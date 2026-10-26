@@ -2,7 +2,8 @@
 /**
  * 🔔 ป๊อปเตือนงานแบบลอย (ส่วนของ WorkPopupHost) — การ์ดลอยมุมขวาล่าง/ขวาบน บนจอคอม แทนหน้าต่างกลางจอ
  * - เนื้อหา = WorkPopupBody เดิม (ติ๊กงานของคุณได้) · ปุ่ม ไว้ทีหลัง / ✓ รับทราบ / ดูทั้งหมด เหมือนเดิม
- * - － ย่อเหลือปุ่มเล็ก · ✕ ซ่อน (ไม่เด้งอีก ทุกเครื่อง) → เปิดใหม่ที่เมนูโปรไฟล์ (WorkPopupFloatToggle)
+ * - ปุ่มเล็กลอยอยู่ทั้งวัน (ป๊อปของวันนี้ · /api/popups/active?all=1) · กางเองเมื่อถึงเวลาและยังไม่รับทราบ
+ *   รับทราบ/ไว้ทีหลัง/นอกเวลา = ยุบเป็นปุ่ม กดดูได้ตลอด · － ย่อ · ✕ ซ่อน (ไม่เด้งอีก ทุกเครื่อง) → เปิดใหม่ที่เมนูโปรไฟล์
  * - ค่าตั้งต่อคน: user_ui_prefs key work_popup_float = { enabled, minimized, position } (useUserPref · บอกต่อในหน้าเดียว)
  * จอแคบกว่า FLOAT_MIN_WIDTH ยังเป็นหน้าต่างกลางจอแบบเดิม (ลอยแล้วบังงาน/ทับแถบเมนูล่าง)
  */
@@ -35,8 +36,10 @@ export function useFloatScreen(): boolean {
 const POS: Record<WorkPopupFloatPosition, string> = { br: "bottom-4 right-4", tr: "top-16 right-4" };
 
 /** การ์ดลอย (กรอบอย่างเดียว — เนื้อหา/ปุ่มส่งมาจาก WorkPopupHost) */
-export function WorkPopupFloatCard({ pref, title, subtitle, pill, footer, onMinimize, onExpand, onHide, children }: {
+export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, footer, onMinimize, onExpand, onHide, children }: {
   pref: WorkPopupFloatPref;
+  /** ยุบเป็นปุ่มเล็ก (ค่าเริ่ม: ยุบ · กางเองเมื่อมีป๊อปถึงเวลา) */
+  minimized: boolean;
   title: string;
   subtitle: string;
   /** ข้อความบนปุ่มตอนย่อ เช่น "งานค้าง 54 · ของคุณ 2" */
@@ -47,7 +50,7 @@ export function WorkPopupFloatCard({ pref, title, subtitle, pill, footer, onMini
   onHide: () => void;
   children: ReactNode;
 }) {
-  if (pref.minimized) {
+  if (minimized) {
     return (
       <button type="button" onClick={onExpand} title="ป๊อปเตือนงาน — กดเพื่อกาง"
         className={`fixed ${POS[pref.position]} z-[45] flex items-center gap-2 h-10 pl-3 pr-4 rounded-full bg-white border border-slate-200 shadow-lg text-sm font-medium text-slate-700 hover:border-amber-300 hover:text-amber-800`}>

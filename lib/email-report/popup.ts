@@ -50,6 +50,10 @@ export type WorkPopupPayload = {
   /** ต้องตามที่เหลือ (ไม่ได้โชว์) */
   more: number;
   view_all: string | null;
+  /** ถึงเวลาเด้งไหม (อยู่ในช่วงเวลา + ยังไม่รับทราบวันนี้) — false = ส่งมาเพราะขอแบบทั้งวัน (ป๊อปลอยโชว์เป็นปุ่มเล็ก) */
+  due?: boolean;
+  /** รับทราบแล้ววันนี้ */
+  acked?: boolean;
 };
 
 const BUILD_TTL = 60_000;   // คนเข้า ERP พร้อมกันตอนเช้า → ประกอบรายงานครั้งเดียวต่อนาที
@@ -139,8 +143,9 @@ type ReportRow = Pick<EmailReport, "id" | "name" | "source_key" | "filters" | "o
 /**
  * ป๊อปที่ผู้ใช้คนนี้ต้องเห็นตอนนี้
  * reportId = เปิดจากกระดิ่ง ("ไว้ทีหลัง") → ข้ามเงื่อนไขเวลา/รับทราบ แต่ยังต้องเป็นคนที่ควรเห็น
+ * allDay = ป๊อปลอยบนจอคอม: เอาทุกรายงานของ "วันนี้" (ตามวันส่ง) แม้นอกช่วงเวลา/รับทราบแล้ว → due บอกว่าถึงเวลาเด้งไหม
  */
-export async function activePopupsFor(admin: Admin, userId: string, opts: { reportId?: string; now?: Date } = {}): Promise<WorkPopupPayload[]> {
+export async function activePopupsFor(admin: Admin, userId: string, opts: { reportId?: string; now?: Date; allDay?: boolean } = {}): Promise<WorkPopupPayload[]> {
   const { data: prof } = await admin.from("user_profiles").select("role, active").eq("id", userId).maybeSingle();
   const p = prof as { role?: string | null; active?: boolean | null } | null;
   if (!p || p.active === false) return [];
@@ -153,7 +158,7 @@ export async function activePopupsFor(admin: Admin, userId: string, opts: { repo
   const n = nowTH(opts.now);
   const candidates = ((data ?? []) as Record<string, unknown>[])
     .map((r) => ({ ...(r as unknown as ReportRow), popup: normalizeReportPopup(r.popup) }))
-    .filter((r) => r.popup.enabled && (opts.reportId || (r.days.map(Number).includes(n.dow) && inWindow(r.popup, n.hm))));
+    .filter((r) => r.popup.enabled && (opts.reportId || (r.days.map(Number).includes(n.dow) && (opts.allDay || inWindow(r.popup, n.hm)))));
   if (!candidates.length) return [];
 
   // daily = รับทราบแล้ววันนี้ไม่เด้งอีก
@@ -166,7 +171,8 @@ export async function activePopupsFor(admin: Admin, userId: string, opts: { repo
 
   const out: WorkPopupPayload[] = [];
   for (const r of candidates) {
-    if (r.popup.frequency === "daily" && acked.has(r.id)) continue;
+    const doneToday = r.popup.frequency === "daily" && acked.has(r.id);
+    if (doneToday && !opts.allDay) continue;
     const listed = (!!p.role && r.popup.roles.includes(p.role)) || r.popup.users.some((u) => u.id === userId);
     if (!listed) {
       if (!r.popup.assignees) continue;
@@ -176,7 +182,7 @@ export async function activePopupsFor(admin: Admin, userId: string, opts: { repo
     }
     try {
       const payload = await buildPopupPayload(admin, r, userId, listed ? "all" : "mine", { force: !!opts.reportId });
-      if (payload) out.push(payload);
+      if (payload) out.push({ ...payload, due: !!opts.reportId || (inWindow(r.popup, n.hm) && !doneToday), acked: acked.has(r.id) });
     } catch (e) { console.error("[popup] build", r.id, e); }   // รายงานหนึ่งพัง ไม่ให้ป๊อปอื่นหาย
   }
   return out;

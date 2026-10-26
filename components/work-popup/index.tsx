@@ -6,7 +6,7 @@
  *   "งานของคุณ" ขึ้นก่อนเสมอ ติ๊กเสร็จในป๊อปได้ (PATCH /api/record-tasks/[id] — ผู้รับผิดชอบติ๊กข้อตัวเองได้)
  *   ปุ่ม: รับทราบ (วันละครั้ง = ไม่เด้งอีกวันนี้) · ไว้ทีหลัง (ปิด + ใส่กระดิ่งให้กดกลับมาเปิด) · เปิดใบงาน = ไว้ทีหลัง
  *   กระดิ่งลิงก์ ?popup=<id> → เปิดป๊อปนั้นทันทีไม่ว่าหน้าไหน (แม้ผู้ใช้ซ่อนป๊อปไว้)
- *   จอคอม (≥1280) = การ์ดลอยมุมขวาล่าง/ขวาบน ย่อ/ซ่อนได้ (./float) · จอเล็ก = หน้าต่างกลางจอแบบเดิม
+ *   จอคอม (≥1280) = การ์ดลอยมุมขวาล่าง/ขวาบน ย่อ/ซ่อนได้ (./float) · ปุ่มเล็กอยู่ทั้งวัน (?all=1) กางเองเมื่อ due · จอเล็ก = หน้าต่างกลางจอแบบเดิม
  *   ซ่อน/เปิด + มุมจอ = เมนูโปรไฟล์ → 🔔 ป๊อปเตือนงาน (user_ui_prefs work_popup_float · ปิด = ไม่ถาม ไม่เด้ง)
  * WorkPopupBody = เนื้อในป๊อป (หน้าตั้งค่าใช้แสดงตัวอย่าง)
  */
@@ -183,19 +183,27 @@ export function WorkPopupHost() {
   const [forced, setForced] = useState<Set<string>>(new Set());
   const enabled = floatPref.enabled;
 
+  // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
+  const [expanded, setExpanded] = useState(false);
+
   const check = useCallback(async (reportId?: string) => {
     if (!uid) return;
     if (!reportId && !enabled) return;
     lastCheck.current = Date.now();
+    const allDay = wide && !reportId;
     try {
-      const r = await apiFetch(`/api/popups/active${reportId ? `?report=${reportId}` : ""}`);
+      const r = await apiFetch(`/api/popups/active${reportId ? `?report=${reportId}` : allDay ? "?all=1" : ""}`);
       if (!r.ok) return;
       const j = (await r.json()) as { data?: WorkPopupPayload[] };
       const seen = reportId ? [] : readSeen(uid);
-      const list = (j.data ?? []).filter((p) => !seen.includes(p.report_id));
-      if (list.length) setQueue((q) => [...q.filter((x) => !list.some((y) => y.report_id === x.report_id)), ...list]);
+      const list = (j.data ?? [])
+        .filter((p) => allDay || !seen.includes(p.report_id))
+        .map((p) => ({ ...p, due: !!reportId || (p.due !== false && !seen.includes(p.report_id)) }));
+      if (allDay) setQueue(list);   // ทั้งวัน = แทนทั้งชุด (ของที่หมดวัน/ปิดรายงานแล้วหายไปด้วย)
+      else if (list.length) setQueue((q) => [...q.filter((x) => !list.some((y) => y.report_id === x.report_id)), ...list]);
+      if (list.some((p) => p.due)) setExpanded(true);
     } catch { /* เงียบ — ป๊อปไม่ขึ้นไม่ทำให้หน้าพัง */ }
-  }, [uid, enabled]);
+  }, [uid, enabled, wide]);
 
   // ถามครั้งแรกหลังหน้าโหลด (ไม่แย่งโหลดเนื้อหาหลัก)
   useEffect(() => {
@@ -217,10 +225,17 @@ export function WorkPopupHost() {
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [uid, skip, check]);
 
-  const cur = queue[0] ?? null;
+  // จอคอม: แสดงตัวที่ถึงเวลาก่อน ไม่มีก็ตัวแรก (เป็นปุ่มเล็ก) · จอเล็ก: เฉพาะตัวที่ถึงเวลา (หน้าต่างกลางจอแบบเดิม)
+  const cur = (wide ? (queue.find((x) => x.due) ?? queue[0]) : queue.find((x) => x.due !== false)) ?? null;
   const finish = (p: WorkPopupPayload, action: "ack" | "later") => {
     if (uid) markSeen(uid, p.report_id);
-    setQueue((q) => q.filter((x) => x.report_id !== p.report_id));
+    if (wide) {
+      // ลอย: ไม่หายไป แค่ยุบเป็นปุ่มเล็ก (กดดูได้ทั้งวัน)
+      setQueue((q) => q.map((x) => (x.report_id === p.report_id ? { ...x, due: false, acked: x.acked || action === "ack" } : x)));
+      setExpanded(queue.some((x) => x.report_id !== p.report_id && x.due));
+    } else {
+      setQueue((q) => q.filter((x) => x.report_id !== p.report_id));
+    }
     void apiFetch("/api/popups/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ report_id: p.report_id, action }) }).catch(() => {});
   };
   const open = (p: WorkPopupPayload, path: string, action: "ack" | "later") => { finish(p, action); router.push(path); };
@@ -240,25 +255,30 @@ export function WorkPopupHost() {
     setFloatPref({ ...floatPref, enabled: false, minimized: false });
     setQueue([]);
     setForced(new Set());
+    setExpanded(false);
     toast.info(`ซ่อนป๊อปเตือนงานแล้ว — ${WORK_POPUP_HIDE_HINT}`);
   };
 
   const visible = !!cur && !skip && (enabled || forced.has(cur.report_id));
   const title = cur ? `${cur.audience === "mine" ? "งานที่รอคุณอยู่" : cur.heading}` : "";
   const subtitle = cur
-    ? `${new Date(`${cur.date}T00:00:00Z`).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}${queue.length > 1 ? ` · ป๊อปที่ 1 จาก ${queue.length}` : ""}`
+    ? `${new Date(`${cur.date}T00:00:00Z`).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}${queue.length > 1 ? ` · ป๊อป ${queue.length} รายการ` : ""}`
     : "";
   const mineOpen = cur ? cur.mine.reduce((n, m) => n + m.tasks.filter((t) => !done.has(t.id)).length, 0) : 0;
   const pill = !cur ? "" : cur.audience === "mine"
     ? `งานของคุณ ${mineOpen}`
     : `งานค้าง ${cur.stats.total}${mineOpen > 0 ? ` · ของคุณ ${mineOpen}` : ""}`;
+  // ยังไม่ถึงเวลา/รับทราบแล้ว (เปิดดูเองจากปุ่มลอย) → ไม่ต้องมี "ไว้ทีหลัง" · รับทราบแล้วบอกไว้
+  const pending = !!cur && cur.due !== false;
   const footer = cur && (
     <div className="flex w-full flex-wrap items-center justify-end gap-2">
       {cur.view_all && cur.audience === "all" && (
-        <button onClick={() => open(cur, cur.view_all!, "ack")} className="mr-auto h-9 rounded-lg px-3 text-sm font-medium text-blue-700 hover:bg-blue-50">ดูทั้งหมด →</button>
+        <button onClick={() => open(cur, cur.view_all!, pending ? "ack" : "later")} className="mr-auto h-9 rounded-lg px-3 text-sm font-medium text-blue-700 hover:bg-blue-50">ดูทั้งหมด →</button>
       )}
-      <button onClick={() => finish(cur, "later")} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ไว้ทีหลัง</button>
-      <button onClick={() => finish(cur, "ack")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700">✓ รับทราบ</button>
+      {pending && <button onClick={() => finish(cur, "later")} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ไว้ทีหลัง</button>}
+      {!pending && cur.acked
+        ? <span className="h-9 inline-flex items-center rounded-lg bg-emerald-50 px-3 text-sm text-emerald-700">✓ รับทราบแล้ววันนี้</span>
+        : <button onClick={() => finish(cur, "ack")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700">✓ รับทราบ</button>}
     </div>
   );
 
@@ -266,9 +286,9 @@ export function WorkPopupHost() {
     <>
       <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
       {visible && cur && (wide ? (
-        <WorkPopupFloatCard pref={floatPref} title={title} subtitle={subtitle} pill={pill} footer={footer}
-          onMinimize={() => setFloatPref({ ...floatPref, minimized: true })}
-          onExpand={() => setFloatPref({ ...floatPref, minimized: false })}
+        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} title={title} subtitle={subtitle} pill={pill} footer={footer}
+          onMinimize={() => setExpanded(false)}
+          onExpand={() => setExpanded(true)}
           onHide={hide}>
           <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
         </WorkPopupFloatCard>

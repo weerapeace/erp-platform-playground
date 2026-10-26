@@ -2,6 +2,7 @@
  * 🔔 ป๊อปเตือนงานที่ผู้ใช้คนนี้ต้องเห็นตอนนี้ — components/work-popup เรียกตอนเข้า ERP
  * GET /api/popups/active              → { data: WorkPopupPayload[] } (ตามวัน/เวลา/ใครเห็น/รับทราบแล้ว — lib/email-report/popup)
  * GET /api/popups/active?report=<id>  → เปิดจากกระดิ่ง ("ไว้ทีหลัง") ข้ามเงื่อนไขเวลา/รับทราบ แต่ยังต้องเป็นคนที่ควรเห็น
+ * GET /api/popups/active?all=1        → ป๊อปลอย (จอคอม): ป๊อปของวันนี้ทั้งหมด + due/acked (ปุ่มลอยอยู่ทั้งวัน)
  * ต้องล็อกอิน (ไม่ต้องมีสิทธิ์พิเศษ — แต่ละคนเห็นเฉพาะป๊อปที่ตั้งให้ตัวเอง)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -19,7 +20,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const reportId = request.nextUrl.searchParams.get("report");
   if (reportId && !/^[0-9a-f-]{36}$/i.test(reportId)) return NextResponse.json({ data: [], error: "รหัสรายงานไม่ถูกต้อง" }, { status: 400 });
   try {
-    const data = await activePopupsFor(supabaseAdmin(), actor.id, { reportId: reportId ?? undefined });
+    // ?all=1 = ป๊อปลอยบนจอคอม: ทุกป๊อปของวันนี้ (แม้นอกช่วงเวลา/รับทราบแล้ว) · due = ถึงเวลาเด้งไหม
+    const allDay = request.nextUrl.searchParams.get("all") === "1";
+    const data = await activePopupsFor(supabaseAdmin(), actor.id, { reportId: reportId ?? undefined, allDay });
     return NextResponse.json({ data, error: null }, { headers: { "Cache-Control": "no-store" } });
   } catch (e) {
     console.error("[popups/active]", e);
