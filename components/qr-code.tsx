@@ -13,35 +13,53 @@
  */
 import { useEffect, useState } from "react";
 
-export type QrOptions = { width?: number; margin?: number; dark?: string; light?: string };
+export type QrOptions = { width?: number; margin?: number; dark?: string; light?: string; ecc?: "L" | "M" | "Q" | "H" };
 
 export async function qrDataUrl(text: string, opts?: QrOptions): Promise<string> {
   const QR = (await import("qrcode")).default;
   return QR.toDataURL(text || " ", {
     width: opts?.width ?? 200,
     margin: opts?.margin ?? 1,
-    errorCorrectionLevel: "M",
+    errorCorrectionLevel: opts?.ecc ?? "M",
     color: { dark: opts?.dark ?? "#0f172a", light: opts?.light ?? "#ffffff" },
   });
 }
 
 export function useQrDataUrl(text: string | null | undefined, opts?: QrOptions): string | null {
   const [src, setSrc] = useState<string | null>(null);
-  const width = opts?.width; const margin = opts?.margin; const dark = opts?.dark; const light = opts?.light;
+  const width = opts?.width; const margin = opts?.margin; const dark = opts?.dark; const light = opts?.light; const ecc = opts?.ecc;
   useEffect(() => {
     let alive = true;
     if (!text) { setSrc(null); return; }
-    qrDataUrl(text, { width, margin, dark, light }).then((d) => { if (alive) setSrc(d); }).catch(() => { if (alive) setSrc(null); });
+    qrDataUrl(text, { width, margin, dark, light, ecc }).then((d) => { if (alive) setSrc(d); }).catch(() => { if (alive) setSrc(null); });
     return () => { alive = false; };
-  }, [text, width, margin, dark, light]);
+  }, [text, width, margin, dark, light, ecc]);
   return src;
 }
 
-export function QrCode({ text, size = 180, className = "", alt = "QR code" }: { text: string | null | undefined; size?: number; className?: string; alt?: string }) {
-  const src = useQrDataUrl(text, { width: size * 2 });   // เรนเดอร์ 2 เท่าให้คมบนจอ retina
+/**
+ * logo = รูปไอคอนวางกลาง QR (เช่น ไอคอนแอป) · logoText = อีโมจิแทน ถ้าไม่มีรูป
+ * ใส่โลโก้แล้วใช้ระดับกันผิดพลาดสูงสุด (H) ให้เอง → ยังสแกนติดแม้กลาง QR ถูกบัง
+ */
+export function QrCode({ text, size = 180, className = "", alt = "QR code", logo, logoText }: { text: string | null | undefined; size?: number; className?: string; alt?: string; logo?: string | null; logoText?: string | null }) {
+  const hasLogo = !!(logo || logoText);
+  const src = useQrDataUrl(text, { width: size * 2, ecc: hasLogo ? "H" : undefined });   // เรนเดอร์ 2 เท่าให้คมบนจอ retina
   if (!src) {
     return <div className={`animate-pulse rounded-lg bg-slate-100 ${className}`} style={{ width: size, height: size }} aria-hidden />;
   }
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} width={size} height={size} alt={alt} className={`rounded-lg bg-white ${className}`} style={{ width: size, height: size }} />;
+  const img = <img src={src} width={size} height={size} alt={alt} className={`rounded-lg bg-white ${className}`} style={{ width: size, height: size }} />;
+  if (!hasLogo) return img;
+  const box = Math.round(size * 0.24);   // ไม่เกิน ~25% ของ QR — ระดับ H ทนการบังได้ราว 30%
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      {img}
+      <div className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center overflow-hidden rounded-[22%] bg-white p-[3px] shadow-sm ring-1 ring-slate-200"
+        style={{ width: box, height: box }}>
+        {logo
+          ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={logo} alt="" className="h-full w-full rounded-[20%] object-cover" />
+          : <span style={{ fontSize: Math.round(box * 0.6) }} className="leading-none">{logoText}</span>}
+      </div>
+    </div>
+  );
 }

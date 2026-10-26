@@ -116,14 +116,23 @@ export function DeviceModeToggle({ mode, viewport, onChange, compact = false, cl
   );
 }
 
-type AppLite = { key: string; label: string; icon: string | null };
+/** iconSrc = รูปไอคอนที่เครื่องจะได้จริงตอนติดตั้ง (กติกาเดียวกับ /api/app-manifest + layout ของ /app/<key>) · customIcon = แอปตั้งไอคอนเองแล้ว */
+type AppLite = { key: string; label: string; icon: string | null; iconSrc: string; customIcon: boolean };
+const SAFE_ICON_KEY = /^[a-zA-Z0-9._/-]+$/;
+/** ไอคอนแอปที่ใช้ติดตั้ง: รูปที่อัปโหลด (R2) ถ้ามี ไม่งั้นไอคอนรวมของระบบ */
+export function appIconSrc(iconUrl: string | null | undefined): string {
+  return iconUrl && SAFE_ICON_KEY.test(iconUrl) ? `/api/r2-image?key=${encodeURIComponent(iconUrl)}` : "/icon-192.png";
+}
+const toAppLite = (a: { key: string; label: string; icon?: string | null; icon_url?: string | null }): AppLite =>
+  ({ key: a.key, label: a.label, icon: a.icon ?? null, iconSrc: appIconSrc(a.icon_url), customIcon: !!(a.icon_url && SAFE_ICON_KEY.test(a.icon_url)) });
 
 /**
  * แอปเดี่ยว (PWA) ที่มีหน้าปัจจุบันอยู่ในเมนู — จาก /api/menu + /api/menu/apps (แคชร่วมกับเชลล์ ไม่ยิงซ้ำ)
  * ใช้ทำ QR "ติดตั้งเป็นแอป": สแกน → /app/<key>?go=<หน้านี้> → กด 📲 ติดตั้งแอปที่หัวแอป
  */
-export function useAppsForCurrentPage(): { apps: AppLite[]; preferred: string | null } {
+export function useAppsForCurrentPage(): { apps: AppLite[]; preferred: string | null; all: AppLite[] } {
   const [apps, setApps] = useState<AppLite[]>([]);
+  const [all, setAll] = useState<AppLite[]>([]);   // ทุกแอป (ใช้หาไอคอนของแอปที่เชลล์ส่งมาบังคับ)
   const [preferred, setPreferred] = useState<string | null>(null);
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -133,18 +142,45 @@ export function useAppsForCurrentPage(): { apps: AppLite[]; preferred: string | 
     try { const m = window.top && window.top !== window ? window.top.location.pathname.match(/^\/app\/([^/?#]+)/) : null; if (m) setPreferred(m[1]); } catch { /* cross-origin */ }
     Promise.all([
       cachedGetJson<{ data?: { href: string; app_keys?: string[] | null; is_active?: boolean }[] }>("/api/menu"),
-      cachedGetJson<{ data?: { key: string; label: string; icon?: string | null; is_active?: boolean }[] }>("/api/menu/apps"),
+      cachedGetJson<{ data?: { key: string; label: string; icon?: string | null; icon_url?: string | null; is_active?: boolean }[] }>("/api/menu/apps"),
     ]).then(([mj, aj]) => {
       if (!alive) return;
       const base = (h: string) => h.split("?")[0];
       const rows = (mj.data ?? []).filter((m) => m.is_active !== false && base(m.href) !== "/" && path.startsWith(base(m.href)));
       rows.sort((a, b) => base(b.href).length - base(a.href).length);   // ตรงที่สุด (ยาวสุด) มาก่อน
       const keys = new Set(rows[0]?.app_keys ?? []);
-      setApps((aj.data ?? []).filter((a) => a.is_active !== false && keys.has(a.key)).map((a) => ({ key: a.key, label: a.label, icon: a.icon ?? null })));
+      const active = (aj.data ?? []).filter((a) => a.is_active !== false);
+      setAll(active.map(toAppLite));
+      setApps(active.filter((a) => keys.has(a.key)).map(toAppLite));
     }).catch(() => { /* ไม่มีเมนู = ไม่มีปุ่มติดตั้ง */ });
     return () => { alive = false; };
   }, []);
-  return { apps, preferred };
+  return { apps, preferred, all };
+}
+
+/** ตัวอย่าง "ไอคอนบนหน้าจอหลังติดตั้ง" — รูป/ชื่อเดียวกับที่เครื่องได้จริง (ชื่อยาวเกิน 12 ตัว Android ตัดเหลือ 12) */
+function HomeIconPreview({ app }: { app: AppLite }) {
+  const shortName = app.label.length > 12 ? app.label.slice(0, 12) : app.label;
+  const ghost = <span className="h-11 w-11 rounded-[22%] bg-white/60" aria-hidden />;
+  return (
+    <div className="w-full rounded-xl bg-gradient-to-b from-sky-100 to-indigo-100 px-3 pb-3 pt-2">
+      <div className="mb-2 text-[10px] font-medium text-slate-500">หลังติดตั้ง ไอคอนบนหน้าจอจะเป็นแบบนี้</div>
+      <div className="flex items-end justify-center gap-4">
+        <span className="flex flex-col items-center gap-1">{ghost}<span className="h-2 w-8 rounded bg-white/60" /></span>
+        <span className="flex flex-col items-center gap-1">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={app.iconSrc} alt={`ไอคอนแอป ${app.label}`} className="h-14 w-14 rounded-[22%] bg-white object-cover shadow-md" />
+          <span className="max-w-[5.5rem] truncate text-[11px] font-medium text-slate-800" title={app.label}>{shortName}</span>
+        </span>
+        <span className="flex flex-col items-center gap-1">{ghost}<span className="h-2 w-8 rounded bg-white/60" /></span>
+      </div>
+      {!app.customIcon && (
+        <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-[10px] leading-snug text-amber-700">
+          แอปนี้ยังไม่ได้ตั้งไอคอนของตัวเอง → จะได้ไอคอนรวมของระบบ<br />(แอดมินตั้งได้ที่ จัดการเมนู → กด ✏️ ที่แอป → อัปโหลดไอคอน)
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** ลิงก์ติดตั้งเป็นแอป: เปิดเชลล์แอปเดี่ยวแล้วเด้งมาหน้านี้ (?go=) — ในเชลล์มีปุ่ม 📲 ติดตั้งแอป */
@@ -169,9 +205,13 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
   const isDesktop = layout === "desktop";
   const [openUrl, setOpenUrl] = useState("");
   const [copied, setCopied] = useState(false);
-  const { apps: foundApps, preferred: foundPreferred } = useAppsForCurrentPage();
-  // แอปที่ส่งมาบังคับ (จากเชลล์) ขึ้นก่อน แล้วค่อยแอปที่หาเจอจากเมนู
-  const apps = useMemo<AppLite[]>(() => (appKeyProp && !foundApps.some((a) => a.key === appKeyProp) ? [{ key: appKeyProp, label: appLabel ?? appKeyProp, icon: null }, ...foundApps] : foundApps), [foundApps, appKeyProp, appLabel]);
+  const { apps: foundApps, preferred: foundPreferred, all: allApps } = useAppsForCurrentPage();
+  // แอปที่ส่งมาบังคับ (จากเชลล์) ขึ้นก่อน แล้วค่อยแอปที่หาเจอจากเมนู · ไอคอนหาจากรายชื่อแอปทั้งหมด
+  const apps = useMemo<AppLite[]>(() => {
+    if (!appKeyProp || foundApps.some((a) => a.key === appKeyProp)) return foundApps;
+    const forced = allApps.find((a) => a.key === appKeyProp) ?? { key: appKeyProp, label: appLabel ?? appKeyProp, icon: null, iconSrc: appIconSrc(null), customIcon: false };
+    return [forced, ...foundApps];
+  }, [foundApps, allApps, appKeyProp, appLabel]);
   const preferred = appKeyProp ?? foundPreferred;
   const [appKey, setAppKey] = useState<string | null>(null);
   useEffect(() => { setOpenUrl(openUrlProp ?? deviceShareUrl(layout)); }, [layout, openUrlProp]);
@@ -200,7 +240,7 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
         </div>
       ) : (
         <>
-          <QrCode text={url} size={168} className="border border-slate-100" alt={`QR เปิดหน้านี้บน${DEVICE_LABEL[layout]}`} />
+          <QrCode text={url} size={168} className="border border-slate-100" alt={`QR เปิดหน้านี้บน${DEVICE_LABEL[layout]}`} logo={app?.customIcon ? app.iconSrc : null} />
           <div className="text-[11px] leading-snug text-slate-500">สแกน QR ด้วยกล้อง{DEVICE_LABEL[layout]}<br />จะเปิดหน้านี้ในโหมด{DEVICE_LABEL[layout]}ทันที</div>
         </>
       )) : apps.length === 0 ? (
@@ -214,7 +254,8 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
               {apps.map((a) => (
                 <button key={a.key} type="button" onClick={() => setAppKey(a.key)}
                   className={`h-7 rounded-full border px-2.5 text-[11px] font-medium ${appKey === a.key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>
-                  {a.icon ? `${a.icon} ` : ""}{a.label}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={a.iconSrc} alt="" className="mr-1 inline-block h-4 w-4 rounded-[22%] bg-white object-cover align-[-3px]" />{a.label}
                 </button>
               ))}
             </div>
@@ -226,6 +267,7 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
                 className="h-10 w-full rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-40">
                 {DEVICE_ICON.desktop} เปิดหน้าติดตั้งบนคอมเครื่องนี้ ↗
               </button>
+              {app && <HomeIconPreview app={app} />}
               <div className="text-left text-[11px] leading-snug text-slate-500">
                 <div className="mb-0.5 text-center font-semibold text-slate-700">ติดตั้งแอป &ldquo;{app?.label}&rdquo; บนคอม</div>
                 1. กดปุ่มด้านบน (คอมเครื่องอื่น: คัดลอกลิงก์ไปเปิดใน Chrome / Edge)<br />
@@ -236,7 +278,10 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
             </>
           ) : (
             <>
-              <QrCode text={url} size={168} className="border border-slate-100" alt={`QR ติดตั้งแอป ${app?.label ?? ""}`} />
+              {/* กลาง QR = ไอคอนแอป (แอปยังไม่ตั้งไอคอน = ใช้อีโมจิของแอปแทน) */}
+              <QrCode text={url} size={168} className="border border-slate-100" alt={`QR ติดตั้งแอป ${app?.label ?? ""}`}
+                logo={app?.customIcon ? app.iconSrc : null} logoText={app && !app.customIcon ? (app.icon ?? "📲") : null} />
+              {app && <HomeIconPreview app={app} />}
               <div className="text-left text-[11px] leading-snug text-slate-500">
                 <div className="mb-0.5 text-center font-semibold text-slate-700">ติดตั้งแอป &ldquo;{app?.label}&rdquo; บนเครื่อง</div>
                 1. สแกน QR → เปิดในเบราว์เซอร์{DEVICE_LABEL[layout]}<br />
