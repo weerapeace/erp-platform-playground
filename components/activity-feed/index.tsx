@@ -23,6 +23,11 @@ const ACTION_CONFIG: Record<string, { label: string; icon: string; dot: string; 
   create: { label: "เพิ่ม",  icon: "＋", dot: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   update: { label: "แก้ไข", icon: "✎", dot: "bg-blue-500",    chip: "bg-blue-50 text-blue-700 border-blue-200" },
   delete: { label: "ลบ",    icon: "🗑", dot: "bg-red-500",     chip: "bg-red-50 text-red-700 border-red-200" },
+  // ใบสั่งผลิต: ปิด/ยกเลิก (lib/mo-workflow) · ข้าม/เอาคืนขั้นตอน (lib/mo-skip)
+  close:        { label: "ปิดงาน",    icon: "✓", dot: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+  cancel:       { label: "ยกเลิก",    icon: "✕", dot: "bg-red-500",     chip: "bg-red-50 text-red-700 border-red-200" },
+  skip_stage:   { label: "ข้ามขั้น",   icon: "⏭", dot: "bg-slate-400",   chip: "bg-slate-50 text-slate-600 border-slate-200" },
+  unskip_stage: { label: "เอาคืนขั้น", icon: "↩", dot: "bg-slate-400",   chip: "bg-slate-50 text-slate-600 border-slate-200" },
 };
 
 function actionCfg(action: string) {
@@ -201,6 +206,14 @@ export function ActivityFeed({
               {/* create/delete name (เมื่อไม่ได้ show ด้านบน) */}
               {!showEntityName && name && entry.action !== "update" && (
                 <p className="text-xs text-slate-500 mt-0.5 truncate">{name}</p>
+              )}
+
+              {/* ขั้นที่ข้าม + เหตุผล (skip_stage / close / cancel) */}
+              {entry.action !== "update" && (typeof entry.metadata.stage_label === "string" || (typeof entry.metadata.reason === "string" && entry.metadata.reason)) && (
+                <p className="text-xs text-slate-600 mt-0.5">
+                  {typeof entry.metadata.stage_label === "string" ? `ขั้น ${entry.metadata.stage_label}` : ""}
+                  {typeof entry.metadata.reason === "string" && entry.metadata.reason ? `${typeof entry.metadata.stage_label === "string" ? " · " : ""}เหตุผล: ${entry.metadata.reason}` : ""}
+                </p>
               )}
 
               {/* actor */}
