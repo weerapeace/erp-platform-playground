@@ -14,6 +14,7 @@ import { useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
 import { QUOTE_STATUS, QUOTE_STATUS_OPTS } from "@/lib/design-sheets-meta";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 
@@ -326,7 +327,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
   const [shift, setShift] = useState("");
   const shiftAll = () => {
     const d = Number(shift);
-    if (!shift.trim() || !Number.isFinite(d) || d === 0) { toast.error("ใส่จำนวนบาท เช่น 10 (บวก) หรือ -10 (ลด)"); return; }
+    if (!shift.trim() || !Number.isFinite(d) || d === 0) { toast.error(tr("ใส่จำนวนบาท เช่น 10 (บวก) หรือ -10 (ลด)", "Enter an amount, e.g. 10 (up) or -10 (down)")); return; }
     const next = { ...cells }; let count = 0; const neg: string[] = [];
     for (const s of rowSizes) {
       if (!onSizes.includes(s.key)) continue;
@@ -334,14 +335,16 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
         const k = key(s.key, qty); const v = next[k]?.trim(); if (!v) continue;
         const n = Number(v); if (!Number.isFinite(n)) continue;
         const r = Math.round((n + d) * 100) / 100;
-        if (r < 0) neg.push(`${s.label} ${qty == null ? "" : `${fmtInt(qty)} ชิ้น`}`.trim());
+        if (r < 0) neg.push(`${s.label} ${qty == null ? "" : `${fmtInt(qty)} ${tr("ชิ้น", "pcs")}`}`.trim());
         next[k] = String(r); count++;
       }
     }
-    if (!count) { toast.error("ยังไม่มีช่องที่ใส่ราคา — ใส่ราคาก่อนแล้วค่อยปรับทุกช่อง"); return; }
-    if (neg.length) { toast.error(`ลดแล้วราคาติดลบ ${neg.length} ช่อง (${neg.slice(0, 3).join(", ")}${neg.length > 3 ? " …" : ""}) — ลองลดน้อยลง`); return; }   // ไม่เดาค่าแทน (ไม่ตัดเป็น 0 เอง)
+    if (!count) { toast.error(tr("ยังไม่มีช่องที่ใส่ราคา — ใส่ราคาก่อนแล้วค่อยปรับทุกช่อง", "No prices entered yet — enter prices first, then adjust all")); return; }
+    const negList = `${neg.slice(0, 3).join(", ")}${neg.length > 3 ? " …" : ""}`;
+    if (neg.length) { toast.error(tr(`ลดแล้วราคาติดลบ ${neg.length} ช่อง (${negList}) — ลองลดน้อยลง`, `${neg.length} prices would go below zero (${negList}) — try a smaller cut`)); return; }   // ไม่เดาค่าแทน (ไม่ตัดเป็น 0 เอง)
     setCells(next); setShift("");
-    toast.success(`ปรับราคาที่เสนอ ${count} ช่อง ${d > 0 ? "+" : "−"}${fmtBaht(Math.abs(d))} บาท`);
+    const amt = `${d > 0 ? "+" : "−"}${fmtBaht(Math.abs(d))}`;
+    toast.success(tr(`ปรับราคาที่เสนอ ${count} ช่อง ${amt} บาท`, `Adjusted ${count} prices by ${amt} THB`));
   };
   // ✏️ บันทึกการแก้ไข: เทียบกับช่องเดิมของการ์ด แล้วยิงเฉพาะที่เปลี่ยน (ทุก API มี audit อยู่แล้ว)
   const saveEdit = async (b: Batch) => {
@@ -440,12 +443,12 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
         </select>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="หมายเหตุ (เช่น ลูกค้าขอลด 5%)" className="h-7 flex-1 min-w-[10rem] px-2 text-xs border border-slate-200 rounded-md bg-white" />
         <button type="button" onClick={fillFromCost} className="h-7 px-2 text-xs border border-slate-200 bg-white rounded-md text-slate-600 hover:bg-slate-50" title="ช่องที่ยังว่าง ใส่ราคาเท่าตีราคาปัจจุบัน">เติมจากตีราคา</button>
-        <span className="inline-flex items-center gap-1 h-7 pl-2 pr-1 text-xs border border-slate-200 bg-white rounded-md text-slate-600" title="บวก/ลบราคาที่เสนอทุกช่องพร้อมกัน เช่น 10 → 400 เป็น 410 · -10 → 400 เป็น 390 (ช่องว่างไม่แตะ)">
-          ปรับทุกช่อง ±
-          <input type="number" step="any" value={shift} onChange={(e) => setShift(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") shiftAll(); }} placeholder="10 / -10" aria-label="ปรับราคาทุกช่อง (บาท)"
+        <span className="inline-flex items-center gap-1 h-7 pl-2 pr-1 text-xs border border-slate-200 bg-white rounded-md text-slate-600" title={tr("บวก/ลบราคาที่เสนอทุกช่องพร้อมกัน เช่น 10 → 400 เป็น 410 · -10 → 400 เป็น 390 (ช่องว่างไม่แตะ)", "Add/subtract on every offered price at once, e.g. 10 → 400 becomes 410 · -10 → 390 (empty cells untouched)")}>
+          {tr("ปรับทุกช่อง ±", "Adjust all ±")}
+          <input type="number" step="any" value={shift} onChange={(e) => setShift(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") shiftAll(); }} placeholder="10 / -10" aria-label={tr("ปรับราคาทุกช่อง (บาท)", "Adjust all prices (THB)")}
             className="h-5 w-16 px-1 text-xs text-right border border-slate-200 rounded" />
-          บาท
-          <button type="button" onClick={shiftAll} className="h-5 px-1.5 text-[11px] rounded bg-blue-600 text-white hover:bg-blue-700">ใช้</button>
+          {tr("บาท", "THB")}
+          <button type="button" onClick={shiftAll} className="h-5 px-1.5 text-[11px] rounded bg-blue-600 text-white hover:bg-blue-700">{tr("ใช้", "Apply")}</button>
         </span>
       </div>
       <div className="overflow-x-auto">
