@@ -38,6 +38,7 @@ import { RichTextEditor } from "@/components/rich-text";
 import type { Attachment } from "@/app/api/attachments/route";
 import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
+import { costUsagePerUnit } from "@/lib/cost-usage";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { SkuLite } from "@/app/api/design-sheets/price-item-skus/route";
@@ -496,6 +497,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   // ---- เฟส 4: ตีราคา ----
   const [priceItems, setPriceItems] = useState<PriceItem[]>([]);
+  const priceItemById = useMemo(() => new Map(priceItems.map((it) => [it.id, it])), [priceItems]);
   const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
   const [copyFromOpen, setCopyFromOpen] = useState(false);   // โมดอลคัดลอกตีราคาจากใบงานอื่น
   // ผูก SKU เข้าวัสดุตีราคา — ทำในตารางจัดการวัสดุตีราคา (ต่อแถว)
@@ -2278,6 +2280,25 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 rowId={(r) => r.key}
                 readonly={!fullEdit}
                 groupByOptions={[{ key: "group", label: "ชนิดวัสดุ" }, { key: "item", label: "วัสดุ" }, { key: "uom", label: "หน่วย" }]}
+                groupNote={(rows) => {
+                  // ใช้ต่อใบ (เจ้าของขอ 2026-10-26) — ผ้า/แผ่นที่คิดเป็น cm² → แปลงเป็นกี่ผืน จากขนาดผืนในทะเบียนวัสดุตีราคา (lib/cost-usage)
+                  const u = costUsagePerUnit(rows.map((r) => ({ item_id: r.item_id, group_name: r.group_name, qty: r.qty, uom: r.uom, piece: rowIsPiece(r) })), (id) => priceItemById.get(id));
+                  const parts: string[] = [];
+                  if (u.sheets) parts.push(`${u.sheets.qty.toFixed(2)} ${u.sheets.unit}${u.sheets.size ? ` (${u.sheets.unit}ละ ${u.sheets.size} ซม.)` : ""}`);
+                  for (const b of u.byUom) parts.push(`${fmtQty(Math.round(b.qty * 1000) / 1000)} ${b.uom}`);
+                  const missing = priceItemById.size > 0 ? u.missingSize : 0;   // รายการวัสดุยังไม่โหลด = ไม่เตือน
+                  if (!parts.length && !missing) return null;
+                  const sheetHow = u.sheets
+                    ? `พื้นที่ที่ใช้รวม ${fmtQty(Math.round(u.sheets.area * 100) / 100)} cm² (รวมเผื่อเสียแล้ว) ÷ ${u.sheets.size ? `พื้นที่${u.sheets.unit} ${u.sheets.size} ซม.` : `พื้นที่${u.sheets.unit}ของแต่ละวัสดุ`} = ${u.sheets.qty.toFixed(2)} ${u.sheets.unit}ต่อใบ · ประมาณจากพื้นที่ ยังไม่รวมการวางแบบจริง`
+                    : undefined;
+                  return (
+                    <span className="text-emerald-700" title={sheetHow}>
+                      {parts.length > 0 && <>· ใช้ต่อใบ ≈ <span className="font-semibold tabular-nums">{parts.join(" + ")}</span></>}
+                      {u.sheets?.perSheet ? <span className="text-slate-500"> · 1 {u.sheets.unit} ทำได้ ~{u.sheets.perSheet} ใบ</span> : null}
+                      {missing > 0 && <span className="text-amber-600"> · {missing} บรรทัดคิดเป็นผืนไม่ได้ (วัสดุไม่มีขนาดผืนในทะเบียนวัสดุตีราคา)</span>}
+                    </span>
+                  );
+                }}
                 onAdd={newCostRow}
                 addLabel="＋ เพิ่มวัตถุดิบ"
                 emptyText="ยังไม่มีวัตถุดิบในรายการตีราคา"

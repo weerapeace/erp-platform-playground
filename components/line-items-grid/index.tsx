@@ -74,6 +74,8 @@ export type LineItemsGridProps<T> = {
   selectable?:   boolean;
   /** แถบเครื่องมือ mass — แสดงเมื่อมีแถวถูกเลือก · คืนปุ่มการกระทำ (grid ห่อจำนวน+ยกเลิกให้) */
   bulkBar?:      (selectedRows: T[], clear: () => void) => React.ReactNode;
+  /** ข้อความเสริมท้ายหัวกลุ่ม (ต่อจาก "รวม…") คิดจากบรรทัดในกลุ่ม — เช่น ใบตีราคา "ใช้ต่อใบ ≈ 0.30 ผืน" */
+  groupNote?:    (groupRows: T[], label: string) => React.ReactNode;
 };
 
 type SortState = { key: string; dir: "asc" | "desc" } | null;
@@ -86,7 +88,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
   groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
-  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar,
+  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote,
 }: LineItemsGridProps<T>) {
   const [sort, setSort]       = useState<SortState>(defaultSort);
   const [groupBy, setGroupBy] = useState<string>("");
@@ -216,7 +218,7 @@ export function LineItemsGrid<T>({
   const summableCols = columns.filter((c) => c.summable);
 
   type Display =
-    | { type: "group"; label: string; count: number; sums: { header: string; total: number }[] }
+    | { type: "group"; label: string; count: number; sums: { header: string; total: number }[]; rows: T[] }
     | { type: "row"; row: T };
   const display: Display[] = useMemo(() => {
     if (!groupCol) return sortRows(rows).map((row) => ({ type: "row" as const, row }));
@@ -230,7 +232,7 @@ export function LineItemsGrid<T>({
         header: c.header,
         total: list.reduce((s, r) => s + (Number(colValue(c, r)) || 0), 0),
       }));
-      out.push({ type: "group", label: g, count: list.length, sums });
+      out.push({ type: "group", label: g, count: list.length, sums, rows: list });
       if (!collapsed.has(g)) list.forEach((row) => out.push({ type: "row", row }));
     });
     return out;
@@ -347,6 +349,7 @@ export function LineItemsGrid<T>({
                       {d.sums.filter((s) => s.total).map((s) => (
                         <span key={s.header} className="text-slate-500">· รวม{s.header} <span className="font-semibold text-slate-700 tabular-nums">{fmtNum(s.total)}</span></span>
                       ))}
+                      {groupNote?.(d.rows, d.label)}
                     </div>
                   ) : (
                     <GridRow key={rowId(d.row)} id={rowId(d.row)} template={template} canDrag={canDrag} readonly={readonly}
