@@ -27,6 +27,7 @@ import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/v
 import type { ColumnDef } from "@tanstack/react-table";
 import type { FormField, FieldRegistryV2Response, FormLayout } from "@/app/api/admin/field-registry-v2/route";
 import { RelationPicker, type RelationConfig } from "@/components/relation-picker";
+import { registryFieldType } from "@/lib/registry-fields";
 import { ImageInput, ImageCell, ImageGallery } from "@/components/image-input";
 import { PngSlot } from "@/components/png-slot";
 import { ImageManager } from "@/components/image-manager";
@@ -155,19 +156,8 @@ function registryToFieldDef(
   rf: FormField,
   cellRenderers?: Record<string, (v: unknown, row?: Record<string, unknown>) => React.ReactNode>,
 ): FieldDef {
-  // map ui_field_type → FieldDef.type
-  const fieldType: FieldDef["type"] =
-    rf.ui_field_type === "boolean" ? "boolean"
-    : rf.ui_field_type === "number" || rf.ui_field_type === "currency" ? "number"
-    : rf.ui_field_type === "date" ? "date"
-    : rf.ui_field_type === "relation" ? "relation"
-    : rf.ui_field_type === "image" ? "image"
-    : rf.ui_field_type === "select" ? "select"
-    : rf.ui_field_type === "textarea" || rf.ui_field_type === "json" ? "textarea"
-    : rf.ui_field_type === "many2many" ? "many2many"
-    : rf.ui_field_type === "one2many" ? "one2many"
-    : rf.ui_field_type === "computed" ? "computed"
-    : "text";
+  // map ui_field_type → FieldDef.type (ของกลาง lib/registry-fields — ตารางแก้ไขแบบตารางของเว็บใช้ตัวเดียวกัน)
+  const fieldType: FieldDef["type"] = registryFieldType(rf.ui_field_type);
 
   const opts = (rf.options as { options?: string[] })?.options;
   // ป้ายภาษาไทยของตัวเลือก (ของกลาง) — เก็บที่ทะเบียน field: options.labels = { "ค่าที่เก็บ": "ป้ายที่คนเห็น" }

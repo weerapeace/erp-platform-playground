@@ -32,6 +32,7 @@ export function FieldChipsPicker({
   showKeys = true,
   markFirst,
   emptyText,
+  groupToggle = false,
 }: {
   value: string[];
   onChange: (keys: string[]) => void;
@@ -55,6 +56,8 @@ export function FieldChipsPicker({
   markFirst?: string;
   /** ยังไม่ได้เลือกเลย → ข้อความเล็กหน้าปุ่ม */
   emptyText?: string;
+  /** หัวกลุ่มในป๊อปมีปุ่ม "เลือกทั้งกลุ่ม / เอาออกทั้งกลุ่ม" (เลือกหลายช่องทีเดียว เช่น คอลัมน์ของตารางแก้ไขแบบตาราง) */
+  groupToggle?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -137,7 +140,24 @@ export function FieldChipsPicker({
             )}
             {[...grouped.entries()].map(([g, list]) => (
               <div key={g || "all"}>
-                {g && <div className="text-[11px] font-medium text-slate-500 mb-1">{groups?.[g] ?? g}</div>}
+                {g && (
+                  <div className="mb-1 flex items-center gap-2 text-[11px] font-medium text-slate-500">
+                    <span>{groups?.[g] ?? g}</span>
+                    {groupToggle && (() => {
+                      const allOn = list.every((f) => value.includes(f.key));
+                      const keys = list.map((f) => f.key);
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => onChange(allOn ? value.filter((k) => !keys.includes(k)) : [...value, ...keys.filter((k) => !value.includes(k))].slice(0, max ?? Infinity))}
+                          className="font-normal text-blue-600 hover:underline"
+                        >
+                          {allOn ? "เอาออกทั้งกลุ่ม" : `เลือกทั้งกลุ่ม (${list.length})`}
+                        </button>
+                      );
+                    })()}
+                  </div>
+                )}
                 <div className="grid sm:grid-cols-2 gap-x-3 gap-y-0.5">
                   {list.map((f) => {
                     const on = value.includes(f.key);

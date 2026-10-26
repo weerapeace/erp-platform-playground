@@ -129,3 +129,132 @@ export function sanitizeBulkPatch(p: ListingPatch): ListingPatch {
   }
   return out as ListingPatch;
 }
+
+// ───────────── ▦ แก้ไขแบบตาราง — ทุกช่องของ "สินค้าบนเว็บร้านนี้" (ทีละรุ่น · ค่าต่างกันได้ทุกแถว) ─────────────
+// ตาราง (components/website-listings-grid-edit) วาดคอลัมน์ฝั่งเว็บจากรายการนี้ · ฝั่ง ERP (Parent SKU / SKU) อ่านจากทะเบียนฟิลด์กลาง
+// เพิ่มช่องเว็บใหม่ = เพิ่มที่นี่ + listingPatchToRow + WEB_GRID_COLUMNS → ตารางขึ้นเอง · API (/api/website/listings/grid) รับเฉพาะ WEB_GRID_PATCH_KEYS
+
+export type WebGridKind = "bool" | "text" | "textarea" | "money" | "stock" | "categories" | "badge" | "sizeGuide" | "codes";
+export type WebGridValue = string | boolean | string[];
+
+/** แถว store_listings ดิบ (เฉพาะคอลัมน์ที่ตารางใช้) */
+export interface WebGridRow {
+  parent_sku_id: string;
+  is_published: boolean | null;
+  featured: boolean | null;
+  web_name: string | null;
+  web_price: number | string | null;
+  web_description: string | null;
+  web_unit: string | null;
+  web_categories: string[] | null;
+  web_badge: string | null;
+  web_stock_status: string | null;
+  web_swatch: string | null;
+  web_size_guide: string | null;
+  web_seo: unknown;
+  web_related: string[] | null;
+}
+export const WEB_GRID_COLUMNS =
+  "parent_sku_id, is_published, featured, web_name, web_price, web_description, web_unit, web_categories, web_badge, web_stock_status, web_swatch, web_size_guide, web_seo, web_related";
+
+export interface WebGridField {
+  key: string;
+  label: string;
+  kind: WebGridKind;
+  hint?: string;
+  read: (r: WebGridRow) => WebGridValue;
+}
+
+const s = (v: unknown) => (v == null ? "" : String(v));
+const seoOf = (r: WebGridRow) => (r.web_seo && typeof r.web_seo === "object" ? (r.web_seo as Record<string, unknown>) : {});
+
+export const WEB_GRID_FIELDS: WebGridField[] = [
+  { key: "published", label: "ขึ้นเว็บ", kind: "bool", read: (r) => !!r.is_published },
+  { key: "featured", label: "สินค้าแนะนำ", kind: "bool", read: (r) => !!r.featured },
+  { key: "webName", label: "ชื่อบนเว็บ", kind: "text", hint: "ว่าง = ชื่ออัตโนมัติตามกฎชื่อร้าน", read: (r) => s(r.web_name) },
+  { key: "webPrice", label: "ราคาเว็บ", kind: "money", hint: "ว่าง = ราคาจาก ERP", read: (r) => (Number(r.web_price) > 0 ? String(Number(r.web_price)) : "") },
+  { key: "webDescription", label: "คำอธิบายบนเว็บ", kind: "textarea", hint: "ว่าง = คำอธิบายจาก ERP", read: (r) => s(r.web_description) },
+  { key: "webUnit", label: "หน่วยขาย", kind: "text", hint: "ว่าง = หน่วยจาก ERP", read: (r) => s(r.web_unit) },
+  { key: "webCategories", label: "หมวดบนเว็บ", kind: "categories", hint: "ตัวแรก = หมวดหลัก", read: (r) => (Array.isArray(r.web_categories) ? r.web_categories : []) },
+  { key: "webBadge", label: "ป้ายบนการ์ด", kind: "badge", read: (r) => s(r.web_badge) },
+  { key: "webStockStatus", label: "สถานะสต๊อก", kind: "stock", read: (r) => s(r.web_stock_status) || "in" },
+  { key: "webSwatch", label: "จุดสีการ์ด", kind: "text", hint: "สี CSS เช่น #222 (ว่าง = ตามสี SKU)", read: (r) => s(r.web_swatch) },
+  { key: "webSizeGuide", label: "ตารางไซส์", kind: "sizeGuide", hint: "ว่าง = อัตโนมัติตามหมวด", read: (r) => s(r.web_size_guide) },
+  { key: "seo.title", label: "SEO ชื่อ", kind: "text", read: (r) => s(seoOf(r).title) },
+  { key: "seo.description", label: "SEO คำอธิบาย", kind: "textarea", read: (r) => s(seoOf(r).description) },
+  { key: "seo.title_en", label: "SEO ชื่อ (EN)", kind: "text", read: (r) => s(seoOf(r).title_en) },
+  { key: "seo.description_en", label: "SEO คำอธิบาย (EN)", kind: "textarea", read: (r) => s(seoOf(r).description_en) },
+  { key: "webRelated", label: "สินค้าที่เกี่ยวข้อง (รหัส)", kind: "codes", hint: "รหัส Parent SKU คั่นด้วย , · ว่าง = ตามกฎกลางของธีม", read: (r) => (Array.isArray(r.web_related) ? r.web_related.join(", ") : "") },
+];
+
+/** ช่องของ ListingPatch ที่ API ตารางรับ */
+export const WEB_GRID_PATCH_KEYS = [
+  "isPublished",
+  "featured",
+  "webName",
+  "webPrice",
+  "webDescription",
+  "webUnit",
+  "webCategories",
+  "webBadge",
+  "webStockStatus",
+  "webSwatch",
+  "webSizeGuide",
+  "webSeo",
+  "webRelated",
+] as const;
+
+/** ตรวจค่าก่อนบันทึก — คืนข้อความภาษาคน (null = ผ่าน) */
+export function webGridValidate(key: string, v: WebGridValue): string | null {
+  const f = WEB_GRID_FIELDS.find((x) => x.key === key);
+  if (!f) return "ไม่รู้จักช่องนี้";
+  if (f.kind === "money" && String(v).trim() !== "" && !(Number(String(v).replace(/,/g, "")) > 0)) return "ราคาต้องเป็นตัวเลขมากกว่า 0 (หรือเว้นว่าง)";
+  if (f.kind === "stock" && !STOCK_STATUS_OPTIONS.some((o) => o.value === v)) return "เลือกสถานะสต๊อก";
+  return null;
+}
+
+/** ค่าที่เปลี่ยนในตาราง (key → ค่าใหม่) → ListingPatch · SEO รวมกับค่าเดิมของแถว (4 ช่องเก็บก้อนเดียว) */
+export function webGridPatch(row: WebGridRow, changes: Record<string, WebGridValue>): ListingPatch {
+  const p: ListingPatch = {};
+  const seo: Record<string, string> = {};
+  for (const [k, v] of Object.entries(changes)) {
+    switch (k) {
+      case "published": p.isPublished = v === true; break;
+      case "featured": p.featured = v === true; break;
+      case "webName": p.webName = String(v); break;
+      case "webPrice": {
+        const n = Number(String(v).replace(/,/g, ""));
+        p.webPrice = String(v).trim() === "" || !(n > 0) ? null : Math.round(n * 100) / 100;
+        break;
+      }
+      case "webDescription": p.webDescription = String(v); break;
+      case "webUnit": p.webUnit = String(v); break;
+      case "webCategories": p.webCategories = Array.isArray(v) ? v : []; break;
+      case "webBadge": p.webBadge = String(v); break;
+      case "webStockStatus": p.webStockStatus = String(v); break;
+      case "webSwatch": p.webSwatch = String(v); break;
+      case "webSizeGuide": p.webSizeGuide = String(v); break;
+      case "webRelated": p.webRelated = String(v).split(/[\s,]+/).filter(Boolean); break;
+      default:
+        if (k.startsWith("seo.")) seo[k.slice(4)] = String(v);
+    }
+  }
+  if (Object.keys(seo).length) {
+    const cur = seoOf(row);
+    p.webSeo = {
+      title: s(cur.title),
+      description: s(cur.description),
+      title_en: s(cur.title_en),
+      description_en: s(cur.description_en),
+      ...seo,
+    };
+  }
+  return p;
+}
+
+/** กรอง patch ที่ API ตารางรับ (ช่องอื่นทิ้ง) */
+export function sanitizeGridPatch(p: ListingPatch): ListingPatch {
+  const out: Record<string, unknown> = {};
+  for (const k of WEB_GRID_PATCH_KEYS) if (p[k] !== undefined) out[k] = p[k];
+  return out as ListingPatch;
+}
