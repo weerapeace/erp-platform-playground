@@ -124,8 +124,11 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       if (Array.isArray(v.basic) && v.basic.length) setBasicFields(v.basic);
     }).catch(() => { /* ไม่มีค่า = ใช้ค่าเริ่มต้น */ });
   }, []);
+  // /api/ui-config รับแค่ GET/PATCH (เดิมส่ง POST → 405 เงียบ ค่าไม่เคยถูกบันทึก) · บันทึกไม่ได้ = ยังใช้ได้รอบนี้ แต่บอกผู้ใช้
   const saveFieldCfg = (mode: "basic" | "advance", basic: string[]) => {
-    apiFetch("/api/ui-config", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "wizard_fields", value: { mode, basic } }) }).catch(() => { /* บันทึกไม่ได้ก็ใช้ในเครื่องต่อได้ */ });
+    apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "wizard_fields", value: { mode, basic } }) })
+      .then((r) => { if (!r.ok) throw new Error(String(r.status)); })
+      .catch(() => pushToast("error", t("บันทึกโหมดกรอกข้อมูลไม่สำเร็จ — ใช้ได้เฉพาะรอบนี้", "Couldn't save the field mode — applies to this session only")));
   };
 
   const STEPS = [t("แบรนด์/เทมเพลต","Brand/Template"), t("ข้อมูลงาน","Task info"), t("งานย่อย","Subtasks"), t("สินค้า","Products")];
