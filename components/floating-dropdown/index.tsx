@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 // - anchorRef = กล่องที่ครอบปุ่ม trigger (ใช้วัดตำแหน่ง + กันปิดเมื่อคลิกปุ่ม)
 // - ปิดเมื่อคลิกนอก (ทั้งนอก trigger และนอก dropdown)
 // - เลื่อน/รีไซส์หน้าจอ → ตามตำแหน่งใหม่; ที่ว่างด้านล่างไม่พอ → เปิดขึ้นบน
+// - ตั้งตัวแปร CSS --fd-max-h = ความสูงที่เหลือถึงขอบจอ → เนื้อหายาวใส่ max-height: var(--fd-max-h) + overflow-y-auto ได้ (ไม่ล้นจอ)
 // ============================================================
 
 export function FloatingDropdown({
@@ -65,11 +66,13 @@ export function FloatingDropdown({
   const desiredWidth = Math.max(box.width, minWidth ?? box.width);
   const width = Math.min(desiredWidth, maxWidth ?? desiredWidth, window.innerWidth - VIEWPORT_GAP * 2);
   const left = Math.max(VIEWPORT_GAP, Math.min(box.left, window.innerWidth - width - VIEWPORT_GAP));
-  const style: CSSProperties = {
+  const roomPx = Math.max(160, Math.floor((openUp ? box.top : window.innerHeight - box.bottom) - GAP - VIEWPORT_GAP));
+  const style: CSSProperties & Record<"--fd-max-h", string> = {
     position: "fixed",
     left,
     width,
     zIndex: 1000,
+    "--fd-max-h": `${roomPx}px`,
     ...(openUp
       ? { bottom: Math.round(window.innerHeight - box.top + GAP) }
       : { top: Math.round(box.bottom + GAP) }),

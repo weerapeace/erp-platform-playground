@@ -7,7 +7,7 @@
  * ลากการ์ด MO ปล่อยในโซนแผนก = popup จ่ายงาน · ลากใบจ่ายงานข้ามแผนก = ย้ายแผนก
  * ซ่อน MO เมื่อจ่ายครบ · ซ่อนใบจ่ายงานเมื่อรับครบ · กรอบสีแบรนด์ + ปุ่มตั้งสี
  */
-import { useState, useEffect, useCallback, useMemo, useRef, Suspense, type PointerEvent as RPE } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Suspense, type PointerEvent as RPE } from "react";
 import { useSearchParams } from "next/navigation";
 import { postMoChecklistEvent } from "@/lib/mo-checklist-embed";
 import dynamicImport from "next/dynamic";
@@ -3929,13 +3929,36 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const panelColOptions: [string, string][] = pendCols.map((c) => [c.key, c.label ?? (typeof c.header === "string" ? c.header : c.key)]);
   const panelChips: [string, string][] = quickFilters.filter(([k]) => k !== "all").map(([k, l]) => [k, l]);
   const presetName = disp.preset === "simple" ? "👓 โหมดง่าย" : disp.preset === "custom" ? "✏️ กำหนดเอง" : "ปกติ";
+  // ⛶ เต็มจอ = ตารางทับทั้งหน้าต่าง (ซ่อนเมนู/หัวหน้า ใต้ป๊อปอัป z-50) จำต่อเครื่อง
+  // ปกติ = กล่องสูงพอดีถึงขอบล่างจอ (วัดตำแหน่งจริง — เดิมเดา 100vh−210px แล้วเหลือที่ว่างด้านล่าง)
+  const [full, setFull] = useState(false);
+  useEffect(() => { try { setFull(localStorage.getItem("wb_table_full") === "1"); } catch { /* ไม่มีที่เก็บ = ปกติ */ } }, []);
+  const toggleFull = () => setFull((v) => { try { localStorage.setItem("wb_table_full", v ? "0" : "1"); } catch { /* ไม่มีที่เก็บก็ใช้ได้ */ } return !v; });
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [fitH, setFitH] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    if (full) return;
+    const fit = () => { const el = boxRef.current; if (el) setFitH(Math.max(360, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 8))); };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+  }, [full, framePreview]);
+  const boxProps = full
+    ? { ref: boxRef, className: "fixed inset-0 z-40 overflow-y-auto bg-slate-50 p-3 sm:p-4 space-y-3" }
+    : { ref: boxRef, className: "space-y-4 overflow-y-auto pr-1", style: { maxHeight: fitH ? `${fitH}px` : "calc(100vh - 210px)" } };
+  const fullBtn = (
+    <button type="button" onClick={toggleFull} title={full ? "ออกจากโหมดเต็มจอ" : "ขยายตารางเต็มหน้าต่าง (ซ่อนเมนูและหัวหน้า) — จำไว้ที่เครื่องนี้"}
+      className={`${touch ? "h-11" : "h-9"} px-3 text-sm rounded-lg border whitespace-nowrap ${full ? "bg-slate-800 border-slate-800 text-white hover:bg-slate-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+      {full ? "✕ ออกจากเต็มจอ" : "⛶ เต็มจอ"}
+    </button>
+  );
   const zoomStyle = dc.scale !== 100 ? { zoom: dc.scale / 100 } : undefined;   // ขยายทั้งส่วน (ตัวหนังสือ ปุ่ม รูป) — ป๊อปอัปอยู่นอกส่วนนี้ ไม่ถูกขยาย
 
   if (framePreview) {
     const sz = dev === "ipadP" ? IPAD_SIZE.portrait : IPAD_SIZE.landscape;
     const openUrl = `${window.location.origin}/master/work-board?view=table`;
     return (
-      <div className="space-y-3 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
+      <div {...boxProps}>
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <p className="text-sm text-slate-600">📱 ดูแบบ iPad ของจริง — หน้าจริงขนาดเท่าเครื่อง กดใช้งานในกรอบได้เลย · สแกน QR ด้านขวาเพื่อเปิดบน iPad</p>
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden divide-x divide-slate-200" title="มุมมองตาราง (จำไว้ที่เครื่องนี้)">
@@ -3943,6 +3966,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             {devBtn("ipadL", "📱 iPad แนวนอน", "ตารางแถวใหญ่ กดง่าย")}
             {devBtn("ipadP", "📱 iPad แนวตั้ง", "1 ใบ = 1 การ์ด")}
           </div>
+          {fullBtn}
         </div>
         <DeviceIframePreview src="/master/work-board?view=table" width={sz.w} height={sz.h}
           label={dev === "ipadP" ? "📱 iPad แนวตั้ง" : "📱 iPad แนวนอน"} qr={{ openUrl }} />
@@ -3951,7 +3975,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   }
 
   return (
-    <div className="space-y-4 max-h-[calc(100vh-210px)] overflow-y-auto pr-1">
+    <div {...boxProps}>
       {/* 🎛 แผงตั้งค่าหน้าตา (ไม่ถูกขยายตามขนาดทั้งหน้า — ปุ่มในแผงขนาดคงที่) */}
       {panelOpen && (
         <TableDisplayPanel d={disp} isAdmin={canSeeMoney} colOptions={panelColOptions} currentCols={pendColPrefs.visible.map((c) => c.key)}
@@ -3979,6 +4003,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           className={`h-9 px-3 text-sm rounded-lg border whitespace-nowrap ${panelOpen ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
           🎛 หน้าตา: {presetName}
         </button>
+        {fullBtn}
       </div>
       {/* แท็บการ์ดใหญ่ — ตัวเลข = จำนวนใบ (ตอนค้นหา = จำนวนที่ค้นเจอในแท็บนั้น) */}
       {dc.show.tabs && <div className={`grid gap-2 ${tabCards.length === 3 ? "grid-cols-3" : tabCards.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>

@@ -101,8 +101,9 @@ export function ColumnChooser<T>({ state, note, className = "" }: { state: Colum
       </button>
       {/* กว้างพอให้ 3 หมวดอ่านชื่อเต็มได้ (เดิม 320 → ชื่อโดนตัด) · จอแคบถูกบีบตามจอเอง */}
       <FloatingDropdown anchorRef={anchor} open={open} onClose={() => setOpen(false)} minWidth={600} maxWidth={720}>
-        <div className="rounded-xl border border-slate-200 bg-white shadow-xl p-3">
-          <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
+        {/* สูงไม่เกินที่เหลือถึงขอบจอ (--fd-max-h จาก FloatingDropdown) — หัวอยู่กับที่ รายการเลื่อนได้ */}
+        <div className="flex flex-col rounded-xl border border-slate-200 bg-white shadow-xl p-3" style={{ maxHeight: "var(--fd-max-h, 80vh)" }}>
+          <div className="flex shrink-0 items-center justify-between gap-2 mb-2 flex-wrap">
             <span className="text-sm font-semibold text-slate-700">{mode === "pick" ? "เลือกคอลัมน์" : "เรียงลำดับคอลัมน์"}</span>
             <span className="flex items-center gap-2">
               <span className="inline-flex overflow-hidden rounded-md border border-slate-200 divide-x divide-slate-200">{segBtn("pick", "☑ เลือก")}{segBtn("order", "↕ เรียงลำดับ")}</span>
@@ -110,6 +111,7 @@ export function ColumnChooser<T>({ state, note, className = "" }: { state: Colum
                 className="h-7 px-2 text-xs rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40">คืนค่าเริ่มต้น</button>
             </span>
           </div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">
           {mode === "pick" ? (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-2">
               {groups.map(([g, cols]) => (
@@ -131,23 +133,24 @@ export function ColumnChooser<T>({ state, note, className = "" }: { state: Colum
             <div className="max-w-md">
               <p className="mb-2 text-[11px] text-slate-500">ลากที่ ⠿ หรือกดลูกศร · บนสุด = ซ้ายสุดในตาราง · คอลัมน์ที่ซ่อนอยู่ไม่อยู่ในรายการนี้ (เปิดได้ที่ ☑ เลือก)</p>
               {lockedShown.map((c) => (
-                <div key={c.key} className="mb-1 flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[13px] text-slate-400">
+                <div key={c.key} className="mb-1 flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-2.5 py-1 text-[13px] text-slate-400">
                   <span className="w-4 text-center text-[11px]">🔒</span><span className="min-w-0 flex-1 break-words">{labelOf(c)}</span><span className="text-[10px]">ล็อกไว้</span>
                 </div>
               ))}
               {movableShown.map((c, i) => (
-                <div key={c.key} {...drag.rowProps(i)} className={`mb-1 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[13px] text-slate-700 ${drag.rowCls(i)}`}>
+                <div key={c.key} {...drag.rowProps(i)} className={`mb-1 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-0.5 text-[13px] text-slate-700 ${drag.rowCls(i)}`}>
                   <DragHandle {...drag.handleProps(i)} className="text-base" />
                   <span className="min-w-0 flex-1 break-words">{labelOf(c)}</span>
                   <button type="button" aria-label="เลื่อนขึ้น" title="เลื่อนขึ้น (ไปทางซ้าย)" disabled={i === 0}
-                    onClick={() => state.move(c.key, movableShown[i - 1].key)} className="h-8 w-8 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-25">↑</button>
+                    onClick={() => state.move(c.key, movableShown[i - 1].key)} className="h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-25">↑</button>
                   <button type="button" aria-label="เลื่อนลง" title="เลื่อนลง (ไปทางขวา)" disabled={i === movableShown.length - 1}
-                    onClick={() => state.move(c.key, movableShown[i + 1].key)} className="h-8 w-8 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-25">↓</button>
+                    onClick={() => state.move(c.key, movableShown[i + 1].key)} className="h-7 w-7 rounded-md text-slate-500 hover:bg-slate-100 disabled:opacity-25">↓</button>
                 </div>
               ))}
             </div>
           )}
-          {note && <p className="mt-2 text-[11px] text-slate-400">{note}</p>}
+          </div>
+          {note && <p className="mt-2 shrink-0 text-[11px] text-slate-400">{note}</p>}
         </div>
       </FloatingDropdown>
     </div>
