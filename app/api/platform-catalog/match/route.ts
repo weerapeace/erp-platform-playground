@@ -5,6 +5,7 @@
  *  → { ok, updated, results: [{ listing_id, matched_parent_sku_id, matched_code, matched_name }] }
  *    ตัวเดียวคืน matched_* ที่ระดับบนด้วย (หน้าจอเดิมอ่านแบบนี้)
  *  audit ทุกตัว: คู่เดิม → คู่ใหม่ (source: manual | bulk)
+ *  จับคู่ตัวที่กด "ไม่ต้องจับคู่" ไว้ → ล้างสถานะข้ามให้เอง
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -56,7 +57,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const todo = items.filter((it) => before.has(it.listing_id));
   for (let i = 0; i < todo.length; i += 20) {
     await Promise.all(todo.slice(i, i + 20).map(async (it) => {
-      const { error } = await admin.from("platform_catalog_listings").update({ matched_parent_sku_id: it.parent_sku_id, updated_at: now }).eq("id", it.listing_id);
+      // จับคู่ตัวที่เคยกด "ไม่ต้องจับคู่" → ล้างสถานะข้ามด้วย (ยกเลิกคู่ไม่แตะ)
+      const clearIgnore = it.parent_sku_id ? { match_ignored: false, match_ignore_reason: null, match_ignored_at: null } : {};
+      const { error } = await admin.from("platform_catalog_listings").update({ matched_parent_sku_id: it.parent_sku_id, ...clearIgnore, updated_at: now }).eq("id", it.listing_id);
       if (error) { errors.push(error.message); return; }
       const p = it.parent_sku_id ? pMap.get(it.parent_sku_id) : null;
       results.push({ listing_id: it.listing_id, matched_parent_sku_id: it.parent_sku_id, matched_code: p?.code ?? null, matched_name: p?.name ?? null });

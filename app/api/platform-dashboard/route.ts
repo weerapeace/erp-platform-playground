@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,20 +43,24 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const orders = (ordersData ?? []) as { id: string; platform_id: string; status: string; total: number | null }[];
 
   // สินค้าบนแพลตฟอร์ม (catalog) ตามฟิลเตอร์ (แพลตฟอร์ม/แบรนด์)
-  let cq = admin.from("platform_catalog_listings").select("id, platform_id, matched_parent_sku_id").limit(20000);
-  if (platformId) cq = cq.eq("platform_id", platformId);
-  if (brandId) cq = cq.eq("brand_id", brandId);
-  const { data: catData } = await cq;
-  const catalog = (catData ?? []) as { platform_id: string; matched_parent_sku_id: string | null }[];
+  // 🐛 เดิม .limit(20000) แต่ PostgREST ตัดที่ 1,000 เงียบ ๆ (มี ~1,200 ตัว → ตัวเลขขาด) → ไล่ทีละหน้า
+  const catalog = await fetchAllPages<{ platform_id: string; matched_parent_sku_id: string | null; match_ignored: boolean | null }>((from, to) => {
+    let cq = admin.from("platform_catalog_listings").select("id, platform_id, matched_parent_sku_id, match_ignored");
+    if (platformId) cq = cq.eq("platform_id", platformId);
+    if (brandId) cq = cq.eq("brand_id", brandId);
+    return cq.order("id", { ascending: true }).range(from, to);
+  });
 
   // KPI
   const salesTotal = orders.filter((o) => o.status !== "cancelled").reduce((s, o) => s + (o.total ?? 0), 0);
   const ordersPending = orders.filter((o) => PENDING.has(o.status)).length;
   const ordersToShip = orders.filter((o) => o.status === "packed").length;
   const catalogMatched = catalog.filter((c) => c.matched_parent_sku_id).length;
+  // "ยังไม่จับคู่" ไม่นับตัวที่กด "ไม่ต้องจับคู่" (งานบริการ/เลิกขาย) — ไม่งั้นไม่มีวันครบ
+  const catalogIgnored = catalog.filter((c) => !c.matched_parent_sku_id && c.match_ignored).length;
   const kpi = {
     salesTotal, ordersCount: orders.length, ordersPending, ordersToShip,
-    catalogTotal: catalog.length, catalogMatched, catalogUnmatched: catalog.length - catalogMatched,
+    catalogTotal: catalog.length, catalogMatched, catalogIgnored, catalogUnmatched: catalog.length - catalogMatched - catalogIgnored,
   };
 
   // แยกตามแพลตฟอร์ม

@@ -19,7 +19,7 @@ export function scoreClass(score: number): { bar: string; text: string } {
   return { bar: "bg-slate-300", text: "text-slate-500" };
 }
 
-export function MatchCandidates({ suggestions, loading, currentId, canEdit, busy, onPick, onUnmatch, numbered }: {
+export function MatchCandidates({ suggestions, loading, currentId, canEdit, busy, onPick, onUnmatch, onIgnore, numbered }: {
   suggestions?: MatchSuggestion[];
   loading?: boolean;
   /** คู่ปัจจุบัน (ถ้าจับคู่แล้ว) */
@@ -28,6 +28,8 @@ export function MatchCandidates({ suggestions, loading, currentId, canEdit, busy
   busy?: boolean;
   onPick: (p: PickedParent) => void;
   onUnmatch?: () => void;
+  /** ปุ่ม "ไม่ต้องจับคู่ตัวนี้" (ส่งมาเฉพาะตัวที่ยังไม่จับคู่) — หน้าเปิดป๊อปเลือกเหตุผลเอง */
+  onIgnore?: () => void;
   /** โชว์เลข 1-3 หน้าคู่ที่เดา (คีย์ลัดในโหมดจับคู่ทีละตัว) */
   numbered?: boolean;
 }) {
@@ -70,6 +72,9 @@ export function MatchCandidates({ suggestions, loading, currentId, canEdit, busy
           </div>
           {currentId && onUnmatch && (
             <button type="button" disabled={busy} onClick={onUnmatch} className="h-8 px-3 text-xs text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50 disabled:opacity-50">ยกเลิกจับคู่</button>
+          )}
+          {!currentId && onIgnore && (
+            <button type="button" disabled={busy} onClick={onIgnore} title="ใช้กับของที่ไม่มีในระบบเรา เช่น งานบริการ/เลิกขาย" className="h-8 px-3 text-xs text-slate-500 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">🚫 ไม่ต้องจับคู่ตัวนี้</button>
           )}
         </div>
       ) : <p className="text-xs text-amber-600">ไม่มีสิทธิ์แก้ไข (ดูได้อย่างเดียว)</p>}

@@ -19,9 +19,11 @@ import { StatFilterCards } from "@/components/stat-filter-cards";
 import { PlatformIcon } from "@/components/platform-icon";
 import { MatchCandidates, type PickedParent } from "@/components/platform-catalog/match-candidates";
 import { MatchWorkbench } from "@/components/platform-catalog/match-workbench";
+import { IgnoreDialog } from "@/components/platform-catalog/ignore-dialog";
+import { BulkActionBar } from "@/components/bulk-action-bar";
 import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
 import { isSellingPlatform } from "@/lib/selling-platforms";
-import type { MatchSuggestion } from "@/lib/platform-match-suggest";
+import { listingMatchStatus, type ListingMatchStatus, type MatchSuggestion } from "@/lib/platform-match-suggest";
 import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type ImportMatrix, type ImportProfile, type DbProfileRow } from "@/lib/platform-import-profiles";
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 
@@ -31,11 +33,14 @@ const ProductPlatformManager = dynamic(() => import("@/components/product-platfo
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string };
 type FieldRow = { field_key: string; field_label: string | null; data_type: string | null; is_required: boolean; sample: string | null; source: string };
-type Listing = { id: string; external_product_id: string | null; title: string | null; sku_code: string | null; matched_parent_sku_id: string | null; matched_code?: string | null; matched_name?: string | null; price: number | null; status: string | null };
-type Filter = "all" | "ok" | "guess" | "none";
+type Listing = {
+  id: string; external_product_id: string | null; title: string | null; sku_code: string | null;
+  matched_parent_sku_id: string | null; matched_code?: string | null; matched_name?: string | null; price: number | null; status: string | null;
+  match_ignored?: boolean | null; match_ignore_reason?: string | null; match_ignored_at?: string | null;
+};
+type Filter = "all" | ListingMatchStatus;
+type IgnorePatch = { match_ignored: boolean; match_ignore_reason: string | null; match_ignored_at: string | null };
 
-// คะแนนตั้งแต่นี้ = นับเป็น "ระบบเดาให้" (ต่ำกว่านี้เดาจากชื่ออย่างเดียว → อยู่กลุ่ม "ยังไม่มีคู่" แต่ยังโชว์ให้เลือกตอนกาง)
-const GUESS_MIN = 60;
 // ยืนยันทีเดียวเกินนี้ต้องพิมพ์คำยืนยัน (กฎ bulk ของระบบ)
 const TYPED_CONFIRM_OVER = 100;
 const LAST_KEY = "platform-catalog:last";
@@ -89,6 +94,10 @@ export default function PlatformCatalogPage() {
   const [workbench, setWorkbench] = useState(false);
   const [bulkAsk, setBulkAsk] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
+  // ไม่ต้องจับคู่ (ข้าม) — ติ๊กหลายตัว + ป๊อปเลือกเหตุผล
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [ignoreTarget, setIgnoreTarget] = useState<string[] | null>(null);
+  const [ignoreBusy, setIgnoreBusy] = useState(false);
 
   // รายชื่อร้าน (เฉพาะร้านขายของ) + แบรนด์ → เปิดร้าน/แบรนด์ที่ดูล่าสุด
   useEffect(() => { (async () => {
@@ -132,7 +141,7 @@ export default function PlatformCatalogPage() {
     const my = ++reqSeq.current;
     setLoading(true); setLoadError(null);
     setListings([]); setFields([]); setMappings({});
-    setSuggestions({}); setHigh(new Set()); setSuggestError(false); setExpanded(new Set());
+    setSuggestions({}); setHigh(new Set()); setSuggestError(false); setExpanded(new Set()); setSelected(new Set());
     let unmatched = 0;
     try {
       const q = new URLSearchParams({ platform_id: platformId, with_counts: "1" }); if (brandId) q.set("brand_id", brandId);
@@ -168,14 +177,13 @@ export default function PlatformCatalogPage() {
   useEffect(() => { load(); }, [load]);
 
   // ---------- จับคู่ ----------
-  const statusOf = useCallback((l: Listing): Exclude<Filter, "all"> =>
-    l.matched_parent_sku_id ? "ok" : (suggestions[l.id]?.[0]?.score ?? 0) >= GUESS_MIN ? "guess" : "none", [suggestions]);
+  const statusOf = useCallback((l: Listing): ListingMatchStatus => listingMatchStatus(l, suggestions[l.id]?.[0]?.score), [suggestions]);
   const counts = useMemo(() => {
-    const c = { all: listings.length, ok: 0, guess: 0, none: 0 };
+    const c = { all: listings.length, ok: 0, guess: 0, none: 0, ignored: 0 };
     for (const l of listings) c[statusOf(l)]++;
     return c;
   }, [listings, statusOf]);
-  const highRows = useMemo(() => listings.filter((l) => !l.matched_parent_sku_id && high.has(l.id) && suggestions[l.id]?.[0]), [listings, high, suggestions]);
+  const highRows = useMemo(() => listings.filter((l) => statusOf(l) === "guess" && high.has(l.id) && suggestions[l.id]?.[0]), [listings, high, suggestions, statusOf]);
   const shownRows = useMemo(() => filter === "all" ? listings : listings.filter((l) => statusOf(l) === filter), [listings, filter, statusOf]);
 
   const applyMatch = (listingId: string, r: { matched_parent_sku_id: string | null; matched_code: string | null; matched_name: string | null }) => {
@@ -189,6 +197,8 @@ export default function PlatformCatalogPage() {
       const r = await apiFetch("/api/platform-catalog/match", { method: "POST", body: JSON.stringify({ listing_id: listingId, parent_sku_id: parent?.id ?? null }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
       applyMatch(listingId, { matched_parent_sku_id: j.matched_parent_sku_id ?? null, matched_code: j.matched_code ?? null, matched_name: j.matched_name ?? null });
+      // จับคู่ตัวที่เคยข้าม → API ล้างสถานะข้ามแล้ว ให้หน้าตรงกัน
+      if (parent) setListings((ls) => ls.map((x) => x.id === listingId ? { ...x, match_ignored: false, match_ignore_reason: null, match_ignored_at: null } : x));
       setExpanded((s) => { const n = new Set(s); n.delete(listingId); return n; });
       if (!quiet) toast.success(parent ? `จับคู่กับ ${j.matched_code ?? parent.code} แล้ว` : "ยกเลิกจับคู่แล้ว");
       return true;
@@ -200,6 +210,36 @@ export default function PlatformCatalogPage() {
     if (s) void saveMatch(l.id, { id: s.parent_sku_id, code: s.code, name: s.name });
   };
   const toggleExpand = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  // ---------- ไม่ต้องจับคู่ (ข้าม) ----------
+  // ignored=true ต้องมีเหตุผล · ตัวที่จับคู่อยู่ข้ามไม่ได้ (API ข้ามให้เอง → skipped) · ส่งเป็นชุดละ 500
+  const saveIgnore = async (ids: string[], ignored: boolean, reason: string | null, quiet = false): Promise<boolean> => {
+    if (ids.length === 0) return false;
+    setIgnoreBusy(true);
+    let updated = 0, skipped = 0;
+    try {
+      for (let i = 0; i < ids.length; i += 500) {
+        const r = await apiFetch("/api/platform-catalog/ignore", { method: "POST", body: JSON.stringify({ listing_ids: ids.slice(i, i + 500), ignored, reason }) });
+        const j = await r.json(); if (j.error) throw new Error(j.error);
+        const patch = new Map(((j.results ?? []) as ({ listing_id: string } & IgnorePatch)[]).map((x) => [x.listing_id, x]));
+        setListings((ls) => ls.map((l) => { const p = patch.get(l.id); return p ? { ...l, match_ignored: p.match_ignored, match_ignore_reason: p.match_ignore_reason, match_ignored_at: p.match_ignored_at } : l; }));
+        setOpenListing((o) => { const p = o && patch.get(o.id); return p ? { ...o!, match_ignored: p.match_ignored, match_ignore_reason: p.match_ignore_reason, match_ignored_at: p.match_ignored_at } : o; });
+        updated += j.updated ?? 0; skipped += j.skipped ?? 0;
+      }
+      setExpanded((s) => { const n = new Set(s); ids.forEach((id) => n.delete(id)); return n; });
+      setSelected(new Set());
+      if (!quiet) {
+        const head = ignored ? `ตั้งไม่ต้องจับคู่ ${updated.toLocaleString()} รายการแล้ว` : `เลิกข้าม ${updated.toLocaleString()} รายการ — กลับไปรอจับคู่`;
+        toast.success(skipped ? `${head} · ข้ามไป ${skipped} รายการ (จับคู่อยู่แล้ว/ไม่ได้ข้าม)` : head);
+      }
+      return updated > 0;
+    } catch (e) { toast.error(`บันทึกไม่สำเร็จ${updated ? ` (ทำไปแล้ว ${updated} รายการ)` : ""}: ${(e as Error).message}`); return false; }
+    finally { setIgnoreBusy(false); }
+  };
+  const ignoreTargetRows = useMemo(() => (ignoreTarget ?? []).map((id) => listings.find((l) => l.id === id)).filter(Boolean) as Listing[], [ignoreTarget, listings]);
+  const selectedRows = useMemo(() => listings.filter((l) => selected.has(l.id)), [listings, selected]);
+  const selIgnorable = selectedRows.filter((l) => !l.matched_parent_sku_id && !l.match_ignored).map((l) => l.id);
+  const selIgnored = selectedRows.filter((l) => !l.matched_parent_sku_id && l.match_ignored).map((l) => l.id);
 
   // ยืนยันทุกตัวที่ "รหัสตรงกันและไม่กำกวม" ทีเดียว (ส่งเป็นชุดละ 500)
   const confirmHighAll = async () => {
@@ -419,6 +459,12 @@ export default function PlatformCatalogPage() {
         {canEdit && <button type="button" onClick={() => toggleExpand(l.id)} className="text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0">เปลี่ยน</button>}
       </span>
     );
+    if (st === "ignored") return (
+      <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
+        <span className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 truncate" title={l.match_ignore_reason ?? ""}>🚫 ไม่ต้องจับคู่{l.match_ignore_reason ? ` · ${l.match_ignore_reason}` : ""}</span>
+        {canEdit && <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore([l.id], false, null)} className="text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0 disabled:opacity-50">เลิกข้าม</button>}
+      </span>
+    );
     const top = suggestions[l.id]?.[0];
     if (st === "guess" && top) return (
       <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
@@ -446,7 +492,7 @@ export default function PlatformCatalogPage() {
       ),
     },
     { key: "price", header: "ราคา", width: "0.7fr", align: "right", sortValue: (l) => l.price ?? -1, cell: (l) => l.price != null ? <span>{l.price.toLocaleString()}฿</span> : <span className="text-slate-300">—</span> },
-    { key: "match", header: "จับคู่ในระบบ", width: "1.6fr", align: "right", sortValue: (l) => ({ guess: 0, none: 1, ok: 2 })[statusOf(l)], cell: matchCell },
+    { key: "match", header: "จับคู่ในระบบ", width: "1.6fr", align: "right", sortValue: (l) => ({ guess: 0, none: 1, ok: 2, ignored: 3 })[statusOf(l)], cell: matchCell },
   ];
   const fcols: MiniColumn<FieldRow>[] = [
     { key: "key", header: "Field", width: "1.3fr", sortValue: (f) => f.field_key, cell: (f) => <span className="font-mono text-xs">{f.field_key}</span> },
@@ -456,8 +502,10 @@ export default function PlatformCatalogPage() {
     { key: "sample", header: "ตัวอย่าง", width: "1.5fr", cell: (f) => <span className="text-xs text-slate-400 truncate">{f.sample || "—"}</span> },
   ];
 
-  const pct = counts.all ? Math.round((counts.ok / counts.all) * 100) : 0;
-  const unmatchedRows = listings.filter((l) => !l.matched_parent_sku_id);
+  // % จับคู่ คิดจากตัวที่ "ต้องจับคู่" (ไม่นับตัวที่กดไม่ต้องจับคู่) → ไปถึง 100% ได้จริง
+  const needMatch = counts.all - counts.ignored;
+  const pct = needMatch ? Math.round((counts.ok / needMatch) * 100) : (counts.all ? 100 : 0);
+  const unmatchedRows = listings.filter((l) => { const s = statusOf(l); return s === "guess" || s === "none"; });
   const where = `${activePf?.name_th ?? "ร้านนี้"}${activeBrand ? ` · ${activeBrand.name}` : ""}`;
 
   return (
@@ -477,6 +525,7 @@ export default function PlatformCatalogPage() {
             <li>ดู <b>การ์ดตัวเลข</b> — กดการ์ดเพื่อกรองตาราง: <span className="text-emerald-700">จับคู่แล้ว</span> · <span className="text-sky-700">ระบบเดาให้ (รอยืนยัน)</span> · <span className="text-amber-700">ยังไม่มีคู่</span></li>
             <li>จับคู่: กด <b>ยืนยัน</b> ในแถวถ้าระบบเดาถูก · กด <b>🔍 จับคู่</b> เพื่อดูตัวเลือก/ค้นหาเอง · หรือกด <b>⚡ จับคู่ทีละตัว</b> ไล่ทีละตัวด้วยคีย์ลัด (1-3 เลือก · S ข้าม)</li>
             <li>รหัสตรงกันเยอะ ๆ กด <b>✓ ยืนยันทั้งหมดที่รหัสตรงกัน</b> ได้ทีเดียว (ระบบถามก่อน · แก้ทีหลังได้ · มีประวัติว่าใครจับคู่อะไร)</li>
+            <li>ของที่ไม่มีในระบบเราจริง ๆ (งานบริการ/เลิกขาย/ซ้ำบนร้าน) กด <b>🚫 ไม่ต้องจับคู่ตัวนี้</b> หรือติ๊กหลายตัวแล้วกดจากแถบด้านล่าง — ไม่นับใน &quot;ยังไม่มีคู่&quot; · กด &quot;เลิกข้าม&quot; ได้ทุกเมื่อ</li>
           </ol>
           <p className="pt-1"><b>แท็บอื่น:</b> “ช่องข้อมูลของร้าน” = คอลัมน์ที่อ่านได้จากไฟล์ · “ตั้งค่าส่งข้อมูล” = บอกว่าจะเอาข้อมูลในระบบเราตัวไหนไปใส่ช่องไหนของร้าน</p>
           <p><b>ปุ่ม ⚙️</b> = จัดการ “ชนิดไฟล์นำเข้า” เพิ่ม/แก้เองได้ถ้าร้านเปลี่ยนคอลัมน์ · ระบบแค่ <b>เดา</b> ให้ — ไม่จับคู่เองโดยไม่มีคนกดยืนยัน</p>
@@ -565,21 +614,24 @@ export default function PlatformCatalogPage() {
             <div className="space-y-3">
               <StatFilterCards value={filter} onChange={(k) => setFilter(k as Filter)} cards={[
                 { key: "all", label: "ทั้งหมด", value: counts.all },
-                { key: "ok", label: "จับคู่แล้ว", value: counts.ok, tone: "success", hint: `${pct}% ของทั้งหมด` },
+                { key: "ok", label: "จับคู่แล้ว", value: counts.ok, tone: "success", hint: `${pct}% ของที่ต้องจับคู่` },
                 { key: "guess", label: "ระบบเดาให้ รอยืนยัน", value: suggestLoading ? null : counts.guess, tone: "info", hint: suggestError ? "เดาคู่ไม่สำเร็จ — กดโหลดใหม่" : highRows.length ? `รหัสตรงกัน ${highRows.length.toLocaleString()}` : undefined },
                 { key: "none", label: "ยังไม่มีคู่", value: suggestLoading ? null : counts.none, tone: "warning" },
+                { key: "ignored", label: "ไม่ต้องจับคู่", value: counts.ignored, tone: "neutral", hint: "งานบริการ/เลิกขาย ฯลฯ" },
               ]} />
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} /></div>
-                <span className="text-xs text-slate-500 shrink-0">จับคู่แล้ว {pct}%</span>
+                <span className="text-xs text-slate-500 shrink-0">จับคู่แล้ว {pct}%{counts.ignored ? ` (ไม่นับที่ไม่ต้องจับคู่ ${counts.ignored.toLocaleString()})` : ""}</span>
               </div>
               <MiniTable
                 rows={shownRows} columns={cols} rowKey={(l) => l.id} onRowClick={openRow}
+                selectable={canEdit} selected={selected} onSelectedChange={setSelected}
                 expandedKeys={expanded}
                 renderExpanded={(l) => (
                   <MatchCandidates suggestions={suggestions[l.id]} loading={suggestLoading} currentId={l.matched_parent_sku_id}
                     canEdit={canEdit} busy={busyIds.has(l.id)} onPick={(p) => void saveMatch(l.id, p)}
-                    onUnmatch={l.matched_parent_sku_id ? () => void saveMatch(l.id, null) : undefined} />
+                    onUnmatch={l.matched_parent_sku_id ? () => void saveMatch(l.id, null) : undefined}
+                    onIgnore={!l.matched_parent_sku_id && !l.match_ignored ? () => setIgnoreTarget([l.id]) : undefined} />
                 )}
                 searchText={(l) => `${l.title ?? ""} ${l.sku_code ?? ""} ${l.external_product_id ?? ""} ${l.matched_code ?? ""}`}
                 searchPlaceholder="ค้นหาชื่อ / SKU / รหัสบนร้าน / รหัสในระบบ"
@@ -638,9 +690,29 @@ export default function PlatformCatalogPage() {
         open={workbench} onClose={() => setWorkbench(false)}
         title={`จับคู่ทีละตัว — ${where}`}
         items={unmatchedRows} suggestions={suggestions} suggestLoading={suggestLoading} canEdit={canEdit}
-        total={counts.all} matchedBefore={counts.ok}
+        total={needMatch} matchedBefore={counts.ok}
         onMatch={(listingId, p) => saveMatch(listingId, p, true)}
+        onIgnore={(listingId, reason) => saveIgnore([listingId], true, reason, true)}
       />
+
+      <IgnoreDialog
+        open={!!ignoreTarget && ignoreTargetRows.length > 0} count={ignoreTargetRows.length} busy={ignoreBusy}
+        sample={ignoreTargetRows.map((l) => l.title || l.sku_code || l.external_product_id || "—")}
+        onClose={() => setIgnoreTarget(null)}
+        onConfirm={(reason) => { void saveIgnore(ignoreTargetRows.map((l) => l.id), true, reason).then((ok) => { if (ok) setIgnoreTarget(null); }); }}
+      />
+
+      {canEdit && tab === "catalog" && (
+        <BulkActionBar count={selected.size} unit="รายการ" onClear={() => setSelected(new Set())}
+          extra={selected.size !== selIgnorable.length + selIgnored.length ? "ตัวที่จับคู่อยู่แล้วจะไม่ถูกข้าม" : undefined}>
+          {selIgnorable.length > 0 && (
+            <button type="button" disabled={ignoreBusy} onClick={() => setIgnoreTarget(selIgnorable)} className="h-8 px-3 text-sm rounded-lg bg-white text-slate-800 hover:bg-slate-100 disabled:opacity-50">🚫 ไม่ต้องจับคู่ ({selIgnorable.length.toLocaleString()})</button>
+          )}
+          {selIgnored.length > 0 && (
+            <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore(selIgnored, false, null)} className="h-8 px-3 text-sm rounded-lg border border-white/30 text-white hover:bg-white/10 disabled:opacity-50">↩ เลิกข้าม ({selIgnored.length.toLocaleString()})</button>
+          )}
+        </BulkActionBar>
+      )}
 
       <ConfirmDialog
         open={bulkAsk} onClose={() => { if (!bulkBusy) setBulkAsk(false); }} onConfirm={() => void confirmHighAll()} loading={bulkBusy}
@@ -676,13 +748,21 @@ export default function PlatformCatalogPage() {
               <div className="text-xs font-semibold text-slate-600">จับคู่กับสินค้าในระบบ</div>
               {openListing.matched_parent_sku_id
                 ? <div className="text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-2 py-1">✓ จับคู่อยู่กับ <span className="font-mono">{openListing.matched_code}</span> {openListing.matched_name ? `· ${openListing.matched_name}` : ""}</div>
-                : <div className="text-xs text-amber-600">ยังไม่จับคู่ — เลือกจากที่ระบบเดา หรือค้นหาเอง</div>}
+                : openListing.match_ignored
+                  ? (
+                    <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded px-2 py-1">
+                      <span className="flex-1">🚫 ตั้งไว้ว่าไม่ต้องจับคู่{openListing.match_ignore_reason ? ` · ${openListing.match_ignore_reason}` : ""}</span>
+                      {canEdit && <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore([openListing.id], false, null)} className="text-violet-700 hover:underline disabled:opacity-50">เลิกข้าม</button>}
+                    </div>
+                  )
+                  : <div className="text-xs text-amber-600">ยังไม่จับคู่ — เลือกจากที่ระบบเดา หรือค้นหาเอง</div>}
               {openListing.matched_parent_sku_id && (
                 <button onClick={() => setManagerParent(openListing.matched_parent_sku_id!)} className="w-full h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">📝 แก้รายละเอียดต่อแพลตฟอร์ม (ชื่อ/หมวด/รูป/ราคา) →</button>
               )}
               <MatchCandidates suggestions={modalSugs ?? undefined} loading={modalSugs === null} currentId={openListing.matched_parent_sku_id}
                 canEdit={canEdit} busy={busyIds.has(openListing.id)} onPick={(p) => void saveMatch(openListing.id, p)}
-                onUnmatch={openListing.matched_parent_sku_id ? () => void saveMatch(openListing.id, null) : undefined} />
+                onUnmatch={openListing.matched_parent_sku_id ? () => void saveMatch(openListing.id, null) : undefined}
+                onIgnore={!openListing.matched_parent_sku_id && !openListing.match_ignored ? () => setIgnoreTarget([openListing.id]) : undefined} />
             </div>
 
             {/* ส่งราคาขึ้น LINE เฉพาะสินค้านี้ (เฉพาะ LINE + จับคู่แล้ว) */}

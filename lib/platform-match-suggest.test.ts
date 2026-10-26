@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { codeTokens, isHighConfidence, normCode, prepareCandidates, skuCodeForms, suggestMatches } from "./platform-match-suggest";
+import { codeTokens, isHighConfidence, listingMatchStatus, normCode, prepareCandidates, skuCodeForms, suggestMatches } from "./platform-match-suggest";
+
+describe("listingMatchStatus", () => {
+  it("จับคู่แล้วชนะเสมอ แม้เคยกดข้าม", () => expect(listingMatchStatus({ matched_parent_sku_id: "p", match_ignored: true }, 0)).toBe("ok"));
+  it("กดข้าม = ไม่ต้องจับคู่ (แม้ระบบเดาได้มั่นใจ)", () => expect(listingMatchStatus({ matched_parent_sku_id: null, match_ignored: true }, 95)).toBe("ignored"));
+  it("คะแนน ≥60 = ระบบเดาให้ · ต่ำกว่า = ยังไม่มีคู่", () => {
+    expect(listingMatchStatus({ matched_parent_sku_id: null }, 60)).toBe("guess");
+    expect(listingMatchStatus({ matched_parent_sku_id: null }, 55)).toBe("none");
+    expect(listingMatchStatus({}, undefined)).toBe("none");
+  });
+});
 
 // รหัส/ชื่อจริงของ IG International (ตัวอย่างที่เจอใน Shopee ที่ยังไม่จับคู่)
 const ERP = prepareCandidates([

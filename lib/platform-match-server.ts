@@ -25,7 +25,7 @@ export type SuggestResult = {
 };
 
 /**
- * listingId = เดาเฉพาะตัวนั้น (แม้จับคู่แล้ว) · ไม่ส่ง = เดาทุกตัวที่ "ยังไม่จับคู่" ของร้าน (+แบรนด์)
+ * listingId = เดาเฉพาะตัวนั้น (แม้จับคู่แล้ว/ข้ามไว้) · ไม่ส่ง = เดาทุกตัวที่ "ยังไม่จับคู่ และไม่ได้กดข้าม" ของร้าน (+แบรนด์)
  */
 export async function computeMatchSuggestions(
   admin: Admin,
@@ -35,7 +35,8 @@ export async function computeMatchSuggestions(
     let q = admin.from("platform_catalog_listings").select("id, external_product_id, title, sku_code, price, brand_id");
     if (args.listingId) q = q.eq("id", args.listingId);
     else {
-      q = q.eq("platform_id", args.platformId ?? "").is("matched_parent_sku_id", null);
+      // ตัวที่กด "ไม่ต้องจับคู่" ไม่ต้องเดาให้ (หน้าจับคู่สินค้าเร็วก็ไม่โชว์)
+      q = q.eq("platform_id", args.platformId ?? "").is("matched_parent_sku_id", null).eq("match_ignored", false);
       if (args.brandId) q = q.eq("brand_id", args.brandId);
     }
     return q.order("id", { ascending: true }).range(from, to);

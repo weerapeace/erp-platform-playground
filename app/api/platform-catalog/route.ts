@@ -30,7 +30,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // PostgREST ตัดที่ 1,000 แถวเงียบ ๆ → ไล่ทีละหน้าให้ครบ (ร้านที่มีสินค้าเกินพันตัวไม่หายครึ่ง)
   const listingsQuery = (from: number, to: number) => {
-    let lq = admin.from("platform_catalog_listings").select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, status, source, last_imported_at").eq("platform_id", platformId);
+    let lq = admin.from("platform_catalog_listings").select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, status, source, last_imported_at, match_ignored, match_ignore_reason, match_ignored_at").eq("platform_id", platformId);
     if (brandId) lq = lq.eq("brand_id", brandId);
     if (search) lq = lq.or(`title.ilike.%${search}%,sku_code.ilike.%${search}%,external_product_id.ilike.%${search}%`);
     return lq.order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to);

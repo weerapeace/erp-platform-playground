@@ -127,6 +127,24 @@ export function suggestMatches(
   return scored.slice(0, limit).map(({ sim: _sim, ...s }) => s);
 }
 
+/** คะแนนตั้งแต่นี้ = นับเป็น "ระบบเดาให้" (ต่ำกว่านี้เดาจากชื่ออย่างเดียว → อยู่กลุ่ม "ยังไม่มีคู่" แต่ยังโชว์ให้เลือกตอนกาง) */
+export const GUESS_MIN = 60;
+
+export type ListingMatchStatus = "ok" | "ignored" | "guess" | "none";
+
+/**
+ * สถานะของสินค้าบนร้าน 1 ตัว (ใช้ทั้งการ์ด/ป้าย/ตัวกรอง) — ลำดับ: จับคู่แล้ว > ไม่ต้องจับคู่ > ระบบเดาให้ > ยังไม่มีคู่
+ * จับคู่แล้วชนะเสมอ (นำเข้าไฟล์รอบหลังอาจจับคู่ด้วยรหัสให้เอง แม้เคยกดข้ามไว้)
+ */
+export function listingMatchStatus(
+  l: { matched_parent_sku_id?: string | null; match_ignored?: boolean | null },
+  topScore: number | null | undefined,
+): ListingMatchStatus {
+  if (l.matched_parent_sku_id) return "ok";
+  if (l.match_ignored) return "ignored";
+  return (topScore ?? 0) >= GUESS_MIN ? "guess" : "none";
+}
+
 /** มั่นใจพอให้ "ยืนยันทีเดียวหลายตัว" ได้ไหม: ตัวแรกรหัสตรง และไม่มีตัวที่สองรหัสตรงด้วย (ไม่กำกวม) */
 export function isHighConfidence(suggestions: readonly MatchSuggestion[]): boolean {
   return (suggestions[0]?.score ?? 0) >= HIGH_CONFIDENCE && (suggestions[1]?.score ?? 0) < HIGH_CONFIDENCE;
