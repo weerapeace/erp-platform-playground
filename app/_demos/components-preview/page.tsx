@@ -3,6 +3,27 @@
 import { useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { WheelSelect } from "@/components/wheel-select";
+import { StatFilterCards } from "@/components/stat-filter-cards";
+
+/** 🔢 ตัวอย่าง StatFilterCards (ของกลาง components/stat-filter-cards) — ตัวเลขสรุปที่กดแล้วกรอง */
+function StatFilterCardsDemo() {
+  const [f, setF] = useState("all");
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
+      <StatFilterCards
+        value={f}
+        onChange={setF}
+        cards={[
+          { key: "all", label: "ทั้งหมด", value: 276 },
+          { key: "ok", label: "จับคู่แล้ว", value: 111, tone: "success", hint: "40% ของทั้งหมด" },
+          { key: "guess", label: "ระบบเดาให้ รอยืนยัน", value: 109, tone: "info" },
+          { key: "none", label: "ยังไม่มีคู่", value: null, tone: "warning", hint: "ตัวเลขยังโหลดไม่เสร็จ" },
+        ]}
+      />
+      <p className="text-xs text-slate-500">กำลังกรอง: <b>{f}</b> · กดการ์ดใบเดิมซ้ำ = กลับไป &quot;ทั้งหมด&quot; · ตัวเลขที่ยังไม่มา (null) ขึ้นแถบรอโหลด</p>
+    </div>
+  );
+}
 
 /** 🖱 ตัวอย่าง WheelSelect (ของกลาง components/wheel-select) */
 function WheelSelectDemo() {
@@ -293,6 +314,12 @@ export default function ComponentsPreviewPage() {
         <section>
           <SectionTitle>WheelSelect — ตัวเลือกเล็ก หมุนลูกกลิ้งปรับได้</SectionTitle>
           <WheelSelectDemo />
+        </section>
+
+        {/* StatFilterCards */}
+        <section>
+          <SectionTitle>StatFilterCards — การ์ดตัวเลขกดกรอง</SectionTitle>
+          <StatFilterCardsDemo />
         </section>
 
         {/* Loading / Empty / Error States */}

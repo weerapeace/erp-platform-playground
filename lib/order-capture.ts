@@ -21,6 +21,7 @@ import { chatJson, imagesToDataUrls, openAiKey } from "@/lib/ai-caption";
 import { appBaseUrl } from "@/lib/app-url";
 import { writeAudit } from "@/lib/audit";
 import { shopNameSimilarity } from "@/lib/partner-match";
+import { nameSimilarity } from "@/lib/text-similarity";
 import { computePoTotals, sumActiveLines } from "@/lib/po-total";
 import { createManualPo } from "@/lib/po-manual";
 import { LINE_SLOTS } from "@/lib/line-registry";
@@ -578,32 +579,8 @@ export async function finalizeStaleSets(admin: Admin): Promise<void> {
 
 // ---------------------------------------------------------------- เสนอ PO ที่น่าจะใช่
 
-/**
- * ตัดช่องว่าง/เครื่องหมาย + วรรณยุกต์ไทย แล้วเทียบคู่ตัวอักษร (ใช้ได้กับไทย/จีนที่ไม่มีเว้นวรรค)
- * ตัดวรรณยุกต์เพราะสะกดต่างกันบ่อย เช่น "ไนลอน" (AI แปล) กับ "ไนล่อน" (ชื่อใน PO)
- */
-function bigrams(s: string): Map<string, number> {
-  const t = s.toLowerCase().replace(/[็-๎]/g, "").replace(/[\s\[\]().,#*×x\-_/:;'"【】]+/g, "");
-  const m = new Map<string, number>();
-  for (let i = 0; i < t.length - 1; i++) { const g = t.slice(i, i + 2); m.set(g, (m.get(g) ?? 0) + 1); }
-  return m;
-}
-/**
- * ความใกล้เคียงของชื่อ 0..1 — เอาค่ามากกว่าระหว่าง
- *   Dice (ทั้งสองชื่อคล้ายกันทั้งก้อน) กับ overlap (ชื่อสั้นใน PO อยู่ในข้อความยาวที่ AI อ่าน — เช่น ชื่อ+ตัวเลือก+คำแปล)
- * overlap ใช้เฉพาะเมื่อชื่อที่สั้นกว่ายาวพอ (≥ 6 คู่ตัวอักษร) กันคำสั้น ๆ อย่าง "เทป" ไปตรงกับทุกอย่าง
- */
-export function nameSimilarity(a: string, b: string): number {
-  const A = bigrams(a), B = bigrams(b);
-  let sa = 0, sb = 0, inter = 0;
-  A.forEach((v) => { sa += v; });
-  B.forEach((v) => { sb += v; });
-  if (!sa || !sb) return 0;
-  A.forEach((v, g) => { inter += Math.min(v, B.get(g) ?? 0); });
-  const dice = (2 * inter) / (sa + sb);
-  const short = Math.min(sa, sb);
-  return short >= 6 ? Math.max(dice, 0.85 * (inter / short)) : dice;
-}
+// ความใกล้เคียงของชื่อ (เทียบคู่ตัวอักษร) ย้ายไปของกลาง lib/text-similarity — ใช้ร่วมกับเดาคู่สินค้าบนร้าน
+export { nameSimilarity };
 
 const OPEN_PO_STATUS = ["draft", "purchase", "partial"];
 const PLATFORM_SELLER: Partial<Record<CapturePlatform, RegExp>> = {

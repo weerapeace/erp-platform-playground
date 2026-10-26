@@ -14,6 +14,7 @@ import type { MasterCRUDConfig } from "@/components/master-crud";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { isSellingPlatform } from "@/lib/selling-platforms";
 import { PrepareListingDialog, type PrepareRow } from "@/components/platform-listing/prepare-dialog";
 import { BulkCategoryDialog } from "@/components/platform-listing/bulk-category-dialog";
 
@@ -23,7 +24,6 @@ const MasterCRUDPage = dynamic(
 );
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
 
-const SELLING_PLATFORMS = ["lazada", "shopee", "tiktok", "line_shopping", "website"];
 
 type Platform = { id: string; code: string; name_th: string };
 type Brand = { id: string; name: string };
@@ -65,7 +65,7 @@ export default function PlatformListingPage() {
         if (j.error) throw new Error(j.error);
         // เฉพาะร้านขายของ (ไม่รวมช่องทางโพสต์คอนเทนต์ เช่น Facebook/IG/YouTube) — erp_platforms ยังไม่มีธงแยกประเภท
         const pfs = ((j.platforms ?? []) as Record<string, unknown>[])
-          .filter((p) => SELLING_PLATFORMS.includes(String(p.code)))
+          .filter((p) => isSellingPlatform(String(p.code)))
           .map((p) => ({ id: String(p.id), code: String(p.code), name_th: String(p.name_th ?? p.code) }));
         const brs = ((j.brands ?? []) as Record<string, unknown>[]).map((b) => ({ id: String(b.id), name: String(b.name ?? "") }));
         setPlatforms(pfs); setBrands(brs);
