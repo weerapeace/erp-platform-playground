@@ -3,7 +3,7 @@
 /**
  * ✂️ ครอปรูปจากรูปสินค้า (ของกลาง) — เลือกรูป (จัดกลุ่มตาม SKU) → ลากกรอบ + ซูม → ได้รูปใหม่เฉพาะส่วนนั้น (อัปขึ้น R2)
  * --------------------------------------------------------------------------
- * - ซ้าย: กลุ่มรูป (เช่น SKU ละกลุ่ม · ป้าย "บนเว็บ") → กดรูปย่อเพื่อเลือก
+ * - ซ้าย: กลุ่มรูป (เช่น SKU ละกลุ่ม · ป้าย "บนเว็บ") → กดรูปย่อเพื่อเลือก · 📤 อัปรูปอื่นมาครอปได้ (กลุ่ม "รูปที่อัปเอง")
  * - ขวา: ImageCropBox (กรอบสัดส่วน aspect · ลากกลางกรอบ = ย้าย · จับมุมลาก = ย่อ/ขยาย · หมุนลูกกลิ้งบนรูปก็ได้) + ตัวอย่างผลลัพธ์ (วงกลม/สี่เหลี่ยม)
  * - "ใช้ส่วนนี้" → ตัดพิกเซลจริงบน canvas (รูปจาก /api/r2-image โดเมนเดียวกัน) → อัปผ่าน /api/admin/upload → onDone(r2Key)
  * ใช้ที่: ทะเบียนสี (รูปลายจุดสี) · ใช้ได้กับงานอื่นที่ต้อง "ตัดส่วนหนึ่งของรูปสินค้า" (ไอคอน · ป้าย · พื้นผิว)
@@ -29,12 +29,14 @@ export interface CropSourceGroup {
 }
 
 const imgUrl = (key: string, w: number) => `/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
-const ZOOM_MAX = 1000;
+/** ซูมสูงสุด = กรอบเล็กสุด ≈ 1/20 ของรูป (5%) — ลายเล็ก ๆ ตัดได้ (เล็กกว่านี้มุมจับซ้อนกัน ลากยาก) */
+const ZOOM_MAX = 2000;
 
 /** ตัดส่วน win (สัดส่วนของรูป 0–1) ของรูป r2 → Blob webp กว้าง outW px */
 export async function cropImageKey(key: string, win: { x: number; y: number; w: number; h: number }, outW: number, outH: number): Promise<Blob> {
   const img = new Image();
-  img.src = imgUrl(key, 2000);
+  // รูปใหญ่สุดที่ระบบย่อให้ (ไม่ขยายเกินต้นฉบับ) — กรอบเล็กมากก็ยังได้พิกเซลจริงพอ
+  img.src = imgUrl(key, 3200);
   await img.decode();
   const nw = img.naturalWidth;
   const nh = img.naturalHeight;
@@ -103,13 +105,54 @@ export function ImageCropPicker({
   const box = { w: aspect, h: 1 };
   const win = size ? canvasBgWindow(size, box, crop) : null;
   const wheelRef = useRef<HTMLDivElement>(null);
+  // 📤 รูปที่อัปเองมาครอป (ไม่มีรูปที่ต้องการในรายการ) — ต่อท้ายเป็นกลุ่ม "รูปที่อัปเอง"
+  const [own, setOwn] = useState<string[]>([]);
+  const [upBusy, setUpBusy] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const allGroups: CropSourceGroup[] | null = groups === null ? null : [...(own.length ? [{ key: "__own", label: "📤 รูปที่อัปเอง", images: own }] : []), ...groups];
 
   // เปิดมา → เลือกรูปแรกให้
   useEffect(() => {
     if (!open) return;
-    const all = (groups ?? []).flatMap((g) => g.images);
+    const all = (allGroups ?? []).flatMap((g) => g.images);
     if (!sel || !all.includes(sel)) setSel(all[0] ?? null);
-  }, [open, groups, sel]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, groups, own, sel]);
+
+  const uploadSource = async (f: File | undefined) => {
+    if (!f) return;
+    if (!f.type.startsWith("image/")) {
+      toast.error("เลือกไฟล์รูปเท่านั้น");
+      return;
+    }
+    setUpBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("folder", folder);
+      fd.append("no_library", "1");
+      const j = await apiFetch("/api/admin/upload", { method: "POST", body: fd }).then((r) => r.json());
+      if (!j.r2_key) {
+        toast.error(j.error ?? "อัปโหลดไม่สำเร็จ");
+        return;
+      }
+      setOwn((o) => [j.r2_key, ...o]);
+      setSel(j.r2_key);
+    } catch {
+      toast.error("อัปโหลดไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setUpBusy(false);
+      if (fileRef.current) fileRef.current.value = "";
+    }
+  };
+  const uploadBtn = (
+    <>
+      <button type="button" onClick={() => fileRef.current?.click()} disabled={upBusy} className="w-full rounded-lg border border-dashed border-slate-300 px-2 py-2 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-700 disabled:opacity-50">
+        {upBusy ? "กำลังอัปโหลด…" : "📤 อัปรูปอื่นมาครอป"}
+      </button>
+      <input ref={fileRef} type="file" accept="image/*" hidden onChange={(e) => void uploadSource(e.target.files?.[0])} />
+    </>
+  );
 
   // หมุนลูกกลิ้งบนรูป = ซูม (ต้องเป็น listener ไม่ passive ถึงกันหน้าเลื่อนได้)
   useEffect(() => {
@@ -117,7 +160,8 @@ export function ImageCropPicker({
     if (!el) return;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      setCrop((c) => ({ ...c, zoom: Math.max(100, Math.min(ZOOM_MAX, Math.round((c.zoom + (e.deltaY < 0 ? 25 : -25)) / 5) * 5)) }));
+      // ทีละ ~12% ของขนาดตอนนี้ (กรอบใหญ่/เล็กก็หมุนแล้วรู้สึกเท่ากัน)
+      setCrop((c) => ({ ...c, zoom: Math.max(100, Math.min(ZOOM_MAX, Math.round(c.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)))) }));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -178,14 +222,18 @@ export function ImageCropPicker({
     >
       {error ? (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">เกิดข้อผิดพลาดในการโหลดรูป ({error})</div>
-      ) : groups === null ? (
+      ) : allGroups === null ? (
         <div className="py-12 text-center text-sm text-slate-400">กำลังโหลดรูป…</div>
-      ) : !groups.length ? (
-        <div className="py-12 text-center text-sm text-slate-500">{emptyText}</div>
+      ) : !allGroups.length ? (
+        <div className="py-12 text-center text-sm text-slate-500 space-y-3">
+          <p>{emptyText}</p>
+          <div className="mx-auto max-w-[240px]">{uploadBtn}</div>
+        </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-[240px_minmax(0,1fr)]">
           <div className="space-y-3 md:max-h-[60vh] overflow-y-auto pr-1">
-            {groups.map((g) => (
+            {uploadBtn}
+            {allGroups.map((g) => (
               <div key={g.key}>
                 <div className="flex items-center gap-1.5 text-xs">
                   <span className="font-medium text-slate-700 truncate">{g.label}</span>
@@ -214,7 +262,7 @@ export function ImageCropPicker({
                 <div ref={wheelRef}>
                   <ImageCropBox imageKey={sel} box={box} value={crop} onChange={(p) => setCrop((c) => ({ ...c, ...p }))} maxHeight={460} maxZoom={ZOOM_MAX} />
                 </div>
-                <p className="text-center text-[11px] text-slate-400">ลากกลางกรอบ = ย้าย · จับมุม ◻ ลาก = ย่อ/ขยาย · หมุนลูกกลิ้ง = ซูม</p>
+                <p className="text-center text-[11px] text-slate-400">ลากกลางกรอบ = ย้าย · จับมุม ◻ ลาก = ย่อ/ขยาย (เล็กสุด ≈ 5% ของรูป) · หมุนลูกกลิ้ง = ซูม</p>
               </>
             ) : (
               <div className="py-12 text-center text-sm text-slate-400">เลือกรูปทางซ้าย</div>

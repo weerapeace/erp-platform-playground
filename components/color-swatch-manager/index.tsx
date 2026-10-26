@@ -207,8 +207,15 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
     try {
       const j = await apiFetch(`/api/color-swatches?images=${encodeURIComponent(names.join("|"))}`).then((r) => r.json());
       if (j.error) throw new Error(j.error);
-      type G = { skuId: string; code: string; name: string; color: string; onWeb: boolean; images: string[] };
-      setCropGroups(((j.data?.groups ?? []) as G[]).map((g) => ({ key: g.skuId, label: g.code || g.color, sub: g.name, badge: g.onWeb ? "บนเว็บ" : undefined, images: g.images })));
+      type G = { skuId: string; code: string; name: string; color: string; onWeb: boolean; images: string[]; kind?: "sku" | "parent" };
+      // 📦 kind parent = รูปของรุ่น (ปก/แกลเลอรี Parent + รูปเว็บ) — รูปรวมที่เห็นลายชัดกว่า
+      setCropGroups(
+        ((j.data?.groups ?? []) as G[]).map((g) =>
+          g.kind === "parent"
+            ? { key: g.skuId, label: `📦 รูปของรุ่น ${g.code}`, sub: "ปก · แกลเลอรี · รูปเว็บของรุ่น (ทุกสี)", images: g.images }
+            : { key: g.skuId, label: g.code || g.color, sub: g.name, badge: g.onWeb ? "บนเว็บ" : undefined, images: g.images },
+        ),
+      );
     } catch (e) {
       setCropErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ");
     }
