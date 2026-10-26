@@ -10,8 +10,9 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { captureImageAdd, captureImageVersion, editContextFromRequest } from "@/lib/record-versions";
+import { captureImageAdd, editContextFromRequest } from "@/lib/record-versions";
 import { buildRow, loadTags, loadUsageCounts, type AssetRow } from "../shared";
+import { removeDescriptionImage } from "@/lib/description-images";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -91,23 +92,9 @@ export async function DELETE(request: NextRequest) {
   const assetId = (sp.get("asset_id") ?? "").trim();
   if (!parentId || !assetId) return NextResponse.json({ error: "ต้องมี parent_id + asset_id" }, { status: 400 });
 
-  const admin = supabaseAdmin();
-  // อ่านไว้ก่อนเอาออก — 🕘 เก็บเป็นเวอร์ชันเก่าของ Parent (ย้อนกลับได้ · ไฟล์ไม่ถูกทิ้ง)
-  const [{ data: use }, { data: asset }] = await Promise.all([
-    admin.from("asset_usages").select("sort_order").eq("module", MODULE).eq("record_id", parentId).eq("asset_id", assetId).is("field", null).maybeSingle(),
-    admin.from("assets").select("r2_key, file_name").eq("id", assetId).maybeSingle(),
-  ]);
-  const { error } = await admin.from("asset_usages").delete()
-    .eq("module", MODULE).eq("record_id", parentId).eq("asset_id", assetId).is("field", null);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  if (use && asset?.r2_key) {
-    const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-    await captureImageVersion(admin, {
-      table: "parent_skus_v2", id: parentId, fieldKey: "description_images", r2Key: asset.r2_key as string,
-      source: "description_image_remove", actorId: user?.id ?? null, actorName: user?.email ?? null, ...editContextFromRequest(request),
-      meta: { asset_id: assetId, file_name: asset.file_name ?? null, sort_order: use.sort_order ?? null },
-    });
-  }
-  await writeAuditFor(request, admin, { action: "description_image_remove", entityType: "parent_skus_v2", entityId: parentId, metadata: { asset_id: assetId } });
+  // เอาออก + 🕘 เก็บเป็นเวอร์ชันเก่าของ Parent (ย้อนกลับได้ · ไฟล์ไม่ถูกทิ้ง) + audit — ของกลาง lib/description-images
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  const r = await removeDescriptionImage(supabaseAdmin(), { parentId, assetId, actorId: user?.id ?? null, actorName: user?.email ?? null, ...editContextFromRequest(request) });
+  if (!r.ok) return NextResponse.json({ error: r.error }, { status: 500 });
   return NextResponse.json({ ok: true, error: null });
 }

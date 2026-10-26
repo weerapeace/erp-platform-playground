@@ -6,12 +6,12 @@
  *   codes = รหัสที่เจอในชื่อโฟลเดอร์/ไฟล์ (BCG11-01 · BCG12-01-L · BCG11) → หารุ่นจาก "รหัสรุ่น" (ตัดตามขีด) + "รหัส SKU ลูกตรงตัว"
  *           (SKU ลูก ~2,300 ตัวรหัสไม่ได้ขึ้นต้นด้วยรหัสรุ่น · ~100 ตัวเป็นตัวพิมพ์เล็ก → ส่งรหัสตามตัวพิมพ์เดิม + ตัวใหญ่)
  *   → { parents: RouteParent + รูปเดิม (galleryItems / skus[].items) , shops }
+ * (ประวัติชุดอัป + "เคยอัปแล้ว" อยู่ที่ /api/product-images/batches)
  *      สี = SKU ตัวหลักของสี · รหัสไซส์ = aliases (ของกลาง colorGroups) · ร้านที่ขาย + รูปบนเว็บรายสี/Hero เดิมต่อร้าน
  * ของกลาง: guardApi(products.view) · colorGroups · codePrefixes (lib/product-image-routing)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
-import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { colorGroups, baseColor } from "@/lib/website-size-options";
 import { normalizeHero } from "@/lib/website-hero";
@@ -131,37 +131,3 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   return NextResponse.json({ parents, shops, truncated: ids.size > MAX_PARENTS });
 }
 
-/**
- * 📝 ประวัติชุดอัป (ใครอัปอะไรเมื่อไร) — PUT { kind: "upload"|"retry"|"undo", mode, resize, parents, ok, failed, attachments, shops }
- * แต่ละรูปมี audit ของทางที่อัปอยู่แล้ว (แกลเลอรี/เว็บ) — ตัวนี้จด "ภาพรวมทั้งชุด" 1 แถว
- */
-export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
-  if (denied) return denied;
-  let b: Record<string, unknown>;
-  try {
-    b = (await request.json()) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
-  }
-  const kind = b.kind === "retry" || b.kind === "undo" ? b.kind : "upload";
-  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
-  const ids = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is string => typeof s === "string" && UUID.test(s)).slice(0, MAX_PARENTS) : []);
-  const resize = b.resize && typeof b.resize === "object" ? (b.resize as Record<string, unknown>) : null;
-  await writeAuditFor(request, supabaseAdmin(), {
-    action: `product_images:${kind}`,
-    entityType: "product_images",
-    entityId: null,
-    metadata: {
-      via: "product-image-router",
-      mode: b.mode === "replace" ? "replace" : "append",
-      resize: resize ? { mode: String(resize.mode ?? ""), px: num(resize.px) } : null,
-      parentIds: ids(b.parents),
-      shops: ids(b.shops),
-      ok: num(b.ok),
-      failed: num(b.failed),
-      attachments: num(b.attachments),
-    },
-  });
-  return NextResponse.json({ ok: true });
-}

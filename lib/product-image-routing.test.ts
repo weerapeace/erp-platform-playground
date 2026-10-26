@@ -225,3 +225,12 @@ describe("buildWebItems", () => {
     ).toEqual([{ parentId: "p11", skus: { [BR]: ["k1", "k2"] }, hero: { desktop: "h1" } }]);
   });
 });
+
+describe("เคยอัปแล้ว (ประวัติชุดอัป)", () => {
+  it("รูปที่เคยอัปข้ามให้ · ตำแหน่งที่เหลือยังตามแม่แบบ", () => {
+    const imgs = ["1", "2", "3"].map((b, i) => ({ id: `s${i}`, base: b }));
+    const r = applyRowMode(imgs, "tpl", { parentLevel: false, template: DEFAULT_TEMPLATE, seen: new Set(["s0"]) });
+    expect(r.map((x) => `${x.dest}:${x.by}`)).toEqual(["skip:seen", "sku:tpl", "sku:tpl"]);
+    expect(applyRowMode(imgs, "skuAll", { parentLevel: false, template: DEFAULT_TEMPLATE, seen: new Set(["s1"]) })[1].dest).toBe("skip");
+  });
+});

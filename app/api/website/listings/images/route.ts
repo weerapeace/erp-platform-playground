@@ -25,6 +25,7 @@ import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
 import { applyImageSlots, mergeListingImages, type ImageSlotsSet } from "@/lib/website-image-merge";
 import { baseColor, colorGroups } from "@/lib/website-size-options";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
+import { LISTING_IMG_COLS, parseListingChanges, undoListingChanges } from "@/lib/website-listing-undo";
 import { MAX_WEB_IMAGES, type CatalogParent, type HeroPick, type HeroSlot, type MassImageItem } from "@/lib/website-image-match";
 
 export const dynamic = "force-dynamic";
@@ -205,48 +206,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     shopId: j.shopId,
     parentId: j.parentId,
     before: j.before,
-    after: Object.fromEntries(IMG_COLS.map((c) => [c, c in j.row ? j.row[c] : j.before[c]])),
+    after: Object.fromEntries(LISTING_IMG_COLS.map((c) => [c, c in j.row ? j.row[c] : j.before[c]])),
   }));
   return NextResponse.json({ ok: !failed.length, updated: done.length, failed, skipped, purged, changes });
 }
 
-const IMG_COLS = ["web_images", "web_sku_images", "web_hero"] as const;
-const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-
-/** ↩ ย้อนทั้งชุด: คืนค่าเดิมเฉพาะแถวที่ยังเป็นค่าที่เพิ่งเขียน (มีคนแก้ต่อ = ข้าม) · audit เก็บค่าก่อนย้อน */
+/** ↩ ย้อนทั้งชุด (ของกลาง lib/website-listing-undo — ใช้ร่วมกับประวัติชุดอัปของ 📂 จัดรูปหลายโฟลเดอร์) */
 async function undoChanges(raw: unknown, user: { id: string; email?: string | null } | null): Promise<NextResponse> {
-  type Change = { shopId: string; parentId: string; before: Record<string, unknown>; after: Record<string, unknown> };
-  const list: Change[] = (Array.isArray(raw) ? raw : [])
-    .slice(0, 500)
-    .map((c) => (c ?? {}) as Change)
-    .filter((c) => typeof c.shopId === "string" && UUID.test(c.shopId) && typeof c.parentId === "string" && UUID.test(c.parentId) && c.before && c.after && typeof c.before === "object" && typeof c.after === "object");
+  const list = parseListingChanges(raw);
   if (!list.length) return NextResponse.json({ error: "ไม่มีรายการให้ย้อน" }, { status: 400 });
-  const sb = supabaseAdmin();
-  const restored: { shopId: string; parentId: string }[] = [];
-  const changed: { shopId: string; parentId: string }[] = [];
-  for (const c of list) {
-    const { data: cur } = await sb.from("store_listings").select("web_images, web_sku_images, web_hero").eq("shop_id", c.shopId).eq("parent_sku_id", c.parentId).maybeSingle();
-    if (!cur) continue;
-    if (!IMG_COLS.every((k) => same((cur as Record<string, unknown>)[k], c.after[k]))) {
-      changed.push({ shopId: c.shopId, parentId: c.parentId });
-      continue;
-    }
-    // ค่าเดิมผ่านตัวกรองช่องรูปชุดเดียวกับตอนบันทึก (กันค่าแปลกปลอม)
-    const row = listingPatchToRow({ webImages: toKeyList(c.before.web_images), webSkuImages: (c.before.web_sku_images && typeof c.before.web_sku_images === "object" ? c.before.web_sku_images : {}) as Record<string, string[]>, webHero: normalizeHero(c.before.web_hero) });
-    const { error } = await sb.from("store_listings").update({ updated_at: new Date().toISOString(), ...row }).eq("shop_id", c.shopId).eq("parent_sku_id", c.parentId);
-    if (!error) restored.push({ shopId: c.shopId, parentId: c.parentId });
-  }
-  for (const shopId of [...new Set(restored.map((r) => r.shopId))]) {
-    const mine = restored.filter((r) => r.shopId === shopId);
-    await writeAudit(sb, {
-      action: "bulk_update",
-      entityType: "store_listing",
-      entityId: shopId,
-      actorId: user?.id ?? null,
-      actorName: user?.email ?? null,
-      metadata: { kind: "mass_images_undo", count: mine.length, parentIds: mine.map((r) => r.parentId), before: Object.fromEntries(list.filter((c) => c.shopId === shopId).map((c) => [c.parentId, c.after])) },
-    });
-    await purgeStorefrontCache(sb, shopId);
-  }
-  return NextResponse.json({ ok: true, restored: restored.length, changed });
+  const r = await undoListingChanges(supabaseAdmin(), list, { id: user?.id ?? null, name: user?.email ?? null });
+  return NextResponse.json({ ok: true, ...r });
 }

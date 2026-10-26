@@ -251,16 +251,18 @@ export interface RouteImage {
   id: string;
   base: string;
   dest: RouteDest;
-  /** ตั้งจาก: ชื่อไฟล์ · แม่แบบ · ตั้งทั้งโฟลเดอร์ · เลือกเอง */
-  by: "name" | "tpl" | "row" | "user";
+  /** ตั้งจาก: ชื่อไฟล์ · แม่แบบ · ตั้งทั้งโฟลเดอร์ · เลือกเอง · เคยอัปแล้ว (ข้ามให้) */
+  by: "name" | "tpl" | "row" | "user" | "seen";
 }
 
 /**
  * ตั้งช่องให้ทั้งโฟลเดอร์ตามตำแหน่งปัจจุบัน (ลากสลับลำดับแล้วเรียกซ้ำ = ช่องตามตำแหน่งใหม่)
  * loose = ไฟล์เดี่ยวไม่มีโฟลเดอร์ (BCG11-01_3.jpg) → แม่แบบ "รูป 1 = ปก" ไม่ใช้ (กันเพิ่มรูปเดียวแล้วปกเปลี่ยนโดยไม่ตั้งใจ · ชื่อไฟล์มีคำว่า ปก ยังได้)
+ * seen = รูปที่เคยอัปให้รุ่นนี้แล้ว (ประวัติชุดอัป) → ข้ามให้เสมอ (เลือกช่องเองทีหลังได้ = อัปซ้ำจริง)
  */
-export function applyRowMode(imgs: { id: string; base: string }[], mode: RowMode, ctx: { parentLevel: boolean; template: RouteTemplate; loose?: boolean }): RouteImage[] {
+export function applyRowMode(imgs: { id: string; base: string }[], mode: RowMode, ctx: { parentLevel: boolean; template: RouteTemplate; loose?: boolean; seen?: Set<string> }): RouteImage[] {
   return imgs.map((im, ix) => {
+    if (ctx.seen?.has(im.id) && mode !== "skip") return { id: im.id, base: im.base, dest: "skip", by: "seen" };
     if (mode === "tpl") {
       const nd = destFromName(im.base, ctx.parentLevel);
       if (nd) return { id: im.id, base: im.base, dest: nd, by: "name" };
