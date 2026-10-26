@@ -40,7 +40,7 @@ const TONE: Record<(typeof MO_BUCKETS)[MoBacklogBucket]["tone"], string> = {
   slate:  "bg-slate-50 text-slate-600 border-slate-200",
 };
 
-const factsOf = (r: MoBacklogRow) => ({ status: r.status, qty: r.qty, dispatched: r.dispatched, received: r.received, openWorkOrders: r.open_work_orders });
+const factsOf = (r: MoBacklogRow) => ({ status: r.status, qty: r.qty, dispatched: r.dispatched, received: r.received, openWorkOrders: r.open_work_orders, receiveSkipped: !!r.receive_skipped });
 const num = (v: number) => v.toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const Dash = () => <span className="text-xs text-slate-300">—</span>;
 

@@ -2,7 +2,7 @@
  * ของกลาง: กฎ "เปลี่ยนสถานะใบสั่งผลิต" (MO workflow) — ที่เดียว ใช้ทั้งหน้าจอและ API
  *
  * ตาม CLAUDE.md §25 — ห้ามเปลี่ยน status ตรง ๆ แบบไม่มีกฎ:
- *   - ปิดงาน (→ done)       ได้เฉพาะใบที่ "ช่างส่งคืนครบทุกชิ้น" และไม่มีใบจ่ายงานค้าง
+ *   - ปิดงาน (→ done)       ได้เฉพาะใบที่ "ช่างส่งคืนครบทุกชิ้น" (หรือแอดมินข้ามขั้นรับคืน) และไม่มีใบจ่ายงานค้าง
  *   - ยกเลิก (→ cancelled)  ได้เฉพาะใบที่ "ยังไม่จ่ายงานเลย" + ต้องใส่เหตุผล
  *   - ใบที่ปิด/ยกเลิกไปแล้ว เปลี่ยนซ้ำไม่ได้
  * ใบที่ไม่ผ่านกฎ → ข้าม (ไม่ล้มทั้งชุด) พร้อมเหตุผลภาษาคนให้รายงานผล
@@ -22,6 +22,8 @@ export type MoTransitionFacts = {
   dispatched: number;      // ยอดจ่ายงานรวม (ไม่นับใบจ่ายงานที่ยกเลิก)
   received: number;        // ยอดที่ช่างส่งคืนแล้วรวม
   openWorkOrders: number;  // ใบจ่ายงานที่ยังไม่เสร็จ (status = dispatched)
+  /** แอดมินข้ามขั้น "รับคืน" (lib/mo-skip) → ปิดได้โดยไม่ต้องรับคืนครบ (ยังต้องไม่มีใบจ่ายงานค้าง) */
+  receiveSkipped?: boolean;
 };
 
 export const MO_ACTION_META: Record<MoBulkStatusAction, { to: string; label: string; needReason: boolean; auditAction: string }> = {
@@ -36,7 +38,7 @@ export function checkMoTransition(action: MoBulkStatusAction, f: MoTransitionFac
   }
   if (action === "close") {
     if (!(f.qty > 0)) return "จำนวนสั่งผลิตเป็น 0";
-    if (f.received < f.qty) return `ช่างยังส่งคืนไม่ครบ (คืน ${fmt(f.received)}/${fmt(f.qty)})`;
+    if (f.received < f.qty && !f.receiveSkipped) return `ช่างยังส่งคืนไม่ครบ (คืน ${fmt(f.received)}/${fmt(f.qty)})`;
     if (f.openWorkOrders > 0) return `ยังมีใบจ่ายงานค้าง ${f.openWorkOrders} ใบ`;
     return null;
   }

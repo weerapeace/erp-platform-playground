@@ -12,6 +12,7 @@ import { fetchAllPages } from "@/lib/fetch-all";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
 import { todayBangkok } from "@/lib/date";
 import { bangkokYmd, bucketOf, daysBetweenYmd, type MoBacklogRow } from "@/lib/mo-backlog";
+import { parseSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const mos = await fetchAllPages<Row>((from, to) =>
     admin.from("manufacturing_orders")
-      .select("id, mo_no, product_sku, product_name, qty, status, created_at, due_date, internal_due_date, bom_code, prep_done, cut_done")
+      .select("id, mo_no, product_sku, product_name, qty, status, created_at, due_date, internal_due_date, bom_code, prep_done, cut_done, skipped_stages")
       .eq("is_active", true).not("status", "in", "(cancelled,done)")
       .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: Row[] | null; error: unknown }>);
   const moNos = [...new Set(mos.map((m) => String(m.mo_no)).filter(Boolean))];
@@ -91,6 +92,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       qty, status: String(m.status ?? "draft"), created_at: created, age_days: age,
       due_date: dueYmd, internal_due_date: ((m.internal_due_date as string) ?? null)?.slice(0, 10) ?? null,
       dispatched: r2(w.disp), received: r2(w.recv), open_work_orders: w.open, last_dispatch_date: w.last,
+      receive_skipped: !!parseSkipped(m.skipped_stages).receive,
       has_bom: p.t > 0,
       // ใบไม่มีสูตร: ใช้ธงติ๊กรวมทั้งใบ (prep_done/cut_done) แทนตัวนับรายวัตถุดิบ
       prep_total: p.t > 0 ? p.t : 1, prep_ready: p.t > 0 ? p.r : (m.prep_done ? 1 : 0),

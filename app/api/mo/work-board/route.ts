@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
+import { parseSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -92,7 +93,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const [{ data: depts }, { data: wos }, { data: mos }] = await Promise.all([
     admin.from("departments").select("id, name, status, note, show_note, display_order, show_on_board").order("display_order", { ascending: true, nullsFirst: false }).order("name", { ascending: true }),
     admin.from("mo_work_orders").select("*").eq("is_active", true).order("created_at", { ascending: true }).limit(2000),
-    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, order_date, created_at, due_date, internal_due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, size_breakdown").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, order_date, created_at, due_date, internal_due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, size_breakdown, skipped_stages").eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000),
   ]);
 
   const departments = (depts ?? []).filter((d: Record<string, unknown>) => !d.status || d.status === "active")
@@ -187,6 +188,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // ใบที่แบ่งจำนวนตามไซส์ → จำนวนรวมมาจากผลบวกไซส์ แก้จำนวนตรง ๆ ไม่ได้ (ต้องแก้ที่หน้าใบสั่งผลิต)
       has_sizes: Array.isArray(m.size_breakdown) && (m.size_breakdown as unknown[]).length > 0,
       issue_count: issueCount.get(String(m.mo_no)) ?? 0,   // นับเฉพาะใบรอจ่าย (ใบที่จ่ายครบแล้ว = 0)
+      skipped_stages: parseSkipped(m.skipped_stages),     // ขั้นที่แอดมินข้าม (ป้าย) — กติกาที่ lib/mo-skip
       ...inf, labor: laborOfMo(String(m.mo_no)), central_rate: centralRateOf(String(m.mo_no)) };
   });
   const pending = allMos.filter((m) => m.remaining > 0.0001);   // การ์ดโซน "รอจ่าย" = ยังจ่ายไม่ครบ
@@ -209,13 +211,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     p.cutTotal += 1; if (x.cut_done) p.cutDone += 1;
     prog.set(k, p);
   }
+  // แอดมินข้ามขั้นเตรียม/ตัด (lib/mo-skip) = นับครบ — ตัวเลขติ๊กจริงไม่ถูกแก้ ส่งกลับแบบครบให้ไฟพร้อมจ่ายตรงกันทุกจอ
   const pendingEnriched = pending.map((p) => {
     const pr = prog.get(String(p.mo_no));
+    const skP = !!p.skipped_stages.prep, skC = !!p.skipped_stages.cut;
     if (pr && pr.prepTotal > 0) {
-      const ready = pr.prepDone >= pr.prepTotal && pr.cutDone >= pr.cutTotal;
-      return { ...p, has_bom: true, prep_total: pr.prepTotal, prep_ready: pr.prepDone, cut_total: pr.cutTotal, cut_ready: pr.cutDone, ready };
+      const prepReady = skP ? pr.prepTotal : pr.prepDone, cutReady = skC ? pr.cutTotal : pr.cutDone;
+      const ready = prepReady >= pr.prepTotal && cutReady >= pr.cutTotal;
+      return { ...p, has_bom: true, prep_total: pr.prepTotal, prep_ready: prepReady, cut_total: pr.cutTotal, cut_ready: cutReady, ready };
     }
-    return { ...p, has_bom: false, prep_total: 0, prep_ready: 0, cut_total: 0, cut_ready: 0, ready: p.prep_done && p.cut_done };
+    return { ...p, has_bom: false, prep_total: 0, prep_ready: 0, cut_total: 0, cut_ready: 0, ready: (p.prep_done || skP) && (p.cut_done || skC) };
   });
 
   // งานเหมารายชิ้นที่ "รอจ่าย" (ติ๊กแล้ว ยังไม่จ่ายให้ช่างเหมา) → โผล่เป็นการ์ดในโซนรอจ่าย

@@ -23,6 +23,8 @@ import type { WorkStep } from "@/app/api/bom/work-steps/route";
 import type { MoPieceRow } from "@/app/api/mo/piecework/route";
 import { WorkStepsTab } from "./work-steps-tab";
 import { BomEditorModal } from "@/components/bom-editor-modal";
+import { MO_SKIP_META, MO_SKIP_STAGES, earlierStagesToSkip, type MoSkipStage, type MoSkipped } from "@/lib/mo-skip";
+import { moSteps, currentStep } from "./mo-steps";
 
 export type PendPane = "job" | "bom" | "prep" | "stage" | "dispatch" | "due" | "group" | "hist";
 export const PEND_PANES: [PendPane, string][] = [
@@ -40,6 +42,7 @@ export type PendMoLite = {
   qty: number; dispatched: number; remaining: number; due_date: string | null; internal_due_date?: string | null;
   created_at?: string | null; priority?: number; priority_note?: string | null; brand: string | null; brand_oem?: boolean;
   has_bom: boolean; prep_total: number; prep_ready: number; cut_total: number; cut_ready: number; issue_count?: number;
+  prep_done?: boolean; cut_done?: boolean; skipped_stages?: MoSkipped;
 };
 export type PlanLite = { id: string; mo_id: string; due_date: string; qty: number; note?: string | null; shipped?: boolean; dn_number?: string | null };
 
@@ -430,9 +433,116 @@ export const parseDetailPrefs = (v: unknown): DetailPrefs | null => {
 const DETAIL_BTNS: [string, string][] = [["check", "📋 เปิดเช็กลิสต์เต็ม"], ["print", "🖨 พิมพ์ใบสั่งงาน"], ["printSteps", "🪜 พิมพ์ขั้นตอนงาน"]];
 const DETAIL_SECS: [string, string][] = [["cost", "💰 ต้นทุน"], ["issue", "⚠️ ปัญหา"], ["steps", "🧵 ขั้นตอนงาน"]];
 
+// ---- แผง 🚦 ความคืบหน้า: 5 ขั้น + แอดมินข้าม/เอาคืนได้ (ป้ายใน skipped_stages — กติกาที่ lib/mo-skip) + ปิดใบเมื่อครบ ----
+function StagePane({ m, prog, received, touch, canSkip, onSkipped }: {
+  m: PendMoLite; prog?: MoProgress; received: number; touch: boolean; canSkip: boolean; onSkipped: () => void;
+}) {
+  const steps = moSteps(m, prog, received);
+  const cur = currentStep(steps);
+  const sk = m.skipped_stages ?? {};
+  const [pick, setPick] = useState<MoSkipStage | null>(null);
+  const [reason, setReason] = useState("");
+  const [alsoPrev, setAlsoPrev] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [closeMsg, setCloseMsg] = useState("");
+  const doneMap = Object.fromEntries(steps.map((s) => [s.key, s.state === "done" || s.state === "na"])) as Partial<Record<MoSkipStage, boolean>>;
+  const prevList = pick ? earlierStagesToSkip(pick, sk, doneMap) : [];
+  const willSkip = pick ? MO_SKIP_STAGES.filter((s) => s === pick || (alsoPrev && prevList.includes(s))) : [];
+  const needReason = willSkip.some((s) => MO_SKIP_META[s].needReason);
+  const careful = willSkip.some((s) => MO_SKIP_META[s].careful);
+  const age = m.created_at ? Math.max(0, Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86400000)) : null;
+
+  const send = async (stages: MoSkipStage[], skip: boolean, why: string) => {
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch(`/api/mo/${encodeURIComponent(m.id)}/skip-stage`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ stages, skip, reason: why }) });
+      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      setPick(null); setReason(""); onSkipped();
+    } catch (e) { setErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  const confirmSkip = () => {
+    if (needReason && !reason.trim()) { setErr("ขั้นนี้ต้องใส่เหตุผลก่อน"); return; }
+    void send(willSkip, true, reason.trim());
+  };
+  // ครบ/ข้ามทุกขั้นแล้ว → ปิดใบ (ผ่านกฎกลาง lib/mo-workflow ที่ /api/mo/bulk-status — ยังมีใบจ่ายงานค้าง = ปิดไม่ได้)
+  const closeMo = async () => {
+    setBusy(true); setCloseMsg("");
+    try {
+      const res = await apiFetch("/api/mo/bulk-status", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: [m.id], action: "close" }) });
+      const j = await res.json();
+      if (Array.isArray(j?.updated) && j.updated.length > 0) { setCloseMsg("ปิดใบแล้ว"); onSkipped(); }
+      else setCloseMsg(j?.skipped?.[0]?.reason || j?.error || "ปิดใบไม่สำเร็จ");
+    } catch { setCloseMsg("ปิดใบไม่สำเร็จ กรุณาลองใหม่"); }
+    finally { setBusy(false); }
+  };
+  const small = touch ? "h-9 px-3 text-[13px]" : "h-7 px-2.5 text-[11px]";
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap">
+        {steps.map((st, i) => {
+          const s = st.state, info = sk[st.key];
+          const bar = s === "done" ? "bg-emerald-500" : s === "skip" ? "bg-[repeating-linear-gradient(45deg,#cbd5e1_0_4px,#f1f5f9_4px_7px)]"
+            : i === cur ? "bg-amber-400" : s === "part" ? "bg-blue-300" : "bg-slate-200";
+          const tip = info ? `ข้ามโดย ${info.by_name ?? "—"}${info.at ? ` · ${formatDateTime(info.at)}` : ""}${info.reason ? ` · เหตุผล: ${info.reason}` : ""}` : undefined;
+          return (
+            <div key={st.key} className="min-w-[7.5rem] flex-1 px-1 text-center" title={tip}>
+              <div className={`my-1.5 h-1.5 rounded-full ${bar} ${pick === st.key ? "ring-2 ring-blue-300" : ""}`} />
+              <div className={`text-[13px] font-semibold ${s === "done" ? "text-emerald-700" : s === "skip" ? "text-slate-400" : i === cur ? "text-amber-700" : "text-slate-500"}`}>{s === "done" ? "✓ " : s === "skip" ? "⏭ " : ""}{st.label}</div>
+              <div className="text-[11px] text-slate-500">{st.sub}</div>
+              {canSkip && s === "skip" && <button type="button" disabled={busy} onClick={() => void send([st.key], false, "")} className={`${small} mt-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50`}>↩ เอาคืน</button>}
+              {canSkip && (s === "todo" || s === "part") && <button type="button" disabled={busy} onClick={() => { setPick(pick === st.key ? null : st.key); setErr(""); setAlsoPrev(true); }} className={`${small} mt-1 rounded-md border ${pick === st.key ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"} disabled:opacity-50`}>⏭ ข้าม</button>}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-slate-500">{cur >= 0 ? <>ค้างอยู่ที่ <b className="text-amber-700">{steps[cur].label}</b></> : "ครบทุกขั้นแล้ว"}{age != null ? ` · ใบนี้สร้างมา ${fmt(age)} วัน` : ""}{canSkip && cur >= 0 ? " · แอดมินกด ⏭ ข้าม ได้ (เอาคืนได้ทุกเมื่อ)" : ""}</p>
+
+      {pick && (
+        <div className={`max-w-2xl rounded-xl border bg-white p-3 ${careful ? "border-amber-300" : "border-slate-200"}`}>
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <span className="text-[13px] font-semibold text-slate-800">ข้ามขั้น &quot;{MO_SKIP_META[pick].label}&quot; ?</span>
+            <span className={`rounded-full px-2 py-0.5 text-[10px] ${careful ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700"}`}>{careful ? "ระวัง — กระทบค่าแรง/สต๊อก" : "ปลอดภัย — กระทบแค่ตัวเลขบนจอ"}</span>
+          </div>
+          {willSkip.map((s) => (
+            <div key={s} className="mb-1">
+              {willSkip.length > 1 && <div className="text-[11px] font-semibold text-slate-500">{MO_SKIP_META[s].label}</div>}
+              {MO_SKIP_META[s].impacts.map((t) => <div key={t} className="flex gap-1.5 text-[12px] text-slate-600"><span className="text-slate-300">•</span><span>{t}</span></div>)}
+            </div>
+          ))}
+          {prevList.length > 0 && (
+            <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-[12px] text-slate-700">
+              <input type="checkbox" checked={alsoPrev} onChange={(e) => setAlsoPrev(e.target.checked)} className="h-4 w-4 accent-blue-600" />
+              ข้ามขั้นก่อนหน้าด้วย ({prevList.map((s) => MO_SKIP_META[s].label).join(", ")})
+            </label>
+          )}
+          <input value={reason} onChange={(e) => { setReason(e.target.value); setErr(""); }} placeholder={needReason ? "เหตุผล (ต้องใส่) เช่น ผลิตเสร็จนอกระบบแล้ว" : "เหตุผล (ถ้ามี)"}
+            className="mt-2 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm" />
+          {err && <p className="mt-1 text-[12px] text-rose-600">{err}</p>}
+          <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
+            <span className="mr-auto text-[11px] text-slate-400">เก็บว่าใครข้าม เมื่อไหร่ เหตุผลอะไร · ไม่ลบข้อมูลเดิม → กด ↩ เอาคืน ได้</span>
+            <button type="button" onClick={() => { setPick(null); setErr(""); }} className={`${small} rounded-lg border border-slate-200 bg-white text-slate-600`}>ยกเลิก</button>
+            <button type="button" disabled={busy} onClick={confirmSkip} className={`${small} rounded-lg bg-slate-800 font-medium text-white hover:bg-slate-700 disabled:opacity-50`}>{busy ? "กำลังบันทึก…" : willSkip.length > 1 ? `ยืนยันข้าม ${willSkip.length} ขั้น` : "ยืนยันข้าม"}</button>
+          </div>
+        </div>
+      )}
+      {!pick && err && <p className="text-[12px] text-rose-600">{err}</p>}
+      {canSkip && cur < 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" disabled={busy} onClick={() => void closeMo()} className={`${small} rounded-lg bg-emerald-600 font-medium text-white hover:bg-emerald-700 disabled:opacity-50`}>🏁 ปิดใบนี้</button>
+          <span className="text-[11px] text-slate-500">{closeMsg || "ครบ/ข้ามทุกขั้นแล้ว — ปิดใบแล้วจะหายจากบอร์ดและหน้าขอซื้อ"}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function PendDetail(p: {
   m: PendMoLite; pane: PendPane; onPane: (pane: PendPane) => void; onClose: () => void;
   touch: boolean; canEdit: boolean; canSeeMoney: boolean;
+  /** แอดมิน: ข้าม/เอาคืนขั้นตอน + ปิดใบ ในแผง 🚦 ความคืบหน้า */
+  canSkip?: boolean; onSkipped?: () => void;
   prog?: MoProgress; received: number; wos: WorkOrder[]; plans: PlanLite[]; groupName: string | null;
   rate: number; valueNode?: ReactNode;
   prefs: DetailPrefs; onPrefs: (next: DetailPrefs) => void;
@@ -493,34 +603,7 @@ export function PendDetail(p: {
         </div>
       );
       case "prep": return <PrepPane moId={m.id} canEdit={canEdit} onChanged={p.onChanged} />;
-      case "stage": {
-        type S = "done" | "part" | "todo" | "na";
-        const lv = (a: number, b: number): S => (a >= b ? "done" : a > 0 ? "part" : "todo");
-        const steps: [string, S, string][] = [
-          ["ซื้อของ", prog ? (prog.buy + prog.requested + prog.ordered === 0 ? "done" : prog.total - prog.buy > 0 ? "part" : "todo") : "na",
-            prog ? `ต้องซื้อ ${prog.buy} · รออนุมัติ ${prog.requested} · รอของ ${prog.ordered} · ครบ ${prog.done}/${prog.total}` : "ยังไม่มีสูตร"],
-          ["เตรียม", m.has_bom ? lv(m.prep_ready, m.prep_total) : "na", m.has_bom ? `${m.prep_ready}/${m.prep_total}` : "—"],
-          ["ตัด", m.has_bom ? lv(m.cut_ready, m.cut_total) : "na", m.has_bom ? (m.cut_total > 0 ? `${m.cut_ready}/${m.cut_total}` : "ไม่มีชิ้นต้องตัด") : "—"],
-          ["จ่ายงาน", m.remaining <= 0.0001 ? "done" : m.dispatched > 0 ? "part" : "todo", `${fmt(m.dispatched)}/${fmt(m.qty)} ชิ้น`],
-          ["รับคืน", p.received > 0 && p.received >= m.qty - 0.0001 ? "done" : p.received > 0 ? "part" : "todo", `${fmt(p.received)}/${fmt(m.qty)} ชิ้น`],
-        ];
-        const cur = steps.findIndex(([, s]) => s === "todo" || s === "part");
-        const age = m.created_at ? Math.max(0, Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86400000)) : null;
-        return (
-          <div className="space-y-2">
-            <div className="flex flex-wrap">
-              {steps.map(([label, s, sub], i) => (
-                <div key={label} className="min-w-[7.5rem] flex-1 px-1 text-center">
-                  <div className={`my-1.5 h-1.5 rounded-full ${s === "done" ? "bg-emerald-500" : i === cur ? "bg-amber-400" : s === "part" ? "bg-blue-300" : "bg-slate-200"}`} />
-                  <div className={`text-[13px] font-semibold ${s === "done" ? "text-emerald-700" : i === cur ? "text-amber-700" : "text-slate-500"}`}>{s === "done" ? "✓ " : ""}{label}</div>
-                  <div className="text-[11px] text-slate-500">{sub}</div>
-                </div>
-              ))}
-            </div>
-            <p className="text-[11px] text-slate-500">{cur >= 0 ? <>ค้างอยู่ที่ <b className="text-amber-700">{steps[cur][0]}</b></> : "ครบทุกขั้นแล้ว"}{age != null ? ` · ใบนี้สร้างมา ${fmt(age)} วัน` : ""}</p>
-          </div>
-        );
-      }
+      case "stage": return <StagePane m={m} prog={prog} received={p.received} touch={touch} canSkip={!!p.canSkip} onSkipped={p.onSkipped ?? p.onChanged} />;
       case "dispatch": return (
         <div className="space-y-2">
           <p className="text-[12px] text-slate-600">ทั้งใบ <b>{fmt(m.qty)}</b> ชิ้น · จ่ายแล้ว {fmt(m.dispatched)} · <b className="text-rose-600">เหลือ {fmt(m.remaining)}</b> · รับคืนแล้ว {fmt(p.received)}</p>

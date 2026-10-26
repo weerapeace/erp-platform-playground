@@ -36,6 +36,7 @@ export function MoProgressBar({ counts, className }: { counts: number[]; classNa
 export function MoProgressCell({ p, loading }: { p: MoProgress | null | undefined; loading?: boolean }) {
   if (loading) return <span className="text-[11px] text-slate-300">กำลังโหลด…</span>;
   if (!p || p.total === 0) return <span className="text-[11px] text-slate-400">— ยังไม่มีสูตร —</span>;
+  if (p.skipped) return <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 whitespace-nowrap" title="แอดมินข้ามขั้นซื้อของแล้ว (เอาคืนได้ในแผงความคืบหน้า)">⏭ ข้ามซื้อของ</span>;
   if (p.buy + p.requested + p.ordered === 0) {
     return <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 whitespace-nowrap">✓ ของครบ {p.total} รายการ</span>;
   }

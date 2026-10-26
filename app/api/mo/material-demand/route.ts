@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { parseSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -59,9 +60,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // เอาเฉพาะใบสั่งผลิตที่ยังไม่จบ
   const moNos = [...new Set(sumList.map((s) => String(s.mo_no)))];
   const { data: mos } = await admin.from("manufacturing_orders")
-    .select("id, mo_no, qty, product_sku, product_name, due_date")
+    .select("id, mo_no, qty, product_sku, product_name, due_date, skipped_stages")
     .in("mo_no", moNos).eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000);
-  const moByNo = new Map(((mos ?? []) as Record<string, unknown>[]).map((m) => [String(m.mo_no), m]));
+  // ใบที่แอดมินข้ามขั้น "ซื้อของ" (lib/mo-skip) = ไม่รอวัตถุดิบแล้ว → ไม่นับ
+  const moByNo = new Map(((mos ?? []) as Record<string, unknown>[]).filter((m) => !parseSkipped(m.skipped_stages).buy).map((m) => [String(m.mo_no), m]));
 
   // รูปสินค้าของใบงาน
   const prodCodes = [...new Set([...moByNo.values()].map((m) => String(m.product_sku ?? "").trim()).filter(Boolean))];

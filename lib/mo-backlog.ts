@@ -26,6 +26,8 @@ export type MoBacklogRow = {
   dispatched: number;
   received: number;
   open_work_orders: number;
+  /** แอดมินข้ามขั้น "รับคืน" แล้ว (lib/mo-skip) → ปิดงานได้โดยไม่ต้องรับคืนครบ */
+  receive_skipped?: boolean;
   last_dispatch_date: string | null;
   has_bom: boolean;
   prep_total: number; prep_ready: number;

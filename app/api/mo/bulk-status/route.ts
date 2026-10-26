@@ -16,6 +16,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAuditMany } from "@/lib/audit";
 import { checkMoTransition, MO_ACTION_META, type MoBulkStatusAction } from "@/lib/mo-workflow";
+import { parseSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const chunks: string[][] = [];
   for (let i = 0; i < ids.length; i += 200) chunks.push(ids.slice(i, i + 200));
   const moParts = await Promise.all(chunks.map((c) =>
-    admin.from("manufacturing_orders").select("id, mo_no, status, qty, is_active").in("id", c)));
+    admin.from("manufacturing_orders").select("id, mo_no, status, qty, is_active, skipped_stages").in("id", c)));
   const mos = moParts.flatMap((p) => (p.data ?? []) as Row[]).filter((m) => m.is_active !== false);
   const moNos = [...new Set(mos.map((m) => String(m.mo_no)).filter(Boolean))];
 
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const okMos: Row[] = [];
   for (const m of mos) {
     const f = facts.get(String(m.mo_no)) ?? { disp: 0, recv: 0, open: 0 };
-    const why = checkMoTransition(action, { status: (m.status as string) ?? null, qty: n(m.qty), dispatched: f.disp, received: f.recv, openWorkOrders: f.open });
+    const why = checkMoTransition(action, { status: (m.status as string) ?? null, qty: n(m.qty), dispatched: f.disp, received: f.recv, openWorkOrders: f.open, receiveSkipped: !!parseSkipped(m.skipped_stages).receive });
     if (why) skipped.push({ id: String(m.id), mo_no: String(m.mo_no), reason: why });
     else okMos.push(m);
   }

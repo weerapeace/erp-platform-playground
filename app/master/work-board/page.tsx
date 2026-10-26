@@ -20,6 +20,8 @@ import { formatDateTime } from "@/lib/date";
 import { MoProgressCell } from "@/components/mo-material-progress";
 import { PendDetail, CELL_PANE, HistTab, DETAIL_PREFS_DEFAULT, parseDetailPrefs, type PendPane } from "./pend-detail";
 import { useUserPref } from "@/lib/use-user-pref";
+import type { MoSkipped } from "@/lib/mo-skip";
+import { moSteps, currentStep } from "./mo-steps";
 import { DeviceIframePreview, IPAD_SIZE, useCanPreviewDevice } from "@/components/device-view";
 import { useTableDisplay } from "./table-display";
 import { TableDisplayPanel } from "./table-display-panel";
@@ -88,6 +90,7 @@ type PendingMO = {
   created_at?: string | null;   // เวลาที่สร้างใบงานในระบบ — โชว์หัวป๊อปเช็กลิสต์
   brand_oem?: boolean;          // แบรนด์รับจ้างผลิต (OEM)
   issue_count?: number;         // ปัญหาที่แจ้งไว้ (เฉพาะใบรอจ่าย)
+  skipped_stages?: MoSkipped;   // ขั้นที่แอดมินข้าม (ป้าย) — กติกาที่ lib/mo-skip
 };
 type MatRow = { id: string; component_sku: string | null; component_name: string | null; required_qty: number; uom: string | null; is_ready: boolean; cut_done: boolean; needs_cut: boolean };
 // แถวรายบล็อกสำหรับ "หน้าตัด" — มาจาก mo_materials โดยตรง (1 แถว = 1 บล็อกตัด) ติ๊กตัดครบรายบล็อกได้
@@ -3155,11 +3158,14 @@ const DueCell = ({ d }: { d: string | null }) => (
 
 // ---- ขั้นตอนของใบรอจ่าย (ตาราง) — ซื้อของ → เตรียม/ตัด → พร้อมจ่าย · ใช้จัดกลุ่ม + เรียง ----
 // p = ความคืบหน้าการซื้อจาก /api/mo/material-progress (ไม่มี = ใบยังไม่มีสูตร หรือยังโหลดไม่เสร็จ)
-type MoStage = "buy" | "wait" | "prep" | "ready" | "nobom";
+type MoStage = "buy" | "wait" | "prep" | "ready" | "nobom" | "skipdisp" | "close";
 const STAGE_META: Record<MoStage, [string, number]> = {
   buy: ["🛒 รอซื้อของ", 1], wait: ["🚚 รอของเข้า", 2], prep: ["✂️ รอเตรียม/ตัด", 3], ready: ["✅ พร้อมจ่าย", 4], nobom: ["❔ ยังไม่มีสูตร (BOM)", 5],
+  skipdisp: ["⏭ ข้ามจ่ายงาน · รอรับคืน", 6], close: ["🏁 ครบแล้ว รอปิดใบ", 7],
 };
 const stageOf = (m: PendingMO, p: MoProgress | undefined): MoStage => {
+  // แอดมินข้ามขั้นจ่ายงาน (lib/mo-skip) → ใบยังอยู่ตารางรอจ่าย แต่ขั้นถัดไปคือรับคืน/ปิดใบ
+  if (m.skipped_stages?.dispatch) return m.skipped_stages.receive ? "close" : "skipdisp";
   if (!m.has_bom && !p) return "nobom";
   if (p && p.buy + p.requested > 0) return "buy";
   if (p && p.ordered > 0) return "wait";
@@ -3181,7 +3187,7 @@ const ymdDiff = (from: string, to: string) => {
 function StageText({ m, p, late, pill }: { m: PendingMO; p: MoProgress | undefined; late: number; pill?: boolean }) {
   const st = stageOf(m, p);
   const [label] = STAGE_META[st];
-  const tone = st === "buy" ? "rose" : st === "wait" ? "blue" : st === "prep" ? "amber" : st === "ready" ? "emerald" : "slate";
+  const tone = st === "buy" ? "rose" : st === "wait" ? "blue" : st === "prep" ? "amber" : st === "ready" || st === "close" ? "emerald" : "slate";
   const toneCls: Record<string, string> = { rose: "bg-rose-50 text-rose-700", blue: "bg-blue-50 text-blue-700", amber: "bg-amber-50 text-amber-700", emerald: "bg-emerald-50 text-emerald-700", slate: "bg-slate-100 text-slate-600" };
   const txtCls: Record<string, string> = { rose: "text-rose-700", blue: "text-blue-700", amber: "text-amber-700", emerald: "text-emerald-700", slate: "text-slate-500" };
   const detail = st === "buy" && p ? `ต้องซื้อ ${p.buy}${p.requested ? ` · รออนุมัติ ${p.requested}` : ""}`
@@ -3201,6 +3207,7 @@ function StageText({ m, p, late, pill }: { m: PendingMO; p: MoProgress | undefin
 function BuyText({ p, loading }: { p: MoProgress | undefined; loading: boolean }) {
   if (loading) return <span className="text-[11px] text-slate-300">กำลังโหลด…</span>;
   if (!p || p.total === 0) return <span className="text-[12px] text-slate-400">— ยังไม่มีสูตร —</span>;
+  if (p.skipped) return <span className="text-slate-500 font-medium whitespace-nowrap" title="แอดมินข้ามขั้นซื้อของแล้ว">⏭ ข้ามซื้อของ</span>;
   if (p.buy > 0) return <span className="text-rose-600 font-medium whitespace-nowrap">ต้องซื้อ {p.buy} อย่าง</span>;
   if (p.requested > 0) return <span className="text-amber-600 font-medium whitespace-nowrap">รออนุมัติ {p.requested} อย่าง</span>;
   if (p.ordered > 0) return <span className="text-blue-600 font-medium whitespace-nowrap">รอของ {p.ordered} อย่าง</span>;
@@ -3223,29 +3230,22 @@ const PrepBar = ({ label, a, b }: { label: string; a: number; b: number }) => {
 
 /** จุดขั้นตอน ซื้อ → เตรียม → ตัด → จ่าย → รับคืน · เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน · เส้นประ = ไม่มีข้อมูล */
 function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefined; received: number }) {
-  type S = "done" | "part" | "todo" | "na";
-  const lv = (a: number, b: number): S => (a >= b ? "done" : a > 0 ? "part" : "todo");
-  const steps: [string, S, string][] = [
-    ["ซื้อ", p ? (p.buy + p.requested + p.ordered === 0 ? "done" : p.total - p.buy > 0 ? "part" : "todo") : "na",
-      p ? `ซื้อของ: ต้องซื้อ ${p.buy} · รออนุมัติ ${p.requested} · รอของ ${p.ordered} · ครบ ${p.done}/${p.total}` : "ซื้อของ: ใบนี้ยังไม่มีสูตร"],
-    ["เตรียม", m.has_bom ? lv(m.prep_ready, m.prep_total) : m.prep_done ? "done" : "todo", m.has_bom ? `เตรียมแล้ว ${m.prep_ready}/${m.prep_total}` : "เตรียมของ"],
-    ["ตัด", m.has_bom ? lv(m.cut_ready, m.cut_total) : m.cut_done ? "done" : "todo", m.has_bom ? (m.cut_total > 0 ? `ตัดแล้ว ${m.cut_ready}/${m.cut_total}` : "ไม่มีชิ้นต้องตัด") : "ตัด"],
-    ["จ่าย", m.remaining <= 0.0001 ? "done" : m.dispatched > 0 ? "part" : "todo", `จ่ายงานแล้ว ${fmt(m.dispatched)}/${fmt(m.qty)}`],
-    ["รับคืน", received > 0 && received >= (m.qty || 0) - 0.0001 ? "done" : received > 0 ? "part" : "todo", `รับงานคืนแล้ว ${fmt(received)}/${fmt(m.qty)}`],
-  ];
-  const cur = steps.findIndex(([, s]) => s === "todo" || s === "part");
+  const steps = moSteps(m, p, received);   // คิดที่เดียวกับแผง 🚦 ความคืบหน้า (mo-steps.ts)
+  const cur = currentStep(steps);
   return (
     <div className="flex">
-      {steps.map(([label, s, tip], i) => {
+      {steps.map((st, i) => {
+        const s = st.state;
         const dot = s === "done" ? "bg-emerald-500"
+          : s === "skip" ? "bg-slate-300"
           : s === "na" ? "border border-dashed border-slate-300"
           : i === cur ? `border-2 border-amber-500 ${s === "part" ? "bg-amber-200" : ""}`
           : s === "part" ? "border-2 border-blue-400 bg-blue-100" : "border border-slate-300";
-        const txt = s === "done" ? "text-emerald-600" : i === cur ? "text-amber-600 font-medium" : "text-slate-400";
+        const txt = s === "done" ? "text-emerald-600" : s === "skip" ? "text-slate-400 line-through" : i === cur ? "text-amber-600 font-medium" : "text-slate-400";
         return (
-          <span key={label} title={tip} className="flex flex-col items-center gap-0.5 w-[2.3rem] shrink-0">
+          <span key={st.key} title={`${st.label}: ${st.sub}`} className="flex flex-col items-center gap-0.5 w-[2.3rem] shrink-0">
             <span className={`h-2.5 w-2.5 rounded-full box-border ${dot}`} />
-            <span className={`text-[10px] leading-none ${txt}`}>{label}</span>
+            <span className={`text-[10px] leading-none ${txt}`}>{st.short}</span>
           </span>
         );
       })}
@@ -3344,6 +3344,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   }, [sel.size, toggleSel, dc.expand, onOpenMO, showPane]);
   // ช่อง "ซื้อของ" + จุดขั้นตอน — ความคืบหน้าการซื้อทุกใบในคำขอเดียว (กติกาเดียวกับหน้าขอซื้อ → ตัวเลขตรงกัน)
   const [prog, setProg] = useState<MoProgressResult | null>(null);
+  const [progTick, setProgTick] = useState(0);   // บังคับโหลดใหม่ (เช่น หลังแอดมินข้าม/เอาคืนขั้นซื้อของ)
   const pendKey = pending.map((m) => m.mo_no).join(",");
   useEffect(() => {
     let cancel = false;
@@ -3352,7 +3353,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       catch { if (!cancel) setProg((p) => p ?? {}); }
     })();
     return () => { cancel = true; };
-  }, [pendKey]);
+  }, [pendKey, progTick]);
   // รับงานคืนแล้วเท่าไหร่ต่อใบ (รวมจากใบจ่ายงานทุกใบของใบสั่งผลิตนั้น)
   const recvByMo = useMemo(() => {
     const m = new Map<string, number>();
@@ -3669,7 +3670,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       </div> },
     { key: "prep", header: "เตรียม / ตัด", group: "ผลิต", defaultHidden: hid("prep"), width: "7.5rem", sortValue: (m) => (m.prep_total > 0 ? m.prep_ready / m.prep_total : -1), sortLabel: "ความคืบหน้าเตรียม",
       cell: (m) => m.has_bom
-        ? <div className="space-y-1"><PrepBar label="เตรียม" a={m.prep_ready} b={m.prep_total} /><PrepBar label="ตัด" a={m.cut_ready} b={m.cut_total} /></div>
+        ? <div className="space-y-1"><PrepBar label={m.skipped_stages?.prep ? "⏭ เตรียม" : "เตรียม"} a={m.prep_ready} b={m.prep_total} /><PrepBar label={m.skipped_stages?.cut ? "⏭ ตัด" : "ตัด"} a={m.cut_ready} b={m.cut_total} /></div>
         : <span className="text-[11px] text-slate-400">{m.ready ? "พร้อม ✓" : "— ไม่มีสูตร —"}</span> },
     { key: "buy", header: "🛒 ซื้อของ", group: "ซื้อของ", defaultHidden: hid("buy"), width: "minmax(8.5rem,1fr)", sortLabel: "ของที่ยังต้องซื้อ",
       sortValue: (m) => { const p = prog?.[m.mo_no]; return p ? p.buy * 10000 + p.requested * 100 + p.ordered : -1; },
@@ -3679,6 +3680,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       sortValue: (m) => { const p = prog?.[m.mo_no]; return !p ? "9999" : p.buy + p.requested > 0 ? "8888" : p.ordered === 0 ? "0000" : p.eta ?? "7777"; },
       cell: (m) => { const p = prog?.[m.mo_no];
         if (!p) return <span className="text-slate-300">—</span>;
+        if (p.skipped) return <span className="text-[11px] text-slate-500">⏭ ข้ามซื้อของ</span>;
         if (p.buy + p.requested > 0) return <span className="text-[11px] text-rose-600">ยังสั่งไม่ครบ</span>;
         if (p.ordered === 0) return <span className="text-[11px] text-emerald-600">✓ ครบแล้ว</span>;
         return <div className="leading-tight text-[12px]">
@@ -3764,7 +3766,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   // แถวที่กางออก = แผงรายละเอียด 8 แท็บ (./pend-detail) — เปิดที่แท็บของช่องที่กด
   const renderPendDetail = (m: PendingMO) => (
     <PendDetail m={m} pane={openPane[m.id] ?? "job"} onPane={(pane) => setOpenPane((prev) => ({ ...prev, [m.id]: pane }))} onClose={() => showPane(m.id, null)}
-      touch={touch} canEdit={canEdit} canSeeMoney={canSeeMoney} prefs={detailPrefs} onPrefs={setDetailPrefs} prog={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0}
+      touch={touch} canEdit={canEdit} canSeeMoney={canSeeMoney} canSkip={canSeeMoney} onSkipped={() => { setProgTick((t) => t + 1); onReload?.(); }} prefs={detailPrefs} onPrefs={setDetailPrefs} prog={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0}
       wos={workOrders.filter((w) => w.mo_no === m.mo_no)} plans={deliveryPlans.filter((p) => p.mo_id === m.id)}
       groupName={groupNameOf(m.mo_no)} rate={rateOf(m)} valueNode={canSeeMoney ? valueCell(m) : undefined}
       onOpenChecklist={() => onOpenMO(m)}

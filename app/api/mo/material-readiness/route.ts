@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { parseSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,9 +58,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const { data: mos } = await admin.from("manufacturing_orders")
-    .select("id, mo_no, qty, product_sku, product_name, due_date, status")
+    .select("id, mo_no, qty, product_sku, product_name, due_date, status, skipped_stages")
     .eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000);
-  const moList = (mos ?? []) as Record<string, unknown>[];
+  // ใบที่แอดมินข้ามขั้น "ซื้อของ" (lib/mo-skip) = ไม่ต้องเตรียมของซื้อแล้ว → ไม่นับ
+  const moList = ((mos ?? []) as Record<string, unknown>[]).filter((m) => !parseSkipped(m.skipped_stages).buy);
   if (moList.length === 0) {
     return NextResponse.json({ summary: { total: 0, ready: 0, preparing: 0, waiting: 0, blocked: 0, no_bom: 0 }, mos: [], missing: [], error: null });
   }
