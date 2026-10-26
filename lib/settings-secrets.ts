@@ -12,7 +12,7 @@ type Row = Record<string, unknown>;
 
 // ตาราง → คอลัมน์ชื่อคีย์ / คอลัมน์ค่า (jsonb) / คีย์ไหนมีความลับอะไรบ้าง
 const SECRET_TABLES: Record<string, { keyCol: string; valCol: string; secrets: Record<string, string[]> }> = {
-  china_app_settings: { keyCol: "skey", valCol: "sval", secrets: { line_config: ["token", "channel_secret"] } },
+  china_app_settings: { keyCol: "skey", valCol: "sval", secrets: { line_config: ["token", "channel_secret"], web_push: ["vapid_private"] } },
 };
 
 export const SECRET_MASK = "••••";

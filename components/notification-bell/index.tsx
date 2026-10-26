@@ -18,7 +18,7 @@ const EVENT_ICON: Record<string, string> = {
   "pr.cancelled": "⊘",
 };
 
-function relTime(iso: string): string {
+export function relTime(iso: string): string {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
   if (diff < 60)    return "เมื่อสักครู่";
   if (diff < 3600)  return `${Math.floor(diff/60)} นาทีที่แล้ว`;
@@ -179,7 +179,8 @@ export function NotificationBell() {
           <div className="px-4 py-2 bg-slate-50 border-t border-slate-100 flex items-center justify-between">
             <Link href="/dashboard" onClick={() => setOpen(false)}
               className="text-xs font-medium text-blue-600 hover:underline">ดูงานทั้งหมด →</Link>
-            <span className="text-[10px] text-slate-400">โพลทุก 30 วินาที</span>
+            <Link href="/notify" onClick={() => setOpen(false)} title="ติดตั้งแอปแจ้งเตือนบนมือถือ · เด้งเตือนเข้าเครื่อง"
+              className="text-xs font-medium text-slate-500 hover:text-blue-600 hover:underline">📱 แอปแจ้งเตือนบนมือถือ</Link>
           </div>
         </div>
       )}
