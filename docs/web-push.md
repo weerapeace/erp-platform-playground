@@ -26,7 +26,7 @@
 | `components/web-push` | `useWebPush()` เปิด/ปิดรับบนเครื่องนี้ · ต่ออายุทุกครั้งที่เปิดแอป |
 | `app/notify/*` | แอปมือถือ (รายการ / เปิดดูเรื่องในกรอบ `?embed=1` / ตั้งค่า) |
 | `public/notify-sw.js` | service worker (scope `/notify` · ไม่มี fetch handler = ไม่ยุ่งกับหน้าอื่น) |
-| `public/notify.webmanifest` | ข้อมูลติดตั้งแอป (scope `/` ให้หน้า login/หน้าเรื่องอยู่ในแอปเดียวกัน) |
+| `public/notify.webmanifest` | ข้อมูลติดตั้งแอป (scope `/` ให้หน้า login/หน้าเรื่องอยู่ในแอปเดียวกัน) · ⚠️ ผูกที่ `app/notify/page.tsx` (ตั้งใน layout ระดับแรกจะโดน manifest กลางทับ) |
 | `app/api/push/subscriptions` | GET/POST/DELETE เครื่องของตัวเอง (audit `push_subscription`) |
 | `app/api/push/dispatch` | ให้ trigger เรียก (โทเคน Vault) |
 | `app/api/push/test` | ปุ่ม "ส่งแจ้งเตือนทดสอบ" (ถึงตัวเองเท่านั้น · event `push.test` ปิดไม่ได้) |
