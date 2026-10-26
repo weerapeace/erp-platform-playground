@@ -23,6 +23,8 @@ import { ColorInput } from "@/components/color-picker";
 import { uploadResizedImage } from "@/components/image-attach";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { menuVisibleTo } from "@/lib/menu-audience";
+import { buildOrbitApps, type OrbitApp } from "@/lib/app-orbit";
+import { AppOrbit } from "@/components/app-orbit";
 
 // ธีมหน้าแรกรายคน (เก็บใน user_ui_prefs key=launcher_theme)
 type LauncherTheme = { bg: string | null; bgGradient: { from: string; to: string } | null; bgImage: string | null; accent: string | null; font: string | null };
@@ -55,6 +57,7 @@ type LauncherPrefs = {
   icons: Record<string, string>;          // ไอคอนเฉพาะตัวเรา (appKey → emoji)
   iconImages: Record<string, string>;     // ไอคอนรูปภาพเฉพาะตัวเรา (appKey → r2 key) — มีรูปใช้รูปแทน emoji
   sectionLabels: Record<string, string>;  // ชื่อหมวดเฉพาะตัวเรา (category → ชื่อ)
+  view?: "orbit" | "grid";                // มุมมองหน้าแรก: ◎ วงแอป (ค่าเริ่มต้น) / ▦ ตารางไอคอน
 };
 const EMPTY_PREFS: LauncherPrefs = { favorites: [], hidden: [], appOrder: {}, sectionOrder: [], labels: {}, icons: {}, iconImages: {}, sectionLabels: {} };
 // ชุด emoji ยอดนิยมสำหรับเปลี่ยนไอคอนแอป
@@ -256,6 +259,7 @@ export default function AppLauncherPage() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [menuRows, setMenuRows] = useState<MenuRow[] | null>(null);
   const [appGroups, setAppGroups] = useState<AppGroup[]>([]);   // แอป (ล็อก/ไม่ล็อก) — กรอง tile ตามสิทธิ์เข้าแอป
+  const [appsLoaded, setAppsLoaded] = useState(false);
 
   // จำนวนงานค้างของฉัน (สำหรับการ์ด "งานของฉัน")
   const [pending, setPending] = useState<number | null>(null);
@@ -272,14 +276,17 @@ export default function AppLauncherPage() {
   useEffect(() => {
     let alive = true;
     apiFetch("/api/menu").then((r) => r.json()).then((j) => {
-      if (alive && Array.isArray(j.data)) setMenuRows(j.data as MenuRow[]);
+      if (alive) setMenuRows(Array.isArray(j.data) ? (j.data as MenuRow[]) : []);   // ตอบผิดรูป = ถือว่าว่าง (วงแอปไม่ค้าง "กำลังโหลด")
     }).catch(() => { if (alive) setMenuRows([]); });
     // รายชื่อแอป (+permission_key) — ใช้ซ่อน tile ของแอปที่ถูกล็อกและไม่มีสิทธิ์ (เช่น Payroll สำหรับพนักงาน)
     apiFetch("/api/menu/apps").then((r) => r.json()).then((j) => {
       if (alive && Array.isArray(j.data)) setAppGroups((j.data as AppGroup[]).filter((a) => a.is_active));
-    }).catch(() => { /* โหลดไม่ได้ = ไม่กรองด้วยแอป */ });
+    }).catch(() => { /* โหลดไม่ได้ = ไม่กรองด้วยแอป */ }).finally(() => { if (alive) setAppsLoaded(true); });
     return () => { alive = false; };
   }, []);
+  // แอปที่ใช้ล่าสุด (แท็บแอปของเชลล์จำไว้) → วงแอปเปิดมาที่แอปนั้น
+  const [lastAppKey, setLastAppKey] = useState<string | null>(null);
+  useEffect(() => { try { setLastAppKey(localStorage.getItem("erp-active-app")); } catch { /* ignore */ } }, []);
 
   const appList: AppEntry[] = useMemo(() => {
     if (!menuRows || menuRows.length === 0) return APPS;  // fallback
@@ -337,7 +344,7 @@ export default function AppLauncherPage() {
   useEffect(() => {
     apiFetch("/api/user-prefs?key=launcher_prefs").then((r) => r.json()).then((j) => {
       const v = (j.value ?? {}) as Partial<LauncherPrefs>;
-      setPrefs({ favorites: v.favorites ?? [], hidden: v.hidden ?? [], appOrder: v.appOrder ?? {}, sectionOrder: v.sectionOrder ?? [], labels: v.labels ?? {}, icons: v.icons ?? {}, iconImages: v.iconImages ?? {}, sectionLabels: v.sectionLabels ?? {} });
+      setPrefs({ favorites: v.favorites ?? [], hidden: v.hidden ?? [], appOrder: v.appOrder ?? {}, sectionOrder: v.sectionOrder ?? [], labels: v.labels ?? {}, icons: v.icons ?? {}, iconImages: v.iconImages ?? {}, sectionLabels: v.sectionLabels ?? {}, view: v.view });
     }).catch(() => { /* ใช้ค่าว่าง */ });
   }, []);
   // แก้ prefs + บันทึกขึ้น server ทันที (functional update กัน stale)
@@ -387,6 +394,25 @@ export default function AppLauncherPage() {
     return prefs.favorites.map((k) => byKey.get(k)).filter((a): a is AppEntry => !!a && !prefs.hidden.includes(a.key))
       .map((a) => ({ ...a, name: prefs.labels[a.key] || a.name, icon: prefs.icons[a.key] || a.icon, iconImage: prefs.iconImages[a.key] || null }));
   }, [appList, prefs.favorites, prefs.hidden, prefs.labels, prefs.icons, prefs.iconImages]);
+
+  // ◎ วงแอป — แอป (erp_app_groups) + เมนูในแอป ตามกฎกลาง lib/app-orbit (สิทธิ์/ใครเห็น/ซ่อนต่อแอป เหมือนแถบเมนู)
+  //   + ค่ารายคนของหน้านี้: เมนูที่ซ่อน / ชื่อเล่น / ไอคอน (key = href เหมือนการ์ดตาราง)
+  const orbitApps: OrbitApp[] | null = useMemo(() => {
+    if (menuRows === null || !appsLoaded) return null;
+    return buildOrbitApps(menuRows, appGroups, { can: (p) => can(p as Parameters<typeof can>[0]), user })
+      .map((a) => ({
+        ...a,
+        menus: a.menus.filter((m) => !prefs.hidden.includes(m.href)).map((m) => ({
+          ...m, label: prefs.labels[m.href] || m.label, icon: prefs.icons[m.href] || m.icon, iconUrl: prefs.iconImages[m.href] || m.iconUrl,
+        })),
+      }))
+      .filter((a) => a.menus.length > 0);
+  }, [menuRows, appsLoaded, appGroups, can, user, prefs.hidden, prefs.labels, prefs.icons, prefs.iconImages]);
+  // ทะเบียนเมนู/แอปโหลดไม่ได้ → ใช้ตารางไอคอน (มี fallback ในโค้ด)
+  const orbitUsable = !(menuRows !== null && menuRows.length === 0) && !(appsLoaded && appGroups.length === 0);
+  const view = prefs.view ?? "orbit";
+  const showOrbit = view === "orbit" && !editMode && orbitUsable;
+  const setView = (v: "orbit" | "grid") => mutatePrefs((p) => ({ ...p, view: v }));
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const onSectionDragEnd = (e: DragEndEvent) => {
@@ -450,6 +476,27 @@ export default function AppLauncherPage() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  const myWork = (
+    <Link href="/dashboard"
+      className="group flex items-center gap-4 rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-white px-5 py-4 shadow-sm hover:shadow-md hover:border-blue-300 transition-all">
+      <span className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 text-white text-2xl flex items-center justify-center shrink-0 shadow">🏠</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-base font-bold text-slate-900">งานของฉัน</span>
+          {pending !== null && pending > 0 && (
+            <span className="text-[11px] font-semibold text-white bg-red-500 px-2 py-0.5 rounded-full">{pending} งานค้าง</span>
+          )}
+        </div>
+        <p className="text-xs text-slate-500 mt-0.5 truncate">
+          {pending === null ? "สรุปงานที่มอบหมายให้คุณ + ภาพรวมทีม"
+            : pending > 0 ? `คุณมีงานค้าง ${pending} รายการ — คลิกเพื่อดูและจัดการ`
+            : "ไม่มีงานค้าง เยี่ยมมาก! 🎉 — คลิกดูภาพรวม"}
+        </p>
+      </div>
+      <span className="text-blue-500 text-lg shrink-0 group-hover:translate-x-0.5 transition-transform">→</span>
+    </Link>
+  );
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30"
@@ -523,8 +570,8 @@ export default function AppLauncherPage() {
         </div>
       </header>
 
-      {/* ============= Hero / Greeting ============= */}
-      <section className="max-w-7xl mx-auto px-6 pt-12 pb-6">
+      {/* ============= Hero / Greeting (วงแอปมีทักทาย+ค้นหาในแผงกลางเอง) ============= */}
+      {!showOrbit && <section className="max-w-7xl mx-auto px-6 pt-12 pb-6">
         <div className="text-center">
           <h1 className="text-3xl sm:text-4xl font-bold text-slate-900" style={accent ? { color: accent } : undefined}>
             {greeting}{user?.name ? `, ${user.name}` : ""} 👋
@@ -562,35 +609,24 @@ export default function AppLauncherPage() {
             )}
           </div>
         </div>
-      </section>
+      </section>}
 
-      {/* ============= งานของฉัน (การ์ดเด่น → Dashboard) ============= */}
-      <section className="max-w-7xl mx-auto px-6 pb-2">
-        <Link href="/dashboard"
-          className="group flex items-center gap-4 rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-white px-5 py-4 shadow-sm hover:shadow-md hover:border-blue-300 transition-all">
-          <span className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 text-white text-2xl flex items-center justify-center shrink-0 shadow">🏠</span>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-base font-bold text-slate-900">งานของฉัน</span>
-              {pending !== null && pending > 0 && (
-                <span className="text-[11px] font-semibold text-white bg-red-500 px-2 py-0.5 rounded-full">{pending} งานค้าง</span>
-              )}
-            </div>
-            <p className="text-xs text-slate-500 mt-0.5 truncate">
-              {pending === null ? "สรุปงานที่มอบหมายให้คุณ + ภาพรวมทีม"
-                : pending > 0 ? `คุณมีงานค้าง ${pending} รายการ — คลิกเพื่อดูและจัดการ`
-                : "ไม่มีงานค้าง เยี่ยมมาก! 🎉 — คลิกดูภาพรวม"}
-            </p>
-          </div>
-          <span className="text-blue-500 text-lg shrink-0 group-hover:translate-x-0.5 transition-transform">→</span>
-        </Link>
-      </section>
+      {/* ============= งานของฉัน (การ์ดเด่น → Dashboard) — วงแอป: ย้ายไปใต้วง ============= */}
+      {!showOrbit && <section className="max-w-7xl mx-auto px-6 pb-2">{myWork}</section>}
 
-      {/* ============= App grid (grouped) ============= */}
       <main className="max-w-7xl mx-auto px-6 pb-16">
-        {/* แถบจัดการ/แต่งหน้าแรก (ซ่อนตอนกำลังค้นหา) */}
-        {!searching && (
-          <div className="flex items-center justify-end gap-2 mb-4">
+        {/* แถบจัดการ/แต่งหน้าแรก (ซ่อนตอนกำลังค้นหาในตารางไอคอน) */}
+        {(showOrbit || !searching) && (
+          <div className={`flex items-center justify-end gap-2 ${showOrbit ? "pt-6 mb-2" : "mb-4"}`}>
+            {/* สลับมุมมอง (จำรายคน) */}
+            {!editMode && orbitUsable && (
+              <div className="mr-auto inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs" role="group" aria-label="มุมมองหน้าแรก">
+                {([["orbit", "◎ วงแอป"], ["grid", "▦ ตารางไอคอน"]] as const).map(([v, label]) => (
+                  <button key={v} type="button" onClick={() => setView(v)} aria-pressed={view === v}
+                    className={`h-7 px-2.5 rounded-md font-medium ${view === v ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+                ))}
+              </div>
+            )}
             {!editMode && (
               <div className="relative">
                 <button type="button" onClick={() => setThemeOpen((o) => !o)} className="h-8 px-3 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🎨 แต่งหน้าแรก</button>
@@ -655,7 +691,26 @@ export default function AppLauncherPage() {
           </div>
         )}
 
-        {searching ? (
+        {showOrbit ? (
+          // ◎ วงแอป (ของกลาง components/app-orbit) + งานของฉัน + โปรด ใต้วง
+          <div className="space-y-8">
+            <AppOrbit apps={orbitApps} query={query} onQueryChange={setQuery} accent={accent} initialKey={lastAppKey}
+              greeting={`${greeting}${user?.name ? `, ${user.name}` : ""} 👋`} />
+            {myWork}
+            {favApps.length > 0 && (
+              <section>
+                <div className="flex items-baseline gap-3 mb-4 px-1">
+                  <h2 className="text-xs font-semibold text-amber-500 uppercase tracking-wider">⭐ โปรด</h2>
+                  <span className="text-[10px] text-slate-400">{favApps.length} แอป</span>
+                  <div className="flex-1 h-px bg-amber-200/70" />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+                  {favApps.map((app) => <AppTile key={app.key} app={app} />)}
+                </div>
+              </section>
+            )}
+          </div>
+        ) : searching ? (
           grouped.length === 0 ? (
             <div className="text-center py-16">
               <div className="text-5xl mb-3 opacity-40">🔍</div>

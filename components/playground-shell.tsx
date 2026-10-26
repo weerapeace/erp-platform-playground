@@ -24,6 +24,7 @@ import { DevicePreviewButton } from "@/components/device-preview";
 import { cachedGetJson } from "@/lib/shell-cache";
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { menuPlace, type AppMenuOverride } from "@/lib/app-menu-layout";
+import { appHomeHref, visibleAppMenus } from "@/lib/app-orbit";
 
 // โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
 // เพิ่ม href ที่นี่เพื่อให้เมนูเปิดแท็บใหม่ + มีไอคอน ↗
@@ -285,14 +286,11 @@ function groupMenuRows(rows: MenuRow[], secMeta?: Map<string, SectionMeta>): Nav
     }));
 }
 
-// route → App สำรอง: สำหรับหน้าจริงที่ลิงก์ไม่ตรงกับ href ในเมนู (เช่น /master/quotations redirect → /quotations)
-// ใช้ตอน sync แถบ App/sidebar ให้ตรงกับหน้าที่เปิด เมื่อหา match จากเมนูไม่เจอ
-// หน้า default ต่อแอป (เปิดหัวเมนูแล้วไปหน้านี้ก่อน แทนเมนูตัวแรกตาม sort_order)
-const APP_DEFAULT_HREF: Record<string, string> = { production: "/master/manufacturing-orders" };
-
 // หน้าที่เปิด "เต็มจอ" อัตโนมัติ (ซ่อน sidebar + แถบ App) — มีปุ่ม toggle กางคืน
 const FOCUS_ROUTES = ["/master/work-board"];
 
+// route → App สำรอง: สำหรับหน้าจริงที่ลิงก์ไม่ตรงกับ href ในเมนู (เช่น /master/quotations redirect → /quotations)
+// ใช้ตอน sync แถบ App/sidebar ให้ตรงกับหน้าที่เปิด เมื่อหา match จากเมนูไม่เจอ
 const ROUTE_APP_FALLBACK: { prefix: string; app: string }[] = [
   { prefix: "/quotations", app: "sales" },
   { prefix: "/sales-orders", app: "sales" },
@@ -488,19 +486,11 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   // หน้าแรกของโมดูลใหญ่ (App) = "หน้าแรก" ที่ตั้งใน ⚙️ ตั้งค่าแอป (erp_app_groups.default_href — ตัวเดียวกับแอปเดี่ยว /app/<key>)
   //   → ไม่ได้ตั้ง/ผู้ใช้ไม่เห็นเมนูนั้น = เมนูย่อยตัวบนสุดของหมวด (ตามลำดับใน /admin/menu)
   //   เดิมไม่อ่าน default_href → กด "จัดซื้อ" เด้งไป SKUs (Master Data) เพราะลำดับ 10 เท่ากับแดชบอร์ด
+  //   กฎเดียวกับปุ่ม "เปิดแอป" ในวงแอป /apps (lib/app-orbit)
   const firstHrefForApp = (key: string): string | null => {
     if (!menuRows) return null;
-    const its = menuRows
-      .filter((r) => r.is_active && r.show_in_sidebar && (r.app_keys ?? []).includes(key)
-        && (!r.permission_key || can(r.permission_key as Parameters<typeof can>[0]))
-        && menuVisibleTo(r.audience, user) && menuPlace(r, key) !== "hidden")
-      .sort((a, b) => a.sort_order - b.sort_order);
-    const home = appGroups.find((a) => a.key === key)?.default_href;
-    if (home && its.some((r) => r.href === home)) return home;
-    // หน้า default ของบางแอป (override ลำดับเมนู) — เช่น เปิด "ผลิต" ให้ไปใบสั่งผลิต (MO) ก่อน
-    const pref = APP_DEFAULT_HREF[key];
-    if (pref && its.some((r) => r.href === pref)) return pref;
-    return its[0]?.href ?? null;
+    const its = visibleAppMenus(menuRows, key, { can: (p) => can(p as Parameters<typeof can>[0]), user });
+    return appHomeHref(its, appGroups.find((a) => a.key === key) ?? { key });
   };
 
   // ซิงก์ App ที่เลือก (หัวบน + sidebar) ให้ตรงกับ "หน้าที่เปิดอยู่" อัตโนมัติ
