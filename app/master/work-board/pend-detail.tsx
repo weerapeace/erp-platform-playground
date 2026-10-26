@@ -12,14 +12,18 @@ import { apiFetch } from "@/lib/api";
 import { formatDate, formatDateTime, todayBangkok, addDaysYmd } from "@/lib/date";
 import { HoverImage } from "@/components/hover-image";
 import { MoShortMaterials } from "@/components/mo-material-progress";
+import { ERPModal } from "@/components/modal";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
 import type { MoProgress } from "@/app/api/mo/material-progress/route";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
+import type { MoCost } from "@/app/api/mo/[id]/cost/route";
+import type { MoIssue } from "@/app/api/mo/issues/route";
+import type { WorkStep } from "@/app/api/bom/work-steps/route";
 
 export type PendPane = "job" | "bom" | "prep" | "stage" | "dispatch" | "due" | "group" | "hist";
 export const PEND_PANES: [PendPane, string][] = [
-  ["job", "📋 รายละเอียดงาน"], ["bom", "🛒 BOM / ซื้อของ"], ["prep", "✂️ เตรียม / ตัด"], ["stage", "🪜 ขั้นตอน"],
+  ["job", "📋 รายละเอียดงาน"], ["bom", "🛒 BOM / ซื้อของ"], ["prep", "✂️ เตรียม / ตัด"], ["stage", "🚦 ความคืบหน้า"],
   ["dispatch", "🚚 จ่ายงาน"], ["due", "📅 กำหนดส่ง"], ["group", "🗂 กลุ่ม"], ["hist", "🕘 ประวัติ"],
 ];
 /** คอลัมน์ → แท็บที่เปิด (ไม่มีในนี้ = กดแล้วไม่กาง เช่น ช่องค่าแรงที่ไว้ดับเบิลคลิกแก้) */
@@ -262,41 +266,183 @@ const Btn = ({ onClick, children, primary, touch }: { onClick: () => void; child
   <button type="button" onClick={onClick}
     className={`${touch ? "h-11 text-sm" : "h-8 text-xs"} rounded-lg px-3 font-medium whitespace-nowrap ${primary ? "bg-slate-800 text-white hover:bg-slate-700" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>{children}</button>
 );
+const Box = ({ title, extra, children }: { title: string; extra?: ReactNode; children: ReactNode }) => (
+  <div className="rounded-xl border border-slate-200 bg-white p-3">
+    <div className="mb-1.5 flex items-center justify-between gap-2"><span className="text-[12px] font-semibold text-slate-700">{title}</span>{extra && <span className="text-[11px] text-slate-400">{extra}</span>}</div>
+    {children}
+  </div>
+);
+
+// ---- กล่องในรายละเอียดงาน: ต้นทุน / ปัญหา / ขั้นตอนงาน (API เดียวกับแท็บในเช็กลิสต์) ----
+function CostBox({ moId, qty, canSeeMoney }: { moId: string; qty: number; canSeeMoney: boolean }) {
+  const [c, setC] = useState<MoCost | null | undefined>(undefined);
+  useEffect(() => {
+    let cancel = false;
+    apiFetch(`/api/mo/${encodeURIComponent(moId)}/cost`).then((r) => r.json())
+      .then((j) => { if (!cancel) setC((j?.data ?? null) as MoCost | null); }).catch(() => { if (!cancel) setC(null); });
+    return () => { cancel = true; };
+  }, [moId]);
+  if (c === undefined) return <Box title="💰 ต้นทุน / ชิ้น"><p className="text-[11px] text-slate-400">กำลังโหลด…</p></Box>;
+  if (c === null) return <Box title="💰 ต้นทุน / ชิ้น"><p className="text-[11px] text-slate-400">โหลดต้นทุนไม่สำเร็จ</p></Box>;
+  const labor = c.est_labor_pp > 0 ? c.est_labor_pp : c.central_rate;
+  const total = (c.material_cost_pp || 0) + (labor || 0);
+  const line = (l: ReactNode, v: ReactNode, cls = "") => <div className={`flex items-center justify-between gap-2 py-0.5 text-[12px] ${cls}`}><span className="text-slate-500">{l}</span><span className="tabular-nums">{v}</span></div>;
+  const profit = c.sell_price - total;
+  return (
+    <Box title="💰 ต้นทุน / ชิ้น" extra={c.materials.length ? `วัตถุดิบ ${c.materials.length} รายการ` : undefined}>
+      {line("วัตถุดิบ", <>฿{fmt(c.material_cost_pp || 0)}{c.missing_price > 0 && <span className="ml-1 text-[10px] text-amber-600">(ไม่มีราคา {c.missing_price})</span>}</>)}
+      {line(c.est_labor_pp > 0 ? "ค่าแรง (ที่ตั้งไว้)" : "ค่าแรง (ราคากลาง)", labor > 0 ? `฿${fmt(labor)}` : <span className="text-slate-400">ยังไม่ใส่</span>)}
+      {line(<b className="text-slate-700">รวม / ชิ้น</b>, <b>฿{fmt(total)}</b>, "border-t border-slate-100 mt-0.5 pt-1")}
+      {line("× จำนวน", `฿${fmt(total * (qty || 0))}`)}
+      {canSeeMoney && (c.sell_price > 0
+        ? <>{line("ราคาขาย / ชิ้น", `฿${fmt(c.sell_price)}`)}{line(<span className={profit >= 0 ? "text-emerald-700" : "text-rose-600"}>กำไร / ชิ้น</span>, <span className={profit >= 0 ? "text-emerald-700" : "text-rose-600"}>฿{fmt(profit)}</span>)}</>
+        : line("ราคาขาย", <span className="text-amber-600">ยังไม่ตั้ง</span>))}
+      {!canSeeMoney && <p className="mt-1 text-[10px] text-slate-400">ราคาขาย/กำไร เห็นเฉพาะผู้บริหาร</p>}
+    </Box>
+  );
+}
+
+const SEV: Record<string, [string, string]> = { low: ["เล็กน้อย", "bg-slate-100 text-slate-600"], medium: ["ปานกลาง", "bg-amber-50 text-amber-700"], high: ["รุนแรง", "bg-rose-50 text-rose-700"] };
+function IssuesBox({ moNo, canEdit }: { moNo: string; canEdit: boolean }) {
+  const [rows, setRows] = useState<MoIssue[] | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [t, setT] = useState(""); const [sev, setSev] = useState("medium"); const [q, setQ] = useState("");
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  useEffect(() => {
+    let cancel = false;
+    apiFetch(`/api/mo/issues?mo_no=${encodeURIComponent(moNo)}`).then((r) => r.json())
+      .then((j) => { if (!cancel) setRows((j?.data ?? []) as MoIssue[]); }).catch(() => { if (!cancel) setRows([]); });
+    return () => { cancel = true; };
+  }, [moNo]);
+  const save = async () => {
+    const dtype = t.trim(); if (!dtype) { setErr("ใส่ว่าเจอปัญหาอะไร"); return; }
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch(`/api/mo/issues`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mo_no: moNo, defect_type: dtype, severity: sev, qty: q || null }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      setRows((rs) => [{ id: String(j.id), defect_no: j.defect_no ?? null, defect_type: dtype, severity: sev, qty: q ? Number(q) : null, cause: null, created_at: new Date().toISOString() }, ...(rs ?? [])]);
+      setT(""); setQ(""); setAdding(false);
+    } catch (e) { setErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Box title="⚠️ ปัญหา" extra={rows ? `${rows.length} เรื่อง` : undefined}>
+      {rows === null ? <p className="text-[11px] text-slate-400">กำลังโหลด…</p>
+        : rows.length === 0 ? <p className="text-[11px] text-slate-400">ยังไม่มีใครแจ้ง</p>
+        : <div className="max-h-40 space-y-1 overflow-y-auto">{rows.map((r) => { const [sl, sc] = SEV[r.severity ?? ""] ?? [r.severity ?? "—", "bg-slate-100 text-slate-600"]; return (
+            <div key={r.id} className="flex items-center gap-1.5 text-[12px]">
+              <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] ${sc}`}>{sl}</span>
+              <span className="min-w-0 flex-1 truncate" title={r.cause ?? ""}>{r.defect_type ?? "—"}</span>
+              <span className="shrink-0 text-[10px] text-slate-400">{r.qty != null ? `${fmt(r.qty)} ชิ้น · ` : ""}{shortDate(r.created_at)}</span>
+            </div>); })}</div>}
+      {canEdit && (adding ? (
+        <div className="mt-2 space-y-1.5">
+          <input value={t} onChange={(e) => setT(e.target.value)} placeholder="เจอปัญหาอะไร เช่น ผ้าไม่ตรงสี" className="h-8 w-full rounded-lg border border-slate-200 px-2 text-sm" autoFocus />
+          <div className="flex gap-1.5">
+            <select value={sev} onChange={(e) => setSev(e.target.value)} className="h-8 rounded-lg border border-slate-200 bg-white px-1.5 text-xs">{Object.entries(SEV).map(([v, [l]]) => <option key={v} value={v}>{l}</option>)}</select>
+            <input type="number" min={0} value={q} onChange={(e) => setQ(e.target.value)} placeholder="กี่ชิ้น" className="h-8 w-20 rounded-lg border border-slate-200 px-2 text-sm" />
+            <button type="button" onClick={() => void save()} disabled={busy} className="h-8 rounded-lg bg-rose-600 px-3 text-xs font-medium text-white hover:bg-rose-700 disabled:opacity-50">{busy ? "…" : "บันทึก"}</button>
+            <button type="button" onClick={() => { setAdding(false); setErr(""); }} className="h-8 rounded-lg border border-slate-200 px-2 text-xs text-slate-500">ยกเลิก</button>
+          </div>
+          {err && <p className="text-[11px] text-rose-600">{err}</p>}
+        </div>
+      ) : <button type="button" onClick={() => setAdding(true)} className="mt-2 h-7 rounded-md border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50">+ แจ้งปัญหา</button>)}
+    </Box>
+  );
+}
+
+function StepsBox({ moId }: { moId: string }) {
+  const [steps, setSteps] = useState<WorkStep[] | null>(null);
+  useEffect(() => {
+    let cancel = false;
+    apiFetch(`/api/bom/work-steps?mo_id=${encodeURIComponent(moId)}`).then((r) => r.json())
+      .then((j) => { if (!cancel) setSteps((j?.data ?? []) as WorkStep[]); }).catch(() => { if (!cancel) setSteps([]); });
+    return () => { cancel = true; };
+  }, [moId]);
+  return (
+    <Box title="🧵 ขั้นตอนงาน" extra={steps ? `${steps.length} ขั้น` : undefined}>
+      {steps === null ? <p className="text-[11px] text-slate-400">กำลังโหลด…</p>
+        : steps.length === 0 ? <p className="text-[11px] text-slate-400">สินค้านี้ยังไม่มีขั้นตอนในสูตร (ตั้งได้ในเช็กลิสต์ แท็บขั้นตอนงาน)</p>
+        : <ol className="max-h-40 space-y-0.5 overflow-y-auto">{[...steps].sort((a, b) => a.sequence - b.sequence).map((s, i) => (
+            <li key={s.id} className="flex items-start gap-1.5 text-[12px]" title={s.instruction ?? ""}>
+              <span className="w-4 shrink-0 text-right text-[11px] text-slate-400">{i + 1}.</span>
+              <span className="min-w-0 flex-1">{s.step_name}</span>
+              {(s.station || s.job_name) && <span className="shrink-0 text-[10px] text-slate-400">{s.station ?? s.job_name}</span>}
+            </li>))}</ol>}
+    </Box>
+  );
+}
+
+/** ตั้งค่ารายละเอียดงาน "ต่อคน" — ปุ่มไหน / กล่องไหน ซ่อนไว้ */
+export type DetailPrefs = { hideBtns: string[]; hideSecs: string[] };
+export const DETAIL_PREFS_DEFAULT: DetailPrefs = { hideBtns: ["printSteps"], hideSecs: [] };
+export const parseDetailPrefs = (v: unknown): DetailPrefs | null => {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const strs = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : []);
+  return { hideBtns: strs(o.hideBtns), hideSecs: strs(o.hideSecs) };
+};
+const DETAIL_BTNS: [string, string][] = [["check", "📋 เปิดเช็กลิสต์เต็ม"], ["print", "🖨 พิมพ์ใบสั่งงาน"], ["printSteps", "🪜 พิมพ์ขั้นตอนงาน"], ["hist", "🕘 ประวัติ"]];
+const DETAIL_SECS: [string, string][] = [["cost", "💰 ต้นทุน"], ["issue", "⚠️ ปัญหา"], ["steps", "🧵 ขั้นตอนงาน"]];
 
 export function PendDetail(p: {
   m: PendMoLite; pane: PendPane; onPane: (pane: PendPane) => void; onClose: () => void;
-  touch: boolean; canEdit: boolean;
+  touch: boolean; canEdit: boolean; canSeeMoney: boolean;
   prog?: MoProgress; received: number; wos: WorkOrder[]; plans: PlanLite[]; groupName: string | null;
   rate: number; valueNode?: ReactNode;
+  prefs: DetailPrefs; onPrefs: (next: DetailPrefs) => void;
   onOpenChecklist: () => void; onDispatch: () => void; onAssignGroup: () => void; onChanged: () => void;
   onSaveDue: (field: "due" | "internal", value: string) => void;
   onAddPlan: (date: string, qty: number, note: string) => Promise<boolean>;
   onDelPlan: (id: string) => Promise<void>;
 }) {
   const { m, pane, touch, canEdit, prog } = p;
+  const [prefsOpen, setPrefsOpen] = useState(false);
+  const [histOpen, setHistOpen] = useState(false);
   const myWos = p.wos.filter((w) => w.is_active !== false);
+  const btnOn = (k: string) => !p.prefs.hideBtns.includes(k);
+  const secOn = (k: string) => !p.prefs.hideSecs.includes(k);
+  const togglePref = (kind: "hideBtns" | "hideSecs", k: string) => {
+    const cur = p.prefs[kind];
+    p.onPrefs({ ...p.prefs, [kind]: cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k] });
+  };
   const body = (() => {
     switch (pane) {
-      case "job": return (
-        <div className="flex flex-wrap gap-4">
-          <HoverImage url={m.image_url} size={touch ? 112 : 96} previewSize={320} />
-          <div className="min-w-[16rem] flex-1 space-y-1 text-[12px] text-slate-600">
-            <div className="text-[15px] font-semibold text-slate-800">{(m.priority ?? 0) >= 2 ? "🔥 " : (m.priority ?? 0) === 1 ? "⭐ " : ""}{m.product_sku} <span className="font-mono text-[11px] font-normal text-slate-400">{m.mo_no}</span></div>
-            {m.product_name && m.product_name !== m.product_sku && <div className="text-slate-500">{m.product_name}</div>}
-            <div>จำนวน <b className="text-slate-800">{fmt(m.qty)}</b> ชิ้น · จ่ายแล้ว {fmt(m.dispatched)} · <b className="text-rose-600">เหลือ {fmt(m.remaining)}</b></div>
-            <div>📦 ส่งลูกค้า {m.due_date ? <>{formatDate(m.due_date)} <DaysTag ymd={m.due_date} /></> : "ยังไม่กำหนด"} · 🪑 ภายใน {m.internal_due_date ? <>{formatDate(m.internal_due_date)} <DaysTag ymd={m.internal_due_date} /></> : "ยังไม่กำหนด"}</div>
-            <div>ค่าแรง {p.rate > 0 ? `฿${fmt(p.rate)}/ชิ้น` : "ยังไม่ใส่"} · กลุ่ม {p.groupName ?? "—"} · แบรนด์ {m.brand ?? "—"}{m.brand_oem ? " (OEM)" : ""}</div>
-            {m.priority_note && <div className="text-amber-700">📌 {m.priority_note}</div>}
-            {(m.issue_count ?? 0) > 0 && <div className="text-rose-600">⚠️ มีปัญหาแจ้งไว้ {m.issue_count} เรื่อง (ดูในเช็กลิสต์ แท็บปัญหา)</div>}
-            {p.valueNode && <div className="flex items-center gap-2">มูลค่า {p.valueNode}</div>}
-            <div className="text-slate-400">สร้างใบ {m.created_at ? formatDateTime(m.created_at) : "—"}</div>
+      case "job": {
+        const secs = DETAIL_SECS.filter(([k]) => secOn(k));
+        const btns = DETAIL_BTNS.filter(([k]) => btnOn(k));
+        return (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-start gap-4">
+              <HoverImage url={m.image_url} size={touch ? 104 : 84} previewSize={320} />
+              <div className="min-w-[16rem] flex-1 space-y-1 text-[12px] text-slate-600">
+                <div className="text-[15px] font-semibold text-slate-800">{(m.priority ?? 0) >= 2 ? "🔥 " : (m.priority ?? 0) === 1 ? "⭐ " : ""}{m.product_sku} <span className="font-mono text-[11px] font-normal text-slate-400">{m.mo_no}</span></div>
+                {m.product_name && m.product_name !== m.product_sku && <div className="text-slate-500">{m.product_name}</div>}
+                <div>จำนวน <b className="text-slate-800">{fmt(m.qty)}</b> ชิ้น · จ่ายแล้ว {fmt(m.dispatched)} · <b className="text-rose-600">เหลือ {fmt(m.remaining)}</b></div>
+                <div>📦 ส่งลูกค้า {m.due_date ? <>{formatDate(m.due_date)} <DaysTag ymd={m.due_date} /></> : "ยังไม่กำหนด"} · 🪑 ภายใน {m.internal_due_date ? <>{formatDate(m.internal_due_date)} <DaysTag ymd={m.internal_due_date} /></> : "ยังไม่กำหนด"}</div>
+                <div>ค่าแรง {p.rate > 0 ? `฿${fmt(p.rate)}/ชิ้น` : "ยังไม่ใส่"} · กลุ่ม {p.groupName ?? "—"} · แบรนด์ {m.brand ?? "—"}{m.brand_oem ? " (OEM)" : ""}</div>
+                {p.valueNode && <div className="flex items-center gap-2">มูลค่า {p.valueNode}</div>}
+                {m.priority_note && <div className="text-amber-700">📌 {m.priority_note}</div>}
+              </div>
+              {btns.length > 0 && (
+                <div className="flex flex-wrap gap-2 sm:flex-col">
+                  {btnOn("check") && <Btn touch={touch} primary onClick={p.onOpenChecklist}>📋 เปิดเช็กลิสต์เต็ม</Btn>}
+                  {btnOn("print") && <Btn touch={touch} onClick={() => window.open(`/print/work-order/${m.id}`, "_blank")}>🖨 พิมพ์ใบสั่งงาน</Btn>}
+                  {btnOn("printSteps") && <Btn touch={touch} onClick={() => window.open(`/print/work-steps/${m.id}`, "_blank")}>🪜 พิมพ์ขั้นตอนงาน</Btn>}
+                  {btnOn("hist") && <Btn touch={touch} onClick={() => setHistOpen(true)}>🕘 ประวัติ</Btn>}
+                </div>
+              )}
+            </div>
+            {secs.length > 0 && (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {secOn("cost") && <CostBox moId={m.id} qty={m.qty} canSeeMoney={p.canSeeMoney} />}
+                {secOn("issue") && <IssuesBox moNo={m.mo_no} canEdit={canEdit} />}
+                {secOn("steps") && <StepsBox moId={m.id} />}
+              </div>
+            )}
           </div>
-          <div className="flex flex-col gap-2">
-            <Btn touch={touch} primary onClick={p.onOpenChecklist}>📋 เปิดเช็กลิสต์เต็ม</Btn>
-            <Btn touch={touch} onClick={() => window.open(`/print/work-order/${m.id}`, "_blank")}>🖨 พิมพ์ใบสั่งงาน</Btn>
-          </div>
-        </div>
-      );
+        );
+      }
       case "bom": return (
         <div className="space-y-2">
           <MoShortMaterials moNo={m.mo_no} allowShowAll />
@@ -336,7 +482,7 @@ export function PendDetail(p: {
         <div className="space-y-2">
           <p className="text-[12px] text-slate-600">ทั้งใบ <b>{fmt(m.qty)}</b> ชิ้น · จ่ายแล้ว {fmt(m.dispatched)} · <b className="text-rose-600">เหลือ {fmt(m.remaining)}</b> · รับคืนแล้ว {fmt(p.received)}</p>
           {myWos.length === 0 ? <p className="text-[11px] text-slate-400">ยังไม่ได้จ่ายให้โต๊ะ/ช่างไหน</p> : (
-            <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white max-w-2xl">
+            <div className="max-w-2xl divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
               {myWos.map((w) => {
                 const b = HIST_BADGE[w.status] ?? { t: w.status, c: "bg-slate-100 text-slate-600" };
                 const left = Math.max(0, (w.qty || 0) - (w.received_qty || 0));
@@ -368,16 +514,37 @@ export function PendDetail(p: {
       case "hist": return <HistPane m={m} />;
     }
   })();
+  const title = PEND_PANES.find(([k]) => k === pane)?.[1] ?? "";
+  const small = touch ? "h-10 px-3 text-sm" : "h-7 px-2.5 text-xs";
   return (
     <div onClick={(e) => e.stopPropagation()} className="cursor-default">
-      <div className="mb-2.5 flex flex-wrap items-center gap-1">
-        {PEND_PANES.map(([k, label]) => (
-          <button key={k} type="button" onClick={() => p.onPane(k)}
-            className={`${touch ? "h-10 px-3 text-sm" : "h-7 px-2.5 text-xs"} rounded-lg border whitespace-nowrap ${pane === k ? "border-blue-300 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
-        ))}
-        <button type="button" onClick={p.onClose} className={`ml-auto ${touch ? "h-10 px-3 text-sm" : "h-7 px-2.5 text-xs"} rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50`}>พับ ✕</button>
+      {/* หัวแผง: ไม่มีแถบแท็บ — จะดูเรื่องไหนให้กดช่องนั้นในแถว */}
+      <div className="mb-2.5 flex flex-wrap items-center gap-2">
+        <span className="text-[13px] font-semibold text-slate-700">{title}</span>
+        {pane !== "job" && <button type="button" onClick={() => p.onPane("job")} className={`${small} rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}>← รายละเอียดงาน</button>}
+        <span className="ml-auto flex gap-1.5">
+          {pane === "job" && <button type="button" onClick={() => setPrefsOpen((v) => !v)} title="ปรับรายละเอียดงานของฉัน (ซ่อนปุ่ม/กล่อง)"
+            className={`${small} rounded-lg border ${prefsOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>⚙️</button>}
+          <button type="button" onClick={p.onClose} className={`${small} rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50`}>พับ ✕</button>
+        </span>
       </div>
+      {pane === "job" && prefsOpen && (
+        <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50/40 px-3 py-2">
+          <p className="mb-1 text-[11px] text-slate-500">ปรับรายละเอียดงานของฉัน — จำไว้ให้คุณคนเดียว ตามไปทุกเครื่อง</p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {DETAIL_BTNS.map(([k, l]) => (
+              <label key={k} className="inline-flex cursor-pointer items-center gap-1.5 text-[12px] text-slate-700"><input type="checkbox" checked={btnOn(k)} onChange={() => togglePref("hideBtns", k)} className="h-4 w-4 accent-blue-600" />{l}</label>
+            ))}
+            {DETAIL_SECS.map(([k, l]) => (
+              <label key={k} className="inline-flex cursor-pointer items-center gap-1.5 text-[12px] text-slate-700"><input type="checkbox" checked={secOn(k)} onChange={() => togglePref("hideSecs", k)} className="h-4 w-4 accent-blue-600" />กล่อง {l}</label>
+            ))}
+          </div>
+        </div>
+      )}
       {body}
+      <ERPModal open={histOpen} onClose={() => setHistOpen(false)} size="md" title={`🕘 ประวัติ · ${m.mo_no}`}>
+        {histOpen && <HistPane m={m} />}
+      </ERPModal>
     </div>
   );
 }

@@ -18,7 +18,8 @@ import { apiFetch } from "@/lib/api";
 import { apiSave } from "@/lib/save-toast";
 import { formatDateTime } from "@/lib/date";
 import { MoProgressCell } from "@/components/mo-material-progress";
-import { PendDetail, CELL_PANE, HistTab, type PendPane } from "./pend-detail";
+import { PendDetail, CELL_PANE, HistTab, DETAIL_PREFS_DEFAULT, parseDetailPrefs, type PendPane } from "./pend-detail";
+import { useUserPref } from "@/lib/use-user-pref";
 import { DeviceIframePreview, IPAD_SIZE, useCanPreviewDevice } from "@/components/device-view";
 import { useTableDisplay } from "./table-display";
 import { TableDisplayPanel } from "./table-display-panel";
@@ -3323,6 +3324,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   //   ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → กดแถว/ช่อง = สลับติ๊ก (แบบ Gmail) · ชุดหน้าตาปิด "แตะแถวกาง" → กด = เปิดเช็กลิสต์ (แบบเดิม)
   const toggleSel = useCallback((id: string) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
   const [openPane, setOpenPane] = useState<Record<string, PendPane>>({});
+  const [detailPrefs, setDetailPrefs] = useUserPref("wb_pend_detail_prefs", DETAIL_PREFS_DEFAULT, parseDetailPrefs); // ปุ่ม/กล่องที่ซ่อนในรายละเอียดงาน (ต่อคน)
   const expanded = useMemo(() => new Set(Object.keys(openPane)), [openPane]);
   const showPane = useCallback((id: string, pane: PendPane | null) => setOpenPane((prev) => {
     const n = { ...prev };
@@ -3762,7 +3764,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   // แถวที่กางออก = แผงรายละเอียด 8 แท็บ (./pend-detail) — เปิดที่แท็บของช่องที่กด
   const renderPendDetail = (m: PendingMO) => (
     <PendDetail m={m} pane={openPane[m.id] ?? "job"} onPane={(pane) => setOpenPane((prev) => ({ ...prev, [m.id]: pane }))} onClose={() => showPane(m.id, null)}
-      touch={touch} canEdit={canEdit} prog={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0}
+      touch={touch} canEdit={canEdit} canSeeMoney={canSeeMoney} prefs={detailPrefs} onPrefs={setDetailPrefs} prog={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0}
       wos={workOrders.filter((w) => w.mo_no === m.mo_no)} plans={deliveryPlans.filter((p) => p.mo_id === m.id)}
       groupName={groupNameOf(m.mo_no)} rate={rateOf(m)} valueNode={canSeeMoney ? valueCell(m) : undefined}
       onOpenChecklist={() => onOpenMO(m)}
