@@ -33,12 +33,13 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { EmptyState, LoadingState } from "@/components/state-views";
+import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
 
 type Role = { key: string; label: string; active: boolean; sort_order: number };
 type Perm = { key: string; label: string; category: string; description: string | null; is_dangerous: boolean; sort_order: number };
 type MatrixRow = { role_key: string; permission_key: string };
 type Tab = "perm" | "task_type" | "platform" | "campaign_category" | "subtype" | "status" | "transition" | "team" | "mysub" | "submit" | "line" | "drive" | "brand_drive" | "ai_prompt";
-const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "subtype", "status", "transition", "team", "mysub", "submit", "line", "drive", "brand_drive", "ai_prompt"];
+const ALL_TABS: Tab[] = ["perm", "task_type", "platform", "campaign_category", "subtype", "status", "transition", "team", "mysub", "submit", "line", "drive", "brand_drive", "ai_prompt"];
 
 export default function TaskSettingsPage() {
   const t = useT();
@@ -56,6 +57,38 @@ export default function TaskSettingsPage() {
   const tab: Tab = tabRaw === "perm" && !canPermTab ? "task_type" : tabRaw;
   const toast = useToast();
   const showToast = useCallback((m: string) => toast.info(m), [toast]);   // แจ้งผ่าน toast กลาง (components/toast)
+  // เลือกเมนู → จำใน URL (?tab=) รีเฟรช/ส่งลิงก์แล้วเปิดหัวข้อเดิม
+  const selectTab = useCallback((k: Tab) => {
+    setTab(k);
+    try { const u = new URL(window.location.href); u.searchParams.set("tab", k); window.history.replaceState(null, "", u.toString()); } catch { /* ignore */ }
+  }, []);
+  // เมนูตั้งค่าจัดหมวด (ของกลาง SettingsNavLayout) — เจ้าของขอ 2026-10-26: เดิม 14 ปุ่มเรียงแถวเดียวดูยาก
+  const navGroups: SettingsNavGroup<Tab>[] = [
+    { label: t("ผู้ใช้และสิทธิ์", "Users and access"), items: [
+      { key: "perm", icon: "🔑", label: t("สิทธิ์", "Permissions"), desc: t("ใครทำอะไรได้ ต่อตำแหน่ง/รายคน", "Who can do what, by role or person"), hidden: !canPermTab },
+      { key: "team", icon: "👥", label: t("ทีม", "Teams"), desc: t("คนในแต่ละทีม", "People in each team") },
+    ] },
+    { label: t("ตัวเลือกในฟอร์มงาน", "Task form options"), items: [
+      { key: "task_type", icon: "🏷️", label: t("ประเภทงาน", "Task types"), desc: t("ตัวเลือกประเภทตอนสร้างงาน", "Type choices when creating a task") },
+      { key: "platform", icon: "📱", label: t("แพลตฟอร์ม", "Platforms"), desc: t("ช่องทางที่ลงงาน", "Channels a task is for") },
+      { key: "campaign_category", icon: "📁", label: t("หมวดแคมเปญ", "Campaign categories"), desc: t("จัดกลุ่มแคมเปญ", "Group campaigns") },
+      { key: "subtype", icon: "🧩", label: t("ชนิดงานย่อย", "Subtask types"), desc: t("งานย่อยที่เพิ่มในงานได้", "Subtasks you can add to a task") },
+    ] },
+    { label: t("ขั้นตอนงาน", "Workflow"), items: [
+      { key: "status", icon: "🚦", label: t("สถานะ", "Statuses"), desc: t("ชื่อและสีของสถานะงาน", "Status names and colors") },
+      { key: "transition", icon: "🔀", label: t("เส้นทาง", "Transitions"), desc: t("สถานะไหนไปต่อสถานะไหนได้", "Which status can move to which") },
+      { key: "submit", icon: "📤", label: t("ส่งงาน", "Submitting work"), desc: t("ต้องกรอก/แนบอะไรก่อนส่งงาน", "What must be filled in before submitting") },
+    ] },
+    { label: t("การแสดงผล", "Display"), items: [
+      { key: "mysub", icon: "🧩", label: t("งานย่อยของฉัน", "My subtasks"), desc: t("จัดกลุ่ม/เรียงรายการงานย่อยของทุกคน", "Grouping and sorting of everyone's subtask list") },
+    ] },
+    { label: t("เชื่อมต่อและอัตโนมัติ", "Connections and automation"), items: [
+      { key: "line", icon: "🔔", label: "LINE", desc: t("แจ้งเตือนงานเข้ากลุ่ม LINE", "Task alerts to a LINE group") },
+      { key: "drive", icon: "🗂️", label: t("โฟลเดอร์ปก", "Cover folder"), desc: t("ที่เก็บรูปปกใน Google Drive", "Where cover images live in Google Drive") },
+      { key: "brand_drive", icon: "🏷️", label: t("โฟลเดอร์ต่อแบรนด์", "Brand folders"), desc: t("Drive แยกตามแบรนด์", "Drive folders per brand") },
+      { key: "ai_prompt", icon: "✨", label: t("Prompt แคปชั่น AI", "AI caption prompt"), desc: t("คำสั่งให้ AI เขียนแคปชั่น", "Instructions for AI-written captions") },
+    ] },
+  ];
 
   return (
     <StandaloneShell title={t("ตั้งค่างาน Creative", "Creative Task Settings")} icon="⚙️" accent="violet">
@@ -63,34 +96,18 @@ export default function TaskSettingsPage() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-slate-900">{t("ตั้งค่า", "Settings")}</h1>
-            <p className="text-slate-500 mt-1">{t("สิทธิ์การใช้งาน + ตัวเลือกที่ใช้ในฟอร์ม (ประเภทงาน/แพลตฟอร์ม)", "Permissions + form options (Task types / Platforms)")}</p>
+            <p className="text-slate-500 mt-1">{t("ตั้งค่าระบบงาน Creative ของทั้งทีม — เลือกหัวข้อจากเมนูด้านซ้าย", "Team-wide settings for Creative tasks — pick a section from the menu")}</p>
           </div>
           <a href="/tasks" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 shrink-0">← {t("กลับไปงาน", "Back to Tasks")}</a>
         </div>
-        {canSettings && (
-          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1 w-fit mt-4">
-            {canPermTab && <TabBtn active={tab === "perm"} onClick={() => setTab("perm")}>🔑 {t("สิทธิ์", "Permissions")}</TabBtn>}
-            <TabBtn active={tab === "task_type"} onClick={() => setTab("task_type")}>🏷️ {t("ประเภทงาน", "Task Types")}</TabBtn>
-            <TabBtn active={tab === "platform"} onClick={() => setTab("platform")}>📱 {t("แพลตฟอร์ม", "Platforms")}</TabBtn>
-            <TabBtn active={tab === "campaign_category"} onClick={() => setTab("campaign_category")}>📁 {t("หมวดแคมเปญ", "Campaign categories")}</TabBtn>
-            <TabBtn active={tab === "subtype"} onClick={() => setTab("subtype")}>🧩 {t("ชนิดงานย่อย", "Subtask types")}</TabBtn>
-            <TabBtn active={tab === "status"} onClick={() => setTab("status")}>🚦 {t("สถานะ", "Status")}</TabBtn>
-            <TabBtn active={tab === "transition"} onClick={() => setTab("transition")}>🔀 {t("เส้นทาง", "Transitions")}</TabBtn>
-            <TabBtn active={tab === "team"} onClick={() => setTab("team")}>👥 {t("ทีม", "Teams")}</TabBtn>
-            <TabBtn active={tab === "mysub"} onClick={() => setTab("mysub")}>🧩 {t("งานย่อยของฉัน", "My subtasks")}</TabBtn>
-            <TabBtn active={tab === "submit"} onClick={() => setTab("submit")}>📤 {t("ส่งงาน", "Submit")}</TabBtn>
-            <TabBtn active={tab === "line"} onClick={() => setTab("line")}>🔔 {t("LINE", "LINE")}</TabBtn>
-            <TabBtn active={tab === "drive"} onClick={() => setTab("drive")}>🗂️ {t("โฟลเดอร์ปก", "Cover folder")}</TabBtn>
-            <TabBtn active={tab === "brand_drive"} onClick={() => setTab("brand_drive")}>🏷️ {t("โฟลเดอร์ต่อแบรนด์", "Brand folders")}</TabBtn>
-            <TabBtn active={tab === "ai_prompt"} onClick={() => setTab("ai_prompt")}>✨ {t("Prompt แคปชั่น AI", "AI caption prompt")}</TabBtn>
-          </div>
-        )}
       </div>
 
-      <div className="px-8 py-6">
+      <div className="px-4 sm:px-8 py-6">
         {!canSettings ? (
           <EmptyState icon="🔒" title={t("หน้านี้สำหรับหัวหน้า / ผู้ดูแลระบบ (สิทธิ์ตั้งค่าแอปจัดการงาน)", "This page needs the task-app settings permission (managers / admins).")} />
-        ) : tab === "perm" ? <PermissionMatrix showToast={showToast} />
+        ) : (
+        <SettingsNavLayout groups={navGroups} active={tab} onSelect={selectTab}>
+        {tab === "perm" ? <PermissionMatrix showToast={showToast} />
           : tab === "status" ? <StatusManager showToast={showToast} />
           : tab === "transition" ? <TransitionManager showToast={showToast} />
           : tab === "team" ? <TeamManager showToast={showToast} />
@@ -119,14 +136,12 @@ export default function TaskSettingsPage() {
           )
           : tab === "brand_drive" ? <BrandDriveFolders />
           : <OptionsManager kind={tab} title={tab === "task_type" ? t("ประเภทงาน", "Task Types") : tab === "campaign_category" ? t("หมวดแคมเปญ", "Campaign categories") : t("แพลตฟอร์ม", "Platforms")} showToast={showToast} />}
+        </SettingsNavLayout>
+        )}
       </div>
 
     </StandaloneShell>
   );
-}
-
-function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return <button onClick={onClick} className={`h-8 px-3 rounded-md text-sm font-medium ${active ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>{children}</button>;
 }
 
 // ============================================================

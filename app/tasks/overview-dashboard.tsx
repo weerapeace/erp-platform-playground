@@ -31,6 +31,8 @@ import type { UserPickerValue } from "@/components/pickers";
 import { subStatusDot, subStatusLabel } from "./subtask-status";
 
 const CSTATUS = Object.fromEntries(CAMPAIGN_STATUS.map((s) => [s.value, s]));
+// จำนวนคอลัมน์การ์ดสรุปบนจอใหญ่ = จำนวนใบที่โชว์ (ซ่อนบางใบแล้วที่เหลือขยายเต็มแถว)
+const CARD_GRID_LG: Record<number, string> = { 1: "lg:grid-cols-1", 2: "lg:grid-cols-2", 3: "lg:grid-cols-3", 4: "lg:grid-cols-4" };
 
 
 export type OvFilter = "all" | "mine" | "review" | "overdue";
@@ -202,6 +204,17 @@ export function OverviewDashboard({
     { key: "review", value: counts.review, label: t("รอตรวจ/อนุมัติ", "In review") },
     { key: "overdue", value: counts.overdue, label: t("เกินกำหนด", "Overdue") },
   ];
+  // ซ่อน/โชว์การ์ดสรุปรายใบ (จำในธีมของคนนี้) — ซ่อนใบที่กำลังกรองอยู่ = กลับไปดูงานทั้งหมด
+  const hiddenCards = theme.show.hiddenCards ?? [];
+  const visibleCards = cardMeta.filter((m) => !hiddenCards.includes(m.key));
+  const hiddenCardMeta = cardMeta.filter((m) => hiddenCards.includes(m.key));
+  const setCardHidden = (k: CardKey, hide: boolean) => {
+    if (hide && filter === k && k !== "all") onFilter("all");
+    onThemeChange({ ...theme, show: { ...theme.show, hiddenCards: hide ? [...hiddenCards.filter((x) => x !== k), k] : hiddenCards.filter((x) => x !== k) } });
+  };
+  // แผงตัวกรอง: ไม่ตั้ง = พับ (บอร์ดกว้างเต็ม) · กางค้างไว้ = จำต่อคน
+  const filtersOpen = theme.show.filtersOpen === true;
+  const setFiltersOpen = (v: boolean) => onThemeChange({ ...theme, show: { ...theme.show, filtersOpen: v } });
 
   const heroImage = theme.hero.mode === "image" && !!theme.hero.imageUrl;
   const heroTitleCls = ({ sm: "text-base sm:text-lg", md: "text-lg sm:text-xl", lg: "text-xl sm:text-2xl", xl: "text-2xl sm:text-3xl" } as const)[theme.hero.titleSize ?? "lg"];
@@ -277,17 +290,30 @@ export function OverviewDashboard({
         </div>
       </div>
 
-      {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) */}
-      <div className={`grid grid-cols-2 lg:grid-cols-4 ${density.gap}`}>
-        {cardMeta.map((m) => (
-          <SummaryCard key={m.key} card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize} labelSize={cardLabelSize} valueSize={cardValueSize} align={cardAlign} pad={density.cardPad} valueColor={theme.cardValueColor ?? null} labelColor={theme.cardLabelColor ?? null} animCls={`${theme.anim?.hover ? "ov-hover" : ""} ${theme.anim?.entrance ? "ov-enter" : ""}`}
-            active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : m.key === "review" ? t("กดดูคิวรอตรวจ", "tap to review") : t("กดเพื่อกรอง", "tap to filter")}
-            onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
-        ))}
-      </div>
+      {/* การ์ดสรุป = ตัวกรองตาราง (ไอคอน/สีแต่งได้) · ซ่อนรายใบได้ด้วยรูปตา (จำต่อคนในธีม show.hiddenCards — เจ้าของขอ 2026-10-26) */}
+      {visibleCards.length > 0 && (
+        <div className={`grid grid-cols-2 ${CARD_GRID_LG[visibleCards.length] ?? "lg:grid-cols-4"} ${density.gap}`}>
+          {visibleCards.map((m) => (
+            <div key={m.key} className="relative group grid">
+              <SummaryCard card={theme.cards[m.key]} value={m.value} label={theme.cards[m.key].label || m.label} iconSize={cardIconSize} labelSize={cardLabelSize} valueSize={cardValueSize} align={cardAlign} pad={density.cardPad} valueColor={theme.cardValueColor ?? null} labelColor={theme.cardLabelColor ?? null} animCls={`${theme.anim?.hover ? "ov-hover" : ""} ${theme.anim?.entrance ? "ov-enter" : ""}`}
+                active={filter === m.key && !activeMetric} hint={filter === m.key && !activeMetric ? t("● กรองอยู่", "● filtering") : m.key === "review" ? t("กดดูคิวรอตรวจ", "tap to review") : t("กดเพื่อกรอง", "tap to filter")}
+                onClick={() => { setActiveMetric(null); onFilter(m.key); }} />
+              <button type="button" onClick={() => setCardHidden(m.key, true)} title={t("ซ่อนการ์ดนี้ (กดคืนได้ที่แถวด้านล่าง)", "Hide this card (restore from the row below)")} aria-label={t("ซ่อนการ์ด", "Hide card")}
+                className="absolute top-1.5 right-1.5 h-6 w-6 rounded-md bg-white/80 text-slate-400 hover:text-slate-700 text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 focus:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">👁</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* การ์ดเมตริกของฉัน (สร้างเอง) + ปุ่มจัดการ */}
       <div className="flex items-center gap-2 flex-wrap">
+        {/* การ์ดสรุปที่ซ่อนไว้ — กดเพื่อเอากลับมาโชว์ */}
+        {hiddenCardMeta.map((m) => (
+          <button key={m.key} type="button" onClick={() => setCardHidden(m.key, false)} title={t("กดเพื่อโชว์การ์ดนี้อีกครั้ง", "Show this card again")}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border border-dashed border-slate-300 text-sm text-slate-400 hover:border-violet-300 hover:text-violet-600">
+            ＋ {theme.cards[m.key].label || m.label} <span className="text-[11px]">({t("ซ่อนอยู่", "hidden")})</span>
+          </button>
+        ))}
         {(metrics ?? []).map((m) => {
           const c = CARD_COLORS[m.color] ?? CARD_COLORS.slate;
           const on = activeMetric === m.id;
@@ -359,10 +385,13 @@ export function OverviewDashboard({
 
       {/* ── 3 คอลัมน์เรียงข้างกัน: ตัวกรอง (แคบ) | Kanban/ตาราง (กว้าง) | แคมเปญ (แคบ) ── */}
       <div className="flex flex-col lg:flex-row gap-4 items-stretch">
-        {/* คอลัมน์ 1 — ตัวกรอง: ประเภทงาน + แบรนด์ (แนวตั้ง) */}
-        {theme.show.filters && (
+        {/* คอลัมน์ 1 — ตัวกรอง: ประเภทงาน + แบรนด์ (แนวตั้ง) · พับได้ (ค่าเริ่มต้น = พับ → ปุ่มเล็กบนหัวบอร์ดแทน) */}
+        {theme.show.filters && filtersOpen && (
           <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-3 lg:w-52 lg:shrink-0 space-y-3">
-            <div className="text-xs font-semibold text-slate-500">🔎 {t("ตัวกรอง", "Filters")}</div>
+            <div className="flex items-center justify-between gap-2">
+              <div className="text-xs font-semibold text-slate-500">🔎 {t("ตัวกรอง", "Filters")}</div>
+              <button type="button" onClick={() => setFiltersOpen(false)} title={t("พับแผงตัวกรอง (บอร์ดกว้างขึ้น)", "Collapse filters (wider board)")} className="h-6 px-1.5 text-[11px] text-slate-400 border border-slate-200 rounded-md hover:text-slate-700 hover:bg-slate-50">◂ {t("พับ", "Hide")}</button>
+            </div>
             <div>
               <div className="text-[11px] text-slate-400 mb-1">{t("ประเภทงาน", "Type")}</div>
               <div className="flex flex-wrap lg:flex-col gap-1 items-start">
@@ -388,6 +417,23 @@ export function OverviewDashboard({
 
         {/* คอลัมน์ 2 — งาน: การ์ด Kanban (ค่าเริ่มต้น) / ตาราง (กว้างสุด) · review = ตารางคิวรอตรวจในตัว */}
         <section className="flex-1 min-w-0 space-y-2">
+          {/* ตัวกรองแบบพับ — ปุ่มกาง + ป้ายตัวกรองที่ใช้อยู่ (กด ✕ ล้างได้เลย) */}
+          {theme.show.filters && !filtersOpen && (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <button type="button" onClick={() => setFiltersOpen(true)} title={t("กางแผงตัวกรอง (ประเภทงาน / แบรนด์)", "Show filters (type / brand)")}
+                className="h-7 px-2.5 text-xs font-medium text-slate-600 bg-white border border-slate-200 rounded-full hover:bg-slate-50 inline-flex items-center gap-1">🔎 {t("ตัวกรอง", "Filters")} ▸</button>
+              {typeFilter && (
+                <button type="button" onClick={() => setTypeFilter("")} title={t("ล้างตัวกรองประเภทงาน", "Clear type filter")} className="h-7 px-2.5 text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-full hover:bg-violet-100">
+                  {typeOptions.find((o) => o.value === typeFilter)?.label ?? typeFilter} ✕
+                </button>
+              )}
+              {brandFilter && (
+                <button type="button" onClick={() => setBrandFilter("")} title={t("ล้างตัวกรองแบรนด์", "Clear brand filter")} className="h-7 px-2.5 text-xs text-violet-700 bg-violet-50 border border-violet-200 rounded-full hover:bg-violet-100">
+                  {brands.find((b) => b.id === brandFilter)?.name ?? t("แบรนด์", "Brand")} ✕
+                </button>
+              )}
+            </div>
+          )}
           {filter === "review" ? (
             <>
               <p className="text-sm font-semibold text-slate-700">🟡 {t("รอตรวจ/อนุมัติ — งานย่อยที่ส่งมา", "Review queue — submitted subtasks")}</p>

@@ -22,7 +22,8 @@ export const CARD_KEYS: CardKey[] = ["all", "mine", "review", "overdue"];
 export type HeroTheme = { mode: "gradient" | "solid" | "image"; color1: string; color2: string; imageUrl: string | null; title: string | null; subtitle: string | null; textColor: string; titleSize?: "sm" | "md" | "lg" | "xl"; align?: "left" | "center"; imagePos?: string; petUrl?: string | null; petLottieUrl?: string | null; petLottieData?: unknown | null; petFrames?: string[] | null };
 export type CardTheme = { icon: string; iconUrl: string | null; color: string; bgUrl: string | null; label: string | null };
 export type PageTheme = { mode: "none" | "color" | "image"; color: string; imageUrl: string | null };
-export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean };
+// hiddenCards = การ์ดสรุป 4 ใบที่คนนี้ซ่อน (ไม่ตั้ง = โชว์ครบ) · filtersOpen = แผงตัวกรองกางอยู่ไหม (ไม่ตั้ง = พับ — เจ้าของขอ 2026-10-26)
+export type SectionsTheme = { shortcuts: boolean; campaigns: boolean; filters: boolean; hiddenCards?: CardKey[]; filtersOpen?: boolean };
 // มุมมองงานหลัก: Kanban การ์ด (ลากเปลี่ยนสถานะ) หรือ ตาราง · ปรับการจัดกลุ่ม + ข้อมูลบนการ์ดได้
 export type KanbanGroupBy = "status" | "brand" | "priority" | "task_type";
 // wip = บอร์ดงานค้าง: ช่องใหญ่ (รอคิว+พร้อมทำ+กำลังทำ) + ช่องเล็ก รอตรวจ / ต้องแก้
@@ -566,6 +567,18 @@ export function OverviewCustomizer({ open, theme, canUpload, isAdmin, onChange, 
               <input type="checkbox" checked={theme.show[k]} onChange={(e) => setShow({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{label}
             </label>
           ))}
+        </div>
+        {/* การ์ดสรุป 4 ใบ — ติ๊กออก = ซ่อน (กดรูปตาบนการ์ดในหน้าก็ได้) */}
+        <div className="text-xs text-slate-500 mt-3 mb-1.5">{t("การ์ดสรุปที่โชว์", "Summary cards shown")}</div>
+        <div className="flex flex-wrap gap-3">
+          {CARD_KEYS.map((k) => {
+            const hidden = (theme.show.hiddenCards ?? []).includes(k);
+            return (
+              <label key={k} className="inline-flex items-center gap-2 text-sm text-slate-600 cursor-pointer">
+                <input type="checkbox" checked={!hidden} onChange={(e) => { const cur = theme.show.hiddenCards ?? []; setShow({ hiddenCards: e.target.checked ? cur.filter((x) => x !== k) : [...cur, k] }); }} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{theme.cards[k].label || CARD_LABEL[k]()}
+              </label>
+            );
+          })}
         </div>
       </section>
 
