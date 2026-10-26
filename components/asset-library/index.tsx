@@ -9,6 +9,7 @@
  * ใช้ของกลาง: apiFetch · useToast · ERPModal · ConfirmDialog · R2 (ผ่าน /api/assets)
  */
 import { useState, useEffect, useCallback } from "react";
+import nextDynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
@@ -37,6 +38,9 @@ import { DriveScanModal } from "./drive-scan-modal";
 import { UploadModal } from "./upload-modal";
 import { DetailModal } from "./detail-modal";
 import { AssetCard } from "./asset-card";
+
+// 📂 จัดรูปสินค้าหลายโฟลเดอร์ (ของกลาง — ตัวเดียวกับหน้า Parent SKU) · โหลดเมื่อกดปุ่ม
+const ProductImageRouter = nextDynamic(() => import("@/components/product-image-router").then((m) => m.ProductImageRouter), { ssr: false });
 const TYPE_FILTERS: { key: string; label: string; en: string }[] = [
   { key: "", label: "ทั้งหมด", en: "All" },
   { key: "image", label: "🖼️ รูปภาพ", en: "🖼️ Images" },
@@ -77,6 +81,9 @@ export function AssetLibrary() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [uploadOpen, setUploadOpen] = useState(false);
+  // null = ยังไม่เคยเปิด · เปิดแล้วคงไว้ (อัปเบื้องหลังต่อได้ · กลับมาดูผล/ย้อนทั้งชุดได้)
+  const [routerOpen, setRouterOpen] = useState<boolean | null>(null);
+  const canRoute = can("products.edit") && can("files.upload");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [newColOpen, setNewColOpen] = useState(false);
   const [metaMgr, setMetaMgr] = useState<"albums" | "tags" | null>(null);   // หน้าต่างจัดการ อัลบั้ม / แท็ก (เปลี่ยนชื่อ + ลบ)
@@ -352,6 +359,12 @@ export function AssetLibrary() {
               className="h-9 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap"
             >{t("📋 เพิ่มหลายงาน", "📋 Add multiple jobs")}</button>
           )}
+          {canRoute && source !== "artwork" && source !== "print" && (
+            <button onClick={() => setRouterOpen(true)}
+              title={t("ลากหลายโฟลเดอร์ (ชื่อโฟลเดอร์ = รหัส SKU ลูก / รหัสรุ่น) แล้วเลือกว่ารูปไหนลงปก · SKU ลูก · แกลเลอรี Parent · Hero · Description", "Drop many folders (named by SKU / model code) and choose where each image goes")}
+              className="h-9 px-3 text-sm font-medium border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 whitespace-nowrap"
+            >{t("📂 จัดรูปสินค้าหลายโฟลเดอร์", "📂 Sort product images")}</button>
+          )}
           <button
             onClick={() => {
               if (source === "artwork") setArtworkAddOpen(true);
@@ -557,6 +570,7 @@ export function AssetLibrary() {
       )}
 
       {/* modals */}
+      {routerOpen !== null && <ProductImageRouter open={routerOpen} onClose={() => setRouterOpen(false)} onDone={() => void load()} />}
       {uploadOpen && (
         <UploadModal
           actor={actor} collections={collections} initialFiles={pendingFiles}
