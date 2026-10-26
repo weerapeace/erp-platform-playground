@@ -62,9 +62,10 @@ const thShort = (d: string) => new Date(d + "T00:00:00").toLocaleDateString("th-
  * รายการวัตถุดิบที่ "ยังไม่ครบ" ของใบสั่งผลิตใบเดียว (ต้องซื้อ → รออนุมัติ → สั่งแล้วรอของ)
  * โหลดเองตอนแสดง · อ่านอย่างเดียว (จะขอซื้อ/รับของ ไปทำที่หน้าขอซื้อหรือแท็บ "ของซื้อ" ในเช็กลิสต์)
  */
-export function MoShortMaterials({ moNo }: { moNo: string }) {
+export function MoShortMaterials({ moNo, allowShowAll = false }: { moNo: string; /** มีติ๊ก "โชว์ที่ครบแล้วด้วย" = ดู BOM ครบทุกรายการ */ allowShowAll?: boolean }) {
   const [items, setItems] = useState<MoMaterialStatus[] | null>(null);
   const [err, setErr] = useState(false);
+  const [showAll, setShowAll] = useState(false);
   useEffect(() => {
     let cancel = false;
     setItems(null); setErr(false);
@@ -79,14 +80,43 @@ export function MoShortMaterials({ moNo }: { moNo: string }) {
   if (items.length === 0) return <p className="text-xs text-slate-400">ใบนี้ยังไม่มีสูตรวัตถุดิบ (BOM)</p>;
   const open = items.filter((it) => OPEN.includes(it.status)).sort((a, b) => OPEN.indexOf(a.status) - OPEN.indexOf(b.status));
   const doneN = items.length - open.length;
-  if (open.length === 0) return <p className="text-xs text-emerald-700">✓ วัตถุดิบครบทั้ง {items.length} รายการ (มีของ / ได้ของ / เตรียมแล้ว)</p>;
+  if (open.length === 0 && !showAll) return (
+    <div className="flex items-center gap-3 flex-wrap">
+      <p className="text-xs text-emerald-700">✓ วัตถุดิบครบทั้ง {items.length} รายการ (มีของ / ได้ของ / เตรียมแล้ว)</p>
+      {allowShowAll && <button type="button" onClick={() => setShowAll(true)} className="text-[11px] text-blue-600 underline">ดูทั้ง {items.length} รายการ</button>}
+    </div>
+  );
+  const list = showAll ? [...open, ...items.filter((it) => !OPEN.includes(it.status))] : open;
 
   const today = ymdBkk();
   return (
     <div>
-      <p className="text-[11px] text-slate-500 mb-1.5">ของที่ยังไม่ครบ <b className="text-slate-700">{open.length}</b> จาก {items.length} รายการ{doneN > 0 ? ` · ครบแล้ว ${doneN}` : ""}</p>
+      <div className="mb-1.5 flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-[11px] text-slate-500">ของที่ยังไม่ครบ <b className="text-slate-700">{open.length}</b> จาก {items.length} รายการ{doneN > 0 ? ` · ครบแล้ว ${doneN}` : ""}</p>
+        {allowShowAll && doneN > 0 && (
+          <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 cursor-pointer">
+            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" /> โชว์ที่ครบแล้วด้วย
+          </label>
+        )}
+      </div>
       <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
-        {open.map((it) => {
+        {list.map((it) => {
+          if (!OPEN.includes(it.status)) {
+            // ครบแล้ว: มีของ / รับของแล้ว / เตรียมแล้ว / ไม่ต้องซื้อ
+            const doneLabel = it.status === "received" ? "รับของแล้ว" : it.status === "ready" ? "เตรียมแล้ว" : it.status === "skip" ? "ไม่ต้องซื้อ" : "มีของแล้ว";
+            return (
+              <div key={it.summary_id} className="flex items-center gap-2.5 px-2.5 py-1.5 text-[12px] bg-slate-50/50">
+                <HoverImage url={it.image} size={28} previewSize={200} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-slate-500 truncate" title={it.name ?? ""}>{it.name ?? it.code}</div>
+                  {it.code && <div className="text-[10px] font-mono text-slate-400 truncate">{it.code}</div>}
+                </div>
+                <span className="shrink-0 tabular-nums text-slate-400 whitespace-nowrap">ใช้ {fmtQty(it.required)} {it.uom ?? ""}</span>
+                <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded border whitespace-nowrap ${it.status === "skip" ? "bg-slate-50 text-slate-500 border-slate-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>✓ {doneLabel}</span>
+                <span className="shrink-0 w-44" />
+              </div>
+            );
+          }
           const u = it.uom ?? "";
           const prNos = [...new Set(it.links.map((l) => l.pr_no).filter(Boolean))].join(", ");
           const poNos = [...new Set(it.links.map((l) => l.po_no).filter(Boolean))].join(", ");

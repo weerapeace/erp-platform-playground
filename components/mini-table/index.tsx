@@ -82,6 +82,10 @@ export type MiniTableProps<T> = {
   //   ผู้เรียกคุมเองว่ากางแถวไหน (เช่น onRowClick สลับ key เข้า/ออก) · ไม่ใส่ = ตารางเหมือนเดิมทุกอย่าง
   expandedKeys?: Set<string>;
   renderExpanded?: (row: T) => ReactNode;
+  /** กดทีละช่อง — ใส่แล้วแต่ละช่องกดได้เอง (ไม่ไหลไปเป็นการกดแถว) เช่น กดช่องซื้อของ = กางรายละเอียดวัตถุดิบ */
+  onCellClick?: (row: T, colKey: string) => void;
+  /** ช่องที่กำลังเปิดรายละเอียดอยู่ของแถวนั้น (ไฮไลต์ให้รู้ว่ากดช่องไหน) */
+  activeCell?: (row: T) => string | null | undefined;
 
   // ส่วนหัว
   title?: ReactNode;
@@ -118,7 +122,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
     rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange, hideSearch,
     groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra,
-    selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded,
+    selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded, onCellClick, activeCell,
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
     dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, maxHeightClass = "", className = "", footnote,
@@ -261,7 +265,15 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
             <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />
           </span>
         )}
-        {columns.map((c) => <div key={c.key} className={`min-w-0 text-sm text-slate-800 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)}`}>{c.cell(r)}</div>)}
+        {columns.map((c) => {
+          const act = !!activeCell && activeCell(r) === c.key;
+          return (
+            <div key={c.key} onClick={onCellClick ? (e) => { e.stopPropagation(); onCellClick(r, c.key); } : undefined}
+              className={`min-w-0 text-sm text-slate-800 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)} ${onCellClick ? `-mx-1 -my-1 rounded-md px-1 py-1 cursor-pointer ${act ? "bg-blue-100/70 ring-1 ring-blue-300" : "hover:bg-blue-50 hover:ring-1 hover:ring-blue-200"}` : ""}`}>
+              {c.cell(r)}
+            </div>
+          );
+        })}
       </div>
     );
     if (!open) return line;

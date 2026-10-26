@@ -17,7 +17,8 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { apiSave } from "@/lib/save-toast";
 import { formatDateTime } from "@/lib/date";
-import { MoProgressCell, MoShortMaterials } from "@/components/mo-material-progress";
+import { MoProgressCell } from "@/components/mo-material-progress";
+import { PendDetail, CELL_PANE, HistTab, type PendPane } from "./pend-detail";
 import { DeviceIframePreview, IPAD_SIZE, useCanPreviewDevice } from "@/components/device-view";
 import { useTableDisplay } from "./table-display";
 import { TableDisplayPanel } from "./table-display-panel";
@@ -1570,7 +1571,7 @@ function WorkBoardPageInner() {
         <PurchaseNeeds canEdit={canEdit} onOpenMo={(moId) => { const mo = board.pending.find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }} />
       ) : viewMode === "table" ? (
         <BoardTable pending={board.pending} workOrders={board.workOrders}
-          departments={board.departments} craftsmen={craftsmen} canEdit={canDispatch} canSeeMoney={isAdmin}
+          departments={board.departments} craftsmen={craftsmen} canEdit={canDispatch} canSeeMoney={isAdmin} deliveryPlans={board.deliveryPlans}
           onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : viewMode === "shop" ? (
         <div className="space-y-3">
@@ -3053,33 +3054,6 @@ function IssueTab({ issues, canEdit, issType, setIssType, issSev, setIssSev, iss
   );
 }
 
-// ---- เฟส 4: ประวัติการจ่ายงาน ----
-const HIST_BADGE: Record<string, { t: string; c: string }> = {
-  dispatched: { t: "จ่ายแล้ว", c: "bg-blue-50 text-blue-700" }, in_progress: { t: "กำลังทำ", c: "bg-indigo-50 text-indigo-700" },
-  partial_return: { t: "คืนบางส่วน", c: "bg-amber-50 text-amber-700" }, done: { t: "เสร็จ", c: "bg-emerald-50 text-emerald-700" },
-};
-function HistTab({ rows }: { rows: DispatchHistRow[] | null }) {
-  if (rows === null) return <div className="text-center py-8 text-slate-400 text-sm">กำลังโหลด…</div>;
-  if (rows.length === 0) return <div className="text-center py-8 text-slate-300 text-sm">ยังไม่เคยจ่ายงานนี้</div>;
-  return (
-    <div className="border border-slate-100 rounded-lg overflow-hidden">
-      <div className="divide-y divide-slate-50 max-h-[46vh] overflow-y-auto">
-        {rows.map((r) => {
-          const b = HIST_BADGE[r.status] ?? { t: r.status, c: "bg-slate-100 text-slate-600" };
-          return (
-            <div key={r.id} className={`flex items-center gap-2 px-3 py-2 ${r.is_active ? "" : "opacity-50"}`}>
-              <div className="min-w-0 flex-1">
-                <p className="text-sm text-slate-800 truncate">{r.assignee_name ?? r.department_name ?? "—"}{!r.is_active && <span className="text-[10px] text-rose-500"> · ยกเลิก</span>}</p>
-                <p className="text-[10px] text-slate-400">{r.wo_no} · {_dt(r.dispatch_date)} · จ่าย {fmt(r.qty)}{r.received_qty ? ` · คืน ${fmt(r.received_qty)}` : ""}</p>
-              </div>
-              <span className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full ${b.c}`}>{b.t}</span>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
 
 // ---- ค่าแรงย่อบนการ์ด (กลุ่ม A): ผลิต/เหมา = แผน/จริง (จริงเป็นสีเขียว) ----
 function LaborMini({ labor }: { labor?: Labor }) {
@@ -3195,6 +3169,8 @@ const stageOrder = (name: string) => Object.values(STAGE_META).find(([label]) =>
 /** ราคาขายต่ำกว่านี้ (฿0 / ฿1) = น่าจะยังไม่ได้ตั้งจริง → ขึ้นเตือน + ไม่นับรวมในยอดมูลค่า */
 const PRICE_MIN = 10;
 const NO_BRAND = "— ไม่ระบุแบรนด์ —";   // หัวกลุ่มของใบที่สินค้าไม่ผูกแบรนด์ (ไว้ท้ายสุดตอนจัดกลุ่มตามแบรนด์)
+/** แท็บที่เปิดอยู่ → ไฮไลต์ช่องไหนในแถว (ให้รู้ว่ากดช่องไหนมา) */
+const PANE_COL: Record<string, string> = { job: "prod", bom: "buy", prep: "prep", stage: "stage", dispatch: "qty", due: "due", group: "group", hist: "created" };
 /** จำนวนวันจาก "YYYY-MM-DD" ถึง "YYYY-MM-DD" (คิดแบบ UTC ล้วน ไม่เพี้ยนตามเขตเวลา) — บวก = to อยู่หลัง from */
 const ymdDiff = (from: string, to: string) => {
   const [y1, m1, d1] = from.split("-").map(Number), [y2, m2, d2] = to.split("-").map(Number);
@@ -3276,8 +3252,8 @@ function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefine
   );
 }
 
-function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, onOpenMO, onOpenWO, onReload }: {
-  pending: PendingMO[]; workOrders: WorkOrder[];
+function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload }: {
+  pending: PendingMO[]; workOrders: WorkOrder[]; deliveryPlans: DeliveryPlan[];
   departments: Dept[]; craftsmen: Assignee[]; canEdit: boolean;
   /** เห็นราคาขาย/มูลค่า = คนที่ดูแผนผู้บริหารได้ (API ราคาล็อกสิทธิ์ admin.users ที่เซิร์ฟเวอร์อีกชั้น) */
   canSeeMoney: boolean;
@@ -3343,13 +3319,27 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   useEffect(() => { void loadQcQueue(); }, [loadQcQueue]);
   const [dueSaving, setDueSaving] = useState(false);
   const selMoNos = pending.filter((m) => sel.has(m.id)).map((m) => m.mo_no);
-  // คลิกแถว: ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → สลับติ๊ก (แบบ Gmail) · ถ้ายังไม่ติ๊กอะไร → กาง/พับ ดูของที่ยังไม่ครบ
-  //   (เปิดเช็กลิสต์เต็ม = ปุ่ม 📋 ท้ายชื่อสินค้า หรือปุ่มในแถวที่กางออก)
+  // กดช่องไหน = กางแท็บของช่องนั้น (ซื้อของ → BOM · สินค้า → รายละเอียดงาน · กำหนดส่ง → แก้วัน/งวดส่ง …) · กดช่องเดิมซ้ำ = พับ
+  //   ถ้ากำลังเลือกอยู่ (มีติ๊กแล้ว) → กดแถว/ช่อง = สลับติ๊ก (แบบ Gmail) · ชุดหน้าตาปิด "แตะแถวกาง" → กด = เปิดเช็กลิสต์ (แบบเดิม)
   const toggleSel = useCallback((id: string) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const toggleExp = useCallback((id: string) => setExpanded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
-  // ชุดหน้าตาปิด "แตะแถวกาง" → แตะแถว = เปิดเช็กลิสต์ (แบบเดิม)
-  const onPendRow = useCallback((m: PendingMO) => { if (sel.size > 0) toggleSel(m.id); else if (dc.expand) toggleExp(m.id); else onOpenMO(m); }, [sel.size, toggleSel, toggleExp, dc.expand, onOpenMO]);
+  const [openPane, setOpenPane] = useState<Record<string, PendPane>>({});
+  const expanded = useMemo(() => new Set(Object.keys(openPane)), [openPane]);
+  const showPane = useCallback((id: string, pane: PendPane | null) => setOpenPane((prev) => {
+    const n = { ...prev };
+    if (pane === null || prev[id] === pane) delete n[id]; else n[id] = pane;
+    return n;
+  }), []);
+  const onPendRow = useCallback((m: PendingMO) => {
+    if (sel.size > 0) toggleSel(m.id);
+    else if (!dc.expand) onOpenMO(m);
+    else showPane(m.id, openPane[m.id] ? null : "job");   // กดช่องว่างระหว่างช่อง = เปิด/พับ แท็บรายละเอียดงาน
+  }, [sel.size, toggleSel, dc.expand, onOpenMO, showPane, openPane]);
+  const onPendCell = useCallback((m: PendingMO, colKey: string) => {
+    if (sel.size > 0) { toggleSel(m.id); return; }
+    if (!dc.expand) { onOpenMO(m); return; }
+    const pane = CELL_PANE[colKey];
+    if (pane) showPane(m.id, pane);
+  }, [sel.size, toggleSel, dc.expand, onOpenMO, showPane]);
   // ช่อง "ซื้อของ" + จุดขั้นตอน — ความคืบหน้าการซื้อทุกใบในคำขอเดียว (กติกาเดียวกับหน้าขอซื้อ → ตัวเลขตรงกัน)
   const [prog, setProg] = useState<MoProgressResult | null>(null);
   const pendKey = pending.map((m) => m.mo_no).join(",");
@@ -3621,9 +3611,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   }, [wos, woSel, qcRows, qcDate, toast, onReload]);
   // กลุ่มใบสั่งผลิต (สำหรับคอลัมน์ "กลุ่ม" + จัดกลุ่มตามกลุ่ม)
   const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
-  useEffect(() => { void (async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
-    setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } })(); }, []);
+  const loadGroups = useCallback(async () => { try { const r = await apiFetch("/api/mo/groups"); const j = await r.json();
+    setMoGroups(((j.data ?? []) as { name: string; mo_nos: unknown }[]).map((g) => ({ name: g.name, mo_nos: (Array.isArray(g.mo_nos) ? g.mo_nos : []) as string[] }))); } catch { /* ignore */ } }, []);
+  useEffect(() => { void loadGroups(); }, [loadGroups]);
   const groupNameOf = useCallback((moNo: string) => moGroups.find((g) => g.mo_nos.includes(moNo))?.name ?? null, [moGroups]);
+  const [groupFor, setGroupFor] = useState<string[] | null>(null);   // จับเข้ากลุ่มจากแผงรายละเอียด (ทีละใบ)
   const GroupCell = ({ moNo }: { moNo: string }) => { const g = groupNameOf(moNo); return g ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{g}</span> : <span className="text-slate-300">—</span>; };
   // โหมดจัดกลุ่ม (เลือกได้): ไม่จัด / ตามกลุ่ม / ตามความพร้อม(รอจ่าย) หรือ ตามสถานะ(จ่ายแล้ว)
   const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready" | "stage" | "brand">("none");
@@ -3694,24 +3686,21 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     { key: "stage", header: "ขั้นตอน", group: "ผลิต", defaultHidden: hid("stage"), width: touch ? "13rem" : "11.75rem", sortLabel: "ขั้นตอน", sortValue: (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][1],
       cell: (m) => dc.stage === "dots" ? <MoStepDots m={m} p={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0} />
         : <StageText m={m} p={prog?.[m.mo_no]} late={lateDays(m)} pill={dc.stage === "pill"} /> },
-    // จอคอม: ดับเบิลคลิกที่วัน = แก้ได้เลย · iPad / ชุดหน้าตาปิด "แก้ในตาราง": อ่านอย่างเดียว (แก้ในเช็กลิสต์)
+    // กำหนดส่ง: กดช่อง = กางแท็บ 📅 กำหนดส่ง (แก้วัน + แบ่งงวดส่ง) — ในตารางเป็นตัวหนังสืออย่างเดียว
     { key: "due", header: "กำหนดส่ง", group: "อื่น ๆ", defaultHidden: hid("due"), width: "11rem", sortLabel: "กำหนดส่ง (วันที่ใกล้สุด)",
       sortValue: (m) => [m.due_date, m.internal_due_date].filter((d): d is string => !!d).sort()[0] ?? "9999",
       cell: (m) => <div className="space-y-0.5">
         {([["due", "📦", m.due_date, "ลูกค้า"], ["internal", "🪑", m.internal_due_date, "ภายใน"]] as const).map(([f, ic, v, lb]) => (
-          <span key={f} className="flex items-center gap-1 text-[12px]" title={touch || !dc.edit ? `ส่ง${lb}` : `ส่ง${lb} — ดับเบิลคลิกเพื่อแก้`}>
+          <span key={f} className="flex items-center gap-1 text-[12px]" title={`ส่ง${lb} — กดเพื่อแก้วัน / แบ่งงวดส่ง`}>
             <span className="w-4 shrink-0 text-[11px]">{ic}</span>
-            {touch || !dc.edit ? <span className="whitespace-nowrap">{
+            <span className="whitespace-nowrap">{
               !v || dc.due === "both" ? dueText(v)
                 : dc.due === "date" ? <span className="tabular-nums">{dueDateText(v.slice(0, 10))}</span>
                 : <span className={daysLeftClass(v)}>{daysLeftText(v)}</span>
-            }</span> : <>
-              <InlineEdit type="date" trigger="dblclick" compact width="7.25rem" disabled={!canEdit} value={v ?? ""} placeholder="— ยังไม่กำหนด —"
-                onSave={(x) => void saveMoDate(m.id, f, x)} />
-              {v && dc.due !== "date" && <span className={`text-[10px] whitespace-nowrap ${daysLeftClass(v)}`}>{daysLeftText(v)}</span>}
-            </>}
+            }</span>
           </span>
         ))}
+        {deliveryPlans.some((p) => p.mo_id === m.id) && <span className="text-[10px] text-indigo-600">📦 แบ่ง {deliveryPlans.filter((p) => p.mo_id === m.id).length} งวด</span>}
       </div> },
     ...(canSeeMoney ? [
       { key: "price", header: "🏷 ราคาขาย/ชิ้น", label: "ราคาขาย/ชิ้น", group: "เงิน", isNew: true, defaultHidden: hid("price"), width: "7rem", align: "right",
@@ -3758,19 +3747,31 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     for (const m of pending.filter((x) => ids.has(x.id))) { const r = rateOf(m); if (r > 0) init[m.id] = String(r); }
     setDispRateBy(init); setDispRate(""); setDispDate2(todayLocal()); setDispOpen(true); setDispMsg("");
   };
-  // แถวที่กางออก = ของที่ยังไม่ครบของใบนั้น (ของกลาง MoShortMaterials) + ปุ่มไปเช็กลิสต์ (iPad: ปุ่มใหญ่ + จ่ายงานใบนี้)
+  // งวดส่ง (API เดียวกับเช็กลิสต์ /api/mo/delivery-plan)
+  const addPlan = useCallback(async (moId: string, date: string, qty: number, note: string) => {
+    const r = await apiSave(toast, "/api/mo/delivery-plan", { method: "POST", body: { mo_id: moId, due_date: date, qty, note: note || null } },
+      { ok: `เพิ่มงวดส่ง ${fmt(qty)} ชิ้นแล้ว`, fail: "เพิ่มงวดส่งไม่สำเร็จ" });
+    if (r.ok) onReload?.();
+    return r.ok;
+  }, [toast, onReload]);
+  const delPlan = useCallback(async (id: string) => {
+    const r = await apiSave(toast, `/api/mo/delivery-plan?id=${encodeURIComponent(id)}`, { method: "DELETE" },
+      { ok: "ลบงวดส่งแล้ว (จำนวนกลับไปเป็นยังไม่แบ่งงวด)", fail: "ลบงวดส่งไม่สำเร็จ" });
+    if (r.ok) onReload?.();
+  }, [toast, onReload]);
+  // แถวที่กางออก = แผงรายละเอียด 8 แท็บ (./pend-detail) — เปิดที่แท็บของช่องที่กด
   const renderPendDetail = (m: PendingMO) => (
-    <div className="flex flex-col lg:flex-row gap-3">
-      <div className="flex-1 min-w-0"><MoShortMaterials moNo={m.mo_no} /></div>
-      <div className={`${touch ? "lg:w-64" : "lg:w-56"} shrink-0 space-y-2`}>
-        <button type="button" onClick={() => onOpenMO(m)} className={`w-full ${touch ? "h-11 text-sm" : "h-8 text-xs"} px-3 font-medium rounded-lg bg-slate-800 text-white hover:bg-slate-700`}>📋 เปิดเช็กลิสต์เตรียม/ตัด</button>
-        {touch && canEdit && m.remaining > 0 && (
-          <button type="button" onClick={() => { const ids = new Set([m.id]); setSel(ids); openDispatchFor(ids); }}
-            className="w-full h-11 px-3 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">🚚 จ่ายงานใบนี้ ({fmt(m.remaining)} ชิ้น)</button>
-        )}
-        <p className="text-[11px] text-slate-400 leading-snug">ขอซื้อ · รับของ · ติ๊กเตรียม/ตัด · แก้วันส่ง ทำต่อได้ในเช็กลิสต์ (แท็บวัตถุดิบ และแท็บของซื้อ)</p>
-      </div>
-    </div>
+    <PendDetail m={m} pane={openPane[m.id] ?? "job"} onPane={(pane) => setOpenPane((prev) => ({ ...prev, [m.id]: pane }))} onClose={() => showPane(m.id, null)}
+      touch={touch} canEdit={canEdit} prog={prog?.[m.mo_no]} received={recvByMo.get(m.mo_no) ?? 0}
+      wos={workOrders.filter((w) => w.mo_no === m.mo_no)} plans={deliveryPlans.filter((p) => p.mo_id === m.id)}
+      groupName={groupNameOf(m.mo_no)} rate={rateOf(m)} valueNode={canSeeMoney ? valueCell(m) : undefined}
+      onOpenChecklist={() => onOpenMO(m)}
+      onDispatch={() => { const ids = new Set([m.id]); setSel(ids); openDispatchFor(ids); }}
+      onAssignGroup={() => setGroupFor([m.mo_no])}
+      onChanged={() => onReload?.()}
+      onSaveDue={(field, value) => void saveMoDate(m.id, field, value)}
+      onAddPlan={(date, qty, note) => addPlan(m.id, date, qty, note)}
+      onDelPlan={delPlan} />
   );
   // iPad แนวตั้ง — 1 ใบ = 1 การ์ด
   const renderPendCard = (m: PendingMO) => (
@@ -4013,6 +4014,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       <MiniTable
         rows={pendShown} rowKey={(m) => m.id} columns={dev === "ipadP" ? pendCols : pendColsShown} onRowClick={onPendRow}
         expandedKeys={expanded} renderExpanded={dc.expand ? renderPendDetail : undefined}
+        onCellClick={dev !== "ipadP" ? onPendCell : undefined} activeCell={(m) => PANE_COL[openPane[m.id] ?? ""] ?? null}
         touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
         layout={dev === "ipadP" ? "cards" : "table"} renderCard={renderPendCard}
         countUnit="ใบ"
@@ -4051,13 +4053,14 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : pendGroup === "brand" ? "จัดกลุ่มตามแบรนด์" : "จัดกลุ่มตามความพร้อม"}
         grouped={pendGroup !== "none"} onGroupedChange={(v) => pickGroup(v ? (pendGroup === "none" ? lastGroupRef.current : pendGroup) : "none")}
         groupExtra={groupSum}
-        footnote={dc.show.foot ? `${touch ? "แตะ" : "กด"}${dev === "ipadP" ? "การ์ด" : "แถว"} = ${dc.expand ? "กางดูของที่ยังไม่ครบ" : "เปิดเช็กลิสต์"} · 📋 = เปิดเช็กลิสต์เต็ม${dc.stage === "dots" ? ` · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน${touch ? "" : " (ชี้ที่จุดเพื่อดูตัวเลข)"}` : ""}${canSeeMoney ? ` · ราคาต่ำกว่า ฿${PRICE_MIN} หรือยังไม่ตั้ง = ไม่นับรวมยอด` : ""}` : undefined}
+        footnote={dc.show.foot ? `${dc.expand ? (dev === "ipadP" ? `${touch ? "แตะ" : "กด"}การ์ด = กางรายละเอียด (สลับแท็บได้)` : `${touch ? "แตะ" : "กด"}ช่องไหน = กางรายละเอียดเรื่องนั้น (ซื้อของ → BOM · สินค้า → รายละเอียดงาน · กำหนดส่ง → แก้วัน/งวดส่ง · เตรียม/ตัด → ติ๊กได้ · เหลือ → จ่ายงาน)`) : `${touch ? "แตะ" : "กด"}แถว = เปิดเช็กลิสต์`} · 📋 = เปิดเช็กลิสต์เต็ม${dc.stage === "dots" ? ` · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน${touch ? "" : " (ชี้ที่จุดเพื่อดูตัวเลข)"}` : ""}${canSeeMoney ? ` · ราคาต่ำกว่า ฿${PRICE_MIN} หรือยังไม่ตั้ง = ไม่นับรวมยอด` : ""}` : undefined}
         emptyText="ไม่มีงานรอจ่าย"
         noMatchText={(q) => `ไม่พบ “${q}” ในแท็บรอจ่าย${qfEff !== "all" ? " (มีปุ่มกรองด่วนเปิดอยู่)" : ""}`}
       />
       </>)}
       </div>
-      {assignOpen &&<AssignToGroupModal moNos={selMoNos} onClose={() => setAssignOpen(false)} onDone={() => { setSel(new Set()); onReload?.(); }} />}
+      {assignOpen &&<AssignToGroupModal moNos={selMoNos} onClose={() => setAssignOpen(false)} onDone={() => { setSel(new Set()); void loadGroups(); onReload?.(); }} />}
+      {groupFor && <AssignToGroupModal moNos={groupFor} onClose={() => setGroupFor(null)} onDone={() => { setGroupFor(null); void loadGroups(); onReload?.(); }} />}
       {dueOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setDueOpen(false)}>
           <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
