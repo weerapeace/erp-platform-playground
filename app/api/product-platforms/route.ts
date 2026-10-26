@@ -8,155 +8,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditMany } from "@/lib/audit";
+import { loadListingContext } from "@/lib/product-listing-context";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// ตรรกะประกอบข้อมูล (ตัวสี/ตัวขาย · รวมรูป · น้ำหนัก/กล่อง · หมวดกลาง→ร้าน) อยู่ที่ของกลาง lib/product-listing-context
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.view"); if (denied) return denied;
   const parentId = (new URL(request.url).searchParams.get("parent_sku_id") ?? "").trim();
   if (!parentId) return NextResponse.json({ error: "ต้องระบุ parent_sku_id" }, { status: 400 });
-  const admin = supabaseAdmin();
-
-  const [{ data: parent }, { data: pf }, { data: drafts }, { data: skus }, { data: slots }, { data: descU }, { data: galleryAtts }, { data: matchedL }] = await Promise.all([
-    admin.from("parent_skus_v2").select("id, code, name_th, name_en, name_platform, introduction, description, platform_description, english_description, cover_image_r2_key, category_id, platform_category_id, brand_id, weight_g, parcel_size_id").eq("id", parentId).maybeSingle(),
-    admin.from("erp_platforms").select("id, code, name_th, name_en, icon_key, theme_color, capabilities, sort_order").eq("is_active", true).order("sort_order", { ascending: true }),
-    admin.from("platform_listing_drafts").select("platform_id, title, description, category_path, status, image_keys, description_image_keys, extra, platform_product_id, review_link, last_sync_status, last_synced_at, last_error, validation").eq("parent_sku_id", parentId),
-    admin.from("skus_v2").select("id, code, name_th, color, color_th, list_price, fake_price, cover_image_r2_key, is_active, attribute_values").eq("parent_sku_id", parentId).order("code", { ascending: true }),
-    admin.from("product_image_slots").select("r2_key").eq("owner_id", parentId),
-    admin.from("asset_usages").select("asset_id, sort_order").eq("module", "parent_sku_description").eq("record_id", parentId).order("sort_order", { ascending: true }),
-    // แกลเลอรีจริงของ Parent SKU ("รูปภาพเพิ่มเติม") — เก็บใน erp_playground_attachments (ไม่ใช่ product_image_slots)
-    admin.from("erp_playground_attachments").select("file_path, is_primary, sort_order").eq("entity_type", "parent_skus_v2").eq("entity_id", parentId).order("is_primary", { ascending: false }).order("sort_order", { ascending: true }),
-    // สินค้าบนร้าน (platform_catalog_listings) ที่จับคู่กับสินค้านี้อยู่ — ต่อแพลตฟอร์ม
-    admin.from("platform_catalog_listings").select("platform_id, id, title, external_product_id, sku_code").eq("matched_parent_sku_id", parentId),
-  ]);
-  // matchedListings: platform_id → listing ที่จับคู่ (ตัวแรกต่อร้าน)
-  const matchedListings: Record<string, { id: string; title: string | null; external_id: string | null; sku_code: string | null }> = {};
-  for (const l of ((matchedL ?? []) as Record<string, unknown>[])) {
-    const pid = String(l.platform_id);
-    if (!matchedListings[pid]) matchedListings[pid] = { id: String(l.id), title: (l.title as string) ?? null, external_id: (l.external_product_id as string) ?? null, sku_code: (l.sku_code as string) ?? null };
-  }
-  const pRow = (parent ?? {}) as Record<string, unknown>;
-  const categoryId = (pRow.category_id as string) ?? null;
-  const platformCategoryId = (pRow.platform_category_id as string) ?? null;   // "หมวดกลางสำหรับลงขาย" → key ของ mapping ต่อแพลตฟอร์ม
-  const brandId = (pRow.brand_id as string) ?? null;
-
-  // auto-fill ฟิลด์ LINE: น้ำหนัก (weight_g → kg) + ขนาดกล่องไปรษณีย์ (parcel_sizes)
-  const weightG = pRow.weight_g != null ? Number(pRow.weight_g) : null;
-  const weightKg = weightG != null && Number.isFinite(weightG) ? Number((weightG / 1000).toFixed(3)) : null;
-  const box: { w: number | null; l: number | null; h: number | null } = { w: null, l: null, h: null };
-  const parcelId = (pRow.parcel_size_id as string) ?? null;
-  if (parcelId) {
-    const { data: pc } = await admin.from("parcel_sizes").select("width_cm, length_cm, height_cm").eq("id", parcelId).maybeSingle();
-    const pcr = pc as Record<string, unknown> | null;
-    if (pcr) { box.w = pcr.width_cm != null ? Number(pcr.width_cm) : null; box.l = pcr.length_cm != null ? Number(pcr.length_cm) : null; box.h = pcr.height_cm != null ? Number(pcr.height_cm) : null; }
-  }
-
-  // ร้านตามแบรนด์ (แบรนด์ × แพลตฟอร์ม) — โชว์ว่าแพลตฟอร์มไหนมีร้านพร้อม publish
-  const accounts: Record<string, { label: string | null; is_active: boolean; external_shop_id: string | null }> = {};
-  let brandName: string | null = null;
-  if (brandId) {
-    const [{ data: accts }, { data: br }] = await Promise.all([
-      admin.from("platform_accounts").select("platform_id, label, is_active, external_shop_id").eq("brand_id", brandId),
-      admin.from("brands").select("name").eq("id", brandId).maybeSingle(),
-    ]);
-    for (const a of ((accts ?? []) as Record<string, unknown>[])) accounts[String(a.platform_id)] = { label: (a.label as string) ?? null, is_active: a.is_active !== false, external_shop_id: (a.external_shop_id as string) ?? null };
-    brandName = (br as { name?: string } | null)?.name ?? null;
-  }
-
-  // ชื่อหมวดสินค้าทั่วไป (แสดงเฉย ๆ)
-  let categoryName: string | null = null;
-  if (categoryId) {
-    const { data: cat } = await admin.from("product_categories").select("display_name, name").eq("id", categoryId).maybeSingle();
-    categoryName = ((cat as { display_name?: string; name?: string } | null)?.display_name) ?? ((cat as { name?: string } | null)?.name) ?? null;
-  }
-
-  // "หมวดกลางสำหรับลงขาย" (platform_central_categories) + mapping ต่อแพลตฟอร์ม
-  // เลือกหมวดกลาง 1 ครั้ง → หมวดของแต่ละร้านเติมอัตโนมัติตามที่จับคู่ไว้ (/master/platform-categories)
-  let platformCategoryName: string | null = null;
-  const mappings: Record<string, string> = {};
-  if (platformCategoryId) {
-    const [{ data: pcat }, { data: maps }] = await Promise.all([
-      admin.from("platform_central_categories").select("name").eq("id", platformCategoryId).maybeSingle(),
-      admin.from("platform_category_mappings").select("platform_id, platform_category_path").eq("central_category_id", platformCategoryId),
-    ]);
-    platformCategoryName = (pcat as { name?: string } | null)?.name ?? null;
-    for (const m of ((maps ?? []) as Record<string, unknown>[])) mappings[String(m.platform_id)] = (m.platform_category_path as string) ?? "";
-  }
-
-  const platforms = ((pf ?? []) as Record<string, unknown>[]).map((p) => ({
-    id: String(p.id), code: String(p.code ?? ""), name_th: String(p.name_th ?? p.code ?? ""),
-    icon_key: (p.icon_key as string) ?? null, theme_color: (p.theme_color as string) ?? null,
-    capabilities: (p.capabilities as Record<string, unknown>) ?? {},
-  }));
-  const draftMap: Record<string, unknown> = {};
-  for (const d of ((drafts ?? []) as Record<string, unknown>[])) draftMap[String(d.platform_id)] = d;
-  // โครง 3 ชั้น: parent → ตัวสี (master) → ตัวขาย (variant)
-  // "ตัวสี" = SKU ที่รหัสเป็น "ฐาน" ของตัวขาย (เช่น WK42-01 เป็นฐานของ WK42-01D/N/G) → ซ่อนจากตาราง platform
-  // ตัวขาย ดึงรูป/ราคา จากตัวสีเมื่อไม่มีของตัวเอง (baseOf = ตัดตัวอักษรท้ายที่ตามหลังตัวเลข)
-  const skuRows = ((skus ?? []) as Record<string, unknown>[]);
-  const baseOf = (code: string): string | null => { const m = code.match(/^(.*\d)[A-Za-z]+$/); return m ? m[1] : null; };
-  const byCode = new Map(skuRows.map((s) => [String(s.code ?? ""), s]));
-  const masterCodes = new Set<string>();
-  for (const s of skuRows) { const b = baseOf(String(s.code ?? "")); if (b && byCode.has(b)) masterCodes.add(b); }
-
-  const variants = skuRows
-    .filter((s) => !masterCodes.has(String(s.code ?? "")))   // โชว์เฉพาะตัวขาย/เดี่ยว (ซ่อนตัวสี)
-    .map((s) => {
-      const code = String(s.code ?? "");
-      const base = baseOf(code);
-      const master = base ? byCode.get(base) : null;   // ตัวสีของตัวขายนี้
-      // ราคา: fake_price (เต็ม) + list_price (ขาย) · ไม่มีของตัวเอง → ดึงจากตัวสี · ส่วนลด = เต็ม − ขาย
-      const ownFake = s.fake_price == null ? null : Number(s.fake_price);
-      const ownSale = s.list_price == null ? null : Number(s.list_price);
-      const mFake = master && master.fake_price != null ? Number(master.fake_price) : null;
-      const mSale = master && master.list_price != null ? Number(master.list_price) : null;
-      const fake_price = ownFake != null ? ownFake : mFake;
-      const sale_price = ownSale != null ? ownSale : mSale;
-      const discount = (fake_price != null && sale_price != null && fake_price > sale_price) ? (fake_price - sale_price) : 0;
-      const ownImg = (s.cover_image_r2_key as string) ?? null;
-      const masterImg = master ? ((master.cover_image_r2_key as string) ?? null) : null;
-      const image_key = ownImg || masterImg;   // ไม่มีรูปตัวเอง → ดึงจากตัวสี
-      const av = (s.attribute_values && typeof s.attribute_values === "object") ? s.attribute_values as Record<string, unknown> : {};
-      const vo = (av.variant_option && typeof av.variant_option === "object") ? av.variant_option as Record<string, unknown> : null;
-      return {
-        id: String(s.id), code, name: (s.name_th as string) ?? "",
-        color: (s.color_th as string) ?? (s.color as string) ?? null, fake_price, sale_price, discount, image_key,
-        is_active: s.is_active !== false,
-        has_price: fake_price != null && fake_price > 0, has_image: !!image_key,
-        inherited_image: !ownImg && !!masterImg,
-        option_name: vo ? (String(vo.name ?? "").trim() || null) : null,
-        option_value: vo ? (String(vo.value ?? "").trim() || null) : null,
-      };
-    });
-
-  // รวมรูปที่เลือกส่งได้: ปก parent + แกลเลอรี parent + ปกตัวสี + รูปประจำตัวขาย (dedup)
-  const seen = new Set<string>();
-  const images: { key: string; source: string }[] = [];
-  const addImg = (key: string | null | undefined, source: string) => { const k = (key ?? "").trim(); if (k && !seen.has(k)) { seen.add(k); images.push({ key: k, source }); } };
-  addImg(pRow.cover_image_r2_key as string, "ปก");
-  for (const a of ((galleryAtts ?? []) as Record<string, unknown>[])) addImg(a.file_path as string, a.is_primary ? "รูปหลัก" : "แกลเลอรี");
-  for (const s of ((slots ?? []) as Record<string, unknown>[])) addImg(s.r2_key as string, "แกลเลอรี");
-  for (const s of skuRows) if (masterCodes.has(String(s.code ?? ""))) addImg((s.cover_image_r2_key as string) ?? null, `สี ${(s.color_th as string) || (s.color as string) || String(s.code)}`);
-  for (const v of variants) addImg(v.image_key, `SKU ${v.code}`);
-
-  // รูป "รายละเอียด (Description)" — แยกชุด (ไม่ปนกับรูปสินค้าหลัก) → เลือกส่งเป็นภาพประกอบรายละเอียด
-  // (asset_usages module=parent_sku_description → assets.r2_key)
-  const descImages: { key: string; source: string }[] = [];
-  const descSeen = new Set<string>();
-  const descIds = ((descU ?? []) as Record<string, unknown>[]).map((x) => String(x.asset_id)).filter(Boolean);
-  if (descIds.length) {
-    const { data: descAssets } = await admin.from("assets").select("id, r2_key").in("id", descIds).eq("status", "active");
-    const keyById = new Map(((descAssets ?? []) as Record<string, unknown>[]).map((a) => [String(a.id), (a.r2_key as string) ?? null]));
-    let dn = 1;
-    for (const id of descIds) { const k = (keyById.get(id) ?? "").trim(); if (k && !descSeen.has(k)) { descSeen.add(k); descImages.push({ key: k, source: `Description ${dn}` }); } dn++; }
-  }
-
-  return NextResponse.json({
-    parent: parent ? { id: String(pRow.id), code: pRow.code ?? "", name_th: pRow.name_th ?? "", name_platform: pRow.name_platform ?? "", description: (pRow.platform_description || pRow.description) ?? "", category_id: categoryId, category_name: categoryName, platform_category_id: platformCategoryId, platform_category_name: platformCategoryName, brand_name: brandName, weight_kg: weightKg, box_width: box.w, box_length: box.l, box_height: box.h } : null,
-    platforms, drafts: draftMap, variants, mappings, images, descImages, accounts, matchedListings, error: null,
-  });
+  const ctx = await loadListingContext(supabaseAdmin(), parentId);
+  return NextResponse.json({ ...ctx, error: null });
 }
 
 const FIELDS = ["title", "description", "category_path", "status", "image_keys", "description_image_keys"] as const;
@@ -181,15 +45,21 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
 
   // ตั้ง "หมวดกลางสำหรับลงขาย" ของสินค้า (parent_skus_v2.platform_category_id)
+  // สินค้าเดียว: parent_sku_id · หลายสินค้าพร้อมกัน (หน้า 📤 ลงสินค้าบนแพลตฟอร์ม): parent_sku_ids[] ≤ 500
   if (body.set_platform_category) {
-    const pid = String(body.parent_sku_id ?? "").trim();
-    if (!pid) return NextResponse.json({ error: "ต้องมี parent_sku_id" }, { status: 400 });
+    const ids = Array.isArray(body.parent_sku_ids)
+      ? [...new Set((body.parent_sku_ids as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean))]
+      : [String(body.parent_sku_id ?? "").trim()].filter(Boolean);
+    if (!ids.length) return NextResponse.json({ error: "ต้องมี parent_sku_id" }, { status: 400 });
+    if (ids.length > 500) return NextResponse.json({ error: "ตั้งได้สูงสุด 500 สินค้าต่อครั้ง" }, { status: 400 });
     const central = String(body.platform_category_id ?? "").trim() || null;
     const admin1 = supabaseAdmin();
-    const { error } = await admin1.from("parent_skus_v2").update({ platform_category_id: central }).eq("id", pid);
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    await writeAudit(admin1, { action: "update", entityType: "parent_sku", entityId: pid, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { platform_category_id: central } });
-    return NextResponse.json({ ok: true, error: null });
+    for (let i = 0; i < ids.length; i += 200) {
+      const { error } = await admin1.from("parent_skus_v2").update({ platform_category_id: central }).in("id", ids.slice(i, i + 200));
+      if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    await writeAuditMany(admin1, ids.map((pid) => ({ action: "update", entityType: "parent_sku", entityId: pid, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { platform_category_id: central, parent_sku_id: pid, bulk: ids.length > 1 } })));
+    return NextResponse.json({ ok: true, updated: ids.length, error: null });
   }
 
   const parent_sku_id = String(body.parent_sku_id ?? "").trim();

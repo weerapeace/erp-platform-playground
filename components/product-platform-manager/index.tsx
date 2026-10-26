@@ -17,6 +17,7 @@ import { useDrawerResize } from "@/lib/use-drawer-resize";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { apiFetch } from "@/lib/api";
 import { requiredChecks } from "@/lib/platform-required-fields";
+import { listingCtx } from "@/lib/platform-listing-builder";
 import { PlatformIcon } from "@/components/platform-icon";
 
 // ตัวแก้สินค้ากลาง (SKU) — เปิดจากตัวจัดการเพื่อแก้ราคา/สี/รูป หรือเพิ่มสีใหม่ · dynamic กัน import วน
@@ -29,7 +30,7 @@ type Draft = { title?: string | null; description?: string | null; category_path
 type ParentInfo = { id: string; code: string; name_th: string; name_platform: string; description: string; category_id: string | null; category_name: string | null; platform_category_id: string | null; platform_category_name: string | null; brand_name: string | null; weight_kg: number | null; box_width: number | null; box_length: number | null; box_height: number | null };
 type ImageItem = { key: string; source: string };
 type Account = { label: string | null; is_active: boolean; external_shop_id?: string | null };
-type Variant = { id: string; code: string; name: string; color: string | null; fake_price: number | null; sale_price: number | null; discount: number; image_key: string | null; is_active: boolean; has_price: boolean; has_image: boolean; option_name?: string | null; option_value?: string | null };
+type Variant = { id: string; code: string; name: string; color: string | null; fake_price: number | null; sale_price: number | null; discount: number; image_key: string | null; is_active: boolean; sale_ok?: boolean; has_price: boolean; has_image: boolean; option_name?: string | null; option_value?: string | null };
 type Toast = { id: number; type: "success" | "error" | "info"; msg: string };
 
 
@@ -488,16 +489,17 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
     } catch (e) { toast("error", (e as Error).message); } finally { setPublishing(false); }
   };
 
-  // เช็คลิสต์ "ฟิลด์จำเป็น" ตามแพลตฟอร์มที่เลือก (LINE มี spec เฉพาะ · อื่น ๆ ใช้ชุดทั่วไป)
+  // เช็คลิสต์ "ฟิลด์จำเป็น" ตามแพลตฟอร์มที่เลือก (LINE / Lazada มี spec เฉพาะ · อื่น ๆ ใช้ชุดทั่วไป)
+  // ค่าที่ตัวตรวจใช้ประกอบจากของกลาง listingCtx — ตัวเดียวกับหน้า 📤 ลงสินค้าบนแพลตฟอร์ม
   const checks = useMemo(() => {
-    const allHavePrice = variants.length > 0 && variants.every((v) => v.has_price);
-    const allHaveImage = variants.length > 0 && variants.every((v) => v.has_image);
     const code = platforms.find((p) => p.id === active)?.code ?? "";
-    return requiredChecks(code, {
-      title, description, category: (activeDraft.category_path ?? "") as string,
-      imagesToSend: (activeDraft.image_keys ?? []).length, variantCount: variants.length, allHavePrice, allHaveImage,
-    });
-  }, [title, description, variants, activeDraft.category_path, activeDraft.image_keys, platforms, active]);
+    const extra = (activeDraft.extra ?? {}) as Record<string, unknown>;
+    return requiredChecks(code, listingCtx({
+      platformCode: code, title, description, category: (activeDraft.category_path ?? "") as string,
+      imageCount: (activeDraft.image_keys ?? []).length, variants, parent: parent ?? {},
+      brand: (typeof extra.brand === "string" && extra.brand.trim()) ? extra.brand : parent?.brand_name ?? null,
+    }));
+  }, [title, description, variants, parent, activeDraft.category_path, activeDraft.image_keys, activeDraft.extra, platforms, active]);
   const ready = checks.every((c) => !c.required || c.ok);
 
   // ตัวเลือกชั้นที่ 2 (เช่น แบบพิมพ์) + จัดกลุ่มตามสี — โชว์คอลัมน์/กลุ่มเฉพาะเมื่อมีประโยชน์
@@ -523,6 +525,8 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
   ], [canEdit, savePrice, hasOption, optionName]);
 
   const activePf = platforms.find((p) => p.id === active);
+  // ร้านนี้ลงสินค้าจริงผ่านปุ่ม "ลงขาย" ได้ไหม (มีตัวเชื่อม API) — ไม่มี = เตรียม/บันทึกร่างได้อย่างเดียว
+  const canRealPublish = activePf?.capabilities?.api === true;
 
   if (!mounted) return null;
   return createPortal(
@@ -757,7 +761,7 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
                   <p className="text-xs font-medium text-slate-600 mb-2">ฟิลด์จำเป็นของ {activePf?.name_th ?? "แพลตฟอร์ม"}</p>
                   <ul className="space-y-1">
                     {checks.map((c, i) => (
-                      <li key={i} className={`text-xs flex items-center gap-2 ${c.ok ? "text-slate-600" : c.required ? "text-rose-600" : "text-amber-600"}`}><span>{c.ok ? "✓" : "✗"}</span>{c.label}{!c.required && <span className="text-[10px] text-slate-400">(แนะนำ)</span>}</li>
+                      <li key={i} className={`text-xs flex items-start gap-2 ${c.ok ? "text-slate-600" : c.required ? "text-rose-600" : "text-amber-600"}`}><span>{c.ok ? "✓" : c.required ? "✗" : "⚠"}</span><span>{c.label}{!c.required && <span className="text-[10px] text-slate-400"> (แนะนำ)</span>}{!c.ok && c.note && <span className="text-[11px] text-slate-500"> — {c.note}</span>}</span></li>
                     ))}
                   </ul>
                   {activePf?.code === "line_shopping" && (
@@ -816,11 +820,12 @@ export function ProductPlatformManager({ parentSkuId, onClose, canEdit = true, c
             )}
 
             <div className="border-t border-slate-200 px-5 py-3 flex items-center justify-between gap-2 shrink-0">
-              <span className="text-[11px] text-slate-400">{dirty ? <span className="text-amber-600 font-medium">● มีข้อมูลที่ยังไม่บันทึก</span> : "แก้แล้วกด “บันทึก” · ลงขายเป็นแบบจำลอง (mock)"}</span>
+              <span className="text-[11px] text-slate-400">{dirty ? <span className="text-amber-600 font-medium">● มีข้อมูลที่ยังไม่บันทึก</span> : canRealPublish ? "แก้แล้วกด “บันทึก” · ลงขายเป็นแบบจำลอง (mock)" : `แก้แล้วกด “บันทึก” · ${activePf?.name_th ?? "ร้านนี้"} ยังไม่เปิดลงสินค้าจริง (บันทึกร่างได้)`}</span>
               <div className="flex items-center gap-2 shrink-0">
                 <button onClick={() => { if (!dirty || window.confirm("มีข้อมูลที่ยังไม่ได้บันทึก — ออกโดยไม่บันทึก?")) onClose(); }} className="h-9 px-4 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>
                 {canEdit && <button onClick={saveAll} disabled={!dirty || savingAll} className={`h-9 px-4 text-sm font-medium rounded-lg ${dirty ? "text-white bg-emerald-600 hover:bg-emerald-700" : "text-slate-400 bg-slate-100 cursor-not-allowed"} disabled:opacity-60`}>{savingAll ? "กำลังบันทึก..." : "💾 บันทึก"}</button>}
-                {canPublish && <button onClick={publishOnePlatform} disabled={!canPublish || publishing || !ready || !account?.is_active} title={!canPublish ? "ไม่มีสิทธิ์ลงขาย" : !account?.is_active ? "ยังไม่มีร้าน" : !ready ? "ข้อมูลยังไม่ครบ" : ""} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed">{publishing ? "..." : published ? "🔄 ส่ง update" : "📤 ลงขาย"}</button>}
+                {canPublish && !canRealPublish && <button disabled title={`ยังไม่ได้เชื่อม ${activePf?.name_th ?? "ร้านนี้"} แบบลงสินค้าจริง — ตอนนี้บันทึกร่างไว้ก่อน`} className="h-9 px-4 text-sm font-medium text-slate-500 bg-slate-200 rounded-lg cursor-not-allowed">ยังไม่เปิดลงสินค้าจริง</button>}
+                {canPublish && canRealPublish && <button onClick={publishOnePlatform} disabled={!canPublish || publishing || !ready || !account?.is_active} title={!canPublish ? "ไม่มีสิทธิ์ลงขาย" : !account?.is_active ? "ยังไม่มีร้าน" : !ready ? "ข้อมูลยังไม่ครบ" : ""} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:bg-slate-300 disabled:cursor-not-allowed">{publishing ? "..." : published ? "🔄 ส่ง update" : "📤 ลงขาย"}</button>}
               </div>
             </div>
           </>

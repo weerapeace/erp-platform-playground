@@ -2,6 +2,8 @@
 // platform-publish (server-only) — service กลางลงขายขึ้นแพลตฟอร์ม (เฟส 2)
 // pipeline ในบ้าน: validate → หาร้านตามแบรนด์ → สร้าง job → connector → เก็บผล/สถานะ/audit
 // ตอนนี้ใช้ mock connector (ยังไม่มี API key จริง) · ต่อ connector จริงทีละแพลตฟอร์มได้ทีหลัง
+// ⛔ ร้านที่ยังไม่มีตัวเชื่อมจริง (erp_platforms.capabilities.api ≠ true เช่น Lazada/Shopee/TikTok) ห้ามลงขายจำลอง
+//    — เดิมกดแล้วร่างขึ้น "ลงขายแล้ว" พร้อมรหัสปลอม MOCK-… ทำให้ตอนต่อจริงเข้าใจผิดว่าลงแล้ว (ใช้ "เตรียมลงสินค้า" แทน)
 // ============================================================
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { writeAudit } from "@/lib/audit";
@@ -34,12 +36,13 @@ function mockConnector(platformCode: string): { platform_product_id: string; rev
 export async function publishOne(admin: Admin, parentSkuId: string, platformId: string, userId: string | null): Promise<{ platform_product_id: string; review_link: string | null }> {
   const [{ data: parent }, { data: platform }, { data: draft }, { data: skus }] = await Promise.all([
     admin.from("parent_skus_v2").select("id, code, brand_id").eq("id", parentSkuId).maybeSingle(),
-    admin.from("erp_platforms").select("id, code, name_th").eq("id", platformId).maybeSingle(),
+    admin.from("erp_platforms").select("id, code, name_th, capabilities").eq("id", platformId).maybeSingle(),
     admin.from("platform_listing_drafts").select("*").eq("parent_sku_id", parentSkuId).eq("platform_id", platformId).maybeSingle(),
     admin.from("skus_v2").select("list_price, cover_image_r2_key, is_active").eq("parent_sku_id", parentSkuId),
   ]);
   if (!parent) throw new Error("ไม่พบสินค้า");
   if (!platform) throw new Error("ไม่พบแพลตฟอร์ม");
+  if (platform.capabilities?.api !== true) throw new Error(`ยังไม่เปิดลงสินค้าจริงบน ${platform.name_th} — ตอนนี้ "เตรียมลงสินค้า" (บันทึกร่าง) ได้อย่างเดียว`);
   if (!draft) throw new Error("ยังไม่มีร่างสำหรับแพลตฟอร์มนี้");
 
   const variants = ((skus ?? []) as any[]).map((s) => ({ has_price: s.list_price != null && Number(s.list_price) > 0, has_image: !!s.cover_image_r2_key }));
