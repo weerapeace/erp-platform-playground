@@ -58,9 +58,12 @@ import {
   type RowMode,
 } from "@/lib/product-image-routing";
 import type { CatalogParent } from "@/app/api/product-images/catalog/route";
+import { SIMILAR_LABEL, similarRank, similarity, visualPrintOf, type SimilarLevel, type VisualPrint } from "@/lib/image-similarity";
 
 type Shop = { id: string; name: string; isDefault: boolean };
-type Item = { id: string; file: File; path: string; base: string; url: string; width: number | null; height: number | null; isPng: boolean; sig: string | null };
+type Item = { id: string; file: File; path: string; base: string; url: string; width: number | null; height: number | null; isPng: boolean; sig: string | null; /** 👀 ลายนิ้วมือภาพ (undefined = กำลังตรวจ · null = อ่านไม่ได้) */ vp?: VisualPrint | null };
+/** 👀 รูปที่หน้าตาเหมือน/คล้ายกัน (คนละไฟล์) — เตือนให้ดูด้วยตา ไม่ข้ามเอง */
+type Similar = { level: SimilarLevel; label: string; url: string };
 type GroupState = {
   key: string;
   label: string;
@@ -172,6 +175,11 @@ export function ProductImageRouter({
   // 🕘 เคยอัปแล้ว (ลายนิ้วมือ → ที่เคยลง) · หน้าประวัติชุดอัป
   const [seen, setSeen] = useState<Record<string, SeenEntry[]>>({});
   const [historyOpen, setHistoryOpen] = useState(false);
+  // 👀 รูปหน้าตาซ้ำ: ลายนิ้วมือภาพของรูปเดิมในระบบ (key → ลายนิ้วมือ) · รูปที่กด "ไม่ซ้ำ" แล้ว · หน้าต่างดูเทียบ
+  const [existingVp, setExistingVp] = useState<Record<string, VisualPrint | null>>({});
+  const [notDup, setNotDup] = useState<Set<string>>(new Set());
+  const [compareId, setCompareId] = useState<string | null>(null);
+  const existingAsked = useRef<Set<string>>(new Set());
   const [colPick, setColPick] = useState<{ n: number; dest: RouteDest }>({ n: 1, dest: "sku" });
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
@@ -200,6 +208,7 @@ export function ProductImageRouter({
     setTyped("");
     setRun(null);
     setSeen({});
+    setNotDup(new Set());
   };
   useEffect(() => () => itemsRef.current.forEach((it) => URL.revokeObjectURL(it.url)), []);
 
@@ -281,8 +290,8 @@ export function ProductImageRouter({
     // ขนาดรูป + ลายนิ้วมือ (ทีละ 4 ไฟล์ · อัปเดตหน้าจอทีละชุด)
     for (let i = 0; i < next.length; i += 4) {
       const part = next.slice(i, i + 4);
-      const facts = await Promise.all(part.map(async (it) => ({ id: it.id, dims: await readDims(it.url), sig: await fileSig(it.file) })));
-      setItems((xs) => xs.map((x) => { const f = facts.find((y) => y.id === x.id); return f ? { ...x, width: f.dims?.w ?? null, height: f.dims?.h ?? null, sig: f.sig } : x; }));
+      const facts = await Promise.all(part.map(async (it) => ({ id: it.id, dims: await readDims(it.url), sig: await fileSig(it.file), vp: await visualPrintOf(it.file) })));
+      setItems((xs) => xs.map((x) => { const f = facts.find((y) => y.id === x.id); return f ? { ...x, width: f.dims?.w ?? null, height: f.dims?.h ?? null, sig: f.sig, vp: f.vp } : x; }));
       for (const f of facts) { const it = next.find((x) => x.id === f.id); if (it) it.sig = f.sig; }
     }
     // 🕘 เคยอัปแล้วไหม (ประวัติชุดอัป) — เช็กไม่ได้ = อัปได้ตามปกติ
@@ -369,6 +378,78 @@ export function ProductImageRouter({
     return `เคยอัปแล้ว ${at}${e.by ? ` โดย ${e.by}` : ""} → ${DEST_LABEL[e.dest]}`;
   };
 
+  // ── 👀 รูปหน้าตาซ้ำ (คนละไฟล์) — เทียบในชุดนี้ + รูปเดิมของรุ่นที่ลากมา ──
+  // รูปเดิม: ใช้รูปย่อเล็กจากที่เก็บรูป (~2–3 KB/รูป) เฉพาะรุ่นที่มีโฟลเดอร์ชี้ถึง
+  const existingOf = useMemo(() => {
+    const by = new Map<string, { key: string; label: string }[]>();
+    for (const p of parents) {
+      const list: { key: string; label: string }[] = p.galleryItems.map((a, i) => ({ key: a.key, label: `รูปเดิม · แกลเลอรี ${p.code} (รูปที่ ${i + 1})` }));
+      for (const sk of p.skus) sk.items.forEach((a, i) => list.push({ key: a.key, label: `รูปเดิม · ${sk.code} ${sk.label} (รูปที่ ${i + 1})` }));
+      by.set(p.parentId, list);
+    }
+    return by;
+  }, [parents]);
+  useEffect(() => {
+    const want = [...new Set(groups.map((g) => g.target?.parentId).filter((x): x is string => !!x))]
+      .flatMap((pid) => existingOf.get(pid) ?? [])
+      .map((e) => e.key)
+      .filter((k) => !existingAsked.current.has(k))
+      .slice(0, 400);
+    if (!want.length) return;
+    want.forEach((k) => existingAsked.current.add(k));
+    let next = 0;
+    const worker = async () => {
+      while (next < want.length) {
+        const key = want[next++];
+        let vp: VisualPrint | null = null;
+        try {
+          const r = await fetch(thumbUrl(key, 96));
+          if (r.ok) vp = await visualPrintOf(await r.blob());
+        } catch {
+          /* โหลดรูปเดิมไม่ได้ = ไม่เทียบรูปนั้น */
+        }
+        setExistingVp((m) => ({ ...m, [key]: vp }));
+      }
+    };
+    void Promise.all(Array.from({ length: 6 }, worker));
+  }, [groups, existingOf]);
+  const similarOf = useMemo(() => {
+    const out = new Map<string, Similar>();
+    const earlier: { print: VisualPrint; label: string; url: string }[] = [];
+    for (const g of groups) {
+      for (const id of g.order) {
+        const it = itemById.get(id);
+        if (!it?.vp) continue;
+        const shown = `${g.label}/${it.path.split("/").pop()}`;
+        // ไฟล์เดียวกันเป๊ะ (เตือน "ซ้ำกับ" อยู่แล้ว) / กด "ไม่ซ้ำ" แล้ว / ข้ามอยู่ = ไม่ต้องเตือนซ้ำ
+        if (!dupOf.has(id) && !notDup.has(id) && g.dests[id]?.dest !== "skip") {
+          const mine = it.vp;
+          let best: Similar | null = null;
+          const consider = (print: VisualPrint, label: string, url: string) => {
+            const lv = similarity(mine, print);
+            if (lv && similarRank(lv) > similarRank(best ? best.level : null)) best = { level: lv, label, url };
+          };
+          for (const o of earlier) consider(o.print, o.label, o.url);
+          if (g.target) {
+            for (const e of existingOf.get(g.target.parentId) ?? []) {
+              const p = existingVp[e.key];
+              if (p) consider(p, e.label, thumbUrl(e.key, 800));
+            }
+          }
+          if (best) out.set(id, best);
+        }
+        earlier.push({ print: it.vp, label: shown, url: it.url });
+      }
+    }
+    return out;
+  }, [groups, itemById, dupOf, notDup, existingOf, existingVp]);
+  const similarText = (id: string) => {
+    const sm = similarOf.get(id);
+    return sm ? `👀 ${SIMILAR_LABEL[sm.level]}กับ ${sm.label}` : null;
+  };
+  const vpPending = items.filter((it) => it.vp === undefined).length;
+  const existingPending = [...existingAsked.current].filter((k) => !(k in existingVp)).length;
+
   // ── ตรวจก่อนอัป ──
   const planIn = useMemo<PlanGroupIn[]>(
     () => groups.map((g) => ({ key: g.key, label: g.label, target: g.target, images: g.order.map((id) => ({ id, base: itemById.get(id)?.base ?? "", dest: g.dests[id]?.dest ?? "skip", by: g.dests[id]?.by ?? "user" })) })),
@@ -388,6 +469,7 @@ export function ProductImageRouter({
     const d = groupOf.get(id)?.dests[id]?.dest ?? "skip";
     if (!it) return null;
     if (d !== "skip" && seenIds.has(id)) return `${seenText(id)} — จะซ้ำ`;
+    if (!dupOf.has(id) && similarOf.has(id)) return `${similarText(id)} — ดูด้วยตาก่อน`;
     return imageWarning(d, { width: it.width, height: it.height, bytes: it.file.size, isPng: it.isPng, dupOf: dupOf.get(id) ?? null }, resizeOf(id));
   };
   const uploadIds = plan.slots.flatMap((s) => s.ids);
@@ -785,6 +867,16 @@ export function ProductImageRouter({
                   </div>
                   <p className={`mt-1 text-[11px] ${resizePref.mode === "none" ? "text-amber-700" : "text-slate-500"}`}>{RESIZE_HINT[resizePref.mode]}</p>
                 </div>
+                <p className="border-t border-slate-100 pt-2 text-[11px] text-slate-500">
+                  👀 ตรวจรูปหน้าตาซ้ำ (คนละไฟล์ก็จับได้):{" "}
+                  {vpPending || existingPending ? (
+                    <span className="text-blue-600">กำลังตรวจ… เหลือ {vpPending} รูปใหม่{existingPending ? ` · ${existingPending} รูปเดิม` : ""} (จัดรูปต่อได้เลย)</span>
+                  ) : similarOf.size ? (
+                    <b className="font-medium text-amber-700">เจอรูปคล้าย {similarOf.size} รูป — กดข้อความใต้รูปเพื่อดูเทียบ</b>
+                  ) : (
+                    <span>ไม่เจอรูปคล้ายกัน</span>
+                  )}
+                </p>
                 {shopsShown.length > 0 && (
                   <div className="flex flex-wrap items-center gap-3 border-t border-slate-100 pt-2 text-xs text-slate-600">
                     <span>ลงหน้าเว็บร้าน (เฉพาะช่องรูปบนเว็บ/Hero):</span>
@@ -814,6 +906,8 @@ export function ProductImageRouter({
                         plan={plan.images}
                         warnOf={warnOf}
                         seenOf={seenText}
+                        similarOf={similarText}
+                        onCompare={(id) => setCompareId(id)}
                         sizeOf={(id) => { const it = itemById.get(id); const r = resizeOf(id); if (!it) return ""; const o = estimateBytes(it.file.size, it.width, r.width); return !r.width ? `ตัวเต็ม ${size(it.file.size)}` : o >= it.file.size ? `${size(it.file.size)} · เล็กอยู่แล้ว` : `${size(it.file.size)} → ${size(o)}`; }}
                         onTarget={(v) => setTarget(g.key, v)}
                         onRow={(m) => setRow(g.key, m)}
@@ -888,6 +982,39 @@ export function ProductImageRouter({
           </div>
         </div>
       </ERPModal>
+      {/* 👀 ดูเทียบรูปที่หน้าตาคล้ายกัน — คนตัดสินเอง (ระบบไม่ข้ามเอง) */}
+      {compareId && (() => {
+        const it = itemById.get(compareId);
+        const sm = similarOf.get(compareId);
+        const g = groupOf.get(compareId);
+        if (!it || !sm || !g) return null;
+        return (
+          <ERPModal
+            open
+            onClose={() => setCompareId(null)}
+            title={`👀 ${SIMILAR_LABEL[sm.level]} — ดูเทียบก่อน`}
+            description="ระบบดูจากหน้าตารูป (คนละไฟล์ก็จับได้) · รูปถ่ายต่อกันหรือสีใกล้กันมากอาจถูกนับว่าคล้าย — ตัดสินด้วยตา"
+            size="lg"
+            footer={
+              <div className="flex w-full flex-wrap justify-end gap-2">
+                <button type="button" onClick={() => setCompareId(null)} className={btn}>ปิด</button>
+                <button type="button" onClick={() => { setNotDup((x) => new Set(x).add(compareId)); setCompareId(null); }} className="h-9 rounded-lg border border-slate-300 bg-white px-4 text-sm text-slate-700 hover:bg-slate-50">ไม่ซ้ำ — ใช้รูปนี้ต่อ</button>
+                <button type="button" onClick={() => { setDest(g.key, compareId, "skip"); setCompareId(null); }} className="h-9 rounded-lg bg-amber-600 px-4 text-sm font-medium text-white hover:bg-amber-700">ซ้ำ — ข้ามรูปใหม่นี้</button>
+              </div>
+            }
+          >
+            <div className="grid grid-cols-2 gap-3">
+              {[{ t: `รูปใหม่ · ${g.label}/${it.path.split("/").pop()}`, u: it.url }, { t: sm.label, u: sm.url }].map((x) => (
+                <figure key={x.t} className="min-w-0">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={x.u} alt="" className="aspect-square w-full rounded-lg border border-slate-200 bg-slate-50 object-contain" />
+                  <figcaption className="mt-1 truncate text-xs text-slate-600" title={x.t}>{x.t}</figcaption>
+                </figure>
+              ))}
+            </div>
+          </ERPModal>
+        );
+      })()}
       <ConfirmDialog
         open={undoAsk}
         onClose={() => !undoBusy && setUndoAsk(false)}
@@ -927,7 +1054,7 @@ function DestSelect({ value, onChange, label }: { value: RouteDest; onChange: (d
   );
 }
 
-function GroupCard({ g, parents, itemById, plan, warnOf, seenOf, sizeOf, onTarget, onRow, onDest, onResize, onReorder }: {
+function GroupCard({ g, parents, itemById, plan, warnOf, seenOf, similarOf, onCompare, sizeOf, onTarget, onRow, onDest, onResize, onReorder }: {
   g: GroupState;
   parents: CatalogParent[];
   itemById: Map<string, Item>;
@@ -935,6 +1062,9 @@ function GroupCard({ g, parents, itemById, plan, warnOf, seenOf, sizeOf, onTarge
   warnOf: (id: string) => string | null;
   /** 🕘 เคยอัปให้รุ่นนี้แล้ว (ข้อความ) */
   seenOf: (id: string) => string | null;
+  /** 👀 รูปหน้าตาเหมือน/คล้าย (ข้อความ) · กดแล้วเปิดดูเทียบ */
+  similarOf: (id: string) => string | null;
+  onCompare: (id: string) => void;
   sizeOf: (id: string) => string;
   onTarget: (v: string) => void;
   onRow: (m: RowMode) => void;
@@ -998,7 +1128,8 @@ function GroupCard({ g, parents, itemById, plan, warnOf, seenOf, sizeOf, onTarge
           const st = plan.get(id);
           const d = g.dests[id]?.dest ?? "skip";
           const warn = warnOf(id);
-          const note = st?.state === "error" || st?.state === "over" ? <p className="text-[11px] leading-tight text-rose-600">{st.note}</p> : warn ? <p className="text-[11px] leading-tight text-amber-700">{warn}</p> : g.dests[id]?.by === "seen" && d === "skip" ? <p className="text-[11px] leading-tight text-slate-500">🕘 {seenOf(id)} — ข้ามให้</p> : g.dests[id]?.by === "name" && d !== "skip" ? <p className="text-[11px] leading-tight text-violet-600">ตั้งจากชื่อไฟล์</p> : null;
+          const sim = st?.state === "error" || st?.state === "over" ? null : similarOf(id);
+          const note = st?.state === "error" || st?.state === "over" ? <p className="text-[11px] leading-tight text-rose-600">{st.note}</p> : sim && warn?.startsWith("👀") ? <button type="button" onClick={() => onCompare(id)} className="text-left text-[11px] leading-tight text-amber-700 underline decoration-dotted hover:text-amber-900">{sim} — กดดูเทียบ</button> : warn ? <p className="text-[11px] leading-tight text-amber-700">{warn}</p> : g.dests[id]?.by === "seen" && d === "skip" ? <p className="text-[11px] leading-tight text-slate-500">🕘 {seenOf(id)} — ข้ามให้</p> : g.dests[id]?.by === "name" && d !== "skip" ? <p className="text-[11px] leading-tight text-violet-600">ตั้งจากชื่อไฟล์</p> : null;
           return (
             <div key={id} {...rowProps(i)} className={`min-w-0 rounded-lg ${rowCls(i)} ${d === "skip" ? "opacity-50" : ""}`}>
               <div className="relative">
