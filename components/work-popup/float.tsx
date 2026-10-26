@@ -3,11 +3,11 @@
  * 🔔 ป๊อปเตือนงานแบบลอย (ส่วนของ WorkPopupHost) — การ์ดลอยมุมขวาล่าง/ขวาบน บนจอคอม แทนหน้าต่างกลางจอ
  * - เนื้อหา = WorkPopupBody เดิม (ติ๊กงานของคุณได้) · ปุ่ม ไว้ทีหลัง / ✓ รับทราบ / ดูทั้งหมด เหมือนเดิม
  * - ปุ่มเล็กลอยอยู่ทั้งวัน (ป๊อปของวันนี้ · /api/popups/active?all=1) · กางเองเมื่อถึงเวลาและยังไม่รับทราบ
- *   รับทราบ/ไว้ทีหลัง/นอกเวลา = ยุบเป็นปุ่ม กดดูได้ตลอด · － ย่อ · ✕ ซ่อน (ไม่เด้งอีก ทุกเครื่อง) → เปิดใหม่ที่เมนูโปรไฟล์
+ *   รับทราบ/ไว้ทีหลัง/นอกเวลา = ยุบเป็นปุ่ม กดดูได้ตลอด · － ย่อ / กดข้างนอก / Esc = ยุบ · ✕ ซ่อน (ไม่เด้งอีก ทุกเครื่อง) → เปิดใหม่ที่เมนูโปรไฟล์
  * - ค่าตั้งต่อคน: user_ui_prefs key work_popup_float = { enabled, minimized, position } (useUserPref · บอกต่อในหน้าเดียว)
  * จอแคบกว่า FLOAT_MIN_WIDTH ยังเป็นหน้าต่างกลางจอแบบเดิม (ลอยแล้วบังงาน/ทับแถบเมนูล่าง)
  */
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useUserPref } from "@/lib/use-user-pref";
 import {
   FLOAT_MIN_WIDTH, WORK_POPUP_FLOAT_DEFAULT, WORK_POPUP_FLOAT_KEY, WORK_POPUP_HIDE_HINT, parseWorkPopupFloatPref,
@@ -50,6 +50,17 @@ export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, foo
   onHide: () => void;
   children: ReactNode;
 }) {
+  // กดข้างนอกการ์ด / กด Esc = ยุบเป็นปุ่มเล็ก (ไม่ใช่ซ่อน — ปุ่มยังลอยอยู่ กดกางใหม่ได้)
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (minimized) return;
+    const onDown = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) onMinimize(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onMinimize(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [minimized, onMinimize]);
+
   if (minimized) {
     return (
       <button type="button" onClick={onExpand} title="ป๊อปเตือนงาน — กดเพื่อกาง"
@@ -59,7 +70,7 @@ export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, foo
     );
   }
   return (
-    <div role="dialog" aria-label={title}
+    <div ref={boxRef} role="dialog" aria-label={title}
       className={`fixed ${POS[pref.position]} z-[45] w-[400px] max-w-[calc(100vw-2rem)] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden`}
       style={{ maxHeight: pref.position === "tr" ? "calc(100vh - 5rem)" : "calc(100vh - 2rem)" }}>
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 bg-amber-50/60">

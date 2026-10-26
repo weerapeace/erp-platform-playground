@@ -185,6 +185,7 @@ export function WorkPopupHost() {
 
   // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
   const [expanded, setExpanded] = useState(false);
+  const collapse = useCallback(() => setExpanded(false), []);   // ค่าคงที่ — การ์ดผูกตัวฟัง "กดข้างนอก" ครั้งเดียว
 
   const check = useCallback(async (reportId?: string) => {
     if (!uid) return;
@@ -287,7 +288,7 @@ export function WorkPopupHost() {
       <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
       {visible && cur && (wide ? (
         <WorkPopupFloatCard pref={floatPref} minimized={!expanded} title={title} subtitle={subtitle} pill={pill} footer={footer}
-          onMinimize={() => setExpanded(false)}
+          onMinimize={collapse}
           onExpand={() => setExpanded(true)}
           onHide={hide}>
           <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
