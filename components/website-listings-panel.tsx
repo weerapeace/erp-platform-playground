@@ -9,6 +9,7 @@
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
  * - 📸 ลงรูปทีละมาก (หัวตาราง = ทั้งร้าน · แถบล่าง = เฉพาะที่ติ๊ก) → components/website-image-mass-upload
  * - ▦ แก้ไขทีละมาก (ตาราง · ทุกช่องจากทะเบียนฟิลด์ · หัวตาราง/แถบล่าง) → components/website-listings-grid-edit
+ * - 🎨 ทะเบียนสี (หัวตาราง) + ป้าย "สียังไม่ผูกทะเบียนสี" กดได้ = ColorSwatchButton (focusNames = สีของสินค้านั้น) · ปิดแล้วโหลดรายการใหม่เงียบ ๆ
  * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ + ✏️ แก้หลายรายการ (ช่องจากทะเบียนกลาง lib/website-listing-fields) · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
  * - กดการ์ด/แถว/✏️ = drawer "ตั้งค่าเว็บของสินค้า" — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (ParentWebListings shopId)
  *     แท็บ ขายบนเว็บ · รูป สี และรูปเปิด · ปั๊มชื่อ/แบนเนอร์/รายละเอียด · ต้องแก้ · ◀ ▶ เลื่อนตามรายการที่เห็น · 💾 บันทึกแถบล่าง
@@ -30,6 +31,7 @@ import { listingIssues, type ListingIssue } from "@/lib/website-listing-health";
 import { WebsiteAddProductsModal } from "@/components/website-add-products-modal";
 import { WebsiteListingsMassEdit } from "@/components/website-listings-mass-edit";
 import { WebsiteImageMassUpload } from "@/components/website-image-mass-upload";
+import { ColorSwatchButton } from "@/components/color-swatch-manager";
 import { webForm } from "@/lib/website-form-styles";
 
 const ParentWebListings = dynamic(() => import("@/components/parent-web-listings").then((m) => m.ParentWebListings), { ssr: false });
@@ -367,6 +369,13 @@ export function WebsiteListingsPanel({
           })}
         </div>
         <div className="flex items-center gap-2">
+          {/* 🎨 ทะเบียนสีกลาง (จุดสีทุกร้าน) — เดิมต้องเข้าแท็บดีไซน์ → การ์ดสินค้า */}
+          <ColorSwatchButton
+            label="🎨 ทะเบียนสี"
+            title="ผูกจุดสีให้ชื่อสีของสินค้า (ใช้ทุกร้าน)"
+            onClosed={() => void reload()}
+            className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:border-slate-400"
+          />
           {listings.length > 0 && (
             <button
               onClick={() => setGridEdit([])}
@@ -570,11 +579,23 @@ export function WebsiteListingsPanel({
                       {(l.display?.hero || iss.length > 0) && (
                         <div className="mt-1 flex flex-wrap gap-1">
                           {l.display?.hero && <span className="rounded-full bg-violet-50 px-2 py-0.5 text-[10px] text-violet-700">🎬 รูปเปิด</span>}
-                          {iss.map((x) => (
-                            <span key={x.key} title={x.detail} className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] text-amber-800">
-                              ⚠️ {x.label}
-                            </span>
-                          ))}
+                          {iss.map((x) =>
+                            x.key === "swatch_missing" ? (
+                              // 🎨 กดป้าย = เปิดทะเบียนสี เลือกสีของสินค้านี้ที่ยังไม่ได้ตั้งไว้ก่อน · ปิดแล้วโหลดจุดสี/ป้ายใหม่
+                              <ColorSwatchButton
+                                key={x.key}
+                                label={`🎨 ${x.label} — กดเพื่อผูก`}
+                                focusNames={x.names}
+                                title={x.detail ? `สีที่ยังไม่ผูก: ${x.detail}` : undefined}
+                                onClosed={() => void reload()}
+                                className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800 hover:bg-amber-100 hover:border-amber-400"
+                              />
+                            ) : (
+                              <span key={x.key} title={x.detail} className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] text-amber-800">
+                                ⚠️ {x.label}
+                              </span>
+                            ),
+                          )}
                         </div>
                       )}
                     </div>

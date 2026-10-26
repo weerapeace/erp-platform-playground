@@ -460,18 +460,32 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
 }
 
 /** ปุ่ม + ป๊อปอัปทะเบียนสี — วางได้ทุกที่ที่มีการตั้งค่าจุดสี */
-export function ColorSwatchButton({ label = "🎨 ตั้งสีของจุดสี", className, focusNames }: { label?: string; className?: string; focusNames?: string[] }) {
+export function ColorSwatchButton({
+  label = "🎨 ตั้งสีของจุดสี",
+  className,
+  focusNames,
+  title,
+  onClosed,
+}: {
+  label?: string;
+  className?: string;
+  focusNames?: string[];
+  /** ข้อความตอนชี้ปุ่ม */
+  title?: string;
+  /** ปิดป๊อปแล้ว (เช่น หน้ารายการสินค้าโหลดจุดสี/ป้ายเตือนใหม่) */
+  onClosed?: () => void;
+}) {
   const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)}
+      <button type="button" onClick={() => setOpen(true)} title={title}
         className={className ?? "text-xs px-2.5 py-1 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}>
         {label}
       </button>
       <ERPModal
         open={open}
-        onClose={() => { setOpen(false); setDirty(false); }}
+        onClose={() => { setOpen(false); setDirty(false); onClosed?.(); }}
         title="🎨 ทะเบียนสี — หน้าตาจุดสี"
         description="ตั้งครั้งเดียว ใช้ทุกร้าน ทุกสินค้าที่มีสีชื่อนี้ (จุดสีบนการ์ด · ปุ่มเลือกสีหน้าสินค้า)"
         size="xl"
