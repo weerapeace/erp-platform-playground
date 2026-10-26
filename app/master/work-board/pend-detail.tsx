@@ -12,7 +12,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate, formatDateTime, todayBangkok, addDaysYmd } from "@/lib/date";
 import { HoverImage } from "@/components/hover-image";
 import { MoShortMaterials } from "@/components/mo-material-progress";
-import { ERPModal } from "@/components/modal";
+import { ActivityFeed, type ActivityEntry } from "@/components/activity-feed";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
 import type { MoProgress } from "@/app/api/mo/material-progress/route";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
@@ -246,21 +246,34 @@ function DuePane({ m, canEdit, plans, onSaveDue, onAddPlan, onDelPlan }: {
   );
 }
 
-// ---- แท็บประวัติ: สร้างใบเมื่อไหร่ + ประวัติจ่ายงาน ----
+// ---- แผงประวัติ (กดช่อง "สร้างเมื่อ"): สร้างใบเมื่อไหร่ + ประวัติจ่ายงาน + ใครแก้อะไรในใบนี้ (audit log กลาง) ----
 function HistPane({ m }: { m: PendMoLite }) {
   const [rows, setRows] = useState<DispatchHistRow[] | null>(null);
+  const [acts, setActs] = useState<ActivityEntry[] | null>(null);
   useEffect(() => {
     let cancel = false;
     apiFetch(`/api/mo/dispatch-history?mo_no=${encodeURIComponent(m.mo_no)}`).then((r) => r.json())
       .then((j) => { if (!cancel) setRows((j?.data ?? []) as DispatchHistRow[]); }).catch(() => { if (!cancel) setRows([]); });
+    apiFetch(`/api/audit-logs?entity_type=mo&entity_id=${encodeURIComponent(m.id)}&limit=50`).then((r) => r.json())
+      .then((j) => { if (!cancel) setActs((j?.data ?? []) as ActivityEntry[]); }).catch(() => { if (!cancel) setActs([]); });
     return () => { cancel = true; };
-  }, [m.mo_no]);
+  }, [m.mo_no, m.id]);
   const age = m.created_at ? Math.max(0, Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86400000)) : null;
   return (
     <div className="space-y-2">
       <p className="text-[12px] text-slate-600">🗓 สร้างใบงาน <b>{m.created_at ? formatDateTime(m.created_at) : "—"}</b>{age != null && <span className="text-slate-400"> · {age === 0 ? "วันนี้" : `${fmt(age)} วันที่แล้ว`}</span>}</p>
-      <p className="text-[11px] text-slate-500">ประวัติการจ่ายงานของใบนี้</p>
-      <HistTab rows={rows} />
+      <div className="grid gap-3 lg:grid-cols-2">
+        <div>
+          <p className="mb-1 text-[11px] font-semibold text-slate-500">🚚 ประวัติการจ่ายงาน</p>
+          <HistTab rows={rows} />
+        </div>
+        <div>
+          <p className="mb-1 text-[11px] font-semibold text-slate-500">📝 ใครแก้อะไรในใบนี้</p>
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2">
+            <ActivityFeed entries={acts ?? []} loading={acts === null} compact emptyMessage="ยังไม่มีการแก้ไข" />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -402,15 +415,6 @@ function StepsBox({ moId, sku, productName, canEdit, onChanged }: { moId: string
           </div>)}
       {bomOpen && sku && <BomEditorModal sku={sku} productName={productName} onClose={(changed) => { setBomOpen(false); if (changed) { setReload((n) => n + 1); onChanged(); } }} />}
     </Box>
-  );
-}
-
-/** ประวัติของใบสั่งผลิต — ป๊อปอัป (เปิดจากช่อง "สร้างเมื่อ" ในตาราง) */
-export function HistModal({ m, onClose }: { m: PendMoLite; onClose: () => void }) {
-  return (
-    <ERPModal open onClose={onClose} size="md" title={`🕘 ประวัติ · ${m.product_sku ?? ""} ${m.mo_no}`}>
-      <HistPane m={m} />
-    </ERPModal>
   );
 }
 
