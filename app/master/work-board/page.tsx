@@ -18,7 +18,7 @@ import { apiFetch } from "@/lib/api";
 import { apiSave } from "@/lib/save-toast";
 import { formatDateTime } from "@/lib/date";
 import { MoProgressCell } from "@/components/mo-material-progress";
-import { PendDetail, CELL_PANE, HistTab, DETAIL_PREFS_DEFAULT, parseDetailPrefs, type PendPane } from "./pend-detail";
+import { PendDetail, HistModal, CELL_PANE, HistTab, DETAIL_PREFS_DEFAULT, parseDetailPrefs, type PendPane } from "./pend-detail";
 import { useUserPref } from "@/lib/use-user-pref";
 import { DeviceIframePreview, IPAD_SIZE, useCanPreviewDevice } from "@/components/device-view";
 import { useTableDisplay } from "./table-display";
@@ -3325,6 +3325,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const toggleSel = useCallback((id: string) => setSel((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }), []);
   const [openPane, setOpenPane] = useState<Record<string, PendPane>>({});
   const [detailPrefs, setDetailPrefs] = useUserPref("wb_pend_detail_prefs", DETAIL_PREFS_DEFAULT, parseDetailPrefs); // ปุ่ม/กล่องที่ซ่อนในรายละเอียดงาน (ต่อคน)
+  const [histFor, setHistFor] = useState<PendingMO | null>(null);   // ป๊อปประวัติ (กดช่อง "สร้างเมื่อ")
   const expanded = useMemo(() => new Set(Object.keys(openPane)), [openPane]);
   const showPane = useCallback((id: string, pane: PendPane | null) => setOpenPane((prev) => {
     const n = { ...prev };
@@ -3338,6 +3339,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   }, [sel.size, toggleSel, dc.expand, onOpenMO, showPane, openPane]);
   const onPendCell = useCallback((m: PendingMO, colKey: string) => {
     if (sel.size > 0) { toggleSel(m.id); return; }
+    if (CELL_PANE[colKey] === "hist") { setHistFor(m); return; }   // ประวัติ = ป๊อปอัป ไม่กางแถว
     if (!dc.expand) { onOpenMO(m); return; }
     const pane = CELL_PANE[colKey];
     if (pane) showPane(m.id, pane);
@@ -3661,7 +3663,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       cell: (m) => { if (!m.created_at) return <span className="text-slate-300">—</span>;
         const d = Math.max(0, Math.floor((Date.now() - new Date(m.created_at).getTime()) / 86400000));
         return <div className="leading-tight"><div className="text-[12px] text-slate-600 tabular-nums">{formatDateTime(m.created_at).slice(0, 10)}</div>
-          <div className={`text-[10px] ${d > 60 ? "text-rose-500" : "text-slate-400"}`}>{d === 0 ? "วันนี้" : `${fmt(d)} วันที่แล้ว`}</div></div>; } },
+          <div className={`text-[10px] ${d > 60 ? "text-rose-500" : "text-slate-400"}`}>{d === 0 ? "วันนี้" : `${fmt(d)} วันที่แล้ว`} <span className="text-slate-400" title="กดดูประวัติ">🕘</span></div></div>; } },
     { key: "qty", header: "เหลือ / ทั้งหมด", group: "พื้นฐาน", defaultHidden: hid("qty"), width: "6rem", align: "right", sortValue: (m) => m.remaining, sortLabel: "จำนวนเหลือ",
       cell: (m) => <div className="leading-tight">
         <div className="tabular-nums whitespace-nowrap"><b className={`text-rose-600 ${touch ? "text-base" : ""}`}>{fmt(m.remaining)}</b><span className="text-[11px] text-slate-400"> / {fmt(m.qty)}</span></div>
@@ -4063,6 +4065,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       </div>
       {assignOpen &&<AssignToGroupModal moNos={selMoNos} onClose={() => setAssignOpen(false)} onDone={() => { setSel(new Set()); void loadGroups(); onReload?.(); }} />}
       {groupFor && <AssignToGroupModal moNos={groupFor} onClose={() => setGroupFor(null)} onDone={() => { setGroupFor(null); void loadGroups(); onReload?.(); }} />}
+      {histFor && <HistModal m={histFor} onClose={() => setHistFor(null)} />}
       {dueOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setDueOpen(false)}>
           <div className="w-full max-w-sm rounded-xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>

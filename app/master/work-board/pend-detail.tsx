@@ -7,7 +7,7 @@
  *   · /api/mo/delivery-plan · /api/mo/dispatch-history · (วันส่ง/จ่ายงาน/กลุ่ม = ฟังก์ชันที่ตารางส่งมา)
  * รอบ 2 (ยังไม่ทำ): ปุ่มขอซื้อ / ติ๊ก "มีของแล้ว" / รับของ / ตั้งราคา ในแผง
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { formatDate, formatDateTime, todayBangkok, addDaysYmd } from "@/lib/date";
 import { HoverImage } from "@/components/hover-image";
@@ -20,6 +20,9 @@ import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import type { MoCost } from "@/app/api/mo/[id]/cost/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { WorkStep } from "@/app/api/bom/work-steps/route";
+import type { MoPieceRow } from "@/app/api/mo/piecework/route";
+import { WorkStepsTab } from "./work-steps-tab";
+import { BomEditorModal } from "@/components/bom-editor-modal";
 
 export type PendPane = "job" | "bom" | "prep" | "stage" | "dispatch" | "due" | "group" | "hist";
 export const PEND_PANES: [PendPane, string][] = [
@@ -266,8 +269,8 @@ const Btn = ({ onClick, children, primary, touch }: { onClick: () => void; child
   <button type="button" onClick={onClick}
     className={`${touch ? "h-11 text-sm" : "h-8 text-xs"} rounded-lg px-3 font-medium whitespace-nowrap ${primary ? "bg-slate-800 text-white hover:bg-slate-700" : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>{children}</button>
 );
-const Box = ({ title, extra, children }: { title: string; extra?: ReactNode; children: ReactNode }) => (
-  <div className="rounded-xl border border-slate-200 bg-white p-3">
+const Box = ({ title, extra, children, className = "" }: { title: string; extra?: ReactNode; children: ReactNode; className?: string }) => (
+  <div className={`rounded-xl border border-slate-200 bg-white p-3 ${className}`}>
     <div className="mb-1.5 flex items-center justify-between gap-2"><span className="text-[12px] font-semibold text-slate-700">{title}</span>{extra && <span className="text-[11px] text-slate-400">{extra}</span>}</div>
     {children}
   </div>
@@ -351,25 +354,63 @@ function IssuesBox({ moNo, canEdit }: { moNo: string; canEdit: boolean }) {
   );
 }
 
-function StepsBox({ moId }: { moId: string }) {
+/** ขั้นตอนงาน: ดูสรุป → กด สร้าง/แก้ = กล่องขยายเต็มแถว ใช้ตัวแก้ตัวเดียวกับแท็บขั้นตอนงานในเช็กลิสต์ (เก็บที่สูตร BOM) */
+function StepsBox({ moId, sku, productName, canEdit, onChanged }: { moId: string; sku: string | null; productName: string | null; canEdit: boolean; onChanged: () => void }) {
   const [steps, setSteps] = useState<WorkStep[] | null>(null);
+  const [bomCode, setBomCode] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [pieceRows, setPieceRows] = useState<MoPieceRow[]>([]);
+  const [bomOpen, setBomOpen] = useState(false);
+  const [reload, setReload] = useState(0);
   useEffect(() => {
     let cancel = false;
     apiFetch(`/api/bom/work-steps?mo_id=${encodeURIComponent(moId)}`).then((r) => r.json())
-      .then((j) => { if (!cancel) setSteps((j?.data ?? []) as WorkStep[]); }).catch(() => { if (!cancel) setSteps([]); });
+      .then((j) => { if (!cancel) { setSteps((j?.data ?? []) as WorkStep[]); setBomCode((j?.bom_code as string) ?? null); } })
+      .catch(() => { if (!cancel) setSteps([]); });
     return () => { cancel = true; };
-  }, [moId]);
+  }, [moId, reload]);
+  useEffect(() => {
+    if (!editing) return;
+    let cancel = false;
+    apiFetch(`/api/mo/piecework?mo_id=${encodeURIComponent(moId)}`).then((r) => r.json())
+      .then((j) => { if (!cancel) setPieceRows((j?.data ?? []) as MoPieceRow[]); }).catch(() => { /* ไม่มีงานเหมาก็สร้างขั้นตอนเองได้ */ });
+    return () => { cancel = true; };
+  }, [editing, moId]);
+  const onSteps = useCallback((s: WorkStep[], b: string | null) => { setSteps(s); if (b) setBomCode(b); }, []);
+
+  if (editing) return (
+    <Box title="🧵 ขั้นตอนงาน — สร้าง / แก้" className="sm:col-span-2 lg:col-span-3"
+      extra={<button type="button" onClick={() => setEditing(false)} className="h-7 rounded-md bg-slate-800 px-3 text-[11px] font-medium text-white hover:bg-slate-700">เสร็จ ✓</button>}>
+      <WorkStepsTab moId={moId} bomCode={bomCode} pieceRows={pieceRows} canEdit={canEdit} steps={steps} onSteps={onSteps} />
+    </Box>
+  );
   return (
     <Box title="🧵 ขั้นตอนงาน" extra={steps ? `${steps.length} ขั้น` : undefined}>
       {steps === null ? <p className="text-[11px] text-slate-400">กำลังโหลด…</p>
-        : steps.length === 0 ? <p className="text-[11px] text-slate-400">สินค้านี้ยังไม่มีขั้นตอนในสูตร (ตั้งได้ในเช็กลิสต์ แท็บขั้นตอนงาน)</p>
+        : steps.length === 0 ? <p className="text-[11px] text-slate-400">ยังไม่มีขั้นตอนงาน</p>
         : <ol className="max-h-40 space-y-0.5 overflow-y-auto">{[...steps].sort((a, b) => a.sequence - b.sequence).map((s, i) => (
             <li key={s.id} className="flex items-start gap-1.5 text-[12px]" title={s.instruction ?? ""}>
               <span className="w-4 shrink-0 text-right text-[11px] text-slate-400">{i + 1}.</span>
               <span className="min-w-0 flex-1">{s.step_name}</span>
               {(s.station || s.job_name) && <span className="shrink-0 text-[10px] text-slate-400">{s.station ?? s.job_name}</span>}
             </li>))}</ol>}
+      {canEdit && steps !== null && (bomCode
+        ? <button type="button" onClick={() => setEditing(true)} className={`mt-2 h-7 rounded-md px-2.5 text-[11px] font-medium ${steps.length ? "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50" : "bg-blue-600 text-white hover:bg-blue-700"}`}>{steps.length ? "✏️ แก้ขั้นตอน" : "＋ สร้างขั้นตอน"}</button>
+        : <div className="mt-2 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] text-amber-700">
+            สินค้านี้ยังไม่มีสูตร (BOM) — ขั้นตอนงานเก็บไว้ในสูตร ต้องมีสูตรก่อน
+            {sku && <button type="button" onClick={() => setBomOpen(true)} className="ml-1 font-medium text-blue-700 underline">🧩 สร้างสูตร</button>}
+          </div>)}
+      {bomOpen && sku && <BomEditorModal sku={sku} productName={productName} onClose={(changed) => { setBomOpen(false); if (changed) { setReload((n) => n + 1); onChanged(); } }} />}
     </Box>
+  );
+}
+
+/** ประวัติของใบสั่งผลิต — ป๊อปอัป (เปิดจากช่อง "สร้างเมื่อ" ในตาราง) */
+export function HistModal({ m, onClose }: { m: PendMoLite; onClose: () => void }) {
+  return (
+    <ERPModal open onClose={onClose} size="md" title={`🕘 ประวัติ · ${m.product_sku ?? ""} ${m.mo_no}`}>
+      <HistPane m={m} />
+    </ERPModal>
   );
 }
 
@@ -382,7 +423,7 @@ export const parseDetailPrefs = (v: unknown): DetailPrefs | null => {
   const strs = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : []);
   return { hideBtns: strs(o.hideBtns), hideSecs: strs(o.hideSecs) };
 };
-const DETAIL_BTNS: [string, string][] = [["check", "📋 เปิดเช็กลิสต์เต็ม"], ["print", "🖨 พิมพ์ใบสั่งงาน"], ["printSteps", "🪜 พิมพ์ขั้นตอนงาน"], ["hist", "🕘 ประวัติ"]];
+const DETAIL_BTNS: [string, string][] = [["check", "📋 เปิดเช็กลิสต์เต็ม"], ["print", "🖨 พิมพ์ใบสั่งงาน"], ["printSteps", "🪜 พิมพ์ขั้นตอนงาน"]];
 const DETAIL_SECS: [string, string][] = [["cost", "💰 ต้นทุน"], ["issue", "⚠️ ปัญหา"], ["steps", "🧵 ขั้นตอนงาน"]];
 
 export function PendDetail(p: {
@@ -398,7 +439,6 @@ export function PendDetail(p: {
 }) {
   const { m, pane, touch, canEdit, prog } = p;
   const [prefsOpen, setPrefsOpen] = useState(false);
-  const [histOpen, setHistOpen] = useState(false);
   const myWos = p.wos.filter((w) => w.is_active !== false);
   const btnOn = (k: string) => !p.prefs.hideBtns.includes(k);
   const secOn = (k: string) => !p.prefs.hideSecs.includes(k);
@@ -429,7 +469,6 @@ export function PendDetail(p: {
                   {btnOn("check") && <Btn touch={touch} primary onClick={p.onOpenChecklist}>📋 เปิดเช็กลิสต์เต็ม</Btn>}
                   {btnOn("print") && <Btn touch={touch} onClick={() => window.open(`/print/work-order/${m.id}`, "_blank")}>🖨 พิมพ์ใบสั่งงาน</Btn>}
                   {btnOn("printSteps") && <Btn touch={touch} onClick={() => window.open(`/print/work-steps/${m.id}`, "_blank")}>🪜 พิมพ์ขั้นตอนงาน</Btn>}
-                  {btnOn("hist") && <Btn touch={touch} onClick={() => setHistOpen(true)}>🕘 ประวัติ</Btn>}
                 </div>
               )}
             </div>
@@ -437,7 +476,7 @@ export function PendDetail(p: {
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {secOn("cost") && <CostBox moId={m.id} qty={m.qty} canSeeMoney={p.canSeeMoney} />}
                 {secOn("issue") && <IssuesBox moNo={m.mo_no} canEdit={canEdit} />}
-                {secOn("steps") && <StepsBox moId={m.id} />}
+                {secOn("steps") && <StepsBox moId={m.id} sku={m.product_sku} productName={m.product_name} canEdit={canEdit} onChanged={p.onChanged} />}
               </div>
             )}
           </div>
@@ -542,9 +581,6 @@ export function PendDetail(p: {
         </div>
       )}
       {body}
-      <ERPModal open={histOpen} onClose={() => setHistOpen(false)} size="md" title={`🕘 ประวัติ · ${m.mo_no}`}>
-        {histOpen && <HistPane m={m} />}
-      </ERPModal>
     </div>
   );
 }
