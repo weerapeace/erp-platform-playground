@@ -7,7 +7,8 @@
  *   - ทีละสี: ทุกช่องของ SKU ลูก (ทะเบียนฟิลด์กลาง)
  *   ⚠️ ห้ามฝังรายการช่องในไฟล์นี้ — เพิ่มช่องที่ทะเบียน → ขึ้นในตัวเลือกช่องเอง · สิทธิ์เห็น/แก้ + ฟิลด์ลับ ตามทะเบียน (lib/registry-fields)
  *   - ตัวเลือกช่อง = FieldChipsPicker (ของกลาง) · พับเก็บได้ · จำช่องที่เลือก + พับ/กาง ต่อคน (useUserPref)
- *   - วางจาก Excel ได้ทีละหลายช่อง (lib/grid-edit) · ⤓ = ใช้ค่าแถวแรกทั้งคอลัมน์ · ช่องที่เปลี่ยน = สีเหลือง · ผิด = สีแดง
+ *   - วางจาก Excel ได้ทีละหลายช่อง (lib/grid-edit) · ⤓ = ใช้ค่าแถวแรกทั้งคอลัมน์ (ถามก่อน) · ช่องที่เปลี่ยน = สีเหลือง · ผิด = สีแดง
+ *   - ช่องว่างที่มีค่าตัวจาง (อัตโนมัติ) → ปุ่ม "ใช้" ในช่อง + "ใช้ทั้งหมด (N)" ที่หัวคอลัมน์ (ถามก่อน · เฉพาะแถวที่ว่าง) · รูปของ Parent เป็นตัวช่วยดูทุกแถว (HoverImage)
  * 🖼 แท็บรูปภาพ = components/website-listings-image-grid (Hero/รูปบนเว็บ/รูปสี ของหลายสินค้า · ลาก/เรียง/ย้าย/คลัง/รูป ERP) — กดบันทึกปุ่มเดียวกัน
  * บันทึกครั้งเดียว: ช่องเว็บ → POST /api/website/listings/grid (audit + ล้างแคชเว็บ) · ช่อง ERP → PATCH /api/master-v2/<module>/<id> ตัวกลางเดิม
  *   เกิน 20 แถวต้องพิมพ์ CONFIRM · สรุปสำเร็จ/ไม่สำเร็จรายแถว
@@ -17,7 +18,8 @@ import { apiFetch } from "@/lib/api";
 import { cachedJson } from "@/lib/client-cache";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
-import { ERPModal } from "@/components/modal";
+import { ConfirmDialog, ERPModal } from "@/components/modal";
+import { HoverImage } from "@/components/hover-image";
 import { FieldChipsPicker, type PickableField } from "@/components/field-chips-picker";
 import { MoneyInput } from "@/components/money-input";
 import { DateInput } from "@/components/date-input";
@@ -109,6 +111,8 @@ export function WebsiteListingsGridEdit({
   const [tab, setTab] = useState<"data" | "images">("data");
   const imgRef = useRef<ImageGridHandle>(null);
   const [imgDirty, setImgDirty] = useState(0);
+  // ถามก่อนทำทั้งคอลัมน์ (⤓ ใช้ค่าแถวแรก · ใช้ค่าตัวจางทั้งหมด) — ConfirmDialog กลาง
+  const [ask, setAsk] = useState<{ title: string; message: string; run: () => void } | null>(null);
   const [imgReload, setImgReload] = useState(0);
   const [folderOpen, setFolderOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useUserPref<boolean>("website_grid_picker_open", true, (v) => (typeof v === "boolean" ? v : null));
@@ -329,9 +333,16 @@ export function WebsiteListingsGridEdit({
     if (!l) return "";
     if (c.webKey === "webName") return l.mapped?.name || l.erpName || "";
     if (c.webKey === "webPrice") return l.mapped?.price ? String(l.mapped.price) : "";
-    if (c.webKey === "webDescription") return (l.mapped?.description || "").slice(0, 80);
+    if (c.webKey === "webDescription") return l.mapped?.description || "";
     if (c.webKey === "webUnit") return l.mapped?.unit || "";
     return "";
+  };
+
+  /** รูปของ Parent ไว้ดูประกอบ (ทั้งทีละสินค้าและทีละสี) — รูปที่ลูกค้าเห็นบนเว็บ · ไม่มี = รูปปกใน ERP */
+  const guideImg = (pid: string): string | null => {
+    const l = listingById.get(pid);
+    const k = l?.display?.imageKey ?? l?.erpImageKey;
+    return k ? `/api/r2-image?key=${encodeURIComponent(k)}&w=600` : null;
   };
 
   const dirtyCells = Object.values(draft).reduce((n, lv) => n + Object.values(lv).reduce((m, one) => m + Object.keys(one).length, 0), 0);
@@ -366,8 +377,29 @@ export function WebsiteListingsGridEdit({
   const fillDown = (c: Col) => {
     if (!c.editable || !page.length) return;
     const v = valOf(page[0], c);
-    for (const r of visible) setCell(r, c, v);
-    toast.info(`ใช้ค่าแถวแรกกับ ${visible.length} แถว (ยังไม่บันทึก)`);
+    const shown = Array.isArray(v) ? v.join(", ") : typeof v === "boolean" ? (v ? "✓" : "—") : c.choices?.find((o) => o.value === v)?.label || String(v ?? "") || "(ว่าง)";
+    setAsk({
+      title: `ใช้ค่าแถวแรกทั้งคอลัมน์ "${c.label}"?`,
+      message: `ทุกแถวที่เห็น (${visible.length} แถว) จะเป็น "${shown.length > 60 ? `${shown.slice(0, 60)}…` : shown}" — ยังไม่บันทึกจนกดบันทึก (กด "ยกเลิกที่แก้" ย้อนได้)`,
+      run: () => {
+        for (const r of visible) setCell(r, c, v);
+        toast.info(`ใช้ค่าแถวแรกกับ ${visible.length} แถว (ยังไม่บันทึก)`);
+      },
+    });
+  };
+  // ค่าตัวจาง (ค่าอัตโนมัติที่เว็บใช้ตอนช่องว่าง) → ใส่เป็นค่าจริง · ทั้งคอลัมน์ = เฉพาะแถวที่ยังว่าง (ถามก่อน)
+  const emptyWithAuto = (c: Col) => visible.filter((r) => valOf(r, c) === "" && autoOf(r, c) !== "");
+  const useAutoAll = (c: Col) => {
+    const rows = emptyWithAuto(c);
+    if (!rows.length) return toast.info("ไม่มีช่องว่างที่มีค่าตัวจางให้ใช้");
+    setAsk({
+      title: `ใช้ค่าตัวจางทั้งคอลัมน์ "${c.label}"?`,
+      message: `จะใส่ค่าตัวจาง (ค่าอัตโนมัติ) ลง ${rows.length} แถวที่ยังว่าง — ช่องที่กรอกไว้แล้วไม่เปลี่ยน · หลังบันทึก ค่าบนเว็บจะคงที่ ไม่เปลี่ยนตาม ERP อีก (แก้เองได้) · ยังไม่บันทึกจนกดบันทึก`,
+      run: () => {
+        for (const r of rows) setCell(r, c, autoOf(r, c));
+        toast.info(`ใส่ค่าตัวจาง ${rows.length} แถว (ยังไม่บันทึก)`);
+      },
+    });
   };
 
   // ---- บันทึก ----
@@ -514,15 +546,29 @@ export function WebsiteListingsGridEdit({
     }
     const set = (x: GridValue) => setCell(r, c, x);
     const ph = autoOf(r, c);
+    // ช่องว่างที่มีค่าตัวจาง → ปุ่ม "ใช้" ดึงค่าตัวจางมาเป็นค่าจริง
+    const canUse = sv === "" && !!ph;
+    const withUse = (node: React.ReactNode) =>
+      canUse ? (
+        <div className="relative">
+          {node}
+          <button type="button" onClick={() => set(ph)} title={`ใช้ค่าตัวจาง: ${ph.length > 80 ? `${ph.slice(0, 80)}…` : ph}`} className="absolute right-1 top-1 h-6 rounded bg-white px-1.5 text-[11px] text-blue-600 ring-1 ring-blue-200 hover:bg-blue-50">
+            ใช้
+          </button>
+        </div>
+      ) : (
+        node
+      );
+    const usePad = canUse ? " pr-11" : "";
     switch (c.kind) {
       case "bool":
         return <input type="checkbox" checked={v === true} onChange={(e) => set(e.target.checked)} className="h-4 w-4 accent-blue-600" aria-label={c.label} />;
       case "money":
-        return <MoneyInput value={sv} onChange={(raw) => set(raw)} placeholder={ph || "—"} className={`${cellCls} text-right tabular-nums`} />;
+        return withUse(<MoneyInput value={sv} onChange={(raw) => set(raw)} placeholder={ph || "—"} className={`${cellCls} text-right tabular-nums${usePad}`} />);
       case "number":
         return <input value={sv} inputMode="decimal" onChange={(e) => set(e.target.value)} className={`${cellCls} text-right tabular-nums`} />;
       case "textarea":
-        return <textarea value={sv} rows={1} placeholder={ph} onChange={(e) => set(e.target.value)} className={`${cellCls} h-8 resize-y py-1 leading-5 focus:h-24`} />;
+        return withUse(<textarea value={sv} rows={1} placeholder={ph} onChange={(e) => set(e.target.value)} className={`${cellCls} h-8 resize-y py-1 leading-5 focus:h-24${usePad}`} />);
       case "date":
         return <DateInput value={sv} onChange={(iso) => set(iso)} className={cellCls} />;
       case "select":
@@ -581,7 +627,7 @@ export function WebsiteListingsGridEdit({
       case "relation":
         return <RelationCell row={r} col={c} value={sv} onChange={(id) => set(id ?? "")} />;
       default:
-        return <input value={sv} placeholder={ph} onChange={(e) => set(e.target.value)} className={cellCls} />;
+        return withUse(<input value={sv} placeholder={ph} onChange={(e) => set(e.target.value)} className={`${cellCls}${usePad}`} />);
     }
   };
 
@@ -726,8 +772,13 @@ export function WebsiteListingsGridEdit({
                         <span className="truncate">{c.label}</span>
                         {c.required && <span className="text-rose-500">*</span>}
                         {c.editable && c.kind !== "relation" && (
-                          <button type="button" onClick={() => fillDown(c)} title="ใช้ค่าแถวแรกกับทุกแถวที่เห็น" className="ml-auto rounded px-1 text-blue-600 hover:bg-blue-50">
+                          <button type="button" onClick={() => fillDown(c)} title="ใช้ค่าแถวแรกกับทุกแถวที่เห็น (ถามก่อน)" className="ml-auto rounded px-1 text-blue-600 hover:bg-blue-50">
                             ⤓
+                          </button>
+                        )}
+                        {c.editable && emptyWithAuto(c).length > 0 && (
+                          <button type="button" onClick={() => useAutoAll(c)} title="ใส่ค่าตัวจางให้ทุกแถวที่ยังว่าง (ถามก่อน)" className="whitespace-nowrap rounded border border-blue-200 px-1.5 text-[10px] font-normal text-blue-600 hover:bg-blue-50">
+                            ใช้ทั้งหมด ({emptyWithAuto(c).length})
                           </button>
                         )}
                       </span>
@@ -741,10 +792,16 @@ export function WebsiteListingsGridEdit({
                   return (
                     <tr key={r.key} className="align-top">
                       <td className="sticky left-0 z-[5] border-b border-slate-100 bg-white px-3 py-1.5">
-                        <div className="text-[13px] font-medium text-slate-800">{r.code}</div>
-                        <div className="max-w-[13rem] truncate text-[11px] text-slate-500" title={r.name}>
-                          {issues && <span className="mr-1 text-amber-600">⚠️</span>}
-                          {r.name}
+                        <div className="flex items-start gap-2">
+                          {/* รูปของ Parent เป็นตัวช่วยดู (ชี้ = รูปใหญ่) — รูปที่เว็บใช้จริง ไม่มีก็รูปปก ERP */}
+                          <HoverImage url={guideImg(r.parentId)} size={36} previewSize={280} rounded="rounded-md" />
+                          <div className="min-w-0">
+                            <div className="text-[13px] font-medium text-slate-800">{r.code}</div>
+                            <div className="max-w-[11rem] truncate text-[11px] text-slate-500" title={r.name}>
+                              {issues && <span className="mr-1 text-amber-600">⚠️</span>}
+                              {r.name}
+                            </div>
+                          </div>
                         </div>
                       </td>
                       {shownCols.map((c, ci) => {
@@ -780,6 +837,19 @@ export function WebsiteListingsGridEdit({
         {folderOpen && (
           <WebsiteImageMassUpload open onClose={() => setFolderOpen(false)} shop={shop} scopeIds={scopeIds} onDone={async () => { setImgReload((n) => n + 1); await onDone(); }} />
         )}
+        {/* ยืนยันก่อนทำทั้งคอลัมน์ */}
+        <ConfirmDialog
+          open={!!ask}
+          onClose={() => setAsk(null)}
+          onConfirm={() => {
+            ask?.run();
+            setAsk(null);
+          }}
+          title={ask?.title ?? ""}
+          message={ask?.message ?? ""}
+          confirmText="ใช้ทั้งคอลัมน์"
+          cancelText="ยกเลิก"
+        />
       </div>
     </ERPModal>
   );
