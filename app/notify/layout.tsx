@@ -6,11 +6,17 @@
  */
 import type { Metadata, Viewport } from "next";
 
-export const metadata: Metadata = {
-  title: "แจ้งเตือน ERP",
-  manifest: "/notify.webmanifest",
-  appleWebApp: { capable: true, title: "แจ้งเตือน", statusBarStyle: "default" },
-};
+// ⚠️ ต้องสร้างหน้าแบบสด + generateMetadata (แบบเดียวกับ /app/[appKey]) — ถ้าเป็นหน้า static
+// Next จะใส่ manifest กลาง (app/manifest.ts = แอปโอนเงินจีน) ทับ → ติดตั้งแล้วได้แอปผิดตัว (เจอจริงบน /goals)
+export const dynamic = "force-dynamic";
+
+export async function generateMetadata(): Promise<Metadata> {
+  return {
+    title: "แจ้งเตือน ERP",
+    manifest: "/notify.webmanifest",
+    appleWebApp: { capable: true, title: "แจ้งเตือน", statusBarStyle: "default" },
+  };
+}
 
 export const viewport: Viewport = {
   themeColor: "#2563eb",
