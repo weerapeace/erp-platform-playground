@@ -16,9 +16,8 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { TaskLinkList } from "@/components/record-tasks/task-links";
 import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } from "@/lib/email-report/popup";
-
-// หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง
-const SKIP_PREFIX = ["/login", "/auth", "/print/", "/a/", "/s/", "/offer/", "/employee-line"];
+// หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง (รายการกลาง lib/chromeless-routes)
+import { isChromelessPath } from "@/lib/chromeless-routes";
 const RECHECK_MS = 30 * 60_000;
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -174,7 +173,7 @@ export function WorkPopupHost() {
   const uid = user?.id ?? null;
   // หน้าที่ฝังในกรอบ (เช่น แท็บตั้งค่าแอป ?embed=1) ไม่เด้ง — ให้หน้าหลักเด้งที่เดียว ไม่ซ้อน 2 ป๊อป
   const inFrame = typeof window !== "undefined" && window.self !== window.top;
-  const skip = inFrame || SKIP_PREFIX.some((p) => pathname.startsWith(p));
+  const skip = inFrame || isChromelessPath(pathname);
 
   const check = useCallback(async (reportId?: string) => {
     if (!uid) return;

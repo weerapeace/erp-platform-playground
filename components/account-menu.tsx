@@ -15,6 +15,7 @@ import { ERPModal } from "@/components/modal";
 import { getTheme, setTheme } from "@/lib/theme";
 import { DeviceModeToggle, DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, type DeviceMode, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
 import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT } from "@/components/pwa-install-button";
+import { NotifyFloatToggle } from "@/components/notification-float";
 
 /** มุมมองอุปกรณ์ (ส่งมาจากเชลล์แอปเดี่ยว) — เลือกดูแบบแท็บเล็ต/มือถือบนจอนี้ + QR เปิด/ติดตั้งบนเครื่องจริง */
 export type AccountMenuDevice = { mode: DeviceMode; viewport: DeviceLayout; onChange: (m: DeviceMode) => void; qr?: DeviceQrOpts };
@@ -82,6 +83,9 @@ export function AccountMenu({ onDark = false, device }: { onDark?: boolean; devi
                 <button type="button" onClick={() => pick(null)} className="ml-1 text-[10px] text-slate-400 hover:text-slate-600">รีเซ็ต</button>
               </div>
             </div>
+
+            {/* การ์ดแจ้งเตือนลอย (จอคอม) — เปิด/ซ่อน + มุมจอ · จำต่อคน */}
+            <NotifyFloatToggle />
 
             {/* มุมมองอุปกรณ์ — ดูแอปนี้แบบแท็บเล็ต/มือถือบนจอคอม (กรอบจำลอง) + QR สแกนเปิดบนเครื่องจริง */}
             {device && (

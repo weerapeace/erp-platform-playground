@@ -1,14 +1,11 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth";
-import { apiFetch } from "@/lib/api";
-import type { Notification, NotificationsResponse } from "@/app/api/notifications/route";
-
-// ---- Polling interval ----
-const POLL_MS = 30_000;
+import type { Notification } from "@/app/api/notifications/route";
+import { useNotificationFeed } from "./feed";
 
 // ---- Event type → icon ----
 const EVENT_ICON: Record<string, string> = {
@@ -30,41 +27,14 @@ export function relTime(iso: string): string {
 export function NotificationBell() {
   const { user } = useAuth();
   const router = useRouter();
-  const [items,  setItems]  = useState<Notification[]>([]);
-  const [unread, setUnread] = useState(0);
+  // ข้อมูลจากตัวดึงกลาง (ถามทุก 30 วิเฉพาะตอนแท็บเปิด · ใช้ร่วมกับการ์ดแจ้งเตือนลอย ไม่ยิงซ้ำ)
+  const { items, unread, loading, refresh, markRead: markReadFeed, markAllRead } = useNotificationFeed(user?.id);
   const [open,   setOpen]   = useState(false);
   const [openUp, setOpenUp] = useState(false);   // เด้งขึ้นบนถ้าที่ว่างด้านล่างไม่พอ (กระดิ่งอยู่ท้าย sidebar = ติดล่างจอ)
-  const [loading,setLoading]= useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
-  // ---- Fetch ----
-  const fetch_ = useCallback(async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const res = await apiFetch("/api/notifications?limit=20");
-      const json: NotificationsResponse = await res.json();
-      if (!json.error) {
-        setItems(json.data);
-        setUnread(json.unread_count);
-      }
-    } catch { /* silent */ } finally { setLoading(false); }
-  }, [user]);
-
-  // ---- Poll ----
-  useEffect(() => {
-    if (!user) return;
-    // perf: เลื่อน fetch แรก ไม่ให้แย่ง resource กับเนื้อหาหลักตอนเปิดหน้า (poll ตามรอบปกติหลังจากนั้น)
-    const first = setTimeout(fetch_, 1500);
-    // ถามเฉพาะตอนแท็บเปิดอยู่ (เดิมถามทุก 30 วิ แม้แท็บซ่อน — รวมแล้วเกือบล้านครั้ง) · กลับมาที่แท็บ = ถามทันที
-    const t = setInterval(() => { if (document.visibilityState === "visible") void fetch_(); }, POLL_MS);
-    const onVisible = () => { if (document.visibilityState === "visible") void fetch_(); };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => { clearTimeout(first); clearInterval(t); document.removeEventListener("visibilitychange", onVisible); };
-  }, [user, fetch_]);
-
   // refresh เมื่อ user คลิกเปิด dropdown
-  useEffect(() => { if (open) fetch_(); }, [open, fetch_]);
+  useEffect(() => { if (open) void refresh(); }, [open, refresh]);
 
   // เลือกทิศเปิด panel: ที่ว่างด้านล่างไม่พอ → เด้งขึ้นบน (ทำงานได้ทั้งกระดิ่งบน topbar และท้าย sidebar)
   useLayoutEffect(() => {
@@ -83,33 +53,12 @@ export function NotificationBell() {
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
 
-  const markRead = async (n: Notification) => {
-    if (!n.read_at) {
-      // optimistic
-      setItems(p => p.map(x => x.id === n.id ? { ...x, read_at: new Date().toISOString() } : x));
-      setUnread(c => Math.max(0, c - 1));
-      try {
-        await apiFetch("/api/notifications", {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: n.id }),
-        });
-      } catch { /* revert: ปล่อย refresh ครั้งถัดไปแก้ */ }
-    }
+  const markRead = (n: Notification) => {
+    void markReadFeed(n);   // optimistic ทุกตัวที่ใช้ตัวดึงกลาง
     if (n.link_url) {
       setOpen(false);
       router.push(n.link_url);
     }
-  };
-
-  const markAllRead = async () => {
-    setItems(p => p.map(x => x.read_at ? x : { ...x, read_at: new Date().toISOString() }));
-    setUnread(0);
-    try {
-      await apiFetch("/api/notifications", {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ all: true }),
-      });
-    } catch { fetch_(); }
   };
 
   if (!user) return null;

@@ -8,9 +8,13 @@
  *   - parse = ตรวจ/แปลงค่าที่อ่านมา (ผิดรูป = null → ใช้ fallback)
  *   - setValue(v) = เปลี่ยนทันที + บันทึก (ไม่ต้องกดบันทึก)
  * ค่าที่เป็น "มุมมองเริ่มต้น" (string จากชุดตัวเลือก) ใช้ useViewPref เดิม
+ * หลายตัวในหน้าเดียวใช้ key เดียวกัน (เช่น สวิตช์ในเมนูโปรไฟล์ + ตัวที่ถูกเปิด/ปิด) → เปลี่ยนที่หนึ่ง อีกที่เปลี่ยนตามทันที
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
+
+const SYNC_EVENT = "erp:userpref";
+type SyncDetail = { key: string; v: unknown; from: symbol };
 
 export function useUserPref<T>(key: string, fallback: T, parse: (raw: unknown) => T | null): [T, (v: T) => void] {
   const lsKey = `userpref:${key}`;
@@ -20,6 +24,21 @@ export function useUserPref<T>(key: string, fallback: T, parse: (raw: unknown) =
   parseRef.current = parse;
   const fallbackRef = useRef(fallback);
   fallbackRef.current = fallback;
+  const selfRef = useRef(Symbol("userpref"));
+
+  // ตัวอื่นในหน้าเดียวกันเปลี่ยนค่า key นี้ → รับค่าตาม
+  useEffect(() => {
+    const onSync = (e: Event) => {
+      const d = (e as CustomEvent<SyncDetail>).detail;
+      if (!d || d.key !== key || d.from === selfRef.current) return;
+      const v = parseRef.current(d.v);
+      if (v === null) return;
+      touched.current = true;
+      setValueState(v);
+    };
+    window.addEventListener(SYNC_EVENT, onSync);
+    return () => window.removeEventListener(SYNC_EVENT, onSync);
+  }, [key]);
 
   useEffect(() => {
     let cancel = false;
@@ -65,6 +84,7 @@ export function useUserPref<T>(key: string, fallback: T, parse: (raw: unknown) =
       } catch {
         /* ignore */
       }
+      window.dispatchEvent(new CustomEvent<SyncDetail>(SYNC_EVENT, { detail: { key, v, from: selfRef.current } }));
       void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key, value: { v } }) }).catch(() => {
         /* ignore */
       });
