@@ -23,7 +23,7 @@ import { isOverdue, updateTask, bulkUpdateTasks, PRIORITY_META, priorityLabel, t
 import { matchMetric, type MetricDef } from "./metrics";
 import { MetricCardsManager } from "./metric-cards-manager";
 import { CAMPAIGN_STATUS } from "./campaigns/campaign-status";
-import { OverviewCustomizer, CARD_COLORS, heroStyle, pageStyle, fontStack, fontGoogleHref, OV_ZOOM, OV_DENSITY, type OverviewTheme, type CardKey, type CardTheme, type CardAlign, type KanbanView } from "./overview-customizer";
+import { OverviewCustomizer, CARD_COLORS, hiddenCardsOf, heroStyle, pageStyle, fontStack, fontGoogleHref, OV_ZOOM, OV_DENSITY, type OverviewTheme, type CardKey, type CardTheme, type CardAlign, type KanbanView } from "./overview-customizer";
 import { DashboardPet, type PetAlertKind } from "./dashboard-pet";
 import { GifPokeModal } from "./gif-poke-modal";
 import { GifPokeLayer } from "./gif-poke-layer";
@@ -204,13 +204,14 @@ export function OverviewDashboard({
     { key: "review", value: counts.review, label: t("รอตรวจ/อนุมัติ", "In review") },
     { key: "overdue", value: counts.overdue, label: t("เกินกำหนด", "Overdue") },
   ];
-  // ซ่อน/โชว์การ์ดสรุปรายใบ (จำในธีมของคนนี้) — ซ่อนใบที่กำลังกรองอยู่ = กลับไปดูงานทั้งหมด
-  const hiddenCards = theme.show.hiddenCards ?? [];
+  // ซ่อน/โชว์การ์ดสรุปรายใบ (จำในธีมของคนนี้) · ยังไม่เคยปรับ = ซ่อนครบ 4 ใบ · ซ่อนใบที่กำลังกรองอยู่ = กลับไปดูงานทั้งหมด
+  const hiddenCards = hiddenCardsOf(theme.show);
   const visibleCards = cardMeta.filter((m) => !hiddenCards.includes(m.key));
   const hiddenCardMeta = cardMeta.filter((m) => hiddenCards.includes(m.key));
+  const setHiddenCards = (list: CardKey[]) => onThemeChange({ ...theme, show: { ...theme.show, hiddenCards: list } });
   const setCardHidden = (k: CardKey, hide: boolean) => {
     if (hide && filter === k && k !== "all") onFilter("all");
-    onThemeChange({ ...theme, show: { ...theme.show, hiddenCards: hide ? [...hiddenCards.filter((x) => x !== k), k] : hiddenCards.filter((x) => x !== k) } });
+    setHiddenCards(hide ? [...hiddenCards.filter((x) => x !== k), k] : hiddenCards.filter((x) => x !== k));
   };
   // แผงตัวกรอง: ไม่ตั้ง = พับ (บอร์ดกว้างเต็ม) · กางค้างไว้ = จำต่อคน
   const filtersOpen = theme.show.filtersOpen === true;
@@ -307,8 +308,13 @@ export function OverviewDashboard({
 
       {/* การ์ดเมตริกของฉัน (สร้างเอง) + ปุ่มจัดการ */}
       <div className="flex items-center gap-2 flex-wrap">
-        {/* การ์ดสรุปที่ซ่อนไว้ — กดเพื่อเอากลับมาโชว์ */}
-        {hiddenCardMeta.map((m) => (
+        {/* การ์ดสรุปที่ซ่อนไว้ — กดเพื่อเอากลับมาโชว์ · ซ่อนครบ 4 ใบ (ค่าเริ่มต้น) = ปุ่มเดียวโชว์ทั้งหมด ไม่รกหน้า */}
+        {hiddenCardMeta.length === cardMeta.length ? (
+          <button type="button" onClick={() => setHiddenCards([])} title={t("โชว์การ์ดสรุป 4 ใบ (งานทั้งหมด / ของฉัน / รอตรวจ / เกินกำหนด) — ซ่อนรายใบได้ด้วยรูปตา", "Show the 4 summary cards — hide any one with the eye icon")}
+            className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border border-dashed border-slate-300 text-sm text-slate-400 hover:border-violet-300 hover:text-violet-600">
+            ＋ {t("การ์ดสรุป", "Summary cards")} <span className="text-[11px]">({t(`ซ่อนอยู่ ${cardMeta.length} ใบ`, `${cardMeta.length} hidden`)})</span>
+          </button>
+        ) : hiddenCardMeta.map((m) => (
           <button key={m.key} type="button" onClick={() => setCardHidden(m.key, false)} title={t("กดเพื่อโชว์การ์ดนี้อีกครั้ง", "Show this card again")}
             className="inline-flex items-center gap-1.5 h-9 px-3 rounded-xl border border-dashed border-slate-300 text-sm text-slate-400 hover:border-violet-300 hover:text-violet-600">
             ＋ {theme.cards[m.key].label || m.label} <span className="text-[11px]">({t("ซ่อนอยู่", "hidden")})</span>
