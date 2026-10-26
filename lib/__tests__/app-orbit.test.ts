@@ -30,6 +30,7 @@ describe("วงแอป — แอป/เมนูที่โชว์ใช�
   it("ไม่เอาการ์ดหน้า /apps เอง · แอปที่ไม่มีเมนูเหลือ = ไม่โชว์", () => {
     const home = buildOrbitApps(rows, apps, admin).find((a) => a.key === "home")!;
     expect(home.menus.map((m) => m.href)).toEqual(["/calendar"]);
+    expect(home.homeHref).toBe("/calendar");   // เมนูแรกคือ /apps → ข้ามไปเมนูถัดไป ไม่วนกลับหน้าเดิม
     expect(buildOrbitApps([row("launcher", "/apps", ["home"])], [app("home", 10)], admin)).toEqual([]);
   });
 

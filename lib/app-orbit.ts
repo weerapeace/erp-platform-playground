@@ -59,7 +59,7 @@ export function buildOrbitApps(rows: OrbitMenuRow[], apps: OrbitAppRow[], viewer
     const all = visibleAppMenus(rows, a.key, viewer);
     const ids = new Set(all.map((r) => r.id).filter(Boolean));
     const top = all.filter((r) => r.href !== "/apps" && !(r.parent_id && ids.has(r.parent_id)));   // เมนูย่อยอยู่ใต้แม่ ไม่ต้องโชว์ซ้ำ
-    const homeHref = appHomeHref(all, a);
+    const homeHref = appHomeHref(all.filter((r) => r.href !== "/apps"), a);   // เปิดแอปจากหน้า /apps ไม่วนกลับมาหน้าเดิม (เช่น "หน้าหลัก" เมนูแรก = App Launcher)
     if (!top.length || !homeHref) continue;
     out.push({
       key: a.key, label: a.label, icon: a.icon, iconUrl: a.icon_url ?? null, color: a.theme_color ?? null, homeHref,
