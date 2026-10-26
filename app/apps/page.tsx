@@ -10,7 +10,7 @@
  */
 
 import Link from "next/link";
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Logo, BRAND } from "@/components/brand";
 import { useAuth, roleLabel, roleColor } from "@/components/auth";
@@ -25,6 +25,11 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { buildOrbitApps, type OrbitApp } from "@/lib/app-orbit";
 import { AppOrbit } from "@/components/app-orbit";
+import { AppOrbitTuner, type OrbitTunerScope } from "@/components/app-orbit/tuner";
+import { ORBIT_MINE_KEY, ORBIT_TEAM_KEY, cleanOrbitStyle, orbitOverrideCount, resolveOrbitStyle, type OrbitStyle } from "@/lib/app-orbit-style";
+import { useMediaQuery } from "@/lib/use-media-query";
+import { useToast } from "@/components/toast";
+import { ConfirmDialog } from "@/components/modal";
 
 // ธีมหน้าแรกรายคน (เก็บใน user_ui_prefs key=launcher_theme)
 type LauncherTheme = { bg: string | null; bgGradient: { from: string; to: string } | null; bgImage: string | null; accent: string | null; font: string | null };
@@ -414,6 +419,67 @@ export default function AppLauncherPage() {
   const showOrbit = view === "orbit" && !editMode && orbitUsable;
   const setView = (v: "orbit" | "grid") => mutatePrefs((p) => ({ ...p, view: v }));
 
+  // ◎ หน้าตา/เอฟเฟกต์วงแอป: ค่ากลางทีม (ui_config — แอดมินแก้) + ค่าของฉัน (user_ui_prefs) · ของฉันชนะทีละช่อง (lib/app-orbit-style)
+  const toast = useToast();
+  const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
+  const canTeamOrbit = can("admin.users" as Parameters<typeof can>[0]);
+  const [orbitTeam, setOrbitTeam] = useState<Partial<OrbitStyle>>({});
+  const [orbitMine, setOrbitMine] = useState<Partial<OrbitStyle>>({});
+  const [tunerOpen, setTunerOpen] = useState(false);
+  const [tunerScope, setTunerScope] = useState<OrbitTunerScope>("mine");
+  const [teamDraft, setTeamDraft] = useState<Partial<OrbitStyle>>({});
+  const [savingTeam, setSavingTeam] = useState(false);
+  const [confirmCloseTuner, setConfirmCloseTuner] = useState(false);
+  const [replayKey, setReplayKey] = useState(0);
+  useEffect(() => {
+    apiFetch(`/api/ui-config?key=${ORBIT_TEAM_KEY}`).then((r) => r.json()).then((j) => setOrbitTeam(cleanOrbitStyle(j.value))).catch(() => { /* ไม่มี = ค่าเริ่มต้น */ });
+    apiFetch(`/api/user-prefs?key=${ORBIT_MINE_KEY}`).then((r) => r.json()).then((j) => setOrbitMine(cleanOrbitStyle(j.value))).catch(() => { /* ไม่มี = ตามทีม */ });
+  }, []);
+  // ค่าของฉันบันทึกอัตโนมัติ (หน่วง 0.6 วิ — ลากแถบเลื่อนไม่ยิงทุกขยับ)
+  const saveMineTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveMine = (value: Partial<OrbitStyle>) => {
+    if (saveMineTimer.current) clearTimeout(saveMineTimer.current);
+    saveMineTimer.current = setTimeout(() => {
+      apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: ORBIT_MINE_KEY, value }) })
+        .then((r) => { if (!r.ok) throw new Error(); }).catch(() => toast.error("บันทึกการปรับวงแอปไม่สำเร็จ ลองใหม่อีกครั้ง"));
+    }, 600);
+  };
+  const editingTeam = tunerOpen && tunerScope === "team";
+  const teamDirty = JSON.stringify(resolveOrbitStyle(teamDraft, null)) !== JSON.stringify(resolveOrbitStyle(orbitTeam, null));
+  // แก้ค่ากลางอยู่ = โชว์ร่างค่ากลางล้วน (ไม่ปนค่าของตัวเอง) ให้เห็นแบบที่คนอื่นจะเห็น
+  const orbitStyle = editingTeam ? resolveOrbitStyle(teamDraft, null, reducedMotion) : resolveOrbitStyle(orbitTeam, orbitMine, reducedMotion);
+  const tunerValue = editingTeam ? resolveOrbitStyle(teamDraft, null) : resolveOrbitStyle(orbitTeam, orbitMine);
+  const patchOrbit = (p: Partial<OrbitStyle>) => {
+    if (editingTeam) { setTeamDraft((d) => ({ ...d, ...p })); return; }
+    const next = { ...orbitMine, ...p };
+    setOrbitMine(next); saveMine(next);
+  };
+  const presetOrbit = (s: OrbitStyle) => {
+    if (editingTeam) setTeamDraft({ ...s });
+    else { setOrbitMine({ ...s }); saveMine({ ...s }); }
+    setReplayKey((k) => k + 1);
+  };
+  const resetMineOrbit = () => { setOrbitMine({}); saveMine({}); };
+  const onTunerScope = (s: OrbitTunerScope) => {
+    if (s === "team" && !teamDirty) setTeamDraft({ ...orbitTeam });
+    setTunerScope(s);
+  };
+  const saveTeamOrbit = async () => {
+    setSavingTeam(true);
+    try {
+      const value = cleanOrbitStyle(teamDraft);
+      const r = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: ORBIT_TEAM_KEY, value }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || "save failed");
+      setOrbitTeam(value);
+      setTeamDraft(value);
+      toast.success("บันทึกค่ากลางวงแอปแล้ว — คนที่ยังไม่ได้ปรับเองจะเห็นแบบนี้");
+    } catch { toast.error("บันทึกค่ากลางไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    finally { setSavingTeam(false); }
+  };
+  // ปิดแผงตอนร่างค่ากลางยังไม่บันทึก → ถามก่อน (ของกลาง ConfirmDialog)
+  const closeTuner = () => { if (editingTeam && teamDirty) setConfirmCloseTuner(true); else setTunerOpen(false); };
+
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   const onSectionDragEnd = (e: DragEndEvent) => {
     const { active, over } = e; if (!over || active.id === over.id) return;
@@ -627,6 +693,10 @@ export default function AppLauncherPage() {
                 ))}
               </div>
             )}
+            {showOrbit && (
+              <button type="button" onClick={() => (tunerOpen ? closeTuner() : setTunerOpen(true))} aria-pressed={tunerOpen}
+                className={`h-8 px-3 text-xs font-medium border rounded-lg ${tunerOpen ? "bg-blue-50 border-blue-300 text-blue-700" : "text-slate-600 border-slate-200 hover:bg-slate-50"}`}>◎ ปรับวงแอป</button>
+            )}
             {!editMode && (
               <div className="relative">
                 <button type="button" onClick={() => setThemeOpen((o) => !o)} className="h-8 px-3 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🎨 แต่งหน้าแรก</button>
@@ -695,6 +765,7 @@ export default function AppLauncherPage() {
           // ◎ วงแอป (ของกลาง components/app-orbit) + งานของฉัน + โปรด ใต้วง
           <div className="space-y-8">
             <AppOrbit apps={orbitApps} query={query} onQueryChange={setQuery} accent={accent} initialKey={lastAppKey}
+              style={orbitStyle} replayKey={replayKey}
               greeting={`${greeting}${user?.name ? `, ${user.name}` : ""} 👋`} />
             {myWork}
             {favApps.length > 0 && (
@@ -881,6 +952,17 @@ export default function AppLauncherPage() {
           </div>
         );
       })()}
+
+      {/* ============= ◎ แผงปรับวงแอป (ของฉัน / ค่ากลางทั้งทีม) ============= */}
+      <AppOrbitTuner open={tunerOpen && showOrbit} onClose={closeTuner} value={tunerValue}
+        onPatch={patchOrbit} onPreset={presetOrbit} onReplay={() => setReplayKey((k) => k + 1)}
+        scope={canTeamOrbit ? tunerScope : "mine"} onScope={onTunerScope} canTeam={canTeamOrbit}
+        mineCount={orbitOverrideCount(orbitTeam, orbitMine)} onResetMine={resetMineOrbit}
+        teamDirty={teamDirty} savingTeam={savingTeam} onSaveTeam={saveTeamOrbit} onCancelTeam={() => setTeamDraft({ ...orbitTeam })} />
+      <ConfirmDialog open={confirmCloseTuner} onClose={() => setConfirmCloseTuner(false)}
+        onConfirm={() => { setConfirmCloseTuner(false); setTeamDraft({ ...orbitTeam }); setTunerOpen(false); }}
+        title="ค่ากลางยังไม่ได้บันทึก" message="คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกโดยไม่บันทึกหรือไม่?"
+        confirmText="ออกโดยไม่บันทึก" cancelText="อยู่ต่อ" variant="danger" />
     </div>
   );
 }

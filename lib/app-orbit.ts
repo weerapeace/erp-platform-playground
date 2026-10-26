@@ -10,6 +10,7 @@
  */
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { applyAppOverrides, menuPlace } from "@/lib/app-menu-layout";
+import type { OrbitStyle } from "@/lib/app-orbit-style";
 
 /** แถวเมนูขั้นต่ำที่ต้องใช้ (ตรงกับ MenuRow ของเชลล์) */
 export type OrbitMenuRow = {
@@ -122,4 +123,67 @@ export function gallerySlot(i: number, focus: number, n: number): number {
   let k = (((i - focus) % n) + n) % n;
   if (k > n / 2) k -= n;
   return k;
+}
+
+// ===== ท่าทางการ์ดตามรูปแบบวง (lib/app-orbit-style) =====
+type PoseStyle = Pick<OrbitStyle, "mode" | "radius" | "tilt" | "depth" | "intro" | "size" | "shape" | "labels">;
+export type OrbitPose = { x: number; y: number; s: number; z: number; o: number; ry: number };
+/** แถวเอียง: เลื่อนกี่ px ต่อการหมุน 1 เรเดียน */
+export const ROW_PX_PER_RAD = 300;
+
+/** ขนาดการ์ด (กล่องไอคอน + กล่องรวมชื่อ) ตามขนาด/ทรง */
+export function orbitCardBox(st: Pick<OrbitStyle, "size" | "shape" | "labels">): { tileW: number; tileH: number; w: number; h: number } {
+  const por = st.shape === "portrait";
+  const tileW = por ? Math.round(st.size * 0.8) : st.size;
+  const tileH = por ? Math.round(st.size * 1.2) : st.size;
+  return { tileW, tileH, w: Math.max(tileW, 84), h: tileH + (st.labels ? 20 : 0) };
+}
+
+function rowSpan(n: number, size: number) { const gap = size * 1.9; return { gap, total: Math.max(n * gap, 1000) }; }
+
+/**
+ * ตำแหน่ง/ขนาด/ความจางของการ์ดใบที่ i (จุดศูนย์กลาง เทียบมุมซ้ายบนของเวที W×H)
+ *   rot = มุมหมุนวง · sel = ใบที่เลือก (แกลเลอรีใช้เป็นใบกลาง) · e = ความคืบหน้าลูกเล่นตอนเปิด 0→1
+ *   compact = แกลเลอรีมือถือ (เวทีเตี้ย)
+ */
+export function orbitPose(i: number, n: number, rot: number, sel: number, W: number, H: number, st: PoseStyle, e = 1, compact = false): OrbitPose {
+  const k = st.radius / 100, cx = W / 2, cy = H / 2;
+  const box = orbitCardBox(st);
+  const ang = rot + (i * TAU) / Math.max(n, 1) - Math.PI / 2 + (st.intro === "spin" ? -(1 - e) * 2.4 : 0);
+  let p: OrbitPose;
+  if (compact || st.mode === "gallery") {
+    const kk = gallerySlot(i, sel, n), a = Math.abs(kk);
+    p = compact
+      ? { x: cx + Math.sign(kk) * (a ? st.size * 1.6 + (a - 1) * st.size * 1.17 : 0), y: cy, s: a === 0 ? 1.25 : a === 1 ? 0.88 : 0.74, z: 100 - a, o: a > 2 ? 0 : 1, ry: 0 }
+      : { x: cx + Math.sign(kk) * (a ? st.size * 1.9 + (a - 1) * st.size * 1.08 : 0), y: H * 0.46, s: a === 0 ? 2 : a === 1 ? 1.2 : 0.85, z: 100 - a, o: a > 5 ? 0 : 1 - a * 0.08, ry: 0 };
+  } else if (st.mode === "ellipse") {
+    p = { x: cx + (W / 2 - box.w / 2 - 8) * k * Math.cos(ang), y: cy + (H / 2 - box.h / 2 - 6) * k * Math.sin(ang), s: 1, z: 10, o: 1, ry: 0 };
+  } else if (st.mode === "circle") {
+    const R = Math.min(H / 2 - box.h / 2 - 6, W / 2 - box.w / 2 - 8) * k;
+    p = { x: cx + R * Math.cos(ang), y: cy + R * Math.sin(ang), s: 1, z: 10, o: 1, ry: 0 };
+  } else if (st.mode === "ring") {
+    const R = (W / 2 - box.w / 2 - 16) * k, tl = (st.tilt * Math.PI) / 180, th = ang + Math.PI, d = (Math.sin(th) + 1) / 2;
+    const vy = Math.min(R * Math.cos(tl), H / 2 - box.h * 0.6);
+    p = { x: cx + R * Math.cos(th), y: H * 0.48 + vy * Math.sin(th), s: 1 - (st.depth / 100) * (1 - d) * Math.sin(tl) * 1.2, z: Math.round(d * 100), o: 1 - 0.5 * (1 - d) * Math.sin(tl), ry: 0 };
+  } else {
+    const { gap, total } = rowSpan(n, st.size);
+    const x = ((((i * gap + rot * ROW_PX_PER_RAD) % total) + total) % total) - total / 2;
+    p = { x: cx + x, y: H * 0.46 + Math.sin(i * 1.7) * st.size * 0.55, s: 1.3, z: 10, o: Math.abs(x) > W / 2 + 50 ? 0 : 1, ry: (-x / W) * st.tilt };
+  }
+  if (st.intro === "burst") { p.x = cx + (p.x - cx) * e; p.y = cy + (p.y - cy) * e; p.o *= e; }
+  if (st.intro === "drop") { p.y += (1 - e) * 130; p.o *= e; }
+  return p;
+}
+
+/** มุมหมุนเป้าหมายเมื่อเลือกใบ i (วง = ขึ้นบนสุด/มาหน้าสุด · แถว = มากลาง · แกลเลอรี = ไม่ต้องหมุน → null) */
+export function orbitSnapTarget(mode: OrbitStyle["mode"], rot: number, i: number, n: number, size: number): number | null {
+  if (mode === "gallery") return null;
+  if (mode === "row") {
+    const { gap, total } = rowSpan(n, size), period = total / ROW_PX_PER_RAD;
+    const want = (total / 2 - i * gap) / ROW_PX_PER_RAD;
+    let d = (((want - rot) % period) + period) % period;
+    if (d > period / 2) d -= period;
+    return rot + d;
+  }
+  return snapRotation(rot, i, n);
 }

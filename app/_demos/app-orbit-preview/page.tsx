@@ -6,7 +6,9 @@
  */
 import { useMemo, useState } from "react";
 import { AppOrbit } from "@/components/app-orbit";
+import { AppOrbitTuner } from "@/components/app-orbit/tuner";
 import type { OrbitApp } from "@/lib/app-orbit";
+import { orbitOverrideCount, resolveOrbitStyle, type OrbitStyle } from "@/lib/app-orbit-style";
 
 const m = (href: string, label: string, icon = "📄") => ({ href, label, icon, iconUrl: null, keywords: [] });
 const SAMPLE: OrbitApp[] = [
@@ -36,6 +38,11 @@ export default function AppOrbitPreviewPage() {
   const [query, setQuery] = useState("");
   const [as, setAs] = useState<"admin" | "prod">("admin");
   const apps = useMemo(() => (as === "admin" ? SAMPLE : SAMPLE.filter((a) => PROD.includes(a.key))), [as]);
+  // แผงปรับ (พรีวิวไม่บันทึกที่ไหน — ของจริงดู app/apps/page.tsx)
+  const [mine, setMine] = useState<Partial<OrbitStyle>>({});
+  const [open, setOpen] = useState(false);
+  const [replay, setReplay] = useState(0);
+  const style = resolveOrbitStyle(null, mine);
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30">
       <div className="max-w-7xl mx-auto px-6 py-6">
@@ -45,11 +52,16 @@ export default function AppOrbitPreviewPage() {
             <option value="admin">แอดมิน · 19 แอป</option>
             <option value="prod">ฝ่ายผลิต · 6 แอป</option>
           </select>
+          <button type="button" onClick={() => setOpen((o) => !o)} className="ml-auto h-7 px-2.5 rounded border border-slate-200 bg-white">◎ ปรับวงแอป</button>
         </div>
         <div className="mt-4">
-          <AppOrbit apps={apps} query={query} onQueryChange={setQuery} greeting="สวัสดีตอนบ่าย, ตัวอย่าง 👋" initialKey="tasks" />
+          <AppOrbit apps={apps} query={query} onQueryChange={setQuery} greeting="สวัสดีตอนบ่าย, ตัวอย่าง 👋" initialKey="tasks" style={style} replayKey={replay} />
         </div>
       </div>
+      <AppOrbitTuner open={open} onClose={() => setOpen(false)} value={style}
+        onPatch={(p) => setMine((m) => ({ ...m, ...p }))} onPreset={(s) => { setMine({ ...s }); setReplay((k) => k + 1); }} onReplay={() => setReplay((k) => k + 1)}
+        scope="mine" onScope={() => {}} canTeam={false} mineCount={orbitOverrideCount(null, mine)} onResetMine={() => setMine({})}
+        teamDirty={false} savingTeam={false} onSaveTeam={() => {}} onCancelTeam={() => {}} />
     </div>
   );
 }
