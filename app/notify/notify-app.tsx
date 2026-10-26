@@ -18,6 +18,8 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, usePwaInstall } from "@/components/pwa-install-button";
 import { relTime } from "@/components/notification-bell";
 import { isStandalone, useWebPush } from "@/components/web-push";
+import { useViewportLayout } from "@/components/device-view";
+import { QrCode } from "@/components/qr-code";
 import { PUSH_CATEGORIES, pushCategoryIcon } from "@/lib/push-categories";
 import type { Notification, NotificationsResponse } from "@/app/api/notifications/route";
 
@@ -57,11 +59,48 @@ export function NotifyApp() {
 }
 
 function Screen({ children }: { children: React.ReactNode }) {
+  const viewport = useViewportLayout();
+  const [installed, setInstalled] = useState(true);   // เริ่ม true = ไม่โชว์ QR ก่อนรู้ว่าเป็นโหมดแอปหรือไม่ (กันกระพริบ)
+  useEffect(() => { setInstalled(isStandalone()); }, []);
+
+  // เปิดบนคอม (ไม่ใช่แอปที่ติดตั้งแล้ว) → แอปอยู่ในกรอบขนาดมือถือ + QR ให้สแกนไปติดตั้งบนมือถือ
+  if (viewport === "desktop" && !installed) {
+    return (
+      <div className="min-h-[100dvh] bg-slate-100 text-slate-800 flex items-start justify-center gap-6 p-6">
+        <div className="w-[400px] h-[calc(100dvh-3rem)] flex flex-col bg-slate-50 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          {children}
+        </div>
+        <InstallQrCard />
+      </div>
+    );
+  }
   return (
     <div className="h-[100dvh] flex flex-col bg-slate-50 text-slate-800"
       style={{ paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
       {children}
     </div>
+  );
+}
+
+/** QR สแกนด้วยกล้องมือถือ → เปิด /notify บนมือถือ → ติดตั้งลงหน้าจอ (ใช้ QrCode ของกลาง + ไอคอนแอปกลาง QR) */
+function InstallQrCard() {
+  const [url, setUrl] = useState("");
+  useEffect(() => { setUrl(`${window.location.origin}/notify`); }, []);
+  return (
+    <aside className="w-72 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 text-center sticky top-6">
+      <h2 className="text-base font-semibold text-slate-800">📱 ติดตั้งบนมือถือ</h2>
+      <p className="text-xs text-slate-500 mt-1">สแกนด้วย <b>กล้องมือถือ</b> แล้วเปิดลิงก์</p>
+      <div className="flex justify-center my-4">
+        <QrCode text={url || null} size={200} logo="/notify-icon-192.png" alt="QR เปิดแอปแจ้งเตือนบนมือถือ" className="border border-slate-100" />
+      </div>
+      <ol className="text-left text-xs text-slate-600 space-y-1.5 list-decimal pl-4">
+        <li><b>Android:</b> เปิดด้วย Chrome → ล็อกอิน → ⚙️ → “ติดตั้งแอป”</li>
+        <li><b>iPhone:</b> เปิดด้วย Safari → แชร์ (▢↑) → “เพิ่มไปยังหน้าจอโฮม” → เปิดจากไอคอน → ล็อกอินด้วยรหัสผ่าน/PIN</li>
+        <li>ในแอป: ⚙️ → “เปิดรับแจ้งเตือนบนเครื่องนี้” → อนุญาต → “ส่งแจ้งเตือนทดสอบ”</li>
+      </ol>
+      <p className="text-[11px] text-amber-700 bg-amber-50 rounded-lg px-2 py-1.5 mt-3 text-left">อย่าสแกนผ่าน LINE — จะเปิดในหน้าต่าง LINE ซึ่งติดตั้งแอปไม่ได้</p>
+      <p className="text-[11px] text-slate-400 mt-3 break-all">{url}</p>
+    </aside>
   );
 }
 
