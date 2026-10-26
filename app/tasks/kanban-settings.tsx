@@ -8,8 +8,54 @@
 
 import { useState } from "react";
 import { useT } from "@/components/i18n";
-import type { KanbanTheme, WipCols } from "./overview-customizer";
+import type { KanbanTheme, WipCols, CardLook, CardScale } from "./overview-customizer";
 import { HOVER_FIELDS, DEFAULT_HOVER_FIELDS, type HoverField } from "./task-hover-card";
+
+// ขนาด เล็ก/กลาง/ใหญ่ → ขนาดการ์ด + จำนวนคอลัมน์ในช่องใหญ่ของ WIP (ตามหน้าตา — แถวรายการกว้าง ใช้คอลัมน์น้อยกว่า)
+const SIZE_COLS: Record<CardLook, Record<CardScale, WipCols>> = {
+  std: { sm: 4, md: 3, lg: 2 }, gallery: { sm: 4, md: 3, lg: 2 }, text: { sm: 4, md: 3, lg: 2 }, list: { sm: 2, md: 1, lg: 1 },
+};
+
+/**
+ * แถบปรับหน้าตา + ขนาดการ์ด (บนหัวบอร์ด) — เจ้าของขอ 2026-10-26 "ปรับรูปแบบหน้าตา/ขนาดได้"
+ * กดครั้งเดียวเปลี่ยนทั้งบอร์ด · จำต่อคน (ธีม kanban) · ปรับละเอียด (คอลัมน์/ข้อมูลบนการ์ด) อยู่ใน ⚙️
+ */
+export function CardStyleBar({ cfg, onChange, accent, wip }: { cfg: KanbanTheme; onChange: (c: KanbanTheme) => void; accent?: string; wip?: boolean }) {
+  const t = useT();
+  const look = cfg.cardLook ?? "std";
+  const size = cfg.cardScale ?? "md";
+  const looks: [CardLook, string, string, string][] = [
+    ["std", "🃏", t("มาตรฐาน", "Standard"), t("รูปบน ข้อมูลตามที่ติ๊กใน ⚙️", "Cover on top, fields from ⚙️")],
+    ["gallery", "🖼️", t("รูปเด่น", "Gallery"), t("รูปใหญ่ + ชื่อ + คน + วันส่ง — จำงานจากรูป", "Big image + title, people, due")],
+    ["list", "☰", t("แถวรายการ", "List"), t("1 บรรทัดต่องาน เห็นได้มากสุดในจอเดียว", "One line per task — see the most at once")],
+    ["text", "🔤", t("กะทัดรัด", "Compact"), t("ไม่มีรูป เหลือชื่อ + คน + วันส่ง", "No images — title, people, due")],
+  ];
+  const sizes: [CardScale, string][] = [["sm", t("เล็ก", "S")], ["md", t("กลาง", "M")], ["lg", t("ใหญ่", "L")]];
+  const pick = (p: { look?: CardLook; size?: CardScale }) => {
+    const nl = p.look ?? look, ns = p.size ?? size;
+    onChange({ ...cfg, cardLook: nl, cardScale: ns, ...(wip ? { wipCols: SIZE_COLS[nl][ns] } : {}) });
+  };
+  const seg = (on: boolean) => `h-7 px-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`;
+  return (
+    <div className="inline-flex items-center gap-1.5">
+      <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm" role="group" aria-label={t("หน้าตาการ์ด", "Card look")}>
+        {looks.map(([k, icon, label, hint]) => (
+          <button key={k} type="button" onClick={() => pick({ look: k })} title={`${label} — ${hint}`} aria-pressed={look === k}
+            style={look === k ? { background: accent || "#7c3aed" } : undefined} className={seg(look === k)}>
+            {icon}<span className="hidden xl:inline ml-1">{label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm" role="group" aria-label={t("ขนาดการ์ด", "Card size")}
+        title={wip ? t("ขนาดการ์ด — ปรับจำนวนคอลัมน์ให้เอง (ปรับละเอียดได้ใน ⚙️)", "Card size — also sets columns (fine-tune in ⚙️)") : t("ขนาดการ์ด", "Card size")}>
+        {sizes.map(([k, label]) => (
+          <button key={k} type="button" onClick={() => pick({ size: k })} aria-pressed={size === k}
+            style={size === k ? { background: accent || "#7c3aed" } : undefined} className={seg(size === k)}>{label}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 // ปุ่มเลือกจำนวนคอลัมน์การ์ดในช่องใหญ่ของมุมมอง WIP (1–6 · มากขึ้น = การ์ดเล็กลง) — ใช้ทั้งบนบอร์ดและในตั้งค่า
 export function WipColsControl({ value, onChange, accent }: { value: WipCols; onChange: (v: WipCols) => void; accent?: string }) {
@@ -80,6 +126,9 @@ export function KanbanSettingsControls({ cfg, onChange, wip }: { cfg: KanbanThem
       )}
       <div>
         <div className="text-xs font-medium text-slate-500 mb-1">{t("ข้อมูลบนการ์ด", "Card fields")}</div>
+        {(cfg.cardLook ?? "std") !== "std" && (
+          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-md px-2 py-1 mb-1.5">{t("ตอนนี้ใช้หน้าตาสำเร็จรูป (เลือกบนหัวบอร์ด) — ติ๊กด้านล่างจะมีผลเมื่อกลับไปใช้แบบ \"มาตรฐาน\"", "A preset look is on (top of board) — these ticks apply to \"Standard\"")}</p>
+        )}
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
           {/* WIP ไม่โชว์บรรทัดสินค้า/SKU บนการ์ด (เจ้าของเลือก) → ซ่อนตัวเลือกนี้ */}
           {([["cover", t("รูปปก", "Cover")], ["brand", t("แบรนด์", "Brand")], ["assignee", t("ผู้รับผิดชอบ", "Assignee")], ["due", t("กำหนดส่ง", "Due date")], ["priority", t("ความสำคัญ", "Priority")], ["taskType", t("ประเภทงาน", "Task type")], ["progress", t("ความคืบหน้า", "Progress")], ["sku", t("สินค้า/SKU", "Product/SKU")], ["taskNo", t("เลขที่งาน", "Task no.")], ["brandBorder", t("กรอบสีตามแบรนด์", "Brand color border")], ["compact", t("การ์ดกะทัดรัด", "Compact card")]] as const).filter(([k]) => !(wip && k === "sku")).map(([k, label]) => (

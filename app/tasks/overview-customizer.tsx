@@ -35,11 +35,17 @@ export type WipCols = 1 | 2 | 3 | 4 | 5 | 6;
 export type CoverSize = "auto" | "sm" | "md" | "lg" | "square";
 export type CardGap = "tight" | "normal" | "loose" | "xloose";
 export type CardScale = "sm" | "md" | "lg";   // ขนาดการ์ดทั้งใบ (ย่อ/ปกติ/ขยาย)
+// หน้าตาการ์ดสำเร็จรูป (เจ้าของขอ 2026-10-26): std = มาตรฐาน (ใช้ข้อมูลที่ติ๊กเอง) · gallery = รูปเด่น · list = แถวรายการ · text = กะทัดรัดไม่มีรูป
+export type CardLook = "std" | "gallery" | "list" | "text";
+// WIP จัดกลุ่มในช่อง "กำลังดำเนินการ": status = แบบเดิม (ชิปสถานะ) · due = ตามกำหนดส่ง · assignee = ตามคนรับผิดชอบหลัก · brand = ตามแบรนด์
+export type WipGroup = "status" | "due" | "assignee" | "brand";
 // WIP: wipSort due = เรียงตามกำหนดส่ง / manual = ลำดับที่ฉันลากจัดเอง (wipOrder = task id เรียงตามที่จัด)
 export type KanbanTheme = { view: KanbanView; groupBy: KanbanGroupBy; cover: boolean; brand: boolean; assignee: boolean; due: boolean; priority: boolean; progress: boolean; brandBorder: boolean; sku?: boolean; taskNo?: boolean; taskType?: boolean; compact?: boolean; wipCols?: WipCols;
   coverSize?: CoverSize; coverFit?: "cover" | "contain"; coverPos?: "top" | "side"; cardGap?: CardGap; cardScale?: CardScale; wipSort?: "due" | "manual"; wipOrder?: string[];
   /** 🪟 ชี้ที่การ์ด = กล่องรูปใหญ่ + รายละเอียด (ไม่ตั้ง = เปิด) · hoverFields = สิ่งที่โชว์ (ไม่ตั้ง = DEFAULT_HOVER_FIELDS) — app/tasks/task-hover-card */
-  hoverCard?: boolean; hoverFields?: HoverField[] };
+  hoverCard?: boolean; hoverFields?: HoverField[];
+  /** หน้าตาการ์ด (ไม่ตั้ง = std) · wipGroup = จัดกลุ่มในช่องใหญ่ของ WIP (ไม่ตั้ง = status) */
+  cardLook?: CardLook; wipGroup?: WipGroup };
 export type CardAlign = "left" | "center" | "right";
 export type AnimTheme = { hover?: boolean; entrance?: boolean; heroGradient?: boolean };
 // สีสถานะ "ของฉัน" (per-user): key=status key → c1 (สีหลัก) + c2 (ไล่สี, เว้น=สีเดียว)

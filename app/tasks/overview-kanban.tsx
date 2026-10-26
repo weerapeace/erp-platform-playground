@@ -20,7 +20,8 @@ import { PRIORITY_META, PRIORITY_RANK, priorityLabel, type CreativeTask, type Cr
 import { TaskCard as CardBody, cardGapPx, coverKey, type CardExtra } from "./task-card";
 // การ์ดงานย้ายไปของกลาง ./task-card — re-export กันโค้ดเดิมที่อ้างจากไฟล์นี้
 export { coverKey, cardGapPx };
-import type { KanbanTheme, KanbanGroupBy, StatusColorMap, AnimTheme } from "./overview-customizer";
+import type { KanbanTheme, KanbanGroupBy, StatusColorMap, AnimTheme, WipGroup } from "./overview-customizer";
+import { dueDiffDays } from "./task-card";
 import { ovStatusBg } from "./overview-customizer";
 
 const NONE = "__none__";
@@ -238,9 +239,11 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   const cols = cfg.wipCols ?? 2;
   const manual = cfg.wipSort === "manual";
   const bigCfg: KanbanTheme = { ...cfg, sku: false };   // WIP ไม่โชว์บรรทัดสินค้า (เจ้าของเลือก)
-  const smallCfg: KanbanTheme = { ...cfg, sku: false, cover: false, progress: false, brand: false, taskNo: false, taskType: false, compact: true };
-  // การ์ดช่องใหญ่: ไม่มีรูป → ไอคอนแทน + ยืดเต็มช่อง = ทุกใบสูงเท่ากัน
-  const bigExtra: CardExtra = { statusPill: true, relDue: true, coverCls: WIP_COVER_CLS[cols], imgW: cols === 1 ? 640 : 400, placeholder: true, fill: true };
+  // ช่องเล็ก (รอตรวจ/ต้องแก้) = การ์ดย่อแบบเดิมเสมอ ไม่ตามหน้าตาสำเร็จรูป
+  const smallCfg: KanbanTheme = { ...cfg, cardLook: "std", sku: false, cover: false, progress: false, brand: false, taskNo: false, taskType: false, compact: true };
+  // การ์ดช่องใหญ่: ไม่มีรูป = ไม่โชว์กล่องรูปว่าง (เจ้าของขอ 2026-10-26 เดิมกินที่) · ยืดเต็มความสูงแถว
+  const bigExtra: CardExtra = { statusPill: true, relDue: true, coverCls: WIP_COVER_CLS[cols], imgW: cols === 1 ? 640 : 400, placeholder: false, fill: true };
+  const group: WipGroup = cfg.wipGroup ?? "status";
   const smallExtra: CardExtra = { relDue: true, fill: true };
   const gap = cardGapPx(cfg);
   // สีแถบหัวช่อง = สีสถานะที่ผู้ใช้ตั้งเอง (ถ้ามี)
@@ -268,6 +271,37 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   }), [sorted]);
   const activeShown = subFilter ? lanes.active.filter((x) => x.status === subFilter) : lanes.active;
   const activeTask = tasks.find((x) => x.id === activeId) ?? null;
+
+  // จัดกลุ่มในช่องใหญ่ (status = แบบเดิมไม่แบ่งหัวข้อ) — ลำดับในกลุ่มตามการเรียงที่เลือก (กำหนดส่ง/ลำดับของฉัน)
+  const groups = useMemo<{ key: string; label: string; color?: string; tone?: string; list: CreativeTask[] }[] | null>(() => {
+    if (group === "status") return null;
+    if (group === "due") {
+      const b: Record<string, CreativeTask[]> = { late: [], today: [], week: [], later: [], none: [] };
+      for (const tk of activeShown) {
+        if (!tk.due_date) { b.none.push(tk); continue; }
+        const d = dueDiffDays(tk.due_date);
+        (d < 0 ? b.late : d === 0 ? b.today : d <= 7 ? b.week : b.later).push(tk);
+      }
+      return [
+        { key: "late", label: t("เกินกำหนด", "Overdue"), color: "#ef4444", tone: "text-red-700", list: b.late },
+        { key: "today", label: t("ส่งวันนี้", "Due today"), color: "#f59e0b", tone: "text-amber-700", list: b.today },
+        { key: "week", label: t("ภายใน 7 วัน", "Within 7 days"), color: "#8b5cf6", list: b.week },
+        { key: "later", label: t("หลังจากนั้น", "Later"), color: "#94a3b8", list: b.later },
+        { key: "none", label: t("ยังไม่กำหนดวันส่ง", "No due date"), color: "#cbd5e1", list: b.none },
+      ].filter((g) => g.list.length > 0);
+    }
+    // คนรับผิดชอบหลัก / แบรนด์ — กลุ่มที่งานเยอะขึ้นก่อน · ไม่ระบุ ไว้ท้าย
+    const m = new Map<string, { key: string; label: string; color?: string; list: CreativeTask[] }>();
+    for (const tk of activeShown) {
+      const k = group === "assignee" ? (tk.assignee_id ?? tk.assignees?.[0]?.id ?? NONE) : (tk.brand_id ?? NONE);
+      const label = group === "assignee"
+        ? (tk.assignee_label ?? tk.assignees?.[0]?.label ?? t("ยังไม่มีผู้รับผิดชอบ", "Unassigned"))
+        : (tk.brand_label ?? t("ไม่ระบุแบรนด์", "No brand"));
+      if (!m.has(k)) m.set(k, { key: k, label: k === NONE ? (group === "assignee" ? t("ยังไม่มีผู้รับผิดชอบ", "Unassigned") : t("ไม่ระบุแบรนด์", "No brand")) : label, color: group === "brand" ? (tk.brand_color || "#cbd5e1") : undefined, list: [] });
+      m.get(k)!.list.push(tk);
+    }
+    return [...m.values()].sort((a, b) => (a.key === NONE ? 1 : b.key === NONE ? -1 : b.list.length - a.list.length));
+  }, [group, activeShown, t]);
 
   // บันทึกลำดับใหม่: ลำดับที่เห็นตอนนี้ (ย้ายใบที่ลาก) + ของเดิมที่ซ่อนจากตัวกรองต่อท้าย (ไม่หาย)
   const saveOrder = (dragId: string, overId: string) => {
@@ -301,7 +335,8 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
   };
 
   const empty = (msg: string) => <div className="h-16 flex items-center justify-center text-center px-2 text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">{msg}</div>;
-  const grid = (n: number) => ({ display: "grid", gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))`, gridAutoRows: "1fr", gap });   // 1fr = ทุกแถวสูงเท่ากัน
+  // แถวสูงตามการ์ดในแถวนั้น (ใบในแถวเดียวกันสูงเท่ากัน) — แถวที่ไม่มีรูปจะเตี้ยลง ไม่เว้นที่ว่าง
+  const grid = (n: number) => ({ display: "grid", gridTemplateColumns: `repeat(${n}, minmax(0, 1fr))`, gridAutoRows: "auto", gap });
 
   // ชิปกรอง: ทั้งหมด → กำลังทำ → พร้อมทำ → รอคิว (ใกล้เสร็จสุดก่อน)
   const subChips: [string, string, number][] = [["", t("ทั้งหมด", "All"), lanes.active.length], ...[...WIP_ACTIVE_STATUSES].reverse().map((s): [string, string, number] => [s, statusMeta(s).label, lanes.active.filter((x) => x.status === s).length])];
@@ -323,6 +358,15 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
           </div>
           {onCfgChange && (
             <div className="flex items-center gap-1">
+              {/* จัดกลุ่มในช่องนี้ — สถานะ (แบบเดิม) / กำหนดส่ง / คนรับผิดชอบ / แบรนด์ · จำต่อคน */}
+              <select value={group} onChange={(e) => onCfgChange({ ...cfg, wipGroup: e.target.value as WipGroup })} aria-label={t("จัดกลุ่มตาม", "Group by")}
+                title={t("จัดกลุ่มการ์ดในช่องนี้", "Group cards in this lane")}
+                className="h-7 pl-2 pr-6 text-[11px] font-medium text-slate-600 border border-slate-200 rounded-lg bg-white">
+                <option value="status">{t("จัดกลุ่ม: สถานะ", "Group: status")}</option>
+                <option value="due">{t("จัดกลุ่ม: กำหนดส่ง", "Group: due date")}</option>
+                <option value="assignee">{t("จัดกลุ่ม: คนรับผิดชอบ", "Group: assignee")}</option>
+                <option value="brand">{t("จัดกลุ่ม: แบรนด์", "Group: brand")}</option>
+              </select>
               <div className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
                 {sortBtn("due", t("⏰ กำหนดส่ง", "⏰ Due date"), t("เรียงตามกำหนดส่ง เก่าสุดก่อน", "Sort by due date, oldest first"))}
                 {sortBtn("manual", t("✋ ลำดับของฉัน", "✋ My order"), t("ลากการ์ดไปวางทับใบอื่นเพื่อสลับตำแหน่ง — จำแยกแต่ละคน", "Drag a card onto another to reorder — saved per person"))}
@@ -335,7 +379,22 @@ export function WipBoard({ tasks, cfg, accent, statusColors, anim, onMoveStatus,
           )}
         </div>
       }>
-      {activeShown.length === 0 ? empty(t("ไม่มีงานค้างในกลุ่มนี้ 🎉", "Nothing in progress here 🎉")) : (
+      {activeShown.length === 0 ? empty(t("ไม่มีงานค้างในกลุ่มนี้ 🎉", "Nothing in progress here 🎉")) : groups ? (
+        <div className="space-y-3">
+          {groups.map((g) => (
+            <div key={g.key}>
+              <div className={`flex items-center gap-1.5 px-0.5 mb-1.5 text-xs font-semibold ${g.tone ?? "text-slate-600"}`}>
+                {g.color && <span className="h-2 w-2 rounded-full shrink-0" style={{ background: g.color }} />}
+                <span className="truncate">{g.label}</span>
+                <span className="text-[11px] font-medium text-slate-400 bg-white border border-slate-200 rounded-full px-1.5">{g.list.length}</span>
+              </div>
+              <div style={grid(cols)}>
+                {g.list.map((tk) => <WipCard key={tk.id} task={tk} cfg={bigCfg} extra={bigExtra} animCls={animCls} dropHint={!!activeId} onClick={() => onCardClick(tk.id)} />)}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
         <div style={grid(cols)}>
           {activeShown.map((tk) => <WipCard key={tk.id} task={tk} cfg={bigCfg} extra={bigExtra} animCls={animCls} dropHint={!!activeId} onClick={() => onCardClick(tk.id)} />)}
         </div>

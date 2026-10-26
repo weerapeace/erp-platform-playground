@@ -15,7 +15,7 @@ import { AssigneeStack } from "./assignee-avatar";
 import { TaskTypeChip } from "./task-type-chip";
 import { statusMeta, isTerminal } from "./use-statuses";
 import { PRIORITY_META, priorityLabel, isOverdue, type CreativeTask, type CreativePriority } from "./data";
-import type { KanbanTheme } from "./overview-customizer";
+import type { KanbanTheme, CardLook } from "./overview-customizer";
 
 /** ค่าตั้งต้นของการ์ด (เปิดเฉพาะที่ระบุ) — ใช้กับการ์ดนอกบอร์ด เช่น "งานของฉัน" / กระดานลากวาง */
 export function taskCardCfg(p: Partial<KanbanTheme>): KanbanTheme {
@@ -50,11 +50,70 @@ const COVER_SIDE_BOX: Record<string, string> = { auto: "w-16 h-16", sm: "w-12 h-
 const CARD_GAP_PX: Record<string, number> = { tight: 4, normal: 8, loose: 14, xloose: 22 };
 export const cardGapPx = (cfg: KanbanTheme) => CARD_GAP_PX[cfg.cardGap ?? "normal"] ?? 8;
 
-// ───────── การ์ด ─────────
-export function TaskCard({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: KanbanTheme; dragging?: boolean; extra?: CardExtra }) {
-  const t = useT();   // subscribe ภาษา
-  const pr = PRIORITY_META[task.priority as CreativePriority];
+// หน้าตาการ์ดสำเร็จรูป (cfg.cardLook) — แปลงเป็นตัวเลือกเดิมของการ์ด · std = ใช้ที่ผู้ใช้ติ๊กเอง · list วาดแยก (ListRow)
+// gallery = รูปใหญ่ 4:3 + ชื่อ + คน + วันส่ง · text = ไม่มีรูป เหลือชื่อ + คน + วันส่ง
+function applyLook(cfg: KanbanTheme, extra: CardExtra | undefined, look: CardLook): { cfg: KanbanTheme; extra: CardExtra | undefined } {
+  const lean = { priority: false, taskType: false, taskNo: false, brand: false, progress: false, sku: false, assignee: true, due: true, compact: true };
+  if (look === "gallery") return { cfg: { ...cfg, ...lean, cover: true, coverPos: "top", coverSize: "auto" }, extra: { ...extra, statusPill: false, placeholder: false, coverCls: "aspect-[4/3]", imgW: Math.max(extra?.imgW ?? 320, 480) } };
+  if (look === "text") return { cfg: { ...cfg, ...lean, cover: false }, extra: { ...extra, statusPill: false, placeholder: false } };
+  return { cfg, extra };
+}
+
+// กำหนดส่งบนการ์ด — relDue = นับวัน (เกิน X วัน / ส่งวันนี้ / อีก X วัน) · ไม่งั้นโชว์วันที่
+function DueText({ task, rel }: { task: CreativeTask; rel?: boolean }) {
+  const t = useT();
+  if (!task.due_date) return null;
+  if (rel) {
+    const d = dueDiffDays(task.due_date);
+    return <span title={task.due_date} className={`text-[11px] whitespace-nowrap ${d < 0 ? "text-red-600 font-semibold" : d === 0 ? "text-amber-600 font-semibold" : "text-slate-400"}`}>
+      {d < 0 ? t(`⚠ เกิน ${-d} วัน`, `⚠ ${-d}d late`) : d === 0 ? t("ส่งวันนี้", "Due today") : t(`อีก ${d} วัน`, `in ${d}d`)}</span>;
+  }
   const overdue = isOverdue(task);
+  return <span className={`text-[11px] ${overdue ? "text-red-600 font-semibold" : "text-slate-400"}`}>{overdue && "⚠ "}{task.due_date.slice(5)}</span>;
+}
+
+// หน้าตา "แถวรายการ" — 1 บรรทัดต่องาน: รูปเล็ก | ชื่อ + แบรนด์ · สถานะ | คน + วันส่ง (เห็นงานได้มากสุดในจอเดียว)
+const LIST_IMG: Record<string, string> = { sm: "h-8 w-8", md: "h-10 w-10", lg: "h-14 w-14" };
+const LIST_TITLE: Record<string, string> = { sm: "text-xs", md: "text-sm", lg: "text-base" };
+function ListRow({ task, cfg, dragging, extra }: { task: CreativeTask; cfg: KanbanTheme; dragging?: boolean; extra?: CardExtra }) {
+  const sz = cfg.cardScale ?? "md";
+  const cover = cfg.cover !== false && !isTerminal(task.status) ? coverKey(task) : null;
+  const m = statusMeta(task.status);
+  const fill = !!extra?.fill;
+  const hoverOn = cfg.hoverCard !== false;
+  const img = cover ? r2ImageUrl(cover, 160) : null;
+  const imgEl = img && (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={img} alt="" loading="lazy" decoding="async" className={`${LIST_IMG[sz] ?? LIST_IMG.md} shrink-0 rounded-md border border-slate-200 object-cover bg-slate-50`} />
+  );
+  return (
+    <TaskHoverWrap task={task} enabled={hoverOn} fields={cfg.hoverFields ?? DEFAULT_HOVER_FIELDS} off={dragging} className={fill ? "h-full" : undefined}>
+    <div className={`bg-white rounded-lg border border-slate-200 shadow-sm flex items-center gap-2.5 px-2.5 py-2 ${fill ? "h-full" : ""} ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
+      style={extra?.accentLeft ? { borderLeftWidth: 3, borderLeftColor: extra.accentLeft } : undefined}>
+      {imgEl && (hoverOn ? imgEl : <HoverPreview url={r2ImageUrl(cover)} previewW={520}>{imgEl}</HoverPreview>)}
+      <div className="flex-1 min-w-0">
+        <p className={`${LIST_TITLE[sz] ?? LIST_TITLE.md} font-medium text-slate-800 truncate`} title={task.title}>{extra?.badge}{task.title}</p>
+        <p className="text-[11px] text-slate-500 truncate flex items-center gap-1">
+          {task.brand_label && <><span className="h-2 w-2 rounded-full shrink-0" style={{ background: task.brand_color || "#cbd5e1" }} />{task.brand_label}<span className="text-slate-300">·</span></>}
+          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${m.dot}`} />{m.label}
+        </p>
+      </div>
+      <div className="shrink-0 flex flex-col items-end gap-0.5">
+        <AssigneeStack list={task.assignees} size={18} />
+        <DueText task={task} rel={extra?.relDue} />
+      </div>
+    </div>
+    </TaskHoverWrap>
+  );
+}
+
+// ───────── การ์ด ─────────
+export function TaskCard({ task, cfg: rawCfg, dragging, extra: rawExtra }: { task: CreativeTask; cfg: KanbanTheme; dragging?: boolean; extra?: CardExtra }) {
+  const t = useT();   // subscribe ภาษา
+  const look = rawCfg.cardLook ?? "std";
+  if (look === "list") return <ListRow task={task} cfg={rawCfg} dragging={dragging} extra={rawExtra} />;
+  const { cfg, extra } = applyLook(rawCfg, rawExtra, look);
+  const pr = PRIORITY_META[task.priority as CreativePriority];
   const compact = cfg.compact === true;
   // คอลัมน์ที่จบแล้ว (เสร็จ/ยกเลิก) ไม่โชว์รูปปก — เหลือแค่ตัวอักษร+ผู้รับผิดชอบ
   const showImages = cfg.cover && !isTerminal(task.status);
@@ -139,11 +198,7 @@ export function TaskCard({ task, cfg, dragging, extra }: { task: CreativeTask; c
         {(cfg.assignee || cfg.due) && (
           <div className="flex items-center justify-between gap-2 mt-2">
             {cfg.assignee ? <AssigneeStack list={task.assignees} size={20} /> : <span />}
-            {cfg.due && task.due_date && (extra?.relDue ? (() => {
-              const d = dueDiffDays(task.due_date);
-              return <span title={task.due_date} className={`text-[11px] whitespace-nowrap ${d < 0 ? "text-red-600 font-semibold" : d === 0 ? "text-amber-600 font-semibold" : "text-slate-400"}`}>
-                {d < 0 ? t(`⚠ เกิน ${-d} วัน`, `⚠ ${-d}d late`) : d === 0 ? t("ส่งวันนี้", "Due today") : t(`อีก ${d} วัน`, `in ${d}d`)}</span>;
-            })() : <span className={`text-[11px] ${overdue ? "text-red-600 font-semibold" : "text-slate-400"}`}>{overdue && "⚠ "}{task.due_date.slice(5)}</span>)}
+            {cfg.due && <DueText task={task} rel={extra?.relDue} />}
           </div>
         )}
         {cfg.progress && (

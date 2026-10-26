@@ -14,7 +14,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { OverviewKanban, WipBoard, isWipStatus } from "./overview-kanban";
 import { TaskCard, taskCardCfg } from "./task-card";
 import { ReviewQueueView } from "./review-queue-view";
-import { KanbanSettings, WipColsControl } from "./kanban-settings";
+import { KanbanSettings, CardStyleBar } from "./kanban-settings";
 import { CalendarBoard } from "./calendar-board";
 import { arrangeMySubtasks, DEFAULT_MYSUB_VIEW, type MySubView } from "./my-subtasks-view";
 import { isTerminal, statusMeta, type Status } from "./use-statuses";
@@ -456,7 +456,7 @@ export function OverviewDashboard({
               : statusFilter && onClearStatusFilter
                 ? <button type="button" onClick={onClearStatusFilter} className="text-[11px] text-violet-600 border border-violet-200 rounded-full px-2 py-0.5 hover:bg-violet-50">✕ {filterLabel} — {t("ล้างตัวกรอง", "Clear filter")}</button>
                 : <span />}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
               {(theme.kanban.view === "kanban" || theme.kanban.view === "wip") && (
                 <input value={kanbanSearch} onChange={(e) => setKanbanSearch(e.target.value)}
                   placeholder={t("ค้นหาในบอร์ด...", "Search board...")}
@@ -469,7 +469,8 @@ export function OverviewDashboard({
                     className={`h-7 px-2.5 rounded-md text-xs font-medium transition-colors ${on ? "text-white" : "text-slate-500 hover:text-slate-700"}`}>{icon} {label}</button>;
                 })}
               </div>
-              {theme.kanban.view === "wip" && <WipColsControl value={theme.kanban.wipCols ?? 2} onChange={(n) => onThemeChange({ ...theme, kanban: { ...theme.kanban, wipCols: n } })} accent={theme.accent} />}
+              {/* หน้าตา + ขนาดการ์ด (กดครั้งเดียว) — จำนวนคอลัมน์ปรับละเอียดได้ใน ⚙️ */}
+              {(theme.kanban.view === "kanban" || theme.kanban.view === "wip") && <CardStyleBar cfg={theme.kanban} onChange={(k) => onThemeChange({ ...theme, kanban: k })} accent={theme.accent} wip={theme.kanban.view === "wip"} />}
               {(theme.kanban.view === "kanban" || theme.kanban.view === "wip") && <KanbanSettings cfg={theme.kanban} onChange={(k) => onThemeChange({ ...theme, kanban: k })} accent={theme.accent} wip={theme.kanban.view === "wip"} />}
             </div>
           </div>
