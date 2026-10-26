@@ -6,7 +6,6 @@ import { LanguageProvider } from "@/components/i18n";
 import { NavProgress } from "@/components/nav-progress";
 import { BackgroundTasksHost } from "@/components/background-tasks-host";
 import { WorkPopupHost } from "@/components/work-popup";
-import { NotificationFloatHost } from "@/components/notification-float";
 import { SilentBoundary } from "@/components/silent-boundary";
 import { BRAND } from "@/components/brand";
 
@@ -46,7 +45,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="th">
       <body className="bg-slate-50 text-slate-900 antialiased">
         <NavProgress />
-        <AuthProvider><LanguageProvider><ToastProvider>{children}<WorkPopupHost /><SilentBoundary name="notification-float"><NotificationFloatHost /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
+        <AuthProvider><LanguageProvider><ToastProvider>{children}<SilentBoundary name="work-popup"><WorkPopupHost /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
         <BackgroundTasksHost />
       </body>
     </html>

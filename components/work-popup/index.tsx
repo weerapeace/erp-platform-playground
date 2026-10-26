@@ -5,7 +5,9 @@
  *   ใคร/เมื่อไหร่/รับทราบแล้ว ตัดสินที่เซิร์ฟเวอร์ (lib/email-report/popup) · ตั้งค่าที่ หน้าส่งอีเมลรายงาน → 🔔 เด้งป๊อปตอนเข้า ERP
  *   "งานของคุณ" ขึ้นก่อนเสมอ ติ๊กเสร็จในป๊อปได้ (PATCH /api/record-tasks/[id] — ผู้รับผิดชอบติ๊กข้อตัวเองได้)
  *   ปุ่ม: รับทราบ (วันละครั้ง = ไม่เด้งอีกวันนี้) · ไว้ทีหลัง (ปิด + ใส่กระดิ่งให้กดกลับมาเปิด) · เปิดใบงาน = ไว้ทีหลัง
- *   กระดิ่งลิงก์ ?popup=<id> → เปิดป๊อปนั้นทันทีไม่ว่าหน้าไหน
+ *   กระดิ่งลิงก์ ?popup=<id> → เปิดป๊อปนั้นทันทีไม่ว่าหน้าไหน (แม้ผู้ใช้ซ่อนป๊อปไว้)
+ *   จอคอม (≥1280) = การ์ดลอยมุมขวาล่าง/ขวาบน ย่อ/ซ่อนได้ (./float) · จอเล็ก = หน้าต่างกลางจอแบบเดิม
+ *   ซ่อน/เปิด + มุมจอ = เมนูโปรไฟล์ → 🔔 ป๊อปเตือนงาน (user_ui_prefs work_popup_float · ปิด = ไม่ถาม ไม่เด้ง)
  * WorkPopupBody = เนื้อในป๊อป (หน้าตั้งค่าใช้แสดงตัวอย่าง)
  */
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
@@ -18,6 +20,7 @@ import { TaskLinkList } from "@/components/record-tasks/task-links";
 import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } from "@/lib/email-report/popup";
 // หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง (รายการกลาง lib/chromeless-routes)
 import { isChromelessPath } from "@/lib/chromeless-routes";
+import { WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScreen, useWorkPopupFloatPref } from "./float";
 const RECHECK_MS = 30 * 60_000;
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -174,9 +177,15 @@ export function WorkPopupHost() {
   // หน้าที่ฝังในกรอบ (เช่น แท็บตั้งค่าแอป ?embed=1) ไม่เด้ง — ให้หน้าหลักเด้งที่เดียว ไม่ซ้อน 2 ป๊อป
   const inFrame = typeof window !== "undefined" && window.self !== window.top;
   const skip = inFrame || isChromelessPath(pathname);
+  // ลอยมุมจอ (จอคอม) / ซ่อน — ค่าตั้งต่อคนจากเมนูโปรไฟล์ (./float) · ปิดอยู่ = ไม่ถาม ไม่เด้ง (ยกเว้นกดลิงก์ ?popup= จากกระดิ่งเอง)
+  const [floatPref, setFloatPref] = useWorkPopupFloatPref();
+  const wide = useFloatScreen();
+  const [forced, setForced] = useState<Set<string>>(new Set());
+  const enabled = floatPref.enabled;
 
   const check = useCallback(async (reportId?: string) => {
     if (!uid) return;
+    if (!reportId && !enabled) return;
     lastCheck.current = Date.now();
     try {
       const r = await apiFetch(`/api/popups/active${reportId ? `?report=${reportId}` : ""}`);
@@ -186,14 +195,20 @@ export function WorkPopupHost() {
       const list = (j.data ?? []).filter((p) => !seen.includes(p.report_id));
       if (list.length) setQueue((q) => [...q.filter((x) => !list.some((y) => y.report_id === x.report_id)), ...list]);
     } catch { /* เงียบ — ป๊อปไม่ขึ้นไม่ทำให้หน้าพัง */ }
-  }, [uid]);
+  }, [uid, enabled]);
 
   // ถามครั้งแรกหลังหน้าโหลด (ไม่แย่งโหลดเนื้อหาหลัก)
   useEffect(() => {
-    if (!uid || skip || lastCheck.current) return;
+    if (!uid || skip || !enabled || lastCheck.current) return;
     const t = setTimeout(() => void check(), 2500);
     return () => clearTimeout(t);
-  }, [uid, skip, check]);
+  }, [uid, skip, enabled, check]);
+  // เปิดกลับจากเมนูโปรไฟล์ → ถามใหม่ทันที (ป๊อปที่ยังไม่รับทราบวันนี้กลับมา)
+  const prevEnabled = useRef(enabled);
+  useEffect(() => {
+    if (enabled && !prevEnabled.current && uid && !skip) void check();
+    prevEnabled.current = enabled;
+  }, [enabled, uid, skip, check]);
   // เปิดแท็บค้างไว้ทั้งวัน → กลับมาที่แท็บเกิน 30 นาที ถามใหม่ (เผื่อเพิ่งเข้าช่วงเวลาเด้ง)
   useEffect(() => {
     if (!uid) return;
@@ -220,26 +235,53 @@ export function WorkPopupHost() {
     }
   };
 
+  // ✕ ซ่อน (ลอย) → ปิดในเมนูโปรไฟล์ด้วย · ไม่ส่ง "รับทราบ/ไว้ทีหลัง" (เปิดกลับวันนี้ = ป๊อปยังอยู่)
+  const hide = () => {
+    setFloatPref({ ...floatPref, enabled: false, minimized: false });
+    setQueue([]);
+    setForced(new Set());
+    toast.info(`ซ่อนป๊อปเตือนงานแล้ว — ${WORK_POPUP_HIDE_HINT}`);
+  };
+
+  const visible = !!cur && !skip && (enabled || forced.has(cur.report_id));
+  const title = cur ? `${cur.audience === "mine" ? "งานที่รอคุณอยู่" : cur.heading}` : "";
+  const subtitle = cur
+    ? `${new Date(`${cur.date}T00:00:00Z`).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}${queue.length > 1 ? ` · ป๊อปที่ 1 จาก ${queue.length}` : ""}`
+    : "";
+  const mineOpen = cur ? cur.mine.reduce((n, m) => n + m.tasks.filter((t) => !done.has(t.id)).length, 0) : 0;
+  const pill = !cur ? "" : cur.audience === "mine"
+    ? `งานของคุณ ${mineOpen}`
+    : `งานค้าง ${cur.stats.total}${mineOpen > 0 ? ` · ของคุณ ${mineOpen}` : ""}`;
+  const footer = cur && (
+    <div className="flex w-full flex-wrap items-center justify-end gap-2">
+      {cur.view_all && cur.audience === "all" && (
+        <button onClick={() => open(cur, cur.view_all!, "ack")} className="mr-auto h-9 rounded-lg px-3 text-sm font-medium text-blue-700 hover:bg-blue-50">ดูทั้งหมด →</button>
+      )}
+      <button onClick={() => finish(cur, "later")} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ไว้ทีหลัง</button>
+      <button onClick={() => finish(cur, "ack")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700">✓ รับทราบ</button>
+    </div>
+  );
+
   return (
     <>
-      <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => void check(id)} />}</Suspense>
-      {cur && !skip && (
+      <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
+      {visible && cur && (wide ? (
+        <WorkPopupFloatCard pref={floatPref} title={title} subtitle={subtitle} pill={pill} footer={footer}
+          onMinimize={() => setFloatPref({ ...floatPref, minimized: true })}
+          onExpand={() => setFloatPref({ ...floatPref, minimized: false })}
+          onHide={hide}>
+          <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
+        </WorkPopupFloatCard>
+      ) : (
         <ERPModal open onClose={() => finish(cur, "later")} size="lg" defaultExpanded={false} storageKey="work-popup" zIndex={300}
           closeOnBackdrop={!cur.require_ack}
-          title={`🔔 ${cur.audience === "mine" ? "งานที่รอคุณอยู่" : cur.heading}`}
-          description={`${new Date(`${cur.date}T00:00:00Z`).toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" })}${queue.length > 1 ? ` · ป๊อปที่ 1 จาก ${queue.length}` : ""}`}
-          footer={
-            <div className="flex w-full flex-wrap items-center justify-end gap-2">
-              {cur.view_all && cur.audience === "all" && (
-                <button onClick={() => open(cur, cur.view_all!, "ack")} className="mr-auto h-9 rounded-lg px-3 text-sm font-medium text-blue-700 hover:bg-blue-50">ดูทั้งหมด →</button>
-              )}
-              <button onClick={() => finish(cur, "later")} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ไว้ทีหลัง</button>
-              <button onClick={() => finish(cur, "ack")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700">✓ รับทราบ</button>
-            </div>
-          }>
+          title={`🔔 ${title}`}
+          description={subtitle}
+          footer={footer}>
           <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
+          <p className="mt-3 text-[11px] text-slate-400">💡 ไม่อยากเห็นป๊อปนี้? ไปที่ เมนูโปรไฟล์ (มุมขวาบน) → 🔔 ป๊อปเตือนงาน แล้วปิดสวิตช์</p>
         </ERPModal>
-      )}
+      ))}
     </>
   );
 }
