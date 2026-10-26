@@ -71,23 +71,25 @@ export function ColumnChooser<T>({ state, note, className = "" }: { state: Colum
         className={`h-8 px-3 text-sm rounded-lg border ${open || state.customized ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
         ▥ คอลัมน์ {state.visible.length}/{state.all.length}
       </button>
-      <FloatingDropdown anchorRef={anchor} open={open} onClose={() => setOpen(false)} minWidth={320} maxWidth={560}>
+      {/* กว้างพอให้ 3 หมวดอ่านชื่อเต็มได้ (เดิม 320 → ชื่อโดนตัด) · จอแคบถูกบีบตามจอเอง */}
+      <FloatingDropdown anchorRef={anchor} open={open} onClose={() => setOpen(false)} minWidth={600} maxWidth={720}>
         <div className="rounded-xl border border-slate-200 bg-white shadow-xl p-3">
           <div className="flex items-center justify-between gap-2 mb-2">
             <span className="text-sm font-semibold text-slate-700">เลือกคอลัมน์</span>
             <button type="button" onClick={state.reset} disabled={!state.customized}
               className="h-7 px-2 text-xs rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-40">คืนค่าเริ่มต้น</button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-5 gap-y-2">
             {groups.map(([g, cols]) => (
-              <div key={g}>
+              <div key={g} className="min-w-0">
                 <div className="text-[11px] font-medium text-slate-400 mb-1">{g}</div>
                 {cols.map((c) => (
-                  <label key={c.key} className={`flex items-center gap-2 py-1 text-[13px] ${c.locked ? "text-slate-400" : "text-slate-700 cursor-pointer"}`}>
-                    <input type="checkbox" checked={state.isOn(c.key)} disabled={c.locked} onChange={() => state.toggle(c.key)} className="w-4 h-4 accent-blue-600" />
-                    <span className="truncate">{labelOf(c)}</span>
-                    {c.locked && <span className="text-[10px]" title="คอลัมน์หลัก ซ่อนไม่ได้">🔒</span>}
-                    {c.isNew && <span className="text-[10px] px-1.5 rounded-full bg-blue-50 text-blue-700">ใหม่</span>}
+                  // ชื่อยาวให้ขึ้นบรรทัดใหม่ — ห้ามตัดทิ้ง (เดิม truncate อ่านไม่ออก)
+                  <label key={c.key} title={labelOf(c)} className={`flex items-start gap-2 py-1 text-[13px] leading-snug ${c.locked ? "text-slate-400" : "text-slate-700 cursor-pointer"}`}>
+                    <input type="checkbox" checked={state.isOn(c.key)} disabled={c.locked} onChange={() => state.toggle(c.key)} className="w-4 h-4 mt-px shrink-0 accent-blue-600" />
+                    <span className="min-w-0 break-words">{labelOf(c)}</span>
+                    {c.locked && <span className="shrink-0 text-[10px]" title="คอลัมน์หลัก ซ่อนไม่ได้">🔒</span>}
+                    {c.isNew && <span className="shrink-0 text-[10px] px-1.5 rounded-full bg-blue-50 text-blue-700">ใหม่</span>}
                   </label>
                 ))}
               </div>
