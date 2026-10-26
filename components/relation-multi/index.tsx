@@ -29,6 +29,8 @@ import { resolveRelationLabels, readRelationLabel, type RelationConfig } from "@
 const FakePriceDialog = nextDynamic(() => import("@/components/fake-price-dialog").then((m) => m.FakePriceDialog), { ssr: false });
 // drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน (master-crud import ไฟล์นี้อยู่)
 const MasterRecordDrawer = nextDynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+// 📂 จัดรูปหลายโฟลเดอร์ (SKU ลูกของ Parent SKU) — โหลดเมื่อกดปุ่ม/โยนรูป
+const ProductImageRouter = nextDynamic(() => import("@/components/product-image-router").then((m) => m.ProductImageRouter), { ssr: false });
 
 type RelConfig = {
   kind?: string;
@@ -1106,6 +1108,9 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
   const canImageMode = !!imageField && !!entityType && !!moduleKey;
   const imageMode = canImageMode && viewPref.view === "images";
   const canDropBoard = canImageMode && (canEditRows || (["skus_v2", "parent_skus_v2"].includes(entityType) && can("products.edit" as Parameters<typeof can>[0])));
+  // 📂 จัดรูปหลายโฟลเดอร์ — เฉพาะ SKU ลูกของ Parent SKU (ลิงก์ด้วย id) · ปุ่มหัวตาราง + ช่องโยนหลายรูปในโหมดรูปภาพ
+  const routerParentId = entityType === "skus_v2" && matchField === "id" && recordId && canDropBoard ? recordId : null;
+  const [router, setRouter] = useState<{ open: boolean; files: File[] | null } | null>(null);
   const [editCell, setEditCell] = useState<{ rowId: string; field: string } | null>(null);
   const [editVal, setEditVal] = useState("");
   const fkCol = config.target_fk_column ?? "";
@@ -1514,12 +1519,20 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
     </div>
   ) : null;
 
+  // 📂 จัดรูปหลายโฟลเดอร์ (เปิดหน้าต่างเปล่า แล้วลาก/เลือกโฟลเดอร์ในนั้น)
+  const routerBtn = routerParentId ? (
+    <button type="button" onClick={() => setRouter({ open: true, files: null })}
+      title="ลากหลายโฟลเดอร์ (ชื่อโฟลเดอร์ = รหัส SKU ลูก) แล้วเลือกว่ารูปไหนลงช่องไหน — ปก · SKU ลูก · แกลเลอรี Parent · Hero · Description"
+      className="flex-shrink-0 h-6 px-2 rounded-md text-[11px] font-medium border border-blue-200 text-blue-700 hover:bg-blue-50">📂 จัดรูปหลายโฟลเดอร์</button>
+  ) : null;
+
   // หัวข้อ + จำนวน (สำหรับ 360 view)
-  const header = (title || gearBtn || addBtn || viewToggle) ? (
+  const header = (title || gearBtn || addBtn || viewToggle || routerBtn) ? (
     <div className="flex items-center gap-1.5 mb-1.5">
       {title && <span className="text-sm font-medium text-slate-700">{title}</span>}
       {title && loaded && <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-700">{total}</span>}
       <div className="flex-1" />
+      {routerBtn}
       {viewToggle}
       {!imageMode && collapseBtn}
       {bulkVariantBtn}
@@ -1880,8 +1893,13 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         <ChildImageBoard rows={rows} titleField={titleField} entityType={entityType} moduleKey={moduleKey} imageField={imageField}
           subtitle={(r) => { const v = r.color_th ?? r.color; return v ? String(v) : null; }}
           canDrop={canDropBoard} actor={user?.name ?? null}
-          onOpen={(id) => setPeek({ id, edit: false })} onChanged={load} />
+          onOpen={(id) => setPeek({ id, edit: false })} onChanged={load}
+          onRouteFiles={routerParentId ? (files) => setRouter({ open: true, files }) : undefined} />
       ) : list}
+      {router && routerParentId && (
+        <ProductImageRouter open={router.open} onClose={() => setRouter((r) => (r ? { ...r, open: false } : r))}
+          parentIds={[routerParentId]} initialFiles={router.files} onDone={load} />
+      )}
       {!imageMode && dropHint}
       {rows.length < total && (
         <button type="button" onClick={loadMore} disabled={loadingMore}

@@ -64,7 +64,14 @@ export interface UploadHandle {
  * - ชนิดไฟล์ดูจากหัวไฟล์ (normalizeMediaFile) · รูปนิ่งใหญ่เกิน 4 MB = ย่ออัตโนมัติ (ด้านยาว ≤ 3200 px · WebP) → ส่งทางเล็ก ไม่ต้องรอ CORS
  * onProgress(pct) = เฉพาะไฟล์ใหญ่ (0–100) · onStart(handle) = ได้ปุ่มยกเลิก · onNotice = ข้อความแจ้ง (เช่น ย่อรูปให้แล้ว)
  */
-type UploadOpts = { folder: string; onProgress?: (pct: number) => void; onStart?: (h: UploadHandle) => void; onNotice?: (msg: string) => void };
+type UploadOpts = {
+  folder: string;
+  onProgress?: (pct: number) => void;
+  onStart?: (h: UploadHandle) => void;
+  onNotice?: (msg: string) => void;
+  /** เก็บรูปตัวเต็ม: ไม่ย่อรูปที่ใหญ่เกิน 4 MB (ส่งตรงเข้า R2 ≤ 20 MB) — 📂 จัดรูปหลายโฟลเดอร์ โหมด "ไม่ลดขนาด" */
+  keepOriginal?: boolean;
+};
 
 export async function uploadMediaFile(input: File, opts: UploadOpts): Promise<string> {
   return (await uploadCore(input, opts)).key;
@@ -92,7 +99,7 @@ export async function uploadMediaAsset(
 
 async function uploadCore(input: File, opts: UploadOpts): Promise<{ key: string; assetId: string | null; duplicate: boolean }> {
   let file = await normalizeMediaFile(input);
-  if (file.size > SMALL_UPLOAD_BYTES && SHRINKABLE_IMAGE_TYPES.includes(file.type)) {
+  if (file.size > SMALL_UPLOAD_BYTES && SHRINKABLE_IMAGE_TYPES.includes(file.type) && !opts.keepOriginal) {
     const s = await shrinkImageToFit(file, SMALL_UPLOAD_BYTES);
     if (s) {
       opts.onNotice?.(`ย่อรูปให้อัตโนมัติ ${fileMb(file.size)} → ${fileMb(s.file.size)} (${s.width}×${s.height} px) — ยังคมพอสำหรับเว็บ`);

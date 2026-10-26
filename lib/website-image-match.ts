@@ -69,10 +69,12 @@ export function splitPath(path: string): { base: string; folders: string[] } {
   return { base: stripExt(file), folders: parts.reverse() };
 }
 
-type CodeRef = { parentId: string; skuId: string | null; code: string };
+export type CodeRef = { parentId: string; skuId: string | null; code: string };
+/** ข้อมูลขั้นต่ำที่ใช้สร้างดัชนีรหัส (รุ่น + สี + รหัสไซส์) — ใช้ร่วมกับ lib/product-image-routing */
+export type CodeIndexParent = { parentId: string; code: string; skus: { id: string; code: string; aliases?: string[] }[] };
 
 /** ดัชนีรหัส (ตัวใหญ่) → รุ่น/สี · รหัสยาวก่อน */
-export function buildCodeIndex(parents: CatalogParent[]): CodeRef[] {
+export function buildCodeIndex(parents: CodeIndexParent[]): CodeRef[] {
   const out: CodeRef[] = [];
   const seen = new Set<string>();
   const add = (code: string, parentId: string, skuId: string | null) => {
@@ -92,7 +94,7 @@ export function buildCodeIndex(parents: CatalogParent[]): CodeRef[] {
 }
 
 /** หา "รหัสที่ขึ้นต้นชื่อ" (ตามด้วยจบชื่อหรือตัวคั่น) → รหัส + ส่วนท้ายที่เหลือ */
-function findCode(name: string, index: CodeRef[]): { ref: CodeRef; rest: string } | null {
+export function findCodePrefix(name: string, index: CodeRef[]): { ref: CodeRef; rest: string } | null {
   const up = name.toUpperCase();
   for (const ref of index) {
     if (up === ref.code) return { ref, rest: "" };
@@ -118,17 +120,17 @@ export function parseSuffix(rest: string, video = false): { hero: HeroSlot | nul
 }
 
 /** ตัวคล้ายรหัสสินค้า (เช่น BBP99-01) ที่ขึ้นต้นชื่อ — ไว้บอกว่า "ไม่พบรหัสนี้ในร้าน" */
-const codeLike = (name: string) => name.match(/^[A-Za-z]{2,}[A-Za-z0-9]*\d[A-Za-z0-9]*(?:-[A-Za-z0-9#.]+)*/)?.[0] ?? null;
+export const codeLike = (name: string) => name.match(/^[A-Za-z]{2,}[A-Za-z0-9]*\d[A-Za-z0-9]*(?:-[A-Za-z0-9#.]+)*/)?.[0] ?? null;
 
 /** จับคู่ไฟล์ 1 ไฟล์ (path = ชื่อไฟล์ หรือ โฟลเดอร์/…/ชื่อไฟล์) */
 export function matchImagePath(path: string, parents: CatalogParent[], index = buildCodeIndex(parents)): ImageMatch {
   const { base, folders } = splitPath(path);
-  let hit = findCode(base, index);
+  let hit = findCodePrefix(base, index);
   let via: "name" | "folder" = "name";
   let rest = hit?.rest ?? "";
   if (!hit) {
     for (const f of folders) {
-      const h = findCode(stripExt(f), index);
+      const h = findCodePrefix(stripExt(f), index);
       if (h) {
         // โฟลเดอร์ JEAN08-01/2.jpg → ส่วนท้ายของโฟลเดอร์ (ถ้ามี) + ชื่อไฟล์ทั้งชื่อ
         hit = h;

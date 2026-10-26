@@ -20,7 +20,7 @@ export const BIG_UPLOAD_EXT: Record<string, string> = {
 };
 
 /** โฟลเดอร์ใน R2 ที่ลิงก์ส่งไฟล์ใหญ่ใช้ได้ (ไม่อยู่ในนี้ = storefront-videos / storefront-images) */
-export const BIG_UPLOAD_FOLDERS = ["storefront-videos", "storefront-hero", "storefront-drops", "storefront-images"];
+export const BIG_UPLOAD_FOLDERS = ["storefront-videos", "storefront-hero", "storefront-drops", "storefront-images", "product-originals"];
 
 /** เพดานขนาดของไฟล์ชนิดนี้ */
 export function uploadMaxBytes(type: string): number {

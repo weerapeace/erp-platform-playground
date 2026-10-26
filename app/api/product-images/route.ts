@@ -2,7 +2,8 @@
  * Product Images — ของกลาง: ใส่รูปเข้า "แกลเลอรีสินค้า" ของ SKU หรือ Parent SKU
  * แกลเลอรีที่ผู้ใช้เห็นจริง = erp_playground_attachments (entity_type skus_v2/parent_skus_v2, entity_id = record id)
  * POST { owner_type: "product_sku" | "parent_sku", owner_id, r2_key }
- *   → เพิ่มรูปเข้าแกลเลอรี (sort_order ถัดไป) + ตั้งเป็นรูปปก (cover) ถ้ายังไม่มี
+ *   → เพิ่มรูปเข้าแกลเลอรี (sort_order ถัดไป) + ตั้งเป็นรูปปก (cover) ถ้ายังไม่มี · คืน id ของแถวรูป
+ *   (📂 จัดรูปหลายโฟลเดอร์ใช้ทางนี้กับไฟล์ตัวเต็มที่ใหญ่เกินส่งผ่าน ERP — ส่งตรงเข้า R2 ก่อนแล้วค่อยผูก)
  * POST { action:"restore", slot_id, r2_key }  → คืนรูปเก่าเข้าแถวเดิม (slot_id = id ของแถว attachment)
  * GET  ?owner_type=&owner_id=&versions=1      → ประวัติ "รูปเก่าที่ถูกแทน" (จาก ledger erp_subtask_sync)
  * ใช้จากป๊อปอัปส่ง/ตรวจงาน · guard products.edit
@@ -102,7 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const rows = (ex ?? []) as { sort_order: number; is_primary: boolean }[];
   const ord = (rows.length ? Number(rows[0].sort_order ?? rows.length - 1) : -1) + 1;
   const makePrimary = rows.length === 0;
-  const { error: insErr } = await admin.from("erp_playground_attachments").insert({ entity_type: entityType, entity_id: ownerId, file_name: r2Key.split("/").pop() ?? "image", file_path: r2Key, public_url: `/api/r2-image?key=${encodeURIComponent(r2Key)}`, content_type: ctFromKey(r2Key), is_primary: makePrimary, sort_order: ord, uploaded_by: user?.id ?? null });
+  const { data: ins, error: insErr } = await admin.from("erp_playground_attachments").insert({ entity_type: entityType, entity_id: ownerId, file_name: r2Key.split("/").pop() ?? "image", file_path: r2Key, public_url: `/api/r2-image?key=${encodeURIComponent(r2Key)}`, content_type: ctFromKey(r2Key), is_primary: makePrimary, sort_order: ord, uploaded_by: user?.id ?? null }).select("id").single();
   if (insErr) return NextResponse.json({ error: insErr.message }, { status: 400 });
 
   // ตั้งรูปปก (cover_image_r2_key ของสินค้า) ถ้ายังไม่มี
@@ -111,5 +112,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!cover) { await admin.from(table).update({ cover_image_r2_key: r2Key }).eq("id", ownerId); cover = r2Key; }
 
   await writeAudit(admin, { action: "product:add_image", entityType: table, entityId: ownerId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { owner_type: ownerType, r2_key: r2Key } });
-  return NextResponse.json({ ok: true, cover, error: null });
+  return NextResponse.json({ ok: true, id: (ins as { id: string } | null)?.id ?? null, cover, error: null });
 }

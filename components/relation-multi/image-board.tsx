@@ -97,7 +97,7 @@ function ThumbStrip({ group, list, canEdit, canDelete, onView, onReorder, onDele
   );
 }
 
-export function ChildImageBoard({ rows, titleField, subtitle, entityType, moduleKey, imageField, canDrop, actor, onOpen, onChanged }: {
+export function ChildImageBoard({ rows, titleField, subtitle, entityType, moduleKey, imageField, canDrop, actor, onOpen, onChanged, onRouteFiles }: {
   rows: Row[]; titleField: string; subtitle?: (r: Row) => string | null;
   entityType: string; moduleKey: string; imageField?: string;
   /** ลากรูปเข้าได้ไหม (สิทธิ์แก้) */
@@ -105,6 +105,8 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
   onOpen: (id: string) => void;
   /** อัปเสร็จ → ให้ตารางโหลดแถวใหม่ (รูปปกเปลี่ยน) */
   onChanged: () => void;
+  /** 📂 มี = ช่องโยนหลายรูปรับทั้งโฟลเดอร์ แล้วส่งต่อให้หน้าต่าง "จัดรูปหลายโฟลเดอร์" (SKU ลูกของ Parent) · files null = เปิดหน้าต่างเปล่า */
+  onRouteFiles?: (files: File[] | null) => void;
 }) {
   const toast = useToast();
   const { can } = useAuth();
@@ -241,18 +243,22 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
   };
 
   const drop = useFileDrop((files, key) => {
-    if (key === "__bulk") { openBulk(files); return; }
+    if (key === "__bulk") { if (onRouteFiles) onRouteFiles(files); else openBulk(files); return; }
     const row = rows.find((r) => String(r.id) === key);
     if (row) void uploadTo(row, files);
-  }, { accept: "image/", disabled: !canDrop || !!busyId || bulkBusy, onReject: () => toast.error("ลากได้เฉพาะไฟล์รูป"), onBusy: () => toast.info("กำลังอัปรูปอยู่ รอสักครู่") });
+  }, { accept: "image/", folders: !!onRouteFiles, disabled: !canDrop || !!busyId || bulkBusy, onReject: () => toast.error("ลากได้เฉพาะไฟล์รูป"), onBusy: () => toast.info("กำลังอัปรูปอยู่ รอสักครู่") });
 
   const matchedCount = pending?.filter((p) => p.code).length ?? 0;
   return (
     <div {...drop.guard} className="space-y-2">
       {canDrop && (
-        <div {...drop.zone("__bulk")} onClick={() => fileInput.current?.click()} role="button" tabIndex={0}
+        <div {...drop.zone("__bulk")} onClick={() => (onRouteFiles ? onRouteFiles(null) : fileInput.current?.click())} role="button" tabIndex={0}
           className={`rounded-lg border-2 border-dashed px-3 py-2 text-xs cursor-pointer ${drop.over === "__bulk" ? "border-violet-400 bg-violet-50 text-violet-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
-          📥 โยนหลายรูปพร้อมกันตรงนี้ (หรือกดเลือกไฟล์) — ระบบจับคู่ตามชื่อไฟล์ เช่น <span className="font-mono">{rows[0] ? `${codeOf(rows[0])}_1.jpg` : "MGN194-01_1.jpg"}</span> → ให้ตรวจก่อนยืนยัน
+          {onRouteFiles ? (
+            <>📂 โยนหลายโฟลเดอร์/หลายรูปตรงนี้ (หรือกดเพื่อเลือก) — ชื่อโฟลเดอร์ = รหัส SKU ลูก เช่น <span className="font-mono">{rows[0] ? `${codeOf(rows[0])}/` : "BCG11-01/"}</span> → เลือกได้ว่ารูปไหนลงปก · SKU ลูก · แกลเลอรี Parent · Hero · Description</>
+          ) : (
+            <>📥 โยนหลายรูปพร้อมกันตรงนี้ (หรือกดเลือกไฟล์) — ระบบจับคู่ตามชื่อไฟล์ เช่น <span className="font-mono">{rows[0] ? `${codeOf(rows[0])}_1.jpg` : "MGN194-01_1.jpg"}</span> → ให้ตรวจก่อนยืนยัน</>
+          )}
           <input ref={fileInput} type="file" accept="image/*" multiple className="hidden"
             onChange={(e) => { const fs = Array.from(e.target.files ?? []); e.target.value = ""; if (fs.length) openBulk(fs); }} />
         </div>

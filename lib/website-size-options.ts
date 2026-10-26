@@ -148,3 +148,18 @@ export const cellOpen = (row: SizeGridColor | undefined, size: string): SizeCell
 
 /** สีที่มีไซส์แต่ปิดไว้ครบทุกไซส์ → ไม่ต้องโชว์สีนี้บนเว็บ */
 export const colorAllOff = (row: SizeGridColor): boolean => !row.free && !Object.values(row.cells).some((c) => !c.off);
+
+/**
+ * สีของรุ่น = SKU ตัวหลักของสี (ไม่ใช่ SKU ไซส์) + รหัส SKU ไซส์ของสีเดียวกัน (alias)
+ * ใช้ร่วม: ลงรูปเว็บทีละมาก (/api/website/listings/images) · จัดรูปหลายโฟลเดอร์ (/api/product-images/catalog)
+ * → ไฟล์/โฟลเดอร์ชื่อ JEAN08-01-L ลงที่สี JEAN08-01
+ */
+export function colorGroups<K extends SizeKid>(kids: K[]): { base: K; aliases: string[] }[] {
+  const baseColors = new Set(kids.filter((k) => !variantOf(k)).map((k) => baseColor(k)));
+  const bases = kids.filter((k) => !variantOf(k) || !baseColors.has(baseColor(k)));
+  const baseIds = new Set(bases.map((k) => k.id));
+  return bases.map((b) => ({
+    base: b,
+    aliases: kids.filter((k) => !baseIds.has(k.id) && baseColor(k) === baseColor(b) && k.code).map((k) => k.code as string),
+  }));
+}

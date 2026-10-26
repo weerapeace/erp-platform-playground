@@ -52,6 +52,11 @@ const ParentDescriptionImages = dynamic(
   () => import("@/components/parent-description-images").then((m) => m.ParentDescriptionImages),
   { ssr: false },
 );
+// 📂 จัดรูปหลายโฟลเดอร์ (หลายรุ่นทีเดียว — หารุ่นจากชื่อโฟลเดอร์)
+const ProductImageRouter = dynamic(
+  () => import("@/components/product-image-router").then((m) => m.ProductImageRouter),
+  { ssr: false },
+);
 
 const FAMILY_LABEL: Record<string, string> = {
   general: "🏷️ ทั่วไป",
@@ -147,10 +152,18 @@ const CONFIG: MasterCRUDConfig = {
 export default function ParentSKUsV2Page() {
   const { can, user } = useAuth();
   const [mgrId, setMgrId] = useState<string | null>(null);
+  // null = ยังไม่เคยเปิด · เปิดแล้วคงไว้ (อัปเบื้องหลังต่อได้ + กลับมาดูผล/ย้อนทั้งชุดได้)
+  const [routerOpen, setRouterOpen] = useState<boolean | null>(null);
   const actor = user?.name ?? user?.email ?? undefined;
   // เพิ่ม row action "ลงขายหลายแพลตฟอร์ม" + ช่อง "รูป Description" ในฟอร์ม — config สร้างใน component เพื่อ setState/actor
+  const canRoute = can("products.edit") && can("files.upload");
   const config = useMemo<MasterCRUDConfig>(() => ({
     ...CONFIG,
+    headerActions: canRoute ? () => (
+      <button type="button" onClick={() => setRouterOpen(true)}
+        title="ลากหลายโฟลเดอร์ (ชื่อโฟลเดอร์ = รหัส SKU ลูก / รหัสรุ่น) หลายรุ่นทีเดียว แล้วเลือกว่ารูปไหนลงช่องไหน"
+        className="h-9 rounded-lg border border-blue-200 bg-white px-3 text-sm font-medium text-blue-700 hover:bg-blue-50">📂 จัดรูปหลายโฟลเดอร์</button>
+    ) : undefined,
     extraRowActions: [
       ...(CONFIG.extraRowActions ?? []),
       { label: "ลงขายหลายแพลตฟอร์ม", icon: "🏬", onClick: (row) => setMgrId(String(row.id)) },
@@ -184,10 +197,11 @@ export default function ParentSKUsV2Page() {
     extraTabs: parentSkuExtraTabs(),
     // 🖼 ช่องใหญ่ "รูปตัดพื้น (PNG)" ใต้รูปสินค้า (การ์ดบนฉากของเว็บร้านใช้) — ชุดเดียวกับ drawer
     sidePngSlots: parentSkuPngSlots(),
-  }), [actor]);
+  }), [actor, canRoute]);
   return (
     <>
       <MasterCRUDPage config={config} />
+      {routerOpen !== null && <ProductImageRouter open={routerOpen} onClose={() => setRouterOpen(false)} />}
       {mgrId && <ProductPlatformManager parentSkuId={mgrId} onClose={() => setMgrId(null)} canEdit={can("products.platforms.edit")} canPublish={can("products.platforms.publish")} />}
     </>
   );

@@ -7,6 +7,9 @@
  * POST { shopIds:[ร้านหลัก, ...ร้านอื่น], mode:"append"|"replace", items:[{ parentId, gallery?, skus?, hero?, skuHero? }] }
  *      → รวมกับรูปเดิม "ตอนบันทึก" (อ่านค่าล่าสุดใน DB — ไม่ทับของที่คนอื่นเพิ่งแก้) · ต่อท้าย = เดิม + ใหม่ (ตัดเพดาน 12/8) · แทนที่ = ใหม่ทั้งช่อง
  *        Hero ช่องละ 1 รูปเสมอ (ไฟล์ใหม่แทนของเดิม) · ช่องที่ไม่มีรูปใหม่ = ไม่แตะ · รุ่นที่ไม่อยู่ในร้านนั้น = ข้าม (บอกกลับ)
+ *      → คืน changes [{ shopId, parentId, before, after }] ไว้ให้ "ย้อนทั้งชุด"
+ * POST { action:"undo", changes } → คืนค่าเดิม (before) เฉพาะรายการที่ยังเป็นค่าที่เราเพิ่งเขียน (after) — มีคนแก้ต่อแล้ว = ข้าม ไม่ทับ (บอกกลับ)
+ *      ใช้ที่ components/product-image-router (📂 จัดรูปหลายโฟลเดอร์ → ย้อนทั้งชุด)
  *
  * ของกลาง: guardApi(products.view/edit) · mergeListingImages (รวมกับรูปเดิม) · listingPatchToRow (ตัวกรองช่องรูปชุดเดียวกับตัวตั้งค่าเว็บของสินค้า) · writeAudit (เก็บค่าเดิมไว้ย้อนได้) · purgeStorefrontCache
  * ไฟล์อัปขึ้น R2 จากฝั่งหน้าเว็บก่อน (uploadResizedImage) — API นี้รับแค่ key
@@ -19,7 +22,7 @@ import { writeAudit } from "@/lib/audit";
 import { listingPatchToRow, toKeyList, LISTING_KEY_RE } from "@/lib/website-listing-patch";
 import { normalizeHero, type HeroMedia } from "@/lib/website-hero";
 import { mergeListingImages } from "@/lib/website-image-merge";
-import { variantOf, baseColor } from "@/lib/website-size-options";
+import { baseColor, colorGroups } from "@/lib/website-size-options";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { MAX_WEB_IMAGES, type CatalogParent, type HeroPick, type HeroSlot, type MassImageItem } from "@/lib/website-image-match";
 
@@ -42,20 +45,6 @@ async function loadKids(sb: ReturnType<typeof supabaseAdmin>, parentIds: string[
     out.push(...((data ?? []) as Kid[]));
   }
   return out;
-}
-
-/**
- * สีของรุ่น = SKU ตัวหลักของสี (ไม่ใช่ SKU ไซส์) — ตรงกับแถวสีในตัวตั้งค่าเว็บของสินค้า (/api/parent-web-listings)
- * SKU ไซส์ (JEAN08-01-L) = alias ของตัวหลักสีเดียวกัน → ไฟล์ชื่อ JEAN08-01-L_1.jpg ลงรูปสี JEAN08-01
- */
-function colorsOf(kids: Kid[]): { base: Kid; aliases: string[] }[] {
-  const baseColors = new Set(kids.filter((k) => !variantOf(k)).map((k) => baseColor(k)));
-  const bases = kids.filter((k) => !variantOf(k) || !baseColors.has(baseColor(k)));
-  const baseIds = new Set(bases.map((k) => k.id));
-  return bases.map((b) => ({
-    base: b,
-    aliases: kids.filter((k) => !baseIds.has(k.id) && baseColor(k) === baseColor(b) && k.code).map((k) => k.code as string),
-  }));
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -103,7 +92,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       name: (p.name_platform ?? "").trim() || (p.name_th ?? "").trim() || p.code,
       webImages: keysOf(r.web_images, MAX_WEB_IMAGES),
       hero: { desktop: heroKey(hero?.desktop), mobile: heroKey(hero?.mobile) },
-      skus: colorsOf(kidsBy.get(p.id) ?? [])
+      skus: colorGroups(kidsBy.get(p.id) ?? [])
         .filter((c) => c.base.code)
         .map(({ base, aliases }, i) => ({
           id: base.id,
@@ -134,6 +123,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: "invalid JSON" }, { status: 400 });
   }
+  if ((b as { action?: unknown }).action === "undo") return undoChanges((b as { changes?: unknown }).changes, user);
   const shopIds = Array.isArray(b.shopIds) ? [...new Set(b.shopIds.filter((s): s is string => typeof s === "string" && UUID.test(s)))].slice(0, 10) : [];
   const mode = b.mode === "replace" ? "replace" : "append";
   const items: MassImageItem[] = (Array.isArray(b.items) ? b.items : [])
@@ -207,5 +197,52 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     });
   }
   const purged = (await Promise.all(shopIds.filter((s) => done.some((j) => j.shopId === s)).map((s) => purgeStorefrontCache(sb, s)))).every(Boolean);
-  return NextResponse.json({ ok: !failed.length, updated: done.length, failed, skipped, purged });
+  const changes = done.map((j) => ({
+    shopId: j.shopId,
+    parentId: j.parentId,
+    before: j.before,
+    after: Object.fromEntries(IMG_COLS.map((c) => [c, c in j.row ? j.row[c] : j.before[c]])),
+  }));
+  return NextResponse.json({ ok: !failed.length, updated: done.length, failed, skipped, purged, changes });
+}
+
+const IMG_COLS = ["web_images", "web_sku_images", "web_hero"] as const;
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** ↩ ย้อนทั้งชุด: คืนค่าเดิมเฉพาะแถวที่ยังเป็นค่าที่เพิ่งเขียน (มีคนแก้ต่อ = ข้าม) · audit เก็บค่าก่อนย้อน */
+async function undoChanges(raw: unknown, user: { id: string; email?: string | null } | null): Promise<NextResponse> {
+  type Change = { shopId: string; parentId: string; before: Record<string, unknown>; after: Record<string, unknown> };
+  const list: Change[] = (Array.isArray(raw) ? raw : [])
+    .slice(0, 500)
+    .map((c) => (c ?? {}) as Change)
+    .filter((c) => typeof c.shopId === "string" && UUID.test(c.shopId) && typeof c.parentId === "string" && UUID.test(c.parentId) && c.before && c.after && typeof c.before === "object" && typeof c.after === "object");
+  if (!list.length) return NextResponse.json({ error: "ไม่มีรายการให้ย้อน" }, { status: 400 });
+  const sb = supabaseAdmin();
+  const restored: { shopId: string; parentId: string }[] = [];
+  const changed: { shopId: string; parentId: string }[] = [];
+  for (const c of list) {
+    const { data: cur } = await sb.from("store_listings").select("web_images, web_sku_images, web_hero").eq("shop_id", c.shopId).eq("parent_sku_id", c.parentId).maybeSingle();
+    if (!cur) continue;
+    if (!IMG_COLS.every((k) => same((cur as Record<string, unknown>)[k], c.after[k]))) {
+      changed.push({ shopId: c.shopId, parentId: c.parentId });
+      continue;
+    }
+    // ค่าเดิมผ่านตัวกรองช่องรูปชุดเดียวกับตอนบันทึก (กันค่าแปลกปลอม)
+    const row = listingPatchToRow({ webImages: toKeyList(c.before.web_images), webSkuImages: (c.before.web_sku_images && typeof c.before.web_sku_images === "object" ? c.before.web_sku_images : {}) as Record<string, string[]>, webHero: normalizeHero(c.before.web_hero) });
+    const { error } = await sb.from("store_listings").update({ updated_at: new Date().toISOString(), ...row }).eq("shop_id", c.shopId).eq("parent_sku_id", c.parentId);
+    if (!error) restored.push({ shopId: c.shopId, parentId: c.parentId });
+  }
+  for (const shopId of [...new Set(restored.map((r) => r.shopId))]) {
+    const mine = restored.filter((r) => r.shopId === shopId);
+    await writeAudit(sb, {
+      action: "bulk_update",
+      entityType: "store_listing",
+      entityId: shopId,
+      actorId: user?.id ?? null,
+      actorName: user?.email ?? null,
+      metadata: { kind: "mass_images_undo", count: mine.length, parentIds: mine.map((r) => r.parentId), before: Object.fromEntries(list.filter((c) => c.shopId === shopId).map((c) => [c.parentId, c.after])) },
+    });
+    await purgeStorefrontCache(sb, shopId);
+  }
+  return NextResponse.json({ ok: true, restored: restored.length, changed });
 }

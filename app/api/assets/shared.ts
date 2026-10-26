@@ -20,6 +20,7 @@ export const LIBRARY_FOLDER_LABEL: Record<string, string> = {
   "storefront-videos": "วิดีโอเว็บ", "storefront-images": "รูปเว็บ", "storefront-drops": "ปกชุดมาใหม่ (เว็บ)",
   "color-swatches": "จุดสี (ทะเบียนสี)",
   "belt-parts": "ชิ้นส่วนเข็มขัด (Belt Builder)",
+  "product-originals": "รูปสินค้าตัวเต็ม (ไม่ลดขนาด)",
 };
 
 // ไซส์ artwork: กว้าง×ยาว + ชื่อกำกับ + หน่วย (เลือกได้ต่อไซส์)
