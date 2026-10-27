@@ -90,6 +90,56 @@ export function useReportSections(prefKey: string, sections: readonly ReportSect
   return { on, toggle, reset };
 }
 
+/**
+ * hook: ตัวเลือกปรับแต่งรายงานแบบอื่นที่ไม่ใช่ เปิด/ปิด (เช่น เรียงตาม / แยกตามลูกค้า / ขนาดรูป) + จำให้รายคน
+ * เก็บแยก key จาก useReportSections (PATCH /api/user-prefs เขียนทับทั้งก้อน ถ้าใช้ key เดียวกันจะลบกันเอง)
+ * ค่าที่อ่านกลับมาจะรับเฉพาะ key ที่มีใน defaults และชนิดตรงกัน — ตัวเลือกเก่า/พิมพ์ผิดจะไม่หลุดเข้ามา
+ *
+ *   const { opts, set } = useReportOptions("sales_monthly_options", DEFAULTS);
+ *   set({ sortKey: "name" });
+ */
+export function useReportOptions<T extends Record<string, unknown>>(prefKey: string, defaults: T) {
+  const lsKey = `reportoptions:${prefKey}`;
+  const [opts, setOpts] = useState<T>(defaults);
+  const touched = useRef(false);
+
+  useEffect(() => {
+    let cancel = false;
+    const merge = (saved: unknown) => {
+      if (!saved || typeof saved !== "object") return;
+      const next = { ...defaults };
+      for (const k of Object.keys(defaults) as (keyof T)[]) {
+        const v = (saved as T)[k];
+        if (v !== undefined && typeof v === typeof defaults[k]) next[k] = v;
+      }
+      if (!cancel && !touched.current) setOpts(next);
+    };
+    try { const raw = localStorage.getItem(lsKey); if (raw) merge(JSON.parse(raw)); } catch { /* ignore */ }
+    apiFetch(`/api/user-prefs?key=${encodeURIComponent(prefKey)}`).then(r => r.json())
+      .then(j => {
+        const v = (j?.value as { options?: unknown } | undefined)?.options;
+        if (v) { merge(v); try { localStorage.setItem(lsKey, JSON.stringify(v)); } catch { /* ignore */ } }
+      }).catch(() => { /* ignore */ });
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefKey]);
+
+  const set = useCallback((patch: Partial<T>) => {
+    touched.current = true;
+    setOpts(prev => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(lsKey, JSON.stringify(next)); } catch { /* ignore */ }
+      apiFetch("/api/user-prefs", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: prefKey, value: { options: next } }),
+      }).catch(() => { /* ignore */ });
+      return next;
+    });
+  }, [prefKey, lsKey]);
+
+  return { opts, set };
+}
+
 /** ปุ่ม + เมนูติ๊กเลือกส่วนที่จะแสดง */
 export function ReportSectionPicker({ sections, on, onToggle, onReset, label = "เลือกสิ่งที่จะแสดง" }: {
   sections: readonly ReportSection[];

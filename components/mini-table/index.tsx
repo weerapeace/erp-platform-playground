@@ -60,6 +60,11 @@ export type MiniTableProps<T> = {
   onSearchChange?: (v: string) => void;
   /** ซ่อนช่องค้นหาของตาราง (ยังกรองตาม searchValue อยู่) — ใช้เมื่อหน้ามีช่องค้นหาร่วมอันเดียวอยู่ด้านบนแล้ว */
   hideSearch?: boolean;
+  /** คุมการเรียงจากภายนอก (ใส่คู่ onSortChange) — ใช้เมื่อลำดับต้องตรงกับที่อื่น เช่น ใบพิมพ์ หรือจำค่ารายคน
+   *  sortKey "" = ลำดับเดิม · ไม่ส่ง = ตารางเก็บการเรียงเอง เหมือนเดิม */
+  sortKey?: string;
+  sortDir?: "asc" | "desc";
+  onSortChange?: (key: string, dir: "asc" | "desc") => void;
 
   // จัดกลุ่ม — ใส่ฟังก์ชันคืนชื่อกลุ่ม จึงจะมีปุ่มจัดกลุ่ม
   groupBy?: (row: T) => string;
@@ -140,6 +145,7 @@ type Dir = "asc" | "desc";
 export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
     rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange, hideSearch,
+    sortKey: sortKeyProp, sortDir: sortDirProp, onSortChange,
     groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra,
     selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded, onCellClick, activeCell,
     title, actions, countUnit: countUnitProp,
@@ -159,8 +165,12 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   // คุมจากภายนอกถ้าส่ง searchValue มา (ไม่ส่ง = ตารางเก็บคำค้นเอง เหมือนเดิม)
   const q = searchValue ?? qInner;
   const setQ = (v: string) => { if (onSearchChange) onSearchChange(v); else setQInner(v); };
-  const [sortKey, setSortKey] = useState<string>("");   // "" = ลำดับเดิม
-  const [dir, setDir] = useState<Dir>("asc");
+  const [sortKeyInner, setSortKeyInner] = useState<string>("");   // "" = ลำดับเดิม
+  const [dirInner, setDirInner] = useState<Dir>("asc");
+  // คุมจากภายนอกถ้าส่ง sortKey มา (แบบเดียวกับ searchValue / grouped)
+  const sortKey = sortKeyProp ?? sortKeyInner;
+  const dir = sortDirProp ?? dirInner;
+  const setSort = (k: string, d: Dir) => { if (onSortChange) onSortChange(k, d); else { setSortKeyInner(k); setDirInner(d); } };
   const [groupedInner, setGroupedInner] = useState(defaultGrouped);
   const grouped = groupedProp ?? groupedInner;
   const setGrouped = (v: boolean) => { if (onGroupedChange) onGroupedChange(v); else setGroupedInner(v); };
@@ -290,8 +300,8 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
 
   // คลิกหัวคอลัมน์เพื่อเรียง (เฉพาะคอลัมน์ที่มี sortValue) — สลับ asc/desc
   const toggleSort = (key: string) => {
-    if (sortKey === key) setDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setDir("asc"); }
+    if (sortKey === key) setSort(key, dir === "asc" ? "desc" : "asc");
+    else setSort(key, "asc");
   };
 
   const allKeys = sorted.map(rowKey);
@@ -431,12 +441,12 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
           )}
           {sortable.length > 0 && (
             <>
-              <select value={sortKey} onChange={(e) => setSortKey(e.target.value)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600">
+              <select value={sortKey} onChange={(e) => setSort(e.target.value, dir)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600">
                 <option value="">{t("เรียง: ลำดับเดิม", "Sort: original order")}</option>
                 {sortable.map((c) => <option key={c.key} value={c.key}>{t("เรียง:", "Sort:")} {c.sortLabel ?? (typeof c.header === "string" ? c.header : c.key)}</option>)}
               </select>
               {sortKey && (
-                <button onClick={() => setDir((d) => (d === "asc" ? "desc" : "asc"))} title={t("สลับทิศ", "Reverse")} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-500">{dir === "asc" ? t("▲ น้อย→มาก", "▲ Low→High") : t("▼ มาก→น้อย", "▼ High→Low")}</button>
+                <button onClick={() => setSort(sortKey, dir === "asc" ? "desc" : "asc")} title={t("สลับทิศ", "Reverse")} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-500">{dir === "asc" ? t("▲ น้อย→มาก", "▲ Low→High") : t("▼ มาก→น้อย", "▼ High→Low")}</button>
               )}
             </>
           )}

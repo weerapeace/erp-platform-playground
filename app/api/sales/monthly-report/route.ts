@@ -4,6 +4,7 @@
  * ใช้โดยหน้า /sales/monthly (ดูบนจอ + พิมพ์/PDF)
  * สรุป: ยอดขาย · จำนวนใบ · ก่อนภาษี/VAT/หัก ณ ที่จ่าย · วางบิลแล้ว/ยังไม่วางบิล
  *       แยกตามลูกค้า · พนักงานขาย · สถานะ · สินค้าขายดี · รายวัน · รายการใบขายทั้งเดือน
+ *       สินค้าที่ขายทั้งหมด ต่อลูกค้า + รูปปก (products — หน้าเว็บ/ใบพิมพ์เอาไปรวม/แยก/เรียงด้วย lib/sold-products)
  *
  * กติกาการนับ (ให้ตรงกับแดชบอร์ดขาย):
  *   - เดือน = order_date (วันที่สั่ง)
@@ -14,6 +15,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { SO_ACTIVE_STATUSES } from "@/lib/so-status";
+import { SKU_COVER_SELECT, resolveSkuCover, coverUrl } from "@/lib/sku-cover";
+import type { SoldProduct } from "@/lib/sold-products";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -68,6 +71,8 @@ export type SalesMonthlyReport = {
   by_sales: { name: string; n: number; amt: number }[];
   by_status: { status: string; n: number; amt: number }[];
   top_products: { sku: string | null; name: string; qty: number; unit: string | null; amt: number }[];
+  /** สินค้าที่ขายทั้งหมด 1 แถวต่อ ลูกค้า+รหัส+หน่วย (ไม่นับใบยกเลิก) */
+  products: SoldProduct[];
   rows: SalesMonthlyRow[];
 };
 
@@ -98,6 +103,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ---- บรรทัดสินค้า: รายการต่อใบ + สินค้าขายดี (ไม่นับใบยกเลิก) ----
   const itemsBySo = new Map<string, SalesMonthlyLine[]>();
   const prodMap = new Map<string, { sku: string | null; name: string; qty: number; unit: string | null; amt: number }>();
+  // สินค้าต่อลูกค้า — key = ลูกค้า + รหัส + หน่วย (หน่วยต่างกันห้ามรวม ยอดจำนวนจะปนกัน)
+  const custOf = new Map(soRows.map(s => [String(s.id), {
+    name: (s.customer_name as string) ?? "(ไม่ระบุ)", code: (s.customer_code as string) ?? null,
+  }]));
+  const custProd = new Map<string, SoldProduct>();
   let totalQty = 0;
   for (let i = 0; i < soIds.length; i += 200) {
     const { data: ls } = await admin.from("erp_playground_so_lines")
@@ -120,8 +130,30 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prodMap.set(key, e);
       e.qty += num(l.qty); e.amt += num(l.net_amount);
       totalQty += num(l.qty);
+
+      const cust = custOf.get(soId)!;
+      const ck = `${cust.name}␟${key}|${(l.unit as string) ?? ""}`;
+      const cp = custProd.get(ck) ?? {
+        customer: cust.name, customer_code: cust.code, sku: (l.sku as string)?.trim() || null,
+        name: String(l.product_name ?? key), unit: (l.unit as string) ?? null, qty: 0, amt: 0, image: null,
+      };
+      custProd.set(ck, cp);
+      cp.qty += num(l.qty); cp.amt += num(l.net_amount);
     }
   }
+
+  // ---- รูปปกสินค้า (ของกลาง lib/sku-cover: ไม่มีรูปตัวเอง → ใช้รูป Parent) ----
+  const products = [...custProd.values()];
+  const codes = [...new Set(products.map(p => p.sku).filter((c): c is string => !!c))];
+  const coverByCode = new Map<string, string | null>();
+  for (let i = 0; i < codes.length; i += 200) {
+    const { data: ks } = await admin.from("skus_v2")
+      .select(`code, ${SKU_COVER_SELECT}`).in("code", codes.slice(i, i + 200));
+    for (const k of (ks ?? []) as Record<string, unknown>[]) {
+      coverByCode.set(String(k.code), coverUrl(resolveSkuCover(k).key));
+    }
+  }
+  for (const p of products) p.image = p.sku ? coverByCode.get(p.sku) ?? null : null;
 
   // ---- วางบิลแล้วหรือยัง (อยู่ในใบวางบิลที่ยังไม่ถูกยกเลิก) ----
   const billedSoIds = new Set<string>();
@@ -224,6 +256,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const report: SalesMonthlyReport = {
     month, summary, prev, daily, by_customer, by_sales, by_status, top_products,
+    products: products.sort((a, b) => b.amt - a.amt),
     rows: rows.sort((a, b) => (a.order_date ?? "").localeCompare(b.order_date ?? "") || (a.so_number ?? "").localeCompare(b.so_number ?? "")),
   };
   return NextResponse.json({ data: report, error: null });

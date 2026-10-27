@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { buildSalesMonthlyReportHtml } from "@/lib/sales-monthly-print";
 import type { SalesMonthlyReport } from "@/app/api/sales/monthly-report/route";
+import { DEFAULT_PRODUCT_OPTIONS, type ProductTableOptions } from "@/lib/sold-products";
 
 // ข้อมูลตัวอย่างเลียนแบบของจริง (ลูกค้า/สินค้า/สถานะหลายแบบ รวมใบยกเลิก)
 const CUSTOMERS = [
@@ -57,6 +58,13 @@ const REP: SalesMonthlyReport = {
   top_products: PRODUCTS.map(([sku, name, unit, price]) => ({
     sku: sku as string, name: name as string, qty: 250, unit: unit as string, amt: 250 * (price as number),
   })),
+  // สินค้าต่อลูกค้า — หน่วยปนกัน (Units / หลา) ไว้เช็กยอดรวมแยกหน่วย · CTL047-01 ซื้อ 2 ลูกค้า ไว้เช็กโหมดรวม
+  products: [
+    { customer: CUSTOMERS[0][0], customer_code: "C-0001", sku: "CTL047-01", name: "Good Goods กระเป๋าทรงถือ ผ้าขาวม้า สีฟ้า", unit: "Units", qty: 240, amt: 144000, image: "/api/r2-image?key=a.jpg" },
+    { customer: CUSTOMERS[0][0], customer_code: "C-0001", sku: "CTL022/1", name: "ริบบิ้นผ้าฝ้าย 2.5 cm", unit: "หลา", qty: 1200, amt: 12000, image: null },
+    { customer: CUSTOMERS[1][0], customer_code: "C-0002", sku: "GTH38/1BK", name: "DEVY เข็มขัดหนัง <ดำ>", unit: "Units", qty: 178, amt: 61410, image: null },
+    { customer: CUSTOMERS[1][0], customer_code: "C-0002", sku: "CTL047-01", name: "Good Goods กระเป๋าทรงถือ ผ้าขาวม้า สีฟ้า", unit: "Units", qty: 10, amt: 6000, image: "/api/r2-image?key=a.jpg" },
+  ],
   rows,
 };
 
@@ -79,7 +87,7 @@ describe("รายงานยอดขายรายเดือน — ใ�
   it("ปิดส่วนไหน ส่วนนั้นต้องหายจากใบพิมพ์", () => {
     const off = buildSalesMonthlyReportHtml(REP, { ...ALL, by_sales: false, top_products: false }, AT);
     expect(off).not.toContain("แยกตามพนักงานขาย");
-    expect(off).not.toContain("สินค้าขายดี");
+    expect(off).not.toContain("สินค้าที่ขาย");
     expect(off).toContain("แยกตามลูกค้า");          // ส่วนที่ยังเปิดอยู่ต้องมี
   });
 
@@ -98,9 +106,70 @@ describe("รายงานยอดขายรายเดือน — ใ�
   });
 
   it("เดือนที่ไม่มีใบขายเลย → ขึ้นข้อความว่าง ไม่ใช่ตารางเปล่า", () => {
-    const empty: SalesMonthlyReport = { ...REP, rows: [], by_customer: [], by_sales: [], by_status: [], top_products: [] };
+    const empty: SalesMonthlyReport = { ...REP, rows: [], by_customer: [], by_sales: [], by_status: [], top_products: [], products: [] };
     const html = buildSalesMonthlyReportHtml(empty, ALL, AT);
     expect(html).toContain("เดือนนี้ยังไม่มีใบขาย");
+    expect(html).not.toContain("สินค้าที่ขาย");
     expect(html).not.toContain("{{");
+  });
+});
+
+describe("รายงานยอดขายรายเดือน — ตารางสินค้าที่ขาย", () => {
+  const BASE = { ...DEFAULT_PRODUCT_OPTIONS, image: "none" as const };
+  const prodHtml = (o: Partial<ProductTableOptions>) =>
+    buildSalesMonthlyReportHtml(REP, { top_products: true }, AT, { ...BASE, ...o });
+
+  it("แยกตามลูกค้า: มีหัวลูกค้า + ยอดรวมรายลูกค้า + รวมทุกลูกค้า", () => {
+    const html = prodHtml({ grouped: true });
+    expect(html).toContain("— แยกตามลูกค้า");
+    expect(html).toContain(CUSTOMERS[0][0]);
+    expect(html).toContain("รวมลูกค้านี้ · 2 รายการ");
+    expect(html).toContain("รวมทุกลูกค้า · 4 รายการ");
+    expect(html).toContain((144000 + 12000 + 61410 + 6000).toLocaleString("th-TH"));
+    expect(html).not.toContain("{{");
+  });
+
+  it("รวมทุกลูกค้า: สินค้าตัวเดียวกันจากหลายลูกค้า รวมเป็นแถวเดียว", () => {
+    const html = prodHtml({ grouped: false });
+    expect(html).toContain("รวมทั้งหมด · 3 รายการ");
+    expect(html).toContain("250 Units");                    // 240 + 10
+    expect(html).not.toContain("รวมทุกลูกค้า");
+  });
+
+  it("จำนวนรวมแยกตามหน่วย — ไม่บวกหลากับ Units", () => {
+    const html = prodHtml({ grouped: false });
+    expect(html).toContain("<div>428 Units</div>");          // 240 + 178 + 10
+    expect(html).toContain("<div>1,200 หลา</div>");
+    expect(html).not.toContain("1,628");
+  });
+
+  it("เรียงตามชื่อ / ยอดเงิน ได้ลำดับต่างกัน", () => {
+    const order = (html: string) => ["CTL047-01", "CTL022/1", "GTH38/1BK"].map(s => html.indexOf(`>${s}<`));
+    const byAmt = order(prodHtml({ grouped: false, sortKey: "amt", sortDir: "desc" }));
+    expect(byAmt[0]).toBeLessThan(byAmt[2]);                 // 150,000 ก่อน 61,410
+    expect(byAmt[2]).toBeLessThan(byAmt[1]);                 // 61,410 ก่อน 12,000
+    const byName = order(prodHtml({ grouped: false, sortKey: "name", sortDir: "asc" }));
+    expect(byName[1]).toBeLessThan(byName[2]);               // ริบบิ้น ก่อน DEVY (เรียงแบบไทย: ไทยก่อนอังกฤษ)
+    expect(byName[2]).toBeLessThan(byName[0]);               // DEVY ก่อน Good Goods
+  });
+
+  it("รูป: เปิดแล้วมี <img> ขนาดย่อ · ไม่มีรูปเป็นกรอบว่าง · ปิดแล้วไม่มีคอลัมน์รูป", () => {
+    const on = prodHtml({ image: "small" });
+    expect(on).toContain('src="/api/r2-image?key=a.jpg&amp;w=80"');
+    expect(on).toContain('class="noimg"');
+    expect(on).toContain("<th>รูป</th>");
+    expect(prodHtml({ image: "none" })).not.toContain("<th>รูป</th>");
+  });
+
+  it("คอลัมน์ % เปิด/ปิดได้ · ชื่อสินค้าถูก escape", () => {
+    expect(prodHtml({ pct: true })).toContain('<th class="r">%</th>');
+    expect(prodHtml({ pct: false })).not.toContain('<th class="r">%</th>');
+    expect(prodHtml({})).toContain("DEVY เข็มขัดหนัง &lt;ดำ&gt;");
+  });
+
+  it("ขึ้นหน้าใหม่ทุกลูกค้า: ใส่ตัวตัดหน้าตั้งแต่ลูกค้าที่ 2", () => {
+    const html = prodHtml({ grouped: true, pageBreak: true });
+    expect(html.match(/<div class="brk">/g)?.length).toBe(1);   // 2 ลูกค้า → ตัด 1 ครั้ง
+    expect(prodHtml({ grouped: true, pageBreak: false })).not.toContain('<div class="brk">');
   });
 });

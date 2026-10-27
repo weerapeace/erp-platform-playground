@@ -3,11 +3,16 @@
  *
  * ใช้ระบบพิมพ์กลาง (buildReportHtml) · หน้า /sales/monthly เรียกตัวนี้แล้วส่งให้ printReportHtmlInNewWindow
  * `show` = ส่วนที่ผู้ใช้ติ๊กเลือกไว้ (จาก components/report-sections) — ปิดส่วนไหน ใบพิมพ์ก็ไม่มีส่วนนั้น
+ * `prod` = ตัวเลือกตารางสินค้า (รวม/แยกลูกค้า · เรียง · รูป · % · ขึ้นหน้าใหม่) — เรียง/รวมผ่าน lib/sold-products ตัวเดียวกับบนจอ
  */
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import { soStatusLabel } from "@/lib/so-status";
 import { monthLabelTh } from "@/lib/month";
 import type { SalesMonthlyReport } from "@/app/api/sales/monthly-report/route";
+import {
+  DEFAULT_PRODUCT_OPTIONS, PRODUCT_SORT_LABEL, fmtQty, groupByCustomer, mergeProducts, productThumb, qtyByUnit, sortProducts, sumAmt,
+  type ProductTableOptions, type SoldProduct,
+} from "@/lib/sold-products";
 
 const baht = (n: number) => Math.round(n || 0).toLocaleString("th-TH");
 const monthLabel = (ym: string) => monthLabelTh(ym);
@@ -41,6 +46,19 @@ const CSS = `
 .cxl { color:#9ca3af; text-decoration:line-through; }
 .t tr.ln td { background:#f8fafc; color:#475569; font-size:9.5px; padding-top:0.9mm; padding-bottom:0.9mm; }
 .empty { text-align:center; color:#94a3b8; padding:12mm 0; font-size:12px; }
+.sec-s { font-size:9.5px; font-weight:400; color:#6b7280; }
+.pt { table-layout:fixed; }
+.pt tr { page-break-inside:avoid; }
+.pt td { vertical-align:middle; }
+.pt td.n, .pt .muted { color:#94a3b8; }
+.pt tfoot td { vertical-align:top; }
+.pt img { display:block; object-fit:contain; margin:auto; }
+.pt .noimg { display:block; margin:auto; background:#f1f5f9; border-radius:2px; }
+.ch { display:flex; justify-content:space-between; gap:3mm; font-size:11px; font-weight:800; margin:3.5mm 0 1.2mm; }
+.ch-s { font-weight:400; color:#6b7280; white-space:nowrap; }
+.brk { break-before:page; page-break-before:always; }
+.grand { margin-top:2.5mm; }
+.grand td { border-top:1.5px solid #111827 !important; background:#f1f5f9; font-weight:800; }
 @media print { .doc { padding: 10mm 10mm !important; } }`;
 
 const TEMPLATE: ReportTemplate = {
@@ -83,11 +101,19 @@ const TEMPLATE: ReportTemplate = {
     </div>
   </div>
 
-  {{#show_top_products}}{{#has_prod}}<div class="sec">สินค้าขายดี (10 อันดับแรก)</div>
-  <table class="t">
-    <thead><tr><th>รหัส</th><th>สินค้า</th><th class="r">จำนวน</th><th class="r">ยอด (บาท)</th></tr></thead>
-    <tbody>{{#products}}<tr><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{qty}}</td><td class="r">{{amt}}</td></tr>{{/products}}</tbody>
-  </table>{{/has_prod}}{{/show_top_products}}
+  {{#show_top_products}}{{#has_prod}}<div class="sec">สินค้าที่ขาย{{#prod_grouped}} — แยกตามลูกค้า{{/prod_grouped}}
+    <span class="sec-s">· {{prod_count}} รายการ · เรียงตาม{{prod_sort}} · ยอดหลังส่วนลด ก่อน VAT · ไม่รวมใบยกเลิก</span></div>
+  {{#prod_groups}}<div class="{{cls}}">
+    {{#title}}<div class="ch"><span>{{title}}</span><span class="ch-s">{{sub}}</span></div>{{/title}}
+    <table class="t pt"><colgroup>{{#prod_cols}}<col style="width:{{w}}">{{/prod_cols}}</colgroup>
+      <thead><tr><th class="r">#</th>{{#prod_img}}<th>รูป</th>{{/prod_img}}<th>รหัส</th><th>สินค้า</th><th class="r">จำนวน</th><th class="r">ยอด (บาท)</th>{{#prod_pct}}<th class="r">%</th>{{/prod_pct}}</tr></thead>
+      <tbody>{{#items}}<tr><td class="r n">{{no}}</td>{{#prod_img}}<td>{{#img}}<img src="{{img}}" style="width:{{img_mm}};height:{{img_mm}}" alt="">{{/img}}{{^img}}<span class="noimg" style="width:{{img_mm}};height:{{img_mm}}"></span>{{/img}}</td>{{/prod_img}}<td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{qty}}</td><td class="r">{{amt}}</td>{{#prod_pct}}<td class="r">{{pct}}</td>{{/prod_pct}}</tr>{{/items}}</tbody>
+      <tfoot><tr><td colspan="{{foot_span}}">{{foot_label}} · {{count}} รายการ</td><td class="r">{{#qty_units}}<div>{{q}}</div>{{/qty_units}}</td><td class="r">{{amt_total}}</td>{{#prod_pct}}<td class="r">100%</td>{{/prod_pct}}</tr></tfoot>
+    </table>
+  </div>{{/prod_groups}}
+  {{#prod_grand}}<table class="t pt grand"><colgroup>{{#prod_cols}}<col style="width:{{w}}">{{/prod_cols}}</colgroup>
+    <tbody><tr><td colspan="{{foot_span}}">รวมทุกลูกค้า · {{count}} รายการ</td><td class="r">{{#qty_units}}<div>{{q}}</div>{{/qty_units}}</td><td class="r">{{amt_total}}</td>{{#prod_pct}}<td></td>{{/prod_pct}}</tr></tbody>
+  </table>{{/prod_grand}}{{/has_prod}}{{/show_top_products}}
 
   {{#show_rows}}{{#has_rows}}<div class="sec">รายการใบขายทั้งเดือน{{#show_items}} (พร้อมรายการสินค้า){{/show_items}}</div>
   <table class="t">
@@ -106,11 +132,64 @@ const TEMPLATE: ReportTemplate = {
   custom_css: CSS,
 };
 
-/** สร้าง HTML ใบพิมพ์จากข้อมูลรายงาน + ส่วนที่เลือกแสดง */
+/** ขนาดรูปบนใบพิมพ์: ความกว้างคอลัมน์ · ขนาดรูป · px ที่ขอจาก r2-image (ย่อให้ ใบไม่หนัก) */
+const IMG_SIZE = { small: { col: "9mm", mm: "7mm", px: 80 }, large: { col: "17mm", mm: "15mm", px: 180 } } as const;
+
+/** ข้อมูลส่วน "สินค้าที่ขาย" สำหรับเทมเพลต — รวม/แยกลูกค้า + เรียง + ยอดรวมแยกหน่วย */
+function productSectionData(rep: SalesMonthlyReport, o: ProductTableOptions) {
+  const img = o.image === "none" ? null : IMG_SIZE[o.image];
+  const soCount = new Map(rep.by_customer.map(c => [c.name, c.n]));
+  const qtyUnits = (list: SoldProduct[]) => qtyByUnit(list).map(u => ({ q: fmtQty(u.qty, u.unit) }));
+  const group = (list: SoldProduct[], extra: { cls: string; title: string; sub: string; foot_label: string }) => {
+    const total = sumAmt(list);
+    return {
+      ...extra,
+      count: list.length,
+      qty_units: qtyUnits(list),
+      amt_total: baht(total),
+      items: sortProducts(list, o.sortKey, o.sortDir).map((p, i) => ({
+        no: i + 1, sku: p.sku ?? "—", name: p.name, qty: fmtQty(p.qty, p.unit), amt: baht(p.amt),
+        pct: total ? `${((p.amt / total) * 100).toFixed(1)}%` : "—",
+        img: img ? productThumb(p.image, img.px) : null,
+      })),
+    };
+  };
+  const all = rep.products ?? [];
+  const groups = o.grouped
+    ? groupByCustomer(all).map((g, i) => group(g.rows, {
+        cls: o.pageBreak && i > 0 ? "brk" : "",
+        title: g.customer,
+        sub: `${soCount.get(g.customer) ?? 0} ใบขาย · ${g.rows.length} รายการ`,
+        foot_label: "รวมลูกค้านี้",
+      }))
+    : [group(mergeProducts(all), { cls: "", title: "", sub: "", foot_label: "รวมทั้งหมด" })];
+  return {
+    has_prod: all.length > 0,
+    prod_grouped: o.grouped,
+    prod_sort: `${PRODUCT_SORT_LABEL[o.sortKey]} (${o.sortDir === "desc" ? (o.sortKey === "name" || o.sortKey === "sku" ? "ฮ→ก" : "มาก→น้อย") : (o.sortKey === "name" || o.sortKey === "sku" ? "ก→ฮ" : "น้อย→มาก")})`,
+    prod_count: groups.reduce((a, g) => a + g.count, 0),
+    prod_img: !!img,
+    img_mm: img?.mm ?? "",
+    prod_pct: o.pct,
+    prod_cols: [
+      { w: "7mm" }, ...(img ? [{ w: img.col }] : []), { w: "26mm" }, { w: "auto" }, { w: "26mm" }, { w: "22mm" },
+      ...(o.pct ? [{ w: "12mm" }] : []),
+    ],
+    foot_span: img ? 4 : 3,
+    prod_groups: groups,
+    // แยกตามลูกค้า → ปิดท้ายด้วยยอดรวมทุกลูกค้า (array 1 ตัว เพราะเทมเพลตเข้า scope ได้เฉพาะ array)
+    prod_grand: o.grouped && groups.length > 1
+      ? [{ count: all.length, qty_units: qtyUnits(all), amt_total: baht(sumAmt(all)) }]
+      : [],
+  };
+}
+
+/** สร้าง HTML ใบพิมพ์จากข้อมูลรายงาน + ส่วนที่เลือกแสดง + ตัวเลือกตารางสินค้า */
 export function buildSalesMonthlyReportHtml(
   rep: SalesMonthlyReport,
   show: Record<string, boolean>,
   printedAt = new Date(),
+  prod: ProductTableOptions = DEFAULT_PRODUCT_OPTIONS,
 ): string {
   const s = rep.summary;
   const prevAmt = rep.prev?.amt ?? 0;
@@ -134,10 +213,7 @@ export function buildSalesMonthlyReportHtml(
     sales: rep.by_sales.map(c => ({ name: c.name, n: c.n, amt: baht(c.amt) })),
     has_status: rep.by_status.length > 0,
     statuses: rep.by_status.map(c => ({ label: soStatusLabel(c.status), n: c.n, amt: baht(c.amt) })),
-    has_prod: rep.top_products.length > 0,
-    products: rep.top_products.slice(0, 10).map(p => ({
-      sku: p.sku ?? "—", name: p.name, qty: `${p.qty.toLocaleString("th-TH")}${p.unit ? " " + p.unit : ""}`, amt: baht(p.amt),
-    })),
+    ...productSectionData(rep, prod),
     has_rows: rep.rows.length > 0,
     rows: rep.rows.map(r => ({
       date: dmy(r.order_date), so_number: r.so_number ?? "(ร่าง)",

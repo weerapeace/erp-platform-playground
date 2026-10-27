@@ -2,12 +2,13 @@
 
 /**
  * สรุปยอดขายรายเดือน — /sales/monthly
- *   เลือกเดือน → เห็นยอดขายทั้งเดือน · แยกตามลูกค้า / พนักงานขาย / สถานะ / สินค้าขายดี
+ *   เลือกเดือน → เห็นยอดขายทั้งเดือน · แยกตามลูกค้า / พนักงานขาย / สถานะ / สินค้าที่ขายทั้งหมด
  *   + รายการใบขายทุกใบในเดือน · พิมพ์เป็น A4 / PDF ได้ · ดาวน์โหลด Excel ได้
  *
  * ของกลางที่ใช้: PlaygroundShell · permission (so.view) · ระบบพิมพ์กลาง (lib/sales-monthly-print → buildReportHtml)
  *                Export กลาง (lib/export — มี audit log ให้อัตโนมัติ) · สถานะ SO กลาง (lib/so-status)
- *                ตัวเลือก "แสดงอะไรบ้าง" กลาง (components/report-sections — จำรายคน)
+ *                ตัวเลือก "แสดงอะไรบ้าง" + ตัวเลือกปรับแต่ง กลาง (components/report-sections — จำรายคน)
+ *                ตารางสินค้าที่ขาย กลาง (components/sold-products-table + lib/sold-products — บนจอกับใบพิมพ์เรียง/รวมตรงกัน)
  * กราฟวาดเอง (CSS) — โปรเจกต์ไม่มี chart library เพื่อไม่ให้ bundle บวม (แบบเดียวกับแดชบอร์ดขาย/จัดซื้อ)
  */
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
@@ -18,7 +19,9 @@ import { apiFetch } from "@/lib/api";
 import { exportTable } from "@/lib/export";
 import { buildSalesMonthlyReportHtml } from "@/lib/sales-monthly-print";
 import { printReportHtmlInNewWindow } from "@/components/report";
-import { useReportSections, ReportSectionPicker, type ReportSection } from "@/components/report-sections";
+import { useReportSections, useReportOptions, ReportSectionPicker, type ReportSection } from "@/components/report-sections";
+import { SoldProductsTable } from "@/components/sold-products-table";
+import { DEFAULT_PRODUCT_OPTIONS } from "@/lib/sold-products";
 import { soStatusLabel, soStatusColor } from "@/lib/so-status";
 import { MonthNav } from "@/components/month-nav";
 import { TH_MONTHS, monthLabelTh, thisMonth } from "@/lib/month";
@@ -31,7 +34,7 @@ const SECTIONS: readonly ReportSection[] = [
   { key: "by_customer",  label: "แยกตามลูกค้า" },
   { key: "by_sales",     label: "แยกตามพนักงานขาย" },
   { key: "by_status",    label: "สถานะเอกสาร" },
-  { key: "top_products", label: "สินค้าขายดี 10 อันดับ" },
+  { key: "top_products", label: "สินค้าที่ขาย (ทั้งหมด)", hint: "รวม/แยกตามลูกค้า · เรียง · รูป · ยอดรวมแยกหน่วย" },
   { key: "rows",         label: "รายการใบขายทั้งเดือน" },
   { key: "items",        label: "รายการสินค้าในแต่ละใบ", on: false, hint: "แตกบรรทัดสินค้าใต้ใบขายแต่ละใบ (ใบยาวขึ้น)" },
 ];
@@ -125,6 +128,7 @@ export default function SalesMonthlyReportPage() {
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const { on, toggle, reset } = useReportSections("sales_monthly_sections", SECTIONS);
+  const { opts: prodOpts, set: setProdOpts } = useReportOptions("sales_monthly_products", DEFAULT_PRODUCT_OPTIONS);
 
   useEffect(() => {
     if (!canView) return;
@@ -136,7 +140,8 @@ export default function SalesMonthlyReportPage() {
   }, [canView, month]);
 
   // ---- HTML สำหรับพิมพ์ (สร้างจาก lib/sales-monthly-print) ----
-  const printHtml = useMemo(() => (rep ? buildSalesMonthlyReportHtml(rep, on) : ""), [rep, on]);
+  const printHtml = useMemo(() => (rep ? buildSalesMonthlyReportHtml(rep, on, new Date(), prodOpts) : ""), [rep, on, prodOpts]);
+  const soCountByCustomer = useMemo(() => new Map((rep?.by_customer ?? []).map(c => [c.name, c.n])), [rep]);
 
   const doExport = useCallback(async (format: "csv" | "excel") => {
     if (!rep) return;
@@ -253,49 +258,46 @@ export default function SalesMonthlyReportPage() {
               </div>
             </Card>}
 
-            {/* ===== ลูกค้า / พนักงานขาย ===== */}
-            {(on.by_customer || on.by_sales) && (
-              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            {/* ===== ลูกค้า | พนักงานขาย + สถานะ (วางแบบเดียวกับใบพิมพ์) ===== */}
+            {(on.by_customer || on.by_sales || on.by_status) && (
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 items-start">
                 {on.by_customer && (
                   <Card title="แยกตามลูกค้า" right={<span className="text-xs text-slate-400">{rep.by_customer.length} ราย</span>}>
                     <RankRows items={rep.by_customer.slice(0, 10).map(c => ({ name: c.name, sub: c.code, n: c.n, amt: c.amt }))} total={s.amt} color="emerald" />
                   </Card>
                 )}
-                {on.by_sales && (
-                  <Card title="แยกตามพนักงานขาย" right={<span className="text-xs text-slate-400">{rep.by_sales.length} คน</span>}>
-                    <RankRows items={rep.by_sales.map(c => ({ name: c.name, n: c.n, amt: c.amt }))} total={s.amt} color="blue" />
-                  </Card>
+                {(on.by_sales || on.by_status) && (
+                  <div className="space-y-4">
+                    {on.by_sales && (
+                      <Card title="แยกตามพนักงานขาย" right={<span className="text-xs text-slate-400">{rep.by_sales.length} คน</span>}>
+                        <RankRows items={rep.by_sales.map(c => ({ name: c.name, n: c.n, amt: c.amt }))} total={s.amt} color="blue" />
+                      </Card>
+                    )}
+                    {on.by_status && (
+                      <Card title="สถานะเอกสาร">
+                        <div className="space-y-2">
+                          {rep.by_status.map(st => (
+                            <div key={st.status} className="flex items-center gap-2 text-sm">
+                              <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: soStatusColor(st.status) }} />
+                              <span className="text-slate-600 flex-1">{soStatusLabel(st.status)}</span>
+                              <span className="text-slate-400 text-xs">{st.n} ใบ</span>
+                              <span className="w-24 text-right font-mono tabular-nums text-xs text-slate-700">{bahtShort(st.amt)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </Card>
+                    )}
+                  </div>
                 )}
               </div>
             )}
 
-            {/* ===== สถานะ / สินค้าขายดี ===== */}
-            {(on.by_status || on.top_products) && (
-              <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-                {on.by_status && (
-                  <Card title="สถานะเอกสาร">
-                    <div className="space-y-2">
-                      {rep.by_status.map(st => (
-                        <div key={st.status} className="flex items-center gap-2 text-sm">
-                          <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ background: soStatusColor(st.status) }} />
-                          <span className="text-slate-600 flex-1">{soStatusLabel(st.status)}</span>
-                          <span className="text-slate-400 text-xs">{st.n} ใบ</span>
-                          <span className="w-24 text-right font-mono tabular-nums text-xs text-slate-700">{bahtShort(st.amt)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </Card>
-                )}
-                {on.top_products && (
-                  <Card title="สินค้าขายดี (10 อันดับ)" className={on.by_status ? "xl:col-span-2" : "xl:col-span-3"}>
-                    <RankRows
-                      items={rep.top_products.slice(0, 10).map(p => ({
-                        name: p.name, sub: p.sku, n: Math.round(p.qty), amt: p.amt, unit: p.unit ?? "ชิ้น",
-                      }))}
-                      total={rep.top_products.reduce((a, p) => a + p.amt, 0)} unit="ชิ้น" color="violet" />
-                  </Card>
-                )}
-              </div>
+            {/* ===== สินค้าที่ขายทั้งหมด (รวม/แยกลูกค้า · เรียง · รูป · %) — ตัวเลือกชุดเดียวกับใบพิมพ์ ===== */}
+            {on.top_products && (
+              <Card title="สินค้าที่ขาย" right={<span className="text-xs text-slate-400">ยอดหลังส่วนลด ก่อน VAT · ไม่รวมใบยกเลิก</span>}>
+                <SoldProductsTable products={rep.products ?? []} opts={prodOpts} onChange={setProdOpts}
+                  groupNote={c => `${soCountByCustomer.get(c) ?? 0} ใบขาย`} />
+              </Card>
             )}
 
             {/* ===== รายการใบขายทั้งเดือน ===== */}
