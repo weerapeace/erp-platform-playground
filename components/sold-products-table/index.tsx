@@ -25,17 +25,57 @@ const baht = (n: number) => Math.round(n || 0).toLocaleString("th-TH");
 const qtyText = (list: SoldProduct[]) => qtyByUnit(list).map(u => fmtQty(u.qty, u.unit)).join(" · ");
 const IMG_PX = { none: 0, small: 28, large: 56 } as const;
 
-function Seg<V extends string>({ value, options, onChange }: {
-  value: V; options: { v: V; label: string }[]; onChange: (v: V) => void;
+function Seg<V extends string>({ value, options, onChange, full = false }: {
+  value: V; options: { v: V; label: string }[]; onChange: (v: V) => void; full?: boolean;
 }) {
   return (
-    <div className="inline-flex h-8 border border-slate-200 rounded-lg overflow-hidden bg-white text-sm">
+    <div className={`${full ? "flex w-full" : "inline-flex"} h-8 border border-slate-200 rounded-lg overflow-hidden bg-white text-sm`}>
       {options.map(o => (
         <button key={o.v} type="button" onClick={() => onChange(o.v)}
-          className={`px-2.5 ${value === o.v ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>
+          className={`${full ? "flex-1" : ""} px-2.5 ${value === o.v ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-500 hover:bg-slate-50"}`}>
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+const IMAGE_OPTIONS: { v: ProductTableOptions["image"]; label: string }[] =
+  [{ v: "none", label: "ไม่โชว์" }, { v: "small", label: "เล็ก" }, { v: "large", label: "ใหญ่" }];
+
+/**
+ * ตัวเลือกตารางสินค้าแบบเรียงลงทีละข้อ — ใช้ในหน้าปรับก่อนพิมพ์ (components/print-setup-dialog)
+ * ค่าชุดเดียวกับตารางบนจอ (เปลี่ยนที่นี่ ตารางบนจอก็เปลี่ยนตาม)
+ */
+export function SoldProductsOptions({ opts, onChange }: {
+  opts: ProductTableOptions;
+  onChange: (patch: Partial<ProductTableOptions>) => void;
+}) {
+  const numeric = opts.sortKey === "amt" || opts.sortKey === "qty";
+  return (
+    <div className="space-y-2.5">
+      <Seg full value={opts.grouped ? "cust" : "all"} onChange={v => onChange({ grouped: v === "cust" })}
+        options={[{ v: "all", label: "รวมทุกลูกค้า" }, { v: "cust", label: "แยกตามลูกค้า" }]} />
+      <div className="space-y-1">
+        <div className="text-[11px] text-slate-400">เรียงตาม</div>
+        <Seg full value={opts.sortKey} onChange={k => onChange({ sortKey: k, sortDir: defaultSortDir(k) })}
+          options={[{ v: "amt", label: "ยอดเงิน" }, { v: "qty", label: "จำนวน" }, { v: "name", label: "ชื่อ" }, { v: "sku", label: "รหัส" }]} />
+        <Seg full value={opts.sortDir} onChange={d => onChange({ sortDir: d })}
+          options={numeric
+            ? [{ v: "desc", label: "มาก → น้อย" }, { v: "asc", label: "น้อย → มาก" }]
+            : [{ v: "asc", label: "ก → ฮ" }, { v: "desc", label: "ฮ → ก" }]} />
+      </div>
+      <div className="space-y-1">
+        <div className="text-[11px] text-slate-400">รูปสินค้า</div>
+        <Seg full value={opts.image} onChange={v => onChange({ image: v })} options={IMAGE_OPTIONS} />
+      </div>
+      <label className="flex items-center gap-2 cursor-pointer text-slate-700">
+        <input type="checkbox" checked={opts.pct} onChange={e => onChange({ pct: e.target.checked })} /> คอลัมน์ % ของยอด
+      </label>
+      <label className={`flex items-center gap-2 text-slate-700 ${opts.grouped ? "cursor-pointer" : "opacity-40"}`}>
+        <input type="checkbox" checked={opts.pageBreak} disabled={!opts.grouped}
+          onChange={e => onChange({ pageBreak: e.target.checked })} /> ขึ้นหน้าใหม่ทุกลูกค้า
+      </label>
     </div>
   );
 }
@@ -114,8 +154,7 @@ export function SoldProductsTable({ products, opts, onChange, groupNote, maxHeig
         actions={
           <div className="flex items-center gap-2 flex-wrap text-sm">
             <span className="text-xs text-slate-400">รูป</span>
-            <Seg value={opts.image} onChange={v => onChange({ image: v })}
-              options={[{ v: "none", label: "ไม่โชว์" }, { v: "small", label: "เล็ก" }, { v: "large", label: "ใหญ่" }]} />
+            <Seg value={opts.image} onChange={v => onChange({ image: v })} options={IMAGE_OPTIONS} />
             <label className="inline-flex items-center gap-1.5 h-8 px-2 text-slate-600 cursor-pointer">
               <input type="checkbox" checked={opts.pct} onChange={e => onChange({ pct: e.target.checked })} /> % ของยอด
             </label>

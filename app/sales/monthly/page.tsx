@@ -18,10 +18,11 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { exportTable } from "@/lib/export";
 import { buildSalesMonthlyReportHtml } from "@/lib/sales-monthly-print";
-import { printReportHtmlInNewWindow } from "@/components/report";
-import { useReportSections, useReportOptions, ReportSectionPicker, type ReportSection } from "@/components/report-sections";
-import { SoldProductsTable } from "@/components/sold-products-table";
+import { PrintSetupDialog, PrintSetupSection } from "@/components/print-setup-dialog";
+import { useReportSections, useReportOptions, ReportSectionPicker, ReportSectionList, type ReportSection } from "@/components/report-sections";
+import { SoldProductsTable, SoldProductsOptions } from "@/components/sold-products-table";
 import { DEFAULT_PRODUCT_OPTIONS } from "@/lib/sold-products";
+import { docFileName } from "@/lib/print-filename";
 import { soStatusLabel, soStatusColor } from "@/lib/so-status";
 import { MonthNav } from "@/components/month-nav";
 import { TH_MONTHS, monthLabelTh, thisMonth } from "@/lib/month";
@@ -30,13 +31,13 @@ import type { SalesMonthlyReport, SalesMonthlyRow } from "@/app/api/sales/monthl
 /** ส่วนต่าง ๆ ของรายงาน — ผู้ใช้ติ๊กเลือกได้ว่าจะโชว์อะไร (มีผลทั้งบนจอและตอนพิมพ์) */
 const SECTIONS: readonly ReportSection[] = [
   { key: "kpi",          label: "การ์ดสรุปยอด",          locked: true },
-  { key: "daily",        label: "กราฟยอดขายรายวัน",     hint: "เฉพาะบนจอ ไม่ติดไปตอนพิมพ์" },
+  { key: "daily",        label: "กราฟยอดขายรายวัน",     hint: "เฉพาะบนจอ ไม่ติดไปตอนพิมพ์", screenOnly: true },
   { key: "by_customer",  label: "แยกตามลูกค้า" },
   { key: "by_sales",     label: "แยกตามพนักงานขาย" },
   { key: "by_status",    label: "สถานะเอกสาร" },
   { key: "top_products", label: "สินค้าที่ขาย (ทั้งหมด)", hint: "รวม/แยกตามลูกค้า · เรียง · รูป · ยอดรวมแยกหน่วย" },
   { key: "rows",         label: "รายการใบขายทั้งเดือน" },
-  { key: "items",        label: "รายการสินค้าในแต่ละใบ", on: false, hint: "แตกบรรทัดสินค้าใต้ใบขายแต่ละใบ (ใบยาวขึ้น)" },
+  { key: "items",        label: "รายการสินค้าในแต่ละใบ", on: false, hint: "แตกบรรทัดสินค้าใต้ใบขายแต่ละใบ (ใบยาวขึ้น)", parent: "rows" },
 ];
 
 // ---- helpers ----
@@ -129,6 +130,7 @@ export default function SalesMonthlyReportPage() {
   const [showAll, setShowAll] = useState(false);
   const { on, toggle, reset } = useReportSections("sales_monthly_sections", SECTIONS);
   const { opts: prodOpts, set: setProdOpts } = useReportOptions("sales_monthly_products", DEFAULT_PRODUCT_OPTIONS);
+  const [printOpen, setPrintOpen] = useState(false);   // หน้าปรับก่อนพิมพ์
 
   useEffect(() => {
     if (!canView) return;
@@ -192,7 +194,7 @@ export default function SalesMonthlyReportPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <MonthNav value={month} onChange={setMonth} />
             <ReportSectionPicker sections={SECTIONS} on={on} onToggle={toggle} onReset={reset} />
-            <button onClick={() => printHtml && printReportHtmlInNewWindow(printHtml)} disabled={!printHtml}
+            <button onClick={() => setPrintOpen(true)} disabled={!printHtml}
               className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">🖨 พิมพ์ / PDF</button>
             <button onClick={() => doExport("excel")} disabled={!rep?.rows.length}
               className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white hover:bg-slate-50 disabled:opacity-50">⬇ Excel</button>
@@ -380,6 +382,22 @@ export default function SalesMonthlyReportPage() {
           </>
         )}
       </div>
+
+      {/* ===== หน้าปรับก่อนพิมพ์ — ติ๊กส่วน/ตัวเลือกตารางสินค้า แล้วดูใบพิมพ์จริงด้านขวา (ค่าชุดเดียวกับบนจอ จำรายคน) ===== */}
+      <PrintSetupDialog open={printOpen} onClose={() => setPrintOpen(false)}
+        title={`พิมพ์รายงานสรุปยอดขาย — ${monthLabelTh(month)}`}
+        html={printHtml} fileName={docFileName("สรุปยอดขายรายเดือน", month)}
+        note="ตัวเลือกที่ปรับที่นี่จำไว้ให้ครั้งหน้า และใช้กับตารางบนจอด้วย">
+        <PrintSetupSection title="ส่วนที่จะพิมพ์">
+          <ReportSectionList sections={SECTIONS} on={on} onToggle={toggle} forPrint />
+          <button type="button" onClick={reset} className="text-xs text-blue-600 hover:underline">คืนค่าเริ่มต้น</button>
+        </PrintSetupSection>
+        {on.top_products && (
+          <PrintSetupSection title="ตารางสินค้าที่ขาย">
+            <SoldProductsOptions opts={prodOpts} onChange={setProdOpts} />
+          </PrintSetupSection>
+        )}
+      </PrintSetupDialog>
     </PlaygroundShell>
   );
 }

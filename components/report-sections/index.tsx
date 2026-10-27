@@ -29,6 +29,10 @@ export type ReportSection = {
   on?: boolean;
   /** คำอธิบายสั้น ๆ ใต้ชื่อ */
   hint?: string;
+  /** มีเฉพาะบนจอ ไม่ติดไปใบพิมพ์ (เช่น กราฟ) — หน้าปรับก่อนพิมพ์จะไม่โชว์ช่องนี้ */
+  screenOnly?: boolean;
+  /** ส่วนย่อยของส่วนอื่น (key แม่) — ปิดแม่แล้วช่องนี้จางลง */
+  parent?: string;
 };
 
 export type SectionState = Record<string, boolean>;
@@ -140,6 +144,37 @@ export function useReportOptions<T extends Record<string, unknown>>(prefKey: str
   return { opts, set };
 }
 
+/**
+ * รายการติ๊กเลือกส่วน (ไม่มีปุ่ม/เมนูครอบ) — ใช้ในเมนู ReportSectionPicker และในหน้าปรับก่อนพิมพ์ (components/print-setup-dialog)
+ * forPrint = ซ่อนส่วนที่มีแต่บนจอ (screenOnly)
+ */
+export function ReportSectionList({ sections, on, onToggle, forPrint = false, className = "" }: {
+  sections: readonly ReportSection[];
+  on: SectionState;
+  onToggle: (key: string) => void;
+  forPrint?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={className}>
+      {sections.filter(s => !(forPrint && s.screenOnly)).map(s => {
+        const parentOff = !!s.parent && !on[s.parent];
+        return (
+          <label key={s.key}
+            className={`flex items-start gap-2 py-1.5 text-sm ${s.parent ? "pl-5" : ""} ${s.locked || parentOff ? "opacity-50" : "hover:bg-slate-50 cursor-pointer"}`}>
+            <input type="checkbox" className="mt-0.5" checked={!!on[s.key]} disabled={s.locked}
+              onChange={() => !s.locked && onToggle(s.key)} />
+            <span>
+              <span className="text-slate-700">{s.label}</span>
+              {s.hint && <span className="block text-[11px] text-slate-400">{s.hint}</span>}
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 /** ปุ่ม + เมนูติ๊กเลือกส่วนที่จะแสดง */
 export function ReportSectionPicker({ sections, on, onToggle, onReset, label = "เลือกสิ่งที่จะแสดง" }: {
   sections: readonly ReportSection[];
@@ -161,17 +196,7 @@ export function ReportSectionPicker({ sections, on, onToggle, onReset, label = "
       <FloatingDropdown anchorRef={anchor} open={open} onClose={() => setOpen(false)} minWidth={260}>
         <div className="bg-white border border-slate-200 rounded-lg shadow-lg py-1.5 max-h-[70vh] overflow-auto">
           <div className="px-3 py-1.5 text-[11px] text-slate-400">ติ๊กเลือกส่วนที่อยากเห็น — มีผลทั้งบนจอและตอนพิมพ์</div>
-          {sections.map(s => (
-            <label key={s.key}
-              className={`flex items-start gap-2 px-3 py-1.5 text-sm ${s.locked ? "opacity-50" : "hover:bg-slate-50 cursor-pointer"}`}>
-              <input type="checkbox" className="mt-0.5" checked={!!on[s.key]} disabled={s.locked}
-                onChange={() => !s.locked && onToggle(s.key)} />
-              <span>
-                <span className="text-slate-700">{s.label}</span>
-                {s.hint && <span className="block text-[11px] text-slate-400">{s.hint}</span>}
-              </span>
-            </label>
-          ))}
+          <ReportSectionList sections={sections} on={on} onToggle={onToggle} className="px-3" />
           {onReset && (
             <div className="border-t border-slate-100 mt-1 pt-1 px-3">
               <button type="button" onClick={() => { onReset(); setOpen(false); }}
