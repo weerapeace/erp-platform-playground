@@ -56,6 +56,8 @@ export type NestingJobRow = {
   created_by_name: string | null; updated_by_name: string | null; created_at: string; updated_at: string;
   // ส่งเข้าคลังงานพิมพ์แล้ว (เฟส 3) — การ์ดในคลังไฟล์ + โฟลเดอร์ Drive + เวลาส่งล่าสุด
   asset_id: string | null; drive_folder_url: string | null; published_at: string | null;
+  // เฉพาะหน้ารายการ: รูปลายจากคลัง (asset_id → url) ไว้โชว์รูปจิ๋วหน้าชื่องาน
+  thumbs?: Record<string, string>;
 };
 
 export const SELECT = "id, name, status, print_type_id, settings, items, result, created_by_name, updated_by_name, created_at, updated_at, asset_id, drive_folder_url, published_at, print_type:erp_print_types(code, name)";

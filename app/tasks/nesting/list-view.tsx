@@ -16,6 +16,7 @@ import { usePushToast } from "@/components/toast";
 import { HelperChip, HelperSetupCard, useHelperStatus } from "./helper-status";
 import { deleteNestingJob, listNestingJobs, type NestingJobRow, type NestingStatus } from "./data";
 import { fmtLen, type Unit } from "./nest-utils";
+import { DesignThumbs, jobDesigns } from "./design-thumbs";
 
 export const STATUS_STYLE: Record<NestingStatus, { th: string; en: string; cls: string }> = {
   draft: { th: "ร่าง", en: "Draft", cls: "bg-blue-50 text-blue-700" },
@@ -30,6 +31,7 @@ export function NestingListView() {
   const { can } = useAuth();
   const toast = usePushToast();
   const { status, recheck } = useHelperStatus();
+  const helperReady = status.state === "ready";   // ลายที่ลากไฟล์เอง → รูปย่อจากตัวช่วยในเครื่อง
   const [rows, setRows] = useState<NestingJobRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
@@ -45,8 +47,19 @@ export function NestingListView() {
 
   const columns = useMemo<ColumnDef<NestingJobRow>[]>(() => [
     {
-      id: "name", accessorKey: "name", header: t("ชื่องาน", "Job name"), size: 260,
-      cell: ({ row }) => <span className="font-medium text-slate-800">{row.original.name}</span>,
+      id: "name", accessorKey: "name", header: t("ชื่องาน", "Job name"), size: 300,
+      cell: ({ row }) => {
+        const designs = jobDesigns(row.original.items, row.original.thumbs);
+        return (
+          <div className="flex min-w-0 items-center gap-2.5">
+            <DesignThumbs designs={designs} helperReady={helperReady} />
+            <div className="min-w-0">
+              <div className="truncate font-medium text-slate-800">{row.original.name}</div>
+              {designs.length > 0 && <div className="text-[11px] text-slate-400">{designs.length} {t("ลาย", designs.length === 1 ? "design" : "designs")}</div>}
+            </div>
+          </div>
+        );
+      },
     },
     {
       id: "print_type", header: t("แผ่น", "Sheet"), size: 150,
@@ -104,7 +117,7 @@ export function NestingListView() {
       id: "updated_at", accessorKey: "updated_at", header: t("แก้ล่าสุด", "Last edited"), size: 150,
       cell: ({ row }) => <span className="text-slate-500">{new Date(row.original.updated_at).toLocaleString(lang === "en" ? "en-GB" : "th-TH", { dateStyle: "medium", timeStyle: "short" })}</span>,
     },
-  ], [t, lang]);
+  ], [t, lang, helperReady]);
 
   const confirmDelete = async () => {
     if (!delTarget) return;

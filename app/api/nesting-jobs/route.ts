@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { urlFor } from "@/app/api/assets/shared";
 import {
   SELECT, actorOf, cleanItems, cleanName, cleanResult, cleanSettings, cleanStatus, cleanUuid, toJob,
 } from "./shared";
@@ -25,7 +26,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (search) q = q.ilike("name", `%${search}%`);
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-  return NextResponse.json({ data: (data ?? []).map((r) => toJob(r as Record<string, unknown>)), error: null });
+  const jobs = (data ?? []).map((r) => toJob(r as Record<string, unknown>));
+
+  // รูปลายจากคลัง (รูปจิ๋วหน้าชื่องาน) — ดึงรวดเดียวทุกงาน แบ่งชุดละ 200 ไม่ให้ลิงก์ยาวเกิน
+  const ids = [...new Set(jobs.flatMap((j) => j.items.map((i) => i.asset_id).filter((x): x is string => !!x)))];
+  const urls: Record<string, string> = {};
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: rows } = await admin.from("assets").select("id, r2_key").in("id", ids.slice(i, i + 200));
+    for (const a of rows ?? []) if (a.r2_key) urls[a.id as string] = urlFor(a.r2_key as string);
+  }
+  const withThumbs = jobs.map((j) => ({
+    ...j, thumbs: Object.fromEntries(j.items.flatMap((i) => (i.asset_id && urls[i.asset_id] ? [[i.asset_id, urls[i.asset_id]]] : []))),
+  }));
+  return NextResponse.json({ data: withThumbs, error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
