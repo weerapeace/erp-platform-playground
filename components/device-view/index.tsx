@@ -287,6 +287,7 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
                 1. สแกน QR → เปิดในเบราว์เซอร์{DEVICE_LABEL[layout]}<br />
                 2. กดปุ่ม <b>📲 ติดตั้งแอป</b> ที่หัวแอป<br />
                 &nbsp;&nbsp;&nbsp;(iPhone/iPad: ปุ่มแชร์ → &ldquo;เพิ่มไปยังหน้าจอโฮม&rdquo;)<br />
+                &nbsp;&nbsp;&nbsp;(มือถือ Samsung: ติดตั้งผ่าน <b>Chrome</b> — Samsung Internet จะโดน Google เตือนว่า &ldquo;Android เวอร์ชันเก่า&rdquo;)<br />
                 3. ไอคอนแอปโผล่บนหน้าจอ เปิดแล้วมาหน้านี้ได้เลย
               </div>
             </>

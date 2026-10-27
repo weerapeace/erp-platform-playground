@@ -15,7 +15,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
-import { IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, usePwaInstall } from "@/components/pwa-install-button";
+import { IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INSTALL_HINT, openInChrome, usePwaInstall } from "@/components/pwa-install-button";
 import { relTime } from "@/components/notification-bell";
 import { isStandalone, useWebPush } from "@/components/web-push";
 import { useViewportLayout } from "@/components/device-view";
@@ -413,6 +413,7 @@ function Settings({ push, onBack }: { push: PushApi; onBack: () => void }) {
             <p className="text-xs text-slate-500 mb-2">เปิดได้จากไอคอนเหมือนแอปทั่วไป ไม่ต้องพิมพ์ที่อยู่เว็บ</p>
             <button onClick={async () => {
               const r = await pwa.install();
+              if (r === "samsung") { toast.info(SAMSUNG_INSTALL_HINT); openInChrome(); return; }
               if (r === "ios") toast.info(IOS_INSTALL_HINT);
               else if (r === "unsupported") toast.info(UNSUPPORTED_INSTALL_HINT);
             }} className="h-10 px-4 rounded-lg border border-blue-200 text-blue-700 text-sm font-medium">📲 ติดตั้งแอป “แจ้งเตือน”</button>

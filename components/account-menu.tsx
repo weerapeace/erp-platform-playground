@@ -14,7 +14,7 @@ import { SecurityDevices } from "@/components/security-devices";
 import { ERPModal } from "@/components/modal";
 import { getTheme, setTheme } from "@/lib/theme";
 import { DeviceModeToggle, DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, type DeviceMode, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
-import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT } from "@/components/pwa-install-button";
+import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INSTALL_HINT, openInChrome } from "@/components/pwa-install-button";
 import { WorkPopupFloatToggle } from "@/components/work-popup/float";
 
 /** มุมมองอุปกรณ์ (ส่งมาจากเชลล์แอปเดี่ยว) — เลือกดูแบบแท็บเล็ต/มือถือบนจอนี้ + QR เปิด/ติดตั้งบนเครื่องจริง */
@@ -94,7 +94,7 @@ export function AccountMenu({ onDark = false, device }: { onDark?: boolean; devi
                 <DeviceModeToggle mode={device.mode} viewport={device.viewport} onChange={(m) => { device.onChange(m); setOpen(false); }} className="w-full [&>button]:flex-1" />
                 {/* ติดตั้งแอปบนเครื่องนี้ — Android/Chrome เด้งกล่องติดตั้ง · iPad/iPhone บอกวิธี แชร์ → เพิ่มไปหน้าจอโฮม */}
                 <button type="button"
-                  onClick={async () => { const r = await pwa.install(); setInstallHint(r === "ios" ? IOS_INSTALL_HINT : r === "unsupported" ? UNSUPPORTED_INSTALL_HINT : r === "installed" ? "✓ เปิดในโหมดแอปอยู่แล้ว" : null); }}
+                  onClick={async () => { const r = await pwa.install(); if (r === "samsung") { setInstallHint(SAMSUNG_INSTALL_HINT); openInChrome(); return; } setInstallHint(r === "ios" ? IOS_INSTALL_HINT : r === "unsupported" ? UNSUPPORTED_INSTALL_HINT : r === "installed" ? "✓ เปิดในโหมดแอปอยู่แล้ว" : null); }}
                   className={`mt-1.5 w-full h-8 rounded-md border text-xs font-medium ${pwa.installed ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-violet-200 bg-violet-50 text-violet-800 hover:bg-violet-100"}`}>
                   {pwa.installed ? "✓ ติดตั้งแอปนี้แล้ว (โหมดแอป)" : "📲 ติดตั้งแอปนี้บนเครื่องนี้"}
                 </button>
