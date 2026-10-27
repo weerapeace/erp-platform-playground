@@ -37,6 +37,7 @@ export type Subscription = {
   group_name: string;       // ชื่อกลุ่ม (พิมพ์เอง) — รายการที่ชื่อกลุ่มเหมือนกันจะรวมเป็นการ์ดเดียวบนบอร์ด ("" = ไม่อยู่กลุ่ม)
   members: SubMember[];     // ผู้ใช้หลายคนในแพ็กเดียว (บิลเดียว) — [] = ผู้ใช้คนเดียว ใช้ช่อง account_email/chrome_* บนแถว
   price_mode: PriceMode;    // วิธีคิดราคาเมื่อมีหลายผู้ใช้
+  logo_url: string;         // โลโก้แอป: URL เต็ม (ไอคอนจากเว็บ) หรือ R2 key (อัปเอง) — "" = ใช้ตัวอักษรแรกแทน (แสดงผ่าน AppLogo)
   created_at?: string;
   updated_at?: string;
 };
@@ -273,6 +274,24 @@ export function subStatusLabel(s: Pick<Subscription, "active" | "pending_cancel"
   return "ใช้งาน";
 }
 
+/** สถานะ 5 แบบ (ชุดเดียวกับคอลัมน์บอร์ด) → ค่าที่ต้องตั้ง 3 ช่อง — ใช้ร่วมบอร์ด (ลากการ์ด) + ฟอร์ม (ปุ่มสถานะ) */
+export const SUB_STATUSES: { key: string; label: string; patch: Pick<Subscription, "active" | "pending_cancel" | "want_to_buy"> }[] = [
+  { key: "active", label: "ใช้งาน", patch: { active: true, pending_cancel: false, want_to_buy: false } },
+  { key: "pending_cancel", label: "กำลังยกเลิก", patch: { active: true, pending_cancel: true, want_to_buy: false } },
+  { key: "wishlist", label: "อยากซื้อ", patch: { active: false, pending_cancel: false, want_to_buy: true } },
+  { key: "closed", label: "ปิด", patch: { active: false, pending_cancel: false, want_to_buy: false } },
+  { key: "cancelled", label: "ยกเลิกแล้ว", patch: { active: false, pending_cancel: true, want_to_buy: false } },
+];
+
+/** สีป้ายสถานะ (คีย์ = ป้ายไทยจาก subStatusLabel) */
+export const SUB_STATUS_BADGE: Record<string, string> = {
+  "ใช้งาน": "bg-emerald-50 text-emerald-700",
+  "กำลังยกเลิก": "bg-amber-50 text-amber-700",
+  "อยากซื้อ": "bg-blue-50 text-blue-700",
+  "ปิด": "bg-slate-100 text-slate-500",
+  "ยกเลิกแล้ว": "bg-red-50 text-red-600",
+};
+
 /** ฟอร์แมตราคาตามสกุลเงินของรายการ เช่น "$20.00" / "฿571.38" */
 export function fmtCost(cost: number, currency: Currency): string {
   return `${CURRENCY_SYMBOL[currency] ?? ""}${Number(cost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -307,6 +326,7 @@ export function toSubRow(input: Partial<SubInput>): Record<string, unknown> {
   if (input.owner_id !== undefined) row.owner_id = input.owner_id || null;
   if (input.streaming !== undefined) row.streaming = Array.isArray(input.streaming) ? input.streaming.filter(Boolean) : [];
   if (input.group_name !== undefined) row.group_name = (input.group_name ?? "").trim();
+  if (input.logo_url !== undefined) row.logo_url = (input.logo_url ?? "").trim();
   if (input.price_mode !== undefined) row.price_mode = input.price_mode === "per_member" ? "per_member" : "total";
   if (input.members !== undefined) {
     const members = normalizeMembers(input.members);

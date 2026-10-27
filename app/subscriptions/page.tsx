@@ -29,7 +29,7 @@ import { WishlistView } from "./wishlist-view";
 import { AllInvoicesView } from "./all-invoices-view";
 import { DownloadInvoiceModal } from "./download-invoice-modal";
 import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "./subscriptions-board";
-import { MembersChip } from "./members-chip";
+import { SubNameCell } from "./sub-name-cell";
 
 type ViewMode = "list" | "inuse" | "onetime" | "calendar" | "wishlist" | "invoices" | "board";
 
@@ -243,18 +243,8 @@ export default function SubscriptionsPage() {
   // ── columns ────────────────────────────────────────────────
   const columns = useMemo<ColumnDef<Subscription>[]>(() => [
     {
-      id: "name", accessorKey: "name", header: "ชื่อรายการ", size: 220,
-      cell: ({ row }) => {
-        const s = row.original;
-        return (
-          <div className="min-w-0">
-            <div className="text-sm font-medium text-slate-800 truncate">{s.name}</div>
-            {s.members?.length >= 2
-              ? <MembersChip sub={s} />
-              : s.account_email && <div className="text-[11px] text-slate-400 truncate">{s.account_email}</div>}
-          </div>
-        );
-      },
+      id: "name", accessorKey: "name", header: "ชื่อรายการ", size: 250,
+      cell: ({ row }) => <SubNameCell sub={row.original} />,
     },
     { id: "card_statement_name", accessorKey: "card_statement_name", header: "ชื่อในบิลบัตร", size: 180,
       cell: ({ getValue }) => { const v = getValue() as string; return v ? <span className="text-xs text-slate-600">{v}</span> : <span className="text-xs text-slate-300">—</span>; } },

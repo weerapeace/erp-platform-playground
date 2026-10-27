@@ -26,7 +26,7 @@ import { DownloadInvoiceModal } from "../download-invoice-modal";
 import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "../subscriptions-board";
 import { PersonalShareModal, type ShareUser } from "../personal-share-modal";
 import { StreamingView } from "./streaming-view";
-import { MembersChip } from "../members-chip";
+import { SubNameCell } from "../sub-name-cell";
 
 type SharedSub = Subscription & { owner_label?: string };
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
@@ -182,18 +182,8 @@ export default function PersonalSubscriptionsPage() {
   const baseColumns = useCallback((opts: { owner?: boolean; actions?: boolean; canEdit?: boolean; streaming?: boolean }): ColumnDef<SharedSub>[] => {
     const cols: ColumnDef<SharedSub>[] = [
       {
-        id: "name", accessorKey: "name", header: "ชื่อรายการ", size: 220,
-        cell: ({ row }) => {
-          const s = row.original;
-          return (
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-slate-800 truncate">{s.name}</div>
-              {s.members?.length >= 2
-                ? <MembersChip sub={s} />
-                : s.account_email && <div className="text-[11px] text-slate-400 truncate">{s.account_email}</div>}
-            </div>
-          );
-        },
+        id: "name", accessorKey: "name", header: "ชื่อรายการ", size: 250,
+        cell: ({ row }) => <SubNameCell sub={row.original} />,
       },
     ];
     if (opts.owner) {

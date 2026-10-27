@@ -12,8 +12,9 @@ import {
 } from "@dnd-kit/core";
 import {
   type Subscription, type SubSettings, type SubType, type BillingCycle,
-  CYCLE_LABEL, subStatusLabel, monthlyTHB, fmtBaht, nextRenewal, daysUntil,
+  CYCLE_LABEL, SUB_STATUSES, SUB_STATUS_BADGE, subStatusLabel, monthlyTHB, fmtBaht, nextRenewal, daysUntil,
 } from "@/lib/subscriptions";
+import { AppLogo } from "@/components/logo-picker";
 import { MembersChip } from "./members-chip";
 
 export type BoardGroupBy = "status" | "category" | "type" | "cycle";
@@ -44,21 +45,7 @@ const CYCLE_COLS: BoardCol[] = [
 ];
 const CATEGORY_DOTS = ["bg-purple-400", "bg-teal-400", "bg-amber-400", "bg-blue-400", "bg-pink-400", "bg-green-400", "bg-orange-400", "bg-rose-400"];
 
-const STATUS_PATCH: Record<string, Partial<Subscription>> = {
-  active: { active: true, pending_cancel: false, want_to_buy: false },
-  pending_cancel: { active: true, pending_cancel: true, want_to_buy: false },
-  wishlist: { active: false, pending_cancel: false, want_to_buy: true },
-  closed: { active: false, pending_cancel: false, want_to_buy: false },
-  cancelled: { active: false, pending_cancel: true, want_to_buy: false },
-};
-
-const STATUS_BADGE: Record<string, string> = {
-  "ใช้งาน": "bg-emerald-50 text-emerald-700",
-  "กำลังยกเลิก": "bg-amber-50 text-amber-700",
-  "อยากซื้อ": "bg-blue-50 text-blue-700",
-  "ปิด": "bg-slate-100 text-slate-500",
-  "ยกเลิกแล้ว": "bg-red-50 text-red-600",
-};
+const STATUS_PATCH: Record<string, Partial<Subscription>> = Object.fromEntries(SUB_STATUSES.map((s) => [s.key, s.patch]));
 
 // รายการนี้อยู่คอลัมน์ไหน (ตามการจัดกลุ่ม)
 export function boardKeyOf(groupBy: BoardGroupBy, sub: Subscription): string {
@@ -98,20 +85,25 @@ function SubCardBody({ sub, settings, dragging }: { sub: Subscription; settings:
   const soon = d !== null && d >= 0 && d <= 30;
   return (
     <div className={`bg-white rounded-lg border p-3 ${dragging ? "shadow-xl ring-2 ring-indigo-300 rotate-1 border-indigo-200" : "border-slate-200 shadow-sm hover:border-indigo-300 hover:shadow"}`}>
-      <div className="flex items-start justify-between gap-2">
-        <span className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{sub.name}</span>
-        {sub.type === "personal" && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-pink-50 text-pink-600">ส่วนตัว</span>}
-      </div>
-      {sub.members?.length >= 2 ? (
-        <div className="mt-0.5 flex min-w-0"><MembersChip sub={sub} /></div>
-      ) : (sub.account_email || sub.category) && (
-        <div className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
-          {sub.account_email || sub.category}{sub.billing_cycle !== "monthly" ? ` · ${CYCLE_LABEL[sub.billing_cycle]}` : ""}
+      <div className="flex items-center gap-2.5">
+        <AppLogo src={sub.logo_url} name={sub.name} size={34} />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <span className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{sub.name}</span>
+            {sub.type === "personal" && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-pink-50 text-pink-600">ส่วนตัว</span>}
+          </div>
+          {sub.members?.length >= 2 ? (
+            <div className="mt-0.5 flex min-w-0"><MembersChip sub={sub} /></div>
+          ) : (sub.account_email || sub.category) && (
+            <div className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
+              {sub.account_email || sub.category}{sub.billing_cycle !== "monthly" ? ` · ${CYCLE_LABEL[sub.billing_cycle]}` : ""}
+            </div>
+          )}
         </div>
-      )}
+      </div>
       <div className="flex items-center justify-between gap-2 mt-2">
         <span className="text-sm font-semibold text-slate-800 tabular-nums">{fmtBaht(monthly)}<span className="text-[11px] text-slate-400 font-normal">/ด.</span></span>
-        <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_BADGE[status] ?? "bg-slate-100 text-slate-500"}`}>{status}</span>
+        <span className={`text-[10px] px-2 py-0.5 rounded-full ${SUB_STATUS_BADGE[status] ?? "bg-slate-100 text-slate-500"}`}>{status}</span>
       </div>
       {soon && <div className="text-[10px] text-amber-600 mt-1.5">⏰ ต่ออายุอีก {d} วัน</div>}
     </div>
@@ -154,6 +146,7 @@ function GroupCard({ name, members, settings, onEdit, onToggleActive }: {
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className="text-slate-400 text-xs shrink-0">{open ? "▾" : "▸"}</span>
+            <AppLogo src={members.find((m) => m.logo_url)?.logo_url} name={name} size={22} />
             <span className="text-sm font-medium text-slate-800 leading-snug truncate">{name}</span>
             <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">กลุ่ม {members.length}</span>
           </div>
