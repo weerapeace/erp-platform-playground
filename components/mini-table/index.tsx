@@ -138,6 +138,9 @@ export type MiniTableProps<T> = {
   onWidthsChange?: (w: Record<string, number>) => void;
   /** พอดีเนื้อหา — คอลัมน์ที่ตั้งยืด (fr) ใช้ความกว้างขั้นต่ำแทน ไม่ยืดกินที่ว่างทั้งจอ */
   fitContent?: boolean;
+  /** ตารางยาว (หลายร้อยแถว): ไม่วาดแถวที่อยู่นอกจอ (CSS content-visibility) — เลื่อนลื่นขึ้นมาก
+   *  ⚠️ มีผลเฉพาะ fill / stickyCols (ต้องวัดความกว้างแถวได้) · ในช่องห้ามมี popup แบบ absolute/fixed ที่ไม่ผ่าน portal (จะโดนตัดขอบแถว) */
+  lazyRows?: boolean;
 };
 
 type Dir = "asc" | "desc";
@@ -151,7 +154,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
     dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, maxHeightClass = "", className = "", footnote,
-    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid, widths: widthsCtl, onWidthsChange, fitContent,
+    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid, widths: widthsCtl, onWidthsChange, fitContent, lazyRows,
   } = props;
   // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
   const t = useT();
@@ -253,7 +256,8 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   // ช่องที่ล็อก: sticky + พื้นทึบ + เงาสีพื้นถมขอบซ้าย/ช่องว่างขวา (ไม่งั้นเห็นเนื้อหาลอดใต้) + เส้นแบ่งหลังช่องสุดท้าย
   //   kind "cell"/"check" = ช่องในแถว → ยืดเต็มความสูงแถว (เดิมทึบแค่ตรงกลาง → ของคอลัมน์อื่นลอดบน/ล่าง ดูเป็นการ์ดลอย) + มุมเหลี่ยม
   const lockStyle = (i: number, bg: string, kind?: "cell" | "check"): CSSProperties | undefined => {
-    if (i >= lockN || lockLefts[i] == null) return undefined;
+    // ตารางไม่ล้นจอ (ไม่มีเลื่อนซ้าย-ขวา) = ไม่ต้องล็อก — ไม่สร้างช่อง sticky หลายร้อยชิ้นให้เบราว์เซอร์แบกตอนเลื่อนขึ้นลง
+    if (i >= lockN || lockLefts[i] == null || !rowMinW) return undefined;
     const sh = [`8px 0 0 0 ${bg}`];
     if (i === 0) sh.unshift(`-12px 0 0 0 ${bg}`);
     if (i === lockN - 1) { sh[sh.length - 1] = `7px 0 0 0 ${bg}`; sh.push("8px 0 0 0 #e2e8f0"); }   // เส้นแบ่งอยู่ในช่องว่าง gap-2 (8px) พอดี ไม่ล้นเข้าคอลัมน์ถัดไป
@@ -319,6 +323,8 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const colTrack = (c: MiniColumn<T>) => (resizable && widths[c.key] != null ? `${widths[c.key]}px` : fitContent ? fitTrack(c.width ?? "1fr") : (c.width ?? "1fr"));
   const tmpl = (selectable ? "2.25rem " : "") + columns.map(colTrack).join(" ");
   const padY = touch ? "py-3" : dense ? "py-1.5" : "py-2";
+  // แถวนอกจอ: เบราว์เซอร์ข้ามการจัดวาง/วาด · สูงประมาณไว้ก่อน แล้วจำความสูงจริงหลังเคยเห็น (auto) — แถบเลื่อนไม่กระโดด
+  const lazyStyle: CSSProperties | undefined = lazyRows && measureOn ? { contentVisibility: "auto", containIntrinsicSize: `auto ${touch ? 72 : dense ? 44 : 56}px` } : undefined;
   const boxCls = touch ? "w-5 h-5 accent-rose-600" : "w-4 h-4 accent-rose-600";
   const cards = layout === "cards" && !!renderCard;
   const alignCls = (a?: string) => (a === "right" ? "text-right justify-end" : a === "center" ? "text-center justify-center" : "");
@@ -360,7 +366,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     const line = (
       <div key={open ? undefined : k} onClick={onRowClick ? () => onRowClick(r) : undefined}
         className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : open ? "bg-blue-50/30" : zebra && idx % 2 ? "bg-slate-50/30" : "bg-white"} ${onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
-        style={{ gridTemplateColumns: tmpl, ...rowW }}>
+        style={{ gridTemplateColumns: tmpl, ...rowW, ...lazyStyle }}>
         {selectable && (
           <span className="flex justify-center" onClick={(e) => e.stopPropagation()} style={lockStyle(0, lockBg, "check")}>
             <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />

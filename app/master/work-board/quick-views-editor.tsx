@@ -6,6 +6,7 @@
  * readOnly = ดูได้อย่างเดียว (มุมมองของทีม สำหรับคนที่ไม่ใช่แอดมิน)
  */
 import { useState } from "react";
+import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import {
   QV_CONDS, QV_SORTS, QV_GROUPS, QV_CARD_FIELDS, QV_ICONS, qvSummary,
   type QuickView, type QvCond, type QvSort, type QvDir, type QvGroup,
@@ -16,16 +17,25 @@ export type QvBrand = { name: string; color: string | null; oem: boolean; n: num
 const btn = (on: boolean) => `h-7 px-2.5 text-xs rounded-md border ${on ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"} disabled:opacity-60`;
 const label = "mb-1 text-[11px] font-medium text-slate-500";
 
-export function QuickViewForm({ view: sel, onChange, isAdmin, brands, colOptions, readOnly = false }: {
+export function QuickViewForm({ view: sel, onChange, isAdmin, brands, colOptions, defaultCols, readOnly = false }: {
   view: QuickView;
   onChange: (patch: Partial<QuickView>) => void;
   isAdmin: boolean;
   brands: QvBrand[];
   colOptions: [string, string][];   // คอลัมน์ตารางรอจ่าย [key, ชื่อ]
+  defaultCols?: string[];           // คอลัมน์ที่ตารางปกติโชว์อยู่ตอนนี้ (ตั้งต้นตอนกด "กำหนดเฉพาะมุมมองนี้")
   readOnly?: boolean;
 }) {
   const [iconOpen, setIconOpen] = useState(false);
   const update = onChange;
+  // ลำดับคอลัมน์ของมุมมอง (ซ้าย → ขวา ตามที่ตารางวาด) — ลาก ⠿ หรือกด ‹ ›
+  const dragCols = useDragReorder((from, to) => { if (sel.cols) update({ cols: moveItem(sel.cols, from, to) }); }, { group: "qv-cols" });
+  const colLabel = (k: string) => colOptions.find(([x]) => x === k)?.[1] ?? k;
+  const startCols = () => {
+    const known = new Set(colOptions.map(([k]) => k));
+    const base = (defaultCols ?? []).filter((k) => known.has(k));
+    return base.length ? base : colOptions.slice(0, 6).map(([k]) => k);
+  };
   const toggleIn = <T,>(arr: T[], x: T) => (arr.includes(x) ? arr.filter((a) => a !== x) : [...arr, x]);
   const sortSel = (k: "sort1" | "sort2", d: "dir1" | "dir2") => (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -122,19 +132,43 @@ export function QuickViewForm({ view: sel, onChange, isAdmin, brands, colOptions
             <div className="flex flex-wrap items-center gap-1.5">
               <span className={label + " mb-0"}>คอลัมน์</span>
               <button type="button" onClick={() => update({ cols: null })} className={btn(sel.cols === null)}>ใช้คอลัมน์ปกติ</button>
-              <button type="button" onClick={() => update({ cols: sel.cols ?? colOptions.slice(0, 6).map(([k]) => k) })} className={btn(sel.cols !== null)}>กำหนดเฉพาะมุมมองนี้</button>
+              <button type="button" onClick={() => update({ cols: sel.cols ?? startCols() })} className={btn(sel.cols !== null)}>กำหนดเฉพาะมุมมองนี้</button>
             </div>
-            {sel.cols && (
-              <div className="flex flex-wrap gap-x-3">
-                {colOptions.map(([k, l]) => (
-                  <label key={k} className="flex cursor-pointer items-center gap-1.5 py-0.5 text-[13px] text-slate-700">
-                    <input type="checkbox" checked={sel.cols!.includes(k)} disabled={k === "prod"}
-                      onChange={() => update({ cols: colOptions.map(([x]) => x).filter((x) => (x === k ? !sel.cols!.includes(k) : sel.cols!.includes(x))) })}
-                      className="h-4 w-4 accent-blue-600" />{l}
-                  </label>
-                ))}
-              </div>
-            )}
+            {sel.cols && (() => {
+              const cols = sel.cols;
+              const rest = colOptions.filter(([k]) => !cols.includes(k));
+              const arrow = "h-6 w-5 rounded text-xs hover:bg-blue-100 disabled:opacity-30";
+              return (
+                <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-2">
+                  <div className="text-[11px] text-slate-500">ลำดับในตาราง (ซ้าย → ขวา) — ลาก ⠿ หรือกด ‹ › เพื่อสลับตำแหน่ง · ✕ = เอาออก</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {cols.map((k, i) => (
+                      <span key={k} {...dragCols.rowProps(i)}
+                        className={`inline-flex h-8 items-center gap-0.5 rounded-lg border border-blue-200 bg-white pl-1 pr-1 text-[13px] text-slate-800 ${dragCols.rowCls(i)}`}>
+                        {!readOnly && <DragHandle {...dragCols.handleProps(i)} />}
+                        <span className="mr-0.5 text-[10px] text-blue-400">{i + 1}</span>
+                        <span className="mr-0.5 whitespace-nowrap">{colLabel(k)}</span>
+                        <button type="button" onClick={() => update({ cols: moveItem(cols, i, i - 1) })} disabled={i === 0} className={arrow} title="ย้ายไปซ้าย">‹</button>
+                        <button type="button" onClick={() => update({ cols: moveItem(cols, i, i + 1) })} disabled={i === cols.length - 1} className={arrow} title="ย้ายไปขวา">›</button>
+                        {k !== "prod" && (
+                          <button type="button" onClick={() => update({ cols: cols.filter((x) => x !== k) })} title="เอาคอลัมน์นี้ออก"
+                            className="h-6 w-5 rounded text-xs text-slate-400 hover:bg-rose-50 hover:text-rose-600">✕</button>
+                        )}
+                      </span>
+                    ))}
+                  </div>
+                  {rest.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="mr-1 text-[11px] text-slate-500">เพิ่ม (ต่อท้าย):</span>
+                      {rest.map(([k, l]) => (
+                        <button key={k} type="button" onClick={() => update({ cols: [...cols, k] })}
+                          className="h-7 rounded-full border border-dashed border-slate-300 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50">＋ {l}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
             <div className="flex flex-wrap items-center gap-1.5">
               <span className={label + " mb-0"}>ความกว้าง</span>
               <button type="button" onClick={() => update({ fit: false })} className={btn(!sel.fit)}>ยืดเต็มจอ</button>

@@ -26,6 +26,11 @@
 | `title`, `actions`, `footnote`, `emptyText`, `maxHeightClass` | ส่วนหัว/ท้าย/สถานะว่าง |
 | `resizable` | เปิดให้ **ลากขอบหัวคอลัมน์ปรับความกว้าง** ได้ (opt-in — ไม่ใส่ = เหมือนเดิม) · คอลัมน์ที่ลากแล้วกลายเป็น px คอลัมน์อื่นยังแบ่งพื้นที่เหลือ |
 | `storageKey` | ใส่คู่กับ `resizable` เพื่อ **จำความกว้างไว้ในเครื่อง** (localStorage) · มีลิงก์ "รีเซ็ตความกว้าง" ในแถบเครื่องมือ |
+| `widths` + `onWidthsChange` | คุมความกว้างจากภายนอก (เช่น เก็บในมุมมอง) — ไม่ใช้ localStorage · ระหว่างลากเก็บในตารางเอง ปล่อยเมาส์ค่อยส่งออก |
+| `fitContent` | พอดีเนื้อหา — คอลัมน์ `fr` ใช้ความกว้างขั้นต่ำ ไม่ยืดเต็มจอ |
+| `fill` + `stickyCols` | เต็มกล่องแม่ เลื่อนในตัว หัวตารางติดบน + ล็อกคอลัมน์ซ้าย — **ล็อกจริงเฉพาะตอนตารางล้นจอ** (ไม่ล้น = ไม่สร้างช่อง sticky หลายร้อยชิ้น) |
+| `lazyRows` | ตารางยาวหลายร้อยแถว: แถวนอกจอไม่ถูกวาด (CSS `content-visibility:auto`) → เลื่อนลื่น · ใช้คู่ `fill`/`stickyCols` · ⚠️ ในช่องห้ามมี popup absolute/fixed ที่ไม่ผ่าน portal (โดนตัด) — HoverImage/FloatingDropdown/ERPModal ผ่าน portal แล้วใช้ได้ |
+| `onScrollTop(top, el)` | เลื่อนในตาราง (fill) — ไว้ซ่อน/โชว์ของเหนือตาราง · ใช้ ref/CSS ไม่ใช่ state (กันทั้งหน้าวาดใหม่ระหว่างเลื่อน) |
 
 คอลัมน์: `{ key, header, cell:(row)=>node, align?, width?, sortValue?, sortLabel? }`
 `width` = grid track (`"6rem"`, `"1fr"`, `"1.5fr"`).

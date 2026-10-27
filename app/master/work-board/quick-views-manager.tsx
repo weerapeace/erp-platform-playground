@@ -23,7 +23,7 @@ const copyView = (v: QuickView, p: Partial<QuickView> = {}): QuickView => ({
 function stripId(v: QuickView): Omit<QuickView, "id"> { const { id: _id, ...rest } = JSON.parse(JSON.stringify(v)) as QuickView; void _id; return rest; }
 const audText = (v: TeamView) => (v.aud === "all" ? "ทุกคน" : v.aud === "roles" ? (v.roles.length ? v.roles.map(roleLabel).join(", ") : "ยังไม่เลือก") : `${v.users.length} คน`);
 
-export function QuickViewsManager({ open, onClose, isAdmin, team, mine, onSave, brands, colOptions, focus, newMine }: {
+export function QuickViewsManager({ open, onClose, isAdmin, team, mine, onSave, brands, colOptions, defaultCols, focus, newMine }: {
   open: boolean;
   onClose: () => void;
   isAdmin: boolean;
@@ -32,6 +32,7 @@ export function QuickViewsManager({ open, onClose, isAdmin, team, mine, onSave, 
   onSave: (next: { team?: TeamView[]; mine?: QvMine }) => Promise<boolean>;
   brands: QvBrand[];
   colOptions: [string, string][];
+  defaultCols?: string[];           // คอลัมน์ที่ตารางปกติโชว์อยู่ (ตั้งต้นตอนมุมมองกำหนดคอลัมน์เอง)
   focus?: Sel | null;               // เปิดมาที่มุมมองนี้
   newMine?: QuickView | null;       // มาจาก "＋ บันทึกเป็นมุมมอง" — เพิ่มเป็นของฉันในร่าง (ยังไม่บันทึก)
 }) {
@@ -191,7 +192,7 @@ export function QuickViewsManager({ open, onClose, isAdmin, team, mine, onSave, 
               </div>
             )}
 
-            <QuickViewForm view={cur} onChange={patchCur} isAdmin={isAdmin} brands={brands} colOptions={colOptions} readOnly={!canEditCur} />
+            <QuickViewForm view={cur} onChange={patchCur} isAdmin={isAdmin} brands={brands} colOptions={colOptions} defaultCols={defaultCols} readOnly={!canEditCur} />
           </>}
         </div>
       </div>

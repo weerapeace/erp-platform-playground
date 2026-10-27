@@ -4248,7 +4248,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
         layout={dev === "ipadP" || view.layout === "cards" ? "cards" : "table"} renderCard={dev === "ipadP" ? renderPendCard : renderViewCard}
         cardGrid={dev !== "ipadP" && view.layout === "cards" ? `repeat(auto-fill,minmax(${QV_CARD_MIN[view.size]},1fr))` : undefined}
-        fill stickyCols={dev === "ipadP" || view.layout === "cards" ? 0 : 2} inlineActions onScrollTop={onTableScroll}
+        fill stickyCols={dev === "ipadP" || view.layout === "cards" ? 0 : 2} inlineActions lazyRows onScrollTop={onTableScroll}
         resizable={dev !== "ipadP" && view.layout === "table"} widths={effWidths} onWidthsChange={setWidthDraft} fitContent={view.fit}
         countUnit="ใบ"
         selectable={dc.check} selected={sel} onSelectedChange={setSel}
@@ -4425,7 +4425,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       <MiniTable
         key={`wo-${woGroup}`}
         rows={wosShown} rowKey={(w) => w.id} columns={woColPrefs.visible}
-        fill stickyCols={1} inlineActions onScrollTop={onTableScroll}
+        fill stickyCols={1} inlineActions lazyRows onScrollTop={onTableScroll}
         touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
         onRowClick={(w) => { if (woSel.size > 0) setWoSel((prev) => { const n = new Set(prev); n.has(w.id) ? n.delete(w.id) : n.add(w.id); return n; }); else onOpenWO(w); }}
         countUnit="ใบ"
@@ -4451,7 +4451,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         <div className="contents [[data-top=hidden]_&]:hidden">{SumRow({ cards: qcCards, keys: qcCardKeys })}</div>
         <MiniTable
           rows={qQueue} rowKey={(q) => q.wo_id}
-          fill stickyCols={1} inlineActions onScrollTop={onTableScroll}
+          fill stickyCols={1} inlineActions lazyRows onScrollTop={onTableScroll}
           touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
           columns={qcColPrefs.visible}
           countUnit="ใบ"
@@ -4469,7 +4469,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       </div>)}
 
       <QuickViewsManager open={mgr.open} onClose={() => setMgr({ open: false })} isAdmin={canSeeMoney}
-        team={qvStore.team} mine={qvStore.mine} onSave={saveViews} brands={qvBrands} colOptions={panelColOptions}
+        team={qvStore.team} mine={qvStore.mine} onSave={saveViews} brands={qvBrands} colOptions={panelColOptions} defaultCols={pendColPrefs.visible.map((c) => c.key)}
         focus={{ kind: isMineView ? "mine" : "team", id: view.id }} newMine={mgr.newMine ?? null} />
       {/* แถบคำสั่งลอยด้านล่าง (ของกลาง BulkActionBar) — โผล่เมื่อติ๊กเลือกหลายใบ แทนปุ่มกระจายบนหัวตาราง */}
       <BulkActionBar count={tab === "pend" ? selMoNos.length : 0} unit="ใบ" onClear={() => setSel(new Set())} spacer={false}>
