@@ -5,16 +5,18 @@
  * 1) ลากทั้งโฟลเดอร์/หลายไฟล์ (หรือกดเลือก) → จับคู่ชื่อไฟล์กับรหัสรุ่น/สี (ของกลาง lib/website-image-match)
  *      JEAN08_1.jpg = รูปบนเว็บ · JEAN08-01_2.jpg = รูปสี · JEAN08_hero(.jpg / _m) = Hero คอม/มือถือ · โฟลเดอร์ชื่อรหัสก็ได้
  *      🎬 วิดีโอ (mp4/webm/mov) = Hero เสมอ: JEAN08.mp4 = คอม · JEAN08_m.mp4 = มือถือ (≤ 200 MB · ไฟล์ > 4 MB ส่งตรงเข้า R2)
- * 2) ตรวจก่อนลง: แยกตามสินค้า → ช่อง → รูปใหม่ตามลำดับ · ไฟล์ที่ต้องดู (ไม่พบรหัส/สีไม่มี/เกินเพดาน/Hero ซ้ำ/ข้ามเอง) เลือกช่องเองได้
+ * 2) ตรวจก่อนลง: แยกตามสินค้า → ช่อง (บอกรหัส SKU + ร้านที่ลง) → รูปใหม่ตามลำดับ · ไฟล์ที่ต้องดู (ไม่พบรหัส/สีไม่มี/เกินเพดาน/Hero ซ้ำ/ข้ามเอง) เลือกช่องเองได้
+ *    ↕ ลากรูปสลับลำดับในแถว (หรือ ‹ ›) · ✎ ย้ายทั้งแถวไปสินค้า/ช่องอื่น · 🔁 เปลี่ยนสินค้าทั้งรุ่น (อ่านชื่อผิด — สีจับคู่ตามเลขสีเดิม)
  *    ค่าเริ่มต้น = เพิ่มต่อท้าย (ของเดิมอยู่ครบ) · แทนที่ = เฉพาะช่องที่มีรูปใหม่ · เกิน 20 สินค้า + แทนที่ = พิมพ์ CONFIRM
  * 3) กดลงรูป → รูปย่อ ≤ 2000px (uploadResizedImage) · วิดีโอใช้ตัวอัปกลาง uploadMediaFile (ตัวเดียวกับช่อง Hero ทีละตัว) → R2 (ทีละ 3 ไฟล์ · ไฟล์ที่ไม่ได้ลงจะไม่อัป) → POST /api/website/listings/images (รวมกับรูปล่าสุดใน DB + audit + ล้างแคชเว็บ)
- * ของกลาง: ERPModal · useFileDrop(folders) · uploadResizedImage · uploadMediaFile · toast
+ * ของกลาง: ERPModal · useFileDrop(folders) · useDragReorder · uploadResizedImage · uploadMediaFile · toast
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { useFileDrop, FileDropHint, filePathOf } from "@/components/file-drop";
+import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { uploadResizedImage } from "@/components/image-attach";
 import { uploadMediaFile, MediaUploadError } from "@/lib/media-upload";
 import { BIG_VIDEO_MAX_BYTES, fileMb } from "@/lib/media-upload-limits";
@@ -46,6 +48,8 @@ type Item = {
   invalid?: string;
   /** เลือกช่องเอง (ทับผลจับคู่) · "skip" = ข้ามไฟล์นี้ */
   manual?: { parentId: string; target: ImageTarget | null } | "skip";
+  /** ↕ ลำดับที่ลากสลับเอง (ทับเลขท้ายชื่อไฟล์) */
+  pos?: number;
 };
 type Phase = "pick" | "uploading" | "saving" | "done";
 type Result = { uploaded: number; uploadFailed: { name: string; why: string }[]; updated: number; failed: number; skippedShops: number };
@@ -179,9 +183,10 @@ export function WebsiteImageMassUpload({
     const ins = items.map((it) => {
       const m = it.manual;
       const base = { video: it.video, invalid: it.invalid };
-      if (m === "skip") return { ...base, id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order: it.match.order, skip: true };
-      if (m) return { ...base, id: it.id, name: it.path, parentId: m.parentId, target: m.target, order: it.match.order };
-      return { ...base, id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order: it.match.order };
+      const order = it.pos ?? it.match.order;
+      if (m === "skip") return { ...base, id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order, skip: true };
+      if (m) return { ...base, id: it.id, name: it.path, parentId: m.parentId, target: m.target, order };
+      return { ...base, id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order };
     });
     return planImageUpload(ins, parents, mode);
   }, [items, parents, mode]);
@@ -202,6 +207,68 @@ export function WebsiteImageMassUpload({
   }, [catalog, touched, byId]);
 
   const setManual = (id: string, manual: Item["manual"]) => setItems((xs) => xs.map((it) => (it.id === id ? { ...it, manual } : it)));
+  // ↕ สลับลำดับในช่องเดียวกัน (รูปแรก = รูปหลักของช่องนั้นบนเว็บ) — ทับเลขท้ายชื่อไฟล์
+  const reorderDest = (ids: string[], from: number, to: number) => {
+    const next = moveItem(ids, from, to);
+    setItems((xs) => xs.map((it) => { const i = next.indexOf(it.id); return i >= 0 ? { ...it, pos: i + 1 } : it; }));
+  };
+  // ✎ ระบบอ่านชื่อผิด → ย้ายรูปทั้งแถวไปสินค้า/ช่องที่เลือกเอง
+  const [editDest, setEditDest] = useState<{ key: string; pid: string } | null>(null);
+  // รูปที่ย้ายมา = ต่อท้ายแถวปลายทาง (คงลำดับเดิมของแถวที่ย้าย)
+  const moveFiles = (ids: string[], parentId: string, target: ImageTarget | null) =>
+    setItems((xs) => xs.map((it) => { const i = ids.indexOf(it.id); return i >= 0 ? { ...it, manual: { parentId, target }, pos: 1000 + i } : it; }));
+  // 🔁 เปลี่ยนสินค้าทั้งรุ่น — สีจับคู่ตามเลขสีเดิม (PIX01-02 → PIX04-02) · รุ่นใหม่ไม่มีสีนั้น = ไปรอเลือกช่องในกล่อง "ไฟล์ที่ต้องดู"
+  const changeProduct = (fromPid: string, toPid: string) => {
+    const from = byId.get(fromPid);
+    const to = byId.get(toPid);
+    if (!from || !to) return;
+    const tail = (code: string, base: string) => {
+      const up = code.toUpperCase();
+      const b = base.toUpperCase();
+      return up.startsWith(b) ? up.slice(b.length) : (up.match(/-[^-]+$/)?.[0] ?? up);
+    };
+    const mapSku = (skuId: string) => {
+      const sk = from.skus.find((x) => x.id === skuId);
+      if (!sk) return null;
+      const t = tail(sk.code, from.code);
+      return to.skus.find((x) => tail(x.code, to.code) === t)?.id ?? null;
+    };
+    const moving = new Map(plan.files.filter((pf) => pf.parentId === fromPid && pf.plan !== "skip").map((pf) => [pf.id, pf.target]));
+    let lost = 0;
+    setItems((xs) =>
+      xs.map((it) => {
+        if (!moving.has(it.id)) return it;
+        const t = moving.get(it.id) ?? null;
+        let nt: ImageTarget | null = null;
+        if (t?.kind === "gallery" || t?.kind === "hero") nt = t;
+        else if (t?.kind === "sku") { const sk = mapSku(t.skuId); nt = sk ? { kind: "sku", skuId: sk } : null; }
+        else if (t?.kind === "skuHero") { const sk = mapSku(t.skuId); nt = sk ? { kind: "skuHero", skuId: sk, slot: t.slot } : { kind: "hero", slot: t.slot }; }
+        if (!nt) lost++;
+        return { ...it, manual: { parentId: toPid, target: nt } };
+      })
+    );
+    setEditDest(null);
+    toast.info(`ย้ายรูป ${moving.size} ไฟล์จาก ${from.code} ไป ${to.code} แล้ว${lost ? ` — ${lost} ไฟล์รุ่นใหม่ไม่มีสีเดียวกัน ให้เลือกช่องในกล่อง "ไฟล์ที่ต้องดู"` : ""}`);
+  };
+  /** ชื่อช่องแบบบอกชัด: ลงที่ไหน · SKU อะไร */
+  const destLabel = (t: ImageTarget, p: Parent): { title: string; sub: string } => {
+    const sk = (id: string) => p.skus.find((x) => x.id === id);
+    if (t.kind === "gallery") return { title: "🖼 รูปบนเว็บ (รวมทั้งรุ่น)", sub: `${p.code} · โชว์ตอนลูกค้ายังไม่เลือกสี` };
+    if (t.kind === "sku") { const x = sk(t.skuId); return { title: `🎨 รูปสี · ${x?.code ?? "?"}`, sub: x?.label ?? "" }; }
+    if (t.kind === "hero") return { title: `🎬 Hero ${t.slot === "desktop" ? "คอม" : "มือถือ"}`, sub: `รูปเปิดหน้าสินค้า ${p.code}` };
+    const x = sk(t.skuId);
+    return { title: `🎬 Hero ${t.slot === "desktop" ? "คอม" : "มือถือ"} · ${x?.code ?? "?"}`, sub: `รูปเปิดเมื่อเลือกสี${x?.label ?? ""}` };
+  };
+  /** ตัวเลือกช่องรูปของสินค้า (ใช้ร่วม: ย้ายทั้งแถว · ไฟล์ที่ต้องดู) */
+  const slotOptions = (p: Parent, video: boolean) => (
+    <>
+      {!video && <option value="g">🖼 รูปบนเว็บ (รวมทั้งรุ่น)</option>}
+      {!video && p.skus.map((x) => <option key={x.id} value={`s:${x.id}`}>🎨 รูปสี {x.code} {x.label}</option>)}
+      <option value="h:desktop">🎬 Hero คอม</option>
+      <option value="h:mobile">🎬 Hero มือถือ</option>
+      {video && p.skus.flatMap((x) => (["desktop", "mobile"] as const).map((slot) => <option key={`${x.id}:${slot}`} value={`sh:${x.id}:${slot}`}>{targetLabel({ kind: "skuHero", skuId: x.id, slot }, p)}</option>))}
+    </>
+  );
 
   const run = async () => {
     setErr(null);
@@ -267,9 +334,12 @@ export function WebsiteImageMassUpload({
     onClose();
   };
 
-  const thumb = (id: string, opts: { muted?: boolean; onSkip?: () => void } = {}) => {
+  const thumb = (id: string, opts: { muted?: boolean; onSkip?: () => void; handle?: Record<string, unknown>; index?: number; onMove?: (dir: -1 | 1) => void; canPrev?: boolean; canNext?: boolean } = {}) => {
     const it = itemById.get(id);
     if (!it) return null;
+    const parts = it.path.split("/");
+    const fileName = parts.pop();
+    const folder = parts.pop();
     return (
       <div key={id} className={`group relative w-16 shrink-0 ${opts.muted ? "opacity-50" : ""}`} title={it.path}>
         {it.video ? (
@@ -279,11 +349,18 @@ export function WebsiteImageMassUpload({
           </>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={it.url} alt="" loading="lazy" decoding="async" className="h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-100" />
+          <img src={it.url} alt="" loading="lazy" decoding="async" draggable={false} {...(opts.handle ?? {})} title={opts.handle ? "กดค้างแล้วลาก = สลับลำดับ (รูปแรก = รูปหลัก)" : it.path} className={`h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-100 ${opts.handle ? "cursor-grab active:cursor-grabbing" : ""}`} />
         )}
-        <p className="mt-0.5 truncate text-[10px] text-slate-500">{it.path.split("/").pop()}</p>
+        {opts.index != null && !it.video && <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/55 px-1 text-[10px] leading-4 text-white">{opts.index + 1}</span>}
+        {opts.onMove && phase === "pick" && (
+          <span className="absolute bottom-[22px] right-0.5 flex gap-0.5">
+            {opts.canPrev && <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => opts.onMove?.(-1)} aria-label="เลื่อนไปซ้าย" className="h-5 w-5 rounded bg-white/90 text-[11px] leading-none text-slate-700 shadow">‹</button>}
+            {opts.canNext && <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => opts.onMove?.(1)} aria-label="เลื่อนไปขวา" className="h-5 w-5 rounded bg-white/90 text-[11px] leading-none text-slate-700 shadow">›</button>}
+          </span>
+        )}
+        <p className="mt-0.5 truncate text-[10px] text-slate-500" title={it.path}>{folder ? <span className="text-slate-400">{folder}/</span> : null}{fileName}</p>
         {opts.onSkip && phase === "pick" && (
-          <button type="button" onClick={opts.onSkip} aria-label={`ข้าม ${it.path}`} title="ไม่ลงไฟล์นี้" className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] text-white group-hover:flex">
+          <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={opts.onSkip} aria-label={`ข้าม ${it.path}`} title="ไม่ลงไฟล์นี้" className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] text-white group-hover:flex">
             ✕
           </button>
         )}
@@ -410,19 +487,58 @@ export function WebsiteImageMassUpload({
                   const dests = plan.dests.filter((d) => d.parentId === pid);
                   return (
                     <div key={pid} className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="min-w-0 text-sm">
                           <b className="font-semibold text-slate-900">{p.code}</b> <span className="text-slate-500">{p.name}</span>
                         </p>
-                        <span className="text-[11px] text-slate-400">{p.skus.length} สี</span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] text-slate-400">
+                            {p.skus.length} สี · ลงที่ร้าน {[shop.name, ...otherShops.filter((o) => alsoShops.has(o.id) && p.otherShopIds.includes(o.id)).map((o) => o.name)].join(" + ")}
+                          </span>
+                          {phase === "pick" && parents.length > 1 && (
+                            <select value="" onChange={(e) => e.target.value && changeProduct(pid, e.target.value)} aria-label={`เปลี่ยนสินค้าของ ${p.code}`} className="h-7 max-w-[13rem] rounded-md border border-slate-300 bg-white px-1.5 text-[11px] text-slate-700">
+                              <option value="">🔁 อ่านผิด? เปลี่ยนสินค้า…</option>
+                              {parents.filter((x) => x.parentId !== pid).map((x) => (
+                                <option key={x.parentId} value={x.parentId}>{x.code} · {x.name}</option>
+                              ))}
+                            </select>
+                          )}
+                        </div>
                       </div>
                       {dests.map((d) => {
                         const isHero = d.target.kind === "hero" || d.target.kind === "skuHero";
+                        const dl = destLabel(d.target, p);
+                        const hasVideo = d.fileIds.some((id) => itemById.get(id)?.video);
+                        const editing = editDest?.key === d.key ? editDest : null;
+                        const ep = editing ? byId.get(editing.pid) : undefined;
                         return (
-                          <div key={d.key} className="mt-2 grid grid-cols-[8.5rem_minmax(0,1fr)] items-start gap-2 border-t border-slate-100 pt-2">
-                            <span className="text-xs text-slate-600">{targetLabel(d.target, p)}</span>
+                          <div key={d.key} className="mt-2 grid grid-cols-[11rem_minmax(0,1fr)] items-start gap-2 border-t border-slate-100 pt-2">
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-medium text-slate-700" title={dl.title}>{dl.title}</p>
+                              <p className="truncate text-[11px] text-slate-500" title={dl.sub}>{dl.sub}</p>
+                              {phase === "pick" && (
+                                <button type="button" onClick={() => setEditDest(editing ? null : { key: d.key, pid })} className="mt-0.5 text-[11px] text-blue-600 hover:underline">
+                                  {editing ? "ปิด" : "✎ ย้ายแถวนี้ (อ่านผิด)"}
+                                </button>
+                              )}
+                            </div>
                             <div className="flex flex-wrap items-end gap-2">
-                              {d.fileIds.map((id) => thumb(id, { onSkip: () => setManual(id, "skip") }))}
+                              <DestThumbs
+                                group={d.key}
+                                ids={d.fileIds}
+                                canDrag={phase === "pick" && d.fileIds.length > 1}
+                                onReorder={(from, to) => reorderDest(d.fileIds, from, to)}
+                                render={(id, i, handle) =>
+                                  thumb(id, {
+                                    onSkip: () => setManual(id, "skip"),
+                                    handle,
+                                    index: d.fileIds.length > 1 ? i : undefined,
+                                    onMove: d.fileIds.length > 1 ? (dir) => reorderDest(d.fileIds, i, i + dir) : undefined,
+                                    canPrev: i > 0,
+                                    canNext: i < d.fileIds.length - 1,
+                                  })
+                                }
+                              />
                               <span className={`self-center text-[11px] ${d.replaces ? "text-amber-700" : "text-slate-500"}`}>
                                 {isHero
                                   ? d.replaces
@@ -433,6 +549,33 @@ export function WebsiteImageMassUpload({
                                     : `+${d.fileIds.length} ต่อท้าย${d.existing ? ` (เดิม ${d.existing} → รวม ${d.total}/${d.limit})` : ` (รวม ${d.total}/${d.limit})`}`}
                               </span>
                             </div>
+                            {editing && (
+                              <div className="col-span-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-blue-50/70 px-2.5 py-2">
+                                <span className="text-[11px] text-slate-700">ย้ายรูป {d.fileIds.length} รูปในแถวนี้ไป:</span>
+                                <select value={editing.pid} onChange={(e) => setEditDest({ key: d.key, pid: e.target.value })} aria-label="สินค้าปลายทาง" className="h-8 max-w-[14rem] rounded-lg border border-slate-300 bg-white px-2 text-xs">
+                                  {parents.map((x) => (
+                                    <option key={x.parentId} value={x.parentId}>{x.code} · {x.name}</option>
+                                  ))}
+                                </select>
+                                {ep && (
+                                  <select
+                                    value={editing.pid === pid ? encT(d.target) : ""}
+                                    onChange={(e) => {
+                                      const t = decT(e.target.value);
+                                      if (!t) return;
+                                      moveFiles(d.fileIds, ep.parentId, t);
+                                      setEditDest(null);
+                                    }}
+                                    aria-label="ช่องรูปปลายทาง"
+                                    className="h-8 max-w-[14rem] rounded-lg border border-slate-300 bg-white px-2 text-xs"
+                                  >
+                                    <option value="">— เลือกช่องรูป —</option>
+                                    {slotOptions(ep, hasVideo)}
+                                  </select>
+                                )}
+                                <span className="text-[11px] text-slate-500">เลือกช่องแล้วย้ายทันที</span>
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -489,23 +632,7 @@ export function WebsiteImageMassUpload({
                                   aria-label="เลือกช่องรูป"
                                 >
                                   <option value="">— ช่องรูป —</option>
-                                  {!it.video && <option value="g">รูปบนเว็บ</option>}
-                                  {!it.video &&
-                                    p.skus.map((s) => (
-                                      <option key={s.id} value={`s:${s.id}`}>
-                                        {targetLabel({ kind: "sku", skuId: s.id }, p)}
-                                      </option>
-                                    ))}
-                                  <option value="h:desktop">Hero คอม</option>
-                                  <option value="h:mobile">Hero มือถือ</option>
-                                  {it.video &&
-                                    p.skus.flatMap((s) =>
-                                      (["desktop", "mobile"] as const).map((slot) => (
-                                        <option key={`${s.id}:${slot}`} value={`sh:${s.id}:${slot}`}>
-                                          {targetLabel({ kind: "skuHero", skuId: s.id, slot }, p)}
-                                        </option>
-                                      ))
-                                    )}
+                                  {slotOptions(p, it.video)}
                                 </select>
                               )}
                               {f.plan !== "skip" && (
@@ -597,3 +724,23 @@ export function WebsiteImageMassUpload({
   );
 }
 
+
+/** ↕ แถวรูปของช่องเดียว — กดค้างที่รูปแล้วลาก = สลับลำดับ (ของกลาง useDragReorder · group = ช่องนั้น ลากข้ามแถวไม่ได้) */
+function DestThumbs({ group, ids, canDrag, onReorder, render }: {
+  group: string;
+  ids: string[];
+  canDrag: boolean;
+  onReorder: (from: number, to: number) => void;
+  render: (id: string, i: number, handle: Record<string, unknown> | undefined) => ReactNode;
+}) {
+  const { rowProps, handleProps, rowCls } = useDragReorder(onReorder, { group: `mass:${group}` });
+  return (
+    <>
+      {ids.map((id, i) => (
+        <div key={id} {...(canDrag ? rowProps(i) : {})} className={canDrag ? `rounded-md ${rowCls(i)}` : undefined}>
+          {render(id, i, canDrag ? (handleProps(i) as unknown as Record<string, unknown>) : undefined)}
+        </div>
+      ))}
+    </>
+  );
+}
