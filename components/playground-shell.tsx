@@ -18,6 +18,8 @@ import { NotificationBell } from "@/components/notification-bell";
 import { LangToggle, useT } from "@/components/i18n";
 import { LangSync } from "@/components/lang-sync";
 import { GlobalSearch } from "@/components/global-search";
+import { PageChromeBar, PageViewOptionsSection, useChromeHost, useIsDesktopXl, usePageChromeSlots } from "@/components/page-chrome";
+import { AccountMenu } from "@/components/account-menu";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { DevicePreviewButton } from "@/components/device-preview";
@@ -408,6 +410,10 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
     }
   }, [ready, user, pathname, router]);
   const [searchOpen, setSearchOpen] = useState(false);
+  // แถบบนแบบแอป (จอ < xl): หน้าลงทะเบียน ชื่อหน้า/ค้นหา/ปุ่ม ผ่าน usePageChrome → วาดแทนโลโก้ (ของกลาง components/page-chrome)
+  const pageChrome = usePageChromeSlots();
+  const isXl = useIsDesktopXl();   // จอคอม: แถบนี้ซ่อนอยู่แล้ว (xl:hidden) → ไม่ต้องวาดของหน้า (หน้าวาดเองในตัว)
+  const hasPageChrome = !isXl && !!(pageChrome.title || pageChrome.search || pageChrome.actions);
   const [helpOpen, setHelpOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // พับเมนูซ้าย (desktop) — เหลือไอคอน เอาเมาส์วางแล้วกาง · จำค่าใน localStorage · จอเล็ก default พับ
@@ -699,23 +705,30 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         </button>
       )}
 
-      {/* Mobile topbar */}
-      <header data-shell-topbar className="xl:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-slate-200 h-12 flex items-center justify-between px-3">
+      <ChromeHostMark />
+      {/* Mobile topbar — มีของจากหน้า (usePageChrome) = แถบแบบแอป: ☰ · ชื่อหน้า/ค้นหา/ปุ่มของหน้า · ผู้ใช้ */}
+      <header data-shell-topbar className="xl:hidden fixed top-0 left-0 right-0 z-30 bg-white border-b border-slate-200 h-12 flex items-center justify-between gap-1 px-3">
         <button onClick={() => setMobileNavOpen(true)} aria-label="เปิดเมนู"
           className="p-2 -ml-1 rounded hover:bg-slate-100">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <line x1="3" y1="6" x2="21" y2="6" /><line x1="3" y1="12" x2="21" y2="12" /><line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
-        <Link href="/" className="flex items-center gap-1.5">
-          <Logo size={22} />
-          <span className="text-sm font-bold text-slate-900">{BRAND.name}</span>
-        </Link>
-        <button onClick={() => setSearchOpen(true)} aria-label="ค้นหา" className="p-2 -mr-1 rounded hover:bg-slate-100">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-          </svg>
-        </button>
+        {hasPageChrome ? (
+          <PageChromeBar variant="shell" onGlobalSearch={() => setSearchOpen(true)} className="flex-1 min-w-0" />
+        ) : (<>
+          <Link href="/" className="flex items-center gap-1.5">
+            <Logo size={22} />
+            <span className="text-sm font-bold text-slate-900">{BRAND.name}</span>
+          </Link>
+          <button onClick={() => setSearchOpen(true)} aria-label="ค้นหา" className="p-2 -mr-1 ml-auto rounded hover:bg-slate-100">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+            </svg>
+          </button>
+        </>)}
+        {/* ปุ่มผู้ใช้ — ในเมนูมี "มุมมองหน้านี้" ถ้าหน้าลงทะเบียนไว้ */}
+        <AccountMenu compact />
       </header>
 
       {/* Backdrop (mobile only when nav open) */}
@@ -928,6 +941,7 @@ function UserSwitcher({ collapsed }: { collapsed?: boolean }) {
           <div className="px-3 py-2 border-b border-slate-100">
             <div className="text-xs text-slate-500 truncate">{user.email}</div>
           </div>
+          <PageViewOptionsSection className="border-t-0 border-b" />
           <Link href="/dashboard" onClick={() => setOpen(false)}
             className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">🏠 {t("Dashboard ของฉัน", "My Dashboard")}</Link>
           <Link href="/profile" onClick={() => setOpen(false)}
@@ -944,4 +958,10 @@ function UserSwitcher({ collapsed }: { collapsed?: boolean }) {
       )}
     </div>
   );
+}
+
+/** บอกของกลาง page-chrome ว่าเชลล์รับวาดแถบบนให้แล้ว (จอ < xl) — หน้าจะซ่อนแถบของตัวเองที่จอเล็ก */
+function ChromeHostMark() {
+  useChromeHost(true);
+  return null;
 }

@@ -19,7 +19,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "@/components/i18n";
 
-export function BulkActionBar({ count, unit: unitProp, onClear, extra, children }: {
+export function BulkActionBar({ count, unit: unitProp, onClear, extra, children, spacer = true }: {
   /** จำนวนที่เลือก (0 = ซ่อน) */
   count: number;
   /** หน่วยนับ เช่น "รุ่น" "ใบ" */
@@ -30,6 +30,8 @@ export function BulkActionBar({ count, unit: unitProp, onClear, extra, children 
   extra?: ReactNode;
   /** ปุ่มคำสั่ง (ชิดขวา) */
   children?: ReactNode;
+  /** เว้นที่ท้ายหน้ากันแถบบังรายการสุดท้าย (ค่าเริ่มต้น เปิด) — ปิดเมื่อหน้าจัดที่ว่างเอง เช่น ตารางเลื่อนในกล่องสูงตายตัว */
+  spacer?: boolean;
 }) {
   const t = useT();
   const unit = unitProp ?? t("รายการ", "items");
@@ -39,7 +41,7 @@ export function BulkActionBar({ count, unit: unitProp, onClear, extra, children 
 
   return (
     <>
-      <div aria-hidden className="h-52 xl:h-24" />
+      {spacer && <div aria-hidden className="h-52 xl:h-24" />}
       {mounted && createPortal(
         <div role="region" aria-label={t("คำสั่งสำหรับรายการที่เลือก", "Actions for selected items")}
           className="fixed inset-x-0 z-40 flex justify-center px-3 bottom-[calc(4.25rem+env(safe-area-inset-bottom))] xl:bottom-5 pointer-events-none">

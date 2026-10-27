@@ -16,13 +16,14 @@ import { getTheme, setTheme } from "@/lib/theme";
 import { DeviceModeToggle, DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, type DeviceMode, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
 import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INSTALL_HINT, openInChrome } from "@/components/pwa-install-button";
 import { WorkPopupFloatToggle } from "@/components/work-popup/float";
+import { PageViewOptionsSection } from "@/components/page-chrome";
 
 /** มุมมองอุปกรณ์ (ส่งมาจากเชลล์แอปเดี่ยว) — เลือกดูแบบแท็บเล็ต/มือถือบนจอนี้ + QR เปิด/ติดตั้งบนเครื่องจริง */
 export type AccountMenuDevice = { mode: DeviceMode; viewport: DeviceLayout; onChange: (m: DeviceMode) => void; qr?: DeviceQrOpts };
 
 const SWATCHES = ["#7c3aed", "#2563eb", "#0891b2", "#059669", "#ea580c", "#e11d48", "#475569"];
 
-export function AccountMenu({ onDark = false, device }: { onDark?: boolean; device?: AccountMenuDevice } = {}) {
+export function AccountMenu({ onDark = false, device, compact = false }: { onDark?: boolean; device?: AccountMenuDevice; /** แถบบนจอเล็ก: โชว์แค่รูปโปรไฟล์ */ compact?: boolean } = {}) {
   const { user, logout } = useAuth();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -47,18 +48,20 @@ export function AccountMenu({ onDark = false, device }: { onDark?: boolean; devi
           // eslint-disable-next-line @next/next/no-img-element
           ? <img src={avatar} alt="" className={`w-7 h-7 rounded-full object-cover border ${onDark ? "border-white/40" : "border-slate-200"}`} />
           : <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold ${onDark ? "bg-white/20 text-white" : "bg-violet-100 text-violet-700"}`}>{(user.name || user.email).charAt(0).toUpperCase()}</span>}
-        <span className="leading-tight text-right hidden sm:block">
+        <span className={`leading-tight text-right ${compact ? "hidden" : "hidden sm:block"}`}>
           <span className={`block text-xs font-medium truncate max-w-[120px] ${onDark ? "text-white" : "text-slate-700"}`}>{user.name}</span>
           <span className={`block text-[10px] ${onDark ? "text-white/70" : "text-slate-400"}`}>{roleLabel(user.role)}</span>
         </span>
-        <span className={`text-xs ${onDark ? "text-white/70" : "text-slate-400"}`}>⋯</span>
+        {!compact && <span className={`text-xs ${onDark ? "text-white/70" : "text-slate-400"}`}>⋯</span>}
       </button>
 
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-full mt-1 w-64 bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1">
+          <div className="absolute right-0 top-full mt-1 w-72 max-h-[calc(100dvh-4.5rem)] overflow-y-auto overscroll-contain bg-white border border-slate-200 rounded-lg shadow-xl z-50 py-1">
             <div className="px-3 py-2 border-b border-slate-100 text-xs text-slate-500 truncate">{user.email}</div>
+            {/* มุมมองหน้านี้ (หน้าลงทะเบียนผ่าน usePageChrome เช่น บอร์ดจ่ายงาน: คอม/iPad · หน้าตา · เต็มจอ) */}
+            <PageViewOptionsSection className="border-t-0 border-b" />
             {/* Dashboard ของฉัน — ซ่อนเมื่ออยู่ในแอป (onDark) เพราะจะพาออกจากแอป */}
             {!onDark && (
               <button type="button" onClick={() => { setOpen(false); router.push("/dashboard"); }}

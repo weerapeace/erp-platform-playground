@@ -23,8 +23,11 @@
  *     actions={<button>...</button>}
  *     expandedKeys={open} renderExpanded={(r) => <Detail r={r} />}   // กางแถว (ผู้เรียกคุมว่ากางแถวไหน)
  *   />
+ *
+ * แบบแอป (opt-in): fill = สูงเต็มกล่องแม่ เลื่อนในตัว + หัวตารางติดบนสุด · stickyCols = ล็อกคอลัมน์ซ้าย n คอลัมน์ตอนเลื่อนขวา
+ *   (ช่องว่าง/ขอบหลังช่องที่ล็อกถูกถมด้วยเงาสีพื้น · แถวทุกแถวกว้างเท่ากัน กันหัวตาราง/พื้นขาดตอนเลื่อนไกล)
  */
-import { ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useT } from "@/components/i18n";
 
 export type MiniColumn<T> = {
@@ -114,6 +117,15 @@ export type MiniTableProps<T> = {
   // ปรับความกว้างคอลัมน์ได้ (ลากขอบหัวคอลัมน์) — opt-in · ใส่ storageKey เพื่อจำค่าไว้ในเครื่อง
   resizable?: boolean;
   storageKey?: string;
+
+  /** เต็มที่ว่างที่เหลือในกล่องแม่ (กล่องแม่ต้อง flex-col + สูงตายตัว — ตารางเป็น flex-1) — เลื่อนในตัวเอง + หัวตารางติดอยู่บนสุด */
+  fill?: boolean;
+  /** ล็อกคอลัมน์ซ้าย n คอลัมน์ (นับเฉพาะคอลัมน์ข้อมูล — ช่องติ๊กล็อกให้เองถ้ามี) ตอนเลื่อนซ้าย-ขวา */
+  stickyCols?: number;
+  /** วาด actions ต่อท้ายแถวเครื่องมือ (เรียง/จัดกลุ่ม) ในแถวเดียวกัน — ประหยัดที่ */
+  inlineActions?: boolean;
+  /** เลื่อนในตาราง (เฉพาะ fill) — ส่ง scrollTop ไว้ซ่อน/โชว์ของเหนือตาราง */
+  onScrollTop?: (top: number) => void;
 };
 
 type Dir = "asc" | "desc";
@@ -126,7 +138,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
     dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, maxHeightClass = "", className = "", footnote,
-    resizable, storageKey,
+    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop,
   } = props;
   // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
   const t = useT();
@@ -172,6 +184,44 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp); document.body.style.cursor = "col-resize";
   };
   const resetWidths = () => setWidths({});
+
+  // ---- ล็อกหัว/คอลัมน์ซ้าย: วัดตำแหน่งจริงของหัวคอลัมน์ (ความกว้างแบบ fr ต้องวัดหลังวาง) ----
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const lockN = stickyCols > 0 ? stickyCols + (selectable ? 1 : 0) : 0;   // จำนวนช่อง (รวมช่องติ๊ก) ที่ล็อก
+  const [lockLefts, setLockLefts] = useState<number[]>([]);
+  const [rowMinW, setRowMinW] = useState(0);   // กว้างจริงที่ต้องใช้ → แถวทุกแถวกว้างเท่ากัน (หัว/พื้นไม่ขาดตอนเลื่อนขวา)
+  const [viewW, setViewW] = useState(0);       // ความกว้างที่มองเห็น → แผงกางแถวกว้างเท่าจอ ไม่เลื่อนหายตอนเลื่อนขวา
+  const measureOn = !!fill || lockN > 0;
+  const colSig = columns.map((c) => `${c.key}:${c.width ?? ""}`).join("|") + JSON.stringify(widths) + (selectable ? "s" : "");
+  useLayoutEffect(() => {
+    if (!measureOn) return;
+    const measure = () => {
+      const h = headerRef.current, sc = scrollerRef.current;
+      if (!h || !sc) return;
+      const prev = h.style.minWidth; h.style.minWidth = "0px";
+      const need = h.scrollWidth;
+      // offsetLeft (หน่วย CSS จริงของแถวหัว) ไม่ใช่ getBoundingClientRect — หน้าที่ใช้ CSS zoom จะได้ไม่เพี้ยน
+      const lefts = (Array.from(h.children) as HTMLElement[]).slice(0, lockN).map((k) => k.offsetLeft);
+      h.style.minWidth = prev;
+      setRowMinW(need > sc.clientWidth + 1 ? need : 0);
+      setLockLefts((old) => (old.join() === lefts.join() ? old : lefts));
+      setViewW(sc.clientWidth);
+    };
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    if (ro && scrollerRef.current) ro.observe(scrollerRef.current);
+    return () => ro?.disconnect();
+  }, [measureOn, colSig, lockN, rows.length]);
+  // ช่องที่ล็อก: sticky + พื้นทึบ + เงาสีพื้นถมขอบซ้าย/ช่องว่างขวา (ไม่งั้นเห็นเนื้อหาลอดใต้) + เส้นแบ่งหลังช่องสุดท้าย
+  const lockStyle = (i: number, bg: string): CSSProperties | undefined => {
+    if (i >= lockN || lockLefts[i] == null) return undefined;
+    const sh = [`8px 0 0 0 ${bg}`];
+    if (i === 0) sh.unshift(`-12px 0 0 0 ${bg}`);
+    if (i === lockN - 1) sh.push("9px 0 0 0 #e2e8f0");
+    return { position: "sticky", left: lockLefts[i], zIndex: 5, backgroundColor: bg, boxShadow: sh.join(", ") };
+  };
+  const rowW: CSSProperties | undefined = rowMinW ? { minWidth: rowMinW } : undefined;
 
   const sel = selected ?? EMPTY;
   const setSel = (next: Set<string>) => onSelectedChange?.(next);
@@ -226,21 +276,22 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const alignCls = (a?: string) => (a === "right" ? "text-right justify-end" : a === "center" ? "text-center justify-center" : "");
 
   const HeaderCell = (
-    <div className="grid gap-2 px-3 py-2 bg-slate-100 text-[11px] font-semibold text-slate-600" style={{ gridTemplateColumns: tmpl }}>
+    <div ref={headerRef} className={`grid gap-2 px-3 py-2 bg-slate-100 text-[11px] font-semibold text-slate-600 ${fill ? "sticky top-0 z-20" : measureOn ? "relative" : ""}`} style={{ gridTemplateColumns: tmpl, ...rowW }}>
       {selectable && (
-        <span className="flex justify-center">
+        <span className="flex justify-center" style={lockStyle(0, HEAD_BG)}>
           <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className={boxCls} />
         </span>
       )}
-      {columns.map((c) => {
+      {columns.map((c, ci) => {
+        const ls = lockStyle(ci + (selectable ? 1 : 0), HEAD_BG);
         const canSort = !!c.sortValue;
         const active = sortKey === c.key;
         const handle = resizable ? <span onMouseDown={startResize(c.key)} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-rose-300/70" /> : null;
         const wrapCls = `flex items-center gap-1 ${resizable ? "relative overflow-hidden pr-2" : ""} ${alignCls(c.align)}`;
         const head = resizable ? <span className="truncate">{c.header}</span> : c.header;   // truncate เฉพาะตอน resizable (กันกระทบตารางเดิม)
-        if (!canSort) return <span key={c.key} className={wrapCls}>{head}{handle}</span>;
+        if (!canSort) return <span key={c.key} className={wrapCls} style={ls}>{head}{handle}</span>;
         return (
-          <span key={c.key} className={wrapCls}>
+          <span key={c.key} className={wrapCls} style={ls}>
             <button type="button" onClick={() => toggleSort(c.key)} title={t("คลิกเพื่อเรียง", "Click to sort")} className={`inline-flex items-center gap-1 min-w-0 hover:text-slate-900 ${active ? "text-rose-600" : ""}`}>
               {head}
               <span className="text-[9px] leading-none shrink-0">{active ? (dir === "asc" ? "▲" : "▼") : "↕"}</span>
@@ -256,19 +307,20 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     const k = rowKey(r);
     const on = sel.has(k);
     const open = !!renderExpanded && !!expandedKeys?.has(k);
+    const lockBg = on ? "#fff1f2" : open ? "#eff6ff" : zebra && idx % 2 ? "#f8fafc" : "#ffffff";   // พื้นทึบของช่องที่ล็อก (ใกล้สีแถว)
     const line = (
       <div key={open ? undefined : k} onClick={onRowClick ? () => onRowClick(r) : undefined}
         className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : open ? "bg-blue-50/30" : zebra && idx % 2 ? "bg-slate-50/30" : "bg-white"} ${onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
-        style={{ gridTemplateColumns: tmpl }}>
+        style={{ gridTemplateColumns: tmpl, ...rowW }}>
         {selectable && (
-          <span className="flex justify-center" onClick={(e) => e.stopPropagation()}>
+          <span className="flex justify-center" onClick={(e) => e.stopPropagation()} style={lockStyle(0, lockBg)}>
             <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />
           </span>
         )}
-        {columns.map((c) => {
+        {columns.map((c, ci) => {
           const act = !!activeCell && activeCell(r) === c.key;
           return (
-            <div key={c.key} onClick={onCellClick ? (e) => { e.stopPropagation(); onCellClick(r, c.key); } : undefined}
+            <div key={c.key} style={lockStyle(ci + (selectable ? 1 : 0), act ? "#dbeafe" : lockBg)} onClick={onCellClick ? (e) => { e.stopPropagation(); onCellClick(r, c.key); } : undefined}
               className={`min-w-0 text-sm text-slate-800 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)} ${onCellClick ? `-mx-1 -my-1 rounded-md px-1 py-1 cursor-pointer ${act ? "bg-blue-100/70 ring-1 ring-blue-300" : "hover:bg-blue-50 hover:ring-1 hover:ring-blue-200"}` : ""}`}>
               {c.cell(r)}
             </div>
@@ -278,9 +330,11 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     );
     if (!open) return line;
     return (
-      <div key={k}>
+      <div key={k} style={rowW}>
         {line}
-        <div className="px-3 pb-3 pt-1 bg-blue-50/30" style={{ paddingLeft: selectable ? "3.25rem" : undefined }}>{renderExpanded!(r)}</div>
+        {/* แผงกาง: โหมดล็อก = กว้างเท่าจอที่เห็น + ติดซ้าย (เลื่อนตารางไปขวาแผงไม่หาย) */}
+        <div className="px-3 pb-3 pt-1 bg-blue-50/30"
+          style={{ paddingLeft: selectable ? "3.25rem" : undefined, ...(measureOn && viewW ? { position: "sticky", left: 0, width: viewW } : {}) }}>{renderExpanded!(r)}</div>
       </div>
     );
   };
@@ -304,7 +358,8 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     );
   };
   const GroupHead = ({ g, gSel, gKeys }: { g: { name: string; rows: T[] }; gSel: boolean; gKeys: string[] }) => (
-    <div className={`flex items-center gap-2 px-3 ${touch ? "py-2" : "py-1.5"} bg-slate-50 border-y border-slate-100 ${cards ? "rounded-lg border-x" : ""}`}>
+    <div className={`flex items-center gap-2 px-3 ${touch ? "py-2" : "py-1.5"} bg-slate-50 border-y border-slate-100 ${cards ? "rounded-lg border-x" : ""}`}
+      style={!cards && measureOn && viewW ? { position: "sticky", left: 0, width: viewW } : undefined}>
       {selectable && <input type="checkbox" checked={gSel} onChange={() => setKeys(gKeys, !gSel)} className={touch ? boxCls : "w-3.5 h-3.5 accent-rose-600"} />}
       <span className="text-xs font-semibold text-slate-600">{g.name}</span>
       <span className="text-[10px] text-slate-400">({g.rows.length})</span>
@@ -313,18 +368,21 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   );
 
   const total = rows.length, shown = sorted.length;
+  const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || groupBy) && total > 0;
+  const actionsInToolbar = !!inlineActions && toolbarOn;   // แถวเดียว: เรียง/จัดกลุ่ม … ปุ่มของผู้เรียกชิดขวา
+  const onScroll = onScrollTop ? (e: React.UIEvent<HTMLDivElement>) => onScrollTop(e.currentTarget.scrollTop) : undefined;
 
   return (
-    <div className={`${maxHeightClass} ${maxHeightClass ? "overflow-y-auto pr-1" : ""} ${className}`}>
-      {(title || actions) && (
-        <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
+    <div className={`${maxHeightClass} ${maxHeightClass ? "overflow-y-auto pr-1" : ""} ${fill ? "flex flex-col min-h-0 flex-1" : ""} ${className}`}>
+      {(title || (actions && !actionsInToolbar)) && (
+        <div className="flex shrink-0 items-center justify-between gap-3 mb-2 flex-wrap">
           {title ? <h3 className="text-sm font-semibold text-slate-700">{title} <span className="text-slate-400">({shown !== total ? `${shown}/${total}` : total} {countUnit})</span></h3> : <span />}
-          {actions}
+          {!actionsInToolbar && actions}
         </div>
       )}
 
-      {!hideToolbar && ((searchText && !hideSearch) || sortable.length > 0 || groupBy) && total > 0 && (
-        <div className="flex items-center gap-2 mb-2 flex-wrap">
+      {toolbarOn && (
+        <div className="flex shrink-0 items-center gap-2 mb-2 flex-wrap">
           {searchText && !hideSearch && (
             <div className="relative">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">🔍</span>
@@ -351,6 +409,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
           {resizable && Object.keys(widths).length > 0 && (
             <button onClick={resetWidths} title={t("คืนความกว้างคอลัมน์เป็นค่าเริ่มต้น", "Reset column widths to default")} className="h-8 px-2 text-xs text-slate-400 hover:text-slate-600 underline">{t("รีเซ็ตความกว้าง", "Reset widths")}</button>
           )}
+          {actionsInToolbar && <div className="ml-auto">{actions}</div>}
         </div>
       )}
 
@@ -359,7 +418,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       ) : shown === 0 ? (
         <div className="text-center py-16 text-slate-300">{noMatchText ? noMatchText(q) : t(`ไม่พบรายการที่ตรงกับ “${q}”`, `Nothing matches “${q}”`)}</div>
       ) : cards ? (
-        <div className="space-y-2">
+        <div ref={scrollerRef} onScroll={onScroll} className={`space-y-2 ${fill ? "flex-1 min-h-0 overflow-y-auto overscroll-contain pr-1" : ""}`}>
           {selectable && (
             <label className="inline-flex items-center gap-2 px-1 text-xs text-slate-500">
               <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className={boxCls} /> {t("เลือกทั้งหมด", "Select all")}
@@ -378,14 +437,15 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         </div>
       ) : (
         // overflow-x-auto (ไม่ใช่ hidden) — คอลัมน์เยอะเกินจอ = เลื่อนซ้าย-ขวาได้ แทนที่จะโดนตัดหายเงียบ ๆ
-        <div className="border border-slate-200 rounded-xl overflow-x-auto">
+        // fill = เลื่อนทั้งสองแกนในกล่องนี้ → หัวตาราง sticky ติดบนได้ (ถ้าเลื่อนที่กล่องแม่ หัวจะไม่ติด)
+        <div ref={scrollerRef} onScroll={onScroll} className={`border border-slate-200 rounded-xl ${fill ? "flex-1 min-h-0 overflow-auto overscroll-contain" : "overflow-x-auto"}`}>
           {HeaderCell}
           {groups.map((g, gi) => {
             const gKeys = g.rows.map(rowKey);
             const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
             let offset = 0; for (let i = 0; i < gi; i++) offset += groups[i].rows.length;
             return (
-              <div key={g.name || "_all"}>
+              <div key={g.name || "_all"} style={rowW}>
                 {groupBy && grouped && GroupHead({ g, gSel, gKeys })}
                 <div className="divide-y divide-slate-50">{g.rows.map((r, i) => Row(r, offset + i))}</div>
               </div>
@@ -399,5 +459,6 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
 }
 
 const EMPTY: Set<string> = new Set();
+const HEAD_BG = "#f1f5f9";   // = bg-slate-100 ของหัวตาราง (ช่องหัวที่ล็อกต้องทึบสีเดียวกัน)
 
 export { useColumnPrefs, ColumnChooser, type ColumnPrefsState } from "./column-chooser";

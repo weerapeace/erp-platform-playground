@@ -56,6 +56,9 @@ const CanvasView = dynamicImport(() => import("./canvas-view").then((m) => m.Can
 import { DeskShop } from "./desk-shop";
 import { BoardLineSettings } from "@/components/board-line-settings";
 import { RequestInboxButton } from "@/components/request-inbox";
+import { FloatingDropdown } from "@/components/floating-dropdown";
+import { BulkActionBar } from "@/components/bulk-action-bar";
+import { usePageChrome, PageChromeBar, useChromeHost, useIsDesktopXl } from "@/components/page-chrome";
 import { MoCreateModal } from "@/components/mo-create";
 import { DispatchPlanBoard } from "./dispatch-plan-board";
 import type { DispatchPlan } from "@/app/api/mo/dispatch-plans/route";
@@ -265,7 +268,7 @@ function WorkBoardPageInner() {
   const viewMode = viewRaw === "exec" && !isAdmin ? "board" : viewRaw;
   const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
   const [lineSettingsOpen, setLineSettingsOpen] = useState(false);   // ป๊อปตั้งค่าแจ้งเตือน LINE
-  const [settingsOpen, setSettingsOpen] = useState(false);           // เมนู ⚙️ ตั้งค่า (ติดตั้งแอป/สีแบรนด์/แจ้งเตือน)
+
   const [moCreateOpen, setMoCreateOpen] = useState(false);           // ป๊อปสร้างใบสั่งผลิต (ของกลาง)
   const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
   const [craftsmen, setCraftsmen] = useState<Assignee[]>([]);
@@ -318,7 +321,7 @@ function WorkBoardPageInner() {
   // ตัวกรองกลุ่มใน widget รอจ่าย
   const [pendGroupFilter, setPendGroupFilter] = useState("__all__");
   // เมนูพิมพ์รายงาน (รอจ่าย / กำลังผลิต) — เปิดหน้าพิมพ์กลาง /print/work-board ตามกลุ่มที่กรองอยู่
-  const [printOpen, setPrintOpen] = useState(false);
+
   const printUrl = useCallback((type: "pending" | "production" | "piece" | "all") => {
     const g = pendGroupFilter && pendGroupFilter !== "__all__" ? `&group=${encodeURIComponent(pendGroupFilter)}` : "";
     return `/print/work-board?type=${type}${g}`;
@@ -435,10 +438,11 @@ function WorkBoardPageInner() {
 
   // silent=true → refresh เบื้องหลัง ไม่โชว์สปินเนอร์เต็มจอ (ใช้หลังปิดป๊อปอัป/ทำ action เพื่อให้ลื่น)
   const [loadError, setLoadError] = useState(false);   // โหลดบอร์ดพลาด → โชว์ error+ลองใหม่ (ไม่ใช่บอร์ดว่าง)
+  const [loadedAt, setLoadedAt] = useState<number | null>(null);   // เวลาโหลดบอร์ดสำเร็จล่าสุด → "อัปเดต x นาทีที่แล้ว" บนแถบบน
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try { const res = await apiFetch("/api/mo/work-board"); const j = await res.json();
-      if (!j.error) { setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], dispatchedMos: j.dispatched_mos ?? [], deliveryPlans: j.delivery_plans ?? [], pendingPiece: j.pending_piece ?? [] }); setLoadError(false); }
+      if (!j.error) { setLoadedAt(Date.now()); setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], dispatchedMos: j.dispatched_mos ?? [], deliveryPlans: j.delivery_plans ?? [], pendingPiece: j.pending_piece ?? [] }); setLoadError(false); }
       else if (!silent) setLoadError(true);
     } catch { if (!silent) setLoadError(true); } finally { if (!silent) setLoading(false); }
   }, []);
@@ -1393,95 +1397,93 @@ function WorkBoardPageInner() {
     return arr;
   }, [board, canEdit, togglePrep]);
 
+  // ---- แถบบนแบบแอป (ของกลาง components/page-chrome) ----
+  //   ชื่อ+สลับมุมมอง · อัปเดตล่าสุด · คำขอ · ＋ สร้างใบ · ⋯ เมนูรวม (ไปหน้า / พิมพ์รายงาน / ตั้งค่า)
+  //   จอ < xl = เชลล์วาดในแถบบนของมันเอง (ค้นหา + ปุ่มผู้ใช้ "มุมมองหน้านี้" มาจากมุมมองตาราง) · จอคอม/embed/ขยายเต็มจอ = หน้าวาดเอง
+  const chromeHost = useChromeHost();
+  const isXl = useIsDesktopXl();
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [moreSec, setMoreSec] = useState<"" | "print">("");
+  const moreRef = useRef<HTMLDivElement>(null);
+  const planSel = printPlan || (activePlan !== "real" ? activePlan : plans[0]?.id) || "";
+  const planHref = planSel ? `/print/work-board?type=plan&plan=${encodeURIComponent(planSel)}` : "";
+  const menuItem = "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50";
+  const menuHead = "px-3 pt-2 pb-1 text-[11px] font-medium text-slate-400";
+  const closeMore = () => setMoreOpen(false);
+  const moreMenu = (
+    <div ref={moreRef} className="inline-block">
+      <button type="button" onClick={() => setMoreOpen((v) => !v)} title="เมนูบอร์ด — ไปหน้าอื่น · พิมพ์รายงาน · ตั้งค่า" aria-label="เมนูบอร์ด"
+        className={`h-9 w-9 rounded-lg border text-lg leading-none ${moreOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>⋯</button>
+      <FloatingDropdown anchorRef={moreRef} open={moreOpen} onClose={closeMore} minWidth={290} maxWidth={330}>
+        <div className="overflow-y-auto overscroll-contain rounded-xl border border-slate-200 bg-white py-1 shadow-xl" style={{ maxHeight: "var(--fd-max-h, 80vh)" }}>
+          <div className={menuHead}>ไปหน้า</div>
+          <a href="/master/work-submissions" className={menuItem}>📤 ตารางส่งงาน</a>
+          <a href="/master/manufacturing-orders" className={menuItem}>🏭 ใบสั่งผลิต</a>
+          <a href="/master/mo-backlog" className={menuItem}>🧹 จัดการใบค้าง <span className="ml-auto text-[11px] text-slate-400">ปิด · ยกเลิก · ตั้งวัน</span></a>
+          <div className="my-1 border-t border-slate-100" />
+          <button type="button" onClick={() => setMoreSec((s) => (s === "print" ? "" : "print"))} className={menuItem}>
+            🖨 พิมพ์รายงาน <span className="ml-auto text-slate-400">{moreSec === "print" ? "▴" : "▾"}</span>
+          </button>
+          {moreSec === "print" && (
+            <div className="mx-2 mb-1 rounded-lg border border-slate-100 bg-slate-50/60 py-1">
+              <div className="px-3 py-1.5">
+                <label className="mb-1 block text-[11px] text-slate-500">เลือกกลุ่มที่จะพิมพ์ (รอจ่าย/กำลังผลิต)</label>
+                <select value={pendGroupFilter} onChange={(e) => setPendGroupFilter(e.target.value)} className="h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                  <option value="__all__">ทั้งหมด</option>
+                  <option value="__none__">— ยังไม่จับกลุ่ม —</option>
+                  {moGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
+                </select>
+              </div>
+              <a href={printUrl("all")} target="_blank" rel="noreferrer" onClick={closeMore} className="block px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50">🖨 พิมพ์ทั้งหมดในใบเดียว<div className="text-[11px] font-normal text-indigo-400">รอจ่าย + งานเหมา + กำลังผลิต</div></a>
+              <a href={printUrl("pending")} target="_blank" rel="noreferrer" onClick={closeMore} className="block px-3 py-1.5 text-sm text-slate-700 hover:bg-white">📋 รายการรอจ่ายทั้งหมด</a>
+              <a href={printUrl("piece")} target="_blank" rel="noreferrer" onClick={closeMore} className="block px-3 py-1.5 text-sm text-slate-700 hover:bg-white">🧵 รายการรอจ่ายเหมาทั้งหมด</a>
+              <a href={printUrl("production")} target="_blank" rel="noreferrer" onClick={closeMore} className="block px-3 py-1.5 text-sm text-slate-700 hover:bg-white">🔨 รายการกำลังผลิต (แยกตามโต๊ะ/ช่าง)</a>
+              <div className="border-t border-slate-100 px-3 py-1.5">
+                <label className="mb-1 block text-[11px] text-slate-500">📅 รายการจ่ายงานตามแผน — เลือกแผน</label>
+                <select value={planSel} onChange={(e) => setPrintPlan(e.target.value)} disabled={plans.length === 0} className="mb-1.5 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm disabled:bg-slate-50">
+                  {plans.length === 0 ? <option value="">— ยังไม่มีแผน —</option> : plans.map((p) => <option key={p.id} value={p.id}>{p.name}{p.line_count ? ` (${p.line_count})` : ""}</option>)}
+                </select>
+                {planSel
+                  ? <a href={planHref} target="_blank" rel="noreferrer" onClick={closeMore} className="block rounded-lg bg-indigo-600 px-3 py-1.5 text-center text-sm text-white hover:bg-indigo-700">พิมพ์แผนที่เลือก</a>
+                  : <div className="rounded-lg bg-slate-100 px-3 py-1.5 text-center text-sm text-slate-400">ยังไม่มีแผนให้พิมพ์</div>}
+              </div>
+            </div>
+          )}
+          <div className="my-1 border-t border-slate-100" />
+          <div className={menuHead}>ตั้งค่า</div>
+          <PwaInstallButton className={menuItem} />
+          <button type="button" onClick={() => { closeMore(); void openColor(); }} className={menuItem}>🎨 ตั้งสีแบรนด์</button>
+          {canDispatch && (
+            <button type="button" onClick={() => { closeMore(); setLineSettingsOpen(true); }} className={menuItem}>🔔 แจ้งเตือน <span className="ml-auto text-[11px] text-slate-400">กลุ่ม LINE</span></button>
+          )}
+        </div>
+      </FloatingDropdown>
+    </div>
+  );
+  usePageChrome({
+    title: <BoardViewPicker view={viewMode} isAdmin={isAdmin} defView={defView} onPick={setViewMode}
+      onSaveDefault={() => { void saveDefView(viewMode); toast.success("ตั้งเป็นมุมมองเริ่มต้นของคุณแล้ว"); }} />,
+    actions: (<>
+      <UpdatedAgo at={loadedAt} onReload={() => void load(true)} />
+      <RequestInboxButton />
+      {canEdit && (
+        <button type="button" onClick={() => setMoCreateOpen(true)} title="เปิดใบสั่งผลิตใหม่ (สร้างเสร็จการ์ดจะโผล่ในช่องรอจ่ายทันที)"
+          className="h-9 whitespace-nowrap rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700">＋<span className="hidden sm:inline"> สร้างใบ</span></button>
+      )}
+      {moreMenu}
+    </>),
+  });
+  const ownBar = !chromeHost || isXl || isMax;   // เชลล์ไม่ได้วาดแถบให้ (จอคอม / embed / ขยายเต็มจอ) → หน้าวาดเอง
+
   if (!canView) return <AccessDenied />;
 
   // ⚠️ ห้ามใส่ CSS zoom ที่ wrapper ล่างนี้ — บน iPad/Safari ทำให้ "จุดแตะ" เพี้ยน (ยิ่งไปทางขวายิ่งคลาด)
   //    → แตะช่องโต๊ะฝั่งขวาไม่ติด จ่ายงานไม่ได้ (เคยใช้ zoom:1.25 บน tablet แล้วพัง)
   return (
-    <div className={isMax ? "fixed inset-0 z-40 bg-white flex flex-col p-3 overflow-auto" : "max-w-[1700px] mx-auto px-5 py-5"}>
-      <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-semibold text-slate-800">📋 บอร์ดจ่ายงาน</h1>
-          <p className="text-sm text-slate-500 mt-0.5">ติ๊ก <b>เตรียม/ตัด</b> บนการ์ด → ครบทั้งคู่ <b className="text-emerald-600">ไฟเขียว</b> = พร้อมจ่าย → ลากไปวางที่แผนกช่างเพื่อจ่ายงาน</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {/* เลือกมุมมอง — รวมเป็น dropdown ตัวเดียว (เดิมเป็นปุ่มเรียงกันหลายปุ่ม ทำให้หัวหน้ารก) */}
-          <select value={viewMode} onChange={(e) => setViewMode(e.target.value as typeof viewMode)} title="เลือกมุมมองของหน้านี้"
-            className="h-9 px-2 text-sm font-medium border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option value="board">📋 บอร์ด</option>
-            <option value="canvas">🗂 แคนวาส (โซนตามโต๊ะ)</option>
-            <option value="table">▦ ตาราง</option>
-            <option value="shop">🛒 ช้อปจ่ายงาน</option>
-            <option value="purchase">📦 ขอซื้อ/เตรียม</option>
-            <option value="calendar">📅 ปฏิทิน</option>
-            <option value="labor">💰 ค่าแรงรายเดือน</option>
-            {/* แผนผู้บริหาร — เห็นเฉพาะแอดมิน (มีตัวเลขราคาขาย/ต้นทุน/กำไร) */}
-            {isAdmin && <option value="exec">👔 แผนผู้บริหาร</option>}
-          </select>
-          <button onClick={() => { void saveDefView(viewMode); toast.success("ตั้งเป็นมุมมองเริ่มต้นของคุณแล้ว"); }}
-            title={defView === viewMode ? "มุมมองนี้เป็นค่าเริ่มต้นของคุณเมื่อเปิดหน้า" : "ตั้งมุมมองนี้เป็นค่าเริ่มต้นเมื่อเปิดหน้า (เฉพาะคุณ)"}
-            className={`h-9 px-2.5 text-sm rounded-lg border ${defView === viewMode ? "border-amber-300 bg-amber-50 text-amber-600" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>{defView === viewMode ? "⭐" : "☆"}</button>
-          {/* ⚙️ ตั้งค่า — รวม ติดตั้งแอป / ตั้งสีแบรนด์ / แจ้งเตือน ไว้ที่เดียว */}
-          <div className="relative">
-            <button onClick={() => setSettingsOpen((v) => !v)} title="ตั้งค่า — ติดตั้งแอป · สีแบรนด์ · แจ้งเตือน LINE"
-              className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">⚙️ ตั้งค่า ▾</button>
-            {settingsOpen && (<>
-              <div className="fixed inset-0 z-40" onClick={() => setSettingsOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 z-50 w-56 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
-                <PwaInstallButton className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-50" />
-                <button onClick={() => { setSettingsOpen(false); void openColor(); }} className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-50">🎨 ตั้งสีแบรนด์</button>
-                {canDispatch && (
-                  <button onClick={() => { setSettingsOpen(false); setLineSettingsOpen(true); }} className="w-full text-left px-3 py-2 text-slate-700 hover:bg-slate-50">
-                    🔔 แจ้งเตือน<div className="text-[11px] text-slate-400">กลุ่ม LINE + ข้อความแจ้งเตือน</div>
-                  </button>
-                )}
-              </div>
-            </>)}
-          </div>
-          {/* คำขอค้างจากหน้างาน (ขอเพิ่มวัตถุดิบ / ขอแก้สูตร) — ของกลาง เห็นตัวเลขโดยไม่ต้องเปิดเข้าไปดู */}
-          <RequestInboxButton />
-          <a href="/master/work-submissions" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📤 ตารางส่งงาน</a>
-          {/* สร้างใบสั่งผลิตได้จากบอร์ดเลย — ใช้ป๊อปของกลางตัวเดียวกับหน้าใบสั่งผลิต */}
-          {canEdit && <button onClick={() => setMoCreateOpen(true)} title="เปิดใบสั่งผลิตใหม่ (สร้างเสร็จการ์ดจะโผล่ในช่องรอจ่ายทันที)"
-            className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 whitespace-nowrap">＋ สร้างใบสั่งผลิต</button>}
-          <a href="/master/manufacturing-orders" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🏭 ใบสั่งผลิต</a>
-          {/* ปิดงาน/ยกเลิก/ตั้งวันกำหนด ทีละหลายใบ — หน้าแยก (ตารางกลาง + แถบล่าง) */}
-          <a href="/master/mo-backlog" title="ปิดงาน · ยกเลิก · ตั้งวันกำหนด ใบสั่งผลิตที่ค้างอยู่ ทีละหลายใบ" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">🧹 จัดการใบค้าง</a>
-          <div className="relative">
-            <button onClick={() => setPrintOpen((v) => !v)} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์รายงาน ▾</button>
-            {printOpen && (() => {
-              const planSel = printPlan || (activePlan !== "real" ? activePlan : plans[0]?.id) || "";
-              const planHref = planSel ? `/print/work-board?type=plan&plan=${encodeURIComponent(planSel)}` : "";
-              return (<>
-              <div className="fixed inset-0 z-40" onClick={() => setPrintOpen(false)} />
-              <div className="absolute right-0 top-full mt-1 z-50 w-72 bg-white border border-slate-200 rounded-lg shadow-lg py-1 text-sm">
-                <div className="px-3 py-2 border-b border-slate-100">
-                  <label className="text-[11px] text-slate-500 block mb-1">เลือกกลุ่มที่จะพิมพ์ (รอจ่าย/กำลังผลิต)</label>
-                  <select value={pendGroupFilter} onChange={(e) => setPendGroupFilter(e.target.value)} className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
-                    <option value="__all__">ทั้งหมด</option>
-                    <option value="__none__">— ยังไม่จับกลุ่ม —</option>
-                    {moGroups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
-                  </select>
-                </div>
-                <a href={printUrl("all")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-indigo-700 bg-indigo-50/60 hover:bg-indigo-50 font-medium">🖨 พิมพ์ทั้งหมดในใบเดียว<div className="text-[11px] text-indigo-400 font-normal">รอจ่าย + งานเหมา + กำลังผลิต (ของจริง)</div></a>
-                <a href={printUrl("pending")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">📋 รายการรอจ่ายทั้งหมด<div className="text-[11px] text-slate-400">พร้อมรูป+ค่าแรง · ตัวที่ยังไม่ตั้ง = เว้นช่องให้กรอก</div></a>
-                <a href={printUrl("piece")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">🧵 รายการรอจ่ายเหมาทั้งหมด<div className="text-[11px] text-slate-400">เฉพาะงานเหมารายชิ้นที่รอจ่าย</div></a>
-                <a href={printUrl("production")} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block px-3 py-2 text-slate-700 hover:bg-slate-50">🔨 รายการกำลังผลิต<div className="text-[11px] text-slate-400">แยกตามโต๊ะ/ช่าง มีรายละเอียดแต่ละโต๊ะ</div></a>
-                <div className="px-3 py-2 border-t border-slate-100">
-                  <label className="text-[11px] text-slate-500 block mb-1">📅 รายการจ่ายงานตามแผน — เลือกแผน</label>
-                  <select value={planSel} onChange={(e) => setPrintPlan(e.target.value)} disabled={plans.length === 0} className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white mb-1.5 disabled:bg-slate-50">
-                    {plans.length === 0 ? <option value="">— ยังไม่มีแผน —</option> : plans.map((p) => <option key={p.id} value={p.id}>{p.name}{p.line_count ? ` (${p.line_count})` : ""}</option>)}
-                  </select>
-                  {planSel
-                    ? <a href={planHref} target="_blank" rel="noreferrer" onClick={() => setPrintOpen(false)} className="block text-center px-3 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">พิมพ์แผนที่เลือก</a>
-                    : <div className="text-center px-3 py-1.5 bg-slate-100 text-slate-400 rounded-lg">ยังไม่มีแผนให้พิมพ์</div>}
-                </div>
-              </div>
-              </>);
-            })()}
-          </div>
-        </div>
-      </div>
+    <div className={isMax ? "fixed inset-0 z-40 bg-white flex flex-col p-3 overflow-auto" : "max-w-[1700px] mx-auto px-3 py-3 xl:px-5 xl:py-5"}>
+      {/* แถบบนแบบแอป — จอคอม/embed/ขยายเต็มจอ วาดในหน้า · จอเล็กอยู่ในแถบบนของเชลล์ (ของกลาง page-chrome) */}
+      {ownBar && <PageChromeBar variant="page" className="mb-3" />}
+      {viewMode === "board" && <p className="mb-2 text-sm text-slate-500">ติ๊ก <b>เตรียม/ตัด</b> บนการ์ด → ครบทั้งคู่ <b className="text-emerald-600">ไฟเขียว</b> = พร้อมจ่าย → ลากไปวางที่แผนกช่างเพื่อจ่ายงาน</p>}
 
       {/* Toolbar — เฉพาะมุมมองบอร์ด */}
       {/* กลุ่ม D: แท็บแผนจ่ายงาน (ของจริง / แผนร่าง) */}
@@ -3424,7 +3426,17 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     ...(canSeeMoney ? [["noprice", "🏷 ยังไม่ตั้งราคา", (m: PendingMO) => priceByMo !== null && !priceOk(m)] as [string, string, (m: PendingMO) => boolean]] : []),
     ["rush", "🔥 งานเร่ง", (m) => (m.priority ?? 0) > 0],
   ];
-  const [qf, setQf] = useState("all");
+  // ตัวกรองด่วน + แบรนด์ — จำต่อคน ตามไปทุกเครื่อง (เปิดครั้งหน้ายังกรองอยู่)
+  const [filt, setFilt] = useUserPref<{ qf: string; brand: string }>("wb_table_filters", { qf: "all", brand: "" }, (v) => {
+    if (!v || typeof v !== "object") return null;
+    const o = v as Record<string, unknown>;
+    return { qf: typeof o.qf === "string" ? o.qf : "all", brand: typeof o.brand === "string" ? o.brand : "" };
+  });
+  const qf = filt.qf;
+  const setQf = (k: string) => setFilt({ ...filt, qf: k });
+  const brandF = filt.brand;   // "" = ทุกแบรนด์ · "__none__" = ใบที่ไม่ระบุแบรนด์
+  const setBrandF = (b: string) => setFilt({ ...filt, brand: brandF === b ? "" : b });
+  const brandOk = (b: string | null | undefined) => !brandF || (brandF === "__none__" ? !b : b === brandF);
   // ปุ่มกรองที่ชุดหน้าตาซ่อนไว้ = ไม่ให้ค้างกรองอยู่โดยมองไม่เห็นปุ่ม
   const chipOn = (k: string) => dc.show.chips && dc.chips[k] !== false;
   const qfEff = qf !== "all" && chipOn(qf) ? qf : "all";
@@ -3433,7 +3445,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const lateDays = (m: PendingMO) => Math.max(0, ...[m.due_date, m.internal_due_date].filter((d): d is string => !!d).map((d) => ymdDiff(d.slice(0, 10), today)));
   const nearDue = (m: PendingMO) => [m.due_date, m.internal_due_date].filter((d): d is string => !!d).sort()[0] ?? "9999";
   const pendShown = (() => {
-    const rows = pending.filter(qfFn);
+    const rows = pending.filter((m) => qfFn(m) && brandOk(m.brand));
     if (dc.sortDef === "urgent") return [...rows].sort((a, b) => lateDays(b) - lateDays(a) || (b.priority ?? 0) - (a.priority ?? 0)
       || STAGE_META[stageOf(a, prog?.[a.mo_no])][1] - STAGE_META[stageOf(b, prog?.[b.mo_no])][1] || nearDue(a).localeCompare(nearDue(b)));
     if (dc.sortDef === "old") return [...rows].sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""));
@@ -3882,9 +3894,27 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const qcText = (q: QcQueueRow) => `${q.sku ?? ""} ${q.name ?? ""} ${q.mo_no ?? ""} ${q.worker ?? ""}`;
   const qq = tableSearch.trim().toLowerCase();
   const hit = (s: string) => !qq || s.toLowerCase().includes(qq);
+  // แท็บกำลังผลิตกรองแบรนด์ด้วย (ชิปเดียวกัน) · ชิปแบรนด์นับจากแท็บที่เปิดอยู่ (ไม่กรองด่วน)
+  const wosShown = brandF ? wos.filter((w) => brandOk(w.brand)) : wos;
+  const brandChips = (() => {
+    const src: { brand?: string | null; brand_color?: string | null }[] = tab === "wip" ? wos : pending;
+    const m = new Map<string, { n: number; color: string | null }>();
+    for (const r of src) { const k = r.brand || "__none__"; const e = m.get(k) ?? { n: 0, color: r.brand_color ?? null }; e.n += 1; m.set(k, e); }
+    if (brandF && !m.has(brandF)) m.set(brandF, { n: 0, color: null });   // แบรนด์ที่จำไว้แต่แท็บนี้ไม่มี = ยังโชว์ชิปให้กดล้างได้
+    return [...m.entries()].sort((a, b) => (a[0] === "__none__" ? 1 : b[0] === "__none__" ? -1 : b[1].n - a[1].n));
+  })();
+  // เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรอง (ตารางได้ที่เต็ม เหมือนแอป) · เลื่อนขึ้น/กลับบนสุด = โชว์
+  const [topHidden, setTopHidden] = useState(false);
+  const lastTop = useRef(0);
+  const onTableScroll = useCallback((top: number) => {
+    const d = top - lastTop.current; lastTop.current = top;
+    if (top < 24) setTopHidden(false);
+    else if (d > 8 && top > 120) setTopHidden(true);
+    else if (d < -24) setTopHidden(false);
+  }, []);
   const tabCards = ([
     ["pend", "📥", "รอจ่าย", pendShown.filter((m) => hit(pendText(m))).length, pending.length, "ยังไม่ได้จ่ายให้โต๊ะ/ช่าง"],
-    ["wip", "🛠", "กำลังผลิต", wos.filter((w) => hit(woText(w))).length, wos.length, "จ่ายแล้ว รอช่างส่งคืน"],
+    ["wip", "🛠", "กำลังผลิต", wosShown.filter((w) => hit(woText(w))).length, wos.length, "จ่ายแล้ว รอช่างส่งคืน"],
     ["qc", "✅", "รอ QC รับเข้า", qQueue.filter((q) => hit(qcText(q))).length, qQueue.length, "ช่างส่งแล้ว รอตรวจ/เข้าชั้น"],
   ] as ["pend" | "wip" | "qc", string, string, number, number, string][]).filter(([k]) => tabVisible(k));
   // แถบสรุปของแท็บ "กำลังผลิต" / "รอ QC"
@@ -3938,14 +3968,46 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const [fitH, setFitH] = useState<number | null>(null);
   useLayoutEffect(() => {
     if (full) return;
-    const fit = () => { const el = boxRef.current; if (el) setFitH(Math.max(360, Math.floor(window.innerHeight - el.getBoundingClientRect().top - 8))); };
+    // หักแถบเมนูล่างของเชลล์ (จอเล็ก — ลอยทับเนื้อหา) ไม่งั้นแถวท้ายตารางโดนบัง
+    const fit = () => {
+      const el = boxRef.current; if (!el) return;
+      const nr = (document.querySelector('nav[aria-label="เมนูล่าง"]') as HTMLElement | null)?.getBoundingClientRect();
+      const navH = nr && nr.height > 0 && nr.top < window.innerHeight ? window.innerHeight - nr.top : 0;
+      setFitH(Math.max(360, Math.floor(window.innerHeight - el.getBoundingClientRect().top - navH - 8)));
+    };
     fit();
+    const late = setTimeout(fit, 400);   // หัวหน้า/ข้อมูลโหลดเสร็จทีหลัง ตำแหน่งกล่องขยับ → วัดซ้ำอีกรอบ
     window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
-  }, [full, framePreview]);
+    return () => { clearTimeout(late); window.removeEventListener("resize", fit); };
+  }, [full, framePreview, tab]);
+  useEffect(() => { setTopHidden(false); lastTop.current = 0; }, [tab]);
+  // กล่องตาราง: สูงตายตัวพอดีจอ (flex-col) → ตารางเลื่อนในตัว + หัวตารางติดบน · เลือกหลายใบ = เว้นล่างให้แถบคำสั่งลอย
+  const anySel = (tab === "pend" && selMoNos.length > 0) || (tab === "wip" && selWos.length > 0) || (tab === "qc" && qSel.size > 0);
   const boxProps = full
-    ? { ref: boxRef, className: "fixed inset-0 z-40 overflow-y-auto bg-slate-50 p-3 sm:p-4 space-y-3" }
-    : { ref: boxRef, className: "space-y-4 overflow-y-auto pr-1", style: { maxHeight: fitH ? `${fitH}px` : "calc(100vh - 210px)" } };
+    ? { ref: boxRef, className: `fixed inset-0 z-40 flex flex-col gap-3 overflow-hidden bg-slate-50 p-3 sm:p-4 ${anySel ? "pb-24" : ""}` }
+    : { ref: boxRef, className: `flex flex-col gap-3 overflow-hidden ${anySel ? "pb-20" : ""}`, style: { height: fitH ? `${fitH}px` : "calc(100vh - 210px)" } };
+  const frameBoxProps = { ref: boxRef, className: "space-y-3 overflow-y-auto pr-1", style: { maxHeight: fitH ? `${fitH}px` : "calc(100vh - 210px)" } };
+  // ค้นหา + มุมมองหน้านี้ → แถบบนแบบแอป (ของกลาง page-chrome): จอเล็ก = แถบบนเชลล์ + ปุ่มผู้ใช้ · จอคอม = แถบของหน้า
+  usePageChrome({
+    search: dc.show.search ? { value: tableSearch, onChange: setTableSearch, placeholder: "ค้นในบอร์ด — สินค้า / เลขใบ / ใบจ่ายงาน / ช่าง" } : null,
+    viewOptions: (
+      <div className="space-y-2">
+        {dc.show.dev && (
+          <div className="flex overflow-hidden rounded-lg border border-slate-200 divide-x divide-slate-200 [&>button]:flex-1" title="มุมมองตาราง (จำไว้ที่เครื่องนี้)">
+            {devBtn("pc", "💻 คอม", "มุมมองจอคอม")}{devBtn("ipadL", "📱 นอน", "iPad แนวนอน — ตารางแถวใหญ่ กดง่าย")}{devBtn("ipadP", "📱 ตั้ง", "iPad แนวตั้ง — 1 ใบ = 1 การ์ด")}
+          </div>
+        )}
+        <button type="button" onClick={() => setPanelOpen((v) => !v)}
+          className={`flex h-9 w-full items-center rounded-lg border px-3 text-left text-sm ${panelOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+          🎛 หน้าตา: {presetName}<span className="ml-auto text-xs text-slate-400">{panelOpen ? "ปิดแผง" : "ปรับ ›"}</span>
+        </button>
+        <button type="button" onClick={toggleFull}
+          className={`flex h-9 w-full items-center rounded-lg border px-3 text-left text-sm ${full ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
+          {full ? "✕ ออกจากเต็มจอ" : "⛶ เต็มจอ"}<span className="ml-auto text-xs opacity-60">{full ? "" : "ซ่อนเมนูและหัวหน้า"}</span>
+        </button>
+      </div>
+    ),
+  });
   const fullBtn = (
     <button type="button" onClick={toggleFull} title={full ? "ออกจากโหมดเต็มจอ" : "ขยายตารางเต็มหน้าต่าง (ซ่อนเมนูและหัวหน้า) — จำไว้ที่เครื่องนี้"}
       className={`${touch ? "h-11" : "h-9"} px-3 text-sm rounded-lg border whitespace-nowrap ${full ? "bg-slate-800 border-slate-800 text-white hover:bg-slate-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
@@ -3958,7 +4020,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     const sz = dev === "ipadP" ? IPAD_SIZE.portrait : IPAD_SIZE.landscape;
     const openUrl = `${window.location.origin}/master/work-board?view=table`;
     return (
-      <div {...boxProps}>
+      <div {...frameBoxProps}>
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <p className="text-sm text-slate-600">📱 ดูแบบ iPad ของจริง — หน้าจริงขนาดเท่าเครื่อง กดใช้งานในกรอบได้เลย · สแกน QR ด้านขวาเพื่อเปิดบน iPad</p>
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden divide-x divide-slate-200" title="มุมมองตาราง (จำไว้ที่เครื่องนี้)">
@@ -3976,60 +4038,51 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
 
   return (
     <div {...boxProps}>
-      {/* 🎛 แผงตั้งค่าหน้าตา (ไม่ถูกขยายตามขนาดทั้งหน้า — ปุ่มในแผงขนาดคงที่) */}
+      {/* เต็มจอ = ทับแถบบนของเชลล์ → วาดแถบแบบแอปของหน้าเองไว้บนสุด (ค้นหา · ปุ่ม · มุมมอง) */}
+      {full && <PageChromeBar variant="page" className="shrink-0" />}
+      {/* 🎛 แผงตั้งค่าหน้าตา (ไม่ถูกขยายตามขนาดทั้งหน้า — ปุ่มในแผงขนาดคงที่) · สูงไม่เกินครึ่งกล่อง เลื่อนในแผงได้ */}
       {panelOpen && (
-        <TableDisplayPanel d={disp} isAdmin={canSeeMoney} colOptions={panelColOptions} currentCols={pendColPrefs.visible.map((c) => c.key)}
-          cardGroups={panelCardGroups} chipOptions={panelChips} onClose={() => setPanelOpen(false)} />
+        <div className="max-h-[45%] shrink-0 overflow-y-auto">
+          <TableDisplayPanel d={disp} isAdmin={canSeeMoney} colOptions={panelColOptions} currentCols={pendColPrefs.visible.map((c) => c.key)}
+            cardGroups={panelCardGroups} chipOptions={panelChips} onClose={() => setPanelOpen(false)} />
+        </div>
       )}
-      <div className="space-y-4" style={zoomStyle}>
-      {/* ค้นหาร่วม 3 แท็บ + มุมมองอุปกรณ์ + 🎛 หน้าตา (ปุ่มนี้โชว์เสมอ — กันซ่อนทุกอย่างแล้วกลับไม่ได้) */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {dc.show.search ? (
-          <div className="relative flex-1 min-w-[16rem]">
-            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">🔍</span>
-            <input value={tableSearch} onChange={(e) => setTableSearch(e.target.value)} placeholder="ค้นหาทั้ง 3 แท็บ — สินค้า / เลขใบสั่งผลิต / ใบจ่ายงาน / โต๊ะ / ช่าง"
-              className={`w-full ${touch ? "h-11 text-base" : "h-9 text-sm"} pl-9 pr-9 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-300`} />
-            {tableSearch && <button type="button" onClick={() => setTableSearch("")} title="ล้างคำค้น" className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">✕</button>}
-          </div>
-        ) : <div className="flex-1" />}
-        {dc.show.dev && (
-          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden divide-x divide-slate-200" title="มุมมองตาราง (จำไว้ที่เครื่องนี้)">
-            {devBtn("pc", "💻 คอม", "มุมมองจอคอม")}
-            {devBtn("ipadL", "📱 iPad แนวนอน", "ตารางแถวใหญ่ กดง่าย")}
-            {devBtn("ipadP", "📱 iPad แนวตั้ง", "1 ใบ = 1 การ์ด")}
-          </div>
-        )}
-        <button type="button" onClick={() => setPanelOpen((v) => !v)} title="ตั้งค่าหน้าตาตาราง / เลือกชุด ปกติ · โหมดง่าย · กำหนดเอง"
-          className={`h-9 px-3 text-sm rounded-lg border whitespace-nowrap ${panelOpen ? "bg-blue-50 border-blue-300 text-blue-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-          🎛 หน้าตา: {presetName}
+      <div className={`flex min-h-0 flex-col gap-3 ${tab === "pend" ? "flex-1" : "shrink-0"}`} style={zoomStyle}>
+      {topHidden ? (
+        // เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรองให้ตารางได้ที่เต็ม (เหมือนแอป) · แตะแถบนี้หรือเลื่อนขึ้น = กลับมา
+        <button type="button" onClick={() => setTopHidden(false)}
+          className="flex h-9 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-sm text-slate-600 hover:bg-slate-50">
+          <span className="text-slate-400">▾</span>
+          <span className="font-medium text-slate-800">{tabCards.find(([k]) => k === tab)?.[2] ?? ""}</span>
+          <span className="truncate text-slate-500">
+            {tab === "pend" && qfEff !== "all" ? `· ${quickFilters.find(([k]) => k === qfEff)?.[1] ?? ""} ` : ""}
+            {brandF && tab !== "qc" ? `· ${brandF === "__none__" ? "ไม่ระบุแบรนด์" : brandF}` : ""}
+          </span>
+          <span className="ml-auto shrink-0 text-[11px] text-slate-400">แตะเพื่อแสดงแท็บ/ตัวกรอง</span>
         </button>
-        {fullBtn}
-      </div>
-      {/* แท็บการ์ดใหญ่ — ตัวเลข = จำนวนใบ (ตอนค้นหา = จำนวนที่ค้นเจอในแท็บนั้น) */}
-      {dc.show.tabs && <div className={`grid gap-2 ${tabCards.length === 3 ? "grid-cols-3" : tabCards.length === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+      ) : (<>
+      {/* แท็บแบบปุ่มแบ่งช่อง — ตัวเลข = จำนวนใบ (ตอนค้นหา/กรอง = จำนวนที่เจอ / ทั้งหมด) */}
+      {dc.show.tabs && <div className="flex shrink-0 gap-1 rounded-xl bg-slate-100 p-1">
         {tabCards.map(([k, icon, label, found, total, sub]) => {
           const on = tab === k;
+          const filtered = found !== total;
           return (
-            <button key={k} type="button" onClick={() => pickTab(k)}
-              className={`text-left rounded-xl border-2 px-3 ${touch ? "py-3" : "py-2.5"} transition-colors ${on ? "border-blue-500 bg-blue-50" : "border-slate-200 bg-white hover:border-slate-300"}`}>
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-lg shrink-0">{icon}</span>
-                <span className={`font-semibold truncate ${on ? "text-blue-700" : "text-slate-700"}`}>{label}</span>
-                <span className={`ml-auto shrink-0 text-2xl font-bold tabular-nums leading-none ${on ? "text-blue-700" : "text-slate-800"}`}>
-                  {fmt(qq ? found : total)}{qq && <span className="text-xs font-normal text-slate-400"> / {fmt(total)}</span>}
-                </span>
-              </div>
-              <div className={`mt-1 text-[11px] truncate ${qq && found > 0 && !on ? "text-blue-600" : "text-slate-500"}`}>{qq ? (found > 0 ? `ค้นเจอ ${fmt(found)} ใบ` : "ไม่พบในแท็บนี้") : sub}</div>
+            <button key={k} type="button" onClick={() => pickTab(k)} title={sub}
+              className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 ${touch ? "h-11" : "h-9"} text-sm font-medium transition-colors ${on ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}>
+              <span className="shrink-0">{icon}</span>
+              <span className="truncate">{label}</span>
+              <span className={`shrink-0 rounded-full px-2 text-xs tabular-nums ${on ? "bg-blue-100 text-blue-700" : "bg-white/80 text-slate-500"}`}>
+                {fmt(filtered ? found : total)}{filtered && <span className="opacity-60">/{fmt(total)}</span>}
+              </span>
             </button>
           );
         })}
       </div>}
-      {tab === "pend" && (<>
-      {/* แถบสรุป + ปุ่มกรองด่วน (ตัวเลขสรุปคิดจากใบที่กรองอยู่) */}
-      <div className="space-y-2">
-        {SumRow({ cards: sumCards, keys: pendCardKeys })}
-        {dc.show.chips && <div className={`flex items-center gap-1.5 ${touch ? "overflow-x-auto pb-1" : "flex-wrap"}`}>
-          {quickFilters.filter(([k]) => k === "all" || chipOn(k)).map(([k, label, fn]) => {
+      {tab === "pend" && SumRow({ cards: sumCards, keys: pendCardKeys })}
+      {/* ชิปตัวกรองด่วน + แบรนด์ (แถวเดียว เลื่อนแนวนอนด้วยนิ้ว) — จำต่อคน */}
+      {(tab === "pend" || tab === "wip") && ((tab === "pend" && dc.show.chips) || brandChips.length > 1) && (
+        <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]">
+          {tab === "pend" && dc.show.chips && quickFilters.filter(([k]) => k === "all" || chipOn(k)).map(([k, label, fn]) => {
             const n = k === "all" ? pending.length : pending.filter(fn).length;
             return (
               <button key={k} type="button" onClick={() => setQf(k)}
@@ -4038,14 +4091,31 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
               </button>
             );
           })}
-        </div>}
-      </div>
+          {brandChips.length > 1 && (<>
+            {tab === "pend" && dc.show.chips && <span className="mx-1 h-6 w-px shrink-0 bg-slate-200" aria-hidden />}
+            {brandChips.map(([b, info]) => {
+              const on = brandF === b;
+              return (
+                <button key={b} type="button" onClick={() => setBrandF(b)} title={on ? "กดอีกครั้ง = ดูทุกแบรนด์" : `ดูเฉพาะ ${b === "__none__" ? "ใบที่ไม่ระบุแบรนด์" : `แบรนด์ ${b}`}`}
+                  className={`inline-flex shrink-0 items-center gap-1.5 ${touch ? "h-10 px-4" : "h-8 px-3"} text-sm rounded-full border ${on ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: info.color || "#94a3b8" }} aria-hidden />
+                  {b === "__none__" ? "ไม่ระบุแบรนด์" : b}
+                  <span className={on ? "text-blue-500" : "text-slate-400"}>{fmt(info.n)}</span>
+                </button>
+              );
+            })}
+          </>)}
+        </div>
+      )}
+      </>)}
+      {tab === "pend" && (<>
       <MiniTable
         rows={pendShown} rowKey={(m) => m.id} columns={dev === "ipadP" ? pendCols : pendColsShown} onRowClick={onPendRow}
         expandedKeys={expanded} renderExpanded={dc.expand ? renderPendDetail : undefined}
         onCellClick={dev !== "ipadP" ? onPendCell : undefined} activeCell={(m) => PANE_COL[openPane[m.id] ?? ""] ?? null}
         touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
         layout={dev === "ipadP" ? "cards" : "table"} renderCard={renderPendCard}
+        fill stickyCols={dev === "ipadP" ? 0 : 2} inlineActions onScrollTop={onTableScroll}
         countUnit="ใบ"
         selectable={dc.check} selected={sel} onSelectedChange={setSel}
         actions={<div className="flex items-center gap-2 flex-wrap">
@@ -4065,11 +4135,6 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
             <option value="ready">จัดกลุ่มตามความพร้อม</option>
           </select>
-          </>}
-          {selMoNos.length > 0 && <>
-            <button onClick={() => setAssignOpen(true)} className="h-8 px-3 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700">🗂 จับเข้ากลุ่ม ({selMoNos.length})</button>
-            <button onClick={() => setDueOpen(true)} className="h-8 px-3 text-sm font-medium bg-amber-600 text-white rounded-lg hover:bg-amber-700">📅 แก้วันกำหนด ({selMoNos.length})</button>
-            {canEdit && <button onClick={() => openDispatchFor(sel)} className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">🚚 จ่ายงาน ({selMoNos.length})</button>}
           </>}
         </div>}
         searchText={pendText} hideSearch
@@ -4221,11 +4286,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </ERPModal>
         );
       })()}
-      {tab === "wip" && (<div className="space-y-4" style={zoomStyle}>
-      {SumRow({ cards: wipCards, keys: wipCardKeys })}
+      {tab === "wip" && (<div className="flex min-h-0 flex-1 flex-col gap-3" style={zoomStyle}>
+      {!topHidden && SumRow({ cards: wipCards, keys: wipCardKeys })}
       <MiniTable
         key={`wo-${woGroup}`}
-        rows={wos} rowKey={(w) => w.id} columns={woColPrefs.visible}
+        rows={wosShown} rowKey={(w) => w.id} columns={woColPrefs.visible}
+        fill stickyCols={1} inlineActions onScrollTop={onTableScroll}
         touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
         onRowClick={(w) => { if (woSel.size > 0) setWoSel((prev) => { const n = new Set(prev); n.has(w.id) ? n.delete(w.id) : n.add(w.id); return n; }); else onOpenWO(w); }}
         countUnit="ใบ"
@@ -4237,10 +4303,6 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
             <option value="status">จัดกลุ่มตามสถานะ</option>
           </select>}
-          {selWos.length > 0 && (<>
-            {canEdit && <button onClick={openQc} title="ส่งงานที่ติ๊กไว้เข้า QC (ลงวันที่ย้อนหลังได้)" className="h-8 px-3 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">📤 ส่งงาน QC ({selWos.length})</button>}
-            <button onClick={() => setWoLaborOpen(true)} className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">💰 ใส่ค่าแรง ({selWos.length})</button>
-          </>)}
         </div>}
         searchText={woText} hideSearch
         searchValue={tableSearch} onSearchChange={setTableSearch}
@@ -4251,19 +4313,18 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       />
       </div>)}
       {/* ✅ รอ QC รับเข้า — งานที่ช่างส่งมาแล้ว รอดึงเข้าชั้น (คิวเดียวกับหน้าโกดัง QC) จัดการจบในหน้าเดียว */}
-      {tab === "qc" && qcSectionOn && (<div className="space-y-4" style={zoomStyle}>
-        {SumRow({ cards: qcCards, keys: qcCardKeys })}
+      {tab === "qc" && qcSectionOn && (<div className="flex min-h-0 flex-1 flex-col gap-3" style={zoomStyle}>
+        {!topHidden && SumRow({ cards: qcCards, keys: qcCardKeys })}
         <MiniTable
           rows={qQueue} rowKey={(q) => q.wo_id}
+          fill stickyCols={1} inlineActions onScrollTop={onTableScroll}
           touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
           columns={qcColPrefs.visible}
           countUnit="ใบ"
           selectable={dc.check} selected={qSel} onSelectedChange={setQSel}
           actions={<div className="flex items-center gap-2 flex-wrap">
             {dc.show.colBtn && <ColumnChooser state={qcColPrefs} note="จำแยกกันระหว่างจอคอมกับ iPad" />}
-            {qSel.size > 0 && canEdit && (
-              <button onClick={openRecv} className="h-8 px-3 text-sm font-medium bg-teal-600 text-white rounded-lg hover:bg-teal-700">📥 รับเข้าชั้น ({qSel.size})</button>
-            )}
+
             <a href="/master/qc-warehouse" className="h-8 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">เปิดโกดัง QC ↗</a>
           </div>}
           searchText={qcText} hideSearch
@@ -4273,6 +4334,19 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         />
       </div>)}
 
+      {/* แถบคำสั่งลอยด้านล่าง (ของกลาง BulkActionBar) — โผล่เมื่อติ๊กเลือกหลายใบ แทนปุ่มกระจายบนหัวตาราง */}
+      <BulkActionBar count={tab === "pend" ? selMoNos.length : 0} unit="ใบ" onClear={() => setSel(new Set())} spacer={false}>
+        <button type="button" onClick={() => setAssignOpen(true)} className="h-9 rounded-lg bg-violet-500 px-3 text-sm font-medium text-white hover:bg-violet-600">🗂 จับเข้ากลุ่ม</button>
+        <button type="button" onClick={() => setDueOpen(true)} className="h-9 rounded-lg bg-amber-500 px-3 text-sm font-medium text-white hover:bg-amber-600">📅 แก้วันกำหนด</button>
+        {canEdit && <button type="button" onClick={() => openDispatchFor(sel)} className="h-9 rounded-lg bg-emerald-500 px-3 text-sm font-medium text-white hover:bg-emerald-600">🚚 จ่ายงาน</button>}
+      </BulkActionBar>
+      <BulkActionBar count={tab === "wip" ? selWos.length : 0} unit="ใบ" onClear={() => setWoSel(new Set())} spacer={false}>
+        {canEdit && <button type="button" onClick={openQc} title="ส่งงานที่ติ๊กไว้เข้า QC (ลงวันที่ย้อนหลังได้)" className="h-9 rounded-lg bg-emerald-500 px-3 text-sm font-medium text-white hover:bg-emerald-600">📤 ส่งงาน QC</button>}
+        <button type="button" onClick={() => setWoLaborOpen(true)} className="h-9 rounded-lg bg-indigo-500 px-3 text-sm font-medium text-white hover:bg-indigo-600">💰 ใส่ค่าแรง</button>
+      </BulkActionBar>
+      <BulkActionBar count={tab === "qc" && canEdit ? qSel.size : 0} unit="ใบ" onClear={() => setQSel(new Set())} spacer={false}>
+        <button type="button" onClick={openRecv} className="h-9 rounded-lg bg-teal-500 px-3 text-sm font-medium text-white hover:bg-teal-600">📥 รับเข้าชั้น</button>
+      </BulkActionBar>
       {/* ป๊อปรับเข้าชั้น QC (หลายใบ) */}
       {(() => {
         const list = qQueue.filter((q) => qSel.has(q.wo_id));
@@ -4427,5 +4501,62 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       })()}
 
     </div>
+  );
+}
+
+// ---- แถบบนแบบแอป: สลับมุมมองบอร์ด (ปุ่มชื่อหน้า ▾) ----
+type BoardView = "board" | "canvas" | "table" | "shop" | "purchase" | "calendar" | "labor" | "exec";
+const BOARD_VIEWS: [BoardView, string, string][] = [
+  ["board", "📋", "บอร์ด"], ["canvas", "🗂", "แคนวาส (โซนตามโต๊ะ)"], ["table", "▦", "ตาราง"], ["shop", "🛒", "ช้อปจ่ายงาน"],
+  ["purchase", "📦", "ขอซื้อ/เตรียม"], ["calendar", "📅", "ปฏิทิน"], ["labor", "💰", "ค่าแรงรายเดือน"], ["exec", "👔", "แผนผู้บริหาร"],
+];
+function BoardViewPicker({ view, isAdmin, defView, onPick, onSaveDefault }: {
+  view: BoardView; isAdmin: boolean; defView: BoardView | null | undefined; onPick: (v: BoardView) => void; onSaveDefault: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLDivElement>(null);
+  const cur = BOARD_VIEWS.find(([k]) => k === view);
+  return (
+    <div ref={anchor} className="inline-block max-w-full min-w-0">
+      <button type="button" onClick={() => setOpen((v) => !v)} title="บอร์ดจ่ายงาน — กดเพื่อสลับมุมมอง"
+        className="inline-flex h-9 max-w-full min-w-0 items-center gap-1.5 rounded-lg px-1.5 hover:bg-slate-100">
+        <span className="text-base">📋</span>
+        <span className="hidden truncate font-semibold text-slate-800 md:inline">บอร์ดจ่ายงาน</span>
+        <span className="truncate text-sm text-slate-600"><span className="hidden md:inline">· </span>{cur?.[1]} {cur?.[2]}</span>
+        <span className="text-xs text-slate-400">▾</span>
+      </button>
+      <FloatingDropdown anchorRef={anchor} open={open} onClose={() => setOpen(false)} minWidth={250} maxWidth={300}>
+        <div className="overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 text-sm shadow-xl" style={{ maxHeight: "var(--fd-max-h, 80vh)" }}>
+          <div className="px-3 pt-1.5 pb-1 text-[11px] font-medium text-slate-400">มุมมองของบอร์ด</div>
+          {BOARD_VIEWS.filter(([k]) => k !== "exec" || isAdmin).map(([k, ic, label]) => (
+            <button key={k} type="button" onClick={() => { onPick(k); setOpen(false); }}
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 ${k === view ? "bg-blue-50/60 font-medium text-blue-700" : "text-slate-700"}`}>
+              <span className="w-5 text-center">{ic}</span><span className="flex-1">{label}</span>
+              {defView === k && <span title="มุมมองเริ่มต้นของคุณ">⭐</span>}
+            </button>
+          ))}
+          <div className="my-1 border-t border-slate-100" />
+          <button type="button" disabled={defView === view} onClick={() => { onSaveDefault(); setOpen(false); }}
+            className="w-full px-3 py-2 text-left text-slate-600 hover:bg-slate-50 disabled:text-slate-400">
+            {defView === view ? `⭐ "${cur?.[2]}" เป็นมุมมองเริ่มต้นของคุณแล้ว` : `☆ ตั้ง "${cur?.[2]}" เป็นมุมมองเริ่มต้นของฉัน`}
+          </button>
+        </div>
+      </FloatingDropdown>
+    </div>
+  );
+}
+
+// ---- แถบบนแบบแอป: "อัปเดต x นาทีที่แล้ว" — แตะเพื่อโหลดใหม่ (นานเกิน 10 นาที = สีเหลืองเตือน) ----
+function UpdatedAgo({ at, onReload }: { at: number | null; onReload: () => void }) {
+  const [, tick] = useState(0);
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 30000); return () => clearInterval(t); }, []);
+  const mins = at == null ? null : Math.floor((Date.now() - at) / 60000);
+  const short = mins == null ? "…" : mins < 1 ? "เพิ่งอัปเดต" : mins < 60 ? `${mins} นาที` : `${Math.floor(mins / 60)} ชม.`;
+  const long = mins == null ? "กำลังโหลด…" : mins < 1 ? "อัปเดตเมื่อสักครู่" : mins < 60 ? `อัปเดต ${mins} นาทีที่แล้ว` : `อัปเดต ${Math.floor(mins / 60)} ชม.ที่แล้ว`;
+  return (
+    <button type="button" onClick={onReload} title={`${long} — แตะเพื่อโหลดข้อมูลใหม่`}
+      className={`h-9 whitespace-nowrap rounded-lg px-2 text-[11px] ${mins != null && mins >= 10 ? "bg-amber-50 text-amber-700" : "text-slate-500 hover:bg-slate-100"}`}>
+      ⟳ <span className="xl:hidden">{short}</span><span className="hidden xl:inline">{long}</span>
+    </button>
   );
 }
