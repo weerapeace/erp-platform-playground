@@ -7,7 +7,7 @@
  * ลากการ์ด MO ปล่อยในโซนแผนก = popup จ่ายงาน · ลากใบจ่ายงานข้ามแผนก = ย้ายแผนก
  * ซ่อน MO เมื่อจ่ายครบ · ซ่อนใบจ่ายงานเมื่อรับครบ · กรอบสีแบรนด์ + ปุ่มตั้งสี
  */
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, Suspense, type PointerEvent as RPE } from "react";
+import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, useDeferredValue, Suspense, type PointerEvent as RPE } from "react";
 import { useSearchParams } from "next/navigation";
 import { postMoChecklistEvent } from "@/lib/mo-checklist-embed";
 import dynamicImport from "next/dynamic";
@@ -3275,6 +3275,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม / แก้กำหนดเสร็จ
   // คำค้นร่วมของทั้ง 2 ตาราง — พิมพ์ที่ไหนก็กรองทั้ง "รอจ่าย" และ "จ่ายแล้ว" (เดิมต่างคนต่างค้น หาของที่จ่ายไปแล้วไม่เจอ)
   const [tableSearch, setTableSearch] = useState("");
+  // ⚡ ช่องค้นหาตอบทันที · การกรองตาราง (~400 แถว) ตามมาทีหลังเมื่อเครื่องว่าง — พิมพ์รัว ๆ ไม่กระตุก
+  const searchQ = useDeferredValue(tableSearch);
   const [assignOpen, setAssignOpen] = useState(false);
   const [dueOpen, setDueOpen] = useState(false);
   const [dueVal, setDueVal] = useState("");
@@ -3981,7 +3983,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const pendText = (m: PendingMO) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`;
   const woText = (w: WorkOrder) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""}`;
   const qcText = (q: QcQueueRow) => `${q.sku ?? ""} ${q.name ?? ""} ${q.mo_no ?? ""} ${q.worker ?? ""}`;
-  const qq = tableSearch.trim().toLowerCase();
+  const qq = searchQ.trim().toLowerCase();
   const hit = (s: string) => !qq || s.toLowerCase().includes(qq);
   // แท็บกำลังผลิตกรองแบรนด์ด้วย (ชิปเดียวกัน) · ชิปแบรนด์นับจากแท็บที่เปิดอยู่ (ไม่กรองด่วน)
   const wosShown = brandF ? wos.filter((w) => brandOk(w.brand)) : wos;
@@ -3993,14 +3995,25 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     return [...m.entries()].sort((a, b) => (a[0] === "__none__" ? 1 : b[0] === "__none__" ? -1 : b[1].n - a[1].n));
   })();
   // เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรอง (ตารางได้ที่เต็ม เหมือนแอป) · เลื่อนขึ้น/กลับบนสุด = โชว์
-  const [topHidden, setTopHidden] = useState(false);
+  // ⚡ ไม่ใช้ state — สลับด้วย data-top บนกล่อง + CSS (เดิมทุกครั้งที่ซ่อน/โชว์ ทั้งบอร์ด ~400 แถววาดใหม่กลางการเลื่อน = กระตุก)
+  const topHiddenRef = useRef(false);
   const lastTop = useRef(0);
-  const onTableScroll = useCallback((top: number) => {
-    const d = top - lastTop.current; lastTop.current = top;
-    if (top < 24) setTopHidden(false);
-    else if (d > 8 && top > 120) setTopHidden(true);
-    else if (d < -24) setTopHidden(false);
+  const topLockUntil = useRef(0);
+  const setTopHidden = useCallback((h: boolean) => {
+    if (topHiddenRef.current === h) return;
+    topHiddenRef.current = h;
+    topLockUntil.current = performance.now() + 350;   // ซ่อน/โชว์แล้วความสูงตารางเปลี่ยน ตำแหน่งเลื่อนกระโดด → ไม่ตัดสินใจซ้ำช่วงสั้น ๆ (กันกระพริบไปมา)
+    const el = boxRef.current;
+    if (el) { if (h) el.dataset.top = "hidden"; else delete el.dataset.top; }
   }, []);
+  const onTableScroll = useCallback((top: number, el?: HTMLElement) => {
+    const d = top - lastTop.current; lastTop.current = top;
+    if (top < 24) { setTopHidden(false); return; }
+    if (performance.now() < topLockUntil.current) return;
+    const atBottom = !!el && el.scrollTop + el.clientHeight >= el.scrollHeight - 4;   // ชนท้าย: ตารางสูงขึ้นแล้วตำแหน่งถอยเอง ไม่ใช่ผู้ใช้เลื่อนขึ้น
+    if (d > 8 && top > 120) setTopHidden(true);
+    else if (d < -24 && !atBottom) setTopHidden(false);
+  }, [setTopHidden]);
   const tabCards = ([
     ["pend", "📥", "รอจ่าย", pendShown.filter((m) => hit(pendText(m))).length, pending.length, "ยังไม่ได้จ่ายให้โต๊ะ/ช่าง"],
     ["wip", "🛠", "กำลังผลิต", wosShown.filter((w) => hit(woText(w))).length, wos.length, "จ่ายแล้ว รอช่างส่งคืน"],
@@ -4048,6 +4061,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const panelColOptions: [string, string][] = pendCols.map((c) => [c.key, c.label ?? (typeof c.header === "string" ? c.header : c.key)]);
 
   const presetName = disp.preset === "simple" ? "👓 โหมดง่าย" : disp.preset === "custom" ? "✏️ กำหนดเอง" : "ปกติ";
+  // ปิดป๊อปหน้าตา — ถ้าแอดมินแก้ชุดกลางค้าง (ยืนยันออกโดยไม่บันทึกแล้ว) = ทิ้งร่างชุดกลาง
+  const closePanel = () => { if (disp.editingShared) disp.cancelEditShared(); setPanelOpen(false); };
   // ⛶ เต็มจอ = ตารางทับทั้งหน้าต่าง (ซ่อนเมนู/หัวหน้า ใต้ป๊อปอัป z-50) จำต่อเครื่อง
   // ปกติ = กล่องสูงพอดีถึงขอบล่างจอ (วัดตำแหน่งจริง — เดิมเดา 100vh−210px แล้วเหลือที่ว่างด้านล่าง)
   const [full, setFull] = useState(false);
@@ -4086,9 +4101,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             {devBtn("pc", "💻 คอม", "มุมมองจอคอม")}{devBtn("ipadL", "📱 นอน", "iPad แนวนอน — ตารางแถวใหญ่ กดง่าย")}{devBtn("ipadP", "📱 ตั้ง", "iPad แนวตั้ง — 1 ใบ = 1 การ์ด")}
           </div>
         )}
-        <button type="button" onClick={() => setPanelOpen((v) => !v)}
-          className={`flex h-9 w-full items-center rounded-lg border px-3 text-left text-sm ${panelOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
-          🎛 หน้าตา: {presetName}<span className="ml-auto text-xs text-slate-400">{panelOpen ? "ปิดแผง" : "ปรับ ›"}</span>
+        <button type="button" onClick={() => setPanelOpen(true)}
+          className="flex h-9 w-full items-center rounded-lg border border-slate-200 bg-white px-3 text-left text-sm text-slate-700 hover:bg-slate-50">
+          🎛 หน้าตา: {presetName}<span className="ml-auto text-xs text-slate-400">ปรับ ›</span>
         </button>
         <button type="button" onClick={toggleFull}
           className={`flex h-9 w-full items-center rounded-lg border px-3 text-left text-sm ${full ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}>
@@ -4129,18 +4144,17 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     <div {...boxProps}>
       {/* เต็มจอ = ทับแถบบนของเชลล์ → วาดแถบแบบแอปของหน้าเองไว้บนสุด (ค้นหา · ปุ่ม · มุมมอง) */}
       {full && <PageChromeBar variant="page" className="shrink-0" />}
-      {/* 🎛 แผงตั้งค่าหน้าตา (ไม่ถูกขยายตามขนาดทั้งหน้า — ปุ่มในแผงขนาดคงที่) · สูงไม่เกินครึ่งกล่อง เลื่อนในแผงได้ */}
-      {panelOpen && (
-        <div className="max-h-[45%] shrink-0 overflow-y-auto">
-          <TableDisplayPanel d={disp} isAdmin={canSeeMoney} colOptions={panelColOptions} currentCols={pendColPrefs.visible.map((c) => c.key)}
-            cardGroups={panelCardGroups} onManageViews={() => setMgr({ open: true })} onClose={() => setPanelOpen(false)} />
-        </div>
-      )}
+      {/* 🎛 ตั้งค่าหน้าตา = ป๊อป (ปรับแล้วตารางด้านหลังเปลี่ยนทันที — เปิดแบบไม่เต็มจอจะได้เห็นผล) · แอดมินแก้ชุดกลางค้าง = ถามก่อนปิด */}
+      <ERPModal open={panelOpen} onClose={closePanel} title="🎛 ตั้งค่าหน้าตาตาราง" size="lg" storageKey="wb-table-display"
+        hasUnsavedChanges={!!disp.editingShared} defaultExpanded={false}>
+        <TableDisplayPanel embedded d={disp} isAdmin={canSeeMoney} colOptions={panelColOptions} currentCols={pendColPrefs.visible.map((c) => c.key)}
+          cardGroups={panelCardGroups} onManageViews={() => { setPanelOpen(false); setMgr({ open: true }); }} onClose={closePanel} />
+      </ERPModal>
       <div className={`flex min-h-0 flex-col gap-3 ${tab === "pend" ? "flex-1" : "shrink-0"}`} style={zoomStyle}>
-      {topHidden ? (
-        // เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรองให้ตารางได้ที่เต็ม (เหมือนแอป) · แตะแถบนี้หรือเลื่อนขึ้น = กลับมา
+      {/* เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรองให้ตารางได้ที่เต็ม (เหมือนแอป) · แตะแถบนี้หรือเลื่อนขึ้น = กลับมา
+          สลับด้วย CSS: กล่องมี data-top="hidden" → แถบย่อโผล่ · ส่วนแท็บ/ตัวกรองซ่อน (ไม่ render ใหม่) */}
         <button type="button" onClick={() => setTopHidden(false)}
-          className="flex h-9 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-sm text-slate-600 hover:bg-slate-50">
+          className="hidden h-9 shrink-0 items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-left text-sm text-slate-600 hover:bg-slate-50 [[data-top=hidden]_&]:flex">
           <span className="text-slate-400">▾</span>
           <span className="font-medium text-slate-800">{tabCards.find(([k]) => k === tab)?.[2] ?? ""}</span>
           <span className="truncate text-slate-500">
@@ -4149,7 +4163,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </span>
           <span className="ml-auto shrink-0 text-[11px] text-slate-400">แตะเพื่อแสดงแท็บ/ตัวกรอง</span>
         </button>
-      ) : (<>
+      <div className="contents [[data-top=hidden]_&]:hidden">
       {/* แท็บแบบปุ่มแบ่งช่อง — ตัวเลข = จำนวนใบ (ตอนค้นหา/กรอง = จำนวนที่เจอ / ทั้งหมด) */}
       {dc.show.tabs && <div className="flex shrink-0 gap-1 rounded-xl bg-slate-100 p-1">
         {tabCards.map(([k, icon, label, found, total, sub]) => {
@@ -4208,7 +4222,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </>)}
         </div>
       )}
-      </>)}
+      </div>
       {tab === "pend" && (<>
       {/* ลากปรับความกว้างคอลัมน์แล้ว → แถบให้กดบันทึกลงมุมมอง (ไม่บันทึกเองเงียบ ๆ) */}
       {widthDirty && (
@@ -4258,7 +4272,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </>}
         </div>}
         searchText={pendText} hideSearch
-        searchValue={tableSearch} onSearchChange={setTableSearch}
+        searchValue={searchQ} onSearchChange={setTableSearch}
         groupBy={pendGroup === "group" ? (m) => groupNameOf(m.mo_no) ?? "— ยังไม่จับกลุ่ม —"
           : pendGroup === "ready" ? (m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม")
           : pendGroup === "stage" ? (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][0]
@@ -4407,7 +4421,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         );
       })()}
       {tab === "wip" && (<div className="flex min-h-0 flex-1 flex-col gap-3" style={zoomStyle}>
-      {!topHidden && SumRow({ cards: wipCards, keys: wipCardKeys })}
+      <div className="contents [[data-top=hidden]_&]:hidden">{SumRow({ cards: wipCards, keys: wipCardKeys })}</div>
       <MiniTable
         key={`wo-${woGroup}`}
         rows={wosShown} rowKey={(w) => w.id} columns={woColPrefs.visible}
@@ -4425,7 +4439,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </select>}
         </div>}
         searchText={woText} hideSearch
-        searchValue={tableSearch} onSearchChange={setTableSearch}
+        searchValue={searchQ} onSearchChange={setTableSearch}
         groupBy={woGroup === "group" ? (w) => groupNameOf(w.mo_no) ?? "— ยังไม่จับกลุ่ม —" : woGroup === "status" ? (w) => (WO_STATUS[w.status]?.label ?? w.status) : undefined}
         groupLabel={woGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : "จัดกลุ่มตามสถานะ"} defaultGrouped={woGroup !== "none"}
         emptyText="ยังไม่มีงานที่จ่าย"
@@ -4434,7 +4448,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       </div>)}
       {/* ✅ รอ QC รับเข้า — งานที่ช่างส่งมาแล้ว รอดึงเข้าชั้น (คิวเดียวกับหน้าโกดัง QC) จัดการจบในหน้าเดียว */}
       {tab === "qc" && qcSectionOn && (<div className="flex min-h-0 flex-1 flex-col gap-3" style={zoomStyle}>
-        {!topHidden && SumRow({ cards: qcCards, keys: qcCardKeys })}
+        <div className="contents [[data-top=hidden]_&]:hidden">{SumRow({ cards: qcCards, keys: qcCardKeys })}</div>
         <MiniTable
           rows={qQueue} rowKey={(q) => q.wo_id}
           fill stickyCols={1} inlineActions onScrollTop={onTableScroll}
@@ -4448,7 +4462,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <a href="/master/qc-warehouse" className="h-8 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">เปิดโกดัง QC ↗</a>
           </div>}
           searchText={qcText} hideSearch
-          searchValue={tableSearch} onSearchChange={setTableSearch}
+          searchValue={searchQ} onSearchChange={setTableSearch}
           emptyText="ไม่มีงานรอรับเข้า QC"
           noMatchText={(q) => `ไม่พบ “${q}” ในแท็บรอ QC`}
         />

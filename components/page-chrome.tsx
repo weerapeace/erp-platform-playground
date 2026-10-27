@@ -44,6 +44,12 @@ export function usePageChromeSlots(): PageChromeSlots {
   return useSyncExternalStore(subscribe, () => merged, () => merged);
 }
 
+/** มีของบนแถบบนไหม (ชื่อ/ค้นหา/ปุ่ม) — คืน boolean: เชลล์ render ใหม่เฉพาะตอนค่านี้เปลี่ยน
+ *  ไม่ใช่ทุกครั้งที่หน้า render (หน้าใหญ่อย่างบอร์ดจ่ายงานจะได้ไม่ลากเชลล์ทั้งก้อนวาดใหม่ตาม = กระตุก) */
+export function usePageChromeHas(): boolean {
+  return useSyncExternalStore(subscribe, () => !!(merged.title || merged.search || merged.actions), () => false);
+}
+
 /** เชลล์ประกาศว่า "รับวาดแถบบนให้" (เฉพาะจอ < xl) — คืนค่า: มีเชลล์รับวาดอยู่ไหม (ไว้ให้หน้าใช้) */
 export function useChromeHost(register = false): boolean {
   useEffect(() => {

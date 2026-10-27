@@ -130,7 +130,7 @@ export type MiniTableProps<T> = {
   /** วาด actions ต่อท้ายแถวเครื่องมือ (เรียง/จัดกลุ่ม) ในแถวเดียวกัน — ประหยัดที่ */
   inlineActions?: boolean;
   /** เลื่อนในตาราง (เฉพาะ fill) — ส่ง scrollTop ไว้ซ่อน/โชว์ของเหนือตาราง */
-  onScrollTop?: (top: number) => void;
+  onScrollTop?: (top: number, el: HTMLDivElement) => void;
   /** โหมดการ์ด: วางเป็นตารางหลายคอลัมน์ (ค่า CSS grid-template-columns เช่น "repeat(auto-fill,minmax(240px,1fr))") · การ์ดที่กางเต็มแถว */
   cardGrid?: string;
   /** คุมความกว้างคอลัมน์จากข้างนอก (เช่น เก็บในมุมมองด่วน) — ใส่คู่ onWidthsChange · ไม่ใส่ = จำใน localStorage ตาม storageKey แบบเดิม */
@@ -419,7 +419,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const total = rows.length, shown = sorted.length;
   const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || groupBy) && total > 0;
   const actionsInToolbar = !!inlineActions && toolbarOn;   // แถวเดียว: เรียง/จัดกลุ่ม … ปุ่มของผู้เรียกชิดขวา
-  const onScroll = onScrollTop ? (e: React.UIEvent<HTMLDivElement>) => onScrollTop(e.currentTarget.scrollTop) : undefined;
+  const onScroll = onScrollTop ? (e: React.UIEvent<HTMLDivElement>) => onScrollTop(e.currentTarget.scrollTop, e.currentTarget) : undefined;
 
   return (
     <div className={`${maxHeightClass} ${maxHeightClass ? "overflow-y-auto pr-1" : ""} ${fill ? "flex flex-col min-h-0 flex-1" : ""} ${className}`}>

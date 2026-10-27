@@ -18,7 +18,7 @@ import { NotificationBell } from "@/components/notification-bell";
 import { LangToggle, useT } from "@/components/i18n";
 import { LangSync } from "@/components/lang-sync";
 import { GlobalSearch } from "@/components/global-search";
-import { PageChromeBar, PageViewOptionsSection, useChromeHost, useIsDesktopXl, usePageChromeSlots } from "@/components/page-chrome";
+import { PageChromeBar, PageViewOptionsSection, useChromeHost, useIsDesktopXl, usePageChromeHas } from "@/components/page-chrome";
 import { AccountMenu } from "@/components/account-menu";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
@@ -411,9 +411,9 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
   }, [ready, user, pathname, router]);
   const [searchOpen, setSearchOpen] = useState(false);
   // แถบบนแบบแอป (จอ < xl): หน้าลงทะเบียน ชื่อหน้า/ค้นหา/ปุ่ม ผ่าน usePageChrome → วาดแทนโลโก้ (ของกลาง components/page-chrome)
-  const pageChrome = usePageChromeSlots();
+  const pageHasChrome = usePageChromeHas();   // boolean เท่านั้น — เชลล์ไม่ render ใหม่ทุกครั้งที่หน้า render (กันหน้าใหญ่กระตุก)
   const isXl = useIsDesktopXl();   // จอคอม: แถบนี้ซ่อนอยู่แล้ว (xl:hidden) → ไม่ต้องวาดของหน้า (หน้าวาดเองในตัว)
-  const hasPageChrome = !isXl && !!(pageChrome.title || pageChrome.search || pageChrome.actions);
+  const hasPageChrome = !isXl && pageHasChrome;
   const [helpOpen, setHelpOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // พับเมนูซ้าย (desktop) — เหลือไอคอน เอาเมาส์วางแล้วกาง · จำค่าใน localStorage · จอเล็ก default พับ

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * แผงตั้งค่าหน้าตาตารางบอร์ดจ่ายงาน 6 หมวด (เปิดเหนือตาราง — ปรับแล้วเห็นผลทันที)
+ * แผงตั้งค่าหน้าตาตารางบอร์ดจ่ายงาน 6 หมวด (ป๊อปบนหน้าบอร์ด embedded — ปรับแล้วตารางด้านหลังเห็นผลทันที)
  * ค่า/ชุดหน้าตา/สิทธิ์แก้ชุดกลาง อยู่ที่ ./table-display (useTableDisplay)
  * ⚠️ ชิ้นย่อยเรียกเป็น "ฟังก์ชัน" ไม่ใช่ <Component/> — ไม่งั้นทุกครั้งที่ปรับค่า React สร้างใหม่ แถบเลื่อนจะหลุดมือกลางทาง
  */
@@ -11,13 +11,14 @@ import type { DisplayCfg, TableDisplay } from "./table-display";
 
 type Opt = [string, string];
 
-export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGroups, onManageViews, onClose }: {
+export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGroups, onManageViews, onClose, embedded = false }: {
   d: TableDisplay; isAdmin: boolean;
   colOptions: Opt[];                 // คอลัมน์ที่มีในแท็บรอจ่าย [key, ชื่อ]
   currentCols: string[];             // คอลัมน์ที่เห็นอยู่ตอนนี้ (ใช้ตอนกด "กำหนดคอลัมน์ในชุดนี้")
   cardGroups: [string, Opt[]][];     // ช่องแถบสรุปแยกตามแท็บ
   onManageViews: () => void;         // เปิดป๊อป ⚙️ จัดการมุมมองด่วน
   onClose: () => void;
+  embedded?: boolean;                // อยู่ในป๊อป (ERPModal) — ไม่วาดกรอบ/หัวเรื่อง/ปุ่มปิดซ้ำ
 }) {
   const c = d.cfg;
   const [open, setOpen] = useState<Set<string>>(new Set(["size", "head"]));
@@ -58,9 +59,9 @@ export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGro
   const TABS: [keyof DisplayCfg["tabs"], string][] = [["pend", "📥 รอจ่าย"], ["wip", "🛠 กำลังผลิต"], ["qc", "✅ รอ QC รับเข้า"]];
 
   return (
-    <div className="rounded-xl border border-blue-200 bg-white shadow-sm p-3">
+    <div className={embedded ? "" : "rounded-xl border border-blue-200 bg-white shadow-sm p-3"}>
       <div className="flex items-center justify-between gap-2 flex-wrap mb-1">
-        <span className="text-sm font-bold text-slate-800">🎛 ตั้งค่าหน้าตาตาราง</span>
+        {!embedded && <span className="text-sm font-bold text-slate-800">🎛 ตั้งค่าหน้าตาตาราง</span>}
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[12px] text-slate-500">ชุด:</span>
           {(["normal", "simple", "custom"] as const).map((p) => (
@@ -69,7 +70,7 @@ export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGro
               {p === "normal" ? "ปกติ" : p === "simple" ? "👓 โหมดง่าย" : "✏️ กำหนดเอง"}
             </button>
           ))}
-          <button type="button" onClick={onClose} className="h-8 px-3 text-sm rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">ปิด</button>
+          {!embedded && <button type="button" onClick={onClose} className="h-8 px-3 text-sm rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50">ปิด</button>}
         </div>
       </div>
       {/* แอดมิน: แก้ชุดกลาง (ทุกคนที่เลือกชุดนี้เห็นตาม) */}
