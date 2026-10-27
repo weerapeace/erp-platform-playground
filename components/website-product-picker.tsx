@@ -54,12 +54,18 @@ export function WebsiteProductPicker({
   max = 24,
   onChange,
   rowImages,
+  imageLabel = "รูปบนแท็บ",
+  defaultImageLabel = "รูปปก Parent",
 }: {
   shopSlug: string;
   value: string[];
   max?: number;
   onChange: (codes: string[]) => void;
   rowImages?: RowImages;
+  /** ชื่อเรียกรูปที่ตั้ง (เช่น "รูปบนการ์ด" ในเมนูใหญ่) · ค่าเริ่ม = รูปบนแท็บ */
+  imageLabel?: string;
+  /** รูปที่ใช้เมื่อไม่ได้ตั้ง (เช่น "รูปแรกของสินค้า") · ค่าเริ่ม = รูปปก Parent */
+  defaultImageLabel?: string;
 }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -128,7 +134,7 @@ export function WebsiteProductPicker({
     try {
       const { key } = await uploadToLibrary(f);
       rowImages.onSet(code, { key });
-      toast.success("ตั้งรูปบนแท็บแล้ว (เก็บเข้าคลังรูปด้วย)");
+      toast.success(`ตั้ง${imageLabel}แล้ว (เก็บเข้าคลังรูปด้วย)`);
     } catch {
       toast.error("อัปโหลดรูปไม่สำเร็จ");
     } finally {
@@ -175,7 +181,7 @@ export function WebsiteProductPicker({
                   <button
                     type="button"
                     onClick={() => setImgOpen(isOpen ? null : code)}
-                    title={pick ? `รูปบนแท็บ: ${pick.label}` : "ตั้งรูปบนแท็บ (ตอนนี้ = รูปปก Parent)"}
+                    title={pick ? `${imageLabel}: ${pick.label}` : `ตั้ง${imageLabel} (ตอนนี้ = ${defaultImageLabel})`}
                     className={`h-7 shrink-0 rounded-md border px-1.5 text-xs ${isOpen ? "border-blue-500 bg-blue-50 text-blue-700" : pick ? "border-blue-300 text-blue-700" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}
                   >
                     🖼{pick ? " ✓" : ""}
@@ -188,7 +194,7 @@ export function WebsiteProductPicker({
                 {rowImages && isOpen && (
                   <div className="mx-2 mb-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-2">
                     <p className="text-[11px] text-slate-500">
-                      รูปบนแท็บตอนนี้: <b className="font-medium text-slate-700">{pick?.label ?? "รูปปก Parent (เดิม)"}</b>
+                      {imageLabel}ตอนนี้: <b className="font-medium text-slate-700">{pick?.label ?? `${defaultImageLabel} (เดิม)`}</b>
                     </p>
                     {skusOf(code).length > 0 && (
                       <div>
@@ -252,7 +258,7 @@ export function WebsiteProductPicker({
               open
               onClose={() => setLibFor(null)}
               typeFilter="image"
-              title={`เลือกรูปบนแท็บ — ${libFor}`}
+              title={`เลือก${imageLabel} — ${libFor}`}
               onSelect={(picked) => {
                 const key = picked[0]?.r2_key;
                 if (key) rowImages.onSet(libFor, { key });

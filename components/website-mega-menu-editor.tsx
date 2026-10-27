@@ -23,6 +23,7 @@ import { LinkTargetPicker } from "@/components/website-link-picker";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ColorInput } from "@/components/color-picker";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
+import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { CategoryCheckList } from "@/components/category-check-list";
 import { translationPatch } from "@/lib/content-i18n";
 import type { SchemaFormContext } from "@/components/website-schema-form";
@@ -584,21 +585,34 @@ function BlockBody({ b, set, ctx }: { b: MegaBlock; set: (p: Partial<MegaBlock>)
             </div>
           ) : (
             <div>
-              <FieldChipsPicker
+              {/* ตัวเลือกสินค้ากลาง (ลากเรียง · ✕ เอาออก) + 🖼 ต่อแถว = รูปบนการ์ด: รูป SKU (สี) / อัปโหลด / คลังรูป / ↺ รูปแรกของสินค้า */}
+              <WebsiteProductPicker
+                shopSlug={ctx.link.shopSlug}
                 value={b.codes}
-                onChange={(codes) => set({ codes })}
-                fields={ctx.products.map((p) => ({ key: p.code, label: `${p.code} · ${p.name}` }))}
                 max={MEGA_LIMITS.codes}
-                compact
-                title="เลือกสินค้าในแผงเมนู"
-                description="ติ๊กสินค้าที่จะโชว์ — เรียงตามลำดับที่ติ๊ก"
-                addLabel="＋ เลือกสินค้า…"
-                searchPlaceholder="ค้นหารหัส/ชื่อสินค้า…"
-                unit="ชิ้น"
-                showKeys={false}
-                emptyText="ยังไม่ได้เลือกสินค้า"
+                imageLabel="รูปบนการ์ด"
+                defaultImageLabel="รูปแรกของสินค้า"
+                onChange={(codes) => {
+                  // เอารุ่นออก = ล้างรูปที่ตั้งไว้ของรุ่นนั้นด้วย
+                  const keep = new Set(codes.map((c) => c.toUpperCase()));
+                  set({
+                    codes,
+                    images: Object.fromEntries(Object.entries(b.images ?? {}).filter(([c]) => keep.has(c.toUpperCase()))),
+                    skuImages: (b.skuImages ?? []).filter((r) => keep.has(r.split(":")[0].toUpperCase())),
+                  });
+                }}
+                rowImages={{
+                  images: b.images ?? {},
+                  skus: b.skuImages ?? [],
+                  onSet: (code, pick) => {
+                    const up = code.toUpperCase();
+                    const restImgs = Object.fromEntries(Object.entries(b.images ?? {}).filter(([c]) => c.toUpperCase() !== up));
+                    const restSkus = (b.skuImages ?? []).filter((r) => r.split(":")[0].toUpperCase() !== up);
+                    set({ images: pick?.key ? { ...restImgs, [code]: pick.key } : restImgs, skuImages: pick?.sku ? [...restSkus, pick.sku] : restSkus });
+                  },
+                }}
               />
-              <p className="mt-1 text-[10px] text-slate-400">สินค้าที่ร้านนี้ไม่มี (เช่น มาจากแม่แบบร้านอื่น) จะไม่โชว์เอง</p>
+              <p className="mt-1 text-[10px] text-slate-400">🖼 ที่แถว = เลือกรูปที่โชว์บนการ์ด (รูปของสีไหน กดการ์ดแล้วเปิดหน้าสินค้าที่สีนั้น) · สินค้าที่ร้านนี้ไม่มี (เช่น มาจากแม่แบบร้านอื่น) จะไม่โชว์เอง</p>
             </div>
           )}
           <div className="flex flex-wrap items-end gap-3">

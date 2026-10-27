@@ -104,6 +104,10 @@ export interface MegaBlock {
   onSale: boolean;
   /** ชี้แล้วสลับเป็นรูปที่ 2 */
   hoverSwap: boolean;
+  /** 🖼 รูปบนการ์ดรายรุ่น (เลือกเอง): อัปโหลด/คลังรูป { รหัสรุ่น: r2 key } — ชนะรูป SKU */
+  images: Record<string, string>;
+  /** 🖼 รูปบนการ์ดจากรูป SKU (สี) "รหัสรุ่น:sku-xxxxxxxx" — กดการ์ดแล้วเปิดหน้าสินค้าที่สีนั้น */
+  skuImages: string[];
   /** โชว์ป้ายบนการ์ด (ป้ายของสินค้า) */
   showBadge: boolean;
   /* รูปเด่น */
@@ -301,6 +305,8 @@ export function newMegaBlock(kind: MegaBlockKind, title = ""): MegaBlock {
     showPrice: false,
     onSale: false,
     hoverSwap: false,
+    images: {},
+    skuImages: [],
     showBadge: false,
     imageKey: null,
     caption: "",
@@ -500,6 +506,15 @@ export function normalizeMegaBlock(r: Record<string, unknown>, i: number): MegaB
     showPrice: r.showPrice === true,
     onSale: r.onSale === true,
     hoverSwap: r.hoverSwap === true,
+    images:
+      r.images && typeof r.images === "object" && !Array.isArray(r.images)
+        ? Object.fromEntries(
+            Object.entries(r.images as Record<string, unknown>)
+              .filter(([c, k]) => /^[\w.-]{1,60}$/.test(c) && typeof k === "string" && /^[\w\-./%()]{1,300}$/.test(k))
+              .slice(0, MEGA_LIMITS.codes),
+          ) as Record<string, string>
+        : {},
+    skuImages: Array.isArray(r.skuImages) ? r.skuImages.filter((x): x is string => typeof x === "string" && /^[\w.-]{1,60}:[\w-]{1,64}$/.test(x)).slice(0, MEGA_LIMITS.codes) : [],
     showBadge: r.showBadge === true,
     imageKey: key(r.imageKey),
     caption: str(r.caption, 120),
@@ -598,6 +613,16 @@ function dayHash(seed: string, now: number): (s: string) => number {
 
 /** คัดสินค้าของกล่องการ์ดสินค้า — อัตโนมัติ: หมวด → เรียงมาใหม่/ขายดี → N ตัว · เลือกเอง: ตามลำดับรหัสที่เลือก (ไม่มีในร้าน = ข้าม) */
 const onSaleP = (p: MegaProductLike) => p.comparePrice != null && p.price != null && p.comparePrice > p.price;
+/** 🖼 รูปที่เลือกให้การ์ดสินค้ารุ่นนี้: อัปโหลด/คลัง (key) ชนะ → รูป SKU (optionId) → null = รูปแรกของสินค้า (เดิม) */
+export function megaCardPick(b: Pick<MegaBlock, "images" | "skuImages">, code: string | null | undefined): { key?: string; optionId?: string } | null {
+  if (!code) return null;
+  const up = code.toUpperCase();
+  const key = Object.entries(b.images ?? {}).find(([c]) => c.toUpperCase() === up)?.[1];
+  if (key) return { key };
+  const ref = (b.skuImages ?? []).find((r) => r.split(":")[0].toUpperCase() === up);
+  return ref ? { optionId: ref.slice(ref.indexOf(":") + 1) } : null;
+}
+
 export function pickMegaProducts<T extends MegaProductLike>(b: Pick<MegaBlock, "source" | "category" | "sort" | "count" | "codes"> & { id?: string; onSale?: boolean }, products: T[], now = Date.now()): T[] {
   const sale = (list: T[]) => (b.onSale ? list.filter(onSaleP) : list);
   if (b.source === "pick") {
