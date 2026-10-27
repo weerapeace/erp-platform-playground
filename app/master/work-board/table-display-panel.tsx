@@ -7,19 +7,22 @@
  */
 import { useState, type ReactNode } from "react";
 import type { DisplayCfg, TableDisplay } from "./table-display";
+import { QuickViewsEditor, type QvBrand } from "./quick-views-editor";
+import { QV_DEFAULT_NORMAL, QV_DEFAULT_SIMPLE } from "./quick-views";
 
 type Opt = [string, string];
 
-export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGroups, chipOptions, onClose }: {
+export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGroups, brands, focusViewId, onClose }: {
   d: TableDisplay; isAdmin: boolean;
   colOptions: Opt[];                 // คอลัมน์ที่มีในแท็บรอจ่าย [key, ชื่อ]
   currentCols: string[];             // คอลัมน์ที่เห็นอยู่ตอนนี้ (ใช้ตอนกด "กำหนดคอลัมน์ในชุดนี้")
   cardGroups: [string, Opt[]][];     // ช่องแถบสรุปแยกตามแท็บ
-  chipOptions: Opt[];                // ปุ่มกรองด่วน
+  brands: QvBrand[];                 // แบรนด์ในใบรอจ่าย (ไว้เลือกในมุมมองด่วน)
+  focusViewId?: string | null;       // เปิดแผงมาที่มุมมองนี้ (เช่น หลังกด "บันทึกเป็นมุมมอง")
   onClose: () => void;
 }) {
   const c = d.cfg;
-  const [open, setOpen] = useState<Set<string>>(new Set(["size", "head", "cols"]));
+  const [open, setOpen] = useState<Set<string>>(new Set(["views", "size"]));
   const toggleSec = (k: string) => setOpen((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const btn = (on: boolean) => `h-7 px-2.5 text-xs rounded-md border ${on ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`;
   const seg = <K extends keyof DisplayCfg>(k: K, opts: [DisplayCfg[K], string][]) => (
@@ -52,7 +55,8 @@ export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGro
     [a[i], a[j]] = [a[j], a[i]]; d.set({ cols: a });
   };
   const labelOf = (k: string) => colOptions.find(([x]) => x === k)?.[1] ?? k;
-  const SHOW: [keyof DisplayCfg["show"], string][] = [["search", "ช่องค้นหา"], ["dev", "ปุ่มคอม/iPad"], ["tabs", "แท็บ"], ["cards", "แถบสรุป"], ["chips", "ปุ่มกรองด่วน"], ["colBtn", "ปุ่ม ▥ คอลัมน์"], ["tools", "ปุ่มจัดกลุ่ม / เรียง / รูป"], ["foot", "คำอธิบายท้ายตาราง"]];
+  const SHOW: [keyof DisplayCfg["show"], string][] = [["search", "ช่องค้นหา"], ["dev", "ปุ่มคอม/iPad"], ["tabs", "แท็บ"], ["cards", "แถบสรุป"], ["chips", "แถบมุมมองด่วน + แบรนด์"], ["colBtn", "ปุ่ม ▥ คอลัมน์"], ["tools", "ปุ่มจัดกลุ่ม / เรียง / รูป"], ["foot", "คำอธิบายท้ายตาราง"]];
+  const factoryViews = (d.editingShared ?? d.preset) === "simple" ? QV_DEFAULT_SIMPLE : QV_DEFAULT_NORMAL;
   const TABS: [keyof DisplayCfg["tabs"], string][] = [["pend", "📥 รอจ่าย"], ["wip", "🛠 กำลังผลิต"], ["qc", "✅ รอ QC รับเข้า"]];
 
   return (
@@ -87,6 +91,12 @@ export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGro
         </div>
       )}
 
+      {sec("views", "⭐ มุมมองด่วน (ปุ่มบนแถบแท็บรอจ่าย — กรอง · ตาราง/การ์ด · เรียง · จัดกลุ่ม)", <>
+        <QuickViewsEditor views={c.views} onChange={(views) => d.set({ views })} isAdmin={isAdmin} brands={brands}
+          colOptions={colOptions} focusId={focusViewId} factory={factoryViews} />
+        {!c.show.chips && <p className="mt-2 text-[11px] text-amber-700">แถบมุมมองด่วนถูกซ่อนอยู่ในชุดนี้ — เปิดได้ที่หมวด 2 · ส่วนหัวหน้า</p>}
+      </>)}
+
       {sec("size", "1 · ขนาด", <>
         {row("ขนาดทั้งหน้า", <>
           <input type="range" min={80} max={170} step={5} value={c.scale} onChange={(e) => d.set({ scale: Number(e.target.value) })} className="flex-1 min-w-[10rem] accent-blue-600" />
@@ -104,8 +114,7 @@ export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGro
         {cardGroups.map(([title, opts]) => (
           <div key={title}>{sub(`ช่องในแถบสรุป · ${title}`)}<div>{opts.map(([k, l]) => ck(`c-${k}`, c.cards[k] !== false, l, (v) => d.set({ cards: { ...c.cards, [k]: v } })))}</div></div>
         ))}
-        {sub("ปุ่มกรองด่วน (แท็บรอจ่าย)")}
-        <div>{chipOptions.map(([k, l]) => ck(`q-${k}`, c.chips[k] !== false, l, (v) => d.set({ chips: { ...c.chips, [k]: v } })))}</div>
+
       </>)}
 
       {sec("cols", "3 · คอลัมน์แท็บรอจ่าย (เปิด/ปิด + เรียงลำดับ)", !cols ? (
@@ -144,7 +153,7 @@ export function TableDisplayPanel({ d, isAdmin, colOptions, currentCols, cardGro
         {row("กำหนดส่ง", seg("due", [["date", "วันที่"], ["days", "อีก/เลย กี่วัน"], ["both", "ทั้งคู่"]]))}
       </>)}
 
-      {sec("def", "6 · ค่าเริ่มต้นตอนเปิด", <>
+      {sec("def", "6 · ค่าเริ่มต้นตอนเปิด (ใช้กับมุมมองที่ไม่ได้ตั้งเรียง)", <>
         {row("เรียง", seg("sortDef", [["none", "ตามระบบ"], ["urgent", "เร่งด่วนก่อน"], ["old", "ใบเก่าก่อน"], ["value", "มูลค่ามากก่อน"]]))}
         <p className="text-[11px] text-slate-400">เร่งด่วนก่อน = เลยกำหนดนานสุดขึ้นก่อน → งานเร่ง → รอซื้อของ → … · กดเรียงที่หัวตารางเองได้ตามปกติ</p>
       </>)}

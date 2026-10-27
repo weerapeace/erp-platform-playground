@@ -126,6 +126,8 @@ export type MiniTableProps<T> = {
   inlineActions?: boolean;
   /** เลื่อนในตาราง (เฉพาะ fill) — ส่ง scrollTop ไว้ซ่อน/โชว์ของเหนือตาราง */
   onScrollTop?: (top: number) => void;
+  /** โหมดการ์ด: วางเป็นตารางหลายคอลัมน์ (ค่า CSS grid-template-columns เช่น "repeat(auto-fill,minmax(240px,1fr))") · การ์ดที่กางเต็มแถว */
+  cardGrid?: string;
 };
 
 type Dir = "asc" | "desc";
@@ -138,7 +140,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
     dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, maxHeightClass = "", className = "", footnote,
-    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop,
+    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid,
   } = props;
   // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
   const t = useT();
@@ -351,7 +353,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     const on = sel.has(k);
     const open = !!renderExpanded && !!expandedKeys?.has(k);
     return (
-      <div key={k} onClick={onRowClick ? () => onRowClick(r) : undefined}
+      <div key={k} onClick={onRowClick ? () => onRowClick(r) : undefined} style={cardGrid && open ? { gridColumn: "1 / -1" } : undefined}
         className={`relative rounded-xl border p-3 ${on ? "border-rose-300 bg-rose-50/40" : open ? "border-blue-300 bg-white" : "border-slate-200 bg-white"} ${onRowClick ? "cursor-pointer active:bg-blue-50/40" : ""}`}>
         {selectable && (
           <span className="absolute top-3 left-3 z-10" onClick={(e) => e.stopPropagation()}>
@@ -436,7 +438,9 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
             return (
               <div key={g.name || "_all"} className="space-y-2">
                 {groupBy && grouped && GroupHead({ g, gSel, gKeys })}
-                {g.rows.map((r) => Card(r))}
+                {cardGrid
+                  ? <div className="grid gap-2" style={{ gridTemplateColumns: cardGrid }}>{g.rows.map((r) => Card(r))}</div>
+                  : g.rows.map((r) => Card(r))}
               </div>
             );
           })}

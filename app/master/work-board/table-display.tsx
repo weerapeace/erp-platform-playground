@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useToast } from "@/components/toast";
+import { QV_DEFAULT_NORMAL, QV_DEFAULT_SIMPLE, parseViews, type QuickView } from "./quick-views";
 
 export type DisplayCfg = {
   scale: number;                       // ขนาดทั้งหน้า % (ตัวหนังสือ ปุ่ม รูป ขยายพร้อมกัน)
@@ -29,7 +30,8 @@ export type DisplayCfg = {
   stage: "dots" | "words" | "pill";    // ช่องขั้นตอน
   buy: "bar" | "words";                // ช่องซื้อของ
   due: "date" | "days" | "both";       // ช่องกำหนดส่ง
-  sortDef: "none" | "urgent" | "old" | "value";   // ลำดับตอนเปิด
+  sortDef: "none" | "urgent" | "old" | "value";   // ลำดับตอนเปิด (ใช้เมื่อมุมมองด่วนไม่ได้ตั้งเรียง)
+  views: QuickView[];                  // มุมมองด่วนของแท็บรอจ่าย (ปุ่มบนแถบ) — กติกาที่ ./quick-views
 };
 
 export const DISPLAY_NORMAL: DisplayCfg = {
@@ -39,14 +41,17 @@ export const DISPLAY_NORMAL: DisplayCfg = {
   cards: {}, chips: {}, cols: null,
   check: true, expand: true, zebra: true, edit: true,
   stage: "dots", buy: "bar", due: "both", sortDef: "none",
+  views: QV_DEFAULT_NORMAL,
 };
 export const DISPLAY_SIMPLE: DisplayCfg = {
   scale: 130, row: "l", img: "l",
-  show: { search: true, dev: false, tabs: true, cards: true, chips: false, colBtn: false, tools: false, foot: false },
+  // chips = แถบมุมมองด่วน (โหมดง่ายใช้เป็นหลัก — การ์ดใหญ่/ของด่วน/งาน OEM)
+  show: { search: true, dev: false, tabs: true, cards: true, chips: true, colBtn: false, tools: false, foot: false },
   tabs: { pend: true, wip: true, qc: true },
   cards: { "pend.noprice": false }, chips: {}, cols: ["img", "prod", "qty", "stage", "due", "value"],
   check: false, expand: true, zebra: true, edit: false,
   stage: "words", buy: "words", due: "days", sortDef: "urgent",
+  views: QV_DEFAULT_SIMPLE,
 };
 
 export type PresetKey = "normal" | "simple" | "custom";
@@ -68,6 +73,7 @@ export function mergeCfg(base: DisplayCfg, p?: Partial<DisplayCfg> | null): Disp
     chips: { ...base.chips, ...boolMap(p.chips) },
     cols: Array.isArray(p.cols) ? p.cols.filter((x): x is string => typeof x === "string") : p.cols === null ? null : base.cols,
     scale: typeof p.scale === "number" ? Math.min(170, Math.max(80, p.scale)) : base.scale,
+    views: parseViews(p.views) ?? base.views,
   };
 }
 const parseMine = (v: unknown): Mine | null => {
