@@ -214,12 +214,16 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     return () => ro?.disconnect();
   }, [measureOn, colSig, lockN, rows.length]);
   // ช่องที่ล็อก: sticky + พื้นทึบ + เงาสีพื้นถมขอบซ้าย/ช่องว่างขวา (ไม่งั้นเห็นเนื้อหาลอดใต้) + เส้นแบ่งหลังช่องสุดท้าย
-  const lockStyle = (i: number, bg: string): CSSProperties | undefined => {
+  //   kind "cell"/"check" = ช่องในแถว → ยืดเต็มความสูงแถว (เดิมทึบแค่ตรงกลาง → ของคอลัมน์อื่นลอดบน/ล่าง ดูเป็นการ์ดลอย) + มุมเหลี่ยม
+  const lockStyle = (i: number, bg: string, kind?: "cell" | "check"): CSSProperties | undefined => {
     if (i >= lockN || lockLefts[i] == null) return undefined;
     const sh = [`8px 0 0 0 ${bg}`];
     if (i === 0) sh.unshift(`-12px 0 0 0 ${bg}`);
     if (i === lockN - 1) sh.push("9px 0 0 0 #e2e8f0");
-    return { position: "sticky", left: lockLefts[i], zIndex: 5, backgroundColor: bg, boxShadow: sh.join(", ") };
+    const base: CSSProperties = { position: "sticky", left: lockLefts[i], zIndex: 5, backgroundColor: bg, boxShadow: sh.join(", ") };
+    if (kind === "check") return { ...base, alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center" };
+    if (kind === "cell") return { ...base, alignSelf: "stretch", display: "flex", flexDirection: "column", justifyContent: "center", borderRadius: 0 };
+    return base;
   };
   const rowW: CSSProperties | undefined = rowMinW ? { minWidth: rowMinW } : undefined;
 
@@ -307,20 +311,21 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     const k = rowKey(r);
     const on = sel.has(k);
     const open = !!renderExpanded && !!expandedKeys?.has(k);
-    const lockBg = on ? "#fff1f2" : open ? "#eff6ff" : zebra && idx % 2 ? "#f8fafc" : "#ffffff";   // พื้นทึบของช่องที่ล็อก (ใกล้สีแถว)
+    // พื้นทึบของช่องที่ล็อก = สีที่ตาเห็นจริงของแถว (พื้นแถวโปร่ง 30–40% บนขาว) → ต่อกับขอบบน/ล่างของแถวเนียน ไม่เห็นเป็นกล่อง
+    const lockBg = on ? "#fff9fa" : open ? "#fafcff" : zebra && idx % 2 ? "#fdfeff" : "#ffffff";
     const line = (
       <div key={open ? undefined : k} onClick={onRowClick ? () => onRowClick(r) : undefined}
         className={`grid gap-2 px-3 ${padY} items-center ${on ? "bg-rose-50/40" : open ? "bg-blue-50/30" : zebra && idx % 2 ? "bg-slate-50/30" : "bg-white"} ${onRowClick ? "cursor-pointer hover:bg-blue-50/40" : ""}`}
         style={{ gridTemplateColumns: tmpl, ...rowW }}>
         {selectable && (
-          <span className="flex justify-center" onClick={(e) => e.stopPropagation()} style={lockStyle(0, lockBg)}>
+          <span className="flex justify-center" onClick={(e) => e.stopPropagation()} style={lockStyle(0, lockBg, "check")}>
             <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />
           </span>
         )}
         {columns.map((c, ci) => {
           const act = !!activeCell && activeCell(r) === c.key;
           return (
-            <div key={c.key} style={lockStyle(ci + (selectable ? 1 : 0), act ? "#dbeafe" : lockBg)} onClick={onCellClick ? (e) => { e.stopPropagation(); onCellClick(r, c.key); } : undefined}
+            <div key={c.key} style={lockStyle(ci + (selectable ? 1 : 0), act ? "#dbeafe" : lockBg, "cell")} onClick={onCellClick ? (e) => { e.stopPropagation(); onCellClick(r, c.key); } : undefined}
               className={`min-w-0 text-sm text-slate-800 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)} ${onCellClick ? `-mx-1 -my-1 rounded-md px-1 py-1 cursor-pointer ${act ? "bg-blue-100/70 ring-1 ring-blue-300" : "hover:bg-blue-50 hover:ring-1 hover:ring-blue-200"}` : ""}`}>
               {c.cell(r)}
             </div>
