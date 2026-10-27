@@ -104,6 +104,7 @@ export default function SubscriptionsPage() {
   }, [rows, settings]);
 
   const categories = useMemo(() => rows.map((r) => r.category), [rows]);
+  const groups = useMemo(() => Array.from(new Set(rows.map((r) => (r.group_name || "").trim()).filter(Boolean))).sort(), [rows]);
 
   // รายการที่ใช้อยู่ = เปิดอยู่ (active) + จ่ายประจำ (รายเดือน/รายปี) — ตัดจ่ายครั้งเดียวออก
   // ใช้อยู่ = เปิดอยู่ + จ่ายประจำ (รายเดือน/รายปี) + ประเภท "งาน" เท่านั้น (ไม่เอาส่วนตัว)
@@ -157,6 +158,23 @@ export default function SubscriptionsPage() {
       await fetchList();   // rollback ด้วยข้อมูลจริง
     }
   }, [boardGroupBy, user?.name, toast, fetchList]);
+
+  // เปิด-ปิดใช้งานรายคนในการ์ดกลุ่ม (สวิตช์) — เปลี่ยนสถานะ active จริง แบบ optimistic
+  const boardToggleActive = useCallback(async (sub: Subscription, active: boolean) => {
+    const patch = { active, pending_cancel: false, want_to_buy: false };
+    setRows((prev) => prev.map((r) => (r.id === sub.id ? { ...r, ...patch } : r)));
+    try {
+      const res = await apiFetch(`/api/subscriptions/${sub.id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...patch, actor: user?.name }),
+      });
+      const j = await res.json();
+      if (j.error) throw new Error(j.error);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "เปลี่ยนสถานะไม่สำเร็จ");
+      await fetchList();
+    }
+  }, [user?.name, toast, fetchList]);
 
   // ทดสอบส่งแจ้งเตือนใกล้ต่ออายุเดี๋ยวนี้ (กระดิ่ง+LINE)
   const testNotify = useCallback(async () => {
@@ -459,6 +477,7 @@ export default function SubscriptionsPage() {
                 groupBy={boardGroupBy}
                 onEdit={canEdit ? openEdit : openInvoices}
                 onMove={canEdit ? boardMove : () => {}}
+                onToggleActive={canEdit ? boardToggleActive : undefined}
               />
             </div>
           )}
@@ -466,7 +485,7 @@ export default function SubscriptionsPage() {
       </div>
 
       {/* ป๊อปอัป */}
-      <SubscriptionFormModal open={formOpen} editing={editing} categories={categories} saving={saving} defaults={createDefaults}
+      <SubscriptionFormModal open={formOpen} editing={editing} categories={categories} groups={groups} saving={saving} defaults={createDefaults}
         onClose={() => !saving && setFormOpen(false)} onSave={handleSave} />
 
       <InvoicesModal sub={invTarget} canEdit={canEdit} onClose={() => setInvTarget(null)} />

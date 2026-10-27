@@ -125,10 +125,83 @@ function DraggableCard({ sub, settings, onClick }: { sub: Subscription; settings
   );
 }
 
-function BoardColumn({ col, rows, total, settings, onEdit }: {
-  col: BoardCol; rows: Subscription[]; total: number; settings: SubSettings; onEdit: (s: Subscription) => void;
+// สวิตช์ เปิด-ปิดใช้งาน รายคนในการ์ดกลุ่ม
+function ActiveSwitch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" aria-label={on ? "ปิดใช้งาน" : "เปิดใช้งาน"} title={on ? "ใช้งานอยู่ — กดเพื่อปิด" : "ปิดอยู่ — กดเพื่อเปิด"}
+      onClick={(e) => { e.stopPropagation(); onToggle(); }}
+      className={`relative h-5 w-9 rounded-full shrink-0 transition-colors ${on ? "bg-emerald-400" : "bg-slate-300"}`}>
+      <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
+    </button>
+  );
+}
+
+// การ์ดกลุ่ม — รวมหลายผู้ใช้ชื่อกลุ่มเดียวกัน (ไว้ดู+เปิดปิดรายคน ไม่ลาก)
+function GroupCard({ name, members, settings, onEdit, onToggleActive }: {
+  name: string; members: Subscription[]; settings: SubSettings;
+  onEdit: (s: Subscription) => void; onToggleActive?: (s: Subscription, active: boolean) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const total = members.reduce((sum, m) => sum + monthlyTHB(m, settings), 0);
+  const activeCount = members.filter((m) => m.active).length;
+  return (
+    <div className="bg-white rounded-lg border border-slate-200 shadow-sm">
+      <button type="button" onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-start justify-between gap-2 p-3 text-left rounded-lg hover:border-indigo-300">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="text-slate-400 text-xs shrink-0">{open ? "▾" : "▸"}</span>
+            <span className="text-sm font-medium text-slate-800 leading-snug truncate">{name}</span>
+            <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">กลุ่ม {members.length}</span>
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5 ml-4">
+            {members.length} ผู้ใช้{activeCount < members.length ? ` · ใช้งาน ${activeCount}` : ""}
+          </div>
+        </div>
+        <span className="text-sm font-semibold text-slate-800 tabular-nums shrink-0">{fmtBaht(total)}<span className="text-[11px] text-slate-400 font-normal">/ด.</span></span>
+      </button>
+      {open && (
+        <div className="border-t border-slate-100 divide-y divide-slate-100">
+          {members.map((m) => (
+            <div key={m.id} className={`flex items-center gap-2 px-3 py-2 ${m.active ? "" : "opacity-50"}`}>
+              <button type="button" onClick={() => onEdit(m)} className="min-w-0 flex-1 text-left">
+                <div className={`text-[13px] text-slate-700 truncate ${m.active ? "" : "line-through"}`}>{m.account_email || m.name}</div>
+                <div className="text-[11px] text-slate-400 tabular-nums">{fmtBaht(monthlyTHB(m, settings))}/ด.{!m.active ? " · ปิด" : ""}</div>
+              </button>
+              {onToggleActive && <ActiveSwitch on={m.active} onToggle={() => onToggleActive(m, !m.active)} />}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// แยก rows ในคอลัมน์เป็น การ์ดเดี่ยว / การ์ดกลุ่ม (กลุ่ม = ชื่อกลุ่มเดียวกัน ≥2 รายการในคอลัมน์นี้)
+type BoardItem = { kind: "solo"; sub: Subscription } | { kind: "group"; name: string; members: Subscription[] };
+function bucketRows(rows: Subscription[]): BoardItem[] {
+  const groups = new Map<string, Subscription[]>();
+  const order: ({ g: string } | { sub: Subscription })[] = [];
+  for (const r of rows) {
+    const g = (r.group_name || "").trim();
+    if (g) {
+      if (!groups.has(g)) { groups.set(g, []); order.push({ g }); }
+      groups.get(g)!.push(r);
+    } else order.push({ sub: r });
+  }
+  return order.map((o): BoardItem => {
+    if ("sub" in o) return { kind: "solo", sub: o.sub };
+    const members = groups.get(o.g)!;
+    return members.length >= 2 ? { kind: "group", name: o.g, members } : { kind: "solo", sub: members[0] };
+  });
+}
+
+function BoardColumn({ col, rows, total, settings, onEdit, onToggleActive }: {
+  col: BoardCol; rows: Subscription[]; total: number; settings: SubSettings;
+  onEdit: (s: Subscription) => void; onToggleActive?: (s: Subscription, active: boolean) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key });
+  const items = useMemo(() => bucketRows(rows), [rows]);
   return (
     <div className="flex flex-col w-60 shrink-0">
       <div className="flex items-center justify-between px-3 py-2 bg-white rounded-t-lg border border-b-0 border-slate-200">
@@ -140,19 +213,23 @@ function BoardColumn({ col, rows, total, settings, onEdit }: {
         <span className="text-xs font-medium text-slate-500 shrink-0">{fmtBaht(total)}/ด.</span>
       </div>
       <div ref={setNodeRef} className={`flex-1 min-h-[120px] space-y-2 p-2 rounded-b-lg border border-t-0 border-slate-200 transition-colors ${isOver ? "bg-indigo-50" : "bg-slate-50/60"}`}>
-        {rows.map((s) => <DraggableCard key={s.id} sub={s} settings={settings} onClick={() => onEdit(s)} />)}
+        {items.map((it) => it.kind === "solo"
+          ? <DraggableCard key={it.sub.id} sub={it.sub} settings={settings} onClick={() => onEdit(it.sub)} />
+          : <GroupCard key={`g:${it.name}`} name={it.name} members={it.members} settings={settings} onEdit={onEdit} onToggleActive={onToggleActive} />)}
         {rows.length === 0 && <div className="h-20 flex items-center justify-center text-xs text-slate-300 border-2 border-dashed border-slate-200 rounded-lg">ลากการ์ดมาวางที่นี่</div>}
       </div>
     </div>
   );
 }
 
-export function SubscriptionsBoard({ rows, settings, groupBy, onEdit, onMove }: {
+export function SubscriptionsBoard({ rows, settings, groupBy, onEdit, onMove, onToggleActive }: {
   rows: Subscription[];
   settings: SubSettings;
   groupBy: BoardGroupBy;
   onEdit: (s: Subscription) => void;
   onMove: (sub: Subscription, toKey: string) => void;
+  /** เปิด-ปิดใช้งานรายคนในการ์ดกลุ่ม (ไม่ส่ง = ไม่มีสิทธิ์แก้ → ไม่โชว์สวิตช์) */
+  onToggleActive?: (sub: Subscription, active: boolean) => void;
 }) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -174,7 +251,7 @@ export function SubscriptionsBoard({ rows, settings, groupBy, onEdit, onMove }: 
         {cols.map((col) => {
           const colRows = rows.filter((r) => boardKeyOf(groupBy, r) === col.key);
           const total = colRows.reduce((sum, r) => sum + monthlyTHB(r, settings), 0);
-          return <BoardColumn key={col.key} col={col} rows={colRows} total={total} settings={settings} onEdit={onEdit} />;
+          return <BoardColumn key={col.key} col={col} rows={colRows} total={total} settings={settings} onEdit={onEdit} onToggleActive={onToggleActive} />;
         })}
         {cols.length === 0 && <div className="text-sm text-slate-400 p-8">ยังไม่มีรายการ</div>}
       </div>

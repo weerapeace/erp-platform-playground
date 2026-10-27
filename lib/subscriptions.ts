@@ -34,6 +34,7 @@ export type Subscription = {
   want_to_buy: boolean;
   owner_id: string | null; // เจ้าของรายการ "ส่วนตัว" (null = งาน/ของบริษัท เห็นทั้งองค์กร)
   streaming: string[];      // id ของบริการ streaming ที่รายการนี้แถม (เฉพาะรายการส่วนตัว)
+  group_name: string;       // ชื่อกลุ่ม (พิมพ์เอง) — รายการที่ชื่อกลุ่มเหมือนกันจะรวมเป็นการ์ดเดียวบนบอร์ด ("" = ไม่อยู่กลุ่ม)
   created_at?: string;
   updated_at?: string;
 };
@@ -231,6 +232,7 @@ export function toSubRow(input: Partial<SubInput>): Record<string, unknown> {
   if (input.want_to_buy !== undefined) row.want_to_buy = !!input.want_to_buy;
   if (input.owner_id !== undefined) row.owner_id = input.owner_id || null;
   if (input.streaming !== undefined) row.streaming = Array.isArray(input.streaming) ? input.streaming.filter(Boolean) : [];
+  if (input.group_name !== undefined) row.group_name = (input.group_name ?? "").trim();
   return row;
 }
 

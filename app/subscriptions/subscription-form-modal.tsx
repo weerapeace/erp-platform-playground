@@ -16,7 +16,7 @@ const EMPTY: SubInput = {
   name: "", category: "", billing_cycle: "monthly", cost: 0, currency: "THB",
   billing_date: null, chrome_profile: "", chrome_profile_url: "", chrome_profile_dir: "", invoice_url: "",
   notes: "", active: true, type: "work", account_email: "", card_last4: "", card_statement_name: "",
-  pending_cancel: false, want_to_buy: false, owner_id: null, streaming: [],
+  pending_cancel: false, want_to_buy: false, owner_id: null, streaming: [], group_name: "",
 };
 
 function fromSub(s: Subscription): SubInput {
@@ -24,10 +24,12 @@ function fromSub(s: Subscription): SubInput {
   return { ...EMPTY, ...rest };
 }
 
-export function SubscriptionFormModal({ open, editing, categories, saving, defaults, streamingServices, onQuickAddStreaming, onClose, onSave }: {
+export function SubscriptionFormModal({ open, editing, categories, groups, saving, defaults, streamingServices, onQuickAddStreaming, onClose, onSave }: {
   open: boolean;
   editing: Subscription | null;
   categories: string[];
+  /** ชื่อกลุ่มที่เคยใช้ (ไว้แนะนำใน datalist กันสะกดไม่ตรง) */
+  groups?: string[];
   saving: boolean;
   defaults?: Partial<SubInput> | null;
   /** ถ้าส่งมา (ไม่ null) = โหมดส่วนตัว → โชว์ section เลือก streaming */
@@ -79,6 +81,7 @@ export function SubscriptionFormModal({ open, editing, categories, saving, defau
   };
 
   const catOptions = useMemo(() => Array.from(new Set(categories.filter(Boolean))).sort(), [categories]);
+  const groupOptions = useMemo(() => Array.from(new Set((groups ?? []).filter(Boolean))).sort(), [groups]);
 
   return (
     <ERPModal open={open} onClose={onClose} size="lg" storageKey="subs-form"
@@ -100,6 +103,13 @@ export function SubscriptionFormModal({ open, editing, categories, saving, defau
           <Field label="ชื่อรายการ" required className="md:col-span-2">
             <input value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="เช่น Claude MAX, Adobe Photoshop"
               className={INP} autoFocus />
+          </Field>
+
+          <Field label="ชื่อกลุ่ม (ไว้รวมหลายผู้ใช้เข้าด้วยกันบนบอร์ด)" className="md:col-span-2">
+            <input value={form.group_name} onChange={(e) => set("group_name", e.target.value)} list="subs-group-list"
+              placeholder="เช่น Google Drive — เว้นว่างถ้าไม่ต้องรวม" className={INP} />
+            <datalist id="subs-group-list">{groupOptions.map((g) => <option key={g} value={g} />)}</datalist>
+            <span className="mt-1 block text-[11px] text-slate-400">รายการที่พิมพ์ชื่อกลุ่มเหมือนกันจะรวมเป็นการ์ดเดียวในหน้าบอร์ด (โชว์ยอดรวม + กางดูรายคนได้)</span>
           </Field>
 
           <Field label="หมวดหมู่">
