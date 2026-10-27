@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * ฟอร์มตั้งค่ามุมมองด่วน 1 มุมมอง (ใช้ในป๊อป ⚙️ จัดการมุมมอง — ./quick-views-manager)
+ * ฟอร์มตั้งค่ามุมมองด่วน 1 มุมมอง (ใช้ในป๊อป ⚙️ ตั้งค่ามุมมอง — ./view-settings-modal · แท็บย่อย = section)
  * กรอง (แบรนด์ · OEM/แบรนด์เรา · เงื่อนไข) · แสดงเป็น (ตาราง/การ์ด · คอลัมน์ · พอดีเนื้อหา · ความกว้าง) · เรียง · จัดกลุ่ม
  * readOnly = ดูได้อย่างเดียว (มุมมองของทีม สำหรับคนที่ไม่ใช่แอดมิน)
  */
@@ -17,7 +17,9 @@ export type QvBrand = { name: string; color: string | null; oem: boolean; n: num
 const btn = (on: boolean) => `h-7 px-2.5 text-xs rounded-md border ${on ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"} disabled:opacity-60`;
 const label = "mb-1 text-[11px] font-medium text-slate-500";
 
-export function QuickViewForm({ view: sel, onChange, isAdmin, brands, colOptions, defaultCols, readOnly = false }: {
+export type QvFormSection = "filter" | "display" | "sort";
+
+export function QuickViewForm({ view: sel, onChange, isAdmin, brands, colOptions, defaultCols, readOnly = false, section }: {
   view: QuickView;
   onChange: (patch: Partial<QuickView>) => void;
   isAdmin: boolean;
@@ -25,7 +27,9 @@ export function QuickViewForm({ view: sel, onChange, isAdmin, brands, colOptions
   colOptions: [string, string][];   // คอลัมน์ตารางรอจ่าย [key, ชื่อ]
   defaultCols?: string[];           // คอลัมน์ที่ตารางปกติโชว์อยู่ตอนนี้ (ตั้งต้นตอนกด "กำหนดเฉพาะมุมมองนี้")
   readOnly?: boolean;
+  section?: QvFormSection;          // แท็บย่อยในป๊อป (ไม่ส่ง = โชว์ทุกส่วน)
 }) {
+  const show = (s: QvFormSection) => !section || section === s;
   const [iconOpen, setIconOpen] = useState(false);
   const update = onChange;
   // ลำดับคอลัมน์ของมุมมอง (ซ้าย → ขวา ตามที่ตารางวาด) — ลาก ⠿ หรือกด ‹ ›
@@ -65,7 +69,7 @@ export function QuickViewForm({ view: sel, onChange, isAdmin, brands, colOptions
         <input value={sel.name} onChange={(e) => update({ name: e.target.value.slice(0, 40) })} placeholder="ชื่อปุ่ม" className="h-8 min-w-[10rem] flex-1 rounded-md border border-slate-200 px-2 text-sm" />
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      {show("filter") && <div className="grid gap-3 lg:grid-cols-2">
         <div>
           <div className={label}>แบรนด์ (เลือกได้หลายอัน · ไม่เลือก = ทุกแบรนด์)</div>
           <div className="flex flex-wrap gap-1">
@@ -102,9 +106,9 @@ export function QuickViewForm({ view: sel, onChange, isAdmin, brands, colOptions
             ))}
           </div>
         </div>
-      </div>
+      </div>}
 
-      <div>
+      {show("display") && <div>
         <div className={label}>แสดงเป็น</div>
         <div className="flex flex-wrap items-center gap-1.5">
           <button type="button" onClick={() => update({ layout: "table" })} className={btn(sel.layout === "table")}>▦ ตาราง</button>
@@ -179,16 +183,16 @@ export function QuickViewForm({ view: sel, onChange, isAdmin, brands, colOptions
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
-      <div className="grid gap-3 lg:grid-cols-2">
+      {show("sort") && <><div className="grid gap-3 lg:grid-cols-2">
         <div><div className={label}>เรียงหลัก</div>{sortSel("sort1", "dir1")}</div>
         <div><div className={label}>ถ้าเท่ากัน เรียงต่อด้วย</div>{sortSel("sort2", "dir2")}</div>
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <span className={label + " mb-0"}>จัดกลุ่ม</span>
         {QV_GROUPS.map(([g, l]) => <button key={g} type="button" onClick={() => update({ group: g as QvGroup })} className={btn(sel.group === g)}>{l}</button>)}
-      </div>
+      </div></>}
       <p className="rounded-md bg-slate-50 px-2 py-1.5 text-[12px] text-slate-600">{qvSummary(sel)}</p>
     </fieldset>
   );

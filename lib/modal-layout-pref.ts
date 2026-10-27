@@ -13,8 +13,8 @@
 import { apiFetch } from "@/lib/api";
 import { supabaseBrowser } from "@/lib/supabase-browser";
 
-/** x = ขยายเต็มจอไหม · w/h = ขนาดที่ลากเอง (px) · t = เวลาที่แก้ล่าสุด (ใช้ตัดสินตอนรวมข้อมูลหลายเครื่อง) */
-export type LayoutPref = { x?: boolean; w?: number; h?: number; t: number };
+/** x = ขยายเต็มจอไหม · w/h = ขนาดที่ลากเอง (px) · px/py = ตำแหน่งที่ลากย้าย (ระยะจากกลางจอ) · t = เวลาที่แก้ล่าสุด (ใช้ตัดสินตอนรวมข้อมูลหลายเครื่อง) */
+export type LayoutPref = { x?: boolean; w?: number; h?: number; px?: number; py?: number; t: number };
 type Store = { uid?: string; m: Record<string, LayoutPref> };
 
 const LS_KEY = "erp-layout-prefs";
@@ -118,7 +118,7 @@ export function getLayoutPref(key: string): LayoutPref | undefined {
 export function setLayoutPref(key: string, patch: Partial<Omit<LayoutPref, "t">> | null) {
   const s = load();
   const next: LayoutPref = patch === null ? { t: Date.now() } : { ...s.m[key], ...patch, t: Date.now() };
-  for (const f of ["x", "w", "h"] as const) if (next[f] === undefined) delete next[f];
+  for (const f of ["x", "w", "h", "px", "py"] as const) if (next[f] === undefined) delete next[f];
   s.m[key] = next;
   s.m = prune(s.m);
   persistLocal();

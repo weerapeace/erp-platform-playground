@@ -96,6 +96,12 @@ export type TableDisplay = {
   saveShared: () => Promise<void>;
   resetSharedToFactory: () => void;
   savingShared: boolean;
+  /** ร่างของป๊อปตั้งค่า: เริ่มร่าง → ปรับแล้วตารางเห็นผลทันทีแต่ยังไม่เก็บ → commit = เก็บ · discard = ทิ้ง · reset = กลับค่าที่เก็บไว้ */
+  beginStage: () => void;
+  commitStage: () => void;
+  discardStage: () => void;
+  resetStage: () => void;
+  stageDirty: boolean;
 };
 
 export function useTableDisplay(isAdmin: boolean): TableDisplay {
@@ -109,35 +115,39 @@ export function useTableDisplay(isAdmin: boolean): TableDisplay {
     return () => { cancel = true; };
   }, []);
   const [mine, setMine] = useUserPref<Mine>("wb_table_display", MINE_DEFAULT, parseMine);
+  // ร่างระหว่างเปิดป๊อป ⚙️ ตั้งค่ามุมมอง — null = ไม่ได้ร่าง (ปรับแล้วเก็บทันทีแบบเดิม)
+  const [stage, setStage] = useState<Mine | null>(null);
+  const cur = stage ?? mine;
+  const writeMine = useCallback((m: Mine) => { if (stage) setStage(m); else setMine(m); }, [stage, setMine]);
   const [draft, setDraft] = useState<{ key: "normal" | "simple"; cfg: DisplayCfg } | null>(null);
   const [savingShared, setSavingShared] = useState(false);
 
   const sharedCfg = useCallback((k: "normal" | "simple") => (k === "simple" ? mergeCfg(DISPLAY_SIMPLE, shared.simple) : mergeCfg(DISPLAY_NORMAL, shared.normal)), [shared]);
   const cfg = useMemo(() => {
-    if (draft && draft.key === mine.preset) return draft.cfg;
-    if (mine.preset === "custom") return mergeCfg(DISPLAY_NORMAL, mine.custom);
-    return sharedCfg(mine.preset);
-  }, [draft, mine, sharedCfg]);
+    if (draft && draft.key === cur.preset) return draft.cfg;
+    if (cur.preset === "custom") return mergeCfg(DISPLAY_NORMAL, cur.custom);
+    return sharedCfg(cur.preset);
+  }, [draft, cur, sharedCfg]);
 
   const setPreset = useCallback((p: PresetKey) => {
     setDraft(null);
     // ยังไม่เคยมี "กำหนดเอง" → เริ่มจากหน้าตาที่ใช้อยู่ตอนนี้
-    setMine({ preset: p, custom: p === "custom" && !mine.custom ? cfg : mine.custom });
-  }, [mine, cfg, setMine]);
+    writeMine({ preset: p, custom: p === "custom" && !cur.custom ? cfg : cur.custom });
+  }, [cur, cfg, writeMine]);
 
   const set = useCallback((patch: Partial<DisplayCfg>) => {
     if (draft) { setDraft({ key: draft.key, cfg: { ...draft.cfg, ...patch } }); return; }
-    const wasShared = mine.preset !== "custom";
-    setMine({ preset: "custom", custom: { ...cfg, ...patch } });
-    if (wasShared) toast.info(`ปรับแล้ว — ตอนนี้เป็นชุด "กำหนดเอง" ของคุณ (ชุด${PRESET_LABEL[mine.preset]}กลางไม่เปลี่ยน)`);
-  }, [draft, mine, cfg, setMine, toast]);
+    const wasShared = cur.preset !== "custom";
+    writeMine({ preset: "custom", custom: { ...cfg, ...patch } });
+    if (wasShared) toast.info(`ปรับแล้ว — ตอนนี้เป็นชุด "กำหนดเอง" ของคุณ (ชุด${PRESET_LABEL[cur.preset]}กลางไม่เปลี่ยน)`);
+  }, [draft, cur, cfg, writeMine, toast]);
 
   const startEditShared = useCallback(() => {
     if (!isAdmin) return;
-    const k = mine.preset === "simple" ? "simple" : "normal";
-    if (mine.preset === "custom") setMine({ preset: k, custom: mine.custom });
+    const k = cur.preset === "simple" ? "simple" : "normal";
+    if (cur.preset === "custom") writeMine({ preset: k, custom: cur.custom });
     setDraft({ key: k, cfg: sharedCfg(k) });
-  }, [isAdmin, mine, sharedCfg, setMine]);
+  }, [isAdmin, cur, sharedCfg, writeMine]);
   const cancelEditShared = useCallback(() => setDraft(null), []);
   const resetSharedToFactory = useCallback(() => {
     if (draft) setDraft({ key: draft.key, cfg: draft.key === "simple" ? DISPLAY_SIMPLE : DISPLAY_NORMAL });
@@ -156,5 +166,14 @@ export function useTableDisplay(isAdmin: boolean): TableDisplay {
     finally { setSavingShared(false); }
   }, [draft, isAdmin, shared, toast]);
 
-  return { cfg, preset: mine.preset, setPreset, set, editingShared: draft?.key ?? null, startEditShared, cancelEditShared, saveShared, resetSharedToFactory, savingShared };
+  const beginStage = useCallback(() => setStage(mine), [mine]);
+  const commitStage = useCallback(() => { if (stage) setMine(stage); }, [stage, setMine]);
+  const discardStage = useCallback(() => setStage(null), []);
+  const resetStage = useCallback(() => setStage((s) => (s ? mine : s)), [mine]);
+  const stageDirty = !!stage && JSON.stringify(stage) !== JSON.stringify(mine);
+
+  return {
+    cfg, preset: cur.preset, setPreset, set, editingShared: draft?.key ?? null, startEditShared, cancelEditShared, saveShared, resetSharedToFactory, savingShared,
+    beginStage, commitStage, discardStage, resetStage, stageDirty,
+  };
 }

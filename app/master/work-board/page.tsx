@@ -27,8 +27,7 @@ import { useTableDisplay } from "./table-display";
 import { qvMatch, qvSort, qvVisible, qvNew, qvSummary, qvAudienceOk, QV_CARD_MIN, QV_FALLBACK, type QuickView, type QvRow, type TeamView, type QvMine } from "./quick-views";
 import type { QvBrand } from "./quick-views-editor";
 import { useQuickViews } from "./use-quick-views";
-import { QuickViewsManager } from "./quick-views-manager";
-import { TableDisplayPanel } from "./table-display-panel";
+import { ViewSettingsModal, type VsTab } from "./view-settings-modal";
 import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progress/route";
 import { InlineEdit } from "@/components/inline-edit";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
@@ -3270,7 +3269,6 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   // ── หน้าตาตาราง: ชุด ปกติ / 👓 โหมดง่าย / กำหนดเอง (ดู ./table-display) · canSeeMoney = แอดมิน → แก้ชุดกลางได้
   const disp = useTableDisplay(canSeeMoney);
   const dc = disp.cfg;
-  const [panelOpen, setPanelOpen] = useState(false);
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
   const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม / แก้กำหนดเสร็จ
   // คำค้นร่วมของทั้ง 2 ตาราง — พิมพ์ที่ไหนก็กรองทั้ง "รอจ่าย" และ "จ่ายแล้ว" (เดิมต่างคนต่างค้น หาของที่จ่ายไปแล้วไม่เจอ)
@@ -3437,8 +3435,13 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const qvStore = useQuickViews(canSeeMoney);
   const { user: authUser } = useAuth();
   const views = qvVisible([...qvStore.team.filter((v) => qvAudienceOk(v, authUser) && !qvStore.mine.hidden.includes(v.id)), ...qvStore.mine.views], canSeeMoney);
+  // ⚙️ ป๊อปตั้งค่ามุมมอง (4 แท็บ · แก้ในร่าง → 💾 บันทึกทีเดียว) · tab = เปิดมาที่แท็บนี้ (ไม่ส่ง = แท็บล่าสุด)
+  //   ＋ บันทึกเป็นมุมมอง = เปิดป๊อปพร้อมมุมมองของฉันใหม่ในร่าง · previewView = มุมมองที่กำลังแก้ในป๊อป → ตารางโชว์ตามทันที
+  const [mgr, setMgr] = useState<{ open: boolean; tab?: VsTab; newMine?: QuickView | null }>({ open: false });
+  const [previewView, setPreviewView] = useState<QuickView | null>(null);
   // ซ่อนแถบมุมมอง = ใช้มุมมองแรกเสมอ (ไม่ให้ค้างกรองอยู่โดยมองไม่เห็นปุ่ม)
-  const view: QuickView = (dc.show.chips ? views.find((v) => v.id === filt.view) : undefined) ?? views[0] ?? QV_FALLBACK;
+  const baseView: QuickView = (dc.show.chips ? views.find((v) => v.id === filt.view) : undefined) ?? views[0] ?? QV_FALLBACK;
+  const view: QuickView = (mgr.open && previewView) || baseView;
   const pickView = (id: string) => setFilt({ ...filt, view: id });
   const lateDays = (m: PendingMO) => Math.max(0, ...[m.due_date, m.internal_due_date].filter((d): d is string => !!d).map((d) => ymdDiff(d.slice(0, 10), today)));
   const nearDue = (m: PendingMO) => [m.due_date, m.internal_due_date].filter((d): d is string => !!d).sort()[0] ?? "9999";
@@ -3476,13 +3479,15 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     return [...m.values()].sort((a, b) => (a.name === "" ? 1 : b.name === "" ? -1 : b.n - a.n));
   })();
   const brandColorOf = (b: string) => qvBrands.find((x) => (x.name || "__none__") === b)?.color ?? "#94a3b8";
-  // ⚙️ ป๊อปจัดการมุมมอง (แก้ในร่าง → 💾 บันทึก) · ＋ บันทึกเป็นมุมมอง = เปิดป๊อปพร้อมมุมมองของฉันใหม่ในร่าง
-  const [mgr, setMgr] = useState<{ open: boolean; newMine?: QuickView | null }>({ open: false });
   const saveViews = async (next: { team?: TeamView[]; mine?: QvMine }) => {
     if (next.team && !(await qvStore.saveTeam(next.team))) return false;
     if (next.mine) qvStore.setMine(next.mine);
-    const nm = mgr.newMine;
-    if (nm && next.mine?.views.some((v) => v.id === nm.id)) setFilt({ view: nm.id, brand: "" });
+    // บันทึกแล้ว ตารางค้างที่มุมมองที่เพิ่งแก้ (ถ้าคนนี้ยังเห็นปุ่มนั้น) — ปิดป๊อปแล้วไม่เด้งกลับมุมมองเดิม
+    const pv = previewView;
+    const team = next.team ?? qvStore.team, mineNext = next.mine ?? qvStore.mine;
+    const seen = !!pv && (mineNext.views.some((v) => v.id === pv.id)
+      || team.some((v) => v.id === pv.id && qvAudienceOk(v, authUser) && !mineNext.hidden.includes(v.id)));
+    if (pv && seen) setFilt({ view: pv.id, brand: mgr.newMine?.id === pv.id ? "" : filt.brand });
     toast.success(next.team ? "บันทึกมุมมองแล้ว — ทุกคนที่เห็นมุมมองทีมจะได้แบบใหม่" : "บันทึกมุมมองของคุณแล้ว");
     return true;
   };
@@ -3493,7 +3498,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       brands: brandF ? [brandF] : [...view.brands], layout: view.layout, size: view.size, cols: view.cols ? [...view.cols] : null,
       cardFields: [...view.cardFields], sort1: view.sort1, dir1: view.dir1, sort2: view.sort2, dir2: view.dir2, group: view.group,
     });
-    setMgr({ open: true, newMine: v });
+    setMgr({ open: true, tab: "views", newMine: v });
   };
   // ความกว้างคอลัมน์ของมุมมอง: ลากในตาราง = ร่าง (มีแถบให้กดบันทึก) · มุมมองของฉัน = เก็บในมุมมอง · มุมมองทีม = แอดมินเก็บให้ทุกคน / คนอื่นเก็บเฉพาะตัว
   const isMineView = qvStore.mine.views.some((v) => v.id === view.id);
@@ -4061,8 +4066,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const panelColOptions: [string, string][] = pendCols.map((c) => [c.key, c.label ?? (typeof c.header === "string" ? c.header : c.key)]);
 
   const presetName = disp.preset === "simple" ? "👓 โหมดง่าย" : disp.preset === "custom" ? "✏️ กำหนดเอง" : "ปกติ";
-  // ปิดป๊อปหน้าตา — ถ้าแอดมินแก้ชุดกลางค้าง (ยืนยันออกโดยไม่บันทึกแล้ว) = ทิ้งร่างชุดกลาง
-  const closePanel = () => { if (disp.editingShared) disp.cancelEditShared(); setPanelOpen(false); };
+
   // ⛶ เต็มจอ = ตารางทับทั้งหน้าต่าง (ซ่อนเมนู/หัวหน้า ใต้ป๊อปอัป z-50) จำต่อเครื่อง
   // ปกติ = กล่องสูงพอดีถึงขอบล่างจอ (วัดตำแหน่งจริง — เดิมเดา 100vh−210px แล้วเหลือที่ว่างด้านล่าง)
   const [full, setFull] = useState(false);
@@ -4101,7 +4105,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             {devBtn("pc", "💻 คอม", "มุมมองจอคอม")}{devBtn("ipadL", "📱 นอน", "iPad แนวนอน — ตารางแถวใหญ่ กดง่าย")}{devBtn("ipadP", "📱 ตั้ง", "iPad แนวตั้ง — 1 ใบ = 1 การ์ด")}
           </div>
         )}
-        <button type="button" onClick={() => setPanelOpen(true)}
+        <button type="button" onClick={() => setMgr({ open: true, tab: "look" })}
           className="flex h-9 w-full items-center rounded-lg border border-slate-200 bg-white px-3 text-left text-sm text-slate-700 hover:bg-slate-50">
           🎛 หน้าตา: {presetName}<span className="ml-auto text-xs text-slate-400">ปรับ ›</span>
         </button>
@@ -4144,12 +4148,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     <div {...boxProps}>
       {/* เต็มจอ = ทับแถบบนของเชลล์ → วาดแถบแบบแอปของหน้าเองไว้บนสุด (ค้นหา · ปุ่ม · มุมมอง) */}
       {full && <PageChromeBar variant="page" className="shrink-0" />}
-      {/* 🎛 ตั้งค่าหน้าตา = ป๊อป (ปรับแล้วตารางด้านหลังเปลี่ยนทันที — เปิดแบบไม่เต็มจอจะได้เห็นผล) · แอดมินแก้ชุดกลางค้าง = ถามก่อนปิด */}
-      <ERPModal open={panelOpen} onClose={closePanel} title="🎛 ตั้งค่าหน้าตาตาราง" size="lg" storageKey="wb-table-display"
-        hasUnsavedChanges={!!disp.editingShared} defaultExpanded={false}>
-        <TableDisplayPanel embedded d={disp} isAdmin={canSeeMoney} colOptions={panelColOptions} currentCols={pendColPrefs.visible.map((c) => c.key)}
-          cardGroups={panelCardGroups} onManageViews={() => { setPanelOpen(false); setMgr({ open: true }); }} onClose={closePanel} />
-      </ERPModal>
+
       <div className={`flex min-h-0 flex-col gap-3 ${tab === "pend" ? "flex-1" : "shrink-0"}`} style={zoomStyle}>
       {/* เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรองให้ตารางได้ที่เต็ม (เหมือนแอป) · แตะแถบนี้หรือเลื่อนขึ้น = กลับมา
           สลับด้วย CSS: กล่องมี data-top="hidden" → แถบย่อโผล่ · ส่วนแท็บ/ตัวกรองซ่อน (ไม่ render ใหม่) */}
@@ -4203,8 +4202,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
               className={`shrink-0 ${touch ? "h-10 px-3" : "h-8 px-2.5"} rounded-full border border-dashed border-slate-300 bg-white text-xs text-slate-500 hover:bg-slate-50`}>＋ บันทึกเป็นมุมมอง</button>
           )}
           {tab === "pend" && dc.show.chips && (
-            <button type="button" onClick={() => setMgr({ open: true })} title="จัดการมุมมอง — มุมมองทีม/ของฉัน · ใครเห็นปุ่มไหน · ซ่อนปุ่มสำหรับตัวเอง"
-              className={`shrink-0 ${touch ? "h-10 px-3" : "h-8 px-2.5"} rounded-full border border-dashed border-slate-300 bg-white text-xs text-slate-500 hover:bg-slate-50`}>⚙️ จัดการมุมมอง</button>
+            <button type="button" onClick={() => setMgr({ open: true })} title="ตั้งค่ามุมมอง — มุมมองด่วน (ทีม/ของฉัน · ใครเห็น) · หน้าตา · ส่วนหัว · คอลัมน์ — เปิดมาเจอแท็บที่ใช้ล่าสุด"
+              className={`shrink-0 ${touch ? "h-10 px-3" : "h-8 px-2.5"} rounded-full border border-dashed border-slate-300 bg-white text-xs text-slate-500 hover:bg-slate-50`}>⚙️ ตั้งค่ามุมมอง</button>
           )}
           {brandChips.length > 1 && (<>
             {tab === "pend" && dc.show.chips && <span className="mx-1 h-6 w-px shrink-0 bg-slate-200" aria-hidden />}
@@ -4468,9 +4467,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         />
       </div>)}
 
-      <QuickViewsManager open={mgr.open} onClose={() => setMgr({ open: false })} isAdmin={canSeeMoney}
+      <ViewSettingsModal open={mgr.open} onClose={() => { setPreviewView(null); setMgr({ open: false }); }} isAdmin={canSeeMoney}
         team={qvStore.team} mine={qvStore.mine} onSave={saveViews} brands={qvBrands} colOptions={panelColOptions} defaultCols={pendColPrefs.visible.map((c) => c.key)}
-        focus={{ kind: isMineView ? "mine" : "team", id: view.id }} newMine={mgr.newMine ?? null} />
+        disp={disp} currentCols={pendColPrefs.visible.map((c) => c.key)} cardGroups={panelCardGroups}
+        openTab={mgr.tab ?? null} focus={{ kind: isMineView ? "mine" : "team", id: baseView.id }} newMine={mgr.newMine ?? null} onPreview={setPreviewView} />
       {/* แถบคำสั่งลอยด้านล่าง (ของกลาง BulkActionBar) — โผล่เมื่อติ๊กเลือกหลายใบ แทนปุ่มกระจายบนหัวตาราง */}
       <BulkActionBar count={tab === "pend" ? selMoNos.length : 0} unit="ใบ" onClear={() => setSel(new Set())} spacer={false}>
         <button type="button" onClick={() => setAssignOpen(true)} className="h-9 rounded-lg bg-violet-500 px-3 text-sm font-medium text-white hover:bg-violet-600">🗂 จับเข้ากลุ่ม</button>

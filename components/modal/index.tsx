@@ -135,6 +135,11 @@ export interface ERPModalProps {
   defaultExpanded?: boolean;
   /** ชั้นซ้อน (ค่าเริ่ม 50) — ป๊อปที่เปิดจากป๊อป portal ชั้นสูง (เช่น 🗂️ จัดการแท็ก z-210) ต้องสูงกว่าตัวที่เปิดมัน ไม่งั้นไปอยู่ข้างหลัง */
   zIndex?: number;
+  /** ลากหัวป๊อปย้ายตำแหน่งได้ จำต่อคน ต่อป๊อป (ดับเบิลคลิกหัว = กลับกลางจอ) — default true
+   *  ไม่ลาก: ป๊อปเล็ก size="sm" (ยืนยัน/ถามสั้น ให้อยู่กลางจอ) · ตอนขยายเต็มจอ · จอแคบกว่า 640px (มือถือ) */
+  draggable?: boolean;
+  /** พื้นหลังด้านหลังป๊อป: "dim" มืด (ค่าเริ่ม) · "light" จาง — ป๊อปตั้งค่าที่ต้องเห็นผลบนหน้าด้านหลังทันที */
+  backdrop?: "dim" | "light";
 }
 
 export interface ConfirmDialogProps {
@@ -251,6 +256,8 @@ export function ERPModal({
   embedded = false,
   defaultExpanded,
   zIndex,
+  draggable = true,
+  backdrop = "dim",
 }: ERPModalProps) {
   const [showUnsavedWarning, setShowUnsavedWarning] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -268,6 +275,11 @@ export function ERPModal({
   const resizing = useRef(false);
   const resizeAxis = useRef<"x" | "y" | "both">("both");   // ลากขอบขวา=x / ขอบล่าง=y / มุม=both
   const panelRef = useRef<HTMLDivElement>(null);
+  // ตำแหน่งที่ลากย้าย = ระยะเลื่อนจากกลางจอ (px) · null = กลางจอ · จำต่อคน ต่อป๊อป (px/py ใน modal-layout-pref)
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const posRef = useRef(pos);
+  posRef.current = pos;
+  const canDrag = draggable && size !== "sm" && !expanded;
 
   useEffect(() => { setMounted(true); prefetchLayoutPrefs(); }, []);
   useRefreshOnClose(open);
@@ -286,8 +298,61 @@ export function ERPModal({
       try { const o = JSON.parse(localStorage.getItem(`erp-modal-${storageKey}`) ?? "null"); if (o?.w && o?.h) d = { w: o.w, h: o.h }; } catch { /* ignore */ }
     }
     setDims(d);
+    setPos(p?.px != null && p?.py != null && window.innerWidth >= 640 ? { x: p.px, y: p.py } : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // กันหลุดจอ: หัวป๊อปต้องอยู่ในจอเสมอ (แนวนอนเหลือให้จับ ≥120px) — base = ตำแหน่งตอนอยู่กลางจอ
+  const baseOf = (cur: { x: number; y: number }) => {
+    const r = panelRef.current!.getBoundingClientRect();
+    return { l: r.left - cur.x, t: r.top - cur.y, w: r.width };
+  };
+  const clampTo = (p: { x: number; y: number }, b: { l: number; t: number; w: number }) => ({
+    x: Math.round(Math.max(120 - b.w - b.l, Math.min(window.innerWidth - 120 - b.l, p.x))),
+    y: Math.round(Math.max(8 - b.t, Math.min(window.innerHeight - 56 - b.t, p.y))),
+  });
+  // เปิดป๊อป/เปลี่ยนขนาด/จอเล็กลง → ดึงกลับเข้าจอถ้าตำแหน่งที่จำไว้หลุด
+  useIsoLayoutEffect(() => {
+    if (!open || !pos || !canDrag || !panelRef.current) return;
+    const c = clampTo(pos, baseOf(pos));
+    if (c.x !== pos.x || c.y !== pos.y) setPos(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, pos?.x, pos?.y, dims?.w, dims?.h, canDrag]);
+
+  // ลากหัวป๊อปย้ายที่ (pointer = เมาส์ + นิ้วบน iPad) — กดปุ่ม/ช่องกรอกบนหัวไม่นับเป็นการลาก
+  const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!canDrag || e.button !== 0 || window.innerWidth < 640 || !panelRef.current) return;
+    if ((e.target as HTMLElement).closest("button, a, input, select, textarea, [data-no-drag]")) return;
+    e.preventDefault();
+    const sx = e.clientX, sy = e.clientY;
+    const start = posRef.current ?? { x: 0, y: 0 };
+    const base = baseOf(start);
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    document.body.style.userSelect = "none";
+    let moved = false;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - sx, dy = ev.clientY - sy;
+      if (!moved && Math.hypot(dx, dy) < 3) return;
+      moved = true;
+      const n = clampTo({ x: start.x + dx, y: start.y + dy }, base);
+      posRef.current = n;
+      setPos(n);
+    };
+    const up = () => {
+      el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
+      document.body.style.userSelect = "";
+      const p = posRef.current;
+      if (moved && p && prefKey.current) setLayoutPref(prefKey.current, { px: p.x, py: p.y });
+    };
+    el.addEventListener("pointermove", move); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+  };
+  // ดับเบิลคลิกหัวป๊อป → กลับกลางจอ (ลืมตำแหน่งที่จำไว้)
+  const recenter = () => {
+    if (!posRef.current) return;
+    setPos(null);
+    if (prefKey.current) setLayoutPref(prefKey.current, { px: undefined, py: undefined });
+  };
 
   const dropLegacySize = () => {
     if (storageKey) { try { localStorage.removeItem(`erp-modal-${storageKey}`); } catch { /* ignore */ } }
@@ -298,8 +363,10 @@ export function ERPModal({
     if (!open || !resizable) return;
     const onMove = (e: MouseEvent) => {
       if (!resizing.current) return;
-      const cx = window.innerWidth / 2;
-      const cy = window.innerHeight / 2;
+      // ป๊อปอยู่กลางจอ (+ ระยะที่ลากย้าย) → มุมขวาล่าง = จุดกลางป๊อป + ครึ่งขนาด
+      const off = posRef.current ?? { x: 0, y: 0 };
+      const cx = window.innerWidth / 2 + off.x;
+      const cy = window.innerHeight / 2 + off.y;
       const w = Math.round(Math.max(320, Math.min(2 * (e.clientX - cx), window.innerWidth * 0.98)));
       const h = Math.round(Math.max(200, Math.min(2 * (e.clientY - cy), window.innerHeight * 0.96)));
       const ax = resizeAxis.current;
@@ -349,9 +416,10 @@ export function ERPModal({
     if (prefKey.current && size !== "sm") setLayoutPref(prefKey.current, { x: n === baseExpanded ? undefined : n });
   };
   // ปุ่ม ↺ คืนขนาดเดิม — ลืมทุกอย่างที่จำไว้ของป๊อปนี้ (ขยาย/ย่อ + ขนาดที่ลาก) กลับเป็นค่าเริ่มต้นของระบบ
-  const canReset = !!dims || expanded !== baseExpanded;
+  const canReset = !!dims || !!pos || expanded !== baseExpanded;
   const resetLayout = () => {
     setDims(null);
+    setPos(null);
     setExpanded(baseExpanded);
     if (prefKey.current) setLayoutPref(prefKey.current, null);
     dropLegacySize();
@@ -406,15 +474,18 @@ export function ERPModal({
     : usingCustom
       ? ""                                  // ขนาดมาจาก inline style
       : `w-full ${SIZE_CLASS[size]} max-h-[90vh]`;
-  const panelStyle = usingCustom
-    ? { width: dims!.w, height: dims!.h, maxWidth: "98vw", maxHeight: "96vh" }
+  const panelStyle: React.CSSProperties | undefined = usingCustom || (pos && canDrag)
+    ? {
+        ...(usingCustom ? { width: dims!.w, height: dims!.h, maxWidth: "98vw", maxHeight: "96vh" } : {}),
+        ...(pos && canDrag ? { transform: `translate(${pos.x}px, ${pos.y}px)` } : {}),
+      }
     : undefined;
 
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={zIndex ? { zIndex } : undefined}>
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/50 transition-opacity"
+        className={`absolute inset-0 ${backdrop === "light" ? "bg-black/15" : "bg-black/50"} transition-opacity`}
         {...backdropDismiss}
       />
 
@@ -433,7 +504,13 @@ export function ERPModal({
         />
 
         {/* Header */}
-        <div className="flex items-start justify-between px-6 pt-6 pb-4 border-b border-slate-100 flex-shrink-0">
+        <div
+          onPointerDown={canDrag ? startDrag : undefined}
+          onDoubleClick={canDrag ? recenter : undefined}
+          title={canDrag ? tr("ลากเพื่อย้ายป๊อป · ดับเบิลคลิก = กลับกลางจอ", "Drag to move · double-click to recenter") : undefined}
+          style={canDrag ? { touchAction: "none" } : undefined}
+          className={`flex items-start justify-between px-6 pt-6 pb-4 border-b border-slate-100 flex-shrink-0 ${canDrag ? "cursor-move select-none" : ""}`}
+        >
           <div>
             <h2 className="text-base font-semibold text-slate-900">{title}</h2>
             {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
