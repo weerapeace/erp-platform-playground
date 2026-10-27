@@ -29,6 +29,8 @@ import { RecordChecklist } from "@/components/record-tasks";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
+import { useT } from "@/components/i18n";
+import { tr, getLang } from "@/lib/lang";
 
 // ป๊อปอัปเต็ม (ของกลางเดิม) โหลดเฉพาะตอนกด "แก้ไขเต็ม"
 const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail").then((m) => m.DesignSheetsDetail), { ssr: false });
@@ -67,7 +69,7 @@ const money = (n: number | null | undefined) => (n == null ? "—" : `฿${Numbe
 const fmtDate = (d: string | null | undefined) => {
   if (!d) return "—";
   const t = new Date(`${d}T00:00:00`);
-  return Number.isNaN(t.getTime()) ? d : new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", year: "2-digit" }).format(t);
+  return Number.isNaN(t.getTime()) ? d : new Intl.DateTimeFormat(getLang() === "en" ? "en-GB" : "th-TH", { day: "numeric", month: "short", year: "2-digit" }).format(t);
 };
 function daysUntil(date: string | null): number | null {
   if (!date) return null;
@@ -77,13 +79,13 @@ function daysUntil(date: string | null): number | null {
   return Math.round((target.getTime() - today.getTime()) / 86400000);
 }
 function deadlineChip(deadline: string | null, finished: boolean): { text: string; cls: string } {
-  if (finished) return { text: "ปิดงานแล้ว", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
+  if (finished) return { text: tr("ปิดงานแล้ว", "Closed"), cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
   const d = daysUntil(deadline);
-  if (d === null) return { text: "ยังไม่กำหนดส่ง", cls: "bg-slate-50 text-slate-500 border-slate-200" };
-  if (d < 0) return { text: `เกินกำหนด ${Math.abs(d)} วัน`, cls: "bg-rose-50 text-rose-700 border-rose-200" };
-  if (d === 0) return { text: "ส่งวันนี้", cls: "bg-rose-50 text-rose-700 border-rose-200" };
-  if (d <= 2) return { text: d === 1 ? "ส่งพรุ่งนี้" : `อีก ${d} วัน`, cls: "bg-amber-50 text-amber-700 border-amber-200" };
-  return { text: `อีก ${d} วัน`, cls: "bg-slate-50 text-slate-600 border-slate-200" };
+  if (d === null) return { text: tr("ยังไม่กำหนดส่ง", "No deadline"), cls: "bg-slate-50 text-slate-500 border-slate-200" };
+  if (d < 0) return { text: tr(`เกินกำหนด ${Math.abs(d)} วัน`, `${Math.abs(d)}d overdue`), cls: "bg-rose-50 text-rose-700 border-rose-200" };
+  if (d === 0) return { text: tr("ส่งวันนี้", "Due today"), cls: "bg-rose-50 text-rose-700 border-rose-200" };
+  if (d <= 2) return { text: d === 1 ? tr("ส่งพรุ่งนี้", "Due tomorrow") : tr(`อีก ${d} วัน`, `In ${d} days`), cls: "bg-amber-50 text-amber-700 border-amber-200" };
+  return { text: tr(`อีก ${d} วัน`, `In ${d} days`), cls: "bg-slate-50 text-slate-600 border-slate-200" };
 }
 
 async function readJson<T>(r: Response, fallback: string): Promise<T> {
@@ -93,6 +95,7 @@ async function readJson<T>(r: Response, fallback: string): Promise<T> {
 }
 
 export function DesignSheetMobileView({ id }: { id: string }) {
+  const t = useT();
   const router = useRouter();
   const toast = useToast();
   const canEdit = usePermission("products.edit");
@@ -132,8 +135,8 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     setLoading(true); setError(null);
     (async () => {
       const [s, st, im] = await Promise.all([
-        apiFetch(`/api/design-sheets/${encodeURIComponent(id)}`).then((r) => readJson<{ data: Sheet }>(r, "โหลดใบงานไม่สำเร็จ")),
-        apiFetch("/api/design-sheets/statuses").then((r) => readJson<{ data: WfStatusRow[] }>(r, "โหลดสถานะไม่สำเร็จ")),
+        apiFetch(`/api/design-sheets/${encodeURIComponent(id)}`).then((r) => readJson<{ data: Sheet }>(r, tr("โหลดใบงานไม่สำเร็จ", "Failed to load design sheet"))),
+        apiFetch("/api/design-sheets/statuses").then((r) => readJson<{ data: WfStatusRow[] }>(r, tr("โหลดสถานะไม่สำเร็จ", "Failed to load statuses"))),
         apiFetch(`/api/design-sheets/${encodeURIComponent(id)}/images`).then((r) => r.ok ? r.json() as Promise<{ data: DesignSheetImage[] }> : { data: [] }).catch(() => ({ data: [] })),
       ]);
       if (!alive) return;
@@ -146,7 +149,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
       ]);
       if (!alive) return;
       setComments(Array.isArray(cm.data) ? cm.data : []); setCostLines(Array.isArray(cl.data) ? cl.data : []); setQuotes(Array.isArray(qt.data) ? qt.data : []);
-    })().catch((e) => { if (alive) { setError(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); setLoading(false); } });
+    })().catch((e) => { if (alive) { setError(e instanceof Error ? e.message : tr("โหลดไม่สำเร็จ", "Failed to load")); setLoading(false); } });
     return () => { alive = false; };
   }, [id, reloadKey]);
 
@@ -167,11 +170,11 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     try {
       const r = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
       const j = await r.json() as { error?: string | null };
-      if (!r.ok || j.error) throw new Error(j.error || `บันทึก${label}ไม่สำเร็จ`);
-      toast.success(`บันทึก${label}แล้ว`);
+      if (!r.ok || j.error) throw new Error(j.error || tr(`บันทึก${label}ไม่สำเร็จ`, `Failed to save ${label.toLowerCase()}`));
+      toast.success(tr(`บันทึก${label}แล้ว`, `${label} saved`));
     } catch (e) {
       setSheet(prev);
-      toast.error(e instanceof Error ? e.message : `บันทึก${label}ไม่สำเร็จ`);
+      toast.error(e instanceof Error ? e.message : tr(`บันทึก${label}ไม่สำเร็จ`, `Failed to save ${label.toLowerCase()}`));
     } finally { setSaving(null); }
   }
 
@@ -182,12 +185,12 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     try {
       const r = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}/comments`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: text, comment_date: commentDate }) });
       const j = await r.json() as { error?: string | null };
-      if (!r.ok || j.error) throw new Error(j.error || "บันทึก comment ไม่สำเร็จ");
+      if (!r.ok || j.error) throw new Error(j.error || tr("บันทึก comment ไม่สำเร็จ", "Failed to save comment"));
       setNewComment("");
       const cm = await apiFetch(`/api/design-sheets/${encodeURIComponent(sheet.id)}/comments`).then((x) => x.json() as Promise<{ data: DesignSheetComment[] }>);
       setComments(Array.isArray(cm.data) ? cm.data : []);
-      toast.success("เพิ่ม comment แล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึก comment ไม่สำเร็จ"); }
+      toast.success(tr("เพิ่ม comment แล้ว", "Comment added"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("บันทึก comment ไม่สำเร็จ", "Failed to save comment")); }
     finally { setSaving(null); }
   }
 
@@ -210,7 +213,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
   const hero = (
     <div className="relative overflow-hidden bg-slate-100">
       {images.length === 0 ? (
-        <div className="flex aspect-square w-full items-center justify-center text-sm text-slate-400">ยังไม่มีรูปงาน</div>
+        <div className="flex aspect-square w-full items-center justify-center text-sm text-slate-400">{t("ยังไม่มีรูปงาน", "No job images yet")}</div>
       ) : (
         <div ref={stripRef} onScroll={onStripScroll} className="flex snap-x snap-mandatory overflow-x-auto [scrollbar-width:none]">
           {images.map((im, i) => (
@@ -264,10 +267,10 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-3">
       {parentChips(costParents, costParent, setCostParent)}
       {curLines.length === 0 && curExtra.every((c) => !c.amount) ? (
-        <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">ยังไม่ตีราคา{costParent ? ` (${costParent})` : ""}</div>
+        <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">{t("ยังไม่ตีราคา", "Not costed yet")}{costParent ? ` (${costParent})` : ""}</div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-          <div className="border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">วัสดุ {curLines.length} รายการ</div>
+          <div className="border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 text-[11px] font-semibold text-slate-500">{t(`วัสดุ ${curLines.length} รายการ`, `Materials: ${curLines.length} items`)}</div>
           {curLines.map((l, i) => (
             <div key={l.id ?? i} className="flex items-start gap-2 border-b border-slate-100 px-2.5 py-2 last:border-0">
               <div className="min-w-0 flex-1">
@@ -280,22 +283,22 @@ export function DesignSheetMobileView({ id }: { id: string }) {
                 {/* ข้อ B: เปลี่ยนวัสดุแล้วยังไม่รับทราบ — โชว์ของเดิม + ส่วนต่าง (มือถือดูอย่างเดียว · กดรับทราบที่หน้า PC) */}
                 {l.prev_item && (
                   <div className="mt-0.5 rounded bg-sky-50 px-1.5 py-0.5 text-[10px] text-sky-900">
-                    🔁 เดิม: {l.prev_item.item_name ?? "—"} {money(l.prev_item.unit_price)} → {money(l.unit_price)}
-                    {l.unit_price != null && l.prev_item.unit_price != null && (() => { const d = l.unit_price - l.prev_item.unit_price; return <span className={d > 0 ? " text-rose-700" : " text-emerald-700"}> ({d > 0 ? "+" : d < 0 ? "−" : ""}{money(Math.abs(d))}/หน่วย)</span>; })()}
+                    {t("🔁 เดิม:", "🔁 Was:")} {l.prev_item.item_name ?? "—"} {money(l.prev_item.unit_price)} → {money(l.unit_price)}
+                    {l.unit_price != null && l.prev_item.unit_price != null && (() => { const d = l.unit_price - l.prev_item.unit_price; return <span className={d > 0 ? " text-rose-700" : " text-emerald-700"}> ({d > 0 ? "+" : d < 0 ? "−" : ""}{money(Math.abs(d))}{t("/หน่วย", "/unit")})</span>; })()}
                   </div>
                 )}
               </div>
               <div className="shrink-0 text-sm font-medium tabular-nums text-slate-800">{money(l.amount)}</div>
             </div>
           ))}
-          <div className="flex justify-between bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600"><span>รวมวัสดุ</span><span className="tabular-nums">{money(curMaterial)}</span></div>
+          <div className="flex justify-between bg-slate-50 px-2.5 py-1.5 text-xs text-slate-600"><span>{t("รวมวัสดุ", "Materials total")}</span><span className="tabular-nums">{money(curMaterial)}</span></div>
           {curExtra.filter((c) => c.amount || c.label).map((c, i) => (
-            <div key={i} className="flex justify-between border-t border-slate-100 px-2.5 py-1.5 text-xs text-slate-600"><span className="truncate">{c.label || "ค่าใช้จ่ายเพิ่ม"}</span><span className="tabular-nums">{money(c.amount)}</span></div>
+            <div key={i} className="flex justify-between border-t border-slate-100 px-2.5 py-1.5 text-xs text-slate-600"><span className="truncate">{c.label || t("ค่าใช้จ่ายเพิ่ม", "Extra cost")}</span><span className="tabular-nums">{money(c.amount)}</span></div>
           ))}
-          <div className="flex justify-between border-t border-slate-200 bg-amber-50 px-2.5 py-2 text-sm font-semibold text-slate-900"><span>ต้นทุนรวม</span><span className="tabular-nums">{money(grandTotal)}</span></div>
+          <div className="flex justify-between border-t border-slate-200 bg-amber-50 px-2.5 py-2 text-sm font-semibold text-slate-900"><span>{t("ต้นทุนรวม", "Total cost")}</span><span className="tabular-nums">{money(grandTotal)}</span></div>
         </div>
       )}
-      {canEdit && editFullBtn("แก้ตีราคา / เลือกวัสดุ (หน้าเต็ม)")}
+      {canEdit && editFullBtn(t("แก้ตีราคา / เลือกวัสดุ (หน้าเต็ม)", "Edit costing / choose materials (full view)"))}
     </div>
   );
 
@@ -326,7 +329,7 @@ export function DesignSheetMobileView({ id }: { id: string }) {
         </div>
       )}
       {sheet.linked_skus.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">ยังไม่มี SKU จากใบงานนี้</div>
+        <div className="rounded-lg border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">{t("ยังไม่มี SKU จากใบงานนี้", "No SKUs from this design sheet yet")}</div>
       ) : (
         <div className="grid grid-cols-2 gap-2">
           {sheet.linked_skus.map((s) => (
@@ -341,15 +344,15 @@ export function DesignSheetMobileView({ id }: { id: string }) {
                 <div className="line-clamp-2 text-xs font-medium text-slate-800">{s.name_th ?? "—"}</div>
                 <div className="mt-0.5 flex items-center gap-1 text-[10px] text-slate-400">
                   {s.color && <span className="truncate">{s.color}</span>}
-                  {!s.is_active && <span className="rounded bg-slate-100 px-1 text-slate-500">ปิดใช้</span>}
-                  {!s.from_sheet && <span className="rounded bg-slate-100 px-1 text-slate-500">ของเดิม</span>}
+                  {!s.is_active && <span className="rounded bg-slate-100 px-1 text-slate-500">{t("ปิดใช้", "Inactive")}</span>}
+                  {!s.from_sheet && <span className="rounded bg-slate-100 px-1 text-slate-500">{t("ของเดิม", "Existing")}</span>}
                 </div>
               </div>
             </button>
           ))}
         </div>
       )}
-      {canEdit && editFullBtn("ตั้ง Parent / สร้าง SKU (หน้าเต็ม)")}
+      {canEdit && editFullBtn(t("ตั้ง Parent / สร้าง SKU (หน้าเต็ม)", "Set Parent / create SKU (full view)"))}
     </div>
   );
 
@@ -361,14 +364,14 @@ export function DesignSheetMobileView({ id }: { id: string }) {
           <div className="min-w-0 flex-1">
             <h1 className="text-lg font-semibold leading-snug text-slate-900">{sheet.name}</h1>
             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />{sheet.brand?.name ?? "ไม่ระบุแบรนด์"}</span>
+              <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: brandColor }} />{sheet.brand?.name ?? t("ไม่ระบุแบรนด์", "No brand")}</span>
               <span>·</span><span className="font-mono">{sheet.code}</span>
             </div>
           </div>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {/* สถานะ: แตะเพื่อเปลี่ยน (แผ่นเลือกจากล่าง) */}
-          <button type="button" onClick={() => canEdit && setStatusSheet(true)} disabled={!canEdit || saving === "สถานะ"}
+          <button type="button" onClick={() => canEdit && setStatusSheet(true)} disabled={!canEdit || saving === t("สถานะ", "Status")}
             className="inline-flex h-9 items-center gap-2 rounded-full px-3 text-sm font-semibold text-white shadow-sm disabled:opacity-70"
             style={{ backgroundColor: statusColor }}>
             <span className="h-2 w-2 rounded-full bg-white/80" />{statusLabel}{canEdit && <span className="text-xs opacity-80">▾</span>}
@@ -376,8 +379,8 @@ export function DesignSheetMobileView({ id }: { id: string }) {
           {dl && (
             <label className={`relative inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-medium ${dl.cls}`}>
               📅 {dl.text}{sheet.deadline && <span className="text-xs opacity-70">· {fmtDate(sheet.deadline)}</span>}
-              {canEdit && <input type="date" value={sheet.deadline ?? ""} onChange={(e) => void patchField({ deadline: e.target.value || null }, "กำหนดส่ง")}
-                className="absolute inset-0 cursor-pointer opacity-0" aria-label="เปลี่ยนวันกำหนดส่ง" />}
+              {canEdit && <input type="date" value={sheet.deadline ?? ""} onChange={(e) => void patchField({ deadline: e.target.value || null }, t("กำหนดส่ง", "Deadline"))}
+                className="absolute inset-0 cursor-pointer opacity-0" aria-label={t("เปลี่ยนวันกำหนดส่ง", "Change deadline")} />}
             </label>
           )}
         </div>
@@ -385,55 +388,55 @@ export function DesignSheetMobileView({ id }: { id: string }) {
 
       {/* ข้อมูลสั้น */}
       <div className={`${sectionCls} grid grid-cols-2 gap-x-3 gap-y-2 text-sm`}>
-        <div><div className="text-[11px] text-slate-400">วันที่สั่ง</div><div className="text-slate-800">{fmtDate(sheet.order_date)}</div></div>
-        <div><div className="text-[11px] text-slate-400">นัดลูกค้า</div><div className="text-slate-800">{fmtDate(sheet.appointment_date)}</div></div>
+        <div><div className="text-[11px] text-slate-400">{t("วันที่สั่ง", "Order date")}</div><div className="text-slate-800">{fmtDate(sheet.order_date)}</div></div>
+        <div><div className="text-[11px] text-slate-400">{t("นัดลูกค้า", "Customer appointment")}</div><div className="text-slate-800">{fmtDate(sheet.appointment_date)}</div></div>
         {/* ⏳ รออะไรอยู่ = เช็กลิสต์กลาง ชุดเดียวกับหน้าคอม (บันทึกทีละข้อทันที) */}
         <div className="col-span-2">
           <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={sheet.id} canEdit={canEdit}
-            presetType={DESIGN_WAITING.presetType} label="⏳ รออะไรอยู่" />
+            presetType={DESIGN_WAITING.presetType} label={t("⏳ รออะไรอยู่", "⏳ Waiting for")} />
         </div>
         <div className="col-span-2">
           <div className="text-[11px] text-slate-400">Parent SKU</div>
-          {sheet.parent_sku_refs.length === 0 && !(sheet.parent_sku_drafts?.length) ? <div className="text-slate-400">ยังไม่ตั้ง</div> : (
+          {sheet.parent_sku_refs.length === 0 && !(sheet.parent_sku_drafts?.length) ? <div className="text-slate-400">{t("ยังไม่ตั้ง", "Not set")}</div> : (
             <div className="mt-0.5 flex flex-wrap gap-1">
               {sheet.parent_sku_refs.map((p) => <a key={p.id} href={`/master/skus?open=${encodeURIComponent(p.id)}`} className="rounded-md bg-emerald-50 px-2 py-0.5 font-mono text-xs text-emerald-700">{p.code}</a>)}
-              {(sheet.parent_sku_drafts ?? []).map((d) => <span key={d} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-500">ร่าง: {d}</span>)}
+              {(sheet.parent_sku_drafts ?? []).map((d) => <span key={d} className="rounded-md bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{t("ร่าง:", "Draft:")} {d}</span>)}
             </div>
           )}
         </div>
         {sheet.drive_link && (
-          <a href={sheet.drive_link} target="_blank" rel="noreferrer" className="col-span-2 inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 text-sm font-medium text-slate-700">📁 เปิดไฟล์งาน (Drive)</a>
+          <a href={sheet.drive_link} target="_blank" rel="noreferrer" className="col-span-2 inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 text-sm font-medium text-slate-700">{t("📁 เปิดไฟล์งาน (Drive)", "📁 Open work files (Drive)")}</a>
         )}
       </div>
 
       {/* โน้ต — แก้ได้ทันที */}
       <div className={sectionCls}>
-        <div className="mb-1 flex items-center justify-between"><span className="text-xs font-semibold text-slate-600">📝 โน้ต</span>
+        <div className="mb-1 flex items-center justify-between"><span className="text-xs font-semibold text-slate-600">{t("📝 โน้ต", "📝 Note")}</span>
           {canEdit && note !== (sheet.note ?? "") && (
-            <button type="button" onClick={() => void patchField({ note: note.trim() || null }, "โน้ต")} disabled={saving === "โน้ต"}
-              className="h-7 rounded-md bg-slate-900 px-3 text-xs font-medium text-white disabled:opacity-50">{saving === "โน้ต" ? "กำลังบันทึก…" : "บันทึก"}</button>
+            <button type="button" onClick={() => void patchField({ note: note.trim() || null }, t("โน้ต", "Note"))} disabled={saving === t("โน้ต", "Note")}
+              className="h-7 rounded-md bg-slate-900 px-3 text-xs font-medium text-white disabled:opacity-50">{saving === t("โน้ต", "Note") ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
           )}
         </div>
-        <textarea value={note} onChange={(e) => setNote(e.target.value)} disabled={!canEdit} rows={2} placeholder="พิมพ์โน้ตสั้น ๆ ที่ทีมต้องรู้…"
+        <textarea value={note} onChange={(e) => setNote(e.target.value)} disabled={!canEdit} rows={2} placeholder={t("พิมพ์โน้ตสั้น ๆ ที่ทีมต้องรู้…", "Type a short note the team needs to know…")}
           className="w-full resize-none rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-2 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-amber-300 disabled:opacity-70" />
       </div>
 
       {/* รายละเอียดงาน (อ่านอย่างเดียว — แก้ในป๊อปอัปเต็ม) */}
       {sheet.detail && (
         <div className={sectionCls}>
-          <div className="mb-1 text-xs font-semibold text-slate-600">📄 รายละเอียดงาน</div>
+          <div className="mb-1 text-xs font-semibold text-slate-600">{t("📄 รายละเอียดงาน", "📄 Job details")}</div>
           <div className={`prose prose-sm max-w-none text-sm text-slate-700 [&_img]:max-w-full [&_img]:rounded-md ${detailOpen ? "" : "max-h-40 overflow-hidden"}`}
             dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(sheet.detail) }} />
-          <button type="button" onClick={() => setDetailOpen((o) => !o)} className="mt-1 text-xs font-medium text-blue-600">{detailOpen ? "ย่อ ▲" : "ดูทั้งหมด ▼"}</button>
+          <button type="button" onClick={() => setDetailOpen((o) => !o)} className="mt-1 text-xs font-medium text-blue-600">{detailOpen ? t("ย่อ ▲", "Collapse ▲") : t("ดูทั้งหมด ▼", "Show all ▼")}</button>
         </div>
       )}
 
       {/* ความคืบหน้า: ตีราคา / เสนอราคา / SKU — แถวสรุป แตะ = กางดูรายละเอียดแบบมือถือ (งานแก้หนักส่งไปป๊อปอัปเต็ม) */}
       <div className={`${sectionCls} divide-y divide-slate-100 !p-0`}>
         {([
-          { key: "cost", icon: "🧮", label: "ตีราคา", value: costLines.length ? `${costLines.length} รายการ · ต้นทุน ${money(grandTotal)}` : "ยังไม่ตีราคา", done: costLines.length > 0 },
-          { key: "quote", icon: "💰", label: "เสนอราคา", value: latestQuote ? `ครั้งที่ ${latestQuote.batch ?? latestQuote.round} · ${money(latestQuote.offered_price ?? latestQuote.price)} · ${QUOTE_STATUS[latestQuote.status]?.label ?? latestQuote.status}` : "ยังไม่เสนอราคา", done: !!latestQuote },
-          { key: "sku", icon: "🏷️", label: "SKU ที่เชื่อม", value: sheet.linked_skus.length ? `${sheet.linked_skus.length} ตัว${sheet.parent_sku_refs.length ? ` · ${sheet.parent_sku_refs.length} Parent` : ""}` : "ยังไม่มี SKU", done: sheet.linked_skus.length > 0 },
+          { key: "cost", icon: "🧮", label: t("ตีราคา", "Costing"), value: costLines.length ? t(`${costLines.length} รายการ · ต้นทุน ${money(grandTotal)}`, `${costLines.length} items · cost ${money(grandTotal)}`) : t("ยังไม่ตีราคา", "Not costed yet"), done: costLines.length > 0 },
+          { key: "quote", icon: "💰", label: t("เสนอราคา", "Quote"), value: latestQuote ? t(`ครั้งที่ ${latestQuote.batch ?? latestQuote.round} · ${money(latestQuote.offered_price ?? latestQuote.price)} · ${QUOTE_STATUS[latestQuote.status]?.label ?? latestQuote.status}`, `Round ${latestQuote.batch ?? latestQuote.round} · ${money(latestQuote.offered_price ?? latestQuote.price)} · ${QUOTE_STATUS[latestQuote.status]?.label ?? latestQuote.status}`) : t("ยังไม่เสนอราคา", "Not quoted yet"), done: !!latestQuote },
+          { key: "sku", icon: "🏷️", label: t("SKU ที่เชื่อม", "Linked SKUs"), value: sheet.linked_skus.length ? t(`${sheet.linked_skus.length} ตัว`, `${sheet.linked_skus.length} SKUs`) + (sheet.parent_sku_refs.length ? ` · ${sheet.parent_sku_refs.length} Parent` : "") : t("ยังไม่มี SKU", "No SKUs yet"), done: sheet.linked_skus.length > 0 },
         ] as const).map((row) => {
           const open = openSec === row.key;
           return (
@@ -456,8 +459,8 @@ export function DesignSheetMobileView({ id }: { id: string }) {
 
       {/* Comment ลูกค้า — ไทม์ไลน์ + พิมพ์เพิ่ม */}
       <div className={sectionCls}>
-        <div className="mb-2 text-xs font-semibold text-slate-600">💬 Comment ลูกค้า ({comments.length})</div>
-        {comments.length === 0 ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">ยังไม่มี comment</div> : (
+        <div className="mb-2 text-xs font-semibold text-slate-600">{t(`💬 Comment ลูกค้า (${comments.length})`, `💬 Customer comments (${comments.length})`)}</div>
+        {comments.length === 0 ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">{t("ยังไม่มี comment", "No comments yet")}</div> : (
           <div className="space-y-2">
             {comments.map((c) => (
               <div key={c.id} className="rounded-lg bg-slate-50 px-2.5 py-2">
@@ -479,12 +482,12 @@ export function DesignSheetMobileView({ id }: { id: string }) {
         )}
         {canEdit && (
           <div className="mt-2 space-y-1.5">
-            <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)} rows={2} placeholder="พิมพ์ comment จากลูกค้า…"
+            <textarea value={newComment} onChange={(e) => setNewComment(e.target.value)} rows={2} placeholder={t("พิมพ์ comment จากลูกค้า…", "Type the customer's comment…")}
               className="w-full resize-none rounded-lg border border-slate-200 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-200" />
             <div className="flex items-center gap-2">
               <input type="date" value={commentDate} onChange={(e) => setCommentDate(e.target.value)} className="h-8 flex-1 rounded-md border border-slate-200 px-2 text-xs text-slate-600" />
               <button type="button" onClick={() => void sendComment()} disabled={!newComment.trim() || saving === "comment"}
-                className="h-8 rounded-md bg-blue-600 px-4 text-xs font-medium text-white disabled:opacity-40">{saving === "comment" ? "กำลังส่ง…" : "ส่ง"}</button>
+                className="h-8 rounded-md bg-blue-600 px-4 text-xs font-medium text-white disabled:opacity-40">{saving === "comment" ? t("กำลังส่ง…", "Sending…") : t("ส่ง", "Send")}</button>
             </div>
           </div>
         )}
@@ -497,16 +500,16 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     <div className="min-h-[100dvh] bg-slate-50">
       {/* แถบบน: ย้อนกลับ · รหัส · แก้ไขเต็ม */}
       <div className="sticky top-0 z-20 flex h-12 items-center gap-2 border-b border-slate-200 bg-white/95 px-2 backdrop-blur">
-        <button type="button" onClick={goBack} aria-label="ย้อนกลับ" className="flex h-9 w-9 items-center justify-center rounded-lg text-xl text-slate-700 active:bg-slate-100">←</button>
+        <button type="button" onClick={goBack} aria-label={t("ย้อนกลับ", "Back")} className="flex h-9 w-9 items-center justify-center rounded-lg text-xl text-slate-700 active:bg-slate-100">←</button>
         <div className="min-w-0 flex-1">
           <div className="truncate font-mono text-xs text-slate-500">{sheet?.code ?? "…"}</div>
-          <div className="truncate text-sm font-semibold text-slate-800">{sheet?.name ?? (loading ? "กำลังโหลด…" : "")}</div>
+          <div className="truncate text-sm font-semibold text-slate-800">{sheet?.name ?? (loading ? t("กำลังโหลด…", "Loading…") : "")}</div>
         </div>
         {sheet && (
-          <button type="button" onClick={() => setPresentOpen(true)} title="ใบนำเสนอ A4" aria-label="ใบนำเสนอ A4" className="h-8 shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 text-xs font-medium text-amber-800">📄</button>
+          <button type="button" onClick={() => setPresentOpen(true)} title={t("ใบนำเสนอ A4", "A4 presentation")} aria-label={t("ใบนำเสนอ A4", "A4 presentation")} className="h-8 shrink-0 rounded-md border border-amber-300 bg-amber-50 px-2 text-xs font-medium text-amber-800">📄</button>
         )}
         {sheet && canEdit && (
-          <button type="button" onClick={() => setEditOpen(true)} className="h-8 shrink-0 rounded-md border border-blue-200 bg-white px-2.5 text-xs font-medium text-blue-700">✏️ แก้ไขเต็ม</button>
+          <button type="button" onClick={() => setEditOpen(true)} className="h-8 shrink-0 rounded-md border border-blue-200 bg-white px-2.5 text-xs font-medium text-blue-700">{t("✏️ แก้ไขเต็ม", "✏️ Full edit")}</button>
         )}
       </div>
 
@@ -518,8 +521,8 @@ export function DesignSheetMobileView({ id }: { id: string }) {
         </div>
       ) : error || !sheet ? (
         <div className="m-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
-          โหลดใบงานไม่สำเร็จ: {error ?? "ไม่พบใบงาน"}
-          <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="ml-2 underline">ลองใหม่</button>
+          {t("โหลดใบงานไม่สำเร็จ:", "Failed to load design sheet:")} {error ?? t("ไม่พบใบงาน", "Design sheet not found")}
+          <button type="button" onClick={() => setReloadKey((k) => k + 1)} className="ml-2 underline">{t("ลองใหม่", "Retry")}</button>
         </div>
       ) : isPhone ? (
         <div className="pb-20">
@@ -537,8 +540,8 @@ export function DesignSheetMobileView({ id }: { id: string }) {
       {/* มือถือ: แถบปุ่มล่างติดจอ */}
       {isPhone && sheet && canEdit && (
         <div className="sticky bottom-0 z-20 flex gap-2 border-t border-slate-200 bg-white/95 p-2 backdrop-blur" style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}>
-          <button type="button" onClick={() => setStatusSheet(true)} className="h-11 flex-1 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: statusColor }}>🔀 เปลี่ยนสถานะ</button>
-          <button type="button" onClick={() => setEditOpen(true)} className="h-11 flex-1 rounded-lg border border-slate-300 bg-white text-sm font-semibold text-slate-800">✏️ แก้ไขเต็ม</button>
+          <button type="button" onClick={() => setStatusSheet(true)} className="h-11 flex-1 rounded-lg text-sm font-semibold text-white" style={{ backgroundColor: statusColor }}>{t("🔀 เปลี่ยนสถานะ", "🔀 Change status")}</button>
+          <button type="button" onClick={() => setEditOpen(true)} className="h-11 flex-1 rounded-lg border border-slate-300 bg-white text-sm font-semibold text-slate-800">{t("✏️ แก้ไขเต็ม", "✏️ Full edit")}</button>
         </div>
       )}
 
@@ -547,14 +550,14 @@ export function DesignSheetMobileView({ id }: { id: string }) {
         <div className="fixed inset-0 z-[70] flex items-end bg-black/40" onClick={() => setStatusSheet(false)}>
           <div className="max-h-[70vh] w-full overflow-y-auto rounded-t-2xl bg-white p-3 shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-200" />
-            <div className="mb-2 text-sm font-semibold text-slate-800">เปลี่ยนสถานะ</div>
+            <div className="mb-2 text-sm font-semibold text-slate-800">{t("เปลี่ยนสถานะ", "Change status")}</div>
             {/* แบรนด์เรา = ไม่มีสถานะ "เฉพาะงานลูกค้า" (กฎกลางเดียวกับบอร์ด/ป๊อปอัป) */}
             {statusOptsFor(statusMeta, isOwnBrandJob(sheet.brand), sheet.status).map(([key, label]) => {
               const on = key === sheet.status; const color = statusMeta.colorHex[key] ?? "#94a3b8";
               return (
-                <button key={key} type="button" onClick={() => { setStatusSheet(false); if (!on) void patchField({ status: key }, "สถานะ"); }}
+                <button key={key} type="button" onClick={() => { setStatusSheet(false); if (!on) void patchField({ status: key }, t("สถานะ", "Status")); }}
                   className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm ${on ? "bg-slate-100 font-semibold text-slate-900" : "text-slate-700 active:bg-slate-50"}`}>
-                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />{label}{on && <span className="ml-auto text-xs text-slate-400">ปัจจุบัน</span>}
+                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: color }} />{label}{on && <span className="ml-auto text-xs text-slate-400">{t("ปัจจุบัน", "Current")}</span>}
                 </button>
               );
             })}

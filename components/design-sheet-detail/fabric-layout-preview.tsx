@@ -13,6 +13,7 @@
 
 import { useMemo, useState, useEffect } from "react";
 import type { FabricResult, FabricRow } from "@/lib/fabric-calc";
+import { useT } from "@/components/i18n";
 
 // สีชุดอ่านง่าย (ไล่เฉด ไม่ฉูดฉาด) — ใช้วนตามชนิดชิ้น
 const PALETTE = [
@@ -38,6 +39,7 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
   sheetLengthCm?: number | null;
   mode: "roll" | "sheet";
 }) {
+  const t = useT();
   const [page, setPage] = useState(0);
   const [showAll, setShowAll] = useState(false);
 
@@ -60,11 +62,11 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
     const strips: { label: string; height: number; rows: FabricRow[] }[] = [];
     if (mode === "sheet" && drawable > 0) {
       for (let s = 0; s < shownSheets; s++) {
-        strips.push({ label: `ผืนที่ ${s + 1}`, height: Number(sheetLengthCm) || 0,
+        strips.push({ label: t(`ผืนที่ ${s + 1}`, `Sheet ${s + 1}`), height: Number(sheetLengthCm) || 0,
           rows: result.rows.filter((r) => (r.sheetIndex ?? 0) === s).map((r) => ({ ...r, y: r.yInSheet ?? r.y })) });
       }
     } else {
-      strips.push({ label: "ผ้าม้วน (ต่อเนื่อง)", height: result.usedLengthCm, rows: result.rows });
+      strips.push({ label: t("ผ้าม้วน (ต่อเนื่อง)", "Roll fabric (continuous)"), height: result.usedLengthCm, rows: result.rows });
     }
     // ตัดแต่ละผืนเป็นหน้า ๆ ช่วงละ segCm — ชิ้นที่คร่อมขอบหน้าถูกวาดต่อในหน้าถัดไปเอง (svg ตัดขอบให้)
     const out: Page[] = [];
@@ -77,7 +79,7 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
       }
     });
     return out;
-  }, [mode, drawable, shownSheets, sheetLengthCm, result, segCm]);
+  }, [mode, drawable, shownSheets, sheetLengthCm, result, segCm, t]);
 
   useEffect(() => { setPage(0); }, [result]);   // ผลใหม่ → กลับหน้าแรก
 
@@ -92,11 +94,11 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
     return (
       <div key={key} className="shrink-0">
         <div className="text-[11px] text-slate-500 mb-1 text-center">
-          {pg.stripLabel} · ช่วง {fmt(pg.from)}–{fmt(pg.to)} ซม.{pg.stripLen > segCm ? ` (ยาวทั้งหมด ${fmt(pg.stripLen)} ซม.)` : ""}
+          {pg.stripLabel} · {t(`ช่วง ${fmt(pg.from)}–${fmt(pg.to)} ซม.`, `Range ${fmt(pg.from)}–${fmt(pg.to)} cm`)}{pg.stripLen > segCm ? t(` (ยาวทั้งหมด ${fmt(pg.stripLen)} ซม.)`, ` (total length ${fmt(pg.stripLen)} cm)`) : ""}
         </div>
         {/* วาดในหน่วย ซม. ตรง ๆ: viewBox = [0, from, หน้าผ้า, ความยาวช่วงนี้] → ไม่ถูกบีบ ไม่ว่าผ้าจะยาวแค่ไหน */}
         <svg width={W} height={Math.max(24, h * scale)} viewBox={`0 ${pg.from} ${faceWidthCm} ${h}`} preserveAspectRatio="none"
-          className="border-2 border-slate-300 rounded bg-slate-100 block" role="img" aria-label={`ผังการวาง ${pg.stripLabel} ${fmt(pg.from)}-${fmt(pg.to)} ซม.`}>
+          className="border-2 border-slate-300 rounded bg-slate-100 block" role="img" aria-label={t(`ผังการวาง ${pg.stripLabel} ${fmt(pg.from)}-${fmt(pg.to)} ซม.`, `Layout ${pg.stripLabel} ${fmt(pg.from)}-${fmt(pg.to)} cm`)}>
           <rect x={0} y={pg.from} width={faceWidthCm} height={h} fill="#f1f5f9" />
           {Array.from({ length: gridN }, (_, i) => {
             const y = gridStart + i * 10; const major = y % 50 === 0;
@@ -113,7 +115,7 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
             return (
               <g key={`${r.y}-${ii}`}>
                 <rect x={it.x} y={it.y} width={it.w} height={it.h} fill={c.fill} stroke={c.stroke} strokeWidth={0.8 / scale} rx={1.5 / scale}>
-                  <title>{`${it.w}×${it.h} ซม.${it.rotated ? " (หมุน 90°)" : ""} · ตำแหน่ง ${fmt(it.y)} ซม.`}</title>
+                  <title>{t(`${it.w}×${it.h} ซม.${it.rotated ? " (หมุน 90°)" : ""} · ตำแหน่ง ${fmt(it.y)} ซม.`, `${it.w}×${it.h} cm${it.rotated ? " (rotated 90°)" : ""} · position ${fmt(it.y)} cm`)}</title>
                 </rect>
                 {showText && (
                   <text x={it.x + it.w / 2} y={it.y + it.h / 2} textAnchor="middle" dominantBaseline="middle"
@@ -133,9 +135,9 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
     <div className="space-y-3">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <p className="text-[12px] text-slate-500">
-          🧵 ผังการวาง — หน้าผ้า {faceWidthCm} ซม. (แนวนอน) · ความยาวผ้าลงล่าง · ↻ = หมุนชิ้น 90° · ตัวเลขซ้าย = ระยะจากต้นผ้า (ซม.)
+          {t(`🧵 ผังการวาง — หน้าผ้า ${faceWidthCm} ซม. (แนวนอน) · ความยาวผ้าลงล่าง · ↻ = หมุนชิ้น 90° · ตัวเลขซ้าย = ระยะจากต้นผ้า (ซม.)`, `🧵 Layout — fabric width ${faceWidthCm} cm (horizontal) · fabric length runs down · ↻ = piece rotated 90° · left numbers = distance from fabric start (cm)`)}
         </p>
-        <span className="text-[11px] text-slate-400">พื้นที่เทาในกรอบ = เศษที่เหลือ</span>
+        <span className="text-[11px] text-slate-400">{t("พื้นที่เทาในกรอบ = เศษที่เหลือ", "Grey area in the frame = leftover scrap")}</span>
       </div>
 
       {pages.length > 1 && (
@@ -144,20 +146,20 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
             <>
               <button type="button" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page <= 0}
                 className="h-8 w-8 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">‹</button>
-              <span className="text-sm text-slate-700">หน้า <b>{Math.min(page, pages.length - 1) + 1}</b> / {pages.length}</span>
+              <span className="text-sm text-slate-700">{t("หน้า", "Page")} <b>{Math.min(page, pages.length - 1) + 1}</b> / {pages.length}</span>
               <button type="button" onClick={() => setPage((p) => Math.min(pages.length - 1, p + 1))} disabled={page >= pages.length - 1}
                 className="h-8 w-8 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-40">›</button>
-              <label className="text-[11px] text-slate-500 flex items-center gap-1">ไปหน้า
+              <label className="text-[11px] text-slate-500 flex items-center gap-1">{t("ไปหน้า", "Go to page")}
                 <input type="number" min={1} max={pages.length} value={Math.min(page, pages.length - 1) + 1}
                   onChange={(e) => setPage(Math.min(pages.length - 1, Math.max(0, (Number(e.target.value) || 1) - 1)))}
                   className="w-14 h-7 px-1 text-sm text-center border border-slate-200 rounded" />
               </label>
-              <span className="text-[11px] text-slate-400">· หน้าละ ~{segCm} ซม.</span>
+              <span className="text-[11px] text-slate-400">· {t(`หน้าละ ~${segCm} ซม.`, `~${segCm} cm per page`)}</span>
             </>
           )}
           <button type="button" onClick={() => setShowAll((v) => !v)}
             className={`ml-auto h-8 px-3 text-[12px] rounded-lg border ${showAll ? "bg-slate-800 text-white border-slate-800" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-            {showAll ? "◧ ดูทีละหน้า" : "▤ เรียงทุกหน้าต่อกัน"}
+            {showAll ? t("◧ ดูทีละหน้า", "◧ One page at a time") : t("▤ เรียงทุกหน้าต่อกัน", "▤ Show all pages side by side")}
           </button>
         </div>
       )}
@@ -167,13 +169,13 @@ export function FabricLayoutPreview({ result, faceWidthCm, sheetLengthCm, mode }
         : <div className="flex justify-center">{cur && renderPage(cur, page)}</div>}
 
       {pages.length > 1 && !showAll && (
-        <p className="text-[11px] text-slate-400">* ชิ้นที่คร่อมขอบล่างของหน้า จะวาดต่อที่ขอบบนของหน้าถัดไป</p>
+        <p className="text-[11px] text-slate-400">{t("* ชิ้นที่คร่อมขอบล่างของหน้า จะวาดต่อที่ขอบบนของหน้าถัดไป", "* Pieces crossing the bottom edge of a page continue at the top of the next page")}</p>
       )}
       {result.sampledFrom && (
-        <p className="text-[11px] text-amber-600">* ล็อตใหญ่: จำลองวาง {result.sampledFrom.simulated.toLocaleString()} จาก {result.sampledFrom.total.toLocaleString()} ชิ้น แล้วขยายสัดส่วน — ผังที่เห็นคือช่วงต้นของผ้า ยอดที่ต้องสั่งคิดครบแล้ว</p>
+        <p className="text-[11px] text-amber-600">{t(`* ล็อตใหญ่: จำลองวาง ${result.sampledFrom.simulated.toLocaleString()} จาก ${result.sampledFrom.total.toLocaleString()} ชิ้น แล้วขยายสัดส่วน — ผังที่เห็นคือช่วงต้นของผ้า ยอดที่ต้องสั่งคิดครบแล้ว`, `* Large lot: simulated ${result.sampledFrom.simulated.toLocaleString()} of ${result.sampledFrom.total.toLocaleString()} pcs and scaled up — the layout shown is the start of the fabric; the order quantity already covers everything`)}</p>
       )}
       {totalSheets > shownSheets && (
-        <p className="text-[11px] text-amber-600">* แสดง {shownSheets} จาก {totalSheets} ผืน (ผืนที่เหลือวางแบบเดียวกัน) — ยอดที่ต้องสั่งด้านบนคิดครบทุกผืนแล้ว</p>
+        <p className="text-[11px] text-amber-600">{t(`* แสดง ${shownSheets} จาก ${totalSheets} ผืน (ผืนที่เหลือวางแบบเดียวกัน) — ยอดที่ต้องสั่งด้านบนคิดครบทุกผืนแล้ว`, `* Showing ${shownSheets} of ${totalSheets} sheets (the rest use the same layout) — the order quantity above already covers every sheet`)}</p>
       )}
     </div>
   );

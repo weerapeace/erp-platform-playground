@@ -15,6 +15,8 @@ import { createPortal } from "react-dom";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import { ImageThumbnail } from "@/components/image-manager";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { FloatingDropdown } from "@/components/floating-dropdown";
@@ -28,7 +30,7 @@ const fmtMoney = (n: number | null | undefined) => (n == null ? "—" : Number(n
 const fmtDay = (d: string | null | undefined) => {
   if (!d) return "";
   const t = new Date(`${d}T00:00:00`);
-  return Number.isNaN(t.getTime()) ? d : new Intl.DateTimeFormat("th-TH", { day: "numeric", month: "short", year: "2-digit" }).format(t);
+  return Number.isNaN(t.getTime()) ? d : new Intl.DateTimeFormat(tr("th-TH", "en-GB"), { day: "numeric", month: "short", year: "2-digit" }).format(t);
 };
 
 /**
@@ -36,18 +38,19 @@ const fmtDay = (d: string | null | undefined) => {
  * ใช้ FloatingDropdown ของกลาง (ลอยออกนอกโมดอล ไม่โดนกรอบตัด)
  */
 function QuotePricePick({ quotes, current, onPick }: { quotes: DesignSheetQuote[]; current: string; onPick: (price: number) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const list = [...quotes].sort((a, b) => b.round - a.round);   // รอบล่าสุดขึ้นก่อน
   return (
     <div ref={ref} className="relative shrink-0">
-      <button type="button" onClick={() => setOpen((o) => !o)} title="เลือกจากราคาที่เสนอ (รอบเสนอราคาของใบงานนี้)"
+      <button type="button" onClick={() => setOpen((o) => !o)} title={t("เลือกจากราคาที่เสนอ (รอบเสนอราคาของใบงานนี้)", "Pick from offered prices (this design sheet's quote rounds)")}
         className={`h-8 rounded border px-1.5 text-xs ${open ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}>💰▾</button>
       <FloatingDropdown anchorRef={ref} open={open} onClose={() => setOpen(false)} minWidth={320} maxWidth={380}>
         <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
-          <div className="px-2 py-1 text-[11px] font-medium text-slate-500">เลือกจากราคาที่เสนอ</div>
+          <div className="px-2 py-1 text-[11px] font-medium text-slate-500">{t("เลือกจากราคาที่เสนอ", "Pick from offered prices")}</div>
           {list.length === 0 ? (
-            <div className="px-2 py-3 text-center text-xs text-slate-400">ใบงานนี้ยังไม่มีรอบเสนอราคา<br />(เพิ่มได้ที่แท็บ 💰 เสนอราคา)</div>
+            <div className="px-2 py-3 text-center text-xs text-slate-400">{t("ใบงานนี้ยังไม่มีรอบเสนอราคา", "This design sheet has no quote rounds yet")}<br />{t("(เพิ่มได้ที่แท็บ 💰 เสนอราคา)", "(add them in the 💰 Quote tab)")}</div>
           ) : list.map((q) => {
             const price = q.offered_price ?? q.price;
             const st = QUOTE_STATUS[q.status] ?? QUOTE_STATUS.pending;
@@ -58,13 +61,13 @@ function QuotePricePick({ quotes, current, onPick }: { quotes: DesignSheetQuote[
                 className={`flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-blue-50 disabled:opacity-40 ${on ? "bg-blue-50" : ""}`}>
                 <span className="min-w-0 flex-1">
                   <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
-                    <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">รอบ {q.round}</span>
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 font-semibold text-slate-600">{t(`รอบ ${q.round}`, `Round ${q.round}`)}</span>
                     <span className={`rounded px-1.5 py-0.5 font-medium ${st.cls}`}>{st.label}</span>
                     {q.parent_code && <span className="font-mono text-slate-500">{q.parent_code}</span>}
                     <span className="text-slate-400">{fmtDay(q.quote_date)}</span>
                   </span>
                   <span className="mt-0.5 block truncate text-[11px] text-slate-400">
-                    {q.qty != null ? `ที่ ${Number(q.qty).toLocaleString("th-TH")} ชิ้น` : "ไม่ระบุจำนวน"}{q.note ? ` · ${q.note}` : ""}
+                    {q.qty != null ? t(`ที่ ${Number(q.qty).toLocaleString("th-TH")} ชิ้น`, `at ${Number(q.qty).toLocaleString("th-TH")} pcs`) : t("ไม่ระบุจำนวน", "No qty")}{q.note ? ` · ${q.note}` : ""}
                   </span>
                 </span>
                 <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">{fmtMoney(price)}{on && <span className="ml-1 text-blue-600">✓</span>}</span>
@@ -79,8 +82,9 @@ function QuotePricePick({ quotes, current, onPick }: { quotes: DesignSheetQuote[
 
 type KidEdit = { color: string; name: string; price: string };
 
-const FAMILIES: [string, string][] = [
-  ["general", "ทั่วไป"], ["bag", "กระเป๋า"], ["belt", "เข็มขัด"], ["jewelry", "เครื่องประดับ"], ["spare", "อะไหล่"],
+// ป้ายหมวดเป็นฟังก์ชัน → อ่านภาษาตอนเรียก (ห้ามเรียก tr ที่ระดับ module)
+const FAMILIES: [string, () => string][] = [
+  ["general", () => tr("ทั่วไป", "General")], ["bag", () => tr("กระเป๋า", "Bags")], ["belt", () => tr("เข็มขัด", "Belts")], ["jewelry", () => tr("เครื่องประดับ", "Jewelry")], ["spare", () => tr("อะไหล่", "Spare parts")],
 ];
 
 type SkuRow = { code: string; color: string; name: string; price: string; imgs: string[] };
@@ -124,6 +128,7 @@ export function SkuWizard({
   onDone: () => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const [pCode, setPCode] = useState("");
   const [pName, setPName] = useState("");
   const [pNameEn, setPNameEn] = useState("");
@@ -167,8 +172,8 @@ export function SkuWizard({
   const saveKid = async (k: ParentSkuChild, override?: Partial<KidEdit>): Promise<boolean> => {
     const e = { ...kidVal(k), ...override };
     const o = kidOrig(k);
-    if (!e.name.trim()) { toast.error(`${k.code}: กรุณาใส่ชื่อ`); return false; }
-    if (e.price !== "" && (!Number.isFinite(Number(e.price)) || Number(e.price) < 0)) { toast.error(`${k.code}: ราคาขายต้องเป็นตัวเลขและไม่ติดลบ`); return false; }
+    if (!e.name.trim()) { toast.error(tr(`${k.code}: กรุณาใส่ชื่อ`, `${k.code}: Please enter a name`)); return false; }
+    if (e.price !== "" && (!Number.isFinite(Number(e.price)) || Number(e.price) < 0)) { toast.error(tr(`${k.code}: ราคาขายต้องเป็นตัวเลขและไม่ติดลบ`, `${k.code}: Selling price must be a number and not negative`)); return false; }
     const patch: Record<string, unknown> = {};
     if (e.color.trim() !== o.color.trim()) patch.color = e.color.trim() || null;
     if (e.name.trim() !== o.name.trim()) patch.name_th = e.name.trim();
@@ -179,7 +184,7 @@ export function SkuWizard({
       const r = await apiFetch(`/api/master-v2/skus-v2/${encodeURIComponent(k.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...patch, actor: user?.name ?? user?.email ?? undefined }) });
       const j = await r.json() as { error?: string | null };
-      if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      if (!r.ok || j.error) throw new Error(j.error || tr("บันทึกไม่สำเร็จ", "Save failed"));
       // อัปเดตแถวในหน้าจอให้ตรงกับที่บันทึก (ไม่ต้องโหลดใหม่ทั้งชุด)
       setCheck((c) => (c ? { ...c, children: c.children.map((x) => (x.id === k.id
         ? { ...x, color: e.color.trim() || null, name_th: e.name.trim(), list_price: "list_price" in patch ? np : x.list_price }
@@ -187,17 +192,17 @@ export function SkuWizard({
       setKidEdits((m) => { const n = { ...m }; delete n[k.id]; return n; });
       return true;
     } catch (err) {
-      toast.error(`${k.code}: ${err instanceof Error ? err.message : "บันทึกไม่สำเร็จ"}`);
+      toast.error(`${k.code}: ${err instanceof Error ? err.message : tr("บันทึกไม่สำเร็จ", "Save failed")}`);
       return false;
     }
   };
-  const saveKidRow = async (k: ParentSkuChild) => { setKidSaving(k.id); const ok = await saveKid(k); setKidSaving(null); if (ok) toast.success(`บันทึก ${k.code} แล้ว`); };
+  const saveKidRow = async (k: ParentSkuChild) => { setKidSaving(k.id); const ok = await saveKid(k); setKidSaving(null); if (ok) toast.success(tr(`บันทึก ${k.code} แล้ว`, `Saved ${k.code}`)); };
   const saveAllKids = async () => {
     setKidSaving("*");
     let ok = 0;
     for (const k of dirtyKids) if (await saveKid(k)) ok++;   // ทีละตัว (ไม่ยิงพร้อมกัน)
     setKidSaving(null);
-    if (ok) toast.success(`บันทึก SKU เดิม ${ok} ตัวแล้ว`);
+    if (ok) toast.success(tr(`บันทึก SKU เดิม ${ok} ตัวแล้ว`, `Saved ${ok} existing SKUs`));
   };
 
   // เปิดหน้าต่าง = เซ็ตค่าเริ่มต้นจากใบงาน
@@ -345,17 +350,17 @@ export function SkuWizard({
         const key = (j.data?.file_path as string) ?? "";
         const url = (j.public_url as string) ?? (key ? `/api/r2-image?key=${encodeURIComponent(key)}` : "");
         if (key) {
-          setSheetImgs((cur) => (cur.some((im) => im.key === key) ? cur : [...cur, { key, url, sourceLabel: "เพิ่งอัปโหลด" }]));
+          setSheetImgs((cur) => (cur.some((im) => im.key === key) ? cur : [...cur, { key, url, sourceLabel: tr("เพิ่งอัปโหลด", "Just uploaded") }]));
           onPicked(key);
           ok++;
         }
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : "อัปโหลดรูปไม่สำเร็จ");
+        toast.error(e instanceof Error ? e.message : tr("อัปโหลดรูปไม่สำเร็จ", "Image upload failed"));
       } finally {
         setUploading((n) => Math.max(0, n - 1));
       }
     }
-    if (ok) toast.success(`อัปโหลด ${ok} รูปเข้าใบงานแล้ว`);
+    if (ok) toast.success(tr(`อัปโหลด ${ok} รูปเข้าใบงานแล้ว`, `Uploaded ${ok} images to the design sheet`));
   };
 
   // ช่องเลือกรูปจากใบงาน — เลือกได้หลายรูป (รูปแรก = ปก) · ป๊อปอัปลอย + hover ขยาย (ผ่าน ImageThumbnail)
@@ -372,7 +377,7 @@ export function SkuWizard({
     }
     return (
       <div className="relative inline-block" data-imgpick>
-        <button type="button" title="เลือกรูปจากใบงาน (เลือกได้หลายรูป)"
+        <button type="button" title={t("เลือกรูปจากใบงาน (เลือกได้หลายรูป)", "Pick images from the design sheet (multiple allowed)")}
           onClick={(e) => { if (pickOpen === id) { setPickOpen(null); return; } openPicker(id, e.currentTarget); }}
           className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-white hover:border-blue-300">
           {cover ? <ImageThumbnail url={imgUrlOf(cover)} size={38} /> : <span className="text-lg leading-none text-slate-300">＋</span>}
@@ -385,12 +390,12 @@ export function SkuWizard({
             onDragLeave={() => setDragOver(false)}
             onDrop={(e) => { e.preventDefault(); setDragOver(false); void uploadImages(Array.from(e.dataTransfer.files), onToggleAdd); }}>
             {sheetImgs.length === 0 ? (
-              <div className="p-2 text-center text-[11px] text-slate-400">ใบงานนี้ยังไม่มีรูปแนบ<br />— ลากรูปมาวาง หรือกดปุ่มด้านล่าง —</div>
+              <div className="p-2 text-center text-[11px] text-slate-400">{t("ใบงานนี้ยังไม่มีรูปแนบ", "This design sheet has no images yet")}<br />{t("— ลากรูปมาวาง หรือกดปุ่มด้านล่าง —", "— drag images here or use the button below —")}</div>
             ) : (
               <>
                 <div className="max-h-52 space-y-1.5 overflow-auto">
                   <button type="button" onClick={onClear}
-                    className="flex h-8 w-full items-center justify-center rounded border border-dashed border-slate-200 text-[10px] text-slate-400 hover:bg-slate-50">✕ ไม่เลือกรูป</button>
+                    className="flex h-8 w-full items-center justify-center rounded border border-dashed border-slate-200 text-[10px] text-slate-400 hover:bg-slate-50">{t("✕ ไม่เลือกรูป", "✕ No image")}</button>
                   {groups.map(([label, imgs]) => (
                     <div key={label}>
                       {groups.length > 1 && <div className="px-0.5 pb-0.5 text-[9px] font-medium text-slate-400">{label}</div>}
@@ -401,7 +406,7 @@ export function SkuWizard({
                             <button key={im.key} type="button" onClick={() => onToggle(im.key)}
                               className={`relative flex h-16 items-center justify-center overflow-hidden rounded border bg-white ${idx >= 0 ? "border-blue-500 ring-1 ring-blue-300" : "border-slate-200 hover:border-blue-300"}`}>
                               <ImageThumbnail url={im.url} size={54} />
-                              {idx >= 0 && <span className="absolute left-0.5 top-0.5 z-10 rounded bg-blue-600 px-1 text-[9px] font-medium text-white">{idx === 0 ? "ปก" : idx + 1}</span>}
+                              {idx >= 0 && <span className="absolute left-0.5 top-0.5 z-10 rounded bg-blue-600 px-1 text-[9px] font-medium text-white">{idx === 0 ? t("ปก", "Cover") : idx + 1}</span>}
                             </button>
                           );
                         })}
@@ -410,14 +415,14 @@ export function SkuWizard({
                   ))}
                 </div>
                 <div className="mt-1 flex items-center justify-between px-1">
-                  <span className="text-[10px] text-slate-400">เลือกหลายรูปได้ · แรก=ปก · ชี้เมาส์ดูใหญ่</span>
-                  <button type="button" onClick={() => setPickOpen(null)} className="text-[11px] text-blue-600 hover:underline">เสร็จ</button>
+                  <span className="text-[10px] text-slate-400">{t("เลือกหลายรูปได้ · แรก=ปก · ชี้เมาส์ดูใหญ่", "Multiple allowed · first = cover · hover to enlarge")}</span>
+                  <button type="button" onClick={() => setPickOpen(null)} className="text-[11px] text-blue-600 hover:underline">{t("เสร็จ", "Done")}</button>
                 </div>
               </>
             )}
             {/* โยนรูปใหม่เข้ามาได้เลย — เลือกไฟล์ / ลากมาวาง / Ctrl+V (เข้าแกลเลอรีใบงาน + เลือกให้ทันที) */}
             <label className={`mt-1 flex h-9 cursor-pointer items-center justify-center gap-1 rounded border border-dashed text-[11px] ${uploading ? "border-slate-200 text-slate-400" : "border-blue-300 text-blue-600 hover:bg-blue-50"}`}>
-              {uploading ? `⏳ กำลังอัปโหลด ${uploading} รูป…` : "⬆️ เพิ่มรูปใหม่ (เลือกไฟล์ · ลากวาง · Ctrl+V)"}
+              {uploading ? t(`⏳ กำลังอัปโหลด ${uploading} รูป…`, `⏳ Uploading ${uploading} images…`) : t("⬆️ เพิ่มรูปใหม่ (เลือกไฟล์ · ลากวาง · Ctrl+V)", "⬆️ Add new images (pick files · drag & drop · Ctrl+V)")}
               <input type="file" accept="image/*" multiple className="hidden" disabled={!!uploading}
                 onChange={(e) => { void uploadImages(Array.from(e.target.files ?? []), onToggleAdd); e.target.value = ""; }} />
             </label>
@@ -429,12 +434,12 @@ export function SkuWizard({
   };
 
   const save = async () => {
-    if (!pCode.trim()) { toast.error("กรอกรหัส Parent SKU"); return; }
-    if (!pName.trim()) { toast.error("กรอกชื่อสินค้า"); return; }
+    if (!pCode.trim()) { toast.error(tr("กรอกรหัส Parent SKU", "Enter a Parent SKU code")); return; }
+    if (!pName.trim()) { toast.error(tr("กรอกชื่อสินค้า", "Enter a product name")); return; }
     const valid = rows.filter((r) => r.code.trim());
-    if (valid.length === 0) { toast.error("กรอกรหัส SKU ลูกอย่างน้อย 1 ตัว"); return; }
+    if (valid.length === 0) { toast.error(tr("กรอกรหัส SKU ลูกอย่างน้อย 1 ตัว", "Enter at least 1 child SKU code")); return; }
     const dupKid = valid.find((r) => kids.some((k) => k.code.toUpperCase() === r.code.trim().toUpperCase()));
-    if (dupKid) { toast.error(`รหัส ${dupKid.code.trim()} มีอยู่แล้วใน ${pCode.trim()} — เปลี่ยนเป็นเลขถัดไป`); return; }
+    if (dupKid) { toast.error(tr(`รหัส ${dupKid.code.trim()} มีอยู่แล้วใน ${pCode.trim()} — เปลี่ยนเป็นเลขถัดไป`, `Code ${dupKid.code.trim()} already exists in ${pCode.trim()} — use the next number`)); return; }
     setSaving(true);
     try {
       // มี SKU เดิมที่แก้ค้างไว้ → บันทึกให้ก่อน (ไม่งั้นปิดหน้าต่างแล้วที่แก้หาย) · ตัวไหนพลาดให้หยุด ไม่สร้างต่อ
@@ -452,24 +457,24 @@ export function SkuWizard({
         }),
       });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(`สร้าง ${j.count} SKU ${j.parent_created ? "+ Parent ใหม่" : "(เข้า Parent เดิม)"} แล้ว`);
+      toast.success(tr(`สร้าง ${j.count} SKU ${j.parent_created ? "+ Parent ใหม่" : "(เข้า Parent เดิม)"} แล้ว`, `Created ${j.count} SKUs ${j.parent_created ? "+ new Parent" : "(into existing Parent)"}`));
       onDone();
       onClose();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "สร้าง SKU ไม่สำเร็จ");
+      toast.error(e instanceof Error ? e.message : tr("สร้าง SKU ไม่สำเร็จ", "Create SKU failed"));
     } finally { setSaving(false); }
   };
 
   return (
-    <ERPModal open={open} onClose={() => !saving && onClose()} size="lg" title="🪄 สร้าง SKU จากใบงาน"
-      description="สร้างสินค้าใหม่ (Parent + SKU ลูกหลายสี) หรือเลือกสินค้าเดิมเพื่อเพิ่มสี — เลือกแล้วระบบดึงข้อมูลเดิมและบอกว่ารหัส SKU ไปถึงไหนแล้ว"
+    <ERPModal open={open} onClose={() => !saving && onClose()} size="lg" title={t("🪄 สร้าง SKU จากใบงาน", "🪄 Create SKUs from design sheet")}
+      description={t("สร้างสินค้าใหม่ (Parent + SKU ลูกหลายสี) หรือเลือกสินค้าเดิมเพื่อเพิ่มสี — เลือกแล้วระบบดึงข้อมูลเดิมและบอกว่ารหัส SKU ไปถึงไหนแล้ว", "Create a new product (Parent + child SKUs in several colors) or pick an existing one to add colors — the system loads its data and shows how far the SKU codes have gone")}
       footer={
         <div className="flex justify-between items-center w-full">
-          <button onClick={addRow} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">＋ เพิ่ม SKU</button>
+          <button onClick={addRow} disabled={saving} className="h-9 px-3 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">{t("＋ เพิ่ม SKU", "＋ Add SKU")}</button>
           <div className="flex gap-2">
-            <button onClick={() => !saving && onClose()} disabled={saving} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={() => !saving && onClose()} disabled={saving} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
             <button onClick={() => void save()} disabled={saving} className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">
-              {saving ? "กำลังสร้าง..." : "สร้าง SKU"}</button>
+              {saving ? t("กำลังสร้าง...", "Creating...") : t("สร้าง SKU", "Create SKU")}</button>
           </div>
         </div>
       }>
@@ -477,15 +482,15 @@ export function SkuWizard({
         {/* ---- Parent SKU ---- */}
         <div className="p-3 border border-slate-200 rounded-lg bg-slate-50/60 space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-xs font-medium text-slate-500">สินค้าหลัก (Parent SKU)</div>
+            <div className="text-xs font-medium text-slate-500">{t("สินค้าหลัก (Parent SKU)", "Main product (Parent SKU)")}</div>
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-slate-400">รูปสินค้า:</span>
+              <span className="text-[11px] text-slate-400">{t("รูปสินค้า:", "Product image:")}</span>
               {parentInfo ? (
-                <div title="รูปปกของ Parent เดิม (แก้ที่หน้า Parent SKU)"
+                <div title={t("รูปปกของ Parent เดิม (แก้ที่หน้า Parent SKU)", "Cover image of the existing Parent (edit on the Parent SKU page)")}
                   className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-white">
                   {parentInfo.cover_image_r2_key
                     ? <ImageThumbnail url={imgUrlOf(parentInfo.cover_image_r2_key)} size={38} />
-                    : <span className="text-[10px] text-slate-300">ไม่มีรูป</span>}
+                    : <span className="text-[10px] text-slate-300">{t("ไม่มีรูป", "No image")}</span>}
                 </div>
               ) : imgSlot(pImgs, (k) => setPImgs((a) => (a.includes(k) ? a.filter((x) => x !== k) : [...a, k])), () => setPImgs([]), "parent")}
             </div>
@@ -493,42 +498,42 @@ export function SkuWizard({
 
           {/* เลือก Parent ที่มีอยู่แล้ว (เคสเพิ่มสีเข้าสินค้าเดิม) — เลือกแล้วดึงข้อมูล + SKU ลูกที่มีมาโชว์ */}
           <label className="block">
-            <span className="text-xs text-slate-500">เลือกสินค้าเดิมที่จะเพิ่มสี/แบบ <span className="text-slate-400">(ไม่เลือก = สร้างสินค้าใหม่)</span></span>
+            <span className="text-xs text-slate-500">{t("เลือกสินค้าเดิมที่จะเพิ่มสี/แบบ", "Pick an existing product to add colors/styles to")} <span className="text-slate-400">{t("(ไม่เลือก = สร้างสินค้าใหม่)", "(none = create a new product)")}</span></span>
             <div className="mt-0.5">
-              <ParentSkuPicker value={picked} disableCreate placeholder="ค้นหาด้วยรหัสหรือชื่อสินค้า..."
+              <ParentSkuPicker value={picked} disableCreate placeholder={t("ค้นหาด้วยรหัสหรือชื่อสินค้า...", "Search by code or product name...")}
                 onChange={(v) => { setPicked(v); setPCode(v ? v.code : ""); }} />
             </div>
           </label>
           {/* ใบงานมีหลายรหัส → เลือกตัวที่จะสร้าง (ทีละตัว) */}
           {(parentCodeOptions?.length ?? 0) > 1 && (
             <div className="flex flex-wrap items-center gap-1">
-              <span className="text-[11px] text-slate-400">เลือกรหัสที่จะสร้าง:</span>
+              <span className="text-[11px] text-slate-400">{t("เลือกรหัสที่จะสร้าง:", "Pick the code to create:")}</span>
               {parentCodeOptions!.map((c) => (
                 <button key={c} type="button" onClick={() => setPCode(c)}
                   className={`px-2 py-0.5 text-xs font-mono rounded border ${pCode === c ? "bg-blue-600 text-white border-blue-600" : "bg-white border-slate-200 text-slate-600 hover:border-blue-300"}`}>{c}</button>
               ))}
-              <span className="text-[10px] text-slate-300">(สร้างทีละตัว)</span>
+              <span className="text-[10px] text-slate-300">{t("(สร้างทีละตัว)", "(one at a time)")}</span>
             </div>
           )}
           {/* รหัส Parent SKU — พิมพ์แล้วเด้งลิสต์รหัสที่มี + ตัวช่วยเลข + เตือนซ้ำ */}
           <label className="block relative">
-            <span className="text-xs text-slate-500">รหัส Parent SKU *</span>
+            <span className="text-xs text-slate-500">{t("รหัส Parent SKU *", "Parent SKU code *")}</span>
             <input value={pCode} onChange={(e) => { setPCode(e.target.value); setCodeOpen(true); }}
               onFocus={() => setCodeOpen(true)} onBlur={() => setTimeout(() => setCodeOpen(false), 150)}
-              placeholder="เช่น CTL085" autoComplete="off"
+              placeholder={t("เช่น CTL085", "e.g. CTL085")} autoComplete="off"
               className={`mt-0.5 w-full h-9 px-2 text-sm font-mono border rounded-lg focus:outline-none focus:ring-2 ${
                 check?.exists ? "border-emerald-400 bg-emerald-50 focus:ring-emerald-400"
                   : check?.skipped ? "border-amber-300 focus:ring-amber-400"
                   : "border-slate-200 focus:ring-blue-500"}`} />
             {codeOpen && (check?.matches?.length ?? 0) > 0 && (
               <div className="absolute z-20 mt-1 w-full max-h-44 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                <div className="px-2 py-1 text-[10px] text-slate-400 border-b border-slate-100">รหัสที่มีอยู่แล้วในกลุ่มนี้ (คลิกเพื่อดู)</div>
+                <div className="px-2 py-1 text-[10px] text-slate-400 border-b border-slate-100">{t("รหัสที่มีอยู่แล้วในกลุ่มนี้ (คลิกเพื่อดู)", "Codes already in this group (click to view)")}</div>
                 {check!.matches.map((c) => {
                   const dup = c.toUpperCase() === pCode.trim().toUpperCase();
                   return (
                     <button key={c} type="button" onMouseDown={(e) => { e.preventDefault(); setPCode(c); setCodeOpen(false); }}
                       className={`block w-full px-2 py-1 text-left text-xs font-mono hover:bg-blue-50 ${dup ? "bg-rose-50 text-rose-600" : "text-slate-600"}`}>
-                      {c}{dup ? " · มีแล้ว" : ""}
+                      {c}{dup ? t(" · มีแล้ว", " · exists") : ""}
                     </button>
                   );
                 })}
@@ -536,12 +541,12 @@ export function SkuWizard({
             )}
           </label>
           <div className="text-[11px] min-h-[16px]">
-            {check?.exists ? <span className="text-emerald-700 font-medium">✓ ใช้สินค้าเดิมตัวนี้ — SKU ที่สร้างจะเข้า Parent เดิม (ไม่สร้างซ้ำ)</span>
-              : check?.skipped ? <span className="text-amber-600">⚠ ตั้งข้ามเลข — ล่าสุดคือ {check.latest} (ตั้งได้ แต่เช็คว่าตั้งใจ)</span>
-              : check?.latest ? <span className="text-slate-400">ล่าสุด: <b>{check.latest}</b>{check.suggested ? <> · ถัดไป: <b className="text-emerald-600">{check.suggested}</b></> : null}{check.max_code ? <> · สูงสุด: {check.max_code}</> : null}</span>
+            {check?.exists ? <span className="text-emerald-700 font-medium">{t("✓ ใช้สินค้าเดิมตัวนี้ — SKU ที่สร้างจะเข้า Parent เดิม (ไม่สร้างซ้ำ)", "✓ Using this existing product — new SKUs go into the existing Parent (no duplicate)")}</span>
+              : check?.skipped ? <span className="text-amber-600">{t(`⚠ ตั้งข้ามเลข — ล่าสุดคือ ${check.latest} (ตั้งได้ แต่เช็คว่าตั้งใจ)`, `⚠ Number skipped — latest is ${check.latest} (allowed, but check it is intended)`)}</span>
+              : check?.latest ? <span className="text-slate-400">{t("ล่าสุด:", "Latest:")} <b>{check.latest}</b>{check.suggested ? <> · {t("ถัดไป:", "Next:")} <b className="text-emerald-600">{check.suggested}</b></> : null}{check.max_code ? <> · {t("สูงสุด:", "Max:")} {check.max_code}</> : null}</span>
               : null}
             {check?.suggested && !check.exists && (
-              <button type="button" onClick={() => setPCode(check.suggested!)} className="ml-2 text-blue-600 hover:underline">ใช้ {check.suggested}</button>
+              <button type="button" onClick={() => setPCode(check.suggested!)} className="ml-2 text-blue-600 hover:underline">{t("ใช้", "Use")} {check.suggested}</button>
             )}
           </div>
 
@@ -549,37 +554,37 @@ export function SkuWizard({
           {parentInfo && (
             <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-2 space-y-1.5">
               <div className="flex items-center gap-2 text-[11px] text-emerald-800">
-                <span className="font-medium">SKU ที่มีอยู่แล้วใน {parentInfo.code}: {kids.length} ตัว</span>
-                {check?.child_next && <span className="text-emerald-700">· รหัสถัดไป <b className="font-mono">{check.child_next}</b></span>}
+                <span className="font-medium">{t(`SKU ที่มีอยู่แล้วใน ${parentInfo.code}: ${kids.length} ตัว`, `Existing SKUs in ${parentInfo.code}: ${kids.length}`)}</span>
+                {check?.child_next && <span className="text-emerald-700">· {t("รหัสถัดไป", "next code")} <b className="font-mono">{check.child_next}</b></span>}
                 <span className="ml-auto flex items-center gap-2">
                   {dirtyKids.length > 0 && (
                     <>
-                      <span className="text-amber-700">แก้ไว้ {dirtyKids.length} ตัว ยังไม่บันทึก</span>
+                      <span className="text-amber-700">{t(`แก้ไว้ ${dirtyKids.length} ตัว ยังไม่บันทึก`, `${dirtyKids.length} edited, not saved`)}</span>
                       <button type="button" onClick={() => void saveAllKids()} disabled={!!kidSaving}
-                        className="h-6 rounded bg-emerald-600 px-2 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50">{kidSaving === "*" ? "กำลังบันทึก…" : "💾 บันทึกที่แก้"}</button>
+                        className="h-6 rounded bg-emerald-600 px-2 text-[11px] font-medium text-white hover:bg-emerald-700 disabled:opacity-50">{kidSaving === "*" ? t("กำลังบันทึก…", "Saving…") : t("💾 บันทึกที่แก้", "💾 Save edits")}</button>
                     </>
                   )}
                   {kids.length > 0 && (
                     <button type="button" onClick={() => setShowKids((v) => !v)} className="text-emerald-700 hover:underline">
-                      {showKids ? "ซ่อนรายการ" : "ดูรายการ"}
+                      {showKids ? t("ซ่อนรายการ", "Hide list") : t("ดูรายการ", "Show list")}
                     </button>
                   )}
                 </span>
               </div>
               {kids.length === 0 ? (
-                <div className="text-[11px] text-slate-500">ยังไม่มี SKU ลูก — สร้างตัวแรกได้เลย</div>
+                <div className="text-[11px] text-slate-500">{t("ยังไม่มี SKU ลูก — สร้างตัวแรกได้เลย", "No child SKUs yet — create the first one")}</div>
               ) : showKids && (
                 /* ตาราง SKU เดิม: มีหัวตาราง + แก้ สี/แบบ · ชื่อ · ราคาขาย ได้ในแถว (รหัสแก้ไม่ได้ — เปลี่ยนรหัสใช้หน้า SKU) */
                 <div className="max-h-56 overflow-auto rounded border border-emerald-100 bg-white">
                   <table className="w-full border-collapse text-xs">
                     <thead className="sticky top-0 z-[1]">
                       <tr className="bg-slate-50 text-[11px] text-slate-500">
-                        <th className="w-10 border-b border-slate-200 px-1 py-1 text-center font-medium">รูป</th>
-                        <th className="w-32 border-b border-slate-200 px-2 py-1 text-left font-medium">รหัส SKU</th>
-                        <th className="w-36 border-b border-slate-200 px-2 py-1 text-left font-medium">สี / แบบ</th>
-                        <th className="border-b border-slate-200 px-2 py-1 text-left font-medium">ชื่อ</th>
-                        <th className="w-40 border-b border-slate-200 px-2 py-1 text-right font-medium">ราคาขาย</th>
-                        <th className="w-16 border-b border-slate-200 px-1 py-1 text-center font-medium">สถานะ</th>
+                        <th className="w-10 border-b border-slate-200 px-1 py-1 text-center font-medium">{t("รูป", "Image")}</th>
+                        <th className="w-32 border-b border-slate-200 px-2 py-1 text-left font-medium">{t("รหัส SKU", "SKU code")}</th>
+                        <th className="w-36 border-b border-slate-200 px-2 py-1 text-left font-medium">{t("สี / แบบ", "Color / style")}</th>
+                        <th className="border-b border-slate-200 px-2 py-1 text-left font-medium">{t("ชื่อ", "Name")}</th>
+                        <th className="w-40 border-b border-slate-200 px-2 py-1 text-right font-medium">{t("ราคาขาย", "Selling price")}</th>
+                        <th className="w-16 border-b border-slate-200 px-1 py-1 text-center font-medium">{t("สถานะ", "Status")}</th>
                         {canEdit && <th className="w-16 border-b border-slate-200 px-1 py-1" />}
                       </tr>
                     </thead>
@@ -613,15 +618,15 @@ export function SkuWizard({
                               </>
                             )}
                             <td className="px-1 py-1 text-center text-[10px]">
-                              {k.is_active ? <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">ใช้งาน</span> : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">ปิดใช้</span>}
+                              {k.is_active ? <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-emerald-700">{t("ใช้งาน", "Active")}</span> : <span className="rounded bg-slate-100 px-1.5 py-0.5 text-slate-500">{t("ปิดใช้", "Inactive")}</span>}
                             </td>
                             {canEdit && (
                               <td className="px-1 py-1 text-center">
                                 {dirty && (
                                   <span className="inline-flex items-center gap-0.5">
-                                    <button type="button" onClick={() => void saveKidRow(k)} disabled={busy} title="บันทึกแถวนี้ (หรือกด Enter)"
+                                    <button type="button" onClick={() => void saveKidRow(k)} disabled={busy} title={t("บันทึกแถวนี้ (หรือกด Enter)", "Save this row (or press Enter)")}
                                       className="h-7 rounded bg-emerald-600 px-1.5 text-[11px] text-white hover:bg-emerald-700 disabled:opacity-50">{busy ? "…" : "💾"}</button>
-                                    <button type="button" onClick={() => setKidEdits((m) => { const n = { ...m }; delete n[k.id]; return n; })} disabled={busy} title="ยกเลิกที่แก้"
+                                    <button type="button" onClick={() => setKidEdits((m) => { const n = { ...m }; delete n[k.id]; return n; })} disabled={busy} title={t("ยกเลิกที่แก้", "Undo edits")}
                                       className="h-7 rounded px-1 text-[11px] text-slate-400 hover:bg-slate-100">↩</button>
                                   </span>
                                 )}
@@ -634,37 +639,37 @@ export function SkuWizard({
                   </table>
                 </div>
               )}
-              <div className="text-[10px] text-slate-500">ข้อมูลสินค้าหลักด้านล่างดึงจากสินค้าเดิม (แก้ได้ที่หน้า Parent SKU) · SKU เดิมในตารางนี้แก้ สี/แบบ · ชื่อ · ราคาขาย ได้เลย แล้วกด 💾</div>
+              <div className="text-[10px] text-slate-500">{t("ข้อมูลสินค้าหลักด้านล่างดึงจากสินค้าเดิม (แก้ได้ที่หน้า Parent SKU) · SKU เดิมในตารางนี้แก้ สี/แบบ · ชื่อ · ราคาขาย ได้เลย แล้วกด 💾", "The main product data below comes from the existing product (edit on the Parent SKU page) · existing SKUs in this table can have color/style · name · selling price edited here, then press 💾")}</div>
             </div>
           )}
 
           {/* ใช้ Parent เดิม = ช่องเหล่านี้เป็นข้อมูลของ Parent ตัวจริง (โชว์อย่างเดียว ระบบไม่แก้ของเดิม) */}
           <div className="grid grid-cols-2 gap-2">
             <label className="block">
-              <span className="text-xs text-slate-500">แบรนด์</span>
+              <span className="text-xs text-slate-500">{t("แบรนด์", "Brand")}</span>
               <select value={bId} onChange={(e) => setBId(e.target.value)} disabled={!!parentInfo}
                 className={`mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg ${parentInfo ? "bg-slate-100 text-slate-500" : "bg-white"}`}>
-                <option value="">— ไม่ระบุ —</option>
+                <option value="">{t("— ไม่ระบุ —", "— Not set —")}</option>
                 {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </label>
             <label className="block">
-              <span className="text-xs text-slate-500">หมวดสินค้า</span>
+              <span className="text-xs text-slate-500">{t("หมวดสินค้า", "Product category")}</span>
               <select value={family} onChange={(e) => setFamily(e.target.value)} disabled={!!parentInfo}
                 className={`mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg ${parentInfo ? "bg-slate-100 text-slate-500" : "bg-white"}`}>
-                {FAMILIES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                {FAMILIES.map(([v, l]) => <option key={v} value={v}>{l()}</option>)}
                 {parentInfo?.product_family && !FAMILIES.some(([v]) => v === parentInfo.product_family) && (
                   <option value={parentInfo.product_family}>{parentInfo.product_family}</option>
                 )}
               </select>
             </label>
             <label className="block">
-              <span className="text-xs text-slate-500">ชื่อสินค้า (ไทย) *</span>
+              <span className="text-xs text-slate-500">{t("ชื่อสินค้า (ไทย) *", "Product name (Thai) *")}</span>
               <input value={pName} onChange={(e) => setPName(e.target.value)} disabled={!!parentInfo}
                 className={`mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${parentInfo ? "bg-slate-100 text-slate-500" : ""}`} />
             </label>
             <label className="block">
-              <span className="text-xs text-slate-500">ชื่อสินค้า (อังกฤษ)</span>
+              <span className="text-xs text-slate-500">{t("ชื่อสินค้า (อังกฤษ)", "Product name (English)")}</span>
               <input value={pNameEn} onChange={(e) => setPNameEn(e.target.value)} disabled={!!parentInfo}
                 className={`mt-0.5 w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${parentInfo ? "bg-slate-100 text-slate-500" : ""}`} />
             </label>
@@ -674,20 +679,20 @@ export function SkuWizard({
         {/* ---- SKU ลูก ---- */}
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
-            <div className="text-xs font-medium text-slate-500">SKU ลูก (แต่ละสี/แบบ = 1 ตัว)</div>
+            <div className="text-xs font-medium text-slate-500">{t("SKU ลูก (แต่ละสี/แบบ = 1 ตัว)", "Child SKUs (1 per color/style)")}</div>
             {codeBase() && (
-              <button type="button" onClick={fillEmptyCodes} title={`ไล่เลขต่อจากที่มีอยู่ เริ่มที่ ${codeBase()}`}
-                className="text-[11px] text-blue-600 hover:underline">🔢 เติมรหัสอัตโนมัติ ({codeBase()})</button>
+              <button type="button" onClick={fillEmptyCodes} title={t(`ไล่เลขต่อจากที่มีอยู่ เริ่มที่ ${codeBase()}`, `Continue numbering from existing codes, starting at ${codeBase()}`)}
+                className="text-[11px] text-blue-600 hover:underline">{t("🔢 เติมรหัสอัตโนมัติ", "🔢 Auto-fill codes")} ({codeBase()})</button>
             )}
           </div>
           <table className="w-full text-sm border-collapse">
             <thead>
               <tr className="bg-slate-50 text-xs text-slate-500">
-                <th className="border border-slate-200 px-1 py-1.5 w-12 text-center">รูป</th>
-                <th className="border border-slate-200 px-2 py-1.5 text-left">รหัส SKU *</th>
-                <th className="border border-slate-200 px-2 py-1.5 text-left w-32">สี / แบบ</th>
-                <th className="border border-slate-200 px-2 py-1.5 text-left">ชื่อ</th>
-                <th className="border border-slate-200 px-2 py-1.5 text-right w-40">ราคาขาย <span className="font-normal text-slate-400">(💰 = เลือกจากที่เสนอ)</span></th>
+                <th className="border border-slate-200 px-1 py-1.5 w-12 text-center">{t("รูป", "Image")}</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-left">{t("รหัส SKU *", "SKU code *")}</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-left w-32">{t("สี / แบบ", "Color / style")}</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-left">{t("ชื่อ", "Name")}</th>
+                <th className="border border-slate-200 px-2 py-1.5 text-right w-40">{t("ราคาขาย", "Selling price")} <span className="font-normal text-slate-400">{t("(💰 = เลือกจากที่เสนอ)", "(💰 = pick from quotes)")}</span></th>
                 <th className="border border-slate-200 px-1 py-1.5 w-10"></th>
               </tr>
             </thead>
@@ -701,14 +706,14 @@ export function SkuWizard({
                     {(() => {
                       const dup = !!r.code.trim() && kids.some((k) => k.code.toUpperCase() === r.code.trim().toUpperCase());
                       return (
-                        <input value={r.code} onChange={(e) => setRow(i, { code: e.target.value })} placeholder={codeBase() ?? "เช่น CTL085-01"}
-                          title={dup ? "รหัสนี้มีอยู่แล้วใน Parent นี้" : undefined}
+                        <input value={r.code} onChange={(e) => setRow(i, { code: e.target.value })} placeholder={codeBase() ?? t("เช่น CTL085-01", "e.g. CTL085-01")}
+                          title={dup ? t("รหัสนี้มีอยู่แล้วใน Parent นี้", "This code already exists in this Parent") : undefined}
                           className={`w-full h-8 px-2 text-sm border rounded focus:outline-none focus:ring-2 ${dup ? "border-rose-400 bg-rose-50 focus:ring-rose-400" : "border-slate-200 focus:ring-blue-500"}`} />
                       );
                     })()}
                   </td>
                   <td className="border border-slate-200 px-1 py-1">
-                    <input value={r.color} onChange={(e) => setRow(i, { color: e.target.value })} placeholder="ดำ / แดง..."
+                    <input value={r.color} onChange={(e) => setRow(i, { color: e.target.value })} placeholder={t("ดำ / แดง...", "Black / red...")}
                       className="w-full h-8 px-2 text-sm border border-slate-200 rounded focus:outline-none focus:ring-2 focus:ring-blue-500" />
                   </td>
                   <td className="border border-slate-200 px-1 py-1">
@@ -724,7 +729,7 @@ export function SkuWizard({
                     </div>
                   </td>
                   <td className="border border-slate-200 px-1 py-1 text-center">
-                    <button onClick={() => removeRow(i)} disabled={rows.length <= 1} title="ลบแถว"
+                    <button onClick={() => removeRow(i)} disabled={rows.length <= 1} title={t("ลบแถว", "Delete row")}
                       className="h-7 w-7 text-rose-500 hover:bg-rose-50 rounded disabled:opacity-30">🗑</button>
                   </td>
                 </tr>

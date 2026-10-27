@@ -16,6 +16,8 @@ import { ERPModal } from "@/components/modal";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import type { BomVersion } from "@/app/api/bom/versions/route";
 import type { SheetSku } from "@/app/api/design-sheets/[id]/skus/route";
 
@@ -43,6 +45,7 @@ export function BomToCostWizard({
   tabLabel: string;                              // ชื่อแท็บที่จะดึงเข้า (เช่น "ทั่วไป" / "CTL110")
   onApply: (lines: BomPulledLine[], sourceLabel: string) => void;
 }) {
+  const t = useT();
   const toast = useToast();
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
   const [sheetSkus, setSheetSkus] = useState<SheetSku[]>([]);    // SKU ของใบนี้ (ปุ่มลัด)
@@ -105,21 +108,21 @@ export function BomToCostWizard({
   const curVer = versions.find((v) => v.id === verId) ?? null;
 
   const apply = () => {
-    if (chosen.length === 0) { toast.error("ยังไม่มีบรรทัดให้ดึง"); return; }
+    if (chosen.length === 0) { toast.error(tr("ยังไม่มีบรรทัดให้ดึง", "No lines to copy yet")); return; }
     const srcLabel = sku ? `${sku.code}${curVer?.version ? ` (${curVer.version})` : ""}` : "BOM";
     onApply(chosen, srcLabel);
     onClose();
   };
 
   return (
-    <ERPModal open={open} onClose={onClose} size="lg" title="🧬⬇ ดึงโครงจาก BOM มาตีราคา">
+    <ERPModal open={open} onClose={onClose} size="lg" title={t("🧬⬇ ดึงโครงจาก BOM มาตีราคา", "🧬⬇ Copy structure from BOM into costing")}>
       <div className="p-1 space-y-3">
         {/* ==== 1) เลือกสินค้า (SKU) ==== */}
         <div>
-          <div className="text-sm font-medium text-slate-700 mb-1">1) เลือกสินค้าที่มีสูตร BOM</div>
+          <div className="text-sm font-medium text-slate-700 mb-1">{t("1) เลือกสินค้าที่มีสูตร BOM", "1) Select a product that has a BOM")}</div>
           {sheetSkus.length > 0 && (
             <div className="flex flex-wrap gap-1.5 mb-1.5">
-              <span className="text-[11px] text-slate-400 self-center">SKU ของใบนี้:</span>
+              <span className="text-[11px] text-slate-400 self-center">{t("SKU ของใบนี้:", "SKUs on this sheet:")}</span>
               {sheetSkus.map((s) => (
                 <button key={s.id} type="button"
                   onClick={() => setSku({ id: s.id, code: s.code, name: s.name_th ?? s.code })}
@@ -129,25 +132,25 @@ export function BomToCostWizard({
               ))}
             </div>
           )}
-          <SkuPicker value={sku} onChange={setSku} placeholder="พิมพ์รหัส/ชื่อ SKU ที่มีสูตร BOM…" />
+          <SkuPicker value={sku} onChange={setSku} placeholder={t("พิมพ์รหัส/ชื่อ SKU ที่มีสูตร BOM…", "Type the code/name of a SKU with a BOM…")} />
         </div>
 
         {/* ==== 2) เลือกเวอร์ชันสูตร ==== */}
         {sku && (
           <div>
-            <div className="text-sm font-medium text-slate-700 mb-1">2) เวอร์ชันสูตร</div>
+            <div className="text-sm font-medium text-slate-700 mb-1">{t("2) เวอร์ชันสูตร", "2) BOM version")}</div>
             {loadingVers ? (
-              <div className="text-xs text-slate-400 py-1">กำลังโหลดเวอร์ชัน…</div>
+              <div className="text-xs text-slate-400 py-1">{t("กำลังโหลดเวอร์ชัน…", "Loading versions…")}</div>
             ) : versions.length === 0 ? (
               <div className="px-3 py-2 text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">
-                สินค้านี้ยังไม่มีสูตร BOM — สร้างสูตรก่อนที่ <a href={`/master/bom?open=${encodeURIComponent(sku.code)}`} target="_blank" rel="noopener" className="underline">หน้าสูตรการผลิต ↗</a>
+                {t("สินค้านี้ยังไม่มีสูตร BOM — สร้างสูตรก่อนที่", "This product has no BOM yet — create one first on the")} <a href={`/master/bom?open=${encodeURIComponent(sku.code)}`} target="_blank" rel="noopener" className="underline">{t("หน้าสูตรการผลิต ↗", "BOM page ↗")}</a>
               </div>
             ) : (
               <select value={verId} onChange={(e) => setVerId(e.target.value)}
                 className="h-9 w-full border border-slate-200 rounded-lg px-2 text-sm text-slate-700 outline-none focus:border-indigo-400">
                 {versions.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.version ?? v.bom_code}{v.is_default ? " · ค่าเริ่มต้น" : ""}{v.status ? ` · ${v.status}` : ""}
+                    {v.version ?? v.bom_code}{v.is_default ? t(" · ค่าเริ่มต้น", " · Default") : ""}{v.status ? ` · ${v.status}` : ""}
                   </option>
                 ))}
               </select>
@@ -159,28 +162,28 @@ export function BomToCostWizard({
         {verId && (
           <div>
             <div className="flex items-center justify-between mb-1">
-              <div className="text-sm font-medium text-slate-700">3) บรรทัดที่จะดึงเข้าตีราคา</div>
-              <span className="text-[11px] text-slate-400">{chosen.length}/{lines.length} บรรทัด</span>
+              <div className="text-sm font-medium text-slate-700">{t("3) บรรทัดที่จะดึงเข้าตีราคา", "3) Lines to copy into costing")}</div>
+              <span className="text-[11px] text-slate-400">{chosen.length}/{lines.length} {t("บรรทัด", "lines")}</span>
             </div>
 
             <div className="px-3 py-2 mb-2 text-[12px] text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg">
-              ดึงมาแค่ <b>ชนิด · กว้าง · ยาว · จำนวน</b> (+ เผื่อเสีย/หน้ากว้าง ช่วยคำนวณ) — <b>วัตถุดิบตัวจริง + ราคา</b> เว้นว่างไว้เลือกเองตอนตีราคา · บรรทัดใหม่จะ <b>ต่อท้าย</b> ของเดิมในแท็บ “{tabLabel}”
+              {t("ดึงมาแค่", "Only copies")} <b>{t("ชนิด · กว้าง · ยาว · จำนวน", "type · width · length · qty")}</b> {t("(+ เผื่อเสีย/หน้ากว้าง ช่วยคำนวณ) —", "(+ waste allowance/fabric width to help calculate) —")} <b>{t("วัตถุดิบตัวจริง + ราคา", "actual materials + prices")}</b> {t("เว้นว่างไว้เลือกเองตอนตีราคา · บรรทัดใหม่จะ", "are left blank for you to pick while costing · new lines are")} <b>{t("ต่อท้าย", "appended after")}</b> {t(`ของเดิมในแท็บ “${tabLabel}”`, `the existing lines in tab “${tabLabel}”`)}
             </div>
 
             {loadingLines ? (
-              <div className="px-3 py-6 text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg">กำลังโหลดบรรทัด…</div>
+              <div className="px-3 py-6 text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg">{t("กำลังโหลดบรรทัด…", "Loading lines…")}</div>
             ) : lines.length === 0 ? (
-              <div className="px-3 py-6 text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg">สูตรนี้ยังไม่มีบรรทัดให้ดึง</div>
+              <div className="px-3 py-6 text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg">{t("สูตรนี้ยังไม่มีบรรทัดให้ดึง", "This BOM has no lines to copy yet")}</div>
             ) : (
               <div className="border border-slate-200 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-slate-50 text-slate-500 text-[11px] uppercase">
                       <th className="w-8 px-2 py-1.5"></th>
-                      <th className="px-2 py-1.5 text-left font-medium">ชนิด</th>
-                      <th className="px-2 py-1.5 text-right font-medium">กว้าง</th>
-                      <th className="px-2 py-1.5 text-right font-medium">ยาว</th>
-                      <th className="px-2 py-1.5 text-right font-medium">จำนวน</th>
+                      <th className="px-2 py-1.5 text-left font-medium">{t("ชนิด", "Type")}</th>
+                      <th className="px-2 py-1.5 text-right font-medium">{t("กว้าง", "Width")}</th>
+                      <th className="px-2 py-1.5 text-right font-medium">{t("ยาว", "Length")}</th>
+                      <th className="px-2 py-1.5 text-right font-medium">{t("จำนวน", "Qty")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -193,8 +196,8 @@ export function BomToCostWizard({
                               onChange={(e) => setInclude((a) => a.map((x, xi) => (xi === i ? e.target.checked : x)))} />
                           </td>
                           <td className="px-2 py-1.5">
-                            <div className="text-slate-700 truncate">{r.material_type || "ไม่ระบุชนิด"}</div>
-                            {r.ref_name && <div className="text-[11px] text-slate-400 truncate">อ้างอิง: {r.ref_name}</div>}
+                            <div className="text-slate-700 truncate">{r.material_type || t("ไม่ระบุชนิด", "No type")}</div>
+                            {r.ref_name && <div className="text-[11px] text-slate-400 truncate">{t("อ้างอิง:", "Ref:")} {r.ref_name}</div>}
                           </td>
                           <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{fmt(r.width_cm)}</td>
                           <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{fmt(r.length_cm)}</td>
@@ -211,10 +214,10 @@ export function BomToCostWizard({
 
         {/* ==== ปุ่ม ==== */}
         <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100 mt-2">
-          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+          <button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
           <button onClick={apply} disabled={chosen.length === 0}
             className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-            ดึงเข้าตีราคา ({chosen.length} บรรทัด)
+            {t(`ดึงเข้าตีราคา (${chosen.length} บรรทัด)`, `Copy into costing (${chosen.length} lines)`)}
           </button>
         </div>
       </div>

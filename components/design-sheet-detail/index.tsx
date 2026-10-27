@@ -32,6 +32,8 @@ import { ToQuotationModal, type PresetQuoteLine } from "@/app/master/design-shee
 import { QuotationCartDrawer } from "@/app/master/design-sheets/quotation-cart-drawer";
 import { PullCostFromSheetModal } from "./pull-cost-modal";
 import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 
 const QUOTE_CART_KEY = "erp-design-quote-cart";   // ตัวชี้ใบเสนอราคาร่างที่เป็น "ตะกร้า" ปัจจุบัน (ต่อ browser)
 import { RichTextEditor } from "@/components/rich-text";
@@ -62,8 +64,9 @@ const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
 type CostExtra = { label: string; amount: number };
-// ค่าใช้จ่ายเพิ่มเริ่มต้น (แก้/ลบ/เพิ่มได้)
-const DEFAULT_COST_EXTRA: CostExtra[] = [
+// ค่าใช้จ่ายเพิ่มเริ่มต้น (แก้/ลบ/เพิ่มได้) — ชื่อพวกนี้ "ถูกบันทึกเป็นข้อมูล" ของใบงาน (ไปโผล่ในใบพิมพ์ต้นทุน)
+// → คงภาษาไทยเสมอ ไม่แปลตามภาษาคนกด (กันข้อมูลในระบบปนไทย/อังกฤษ) — เหมือนข้อมูลอื่นที่คนพิมพ์เอง
+const defaultCostExtra = (): CostExtra[] => [
   { label: "ค่าแรงผลิต", amount: 0 },
   { label: "ค่าแรง (ตัด/ปลอก/วาด)", amount: 0 },
   { label: "ค่าโสหุ้ย (ส่ง/QC/Packing)", amount: 0 },
@@ -88,7 +91,10 @@ const empty = (): FormState => ({ id: null, code: "", name: "", brand_id: "", de
 
 // บรรทัดตีราคา (เฟส 4) — row ฝั่งหน้าจอ = CostLine + key ชั่วคราว (+ group_code สำหรับเช็คชนิดชิ้น)
 type CostRow = CostLine & { key: string; group_code?: string | null };
-const METHOD_LABEL: Record<string, string> = { area_face: "พื้นที่÷หน้ากว้าง", area_100: "พื้นที่÷100", length: "ความยาว", count: "นับชิ้น", manual: "พิมพ์เอง" };
+const methodLabel = (m: string): string | undefined => ({
+  area_face: tr("พื้นที่÷หน้ากว้าง", "Area÷width"), area_100: tr("พื้นที่÷100", "Area÷100"), length: tr("ความยาว", "Length"),
+  count: tr("นับชิ้น", "Count pcs"), manual: tr("พิมพ์เอง", "Manual"),
+} as Record<string, string>)[m];
 
 // หมายเหตุที่บรรทัด "ดึงจาก BOM" ใส่ไว้ = อ้างอิงชื่อวัสดุเดิม → ใช้เป็นคำค้นตั้งต้นตอนเลือกวัสดุ
 const BOM_REF_NOTE_PREFIX = "อ้างอิง BOM: ";
@@ -217,7 +223,7 @@ function itemBasisDate(it: PriceItem, basis: string | null): string | null {
 }
 const fmtShortDate = (d: string | null | undefined) => {
   if (!d) return "";
-  const t = new Date(d); return Number.isNaN(t.getTime()) ? "" : t.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
+  const t = new Date(d); return Number.isNaN(t.getTime()) ? "" : t.toLocaleDateString(tr("th-TH", "en-GB"), { day: "numeric", month: "short", year: "2-digit" });
 };
 /**
  * ตรวจว่าราคาของบรรทัด "ตกยุค" ไหม — เจ้าของขอ: วัสดุปรับราคาแล้ว ให้เตือนในแถวตีราคา (พร้อมวันที่) แล้วเลือกเองว่าจะเปลี่ยนไหม
@@ -230,14 +236,14 @@ function priceDrift(r: CostRow, item: PriceItem | null, g: PriceGroup | null): {
   if (item) {
     const basis = r.price_basis ?? "manual";
     const cur = itemBasisPrice(item, basis);
-    if (diff(cur)) return { price: cur as number, date: itemBasisDate(item, basis), reason: basis === "manual" ? "ราคาวัสดุ (master) ปรับ" : "ราคาฐานที่เลือกปรับ" };
+    if (diff(cur)) return { price: cur as number, date: itemBasisDate(item, basis), reason: basis === "manual" ? tr("ราคาวัสดุ (master) ปรับ", "Material price (master) changed") : tr("ราคาฐานที่เลือกปรับ", "Selected base price changed") };
     if (basis === "manual" && item.sku_latest_price != null && (item.sku_latest_currency ?? "THB") === "THB" && diff(item.sku_latest_price))
-      return { price: item.sku_latest_price, date: item.sku_latest_date, reason: "มีราคาซื้อจริงล่าสุดต่างจากที่ตีไว้" };
+      return { price: item.sku_latest_price, date: item.sku_latest_date, reason: tr("มีราคาซื้อจริงล่าสุดต่างจากที่ตีไว้", "Latest purchase price differs from costed price") };
     return null;
   }
   if (g) {
     const cur = groupBasisPrice(g, r.price_basis ?? "avg");
-    if (diff(cur)) return { price: cur as number, date: g.latest_date, reason: "ราคากลุ่มปรับ" };
+    if (diff(cur)) return { price: cur as number, date: g.latest_date, reason: tr("ราคากลุ่มปรับ", "Group price changed") };
   }
   return null;
 }
@@ -278,7 +284,7 @@ const pct = (from: number | null | undefined, to: number | null | undefined) =>
 // ฟิลด์บรรทัดเมื่อเลือกแบบ "กลุ่ม" (item_id = null = จับคู่วัสดุจริงทีหลัง)
 function rowFieldsFromGroup(g: PriceGroup, basis: string): Partial<CostRow> {
   return {
-    item_id: null, item_name: `[กลุ่ม] ${g.name}`, group_name: g.name, group_code: g.code,
+    item_id: null, item_name: `[กลุ่ม] ${g.name}`, group_name: g.name, group_code: g.code,   // ชื่อบรรทัดถูกบันทึกเป็นข้อมูล → คงไทย
     price_basis: basis, calc_method: g.calc_method,
     waste_percent: g.loss_percent, divisor: g.divisor, uom: g.uom_default,
     unit_price: groupBasisPrice(g, basis),
@@ -289,17 +295,18 @@ function rowFieldsFromGroup(g: PriceGroup, basis: string): Partial<CostRow> {
 function calcTooltip(r: CostRow): string {
   if (rowIsPiece(r)) {
     const a = pieceArea(r); const w = r.waste_percent || 0;
+    const wasteTxt = w ? tr(` × (1+เผื่อเสีย ${w}%)`, ` × (1+waste ${w}%)`) : "";
     return a != null
-      ? `พื้นที่ใช้ ${r.width_cm}×${r.length_cm} = ${a} cm²${w ? ` × (1+เผื่อเสีย ${w}%)` : ""} × ${r.pieces ?? 1} ชิ้น × ${r.unit_price ?? 0} บ./cm² = ${fmtBaht(r.amount)}`
-      : "ใส่ กว้าง×ยาว + จำนวนชิ้น";
+      ? tr(`พื้นที่ใช้ ${r.width_cm}×${r.length_cm} = ${a} cm²${wasteTxt} × ${r.pieces ?? 1} ชิ้น × ${r.unit_price ?? 0} บ./cm² = ${fmtBaht(r.amount)}`, `Area used ${r.width_cm}×${r.length_cm} = ${a} cm²${wasteTxt} × ${r.pieces ?? 1} pcs × ${r.unit_price ?? 0} THB/cm² = ${fmtBaht(r.amount)}`)
+      : tr("ใส่ กว้าง×ยาว + จำนวนชิ้น", "Enter width×length + pcs");
   }
   const m = r.calc_method; const w = r.waste_percent || 0; const d = r.divisor || 90;
   const fx = (n: number | null) => (n == null ? 0 : n);
-  if (m === "count")     return `จำนวนชิ้น = ${fx(r.pieces)} ${r.uom ?? ""}`;
-  if (m === "length")    return `ความยาว ${fx(r.length_cm)} ซม. × (1+เผื่อเสีย ${w}%) ÷ ${d} = ${fmtQty(r.qty)} ${r.uom ?? ""}`;
-  if (m === "area_100")  return `พื้นที่ (${fx(r.width_cm)}×${fx(r.length_cm)}×${fx(r.pieces) || 1}) × (1+${w}%) ÷ ${d} = ${fmtQty(r.qty)} ${r.uom ?? ""}`;
-  if (m === "area_face") return `พื้นที่ (${fx(r.width_cm)}×${fx(r.length_cm)}×${fx(r.pieces) || 1}) ซม.² × (1+เผื่อเสีย ${w}%) ÷ หน้ากว้าง ${fx(r.face_width_cm)} ÷ ${d} = ${fmtQty(r.qty)} ${r.uom ?? ""}`;
-  return "กรอกปริมาณเอง (ชนิดนี้ไม่มีสูตรคำนวณ)";
+  if (m === "count")     return tr(`จำนวนชิ้น = ${fx(r.pieces)} ${r.uom ?? ""}`, `Pcs = ${fx(r.pieces)} ${r.uom ?? ""}`);
+  if (m === "length")    return tr(`ความยาว ${fx(r.length_cm)} ซม. × (1+เผื่อเสีย ${w}%) ÷ ${d} = ${fmtQty(r.qty)} ${r.uom ?? ""}`, `Length ${fx(r.length_cm)} cm × (1+waste ${w}%) ÷ ${d} = ${fmtQty(r.qty)} ${r.uom ?? ""}`);
+  if (m === "area_100")  return tr(`พื้นที่ (${fx(r.width_cm)}×${fx(r.length_cm)}×${fx(r.pieces) || 1}) × (1+${w}%) ÷ ${d} = ${fmtQty(r.qty)} ${r.uom ?? ""}`, `Area (${fx(r.width_cm)}×${fx(r.length_cm)}×${fx(r.pieces) || 1}) × (1+${w}%) ÷ ${d} = ${fmtQty(r.qty)} ${r.uom ?? ""}`);
+  if (m === "area_face") return tr(`พื้นที่ (${fx(r.width_cm)}×${fx(r.length_cm)}×${fx(r.pieces) || 1}) ซม.² × (1+เผื่อเสีย ${w}%) ÷ หน้ากว้าง ${fx(r.face_width_cm)} ÷ ${d} = ${fmtQty(r.qty)} ${r.uom ?? ""}`, `Area (${fx(r.width_cm)}×${fx(r.length_cm)}×${fx(r.pieces) || 1}) cm² × (1+waste ${w}%) ÷ width ${fx(r.face_width_cm)} ÷ ${d} = ${fmtQty(r.qty)} ${r.uom ?? ""}`);
+  return tr("กรอกปริมาณเอง (ชนิดนี้ไม่มีสูตรคำนวณ)", "Enter qty manually (no formula for this type)");
 }
 
 // สถานะ (label/สี) ย้ายไปไว้ที่ lib/design-sheets-meta.ts — ใช้ร่วมกับหน้าพิมพ์
@@ -318,6 +325,7 @@ function deadlineTone(deadline: string | null, status: string, finished: Set<str
 // ปุ่มเลือก "ฐานราคา" แบบ compact (สัญลักษณ์ + ราคา) — แทน <select> ยาว ๆ ที่ทำให้ดูรก/ขึ้น 2 บรรทัด
 type BasisOption = { value: string; symbol: string; label: string; price?: number | null; note?: string };
 function BasisPicker({ value, options, onChange }: { value: string; options: BasisOption[]; onChange: (v: string) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ left: number; top: number; openUp: boolean } | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -339,7 +347,7 @@ function BasisPicker({ value, options, onChange }: { value: string; options: Bas
   const cur = options.find((o) => o.value === value) ?? options[0];
   return (
     <div className="relative inline-block shrink-0">
-      <button ref={btnRef} type="button" onClick={() => setOpen((o) => !o)} title={`ฐานราคา: ${cur?.label ?? ""}`}
+      <button ref={btnRef} type="button" onClick={() => setOpen((o) => !o)} title={t(`ฐานราคา: ${cur?.label ?? ""}`, `Price base: ${cur?.label ?? ""}`)}
         className="h-7 px-1.5 inline-flex items-center gap-1 text-xs border border-slate-200 rounded bg-white hover:bg-slate-50 max-w-[120px]">
         <span>{cur?.symbol}</span>
         <span className="text-slate-500 truncate tabular-nums">{cur && cur.price != null ? fmtBaht(cur.price) : (cur?.note ?? cur?.label)}</span>
@@ -350,7 +358,7 @@ function BasisPicker({ value, options, onChange }: { value: string; options: Bas
           <div className="fixed inset-0 z-[1000]" onClick={() => setOpen(false)} />
           <div className="fixed z-[1001] w-[230px] bg-white border border-slate-200 rounded-lg shadow-xl py-1"
             style={{ left: pos.left, top: pos.top, transform: pos.openUp ? "translateY(calc(-100% - 4px))" : "translateY(4px)" }}>
-            <div className="px-2.5 py-1 text-[10px] text-slate-400">ฐานราคาที่ใช้</div>
+            <div className="px-2.5 py-1 text-[10px] text-slate-400">{t("ฐานราคาที่ใช้", "Price base used")}</div>
             {options.map((o) => (
               <button key={o.value} type="button" onClick={() => { onChange(o.value); setOpen(false); }}
                 className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center gap-2 hover:bg-blue-50 ${o.value === value ? "bg-blue-50/60 text-blue-700 font-medium" : "text-slate-700"}`}>
@@ -369,13 +377,14 @@ function BasisPicker({ value, options, onChange }: { value: string; options: Bas
 
 // chips รหัส SKU ที่ผูกกับวัสดุ (ตารางจัดการวัสดุตีราคา) — เยอะ→ยุบไว้ตั้งแต่เปิด กดปุ่มกางดู/ลบ (กันรก)
 function LinkedSkuChips({ ids, codeOf, onRemove }: { ids: string[]; codeOf: (sid: string) => string; onRemove: (sid: string) => void }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   if (!ids || ids.length === 0) return null;
   if (!open && ids.length > 4) {
     return (
-      <button type="button" onClick={() => setOpen(true)} title="กดดูรหัส SKU ที่ผูก"
+      <button type="button" onClick={() => setOpen(true)} title={t("กดดูรหัส SKU ที่ผูก", "Show linked SKU codes")}
         className="mt-1 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium bg-blue-50 border border-blue-200 text-blue-700 rounded hover:bg-blue-100">
-        📎 {ids.length} รหัส ▾
+        📎 {ids.length} {t("รหัส", "codes")} ▾
       </button>
     );
   }
@@ -387,13 +396,14 @@ function LinkedSkuChips({ ids, codeOf, onRemove }: { ids: string[]; codeOf: (sid
           <button type="button" onClick={() => onRemove(sid)} className="text-blue-300 hover:text-rose-500 leading-none">✕</button>
         </span>
       ))}
-      {ids.length > 4 && <button type="button" onClick={() => setOpen(false)} className="text-[10px] text-slate-400 hover:text-slate-600 ml-0.5">ซ่อน ▲</button>}
+      {ids.length > 4 && <button type="button" onClick={() => setOpen(false)} className="text-[10px] text-slate-400 hover:text-slate-600 ml-0.5">{t("ซ่อน", "Hide")} ▲</button>}
     </div>
   );
 }
 
 // ปุ่ม "Copy ตีราคา" — คัดลอกบรรทัด + ค่าใช้จ่าย"จาก" Parent อื่น "มาใส่แท็บที่กำลังดู" (แทนที่ของแท็บนี้)
 function CopyCostButton({ tabs, current, onCopy, lineCountOf }: { tabs: { key: string; label: string; kind: string }[]; current: string; onCopy: (source: string) => void; lineCountOf?: (key: string) => number }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -402,24 +412,24 @@ function CopyCostButton({ tabs, current, onCopy, lineCountOf }: { tabs: { key: s
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [open]);
-  const sources = tabs.filter((t) => t.key !== current);   // แท็บอื่น = ตัวเลือก "ต้นทาง" ที่จะคัดลอกมา
+  const sources = tabs.filter((tb) => tb.key !== current);   // แท็บอื่น = ตัวเลือก "ต้นทาง" ที่จะคัดลอกมา
   if (sources.length === 0) return null;
   return (
     <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen((o) => !o)} title="คัดลอกบรรทัดตีราคาจากแท็บอื่นมาใส่แท็บนี้"
-        className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⧉ Copy ตีราคาจาก…</button>
+      <button type="button" onClick={() => setOpen((o) => !o)} title={t("คัดลอกบรรทัดตีราคาจากแท็บอื่นมาใส่แท็บนี้", "Copy costing lines from another tab into this tab")}
+        className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("⧉ Copy ตีราคาจาก…", "⧉ Copy costing from…")}</button>
       {open && (
         <div className="absolute z-30 right-0 mt-1 min-w-[220px] bg-white border border-slate-200 rounded-lg shadow-lg py-1">
-          <div className="px-2.5 py-1 text-[10px] text-slate-400">คัดลอก<b>จาก</b>แท็บไหน (มาแทนที่แท็บนี้)</div>
-          {sources.map((t) => {
-            const n = lineCountOf?.(t.key) ?? 0;
-            const name = t.kind === "draft" ? `✎ ${t.label}` : t.label;   // แท็บทั่วไป: label = ชื่อที่ตั้งเอง
+          <div className="px-2.5 py-1 text-[10px] text-slate-400">{t("คัดลอก", "Copy ")}<b>{t("จาก", "from")}</b>{t("แท็บไหน (มาแทนที่แท็บนี้)", " which tab (replaces this tab)")}</div>
+          {sources.map((tb) => {
+            const n = lineCountOf?.(tb.key) ?? 0;
+            const name = tb.kind === "draft" ? `✎ ${tb.label}` : tb.label;   // แท็บทั่วไป: label = ชื่อที่ตั้งเอง
             return (
-              <button key={t.key || "__gen__"} type="button" disabled={n === 0}
-                onClick={() => { setOpen(false); onCopy(t.key); }}
+              <button key={tb.key || "__gen__"} type="button" disabled={n === 0}
+                onClick={() => { setOpen(false); onCopy(tb.key); }}
                 className="w-full flex items-center justify-between gap-2 text-left px-2.5 py-1.5 text-xs hover:bg-blue-50 text-slate-700 disabled:opacity-40 disabled:hover:bg-transparent">
                 <span className="truncate">{name}</span>
-                <span className="shrink-0 tabular-nums text-[10px] text-slate-400">{n > 0 ? `${n} บรรทัด` : "ว่าง"}</span>
+                <span className="shrink-0 tabular-nums text-[10px] text-slate-400">{n > 0 ? t(`${n} บรรทัด`, `${n} lines`) : t("ว่าง", "Empty")}</span>
               </button>
             );
           })}
@@ -438,6 +448,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; hideSendToBoard?: boolean; onDetailClose?: () => void; onCreated?: (sheet: { id: string; code: string }) => void;
     /** เปิดแผง "📄 ใบนำเสนอ A4" ที่หน้าแม่ (เช่น Dashboard — แผงอยู่ต่อได้แม้ปิดป๊อปอัป) · ไม่ส่ง = ป๊อปอัปเปิดแผงเอง */
     onOpenPresentation?: (sheetId: string) => void } = {}) {
+  const t = useT();
   const [presentOpen, setPresentOpen] = useState(false);   // แผงใบนำเสนอ (กรณีหน้าแม่ไม่รับไปทำเอง)
   const canSendToBoard = useCanSendToBoard();
   const [boardPick, setBoardPick] = useState(false);   // ป๊อปอัปเลือกแคมเปญปลายทาง
@@ -553,9 +564,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   // ต้นทุนวัสดุแยกตามชนิด (สำหรับการ์ดสรุป)
   const costByGroup = useMemo(() => {
     const m = new Map<string, number>();
-    for (const r of curLines) { const k = r.group_name || "ไม่ระบุชนิด"; m.set(k, (m.get(k) ?? 0) + (r.amount || 0)); }
+    for (const r of curLines) { const k = r.group_name || t("ไม่ระบุชนิด", "Unspecified type"); m.set(k, (m.get(k) ?? 0) + (r.amount || 0)); }
     return [...m.entries()].map(([label, amount]) => ({ label, amount }));
-  }, [curLines]);
+  }, [curLines, t]);
   // ชื่อแท็บ "ทั่วไป" ของใบนี้ (ตั้งเองได้ · ว่าง = ทั่วไป) — ของกลาง lib/design-sheet-cost-labels
   const generalLabel = generalLabelOf(form?.cost_general_label);
   // แท็บ Parent ในแท็บตีราคา: ทั่วไป + รหัสจริง + ร่าง + parent_code ที่มีบรรทัดแต่หลุดจากลิสต์ (กันงานหาย)
@@ -572,7 +583,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   }, [form?.parent_sku_codes, form?.parent_sku_drafts, costLines, generalLabel]);
   // ป้ายไซส์ของรอบเสนอราคา (null = รอบเก่าไม่ระบุ · "" = ทั่วไป)
   const quoteSizeLabel = (code: string | null) =>
-    code == null ? "—" : code === "" ? generalLabel : (costParentTabs.find((t) => t.key === code)?.label ?? code);
+    code == null ? "—" : code === "" ? generalLabel : (costParentTabs.find((tb) => tb.key === code)?.label ?? code);
 
   // ---- เฟส 5: ตั้ง Parent SKU + ตัวเช็ครหัส ----
   const [skuCheck, setSkuCheck] = useState<ParentSkuCheck | null>(null);
@@ -587,7 +598,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [brandSaving, setBrandSaving] = useState(false);
 
   const addBrand = async () => {
-    if (!newBrandName.trim()) { toast.error("กรุณาใส่ชื่อแบรนด์"); return; }
+    if (!newBrandName.trim()) { toast.error(t("กรุณาใส่ชื่อแบรนด์", "Please enter a brand name")); return; }
     setBrandSaving(true);
     try {
       const res = await apiFetch("/api/brands", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -597,8 +608,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       setBrands((list) => [...list, b].sort((x, y) => x.name.localeCompare(y.name, "th")));
       patch({ brand_id: b.id });   // เลือกแบรนด์ใหม่ให้เลย
       setBrandModal(false);
-      toast.success(`เพิ่มแบรนด์ "${b.name}" แล้ว`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มแบรนด์ไม่สำเร็จ"); }
+      toast.success(t(`เพิ่มแบรนด์ "${b.name}" แล้ว`, `Added brand "${b.name}"`));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เพิ่มแบรนด์ไม่สำเร็จ", "Failed to add brand")); }
     finally { setBrandSaving(false); }
   };
 
@@ -626,12 +637,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const groupUsesPiece = (id: string | null) => isPieceGroup(mgOf(id)?.code, mgOf(id)?.name);  // ชนิดชิ้น (กว้าง×ยาว)
   const groupUsesFace = (id: string | null) => mgOf(id)?.calc_method === "area_face" && !groupUsesPiece(id);  // ผ้าม้วน
   const groupHint = (id: string | null): string => {
-    if (groupUsesPiece(id)) return "ซื้อเป็นแผ่น — ใส่ขนาดแผ่น กว้าง×ยาว + ราคา/แผ่น → ระบบหารเป็นราคา/cm² · ตอนตีราคา = พื้นที่ที่ใช้ × ราคา/cm² × จำนวน";
+    if (groupUsesPiece(id)) return t("ซื้อเป็นแผ่น — ใส่ขนาดแผ่น กว้าง×ยาว + ราคา/แผ่น → ระบบหารเป็นราคา/cm² · ตอนตีราคา = พื้นที่ที่ใช้ × ราคา/cm² × จำนวน", "Bought as sheets — enter sheet width×length + price/sheet → system divides into price/cm² · when costing = area used × price/cm² × qty");
     const m = mgOf(id)?.calc_method;
-    if (m === "area_face") return "ผ้าม้วน — ใส่หน้ากว้าง · ตอนตีราคาใส่ กว้าง × ยาว × จำนวน (พื้นที่ ÷ หน้ากว้าง)";
-    if (m === "area_100")  return "คิดตามพื้นที่ ÷ 100 — ตอนตีราคาใส่ กว้าง × ยาว × จำนวน";
-    if (m === "length")    return "คิดตามความยาว — ตอนตีราคาใส่แค่ ยาว";
-    if (m === "count")     return "คิดตามจำนวนชิ้น — ตอนตีราคาใส่ จำนวนชิ้น";
+    if (m === "area_face") return t("ผ้าม้วน — ใส่หน้ากว้าง · ตอนตีราคาใส่ กว้าง × ยาว × จำนวน (พื้นที่ ÷ หน้ากว้าง)", "Fabric roll — enter roll width · when costing enter width × length × qty (area ÷ roll width)");
+    if (m === "area_100")  return t("คิดตามพื้นที่ ÷ 100 — ตอนตีราคาใส่ กว้าง × ยาว × จำนวน", "By area ÷ 100 — when costing enter width × length × qty");
+    if (m === "length")    return t("คิดตามความยาว — ตอนตีราคาใส่แค่ ยาว", "By length — when costing enter length only");
+    if (m === "count")     return t("คิดตามจำนวนชิ้น — ตอนตีราคาใส่ จำนวนชิ้น", "By pcs — when costing enter pcs");
     return "";
   };
   // คัดลอกวัสดุที่มีอยู่ → เติมค่าลงช่องเพิ่มด้านบน (ชื่อ + " (copy)") ให้แก้นิดเดียวแล้วกดเพิ่ม
@@ -641,7 +652,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     setPmPrice(r.price_per_unit != null ? String(r.price_per_unit) : "");
     setPmUom(r.uom ?? ""); setPmFace(r.face_width_cm != null ? String(r.face_width_cm) : "");
     setPmWidth(r.width_cm != null ? String(r.width_cm) : ""); setPmLength(r.length_cm != null ? String(r.length_cm) : "");
-    toast.info("คัดลอกค่ามาที่ช่องเพิ่มด้านบนแล้ว — แก้ชื่อ/ค่าแล้วกด ＋ เพิ่ม");
+    toast.info(t("คัดลอกค่ามาที่ช่องเพิ่มด้านบนแล้ว — แก้ชื่อ/ค่าแล้วกด ＋ เพิ่ม", "Copied into the add row above — edit name/values then press ＋ Add"));
   };
   const pmToggleSort = (key: "name" | "group" | "price") =>
     setPmSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" }));
@@ -680,7 +691,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     const j = await apiFetch("/api/design-sheets/price-item-skus", {
       method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ item_id: itemId, sku_ids: ids }),
     }).then((r) => r.json());
-    if (j.error) { toast.error(j.error); void loadPm(); } else toast.success("บันทึก SKU ที่ผูกแล้ว");
+    if (j.error) { toast.error(j.error); void loadPm(); } else toast.success(t("บันทึก SKU ที่ผูกแล้ว", "Linked SKUs saved"));
   };
   const onPmLinkPicked = (picked: SkuPickerValue[]) => {
     if (!pmLinkFor) return;
@@ -695,7 +706,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const numOrNull = (s: string) => (s === "" ? null : Number(s));
 
   const pmAdd = async () => {
-    if (!pmName.trim()) { toast.error("กรุณาใส่ชื่อวัสดุ"); return; }
+    if (!pmName.trim()) { toast.error(t("กรุณาใส่ชื่อวัสดุ", "Please enter a material name")); return; }
     setPmSaving(true);
     const piece = groupUsesPiece(pmGroup);
     try {
@@ -704,23 +715,23 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           face_width_cm: piece ? null : numOrNull(pmFace), width_cm: piece ? numOrNull(pmWidth) : null, length_cm: piece ? numOrNull(pmLength) : null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       setPmName(""); setPmPrice(""); setPmUom(""); setPmFace(""); setPmWidth(""); setPmLength("");
-      await loadPm(); toast.success("เพิ่มวัสดุแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มวัสดุไม่สำเร็จ"); }
+      await loadPm(); toast.success(t("เพิ่มวัสดุแล้ว", "Material added"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เพิ่มวัสดุไม่สำเร็จ", "Failed to add material")); }
     finally { setPmSaving(false); }
   };
 
   const pmStartEdit = (r: PmRow) => { setPmEditId(r.id); setPmEdit({ name: r.name ?? "", material_group_id: r.material_group_id ?? "", price: r.price_per_unit != null ? String(r.price_per_unit) : "", uom: r.uom ?? "", face: r.face_width_cm != null ? String(r.face_width_cm) : "", width: r.width_cm != null ? String(r.width_cm) : "", length: r.length_cm != null ? String(r.length_cm) : "" }); };
   const pmSaveEdit = async () => {
     if (!pmEditId) return;
-    if (!pmEdit.name.trim()) { toast.error("กรุณาใส่ชื่อวัสดุ"); return; }
+    if (!pmEdit.name.trim()) { toast.error(t("กรุณาใส่ชื่อวัสดุ", "Please enter a material name")); return; }
     const piece = groupUsesPiece(pmEdit.material_group_id);
     try {
       const res = await apiFetch(`/api/master-v2/design-price-items/${pmEditId}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: pmEdit.name.trim(), material_group_id: pmEdit.material_group_id || null, price_per_unit: numOrNull(pmEdit.price), uom: pmEdit.uom.trim() || null,
           face_width_cm: piece ? null : numOrNull(pmEdit.face), width_cm: piece ? numOrNull(pmEdit.width) : null, length_cm: piece ? numOrNull(pmEdit.length) : null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      setPmEditId(null); await loadPm(); toast.success("บันทึกวัสดุแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+      setPmEditId(null); await loadPm(); toast.success(t("บันทึกวัสดุแล้ว", "Material saved"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
   };
 
   const pmDelete = async () => {
@@ -729,8 +740,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       const res = await apiFetch(`/api/master-v2/design-price-items/${pmDel.id}`, { method: "DELETE" });
       const j = await res.json().catch(() => ({}));
       if (j.error) throw new Error(j.error);
-      setPmDel(null); await loadPm(); toast.success("เก็บวัสดุเข้ากรุแล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+      setPmDel(null); await loadPm(); toast.success(t("เก็บวัสดุเข้ากรุแล้ว", "Material archived"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Delete failed")); }
   };
 
   // ---- รูปก่อนบันทึก (ตอนสร้างใหม่): พักไว้ในเครื่อง → อัปโหลดอัตโนมัติตอนกดบันทึก ----
@@ -768,7 +779,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       if (costDirty) await saveCost();
       if (supplierDirty) await supplierSaveRef.current?.();
       doClose();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setCloseSaving(false); }
   };
   const discardAndClose = () => doClose();
@@ -824,7 +835,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const addParentCode = () => {
     const code = skuInput.trim().toUpperCase();
     if (!code) return;
-    if (skuCheck?.exists) { setFormErr(`รหัส ${code} มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ`); return; }
+    if (skuCheck?.exists) { setFormErr(t(`รหัส ${code} มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ`, `Code ${code} already exists — duplicates not allowed`)); return; }
     setForm((f) => (f && !f.parent_sku_codes.includes(code) ? { ...f, parent_sku_codes: [...f.parent_sku_codes, code] } : f));
     setSkuInput(""); setSkuCheck(null);
   };
@@ -857,11 +868,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       const lj = await lr.json(); if (lj.error) throw new Error(lj.error);
       const ej = await er.json(); if (ej.error) throw new Error(ej.error);
       setCostDirty(false);
-      toast.success(`บันทึกตีราคาแล้ว (${lj.saved} บรรทัด)`);
+      toast.success(t(`บันทึกตีราคาแล้ว (${lj.saved} บรรทัด)`, `Costing saved (${lj.saved} lines)`));
       return true;
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกตีราคาไม่สำเร็จ"); return false; }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกตีราคาไม่สำเร็จ", "Failed to save costing")); return false; }
     finally { setCostSaving(false); }
-  }, [form?.id, form?.parent_sku_drafts, costLines, costExtraMap, toast]);
+  }, [form?.id, form?.parent_sku_drafts, costLines, costExtraMap, toast, t]);
 
   // เปลี่ยนชื่อ / ลบ "เวอร์ชันตีราคา" (แท็บ) — เซิร์ฟเวอร์แก้ให้ครบทุกตาราง (วัสดุ/สั่งจากร้าน/เสนอราคา/ค่าใช้จ่ายเพิ่ม/แบ่งกำไร/ชื่อ) แล้วหน้าจอรีโหลด
   const versionOp = async (action: "rename" | "delete", from: string, to?: string): Promise<boolean> => {
@@ -891,9 +902,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       setCostParent(action === "rename" && to ? to : "");
       const c = (j.counts ?? {}) as Record<string, number>;
       const n = (c.design_sheet_cost_lines ?? 0) + (c.design_sheet_supplier_lines ?? 0);
-      toast.success(action === "rename" ? `เปลี่ยนชื่อ "${from}" → "${to}" แล้ว (${n} รายการตามไปด้วย)` : `ลบเวอร์ชัน "${from}" แล้ว (${n} รายการ)`);
+      toast.success(action === "rename" ? t(`เปลี่ยนชื่อ "${from}" → "${to}" แล้ว (${n} รายการตามไปด้วย)`, `Renamed "${from}" → "${to}" (${n} items updated too)`) : t(`ลบเวอร์ชัน "${from}" แล้ว (${n} รายการ)`, `Deleted version "${from}" (${n} items)`));
       return true;
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); return false; }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ทำรายการไม่สำเร็จ", "Action failed")); return false; }
     finally { setVerBusy(false); }
   };
 
@@ -901,24 +912,24 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const saveGeneralLabel = async (name: string): Promise<boolean> => {
     if (!form?.id) return false;
     const label = name.trim();
-    if (label && costParentTabs.some((t) => t.key !== "" && t.key === label)) { toast.error(`มีแท็บชื่อ "${label}" อยู่แล้ว — ตั้งชื่ออื่น`); return false; }
+    if (label && costParentTabs.some((tb) => tb.key !== "" && tb.key === label)) { toast.error(t(`มีแท็บชื่อ "${label}" อยู่แล้ว — ตั้งชื่ออื่น`, `A tab named "${label}" already exists — choose another name`)); return false; }
     setVerBusy(true);
     try {
       const res = await apiFetch(`/api/design-sheets/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ cost_general_label: label || null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       setForm((f) => (f ? { ...f, cost_general_label: label } : f));
-      toast.success(label ? `ตั้งชื่อแท็บเป็น "${label}" แล้ว` : 'ใช้ชื่อ "ทั่วไป" ตามเดิมแล้ว');
+      toast.success(label ? t(`ตั้งชื่อแท็บเป็น "${label}" แล้ว`, `Tab renamed to "${label}"`) : t('ใช้ชื่อ "ทั่วไป" ตามเดิมแล้ว', 'Back to the default "General" name'));
       return true;
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เปลี่ยนชื่อไม่สำเร็จ"); return false; }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เปลี่ยนชื่อไม่สำเร็จ", "Rename failed")); return false; }
     finally { setVerBusy(false); }
   };
   const doRename = async () => {
     if (verRename === "") { if (await saveGeneralLabel(verRenameName)) setVerRename(null); return; }
     const from = verRename ?? ""; const to = verRenameName.trim();
-    if (!to) { toast.error("ตั้งชื่อใหม่ก่อน"); return; }
+    if (!to) { toast.error(t("ตั้งชื่อใหม่ก่อน", "Enter a new name first")); return; }
     if (to === from) { setVerRename(null); return; }
-    if (costParentTabs.some((t) => t.key === to)) { toast.error(`มีแท็บชื่อ "${to}" อยู่แล้ว — ตั้งชื่ออื่น`); return; }
+    if (costParentTabs.some((tb) => tb.key === to)) { toast.error(t(`มีแท็บชื่อ "${to}" อยู่แล้ว — ตั้งชื่ออื่น`, `A tab named "${to}" already exists — choose another name`)); return; }
     if (await versionOp("rename", from, to)) setVerRename(null);
   };
 
@@ -926,7 +937,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const sendCostToQuote = async () => {
     if (!form?.id) return;
     const total = Math.round(grandTotal * 100) / 100;
-    if (!(total > 0)) { toast.error("ยังไม่มียอดตีราคา — ใส่บรรทัดวัสดุ/ค่าใช้จ่ายก่อน"); return; }
+    if (!(total > 0)) { toast.error(t("ยังไม่มียอดตีราคา — ใส่บรรทัดวัสดุ/ค่าใช้จ่ายก่อน", "No costing total yet — add material/expense lines first")); return; }
     if (costDirty && !(await saveCost())) return;
     try {
       // price = ราคาจากตีราคา (อ้างอิง), offered_price = ตั้งต้นเท่ายอดตีราคา (แก้ทีหลังได้)
@@ -935,8 +946,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       const j = await res.json(); if (j.error) throw new Error(j.error);
       await loadCq(form.id);
       setModalTab("quotes");
-      toast.success(`ส่งยอด ${fmtBaht(total)} บาท ไปเสนอราคา ครั้งที่ ${j.round} แล้ว`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ส่งยอดไม่สำเร็จ"); }
+      toast.success(t(`ส่งยอด ${fmtBaht(total)} บาท ไปเสนอราคา ครั้งที่ ${j.round} แล้ว`, `Sent ${fmtBaht(total)} THB to quote round ${j.round}`));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ส่งยอดไม่สำเร็จ", "Failed to send total")); }
   };
 
 
@@ -947,7 +958,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   const addComment = async () => {
     if (!form?.id || cmSaving) return;
-    if (!newCmBody.trim()) { toast.error("กรุณาใส่รายการ comment"); return; }
+    if (!newCmBody.trim()) { toast.error(t("กรุณาใส่รายการ comment", "Please enter a comment")); return; }
     setCmSaving(true);
     try {
       const res = await apiFetch(`/api/design-sheets/${form.id}/comments`, { method: "POST", headers: { "Content-Type": "application/json" },
@@ -956,21 +967,21 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       setNewCmBody(""); setNewCmDate(todayStr());
       await loadCq(form.id);
       setOpenImgCid(j.id);   // กางช่องรูปของ comment ใหม่ให้เลย เผื่อแนบรูปต่อ
-      toast.success("เพิ่ม comment แล้ว — แนบรูปประกอบได้เลย");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่ม comment ไม่สำเร็จ"); }
+      toast.success(t("เพิ่ม comment แล้ว — แนบรูปประกอบได้เลย", "Comment added — you can attach images now"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เพิ่ม comment ไม่สำเร็จ", "Failed to add comment")); }
     finally { setCmSaving(false); }
   };
 
   const startEditComment = (c: DesignSheetComment) => { setEditCid(c.id); setEditCmDate(c.comment_date); setEditCmBody(c.body); };
   const saveEditComment = async () => {
     if (!form?.id || !editCid) return;
-    if (!editCmBody.trim()) { toast.error("กรุณาใส่รายการ comment"); return; }
+    if (!editCmBody.trim()) { toast.error(t("กรุณาใส่รายการ comment", "Please enter a comment")); return; }
     try {
       const res = await apiFetch(`/api/design-sheets/${form.id}/comments/${editCid}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ comment_date: editCmDate, body: editCmBody.trim() }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      setEditCid(null); await loadCq(form.id); toast.success("แก้ comment แล้ว");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "แก้ comment ไม่สำเร็จ"); }
+      setEditCid(null); await loadCq(form.id); toast.success(t("แก้ comment แล้ว", "Comment updated"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("แก้ comment ไม่สำเร็จ", "Failed to update comment")); }
   };
 
   const doDeleteComment = async () => {
@@ -978,8 +989,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     try {
       const res = await apiFetch(`/api/design-sheets/${form.id}/comments/${delComment.id}`, { method: "DELETE" });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      setDelComment(null); await loadCq(form.id); toast.success("ลบ comment แล้ว (รูปประกอบถูกลบออกจาก R2 ด้วย)");
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบ comment ไม่สำเร็จ"); }
+      setDelComment(null); await loadCq(form.id); toast.success(t("ลบ comment แล้ว (รูปประกอบถูกลบออกจาก R2 ด้วย)", "Comment deleted (its images were removed from R2 too)"));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ลบ comment ไม่สำเร็จ", "Failed to delete comment")); }
   };
 
   // มุมมอง: ตาราง / Canvas (จำค่าล่าสุดไว้ในเครื่อง)
@@ -1032,7 +1043,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       if (!alive) return;
       if (j.error) { setCanvasErr(String(j.error)); setCanvasItems([]); }
       else setCanvasItems((j.data ?? []) as DesignSheetListItem[]);
-    }).catch((e) => { if (alive) setCanvasErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); })
+    }).catch((e) => { if (alive) setCanvasErr(e instanceof Error ? e.message : tr("โหลดไม่สำเร็จ", "Failed to load")); })
       .finally(() => { if (alive) setCanvasLoading(false); });
     return () => { alive = false; };
   }, [view, brandFilter, refreshKey]);
@@ -1043,13 +1054,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const zones = useMemo<CanvasZone[]>(() => {
     const zs: CanvasZone[] = wfMeta.opts.map(([k, l]) => ({
       id: k, title: l, color: wfMeta.colorHex[k] ?? "#cbd5e1",
-      hint: canEdit ? "ลากการ์ดมาวาง = เปลี่ยนสถานะ" : undefined,
+      hint: canEdit ? t("ลากการ์ดมาวาง = เปลี่ยนสถานะ", "Drop a card here = change status") : undefined,
     }));
     if (canvasItems.some((it) => !knownStatus.has(it.status))) {
-      zs.push({ id: OLD_STATUS_ZONE, title: "สถานะเก่า (ถูกลบจากรายการแล้ว — ลากออกได้)", color: "#cbd5e1" });
+      zs.push({ id: OLD_STATUS_ZONE, title: t("สถานะเก่า (ถูกลบจากรายการแล้ว — ลากออกได้)", "Old status (removed from list — drag out)"), color: "#cbd5e1" });
     }
     return zs;
-  }, [wfMeta, knownStatus, canEdit, canvasItems]);
+  }, [wfMeta, knownStatus, canEdit, canvasItems, t]);
 
   // ลากการ์ดข้ามโซน = เปลี่ยนสถานะ (optimistic + บันทึกผ่าน API กลาง + audit)
   const moveStatus = async (item: DesignSheetListItem, toZoneId: string) => {
@@ -1062,7 +1073,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       toast.success(`${item.code} → ${statusOf(toZoneId).label}`);
     } catch (e) {
       setCanvasItems(prev);   // เปลี่ยนไม่สำเร็จ → ดึงการ์ดกลับที่เดิม
-      toast.error(e instanceof Error ? e.message : "เปลี่ยนสถานะไม่สำเร็จ");
+      toast.error(e instanceof Error ? e.message : t("เปลี่ยนสถานะไม่สำเร็จ", "Failed to change status"));
     }
   };
 
@@ -1075,7 +1086,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     try {
       const res = await apiFetch("/api/design-sheets/reorder", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: next.map((x) => x.id) }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกลำดับไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกลำดับไม่สำเร็จ", "Failed to save order")); }
   };
 
   const serverFetch = useCallback(async (p: ServerFetchParams) => {
@@ -1104,14 +1115,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   // อัปโหลดรูปในรายละเอียดงาน (Tiptap) → R2 ผ่านระบบแนบไฟล์กลาง (entity=design_sheet_detail)
   const uploadDetailImage = async (file: File): Promise<string> => {
-    if (!form?.id) throw new Error("ต้องบันทึกใบงานก่อน");
+    if (!form?.id) throw new Error(t("ต้องบันทึกใบงานก่อน", "Save the design sheet first"));
     const fd = new FormData();
     fd.append("file", file); fd.append("entity_type", "design_sheet_detail"); fd.append("entity_id", form.id);
     const an = user?.name ?? user?.email; if (an) fd.append("actor", an);
     const res = await apiFetch("/api/attachments", { method: "POST", body: fd });
     const j = await res.json(); if (j.error) throw new Error(j.error);
     const url = j.public_url ?? j.data?.public_url;
-    if (!url) throw new Error("อัปโหลดรูปไม่สำเร็จ");
+    if (!url) throw new Error(t("อัปโหลดรูปไม่สำเร็จ", "Image upload failed"));
     return url as string;
   };
   // ลบรูปในรายละเอียดที่ถูกเอาออกจากเนื้อหา → ลบจาก R2 (ย้าย trash) กันไฟล์ขยะ
@@ -1137,7 +1148,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     } catch { /* ไม่ critical */ }
   }, []);
 
-  const openCreate = () => { setEditing(true); setCreateMore(false); setRecentBrandIds(loadRecent<{ id: string }>(RECENT_KEYS.designBrands).map((b) => b.id)); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": DEFAULT_COST_EXTRA }); };
+  const openCreate = () => { setEditing(true); setCreateMore(false); setRecentBrandIds(loadRecent<{ id: string }>(RECENT_KEYS.designBrands).map((b) => b.id)); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": defaultCostExtra() }); };
 
   const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({}); setLinkedSkus([]);
@@ -1171,11 +1182,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         for (const [k, v] of Object.entries(rawCe as Record<string, unknown>)) ceMap[k] = normArr(v);
       } else {
         const arr = normArr(rawCe);
-        ceMap = { "": arr.length ? arr : DEFAULT_COST_EXTRA };
+        ceMap = { "": arr.length ? arr : defaultCostExtra() };
       }
-      if (!(ceMap[""]?.length)) ceMap[""] = DEFAULT_COST_EXTRA;   // แท็บทั่วไปโชว์ค่าแรงตั้งต้นเสมอถ้ายังว่าง
+      if (!(ceMap[""]?.length)) ceMap[""] = defaultCostExtra();   // แท็บทั่วไปโชว์ค่าแรงตั้งต้นเสมอถ้ายังว่าง
       setCostParent(""); setCostExtraMap(ceMap);
-    } catch (e) { setFormErr(e instanceof Error ? e.message : "โหลดไม่ได้"); }
+    } catch (e) { setFormErr(e instanceof Error ? e.message : t("โหลดไม่ได้", "Could not load")); }
     finally { setLoadingForm(false); }
   };
 
@@ -1183,8 +1194,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const copySheetLink = async () => {
     if (!form?.id || typeof window === "undefined") return;
     const url = `${window.location.origin}${window.location.pathname}?open=${form.id}`;
-    try { await navigator.clipboard.writeText(url); toast.success("คัดลอกลิงก์ใบงานนี้แล้ว — วางส่งให้คนอื่นเปิดได้เลย"); }
-    catch { toast.error("คัดลอกลิงก์ไม่สำเร็จ"); }
+    try { await navigator.clipboard.writeText(url); toast.success(t("คัดลอกลิงก์ใบงานนี้แล้ว — วางส่งให้คนอื่นเปิดได้เลย", "Design sheet link copied — paste it to share")); }
+    catch { toast.error(t("คัดลอกลิงก์ไม่สำเร็จ", "Failed to copy link")); }
   };
   // เปิดหน้าด้วยลิงก์ ?open=<id> (หรือ ?sheet=<id> เดิม) → เปิด modal ใบงานนั้นอัตโนมัติ (ครั้งเดียวตอนเข้าหน้า)
   // ?open= = พารามิเตอร์มาตรฐาน (การ์ดบน Design Dashboard ใช้ตัวนี้) · ?sheet= คงไว้ให้ลิงก์เก่ายังเปิดได้
@@ -1217,10 +1228,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   const save = async () => {
     if (!form) return;
-    if (!form.name.trim()) { setFormErr("กรุณาใส่ชื่องาน"); return; }
+    if (!form.name.trim()) { setFormErr(t("กรุณาใส่ชื่องาน", "Please enter a job name")); return; }
     // รหัสที่ค้างพิมพ์ในช่องเพิ่ม (ยังไม่กด Enter) → ถ้าซ้ำห้ามบันทึก, ถ้าใช้ได้ให้รวมเข้าไปด้วย
     const pending = skuInput.trim().toUpperCase();
-    if (pending && skuCheck?.exists) { setFormErr(`รหัส Parent SKU "${pending}" มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ`); return; }
+    if (pending && skuCheck?.exists) { setFormErr(t(`รหัส Parent SKU "${pending}" มีอยู่ในระบบแล้ว — ห้ามตั้งซ้ำ`, `Parent SKU code "${pending}" already exists — duplicates not allowed`)); return; }
     const parentCodes = [...form.parent_sku_codes];
     if (pending && !parentCodes.includes(pending)) parentCodes.push(pending);
     setSaving(true); setFormErr(null);
@@ -1237,7 +1248,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       const j = await res.json(); if (j.error) throw new Error(j.error);
       if (form.id) {
         await reconcileDetailImages(form.id, form.detail);   // ลบรูปในรายละเอียดที่ถูกเอาออก (→ R2 trash)
-        toast.success("บันทึกแล้ว");
+        toast.success(t("บันทึกแล้ว", "Saved"));
         setForm(null);
         if (detailOnly) onDetailClose?.();   // โหมด popup-เดี่ยว (Dashboard): ถอด overlay + refresh บอร์ดหลังบันทึก
       } else {
@@ -1255,16 +1266,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             } catch { fail++; }
           }
           clearPend();
-          if (fail > 0) toast.error(`อัปโหลดรูปไม่สำเร็จ ${fail} ไฟล์ (สำเร็จ ${ok})`);
+          if (fail > 0) toast.error(t(`อัปโหลดรูปไม่สำเร็จ ${fail} ไฟล์ (สำเร็จ ${ok})`, `${fail} image(s) failed to upload (${ok} done)`));
         }
         // สร้างเสร็จ → ค้างป๊อปอัพไว้ (กลายเป็นโหมดแก้) ให้แนบรูป/comment ต่อได้เลย
-        toast.success(`สร้างใบงานแล้ว: ${j.code}`);
+        toast.success(t(`สร้างใบงานแล้ว: ${j.code}`, `Design sheet created: ${j.code}`));
         if (form.brand_id) pushRecent(RECENT_KEYS.designBrands, { id: form.brand_id });   // ปุ่มแบรนด์ล่าสุดครั้งหน้า
         patch({ id: j.id, code: j.code });
         onCreated?.({ id: String(j.id), code: String(j.code ?? "") });   // เช่น กระดานแคมเปญ → วางการ์ดใบงานที่เพิ่งสร้าง
       }
       refresh();
-    } catch (e) { setFormErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    } catch (e) { setFormErr(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setSaving(false); }
   };
 
@@ -1273,8 +1284,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     try {
       const res = await apiFetch(`/api/design-sheets/${archiveTarget.id}`, { method: "DELETE" });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("เก็บเข้ากรุแล้ว — ดูได้จากติ๊ก “แสดงที่เก็บเข้ากรุ”"); setArchiveTarget(null); refresh();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เก็บเข้ากรุไม่สำเร็จ"); }
+      toast.success(t("เก็บเข้ากรุแล้ว — ดูได้จากติ๊ก “แสดงที่เก็บเข้ากรุ”", "Archived — tick “Show archived” to see it")); setArchiveTarget(null); refresh();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เก็บเข้ากรุไม่สำเร็จ", "Failed to archive")); }
     finally { setArchiving(false); }
   };
 
@@ -1283,9 +1294,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     try {
       const res = await apiFetch(`/api/design-sheets/${hardDelTarget.id}?hard=1`, { method: "DELETE" });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("ลบใบงานถาวรแล้ว (รูปย้ายเข้าถังขยะ R2 สำรอง 30 วัน)");
+      toast.success(t("ลบใบงานถาวรแล้ว (รูปย้ายเข้าถังขยะ R2 สำรอง 30 วัน)", "Design sheet permanently deleted (images moved to R2 trash, kept 30 days)"));
       setHardDelTarget(null); setForm(null); refresh();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Delete failed")); }
     finally { setHardDeleting(false); }
   };
 
@@ -1293,27 +1304,27 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     try {
       const res = await apiFetch(`/api/design-sheets/${row.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ is_active: true }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(`กู้คืน ${row.code} แล้ว`); refresh();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "กู้คืนไม่สำเร็จ"); }
+      toast.success(t(`กู้คืน ${row.code} แล้ว`, `Restored ${row.code}`)); refresh();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("กู้คืนไม่สำเร็จ", "Restore failed")); }
   };
 
   const columns = useMemo<ColumnDef<DesignSheetListItem>[]>(() => [
-    { id: "cover", header: "รูป", size: 56, enableSorting: false,
+    { id: "cover", header: t("รูป", "Image"), size: 56, enableSorting: false,
       cell: ({ row }) => <ImageThumbnail url={row.original.cover_url} size={40} alt={row.original.name} /> },
-    { id: "code", accessorKey: "code", header: "เลขที่", size: 120,
+    { id: "code", accessorKey: "code", header: t("เลขที่", "No."), size: 120,
       cell: ({ getValue }) => <code className="text-xs text-slate-500">{getValue() as string}</code> },
-    { id: "name", accessorKey: "name", header: "ชื่องาน", size: 240,
+    { id: "name", accessorKey: "name", header: t("ชื่องาน", "Job name"), size: 240,
       cell: ({ getValue }) => <span className="font-medium text-slate-700">{getValue() as string}</span> },
-    { id: "brand", header: "แบรนด์", size: 140, enableSorting: false,
+    { id: "brand", header: t("แบรนด์", "Brand"), size: 140, enableSorting: false,
       cell: ({ row }) => row.original.brand_name ? (
         <span className="inline-flex items-center gap-1.5 text-sm text-slate-600">
           <span className="w-2.5 h-2.5 rounded-full border border-slate-200 shrink-0" style={{ backgroundColor: row.original.brand_color ?? "#e2e8f0" }} />
           {row.original.brand_name}
         </span>
       ) : <span className="text-slate-300">—</span> },
-    { id: "status", accessorKey: "status", header: "สถานะ", size: 130,
+    { id: "status", accessorKey: "status", header: t("สถานะ", "Status"), size: 130,
       cell: ({ getValue }) => { const s = statusOf(String(getValue() ?? "design")); return <span className={`text-xs px-2 py-0.5 rounded ${s.cls}`}>{s.label}</span>; } },
-    { id: "order_date", accessorKey: "order_date", header: "วันที่สั่ง", size: 105,
+    { id: "order_date", accessorKey: "order_date", header: t("วันที่สั่ง", "Order date"), size: 105,
       cell: ({ getValue }) => <span className="text-sm text-slate-600">{formatDate(getValue())}</span> },
     { id: "deadline", accessorKey: "deadline", header: "Deadline", size: 105,
       cell: ({ row }) => {
@@ -1322,14 +1333,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         const overdue = !wfMeta.finished.has(row.original.status) && d < new Date().toISOString().slice(0, 10);
         return <span className={`text-sm ${overdue ? "text-rose-600 font-semibold" : "text-slate-600"}`}>{formatDate(d)}{overdue ? " ⚠" : ""}</span>;
       } },
-    { id: "drive", header: "ไฟล์งาน", size: 80, enableSorting: false,
+    { id: "drive", header: t("ไฟล์งาน", "Work files"), size: 80, enableSorting: false,
       cell: ({ row }) => row.original.drive_link
-        ? <a href={row.original.drive_link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-blue-600 hover:underline">📁 เปิด</a>
+        ? <a href={row.original.drive_link} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-xs text-blue-600 hover:underline">{t("📁 เปิด", "📁 Open")}</a>
         : <span className="text-slate-300">—</span> },
     { id: "note", accessorKey: "note", header: "Note", size: 180, enableSorting: false,
       cell: ({ getValue }) => <span className="block max-w-[180px] truncate text-sm text-slate-500">{(getValue() as string) || ""}</span> },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [wfMeta]);
+  ], [wfMeta, t]);
 
   // ข้อ 2: สร้างวัสดุตีราคาใหม่จาก dropdown (ค้นไม่เจอ) → POST + reload price-items + เลือกให้ทันที
   const createPriceItemInline = useCallback(async (name: string, onPicked: (it: PriceItem) => void) => {
@@ -1343,17 +1354,17 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       setPriceItems(items); setPriceGroups((pr.groups ?? []) as PriceGroup[]);
       const it = items.find((p) => p.id === newId) ?? items.find((p) => p.name === nm);
       if (it) onPicked(it);
-      toast.success(`เพิ่มวัสดุ "${nm}" แล้ว — เติมราคา/ชนิดได้ที่ปุ่ม 🧮 จัดการวัสดุตีราคา`);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มวัสดุไม่สำเร็จ"); }
-  }, [toast]);
+      toast.success(t(`เพิ่มวัสดุ "${nm}" แล้ว — เติมราคา/ชนิดได้ที่ปุ่ม 🧮 จัดการวัสดุตีราคา`, `Added material "${nm}" — set price/type via 🧮 Manage costing materials`));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เพิ่มวัสดุไม่สำเร็จ", "Failed to add material")); }
+  }, [toast, t]);
 
   // คอลัมน์ตารางตีราคา (ใช้ LineItemsGrid กลาง) — เลือกวัสดุ → เติมชนิด/สูตร/เผื่อเสีย/ราคาอัตโนมัติ แล้วคำนวณสด
   const numInputCls = "w-full h-8 px-1.5 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
   // โหมดดูอย่างเดียว: ล็อกช่องแก้ให้ตรงกับตาราง (เดิมพิมพ์ได้แต่บันทึกไม่ได้) + บอกเหตุผลเมื่อชี้เมาส์
-  const roTip = !fullEdit ? "อยู่ในโหมดดูอย่างเดียว — กดปุ่ม ✏️ แก้ไข ด้านล่างก่อนจึงจะแก้ได้ (การจัดกลุ่ม/เรียงลำดับใช้ได้ตลอด)" : undefined;
+  const roTip = !fullEdit ? t("อยู่ในโหมดดูอย่างเดียว — กดปุ่ม ✏️ แก้ไข ด้านล่างก่อนจึงจะแก้ได้ (การจัดกลุ่ม/เรียงลำดับใช้ได้ตลอด)", "View-only mode — press ✏️ Edit below to make changes (grouping/sorting always works)") : undefined;
   const cellEdit = fullEdit;
   const costCols = useMemo<LineColumn<CostRow>[]>(() => [
-    { key: "item", header: "วัสดุ / กลุ่ม", minWidth: 220, sortable: true, getValue: (r) => r.item_name,
+    { key: "item", header: t("วัสดุ / กลุ่ม", "Material / group"), minWidth: 220, sortable: true, getValue: (r) => r.item_name,
       render: (r, u) => {
         const inGroupMode = !r.item_id && !!r.group_code;   // รายการเดิมที่เคยเลือกแบบกลุ่ม
         const g = inGroupMode ? priceGroups.find((x) => x.code === r.group_code) : undefined;
@@ -1367,10 +1378,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 {/* แหล่งวัสดุ 2 ทาง: master "วัสดุตีราคา" (เดิม) หรือ "SKU คลังสินค้า" (ดึงประเภท/ราคา/หน่วย/หน้ากว้างมาให้) */}
                 {r.item_sku_id ? (
                   <ComponentPicker sku={r.item_sku_code ?? ""} name={r.item_name ?? ""}
-                    placeholder="— เลือก SKU วัตถุดิบ —"
+                    placeholder={t("— เลือก SKU วัตถุดิบ —", "— Select material SKU —")}
                     onPick={(c) => u(withPrevItem(r, costSkuPatch(c, priceGroups, r)))} />
                 ) : (
-                <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!fullEdit} placeholder="— เลือกกลุ่ม / วัสดุ —"
+                <SearchableSelect value={r.item_id ?? (inGroupMode ? `grp:${r.group_code}` : "")} disabled={!fullEdit} placeholder={t("— เลือกกลุ่ม / วัสดุ —", "— Select group / material —")}
                   initialQuery={!r.item_id ? bomRefSearchSeed(r.note) : undefined}
                   options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
                   onChange={(val) => {
@@ -1379,7 +1390,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     applyItem(it);
                   }}
                   onCreate={fullEdit ? (q) => void createPriceItemInline(q, applyItem) : undefined}
-                  createLabel="เพิ่มวัสดุใหม่" />
+                  createLabel={t("เพิ่มวัสดุใหม่", "Add new material")} />
                 )}
               </div>
               {/* สลับแหล่ง: 🏷️ = เลือกจาก SKU คลังสินค้า · 🧮 = กลับไปใช้ master วัสดุตีราคา */}
@@ -1389,8 +1400,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     ? { item_sku_id: null, item_sku_code: null }
                     : { item_sku_id: "", item_sku_code: "", item_id: null, price_basis: null })}
                   title={r.item_sku_id
-                    ? "กลับไปเลือกจาก “วัสดุตีราคา” (master)"
-                    : "เลือกวัตถุดิบจากคลังสินค้า (SKU) — ดึงประเภท ราคาซื้อ หน่วย หน้ากว้าง มาให้"}
+                    ? t("กลับไปเลือกจาก “วัสดุตีราคา” (master)", "Back to picking from “Costing materials” (master)")
+                    : t("เลือกวัตถุดิบจากคลังสินค้า (SKU) — ดึงประเภท ราคาซื้อ หน่วย หน้ากว้าง มาให้", "Pick material from inventory (SKU) — fills type, purchase price, unit, roll width")}
                   className={`h-7 shrink-0 rounded border px-1.5 text-xs ${r.item_sku_id ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-400 hover:border-blue-300 hover:text-blue-600"}`}>
                   🏷️
                 </button>
@@ -1400,81 +1411,81 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 <BasisPicker value={r.price_basis ?? "manual"}
                   onChange={(v) => u({ price_basis: v, unit_price: itemBasisPrice(item, v) })}
                   options={[
-                    { value: "manual", symbol: "✍️", label: "กรอกเอง", price: item.price_per_unit },
-                    { value: "latest", symbol: "🕐", label: "ซื้อจริงล่าสุด", price: item.sku_latest_price, note: item.sku_count > 0 ? "ยังไม่มีราคาซื้อ" : "ยังไม่ผูก SKU" },
-                    { value: "avg", symbol: "≈", label: "เฉลี่ยจาก SKU", price: item.sku_avg_price, note: "ยังไม่มี" },
-                    { value: "max", symbol: "🔺", label: "แพงสุดจาก SKU", price: item.sku_max_price, note: item.sku_count > 0 ? "ยังไม่มีราคาซื้อ" : "ยังไม่ผูก SKU" },
-                    { value: "min", symbol: "🔻", label: "ถูกสุดจาก SKU", price: item.sku_min_price, note: item.sku_count > 0 ? "ยังไม่มีราคาซื้อ" : "ยังไม่ผูก SKU" },
-                    { value: "used", symbol: "♻️", label: "ที่ใช้ตีล่าสุด", price: item.last_used_price, note: "ยังไม่เคยใช้" },
+                    { value: "manual", symbol: "✍️", label: t("กรอกเอง", "Manual"), price: item.price_per_unit },
+                    { value: "latest", symbol: "🕐", label: t("ซื้อจริงล่าสุด", "Latest purchase"), price: item.sku_latest_price, note: item.sku_count > 0 ? t("ยังไม่มีราคาซื้อ", "No purchase price yet") : t("ยังไม่ผูก SKU", "No SKU linked") },
+                    { value: "avg", symbol: "≈", label: t("เฉลี่ยจาก SKU", "Average from SKU"), price: item.sku_avg_price, note: t("ยังไม่มี", "None yet") },
+                    { value: "max", symbol: "🔺", label: t("แพงสุดจาก SKU", "Highest from SKU"), price: item.sku_max_price, note: item.sku_count > 0 ? t("ยังไม่มีราคาซื้อ", "No purchase price yet") : t("ยังไม่ผูก SKU", "No SKU linked") },
+                    { value: "min", symbol: "🔻", label: t("ถูกสุดจาก SKU", "Lowest from SKU"), price: item.sku_min_price, note: item.sku_count > 0 ? t("ยังไม่มีราคาซื้อ", "No purchase price yet") : t("ยังไม่ผูก SKU", "No SKU linked") },
+                    { value: "used", symbol: "♻️", label: t("ที่ใช้ตีล่าสุด", "Last used in costing"), price: item.last_used_price, note: t("ยังไม่เคยใช้", "Never used") },
                   ]} />
               )}
               {inGroupMode && fullEdit && (
                 <BasisPicker value={r.price_basis ?? "avg"}
                   onChange={(v) => u({ price_basis: v, unit_price: g ? groupBasisPrice(g, v) : r.unit_price })}
                   options={[
-                    { value: "avg", symbol: "≈", label: "เฉลี่ย", price: g?.avg_price ?? null },
-                    { value: "set", symbol: "📌", label: "ตั้งไว้", price: g?.set_price ?? null, note: "ยังไม่ตั้ง" },
-                    { value: "latest", symbol: "🕐", label: "ซื้อจริงล่าสุด", price: g?.latest_price ?? null },
+                    { value: "avg", symbol: "≈", label: t("เฉลี่ย", "Average"), price: g?.avg_price ?? null },
+                    { value: "set", symbol: "📌", label: t("ตั้งไว้", "Set price"), price: g?.set_price ?? null, note: t("ยังไม่ตั้ง", "Not set") },
+                    { value: "latest", symbol: "🕐", label: t("ซื้อจริงล่าสุด", "Latest purchase"), price: g?.latest_price ?? null },
                   ]} />
               )}
             </div>
             {item && !rowIsPiece(r) && r.price_basis === "latest" && item.sku_latest_currency && item.sku_latest_currency !== "THB" && (
-              <div className="text-[10px] text-amber-600">⚠ ราคาเป็น {item.sku_latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”</div>
+              <div className="text-[10px] text-amber-600">{t(`⚠ ราคาเป็น ${item.sku_latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”`, `⚠ Price is in ${item.sku_latest_currency} — convert to THB yourself in “Price/unit”`)}</div>
             )}
           </div>
         );
       } },
-    { key: "group", header: "ชนิด / สูตร", width: 116, sortable: true, getValue: (r) => r.group_name,
-      groupLabel: (r) => r.group_name || "ไม่ระบุชนิด",
+    { key: "group", header: t("ชนิด / สูตร", "Type / formula"), width: 116, sortable: true, getValue: (r) => r.group_name,
+      groupLabel: (r) => r.group_name || t("ไม่ระบุชนิด", "Unspecified type"),
       render: (r) => (
         <span className="block px-1 text-xs text-slate-500 leading-tight">{r.group_name ?? "—"}<br />
-          <span className="text-[10px] text-slate-300">{METHOD_LABEL[r.calc_method ?? "manual"] ?? r.calc_method}</span></span>
+          <span className="text-[10px] text-slate-300">{methodLabel(r.calc_method ?? "manual") ?? r.calc_method}</span></span>
       ) },
-    { key: "width_cm", header: "กว้าง (ซม.)", width: 84, align: "right", sortable: true, getValue: (r) => r.width_cm,
+    { key: "width_cm", header: t("กว้าง (ซม.)", "Width (cm)"), width: 84, align: "right", sortable: true, getValue: (r) => r.width_cm,
       render: (r, u) => usesWidth(r.calc_method)
         ? <input type="number" min={0} step="any" value={r.width_cm ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ width_cm: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
-        : <span className="block px-1 text-right text-slate-300 text-xs" title="ชนิดนี้ไม่ใช้ความกว้าง">—</span> },
-    { key: "length_cm", header: "ยาว (ซม.)", width: 84, align: "right", sortable: true, getValue: (r) => r.length_cm,
+        : <span className="block px-1 text-right text-slate-300 text-xs" title={t("ชนิดนี้ไม่ใช้ความกว้าง", "This type doesn't use width")}>—</span> },
+    { key: "length_cm", header: t("ยาว (ซม.)", "Length (cm)"), width: 84, align: "right", sortable: true, getValue: (r) => r.length_cm,
       render: (r, u) => usesLength(r.calc_method)
         ? <input type="number" min={0} step="any" value={r.length_cm ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ length_cm: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
-        : <span className="block px-1 text-right text-slate-300 text-xs" title="ชนิดนี้ไม่ใช้ความยาว">—</span> },
-    { key: "pieces", header: "จำนวนชิ้น", width: 80, align: "right", sortable: true, getValue: (r) => r.pieces,
+        : <span className="block px-1 text-right text-slate-300 text-xs" title={t("ชนิดนี้ไม่ใช้ความยาว", "This type doesn't use length")}>—</span> },
+    { key: "pieces", header: t("จำนวนชิ้น", "Pcs"), width: 80, align: "right", sortable: true, getValue: (r) => r.pieces,
       render: (r, u) => usesPieces(r.calc_method)
         ? <input type="number" min={0} step="any" value={r.pieces ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ pieces: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
-        : <span className="block px-1 text-right text-slate-300 text-xs" title="ชนิดนี้ไม่ใช้จำนวนชิ้น">—</span> },
-    { key: "waste_percent", header: "เผื่อเสีย %", width: 84, align: "right", sortable: true, getValue: (r) => r.waste_percent,
+        : <span className="block px-1 text-right text-slate-300 text-xs" title={t("ชนิดนี้ไม่ใช้จำนวนชิ้น", "This type doesn't use pcs")}>—</span> },
+    { key: "waste_percent", header: t("เผื่อเสีย %", "Waste %"), width: 84, align: "right", sortable: true, getValue: (r) => r.waste_percent,
       render: (r, u) => usesWaste(r.calc_method)
         ? <input type="number" min={0} step="any" value={r.waste_percent ?? ""} disabled={!cellEdit} title={roTip} placeholder="0"
             onChange={(e) => u({ waste_percent: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
-        : <span className="block px-1 text-right text-slate-300 text-xs" title="ชนิดนี้ไม่ใช้เผื่อเสีย">—</span> },
-    { key: "face_width_cm", header: "หน้ากว้าง / พื้นที่", width: 96, align: "right", sortable: true, getValue: (r) => r.face_width_cm,
+        : <span className="block px-1 text-right text-slate-300 text-xs" title={t("ชนิดนี้ไม่ใช้เผื่อเสีย", "This type doesn't use waste")}>—</span> },
+    { key: "face_width_cm", header: t("หน้ากว้าง / พื้นที่", "Roll width / area"), width: 96, align: "right", sortable: true, getValue: (r) => r.face_width_cm,
       render: (r, u) => rowIsPiece(r)
         // ชนิดชิ้น: ไม่ใช้หน้ากว้าง — โชว์พื้นที่ cm² (กว้าง×ยาว) แทนไว้อ้างอิง
-        ? <span className="block px-1 text-right text-xs text-violet-600" title="พื้นที่ = กว้าง×ยาว (อ้างอิง ไม่ได้คูณราคา)">{pieceArea(r) != null ? `${fmtQty(pieceArea(r))} cm²` : "—"}</span>
+        ? <span className="block px-1 text-right text-xs text-violet-600" title={t("พื้นที่ = กว้าง×ยาว (อ้างอิง ไม่ได้คูณราคา)", "Area = width×length (reference only, not multiplied by price)")}>{pieceArea(r) != null ? `${fmtQty(pieceArea(r))} cm²` : "—"}</span>
         : r.calc_method === "area_face"
         ? <input type="number" min={0} step="any" value={r.face_width_cm ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ face_width_cm: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
         : <span className="block px-1 text-right text-slate-300 text-xs">—</span> },
-    { key: "qty", header: "ปริมาณ", width: 96, align: "right", summable: true, sortable: true, getValue: (r) => r.qty,
+    { key: "qty", header: t("ปริมาณ", "Qty"), width: 96, align: "right", summable: true, sortable: true, getValue: (r) => r.qty,
       render: (r, u) => isManualM(r.calc_method) && canEdit
-        ? <input type="number" min={0} step="any" value={r.qty ?? ""} placeholder="พิมพ์เอง"
+        ? <input type="number" min={0} step="any" value={r.qty ?? ""} placeholder={t("พิมพ์เอง", "Type in")}
             onChange={(e) => u({ qty: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
         : <span className="block px-1 text-right tabular-nums font-medium text-slate-700 cursor-help underline decoration-dotted decoration-slate-300" title={calcTooltip(r)}>{fmtQty(r.qty)}</span> },
-    { key: "uom", header: "หน่วย", width: 70, sortable: true, getValue: (r) => r.uom,
+    { key: "uom", header: t("หน่วย", "Unit"), width: 70, sortable: true, getValue: (r) => r.uom,
       render: (r, u) => <input value={r.uom ?? ""} disabled={!cellEdit} title={roTip} onChange={(e) => u({ uom: e.target.value || null })}
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
-    { key: "unit_price", header: "ราคา/หน่วย", width: 96, align: "right", sortable: true, getValue: (r) => r.unit_price,
+    { key: "unit_price", header: t("ราคา/หน่วย", "Price/unit"), width: 96, align: "right", sortable: true, getValue: (r) => r.unit_price,
       render: (r, u) => <input type="number" min={0} step="any" value={r.unit_price ?? ""} disabled={!cellEdit} title={roTip}
         onChange={(e) => u({ unit_price: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} /> },
-    { key: "amount", header: "รวม (บาท)", width: 104, align: "right", summable: true, sortable: true, getValue: (r) => r.amount,
+    { key: "amount", header: t("รวม (บาท)", "Total (THB)"), width: 104, align: "right", summable: true, sortable: true, getValue: (r) => r.amount,
       render: (r) => <span className="block px-1 text-right tabular-nums font-semibold text-emerald-700">{fmtBaht(r.amount)}</span> },
-    { key: "note", header: "หมายเหตุ", minWidth: 120, getValue: (r) => r.note,
+    { key: "note", header: t("หมายเหตุ", "Note"), minWidth: 120, getValue: (r) => r.note,
       render: (r, u) => <input value={r.note ?? ""} disabled={!cellEdit} title={roTip} onChange={(e) => u({ note: e.target.value || null })} placeholder="—"
         className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" /> },
-  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline]);
+  ], [priceItems, priceGroups, canEdit, fullEdit, createPriceItemInline, t]);
 
   // ส่วนรูปภาพ (คอลัมน์ซ้ายของ modal — เห็นตลอดทุกแท็บ): บันทึกแล้ว=ImageManager แกลเลอรี · ยังไม่บันทึก=ที่พักรูป (อัปตอนกดบันทึก)
   const imageSection = !form ? null : form.id ? (
@@ -1490,8 +1501,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           pendDragging ? "border-blue-400 bg-blue-50" : "border-slate-200 hover:border-blue-300 hover:bg-slate-50"}`}>
         <input ref={pendFileRef} type="file" accept="image/*,application/pdf" multiple className="hidden"
           onChange={(e) => { if (e.target.files?.length) { addPendFiles(e.target.files); e.target.value = ""; } }} />
-        <p className="text-sm text-slate-600">{pendDragging ? "วางไฟล์ที่นี่" : "ลากรูปมาวาง · คลิกเลือก · หรือกด Ctrl+V"}</p>
-        <p className="text-xs text-slate-400 mt-0.5">อัปโหลดอัตโนมัติตอนกด &quot;บันทึก&quot;</p>
+        <p className="text-sm text-slate-600">{pendDragging ? t("วางไฟล์ที่นี่", "Drop files here") : t("ลากรูปมาวาง · คลิกเลือก · หรือกด Ctrl+V", "Drag images here · click to pick · or press Ctrl+V")}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{t('อัปโหลดอัตโนมัติตอนกด "บันทึก"', 'Uploads automatically when you press "Save"')}</p>
       </div>
       {pendImgs.length > 0 && (
         <div className="grid grid-cols-3 gap-1.5 mt-1.5">
@@ -1501,7 +1512,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 // eslint-disable-next-line @next/next/no-img-element
                 ? <img src={p.url} alt="" className="w-full h-full object-cover" />
                 : <div className="w-full h-full flex flex-col items-center justify-center text-slate-400"><span className="text-xl">📄</span><span className="text-[9px] px-0.5 truncate max-w-full">{p.file.name}</span></div>}
-              <button type="button" onClick={(e) => { e.stopPropagation(); removePend(i); }} title="เอาออก"
+              <button type="button" onClick={(e) => { e.stopPropagation(); removePend(i); }} title={t("เอาออก", "Remove")}
                 className="absolute top-0.5 right-0.5 h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-[10px] text-rose-600 opacity-0 group-hover:opacity-100 border border-slate-200">✕</button>
             </div>
           ))}
@@ -1514,28 +1525,28 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const fld = !form ? null : {
     code: (
       <div>
-        <span className="text-[11px] text-slate-500">เลขที่</span>
+        <span className="text-[11px] text-slate-500">{t("เลขที่", "No.")}</span>
         <div className="h-8 mt-0.5 px-2 flex items-center text-sm bg-slate-50 border border-slate-200 rounded-lg text-slate-500">
-          {form.id ? <code>{form.code}</code> : "ออกอัตโนมัติตอนบันทึก"}</div>
+          {form.id ? <code>{form.code}</code> : t("ออกอัตโนมัติตอนบันทึก", "Assigned automatically on save")}</div>
       </div>
     ),
     status: (
       <label className="block">
-        <span className="text-[11px] text-slate-500">สถานะ</span>
+        <span className="text-[11px] text-slate-500">{t("สถานะ", "Status")}</span>
         <select value={form.status} onChange={(e) => patch({ status: e.target.value })} disabled={!canEdit}
           className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
           {/* แบรนด์เรา (ไม่ได้ติ๊ก 👤 งานลูกค้า) = ไม่มีสถานะ "เฉพาะงานลูกค้า" (กฎกลาง statusOptsFor) */}
           {statusOptsFor(wfMeta, isOwnBrandJob(brands.find((b) => b.id === form.brand_id)), form.status).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           {/* สถานะเดิมของใบนี้ที่ถูกลบออกจาก workflow แล้ว — ยังโชว์ให้เลือกค้างไว้ได้ ไม่พัง */}
-          {form.status && !wfMeta.map[form.status] && <option value={form.status}>{form.status} (สถานะเก่า)</option>}
+          {form.status && !wfMeta.map[form.status] && <option value={form.status}>{form.status} {t("(สถานะเก่า)", "(old status)")}</option>}
         </select>
       </label>
     ),
     name: (
       <label className="block">
-        <span className="text-[11px] text-slate-500">ชื่องาน *</span>
+        <span className="text-[11px] text-slate-500">{t("ชื่องาน *", "Job name *")}</span>
         {/* สร้างใหม่: ช่องใหญ่ขึ้น + เคอร์เซอร์รออยู่เลย (ช่องแรกที่ต้องกรอก) */}
-        <input value={form.name} onChange={(e) => patch({ name: e.target.value })} disabled={!fullEdit} placeholder="เช่น กระเป๋าผ้าแคนวาสรุ่นใหม่" autoFocus={!form.id}
+        <input value={form.name} onChange={(e) => patch({ name: e.target.value })} disabled={!fullEdit} placeholder={t("เช่น กระเป๋าผ้าแคนวาสรุ่นใหม่", "e.g. New canvas tote bag")} autoFocus={!form.id}
           className={`w-full mt-0.5 px-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 ${form.id ? "h-8 text-sm" : "h-10 text-base"}`} />
       </label>
     ),
@@ -1543,16 +1554,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       // สร้างใหม่: ปุ่มแบรนด์ที่คนนี้ใช้ล่าสุด 3 อัน (กดทีเดียว · กดซ้ำ = เอาออก) + ช่องเลือก "อื่น ๆ" สำหรับแบรนด์ที่เหลือ
       const chips = form.id ? [] : recentBrandIds.map((id) => brands.find((b) => b.id === id)).filter((b): b is Brand => !!b).slice(0, RECENT_BRAND_CHIPS);
       const onChip = chips.some((b) => b.id === form.brand_id);
-      const addBtn = fullEdit && <button type="button" title="เพิ่มแบรนด์ใหม่"
+      const addBtn = fullEdit && <button type="button" title={t("เพิ่มแบรนด์ใหม่", "Add new brand")}
         onClick={() => { setNewBrandName(""); setNewBrandColor("#3b82f6"); setBrandModal(true); }}
         className="h-8 w-8 shrink-0 inline-flex items-center justify-center border border-slate-200 rounded-lg text-slate-500 hover:bg-blue-50 hover:text-blue-600">＋</button>;
       if (!chips.length) return (
         <label className="block">
-          <span className="text-[11px] text-slate-500">แบรนด์</span>
+          <span className="text-[11px] text-slate-500">{t("แบรนด์", "Brand")}</span>
           <div className="flex gap-1.5 mt-0.5">
             <select value={form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit}
               className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50">
-              <option value="">— ไม่ระบุ —</option>
+              <option value="">{t("— ไม่ระบุ —", "— None —")}</option>
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
             {addBtn}
@@ -1561,7 +1572,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       );
       return (
         <div>
-          <span className="text-[11px] text-slate-500">แบรนด์</span>
+          <span className="text-[11px] text-slate-500">{t("แบรนด์", "Brand")}</span>
           <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
             {chips.map((b) => {
               const on = form.brand_id === b.id;
@@ -1572,9 +1583,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 </button>
               );
             })}
-            <select value={onChip ? "" : form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit} aria-label="แบรนด์อื่น"
+            <select value={onChip ? "" : form.brand_id} onChange={(e) => patch({ brand_id: e.target.value })} disabled={!fullEdit} aria-label={t("แบรนด์อื่น", "Other brand")}
               className={`h-8 min-w-0 max-w-[12rem] rounded-lg border px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50 ${!onChip && form.brand_id ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500"}`}>
-              <option value="">อื่น ๆ…</option>
+              <option value="">{t("อื่น ๆ…", "Other…")}</option>
               {brands.filter((b) => !chips.some((c) => c.id === b.id)).map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
             {addBtn}
@@ -1584,7 +1595,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     })(),
     orderDate: (
       <label className="block">
-        <span className="text-[11px] text-slate-500">วันที่สั่ง</span>
+        <span className="text-[11px] text-slate-500">{t("วันที่สั่ง", "Order date")}</span>
         <input type="date" value={form.order_date} onChange={(e) => patch({ order_date: e.target.value })} disabled={!fullEdit}
           className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
       </label>
@@ -1598,25 +1609,25 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     ) : (
       // สร้างใหม่: ปุ่มลัด วันนี้ +1 / +3 / +7 วัน (นับทุกวันตามปฏิทิน · กดซ้ำ = เอาออก) หรือเลือกวันเองในปฏิทิน
       <div>
-        <span className="text-[11px] text-slate-500">ส่งงานภายใน (Deadline)</span>
+        <span className="text-[11px] text-slate-500">{t("ส่งงานภายใน (Deadline)", "Due within (Deadline)")}</span>
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
           {DEADLINE_QUICK.map((n) => {
             const v = addDaysYmd(todayStr(), n);
             const on = form.deadline === v;
             return (
               <button key={n} type="button" aria-pressed={on} disabled={!canEdit} onClick={() => patch({ deadline: on ? "" : v })} title={formatDate(v)}
-                className={`h-8 rounded-full border px-3 text-sm tabular-nums ${on ? "border-blue-500 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>+{n} วัน</button>
+                className={`h-8 rounded-full border px-3 text-sm tabular-nums ${on ? "border-blue-500 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{t(`+${n} วัน`, `+${n} days`)}</button>
             );
           })}
-          <input type="date" value={form.deadline} onChange={(e) => patch({ deadline: e.target.value })} disabled={!canEdit} aria-label="วันส่งงาน"
+          <input type="date" value={form.deadline} onChange={(e) => patch({ deadline: e.target.value })} disabled={!canEdit} aria-label={t("วันส่งงาน", "Due date")}
             className="h-8 w-40 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
         </div>
-        <p className="mt-0.5 text-[11px] text-slate-400">นับจากวันนี้ ({formatDate(todayStr())}) · เลือกวันเองในปฏิทินก็ได้</p>
+        <p className="mt-0.5 text-[11px] text-slate-400">{t(`นับจากวันนี้ (${formatDate(todayStr())}) · เลือกวันเองในปฏิทินก็ได้`, `Counted from today (${formatDate(todayStr())}) · or pick a date in the calendar`)}</p>
       </div>
     ),
     appointment: (
       <label className="block">
-        <span className="text-[11px] text-slate-500">วันนัด / วันได้ตัวอย่าง</span>
+        <span className="text-[11px] text-slate-500">{t("วันนัด / วันได้ตัวอย่าง", "Appointment / sample date")}</span>
         <input type="date" value={form.appointment_date} onChange={(e) => patch({ appointment_date: e.target.value })} disabled={!canEdit}
           className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
       </label>
@@ -1624,16 +1635,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     // ⏳ รออะไรอยู่ = เช็กลิสต์กลาง (บันทึกทันทีทีละข้อ ไม่ต้องกดบันทึกใบงาน) — โชว์บนการ์ด + กล่อง hover ของ Design Dashboard · ต้องมีเลขใบก่อน
     waiting: form.id ? (
       <RecordChecklist moduleKey={DESIGN_WAITING.moduleKey} recordType={DESIGN_WAITING.recordType} recordId={form.id} canEdit={canEdit}
-        presetType={DESIGN_WAITING.presetType} label="⏳ รออะไรอยู่" emptyText="ไม่มีอะไรรอ" />
+        presetType={DESIGN_WAITING.presetType} label={t("⏳ รออะไรอยู่", "⏳ Waiting on")} emptyText={t("ไม่มีอะไรรอ", "Nothing pending")} />
     ) : null,
     drive: (
       <label className="block">
-        <span className="text-[11px] text-slate-500">ลิงก์ไฟล์งาน (Google Drive)</span>
+        <span className="text-[11px] text-slate-500">{t("ลิงก์ไฟล์งาน (Google Drive)", "Work file link (Google Drive)")}</span>
         <div className="flex gap-1.5 mt-0.5">
           <input value={form.drive_link} onChange={(e) => patch({ drive_link: e.target.value })} disabled={!canEdit} placeholder="https://drive.google.com/..."
             className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
           {form.drive_link && <a href={form.drive_link} target="_blank" rel="noreferrer"
-            className="h-8 px-2.5 inline-flex items-center text-sm border border-slate-200 rounded-lg text-blue-600 hover:bg-blue-50">↗ เปิด</a>}
+            className="h-8 px-2.5 inline-flex items-center text-sm border border-slate-200 rounded-lg text-blue-600 hover:bg-blue-50">{t("↗ เปิด", "↗ Open")}</a>}
         </div>
       </label>
     ),
@@ -1642,7 +1653,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         (เดิมผูก fullEdit → โหมดดูเห็นแค่หัวข้อเปล่า ๆ ไม่มีช่องให้พิมพ์ เจ้าของแจ้งว่า "ใช้ไม่ได้") · มีผลจริงตอนกดบันทึก */
     parent: (
       <div className="block">
-        <span className="text-[11px] text-slate-500">Parent SKU ที่จะตั้ง (เพิ่มได้หลายตัว)</span>
+        <span className="text-[11px] text-slate-500">{t("Parent SKU ที่จะตั้ง (เพิ่มได้หลายตัว)", "Parent SKUs to create (multiple allowed)")}</span>
         {form.parent_sku_codes.length > 0 && (
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             {form.parent_sku_codes.map((c) => {
@@ -1652,7 +1663,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   {pid
                     ? <RecordPeekLink moduleKey="parent-skus-v2" recordId={pid} label={c} />
                     : <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-mono text-blue-700">{c}</span>}
-                  {canEdit && <button type="button" onClick={() => removeParentCode(c)} title="เอาออก" className="leading-none text-slate-300 hover:text-rose-500">✕</button>}
+                  {canEdit && <button type="button" onClick={() => removeParentCode(c)} title={t("เอาออก", "Remove")} className="leading-none text-slate-300 hover:text-rose-500">✕</button>}
                 </span>
               );
             })}
@@ -1662,35 +1673,35 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           <div className="flex gap-1 mt-1">
             <input value={skuInput} onChange={(e) => setSkuInput(e.target.value.toUpperCase())}
               onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentCode(); } }}
-              placeholder="เช่น CTL085 แล้วกด Enter"
+              placeholder={t("เช่น CTL085 แล้วกด Enter", "e.g. CTL085 then press Enter")}
               className={`flex-1 h-8 px-2 text-sm font-mono border rounded-lg focus:outline-none focus:ring-2 ${
                 skuCheck?.exists ? "border-rose-400 bg-rose-50 focus:ring-rose-400"
                 : skuCheck?.skipped ? "border-amber-300 focus:ring-amber-400"
                 : "border-slate-200 focus:ring-blue-500"}`} />
             <button type="button" onClick={addParentCode} disabled={!skuInput.trim() || skuCheck?.exists}
-              className="h-8 px-3 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">＋ เพิ่ม</button>
+              className="h-8 px-3 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{t("＋ เพิ่ม", "＋ Add")}</button>
           </div>
         )}
         <div className="mt-0.5 text-[11px] min-h-[14px]">
-          {skuChecking ? <span className="text-slate-300">กำลังเช็ครหัส...</span>
+          {skuChecking ? <span className="text-slate-300">{t("กำลังเช็ครหัส...", "Checking code...")}</span>
             : !skuInput.trim() ? null
-            : skuCheck?.exists ? <span className="text-rose-600 font-medium">✕ รหัสนี้มีอยู่แล้ว — เพิ่มไม่ได้</span>
-            : skuCheck?.skipped ? <span className="text-amber-600">⚠ ตั้งข้ามเลข — ล่าสุดที่ตั้งคือ {skuCheck.latest} (เพิ่มได้ แต่เช็คว่าตั้งใจ)</span>
-            : skuCheck?.latest ? <span className="text-slate-400">✓ ใช้ได้ · ล่าสุดที่ตั้ง: <b>{skuCheck.latest}</b>{skuCheck.suggested ? <> · ถัดไป: <b className="text-emerald-600">{skuCheck.suggested}</b></> : null}{skuCheck.max_code ? <> · เลขสูงสุด: {skuCheck.max_code}</> : null}</span>
-            : skuCheck ? <span className="text-emerald-600">✓ ยังไม่มีรหัสกลุ่มนี้ ใช้ได้</span> : null}
+            : skuCheck?.exists ? <span className="text-rose-600 font-medium">{t("✕ รหัสนี้มีอยู่แล้ว — เพิ่มไม่ได้", "✕ This code already exists — can't add")}</span>
+            : skuCheck?.skipped ? <span className="text-amber-600">{t(`⚠ ตั้งข้ามเลข — ล่าสุดที่ตั้งคือ ${skuCheck.latest} (เพิ่มได้ แต่เช็คว่าตั้งใจ)`, `⚠ Skips numbers — latest set is ${skuCheck.latest} (allowed, but check it's intended)`)}</span>
+            : skuCheck?.latest ? <span className="text-slate-400">{t("✓ ใช้ได้ · ล่าสุดที่ตั้ง:", "✓ OK · latest set:")} <b>{skuCheck.latest}</b>{skuCheck.suggested ? <> · {t("ถัดไป:", "next:")} <b className="text-emerald-600">{skuCheck.suggested}</b></> : null}{skuCheck.max_code ? <> · {t("เลขสูงสุด:", "highest:")} {skuCheck.max_code}</> : null}</span>
+            : skuCheck ? <span className="text-emerald-600">{t("✓ ยังไม่มีรหัสกลุ่มนี้ ใช้ได้", "✓ No codes in this group yet — OK")}</span> : null}
         </div>
         {/* SKU ที่เชื่อมกับใบงานนี้ — ตัวที่สร้างจากใบนี้ (เขียว) + พี่น้องใต้ Parent เดียวกัน (เทา) · คลิกเปิดดู SKU */}
         {linkedSkus.length > 0 && (
           <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-2">
             <div className="mb-1 text-[11px] font-medium text-emerald-800">
-              🏷️ SKU ที่เชื่อม {linkedSkus.filter((s) => s.from_sheet).length} ตัว
+              {t(`🏷️ SKU ที่เชื่อม ${linkedSkus.filter((s) => s.from_sheet).length} ตัว`, `🏷️ Linked SKUs: ${linkedSkus.filter((s) => s.from_sheet).length}`)}
               {linkedSkus.some((s) => !s.from_sheet) && (
-                <span className="font-normal text-slate-500"> · ใต้ Parent เดียวกันอีก {linkedSkus.filter((s) => !s.from_sheet).length} ตัว</span>
+                <span className="font-normal text-slate-500">{t(` · ใต้ Parent เดียวกันอีก ${linkedSkus.filter((s) => !s.from_sheet).length} ตัว`, ` · ${linkedSkus.filter((s) => !s.from_sheet).length} more under the same Parent`)}</span>
               )}
             </div>
             <div className="max-h-40 space-y-1 overflow-auto">
               {linkedSkus.map((s) => (
-                <div key={s.id} title={s.from_sheet ? "สร้างจากใบงานนี้" : `อยู่ใต้ Parent ${s.parent_code ?? ""} (ไม่ได้สร้างจากใบนี้)`}
+                <div key={s.id} title={s.from_sheet ? t("สร้างจากใบงานนี้", "Created from this design sheet") : t(`อยู่ใต้ Parent ${s.parent_code ?? ""} (ไม่ได้สร้างจากใบนี้)`, `Under Parent ${s.parent_code ?? ""} (not created from this sheet)`)}
                   className={`flex items-center gap-1.5 rounded border bg-white px-1.5 py-1 ${s.from_sheet ? "border-emerald-200" : "border-slate-200 opacity-70"}`}>
                   {s.image_key
                     ? <ImageThumbnail url={`/api/r2-image?key=${encodeURIComponent(s.image_key)}`} size={22} />
@@ -1700,7 +1711,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   <span className="ml-auto shrink-0 text-[11px] tabular-nums text-slate-500">
                     {s.standard_price != null ? s.standard_price.toLocaleString("th-TH") : ""}
                   </span>
-                  {!s.is_active && <span className="shrink-0 text-[10px] text-slate-400">ปิดใช้</span>}
+                  {!s.is_active && <span className="shrink-0 text-[10px] text-slate-400">{t("ปิดใช้", "Inactive")}</span>}
                 </div>
               ))}
             </div>
@@ -1709,13 +1720,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
         {/* ข้อ 6: ร่าง Parent (ชื่อก่อน ยังไม่ใส่รหัสจริง) — ใช้ตั้งชื่อแบบที่จะทำ แล้วค่อยสร้างรหัสจริงทีหลัง */}
         <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
-          <span className="text-[11px] text-slate-500">ร่าง Parent (ยังไม่มีรหัส) — เช่น &quot;พวงกุญแจ มะพร้าว&quot;</span>
+          <span className="text-[11px] text-slate-500">{t('ร่าง Parent (ยังไม่มีรหัส) — เช่น "พวงกุญแจ มะพร้าว"', 'Draft Parent (no code yet) — e.g. "Coconut keychain"')}</span>
           {form.parent_sku_drafts.length > 0 && (
             <div className="flex flex-wrap gap-1 mt-1">
               {form.parent_sku_drafts.map((d) => (
                 <span key={d} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-50 border border-dashed border-amber-300 text-amber-700 rounded">
                   ✎ {d}
-                  {canEdit && <button type="button" onClick={() => removeParentDraft(d)} title="เอาออก" className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
+                  {canEdit && <button type="button" onClick={() => removeParentDraft(d)} title={t("เอาออก", "Remove")} className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
                 </span>
               ))}
             </div>
@@ -1724,10 +1735,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             <div className="flex gap-1 mt-1">
               <input value={draftInput} onChange={(e) => setDraftInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentDraft(); } }}
-                placeholder="เช่น พวงกุญแจ มะพร้าว แล้วกด Enter"
+                placeholder={t("เช่น พวงกุญแจ มะพร้าว แล้วกด Enter", "e.g. Coconut keychain then press Enter")}
                 className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
               <button type="button" onClick={addParentDraft} disabled={!draftInput.trim()}
-                className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-40">＋ ร่าง</button>
+                className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-40">{t("＋ ร่าง", "＋ Draft")}</button>
             </div>
           )}
         </div>
@@ -1735,11 +1746,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     ),
     detail: (
       <div className="block">
-        <span className="text-[11px] text-slate-500">รายละเอียดงาน</span>
+        <span className="text-[11px] text-slate-500">{t("รายละเอียดงาน", "Job details")}</span>
         <div className="mt-0.5">
           <RichTextEditor value={form.detail} onChange={(html) => patch({ detail: html })} editable={canEdit}
             onUploadImage={form.id ? uploadDetailImage : undefined} minHeight={form.id ? 150 : 120} />
-          {!form.id && <p className="text-[10px] text-slate-400 mt-0.5">บันทึกใบงานก่อน แล้วจะวางรูปในรายละเอียดได้</p>}
+          {!form.id && <p className="text-[10px] text-slate-400 mt-0.5">{t("บันทึกใบงานก่อน แล้วจะวางรูปในรายละเอียดได้", "Save the design sheet first, then you can paste images into details")}</p>}
         </div>
       </div>
     ),
@@ -1762,7 +1773,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     <div className="mx-auto w-full max-w-2xl space-y-3">
       {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
       <div>
-        <span className="text-[11px] text-slate-500">รูปภาพงานออกแบบ</span>
+        <span className="text-[11px] text-slate-500">{t("รูปภาพงานออกแบบ", "Design images")}</span>
         <div className="mt-0.5">{imageSection}</div>
       </div>
       {fld.name}
@@ -1773,9 +1784,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         <button type="button" onClick={() => setCreateMore((v) => !v)} aria-expanded={createOpenMore}
           className="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800">
           <span className="inline-block w-3 text-center">{createOpenMore ? "−" : "＋"}</span>
-          {createOpenMore ? "ซ่อนข้อมูลอื่น" : "ใส่ข้อมูลอื่น"}
-          <span className="text-xs text-slate-400">(สถานะ · วันสั่ง · วันนัด · Drive · Parent SKU · Note)</span>
-          {!createOpenMore && createMoreFilled > 0 && <span className="rounded-full bg-blue-50 px-1.5 text-[11px] text-blue-700">ใส่แล้ว {createMoreFilled}</span>}
+          {createOpenMore ? t("ซ่อนข้อมูลอื่น", "Hide other fields") : t("ใส่ข้อมูลอื่น", "Add other fields")}
+          <span className="text-xs text-slate-400">{t("(สถานะ · วันสั่ง · วันนัด · Drive · Parent SKU · Note)", "(Status · order date · appointment · Drive · Parent SKU · Note)")}</span>
+          {!createOpenMore && createMoreFilled > 0 && <span className="rounded-full bg-blue-50 px-1.5 text-[11px] text-blue-700">{t(`ใส่แล้ว ${createMoreFilled}`, `${createMoreFilled} filled`)}</span>}
         </button>
         {createOpenMore && (
           <div className="mt-2 space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
@@ -1785,7 +1796,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           </div>
         )}
       </div>
-      <p className="text-[11px] text-slate-400">บันทึกแล้วจะเพิ่ม ⏳ รออะไรอยู่ · Comment ลูกค้า · ตีราคา · เสนอราคา ได้</p>
+      <p className="text-[11px] text-slate-400">{t("บันทึกแล้วจะเพิ่ม ⏳ รออะไรอยู่ · Comment ลูกค้า · ตีราคา · เสนอราคา ได้", "After saving you can add ⏳ Waiting on · Customer comments · Costing · Quotes")}</p>
     </div>
   );
 
@@ -1797,13 +1808,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       <div className="max-w-7xl mx-auto px-6 py-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-semibold text-slate-800">🎨 Design Sheets (ใบงานออกแบบ)</h1>
-            <p className="text-sm text-slate-500 mt-0.5">งานออกแบบสินค้าใหม่ ตั้งแต่รับโจทย์จนตั้งเป็นสินค้าจริง — คลิกแถวเพื่อเปิดดู/แก้</p>
+            <h1 className="text-2xl font-semibold text-slate-800">{t("🎨 Design Sheets (ใบงานออกแบบ)", "🎨 Design Sheets")}</h1>
+            <p className="text-sm text-slate-500 mt-0.5">{t("งานออกแบบสินค้าใหม่ ตั้งแต่รับโจทย์จนตั้งเป็นสินค้าจริง — คลิกแถวเพื่อเปิดดู/แก้", "New product design jobs, from brief to real product — click a row to view/edit")}</p>
           </div>
           <div className="flex items-center gap-2">
-            <a href="/master/design-sheets/dashboard" className="h-9 px-3 text-sm font-medium border border-amber-200 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100">🗺️ แผนที่ภารกิจ</a>
+            <a href="/master/design-sheets/dashboard" className="h-9 px-3 text-sm font-medium border border-amber-200 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100">{t("🗺️ แผนที่ภารกิจ", "🗺️ Mission map")}</a>
             <RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} />
-            {canCreate && <button onClick={openCreate} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">＋ สร้างใบงานออกแบบ</button>}
+            {canCreate && <button onClick={openCreate} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">{t("＋ สร้างใบงานออกแบบ", "＋ New design sheet")}</button>}
           </div>
         </div>
 
@@ -1811,33 +1822,33 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
             <button onClick={() => switchView("table")}
-              className={`h-7 px-3 text-sm rounded-md ${view === "table" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>📋 ตาราง</button>
+              className={`h-7 px-3 text-sm rounded-md ${view === "table" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{t("📋 ตาราง", "📋 Table")}</button>
             <button onClick={() => switchView("canvas")}
               className={`h-7 px-3 text-sm rounded-md ${view === "canvas" ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>🎨 Canvas</button>
           </div>
           {view === "table" && (
             <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); refresh(); }}
               className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-              <option value="">สถานะ: ทั้งหมด</option>
+              <option value="">{t("สถานะ: ทั้งหมด", "Status: all")}</option>
               {wfMeta.opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           )}
           {/* Canvas: โซน=สถานะอยู่แล้ว เหลือตัวกรองแบรนด์ (แบรนด์ดูจากสีเงา+ชื่อบนการ์ด) */}
           <select value={brandFilter} onChange={(e) => { setBrandFilter(e.target.value); refresh(); }}
             className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option value="">แบรนด์: ทั้งหมด</option>
+            <option value="">{t("แบรนด์: ทั้งหมด", "Brand: all")}</option>
             {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
           {view === "table" && (
             <label className="inline-flex items-center gap-1.5 text-sm text-slate-500 cursor-pointer select-none">
               <input type="checkbox" checked={showArchived} onChange={(e) => { setShowArchived(e.target.checked); refresh(); }} className="rounded border-slate-300" />
-              แสดงที่เก็บเข้ากรุ
+              {t("แสดงที่เก็บเข้ากรุ", "Show archived")}
             </label>
           )}
           {view === "canvas" && canEdit && (
-            <button onClick={() => setStatusMgr(true)} title="เพิ่ม/แก้ชื่อ/เปลี่ยนสี/เรียงลำดับสถานะงาน"
+            <button onClick={() => setStatusMgr(true)} title={t("เพิ่ม/แก้ชื่อ/เปลี่ยนสี/เรียงลำดับสถานะงาน", "Add/rename/recolor/reorder job statuses")}
               className="h-8 px-3 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50 ml-auto">
-              ⚙️ จัดการสถานะงาน
+              {t("⚙️ จัดการสถานะงาน", "⚙️ Manage job statuses")}
             </button>
           )}
         </div>
@@ -1847,24 +1858,24 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             tableId="design-sheets" data={[]} columns={columns}
             serverFetch={serverFetch} serverRefreshKey={refreshKey}
             searchableKeys={["code", "name"]}
-            searchPlaceholder="ค้นหา เลขที่ DS / ชื่องาน..."
+            searchPlaceholder={t("ค้นหา เลขที่ DS / ชื่องาน...", "Search DS no. / job name...")}
             exportFilename="design-sheets" exportEntityType="design_sheet"
             canCheck={(p) => can(p as Parameters<typeof can>[0])}
             onRowClick={openEdit}
             rowActions={canEdit ? (showArchived ? [
-              { label: "กู้คืน", icon: "↩", onClick: doRestore },
+              { label: t("กู้คืน", "Restore"), icon: "↩", onClick: doRestore },
             ] : [
-              { label: "แก้", icon: "✏", onClick: openEdit },
-              { label: "เก็บเข้ากรุ", icon: "🗑", variant: "danger", onClick: (r) => setArchiveTarget(r) },
+              { label: t("แก้", "Edit"), icon: "✏", onClick: openEdit },
+              { label: t("เก็บเข้ากรุ", "Archive"), icon: "🗑", variant: "danger", onClick: (r) => setArchiveTarget(r) },
             ]) : []}
             pageSize={20}
           />
         ) : canvasLoading ? (
-          <div className="py-16 text-center text-slate-400">กำลังโหลดกระดาน...</div>
+          <div className="py-16 text-center text-slate-400">{t("กำลังโหลดกระดาน...", "Loading board...")}</div>
         ) : canvasErr ? (
           <div className="py-10 text-center">
             <p className="text-sm text-rose-600 mb-2">⚠ {canvasErr}</p>
-            <button onClick={refresh} className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ลองใหม่</button>
+            <button onClick={refresh} className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("ลองใหม่", "Retry")}</button>
           </div>
         ) : (
           <CanvasBoard<DesignSheetListItem>
@@ -1876,14 +1887,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             onReorder={canEdit ? reorderCards : undefined}
             onCardClick={openEdit}
             cardWidth={184}
-            emptyText="ยังไม่มีงานในสถานะนี้ — ลากการ์ดมาวางได้"
+            emptyText={t("ยังไม่มีงานในสถานะนี้ — ลากการ์ดมาวางได้", "No jobs in this status yet — drag cards here")}
             renderCard={(it, dragging) => {
               const tone = deadlineTone(it.deadline, it.status, wfMeta.finished);
               const brandColor = it.brand_color ?? "#cbd5e1";
               // เฟส 8: ไฟสถานะขั้นตอน — เขียว=เสนอราคาแล้ว · เหลือง=ตีราคาแล้วยังไม่เสนอ · เทา=ยังไม่ตีราคา
-              const step = it.has_quote ? { dot: "bg-emerald-500", label: "เสนอราคาแล้ว" }
-                : it.has_cost ? { dot: "bg-amber-500", label: "ตีราคาแล้ว · ยังไม่เสนอ" }
-                : { dot: "bg-slate-300", label: "ยังไม่ตีราคา" };
+              const step = it.has_quote ? { dot: "bg-emerald-500", label: t("เสนอราคาแล้ว", "Quoted") }
+                : it.has_cost ? { dot: "bg-amber-500", label: t("ตีราคาแล้ว · ยังไม่เสนอ", "Costed · not quoted yet") }
+                : { dot: "bg-slate-300", label: t("ยังไม่ตีราคา", "Not costed yet") };
               return (
                 /* เงาทึบเหลื่อมขวา-ล่างสีแบรนด์ (ตามสเก็ตช์เจ้าของ) — ไม่ระบุแบรนด์ = เทาอ่อน */
                 <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden ${dragging ? "ring-2 ring-blue-300 rotate-1" : "hover:border-blue-300"}`}
@@ -1899,13 +1910,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     <div className="flex items-center justify-between gap-1">
                       <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 min-w-0">
                         <span className="w-2 h-2 rounded-full shrink-0 border border-slate-200" style={{ backgroundColor: brandColor }} />
-                        <span className="truncate">{it.brand_name ?? "ไม่ระบุแบรนด์"}</span>
+                        <span className="truncate">{it.brand_name ?? t("ไม่ระบุแบรนด์", "No brand")}</span>
                       </span>
                       <span className="font-mono text-[10px] text-slate-300 shrink-0">{it.code.replace(/^DS-/, "")}</span>
                     </div>
                     <div className={`flex items-center gap-1.5 text-[11px] ${tone.text}`}>
                       <span className={`w-2 h-2 rounded-full shrink-0 ${tone.dot}`} />
-                      {it.deadline ? `เสร็จ ${formatDate(it.deadline)}` : "ไม่กำหนดเสร็จ"}
+                      {it.deadline ? t(`เสร็จ ${formatDate(it.deadline)}`, `Due ${formatDate(it.deadline)}`) : t("ไม่กำหนดเสร็จ", "No due date")}
                     </div>
                     {/* เฟส 8: ไฟสถานะขั้นตอน (ครบ/ขาด) */}
                     <div className="flex items-center gap-1.5 text-[11px] text-slate-500" title={step.label}>
@@ -1915,11 +1926,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     {it.note && <p className="text-[11px] text-slate-400 line-clamp-1">{it.note}</p>}
                     {/* เฟส 8: ปุ่มลัดบนการ์ด — กดแล้วไม่เปิดการ์ด (stopPropagation) */}
                     <div className="flex items-center gap-1 pt-1 mt-0.5 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
-                      <button type="button" title="ตีราคา" onClick={(e) => { e.stopPropagation(); void openEdit(it, "cost"); }}
-                        className="flex-1 h-7 inline-flex items-center justify-center gap-1 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-amber-50 hover:border-amber-200">🧮 ตีราคา</button>
-                      <button type="button" title="เสนอราคา" onClick={(e) => { e.stopPropagation(); void openEdit(it, "quotes"); }}
-                        className="flex-1 h-7 inline-flex items-center justify-center gap-1 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:border-emerald-200">💰 เสนอ</button>
-                      <a href={`/print/design-sheet-quote/${it.id}`} target="_blank" rel="noreferrer" title="พิมพ์ใบเสนอราคา" onClick={(e) => e.stopPropagation()}
+                      <button type="button" title={t("ตีราคา", "Costing")} onClick={(e) => { e.stopPropagation(); void openEdit(it, "cost"); }}
+                        className="flex-1 h-7 inline-flex items-center justify-center gap-1 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-amber-50 hover:border-amber-200">{t("🧮 ตีราคา", "🧮 Cost")}</button>
+                      <button type="button" title={t("เสนอราคา", "Quote")} onClick={(e) => { e.stopPropagation(); void openEdit(it, "quotes"); }}
+                        className="flex-1 h-7 inline-flex items-center justify-center gap-1 text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-emerald-50 hover:border-emerald-200">{t("💰 เสนอ", "💰 Quote")}</button>
+                      <a href={`/print/design-sheet-quote/${it.id}`} target="_blank" rel="noreferrer" title={t("พิมพ์ใบเสนอราคา", "Print quotation")} onClick={(e) => e.stopPropagation()}
                         className="h-7 px-2 inline-flex items-center justify-center text-[11px] rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50">🖨</a>
                     </div>
                   </div>
@@ -1933,52 +1944,52 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
       {/* สร้างใหม่ = ป๊อปขนาดปกติ ไม่เต็มจอ (ฟอร์มสั้น · เจ้าของขอ 2026-10-24 · ยังกด ⤢ ขยายเองได้) · เปิดใบเดิม = ใหญ่ตามเดิม */}
       <ERPModal open={form !== null} onClose={requestClose} size={form?.id ? "xl" : "lg"} defaultExpanded={form?.id ? undefined : false}
-        title={form?.id ? `ใบงานออกแบบ: ${form.code}` : "สร้างใบงานออกแบบใหม่"}
+        title={form?.id ? t(`ใบงานออกแบบ: ${form.code}`, `Design sheet: ${form.code}`) : t("สร้างใบงานออกแบบใหม่", "New design sheet")}
         footer={<>
           {form?.id && (
             <div className="mr-auto flex items-center gap-1.5">
-              <button onClick={() => void copySheetLink()} title="คัดลอกลิงก์มาที่ใบงานนี้ (ส่งให้คนอื่นเปิดตรงนี้ได้เลย)"
-                className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🔗 คัดลอกลิงก์</button>
+              <button onClick={() => void copySheetLink()} title={t("คัดลอกลิงก์มาที่ใบงานนี้ (ส่งให้คนอื่นเปิดตรงนี้ได้เลย)", "Copy a link to this design sheet (others can open it directly)")}
+                className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("🔗 คัดลอกลิงก์", "🔗 Copy link")}</button>
               {/* ปุ่มลัด: ส่งใบงานนี้ขึ้นกระดานวางแผนของแคมเปญ (ของกลาง) — ซ่อนตอนเปิดจากบนกระดานเอง (ซ้ำซ้อน) */}
               {canSendToBoard && !hideSendToBoard && (
-                <button onClick={() => { if (costDirty) { toast.error("มีข้อมูลตีราคายังไม่บันทึก — กดบันทึกก่อนออกจากใบงาน"); return; } setBoardPick(true); }}
-                  title="เลือกแคมเปญ แล้วไปวางการ์ดใบงานนี้บนกระดานวางแผน"
-                  className="h-9 px-3 inline-flex items-center text-sm border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50">🎨 ส่งขึ้นกระดาน</button>
+                <button onClick={() => { if (costDirty) { toast.error(t("มีข้อมูลตีราคายังไม่บันทึก — กดบันทึกก่อนออกจากใบงาน", "Unsaved costing — save before leaving the design sheet")); return; } setBoardPick(true); }}
+                  title={t("เลือกแคมเปญ แล้วไปวางการ์ดใบงานนี้บนกระดานวางแผน", "Pick a campaign, then place this design sheet card on its planning board")}
+                  className="h-9 px-3 inline-flex items-center text-sm border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50">{t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}</button>
               )}
               {/* ใบนำเสนอ A4 (เสนอลูกค้า) — แผงลอย จัดรูป/ข้อความ 1-2 หน้า แล้วพิมพ์ (ของกลาง design-sheet-present) */}
               <button type="button" onClick={() => { if (!form.id) return; if (onOpenPresentation) onOpenPresentation(form.id); else setPresentOpen(true); }}
-                title="จัดใบนำเสนอ A4 สำหรับเสนอลูกค้า (เลือกรูป + ข้อความ 1-2 หน้า แล้วพิมพ์/PDF)"
-                className="h-9 px-3 inline-flex items-center text-sm border border-amber-300 rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100">📄 ใบนำเสนอ A4</button>
+                title={t("จัดใบนำเสนอ A4 สำหรับเสนอลูกค้า (เลือกรูป + ข้อความ 1-2 หน้า แล้วพิมพ์/PDF)", "Build an A4 presentation for the customer (pick images + text, 1-2 pages, then print/PDF)")}
+                className="h-9 px-3 inline-flex items-center text-sm border border-amber-300 rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100">{t("📄 ใบนำเสนอ A4", "📄 A4 presentation")}</button>
               <a href={`/print/design-sheet/${form.id}`} target="_blank" rel="noreferrer"
-                className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบสั่งตัวอย่าง</a>
+                className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("🖨 ใบสั่งตัวอย่าง", "🖨 Sample order")}</a>
               <a href={`/print/design-sheet-quote/${form.id}`} target="_blank" rel="noreferrer"
-                className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบเสนอราคา</a>
+                className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("🖨 ใบเสนอราคา", "🖨 Quotation")}</a>
               <a href={`/print/design-sheet-cost/${form.id}${costParent ? `?parent=${encodeURIComponent(costParent)}` : ""}`} target="_blank" rel="noreferrer"
-                title={costParent ? `พิมพ์เฉพาะไซส์ "${costParent}" (เปลี่ยนได้ในหน้าพิมพ์)` : "พิมพ์ใบตีราคาต้นทุน"}
-                className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🖨 ใบตีราคา</a>
+                title={costParent ? t(`พิมพ์เฉพาะไซส์ "${costParent}" (เปลี่ยนได้ในหน้าพิมพ์)`, `Print size "${costParent}" only (changeable on the print page)`) : t("พิมพ์ใบตีราคาต้นทุน", "Print cost sheet")}
+                className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("🖨 ใบตีราคา", "🖨 Cost sheet")}</a>
               {canCreate && (
-                <button onClick={() => setSkuWizard(true)} title="สร้าง Parent SKU + SKU ลูก จากใบงานนี้"
-                  className="h-9 px-3 inline-flex items-center text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50">🪄 สร้าง SKU</button>
+                <button onClick={() => setSkuWizard(true)} title={t("สร้าง Parent SKU + SKU ลูก จากใบงานนี้", "Create Parent SKU + child SKUs from this design sheet")}
+                  className="h-9 px-3 inline-flex items-center text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50">{t("🪄 สร้าง SKU", "🪄 Create SKU")}</button>
               )}
               {/* ลบถาวร = ลบทั้งใบ + comment + ราคา (กู้ไม่ได้) → ต้องมีสิทธิ์ "ลบข้อมูลสินค้า" (server เช็กซ้ำ) */}
               {canEdit && can("products.delete" as Parameters<typeof can>[0]) && (
                 <button onClick={() => { if (form?.id) setHardDelTarget({ id: form.id, code: form.code ?? "", name: form.name ?? "" }); }}
-                  title="ลบใบงานถาวร + ย้ายรูปเข้าถังขยะ R2"
-                  className="h-9 px-3 inline-flex items-center text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">🗑 ลบถาวร</button>
+                  title={t("ลบใบงานถาวร + ย้ายรูปเข้าถังขยะ R2", "Permanently delete design sheet + move images to R2 trash")}
+                  className="h-9 px-3 inline-flex items-center text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">{t("🗑 ลบถาวร", "🗑 Delete permanently")}</button>
               )}
             </div>
           )}
-          <button onClick={requestClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ปิด</button>
+          <button onClick={requestClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">{t("ปิด", "Close")}</button>
           {canEdit && form?.id && !editing && (modalTab === "info" || modalTab === "cost") && (
-            <button onClick={() => setEditing(true)} className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50">✏️ แก้ไข</button>
+            <button onClick={() => setEditing(true)} className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50">{t("✏️ แก้ไข", "✏️ Edit")}</button>
           )}
-          {canEdit && modalTab === "info" && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "บันทึก"}</button>}
+          {canEdit && modalTab === "info" && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>}
         </>}>
-        {loadingForm ? <div className="py-12 text-center text-slate-400">กำลังโหลด...</div> : form && !form.id ? createLayout : form && (
+        {loadingForm ? <div className="py-12 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div> : form && !form.id ? createLayout : form && (
           <div className="flex flex-col lg:flex-row gap-4">
             {/* ซ้าย: รูปภาพงานออกแบบ — เห็นตลอดทุกแท็บ */}
             <div className="lg:w-[300px] lg:shrink-0">
-              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">รูปภาพงานออกแบบ</span>
+              <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">{t("รูปภาพงานออกแบบ", "Design images")}</span>
               <div className="mt-1">{imageSection}</div>
             </div>
             {/* ขวา: ข้อมูลงาน + แท็บ (สลับแท็บได้) */}
@@ -1988,11 +1999,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {/* แท็บ (โผล่เมื่อบันทึกแล้ว) */}
             {form.id && (
               <div className="flex items-center gap-1 border-b border-slate-200 pb-2">
-                {([["info", "📋 ข้อมูลงาน"], ["comments", `💬 Comment ลูกค้า (${comments.length})`], ["cost", `🧮 ตีราคา (${costLines.length})`], ["quotes", `💰 เสนอราคา (${quotes.length})`]] as const).map(([k, l]) => (
+                {([["info", t("📋 ข้อมูลงาน", "📋 Job info")], ["comments", t(`💬 Comment ลูกค้า (${comments.length})`, `💬 Customer comments (${comments.length})`)], ["cost", t(`🧮 ตีราคา (${costLines.length})`, `🧮 Costing (${costLines.length})`)], ["quotes", t(`💰 เสนอราคา (${quotes.length})`, `💰 Quotes (${quotes.length})`)]] as const).map(([k, l]) => (
                   <button key={k} onClick={() => setModalTab(k)}
                     className={`h-8 px-3 text-sm rounded-lg ${modalTab === k ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{l}</button>
                 ))}
-                {cqLoading && <span className="text-[11px] text-slate-300 ml-1">กำลังโหลด...</span>}
+                {cqLoading && <span className="text-[11px] text-slate-300 ml-1">{t("กำลังโหลด...", "Loading...")}</span>}
               </div>
             )}
 
@@ -2013,12 +2024,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               {canEdit && (
                 <div className="flex gap-1.5 items-start p-2 bg-slate-50 border border-slate-200 rounded-lg">
                   <input type="date" value={newCmDate} onChange={(e) => setNewCmDate(e.target.value)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg w-36 shrink-0" />
-                  <textarea rows={1} value={newCmBody} onChange={(e) => setNewCmBody(e.target.value)} placeholder="ลูกค้า comment ว่าอะไร..."
+                  <textarea rows={1} value={newCmBody} onChange={(e) => setNewCmBody(e.target.value)} placeholder={t("ลูกค้า comment ว่าอะไร...", "What did the customer say...")}
                     className="flex-1 px-2 py-1.5 text-sm border border-slate-200 rounded-lg resize-y" />
-                  <button onClick={addComment} disabled={cmSaving} className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 shrink-0">{cmSaving ? "..." : "＋ เพิ่ม"}</button>
+                  <button onClick={addComment} disabled={cmSaving} className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 shrink-0">{cmSaving ? "..." : t("＋ เพิ่ม", "＋ Add")}</button>
                 </div>
               )}
-              {comments.length === 0 && <div className="py-8 text-center text-sm text-slate-300">— ยังไม่มี comment จากลูกค้า —</div>}
+              {comments.length === 0 && <div className="py-8 text-center text-sm text-slate-300">{t("— ยังไม่มี comment จากลูกค้า —", "— No customer comments yet —")}</div>}
               {comments.map((c, i) => (
                 <div key={c.id} className="border border-slate-200 rounded-lg p-2.5">
                   {editCid === c.id ? (
@@ -2041,18 +2052,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                         )}
                       </div>
                       <div className="flex gap-1 shrink-0">
-                        <button title="รูปประกอบ"
+                        <button title={t("รูปประกอบ", "Images")}
                           onClick={() => { const closing = openImgCid === c.id; setOpenImgCid(closing ? null : c.id); if (closing && form.id) void loadCq(form.id); }}
                           className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">🖼 {c.images.length}</button>
-                        {canEdit && <button onClick={() => startEditComment(c)} title="แก้" className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">✏</button>}
-                        {canEdit && <button onClick={() => setDelComment(c)} title="ลบ" className="h-7 px-2 text-xs border border-rose-200 rounded-lg text-rose-500 hover:bg-rose-50">🗑</button>}
+                        {canEdit && <button onClick={() => startEditComment(c)} title={t("แก้", "Edit")} className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">✏</button>}
+                        {canEdit && <button onClick={() => setDelComment(c)} title={t("ลบ", "Delete")} className="h-7 px-2 text-xs border border-rose-200 rounded-lg text-rose-500 hover:bg-rose-50">🗑</button>}
                       </div>
                     </div>
                   )}
                   {openImgCid === c.id && (
                     <div className="mt-2 pt-2 border-t border-slate-100">
                       <ImageManager entityType="design_sheet_comment" entityId={c.id} actor={user?.name ?? user?.email ?? undefined} readonly={!canEdit} />
-                      <p className="text-[10px] text-slate-300 mt-1">ปิดช่องรูป (กด 🖼 อีกครั้ง) แล้วรูปย่อในแถวจะอัปเดตตาม</p>
+                      <p className="text-[10px] text-slate-300 mt-1">{t("ปิดช่องรูป (กด 🖼 อีกครั้ง) แล้วรูปย่อในแถวจะอัปเดตตาม", "Close the image panel (press 🖼 again) to refresh the thumbnails in the row")}</p>
                     </div>
                   )}
                 </div>
@@ -2063,14 +2074,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {modalTab === "cost" && form.id && <div className="space-y-2">
               {/* ข้อ 7: แท็บย่อยตีราคาแยกตาม Parent SKU (ทั่วไป + รหัสจริง + ร่าง) + ปุ่ม Copy */}
               <div className="flex flex-wrap items-center gap-1 border-b border-slate-200 pb-1">
-                {costParentTabs.map((t) => {
-                  const n = costLines.filter((r) => pkey(r.parent_code) === t.key).length;
-                  const active = costParent === t.key;
+                {costParentTabs.map((tb) => {
+                  const n = costLines.filter((r) => pkey(r.parent_code) === tb.key).length;
+                  const active = costParent === tb.key;
                   return (
-                    <button key={t.key || "__gen__"} onClick={() => setCostParent(t.key)}
-                      title={t.kind === "draft" ? "ร่าง Parent" : t.kind === "orphan" ? "Parent นี้ถูกเอาออกจากใบแล้ว (ยังมีบรรทัดค้าง)" : undefined}
-                      className={`h-7 px-2.5 text-xs rounded-md inline-flex items-center gap-1 border ${active ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"} ${t.kind === "draft" ? "border-dashed" : ""}`}>
-                      {t.kind === "draft" ? `✎ ${t.label}` : t.kind === "orphan" ? `⚠ ${t.label}` : t.label}
+                    <button key={tb.key || "__gen__"} onClick={() => setCostParent(tb.key)}
+                      title={tb.kind === "draft" ? t("ร่าง Parent", "Draft Parent") : tb.kind === "orphan" ? t("Parent นี้ถูกเอาออกจากใบแล้ว (ยังมีบรรทัดค้าง)", "This Parent was removed from the sheet (lines still remain)") : undefined}
+                      className={`h-7 px-2.5 text-xs rounded-md inline-flex items-center gap-1 border ${active ? "bg-blue-600 text-white border-blue-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"} ${tb.kind === "draft" ? "border-dashed" : ""}`}>
+                      {tb.kind === "draft" ? `✎ ${tb.label}` : tb.kind === "orphan" ? `⚠ ${tb.label}` : tb.label}
                       {n > 0 && <span className={`text-[10px] rounded-full px-1 ${active ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{n}</span>}
                     </button>
                   );
@@ -2078,12 +2089,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 {/* เพิ่ม "เวอร์ชัน" ตีราคา = แท็บใหม่ (ลองราคาอีกแบบ / อีกไซส์) — โหมดดูก็กดได้ */}
                 {canEdit && (
                   <button onClick={() => {
-                    const n = costParentTabs.filter((t) => t.kind === "draft").length + 2;
-                    setVerName(`เวอร์ชัน ${n}`); setVerCopy(true); setVerOpen(true);
+                    const n = costParentTabs.filter((tb) => tb.kind === "draft").length + 2;
+                    setVerName(t(`เวอร์ชัน ${n}`, `Version ${n}`)); setVerCopy(true); setVerOpen(true);
                   }}
-                    title="เพิ่มเวอร์ชันตีราคาใหม่ (แท็บใหม่) — คัดลอกจากแท็บที่ดูอยู่ได้"
+                    title={t("เพิ่มเวอร์ชันตีราคาใหม่ (แท็บใหม่) — คัดลอกจากแท็บที่ดูอยู่ได้", "Add a new costing version (new tab) — can copy from the current tab")}
                     className="ml-auto h-7 px-2.5 text-xs font-medium rounded-md border border-dashed border-blue-300 text-blue-700 bg-white hover:bg-blue-50">
-                    ＋ เพิ่มเวอร์ชัน
+                    {t("＋ เพิ่มเวอร์ชัน", "＋ Add version")}
                   </button>
                 )}
               </div>
@@ -2093,21 +2104,21 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               <div className="contents space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="text-[11px] text-slate-400 inline-flex items-center gap-1.5">
-                  กำลังตีราคาของ: <b className="text-slate-600">{costTabLabel(costParent, generalLabel)}</b>
+                  {t("กำลังตีราคาของ:", "Costing for:")} <b className="text-slate-600">{costTabLabel(costParent, generalLabel)}</b>
                   {/* เปลี่ยนชื่อ/ลบ ได้เฉพาะแท็บที่เป็น "ชื่อ" (เวอร์ชัน ✎ / orphan ⚠) — รหัส Parent จริงไปจัดการที่แท็บข้อมูลงาน */}
                   {canEdit && costParent === "" && (
                     <button onClick={() => { setVerRenameName(form.cost_general_label); setVerRename(""); }} disabled={verBusy}
-                      title="ตั้งชื่อแท็บนี้เอง (เปลี่ยนแค่ชื่อที่แสดง · ว่าง = ทั่วไป)" className="h-5 px-1.5 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 hover:text-blue-700 disabled:opacity-50">✎ เปลี่ยนชื่อ</button>
+                      title={t("ตั้งชื่อแท็บนี้เอง (เปลี่ยนแค่ชื่อที่แสดง · ว่าง = ทั่วไป)", "Name this tab yourself (display name only · blank = General)")} className="h-5 px-1.5 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 hover:text-blue-700 disabled:opacity-50">{t("✎ เปลี่ยนชื่อ", "✎ Rename")}</button>
                   )}
                   {canEdit && costParent !== "" && (() => {
-                    const kind = costParentTabs.find((t) => t.key === costParent)?.kind;
-                    if (kind === "code") return <span className="text-[10px] text-slate-300" title="รหัส Parent SKU จริง — เพิ่ม/เอาออกที่แท็บ ข้อมูลงาน">(รหัสจริง)</span>;
+                    const kind = costParentTabs.find((tb) => tb.key === costParent)?.kind;
+                    if (kind === "code") return <span className="text-[10px] text-slate-300" title={t("รหัส Parent SKU จริง — เพิ่ม/เอาออกที่แท็บ ข้อมูลงาน", "Real Parent SKU code — add/remove in the Job info tab")}>{t("(รหัสจริง)", "(real code)")}</span>;
                     return (
                       <>
                         <button onClick={() => { setVerRenameName(costParent); setVerRename(costParent); }} disabled={verBusy}
-                          title="เปลี่ยนชื่อเวอร์ชันนี้" className="h-5 px-1.5 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 hover:text-blue-700 disabled:opacity-50">✎ เปลี่ยนชื่อ</button>
+                          title={t("เปลี่ยนชื่อเวอร์ชันนี้", "Rename this version")} className="h-5 px-1.5 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-slate-50 hover:text-blue-700 disabled:opacity-50">{t("✎ เปลี่ยนชื่อ", "✎ Rename")}</button>
                         <button onClick={() => setVerDel(costParent)} disabled={verBusy}
-                          title="ลบเวอร์ชันนี้ทั้งแท็บ" className="h-5 px-1.5 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50">🗑 ลบเวอร์ชัน</button>
+                          title={t("ลบเวอร์ชันนี้ทั้งแท็บ", "Delete this whole version tab")} className="h-5 px-1.5 rounded border border-slate-200 text-[10px] text-slate-500 hover:bg-red-50 hover:text-red-600 hover:border-red-200 disabled:opacity-50">{t("🗑 ลบเวอร์ชัน", "🗑 Delete version")}</button>
                       </>
                     );
                   })()}
@@ -2119,40 +2130,40 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       onCopy={(source) => {
                         // คัดลอก "จาก" source → "มาใส่" แท็บปัจจุบัน (costParent) แทนที่ของเดิมในแท็บนี้
                         const src = costLines.filter((r) => pkey(r.parent_code) === source);
-                        if (src.length === 0) { toast.info(`"${costTabLabel(source, generalLabel)}" ยังไม่มีบรรทัดให้คัดลอก`); return; }
+                        if (src.length === 0) { toast.info(t(`"${costTabLabel(source, generalLabel)}" ยังไม่มีบรรทัดให้คัดลอก`, `"${costTabLabel(source, generalLabel)}" has no lines to copy`)); return; }
                         const cloned = src.map((r, i) => recomputeRow({ ...r, key: `cp${Date.now()}_${i}`, parent_code: costParent || null }));
                         setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...cloned]);
                         setCostExtraMap((m) => ({ ...m, [costParent]: (m[source] ?? []).map((c) => ({ ...c })) }));
                         setCostDirty(true);
-                        toast.success(`คัดลอกตีราคาจาก "${costTabLabel(source, generalLabel)}" มาแล้ว (${cloned.length} บรรทัด)`);
+                        toast.success(t(`คัดลอกตีราคาจาก "${costTabLabel(source, generalLabel)}" มาแล้ว (${cloned.length} บรรทัด)`, `Copied costing from "${costTabLabel(source, generalLabel)}" (${cloned.length} lines)`));
                       }} />
                   )}
                   {/* ล้างหมายเหตุทุกบรรทัดของแท็บที่ดูอยู่ (เช่น "อ้างอิง BOM: …" ที่ดึงมา) — โหมดแก้ไข: ค้างให้กด 💾 · โหมดดู: บันทึกทันที */}
                   {canEdit && curLines.some((r) => (r.note ?? "").trim()) && (
                     <button onClick={async () => {
                       const n = curLines.filter((r) => (r.note ?? "").trim()).length;
-                      const ok = await askConfirm({ title: `ล้างหมายเหตุ ${n} บรรทัด ในแท็บ "${costTabLabel(costParent, generalLabel)}"?`,
-                        message: "ช่องหมายเหตุของทุกบรรทัดในแท็บนี้จะว่าง (วัสดุ/ขนาด/ราคา ไม่เปลี่ยน) — แท็บอื่นไม่โดน", confirmText: "ล้างหมายเหตุ", variant: "danger" });
+                      const ok = await askConfirm({ title: t(`ล้างหมายเหตุ ${n} บรรทัด ในแท็บ "${costTabLabel(costParent, generalLabel)}"?`, `Clear notes on ${n} lines in tab "${costTabLabel(costParent, generalLabel)}"?`),
+                        message: t("ช่องหมายเหตุของทุกบรรทัดในแท็บนี้จะว่าง (วัสดุ/ขนาด/ราคา ไม่เปลี่ยน) — แท็บอื่นไม่โดน", "The note on every line in this tab will be cleared (material/size/price unchanged) — other tabs are not affected"), confirmText: t("ล้างหมายเหตุ", "Clear notes"), variant: "danger" });
                       if (!ok) return;
                       quickApply((rows) => rows.map((r) => (pkey(r.parent_code) === costParent && r.note ? { ...r, note: null } : r)));
-                      toast.success(fullEdit ? `ล้างหมายเหตุ ${n} บรรทัดแล้ว — กด 💾 บันทึกตีราคา` : `ล้างหมายเหตุ ${n} บรรทัดแล้ว`);
-                    }} title="ลบข้อความในช่องหมายเหตุของทุกบรรทัดในแท็บนี้"
-                      className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200">🧹 ล้างหมายเหตุ</button>
+                      toast.success(fullEdit ? t(`ล้างหมายเหตุ ${n} บรรทัดแล้ว — กด 💾 บันทึกตีราคา`, `Cleared notes on ${n} lines — press 💾 Save costing`) : t(`ล้างหมายเหตุ ${n} บรรทัดแล้ว`, `Cleared notes on ${n} lines`));
+                    }} title={t("ลบข้อความในช่องหมายเหตุของทุกบรรทัดในแท็บนี้", "Clear the note text on every line in this tab")}
+                      className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200">{t("🧹 ล้างหมายเหตุ", "🧹 Clear notes")}</button>
                   )}
-                  {canEdit && form?.id && <button onClick={() => setCopyFromOpen(true)} title="ดึงวัตถุดิบตีราคาจากใบงานออกแบบอื่น — เลือกแท็บต้นทาง + ติ๊กรายการได้"
-                    className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">📄 ดึงจากใบงานอื่น</button>}
-                  {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">🧮 จัดการวัสดุตีราคา</button>}
-                  {fullEdit && <button onClick={() => setBomPull(true)} title="ดึงชนิด/กว้าง/ยาว/จำนวน จากสูตร BOM มาตีราคา (วัสดุ+ราคาเลือกเอง)"
-                    className="h-8 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50">🧬⬇ ดึงจาก BOM</button>}
-                  {canEdit && <button onClick={() => setBomWizard(true)} title="ดึงกว้าง/ยาว/จำนวนจากตีราคาไปสร้างสูตรการผลิต (วัตถุดิบใส่ทีหลัง)"
-                    className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">🧬 สร้างสูตร BOM</button>}
-                  <button onClick={() => setFabricCalc(true)} title="คำนวณว่าต้องใช้ผ้ากี่หลา/กี่ผืน จากขนาดชิ้นในตาราง × จำนวนที่ผลิต (ใช้ได้ทั้งโหมดดู)"
-                    className="h-8 px-3 text-sm font-medium border border-teal-300 text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100">🧵 คำนวณผ้า</button>
+                  {canEdit && form?.id && <button onClick={() => setCopyFromOpen(true)} title={t("ดึงวัตถุดิบตีราคาจากใบงานออกแบบอื่น — เลือกแท็บต้นทาง + ติ๊กรายการได้", "Pull costing materials from another design sheet — pick the source tab + tick items")}
+                    className="h-8 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("📄 ดึงจากใบงานอื่น", "📄 Pull from another sheet")}</button>}
+                  {canEdit && <button onClick={openPm} className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">{t("🧮 จัดการวัสดุตีราคา", "🧮 Manage costing materials")}</button>}
+                  {fullEdit && <button onClick={() => setBomPull(true)} title={t("ดึงชนิด/กว้าง/ยาว/จำนวน จากสูตร BOM มาตีราคา (วัสดุ+ราคาเลือกเอง)", "Pull type/width/length/qty from a BOM into costing (choose material + price yourself)")}
+                    className="h-8 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50">{t("🧬⬇ ดึงจาก BOM", "🧬⬇ Pull from BOM")}</button>}
+                  {canEdit && <button onClick={() => setBomWizard(true)} title={t("ดึงกว้าง/ยาว/จำนวนจากตีราคาไปสร้างสูตรการผลิต (วัตถุดิบใส่ทีหลัง)", "Use width/length/qty from costing to create a production BOM (add materials later)")}
+                    className="h-8 px-3 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">{t("🧬 สร้างสูตร BOM", "🧬 Create BOM")}</button>}
+                  <button onClick={() => setFabricCalc(true)} title={t("คำนวณว่าต้องใช้ผ้ากี่หลา/กี่ผืน จากขนาดชิ้นในตาราง × จำนวนที่ผลิต (ใช้ได้ทั้งโหมดดู)", "Calculate how many yards/sheets of fabric are needed from piece sizes × production qty (works in view mode too)")}
+                    className="h-8 px-3 text-sm font-medium border border-teal-300 text-teal-700 bg-teal-50 rounded-lg hover:bg-teal-100">{t("🧵 คำนวณผ้า", "🧵 Fabric calc")}</button>
                 </div>
               </div>
               {priceItems.length === 0 && (
                 <div className="px-3 py-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">
-                  ยังไม่มีวัสดุตีราคาในระบบ — กดปุ่ม &quot;🧮 จัดการวัสดุตีราคา&quot; ด้านบน เพิ่มได้เลยไม่ต้องออกจากหน้านี้
+                  {t('ยังไม่มีวัสดุตีราคาในระบบ — กดปุ่ม "🧮 จัดการวัสดุตีราคา" ด้านบน เพิ่มได้เลยไม่ต้องออกจากหน้านี้', 'No costing materials yet — press "🧮 Manage costing materials" above to add them without leaving this page')}
                 </div>
               )}
 
@@ -2178,7 +2189,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   quickApply((rows) => rows.map((r) => (m.has(r.key) ? { ...r, price_ack: { price: m.get(r.key) as number, at } } : r))); };
                 const ackKeys = (keys: Set<string>) => quickApply((rows) => rows.map((r) => (keys.has(r.key) ? { ...r, prev_item: null } : r)));
                 const restoreKey = (key: string, p: PrevItem) => quickApply((rows) => rows.map((r) => (r.key === key ? recomputeRow({ ...r, ...restorePrevItem(p) }) : r)));
-                const hint = !fullEdit && canEdit ? <span className="text-[10px] opacity-70">· กดแล้วบันทึกให้ทันที</span> : null;
+                const hint = !fullEdit && canEdit ? <span className="text-[10px] opacity-70">{t("· กดแล้วบันทึกให้ทันที", "· saves immediately when pressed")}</span> : null;
                 const sm = "h-6 rounded px-2 text-[11px] font-medium";
                 return (
                   <div className="space-y-1.5 text-xs">
@@ -2186,8 +2197,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       <div className="rounded-lg border border-amber-200 bg-amber-50 text-amber-800">
                         <button type="button" onClick={() => setDriftOpen((o) => !o)} className="flex w-full flex-wrap items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-amber-100/60 rounded-lg">
                           <span className="w-3 text-[10px]">{driftOpen ? "▼" : "▶"}</span>
-                          <span>⚠ ราคาวัสดุปรับ <b>{drifted.length}</b> บรรทัด — ถ้าใช้ราคาใหม่ ต้นทุนรวม <b className={signCls(driftTotal)}>{fmtSigned(driftTotal)}</b> บาท</span>
-                          <span className="ml-auto text-[10px] text-amber-600">{driftOpen ? "ซ่อน" : "กดดูรายละเอียด"}</span>
+                          <span>{t("⚠ ราคาวัสดุปรับ", "⚠ Material prices changed on")} <b>{drifted.length}</b> {t("บรรทัด — ถ้าใช้ราคาใหม่ ต้นทุนรวม", "lines — with new prices, total cost")} <b className={signCls(driftTotal)}>{fmtSigned(driftTotal)}</b> {t("บาท", "THB")}</span>
+                          <span className="ml-auto text-[10px] text-amber-600">{driftOpen ? t("ซ่อน", "Hide") : t("กดดูรายละเอียด", "Show details")}</span>
                         </button>
                         {driftOpen && (
                           <div className="space-y-1 border-t border-amber-200 px-2.5 py-1.5">
@@ -2197,13 +2208,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                                 <div key={r.key} className="flex flex-wrap items-center gap-1.5" title={d.reason}>
                                   <span className="min-w-0 flex-1">
                                     <b>{r.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(r.unit_price)}</span> → <b className="tabular-nums">{fmtBaht(d.price)}</b>
-                                    <span className={signCls(diff)}> {fmtSigned(diff)}/หน่วย{pct(r.unit_price, d.price)}{r.qty != null ? ` · รวม ${fmtSigned(diff * r.qty)}` : ""}</span>
-                                    {when ? <span className="text-amber-600/80"> · ตั้งแต่ {when}</span> : null}
+                                    <span className={signCls(diff)}> {fmtSigned(diff)}{t("/หน่วย", "/unit")}{pct(r.unit_price, d.price)}{r.qty != null ? t(` · รวม ${fmtSigned(diff * r.qty)}`, ` · total ${fmtSigned(diff * r.qty)}`) : ""}</span>
+                                    {when ? <span className="text-amber-600/80">{t(` · ตั้งแต่ ${when}`, ` · since ${when}`)}</span> : null}
                                   </span>
                                   {canEdit && (
                                     <>
-                                      <button type="button" onClick={() => applyPrices(new Map([[r.key, d.price]]))} className={`${sm} bg-amber-600 text-white hover:bg-amber-700`}>เปลี่ยน</button>
-                                      <button type="button" onClick={() => offKeys([[r.key, d.price]])} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>ไม่เปลี่ยน</button>
+                                      <button type="button" onClick={() => applyPrices(new Map([[r.key, d.price]]))} className={`${sm} bg-amber-600 text-white hover:bg-amber-700`}>{t("เปลี่ยน", "Update")}</button>
+                                      <button type="button" onClick={() => offKeys([[r.key, d.price]])} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>{t("ไม่เปลี่ยน", "Keep")}</button>
                                     </>
                                   )}
                                 </div>
@@ -2213,12 +2224,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                               <div className="flex flex-wrap items-center gap-1.5 border-t border-amber-200/60 pt-1.5">
                                 {drifted.length > 1 && (
                                   <>
-                                    <button type="button" onClick={() => applyPrices(new Map(drifted.map(({ r, d }) => [r.key, d.price])))} className={`${sm} bg-amber-600 text-white hover:bg-amber-700`}>เปลี่ยนทั้งหมด ({drifted.length})</button>
-                                    <button type="button" onClick={() => offKeys(drifted.map(({ r, d }) => [r.key, d.price]))} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>ไม่เปลี่ยนทั้งหมด</button>
+                                    <button type="button" onClick={() => applyPrices(new Map(drifted.map(({ r, d }) => [r.key, d.price])))} className={`${sm} bg-amber-600 text-white hover:bg-amber-700`}>{t(`เปลี่ยนทั้งหมด (${drifted.length})`, `Update all (${drifted.length})`)}</button>
+                                    <button type="button" onClick={() => offKeys(drifted.map(({ r, d }) => [r.key, d.price]))} className={`${sm} border border-amber-300 bg-white text-amber-700 hover:bg-amber-100`}>{t("ไม่เปลี่ยนทั้งหมด", "Keep all")}</button>
                                   </>
                                 )}
                                 {hint}
-                                <span className="text-[10px] opacity-70">· "ไม่เปลี่ยน" = จำไว้ถาวร จะเตือนอีกเมื่อราคาฐานเปลี่ยนอีกครั้ง</span>
+                                <span className="text-[10px] opacity-70">{t('· "ไม่เปลี่ยน" = จำไว้ถาวร จะเตือนอีกเมื่อราคาฐานเปลี่ยนอีกครั้ง', '· "Keep" is remembered — you will be warned again if the base price changes')}</span>
                               </div>
                             )}
                           </div>
@@ -2229,8 +2240,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       <div className="rounded-lg border border-sky-200 bg-sky-50 text-sky-900">
                         <button type="button" onClick={() => setChangedOpen((o) => !o)} className="flex w-full flex-wrap items-center gap-1.5 px-2.5 py-1.5 text-left hover:bg-sky-100/60 rounded-lg">
                           <span className="w-3 text-[10px]">{changedOpen ? "▼" : "▶"}</span>
-                          <span>🔁 เปลี่ยนวัสดุ <b>{changed.length}</b> บรรทัด (ยังไม่รับทราบ) — ต้นทุนต่างจากเดิม <b className={signCls(changedTotal)}>{fmtSigned(changedTotal)}</b> บาท</span>
-                          <span className="ml-auto text-[10px] text-sky-600">{changedOpen ? "ซ่อน" : "กดดูรายละเอียด"}</span>
+                          <span>{t("🔁 เปลี่ยนวัสดุ", "🔁 Material changed on")} <b>{changed.length}</b> {t("บรรทัด (ยังไม่รับทราบ) — ต้นทุนต่างจากเดิม", "lines (not acknowledged) — cost difference")} <b className={signCls(changedTotal)}>{fmtSigned(changedTotal)}</b> {t("บาท", "THB")}</span>
+                          <span className="ml-auto text-[10px] text-sky-600">{changedOpen ? t("ซ่อน", "Hide") : t("กดดูรายละเอียด", "Show details")}</span>
                         </button>
                         {changedOpen && (
                           <div className="space-y-1 border-t border-sky-200 px-2.5 py-1.5">
@@ -2240,16 +2251,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                               const dLine = r.amount != null && p.amount != null ? r.amount - p.amount : null;
                               const when = fmtShortDate(p.changed_at);
                               return (
-                                <div key={r.key} className="flex flex-wrap items-center gap-1.5" title={`เดิมฐานราคา ${p.price_basis ?? "กรอกเอง"} · ${p.uom ?? ""}`}>
+                                <div key={r.key} className="flex flex-wrap items-center gap-1.5" title={t(`เดิมฐานราคา ${p.price_basis ?? "กรอกเอง"} · ${p.uom ?? ""}`, `Previous price base ${p.price_basis ?? "manual"} · ${p.uom ?? ""}`)}>
                                   <span className="min-w-0 flex-1">
-                                    เดิม: <b>{p.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(p.unit_price)}</span> → <b>{r.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(r.unit_price)}</span>
-                                    {dUnit != null && <span className={signCls(dUnit)}> ({fmtSigned(dUnit)}/หน่วย{pct(p.unit_price, r.unit_price)}{dLine != null ? ` · รวม ${fmtSigned(dLine)}` : ""})</span>}
+                                    {t("เดิม:", "Was:")} <b>{p.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(p.unit_price)}</span> → <b>{r.item_name ?? "—"}</b> <span className="tabular-nums">{fmtBaht(r.unit_price)}</span>
+                                    {dUnit != null && <span className={signCls(dUnit)}> ({fmtSigned(dUnit)}{t("/หน่วย", "/unit")}{pct(p.unit_price, r.unit_price)}{dLine != null ? t(` · รวม ${fmtSigned(dLine)}`, ` · total ${fmtSigned(dLine)}`) : ""})</span>}
                                     {when ? <span className="text-sky-700/70"> · {when}</span> : null}
                                   </span>
                                   {canEdit && (
                                     <>
-                                      <button type="button" onClick={() => restoreKey(r.key, p)} className={`${sm} border border-sky-300 bg-white text-sky-800 hover:bg-sky-100`}>↶ กลับของเดิม</button>
-                                      <button type="button" onClick={() => ackKeys(new Set([r.key]))} className={`${sm} bg-sky-600 text-white hover:bg-sky-700`}>✓ รับทราบ</button>
+                                      <button type="button" onClick={() => restoreKey(r.key, p)} className={`${sm} border border-sky-300 bg-white text-sky-800 hover:bg-sky-100`}>{t("↶ กลับของเดิม", "↶ Revert")}</button>
+                                      <button type="button" onClick={() => ackKeys(new Set([r.key]))} className={`${sm} bg-sky-600 text-white hover:bg-sky-700`}>{t("✓ รับทราบ", "✓ Acknowledge")}</button>
                                     </>
                                   )}
                                 </div>
@@ -2257,7 +2268,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                             })}
                             {canEdit && (
                               <div className="flex flex-wrap items-center gap-1.5 border-t border-sky-200/60 pt-1.5">
-                                {changed.length > 1 && <button type="button" onClick={() => ackKeys(new Set(changed.map((r) => r.key)))} className={`${sm} bg-sky-600 text-white hover:bg-sky-700`}>✓ รับทราบทั้งหมด ({changed.length})</button>}
+                                {changed.length > 1 && <button type="button" onClick={() => ackKeys(new Set(changed.map((r) => r.key)))} className={`${sm} bg-sky-600 text-white hover:bg-sky-700`}>{t(`✓ รับทราบทั้งหมด (${changed.length})`, `✓ Acknowledge all (${changed.length})`)}</button>}
                                 {hint}
                               </div>
                             )}
@@ -2279,36 +2290,41 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 }}
                 rowId={(r) => r.key}
                 readonly={!fullEdit}
-                groupByOptions={[{ key: "group", label: "ชนิดวัสดุ" }, { key: "item", label: "วัสดุ" }, { key: "uom", label: "หน่วย" }]}
+                groupByOptions={[{ key: "group", label: t("ชนิดวัสดุ", "Material type") }, { key: "item", label: t("วัสดุ", "Material") }, { key: "uom", label: t("หน่วย", "Unit") }]}
                 groupNote={(rows) => {
                   // ใช้ต่อใบ (เจ้าของขอ 2026-10-26) — ผ้า/แผ่นที่คิดเป็น cm² → แปลงเป็นกี่ผืน จากขนาดผืนในทะเบียนวัสดุตีราคา (lib/cost-usage)
                   const u = costUsagePerUnit(rows.map((r) => ({ item_id: r.item_id, group_name: r.group_name, qty: r.qty, uom: r.uom, piece: rowIsPiece(r) })), (id) => priceItemById.get(id));
                   const parts: string[] = [];
-                  if (u.sheets) parts.push(`${u.sheets.qty.toFixed(2)} ${u.sheets.unit}${u.sheets.size ? ` (${u.sheets.unit}ละ ${u.sheets.size} ซม.)` : ""}`);
+                  if (u.sheets) parts.push(`${u.sheets.qty.toFixed(2)} ${u.sheets.unit}${u.sheets.size ? t(` (${u.sheets.unit}ละ ${u.sheets.size} ซม.)`, ` (${u.sheets.size} cm per ${u.sheets.unit})`) : ""}`);
                   for (const b of u.byUom) parts.push(`${fmtQty(Math.round(b.qty * 1000) / 1000)} ${b.uom}`);
                   const missing = priceItemById.size > 0 ? u.missingSize : 0;   // รายการวัสดุยังไม่โหลด = ไม่เตือน
                   if (!parts.length && !missing) return null;
                   const sheetHow = u.sheets
-                    ? `พื้นที่ที่ใช้รวม ${fmtQty(Math.round(u.sheets.area * 100) / 100)} cm² (รวมเผื่อเสียแล้ว) ÷ ${u.sheets.size ? `พื้นที่${u.sheets.unit} ${u.sheets.size} ซม.` : `พื้นที่${u.sheets.unit}ของแต่ละวัสดุ`} = ${u.sheets.qty.toFixed(2)} ${u.sheets.unit}ต่อใบ · ประมาณจากพื้นที่ ยังไม่รวมการวางแบบจริง`
+                    ? (() => {
+                        const sh = u.sheets;
+                        const area = fmtQty(Math.round(sh.area * 100) / 100);
+                        const div = sh.size ? t(`พื้นที่${sh.unit} ${sh.size} ซม.`, `${sh.unit} area ${sh.size} cm`) : t(`พื้นที่${sh.unit}ของแต่ละวัสดุ`, `${sh.unit} area of each material`);
+                        return t(`พื้นที่ที่ใช้รวม ${area} cm² (รวมเผื่อเสียแล้ว) ÷ ${div} = ${sh.qty.toFixed(2)} ${sh.unit}ต่อใบ · ประมาณจากพื้นที่ ยังไม่รวมการวางแบบจริง`, `Total area used ${area} cm² (incl. waste) ÷ ${div} = ${sh.qty.toFixed(2)} ${sh.unit} per sheet · area estimate, not actual nesting`);
+                      })()
                     : undefined;
                   return (
                     <span className="text-emerald-700" title={sheetHow}>
-                      {parts.length > 0 && <>· ใช้ต่อใบ ≈ <span className="font-semibold tabular-nums">{parts.join(" + ")}</span></>}
-                      {u.sheets?.perSheet ? <span className="text-slate-500"> · 1 {u.sheets.unit} ทำได้ ~{u.sheets.perSheet} ใบ</span> : null}
-                      {missing > 0 && <span className="text-amber-600"> · {missing} บรรทัดคิดเป็นผืนไม่ได้ (วัสดุไม่มีขนาดผืนในทะเบียนวัสดุตีราคา)</span>}
+                      {parts.length > 0 && <>{t("· ใช้ต่อใบ ≈", "· Per sheet ≈")} <span className="font-semibold tabular-nums">{parts.join(" + ")}</span></>}
+                      {u.sheets?.perSheet ? <span className="text-slate-500">{t(` · 1 ${u.sheets.unit} ทำได้ ~${u.sheets.perSheet} ใบ`, ` · 1 ${u.sheets.unit} makes ~${u.sheets.perSheet} sheets`)}</span> : null}
+                      {missing > 0 && <span className="text-amber-600">{t(` · ${missing} บรรทัดคิดเป็นผืนไม่ได้ (วัสดุไม่มีขนาดผืนในทะเบียนวัสดุตีราคา)`, ` · ${missing} lines can't be converted to sheets (material has no sheet size in the costing materials register)`)}</span>}
                     </span>
                   );
                 }}
                 onAdd={newCostRow}
-                addLabel="＋ เพิ่มวัตถุดิบ"
-                emptyText="ยังไม่มีวัตถุดิบในรายการตีราคา"
+                addLabel={t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}
+                emptyText={t("ยังไม่มีวัตถุดิบในรายการตีราคา", "No materials in the costing list yet")}
                 // โหมดดูอย่างเดียว: ให้กด "เพิ่มวัตถุดิบ" ได้เลย (เข้าโหมดแก้ไข + เพิ่มบรรทัดให้ในคลิกเดียว)
                 emptyAction={canEdit ? (
                   <div className="flex flex-wrap justify-center gap-2">
                     {!fullEdit && <button type="button" onClick={() => { setEditing(true); addCostRow(); }}
-                      className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">＋ เพิ่มวัตถุดิบ</button>}
+                      className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">{t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}</button>}
                     <button type="button" onClick={() => setCopyFromOpen(true)}
-                      className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 bg-white rounded-lg hover:bg-blue-50">📄 ดึงจากใบงานอื่น</button>
+                      className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 bg-white rounded-lg hover:bg-blue-50">{t("📄 ดึงจากใบงานอื่น", "📄 Pull from another sheet")}</button>
                   </div>
                 ) : null}
                 onDuplicate={(r) => recomputeRow({ ...r, key: `d${Date.now()}_${Math.round(Math.random() * 1e6)}` })}
@@ -2319,24 +2335,24 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   const applyBulkItem = (it: PriceItem) => {
                     setCostLines((prev) => prev.map((r) => (keys.has(r.key) ? recomputeRow({ ...r, ...withPrevItem(r, costItemPatch(it, r)) }) : r)));
                     setCostDirty(true);
-                    toast.success(`ตั้งวัสดุ "${it.name}" ให้ ${keys.size} บรรทัดแล้ว`);
+                    toast.success(t(`ตั้งวัสดุ "${it.name}" ให้ ${keys.size} บรรทัดแล้ว`, `Set material "${it.name}" on ${keys.size} lines`));
                   };
                   return (
                     <>
                       <div className="w-56">
-                        <SearchableSelect value="" placeholder="🧰 ตั้งวัสดุให้ที่เลือก…"
+                        <SearchableSelect value="" placeholder={t("🧰 ตั้งวัสดุให้ที่เลือก…", "🧰 Set material for selected…")}
                           options={priceItems.map((p) => ({ value: p.id, label: p.name, sub: p.group_name ?? undefined }))}
                           onChange={(val) => { const it = priceItems.find((p) => p.id === val); if (it) applyBulkItem(it); }}
-                          onCreate={(q) => void createPriceItemInline(q, applyBulkItem)} createLabel="เพิ่มวัสดุใหม่" />
+                          onCreate={(q) => void createPriceItemInline(q, applyBulkItem)} createLabel={t("เพิ่มวัสดุใหม่", "Add new material")} />
                       </div>
                       <button type="button"
                         onClick={() => {
-                          if (!window.confirm(`ลบ ${keys.size} บรรทัดที่เลือก?`)) return;
+                          if (!window.confirm(t(`ลบ ${keys.size} บรรทัดที่เลือก?`, `Delete ${keys.size} selected lines?`))) return;
                           setCostLines((prev) => prev.filter((r) => !keys.has(r.key)));
                           setCostDirty(true); clear();
-                          toast.success(`ลบ ${keys.size} บรรทัดแล้ว`);
+                          toast.success(t(`ลบ ${keys.size} บรรทัดแล้ว`, `Deleted ${keys.size} lines`));
                         }}
-                        className="h-8 px-3 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50">🗑 ลบที่เลือก ({sel.length})</button>
+                        className="h-8 px-3 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50">{t(`🗑 ลบที่เลือก (${sel.length})`, `🗑 Delete selected (${sel.length})`)}</button>
                     </>
                   );
                 }}
@@ -2346,22 +2362,22 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               {/* ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย/อื่นๆ) — เพิ่ม/ลบ/ตั้งชื่อเองได้ */}
               <div className="border border-slate-200 rounded-lg p-2.5 space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-slate-600">💼 ค่าใช้จ่ายเพิ่ม (นอกจากวัสดุ)</span>
+                  <span className="text-sm font-medium text-slate-600">{t("💼 ค่าใช้จ่ายเพิ่ม (นอกจากวัสดุ)", "💼 Additional costs (besides materials)")}</span>
                   {canEdit && <button onClick={() => { setCurExtra((l) => [...l, { label: "", amount: 0 }]); setCostDirty(true); }}
-                    className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">＋ เพิ่มรายการ</button>}
+                    className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("＋ เพิ่มรายการ", "＋ Add item")}</button>}
                 </div>
-                {costExtra.length === 0 && <p className="text-xs text-slate-300">— ยังไม่มีรายการ —</p>}
+                {costExtra.length === 0 && <p className="text-xs text-slate-300">{t("— ยังไม่มีรายการ —", "— No items yet —")}</p>}
                 {costExtra.map((c, i) => (
                   <div key={i} className="flex items-center gap-1.5">
-                    <input value={c.label} disabled={!canEdit} placeholder="ชื่อรายการ เช่น ค่าแรงผลิต"
+                    <input value={c.label} disabled={!canEdit} placeholder={t("ชื่อรายการ เช่น ค่าแรงผลิต", "Item name, e.g. production labor")}
                       onChange={(e) => { setCurExtra((l) => l.map((x, xi) => (xi === i ? { ...x, label: e.target.value } : x))); setCostDirty(true); }}
                       className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
                     <input type="number" min={0} step="any" value={c.amount || ""} disabled={!canEdit} placeholder="0.00"
                       onChange={(e) => { setCurExtra((l) => l.map((x, xi) => (xi === i ? { ...x, amount: Number(e.target.value) || 0 } : x))); setCostDirty(true); }}
                       className="w-28 h-8 px-2 text-sm text-right tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-                    <span className="text-xs text-slate-400">บาท</span>
+                    <span className="text-xs text-slate-400">{t("บาท", "THB")}</span>
                     {canEdit && <button onClick={() => { setCurExtra((l) => l.filter((_, xi) => xi !== i)); setCostDirty(true); }}
-                      title="ลบ" className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-rose-500 border border-rose-200 rounded-lg hover:bg-rose-50">🗑</button>}
+                      title={t("ลบ", "Delete")} className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-rose-500 border border-rose-200 rounded-lg hover:bg-rose-50">🗑</button>}
                   </div>
                 ))}
               </div>
@@ -2369,25 +2385,25 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               {/* การ์ดสรุปต้นทุน (แยกตามชนิด + รวมวัสดุ + ค่าใช้จ่าย + ต้นทุนสินค้า) */}
               <div className="rounded-xl bg-slate-800 text-slate-100 p-3 space-y-1 text-sm">
                 <div className="flex items-center justify-between pb-1 mb-1 border-b border-slate-600">
-                  <span className="font-semibold">📊 สรุปต้นทุน</span>
+                  <span className="font-semibold">{t("📊 สรุปต้นทุน", "📊 Cost summary")}</span>
                   <span className="font-bold text-emerald-300 tabular-nums">{fmtBaht(grandTotal)} ฿</span>
                 </div>
-                {costByGroup.length === 0 && <div className="text-xs text-slate-400">— ยังไม่มีต้นทุนวัสดุ —</div>}
+                {costByGroup.length === 0 && <div className="text-xs text-slate-400">{t("— ยังไม่มีต้นทุนวัสดุ —", "— No material cost yet —")}</div>}
                 {costByGroup.map((g) => (
                   <div key={g.label} className="flex items-center justify-between text-[13px]">
-                    <span className="text-slate-300">ต้นทุน ({g.label})</span><span className="tabular-nums">{fmtBaht(g.amount)} ฿</span>
+                    <span className="text-slate-300">{t(`ต้นทุน (${g.label})`, `Cost (${g.label})`)}</span><span className="tabular-nums">{fmtBaht(g.amount)} ฿</span>
                   </div>
                 ))}
                 <div className="flex items-center justify-between font-medium pt-1 mt-1 border-t border-slate-600">
-                  <span>ต้นทุนวัสดุดิบรวม</span><span className="tabular-nums">{fmtBaht(costTotal)} ฿</span>
+                  <span>{t("ต้นทุนวัสดุดิบรวม", "Total raw material cost")}</span><span className="tabular-nums">{fmtBaht(costTotal)} ฿</span>
                 </div>
                 {costExtra.filter((c) => (c.amount || 0) !== 0).map((c, i) => (
                   <div key={i} className="flex items-center justify-between text-[13px] text-slate-300">
-                    <span>{c.label || "ค่าใช้จ่าย"}</span><span className="tabular-nums">{fmtBaht(c.amount)} ฿</span>
+                    <span>{c.label || t("ค่าใช้จ่าย", "Expense")}</span><span className="tabular-nums">{fmtBaht(c.amount)} ฿</span>
                   </div>
                 ))}
                 <div className="flex items-center justify-between font-bold text-emerald-300 pt-1 mt-1 border-t border-slate-600">
-                  <span>ต้นทุนสินค้า (รวมทั้งหมด)</span><span className="tabular-nums">{fmtBaht(grandTotal)} ฿</span>
+                  <span>{t("ต้นทุนสินค้า (รวมทั้งหมด)", "Product cost (grand total)")}</span><span className="tabular-nums">{fmtBaht(grandTotal)} ฿</span>
                 </div>
               </div>
 
@@ -2399,26 +2415,26 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   onDirtyChange={setSupplierDirty} saveRef={supplierSaveRef}
                   onRequestEdit={() => setEditing(true)}
                   onSendToQuote={(lines) => {
-                    if (!lines.length) { toast.error("ยังไม่มีรายการที่ใส่ราคาที่จะเสนอ"); return; }
-                    if (supplierDirty) { toast.error("มีรายการที่ยังไม่บันทึก — กด 💾 บันทึก ก่อนส่งไปใบเสนอราคา"); return; }
+                    if (!lines.length) { toast.error(t("ยังไม่มีรายการที่ใส่ราคาที่จะเสนอ", "No items with an offered price yet")); return; }
+                    if (supplierDirty) { toast.error(t("มีรายการที่ยังไม่บันทึก — กด 💾 บันทึก ก่อนส่งไปใบเสนอราคา", "Unsaved items — press 💾 Save before sending to a quotation")); return; }
                     setQuoteBatch(lines); setToQuote(true);
                   }} />
               )}
 
               {/* แถบยอดรวม + ปุ่ม — sticky ติดล่าง (เลื่อนตารางยาวแค่ไหนก็เห็นปุ่มเสมอ) */}
               <div className="sticky bottom-0 z-10 -mx-1 px-1 py-2 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-sm text-slate-600">ต้นทุนสินค้า: <b className="text-base text-emerald-700">{fmtBaht(grandTotal)}</b> บาท
-                  {costDirty && <span className="ml-2 text-[11px] text-amber-600">● มีแก้ไขที่ยังไม่บันทึก</span>}
+                <div className="text-sm text-slate-600">{t("ต้นทุนสินค้า:", "Product cost:")} <b className="text-base text-emerald-700">{fmtBaht(grandTotal)}</b> {t("บาท", "THB")}
+                  {costDirty && <span className="ml-2 text-[11px] text-amber-600">{t("● มีแก้ไขที่ยังไม่บันทึก", "● Unsaved changes")}</span>}
                   {form.id && (
-                    <button type="button" onClick={() => { setVersionsInit(null); setVersionsOpen(true); }} title="เปรียบเทียบตีราคาเวอร์ชันก่อน ๆ กับปัจจุบัน"
-                      className="ml-2 h-7 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50">🕘 เวอร์ชัน</button>
+                    <button type="button" onClick={() => { setVersionsInit(null); setVersionsOpen(true); }} title={t("เปรียบเทียบตีราคาเวอร์ชันก่อน ๆ กับปัจจุบัน", "Compare earlier costing versions with the current one")}
+                      className="ml-2 h-7 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50">{t("🕘 เวอร์ชัน", "🕘 Versions")}</button>
                   )}</div>
                 {fullEdit && (
                   <div className="flex gap-1.5">
                     <button onClick={() => void saveCost()} disabled={costSaving}
-                      className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm">{costSaving ? "กำลังบันทึก..." : "💾 บันทึกตีราคา"}</button>
+                      className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm">{costSaving ? t("กำลังบันทึก...", "Saving...") : t("💾 บันทึกตีราคา", "💾 Save costing")}</button>
                     <button onClick={() => void sendCostToQuote()} disabled={costSaving || !(grandTotal > 0)}
-                      className="h-9 px-4 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50 bg-white">→ ส่งยอดไปเสนอราคา</button>
+                      className="h-9 px-4 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50 bg-white">{t("→ ส่งยอดไปเสนอราคา", "→ Send total to quote")}</button>
                   </div>
                 )}
               </div>
@@ -2428,7 +2444,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {/* แท็บรอบเสนอราคา (เฟส 3) */}
             {modalTab === "quotes" && form.id && (
               /* รอบเสนอราคาแบบ 1 ครั้ง = 1 การ์ด (ไซส์ × ขั้นจำนวน) — components/design-sheet-detail/quote-rounds.tsx */
-              <QuoteRounds sheetId={form.id} quotes={quotes} sizes={costParentTabs.map((t) => ({ key: t.key, label: t.label }))} sizeLabel={quoteSizeLabel}
+              <QuoteRounds sheetId={form.id} quotes={quotes} sizes={costParentTabs.map((tb) => ({ key: tb.key, label: tb.label }))} sizeLabel={quoteSizeLabel}
                 currentCost={totalForParent} canEdit={canEdit} costDirty={costDirty} saveCost={saveCost}
                 onReload={() => loadCq(form.id!)}
                 onOpenVersions={(a, b, parent) => { setVersionsInit({ a, b, parent }); setVersionsOpen(true); }}
@@ -2447,18 +2463,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           currentLines={costLines as SnapLine[]} currentExtra={costExtraMap} canEdit={canEdit}
           onRestore={(lines: SnapLine[], extra: SnapExtra[]) => {
             // ใส่บรรทัดของเวอร์ชันนั้นแทนของ Parent ที่ดูอยู่ (ยังไม่ลง DB — ต้องกด 💾 บันทึกตีราคา)
-            const t = Date.now();
-            const rows: CostRow[] = lines.map((l, i) => ({ ...normalizeSnapLine(l), key: `v${t}_${i}`, parent_code: costParent || null, sort_order: i + 1 } as CostRow));
+            const ts = Date.now();
+            const rows: CostRow[] = lines.map((l, i) => ({ ...normalizeSnapLine(l), key: `v${ts}_${i}`, parent_code: costParent || null, sort_order: i + 1 } as CostRow));
             setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...rows]);
             setCostExtraMap((m) => ({ ...m, [costParent]: extra.map((e) => ({ label: e.label, amount: e.amount })) }));
             setCostDirty(true); if (!editing) setEditing(true);
             setVersionsOpen(false);
-            toast.success(`ใส่เวอร์ชันที่เลือกกลับเข้าตารางแล้ว (${rows.length} บรรทัด) — กด 💾 บันทึกตีราคา เพื่อยืนยัน`);
+            toast.success(t(`ใส่เวอร์ชันที่เลือกกลับเข้าตารางแล้ว (${rows.length} บรรทัด) — กด 💾 บันทึกตีราคา เพื่อยืนยัน`, `Selected version loaded into the table (${rows.length} lines) — press 💾 Save costing to confirm`));
           }} />
       )}
       <ConfirmDialog open={delComment !== null} onClose={() => setDelComment(null)} onConfirm={doDeleteComment}
-        title="ลบ comment" variant="danger" confirmText="ลบ" cancelText="ยกเลิก"
-        message={`ลบ comment วันที่ ${delComment ? formatDate(delComment.comment_date) : ""} หรือไม่? รูปประกอบของ comment นี้จะถูกลบออกจาก R2 ด้วย`} />
+        title={t("ลบ comment", "Delete comment")} variant="danger" confirmText={t("ลบ", "Delete")} cancelText={t("ยกเลิก", "Cancel")}
+        message={t(`ลบ comment วันที่ ${delComment ? formatDate(delComment.comment_date) : ""} หรือไม่? รูปประกอบของ comment นี้จะถูกลบออกจาก R2 ด้วย`, `Delete the comment dated ${delComment ? formatDate(delComment.comment_date) : ""}? Its images will also be removed from R2.`)} />
 
 {/* จัดการสถานะงาน (โซนบนกระดาน) — เปิดจากปุ่มบนหน้า Canvas */}
       <WorkflowStatusManager open={statusMgr} onClose={() => setStatusMgr(false)}
@@ -2512,23 +2528,23 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             } as CostRow));
             setCostLines((prev) => [...prev, ...rows]);
             setCostDirty(true);
-            toast.success(`ดึงจาก BOM ${srcLabel} มา ${rows.length} บรรทัด — เลือกวัสดุ/ใส่ราคาต่อได้เลย`);
+            toast.success(t(`ดึงจาก BOM ${srcLabel} มา ${rows.length} บรรทัด — เลือกวัสดุ/ใส่ราคาต่อได้เลย`, `Pulled ${rows.length} lines from BOM ${srcLabel} — now pick materials/enter prices`));
           }} />
       )}
 
       {/* เพิ่มเวอร์ชันตีราคา = แท็บใหม่ (เก็บชื่อไว้ใน "ร่าง Parent" ของใบงาน) */}
       <ERPModal open={verOpen} onClose={() => setVerOpen(false)} size="sm"
-        title="➕ เพิ่มเวอร์ชันตีราคา"
-        description="สร้างแท็บตีราคาใหม่ไว้ลองราคาอีกแบบ (คนละสูตร/คนละไซส์) โดยไม่ทับของเดิม"
+        title={t("➕ เพิ่มเวอร์ชันตีราคา", "➕ Add costing version")}
+        description={t("สร้างแท็บตีราคาใหม่ไว้ลองราคาอีกแบบ (คนละสูตร/คนละไซส์) โดยไม่ทับของเดิม", "Create a new costing tab to try another pricing (different formula/size) without overwriting the original")}
         footer={
           <div className="flex w-full justify-end gap-2">
-            <button onClick={() => setVerOpen(false)} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+            <button onClick={() => setVerOpen(false)} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
             <button
               onClick={() => {
                 const name = verName.trim();
-                if (!name) { toast.error("ตั้งชื่อเวอร์ชันก่อน"); return; }
-                const exists = costParentTabs.some((t) => t.key === name) || name === "";
-                if (exists) { toast.error(`มีแท็บชื่อ "${name}" อยู่แล้ว`); return; }
+                if (!name) { toast.error(t("ตั้งชื่อเวอร์ชันก่อน", "Enter a version name first")); return; }
+                const exists = costParentTabs.some((tb) => tb.key === name) || name === "";
+                if (exists) { toast.error(t(`มีแท็บชื่อ "${name}" อยู่แล้ว`, `A tab named "${name}" already exists`)); return; }
                 if (!fullEdit) setEditing(true);
                 // ชื่อเวอร์ชันเก็บเป็น "ร่าง Parent" (แท็บโชว์ด้วยเส้นประ ✎) — บันทึกพร้อมตีราคา
                 setForm((f) => (f ? { ...f, parent_sku_drafts: [...f.parent_sku_drafts, name] } : f));
@@ -2540,61 +2556,61 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   }
                   setCostExtraMap((m) => ({ ...m, [name]: (m[costParent] ?? []).map((c) => ({ ...c })) }));
                   setCostDirty(true);
-                  toast.success(`เพิ่มเวอร์ชัน "${name}" + คัดลอก ${src.length} บรรทัดจาก "${costTabLabel(costParent, generalLabel)}" แล้ว`);
+                  toast.success(t(`เพิ่มเวอร์ชัน "${name}" + คัดลอก ${src.length} บรรทัดจาก "${costTabLabel(costParent, generalLabel)}" แล้ว`, `Added version "${name}" + copied ${src.length} lines from "${costTabLabel(costParent, generalLabel)}"`));
                 } else {
                   setCostDirty(true);
-                  toast.success(`เพิ่มเวอร์ชัน "${name}" แล้ว — เริ่มใส่วัตถุดิบได้เลย`);
+                  toast.success(t(`เพิ่มเวอร์ชัน "${name}" แล้ว — เริ่มใส่วัตถุดิบได้เลย`, `Added version "${name}" — start adding materials`));
                 }
                 setCostParent(name);
                 setVerOpen(false);
               }}
-              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">สร้างเวอร์ชัน</button>
+              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">{t("สร้างเวอร์ชัน", "Create version")}</button>
           </div>
         }>
         <div className="space-y-3">
           <label className="block">
-            <span className="text-xs text-slate-500">ชื่อเวอร์ชัน *</span>
+            <span className="text-xs text-slate-500">{t("ชื่อเวอร์ชัน *", "Version name *")}</span>
             <input value={verName} onChange={(e) => setVerName(e.target.value)} autoFocus
-              placeholder="เช่น เวอร์ชัน 2 · ผ้าถูกลง · ไซส์ L"
+              placeholder={t("เช่น เวอร์ชัน 2 · ผ้าถูกลง · ไซส์ L", "e.g. Version 2 · cheaper fabric · size L")}
               className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </label>
           <label className="flex items-start gap-2 rounded-lg border border-slate-200 p-2">
             <input type="checkbox" checked={verCopy} onChange={(e) => setVerCopy(e.target.checked)} className="mt-0.5 h-4 w-4 accent-blue-600" />
             <span className="text-[13px] leading-snug text-slate-700">
-              คัดลอกรายการจากแท็บ <b>{costTabLabel(costParent, generalLabel)}</b> มาตั้งต้น
+              {t("คัดลอกรายการจากแท็บ", "Copy items from tab")} <b>{costTabLabel(costParent, generalLabel)}</b> {t("มาตั้งต้น", "as a starting point")}
               <span className="block text-[11px] text-slate-400">
-                {costLines.filter((r) => pkey(r.parent_code) === costParent).length} บรรทัด + ค่าใช้จ่ายเพิ่ม — ก๊อปมาแล้วแก้ตัวเลขต่อได้เลย
+                {costLines.filter((r) => pkey(r.parent_code) === costParent).length} {t("บรรทัด + ค่าใช้จ่ายเพิ่ม — ก๊อปมาแล้วแก้ตัวเลขต่อได้เลย", "lines + additional costs — copy, then edit the numbers")}
               </span>
             </span>
           </label>
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-            💡 อย่าลืมกด <b>บันทึกตีราคา</b> หลังแก้เสร็จ — เวอร์ชันใหม่จะถูกบันทึกไปพร้อมกัน
+            {t("💡 อย่าลืมกด", "💡 Remember to press")} <b>{t("บันทึกตีราคา", "Save costing")}</b> {t("หลังแก้เสร็จ — เวอร์ชันใหม่จะถูกบันทึกไปพร้อมกัน", "when done — the new version is saved along with it")}
           </p>
         </div>
       </ERPModal>
 
       {/* เปลี่ยนชื่อเวอร์ชันตีราคา — เซิร์ฟเวอร์เปลี่ยน parent_code ให้ครบทุกตาราง (บันทึกทันที ไม่ต้องกดบันทึกตีราคาซ้ำ) */}
       <ERPModal open={verRename !== null} onClose={() => { if (!verBusy) setVerRename(null); }} size="sm"
-        title={verRename === "" ? "✎ เปลี่ยนชื่อแท็บ" : "✎ เปลี่ยนชื่อเวอร์ชัน"}
+        title={verRename === "" ? t("✎ เปลี่ยนชื่อแท็บ", "✎ Rename tab") : t("✎ เปลี่ยนชื่อเวอร์ชัน", "✎ Rename version")}
         description={verRename === ""
-          ? `ตั้งชื่อแท็บ "${generalLabel}" ใหม่ — เปลี่ยนแค่ชื่อที่แสดง (แท็บ / รอบเสนอราคา / ใบพิมพ์เห็นชื่อใหม่) · เว้นว่าง = กลับเป็น "ทั่วไป"`
-          : `เปลี่ยนชื่อแท็บ "${verRename ?? ""}" — บรรทัดวัสดุ / ตีราคาสั่งจากร้าน / รอบเสนอราคา ของแท็บนี้จะย้ายตามชื่อใหม่ทั้งหมด`}
+          ? t(`ตั้งชื่อแท็บ "${generalLabel}" ใหม่ — เปลี่ยนแค่ชื่อที่แสดง (แท็บ / รอบเสนอราคา / ใบพิมพ์เห็นชื่อใหม่) · เว้นว่าง = กลับเป็น "ทั่วไป"`, `Rename tab "${generalLabel}" — display name only (tab / quote rounds / printouts show the new name) · leave blank = back to "General"`)
+          : t(`เปลี่ยนชื่อแท็บ "${verRename ?? ""}" — บรรทัดวัสดุ / ตีราคาสั่งจากร้าน / รอบเสนอราคา ของแท็บนี้จะย้ายตามชื่อใหม่ทั้งหมด`, `Rename tab "${verRename ?? ""}" — this tab's material lines / supplier costing / quote rounds all move to the new name`)}
         footer={
           <div className="flex w-full justify-end gap-2">
-            <button onClick={() => setVerRename(null)} disabled={verBusy} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+            <button onClick={() => setVerRename(null)} disabled={verBusy} className="h-9 px-4 text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">{t("ยกเลิก", "Cancel")}</button>
             <button disabled={verBusy} onClick={() => void doRename()}
-              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{verBusy ? "กำลังเปลี่ยน…" : "เปลี่ยนชื่อ"}</button>
+              className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{verBusy ? t("กำลังเปลี่ยน…", "Renaming…") : t("เปลี่ยนชื่อ", "Rename")}</button>
           </div>
         }>
         <label className="block">
-          <span className="text-xs text-slate-500">{verRename === "" ? "ชื่อแท็บ (ว่าง = ทั่วไป)" : "ชื่อใหม่ *"}</span>
-          <input value={verRenameName} placeholder={verRename === "" ? "ทั่วไป" : undefined} onChange={(e) => setVerRenameName(e.target.value)} autoFocus
+          <span className="text-xs text-slate-500">{verRename === "" ? t("ชื่อแท็บ (ว่าง = ทั่วไป)", "Tab name (blank = General)") : t("ชื่อใหม่ *", "New name *")}</span>
+          <input value={verRenameName} placeholder={verRename === "" ? t("ทั่วไป", "General") : undefined} onChange={(e) => setVerRenameName(e.target.value)} autoFocus
             onKeyDown={(e) => { if (e.key === "Enter" && !verBusy) void doRename(); }}
             className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </label>
         {verRename !== "" && (costDirty || supplierDirty) && (
           <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">
-            💡 มีข้อมูลที่ยังไม่บันทึก — ระบบจะ<b>บันทึกให้ก่อน</b>แล้วค่อยเปลี่ยนชื่อ
+            {t("💡 มีข้อมูลที่ยังไม่บันทึก — ระบบจะ", "💡 There are unsaved changes — the system will ")}<b>{t("บันทึกให้ก่อน", "save them first")}</b>{t("แล้วค่อยเปลี่ยนชื่อ", " and then rename")}
           </p>
         )}
       </ERPModal>
@@ -2602,9 +2618,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {/* ลบเวอร์ชันตีราคา — ลบบรรทัดวัสดุ + สั่งจากร้าน + ค่าใช้จ่ายเพิ่ม + แบ่งกำไร ของแท็บนี้ (รอบเสนอราคาเก็บไว้เป็นประวัติ) */}
       <ConfirmDialog open={verDel !== null} onClose={() => { if (!verBusy) setVerDel(null); }}
         onConfirm={async () => { if (verDel != null && (await versionOp("delete", verDel))) setVerDel(null); }}
-        title="ลบเวอร์ชันตีราคา" variant="danger" loading={verBusy}
-        confirmText="ลบเวอร์ชัน" cancelText="ยกเลิก"
-        message={`ต้องการลบเวอร์ชัน "${verDel ?? ""}" ทั้งแท็บหรือไม่?\n\nจะลบ: บรรทัดวัสดุ ${costLines.filter((r) => pkey(r.parent_code) === (verDel ?? "")).length} บรรทัด + ตีราคาสั่งจากร้าน + ค่าใช้จ่ายเพิ่ม + แบ่งกำไร ของแท็บนี้ (ลบแล้วกู้คืนไม่ได้)\nรอบเสนอราคาที่เคยส่งจากแท็บนี้ยังเก็บไว้เป็นประวัติ${(costDirty || supplierDirty) ? "\n\n💡 มีข้อมูลที่ยังไม่บันทึก — ระบบจะบันทึกให้ก่อนแล้วค่อยลบ" : ""}`} />
+        title={t("ลบเวอร์ชันตีราคา", "Delete costing version")} variant="danger" loading={verBusy}
+        confirmText={t("ลบเวอร์ชัน", "Delete version")} cancelText={t("ยกเลิก", "Cancel")}
+        message={(() => {
+          const delN = costLines.filter((r) => pkey(r.parent_code) === (verDel ?? "")).length;
+          const unsaved = (costDirty || supplierDirty) ? t("\n\n💡 มีข้อมูลที่ยังไม่บันทึก — ระบบจะบันทึกให้ก่อนแล้วค่อยลบ", "\n\n💡 There are unsaved changes — the system will save them first, then delete") : "";
+          return t(`ต้องการลบเวอร์ชัน "${verDel ?? ""}" ทั้งแท็บหรือไม่?\n\nจะลบ: บรรทัดวัสดุ ${delN} บรรทัด + ตีราคาสั่งจากร้าน + ค่าใช้จ่ายเพิ่ม + แบ่งกำไร ของแท็บนี้ (ลบแล้วกู้คืนไม่ได้)\nรอบเสนอราคาที่เคยส่งจากแท็บนี้ยังเก็บไว้เป็นประวัติ${unsaved}`, `Delete the whole version "${verDel ?? ""}" tab?\n\nThis deletes: ${delN} material lines + supplier costing + additional costs + profit split for this tab (cannot be undone)\nQuote rounds already sent from this tab are kept as history${unsaved}`);
+        })()} />
 
       {/* ส่งสินค้าไปใบเสนอราคา (ระบบขาย) — หย่อนเข้าตะกร้า หรือเริ่มใบใหม่ */}
       {form?.id && (
@@ -2622,33 +2642,32 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {/* เลือกแคมเปญปลายทาง (ของกลาง) → ไปกระดานนั้นพร้อมวางการ์ดใบงานนี้ */}
       <CampaignBoardPicker open={boardPick} onClose={() => setBoardPick(false)} sheetIds={form?.id ? [form.id] : []} />
 
-      <ERPModal open={closeConfirm} onClose={() => !closeSaving && setCloseConfirm(false)} size="sm" title="ยังไม่ได้บันทึก"
+      <ERPModal open={closeConfirm} onClose={() => !closeSaving && setCloseConfirm(false)} size="sm" title={t("ยังไม่ได้บันทึก", "Not saved yet")}
         footer={<>
-          <button onClick={() => setCloseConfirm(false)} disabled={closeSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">อยู่ต่อ</button>
-          <button onClick={discardAndClose} disabled={closeSaving} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-50">ออกโดยไม่บันทึก</button>
-          <button onClick={() => void saveAndClose()} disabled={closeSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{closeSaving ? "กำลังบันทึก..." : "บันทึกแล้วปิด"}</button>
+          <button onClick={() => setCloseConfirm(false)} disabled={closeSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">{t("อยู่ต่อ", "Stay")}</button>
+          <button onClick={discardAndClose} disabled={closeSaving} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 disabled:opacity-50">{t("ออกโดยไม่บันทึก", "Leave without saving")}</button>
+          <button onClick={() => void saveAndClose()} disabled={closeSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{closeSaving ? t("กำลังบันทึก...", "Saving...") : t("บันทึกแล้วปิด", "Save and close")}</button>
         </>}>
         <p className="text-sm text-slate-600">
-          มีข้อมูลตีราคาที่ยังไม่ได้บันทึก —
-          ต้องการบันทึกก่อนปิดหรือไม่?
+          {t("มีข้อมูลตีราคาที่ยังไม่ได้บันทึก — ต้องการบันทึกก่อนปิดหรือไม่?", "There is unsaved costing data — save before closing?")}
         </p>
       </ERPModal>
 
       {/* ป๊อปเพิ่มแบรนด์ใหม่ (ปุ่ม ＋ ข้าง dropdown แบรนด์) */}
-      <ERPModal open={brandModal} onClose={() => !brandSaving && setBrandModal(false)} size="sm" title="เพิ่มแบรนด์ใหม่"
+      <ERPModal open={brandModal} onClose={() => !brandSaving && setBrandModal(false)} size="sm" title={t("เพิ่มแบรนด์ใหม่", "Add new brand")}
         footer={<>
-          <button onClick={() => setBrandModal(false)} disabled={brandSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-          <button onClick={() => void addBrand()} disabled={brandSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{brandSaving ? "กำลังบันทึก..." : "เพิ่มแบรนด์"}</button>
+          <button onClick={() => setBrandModal(false)} disabled={brandSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">{t("ยกเลิก", "Cancel")}</button>
+          <button onClick={() => void addBrand()} disabled={brandSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{brandSaving ? t("กำลังบันทึก...", "Saving...") : t("เพิ่มแบรนด์", "Add brand")}</button>
         </>}>
         <div className="space-y-2">
           <label className="block">
-            <span className="text-[11px] text-slate-500">ชื่อแบรนด์ *</span>
+            <span className="text-[11px] text-slate-500">{t("ชื่อแบรนด์ *", "Brand name *")}</span>
             <input value={newBrandName} onChange={(e) => setNewBrandName(e.target.value)} autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") void addBrand(); }} placeholder="เช่น Good Goods"
+              onKeyDown={(e) => { if (e.key === "Enter") void addBrand(); }} placeholder={t("เช่น Good Goods", "e.g. Good Goods")}
               className="w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </label>
           <label className="block">
-            <span className="text-[11px] text-slate-500">สีประจำแบรนด์ (ใช้กับกรอบการ์ด + หัวโซน Canvas)</span>
+            <span className="text-[11px] text-slate-500">{t("สีประจำแบรนด์ (ใช้กับกรอบการ์ด + หัวโซน Canvas)", "Brand color (used for card frame + Canvas zone header)")}</span>
             <input type="color" value={newBrandColor} onChange={(e) => setNewBrandColor(e.target.value)}
               className="block w-16 h-8 mt-0.5 border border-slate-200 rounded-lg cursor-pointer" />
           </label>
@@ -2672,16 +2691,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             if (srcExtra) setCostExtraMap((m) => ({ ...m, [costParent]: srcExtra.map((c) => ({ ...c })) }));
             if (!fullEdit) setEditing(true);   // ดึงมาแล้วตรวจ/แก้ต่อ แล้วกดบันทึกเอง (เหมือนปุ่ม ＋ เพิ่มวัตถุดิบ)
             setCostDirty(true); setCopyFromOpen(false);
-            toast.success(`ดึงจาก "${label}" มา ${cloned.length} บรรทัด${srcExtra ? " + ค่าใช้จ่ายเพิ่ม" : ""} — ตรวจแล้วกด 💾 บันทึกตีราคา`);
+            toast.success(t(`ดึงจาก "${label}" มา ${cloned.length} บรรทัด${srcExtra ? " + ค่าใช้จ่ายเพิ่ม" : ""} — ตรวจแล้วกด 💾 บันทึกตีราคา`, `Pulled ${cloned.length} lines from "${label}"${srcExtra ? " + additional costs" : ""} — review, then press 💾 Save costing`));
           }} />
       )}
 
-      <ERPModal open={pmOpen} onClose={closePm} size="lg" title="🧮 จัดการวัสดุตีราคา"
-        footer={<button onClick={closePm} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด (รายการวัสดุในตารางจะอัปเดตเอง)</button>}>
+      <ERPModal open={pmOpen} onClose={closePm} size="lg" title={t("🧮 จัดการวัสดุตีราคา", "🧮 Manage costing materials")}
+        footer={<button onClick={closePm} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">{t("ปิด (รายการวัสดุในตารางจะอัปเดตเอง)", "Close (the material list in the table updates itself)")}</button>}>
         <div className="space-y-2">
           <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
             <div className="flex flex-wrap gap-1.5 items-center">
-              <input value={pmName} onChange={(e) => setPmName(e.target.value)} placeholder="ชื่อวัสดุ เช่น ผ้าแคนวาส *"
+              <input value={pmName} onChange={(e) => setPmName(e.target.value)} placeholder={t("ชื่อวัสดุ เช่น ผ้าแคนวาส *", "Material name, e.g. canvas fabric *")}
                 onKeyDown={(e) => { if (e.key === "Enter") void pmAdd(); }}
                 className="flex-1 min-w-[150px] h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
               <select value={pmGroup} onChange={(e) => {
@@ -2693,57 +2712,57 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     if (g && g.calc_method !== "area_face") setPmFace(""); }
                 }}
                 className="h-8 px-2 text-sm border border-slate-200 rounded-lg w-36">
-                <option value="">— ชนิด —</option>
+                <option value="">{t("— ชนิด —", "— Type —")}</option>
                 {mgList.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
               </select>
-              <input type="number" min={0} step="any" value={pmPrice} onChange={(e) => setPmPrice(e.target.value)} placeholder={groupUsesPiece(pmGroup) ? "ราคา/แผ่น" : "ราคา/หน่วย"}
+              <input type="number" min={0} step="any" value={pmPrice} onChange={(e) => setPmPrice(e.target.value)} placeholder={groupUsesPiece(pmGroup) ? t("ราคา/แผ่น", "Price/sheet") : t("ราคา/หน่วย", "Price/unit")}
                 className="h-8 px-2 w-24 text-sm text-right border border-slate-200 rounded-lg" />
               {/* ชนิดชิ้นไม่ต้องกรอกหน่วย (เป็น cm² อัตโนมัติ) */}
               {!groupUsesPiece(pmGroup) && (
-                <input value={pmUom} onChange={(e) => setPmUom(e.target.value)} placeholder="หน่วย"
+                <input value={pmUom} onChange={(e) => setPmUom(e.target.value)} placeholder={t("หน่วย", "Unit")}
                   className="h-8 px-2 w-20 text-sm border border-slate-200 rounded-lg" />
               )}
               {/* ผ้าม้วน → หน้ากว้าง · ชนิดชิ้น → ขนาดแผ่น กว้าง+ยาว (โชว์พื้นที่ + ราคา/cm²) */}
               {groupUsesFace(pmGroup) && (
-                <input type="number" min={0} step="any" value={pmFace} onChange={(e) => setPmFace(e.target.value)} placeholder="หน้ากว้าง"
+                <input type="number" min={0} step="any" value={pmFace} onChange={(e) => setPmFace(e.target.value)} placeholder={t("หน้ากว้าง", "Roll width")}
                   className="h-8 px-2 w-24 text-sm text-right border border-slate-200 rounded-lg" />
               )}
               {groupUsesPiece(pmGroup) && (<>
-                <input type="number" min={0} step="any" value={pmWidth} onChange={(e) => setPmWidth(e.target.value)} placeholder="กว้างแผ่น(ซม.)"
+                <input type="number" min={0} step="any" value={pmWidth} onChange={(e) => setPmWidth(e.target.value)} placeholder={t("กว้างแผ่น(ซม.)", "Sheet width (cm)")}
                   className="h-8 px-2 w-24 text-sm text-right border border-slate-200 rounded-lg" />
                 <span className="text-slate-400 text-xs">×</span>
-                <input type="number" min={0} step="any" value={pmLength} onChange={(e) => setPmLength(e.target.value)} placeholder="ยาวแผ่น(ซม.)"
+                <input type="number" min={0} step="any" value={pmLength} onChange={(e) => setPmLength(e.target.value)} placeholder={t("ยาวแผ่น(ซม.)", "Sheet length (cm)")}
                   className="h-8 px-2 w-24 text-sm text-right border border-slate-200 rounded-lg" />
                 {pmWidth && pmLength && (() => {
                   const area = Math.round(Number(pmWidth) * Number(pmLength) * 100) / 100;
                   const perCm2 = pmPrice && area ? Math.round((Number(pmPrice) / area) * 1e6) / 1e6 : null;
-                  return <span className="text-[11px] text-violet-600 whitespace-nowrap">= {fmtQty(area)} cm²{perCm2 != null ? ` · ${perCm2} บ./cm²` : ""}</span>;
+                  return <span className="text-[11px] text-violet-600 whitespace-nowrap">= {fmtQty(area)} cm²{perCm2 != null ? t(` · ${perCm2} บ./cm²`, ` · ${perCm2} THB/cm²`) : ""}</span>;
                 })()}
               </>)}
               <button onClick={() => void pmAdd()} disabled={pmSaving}
-                className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{pmSaving ? "..." : "＋ เพิ่ม"}</button>
+                className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{pmSaving ? "..." : t("＋ เพิ่ม", "＋ Add")}</button>
             </div>
             {pmGroup && <p className="text-[11px] text-slate-500 px-0.5">💡 {groupHint(pmGroup)}</p>}
           </div>
 
           {pmRows.length > 0 && (
-            <input value={pmSearch} onChange={(e) => setPmSearch(e.target.value)} placeholder="ค้นหาวัสดุ (ชื่อ/ชนิด)..."
+            <input value={pmSearch} onChange={(e) => setPmSearch(e.target.value)} placeholder={t("ค้นหาวัสดุ (ชื่อ/ชนิด)...", "Search materials (name/type)...")}
               className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
           )}
-          {pmLoading ? <div className="py-8 text-center text-sm text-slate-300">กำลังโหลด...</div>
-            : pmRows.length === 0 ? <div className="py-8 text-center text-sm text-slate-300">— ยังไม่มีวัสดุ เพิ่มจากแถวด้านบน —</div>
-            : pmShown.length === 0 ? <div className="py-8 text-center text-sm text-slate-300">ไม่พบวัสดุที่ค้นหา</div>
+          {pmLoading ? <div className="py-8 text-center text-sm text-slate-300">{t("กำลังโหลด...", "Loading...")}</div>
+            : pmRows.length === 0 ? <div className="py-8 text-center text-sm text-slate-300">{t("— ยังไม่มีวัสดุ เพิ่มจากแถวด้านบน —", "— No materials yet, add from the row above —")}</div>
+            : pmShown.length === 0 ? <div className="py-8 text-center text-sm text-slate-300">{t("ไม่พบวัสดุที่ค้นหา", "No matching materials")}</div>
             : (
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-slate-50 text-xs text-slate-500">
-                    {([["name", "ชื่อวัสดุ", "text-left"], ["group", "ชนิด", "text-center w-32"], ["price", "ราคา/หน่วย", "text-right w-28"]] as const).map(([k, label, cls]) => (
+                    {([["name", t("ชื่อวัสดุ", "Material name"), "text-left"], ["group", t("ชนิด", "Type"), "text-center w-32"], ["price", t("ราคา/หน่วย", "Price/unit"), "text-right w-28"]] as const).map(([k, label, cls]) => (
                       <th key={k} className={`border border-slate-200 px-2 py-1.5 cursor-pointer hover:bg-slate-100 select-none ${cls}`} onClick={() => pmToggleSort(k)}>
                         {label}{pmSort.key === k ? (pmSort.dir === "asc" ? " ▲" : " ▼") : ""}
                       </th>
                     ))}
-                    <th className="border border-slate-200 px-2 py-1.5 w-20">หน่วย</th>
-                    <th className="border border-slate-200 px-2 py-1.5 w-32 text-right">หน้ากว้าง / ขนาดชิ้น</th>
+                    <th className="border border-slate-200 px-2 py-1.5 w-20">{t("หน่วย", "Unit")}</th>
+                    <th className="border border-slate-200 px-2 py-1.5 w-32 text-right">{t("หน้ากว้าง / ขนาดชิ้น", "Roll width / piece size")}</th>
                     <th className="border border-slate-200 px-2 py-1.5 w-28"></th>
                   </tr>
                 </thead>
@@ -2770,7 +2789,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                                   face: piece || (g && g.calc_method !== "area_face") ? "" : p.face,           // ชนิดชิ้น/ไม่ใช้ → เคลียร์หน้ากว้าง
                                   width: piece ? p.width : "", length: piece ? p.length : "" }));               // ไม่ใช่ชนิดชิ้น → เคลียร์กว้างยาว
                               }} className="w-full h-7 px-1 text-xs border border-slate-200 rounded">
-                              <option value="">— ชนิด —</option>
+                              <option value="">{t("— ชนิด —", "— Type —")}</option>
                               {mgList.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
                             </select>
                           ) : <span className="text-xs text-slate-500">{mgName(r.material_group_id)}</span>}
@@ -2787,27 +2806,27 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                           {editing
                             ? (groupUsesPiece(pmEdit.material_group_id)
                                 ? <span className="inline-flex items-center gap-0.5 justify-end">
-                                    <input type="number" min={0} step="any" value={pmEdit.width} onChange={(e) => setPmEdit({ ...pmEdit, width: e.target.value })} placeholder="ก" className="w-12 h-7 px-1 text-sm text-right border border-slate-200 rounded" />
+                                    <input type="number" min={0} step="any" value={pmEdit.width} onChange={(e) => setPmEdit({ ...pmEdit, width: e.target.value })} placeholder={t("ก", "W")} className="w-12 h-7 px-1 text-sm text-right border border-slate-200 rounded" />
                                     <span className="text-slate-400 text-xs">×</span>
-                                    <input type="number" min={0} step="any" value={pmEdit.length} onChange={(e) => setPmEdit({ ...pmEdit, length: e.target.value })} placeholder="ย" className="w-12 h-7 px-1 text-sm text-right border border-slate-200 rounded" />
+                                    <input type="number" min={0} step="any" value={pmEdit.length} onChange={(e) => setPmEdit({ ...pmEdit, length: e.target.value })} placeholder={t("ย", "L")} className="w-12 h-7 px-1 text-sm text-right border border-slate-200 rounded" />
                                   </span>
                                 : groupUsesFace(pmEdit.material_group_id)
                                 ? <input type="number" min={0} step="any" value={pmEdit.face} onChange={(e) => setPmEdit({ ...pmEdit, face: e.target.value })} className="w-full h-7 px-1 text-sm text-right border border-slate-200 rounded" />
-                                : <span className="text-slate-300" title="ชนิดนี้ไม่ใช้">—</span>)
+                                : <span className="text-slate-300" title={t("ชนิดนี้ไม่ใช้", "Not used for this type")}>—</span>)
                             : (r.width_cm != null && r.length_cm != null
                                 ? <span className="text-violet-600 text-xs">{Number(r.width_cm).toLocaleString("th-TH")}×{Number(r.length_cm).toLocaleString("th-TH")} = {Math.round(r.width_cm * r.length_cm * 100) / 100} cm²</span>
                                 : r.face_width_cm != null ? Number(r.face_width_cm).toLocaleString("th-TH") : "—")}
                         </td>
                         <td className="border border-slate-200 px-1 py-1 text-center whitespace-nowrap">
                           {editing ? (<>
-                            <button onClick={() => void pmSaveEdit()} title="บันทึก" className="h-6 px-1.5 text-xs bg-emerald-600 text-white rounded mr-1">✓</button>
-                            <button onClick={() => setPmEditId(null)} title="ยกเลิก" className="h-6 px-1.5 text-xs border border-slate-200 rounded">✕</button>
+                            <button onClick={() => void pmSaveEdit()} title={t("บันทึก", "Save")} className="h-6 px-1.5 text-xs bg-emerald-600 text-white rounded mr-1">✓</button>
+                            <button onClick={() => setPmEditId(null)} title={t("ยกเลิก", "Cancel")} className="h-6 px-1.5 text-xs border border-slate-200 rounded">✕</button>
                           </>) : (<>
-                            <button onClick={() => setPmLinkFor(r)} title="ผูก SKU จัดซื้อ (ดึงราคาซื้อจริงล่าสุด/เฉลี่ย)"
+                            <button onClick={() => setPmLinkFor(r)} title={t("ผูก SKU จัดซื้อ (ดึงราคาซื้อจริงล่าสุด/เฉลี่ย)", "Link purchase SKUs (pulls latest/average real purchase price)")}
                               className={`h-6 px-1.5 text-xs border rounded mr-1 ${(pmLinks[r.id]?.length ?? 0) > 0 ? "border-blue-300 text-blue-600 bg-blue-50" : "border-slate-200 text-slate-500"}`}>🔗 {pmLinks[r.id]?.length ?? 0}</button>
-                            <button onClick={() => pmCopy(r)} title="คัดลอกเป็นตัวใหม่" className="h-6 px-1.5 text-xs border border-slate-200 rounded text-slate-500 mr-1">⧉</button>
-                            <button onClick={() => pmStartEdit(r)} title="แก้" className="h-6 px-1.5 text-xs border border-slate-200 rounded text-slate-500 mr-1">✏</button>
-                            <button onClick={() => setPmDel(r)} title="เก็บเข้ากรุ" className="h-6 px-1.5 text-xs border border-rose-200 rounded text-rose-500">🗑</button>
+                            <button onClick={() => pmCopy(r)} title={t("คัดลอกเป็นตัวใหม่", "Copy as new")} className="h-6 px-1.5 text-xs border border-slate-200 rounded text-slate-500 mr-1">⧉</button>
+                            <button onClick={() => pmStartEdit(r)} title={t("แก้", "Edit")} className="h-6 px-1.5 text-xs border border-slate-200 rounded text-slate-500 mr-1">✏</button>
+                            <button onClick={() => setPmDel(r)} title={t("เก็บเข้ากรุ", "Archive")} className="h-6 px-1.5 text-xs border border-rose-200 rounded text-rose-500">🗑</button>
                           </>)}
                         </td>
                       </tr>
@@ -2816,23 +2835,23 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 </tbody>
               </table>
             )}
-          <p className="text-[11px] text-slate-400">จัดการแบบเต็ม (Studio/นำเข้า/ส่งออก) อยู่ที่เมนู <a href="/master/design-price-items" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">🧮 วัสดุตีราคา</a></p>
+          <p className="text-[11px] text-slate-400">{t("จัดการแบบเต็ม (Studio/นำเข้า/ส่งออก) อยู่ที่เมนู", "Full management (Studio/import/export) is in the menu")} <a href="/master/design-price-items" target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{t("🧮 วัสดุตีราคา", "🧮 Costing materials")}</a></p>
         </div>
       </ERPModal>
 
       <ConfirmDialog open={pmDel !== null} onClose={() => setPmDel(null)} onConfirm={pmDelete}
-        title="เก็บวัสดุเข้ากรุ" variant="danger" confirmText="เก็บเข้ากรุ" cancelText="ยกเลิก"
-        message={`เก็บวัสดุ "${pmDel?.name ?? ""}" เข้ากรุหรือไม่? บรรทัดตีราคาเดิมที่เคยใช้วัสดุนี้ยังอยู่ครบ`} />
+        title={t("เก็บวัสดุเข้ากรุ", "Archive material")} variant="danger" confirmText={t("เก็บเข้ากรุ", "Archive")} cancelText={t("ยกเลิก", "Cancel")}
+        message={t(`เก็บวัสดุ "${pmDel?.name ?? ""}" เข้ากรุหรือไม่? บรรทัดตีราคาเดิมที่เคยใช้วัสดุนี้ยังอยู่ครบ`, `Archive material "${pmDel?.name ?? ""}"? Existing costing lines that used it stay intact.`)} />
 
       <ConfirmDialog open={archiveTarget !== null} onClose={() => setArchiveTarget(null)} onConfirm={doArchive}
-        title="เก็บเข้ากรุ" variant="danger" loading={archiving}
-        confirmText="เก็บเข้ากรุ" cancelText="ยกเลิก"
-        message={`ต้องการเก็บใบงาน ${archiveTarget?.code ?? ""} (${archiveTarget?.name ?? ""}) เข้ากรุหรือไม่? ข้อมูลยังอยู่ กู้คืนได้ภายหลัง`} />
+        title={t("เก็บเข้ากรุ", "Archive")} variant="danger" loading={archiving}
+        confirmText={t("เก็บเข้ากรุ", "Archive")} cancelText={t("ยกเลิก", "Cancel")}
+        message={t(`ต้องการเก็บใบงาน ${archiveTarget?.code ?? ""} (${archiveTarget?.name ?? ""}) เข้ากรุหรือไม่? ข้อมูลยังอยู่ กู้คืนได้ภายหลัง`, `Archive design sheet ${archiveTarget?.code ?? ""} (${archiveTarget?.name ?? ""})? The data is kept and can be restored later.`)} />
 
       <ConfirmDialog open={hardDelTarget !== null} onClose={() => setHardDelTarget(null)} onConfirm={doHardDelete}
-        title="ลบใบงานถาวร" variant="danger" loading={hardDeleting}
-        confirmText="ลบถาวร" cancelText="ยกเลิก"
-        message={`ต้องการลบใบงาน ${hardDelTarget?.code ?? ""} (${hardDelTarget?.name ?? ""}) ถาวรหรือไม่?\n\nระบบจะลบใบงาน + comment + ตีราคา + เสนอราคา และย้ายรูปทั้งหมดเข้าถังขยะ R2 (สำรอง 30 วัน) — ต่างจาก "เก็บเข้ากรุ" ที่ยังกู้คืนได้`} />
+        title={t("ลบใบงานถาวร", "Permanently delete design sheet")} variant="danger" loading={hardDeleting}
+        confirmText={t("ลบถาวร", "Delete permanently")} cancelText={t("ยกเลิก", "Cancel")}
+        message={t(`ต้องการลบใบงาน ${hardDelTarget?.code ?? ""} (${hardDelTarget?.name ?? ""}) ถาวรหรือไม่?\n\nระบบจะลบใบงาน + comment + ตีราคา + เสนอราคา และย้ายรูปทั้งหมดเข้าถังขยะ R2 (สำรอง 30 วัน) — ต่างจาก "เก็บเข้ากรุ" ที่ยังกู้คืนได้`, `Permanently delete design sheet ${hardDelTarget?.code ?? ""} (${hardDelTarget?.name ?? ""})?\n\nThis deletes the sheet + comments + costing + quotes and moves all images to the R2 trash (kept 30 days) — unlike "Archive", which can be restored`)} />
     </>
   );
 }

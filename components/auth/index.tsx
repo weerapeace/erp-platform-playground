@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { supabaseBrowser } from "@/lib/supabase-browser";
+import { useT } from "@/components/i18n";
 
 // ============================================================
 // Auth — Supabase Auth จริง (email/password)
@@ -373,6 +374,7 @@ export function PermissionGate({
 
 // ---- AccessDenied ----
 export function AccessDenied({ message }: { message?: string }) {
+  const t = useT();   // หน้าไม่มีสิทธิ์ (ของกลางทุกหน้า) — 2 ภาษา
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center">
       <div className="w-16 h-16 rounded-full bg-red-50 flex items-center justify-center text-red-400 mb-4">
@@ -380,8 +382,8 @@ export function AccessDenied({ message }: { message?: string }) {
           <rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
         </svg>
       </div>
-      <h2 className="text-lg font-semibold text-slate-800">คุณไม่มีสิทธิ์เข้าถึงหน้านี้</h2>
-      <p className="text-sm text-slate-500 mt-1">{message ?? "กรุณาติดต่อผู้ดูแลระบบ"}</p>
+      <h2 className="text-lg font-semibold text-slate-800">{t("คุณไม่มีสิทธิ์เข้าถึงหน้านี้", "You don't have access to this page")}</h2>
+      <p className="text-sm text-slate-500 mt-1">{message ?? t("กรุณาติดต่อผู้ดูแลระบบ", "Please contact your administrator")}</p>
     </div>
   );
 }

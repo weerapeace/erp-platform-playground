@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
+import { useT } from "@/components/i18n";
 import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
@@ -30,6 +31,7 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
   onClose: () => void;
   onApply: (lines: CostLine[], extra: PullExtra[] | null, mode: PullMode, sourceLabel: string) => void;
 }) {
+  const t = useT();
   const [q, setQ] = useState("");
   const [onlyCosted, setOnlyCosted] = useState(true);
   const [rows, setRows] = useState<DesignSheetListItem[] | null>(null);
@@ -47,12 +49,12 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
   useEffect(() => {
     if (!open || src) return;
     setLoading(true);
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       apiFetch(`/api/design-sheets?limit=40${q ? `&search=${encodeURIComponent(q)}` : ""}`).then((r) => r.json())
         .then((j) => setRows(((j.data ?? []) as DesignSheetListItem[]).filter((s) => s.id !== excludeId)))
         .catch(() => setRows([])).finally(() => setLoading(false));
     }, 250);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [open, q, excludeId, src]);
 
   const tabLines = useMemo(() => (src ? src.lines.filter((l) => pkey(l.parent_code) === tab) : []), [src, tab]);
@@ -83,7 +85,7 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
       };
       const first = lines.some((l) => !l.parent_code) ? "" : pkey(lines[0]?.parent_code);
       setSrc(next); pickTab(next, first);
-    } catch (e) { setErr(e instanceof Error ? e.message : "โหลดใบงานไม่สำเร็จ"); }
+    } catch (e) { setErr(e instanceof Error ? e.message : t("โหลดใบงานไม่สำเร็จ", "Failed to load design sheet")); }
     finally { setBusyId(null); }
   };
   const pickTab = (s: Source, key: string) => {
@@ -104,16 +106,16 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
   const shown = (rows ?? []).filter((s) => !onlyCosted || s.has_cost);
 
   return (
-    <ERPModal open={open} onClose={onClose} size="xl" title="📄 ดึงวัตถุดิบตีราคาจากใบงานอื่น"
-      description={src ? `เลือกวัตถุดิบจาก ${src.sheet.code} มาใส่แท็บ "${targetLabel}"` : `ค้นใบงานต้นทาง — วัตถุดิบที่เลือกจะมาอยู่ในแท็บ "${targetLabel}" ที่กำลังดู`}
+    <ERPModal open={open} onClose={onClose} size="xl" title={t("📄 ดึงวัตถุดิบตีราคาจากใบงานอื่น", "📄 Pull costing materials from another design sheet")}
+      description={src ? t(`เลือกวัตถุดิบจาก ${src.sheet.code} มาใส่แท็บ "${targetLabel}"`, `Pick materials from ${src.sheet.code} into tab "${targetLabel}"`) : t(`ค้นใบงานต้นทาง — วัตถุดิบที่เลือกจะมาอยู่ในแท็บ "${targetLabel}" ที่กำลังดู`, `Find the source design sheet — picked materials go into the current tab "${targetLabel}"`)}
       footer={src ? (
         <div className="flex w-full flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-slate-500">เลือก {picked.size}/{tabLines.length} บรรทัด · รวม {fmt(pickedTotal)} บาท</span>
+          <span className="text-xs text-slate-500">{t(`เลือก ${picked.size}/${tabLines.length} บรรทัด · รวม ${fmt(pickedTotal)} บาท`, `${picked.size}/${tabLines.length} lines selected · total ${fmt(pickedTotal)} THB`)}</span>
           <div className="flex gap-2">
-            <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+            <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-300 px-4 text-sm text-slate-600 hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
             <button type="button" onClick={apply} disabled={picked.size === 0 && !(withExtra && tabExtra.length)}
               className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
-              {mode === "replace" ? "♻ แทนที่ด้วย" : "➕ ดึงมา"} {picked.size} บรรทัด
+              {mode === "replace" ? t(`♻ แทนที่ด้วย ${picked.size} บรรทัด`, `♻ Replace with ${picked.size} lines`) : t(`➕ ดึงมา ${picked.size} บรรทัด`, `➕ Pull ${picked.size} lines`)}
             </button>
           </div>
         </div>
@@ -121,16 +123,16 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
       {!src ? (
         <>
           <div className="mb-2 flex flex-wrap items-center gap-2">
-            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาเลขใบ / ชื่องาน..."
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหาเลขใบ / ชื่องาน...", "Search sheet no. / job name...")}
               className="h-9 min-w-[200px] flex-1 rounded-md border border-slate-200 px-3 text-sm" />
             <label className="inline-flex items-center gap-1.5 text-xs text-slate-600">
               <input type="checkbox" checked={onlyCosted} onChange={(e) => setOnlyCosted(e.target.checked)} className="h-4 w-4 accent-blue-600" />
-              เฉพาะใบที่ตีราคาแล้ว
+              {t("เฉพาะใบที่ตีราคาแล้ว", "Costed sheets only")}
             </label>
           </div>
           {err && <p className="mb-2 rounded-md bg-rose-50 px-3 py-2 text-xs text-rose-700">⚠️ {err}</p>}
-          {loading ? <div className="py-8 text-center text-sm text-slate-400">กำลังโหลด…</div>
-            : shown.length === 0 ? <div className="py-8 text-center text-sm text-slate-300">— ไม่พบใบงาน —</div>
+          {loading ? <div className="py-8 text-center text-sm text-slate-400">{t("กำลังโหลด…", "Loading…")}</div>
+            : shown.length === 0 ? <div className="py-8 text-center text-sm text-slate-300">{t("— ไม่พบใบงาน —", "— No design sheets found —")}</div>
             : <div className="max-h-[55vh] space-y-1 overflow-auto">
                 {shown.map((s) => (
                   <button key={s.id} type="button" disabled={busyId === s.id || !s.has_cost} onClick={() => void choose(s)}
@@ -140,9 +142,9 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm text-slate-800">{s.code} · {s.name}</div>
-                      <div className="text-[11px] text-slate-400">{s.brand_name ?? "—"}{s.has_cost ? " · ✅ มีตีราคา" : " · ยังไม่ตีราคา"}</div>
+                      <div className="text-[11px] text-slate-400">{s.brand_name ?? "—"}{s.has_cost ? t(" · ✅ มีตีราคา", " · ✅ Costed") : t(" · ยังไม่ตีราคา", " · Not costed yet")}</div>
                     </div>
-                    <span className="shrink-0 text-xs text-blue-700">{busyId === s.id ? "กำลังโหลด…" : "เลือก ›"}</span>
+                    <span className="shrink-0 text-xs text-blue-700">{busyId === s.id ? t("กำลังโหลด…", "Loading…") : t("เลือก ›", "Select ›")}</span>
                   </button>
                 ))}
               </div>}
@@ -150,17 +152,17 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
       ) : (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => setSrc(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs text-slate-600 hover:bg-slate-50">‹ เลือกใบอื่น</button>
+            <button type="button" onClick={() => setSrc(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs text-slate-600 hover:bg-slate-50">{t("‹ เลือกใบอื่น", "‹ Pick another sheet")}</button>
             <span className="truncate text-sm font-medium text-slate-800">{src.sheet.code} · {src.sheet.name}</span>
           </div>
-          {srcTabs.length === 0 ? <div className="py-8 text-center text-sm text-slate-400">ใบนี้ยังไม่มีบรรทัดตีราคา</div> : (
+          {srcTabs.length === 0 ? <div className="py-8 text-center text-sm text-slate-400">{t("ใบนี้ยังไม่มีบรรทัดตีราคา", "This sheet has no costing lines yet")}</div> : (
             <>
               <div className="flex flex-wrap items-center gap-1">
-                <span className="mr-1 text-[11px] text-slate-400">แท็บต้นทาง:</span>
-                {srcTabs.map((t) => (
-                  <button key={t.key || "__gen__"} type="button" onClick={() => pickTab(src, t.key)}
-                    className={`inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-xs ${tab === t.key ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                    {t.label}<span className={`rounded-full px-1 text-[10px] ${tab === t.key ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{t.n}</span>
+                <span className="mr-1 text-[11px] text-slate-400">{t("แท็บต้นทาง:", "Source tab:")}</span>
+                {srcTabs.map((st) => (
+                  <button key={st.key || "__gen__"} type="button" onClick={() => pickTab(src, st.key)}
+                    className={`inline-flex h-7 items-center gap-1 rounded-md border px-2.5 text-xs ${tab === st.key ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                    {st.label}<span className={`rounded-full px-1 text-[10px] ${tab === st.key ? "bg-white/25" : "bg-slate-100 text-slate-500"}`}>{st.n}</span>
                   </button>
                 ))}
               </div>
@@ -169,13 +171,13 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
                   <thead className="sticky top-0 bg-slate-50 text-slate-500">
                     <tr>
                       <th className="w-8 px-2 py-1.5 text-left">
-                        <input type="checkbox" checked={allOn} onChange={() => setPicked(allOn ? new Set() : new Set(tabLines.map((_, i) => i)))} className="h-4 w-4 accent-blue-600" title="เลือกทั้งหมด" />
+                        <input type="checkbox" checked={allOn} onChange={() => setPicked(allOn ? new Set() : new Set(tabLines.map((_, i) => i)))} className="h-4 w-4 accent-blue-600" title={t("เลือกทั้งหมด", "Select all")} />
                       </th>
-                      <th className="px-2 py-1.5 text-left">วัสดุ</th>
-                      <th className="px-2 py-1.5 text-left">ขนาด</th>
-                      <th className="px-2 py-1.5 text-right">ปริมาณ</th>
-                      <th className="px-2 py-1.5 text-right">ราคา/หน่วย</th>
-                      <th className="px-2 py-1.5 text-right">รวม</th>
+                      <th className="px-2 py-1.5 text-left">{t("วัสดุ", "Material")}</th>
+                      <th className="px-2 py-1.5 text-left">{t("ขนาด", "Dimensions")}</th>
+                      <th className="px-2 py-1.5 text-right">{t("ปริมาณ", "Qty")}</th>
+                      <th className="px-2 py-1.5 text-right">{t("ราคา/หน่วย", "Unit price")}</th>
+                      <th className="px-2 py-1.5 text-right">{t("รวม", "Total")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -201,21 +203,21 @@ export function PullCostFromSheetModal({ open, excludeId, targetLabel, targetCou
                 <div className="space-y-1 rounded-lg border border-slate-200 p-2 text-[13px]">
                   <label className="flex items-start gap-2">
                     <input type="radio" name="pull-mode" checked={mode === "append"} onChange={() => setMode("append")} className="mt-0.5 accent-blue-600" />
-                    <span>➕ เพิ่มต่อท้ายแท็บ <b>{targetLabel}</b><span className="block text-[11px] text-slate-400">ของเดิม {targetCount} บรรทัดอยู่ครบ</span></span>
+                    <span>{t("➕ เพิ่มต่อท้ายแท็บ", "➕ Append to tab")} <b>{targetLabel}</b><span className="block text-[11px] text-slate-400">{t(`ของเดิม ${targetCount} บรรทัดอยู่ครบ`, `The existing ${targetCount} lines are kept`)}</span></span>
                   </label>
                   <label className="flex items-start gap-2">
                     <input type="radio" name="pull-mode" checked={mode === "replace"} onChange={() => setMode("replace")} className="mt-0.5 accent-blue-600" />
-                    <span>♻ แทนที่ทั้งแท็บ <b>{targetLabel}</b><span className="block text-[11px] text-slate-400">ลบของเดิม {targetCount} บรรทัด แล้วใส่ที่เลือก</span></span>
+                    <span>{t("♻ แทนที่ทั้งแท็บ", "♻ Replace whole tab")} <b>{targetLabel}</b><span className="block text-[11px] text-slate-400">{t(`ลบของเดิม ${targetCount} บรรทัด แล้วใส่ที่เลือก`, `Removes the existing ${targetCount} lines, then adds the selection`)}</span></span>
                   </label>
                 </div>
                 <label className={`flex items-start gap-2 rounded-lg border border-slate-200 p-2 text-[13px] ${tabExtra.length ? "" : "opacity-50"}`}>
                   <input type="checkbox" checked={withExtra} disabled={!tabExtra.length} onChange={(e) => setWithExtra(e.target.checked)} className="mt-0.5 h-4 w-4 accent-blue-600" />
-                  <span>ดึงค่าใช้จ่ายเพิ่มมาด้วย ({tabExtra.length} รายการ)
-                    <span className="block text-[11px] text-slate-400">{tabExtra.length ? `${tabExtra.map((c) => c.label).slice(0, 3).join(", ")}${tabExtra.length > 3 ? "…" : ""} — แทนที่ค่าใช้จ่ายเพิ่มของแท็บนี้` : "แท็บนี้ไม่มีค่าใช้จ่ายเพิ่ม"}</span>
+                  <span>{t(`ดึงค่าใช้จ่ายเพิ่มมาด้วย (${tabExtra.length} รายการ)`, `Also pull extra costs (${tabExtra.length} items)`)}
+                    <span className="block text-[11px] text-slate-400">{tabExtra.length ? `${tabExtra.map((c) => c.label).slice(0, 3).join(", ")}${tabExtra.length > 3 ? "…" : ""}${t(" — แทนที่ค่าใช้จ่ายเพิ่มของแท็บนี้", " — replaces this tab's extra costs")}` : t("แท็บนี้ไม่มีค่าใช้จ่ายเพิ่ม", "This tab has no extra costs")}</span>
                   </span>
                 </label>
               </div>
-              <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">💡 ดึงมาแล้วแก้ตัวเลข/วัสดุต่อได้ — อย่าลืมกด <b>บันทึกตีราคา</b></p>
+              <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-700">{t("💡 ดึงมาแล้วแก้ตัวเลข/วัสดุต่อได้ — อย่าลืมกด", "💡 You can edit numbers/materials after pulling — don't forget to press")} <b>{t("บันทึกตีราคา", "Save costing")}</b></p>
             </>
           )}
         </div>

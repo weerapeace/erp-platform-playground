@@ -11,6 +11,8 @@ import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { useT } from "@/components/i18n";
+import { tr } from "@/lib/lang";
 import type { QuoteDetail, QuoteLine } from "@/app/api/quotations/route";
 
 const baht = (n: number) => n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -29,6 +31,7 @@ export function QuotationCartDrawer({
   onLabel?: (label: string | null) => void;
 }) {
   const toast = useToast();
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [quote, setQuote] = useState<QuoteDetail | null>(null);
   const [lines, setLines] = useState<QuoteLine[]>([]);
@@ -53,7 +56,7 @@ export function QuotationCartDrawer({
 
   /** อัปรูปใหม่เข้าใบงาน แล้วใช้เป็นรูปของบรรทัดนี้ */
   const uploadForLine = async (i: number, file: File) => {
-    if (!sheetId) { toast.error("เปิดจากใบงานออกแบบถึงจะอัปรูปใหม่ได้"); return; }
+    if (!sheetId) { toast.error(tr("เปิดจากใบงานออกแบบถึงจะอัปรูปใหม่ได้", "Open from a design sheet to upload new images")); return; }
     if (!file.type.startsWith("image/")) return;
     setUploading(true);
     try {
@@ -64,11 +67,11 @@ export function QuotationCartDrawer({
       const key = (j.data?.file_path as string) ?? "";
       const url = (j.public_url as string) ?? "";
       if (key) {
-        setSheetImgs((cur) => [...(cur ?? []), { key, url, source_label: "เพิ่งอัปโหลด" }]);
+        setSheetImgs((cur) => [...(cur ?? []), { key, url, source_label: tr("เพิ่งอัปโหลด", "Just uploaded") }]);
         setLine(i, { image_key: key });
-        toast.success("อัปโหลดรูปแล้ว");
+        toast.success(tr("อัปโหลดรูปแล้ว", "Image uploaded"));
       }
-    } catch (e) { toast.error(e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("อัปโหลดไม่สำเร็จ", "Upload failed")); }
     finally { setUploading(false); }
   };
 
@@ -81,7 +84,7 @@ export function QuotationCartDrawer({
       // ใบหาย / ไม่ใช่ร่างแล้ว (ออกใบ/แปลงเป็น SO) → ตะกร้าหมดอายุ
       if (j.error || !q || q.status !== "draft") { onClear(); onLabel?.(null); setQuote(null); setLines([]); return; }
       setQuote(q); setLines(q.lines ?? []); setDirty(false);
-      onLabel?.(`${q.quote_number ?? "ร่าง"}${q.customer_name ? ` · ${q.customer_name}` : ""}`);
+      onLabel?.(`${q.quote_number ?? tr("ร่าง", "Draft")}${q.customer_name ? ` · ${q.customer_name}` : ""}`);
     } catch { /* เงียบไว้ ไม่รบกวน */ }
   }, [cartId, onClear, onLabel]);
 
@@ -102,9 +105,9 @@ export function QuotationCartDrawer({
       }));
       const res = await apiFetch(`/api/quotations/${cartId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ lines: payload }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("บันทึกตะกร้าแล้ว");
+      toast.success(tr("บันทึกตะกร้าแล้ว", "Cart saved"));
       await load();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setSaving(false); }
   };
 
@@ -119,7 +122,7 @@ export function QuotationCartDrawer({
     <>
       {/* แถบลอยขอบขวา (เมื่อปิด drawer) */}
       {!open && (
-        <button onClick={() => setOpen(true)} title="เปิดตะกร้าใบเสนอราคา"
+        <button onClick={() => setOpen(true)} title={t("เปิดตะกร้าใบเสนอราคา", "Open quotation cart")}
           className="fixed right-0 top-1/3 z-[60] flex flex-col items-center gap-1 rounded-l-xl bg-indigo-600 px-2.5 py-3 text-white shadow-lg hover:bg-indigo-700">
           <span className="text-lg leading-none">🧺</span>
           <span className="text-xs font-semibold">{count}</span>
@@ -134,8 +137,8 @@ export function QuotationCartDrawer({
             {/* หัว */}
             <div className="flex items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
               <div>
-                <div className="text-sm font-semibold text-slate-800">🧺 ตะกร้าใบเสนอราคา</div>
-                <div className="text-xs text-slate-500">{quote.quote_number ?? "(ร่าง)"} · {quote.customer_name ?? "ไม่ระบุลูกค้า"}</div>
+                <div className="text-sm font-semibold text-slate-800">{t("🧺 ตะกร้าใบเสนอราคา", "🧺 Quotation cart")}</div>
+                <div className="text-xs text-slate-500">{quote.quote_number ?? t("(ร่าง)", "(Draft)")} · {quote.customer_name ?? t("ไม่ระบุลูกค้า", "No customer")}</div>
               </div>
               <button onClick={() => setOpen(false)} className="h-7 w-7 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
             </div>
@@ -148,32 +151,32 @@ export function QuotationCartDrawer({
                   <div className="flex items-start justify-between gap-2">
                     {/* รูปประกอบของบรรทัด — กดเพื่อเลือกจากใบงานออกแบบ หรืออัปโหลดใหม่ (ติดไปกับใบพิมพ์) */}
                     <button type="button" onClick={() => setImgFor(imgFor === i ? null : i)}
-                      title={l.image_key ? "เปลี่ยน/เอารูปออก" : "ใส่รูปประกอบ (เลือกจากใบงาน หรืออัปโหลดใหม่)"}
+                      title={l.image_key ? t("เปลี่ยน/เอารูปออก", "Change/remove image") : t("ใส่รูปประกอบ (เลือกจากใบงาน หรืออัปโหลดใหม่)", "Add an image (pick from the design sheet or upload new)")}
                       className={`flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded border bg-white ${l.image_key ? "border-slate-200" : "border-dashed border-slate-300 text-[10px] leading-tight text-slate-400"} hover:border-indigo-400`}>
                       {l.image_key
                         // eslint-disable-next-line @next/next/no-img-element
                         ? <img src={`/api/r2-image?key=${encodeURIComponent(l.image_key)}`} alt="" className="h-full w-full object-cover" />
-                        : <span>＋<br />รูป</span>}
+                        : <span>＋<br />{t("รูป", "Image")}</span>}
                     </button>
                     <div className="min-w-0 flex-1 space-y-1">
                       <input value={l.product_name ?? ""} onChange={(e) => setLine(i, { product_name: e.target.value })}
-                        title="ชื่อสินค้า (แก้ได้)" placeholder="ชื่อสินค้า"
+                        title={t("ชื่อสินค้า (แก้ได้)", "Product name (editable)")} placeholder={t("ชื่อสินค้า", "Product name")}
                         className="h-7 w-full rounded border border-transparent px-1 text-sm text-slate-800 hover:border-slate-200 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300" />
                       <div className="flex items-center gap-1">
-                        <span className="shrink-0 text-[11px] text-slate-400">ตัวเลือก:</span>
+                        <span className="shrink-0 text-[11px] text-slate-400">{t("ตัวเลือก:", "Option:")}</span>
                         <input value={l.note ?? ""} onChange={(e) => setLine(i, { note: e.target.value })}
-                          title="สี / ไซส์ / ตัวเลือก (แก้ได้)" placeholder="เช่น ครีม M (10 cm.)"
+                          title={t("สี / ไซส์ / ตัวเลือก (แก้ได้)", "Color / size / option (editable)")} placeholder={t("เช่น ครีม M (10 cm.)", "e.g. Cream M (10 cm.)")}
                           className="h-6 w-full rounded border border-transparent px-1 text-xs text-slate-500 hover:border-slate-200 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-300" />
                       </div>
                     </div>
-                    <button onClick={() => removeLine(i)} title="ลบรายการ" className="h-6 w-6 shrink-0 rounded text-rose-500 hover:bg-rose-50">🗑</button>
+                    <button onClick={() => removeLine(i)} title={t("ลบรายการ", "Delete line")} className="h-6 w-6 shrink-0 rounded text-rose-500 hover:bg-rose-50">🗑</button>
                   </div>
                   <div className="mt-1.5 flex items-center gap-1.5">
                     <input type="number" min={0} step="any" value={l.qty} onChange={(e) => setLine(i, { qty: Number(e.target.value) })}
-                      title="จำนวน" className="h-7 w-16 rounded border border-slate-200 px-1.5 text-right text-sm" />
+                      title={t("จำนวน", "Qty")} className="h-7 w-16 rounded border border-slate-200 px-1.5 text-right text-sm" />
                     <span className="text-xs text-slate-400">×</span>
                     <input type="number" min={0} step="any" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: Number(e.target.value) })}
-                      title="ราคา/หน่วย" className="h-7 w-24 rounded border border-slate-200 px-1.5 text-right text-sm" />
+                      title={t("ราคา/หน่วย", "Unit price")} className="h-7 w-24 rounded border border-slate-200 px-1.5 text-right text-sm" />
                     <span className="ml-auto text-sm font-medium tabular-nums text-slate-700">{baht((Number(l.qty) || 0) * (Number(l.unit_price) || 0))}</span>
                   </div>
 
@@ -183,18 +186,18 @@ export function QuotationCartDrawer({
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files?.[0]; if (f) void uploadForLine(i, f); }}>
                       <div className="mb-1 flex items-center gap-2">
-                        <span className="text-[11px] font-medium text-indigo-800">รูปประกอบรายการนี้</span>
+                        <span className="text-[11px] font-medium text-indigo-800">{t("รูปประกอบรายการนี้", "Image for this line")}</span>
                         {l.image_key && (
-                          <button onClick={() => setLine(i, { image_key: null })} className="text-[11px] text-slate-500 hover:text-rose-600">✕ เอารูปออก</button>
+                          <button onClick={() => setLine(i, { image_key: null })} className="text-[11px] text-slate-500 hover:text-rose-600">{t("✕ เอารูปออก", "✕ Remove image")}</button>
                         )}
-                        <button onClick={() => setImgFor(null)} className="ml-auto text-[11px] text-slate-400 hover:text-slate-700">ปิด</button>
+                        <button onClick={() => setImgFor(null)} className="ml-auto text-[11px] text-slate-400 hover:text-slate-700">{t("ปิด", "Close")}</button>
                       </div>
                       {!sheetId ? (
-                        <p className="mb-1 text-[11px] text-slate-400">เปิดตะกร้าจากใบงานออกแบบ จะเลือกรูปจากใบงานได้</p>
+                        <p className="mb-1 text-[11px] text-slate-400">{t("เปิดตะกร้าจากใบงานออกแบบ จะเลือกรูปจากใบงานได้", "Open the cart from a design sheet to pick its images")}</p>
                       ) : sheetImgs === null ? (
-                        <p className="mb-1 text-[11px] text-slate-400">กำลังโหลดรูปจากใบงาน…</p>
+                        <p className="mb-1 text-[11px] text-slate-400">{t("กำลังโหลดรูปจากใบงาน…", "Loading design sheet images…")}</p>
                       ) : sheetImgs.length === 0 ? (
-                        <p className="mb-1 text-[11px] text-slate-400">ใบงานนี้ยังไม่มีรูป — อัปโหลดใหม่ได้เลย</p>
+                        <p className="mb-1 text-[11px] text-slate-400">{t("ใบงานนี้ยังไม่มีรูป — อัปโหลดใหม่ได้เลย", "This design sheet has no images yet — upload one")}</p>
                       ) : (
                         <div className="mb-1 grid max-h-32 grid-cols-4 gap-1 overflow-auto">
                           {sheetImgs.map((im) => (
@@ -207,7 +210,7 @@ export function QuotationCartDrawer({
                         </div>
                       )}
                       <label className={`flex h-8 cursor-pointer items-center justify-center rounded border border-dashed text-[11px] ${uploading ? "border-slate-200 text-slate-400" : "border-indigo-300 text-indigo-700 hover:bg-white"}`}>
-                        {uploading ? "⏳ กำลังอัปโหลด…" : "⬆️ อัปโหลดรูปใหม่ (หรือลากมาวาง)"}
+                        {uploading ? t("⏳ กำลังอัปโหลด…", "⏳ Uploading…") : t("⬆️ อัปโหลดรูปใหม่ (หรือลากมาวาง)", "⬆️ Upload new image (or drag & drop)")}
                         <input type="file" accept="image/*" className="hidden" disabled={uploading}
                           onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadForLine(i, f); e.target.value = ""; }} />
                       </label>
@@ -220,20 +223,20 @@ export function QuotationCartDrawer({
             {/* ท้าย */}
             <div className="border-t border-slate-200 px-4 py-3 space-y-2">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-slate-500">รวม {count} รายการ</span>
+                <span className="text-slate-500">{t(`รวม ${count} รายการ`, `Total ${count} items`)}</span>
                 <span className="text-base font-semibold tabular-nums text-slate-900">{baht(total)} ฿</span>
               </div>
               <button onClick={() => setDetailOpen(true)}
-                className="h-9 w-full rounded-lg border border-indigo-300 text-sm font-medium text-indigo-700 hover:bg-indigo-50">👁 ดูรายละเอียด / พิมพ์</button>
+                className="h-9 w-full rounded-lg border border-indigo-300 text-sm font-medium text-indigo-700 hover:bg-indigo-50">{t("👁 ดูรายละเอียด / พิมพ์", "👁 View details / print")}</button>
               {dirty && (
                 <button onClick={() => void save()} disabled={saving}
-                  className="h-9 w-full rounded-lg bg-blue-600 text-sm text-white hover:bg-blue-700 disabled:opacity-50">{saving ? "กำลังบันทึก..." : "💾 บันทึกการแก้ไข"}</button>
+                  className="h-9 w-full rounded-lg bg-blue-600 text-sm text-white hover:bg-blue-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("💾 บันทึกการแก้ไข", "💾 Save changes")}</button>
               )}
               <div className="flex gap-2">
                 <a href="/quotations" target="_blank" rel="noreferrer"
-                  className="flex h-9 flex-1 items-center justify-center rounded-lg border border-indigo-300 text-sm text-indigo-700 hover:bg-indigo-50">เปิดใบเต็มในระบบขาย ↗</a>
-                <button onClick={() => { onClear(); setOpen(false); toast.success("ล้างตะกร้าแล้ว (ใบยังอยู่ในระบบขาย)"); }}
-                  className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-600 hover:bg-slate-50">เริ่มใบใหม่</button>
+                  className="flex h-9 flex-1 items-center justify-center rounded-lg border border-indigo-300 text-sm text-indigo-700 hover:bg-indigo-50">{t("เปิดใบเต็มในระบบขาย ↗", "Open full quotation in Sales ↗")}</a>
+                <button onClick={() => { onClear(); setOpen(false); toast.success(tr("ล้างตะกร้าแล้ว (ใบยังอยู่ในระบบขาย)", "Cart cleared (the quotation is still in Sales)")); }}
+                  className="h-9 rounded-lg border border-slate-300 px-3 text-sm text-slate-600 hover:bg-slate-50">{t("เริ่มใบใหม่", "Start new quotation")}</button>
               </div>
             </div>
           </div>
@@ -246,13 +249,13 @@ export function QuotationCartDrawer({
           <div className="flex max-h-[88vh] w-[580px] max-w-full flex-col overflow-hidden rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-start justify-between gap-2 border-b border-slate-200 px-4 py-3">
               <div className="min-w-0">
-                <div className="text-base font-semibold text-slate-800">🧾 {quote.quote_number ?? "(ร่าง)"}</div>
-                <div className="truncate text-xs text-slate-500">{quote.customer_name ?? "ไม่ระบุลูกค้า"}{quote.customer_code ? ` (${quote.customer_code})` : ""}</div>
-                <div className="text-[11px] text-slate-400">วันที่ {quote.quote_date}{quote.valid_until ? ` · ใช้ได้ถึง ${quote.valid_until}` : ""}</div>
+                <div className="text-base font-semibold text-slate-800">🧾 {quote.quote_number ?? t("(ร่าง)", "(Draft)")}</div>
+                <div className="truncate text-xs text-slate-500">{quote.customer_name ?? t("ไม่ระบุลูกค้า", "No customer")}{quote.customer_code ? ` (${quote.customer_code})` : ""}</div>
+                <div className="text-[11px] text-slate-400">{t("วันที่", "Date")} {quote.quote_date}{quote.valid_until ? ` · ${t("ใช้ได้ถึง", "Valid until")} ${quote.valid_until}` : ""}</div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <a href={`/print/quotation/${cartId}`} target="_blank" rel="noreferrer"
-                  className="inline-flex h-8 items-center rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700">🖨 พิมพ์</a>
+                  className="inline-flex h-8 items-center rounded-lg bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700">{t("🖨 พิมพ์", "🖨 Print")}</a>
                 <button onClick={() => setDetailOpen(false)} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-slate-100">✕</button>
               </div>
             </div>
@@ -260,10 +263,10 @@ export function QuotationCartDrawer({
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-xs text-slate-500">
-                    <th className="py-1.5 text-left">รายการ</th>
-                    <th className="w-14 py-1.5 text-right">จำนวน</th>
-                    <th className="w-24 py-1.5 text-right">ราคา/หน่วย</th>
-                    <th className="w-28 py-1.5 text-right">รวม</th>
+                    <th className="py-1.5 text-left">{t("รายการ", "Item")}</th>
+                    <th className="w-14 py-1.5 text-right">{t("จำนวน", "Qty")}</th>
+                    <th className="w-24 py-1.5 text-right">{t("ราคา/หน่วย", "Unit price")}</th>
+                    <th className="w-28 py-1.5 text-right">{t("รวม", "Total")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -277,7 +280,7 @@ export function QuotationCartDrawer({
                           )}
                           <div className="min-w-0">
                         <div className="text-slate-800">{l.product_name}</div>
-                        {l.note && <div className="text-[11px] text-slate-400">ตัวเลือก: {l.note}</div>}
+                        {l.note && <div className="text-[11px] text-slate-400">{t("ตัวเลือก:", "Option:")} {l.note}</div>}
                           </div>
                         </div>
                       </td>
@@ -291,11 +294,11 @@ export function QuotationCartDrawer({
             </div>
             <div className="border-t border-slate-200 px-4 py-3">
               <div className="flex items-center justify-between text-base font-semibold">
-                <span className="text-slate-700">รวม {count} รายการ</span>
+                <span className="text-slate-700">{t(`รวม ${count} รายการ`, `Total ${count} items`)}</span>
                 <span className="tabular-nums text-emerald-700">{baht(total)} ฿</span>
               </div>
-              {dirty && <p className="mt-1 text-[11px] text-amber-600">● มีการแก้ไขที่ยังไม่บันทึก — กด “บันทึกการแก้ไข” ก่อนพิมพ์เพื่อให้เอกสารตรง</p>}
-              <p className="mt-1 text-[11px] text-slate-400">ภาษี/ส่วนลดท้ายบิลจะแสดงครบในเอกสารพิมพ์</p>
+              {dirty && <p className="mt-1 text-[11px] text-amber-600">{t("● มีการแก้ไขที่ยังไม่บันทึก — กด “บันทึกการแก้ไข” ก่อนพิมพ์เพื่อให้เอกสารตรง", "● Unsaved changes — click “Save changes” before printing so the document matches")}</p>}
+              <p className="mt-1 text-[11px] text-slate-400">{t("ภาษี/ส่วนลดท้ายบิลจะแสดงครบในเอกสารพิมพ์", "Tax and end-of-bill discounts are shown in full on the printed document")}</p>
             </div>
           </div>
         </div>

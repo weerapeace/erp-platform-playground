@@ -4,17 +4,31 @@
  * (label อยู่ที่เดียว แก้ที่นี่เปลี่ยนทุกหน้า)
  */
 
+import { tr } from "@/lib/lang";
+
+/**
+ * ป้าย 2 ภาษา (ไทย/อังกฤษ) — label เป็น getter อ่านภาษาตอน "แสดงผล" (ถ้าแปลตอนโหลดไฟล์ จะได้ไทยเสมอเพราะภาษายังไม่ถูกโหลด)
+ * lazyOpts = คู่ [ค่า, ป้าย] สำหรับ <select> โดยป้ายอ่านภาษาตอนใช้ (ช่องที่ 1 ของ tuple เป็น getter) — ที่ใช้อยู่ไม่ต้องแก้
+ */
+function lazyOpts(map: Record<string, { label: string }>): ReadonlyArray<readonly [string, string]> {
+  return Object.keys(map).map((v) => {
+    const pair = [v, ""] as [string, string];
+    Object.defineProperty(pair, 1, { get: () => map[v].label, enumerable: true });
+    return pair as readonly [string, string];
+  });
+}
+
 export const DS_STATUS: Record<string, { label: string; cls: string }> = {
-  design:        { label: "ออกแบบ",           cls: "bg-slate-100 text-slate-600" },
-  sent_customer: { label: "ส่งลูกค้าดู",       cls: "bg-blue-50 text-blue-700" },
-  revising:      { label: "แก้ไขตาม comment", cls: "bg-amber-50 text-amber-700" },
-  costing:       { label: "ตีราคา",            cls: "bg-violet-50 text-violet-700" },
-  quoted:        { label: "เสนอราคา",          cls: "bg-indigo-50 text-indigo-700" },
-  approved:      { label: "อนุมัติ",           cls: "bg-emerald-50 text-emerald-700" },
-  sku_created:   { label: "ตั้ง SKU แล้ว",     cls: "bg-purple-50 text-purple-700" },
-  cancelled:     { label: "ยกเลิก",            cls: "bg-rose-50 text-rose-700" },
+  design:        { get label() { return tr("ออกแบบ", "Design"); },                  cls: "bg-slate-100 text-slate-600" },
+  sent_customer: { get label() { return tr("ส่งลูกค้าดู", "Sent to customer"); },     cls: "bg-blue-50 text-blue-700" },
+  revising:      { get label() { return tr("แก้ไขตาม comment", "Revising"); },        cls: "bg-amber-50 text-amber-700" },
+  costing:       { get label() { return tr("ตีราคา", "Costing"); },                  cls: "bg-violet-50 text-violet-700" },
+  quoted:        { get label() { return tr("เสนอราคา", "Quoted"); },                 cls: "bg-indigo-50 text-indigo-700" },
+  approved:      { get label() { return tr("อนุมัติ", "Approved"); },                 cls: "bg-emerald-50 text-emerald-700" },
+  sku_created:   { get label() { return tr("ตั้ง SKU แล้ว", "SKU created"); },         cls: "bg-purple-50 text-purple-700" },
+  cancelled:     { get label() { return tr("ยกเลิก", "Cancelled"); },                 cls: "bg-rose-50 text-rose-700" },
 };
-export const DS_STATUS_OPTS = Object.entries(DS_STATUS).map(([v, s]) => [v, s.label] as const);
+export const DS_STATUS_OPTS = lazyOpts(DS_STATUS);
 export const DS_FINISHED = new Set(["approved", "sku_created", "cancelled"]);
 
 // ---- สถานะจากระบบ Workflow กลาง (แก้เองได้ที่ /admin/workflows) ----
@@ -77,11 +91,11 @@ export function statusOptsFor(meta: StatusMeta, ownBrand: boolean, current?: str
 export const UNKNOWN_STATUS_CLS = "bg-slate-100 text-slate-400";
 
 export const QUOTE_STATUS: Record<string, { label: string; cls: string }> = {
-  pending: { label: "รอผล",    cls: "bg-slate-100 text-slate-600" },
-  passed:  { label: "ผ่าน",     cls: "bg-emerald-50 text-emerald-700" },
-  failed:  { label: "ไม่ผ่าน",  cls: "bg-rose-50 text-rose-700" },
+  pending: { get label() { return tr("รอผล", "Pending"); },   cls: "bg-slate-100 text-slate-600" },
+  passed:  { get label() { return tr("ผ่าน", "Passed"); },    cls: "bg-emerald-50 text-emerald-700" },
+  failed:  { get label() { return tr("ไม่ผ่าน", "Failed"); }, cls: "bg-rose-50 text-rose-700" },
 };
-export const QUOTE_STATUS_OPTS = Object.entries(QUOTE_STATUS).map(([v, s]) => [v, s.label] as const);
+export const QUOTE_STATUS_OPTS = lazyOpts(QUOTE_STATUS);
 
 // ---- สูตรคำนวณปริมาณตีราคา (เฟส 4) ----
 // สูตรเดียวกับ BOM (app/master/bom/line-editor.tsx → calcLine) — อิงวิธีคำนวณจาก material_groups

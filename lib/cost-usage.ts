@@ -7,6 +7,7 @@
  * pure → เทสที่ lib/__tests__/cost-usage.test.ts
  */
 import { sheetUnitFor } from "@/lib/bom-calc";
+import { tr } from "@/lib/lang";
 
 export type UsageLine = { item_id: string | null; group_name: string | null; qty: number | null; uom: string | null; piece: boolean };
 export type SheetSize = { width_cm: number | null; length_cm: number | null };
@@ -47,7 +48,7 @@ export function costUsagePerUnit(lines: UsageLine[], sheetOf: (itemId: string) =
   return {
     sheets: sheetQty > 0 ? {
       qty: sheetQty,
-      unit: units.size === 1 ? [...units][0] : "ผืน/แผ่น",
+      unit: units.size === 1 ? [...units][0] : tr("ผืน/แผ่น", "sheets"),
       size,
       area,
       // 1 ผืนทำได้กี่ใบ — คิดเฉพาะผืนขนาดเดียวกันและใช้ไม่เกิน 1 ผืนต่อใบ (ประมาณจากพื้นที่ ยังไม่รวมการวางแบบจริง)

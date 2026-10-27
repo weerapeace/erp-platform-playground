@@ -11,6 +11,8 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { tr } from "@/lib/lang";
+import { useT } from "@/components/i18n";
 import { diffCostLines, diffExtras, costTotals, type DiffRow, type SnapExtra, type SnapExtraMap, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
 import type { CostSnapshot } from "@/app/api/design-sheets/[id]/cost-snapshots/route";
 
@@ -18,7 +20,7 @@ const fmtBaht = (n: number | null | undefined) => (n == null ? "—" : n.toLocal
 const fmtQty = (n: number | null | undefined) => (n == null ? "—" : n.toLocaleString("th-TH", { maximumFractionDigits: 4 }));
 const fmtSigned = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${fmtBaht(Math.abs(n))}`;
 const signCls = (n: number) => (n > 0.004 ? "text-rose-700" : n < -0.004 ? "text-emerald-700" : "text-slate-400");
-const fmtWhen = (d: string) => { const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleString("th-TH", { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }); };
+const fmtWhen = (d: string) => { const t = new Date(d); return Number.isNaN(t.getTime()) ? d : t.toLocaleString(tr("th-TH", "en-GB"), { day: "numeric", month: "short", year: "2-digit", hour: "2-digit", minute: "2-digit" }); };
 
 type Side = { label: string; lines: SnapLine[]; extra: SnapExtra[] };
 
@@ -30,6 +32,7 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
   canEdit: boolean;
   onRestore: (lines: SnapLine[], extra: SnapExtra[]) => void;   // ↩ ใช้เวอร์ชันนี้ → ใส่กลับเข้าตารางของ Parent ที่ดูอยู่
 }) {
+  const t = useT();
   const toast = useToast();
   const [list, setList] = useState<CostSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
@@ -50,7 +53,7 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
       const rows = (j.data ?? []) as CostSnapshot[];
       setList(rows);
       setAId((cur) => cur && rows.some((s) => s.id === cur) ? cur : (rows[0]?.id ?? null));
-    } catch (e) { setError(e instanceof Error ? e.message : "โหลดเวอร์ชันไม่สำเร็จ"); }
+    } catch (e) { setError(e instanceof Error ? e.message : tr("โหลดเวอร์ชันไม่สำเร็จ", "Failed to load versions")); }
     finally { setLoading(false); }
   }, [sheetId]);
   useEffect(() => { if (open) { if (initialA) setAId(initialA); setBId(initialB ?? "current"); void load(); } }, [open, load, initialA, initialB]);
@@ -62,17 +65,17 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
       const r = await apiFetch(`/api/design-sheets/${sheetId}/cost-snapshots?id=${id}`);
       const j = await r.json(); if (j.error) throw new Error(j.error);
       setFull((m) => ({ ...m, [id]: j.data as CostSnapshot }));
-    } catch (e) { toast.error(e instanceof Error ? e.message : "โหลดเวอร์ชันไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : tr("โหลดเวอร์ชันไม่สำเร็จ", "Failed to load version")); }
   }, [sheetId, full, toast]);
   useEffect(() => { void ensureFull(aId); }, [aId, ensureFull]);
   useEffect(() => { void ensureFull(bId); }, [bId, ensureFull]);
 
   const sideOf = useCallback((id: string | null): Side | null => {
     if (!id) return null;
-    if (id === "current") return { label: "ปัจจุบัน (บนหน้าจอ)", lines: currentLines.filter((l) => (l.parent_code ?? "") === parentKey), extra: currentExtra[parentKey] ?? [] };
+    if (id === "current") return { label: tr("ปัจจุบัน (บนหน้าจอ)", "Current (on screen)"), lines: currentLines.filter((l) => (l.parent_code ?? "") === parentKey), extra: currentExtra[parentKey] ?? [] };
     const s = full[id]; if (!s) return null;
     const meta = list.find((x) => x.id === id);
-    return { label: meta ? `${meta.label ? `${meta.label} · ` : ""}${fmtWhen(meta.taken_at)}` : "เวอร์ชัน", lines: (s.lines ?? []).filter((l) => (l.parent_code ?? "") === parentKey), extra: (s.cost_extra ?? {})[parentKey] ?? [] };
+    return { label: meta ? `${meta.label ? `${meta.label} · ` : ""}${fmtWhen(meta.taken_at)}` : tr("เวอร์ชัน", "Version"), lines: (s.lines ?? []).filter((l) => (l.parent_code ?? "") === parentKey), extra: (s.cost_extra ?? {})[parentKey] ?? [] };
   }, [currentLines, currentExtra, parentKey, full, list]);
 
   const A = sideOf(aId), B = sideOf(bId);
@@ -85,14 +88,14 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
 
   const cols: MiniColumn<DiffRow>[] = [
     { key: "st", header: "", width: "4.5rem", cell: (r) => {
-      const m = { same: ["เท่าเดิม", "bg-slate-100 text-slate-500"], changed: ["เปลี่ยน", "bg-amber-100 text-amber-800"], added: ["เพิ่ม", "bg-emerald-100 text-emerald-800"], removed: ["ลบ", "bg-rose-100 text-rose-800"] }[r.status];
+      const m = { same: [t("เท่าเดิม", "Same"), "bg-slate-100 text-slate-500"], changed: [t("เปลี่ยน", "Changed"), "bg-amber-100 text-amber-800"], added: [t("เพิ่ม", "Added"), "bg-emerald-100 text-emerald-800"], removed: [t("ลบ", "Removed"), "bg-rose-100 text-rose-800"] }[r.status];
       return <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${m[1]}`}>{m[0]}</span>;
     } },
-    { key: "name", header: "วัสดุ", width: "1.6fr", cell: (r) => { const l = r.b ?? r.a; return <span className="truncate" title={l?.note ?? undefined}><b>{l?.item_name ?? l?.group_name ?? "—"}</b>{l?.note ? <span className="ml-1 text-[10px] text-slate-400">· {l.note}</span> : null}</span>; } },
-    { key: "qty", header: "ปริมาณ", width: "7.5rem", align: "right", cell: (r) => <Pair a={r.a ? `${fmtQty(r.a.qty)} ${r.a.uom ?? ""}` : null} b={r.b ? `${fmtQty(r.b.qty)} ${r.b.uom ?? ""}` : null} hot={r.changedFields.includes("qty") || r.changedFields.includes("uom")} /> },
-    { key: "price", header: "ราคา/หน่วย", width: "7rem", align: "right", cell: (r) => <Pair a={r.a ? fmtBaht(r.a.unit_price) : null} b={r.b ? fmtBaht(r.b.unit_price) : null} hot={r.changedFields.includes("unit_price")} /> },
-    { key: "amt", header: "ยอด", width: "7rem", align: "right", cell: (r) => <Pair a={r.a ? fmtBaht(r.a.amount) : null} b={r.b ? fmtBaht(r.b.amount) : null} hot={r.changedFields.includes("amount")} /> },
-    { key: "diff", header: "ต่าง", width: "6.5rem", align: "right", sortValue: (r) => r.amountDiff, cell: (r) => <b className={`tabular-nums ${signCls(r.amountDiff)}`}>{fmtSigned(r.amountDiff)}</b> },
+    { key: "name", header: t("วัสดุ", "Material"), width: "1.6fr", cell: (r) => { const l = r.b ?? r.a; return <span className="truncate" title={l?.note ?? undefined}><b>{l?.item_name ?? l?.group_name ?? "—"}</b>{l?.note ? <span className="ml-1 text-[10px] text-slate-400">· {l.note}</span> : null}</span>; } },
+    { key: "qty", header: t("ปริมาณ", "Qty"), width: "7.5rem", align: "right", cell: (r) => <Pair a={r.a ? `${fmtQty(r.a.qty)} ${r.a.uom ?? ""}` : null} b={r.b ? `${fmtQty(r.b.qty)} ${r.b.uom ?? ""}` : null} hot={r.changedFields.includes("qty") || r.changedFields.includes("uom")} /> },
+    { key: "price", header: t("ราคา/หน่วย", "Unit price"), width: "7rem", align: "right", cell: (r) => <Pair a={r.a ? fmtBaht(r.a.unit_price) : null} b={r.b ? fmtBaht(r.b.unit_price) : null} hot={r.changedFields.includes("unit_price")} /> },
+    { key: "amt", header: t("ยอด", "Amount"), width: "7rem", align: "right", cell: (r) => <Pair a={r.a ? fmtBaht(r.a.amount) : null} b={r.b ? fmtBaht(r.b.amount) : null} hot={r.changedFields.includes("amount")} /> },
+    { key: "diff", header: t("ต่าง", "Diff"), width: "6.5rem", align: "right", sortValue: (r) => r.amountDiff, cell: (r) => <b className={`tabular-nums ${signCls(r.amountDiff)}`}>{fmtSigned(r.amountDiff)}</b> },
   ];
 
   const doDelete = async () => {
@@ -100,8 +103,8 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
     try {
       const r = await apiFetch(`/api/design-sheets/${sheetId}/cost-snapshots?id=${delId}`, { method: "DELETE" });
       const j = await r.json(); if (j.error) throw new Error(j.error);
-      toast.success("ลบเวอร์ชันแล้ว"); setDelId(null); void load();
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+      toast.success(t("ลบเวอร์ชันแล้ว", "Version deleted")); setDelId(null); void load();
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ลบไม่สำเร็จ", "Delete failed")); }
   };
   const doRename = async () => {
     if (!renameId) return;
@@ -109,42 +112,42 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
       const r = await apiFetch(`/api/design-sheets/${sheetId}/cost-snapshots`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: renameId, label: renameVal }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
       setList((l) => l.map((s) => (s.id === renameId ? { ...s, label: j.label } : s))); setRenameId(null);
-    } catch (e) { toast.error(e instanceof Error ? e.message : "ตั้งชื่อไม่สำเร็จ"); }
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("ตั้งชื่อไม่สำเร็จ", "Rename failed")); }
   };
 
   return (
-    <ERPModal open={open} onClose={onClose} title={`🕘 เวอร์ชันตีราคา — ${parentLabel}`} size="xl"
+    <ERPModal open={open} onClose={onClose} title={t(`🕘 เวอร์ชันตีราคา — ${parentLabel}`, `🕘 Costing versions — ${parentLabel}`)} size="xl"
       footer={<div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-slate-400">ระบบเก็บเวอร์ชันให้เองทุกครั้งที่กด 💾 บันทึกตีราคา แล้วเนื้อหาเปลี่ยน (เก็บล่าสุด 50 เวอร์ชัน)</span>
-        <button type="button" onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">ปิด</button>
+        <span className="text-[11px] text-slate-400">{t("ระบบเก็บเวอร์ชันให้เองทุกครั้งที่กด 💾 บันทึกตีราคา แล้วเนื้อหาเปลี่ยน (เก็บล่าสุด 50 เวอร์ชัน)", "A version is saved automatically each time you press 💾 Save costing and the content changed (latest 50 kept)")}</span>
+        <button type="button" onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">{t("ปิด", "Close")}</button>
       </div>}>
       <div className="grid gap-3 md:grid-cols-[15rem_1fr]">
         {/* รายการเวอร์ชัน (ซ้าย) */}
         <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-2 space-y-1 max-h-[60vh] overflow-y-auto">
-          <div className="text-[11px] font-semibold text-slate-500 px-1">เลือกเวอร์ชันเก่า (ซ้าย)</div>
-          {loading && <p className="px-2 py-4 text-xs text-slate-400 text-center">กำลังโหลด…</p>}
-          {error && <p className="px-2 py-2 text-xs text-rose-600">⚠ {error} <button type="button" onClick={() => void load()} className="underline">ลองใหม่</button></p>}
-          {!loading && !error && list.length === 0 && <p className="px-2 py-4 text-xs text-slate-400 text-center">ยังไม่มีเวอร์ชัน — กด 💾 บันทึกตีราคา ครั้งแรกจะเริ่มเก็บให้</p>}
+          <div className="text-[11px] font-semibold text-slate-500 px-1">{t("เลือกเวอร์ชันเก่า (ซ้าย)", "Pick an older version (left)")}</div>
+          {loading && <p className="px-2 py-4 text-xs text-slate-400 text-center">{t("กำลังโหลด…", "Loading…")}</p>}
+          {error && <p className="px-2 py-2 text-xs text-rose-600">⚠ {error} <button type="button" onClick={() => void load()} className="underline">{t("ลองใหม่", "Retry")}</button></p>}
+          {!loading && !error && list.length === 0 && <p className="px-2 py-4 text-xs text-slate-400 text-center">{t("ยังไม่มีเวอร์ชัน — กด 💾 บันทึกตีราคา ครั้งแรกจะเริ่มเก็บให้", "No versions yet — the first 💾 Save costing starts keeping them")}</p>}
           {list.map((s, i) => {
-            const t = s.totals?.[parentKey];
+            const tot = s.totals?.[parentKey];
             const prev = list[i + 1]?.totals?.[parentKey];
-            const d = t && prev ? t.total - prev.total : null;
+            const d = tot && prev ? tot.total - prev.total : null;
             const on = s.id === aId;
             return (
               <div key={s.id} className={`rounded-md border px-2 py-1.5 text-xs cursor-pointer ${on ? "border-blue-400 bg-white ring-1 ring-blue-200" : "border-slate-200 bg-white hover:border-blue-300"}`} onClick={() => setAId(s.id)}>
                 <div className="flex items-center gap-1">
-                  <span className="font-medium text-slate-800 truncate flex-1">{s.label || `เวอร์ชัน ${list.length - i}`}</span>
-                  {i === 0 && <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-500">ล่าสุด</span>}
+                  <span className="font-medium text-slate-800 truncate flex-1">{s.label || t(`เวอร์ชัน ${list.length - i}`, `Version ${list.length - i}`)}</span>
+                  {i === 0 && <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-500">{t("ล่าสุด", "Latest")}</span>}
                 </div>
                 <div className="text-[10px] text-slate-500">{fmtWhen(s.taken_at)}{s.taken_by_name ? ` · ${s.taken_by_name.split("@")[0]}` : ""}</div>
                 <div className="flex items-center gap-1 text-[11px]">
-                  <span className="tabular-nums text-slate-700">{t ? fmtBaht(t.total) : "—"} บ.</span>
+                  <span className="tabular-nums text-slate-700">{tot ? fmtBaht(tot.total) : "—"} {t("บ.", "THB")}</span>
                   {d != null && <span className={`tabular-nums text-[10px] ${signCls(d)}`}>{fmtSigned(d)}</span>}
                 </div>
                 {canEdit && on && (
                   <div className="mt-1 flex flex-wrap gap-1">
-                    <button type="button" onClick={(e) => { e.stopPropagation(); setRenameId(s.id); setRenameVal(s.label ?? ""); }} className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[10px] text-slate-600 hover:bg-slate-50">✏️ ตั้งชื่อ</button>
-                    <button type="button" onClick={(e) => { e.stopPropagation(); const f = full[s.id]; if (!f) { toast.error("กำลังโหลดเวอร์ชันนี้ ลองอีกครั้ง"); return; } onRestore((f.lines ?? []).filter((l) => (l.parent_code ?? "") === parentKey), (f.cost_extra ?? {})[parentKey] ?? []); }} className="h-6 rounded border border-blue-200 bg-blue-50 px-1.5 text-[10px] text-blue-700 hover:bg-blue-100" title="ใส่บรรทัดของเวอร์ชันนี้กลับเข้าตาราง (ต้องกด 💾 บันทึก จึงมีผล)">↩ ใช้เวอร์ชันนี้</button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setRenameId(s.id); setRenameVal(s.label ?? ""); }} className="h-6 rounded border border-slate-200 bg-white px-1.5 text-[10px] text-slate-600 hover:bg-slate-50">{t("✏️ ตั้งชื่อ", "✏️ Rename")}</button>
+                    <button type="button" onClick={(e) => { e.stopPropagation(); const f = full[s.id]; if (!f) { toast.error(t("กำลังโหลดเวอร์ชันนี้ ลองอีกครั้ง", "Still loading this version — try again")); return; } onRestore((f.lines ?? []).filter((l) => (l.parent_code ?? "") === parentKey), (f.cost_extra ?? {})[parentKey] ?? []); }} className="h-6 rounded border border-blue-200 bg-blue-50 px-1.5 text-[10px] text-blue-700 hover:bg-blue-100" title={t("ใส่บรรทัดของเวอร์ชันนี้กลับเข้าตาราง (ต้องกด 💾 บันทึก จึงมีผล)", "Put this version's lines back into the table (takes effect after 💾 Save)")}>{t("↩ ใช้เวอร์ชันนี้", "↩ Use this version")}</button>
                     <button type="button" onClick={(e) => { e.stopPropagation(); setDelId(s.id); }} className="h-6 rounded border border-rose-200 bg-white px-1.5 text-[10px] text-rose-600 hover:bg-rose-50">🗑</button>
                   </div>
                 )}
@@ -156,19 +159,19 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
         {/* เปรียบเทียบ (ขวา) */}
         <div className="space-y-2 min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-slate-500">เทียบกับ (ขวา):</span>
+            <span className="text-slate-500">{t("เทียบกับ (ขวา):", "Compare with (right):")}</span>
             <select value={bId} onChange={(e) => setBId(e.target.value)} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs">
-              <option value="current">ปัจจุบัน (บนหน้าจอ)</option>
-              {list.filter((s) => s.id !== aId).map((s, i) => <option key={s.id} value={s.id}>{s.label || `เวอร์ชัน ${list.length - list.indexOf(s)}`} · {fmtWhen(s.taken_at)}{i === 0 && list[0]?.id === s.id ? " (ล่าสุด)" : ""}</option>)}
+              <option value="current">{t("ปัจจุบัน (บนหน้าจอ)", "Current (on screen)")}</option>
+              {list.filter((s) => s.id !== aId).map((s, i) => <option key={s.id} value={s.id}>{s.label || t(`เวอร์ชัน ${list.length - list.indexOf(s)}`, `Version ${list.length - list.indexOf(s)}`)} · {fmtWhen(s.taken_at)}{i === 0 && list[0]?.id === s.id ? t(" (ล่าสุด)", " (latest)") : ""}</option>)}
             </select>
-            <label className="ml-auto flex items-center gap-1 text-slate-600"><input type="checkbox" checked={onlyChanged} onChange={(e) => setOnlyChanged(e.target.checked)} className="h-3.5 w-3.5" /> เฉพาะที่ต่าง ({nChanged})</label>
+            <label className="ml-auto flex items-center gap-1 text-slate-600"><input type="checkbox" checked={onlyChanged} onChange={(e) => setOnlyChanged(e.target.checked)} className="h-3.5 w-3.5" /> {t(`เฉพาะที่ต่าง (${nChanged})`, `Differences only (${nChanged})`)}</label>
           </div>
 
           {A && B && tA && tB ? (
             <>
               {/* สรุปยอด A → B */}
               <div className="grid grid-cols-3 gap-2 text-xs">
-                {([["วัสดุ", tA.material, tB.material], ["ค่าใช้จ่ายเพิ่ม", tA.extra, tB.extra], ["ต้นทุนรวม", tA.total, tB.total]] as const).map(([lab, a, b]) => (
+                {([[t("วัสดุ", "Material"), tA.material, tB.material], [t("ค่าใช้จ่ายเพิ่ม", "Extra costs"), tA.extra, tB.extra], [t("ต้นทุนรวม", "Total cost"), tA.total, tB.total]] as const).map(([lab, a, b]) => (
                   <div key={lab} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
                     <div className="text-[10px] text-slate-500">{lab}</div>
                     <div className="tabular-nums text-slate-500">{fmtBaht(a)} <span className="text-slate-300">→</span> <b className="text-slate-800">{fmtBaht(b)}</b></div>
@@ -176,12 +179,12 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
                   </div>
                 ))}
               </div>
-              <div className="text-[10px] text-slate-400">ซ้าย = <b>{A.label}</b> · ขวา = <b>{B.label}</b> · ต่าง = ขวา − ซ้าย</div>
+              <div className="text-[10px] text-slate-400">{t("ซ้าย =", "Left =")} <b>{A.label}</b> · {t("ขวา =", "Right =")} <b>{B.label}</b> · {t("ต่าง = ขวา − ซ้าย", "Diff = right − left")}</div>
               <MiniTable<DiffRow> rows={shown} columns={cols} rowKey={(r) => r.key} dense maxHeightClass="max-h-[42vh]"
-                emptyText={rows.length ? "ไม่มีบรรทัดที่ต่างกัน — วัสดุเหมือนกันทุกบรรทัด" : "ทั้งสองเวอร์ชันไม่มีบรรทัดวัสดุ"} />
+                emptyText={rows.length ? t("ไม่มีบรรทัดที่ต่างกัน — วัสดุเหมือนกันทุกบรรทัด", "No differing lines — every material line is the same") : t("ทั้งสองเวอร์ชันไม่มีบรรทัดวัสดุ", "Neither version has material lines")} />
               {extras.length > 0 && (
                 <div className="rounded-lg border border-slate-200 bg-white p-2 text-xs space-y-0.5">
-                  <div className="text-[10px] font-semibold text-slate-500">💼 ค่าใช้จ่ายเพิ่ม</div>
+                  <div className="text-[10px] font-semibold text-slate-500">{t("💼 ค่าใช้จ่ายเพิ่ม", "💼 Extra costs")}</div>
                   {extras.map((e) => (
                     <div key={e.label} className="flex items-center gap-2">
                       <span className="flex-1 truncate text-slate-700">{e.label}</span>
@@ -193,16 +196,16 @@ export function CostVersionsModal({ open, onClose, sheetId, parentKey, parentLab
               )}
             </>
           ) : (
-            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-xs text-slate-400">{list.length ? "กำลังโหลดเวอร์ชันที่เลือก…" : "เลือกเวอร์ชันทางซ้ายเพื่อเปรียบเทียบ"}</p>
+            <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-xs text-slate-400">{list.length ? t("กำลังโหลดเวอร์ชันที่เลือก…", "Loading the selected version…") : t("เลือกเวอร์ชันทางซ้ายเพื่อเปรียบเทียบ", "Pick a version on the left to compare")}</p>
           )}
         </div>
       </div>
 
-      <ConfirmDialog open={delId !== null} onClose={() => setDelId(null)} onConfirm={doDelete} title="ลบเวอร์ชันตีราคา" variant="danger" confirmText="ลบ" cancelText="ยกเลิก"
-        message="ลบเวอร์ชันนี้ออกจากประวัติ? บรรทัดตีราคาปัจจุบันไม่ได้รับผลกระทบ" />
-      <ERPModal open={renameId !== null} onClose={() => setRenameId(null)} title="ตั้งชื่อเวอร์ชัน" size="sm"
-        footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setRenameId(null)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button><button type="button" onClick={() => void doRename()} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg">บันทึก</button></div>}>
-        <input autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void doRename(); }} placeholder="เช่น ราคาก่อนปรับผ้า / เสนอลูกค้ารอบ 2" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+      <ConfirmDialog open={delId !== null} onClose={() => setDelId(null)} onConfirm={doDelete} title={t("ลบเวอร์ชันตีราคา", "Delete costing version")} variant="danger" confirmText={t("ลบ", "Delete")} cancelText={t("ยกเลิก", "Cancel")}
+        message={t("ลบเวอร์ชันนี้ออกจากประวัติ? บรรทัดตีราคาปัจจุบันไม่ได้รับผลกระทบ", "Remove this version from history? Current costing lines are not affected.")} />
+      <ERPModal open={renameId !== null} onClose={() => setRenameId(null)} title={t("ตั้งชื่อเวอร์ชัน", "Rename version")} size="sm"
+        footer={<div className="flex justify-end gap-2"><button type="button" onClick={() => setRenameId(null)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button><button type="button" onClick={() => void doRename()} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg">{t("บันทึก", "Save")}</button></div>}>
+        <input autoFocus value={renameVal} onChange={(e) => setRenameVal(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void doRename(); }} placeholder={t("เช่น ราคาก่อนปรับผ้า / เสนอลูกค้ารอบ 2", "e.g. Price before fabric change / Customer quote round 2")} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
       </ERPModal>
     </ERPModal>
   );

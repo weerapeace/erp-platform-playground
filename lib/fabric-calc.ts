@@ -13,6 +13,7 @@
  * หมายเหตุ: ผลลัพธ์เป็นการประมาณเชิงวิศวกรรม (วางแนวตรง ไม่หมุนเฉียง/ไม่ interlock)
  *            เหมาะกับการตีราคา — งานตัดจริงอาจดีกว่านี้เล็กน้อย
  */
+import { tr } from "@/lib/lang";   // ข้อความ/หน่วย 2 ภาษา (แปลตอนคำนวณ = ตอนผู้ใช้กด ภาษาโหลดแล้ว)
 
 export type FabricPiece = {
   key: string;
@@ -94,12 +95,12 @@ export function packFabric(input: FabricInput): FabricResult {
   const sampled = simRatio < 1;
   const pieceAreaCm2 = realArea;
 
-  if (face <= 0) return emptyResult("ยังไม่รู้หน้ากว้างผ้า — ใส่หน้ากว้าง (ซม.) ก่อน", flat.length, pieceAreaCm2);
-  if (flat.length === 0) return emptyResult("ไม่มีชิ้นที่ต้องตัด (ตรวจว่ากรอกกว้าง/ยาว/จำนวนชิ้นครบไหม)", 0, 0);
+  if (face <= 0) return emptyResult(tr("ยังไม่รู้หน้ากว้างผ้า — ใส่หน้ากว้าง (ซม.) ก่อน", "Fabric width unknown — enter the width (cm) first"), flat.length, pieceAreaCm2);
+  if (flat.length === 0) return emptyResult(tr("ไม่มีชิ้นที่ต้องตัด (ตรวจว่ากรอกกว้าง/ยาว/จำนวนชิ้นครบไหม)", "No pieces to cut (check width / length / quantity are filled in)"), 0, 0);
 
   // ชิ้นที่กว้างเกินหน้าผ้า → วางไม่ได้ (ลองหมุนก่อนถ้าอนุญาต)
   const oversize = flat.find((p) => Math.min(p.w, rotate && !p.noRotate ? p.h : p.w) > face);
-  if (oversize) return emptyResult(`ชิ้น "${oversize.label}" (${oversize.w}×${oversize.h} ซม.) กว้างเกินหน้าผ้า ${face} ซม.`, flat.length, pieceAreaCm2);
+  if (oversize) return emptyResult(tr(`ชิ้น "${oversize.label}" (${oversize.w}×${oversize.h} ซม.) กว้างเกินหน้าผ้า ${face} ซม.`, `Piece "${oversize.label}" (${oversize.w}×${oversize.h} cm) is wider than the ${face} cm fabric`), flat.length, pieceAreaCm2);
 
   const sheetLen = Number(input.sheetLengthCm) || 0;
   const limitH = sheetLen > 0 ? sheetLen : Infinity;   // ผ้าผืน = สูงจำกัดต่อผืน · ผ้าม้วน = ไม่จำกัด
@@ -201,7 +202,7 @@ export function packFabric(input: FabricInput): FabricResult {
   }
   if (sampled) res.sampledFrom = { simulated: flat.length, total: wantTotal };
   // ชิ้นที่วางไม่ลงเลย (ปกติเกิดเฉพาะชิ้นใหญ่เกินผ้า ซึ่งดักไว้ก่อนแล้ว)
-  if (remaining.length > 0) { res.ok = false; res.error = `วางไม่ลง ${remaining.length} ชิ้น — ลองเพิ่มหน้ากว้าง/ความยาวผืน`; }
+  if (remaining.length > 0) { res.ok = false; res.error = tr(`วางไม่ลง ${remaining.length} ชิ้น — ลองเพิ่มหน้ากว้าง/ความยาวผืน`, `${remaining.length} pieces don't fit — try a wider fabric or longer sheet`); }
   return res;
 }
 
@@ -333,7 +334,7 @@ function fitHintsOf(pieces: FabricPiece[], face: number, rotate: boolean, gap: n
     // ถ้าหน้าผ้ากว้างขึ้นอีกนิดจะวางได้เพิ่ม 1 ชิ้น → แนะนำหน้ากว้างนั้น
     const suggest = (bestPerRow + 1) * bestW + bestPerRow * gap;
     out.push({
-      label: `${w0}×${h0} ซม.`, w: bestW, perRow: bestPerRow,
+      label: `${w0}×${h0} ${tr("ซม.", "cm")}`, w: bestW, perRow: bestPerRow,
       leftoverCm: Math.round(leftover * 10) / 10,
       suggestFaceCm: suggest <= face * 1.6 ? Math.ceil(suggest) : null,   // แนะนำเฉพาะที่ไม่เพ้อฝัน
     });
@@ -346,5 +347,5 @@ function emptyResult(error: string, totalPieces: number, pieceAreaCm2: number): 
     pieceAreaCm2, fabricAreaCm2: 0, utilizationPercent: 0, packEfficiencyPercent: 0, naiveYards: 0 };
 }
 
-export const fmtCm = (v: number) => `${Math.round(v * 10) / 10} ซม.`;
-export const fmtYard = (v: number) => `${(Math.round(v * 100) / 100).toLocaleString("th-TH")} หลา`;
+export const fmtCm = (v: number) => `${Math.round(v * 10) / 10} ${tr("ซม.", "cm")}`;
+export const fmtYard = (v: number) => `${(Math.round(v * 100) / 100).toLocaleString("th-TH")} ${tr("หลา", "yd")}`;
