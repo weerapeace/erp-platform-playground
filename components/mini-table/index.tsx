@@ -219,10 +219,11 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     if (i >= lockN || lockLefts[i] == null) return undefined;
     const sh = [`8px 0 0 0 ${bg}`];
     if (i === 0) sh.unshift(`-12px 0 0 0 ${bg}`);
-    if (i === lockN - 1) sh.push("9px 0 0 0 #e2e8f0");
+    if (i === lockN - 1) { sh[sh.length - 1] = `7px 0 0 0 ${bg}`; sh.push("8px 0 0 0 #e2e8f0"); }   // เส้นแบ่งอยู่ในช่องว่าง gap-2 (8px) พอดี ไม่ล้นเข้าคอลัมน์ถัดไป
     const base: CSSProperties = { position: "sticky", left: lockLefts[i], zIndex: 5, backgroundColor: bg, boxShadow: sh.join(", ") };
     if (kind === "check") return { ...base, alignSelf: "stretch", display: "flex", alignItems: "center", justifyContent: "center" };
-    if (kind === "cell") return { ...base, alignSelf: "stretch", display: "flex", flexDirection: "column", justifyContent: "center", borderRadius: 0 };
+    // ตัดระยะยื่น -mx-1/px-1 (ไว้ไฮไลต์ตอนกดช่อง) ออก → กล่องเท่าช่องตารางพอดี เงาถมแค่ช่องว่าง ไม่ทับต้นคอลัมน์ถัดไป
+    if (kind === "cell") return { ...base, alignSelf: "stretch", display: "flex", flexDirection: "column", justifyContent: "center", borderRadius: 0, marginLeft: 0, marginRight: 0, paddingLeft: 0, paddingRight: 0 };
     return base;
   };
   const rowW: CSSProperties | undefined = rowMinW ? { minWidth: rowMinW } : undefined;
