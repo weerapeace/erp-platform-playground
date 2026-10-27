@@ -66,6 +66,7 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
   const [addingStreaming, setAddingStreaming] = useState(false);
   const [users, setUsers] = useState<SubMember[]>(() => usersFromInput(EMPTY));
   const [openUsers, setOpenUsers] = useState<Set<string>>(new Set());
+  const [focusUserId, setFocusUserId] = useState<string | null>(null); // ผู้ใช้ที่เพิ่งเพิ่ม → โฟกัสช่องชื่อ
   const multi = users.length >= 2;
   const perMember = multi && form.price_mode === "per_member";
   const activeUsers = users.filter((u) => u.active).length;
@@ -85,6 +86,7 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
     };
     setUsers((us) => [...us, u]);
     setOpenUsers(new Set([u.id]));
+    setFocusUserId(u.id);
     setDirty(true);
   };
   const removeUser = (id: string) => {
@@ -98,8 +100,12 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
   const setPriceMode = (mode: PriceMode) => {
     if (mode === form.price_mode) return;
     if (mode === "per_member") {
-      // สลับเป็นแยกรายคน → ถ้าผลรวมรายคนไม่เท่ายอดเดิม แบ่งยอดเดิมให้เท่า ๆ กันก่อน (ยอดรวมไม่กระโดด)
-      setUsers((us) => (round2(membersTotal(us)) === round2(form.cost) ? us : splitEvenly(us, form.cost)));
+      // สลับเป็นแยกรายคน → แบ่งยอดเดิมให้เท่า ๆ กัน (ยอดรวมไม่กระโดด)
+      // ยกเว้นเคยตั้งราคารายคนไว้แล้วครบทุกคนและรวมได้เท่ายอดเดิม → คงไว้
+      setUsers((us) => {
+        const keep = round2(membersTotal(us)) === round2(form.cost) && us.every((u) => !u.active || u.price > 0);
+        return keep ? us : splitEvenly(us, form.cost);
+      });
     } else {
       set("cost", round2(membersTotal(users)));
     }
@@ -129,7 +135,7 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
     if (open) {
       const f = editing ? fromSub(editing) : { ...EMPTY, ...(defaults ?? {}) };
       const us = usersFromInput(f);
-      setForm(f); setUsers(us); setOpenUsers(new Set(us.length === 1 ? [us[0].id] : []));
+      setForm(f); setUsers(us); setOpenUsers(new Set(us.length === 1 ? [us[0].id] : [])); setFocusUserId(null);
       setDirty(false); setErr(null); setNewStreaming("");
     }
   }, [open, editing, defaults]);
@@ -317,7 +323,8 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
                   <div className="border-t border-slate-100 px-3 pt-3 pb-3 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
                     {multi && (
                       <Field label="ชื่อผู้ใช้ (ไว้เรียก)">
-                        <input value={u.name} onChange={(e) => patchUser(u.id, { name: e.target.value })} placeholder="เช่น Gogo, ทีมกราฟิก" className={INP} />
+                        <input value={u.name} onChange={(e) => patchUser(u.id, { name: e.target.value })} placeholder="เช่น Gogo, ทีมกราฟิก" className={INP}
+                          autoFocus={u.id === focusUserId} />
                       </Field>
                     )}
                     <Field label="อีเมลบัญชี">
