@@ -14,6 +14,7 @@ import {
   type Subscription, type SubSettings, type SubType, type BillingCycle,
   CYCLE_LABEL, subStatusLabel, monthlyTHB, fmtBaht, nextRenewal, daysUntil,
 } from "@/lib/subscriptions";
+import { MembersChip } from "./members-chip";
 
 export type BoardGroupBy = "status" | "category" | "type" | "cycle";
 export const GROUP_OPTIONS: { key: BoardGroupBy; label: string }[] = [
@@ -101,7 +102,9 @@ function SubCardBody({ sub, settings, dragging }: { sub: Subscription; settings:
         <span className="text-sm font-medium text-slate-800 leading-snug line-clamp-2">{sub.name}</span>
         {sub.type === "personal" && <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-pink-50 text-pink-600">ส่วนตัว</span>}
       </div>
-      {(sub.account_email || sub.category) && (
+      {sub.members?.length >= 2 ? (
+        <div className="mt-0.5 flex min-w-0"><MembersChip sub={sub} /></div>
+      ) : (sub.account_email || sub.category) && (
         <div className="text-[11px] text-slate-400 line-clamp-1 mt-0.5">
           {sub.account_email || sub.category}{sub.billing_cycle !== "monthly" ? ` · ${CYCLE_LABEL[sub.billing_cycle]}` : ""}
         </div>

@@ -26,6 +26,7 @@ import { DownloadInvoiceModal } from "../download-invoice-modal";
 import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "../subscriptions-board";
 import { PersonalShareModal, type ShareUser } from "../personal-share-modal";
 import { StreamingView } from "./streaming-view";
+import { MembersChip } from "../members-chip";
 
 type SharedSub = Subscription & { owner_label?: string };
 const DEFAULT_SETTINGS: SubSettings = { exchange_rate: 32, eur_rate: 39, display_currency: "THB" };
@@ -187,7 +188,9 @@ export default function PersonalSubscriptionsPage() {
           return (
             <div className="min-w-0">
               <div className="text-sm font-medium text-slate-800 truncate">{s.name}</div>
-              {s.account_email && <div className="text-[11px] text-slate-400 truncate">{s.account_email}</div>}
+              {s.members?.length >= 2
+                ? <MembersChip sub={s} />
+                : s.account_email && <div className="text-[11px] text-slate-400 truncate">{s.account_email}</div>}
             </div>
           );
         },

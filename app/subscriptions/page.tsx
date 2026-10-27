@@ -29,6 +29,7 @@ import { WishlistView } from "./wishlist-view";
 import { AllInvoicesView } from "./all-invoices-view";
 import { DownloadInvoiceModal } from "./download-invoice-modal";
 import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "./subscriptions-board";
+import { MembersChip } from "./members-chip";
 
 type ViewMode = "list" | "inuse" | "onetime" | "calendar" | "wishlist" | "invoices" | "board";
 
@@ -248,7 +249,9 @@ export default function SubscriptionsPage() {
         return (
           <div className="min-w-0">
             <div className="text-sm font-medium text-slate-800 truncate">{s.name}</div>
-            {s.account_email && <div className="text-[11px] text-slate-400 truncate">{s.account_email}</div>}
+            {s.members?.length >= 2
+              ? <MembersChip sub={s} />
+              : s.account_email && <div className="text-[11px] text-slate-400 truncate">{s.account_email}</div>}
           </div>
         );
       },

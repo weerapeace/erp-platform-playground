@@ -35,9 +35,83 @@ export type Subscription = {
   owner_id: string | null; // เจ้าของรายการ "ส่วนตัว" (null = งาน/ของบริษัท เห็นทั้งองค์กร)
   streaming: string[];      // id ของบริการ streaming ที่รายการนี้แถม (เฉพาะรายการส่วนตัว)
   group_name: string;       // ชื่อกลุ่ม (พิมพ์เอง) — รายการที่ชื่อกลุ่มเหมือนกันจะรวมเป็นการ์ดเดียวบนบอร์ด ("" = ไม่อยู่กลุ่ม)
+  members: SubMember[];     // ผู้ใช้หลายคนในแพ็กเดียว (บิลเดียว) — [] = ผู้ใช้คนเดียว ใช้ช่อง account_email/chrome_* บนแถว
+  price_mode: PriceMode;    // วิธีคิดราคาเมื่อมีหลายผู้ใช้
   created_at?: string;
   updated_at?: string;
 };
+
+/**
+ * ผู้ใช้ 1 คนในแพ็ก (เช่น Google Drive 2 users) — เก็บเป็น jsonb `subscriptions.members`
+ * ⚠️ คนแรกถูก mirror ลงช่องบนแถว (account_email/chrome_*) ตอนบันทึก → ปุ่ม .bat / หาในเมล / บิลขาด ใช้คนแรก
+ */
+export type SubMember = {
+  id: string;
+  name: string;               // ชื่อเรียก เช่น "Gogo", "Louis Team"
+  account_email: string;
+  chrome_profile: string;
+  chrome_profile_dir: string;
+  chrome_profile_url: string;
+  active: boolean;
+  price: number;              // ใช้เมื่อ price_mode = per_member (สกุลเงินเดียวกับรายการ)
+};
+
+/** total = ราคารวมทั้งแพ็ก (ช่อง cost) · per_member = แยกราคารายคน (cost = ผลรวมคนที่ใช้งานอยู่) */
+export type PriceMode = "total" | "per_member";
+
+export const PRICE_MODE_LABEL: Record<PriceMode, string> = {
+  total: "ราคารวมทั้งแพ็ก",
+  per_member: "แยกราคารายคน",
+};
+
+const MAX_MEMBERS = 50;
+
+export function newMemberId(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
+/** ผู้ใช้คนเดียวจากช่องบนแถว (รายการเดิมที่ยังไม่มี members) */
+export function memberFromSub(s: Pick<Subscription, "account_email" | "chrome_profile" | "chrome_profile_dir" | "chrome_profile_url" | "cost">): SubMember {
+  return {
+    id: newMemberId(), name: "", account_email: s.account_email ?? "", chrome_profile: s.chrome_profile ?? "",
+    chrome_profile_dir: s.chrome_profile_dir ?? "", chrome_profile_url: s.chrome_profile_url ?? "",
+    active: true, price: Number(s.cost) || 0,
+  };
+}
+
+/** ทำความสะอาด members ที่มาจาก DB/ฟอร์ม (กันค่าแปลก ๆ + ช่องข้อความเป็น '' เสมอ) */
+export function normalizeMembers(raw: unknown): SubMember[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, MAX_MEMBERS).filter((m) => m && typeof m === "object").map((m) => {
+    const o = m as Record<string, unknown>;
+    const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+    return {
+      id: str(o.id) || newMemberId(),
+      name: str(o.name),
+      account_email: str(o.account_email),
+      chrome_profile: str(o.chrome_profile),
+      chrome_profile_dir: str(o.chrome_profile_dir),
+      chrome_profile_url: str(o.chrome_profile_url),
+      active: o.active !== false,
+      price: Math.max(0, Number(o.price) || 0),
+    };
+  });
+}
+
+/** จำนวนผู้ใช้ในแพ็ก (ไม่มี members = 1 คน) */
+export function memberCount(s: Pick<Subscription, "members">): number {
+  return Math.max(1, s.members?.length ?? 0);
+}
+
+/** ผลรวมราคาของคนที่ใช้งานอยู่ (โหมดแยกราคารายคน) */
+export function membersTotal(members: SubMember[]): number {
+  return members.filter((m) => m.active).reduce((sum, m) => sum + (Number(m.price) || 0), 0);
+}
+
+/** ป้ายผู้ใช้ 1 คน (ชื่อเรียก ไม่มีก็ใช้อีเมล) */
+export function memberLabel(m: Pick<SubMember, "name" | "account_email">): string {
+  return m.name || m.account_email || "ผู้ใช้";
+}
 
 /** บริการ streaming ในคลังของผู้ใช้ (เช่น iQIYI, WeTV, Netflix) */
 export type StreamingService = {
@@ -233,6 +307,24 @@ export function toSubRow(input: Partial<SubInput>): Record<string, unknown> {
   if (input.owner_id !== undefined) row.owner_id = input.owner_id || null;
   if (input.streaming !== undefined) row.streaming = Array.isArray(input.streaming) ? input.streaming.filter(Boolean) : [];
   if (input.group_name !== undefined) row.group_name = (input.group_name ?? "").trim();
+  if (input.price_mode !== undefined) row.price_mode = input.price_mode === "per_member" ? "per_member" : "total";
+  if (input.members !== undefined) {
+    const members = normalizeMembers(input.members);
+    if (members.length >= 2) {
+      // หลายผู้ใช้ → คนแรก mirror ลงช่องบนแถว (ปุ่ม .bat / หาในเมล / ค้นหา ยังใช้ได้)
+      const first = members[0];
+      row.members = members;
+      row.account_email = first.account_email;
+      row.chrome_profile = first.chrome_profile;
+      row.chrome_profile_dir = first.chrome_profile_dir;
+      row.chrome_profile_url = first.chrome_profile_url;
+      if (input.price_mode === "per_member") row.cost = membersTotal(members);
+    } else {
+      // เหลือคนเดียว → กลับเป็นรายการธรรมดา (ใช้ช่องบนแถว)
+      row.members = [];
+      if (input.price_mode !== undefined) row.price_mode = "total";
+    }
+  }
   return row;
 }
 
@@ -249,5 +341,11 @@ export function validateSubInput(input: Partial<SubInput>, isCreate: boolean): s
   if (input.billing_cycle !== undefined && !CYCLES.includes(input.billing_cycle)) return "รอบบิลไม่ถูกต้อง";
   if (input.currency !== undefined && !CURRENCIES.includes(input.currency)) return "สกุลเงินไม่ถูกต้อง";
   if (input.type !== undefined && !TYPES.includes(input.type)) return "ประเภทไม่ถูกต้อง";
+  if (input.price_mode !== undefined && input.price_mode !== "total" && input.price_mode !== "per_member") return "วิธีคิดราคาไม่ถูกต้อง";
+  if (input.members !== undefined) {
+    if (!Array.isArray(input.members)) return "รายชื่อผู้ใช้ไม่ถูกต้อง";
+    if (input.members.length > MAX_MEMBERS) return `ผู้ใช้ในแพ็กได้สูงสุด ${MAX_MEMBERS} คน`;
+    if (input.members.some((m) => isNaN(Number(m?.price)) || Number(m?.price) < 0)) return "ราคารายคนต้องเป็นตัวเลขไม่ติดลบ";
+  }
   return null;
 }
