@@ -29,9 +29,13 @@ const ROTATES: RotateLock[] = ["sheet", "none", "flip", "quad"];
 const TABLE_COLS = (fill: boolean) =>
   `28px 64px minmax(220px,1.4fr) 330px ${fill ? "205px" : "90px"} 200px 150px minmax(170px,1fr) 64px`;
 
+/** ไฟล์ไม่อยู่ในเครื่องเพราะอะไร: old = มีในคลังแต่ตัวช่วยเก่า · none = ยังไม่มีในคลัง · fail = โหลดจากคลังไม่สำเร็จ */
+export type MissWhy = "old" | "none" | "fail";
+
 export function ItemsPanel({
   items, infos, missing, previews, settings, resultByKey, busy, onChange, onAttach, onAddFiles, onPickLibrary,
   canSplit, onSplit, onMergeBack, variant = "cards", cloud = {}, onLibrarySize, librarySizeOf, onSaveSize,
+  missWhy = {}, cloudReady = false, helperVersion = null, onDrivePick,
 }: {
   items: NestingItem[];
   infos: Record<string, FileInfo>;
@@ -52,6 +56,10 @@ export function ItemsPanel({
   onLibrarySize?: (key: string, size: AssetSize) => void;           // ชิ้นที่แยก: ไซส์ในคลัง (ของภาพเต็ม) → ทุกชิ้นของภาพนั้น
   librarySizeOf?: (it: NestingItem) => { w: number; h: number } | null;   // ขนาดที่บันทึกเป็นไซส์ในคลังได้ (cm · ของภาพเต็ม)
   onSaveSize?: (key: string) => void;
+  missWhy?: Record<string, MissWhy>;
+  cloudReady?: boolean;                    // ตัวช่วยรุ่นนี้ส่ง/โหลดไฟล์กับคลังได้ (v1.5.0+)
+  helperVersion?: string | null;
+  onDrivePick?: (key: string) => void;     // ใช้ไฟล์จาก Drive ของลายในคลัง
 }) {
   const t = useT();
   const { lang } = useLang();
@@ -156,6 +164,27 @@ export function ItemsPanel({
       </div>
     </>
   );
+  /** ข้อความเมื่อไฟล์ไม่อยู่ในเครื่อง — บอกตามสาเหตุจริง */
+  const missText = (it: NestingItem, c: Ctx) => {
+    if (!c.miss) return t("ยังไม่มีไฟล์พิมพ์ — ลาก PNG ตัวจริงมาวางที่การ์ดนี้", "No print file yet — drop the real PNG onto this card");
+    const why = it.file ? missWhy[it.file.sha] : undefined;
+    const name = it.piece ? it.piece.source.name : it.file?.name ?? "";
+    if (why === "old") return t(`ไฟล์อยู่ในคลังแล้ว แต่ตัวช่วยเครื่องนี้ยังเก่า (${helperVersion ?? "?"}) — อัปเดตแล้วไฟล์จะมาเอง: คลิกขวาไอคอนกรรไกรข้างนาฬิกา → ตรวจหาเวอร์ชันใหม่`,
+      `The file is in the library, but this computer's helper is old (${helperVersion ?? "?"}) — update it and the file comes by itself: right-click the scissors icon by the clock → Check for updates`);
+    if (why === "fail") return t(`โหลดไฟล์ ${name} จากคลังไม่สำเร็จ — ลองเปิดงานใหม่ หรือลากไฟล์มาใส่`, `Couldn't download ${name} from the library — reopen the job or drop the file in`);
+    if (why === "none") {
+      const keep = cloudReady ? t(" ระบบเก็บให้ทุกเครื่อง", " it's kept for every computer")
+        : t(" (อัปเดตตัวช่วยเป็น 1.5 ขึ้นไป ระบบจึงเก็บให้ทุกเครื่องได้)", " (update the helper to 1.5+ so it's kept for every computer)");
+      return it.piece ? t(`ยังไม่มีไฟล์ต้นฉบับ ${name} ในคลัง — ใส่ไฟล์ครั้งเดียว แยกชิ้นให้เอง${keep}`, `The original ${name} isn't in the library yet — add it once, it splits automatically;${keep}`)
+        : t(`ยังไม่มีไฟล์พิมพ์ในคลัง — ใส่ไฟล์ครั้งเดียว${keep}`, `No print file in the library yet — add it once;${keep}`);
+    }
+    return it.piece ? t(`ชิ้นนี้ไม่ได้อยู่ในเครื่องนี้ — ลากไฟล์ต้นฉบับ ${name} มาใหม่ (แยกชิ้นให้เอง)`, `This piece is not on this computer — drop the original ${name} again (it splits automatically)`)
+      : t(`ไฟล์ ${name} ไม่ได้อยู่ในเครื่องนี้ — ลากไฟล์เดิมมาใหม่`, `File ${name} is not on this computer — drop it again`);
+  };
+  const missTone = (it: NestingItem, c: Ctx) => {
+    const why = c.miss && it.file ? missWhy[it.file.sha] : undefined;
+    return why === "none" ? "text-rose-700" : "text-amber-700";
+  };
   const fileLine = (it: NestingItem, c: Ctx) => (
     <div className="flex items-center gap-2 text-xs">
       {it.file && !c.miss ? (
@@ -166,11 +195,14 @@ export function ItemsPanel({
       ) : c.miss === undefined && it.file && cloudState(it) === "fetching" ? (
         <span className="text-sky-700">☁️ {t("กำลังโหลดไฟล์จากคลัง…", "Downloading the file from the library…")}</span>
       ) : (
-        <span className="text-amber-700">
-          {c.miss && it.piece ? t(`ชิ้นนี้ไม่ได้อยู่ในเครื่องนี้ — ลากไฟล์ต้นฉบับ ${it.piece.source.name} มาใหม่ (แยกชิ้นให้เอง)`, `This piece is not on this computer — drop the original ${it.piece.source.name} again (it splits automatically)`)
-            : c.miss ? t(`ไฟล์ ${it.file?.name} ไม่ได้อยู่ในเครื่องนี้ — ลากไฟล์เดิมมาใหม่`, `File ${it.file?.name} is not on this computer — drop it again`)
-            : t("ยังไม่มีไฟล์พิมพ์ — ลาก PNG ตัวจริงมาวางที่การ์ดนี้", "No print file yet — drop the real PNG onto this card")}
-        </span>
+        <span className={`min-w-0 ${missTone(it, c)}`}>{missText(it, c)}</span>
+      )}
+      {onDrivePick && it.asset_id && (!it.file || (c.miss && missWhy[it.file.sha] !== "old")) && (
+        <button type="button" onClick={() => onDrivePick(it.key)} disabled={busy}
+          title={t("เลือก PNG จากโฟลเดอร์ Drive ของลายนี้ — ระบบคัดลอกเข้าคลังให้", "Pick a PNG from this artwork's Drive folder — it's copied into the library")}
+          className="shrink-0 rounded border border-violet-300 bg-violet-50 px-2 py-0.5 text-violet-700 hover:bg-violet-100 disabled:opacity-50">
+          📁 {t("ใช้ไฟล์จาก Drive", "Use a file from Drive")}
+        </button>
       )}
       <button type="button" onClick={() => browse(it.key)} disabled={busy}
         className="ml-auto shrink-0 rounded border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50 disabled:opacity-50">

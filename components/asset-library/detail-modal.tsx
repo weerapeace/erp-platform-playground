@@ -10,6 +10,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { type AssetRow, type AssetDetail, type AssetSize, type PrintItem } from "@/app/api/assets/shared";
 import { AssetPicker } from "@/components/asset-picker";
 import { printPreviewProblem } from "@/lib/print-file-policy";
+import { PrintFileSlot } from "./print-file-slot";
 import { Spinner, LoadingOverlay } from "@/components/spinner";
 import { DriveFolderFiles } from "@/components/drive-folder-files";
 import { HelpButton } from "@/components/help-guides";
@@ -320,6 +321,8 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
                   </div>
                 )}
                 <div className="mt-3"><p className="text-[12px] font-medium text-slate-600 mb-1">{t("📦 Parent SKU ที่ใช้", "📦 Parent SKUs used")}</p><ParentSkuField value={parentCodes} onChange={setParentCodes} disabled={trashed} /></div>
+                {/* ไฟล์พิมพ์ PNG ตัวจริง (ไฟล์เดียวกับที่หน้าจัดเรียงใช้) — เฉพาะลาย */}
+                {d.source === "artwork" && <PrintFileSlot key={d.id} assetId={d.id} previewUrl={d.url} readOnly={trashed} />}
               </>
             )}
 

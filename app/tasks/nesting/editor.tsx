@@ -27,7 +27,8 @@ import {
   type JobDraft, type NestingItem, type NestingJobRow, type NestingResult, type NestingStatus, type PrintType, type PublishResult, type SplitParams,
 } from "./data";
 import { HelperChip, HelperSetupCard, useHelperStatus } from "./helper-status";
-import { ItemsPanel, type AssetPreview } from "./items-panel";
+import { ItemsPanel, type AssetPreview, type MissWhy } from "./items-panel";
+import { DrivePrintPicker, type PrintFile } from "@/components/asset-library/print-file-slot";
 import { STATUS_STYLE } from "./list-view";
 import { SETTINGS_DEFAULTS, fmt, fmtLen, natural, newKey, readSettings, rebalanceFill, sizeOf, type FileInfo, type Settings, type Unit } from "./nest-utils";
 import { SettingsPanel, sheetFromPrintType } from "./settings-panel";
@@ -157,6 +158,10 @@ export function NestingEditor({ id }: { id: string }) {
   const [cloud, setCloud] = useState<Record<string, "saving" | "saved" | "fetching" | "error">>({});
   const [prints, setPrints] = useState<Record<string, CloudPrint>>({});
   const recovering = useRef(new Map<string, Promise<FileInfo | null>>());
+  // ไฟล์ไม่อยู่ในเครื่องเพราะอะไร (ข้อความบนการ์ดลาย): old = มีในคลังแต่ตัวช่วยเก่า · none = ยังไม่มีในคลัง · fail = โหลดจากคลังไม่สำเร็จ
+  const [missWhy, setMissWhy] = useState<Record<string, MissWhy>>({});
+  const replaced = useRef(new Set<string>());   // ใช้ไฟล์พิมพ์ของลายในคลังแทนไปแล้ว (กันทำซ้ำต่อชิ้น)
+  const [drivePick, setDrivePick] = useState<NestingItem | null>(null);
 
   useEffect(() => {
     for (const it of items) {
@@ -178,9 +183,16 @@ export function NestingEditor({ id }: { id: string }) {
       helperApi<FileInfo & { missing?: boolean }>(`/api/files/${sha}`, lang)
         .then(async (info) => {
           if (!info.missing) { setInfos((m) => ({ ...m, [sha]: { ...info, sha } })); return; }
-          // ไฟล์อยู่อีกเครื่อง → โหลดจากคลังกลาง (ถ้าเคยบันทึกไว้) · ไม่มีในคลัง = ให้ลากใหม่
+          // ไฟล์อยู่อีกเครื่อง → โหลดจากคลังกลาง (ถ้าเคยบันทึกไว้)
           const got = await recoverFile(it).catch(() => null);
-          if (!got) setMissing((m) => ({ ...m, [sha]: info.error ?? "missing" }));
+          if (got) return;
+          // ลายในคลังมีไฟล์พิมพ์อื่น (อัปที่การ์ดลาย / คัดลอกจาก Drive) → ใช้ไฟล์นั้นแทน
+          const src = (it.piece ? it.piece.source : it.file)!;
+          const p = it.asset_id ? (await getAssetPrints([it.asset_id]).catch(() => ({} as Record<string, CloudPrint>)))[it.asset_id] : undefined;
+          if (p && p.sha !== src.sha && cloudVer) { applyAssetPrint(it, p); return; }
+          const inLib = !!p || (!cloudVer && (await printDownloadUrl(src.sha).catch(() => null))?.exists === true);
+          setMissWhy((m) => ({ ...m, [sha]: !inLib ? "none" : cloudVer ? "fail" : "old" }));
+          setMissing((m) => ({ ...m, [sha]: info.error ?? "missing" }));
         })
         .catch((e) => setMissing((m) => ({ ...m, [sha]: (e as Error).message })));
     }
@@ -301,6 +313,28 @@ export function NestingEditor({ id }: { id: string }) {
   const replaceGroup = (group: NestingItem[], next: NestingItem[]) => {
     const keys = new Set(group.map((g) => g.key));
     setItems((list) => list.flatMap((x) => (x.key === group[0].key ? next : keys.has(x.key) ? [] : [x])));
+  };
+  /** ลายในคลังมีไฟล์พิมพ์ (อัปที่การ์ดลาย / คัดลอกจาก Drive) → ใช้แทนไฟล์ที่ไม่อยู่ในเครื่อง · ชิ้นที่แยก = รวมกลับแล้วแยกใหม่ตามค่าเดิม */
+  const applyAssetPrint = (it: NestingItem, p: CloudPrint) => {
+    const once = it.piece ? `p:${it.piece.source.sha}` : it.key;
+    if (replaced.current.has(once)) return;
+    replaced.current.add(once);
+    if (it.asset_id) setPrints((m) => ({ ...m, [it.asset_id!]: p }));
+    const file = { name: p.name, sha: p.sha };
+    if (!it.piece) { setItems((list) => list.map((x) => (x.key === it.key ? { ...x, file } : x))); return; }
+    const group = items.filter((x) => sameSplit(x, it));
+    const parent = parentOf(it, group, file);
+    if (it.asset_id) setSplits((m) => (m[it.asset_id!] ? m : { ...m, [it.asset_id!]: { gap_mm: it.piece!.gap_mm, joins: it.piece!.joins } }));
+    autoSplit.current.add(parent.key);
+    replaceGroup(group, [parent]);
+  };
+  /** เลือก PNG จาก Drive ของลาย → คลังคัดลอกให้แล้ว → ใช้กับการ์ดนี้ (ตัวช่วย 1.5+ โหลดลงเครื่องเอง) */
+  const onDrivePicked = (it: NestingItem, f: PrintFile) => {
+    setDrivePick(null);
+    toast("success", t("คัดลอกไฟล์จาก Drive เข้าคลังแล้ว", "Copied the file from Drive into the library"));
+    replaced.current.delete(it.piece ? `p:${it.piece.source.sha}` : it.key);
+    if (it.file) { const old = it.file.sha; setMissing((m) => { const x = { ...m }; delete x[old]; return x; }); }
+    applyAssetPrint(it, { sha: f.sha, name: f.name, size: f.size });
   };
 
   const attachFile = (key: string, file: File) => {
@@ -826,7 +860,9 @@ export function NestingEditor({ id }: { id: string }) {
             <ItemsPanel items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}
               busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)}
               canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack}
-              cloud={cloud} onLibrarySize={applyLibrarySize} librarySizeOf={canRun ? librarySizeOf : () => null} onSaveSize={openSaveSize} />
+              cloud={cloud} onLibrarySize={applyLibrarySize} librarySizeOf={canRun ? librarySizeOf : () => null} onSaveSize={openSaveSize}
+              missWhy={missWhy} cloudReady={cloudVer} helperVersion={helper.state === "ready" ? helper.version : null}
+              onDrivePick={canRun ? (key) => setDrivePick(items.find((x) => x.key === key) ?? null) : undefined} />
           </section>
           {canRun && (
             <div className="sticky bottom-2 rounded-xl border border-slate-200 bg-white p-3">
@@ -1024,8 +1060,14 @@ export function NestingEditor({ id }: { id: string }) {
         <ItemsPanel variant="table" items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}
           busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)}
           canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack}
-              cloud={cloud} onLibrarySize={applyLibrarySize} librarySizeOf={canRun ? librarySizeOf : () => null} onSaveSize={openSaveSize} />
+              cloud={cloud} onLibrarySize={applyLibrarySize} librarySizeOf={canRun ? librarySizeOf : () => null} onSaveSize={openSaveSize}
+              missWhy={missWhy} cloudReady={cloudVer} helperVersion={helper.state === "ready" ? helper.version : null}
+              onDrivePick={canRun ? (key) => setDrivePick(items.find((x) => x.key === key) ?? null) : undefined} />
       </ERPModal>
+      {drivePick?.asset_id && (
+        <DrivePrintPicker assetId={drivePick.asset_id} title={drivePick.piece?.parent.title || drivePick.title}
+          onClose={() => setDrivePick(null)} onPicked={(f) => onDrivePicked(drivePick, f)} />
+      )}
       {splitItem && splitInfo && (
         <SplitModal open onClose={() => setSplitKey(null)} item={splitItem} info={splitInfo} scale={scaleOf(splitItem, splitInfo)}
           initial={splitInitial} saved={!!savedSplit} canRemember={!!splitItem.asset_id && canRun} unit={settings.unit}
