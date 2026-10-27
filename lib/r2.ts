@@ -294,6 +294,19 @@ export async function r2PresignPut(key: string, expiresSec = 900): Promise<strin
   return signed.url;
 }
 
+/**
+ * 🔏 ลิงก์โหลดตรงจาก R2 (GET · หมดอายุ expiresSec วินาที) — โปรแกรมในเครื่อง (เช่น ตัวช่วยจัดเรียง) ดึงไฟล์ใหญ่ได้ไม่ผ่าน Vercel
+ * ไม่มี S3 env = null
+ */
+export async function r2PresignGet(key: string, expiresSec = 900): Promise<string | null> {
+  const s3 = s3Access();
+  if (!s3) return null;
+  const url = new URL(s3.urlFor(key));
+  url.searchParams.set("X-Amz-Expires", String(Math.max(60, Math.min(3600, Math.round(expiresSec)))));
+  const signed = await s3.client.sign(new Request(url.toString(), { method: "GET" }), { aws: { signQuery: true } });
+  return signed.url;
+}
+
 /** ขนาดไฟล์ใน R2 (ไบต์) — null = ไม่พบ (ใช้ยืนยันว่าอัปโหลดตรงสำเร็จจริง) */
 export async function r2HeadSize(key: string): Promise<number | null> {
   const r = await r2GetRange(key, 0, 0);

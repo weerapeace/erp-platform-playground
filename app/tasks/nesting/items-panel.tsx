@@ -31,7 +31,7 @@ const TABLE_COLS = (fill: boolean) =>
 
 export function ItemsPanel({
   items, infos, missing, previews, settings, resultByKey, busy, onChange, onAttach, onAddFiles, onPickLibrary,
-  canSplit, onSplit, onMergeBack, variant = "cards",
+  canSplit, onSplit, onMergeBack, variant = "cards", cloud = {}, onLibrarySize, librarySizeOf, onSaveSize,
 }: {
   items: NestingItem[];
   infos: Record<string, FileInfo>;
@@ -48,6 +48,10 @@ export function ItemsPanel({
   onSplit: (key: string) => void;
   onMergeBack: (key: string) => void;
   variant?: "cards" | "table";
+  cloud?: Record<string, "saving" | "saved" | "fetching" | "error">;   // สถานะไฟล์ในคลังกลาง (ตาม sha)
+  onLibrarySize?: (key: string, size: AssetSize) => void;           // ชิ้นที่แยก: ไซส์ในคลัง (ของภาพเต็ม) → ทุกชิ้นของภาพนั้น
+  librarySizeOf?: (it: NestingItem) => { w: number; h: number } | null;   // ขนาดที่บันทึกเป็นไซส์ในคลังได้ (cm · ของภาพเต็ม)
+  onSaveSize?: (key: string) => void;
 }) {
   const t = useT();
   const { lang } = useLang();
@@ -117,6 +121,25 @@ export function ItemsPanel({
   };
   type Ctx = ReturnType<typeof ctx>;
 
+  const cloudState = (it: NestingItem) => cloud[(it.piece ? it.piece.source : it.file)?.sha ?? ""];
+  const cloudChip = (it: NestingItem) => {
+    const st = cloudState(it);
+    if (!st) return null;
+    const m = {
+      saving: ["text-sky-700", t("☁️ กำลังบันทึกเข้าคลัง…", "☁️ Saving to library…")],
+      fetching: ["text-sky-700", t("☁️ กำลังโหลดจากคลัง…", "☁️ Downloading…")],
+      saved: ["text-emerald-700", t("☁️ เก็บในคลังแล้ว", "☁️ In the library")],
+      error: ["text-amber-700", t("☁️ บันทึกเข้าคลังไม่สำเร็จ", "☁️ Not saved to library")],
+    }[st];
+    return <span className={`shrink-0 text-[11px] ${m[0]}`}>{m[1]}</span>;
+  };
+  /** แสดงปุ่ม "บันทึกเป็นไซส์ในคลัง" — มีลายในคลัง + ขนาดนี้ยังไม่มีในไซส์ของลาย */
+  const canSaveSize = (it: NestingItem, c: Ctx) => {
+    const v = librarySizeOf?.(it);
+    if (!v || !onSaveSize) return false;
+    return !c.assetSizes.some((z) => (z.w ? Math.abs(toMm(z.w, z.unit) / 10 - v.w) < 0.05 : z.h ? Math.abs(toMm(z.h, z.unit) / 10 - v.h) < 0.05 : false));
+  };
+
   const thumb = (it: NestingItem, c: Ctx) => (
     <div className="h-12 w-14 shrink-0 overflow-hidden rounded-md bg-[repeating-conic-gradient(#eceef1_0_25%,#fff_0_50%)] bg-[length:12px_12px]">
       {c.info && !c.info.error ? <img src={helperFileUrl(c.info.sha, "thumb")} alt="" className="h-full w-full object-contain" />
@@ -136,7 +159,12 @@ export function ItemsPanel({
   const fileLine = (it: NestingItem, c: Ctx) => (
     <div className="flex items-center gap-2 text-xs">
       {it.file && !c.miss ? (
-        <span className="truncate text-slate-600" title={it.file.name}>📄 {it.file.name}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-slate-600" title={it.file.name}>📄 {it.file.name}</span>
+          {cloudChip(it)}
+        </span>
+      ) : c.miss === undefined && it.file && cloudState(it) === "fetching" ? (
+        <span className="text-sky-700">☁️ {t("กำลังโหลดไฟล์จากคลัง…", "Downloading the file from the library…")}</span>
       ) : (
         <span className="text-amber-700">
           {c.miss && it.piece ? t(`ชิ้นนี้ไม่ได้อยู่ในเครื่องนี้ — ลากไฟล์ต้นฉบับ ${it.piece.source.name} มาใหม่ (แยกชิ้นให้เอง)`, `This piece is not on this computer — drop the original ${it.piece.source.name} again (it splits automatically)`)
@@ -153,11 +181,13 @@ export function ItemsPanel({
   const sizeCtl = (it: NestingItem, c: Ctx) => (
     <>
       <div className="flex flex-wrap items-center gap-1.5">
-        {c.assetSizes.length > 0 && (
+        {c.assetSizes.length > 0 && (!it.piece || it.piece.parent_natural_mm) && (
           <select className="h-7 rounded border border-slate-300 px-1 text-xs" value=""
+            title={it.piece ? t("ไซส์ของภาพเต็ม — ทุกชิ้นของภาพนี้ปรับตามสัดส่วนเดิม", "Size of the whole image — every piece of it is scaled to match") : undefined}
             onChange={(e) => {
               const s = c.assetSizes[Number(e.target.value)];
               if (!s) return;
+              if (it.piece) { onLibrarySize?.(it.key, s); return; }
               patch(it.key, { size: s.w ? { mode: "width", value: toMm(s.w, s.unit) } : { mode: "height", value: toMm(s.h ?? 0, s.unit) } });
             }}>
             <option value="">{t("ไซส์จากคลัง…", "Library size…")}</option>
@@ -185,6 +215,13 @@ export function ItemsPanel({
       </div>
       <div className="mt-1 text-[11px] text-slate-500">
         {c.sz ? `→ ${fmtLen(c.sz.w, u, lang)} × ${fmtLen(c.sz.h, u, lang)} · ${fmt(c.sz.dpi, 0, lang)} dpi` : it.size.mode !== "natural" && !(Number(it.size.value) > 0) ? t("→ ใส่ขนาด", "→ enter a size") : ""}
+        {canSaveSize(it, c) && (
+          <button type="button" onClick={() => onSaveSize?.(it.key)}
+            title={t("เพิ่มขนาดนี้เป็นไซส์ของลายในคลังไฟล์กลาง (งานต่อไปเลือกได้เลย)", "Add this size to the artwork in the central library (pick it next time)")}
+            className="ml-2 rounded border border-violet-300 bg-violet-50 px-1.5 py-0.5 text-[11px] text-violet-700 hover:bg-violet-100">
+            ＋ {t("บันทึกเป็นไซส์ในคลัง", "Save as library size")}
+          </button>
+        )}
       </div>
     </>
   );

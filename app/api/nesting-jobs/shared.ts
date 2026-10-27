@@ -42,6 +42,7 @@ export type NestingPiece = SplitParams & {
   source: { name: string; sha: string };            // ภาพต้นฉบับ (ลากไฟล์นี้ใหม่ = สร้างชิ้นใหม่ได้ตรงเดิม)
   index: number; count: number;
   parent: { title: string; size: { mode: SizeMode; value: number | null }; qty: number };   // ไว้รวมกลับเป็นภาพเดียว
+  parent_natural_mm?: [number, number] | null;   // ขนาดจริงของภาพเต็ม (ไซส์ในคลังเป็นของภาพเต็ม → แปลงเป็นขนาดชิ้นได้)
 };
 
 export type NestingResult = {
@@ -143,6 +144,8 @@ function cleanPiece(v: unknown): NestingPiece | null {
     source: { name: String(src.name ?? "").slice(0, 200), sha: src.sha },
     index: Math.max(0, Math.floor(num(o.index) ?? 0)), count: Math.max(1, Math.floor(num(o.count) ?? 1)),
     parent: { title: String(par.title ?? "").slice(0, 200), size: cleanSize(par.size), qty: Math.max(0, Math.floor(num(par.qty) ?? 0)) },
+    parent_natural_mm: Array.isArray(o.parent_natural_mm) && o.parent_natural_mm.length === 2 && o.parent_natural_mm.every((x) => Number(x) > 0)
+      ? [Number(o.parent_natural_mm[0]), Number(o.parent_natural_mm[1])] : null,
   };
 }
 

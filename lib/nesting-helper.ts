@@ -19,6 +19,8 @@ export const HELPER_DRIVE_VERSION = "1.2.0";
 export const HELPER_SPLIT_VERSION = "1.3.0";
 /** เรียงเป็นแถวเฉพาะลาย + แผ่นม้วนเติมช่องว่างไม่ยืดม้วน ได้ตั้งแต่รุ่นนี้ */
 export const HELPER_ROWS_VERSION = "1.4.0";
+/** ส่ง/โหลดไฟล์พิมพ์กับคลังกลาง (R2) ได้ตั้งแต่รุ่นนี้ */
+export const HELPER_CLOUD_VERSION = "1.5.0";
 
 /** ผลแยกชิ้นจากตัวช่วย (POST /api/files/<sha>/split) — box = pixel ในกรอบเนื้องาน · auto = เลขกลุ่มอัตโนมัติที่รวมกัน */
 export type SplitGroup = { index: number; auto: number[]; color: string; box: [number, number, number, number]; w_mm: number; h_mm: number };

@@ -14,6 +14,32 @@ export type { NestingItem, NestingJobRow, NestingLock, NestingPiece, NestingResu
 /** มุมหมุนของลายที่ล็อก → รายการมุมที่ส่งให้ตัวช่วย (ตามแผ่น = ไม่ส่ง) */
 export const ROTATE_LOCK_ANGLES: Record<RotateLock, number[] | null> = { sheet: null, none: [0], flip: [0, 180], quad: [0, 90, 180, 270] };
 
+// ---------------------------------------------------------------- ไฟล์พิมพ์ในคลังกลาง (R2) + ไซส์ในคลัง
+
+export type CloudPrint = { sha: string; name: string; size: number | null };
+
+/** เตรียมส่งไฟล์ขึ้นคลัง: มีแล้ว = ไม่ต้องส่ง · ไม่มี = ลิงก์ PUT ให้ตัวช่วยส่งตรง */
+export async function openPrintUpload(sha: string): Promise<{ exists: boolean; put_url: string | null }> {
+  return json(await apiFetch("/api/nesting-jobs/print-files", { method: "POST", body: JSON.stringify({ sha }) }));
+}
+/** ยืนยันว่าไฟล์ขึ้นคลังแล้ว + จำไว้กับลายในคลัง (มี asset_id = แทนที่ไฟล์เดิมของลายนั้น) */
+export async function confirmPrintUpload(sha: string, name: string, assetId: string | null): Promise<void> {
+  await json(await apiFetch("/api/nesting-jobs/print-files", { method: "PUT", body: JSON.stringify({ sha, name, asset_id: assetId }) }));
+}
+/** ลิงก์โหลดไฟล์จากคลัง (ไม่มีในคลัง = exists false) */
+export async function printDownloadUrl(sha: string): Promise<{ exists: boolean; get_url: string | null }> {
+  return json(await apiFetch(`/api/nesting-jobs/print-files?sha=${sha}`));
+}
+/** ไฟล์พิมพ์ที่จำไว้กับลายในคลัง */
+export async function getAssetPrints(ids: string[]): Promise<Record<string, CloudPrint>> {
+  if (!ids.length) return {};
+  return json<Record<string, CloudPrint>>(await apiFetch(`/api/nesting-jobs/asset-prints?ids=${ids.join(",")}`));
+}
+/** เพิ่มไซส์เข้าลายในคลัง → รายการไซส์ล่าสุด */
+export async function addAssetSize(assetId: string, size: { label: string; w: number | null; h: number | null; unit: "cm" }): Promise<{ sizes: import("@/app/api/assets/shared").AssetSize[]; added: boolean }> {
+  return json(await apiFetch("/api/nesting-jobs/asset-sizes", { method: "POST", body: JSON.stringify({ asset_id: assetId, size }) }));
+}
+
 /** ค่าแยกชิ้นที่จำไว้กับลายในคลัง (เฉพาะลายที่ตั้งไว้) */
 export async function getAssetSplits(ids: string[]): Promise<Record<string, SplitParams>> {
   if (!ids.length) return {};

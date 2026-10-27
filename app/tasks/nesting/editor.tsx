@@ -19,10 +19,11 @@ import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { usePushToast } from "@/components/toast";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
-import { HELPER_ROWS_VERSION, HELPER_SPLIT_VERSION, helperApi, helperDownload, helperLink, versionAtLeast, type SplitResult } from "@/lib/nesting-helper";
+import { HELPER_CLOUD_VERSION, HELPER_ROWS_VERSION, HELPER_SPLIT_VERSION, helperApi, helperDownload, helperLink, versionAtLeast, type SplitResult } from "@/lib/nesting-helper";
 import type { AssetDetail, AssetRow, AssetSize } from "@/app/api/assets/shared";
 import {
-  ROTATE_LOCK_ANGLES, createNestingJob, getAssetSplits, getNestingJob, listPrintTypes, saveAssetSplit, toMm, updateNestingJob,
+  ROTATE_LOCK_ANGLES, addAssetSize, confirmPrintUpload, createNestingJob, getAssetPrints, getAssetSplits, getNestingJob, listPrintTypes,
+  openPrintUpload, printDownloadUrl, saveAssetSplit, toMm, updateNestingJob, type CloudPrint,
   type JobDraft, type NestingItem, type NestingJobRow, type NestingResult, type NestingStatus, type PrintType, type PublishResult, type SplitParams,
 } from "./data";
 import { HelperChip, HelperSetupCard, useHelperStatus } from "./helper-status";
@@ -97,6 +98,7 @@ export function NestingEditor({ id }: { id: string }) {
   const ready = helper.state === "ready";
   const canRun = can("nesting.run");
   const canSplit = helper.state === "ready" && versionAtLeast(helper.version, HELPER_SPLIT_VERSION);   // ล็อกลาย + แยกชิ้น (ตัวช่วย v1.3.0+)
+  const cloudVer = helper.state === "ready" && versionAtLeast(helper.version, HELPER_CLOUD_VERSION);   // ไฟล์พิมพ์ในคลังกลาง (v1.5.0+)
 
   // ---------------------------------------------------------------- งาน (เก็บใน ERP)
   const [jobId, setJobId] = useState<string | null>(id === "new" ? null : id);
@@ -151,6 +153,10 @@ export function NestingEditor({ id }: { id: string }) {
   const askedAssets = useRef(new Set<string>());
   const askedFiles = useRef(new Set<string>());
   const [busy, setBusy] = useState<string | null>(null);   // ข้อความตอนรอ (อัปไฟล์ / ทำ PDF)
+  // ไฟล์พิมพ์ในคลังกลาง (R2): สถานะต่อไฟล์ + ไฟล์ที่จำไว้กับลายในคลัง
+  const [cloud, setCloud] = useState<Record<string, "saving" | "saved" | "fetching" | "error">>({});
+  const [prints, setPrints] = useState<Record<string, CloudPrint>>({});
+  const recovering = useRef(new Map<string, Promise<FileInfo | null>>());
 
   useEffect(() => {
     for (const it of items) {
@@ -170,13 +176,16 @@ export function NestingEditor({ id }: { id: string }) {
       if (!sha || askedFiles.current.has(sha)) continue;
       askedFiles.current.add(sha);
       helperApi<FileInfo & { missing?: boolean }>(`/api/files/${sha}`, lang)
-        .then((info) => {
-          if (info.missing) setMissing((m) => ({ ...m, [sha]: info.error ?? "missing" }));  // ไฟล์อยู่อีกเครื่อง → ให้ลากใหม่
-          else setInfos((m) => ({ ...m, [sha]: { ...info, sha } }));
+        .then(async (info) => {
+          if (!info.missing) { setInfos((m) => ({ ...m, [sha]: { ...info, sha } })); return; }
+          // ไฟล์อยู่อีกเครื่อง → โหลดจากคลังกลาง (ถ้าเคยบันทึกไว้) · ไม่มีในคลัง = ให้ลากใหม่
+          const got = await recoverFile(it).catch(() => null);
+          if (!got) setMissing((m) => ({ ...m, [sha]: info.error ?? "missing" }));
         })
         .catch((e) => setMissing((m) => ({ ...m, [sha]: (e as Error).message })));
     }
-  }, [items, ready, lang]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, ready, lang, cloudVer]);
 
   const [splits, setSplits] = useState<Record<string, SplitParams>>({});
   const askedSplits = useRef(new Set<string>());
@@ -210,6 +219,63 @@ export function NestingEditor({ id }: { id: string }) {
     return true;
   };
 
+  // ---------------------------------------------------------------- ไฟล์พิมพ์ในคลังกลาง (R2) — ตัวช่วยส่ง/ดึงตรง ไม่ผ่านเซิร์ฟเวอร์ ERP
+  /** ไฟล์พิมพ์ → คลังกลาง + จำไว้กับลายในคลัง (เบื้องหลัง · พลาดก็ยังใช้ในเครื่องนี้ได้) */
+  const saveToCloud = async (sha: string, name: string, assetId: string | null) => {
+    if (!cloudVer || !canRun) return;
+    setCloud((m) => ({ ...m, [sha]: "saving" }));
+    try {
+      const up = await openPrintUpload(sha);
+      if (!up.exists && up.put_url) await helperApi(`/api/files/${sha}/cloud-upload`, lang, { method: "POST", body: { url: up.put_url } });
+      await confirmPrintUpload(sha, name, assetId);
+      if (assetId) setPrints((m) => ({ ...m, [assetId]: { sha, name, size: null } }));
+      setCloud((m) => ({ ...m, [sha]: "saved" }));
+    } catch (e) {
+      setCloud((m) => ({ ...m, [sha]: "error" }));
+      toast("warning", t(`บันทึกไฟล์ ${name} เข้าคลังไม่สำเร็จ — ยังใช้ในเครื่องนี้ได้ (${(e as Error).message})`, `Couldn't save ${name} to the library — it still works on this computer (${(e as Error).message})`));
+    }
+  };
+  /** โหลดไฟล์จากคลังกลางมาไว้ในตัวช่วยเครื่องนี้ (ไม่มีในคลัง = null) */
+  const fetchFromCloud = async (sha: string, name: string): Promise<FileInfo | null> => {
+    if (!cloudVer) return null;
+    const d = await printDownloadUrl(sha);
+    if (!d.exists || !d.get_url) return null;
+    setCloud((m) => ({ ...m, [sha]: "fetching" }));
+    try {
+      const info = await helperApi<FileInfo>("/api/files/cloud-fetch", lang, { method: "POST", body: { sha, name, url: d.get_url } });
+      askedFiles.current.add(sha);
+      setInfos((m) => ({ ...m, [sha]: { ...info, sha } }));
+      setMissing((m) => { const x = { ...m }; delete x[sha]; return x; });
+      setCloud((m) => ({ ...m, [sha]: "saved" }));
+      return info;
+    } catch (e) {
+      setCloud((m) => ({ ...m, [sha]: "error" }));
+      throw e;
+    }
+  };
+  /** การ์ดที่ไฟล์ไม่อยู่ในเครื่อง → ดึงจากคลัง · ชิ้นที่แยก = ดึงต้นฉบับแล้วแยกใหม่ตามค่าเดิม (ภาพเดิม+ค่าเดิม = ชิ้นเดิมทุกครั้ง) */
+  const recoverFile = (it: NestingItem): Promise<FileInfo | null> => {
+    const src = it.piece ? it.piece.source : it.file;
+    if (!src) return Promise.resolve(null);
+    const run = recovering.current.get(src.sha) ?? (async () => {
+      const info = await fetchFromCloud(src.sha, src.name);
+      if (!info || !it.piece) return info;
+      const res = await helperApi<SplitResult>(`/api/files/${src.sha}/split`, lang, {
+        method: "POST", body: { gap_mm: it.piece.gap_mm, joins: it.piece.joins, apply: true, name: src.name },
+      });
+      const pcs = res.pieces ?? [];
+      for (const pc of pcs) askedFiles.current.add(pc.sha);
+      setInfos((m) => ({ ...m, ...Object.fromEntries(pcs.map((pc) => [pc.sha, pc as unknown as FileInfo])) }));
+      setMissing((m) => { const x = { ...m }; for (const pc of pcs) delete x[pc.sha]; return x; });
+      return info;
+    })();
+    recovering.current.set(src.sha, run);
+    return run.then((info) => {
+      if (!info || !it.piece) return info;
+      return it.file && infos[it.file.sha] ? infos[it.file.sha] : info;
+    });
+  };
+
   /** ผลแยกชิ้นจากตัวช่วย → การ์ดชิ้นละใบ (ขนาดเท่าเดิมในภาพ · จำนวน/ล็อกตามการ์ดเดิม) */
   const makePieces = (src: NestingItem, srcInfo: FileInfo, res: SplitResult, params: SplitParams, qtys?: number[], keep?: NestingItem[]): NestingItem[] => {
     const pieces = res.pieces ?? [];
@@ -223,7 +289,8 @@ export function NestingEditor({ id }: { id: string }) {
       size: src.size.mode === "natural" ? { mode: "natural", value: null } : { mode: "width", value: round2(pc.w_mm * s) },
       qty: qtys?.[k] ?? src.qty, fill_pct: settings.fill ? round2((src.fill_pct || 0) / n) : 0,
       file: { name: pc.name, sha: pc.sha }, lock: keep ? keep[k]?.lock ?? null : src.lock ?? null,
-      piece: { ...params, source: src.file!, index: k, count: n, parent: { title: src.title, size: src.size, qty: src.qty } },
+      piece: { ...params, source: src.file!, index: k, count: n, parent: { title: src.title, size: src.size, qty: src.qty },
+        parent_natural_mm: res.natural_mm ?? null },
     }));
   };
   /** การ์ดภาพเดิม (ก่อนแยก) จากการ์ดชิ้นใดชิ้นหนึ่ง */
@@ -243,6 +310,7 @@ export function NestingEditor({ id }: { id: string }) {
       if (!info) return;
       const it = items.find((x) => x.key === key);
       const nf = { name: file.name, sha: info.sha };
+      if (!info.error) void saveToCloud(info.sha, file.name, it?.asset_id ?? null);   // เก็บกับลายในคลัง (แทนที่ไฟล์เดิมของลาย)
       const group = it?.piece ? items.filter((x) => sameSplit(x, it)).sort((a, b) => a.piece!.index - b.piece!.index) : it ? [it] : [];
       const params: SplitParams | undefined = it?.piece ? { gap_mm: it.piece.gap_mm, joins: it.piece.joins } : it?.asset_id ? splits[it.asset_id] : undefined;
       if (it && params && !info.error) {
@@ -305,6 +373,7 @@ export function NestingEditor({ id }: { id: string }) {
     if (needHelper()) return;
     void withBusy(t(`กำลังอ่านและตรวจ ${files.length} ไฟล์…`, `Reading and checking ${files.length} file(s)…`), async () => {
       const ok = await uploadToHelper(files);
+      for (const info of ok) void saveToCloud(info.sha, info.name ?? "image.png", null);   // เปิดงานนี้เครื่องอื่นโหลดให้เอง
       setItems((list) => [...list, ...ok.map((info): NestingItem => ({
         key: newKey(), asset_id: null, title: stem(info.name ?? "image.png"), size: { mode: "natural", value: null },
         qty: 1, fill_pct: 0, file: { name: info.name ?? "image.png", sha: info.sha },
@@ -313,16 +382,97 @@ export function NestingEditor({ id }: { id: string }) {
   };
 
   const [pickerOpen, setPickerOpen] = useState(false);
+  const autoSplit = useRef(new Set<string>());   // การ์ดจากคลังที่ได้ไฟล์จากคลัง + จำการแยกไว้ → แยกให้เองเมื่อไฟล์พร้อม
   const addFromLibrary = (assets: AssetRow[]) => {
     setPreviews((p) => ({ ...p, ...Object.fromEntries(assets.map((a) => [a.id, { url: a.url, sizes: a.sizes ?? [] }])) }));
     for (const a of assets) askedAssets.current.add(a.id);
-    setItems((list) => [...list, ...assets.map((a): NestingItem => {
+    const added = assets.map((a): NestingItem => {
       const s = (a.sizes ?? []).find((z) => z.unit !== "px" && (z.w || z.h));
       return {
         key: newKey(), asset_id: a.id, title: a.title || stem(a.file_name), qty: 1, fill_pct: 0, file: null,
         size: !s ? { mode: "natural", value: null } : s.w ? { mode: "width", value: toMm(s.w, s.unit) } : { mode: "height", value: toMm(s.h ?? 0, s.unit) },
       };
-    })]);
+    });
+    setItems((list) => [...list, ...added]);
+    const ids = assets.map((a) => a.id);
+    Promise.all([getAssetPrints(ids), getAssetSplits(ids)]).then(([pm, sm]) => {
+      setPrints((m) => ({ ...m, ...pm }));
+      setSplits((m) => ({ ...m, ...sm }));
+      for (const id of ids) askedSplits.current.add(id);
+      const byKey = new Map(added.filter((x) => x.asset_id && pm[x.asset_id]).map((x) => [x.key, pm[x.asset_id!]]));
+      if (!byKey.size) return;
+      for (const x of added) if (byKey.has(x.key) && x.asset_id && sm[x.asset_id]) autoSplit.current.add(x.key);
+      setItems((list) => list.map((x) => (byKey.has(x.key) && !x.file ? { ...x, file: { name: byKey.get(x.key)!.name, sha: byKey.get(x.key)!.sha } } : x)));
+      toast("success", t(`ใส่ไฟล์พิมพ์ที่เก็บไว้กับลายให้แล้ว ${byKey.size} ลาย`, `Attached the saved print file for ${byKey.size} artwork(s)`));
+    }).catch(() => { /* อ่านไม่ได้ = ลากไฟล์เองตามเดิม */ });
+  };
+  useEffect(() => {
+    for (const k of [...autoSplit.current]) {
+      const it = items.find((x) => x.key === k);
+      if (!it) { autoSplit.current.delete(k); continue; }
+      const info = it.file ? infos[it.file.sha] : undefined;
+      if (!info) continue;   // ยังโหลดไฟล์ไม่เสร็จ
+      autoSplit.current.delete(k);
+      const params = it.asset_id ? splits[it.asset_id] : undefined;
+      if (!params || !canSplit || it.piece || info.error) continue;
+      void (async () => {
+        try {
+          const res = await helperApi<SplitResult>(`/api/files/${info.sha}/split`, lang, { method: "POST", body: { ...params, apply: true, name: it.file!.name } });
+          replaceGroup([it], makePieces(it, info, res, params));
+          toast("success", t(`${it.title}: แยกเป็น ${res.pieces?.length ?? 0} ชิ้นตามที่จำไว้กับลายนี้`, `${it.title}: split into ${res.pieces?.length ?? 0} pieces as remembered`));
+        } catch (e) { toast("warning", t(`แยกชิ้นตามที่จำไว้ไม่ได้ (${(e as Error).message})`, `Couldn't split as remembered (${(e as Error).message})`)); }
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, infos, splits, canSplit]);
+
+  // ---------------------------------------------------------------- ไซส์ในคลัง: ใช้กับชิ้นที่แยก / บันทึกไซส์ใหม่กลับคลัง
+  /** ไซส์ในคลัง (ของภาพเต็ม) → ใช้กับทุกชิ้นของภาพเดียวกัน (ชิ้นได้ขนาดตามสัดส่วนเดิมในภาพ) */
+  const applyLibrarySize = (key: string, z: AssetSize) => {
+    const it = items.find((x) => x.key === key);
+    const pn = it?.piece?.parent_natural_mm;
+    if (!it?.piece || !pn) return;
+    const k = z.w ? toMm(z.w, z.unit) / pn[0] : toMm(z.h ?? 0, z.unit) / pn[1];
+    if (!(k > 0)) return;
+    const parentSize = z.w ? { mode: "width" as const, value: toMm(z.w, z.unit) } : { mode: "height" as const, value: toMm(z.h ?? 0, z.unit) };
+    setItems((list) => list.map((x) => {
+      if (!sameSplit(x, it)) return x;
+      const pi = x.file ? infos[x.file.sha] : undefined;
+      const size = pi && !pi.error ? { mode: "width" as const, value: round2(natural(pi).w * k) } : x.size;
+      return { ...x, size, piece: { ...x.piece!, parent: { ...x.piece!.parent, size: parentSize } } };
+    }));
+  };
+  /** ขนาดที่จะบันทึกเป็นไซส์ในคลัง (cm · ของภาพเต็ม) — ไม่มีลาย/ยังไม่มีขนาด/ชิ้นเก่าที่ไม่รู้ขนาดภาพเต็ม = null */
+  const librarySizeOf = (it: NestingItem): { w: number; h: number } | null => {
+    const info = it.file ? infos[it.file.sha] : undefined;
+    if (!it.asset_id || !info || info.error) return null;
+    const sz = sizeOf(it, info);
+    if (!sz) return null;
+    if (!it.piece) return { w: round2(sz.w / 10), h: round2(sz.h / 10) };
+    const pn = it.piece.parent_natural_mm;
+    if (!pn) return null;
+    const k = sz.w / natural(info).w;
+    return { w: round2((pn[0] * k) / 10), h: round2((pn[1] * k) / 10) };
+  };
+  const [sizeSave, setSizeSave] = useState<{ key: string; w: number; h: number; label: string; saving: boolean } | null>(null);
+  const openSaveSize = (key: string) => {
+    const it = items.find((x) => x.key === key);
+    const v = it ? librarySizeOf(it) : null;
+    if (v) setSizeSave({ key, ...v, label: "", saving: false });
+  };
+  const confirmSaveSize = async () => {
+    const it = sizeSave ? items.find((x) => x.key === sizeSave.key) : undefined;
+    if (!sizeSave || !it?.asset_id) return;
+    setSizeSave({ ...sizeSave, saving: true });
+    try {
+      const r = await addAssetSize(it.asset_id, { label: sizeSave.label.trim(), w: sizeSave.w, h: sizeSave.h, unit: "cm" });
+      setPreviews((m) => ({ ...m, [it.asset_id!]: { url: m[it.asset_id!]?.url ?? null, sizes: r.sizes } }));
+      toast("success", r.added ? t("บันทึกไซส์เข้าคลังแล้ว", "Size saved to the library") : t("ไซส์นี้มีในคลังอยู่แล้ว", "This size is already in the library"));
+      setSizeSave(null);
+    } catch (e) {
+      toast("error", (e as Error).message);
+      setSizeSave((cur) => (cur ? { ...cur, saving: false } : cur));
+    }
   };
 
   // ---------------------------------------------------------------- จัดเรียง (ตัวช่วยคิด)
@@ -675,7 +825,8 @@ export function NestingEditor({ id }: { id: string }) {
             </h3>
             <ItemsPanel items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}
               busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)}
-              canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack} />
+              canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack}
+              cloud={cloud} onLibrarySize={applyLibrarySize} librarySizeOf={canRun ? librarySizeOf : () => null} onSaveSize={openSaveSize} />
           </section>
           {canRun && (
             <div className="sticky bottom-2 rounded-xl border border-slate-200 bg-white p-3">
@@ -829,6 +980,33 @@ export function NestingEditor({ id }: { id: string }) {
             ? t("มีชิ้นที่ชิดเกินระยะหรือเลยขอบแผ่น — งานจริงอาจชนกันหรือพิมพ์ตกขอบ", "Some pieces are too close or over the sheet edge — the print may overlap or run off the edge") : null} />
       )}
       {cardOpen && pub.asset_id && <AssetDetailPopup assetId={pub.asset_id} onClose={() => setCardOpen(false)} />}
+      <ERPModal open={!!sizeSave} onClose={() => { if (!sizeSave?.saving) setSizeSave(null); }} size="sm"
+        title={`📐 ${t("บันทึกเป็นไซส์ในคลัง", "Save as a library size")}`}
+        description={t("ไซส์นี้จะไปอยู่ในลายนี้ที่คลังไฟล์กลาง — งานต่อไปเลือกจาก “ไซส์จากคลัง…” ได้เลย", "This size is added to the artwork in the central library — pick it from “Library size…” next time")}
+        footer={<div className="flex justify-end gap-2">
+          <button type="button" onClick={() => setSizeSave(null)} disabled={sizeSave?.saving} className="rounded-lg border border-slate-300 px-4 py-2 text-sm">{t("ยกเลิก", "Cancel")}</button>
+          <button type="button" onClick={() => void confirmSaveSize()} disabled={sizeSave?.saving}
+            className="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-60">
+            {sizeSave?.saving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกเข้าคลัง", "Save to library")}
+          </button>
+        </div>}>
+        {sizeSave && (
+          <div className="space-y-3 text-sm">
+            <label className="block">
+              <span className="mb-1 block text-xs text-slate-500">{t("ชื่อไซส์ (เช่น XS, M, 10 cm)", "Size name (e.g. XS, M, 10 cm)")}</span>
+              <input autoFocus value={sizeSave.label} maxLength={40} onChange={(e) => setSizeSave({ ...sizeSave, label: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") void confirmSaveSize(); }}
+                className="h-9 w-full rounded-lg border border-slate-300 px-3" placeholder="XS" />
+            </label>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-slate-700">
+              {t(`กว้าง ${sizeSave.w} × สูง ${sizeSave.h} cm`, `W ${sizeSave.w} × H ${sizeSave.h} cm`)}
+              {items.find((x) => x.key === sizeSave.key)?.piece && (
+                <div className="mt-1 text-[11px] text-slate-500">{t("ขนาดของภาพเต็ม (ก่อนแยกชิ้น)", "Size of the whole image (before splitting)")}</div>
+              )}
+            </div>
+          </div>
+        )}
+      </ERPModal>
       <ERPModal open={itemsBig} onClose={() => setItemsBig(false)} size="xl" defaultExpanded
         title={`🖼 ${t("จัดการรูป", "Manage images")} · ${t(`${items.length} ลาย · ${items.reduce((a, i) => a + i.qty, 0)} ชิ้น`, `${items.length} designs · ${items.reduce((a, i) => a + i.qty, 0)} pcs`)}`}
         description={t("แก้ได้ทุกช่องเหมือนการ์ด · ลาก ⠿ เพื่อสลับลำดับ · ลากไฟล์ PNG มาวางที่แถวเพื่อใส่ไฟล์", "Edit everything as on the cards · drag ⠿ to reorder · drop a PNG on a row to attach it")}
@@ -845,7 +1023,8 @@ export function NestingEditor({ id }: { id: string }) {
         }>
         <ItemsPanel variant="table" items={items} infos={infos} missing={missing} previews={previews} settings={settings} resultByKey={resultByKey}
           busy={!!busy} onChange={setItems} onAttach={attachFile} onAddFiles={addFiles} onPickLibrary={() => setPickerOpen(true)}
-          canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack} />
+          canSplit={canSplit} onSplit={setSplitKey} onMergeBack={mergeBack}
+              cloud={cloud} onLibrarySize={applyLibrarySize} librarySizeOf={canRun ? librarySizeOf : () => null} onSaveSize={openSaveSize} />
       </ERPModal>
       {splitItem && splitInfo && (
         <SplitModal open onClose={() => setSplitKey(null)} item={splitItem} info={splitInfo} scale={scaleOf(splitItem, splitInfo)}
