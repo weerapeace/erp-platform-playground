@@ -115,6 +115,10 @@ export type MiniTableProps<T> = {
   /** "cards" = 1 แถว = 1 การ์ด (ใช้ renderCard) ยังค้นหา/เรียง/จัดกลุ่ม/เลือก/กางได้เหมือนตาราง — เช่น iPad แนวตั้ง */
   layout?: "table" | "cards";
   renderCard?: (row: T) => ReactNode;
+  /** การ์ดแบบหยิบเลือก (คู่ layout "cards" + selectable): กดทั้งใบ = ติ๊ก · ช่องติ๊กลอยมุมซ้ายบน ไม่เว้นซ้าย · เนื้อการ์ดชิดขอบ (รูปเต็มใบได้) */
+  cardPick?: boolean;
+  /** เรียงแบบพิเศษที่ไม่ผูกคอลัมน์ (เช่น "เลือกล่าสุดก่อน") — อยู่บนสุดของเมนูเรียง · ป้ายใส่เต็มเอง · ทางเดียว (ไม่มีปุ่มสลับทิศ) */
+  extraSorts?: { key: string; label: string; compare: (a: T, b: T) => number }[];
   maxHeightClass?: string;              // เช่น "max-h-[calc(100vh-210px)]"
   className?: string;
   footnote?: ReactNode;
@@ -153,7 +157,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded, onCellClick, activeCell,
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
-    dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, maxHeightClass = "", className = "", footnote,
+    dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, cardPick, extraSorts, maxHeightClass = "", className = "", footnote,
     resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid, widths: widthsCtl, onWidthsChange, fitContent, lazyRows,
   } = props;
   // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
@@ -280,7 +284,9 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   );
 
   // เรียงลำดับ
+  const extraSort = extraSorts?.find((s) => s.key === sortKey);
   const sorted = useMemo(() => {
+    if (extraSort) return [...filtered].sort(extraSort.compare);
     const col = sortable.find((c) => c.key === sortKey);
     if (!col?.sortValue) return filtered;
     const sv = col.sortValue;
@@ -290,7 +296,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       if (typeof va === "number" && typeof vb === "number") return (va - vb) * mul;
       return String(va ?? "").localeCompare(String(vb ?? ""), "th") * mul;
     });
-  }, [filtered, sortKey, dir, sortable]);
+  }, [filtered, sortKey, dir, sortable, extraSort]);
 
   // จัดกลุ่ม
   const groups = useMemo<{ name: string; rows: T[] }[]>(() => {
@@ -399,6 +405,19 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     const k = rowKey(r);
     const on = sel.has(k);
     const open = !!renderExpanded && !!expandedKeys?.has(k);
+    if (cardPick) {
+      return (
+        <div key={k} onClick={() => (onRowClick ? onRowClick(r) : selectable && toggleKey(k))}
+          className={`relative overflow-hidden rounded-xl border bg-white cursor-pointer ${on ? "border-rose-400 ring-2 ring-rose-300" : "border-slate-200 hover:border-slate-400"}`}>
+          {selectable && (
+            <span className="absolute top-1.5 left-1.5 z-10 flex rounded-md bg-white/90 p-1 shadow-sm" onClick={(e) => e.stopPropagation()}>
+              <input type="checkbox" checked={on} onChange={() => toggleKey(k)} className={boxCls} />
+            </span>
+          )}
+          {renderCard!(r)}
+        </div>
+      );
+    }
     return (
       <div key={k} onClick={onRowClick ? () => onRowClick(r) : undefined} style={cardGrid && open ? { gridColumn: "1 / -1" } : undefined}
         className={`relative rounded-xl border p-3 ${on ? "border-rose-300 bg-rose-50/40" : open ? "border-blue-300 bg-white" : "border-slate-200 bg-white"} ${onRowClick ? "cursor-pointer active:bg-blue-50/40" : ""}`}>
@@ -423,7 +442,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   );
 
   const total = rows.length, shown = sorted.length;
-  const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || groupBy) && total > 0;
+  const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || extraSorts?.length || groupBy) && total > 0;
   const actionsInToolbar = !!inlineActions && toolbarOn;   // แถวเดียว: เรียง/จัดกลุ่ม … ปุ่มของผู้เรียกชิดขวา
   const onScroll = onScrollTop ? (e: React.UIEvent<HTMLDivElement>) => onScrollTop(e.currentTarget.scrollTop, e.currentTarget) : undefined;
 
@@ -445,13 +464,14 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
                 className="h-8 w-56 pl-7 pr-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-rose-300" />
             </div>
           )}
-          {sortable.length > 0 && (
+          {(sortable.length > 0 || !!extraSorts?.length) && (
             <>
               <select value={sortKey} onChange={(e) => setSort(e.target.value, dir)} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-600">
+                {extraSorts?.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                 <option value="">{t("เรียง: ลำดับเดิม", "Sort: original order")}</option>
                 {sortable.map((c) => <option key={c.key} value={c.key}>{t("เรียง:", "Sort:")} {c.sortLabel ?? (typeof c.header === "string" ? c.header : c.key)}</option>)}
               </select>
-              {sortKey && (
+              {sortKey && !extraSort && (
                 <button onClick={() => setSort(sortKey, dir === "asc" ? "desc" : "asc")} title={t("สลับทิศ", "Reverse")} className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white text-slate-500">{dir === "asc" ? t("▲ น้อย→มาก", "▲ Low→High") : t("▼ มาก→น้อย", "▼ High→Low")}</button>
               )}
             </>

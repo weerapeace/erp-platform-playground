@@ -5,12 +5,12 @@
  *
  * ใช้ใน Section "ตารางสินค้า / คอลเลกชัน" แหล่ง "เลือก SKU เองทีละตัว" (schema field type = skus) → 1 การ์ด / SKU
  * ดึงจาก /api/public/storefront/products?shop= (ชุดเดียวกับที่เว็บร้านเห็น: สินค้าที่เผยแพร่ + ตัวเลือกสีพร้อมรูป)
- * หน้าตา/การใช้งานเหมือน WebsiteProductPicker: ป๊อป ERPModal + MiniTable เลือกหลายแถว · ลาก ⠿ เรียง · ✕ เอาออก
+ * หน้าตา/การใช้งานเหมือน WebsiteProductPicker: ป๊อปกลาง WebsitePickModal (☰ ตาราง / ▦ การ์ด · เรียงเลือกล่าสุดก่อน) · ลาก ⠿ เรียง · ✕ เอาออก
  * เว็บร้านแปลงรหัสเป็นการ์ดที่ src/lib/sku-cards.ts (pickSkuCards)
  */
 import { useEffect, useMemo, useState } from "react";
-import { ERPModal } from "@/components/modal";
-import { MiniTable } from "@/components/mini-table";
+import { WebsitePickModal, rememberWebPicks } from "@/components/website-pick-modal";
+import { RECENT_KEYS } from "@/lib/recent-picks";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { loadStorefrontProducts } from "@/lib/website-data";
 
@@ -72,6 +72,7 @@ export function WebsiteSkuPicker({ shopSlug, value, max = 24, onChange }: { shop
     const keep = value.filter((c) => sel.has(c));
     const added = rows.map((r) => r.ref).filter((c) => sel.has(c) && !keep.includes(c));
     onChange([...keep, ...added].slice(0, max));
+    rememberWebPicks(RECENT_KEYS.webSkus, [...added, ...keep]); // ตัวที่เพิ่งเพิ่ม = ล่าสุด
     setOpen(false);
   };
 
@@ -107,54 +108,39 @@ export function WebsiteSkuPicker({ shopSlug, value, max = 24, onChange }: { shop
         🎨 เลือก SKU ({value.length}/{max})
       </button>
 
-      <ERPModal
-        open={open}
-        onClose={() => setOpen(false)}
-        title="เลือก SKU ที่จะแสดง (1 การ์ด / SKU)"
-        size="lg"
-        footer={
-          <div className="flex items-center justify-between w-full">
-            <span className={`text-xs ${sel.size > max ? "text-red-600" : "text-slate-500"}`}>
-              เลือกแล้ว {sel.size} SKU (สูงสุด {max})
-            </span>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setOpen(false)} className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
-                ยกเลิก
-              </button>
-              <button type="button" onClick={confirm} disabled={sel.size > max} className="px-4 py-1.5 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-40">
-                ใช้รายการนี้
-              </button>
-            </div>
-          </div>
-        }
-      >
-        {loading ? (
-          <p className="py-8 text-center text-sm text-slate-400">กำลังโหลด SKU บนเว็บ…</p>
-        ) : (
-          <MiniTable<SkuRow>
-            rows={rows}
-            rowKey={(r) => r.ref}
-            selectable
-            selected={sel}
-            onSelectedChange={setSel}
-            searchText={(r) => `${r.code} ${r.name} ${r.color} ${r.cat}`}
-            searchPlaceholder="ค้นหารหัส/ชื่อ/สี"
-            countUnit="SKU"
-            emptyText='ยังไม่มีสินค้าที่เผยแพร่บนเว็บ — เพิ่มได้ที่แท็บ "สินค้าบนเว็บ"'
-            dense
-            maxHeightClass="max-h-[60vh]"
-            columns={[
-              { key: "img", header: "", width: "3rem", cell: (r) => thumb(r.image, "w-9 h-9") },
-              { key: "code", header: "รหัสรุ่น", width: "7rem", cell: (r) => <span className="font-mono text-xs">{r.code}</span>, sortValue: (r) => r.code },
-              { key: "color", header: "สี / แบบ", width: "8rem", cell: (r) => <span className="text-sm font-medium">{r.color || <span className="text-slate-400 font-normal">— ไม่มีสี —</span>}</span>, sortValue: (r) => r.color },
-              { key: "name", header: "ชื่อบนเว็บ", width: "1fr", cell: (r) => <span className="text-sm line-clamp-2">{r.name}</span>, sortValue: (r) => r.name },
-            ]}
-          />
-        )}
-        {byRef.size > 0 && value.some((c) => !byRef.has(c)) && (
-          <p className="mt-2 text-[11px] text-amber-600">บาง SKU ที่เลือกไว้ไม่อยู่บนเว็บแล้ว (ถูกปิดเผยแพร่/ลบสี) — จะไม่แสดงบนเว็บ</p>
-        )}
-      </ERPModal>
+      {open && (
+        <WebsitePickModal<SkuRow>
+          open
+          onClose={() => setOpen(false)}
+          title="เลือก SKU ที่จะแสดง (1 การ์ด / SKU)"
+          unit="SKU"
+          max={max}
+          rows={rows}
+          rowKey={(r) => r.ref}
+          loading={loading}
+          loadingText="กำลังโหลด SKU บนเว็บ…"
+          selected={sel}
+          onSelectedChange={setSel}
+          chosen={value}
+          recentKey={RECENT_KEYS.webSkus}
+          onConfirm={confirm}
+          searchText={(r) => `${r.code} ${r.name} ${r.color} ${r.cat}`}
+          searchPlaceholder="ค้นหารหัส/ชื่อ/สี"
+          emptyText='ยังไม่มีสินค้าที่เผยแพร่บนเว็บ — เพิ่มได้ที่แท็บ "สินค้าบนเว็บ"'
+          card={(r) => ({ image: r.image, code: r.code, sub: r.color || undefined, title: r.name })}
+          note={
+            byRef.size > 0 && value.some((c) => !byRef.has(c)) ? (
+              <p className="mt-2 text-[11px] text-amber-600">บาง SKU ที่เลือกไว้ไม่อยู่บนเว็บแล้ว (ถูกปิดเผยแพร่/ลบสี) — จะไม่แสดงบนเว็บ</p>
+            ) : null
+          }
+          columns={[
+            { key: "img", header: "", width: "3rem", cell: (r) => thumb(r.image, "w-9 h-9") },
+            { key: "code", header: "รหัสรุ่น", width: "7rem", cell: (r) => <span className="font-mono text-xs">{r.code}</span>, sortValue: (r) => r.code },
+            { key: "color", header: "สี / แบบ", width: "8rem", cell: (r) => <span className="text-sm font-medium">{r.color || <span className="text-slate-400 font-normal">— ไม่มีสี —</span>}</span>, sortValue: (r) => r.color },
+            { key: "name", header: "ชื่อบนเว็บ", width: "1fr", cell: (r) => <span className="text-sm line-clamp-2">{r.name}</span>, sortValue: (r) => r.name },
+          ]}
+        />
+      )}
     </div>
   );
 }

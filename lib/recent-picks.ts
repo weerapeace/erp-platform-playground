@@ -33,6 +33,8 @@ export const RECENT_KEYS = {
   materials:  "erp-recent-materials",
   globalSearch: "erp-recent-global-search",   // Global Search (Ctrl+K) — ผลที่เพิ่งเปิด
   designBrands: "erp-recent-design-brands",   // แบรนด์ที่ใช้สร้างใบงานออกแบบล่าสุด (ปุ่มลัดในฟอร์มสร้างใหม่)
+  webProducts: "erp-recent-web-products",     // จัดการ Website › ตัวเลือกสินค้า (รหัสรุ่น) — เรียง "เลือกล่าสุดก่อน"
+  webSkus:     "erp-recent-web-skus",         // จัดการ Website › ตัวเลือก SKU ("CODE:sku-xxx")
 } as const;
 
 type WithId = { id: string };
@@ -51,6 +53,18 @@ export function pushRecent<V extends WithId>(key: string, v: V, limit = RECENT_L
   if (!v?.id) return loadRecent<V>(key);
   try {
     const next = [v, ...loadRecent<V>(key).filter((x) => x?.id !== v.id)].slice(0, limit);
+    localStorage.setItem(key, JSON.stringify(next));
+    return next;
+  } catch { return loadRecent<V>(key); }
+}
+
+/** จำหลายตัวพร้อมกัน (ตัวแรกของ vs = ล่าสุด อยู่บนสุด) — เช่น ป๊อปเลือกหลายรายการตอนกด "ใช้รายการนี้" */
+export function pushRecentMany<V extends WithId>(key: string, vs: V[], limit = RECENT_LIMIT): V[] {
+  const ids = new Set(vs.filter((v) => v?.id).map((v) => v.id));
+  if (!ids.size) return loadRecent<V>(key);
+  try {
+    const fresh = vs.filter((v, i) => v?.id && vs.findIndex((x) => x?.id === v.id) === i);
+    const next = [...fresh, ...loadRecent<V>(key).filter((x) => !ids.has(x?.id))].slice(0, limit);
     localStorage.setItem(key, JSON.stringify(next));
     return next;
   } catch { return loadRecent<V>(key); }
