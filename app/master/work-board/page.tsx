@@ -24,8 +24,10 @@ import type { MoSkipped } from "@/lib/mo-skip";
 import { moSteps, currentStep } from "./mo-steps";
 import { DeviceIframePreview, IPAD_SIZE, useCanPreviewDevice } from "@/components/device-view";
 import { useTableDisplay } from "./table-display";
-import { qvMatch, qvSort, qvVisible, qvNew, qvSummary, QV_CARD_MIN, QV_FALLBACK, type QuickView, type QvRow } from "./quick-views";
+import { qvMatch, qvSort, qvVisible, qvNew, qvSummary, qvAudienceOk, QV_CARD_MIN, QV_FALLBACK, type QuickView, type QvRow, type TeamView, type QvMine } from "./quick-views";
 import type { QvBrand } from "./quick-views-editor";
+import { useQuickViews } from "./use-quick-views";
+import { QuickViewsManager } from "./quick-views-manager";
 import { TableDisplayPanel } from "./table-display-panel";
 import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progress/route";
 import { InlineEdit } from "@/components/inline-edit";
@@ -3429,7 +3431,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const brandF = filt.brand;   // "" = ทุกแบรนด์ · "__none__" = ใบที่ไม่ระบุแบรนด์
   const setBrandF = (b: string) => setFilt({ ...filt, brand: brandF === b ? "" : b });
   const brandOk = (b: string | null | undefined) => !brandF || (brandF === "__none__" ? !b : b === brandF);
-  const views = qvVisible(dc.views, canSeeMoney);
+  // มุมมองทีม (แอดมินตั้ง · กรอง "ใครเห็น" + ที่ฉันซ่อน) ต่อด้วยมุมมองของฉัน — ที่เก็บ ./use-quick-views
+  const qvStore = useQuickViews(canSeeMoney);
+  const { user: authUser } = useAuth();
+  const views = qvVisible([...qvStore.team.filter((v) => qvAudienceOk(v, authUser) && !qvStore.mine.hidden.includes(v.id)), ...qvStore.mine.views], canSeeMoney);
   // ซ่อนแถบมุมมอง = ใช้มุมมองแรกเสมอ (ไม่ให้ค้างกรองอยู่โดยมองไม่เห็นปุ่ม)
   const view: QuickView = (dc.show.chips ? views.find((v) => v.id === filt.view) : undefined) ?? views[0] ?? QV_FALLBACK;
   const pickView = (id: string) => setFilt({ ...filt, view: id });
@@ -3469,8 +3474,16 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     return [...m.values()].sort((a, b) => (a.name === "" ? 1 : b.name === "" ? -1 : b.n - a.n));
   })();
   const brandColorOf = (b: string) => qvBrands.find((x) => (x.name || "__none__") === b)?.color ?? "#94a3b8";
-  // ＋ บันทึกเป็นมุมมอง — คัดลอกมุมมองที่เปิดอยู่ (+ แบรนด์ที่กดชิปไว้) เป็นปุ่มใหม่ แล้วเปิดแผงตั้งชื่อ
-  const [focusViewId, setFocusViewId] = useState<string | null>(null);
+  // ⚙️ ป๊อปจัดการมุมมอง (แก้ในร่าง → 💾 บันทึก) · ＋ บันทึกเป็นมุมมอง = เปิดป๊อปพร้อมมุมมองของฉันใหม่ในร่าง
+  const [mgr, setMgr] = useState<{ open: boolean; newMine?: QuickView | null }>({ open: false });
+  const saveViews = async (next: { team?: TeamView[]; mine?: QvMine }) => {
+    if (next.team && !(await qvStore.saveTeam(next.team))) return false;
+    if (next.mine) qvStore.setMine(next.mine);
+    const nm = mgr.newMine;
+    if (nm && next.mine?.views.some((v) => v.id === nm.id)) setFilt({ view: nm.id, brand: "" });
+    toast.success(next.team ? "บันทึกมุมมองแล้ว — ทุกคนที่เห็นมุมมองทีมจะได้แบบใหม่" : "บันทึกมุมมองของคุณแล้ว");
+    return true;
+  };
   const saveAsView = () => {
     const bl = brandF === "__none__" ? "ไม่ระบุแบรนด์" : brandF;
     const v = qvNew({
@@ -3478,9 +3491,25 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       brands: brandF ? [brandF] : [...view.brands], layout: view.layout, size: view.size, cols: view.cols ? [...view.cols] : null,
       cardFields: [...view.cardFields], sort1: view.sort1, dir1: view.dir1, sort2: view.sort2, dir2: view.dir2, group: view.group,
     });
-    disp.set({ views: [...dc.views, v] });
-    setFilt({ view: v.id, brand: "" });
-    setFocusViewId(v.id); setPanelOpen(true);
+    setMgr({ open: true, newMine: v });
+  };
+  // ความกว้างคอลัมน์ของมุมมอง: ลากในตาราง = ร่าง (มีแถบให้กดบันทึก) · มุมมองของฉัน = เก็บในมุมมอง · มุมมองทีม = แอดมินเก็บให้ทุกคน / คนอื่นเก็บเฉพาะตัว
+  const isMineView = qvStore.mine.views.some((v) => v.id === view.id);
+  const savedWidths = isMineView ? view.widths : (qvStore.mine.widthOverride[view.id] ?? view.widths);
+  const [widthDraft, setWidthDraft] = useState<Record<string, number> | null>(null);
+  useEffect(() => { setWidthDraft(null); }, [view.id]);
+  const effWidths = widthDraft ?? savedWidths;
+  const widthDirty = widthDraft !== null && JSON.stringify(widthDraft) !== JSON.stringify(savedWidths);
+  const saveWidths = async (scope: "view" | "me") => {
+    if (!widthDraft) return;
+    const w = widthDraft;
+    if (isMineView) qvStore.setMine({ ...qvStore.mine, views: qvStore.mine.views.map((v) => (v.id === view.id ? { ...v, widths: w } : v)) });
+    else if (scope === "view" && canSeeMoney) {
+      if (!(await qvStore.saveTeam(qvStore.team.map((v) => (v.id === view.id ? { ...v, widths: w } : v))))) return;
+      if (qvStore.mine.widthOverride[view.id]) { const wo = { ...qvStore.mine.widthOverride }; delete wo[view.id]; qvStore.setMine({ ...qvStore.mine, widthOverride: wo }); }
+    } else qvStore.setMine({ ...qvStore.mine, widthOverride: { ...qvStore.mine.widthOverride, [view.id]: w } });
+    setWidthDraft(null);
+    toast.success(scope === "view" && !isMineView ? `บันทึกความกว้างคอลัมน์ในมุมมอง “${view.name}” แล้ว (ทุกคนที่เห็น)` : `บันทึกความกว้างคอลัมน์ของ “${view.name}” แล้ว`);
   };
   // ปิดช่องติ๊กในชุดหน้าตา → ล้างที่เลือกค้างไว้ (ปุ่มทำหลายใบจะได้ไม่โผล่)
   useEffect(() => { if (!dc.check) { setSel(new Set()); setWoSel(new Set()); setQSel(new Set()); } }, [dc.check]);
@@ -4104,7 +4133,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       {panelOpen && (
         <div className="max-h-[45%] shrink-0 overflow-y-auto">
           <TableDisplayPanel d={disp} isAdmin={canSeeMoney} colOptions={panelColOptions} currentCols={pendColPrefs.visible.map((c) => c.key)}
-            cardGroups={panelCardGroups} brands={qvBrands} focusViewId={focusViewId} onClose={() => { setPanelOpen(false); setFocusViewId(null); }} />
+            cardGroups={panelCardGroups} onManageViews={() => setMgr({ open: true })} onClose={() => setPanelOpen(false)} />
         </div>
       )}
       <div className={`flex min-h-0 flex-col gap-3 ${tab === "pend" ? "flex-1" : "shrink-0"}`} style={zoomStyle}>
@@ -4159,6 +4188,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <button type="button" onClick={saveAsView} title="บันทึกสิ่งที่เปิดอยู่ (มุมมองนี้ + แบรนด์ที่กดไว้) เป็นปุ่มใหม่ แล้วตั้งชื่อ/ปรับต่อได้"
               className={`shrink-0 ${touch ? "h-10 px-3" : "h-8 px-2.5"} rounded-full border border-dashed border-slate-300 bg-white text-xs text-slate-500 hover:bg-slate-50`}>＋ บันทึกเป็นมุมมอง</button>
           )}
+          {tab === "pend" && dc.show.chips && (
+            <button type="button" onClick={() => setMgr({ open: true })} title="จัดการมุมมอง — มุมมองทีม/ของฉัน · ใครเห็นปุ่มไหน · ซ่อนปุ่มสำหรับตัวเอง"
+              className={`shrink-0 ${touch ? "h-10 px-3" : "h-8 px-2.5"} rounded-full border border-dashed border-slate-300 bg-white text-xs text-slate-500 hover:bg-slate-50`}>⚙️ จัดการมุมมอง</button>
+          )}
           {brandChips.length > 1 && (<>
             {tab === "pend" && dc.show.chips && <span className="mx-1 h-6 w-px shrink-0 bg-slate-200" aria-hidden />}
             {brandChips.map(([b, info]) => {
@@ -4177,6 +4210,23 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       )}
       </>)}
       {tab === "pend" && (<>
+      {/* ลากปรับความกว้างคอลัมน์แล้ว → แถบให้กดบันทึกลงมุมมอง (ไม่บันทึกเองเงียบ ๆ) */}
+      {widthDirty && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-800">
+          <span>↔️ ปรับความกว้างคอลัมน์ของมุมมอง “{view.name}” แล้ว — ยังไม่บันทึก</span>
+          <span className="ml-auto flex flex-wrap gap-1.5">
+            {(isMineView || canSeeMoney) && (
+              <button type="button" onClick={() => void saveWidths("view")} className="h-7 rounded-md bg-amber-600 px-3 font-medium text-white hover:bg-amber-700">
+                💾 บันทึกในมุมมอง{!isMineView ? " (ทุกคนที่เห็น)" : ""}
+              </button>
+            )}
+            {!isMineView && (
+              <button type="button" onClick={() => void saveWidths("me")} className={`h-7 rounded-md px-3 ${canSeeMoney ? "border border-amber-300 bg-white" : "bg-amber-600 font-medium text-white hover:bg-amber-700"}`}>💾 บันทึกเฉพาะฉัน</button>
+            )}
+            <button type="button" onClick={() => setWidthDraft(null)} className="h-7 rounded-md border border-amber-300 bg-white px-3">ย้อนกลับ</button>
+          </span>
+        </div>
+      )}
       <MiniTable
         rows={pendShown} rowKey={(m) => m.id} columns={dev === "ipadP" ? pendCols : pendColsShown} onRowClick={onPendRow}
         expandedKeys={expanded} renderExpanded={dc.expand ? renderPendDetail : undefined}
@@ -4185,6 +4235,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         layout={dev === "ipadP" || view.layout === "cards" ? "cards" : "table"} renderCard={dev === "ipadP" ? renderPendCard : renderViewCard}
         cardGrid={dev !== "ipadP" && view.layout === "cards" ? `repeat(auto-fill,minmax(${QV_CARD_MIN[view.size]},1fr))` : undefined}
         fill stickyCols={dev === "ipadP" || view.layout === "cards" ? 0 : 2} inlineActions onScrollTop={onTableScroll}
+        resizable={dev !== "ipadP" && view.layout === "table"} widths={effWidths} onWidthsChange={setWidthDraft} fitContent={view.fit}
         countUnit="ใบ"
         selectable={dc.check} selected={sel} onSelectedChange={setSel}
         actions={<div className="flex items-center gap-2 flex-wrap">
@@ -4403,6 +4454,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         />
       </div>)}
 
+      <QuickViewsManager open={mgr.open} onClose={() => setMgr({ open: false })} isAdmin={canSeeMoney}
+        team={qvStore.team} mine={qvStore.mine} onSave={saveViews} brands={qvBrands} colOptions={panelColOptions}
+        focus={{ kind: isMineView ? "mine" : "team", id: view.id }} newMine={mgr.newMine ?? null} />
       {/* แถบคำสั่งลอยด้านล่าง (ของกลาง BulkActionBar) — โผล่เมื่อติ๊กเลือกหลายใบ แทนปุ่มกระจายบนหัวตาราง */}
       <BulkActionBar count={tab === "pend" ? selMoNos.length : 0} unit="ใบ" onClear={() => setSel(new Set())} spacer={false}>
         <button type="button" onClick={() => setAssignOpen(true)} className="h-9 rounded-lg bg-violet-500 px-3 text-sm font-medium text-white hover:bg-violet-600">🗂 จับเข้ากลุ่ม</button>

@@ -128,6 +128,11 @@ export type MiniTableProps<T> = {
   onScrollTop?: (top: number) => void;
   /** โหมดการ์ด: วางเป็นตารางหลายคอลัมน์ (ค่า CSS grid-template-columns เช่น "repeat(auto-fill,minmax(240px,1fr))") · การ์ดที่กางเต็มแถว */
   cardGrid?: string;
+  /** คุมความกว้างคอลัมน์จากข้างนอก (เช่น เก็บในมุมมองด่วน) — ใส่คู่ onWidthsChange · ไม่ใส่ = จำใน localStorage ตาม storageKey แบบเดิม */
+  widths?: Record<string, number>;
+  onWidthsChange?: (w: Record<string, number>) => void;
+  /** พอดีเนื้อหา — คอลัมน์ที่ตั้งยืด (fr) ใช้ความกว้างขั้นต่ำแทน ไม่ยืดกินที่ว่างทั้งจอ */
+  fitContent?: boolean;
 };
 
 type Dir = "asc" | "desc";
@@ -140,7 +145,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
     dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, maxHeightClass = "", className = "", footnote,
-    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid,
+    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid, widths: widthsCtl, onWidthsChange, fitContent,
   } = props;
   // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
   const t = useT();
@@ -161,28 +166,48 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const setGrouped = (v: boolean) => { if (onGroupedChange) onGroupedChange(v); else setGroupedInner(v); };
 
   // ความกว้างที่ผู้ใช้ลากปรับ (px ต่อ key) — โหลด/บันทึกจาก localStorage ถ้ามี storageKey
-  const [widths, setWidths] = useState<Record<string, number>>({});
-  const lsKey = storageKey ? `minitable:w:${storageKey}` : "";
+  const [widthsInner, setWidthsInner] = useState<Record<string, number>>({});
+  // ระหว่างลาก = ร่างในตารางเอง (ไม่ส่งออกทุกการขยับเมาส์ — หน้าใหญ่จะได้ไม่กระตุก) · ปล่อยเมาส์แล้วค่อยส่งออก
+  const [dragW, setDragW] = useState<{ key: string; w: number } | null>(null);
+  const widthsBase = widthsCtl ?? widthsInner;
+  const widths = dragW ? { ...widthsBase, [dragW.key]: dragW.w } : widthsBase;
+  const widthsRef = useRef(widthsBase); widthsRef.current = widthsBase;
+  // ตั้งค่าแบบเดียวกับ setState (รับฟังก์ชันได้) — คุมจากข้างนอก = ส่งค่าใหม่ออกไป
+  const setWidths = (next: Record<string, number> | ((prev: Record<string, number>) => Record<string, number>)) => {
+    const v = typeof next === "function" ? next(widthsRef.current) : next;
+    widthsRef.current = v;
+    if (onWidthsChange) onWidthsChange(v); else setWidthsInner(v);
+  };
+  const lsKey = storageKey && !onWidthsChange ? `minitable:w:${storageKey}` : "";
   useEffect(() => {
     if (!resizable || !lsKey) return;
     try { const s = localStorage.getItem(lsKey); if (s) setWidths(JSON.parse(s)); } catch { /* ignore */ }
   }, [resizable, lsKey]);
   useEffect(() => {
     if (!resizable || !lsKey) return;
-    try { localStorage.setItem(lsKey, JSON.stringify(widths)); } catch { /* ignore */ }
-  }, [widths, resizable, lsKey]);
+    try { localStorage.setItem(lsKey, JSON.stringify(widthsBase)); } catch { /* ignore */ }
+  }, [widthsBase, resizable, lsKey]);
 
   // ลากขอบหัวคอลัมน์เพื่อปรับความกว้าง
   const dragRef = useRef<{ key: string; startX: number; startW: number } | null>(null);
   const startResize = (key: string) => (e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     const headerCell = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
-    dragRef.current = { key, startX: e.clientX, startW: headerCell.getBoundingClientRect().width };
+    // เผื่อหน้าใช้ CSS zoom (ขนาดตัวอักษรของบอร์ด): ความกว้างจริง = offsetWidth · ระยะเมาส์ต้องหารด้วยอัตรา zoom
+    const zoom = headerCell.offsetWidth ? headerCell.getBoundingClientRect().width / headerCell.offsetWidth || 1 : 1;
+    dragRef.current = { key, startX: e.clientX, startW: headerCell.offsetWidth || headerCell.getBoundingClientRect().width };
+    let last: number | null = null;
     const onMove = (ev: MouseEvent) => {
       const d = dragRef.current; if (!d) return;
-      setWidths((prev) => ({ ...prev, [d.key]: Math.max(48, Math.round(d.startW + (ev.clientX - d.startX))) }));
+      last = Math.max(48, Math.round(d.startW + (ev.clientX - d.startX) / zoom));
+      setDragW({ key: d.key, w: last });
     };
-    const onUp = () => { dragRef.current = null; document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); document.body.style.cursor = ""; };
+    const onUp = () => {
+      const d = dragRef.current; dragRef.current = null;
+      document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); document.body.style.cursor = "";
+      if (d && last != null) { const w = last; setWidths((prev) => ({ ...prev, [d.key]: w })); }
+      setDragW(null);
+    };
     document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp); document.body.style.cursor = "col-resize";
   };
   const resetWidths = () => setWidths({});
@@ -195,7 +220,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const [rowMinW, setRowMinW] = useState(0);   // กว้างจริงที่ต้องใช้ → แถวทุกแถวกว้างเท่ากัน (หัว/พื้นไม่ขาดตอนเลื่อนขวา)
   const [viewW, setViewW] = useState(0);       // ความกว้างที่มองเห็น → แผงกางแถวกว้างเท่าจอ ไม่เลื่อนหายตอนเลื่อนขวา
   const measureOn = !!fill || lockN > 0;
-  const colSig = columns.map((c) => `${c.key}:${c.width ?? ""}`).join("|") + JSON.stringify(widths) + (selectable ? "s" : "");
+  const colSig = columns.map((c) => `${c.key}:${c.width ?? ""}`).join("|") + JSON.stringify(widths) + (selectable ? "s" : "") + (fitContent ? "f" : "");
   useLayoutEffect(() => {
     if (!measureOn) return;
     const measure = () => {
@@ -275,7 +300,13 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const setKeys = (keys: string[], on: boolean) => { const n = new Set(sel); keys.forEach((k) => (on ? n.add(k) : n.delete(k))); setSel(n); };
 
   // grid template — เพิ่มช่อง checkbox นำหน้าถ้าเลือกได้ · คอลัมน์ที่ลากปรับแล้วใช้ px
-  const colTrack = (c: MiniColumn<T>) => (resizable && widths[c.key] != null ? `${widths[c.key]}px` : (c.width ?? "1fr"));
+  // พอดีเนื้อหา: minmax(ขั้นต่ำ, …fr) → ขั้นต่ำ · fr ล้วน → 10rem (แถวแต่ละแถวเป็น grid แยก ต้องเป็นค่าตายตัว ไม่งั้นคอลัมน์ไม่ตรงกัน)
+  const fitTrack = (w: string) => {
+    if (!/fr\b/.test(w)) return w;
+    const m = w.match(/^minmax\(\s*([^,]+?)\s*,/);
+    return m && !/fr\b/.test(m[1]) ? m[1] : "10rem";
+  };
+  const colTrack = (c: MiniColumn<T>) => (resizable && widths[c.key] != null ? `${widths[c.key]}px` : fitContent ? fitTrack(c.width ?? "1fr") : (c.width ?? "1fr"));
   const tmpl = (selectable ? "2.25rem " : "") + columns.map(colTrack).join(" ");
   const padY = touch ? "py-3" : dense ? "py-1.5" : "py-2";
   const boxCls = touch ? "w-5 h-5 accent-rose-600" : "w-4 h-4 accent-rose-600";

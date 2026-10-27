@@ -3,7 +3,9 @@
  * --------------------------------------------------------------------------
  * 1 มุมมอง = กรอง (แบรนด์หลายอัน · OEM/แบรนด์เรา · เงื่อนไขผสม ทุกข้อ/ข้อใดข้อหนึ่ง)
  *          + หน้าตา (ตาราง/การ์ด · ขนาดการ์ด · ช่อง/คอลัมน์) + เรียงหลัก/รอง/ทิศ + จัดกลุ่ม
- * เก็บอยู่ในชุดหน้าตา (DisplayCfg.views — ./table-display) → แอดมินตั้งชุดกลาง ปกติ/โหมดง่าย · คนอื่นปรับเป็น "กำหนดเอง"
+ * เก็บ 2 ชั้น (./use-quick-views):
+ *   👥 มุมมองของทีม = ui_config "admin_wb_quick_views" (แอดมินแก้) + ตั้ง "ใครเห็น" ทุกคน / เฉพาะตำแหน่ง / เฉพาะคน
+ *   👤 มุมมองของฉัน + ปุ่มทีมที่ซ่อน + ความกว้างคอลัมน์เฉพาะตัว = useUserPref("wb_quick_views_mine")
  * หน้าบอร์ดแปลงใบสั่งผลิตเป็น QvRow (ค่าที่ต้องใช้คิดไว้แล้ว) ก่อนส่งเข้า qvMatch / qvSort
  */
 
@@ -29,7 +31,15 @@ export type QuickView = {
   sort2: QvSort; dir2: QvDir;   // ถ้าค่าเรียงหลักเท่ากัน
   group: QvGroup;
   show: boolean;                // โชว์บนแถบ
+  widths: Record<string, number>;   // ความกว้างคอลัมน์ที่ลากปรับแล้ว (px ต่อ key)
+  fit: boolean;                 // พอดีเนื้อหา (คอลัมน์ไม่ยืดกินที่ว่าง)
 };
+
+/** มุมมองของทีม = มุมมอง + ใครเห็นปุ่มนี้ (role = admin/manager/staff · users = id ผู้ใช้) */
+export type QvAudience = "all" | "roles" | "users";
+export type TeamView = QuickView & { aud: QvAudience; roles: string[]; users: string[] };
+/** ของแต่ละคน: มุมมองของฉัน + ปุ่มทีมที่ซ่อน + ความกว้างคอลัมน์ของมุมมองทีม (เฉพาะตัว) */
+export type QvMine = { views: QuickView[]; hidden: string[]; widthOverride: Record<string, Record<string, number>> };
 
 /** ค่าของใบ 1 ใบที่มุมมองต้องใช้ (หน้าบอร์ดคิดให้) */
 export type QvRow = {
@@ -66,7 +76,8 @@ export const QV_CARD_MIN: Record<QuickView["size"], string> = { s: "180px", m: "
 
 const base = (id: string, name: string, icon: string, p: Partial<QuickView>): QuickView => ({
   id, name, icon, brands: [], own: "all", mode: "any", conds: [], layout: "table", size: "m", cols: null,
-  cardFields: ["img", "prod", "left", "due", "stage"], sort1: "none", dir1: "desc", sort2: "none", dir2: "asc", group: "none", show: true, ...p,
+  cardFields: ["img", "prod", "left", "due", "stage"], sort1: "none", dir1: "desc", sort2: "none", dir2: "asc", group: "none", show: true,
+  widths: {}, fit: false, ...p,
 });
 
 /** ชุด "ปกติ" — เหมือนปุ่มกรองด่วนเดิม (ตาราง) */
@@ -88,6 +99,28 @@ export const QV_DEFAULT_SIMPLE: QuickView[] = [
   base("ownnodue", "แบรนด์เรา ยังไม่มีวันส่ง", "📅", { own: "own", conds: ["nodue"], mode: "all", layout: "table", cols: ["img", "prod", "created", "qty", "stage", "due"], sort1: "age", dir1: "desc", sort2: "brand", dir2: "asc" }),
   base("nobrand", "ยังไม่ระบุแบรนด์", "❔", { brands: ["__none__"], layout: "table" }),
 ];
+
+/** มุมมองของทีมตั้งต้น (ยังไม่มีแอดมินบันทึก) — รวมของเดิม + ข้อแนะนำจากข้อมูลจริง · ทุกคนเห็น */
+const team = (v: QuickView): TeamView => ({ ...v, aud: "all", roles: [], users: [] });
+export const QV_DEFAULT_TEAM: TeamView[] = [
+  base("all", "ทั้งหมด", "📋", {}),
+  base("hot", "ของด่วน", "🔥", { conds: ["late", "due7", "flag"], mode: "any", layout: "cards", size: "l", cardFields: ["img", "prod", "due", "stage", "left"], sort1: "late", dir1: "desc", sort2: "value", dir2: "desc" }),
+  base("oem", "งานลูกค้า OEM", "🧾", { own: "oem", sort1: "due", dir1: "asc", sort2: "late", dir2: "desc" }),
+  base("late", "เกินกำหนด", "⏰", { conds: ["late"], sort1: "late", dir1: "desc" }),
+  base("short", "ของยังไม่ครบ", "🛒", { conds: ["short"], sort1: "buy", dir1: "desc", sort2: "due", dir2: "asc", group: "brand" }),
+  base("ready", "พร้อมจ่าย", "✅", { conds: ["ready"], layout: "cards", size: "s", cardFields: ["img", "prod", "left", "due"], sort1: "due", dir1: "asc" }),
+  base("noprice", "ยังไม่ตั้งราคา", "🏷", { conds: ["noprice"] }),
+  base("ownnodue", "แบรนด์เรา ยังไม่มีวันส่ง", "📅", { own: "own", conds: ["nodue"], mode: "all", sort1: "age", dir1: "desc", sort2: "brand", dir2: "asc" }),
+  base("nobrand", "ยังไม่ระบุแบรนด์", "❔", { brands: ["__none__"] }),
+].map(team);
+
+/** คนนี้เห็นปุ่มทีมนี้ไหม (UX เท่านั้น — ไม่ใช่ด่านความปลอดภัย) */
+export function qvAudienceOk(v: TeamView, user: { id?: string | null; role?: string | null } | null | undefined): boolean {
+  if (v.aud === "all") return true;
+  if (!user) return false;
+  if (v.aud === "roles") return !!user.role && v.roles.includes(user.role);
+  return !!user.id && v.users.includes(user.id);
+}
 
 // ---- อ่านค่าจาก DB/pref แบบปลอดภัย (ค่าเพี้ยน = ตัดทิ้ง/เติมค่าตั้งต้น) ----
 const oneOf = <T extends string>(v: unknown, opts: readonly T[], d: T): T => (typeof v === "string" && (opts as readonly string[]).includes(v) ? (v as T) : d);
@@ -113,9 +146,31 @@ export function parseViews(v: unknown): QuickView[] | null {
       sort1: oneOf(o.sort1, SORTS, "none"), dir1: oneOf(o.dir1, ["asc", "desc"] as const, "desc"),
       sort2: oneOf(o.sort2, SORTS, "none"), dir2: oneOf(o.dir2, ["asc", "desc"] as const, "asc"),
       group: oneOf(o.group, GROUPS, "none"), show: o.show !== false,
+      widths: numMap(o.widths), fit: o.fit === true,
     });
   }
   return out.length ? out : null;
+}
+const numMap = (v: unknown): Record<string, number> => (v && typeof v === "object" && !Array.isArray(v)
+  ? Object.fromEntries(Object.entries(v as Record<string, unknown>).filter(([, x]) => typeof x === "number" && x >= 40 && x <= 2000).map(([k, x]) => [k, Math.round(x as number)]))
+  : {});
+/** มุมมองของทีม (มี "ใครเห็น") — ว่าง/เพี้ยน = null (ใช้ค่าตั้งต้น) */
+export function parseTeamViews(v: unknown): TeamView[] | null {
+  const raw = Array.isArray(v) ? v : v && typeof v === "object" && Array.isArray((v as { views?: unknown }).views) ? (v as { views: unknown[] }).views : null;
+  const base = parseViews(raw);
+  if (!base || !raw) return null;
+  const byId = new Map((raw as Record<string, unknown>[]).filter((x) => x && typeof x === "object").map((x) => [String(x.id), x]));
+  return base.map((b) => {
+    const o = byId.get(b.id) ?? {};
+    return { ...b, aud: oneOf(o.aud, ["all", "roles", "users"] as const, "all"), roles: strArr(o.roles), users: strArr(o.users) };
+  });
+}
+export const QV_MINE_DEFAULT: QvMine = { views: [], hidden: [], widthOverride: {} };
+export function parseMine(v: unknown): QvMine | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const wo = o.widthOverride && typeof o.widthOverride === "object" ? o.widthOverride as Record<string, unknown> : {};
+  return { views: parseViews(o.views) ?? [], hidden: strArr(o.hidden), widthOverride: Object.fromEntries(Object.entries(wo).map(([k, x]) => [k, numMap(x)])) };
 }
 
 /** ใบนี้อยู่ในมุมมองไหม — แบรนด์ → OEM/แบรนด์เรา → เงื่อนไข (noprice ที่ยังไม่รู้ = ไม่ผ่าน) */

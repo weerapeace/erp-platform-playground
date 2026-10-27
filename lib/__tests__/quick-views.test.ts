@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { qvMatch, qvSort, parseViews, qvVisible, qvSummary, QV_DEFAULT_SIMPLE, QV_DEFAULT_NORMAL, qvNew, type QvRow, type QuickView } from "../../app/master/work-board/quick-views";
+import { qvMatch, qvSort, parseViews, qvVisible, qvSummary, QV_DEFAULT_SIMPLE, QV_DEFAULT_NORMAL, qvNew, parseTeamViews, parseMine, qvAudienceOk, QV_DEFAULT_TEAM, type QvRow, type QuickView, type TeamView } from "../../app/master/work-board/quick-views";
 
 // มุมมองด่วนแท็บรอจ่าย — กติกากลาง (กรอง/เรียง/อ่านค่า)
 const row = (p: Partial<QvRow>): QvRow => ({ brand: "Good Goods", oem: true, late: 0, dueIn: null, flag: 0, short: false, ready: false, noprice: null, age: 10, stage: 1, buy: 0, left: 10, value: 0, sku: "A", ...p });
@@ -66,5 +66,42 @@ describe("parseViews / qvVisible / qvSummary", () => {
   });
   it("สรุปภาษาคน", () => {
     expect(qvSummary(QV_DEFAULT_SIMPLE.find((v) => v.id === "hot")!)).toContain("เกินกำหนดส่ง หรือ ส่งภายใน 7 วัน");
+  });
+});
+
+describe("มุมมองทีม / ของฉัน / ใครเห็น", () => {
+  const tv = (p: Partial<TeamView>): TeamView => ({ ...qvNew({ name: "x" }), aud: "all", roles: [], users: [], ...p });
+  it("ใครเห็น: ทุกคน · เฉพาะตำแหน่ง · เฉพาะคน (ไม่ล็อกอิน = เห็นแค่ทุกคน)", () => {
+    const staff = { id: "u1", role: "staff" };
+    expect(qvAudienceOk(tv({ aud: "all" }), staff)).toBe(true);
+    expect(qvAudienceOk(tv({ aud: "roles", roles: ["admin", "manager"] }), staff)).toBe(false);
+    expect(qvAudienceOk(tv({ aud: "roles", roles: ["staff"] }), staff)).toBe(true);
+    expect(qvAudienceOk(tv({ aud: "users", users: ["u2"] }), staff)).toBe(false);
+    expect(qvAudienceOk(tv({ aud: "users", users: ["u1"] }), staff)).toBe(true);
+    expect(qvAudienceOk(tv({ aud: "roles", roles: ["staff"] }), null)).toBe(false);
+    expect(qvAudienceOk(tv({ aud: "all" }), null)).toBe(true);
+  });
+  it("parseTeamViews: รับทั้ง array และ {views} · ค่าใครเห็นเพี้ยน = ทุกคน · ว่าง/ผิดรูป = null (ใช้ค่าตั้งต้น)", () => {
+    const a = parseTeamViews({ views: [{ id: "a", name: "A", aud: "roles", roles: ["staff", 3] }, { id: "b", name: "B", aud: "zzz" }] })!;
+    expect(a.map((v) => [v.id, v.aud, v.roles])).toEqual([["a", "roles", ["staff"]], ["b", "all", []]]);
+    expect(parseTeamViews([{ id: "c", name: "C", aud: "users", users: ["u1"] }])![0].users).toEqual(["u1"]);
+    expect(parseTeamViews({})).toBeNull();
+    expect(parseTeamViews("x")).toBeNull();
+    expect(QV_DEFAULT_TEAM.every((v) => v.aud === "all")).toBe(true);
+  });
+  it("ความกว้างคอลัมน์ + พอดีเนื้อหา เก็บในมุมมอง (ค่าเพี้ยน/เล็กเกิน/ใหญ่เกิน ถูกตัด)", () => {
+    const [v] = parseTeamViews([{ id: "w", name: "W", fit: true, widths: { sku: 180, bad: "x", tiny: 5, huge: 99999 } }])!;
+    expect(v.fit).toBe(true);
+    expect(v.widths.sku).toBe(180);
+    expect(v.widths.bad).toBeUndefined();
+    expect(Object.values(v.widths).every((n) => n >= 40 && n <= 2000)).toBe(true);
+  });
+  it("parseMine: มุมมองของฉัน + ปุ่มทีมที่ซ่อน + ความกว้างเฉพาะตัว", () => {
+    const m = parseMine({ views: [{ id: "m1", name: "ของฉัน" }], hidden: ["hot", 1], widthOverride: { oem: { sku: 200 } } })!;
+    expect(m.views.map((v) => v.id)).toEqual(["m1"]);
+    expect(m.hidden).toEqual(["hot"]);
+    expect(m.widthOverride.oem.sku).toBe(200);
+    expect(parseMine(null)).toBeNull();
+    expect(parseMine({})).toEqual({ views: [], hidden: [], widthOverride: {} });
   });
 });
