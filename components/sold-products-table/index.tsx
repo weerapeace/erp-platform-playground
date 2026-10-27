@@ -80,13 +80,17 @@ export function SoldProductsOptions({ opts, onChange }: {
   );
 }
 
-export function SoldProductsTable({ products, opts, onChange, groupNote, maxHeightClass = "max-h-[640px]" }: {
+export function SoldProductsTable({ products, opts, onChange, groupNote, maxHeightClass = "max-h-[640px]", groupWord = "ลูกค้า", printOptions = true }: {
   products: SoldProduct[];
   opts: ProductTableOptions;
   onChange: (patch: Partial<ProductTableOptions>) => void;
   /** ข้อความเสริมหัวกลุ่มลูกค้า เช่น "21 ใบขาย" */
   groupNote?: (customer: string) => string;
   maxHeightClass?: string;
+  /** คำเรียกกลุ่ม (ช่อง customer) เช่น "ร้าน" ในรายงานแพลตฟอร์ม · ค่าเริ่มต้น "ลูกค้า" */
+  groupWord?: string;
+  /** โชว์ตัวเลือกที่มีผลตอนพิมพ์ (ขึ้นหน้าใหม่ทุกกลุ่ม) — หน้าที่ไม่มีปุ่มพิมพ์ให้ปิด */
+  printOptions?: boolean;
 }) {
   const groups = useMemo(() => groupByCustomer(products), [products]);
   const groupRank = useMemo(() => new Map(groups.map((g, i) => [g.customer, i])), [groups]);
@@ -139,7 +143,7 @@ export function SoldProductsTable({ products, opts, onChange, groupNote, maxHeig
         sortDir={opts.sortDir}
         onSortChange={onSortChange}
         groupBy={p => p.customer}
-        groupLabel="แยกตามลูกค้า"
+        groupLabel={`แยกตาม${groupWord}`}
         grouped={opts.grouped}
         onGroupedChange={v => onChange({ grouped: v })}
         groupOrder={name => groupRank.get(name) ?? 999}
@@ -158,9 +162,9 @@ export function SoldProductsTable({ products, opts, onChange, groupNote, maxHeig
             <label className="inline-flex items-center gap-1.5 h-8 px-2 text-slate-600 cursor-pointer">
               <input type="checkbox" checked={opts.pct} onChange={e => onChange({ pct: e.target.checked })} /> % ของยอด
             </label>
-            {opts.grouped && (
+            {opts.grouped && printOptions && (
               <label className="inline-flex items-center gap-1.5 h-8 px-2 text-slate-600 cursor-pointer" title="มีผลตอนพิมพ์ / PDF">
-                <input type="checkbox" checked={opts.pageBreak} onChange={e => onChange({ pageBreak: e.target.checked })} /> ขึ้นหน้าใหม่ทุกลูกค้า (ตอนพิมพ์)
+                <input type="checkbox" checked={opts.pageBreak} onChange={e => onChange({ pageBreak: e.target.checked })} /> ขึ้นหน้าใหม่ทุก{groupWord} (ตอนพิมพ์)
               </label>
             )}
           </div>
@@ -171,7 +175,7 @@ export function SoldProductsTable({ products, opts, onChange, groupNote, maxHeig
       {products.length > 0 && (
         <div className="mt-2 flex items-center justify-between gap-3 flex-wrap px-3 py-2 rounded-lg bg-slate-100 text-sm">
           <span className="font-semibold text-slate-700">
-            {opts.grouped ? "รวมทุกลูกค้า" : "รวมทั้งหมด"} · {rows.length.toLocaleString("th-TH")} รายการ
+            {opts.grouped ? `รวมทุก${groupWord}` : "รวมทั้งหมด"} · {rows.length.toLocaleString("th-TH")} รายการ
           </span>
           <span className="flex items-center gap-4 flex-wrap">
             <span className="text-slate-600">จำนวน {qtyText(products)}</span>
