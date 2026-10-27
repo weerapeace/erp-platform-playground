@@ -13,6 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { driveConfigured, driveListFiles, driveTrashFile } from "@/lib/google-drive";
 import { isR2Configured, r2MoveToTrash, r2PutObject } from "@/lib/r2";
 import { ASSET_MAX_BYTES, extOf, sha256Hex } from "@/lib/assets";
+import { printPreviewProblem } from "@/lib/print-file-policy";
 import { normalizePrintItems, normalizeSizes } from "@/app/api/assets/shared";
 import { SELECT, actorOf, cleanUuid, toJob } from "../../shared";
 import { printTypeByCode, resolveJobFolder, safeName } from "../../publish-shared";
@@ -35,7 +36,10 @@ export async function POST(request: NextRequest, { params }: Ctx): Promise<NextR
   let form: FormData;
   try { form = await request.formData(); } catch { return NextResponse.json({ error: "ต้องเป็น multipart/form-data" }, { status: 400 }); }
   const file = form.get("file") as File | null;
-  if (!file || !(file.type || "").startsWith("image/")) return NextResponse.json({ error: "ต้องแนบรูปตัวอย่างแผ่น" }, { status: 400 });
+  if (!file) return NextResponse.json({ error: "ต้องแนบรูปตัวอย่างแผ่น" }, { status: 400 });
+  // ไฟล์นี้ลง R2 (รูปการ์ด) → ต้องเป็นรูปจริง · PDF/EPS ส่งเข้า Drive ทางตัวช่วยเท่านั้น (lib/print-file-policy)
+  const bad = printPreviewProblem(file.name, file.type, new Uint8Array(await file.slice(0, 16).arrayBuffer()));
+  if (bad) return NextResponse.json({ error: bad.th }, { status: 400 });
   if (file.size > ASSET_MAX_BYTES) return NextResponse.json({ error: `รูปตัวอย่างใหญ่เกิน ${Math.round(ASSET_MAX_BYTES / 1024 / 1024)}MB` }, { status: 400 });
   let meta: Record<string, unknown> = {};
   try { meta = JSON.parse(String(form.get("meta") ?? "{}")) ?? {}; } catch { return NextResponse.json({ error: "ข้อมูลที่ส่งมาไม่ถูกต้อง" }, { status: 400 }); }

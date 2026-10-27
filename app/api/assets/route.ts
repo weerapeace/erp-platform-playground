@@ -9,6 +9,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { r2PutObject, isR2Configured } from "@/lib/r2";
+import { printPreviewProblem } from "@/lib/print-file-policy";
 import { detectAssetType, extOf, sha256Hex, ASSET_MAX_BYTES } from "@/lib/assets";
 import {
   type AssetRow, buildRow, sanitizeToken, loadTags, loadUsageCounts, attachTags, rowOf, actorId,
@@ -158,6 +159,11 @@ export async function POST(request: NextRequest) {
 
   const admin  = supabaseAdmin();
   const buffer = await file.arrayBuffer();
+  // หมวดงานพิมพ์: R2 เก็บได้แค่รูปตัวอย่าง — PDF/EPS/AI ต้องไป Google Drive (lib/print-file-policy)
+  if (source === "print") {
+    const bad = printPreviewProblem(file.name, file.type, new Uint8Array(buffer, 0, Math.min(16, buffer.byteLength)));
+    if (bad) return NextResponse.json({ error: bad.th }, { status: 400 });
+  }
   const checksum = await sha256Hex(buffer);
 
   // กันไฟล์ซ้ำ — ถ้าไฟล์เดิม (เนื้อหาเดียวกัน) ยังอยู่ในคลัง ใช้ตัวเดิม ไม่เก็บซ้ำ

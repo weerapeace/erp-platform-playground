@@ -15,6 +15,7 @@ import { triggerRefresh } from "@/lib/refresh-bus";
 import type { PrintType } from "@/app/api/print-types/route";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import { previewForDrive, uploadArtworkToDrive, useDriveFolderMaps } from "./asset-shared";
+import { printPreviewProblem } from "@/lib/print-file-policy";
 import { CollectionMultiSelect, PrintItemsField, SizesEditor, ParentSkuField, TagPickerField } from "./asset-fields";
 
 // ── เพิ่มงานพิมพ์ (DTF/UV) — รูป preview + ไฟล์ .ai/.pdf ขึ้นโฟลเดอร์ Drive + ประเภท/ขนาดแผ่น ──
@@ -83,6 +84,9 @@ export function PrintJobAddModal({ actor, printTypes, collections, defaultCollec
   };
 
   const pick = (f: File | null) => {
+    // ช่องนี้ = รูปตัวอย่าง (เก็บ R2) · PDF/EPS/AI ต้องไป Drive ผ่านช่อง "ไฟล์พิมพ์" (lib/print-file-policy)
+    const bad = f ? printPreviewProblem(f.name, f.type) : null;
+    if (bad) { toast.error(t(bad.th, bad.en)); return; }
     setFile(f);
     setPreview(f && f.type.startsWith("image/") ? URL.createObjectURL(f) : null);
     if (f && !title.trim()) setTitle(f.name.replace(/\.[^.]+$/, ""));
@@ -381,7 +385,10 @@ export function MassPrintModal({ actor, printTypes, collections, defaultCollecti
   }, [driveOn, ptype, printRoot.folder_id]);
 
   const addFiles = (list: FileList | File[]) => {
-    const arr = Array.from(list).filter((f) => f.type.startsWith("image/"));
+    const all = Array.from(list);
+    const arr = all.filter((f) => !printPreviewProblem(f.name, f.type));
+    const bad = all.map((f) => printPreviewProblem(f.name, f.type)).find(Boolean);
+    if (bad) toast.error(`${t("ไม่ได้ใส่", "Skipped")} ${all.length - arr.length} ${t("ไฟล์", "files")} — ${t(bad.th, bad.en)}`);
     if (!arr.length) return;
     setRows((cur) => [...cur, ...arr.map((f) => ({ id: idRef.current++, file: f, preview: URL.createObjectURL(f), name: f.name.replace(/\.[^.]+$/, ""), sizes: defSize(), group: "", srcFiles: [], printItems: [] as PrintItem[] }))]);
   };

@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { r2PutObject, isR2Configured } from "@/lib/r2";
 import { detectAssetType, extOf, sha256Hex, ASSET_MAX_BYTES } from "@/lib/assets";
+import { printPreviewProblem } from "@/lib/print-file-policy";
 import { rowOf, actorId } from "../../shared";
 
 export const dynamic = "force-dynamic";
@@ -33,12 +34,17 @@ export async function POST(request: NextRequest, ctx: { params: Promise<{ id: st
   const heightRaw = form.get("height") ? Number(form.get("height")) : NaN;
 
   const admin = supabaseAdmin();
-  const { data: asset, error: e0 } = await admin.from("assets").select("id, r2_key").eq("id", id).maybeSingle();
+  const { data: asset, error: e0 } = await admin.from("assets").select("id, r2_key, source").eq("id", id).maybeSingle();
   if (e0) return NextResponse.json({ error: e0.message }, { status: 500 });
   if (!asset) return NextResponse.json({ error: "ไม่พบไฟล์" }, { status: 404 });
 
   const oldKey = (asset as { r2_key: string }).r2_key;
   const buffer = await file.arrayBuffer();
+  // การ์ดงานพิมพ์: แทนที่ได้แค่รูปตัวอย่าง — PDF/EPS/AI ต้องไป Google Drive (lib/print-file-policy)
+  if ((asset as { source: string | null }).source === "print") {
+    const bad = printPreviewProblem(file.name, file.type, new Uint8Array(buffer, 0, Math.min(16, buffer.byteLength)));
+    if (bad) return NextResponse.json({ error: bad.th }, { status: 400 });
+  }
   const checksum = await sha256Hex(buffer);
   try {
     await r2PutObject(oldKey, new Uint8Array(buffer), file.type || "application/octet-stream");

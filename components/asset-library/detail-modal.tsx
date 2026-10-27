@@ -9,6 +9,7 @@ import { ASSET_TYPE_LABEL, formatBytes } from "@/lib/assets";
 import { withImageWidth } from "@/lib/r2-image";
 import { type AssetRow, type AssetDetail, type AssetSize, type PrintItem } from "@/app/api/assets/shared";
 import { AssetPicker } from "@/components/asset-picker";
+import { printPreviewProblem } from "@/lib/print-file-policy";
 import { Spinner, LoadingOverlay } from "@/components/spinner";
 import { DriveFolderFiles } from "@/components/drive-folder-files";
 import { HelpButton } from "@/components/help-guides";
@@ -134,6 +135,9 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
 
   // แทนที่ไฟล์ — เขียนทับ key เดิม → ทุกที่ที่ใช้รูปนี้เห็นรูปใหม่ทันที
   const doReplace = async (file: File) => {
+    // การ์ดงานพิมพ์: แทนที่ได้แค่รูปตัวอย่าง — PDF/EPS/AI ต้องไป Drive (lib/print-file-policy)
+    const bad = d?.source === "print" ? printPreviewProblem(file.name, file.type) : null;
+    if (bad) { toast.error(t(bad.th, bad.en)); return; }
     setReplacing(true);
     try {
       const fd = new FormData();
