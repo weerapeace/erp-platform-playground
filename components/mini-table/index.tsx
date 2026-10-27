@@ -29,6 +29,7 @@
  */
 import { ReactNode, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useT } from "@/components/i18n";
+import { FloatingDropdown } from "@/components/floating-dropdown";
 
 export type MiniColumn<T> = {
   key: string;
@@ -145,6 +146,9 @@ export type MiniTableProps<T> = {
   /** ตารางยาว (หลายร้อยแถว): ไม่วาดแถวที่อยู่นอกจอ (CSS content-visibility) — เลื่อนลื่นขึ้นมาก
    *  ⚠️ มีผลเฉพาะ fill / stickyCols (ต้องวัดความกว้างแถวได้) · ในช่องห้ามมี popup แบบ absolute/fixed ที่ไม่ผ่าน portal (จะโดนตัดขอบแถว) */
   lazyRows?: boolean;
+  /** เมนูที่หัวคอลัมน์ (ปุ่ม ⋮) — เรียง (คอลัมน์ที่เรียงได้) · พอดีเนื้อหา/คืนความกว้าง (เมื่อ resizable) · ย้ายซ้าย/ขวา + ซ่อน (เมื่อส่งตัวจัดการมา)
+   *  ตารางไม่ได้ถือรายการคอลัมน์เอง → ย้าย/ซ่อน ให้หน้าเจ้าของเป็นคนเปลี่ยน columns (เช่น เก็บลงมุมมอง) */
+  columnMenu?: { onMove?: (key: string, dir: -1 | 1) => void; onHide?: (key: string) => void; canHide?: (key: string) => boolean };
 };
 
 type Dir = "asc" | "desc";
@@ -158,7 +162,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
     dense, zebra = true, hideToolbar, touch, layout = "table", renderCard, cardPick, extraSorts, maxHeightClass = "", className = "", footnote,
-    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid, widths: widthsCtl, onWidthsChange, fitContent, lazyRows,
+    resizable, storageKey, fill, stickyCols = 0, inlineActions, onScrollTop, cardGrid, widths: widthsCtl, onWidthsChange, fitContent, lazyRows, columnMenu,
   } = props;
   // ข้อความระบบ 2 ภาษา (ของกลาง i18n) — ผู้เรียกส่งคำของตัวเองมาแทนได้
   const t = useT();
@@ -335,6 +339,55 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const cards = layout === "cards" && !!renderCard;
   const alignCls = (a?: string) => (a === "right" ? "text-right justify-end" : a === "center" ? "text-center justify-center" : "");
 
+  // ---- เมนูหัวคอลัมน์ (⋮) ----
+  const [colMenu, setColMenu] = useState<string | null>(null);
+  const colMenuAnchor = useRef<HTMLElement | null>(null);
+  // พอดีเนื้อหา: วัดความกว้างจริงของทุกช่องในคอลัมน์นี้ (หัว + แถว) แบบ max-content แล้วตั้งเป็นความกว้างคอลัมน์
+  const fitColumn = (key: string) => {
+    const root = scrollerRef.current;
+    if (!root) return;
+    let max = 0;
+    root.querySelectorAll<HTMLElement>(`[data-col="${typeof CSS !== "undefined" && CSS.escape ? CSS.escape(key) : key}"]`).forEach((el) => {
+      const prev = el.style.width;
+      el.style.width = "max-content";
+      max = Math.max(max, el.offsetWidth);
+      el.style.width = prev;
+    });
+    if (max) setWidths((w) => ({ ...w, [key]: Math.max(48, Math.min(600, Math.ceil(max) + 6)) }));
+  };
+  const menuCol = colMenu ? columns.find((c) => c.key === colMenu) : undefined;
+  const menuIdx = menuCol ? columns.indexOf(menuCol) : -1;
+  const menuItem = "flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent";
+  const closeMenu = () => setColMenu(null);
+  const ColMenu = menuCol && (
+    <FloatingDropdown anchorRef={colMenuAnchor} open onClose={closeMenu} minWidth={200}>
+      <div className="rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+        <div className="px-3 pb-1 pt-0.5 text-[11px] text-slate-400">{typeof menuCol.header === "string" ? menuCol.header : t("คอลัมน์", "Column")}</div>
+        {menuCol.sortValue && <>
+          <button type="button" className={menuItem} onClick={() => { setSort(menuCol.key, "asc"); closeMenu(); }}>▲ {t("เรียง น้อย → มาก", "Sort low → high")}</button>
+          <button type="button" className={menuItem} onClick={() => { setSort(menuCol.key, "desc"); closeMenu(); }}>▼ {t("เรียง มาก → น้อย", "Sort high → low")}</button>
+          {sortKey === menuCol.key && <button type="button" className={menuItem} onClick={() => { setSort("", dir); closeMenu(); }}>↺ {t("เลิกเรียง (ลำดับเดิม)", "Clear sort")}</button>}
+        </>}
+        {columnMenu?.onMove && <>
+          <div className="my-1 border-t border-slate-100" />
+          <button type="button" className={menuItem} disabled={menuIdx <= 0} onClick={() => { columnMenu.onMove!(menuCol.key, -1); closeMenu(); }}>← {t("ย้ายไปซ้าย", "Move left")}</button>
+          <button type="button" className={menuItem} disabled={menuIdx >= columns.length - 1} onClick={() => { columnMenu.onMove!(menuCol.key, 1); closeMenu(); }}>→ {t("ย้ายไปขวา", "Move right")}</button>
+        </>}
+        {resizable && <>
+          <div className="my-1 border-t border-slate-100" />
+          <button type="button" className={menuItem} onClick={() => { fitColumn(menuCol.key); closeMenu(); }}>↔ {t("พอดีเนื้อหา", "Fit to content")}</button>
+          {widths[menuCol.key] != null && (
+            <button type="button" className={menuItem} onClick={() => { setWidths((w) => { const n = { ...w }; delete n[menuCol.key]; return n; }); closeMenu(); }}>↺ {t("คืนความกว้างเดิม", "Reset width")}</button>
+          )}
+        </>}
+        {columnMenu?.onHide && (columnMenu.canHide?.(menuCol.key) ?? true) && <>
+          <div className="my-1 border-t border-slate-100" />
+          <button type="button" className={`${menuItem} text-rose-600`} onClick={() => { columnMenu.onHide!(menuCol.key); closeMenu(); }}>🙈 {t("ซ่อนคอลัมน์นี้", "Hide column")}</button>
+        </>}
+      </div>
+    </FloatingDropdown>
+  );
+
   const HeaderCell = (
     <div ref={headerRef} className={`grid gap-2 px-3 py-2 bg-slate-100 text-[11px] font-semibold text-slate-600 ${fill ? "sticky top-0 z-20" : measureOn ? "relative" : ""}`} style={{ gridTemplateColumns: tmpl, ...rowW }}>
       {selectable && (
@@ -347,15 +400,21 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         const canSort = !!c.sortValue;
         const active = sortKey === c.key;
         const handle = resizable ? <span onMouseDown={startResize(c.key)} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-rose-300/70" /> : null;
-        const wrapCls = `flex items-center gap-1 ${resizable ? "relative overflow-hidden pr-2" : ""} ${alignCls(c.align)}`;
+        const wrapCls = `group/h flex items-center gap-1 ${resizable ? "relative overflow-hidden pr-2" : ""} ${alignCls(c.align)}`;
         const head = resizable ? <span className="truncate">{c.header}</span> : c.header;   // truncate เฉพาะตอน resizable (กันกระทบตารางเดิม)
-        if (!canSort) return <span key={c.key} className={wrapCls} style={ls}>{head}{handle}</span>;
+        const menuBtn = columnMenu ? (
+          <button type="button" onClick={(e) => { e.stopPropagation(); colMenuAnchor.current = e.currentTarget; setColMenu((o) => (o === c.key ? null : c.key)); }}
+            title={t("ตัวเลือกคอลัมน์ (เรียง · ย้าย · พอดีเนื้อหา · ซ่อน)", "Column options")}
+            className={`shrink-0 rounded px-1 leading-none text-slate-400 hover:bg-slate-200 hover:text-slate-700 ${colMenu === c.key ? "bg-slate-200 text-slate-700" : touch ? "" : "opacity-0 group-hover/h:opacity-100 focus:opacity-100"}`}>⋮</button>
+        ) : null;
+        if (!canSort) return <span key={c.key} data-col={c.key} className={wrapCls} style={ls}>{head}{menuBtn}{handle}</span>;
         return (
-          <span key={c.key} className={wrapCls} style={ls}>
+          <span key={c.key} data-col={c.key} className={wrapCls} style={ls}>
             <button type="button" onClick={() => toggleSort(c.key)} title={t("คลิกเพื่อเรียง", "Click to sort")} className={`inline-flex items-center gap-1 min-w-0 hover:text-slate-900 ${active ? "text-rose-600" : ""}`}>
               {head}
               <span className="text-[9px] leading-none shrink-0">{active ? (dir === "asc" ? "▲" : "▼") : "↕"}</span>
             </button>
+            {menuBtn}
             {handle}
           </span>
         );
@@ -381,7 +440,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         {columns.map((c, ci) => {
           const act = !!activeCell && activeCell(r) === c.key;
           return (
-            <div key={c.key} style={lockStyle(ci + (selectable ? 1 : 0), act ? "#dbeafe" : lockBg, "cell")} onClick={onCellClick ? (e) => { e.stopPropagation(); onCellClick(r, c.key); } : undefined}
+            <div key={c.key} data-col={c.key} style={lockStyle(ci + (selectable ? 1 : 0), act ? "#dbeafe" : lockBg, "cell")} onClick={onCellClick ? (e) => { e.stopPropagation(); onCellClick(r, c.key); } : undefined}
               className={`min-w-0 text-sm text-slate-800 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)} ${onCellClick ? `-mx-1 -my-1 rounded-md px-1 py-1 cursor-pointer ${act ? "bg-blue-100/70 ring-1 ring-blue-300" : "hover:bg-blue-50 hover:ring-1 hover:ring-blue-200"}` : ""}`}>
               {c.cell(r)}
             </div>
@@ -517,6 +576,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         // fill = เลื่อนทั้งสองแกนในกล่องนี้ → หัวตาราง sticky ติดบนได้ (ถ้าเลื่อนที่กล่องแม่ หัวจะไม่ติด)
         <div ref={scrollerRef} onScroll={onScroll} className={`border border-slate-200 rounded-xl ${fill ? "flex-1 min-h-0 overflow-auto overscroll-contain" : "overflow-x-auto"}`}>
           {HeaderCell}
+          {ColMenu}
           {groups.map((g, gi) => {
             const gKeys = g.rows.map(rowKey);
             const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));

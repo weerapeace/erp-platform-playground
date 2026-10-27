@@ -80,7 +80,7 @@ function ChromeSearch({ search, onGlobal, tall }: { search: PageChromeSearch; on
   return (
     <div className={`${fieldCls} ${tall ? "h-10" : "h-9"} flex-1`}>
       <span className="text-sm text-slate-400" aria-hidden>🔍</span>
-      <input value={search.value} onChange={(e) => search.onChange(e.target.value)} placeholder={search.placeholder ?? "ค้นหาในหน้านี้"}
+      <input data-page-search value={search.value} onChange={(e) => search.onChange(e.target.value)} placeholder={search.placeholder ?? "ค้นหาในหน้านี้"}
         className="h-full min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-slate-400" />
       {search.value && <button type="button" onClick={() => search.onChange("")} title="ล้างคำค้น" className="px-1 text-slate-400 hover:text-slate-600">✕</button>}
       {onGlobal && (

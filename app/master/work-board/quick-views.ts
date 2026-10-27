@@ -9,7 +9,7 @@
  * หน้าบอร์ดแปลงใบสั่งผลิตเป็น QvRow (ค่าที่ต้องใช้คิดไว้แล้ว) ก่อนส่งเข้า qvMatch / qvSort
  */
 
-export type QvCond = "late" | "due7" | "flag" | "short" | "ready" | "nodue" | "noprice";
+export type QvCond = "late" | "due7" | "flag" | "short" | "ready" | "nodue" | "old" | "noprice";
 export type QvSort = "urgent" | "late" | "due" | "age" | "stage" | "buy" | "left" | "value" | "brand" | "sku" | "none";
 export type QvDir = "asc" | "desc";
 export type QvGroup = "none" | "stage" | "brand" | "group" | "ready";
@@ -38,8 +38,13 @@ export type QuickView = {
 /** มุมมองของทีม = มุมมอง + ใครเห็นปุ่มนี้ (role = admin/manager/staff · users = id ผู้ใช้) */
 export type QvAudience = "all" | "roles" | "users";
 export type TeamView = QuickView & { aud: QvAudience; roles: string[]; users: string[] };
-/** ของแต่ละคน: มุมมองของฉัน + ปุ่มทีมที่ซ่อน + ความกว้างคอลัมน์ของมุมมองทีม (เฉพาะตัว) */
-export type QvMine = { views: QuickView[]; hidden: string[]; widthOverride: Record<string, Record<string, number>> };
+/** ของแต่ละคน: มุมมองของฉัน + ปุ่มทีมที่ซ่อน + ความกว้าง/คอลัมน์ของมุมมองทีม (เฉพาะตัว) + ลำดับปุ่มบนแถบ (เฉพาะตัว) */
+export type QvMine = {
+  views: QuickView[]; hidden: string[];
+  widthOverride: Record<string, Record<string, number>>;
+  colsOverride: Record<string, string[]>;
+  order: string[];                // ลำดับปุ่มบนแถบของคนนี้ (id) — ว่าง = ตามที่แอดมินเรียง + ของฉันต่อท้าย
+};
 
 /** ค่าของใบ 1 ใบที่มุมมองต้องใช้ (หน้าบอร์ดคิดให้) */
 export type QvRow = {
@@ -57,8 +62,10 @@ export type QvRow = {
 
 export const QV_CONDS: [QvCond, string][] = [
   ["late", "เกินกำหนดส่ง"], ["due7", "ส่งภายใน 7 วัน"], ["flag", "ผู้บริหารติดธงเร่ง"], ["short", "ของยังไม่ครบ"],
-  ["ready", "พร้อมจ่าย"], ["nodue", "ยังไม่มีกำหนดส่ง"], ["noprice", "ยังไม่ตั้งราคา (แอดมิน)"],
+  ["ready", "พร้อมจ่าย"], ["nodue", "ยังไม่มีกำหนดส่ง"], ["old", "ค้างเกิน 30 วัน"], ["noprice", "ยังไม่ตั้งราคา (แอดมิน)"],
 ];
+/** ค้างนานกี่วันถึงนับ "ค้างเกิน 30 วัน" */
+export const QV_OLD_DAYS = 30;
 export const QV_SORTS: [QvSort, string, QvDir][] = [
   ["urgent", "ด่วนสุด (เลยกำหนด → ธงเร่ง → ใกล้ส่ง)", "desc"], ["late", "เลยกำหนดกี่วัน", "desc"], ["due", "กำหนดส่ง (ใกล้สุดก่อน)", "asc"],
   ["age", "อายุใบ (สร้างนานสุดก่อน)", "desc"], ["stage", "ขั้นตอน (ค้างต้นทางก่อน)", "asc"], ["buy", "ของที่ยังต้องซื้อ (รายการ)", "desc"],
@@ -165,12 +172,37 @@ export function parseTeamViews(v: unknown): TeamView[] | null {
     return { ...b, aud: oneOf(o.aud, ["all", "roles", "users"] as const, "all"), roles: strArr(o.roles), users: strArr(o.users) };
   });
 }
-export const QV_MINE_DEFAULT: QvMine = { views: [], hidden: [], widthOverride: {} };
+export const QV_MINE_DEFAULT: QvMine = { views: [], hidden: [], widthOverride: {}, colsOverride: {}, order: [] };
 export function parseMine(v: unknown): QvMine | null {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
-  const wo = o.widthOverride && typeof o.widthOverride === "object" ? o.widthOverride as Record<string, unknown> : {};
-  return { views: parseViews(o.views) ?? [], hidden: strArr(o.hidden), widthOverride: Object.fromEntries(Object.entries(wo).map(([k, x]) => [k, numMap(x)])) };
+  const obj = (x: unknown) => (x && typeof x === "object" && !Array.isArray(x) ? x as Record<string, unknown> : {});
+  return {
+    views: parseViews(o.views) ?? [], hidden: strArr(o.hidden),
+    widthOverride: Object.fromEntries(Object.entries(obj(o.widthOverride)).map(([k, x]) => [k, numMap(x)])),
+    colsOverride: Object.fromEntries(Object.entries(obj(o.colsOverride)).filter(([, x]) => Array.isArray(x)).map(([k, x]) => [k, strArr(x)])),
+    order: strArr(o.order),
+  };
+}
+
+/** เรียงปุ่มตามลำดับเฉพาะตัว — id ที่อยู่ใน order ขึ้นก่อนตามนั้น · ที่ยังไม่อยู่ (มุมมองใหม่) ต่อท้ายตามลำดับเดิม */
+export function qvApplyOrder<T extends { id: string }>(views: T[], order: string[]): T[] {
+  if (!order.length) return views;
+  const at = new Map(order.map((id, i) => [id, i]));
+  return views.map((v, i) => [v, i] as const)
+    .sort(([a, ia], [b, ib]) => (at.get(a.id) ?? 1e6 + ia) - (at.get(b.id) ?? 1e6 + ib))
+    .map(([v]) => v);
+}
+/** ย้ายปุ่ม id ไปซ้าย (-1) / ขวา (+1) หรือไปตำแหน่ง to — คืนลำดับใหม่ (id ของปุ่มที่เห็นทั้งหมด) */
+export function qvMoveOrder(visibleIds: string[], id: string, to: number | { dir: -1 | 1 }): string[] {
+  const from = visibleIds.indexOf(id);
+  if (from < 0) return visibleIds;
+  const dest = typeof to === "number" ? to : from + to.dir;
+  if (dest < 0 || dest >= visibleIds.length || dest === from) return visibleIds;
+  const next = [...visibleIds];
+  next.splice(from, 1);
+  next.splice(dest, 0, id);
+  return next;
 }
 
 /** ใบนี้อยู่ในมุมมองไหม — แบรนด์ → OEM/แบรนด์เรา → เงื่อนไข (noprice ที่ยังไม่รู้ = ไม่ผ่าน) */
@@ -186,6 +218,7 @@ export function qvMatch(v: QuickView, r: QvRow): boolean {
     : c === "short" ? r.short
     : c === "ready" ? r.ready
     : c === "nodue" ? r.dueIn == null
+    : c === "old" ? r.age >= QV_OLD_DAYS
     : r.noprice === true;
   return v.mode === "all" ? v.conds.every(hit) : v.conds.some(hit);
 }
@@ -246,3 +279,20 @@ export const QV_FALLBACK: QuickView = base("all", "ทั้งหมด", "📋
 /** มุมมองใหม่ (ปุ่ม ＋ / บันทึกเป็นมุมมอง) */
 export const qvNew = (p: Partial<QuickView> = {}): QuickView =>
   base(`v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`, "มุมมองใหม่", "⭐", p);
+
+/** แม่แบบมุมมองสำเร็จรูป — สร้างมุมมองของฉันได้ 1 คลิก (brand = ต้องเลือกแบรนด์ก่อน) */
+export type QvTemplate = { key: string; name: string; icon: string; brand?: boolean; make: (brand?: string) => Partial<QuickView> };
+export const QV_TEMPLATES: QvTemplate[] = [
+  { key: "hotBrand", name: "ของด่วนของแบรนด์…", icon: "🔥", brand: true,
+    make: (b) => ({ name: `ของด่วน · ${b === "__none__" ? "ไม่ระบุแบรนด์" : b}`, icon: "🔥", brands: b ? [b] : [], conds: ["late", "due7", "flag"], mode: "any", layout: "cards", size: "l", cardFields: ["img", "prod", "due", "stage", "left"], sort1: "urgent", dir1: "desc" }) },
+  { key: "old", name: `ค้างนานเกิน ${QV_OLD_DAYS} วัน`, icon: "🐢",
+    make: () => ({ name: `ค้างเกิน ${QV_OLD_DAYS} วัน`, icon: "📅", conds: ["old"], sort1: "age", dir1: "desc", sort2: "due", dir2: "asc", group: "brand" }) },
+  { key: "readyToday", name: "พร้อมจ่ายวันนี้", icon: "✅",
+    make: () => ({ name: "พร้อมจ่ายวันนี้", icon: "✅", conds: ["ready"], layout: "cards", size: "s", cardFields: ["img", "prod", "left", "due"], sort1: "due", dir1: "asc", sort2: "urgent", dir2: "desc" }) },
+  { key: "nodue", name: "ยังไม่มีวันส่ง", icon: "❔",
+    make: () => ({ name: "ยังไม่มีวันส่ง", icon: "❔", conds: ["nodue"], sort1: "age", dir1: "desc", group: "brand" }) },
+  { key: "shortBrand", name: "ของยังไม่ครบ จัดตามแบรนด์", icon: "🛒",
+    make: () => ({ name: "ของยังไม่ครบ (ตามแบรนด์)", icon: "🛒", conds: ["short"], sort1: "buy", dir1: "desc", sort2: "due", dir2: "asc", group: "brand" }) },
+  { key: "oemLate", name: "งานลูกค้า OEM ที่เลยกำหนด", icon: "🧾",
+    make: () => ({ name: "OEM เลยกำหนด", icon: "🧾", own: "oem", conds: ["late"], sort1: "late", dir1: "desc" }) },
+];

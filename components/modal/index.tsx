@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useLayoutEffect, useCallback, useState, useRef } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import { refreshIfDirty } from "@/lib/refresh-bus";
 import { tr } from "@/lib/lang";   // ข้อความระบบ 2 ภาษา (ภาษาเปลี่ยน = รีโหลดหน้า → อ่านตอน render พอ)
 import { autoLayoutKey, getLayoutPref, prefetchLayoutPrefs, setLayoutPref, syncLayoutPrefs } from "@/lib/modal-layout-pref";
@@ -239,6 +239,10 @@ function UnsavedChangesDialog({
 
 // ค่ากว้างเริ่มต้น (px) ตาม size preset — ใช้เป็นจุดเริ่มเมื่อผู้ใช้ลากครั้งแรก
 const SIZE_PX: Record<ModalSize, number> = { sm: 384, md: 448, lg: 672, xl: 896 };
+// เกาะขอบเป็นแผงข้าง: ใช้ได้เมื่อจอกว้าง ≥ 900px · ลากหัวเข้าใกล้ขอบ ≤ 16px
+const DOCK_MIN_VW = 900;
+const DOCK_EDGE = 16;
+const clampDockW = (w: number) => Math.round(Math.max(320, Math.min(w, (typeof window !== "undefined" ? window.innerWidth : 1600) * 0.8)));
 
 export function ERPModal({
   open,
@@ -280,6 +284,15 @@ export function ERPModal({
   const posRef = useRef(pos);
   posRef.current = pos;
   const canDrag = draggable && size !== "sm" && !expanded;
+  // เกาะขอบจอเป็นแผงข้าง (ลากหัวไปชนขอบซ้าย/ขวา) — หน้าด้านหลังเห็นเต็ม + เลื่อน/กดได้ · จำต่อคน ต่อป๊อป (dk/dw)
+  const [dock, setDock] = useState<"l" | "r" | null>(null);
+  const dockRef = useRef(dock);
+  dockRef.current = dock;
+  const [dockW, setDockW] = useState(560);
+  const dockWRef = useRef(dockW);
+  dockWRef.current = dockW;
+  const [dockHint, setDockHint] = useState<"l" | "r" | null>(null);
+  const docked = !!dock && canDrag;
 
   useEffect(() => { setMounted(true); prefetchLayoutPrefs(); }, []);
   useRefreshOnClose(open);
@@ -299,6 +312,9 @@ export function ERPModal({
     }
     setDims(d);
     setPos(p?.px != null && p?.py != null && window.innerWidth >= 640 ? { x: p.px, y: p.py } : null);
+    setDock(p?.dk && window.innerWidth >= DOCK_MIN_VW ? p.dk : null);
+    setDockW(clampDockW(p?.dw ?? Math.min(560, window.innerWidth * 0.42)));
+    setDockHint(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -313,7 +329,7 @@ export function ERPModal({
   });
   // เปิดป๊อป/เปลี่ยนขนาด/จอเล็กลง → ดึงกลับเข้าจอถ้าตำแหน่งที่จำไว้หลุด
   useIsoLayoutEffect(() => {
-    if (!open || !pos || !canDrag || !panelRef.current) return;
+    if (!open || !pos || !canDrag || docked || !panelRef.current) return;
     const c = clampTo(pos, baseOf(pos));
     if (c.x !== pos.x || c.y !== pos.y) setPos(c);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -324,34 +340,79 @@ export function ERPModal({
     if (!canDrag || e.button !== 0 || window.innerWidth < 640 || !panelRef.current) return;
     if ((e.target as HTMLElement).closest("button, a, input, select, textarea, [data-no-drag]")) return;
     e.preventDefault();
-    const sx = e.clientX, sy = e.clientY;
-    const start = posRef.current ?? { x: 0, y: 0 };
-    const base = baseOf(start);
+    let sx = e.clientX, sy = e.clientY;
+    let start = posRef.current ?? { x: 0, y: 0 };
+    // เกาะขอบอยู่ → ยังไม่รู้ขนาดตอนลอย: วัด base ตอนขยับครั้งแรกหลังหลุดจากขอบ
+    let base: { l: number; t: number; w: number } | null = dockRef.current ? null : baseOf(start);
     const el = e.currentTarget;
     el.setPointerCapture(e.pointerId);
     document.body.style.userSelect = "none";
     let moved = false;
+    const canDock = window.innerWidth >= DOCK_MIN_VW;
     const move = (ev: PointerEvent) => {
       const dx = ev.clientX - sx, dy = ev.clientY - sy;
       if (!moved && Math.hypot(dx, dy) < 3) return;
+      if (!moved && dockRef.current) {
+        // ลากออกจากขอบ = กลับเป็นป๊อปลอย ให้หัวป๊อปอยู่ใต้นิ้ว/เมาส์
+        const h = dimsRef.current?.h ?? Math.min(window.innerHeight * 0.9, 640);
+        start = { x: Math.round(ev.clientX - window.innerWidth / 2), y: Math.round(ev.clientY - window.innerHeight / 2 + h / 2 - 28) };
+        sx = ev.clientX; sy = ev.clientY;
+        posRef.current = start;
+        dockRef.current = null;
+        flushSync(() => { setPos(start); setDock(null); });   // วาดเป็นป๊อปลอยทันที → วัด base ได้ถูก
+        if (panelRef.current) {
+          // ขนาดจริงตอนลอยรู้แล้ว → ขยับให้หัวป๊อปอยู่ใต้นิ้ว/เมาส์พอดี
+          const r = panelRef.current.getBoundingClientRect();
+          const fixed = { x: Math.round(start.x + ev.clientX - (r.left + r.width / 2)), y: Math.round(start.y + ev.clientY - (r.top + 24)) };
+          start = fixed;
+          posRef.current = fixed;
+          flushSync(() => setPos(fixed));
+          base = baseOf(fixed);
+        }
+        if (prefKey.current) setLayoutPref(prefKey.current, { dk: undefined });
+        moved = true;
+        return;
+      }
       moved = true;
+      if (!base) { if (!panelRef.current) return; base = baseOf(start); }
       const n = clampTo({ x: start.x + dx, y: start.y + dy }, base);
       posRef.current = n;
       setPos(n);
+      const hint = !canDock ? null : ev.clientX <= DOCK_EDGE ? "l" : ev.clientX >= window.innerWidth - DOCK_EDGE ? "r" : null;
+      setDockHint((o) => (o === hint ? o : hint));
     };
-    const up = () => {
+    const up = (ev: PointerEvent) => {
       el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
       document.body.style.userSelect = "";
+      setDockHint(null);
+      if (!moved || !prefKey.current) return;
+      const side = canDock && !dockRef.current ? (ev.clientX <= DOCK_EDGE ? "l" : ev.clientX >= window.innerWidth - DOCK_EDGE ? "r" : null) : null;
+      if (side) { setDock(side); setLayoutPref(prefKey.current, { dk: side, dw: dockWRef.current }); return; }
       const p = posRef.current;
-      if (moved && p && prefKey.current) setLayoutPref(prefKey.current, { px: p.x, py: p.y });
+      if (p) setLayoutPref(prefKey.current, { px: p.x, py: p.y });
     };
     el.addEventListener("pointermove", move); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
   };
-  // ดับเบิลคลิกหัวป๊อป → กลับกลางจอ (ลืมตำแหน่งที่จำไว้)
+  // ดับเบิลคลิกหัวป๊อป → กลับกลางจอ (ลืมตำแหน่ง + เลิกเกาะขอบ)
   const recenter = () => {
-    if (!posRef.current) return;
+    if (!posRef.current && !dockRef.current) return;
     setPos(null);
-    if (prefKey.current) setLayoutPref(prefKey.current, { px: undefined, py: undefined });
+    setDock(null);
+    if (prefKey.current) setLayoutPref(prefKey.current, { px: undefined, py: undefined, dk: undefined });
+  };
+  // ปุ่ม ⇱ บนหัวตอนเกาะขอบ — กลับเป็นป๊อปลอยกลางจอ
+  const undock = () => {
+    setDock(null);
+    setPos(null);
+    if (prefKey.current) setLayoutPref(prefKey.current, { dk: undefined, px: undefined, py: undefined });
+  };
+  // ลากเส้นขอบด้านในของแผงข้าง → ปรับความกว้าง
+  const startDockResize = (e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    resizeAxis.current = "x";
+    resizing.current = true;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "ew-resize";
   };
 
   const dropLegacySize = () => {
@@ -363,6 +424,12 @@ export function ERPModal({
     if (!open || !resizable) return;
     const onMove = (e: MouseEvent) => {
       if (!resizing.current) return;
+      if (dockRef.current) {
+        const w = clampDockW(dockRef.current === "r" ? window.innerWidth - e.clientX : e.clientX);
+        dockWRef.current = w;
+        setDockW(w);
+        return;
+      }
       // ป๊อปอยู่กลางจอ (+ ระยะที่ลากย้าย) → มุมขวาล่าง = จุดกลางป๊อป + ครึ่งขนาด
       const off = posRef.current ?? { x: 0, y: 0 };
       const cx = window.innerWidth / 2 + off.x;
@@ -380,6 +447,7 @@ export function ERPModal({
       resizing.current = false;
       document.body.style.userSelect = "";
       document.body.style.cursor = "";
+      if (dockRef.current) { if (prefKey.current) setLayoutPref(prefKey.current, { dw: dockWRef.current }); return; }
       const d = dimsRef.current;
       if (d && prefKey.current) { setLayoutPref(prefKey.current, { w: d.w, h: d.h }); dropLegacySize(); }
     };
@@ -416,10 +484,11 @@ export function ERPModal({
     if (prefKey.current && size !== "sm") setLayoutPref(prefKey.current, { x: n === baseExpanded ? undefined : n });
   };
   // ปุ่ม ↺ คืนขนาดเดิม — ลืมทุกอย่างที่จำไว้ของป๊อปนี้ (ขยาย/ย่อ + ขนาดที่ลาก) กลับเป็นค่าเริ่มต้นของระบบ
-  const canReset = !!dims || !!pos || expanded !== baseExpanded;
+  const canReset = !!dims || !!pos || !!dock || expanded !== baseExpanded;
   const resetLayout = () => {
     setDims(null);
     setPos(null);
+    setDock(null);
     setExpanded(baseExpanded);
     if (prefKey.current) setLayoutPref(prefKey.current, null);
     dropLegacySize();
@@ -452,7 +521,7 @@ export function ERPModal({
   // ตัวครอบภายนอก (เช่น ERPModal ของ WorkInstruction) เป็นคนคุมหัวเรื่อง+ปุ่มปิด
   if (embedded) {
     return createPortal(
-      <div className="fixed inset-0 z-50 flex flex-col bg-white">
+      <div data-erp-modal className="fixed inset-0 z-50 flex flex-col bg-white">
         <UnsavedChangesDialog
           open={showUnsavedWarning}
           onStay={() => setShowUnsavedWarning(false)}
@@ -474,25 +543,41 @@ export function ERPModal({
     : usingCustom
       ? ""                                  // ขนาดมาจาก inline style
       : `w-full ${SIZE_CLASS[size]} max-h-[90vh]`;
-  const panelStyle: React.CSSProperties | undefined = usingCustom || (pos && canDrag)
-    ? {
-        ...(usingCustom ? { width: dims!.w, height: dims!.h, maxWidth: "98vw", maxHeight: "96vh" } : {}),
-        ...(pos && canDrag ? { transform: `translate(${pos.x}px, ${pos.y}px)` } : {}),
-      }
-    : undefined;
+  const panelStyle: React.CSSProperties | undefined = docked
+    ? { width: dockW, maxWidth: "80vw" }
+    : usingCustom || (pos && canDrag)
+      ? {
+          ...(usingCustom ? { width: dims!.w, height: dims!.h, maxWidth: "98vw", maxHeight: "96vh" } : {}),
+          ...(pos && canDrag ? { transform: `translate(${pos.x}px, ${pos.y}px)` } : {}),
+        }
+      : undefined;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={zIndex ? { zIndex } : undefined}>
-      {/* Backdrop */}
-      <div
-        className={`absolute inset-0 ${backdrop === "light" ? "bg-black/15" : "bg-black/50"} transition-opacity`}
-        {...backdropDismiss}
-      />
+    <div data-erp-modal
+      className={docked
+        ? `fixed inset-0 z-50 flex ${dock === "r" ? "justify-end" : "justify-start"} pointer-events-none`
+        : "fixed inset-0 z-50 flex items-center justify-center p-4"}
+      style={zIndex ? { zIndex } : undefined}
+    >
+      {/* Backdrop — เกาะขอบ = ไม่มีพื้นหลัง (หน้าด้านหลังเลื่อน/กดได้) */}
+      {!docked && (
+        <div
+          className={`absolute inset-0 ${backdrop === "light" ? "bg-black/15" : "bg-black/50"} transition-opacity`}
+          {...backdropDismiss}
+        />
+      )}
+      {/* ลากหัวไปใกล้ขอบ → โชว์ที่ที่จะเกาะ */}
+      {dockHint && (
+        <div className={`pointer-events-none fixed inset-y-2 ${dockHint === "l" ? "left-2" : "right-2"} rounded-xl border-2 border-dashed border-blue-400 bg-blue-500/10`}
+          style={{ width: Math.min(dockW, window.innerWidth * 0.8) }} />
+      )}
 
       {/* Modal panel */}
       <div
         ref={panelRef}
-        className={`relative bg-white rounded-xl shadow-2xl flex flex-col ${panelClass}`}
+        className={docked
+          ? `relative pointer-events-auto bg-white shadow-2xl flex flex-col h-full ${dock === "r" ? "border-l" : "border-r"} border-slate-200`
+          : `relative bg-white rounded-xl shadow-2xl flex flex-col ${panelClass}`}
         style={panelStyle}
         onClick={(e) => e.stopPropagation()}
       >
@@ -507,7 +592,9 @@ export function ERPModal({
         <div
           onPointerDown={canDrag ? startDrag : undefined}
           onDoubleClick={canDrag ? recenter : undefined}
-          title={canDrag ? tr("ลากเพื่อย้ายป๊อป · ดับเบิลคลิก = กลับกลางจอ", "Drag to move · double-click to recenter") : undefined}
+          title={!canDrag ? undefined : docked
+            ? tr("ลากออกจากขอบ = กลับเป็นป๊อปลอย · ดับเบิลคลิก = กลับกลางจอ", "Drag away from the edge to float · double-click to recenter")
+            : tr("ลากเพื่อย้ายป๊อป · ลากไปชนขอบซ้าย/ขวา = เกาะเป็นแผงข้าง · ดับเบิลคลิก = กลับกลางจอ", "Drag to move · drag to the left/right edge to dock · double-click to recenter")}
           style={canDrag ? { touchAction: "none" } : undefined}
           className={`flex items-start justify-between px-6 pt-6 pb-4 border-b border-slate-100 flex-shrink-0 ${canDrag ? "cursor-move select-none" : ""}`}
         >
@@ -516,6 +603,18 @@ export function ERPModal({
             {description && <p className="text-sm text-slate-500 mt-0.5">{description}</p>}
           </div>
           <div className="ml-4 flex-shrink-0 flex items-center gap-1">
+            {docked && (
+              <button
+                onClick={undock}
+                title={tr("เลิกเกาะขอบ — กลับเป็นป๊อปลอยกลางจอ", "Undock — float in the center")}
+                aria-label={tr("เลิกเกาะขอบ", "Undock")}
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="4" y="6" width="16" height="12" rx="2" /><path d="M9 3h6" />
+                </svg>
+              </button>
+            )}
             {canReset && (
               <button
                 onClick={resetLayout}
@@ -572,7 +671,17 @@ export function ERPModal({
         )}
 
         {/* แถบลากปรับขนาด — ขอบขวา (กว้าง), ขอบล่าง (สูง), มุม (ทั้งคู่) วางนอกขอบเล็กน้อยกันทับแถบเลื่อน/ปุ่ม */}
-        {resizable && !expanded && (
+        {/* เกาะขอบ: ลากเส้นขอบด้านใน → ปรับความกว้างแผงข้าง */}
+        {docked && (
+          <div
+            onMouseDown={startDockResize}
+            title={tr("ลากเพื่อปรับความกว้าง", "Drag to resize width")}
+            className={`absolute inset-y-0 ${dock === "r" ? "-left-1.5" : "-right-1.5"} w-3 cursor-ew-resize z-20 group flex items-center justify-center`}
+          >
+            <div className="w-1 h-12 rounded-full bg-slate-300 group-hover:bg-orange-400 transition-colors" />
+          </div>
+        )}
+        {resizable && !expanded && !docked && (
           <>
             {/* ขอบขวา → ปรับความกว้าง */}
             <div
@@ -653,7 +762,7 @@ export function ConfirmDialog({
   if (!mounted || !open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div data-erp-modal className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" {...backdropDismiss} />
       <div
         className="relative w-full max-w-md bg-white rounded-xl shadow-2xl"
@@ -964,7 +1073,7 @@ export function ApprovalDialog({
   if (!mounted || !open) return null;
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div data-erp-modal className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50" {...backdropDismiss} />
       <div className="relative w-full max-w-md bg-white rounded-xl shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="p-6">

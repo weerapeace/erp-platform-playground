@@ -10,15 +10,16 @@
  *   👤 มุมมองของฉัน: ใครก็สร้าง/แก้/ลบได้ เห็นคนเดียว
  * ที่เก็บมุมมอง = ./use-quick-views · ฟอร์ม 1 มุมมอง = ./quick-views-editor · หน้าตา = ./table-display-panel
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
+import { FloatingDropdown } from "@/components/floating-dropdown";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { roleLabel } from "@/components/auth";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { QuickViewForm, type QvBrand, type QvFormSection } from "./quick-views-editor";
-import { QV_DEFAULT_TEAM, qvNew, type QuickView, type QvMine, type TeamView } from "./quick-views";
+import { QV_DEFAULT_TEAM, QV_TEMPLATES, qvNew, type QuickView, type QvMine, type QvTemplate, type TeamView } from "./quick-views";
 import { DisplaySettings, type DisplayTab } from "./table-display-panel";
 import type { TableDisplay } from "./table-display";
 
@@ -46,7 +47,7 @@ const copyView = (v: QuickView, p: Partial<QuickView> = {}): QuickView => ({
 function stripId(v: QuickView): Omit<QuickView, "id"> { const { id: _id, ...rest } = JSON.parse(JSON.stringify(v)) as QuickView; void _id; return rest; }
 const audText = (v: TeamView) => (v.aud === "all" ? "ทุกคน" : v.aud === "roles" ? (v.roles.length ? v.roles.map(roleLabel).join(", ") : "ยังไม่เลือก") : `${v.users.length} คน`);
 
-export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, brands, colOptions, defaultCols, disp, currentCols, cardGroups, openTab, focus, newMine, onPreview }: {
+export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, brands, colOptions, defaultCols, disp, currentCols, cardGroups, openTab, focus, openSel, newMine, onPreview, countOf, total }: {
   open: boolean;
   onClose: () => void;
   isAdmin: boolean;
@@ -61,8 +62,11 @@ export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, 
   cardGroups: [string, [string, string][]][];
   openTab?: VsTab | null;           // เปิดมาที่แท็บนี้ (ไม่ส่ง = แท็บที่ใช้ล่าสุด)
   focus?: Sel | null;               // มุมมองที่ตารางใช้อยู่ (ถ้ายังไม่เคยเลือกในป๊อป)
+  openSel?: Sel | null;             // เปิดมาที่มุมมองนี้แน่ ๆ (เมนูลัด "แก้มุมมองนี้") — ทับที่จำไว้
   newMine?: QuickView | null;       // มาจาก "＋ บันทึกเป็นมุมมอง" — เพิ่มเป็นของฉันในร่าง (ยังไม่บันทึก)
   onPreview?: (v: QuickView | null) => void;   // มุมมองที่กำลังแก้ → ตารางด้านหลังโชว์ตามทันที · null = กลับมุมมองเดิม
+  countOf?: (v: QuickView) => number;          // นับใบที่ตรงมุมมอง (สด ๆ ตอนแก้เงื่อนไข)
+  total?: number;                              // ใบรอจ่ายทั้งหมด
 }) {
   const toast = useToast();
   const [dTeam, setDTeam] = useState<TeamView[]>(team);
@@ -83,7 +87,7 @@ export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, 
     setDTeam(t);
     setDMine(m);
     const has = (s: Sel | null | undefined): s is Sel => !!s && (s.kind === "team" ? t.some((v) => v.id === s.id) : m.views.some((v) => v.id === s.id));
-    setSel(newMine ? { kind: "mine", id: newMine.id } : has(ui.sel) ? ui.sel : has(focus) ? focus : t[0] ? { kind: "team", id: t[0].id } : null);
+    setSel(newMine ? { kind: "mine", id: newMine.id } : has(openSel) ? openSel : has(ui.sel) ? ui.sel : has(focus) ? focus : t[0] ? { kind: "team", id: t[0].id } : null);
     setTab(newMine ? "views" : openTab ?? ui.tab);
     setSub(ui.sub);
     disp.beginStage();
@@ -138,15 +142,28 @@ export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, 
     else { const rest = dMine.views.filter((v) => v.id !== sel.id); setDMine((m) => ({ ...m, views: rest })); setSel(rest[0] ? { kind: "mine", id: rest[0].id } : dTeam[0] ? { kind: "team", id: dTeam[0].id } : null); }
   };
   // 💾 บันทึกทีเดียว: มุมมอง (ทีม/ของฉัน) → ชุดกลาง (แอดมินที่กำลังแก้) → หน้าตาของฉัน
+  // บันทึกแล้วมีปุ่ม "ย้อนกลับ" 10 วินาที (คืนมุมมอง + หน้าตาเป็นแบบก่อนบันทึก · ชุดกลางของแอดมินไม่ย้อน)
   const save = async () => {
     setBusy(true);
     let ok = true;
     rememberUi();
+    const prev = { team: JSON.parse(JSON.stringify(team)) as TeamView[], mine: JSON.parse(JSON.stringify(mine)) as QvMine, disp: disp.getSaved() };
+    const did = { team: teamDirty, mine: mineDirty, disp: disp.stageDirty };
     if (teamDirty || mineDirty) ok = await onSave({ team: teamDirty ? dTeam : undefined, mine: mineDirty ? dMine : undefined });
     if (ok && disp.editingShared) await disp.saveShared();
-    if (ok && disp.stageDirty) { disp.commitStage(); if (!teamDirty && !mineDirty) toast.success("บันทึกหน้าตาตารางแล้ว"); }
+    if (ok && disp.stageDirty) disp.commitStage();
     setBusy(false);
-    if (ok) { const d = new Date(); setSavedAt(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`); }
+    if (!ok) return;
+    const d = new Date(); setSavedAt(`${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`);
+    if (!did.team && !did.mine && !did.disp) return;
+    const msg = did.team ? "บันทึกแล้ว — ทุกคนที่เห็นมุมมองทีมจะได้แบบใหม่" : did.mine ? "บันทึกมุมมองของคุณแล้ว" : "บันทึกหน้าตาตารางแล้ว";
+    toast.action(msg, "ย้อนกลับ", () => {
+      void (async () => {
+        if (did.team || did.mine) await onSave({ team: did.team ? prev.team : undefined, mine: did.mine ? prev.mine : undefined });
+        if (did.disp) disp.restoreSaved(prev.disp);
+        toast.info("ย้อนกลับเป็นแบบก่อนบันทึกแล้ว");
+      })();
+    });
   };
   const cancelEdits = () => {
     setDTeam(JSON.parse(JSON.stringify(team))); setDMine(JSON.parse(JSON.stringify(mine)));
@@ -154,6 +171,17 @@ export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, 
     if (disp.editingShared) disp.cancelEditShared();
   };
   // ปิดป๊อป (ยืนยันทิ้งที่แก้แล้ว ถ้ามี) = ทิ้งร่างทั้งหมด ตารางกลับเป็นแบบเดิม
+  // ＋ จากแม่แบบ → มุมมองของฉันใหม่ (แม่แบบที่ต้องเลือกแบรนด์ = เลือกจากรายการแบรนด์ก่อน)
+  const tplAnchor = useRef<HTMLButtonElement>(null);
+  const [tplOpen, setTplOpen] = useState(false);
+  const [tplBrand, setTplBrand] = useState<QvTemplate | null>(null);
+  const addFromTemplate = (t: QvTemplate, brand?: string) => {
+    const v = qvNew(t.make(brand));
+    setDMine((m) => ({ ...m, views: [...m.views, v] }));
+    setSel({ kind: "mine", id: v.id });
+    setSub("filter");
+    setTplOpen(false); setTplBrand(null);
+  };
   const close = () => {
     rememberUi();
     disp.discardStage();
@@ -185,6 +213,7 @@ export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, 
                     className={`shrink-0 text-sm ${hid ? "opacity-30" : ""}`}>👁</button>
                   <span className="shrink-0">{v.icon}</span>
                   <span className={`min-w-0 flex-1 truncate ${hid ? "text-slate-400 line-through" : "text-slate-800"}`}>{v.name}</span>
+                  {countOf && <span className="shrink-0 tabular-nums text-[11px] text-slate-400" title="จำนวนใบที่ตรงมุมมองนี้ตอนนี้">{countOf(v)}</span>}
                   <span className="shrink-0 rounded-full bg-slate-100 px-1.5 text-[10px] text-slate-500" title="ใครเห็นปุ่มนี้">{audText(v)}</span>
                 </div>
               );
@@ -207,11 +236,35 @@ export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, 
                 <DragHandle {...dragMine.handleProps(i)} />
                 <span className="shrink-0">{v.icon}</span>
                 <span className="min-w-0 flex-1 truncate text-slate-800">{v.name}</span>
+                {countOf && <span className="shrink-0 tabular-nums text-[11px] text-slate-400" title="จำนวนใบที่ตรงมุมมองนี้ตอนนี้">{countOf(v)}</span>}
                 <span className="shrink-0 text-[10px] text-slate-400">{v.layout === "cards" ? "การ์ด" : "ตาราง"}</span>
               </div>
             ))}
           </div>
-          <button type="button" onClick={addMine} className="mt-1.5 h-7 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50">＋ มุมมองของฉัน</button>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <button type="button" onClick={addMine} className="h-7 rounded-md border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50">＋ มุมมองของฉัน</button>
+            <button ref={tplAnchor} type="button" onClick={() => { setTplOpen((o) => !o); setTplBrand(null); }}
+              className="h-7 rounded-md border border-blue-200 bg-blue-50 px-2.5 text-xs text-blue-700 hover:bg-blue-100">＋ จากแม่แบบ ▾</button>
+          </div>
+          <FloatingDropdown anchorRef={tplAnchor} open={tplOpen} onClose={() => { setTplOpen(false); setTplBrand(null); }} minWidth={240}>
+            <div className="max-h-[var(--fd-max-h)] overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg">
+              {tplBrand ? <>
+                <button type="button" onClick={() => setTplBrand(null)} className="w-full px-3 py-1.5 text-left text-[12px] text-slate-500 hover:bg-slate-50">‹ {tplBrand.name} — เลือกแบรนด์</button>
+                {brands.map((b) => (
+                  <button key={b.name || "__none__"} type="button" onClick={() => addFromTemplate(tplBrand, b.name || "__none__")} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: b.color || "#94a3b8" }} />{b.name || "ไม่ระบุแบรนด์"}<span className="ml-auto text-[11px] text-slate-400">{b.n}</span>
+                  </button>
+                ))}
+              </> : <>
+                <div className="px-3 pb-1 text-[11px] text-slate-400">สร้างมุมมองของฉันจากแม่แบบ (แก้ต่อได้)</div>
+                {QV_TEMPLATES.map((t) => (
+                  <button key={t.key} type="button" onClick={() => (t.brand ? setTplBrand(t) : addFromTemplate(t))} className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-slate-50">
+                    <span>{t.icon}</span>{t.name}{t.brand && <span className="ml-auto text-slate-400">›</span>}
+                  </button>
+                ))}
+              </>}
+            </div>
+          </FloatingDropdown>
         </div>
       </div>
 
@@ -228,6 +281,12 @@ export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, 
           </div>
           {sel?.kind === "team" && !isAdmin && <p className="rounded-md bg-amber-50 px-2 py-1.5 text-[12px] text-amber-800">มุมมองของทีม — แอดมินเป็นคนตั้ง · คุณกด 👁 ซ่อนปุ่มนี้สำหรับตัวเองได้ หรือ &quot;ทำสำเนาเป็นของฉัน&quot; เพื่อปรับเอง</p>}
 
+          {countOf && (
+            <div className="rounded-md bg-blue-50 px-2.5 py-1.5 text-[13px] text-blue-800">
+              🔎 มุมมองนี้เจอ <b className="tabular-nums">{countOf(cur)}</b> ใบ{total != null ? <> จาก <span className="tabular-nums">{total}</span></> : null}
+              <span className="ml-1 text-[11px] text-blue-600/80">(นับสดตามที่แก้ · ยังไม่รวมแบรนด์ที่กดชิปบนแถบ)</span>
+            </div>
+          )}
           {/* แท็บย่อย — ฟอร์มยาวแบ่งเป็นช่วง ไม่ต้องเลื่อนหา */}
           <div className="flex flex-wrap gap-1">
             {VS_SUBS.filter(([k]) => k !== "aud" || audOk).map(([k, l]) => (

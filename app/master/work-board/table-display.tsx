@@ -102,7 +102,12 @@ export type TableDisplay = {
   discardStage: () => void;
   resetStage: () => void;
   stageDirty: boolean;
+  /** ค่าที่เก็บไว้จริงตอนนี้ (ไว้จำก่อนบันทึก) · restoreSaved = เอาค่าเดิมกลับ (ปุ่มย้อนกลับหลังบันทึก) */
+  getSaved: () => DisplayMine;
+  restoreSaved: (m: DisplayMine) => void;
 };
+/** หน้าตาของแต่ละคน (ชุดที่เลือก + กำหนดเอง) */
+export type DisplayMine = Mine;
 
 export function useTableDisplay(isAdmin: boolean): TableDisplay {
   const toast = useToast();
@@ -171,9 +176,11 @@ export function useTableDisplay(isAdmin: boolean): TableDisplay {
   const discardStage = useCallback(() => setStage(null), []);
   const resetStage = useCallback(() => setStage((s) => (s ? mine : s)), [mine]);
   const stageDirty = !!stage && JSON.stringify(stage) !== JSON.stringify(mine);
+  const getSaved = useCallback(() => mine, [mine]);
+  const restoreSaved = useCallback((m: Mine) => { setMine(m); setStage((s) => (s ? m : s)); }, [setMine]);
 
   return {
     cfg, preset: cur.preset, setPreset, set, editingShared: draft?.key ?? null, startEditShared, cancelEditShared, saveShared, resetSharedToFactory, savingShared,
-    beginStage, commitStage, discardStage, resetStage, stageDirty,
+    beginStage, commitStage, discardStage, resetStage, stageDirty, getSaved, restoreSaved,
   };
 }

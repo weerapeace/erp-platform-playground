@@ -24,7 +24,9 @@ import type { MoSkipped } from "@/lib/mo-skip";
 import { moSteps, currentStep } from "./mo-steps";
 import { DeviceIframePreview, IPAD_SIZE, useCanPreviewDevice } from "@/components/device-view";
 import { useTableDisplay } from "./table-display";
-import { qvMatch, qvSort, qvVisible, qvNew, qvSummary, qvAudienceOk, QV_CARD_MIN, QV_FALLBACK, type QuickView, type QvRow, type TeamView, type QvMine } from "./quick-views";
+import { qvMatch, qvSort, qvVisible, qvNew, qvSummary, qvAudienceOk, qvApplyOrder, qvMoveOrder, QV_CARD_MIN, QV_FALLBACK, type QuickView, type QvRow, type TeamView, type QvMine } from "./quick-views";
+import { ViewChipsBar } from "./view-chips-bar";
+import { copyText } from "@/components/copy-button";
 import type { QvBrand } from "./quick-views-editor";
 import { useQuickViews } from "./use-quick-views";
 import { ViewSettingsModal, type VsTab } from "./view-settings-modal";
@@ -3434,10 +3436,13 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   // มุมมองทีม (แอดมินตั้ง · กรอง "ใครเห็น" + ที่ฉันซ่อน) ต่อด้วยมุมมองของฉัน — ที่เก็บ ./use-quick-views
   const qvStore = useQuickViews(canSeeMoney);
   const { user: authUser } = useAuth();
-  const views = qvVisible([...qvStore.team.filter((v) => qvAudienceOk(v, authUser) && !qvStore.mine.hidden.includes(v.id)), ...qvStore.mine.views], canSeeMoney);
+  // ลำดับปุ่มบนแถบ = ลำดับเฉพาะตัว (ลากสลับ/เมนูลัด) ทับลำดับของแอดมิน
+  const views = qvApplyOrder(qvVisible([...qvStore.team.filter((v) => qvAudienceOk(v, authUser) && !qvStore.mine.hidden.includes(v.id)), ...qvStore.mine.views], canSeeMoney), qvStore.mine.order);
+  const mineRef = useRef(qvStore.mine);   // ค่าล่าสุดสำหรับปุ่ม "ย้อนกลับ" ที่กดทีหลัง (กันใช้ค่าเก่าในปิด)
+  mineRef.current = qvStore.mine;
   // ⚙️ ป๊อปตั้งค่ามุมมอง (4 แท็บ · แก้ในร่าง → 💾 บันทึกทีเดียว) · tab = เปิดมาที่แท็บนี้ (ไม่ส่ง = แท็บล่าสุด)
   //   ＋ บันทึกเป็นมุมมอง = เปิดป๊อปพร้อมมุมมองของฉันใหม่ในร่าง · previewView = มุมมองที่กำลังแก้ในป๊อป → ตารางโชว์ตามทันที
-  const [mgr, setMgr] = useState<{ open: boolean; tab?: VsTab; newMine?: QuickView | null }>({ open: false });
+  const [mgr, setMgr] = useState<{ open: boolean; tab?: VsTab; newMine?: QuickView | null; sel?: { kind: "team" | "mine"; id: string } }>({ open: false });
   const [previewView, setPreviewView] = useState<QuickView | null>(null);
   // ซ่อนแถบมุมมอง = ใช้มุมมองแรกเสมอ (ไม่ให้ค้างกรองอยู่โดยมองไม่เห็นปุ่ม)
   const baseView: QuickView = (dc.show.chips ? views.find((v) => v.id === filt.view) : undefined) ?? views[0] ?? QV_FALLBACK;
@@ -3488,35 +3493,91 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     const seen = !!pv && (mineNext.views.some((v) => v.id === pv.id)
       || team.some((v) => v.id === pv.id && qvAudienceOk(v, authUser) && !mineNext.hidden.includes(v.id)));
     if (pv && seen) setFilt({ view: pv.id, brand: mgr.newMine?.id === pv.id ? "" : filt.brand });
-    toast.success(next.team ? "บันทึกมุมมองแล้ว — ทุกคนที่เห็นมุมมองทีมจะได้แบบใหม่" : "บันทึกมุมมองของคุณแล้ว");
-    return true;
+    return true;   // แจ้ง + ปุ่มย้อนกลับ = ป๊อปเป็นคนแสดง
   };
+  // ---- เมนูลัดของปุ่มมุมมอง (คลิกขวา / กดค้าง) ----
+  const [chipMenu, setChipMenu] = useState<QuickView | null>(null);
+  const chipMenuAnchor = useRef<HTMLElement | null>(null);
+  const openChipMenu = (v: QuickView, el: HTMLElement) => { chipMenuAnchor.current = el; setChipMenu(v); };
+  const kindOf = (id: string): "team" | "mine" => (qvStore.mine.views.some((x) => x.id === id) ? "mine" : "team");
+  const copyAsMine = (v: QuickView, p: Partial<QuickView> = {}) => qvNew({
+    name: `${v.name} (ของฉัน)`, icon: v.icon, own: v.own, mode: v.mode, conds: [...v.conds], brands: [...v.brands], layout: v.layout, size: v.size,
+    cols: v.cols ? [...v.cols] : null, cardFields: [...v.cardFields], sort1: v.sort1, dir1: v.dir1, sort2: v.sort2, dir2: v.dir2, group: v.group,
+    widths: { ...v.widths }, fit: v.fit, ...p,
+  });
+  const setOrder = (ids: string[]) => qvStore.setMine({ ...mineRef.current, order: ids });
+  const moveChip = (fromId: string, toId: string) => { const ids = views.map((x) => x.id); setOrder(qvMoveOrder(ids, fromId, ids.indexOf(toId))); };
+  const viewLink = (id: string) => `${window.location.origin}/master/work-board?view=table&qv=${encodeURIComponent(id)}`;
+  const chipAction = async (act: "edit" | "copy" | "link" | "left" | "right" | "hide" | "del", v: QuickView) => {
+    setChipMenu(null);
+    if (act === "edit") { setMgr({ open: true, tab: "views", sel: { kind: kindOf(v.id), id: v.id } }); return; }
+    if (act === "copy") { setMgr({ open: true, tab: "views", newMine: copyAsMine(v) }); return; }
+    if (act === "link") { const ok = await copyText(viewLink(v.id)); toast[ok ? "success" : "error"](ok ? `คัดลอกลิงก์ “${v.name}” แล้ว — ส่งทาง LINE ได้ (คนที่เปิดต้องเห็นมุมมองนี้ด้วย)` : "คัดลอกไม่สำเร็จ"); return; }
+    if (act === "left" || act === "right") { setOrder(qvMoveOrder(views.map((x) => x.id), v.id, { dir: act === "left" ? -1 : 1 })); return; }
+    if (act === "hide") {
+      qvStore.setMine({ ...mineRef.current, hidden: [...mineRef.current.hidden.filter((x) => x !== v.id), v.id] });
+      toast.action(`ซ่อนปุ่ม “${v.name}” แล้ว (เฉพาะคุณ)`, "ย้อนกลับ", () => qvStore.setMine({ ...mineRef.current, hidden: mineRef.current.hidden.filter((x) => x !== v.id) }), { variant: "info" });
+      return;
+    }
+    const old = mineRef.current.views.find((x) => x.id === v.id);
+    const at = mineRef.current.views.findIndex((x) => x.id === v.id);
+    if (!old) return;
+    qvStore.setMine({ ...mineRef.current, views: mineRef.current.views.filter((x) => x.id !== v.id) });
+    toast.action(`ลบมุมมอง “${v.name}” แล้ว`, "ย้อนกลับ", () => {
+      const vs = [...mineRef.current.views];
+      vs.splice(Math.min(at, vs.length), 0, old);
+      qvStore.setMine({ ...mineRef.current, views: vs });
+    }, { variant: "info" });
+  };
+  // ลิงก์ ?qv=<id> (ส่งให้เพื่อน) → เปิดบอร์ดที่มุมมองนั้น (ครั้งเดียวหลังโหลดมุมมองทีมเสร็จ)
+  const qvLinkDone = useRef(false);
+  useEffect(() => {
+    if (qvLinkDone.current || !qvStore.teamLoaded) return;
+    qvLinkDone.current = true;
+    const id = new URLSearchParams(window.location.search).get("qv");
+    if (!id) return;
+    if (views.some((x) => x.id === id)) { setFilt({ view: id, brand: "" }); pickTab("pend"); }
+    else toast.warning("มุมมองในลิงก์นี้คุณยังไม่เห็น (อาจตั้งให้เฉพาะบางคน หรือถูกซ่อน/ลบไปแล้ว)");
+  }, [qvStore.teamLoaded]);   // eslint-disable-line react-hooks/exhaustive-deps
   const saveAsView = () => {
     const bl = brandF === "__none__" ? "ไม่ระบุแบรนด์" : brandF;
-    const v = qvNew({
-      name: brandF ? `${view.name} · ${bl}` : `${view.name} (ของฉัน)`, icon: view.icon, own: view.own, mode: view.mode, conds: [...view.conds],
-      brands: brandF ? [brandF] : [...view.brands], layout: view.layout, size: view.size, cols: view.cols ? [...view.cols] : null,
-      cardFields: [...view.cardFields], sort1: view.sort1, dir1: view.dir1, sort2: view.sort2, dir2: view.dir2, group: view.group,
-    });
+    const v = copyAsMine(view, brandF ? { name: `${view.name} · ${bl}`, brands: [brandF] } : {});
     setMgr({ open: true, tab: "views", newMine: v });
   };
   // ความกว้างคอลัมน์ของมุมมอง: ลากในตาราง = ร่าง (มีแถบให้กดบันทึก) · มุมมองของฉัน = เก็บในมุมมอง · มุมมองทีม = แอดมินเก็บให้ทุกคน / คนอื่นเก็บเฉพาะตัว
   const isMineView = qvStore.mine.views.some((v) => v.id === view.id);
+  // + คอลัมน์ของมุมมอง (เมนู ⋮ ที่หัวคอลัมน์: ย้าย/ซ่อน) = ร่างเดียวกัน → แถบเหลืองให้กดบันทึก
   const savedWidths = isMineView ? view.widths : (qvStore.mine.widthOverride[view.id] ?? view.widths);
+  const savedCols = isMineView ? view.cols : (qvStore.mine.colsOverride[view.id] ?? view.cols);
   const [widthDraft, setWidthDraft] = useState<Record<string, number> | null>(null);
-  useEffect(() => { setWidthDraft(null); }, [view.id]);
+  const [colsDraft, setColsDraft] = useState<string[] | null>(null);
+  useEffect(() => { setWidthDraft(null); setColsDraft(null); }, [view.id]);
   const effWidths = widthDraft ?? savedWidths;
+  const effCols = colsDraft ?? savedCols;
   const widthDirty = widthDraft !== null && JSON.stringify(widthDraft) !== JSON.stringify(savedWidths);
-  const saveWidths = async (scope: "view" | "me") => {
-    if (!widthDraft) return;
-    const w = widthDraft;
-    if (isMineView) qvStore.setMine({ ...qvStore.mine, views: qvStore.mine.views.map((v) => (v.id === view.id ? { ...v, widths: w } : v)) });
+  const colsDirty = colsDraft !== null && JSON.stringify(colsDraft) !== JSON.stringify(savedCols);
+  const layoutDirty = widthDirty || colsDirty;
+  const discardLayout = () => { setWidthDraft(null); setColsDraft(null); };
+  const saveLayout = async (scope: "view" | "me") => {
+    if (!layoutDirty) return;
+    const w = widthDirty && widthDraft ? widthDraft : savedWidths;
+    const cols = colsDirty ? colsDraft : savedCols;
+    const patch = <V extends QuickView>(v: V): V => ({ ...v, widths: w, cols });
+    if (isMineView) qvStore.setMine({ ...qvStore.mine, views: qvStore.mine.views.map((v) => (v.id === view.id ? patch(v) : v)) });
     else if (scope === "view" && canSeeMoney) {
-      if (!(await qvStore.saveTeam(qvStore.team.map((v) => (v.id === view.id ? { ...v, widths: w } : v))))) return;
-      if (qvStore.mine.widthOverride[view.id]) { const wo = { ...qvStore.mine.widthOverride }; delete wo[view.id]; qvStore.setMine({ ...qvStore.mine, widthOverride: wo }); }
-    } else qvStore.setMine({ ...qvStore.mine, widthOverride: { ...qvStore.mine.widthOverride, [view.id]: w } });
-    setWidthDraft(null);
-    toast.success(scope === "view" && !isMineView ? `บันทึกความกว้างคอลัมน์ในมุมมอง “${view.name}” แล้ว (ทุกคนที่เห็น)` : `บันทึกความกว้างคอลัมน์ของ “${view.name}” แล้ว`);
+      if (!(await qvStore.saveTeam(qvStore.team.map((v) => (v.id === view.id ? patch(v) : v))))) return;
+      if (qvStore.mine.widthOverride[view.id] || qvStore.mine.colsOverride[view.id]) {
+        const wo = { ...qvStore.mine.widthOverride }; delete wo[view.id];
+        const co = { ...qvStore.mine.colsOverride }; delete co[view.id];
+        qvStore.setMine({ ...qvStore.mine, widthOverride: wo, colsOverride: co });
+      }
+    } else qvStore.setMine({
+      ...qvStore.mine,
+      widthOverride: widthDirty ? { ...qvStore.mine.widthOverride, [view.id]: w } : qvStore.mine.widthOverride,
+      colsOverride: colsDirty && cols ? { ...qvStore.mine.colsOverride, [view.id]: cols } : qvStore.mine.colsOverride,
+    });
+    discardLayout();
+    toast.success(scope === "view" && !isMineView ? `บันทึกคอลัมน์ในมุมมอง “${view.name}” แล้ว (ทุกคนที่เห็น)` : `บันทึกคอลัมน์ของ “${view.name}” แล้ว`);
   };
   // ปิดช่องติ๊กในชุดหน้าตา → ล้างที่เลือกค้างไว้ (ปุ่มทำหลายใบจะได้ไม่โผล่)
   useEffect(() => { if (!dc.check) { setSel(new Set()); setWoSel(new Set()); setQSel(new Set()); } }, [dc.check]);
@@ -3818,11 +3879,36 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const pendColPrefs = useColumnPrefs(touch ? "wb_table_cols_ipad" : "wb_table_cols_pc", pendCols);
   // คอลัมน์ที่โชว์จริง: ชุดหน้าตากำหนดไว้ (เรียงตามชุด) หรือ ▥ คอลัมน์ของแต่ละคน · ชื่อสินค้าต้องมีเสมอ · ช่องเงินไม่มีสิทธิ์ = ไม่มีใน pendCols อยู่แล้ว
   const pendColsShown = (() => {
-    const fixedCols = view.cols ?? dc.cols;   // มุมมองกำหนดคอลัมน์เอง > ชุดหน้าตา > ▥ คอลัมน์ของแต่ละคน
+    const fixedCols = effCols ?? dc.cols;   // มุมมองกำหนดคอลัมน์เอง (+ ร่างจากเมนูหัวคอลัมน์) > ชุดหน้าตา > ▥ คอลัมน์ของแต่ละคน
     const base = fixedCols ? fixedCols.map((k) => pendCols.find((c) => c.key === k)).filter((c): c is MiniColumn<PendingMO> => !!c) : pendColPrefs.visible;
     const withProd = base.some((c) => c.key === "prod") ? base : [...pendCols.filter((c) => c.key === "prod"), ...base];
     return withProd.filter((c) => dc.img !== "0" || c.key !== "img");
   })();
+  // เมนู ⋮ ที่หัวคอลัมน์ (ของกลาง MiniTable) — ย้าย/ซ่อน = ร่างคอลัมน์ของมุมมองนี้ (แถบเหลืองให้บันทึก)
+  const pendColMenu = {
+    onMove: (key: string, d: -1 | 1) => setColsDraft(qvMoveOrder(pendColsShown.map((c) => c.key), key, { dir: d })),
+    onHide: (key: string) => setColsDraft(pendColsShown.map((c) => c.key).filter((k) => k !== key)),
+    canHide: (key: string) => key !== "prod",
+  };
+  // คีย์ลัด (คอม): 1–9 = สลับมุมมอง · / = ไปช่องค้นหา — ไม่ทำงานตอนพิมพ์อยู่หรือมีป๊อปเปิด
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey || mgr.open) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      if (document.querySelector("[data-erp-modal]")) return;
+      if (e.key === "/") {
+        const box = Array.from(document.querySelectorAll<HTMLInputElement>("[data-page-search]")).find((x) => x.offsetParent !== null);
+        if (box) { e.preventDefault(); box.focus(); box.select(); }
+        return;
+      }
+      if (tab !== "pend" || !dc.show.chips || !/^[1-9]$/.test(e.key)) return;
+      const v = views[Number(e.key) - 1];
+      if (v) { e.preventDefault(); pickView(v.id); }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  });
 
   // จ่ายงาน (ป๊อปเดิมของตาราง) — ค่าแรงตั้งต้น = ราคากลางในสูตรของสินค้านั้น (ไม่มีก็ถอดจากค่าแรงที่วางแผนไว้) แก้รายใบได้
   const openDispatchFor = (ids: Set<string>) => {
@@ -4185,26 +4271,41 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       {(tab === "pend" || tab === "wip") && ((tab === "pend" && dc.show.chips) || brandChips.length > 1) && (
         <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto pb-1 [scrollbar-width:thin]">
           {/* มุมมองด่วน — กดแล้วกรอง + หน้าตา (ตาราง/การ์ด) + เรียง + จัดกลุ่ม ตามที่ตั้งไว้ · ชี้ค้าง = สรุปว่าโชว์อะไร */}
-          {tab === "pend" && dc.show.chips && views.map((v) => {
-            const on = v.id === view.id;
-            return (
-              <button key={v.id} type="button" onClick={() => pickView(v.id)} title={qvSummary(v)}
-                className={`inline-flex shrink-0 items-center gap-1.5 ${touch ? "h-10 px-4" : "h-8 px-3"} text-sm rounded-full border ${on ? "bg-slate-800 border-slate-800 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                <span aria-hidden>{v.icon}</span>{v.name}
-                {v.brands.slice(0, 3).map((b) => <span key={b} className="h-2 w-2 shrink-0 rounded-full ring-1 ring-white" style={{ backgroundColor: brandColorOf(b) }} aria-hidden />)}
-                {v.layout === "cards" && <span className={on ? "text-white/60" : "text-slate-300"} title="แสดงเป็นการ์ด" aria-hidden>▤</span>}
-                <span className={on ? "text-white/70" : "text-slate-400"}>{fmt(viewCount(v))}</span>
-              </button>
-            );
-          })}
           {tab === "pend" && dc.show.chips && (
-            <button type="button" onClick={saveAsView} title="บันทึกสิ่งที่เปิดอยู่ (มุมมองนี้ + แบรนด์ที่กดไว้) เป็นปุ่มใหม่ แล้วตั้งชื่อ/ปรับต่อได้"
-              className={`shrink-0 ${touch ? "h-10 px-3" : "h-8 px-2.5"} rounded-full border border-dashed border-slate-300 bg-white text-xs text-slate-500 hover:bg-slate-50`}>＋ บันทึกเป็นมุมมอง</button>
+            <ViewChipsBar views={views} activeId={view.id} onPick={pickView} countOf={viewCount} brandColorOf={brandColorOf} touch={touch} fmt={fmt}
+              onMenu={openChipMenu} onReorder={moveChip} reserve={touch ? 300 : 260} share={brandChips.length > 1 ? 0.62 : 1}
+              after={<>
+                <button type="button" onClick={saveAsView} title="บันทึกสิ่งที่เปิดอยู่ (มุมมองนี้ + แบรนด์ที่กดไว้) เป็นปุ่มใหม่ แล้วตั้งชื่อ/ปรับต่อได้"
+                  className={`shrink-0 ${touch ? "h-10 px-3" : "h-8 px-2.5"} rounded-full border border-dashed border-slate-300 bg-white text-xs text-slate-500 hover:bg-slate-50`}>＋ บันทึกเป็นมุมมอง</button>
+                <button type="button" onClick={() => setMgr({ open: true })} title="ตั้งค่ามุมมอง — มุมมองด่วน (ทีม/ของฉัน · ใครเห็น) · หน้าตา · ส่วนหัว · คอลัมน์ — เปิดมาเจอแท็บที่ใช้ล่าสุด"
+                  className={`shrink-0 ${touch ? "h-10 px-3" : "h-8 px-2.5"} rounded-full border border-dashed border-slate-300 bg-white text-xs text-slate-500 hover:bg-slate-50`}>⚙️ ตั้งค่ามุมมอง</button>
+              </>} />
           )}
-          {tab === "pend" && dc.show.chips && (
-            <button type="button" onClick={() => setMgr({ open: true })} title="ตั้งค่ามุมมอง — มุมมองด่วน (ทีม/ของฉัน · ใครเห็น) · หน้าตา · ส่วนหัว · คอลัมน์ — เปิดมาเจอแท็บที่ใช้ล่าสุด"
-              className={`shrink-0 ${touch ? "h-10 px-3" : "h-8 px-2.5"} rounded-full border border-dashed border-slate-300 bg-white text-xs text-slate-500 hover:bg-slate-50`}>⚙️ ตั้งค่ามุมมอง</button>
-          )}
+          {/* เมนูลัดของปุ่มมุมมอง (คลิกขวา / กดค้าง) */}
+          <FloatingDropdown anchorRef={chipMenuAnchor} open={!!chipMenu} onClose={() => setChipMenu(null)} minWidth={230}>
+            {chipMenu && (() => {
+              const v = chipMenu;
+              const mineV = kindOf(v.id) === "mine";
+              const idx = views.findIndex((x) => x.id === v.id);
+              const it = "flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent";
+              return (
+                <div className="rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                  <div className="px-3 pb-1 pt-0.5 text-[11px] text-slate-400">{v.icon} {v.name} · {mineV ? "มุมมองของฉัน" : "มุมมองของทีม"}</div>
+                  <button type="button" className={it} onClick={() => void chipAction("edit", v)}>✏️ แก้มุมมองนี้</button>
+                  <button type="button" className={it} onClick={() => void chipAction("copy", v)}>📄 ทำสำเนาเป็นของฉัน</button>
+                  <button type="button" className={it} disabled={mineV} onClick={() => void chipAction("link", v)}
+                    title={mineV ? "มุมมองของฉัน — คนอื่นเปิดไม่ได้ (แชร์เป็นมุมมองทีมก่อน)" : undefined}>🔗 คัดลอกลิงก์ส่งเพื่อน{mineV ? " (เฉพาะมุมมองทีม)" : ""}</button>
+                  <div className="my-1 border-t border-slate-100" />
+                  <button type="button" className={it} disabled={idx <= 0} onClick={() => void chipAction("left", v)}>← ย้ายไปซ้าย</button>
+                  <button type="button" className={it} disabled={idx < 0 || idx >= views.length - 1} onClick={() => void chipAction("right", v)}>→ ย้ายไปขวา</button>
+                  <div className="my-1 border-t border-slate-100" />
+                  {mineV
+                    ? <button type="button" className={`${it} text-rose-600`} onClick={() => void chipAction("del", v)}>🗑 ลบมุมมองนี้</button>
+                    : <button type="button" className={it} onClick={() => void chipAction("hide", v)}>🙈 ซ่อนปุ่มนี้ (เฉพาะฉัน)</button>}
+                </div>
+              );
+            })()}
+          </FloatingDropdown>
           {brandChips.length > 1 && (<>
             {tab === "pend" && dc.show.chips && <span className="mx-1 h-6 w-px shrink-0 bg-slate-200" aria-hidden />}
             {brandChips.map(([b, info]) => {
@@ -4223,20 +4324,21 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       )}
       </div>
       {tab === "pend" && (<>
-      {/* ลากปรับความกว้างคอลัมน์แล้ว → แถบให้กดบันทึกลงมุมมอง (ไม่บันทึกเองเงียบ ๆ) */}
-      {widthDirty && (
+      {/* ลากความกว้าง / ย้าย-ซ่อนคอลัมน์ (เมนู ⋮) แล้ว → แถบให้กดบันทึกลงมุมมอง (ไม่บันทึกเองเงียบ ๆ) */}
+      {layoutDirty && (
         <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-[12px] text-amber-800">
-          <span>↔️ ปรับความกว้างคอลัมน์ของมุมมอง “{view.name}” แล้ว — ยังไม่บันทึก</span>
+          <span>↔️ ปรับ{colsDirty ? (widthDirty ? "คอลัมน์ + ความกว้าง" : "คอลัมน์") : "ความกว้างคอลัมน์"}ของมุมมอง “{view.name}” แล้ว — ยังไม่บันทึก
+            {colsDirty && !savedCols && <span className="ml-1 text-amber-700/80">(บันทึกแล้วมุมมองนี้จะใช้คอลัมน์ของตัวเอง)</span>}</span>
           <span className="ml-auto flex flex-wrap gap-1.5">
             {(isMineView || canSeeMoney) && (
-              <button type="button" onClick={() => void saveWidths("view")} className="h-7 rounded-md bg-amber-600 px-3 font-medium text-white hover:bg-amber-700">
+              <button type="button" onClick={() => void saveLayout("view")} className="h-7 rounded-md bg-amber-600 px-3 font-medium text-white hover:bg-amber-700">
                 💾 บันทึกในมุมมอง{!isMineView ? " (ทุกคนที่เห็น)" : ""}
               </button>
             )}
             {!isMineView && (
-              <button type="button" onClick={() => void saveWidths("me")} className={`h-7 rounded-md px-3 ${canSeeMoney ? "border border-amber-300 bg-white" : "bg-amber-600 font-medium text-white hover:bg-amber-700"}`}>💾 บันทึกเฉพาะฉัน</button>
+              <button type="button" onClick={() => void saveLayout("me")} className={`h-7 rounded-md px-3 ${canSeeMoney ? "border border-amber-300 bg-white" : "bg-amber-600 font-medium text-white hover:bg-amber-700"}`}>💾 บันทึกเฉพาะฉัน</button>
             )}
-            <button type="button" onClick={() => setWidthDraft(null)} className="h-7 rounded-md border border-amber-300 bg-white px-3">ย้อนกลับ</button>
+            <button type="button" onClick={discardLayout} className="h-7 rounded-md border border-amber-300 bg-white px-3">ย้อนกลับ</button>
           </span>
         </div>
       )}
@@ -4249,10 +4351,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         cardGrid={dev !== "ipadP" && view.layout === "cards" ? `repeat(auto-fill,minmax(${QV_CARD_MIN[view.size]},1fr))` : undefined}
         fill stickyCols={dev === "ipadP" || view.layout === "cards" ? 0 : 2} inlineActions lazyRows onScrollTop={onTableScroll}
         resizable={dev !== "ipadP" && view.layout === "table"} widths={effWidths} onWidthsChange={setWidthDraft} fitContent={view.fit}
+        columnMenu={dev !== "ipadP" && view.layout === "table" ? pendColMenu : undefined}
         countUnit="ใบ"
         selectable={dc.check} selected={sel} onSelectedChange={setSel}
         actions={<div className="flex items-center gap-2 flex-wrap">
-          {dev !== "ipadP" && dc.show.colBtn && !dc.cols && !view.cols && view.layout === "table" && <ColumnChooser state={pendColPrefs}
+          {dev !== "ipadP" && dc.show.colBtn && !dc.cols && !effCols && view.layout === "table" && <ColumnChooser state={pendColPrefs}
             note={`จำแยกกันระหว่างจอคอมกับ iPad · ${canSeeMoney ? "ราคาขาย/มูลค่าเห็นเฉพาะคนที่ดูแผนผู้บริหารได้" : "ช่องราคาขาย/มูลค่าเห็นเฉพาะผู้บริหาร"}`} />}
           {dc.show.tools && <>
           <button type="button" onClick={() => pickGroup(pendGroup === "stage" ? "none" : "stage")} title="จัดกลุ่มตามขั้นตอน: รอซื้อของ → รอของเข้า → รอเตรียม/ตัด → พร้อมจ่าย"
@@ -4470,7 +4573,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       <ViewSettingsModal open={mgr.open} onClose={() => { setPreviewView(null); setMgr({ open: false }); }} isAdmin={canSeeMoney}
         team={qvStore.team} mine={qvStore.mine} onSave={saveViews} brands={qvBrands} colOptions={panelColOptions} defaultCols={pendColPrefs.visible.map((c) => c.key)}
         disp={disp} currentCols={pendColPrefs.visible.map((c) => c.key)} cardGroups={panelCardGroups}
-        openTab={mgr.tab ?? null} focus={{ kind: isMineView ? "mine" : "team", id: baseView.id }} newMine={mgr.newMine ?? null} onPreview={setPreviewView} />
+        openTab={mgr.tab ?? null} focus={{ kind: isMineView ? "mine" : "team", id: baseView.id }} openSel={mgr.sel ?? null} newMine={mgr.newMine ?? null} onPreview={setPreviewView}
+        countOf={viewCount} total={pending.length} />
       {/* แถบคำสั่งลอยด้านล่าง (ของกลาง BulkActionBar) — โผล่เมื่อติ๊กเลือกหลายใบ แทนปุ่มกระจายบนหัวตาราง */}
       <BulkActionBar count={tab === "pend" ? selMoNos.length : 0} unit="ใบ" onClear={() => setSel(new Set())} spacer={false}>
         <button type="button" onClick={() => setAssignOpen(true)} className="h-9 rounded-lg bg-violet-500 px-3 text-sm font-medium text-white hover:bg-violet-600">🗂 จับเข้ากลุ่ม</button>

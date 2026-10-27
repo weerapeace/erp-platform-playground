@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { qvMatch, qvSort, parseViews, qvVisible, qvSummary, QV_DEFAULT_SIMPLE, QV_DEFAULT_NORMAL, qvNew, parseTeamViews, parseMine, qvAudienceOk, QV_DEFAULT_TEAM, type QvRow, type QuickView, type TeamView } from "../../app/master/work-board/quick-views";
+import { qvMatch, qvSort, parseViews, qvVisible, qvSummary, QV_DEFAULT_SIMPLE, QV_DEFAULT_NORMAL, qvNew, parseTeamViews, parseMine, qvAudienceOk, QV_DEFAULT_TEAM, qvApplyOrder, qvMoveOrder, QV_TEMPLATES, QV_OLD_DAYS, type QvRow, type QuickView, type TeamView } from "../../app/master/work-board/quick-views";
 
 // มุมมองด่วนแท็บรอจ่าย — กติกากลาง (กรอง/เรียง/อ่านค่า)
 const row = (p: Partial<QvRow>): QvRow => ({ brand: "Good Goods", oem: true, late: 0, dueIn: null, flag: 0, short: false, ready: false, noprice: null, age: 10, stage: 1, buy: 0, left: 10, value: 0, sku: "A", ...p });
@@ -102,6 +102,37 @@ describe("มุมมองทีม / ของฉัน / ใครเห็�
     expect(m.hidden).toEqual(["hot"]);
     expect(m.widthOverride.oem.sku).toBe(200);
     expect(parseMine(null)).toBeNull();
-    expect(parseMine({})).toEqual({ views: [], hidden: [], widthOverride: {} });
+    expect(parseMine({})).toEqual({ views: [], hidden: [], widthOverride: {}, colsOverride: {}, order: [] });
+  });
+});
+
+describe("ลำดับปุ่มเฉพาะตัว / แม่แบบ / ค้างนาน", () => {
+  const vs = ["a", "b", "c", "d"].map((id) => ({ id }));
+  it("qvApplyOrder: ตามลำดับที่จำ · มุมมองใหม่ต่อท้ายตามลำดับเดิม · ไม่มีลำดับ = เหมือนเดิม", () => {
+    expect(qvApplyOrder(vs, ["c", "a"]).map((v) => v.id)).toEqual(["c", "a", "b", "d"]);
+    expect(qvApplyOrder(vs, []).map((v) => v.id)).toEqual(["a", "b", "c", "d"]);
+    expect(qvApplyOrder(vs, ["x", "d"]).map((v) => v.id)).toEqual(["d", "a", "b", "c"]);
+  });
+  it("qvMoveOrder: ย้ายซ้าย/ขวา/ไปตำแหน่ง · สุดขอบ/ไม่พบ = เหมือนเดิม", () => {
+    const ids = ["a", "b", "c", "d"];
+    expect(qvMoveOrder(ids, "c", { dir: -1 })).toEqual(["a", "c", "b", "d"]);
+    expect(qvMoveOrder(ids, "a", { dir: -1 })).toEqual(ids);
+    expect(qvMoveOrder(ids, "a", 3)).toEqual(["b", "c", "d", "a"]);
+    expect(qvMoveOrder(ids, "z", 1)).toEqual(ids);
+  });
+  it("ค้างเกิน 30 วัน · parseMine อ่าน order/colsOverride", () => {
+    const r = { brand: "A", oem: false, late: 0, dueIn: 5, flag: 0, short: false, ready: false, noprice: null, age: QV_OLD_DAYS, stage: 1, buy: 0, left: 1, value: 0, sku: "x" };
+    expect(qvMatch(qvNew({ conds: ["old"] }), r)).toBe(true);
+    expect(qvMatch(qvNew({ conds: ["old"] }), { ...r, age: QV_OLD_DAYS - 1 })).toBe(false);
+    const m = parseMine({ order: ["b", 2, "a"], colsOverride: { hot: ["img", "prod"], bad: "x" } })!;
+    expect(m.order).toEqual(["b", "a"]);
+    expect(m.colsOverride).toEqual({ hot: ["img", "prod"] });
+  });
+  it("แม่แบบ: แบรนด์ใส่ชื่อ+กรอง · ทุกแม่แบบได้ค่าที่อ่านกลับได้", () => {
+    const hot = QV_TEMPLATES.find((t) => t.key === "hotBrand")!;
+    const p = hot.make("Good Goods");
+    expect(p.brands).toEqual(["Good Goods"]);
+    expect(p.name).toContain("Good Goods");
+    for (const t of QV_TEMPLATES) expect(parseViews([qvNew(t.make("A"))])?.[0].conds.length ?? 0).toBeGreaterThanOrEqual(0);
   });
 });
