@@ -15,7 +15,7 @@ import type { CatchUpSnapshot } from "@/app/api/mo/catch-up/route";
 import { CrewPick, crewFields, crewList, lastCrewIds } from "./crew-pick";
 import { DispatchDatePick } from "./dispatch-date-pick";
 import {
-  CU_TARGETS, CU_STAGE_LABEL, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun,
+  CU_TARGETS, CU_STAGE_LABEL, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuStageDone, cuCanShort,
   type CuTargetKey, type CuTicks, type CuResult, type CuStage,
 } from "./catch-up";
 
@@ -23,6 +23,11 @@ type DeptLite = { id: string; name: string };
 type CrewWO = Parameters<typeof lastCrewIds>[0][number];
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const numIn = "w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500";
+/** สถานะซื้อของรายวัตถุดิบ (lib/mo-material-status) → คำที่โชว์ */
+const MAT_LABEL: Record<string, string> = { buy: "ต้องซื้อ", requested: "รออนุมัติ", ordered: "รอของ", received: "ได้ของแล้ว", have: "มีของ", ready: "เตรียมแล้ว", skip: "ไม่ต้องซื้อ" };
+/** เส้นขั้นตอน = สถานะที่เลือกได้เรียงตามลำดับ (ยกเลิกใบแยกไว้ล่างสุด) แบ่งหมวดตาม group */
+const flow = CU_TARGETS.filter((t) => t.key !== "cancel");
+const phases = [...new Set(flow.map((t) => t.group))];
 
 export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders }: {
   /** ใบสั่งผลิตที่จะอัปเดต (null = ปิดป๊อป) */
@@ -44,13 +49,14 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const [shelfId, setShelfId] = useState("");
   const [badReason, setBadReason] = useState("");
   const [cancelReason, setCancelReason] = useState("");
+  const [missing, setMissing] = useState<string[]>([]);   // รหัสวัตถุดิบที่ "ยังขาด"
   const [running, setRunning] = useState(-1);
   const [results, setResults] = useState<CuResult[]>([]);
 
   useEffect(() => {
     if (!moNo) return;
     setSnap(null); setLoadErr(""); setPage(1); setTarget(null); setTicks({}); setDeptId(""); setCrewIds([]); setDispDate(null);
-    setShelfId(""); setBadReason(""); setCancelReason(""); setResults([]); setRunning(-1);
+    setShelfId(""); setBadReason(""); setCancelReason(""); setMissing([]); setResults([]); setRunning(-1);
     let alive = true;
     void (async () => {
       try {
@@ -67,18 +73,26 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const f = useMemo(() => (snap ? cuFacts(snap) : null), [snap]);
   const pick = (k: CuTargetKey) => {
     if (!f) return;
-    setTarget(k); setTicks(cuDefaultTicks(f, k));
+    setTarget(k); setTicks((t) => ({ ...cuDefaultTicks(f, k), short: k !== "have" && cuCanShort(f, k) ? t.short : false }));
     const q = cuDefaultQty(f, k); setQty(q);
     const good = snap?.shelves.filter((s) => s.kind !== "defect") ?? [];
     if (good.length === 1) setShelfId(good[0].id);
   };
   const rows = f && target ? cuRows(f, target, ticks) : [];
+  const selIdx = target ? flow.findIndex((t) => t.key === target) : -1;
+  const phaseOn = (ph: string) => selIdx >= 0 && flow.some((t, i) => t.group === ph && i <= selIdx);
+  /** ขั้นที่ระบบบันทึกไปถึงแล้ว (ไกลสุด) — ป้าย "ระบบบันทึกถึงตรงนี้" */
+  const sysKey = f ? [...flow].reverse().find((t) => t.upto && t.key !== "return_part" && cuStageDone(f, t.upto))?.key : undefined;
+  const toggleShort = (v: boolean) => {
+    setTicks((t) => ({ ...t, short: v }));
+    if (v && snap) setMissing(snap.materials.filter((x) => !x.ready && ["buy", "requested", "ordered"].includes(x.status)).map((x) => x.sku));
+  };
   const on = (st: CuStage) => rows.some((r) => r.stage === st && (r.state === "need" || (r.state === "opt" && !!ticks[st])));
 
   const dept = departments.find((d) => d.id === deptId) ?? null;
   const hire = !!dept && /เหมา/.test(dept.name);
   const pool = useMemo(() => (dept ? (hire ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id)) : []), [dept, hire, craftsmen]);
-  const built = f && target ? cuBuildSteps(f, target, ticks, { ...qty, shelfId, deptId, cancelReason }) : { steps: [], errors: [] };
+  const built = f && target ? cuBuildSteps(f, target, ticks, { ...qty, shelfId, deptId, cancelReason, missing }) : { steps: [], errors: [] };
   const errors = [...built.errors, ...(on("dispatch") && hire && crewIds.length === 0 && qty.dispatchQty > 0 ? ["โต๊ะเหมา ต้องเลือกช่างอย่างน้อย 1 คน"] : [])];
 
   const save = async () => {
@@ -123,49 +137,101 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
         : !snap || !f || !m ? <div className="py-10 text-center text-sm text-slate-400">กำลังโหลดข้อมูลใบงาน…</div>
         : page === 1 ? (
           <div className="space-y-4">
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-[12px]">
               <div className="mb-1 font-medium text-slate-500">ระบบบันทึกไว้ตอนนี้</div>
-              <div className="flex flex-wrap gap-x-3 gap-y-1">
-                <span>🛒 {buyTxt}</span>
-                <span>🧺 เตรียม {m.has_bom ? `${m.prep_ready}/${m.prep_total}` : m.prep_done ? "✓" : "—"}</span>
-                <span>✂️ ตัด {m.has_bom ? (m.cut_total ? `${m.cut_ready}/${m.cut_total}` : "ไม่มีชิ้นต้องตัด") : m.cut_done ? "✓" : "—"}</span>
-                <span>🚚 จ่าย {fmt(f.dispatched)}/{fmt(f.qty)}</span>
-                <span>↩️ ช่างคืน {fmt(f.received)}</span>
-                <span>🗄️ QC รับเข้า {fmt(f.qcPulled)}{f.shelfGood ? ` · บนชั้น ${fmt(f.shelfGood)}` : ""}</span>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-700">
+                {([["ซื้อของ", buyTxt], ["เตรียม", m.has_bom ? `${m.prep_ready}/${m.prep_total}` : m.prep_done ? "ครบ" : "—"],
+                  ["ตัด", m.has_bom ? (m.cut_total ? `${m.cut_ready}/${m.cut_total}` : "ไม่มีชิ้นต้องตัด") : m.cut_done ? "ครบ" : "—"],
+                  ["จ่าย", `${fmt(f.dispatched)}/${fmt(f.qty)}`], ["ช่างคืน", fmt(f.received)],
+                  ["QC รับเข้า", `${fmt(f.qcPulled)}${f.shelfGood ? ` (บนชั้น ${fmt(f.shelfGood)})` : ""}`]] as [string, string][]).map(([k, v]) => (
+                  <span key={k}><span className="text-slate-400">{k}</span> {v}</span>
+                ))}
               </div>
             </div>
             <div>
-              <div className="mb-2 text-sm font-medium text-slate-700">ตอนนี้ของจริงอยู่ขั้นไหน?</div>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {CU_TARGETS.map((t) => {
-                  const why = cuTargetBlocked(f, t.key), sel = target === t.key;
+              <div className="mb-2 text-sm font-medium text-slate-700">ตอนนี้ของจริงอยู่ขั้นไหน? <span className="text-[12px] font-normal text-slate-400">กดขั้นเดียว ขั้นก่อนหน้าเป็นสีม่วงให้เอง</span></div>
+              <div>
+                {phases.map((ph, pi) => {
+                  const items = flow.filter((t) => t.group === ph);
+                  const lineOn = pi < phases.length - 1 && phaseOn(phases[pi + 1]);
                   return (
-                    <button key={t.key} type="button" disabled={!!why} title={why ?? `${t.group} · ${t.hint}`} onClick={() => pick(t.key)}
-                      className={`rounded-lg border px-2.5 py-2 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${sel
-                        ? t.key === "cancel" ? "border-rose-500 bg-rose-50 ring-1 ring-rose-500" : "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500"
-                        : "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/40"}`}>
-                      <div className={`text-[13px] font-medium ${sel ? (t.key === "cancel" ? "text-rose-700" : "text-indigo-700") : "text-slate-800"}`}>{t.icon} {t.label}</div>
-                      <div className="text-[11px] text-slate-400">{why ?? t.hint}</div>
-                    </button>
+                    <div key={ph} className="relative grid grid-cols-[5rem_minmax(0,1fr)] gap-3 py-1.5">
+                      {pi < phases.length - 1 && <span className={`absolute left-[2.5rem] top-9 -bottom-1.5 w-0.5 ${lineOn ? "bg-indigo-400" : "bg-slate-200"}`} />}
+                      <div className="relative z-[1] flex flex-col items-center gap-0.5 pt-1">
+                        <span className={`flex h-6 w-6 items-center justify-center rounded-full border-2 text-[11px] font-semibold ${phaseOn(ph) ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-300 bg-white text-slate-400"}`}>{pi + 1}</span>
+                        <span className="bg-white px-0.5 text-center text-[11px] leading-tight text-slate-500">{ph}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {items.map((t) => {
+                          const i = flow.indexOf(t), why = cuTargetBlocked(f, t.key), sel = target === t.key, past = selIdx >= 0 && i < selIdx;
+                          const isSys = sysKey === t.key;
+                          return (
+                            <button key={t.key} type="button" disabled={!!why} title={why ?? t.hint} onClick={() => pick(t.key)}
+                              className={`min-w-[8.5rem] rounded-lg border px-2.5 py-1.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${sel
+                                ? "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500" : past ? "border-indigo-200 bg-indigo-50/60" : "border-slate-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/40"}`}>
+                              <div className={`text-[13px] ${sel ? "font-semibold text-indigo-700" : past ? "text-indigo-700" : "font-medium text-slate-800"}`}>{t.label}</div>
+                              <div className={`text-[11px] ${isSys ? "text-emerald-600" : "text-slate-400"}`}>{why ?? (isSys ? "ระบบบันทึกถึงตรงนี้" : t.hint)}</div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   );
                 })}
               </div>
+              {(() => {
+                const why = cuTargetBlocked(f, "cancel"), sel = target === "cancel";
+                return (
+                  <button type="button" disabled={!!why} title={why ?? undefined} onClick={() => pick("cancel")}
+                    className={`mt-1 rounded-md px-2 py-1 text-[12px] disabled:cursor-not-allowed disabled:opacity-40 ${sel ? "bg-rose-50 font-medium text-rose-700 ring-1 ring-rose-400" : "text-rose-600 underline decoration-dotted hover:bg-rose-50"}`}>
+                    ยกเลิกใบ <span className="text-rose-400">({why ?? "เฉพาะใบที่ยังไม่จ่าย"})</span>
+                  </button>
+                );
+              })()}
             </div>
             {target && target !== "cancel" && (
               <div>
-                <div className="mb-1 text-[12px] text-slate-500">ระบบติ๊กขั้นก่อนหน้าให้แล้ว · เอาติ๊กออกได้ ถ้าทำข้ามไปก่อน</div>
+                <div className="mb-1 text-[12px] text-slate-500">ขั้นที่จะบันทึก · เอาติ๊กออกได้ ถ้าทำข้ามไปก่อน</div>
                 <div className="divide-y divide-dashed divide-slate-200 rounded-lg border border-slate-200 px-3">
                   {rows.map((r) => {
-                    const checked = r.state === "done" || r.state === "need" || r.state === "implied" || !!ticks[r.stage];
-                    const note = r.state === "done" ? "✓ มีในระบบแล้ว" : r.state === "need" ? "ต้องบันทึก" : r.state === "implied" ? "รวมอยู่ใน \"เตรียมของแล้ว\""
-                      : ticks[r.stage] ? "ติ๊กให้แล้ว" : "ยังไม่ได้ทำ (ทำข้ามไปก่อน)";
+                    const checked = r.state === "done" || r.state === "need" || r.state === "implied" || (r.state === "opt" && !!ticks[r.stage]);
+                    const note = r.state === "done" ? "มีในระบบแล้ว" : r.state === "need" ? "ต้องบันทึก" : r.state === "implied" ? "รวมอยู่ใน \"เตรียมของแล้ว\""
+                      : r.state === "short" ? "ยังไม่ครบ (ดูด้านล่าง)" : ticks[r.stage] ? "ติ๊กให้แล้ว" : "ยังไม่ได้ทำ (ทำข้ามไปก่อน)";
                     return (
-                      <label key={r.stage} className={`flex items-center gap-2 py-2 text-sm ${r.state === "opt" ? "cursor-pointer" : ""}`}>
-                        <input type="checkbox" checked={checked} disabled={r.state !== "opt"} onChange={(e) => setTicks((t) => ({ ...t, [r.stage]: e.target.checked }))}
-                          className="h-4 w-4 accent-indigo-600" />
-                        <span className={`flex-1 ${r.state === "done" ? "text-slate-400" : "text-slate-800"}`}>{CU_STAGE_LABEL[r.stage]}</span>
-                        <span className={`text-[11px] ${r.state === "done" ? "text-emerald-600" : r.state === "opt" && !ticks[r.stage] ? "text-amber-600" : "text-slate-400"}`}>{note}</span>
-                      </label>
+                      <div key={r.stage}>
+                        <label className={`flex items-center gap-2 py-2 text-sm ${r.state === "opt" ? "cursor-pointer" : ""}`}>
+                          <input type="checkbox" checked={checked} disabled={r.state !== "opt"} onChange={(e) => setTicks((t) => ({ ...t, [r.stage]: e.target.checked }))}
+                            className="h-4 w-4 accent-indigo-600" />
+                          <span className={`flex-1 ${r.state === "done" ? "text-slate-400" : "text-slate-800"}`}>{CU_STAGE_LABEL[r.stage]}</span>
+                          <span className={`text-[11px] ${r.state === "done" ? "text-emerald-600" : r.state === "short" || (r.state === "opt" && !ticks[r.stage]) ? "text-amber-600" : "text-slate-400"}`}>{note}</span>
+                        </label>
+                        {r.stage === "have" && cuCanShort(f, target) && (
+                          <div className="pb-2 pl-6">
+                            <label className="flex cursor-pointer items-center gap-2 text-sm">
+                              <input type="checkbox" checked={!!ticks.short} onChange={(e) => toggleShort(e.target.checked)} className="h-4 w-4 accent-amber-500" />
+                              <span className="flex-1 text-amber-700">⚠️ ยังขาดของอยู่</span>
+                              <span className="text-[11px] text-slate-400">{ticks.short ? `ขาด ${missing.length} รายการ` : "ติ๊กถ้ายังมีของไม่ครบ"}</span>
+                            </label>
+                            {ticks.short && (snap.materials.length ? (
+                              <div className="mt-2">
+                                <div className="mb-1.5 text-[12px] text-slate-500">ขาดอะไรบ้าง? (ระบบเลือกตัวที่ยังไม่มีของให้ก่อน)</div>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {snap.materials.map((x) => {
+                                    const on = missing.includes(x.sku);
+                                    return (
+                                      <button key={x.sku} type="button" onClick={() => setMissing((ms) => (on ? ms.filter((s) => s !== x.sku) : [...ms, x.sku]))}
+                                        className={`inline-flex h-8 items-center gap-1 rounded-full border px-2.5 text-[12px] ${on ? "border-amber-400 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-700 hover:border-amber-300"}`}>
+                                        {on && "⚠️"} {x.name} <span className="text-[11px] text-slate-400">· {MAT_LABEL[x.status] ?? x.status}</span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <div className="mt-1.5 text-[11px] text-slate-400">ตัวที่ขาดจะไม่ถูกติ๊กเตรียม/ตัด → ยังขึ้นในหน้าขอซื้อให้ฝ่ายจัดซื้อเห็น</div>
+                              </div>
+                            ) : <div className="mt-1 text-[11px] text-slate-400">ใบนี้ยังไม่มีสูตร เลือกรายการของไม่ได้ — ระบบจะไม่ติดป้าย "ของครบ" ให้</div>)}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>

@@ -2,6 +2,7 @@
  * mark ใบสั่งผลิตเป็น "เตรียม/ตัดครบ" ทั้งใบ (ใช้ตอนจ่ายงานจากหน้าช้อป — ติ๊กงานที่ตัด/เตรียมครบพร้อมจ่าย)
  * PATCH /api/mo/[id]/mark-ready  body: { ready?: boolean, parts?: ("prep"|"cut")[] }  (default true · ทั้งเตรียม+ตัด)
  *   parts = ["prep"] → ติ๊กแค่ "เตรียม" (โหมดอัปเดตงานย้อนหลัง เลือกขั้น "เตรียมแล้ว รอตัด")
+ *   except = ["SKU…"] → ข้ามวัตถุดิบที่ "ยังขาดของ" (ไม่ติ๊กเตรียม/ตัดตัวนั้น → ยังขึ้นในหน้าขอซื้อ) · ไม่แตะธงทั้งใบ
  *   → manufacturing_orders.prep_done/cut_done = ready (ครอบคลุมใบไม่มี BOM)
  *   → mo_material_summary.is_ready = ready ทุกแถวของใบ (เตรียมครบ)
  *   → mo_materials.cut_done = ready ทุกแถวของใบ (ตัดครบ) — ครอบคลุมใบมี BOM
@@ -16,7 +17,7 @@ import { friendlyDbError } from "../../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Body = { ready?: boolean; parts?: unknown };
+type Body = { ready?: boolean; parts?: unknown; except?: unknown };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -30,25 +31,39 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const parts = Array.isArray(body.parts) ? body.parts.filter((p) => p === "prep" || p === "cut") : [];
   const doPrep = parts.length === 0 || parts.includes("prep");
   const doCut = parts.length === 0 || parts.includes("cut");
+  const except = new Set(Array.isArray(body.except) ? body.except.filter((x): x is string => typeof x === "string" && !!x) : []);
 
   const admin = supabaseAdmin();
   const { data: existing } = await admin.from("manufacturing_orders").select("mo_no").eq("id", id).maybeSingle();
   if (!existing) return NextResponse.json({ error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
   const moNo = (existing as { mo_no: string }).mo_no;
 
+  // ธงทั้งใบ (ใบไม่มี BOM) — ยังขาดของบางตัว = ยังไม่ครบทั้งใบ จึงไม่ตั้งธง
   const patch: Record<string, unknown> = {};
-  if (doPrep) { patch.prep_done = ready; patch.prep_done_at = ready ? now : null; }
-  if (doCut) { patch.cut_done = ready; patch.cut_done_at = ready ? now : null; }
-  const { error } = await admin.from("manufacturing_orders").update(patch).eq("id", id);
-  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  if (doPrep && except.size === 0) { patch.prep_done = ready; patch.prep_done_at = ready ? now : null; }
+  if (doCut && except.size === 0) { patch.cut_done = ready; patch.cut_done_at = ready ? now : null; }
+  if (Object.keys(patch).length) {
+    const { error } = await admin.from("manufacturing_orders").update(patch).eq("id", id);
+    if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  }
 
-  // ใบมี BOM: ความพร้อมคิดจากวัตถุดิบ → เซ็ตทั้งใบให้ครบ
-  if (doPrep) await admin.from("mo_material_summary").update({ is_ready: ready }).eq("mo_no", moNo).eq("is_active", true);
-  if (doCut) await admin.from("mo_materials").update({ cut_done: ready, cut_done_at: ready ? now : null }).eq("mo_no", moNo).eq("is_active", true);
+  // ใบมี BOM: ความพร้อมคิดจากวัตถุดิบ → เซ็ตทั้งใบให้ครบ (เว้นตัวที่ยังขาด)
+  const idsOf = async (table: "mo_material_summary" | "mo_materials") => {
+    const { data } = await admin.from(table).select("id, component_sku").eq("mo_no", moNo).eq("is_active", true);
+    return ((data ?? []) as { id: string; component_sku: string | null }[]).filter((r) => !r.component_sku || !except.has(r.component_sku)).map((r) => r.id);
+  };
+  if (doPrep) {
+    if (except.size === 0) await admin.from("mo_material_summary").update({ is_ready: ready }).eq("mo_no", moNo).eq("is_active", true);
+    else { const ids = await idsOf("mo_material_summary"); if (ids.length) await admin.from("mo_material_summary").update({ is_ready: ready }).in("id", ids); }
+  }
+  if (doCut) {
+    if (except.size === 0) await admin.from("mo_materials").update({ cut_done: ready, cut_done_at: ready ? now : null }).eq("mo_no", moNo).eq("is_active", true);
+    else { const ids = await idsOf("mo_materials"); if (ids.length) await admin.from("mo_materials").update({ cut_done: ready, cut_done_at: ready ? now : null }).in("id", ids); }
+  }
 
   await admin.from("audit_logs").insert({
     actor_user_id: user?.id ?? null, action: "update", entity_type: "mo", entity_id: id,
-    metadata: { mo_no: moNo, mark_ready: ready, parts: doPrep && doCut ? ["prep", "cut"] : doPrep ? ["prep"] : ["cut"] },
+    metadata: { mo_no: moNo, mark_ready: ready, parts: doPrep && doCut ? ["prep", "cut"] : doPrep ? ["prep"] : ["cut"], ...(except.size ? { missing: [...except] } : {}) },
   }).then(() => {}, () => {});
 
   return NextResponse.json({ id, mo_no: moNo, ready, error: null });

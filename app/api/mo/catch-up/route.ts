@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
-import { loadMoPurchaseLinks, computeMatStatus, linkKey } from "@/lib/mo-material-status";
+import { loadMoPurchaseLinks, computeMatStatus, linkKey, type MatStatus } from "@/lib/mo-material-status";
 import { parseSkipped, type MoSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +30,8 @@ export type CatchUpSnapshot = {
   };
   /** null = ใบยังไม่มีสูตร (ไม่มีรายการวัตถุดิบ) */
   progress: { total: number; buy: number; requested: number; ordered: number } | null;
+  /** วัตถุดิบรายตัว (ไว้เลือก "ยังขาดของ") — สถานะซื้อของตามกติกากลาง · ready = ติ๊กเตรียมแล้ว */
+  materials: { sku: string; name: string; status: MatStatus; ready: boolean }[];
   /** ใบจ่ายงานที่ยังใช้อยู่ (ไม่นับที่ยกเลิก) เรียงเก่า → ใหม่ */
   wos: CatchUpWo[];
   shelves: { id: string; name: string; kind: string }[];
@@ -53,7 +55,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const skipped = parseSkipped(m.skipped_stages);
 
   const [sumsRes, matsRes, wosRes, shelvesRes, itemsRes, links] = await Promise.all([
-    admin.from("mo_material_summary").select("id, mo_no, component_sku, qty_per, on_hand_qty, to_purchase_qty, is_ready").eq("mo_no", moNo).eq("is_active", true),
+    admin.from("mo_material_summary").select("id, mo_no, component_sku, component_name, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence").eq("mo_no", moNo).eq("is_active", true).order("sequence"),
     admin.from("mo_materials").select("material_type, cut_block_code, cut_length, pieces, cut_done").eq("mo_no", moNo).eq("is_active", true),
     admin.from("mo_work_orders").select("id, wo_no, qty, received_qty, qc_pulled_qty, status, department_name, assignee_name, dispatch_date, created_at")
       .eq("mo_no", moNo).eq("is_active", true).neq("status", "cancelled").order("created_at", { ascending: true }),
@@ -66,13 +68,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ซื้อของ — กติกาเดียวกับ material-progress (ข้ามซื้อของ = ของครบทุกบรรทัด)
   const sums = (sumsRes.data ?? []) as Row[];
   let progress: CatchUpSnapshot["progress"] = null;
+  const materials: CatchUpSnapshot["materials"] = [];
   if (sums.length > 0) {
     progress = { total: 0, buy: 0, requested: 0, ordered: 0 };
     for (const s of sums) {
       progress.total += 1;
-      if (skipped.buy) continue;
       const code = (s.component_sku as string) ?? null;
       const { status } = computeMatStatus(s, n(m.qty), code ? links.get(linkKey(moNo, code)) ?? [] : []);
+      if (code) materials.push({ sku: code, name: String(s.component_name ?? code), status: skipped.buy ? "skip" : status, ready: s.is_ready === true });
+      if (skipped.buy) continue;
       if (status === "buy") progress.buy += 1;
       else if (status === "requested") progress.requested += 1;
       else if (status === "ordered") progress.ordered += 1;
@@ -100,6 +104,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prep_done: m.prep_done === true || !!skipped.prep, cut_done: m.cut_done === true || !!skipped.cut, skipped,
     },
     progress,
+    materials,
     wos: ((wosRes.data ?? []) as Row[]).map((w) => ({
       id: String(w.id), wo_no: String(w.wo_no ?? ""), qty: n(w.qty), received_qty: n(w.received_qty), qc_pulled_qty: n(w.qc_pulled_qty),
       status: String(w.status ?? ""), department_name: (w.department_name as string) ?? null, assignee_name: (w.assignee_name as string) ?? null,

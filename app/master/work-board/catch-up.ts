@@ -47,6 +47,8 @@ const fmt = (n: number) => r2(n).toLocaleString("th-TH");
 export type CuFacts = {
   qty: number; status: string;
   buyDone: boolean; prepDone: boolean; cutDone: boolean;
+  /** จำนวนรายการวัตถุดิบที่เลือกเป็น "ยังขาด" ได้ (0 = ใบไม่มีสูตร) */
+  materials: number;
   dispatched: number; received: number; qcPulled: number; shelfGood: number;
 };
 export function cuFacts(s: CatchUpSnapshot): CuFacts {
@@ -57,7 +59,7 @@ export function cuFacts(s: CatchUpSnapshot): CuFacts {
   const buyDone = !!m.skipped.buy || prepDone || (!!p && p.buy + p.requested + p.ordered === 0);
   const sum = (f: (w: CatchUpWo) => number) => r2(s.wos.reduce((a, w) => a + f(w), 0));
   return {
-    qty: m.qty, status: m.status, buyDone, prepDone, cutDone,
+    qty: m.qty, status: m.status, buyDone, prepDone, cutDone, materials: s.materials.length,
     dispatched: sum((w) => w.qty), received: sum((w) => w.received_qty), qcPulled: sum((w) => w.qc_pulled_qty), shelfGood: s.shelf.good,
   };
 }
@@ -86,15 +88,19 @@ export function cuTargetBlocked(f: CuFacts, k: CuTargetKey): string | null {
   return null;
 }
 
-export type CuTicks = Partial<Record<CuStage, boolean>>;
-export type CuRowState = "done" | "need" | "opt" | "implied";
-/** แถวเช็กลิสต์ในป๊อปขั้นที่ 1: done = มีในระบบแล้ว · need = ต้องทำ (ติ๊กล็อก) · opt = ติ๊ก/เอาออกได้ · implied = รวมอยู่ในขั้นอื่น */
+/** short = ติ๊ก "ยังขาดของอยู่" (แทนของครบ) → ของที่ขาดไม่ถูกติ๊กเตรียม/ตัด และไม่ติดป้ายของครบ */
+export type CuTicks = Partial<Record<CuStage, boolean>> & { short?: boolean };
+export type CuRowState = "done" | "need" | "opt" | "implied" | "short";
+/** เลือก "ยังขาดของอยู่" ได้ไหม — ต้องมีแถวของครบที่ยังไม่ครบ และไม่ได้เลือกขั้น "ของครบแล้ว" เอง */
+export const cuCanShort = (f: CuFacts, k: CuTargetKey) => !f.buyDone && !!cuTarget(k).upto && k !== "have";
+/** แถวเช็กลิสต์ในป๊อปขั้นที่ 1: done = มีในระบบแล้ว · need = ต้องทำ (ติ๊กล็อก) · opt = ติ๊ก/เอาออกได้ · implied = รวมอยู่ในขั้นอื่น · short = ยังขาดของ */
 export function cuRows(f: CuFacts, k: CuTargetKey, ticks: CuTicks): { stage: CuStage; state: CuRowState }[] {
   const t = cuTarget(k);
   if (!t.upto) return [];
   const upto = CU_CHAIN.indexOf(t.upto);
   return CU_CHAIN.slice(0, upto + 1).map((stage) => {
     if (cuStageDone(f, stage)) return { stage, state: "done" as const };
+    if (stage === "have" && ticks.short && k !== "have") return { stage, state: "short" as const };
     if (stage === "have" && ticks.prep) return { stage, state: "implied" as const };   // ติ๊กเตรียม = ของครบในตัว
     if (isOptional(stage, t.upto!)) return { stage, state: "opt" as const };
     return { stage, state: "need" as const };
@@ -115,10 +121,11 @@ export function cuDefaultQty(f: CuFacts, k: CuTargetKey) {
   return { dispatchQty, returnQty: k === "return_part" ? 0 : outstanding, qcGood: r2(f.received + outstanding - f.qcPulled), qcBad: 0 };
 }
 
-export type CuInputs = { dispatchQty: number; returnQty: number; qcGood: number; qcBad: number; shelfId: string; deptId: string; cancelReason: string };
+/** missing = รหัสวัตถุดิบที่ "ยังขาด" (ใช้เมื่อติ๊ก short) */
+export type CuInputs = { dispatchQty: number; returnQty: number; qcGood: number; qcBad: number; shelfId: string; deptId: string; cancelReason: string; missing?: string[] };
 export type CuStep =
   | { kind: "skip_buy" }
-  | { kind: "mark_ready"; parts: ("prep" | "cut")[] }
+  | { kind: "mark_ready"; parts: ("prep" | "cut")[]; except?: string[] }
   | { kind: "dispatch"; qty: number }
   | { kind: "return"; qty: number }
   | { kind: "qc_in"; good: number; bad: number }
@@ -129,7 +136,7 @@ export type CuStep =
 export function cuStepLabel(s: CuStep): string {
   switch (s.kind) {
     case "skip_buy": return "ติดป้าย \"ของครบ (อัปเดตย้อนหลัง)\" ที่ขั้นซื้อของ · เอาคืนได้";
-    case "mark_ready": return `ติ๊ก${s.parts.includes("prep") ? " เตรียม" : ""}${s.parts.length === 2 ? " +" : ""}${s.parts.includes("cut") ? " ตัด" : ""} ครบทั้งใบ`;
+    case "mark_ready": return `ติ๊ก${s.parts.includes("prep") ? " เตรียม" : ""}${s.parts.length === 2 ? " +" : ""}${s.parts.includes("cut") ? " ตัด" : ""} ${s.except?.length ? `ยกเว้นของที่ยังขาด ${s.except.length} รายการ` : "ครบทั้งใบ"}`;
     case "dispatch": return `สร้างใบจ่ายงาน ${fmt(s.qty)} ชิ้น`;
     case "return": return `บันทึกช่างส่งคืน ${fmt(s.qty)} ชิ้น · ยังไม่ลงค่าแรง`;
     case "qc_in": return `รับเข้าชั้น QC · ของดี ${fmt(s.good)}${s.bad > 0 ? ` · ของเสีย ${fmt(s.bad)}` : ""} ชิ้น`;
@@ -152,9 +159,12 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
   const rows = cuRows(f, k, ticks);
   const on = (st: CuStage) => rows.some((r) => r.stage === st && (r.state === "need" || (r.state === "opt" && !!ticks[st])));
 
+  const short = rows.some((r) => r.stage === "have" && r.state === "short");
+  const missing = short ? [...new Set(inp.missing ?? [])] : [];
+  if (short && f.materials > 0 && missing.length === 0) errors.push("เลือกของที่ยังขาดอย่างน้อย 1 รายการ (หรือเอาติ๊ก \"ยังขาดของอยู่\" ออก)");
   if (on("have") && !on("prep")) steps.push({ kind: "skip_buy" });
   const parts = (["prep", "cut"] as const).filter((p) => on(p));
-  if (parts.length) steps.push({ kind: "mark_ready", parts: [...parts] });
+  if (parts.length) steps.push(missing.length ? { kind: "mark_ready", parts: [...parts], except: missing } : { kind: "mark_ready", parts: [...parts] });
 
   const remain = r2(f.qty - f.dispatched);
   let dispatched = f.dispatched;
@@ -245,7 +255,7 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
           await api(`/api/mo/${mo.id}/skip-stage`, { stages: ["buy"], skip: true, via: "catch_up", reason: "อัปเดตงานย้อนหลัง: ของครบแล้ว" }, "PATCH");
           break;
         case "mark_ready":
-          await api(`/api/mo/${mo.id}/mark-ready`, { ready: true, parts: step.parts }, "PATCH");
+          await api(`/api/mo/${mo.id}/mark-ready`, { ready: true, parts: step.parts, ...(step.except?.length ? { except: step.except } : {}) }, "PATCH");
           break;
         case "dispatch": {
           if (!ctx.dept) throw new Error("ยังไม่ได้เลือกโต๊ะ");

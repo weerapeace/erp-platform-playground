@@ -8,6 +8,7 @@ const snap = (o: { mo?: Partial<CatchUpSnapshot["mo"]>; progress?: CatchUpSnapsh
   mo: { id: "m1", mo_no: "MO-1", product_sku: "SKU", product_name: "ชื่อ", qty: 100, status: "draft", due_date: null, internal_due_date: null,
     has_bom: true, prep_total: 4, prep_ready: 0, cut_total: 2, cut_ready: 0, prep_done: false, cut_done: false, skipped: {}, ...o.mo },
   progress: o.progress === undefined ? { total: 4, buy: 2, requested: 0, ordered: 0 } : o.progress,
+  materials: [{ sku: "FAB", name: "ผ้า", status: "have", ready: false }, { sku: "ZIP", name: "ซิป", status: "buy", ready: false }],
   wos: o.wos ?? [], shelves: [], shelf: { good: o.good ?? 0, defect: 0, repairing: 0 },
 });
 const inp = (o: Partial<CuInputs> = {}): CuInputs => ({ dispatchQty: 100, returnQty: 100, qcGood: 100, qcBad: 0, shelfId: "s1", deptId: "d1", cancelReason: "", ...o });
@@ -79,6 +80,33 @@ describe("cuBuildSteps", () => {
   it("ขั้นที่เลือกบันทึกครบแล้ว → แจ้งว่าไม่มีอะไรต้องทำ", () => {
     const f = cuFacts(snap({ mo: { prep_ready: 4, cut_ready: 2 } }));
     expect(cuBuildSteps(f, "cut", cuDefaultTicks(f, "cut"), inp()).errors[0]).toMatch(/ครบแล้ว/);
+  });
+});
+
+describe("ยังขาดของอยู่", () => {
+  it("ติ๊กยังขาดของ → ไม่ติดป้ายของครบ · ติ๊กเตรียม/ตัดยกเว้นตัวที่ขาด", () => {
+    const f = cuFacts(snap());
+    const ticks = { ...cuDefaultTicks(f, "dispatch"), short: true };
+    expect(cuRows(f, "dispatch", ticks).find((r) => r.stage === "have")?.state).toBe("short");
+    const r = cuBuildSteps(f, "dispatch", ticks, inp({ missing: ["ZIP"] }));
+    expect(r.errors).toEqual([]);
+    expect(r.steps[0]).toEqual({ kind: "mark_ready", parts: ["prep", "cut"], except: ["ZIP"] });
+    expect(r.steps.some((s) => s.kind === "skip_buy")).toBe(false);
+  });
+  it("ติ๊กยังขาดของแต่ไม่เลือกอะไร → เตือน", () => {
+    const f = cuFacts(snap());
+    expect(cuBuildSteps(f, "dispatch", { ...cuDefaultTicks(f, "dispatch"), short: true }, inp({ missing: [] })).errors[0]).toMatch(/ยังขาด/);
+  });
+  it("จ่ายก่อนเตรียม + ยังขาดของ → ไม่บันทึกอะไรเรื่องของ", () => {
+    const f = cuFacts(snap());
+    const r = cuBuildSteps(f, "dispatch", { have: true, prep: false, cut: false, dispatch: true, short: true }, inp({ missing: ["ZIP"] }));
+    expect(r.steps.map((s) => s.kind)).toEqual(["dispatch"]);
+  });
+  it("ส่ง except ไปที่ mark-ready", async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    await cuRun([{ kind: "mark_ready", parts: ["prep"], except: ["ZIP"] }], { snap: snap(), dept: null, who: {}, dispatchDate: null, shelfId: "", badReason: "" },
+      async (url, body) => { calls.push({ url, body }); return {}; });
+    expect(calls[0]).toEqual({ url: "/api/mo/m1/mark-ready", body: { ready: true, parts: ["prep"], except: ["ZIP"] } });
   });
 });
 
