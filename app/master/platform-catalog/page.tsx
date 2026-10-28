@@ -17,6 +17,7 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { StatFilterCards } from "@/components/stat-filter-cards";
 import { PlatformIcon } from "@/components/platform-icon";
+import { Icon } from "@/components/icon";
 import { MatchCandidates, type PickedParent } from "@/components/platform-catalog/match-candidates";
 import { MatchWorkbench } from "@/components/platform-catalog/match-workbench";
 import { IgnoreDialog } from "@/components/platform-catalog/ignore-dialog";
@@ -382,6 +383,31 @@ export default function PlatformCatalogPage() {
   const activePf = platforms.find((p) => p.id === platformId);
   const activeBrand = brands.find((b) => b.id === brandId);
 
+  // Lazada (ต่อ API · OAuth ผูกกับแบรนด์) — สถานะกุญแจ + ดึงสินค้าที่ลงไว้บนร้าน (อ่านอย่างเดียว)
+  type LazStatus = { connected: boolean; health: "none" | "connected" | "expiring" | "expired"; days_left: number | null; short_code: string | null; configured: boolean };
+  const [lazStatus, setLazStatus] = useState<LazStatus | null>(null);
+  const lazSeq = useRef(0);
+  useEffect(() => {
+    const my = ++lazSeq.current;
+    setLazStatus(null);
+    if (platformCode !== "lazada" || !brandId) return;
+    apiFetch(`/api/lazada/status?brand_id=${encodeURIComponent(brandId)}`).then((r) => r.json())
+      .then((j) => { if (my === lazSeq.current && !j.error) setLazStatus(j as LazStatus); })
+      .catch(() => { /* โชว์ปุ่มไม่ได้ก็ไม่เป็นไร */ });
+  }, [platformCode, brandId]);
+  const syncLazada = async () => {
+    if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน (การเชื่อม Lazada ผูกกับแบรนด์)"); return; }
+    setImporting(true); setNote("กำลังดึงสินค้าจาก Lazada... (ร้านใหญ่อาจใช้เวลาเกือบนาที)");
+    try {
+      const r = await apiFetch("/api/lazada/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
+      const j = await r.json(); if (j.error) throw new Error(j.error);
+      const part = j.partial ? " · ⚠️ ยังดึงไม่ครบ (หมดเวลา) กดดึงอีกครั้งเพื่อเติมส่วนที่เหลือ" : "";
+      setNote(`ดึงจาก Lazada แล้ว: ${j.fetched} สินค้า${j.api_total ? ` (Lazada รายงาน ${j.api_total})` : ""} · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่รหัสตรงอัตโนมัติ ${j.newly_matched} — ที่เหลือดูการ์ด "รอยืนยัน"${part}`);
+      await load();
+    } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
+    finally { setImporting(false); }
+  };
+
   // ดึงสินค้าจาก LINE SHOPPING (ต่อ API จริง) → catalog + จับคู่ ERP
   const syncLine = async () => {
     if (!brandId) { setNote("เลือกแบรนด์/ร้านก่อน (คีย์ LINE ผูกกับแบรนด์)"); return; }
@@ -563,6 +589,35 @@ export default function PlatformCatalogPage() {
           <button onClick={() => setShowManager(true)} disabled={!canEdit || !platformId} title="จัดการชนิดไฟล์นำเข้า (เพิ่ม/แก้เองได้)" aria-label="จัดการชนิดไฟล์นำเข้า" className="h-9 px-2.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⚙️</button>
         </div>
       </div>
+      {platformCode === "lazada" && (
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <span className="text-xs text-slate-500">Lazada (ต่อ API · อ่านอย่างเดียว):</span>
+          {!brandId ? (
+            <span className="text-xs text-slate-400">เลือกแบรนด์ก่อน — การเชื่อม Lazada ผูกกับแบรนด์</span>
+          ) : !lazStatus ? (
+            <span className="text-xs text-slate-400">กำลังเช็กการเชื่อมต่อ…</span>
+          ) : lazStatus.connected ? (
+            <>
+              <button onClick={() => void syncLazada()} disabled={!canEdit || importing} title="อ่านรายการสินค้าที่ลงไว้บน Lazada เข้ามา (ไม่แก้อะไรบนร้าน)"
+                className="h-8 px-3 text-sm text-[#0F146D] border border-indigo-200 rounded-lg hover:bg-indigo-50 disabled:opacity-50 inline-flex items-center gap-1.5">
+                <Icon name="refresh" />{importing ? "กำลังดึง..." : "ดึงสินค้าจาก Lazada"}
+              </button>
+              <span className="text-[11px] text-emerald-600">● เชื่อมอยู่{lazStatus.short_code ? ` (${lazStatus.short_code})` : ""}</span>
+              {lazStatus.health === "expiring" && (
+                <a href="/admin/platform-accounts" className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 inline-flex items-center gap-1">
+                  <Icon name="warning" />อีก {lazStatus.days_left ?? 0} วันต้องกดเชื่อมใหม่ — กดที่นี่
+                </a>
+              )}
+            </>
+          ) : (
+            <a href="/admin/platform-accounts" className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 inline-flex items-center gap-1.5">
+              <Icon name="warning" />
+              {lazStatus.health === "expired" ? "การเชื่อมต่อ Lazada หมดอายุแล้ว" : "แบรนด์นี้ยังไม่ได้เชื่อมต่อ Lazada"} — ไปที่ จัดการร้าน/บัญชีแพลตฟอร์ม แล้วกด เชื่อมต่อ Lazada
+              <Icon name="link" />
+            </a>
+          )}
+        </div>
+      )}
       {platformCode === "line_shopping" && (
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <span className="text-xs text-slate-500">LINE SHOPPING (ต่อ API):</span>
@@ -614,8 +669,11 @@ export default function PlatformCatalogPage() {
         : tab === "catalog" ? (
           listings.length === 0 ? (
             <EmptyState icon="🛒" title={`ยังไม่มีสินค้าจาก ${where}`}
-              hint={platformCode === "line_shopping" ? "กด 🟢 ดึงสินค้าจาก LINE ด้านบน แล้วระบบจะช่วยจับคู่ให้" : "นำเข้าไฟล์ export จาก Seller Center เข้ามาก่อน แล้วระบบจะช่วยจับคู่ให้"}
-              action={canEdit && platformCode !== "line_shopping" ? { label: `⬆️ นำเข้าสินค้าจาก ${activePf?.name_th ?? "ร้าน"}`, onClick: () => fileRef.current?.click() } : undefined} />
+              hint={platformCode === "line_shopping" ? "กด 🟢 ดึงสินค้าจาก LINE ด้านบน แล้วระบบจะช่วยจับคู่ให้"
+                : platformCode === "lazada" ? "กด ดึงสินค้าจาก Lazada ด้านบน (ต้องเชื่อมร้านก่อน) หรือนำเข้าไฟล์ export แล้วระบบจะช่วยจับคู่ให้"
+                : "นำเข้าไฟล์ export จาก Seller Center เข้ามาก่อน แล้วระบบจะช่วยจับคู่ให้"}
+              action={canEdit && platformCode === "lazada" && lazStatus?.connected ? { label: "ดึงสินค้าจาก Lazada", onClick: () => void syncLazada() }
+                : canEdit && platformCode !== "line_shopping" ? { label: `⬆️ นำเข้าสินค้าจาก ${activePf?.name_th ?? "ร้าน"}`, onClick: () => fileRef.current?.click() } : undefined} />
           ) : (
             <div className="space-y-3">
               <StatFilterCards value={filter} onChange={(k) => setFilter(k as Filter)} cards={[

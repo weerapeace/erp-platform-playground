@@ -9,6 +9,7 @@ import { ERPInput } from "@/components/form";
 import { useAuth } from "@/components/auth";
 import { AppAccessGate } from "@/components/app-access-gate";
 import { PlatformIcon } from "@/components/platform-icon";
+import { Icon } from "@/components/icon";
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string; color: string | null };
@@ -64,7 +65,8 @@ export default function PlatformAccountsPage() {
   const [metaCfg, setMetaCfg] = useState(true);   // ตั้งค่า META_APP_ID/SECRET ในโฮสต์แล้วไหม
   const [pickPage, setPickPage] = useState("");   // เพจที่เลือก (กรณีมีหลายเพจ)
   // สถานะเชื่อมต่อ Lazada ต่อแบรนด์
-  type LazStatus = { connected: boolean; seller_id: string | null; short_code: string | null; country: string | null; configured: boolean };
+  // health: expired = หมดอายุแล้วต้องเชื่อมใหม่ · expiring = เหลือ ≤ 7 วัน (ตัวต่ออายุอัตโนมัติรายวัน /api/cron/lazada-token)
+  type LazStatus = { connected: boolean; health?: "none" | "connected" | "expiring" | "expired"; days_left?: number | null; seller_id: string | null; short_code: string | null; country: string | null; configured: boolean };
   const [laz, setLaz] = useState<LazStatus>({ connected: false, seller_id: null, short_code: null, country: null, configured: true });
   const [lazSyncing, setLazSyncing] = useState(false);
   const brandChosen = useRef(false);   // มีการเลือกแบรนด์แล้ว (จาก query/ผู้ใช้) — กัน auto-select ทับ
@@ -358,14 +360,20 @@ export default function PlatformAccountsPage() {
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[11px] text-emerald-600 shrink-0">● เชื่อมต่อแล้ว</span>
                         <span className="text-sm text-slate-700">ร้าน <b>{laz.short_code || laz.seller_id}</b>{laz.country ? ` (${laz.country})` : ""}</span>
+                        {laz.health === "expiring" && (
+                          <span className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-0.5 shrink-0 inline-flex items-center gap-1"><Icon name="warning" />อีก {laz.days_left ?? 0} วันต้องกด &quot;เชื่อมใหม่&quot; (Lazada ให้สิทธิ์ทีละ ~30 วัน)</span>
+                        )}
                         <button onClick={syncLazOrders} disabled={lazSyncing} className="h-8 px-3 text-sm text-white bg-[#0F146D] rounded-lg hover:opacity-90 disabled:opacity-50">{lazSyncing ? "กำลังดึง..." : "📥 ดึงออเดอร์ (30 วัน)"}</button>
                         <button onClick={connectLaz} className="text-[11px] text-violet-600 underline">เชื่อมใหม่</button>
                         <button onClick={disconnectLaz} className="text-[11px] text-rose-500 border border-rose-200 rounded-lg px-2 py-0.5 hover:bg-rose-50">ตัดการเชื่อมต่อ</button>
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-center gap-2">
-                        <button onClick={connectLaz} disabled={!brandId} className="h-8 px-3 text-sm text-white rounded-lg hover:opacity-90 disabled:opacity-40" style={{ background: "linear-gradient(90deg,#F57224,#0F146D)" }}>🛒 เชื่อมต่อ Lazada</button>
-                        <span className="text-[11px] text-slate-400">กดแล้วเข้าสู่ระบบ Lazada Seller + อนุญาต → ดึงออเดอร์เข้าระบบได้</span>
+                        {laz.health === "expired" && (
+                          <span className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1 inline-flex items-center gap-1"><Icon name="warning" />การเชื่อมต่อเดิมหมดอายุแล้ว — กดเชื่อมใหม่ (ระบบจะต่ออายุให้อัตโนมัติทุกวันหลังจากนี้)</span>
+                        )}
+                        <button onClick={connectLaz} disabled={!brandId} className="h-8 px-3 text-sm text-white rounded-lg hover:opacity-90 disabled:opacity-40" style={{ background: "linear-gradient(90deg,#F57224,#0F146D)" }}>🛒 {laz.health === "expired" ? "เชื่อมต่อ Lazada ใหม่" : "เชื่อมต่อ Lazada"}</button>
+                        <span className="text-[11px] text-slate-400">กดแล้วเข้าสู่ระบบ Lazada Seller + อนุญาต → ดึงออเดอร์/สินค้าเข้าระบบได้</span>
                       </div>
                     )}
                   </div>

@@ -107,3 +107,59 @@ export async function lazGetCategoryAttributes(gateway: string, accessToken: str
     options: Array.isArray(a.options) ? (a.options as Record<string, unknown>[]).map((o) => String(o.name ?? "")).filter(Boolean) : [],
   }));
 }
+
+// ---- สถานะกุญแจ (pure · มี test) ----
+// Lazada ไทย: access_token อยู่ได้ ~7 วัน · refresh_token ~30 วัน → ไม่มีใครต่ออายุ = หลุดเงียบ (เคยหลุด 5 ส.ค. 2026)
+// ตัวต่ออายุอัตโนมัติ: /api/cron/lazada-token (วันละครั้ง)
+export type LazHealthState = "none" | "connected" | "expiring" | "expired";
+export type LazHealth = { state: LazHealthState; refresh_expires_at: number | null; days_left: number | null };
+const EXPIRING_DAYS = 7;
+
+/** expired = ตัวต่ออายุหมดแล้ว ต้องกดเชื่อมใหม่ · expiring = เหลือ ≤ 7 วัน (เตือนให้เชื่อมใหม่ก่อนหลุด) */
+export function lazConnHealth(meta: { stage?: string; refresh_expires_at?: number; expires_at?: number } | null | undefined, now = Date.now()): LazHealth {
+  if (!meta || meta.stage !== "connected") return { state: "none", refresh_expires_at: null, days_left: null };
+  const rx = Number(meta.refresh_expires_at) || 0;
+  if (!rx) return { state: (Number(meta.expires_at) || 0) > now ? "connected" : "expired", refresh_expires_at: null, days_left: null };
+  const daysLeft = Math.floor((rx - now) / 86_400_000);
+  if (rx <= now) return { state: "expired", refresh_expires_at: rx, days_left: 0 };
+  return { state: daysLeft <= EXPIRING_DAYS ? "expiring" : "connected", refresh_expires_at: rx, days_left: daysLeft };
+}
+
+// ---- สินค้าบนร้าน (อ่านอย่างเดียว · ดึงเข้าหน้า "สินค้าบนแพลตฟอร์ม") ----
+// GET /products/get · filter=all (ไม่รวมที่ลบแล้ว) · ได้ครั้งละไม่เกิน 50 ตัว
+export async function lazGetProducts(gateway: string, accessToken: string, opts: { offset?: number; limit?: number; filter?: string } = {}): Promise<{ products: Record<string, unknown>[]; total: number }> {
+  const j = await lazApiGet(gateway, "/products/get", accessToken, {
+    filter: opts.filter ?? "all", offset: String(opts.offset ?? 0), limit: String(Math.min(50, opts.limit ?? 50)),
+  });
+  const data = j.data as { products?: Record<string, unknown>[]; total_products?: number | string } | undefined;
+  return { products: data?.products ?? [], total: Number(data?.total_products ?? 0) || 0 };
+}
+
+export type LazCatalogItem = { external_product_id: string; title: string | null; skus: string[]; price: number | null; status: string | null; raw: Record<string, unknown> };
+const s0 = (v: unknown): string | null => { const s = v == null ? "" : String(v).trim(); return s || null; };
+const n0 = (v: unknown): number | null => { if (v == null || v === "") return null; const n = Number(v); return Number.isFinite(n) ? n : null; };
+
+/**
+ * แปลงสินค้า 1 ตัวจาก /products/get → รายการมาตรฐานของหน้า "สินค้าบนแพลตฟอร์ม" (pure · มี test)
+ * เก็บเฉพาะที่ใช้ (รหัส/ชื่อ/สถานะ/ราคา/สต๊อกต่อ SKU) — ไม่เก็บ HTML รายละเอียด/รูป กันข้อมูลบวม
+ * ราคาที่โชว์ = ราคาปกติต่ำสุด (ราคาลดเก็บใน raw)
+ */
+export function lazProductToCatalogItem(p: Record<string, unknown>): LazCatalogItem | null {
+  const id = s0(p.item_id);
+  if (!id) return null;
+  const attrs = (p.attributes && typeof p.attributes === "object") ? p.attributes as Record<string, unknown> : {};
+  const skus = (Array.isArray(p.skus) ? p.skus as Record<string, unknown>[] : []).map((s) => ({
+    seller_sku: s0(s.SellerSku ?? s.seller_sku), sku_id: s0(s.SkuId ?? s.sku_id), shop_sku: s0(s.ShopSku ?? s.shop_sku),
+    price: n0(s.price), special_price: n0(s.special_price), quantity: n0(s.quantity), available: n0(s.Available ?? s.available), status: s0(s.Status ?? s.status),
+  }));
+  const prices = skus.map((s) => s.price).filter((n): n is number => n != null && n > 0);
+  const status = s0(p.status);
+  return {
+    external_product_id: id,
+    title: s0(attrs.name),
+    skus: [...new Set(skus.map((s) => s.seller_sku).filter((x): x is string => !!x))],
+    price: prices.length ? Math.min(...prices) : null,
+    status: status ? status.toLowerCase() : null,
+    raw: { lazada: { item_id: id, primary_category: s0(p.primary_category), status, brand: s0(attrs.brand), created_time: s0(p.created_time), updated_time: s0(p.updated_time), skus } },
+  };
+}
