@@ -47,7 +47,7 @@ import { webForm } from "@/lib/website-form-styles";
 import { AccountPageSetting } from "@/components/website-account-design";
 import { LoginExtraSetting } from "@/components/website-login-design";
 import { PartStyleFold } from "@/components/website-part-style-editor";
-import { COOKIE_PARTS, NF_PARTS, POPUP_PARTS, THANKS_PARTS } from "@/lib/website-page-parts";
+import { COOKIE_PARTS, NF_PARTS, POPUP_PARTS, SEARCH_PARTS, THANKS_PARTS } from "@/lib/website-page-parts";
 import type { SiteTheme } from "@/lib/website-theme";
 
 type Colors = { brand: string; ink: string; page: string; onBrand: string };
@@ -545,6 +545,11 @@ export function SiteSalesSetting({ value, onChange, colors, onPreview }: { value
           ]}
         />
         <p className="text-[11px] text-slate-400 mt-1">คำยอดนิยม = คำที่ตั้งเองในแท็บ ข้อมูลร้าน › 🔍 ค้นหา + คำที่ลูกค้าค้นจริงบ่อย ๆ และหาเจอ (ระบบเติมให้เอง · ยังไม่มีข้อมูล = โชว์เฉพาะคำที่ตั้ง)</p>
+        {colors && (
+          <div className="mt-3">
+            <PartStyleFold parts={SEARCH_PARTS} value={value.areaParts.search} onChange={(search) => onChange({ areaParts: { ...value.areaParts, search } })} colors={colors} onOpen={() => onPreview?.("/?pv=search")} hint="ช่องพิมพ์ · หัวข้อ · การ์ดสินค้า · ค้นหาไม่เจอ" testId="search" />
+          </div>
+        )}
       </div>
 
       <div className="mt-4 pt-3 border-t border-slate-100">

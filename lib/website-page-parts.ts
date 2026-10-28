@@ -144,6 +144,85 @@ export const POPUP_PARTS: PartDef[] = [
   { key: "pp.code", label: "โค้ดที่ได้", groups: ["text", "box"] },
 ];
 
+/** 🔍 ช่องค้นหาเต็มจอ (เว็บร้าน components/layout/SearchOverlay · ค่าเก็บที่ theme.page.areaParts.search) */
+export const SEARCH_PARTS: PartDef[] = [
+  { key: "sr.box", label: "กรอบช่องค้นหา", hint: "แผงเต็มจอ", groups: ["box", "layout"] },
+  { key: "sr.bar", label: "แถบพิมพ์ค้นหา", groups: ["box", "layout"] },
+  { key: "sr.input", label: "ช่องพิมพ์", groups: ["text"] },
+  { key: "sr.head", label: "หัวข้อย่อย", hint: "หมวดสินค้า · คำยอดนิยม · สินค้า", groups: ["text"] },
+  { key: "sr.cat", label: "ลิงก์หมวด", groups: ["text"] },
+  { key: "sr.chip", label: "ปุ่มคำยอดนิยม", groups: ["text", "box"] },
+  { key: "sr.item", label: "การ์ดสินค้า", groups: ["box", "layout"] },
+  { key: "sr.name", label: "ชื่อสินค้า", groups: ["text"] },
+  { key: "sr.price", label: "ราคา", groups: ["text"] },
+  { key: "sr.empty", label: "ข้อความค้นหาไม่เจอ", groups: ["text", "box"] },
+  { key: "sr.all", label: "ปุ่มดูทั้งหมด", groups: ["text", "box"] },
+];
+
+/** 🛒 ตะกร้า — ลิ้นชัก + หน้า /cart (เว็บร้าน CartDrawer · CartPageClient · components/cart/* · theme.page.areaParts.cart) */
+export const CART_PARTS: PartDef[] = [
+  { key: "cart.panel", label: "กรอบลิ้นชัก/หน้าต่างตะกร้า", groups: ["box"] },
+  { key: "cart.head", label: "หัวข้อ \"ตะกร้า\"", groups: ["text"] },
+  { key: "cart.box", label: "กล่องในหน้าตะกร้า", hint: "หน้า /cart", groups: ["box", "layout"] },
+  { key: "cart.line", label: "แถวสินค้า", groups: ["box", "layout"] },
+  { key: "cart.img", label: "รูปสินค้า", groups: ["box"] },
+  { key: "cart.name", label: "ชื่อสินค้า", groups: ["text"] },
+  { key: "cart.price", label: "ราคาแถว", groups: ["text"] },
+  { key: "cart.qty", label: "ปุ่มเพิ่ม/ลดจำนวน", groups: ["text", "box"] },
+  { key: "cart.ship", label: "แถบส่งฟรี", groups: ["text", "box"] },
+  { key: "cart.sum", label: "กล่องสรุปยอด", groups: ["box", "layout"] },
+  { key: "cart.sum-head", label: "หัวข้อสรุปคำสั่งซื้อ", hint: "หน้า /cart แบบ 2 ฝั่ง", groups: ["text"] },
+  { key: "cart.total-label", label: "คำว่า ยอดรวม", groups: ["text"] },
+  { key: "cart.total", label: "ตัวเลขยอดรวม", groups: ["text"] },
+  { key: "cart.btn", label: "ปุ่มสั่งซื้อ", groups: ["text", "box"] },
+  { key: "cart.btn2", label: "ปุ่มรอง", hint: "เลือกซื้อต่อ · สมาชิก · ตะกร้าเต็มหน้า", groups: ["text", "box"] },
+  { key: "cart.trust", label: "แถบความมั่นใจ", groups: ["text", "layout"] },
+  { key: "cart.reco-head", label: "หัวข้อสินค้าแนะนำ", groups: ["text"] },
+  { key: "cart.empty-icon", label: "ไอคอนตะกร้าว่าง", groups: ["text", "hide"] },
+  { key: "cart.empty", label: "ข้อความตะกร้าว่าง", groups: ["text"] },
+];
+
+/** 💳 หน้าชำระเงิน (เว็บร้าน components/checkout/CheckoutClient · theme.page.areaParts.checkout) */
+export const CHECKOUT_PARTS: PartDef[] = [
+  { key: "co.box", label: "กล่องแต่ละส่วน", hint: "ผู้รับ · ที่อยู่ · วิธีชำระ", groups: ["box", "layout"] },
+  { key: "co.title", label: "หัวข้อแต่ละส่วน", groups: ["text"] },
+  { key: "co.label", label: "ป้ายช่องกรอก", groups: ["text"] },
+  { key: "co.input", label: "ช่องกรอก", groups: ["text", "box"] },
+  { key: "co.pay", label: "ตัวเลือกวิธีชำระ", groups: ["text", "box", "active"] },
+  { key: "co.sum", label: "กล่องสรุปคำสั่งซื้อ", groups: ["box", "layout"] },
+  { key: "co.total", label: "แถวยอดรวม", groups: ["text"] },
+  { key: "co.btn", label: "ปุ่มยืนยันสั่งซื้อ", groups: ["text", "box"] },
+];
+
+/** 🧭 หัวเว็บ + แถบประกาศ (เว็บร้าน Navbar · AnnouncementBar · theme.page.areaParts.header) */
+export const HEADER_PARTS: PartDef[] = [
+  { key: "hd.announce", label: "แถบประกาศ", hint: "แถบบนสุด", groups: ["box", "layout", "hide"] },
+  { key: "hd.announce-text", label: "ข้อความแถบประกาศ", groups: ["text"] },
+  { key: "hd.bar", label: "แถบหัวเว็บ", hint: "ตั้งสีพื้น = ทับตอนลอยบนรูปปกด้วย", groups: ["box"] },
+  { key: "hd.row", label: "แถวในหัวเว็บ", groups: ["layout", "box"] },
+  { key: "hd.logo", label: "โลโก้", groups: ["text", "layout"] },
+  { key: "hd.link", label: "ลิงก์เมนู", groups: ["text", "box", "active"] },
+  { key: "hd.dd", label: "กล่องเมนูย่อย", groups: ["box"] },
+  { key: "hd.dd-link", label: "ลิงก์เมนูย่อย", groups: ["text", "box"] },
+  { key: "hd.icon", label: "ปุ่มไอคอน", hint: "ค้นหา · ตะกร้า · บัญชี", groups: ["box", "icon"] },
+  { key: "hd.word", label: "คำข้างไอคอน", groups: ["text"] },
+  { key: "hd.badge", label: "ป้ายจำนวนในตะกร้า", groups: ["text", "box"] },
+  { key: "hd.btn", label: "ปุ่มบนหัวเว็บ", groups: ["text", "box"] },
+  { key: "hd.drawer", label: "เมนูมือถือ (ลิ้นชัก)", groups: ["box"] },
+];
+
+/** 🦶 ท้ายเว็บ (เว็บร้าน components/layout/Footer · theme.page.areaParts.footer) */
+export const FOOTER_PARTS: PartDef[] = [
+  { key: "ft.box", label: "ท้ายเว็บทั้งก้อน", groups: ["box"] },
+  { key: "ft.logo", label: "โลโก้", groups: ["layout", "hide"] },
+  { key: "ft.text", label: "ข้อความเกี่ยวกับร้าน", groups: ["text"] },
+  { key: "ft.head", label: "หัวคอลัมน์", groups: ["text"] },
+  { key: "ft.link", label: "ลิงก์", groups: ["text"] },
+  { key: "ft.social", label: "ปุ่มโซเชียล", groups: ["text", "box"] },
+  { key: "ft.bottom", label: "แถวล่างสุด", groups: ["text", "box", "layout"] },
+  { key: "ft.copy", label: "ข้อความลิขสิทธิ์", groups: ["text", "hide"] },
+];
+
 /** 🍪 แถบคุกกี้ (เว็บร้าน components/layout/Tracking) */
 export const COOKIE_PARTS: PartDef[] = [
   { key: "ck.box", label: "กรอบแถบคุกกี้", groups: ["box", "layout"] },

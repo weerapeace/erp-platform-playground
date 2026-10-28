@@ -195,6 +195,8 @@ export interface SitePageDesign {
   login: LoginLook;
   /** 👤 หน้าบัญชีของฉัน (ชุดปรับหน้าตาละเอียด) */
   account: AccountLook;
+  /** 🎨 ปรับละเอียดทีละชิ้นของ ค้นหา · ตะกร้า · ชำระเงิน · หัวเว็บ · ท้ายเว็บ (ค่าหลักของส่วนเหล่านี้อยู่ไฟล์มิเรอร์อื่นที่ห้าม import → เก็บชิ้นส่วนไว้ที่นี่ที่เดียว) */
+  areaParts: AreaParts;
   /** 🎪 ชุด 5 */
   festive: FestiveLook;
   proof: ProofLook;
@@ -304,6 +306,15 @@ export function normalizePartValue(raw: unknown): PartStyleValue | undefined {
   if (r.align === "left" || r.align === "center" || r.align === "right") out.align = r.align;
   for (const k of ["upper", "italic", "hidden"] as const) if (typeof r[k] === "boolean") out[k] = r[k] as boolean;
   return Object.keys(out).length ? out : undefined;
+}
+
+/** ส่วนของเว็บที่ปรับละเอียดได้ แต่ค่าหลักอยู่นอกไฟล์นี้ — ค้นหา (sr.*) · ตะกร้า (cart.*) · ชำระเงิน (co.*) · หัวเว็บ+แถบประกาศ (hd.*) · ท้ายเว็บ (ft.*) */
+export type PartArea = "search" | "cart" | "checkout" | "header" | "footer";
+export const PART_AREAS: PartArea[] = ["search", "cart", "checkout", "header", "footer"];
+export type AreaParts = Record<PartArea, PartStyles>;
+export function normalizeAreaParts(raw: unknown): AreaParts {
+  const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return { search: normalizePartStyles(r.search), cart: normalizePartStyles(r.cart), checkout: normalizePartStyles(r.checkout), header: normalizePartStyles(r.header), footer: normalizePartStyles(r.footer) };
 }
 
 export function normalizePartStyles(raw: unknown): PartStyles {
@@ -511,6 +522,7 @@ export const DEFAULT_SITE_PAGE: SitePageDesign = {
   share: { style: "photo", bg: "paper" },
   login: { layout: "center", imageKey: null, title: "", text: "", popupTitle: "", signupLabel: "", perksOn: true, perks: [], guestLink: true, providerStyle: "brand", parts: {} },
   account: DEFAULT_ACCOUNT_LOOK,
+  areaParts: { search: {}, cart: {}, checkout: {}, header: {}, footer: {} },
   festive: { kind: "none", amount: "some", where: "home", mobile: true },
   proof: { viewers: false, viewersMin: 5, sold: false, soldMin: 10, soldSource: "web", soldPeriod: "30d", onCard: false },
 };
@@ -584,6 +596,7 @@ export function normalizeSitePage(raw: unknown): SitePageDesign {
     share: normalizeShare(r.share),
     login: normalizeLogin(r.login),
     account: normalizeAccount(r.account),
+    areaParts: normalizeAreaParts(r.areaParts),
     festive: normalizeFestive(r.festive),
     proof: normalizeProof(r.proof),
   };

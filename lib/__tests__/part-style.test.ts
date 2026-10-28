@@ -111,10 +111,27 @@ describe("ขั้น 3: 404 · ขอบคุณ · ป๊อปอัป · 
   });
   it("ทะเบียนชิ้นส่วนทุกหน้า: คีย์ไม่ซ้ำข้ามหน้า ผ่านตัวตรวจคีย์ ทุกกลุ่มมีช่อง", async () => {
     const R = await import("../website-page-parts");
-    const all = [...R.ACCOUNT_PARTS, ...R.LOGIN_PARTS, ...R.NF_PARTS, ...R.THANKS_PARTS, ...R.POPUP_PARTS, ...R.COOKIE_PARTS];
+    const all = [...R.ACCOUNT_PARTS, ...R.LOGIN_PARTS, ...R.NF_PARTS, ...R.THANKS_PARTS, ...R.POPUP_PARTS, ...R.COOKIE_PARTS, ...R.SEARCH_PARTS, ...R.CART_PARTS, ...R.CHECKOUT_PARTS, ...R.HEADER_PARTS, ...R.FOOTER_PARTS];
     const keys = all.map((p) => p.key);
     expect(new Set(keys).size).toBe(keys.length);
-    expect(Object.keys(normalizePartStyles(Object.fromEntries(keys.map((k) => [k, { all: { size: 12 } }]))))).toEqual(keys);
+    // ตรวจคีย์ทีละหน้า (ค่าหนึ่งหน้าเก็บได้สูงสุด 80 ชิ้น)
+    for (const list of [R.ACCOUNT_PARTS, R.LOGIN_PARTS, R.NF_PARTS, R.THANKS_PARTS, R.POPUP_PARTS, R.COOKIE_PARTS, R.SEARCH_PARTS, R.CART_PARTS, R.CHECKOUT_PARTS, R.HEADER_PARTS, R.FOOTER_PARTS]) {
+      const k = list.map((p) => p.key);
+      expect(Object.keys(normalizePartStyles(Object.fromEntries(k.map((x) => [x, { all: { size: 12 } }]))))).toEqual(k);
+    }
     for (const p of all) for (const g of p.groups) expect(PART_GROUP_FIELDS[g].length).toBeGreaterThan(0);
+  });
+});
+
+describe("ขั้น 4: ค้นหา · ตะกร้า · ชำระเงิน · หัวเว็บ · ท้ายเว็บ (theme.page.areaParts)", () => {
+  it("ไม่มีค่า = ทุกส่วนว่าง (หน้าตาเดิม)", () => {
+    expect(normalizeSitePage({}).areaParts).toEqual({ search: {}, cart: {}, checkout: {}, header: {}, footer: {} });
+    expect(DEFAULT_SITE_PAGE.areaParts).toEqual({ search: {}, cart: {}, checkout: {}, header: {}, footer: {} });
+  });
+  it("ค่าแปลก/ส่วนที่ไม่รู้จัก ถูกทิ้ง · แต่ละส่วนผ่านตัวตรวจกลาง", () => {
+    const a = normalizeSitePage({ areaParts: { cart: { "cart.btn": { all: { bg: "ink", evil: 1 } }, "x y": { all: { size: 9 } } }, header: "bad", unknown: { "hd.bar": { all: { size: 12 } } } } }).areaParts;
+    expect(a.cart).toEqual({ "cart.btn": { all: { bg: "ink" } } });
+    expect(a.header).toEqual({});
+    expect(Object.keys(a)).toEqual(["search", "cart", "checkout", "header", "footer"]);
   });
 });

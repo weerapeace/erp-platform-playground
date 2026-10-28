@@ -81,6 +81,9 @@ import type { CartConfig } from "@/lib/website-cart";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
 import { setPreviewFrame } from "@/lib/storefront-preview-bus";
+import { PartStyleFold } from "@/components/website-part-style-editor";
+import { CART_PARTS, CHECKOUT_PARTS, FOOTER_PARTS, HEADER_PARTS, type PartDef } from "@/lib/website-page-parts";
+import type { PartArea } from "@/lib/website-site-design";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
@@ -555,6 +558,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const setCard = (p: Partial<Theme["card"]>) => theme && apply({ ...theme, card: { ...theme.card, ...p } });
   const setShape = (patch: Partial<Shape>) => theme && apply({ ...theme, shape: { ...theme.shape, ...patch } });
   const setProduct = (p: Partial<Theme["product"]>) => theme && apply({ ...theme, product: { ...theme.product, ...p } });
+  // 🎨 ปรับละเอียดทีละชิ้นของ ตะกร้า/ชำระเงิน/หัวเว็บ/ท้ายเว็บ (ค่าเก็บที่ theme.page.areaParts · ของกลาง PartStyleFold · เปิดครั้งแรก = พาพรีวิวไป path)
+  const areaFold = (area: PartArea, parts: PartDef[], hint: string, path?: string) =>
+    theme ? (
+      <div className={cardCls}>
+        <PartStyleFold parts={parts} value={theme.page.areaParts[area]} onChange={(v) => apply({ ...theme, page: { ...theme.page, areaParts: { ...theme.page.areaParts, [area]: v } } })} colors={theme.colors} onOpen={path ? () => setPage(path) : undefined} hint={hint} testId={area} />
+      </div>
+    ) : null;
   // 🖥/📱 กำลังตั้งค่าให้จอไหน — มือถือ = เขียนลง product.mobile (ค่าที่ไม่ตั้ง = ตามคอม)
   const [editDevice, setEditDevice] = useState<"pc" | "mobile">("pc");
   const setMobile = (p: Partial<ProductMobile>) => theme && setProduct({ mobile: { ...theme.product.mobile, ...p } });
@@ -1373,6 +1383,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               <p className="text-[11px] text-slate-400 mt-3">* รายการในเมนูตั้งที่แท็บ "เมนู" · ยังไม่ตั้ง = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้างเอง + ติดต่อ)</p>
             </div>
           )}
+          {tab === "header" && areaFold("header", HEADER_PARTS, "แถบประกาศ · โลโก้ · ลิงก์เมนู · ไอคอน · ป้ายตะกร้า", "/")}
 
           {/* ── เมนู ── */}
           {tab === "menu" && (
@@ -1760,6 +1771,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                   จัดกึ่งกลางบนมือถือ (จอคอมตามที่ตั้งด้านบน)
                 </label>
               </div>
+              {areaFold("footer", FOOTER_PARTS, "หัวคอลัมน์ · ลิงก์ · โซเชียล · แถวล่าง")}
             </>
           )}
 
@@ -2690,9 +2702,19 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {/* ── 🛒 ตะกร้า: หน้าตา · รายการ · ท้ายตะกร้า · สินค้าแนะนำ · ฟังก์ชันเพิ่ม (components/website-cart-settings) ── */}
           {/* ── 🔗 แนะนำสินค้า: สินค้าที่เกี่ยวข้อง (กฎหลายชั้น) + 👀 ดูล่าสุด (components/website-related-settings) ── */}
           {tab === "related" && <RelatedSettings product={theme.product} onChange={setProduct} shopSlug={shopSlug} />}
-          {tab === "cart" && <CartSettings value={theme.cart} onChange={(cart) => apply({ ...theme, cart })} shopSlug={shopSlug} categories={choices?.categories ?? []} onPreviewPage={setPage} />}
+          {tab === "cart" && (
+            <>
+              <CartSettings value={theme.cart} onChange={(cart) => apply({ ...theme, cart })} shopSlug={shopSlug} categories={choices?.categories ?? []} onPreviewPage={setPage} />
+              {areaFold("cart", CART_PARTS, "ลิ้นชัก/หน้าตะกร้า · แถวสินค้า · ยอดรวม · ปุ่ม")}
+            </>
+          )}
           {/* ── 💳 หน้าชำระเงิน: ข้อความ · ช่องกรอก · การจัดวาง · ช่องทางจ่าย · แถบความมั่นใจ · หน้าขอบคุณ (components/website-checkout-settings) ── */}
-          {tab === "checkout" && <CheckoutSettings value={theme.checkout} onChange={(checkout) => apply({ ...theme, checkout })} payInfo={choices?.payInfo} onPreviewPage={setPage} />}
+          {tab === "checkout" && (
+            <>
+              <CheckoutSettings value={theme.checkout} onChange={(checkout) => apply({ ...theme, checkout })} payInfo={choices?.payInfo} onPreviewPage={setPage} />
+              {areaFold("checkout", CHECKOUT_PARTS, "กล่อง · ช่องกรอก · วิธีชำระ · ปุ่มยืนยัน", "/checkout")}
+            </>
+          )}
 
           {tab === "shape" && (
             <>
