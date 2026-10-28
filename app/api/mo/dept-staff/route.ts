@@ -2,7 +2,9 @@
  * ย้ายพนักงานเข้า/ออก "โต๊ะ" (แผนก) จากบอร์ดจ่ายงาน — /api/mo/dept-staff
  *   POST { employee_id, department_id | null }
  *
- * ทำไมมี endpoint แยกจากของ payroll (/api/payroll/board/move):
+ * 🔒 สิทธิ์ (เจ้าของสั่ง 2026-10-28): ย้ายคนเข้า/ออกโต๊ะได้ "เฉพาะคนมีสิทธิ์ฝ่ายบุคคล" = app.payroll + employees.edit
+ *    (เดิมใช้ products.edit — ตรวจแล้วตอนเปลี่ยน: ประวัติย้าย 63 ครั้งเป็นเจ้าของคนเดียว ไม่มีใครเสียสิทธิ์ที่ใช้อยู่)
+ * ทำไมมี endpoint แยกจากของ payroll (/api/payroll/board/move) — ประวัติเดิม:
  *   ตัวนั้นล็อกด้วยสิทธิ์ payroll (คนคุมเงินเดือน) — หัวหน้าที่จัดโต๊ะบนบอร์ดไม่มีสิทธิ์นั้น
  *   ตัวนี้ใช้สิทธิ์เดียวกับการแก้ข้อมูลผลิต (products.edit) แต่ **เขียนประวัติย้ายแผนก + audit เหมือนกันทุกอย่าง**
  *   → ไม่ว่าใครย้าย ก็ตามรอยได้ว่าใครย้ายใคร เมื่อไหร่ จากโต๊ะไหนไปโต๊ะไหน
@@ -12,14 +14,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardPayroll } from "@/lib/payroll-auth";
 import { writeAudit } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
+  const denied = await guardPayroll(request, "employees.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
   let body: Record<string, unknown>;

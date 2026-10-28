@@ -13,6 +13,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { HoverImage } from "@/components/hover-image";
 import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
+import { moveDeskStaff } from "./desk-staff-panel";
 
 type DeptLite = { id: string; name: string };
 type PendingLite = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; remaining: number; image_url?: string | null; status?: string; ready?: boolean; prep_done?: boolean; cut_done?: boolean; brand?: string | null; due_date?: string | null; internal_due_date?: string | null };
@@ -73,7 +74,7 @@ function CardShell({ dim, accent, thumbUrl, sku, drag, actions, children }: {
 export function DispatchPlanBoard({
   planId, planName, planStatus, startDate, endDate, departments, pending, realWOs, craftsmen, defectByWorker,
   laborPerUnit, imageByMo, deptWages, canEdit, tablet, realMode, onDispatch, pendingPiece, onPieceClick,
-  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onStaffMoved, onUpdateWO, onCancelWO, onSetCentralRate, onPickDispatch,
+  onApplied, onRenamed, onDates, onDeleted, onOpenWork, onReorderDepts, onManageDepts, onStaffMoved, onUpdateWO, onCancelWO, onSetCentralRate, onPickDispatch, canMoveStaff = false,
 }: {
   planId: string; planName: string; planStatus: string; startDate: string | null; endDate: string | null;
   departments: DeptLite[]; pending: PendingLite[]; pendingPiece?: PieceLite[]; onPieceClick?: (p: PieceLite) => void; realWOs: WOLite[]; craftsmen: CraftLite[];
@@ -89,6 +90,7 @@ export function DispatchPlanBoard({
   onReorderDepts?: (orderedIds: string[]) => void;   // ลากสลับคอลัมน์แผนก → บันทึกลำดับ
   onManageDepts?: () => void;   // เปิดป๊อปอัปตั้งค่าแผนก (ซ่อน/แสดงโต๊ะ ฯลฯ)
   onStaffMoved?: () => void;    // ย้ายพนักงานเข้า/ออกโต๊ะแล้ว → ให้หน้าแม่โหลดรายชื่อ + เงินเดือนรวมใหม่
+  canMoveStaff?: boolean;       // ย้ายคนเข้า/ออกโต๊ะได้ = เฉพาะสิทธิ์ฝ่ายบุคคล (app.payroll + employees.edit) — เจ้าของสั่ง 2026-10-28
   onUpdateWO?: (id: string, patch: { labor_cost?: number; assignees?: { id: string | null; name: string }[]; assignee_name?: string | null; assignee_id?: string | null; assignee_type?: string; department_id?: string | null; department_name?: string | null }, quiet?: boolean) => Promise<void>;   // แก้ใบงานจริง (ของจริงเท่านั้น) · quiet = ไม่เด้ง toast "บันทึกค่าแรงแล้ว"
   onCancelWO?: (id: string) => void | Promise<void>;   // ยกเลิกใบจ่ายงาน (ของจริง) → คืน qty กลับ "รอจ่าย"
   onSetCentralRate?: (info: { moNo: string; rate: number }) => void | Promise<void>;   // การ์ดร่าง: ใส่ค่าแรง → ตั้งเรตกลางสินค้า
@@ -1390,10 +1392,7 @@ export function DispatchPlanBoard({
         const moveStaff = async (empId: string, toDept: string | null, label: string) => {
           setStaffBusy(empId);
           try {
-            const res = await apiFetch("/api/mo/dept-staff", { method: "POST", headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ employee_id: empId, department_id: toDept }) });
-            const j = await res.json();
-            if (j.error) throw new Error(j.error);
+            await moveDeskStaff(empId, toDept);
             toast.success(label);
             onStaffMoved?.();   // ให้หน้าแม่โหลดรายชื่อ/เงินเดือนรวมใหม่
           } catch (e) {
@@ -1459,7 +1458,7 @@ export function DispatchPlanBoard({
                           <span className="text-sm text-slate-700 flex-1 min-w-0 truncate">
                             {c.code ? <code className="text-[10px] text-slate-400 mr-1">[{c.code}]</code> : null}{c.name}
                           </span>
-                          {canEdit && (
+                          {canMoveStaff && (
                             <button onClick={() => void moveStaff(c.id, null, `ย้าย ${c.name} ออกจาก ${dept.name} แล้ว`)} disabled={staffBusy === c.id}
                               title="ย้ายออกจากโต๊ะนี้ (ไม่ได้ลบพนักงาน — แค่ไม่สังกัดโต๊ะ)"
                               className="shrink-0 h-6 px-1.5 text-[11px] text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded disabled:opacity-40">ย้ายออก</button>
@@ -1503,8 +1502,9 @@ export function DispatchPlanBoard({
                 </div>
               )}
 
-              {/* เพิ่มคนเข้าโต๊ะ */}
-              {canEdit && (
+              {/* เพิ่มคนเข้าโต๊ะ (ย้ายจากโต๊ะอื่น) — เฉพาะสิทธิ์ฝ่ายบุคคล */}
+              {!canMoveStaff && <p className="mt-2 border-t border-slate-100 pt-2 text-[11px] text-slate-400">ย้ายคนเข้า/ออกโต๊ะได้เฉพาะคนที่มีสิทธิ์ฝ่ายบุคคล</p>}
+              {canMoveStaff && (
                 <div className="mt-2 pt-2 border-t border-slate-100">
                   {!staffAddOpen ? (
                     <button onClick={() => setStaffAddOpen(true)} className="w-full h-8 text-sm text-violet-600 border border-dashed border-violet-200 rounded-lg hover:bg-violet-50">＋ เพิ่มคนเข้าโต๊ะนี้</button>

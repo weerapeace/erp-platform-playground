@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function POST(req: NextRequest): Promise<NextResponse> {
-  const denied = await guardPayroll(req); if (denied) return denied;
+  const denied = await guardPayroll(req, "employees.edit"); if (denied) return denied;   // ย้ายแผนก = แก้ข้อมูลพนักงาน (เดิมขอแค่ดู)
   const { data: { user } } = await supabaseFromRequest(req).auth.getUser();
 
   let body: Record<string, unknown>;

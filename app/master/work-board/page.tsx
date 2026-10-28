@@ -73,6 +73,7 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
 import { PwaInstallButton } from "@/components/pwa-install-button";
 import type { Assignee } from "@/app/api/mo/assignees/route";
+import { DeskStaffPanel } from "./desk-staff-panel";
 import type { LaborRate } from "@/app/api/bom/labor-rates/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -257,6 +258,10 @@ function WorkBoardPageInner() {
   const canEdit = usePermission("products.edit");
   // สิทธิ์ "จ่ายงานเข้าแผนก" แยกต่างหาก — ตั้งค่ารายตำแหน่งได้ที่ /admin/roles-permissions
   const canDispatch = usePermission("work_board.dispatch");
+  // ย้ายคนเข้า/ออกโต๊ะ = เปลี่ยนแผนกในข้อมูลพนักงาน → เฉพาะสิทธิ์ฝ่ายบุคคล (เรียก hook แยก — ห้าม && ระหว่าง hook)
+  const hrApp = usePermission("app.payroll");
+  const hrEdit = usePermission("employees.edit");
+  const canMoveStaff = hrApp && hrEdit;
   const { user } = useAuth();
   // แท็บ "แผนผู้บริหาร" (ตัวเลขราคาขาย/ต้นทุน/กำไร) — เจ้าของหรือแอดมินเท่านั้น
   // ⚠️ เรียก usePermission ไว้ตรง ๆ เสมอ (ห้ามใส่หลัง || เพราะ hook ห้ามเรียกแบบมีเงื่อนไข)
@@ -361,6 +366,7 @@ function WorkBoardPageInner() {
   }, []);
   const [dispMO, setDispMO] = useState<PendingMO | null>(null);
   const [dispDept, setDispDept] = useState<Dept | null>(null);
+  const [deskPanel, setDeskPanel] = useState(false);   // 👥 แผงจัดคนในโต๊ะ (ในป๊อปจ่ายงาน)
   const [dispQty, setDispQty] = useState(0);
   const [dispCraftsman, setDispCraftsman] = useState("");
   const [dispDue, setDispDue] = useState("");
@@ -1583,6 +1589,7 @@ function WorkBoardPageInner() {
       ) : viewMode === "table" ? (
         <BoardTable pending={board.pending} workOrders={board.workOrders}
           departments={board.departments} craftsmen={craftsmen} canEdit={canDispatch} canSeeMoney={isAdmin} deliveryPlans={board.deliveryPlans}
+          canMoveStaff={canMoveStaff} onStaffChanged={reloadAssignees}
           onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : viewMode === "shop" ? (
         <div className="space-y-3">
@@ -1625,7 +1632,7 @@ function WorkBoardPageInner() {
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
             pending={board.pending} pendingPiece={board.pendingPiece} onPieceClick={(p) => { setDispPiece({ ...p, image_url: p.image_url ?? null, brand: null, brand_color: null }); setPieceCraftsman(""); }} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
-            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr} onStaffMoved={() => void reloadAssignees()}
+            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr} onStaffMoved={() => void reloadAssignees()} canMoveStaff={canMoveStaff}
             onApplied={() => { void load(true); void loadPlans(); setActivePlan("real"); }}
             onSetCentralRate={setCentralRate}
             onRenamed={(name) => setPlans((ps) => ps.map((x) => x.id === p.id ? { ...x, name } : x))}
@@ -1664,7 +1671,7 @@ function WorkBoardPageInner() {
             departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
             pending={board.pending} pendingPiece={board.pendingPiece} onPieceClick={(p) => { setDispPiece({ ...p, image_url: p.image_url ?? null, brand: null, brand_color: null }); setPieceCraftsman(""); }} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
-            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr} onStaffMoved={() => void reloadAssignees()}
+            canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr} onStaffMoved={() => void reloadAssignees()} canMoveStaff={canMoveStaff}
             onApplied={() => {}} onRenamed={() => {}} onDates={() => {}} onDeleted={() => {}}
             onDispatch={({ moId, deptId, qty }) => {
               const mo = board.pending.find((x) => x.id === moId);
@@ -1805,9 +1812,22 @@ function WorkBoardPageInner() {
               <select value={dispDept?.id ?? ""} onChange={(e) => setDispDept(board.departments.find((d) => d.id === e.target.value) ?? null)}
                 className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
                 <option value="">— เลือกโต๊ะ —</option>
-                {board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                {board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).map((d) => {
+                  const n = craftsmen.filter((c) => c.department_id === d.id).length;
+                  return <option key={d.id} value={d.id}>{d.name}{n ? ` · ${n} คน` : " · ยังไม่มีคน"}</option>;
+                })}
               </select>
             </label>
+            {/* 👥 จัดคนในโต๊ะได้ในป๊อปนี้เลย (ย้าย = เฉพาะสิทธิ์ฝ่ายบุคคล) */}
+            {dispDept && (
+              <div className="-mt-1.5 flex items-center gap-2 text-[12px]">
+                <span className="text-slate-500">👥 {craftsmen.filter((c) => c.department_id === dispDept.id).length} คนในโต๊ะ</span>
+                <button type="button" onClick={() => setDeskPanel((o) => !o)} className="text-violet-700 hover:underline">{deskPanel ? "ปิดจัดคน ▴" : "จัดคนในโต๊ะ ▾"}</button>
+              </div>
+            )}
+            {dispDept && deskPanel && (
+              <DeskStaffPanel dept={dispDept} desks={board.departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canDispatch} onChanged={reloadAssignees} />
+            )}
             <div className="grid grid-cols-3 gap-2">
               <label className="block"><span className="text-[11px] text-slate-500">จำนวนที่จ่าย</span>
                 <input type="number" min={0} step="any" max={dispMO.remaining} value={dispQty} onChange={(e) => setDispQty(Number(e.target.value))}
@@ -3260,9 +3280,11 @@ function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefine
   );
 }
 
-function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload }: {
+function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged }: {
   pending: PendingMO[]; workOrders: WorkOrder[]; deliveryPlans: DeliveryPlan[];
   departments: Dept[]; craftsmen: Assignee[]; canEdit: boolean;
+  /** ย้ายคนเข้า/ออกโต๊ะได้ (สิทธิ์ฝ่ายบุคคล) · ย้าย/เพิ่มแล้วให้หน้าแม่โหลดรายชื่อใหม่ */
+  canMoveStaff?: boolean; onStaffChanged?: () => void | Promise<void>;
   /** เห็นราคาขาย/มูลค่า = คนที่ดูแผนผู้บริหารได้ (API ราคาล็อกสิทธิ์ admin.users ที่เซิร์ฟเวอร์อีกชั้น) */
   canSeeMoney: boolean;
   onOpenMO: (mo: PendingMO) => void; onOpenWO: (wo: WorkOrder) => void; onReload?: () => void;
@@ -3284,6 +3306,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   // 🚚 จ่ายงานตามที่ติ๊ก (จ่ายทีเดียวหลายใบเข้าโต๊ะเดียวกัน)
   const [dispOpen, setDispOpen] = useState(false);
   const [dispDeptId, setDispDeptId] = useState("");
+  const [deskPanel, setDeskPanel] = useState(false);   // 👥 แผงจัดคนในโต๊ะ (ในป๊อปจ่ายงาน)
   const [dispCraft, setDispCraft] = useState("");
   const [dispDue2, setDispDue2] = useState("");
   const [dispDate2, setDispDate2] = useState(todayLocal());   // วันที่จ่ายงาน (ตั้งต้น = วันนี้)
@@ -4440,9 +4463,22 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
                 <select value={dispDeptId} onChange={(e) => { setDispDeptId(e.target.value); setDispCraft(""); }}
                   className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
                   <option value="">— เลือกโต๊ะ —</option>
-                  {departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  {departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).map((d) => {
+                    const n = craftsmen.filter((c) => c.department_id === d.id).length;
+                    return <option key={d.id} value={d.id}>{d.name}{n ? ` · ${n} คน` : " · ยังไม่มีคน"}</option>;
+                  })}
                 </select>
               </label>
+              {/* 👥 จัดคนในโต๊ะได้ในป๊อปนี้เลย (ย้าย = เฉพาะสิทธิ์ฝ่ายบุคคล) */}
+              {dept && (
+                <div className="-mt-1.5 flex items-center gap-2 text-[12px]">
+                  <span className="text-slate-500">👥 {craftsmen.filter((c) => c.department_id === dept.id).length} คนในโต๊ะ</span>
+                  <button type="button" onClick={() => setDeskPanel((o) => !o)} className="text-violet-700 hover:underline">{deskPanel ? "ปิดจัดคน ▴" : "จัดคนในโต๊ะ ▾"}</button>
+                </div>
+              )}
+              {dept && deskPanel && (
+                <DeskStaffPanel dept={dept} desks={departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canEdit} onChanged={() => onStaffChanged?.()} />
+              )}
 
               <label className="block"><span className="text-[11px] text-slate-500">{isHire ? "เลือกช่าง (งานเหมา — จำเป็น *)" : `ช่างในแผนก ${dept?.name ?? ""}`}</span>
                 <div className="mt-0.5">
