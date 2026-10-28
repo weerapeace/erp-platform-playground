@@ -308,13 +308,13 @@ export function normalizePartValue(raw: unknown): PartStyleValue | undefined {
   return Object.keys(out).length ? out : undefined;
 }
 
-/** ส่วนของเว็บที่ปรับละเอียดได้ แต่ค่าหลักอยู่นอกไฟล์นี้ — ค้นหา (sr.*) · ตะกร้า (cart.*) · ชำระเงิน (co.*) · หัวเว็บ+แถบประกาศ (hd.*) · ท้ายเว็บ (ft.*) */
-export type PartArea = "search" | "cart" | "checkout" | "header" | "footer";
-export const PART_AREAS: PartArea[] = ["search", "cart", "checkout", "header", "footer"];
+/** ส่วนของเว็บที่ปรับละเอียดได้ แต่ค่าหลักอยู่นอกไฟล์นี้ — ค้นหา (sr.*) · ตะกร้า (cart.*) · ชำระเงิน (co.*) · หัวเว็บ+แถบประกาศ (hd.*) · ท้ายเว็บ (ft.*) · หน้าสินค้า (pd.*) · การ์ดสินค้า (pc.*) */
+export type PartArea = "search" | "cart" | "checkout" | "header" | "footer" | "product" | "card";
+export const PART_AREAS: PartArea[] = ["search", "cart", "checkout", "header", "footer", "product", "card"];
 export type AreaParts = Record<PartArea, PartStyles>;
 export function normalizeAreaParts(raw: unknown): AreaParts {
   const r = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-  return { search: normalizePartStyles(r.search), cart: normalizePartStyles(r.cart), checkout: normalizePartStyles(r.checkout), header: normalizePartStyles(r.header), footer: normalizePartStyles(r.footer) };
+  return { search: normalizePartStyles(r.search), cart: normalizePartStyles(r.cart), checkout: normalizePartStyles(r.checkout), header: normalizePartStyles(r.header), footer: normalizePartStyles(r.footer), product: normalizePartStyles(r.product), card: normalizePartStyles(r.card) };
 }
 
 export function normalizePartStyles(raw: unknown): PartStyles {
@@ -336,13 +336,13 @@ export function normalizePartStyles(raw: unknown): PartStyles {
 export type AccountTabKey = "orders" | "points" | "coupons" | "wishlist" | "addresses" | "profile";
 export const ACCOUNT_TABS: AccountTabKey[] = ["orders", "points", "coupons", "wishlist", "addresses", "profile"];
 /** ชื่อ/ไอคอนตั้งต้นของแต่ละแท็บ (ชื่อว่าง/ไอคอนว่าง = ใช้ค่านี้) · ไอคอนเส้นใช้ชุดไอคอนกลาง (i:<key>) */
-export const ACCOUNT_TAB_DEFAULTS: Record<AccountTabKey, { label: string; emoji: string; line: string }> = {
-  orders: { label: "ออเดอร์ของฉัน", emoji: "📦", line: "i:package" },
-  points: { label: "แต้ม", emoji: "⭐", line: "i:star" },
-  coupons: { label: "คูปอง", emoji: "🎟️", line: "i:tag" },
-  wishlist: { label: "รายการโปรด", emoji: "❤️", line: "i:heart" },
-  addresses: { label: "ที่อยู่", emoji: "📍", line: "i:map-pin" },
-  profile: { label: "โปรไฟล์", emoji: "👤", line: "i:user" },
+export const ACCOUNT_TAB_DEFAULTS: Record<AccountTabKey, { label: string; labelEn: string; emoji: string; line: string }> = {
+  orders: { label: "ออเดอร์ของฉัน", labelEn: "My orders", emoji: "📦", line: "i:package" },
+  points: { label: "แต้ม", labelEn: "Points", emoji: "⭐", line: "i:star" },
+  coupons: { label: "คูปอง", labelEn: "Coupons", emoji: "🎟️", line: "i:tag" },
+  wishlist: { label: "รายการโปรด", labelEn: "Wishlist", emoji: "❤️", line: "i:heart" },
+  addresses: { label: "ที่อยู่", labelEn: "Addresses", emoji: "📍", line: "i:map-pin" },
+  profile: { label: "โปรไฟล์", labelEn: "Profile", emoji: "👤", line: "i:user" },
 };
 export interface AccountTabSetting {
   key: AccountTabKey;
@@ -406,6 +406,12 @@ export interface AccountLook {
   countUp: boolean;
   tabAnim: "none" | "fade" | "slide";
   tilt: boolean;
+  /** 🎉 พลุฉลองตอนสมาชิกเลื่อนระดับ / เข้าบัญชีครั้งแรก (เครื่องลูกค้าจำว่าฉลองแล้ว) */
+  celebrate: boolean;
+  /** 🔄 บัตรสมาชิกกดพลิกได้ — ด้านหลัง: สิทธิ์ของระดับ + QR ลิงก์ชวนเพื่อน (ร้านเปิดชวนเพื่อน) */
+  flip: boolean;
+  /** 🛤 ไทม์ไลน์สถานะในแต่ละออเดอร์ (รับคำสั่งซื้อ → เตรียมของ → จัดส่ง → สำเร็จ) */
+  orderTimeline: boolean;
   parts: PartStyles;
 }
 const EMPTY_TEXT: AccountEmptyText = { text: "", button: "", href: "" };
@@ -441,6 +447,9 @@ export const DEFAULT_ACCOUNT_LOOK: AccountLook = {
   countUp: false,
   tabAnim: "none",
   tilt: false,
+  celebrate: false,
+  flip: false,
+  orderTimeline: false,
   parts: {},
 };
 
@@ -459,7 +468,7 @@ export function normalizeAccount(raw: unknown): AccountLook {
     const key = o.key as AccountTabKey;
     if (!ACCOUNT_TABS.includes(key) || seen.has(key)) continue;
     seen.add(key);
-    tabs.push({ key, label: txt(o.label, 40), hidden: key !== "profile" && o.hidden === true, icon: txt(o.icon, 300) });
+    tabs.push(keepEn({ key, label: txt(o.label, 40), hidden: key !== "profile" && o.hidden === true, icon: txt(o.icon, 300) }, o, ["label"], 40));
   }
   for (const key of ACCOUNT_TABS) if (!seen.has(key)) tabs.push({ key, label: "", hidden: false, icon: "" });
   const firstTab = oneOf(r.firstTab, ACCOUNT_TABS, d.firstTab);
@@ -467,13 +476,14 @@ export function normalizeAccount(raw: unknown): AccountLook {
   const empty = {} as Record<AccountEmptyKey, AccountEmptyText>;
   for (const k of ["orders", "wishlist", "addresses"] as AccountEmptyKey[]) {
     const e = obj(em[k]);
-    empty[k] = { text: txt(e.text, 200), button: txt(e.button, 40), href: accHref(e.href) };
+    empty[k] = keepEn({ text: txt(e.text, 200), button: txt(e.button, 40), href: accHref(e.href) }, e, ["text", "button"], 200);
   }
   const n = obj(r.notice);
   const a = obj(r.aside);
   const order = Array.isArray(r.order) ? [...new Set(r.order.filter((x): x is AccountBlock => (ACCOUNT_BLOCKS as readonly unknown[]).includes(x)))] : [];
   for (const b of ACCOUNT_BLOCKS) if (!order.includes(b)) order.push(b);
-  return {
+  // 🌐 ข้อความที่ตั้งเองเก็บช่อง _en ด้วย (หน้า /en สลับให้เองที่ localizeContent)
+  return keepEn({
     header: oneOf(r.header, ["simple", "center", "banner", "card"] as const, d.header),
     imageKey: typeof r.imageKey === "string" && r.imageKey.trim() ? r.imageKey.trim().slice(0, 300) : null,
     greeting: txt(r.greeting, 80),
@@ -492,12 +502,12 @@ export function normalizeAccount(raw: unknown): AccountLook {
     cards: oneOf(r.cards, ["card", "line", "flat"] as const, d.cards),
     claim: oneOf(r.claim, ["box", "link", "hide"] as const, d.claim),
     empty,
-    notice: { on: n.on === true, text: txt(n.text, 200), tone: n.tone === "brand" ? "brand" : "soft" },
+    notice: keepEn({ on: n.on === true, text: txt(n.text, 200), tone: n.tone === "brand" ? ("brand" as const) : ("soft" as const) }, n, ["text"], 200),
     recommend: r.recommend === true,
     help: r.help === true,
     width: r.width === "narrow" ? "narrow" : "site",
     profileStyle: r.profileStyle === "rows" ? "rows" : "form",
-    aside: { on: a.on === true, icon: txt(a.icon, 300), title: txt(a.title, 60), text: txt(a.text, 200), href: accHref(a.href) },
+    aside: keepEn({ on: a.on === true, icon: txt(a.icon, 300), title: txt(a.title, 60), text: txt(a.text, 200), href: accHref(a.href) }, a, ["title", "text"], 200),
     order,
     decor: oneOf(r.decor, ["none", "blobs", "wash"] as const, d.decor),
     glass: r.glass === true,
@@ -505,8 +515,11 @@ export function normalizeAccount(raw: unknown): AccountLook {
     countUp: r.countUp === true,
     tabAnim: oneOf(r.tabAnim, ["none", "fade", "slide"] as const, d.tabAnim),
     tilt: r.tilt === true,
+    celebrate: r.celebrate === true,
+    flip: r.flip === true,
+    orderTimeline: r.orderTimeline === true,
     parts: normalizePartStyles(r.parts),
-  };
+  } satisfies AccountLook, r, ["greeting", "subtext", "panelTitle"], 160);
 }
 
 export const DEFAULT_SITE_PAGE: SitePageDesign = {
@@ -522,7 +535,7 @@ export const DEFAULT_SITE_PAGE: SitePageDesign = {
   share: { style: "photo", bg: "paper" },
   login: { layout: "center", imageKey: null, title: "", text: "", popupTitle: "", signupLabel: "", perksOn: true, perks: [], guestLink: true, providerStyle: "brand", parts: {} },
   account: DEFAULT_ACCOUNT_LOOK,
-  areaParts: { search: {}, cart: {}, checkout: {}, header: {}, footer: {} },
+  areaParts: { search: {}, cart: {}, checkout: {}, header: {}, footer: {}, product: {}, card: {} },
   festive: { kind: "none", amount: "some", where: "home", mobile: true },
   proof: { viewers: false, viewersMin: 5, sold: false, soldMin: 10, soldSource: "web", soldPeriod: "30d", onCard: false },
 };

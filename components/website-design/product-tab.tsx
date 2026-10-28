@@ -23,9 +23,12 @@ import { ProductExtrasSetting } from "@/components/website-product-extras-settin
 import { ProductLuxeSetting } from "@/components/website-product-luxe-setting";
 import { FONT_LABELS, FONT_SIZES, type ProductTitleStyle, type ProductImageBg, type ProductSection, type ProductGalleryStyle, type ProductDetailsStyle, type ProductDetailsOpen, type DetailSource, type DetailApply, type DetailOpen, type DetailItem, PRODUCT_DETAIL_SOURCES, SHOP_DETAIL_SOURCES, type Theme, inputCls, labelCls, cardCls } from "./shared";
 import { useDesign } from "./context";
+import { useAreaFold } from "./shared";
+import { PRODUCT_PARTS } from "@/lib/website-page-parts";
 
 export function ProductTab() {
   const { shopSlug, theme, published, choices, setChoices, toast, setProduct, setDevice, editDevice, setEditDevice } = useDesign();
+  const areaFold = useAreaFold();
   const setMobile = (p: Partial<ProductMobile>) => theme && setProduct({ mobile: { ...theme.product.mobile, ...p } });
   const viewProduct = (t: Theme) => (editDevice === "mobile" ? resolveMobileProduct(t.product) : t.product);
   const setSections = (sections: ProductSection[]) => (editDevice === "mobile" ? setMobile({ sections }) : setProduct({ sections }));
@@ -131,6 +134,7 @@ export function ProductTab() {
   const fitLabel = (fit: ProductImageFit, size: number) => (fit === "cover" ? "เต็มกรอบ" : fit === "auto" ? "อัตโนมัติตามรูป" : `${size}%`);
   const mobCount = mobileOverrideCount(mob);
   return (
+    <>
     <div className={cardCls}>
       <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
         <h3 className="text-sm font-semibold text-slate-800">หน้าสินค้า — เลือก Style</h3>
@@ -791,6 +795,8 @@ export function ProductTab() {
 
       <p className="text-[11px] text-slate-400 mt-3">ดูผล: พรีวิวด้านขวาเปิด &quot;หน้าสินค้า (ตัวอย่าง)&quot; ให้แล้ว (เลือกหน้าอื่นได้จากเมนูบนพรีวิว) — ยังไม่ขึ้นเว็บจริงจนกว่าจะกดเผยแพร่</p>
     </div>
+    {areaFold("product", PRODUCT_PARTS, "ชื่อ · ราคา · ตัวเลือก · ปุ่มใส่ตะกร้า · แถบลอย · หัวข้อ")}
+    </>
   );
 }
 

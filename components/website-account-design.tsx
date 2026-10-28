@@ -12,6 +12,7 @@
  * พรีวิว: /account ในกรอบพรีวิว = ข้อมูลตัวอย่าง (ไม่ต้องล็อกอิน)
  */
 import { type ReactNode } from "react";
+import { LangInput } from "@/components/bilingual-field";
 import { ImageInput } from "@/components/image-input";
 import { SiteIconPicker } from "@/components/site-icon-picker";
 import { PartStyleFold } from "@/components/website-part-style-editor";
@@ -83,7 +84,7 @@ const PRESETS: { k: string; l: string; d: string; p: Partial<AccountLook> }[] = 
     k: "card",
     l: "💳 บัตรสมาชิก",
     d: "หัวเป็นบัตรเอียงได้ · เลขแต้มวิ่ง · ไอคอนแบบแอป",
-    p: { header: "card", nav: "tiles", tilt: true, countUp: true, timeGreeting: true, decor: "wash", glass: false, tabAnim: "slide" },
+    p: { header: "card", nav: "tiles", tilt: true, flip: true, celebrate: true, orderTimeline: true, countUp: true, timeGreeting: true, decor: "wash", glass: false, tabAnim: "slide" },
   },
   {
     k: "plain",
@@ -101,6 +102,9 @@ const PRESETS: { k: string; l: string; d: string; p: Partial<AccountLook> }[] = 
       countUp: false,
       tabAnim: "none",
       tilt: false,
+      flip: false,
+      celebrate: false,
+      orderTimeline: false,
       aside: { ...DEFAULT_ACCOUNT_LOOK.aside },
     },
   },
@@ -169,12 +173,12 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
         )}
         <div className="grid sm:grid-cols-2 gap-2">
           <label className="block">
-            <span className={webForm.label}>ข้อความทักทาย ({"{ชื่อ}"} = ชื่อสมาชิก)</span>
-            <input className={webForm.input} value={value.greeting} onChange={(e) => set({ greeting: e.target.value })} placeholder="บัญชีของฉัน" maxLength={80} />
+            <span className={webForm.label}>ข้อความทักทาย ({"{ชื่อ}"} หรือ {"{name}"} = ชื่อสมาชิก · ปุ่ม TH/EN = หน้าภาษาอังกฤษ)</span>
+            <LangInput className={webForm.input} obj={value} k="greeting" onPatch={(p) => set(p)} placeholder="บัญชีของฉัน" enPlaceholder="My account" maxLength={80} />
           </label>
           <label className="block">
             <span className={webForm.label}>ข้อความรอง (ว่างได้)</span>
-            <input className={webForm.input} value={value.subtext} onChange={(e) => set({ subtext: e.target.value })} placeholder="เช่น ขอบคุณที่เป็นครอบครัวเดียวกัน 💗" maxLength={160} />
+            <LangInput className={webForm.input} obj={value} k="subtext" onPatch={(p) => set(p)} placeholder="เช่น ขอบคุณที่เป็นครอบครัวเดียวกัน 💗" maxLength={160} />
           </label>
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
@@ -203,7 +207,7 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
             {value.nav === "panel" && (
               <label className="block">
                 <span className={webForm.label}>หัวเมนูข้าง</span>
-                <input className={`${webForm.input} !w-44`} value={value.panelTitle} onChange={(e) => set({ panelTitle: e.target.value })} placeholder="บัญชีของฉัน" maxLength={40} />
+                <LangInput className={`${webForm.input} !w-44`} obj={value} k="panelTitle" onPatch={(p) => set(p)} placeholder="บัญชีของฉัน" enPlaceholder="My account" maxLength={40} />
               </label>
             )}
             <div className="space-y-1">
@@ -229,7 +233,7 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
                 <button type="button" className="h-7 w-7 rounded border border-slate-200 bg-white text-xs disabled:opacity-30" disabled={i === tabs.length - 1} onClick={() => move(i, 1)} aria-label="เลื่อนลง">
                   ↓
                 </button>
-                <input className={`${webForm.input} !w-40 flex-1`} value={t.label} placeholder={def.label} onChange={(e) => setTab(i, { label: e.target.value })} maxLength={40} aria-label={`ชื่อเมนู ${def.label}`} />
+                <LangInput className={`${webForm.input} !w-40 flex-1`} obj={t} k="label" placeholder={def.label} enPlaceholder={def.labelEn} onPatch={(p) => setTab(i, p)} maxLength={40} ariaLabel={`ชื่อเมนู ${def.label}`} />
                 {value.navIcons !== "none" && (
                   <div className="flex items-center gap-1">
                     <SiteIconPicker value={t.icon || (value.navIcons === "line" ? def.line : def.emoji)} onChange={(v) => setTab(i, { icon: v })} label="ไอคอน" />
@@ -285,13 +289,13 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
             <div key={k} className="grid sm:grid-cols-[2fr_1fr_1fr] gap-2 items-end">
               <label className="block">
                 <span className={webForm.label}>{fb.label} — ข้อความ</span>
-                <input className={webForm.input} value={e.text} onChange={(ev) => setEmpty(k, { text: ev.target.value })} placeholder={fb.text} maxLength={200} />
+                <LangInput className={webForm.input} obj={e} k="text" onPatch={(p) => setEmpty(k, p)} placeholder={fb.text} maxLength={200} />
               </label>
               {k !== "addresses" && (
                 <>
                   <label className="block">
                     <span className={webForm.label}>ปุ่ม</span>
-                    <input className={webForm.input} value={e.button} onChange={(ev) => setEmpty(k, { button: ev.target.value })} placeholder={fb.button} maxLength={40} />
+                    <LangInput className={webForm.input} obj={e} k="button" onPatch={(p) => setEmpty(k, p)} placeholder={fb.button} maxLength={40} />
                   </label>
                   <label className="block">
                     <span className={webForm.label}>ไปที่ (/หน้า หรือ https://)</span>
@@ -310,7 +314,7 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
         </Toggle>
         {value.notice.on && (
           <div className="flex flex-wrap items-center gap-2">
-            <input className={`${webForm.input} flex-1 min-w-[14rem]`} value={value.notice.text} onChange={(e) => set({ notice: { ...value.notice, text: e.target.value } })} placeholder="เช่น สมาชิกระดับ Gold รับส่งฟรีทุกออเดอร์ ✨" maxLength={200} />
+            <LangInput className={`${webForm.input} flex-1 min-w-[14rem]`} obj={value.notice} k="text" onPatch={(p) => set({ notice: { ...value.notice, ...p } })} placeholder="เช่น สมาชิกระดับ Gold รับส่งฟรีทุกออเดอร์ ✨" maxLength={200} />
             <Opt value={value.notice.tone} onChange={(v) => set({ notice: { ...value.notice, tone: v } })} options={[{ v: "soft", l: "สีอ่อน" }, { v: "brand", l: "สีหลัก" }]} />
           </div>
         )}
@@ -332,7 +336,7 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
             <SiteIconPicker value={value.aside.icon} onChange={(v) => setAside({ icon: v })} label="ไอคอน" />
             <label className="block">
               <span className={webForm.label}>หัวข้อ</span>
-              <input className={webForm.input} value={value.aside.title} onChange={(e) => setAside({ title: e.target.value })} placeholder="คู่มือใช้งานบัญชี" maxLength={60} />
+              <LangInput className={webForm.input} obj={value.aside} k="title" onPatch={(p) => setAside(p)} placeholder="คู่มือใช้งานบัญชี" maxLength={60} />
             </label>
             <label className="block">
               <span className={webForm.label}>กดแล้วไปที่ (ว่าง = กดไม่ได้)</span>
@@ -340,7 +344,7 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
             </label>
             <label className="block sm:col-span-3">
               <span className={webForm.label}>ข้อความ</span>
-              <textarea className={webForm.input} rows={2} value={value.aside.text} onChange={(e) => setAside({ text: e.target.value })} placeholder="เช่น สมาชิก Gold รับส่วนลด 10% ทุกออเดอร์" maxLength={200} />
+              <LangInput multiline className={webForm.input} rows={2} obj={value.aside} k="text" onPatch={(p) => setAside(p)} placeholder="เช่น สมาชิก Gold รับส่วนลด 10% ทุกออเดอร์" maxLength={200} />
             </label>
           </div>
         )}
@@ -378,6 +382,9 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
           <Toggle checked={value.timeGreeting} onChange={(v) => set({ timeGreeting: v })}>ทักทายตามเวลา (อรุณสวัสดิ์ ☀️ / ราตรีสวัสดิ์ 🌙 · ใช้เมื่อไม่ได้ตั้งข้อความทักทาย)</Toggle>
           <Toggle checked={value.countUp} onChange={(v) => set({ countUp: v })}>ตัวเลขแต้มวิ่งจาก 0</Toggle>
           <Toggle checked={value.tilt} onChange={(v) => set({ tilt: v })}>บัตรสมาชิกเอียงตามเมาส์ + แสงสะท้อน (หัวแบบบัตรสมาชิก)</Toggle>
+          <Toggle checked={value.flip} onChange={(v) => set({ flip: v })}>🔄 บัตรสมาชิกกดพลิกได้ — ด้านหลัง: สิทธิ์ของระดับ + QR ชวนเพื่อน (หัวแบบบัตรสมาชิก)</Toggle>
+          <Toggle checked={value.celebrate} onChange={(v) => set({ celebrate: v })}>🎉 พลุฉลองตอนเลื่อนระดับ / เข้าบัญชีครั้งแรก (ครั้งเดียวต่อเครื่อง)</Toggle>
+          <Toggle checked={value.orderTimeline} onChange={(v) => set({ orderTimeline: v })}>🛤 ไทม์ไลน์สถานะในแต่ละออเดอร์ (รับคำสั่งซื้อ → เตรียมของ → จัดส่ง → สำเร็จ)</Toggle>
         </div>
         <p className="text-[11px] text-slate-500">ลูกค้าที่ตั้งเครื่องให้ &quot;ลดการเคลื่อนไหว&quot; จะไม่เห็นภาพเคลื่อนไหว (เพื่อความสบายตา)</p>
       </Section>

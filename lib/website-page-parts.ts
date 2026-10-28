@@ -223,6 +223,42 @@ export const FOOTER_PARTS: PartDef[] = [
   { key: "ft.copy", label: "ข้อความลิขสิทธิ์", groups: ["text", "hide"] },
 ];
 
+/** 🛍 หน้าสินค้า — ทุกแบบหน้า (เว็บร้าน ProductShowcase · Style หรู · ProductDetailClient แบบคลาสสิก · theme.page.areaParts.product) */
+export const PRODUCT_PARTS: PartDef[] = [
+  { key: "pd.crumb", label: "ทางเดิน (หน้าแรก / หมวด)", groups: ["text", "layout", "hide"] },
+  { key: "pd.title", label: "ชื่อสินค้า", groups: ["text", "layout"] },
+  { key: "pd.sub", label: "ข้อความรองใต้ชื่อ", groups: ["text", "hide"] },
+  { key: "pd.price", label: "ราคา", groups: ["text"] },
+  { key: "pd.compare", label: "ราคาก่อนลด", groups: ["text", "hide"] },
+  { key: "pd.desc", label: "คำอธิบายสั้น", groups: ["text", "box"] },
+  { key: "pd.stock", label: "สถานะสต๊อก", groups: ["text", "box", "hide"] },
+  { key: "pd.label", label: "ป้ายหัวตัวเลือก", hint: "สี · จำนวน", groups: ["text"] },
+  { key: "pd.opt", label: "ปุ่มตัวเลือก", hint: "สี/แบบ · รูป · จุดสี", groups: ["text", "box", "active"] },
+  { key: "pd.qty", label: "ปุ่มเพิ่ม/ลดจำนวน", groups: ["text", "box"] },
+  { key: "pd.add", label: "ปุ่มใส่ตะกร้า", groups: ["text", "box"] },
+  { key: "pd.tab", label: "แท็บรายละเอียด", hint: "แบบแท็บ", groups: ["text", "box", "active"] },
+  { key: "pd.h3", label: "หัวข้อรายละเอียด", hint: "แบบเรียงลงมา", groups: ["text"] },
+  { key: "pd.h2", label: "หัวข้อส่วน", hint: "สินค้าที่เกี่ยวข้อง ฯลฯ", groups: ["text", "layout"] },
+  { key: "pd.bar", label: "แถบลอย (คอม)", groups: ["box"] },
+  { key: "pd.bar-btn", label: "ปุ่มบนแถบลอย", groups: ["text", "box"] },
+  { key: "pd.mbar", label: "แถบใส่ตะกร้าล่างจอ (มือถือ)", groups: ["box"] },
+];
+
+/** 🃏 การ์ดสินค้า — ทุกที่ที่มีการ์ด: หน้ารวม · หมวด · หน้าแรก · สินค้าที่เกี่ยวข้อง (เว็บร้าน components/shop/ProductCard · theme.page.areaParts.card) */
+export const CARD_PARTS: PartDef[] = [
+  { key: "pc.card", label: "กรอบการ์ด", groups: ["box"] },
+  { key: "pc.media", label: "กรอบรูป", groups: ["box"] },
+  { key: "pc.info", label: "ส่วนข้อความใต้รูป", groups: ["layout", "box"] },
+  { key: "pc.cat", label: "ชื่อหมวด", groups: ["text", "hide"] },
+  { key: "pc.stock", label: "สถานะสต๊อก", groups: ["text", "hide"] },
+  { key: "pc.name", label: "ชื่อสินค้า", groups: ["text"] },
+  { key: "pc.price", label: "ราคา", groups: ["text"] },
+  { key: "pc.compare", label: "ราคาก่อนลด", groups: ["text", "hide"] },
+  { key: "pc.badge", label: "ป้ายบนรูป", hint: "ใหม่ · ลดราคา", groups: ["text", "box"] },
+  { key: "pc.add", label: "ปุ่มใส่ตะกร้าบนรูป", groups: ["text", "box"] },
+  { key: "pc.swatches", label: "แถวจุดสี", groups: ["layout", "hide"] },
+];
+
 /** 🍪 แถบคุกกี้ (เว็บร้าน components/layout/Tracking) */
 export const COOKIE_PARTS: PartDef[] = [
   { key: "ck.box", label: "กรอบแถบคุกกี้", groups: ["box", "layout"] },

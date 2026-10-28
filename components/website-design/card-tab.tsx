@@ -10,12 +10,15 @@ import { ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
 import { RangeInput } from "@/components/range-input";
 import { RATIO_CSS, SampleCard } from "./sample-card";
-import { type ImageRatio, type CardHover, type Theme, inputCls, labelCls, cardCls } from "./shared";
+import { type ImageRatio, type CardHover, type Theme, inputCls, labelCls, cardCls, useAreaFold } from "./shared";
+import { CARD_PARTS } from "@/lib/website-page-parts";
 import { useDesign } from "./context";
 
 export function CardTab() {
   const { theme, choices, setLogo, setCard, setShape, sampleItems } = useDesign();
+  const areaFold = useAreaFold();
   return (
+    <>
     <div className={cardCls}>
       <h3 className="text-sm font-semibold text-slate-800 mb-3">การ์ดสินค้า</h3>
 
@@ -262,6 +265,8 @@ export function CardTab() {
         )}
       </div>
     </div>
+    {areaFold("card", CARD_PARTS, "กรอบ · รูป · ชื่อ · ราคา · ป้าย · ปุ่มใส่ตะกร้า — ทุกที่ที่มีการ์ด", "/shop")}
+    </>
   );
 }
 
