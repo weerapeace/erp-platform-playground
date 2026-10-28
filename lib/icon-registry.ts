@@ -4,7 +4,7 @@
  *
  * แนวคิด: ไม่ต้องไล่แก้อีโมจิทีละไฟล์ก่อน — ของกลาง <Icon value="📦" /> ดูว่าอีโมจินี้ "หมายถึงอะไร" (ตาราง ICON_MEANINGS)
  *   แล้ววาดตามโหมดที่แอดมินเลือกในหน้า /admin/icons: อีโมจิแบบเดิม / ไอคอนเส้น / ไอคอนเส้น+สี
- *   แอดมินเปลี่ยนไอคอนของความหมายไหน = ทุกจุดที่ใช้ความหมายนั้นเปลี่ยนตาม · อัปโหลดไอคอนเองได้ (ไอคอนของฉัน)
+ *   แอดมินเปลี่ยนไอคอน/สีของความหมายไหน = ทุกจุดที่ใช้ความหมายนั้นเปลี่ยนตาม · อัปโหลดไอคอนเองได้ (ไอคอนของฉัน)
  *
  * ค่าไอคอนที่เก็บ (ข้อความเดียว · เข้ากับ lib/website-icons เดิม):
  *   "i:<key>"  = ไอคอนเส้น (ชุด ERP ก่อน แล้วค่อยชุดเว็บร้าน)
@@ -222,8 +222,36 @@ export interface IconSettings {
   /** อีโมจิเพิ่มเติม → ความหมาย (แอดมินจับคู่เอง · ชนะตารางพื้นฐาน) */
   emojiMap: Record<string, string>;
   custom: CustomIcon[];
+  /** ความหมาย → สีที่แอดมินตั้งเอง ("#rrggbb") · ตั้งแล้วโชว์ทั้งโหมดไอคอนเส้นและไอคอนเส้น+สี */
+  colors: Record<string, string>;
 }
-export const DEFAULT_ICON_SETTINGS: IconSettings = { mode: "emoji", overrides: {}, emojiMap: {}, custom: [] };
+export const DEFAULT_ICON_SETTINGS: IconSettings = { mode: "emoji", overrides: {}, emojiMap: {}, custom: [], colors: {} };
+
+// ── สี ──
+/** สีอัตโนมัติของแต่ละโทน (โหมด "ไอคอนเส้น + สี") · neutral = ตามตัวหนังสือ */
+export const TONE_COLOR: Record<IconTone, string | null> = {
+  neutral: null,
+  accent: "#ea580c",
+  success: "#059669",
+  warning: "#f59e0b",
+  danger: "#ef4444",
+  violet: "#7c3aed",
+};
+/** สีให้เลือกเร็วในหน้าตั้งค่า (เลือกสีอื่นเองได้จากตัวเลือกสี) */
+export const ICON_COLOR_SWATCHES: { hex: string; label: string }[] = [
+  { hex: "#334155", label: "เทาเข้ม" }, { hex: "#94a3b8", label: "เทาอ่อน" }, { hex: "#ea580c", label: "ส้ม" },
+  { hex: "#ef4444", label: "แดง" }, { hex: "#f59e0b", label: "เหลืองอำพัน" }, { hex: "#059669", label: "เขียว" },
+  { hex: "#0d9488", label: "เขียวน้ำทะเล" }, { hex: "#0284c7", label: "ฟ้า" }, { hex: "#4f46e5", label: "คราม" },
+  { hex: "#7c3aed", label: "ม่วง" }, { hex: "#db2777", label: "ชมพู" }, { hex: "#92400e", label: "น้ำตาล" },
+];
+const HEX_RE = /^#[0-9a-f]{6}$/;
+/** สีเริ่มต้นของความหมายในโหมด "ไอคอนเส้น + สี" (null = ตามตัวหนังสือ) */
+export const meaningDefaultColor = (m: IconMeaning): string | null => TONE_COLOR[m.tone ?? "neutral"];
+/** สีที่ใช้จริงในโหมดนั้น — สีที่ตั้งเองชนะเสมอ · โหมดไอคอนเส้น = ไม่มีสีอัตโนมัติ */
+export function meaningColor(m: IconMeaning, s: IconSettings, mode: IconMode = s.mode): string | null {
+  if (mode === "emoji") return null;
+  return s.colors[m.key] ?? (mode === "color" ? meaningDefaultColor(m) : null);
+}
 
 const R2_KEY_RE = /^[\w\-./%()]{1,200}$/;
 const ICON_VALUE_RE = /^(i:[a-z0-9-]{1,40}|c:[a-z0-9]{1,24})$/;
@@ -255,7 +283,13 @@ export function cleanIconSettings(raw: unknown): IconSettings {
       if (!ne || ne.length > 16 || typeof k !== "string" || !MEANING_BY_KEY.has(k)) continue;
       emojiMap[ne] = k;
     }
-  return { mode, overrides, emojiMap, custom };
+  const colors: Record<string, string> = {};
+  if (o.colors && typeof o.colors === "object")
+    for (const [k, v] of Object.entries(o.colors as Record<string, unknown>)) {
+      const hex = typeof v === "string" ? v.trim().toLowerCase() : "";
+      if (MEANING_BY_KEY.has(k) && HEX_RE.test(hex)) colors[k] = hex;
+    }
+  return { mode, overrides, emojiMap, custom, colors };
 }
 
 /** อีโมจินี้หมายถึงอะไร (ค่าที่แอดมินจับคู่เอง ชนะตารางพื้นฐาน) */
@@ -280,24 +314,24 @@ export function emojisOfMeaning(key: string, s: IconSettings): string[] {
 
 // ── แปลงเป็นสิ่งที่ต้องวาด ──
 export type ResolvedIcon =
-  | { kind: "line"; d: string[]; tone: IconTone }
-  | { kind: "img"; src: string; tint: boolean; tone: IconTone }
+  | { kind: "line"; d: string[]; color: string | null }
+  | { kind: "img"; src: string; tint: boolean; color: string | null }
   | { kind: "text"; text: string }
   | null;
 
 /** ค่าไอคอนตรง ๆ ("i:" / "c:" / "img:") → สิ่งที่วาด · ไม่ใช่รูปแบบนี้ = null */
-function resolveIconValue(v: string, s: IconSettings, tone: IconTone): ResolvedIcon {
+function resolveIconValue(v: string, s: IconSettings, color: string | null): ResolvedIcon {
   if (v.startsWith("i:")) {
     const def = erpIconDef(v.slice(2)) ?? siteIconDef(v.slice(2));
-    return def ? { kind: "line", d: def.d, tone } : null;
+    return def ? { kind: "line", d: def.d, color } : null;
   }
   if (v.startsWith("c:")) {
     const c = s.custom.find((x) => x.id === v.slice(2));
-    return c ? { kind: "img", src: c.src, tint: c.tint, tone } : null;
+    return c ? { kind: "img", src: c.src, tint: c.tint, color } : null;
   }
   if (v.startsWith("img:")) {
     const key = v.slice(4);
-    return R2_KEY_RE.test(key) ? { kind: "img", src: key, tint: false, tone } : null;
+    return R2_KEY_RE.test(key) ? { kind: "img", src: key, tint: false, color } : null;
   }
   return null;
 }
@@ -314,13 +348,12 @@ export const meaningIconValue = (m: IconMeaning, s: IconSettings): string => s.o
 export function resolveIcon(input: { name?: string; value?: string | null }, s: IconSettings, mode: IconMode = s.mode): ResolvedIcon {
   const raw = (input.value ?? "").trim();
   if (raw) {
-    const direct = resolveIconValue(raw, s, "neutral");
+    const direct = resolveIconValue(raw, s, null);
     if (direct) return direct;
     if (/^(i|c|img):/.test(raw)) return null; // ค่าไอคอนที่หาไม่เจอ (ถูกลบ) — ไม่วาดดีกว่าโชว์รหัส
   }
   const m = input.name ? iconMeaning(input.name) : raw ? meaningOfEmoji(raw, s) : null;
   if (!m) return raw ? { kind: "text", text: raw } : null;
   if (mode === "emoji") return { kind: "text", text: raw || m.emoji };
-  const tone: IconTone = mode === "color" ? m.tone ?? "neutral" : "neutral";
-  return resolveIconValue(meaningIconValue(m, s), s, tone) ?? { kind: "text", text: raw || m.emoji };
+  return resolveIconValue(meaningIconValue(m, s), s, meaningColor(m, s, mode)) ?? { kind: "text", text: raw || m.emoji };
 }

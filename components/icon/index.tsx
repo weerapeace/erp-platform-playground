@@ -12,7 +12,7 @@
  */
 import { useSyncExternalStore, type CSSProperties } from "react";
 import { apiFetch } from "@/lib/api";
-import { DEFAULT_ICON_SETTINGS, cleanIconSettings, resolveIcon, type IconMode, type IconSettings, type IconTone } from "@/lib/icon-registry";
+import { DEFAULT_ICON_SETTINGS, cleanIconSettings, resolveIcon, type IconMode, type IconSettings } from "@/lib/icon-registry";
 
 export const ICON_SETTINGS_API = "/api/admin/icon-settings";
 const LS_KEY = "erp.iconSettings.v1";
@@ -76,15 +76,6 @@ export function commitIconSettings(s: IconSettings) {
 }
 
 // ── วาด ──
-const TONE_CLASS: Record<IconTone, string> = {
-  neutral: "",
-  accent: "text-blue-600",
-  success: "text-emerald-600",
-  warning: "text-amber-500",
-  danger: "text-red-500",
-  violet: "text-violet-600",
-};
-
 export const iconImageUrl = (r2Key: string, w = 96) => `/api/r2-image?key=${encodeURIComponent(r2Key)}&w=${w}`;
 
 export function Icon({
@@ -117,8 +108,9 @@ export function Icon({
   const r = resolveIcon({ name, value }, s, mode ?? s.mode);
   if (!r) return null;
   if (r.kind === "text") return title ? <span title={title}>{r.text}</span> : <>{r.text}</>;
-  const cls = `${TONE_CLASS[r.tone]} ${className}`.trim() || undefined;
-  const style: CSSProperties = { width: size, height: size, display: "inline-block", verticalAlign: "-0.125em", flexShrink: 0 };
+  const cls = className || undefined;
+  // สี: ที่แอดมินตั้ง/สีตามความหมาย (โหมดสี) · ไม่มี = ตามตัวหนังสือรอบ ๆ (currentColor)
+  const style: CSSProperties = { width: size, height: size, display: "inline-block", verticalAlign: "-0.125em", flexShrink: 0, ...(r.color ? { color: r.color } : null) };
   const a11y = title ? { role: "img" as const, "aria-label": title } : { "aria-hidden": true as const };
   if (r.kind === "line")
     return (

@@ -4,6 +4,7 @@
  * 🔣 IconPickerModal — ของกลาง: ป๊อปเลือกไอคอนจากทะเบียนไอคอนกลาง
  *   แท็บ 〰 ไอคอนเส้น (ชุด lib/erp-icons · ค้นหาไทย/อังกฤษได้) · 📁 ไอคอนของฉัน (อัปโหลดรูป/SVG หรือวางโค้ด SVG)
  *   คืนค่า "i:<key>" / "c:<id>" ผ่าน onPick · null = กลับไปใช้ไอคอนเริ่มต้น
+ *   ส่ง onColor มา = มีแถบเลือกสี (สีอัตโนมัติ / สีด่วน 12 สี / เลือกเองจาก ColorInput) · โหมดนี้กดไอคอนแล้วป๊อปไม่ปิด (กด "เสร็จ")
  * ใช้ที่: /admin/icons (เปลี่ยนไอคอนของความหมาย) · ต่อไป: ช่องไอคอนเมนู/แอป
  *
  * <IconPickerModal open title="เลือกไอคอนให้ “บันทึก”" value={v} settings={s} onPick={...} onAddCustom={...} onClose={...} />
@@ -12,7 +13,8 @@ import { useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { ERP_ICONS } from "@/lib/erp-icons";
-import type { CustomIcon, IconSettings } from "@/lib/icon-registry";
+import { ICON_COLOR_SWATCHES, type CustomIcon, type IconSettings } from "@/lib/icon-registry";
+import { ColorInput } from "@/components/color-picker";
 import { Icon } from "@/components/icon";
 import { newCustomIconId, svgTextToPng, uploadIconFile } from "@/components/icon/upload";
 
@@ -27,6 +29,9 @@ export function IconPickerModal({
   settings,
   onPick,
   onAddCustom,
+  color,
+  defaultColor,
+  onColor,
 }: {
   open: boolean;
   onClose: () => void;
@@ -39,6 +44,12 @@ export function IconPickerModal({
   onPick: (v: string | null) => void;
   /** มี = อัปโหลดไอคอนของฉันใหม่ได้ในป๊อปนี้ (ผู้เรียกเก็บลงรายการ custom) */
   onAddCustom?: (c: CustomIcon) => void;
+  /** สีที่ตั้งเองอยู่ ("#rrggbb") · null = ใช้สีอัตโนมัติ */
+  color?: string | null;
+  /** สีอัตโนมัติของช่องนี้ (โชว์ในปุ่ม "อัตโนมัติ") · null = ตามตัวหนังสือ */
+  defaultColor?: string | null;
+  /** มี = เลือกสีได้ในป๊อปนี้ · null = กลับไปสีอัตโนมัติ */
+  onColor?: (hex: string | null) => void;
 }) {
   const toast = useToast();
   const [tab, setTab] = useState<Tab>(value?.startsWith("c:") ? "mine" : "line");
@@ -54,7 +65,9 @@ export function IconPickerModal({
     return t ? ERP_ICONS.filter((i) => `${i.key} ${i.label}`.toLowerCase().includes(t)) : ERP_ICONS;
   }, [q]);
 
-  const pick = (v: string | null) => { onPick(v); onClose(); };
+  // มีแถบสี = แก้ทั้งไอคอนและสีในป๊อปเดียว → กดไอคอนแล้วยังไม่ปิด
+  const pick = (v: string | null) => { onPick(v); if (!onColor) onClose(); };
+  const shown = color ?? defaultColor ?? null;
 
   const addCustom = async (file: File) => {
     if (!onAddCustom) return;
@@ -77,7 +90,8 @@ export function IconPickerModal({
 
   const cell = (v: string, node: React.ReactNode, tip: string) => (
     <button key={v} type="button" title={tip} onClick={() => pick(v)}
-      className={`h-11 w-11 flex items-center justify-center rounded-lg border text-slate-700 text-[22px] transition-colors ${value === v ? "border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-200" : "border-slate-200 hover:bg-slate-50 hover:border-slate-300"}`}>
+      style={shown ? { color: shown } : undefined}
+      className={`h-11 w-11 flex items-center justify-center rounded-lg border text-slate-700 text-[22px] transition-colors ${value === v ? "border-blue-500 bg-blue-50 ring-2 ring-blue-200" : "border-slate-200 hover:bg-slate-50 hover:border-slate-300"}`}>
       {node}
     </button>
   );
@@ -95,9 +109,39 @@ export function IconPickerModal({
               <Icon value={defaultValue} size={16} /> ใช้ไอคอนเริ่มต้น
             </button>
           )}
-          <button type="button" onClick={onClose} className="ml-auto px-4 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800">ปิด</button>
+          {onColor
+            ? <button type="button" onClick={onClose} className="ml-auto px-5 py-2 rounded-lg text-sm font-medium bg-blue-600 text-white hover:bg-blue-700">เสร็จ</button>
+            : <button type="button" onClick={onClose} className="ml-auto px-4 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800">ปิด</button>}
         </div>
       }>
+      {onColor && (
+        <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+          <div className="flex items-center gap-3 mb-2.5">
+            <span className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-[28px] text-slate-700 shrink-0" style={shown ? { color: shown } : undefined}>
+              {value && <Icon value={value} settings={settings} />}
+            </span>
+            <div className="text-sm">
+              <div className="font-medium text-slate-800">สีไอคอน</div>
+              <div className="text-xs text-slate-500">{color ? "สีที่ตั้งเอง — โชว์ทั้งโหมดไอคอนเส้น และไอคอนเส้น + สี" : "อัตโนมัติ — ตามตัวหนังสือ หรือสีตามความหมายในโหมดไอคอนเส้น + สี"}</div>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button type="button" onClick={() => onColor(null)} title="กลับไปสีอัตโนมัติ"
+              className={`h-8 px-2.5 rounded-lg border text-xs inline-flex items-center gap-1.5 ${!color ? "border-blue-500 bg-white ring-2 ring-blue-200 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}>
+              <span className="w-3.5 h-3.5 rounded-full border border-slate-300" style={{ background: defaultColor ?? "linear-gradient(135deg,#fff 45%,#94a3b8 45%,#94a3b8 55%,#fff 55%)" }} />
+              อัตโนมัติ
+            </button>
+            {ICON_COLOR_SWATCHES.map((c) => (
+              <button key={c.hex} type="button" onClick={() => onColor(c.hex)} title={c.label} aria-label={c.label}
+                className={`w-8 h-8 rounded-lg border-2 ${color === c.hex ? "border-slate-800 ring-2 ring-blue-200" : "border-white shadow-sm hover:scale-110"} transition-transform`}
+                style={{ background: c.hex }} />
+            ))}
+            <span className="ml-1 text-xs text-slate-400">หรือเลือกเอง</span>
+            <ColorInput value={color ?? defaultColor ?? "#334155"} onChange={(v) => /^#[0-9a-f]{6}$/i.test(v) && onColor(v.toLowerCase())} allowText />
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center gap-1 mb-3">
         {tabBtn("line", `ไอคอนเส้น (${ERP_ICONS.length})`)}
         {tabBtn("mine", `ไอคอนของฉัน (${settings.custom.length})`)}

@@ -3,7 +3,7 @@
 /**
  * 🔣 หน้าไอคอนทั้งระบบ (/admin/icons) — ตั้งค่าทะเบียนไอคอนกลาง (lib/icon-registry)
  *   1) เลือกโหมด: อีโมจิแบบเดิม / ไอคอนเส้น / ไอคอนเส้น + สี
- *   2) เปลี่ยนไอคอนของแต่ละ "ความหมาย" (ทุกที่ที่ใช้ความหมายนั้นเปลี่ยนตาม) · อัปโหลดไอคอนของฉันได้
+ *   2) เปลี่ยนไอคอน + สีของแต่ละ "ความหมาย" (ทุกที่ที่ใช้ความหมายนั้นเปลี่ยนตาม) · อัปโหลดไอคอนของฉันได้
  *   3) จับคู่อีโมจิที่ระบบยังไม่รู้จัก (เช่น ในเมนู) เข้ากับความหมาย
  * แก้แล้วเมนูข้างเปลี่ยนให้ดูทันที (ลองดู) — ยังไม่มีผลกับคนอื่นจนกว่าจะกดบันทึก
  */
@@ -18,7 +18,7 @@ import { Icon, ICON_SETTINGS_API, commitIconSettings, iconImageUrl, previewIconS
 import { IconPickerModal } from "@/components/icon/icon-picker-modal";
 import {
   DEFAULT_ICON_SETTINGS, ICON_GROUP_LABEL, ICON_MEANINGS, ICON_MODE_LABEL,
-  cleanIconSettings, displayEmoji, emojisOfMeaning, meaningIconValue, meaningOfEmoji, normEmoji,
+  cleanIconSettings, displayEmoji, emojisOfMeaning, meaningDefaultColor, meaningIconValue, meaningOfEmoji, normEmoji,
   type IconGroup, type IconMeaning, type IconMode, type IconSettings,
 } from "@/lib/icon-registry";
 
@@ -27,8 +27,8 @@ const GROUP_ORDER = Object.keys(ICON_GROUP_LABEL) as IconGroup[];
 const MODE_SAMPLE = ["save", "edit", "delete", "warning", "done", "package", "truck", "chart"];
 const MODE_HINT: Record<IconMode, string> = {
   emoji: "เหมือนที่ใช้อยู่ตอนนี้ ไม่มีอะไรเปลี่ยน",
-  line: "ไอคอนเส้นสีเดียวตามตัวหนังสือ ดูสะอาด ไม่รก",
-  color: "ไอคอนเส้น + สีตามความหมาย (เตือน=เหลือง ลบ=แดง ผ่าน=เขียว)",
+  line: "ไอคอนเส้นสีเดียวตามตัวหนังสือ ดูสะอาด ไม่รก (สีที่ตั้งเองยังโชว์)",
+  color: "ไอคอนเส้น + สีตามความหมาย (เตือน=เหลือง ลบ=แดง ผ่าน=เขียว) ปรับสีเองได้ทีละความหมาย",
 };
 const isEmojiLike = (s: string) => /\p{Extended_Pictographic}/u.test(s);
 const same = (a: IconSettings, b: IconSettings) => JSON.stringify(a) === JSON.stringify(b);
@@ -126,6 +126,13 @@ export function IconsAdmin() {
       if (v) overrides[key] = v; else delete overrides[key];
       return { ...d, overrides };
     });
+  const setColor = (key: string, hex: string | null) =>
+    setDraft((d) => {
+      const colors = { ...d.colors };
+      if (hex) colors[key] = hex; else delete colors[key];
+      return { ...d, colors };
+    });
+  const customColorCount = Object.keys(draft.colors).length;
   const mapEmoji = (emoji: string, key: string | null) =>
     setDraft((d) => {
       const emojiMap = { ...d.emojiMap };
@@ -151,6 +158,8 @@ export function IconsAdmin() {
   };
 
   const iconMode: IconMode = draft.mode === "emoji" ? "line" : draft.mode; // คอลัมน์ "ไอคอนใหม่" โชว์แบบไอคอนเสมอ
+  /** สีอัตโนมัติของความหมายในโหมดที่เลือก (โหมดไอคอนเส้น = ตามตัวหนังสือ) */
+  const autoColor = (m: IconMeaning) => (iconMode === "color" ? meaningDefaultColor(m) : null);
   const columns: MiniColumn<IconMeaning>[] = [
     { key: "label", header: "ความหมาย", width: "1.4fr", sortValue: (m) => m.label, cell: (m) => <span className="text-slate-800">{m.label}</span> },
     {
@@ -165,6 +174,20 @@ export function IconsAdmin() {
           {draft.overrides[m.key] && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">เปลี่ยนแล้ว</span>}
         </span>
       ),
+    },
+    {
+      key: "color", header: "สี", width: "7.5rem",
+      cell: (m) => {
+        const own = draft.colors[m.key];
+        const c = own ?? autoColor(m);
+        return (
+          <button type="button" onClick={() => setEditing(m)} title="เปลี่ยนสี"
+            className="inline-flex items-center gap-1.5 px-1.5 py-1 rounded-lg hover:bg-slate-100 text-xs text-slate-500">
+            <span className="w-4 h-4 rounded-full border border-slate-300 shrink-0" style={c ? { background: c, borderColor: c } : undefined} />
+            {own ? <span className="text-slate-700">ตั้งเอง</span> : c ? "อัตโนมัติ" : "ตามตัวหนังสือ"}
+          </button>
+        );
+      },
     },
     {
       key: "used", header: "ใช้ในเมนู", width: "1.6fr", sortValue: (m) => menuByMeaning.get(m.key)?.length ?? 0,
@@ -238,6 +261,11 @@ export function IconsAdmin() {
         groupOrder={(g) => GROUP_ORDER.findIndex((k) => ICON_GROUP_LABEL[k] === g)}
         defaultGrouped
         countUnit="ความหมาย"
+        actions={customColorCount > 0 ? (
+          <button type="button" onClick={() => setDraft((d) => ({ ...d, colors: {} }))} className="h-8 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">
+            ล้างสีที่ตั้งเอง ({customColorCount})
+          </button>
+        ) : undefined}
         dense
         footnote="เปลี่ยนไอคอนของความหมายไหน = เมนูและหน้าจอที่ใช้ความหมายนั้นเปลี่ยนตามทั้งระบบ (หน้าที่ยังไม่ได้ย้ายมาใช้ของกลาง จะทยอยตามมา)"
       />
@@ -333,9 +361,12 @@ export function IconsAdmin() {
         <IconPickerModal
           open
           onClose={() => setEditing(null)}
-          title={`เลือกไอคอนให้ “${editing.label}”`}
+          title={`ไอคอนและสีของ “${editing.label}”`}
           value={meaningIconValue(editing, draft)}
           defaultValue={`i:${editing.icon}`}
+          color={draft.colors[editing.key] ?? null}
+          defaultColor={autoColor(editing)}
+          onColor={(hex) => setColor(editing.key, hex)}
           settings={draft}
           onPick={(v) => setOverride(editing.key, v && v !== `i:${editing.icon}` ? v : null)}
           onAddCustom={(c) => setDraft((d) => ({ ...d, custom: [...d.custom, c] }))}

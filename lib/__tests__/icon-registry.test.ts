@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ERP_ICONS, erpIconDef } from "@/lib/erp-icons";
 import {
-  DEFAULT_ICON_SETTINGS, ICON_MEANINGS, cleanIconSettings, emojisOfMeaning, meaningOfEmoji, normEmoji, resolveIcon,
+  DEFAULT_ICON_SETTINGS, ICON_MEANINGS, TONE_COLOR, cleanIconSettings, emojisOfMeaning, iconMeaning, meaningColor, meaningOfEmoji, normEmoji, resolveIcon,
   type IconSettings,
 } from "@/lib/icon-registry";
 
@@ -30,10 +30,20 @@ describe("icon registry", () => {
     expect(resolveIcon({ name: "save" }, S())).toEqual({ kind: "text", text: "💾" });
   });
 
-  it("line mode draws the meaning's line icon; colour mode adds its tone", () => {
+  it("line mode draws the meaning's line icon; colour mode adds its tone colour", () => {
     const line = resolveIcon({ value: "🗑️" }, S({ mode: "line" }));
-    expect(line).toMatchObject({ kind: "line", tone: "neutral" });
-    expect(resolveIcon({ value: "🗑️" }, S({ mode: "color" }))).toMatchObject({ kind: "line", tone: "danger" });
+    expect(line).toMatchObject({ kind: "line", color: null });
+    expect(resolveIcon({ value: "🗑️" }, S({ mode: "color" }))).toMatchObject({ kind: "line", color: TONE_COLOR.danger });
+    expect(resolveIcon({ name: "settings" }, S({ mode: "color" }))).toMatchObject({ kind: "line", color: null });
+  });
+
+  it("a colour set by the admin shows in both icon modes, never in emoji mode", () => {
+    const colors = { delete: "#0284c7", settings: "#db2777" };
+    expect(resolveIcon({ value: "🗑️" }, S({ mode: "line", colors }))).toMatchObject({ color: "#0284c7" });
+    expect(resolveIcon({ value: "🗑️" }, S({ mode: "color", colors }))).toMatchObject({ color: "#0284c7" });
+    expect(resolveIcon({ name: "settings" }, S({ mode: "line", colors }))).toMatchObject({ color: "#db2777" });
+    expect(resolveIcon({ value: "🗑️" }, S({ mode: "emoji", colors }))).toEqual({ kind: "text", text: "🗑️" });
+    expect(meaningColor(iconMeaning("delete")!, S({ mode: "line" }))).toBeNull();
   });
 
   it("unknown emoji and plain text stay as they are in every mode", () => {
@@ -44,9 +54,9 @@ describe("icon registry", () => {
 
   it("an override or a custom icon replaces the meaning everywhere", () => {
     const s = S({ mode: "line", overrides: { delete: "i:trash-x" } });
-    expect(resolveIcon({ value: "🗑" }, s)).toEqual({ kind: "line", d: erpIconDef("trash-x")!.d, tone: "neutral" });
+    expect(resolveIcon({ value: "🗑" }, s)).toEqual({ kind: "line", d: erpIconDef("trash-x")!.d, color: null });
     const c = S({ mode: "line", custom: [{ id: "abc", label: "x", src: "erp-icons/u/1.png", tint: true }], overrides: { delete: "c:abc" } });
-    expect(resolveIcon({ name: "delete" }, c)).toEqual({ kind: "img", src: "erp-icons/u/1.png", tint: true, tone: "neutral" });
+    expect(resolveIcon({ name: "delete" }, c)).toEqual({ kind: "img", src: "erp-icons/u/1.png", tint: true, color: null });
   });
 
   it("explicit i:/c:/img: values are drawn in every mode; missing ones draw nothing", () => {
@@ -68,7 +78,9 @@ describe("icon registry", () => {
       overrides: { delete: "i:trash-x", save: "<script>", nope: "i:truck", edit: "c:missing" },
       emojiMap: { "🦄": "truck", "🐉": "not-a-meaning" },
       custom: [{ id: "ok1", label: "a", src: "erp-icons/a.png" }, { id: "BAD ID", src: "x.png" }, { id: "ok2", src: "javascript:alert(1)" }],
+      colors: { delete: "#0284C7", save: "red", edit: "#12345", nope: "#000000", settings: "url(x)" },
     });
+    expect(s.colors).toEqual({ delete: "#0284c7" });
     expect(s.mode).toBe("emoji");
     expect(s.overrides).toEqual({ delete: "i:trash-x" });
     expect(s.emojiMap).toEqual({ "🦄": "truck" });

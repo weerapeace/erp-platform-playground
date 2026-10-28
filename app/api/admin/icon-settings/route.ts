@@ -1,7 +1,7 @@
 /**
  * 🔣 ไอคอนทั้งระบบ — ค่าตั้งค่าของทะเบียนไอคอนกลาง (lib/icon-registry · หน้า /admin/icons)
  *
- * เก็บใน app_settings.icon_settings = { mode, overrides, emojiMap, custom }
+ * เก็บใน app_settings.icon_settings = { mode, overrides, emojiMap, custom, colors }
  *
  * GET   /api/admin/icon-settings              → ค่าปัจจุบัน (ทุกหน้าใช้วาดไอคอน · ว่าง = อีโมจิแบบเดิม)
  * PATCH /api/admin/icon-settings { settings }  → บันทึก (เฉพาะ admin.users) + audit
@@ -40,8 +40,9 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { error } = await admin.from("app_settings").update({ icon_settings: next }).eq("id", 1);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  // ประวัติ: บอกเป็นภาษาคนว่าเปลี่ยนอะไร (โหมด · ความหมายที่เปลี่ยนไอคอน · อีโมจิที่จับคู่ · ไอคอนของฉัน)
+  // ประวัติ: บอกเป็นภาษาคนว่าเปลี่ยนอะไร (โหมด · ความหมายที่เปลี่ยนไอคอน/สี · อีโมจิที่จับคู่ · ไอคอนของฉัน)
   const changedMeanings = [...new Set([...Object.keys(prev.overrides), ...Object.keys(next.overrides)])].filter((k) => prev.overrides[k] !== next.overrides[k]);
+  const changedColors = [...new Set([...Object.keys(prev.colors), ...Object.keys(next.colors)])].filter((k) => prev.colors[k] !== next.colors[k]);
   const changedEmoji = [...new Set([...Object.keys(prev.emojiMap), ...Object.keys(next.emojiMap)])].filter((e) => prev.emojiMap[e] !== next.emojiMap[e]);
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   await writeAudit(admin, {
@@ -50,6 +51,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     metadata: {
       mode: prev.mode === next.mode ? next.mode : { old: prev.mode, new: next.mode },
       overrides: changedMeanings.map((k) => ({ meaning: k, old: prev.overrides[k] ?? null, new: next.overrides[k] ?? null })),
+      colors: changedColors.map((k) => ({ meaning: k, old: prev.colors[k] ?? null, new: next.colors[k] ?? null })),
       emoji_map: changedEmoji.map((e) => ({ emoji: e, old: prev.emojiMap[e] ?? null, new: next.emojiMap[e] ?? null })),
       custom_count: { old: prev.custom.length, new: next.custom.length },
     },
