@@ -405,7 +405,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
               <section id="cu-disp" className="rounded-lg border border-slate-200 p-3">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-slate-700">🚚 จ่ายงาน</span>
-                  <span className="text-[12px] text-slate-500">จ่ายรวม {fmt(dispTotal)} / เหลือให้จ่าย {fmt(remain)} ชิ้น</span>
+                  <span className={`text-[12px] ${dispTotal > remain + 0.0001 ? "font-medium text-rose-600" : "text-slate-500"}`}>จ่ายรวม {fmt(dispTotal)} / เหลือให้จ่าย {fmt(remain)} ชิ้น{dispTotal > remain + 0.0001 ? ` · เกิน ${fmt(dispTotal - remain)} ชิ้น` : ""}</span>
                   <SecBadge prefix="disp" />
                   {f.dispatched > 0 && <span className="text-[11px] text-slate-400">· ใส่ 0 ได้ ถ้าที่เหลือยังไม่ได้จ่ายจริง</span>}
                 </div>
@@ -427,7 +427,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                           </div>
                           <div id={`cu-${k}:qty`}>
                             <label className={lbl}>จำนวน</label>
-                            <input type="number" min={0} step="any" value={r.qty} onChange={(e) => setRow(r.key, { qty: Number(e.target.value) })} className={`${numIn}${ring(`${k}:qty`)}`} />
+                            <input type="number" min={0} step="any" max={Math.max(0, r2(remain - (dispTotal - (r.qty > 0 ? r.qty : 0))))} value={r.qty} onChange={(e) => setRow(r.key, { qty: Number(e.target.value) })} className={`${numIn}${ring(`${k}:qty`)}`} />
                             <Msg field={`${k}:qty`} />
                           </div>
                           <div id={`cu-${k}:rate`}>
@@ -477,7 +477,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
               <section id="cu-ret" className="rounded-lg border border-slate-200 p-3">
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-slate-700">↩️ ช่างส่งคืน</span>
-                  <span className="text-[12px] text-slate-500">คืนรวม {fmt(retTotal)} / ค้างช่าง {fmt(outstanding)} ชิ้น</span>
+                  <span className={`text-[12px] ${retTotal > outstanding + 0.0001 ? "font-medium text-rose-600" : "text-slate-500"}`}>คืนรวม {fmt(retTotal)} / ค้างช่าง {fmt(outstanding)} ชิ้น{retTotal > outstanding + 0.0001 ? ` · เกิน ${fmt(retTotal - outstanding)} ชิ้น` : ""}</span>
                   {!retSet && ret.length === 1 && <span className="rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700">ตามยอดจ่ายอัตโนมัติ</span>}
                   <SecBadge prefix="ret" />
                 </div>
@@ -496,7 +496,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                         </div>
                         <div id={`cu-${k}:qty`}>
                           <label className={lbl}>จำนวน</label>
-                          <input type="number" min={0} step="any" value={r.qty} onChange={(e) => { setRetSet(true); setRetRow(r.key, { qty: Number(e.target.value) }); }} className={`${numIn}${ring(`${k}:qty`)}`} />
+                          <input type="number" min={0} step="any" max={Math.max(0, r2(outstanding - (retTotal - (r.qty > 0 ? r.qty : 0))))} value={r.qty} onChange={(e) => { setRetSet(true); setRetRow(r.key, { qty: Number(e.target.value) }); }} className={`${numIn}${ring(`${k}:qty`)}`} />
                           <Msg field={`${k}:qty`} />
                         </div>
                         <div id={`cu-${k}:wage`}>

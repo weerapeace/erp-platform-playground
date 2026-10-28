@@ -211,14 +211,19 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
     const skipAll = f.dispatched > EPS && inp.disp.length === 1 && !(inp.disp[0].qty > 0);
     if (!skipAll) {
       const total = r2(inp.disp.reduce((a, l) => a + (l.qty > 0 ? l.qty : 0), 0));
+      // จ่ายเกินไม่ได้: ไล่รวมทีละแถว แถวที่ทำให้ยอดรวมเกิน = กรอบแดงที่ช่องจำนวนของแถวนั้น (บอกว่าใส่ได้อีกเท่าไร)
+      let before = 0;
       inp.disp.forEach((l, i) => {
         const where = inp.disp.length > 1 ? `แถวจ่าย ${i + 1}` : "จ่ายงาน";
-        add(dispatchRowIssues({ qty: l.qty, remaining: remain, deskName: l.deptId ? (l.deskName ?? "โต๊ะ") : null, crewCount: l.crewCount ?? 1 }, `disp:${l.key}`)
-          .map((x) => (x.field.endsWith(":qty") && !(l.qty > 0) && inp.disp.length > 1 ? { ...x, msg: "ใส่จำนวน หรือกด ✕ ลบแถวนี้" } : x)), where);
+        const rowCap = r2(Math.max(0, remain - before));
+        add(dispatchRowIssues({ qty: l.qty, remaining: rowCap, deskName: l.deptId ? (l.deskName ?? "โต๊ะ") : null, crewCount: l.crewCount ?? 1 }, `disp:${l.key}`)
+          .map((x) => !x.field.endsWith(":qty") || inp.disp.length < 2 ? x
+            : !(l.qty > 0) ? { ...x, msg: "ใส่จำนวน หรือกด ✕ ลบแถวนี้" }
+            : { ...x, msg: `เกิน ${fmt(l.qty - rowCap)} ชิ้น — ใส่ได้ ${fmt(rowCap)}` }), where);
         add(wageIssues(l.rate ?? null, inp.centralRate, `disp:${l.key}:rate`), where);
         add(dateIssues(l.date, `disp:${l.key}:date`, { today }), where);
+        if (l.qty > 0) before = r2(before + l.qty);
       });
-      if (total > remain + EPS) issues.push({ level: "error", field: "disp", msg: `จ่ายรวม ${fmt(total)} ชิ้น เกินที่เหลือ ${fmt(remain)} ชิ้น` });
       const rowErr = issues.some((x) => x.level === "error" && x.field.startsWith("disp"));
       if (!rowErr) for (const l of inp.disp) {
         steps.push({ kind: "dispatch", line: l.key, qty: r2(l.qty), date: l.date, ...(l.rate != null && l.rate > 0 ? { rate: l.rate } : {}) });
@@ -241,10 +246,15 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
     if (out <= EPS) issues.push({ level: "error", field: "ret", msg: "ยังไม่มีงานค้างที่ช่างให้ส่งคืน" });
     else {
       const left = new Map(cap);
+      let before = 0;   // ไล่รวมทีละรอบ — รอบที่ทำให้เกินที่ค้างช่าง = กรอบแดงที่ช่องจำนวนของรอบนั้น
       inp.ret.forEach((l, i) => {
         const where = inp.ret.length > 1 ? `รอบส่งคืน ${i + 1}` : "ส่งคืน";
-        const base = returnRowIssues({ qty: l.qty, outstanding: out }, `ret:${l.key}`);
-        add(base.map((x) => (!(l.qty > 0) && inp.ret.length > 1 ? { ...x, msg: "ใส่จำนวน หรือกด ✕ ลบรอบนี้" } : x)), where);
+        const rowCap = r2(Math.max(0, out - before));
+        const base = returnRowIssues({ qty: l.qty, outstanding: rowCap }, `ret:${l.key}`);
+        add(base.map((x) => inp.ret.length < 2 ? x
+          : !(l.qty > 0) ? { ...x, msg: "ใส่จำนวน หรือกด ✕ ลบรอบนี้" }
+          : { ...x, msg: `เกิน ${fmt(l.qty - rowCap)} ชิ้น — ใส่ได้ ${fmt(rowCap)}` }), where);
+        if (l.qty > 0) before = r2(before + l.qty);
         if (!base.length && l.ref !== "auto") {
           const c = left.get(l.ref) ?? 0;
           if (l.qty > c + EPS) issues.push({ level: "error", field: `ret:${l.key}:qty`, msg: `ใบนั้นค้างช่างแค่ ${fmt(c)} ชิ้น`, where });
@@ -254,7 +264,6 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
         add(dateIssues(l.date, `ret:${l.key}:date`, { today, notBefore: l.ref !== "auto" ? dateOfRef.get(l.ref) : null, notBeforeLabel: "วันที่จ่าย" }), where);
         if (l.date && (!lastRetDate || l.date > lastRetDate)) lastRetDate = l.date;
       });
-      if (total > out + EPS) issues.push({ level: "error", field: "ret", msg: `ส่งคืนรวม ${fmt(total)} ชิ้น เกินที่ค้างช่าง ${fmt(out)} ชิ้น` });
       received = r2(received + Math.min(total, out));   // ตรวจขั้นถัดไปต่อได้แม้รอบส่งคืนยังมีจุดต้องแก้
       if (!issues.some((x) => x.level === "error" && x.field.startsWith("ret"))) {
         // ใบที่ระบุชัดก่อน แล้วค่อย "อัตโนมัติ" (กันอัตโนมัติไปกินยอดของใบที่ระบุ)

@@ -97,8 +97,13 @@ describe("แยกแถว + วันที่", () => {
   });
   it("จ่ายรวมเกิน / แถวไม่มีโต๊ะ → เตือน", () => {
     const over = cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({ disp: [{ key: "a", deptId: "d1", qty: 80, date: null }, { key: "b", deptId: "", qty: 40, date: null }] }));
-    expect(over.errors.join(" ")).toMatch(/เกินที่เหลือ 100/);
+    // จ่ายเกิน = กรอบแดงที่ช่องจำนวนของแถวที่ทำให้เกิน (แถว 2) ไม่ใช่แค่ข้อความรวม
+    expect(over.issues.find((x) => x.field === "disp:b:qty")?.msg).toBe("เกิน 20 ชิ้น — ใส่ได้ 20");
+    expect(over.issues.some((x) => x.field === "disp:a:qty")).toBe(false);
     expect(over.errors.join(" ")).toMatch(/แถวจ่าย 2: เลือกโต๊ะ/);
+    // ส่งคืนเกิน = เหมือนกัน (รอบที่ทำให้เกิน)
+    const rr = cuBuildSteps(f, "return", cuDefaultTicks(f, "return"), inp({ ret: [{ key: "r1", ref: "auto", qty: 70, date: null }, { key: "r2", ref: "auto", qty: 50, date: null }] }));
+    expect(rr.issues.find((x) => x.field === "ret:r2:qty")?.msg).toBe("เกิน 20 ชิ้น — ใส่ได้ 30");
   });
   it("ส่งคืนหลายรอบ ระบุใบได้ · เกินยอดของใบนั้น = เตือน", () => {
     const disp = [{ key: "a", deptId: "d1", qty: 60, date: null }, { key: "b", deptId: "d2", qty: 40, date: null }];
