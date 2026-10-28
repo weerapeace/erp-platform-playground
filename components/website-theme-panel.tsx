@@ -80,6 +80,7 @@ import { withPreviewKey } from "@/lib/storefront-preview-link";
 import type { CartConfig } from "@/lib/website-cart";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH, type HeaderCart, type HeaderSearch } from "@/lib/website-header-els";
 import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MegaAutoData, type MenuBehavior } from "@/lib/website-mega-menu";
+import { setPreviewFrame } from "@/lib/storefront-preview-bus";
 import { GRADIENT_ANGLES, PRODUCT_IMAGE_EFFECTS, PRODUCT_IMAGE_SIZES, BUY_ITEM_DEFS, DEFAULT_BUY_ITEMS, defaultBuyItem, type ProductImageBgKind, type ProductGradient, type ProductImageEffect, type ProductImageFit, type BuyItem, type PartBox, PART_WIDTH_OPTIONS, PART_SPACE_OPTIONS, partHasWidth } from "@/lib/website-theme";
 
 type Radius = "sharp" | "soft" | "round";
@@ -2840,7 +2841,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             />
           )}
 
-          {tab === "pages" && <SitePagesSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} shopSlug={shopSlug} onPreview={setPage} />}
+          {tab === "pages" && <SitePagesSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} shopSlug={shopSlug} onPreview={setPage} colors={theme.colors} />}
 
           {/* ── ประวัติ ── */}
           {tab === "history" && (
@@ -2926,7 +2927,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 {/* กล่องนอกกว้างเท่า "ขนาดหลังย่อ" — transform ไม่ย่อกล่อง layout ถ้าไม่ครอบแบบนี้จะเหลือที่ว่างมหาศาล */}
                 <div style={{ width: dev.w * scale, height: frameH * scale, margin: "0 auto", overflow: "hidden" }}>
                   <iframe
-                    ref={iframeRef}
+                    ref={(el) => {
+                      iframeRef.current = el;
+                      // 📡 ให้แผงตั้งค่าลูก ๆ คุยกับพรีวิวได้ (lib/storefront-preview-bus — เช่น คลิกเลือกชิ้นส่วน)
+                      setPreviewFrame(el);
+                    }}
                     src={previewSrc}
                     title="พรีวิวเว็บไซต์"
                     className="bg-white border-0 shadow-sm"

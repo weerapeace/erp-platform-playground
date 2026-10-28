@@ -44,6 +44,8 @@ import {
   type SiteWidth,
 } from "@/lib/website-site-design";
 import { webForm } from "@/lib/website-form-styles";
+import { AccountPageSetting } from "@/components/website-account-design";
+import type { SiteTheme } from "@/lib/website-theme";
 
 type Colors = { brand: string; ink: string; page: string; onBrand: string };
 
@@ -581,8 +583,8 @@ export function SiteSalesSetting({ value, onChange }: { value: SitePageDesign; o
   );
 }
 
-/** 📄 ชุด 4 — หน้าพิเศษ (theme.page: notFound · thanks · popup · share · login) · เว็บร้าน NotFoundView / ThanksExtras / PromoPopup / /api/og/product / LoginShell */
-export function SitePagesSetting({ value, onChange, shopSlug, onPreview }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void; shopSlug: string; onPreview: (path: string) => void }) {
+/** 📄 ชุด 4 — หน้าพิเศษ (theme.page: notFound · thanks · popup · share · login · account) · เว็บร้าน NotFoundView / ThanksExtras / PromoPopup / /api/og/product / LoginShell / AccountClient */
+export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void; shopSlug: string; onPreview: (path: string) => void; /** สีร้าน (ตัวอย่างสีในตัวปรับละเอียด) */ colors?: SiteTheme["colors"] }) {
   const nf = value.notFound;
   const setNf = (p: Partial<SitePageDesign["notFound"]>) => onChange({ notFound: { ...nf, ...p } });
   const th = value.thanks;
@@ -799,6 +801,18 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview }: { val
           </div>
         </div>
       </div>
+
+      {/* ── หน้าบัญชีของฉัน (ชุดปรับหน้าตาละเอียด — ของกลาง) ── */}
+      {colors && (
+        <div className={cardCls}>
+          <div className="flex items-center justify-between gap-2 mb-1">
+            <h3 className="text-sm font-semibold text-slate-800">🧑 หน้าบัญชีของฉัน</h3>
+            {pvBtn("/account", "ดูในพรีวิว (ข้อมูลตัวอย่าง)")}
+          </div>
+          <p className="text-xs text-slate-500 mb-3">หน้าที่สมาชิกเห็นหลังเข้าสู่ระบบ · พรีวิวใช้ข้อมูลตัวอย่าง (ไม่ต้องล็อกอิน) · ไม่ตั้ง = หน้าตาเดิม</p>
+          <AccountPageSetting value={value.account} onChange={(account) => onChange({ account })} colors={colors} onPreview={onPreview} />
+        </div>
+      )}
     </div>
   );
 }
