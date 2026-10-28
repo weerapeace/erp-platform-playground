@@ -3395,8 +3395,17 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const dc = disp.cfg;
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
   const [cuMo, setCuMo] = useState<string | null>(null);   // ใบที่เปิดป๊อปอัปเดตงานอยู่
+  const [cuList, setCuList] = useState<string[]>([]);      // ลำดับใบของแท็บที่เปิดอยู่ (ตอนกดอัปเดต) — ไว้ไป "ใบถัดไป"
+  const openCu = (moNo: string) => {
+    const rows = tab === "pend" ? pendShown.filter((m) => hit(pendText(m))).map((m) => m.mo_no)
+      : tab === "wip" ? wosShown.filter((w) => hit(woText(w))).map((w) => w.mo_no)
+      : qQueue.filter((q) => hit(qcText(q))).map((q) => q.mo_no ?? "");
+    setCuList([...new Set(rows.filter(Boolean))]); setCuMo(moNo);
+  };
+  const cuNext = cuMo ? cuList[cuList.indexOf(cuMo) + 1] ?? null : null;
+  const skuOfMo = (mo: string) => pending.find((m) => m.mo_no === mo)?.product_sku ?? workOrders.find((w) => w.mo_no === mo)?.product_sku ?? qQueue.find((q) => q.mo_no === mo)?.sku ?? mo;
   const cuBtn = (moNo: string | null | undefined) => catchUp && moNo ? (
-    <button type="button" onClick={(e) => { e.stopPropagation(); setCuMo(moNo); }} title="บอกว่าใบนี้ไปถึงขั้นไหนแล้ว (ติ๊กขั้นก่อนหน้าให้อัตโนมัติ)"
+    <button type="button" onClick={(e) => { e.stopPropagation(); openCu(moNo); }} title="บอกว่าใบนี้ไปถึงขั้นไหนแล้ว (ติ๊กขั้นก่อนหน้าให้อัตโนมัติ)"
       className={`shrink-0 rounded-md bg-indigo-600 px-2 font-medium text-white hover:bg-indigo-700 ${touch ? "h-9 text-sm" : "h-7 text-[12px]"}`}>🔄 อัปเดต</button>
   ) : null;
   const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม / แก้กำหนดเสร็จ
@@ -4383,7 +4392,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         )}
         <CatchUpModal moNo={cuMo} onClose={() => setCuMo(null)} onDone={() => onReload?.()}
           departments={departments} craftsmen={craftsmen} workOrders={workOrders}
-          canMoveStaff={canMoveStaff} canAddNew={canEdit} onStaffChanged={() => onStaffChanged?.()} onDesksChanged={() => onReload?.()} />
+          canMoveStaff={canMoveStaff} canAddNew={canEdit} onStaffChanged={() => onStaffChanged?.()} onDesksChanged={() => onReload?.()}
+          onNext={cuNext ? () => setCuMo(cuNext) : undefined} nextLabel={cuNext ? skuOfMo(cuNext) : null} />
       {/* เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรองให้ตารางได้ที่เต็ม (เหมือนแอป) · แตะแถบนี้หรือเลื่อนขึ้น = กลับมา
           สลับด้วย CSS: กล่องมี data-top="hidden" → แถบย่อโผล่ · ส่วนแท็บ/ตัวกรองซ่อน (ไม่ render ใหม่) */}
         <button type="button" onClick={() => setTopHidden(false)}

@@ -123,7 +123,10 @@ export function cuDefaultQty(f: CuFacts, k: CuTargetKey) {
 }
 
 /** แถวจ่ายงาน 1 แถว = ใบจ่ายงาน 1 ใบ · deskName/crewCount = หน้าจอส่งมาให้ตรวจกฎโต๊ะเหมา · rate = ค่าแรง/ชิ้น (ว่าง = ให้เซิร์ฟเวอร์เติมราคากลาง) */
-export type CuDispLine = { key: string; deptId: string; qty: number; date: string | null; deskName?: string | null; crewCount?: number; rate?: number | null };
+export type CuDispLine = { key: string; deptId: string; qty: number; date: string | null; deskName?: string | null; crewCount?: number; rate?: number | null; note?: string };
+/** ปัญหาที่เจอ 1 รายการ → กล่อง "ปัญหา" ของใบงาน (/api/mo/issues) · model = จำเป็นปัญหาของรุ่น (ทุกสี) เตือนตอนจ่ายครั้งหน้า */
+export type CuProblem = { key: string; text: string; severity: "low" | "medium" | "high"; qty: number | null; model: boolean };
+export const CU_SEVERITY: Record<CuProblem["severity"], string> = { low: "เล็กน้อย", medium: "ปานกลาง", high: "รุนแรง" };
 /** แถวส่งคืน 1 แถว = ส่งงาน 1 ครั้ง · ref = "auto" (ไล่ใบเก่าก่อน) | id ใบจ่ายเดิม | "new:<key แถวจ่าย>" · wage = ค่าแรง/ชิ้น (ว่าง = ยังไม่ลงค่าแรง) */
 export type CuRetLine = { key: string; ref: string; qty: number; date: string | null; wage?: number | null };
 /** วันที่จริงของแต่ละขั้น (null = จำไม่ได้/ข้าม) */
@@ -134,16 +137,21 @@ export type CuInputs = {
   disp: CuDispLine[]; ret: CuRetLine[];
   qcGood: number; qcBad: number; shelfId: string; cancelReason: string; missing?: string[]; dates: CuDates;
   badReason?: string; centralRate?: number | null; today?: string;
+  /** ข้อมูลเพิ่มเติม (ไม่บังคับ): ปัญหาที่เจอ · บันทึกต่อท้ายหมายเหตุใบสั่งผลิต · ค่าแรง/ชิ้นที่จะบันทึกกลับเข้าสูตร (BOM) */
+  problems?: CuProblem[]; teamNote?: string; bomRate?: number | null;
 };
 export type CuStep =
   | { kind: "skip_buy"; date: string | null }
   | { kind: "mark_ready"; parts: ("prep" | "cut")[]; except?: string[]; date: string | null }
-  | { kind: "dispatch"; line: string; qty: number; date: string | null; rate?: number | null }
+  | { kind: "dispatch"; line: string; qty: number; date: string | null; rate?: number | null; note?: string }
   | { kind: "return"; ref: string; qty: number; date: string | null; wage?: number | null }
   | { kind: "qc_in"; good: number; bad: number; date: string | null }
   | { kind: "ship"; qty: number; date: string | null }
   | { kind: "close"; date: string | null }
-  | { kind: "cancel"; reason: string; date: string | null };
+  | { kind: "cancel"; reason: string; date: string | null }
+  | { kind: "problem"; text: string; severity: CuProblem["severity"]; qty: number | null; model: boolean }
+  | { kind: "note"; text: string }
+  | { kind: "bom_rate"; rate: number };
 /** ปัญหาที่ช่อง (กฎกลาง lib/work-entry-rules) + where = บอกว่าแถวไหน (ไว้โชว์ในสรุป) */
 export type CuIssue = EntryIssue & { where?: string };
 
@@ -157,12 +165,15 @@ export function cuStepLabel(s: CuStep, who?: (s: CuStep) => string): string {
   switch (s.kind) {
     case "skip_buy": return `ติดป้าย "ของครบ (อัปเดตย้อนหลัง)" ที่ขั้นซื้อของ${d}`;
     case "mark_ready": return `ติ๊ก${s.parts.includes("prep") ? " เตรียม" : ""}${s.parts.length === 2 ? " +" : ""}${s.parts.includes("cut") ? " ตัด" : ""} ${s.except?.length ? `ยกเว้นของที่ยังขาด ${s.except.length} รายการ` : "ครบทั้งใบ"}${d}`;
-    case "dispatch": return `สร้างใบจ่ายงาน ${fmt(s.qty)} ชิ้น${w ? ` → ${w}` : ""}${s.rate ? ` · ค่าแรง ฿${fmt(s.rate)}/ชิ้น` : ""}${d}`;
+    case "dispatch": return `สร้างใบจ่ายงาน ${fmt(s.qty)} ชิ้น${w ? ` → ${w}` : ""}${s.rate ? ` · ค่าแรง ฿${fmt(s.rate)}/ชิ้น` : ""}${d}${s.note ? ` · หมายเหตุ: ${s.note}` : ""}`;
     case "return": return `บันทึกช่างส่งคืน ${fmt(s.qty)} ชิ้น${w ? ` (${w})` : ""}${d} · ${s.wage != null ? `ค่าแรง ฿${fmt(s.wage)}/ชิ้น` : "ยังไม่ลงค่าแรง"}`;
     case "qc_in": return `รับเข้าชั้น QC · ของดี ${fmt(s.good)}${s.bad > 0 ? ` · ของเสีย ${fmt(s.bad)}` : ""} ชิ้น${d}`;
     case "ship": return `ส่งออกจากชั้น QC ${fmt(s.qty)} ชิ้น${d}`;
     case "close": return `ปิดใบสั่งผลิต${d}`;
     case "cancel": return `ยกเลิกใบ (เหตุผล: ${s.reason})${d}`;
+    case "problem": return `แจ้งปัญหา: ${s.text} (${CU_SEVERITY[s.severity]}${s.qty ? ` · ${fmt(s.qty)} ชิ้น` : ""})${s.model ? " + จำเป็นปัญหาของรุ่นนี้" : ""}`;
+    case "note": return `บันทึกต่อท้ายหมายเหตุใบสั่งผลิต: ${s.text}`;
+    case "bom_rate": return `บันทึกค่าแรง ฿${fmt(s.rate)}/ชิ้น กลับเข้าสูตร (BOM · ราคากลาง)`;
   }
 }
 
@@ -176,6 +187,14 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
   const D = inp.dates, today = inp.today ?? todayYmd();
   const add = (list: EntryIssue[], where?: string) => { for (const x of list) issues.push(where ? { ...x, where } : x); };
   const done = () => {
+    // ข้อมูลเพิ่มเติม (ไม่บังคับ) ต่อท้ายเสมอ — ขั้นสถานะสำเร็จก่อน ปัญหา/หมายเหตุพังทีหลังก็ไม่กระทบสถานะ
+    (inp.problems ?? []).forEach((p, i) => {
+      if (!p.text.trim()) return;
+      if (p.qty != null && p.qty < 0) { issues.push({ level: "error", field: `prob:${p.key}:qty`, msg: "จำนวนติดลบไม่ได้", where: `ปัญหา ${i + 1}` }); return; }
+      steps.push({ kind: "problem", text: p.text.trim(), severity: p.severity, qty: p.qty != null && p.qty > 0 ? r2(p.qty) : null, model: p.model });
+    });
+    if (inp.teamNote?.trim()) steps.push({ kind: "note", text: inp.teamNote.trim() });
+    if (inp.bomRate != null && inp.bomRate > 0) steps.push({ kind: "bom_rate", rate: r2(inp.bomRate) });
     if (!issues.some((x) => x.level === "error") && !steps.length) issues.push({ level: "error", field: "target", msg: "ระบบบันทึกขั้นนี้ไว้ครบแล้ว ไม่มีอะไรต้องอัปเดต" });
     return { steps, issues, errors: issues.filter((x) => x.level === "error").map((x) => (x.where ? `${x.where}: ${x.msg}` : x.msg)) };
   };
@@ -226,7 +245,7 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
       });
       const rowErr = issues.some((x) => x.level === "error" && x.field.startsWith("disp"));
       if (!rowErr) for (const l of inp.disp) {
-        steps.push({ kind: "dispatch", line: l.key, qty: r2(l.qty), date: l.date, ...(l.rate != null && l.rate > 0 ? { rate: l.rate } : {}) });
+        steps.push({ kind: "dispatch", line: l.key, qty: r2(l.qty), date: l.date, ...(l.rate != null && l.rate > 0 ? { rate: l.rate } : {}), ...(l.note?.trim() ? { note: l.note.trim() } : {}) });
         cap.set(`new:${l.key}`, r2(l.qty)); dateOfRef.set(`new:${l.key}`, l.date);
       }
       dispatched = r2(dispatched + total);
@@ -280,7 +299,11 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
     const qi = qcReceiveIssues({ good: inp.qcGood, bad: inp.qcBad, available: avail, shelfChosen: !!inp.shelfId, reasonChosen: !!inp.badReason?.trim() });
     add(qi, "QC");
     add(dateIssues(D.qc, "qc:date", { today, notBefore: lastRetDate, notBeforeLabel: "วันที่ส่งคืน" }), "QC");
-    if (!qi.length) { good = r2(inp.qcGood); steps.push({ kind: "qc_in", good, bad: r2(inp.qcBad), date: D.qc }); }
+    if (!qi.length) {
+      good = r2(inp.qcGood); steps.push({ kind: "qc_in", good, bad: r2(inp.qcBad), date: D.qc });
+      const left = r2(avail - (inp.qcGood || 0) - (inp.qcBad || 0));
+      if (left > EPS) issues.push({ level: "warn", field: "qc:good", msg: `ยังเหลือรอ QC ${fmt(left)} ชิ้น (ค้างในคิว "รอ QC รับเข้า")`, where: "QC" });
+    }
   }
 
   if (on("ship")) {
@@ -359,7 +382,8 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
             ...d.who, qty: step.qty, uom: "ชิ้น", dispatch_date: step.date,
             // ค่าแรง/ชิ้น × จำนวน (ไม่ใส่ = เซิร์ฟเวอร์เติมจากราคากลางในสูตรให้เอง — เหมือนจ่ายงานหลายใบ)
             ...(step.rate ? { labor_cost: r2(step.rate * step.qty) } : {}),
-            due_date: mo.internal_due_date || mo.due_date || null, note: `อัปเดตงานย้อนหลัง (ใบสั่งผลิต ${mo.mo_no})`, quiet: true,
+            due_date: mo.internal_due_date || mo.due_date || null, quiet: true,
+            note: step.note ? `${step.note} · อัปเดตย้อนหลัง` : `อัปเดตงานย้อนหลัง (ใบสั่งผลิต ${mo.mo_no})`,
           });
           const id = String(j.id);
           newWo.set(step.line, id);
@@ -393,6 +417,22 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
         }
         case "ship":
           for (const it of goodItems) await api("/api/qc-warehouse/items", { action: "ship", item_id: it.id, mode: "catch_up", wh: null, ...(step.date ? { date: step.date } : {}) });
+          break;
+        case "problem":
+          // กล่อง "ปัญหา" ของใบงาน (ตัวเดียวกับที่แจ้งบนบอร์ด) + ถ้าติ๊ก = ปัญหาของรุ่น (เตือนตอนจ่ายรุ่นนี้ครั้งหน้า)
+          await api("/api/mo/issues", { mo_no: mo.mo_no, defect_type: step.text, severity: step.severity, qty: step.qty });
+          if (step.model) {
+            try { await api("/api/parent-sku-issues", { sku: mo.product_sku, problem_text: step.text }); }
+            catch (e) { throw new Error(`ลงปัญหาของใบงานแล้ว แต่จำเป็นปัญหาของรุ่นไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); }
+          }
+          break;
+        case "note": {
+          const line = `[อัปเดตงาน ${cuDateText(todayYmd())}] ${step.text}`;
+          await api(`/api/mo/${mo.id}`, { note: mo.note ? `${mo.note}\n${line}` : line }, "PATCH");
+          break;
+        }
+        case "bom_rate":
+          await api("/api/bom/labor-rates", { bom_code: mo.bom_code ?? undefined, product_sku: mo.product_sku, craftsman_id: null, craftsman_name: "ราคากลาง", rate: step.rate });
           break;
         case "close":
         case "cancel": {

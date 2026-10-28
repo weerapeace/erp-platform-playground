@@ -22,7 +22,7 @@ import { DeskStaffPanel } from "./desk-staff-panel";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuStageDone, cuCanShort,
-  type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuDispLine, type CuRetLine, type CuDates, type CuIssue,
+  CU_SEVERITY, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuDispLine, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
 } from "./catch-up";
 
 type DeptLite = { id: string; name: string };
@@ -40,8 +40,13 @@ const MAT_LABEL: Record<string, string> = { buy: "ต้องซื้อ", req
 const flow = CU_TARGETS.filter((t) => t.key !== "cancel");
 const phases = [...new Set(flow.map((t) => t.group))];
 const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
+/** จำโต๊ะ/คนรับ/ชั้น QC ล่าสุดไว้ให้ใบถัดไป (ต่อเครื่อง — ไม่จำวันที่ กันวันผิดติดไปเงียบ ๆ) */
+const LAST_KEY = "wb-catchup-last";
+type CuLast = { deptId?: string; crewIds?: string[]; shelfId?: string };
+const readLast = (): CuLast => { try { return JSON.parse(localStorage.getItem(LAST_KEY) ?? "{}") as CuLast; } catch { return {}; } };
+const writeLast = (v: CuLast) => { try { localStorage.setItem(LAST_KEY, JSON.stringify(v)); } catch { /* ไม่มี storage ก็ข้าม */ } };
 
-export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged }: {
+export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel }: {
   /** ใบสั่งผลิตที่จะอัปเดต (null = ปิดป๊อป) */
   moNo: string | null;
   onClose: () => void;
@@ -53,6 +58,8 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   onStaffChanged?: () => void | Promise<void>;
   /** สร้าง/เปลี่ยนชื่อ/ปิดโต๊ะแล้ว → หน้าแม่โหลดโต๊ะใหม่ */
   onDesksChanged?: () => void;
+  /** ไปใบถัดไปในตาราง (โหมดอัปเดตงาน — ไล่ใบค้างทีละใบโดยไม่ต้องปิดป๊อป) · nextLabel = รหัสสินค้าใบถัดไป */
+  onNext?: () => void; nextLabel?: string | null;
 }) {
   const toast = useToast();
   const [snap, setSnap] = useState<CatchUpSnapshot | null>(null);
@@ -72,6 +79,9 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const [newReason, setNewReason] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState("");
   const [missing, setMissing] = useState<string[]>([]);   // รหัสวัตถุดิบที่ "ยังขาด"
+  const [problems, setProblems] = useState<CuProblem[]>([]);   // ปัญหาที่เจอ (ข้อมูลเพิ่มเติม)
+  const [teamNote, setTeamNote] = useState("");
+  const [saveBom, setSaveBom] = useState(true);            // บันทึกค่าแรง/ชิ้นกลับเข้า BOM (เจ้าของสั่ง: ค่าเริ่ม = บันทึก)
   const [deskPanelFor, setDeskPanelFor] = useState<string | null>(null);   // แถวจ่ายที่เปิด "จัดคนในโต๊ะ"
   const [defects, setDefects] = useState<Record<string, { sku: string | null }[]> | null>(null);   // ประวัติงานเสียรายช่าง (โหลดตอนใช้)
   const [running, setRunning] = useState(-1);
@@ -83,6 +93,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     if (!moNo) return;
     setSnap(null); setLoadErr(""); setPage(1); setTarget(null); setTicks({}); setDisp([]); setRet([]); setRetSet(false); setQcSet(false); setDates(CU_NO_DATES);
     setShelfId(""); setBadReason(""); setNewReason(null); setCancelReason(""); setMissing([]); setDeskPanelFor(null); setResults([]); setRunning(-1);
+    setProblems([]); setTeamNote(""); setSaveBom(true);
     let alive = true;
     void (async () => {
       try {
@@ -106,12 +117,16 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     if (!f) return;
     setTarget(k); setTicks((t) => ({ ...cuDefaultTicks(f, k), short: k !== "have" && cuCanShort(f, k) ? t.short : false }));
     const q = cuDefaultQty(f, k);
-    setDisp([{ key: nk("d"), deptId: "", crewIds: [], qty: q.dispatchQty, date: null, rate: centralRate }]);
+    // ใช้โต๊ะ/คนรับ/ชั้นล่าสุด (ถ้ายังมีอยู่) — ไล่ใบค้างชุดเดียวกันไม่ต้องเลือกซ้ำ
+    const last = readLast();
+    const lastDept = last.deptId ? departments.find((d) => d.id === last.deptId) ?? null : null;
+    const lastCrew = lastDept ? (last.crewIds ?? []).filter((id) => poolOf(lastDept).some((c) => c.id === id)) : [];
+    setDisp([{ key: nk("d"), deptId: lastDept?.id ?? "", crewIds: lastCrew, qty: q.dispatchQty, date: null, rate: lastCrew.length ? rateFor(lastCrew) : centralRate }]);
     setRet([{ key: nk("r"), ref: "auto", qty: q.returnQty, date: null, wage: null }]);
     setRetSet(k === "return_part"); setQcSet(false);
     setQc({ good: q.qcGood, bad: 0 });
     const good = snap?.shelves.filter((s) => s.kind !== "defect") ?? [];
-    if (good.length === 1) setShelfId(good[0].id);
+    setShelfId(good.length === 1 ? good[0].id : good.some((s) => s.id === last.shelfId) ? last.shelfId! : "");
   };
   const rows = f && target ? cuRows(f, target, ticks) : [];
   const selIdx = target ? flow.findIndex((t) => t.key === target) : -1;
@@ -176,10 +191,15 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     return "";
   };
 
+  // ค่าแรง/ชิ้นที่พิมพ์เอง (ต่างจากราคากลางในสูตร) → เสนอบันทึกกลับเข้า BOM
+  const bomCandidate = (on("dispatch") ? disp.find((r) => r.rateSet && r.rate != null && r.rate > 0)?.rate : undefined)
+    ?? (on("return") ? ret.find((r) => r.wage != null && r.wage > 0)?.wage : undefined) ?? null;
+  const bomOffer = bomCandidate != null && bomCandidate !== centralRate && !!snap?.mo.product_sku;
   const built = f && target
     ? cuBuildSteps(f, target, ticks, {
         disp: disp.map((r) => ({ ...r, deskName: deptOf(r.deptId)?.name ?? null, crewCount: r.crewIds.length })),
         ret, qcGood: qc.good, qcBad: qc.bad, shelfId, cancelReason, missing, dates, badReason, centralRate, today: todayYmd(),
+        problems, teamNote, bomRate: bomOffer && saveBom ? bomCandidate : null,
       }, snap?.wos ?? [])
     : { steps: [] as CuStep[], errors: [] as string[], issues: [] as CuIssue[] };
   // เตือนงานเสียของช่างที่เลือก (ข้อมูลอยู่ฝั่งจอ) — เตือนเฉย ๆ บันทึกได้
@@ -233,7 +253,11 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
       return j as Record<string, unknown>;
     }, setRunning, (s) => cuStepLabel(s, whoOf));
     setRunning(-1); setResults(res);
-    if (res.some((x) => x.ok)) onDone();
+    if (res.some((x) => x.ok)) {
+      const d0 = disp.find((r) => r.deptId);
+      writeLast({ ...readLast(), ...(d0 ? { deptId: d0.deptId, crewIds: d0.crewIds } : {}), ...(shelfId ? { shelfId } : {}) });
+      onDone();
+    }
   };
 
   const busy = page === 3 && results.length === 0;
@@ -243,6 +267,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
 
   const footer = page === 1 ? (<>
     <button type="button" onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
+    {onNext && <button type="button" onClick={onNext} title={nextLabel ? `ข้ามไป ${nextLabel}` : undefined} className="h-9 px-3 text-sm text-slate-600 rounded-lg hover:bg-slate-50">ข้ามใบนี้ →</button>}
     <button type="button" disabled={!target} onClick={() => setPage(2)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">ถัดไป: เติมข้อมูล →</button>
   </>) : page === 2 ? (<>
     <button type="button" onClick={() => setPage(1)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">← กลับ</button>
@@ -256,7 +281,10 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
       </button>
     )}
   </>) : (
-    <button type="button" disabled={busy} onClick={onClose} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">ปิด</button>
+    <>
+      <button type="button" disabled={busy} onClick={onClose} className={`h-9 px-4 text-sm rounded-lg disabled:opacity-40 ${onNext ? "border border-slate-200 hover:bg-slate-50" : "font-medium bg-indigo-600 text-white hover:bg-indigo-700"}`}>ปิด</button>
+      {onNext && <button type="button" disabled={busy} onClick={onNext} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">ใบถัดไป{nextLabel ? ` · ${nextLabel}` : ""} →</button>}
+    </>
   );
 
   return (
@@ -279,6 +307,18 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                 ))}
               </div>
             </div>
+            {(snap.past.mo.length > 0 || snap.past.model.length > 0) && (
+              <details className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900">
+                <summary className="cursor-pointer select-none">
+                  <Icon name="warning" /> ปัญหาที่เคยแจ้ง: {snap.past.mo.length > 0 && `ใบนี้ ${snap.past.mo.length} เรื่อง`}{snap.past.mo.length > 0 && snap.past.model.length > 0 && " · "}{snap.past.model.length > 0 && `รุ่นนี้ ${snap.past.model.length} เรื่อง`}
+                  <span className="text-amber-700/70"> — กดดู กันแจ้งซ้ำ</span>
+                </summary>
+                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                  {snap.past.mo.map((x, i) => <li key={`m${i}`}>{x.text}{x.qty ? ` (${fmt(x.qty)} ชิ้น)` : ""} <span className="text-amber-700/70">· ใบนี้</span></li>)}
+                  {snap.past.model.map((x, i) => <li key={`p${i}`}>{x} <span className="text-amber-700/70">· ทั้งรุ่น</span></li>)}
+                </ul>
+              </details>
+            )}
             <div>
               <div className="mb-2 text-sm font-medium text-slate-700">ตอนนี้ของจริงอยู่ขั้นไหน? <span className="text-[12px] font-normal text-slate-400">กดขั้นเดียว ขั้นก่อนหน้าเป็นสีม่วงให้เอง</span></div>
               <div>
@@ -463,6 +503,10 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                             <Msg field={`${k}:crew`} />
                           </div>
                         )}
+                        {d && (
+                          <input value={r.note ?? ""} onChange={(e) => setRow(r.key, { note: e.target.value })} placeholder="หมายเหตุถึงช่าง (ไม่บังคับ) เช่น ใช้ด้ายสีเข้ม"
+                            className="mt-2 h-8 w-full rounded-lg border border-slate-200 bg-white px-2 text-[13px] focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                        )}
                       </div>
                     );
                   })}
@@ -579,6 +623,59 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   {on("ship") && <div><label className={lbl}>ส่งออกเมื่อ</label><DispatchDatePick value={dates.ship} onChange={(v) => setDates((d) => ({ ...d, ship: v }))} /><Msg field="ship:date" /></div>}
                   {on("close") && <div><label className={lbl}>ปิดใบเมื่อ</label><DispatchDatePick value={dates.close} onChange={(v) => setDates((d) => ({ ...d, close: v }))} /><Msg field="close:date" /></div>}
+                </div>
+              </section>
+            )}
+            {bomOffer && (
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50/50 px-3 py-2 text-[13px] text-indigo-900">
+                <input type="checkbox" checked={saveBom} onChange={(e) => setSaveBom(e.target.checked)} className="h-4 w-4 accent-indigo-600" />
+                บันทึกค่าแรง ฿{fmt(bomCandidate!)}/ชิ้น กลับเข้าสูตร (BOM) เป็นราคากลาง
+                <span className="text-[11px] text-indigo-700/70">{centralRate ? `เดิม ฿${fmt(centralRate)}` : "ยังไม่เคยตั้ง"} · เก็บประวัติเดิมไว้</span>
+              </label>
+            )}
+            {target !== "cancel" && (
+              <section id="cu-extra" className="rounded-lg border border-slate-200 p-3">
+                <div className="mb-1 flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-medium text-slate-700">📝 ข้อมูลเพิ่มเติม</span>
+                  <span className="text-[11px] text-slate-400">ไม่บังคับ · ปัญหาไปขึ้นที่กล่อง "ปัญหา" ของใบงานบนบอร์ด</span>
+                </div>
+                <div className="space-y-2">
+                  {problems.map((pr, i) => (
+                    <div key={pr.key} id={`cu-prob:${pr.key}`} className="rounded-lg bg-slate-50/70 p-2.5">
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_5.5rem_auto]">
+                        <div>
+                          <label className={lbl}>ปัญหาที่เจอ {problems.length > 1 ? i + 1 : ""}</label>
+                          <input value={pr.text} onChange={(e) => setProblems((ps) => ps.map((x) => (x.key === pr.key ? { ...x, text: e.target.value } : x)))}
+                            placeholder="เช่น ผ้าไม่ตรงสี / เย็บเบี้ยว" className={numIn} />
+                        </div>
+                        <div>
+                          <label className={lbl}>กี่ชิ้น</label>
+                          <input type="number" min={0} step="any" value={pr.qty ?? ""} placeholder="—"
+                            onChange={(e) => setProblems((ps) => ps.map((x) => (x.key === pr.key ? { ...x, qty: numOrNull(e.target.value) } : x)))} className={`${numIn}${ring(`prob:${pr.key}:qty`)}`} />
+                          <Msg field={`prob:${pr.key}:qty`} />
+                        </div>
+                        <button type="button" title="ลบปัญหานี้" onClick={() => setProblems((ps) => ps.filter((x) => x.key !== pr.key))}
+                          className="mt-5 h-9 w-9 rounded-lg border border-slate-200 bg-white text-slate-400 hover:border-rose-300 hover:text-rose-600">✕</button>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {(Object.keys(CU_SEVERITY) as CuProblem["severity"][]).map((sv) => (
+                          <button key={sv} type="button" onClick={() => setProblems((ps) => ps.map((x) => (x.key === pr.key ? { ...x, severity: sv } : x)))}
+                            className={`h-7 rounded-full border px-2.5 text-[12px] ${pr.severity === sv
+                              ? sv === "high" ? "border-rose-400 bg-rose-50 text-rose-700" : sv === "medium" ? "border-amber-400 bg-amber-50 text-amber-800" : "border-slate-400 bg-slate-100 text-slate-700"
+                              : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{CU_SEVERITY[sv]}</button>
+                        ))}
+                        <label className="ml-1 inline-flex cursor-pointer items-center gap-1 text-[12px] text-slate-600" title="จำไว้ที่รุ่นสินค้า (ทุกสี) — ครั้งหน้าที่จ่ายงานรุ่นนี้จะเตือน">
+                          <input type="checkbox" checked={pr.model} onChange={(e) => setProblems((ps) => ps.map((x) => (x.key === pr.key ? { ...x, model: e.target.checked } : x)))} className="h-3.5 w-3.5 accent-indigo-600" />
+                          จำเป็นปัญหาของรุ่นนี้ (ทุกสี)
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                  <button type="button" className={addBtn} onClick={() => setProblems((ps) => [...ps, { key: nk("p"), text: "", severity: "medium", qty: null, model: false }])}>＋ แจ้งปัญหาที่เจอ</button>
+                  <div>
+                    <label className={lbl}>บันทึกถึงทีม (ต่อท้ายหมายเหตุของใบสั่งผลิต)</label>
+                    <input value={teamNote} onChange={(e) => setTeamNote(e.target.value)} placeholder="เช่น ลูกค้าขอเลื่อนส่ง / ช่างลาป่วยครึ่งวัน" className={numIn} />
+                  </div>
                 </div>
               </section>
             )}

@@ -68,7 +68,14 @@ export function CrewPick({ people, value, onChange, required = false, recent = [
   const picked = value.filter((id) => people.some((p) => p.id === id));   // นับเฉพาะคนที่ยังอยู่ในรายชื่อ (ย้ายโต๊ะไปแล้วไม่นับ)
   const recentOk = recent.filter((id) => people.some((p) => p.id === id));
   const sameAsRecent = recentOk.length === picked.length && recentOk.every((id) => sel.has(id));
-  const nameOf = (id: string) => people.find((p) => p.id === id)?.name ?? "";
+  // ปุ่มโชว์แค่ชื่อเล่น (เจ้าของสั่ง 2026-10-28) · ไม่มีชื่อเล่น = ชื่อเต็ม · ชื่อเล่นซ้ำในโต๊ะ = ต่อรหัสให้แยกออก · ชี้ค้าง = ชื่อเต็ม+รหัส
+  const label = (p: CrewPerson) => p.nickname?.trim() || p.name;
+  const nickCount = useMemo(() => {
+    const c = new Map<string, number>();
+    for (const p of people) { const k = p.nickname?.trim() || p.name; c.set(k, (c.get(k) ?? 0) + 1); }
+    return c;
+  }, [people]);
+  const nameOf = (id: string) => { const p = people.find((x) => x.id === id); return p ? label(p) : ""; };
 
   return (
     <div className="space-y-1.5">
@@ -83,10 +90,11 @@ export function CrewPick({ people, value, onChange, required = false, recent = [
         {shown.map((p) => {
           const on = sel.has(p.id); const f = flag?.(p) ?? null;
           return (
-            <button key={p.id} type="button" onClick={() => toggle(p.id)} aria-pressed={on} title={f ?? undefined} className={chipCls(on)}>
+            <button key={p.id} type="button" onClick={() => toggle(p.id)} aria-pressed={on}
+              title={[p.code ? `[${p.code}] ${p.name}` : p.name, f].filter(Boolean).join(" · ")} className={chipCls(on)}>
               {on && <span>✓</span>}{f && <span>⚠️</span>}
-              {p.code && <span className="opacity-60">[{p.code}]</span>}
-              <span className="truncate max-w-[14rem]">{p.name}</span>
+              <span className="truncate max-w-[14rem]">{label(p)}</span>
+              {(nickCount.get(label(p)) ?? 0) > 1 && p.code && <span className="opacity-60">{p.code}</span>}
             </button>
           );
         })}

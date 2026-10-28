@@ -6,10 +6,10 @@ const wo = (o: Partial<CatchUpWo>): CatchUpWo => ({ id: "w1", wo_no: "WO-1", qty
   department_name: null, assignee_name: null, dispatch_date: null, created_at: "", ...o });
 const snap = (o: { mo?: Partial<CatchUpSnapshot["mo"]>; progress?: CatchUpSnapshot["progress"]; wos?: CatchUpWo[]; good?: number } = {}): CatchUpSnapshot => ({
   mo: { id: "m1", mo_no: "MO-1", product_sku: "SKU", product_name: "ชื่อ", qty: 100, status: "draft", due_date: null, internal_due_date: null,
-    has_bom: true, prep_total: 4, prep_ready: 0, cut_total: 2, cut_ready: 0, prep_done: false, cut_done: false, skipped: {}, ...o.mo },
+    has_bom: true, prep_total: 4, prep_ready: 0, cut_total: 2, cut_ready: 0, prep_done: false, cut_done: false, skipped: {}, bom_code: "BOM-1", note: null, ...o.mo },
   progress: o.progress === undefined ? { total: 4, buy: 2, requested: 0, ordered: 0 } : o.progress,
   materials: [{ sku: "FAB", name: "ผ้า", status: "have", ready: false }, { sku: "ZIP", name: "ซิป", status: "buy", ready: false }],
-  wos: o.wos ?? [], shelves: [], shelf: { good: o.good ?? 0, defect: 0, repairing: 0 }, rates: [], reasons: [],
+  wos: o.wos ?? [], shelves: [], shelf: { good: o.good ?? 0, defect: 0, repairing: 0 }, rates: [], reasons: [], past: { mo: [], model: [] },
 });
 /** ค่าตั้งต้น = จ่าย 1 แถว 100 ชิ้น โต๊ะ d1 · ส่งคืน 1 รอบ 100 ชิ้น (อัตโนมัติ) */
 const inp = (o: Partial<CuInputs> & { dq?: number; rq?: number } = {}): CuInputs => {
@@ -198,6 +198,45 @@ describe("ยังขาดของอยู่", () => {
   it("จ่ายก่อนเตรียม + ยังขาดของ → ไม่บันทึกอะไรเรื่องของ", () => {
     const r = cuBuildSteps(cuFacts(snap()), "dispatch", { have: true, prep: false, cut: false, dispatch: true, short: true }, inp({ missing: ["ZIP"] }));
     expect(r.steps.map((s) => s.kind)).toEqual(["dispatch"]);
+  });
+});
+
+describe("ข้อมูลเพิ่มเติม + ค่าแรงกลับ BOM", () => {
+  const f = cuFacts(snap({ mo: { prep_ready: 4, cut_ready: 2 } }));
+  it("ปัญหา/หมายเหตุ/ค่าแรงเข้า BOM ต่อท้ายขั้นสถานะ · แถวปัญหาว่างไม่นับ", () => {
+    const r = cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({
+      problems: [{ key: "p1", text: "ผ้าไม่ตรงสี", severity: "medium", qty: 2, model: true }, { key: "p2", text: " ", severity: "low", qty: null, model: false }],
+      teamNote: "ลูกค้าขอเลื่อน", bomRate: 25,
+    }));
+    expect(r.errors).toEqual([]);
+    expect(r.steps.map((s) => s.kind)).toEqual(["dispatch", "problem", "note", "bom_rate"]);
+  });
+  it("ใบที่บันทึกครบแล้วยังเพิ่มปัญหาอย่างเดียวได้", () => {
+    const done = cuFacts(snap({ mo: { prep_ready: 4, cut_ready: 2 } }));
+    const r = cuBuildSteps(done, "cut", cuDefaultTicks(done, "cut"), inp({ problems: [{ key: "p", text: "ตัดเบี้ยว", severity: "high", qty: null, model: false }] }));
+    expect(r.errors).toEqual([]);
+    expect(r.steps.map((s) => s.kind)).toEqual(["problem"]);
+  });
+  it("QC รับไม่หมด = เตือนยังเหลือในคิว", () => {
+    const r = cuBuildSteps(f, "qc_in", cuDefaultTicks(f, "qc_in"), inp({ qcGood: 16, qcBad: 2, badReason: "เย็บเบี้ยว", rq: 20, disp: [{ key: "a", deptId: "d1", qty: 20, date: null }] }));
+    expect(r.issues.find((x) => x.field === "qc:good" && x.level === "warn")?.msg).toMatch(/ยังเหลือรอ QC 2 ชิ้น/);
+  });
+  it("ส่งไป API: ปัญหา + ปัญหาของรุ่น · หมายเหตุต่อท้าย · ค่าแรงเข้า BOM ราคากลาง · หมายเหตุถึงช่างติดใบจ่าย", async () => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const api = async (url: string, body: unknown) => { calls.push({ url, body: body as Record<string, unknown> }); return url.endsWith("work-orders") ? { id: "w9", wo_no: "WO-9" } : {}; };
+    const s0 = snap({ mo: { note: "เดิม" } });
+    await cuRun([
+      { kind: "dispatch", line: "a", qty: 5, date: null, note: "ใช้ด้ายเข้ม" },
+      { kind: "problem", text: "ผ้าไม่ตรงสี", severity: "medium", qty: 2, model: true },
+      { kind: "note", text: "ลูกค้าขอเลื่อน" },
+      { kind: "bom_rate", rate: 25 },
+    ], ctx(s0), api);
+    expect(calls[0].body).toMatchObject({ note: "ใช้ด้ายเข้ม · อัปเดตย้อนหลัง" });
+    expect(calls[1]).toMatchObject({ url: "/api/mo/issues", body: { mo_no: "MO-1", defect_type: "ผ้าไม่ตรงสี", severity: "medium", qty: 2 } });
+    expect(calls[2]).toMatchObject({ url: "/api/parent-sku-issues", body: { sku: "SKU", problem_text: "ผ้าไม่ตรงสี" } });
+    expect(calls[3].url).toBe("/api/mo/m1");
+    expect(String(calls[3].body.note)).toMatch(/^เดิม\n\[อัปเดตงาน .+\] ลูกค้าขอเลื่อน$/);
+    expect(calls[4]).toMatchObject({ url: "/api/bom/labor-rates", body: { bom_code: "BOM-1", craftsman_id: null, craftsman_name: "ราคากลาง", rate: 25 } });
   });
 });
 
