@@ -24,6 +24,7 @@ import type { MemberTier } from "@/lib/member-points";
 import { MEMBER_SEGMENTS, inSegment } from "@/lib/website-member-segments";
 import { MemberTrialModal, openAsTrialMember } from "@/components/website-member-trial";
 import { MemberLoginSettingsModal } from "@/components/website-member-login-settings";
+import { MemberBirthdayModal, birthdayText } from "@/components/website-member-birthday";
 
 type Member = {
   id: string;
@@ -44,6 +45,9 @@ type Member = {
   lastOrderAt: string | null;
   tier: { key: string; name: string; color: string } | null;
   isTest: boolean;
+  /** 🎂 วัน+เดือนเกิด (สมาชิกตั้งเองครั้งเดียว · ร้านแก้ได้) */
+  birthMonth: number | null;
+  birthDay: number | null;
 };
 
 const TRIAL_SEG = "trial";
@@ -69,6 +73,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
   const [trialOpen, setTrialOpen] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [opening, setOpening] = useState<string | null>(null);
+  const [bdOf, setBdOf] = useState<Member | null>(null);
 
   const load = useCallback(() => {
     apiFetch(`/api/website/members?shop=${encodeURIComponent(shopSlug)}`)
@@ -238,6 +243,10 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
                   <span className="block text-[11px] text-slate-400 truncate">
                     {r.email ?? "ไม่มีอีเมล"}
                     {r.phone && ` · ${r.phone}`}
+                    {" · "}
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setBdOf(r); }} className="text-slate-500 hover:text-blue-600 hover:underline" title="วันเกิด (แก้/ล้าง)" data-member-birthday>
+                      🎂 {r.birthMonth ? birthdayText(r.birthMonth, r.birthDay) : "ยังไม่ตั้ง"}
+                    </button>
                   </span>
                 </span>
               </span>
@@ -309,6 +318,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
       <MemberTiersModal open={tierEdit} shopSlug={shopSlug} onClose={() => setTierEdit(false)} onSaved={load} />
       <MemberTrialModal open={trialOpen} shopSlug={shopSlug} members={trial} onClose={() => setTrialOpen(false)} onChanged={load} />
       <MemberLoginSettingsModal open={loginOpen} shopSlug={shopSlug} onClose={() => setLoginOpen(false)} onSaved={load} />
+      <MemberBirthdayModal member={bdOf} onClose={() => setBdOf(null)} onSaved={load} />
       <ConfirmDialog
         open={!!ask}
         onClose={() => !busy && setAsk(null)}

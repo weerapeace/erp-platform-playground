@@ -11,6 +11,7 @@
  *   3) ไม่เจอ → สร้างสมาชิกใหม่
  *   อีเมลที่ไม่ได้ยืนยัน ห้ามใช้ผูกบัญชีเด็ดขาด (กันคนอื่นตั้งอีเมลเราแล้วเข้าบัญชีเรา)
  */
+import { validBirthday } from "@/lib/website-birthday";
 
 export type MemberProvider = "google" | "line" | "facebook" | "password";
 export const MEMBER_PROVIDERS: readonly MemberProvider[] = ["google", "line", "facebook", "password"];
@@ -173,5 +174,11 @@ export function sanitizeProfilePatch(raw: unknown): { ok: true; patch: Record<st
     patch.phone = phone || null;
   }
   if (r.marketingOptIn !== undefined) patch.marketing_opt_in = r.marketingOptIn === true;
+  // 🎂 วันเกิด (วัน+เดือน ไม่เก็บปี) — ต้องมาคู่กันและเป็นวันที่จริง · ตั้งแล้วแก้เองไม่ได้ (route me ตรวจ) กันเปลี่ยนเพื่อเอาคูปองบ่อย ๆ
+  if (r.birthMonth !== undefined || r.birthDay !== undefined) {
+    if (!validBirthday(r.birthMonth, r.birthDay)) return { ok: false, error: "วันเกิดไม่ถูกต้อง — เลือกทั้งวันและเดือน" };
+    patch.birth_month = Number(r.birthMonth);
+    patch.birth_day = Number(r.birthDay);
+  }
   return { ok: true, patch };
 }

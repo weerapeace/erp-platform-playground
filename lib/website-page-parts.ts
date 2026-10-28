@@ -63,6 +63,7 @@ export const ACCOUNT_PARTS: PartDef[] = [
   { key: "acc.row", label: "แถวข้อมูลโปรไฟล์", hint: "โปรไฟล์แบบแถว", groups: ["text", "box"] },
   { key: "acc.aside", label: "กล่องข้างขวา", hint: "คู่มือ / โปรสมาชิก", groups: ["text", "box", "icon"] },
   { key: "acc.timeline", label: "ไทม์ไลน์สถานะออเดอร์", hint: "✨ ไทม์ไลน์", groups: ["text", "layout", "box"] },
+  { key: "acc.bday", label: "แบนเนอร์คูปองวันเกิด", hint: "🎂 เดือนเกิด", groups: ["text", "box"] },
 ];
 
 /** ช่วงแถบเลื่อนในแผง (แคบกว่าที่ระบบรับ — พิมพ์ตัวเลขเกินได้ถึงขอบ PART_RANGES) + ค่าโชว์ตอนยังไม่ตั้ง */

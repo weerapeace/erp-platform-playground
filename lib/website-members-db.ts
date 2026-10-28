@@ -19,6 +19,9 @@ export interface MemberSummary {
   createdAt: string;
   /** 🧪 สมาชิกทดลอง (เว็บร้านโชว์ป้าย + ปิดปุ่มสั่งซื้อ) */
   isTest: boolean;
+  /** 🎂 วันเกิด (ตั้งแล้วแก้เองไม่ได้) · null = ยังไม่ตั้ง */
+  birthMonth: number | null;
+  birthDay: number | null;
 }
 
 export async function memberSummary(sb: Admin, m: MemberRow): Promise<MemberSummary> {
@@ -34,6 +37,8 @@ export async function memberSummary(sb: Admin, m: MemberRow): Promise<MemberSumm
     providers: [...new Set(((data ?? []) as { provider: MemberProvider }[]).map((r) => r.provider))],
     createdAt: m.created_at,
     isTest: !!m.is_test,
+    birthMonth: m.birth_month ?? null,
+    birthDay: m.birth_day ?? null,
   };
 }
 

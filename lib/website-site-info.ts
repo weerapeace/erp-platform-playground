@@ -19,7 +19,7 @@ export interface SiteInfoField {
   key: string;
   label: string;
   hint?: string;
-  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "referral" | "returns" | "shippop" | "notify" | "redirects";
+  group: "shop" | "contact" | "order" | "gift" | "promo" | "points" | "fit" | "belt" | "tracking" | "chat" | "reviews" | "search" | "preorder" | "referral" | "birthday" | "returns" | "shippop" | "notify" | "redirects";
   type: SiteInfoType;
   /** ส่งให้เว็บร้าน (API สาธารณะ) ได้ไหม */
   isPublic: boolean;
@@ -46,6 +46,7 @@ export const SITE_INFO_GROUPS: { key: SiteInfoField["group"]; label: string; hin
   { key: "reviews", label: "⭐ รีวิวสินค้า", hint: "ลูกค้าให้ดาว + เขียน + แนบรูป ที่หน้าสินค้า · ทุกรีวิวต้องผ่านการตรวจในแท็บ ⭐ รีวิว ก่อนขึ้นเว็บ (เว้นแต่เปิดอนุมัติอัตโนมัติ) · ดาวเฉลี่ยขึ้นในผลค้นหา Google ด้วย" },
   { key: "preorder", label: "📦 สั่งจอง (พรีออเดอร์) + มัดจำ", hint: "สินค้าที่ตั้งสถานะสต็อก “พรีออเดอร์” ในแท็บสินค้าบนเว็บ · เปิดมัดจำแล้ว ออเดอร์ที่มีของพรีออเดอร์ต้องโอนพร้อมเพย์ (ไม่มีเก็บปลายทาง) จ่ายมัดจำก่อน ที่เหลือจ่ายก่อนจัดส่ง · ระบบตรวจสลิปตามยอดที่ต้องจ่ายแต่ละรอบ" },
   { key: "referral", label: "🎁 ชวนเพื่อน (โค้ดแนะนำ)", hint: "สมาชิกทุกคนได้โค้ดชวนเพื่อนของตัวเอง (หน้าบัญชี) · เพื่อนใช้โค้ดตอนสั่งครั้งแรก = ได้ส่วนลด · ออเดอร์ของเพื่อนสำเร็จ = คนชวนได้แต้ม (ต้องเปิดระบบแต้ม) · 1 เบอร์ใช้โค้ดชวนเพื่อนได้ครั้งเดียว ใช้โค้ดตัวเองไม่ได้" },
+  { key: "birthday", label: "🎂 คูปองวันเกิดสมาชิก", hint: "สมาชิกใส่วันเกิด (วัน+เดือน) ในหน้าบัญชีได้ครั้งเดียว · เปิดหน้าบัญชีในเดือนเกิด = ได้คูปองของตัวเองอัตโนมัติ ใช้ได้ทั้งเดือน 1 ครั้ง (คนอื่นใช้ไม่ได้) · ปีละ 1 ใบ · เปลี่ยนส่วนลดที่นี่ = คูปองวันเกิดทุกใบเปลี่ยนตาม" },
   { key: "returns", label: "↩️ ขอคืน/เปลี่ยนสินค้า", hint: "ลูกค้ากด “ขอคืน/เปลี่ยนสินค้า” จากหน้าตามออเดอร์ (ออเดอร์ที่ส่งแล้ว/สำเร็จ ภายในกี่วันหลังได้รับของ) เลือกชิ้น + เหตุผล + แนบรูป → ร้านตอบในแท็บ ↩️ คืน/เปลี่ยน · ระบบไม่คืนเงิน/ไม่ตัดสต็อกให้เอง" },
   { key: "notify", label: "🔔 แจ้งลูกค้าอัตโนมัติ (LINE · ตะกร้าค้าง · ของที่ถูกใจลดราคา)", hint: "LINE = สมาชิกที่เข้าสู่ระบบด้วย LINE และแอดเพื่อน OA ร้านแล้ว (ต้องใส่กุญแจ OA ใน Vercel: LINE_OA_TOKEN_<รหัสร้าน>) · อีเมล = ต้องตั้ง RESEND_API_KEY + EMAIL_FROM · ตะกร้าค้าง/ของลดราคา ส่งเฉพาะสมาชิกที่ยินยอมรับข่าวสาร (PDPA) · กลุ่ม LINE พนักงานตั้งที่ ERP › ศูนย์ LINE › 🛍 เว็บร้าน" },
   { key: "shippop", label: "🚚 Shippop (จองขนส่ง · ใบปะหน้า · เลขพัสดุอัตโนมัติ)", hint: "จองขนส่งจากรายละเอียดออเดอร์ (ดูราคาหลายเจ้า → จอง → ได้เลขพัสดุ + ใบปะหน้า) · ขนส่งรับพัสดุแล้ว/ส่งถึง = เปลี่ยนสถานะออเดอร์ให้เอง · ยังไม่ใส่ API KEY ใน Vercel = โหมดจำลอง (ไม่เรียก Shippop จริง ไม่เสียเงิน)" },
@@ -174,6 +175,13 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "referral_friend_discount", label: "เพื่อนได้ส่วนลด (บาท)", hint: "ลดจากยอดสินค้าออเดอร์แรกของเพื่อน", group: "referral", type: "number", isPublic: true, placeholder: "100" },
   { key: "referral_min_subtotal", label: "ยอดสินค้าขั้นต่ำของเพื่อน (บาท)", hint: "0 = ไม่มีขั้นต่ำ", group: "referral", type: "number", isPublic: true, placeholder: "0" },
   { key: "referral_reward_points", label: "คนชวนได้แต้ม", hint: "ให้เมื่อออเดอร์ของเพื่อน “สำเร็จ” (ครั้งเดียวต่อออเดอร์) · ต้องเปิดระบบแต้ม", group: "referral", type: "number", isPublic: true, placeholder: "100" },
+
+  // ─── 🎂 คูปองวันเกิด (lib/website-birthday · คูปอง = แถวใน store_coupons ที่มี owner_id + birthday_year) ───
+  { key: "birthday_enabled", label: "เปิดคูปองวันเกิด", hint: "ปิด = ไม่ออกใบใหม่ และใบที่ออกไปแล้วใช้ไม่ได้ (เปิดกลับมาใช้ได้)", group: "birthday", type: "bool", isPublic: true },
+  { key: "birthday_discount_pct", label: "ลด (%)", hint: "1–90 · ใส่ % = ใช้ % · ว่าง/0 = ใช้ลดเป็นบาทด้านล่าง", group: "birthday", type: "number", isPublic: true, placeholder: "10" },
+  { key: "birthday_discount_baht", label: "หรือ ลด (บาท)", hint: "ใช้เมื่อไม่ได้ใส่ %", group: "birthday", type: "number", isPublic: true, placeholder: "100" },
+  { key: "birthday_max_discount", label: "ลดสูงสุด (บาท)", hint: "ใช้กับแบบ % · 0 = ไม่จำกัด", group: "birthday", type: "number", isPublic: true, placeholder: "0" },
+  { key: "birthday_min_subtotal", label: "ยอดสินค้าขั้นต่ำ (บาท)", hint: "0 = ไม่มีขั้นต่ำ", group: "birthday", type: "number", isPublic: true, placeholder: "0" },
 
   // ─── ↩️ ขอคืน/เปลี่ยนสินค้า (lib/website-returns · returnDeadline) ───
   { key: "returns_enabled", label: "เปิดให้ลูกค้าขอคืน/เปลี่ยนทางเว็บ", group: "returns", type: "bool", isPublic: true },
@@ -424,6 +432,11 @@ export interface SiteInfo {
   referral_friend_discount: number;
   referral_min_subtotal: number;
   referral_reward_points: number;
+  birthday_enabled: boolean;
+  birthday_discount_pct: number;
+  birthday_discount_baht: number;
+  birthday_max_discount: number;
+  birthday_min_subtotal: number;
   redirects: string;
   _i18n?: I18nMeta;
 }
@@ -537,6 +550,11 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   referral_friend_discount: 100,
   referral_min_subtotal: 0,
   referral_reward_points: 100,
+  birthday_enabled: false,
+  birthday_discount_pct: 10,
+  birthday_discount_baht: 0,
+  birthday_max_discount: 0,
+  birthday_min_subtotal: 0,
   redirects: "",
 };
 
@@ -606,7 +624,7 @@ export function normalizeSiteInfo(raw: unknown): SiteInfo {
     const v = m.get(f.key);
     const fb = d[f.key as keyof SiteInfo];
     if (f.type === "bool") out[f.key] = toBool(v, fb as boolean);
-    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key.startsWith("reviews_") || f.key.startsWith("referral_") ? Math.max(0, Math.min(f.key.startsWith("referral_") ? 100000 : 10000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "returns_days" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "cart_reminder_hours" ? Math.max(2, Math.min(72, Math.round(toNum(v, fb as number)))) : f.key === "wishlist_alert_pct" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
+    else if (f.type === "number") out[f.key] = f.key === "promo_delay" ? Math.min(60, toNum(v, fb as number)) : f.key === "birthday_discount_pct" ? Math.max(0, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key.startsWith("reviews_") || f.key.startsWith("referral_") || f.key.startsWith("birthday_") ? Math.max(0, Math.min(f.key.startsWith("reviews_") ? 10000 : 100000, Math.round(toNum(v, fb as number)))) : f.key === "preorder_deposit_pct" ? Math.max(10, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "returns_days" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : f.key === "cart_reminder_hours" ? Math.max(2, Math.min(72, Math.round(toNum(v, fb as number)))) : f.key === "wishlist_alert_pct" ? Math.max(1, Math.min(90, Math.round(toNum(v, fb as number)))) : toNum(v, fb as number);
     else if (f.key === "search_synonyms") out[f.key] = cleanSynonyms(v);
     else if (f.key === "search_popular") out[f.key] = popularTermsOf(v).join("\n");
     else if (f.key === "redirects") out[f.key] = cleanRedirects(v);

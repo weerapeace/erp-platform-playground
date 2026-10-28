@@ -38,6 +38,10 @@ export interface StoreCoupon {
   note: string;
   /** 🎁 โค้ดชวนเพื่อนของสมาชิกคนนี้ (lib/website-referral) · null = คูปองปกติ */
   referrerId?: string | null;
+  /** 🔒 คูปองเฉพาะคน — สมาชิกเจ้าของเท่านั้นที่เห็น/ใช้ได้ (เช่น คูปองวันเกิด) · null = คูปองปกติ */
+  ownerId?: string | null;
+  /** 🎂 คูปองวันเกิดของปีไหน (lib/website-birthday) · null = ไม่ใช่คูปองวันเกิด */
+  birthdayYear?: number | null;
 }
 
 /** โค้ด: ตัวใหญ่ A-Z 0-9 - _ ยาว 3–30 (ลูกค้าพิมพ์เล็ก/มีช่องว่าง ก็ใช้ได้) */
@@ -174,6 +178,8 @@ export function couponFromRow(r: Record<string, unknown>): StoreCoupon {
     active: r.active !== false,
     note: String(r.note ?? ""),
     referrerId: (r.referrer_id as string | null | undefined) ?? null,
+    ownerId: (r.owner_id as string | null | undefined) ?? null,
+    birthdayYear: r.birthday_year == null ? null : Number(r.birthday_year),
   };
 }
 

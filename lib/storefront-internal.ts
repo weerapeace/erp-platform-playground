@@ -36,9 +36,12 @@ export interface MemberRow {
   created_at: string;
   /** 🧪 สมาชิกทดลอง (ERP สร้าง · ไม่นับสถิติ · สั่งซื้อจริงไม่ได้) */
   is_test: boolean;
+  /** 🎂 วันเกิด (วัน+เดือน ไม่เก็บปี · lib/website-birthday) */
+  birth_month?: number | null;
+  birth_day?: number | null;
 }
 
-export const MEMBER_ROW_COLS = "id, shop_id, email, email_verified, name, phone, avatar_url, marketing_opt_in, status, created_at, is_test";
+export const MEMBER_ROW_COLS = "id, shop_id, email, email_verified, name, phone, avatar_url, marketing_opt_in, status, created_at, is_test, birth_month, birth_day";
 
 const json = (body: unknown, status: number) => NextResponse.json(body, { status, headers: { "Cache-Control": "no-store" } });
 

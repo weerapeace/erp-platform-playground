@@ -8,6 +8,7 @@ import { memberStats, readTiers } from "@/lib/member-points-db";
 import type { MemberTier } from "@/lib/member-points";
 import { referralCoupon, samePhone9 } from "@/lib/website-referral";
 import { readSiteInfo } from "@/lib/website-site-info";
+import { birthdayCoupon } from "@/lib/website-birthday";
 
 type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
 
@@ -84,6 +85,12 @@ export async function checkCoupon(sb: Admin, shopId: string, rawCode: unknown, s
     }
     coupon = referralCoupon(coupon, info);
   }
+  // 🔒 คูปองเฉพาะคน (เช่น 🎂 วันเกิด): เจ้าของที่เข้าสู่ระบบอยู่เท่านั้น · คนอื่น = เหมือนไม่มีโค้ด (ไม่บอกว่าเป็นของใคร)
+  if (coupon.ownerId) {
+    if (!memberId) return { ok: false, error: "โค้ดนี้เป็นคูปองเฉพาะสมาชิก — เข้าสู่ระบบด้วยบัญชีที่ได้รับโค้ดก่อนนะ" };
+    if (memberId !== coupon.ownerId) return { ok: false, error: "ไม่พบโค้ดนี้ — ตรวจตัวสะกดอีกครั้ง" };
+    if (coupon.birthdayYear) coupon = birthdayCoupon(coupon, await readSiteInfo(sb, shopId));
+  }
   const usage = await couponUsage(sb, coupon, rawPhone, memberId);
   const r = evaluateCoupon(coupon, subtotal, usage);
   return r.ok ? { ...r, coupon } : r;
@@ -98,6 +105,8 @@ export interface MemberCouponView {
   eligible: boolean;
   /** เบอร์ของสมาชิกใช้โค้ดนี้ไปแล้ว (ใช้ได้ครั้งเดียว) */
   used: boolean;
+  /** 🎂 คูปองวันเกิดของสมาชิกคนนี้ */
+  birthday?: boolean;
 }
 
 /**
@@ -107,7 +116,13 @@ export interface MemberCouponView {
 export async function memberCouponList(sb: Admin, shopId: string, memberId: string, phone?: string | null): Promise<MemberCouponView[]> {
   const nowIso = new Date().toISOString();
   const { data } = await sb.from("store_coupons").select("*").eq("shop_id", shopId).eq("active", true).or("members_only.eq.true,min_tier.not.is.null").order("created_at", { ascending: false }).limit(50);
-  const coupons = ((data ?? []) as Record<string, unknown>[]).map(couponFromRow).filter((c) => (!c.startsAt || c.startsAt <= nowIso) && (!c.endsAt || c.endsAt >= nowIso));
+  // 🔒 คูปองเฉพาะคน: เห็นเฉพาะของตัวเอง · 🎂 วันเกิด = ค่าจากที่ตั้งร้านตอนนี้ (ร้านปิด = ไม่โชว์)
+  const bInfo = ((data ?? []) as Record<string, unknown>[]).some((r) => r.owner_id === memberId && r.birthday_year != null) ? await readSiteInfo(sb, shopId) : null;
+  const coupons = ((data ?? []) as Record<string, unknown>[])
+    .map(couponFromRow)
+    .filter((c) => !c.ownerId || c.ownerId === memberId)
+    .map((c) => (c.birthdayYear && bInfo ? birthdayCoupon(c, bInfo) : c))
+    .filter((c) => c.active && (!c.startsAt || c.startsAt <= nowIso) && (!c.endsAt || c.endsAt >= nowIso));
   if (!coupons.length) return [];
   const ctx = await memberContext(sb, shopId, memberId);
   const counts = await couponUseCounts(sb, coupons.map((c) => c.id));
@@ -127,5 +142,6 @@ export async function memberCouponList(sb: Admin, shopId: string, memberId: stri
       minTierName: c.minTier ? ctx.tiers.find((t) => t.key === c.minTier)?.name ?? null : null,
       eligible: !c.minTier || !!ctx.member?.reachedTiers.includes(c.minTier),
       used: c.perPhoneOnce && usedByPhone.has(c.id),
+      ...(c.birthdayYear ? { birthday: true } : {}),
     }));
 }

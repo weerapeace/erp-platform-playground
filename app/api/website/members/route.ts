@@ -3,6 +3,7 @@
  * GET   ?shop=<slug> → { members: [...สรุป + วิธีเข้าสู่ระบบ + จำนวนออเดอร์ + ยอดซื้อ (ไม่นับยกเลิก) + ⭐ แต้ม/ระดับ], tiers, pointsEnabled }
  *       ยอด/แต้มคิดใน DB (store_member_stats) — ไม่ดึงแถวมารวมเอง (ติดเพดาน 1,000 แถว)
  *       + isTest (🧪 สมาชิกทดลอง — หน้าจอไม่นับในกลุ่ม/สถิติ) · loginReady = ช่องทางเข้าสู่ระบบที่ตั้งครบแล้ว (ไม่มีรหัสลับ)
+ * PATCH { id, birthMonth, birthDay } → 🎂 แก้/ล้างวันเกิด (null ทั้งคู่ = ล้าง · สมาชิกตั้งเองได้ครั้งเดียว ร้านแก้ให้ที่นี่) · audit
  * PATCH { id, status: "active" | "blocked" } → ระงับ/เปิดบัญชี (ระงับ = เข้าสู่ระบบไม่ได้ · ออเดอร์เดิมไม่หาย) + audit
  * ด่าน: guardApi (พนักงาน) — ไม่ใช่เส้นของเว็บร้าน
  */
@@ -15,13 +16,14 @@ import type { MemberProvider } from "@/lib/website-members";
 import { memberStats, readTiers } from "@/lib/member-points-db";
 import { tierFor } from "@/lib/member-points";
 import { readSiteInfo } from "@/lib/website-site-info";
+import { validBirthday } from "@/lib/website-birthday";
 import { lastOrderDates } from "@/lib/website-members-db";
 import { shopBySlug } from "@/lib/website-shop";
 import { OAUTH_PROVIDERS, providerReady, readLoginProviders } from "@/lib/storefront-oauth";
 
 export const dynamic = "force-dynamic";
 
-type Row = { id: string; email: string | null; email_verified: boolean; name: string; phone: string | null; avatar_url: string | null; marketing_opt_in: boolean; status: string; created_at: string; last_login_at: string | null; is_test: boolean };
+type Row = { id: string; email: string | null; email_verified: boolean; name: string; phone: string | null; avatar_url: string | null; marketing_opt_in: boolean; status: string; created_at: string; last_login_at: string | null; is_test: boolean; birth_month: number | null; birth_day: number | null };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardWebsite(request, "view");
@@ -33,7 +35,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const shopId = (shop as { id: string }).id;
   const { data, error } = await sb
     .from("store_customers")
-    .select("id, email, email_verified, name, phone, avatar_url, marketing_opt_in, status, created_at, last_login_at, is_test")
+    .select("id, email, email_verified, name, phone, avatar_url, marketing_opt_in, status, created_at, last_login_at, is_test, birth_month, birth_day")
     .eq("shop_id", shopId)
     .neq("status", "deleted")
     .order("created_at", { ascending: false })
@@ -70,6 +72,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         createdAt: r.created_at,
         lastLoginAt: r.last_login_at,
         isTest: !!r.is_test,
+        birthMonth: r.birth_month ?? null,
+        birthDay: r.birth_day ?? null,
         providers: [...(prov.get(r.id) ?? [])],
         orderCount: stats.get(r.id)?.orderCount ?? 0,
         orderTotal: stats.get(r.id)?.orderTotal ?? 0,
@@ -92,8 +96,32 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
-  const body = (await request.json().catch(() => null)) as { id?: string; status?: string } | null;
+  const body = (await request.json().catch(() => null)) as { id?: string; status?: string; birthMonth?: unknown; birthDay?: unknown } | null;
   const id = String(body?.id ?? "");
+  // 🎂 แก้/ล้างวันเกิด (พนักงาน)
+  if (body && "birthMonth" in body) {
+    const clear = body.birthMonth == null && body.birthDay == null;
+    if (!id || (!clear && !validBirthday(body.birthMonth, body.birthDay))) return NextResponse.json({ error: "วันเกิดไม่ถูกต้อง — เลือกทั้งวันและเดือน" }, { status: 400 });
+    const sb = supabaseAdmin();
+    const { data: before } = await sb.from("store_customers").select("id, name, email, status, shop_id, birth_month, birth_day").eq("id", id).maybeSingle();
+    if (!before || (before as { status: string }).status === "deleted") return NextResponse.json({ error: "ไม่พบสมาชิก" }, { status: 404 });
+    const next = clear ? { birth_month: null, birth_day: null } : { birth_month: Number(body.birthMonth), birth_day: Number(body.birthDay) };
+    const { error } = await sb.from("store_customers").update({ ...next, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
+    const {
+      data: { user },
+    } = await supabaseFromRequest(request).auth.getUser();
+    const b = before as { name: string; email: string | null; shop_id: string; birth_month: number | null; birth_day: number | null };
+    await writeAudit(sb, {
+      action: "update",
+      entityType: "store_customer",
+      entityId: id,
+      actorId: user?.id ?? null,
+      actorName: user?.email ?? null,
+      metadata: { name: b.name, email: b.email, shop_id: b.shop_id, field: "birthday", before: b.birth_month ? `${b.birth_day}/${b.birth_month}` : null, after: next.birth_month ? `${next.birth_day}/${next.birth_month}` : null },
+    });
+    return NextResponse.json({ ok: true });
+  }
   const status = body?.status === "blocked" ? "blocked" : body?.status === "active" ? "active" : "";
   if (!id || !status) return NextResponse.json({ error: "ต้องระบุสมาชิกและสถานะ" }, { status: 400 });
   const sb = supabaseAdmin();
