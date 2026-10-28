@@ -50,7 +50,7 @@ export function IgnoreDialog({ open, count, sample, busy, onClose, onConfirm }: 
   return (
     <ERPModal open={open} onClose={() => { if (!busy) onClose(); }} size="sm" defaultExpanded={false} storageKey="platform-catalog-ignore"
       title={count > 1 ? `ไม่ต้องจับคู่ ${count.toLocaleString()} รายการ` : "ไม่ต้องจับคู่ตัวนี้"}
-      description="ใช้กับของที่ไม่มีในระบบเราจริง ๆ — ไม่นับใน “ยังไม่มีคู่” และระบบจะไม่เดาคู่ให้อีก · เลิกข้ามได้ทุกเมื่อ"
+      description="ใช้กับของที่ไม่มีในระบบเราจริง ๆ — ไม่นับใน “ยังไม่จับคู่” และระบบจะไม่เดาคู่ให้อีก · เลิกข้ามได้ทุกเมื่อ"
       footer={(
         <div className="flex justify-end gap-2">
           <button type="button" onClick={onClose} disabled={busy} className="h-9 px-4 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>

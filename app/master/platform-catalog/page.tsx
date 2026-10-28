@@ -506,6 +506,9 @@ export default function PlatformCatalogPage() {
   const needMatch = counts.all - counts.ignored;
   const pct = needMatch ? Math.round((counts.ok / needMatch) * 100) : (counts.all ? 100 : 0);
   const unmatchedRows = listings.filter((l) => { const s = statusOf(l); return s === "guess" || s === "none"; });
+  // ยังไม่จับคู่ = รอยืนยัน + ต้องหาคู่เอง (รู้ได้ทันที ไม่ต้องรอตัวเดา) · หลายประกาศบนร้านชี้สินค้าในระบบตัวเดียวกันได้ → นับรุ่นแยก
+  const unmatchedCount = needMatch - counts.ok;
+  const matchedParents = new Set(listings.map((l) => l.matched_parent_sku_id).filter(Boolean)).size;
   const where = `${activePf?.name_th ?? "ร้านนี้"}${activeBrand ? ` · ${activeBrand.name}` : ""}`;
 
   return (
@@ -522,10 +525,10 @@ export default function PlatformCatalogPage() {
           <ol className="list-decimal ml-5 space-y-1">
             <li><b>เลือกร้าน</b> (ปุ่มด้านบน) + แบรนด์ — ระบบจำร้านที่ดูล่าสุดไว้ให้</li>
             <li>ยังไม่มีสินค้า? กด <b>⬆️ นำเข้าสินค้าจากร้าน</b> แล้วเลือกไฟล์ export จาก Seller Center (เลือกหลายไฟล์พร้อมกันได้ ระบบดูให้เองว่าแต่ละไฟล์คืออะไร)</li>
-            <li>ดู <b>การ์ดตัวเลข</b> — กดการ์ดเพื่อกรองตาราง: <span className="text-emerald-700">จับคู่แล้ว</span> · <span className="text-sky-700">ระบบเดาให้ (รอยืนยัน)</span> · <span className="text-amber-700">ยังไม่มีคู่</span></li>
+            <li>ดู <b>การ์ดตัวเลข</b> — กดการ์ดเพื่อกรองตาราง: <span className="text-emerald-700">จับคู่แล้ว</span> · <span className="text-sky-700">รอยืนยัน (ระบบเดาให้แล้ว)</span> · <span className="text-amber-700">ต้องหาคู่เอง</span> — สองใบหลังรวมกัน = ยังไม่จับคู่</li>
             <li>จับคู่: กด <b>ยืนยัน</b> ในแถวถ้าระบบเดาถูก · กด <b>🔍 จับคู่</b> เพื่อดูตัวเลือก/ค้นหาเอง · หรือกด <b>⚡ จับคู่ทีละตัว</b> ไล่ทีละตัวด้วยคีย์ลัด (1-3 เลือก · S ข้าม)</li>
             <li>รหัสตรงกันเยอะ ๆ กด <b>✓ ยืนยันทั้งหมดที่รหัสตรงกัน</b> ได้ทีเดียว (ระบบถามก่อน · แก้ทีหลังได้ · มีประวัติว่าใครจับคู่อะไร)</li>
-            <li>ของที่ไม่มีในระบบเราจริง ๆ (งานบริการ/เลิกขาย/ซ้ำบนร้าน) กด <b>🚫 ไม่ต้องจับคู่ตัวนี้</b> หรือติ๊กหลายตัวแล้วกดจากแถบด้านล่าง — ไม่นับใน &quot;ยังไม่มีคู่&quot; · กด &quot;เลิกข้าม&quot; ได้ทุกเมื่อ</li>
+            <li>ของที่ไม่มีในระบบเราจริง ๆ (งานบริการ/เลิกขาย/ซ้ำบนร้าน) กด <b>🚫 ไม่ต้องจับคู่ตัวนี้</b> หรือติ๊กหลายตัวแล้วกดจากแถบด้านล่าง — ไม่นับใน &quot;ยังไม่จับคู่&quot; · กด &quot;เลิกข้าม&quot; ได้ทุกเมื่อ</li>
           </ol>
           <p className="pt-1"><b>แท็บอื่น:</b> “ช่องข้อมูลของร้าน” = คอลัมน์ที่อ่านได้จากไฟล์ · “ตั้งค่าส่งข้อมูล” = บอกว่าจะเอาข้อมูลในระบบเราตัวไหนไปใส่ช่องไหนของร้าน</p>
           <p><b>ปุ่ม ⚙️</b> = จัดการ “ชนิดไฟล์นำเข้า” เพิ่ม/แก้เองได้ถ้าร้านเปลี่ยนคอลัมน์ · ระบบแค่ <b>เดา</b> ให้ — ไม่จับคู่เองโดยไม่มีคนกดยืนยัน</p>
@@ -554,8 +557,11 @@ export default function PlatformCatalogPage() {
         </select>
         <div className="flex-1" />
         <input ref={fileRef} type="file" multiple accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) importFiles(fs); }} />
-        <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{importing ? "กำลังนำเข้า..." : "⬆️ นำเข้าสินค้าจากร้าน"}</button>
-        <button onClick={() => setShowManager(true)} disabled={!canEdit || !platformId} title="จัดการชนิดไฟล์นำเข้า (เพิ่ม/แก้เองได้)" aria-label="จัดการชนิดไฟล์นำเข้า" className="h-9 px-2.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⚙️</button>
+        {/* ปุ่มนำเข้า + ⚙️ ติดกันเสมอ (ร้านเยอะแล้วแถวเต็ม ⚙️ เคยตกไปอยู่บรรทัดใหม่คนเดียว) */}
+        <div className="flex items-center gap-2 shrink-0 ml-auto">
+          <button onClick={() => fileRef.current?.click()} disabled={!canEdit || importing || !platformId} title={!canEdit ? "ไม่มีสิทธิ์นำเข้า" : "อัปไฟล์ export (Excel/CSV) จาก Seller Center — เลือกได้หลายไฟล์"} className="h-9 px-3 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50 whitespace-nowrap">{importing ? "กำลังนำเข้า..." : "⬆️ นำเข้าสินค้าจากร้าน"}</button>
+          <button onClick={() => setShowManager(true)} disabled={!canEdit || !platformId} title="จัดการชนิดไฟล์นำเข้า (เพิ่ม/แก้เองได้)" aria-label="จัดการชนิดไฟล์นำเข้า" className="h-9 px-2.5 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">⚙️</button>
+        </div>
       </div>
       {platformCode === "line_shopping" && (
         <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -613,10 +619,10 @@ export default function PlatformCatalogPage() {
           ) : (
             <div className="space-y-3">
               <StatFilterCards value={filter} onChange={(k) => setFilter(k as Filter)} cards={[
-                { key: "all", label: "ทั้งหมด", value: counts.all },
-                { key: "ok", label: "จับคู่แล้ว", value: counts.ok, tone: "success", hint: `${pct}% ของที่ต้องจับคู่` },
-                { key: "guess", label: "ระบบเดาให้ รอยืนยัน", value: suggestLoading ? null : counts.guess, tone: "info", hint: suggestError ? "เดาคู่ไม่สำเร็จ — กดโหลดใหม่" : highRows.length ? `รหัสตรงกัน ${highRows.length.toLocaleString()}` : undefined },
-                { key: "none", label: "ยังไม่มีคู่", value: suggestLoading ? null : counts.none, tone: "warning" },
+                { key: "all", label: "ทั้งหมด", value: counts.all, hint: unmatchedCount > 0 ? `ยังไม่จับคู่ ${unmatchedCount.toLocaleString()}` : "จับคู่ครบแล้ว" },
+                { key: "ok", label: "จับคู่แล้ว", value: counts.ok, tone: "success", hint: `${pct}% · ${matchedParents.toLocaleString()} รุ่นในระบบ` },
+                { key: "guess", label: "รอยืนยัน", value: suggestLoading ? null : counts.guess, tone: "info", hint: suggestError ? "เดาคู่ไม่สำเร็จ — กดโหลดใหม่" : highRows.length ? `ระบบเดาให้ · รหัสตรงกัน ${highRows.length.toLocaleString()}` : "ระบบเดาให้แล้ว" },
+                { key: "none", label: "ต้องหาคู่เอง", value: suggestLoading ? null : counts.none, tone: "warning", hint: "ระบบเดาไม่ได้/ไม่มั่นใจ" },
                 { key: "ignored", label: "ไม่ต้องจับคู่", value: counts.ignored, tone: "neutral", hint: "งานบริการ/เลิกขาย ฯลฯ" },
               ]} />
               <div className="flex items-center gap-3">

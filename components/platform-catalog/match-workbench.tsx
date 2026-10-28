@@ -150,7 +150,7 @@ export function MatchWorkbench({ open, onClose, title, items, suggestions, sugge
             {finished ? (
               <div className="py-16 text-center space-y-2">
                 <p className="text-base font-medium text-slate-800">ชุดนี้เสร็จแล้ว</p>
-                <p className="text-sm text-slate-500">จับคู่ไป {tally.ok} ตัว · ไม่ต้องจับคู่ {tally.ignored} ตัว · ข้ามไว้ {tally.skip} ตัว (ตัวที่ข้ามยังอยู่ในการ์ด &quot;ยังไม่มีคู่&quot;)</p>
+                <p className="text-sm text-slate-500">จับคู่ไป {tally.ok} ตัว · ไม่ต้องจับคู่ {tally.ignored} ตัว · ข้ามไว้ {tally.skip} ตัว (ตัวที่ข้ามไว้ยังรอจับคู่อยู่ในหน้ารายการ)</p>
                 <button type="button" onClick={onClose} className="mt-2 h-9 px-4 text-sm text-white bg-violet-600 rounded-lg hover:bg-violet-700">กลับไปหน้ารายการ</button>
               </div>
             ) : item && (
