@@ -95,8 +95,8 @@ export interface ListingConfig {
   cardMode: ListingCardMode;
   /** อัตโนมัติ: หมวดที่มีรุ่นน้อยกว่าเท่านี้ = แตกเป็นทีละสี */
   cardAutoMax: number;
-  /** การ์ดทีละสี: mix = สลับรุ่น (สีแรกของทุกรุ่นก่อน) · group = ทุกสีของรุ่นแรกก่อน */
-  skuOrder: "mix" | "group";
+  /** การ์ดทีละสี: mix = สลับรุ่น (สีแรกของทุกรุ่นก่อน) · group = ทุกสีของรุ่นแรกก่อน · code = ตามรหัส SKU (A→Z) · random = สุ่ม (ลูกค้าเข้าแต่ละครั้งได้ลำดับใหม่) */
+  skuOrder: ListingSkuOrder;
   /** ตั้งรายหมวด { รหัสหมวด | "all" (หน้าสินค้าทั้งหมด): parent | sku } — ไม่มี = ตามค่าทั้งเว็บ */
   cardModeByCat: Record<string, "parent" | "sku">;
   /** ลูกค้าสลับเองได้ (ปุ่ม "ดูแบบรุ่น | ดูทีละสี" บนหน้า) */
@@ -114,6 +114,14 @@ export const LISTING_CARD_MODES: { value: ListingCardMode; label: string; hint: 
   { value: "auto", label: "อัตโนมัติ (หมวดของน้อย)", hint: "หมวดที่มีรุ่นไม่ถึงที่ตั้ง = แตกเป็นทีละสี" },
 ];
 export const LISTING_CARD_AUTO_RANGE = { min: 2, max: 30 } as const;
+/** ↕ เรียงการ์ดทีละสี — code/random ใช้ตอนลูกค้าเรียงแบบ "แนะนำ" และไม่ได้ค้นหา (เลือกเรียงราคา/ใหม่ล่าสุด = เรียงตามนั้น) */
+export type ListingSkuOrder = "mix" | "group" | "code" | "random";
+export const LISTING_SKU_ORDERS: { value: ListingSkuOrder; label: string; hint: string }[] = [
+  { value: "mix", label: "สลับรุ่น", hint: "สีแรกของทุกรุ่นก่อน แล้วสีที่ 2 …" },
+  { value: "group", label: "ทีละรุ่น", hint: "ทุกสีของรุ่นเดียวกันอยู่ติดกัน" },
+  { value: "code", label: "ตามรหัส SKU", hint: "เรียงรหัส A→Z เช่น PIX24-01, PIX24-02 … PIX34-01" },
+  { value: "random", label: "สุ่ม", hint: "ลูกค้าเข้าแต่ละครั้งเห็นลำดับใหม่ (เลื่อนดู/ดูเพิ่ม/กลับจากหน้าสินค้า ลำดับไม่สลับ)" },
+];
 /** รหัสหน้า "สินค้าทั้งหมด" ในการตั้งรายหมวด */
 export const LISTING_ALL_KEY = "all";
 
@@ -469,7 +477,7 @@ function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig,
     stickyBar: r.stickyBar === true,
     cardMode: r.cardMode === "sku" || r.cardMode === "auto" ? r.cardMode : "parent",
     cardAutoMax: int(r.cardAutoMax, 6, LISTING_CARD_AUTO_RANGE.min, LISTING_CARD_AUTO_RANGE.max),
-    skuOrder: r.skuOrder === "group" ? "group" : "mix",
+    skuOrder: LISTING_SKU_ORDERS.some((o) => o.value === r.skuOrder) ? (r.skuOrder as ListingSkuOrder) : "mix",
     cardModeByCat: normalizeCardModeByCat(r.cardModeByCat),
     cardSwitch: r.cardSwitch === true,
   };

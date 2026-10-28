@@ -11,7 +11,7 @@ import { Seg } from "@/components/website-block-editor";
 import { RangeInput } from "@/components/range-input";
 import { categoryTree } from "@/lib/website-category-tree";
 import { loadStorefrontProducts } from "@/lib/website-data";
-import { LISTING_ALL_KEY, LISTING_CARD_AUTO_RANGE, LISTING_CARD_MODES, listingCardModeFor, type ListingConfig } from "@/lib/website-listing";
+import { LISTING_ALL_KEY, LISTING_CARD_AUTO_RANGE, LISTING_CARD_MODES, LISTING_SKU_ORDERS, listingCardModeFor, type ListingConfig } from "@/lib/website-listing";
 import { webForm } from "@/lib/website-form-styles";
 
 const box = "rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2";
@@ -86,16 +86,18 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
         </div>
       )}
       {anySku && (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-xs text-slate-700">เรียงการ์ดสี</span>
-          <Seg<"mix" | "group">
-            value={value.skuOrder}
-            onChange={(v) => set({ skuOrder: v })}
-            options={[
-              { v: "mix", l: "สลับรุ่น (สีแรกของทุกรุ่นก่อน)" },
-              { v: "group", l: "ทีละรุ่น (ทุกสีของรุ่นเดียวกันติดกัน)" },
-            ]}
-          />
+        <div className="space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-700">↕ เรียงการ์ดสี</span>
+            {/* nowrap: ปุ่ม "ตามรหัส SKU" ไม่หักเป็น 3 บรรทัด */}
+            <div className="whitespace-nowrap">
+              <Seg<ListingConfig["skuOrder"]> value={value.skuOrder} onChange={(v) => set({ skuOrder: v })} options={LISTING_SKU_ORDERS.map((o) => ({ v: o.value, l: o.label }))} />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500" data-sku-order-hint>
+            {LISTING_SKU_ORDERS.find((o) => o.value === value.skuOrder)?.hint}
+            {(value.skuOrder === "code" || value.skuOrder === "random") && " · ใช้ตอนเรียงแบบ \"แนะนำ\" — ลูกค้าเลือกเรียงราคา/ใหม่ล่าสุด หรือพิมพ์ค้นหา = เรียงตามนั้น"}
+          </p>
         </div>
       )}
 

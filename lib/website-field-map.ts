@@ -536,10 +536,10 @@ function resolveOptions(
   map: FieldMap,
   kids: ChildSku[],
   overrides: Record<string, string[]>
-): { label: string; items: { id: string; label: string; label_en?: string; image?: string | null; images?: string[] }[] } | null {
+): { label: string; items: { id: string; label: string; label_en?: string; code?: string; image?: string | null; images?: string[] }[] } | null {
   if (map.options.source !== "sku_color") return null;
   const seen = new Set<string>();
-  const items: { id: string; label: string; label_en?: string; image?: string | null; images?: string[] }[] = [];
+  const items: { id: string; label: string; label_en?: string; code?: string; image?: string | null; images?: string[] }[] = [];
   for (const k of sortKids(kids)) {
     // สีของ SKU ไซส์ที่พิมพ์ "/L" ติดท้าย (ข้อมูลเก่า) → นับเป็นสีเดียวกับตัวหลัก · ชื่อไทย (สี (ไทย)) ก่อน
     const label = baseColor(k);
@@ -549,7 +549,9 @@ function resolveOptions(
     const en = baseColorEn(k);
     // รูปของสีนั้น (r2 key) — เว็บร้านใช้สลับแกลเลอรีตอนกดเลือกสี (image = รูปแรก, images = ทั้งชุด)
     const imgs = kidImages(k, overrides);
-    items.push({ id: `sku-${k.id.slice(0, 8)}`, label, ...(en && en !== label ? { label_en: en } : {}), image: imgs[0] ?? null, images: imgs.length ? imgs : undefined });
+    // code = รหัส SKU ของสีนั้น (ตัวแรกถ้าสีเดียวมีหลายไซส์) — เว็บใช้ "↕ เรียงการ์ดสีตามรหัส SKU" ในหน้ารายการ
+    const code = clean(k.code);
+    items.push({ id: `sku-${k.id.slice(0, 8)}`, label, ...(en && en !== label ? { label_en: en } : {}), ...(code ? { code } : {}), image: imgs[0] ?? null, images: imgs.length ? imgs : undefined });
     if (items.length >= 24) break;
   }
   return items.length ? { label: map.options.label || "แบบ/สี", items } : null;
@@ -688,7 +690,7 @@ export interface ResolvedProduct {
   categories: string[];
   images: string[];
   /** items[].label = ชื่อสีไทย · label_en = ชื่ออังกฤษจาก SKU (ไม่มี = products API แปลจากทะเบียนสีกลาง) */
-  options: { label: string; items: { id: string; label: string; label_en?: string; swatch?: string | null; image?: string | null; images?: string[] }[] } | null;
+  options: { label: string; items: { id: string; label: string; label_en?: string; code?: string; swatch?: string | null; image?: string | null; images?: string[] }[] } | null;
   /** null = สินค้าชิ้นนี้มีตัวเลือกชั้นเดียว */
   options2: Options2 | null;
   /** 💰 ราคาต่อตัวเลือก (เฉพาะเมื่อแต่ละตัวเลือกราคาไม่เท่ากัน) — price ด้านบน = ราคาต่ำสุด ("เริ่มต้น") */
