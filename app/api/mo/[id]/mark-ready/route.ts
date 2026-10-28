@@ -17,7 +17,7 @@ import { friendlyDbError } from "../../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Body = { ready?: boolean; parts?: unknown; except?: unknown };
+type Body = { ready?: boolean; parts?: unknown; except?: unknown; done_date?: unknown };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -27,7 +27,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   let body: Body;
   try { body = await request.json(); } catch { body = {}; }
   const ready = body.ready !== false;   // default = true
-  const now = new Date().toISOString();
+  // done_date = วันที่เตรียม/ตัดเสร็จจริง (โหมดอัปเดตงานย้อนหลัง) → เที่ยงวันเวลาไทย กันวันเพี้ยนข้ามโซนเวลา
+  const now = typeof body.done_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.done_date) ? `${body.done_date}T12:00:00+07:00` : new Date().toISOString();
   const parts = Array.isArray(body.parts) ? body.parts.filter((p) => p === "prep" || p === "cut") : [];
   const doPrep = parts.length === 0 || parts.includes("prep");
   const doCut = parts.length === 0 || parts.includes("cut");

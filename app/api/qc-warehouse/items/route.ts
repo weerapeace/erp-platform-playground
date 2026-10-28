@@ -97,7 +97,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const remaining = Number(wo.received_qty ?? 0) - Number(wo.qc_pulled_qty ?? 0);
       if (good + badTotal > remaining) return NextResponse.json({ error: `รวมเกินจำนวนที่เหลือ (${remaining})` }, { status: 400 });
 
-      const base = { wo_id, mo_no: wo.mo_no, sku: wo.product_sku, sku_name: wo.product_name ?? wo.product_sku, worker: wo.assignee_name, source: "production" };
+      // date = วันที่รับเข้าจริง (โหมดอัปเดตงานย้อนหลัง) → ใช้เป็นเวลาเข้าชั้น (เที่ยงวันเวลาไทย)
+      const recvAt = typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? { created_at: `${body.date}T12:00:00+07:00` } : {};
+      const base = { wo_id, mo_no: wo.mo_no, sku: wo.product_sku, sku_name: wo.product_name ?? wo.product_sku, worker: wo.assignee_name, source: "production", ...recvAt };
       const rows: Record<string, unknown>[] = [];
       if (good > 0) rows.push({ ...base, shelf_id, qty: good, status: "good" });
       if (bad.length > 0) {
@@ -142,7 +144,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (!item) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
       const del = await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       if (del.error) return NextResponse.json({ error: friendlyDbError(del.error.message) }, { status: 400 });
-      await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: item.qty, mode: body.mode, wh: body.wh } });
+      await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: item.qty, mode: body.mode, wh: body.wh,
+        ...(typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? { date: body.date } : {}) } });
       return NextResponse.json({ error: null });
     }
 

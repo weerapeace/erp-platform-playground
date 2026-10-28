@@ -4379,7 +4379,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </div>
         )}
         <CatchUpModal moNo={cuMo} onClose={() => setCuMo(null)} onDone={() => onReload?.()}
-          departments={departments} craftsmen={craftsmen} workOrders={workOrders} />
+          departments={departments} craftsmen={craftsmen} workOrders={workOrders}
+          canMoveStaff={canMoveStaff} canAddNew={canEdit} onStaffChanged={() => onStaffChanged?.()} onDesksChanged={() => onReload?.()} />
       {/* เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรองให้ตารางได้ที่เต็ม (เหมือนแอป) · แตะแถบนี้หรือเลื่อนขึ้น = กลับมา
           สลับด้วย CSS: กล่องมี data-top="hidden" → แถบย่อโผล่ · ส่วนแท็บ/ตัวกรองซ่อน (ไม่ render ใหม่) */}
         <button type="button" onClick={() => setTopHidden(false)}

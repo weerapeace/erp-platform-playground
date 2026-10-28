@@ -29,11 +29,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { ids?: unknown; action?: unknown; reason?: unknown };
+  let body: { ids?: unknown; action?: unknown; reason?: unknown; date?: unknown; source?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const ids = Array.isArray(body.ids) ? [...new Set(body.ids.map((v) => String(v)).filter(Boolean))] : [];
   const action = body.action === "close" || body.action === "cancel" ? (body.action as MoBulkStatusAction) : null;
   const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
+  // โหมดอัปเดตงานย้อนหลัง: วันที่ปิด/ยกเลิกจริง (ไม่มีช่องในตาราง → เก็บในประวัติ)
+  const actualDate = typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : null;
+  const source = body.source === "catch_up" ? "catch_up" : "mo-backlog";
   if (!action) return NextResponse.json({ error: "ไม่รู้จักคำสั่งนี้" }, { status: 400 });
   if (!ids.length) return NextResponse.json({ error: "ไม่มีรายการที่เลือก" }, { status: 400 });
   if (ids.length > MAX_IDS) return NextResponse.json({ error: `เลือกได้ครั้งละไม่เกิน ${MAX_IDS} ใบ` }, { status: 400 });
@@ -102,7 +105,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     action: meta.auditAction, entityType: "mo", entityId: u.id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { mo_no: u.mo_no, field: "status", old_value: u.old_status, new_value: meta.to, reason: reason || null,
-      bulk: true, batch_count: updated.length, source: "mo-backlog" },
+      bulk: true, batch_count: updated.length, source, ...(actualDate ? { date: actualDate } : {}) },
   })));
 
   return NextResponse.json({ ok: true, action, updated: updated.map(({ id, mo_no }) => ({ id, mo_no })), skipped, linked_prs: linkedPrs, error: null });
