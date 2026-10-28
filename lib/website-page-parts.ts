@@ -62,6 +62,7 @@ export const ACCOUNT_PARTS: PartDef[] = [
   { key: "acc.ptitle", label: "หัวข้อหน้า", hint: "ชื่อแท็บที่เปิดอยู่ · หน้าต่างแอป", groups: ["text", "hide"] },
   { key: "acc.row", label: "แถวข้อมูลโปรไฟล์", hint: "โปรไฟล์แบบแถว", groups: ["text", "box"] },
   { key: "acc.aside", label: "กล่องข้างขวา", hint: "คู่มือ / โปรสมาชิก", groups: ["text", "box", "icon"] },
+  { key: "acc.timeline", label: "ไทม์ไลน์สถานะออเดอร์", hint: "✨ ไทม์ไลน์", groups: ["text", "layout", "box"] },
 ];
 
 /** ช่วงแถบเลื่อนในแผง (แคบกว่าที่ระบบรับ — พิมพ์ตัวเลขเกินได้ถึงขอบ PART_RANGES) + ค่าโชว์ตอนยังไม่ตั้ง */
