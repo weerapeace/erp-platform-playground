@@ -14,7 +14,7 @@ export type Db = ReturnType<typeof supabaseAdmin>;
 /** 🏷 แท็กในคลังกลางตาม "ที่มา" (folder ของไฟล์ที่อัป) — ไม่อยู่ในรายการ = ใช้ชื่อ folder ตรง ๆ · ใช้ร่วม /api/admin/upload + /api/assets/register */
 export const LIBRARY_FOLDER_LABEL: Record<string, string> = {
   "parent-skus": "สินค้า (Parent)", "skus": "สินค้า (SKU)",
-  "app-icons": "ไอคอนแอป", "section-icons": "ไอคอนหมวด", "overview-theme": "ธีมภาพรวม",
+  "app-icons": "ไอคอนแอป", "erp-icons": "ไอคอนระบบ", "section-icons": "ไอคอนหมวด", "overview-theme": "ธีมภาพรวม",
   "design-sheets": "งานออกแบบ", "uploads": "อัปทั่วไป",
   "storefront-hero": "รูปเปิดหน้าสินค้า (เว็บ)", "storefront-products": "รูปสินค้า (เว็บ)",
   "storefront-videos": "วิดีโอเว็บ", "storefront-images": "รูปเว็บ", "storefront-drops": "ปกชุดมาใหม่ (เว็บ)",

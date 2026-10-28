@@ -448,6 +448,7 @@ export default function MenuManagerPage() {
         <div className="flex items-center justify-between mb-1">
           <h1 className="text-2xl font-semibold text-slate-800">จัดการเมนู</h1>
           <div className="flex items-center gap-2">
+            <a href="/admin/icons" className="h-9 px-3 inline-flex items-center gap-1.5 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50" title="เปลี่ยนอีโมจิเป็นไอคอน / เปลี่ยนไอคอนทั้งระบบ">🔣 ไอคอนทั้งระบบ</a>
             {msg && <span className="text-xs text-emerald-600">✓ {msg}</span>}
             {rows.length === 0 && !loading && (
               <button onClick={importDefaults} disabled={busy} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">⬇ นำเข้าเมนูเริ่มต้น</button>

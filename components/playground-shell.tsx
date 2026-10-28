@@ -27,6 +27,7 @@ import { cachedGetJson } from "@/lib/shell-cache";
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { menuPlace, type AppMenuOverride } from "@/lib/app-menu-layout";
 import { appHomeHref, visibleAppMenus } from "@/lib/app-orbit";
+import { Icon } from "@/components/icon";
 
 // โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
 // เพิ่ม href ที่นี่เพื่อให้เมนูเปิดแท็บใหม่ + มีไอคอน ↗
@@ -224,7 +225,7 @@ function AppTabIcon({ icon, iconUrl }: { icon: string | null; iconUrl?: string |
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={`/api/r2-image?key=${encodeURIComponent(iconUrl)}&w=40`} alt="" className="w-[18px] h-[18px] rounded object-contain shrink-0" />;
   }
-  return <span>{icon ?? "📦"}</span>;
+  return <span><Icon value={icon ?? "📦"} /></span>;
 }
 
 // map section (default nav) → app key — สำหรับ "นำเข้าเมนูเริ่มต้น"
@@ -586,7 +587,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
         className={`flex items-center gap-2.5 py-2 rounded-lg text-sm transition-colors ${navExpanded ? (child ? "px-2" : "px-2.5") : "px-0 justify-center"} ${
           isActive ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
         }`}>
-        <span className={`${child ? "text-sm" : "text-base"} leading-none relative`}>{item.icon}
+        <span className={`${child ? "text-sm" : "text-base"} leading-none relative`}><Icon value={item.icon} />
           {!navExpanded && isReady && !isActive && <span className="absolute -top-0.5 -right-1 w-1.5 h-1.5 bg-emerald-400 rounded-full" />}
         </span>
         {navExpanded && <>
@@ -790,7 +791,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
                     {group.iconUrl
                       // eslint-disable-next-line @next/next/no-img-element
                       ? <img src={`/api/r2-image?key=${encodeURIComponent(group.iconUrl)}`} alt="" className="w-3.5 h-3.5 rounded object-contain shrink-0" />
-                      : group.icon ? <span className="text-xs leading-none shrink-0">{group.icon}</span> : null}
+                      : group.icon ? <span className="text-xs leading-none shrink-0"><Icon value={group.icon} /></span> : null}
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{group.label}</span>
                   </div>
                 : <div className="mx-2 mb-1 border-t border-slate-100" />}
@@ -807,7 +808,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
                     <div key={item.id ?? item.href}>
                       <button onClick={() => toggleNav(item.id ?? item.href)}
                         className={`w-full flex items-center gap-2.5 py-2 px-2.5 rounded-lg text-sm transition-colors ${parentActive ? "bg-blue-50 text-blue-700 font-medium" : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"}`}>
-                        <span className="text-base leading-none">{item.icon}</span>
+                        <span className="text-base leading-none"><Icon value={item.icon} /></span>
                         <span className="flex-1 leading-tight text-left">{item.labelTH}</span>
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className={`flex-shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`}><path d="m6 9 6 6 6-6" /></svg>
                       </button>
@@ -874,7 +875,7 @@ export function PlaygroundShell({ children }: { children: React.ReactNode }) {
             const on = pathname === it.href || pathname.startsWith(it.href + "/");
             return (
               <Link key={it.href} href={it.href} className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-0.5 py-1.5 ${on ? "text-blue-600" : "text-slate-500"}`}>
-                <span className="text-lg leading-none">{it.icon}</span>
+                <span className="text-lg leading-none"><Icon value={it.icon} /></span>
                 <span className="text-[10px] truncate max-w-full px-1">{it.labelTH}</span>
               </Link>
             );
