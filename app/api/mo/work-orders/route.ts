@@ -19,6 +19,8 @@ export const revalidate = 0;
 export type WorkOrder = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; product_name: string | null;
   stage: string; assignee_type: string; assignee_id: string | null; assignee_name: string | null;
+  /** คนรับงานหลายคน (assignee_name = ชื่อต่อกัน · assignee_id = คนแรก) — ว่าง = ทั้งโต๊ะ */
+  assignees?: { id: string | null; name: string }[];
   department_id: string | null; department_name: string | null;
   qty: number; uom: string | null; received_qty: number;
   dispatch_date: string | null; due_date: string | null; status: string; note: string | null;
@@ -58,10 +60,27 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 type CreateBody = {
   mo_no?: string; product_sku?: string | null; product_name?: string | null;
   stage?: string; assignee_type?: string; assignee_id?: string | null; assignee_name?: string | null;
+  assignees?: { id: string | null; name: string }[];   // คนรับงานหลายคน (ป๊อปจ่ายงาน)
   department_id?: string | null; department_name?: string | null;
+  /** dispatch_date: ไม่ส่ง/ว่าง = วันนี้ · null = จำไม่ได้ว่าจ่ายวันไหน (บันทึกเป็นว่าง) */
   qty?: number; uom?: string | null; dispatch_date?: string | null; due_date?: string | null; note?: string | null;
   labor_cost?: number | null;   // ค่าแรงผลิตรวม (กรอกตั้งแต่ตอนจ่ายงาน — default ราคากลาง × จำนวน)
 };
+
+/** คนรับงานจากฝั่ง client → [{id, name}] ที่สะอาด (ตัดชื่อว่าง/ซ้ำ) */
+function cleanCrew(v: unknown): { id: string | null; name: string }[] {
+  if (!Array.isArray(v)) return [];
+  const seen = new Set<string>(); const out: { id: string | null; name: string }[] = [];
+  for (const a of v.slice(0, 50)) {
+    const name = typeof a?.name === "string" ? a.name.trim().slice(0, 120) : "";
+    const id = typeof a?.id === "string" && a.id ? a.id : null;
+    const key = id ?? `n:${name}`;
+    if (!name || seen.has(key)) continue;
+    seen.add(key); out.push({ id, name });
+  }
+  return out;
+}
+const isYmd = (s: unknown): s is string => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;
@@ -75,6 +94,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (qty <= 0) return NextResponse.json({ error: "จำนวนที่จ่ายต้องมากกว่า 0" }, { status: 400 });
   if (!body.assignee_name) return NextResponse.json({ error: "ต้องเลือกผู้รับงาน" }, { status: 400 });
 
+  const crew = cleanCrew(body.assignees);
   const admin = supabaseAdmin();
   const woNo = await nextWoNo(admin);
 
@@ -104,10 +124,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     wo_no: woNo, mo_no: body.mo_no, product_sku: body.product_sku ?? null, product_name: body.product_name ?? null,
     stage: body.stage || "cut", assignee_type: body.assignee_type || "craftsman",
     assignee_id: body.assignee_id ?? null, assignee_name: body.assignee_name ?? null,
+    assignees: crew,
     department_id: body.department_id ?? null, department_name: body.department_name ?? null,
     qty, uom: body.uom ?? null, received_qty: 0,
     labor_cost: laborCost,
-    dispatch_date: body.dispatch_date || new Date().toISOString().slice(0, 10),
+    dispatch_date: body.dispatch_date === null ? null : (isYmd(body.dispatch_date) ? body.dispatch_date : new Date().toISOString().slice(0, 10)),
     due_date: body.due_date || null, status: "dispatched", note: body.note ?? null,
     created_by: user.id, is_active: true,
   }).select("id, wo_no").single();
@@ -135,7 +156,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     worker: isCraft ? (body.assignee_name ?? "") : "ทั้งแผนก", dept: body.department_name ?? "แผนก",
     qty, due: body.due_date ?? "—", mo_no: body.mo_no, link,
   });
-  if (isCraft) await dmEmployeeById(admin, body.assignee_id, `📤 คุณได้รับงานใหม่\n${body.product_sku ?? ""} · ${body.product_name ?? ""}\nจำนวน ${qty} ชิ้น${body.due_date ? ` · กำหนด ${body.due_date}` : ""}\n🔗 ${link}`);
+  // แจ้งทุกคนที่รับงาน (หลายคน) — ของเก่าที่ส่งมาแค่ assignee_id ก็ยังแจ้งเหมือนเดิม
+  const dmIds = isCraft ? [...new Set([...crew.map((c) => c.id).filter((x): x is string => !!x), body.assignee_id as string])] : [];
+  for (const id of dmIds) await dmEmployeeById(admin, id, `📤 คุณได้รับงานใหม่\n${body.product_sku ?? ""} · ${body.product_name ?? ""}\nจำนวน ${qty} ชิ้น${body.due_date ? ` · กำหนด ${body.due_date}` : ""}\n🔗 ${link}`);
 
   return NextResponse.json({ id: wo.id, wo_no: woNo, error: null });
 }
@@ -143,7 +166,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 // PATCH — แก้ใบงานจริง (ค่าแรง / ผู้รับงาน) หลังจ่ายแล้ว
 type PatchBody = { id?: string; labor_cost?: number | null; assignee_type?: string | null; assignee_id?: string | null; assignee_name?: string | null; assignees?: { id: string | null; name: string }[];
   // ย้ายโต๊ะ (ลากการ์ดข้ามคอลัมน์บนบอร์ด)
-  department_id?: string | null; department_name?: string | null; stage?: string | null };
+  department_id?: string | null; department_name?: string | null; stage?: string | null;
+  /** แก้วันที่จ่าย (คีย์ผิด/นึกออกทีหลัง) · null = ไม่ระบุวัน */
+  dispatch_date?: string | null };
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
@@ -156,7 +181,11 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if ("labor_cost" in body)    patch.labor_cost    = body.labor_cost != null ? num(body.labor_cost) : null;
   if ("assignee_type" in body) patch.assignee_type = body.assignee_type ?? "department";
   if ("assignee_id" in body)   patch.assignee_id   = body.assignee_id ?? null;
-  if ("assignees" in body)     patch.assignees     = Array.isArray(body.assignees) ? body.assignees : [];
+  if ("assignees" in body)     patch.assignees     = cleanCrew(body.assignees);
+  if ("dispatch_date" in body) {
+    if (body.dispatch_date !== null && !isYmd(body.dispatch_date)) return NextResponse.json({ error: "วันที่จ่ายไม่ถูกต้อง" }, { status: 400 });
+    patch.dispatch_date = body.dispatch_date;
+  }
   if ("assignee_name" in body) patch.assignee_name = body.assignee_name ?? null;
   // ย้ายโต๊ะ — ลากการ์ดใบจ่ายงานข้ามคอลัมน์ (บอร์ด "ของจริง")
   if ("department_id" in body)   patch.department_id   = body.department_id ?? null;

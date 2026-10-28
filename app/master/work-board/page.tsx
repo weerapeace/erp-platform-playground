@@ -74,6 +74,8 @@ import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-
 import { PwaInstallButton } from "@/components/pwa-install-button";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import { DeskStaffPanel } from "./desk-staff-panel";
+import { CrewPick, crewFields, crewList, crewIdsOf, lastCrewIds } from "./crew-pick";
+import { DispatchDatePick } from "./dispatch-date-pick";
 import type { LaborRate } from "@/app/api/bom/labor-rates/route";
 import type { Brand } from "@/app/api/brands/route";
 
@@ -368,9 +370,9 @@ function WorkBoardPageInner() {
   const [dispDept, setDispDept] = useState<Dept | null>(null);
   const [deskPanel, setDeskPanel] = useState(false);   // 👥 แผงจัดคนในโต๊ะ (ในป๊อปจ่ายงาน)
   const [dispQty, setDispQty] = useState(0);
-  const [dispCraftsman, setDispCraftsman] = useState("");
+  const [dispCrew, setDispCrew] = useState<string[]>([]);   // 👥 คนรับงาน (หลายคนได้ · ว่าง = ทั้งโต๊ะ/จำไม่ได้ว่าใคร)
   const [dispDue, setDispDue] = useState("");
-  const [dispDate, setDispDate] = useState(todayLocal());   // วันที่จ่ายงาน (ตั้งต้น = วันนี้) — ย้อนวันได้เวลาคีย์ตามหลัง
+  const [dispDate, setDispDate] = useState<string | null>(todayLocal());   // วันที่จ่ายงาน (ตั้งต้น = วันนี้) — ย้อนวันได้ · null = จำไม่ได้ (ไม่ระบุวัน)
   const [dispSaving, setDispSaving] = useState(false);
   const [dispPiece, setDispPiece] = useState<PendingPiece | null>(null);   // งานเหมารายชิ้นที่กำลังจ่ายให้ช่างเหมา
   const [pieceCraftsman, setPieceCraftsman] = useState("");
@@ -382,6 +384,11 @@ function WorkBoardPageInner() {
   const [brands, setBrands] = useState<Brand[]>([]);
   // คลิกการ์ด = ดูรายละเอียด / รับงานคืน
   const [detailWO, setDetailWO] = useState<WorkOrder | null>(null);
+  // ✏️ แก้คนรับงาน / วันที่จ่าย ของใบที่จ่ายไปแล้ว (ในรายละเอียดใบงาน) — null = ไม่ได้แก้อยู่
+  const [crewEdit, setCrewEdit] = useState<string[] | null>(null);
+  const [dateEdit, setDateEdit] = useState<{ v: string | null } | null>(null);
+  const [woFixSaving, setWoFixSaving] = useState(false);
+  useEffect(() => { setCrewEdit(null); setDateEdit(null); }, [detailWO?.id]);
   const [detailMO, setDetailMO] = useState<PendingMO | null>(null);
   const [recvQty, setRecvQty] = useState(0);
   const [recvSaving, setRecvSaving] = useState(false);
@@ -602,7 +609,7 @@ function WorkBoardPageInner() {
 
   // เปิด popup จ่ายงาน (ตั้งค่าเริ่มต้นจาก MO)
   const openDispatch = useCallback((mo: PendingMO, dept: Dept | null) => {
-    setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCraftsman(""); setDispDue(mo.internal_due_date ?? mo.due_date ?? ""); setDispDate(todayLocal());
+    setDispMO(mo); setDispDept(dept); setDispQty(mo.remaining); setDispCrew([]); setDispDue(mo.internal_due_date ?? mo.due_date ?? ""); setDispDate(todayLocal());
     setDispRates([]); setDispLaborRate(""); setDefectListOpen(false);
     // ดึงค่าแรง/ชิ้น จาก BOM ของสินค้านี้ (ราคากลาง + รายช่าง) → ใช้ตั้ง default
     if (mo.bom_code) void (async () => {
@@ -613,12 +620,13 @@ function WorkBoardPageInner() {
   // ตั้งค่าแรง/ชิ้น default ตามช่างที่เลือก (มีเรตเฉพาะ → ใช้, ไม่งั้นราคากลาง)
   useEffect(() => {
     if (!dispMO) return;
-    const byCraft = dispCraftsman ? dispRates.find((r) => r.craftsman_id === dispCraftsman) : null;
+    // เลือกคนเดียวที่มีเรตเฉพาะ → ใช้เรตคนนั้น · หลายคน/ทั้งโต๊ะ → ราคากลาง
+    const byCraft = dispCrew.length === 1 ? dispRates.find((r) => r.craftsman_id === dispCrew[0]) : null;
     const central = dispRates.find((r) => !r.craftsman_id);
     const pick = byCraft ?? central;
     if (pick) setDispLaborRate(String(pick.rate));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dispCraftsman, dispRates]);
+  }, [dispCrew, dispRates]);
 
   // ---- pointer ----
   const onBoardDown = (e: RPE) => {
@@ -725,20 +733,44 @@ function WorkBoardPageInner() {
     if (!dispMO || !dispDept) return;
     if (!(dispQty > 0)) { toast.error("จำนวนต้องมากกว่า 0"); return; }
     // ค่าแรงว่างได้ — จ่ายก่อน ค่อยมาใส่ทีหลัง (ปุ่ม 💰 ใส่ค่าแรง ที่การ์ดในโต๊ะ / ตอนส่งงาน)
-    const craft = craftsmen.find((c) => c.id === dispCraftsman);
+    const crew = crewList(dispCrew, deptCraftsmen);   // เฉพาะคนที่ยังอยู่ในโต๊ะนี้ (เปลี่ยนโต๊ะ/ย้ายคน → ตัดทิ้ง)
     setDispSaving(true);
     try {
       const res = await apiFetch("/api/mo/work-orders", { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mo_no: dispMO.mo_no, product_sku: dispMO.product_sku, product_name: dispMO.product_name,
           stage: stageOfDept(dispDept.name), department_id: dispDept.id, department_name: dispDept.name,
-          assignee_type: craft ? "craftsman" : "department", assignee_id: craft?.id ?? null, assignee_name: craft?.name ?? dispDept.name,
-          qty: dispQty, uom: "ชิ้น", dispatch_date: dispDate || todayLocal(), due_date: dispDue || null, note: `จากใบสั่งผลิต ${dispMO.mo_no}`,
+          ...crewFields(crew, dispDept.name),
+          // null = จำไม่ได้ว่าจ่ายวันไหน (บันทึกเป็นว่าง)
+          qty: dispQty, uom: "ชิ้น", dispatch_date: dispDate === null ? null : (dispDate || todayLocal()), due_date: dispDue || null, note: `จากใบสั่งผลิต ${dispMO.mo_no}`,
           labor_cost: dispLaborRate.trim() !== "" ? (Number(dispLaborRate) || 0) * dispQty : null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success(`จ่ายงานเข้า ${dispDept.name} แล้ว: ${j.wo_no ?? ""}`);
+      toast.success(`จ่ายงานเข้า ${dispDept.name}${crew.length ? ` · ${crew.map((c) => c.name).join(", ")}` : ""} แล้ว: ${j.wo_no ?? ""}`);
       setDispMO(null); setDispDept(null); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
     finally { setDispSaving(false); }
+  };
+
+  // ✏️ แก้คนรับงาน/วันที่จ่าย ของใบที่จ่ายแล้ว (ลืมว่าให้ใคร/วันไหน · เพิ่มคนช่วย) — PATCH ตัวเดียวกับบอร์ดแผน
+  const crewPoolOf = (wo: WorkOrder) => {
+    const desk = /เหมา/.test(wo.department_name ?? "") ? craftsmen : craftsmen.filter((c) => c.department_id === wo.department_id);
+    const cur = crewIdsOf(wo);   // คนที่รับอยู่แต่ย้ายโต๊ะไปแล้ว ยังโชว์ให้เอาออกได้
+    return [...desk, ...craftsmen.filter((c) => cur.includes(c.id) && !desk.includes(c))];
+  };
+  const saveWoFix = async (patch: Partial<WorkOrder>, okMsg: string) => {
+    if (!detailWO) return;
+    setWoFixSaving(true);
+    try {
+      const res = await apiFetch("/api/mo/work-orders", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: detailWO.id, ...patch }) });
+      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      setDetailWO({ ...detailWO, ...patch }); setCrewEdit(null); setDateEdit(null);
+      toast.success(okMsg); void load(true);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setWoFixSaving(false); }
+  };
+  const saveCrew = () => {
+    if (!detailWO || crewEdit === null) return;
+    const f = crewFields(crewList(crewEdit, crewPoolOf(detailWO)), detailWO.department_name ?? "");
+    void saveWoFix(f, f.assignees.length ? `บันทึกคนรับงานแล้ว: ${f.assignee_name}` : "ตั้งเป็นทั้งโต๊ะรับงาน (ไม่ระบุคน) แล้ว");
   };
 
   // A: จ่ายจริงทันที (แตะการ์ด→แตะโต๊ะ บนบอร์ดของจริง) — ไม่เปิดหน้าต่าง
@@ -1818,13 +1850,13 @@ function WorkBoardPageInner() {
       <ERPModal open={dispMO !== null} onClose={() => { if (dispSaving) return; setDispMO(null); void load(true); }} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
         footer={<>
           <button onClick={() => setDispMO(null)} disabled={dispSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-          <button onClick={submitDispatch} disabled={dispSaving || !dispDept || (dispIsHire && !dispCraftsman)} title={!dispDept ? "เลือกโต๊ะก่อน" : (dispIsHire && !dispCraftsman) ? "งานเหมา ต้องเลือกช่างก่อน" : !(Number(dispLaborRate) > 0) ? "จ่ายได้เลย — ค่าแรงค่อยมาใส่ทีหลัง" : ""} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
+          <button onClick={submitDispatch} disabled={dispSaving || !dispDept || (dispIsHire && dispCrew.length === 0)} title={!dispDept ? "เลือกโต๊ะก่อน" : (dispIsHire && dispCrew.length === 0) ? "งานเหมา ต้องเลือกช่างก่อน" : !(Number(dispLaborRate) > 0) ? "จ่ายได้เลย — ค่าแรงค่อยมาใส่ทีหลัง" : ""} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
         </>}>
         {dispMO && (
           <div className="space-y-3">
             <p className="text-[11px] text-slate-400">ใบสั่งผลิต <b>{dispMO.mo_no}</b> · {dispMO.product_name ?? dispMO.product_sku} · เหลือจ่าย {fmt(dispMO.remaining)} ชิ้น</p>
             <label className="block"><span className="text-[11px] text-slate-500">โต๊ะ/แผนกที่จ่าย</span>
-              <select value={dispDept?.id ?? ""} onChange={(e) => setDispDept(board.departments.find((d) => d.id === e.target.value) ?? null)}
+              <select value={dispDept?.id ?? ""} onChange={(e) => { setDispDept(board.departments.find((d) => d.id === e.target.value) ?? null); setDispCrew([]); }}
                 className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
                 <option value="">— เลือกโต๊ะ —</option>
                 {board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).map((d) => {
@@ -1848,23 +1880,21 @@ function WorkBoardPageInner() {
               <label className="block"><span className="text-[11px] text-slate-500">จำนวนที่จ่าย</span>
                 <input type="number" min={0} step="any" max={dispMO.remaining} value={dispQty} onChange={(e) => setDispQty(Number(e.target.value))}
                   className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
-              <label className="block"><span className="text-[11px] text-slate-500">วันที่จ่าย</span>
-                <input type="date" value={dispDate} onChange={(e) => setDispDate(e.target.value)} title="วันที่จ่ายงานจริง — ตั้งต้นเป็นวันนี้ ย้อนวันได้ถ้าคีย์ตามหลัง"
-                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+              <div><span className="text-[11px] text-slate-500">วันที่จ่าย</span>
+                <div className="mt-0.5"><DispatchDatePick value={dispDate} onChange={setDispDate} /></div></div>
               <label className="block"><span className="text-[11px] text-slate-500">กำหนดเสร็จ</span>
                 <input type="date" value={dispDue} onChange={(e) => setDispDue(e.target.value)} className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
             </div>
-            <label className="block"><span className="text-[11px] text-slate-500">{dispIsHire ? "เลือกช่าง (งานเหมา — จำเป็น *)" : `ช่างในแผนก ${dispDept?.name ?? ""}`}</span>
-              <div className="mt-0.5">
-                <SearchableSelect value={dispCraftsman} onChange={setDispCraftsman} placeholder={dispIsHire ? "— เลือกช่าง (จำเป็น) —" : "— ทั้งแผนก (ไม่ระบุช่าง) —"}
-                  options={[
-                    ...(dispIsHire ? [] : [{ value: "", label: "— ทั้งแผนก (ไม่ระบุช่าง) —" }]),
-                    ...deptCraftsmen.map((c) => { const d = defectScoped(c.name, parentKeyOf(dispMO.product_sku)); return { value: c.id, label: `${d ? "⚠️ " : ""}${c.code ? `[${c.code}] ` : ""}${c.name}`, sub: d ? `เคยทำรุ่นนี้เสีย ${d.count} ครั้ง` : undefined, searchText: `${c.code ?? ""} ${c.name}` }; }),
-                  ]} />
+            {dispDept && (
+              <div>
+                <span className="text-[11px] text-slate-500">{dispIsHire ? "👥 คนรับงาน (งานเหมา — ต้องเลือก *)" : `👥 คนรับงานใน ${dispDept.name} — กดได้หลายคน`}</span>
+                <div className="mt-1">
+                  <CrewPick people={deptCraftsmen} value={dispCrew} onChange={setDispCrew} required={dispIsHire}
+                    recent={lastCrewIds(board.workOrders, dispDept.id, deptCraftsmen)}
+                    flag={(p) => { const d = defectScoped(p.name, parentKeyOf(dispMO.product_sku)); return d ? `เคยทำรุ่นนี้เสีย ${d.count} ครั้ง` : null; }} />
+                </div>
               </div>
-              {dispIsHire ? <span className="text-[10px] text-rose-500">งานเหมา — ต้องเลือกช่าง (จ่ายทั้งแผนกไม่ได้) · พิมพ์ชื่อ/รหัสค้นหา</span>
-                : deptCraftsmen.length === 0 && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
-            </label>
+            )}
             {/* ค่าแรงผลิต/ชิ้น — default ราคากลางจาก BOM (เลือกช่างที่มีเรต → ใช้เรตช่างนั้น) */}
             <label className="block">
               <span className="text-[11px] text-slate-500">💰 ค่าแรงผลิต / ชิ้น (บาท) <span className="text-slate-400">— เว้นว่างได้ ใส่ทีหลังก็ได้</span></span>
@@ -1877,12 +1907,14 @@ function WorkBoardPageInner() {
             </label>
             {/* กลุ่ม B: เตือนถ้าผู้รับงานเคยทำ "รุ่นเดียวกัน (Parent SKU)" เสีย — กดดูได้ว่างานอะไร */}
             {(() => {
-              const craftName = deptCraftsmen.find((c) => c.id === dispCraftsman)?.name ?? null;
-              const targetName = craftName ?? dispDept?.name ?? "";
-              const d = defectScoped(targetName, parentKeyOf(dispMO.product_sku));
-              if (!d) return null;
-              return (
-                <div className={`rounded-lg border px-3 py-2 text-xs ${dispIsHire ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}>
+              // เลือกหลายคน → เตือนทีละคนที่เคยทำรุ่นนี้เสีย · ไม่เลือกใคร → ดูของทั้งโต๊ะ
+              const picked = deptCraftsmen.filter((c) => dispCrew.includes(c.id)).map((c) => c.name);
+              const hits = (picked.length ? picked : [dispDept?.name ?? ""]).flatMap((n) => {
+                const d = defectScoped(n, parentKeyOf(dispMO.product_sku)); return d ? [{ targetName: n, d }] : [];
+              });
+              if (!hits.length) return null;
+              return hits.map(({ targetName, d }) => (
+                <div key={targetName} className={`rounded-lg border px-3 py-2 text-xs ${dispIsHire ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-amber-50 border-amber-200 text-amber-700"}`}>
                   <button type="button" onClick={() => setDefectListOpen((o) => !o)} className="w-full text-left">
                     ⚠️ <b>{targetName}</b> เคยทำ<b>รุ่นนี้</b>เสีย <b>{d.count}</b> ครั้ง
                     {d.types.length > 0 && <span className="opacity-70"> ({d.types.slice(0, 3).join(", ")}{d.types.length > 3 ? "…" : ""})</span>}
@@ -1903,7 +1935,7 @@ function WorkBoardPageInner() {
                   )}
                   {dispIsHire && <div className="mt-0.5 text-[11px] font-medium">เป็นช่างเหมา — โปรดพิจารณาก่อนจ่ายงาน</div>}
                 </div>
-              );
+              ));
             })()}
           </div>
         )}
@@ -1939,12 +1971,48 @@ function WorkBoardPageInner() {
             <p className="font-medium text-slate-800">{detailWO.product_name ?? detailWO.product_sku}</p>
             <div className="grid grid-cols-2 gap-y-1 text-xs text-slate-500">
               <span>ใบสั่งผลิต</span><span className="text-slate-700">{detailWO.mo_no}</span>
-              <span>แผนก/ผู้รับ</span><span className="text-slate-700">{detailWO.department_name ?? "—"} · {detailWO.assignee_name ?? "—"}</span>
+              <span>แผนก/ผู้รับ</span>
+              <span className="text-slate-700">{detailWO.department_name ?? "—"} · {detailWO.assignee_name ?? "—"}
+                {canDispatch && detailWO.status !== "cancelled" && crewEdit === null && (
+                  <button type="button" onClick={() => setCrewEdit(crewIdsOf(detailWO))} className="ml-1.5 text-violet-700 hover:underline">✏️ แก้</button>
+                )}
+              </span>
+              <span>วันที่จ่าย</span>
+              <span className="text-slate-700">{detailWO.dispatch_date ? new Date(detailWO.dispatch_date).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : <span className="text-amber-600">🤷 ไม่ระบุ</span>}
+                {canDispatch && detailWO.status !== "cancelled" && dateEdit === null && (
+                  <button type="button" onClick={() => setDateEdit({ v: detailWO.dispatch_date })} className="ml-1.5 text-violet-700 hover:underline">✏️ แก้</button>
+                )}
+              </span>
               <span>จ่าย</span><span className="text-slate-700">{fmt(detailWO.qty)} ชิ้น</span>
               <span>ส่งแล้ว</span><span className="text-slate-700">{fmt(detailWO.received_qty)} · เหลือ {fmt(detailWO.qty - detailWO.received_qty)}</span>
               <span>กำหนดเสร็จ</span><span className="text-slate-700">{detailWO.due_date ?? "—"}</span>
               <span>สถานะ</span><span><span className={`text-[11px] px-2 py-0.5 rounded border ${(WO_STATUS[detailWO.status] ?? WO_STATUS.dispatched).cls}`}>{(WO_STATUS[detailWO.status] ?? WO_STATUS.dispatched).label}</span></span>
             </div>
+            {crewEdit !== null && (() => {
+              const pool = crewPoolOf(detailWO);
+              const hire = /เหมา/.test(detailWO.department_name ?? "");
+              return (
+                <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2 space-y-2">
+                  <div className="text-[11px] font-medium text-violet-800">👥 คนรับงานใบนี้ — กดได้หลายคน</div>
+                  <CrewPick people={pool} value={crewEdit} onChange={setCrewEdit} required={hire} recent={lastCrewIds(board.workOrders, detailWO.department_id, pool)} />
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setCrewEdit(null)} disabled={woFixSaving} className="h-8 px-3 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50">ยกเลิก</button>
+                    <button type="button" onClick={saveCrew} disabled={woFixSaving || (hire && crewEdit.length === 0)} className="h-8 px-3 text-xs bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">{woFixSaving ? "กำลังบันทึก…" : "บันทึกคนรับ"}</button>
+                  </div>
+                </div>
+              );
+            })()}
+            {dateEdit !== null && (
+              <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2 space-y-2">
+                <div className="text-[11px] font-medium text-violet-800">📅 วันที่จ่ายใบนี้</div>
+                <DispatchDatePick value={dateEdit.v} onChange={(v) => setDateEdit({ v })} />
+                <div className="flex justify-end gap-2">
+                  <button type="button" onClick={() => setDateEdit(null)} disabled={woFixSaving} className="h-8 px-3 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50">ยกเลิก</button>
+                  <button type="button" onClick={() => void saveWoFix({ dispatch_date: dateEdit.v }, dateEdit.v ? "บันทึกวันที่จ่ายแล้ว" : "ตั้งเป็นไม่ระบุวันแล้ว")} disabled={woFixSaving}
+                    className="h-8 px-3 text-xs bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">{woFixSaving ? "กำลังบันทึก…" : "บันทึกวันที่"}</button>
+                </div>
+              </div>
+            )}
             {detailWO.status !== "done" && (
               <div className="grid grid-cols-2 gap-3 pt-1">
                 <label className="block"><span className="text-[11px] text-slate-500">ส่งรอบนี้ (ชิ้น)</span>
@@ -3159,7 +3227,7 @@ function WOBody({ w }: { w: WorkOrder }) {
       {/* ช่างที่จ่าย — badge มุมซ้ายบน */}
       {w.assignee_name && (
         <span className="absolute -top-2.5 left-2 z-20 inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-white shadow-sm truncate max-w-[85%]" style={{ border: `2px solid ${border}`, color: border }} title={w.assignee_name}>
-          {w.assignee_type === "department" ? "🏢" : "👤"} {w.assignee_name}
+          {w.assignee_type === "department" ? "🏢" : (w.assignees?.length ?? 0) > 1 ? "👥" : "👤"} {w.assignee_name}
         </span>
       )}
       <div className="relative w-full aspect-[4/3] rounded-md bg-slate-50 border border-slate-100 overflow-hidden flex items-center justify-center mb-1.5 mt-1.5">
@@ -3325,9 +3393,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const [dispOpen, setDispOpen] = useState(false);
   const [dispDeptId, setDispDeptId] = useState("");
   const [deskPanel, setDeskPanel] = useState(false);   // 👥 แผงจัดคนในโต๊ะ (ในป๊อปจ่ายงาน)
-  const [dispCraft, setDispCraft] = useState("");
+  const [dispCrew, setDispCrew] = useState<string[]>([]);   // 👥 คนรับงาน (หลายคนได้ · ว่าง = ทั้งโต๊ะ/จำไม่ได้ว่าใคร)
   const [dispDue2, setDispDue2] = useState("");
-  const [dispDate2, setDispDate2] = useState(todayLocal());   // วันที่จ่ายงาน (ตั้งต้น = วันนี้)
+  const [dispDate2, setDispDate2] = useState<string | null>(todayLocal());   // วันที่จ่ายงาน (ตั้งต้น = วันนี้ · null = จำไม่ได้)
   const [dispRate, setDispRate] = useState("");                       // ช่อง "ใส่ให้ทุกใบ" (ตัวช่วย)
   const [dispRateBy, setDispRateBy] = useState<Record<string, string>>({});   // ค่าแรง/ชิ้น รายใบ (ตั้งต้นจากสูตรของสินค้านั้น)
   const [dispBusy, setDispBusy] = useState(false);
@@ -3668,9 +3736,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     if (!dept) { toast.error("เลือกโต๊ะ/แผนกก่อน"); return; }
     const list = pending.filter((m) => sel.has(m.id) && m.remaining > 0);
     if (!list.length) { toast.error("ใบที่ติ๊กไว้ไม่มีจำนวนคงเหลือให้จ่าย"); return; }
-    const craft = craftsmen.find((c) => c.id === dispCraft);
-    // งานเหมา = ต้องระบุช่าง (กฎเดียวกับป๊อปจ่ายงานปกติ)
-    if (/เหมา/.test(dept.name) && !craft) { toast.error("งานเหมา ต้องเลือกช่างก่อน"); return; }
+    const hire = /เหมา/.test(dept.name);
+    const crew = crewList(dispCrew, hire ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id));
+    // งานเหมา = ต้องระบุคน (กฎเดียวกับป๊อปจ่ายงานปกติ)
+    if (hire && !crew.length) { toast.error("งานเหมา ต้องเลือกช่างก่อน"); return; }
+    const who = crewFields(crew, dept.name);
     const rateFor = (m: PendingMO) => {
       const v = dispRateBy[m.id];
       if (v == null || v.trim() === "") return 0;
@@ -3687,8 +3757,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           body: JSON.stringify({
             mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
             stage: stageOfDept(dept.name), department_id: dept.id, department_name: dept.name,
-            assignee_type: craft ? "craftsman" : "department", assignee_id: craft?.id ?? null, assignee_name: craft?.name ?? dept.name,
-            qty: m.remaining, uom: "ชิ้น", dispatch_date: dispDate2 || todayLocal(),
+            ...who,
+            qty: m.remaining, uom: "ชิ้น", dispatch_date: dispDate2 === null ? null : (dispDate2 || todayLocal()),
             due_date: dispDue2 || m.internal_due_date || m.due_date || null,
             note: `จากใบสั่งผลิต ${m.mo_no}`,
             // ค่าแรงรายใบ (0 = ไม่ส่ง → เซิร์ฟเวอร์เติมจากใบสั่งผลิต/ราคากลางในสูตรให้เอง)
@@ -3700,10 +3770,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       } catch (e) { fails.push(`${m.product_sku ?? m.mo_no}: ${e instanceof Error ? e.message : "ไม่สำเร็จ"}`); }
     }
     setDispBusy(false); setDispMsg("");
-    if (ok > 0) toast.success(`จ่ายเข้า ${dept.name}${craft ? ` · ${craft.name}` : ""} แล้ว ${ok} ใบ`);
+    if (ok > 0) toast.success(`จ่ายเข้า ${dept.name}${crew.length ? ` · ${who.assignee_name}` : ""} แล้ว ${ok} ใบ`);
     if (fails.length) toast.error(`ไม่สำเร็จ ${fails.length} ใบ — ${fails[0]}`);
     if (ok > 0) { setDispOpen(false); setSel(new Set()); onReload?.(); }
-  }, [pending, sel, departments, craftsmen, dispDeptId, dispCraft, dispDate2, dispDue2, dispRateBy, toast, onReload]);
+  }, [pending, sel, departments, craftsmen, dispDeptId, dispCrew, dispDate2, dispDue2, dispRateBy, toast, onReload]);
 
   // ใส่ค่าแรง/ชิ้น ให้ใบจ่ายงานที่ติ๊กไว้ — ใบละ (ค่าแรง/ชิ้น × จำนวนของใบนั้น)
   const selWos = wos.filter((w) => woSel.has(w.id));
@@ -4466,8 +4536,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             footer={<>
               <span className="mr-auto text-[11px] text-slate-400">{dispMsg}</span>
               <button onClick={() => setDispOpen(false)} disabled={dispBusy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-              <button onClick={() => void dispatchSelected()} disabled={dispBusy || !dept || (isHire && !dispCraft)}
-                title={!dept ? "เลือกโต๊ะก่อน" : (isHire && !dispCraft) ? "งานเหมา ต้องเลือกช่างก่อน" : ""}
+              <button onClick={() => void dispatchSelected()} disabled={dispBusy || !dept || (isHire && dispCrew.length === 0)}
+                title={!dept ? "เลือกโต๊ะก่อน" : (isHire && dispCrew.length === 0) ? "งานเหมา ต้องเลือกช่างก่อน" : ""}
                 className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
                 {dispBusy ? "กำลังจ่าย..." : `ยืนยันจ่ายงาน ${selPend.length} ใบ`}
               </button>
@@ -4478,7 +4548,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
               </p>
 
               <label className="block"><span className="text-[11px] text-slate-500">โต๊ะ/แผนกที่จ่าย</span>
-                <select value={dispDeptId} onChange={(e) => { setDispDeptId(e.target.value); setDispCraft(""); }}
+                <select value={dispDeptId} onChange={(e) => { setDispDeptId(e.target.value); setDispCrew([]); }}
                   className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
                   <option value="">— เลือกโต๊ะ —</option>
                   {departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).map((d) => {
@@ -4499,22 +4569,18 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
                   wos={workOrders} onDesksChanged={(focus) => { onReload?.(); setDispDeptId(focus ?? ""); }} />
               )}
 
-              <label className="block"><span className="text-[11px] text-slate-500">{isHire ? "เลือกช่าง (งานเหมา — จำเป็น *)" : `ช่างในแผนก ${dept?.name ?? ""}`}</span>
-                <div className="mt-0.5">
-                  <SearchableSelect value={dispCraft} onChange={setDispCraft} placeholder={isHire ? "— เลือกช่าง (จำเป็น) —" : "— ทั้งแผนก (ไม่ระบุช่าง) —"}
-                    options={[
-                      ...(isHire ? [] : [{ value: "", label: "— ทั้งแผนก (ไม่ระบุช่าง) —" }]),
-                      ...deptCrafts.map((c) => ({ value: c.id, label: `${c.code ? `[${c.code}] ` : ""}${c.name}`, searchText: `${c.code ?? ""} ${c.name}` })),
-                    ]} />
+              {dept && (
+                <div>
+                  <span className="text-[11px] text-slate-500">{isHire ? "👥 คนรับงาน (งานเหมา — ต้องเลือก *)" : `👥 คนรับงานใน ${dept.name} — กดได้หลายคน`}</span>
+                  <div className="mt-1">
+                    <CrewPick people={deptCrafts} value={dispCrew} onChange={setDispCrew} required={isHire} recent={lastCrewIds(workOrders, dept.id, deptCrafts)} />
+                  </div>
                 </div>
-                {isHire ? <span className="text-[10px] text-rose-500">งานเหมา — ต้องเลือกช่าง (จ่ายทั้งแผนกไม่ได้) · พิมพ์ชื่อ/รหัสค้นหา</span>
-                  : deptCrafts.length === 0 && dept && <span className="text-[10px] text-slate-400">แผนกนี้ยังไม่มีช่าง — จ่ายเป็นทั้งแผนกได้</span>}
-              </label>
+              )}
 
-              <label className="block"><span className="text-[11px] text-slate-500">วันที่จ่าย <span className="text-slate-400">— ตั้งต้นวันนี้ · ย้อนวันได้ถ้าคีย์ตามหลัง</span></span>
-                <input type="date" value={dispDate2} onChange={(e) => setDispDate2(e.target.value)}
-                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
-              </label>
+              <div><span className="text-[11px] text-slate-500">วันที่จ่าย <span className="text-slate-400">— ตั้งต้นวันนี้ · ย้อนวันได้ถ้าคีย์ตามหลัง</span></span>
+                <div className="mt-0.5"><DispatchDatePick value={dispDate2} onChange={setDispDate2} /></div>
+              </div>
 
               <label className="block"><span className="text-[11px] text-slate-500">กำหนดเสร็จ <span className="text-slate-400">— เว้นว่าง = ใช้วันส่งภายใน/ส่งลูกค้าของแต่ละใบ</span></span>
                 <input type="date" value={dispDue2} onChange={(e) => setDispDue2(e.target.value)}
