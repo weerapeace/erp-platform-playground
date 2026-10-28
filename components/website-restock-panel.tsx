@@ -19,7 +19,8 @@ type Row = {
   id: string;
   parent_sku_id: string;
   option_label: string | null;
-  contact_type: RestockContactType;
+  /** member = สมาชิกกดครั้งเดียว (contact = รหัสสมาชิก · ดูชื่อที่ member) */
+  contact_type: RestockContactType | "member";
   contact: string;
   name: string | null;
   status: RestockStatus;
@@ -30,6 +31,11 @@ type Row = {
   lang?: "th" | "en";
   option_en?: string | null;
   product: { code: string; name: string; name_en?: string };
+  /** 🆕 ฝากแจ้งตอนชุดมาใหม่เปิดขาย */
+  drop?: { id: string; title: string } | null;
+  member?: { name: string; email: string } | null;
+  /** 🤖 ระบบส่งเองสำเร็จทางไหน */
+  auto_channel?: "email" | "line" | null;
 };
 type Counts = Record<RestockStatus, number>;
 type Scope = { shopId?: string; shopSlug?: string; parentId?: string };
@@ -110,6 +116,24 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
     }
   };
   const pending = rows.filter((r) => r.status === "pending");
+  // ⚡ ส่งแจ้งอัตโนมัติที่ถึงเวลาเดี๋ยวนี้ (ไม่ต้องรอรอบตรวจ ~30 นาที) — ร้านต้องเปิด "แจ้งอัตโนมัติ" ใน 🔔 ก่อน
+  const runNow = async () => {
+    if (!scope.shopSlug) return;
+    setBusy(true);
+    try {
+      const j = await apiFetch(`/api/cron/webshop-reminders?shop=${encodeURIComponent(scope.shopSlug)}`).then((r) => r.json());
+      if (!j.ok) throw new Error(j.error ?? "ส่งไม่สำเร็จ");
+      const res = (j.results ?? [])[0] as { restock?: { ready: number; sent: number } } | undefined;
+      if (!res) toast.warning("ร้านยังไม่ได้เปิด \"แจ้งอัตโนมัติ\" (🏪 ข้อมูลร้าน › 🔔)");
+      else toast.success(`ถึงเวลาแจ้ง ${res.restock?.ready ?? 0} รายการ · ส่งแล้ว ${res.restock?.sent ?? 0}`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "ส่งไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const contactText = (r: Row) => (r.contact_type === "member" ? `👤 ${r.member?.name || "สมาชิก"}${r.member?.email ? ` <${r.member.email}>` : ""}` : formatRestockContact(r.contact_type, r.contact));
 
   if (err) return <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">เกิดข้อผิดพลาดในการโหลดรายชื่อ ({err}) <button className="ml-2 underline" onClick={() => void load()}>ลองใหม่</button></div>;
 
@@ -123,7 +147,12 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
         ))}
         {pending.length > 0 && (
           <div className="ml-auto flex gap-2">
-            <button type="button" onClick={() => void copy(pending.map((r) => `${formatRestockContact(r.contact_type, r.contact)}${r.name ? ` (${r.name})` : ""}`).join("\n"), "รายชื่อที่รอ")} className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">
+            {scope.shopSlug && (
+              <button type="button" disabled={busy} onClick={() => void runNow()} title="ส่งให้คนที่ฝากอีเมล / สมาชิก ที่สินค้ามีของแล้ว หรือชุดเปิดขายแล้ว (เบอร์โทร/LINE ID ยังต้องติดต่อเอง)" className="px-2.5 py-1 rounded-lg border border-blue-300 bg-blue-50 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-50">
+                ⚡ ส่งที่พร้อมตอนนี้
+              </button>
+            )}
+            <button type="button" onClick={() => void copy(pending.map((r) => `${contactText(r)}${r.name && r.contact_type !== "member" ? ` (${r.name})` : ""}`).join("\n"), "รายชื่อที่รอ")} className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">
               📋 คัดลอกทั้งหมดที่รอ
             </button>
             <button type="button" disabled={busy} onClick={() => void setRowStatus(pending.map((r) => r.id), "notified")} className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white text-xs hover:bg-emerald-700 disabled:opacity-50">
@@ -138,19 +167,33 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
         dense
         countUnit="รายการ"
         maxHeightClass="max-h-96"
-        searchText={(r) => `${r.product.code} ${r.product.name} ${r.contact} ${r.name ?? ""} ${r.option_label ?? ""}`}
+        searchText={(r) => `${r.product.code} ${r.product.name} ${r.drop?.title ?? ""} ${r.member?.name ?? ""} ${r.member?.email ?? ""} ${r.contact} ${r.name ?? ""} ${r.option_label ?? ""}`}
         searchPlaceholder="ค้นหารหัส/ชื่อสินค้า/อีเมล/เบอร์…"
-        emptyText={loading ? "กำลังโหลด…" : status === "pending" ? "ยังไม่มีใครรอแจ้งของเข้า — ปุ่มขึ้นในหน้าสินค้าที่ตั้ง \"สินค้าหมด\"" : "ไม่มีรายการ"}
+        emptyText={loading ? "กำลังโหลด…" : status === "pending" ? "ยังไม่มีใครรอแจ้งของเข้า — ปุ่มขึ้นในหน้าสินค้าที่ตั้ง \"สินค้าหมด\" (และการ์ดชุดมาใหม่ที่ยังไม่เปิด เมื่อเปิดแจ้งอัตโนมัติ)" : "ไม่มีรายการ"}
         columns={[
           ...(scope.parentId
             ? []
-            : [{ key: "p", header: "สินค้า", width: "minmax(0,1.3fr)", sortValue: (r: Row) => r.product.code, cell: (r: Row) => <div className="min-w-0"><div className="text-xs font-medium text-slate-800 truncate">{r.product.code}</div><div className="text-[11px] text-slate-400 truncate">{r.product.name}</div></div> }]),
+            : [{ key: "p", header: "สินค้า", width: "minmax(0,1.3fr)", sortValue: (r: Row) => r.product.code, cell: (r: Row) =>
+                  r.drop ? (
+                    <div className="min-w-0"><div className="text-xs font-medium text-slate-800 truncate">🆕 ชุด {r.drop.title}</div><div className="text-[11px] text-slate-400 truncate">แจ้งตอนเปิดขาย</div></div>
+                  ) : (
+                    <div className="min-w-0"><div className="text-xs font-medium text-slate-800 truncate">{r.product.code}</div><div className="text-[11px] text-slate-400 truncate">{r.product.name}</div></div>
+                  ) }]),
           { key: "opt", header: "สี/ตัวเลือก", width: "7rem", cell: (r: Row) => <span className="text-xs text-slate-600">{r.option_label ?? "—"}</span> },
           {
             key: "c",
             header: "ช่องทาง",
             width: "minmax(0,1.4fr)",
             cell: (r: Row) => {
+              if (r.contact_type === "member")
+                return (
+                  <div className="min-w-0 flex items-center gap-1.5" title="สมาชิกกดรับแจ้ง — ระบบส่งทาง LINE ที่เข้าระบบไว้ / อีเมลที่ยืนยันแล้ว">
+                    <span>👤</span>
+                    <span className="text-xs text-slate-800 truncate">{r.member?.name || "สมาชิก"}</span>
+                    {r.member?.email && <span className="text-[11px] text-slate-400 truncate">· {r.member.email}</span>}
+                    {r.lang === "en" && <span className="text-[10px] px-1 rounded bg-sky-100 text-sky-700">EN</span>}
+                  </div>
+                );
               const t = RESTOCK_CONTACTS.find((x) => x.value === r.contact_type);
               const shown = formatRestockContact(r.contact_type, r.contact);
               return (
@@ -198,6 +241,7 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
             width: "6.5rem",
             cell: (r: Row) => (
               <span className={`text-[11px] px-2 py-0.5 rounded-full ${STATUS_CLS[r.status]}`} title={r.notified_at ? `แจ้งเมื่อ ${dt(r.notified_at)}${r.notified_by ? ` โดย ${r.notified_by}` : ""}` : undefined}>
+                {r.auto_channel ? "🤖 " : ""}
                 {RESTOCK_STATUS_LABEL[r.status]}
               </span>
             ),
@@ -227,7 +271,7 @@ export function RestockRequests({ onCounts, ...scope }: Scope & { onCounts?: (c:
         onClose={() => setDel(null)}
         onConfirm={() => void remove()}
         title="ลบรายชื่อนี้?"
-        message={del ? `ลบ ${formatRestockContact(del.contact_type, del.contact)} (${del.product.code || "สินค้า"}) ออกจากรายชื่อรอของเข้า — ลบแล้วกู้คืนไม่ได้ (ถ้าแค่ไม่ต้องแจ้งแล้ว ใช้ "ยกเลิก" แทน)` : ""}
+        message={del ? `ลบ ${contactText(del)} (${del.drop ? `ชุด ${del.drop.title}` : del.product.code || "สินค้า"}) ออกจากรายชื่อรอของเข้า — ลบแล้วกู้คืนไม่ได้ (ถ้าแค่ไม่ต้องแจ้งแล้ว ใช้ "ยกเลิก" แทน)` : ""}
         confirmText="ลบ"
         variant="danger"
         loading={busy}

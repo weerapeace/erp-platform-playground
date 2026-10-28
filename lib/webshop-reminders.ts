@@ -162,3 +162,60 @@ export function wishlistAlertMessage(a: { lang: CustomerLang; shopName: string; 
     line,
   };
 }
+
+/* ─────────── 🔔 มีของแล้ว / ชุดเปิดขายแล้ว (ฝากไว้ที่ "แจ้งฉันเมื่อมีของ") ─────────── */
+
+/** รอบหนึ่งส่งได้สูงสุดกี่คำขอต่อร้าน (ที่เหลือรอบหน้า) */
+export const RESTOCK_MAX_PER_RUN = 300;
+
+const restockFoot = (lang: CustomerLang) =>
+  lang === "en"
+    ? "This is a one-time message because you asked to be notified on our website."
+    : "ข้อความนี้ส่งครั้งเดียว เพราะคุณกด \"แจ้งฉันเมื่อมีของ\" บนเว็บของร้าน";
+
+/** ถ้อยคำแจ้ง "มีของแล้ว" (สินค้า) / "เปิดขายแล้ว" (ชุดมาใหม่) — อีเมล + LINE ตามภาษาที่ลูกค้าใช้ตอนฝาก */
+export function restockAlertMessage(a: {
+  lang: CustomerLang;
+  shopName: string;
+  customerName: string | null;
+  kind: "product" | "drop";
+  itemName: string;
+  option: string | null;
+  url: string | null;
+}): ReminderMessage {
+  const en = a.lang === "en";
+  const item = a.option ? `${a.itemName} (${a.option})` : a.itemName;
+  const drop = a.kind === "drop";
+  const title = drop ? (en ? `${a.itemName} is now open` : `ชุด ${a.itemName} เปิดขายแล้ว`) : en ? "Back in stock" : "ของกลับมาแล้ว";
+  const hi = a.customerName ? (en ? `Hi ${a.customerName},` : `สวัสดีคุณ${a.customerName}`) : en ? "Hi," : "สวัสดีค่ะ";
+  const body = drop
+    ? en
+      ? `The drop you were waiting for — ${a.itemName} — is now open. Favourite pieces tend to sell out fast.`
+      : `ชุด ${a.itemName} ที่คุณรอ เปิดขายแล้ว — ชิ้นที่ชอบมักหมดเร็ว`
+    : en
+      ? `Good news — ${item} is back in stock.`
+      : `${item} ที่คุณรอ กลับมามีของแล้ว`;
+  const btn = drop ? (en ? "Shop the drop" : "ดูชุดนี้") : en ? "Order now" : "สั่งซื้อเลย";
+  const text = [hi, "", body, a.url ? `${btn}: ${a.url}` : "", "", a.shopName].filter((x, i, arr) => x !== "" || arr[i - 1] !== "").join("\n").trim();
+  const line = [`🔔 ${title} · ${a.shopName}`, body, a.url ? `${btn}: ${a.url}` : ""].filter(Boolean).join("\n");
+  return {
+    subject: `${a.shopName}: ${title}`,
+    email: { lang: a.lang, shopName: a.shopName, title, lines: [hi, body], button: a.url ? { text: btn, href: a.url } : undefined, foot: restockFoot(a.lang) },
+    text: `${text}\n\n${restockFoot(a.lang)}`,
+    line,
+  };
+}
+
+/** คำขอนี้ถึงเวลาแจ้งหรือยัง — สินค้า: เผยแพร่ + ไม่ได้ตั้ง "หมด" · ชุด: ถึงเวลาเปิดแล้ว */
+export function restockReady(
+  r: { parent_sku_id: string | null; drop_id: string | null },
+  inStock: ReadonlySet<string>,
+  dropStart: ReadonlyMap<string, number>,
+  now = Date.now(),
+): boolean {
+  if (r.drop_id) {
+    const t = dropStart.get(r.drop_id);
+    return t != null && t <= now;
+  }
+  return !!r.parent_sku_id && inStock.has(r.parent_sku_id);
+}

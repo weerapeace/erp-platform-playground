@@ -11,7 +11,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeSiteInfo, type SiteInfo } from "@/lib/website-site-info";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { customerLang, localizedUrl, type CustomerLang } from "@/lib/customer-messages";
-import { sendEmail } from "@/lib/email";
+import { emailConfigured, sendEmail } from "@/lib/email";
 import { emailLayout } from "@/lib/email-layout";
 import { lineTextToMember } from "@/lib/webshop-line";
 import { writeAudit } from "@/lib/audit";
@@ -20,6 +20,9 @@ import { productHref } from "@/lib/website-links";
 import {
   CART_MAX_AGE_DAYS,
   REMINDER_RUN_EVERY_MIN,
+  RESTOCK_MAX_PER_RUN,
+  restockAlertMessage,
+  restockReady,
   WISHLIST_MAX_PER_MESSAGE,
   cartDue,
   cartHash,
@@ -51,6 +54,7 @@ export interface ReminderRunResult {
   shop: string;
   carts: { due: number; sent: number };
   wishlist: { drops: number; sent: number };
+  restock: { ready: number; sent: number };
 }
 
 /** เวลารอบตรวจล่าสุดของร้าน (store_settings) */
@@ -227,6 +231,100 @@ export async function runWishlistAlerts(sb: Admin, shop: Shop, info: SiteInfo, s
   return { drops, sent };
 }
 
+/* ─────────── 🔔 แจ้งฉันเมื่อมีของ — ส่งอัตโนมัติ (restock_auto_enabled) ─────────── */
+
+/**
+ * คำขอที่ "ถึงเวลา" (สินค้ากลับมามีของ / ชุดมาใหม่เปิดแล้ว) → ส่งอีเมล (ฝากอีเมลไว้) หรือ LINE/อีเมลของสมาชิก
+ * ฝากเบอร์โทร / LINE ID = ส่งเองไม่ได้ → คงไว้ในรายชื่อให้ร้านติดต่อเอง (แบบเดิม)
+ * 🔒 จองแถวก่อนส่ง (status pending → notified) · ส่งไม่ได้สักช่องทาง = คืนเป็นรอ (รอบหน้าลองใหม่)
+ * ไม่ต้องยินยอมรับข่าวสาร — ลูกค้าขอเองรายครั้ง (ข้อความบอกว่าส่งครั้งเดียว)
+ */
+export async function runRestockAlerts(sb: Admin, shop: Shop, info: SiteInfo, siteUrl: string | null, now = Date.now()): Promise<{ ready: number; sent: number }> {
+  if (!info.restock_auto_enabled) return { ready: 0, sent: 0 };
+  const { data } = await sb
+    .from("store_restock_requests")
+    .select("id, parent_sku_id, drop_id, option_label, contact_type, contact, name, customer_id, lang")
+    .eq("shop_id", shop.id)
+    .eq("status", "pending")
+    .in("contact_type", ["email", "member"])
+    .order("created_at", { ascending: true })
+    .limit(RESTOCK_MAX_PER_RUN);
+  type Row = { id: string; parent_sku_id: string | null; drop_id: string | null; option_label: string | null; contact_type: "email" | "member"; contact: string; name: string | null; customer_id: string | null; lang: string | null };
+  const rows = (data ?? []) as Row[];
+  if (!rows.length) return { ready: 0, sent: 0 };
+
+  const pids = [...new Set(rows.filter((r) => !r.drop_id && r.parent_sku_id).map((r) => r.parent_sku_id as string))];
+  const dids = [...new Set(rows.filter((r) => r.drop_id).map((r) => r.drop_id as string))];
+  const inStock = new Set<string>();
+  for (const part of chunks(pids)) {
+    const { data: ls } = await sb.from("store_listings").select("parent_sku_id, is_published, web_stock_status").eq("shop_id", shop.id).in("parent_sku_id", part);
+    for (const l of (ls ?? []) as { parent_sku_id: string; is_published: boolean; web_stock_status: string | null }[]) if (l.is_published && l.web_stock_status !== "out") inStock.add(l.parent_sku_id);
+  }
+  const dropStart = new Map<string, number>();
+  const dropInfo = new Map<string, { title: string; titleEn: string }>();
+  for (const part of chunks(dids)) {
+    const { data: ds } = await sb.from("store_new_drops").select("id, title, title_en, start_at").eq("shop_id", shop.id).in("id", part);
+    for (const d of (ds ?? []) as { id: string; title: string; title_en: string | null; start_at: string }[]) {
+      const t = Date.parse(d.start_at);
+      if (Number.isFinite(t)) dropStart.set(d.id, t);
+      dropInfo.set(d.id, { title: d.title, titleEn: d.title_en || d.title });
+    }
+  }
+  const ready = rows.filter((r) => restockReady(r, inStock, dropStart, now));
+  if (!ready.length) return { ready: 0, sent: 0 };
+
+  const live = await livePrices(sb, shop, [...new Set(ready.filter((r) => !r.drop_id).map((r) => r.parent_sku_id as string))]);
+  const members = await membersById(sb, ready.filter((r) => r.customer_id).map((r) => r.customer_id as string));
+  const emailOn = emailConfigured();
+  let sent = 0;
+  for (const r of ready) {
+    // ส่งอีเมลไม่ได้ (ร้านยังไม่ตั้งระบบอีเมล) = ไม่จอง · คงไว้ในรายชื่อ
+    if (r.contact_type === "email" && !emailOn) continue;
+    const m = r.customer_id ? members.get(r.customer_id) : undefined;
+    if (r.contact_type === "member" && (!m || m.status !== "active")) continue;
+    const stamp = new Date(now).toISOString();
+    const { data: claimed } = await sb
+      .from("store_restock_requests")
+      .update({ status: "notified", notified_at: stamp, notified_by: "ระบบอัตโนมัติ" })
+      .eq("id", r.id)
+      .eq("status", "pending")
+      .select("id");
+    if (!claimed?.length) continue;
+    const lang = customerLang(r.lang);
+    const p = r.drop_id ? null : live.get(r.parent_sku_id as string);
+    const d = r.drop_id ? dropInfo.get(r.drop_id) : null;
+    const msg = restockAlertMessage({
+      lang,
+      shopName: shop.name,
+      customerName: (m?.name || r.name || "").trim() || null,
+      kind: r.drop_id ? "drop" : "product",
+      itemName: d ? (lang === "en" ? d.titleEn : d.title) : p ? (lang === "en" ? p.nameEn : p.name) : lang === "en" ? "The item you wanted" : "สินค้าที่คุณรอ",
+      option: r.drop_id ? null : r.option_label,
+      url: r.drop_id ? localizedUrl(siteUrl, `/new/${r.drop_id}`, lang) : p?.code ? localizedUrl(siteUrl, productHref(p.code), lang) : null,
+    });
+    const channels: ("email" | "line")[] = [];
+    if (r.contact_type === "email") {
+      const res = await sendEmail({ to: r.contact, subject: msg.subject, html: emailLayout(msg.email), text: msg.text, fromName: shop.name });
+      if (res.ok) channels.push("email");
+    } else if (m) {
+      if (await lineTextToMember(sb, shop.id, m.id, msg.line)) channels.push("line");
+      else if (m.email && m.email_verified && emailOn) {
+        const res = await sendEmail({ to: m.email, subject: msg.subject, html: emailLayout(msg.email), text: msg.text, fromName: shop.name });
+        if (res.ok) channels.push("email");
+      }
+    }
+    if (!channels.length) {
+      // ส่งไม่ได้สักทาง → คืนเป็นรอ (รอบหน้าลองใหม่ · ร้านยังเห็นในรายชื่อ)
+      await sb.from("store_restock_requests").update({ status: "pending", notified_at: null, notified_by: null }).eq("id", r.id).eq("notified_at", stamp);
+      continue;
+    }
+    sent++;
+    await sb.from("store_restock_requests").update({ auto_channel: channels[0], notified_by: `ระบบอัตโนมัติ (${channels[0] === "line" ? "LINE" : "อีเมล"})` }).eq("id", r.id);
+    await writeAudit(sb, { action: "notify", entityType: "store_restock_requests", entityId: r.id, actorId: null, actorName: "system", metadata: { shop_id: shop.id, kind: r.drop_id ? "drop_open" : "restock", target: r.drop_id ?? r.parent_sku_id, channels } });
+  }
+  return { ready: ready.length, sent };
+}
+
 /* ─────────── รอบตรวจ ─────────── */
 
 /** ตรวจทุกร้านที่เปิดไว้ (หรือร้านเดียว) — ร้านที่ปิดทั้ง 2 อย่าง = ข้าม */
@@ -241,12 +339,13 @@ export async function runWebshopReminders(sb: Admin, opts: { shopId?: string } =
   for (const shop of list) {
     const { data: rows } = await sb.from("store_settings").select("key, value").eq("shop_id", shop.id);
     const info = normalizeSiteInfo(Array.isArray(rows) ? rows : []);
-    if (!info.cart_reminder_enabled && !info.wishlist_alert_enabled) continue;
+    if (!info.cart_reminder_enabled && !info.wishlist_alert_enabled && !info.restock_auto_enabled) continue;
     await sb.from("store_settings").upsert({ shop_id: shop.id, key: RUN_KEY, value: new Date().toISOString(), updated_at: new Date().toISOString() }, { onConflict: "shop_id,key" });
     const siteUrl = urls.get(shop.id) ?? null;
     const carts = await runCartReminders(sb, shop, info, siteUrl);
     const wishlist = await runWishlistAlerts(sb, shop, info, siteUrl);
-    out.push({ shop: shop.slug, carts, wishlist });
+    const restock = await runRestockAlerts(sb, shop, info, siteUrl);
+    out.push({ shop: shop.slug, carts, wishlist, restock });
   }
   return out;
 }
@@ -260,10 +359,10 @@ export async function maybeRunWebshopReminders(sb: Admin, shopId: string): Promi
     const now = Date.now();
     if ((checkedAt.get(shopId) ?? 0) > now - 5 * 60_000) return;
     checkedAt.set(shopId, now);
-    const { data } = await sb.from("store_settings").select("key, value").eq("shop_id", shopId).in("key", [RUN_KEY, "cart_reminder_enabled", "wishlist_alert_enabled"]);
+    const { data } = await sb.from("store_settings").select("key, value").eq("shop_id", shopId).in("key", [RUN_KEY, "cart_reminder_enabled", "wishlist_alert_enabled", "restock_auto_enabled"]);
     const rows = (data ?? []) as { key: string; value: unknown }[];
     const flags = normalizeSiteInfo(rows);
-    if (!flags.cart_reminder_enabled && !flags.wishlist_alert_enabled) return;
+    if (!flags.cart_reminder_enabled && !flags.wishlist_alert_enabled && !flags.restock_auto_enabled) return;
     const last = Date.parse(String(rows.find((r) => r.key === RUN_KEY)?.value ?? ""));
     if (Number.isFinite(last) && last > now - REMINDER_RUN_EVERY_MIN * 60_000) return;
     await runWebshopReminders(sb, { shopId });

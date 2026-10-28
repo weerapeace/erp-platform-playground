@@ -2,7 +2,8 @@
  * 🔔 รายชื่อ "แจ้งฉันเมื่อมีของ" ของร้าน — /api/website/restock (แท็บ "🏪 ข้อมูลร้าน" + drawer สินค้าบนเว็บ)
  *
  * GET    ?shop=<slug>|shopId=<uuid> [&status=pending|notified|cancelled|all] [&parent=<uuid>] [&countOnly=1]
- *        → { rows:[{…, lang, option_en, product:{code,name,name_en}}], counts:{pending,notified,cancelled}, messaging:{shopName,siteUrl} }
+ *        → { rows:[{…, lang, option_en, product:{code,name,name_en}, drop:{id,title}|null, member:{name,email}|null, auto_channel}], counts:{pending,notified,cancelled}, messaging:{shopName,siteUrl} }
+ *        🆕 drop = ฝากแจ้งตอนชุดเปิดขาย · 👤 member = สมาชิกกดครั้งเดียว · auto_channel = ระบบส่งเองทางไหน (email/line)
  *        🌐 lang = ภาษาที่ลูกค้าใช้ตอนฝากชื่อ → ปุ่ม "💬 คัดลอกข้อความ" ในแท็บ ทำข้อความภาษานั้น (lib/customer-messages restockMessage)
  * PATCH  { ids:[uuid], status } → เปลี่ยนสถานะ (แจ้งแล้ว = บันทึกเวลา+คนแจ้ง) + audit
  * DELETE ?id=<uuid>             → ลบ 1 รายการ + audit
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   let q = sb
     .from("store_restock_requests")
-    .select("id, parent_sku_id, option_label, contact_type, contact, name, status, notified_at, notified_by, created_at, lang, parent_skus_v2(code, name_th, name_en)")
+    .select("id, parent_sku_id, drop_id, customer_id, auto_channel, option_label, contact_type, contact, name, status, notified_at, notified_by, created_at, lang, parent_skus_v2(code, name_th, name_en), store_new_drops(id, title), store_customers(name, email)")
     .eq("shop_id", shopId)
     .order("created_at", { ascending: false })
     .limit(1000);
@@ -66,7 +67,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if ((STATUSES as readonly string[]).includes(status)) q = q.eq("status", status);
   const { data, error } = await q;
   if (error) return NextResponse.json({ error: "โหลดรายชื่อไม่สำเร็จ", rows: [], counts }, { status: 500 });
-  type Row = { parent_skus_v2: { code: string | null; name_th: string | null; name_en: string | null } | null; lang?: string | null; option_label?: string | null } & Record<string, unknown>;
+  type Row = {
+    parent_skus_v2: { code: string | null; name_th: string | null; name_en: string | null } | null;
+    store_new_drops: { id: string; title: string } | null;
+    store_customers: { name: string | null; email: string | null } | null;
+    lang?: string | null;
+    option_label?: string | null;
+  } & Record<string, unknown>;
   const raw = (data ?? []) as unknown as Row[];
   // 🌐 ลูกค้าอังกฤษ: ชื่อสีภาษาอังกฤษจากทะเบียนสีกลาง (ไว้ทำข้อความแจ้ง)
   const needEn = raw.some((r) => r.lang === "en" && r.option_label);
@@ -76,7 +83,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     loadShopSiteUrls(sb, [shopId]),
   ]);
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
-  const rows = raw.map(({ parent_skus_v2: ps, ...r }) => ({
+  const rows = raw.map(({ parent_skus_v2: ps, store_new_drops: dr, store_customers: cu, ...r }) => ({
+    drop: dr ? { id: dr.id, title: dr.title } : null,
+    member: cu ? { name: cu.name ?? "", email: cu.email ?? "" } : null,
     ...r,
     lang: r.lang === "en" ? "en" : "th",
     option_en: r.lang === "en" && r.option_label ? swatches.english(r.option_label) || r.option_label : null,

@@ -186,6 +186,7 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "cart_reminder_hours", label: "เตือนหลังทิ้งตะกร้ากี่ชั่วโมง", hint: "2–72 · ค่าเริ่ม 6", group: "notify", type: "number", isPublic: false, placeholder: "6" },
   { key: "wishlist_alert_enabled", label: "แจ้งเมื่อของที่ถูกใจลดราคา (สมาชิก)", hint: "ราคาลดลงจากตอนกดถูกใจ ≥ % ที่ตั้ง → ส่งอีเมล/LINE ครั้งเดียวต่อการลด · สมาชิกที่ยินยอมรับข่าวสารเท่านั้น", group: "notify", type: "bool", isPublic: false },
   { key: "wishlist_alert_pct", label: "ลดอย่างน้อยกี่ % ถึงแจ้ง", hint: "1–90 · ค่าเริ่ม 5", group: "notify", type: "number", isPublic: false, placeholder: "5" },
+  { key: "restock_auto_enabled", label: "แจ้ง \"มีของแล้ว / ชุดเปิดขาย\" อัตโนมัติ", hint: "คนที่กด \"แจ้งฉันเมื่อมีของ\" (ทางอีเมล หรือสมาชิกที่เข้าระบบ) ได้ข้อความเองเมื่อสินค้ากลับมามีของ / ชุดมาใหม่เปิดขาย · เปิดแล้วการ์ดชุดที่ยังไม่เปิดมีปุ่ม \"แจ้งฉันตอนเปิดขาย\" · ฝากเบอร์โทร/LINE ID = ร้านติดต่อเองเหมือนเดิม", group: "notify", type: "bool", isPublic: true },
 
   // ─── 🚚 Shippop (lib/shippop · /api/website/orders/shippop) — ไม่ส่งให้เว็บร้าน ───
   { key: "shippop_enabled", label: "เปิดปุ่มจองขนส่ง Shippop ในออเดอร์", hint: "", group: "shippop", type: "bool", isPublic: false },
@@ -406,6 +407,8 @@ export interface SiteInfo {
   cart_reminder_hours: number;
   wishlist_alert_enabled: boolean;
   wishlist_alert_pct: number;
+  /** 🔔 ส่ง "มีของแล้ว / ชุดเปิดขาย" อัตโนมัติ (lib/webshop-reminders-db runRestockAlerts) + ปุ่มแจ้งบนชุดที่ยังไม่เปิด */
+  restock_auto_enabled: boolean;
   shippop_enabled: boolean;
   shippop_courier: string;
   shippop_box: string;
@@ -518,6 +521,7 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   cart_reminder_hours: 6,
   wishlist_alert_enabled: false,
   wishlist_alert_pct: 5,
+  restock_auto_enabled: false,
   shippop_enabled: false,
   shippop_courier: "FLE",
   shippop_box: "20x30x10",
