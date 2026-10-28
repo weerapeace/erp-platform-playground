@@ -1,7 +1,7 @@
 /**
  * 🔑 สมาชิกแบบอีเมล + รหัสผ่าน — /api/storefront-member/password  (POST { action, ... })
  *
- *  register { email, password, name, origin } → สร้างบัญชี (ยังไม่ยืนยัน) + ส่งลิงก์ยืนยันอีเมล
+ *  register { email, password, name, origin, consent?, marketing? } → สร้างบัญชี (ยังไม่ยืนยัน) + ส่งลิงก์ยืนยันอีเมล · consent = ✅ เวลายอมรับนโยบาย (PDPA)
  *  resend   { email, origin }                 → ส่งลิงก์ยืนยันใหม่ (ตอบ ok เสมอ ไม่บอกว่ามีบัญชีไหม)
  *  verify   { token }                         → ยืนยันอีเมล → { member } (เว็บร้านเข้าสู่ระบบให้)
  *  login    { email, password }               → { member } · ผิด 5 ครั้งล็อก 15 นาที · ยังไม่ยืนยัน = code "unverified"
@@ -122,12 +122,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
       if (m && m.status === "blocked") return storefrontJson({ ok: false, error: "บัญชีนี้ถูกระงับ — ติดต่อร้านค้า" }, 403);
       const hash = hashPassword(String(body.password));
+      // ✅ ติ๊กยอมรับนโยบายในฟอร์มสมัคร = บันทึกเวลายอมรับ + รับข่าวสารตามที่ติ๊ก
+      const consent = body.consent === true ? { terms_accepted_at: now, marketing_opt_in: body.marketing === true } : {};
       if (m) {
         // บัญชีเดิมยังไม่ยืนยัน → ใช้ข้อมูลล่าสุด + ลิงก์ยืนยันเก่าใช้ไม่ได้แล้ว (กันคนที่สมัครค้างไว้ยืนยันด้วยรหัสของตัวเอง)
         await sb.from("store_customer_tokens").update({ used_at: now }).eq("customer_id", m.id).eq("kind", "verify").is("used_at", null);
-        await sb.from("store_customers").update({ password_hash: hash, name, updated_at: now }).eq("id", m.id);
+        await sb.from("store_customers").update({ password_hash: hash, name, updated_at: now, ...consent }).eq("id", m.id);
       } else {
-        const { data: created, error } = await sb.from("store_customers").insert({ shop_id: shop.id, email, email_verified: false, name, password_hash: hash }).select(COLS).maybeSingle();
+        const { data: created, error } = await sb.from("store_customers").insert({ shop_id: shop.id, email, email_verified: false, name, password_hash: hash, ...consent }).select(COLS).maybeSingle();
         if (error || !created) return storefrontJson({ ok: false, error: "สมัครไม่สำเร็จ กรุณาลองใหม่" }, 500);
         m = created as Row;
       }

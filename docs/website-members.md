@@ -1,7 +1,23 @@
 # 👤 ระบบสมาชิกเว็บร้าน (ลูกค้า login)
 
+## ⭐ อัปเดต 2026-10-28 — ไม่ต้องตั้ง env ใน Vercel แล้ว + 🧪 สมาชิกทดลอง + ปุ่มสมัคร/ป๊อป
+- **ตั้งค่าในหน้า ERP**: แท็บ 👥 สมาชิก › **🔑 ตั้งค่าการเข้าสู่ระบบ** วางรหัส Google / LINE / Facebook ต่อร้าน (คู่มือเจ้าของ: docs/website-members-login-setup.md) · ช่องว่าง/ปิด = ปุ่มนั้นไม่ขึ้น
+- **🎫 บัตรสมาชิก**: ERP ออกบัตร (JWT EdDSA · `lib/storefront-member-token` · กุญแจสืบจาก `STOREFRONT_MEMBER_SECRET` หรือ `SUPABASE_SERVICE_ROLE_KEY`) → เว็บร้านเก็บในคุกกี้ `sf_member` และตรวจเองด้วยกุญแจสาธารณะ (`/api/public/storefront/member-config` · แคช 60 วิ) · ERP ตรวจซ้ำทุกคำขอ (`guardMember` + สถานะบัญชีใน DB)
+- **ERP แลก OAuth code เอง** (`/api/storefront-member/oauth` · `lib/storefront-oauth`): รหัสลับอยู่ในตาราง `store_login_providers` (RLS ไม่มี policy · หน้าจอเห็น ••••4 ตัวท้าย · audit) · redirectUri ต้องเป็น callback บนโดเมนใน shop_domains · ตรวจ aud/iss ของ id_token
+- **ด่าน**: `guardShop` (แค่ร้าน — oauth / trial-login) · `guardStorefront` (ต้องมีกุญแจภายใน — login ที่เชื่อโปรไฟล์จากเว็บร้าน, password) · `guardMember` (บัตร หรือ กุญแจ+รหัสสมาชิก) · ⚠️ `link` POST (เชื่อโปรไฟล์ที่ส่งมา) ต้องมีกุญแจเสมอ — ไม่งั้นลูกค้ายิงตรงมาผูก Google ของคนอื่นได้ · ร้านที่ตั้งรหัสใน ERP เชื่อมผ่าน oauth `link:true`
+- **แบบเดิมยังใช้ได้**: ตั้ง `STOREFRONT_INTERNAL_KEY` + `GOOGLE_CLIENT_ID/SECRET` ฯลฯ ในเว็บร้าน = เว็บร้านแลก code เองแล้วส่งให้ `/login` (env มาก่อนค่าใน ERP) · `MEMBER_SESSION_SECRET` ไม่ใช้แล้ว · อีเมล+รหัสผ่านยังต้องใช้ env (กุญแจภายใน + `MEMBER_EMAIL_LOGIN=1` + Resend ที่ ERP)
+- **✅ PDPA**: ป๊อป/หน้าเข้าสู่ระบบมี 2 แท็บ — **สมัคร** ต้องติ๊กยอมรับนโยบายก่อนปุ่มกดได้ (`store_customers.terms_accepted_at` · รับข่าวสาร = ไม่บังคับ) · **เข้าสู่ระบบ** ไม่สร้างบัญชีใหม่ (ยังไม่เคยสมัคร = 409 need_signup → เด้งกลับแท็บสมัคร) · ฟอร์มสมัครด้วยอีเมลมีช่องติ๊กเหมือนกัน · ขอเฉพาะ openid/profile/email (FB: email,public_profile)
+- **ปุ่มบนหัวเว็บ (แบบ A ที่เจ้าของเลือก)**: ไอคอน 👤 = ป๊อปแท็บเข้าสู่ระบบ + ปุ่มเด่น "สมัครสมาชิก" = ป๊อปแท็บสมัคร (จอเล็กเหลือไอคอน) · ป๊อปกลางจอ (มือถือ = แผ่นเลื่อนจากล่าง) `components/account/MemberAuthHost` + เนื้อหา `MemberAuthPanel` (ใช้ร่วมกับหน้า /account/login)
+  - ลิงก์ `/account/login?tab=&next=` ทุกที่บนเว็บกลายเป็นป๊อปเอง (ดักคลิกที่ window capture ก่อน NavProgress) · โค้ดที่ไม่ใช่ลิงก์เรียก `openMemberAuth()` (`lib/member/auth-open`) เช่น ❤️
+- **🧪 สมาชิกทดลอง**: แท็บ 👥 › ปุ่ม **🧪 สมาชิกทดลอง** → สร้าง (ชื่อ + แต้มเริ่มต้น) / **เปิดเว็บในฐานะคนนี้** / ลบ / ลบทั้งหมด (`/api/website/members/test` · products.edit · audit ทุกคำสั่ง · สูงสุด 20 คน/ร้าน)
+  - `store_customers.is_test` · ตั๋ว `store_customer_tokens` kind `trial_login` (ใช้ครั้งเดียว 10 นาที เก็บแค่แฮช) → `https://<โดเมน>/api/auth/trial?t=…&pk=…` → ERP `/api/storefront-member/trial-login` · ร้านปิดเว็บ = แนบ preview+pk ให้
+  - ห้าม: สั่งซื้อ (`order`) · ผูกออเดอร์เก่า (`orders` POST) · เชื่อมช่องทาง · ตั้งรหัสผ่าน (`denyTestMember`) · โค้ดชวนเพื่อน = ตัวอย่าง "FTEST00" (ไม่สร้างจริง)
+  - ไม่นับ: ปุ่มกลุ่ม/จำนวนในแท็บ 👥 (ดูได้จากปุ่มกรอง "🧪 ทดลอง") · CSV ตัดฝั่งเซิร์ฟเวอร์ · ไม่มีออเดอร์จึงไม่ปนยอดขาย · ลบได้เสมอ (FK cascade ทุกตาราง ยกเว้น store_orders ซึ่งไม่มี)
+  - ลูกค้าจริงใช้ทางนี้ไม่ได้: ตั๋วออกจาก ERP (พนักงาน) เท่านั้น + ใช้ได้เฉพาะ is_test · บัญชีจริงเปลี่ยนเป็นทดลองไม่ได้
+- migration `202611040100_store_members_trial_login` · เทสต์ `lib/__tests__/storefront-member-login.test.ts`
+
 ## ใช้ทำอะไร
-ลูกค้าเข้าสู่ระบบที่หน้าเว็บร้าน (ปุ่ม 👤 มุมขวาบน) ด้วย Google (ขั้น M1) — LINE / Facebook / อีเมล ตามมาในขั้นถัดไป
+ลูกค้าเข้าสู่ระบบที่หน้าเว็บร้าน (ปุ่ม 👤 / "สมัครสมาชิก" มุมขวาบน) ด้วย Google / LINE / Facebook / อีเมล
 - ครั้งแรกที่เข้า = สมัครให้อัตโนมัติ · **แยกบัญชีต่อร้าน** (ลูกค้า Pixiedustie ≠ Louis Montini)
 - สั่งซื้อแบบไม่สมัครยังได้เหมือนเดิม
 - หน้า "บัญชีของฉัน" (`/account`): ออเดอร์ของฉัน · ที่อยู่ที่บันทึก (หลายที่ · ที่อยู่หลัก) · โปรไฟล์ (ชื่อ/เบอร์/รับข่าวสาร) · เพิ่มออเดอร์เก่าเข้าบัญชีด้วยเลขที่ + เบอร์
@@ -34,7 +50,7 @@ RLS เปิด ไม่มี policy (service role ผ่าน API เท่
 - ERP: `lib/website-members.ts` (กฎ) · `lib/website-members-db.ts` · `lib/storefront-internal.ts` (ด่านกุญแจ) · `app/api/storefront-member/{login,me,addresses,orders,order}` · `app/api/website/members` · `components/website-members-panel.tsx`
 - เว็บร้าน: `src/lib/member/{config,session,erp,oauth,login-flow,types}.ts` · `src/app/api/auth/[provider]/{start,callback}` · `src/app/api/auth/logout` · `src/app/api/member/[...path]` (ทางผ่าน — อนุญาตเฉพาะเส้นที่ระบุ) · `src/app/account` · `src/components/account/*`
 
-## 🔧 เปิดใช้ (เจ้าของร้านทำเอง — ค่าเป็นความลับ ห้ามส่งในแชท)
+## 🔧 เปิดใช้แบบเดิม — env ใน Vercel (ไม่จำเป็นแล้ว · ดูหัวข้อ ⭐ อัปเดต 2026-10-28 · ค่าเป็นความลับ ห้ามส่งในแชท)
 1. **สร้างกุญแจสุ่ม 2 ตัว** (ใช้ตัวสร้างรหัสผ่านของ password manager ยาว 64 ตัว):
    - `STOREFRONT_INTERNAL_KEY` — ตัวเดียวกันใส่ทั้ง ERP และทุกเว็บร้าน
    - `MEMBER_SESSION_SECRET` — ใส่เฉพาะเว็บร้าน (ร้านละค่าก็ได้)
