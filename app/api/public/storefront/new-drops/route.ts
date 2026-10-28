@@ -54,7 +54,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     status: dropStatus(d, now),
     codes: withCodes ? d.codes : [],
     // 🖼 รูปแทรกในตารางสินค้าของชุด (เฉพาะชุดที่เปิดแล้ว · เปิดอยู่ + มีรูป) — เว็บร้านวาดด้วยของกลาง ListingInsertTile
-    inserts: withCodes ? normalizeListingInserts(d.inserts).filter((x) => x.enabled && x.imageKey) : [],
+    inserts: withCodes ? normalizeListingInserts(d.inserts).filter((x) => x.enabled && (x.imageKey || x.mobileImageKey || x.videoKey || x.mobileVideoKey)) : [],
   });
   const { upcoming, started } = orderDrops(drops, now);
   return json({

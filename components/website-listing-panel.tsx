@@ -1,7 +1,7 @@
 "use client";
 /**
  * 🖼 แท็บ "หน้ารายการสินค้า" ในหน้าดีไซน์เว็บ — รูปแทรกในกริดสินค้า (theme.listing)
- * ของกลาง: useDragReorder/DragHandle (ลากเรียง) · ImageUploadField (อัปโหลดรูป) · ConfirmDialog (ลบ)
+ * ของกลาง: useDragReorder/DragHandle (ลากเรียง) · ImageUploadField (อัปโหลดรูป) · WebsiteVideoField (วิดีโอ) · WebsiteProductPicker / WebsiteSkuPicker (📌 ผูกกับสินค้า) · ConfirmDialog (ลบ)
  * ตรรกะ/ค่าที่เลือกได้อยู่ lib/website-listing.ts · storefront วาดใน ShopClient + ListingInsertTile
  */
 import { LangInput } from "@/components/bilingual-field";
@@ -14,6 +14,9 @@ import { categoryHref } from "@/lib/website-links";
 import { ShopFiltersEditor } from "@/components/website-shop-filters-editor";
 import { LinkTargetPicker } from "@/components/website-link-picker";
 import { ListingLayoutSettings } from "@/components/website-listing-layout";
+import { WebsiteProductPicker } from "@/components/website-product-picker";
+import { WebsiteSkuPicker } from "@/components/website-sku-picker";
+import { WebsiteVideoField } from "@/components/website-video-field";
 import type { SchemaFormContext } from "@/components/website-schema-form";
 import {
   LISTING_SIZES, LISTING_SCOPES, LISTING_TEXT_POS, LISTING_RATIOS, LISTING_RATIOS_MOBILE, MAX_LISTING_INSERTS,
@@ -116,6 +119,7 @@ export function ListingInsertsEditor({
   products,
   linkCtx,
   where = "listing",
+  shopSlug,
 }: {
   list: ListingInsert[];
   onChange: (inserts: ListingInsert[]) => void;
@@ -123,7 +127,10 @@ export function ListingInsertsEditor({
   products: { code: string; name: string }[];
   linkCtx?: SchemaFormContext;
   where?: "listing" | "drop";
+  /** ร้าน (ป๊อปเลือกสินค้า/SKU ที่ผูกรูป) — ไม่ส่ง = ใช้ของ linkCtx */
+  shopSlug?: string;
 }) {
+  const slug = shopSlug ?? linkCtx?.shopSlug ?? "";
   const set = (inserts: ListingInsert[]) => onChange(inserts);
   const patch = (id: string, p: Partial<ListingInsert>) => set(list.map((x) => (x.id === id ? { ...x, ...p } : x)));
   const drag = useDragReorder((from, to) => set(moveItem(list, from, to)));
@@ -131,9 +138,15 @@ export function ListingInsertsEditor({
   const [del, setDel] = useState<ListingInsert | null>(null);
 
   const catLabel = (k: string) => categories.find((c) => c.key === k)?.label ?? k;
+  // 📌 ผูกกับสินค้า: "หลัง PIX28, PIX01" · SKU = รหัสรุ่นของสีนั้น
+  const anchorText = (x: ListingInsert) => {
+    const codes = x.anchors.map((a) => a.split(":")[0]);
+    return `${x.anchorSide === "before" ? "ก่อน" : "หลัง"} ${x.anchorKind === "sku" ? "SKU " : ""}${codes.length ? `${codes.slice(0, 3).join(", ")}${codes.length > 3 ? ` +${codes.length - 3}` : ""}` : "(ยังไม่เลือกสินค้า)"}`;
+  };
   const summary = (x: ListingInsert) =>
     [
-      x.after === 0 ? "ก่อนสินค้าชิ้นแรก" : `หลังสินค้าชิ้นที่ ${x.after}`,
+      x.placeBy === "product" ? anchorText(x) : x.after === 0 ? "ก่อนสินค้าชิ้นแรก" : `หลังสินค้าชิ้นที่ ${x.after}`,
+      x.videoKey || x.mobileVideoKey ? "🎬 วิดีโอ" : null,
       LISTING_SIZES.find((s) => s.value === x.size)?.label.replace(/ \(.*\)$/, ""),
       where === "listing" ? (x.scope === "all" ? "ทุกหน้า" : x.scope === "shop" ? "เฉพาะหน้าทั้งหมด" : x.categories.map(catLabel).join(", ") || "ยังไม่เลือกหมวด") : null,
     ]
@@ -146,7 +159,9 @@ export function ListingInsertsEditor({
         <div className="rounded-lg bg-slate-50 px-3 py-2 text-[11px] text-slate-600 leading-relaxed">
           แทรกรูป (เช่น รูปนายแบบ/ไลฟ์สไตล์) ระหว่างการ์ดสินค้าในหน้า <b>สินค้าทั้งหมด</b> และหน้าหมวด · เพิ่มได้หลายรูป ลาก ⠿ เพื่อเรียง
           <br />
-          กฎบนเว็บ: โชว์เฉพาะตอนลูกค้าเรียงแบบ &quot;แนะนำ&quot; และไม่ได้ค้นหา/กดตัวกรอง · ถ้าหมวดนั้นมีสินค้าน้อยกว่าลำดับที่ตั้ง รูปนั้นจะไม่โชว์ · ระบบดึงการ์ดมาเติมช่องว่างให้เอง (ไม่มีรูโหว่) · มือถือ: รูปที่ใหญ่กว่า 1 ช่องจะเป็นเต็มแถว
+          กฎบนเว็บ: แบบ &quot;ตามลำดับ&quot; โชว์เฉพาะตอนลูกค้าเรียงแบบ &quot;แนะนำ&quot; และไม่ได้ค้นหา/กดตัวกรอง · ถ้าหมวดนั้นมีสินค้าน้อยกว่าลำดับที่ตั้ง รูปนั้นจะไม่โชว์ · ระบบดึงการ์ดมาเติมช่องว่างให้เอง (ไม่มีรูโหว่) · มือถือ: รูปที่ใหญ่กว่า 1 ช่องจะเป็นเต็มแถว
+          <br />
+          📌 แบบ &quot;ผูกกับสินค้า&quot; = วางก่อน/หลังการ์ดของสินค้า (หรือ SKU) ที่เลือก ถ้าหน้านั้นมีสินค้านั้น · ตามไปด้วยตอนลูกค้าเรียง/กรองได้ · 🎬 ใส่วิดีโอเล่นแทนรูปได้
         </div>
 
       ) : (
@@ -154,6 +169,8 @@ export function ListingInsertsEditor({
           แทรกรูป (เช่น รูปลุค/นายแบบของชุดนี้) ระหว่างการ์ดสินค้าในตารางของชุดนี้ — Section ชุดมาใหม่ + หน้า /new/&lt;ชุด&gt; · เพิ่มได้หลายรูป ลาก ⠿ เพื่อเรียง
           <br />
           ชุดมีสินค้าน้อยกว่าลำดับที่ตั้ง = รูปต่อท้ายสุด · มือถือ: รูปที่ใหญ่กว่า 1 ช่องจะเป็นเต็มแถว · บันทึกชุดแล้วเว็บอัปเดตภายใน ~1 นาที
+          <br />
+          📌 ผูกกับสินค้า (หรือ SKU) ในชุดได้ = วางก่อน/หลังการ์ดนั้น · 🎬 ใส่วิดีโอเล่นแทนรูปได้
         </div>
       )}
       {list.length === 0 && (
@@ -178,7 +195,11 @@ export function ListingInsertsEditor({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs text-slate-700 truncate">{x.title || `รูปแทรก ${i + 1}`}</div>
-                  <div className="text-[11px] text-slate-400 truncate">{summary(x)}{!thumb && <span className="ml-1 text-rose-500">· ยังไม่มีรูป — เว็บจะไม่โชว์</span>}</div>
+                  <div className="text-[11px] text-slate-400 truncate">
+                    {summary(x)}
+                    {!thumb && !x.videoKey && !x.mobileVideoKey && <span className="ml-1 text-rose-500">· ยังไม่มีรูป — เว็บจะไม่โชว์</span>}
+                    {x.placeBy === "product" && !x.anchors.length && <span className="ml-1 text-rose-500">· ยังไม่เลือกสินค้าที่ผูก — เว็บจะไม่โชว์</span>}
+                  </div>
                 </div>
                 <label className="flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer shrink-0" title="เปิด/ปิดชั่วคราว">
                   <input type="checkbox" className="accent-blue-600" checked={x.enabled} onChange={(e) => patch(x.id, { enabled: e.target.checked })} />
@@ -195,12 +216,110 @@ export function ListingInsertsEditor({
                     <ImageUploadField label="รูปบนมือถือ (ว่าง = ใช้รูปคอม)" hint="แนะนำแนวตั้ง 4:5" value={x.mobileImageKey} onChange={(k) => patch(x.id, { mobileImageKey: k })} height={56} />
                   </div>
 
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <div>
-                      <label className={lbl}>แทรกหลังสินค้าชิ้นที่</label>
-                      <input type="number" min={0} max={500} value={x.after} onChange={(e) => patch(x.id, { after: Math.max(0, Math.min(500, Math.round(Number(e.target.value) || 0))) })} className={inputCls} />
-                      <p className="text-[10px] text-slate-400 mt-0.5">0 = ก่อนสินค้าชิ้นแรก</p>
+                  {/* 🎬 วิดีโอ (ไม่บังคับ) — มี = เล่นแทนรูป เงียบ วนซ้ำ · รูปด้านบน = ภาพปกระหว่างโหลด · ของกลาง WebsiteVideoField */}
+                  <details open={!!(x.videoKey || x.mobileVideoKey)} className="rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+                    <summary className="cursor-pointer text-xs text-slate-700">🎬 วิดีโอแทนรูป (ไม่บังคับ){x.videoKey || x.mobileVideoKey ? " · ตั้งแล้ว" : ""}</summary>
+                    <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                      <div>
+                        <label className={lbl}>วิดีโอบนคอม</label>
+                        <WebsiteVideoField slot="🖥 วิดีโอบนคอม" value={x.videoKey} onChange={(k) => patch(x.id, { videoKey: k })} />
+                      </div>
+                      <div>
+                        <label className={lbl}>วิดีโอบนมือถือ (ว่าง = ใช้ของคอม)</label>
+                        <WebsiteVideoField slot="📱 วิดีโอบนมือถือ" value={x.mobileVideoKey} onChange={(k) => patch(x.id, { mobileVideoKey: k })} />
+                      </div>
                     </div>
+                    <p className="mt-1 text-[10px] text-slate-400">เล่นเองแบบเงียบ วนซ้ำ (เล่นเฉพาะตอนเห็นบนจอ) · รูปด้านบน = ภาพปกระหว่างโหลด · แนะนำ MP4 ≤ 15 MB 6–10 วินาที</p>
+                  </details>
+
+                  {/* 📌 ตำแหน่ง: ตามลำดับ (เดิม) / ผูกกับสินค้า (Parent หรือ SKU) — ตำแหน่งจริงคิดที่ resolveInsertAt (lib/website-listing ใช้ร่วมเว็บร้าน) */}
+                  <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 px-2.5 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-medium text-slate-700">📌 ตำแหน่ง</span>
+                      <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
+                        {([
+                          ["pos", "ตามลำดับ (หลังชิ้นที่ N)"],
+                          ["product", "ผูกกับสินค้า"],
+                        ] as const).map(([v, l]) => (
+                          <button key={v} type="button" onClick={() => patch(x.id, { placeBy: v })} className={`px-2.5 py-1 text-xs ${x.placeBy === v ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+                            {l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {x.placeBy === "product" ? (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-xs text-slate-700">ผูกกับ</span>
+                          <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
+                            {([
+                              ["parent", "สินค้า (Parent) — ทุกสีของรุ่น"],
+                              ["sku", "SKU — สีเดียว"],
+                            ] as const).map(([v, l]) => (
+                              <button
+                                key={v}
+                                type="button"
+                                onClick={() =>
+                                  v !== x.anchorKind &&
+                                  // SKU → Parent = เหลือรหัสรุ่น · Parent → SKU = เลือกสีใหม่
+                                  patch(x.id, { anchorKind: v, anchors: v === "parent" ? [...new Set(x.anchors.map((a) => a.split(":")[0]))] : [] })
+                                }
+                                className={`px-2.5 py-1 text-xs ${x.anchorKind === v ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                              >
+                                {l}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        {!slug ? (
+                          <p className="text-[11px] text-rose-600">ไม่รู้ว่าเป็นร้านไหน — เปิดจากหน้าเว็บของร้านเพื่อเลือกสินค้า</p>
+                        ) : x.anchorKind === "parent" ? (
+                          <WebsiteProductPicker shopSlug={slug} value={x.anchors} max={30} onChange={(codes) => patch(x.id, { anchors: codes })} />
+                        ) : (
+                          <WebsiteSkuPicker shopSlug={slug} value={x.anchors} max={30} onChange={(refs) => patch(x.id, { anchors: refs })} />
+                        )}
+                        <p className="text-[10px] text-slate-400">
+                          เลือกได้หลายตัว · หน้านั้นมีหลายตัว = วางที่ตัวแรกที่เจอ (รูปโผล่ครั้งเดียว) · หน้าการ์ดแบบรุ่น + ผูก SKU = ติดการ์ดรุ่นของสีนั้น · หน้าการ์ดแตกสี + ผูก Parent = ติดการ์ดสีแรกที่เจอ
+                        </p>
+                        <div className="grid gap-2 sm:grid-cols-3">
+                          <div>
+                            <label className={lbl}>วางรูป</label>
+                            <select className={inputCls} value={x.anchorSide} onChange={(e) => patch(x.id, { anchorSide: e.target.value === "before" ? "before" : "after" })}>
+                              <option value="after">หลังสินค้านั้น</option>
+                              <option value="before">ก่อนสินค้านั้น</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className={lbl}>ถ้าหน้านั้นไม่มีสินค้าที่เลือก</label>
+                            <select className={inputCls} value={x.anchorFallback} onChange={(e) => patch(x.id, { anchorFallback: e.target.value === "pos" ? "pos" : "hide" })}>
+                              <option value="hide">ไม่โชว์รูปนี้</option>
+                              <option value="pos">ใช้ตำแหน่งหลังชิ้นที่ {x.after} แทน</option>
+                            </select>
+                          </div>
+                          {x.anchorFallback === "pos" && (
+                            <div>
+                              <label className={lbl}>ตำแหน่งสำรอง (หลังชิ้นที่)</label>
+                              <input type="number" min={0} max={500} value={x.after} onChange={(e) => patch(x.id, { after: Math.max(0, Math.min(500, Math.round(Number(e.target.value) || 0))) })} className={inputCls} />
+                            </div>
+                          )}
+                        </div>
+                        {where === "listing" && (
+                          <label className="flex items-center gap-2 text-xs text-slate-700">
+                            <input type="checkbox" className="accent-blue-600" checked={x.anchorFollow} onChange={(e) => patch(x.id, { anchorFollow: e.target.checked })} />
+                            ตามสินค้าไปด้วยตอนลูกค้าเรียง/กรอง <span className="text-[10px] text-slate-400">(ค้นหาด้วยคำ = ไม่โชว์เหมือนเดิม)</span>
+                          </label>
+                        )}
+                      </>
+                    ) : (
+                      <div className="max-w-[14rem]">
+                        <label className={lbl}>แทรกหลังสินค้าชิ้นที่</label>
+                        <input type="number" min={0} max={500} value={x.after} onChange={(e) => patch(x.id, { after: Math.max(0, Math.min(500, Math.round(Number(e.target.value) || 0))) })} className={inputCls} />
+                        <p className="text-[10px] text-slate-400 mt-0.5">0 = ก่อนสินค้าชิ้นแรก</p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid gap-2 sm:grid-cols-3">
                     <div>
                       <label className={lbl}>ขนาด</label>
                       <select className={inputCls} value={x.size} onChange={(e) => patch(x.id, { size: e.target.value as ListingInsert["size"] })}>

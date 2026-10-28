@@ -6,6 +6,9 @@
  *           ใช้กับทุกหน้า / เฉพาะหน้า "ทั้งหมด" / เลือกหมวด · ลิงก์ · ข้อความทับรูป · รูปมือถือแยกได้
  * กฎบนเว็บ: โชว์เฉพาะตอนเรียงแบบ "แนะนำ" และไม่ได้ค้นหา · หมวดที่มีสินค้าน้อยกว่า N ชิ้น = ไม่โชว์รูปนั้น
  *           มือถือ: รูปที่ใหญ่กว่า 1 ช่อง = เต็มแถว (ใช้สัดส่วนมือถือ)
+ * 📌 ผูกกับสินค้า (placeBy "product"): วางก่อน/หลังการ์ดของสินค้า (Parent) หรือ SKU ที่เลือก — เจอตัวแรกในหน้า · ไม่เจอ = ไม่โชว์/ใช้ลำดับ
+ *           ตามสินค้าไปด้วยตอนลูกค้าเรียง/กรองได้ (anchorFollow) · ตำแหน่งคิดที่ resolveInsertAt (ใช้ร่วมเว็บร้าน)
+ * 🎬 วิดีโอ (videoKey / mobileVideoKey) เล่นแทนรูปได้ · รูป = ภาพปกระหว่างโหลด
  */
 export type ListingInsertSize = "1x1" | "2x1" | "2x2" | "full";
 export type ListingInsertScope = "all" | "shop" | "categories";
@@ -38,7 +41,23 @@ export interface ListingInsert {
   ratio: "3:1" | "21:9" | "2:1" | "16:9";
   /** สัดส่วนบนมือถือ (รูปที่ใหญ่กว่า 1 ช่อง) */
   ratioMobile: "4:5" | "1:1" | "3:4" | "16:9";
+  /** 🎬 วิดีโอ (r2 key · ไม่บังคับ) — มี = เล่นแทนรูป (เงียบ วนซ้ำ) · รูป = ภาพปกระหว่างโหลด · มือถือว่าง = ใช้ของคอม */
+  videoKey: string | null;
+  mobileVideoKey: string | null;
+  /** 📌 วางตาม: "pos" = หลังสินค้าชิ้นที่ after (เดิม) · "product" = ผูกกับสินค้าที่เลือก (anchors) */
+  placeBy: ListingPlaceBy;
+  /** ผูกกับ "parent" (ทุกสีของรุ่น) หรือ "sku" (สีเดียว) */
+  anchorKind: "parent" | "sku";
+  /** รหัสที่ผูก — parent = "CODE" · sku = "CODE:sku-xxxxxxxx" (รูปแบบเดียวกับการ์ดแบบ SKU) · หลายตัว = ตัวแรกที่เจอในหน้า */
+  anchors: string[];
+  /** วางก่อน / หลังการ์ดสินค้านั้น */
+  anchorSide: "before" | "after";
+  /** หน้านั้นไม่มีสินค้าที่ผูก: hide = ไม่โชว์ · pos = ใช้ตำแหน่ง after แทน */
+  anchorFallback: "hide" | "pos";
+  /** ตามสินค้าไปด้วยตอนลูกค้าเรียง/กรอง (ค้นหาด้วยคำ = ไม่โชว์เหมือนเดิม) */
+  anchorFollow: boolean;
 }
+export type ListingPlaceBy = "pos" | "product";
 
 export interface ListingConfig {
   inserts: ListingInsert[];
@@ -279,6 +298,14 @@ export const newListingInsert = (after = 4): ListingInsert => ({
   textColor: "light",
   ratio: "21:9",
   ratioMobile: "4:5",
+  videoKey: null,
+  mobileVideoKey: null,
+  placeBy: "pos",
+  anchorKind: "parent",
+  anchors: [],
+  anchorSide: "after",
+  anchorFallback: "hide",
+  anchorFollow: true,
 });
 
 /** 🖼 รูปแทรกในกริดสินค้า (ของกลาง — หน้ารายการสินค้า + ชุดมาใหม่รายชุด) → รายการที่ใช้ได้ · ค่าเพี้ยน = ค่าเริ่ม · id ซ้ำ/ไม่มี = ทิ้ง · สูงสุด MAX_LISTING_INSERTS */
@@ -317,10 +344,62 @@ export function normalizeListingInserts(v: unknown): ListingInsert[] {
       textColor: one(o.textColor, ["light", "dark"] as const, "light"),
       ratio: one(o.ratio, LISTING_RATIOS, "21:9"),
       ratioMobile: one(o.ratioMobile, LISTING_RATIOS_MOBILE, "4:5"),
+      videoKey: key(o.videoKey),
+      mobileVideoKey: key(o.mobileVideoKey),
+      placeBy: o.placeBy === "product" ? "product" : "pos",
+      anchorKind: o.anchorKind === "sku" ? "sku" : "parent",
+      anchors: cleanAnchors(o.anchors),
+      anchorSide: o.anchorSide === "before" ? "before" : "after",
+      anchorFallback: o.anchorFallback === "pos" ? "pos" : "hide",
+      anchorFollow: o.anchorFollow !== false,
     });
     if (inserts.length >= MAX_LISTING_INSERTS) break;
   }
   return inserts;
+}
+
+/** รหัสที่ผูก: "CODE" หรือ "CODE:sku-xxxxxxxx" · ตัวพิมพ์ใหญ่ที่รหัส · ไม่ซ้ำ · ≤ 30 */
+const cleanAnchors = (v: unknown): string[] =>
+  [
+    ...new Set(
+      (Array.isArray(v) ? v : [])
+        .map((x) => String(x ?? "").trim())
+        .filter((x) => /^[^\s:]{1,60}(:[\w-]{1,40})?$/.test(x))
+        .map((x) => {
+          const [code, opt] = x.split(":");
+          return opt ? `${code.toUpperCase()}:${opt}` : code.toUpperCase();
+        }),
+    ),
+  ].slice(0, 30);
+
+/** การ์ดในกริด (เท่าที่ต้องใช้) — สินค้าของเว็บร้าน / การ์ดแบบ SKU (cardKey "id:sku-x" + cardMain = สีนั้น) */
+export interface InsertCardLike {
+  code?: string | null;
+  slug?: string | null;
+  cardKey?: string | null;
+  cardMain?: string | null;
+}
+
+/** การ์ดตรงกับรหัสที่ผูกไหม — "CODE" = ทุกการ์ดของรุ่นนั้น · "CODE:sku-x" = การ์ดสีนั้น (หน้าที่เป็นการ์ดแบบรุ่น = การ์ดรุ่นของสีนั้น) */
+export function cardMatchesAnchor(card: InsertCardLike, ref: string): boolean {
+  const [code, opt] = ref.split(":");
+  const own = String(card.code ?? card.slug ?? "").toUpperCase();
+  if (!own || own !== code.toUpperCase()) return false;
+  if (!opt) return true;
+  const isSkuCard = !!card.cardKey && card.cardKey.includes(":");
+  return isSkuCard ? card.cardMain === opt : true;
+}
+
+/**
+ * 📌 ตำแหน่งของรูปแทรก = ก่อนการ์ดลำดับที่ at (0 = ก่อนการ์ดแรก) — ใช้ร่วมหน้ารายการสินค้า + ชุดมาใหม่ (เว็บร้าน)
+ *   pos = after ตามที่ตั้ง · product = การ์ดแรกที่ตรงกับรหัสที่ผูก → ก่อน/หลังการ์ดนั้น · ไม่เจอ = fallback (ตำแหน่ง after / ไม่โชว์)
+ *   via บอกว่าได้ตำแหน่งจากสินค้าที่ผูก หรือจากลำดับ (หน้ารายการ: ตำแหน่งตามลำดับใช้เฉพาะตอนเรียงแบบเริ่มต้น)
+ */
+export function resolveInsertAt(ins: Pick<ListingInsert, "after" | "placeBy" | "anchors" | "anchorSide" | "anchorFallback">, cards: InsertCardLike[]): { at: number; via: "anchor" | "pos" } | null {
+  if (ins.placeBy !== "product") return { at: ins.after, via: "pos" };
+  const idx = cards.findIndex((c) => ins.anchors.some((a) => cardMatchesAnchor(c, a)));
+  if (idx >= 0) return { at: ins.anchorSide === "before" ? idx : idx + 1, via: "anchor" };
+  return ins.anchorFallback === "pos" ? { at: ins.after, via: "pos" } : null;
 }
 
 export function normalizeListing(raw: unknown): ListingConfig {

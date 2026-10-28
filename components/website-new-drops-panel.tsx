@@ -310,6 +310,7 @@ export function WebsiteNewDropsPanel({ shopSlug, shopId }: { shopSlug: string; s
                   onChange={(inserts) => setEdit({ ...e, inserts })}
                   categories={[]}
                   products={e.codes.map((code) => ({ code, name: "" }))}
+                  shopSlug={shopSlug}
                 />
               </div>
             </div>
