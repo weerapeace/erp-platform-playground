@@ -1,6 +1,6 @@
 "use client";
 
-/** รูปทรง · การเคลื่อนไหว · ฐานหน้าตาทั้งเว็บ (แยกจาก components/website-theme-panel.tsx — ค่าทุกช่องยังอยู่ในธีมเดิม) */
+/** ทั้งเว็บ: รูปทรงและปุ่ม · ลูกเล่นและการเคลื่อนไหว · มือถือและช่วยขาย (เดิมรวมอยู่แท็บ "รูปทรง" เดียว — แยกเป็น 3 หน้า ค่าในธีมเหมือนเดิม) */
 import { BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, resolveOnBrand, type Shape } from "@/lib/website-theme";
 import { WheelSelect } from "@/components/wheel-select";
 import { SiteControlsSetting, SiteMotionSetting, SitePageSetting, SiteSalesSetting } from "@/components/website-site-design-setting";
@@ -8,43 +8,9 @@ import { labelCls, cardCls, ResetBtn } from "./shared";
 import { useDesign } from "./context";
 
 export function ShapeTab() {
-  const { theme, published, choices, apply, setShape, setPage } = useDesign();
+  const { theme, published, choices, apply, setShape } = useDesign();
   return (
     <>
-      {/* ✨ การเคลื่อนไหวทั้งเว็บ — เว็บร้าน: PageMotion + ::view-transition (globals.css) */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">✨ การเคลื่อนไหวทั้งเว็บ</h3>
-        <p className="text-xs text-slate-500 mb-3">ตอนลูกค้ากดไปหน้าอื่น · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว จะไม่เห็นแอนิเมชันเสมอ</p>
-        <div className="flex flex-wrap gap-2 mb-3">
-          {([
-            ["fade", "จางเปลี่ยนหน้า", "หน้าเก่าจางออก หน้าใหม่จางเข้า (แนะนำ)"],
-            ["rise", "เลื่อนขึ้น", "หน้าใหม่ลอยขึ้นพร้อมจางเข้า ดูหรูขึ้น"],
-            ["curtain", "ม่านสีแบรนด์", "ม่านสีหลักปาดขึ้นปิดจอ แล้วเปิดเป็นหน้าใหม่"],
-            ["logo", "โลโก้วาบ", "จอเป็นสีพื้นพร้อมโลโก้กลางจอ แล้วเปิดหน้าใหม่"],
-            ["zoom", "ซูมเข้า", "หน้าใหม่ซูมเข้าเบา ๆ พร้อมจาง"],
-            ["none", "ไม่มี", "เปลี่ยนหน้าทันที"],
-          ] as const).map(([v, l, d]) => (
-            <button
-              key={v}
-              type="button"
-              onClick={() => apply({ ...theme, page: { ...theme.page, transition: v } })}
-              className={`text-left px-3 py-2 rounded-lg border text-sm transition ${theme.page.transition === v ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
-            >
-              <span className="block font-medium">{l}</span>
-              <span className="block text-[11px] text-slate-500">{d}</span>
-            </button>
-          ))}
-        </div>
-        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.page.smoothScroll} onChange={(e) => apply({ ...theme, page: { ...theme.page, smoothScroll: e.target.checked } })} />
-          เลื่อนจอนุ่ม (Smooth scroll)
-        </label>
-        <p className="text-[11px] text-slate-400 mt-1">เลื่อนลูกกลิ้งเมาส์แล้วหน้าเว็บไหลนุ่มแบบเว็บแบรนด์หรู · ใช้กับคอมที่ใช้เมาส์/ทัชแพด (มือถือเลื่อนแบบปกติ) · ไม่ทำงานในพรีวิวนี้ — ดูผลบนเว็บจริง</p>
-      </div>
-      {/* ✨ ลูกเล่นทั้งเว็บ (ชุด 2): Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · แถบเลื่อนอ่าน · ปุ่มกลับขึ้นบน */}
-      <SiteMotionSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} />
-      {/* 📱 มือถือและช่วยขาย (ชุด 3): แถบเมนูล่าง · ปุ่มแชท · ค้นหาตอนยังไม่พิมพ์ · แถบคุกกี้ */}
-      <SiteSalesSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={theme.colors} onPreview={setPage} />
       {/* 🧱 ฐานหน้าตาทั้งเว็บ (ชุด 1) — components/website-site-design-setting · เว็บร้าน src/lib/site-design-css.ts */}
       <SitePageSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
       <SiteControlsSetting value={theme.shape} onChange={(p) => setShape(p)} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
@@ -139,5 +105,54 @@ export function ShapeTab() {
         </div>
       </div>
     </>
+  );
+}
+
+/** ✨ ลูกเล่นและการเคลื่อนไหว — เปลี่ยนหน้า · เลื่อนนุ่ม · Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · ปุ่มกลับขึ้นบน */
+export function MotionTab() {
+  const { theme, apply } = useDesign();
+  return (
+    <>
+      {/* ✨ การเคลื่อนไหวทั้งเว็บ — เว็บร้าน: PageMotion + ::view-transition (globals.css) */}
+      <div className={cardCls}>
+        <h3 className="text-sm font-semibold text-slate-800 mb-1">✨ การเคลื่อนไหวทั้งเว็บ</h3>
+        <p className="text-xs text-slate-500 mb-3">ตอนลูกค้ากดไปหน้าอื่น · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว จะไม่เห็นแอนิเมชันเสมอ</p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {([
+            ["fade", "จางเปลี่ยนหน้า", "หน้าเก่าจางออก หน้าใหม่จางเข้า (แนะนำ)"],
+            ["rise", "เลื่อนขึ้น", "หน้าใหม่ลอยขึ้นพร้อมจางเข้า ดูหรูขึ้น"],
+            ["curtain", "ม่านสีแบรนด์", "ม่านสีหลักปาดขึ้นปิดจอ แล้วเปิดเป็นหน้าใหม่"],
+            ["logo", "โลโก้วาบ", "จอเป็นสีพื้นพร้อมโลโก้กลางจอ แล้วเปิดหน้าใหม่"],
+            ["zoom", "ซูมเข้า", "หน้าใหม่ซูมเข้าเบา ๆ พร้อมจาง"],
+            ["none", "ไม่มี", "เปลี่ยนหน้าทันที"],
+          ] as const).map(([v, l, d]) => (
+            <button
+              key={v}
+              type="button"
+              onClick={() => apply({ ...theme, page: { ...theme.page, transition: v } })}
+              className={`text-left px-3 py-2 rounded-lg border text-sm transition ${theme.page.transition === v ? "border-blue-600 text-blue-700 bg-blue-50" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
+            >
+              <span className="block font-medium">{l}</span>
+              <span className="block text-[11px] text-slate-500">{d}</span>
+            </button>
+          ))}
+        </div>
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.page.smoothScroll} onChange={(e) => apply({ ...theme, page: { ...theme.page, smoothScroll: e.target.checked } })} />
+          เลื่อนจอนุ่ม (Smooth scroll)
+        </label>
+        <p className="text-[11px] text-slate-400 mt-1">เลื่อนลูกกลิ้งเมาส์แล้วหน้าเว็บไหลนุ่มแบบเว็บแบรนด์หรู · ใช้กับคอมที่ใช้เมาส์/ทัชแพด (มือถือเลื่อนแบบปกติ) · ไม่ทำงานในพรีวิวนี้ — ดูผลบนเว็บจริง</p>
+      </div>
+      {/* ✨ ลูกเล่นทั้งเว็บ (ชุด 2): Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · แถบเลื่อนอ่าน · ปุ่มกลับขึ้นบน */}
+      <SiteMotionSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} />
+    </>
+  );
+}
+
+/** 📱 มือถือและช่วยขาย — แถบเมนูล่าง · ปุ่มแชท · ค้นหาตอนยังไม่พิมพ์ · แถบคุกกี้ */
+export function MobileSalesTab() {
+  const { theme, apply, setPage } = useDesign();
+  return (
+    <SiteSalesSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={theme.colors} onPreview={setPage} />
   );
 }

@@ -13,27 +13,7 @@ import { useDesign } from "./context";
 
 export function ColorsTab() {
   const { shopId, theme, published, apply, toast, setColor, setCard, sampleItems } = useDesign();
-  // 🔎 ตรวจความอ่านง่าย — ทุกคู่สีที่ลูกค้าเห็นจริง · fix = ช่องที่จะเปลี่ยนเมื่อกด "ใช้ #xxx"
-  const tc = theme.colors;
-  const onBrand = resolveOnBrand(tc);
-  const checks = (
-    [
-      { label: "ตัวอักษรบนพื้นหลังเว็บ", fg: tc.ink, bg: tc.page, fix: (v: string) => setColor("ink", v) },
-      { label: "ตัวอักษรรองบนพื้นการ์ด", fg: tc.muted, bg: tc.surface, fix: (v: string) => setColor("muted", v) },
-      { label: "ตัวอักษรบนปุ่มสีหลัก", fg: onBrand, bg: tc.brand, fix: (v: string) => setColor("onBrand", v) },
-      { label: "สีแบรนด์บนพื้นหลังเว็บ", fg: tc.brand, bg: tc.page, fix: (v: string) => setColor("brand", v) },
-      tc.link ? { label: "ลิงก์บนพื้นหลังเว็บ", fg: tc.link, bg: tc.page, fix: (v: string) => setColor("link", v) } : null,
-      tc.price ? { label: "ราคาบนพื้นการ์ด", fg: tc.price, bg: tc.surface, fix: (v: string) => setColor("price", v) } : null,
-      tc.sale ? { label: "ราคาลดบนพื้นการ์ด", fg: tc.sale, bg: tc.surface, fix: (v: string) => setColor("sale", v) } : null,
-      { label: "“พร้อมส่ง” บนพื้นการ์ด", fg: tc.stockIn, bg: tc.surface, fix: (v: string) => setColor("stockIn", v) },
-      { label: "“เหลือน้อย” บนพื้นการ์ด", fg: tc.stockLow, bg: tc.surface, fix: (v: string) => setColor("stockLow", v) },
-      { label: "ตัวอักษรขาวบนป้ายลดราคา", fg: "#FFFFFF", bg: theme.card.autoBadges.saleColor, fix: null },
-    ].filter((c): c is { label: string; fg: string; bg: string; fix: ((v: string) => void) | null } => !!c)
-  ).map((c) => {
-    const ratio = contrastRatio(c.fg, c.bg);
-    const level = wcagLevel(ratio);
-    return { ...c, ratio, level, suggest: level === "fail" ? suggestReadable(c.fg, c.bg) : null };
-  });
+  const checks = colorChecks(theme, setColor);
   const failCount = checks.filter((c) => c.level === "fail").length;
   return (
     <>
@@ -335,4 +315,29 @@ export function ColorsLivePreview({ theme, sample }: { theme: Theme; sample: Sam
       </div>
     </div>
   );
+}
+
+/** 🔎 ตรวจความอ่านง่าย — ทุกคู่สีที่ลูกค้าเห็นจริง · fix = ช่องที่จะเปลี่ยนเมื่อกด "ใช้ #xxx" — ใช้ร่วม แท็บสี + หน้าภาพรวม ("ข้อความอ่านยาก") */
+export function colorChecks(theme: Theme, setColor?: (k: ColorKey, v: string) => void) {
+  const fx = (k: ColorKey) => (setColor ? (v: string) => setColor(k, v) : null);
+  const tc = theme.colors;
+  const onBrand = resolveOnBrand(tc);
+  return (
+    [
+      { label: "ตัวอักษรบนพื้นหลังเว็บ", fg: tc.ink, bg: tc.page, fix: fx("ink") },
+      { label: "ตัวอักษรรองบนพื้นการ์ด", fg: tc.muted, bg: tc.surface, fix: fx("muted") },
+      { label: "ตัวอักษรบนปุ่มสีหลัก", fg: onBrand, bg: tc.brand, fix: fx("onBrand") },
+      { label: "สีแบรนด์บนพื้นหลังเว็บ", fg: tc.brand, bg: tc.page, fix: fx("brand") },
+      tc.link ? { label: "ลิงก์บนพื้นหลังเว็บ", fg: tc.link, bg: tc.page, fix: fx("link") } : null,
+      tc.price ? { label: "ราคาบนพื้นการ์ด", fg: tc.price, bg: tc.surface, fix: fx("price") } : null,
+      tc.sale ? { label: "ราคาลดบนพื้นการ์ด", fg: tc.sale, bg: tc.surface, fix: fx("sale") } : null,
+      { label: "“พร้อมส่ง” บนพื้นการ์ด", fg: tc.stockIn, bg: tc.surface, fix: fx("stockIn") },
+      { label: "“เหลือน้อย” บนพื้นการ์ด", fg: tc.stockLow, bg: tc.surface, fix: fx("stockLow") },
+      { label: "ตัวอักษรขาวบนป้ายลดราคา", fg: "#FFFFFF", bg: theme.card.autoBadges.saleColor, fix: null },
+    ].filter((c): c is { label: string; fg: string; bg: string; fix: ((v: string) => void) | null } => !!c)
+  ).map((c) => {
+    const ratio = contrastRatio(c.fg, c.bg);
+    const level = wcagLevel(ratio);
+    return { ...c, ratio, level, suggest: level === "fail" ? suggestReadable(c.fg, c.bg) : null };
+  });
 }

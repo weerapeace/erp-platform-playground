@@ -3,7 +3,8 @@
 /**
  * WebsiteThemePanel — แท็บ "🎨 ดีไซน์" ในหน้า /website/<slug>
  *
- * หมวด: สี · ตัวอักษร · โลโก้และแบรนด์ · Header · การ์ดสินค้า · รูปทรง · ประวัติ
+ * เมนูซ้ายจัดหมวด (ของกลาง SettingsNavLayout · สารบัญ lib/website-design-nav): ภาพรวม · ทั้งเว็บ · หัว-ท้ายเว็บ · สินค้า · ซื้อขาย · หน้าอื่น ๆ
+ * เนื้อหาแต่ละหน้าอยู่ components/website-design/* (ดึงค่าผ่าน DesignCtx) · ?d=<หน้า> ในลิงก์ = เปิดหน้านั้น
  * ร่าง/เผยแพร่ · undo/redo (Ctrl+Z) · คืนค่ารายช่อง · ตรวจ contrast (WCAG) ·
  * พรีวิว = เว็บจริงใน iframe (?preview=1) ส่งธีมสดผ่าน postMessage
  *
@@ -41,28 +42,15 @@ import { HistoryTab } from "@/components/website-design/history-tab";
 import { CheckoutTab, CartTab } from "@/components/website-design/sell-tabs";
 import { LogoSettings } from "@/components/website-design/logo-tab";
 import { DesignCtx, type DesignCtxValue } from "@/components/website-design/context";
+import { MotionTab, MobileSalesTab } from "@/components/website-design/shape-tab";
+import { DesignOverview } from "@/components/website-design/overview";
+import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
+import { Icon } from "@/components/icon";
+import { DESIGN_GROUPS, DESIGN_PAGES, designGroupOf, dirtyDesignPages, isDesignPageKey, normTitle, searchDesign, type DesignPageKey } from "@/lib/website-design-nav";
 const FINE_COLOR_LABEL = "สีละเอียด";
-type TabKey = "colors" | "fonts" | "logo" | "header" | "menu" | "footer" | "card" | "listing" | "product" | "related" | "cart" | "checkout" | "pages" | "campaign" | "shape" | "history";
+/** หน้าในแท็บดีไซน์ = ทะเบียนกลาง lib/website-design-nav (เมนูซ้ายจัดหมวด) */
+type TabKey = DesignPageKey;
 type Device = "desktop" | "tablet" | "mobile";
-
-const TABS: { k: TabKey; label: string }[] = [
-  { k: "colors", label: "สี" },
-  { k: "fonts", label: "ตัวอักษร" },
-  { k: "logo", label: "โลโก้" },
-  { k: "header", label: "Header" },
-  { k: "menu", label: "เมนู" },
-  { k: "footer", label: "Footer" },
-  { k: "card", label: "การ์ดสินค้า" },
-  { k: "listing", label: "หน้ารายการสินค้า" },
-  { k: "product", label: "หน้าสินค้า" },
-  { k: "related", label: "🔗 แนะนำสินค้า" },
-  { k: "cart", label: "🛒 ตะกร้า" },
-  { k: "checkout", label: "💳 หน้าชำระเงิน" },
-  { k: "pages", label: "📄 หน้าพิเศษ" },
-  { k: "campaign", label: "🎪 แคมเปญ" },
-  { k: "shape", label: "รูปทรง" },
-  { k: "history", label: "ประวัติ" },
-];
 
 const DEVICES: { k: Device; label: string; w: number; h: number; icon: string }[] = [
   { k: "desktop", label: "คอมพิวเตอร์", w: 1440, h: 900, icon: "🖥️" },
@@ -111,7 +99,44 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<"draft" | "publish" | null>(null);
-  const [tab, setTab] = useState<TabKey>("colors");
+  const [tab, setTabState] = useState<TabKey>("overview");
+  // 🔗 ?d=<หน้า> ในลิงก์ = เปิดหน้านั้นเลย · เปลี่ยนหน้าแล้วอัปเดตลิงก์ (ไม่ใช้ useSearchParams — อยู่ใน PlaygroundShell)
+  useEffect(() => {
+    const d = new URLSearchParams(window.location.search).get("d");
+    if (isDesignPageKey(d)) setTabState(d);
+  }, []);
+  const setTab = useCallback((k: TabKey) => {
+    setTabState(k);
+    try {
+      const url = new URL(window.location.href);
+      if (k === "overview") url.searchParams.delete("d");
+      else url.searchParams.set("d", k);
+      window.history.replaceState(window.history.state, "", url);
+    } catch {
+      /* เปลี่ยนลิงก์ไม่ได้ก็ไม่เป็นไร */
+    }
+  }, []);
+  // 🔎 ไปหน้า + การ์ดที่ค้นเจอ → เลื่อนให้เห็นแล้วกะพริบกรอบ (หาจากหัวการ์ดบนจอ)
+  const settingsColRef = useRef<HTMLDivElement>(null);
+  const goTo = useCallback((k: TabKey, card?: string) => {
+    setTab(k);
+    if (!card) return;
+    window.dispatchEvent(new CustomEvent("website-design-focus", { detail: card }));
+    const want = normTitle(card);
+    const tryFocus = (left: number) => {
+      const col = settingsColRef.current;
+      const head = col ? Array.from(col.querySelectorAll("h3, h4")).find((h) => normTitle(h.textContent ?? "").startsWith(want)) : undefined;
+      if (!head) {
+        if (left > 0) window.setTimeout(() => tryFocus(left - 1), 120);
+        return;
+      }
+      const box = (head.closest("[data-design-card]") ?? head.closest(".rounded-xl") ?? head) as HTMLElement;
+      box.scrollIntoView({ behavior: "smooth", block: "start" });
+      box.classList.add("ring-2", "ring-amber-400", "ring-offset-2");
+      window.setTimeout(() => box.classList.remove("ring-2", "ring-amber-400", "ring-offset-2"), 1600);
+    };
+    window.setTimeout(() => tryFocus(8), 60);
+  }, [setTab]);
   // ⏰🎪 ชุด 5: งานตั้งเวลา/แคมเปญ (components/website-theme-schedule) · campPreview = ดูตัวอย่างแคมเปญในพรีวิว (ไม่บันทึก)
   const { list: schedules, reload: reloadSchedules } = useThemeSchedules(shopSlug);
   const pendingSchedule = (schedules ?? []).find((s) => s.kind === "publish" && s.status === "pending") ?? null;
@@ -553,19 +578,18 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   // สูงพอให้เนื้อเว็บเต็มกล่องหลังย่อแล้ว (ไม่งั้นเหลือที่ว่างข้างล่าง)
   const frameH = Math.max(dev.h, Math.round((boxH - 16) / scale));
 
-  const tabDirty = (k: TabKey) =>
-    (k === "colors" && dirtyFields.some((d) => d === FINE_COLOR_LABEL || COLOR_FIELDS.some((c) => c.label === d))) ||
-    (k === "fonts" && dirtyFields.some((d) => d.startsWith("ฟอนต์") || d === "ตัวอักษร")) ||
-    (k === "logo" && dirtyFields.includes("โลโก้")) ||
-    (k === "header" && dirtyFields.includes("Header")) ||
-    (k === "menu" && dirtyFields.includes("เมนู")) ||
-    (k === "footer" && dirtyFields.includes("Footer")) ||
-    (k === "card" && (dirtyFields.includes("การ์ดสินค้า") || dirtyFields.includes("รอรูปโหลด"))) ||
-    (k === "listing" && dirtyFields.includes("หน้ารายการสินค้า")) ||
-    (k === "shape" && (dirtyFields.includes("ความมนขอบ") || dirtyFields.includes("รูปทรง") || dirtyFields.includes("ทั้งเว็บ (รูปทรง)"))) ||
-    (k === "cart" && dirtyFields.includes("ตะกร้า")) ||
-    (k === "checkout" && dirtyFields.includes("หน้าชำระเงิน")) ||
-    ((k === "product" || k === "related") && dirtyFields.includes("หน้าสินค้า"));
+  // 🟠 หน้าที่แก้แล้วยังไม่บันทึก (เทียบค่าในธีมตามทะเบียน lib/website-design-nav)
+  const dirtyPages = dirtyDesignPages(theme, saved);
+  // 🧭 เมนูซ้ายจัดหมวด (ของกลาง SettingsNavLayout) — ภาพรวม + 5 หมวด
+  const navGroups: SettingsNavGroup<TabKey>[] = [
+    { label: "", items: [{ key: "overview", label: "ภาพรวม", desc: "สถานะ · สิ่งที่ควรทำ · ทางลัด", icon: <Icon name="home" /> }] },
+    ...DESIGN_GROUPS.map((g) => ({
+      label: g.label,
+      icon: <Icon name={g.icon} />,
+      items: g.pages.map((k) => ({ key: k, label: DESIGN_PAGES[k].label, desc: DESIGN_PAGES[k].desc, keywords: `${DESIGN_PAGES[k].keywords ?? ""} ${DESIGN_PAGES[k].cards.map((c) => c.title).join(" ")}`, dot: dirtyPages.includes(k) })),
+    })),
+  ];
+  const curPage = tab === "overview" ? null : DESIGN_PAGES[tab];
 
   // 🧩 ของที่แท็บย่อย (components/website-design/*) ใช้ร่วม — ส่งผ่าน DesignCtx แทน props ยาว ๆ
   const designCtx: DesignCtxValue = {
@@ -581,7 +605,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     <DesignCtx.Provider value={designCtx}>
     <PageHealthCtx.Provider value={pagesReady ? storePages : null}>
     <div className="space-y-3">
-      {/* แถบสถานะ */}
+      {/* แถบสถานะ — รวมคำเตือน "แก้เว็บจริง" ไว้บรรทัดเดียว (เดิมเป็นกล่องฟ้าแยก) */}
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5">
         <span
           className={`text-xs px-2.5 py-1 rounded-full font-medium ${
@@ -590,52 +614,45 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         >
           {isDirty ? "● มีการแก้ไขที่ยังไม่บันทึก" : hadDraft ? "● มีร่างที่ยังไม่เผยแพร่" : "✓ เผยแพร่แล้ว"}
         </span>
-        {lastVersion && (
-          <span className="text-[11px] text-slate-400">
-            เผยแพร่ล่าสุด: เวอร์ชัน {lastVersion.version_no} · {timeAgo(lastVersion.created_at)}
-          </span>
-        )}
+        <span className="text-[11px] text-slate-500">
+          กำลังแก้ธีมของเว็บจริง · “บันทึกร่าง” ยังไม่เปลี่ยนหน้าเว็บ จนกว่าจะกด “เผยแพร่”
+          {lastVersion && <span className="text-slate-400"> · เผยแพร่ล่าสุด เวอร์ชัน {lastVersion.version_no} · {timeAgo(lastVersion.created_at)}</span>}
+        </span>
         <div className="ml-auto flex items-center gap-1">
+          {/* 🌐 ข้อความในธีมภาษาอังกฤษ (เมนู · ท้ายเว็บ · แผงเมนู · หัวเว็บ · หน้าสินค้า · ตะกร้า) — ตารางคำแปลของกลาง */}
+          <TranslateButton
+            className="shrink-0"
+            value={theme}
+            onChange={(next) => apply(next)}
+            keys={THEME_TEXT_KEYS}
+            crumbOf={themeCrumb}
+            title="ข้อความในธีม — เมนู · ท้ายเว็บ · แผงเมนูใหญ่ · หัวเว็บ · หน้าสินค้า · ตะกร้า"
+            description="แก้แล้วกด บันทึกร่าง / เผยแพร่ ของหน้านี้ตามปกติ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน"
+          />
           <button onClick={undo} disabled={!undoStack.current.length} title="ย้อนกลับ (Ctrl+Z)" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↶</button>
           <button onClick={redo} disabled={!redoStack.current.length} title="ทำซ้ำ" className="px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 disabled:opacity-40 hover:border-slate-400">↷</button>
         </div>
       </div>
 
-      <div className="rounded-xl bg-blue-50/60 border border-blue-200 px-4 py-2.5">
-        <p className="text-sm text-slate-700 font-medium">กำลังแก้ไขธีมของเว็บไซต์จริง</p>
-        <p className="text-xs text-slate-500 mt-0.5">
-          กด &quot;บันทึกร่าง&quot; จะยังไม่เปลี่ยนหน้าเว็บ จนกว่าจะกด &quot;เผยแพร่&quot;
-        </p>
-      </div>
-
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(340px,38%)] items-start">
+      <SettingsNavLayout
+        groups={navGroups}
+        active={tab}
+        onSelect={(k) => setTab(k)}
+        showHeader={false}
+        compact
+        searchPlaceholder="ค้นหา เช่น โลโก้ ส่งฟรี favicon"
+        searchHits={(q) => searchDesign(q).filter((h) => h.card).map((h) => ({ id: `${h.page}|${h.card}`, label: h.label, crumb: h.crumb, onPick: () => goTo(h.page, h.card) }))}
+      >
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,40%)] items-start">
         {/* ── ซ้าย: ตั้งค่า ── */}
-        <div className="min-w-0 space-y-3">
-          <div className="flex gap-1 border-b border-slate-200 overflow-x-auto">
-            {TABS.map((t) => (
-              <button
-                key={t.k}
-                onClick={() => setTab(t.k)}
-                className={`px-3.5 py-2 text-sm border-b-2 -mb-px whitespace-nowrap transition ${
-                  tab === t.k ? "border-blue-600 text-blue-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"
-                }`}
-              >
-                {t.label}
-                {tabDirty(t.k) && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-amber-500 align-middle" />}
-              </button>
-            ))}
-            <span className="flex-1" />
-            {/* 🌐 ข้อความในธีมภาษาอังกฤษ (เมนู · ท้ายเว็บ · แผงเมนู · หัวเว็บ · หน้าสินค้า · ตะกร้า) — ตารางคำแปลของกลาง */}
-            <TranslateButton
-              className="self-center shrink-0 mb-1"
-              value={theme}
-              onChange={(next) => apply(next)}
-              keys={THEME_TEXT_KEYS}
-              crumbOf={themeCrumb}
-              title="ข้อความในธีม — เมนู · ท้ายเว็บ · แผงเมนูใหญ่ · หัวเว็บ · หน้าสินค้า · ตะกร้า"
-              description="แก้แล้วกด บันทึกร่าง / เผยแพร่ ของหน้านี้ตามปกติ · ช่องที่ยังว่าง ลูกค้าหน้า /en เห็นภาษาไทยแทน"
-            />
-          </div>
+        <div ref={settingsColRef} className="min-w-0 space-y-3">
+          {curPage && (
+            <div>
+              <p className="text-xs text-slate-400">{designGroupOf(tab)?.label} ›</p>
+              <h2 className="text-lg font-semibold text-slate-800 leading-tight">{curPage.label}</h2>
+              <p className="text-xs text-slate-500">{curPage.desc}</p>
+            </div>
+          )}
 
           {/* 🌐 สลับภาษาที่กำลังแก้ทั้งหน้า (เหมือนตัวจัดหน้า) — EN = ทุกช่องข้อความเป็นภาษาอังกฤษ + พรีวิวหน้า /en · แปลที่ยังขาดทั้งธีม */}
           <PathsLangBar value={theme} onChange={(next) => apply(next)} keys={THEME_TEXT_KEYS} />
@@ -643,6 +660,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <p className="text-[11px] text-indigo-700 bg-indigo-50/60 border border-indigo-100 rounded-lg px-2.5 py-1.5">
               🌐 กำลังแก้ภาษาอังกฤษ — ช่องกรอบม่วง = ข้อความที่ลูกค้าหน้า /en เห็น · ช่องที่ยังว่าง ลูกค้าเห็นภาษาไทย (ตัวจางในช่อง) · สี / รูป / สวิตช์ ใช้ร่วมกันทั้ง 2 ภาษา · พรีวิวขวาเป็นหน้า /en
             </p>
+          )}
+
+          {tab === "overview" && (
+            <DesignOverview dirty={dirtyPages} hadDraft={hadDraft} lastVersion={lastVersion} onGo={goTo} onEnglish={() => setContentLang("en")} />
           )}
 
           {/* ── สี ── */}
@@ -686,6 +707,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {tab === "checkout" && <CheckoutTab />}
 
           {tab === "shape" && <ShapeTab />}
+          {tab === "motion" && <MotionTab />}
+          {tab === "mobile" && <MobileSalesTab />}
 
           {/* ── 📄 หน้าพิเศษ (ชุด 4): 404 · ขอบคุณ · ป๊อปอัป · รูปแชร์ · เข้าสู่ระบบ — components/website-site-design-setting ── */}
           {/* ── 🎪 แคมเปญ (ชุด 5): ตั้งเวลาเผยแพร่ · ธีมแคมเปญ · ของตกแต่ง · ป้ายคนดู/ขายแล้ว — components/website-theme-schedule ── */}
@@ -709,7 +732,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         </div>
 
         {/* ── ขวา: พรีวิวเว็บจริง ── */}
-        <div className="lg:sticky lg:top-4 min-w-0">
+        <div className="xl:sticky xl:top-4 min-w-0">
           <div className="flex flex-wrap items-center gap-1.5 mb-2">
             {DEVICES.map((d) => (
               <button key={d.k} onClick={() => setDevice(d.k)} title={`${d.label} ${d.w}px`} className={`px-2.5 py-1 rounded-lg border text-xs transition ${device === d.k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
@@ -796,6 +819,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           </p>
         </div>
       </div>
+      </SettingsNavLayout>
 
       {/* ⏰ ตั้งเวลาเผยแพร่ไว้ (ชุด 5) */}
       <ScheduleBanner pending={tab === "campaign" ? null : pendingSchedule} onCancel={async (s) => (await cancelSchedule(s, toast)) && reloadSchedules()} />
@@ -818,20 +842,25 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         <span className="text-xs text-slate-500">
           {isDirty ? (
             <>
-              มีการแก้ไขที่ยังไม่บันทึก <span className="font-medium text-amber-700">{dirtyFields.length} รายการ</span>
-              <span className="text-slate-400"> · {dirtyFields.slice(0, 3).join(", ")}{dirtyFields.length > 3 ? "…" : ""}</span>
+              มีการแก้ไขที่ยังไม่บันทึก <span className="font-medium text-amber-700">{dirtyPages.length || dirtyFields.length} หัวข้อ</span>
+              {/* กดชื่อหัวข้อ = ไปหน้านั้น */}
+              {dirtyPages.map((k) => (
+                <button key={k} type="button" onClick={() => setTab(k)} className="ml-1.5 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800 hover:border-amber-400">
+                  {DESIGN_PAGES[k].label}
+                </button>
+              ))}
             </>
           ) : hadDraft ? "มีร่างบันทึกไว้ — ยังไม่เผยแพร่" : "ไม่มีการเปลี่ยนแปลง"}
         </span>
         <div className="ml-auto flex items-center gap-2">
-          <button onClick={() => void discard()} disabled={!isDirty && !hadDraft} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40">ละทิ้งการเปลี่ยนแปลง</button>
-          <button onClick={() => void save("draft")} disabled={busy !== null} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50">
+          <button onClick={() => void discard()} disabled={!isDirty && !hadDraft} className="px-3.5 py-2 rounded-lg text-sm text-slate-500 hover:text-slate-800 disabled:opacity-40 whitespace-nowrap"><span className="hidden sm:inline">ละทิ้งการเปลี่ยนแปลง</span><span className="sm:hidden">ละทิ้ง</span></button>
+          <button onClick={() => void save("draft")} disabled={busy !== null} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50 whitespace-nowrap">
             {busy === "draft" ? "กำลังบันทึก…" : "บันทึกร่าง"}
           </button>
-          <button onClick={() => setScheduleOpen(true)} disabled={busy !== null} title="ตั้งเวลาให้ระบบเผยแพร่เอง" className="px-3.5 py-2 rounded-lg border border-blue-300 text-sm text-blue-700 hover:bg-blue-50 disabled:opacity-50" data-schedule-btn>
+          <button onClick={() => setScheduleOpen(true)} disabled={busy !== null} title="ตั้งเวลาให้ระบบเผยแพร่เอง" className="px-3.5 py-2 rounded-lg border border-blue-300 text-sm text-blue-700 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap" data-schedule-btn>
             ⏰ ตั้งเวลา
           </button>
-          <button onClick={() => void save("publish")} disabled={busy !== null} className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+          <button onClick={() => void save("publish")} disabled={busy !== null} className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">
             {busy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}
           </button>
         </div>
