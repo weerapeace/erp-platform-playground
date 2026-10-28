@@ -29,16 +29,19 @@ import {
   DEFAULT_RECS_SET,
   DEFAULT_TRUST_ITEMS,
   MAX_RECS_SETS,
+  TRUST_ICON_SIZE,
   etaLine,
   freeShipLine,
   type CartConfig,
   type CartIcons,
   type CartRecsSet,
   type CartStyle,
+  type CartTrustIconColor,
   type CartUnitPriceWhen,
 } from "@/lib/website-cart";
 import { webForm } from "@/lib/website-form-styles";
 import { RangeInput } from "@/components/range-input";
+import { SiteIcon, SiteIconPicker } from "@/components/site-icon-picker";
 
 const lbl = webForm.label;
 const input = "w-full h-8 rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-400";
@@ -669,7 +672,8 @@ export function CartSettings({
           {trust.map((it, i) => (
             <div key={i} {...drag.rowProps(i)} className={`flex items-center gap-2 ${drag.rowCls(i)}`}>
               <DragHandle {...drag.handleProps(i)} />
-              <input className="w-14 shrink-0 h-8 rounded-lg border border-slate-200 px-1 text-center text-sm focus:outline-none focus:border-blue-400" value={it.icon} maxLength={8} onChange={(e) => setTrust(trust.map((x, j) => (j === i ? { ...x, icon: e.target.value } : x)))} aria-label="ไอคอน" />
+              {/* 🔣 ไอคอนเส้น (ชุดกลาง) / อีโมจิ / อัปโหลด — ของกลาง SiteIconPicker */}
+              <SiteIconPicker value={it.icon} onChange={(icon) => setTrust(trust.map((x, j) => (j === i ? { ...x, icon } : x)))} />
               <LangInput className={`${input} min-w-0`} obj={it} k="text" maxLength={60} placeholder="ข้อความ" onPatch={(p) => setTrust(trust.map((x, j) => (j === i ? { ...x, ...p } : x)))} />
               <button type="button" onClick={() => setTrust(trust.filter((_, j) => j !== i))} className="shrink-0 w-8 h-8 rounded-lg border border-slate-200 text-slate-400 hover:text-red-600 hover:border-red-300" title="ลบ">
                 ×
@@ -678,7 +682,7 @@ export function CartSettings({
           ))}
           <div className="flex gap-3">
             {trust.length < 4 && (
-              <button type="button" onClick={() => setTrust([...trust, { icon: "✅", text: "" }])} className="text-xs text-blue-600 hover:underline">
+              <button type="button" onClick={() => setTrust([...trust, { icon: "i:circle-check", text: "" }])} className="text-xs text-blue-600 hover:underline">
                 + เพิ่มข้อ
               </button>
             )}
@@ -687,6 +691,37 @@ export function CartSettings({
             </button>
           </div>
           {trust.some((x) => !x.text.trim()) && <p className="text-[11px] text-amber-700">⚠ ข้อที่ไม่มีข้อความจะไม่โชว์บนเว็บ</p>}
+          {/* ขนาด/สีไอคอน — ใช้กับไอคอนเส้นและรูป (อีโมจิใช้ขนาดตัวอักษรเท่าเดิม) */}
+          <div className="grid gap-3 sm:grid-cols-2 pt-2 border-t border-slate-100" data-trust-icon-style>
+            <div>
+              <span className={lbl}>ขนาดไอคอน {c.trustIconSize}px</span>
+              <RangeInput min={TRUST_ICON_SIZE.min} max={TRUST_ICON_SIZE.max} value={c.trustIconSize} onChange={(trustIconSize) => set({ trustIconSize })} unit="px" className="w-full accent-blue-600" />
+            </div>
+            <div>
+              <span className={lbl}>สีไอคอน</span>
+              <Seg<CartTrustIconColor>
+                value={c.trustIconColor}
+                onChange={(trustIconColor) => set({ trustIconColor })}
+                options={[
+                  { v: "text", l: "ตามตัวอักษร" },
+                  { v: "brand", l: "สีหลักของร้าน" },
+                ]}
+              />
+            </div>
+          </div>
+          {/* ตัวอย่างแถบ (สีจริงตามธีมร้าน — ดูในพรีวิวด้านข้าง) */}
+          {trust.some((x) => x.text.trim()) && (
+            <div className="flex flex-wrap justify-center gap-x-3.5 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-[11.5px] text-slate-500" data-trust-sample>
+              {trust
+                .filter((x) => x.text.trim())
+                .map((x, i) => (
+                  <span key={i} className="inline-flex items-center gap-1">
+                    <SiteIcon value={x.icon} size={c.trustIconSize} className={c.trustIconColor === "brand" ? "text-orange-600" : undefined} />
+                    {x.text}
+                  </span>
+                ))}
+            </div>
+          )}
         </div>
       </Card>
 

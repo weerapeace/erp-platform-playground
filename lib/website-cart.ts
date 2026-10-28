@@ -73,9 +73,12 @@ export interface CartLabels {
   note: string;
 }
 export interface CartTrustItem {
+  /** "i:<ไอคอนเส้น>" · "img:<รูปที่อัปโหลด>" · อีโมจิ (ค่าเดิม) — รูปแบบ = lib/website-icons */
   icon: string;
   text: string;
 }
+/** สีไอคอนแถบความมั่นใจ: text ตามตัวอักษร (เดิม) · brand สีหลักของร้าน */
+export type CartTrustIconColor = "text" | "brand";
 /** 🎀 ห่อของขวัญ/การ์ด: order = ทั้งออเดอร์ (เดิม) · item = เลือกรายชิ้นในตะกร้า (ค่าห่อ × จำนวนชิ้น · การ์ด 1 ใบ/รายการ) */
 export type CartGiftMode = "order" | "item";
 /** หน้า /cart: classic = แบบเดิม · split = แยกรายการ (ป้ายหมวด · ไอคอนท้ายแถว) + กล่องสรุปขวาแบบตาราง */
@@ -176,6 +179,9 @@ export interface CartConfig {
   /** แถบความมั่นใจใต้ปุ่มสั่งซื้อ */
   trust: boolean;
   trustItems: CartTrustItem[];
+  /** ขนาดไอคอนเส้น/รูป (px) — อีโมจิใช้ขนาดตัวอักษรเท่าเดิม */
+  trustIconSize: number;
+  trustIconColor: CartTrustIconColor;
   /** 🚚 วันที่คาดว่าได้รับ (นับวันทำการ จ.–ศ.) */
   eta: boolean;
   etaMin: number;
@@ -184,11 +190,21 @@ export interface CartConfig {
   etaText: string;
 }
 
+/** ชุดเริ่มต้น = ไอคอนเส้น (ร้านที่บันทึกอีโมจิไว้แล้วยังโชว์อีโมจิเหมือนเดิม) */
 export const DEFAULT_TRUST_ITEMS: CartTrustItem[] = [
-  { icon: "🔒", text: "ชำระเงินปลอดภัย" },
-  { icon: "🚚", text: "จัดส่งไว" },
-  { icon: "↩️", text: "เปลี่ยนสินค้าได้" },
+  { icon: "i:lock", text: "ชำระเงินปลอดภัย" },
+  { icon: "i:truck", text: "จัดส่งไว" },
+  { icon: "i:arrow-back-up", text: "เปลี่ยนสินค้าได้" },
 ];
+export const TRUST_ICON_SIZE = { def: 14, min: 10, max: 32 } as const;
+
+/** ไอคอนแถบความมั่นใจ — กฎเดียวกับ cleanSiteIcon (lib/website-icons · ไฟล์นี้ห้าม import): i:<key> / img:<r2 key> เก็บเต็ม · อีโมจิ ≤ 8 ตัว */
+const trustIconOf = (v: unknown): string => {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (/^i:[a-z0-9-]{1,40}$/.test(s)) return s;
+  if (s.startsWith("img:")) return /^[\w\-./%()]{1,200}$/.test(s.slice(4)) ? s : "";
+  return s.startsWith("i:") ? "" : s.slice(0, 8);
+};
 
 export const DEFAULT_CART_ICONS: CartIcons = { coupon: "🎟️", gift: "🎀", card: "💌", note: "📝", points: "⭐", eta: "🚚" };
 export const DEFAULT_CART_LABELS: CartLabels = { gift: "", card: "", note: "" };
@@ -273,6 +289,8 @@ export const DEFAULT_CART: CartConfig = {
   labels: { ...DEFAULT_CART_LABELS },
   trust: false,
   trustItems: DEFAULT_TRUST_ITEMS,
+  trustIconSize: TRUST_ICON_SIZE.def,
+  trustIconColor: "text",
   eta: false,
   etaMin: 2,
   etaMax: 4,
@@ -423,7 +441,7 @@ export function normalizeCart(raw: unknown): CartConfig {
   const trustItems = trustRaw
     ? trustRaw
         .map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>) : {}))
-        .map((x) => ({ icon: str(x.icon, "", 8).trim(), text: str(x.text, "", 60).trim() }))
+        .map((x) => ({ icon: trustIconOf(x.icon), text: str(x.text, "", 60).trim() }))
         .filter((x) => x.text)
         .slice(0, 4)
     : d.trustItems.map((x) => ({ ...x }));
@@ -489,6 +507,8 @@ export function normalizeCart(raw: unknown): CartConfig {
     labels: { gift: str(lb.gift, "", 60).trim(), card: str(lb.card, "", 60).trim(), note: str(lb.note, "", 60).trim() },
     trust: bool(r.trust, d.trust),
     trustItems,
+    trustIconSize: int(r.trustIconSize, d.trustIconSize, TRUST_ICON_SIZE.min, TRUST_ICON_SIZE.max),
+    trustIconColor: one(r.trustIconColor, ["text", "brand"] as const, d.trustIconColor),
     eta: bool(r.eta, d.eta),
     etaMin,
     etaMax: Math.max(etaMin, int(r.etaMax, d.etaMax, 0, 90)),
