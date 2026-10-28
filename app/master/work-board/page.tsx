@@ -506,13 +506,19 @@ function WorkBoardPageInner() {
     return m;
   }, [board]);
 
+  // โต๊ะที่โชว์บนบอร์ด = เปิดโชว์ + โต๊ะที่ปิดแล้วแต่ยังมีงานค้าง (งานเก่ายังเห็นจนส่งคืนครบ) · ช่องเลือกโต๊ะตอนจ่ายงานใหม่ยังกรองแค่ที่เปิดโชว์
+  const boardDesks = useMemo(() => {
+    const busy = new Set(board.workOrders.filter((w) => w.status !== "done" && w.status !== "cancelled").map((w) => w.department_id).filter(Boolean));
+    return board.departments.filter((d) => stageOfDept(d.name) !== "cut" && (d.show_on_board !== false || busy.has(d.id)));
+  }, [board]);
+
   const zones: Zone[] = useMemo(() => {
     // รอจ่ายไม่อยู่บนแคนวาสแล้ว — ย้ายไปปุ่ม "📥 รอจ่าย" → ป๊อปอัป (ใช้พื้นที่น้อยลง) · เหลือแต่โซนโต๊ะ
     const arr: Zone[] = [];
     // เอาแผนก "ตัด/เตรียม" ออกจากบอร์ด — งานตัด/เตรียมย้ายไปเป็นเช็กลิสต์ในตัวการ์ดรอจ่าย
-    board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false).forEach((d, i) => arr.push({ key: `dept:${d.id}`, label: d.name, kind: "dept", dept: d, accent: ACCENT[(i + 1) % ACCENT.length], moCards: [], woCards: wosByDept.get(d.id) ?? [] }));
+    boardDesks.forEach((d, i) => arr.push({ key: `dept:${d.id}`, label: d.name, kind: "dept", dept: d, accent: ACCENT[(i + 1) % ACCENT.length], moCards: [], woCards: wosByDept.get(d.id) ?? [] }));
     return arr;
-  }, [board, wosByDept]);
+  }, [board, wosByDept, boardDesks]);
 
   const countOf = (z: Zone) => (z.kind === "pending" ? z.moCards.length : z.woCards.length);
   // หมายเหตุที่จะโชว์ใต้หัวแผนก (ถ้าเปิด "โชว์หมายเหตุ")
@@ -1357,6 +1363,15 @@ function WorkBoardPageInner() {
     catch { /* ignore */ } finally { setDeptLoading(false); }
   }, []);
   const openDeptMgr = useCallback(() => { setConfirmDelId(null); setDeptMgrOpen(true); void loadDepts(); }, [loadDepts]);
+  // สร้าง/เปลี่ยนชื่อ/ปิดโต๊ะจากแผง 👥 ในป๊อปจ่ายงาน → โหลดบอร์ดใหม่ แล้วเลือกโต๊ะปลายทางให้ (null = ไม่เลือก)
+  const [deskFocus, setDeskFocus] = useState<string | null | undefined>(undefined);
+  const deskChanged = useCallback(async (focus: string | null) => { await load(true); setDeskFocus(focus); }, [load]);
+  useEffect(() => {
+    if (deskFocus === undefined) return;
+    if (deskFocus === null) { setDispDept(null); setDeskFocus(undefined); return; }
+    const d = board.departments.find((x) => x.id === deskFocus);
+    if (d) { setDispDept(d); setDeskFocus(undefined); }
+  }, [deskFocus, board.departments]);
   const closeDeptMgr = useCallback(() => { setDeptMgrOpen(false); void load(true); }, [load]);
   const patchDept = useCallback(async (id: string, p: Partial<DeptFull>) => {
     setDeptList((ls) => ls.map((d) => d.id === id ? { ...d, ...p } : d));
@@ -1548,7 +1563,7 @@ function WorkBoardPageInner() {
           for (const m of board.pending) { laborPerUnit[m.mo_no] = (m.central_rate && m.central_rate > 0) ? m.central_rate : (m.qty > 0 && m.labor ? m.labor.prod_plan / m.qty : 0); if (m.image_url) imageByMo[m.mo_no] = m.image_url; }
           for (const w of board.workOrders) { const k = String(w.mo_no); if (!laborPerUnit[k]) laborPerUnit[k] = (w.central_rate && w.central_rate > 0) ? w.central_rate : ((w.qty || 0) > 0 && w.labor ? w.labor.prod_plan / (w.qty || 1) : 0); if (imageByMo[k] == null && w.image_url) imageByMo[k] = w.image_url; }
           return <CanvasView
-            departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+            departments={boardDesks}
             realWOs={board.workOrders} plans={plans} canEdit={canDispatch}
             imageByMo={imageByMo} laborPerUnit={laborPerUnit}
             onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
@@ -1600,7 +1615,7 @@ function WorkBoardPageInner() {
           {shopMode === "dispatch" ? (
             <DispatchShop
               pending={board.pending}
-              departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+              departments={boardDesks}
               craftsmen={craftsmen}
               canDispatch={canDispatch}
               moGroups={moGroups}
@@ -1612,7 +1627,7 @@ function WorkBoardPageInner() {
           ) : (
             <DeskShop
               workOrders={board.workOrders}
-              departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+              departments={boardDesks}
               onOpenWO={(w) => { const real = board.workOrders.find((x) => x.id === w.id); if (real) { setRecvQty(Math.max(0, (real.qty || 0) - (real.received_qty || 0))); openWO(real); } }}
             />
           )}
@@ -1629,7 +1644,7 @@ function WorkBoardPageInner() {
           for (const w of board.workOrders) { const k = String(w.mo_no); if (!laborPerUnit[k]) laborPerUnit[k] = (w.central_rate && w.central_rate > 0) ? w.central_rate : ((w.qty || 0) > 0 && w.labor ? w.labor.prod_plan / (w.qty || 1) : 0); if (imageByMo[k] == null && w.image_url) imageByMo[k] = w.image_url; }
           return <DispatchPlanBoard
             planId={p.id} planName={p.name} planStatus={p.status} startDate={p.start_date} endDate={p.end_date}
-            departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+            departments={boardDesks}
             pending={board.pending} pendingPiece={board.pendingPiece} onPieceClick={(p) => { setDispPiece({ ...p, image_url: p.image_url ?? null, brand: null, brand_color: null }); setPieceCraftsman(""); }} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
             canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr} onStaffMoved={() => void reloadAssignees()} canMoveStaff={canMoveStaff}
@@ -1668,7 +1683,7 @@ function WorkBoardPageInner() {
           for (const w of board.workOrders) { const k = String(w.mo_no); if (!laborPerUnit[k]) laborPerUnit[k] = (w.central_rate && w.central_rate > 0) ? w.central_rate : ((w.qty || 0) > 0 && w.labor ? w.labor.prod_plan / (w.qty || 1) : 0); if (imageByMo[k] == null && w.image_url) imageByMo[k] = w.image_url; }
           return <DispatchPlanBoard
             realMode planId="real" planName="" planStatus="" startDate={null} endDate={null}
-            departments={board.departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false)}
+            departments={boardDesks}
             pending={board.pending} pendingPiece={board.pendingPiece} onPieceClick={(p) => { setDispPiece({ ...p, image_url: p.image_url ?? null, brand: null, brand_color: null }); setPieceCraftsman(""); }} realWOs={board.workOrders} craftsmen={craftsmen} defectByWorker={defectByWorker} deptWages={deptWages}
             laborPerUnit={laborPerUnit} imageByMo={imageByMo}
             canEdit={canDispatch} tablet={tablet} onManageDepts={openDeptMgr} onStaffMoved={() => void reloadAssignees()} canMoveStaff={canMoveStaff}
@@ -1826,7 +1841,8 @@ function WorkBoardPageInner() {
               </div>
             )}
             {dispDept && deskPanel && (
-              <DeskStaffPanel dept={dispDept} desks={board.departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canDispatch} onChanged={reloadAssignees} />
+              <DeskStaffPanel dept={dispDept} desks={board.departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canDispatch} onChanged={reloadAssignees}
+                wos={board.workOrders} onDesksChanged={deskChanged} />
             )}
             <div className="grid grid-cols-3 gap-2">
               <label className="block"><span className="text-[11px] text-slate-500">จำนวนที่จ่าย</span>
@@ -2609,7 +2625,9 @@ function WorkBoardPageInner() {
                           )}
                         </div>
                         <div className="flex items-center gap-4 pl-7">
-                          <Toggle label="โชว์ในบอร์ด" on={d.show_on_board !== false} onClick={() => void patchDept(d.id, { show_on_board: d.show_on_board === false })} />
+                          <Toggle label="โชว์ในบอร์ด" on={d.show_on_board !== false}
+                            onClick={() => void patchDept(d.id, d.show_on_board === false ? { show_on_board: true, status: "active" } : { show_on_board: false })} />
+                          {d.status === "inactive" && <span className="text-[10px] text-rose-600">🔒 ปิดโต๊ะแล้ว — เปิด “โชว์ในบอร์ด” = เปิดโต๊ะกลับ</span>}
                           <Toggle label="โชว์หมายเหตุ" on={d.show_note} onClick={() => void patchDept(d.id, { show_note: !d.show_note })} />
                           {isCut && <span className="text-[10px] text-amber-600">ℹ️ แผนกตัด/เตรียม จะไม่ขึ้นบอร์ด (อยู่ในตัวการ์ด)</span>}
                         </div>
@@ -4477,7 +4495,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
                 </div>
               )}
               {dept && deskPanel && (
-                <DeskStaffPanel dept={dept} desks={departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canEdit} onChanged={() => onStaffChanged?.()} />
+                <DeskStaffPanel dept={dept} desks={departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canEdit} onChanged={() => onStaffChanged?.()}
+                  wos={workOrders} onDesksChanged={(focus) => { onReload?.(); setDispDeptId(focus ?? ""); }} />
               )}
 
               <label className="block"><span className="text-[11px] text-slate-500">{isHire ? "เลือกช่าง (งานเหมา — จำเป็น *)" : `ช่างในแผนก ${dept?.name ?? ""}`}</span>
