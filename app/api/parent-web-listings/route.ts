@@ -89,7 +89,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     sb.from("parent_skus_v2").select(PARENT_SELECT).eq("id", parentId).maybeSingle(),
     sb.from("store_listings").select("*").eq("parent_sku_id", parentId),
     sb.from("shops").select("id, name, slug, is_default, theme, theme_draft, field_map").order("is_default", { ascending: false }),
-    sb.from("skus_v2").select("id, code, color, color_th, list_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentId).eq("is_active", true).eq("sale_ok", true).gt("list_price", 0).order("code"),
+    // SKU ที่ใช้งานทุกตัว = ชุดเดียวกับที่เว็บโชว์ (เดิมกรองราคา > 0 → รุ่นที่ยังไม่ตั้งราคา SKU ไม่มีแถวให้แก้เลย)
+    sb.from("skus_v2").select("id, code, color, color_th, list_price, cover_image_r2_key, attribute_values").eq("parent_sku_id", parentId).eq("is_active", true).order("code"),
     loadParentWebFields(sb),
     loadShopSiteUrls(sb),
     // SKU ลูกแบบที่เว็บใช้ (คำนวณราคา/รูป/สีที่ลูกค้าเห็นจริง) + ทะเบียนสีกลาง (จุดสี)

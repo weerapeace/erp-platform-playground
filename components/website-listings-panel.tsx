@@ -11,7 +11,8 @@
  * - ▦ แก้ไขทีละมาก (ตาราง · ทุกช่องจากทะเบียนฟิลด์ · หัวตาราง/แถบล่าง) → components/website-listings-grid-edit
  * - 🎨 ทะเบียนสี (หัวตาราง) + ป้าย "สียังไม่ผูกทะเบียนสี" กดได้ = ColorSwatchButton (focusNames = สีของสินค้านั้น) · ปิดแล้วโหลดรายการใหม่เงียบ ๆ
  * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ + ✏️ แก้หลายรายการ (ช่องจากทะเบียนกลาง lib/website-listing-fields) · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
- * - กดการ์ด/แถว/✏️ = drawer "ตั้งค่าเว็บของสินค้า" — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (ParentWebListings shopId)
+ * - ▸ ขยาย SKU ย่อยใต้แถว (โหลดตอนกด · /api/website/listings/grid?parentIds= ตัวกลางทะเบียนฟิลด์) · กดแถว SKU = drawer เลื่อนไปแถว SKU นั้น (focusSkuId)
+ * - กดการ์ด/ชื่อ/รูป/✏️ = drawer "ตั้งค่าเว็บของสินค้า" — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (ParentWebListings shopId)
  *     แท็บ ขายบนเว็บ · รูป สี และรูปเปิด · ปั๊มชื่อ/แบนเนอร์/รายละเอียด · ต้องแก้ · ◀ ▶ เลื่อนตามรายการที่เห็น · 💾 บันทึกแถบล่าง
  * - 📦 เปิด Parent SKU = MasterRecordDrawer ตัวจริง (ทุกแท็บ · ◀ ▶ เลื่อนตามรายการที่เห็น · ปิดแล้วกลับมาที่ drawer เว็บ)
  * ของกลาง: BulkActionBar · useDragReorder/DragHandle · CopyButton · Drawer/ConfirmDialog · footer-save · ParentWebListings
@@ -99,6 +100,10 @@ export type Listing = {
   webOptions: WebOptions;
 };
 
+/** ▸ SKU ย่อยของรุ่น (ขยายในตาราง) — อ่านผ่าน /api/website/listings/grid (ทะเบียนฟิลด์ · ราคาซ่อนตามสิทธิ์) */
+type SubSku = { id: string; code: string | null; color?: string | null; color_th?: string | null; list_price?: number | string | null; cover_image_r2_key?: string | null };
+const SUB_SKU_COLS = "color,color_th,list_price,cover_image_r2_key";
+
 /** หมวดของร้าน — มาจาก API (ตั้งได้เองในแท็บ ⚙️ จับคู่ฟิลด์) */
 export type CategoryDef = { key: string; label: string; icon: string; parent?: string | null };
 
@@ -147,6 +152,63 @@ function Thumb({ l, size = 48 }: { l: Listing; size?: number }) {
   );
 }
 
+/** ▸ แถว SKU ย่อยใต้รุ่น — คอลัมน์ตรงกับแถวรุ่น (ชื่อ · ราคา · ✏️) · กดแถว = เปิดแก้ที่ drawer เลื่อนไป SKU นั้น */
+function SubSkuRows({ rows, onOpen, onRetry }: { rows: SubSku[] | "loading" | "error" | undefined; onOpen: (skuId: string) => void; onRetry: () => void }) {
+  const pad = "pl-10 md:pl-24 pr-3";
+  if (rows === undefined || rows === "loading") return <div className={`${pad} pb-2.5 text-xs text-slate-400`}>กำลังโหลด SKU…</div>;
+  if (rows === "error")
+    return (
+      <div className={`${pad} pb-2.5 text-xs text-rose-600`}>
+        โหลด SKU ไม่สำเร็จ{" "}
+        <button type="button" onClick={onRetry} className="underline hover:text-rose-800">
+          ลองใหม่
+        </button>
+      </div>
+    );
+  if (!rows.length) return <div className={`${pad} pb-2.5 text-xs text-slate-400`}>รุ่นนี้ยังไม่มี SKU ที่ใช้งานอยู่</div>;
+  return (
+    <ul className="pb-1.5 bg-slate-50/60 border-t border-slate-100">
+      {rows.map((k) => {
+        const th = String(k.color_th ?? "").trim();
+        const en = String(k.color ?? "").trim();
+        const price = k.list_price === undefined ? null : Number(k.list_price) || 0;
+        return (
+          <li key={k.id}>
+            <button type="button" onClick={() => onOpen(k.id)} className={`group w-full flex items-center gap-3 py-1.5 text-left hover:bg-white ${pad}`} title={`แก้ SKU ${k.code ?? ""}`}>
+              <span className="w-12 shrink-0 flex justify-center">
+                {k.cover_image_r2_key ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={keyUrl(k.cover_image_r2_key, 64)} alt="" className="w-8 h-8 rounded object-cover bg-slate-100" loading="lazy" />
+                ) : (
+                  <span className="w-8 h-8 rounded bg-slate-100" />
+                )}
+              </span>
+              {/* มือถือ: รหัส / ชื่อสี 2 บรรทัด · จอคอม: บรรทัดเดียว */}
+              <span className="flex-1 min-w-0 text-xs md:truncate">
+                <span className="block md:inline truncate font-mono text-slate-500">{k.code}</span>
+                <span className="hidden md:inline text-slate-300"> · </span>
+                <span className="block md:inline truncate text-slate-700">
+                  {th || en || "ไม่มีชื่อสี"}
+                  {th && en && en !== th && <span className="text-slate-400"> / {en}</span>}
+                </span>
+              </span>
+              <span className="hidden md:block w-24" />
+              <span
+                className={`md:w-24 text-right text-xs tabular-nums ${price === null ? "text-slate-300" : price > 0 ? "text-slate-700" : "text-rose-500"}`}
+                title={price === null ? "ไม่มีสิทธิ์ดูราคา" : undefined}
+              >
+                {price === null ? "—" : price > 0 ? baht(price) : "ยังไม่มีราคา"}
+              </span>
+              <span className="hidden md:block w-28" />
+              <span className="w-16 shrink-0 text-center text-[11px] text-slate-400 group-hover:text-blue-700">✏️ แก้</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 export function WebsiteListingsPanel({
   shop,
   listings,
@@ -190,6 +252,10 @@ export function WebsiteListingsPanel({
   const [pendingNav, setPendingNav] = useState<{ to: string | null } | null>(null);
   // 📦 เปิด Parent SKU — drawer ตัวจริงของหน้า Parent SKU (ทุกแท็บ) · ◀ ▶ เลื่อนตามรายการที่เห็นอยู่
   const [parentOpen, setParentOpen] = useState<string | null>(null);
+  // ▸ ขยาย SKU ย่อยใต้แถว (โหลดตอนกดครั้งแรก · เก็บไว้จนบันทึกรุ่นนั้น) + 🎯 กดแถว SKU = เปิด drawer เลื่อนไปแถว SKU นั้น
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [subSkus, setSubSkus] = useState<Record<string, SubSku[] | "loading" | "error">>({});
+  const [focus, setFocus] = useState<{ parentId: string; skuId: string } | null>(null);
 
   // แผงเพิ่มสินค้า
   const [showAdd, setShowAdd] = useState(false);
@@ -327,6 +393,32 @@ export function WebsiteListingsPanel({
   const goWeb = (to: string | null) => {
     if (webSave.anyDirty) setPendingNav({ to });
     else setOpen(to);
+  };
+  /** กดชื่อ/รูป/✏️ = เปิดแก้ทั้งรุ่น · กดแถว SKU ย่อย = เปิดแล้วเลื่อนไปแถว SKU นั้น */
+  const openWeb = (parentId: string, skuId?: string) => {
+    setFocus(skuId ? { parentId, skuId } : null);
+    goWeb(parentId);
+  };
+
+  const loadSubSkus = async (parentId: string) => {
+    setSubSkus((m) => ({ ...m, [parentId]: "loading" }));
+    try {
+      const r = await apiFetch(`/api/website/listings/grid?shopId=${encodeURIComponent(shop.id)}&level=color&parentIds=${parentId}&scols=${SUB_SKU_COLS}`);
+      const j = (await r.json().catch(() => ({}))) as { skus?: (SubSku & { parent_sku_id?: string })[] };
+      if (!r.ok || !Array.isArray(j.skus)) throw new Error();
+      setSubSkus((m) => ({ ...m, [parentId]: j.skus!.filter((k) => !k.parent_sku_id || k.parent_sku_id === parentId) }));
+    } catch {
+      setSubSkus((m) => ({ ...m, [parentId]: "error" }));
+    }
+  };
+  const toggleExpand = (parentId: string) => {
+    if (!expanded.has(parentId) && !Array.isArray(subSkus[parentId])) void loadSubSkus(parentId);
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) next.delete(parentId);
+      else next.add(parentId);
+      return next;
+    });
   };
 
   const FILTERS: { k: Filter; label: string; warn?: boolean }[] = [
@@ -469,7 +561,7 @@ export function WebsiteListingsPanel({
           setListings={setListings}
           categories={categories}
           reload={reload}
-          onOpen={(id) => setOpen(id)}
+          onOpen={(id) => openWeb(id)}
           paused={!!open || !!parentOpen}
         />
       ) : !shown.length ? (
@@ -495,7 +587,7 @@ export function WebsiteListingsPanel({
               <button
                 key={l.parentId}
                 type="button"
-                onClick={() => setOpen(l.parentId)}
+                onClick={() => openWeb(l.parentId)}
                 className={`text-left rounded-xl border border-slate-200 bg-white overflow-hidden hover:border-slate-400 transition ${l.published ? "" : "opacity-60"}`}
               >
                 <div className="relative aspect-square bg-slate-100" style={!key && l.webSwatch ? { background: l.webSwatch } : undefined}>
@@ -531,8 +623,9 @@ export function WebsiteListingsPanel({
           <div className="hidden md:flex items-center gap-3 px-3 py-2 border-b border-slate-100 bg-slate-50/70 text-[11px] text-slate-500">
             <input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} className="w-4 h-4 accent-blue-600" aria-label="เลือกทั้งหมดที่เห็น" />
             <span className="w-3" />
+            <span className="w-5" />
             <span className="w-12" />
-            <span className="flex-1">สินค้า (ชื่อที่ลูกค้าเห็นจริง)</span>
+            <span className="flex-1">สินค้า (ชื่อที่ลูกค้าเห็นจริง · กดชื่อเพื่อแก้ · ▸ ดู SKU ย่อย)</span>
             <span className="w-24">สี</span>
             <span className="w-24 text-right">ราคา</span>
             <span className="w-28 text-center">ขึ้นเว็บ / แนะนำ</span>
@@ -541,6 +634,7 @@ export function WebsiteListingsPanel({
           <ul>
             {shown.map((l) => {
               const isOpen = open === l.parentId;
+              const isExp = expanded.has(l.parentId);
               const iss = issuesById.get(l.parentId) ?? [];
               const idx = listings.indexOf(l);
               return (
@@ -562,15 +656,30 @@ export function WebsiteListingsPanel({
                     ) : (
                       <DragHandle {...drag.handleProps(idx)} title="ลากเพื่อเรียงลำดับบนเว็บ" className="w-3" />
                     )}
-                    <div className={l.published ? "" : "opacity-50"}>
+                    <button
+                      type="button"
+                      onClick={() => toggleExpand(l.parentId)}
+                      aria-expanded={isExp}
+                      aria-label={`${isExp ? "ซ่อน" : "ดู"} SKU ย่อยของ ${l.code}`}
+                      title={isExp ? "ซ่อน SKU ย่อย" : "ดู SKU ย่อยของรุ่นนี้"}
+                      className={`w-5 h-6 shrink-0 rounded text-xs leading-none transition-transform ${isExp ? "rotate-90 text-slate-700" : "text-slate-400 hover:text-slate-700"}`}
+                    >
+                      ▶
+                    </button>
+                    <button type="button" onClick={() => openWeb(l.parentId)} className={`shrink-0 ${l.published ? "" : "opacity-50"}`} title="เปิดแก้ไข" aria-label={`เปิดแก้ไข ${l.code}`}>
                       <Thumb l={l} />
-                    </div>
+                    </button>
 
                     {/* มือถือ: ชื่อเต็มบรรทัดแรก ราคา/ปุ่มขึ้นบรรทัดสอง · จอคอม: แถวเดียว */}
-                    <div className="flex-1 min-w-0 basis-[calc(100%-7.5rem)] md:basis-0">
-                      <p className={`text-sm font-medium truncate ${l.published ? "text-slate-800" : "text-slate-500"}`} title={shownName(l)}>
+                    <div className="flex-1 min-w-0 basis-[calc(100%-9.5rem)] md:basis-0">
+                      <button
+                        type="button"
+                        onClick={() => openWeb(l.parentId)}
+                        className={`block max-w-full text-left text-sm font-medium truncate hover:text-blue-700 hover:underline ${l.published ? "text-slate-800" : "text-slate-500"}`}
+                        title={`${shownName(l)} — กดเพื่อแก้ไข`}
+                      >
                         {shownName(l)}
-                      </p>
+                      </button>
                       <p className="text-[11px] text-slate-400 truncate">
                         {l.code}
                         {(l.categories ?? []).length > 0 ? ` · ${l.categories.map(catLabel).join(", ")}` : ""}
@@ -625,13 +734,14 @@ export function WebsiteListingsPanel({
                     </span>
 
                     <button
-                      onClick={() => setOpen(l.parentId)}
+                      onClick={() => openWeb(l.parentId)}
                       className={`w-16 shrink-0 px-2 py-1.5 rounded-lg border text-xs ${isOpen ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
                     >
                       ✏️ แก้
                     </button>
                   </div>
 
+                  {isExp && <SubSkuRows rows={subSkus[l.parentId]} onOpen={(skuId) => openWeb(l.parentId, skuId)} onRetry={() => void loadSubSkus(l.parentId)} />}
                 </li>
               );
             })}
@@ -762,10 +872,10 @@ export function WebsiteListingsPanel({
                 </div>
               </div>
               <div className="flex gap-1 shrink-0">
-                <button type="button" disabled={navIdx <= 0} onClick={() => goWeb(shown[navIdx - 1]?.parentId ?? null)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ตัวก่อนหน้า" aria-label="ตัวก่อนหน้า">
+                <button type="button" disabled={navIdx <= 0} onClick={() => openWeb(shown[navIdx - 1].parentId)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ตัวก่อนหน้า" aria-label="ตัวก่อนหน้า">
                   ◀
                 </button>
-                <button type="button" disabled={navIdx < 0 || navIdx >= shown.length - 1} onClick={() => goWeb(shown[navIdx + 1]?.parentId ?? null)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ตัวถัดไป" aria-label="ตัวถัดไป">
+                <button type="button" disabled={navIdx < 0 || navIdx >= shown.length - 1} onClick={() => openWeb(shown[navIdx + 1].parentId)} className="w-8 h-8 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-30" title="ตัวถัดไป" aria-label="ตัวถัดไป">
                   ▶
                 </button>
               </div>
@@ -775,7 +885,13 @@ export function WebsiteListingsPanel({
                 key={webL.parentId}
                 parentId={webL.parentId}
                 shopId={shop.id}
-                onChanged={() => void reload()}
+                focusSkuId={focus?.parentId === webL.parentId ? focus.skuId : null}
+                onChanged={() => {
+                  void reload();
+                  // ราคา/ชื่อสีที่แก้ใน drawer → แถว SKU ย่อยที่กางอยู่ดึงใหม่ · ที่พับอยู่ล้างแคช (กางครั้งหน้าโหลดใหม่)
+                  if (expanded.has(webL.parentId)) void loadSubSkus(webL.parentId);
+                  else setSubSkus((m) => { const n = { ...m }; delete n[webL.parentId]; return n; });
+                }}
                 onOpenParent={() => {
                   if (webSave.anyDirty) {
                     toast.info("บันทึกการแก้ไขก่อน แล้วค่อยเปิด Parent SKU");

@@ -1,7 +1,7 @@
 /**
  * ▦ แก้ไขแบบตาราง (หน้า "สินค้าบนเว็บ") — /api/website/listings/grid
  *
- * GET  ?shopId=<id>&level=product|color&pcols=a,b&scols=c,d (คอลัมน์ที่เลือกในตาราง · ต้องอยู่ในทะเบียนฟิลด์)
+ * GET  ?shopId=<id>&level=product|color&pcols=a,b&scols=c,d (คอลัมน์ที่เลือกในตาราง · ต้องอยู่ในทะเบียนฟิลด์) [&parentIds=x,y เฉพาะบางรุ่น]
  *      → listings: ค่าฝั่งเว็บของทุกรุ่นในร้าน (คอลัมน์ WEB_GRID_COLUMNS)
  *        parents: แถว Parent SKU · skus (level=color): SKU ลูกที่ใช้งานของรุ่นในร้าน — เฉพาะ id/code + คอลัมน์ที่ขอ
  *        อ่านผ่านตัวกลางชุดเดียวกับตาราง master (resolveEntity + ชื่อ relation + ซ่อนฟิลด์ตามสิทธิ์ + ปิดค่าความลับ)
@@ -66,12 +66,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data, error } = await supabaseAdmin().from("store_listings").select(WEB_GRID_COLUMNS).eq("shop_id", shopId);
   if (error) return NextResponse.json({ error: "โหลดรายการสินค้าไม่สำเร็จ" }, { status: 500 });
-  const listings = (data ?? []) as unknown as WebGridRow[];
+  // pcols / scols = คอลัมน์ Parent SKU / SKU ที่เลือกไว้ในตาราง (คั่นด้วย ,) · parentIds = เฉพาะบางรุ่น (▸ ขยาย SKU ย่อยในหน้าสินค้าบนเว็บ)
+  const listOf = (k: string) => (url.searchParams.get(k) ?? "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 200);
+  const only = new Set(listOf("parentIds").filter((x) => UUID.test(x)));
+  const listings = ((data ?? []) as unknown as WebGridRow[]).filter((r) => !only.size || only.has(r.parent_sku_id));
   const ids = listings.map((r) => r.parent_sku_id);
   if (!ids.length) return NextResponse.json({ listings: [], parents: [], skus: [] });
 
-  // pcols / scols = คอลัมน์ Parent SKU / SKU ที่เลือกไว้ในตาราง (คั่นด้วย ,)
-  const listOf = (k: string) => (url.searchParams.get(k) ?? "").split(",").map((x) => x.trim()).filter(Boolean).slice(0, 200);
   const [parents, skus] = await Promise.all([
     loadModuleRows(request, "parent-skus-v2", "id", ids, listOf("pcols")),
     level === "color" ? loadModuleRows(request, "skus-v2", "parent_sku_id", ids, listOf("scols")) : Promise.resolve([] as Row[]),

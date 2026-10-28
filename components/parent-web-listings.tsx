@@ -174,10 +174,13 @@ export function ParentWebListings({
   shopId,
   onChanged,
   onOpenParent,
+  focusSkuId,
 }: {
   parentId: string | null;
   /** เฉพาะร้านนี้ (drawer หน้า "สินค้าบนเว็บ") — ไม่ส่ง = ทุกร้าน (แท็บ 🛍 ใน Parent SKU) */
   shopId?: string;
+  /** เปิดมาจากแถว SKU ย่อย (หน้าสินค้าบนเว็บ) → เลื่อนไปแถว SKU นั้น + ไฮไลต์ */
+  focusSkuId?: string | null;
   /** บันทึก/เพิ่มเข้าร้านสำเร็จ (ให้หน้าที่เปิดอยู่ดึงค่าที่เว็บเห็นใหม่) */
   onChanged?: () => void;
   /** ปุ่ม "ไปเติมที่ Parent SKU" ในกล่องข้อมูลที่เชื่อม (ไม่ส่ง = อยู่ในหน้า Parent SKU อยู่แล้ว → บอกให้ไปแท็บข้อมูล) */
@@ -231,6 +234,27 @@ export function ParentWebListings({
   useEffect(() => {
     void load();
   }, [load]);
+
+  // 🎯 เปิดมาจากแถว SKU ย่อย → เลื่อนไปแถวนั้น (SKU ไซส์ไม่มีแถวของตัวเอง → ไปหัวรายการ SKU) + ไฮไลต์ชั่วครู่
+  const [flashSku, setFlashSku] = useState<string | null>(null);
+  const hasData = !!data;
+  useEffect(() => {
+    if (!focusSkuId || loading || !hasData) return;
+    // เลื่อนแบบทันที (smooth โดนยกเลิกระหว่าง drawer กำลังเลื่อนเข้า) · เลื่อนซ้ำอีกรอบหลังรูปโหลดแล้วความสูงเปลี่ยน
+    const go = () =>
+      (document.querySelector<HTMLElement>(`[data-web-sku="${focusSkuId}"]`) ?? document.querySelector<HTMLElement>("[data-web-skus]"))?.scrollIntoView({ block: "center" });
+    const t1 = window.setTimeout(() => {
+      go();
+      setFlashSku(focusSkuId);
+    }, 250);
+    const t2 = window.setTimeout(go, 800);
+    const off = window.setTimeout(() => setFlashSku(null), 3200);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+      window.clearTimeout(off);
+    };
+  }, [focusSkuId, loading, hasData]);
 
   const patchShop = (sid: string, p: Partial<ShopState>) =>
     setData((d) => (d ? { ...d, shops: d.shops.map((s) => (s.shopId === sid ? { ...s, ...p } : s)) } : d));
@@ -589,7 +613,10 @@ export function ParentWebListings({
           )}
         </div>
 
-        {/* 🖼 รูป สี และรูปเปิด (เดิมแยกแท็บ — เจ้าของขอรวมไว้หน้านี้ 2026-10-20) */}
+        {/* 🎨 SKU ในรุ่นนี้ — ขึ้นก่อนรูป (เจ้าของขอ "ต้องเห็น SKU และแก้ได้" 2026-10-28) */}
+        {renderSkus(s)}
+
+        {/* 🖼 รูปเปิด + รูปบนเว็บ (เดิมแยกแท็บ — เจ้าของขอรวมไว้หน้านี้ 2026-10-20) */}
         {renderMedia(s)}
 
         {/* 📐 ไซส์ (ตัวเลือกชุดที่ 2) — เปิด/ปิดแต่ละคู่ สี×ไซส์ บนเว็บร้านนี้ · ตัวเลือกกรอกเอง = ไม่ใช้ไซส์จาก SKU */}
@@ -754,12 +781,26 @@ export function ParentWebListings({
           />
         )}
       </div>
+    </div>
+  );
 
-      {/* รูปเว็บรายสี — หลายรูปต่อสี เลือกจากแกลเลอรี SKU หรือคลัง */}
-      {data.variants.length > 0 && (
-        <div>
-          <div className="text-xs font-medium text-slate-600 mb-1.5">
-            ตัวเลือก (สี) — {data.variants.length} แบบ · ✏️ แก้ชื่อสี ไทย/EN + ราคา ในแถวได้เลย (แก้ที่ SKU ใน ERP — ทุกร้านเห็น · กด 💾 บันทึก) · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย · กดค้างที่รูปแล้วลาก = สลับตำแหน่ง
+  /* ───────── 🎨 SKU ในรุ่นนี้ (แถวสี) — ชื่อสี ไทย/EN + ราคา แก้ได้ในแถว · รูปเว็บรายสี · Hero รายสี ───────── */
+  const renderSkus = (s: ShopState) => {
+    if (!data.variants.length)
+      return (
+        <div data-web-skus className="rounded-lg border border-dashed border-slate-300 px-3 py-2 text-xs text-slate-400">
+          🎨 รุ่นนี้ยังไม่มี SKU ที่ใช้งานอยู่ — สร้าง/เปิดใช้ SKU ที่ Parent SKU ก่อน
+        </div>
+      );
+    const noPrice = data.variants.filter((v) => !(v.price > 0)).length;
+    return (
+        <div data-web-skus>
+          <div className="flex items-baseline gap-2 flex-wrap mb-1.5">
+            <span className="text-sm font-semibold text-slate-800">🎨 SKU ในรุ่นนี้ ({data.variants.length})</span>
+            {noPrice > 0 && <span className="rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[11px] text-rose-700">ยังไม่มีราคา {noPrice} ตัว — ใส่ราคาในแถวได้เลย</span>}
+          </div>
+          <div className="text-[11px] text-slate-500 mb-1.5">
+            ✏️ แก้ชื่อสี ไทย/EN + ราคา ในแถวได้เลย (แก้ที่ SKU ใน ERP — ทุกร้านเห็น · กด 💾 บันทึก) · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย · กดค้างที่รูปแล้วลาก = สลับตำแหน่ง
           </div>
           {(() => {
             const all = colorLabels();
@@ -792,7 +833,12 @@ export function ParentWebListings({
               const on = cardShown(s, v.label);
               const isMain = !!s.webCardColors.main && sameColor(s.webCardColors.main, v.label);
               return (
-                <div key={v.id} {...fileDrop.zone(`${s.shopId}:${v.id}`)} className="relative p-2 bg-white space-y-1.5">
+                <div
+                  key={v.id}
+                  data-web-sku={v.id}
+                  {...fileDrop.zone(`${s.shopId}:${v.id}`)}
+                  className={`relative p-2 space-y-1.5 transition-colors duration-700 ${flashSku === v.id ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : "bg-white"}`}
+                >
                   <FileDropHint show={fileDrop.over === `${s.shopId}:${v.id}`} label={`วางรูปเพื่ออัปโหลดเข้าสี ${v.label}`} />
                   <div className="flex items-center gap-2.5">
                     {v.erpImageKey ? (
@@ -834,7 +880,7 @@ export function ParentWebListings({
                                 className="min-w-0 flex-1 bg-transparent text-sm text-slate-800 py-1 pr-2 outline-none"
                               />
                             </label>
-                            <label className={`${box} w-28`} title="ราคาขายของ SKU นี้ (ราคากลาง ใช้ทุกช่องทาง)">
+                            <label className={`${box} w-28 ${!(v.price > 0) && !d.price.trim() ? "!border-rose-300 !bg-rose-50/60" : ""}`} title="ราคาขายของ SKU นี้ (ราคากลาง ใช้ทุกช่องทาง)">
                               <span className={tag}>฿</span>
                               <MoneyInput
                                 value={d.price}
@@ -854,6 +900,7 @@ export function ParentWebListings({
                           </div>
                           <div className="text-xs text-slate-400">
                             {v.code} · สต๊อก {v.qty} · รูปใน SKU {v.gallery.length}
+                            {!(v.price > 0) && <span className="text-rose-500"> · ยังไม่มีราคา (เว็บใช้ราคารุ่นแทน)</span>}
                             {enHint && <span className="text-slate-400"> · 🌐 {enHint}</span>}
                           </div>
                         </div>
@@ -977,9 +1024,8 @@ export function ParentWebListings({
             })}
           </div>
         </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   /* ───────── 🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด ───────── */
   const imageOptionsOf = (s: ShopState) =>
