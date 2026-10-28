@@ -13,6 +13,8 @@ import { Seg } from "@/components/website-block-editor";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import {
+  CART_IMAGE_RADIUS_DEFAULT,
+  CART_IMAGE_RADIUS_MAX,
   CART_IMAGE_SIZES,
   CART_PAGE_BTNS,
   CART_PAGE_LAYOUTS,
@@ -33,8 +35,10 @@ import {
   type CartIcons,
   type CartRecsSet,
   type CartStyle,
+  type CartUnitPriceWhen,
 } from "@/lib/website-cart";
 import { webForm } from "@/lib/website-form-styles";
+import { RangeInput } from "@/components/range-input";
 
 const lbl = webForm.label;
 const input = "w-full h-8 rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-400";
@@ -437,6 +441,20 @@ export function CartSettings({
                 { v: "circle", l: "วงกลม" },
               ]}
             />
+            {/* มนแค่ไหน — 12 = เดิม · มากสุด = เกือบวงกลม */}
+            {c.imageShape === "rounded" && (
+              <div className="mt-2" data-cart-radius>
+                <span className="text-[11px] text-slate-500 flex items-center gap-2">
+                  ความมน {c.imageRadius}px
+                  {c.imageRadius !== CART_IMAGE_RADIUS_DEFAULT && (
+                    <button type="button" onClick={() => set({ imageRadius: CART_IMAGE_RADIUS_DEFAULT })} className="text-blue-600 hover:underline">
+                      ↺ เดิม ({CART_IMAGE_RADIUS_DEFAULT})
+                    </button>
+                  )}
+                </span>
+                <RangeInput min={0} max={CART_IMAGE_RADIUS_MAX} value={c.imageRadius} onChange={(imageRadius) => set({ imageRadius })} unit="px" className="w-full accent-blue-600" />
+              </div>
+            )}
           </div>
           <div>
             <span className={lbl}>รูปในกรอบ</span>
@@ -452,7 +470,21 @@ export function CartSettings({
         </div>
         <div className="grid gap-2 sm:grid-cols-2">
           <Check label="โชว์ตัวเลือกที่ลูกค้าเลือก (สี/ขนาด/ปั๊มชื่อ)" checked={c.showOptions} onChange={(showOptions) => set({ showOptions })} />
-          <Check label="โชว์ราคาต่อชิ้น" hint="เช่น ฿320 / ชิ้น ใต้ชื่อ" checked={c.showUnitPrice} onChange={(showUnitPrice) => set({ showUnitPrice })} />
+          <div>
+            <Check label="โชว์ราคาต่อชิ้น" hint="เช่น ฿320 / ชิ้น ใต้ชื่อ" checked={c.showUnitPrice} onChange={(showUnitPrice) => set({ showUnitPrice })} />
+            {c.showUnitPrice && (
+              <div className="mt-1.5 ml-6" data-cart-unit-when>
+                <Seg<CartUnitPriceWhen>
+                  value={c.unitPriceWhen}
+                  onChange={(unitPriceWhen) => set({ unitPriceWhen })}
+                  options={[
+                    { v: "all", l: "ทุกรายการ (เดิม)" },
+                    { v: "multi", l: "เฉพาะที่มี 2 ชิ้นขึ้นไป" },
+                  ]}
+                />
+              </div>
+            )}
+          </div>
           <Check label="โชว์ราคาเต็มขีดฆ่า + “ประหยัด ฿X”" hint="เฉพาะสินค้าที่ตั้งราคาเต็มไว้" checked={c.showCompare} onChange={(showCompare) => set({ showCompare })} />
           <Check label="♡ ปุ่ม “ย้ายไปรายการโปรด”" hint="เอาออกจากตะกร้า + เก็บในรายการโปรด (ต้องเปิดระบบสมาชิก · ยังไม่เข้าสู่ระบบ = ไปหน้าเข้าสู่ระบบ)" checked={c.wishlist} onChange={(wishlist) => set({ wishlist })} />
         </div>

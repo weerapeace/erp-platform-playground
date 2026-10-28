@@ -16,6 +16,11 @@ export type CartRecsPos = "top" | "afterItems" | "bottom" | "footer";
 export type CartRecsLayout = "row" | "grid" | "list" | "addon";
 /** ตำแหน่งของชุดสินค้าแนะนำ = CartRecsPos (บนสุด · ต่อจากรายการ · ท้ายรายการ เดิม · ติดเหนือยอดรวม) */
 export type CartRecsPlace = CartRecsPos;
+/** ราคาต่อชิ้นโชว์ที่: all ทุกรายการ (เดิม) · multi เฉพาะรายการที่มี 2 ชิ้นขึ้นไป */
+export type CartUnitPriceWhen = "all" | "multi";
+/** ความมนรูปในรายการ (px) — 12 = เดิม (rounded-xl) · 44 = ครึ่งรูปใหญ่สุด (เกือบวงกลม) */
+export const CART_IMAGE_RADIUS_DEFAULT = 12;
+export const CART_IMAGE_RADIUS_MAX = 44;
 /** โชว์เมื่อ: always ทุกครั้ง (เดิม) · items เฉพาะมีของในตะกร้า · empty เฉพาะตะกร้าว่าง */
 export type CartRecsWhen = "always" | "items" | "empty";
 /** 🛍 สินค้าแนะนำ 1 ชุด (ตั้งได้สูงสุด 3 ชุด · แต่ละชุดตั้งที่มา/หัวข้อ/หน้าตา/ตำแหน่งเอง) */
@@ -117,10 +122,14 @@ export interface CartConfig {
   /* ── รายการสินค้า ── */
   imageSize: "sm" | "md" | "lg";
   imageShape: "rounded" | "square" | "circle";
+  /** ความมนของรูป (px · ใช้เมื่อทรง = มน) — 12 = เดิม */
+  imageRadius: number;
   imageFit: "cover" | "contain";
   showOptions: boolean;
   /** ราคาต่อชิ้น (ใต้ชื่อ) */
   showUnitPrice: boolean;
+  /** ราคาต่อชิ้นโชว์ทุกรายการ / เฉพาะรายการที่มี 2 ชิ้นขึ้นไป */
+  unitPriceWhen: CartUnitPriceWhen;
   /** ราคาเต็มขีดฆ่า + "ประหยัด ฿X" */
   showCompare: boolean;
   /** ♡ ย้ายไปรายการโปรด (เอาออกจากตะกร้า + เก็บในรายการโปรด) */
@@ -231,9 +240,11 @@ export const DEFAULT_CART: CartConfig = {
   recsPromoBadge: false,
   imageSize: "md",
   imageShape: "rounded",
+  imageRadius: CART_IMAGE_RADIUS_DEFAULT,
   imageFit: "cover",
   showOptions: true,
   showUnitPrice: false,
+  unitPriceWhen: "all",
   showCompare: false,
   wishlist: false,
   emptyText: "ยังไม่มีสินค้าในตะกร้า",
@@ -437,9 +448,11 @@ export function normalizeCart(raw: unknown): CartConfig {
     recsPromoBadge: bool(r.recsPromoBadge, d.recsPromoBadge),
     imageSize: one(r.imageSize, ["sm", "md", "lg"] as const, d.imageSize),
     imageShape: one(r.imageShape, ["rounded", "square", "circle"] as const, d.imageShape),
+    imageRadius: r.imageRadius == null ? d.imageRadius : int(r.imageRadius, d.imageRadius, 0, CART_IMAGE_RADIUS_MAX),
     imageFit: one(r.imageFit, ["cover", "contain"] as const, d.imageFit),
     showOptions: bool(r.showOptions, d.showOptions),
     showUnitPrice: bool(r.showUnitPrice, d.showUnitPrice),
+    unitPriceWhen: one(r.unitPriceWhen, ["all", "multi"] as const, d.unitPriceWhen),
     showCompare: bool(r.showCompare, d.showCompare),
     wishlist: bool(r.wishlist, d.wishlist),
     emptyText: str(r.emptyText, d.emptyText, 120).trim() || d.emptyText,
@@ -494,6 +507,18 @@ export function recsAt(cfg: Pick<CartConfig, "recsSets">, place: CartRecsPlace, 
 export function recsSetFits(set: Pick<CartRecsSet, "ifCats">, cartCats?: string[]): boolean {
   if (!set.ifCats.length || !cartCats) return true;
   return set.ifCats.some((c) => cartCats.includes(c));
+}
+
+/** 🖼 มุมรูปในรายการ (CSS border-radius) — มน = ตามความมนที่ตั้ง (rem: 12 = rounded-xl เดิมเป๊ะ) · เหลี่ยม 0 · วงกลม */
+export function cartLineRadius(cfg: Pick<CartConfig, "imageShape" | "imageRadius">): string {
+  if (cfg.imageShape === "square") return "0";
+  if (cfg.imageShape === "circle") return "9999px";
+  return `${cfg.imageRadius / 16}rem`;
+}
+
+/** 🏷 รายการนี้โชว์ราคาต่อชิ้นไหม (ปิด = ไม่โชว์ · multi = เฉพาะ 2 ชิ้นขึ้นไป) */
+export function cartUnitPriceShown(cfg: Pick<CartConfig, "showUnitPrice" | "unitPriceWhen">, qty: number): boolean {
+  return cfg.showUnitPrice && (cfg.unitPriceWhen === "all" || qty >= 2);
 }
 
 /** ข้อความส่งฟรี: แทน {amount} */
