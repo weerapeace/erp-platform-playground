@@ -5,9 +5,9 @@
  * ตั้งต้น = วันนี้ · ย้อนวันได้ · คีย์ย้อนหลังแล้วจำไม่ได้ว่าวันไหน → กด "จำไม่ได้" = ไม่ระบุวัน (value null → บันทึกเป็นว่าง)
  *
  * เปิดปุ่ม "จำไม่ได้" (บันทึกวันว่าง) ได้เมื่อ DB ปลดข้อบังคับห้ามว่างแล้ว
- * — SQL ใน docs/crew-pick.md (รอเจ้าของอนุมัติ) · ยังไม่รัน = ส่งค่าว่างไป DB จะปฏิเสธ
+ * — DB ปลดแล้ว 2026-10-28 (เจ้าของอนุมัติ · migration 202611030200_mo_work_orders_dispatch_date_nullable)
  */
-export const ALLOW_UNKNOWN_DATE = false;
+export const ALLOW_UNKNOWN_DATE = true;
 
 const todayLocal = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 
