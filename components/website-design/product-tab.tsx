@@ -21,8 +21,9 @@ import { RelatedSettings } from "@/components/website-related-settings";
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
 import { ProductExtrasSetting } from "@/components/website-product-extras-setting";
 import { ProductLuxeSetting } from "@/components/website-product-luxe-setting";
-import { FONT_LABELS, FONT_SIZES, type ProductTitleStyle, type ProductImageBg, type ProductSection, type ProductGalleryStyle, type ProductDetailsStyle, type ProductDetailsOpen, type DetailSource, type DetailApply, type DetailOpen, type DetailItem, PRODUCT_DETAIL_SOURCES, SHOP_DETAIL_SOURCES, type Theme, inputCls, labelCls, cardCls } from "./shared";
+import { FONT_LABELS, FONT_SIZES, type ProductTitleStyle, type ProductImageBg, type ProductSection, type ProductGalleryStyle, type ProductDetailsStyle, type ProductDetailsOpen, type DetailSource, type DetailApply, type DetailOpen, type DetailItem, PRODUCT_DETAIL_SOURCES, SHOP_DETAIL_SOURCES, type Theme, inputCls, labelCls } from "./shared";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 import { useAreaFold } from "./shared";
 import { PRODUCT_PARTS } from "@/lib/website-page-parts";
 
@@ -135,16 +136,12 @@ export function ProductTab() {
   const mobCount = mobileOverrideCount(mob);
   return (
     <>
-    <div className={cardCls}>
-      <div className="flex items-center justify-between gap-2 mb-1 flex-wrap">
-        <h3 className="text-sm font-semibold text-slate-800">หน้าสินค้า — เลือก Style</h3>
-        <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs" title="ตั้งค่าแยกตามจอ: ช่องที่ยังเป็น 'ตามคอม' ใช้ค่าเดียวกับคอม">
+    <DesignCard title="หน้าสินค้า — เลือก Style" right={<><div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs" title="ตั้งค่าแยกตามจอ: ช่องที่ยังเป็น 'ตามคอม' ใช้ค่าเดียวกับคอม">
           <button type="button" onClick={() => { setEditDevice("pc"); setDevice("desktop"); }} className={`px-2.5 py-1 ${!isMobileEdit ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🖥 คอม</button>
           <button type="button" onClick={() => { setEditDevice("mobile"); setDevice("mobile"); }} className={`px-2.5 py-1 ${isMobileEdit ? "bg-slate-900 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
             📱 มือถือ{mobCount > 0 && <span className={`ml-1 rounded-full px-1.5 text-[10px] ${isMobileEdit ? "bg-white/20" : "bg-blue-100 text-blue-700"}`}>{mobCount}</span>}
           </button>
-        </div>
-      </div>
+        </div></>}>
       {isMobileEdit && (
         <div className="mb-3 rounded-lg bg-blue-50 border border-blue-100 px-3 py-2 text-[11px] text-blue-800 flex items-center justify-between gap-2 flex-wrap">
           <span>📱 กำลังตั้งค่าสำหรับ <b>มือถือ</b> (จอแคบกว่า 768px) — ช่องที่เป็น "ตามคอม" ใช้ค่าเดียวกับคอม · ตั้งแยกได้ทุกอย่าง: วิธีโชว์รายละเอียด, พับ/เปิด, ลำดับ/ซ่อนส่วนประกอบ, ⚙️ ทุกส่วน (รูปใหญ่ · ราคา-ตะกร้าทั้งชุด · แบนเนอร์ · คุณอาจชอบ), เอฟเฟกต์/ขนาดรูป, ขนาดตัวอักษร</span>
@@ -794,7 +791,7 @@ export function ProductTab() {
       )}
 
       <p className="text-[11px] text-slate-400 mt-3">ดูผล: พรีวิวด้านขวาเปิด &quot;หน้าสินค้า (ตัวอย่าง)&quot; ให้แล้ว (เลือกหน้าอื่นได้จากเมนูบนพรีวิว) — ยังไม่ขึ้นเว็บจริงจนกว่าจะกดเผยแพร่</p>
-    </div>
+    </DesignCard>
     {areaFold("product", PRODUCT_PARTS, "ชื่อ · ราคา · ตัวเลือก · ปุ่มใส่ตะกร้า · แถบลอย · หัวข้อ")}
     </>
   );

@@ -43,13 +43,30 @@ import {
 import { webForm } from "@/lib/website-form-styles";
 import { RangeInput } from "@/components/range-input";
 import { SiteIcon, SiteIconPicker } from "@/components/site-icon-picker";
+import { DesignCard, useInDesignCards } from "@/components/website-design/design-card";
 
 const lbl = webForm.label;
 const input = "w-full h-8 rounded-lg border border-slate-200 px-2.5 text-sm text-slate-800 focus:outline-none focus:border-blue-400";
 const card = "rounded-xl border border-slate-200 bg-white p-4 space-y-3";
 
-/** การ์ดตั้งค่า (หัว + คำอธิบาย + สวิตช์เปิด/ปิด) — ใช้ร่วมกับแท็บ 💳 หน้าชำระเงิน (website-checkout-settings) */
+/**
+ * การ์ดตั้งค่า (หัว + คำอธิบาย + สวิตช์เปิด/ปิด) — ใช้ร่วมกับแท็บ 💳 หน้าชำระเงิน (website-checkout-settings) · 🔗 แนะนำสินค้า
+ * อยู่ในหน้าดีไซน์ = การ์ดพับ/กางได้ (DesignCard · ตอนพับโชว์ เปิด/ปิด + คำอธิบาย)
+ */
 export function Card({ title, hint, children, on, onToggle }: { title: string; hint?: string; children?: ReactNode; on?: boolean; onToggle?: (v: boolean) => void }) {
+  const foldable = useInDesignCards();
+  const toggle = onToggle && (
+    <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer shrink-0">
+      <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={!!on} onChange={(e) => onToggle(e.target.checked)} />
+      {on ? "เปิด" : "ปิด"}
+    </label>
+  );
+  if (foldable)
+    return (
+      <DesignCard title={title} hint={hint} summary={onToggle ? `${on ? "เปิดอยู่" : "ปิดอยู่"}${hint ? ` · ${hint}` : ""}` : undefined} right={toggle}>
+        {(on ?? true) && <div className="space-y-3">{children}</div>}
+      </DesignCard>
+    );
   return (
     <div className={card}>
       <div className="flex items-start gap-2">
@@ -57,12 +74,7 @@ export function Card({ title, hint, children, on, onToggle }: { title: string; h
           <h3 className="text-sm font-semibold text-slate-800">{title}</h3>
           {hint && <p className="text-[11px] text-slate-500 mt-0.5">{hint}</p>}
         </div>
-        {onToggle && (
-          <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer shrink-0">
-            <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={!!on} onChange={(e) => onToggle(e.target.checked)} />
-            {on ? "เปิด" : "ปิด"}
-          </label>
-        )}
+        {toggle}
       </div>
       {(on ?? true) && children}
     </div>

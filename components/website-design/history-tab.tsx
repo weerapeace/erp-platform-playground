@@ -1,14 +1,14 @@
 "use client";
 
 /** ประวัติการเผยแพร่ — กู้คืนเวอร์ชันเป็นร่าง (แยกจาก components/website-theme-panel.tsx — ค่าทุกช่องยังอยู่ในธีมเดิม) */
-import { cardCls, timeAgo } from "./shared";
+import { timeAgo } from "./shared";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 
 export function HistoryTab() {
   const { versions, restore } = useDesign();
   return (
-    <div className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-800 mb-3">ประวัติการเผยแพร่</h3>
+    <DesignCard title="ประวัติการเผยแพร่" summary={versions.length ? `${versions.length} เวอร์ชัน — กดกู้คืนเป็นร่างได้` : "ยังไม่มีประวัติ"}>
       {!versions.length ? (
         <p className="py-8 text-center text-sm text-slate-400">ยังไม่มีประวัติ — จะบันทึกทุกครั้งที่กดเผยแพร่</p>
       ) : (
@@ -29,6 +29,6 @@ export function HistoryTab() {
           ))}
         </ul>
       )}
-    </div>
+    </DesignCard>
   );
 }

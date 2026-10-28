@@ -120,7 +120,11 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
     paths: ["header", "page.areaParts.header"],
     keywords: "header หัวเว็บ แถบบน",
     cards: [
-      { title: "แถบเมนูด้านบน (Header)", keywords: "ความสูง สีพื้นหลัง ตำแหน่งเมนู ตรึงด้านบน ไอคอนตะกร้า เส้นคั่น ตำแหน่งชิ้นส่วน ซ้าย กลาง ขวา ปุ่มบนหัวเว็บ ซ่อนตอนเลื่อน โปร่งใส ทับรูปใหญ่ ไอคอนหัวเว็บ เมนูมือถือ" },
+      { title: "แถบหัวเว็บ — ขนาด · สี · ตำแหน่งเมนู", keywords: "ความสูง สีพื้นหลัง ตำแหน่งเมนู ตรึงด้านบน ไอคอนตะกร้า เส้นคั่น สีตัวอักษร" },
+      { title: "ตำแหน่งชิ้นส่วน (ซ้าย · กลาง · ขวา)", keywords: "โซน โลโก้ เมนู ค้นหา ตะกร้า โซเชียล บัญชีสมาชิก" },
+      { title: "ปุ่มบนหัวเว็บ · เมนูมือถือ", keywords: "ปุ่ม ลิงก์ เมนูมือถือ ลิ้นชัก ซ่อนตอนเลื่อน" },
+      { title: "หัวเว็บทับรูปใหญ่ (โปร่งใสตอนอยู่บนสุด)", keywords: "โปร่งใส ทับรูป hero" },
+      { title: "ไอคอนบนหัวเว็บ", keywords: "ไอคอน เส้น ทึบ" },
       { title: "ปรับละเอียดทีละชิ้น", keywords: "แถบประกาศ ลิงก์เมนู ป้ายตะกร้า" },
     ],
   },
@@ -148,9 +152,16 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
   card: {
     label: "การ์ดสินค้า",
     desc: "ชุดสำเร็จรูป · กรอบรูป · ป้าย · จุดสี",
-    paths: ["card", "logo.placeholder"],
+    paths: ["card", "logo.placeholder", "page.areaParts.card"],
     keywords: "card การ์ด product card",
-    cards: [{ title: "การ์ดสินค้า", keywords: "สัดส่วนรูป ชี้เมาส์ สลับรูป ป้ายลดราคา ป้ายสินค้าใหม่ จุดสี ระหว่างรอรูปโหลด ชื่อสินค้ากี่บรรทัด ราคาเต็ม" }],
+    cards: [
+      { title: "ตัวอย่างการ์ด (ดูผลทันที)" },
+      { title: "หน้าตาการ์ด — ชุดสำเร็จรูป · รูปแบบ · ช่องหลัก", keywords: "สัดส่วนรูป ชี้เมาส์ สลับรูป ชื่อสินค้ากี่บรรทัด ราคาเต็ม ปุ่มเพิ่มลงตะกร้า คอลัมน์ ช่องไฟ ความมน" },
+      { title: "จุดสีบนการ์ด", keywords: "swatch สี" },
+      { title: "ป้าย · รูปบนการ์ด · ชื่อ/ราคา · ดูด่วน", keywords: "ป้ายลดราคา ป้ายสินค้าใหม่ ขายดี รูปในกรอบ quick view" },
+      { title: "ระหว่างรอรูปโหลด", keywords: "placeholder" },
+      { title: "ปรับละเอียดทีละชิ้น" },
+    ],
   },
   listing: {
     label: "หน้ารายการสินค้า",
@@ -162,7 +173,7 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
   product: {
     label: "หน้าสินค้า",
     desc: "Style · ลำดับส่วน · รูป · รายละเอียด",
-    paths: ["product"],
+    paths: ["product", "page.areaParts.product"],
     keywords: "product page pdp หน้าสินค้า",
     cards: [{ title: "หน้าสินค้า — เลือก Style", keywords: "ลำดับส่วนประกอบ รูปสินค้า พื้นหลังรูป หัวข้อรายละเอียด แบนเนอร์ ขนาดตัวอักษร มือถือ ราคา ตะกร้า วัสดุ หรู luxe" }],
   },

@@ -11,10 +11,11 @@ import { FontSelect } from "@/components/font-select";
 import { RangeInput } from "@/components/range-input";
 import { webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-pickers";
 import { FOOTER_PARTS } from "@/lib/website-page-parts";
-import { type Choices, inputCls, labelCls, cardCls, ColorField, useAreaFold } from "./shared";
+import { type Choices, inputCls, labelCls, ColorField, useAreaFold } from "./shared";
 import { MenuEditor } from "./menu-tab";
 import { PageHealthCtx, IssueNote, footerColumnIssue, FooterHealthSummary } from "./link-health";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 
 export function FooterTab() {
   const { shopSlug, shopId, theme, choices, setFooter, storePages, iframeRef } = useDesign();
@@ -22,8 +23,7 @@ export function FooterTab() {
   const [footerSocialOpen, setFooterSocialOpen] = useState(false);
   return (
     <>
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-3">ท้ายเว็บ (Footer) — สี</h3>
+      <DesignCard title="ท้ายเว็บ (Footer) — สี">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className={labelCls}>สีพื้น</label>
@@ -123,12 +123,10 @@ export function FooterTab() {
             />
           </div>
         </div>
-      </div>
+      </DesignCard>
 
       {/* 🖼 โลโก้ท้ายเว็บ */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">🖼 โลโก้ท้ายเว็บ</h3>
-        <p className="text-xs text-slate-500 mb-3">รูปโลโก้ (รวม &quot;โลโก้สำหรับพื้นเข้ม&quot;) ตั้งที่แท็บ โลโก้</p>
+      <DesignCard title="🖼 โลโก้ท้ายเว็บ" hint={<>รูปโลโก้ (รวม &quot;โลโก้สำหรับพื้นเข้ม&quot;) ตั้งที่แท็บ โลโก้</>}>
         <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-3">
           <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.logoShow} onChange={(e) => setFooter({ logoShow: e.target.checked })} />
           แสดงโลโก้
@@ -207,22 +205,17 @@ export function FooterTab() {
             </div>
           </div>
         )}
-      </div>
+      </DesignCard>
 
       {/* 📏 ระยะห่าง — ค่าเริ่ม = หน้าตาเดิม (FOOTER_SPACING_DEFAULTS) */}
-      <div className={cardCls}>
-        <div className="flex items-center gap-2 mb-1">
-          <h3 className="text-sm font-semibold text-slate-800">📏 ระยะห่าง</h3>
-          <button
+      <DesignCard title="📏 ระยะห่าง" hint="ปรับแล้วดูพรีวิวด้านขวาได้ทันที" summary={"ระยะห่างบน-ล่าง · ช่องไฟคอลัมน์ · ระยะแถวล่างสุด"} right={<><button
             type="button"
             className="ml-auto text-[11px] text-slate-500 hover:text-blue-600 hover:underline"
             onClick={() => setFooter({ ...FOOTER_SPACING_DEFAULTS, colFit: "equal" })}
             title="กลับเป็นระยะแบบเดิม"
           >
             ↺ ค่าเริ่ม
-          </button>
-        </div>
-        <p className="text-xs text-slate-500 mb-3">ปรับแล้วดูพรีวิวด้านขวาได้ทันที</p>
+          </button></>}>
         {/* ขอบบน/ล่าง: ยังไม่เคยเลื่อน (-1) = ตาม "ระยะบน-ล่าง (แบบเร็ว)" ด้านบน */}
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-3 mb-3 pb-3 border-b border-slate-100">
           {(
@@ -290,11 +283,9 @@ export function FooterTab() {
             </select>
           </div>
         </div>
-      </div>
+      </DesignCard>
 
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">คอลัมน์</h3>
-        <p className="text-xs text-slate-500 mb-3">เลือกชนิดคอลัมน์ ตั้งหัวข้อ ลาก ⠿ จัดลำดับ · กว้าง 1 หรือ 2 ช่อง · กด ⤵ ซ้อนใต้ = 2 หัวข้อในคอลัมน์เดียว · 👁 ปิดตา = ซ่อนชั่วคราว (ไม่ลบ) · จำนวนคอลัมน์ต่อแถว (คอม/มือถือ) ตั้งได้ด้านล่าง</p>
+      <DesignCard title="คอลัมน์" hint="เลือกชนิดคอลัมน์ ตั้งหัวข้อ ลาก ⠿ จัดลำดับ · กว้าง 1 หรือ 2 ช่อง · กด ⤵ ซ้อนใต้ = 2 หัวข้อในคอลัมน์เดียว · 👁 ปิดตา = ซ่อนชั่วคราว (ไม่ลบ) · จำนวนคอลัมน์ต่อแถว (คอม/มือถือ) ตั้งได้ด้านล่าง" summary={theme.footer.columns ? `${theme.footer.columns.length} คอลัมน์` : "คอลัมน์อัตโนมัติ"}>
         <FooterHealthSummary columns={theme.footer.columns ?? []} bottomLinks={theme.footer.bottomLinks} shopSlug={shopSlug} />
         {theme.footer.columns === null ? (
           <div className="rounded-lg border border-dashed border-slate-300 p-4 text-sm text-slate-600">
@@ -320,10 +311,9 @@ export function FooterTab() {
             <button type="button" className="mt-3 text-xs text-slate-500 hover:text-rose-600 hover:underline" onClick={() => { if (confirm("กลับไปใช้ท้ายเว็บแบบอัตโนมัติ? (คอลัมน์ที่จัดไว้จะหาย)")) setFooter({ columns: null }); }}>กลับไปใช้แบบอัตโนมัติ</button>
           </>
         )}
-      </div>
+      </DesignCard>
 
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-3">แถวล่างสุด</h3>
+      <DesignCard title="แถวล่างสุด">
         <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-3">
           <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.showCopyright} onChange={(e) => setFooter({ showCopyright: e.target.checked })} />
           แสดง © ปี + ชื่อร้าน (ข้อความท้ายเว็บตั้งที่แท็บข้อมูลร้าน)
@@ -382,11 +372,10 @@ export function FooterTab() {
         <label className={labelCls}>ลิงก์แถวล่าง (เช่น นโยบายความเป็นส่วนตัว · เงื่อนไข)</label>
         <MenuEditor items={theme.footer.bottomLinks} onChange={(bottomLinks) => setFooter({ bottomLinks })} choices={choices} pages={storePages} depth={1} />
         <button type="button" className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:border-slate-500" onClick={() => setFooter({ bottomLinks: [...theme.footer.bottomLinks, newMenuItem("ลิงก์ใหม่", "page")] })}>+ เพิ่มลิงก์</button>
-      </div>
+      </DesignCard>
 
       {/* 📱 มือถือ */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-3">📱 บนมือถือ</h3>
+      <DesignCard title="📱 บนมือถือ">
         <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer mb-2">
           <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.mobileCollapse} onChange={(e) => setFooter({ mobileCollapse: e.target.checked })} />
           หัวคอลัมน์กดพับ/กางได้ (ท้ายเว็บสั้นลง ไม่ต้องเลื่อนยาว)
@@ -395,7 +384,7 @@ export function FooterTab() {
           <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={theme.footer.mobileCenter} onChange={(e) => setFooter({ mobileCenter: e.target.checked })} />
           จัดกึ่งกลางบนมือถือ (จอคอมตามที่ตั้งด้านบน)
         </label>
-      </div>
+      </DesignCard>
       {areaFold("footer", FOOTER_PARTS, "หัวคอลัมน์ · ลิงก์ · โซเชียล · แถวล่าง")}
     </>
   );

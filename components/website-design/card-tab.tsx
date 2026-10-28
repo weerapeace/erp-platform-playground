@@ -10,17 +10,35 @@ import { ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
 import { RangeInput } from "@/components/range-input";
 import { RATIO_CSS, SampleCard } from "./sample-card";
-import { type ImageRatio, type CardHover, type Theme, inputCls, labelCls, cardCls, useAreaFold } from "./shared";
+import { type ImageRatio, type CardHover, type Theme, inputCls, labelCls, useAreaFold } from "./shared";
 import { CARD_PARTS } from "@/lib/website-page-parts";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 
 export function CardTab() {
   const { theme, choices, setLogo, setCard, setShape, sampleItems } = useDesign();
   const areaFold = useAreaFold();
   return (
     <>
-    <div className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-800 mb-3">การ์ดสินค้า</h3>
+    {/* การ์ดจำลองจากสินค้าจริง — เปลี่ยนค่าแล้วเห็นทันที (ชี้เมาส์ดูเอฟเฟกต์) */}
+    <DesignCard title="ตัวอย่างการ์ด (ดูผลทันที)" hint="จากสินค้าจริงในร้าน · ชี้เมาส์เพื่อดูเอฟเฟกต์" defaultOpen>
+      {sampleItems.length ? (
+        <div className="rounded-xl p-4" style={{ background: theme.colors.page }}>
+          <div className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(sampleItems.length, theme.card.columns.desktop)}, minmax(0, 1fr))`, gap: theme.card.gap === "sm" ? 8 : theme.card.gap === "lg" ? 24 : 16, maxWidth: 560 }}>
+            {sampleItems.slice(0, Math.min(sampleItems.length, theme.card.columns.desktop)).map((it, i) => (
+              <SampleCard key={i} item={it} card={theme.card} colors={theme.colors} fonts={theme.fonts} radius={theme.radius} shape={theme.shape} />
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-400">ยังไม่มีสินค้าบนเว็บ — การ์ดจำลองจะโชว์เมื่อมีสินค้าที่เผยแพร่แล้ว</p>
+      )}
+    </DesignCard>
+
+    <DesignCard
+      title="หน้าตาการ์ด — ชุดสำเร็จรูป · รูปแบบ · ช่องหลัก"
+      summary={`${choices.cardPresets.find((p) => p.value === theme.card.preset)?.label ?? theme.card.preset} · รูป ${theme.card.imageRatio} · ชื่อ ${theme.card.titleLines} บรรทัด`}
+    >
 
       {/* 🃏 ชุดสำเร็จรูป — กดทีเดียวตั้งหลายช่อง แล้วปรับต่อเองได้ (lib/website-card-looks · ใช้ชุดเดียวกับ "การ์ดในส่วนนี้" ของ Section) */}
       <label className={labelCls}>ชุดหน้าตาสำเร็จรูป</label>
@@ -194,7 +212,14 @@ export function CardTab() {
         <span className="ml-auto"><ColorSwatchButton /></span>
       </div>
 
-      {/* 🎨 จุดสีบนการ์ด */}
+    </DesignCard>
+
+    {/* 🎨 จุดสีบนการ์ด */}
+    <DesignCard
+      title="จุดสีบนการ์ด"
+      summary={theme.card.showSwatches ? `โชว์สูงสุด ${theme.card.swatchMax} จุด${theme.card.swatchSwap ? " · ชี้แล้วเปลี่ยนรูป" : ""}` : "ปิดอยู่ (เปิด “จุดสีตัวเลือก” ในการ์ดหน้าตาการ์ด)"}
+    >
+      {!theme.card.showSwatches && <p className="text-xs text-slate-400">ยังไม่ได้เปิด “จุดสีตัวเลือก” — ติ๊กในการ์ด “หน้าตาการ์ด” ด้านบนก่อน</p>}
       {theme.card.showSwatches && (
         <div className="mt-3 rounded-lg bg-slate-50 p-3 space-y-2">
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -237,9 +262,15 @@ export function CardTab() {
         </div>
       )}
 
-      <CardExtras card={theme.card} setCard={setCard} />
+    </DesignCard>
 
-      {/* 🖼 ระหว่างรอรูปโหลด — ใช้ทั้งการ์ดและหน้าสินค้า (เก็บใน logo.placeholder) */}
+    <DesignCard title="ป้าย · รูปบนการ์ด · ชื่อ/ราคา · ดูด่วน" hint="ป้ายอัตโนมัติ (ลด/ใหม่/ขายดี) · รูปในกรอบ · ตำแหน่งรูป · ขนาดชื่อ/ราคา · ปุ่มดูด่วน">
+      <CardExtras card={theme.card} setCard={setCard} />
+    </DesignCard>
+
+
+    {/* 🖼 ระหว่างรอรูปโหลด — ใช้ทั้งการ์ดและหน้าสินค้า (เก็บใน logo.placeholder) */}
+    <DesignCard title="ระหว่างรอรูปโหลด" hint="ใช้ทั้งการ์ดสินค้าและหน้าสินค้า">
       <PlaceholderSettings
         value={theme.logo.placeholder}
         onChange={(p) => setLogo({ placeholder: { ...theme.logo.placeholder, ...p } })}
@@ -248,23 +279,7 @@ export function CardTab() {
         colors={theme.colors}
         ratio={RATIO_CSS[theme.card.imageRatio] ?? "4 / 5"}
       />
-
-      {/* การ์ดจำลองจากสินค้าจริง — เปลี่ยนค่าแล้วเห็นทันที (ชี้เมาส์ดูเอฟเฟกต์) */}
-      <div className="mt-4 pt-3 border-t border-slate-100">
-        <label className={labelCls}>ตัวอย่างการ์ด (จากสินค้าจริงในร้าน · ชี้เมาส์เพื่อดูเอฟเฟกต์)</label>
-        {sampleItems.length ? (
-          <div className="rounded-xl p-4" style={{ background: theme.colors.page }}>
-            <div className="grid" style={{ gridTemplateColumns: `repeat(${Math.min(sampleItems.length, theme.card.columns.desktop)}, minmax(0, 1fr))`, gap: theme.card.gap === "sm" ? 8 : theme.card.gap === "lg" ? 24 : 16, maxWidth: 560 }}>
-              {sampleItems.slice(0, Math.min(sampleItems.length, theme.card.columns.desktop)).map((it, i) => (
-                <SampleCard key={i} item={it} card={theme.card} colors={theme.colors} fonts={theme.fonts} radius={theme.radius} shape={theme.shape} />
-              ))}
-            </div>
-          </div>
-        ) : (
-          <p className="text-xs text-slate-400">ยังไม่มีสินค้าบนเว็บ — การ์ดจำลองจะโชว์เมื่อมีสินค้าที่เผยแพร่แล้ว</p>
-        )}
-      </div>
-    </div>
+    </DesignCard>
     {areaFold("card", CARD_PARTS, "กรอบ · รูป · ชื่อ · ราคา · ป้าย · ปุ่มใส่ตะกร้า — ทุกที่ที่มีการ์ด", "/shop")}
     </>
   );

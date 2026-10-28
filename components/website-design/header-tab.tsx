@@ -15,11 +15,12 @@ import { HeaderOverPagesSettings } from "@/components/website-header-over-settin
 import { HeaderIconStyleSetting } from "@/components/website-site-design-setting";
 import { DEFAULT_HEADER_CART, DEFAULT_HEADER_SEARCH } from "@/lib/website-header-els";
 import { HEADER_PARTS } from "@/lib/website-page-parts";
-import { type HeaderBg, type MenuAlign, roleOf, inputCls, labelCls, cardCls, ColorField, useAreaFold } from "./shared";
+import { type HeaderBg, type MenuAlign, roleOf, inputCls, labelCls, ColorField, useAreaFold } from "./shared";
 import { useRoleEditor } from "./fonts-tab";
 import { MenuSettings } from "./menu-tab";
 import { LogoSettings } from "./logo-tab";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 
 export function HeaderTab() {
   const { shopSlug, shopId, theme, choices, apply, setHeader, setMenu, page, setPage, sampleProduct, storePages, iframeRef, linkCtx, megaCtx } = useDesign();
@@ -27,10 +28,14 @@ export function HeaderTab() {
   const areaFold = useAreaFold();
   /** ป๊อปตั้งค่าชิ้นส่วนหัวเว็บที่เปิดอยู่ (กดชื่อชิ้นที่มี ⚙ ใน ZonesEditor) */
   const [zoneCfg, setZoneCfg] = useState<HeaderEl | null>(null);
+  const zoneNames = (els: HeaderEl[]) => els.map((k) => HEADER_EL_DEFS.find((d) => d.key === k)?.label ?? k).join(" ") || "—";
+  const z = theme.header.zones;
   return (
     <>
-    <div className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-800 mb-3">แถบเมนูด้านบน (Header)</h3>
+    <DesignCard
+      title="แถบหัวเว็บ — ขนาด · สี · ตำแหน่งเมนู"
+      summary={`${choices.headerBg.find((o) => o.value === theme.header.bg)?.label ?? theme.header.bg} · สูง ${theme.header.height}px${theme.header.sticky ? " · ตรึงด้านบน" : ""}`}
+    >
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className={labelCls}>ความสูง · {theme.header.height}px</label>
@@ -78,9 +83,14 @@ export function HeaderTab() {
         </div>
         <ColorField label="สีตัวอักษร/ไอคอนใน Header" value={theme.header.textColor} onChange={(hex) => setHeader({ textColor: hex })} emptyLabel="อัตโนมัติ (ขาว/ดำตามพื้น)" />
       </div>
+    </DesignCard>
 
-      <div className="mt-4 pt-3 border-t border-slate-100">
-        <label className={labelCls}>ตำแหน่งชิ้นส่วน (ซ้าย · กลาง · ขวา) — ลาก ⠿ จัดลำดับในโซน · ◀ ▶ ย้ายโซน · ✕ เอาออก</label>
+    <DesignCard
+      title="ตำแหน่งชิ้นส่วน (ซ้าย · กลาง · ขวา)"
+      hint="ลาก ⠿ จัดลำดับในโซน · ◀ ▶ ย้ายโซน · ✕ เอาออก"
+      summary={`ซ้าย ${zoneNames(z.left)} · กลาง ${zoneNames(z.center)} · ขวา ${zoneNames(z.right)}`}
+    >
+      <div>
         <ZonesEditor zones={theme.header.zones} onChange={(zones) => setHeader({ zones })} onConfig={setZoneCfg} />
         <p className="text-[11px] text-slate-400 mt-1.5">กดชื่อชิ้นที่มี ⚙ (โลโก้ · เมนู · ค้นหา · ตะกร้า · โซเชียล) เพื่อตั้งค่าในป๊อปได้เลย · “บัญชีสมาชิก” โชว์เมื่อเว็บเปิดระบบสมาชิกแล้ว (ตั้งช่องทางเข้าสู่ระบบ)</p>
         {/* ⚙ ป๊อปตั้งค่าชิ้นส่วน: เมนู = แก้ในธีม (บันทึกร่าง/เผยแพร่พร้อมดีไซน์) · โซเชียล = ข้อมูลร้าน บันทึกทันที */}
@@ -139,8 +149,13 @@ export function HeaderTab() {
           onSaved={() => setTimeout(() => { if (iframeRef.current) iframeRef.current.src = iframeRef.current.src; }, 1500)}
         />
       </div>
+    </DesignCard>
 
-      <div className="grid gap-3 sm:grid-cols-2 mt-4 pt-3 border-t border-slate-100">
+    <DesignCard
+      title="ปุ่มบนหัวเว็บ · เมนูมือถือ"
+      summary={`${theme.header.button.text ? `ปุ่ม “${theme.header.button.text}”` : "ไม่มีปุ่ม"} · เมนูมือถือ${theme.header.mobileMenuSide === "top" ? "คลี่ลง" : theme.header.mobileMenuSide === "left" ? "จากซ้าย" : "จากขวา"}${theme.header.hideOnScroll ? " · เลื่อนลงซ่อน" : ""}`}
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <label className={labelCls}>ข้อความปุ่มใน Header (ว่าง = ไม่มีปุ่ม)</label>
           <LangInput className={inputCls} obj={theme.header.button} k="text" maxLength={30} placeholder="เช่น ช้อปเลย" onPatch={(p) => setHeader({ button: { ...theme.header.button, ...p } })} />
@@ -164,6 +179,9 @@ export function HeaderTab() {
           </label>
         </div>
       </div>
+    </DesignCard>
+
+    <DesignCard title="หัวเว็บทับรูปใหญ่ (โปร่งใสตอนอยู่บนสุด)" summary={theme.header.overPages.home.on ? "เปิดที่หน้าแรก" : "ปิดที่หน้าแรก"}>
       <HeaderOverPagesSettings
         value={theme.header.overPages}
         onChange={(overPages) => setHeader({ overPages, overHero: overPages.home.on })}
@@ -171,9 +189,12 @@ export function HeaderTab() {
         currentPath={page}
         onPreview={setPage}
       />
+    </DesignCard>
+
+    <DesignCard title="ไอคอนบนหัวเว็บ" summary="หน้าตาไอคอนค้นหา · บัญชี · ตะกร้า">
       <HeaderIconStyleSetting value={theme.header.iconStyle} onChange={(iconStyle) => setHeader({ iconStyle })} ink={theme.header.textColor || theme.colors.ink} />
       <p className="text-[11px] text-slate-400 mt-3">* รายการในเมนูตั้งที่แท็บ "เมนู" · ยังไม่ตั้ง = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้างเอง + ติดต่อ)</p>
-    </div>
+    </DesignCard>
     {areaFold("header", HEADER_PARTS, "แถบประกาศ · โลโก้ · ลิงก์เมนู · ไอคอน · ป้ายตะกร้า", "/")}
     </>
   );

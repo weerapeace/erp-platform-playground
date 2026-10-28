@@ -7,17 +7,16 @@ import { WheelSelect } from "@/components/wheel-select";
 import { FontSelect } from "@/components/font-select";
 import { RangeInput } from "@/components/range-input";
 import { latinFontOptions, webFontOptions, WEB_FONT_NAMES } from "@/components/website-text-pickers";
-import { type Theme, roleOf, labelCls, cardCls, ColorField, ResetBtn } from "./shared";
+import { type Theme, roleOf, labelCls, ColorField, ResetBtn } from "./shared";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 
 export function FontsTab() {
   const { theme, published, apply } = useDesign();
   const roleEditor = useRoleEditor();
   return (
     <>
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">ฟอนต์หลัก</h3>
-        <p className="text-xs text-slate-500 mb-3">ฟอนต์หัวข้อใช้กับหัวข้อ/ชื่อสินค้า · ฟอนต์เนื้อหาใช้กับข้อความทั่วไป ปุ่ม เมนู · 🔤 ตั้ง &quot;ตัวอังกฤษ/ตัวเลข&quot; แยกได้: ตัวอังกฤษใช้ฟอนต์อังกฤษสวย ๆ ตัวไทยใช้ฟอนต์ไทยที่เลือก</p>
+      <DesignCard title="ฟอนต์หลัก" hint={<>ฟอนต์หัวข้อใช้กับหัวข้อ/ชื่อสินค้า · ฟอนต์เนื้อหาใช้กับข้อความทั่วไป ปุ่ม เมนู · 🔤 ตั้ง &quot;ตัวอังกฤษ/ตัวเลข&quot; แยกได้: ตัวอังกฤษใช้ฟอนต์อังกฤษสวย ๆ ตัวไทยใช้ฟอนต์ไทยที่เลือก</>} summary={`${theme.fonts.display} / ${theme.fonts.body}`}>
         <div className="grid gap-3 sm:grid-cols-2">
           {(["display", "body"] as const).map((fk) => (
             <div key={fk}>
@@ -44,15 +43,13 @@ export function FontsTab() {
             </div>
           ))}
         </div>
-      </div>
+      </DesignCard>
 
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">ปรับละเอียดรายบทบาท</h3>
-        <p className="text-xs text-slate-500 mb-3">แต่ละชนิดข้อความตั้งแยกได้: ฟอนต์ น้ำหนัก เอียง ขนาด (คอม/มือถือ) ระยะห่าง ตัวพิมพ์ใหญ่ สี พื้นหลัง · ตัวอย่างด้านล่างเปลี่ยนตามทันที</p>
+      <DesignCard title="ปรับละเอียดรายบทบาท" hint="แต่ละชนิดข้อความตั้งแยกได้: ฟอนต์ น้ำหนัก เอียง ขนาด (คอม/มือถือ) ระยะห่าง ตัวพิมพ์ใหญ่ สี พื้นหลัง · ตัวอย่างด้านล่างเปลี่ยนตามทันที">
         <div className="space-y-3">
           {TEXT_ROLE_DEFS.map(roleEditor)}
         </div>
-      </div>
+      </DesignCard>
     </>
   );
 }

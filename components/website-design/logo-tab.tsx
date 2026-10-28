@@ -4,16 +4,16 @@
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { LangInput } from "@/components/bilingual-field";
 import { RangeInput } from "@/components/range-input";
-import { type LogoMode, inputCls, labelCls, cardCls } from "./shared";
+import { type LogoMode, inputCls, labelCls } from "./shared";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 
 // 🔤 เนื้อหาแท็บโลโก้ — ใช้ร่วม แท็บโลโก้ + ป๊อป ⚙ โลโก้ ในตำแหน่งชิ้นส่วน Header (ค่าเดียวกัน)
 export function LogoSettings() {
   const { theme, choices, setLogo } = useDesign();
   return (
     <>
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-3">รูปแบบโลโก้</h3>
+      <DesignCard title="รูปแบบโลโก้" summary={`${choices.logoModes.find((m) => m.value === theme.logo.mode)?.label ?? theme.logo.mode} · สูง ${theme.logo.height}px`}>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className={labelCls}>แสดงแบบ</label>
@@ -35,20 +35,17 @@ export function LogoSettings() {
             <LangInput className={inputCls} obj={theme.logo} k="text" onPatch={setLogo} />
           </div>
         </div>
-      </div>
+      </DesignCard>
 
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">รูปโลโก้ &amp; ไอคอน</h3>
-        <p className="text-[11px] text-slate-500 mb-3">อัปโหลดแล้วเลือก &quot;แสดงแบบ: รูปโลโก้&quot; ด้านบน · รองรับ PNG/JPG/WebP (โปร่งใสแนะนำ PNG)</p>
+      <DesignCard title="รูปโลโก้ & ไอคอน" summary={[theme.logo.imageKey ? "มีรูปโลโก้" : "ยังไม่มีรูปโลโก้", theme.logo.faviconKey ? "มี Favicon" : "ยังไม่มี Favicon"].join(" · ")} hint={<>อัปโหลดแล้วเลือก &quot;แสดงแบบ: รูปโลโก้&quot; ด้านบน · รองรับ PNG/JPG/WebP (โปร่งใสแนะนำ PNG)</>}>
         <div className="grid gap-4 sm:grid-cols-2">
           <ImageUploadField label="โลโก้หลัก" hint="ใช้บนพื้นสว่าง" value={theme.logo.imageKey} onChange={(k) => setLogo({ imageKey: k })} previewBg={theme.colors.page} />
           <ImageUploadField label="โลโก้สำหรับพื้นเข้ม" hint="ใช้ตอน Header สีเข้ม" value={theme.logo.imageDarkKey} onChange={(k) => setLogo({ imageDarkKey: k })} previewBg={theme.colors.ink} />
           <ImageUploadField label="ไอคอนแท็บเบราว์เซอร์ (Favicon)" hint="จัตุรัส 64px+" value={theme.logo.faviconKey} onChange={(k) => setLogo({ faviconKey: k })} height={44} />
         </div>
-      </div>
+      </DesignCard>
 
-      <div className={cardCls}>
-        <p className={labelCls}>ดูบนพื้นหลังต่าง ๆ</p>
+      <DesignCard title="ดูบนพื้นหลังต่าง ๆ">
         <div className="grid grid-cols-3 gap-2">
           {[
             { bg: "#FFFFFF", label: "พื้นขาว", dark: false },
@@ -81,7 +78,7 @@ export function LogoSettings() {
             );
           })}
         </div>
-      </div>
+      </DesignCard>
     </>
   );
 }

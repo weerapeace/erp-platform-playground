@@ -8,8 +8,9 @@ import { FINE_COLOR_DEFAULTS, SOFT_PCT_RANGE, tintPctOf, resolveOnBrand, ON_BRAN
 import { applySavedTheme } from "@/lib/website-saved-themes";
 import { SavedThemesCard } from "@/components/website-saved-themes";
 import { RangeInput } from "@/components/range-input";
-import { type SampleItem, type Theme, type ColorKey, FINE_COLOR_KEYS, COLOR_FIELDS, PRESETS, inputCls, labelCls, cardCls, ColorField, ResetBtn } from "./shared";
+import { type SampleItem, type Theme, type ColorKey, FINE_COLOR_KEYS, COLOR_FIELDS, PRESETS, inputCls, labelCls, ColorField, ResetBtn } from "./shared";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 
 export function ColorsTab() {
   const { shopId, theme, published, apply, toast, setColor, setCard, sampleItems } = useDesign();
@@ -20,9 +21,7 @@ export function ColorsTab() {
       {/* 💾 ธีมที่บันทึกไว้ (ของกลาง components/website-saved-themes · ใช้ข้ามร้านได้) */}
       <SavedThemesCard shopId={shopId} theme={theme} onApply={(s) => apply(applySavedTheme(theme, s))} />
       {/* 🎨 ธีมทั้งชุด (lib/website-theme-presets) — สี ฟอนต์ ปุ่ม การ์ด หัวเว็บ การเปลี่ยนหน้า ในคลิกเดียว */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">🎨 ธีมทั้งชุด (กดครั้งเดียว)</h3>
-        <p className="text-[11px] text-slate-500 mb-3">เปลี่ยน สี · ฟอนต์ · ปุ่ม · การ์ดสินค้า · หัวเว็บ · การเปลี่ยนหน้า พร้อมกัน — ไม่แตะโลโก้/เมนู/เนื้อหา · กดแล้วปรับต่อได้ · ↶ ย้อนกลับได้ก่อนบันทึก</p>
+      <DesignCard title="🎨 ธีมทั้งชุด (กดครั้งเดียว)" hint="เปลี่ยน สี · ฟอนต์ · ปุ่ม · การ์ดสินค้า · หัวเว็บ · การเปลี่ยนหน้า พร้อมกัน — ไม่แตะโลโก้/เมนู/เนื้อหา · กดแล้วปรับต่อได้ · ↶ ย้อนกลับได้ก่อนบันทึก" summary={FULL_THEME_PRESETS.find((p) => p.colors.brand === theme.colors.brand && p.colors.page === theme.colors.page)?.label ?? "ยังไม่ได้ใช้ธีมชุด — กดเลือกได้"}>
         <div className="grid gap-2 grid-cols-2 lg:grid-cols-4">
           {FULL_THEME_PRESETS.map((p) => {
             const on = theme.colors.brand === p.colors.brand && theme.colors.page === p.colors.page && theme.fonts.display === p.fonts.display;
@@ -48,10 +47,8 @@ export function ColorsTab() {
             );
           })}
         </div>
-      </div>
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">ชุดสีสำเร็จรูป</h3>
-        <p className="text-[11px] text-slate-500 mb-3">เลือกแล้วปรับต่อได้ · ย้อนกลับได้ก่อนบันทึก</p>
+      </DesignCard>
+      <DesignCard title="ชุดสีสำเร็จรูป" hint="เลือกแล้วปรับต่อได้ · ย้อนกลับได้ก่อนบันทึก">
         <div className="flex flex-wrap gap-2">
           {PRESETS.map((p) => (
             <button key={p.name} onClick={() => apply({ ...theme, ...p.theme, colors: { ...theme.colors, ...p.theme.colors }, fonts: { ...theme.fonts, ...p.theme.fonts } })} className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-700 hover:border-slate-500">
@@ -64,15 +61,11 @@ export function ColorsTab() {
             </button>
           ))}
         </div>
-      </div>
+      </DesignCard>
 
-      <div className={cardCls}>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-slate-800">สี</h3>
-          <button onClick={() => apply({ ...theme, colors: { ...theme.colors, brandDeep: darken(theme.colors.brand) } })} className="text-[11px] text-blue-600 hover:underline">
+      <DesignCard title="สี" summary={<span className="inline-flex items-center gap-1">{[theme.colors.brand, theme.colors.brandDeep, theme.colors.ink, theme.colors.muted, theme.colors.page, theme.colors.surface].map((c, i) => <span key={i} className="inline-block w-3 h-3 rounded border border-black/10" style={{ background: c }} />)}</span>} right={<><button onClick={() => apply({ ...theme, colors: { ...theme.colors, brandDeep: darken(theme.colors.brand) } })} className="text-[11px] text-blue-600 hover:underline">
             สร้างสีเข้มจากสีหลักอัตโนมัติ
-          </button>
-        </div>
+          </button></>}>
         <div className="grid gap-3 sm:grid-cols-2">
           {COLOR_FIELDS.map((f) => (
             <div key={f.key}>
@@ -96,7 +89,7 @@ export function ColorsTab() {
             ))}
           </div>
         </div>
-      </div>
+      </DesignCard>
 
       <FineColorsCard
         theme={theme}
@@ -108,9 +101,7 @@ export function ColorsTab() {
         onResetAll={() => apply({ ...theme, colors: { ...theme.colors, ...FINE_COLOR_DEFAULTS } })}
       />
 
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">ตรวจความอ่านง่าย (WCAG)</h3>
-        <p className="text-[11px] text-slate-500 mb-3">{failCount ? `⚠️ พบ ${failCount} จุดที่อ่านยาก` : "✓ ผ่านทุกจุด"}</p>
+      <DesignCard title="ตรวจความอ่านง่าย (WCAG)" hint={<>{failCount ? `⚠️ พบ ${failCount} จุดที่อ่านยาก` : "✓ ผ่านทุกจุด"}</>} summary={failCount ? `ต้องแก้ ${failCount} คู่สี` : `อ่านง่ายครบ ${checks.length} คู่สี`}>
         <ul className="space-y-2">
           {checks.map((c) => (
             <li key={c.label} className="flex items-center gap-2 text-xs">
@@ -128,7 +119,7 @@ export function ColorsTab() {
             </li>
           ))}
         </ul>
-      </div>
+      </DesignCard>
     </>
   );
 }
@@ -166,18 +157,11 @@ export function FineColorsCard({
   );
   const customOn = c.onBrand !== "auto" && !ON_BRAND_CHOICES.some((o) => o.v === c.onBrand);
   return (
-    <div className={cardCls}>
-      <div className="flex items-start justify-between gap-2 mb-1">
-        <h3 className="text-sm font-semibold text-slate-800">🎨 ปรับสีละเอียด</h3>
-        {changed > 0 && (
+    <DesignCard title="🎨 ปรับสีละเอียด" hint={<>ไม่ตั้ง = หน้าตาเดิมของเว็บ · ตัวอย่างด้านล่างเปลี่ยนตามทันที {pubChanged && <span className="text-amber-600">· มีค่าที่ยังไม่เผยแพร่</span>}</>} summary={changed ? `ปรับแล้ว ${changed} สี` : "ใช้สีตามธีมทั้งหมด"} right={<>{changed > 0 && (
           <button type="button" onClick={onResetAll} className="text-[11px] text-slate-400 hover:text-slate-700 shrink-0" title="สีละเอียดทั้งหมดกลับเป็นค่าเริ่มต้น">
             ↺ ค่าเริ่มต้นทั้งหมด
           </button>
-        )}
-      </div>
-      <p className="text-[11px] text-slate-500 mb-3">
-        ไม่ตั้ง = หน้าตาเดิมของเว็บ · ตัวอย่างด้านล่างเปลี่ยนตามทันที {pubChanged && <span className="text-amber-600">· มีค่าที่ยังไม่เผยแพร่</span>}
-      </p>
+        )}</>}>
       <div className="grid gap-4 lg:grid-cols-[1fr_minmax(0,260px)]">
         <div className="space-y-4">
           <div>
@@ -244,7 +228,7 @@ export function FineColorsCard({
         </div>
         <ColorsLivePreview theme={theme} sample={sample} />
       </div>
-    </div>
+    </DesignCard>
   );
 }
 /** 👁 ตัวอย่างสด: การ์ดราคาปกติ + การ์ดลดราคา + ปุ่ม/ลิงก์/เส้น — ใช้สีจริงของธีมที่กำลังแก้ */

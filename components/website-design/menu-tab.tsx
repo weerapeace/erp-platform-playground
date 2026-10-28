@@ -15,20 +15,19 @@ import { ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
 import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MenuBehavior } from "@/lib/website-mega-menu";
-import { type Choices, roleOf, cardCls } from "./shared";
+import { type Choices, roleOf } from "./shared";
 import { useRoleEditor } from "./fonts-tab";
 import { PageHealthCtx, IssueNote } from "./link-health";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 
 export function MenuTab() {
   const { theme, choices, apply, setMenu, storePages, megaCtx } = useDesign();
   const roleEditor = useRoleEditor();
   return (
-    <div className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-800 mb-1">เมนูด้านบน</h3>
-      <p className="text-xs text-slate-500 mb-3">จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ใส่ป้ายเล็ก · เมนูย่อย (dropdown หรือแผง Mega มีรูป) · ตั้งชุดมือถือแยกได้</p>
+    <DesignCard title="เมนูด้านบน" hint="จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ใส่ป้ายเล็ก · เมนูย่อย (dropdown หรือแผง Mega มีรูป) · ตั้งชุดมือถือแยกได้">
       <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} typo={{ nav: roleOf(theme, "nav").uppercase, menu: roleOf(theme, "menu").uppercase, setUpper: (k, v) => apply({ ...theme, typography: { ...theme.typography, [k]: { ...roleOf(theme, k), uppercase: v } } }), editors: TEXT_ROLE_DEFS.filter((d) => d.key === "nav" || d.key === "menu").map(roleEditor) }} />
-    </div>
+    </DesignCard>
   );
 }
 

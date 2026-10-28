@@ -31,7 +31,7 @@ import { setPreviewFrame } from "@/lib/storefront-preview-bus";
 import { ProductTab } from "@/components/website-design/product-tab";
 import { CardTab } from "@/components/website-design/card-tab";
 import { ColorsTab } from "@/components/website-design/colors-tab";
-import { type SampleItem, type Theme, type Choices, type ColorKey, FINE_COLOR_KEYS, COLOR_FIELDS, inputCls, cardCls, timeAgo } from "@/components/website-design/shared";
+import { type SampleItem, type Theme, type Choices, type ColorKey, FINE_COLOR_KEYS, COLOR_FIELDS, inputCls, timeAgo } from "@/components/website-design/shared";
 import { FontsTab } from "@/components/website-design/fonts-tab";
 import { HeaderTab } from "@/components/website-design/header-tab";
 import { MenuTab } from "@/components/website-design/menu-tab";
@@ -44,6 +44,7 @@ import { LogoSettings } from "@/components/website-design/logo-tab";
 import { DesignCtx, type DesignCtxValue } from "@/components/website-design/context";
 import { MotionTab, MobileSalesTab } from "@/components/website-design/shape-tab";
 import { DesignOverview } from "@/components/website-design/overview";
+import { DesignCard, DesignCardsProvider, DesignCardsToggleAll } from "@/components/website-design/design-card";
 import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
 import { Icon } from "@/components/icon";
 import { DESIGN_GROUPS, DESIGN_PAGES, designGroupOf, dirtyDesignPages, isDesignPageKey, normTitle, searchDesign, type DesignPageKey } from "@/lib/website-design-nav";
@@ -121,7 +122,6 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const goTo = useCallback((k: TabKey, card?: string) => {
     setTab(k);
     if (!card) return;
-    window.dispatchEvent(new CustomEvent("website-design-focus", { detail: card }));
     const want = normTitle(card);
     const tryFocus = (left: number) => {
       const col = settingsColRef.current;
@@ -130,10 +130,14 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         if (left > 0) window.setTimeout(() => tryFocus(left - 1), 120);
         return;
       }
-      const box = (head.closest("[data-design-card]") ?? head.closest(".rounded-xl") ?? head) as HTMLElement;
-      box.scrollIntoView({ behavior: "smooth", block: "start" });
-      box.classList.add("ring-2", "ring-amber-400", "ring-offset-2");
-      window.setTimeout(() => box.classList.remove("ring-2", "ring-amber-400", "ring-offset-2"), 1600);
+      // การ์ดพับอยู่ → กางก่อน (DesignCard ฟัง event นี้) แล้วค่อยเลื่อน
+      window.dispatchEvent(new CustomEvent("website-design-focus", { detail: card }));
+      window.setTimeout(() => {
+        const box = (head.closest("[data-design-card]") ?? head.closest(".rounded-xl") ?? head) as HTMLElement;
+        box.scrollIntoView({ behavior: "smooth", block: "start" });
+        box.classList.add("ring-2", "ring-amber-400", "ring-offset-2");
+        window.setTimeout(() => box.classList.remove("ring-2", "ring-amber-400", "ring-offset-2"), 1600);
+      }, 80);
     };
     window.setTimeout(() => tryFocus(8), 60);
   }, [setTab]);
@@ -646,11 +650,16 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,40%)] items-start">
         {/* ── ซ้าย: ตั้งค่า ── */}
         <div ref={settingsColRef} className="min-w-0 space-y-3">
+          {/* 🗂 การ์ดในหน้านี้พับ/กางได้ + จำต่อคน (components/website-design/design-card) */}
+          <DesignCardsProvider page={tab}>
           {curPage && (
-            <div>
-              <p className="text-xs text-slate-400">{designGroupOf(tab)?.label} ›</p>
-              <h2 className="text-lg font-semibold text-slate-800 leading-tight">{curPage.label}</h2>
-              <p className="text-xs text-slate-500">{curPage.desc}</p>
+            <div className="flex items-end gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-xs text-slate-400">{designGroupOf(tab)?.label} ›</p>
+                <h2 className="text-lg font-semibold text-slate-800 leading-tight">{curPage.label}</h2>
+                <p className="text-xs text-slate-500">{curPage.desc}</p>
+              </div>
+              <DesignCardsToggleAll />
             </div>
           )}
 
@@ -693,10 +702,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {/* ── รูปทรง ── */}
           {/* ── หน้ารายการสินค้า: รูปแทรกในกริด ── */}
           {tab === "listing" && (
-            <div className={cardCls}>
-              <h3 className="text-sm font-semibold text-slate-800 mb-2">หน้ารายการสินค้า — หัวหน้า · ต่อแถว · แบ่งหน้า · การเรียง · ตัวกรอง · รูปแทรก</h3>
+            <DesignCard title="หน้ารายการสินค้า" hint="หัวหน้า · ต่อแถว · แบ่งหน้า · การเรียง · ตัวกรอง · รูปแทรก" defaultOpen>
               <ListingPanel value={theme.listing} onChange={(listing) => apply({ ...theme, listing })} categories={choices.categories ?? []} products={choices.products ?? []} fields={choices.specFields ?? []} linkCtx={linkCtx} cardColumns={theme.card.columns} shopSlug={shopSlug} />
-            </div>
+            </DesignCard>
           )}
 
           {/* ── 🛒 ตะกร้า: หน้าตา · รายการ · ท้ายตะกร้า · สินค้าแนะนำ · ฟังก์ชันเพิ่ม (components/website-cart-settings) ── */}
@@ -729,6 +737,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
           {/* ── ประวัติ ── */}
           {tab === "history" && <HistoryTab />}
+          </DesignCardsProvider>
         </div>
 
         {/* ── ขวา: พรีวิวเว็บจริง ── */}
