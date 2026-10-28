@@ -4,17 +4,21 @@
  *
  * ชนิด:
  *   flash        ⚡ ลดราคาตั้งเวลา — ลด % ทุกชิ้นของรุ่นที่ร่วม (ราคาโชว์ขีดฆ่า + นับถอยหลังบนเว็บ) · ซ้อนกับโปรอื่นได้
+ *   item         🏷 ลดรายชิ้น — แต่ละรุ่นลดไม่เท่ากันได้: ลด % / ลดบาท / ราคาพิเศษ (+ ปัดราคาสวย · นับถอยหลังได้)
  *   qty_percent  ซื้อครบ N ชิ้น ลด X% (นับรวมทุกรุ่นที่ร่วม)
  *   bxgy         ซื้อ X แถม Y (ชิ้นที่ถูกสุดในแต่ละชุด ลด getPercent% · 100 = ฟรี)
  *   tier         ยอดครบขั้น ลด (ขั้นสูงสุดที่ถึง · % หรือบาท)
  *   bundle       ซื้อเป็นเซ็ต (ต้องมีครบทุกรุ่นในเซ็ต) ลด % หรือบาทต่อเซ็ต
- * วิธีรวม: ⚡ ลดก่อน (ต่อชิ้น) → โปรตะกร้า (4 ชนิดหลัง) ใช้ "ตัวที่ลดได้มากสุด" ตัวเดียว (ลูกค้าเข้าใจง่าย ไม่ลดซ้อนจนขาดทุน)
+ * วิธีรวม: ลดต่อชิ้นก่อน (⚡ + 🏷 หลายตัวทับกัน = ใช้ราคาที่ถูกสุดตัวเดียว ไม่ลดซ้อน)
+ *          → โปรตะกร้า (4 ชนิดหลัง) ใช้ "ตัวที่ลดได้มากสุด" ตัวเดียว (ลูกค้าเข้าใจง่าย ไม่ลดซ้อนจนขาดทุน)
+ * ขอบเขต: ทุกสินค้า / รหัสรุ่น / หมวดเว็บ / 📦 กลุ่มสินค้า (เลือกเอง หรือ อัตโนมัติตามเงื่อนไข) + ยกเว้นรุ่น/กลุ่ม
  * คูปอง: คิดหลังโปรจากยอดที่ลดแล้ว · โปรที่ตั้ง "ใช้คู่คูปองไม่ได้" + ลูกค้าใส่โค้ด → ERP ไม่รับโค้ด (บอกเหตุผล)
  * เงินเป็นบาท ปัดทศนิยม 2 ตำแหน่ง
  */
-export type PromoKind = "flash" | "qty_percent" | "bxgy" | "tier" | "bundle";
+export type PromoKind = "flash" | "item" | "qty_percent" | "bxgy" | "tier" | "bundle";
 
 export const PROMO_KINDS: { key: PromoKind; label: string; hint: string }[] = [
+  { key: "item", label: "🏷 ลดรายชิ้น", hint: "แต่ละรุ่นลดไม่เท่ากันได้ — ลด % / ลดบาท / ราคาพิเศษ · เว็บโชว์ราคาขีดฆ่า" },
   { key: "flash", label: "⚡ ลดราคาตั้งเวลา (Flash sale)", hint: "ลด % ทุกชิ้นของรุ่นที่เลือก ช่วงเวลาที่ตั้ง · เว็บโชว์ราคาขีดฆ่า + นับถอยหลัง" },
   { key: "qty_percent", label: "ซื้อครบ N ชิ้น ลด %", hint: "เช่น ซื้อ 2 ชิ้นขึ้นไป ลด 10% (นับรวมทุกรุ่นที่ร่วม)" },
   { key: "bxgy", label: "ซื้อ X แถม Y", hint: "เช่น ซื้อ 2 แถม 1 — ชิ้นที่ถูกสุดในแต่ละชุดฟรี (หรือลด %)" },
@@ -22,13 +26,56 @@ export const PROMO_KINDS: { key: PromoKind; label: string; hint: string }[] = [
   { key: "bundle", label: "ซื้อเป็นเซ็ต ลดพิเศษ", hint: "เช่น กระเป๋า + เข็มขัด รุ่นที่กำหนด ซื้อคู่กันลด ฿200" },
 ];
 
+/** โปรที่ลด "ต่อชิ้น" (โชว์เป็นราคาลดบนการ์ด/หน้าสินค้า · คิดก่อนโปรตะกร้า) */
+export const isUnitPromo = (p: Pick<Promotion, "kind">): boolean => p.kind === "flash" || p.kind === "item";
+
 export type DiscountKind = "percent" | "fixed";
 
+/** 🏷 ลดรายชิ้น: percent = ลด % · fixed = ลดกี่บาท · price = ขายราคานี้ (ราคาพิเศษ) */
+export type ItemDealKind = "percent" | "fixed" | "price";
+export interface ItemDeal {
+  kind: ItemDealKind;
+  value: number;
+}
+
+/** ปัดราคาหลังลด (ปัดลงเสมอ — ลูกค้าไม่เสียเปรียบ): 0 = ไม่ปัด · 1 = บาทเต็ม · 9 = ลงท้าย 9 · 90 = ลงท้าย 90 · 100 = หลักร้อย */
+export const PRICE_ROUNDS = [0, 1, 9, 90, 100] as const;
+export type PriceRound = (typeof PRICE_ROUNDS)[number];
+
+/** 📦 เงื่อนไขกลุ่มอัตโนมัติ — ทุกข้อที่ตั้งต้องตรง (หมวด/รหัส = ข้อใดข้อหนึ่งในรายการ) */
+export interface GroupMatch {
+  /** อยู่หมวดเว็บใดหมวดหนึ่ง */
+  categories?: string[];
+  /** ราคาขายปกติ (บาท) */
+  priceMin?: number | null;
+  priceMax?: number | null;
+  /** ขึ้นเว็บภายใน N วัน (มาใหม่) */
+  newDays?: number | null;
+  /** รหัสรุ่นขึ้นต้นด้วย */
+  codePrefixes?: string[];
+}
+
+/** 📦 กลุ่มสินค้า (ตั้งที่ ERP ครั้งเดียว ใช้ซ้ำได้ทุกโปร) — manual = รหัสที่เลือกเอง · smart = ตามเงื่อนไข (ของเข้าใหม่เข้ากลุ่มเอง) */
+export interface ProductGroup {
+  id: string;
+  name: string;
+  mode: "manual" | "smart";
+  codes: string[];
+  match: GroupMatch;
+}
+
 export interface PromoScope {
-  /** all = ทุกสินค้า · codes = รหัสรุ่นที่เลือก · categories = หมวดเว็บที่เลือก */
-  mode: "all" | "codes" | "categories";
+  /** all = ทุกสินค้า · codes = รหัสรุ่นที่เลือก · categories = หมวดเว็บที่เลือก · groups = กลุ่มสินค้า */
+  mode: "all" | "codes" | "categories" | "groups";
   codes: string[];
   categories: string[];
+  /** id กลุ่มสินค้า (mode groups) */
+  groups?: string[];
+  /** ยกเว้น (ใช้ได้กับทุก mode) */
+  excludeCodes?: string[];
+  excludeGroups?: string[];
+  /** นิยามกลุ่มที่โปรนี้อ้างถึง — เซิร์ฟเวอร์ใส่ให้ตอนอ่าน (withGroupDefs) ไม่เก็บลงฐานข้อมูล · ไม่มี = กลุ่มไม่ตรงอะไรเลย */
+  groupDefs?: ProductGroup[];
 }
 
 export interface PromoRule {
@@ -47,6 +94,14 @@ export interface PromoRule {
   bundleCodes?: string[];
   bundleKind?: DiscountKind;
   bundleValue?: number;
+  /** item: ส่วนลดตั้งต้น (ทุกรุ่นในขอบเขต) · ไม่มี = ลดเฉพาะรุ่นที่ตั้งรายตัว */
+  item?: ItemDeal;
+  /** item: ตั้งรายรุ่น { รหัสรุ่น (ตัวใหญ่): ส่วนลด } — ทับค่าตั้งต้น */
+  items?: Record<string, ItemDeal>;
+  /** item: ปัดราคาหลังลด (เฉพาะลด % / ลดบาท · ราคาพิเศษใช้ตามที่พิมพ์) */
+  round?: PriceRound;
+  /** item: โชว์นับถอยหลังบนเว็บ (ต้องมีเวลาสิ้นสุด) — flash นับถอยหลังเสมอ */
+  countdown?: boolean;
   /** ใช้คู่คูปองไม่ได้ */
   noCoupon?: boolean;
   /** ข้อความป้ายบนเว็บ (ว่าง = สร้างให้เอง) */
@@ -69,7 +124,12 @@ export interface PromoLine {
   /** ราคาต่อชิ้น (บาท) */
   unitPrice: number;
   qty: number;
+  /** วันที่ขึ้นเว็บ (ISO) — ใช้กับกลุ่มอัตโนมัติ "มาใหม่ภายใน N วัน" */
+  listedAt?: string | null;
 }
+
+/** ข้อมูลสินค้าที่ใช้ตัดสินขอบเขต (ราคา/วันขึ้นเว็บ ใช้กับกลุ่มอัตโนมัติ — ไม่ส่ง = เงื่อนไขนั้นไม่ตรง) */
+export type ScopeLine = Pick<PromoLine, "code" | "categories"> & { unitPrice?: number; listedAt?: string | null };
 
 export interface AppliedPromo {
   id: string;
@@ -82,7 +142,7 @@ export interface PromoResult {
   /** ส่วนลดรวมทุกโปร (บาท · ไม่เกินยอดสินค้า) */
   total: number;
   applied: AppliedPromo[];
-  /** ⚡ ราคาต่อชิ้นหลังลดของแต่ละบรรทัด (ลำดับเดียวกับที่ส่งมา) — ไว้โชว์ในตะกร้า */
+  /** ราคาต่อชิ้นหลังโปรลดต่อชิ้น (⚡/🏷) ของแต่ละบรรทัด (ลำดับเดียวกับที่ส่งมา) — ไว้โชว์ในตะกร้า */
   flashUnit: number[];
   /** โปรที่ใช้แล้ว ห้ามใช้คูปองคู่ */
   blocksCoupon: boolean;
@@ -100,18 +160,56 @@ export function isLive(p: Pick<Promotion, "active" | "startsAt" | "endsAt">, now
   return true;
 }
 
-export function inScope(scope: PromoScope, line: Pick<PromoLine, "code" | "categories">): boolean {
+/** 📦 สินค้านี้อยู่ในกลุ่มไหม — กลุ่มอัตโนมัติที่ไม่ได้ตั้งเงื่อนไขเลย = ไม่ตรงอะไร (กันลดทั้งร้านโดยไม่ตั้งใจ) */
+export function groupMatches(g: ProductGroup, line: ScopeLine, now: Date = new Date()): boolean {
+  const code = up(line.code);
+  if (g.mode !== "smart") return (g.codes ?? []).some((c) => up(c) === code);
+  const m = g.match ?? {};
+  let any = false;
+  if (m.categories?.length) {
+    any = true;
+    if (!line.categories.some((c) => m.categories!.includes(c))) return false;
+  }
+  if (m.codePrefixes?.length) {
+    any = true;
+    if (!m.codePrefixes.some((p) => up(p) && code.startsWith(up(p)))) return false;
+  }
+  if (m.priceMin != null || m.priceMax != null) {
+    any = true;
+    const p = line.unitPrice;
+    if (p == null || !(p >= 0)) return false;
+    if (m.priceMin != null && p < m.priceMin) return false;
+    if (m.priceMax != null && p > m.priceMax) return false;
+  }
+  if (m.newDays != null && m.newDays > 0) {
+    any = true;
+    const t = line.listedAt ? Date.parse(line.listedAt) : NaN;
+    if (!(t > 0) || now.getTime() - t > m.newDays * 864e5) return false;
+  }
+  return any;
+}
+
+const inGroups = (ids: string[] | undefined, defs: ProductGroup[] | undefined, line: ScopeLine, now: Date) =>
+  !!ids?.length && ids.some((id) => {
+    const g = defs?.find((d) => d.id === id);
+    return !!g && groupMatches(g, line, now);
+  });
+
+export function inScope(scope: PromoScope, line: ScopeLine, now: Date = new Date()): boolean {
+  if (scope.excludeCodes?.length && scope.excludeCodes.some((c) => up(c) === up(line.code))) return false;
+  if (inGroups(scope.excludeGroups, scope.groupDefs, line, now)) return false;
   if (scope.mode === "all") return true;
   if (scope.mode === "codes") return scope.codes.map(up).includes(up(line.code));
+  if (scope.mode === "groups") return inGroups(scope.groups, scope.groupDefs, line, now);
   return line.categories.some((c) => scope.categories.includes(c));
 }
 
-/** ⚡ % ลดของรุ่นนี้ตอนนี้ (หลายโปรทับกัน = เอามากสุด) */
-export function flashPercent(promos: Promotion[], line: Pick<PromoLine, "code" | "categories">, now: Date = new Date()): { percent: number; promo: Promotion | null } {
+/** ⚡ % ลดของรุ่นนี้ตอนนี้ (หลายโปรทับกัน = เอามากสุด) — เฉพาะ flash (ของเดิม · ราคาลดรวมทุกชนิดใช้ unitDeal) */
+export function flashPercent(promos: Promotion[], line: ScopeLine, now: Date = new Date()): { percent: number; promo: Promotion | null } {
   let best: Promotion | null = null;
   let pct = 0;
   for (const p of promos) {
-    if (p.kind !== "flash" || !isLive(p, now) || !inScope(p.rule.scope, line)) continue;
+    if (p.kind !== "flash" || !isLive(p, now) || !inScope(p.rule.scope, line, now)) continue;
     const v = clampPct(p.rule.percent);
     if (v > pct) {
       pct = v;
@@ -121,9 +219,59 @@ export function flashPercent(promos: Promotion[], line: Pick<PromoLine, "code" |
   return { percent: pct, promo: best };
 }
 
-/** ส่วนลดของโปรตะกร้า 1 ตัว (บาท) จากราคาหลัง ⚡ */
-export function cartPromoAmount(p: Promotion, lines: PromoLine[], unit: number[]): number {
-  const idx = lines.map((l, i) => ({ l, i })).filter(({ l }) => inScope(p.rule.scope, l));
+/** ปัดราคาลง (ไม่เกินราคาเดิมเสมอ) — ราคาต่ำกว่าหลักที่ปัด = ปัดเป็นบาทเต็มแทน */
+export function roundPrice(x: number, round: number | undefined): number {
+  if (!(x > 0)) return 0;
+  switch (round) {
+    case 1:
+      return Math.floor(x);
+    case 9:
+      return x >= 9 ? Math.floor((x - 9) / 10 + 1e-9) * 10 + 9 : Math.floor(x);
+    case 90:
+      return x >= 90 ? Math.floor((x - 90) / 100 + 1e-9) * 100 + 90 : Math.floor(x);
+    case 100:
+      return x >= 100 ? Math.floor(x / 100 + 1e-9) * 100 : Math.floor(x);
+    default:
+      return r2(x);
+  }
+}
+
+/** 🏷 ราคาหลังลดรายชิ้น 1 รุ่น — ราคาพิเศษที่ไม่ถูกกว่าเดิม = ไม่ลด */
+export function itemDealPrice(unit: number, deal: ItemDeal | null | undefined, round?: number): number {
+  if (!deal || !(unit > 0)) return unit;
+  const v = Math.max(0, Number(deal.value) || 0);
+  const raw = deal.kind === "percent" ? unit * (1 - clampPct(v) / 100) : deal.kind === "fixed" ? unit - v : v;
+  // ไม่ได้ลดจริง = ราคาเดิม (ห้ามให้การปัดราคาสร้างส่วนลดเอง)
+  if (!(raw < unit)) return unit;
+  // ราคาพิเศษ = ใช้ตามที่พิมพ์ (ปัดเฉพาะลด % / ลดบาท)
+  const out = deal.kind === "price" ? Math.max(0, raw) : roundPrice(Math.max(0, raw), round);
+  return out >= unit ? unit : r2(out);
+}
+
+/** ส่วนลดรายชิ้นของรุ่นนี้ในโปร 🏷 (ตั้งรายตัวก่อน · ไม่มี = ค่าตั้งต้น) */
+export function itemDealOf(p: Pick<Promotion, "rule">, code: string): ItemDeal | null {
+  return p.rule.items?.[up(code)] ?? p.rule.item ?? null;
+}
+
+/** ราคาต่อชิ้นหลังโปรลดต่อชิ้น (⚡ flash + 🏷 ลดรายชิ้น) — หลายโปรทับกัน = ใช้ราคาที่ถูกสุดตัวเดียว (ไม่ลดซ้อน) */
+export function unitDeal(promos: Promotion[], line: ScopeLine & { unitPrice: number }, now: Date = new Date()): { price: number; percent: number; promo: Promotion | null } {
+  let best: Promotion | null = null;
+  let price = line.unitPrice;
+  for (const p of promos) {
+    if (!isUnitPromo(p) || !isLive(p, now) || !inScope(p.rule.scope, line, now)) continue;
+    const after = p.kind === "flash" ? r2(line.unitPrice * (1 - clampPct(p.rule.percent) / 100)) : itemDealPrice(line.unitPrice, itemDealOf(p, line.code), p.rule.round);
+    if (after < price) {
+      price = after;
+      best = p;
+    }
+  }
+  const percent = best && line.unitPrice > 0 ? Math.round((1 - price / line.unitPrice) * 100) : 0;
+  return { price, percent, promo: best };
+}
+
+/** ส่วนลดของโปรตะกร้า 1 ตัว (บาท) จากราคาหลังลดต่อชิ้น */
+export function cartPromoAmount(p: Promotion, lines: PromoLine[], unit: number[], now: Date = new Date()): number {
+  const idx = lines.map((l, i) => ({ l, i })).filter(({ l }) => inScope(p.rule.scope, l, now));
   const eligQty = idx.reduce((s, { l }) => s + l.qty, 0);
   const eligSub = idx.reduce((s, { l, i }) => s + unit[i] * l.qty, 0);
   const rule = p.rule;
@@ -166,26 +314,25 @@ export function cartPromoAmount(p: Promotion, lines: PromoLine[], unit: number[]
   }
 }
 
-/** คิดโปรทั้งตะกร้า — ⚡ ต่อชิ้นก่อน แล้วโปรตะกร้าที่ลดได้มากสุด 1 ตัว */
+/** คิดโปรทั้งตะกร้า — ลดต่อชิ้น (⚡/🏷 ถูกสุดตัวเดียว) ก่อน แล้วโปรตะกร้าที่ลดได้มากสุด 1 ตัว */
 export function evaluatePromotions(promos: Promotion[], lines: PromoLine[], now: Date = new Date()): PromoResult {
   const applied: AppliedPromo[] = [];
-  const flashBy = new Map<string, AppliedPromo>();
+  const unitBy = new Map<string, AppliedPromo>();
   const unit = lines.map((l) => {
-    const { percent, promo } = flashPercent(promos, l, now);
-    if (!promo || !percent) return l.unitPrice;
-    const after = r2(l.unitPrice * (1 - percent / 100));
-    const cut = r2((l.unitPrice - after) * l.qty);
-    const a = flashBy.get(promo.id) ?? { id: promo.id, name: promo.name, kind: promo.kind, amount: 0 };
+    const { price, promo } = unitDeal(promos, l, now);
+    if (!promo) return l.unitPrice;
+    const cut = r2((l.unitPrice - price) * l.qty);
+    const a = unitBy.get(promo.id) ?? { id: promo.id, name: promo.name, kind: promo.kind, amount: 0 };
     a.amount = r2(a.amount + cut);
-    flashBy.set(promo.id, a);
-    return after;
+    unitBy.set(promo.id, a);
+    return price;
   });
-  applied.push(...flashBy.values());
+  applied.push(...unitBy.values());
 
   let best: { p: Promotion; amount: number } | null = null;
   for (const p of promos) {
-    if (p.kind === "flash" || !isLive(p, now)) continue;
-    const amount = cartPromoAmount(p, lines, unit);
+    if (isUnitPromo(p) || !isLive(p, now)) continue;
+    const amount = cartPromoAmount(p, lines, unit, now);
     if (amount > 0 && (!best || amount > best.amount)) best = { p, amount };
   }
   if (best) applied.push({ id: best.p.id, name: best.p.name, kind: best.p.kind, amount: best.amount });
@@ -206,6 +353,14 @@ export function promoBadge(p: Pick<Promotion, "kind" | "rule">, lang: "th" | "en
   switch (p.kind) {
     case "flash":
       return en ? `⚡ ${clampPct(r.percent)}% off` : `⚡ ลด ${clampPct(r.percent)}%`;
+    case "item": {
+      // ทุกรุ่นลดเท่ากัน = บอกตัวเลข · ตั้งรายตัว/ราคาพิเศษ = "ราคาพิเศษ" (ราคาจริงโชว์ที่การ์ดแต่ละใบ)
+      const d = r.item;
+      const custom = Object.keys(r.items ?? {}).length > 0;
+      if (d && !custom && d.kind === "percent") return en ? `${clampPct(d.value)}% off` : `ลด ${clampPct(d.value)}%`;
+      if (d && !custom && d.kind === "fixed") return en ? `${baht(d.value)} off` : `ลด ${baht(d.value)}`;
+      return en ? "Special price" : "ราคาพิเศษ";
+    }
     case "qty_percent":
       return en ? `Buy ${r.minQty ?? 2}+ save ${clampPct(r.percent)}%` : `ซื้อ ${r.minQty ?? 2} ชิ้น ลด ${clampPct(r.percent)}%`;
     case "bxgy":
@@ -245,13 +400,21 @@ export function sanitizePromotion(raw: unknown): { ok: true; promo: Omit<Promoti
   const rr = (r.rule ?? {}) as Record<string, unknown>;
   const sc = (rr.scope ?? {}) as Record<string, unknown>;
   const list = (v: unknown, max: number, f: (s: string) => string) => [...new Set((Array.isArray(v) ? v : String(v ?? "").split(/[\s,]+/)).map((x) => f(String(x).trim())).filter(Boolean))].slice(0, max);
+  const groupId = (s: string) => s.slice(0, 40);
   const scope: PromoScope = {
-    mode: sc.mode === "codes" || sc.mode === "categories" ? sc.mode : "all",
+    mode: sc.mode === "codes" || sc.mode === "categories" || sc.mode === "groups" ? sc.mode : "all",
     codes: list(sc.codes, 300, up),
     categories: list(sc.categories, 50, (s) => s.slice(0, 60)),
   };
+  const groups = list(sc.groups, 20, groupId);
+  const excludeCodes = list(sc.excludeCodes, 300, up);
+  const excludeGroups = list(sc.excludeGroups, 20, groupId);
+  if (groups.length) scope.groups = groups;
+  if (excludeCodes.length) scope.excludeCodes = excludeCodes;
+  if (excludeGroups.length) scope.excludeGroups = excludeGroups;
   if (scope.mode === "codes" && !scope.codes.length) return { ok: false, error: "เลือกรหัสรุ่นที่ร่วมโปรอย่างน้อย 1 รุ่น" };
   if (scope.mode === "categories" && !scope.categories.length) return { ok: false, error: "เลือกหมวดที่ร่วมโปรอย่างน้อย 1 หมวด" };
+  if (scope.mode === "groups" && !groups.length) return { ok: false, error: "เลือกกลุ่มสินค้าที่ร่วมโปรอย่างน้อย 1 กลุ่ม" };
 
   const num = (v: unknown) => Number(v);
   const rule: PromoRule = { scope, noCoupon: rr.noCoupon === true, badge: String(rr.badge ?? "").trim().slice(0, 40) || undefined };
@@ -259,6 +422,38 @@ export function sanitizePromotion(raw: unknown): { ok: true; promo: Omit<Promoti
     const pct = num(rr.percent);
     if (!(pct > 0 && pct < 100)) return { ok: false, error: "ส่วนลดต้องมากกว่า 0 และน้อยกว่า 100%" };
     rule.percent = Math.round(pct * 100) / 100;
+  }
+  if (kind === "item") {
+    // ส่วนลดเปล่า/0 = ไม่ตั้ง · % ต้องน้อยกว่า 100 · บาท/ราคาพิเศษ ต้องมากกว่า 0
+    const deal = (v: unknown): ItemDeal | null | false => {
+      const o = (v ?? {}) as Record<string, unknown>;
+      if (o.value == null || o.value === "") return null;
+      const k: ItemDealKind = o.kind === "fixed" || o.kind === "price" ? o.kind : "percent";
+      const n = Math.round(num(o.value) * 100) / 100;
+      if (!Number.isFinite(n) || n < 0) return false;
+      if (n === 0) return null;
+      if (k === "percent" && n >= 100) return false;
+      return { kind: k, value: n };
+    };
+    const def = deal(rr.item);
+    if (def === false) return { ok: false, error: "ส่วนลดตั้งต้นไม่ถูกต้อง (ลด % ต้อง 1–99 · ลดบาท/ราคาพิเศษ ต้องมากกว่า 0)" };
+    const items: Record<string, ItemDeal> = {};
+    const src = rr.items && typeof rr.items === "object" && !Array.isArray(rr.items) ? (rr.items as Record<string, unknown>) : {};
+    for (const [c, v] of Object.entries(src).slice(0, 300)) {
+      const code = up(c).slice(0, 60);
+      const d = deal(v);
+      if (d === false) return { ok: false, error: `ส่วนลดของรุ่น ${code} ไม่ถูกต้อง (ลด % ต้อง 1–99 · ลดบาท/ราคาพิเศษ ต้องมากกว่า 0)` };
+      if (code && d) items[code] = d;
+    }
+    if (!def && !Object.keys(items).length) return { ok: false, error: "ตั้งส่วนลดอย่างน้อย 1 รุ่น (หรือใส่ส่วนลดตั้งต้นให้ทุกรุ่น)" };
+    if (def) rule.item = def;
+    if (Object.keys(items).length) rule.items = items;
+    const round = num(rr.round);
+    if ((PRICE_ROUNDS as readonly number[]).includes(round) && round > 0) rule.round = round as PriceRound;
+    if (rr.countdown === true) {
+      if (!endsAt) return { ok: false, error: "นับถอยหลังต้องมีเวลาสิ้นสุด" };
+      rule.countdown = true;
+    }
   }
   if (kind === "qty_percent") {
     const m = Math.round(num(rr.minQty));
@@ -311,4 +506,14 @@ export function promotionFromRow(r: Record<string, unknown>): Promotion {
 /** ส่งให้เว็บร้าน: เฉพาะที่เปิด + ยังไม่หมดเวลา (รวมที่ยังไม่เริ่ม — เว็บซ่อนเองจนถึงเวลา) */
 export function publicPromotions(list: Promotion[], now: Date = new Date()): Promotion[] {
   return list.filter((p) => p.active && (!p.endsAt || new Date(p.endsAt).getTime() > now.getTime()));
+}
+
+/** 📦 ใส่นิยามกลุ่มที่โปรอ้างถึงลงในขอบเขต — เว็บร้าน/ตอนรับออเดอร์คิดเหมือนกันโดยไม่ต้องโหลดกลุ่มเอง (กลุ่มที่ถูกลบ = ไม่ตรงอะไร) */
+export function withGroupDefs(promos: Promotion[], groups: ProductGroup[]): Promotion[] {
+  return promos.map((p) => {
+    const ids = [...(p.rule.scope.groups ?? []), ...(p.rule.scope.excludeGroups ?? [])];
+    if (!ids.length) return p;
+    const groupDefs = groups.filter((g) => ids.includes(g.id)).map(({ id, name, mode, codes, match }) => ({ id, name, mode, codes, match }));
+    return { ...p, rule: { ...p.rule, scope: { ...p.rule.scope, groupDefs } } };
+  });
 }

@@ -1,6 +1,6 @@
 /**
  * 🏷 โปรโมชันอัตโนมัติของเว็บร้าน (ERP แท็บ 🏷 โปรโมชัน) : /api/website/promotions
- * GET    ?shop=<slug>          → { promotions, used: { [id]: { orders, discount } } }
+ * GET    ?shop=<slug>          → { promotions, used: { [id]: { orders, discount } }, canCost, costs: { รหัสรุ่น: ต้นทุน } (เฉพาะคนมีสิทธิ์ดูต้นทุน) }
  * POST   { shopId, ...promo }  → สร้าง
  * PATCH  { id, ...promo } | { id, active } → แก้ / เปิด-ปิด
  * DELETE ?id=                  → ลบ (ออเดอร์เก่าที่ใช้ไปแล้วยังเก็บชื่อ/ยอดไว้ในออเดอร์)
@@ -9,8 +9,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { apiCan } from "@/lib/api-auth";
 import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
+import { COST_PERM } from "@/lib/cost-access";
 import { promotionFromRow, sanitizePromotion, type Promotion } from "@/lib/website-promotions";
 import { shopBySlug } from "@/lib/website-shop";
 
@@ -51,7 +53,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       u.discount = Math.round((u.discount + (Number(p.amount) || 0)) * 100) / 100;
     }
   }
-  return NextResponse.json({ promotions: ((data ?? []) as Record<string, unknown>[]).map(promotionFromRow), used }, { headers: { "Cache-Control": "no-store" } });
+  // 🛡 กันขาดทุน: ต้นทุนต่อรุ่น (ส่งเฉพาะคนมีสิทธิ์ดูต้นทุน — ไม่มีสิทธิ์ = ไม่ส่งตัวเลขเลย)
+  const canCost = await apiCan(request, COST_PERM);
+  const costs = canCost ? await costByCode(sb, shopId) : {};
+  return NextResponse.json({ promotions: ((data ?? []) as Record<string, unknown>[]).map(promotionFromRow), used, canCost, costs }, { headers: { "Cache-Control": "no-store" } });
+}
+
+/** ต้นทุนต่อชิ้นของรุ่นที่เผยแพร่ (parent_skus_v2.product_cost / costs — ค่ามากกว่า 0 เท่านั้น · ยังไม่กรอก = ไม่อยู่ในรายการ) */
+async function costByCode(sb: ReturnType<typeof supabaseAdmin>, shopId: string): Promise<Record<string, number>> {
+  const { data: ls } = await sb.from("store_listings").select("parent_sku_id").eq("shop_id", shopId).eq("is_published", true).limit(5000);
+  const ids = [...new Set(((ls ?? []) as { parent_sku_id: string }[]).map((l) => l.parent_sku_id))];
+  const out: Record<string, number> = {};
+  for (let i = 0; i < ids.length; i += 300) {
+    const { data } = await sb.from("parent_skus_v2").select("code, product_cost, costs").in("id", ids.slice(i, i + 300));
+    for (const p of (data ?? []) as { code: string | null; product_cost: number | string | null; costs: number | string | null }[]) {
+      const c = Math.max(Number(p.product_cost) || 0, Number(p.costs) || 0);
+      if (p.code && c > 0) out[p.code.toUpperCase()] = Math.round(c * 100) / 100;
+    }
+  }
+  return out;
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {

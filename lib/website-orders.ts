@@ -457,7 +457,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const [{ data: listData }, { data: parents }, { data: children }, { data: swatchRows }, { data: dropRows }] = await Promise.all([
     sb
       .from("store_listings")
-      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize, web_stock_status, web_variant_off")
+      .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize, web_stock_status, web_variant_off, created_at")
       .eq("shop_id", shop.id)
       .in("parent_sku_id", parentIds),
     sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
@@ -471,8 +471,8 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
   const swatches = new SwatchIndex(((swatchRows ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry));
   const enOf = (s: string) => swatches.english(s) || s;
 
-  const listingByParent = new Map<string, ListingRow & { parent_sku_id: string; is_published: boolean; web_stock_status?: string | null }>();
-  for (const l of (listData ?? []) as (ListingRow & { parent_sku_id: string; is_published: boolean; web_stock_status?: string | null })[]) {
+  const listingByParent = new Map<string, ListingRow & { parent_sku_id: string; is_published: boolean; web_stock_status?: string | null; created_at?: string | null }>();
+  for (const l of (listData ?? []) as (ListingRow & { parent_sku_id: string; is_published: boolean; web_stock_status?: string | null; created_at?: string | null })[]) {
     listingByParent.set(l.parent_sku_id, l);
   }
   // ชื่อสินค้าในออเดอร์ต้องตรงกับที่ลูกค้าเห็นบนเว็บ (กฎลบแบรนด์/คอลเลกชัน)
@@ -591,11 +591,12 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       line_total: lineTotal,
       ...(ig.gift ? { gift: ig.gift } : {}),
     });
-    promoLines.push({ code: parent.code ?? "", categories: withParentCategories(fieldMap.categories, resolved.categories), unitPrice: price, qty: it.qty });
+    // listedAt = วันขึ้นเว็บ (กลุ่มอัตโนมัติ "มาใหม่ภายใน N วัน" — ค่าเดียวกับ listedAt ที่เว็บร้านได้จาก products API)
+    promoLines.push({ code: parent.code ?? "", categories: withParentCategories(fieldMap.categories, resolved.categories), unitPrice: price, qty: it.qty, listedAt: listing.created_at ?? null });
   }
 
   subtotal = Math.round(subtotal * 100) / 100;
-  // 🏷 ⚡ ลดต่อชิ้นก่อน แล้วโปรตะกร้าที่ลดได้มากสุด 1 ตัว (เข็มขัดสั่งทำไม่ร่วมโปร)
+  // 🏷 ลดต่อชิ้นก่อน (⚡ / ลดรายชิ้น — ถูกสุดตัวเดียว) แล้วโปรตะกร้าที่ลดได้มากสุด 1 ตัว (เข็มขัดสั่งทำไม่ร่วมโปร)
   const promo = evaluatePromotions(promos, promoLines);
   // 🎁 สิทธิ์ตามระดับสมาชิก (สมาชิก + ร้านเปิดแต้ม): ลด % จากยอดหลังโปร (ก่อนคูปอง) + ส่งฟรี — สูตรเดียวกับเว็บร้าน (CheckoutClient)
   //    บันทึกเป็นบรรทัดหนึ่งใน promos (id ขึ้นต้น member: · kind เป็นช่องบังคับ ใช้ "tier") → ใบออเดอร์/รายงานเห็นเหมือนโปรอื่น
