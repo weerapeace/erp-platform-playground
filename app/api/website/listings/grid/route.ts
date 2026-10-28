@@ -13,7 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { getFieldAccess, stripHidden } from "@/lib/field-permissions";
 import { maskSecretRows } from "@/lib/settings-secrets";
@@ -57,7 +57,7 @@ async function loadModuleRows(request: NextRequest, moduleKey: string, filterCol
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const url = new URL(request.url);
   const shopId = (url.searchParams.get("shopId") ?? "").trim();
@@ -83,7 +83,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

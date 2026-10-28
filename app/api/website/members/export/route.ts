@@ -6,7 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAuditFor } from "@/lib/audit";
 import { memberStats, readTiers } from "@/lib/member-points-db";
 import { tierFor } from "@/lib/member-points";
@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 const UUID = /^[0-9a-f-]{36}$/i;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { shop?: string; ids?: unknown; segment?: string } | null;
   const ids = Array.isArray(body?.ids) ? [...new Set((body!.ids as unknown[]).map(String).filter((x) => UUID.test(x)))].slice(0, 5000) : [];

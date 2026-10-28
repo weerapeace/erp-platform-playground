@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { loadParentWebFields, loadParentImageFields, PARENT_FIELD_GROUP_LABEL } from "@/lib/website-parent-fields";
 import { writeAudit, writeAuditFor } from "@/lib/audit";
@@ -46,7 +46,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
 
   const shopSlug = (new URL(request.url).searchParams.get("shop") ?? "").trim();
@@ -148,7 +148,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },
@@ -213,7 +213,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
 /** ละทิ้งร่าง */
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
 
   const shopId = (new URL(request.url).searchParams.get("shopId") ?? "").trim();

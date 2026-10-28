@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { cleanSavedThemeName, cleanSavedThemeScope, themeLookOf, type SavedTheme, type SavedThemeScope } from "@/lib/website-saved-themes";
 
@@ -31,7 +31,7 @@ async function actor(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const sb = supabaseAdmin();
   const { data, error } = await sb
@@ -54,7 +54,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: { shopId?: string; name?: string; scope?: string; theme?: unknown };
   try {
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: { id?: string; name?: string };
   try {
@@ -105,7 +105,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const id = request.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "ต้องระบุธีม" }, { status: 400 });

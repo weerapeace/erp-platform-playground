@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeBlocks, blockTypesFor } from "@/lib/website-blocks";
@@ -28,7 +28,7 @@ export const revalidate = 0;
 type DropRow = { id: string; shop_id: string; title: string; start_at: string; layout: unknown; draft_layout: unknown; updated_at: string };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const url = new URL(request.url);
   const shopSlug = (url.searchParams.get("shop") ?? "").trim();
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },
@@ -115,7 +115,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

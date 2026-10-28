@@ -8,7 +8,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAuditFor } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
@@ -108,7 +108,7 @@ async function usesOf(sb: Admin, shopId: string) {
 const toRow = (s: ImageSet) => ({ name: s.name, link: s.link, alt: s.alt, cur: s.cur, draft: s.draft, queue: s.queue, history: s.history });
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const sb = supabaseAdmin();
   const shop = await shopOf(sb, request.nextUrl.searchParams.get("shop") ?? "");
@@ -128,7 +128,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { shop?: string; name?: string } | null;
   const sb = supabaseAdmin();
@@ -146,7 +146,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   const sb = supabaseAdmin();
@@ -214,7 +214,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const sb = supabaseAdmin();
   const p = request.nextUrl.searchParams;

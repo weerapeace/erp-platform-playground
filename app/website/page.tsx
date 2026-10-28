@@ -3,18 +3,22 @@
 /**
  * /website — หน้ารวม "เว็บไซต์ทั้งหมด"
  * แต่ละเว็บมีหน้าจัดการของตัวเองที่ /website/<slug> (ไม่รวมกันในหน้าเดียวแล้ว)
- * ข้อมูล: /api/website/shops (guardApi products.view)
+ * ข้อมูล: /api/website/shops (guardWebsite · เห็นเฉพาะร้านที่มีสิทธิ์ website.shop.<slug>)
+ * 🔐 ปุ่ม "ใครทำอะไรได้" (admin.users) → /website/access
  * การ์ดร้าน = components/website-shop-card (หัวการ์ด = ภาพย่อเว็บจริงแบบสด + โลโก้)
  */
 import { useEffect, useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { apiFetch } from "@/lib/api";
 import { WebsiteShopCard, type WebsiteShopCardData } from "@/components/website-shop-card";
+import Link from "next/link";
+import { useAuth } from "@/components/auth";
 
 export default function WebsiteIndexPage() {
   const [shops, setShops] = useState<WebsiteShopCardData[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const { can } = useAuth();
 
   useEffect(() => {
     apiFetch("/api/website/shops")
@@ -31,7 +35,14 @@ export default function WebsiteIndexPage() {
     <PlaygroundShell>
       <div className="max-w-5xl mx-auto px-5 py-6">
         <div className="mb-6">
-          <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">🌐 เว็บไซต์</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">🌐 เว็บไซต์</h1>
+            {can("admin.users") && (
+              <Link href="/website/access" className="ml-auto rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-600">
+                🔐 ใครทำอะไรได้
+              </Link>
+            )}
+          </div>
           <p className="text-sm text-slate-500 mt-1">
             เลือกเว็บที่ต้องการจัดการ — แต่ละเว็บมีสินค้า การจับคู่ฟิลด์ และดีไซน์เป็นของตัวเอง
           </p>
@@ -47,7 +58,7 @@ export default function WebsiteIndexPage() {
           <div className="px-4 py-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {err}</div>
         ) : !shops.length ? (
           <div className="rounded-2xl border border-dashed border-slate-300 py-16 text-center text-slate-400 text-sm">
-            ยังไม่มีเว็บร้าน
+            ยังไม่มีเว็บร้านที่คุณเข้าได้ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ
           </div>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

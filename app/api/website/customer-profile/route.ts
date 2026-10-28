@@ -5,7 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { memberStats, readTiers } from "@/lib/member-points-db";
 import { tierFor } from "@/lib/member-points";
 import { phoneVariants, summarizeCustomer, type ProfileItemRow, type ProfileOrderRow } from "@/lib/website-customer-profile";
@@ -19,7 +19,7 @@ const UUID = /^[0-9a-f-]{36}$/i;
 type Member = { id: string; name: string; email: string | null; phone: string | null; avatar_url: string | null; status: string; marketing_opt_in: boolean; created_at: string; last_login_at: string | null };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const p = request.nextUrl.searchParams;
   const sb = supabaseAdmin();

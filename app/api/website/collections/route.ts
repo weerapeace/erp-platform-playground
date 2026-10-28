@@ -3,12 +3,12 @@
  *
  * GET ?shop=<slug>               → คอลเลกชันที่มีสินค้าอยู่บนเว็บร้านนี้ (ชื่อ/จำนวน/รูปตัวอย่าง) + ค่าที่ตั้งไว้
  * PUT { shopId, collections:[] } → บันทึกหน้าตาบนเว็บ (shops.field_map.collections) + audit + ล้างแคชเว็บร้าน
- * ของกลาง: lib/website-collections (normalize) · guardApi(products.view/edit) · writeAudit · purgeStorefrontCache
+ * ของกลาง: lib/website-collections (normalize) · guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) · writeAudit · purgeStorefrontCache
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { normalizeFieldMap } from "@/lib/website-field-map";
 import { normalizeWebCollections } from "@/lib/website-collections";
@@ -18,7 +18,7 @@ import { shopBySlug } from "@/lib/website-shop";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const slug = (new URL(request.url).searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

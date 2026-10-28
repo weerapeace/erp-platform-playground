@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import type { MemberProvider } from "@/lib/website-members";
 import { memberStats, readTiers } from "@/lib/member-points-db";
@@ -24,7 +24,7 @@ export const dynamic = "force-dynamic";
 type Row = { id: string; email: string | null; email_verified: boolean; name: string; phone: string | null; avatar_url: string | null; marketing_opt_in: boolean; status: string; created_at: string; last_login_at: string | null; is_test: boolean };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { id?: string; status?: string } | null;
   const id = String(body?.id ?? "");

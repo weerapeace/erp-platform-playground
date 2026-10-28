@@ -10,14 +10,14 @@
  * POST { shopId, action:"addCategory", newCategory:{ key, label, parent? } } → 🗂 เพิ่มหมวด (ต่อท้ายกลุ่มแม่ใน field_map.categories · ไม่ทับช่องอื่น)
  * POST { shopId, parentId, patch:{...} }            → แก้ข้อมูลเวอร์ชันเว็บ (store_listings)
  *
- * ของกลาง: guardApi(products.view/edit) + supabaseAdmin (store_* อยู่ DB เดียวกัน) + writeAudit
+ * ของกลาง: guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) + supabaseAdmin (store_* อยู่ DB เดียวกัน) + writeAudit
  * หมายเหตุ: ฟิลด์ web_unit/web_category/web_options/web_badge/web_stock_status/web_swatch
  * เพิ่มมาเพื่อร้านวัสดุ (IG International) — ร้านอื่นปล่อยว่างได้
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import {
   normalizeFieldMap,
@@ -66,7 +66,7 @@ const PARENT_COLS =
   "id, code, name_th, name_platform, description, platform_description, sale_price, final_price, cover_image_r2_key";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
 
   const url = new URL(request.url);
@@ -239,7 +239,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 type Patch = ListingPatch;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

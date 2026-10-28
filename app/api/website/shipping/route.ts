@@ -5,12 +5,12 @@
  *                             + ตัวช่วยหน้าจอ: ขนส่ง (PARCEL_CARRIERS) · กล่องมาตรฐานของคลัง (parcel_sizes) · พื้นที่ · รหัสห่างไกลแนะนำ
  * PUT { shopId, config }    → บันทึก (store_settings key shipping_methods) + audit + ล้างแคชเว็บร้าน
  *
- * ของกลาง: lib/website-shipping (กติกา · มิเรอร์ไปเว็บร้าน) · lib/website-shipping-db · guardApi(products.view/edit) · writeAudit
+ * ของกลาง: lib/website-shipping (กติกา · มิเรอร์ไปเว็บร้าน) · lib/website-shipping-db · guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) · writeAudit
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { readSiteInfo } from "@/lib/website-site-info";
@@ -23,7 +23,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const slug = (new URL(request.url).searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

@@ -7,12 +7,12 @@
  * PATCH  { ids:[uuid], status } → เปลี่ยนสถานะ (แจ้งแล้ว = บันทึกเวลา+คนแจ้ง) + audit
  * DELETE ?id=<uuid>             → ลบ 1 รายการ + audit
  *
- * ของกลาง: guardApi(products.view/edit) + writeAudit · ข้อมูลส่วนตัวลูกค้า (อีเมล/เบอร์) — อ่านได้เฉพาะคนมีสิทธิ์ดูสินค้า
+ * ของกลาง: guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) + writeAudit · ข้อมูลส่วนตัวลูกค้า (อีเมล/เบอร์) — อ่านได้เฉพาะคนมีสิทธิ์ดูสินค้า
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit, writeAuditMany } from "@/lib/audit";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
@@ -35,7 +35,7 @@ async function shopIdOf(sb: ReturnType<typeof supabaseAdmin>, p: URLSearchParams
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const p = new URL(request.url).searchParams;
   const sb = supabaseAdmin();
@@ -86,7 +86,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: { ids?: unknown; status?: unknown };
   try {
@@ -129,7 +129,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

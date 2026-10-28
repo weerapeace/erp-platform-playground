@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { decideReturn } from "@/lib/website-returns-server";
 import { RETURN_STATUSES, type ReturnStatus } from "@/lib/website-returns";
 import { shopBySlug } from "@/lib/website-shop";
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const p = request.nextUrl.searchParams;
   const sb = supabaseAdmin();
@@ -39,7 +39,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { id?: string; status?: string; note?: string } | null;
   const id = String(body?.id ?? "");

@@ -6,7 +6,9 @@
  *
  * แท็บ: สินค้าบนเว็บ (components/website-listings-panel) · หมวดหมู่ · จับคู่ฟิลด์ · ดีไซน์ · หน้าแรก · หน้าเว็บ · ข้อมูลร้าน · ออเดอร์
  * เว้นว่าง = ใช้ค่าจาก ERP / จากการจับคู่ฟิลด์
- * ข้อมูล: /api/website/listings (guardApi products.view/edit + audit)
+ * ข้อมูล: /api/website/listings (guardWebsite + audit)
+ * 🔐 สิทธิ์ (lib/website-access): แท็บโชว์ตามกลุ่มที่ "ดูได้" · กลุ่มที่ดูได้อย่างเดียว = แถบเตือน (API กันบันทึกเอง)
+ *    ไม่มีสิทธิ์ร้านนี้ = หน้าห้ามเข้า · สิทธิ์ยังโหลดไม่เสร็จ = ไม่บล็อก (เหมือนล็อกแอป)
  */
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
@@ -39,6 +41,9 @@ import { WheelSelect } from "@/components/wheel-select";
 import { useViewPref } from "@/lib/use-view-pref";
 import { ConfirmDialog } from "@/components/modal";
 import { UnsavedGuardProvider, useUnsavedGuardHost } from "@/components/save-bar";
+import { AccessDenied, useAuth, type Permission } from "@/components/auth";
+import { apiFetch } from "@/lib/api";
+import { WEBSITE_LEVEL_LABEL, websiteGroupDef, websiteGroupOfTab, websiteLevel, websiteShopPerm, WEBSITE_GROUPS } from "@/lib/website-access";
 
 /** ↔ ความกว้างหน้าจัดการเว็บ (จำรายคน · useViewPref) — กว้าง = ค่าเริ่มต้น จัดดีไซน์/พรีวิวสะดวกขึ้น */
 const PAGE_WIDTHS = ["normal", "wide", "full"] as const;
@@ -64,6 +69,16 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
     else setTab(k);
   };
   const [categories, setCategories] = useState<CategoryDef[]>([]);
+  // 🔐 สิทธิ์เว็บไซต์ — สิทธิ์ยังโหลดไม่เสร็จ = ถือว่าได้ (API ตรวจซ้ำเสมอ)
+  const { can, permsReady, user } = useAuth();
+  const know = permsReady || user?.role === "admin";
+  const has = (k: string) => !know || can(k as Permission);
+  const levelOfTab = (k: string) => {
+    const g = websiteGroupOfTab(k);
+    return g ? websiteLevel(has, g) : "edit";
+  };
+  const shopAllowed = has(websiteShopPerm(shopSlug));
+  const anyGroup = WEBSITE_GROUPS.some((g) => websiteLevel(has, g.key) !== "none");
   // ลิงก์จากที่อื่น (เช่น ป๊อปตรวจก่อนเผยแพร่ → "ไปแก้") เปิดแท็บที่ระบุ ?tab= · ⚠️ ไม่ใช้ useSearchParams (อยู่ใน PlaygroundShell)
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
@@ -76,6 +91,16 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
       setLoading((v) => v || !slug);
       try {
         const j = await loadWebListings<Listing, ShopInfo, CategoryDef>(slug ?? "", true);
+        if (!j.shop && (j as { error?: string }).error) {
+          // ไม่มีสิทธิ์กลุ่มสินค้าบนเว็บ → ข้อมูลร้านจากรายชื่อร้าน (เห็นเฉพาะร้านที่เข้าได้)
+          const s = await apiFetch("/api/website/shops").then((r) => r.json()).catch(() => null);
+          const found = ((s?.shops ?? []) as ShopInfo[]).find((x) => x.slug === slug) ?? null;
+          setShop(found);
+          setNotFound(!found);
+          setListings([]);
+          setCategories([]);
+          return;
+        }
         setShop(j.shop ?? null);
         // API ตอบ notFound เมื่อ slug ที่ขอไม่มีจริง (ไม่เด้งไปร้านอื่นแล้ว)
         setNotFound(Boolean(j.notFound) || !j.shop);
@@ -95,6 +120,29 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
     void load(shopSlug);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shopSlug]);
+
+  // แท็บที่เปิดอยู่ไม่มีสิทธิ์ดู (สิทธิ์โหลดเสร็จ / เปิดจากลิงก์ ?tab=) → ไปแท็บแรกที่ดูได้
+  const tabKeys = WEBSITE_GROUPS.flatMap((g) => g.tabs) as TabKey[];
+  const firstTab = tabKeys.find((k) => levelOfTab(k) !== "none") ?? null;
+  useEffect(() => {
+    if (levelOfTab(tab) === "none" && firstTab) setTab(firstTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, firstTab]);
+
+  if (know && (!anyGroup || !shopAllowed))
+    return (
+      <PlaygroundShell>
+        <div className="max-w-6xl mx-auto px-5 py-6">
+          <Link href="/website" className="text-xs text-slate-500 hover:text-blue-600 inline-flex items-center gap-1">
+            ← เว็บไซต์ทั้งหมด
+          </Link>
+          <AccessDenied message={anyGroup ? "คุณไม่มีสิทธิ์จัดการเว็บร้านนี้ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ" : "คุณยังไม่มีสิทธิ์ใช้งานเว็บไซต์ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ"} />
+        </div>
+      </PlaygroundShell>
+    );
+
+  const tabLevel = levelOfTab(tab);
+  const tabGroup = websiteGroupOfTab(tab);
 
   // ไม่มีเว็บร้านชื่อนี้ — บอกให้ชัด ดีกว่าพาไปร้านอื่นแบบเงียบ ๆ
   if (notFound && !loading)
@@ -137,13 +185,18 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
               )}
             </h1>
             {/* ปุ่มเปิด/ปิดเว็บชั่วคราว — ค่าเดียวกับช่องในแท็บข้อมูลร้าน */}
-            {shop && <WebsiteOpenToggle shopSlug={shop.slug} shopId={shop.id} />}
+            {shop && websiteLevel(has, "settings") !== "none" && <WebsiteOpenToggle shopSlug={shop.slug} shopId={shop.id} />}
             {shop?.siteUrl && (
               <a href={shop.siteUrl} target="_blank" rel="noreferrer" className="text-xs text-blue-600 hover:underline">
                 {shop.siteUrl.replace(/^https?:\/\//, "")} ↗
               </a>
             )}
-            <label className="ml-auto flex items-center gap-1.5 text-[11px] text-slate-500" title="ความกว้างของหน้านี้ (จำไว้ให้ครั้งหน้า)">
+            {can("admin.users") && (
+              <Link href="/website/access" className="ml-auto text-xs text-slate-500 hover:text-blue-600" title="ตั้งว่าใครเห็น/แก้ส่วนไหนของเว็บ และเข้าร้านไหนได้">
+                🔐 ใครทำอะไรได้
+              </Link>
+            )}
+            <label className={`${can("admin.users") ? "" : "ml-auto "}flex items-center gap-1.5 text-[11px] text-slate-500`} title="ความกว้างของหน้านี้ (จำไว้ให้ครั้งหน้า)">
               ↔ ความกว้างหน้า
               <WheelSelect
                 value={pageWidth}
@@ -188,7 +241,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
               { k: "members", l: "👥 สมาชิก" },
               { k: "reviews", l: "⭐ รีวิว" },
               { k: "stats", l: "📈 สถิติ" },
-            ] as const).map((t) => (
+            ] as const).filter((t) => levelOfTab(t.k) !== "none").map((t) => (
               <button
                 key={t.k}
                 onClick={() => goTab(t.k)}
@@ -199,8 +252,16 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
                 }`}
               >
                 {t.l}
+                {know && levelOfTab(t.k) === "view" && <span className="ml-1 text-[10px] text-slate-400" title="ดูได้อย่างเดียว">👁</span>}
               </button>
             ))}
+          </div>
+        )}
+
+        {/* 👁 กลุ่มนี้ดูได้อย่างเดียว — ปุ่มบันทึกยังกดได้ แต่ระบบไม่ให้บันทึก (API ตรวจสิทธิ์) */}
+        {shop && know && tabLevel === "view" && tabGroup && (
+          <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-website-view-only>
+            👁 ส่วน “{websiteGroupDef(tabGroup).label}” คุณ{WEBSITE_LEVEL_LABEL.view}อย่างเดียว — แก้แล้วบันทึกไม่ได้ · ขอสิทธิ์แก้ได้ที่ผู้ดูแลระบบ
           </div>
         )}
 

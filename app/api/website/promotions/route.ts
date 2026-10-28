@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { promotionFromRow, sanitizePromotion, type Promotion } from "@/lib/website-promotions";
 import { shopBySlug } from "@/lib/website-shop";
@@ -30,7 +30,7 @@ async function actor(request: NextRequest) {
 const toRow = (p: Omit<Promotion, "id">) => ({ name: p.name, kind: p.kind, active: p.active, starts_at: p.startsAt, ends_at: p.endsAt, rule: p.rule });
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: Record<string, unknown>;
   try {
@@ -81,7 +81,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: Record<string, unknown>;
   try {
@@ -110,7 +110,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const id = (request.nextUrl.searchParams.get("id") ?? "").trim();
   if (!id) return NextResponse.json({ error: "ต้องระบุโปรโมชัน" }, { status: 400 });

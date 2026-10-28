@@ -13,13 +13,13 @@
  *
  * ไม่มีลบ: ออเดอร์เป็นเอกสารที่ลูกค้าถืออยู่ (มีเลขที่) จึงให้ "ยกเลิก" (status=cancelled) แทน
  * ⭐ เปลี่ยนสถานะออเดอร์ของสมาชิก = ปรับแต้มให้อัตโนมัติ (สำเร็จ = ได้แต้ม · ถอย/ยกเลิก = เรียกคืน · ยกเลิก = คืนแต้มที่ใช้) — lib/member-points-db
- * ของกลาง: lib/website-orders.ts · guardApi(products.view/edit) · writeAudit
+ * ของกลาง: lib/website-orders.ts · guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) · writeAudit
  */
 import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { maybeRunWebshopReminders } from "@/lib/webshop-reminders-db";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { ORDER_STATUSES, PAYMENT_STATUSES, PAYMENT_METHOD_LABEL, toOrderView, orderStatusLabel, paymentStatusLabel } from "@/lib/website-orders";
 import { moveError } from "@/lib/website-order-status";
@@ -44,7 +44,7 @@ const STATUS_KEYS = new Set(ORDER_STATUSES.map((s) => s.key));
 const PAY_KEYS = new Set(PAYMENT_STATUSES.map((s) => s.key));
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
 
   const url = new URL(request.url);
@@ -149,7 +149,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

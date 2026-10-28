@@ -2,11 +2,12 @@
  * รายชื่อเว็บร้านทั้งหมด (สำหรับหน้ารวม /website) — /api/website/shops
  * GET → ร้าน + จำนวนสินค้าบนเว็บ + จำนวนที่เผยแพร่ + โดเมนเว็บจริง (ถ้าตั้งไว้)
  *        + หน้าตาการ์ด: โลโก้ (ธีม) + สีหลัก + ลิงก์พรีวิวเว็บ (siteUrl + previewKey — ร้านปิดเว็บก็เห็นหน้าแรก)
- * ของกลาง: guardApi(products.view) + supabaseAdmin · normalizeTheme · issuePreviewKey
+ *        เฉพาะร้านที่ผู้ใช้เข้าได้ (website.shop.<slug>)
+ * ของกลาง: guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) + supabaseAdmin · normalizeTheme · issuePreviewKey
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite, websiteCanShop } from "@/lib/website-api-guard";
 import { normalizeTheme } from "@/lib/website-theme";
 import { issuePreviewKey } from "@/lib/storefront-preview-key";
 
@@ -14,7 +15,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
 
   const sb = supabaseAdmin();
@@ -25,7 +26,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     sb.from("shop_domains").select("shop_id, domain"),
   ]);
 
-  const shops = (shopsData ?? []) as { id: string; name: string; slug: string; is_default: boolean; status: string; theme: unknown }[];
+  const allShops = (shopsData ?? []) as { id: string; name: string; slug: string; is_default: boolean; status: string; theme: unknown }[];
+  const allowed = await Promise.all(allShops.map((s) => websiteCanShop(request, s.slug)));
+  const shops = allShops.filter((_, i) => allowed[i]);
 
   const total = new Map<string, number>();
   const published = new Map<string, number>();

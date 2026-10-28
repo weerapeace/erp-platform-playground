@@ -4,12 +4,12 @@
  * GET  ?shop=<slug>  → การจับคู่ปัจจุบัน + รายชื่อหมวดใน ERP (ไว้จับคู่เป็นหมวดเว็บ)
  * PUT  { shopId, fieldMap } → บันทึก (เก็บที่ shops.field_map)
  *
- * ของกลาง: guardApi(products.view/edit) + supabaseAdmin + writeAudit + lib/website-field-map
+ * ของกลาง: guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) + supabaseAdmin + writeAudit + lib/website-field-map
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { normalizeFieldMap, DEFAULT_FIELD_MAP } from "@/lib/website-field-map";
 import { cleanTagRules } from "@/lib/website-tag-categories";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
 
   const shopSlug = (new URL(request.url).searchParams.get("shop") ?? "").trim();
@@ -79,7 +79,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

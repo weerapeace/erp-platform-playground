@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { shopBySlug } from "@/lib/website-shop";
 import { adjustPoints } from "@/lib/member-points-db";
@@ -25,7 +25,7 @@ const MAX_TEST_MEMBERS = 20;
 const TICKET_MIN = 10;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = ((await request.json().catch(() => null)) ?? {}) as Record<string, unknown>;
   const action = String(body.action ?? "");

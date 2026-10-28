@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { couponFromRow, couponToRow, sanitizeCouponInput } from "@/lib/website-coupons";
 import { couponUseCounts } from "@/lib/website-coupons-db";
@@ -33,7 +33,7 @@ async function actor(request: NextRequest) {
 const dupError = (e: { code?: string } | null) => (e?.code === "23505" ? "โค้ดนี้มีอยู่แล้วในร้านนี้ — ตั้งโค้ดอื่น" : null);
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
   const sb = supabaseAdmin();
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: Record<string, unknown>;
   try {
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: Record<string, unknown>;
   try {
@@ -106,7 +106,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const id = request.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "ต้องระบุคูปอง" }, { status: 400 });

@@ -7,7 +7,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAuditFor } from "@/lib/audit";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { formatThaiAddress, formatTaxId } from "@/lib/thai-address";
@@ -42,7 +42,7 @@ function prefixOf(code: string | null, now = new Date()): string {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { orderId?: string } | null;
   const id = String(body?.orderId ?? "");
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const id = request.nextUrl.searchParams.get("id") ?? "";
   if (!UUID.test(id)) return NextResponse.json({ error: "ต้องระบุออเดอร์" }, { status: 400 });

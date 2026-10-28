@@ -5,7 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { readSearchTerms } from "@/lib/website-search-terms";
 import { bkkDayFrom, cleanAb, summarizeWebStats, type StatOrder, type StatRow } from "@/lib/website-web-stats";
 
@@ -16,7 +16,7 @@ const PAGE = 1000;
 const MAX_ROWS = 50000;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const p = request.nextUrl.searchParams;
   const shopId = (p.get("shopId") ?? "").trim();

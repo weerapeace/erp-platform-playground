@@ -3,12 +3,12 @@
  *
  * GET ?shop=<slug> | ?shopId=<id>  → { shopId, badges } (ยังไม่เคยตั้ง = ชุดตั้งต้น ขายดี/ใหม่/ลดราคา/Limited)
  * PUT { shopId, badges }           → ทำความสะอาด + บันทึก (store_settings "card_badges") + เปลี่ยนชื่อป้ายในสินค้าที่ใช้อยู่ตาม + audit + ล้างแคชเว็บ
- * ของกลาง: lib/website-card-badges(.ts | -db.ts) · guardApi(products.view/edit) · writeAudit · purgeStorefrontCache
+ * ของกลาง: lib/website-card-badges(.ts | -db.ts) · guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) · writeAudit · purgeStorefrontCache
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeCardBadges } from "@/lib/website-card-badges";
@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const sp = new URL(request.url).searchParams;
   const sb = supabaseAdmin();
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

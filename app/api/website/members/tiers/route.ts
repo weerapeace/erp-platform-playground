@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { sanitizeTiers, SUGGESTED_TIERS } from "@/lib/member-points";
 import { readTiers } from "@/lib/member-points-db";
@@ -17,7 +17,7 @@ import { shopBySlug } from "@/lib/website-shop";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const sb = supabaseAdmin();
   const shop = await shopBySlug<{ id: string; slug: string }>(sb, request.nextUrl.searchParams.get("shop"), "id, slug");
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { shop?: string; tiers?: unknown } | null;
   const sb = supabaseAdmin();

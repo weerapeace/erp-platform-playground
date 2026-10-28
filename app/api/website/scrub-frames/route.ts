@@ -7,7 +7,7 @@
  * ไม่ลงคลังไฟล์ (เป็นของที่สร้างจากคลิป — สร้างใหม่ได้เสมอ)
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { r2PutObject } from "@/lib/r2";
 import { writeAuditFor } from "@/lib/audit";
@@ -19,7 +19,7 @@ const TYPES: Record<string, string> = { webp: "image/webp", jpg: "image/jpeg" };
 const MAX_FRAME = 600 * 1024;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
 
   let form: FormData;

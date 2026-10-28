@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { normalizeFrameDef, type SavedFrame } from "@/lib/website-frames";
 import { shopBySlug } from "@/lib/website-shop";
@@ -38,7 +38,7 @@ async function actor(request: NextRequest) {
 const toFrame = (r: Row): SavedFrame => ({ id: r.id, shopId: r.shop_id, name: r.name, def: normalizeFrameDef(r.def), updatedAt: r.updated_at });
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const sb = supabaseAdmin();
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
@@ -55,7 +55,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: { shopId?: string | null; name?: string; def?: unknown };
   try {
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: { id?: string; name?: string; def?: unknown; shopId?: string | null };
   try {
@@ -113,7 +113,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const id = request.nextUrl.searchParams.get("id");
   if (!isUuid(id)) return NextResponse.json({ error: "ต้องระบุกรอบ" }, { status: 400 });

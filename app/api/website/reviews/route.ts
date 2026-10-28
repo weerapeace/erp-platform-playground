@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { moderateReview, type ModerateAction, type ReviewRow } from "@/lib/website-reviews-server";
 import type { ReviewStatus } from "@/lib/website-reviews";
@@ -19,7 +19,7 @@ export const revalidate = 0;
 const STATUSES: ReviewStatus[] = ["pending", "approved", "hidden"];
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const slug = (request.nextUrl.searchParams.get("shop") ?? "").trim();
   const status = request.nextUrl.searchParams.get("status") ?? "pending";
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: Record<string, unknown>;
   try {

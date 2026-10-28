@@ -25,7 +25,7 @@ type Role = { key: string; label: string; active?: boolean };
 type AppSettingsPage = { href: string; label: string; icon?: string; perm?: Permission };
 const REPORTS_PAGE: AppSettingsPage = { href: "/admin/email-reports", label: "รายงานและแจ้งเตือนอัตโนมัติ", icon: "🔔", perm: "admin.email_reports" };
 export const APP_SETTINGS_PAGES: Record<string, AppSettingsPage[]> = {
-  tasks: [{ href: "/tasks/settings", label: "ตั้งค่างาน" }, REPORTS_PAGE],
+  tasks: [{ href: "/tasks/settings", label: "ตั้งค่างาน" }, { href: "/website/access", label: "สิทธิ์เว็บไซต์", icon: "🔐", perm: "admin.users" }, REPORTS_PAGE],
   design: [REPORTS_PAGE],
   payroll: [{ href: "/payroll/settings", label: "ตั้งค่าเงินเดือน" }],
 };

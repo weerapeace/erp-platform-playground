@@ -69,7 +69,9 @@ export type Permission =
   | "app.misc" | "offers.view" | "offers.edit" | "report.create" | "report.manage" | "task_template.view"
   | "task_template.create" | "task_template.edit" | "task_template.delete" | "task_subtask.approve" | "task_subtask.revise" | "task_subtask.cancel"
   | "product_media.sync" | "sku_description.sync"
-  | "admin.users" | "admin.audit_log";
+  | "admin.users" | "admin.audit_log"
+  // 🔐 สิทธิ์เว็บไซต์ (lib/website-access): website.access / website.<กลุ่ม>.view|edit / website.shop.<slug>
+  | `website.${string}`;
 
 export type Role = "admin" | "manager" | "staff" | "viewer";
 

@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { shopBySlug } from "@/lib/website-shop";
 import { SECRET_MASK } from "@/lib/settings-secrets";
@@ -32,7 +32,7 @@ async function shopDomains(sb: ReturnType<typeof supabaseAdmin>, shopId: string)
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const sb = supabaseAdmin();
   const shop = await shopBySlug(sb, request.nextUrl.searchParams.get("shop"));
@@ -50,7 +50,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = ((await request.json().catch(() => null)) ?? {}) as { shop?: unknown; providers?: Record<string, { clientId?: unknown; clientSecret?: unknown; enabled?: unknown }> };
   const sb = supabaseAdmin();

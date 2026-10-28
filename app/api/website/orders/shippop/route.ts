@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAuditFor } from "@/lib/audit";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { SHIPPOP_COURIERS, SHIPPOP_STATUS_LABEL, carrierOf, shippopBookAndConfirm, shippopCancel, shippopLabelHtml, shippopMode, shippopQuote, type ShippopInfo } from "@/lib/shippop";
@@ -33,7 +34,7 @@ async function qtyOf(sb: Admin, ids: string[]): Promise<Map<string, number>> {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const ids = (request.nextUrl.searchParams.get("ids") ?? "").split(",").filter((x) => UUID.test(x)).slice(0, 100);
   if (!ids.length) return NextResponse.json({ error: "ต้องระบุออเดอร์" }, { status: 400 });

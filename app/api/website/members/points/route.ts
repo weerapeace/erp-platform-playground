@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { adjustPoints, pointsBalance, pointsHistory } from "@/lib/member-points-db";
 
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 const MAX_ADJUST = 1_000_000;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const id = (request.nextUrl.searchParams.get("id") ?? "").trim();
   if (!id) return NextResponse.json({ error: "ต้องระบุสมาชิก" }, { status: 400 });
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { id?: string; delta?: unknown; note?: unknown } | null;
   const id = String(body?.id ?? "");

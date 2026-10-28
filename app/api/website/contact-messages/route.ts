@@ -5,12 +5,12 @@
  * PATCH  { id, status?, staffNote? }              → ติ๊กตอบแล้ว / สแปม / กลับเป็นใหม่ · โน้ตภายใน + audit
  * DELETE ?id=<uuid>                               → ลบถาวร (ลูกค้าขอลบข้อมูล) + audit
  *
- * ของกลาง: guardApi(products.view/edit) + writeAudit · ข้อความเข้ามาทาง /api/public/storefront/contact
+ * ของกลาง: guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) + writeAudit · ข้อความเข้ามาทาง /api/public/storefront/contact
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { CONTACT_STATUSES, type ContactStatus } from "@/lib/website-contact";
 import { shopBySlug } from "@/lib/website-shop";
@@ -21,7 +21,7 @@ export const revalidate = 0;
 const STATUS_KEYS = new Set<string>(CONTACT_STATUSES.map((s) => s.key));
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
 
   const url = new URL(request.url);
@@ -49,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },
@@ -93,7 +93,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const {
     data: { user },

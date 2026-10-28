@@ -12,7 +12,7 @@
  * บันทึก: หน้าจอส่งกลับทาง API เดิมของแต่ละแท็บ (สิทธิ์ + audit + ล้างแคชเว็บตามเดิม) — เส้นนี้อ่านอย่างเดียว
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeBlocks, defaultLayout } from "@/lib/website-blocks";
 import { normalizeTheme } from "@/lib/website-theme";
@@ -34,7 +34,7 @@ function descFields(map: FieldMap, p: Record<string, unknown>): { thField: strin
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
 
   const slug = (new URL(request.url).searchParams.get("shop") ?? "").trim();

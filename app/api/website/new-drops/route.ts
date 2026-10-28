@@ -6,12 +6,12 @@
  * PATCH  { shopId, id, drop }                → แก้ชุด + audit (เก็บค่าก่อนแก้)
  * DELETE ?id=<uuid>                          → ลบชุด + audit (สินค้าไม่ถูกลบ — แค่เลิกเป็นชุด)
  *
- * ของกลาง: guardApi(products.view/edit) + writeAudit · ตรวจค่า lib/website-new-drops (normalizeDropInput)
+ * ของกลาง: guardWebsite (สิทธิ์เว็บไซต์ · lib/website-access) + writeAudit · ตรวจค่า lib/website-new-drops (normalizeDropInput)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { dropFromRow, dropToRow, normalizeDropInput } from "@/lib/website-new-drops";
 import { normalizeListingInserts } from "@/lib/website-listing";
@@ -43,7 +43,7 @@ async function actor(request: NextRequest) {
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view");
+  const denied = await guardWebsite(request, "view");
   if (denied) return denied;
   const sb = supabaseAdmin();
   const shopId = await shopIdOf(sb, new URL(request.url).searchParams);
@@ -64,7 +64,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: { shopId?: unknown; drop?: unknown };
   try {
@@ -90,7 +90,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   let body: { shopId?: unknown; id?: unknown; drop?: unknown };
   try {
@@ -126,7 +126,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit");
+  const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
   const id = (new URL(request.url).searchParams.get("id") ?? "").trim();
   if (!UUID.test(id)) return NextResponse.json({ error: "ต้องระบุชุด" }, { status: 400 });
