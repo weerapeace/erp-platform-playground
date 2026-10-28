@@ -7,7 +7,13 @@
 ทุกค่าตั้งได้ "ทุกจอ" และ "เฉพาะมือถือ" (< 768px) · ไม่ตั้ง = ค่ากลางของร้าน (หน้าตาเดิม)
 
 ใช้แล้วที่: **👤 หน้าบัญชีของฉัน** (ขั้น 1) · **หน้าเข้าสู่ระบบ + ป๊อปสมัคร + ปุ่มสมัครบนหัวเว็บ** (ขั้น 2 · `LOGIN_PARTS` 13 ชิ้น · CSS ฉีดที่ MemberAuthHost) — ERP › เว็บไซต์ › ดีไซน์ › 📄 หน้าพิเศษ
-ต่อไป: หน้าขอบคุณ · 404 · ป๊อปอัป · คุกกี้ · ค้นหาไม่เจอ
+· **404 · หน้าขอบคุณ · ป๊อปอัปแจกโค้ด · แถบคุกกี้** (ขั้น 3 · `NF_PARTS` `THANKS_PARTS` `POPUP_PARTS` `COOKIE_PARTS` · CSS ฉีดที่ `PagePartStyles` ใน layout ครั้งเดียว)
+ต่อไป: ค้นหาไม่เจอ · ตะกร้า/ชำระเงิน · หัว/ท้ายเว็บ
+
+**หน้าบัญชี — จัดวาง + ลูกเล่น** (การ์ด 🧑 หน้าบัญชีของฉัน): ⚡ แบบสำเร็จรูป (🪟 หน้าต่างแอป · 💳 บัตรสมาชิก · ↺ แบบเดิม — กดแล้วปรับต่อได้ทุกช่อง)
+· เมนู 5 แบบ (+ หน้าต่างแอป: กรอบมนใหญ่ เมนูในกรอบ หัวข้อหน้า + รูปโปรไฟล์มุมขวาบน) · เมนูซ้าย/ขวา · ⑤ ลำดับส่วนในหน้า · กล่องข้างขวา (คู่มือ/โปร) · โปรไฟล์แบบแถวข้อมูลกดแก้
+· ✨ พื้นวงกลมเบลอ/ไล่สีจาง · กระจกฝ้า · ทักทายตามเวลา · เลขแต้มวิ่ง · เปลี่ยนแท็บนุ่ม · บัตรสมาชิกเอียงตามเมาส์ (เครื่องที่ตั้ง "ลดการเคลื่อนไหว" = ไม่ขยับ)
+· แถบคุกกี้ไม่ขึ้นในพรีวิวปกติ — เปิดตัวปรับละเอียดของคุกกี้แล้วพรีวิวไป `/?pv=cookie` (ตัวอย่าง ไม่โหลดสคริปต์ ไม่บันทึกค่า)
 
 ป๊อปสมัคร: ตั้งหัวป๊อป/ข้อความปุ่มสมัคร (ไทย+อังกฤษ) · ข้อดีสมาชิก · ลิงก์ไม่สมัคร · สีปุ่ม (สีเจ้า/สีร้าน/ขอบเส้น) · พรีวิว `/account/login?auth=signup` (ร้านที่ยังไม่ตั้งช่องทาง = ปุ่มตัวอย่าง เฉพาะพรีวิว) · ลิงก์ `?auth=signup` หน้าไหนก็ได้ = เปิดป๊อปทันที (ใช้ในโพสต์/อีเมลชวนสมัครได้)
 
@@ -22,7 +28,8 @@
 |---|---|
 | ชนิดค่า + ตัวตรวจ `PartStyles` / `normalizePartStyles` + หน้าบัญชี `AccountLook` / `normalizeAccount` | ERP `lib/website-site-design.ts` ↔ เว็บร้าน `src/lib/site-design.ts` (**มิเรอร์ทั้งไฟล์** — `check:mirrors`) |
 | ทะเบียนชิ้นส่วนของแต่ละหน้า + กลุ่มตัวปรับ + ช่วงแถบเลื่อน | ERP `lib/website-page-parts.ts` (`ACCOUNT_PARTS`) |
-| แผงปรับ (ของกลาง) | ERP `components/website-part-style-editor.tsx` `<PartStyleEditor parts value onChange colors />` |
+| แผงปรับ (ของกลาง) | ERP `components/website-part-style-editor.tsx` `<PartStyleEditor parts value onChange colors />` · ปุ่มพับท้ายการ์ด `<PartStyleFold parts value onChange colors onOpen hint />` (เปิดครั้งแรก = พาพรีวิวไปหน้านั้น) |
+| ตัวฉีด CSS หน้าพิเศษ | เว็บร้าน `src/components/layout/PagePartStyles.tsx` (รวม parts ของ login/notFound/thanks/popup/cookie · scope `html`) — หน้าบัญชีฉีดเองใน `[data-acc]` |
 | คุยกับพรีวิว (iframe แท็บดีไซน์) | ERP `lib/storefront-preview-bus.ts` (`setPreviewFrame` · `sendToPreview` · `usePreviewMessages` — ฟังเฉพาะข้อความจาก iframe จริง) |
 | ตัววาด CSS | เว็บร้าน `src/lib/part-style-css.ts` `partStylesCss(scope, parts)` · ฟอนต์ Google `partStyleFonts` + `partFontsHref` |
 | คลิกเลือกชิ้นในพรีวิว | เว็บร้าน `src/components/layout/PartPickBridge.tsx` (ใน layout เฉพาะพรีวิว) — ข้อความ `storefront-part-pick` / `storefront-part-picked` |
@@ -34,8 +41,8 @@
 ## เพิ่มหน้าใหม่ให้ปรับละเอียดได้
 1. ERP `lib/website-page-parts.ts`: ประกาศ `XXX_PARTS` (คีย์ · ชื่อไทย · กลุ่ม)
 2. เก็บค่า `parts: PartStyles` ในค่าของหน้านั้น (normalize ด้วย `normalizePartStyles`) — แก้ไฟล์มิเรอร์ทั้ง 2 repo
-3. เว็บร้าน: ติด `data-part="<คีย์>"` ที่ชิ้นนั้น + ครอบด้วย scope (เช่น `data-xxx`) + `<style>{partStylesCss('[data-xxx]', parts)}</style>`
-4. ERP: วาง `<PartStyleEditor parts={XXX_PARTS} … />` ในการ์ดตั้งค่าของหน้านั้น — แผง + คลิกเลือกในพรีวิวได้เอง
+3. เว็บร้าน: ติด `data-part="<คีย์>"` ที่ชิ้นนั้น + เพิ่ม `pg.xxx.parts` ในรายการของ `PagePartStyles` (หน้าที่มี CSS เสริมของตัวเอง เช่นหน้าบัญชี ฉีดเองใน scope ได้)
+4. ERP: วาง `<PartStyleFold parts={XXX_PARTS} … onOpen={() => onPreview("/หน้านั้น")} />` ท้ายการ์ดตั้งค่าของหน้านั้น — แผง + คลิกเลือกในพรีวิวได้เอง
 
 ## ห้าม / ข้อจำกัด
 - ห้ามทำแผงปรับสี/ฟอนต์แยกเองในหน้าใหม่ — ใช้ตัวนี้
