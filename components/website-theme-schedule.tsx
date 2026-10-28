@@ -31,9 +31,9 @@ import {
   type ThemeSchedule,
 } from "@/lib/website-theme-schedule";
 import { webForm } from "@/lib/website-form-styles";
+import { DesignCard } from "@/components/website-design/design-card";
 
 const API = "/api/website/theme/schedules";
-const cardCls = webForm.cardRoomy;
 const inputCls = webForm.inputBasic;
 const labelCls = webForm.labelRoomy;
 
@@ -341,12 +341,7 @@ export function CampaignTab({
   return (
     <div className="space-y-4">
       {/* ── ⏰ ตั้งเวลาเผยแพร่ ── */}
-      <div className={cardCls}>
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <h3 className="text-sm font-semibold text-slate-800">⏰ ตั้งเวลาเผยแพร่</h3>
-          <button type="button" onClick={onSchedule} className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">ตั้งเวลาเผยแพร่ร่างนี้</button>
-        </div>
-        <p className="text-xs text-slate-500 mb-3">แต่งร่างไว้ล่วงหน้า แล้วให้ระบบเผยแพร่เองตามเวลา (มีปุ่มเดียวกันที่แถบล่าง ข้างปุ่มเผยแพร่)</p>
+      <DesignCard title="⏰ ตั้งเวลาเผยแพร่" hint="แต่งร่างไว้ล่วงหน้า แล้วให้ระบบเผยแพร่เองตามเวลา (มีปุ่มเดียวกันที่แถบล่าง ข้างปุ่มเผยแพร่)" right={<><button type="button" onClick={onSchedule} className="text-xs px-3 py-1.5 rounded-lg border border-blue-300 text-blue-700 hover:bg-blue-50">ตั้งเวลาเผยแพร่ร่างนี้</button></>}>
         {schedules === null ? (
           <p className="text-xs text-slate-400">กำลังโหลด…</p>
         ) : (
@@ -365,15 +360,10 @@ export function CampaignTab({
             )}
           </>
         )}
-      </div>
+      </DesignCard>
 
       {/* ── 🎪 แคมเปญ ── */}
-      <div className={cardCls}>
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <h3 className="text-sm font-semibold text-slate-800">🎪 ธีมแคมเปญตามช่วงวันที่</h3>
-          <button type="button" onClick={() => setEditing(emptyDraft())} className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">+ แคมเปญใหม่</button>
-        </div>
-        <p className="text-xs text-slate-500 mb-3">ช่วงแคมเปญ เว็บใช้หน้าตา/ของตกแต่งที่เลือก พอหมดช่วงกลับธีมปกติเอง · <b>บันทึกแล้วมีผลทันที</b> ไม่ต้องกดเผยแพร่ · ระหว่างแคมเปญแก้ธีมปกติได้ตามเดิม</p>
+      <DesignCard title="🎪 ธีมแคมเปญตามช่วงวันที่" hint={<>ช่วงแคมเปญ เว็บใช้หน้าตา/ของตกแต่งที่เลือก พอหมดช่วงกลับธีมปกติเอง · <b>บันทึกแล้วมีผลทันที</b>ไม่ต้องกดเผยแพร่ · ระหว่างแคมเปญแก้ธีมปกติได้ตามเดิม</>} right={<><button type="button" onClick={() => setEditing(emptyDraft())} className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700">+ แคมเปญใหม่</button></>}>
         {campaigns.length === 0 ? (
           <p className="text-xs text-slate-400">ยังไม่มีแคมเปญ</p>
         ) : (
@@ -404,21 +394,17 @@ export function CampaignTab({
             })}
           </ul>
         )}
-      </div>
+      </DesignCard>
 
       {/* ── 🎄 ของตกแต่ง (ธีมปกติ) ── */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">🎄 ของตกแต่งเทศกาล (ธีมปกติ)</h3>
-        <p className="text-xs text-slate-500 mb-3">ติดไว้ตลอดจนกว่าจะเอาออก · อยากให้มีแค่ช่วงเทศกาล = ตั้งในแคมเปญแทน · อยู่ในร่างธีม (กดบันทึกร่าง/เผยแพร่)</p>
+      <DesignCard title="🎄 ของตกแต่งเทศกาล (ธีมปกติ)" hint="ติดไว้ตลอดจนกว่าจะเอาออก · อยากให้มีแค่ช่วงเทศกาล = ตั้งในแคมเปญแทน · อยู่ในร่างธีม (กดบันทึกร่าง/เผยแพร่)">
         <FestiveSetting value={theme.page.festive} onChange={(festive) => onPage({ festive })} />
-      </div>
+      </DesignCard>
 
       {/* ── 👀🔥 ป้ายคนดู / ขายแล้ว ── */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">👀 ป้ายคนดู / 🔥 ขายแล้ว</h3>
-        <p className="text-xs text-slate-500 mb-3">โชว์ใต้ราคาในหน้าสินค้า · อยู่ในร่างธีม (กดบันทึกร่าง/เผยแพร่)</p>
+      <DesignCard title="👀 ป้ายคนดู / 🔥 ขายแล้ว" hint="โชว์ใต้ราคาในหน้าสินค้า · อยู่ในร่างธีม (กดบันทึกร่าง/เผยแพร่)">
         <ProofSetting value={theme.page.proof} onChange={(proof) => onPage({ proof })} />
-      </div>
+      </DesignCard>
 
       {editing && <CampaignModal open onClose={() => setEditing(null)} shopId={shopId} initial={editing} list={list} savedThemes={saved} onSaved={reload} />}
     </div>

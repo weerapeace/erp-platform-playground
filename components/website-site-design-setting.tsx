@@ -49,10 +49,10 @@ import { LoginExtraSetting } from "@/components/website-login-design";
 import { PartStyleFold } from "@/components/website-part-style-editor";
 import { COOKIE_PARTS, NF_PARTS, POPUP_PARTS, SEARCH_PARTS, THANKS_PARTS } from "@/lib/website-page-parts";
 import type { SiteTheme } from "@/lib/website-theme";
+import { DesignCard } from "@/components/website-design/design-card";
 
 type Colors = { brand: string; ink: string; page: string; onBrand: string };
 
-const cardCls = webForm.cardRoomy;
 const labelCls = webForm.labelRoomy;
 
 /** ปุ่มตัวเลือกแบบมีชื่อ + คำอธิบาย + ภาพตัวอย่างเล็ก (เหมือนตัวเลือกการเปลี่ยนหน้า) */
@@ -104,9 +104,7 @@ const TexturePv = ({ kind, page }: { kind: SiteTexture; page: string }) => (
 export function SitePageSetting({ value, onChange, colors }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void; colors: Colors }) {
   const d = DEFAULT_SITE_PAGE;
   return (
-    <div className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-800 mb-1">🧱 พื้นที่ · พื้นหลัง · มือถือ (ทั้งเว็บ)</h3>
-      <p className="text-xs text-slate-500 mb-3">ตั้งครั้งเดียว ทุกหน้าเปลี่ยนตาม · ค่าที่มีป้าย &quot;แบบเดิม&quot; คือหน้าตาก่อนมีตัวเลือกนี้</p>
+    <DesignCard title="🧱 พื้นที่ · พื้นหลัง · มือถือ (ทั้งเว็บ)" hint={<>ตั้งครั้งเดียว ทุกหน้าเปลี่ยนตาม · ค่าที่มีป้าย &quot;แบบเดิม&quot; คือหน้าตาก่อนมีตัวเลือกนี้</>}>
 
       <label className={labelCls}>ความโปร่งของทั้งหน้า</label>
       <Choice<SiteDensity>
@@ -183,7 +181,7 @@ export function SitePageSetting({ value, onChange, colors }: { value: SitePageDe
         />
         <p className="text-[11px] text-slate-400 mt-1">ใช้กับการ์ด หน้าสินค้า ตะกร้า ชำระเงิน · ข้อความโปรที่คิดจากระบบโปร/ค่าส่ง ยังเขียนแบบ ฿ ตามเดิม</p>
       </div>
-    </div>
+    </DesignCard>
   );
 }
 
@@ -241,9 +239,7 @@ function InputPv({ mode, colors }: { mode: InputStyle; colors: Colors }) {
 export function SiteControlsSetting({ value, onChange, colors }: { value: SiteShapeDesign; onChange: (v: Partial<SiteShapeDesign>) => void; colors: Colors }) {
   const d = DEFAULT_SITE_SHAPE;
   return (
-    <div className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-800 mb-1">🔘 ปุ่ม · ลิงก์ · ช่องกรอก (ทั้งเว็บ)</h3>
-      <p className="text-xs text-slate-500 mb-3">ทรงปุ่ม/ขนาดปุ่มตั้งในกล่องด้านล่าง · ตัวอย่างในแต่ละตัวเลือก เอาเมาส์ชี้ดูลูกเล่นได้</p>
+    <DesignCard title="🔘 ปุ่ม · ลิงก์ · ช่องกรอก (ทั้งเว็บ)" hint="ทรงปุ่ม/ขนาดปุ่มตั้งในกล่องด้านล่าง · ตัวอย่างในแต่ละตัวเลือก เอาเมาส์ชี้ดูลูกเล่นได้">
 
       <label className={labelCls}>
         แบบปุ่มใน Section<Def show={value.buttonKind === d.buttonKind} />
@@ -306,7 +302,7 @@ export function SiteControlsSetting({ value, onChange, colors }: { value: SiteSh
         />
         <p className="text-[11px] text-slate-400 mt-1">หน้าชำระเงิน สมัครสมาชิก ติดต่อเรา รับข่าวสาร รีวิว · ความมนของกล่องตั้งที่ &quot;ขอบช่องกรอก&quot; ด้านล่าง</p>
       </div>
-    </div>
+    </DesignCard>
   );
 }
 
@@ -360,9 +356,7 @@ export function HeaderIconStyleSetting({ value, onChange, ink }: { value: Header
 export function SiteMotionSetting({ value, onChange }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void }) {
   const d = DEFAULT_SITE_PAGE;
   return (
-    <div className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-800 mb-1">✨ ลูกเล่นทั้งเว็บ</h3>
-      <p className="text-xs text-slate-500 mb-3">ปิดทุกตัวเป็นค่าเริ่ม · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหวจะไม่เห็นลูกเล่นเหล่านี้</p>
+    <DesignCard title="✨ ลูกเล่นทั้งเว็บ" hint="ปิดทุกตัวเป็นค่าเริ่ม · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหวจะไม่เห็นลูกเล่นเหล่านี้">
 
       <label className={labelCls}>
         Section โผล่ตอนเลื่อนมาถึง (ค่าทั้งเว็บ)<Def show={value.sectionMotion === d.sectionMotion} />
@@ -452,7 +446,7 @@ export function SiteMotionSetting({ value, onChange }: { value: SitePageDesign; 
           <p className="text-[11px] text-slate-400 mt-1">โผล่เมื่อเลื่อนลงเกินเกือบ 1 จอ · ไม่โชว์หน้าชำระเงิน</p>
         </div>
       </div>
-    </div>
+    </DesignCard>
   );
 }
 
@@ -475,9 +469,7 @@ export function SiteSalesSetting({ value, onChange, colors, onPreview }: { value
     setNav({ items: MOBILE_NAV_ITEMS.filter((x) => (x === k ? !has : nav.items.includes(x))) });
   };
   return (
-    <div className={cardCls}>
-      <h3 className="text-sm font-semibold text-slate-800 mb-1">📱 มือถือและช่วยขาย</h3>
-      <p className="text-xs text-slate-500 mb-3">ค่าที่มีป้าย &quot;แบบเดิม&quot; คือหน้าตาตอนนี้ · ดูผลได้ในพรีวิวด้านขวา (เลือกจอมือถือ)</p>
+    <DesignCard title="📱 มือถือและช่วยขาย" hint={<>ค่าที่มีป้าย &quot;แบบเดิม&quot; คือหน้าตาตอนนี้ · ดูผลได้ในพรีวิวด้านขวา (เลือกจอมือถือ)</>}>
 
       <label className={labelCls}>
         แถบเมนูล่างแบบแอป (มือถือ)<Def show={nav.style === "off"} />
@@ -592,7 +584,7 @@ export function SiteSalesSetting({ value, onChange, colors, onPreview }: { value
           </div>
         )}
       </div>
-    </div>
+    </DesignCard>
   );
 }
 
@@ -638,12 +630,7 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
   return (
     <div className="space-y-4">
       {/* ── 404 ── */}
-      <div className={cardCls}>
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <h3 className="text-sm font-semibold text-slate-800">🧭 หน้า 404 (ไม่พบหน้า)</h3>
-          {pvBtn("/zz-page-not-found", "ดูในพรีวิว")}
-        </div>
-        <p className="text-xs text-slate-500 mb-3">หน้าที่ลูกค้าเห็นเมื่อกดลิงก์ที่ไม่มีแล้ว · ลิงก์ที่ตั้ง &quot;ย้ายลิงก์&quot; ไว้ (ข้อมูลร้าน › 🔀) ยังพาไปหน้าใหม่ก่อนเสมอ</p>
+      <DesignCard title="🧭 หน้า 404 (ไม่พบหน้า)" hint={<>หน้าที่ลูกค้าเห็นเมื่อกดลิงก์ที่ไม่มีแล้ว · ลิงก์ที่ตั้ง &quot;ย้ายลิงก์&quot; ไว้ (ข้อมูลร้าน › 🔀) ยังพาไปหน้าใหม่ก่อนเสมอ</>} right={<>{pvBtn("/zz-page-not-found", "ดูในพรีวิว")}</>}>
         <Choice<"plain" | "image" | "big">
           value={nf.style}
           onChange={(v) => setNf({ style: v })}
@@ -683,15 +670,10 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
             <PartStyleFold parts={NF_PARTS} value={nf.parts} onChange={(parts) => setNf({ parts })} colors={colors} onOpen={() => onPreview("/zz-page-not-found")} hint="404 · หัวข้อ · ปุ่ม · ช่องค้นหา" testId="notfound" />
           </div>
         )}
-      </div>
+      </DesignCard>
 
       {/* ── หน้าขอบคุณ ── */}
-      <div className={cardCls}>
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <h3 className="text-sm font-semibold text-slate-800">🎉 หน้าขอบคุณหลังสั่งซื้อ</h3>
-          {pvBtn("/checkout?pv=thanks", "ดูในพรีวิว")}
-        </div>
-        <p className="text-xs text-slate-500 mb-3">หัวข้อ/ข้อความของหน้านี้ตั้งที่แท็บ 💳 หน้าชำระเงิน · ที่นี่เพิ่มของเสริม</p>
+      <DesignCard title="🎉 หน้าขอบคุณหลังสั่งซื้อ" hint="หัวข้อ/ข้อความของหน้านี้ตั้งที่แท็บ 💳 หน้าชำระเงิน · ที่นี่เพิ่มของเสริม" right={<>{pvBtn("/checkout?pv=thanks", "ดูในพรีวิว")}</>}>
         <label className={labelCls}>ด้านบนการ์ด<Def show={th.top === "emoji"} /></label>
         <Choice<"emoji" | "image" | "none"> value={th.top} onChange={(v) => setTh({ top: v })} options={[{ v: "emoji", l: "อีโมจิ 🎉" }, { v: "image", l: "รูปแบนเนอร์" }, { v: "none", l: "ไม่มี" }]} />
         {/* ช่องรูปของกลางเว็บ = มีปุ่ม 🔗 ใช้ชุดรูป (เปลี่ยนรูปทีเดียวหลายที่) */}
@@ -735,15 +717,10 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
             <PartStyleFold parts={THANKS_PARTS} value={th.parts} onChange={(parts) => setTh({ parts })} colors={colors} onOpen={() => onPreview("/checkout?pv=thanks")} hint="หัวข้อ · เลขออเดอร์ · คูปอง · โซเชียล" testId="thanks" />
           </div>
         )}
-      </div>
+      </DesignCard>
 
       {/* ── ป๊อปอัป ── */}
-      <div className={cardCls}>
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <h3 className="text-sm font-semibold text-slate-800">🎁 ป๊อปอัปรับส่วนลด</h3>
-          {pvBtn("/?pv=popup", "ดูตัวอย่าง")}
-        </div>
-        <p className="text-xs text-slate-500 mb-3">เปิด/โค้ด/ข้อความ/วินาที ตั้งที่แท็บ ข้อมูลร้าน › 🎁 · ที่นี่ตั้งหน้าตาและจังหวะ · ตัวอย่างในพรีวิวไม่ส่งอีเมลจริง</p>
+      <DesignCard title="🎁 ป๊อปอัปรับส่วนลด" hint="เปิด/โค้ด/ข้อความ/วินาที ตั้งที่แท็บ ข้อมูลร้าน › 🎁 · ที่นี่ตั้งหน้าตาและจังหวะ · ตัวอย่างในพรีวิวไม่ส่งอีเมลจริง" right={<>{pvBtn("/?pv=popup", "ดูตัวอย่าง")}</>}>
         <Choice<"center" | "split" | "sheet" | "corner">
           value={pp.layout}
           onChange={(v) => setPp({ layout: v })}
@@ -774,12 +751,10 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
             <PartStyleFold parts={POPUP_PARTS} value={pp.parts} onChange={(parts) => setPp({ parts })} colors={colors} onOpen={() => onPreview("/?pv=popup")} hint="กรอบ · หัวข้อ · ช่องกรอก · ปุ่ม · โค้ด" testId="popup" />
           </div>
         )}
-      </div>
+      </DesignCard>
 
       {/* ── รูปตอนแชร์ ── */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">🖼 รูปตอนแชร์ลิงก์สินค้า (Facebook · LINE)</h3>
-        <p className="text-xs text-slate-500 mb-3">แบบการ์ด/กรอบ = ระบบวาดรูปใหม่ให้สินค้าทุกตัวเอง · แอปแชทอาจจำรูปเก่าไว้สักพัก (ลิงก์ที่แชร์ใหม่ได้รูปใหม่)</p>
+      <DesignCard title="🖼 รูปตอนแชร์ลิงก์สินค้า (Facebook · LINE)" hint="แบบการ์ด/กรอบ = ระบบวาดรูปใหม่ให้สินค้าทุกตัวเอง · แอปแชทอาจจำรูปเก่าไว้สักพัก (ลิงก์ที่แชร์ใหม่ได้รูปใหม่)">
         <Choice<"photo" | "card" | "frame">
           value={sh.style}
           onChange={(v) => setSh({ style: v })}
@@ -795,15 +770,10 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
             <Choice<"paper" | "brand" | "ink"> value={sh.bg} onChange={(v) => setSh({ bg: v })} options={[{ v: "paper", l: "สีพื้นเว็บ" }, { v: "brand", l: "สีหลัก" }, { v: "ink", l: "เข้ม" }]} />
           </div>
         )}
-      </div>
+      </DesignCard>
 
       {/* ── หน้าเข้าสู่ระบบ ── */}
-      <div className={cardCls}>
-        <div className="flex items-center justify-between gap-2 mb-1">
-          <h3 className="text-sm font-semibold text-slate-800">👤 หน้าเข้าสู่ระบบ / สมัครสมาชิก</h3>
-          {pvBtn("/account/login", "ดูในพรีวิว")}
-        </div>
-        <p className="text-xs text-slate-500 mb-3">ลูกค้าเห็นเมื่อเปิดระบบสมาชิก (แท็บ 👥 สมาชิก)</p>
+      <DesignCard title="👤 หน้าเข้าสู่ระบบ / สมัครสมาชิก" hint="ลูกค้าเห็นเมื่อเปิดระบบสมาชิก (แท็บ 👥 สมาชิก)" right={<>{pvBtn("/account/login", "ดูในพรีวิว")}</>}>
         <Choice<"center" | "split" | "cover">
           value={lg.layout}
           onChange={(v) => setLg({ layout: v })}
@@ -830,18 +800,13 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
         </div>
         {/* 💬 ป๊อปสมัคร + ปุ่มสมัครบนหัวเว็บ + 🎨 ปรับละเอียด (ชุดปรับหน้าตาชิ้นส่วน — ของกลาง) */}
         {colors && <LoginExtraSetting value={lg} onChange={(p) => setLg(p)} colors={colors} onPreview={onPreview} />}
-      </div>
+      </DesignCard>
 
       {/* ── หน้าบัญชีของฉัน (ชุดปรับหน้าตาละเอียด — ของกลาง) ── */}
       {colors && (
-        <div className={cardCls}>
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <h3 className="text-sm font-semibold text-slate-800">🧑 หน้าบัญชีของฉัน</h3>
-            {pvBtn("/account", "ดูในพรีวิว (ข้อมูลตัวอย่าง)")}
-          </div>
-          <p className="text-xs text-slate-500 mb-3">หน้าที่สมาชิกเห็นหลังเข้าสู่ระบบ · พรีวิวใช้ข้อมูลตัวอย่าง (ไม่ต้องล็อกอิน) · ไม่ตั้ง = หน้าตาเดิม</p>
+        <DesignCard title="🧑 หน้าบัญชีของฉัน" hint="หน้าที่สมาชิกเห็นหลังเข้าสู่ระบบ · พรีวิวใช้ข้อมูลตัวอย่าง (ไม่ต้องล็อกอิน) · ไม่ตั้ง = หน้าตาเดิม" right={<>{pvBtn("/account", "ดูในพรีวิว (ข้อมูลตัวอย่าง)")}</>}>
           <AccountPageSetting value={value.account} onChange={(account) => onChange({ account })} colors={colors} onPreview={onPreview} />
-        </div>
+        </DesignCard>
       )}
     </div>
   );

@@ -4,8 +4,9 @@
 import { BUTTON_SHAPES, BUTTON_SIZES, SHADOW_LEVELS, RADIUS_PX_CHOICES, resolveOnBrand, type Shape } from "@/lib/website-theme";
 import { WheelSelect } from "@/components/wheel-select";
 import { SiteControlsSetting, SiteMotionSetting, SitePageSetting, SiteSalesSetting } from "@/components/website-site-design-setting";
-import { labelCls, cardCls, ResetBtn } from "./shared";
+import { labelCls, ResetBtn } from "./shared";
 import { useDesign } from "./context";
+import { DesignCard } from "./design-card";
 
 export function ShapeTab() {
   const { theme, published, choices, apply, setShape } = useDesign();
@@ -14,8 +15,7 @@ export function ShapeTab() {
       {/* 🧱 ฐานหน้าตาทั้งเว็บ (ชุด 1) — components/website-site-design-setting · เว็บร้าน src/lib/site-design-css.ts */}
       <SitePageSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
       <SiteControlsSetting value={theme.shape} onChange={(p) => setShape(p)} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-3">ความมนของขอบ (ค่ารวมทั้งเว็บ)</h3>
+      <DesignCard title="ความมนของขอบ (ค่ารวมทั้งเว็บ)" summary={choices.radius.find((o) => o.value === theme.radius)?.label ?? theme.radius}>
         <div className="flex flex-wrap gap-2">
           {choices.radius.map((o) => (
             <button
@@ -44,10 +44,9 @@ export function ShapeTab() {
             </div>
           ))}
         </div>
-      </div>
+      </DesignCard>
 
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-3">ปุ่ม · เส้นขอบ · เงา</h3>
+      <DesignCard title="ปุ่ม · เส้นขอบ · เงา">
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className={labelCls}>รูปทรงปุ่ม</label>
@@ -103,20 +102,20 @@ export function ShapeTab() {
             })()}
           </div>
         </div>
-      </div>
+      </DesignCard>
     </>
   );
 }
 
 /** ✨ ลูกเล่นและการเคลื่อนไหว — เปลี่ยนหน้า · เลื่อนนุ่ม · Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · ปุ่มกลับขึ้นบน */
+const TRANSITION_LABEL: Record<string, string> = { fade: "จาง", rise: "เลื่อนขึ้น", curtain: "ม่านสีแบรนด์", logo: "โลโก้วาบ", zoom: "ซูมเข้า", none: "ไม่มี" };
+
 export function MotionTab() {
   const { theme, apply } = useDesign();
   return (
     <>
       {/* ✨ การเคลื่อนไหวทั้งเว็บ — เว็บร้าน: PageMotion + ::view-transition (globals.css) */}
-      <div className={cardCls}>
-        <h3 className="text-sm font-semibold text-slate-800 mb-1">✨ การเคลื่อนไหวทั้งเว็บ</h3>
-        <p className="text-xs text-slate-500 mb-3">ตอนลูกค้ากดไปหน้าอื่น · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว จะไม่เห็นแอนิเมชันเสมอ</p>
+      <DesignCard title="✨ การเคลื่อนไหวทั้งเว็บ" summary={`เปลี่ยนหน้า: ${TRANSITION_LABEL[theme.page.transition] ?? theme.page.transition}${theme.page.smoothScroll ? " · เลื่อนจอนุ่ม" : ""}`} hint="ตอนลูกค้ากดไปหน้าอื่น · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว จะไม่เห็นแอนิเมชันเสมอ">
         <div className="flex flex-wrap gap-2 mb-3">
           {([
             ["fade", "จางเปลี่ยนหน้า", "หน้าเก่าจางออก หน้าใหม่จางเข้า (แนะนำ)"],
@@ -142,7 +141,7 @@ export function MotionTab() {
           เลื่อนจอนุ่ม (Smooth scroll)
         </label>
         <p className="text-[11px] text-slate-400 mt-1">เลื่อนลูกกลิ้งเมาส์แล้วหน้าเว็บไหลนุ่มแบบเว็บแบรนด์หรู · ใช้กับคอมที่ใช้เมาส์/ทัชแพด (มือถือเลื่อนแบบปกติ) · ไม่ทำงานในพรีวิวนี้ — ดูผลบนเว็บจริง</p>
-      </div>
+      </DesignCard>
       {/* ✨ ลูกเล่นทั้งเว็บ (ชุด 2): Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · แถบเลื่อนอ่าน · ปุ่มกลับขึ้นบน */}
       <SiteMotionSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} />
     </>
