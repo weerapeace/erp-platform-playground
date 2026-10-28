@@ -4,7 +4,8 @@
  * 🔣 SiteIconPicker / SiteIcon — ของกลาง: เลือก/วาดไอคอนของเว็บร้าน (ชุดเส้นกลาง lib/website-icons)
  *   แท็บ: 〰 ไอคอนเส้น (ค้นหาได้ · สีตามธีมร้าน) · 😀 อีโมจิ (ค่าเดิม) · ⬆ อัปโหลดรูป/SVG เอง
  *   ค่าที่ได้ = ข้อความเดียว "i:<key>" / "img:<r2 key>" / อีโมจิ — เว็บร้านวาดด้วย components/ui/SiteIcon ตัวคู่กัน
- * ใช้ที่: แถบความมั่นใจในตะกร้า (website-cart-settings) · ต่อไป Footer / ศูนย์ช่วยเหลือ / ป้าย
+ * ใช้ที่: ตะกร้า (แถบความมั่นใจ + ไอคอนคูปอง/ห่อ/การ์ด/หมายเหตุ/แต้ม/วันได้รับ — website-cart-settings) · แถวความมั่นใจหน้าสินค้าแบบหรู (website-product-luxe-setting)
+ *         · ไอคอนลิงก์เมนูใหญ่ (website-mega-menu-editor) · ต่อไป Footer / ศูนย์ช่วยเหลือ / ป้าย
  * (IconPicker ใน components/icon-picker = อีโมจิสำหรับตั้งค่าโมดูล ERP — คนละงาน)
  *
  * <SiteIconPicker value={icon} onChange={setIcon} />

@@ -9,7 +9,7 @@
  * แบบคอลัมน์ = กล่อง (block) เรียงซ้าย→ขวา 5 ชนิด: รายการลิงก์ · กลุ่มหัวข้อย่อย · การ์ดสินค้า · รูปเด่น · การ์ดรูป
  * มือถือ: เว็บร้านแสดงเป็นชั้นพับ-กาง (หัวคอลัมน์ → รายการ) · การ์ด/รูปเลื่อนแนวนอน
  * การ์ดสินค้า: อัตโนมัติจากหมวด (มาใหม่/ขายดี) หรือเลือกเอง (รหัสรุ่น) — คัดด้วย pickMegaProducts (ใช้ทั้งเซิร์ฟเวอร์และหน้าเว็บ)
- * ไอคอน: ชุดเส้นในตัว MEGA_ICONS (รูปทรงอ้างอิง Tabler Icons · MIT) หรืออัปโหลดรูปเอง (iconKey)
+ * ไอคอน: ชุดไอคอนกลางของเว็บร้าน (ERP lib/website-icons ↔ เว็บร้าน site-icons) ค่า "i:<key>" / อีโมจิ · หรืออัปโหลดรูปเอง (iconKey)
  * รอบ 2: รูปเปลี่ยนตามลิงก์ที่ชี้ (hoverImageKey → กล่องรูปเด่น) · รายการอัตโนมัติ (หมวด/คอลเลกชัน/สี — autoMegaLinks)
  *        ลิงก์ตัวหนา/สี · จำนวนสินค้า · แบ่งคอลัมน์ย่อย · หัวคอลัมน์กดได้ + "ดูทั้งหมด" · การ์ดสินค้า เรียง/เฉพาะลด/สลับรูป/สัดส่วน/ป้าย
  *        หน้าตาแผง (เต็มจอ/กล่องลอย · สีพื้น · เส้นคั่น · แถบข้อความโปร · ซ่อนรูปบนมือถือ) · ตั้งเวลาแสดง (inShowWindow)
@@ -32,7 +32,7 @@ export interface MegaLink {
   href: string;
   /** คำอธิบายบรรทัดล่าง (แบบไอคอน/จุดสี/รูปเล็ก) */
   desc: string;
-  /** ชื่อไอคอนในชุด MEGA_ICONS ("" = ไม่มี) */
+  /** "i:<key>" ไอคอนชุดกลาง · อีโมจิ · "" = ไม่มี (ข้อมูลเก่าเก็บชื่อเปล่า เช่น "belt" → อ่านเป็น i:belt) */
   icon: string;
   /** รูปไอคอนที่อัปโหลดเอง (มี = ใช้แทน icon) */
   iconKey: string | null;
@@ -250,30 +250,14 @@ export const MEGA_RATIOS: { value: MegaRatio; label: string }[] = [
 ];
 export const megaRatioCss = (r: MegaRatio) => r.replace(":", " / ");
 
-/** ไอคอนเส้น 24×24 (stroke) — d ของ <path> */
-export const MEGA_ICONS: { key: string; label: string; d: string[] }[] = [
-  { key: "bag", label: "ถุงช้อปปิ้ง", d: ["M6.331 8h11.339a2 2 0 0 1 1.977 2.304l-1.255 8.152a3 3 0 0 1 -2.966 2.544h-6.852a3 3 0 0 1 -2.965 -2.544l-1.255 -8.152a2 2 0 0 1 1.977 -2.304z", "M9 11v-5a3 3 0 0 1 6 0v5"] },
-  { key: "handbag", label: "กระเป๋าถือ", d: ["M5 10h14l-1.2 9a2 2 0 0 1 -2 1.7h-7.6a2 2 0 0 1 -2 -1.7z", "M8.5 10v-1.5a3.5 3.5 0 0 1 7 0v1.5"] },
-  { key: "briefcase", label: "กระเป๋าเอกสาร", d: ["M3 9a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v9a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2z", "M8 7v-2a2 2 0 0 1 2 -2h4a2 2 0 0 1 2 2v2", "M12 12v.01", "M3 13a20 20 0 0 0 18 0"] },
-  { key: "backpack", label: "กระเป๋าเป้", d: ["M5 18v-6a6 6 0 0 1 6 -6h2a6 6 0 0 1 6 6v6a3 3 0 0 1 -3 3h-8a3 3 0 0 1 -3 -3z", "M10 6v-1a2 2 0 1 1 4 0v1", "M9 21v-4a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v4", "M11 10h2"] },
-  { key: "luggage", label: "กระเป๋าเดินทาง", d: ["M6 8a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z", "M9 6v-1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v1", "M6 10h12", "M6 16h12", "M9 20v1", "M15 20v1"] },
-  { key: "clutch", label: "คลัตช์/ซอง", d: ["M3 7a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v10a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2z", "M3 7l9 6l9 -6"] },
-  { key: "wallet", label: "กระเป๋าสตางค์", d: ["M17 8v-3a1 1 0 0 0 -1 -1h-10a2 2 0 0 0 0 4h12a1 1 0 0 1 1 1v3m0 4v3a1 1 0 0 1 -1 1h-12a2 2 0 0 1 -2 -2v-12", "M20 12v4h-4a2 2 0 0 1 0 -4h4"] },
-  { key: "belt", label: "เข็มขัด", d: ["M2 10h20v4h-20z", "M13 8.5h5v7h-5z", "M15.5 12h4"] },
-  { key: "laptop", label: "แล็ปท็อป", d: ["M3 19h18", "M5 7a1 1 0 0 1 1 -1h12a1 1 0 0 1 1 1v8a1 1 0 0 1 -1 1h-12a1 1 0 0 1 -1 -1z"] },
-  { key: "world", label: "เดินทาง/ทั่วโลก", d: ["M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0", "M3.6 9h16.8", "M3.6 15h16.8", "M11.5 3a17 17 0 0 0 0 18", "M12.5 3a17 17 0 0 1 0 18"] },
-  { key: "user", label: "คน/ผู้ใช้", d: ["M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0", "M6 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2"] },
-  { key: "shirt", label: "เสื้อผ้า", d: ["M15 4l6 2v5h-3v8a1 1 0 0 1 -1 1h-10a1 1 0 0 1 -1 -1v-8h-3v-5l6 -2a3 3 0 0 0 6 0"] },
-  { key: "gift", label: "ของขวัญ", d: ["M3 9a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1z", "M12 8v13", "M19 12v7a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-7", "M7.5 8a2.5 2.5 0 0 1 0 -5a4.8 8 0 0 1 4.5 5a4.8 8 0 0 1 4.5 -5a2.5 2.5 0 0 1 0 5"] },
-  { key: "star", label: "ดาว/แนะนำ", d: ["M12 17.75l-6.172 3.245l1.179 -6.873l-5 -4.867l6.9 -1l3.086 -6.253l3.086 6.253l6.9 1l-5 4.867l1.179 6.873z"] },
-  { key: "heart", label: "หัวใจ", d: ["M19.5 12.572l-7.5 7.428l-7.5 -7.428a5 5 0 1 1 7.5 -6.566a5 5 0 1 1 7.5 6.572"] },
-  { key: "tag", label: "ป้าย/ลดราคา", d: ["M6.5 7.5a1 1 0 1 0 2 0a1 1 0 1 0 -2 0", "M3 6v5.172a2 2 0 0 0 .586 1.414l7.71 7.71a2.41 2.41 0 0 0 3.408 0l5.592 -5.592a2.41 2.41 0 0 0 0 -3.408l-7.71 -7.71a2 2 0 0 0 -1.414 -.586h-5.172a3 3 0 0 0 -3 3z"] },
-  { key: "diamond", label: "เพชร/พรีเมียม", d: ["M6 5h12l3 5l-8.5 9.5a.7 .7 0 0 1 -1 0l-8.5 -9.5l3 -5", "M10 12l-2 -2.2l.6 -1"] },
-  { key: "leaf", label: "ใบไม้/วัสดุธรรมชาติ", d: ["M5 21c.5 -4.5 2.5 -8 7 -10", "M9 18c6.218 0 10.5 -3.288 11 -12v-2h-4.014c-9 0 -11.986 4 -12 9c0 1 0 3 2 5h3z"] },
-  { key: "droplet", label: "หยดน้ำ/กันน้ำ", d: ["M7.502 19.423c2.602 2.105 6.395 2.105 8.996 0c2.602 -2.105 3.262 -5.708 1.566 -8.546l-4.89 -7.26c-.42 -.625 -1.287 -.803 -1.936 -.397a1.376 1.376 0 0 0 -.41 .397l-4.893 7.26c-1.695 2.838 -1.035 6.441 1.567 8.546z"] },
-  { key: "sparkles", label: "ใหม่/วิบวับ", d: ["M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2zm0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2zm-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6z"] },
-];
-const ICON_KEYS = new Set(MEGA_ICONS.map((i) => i.key));
+/** ไอคอนลิงก์ — กฎเดียวกับ cleanSiteIcon (lib/website-icons · ไฟล์นี้ห้าม import): i:<key> · อีโมจิ ≤ 8 ตัว
+ *  ข้อมูลเก่า (ชุด MEGA_ICONS เดิม 20 ตัว — อยู่ในชุดกลางครบแล้ว) เก็บชื่อเปล่า "belt" → i:belt · รูปอัปโหลดอยู่ที่ iconKey */
+const megaIconOf = (v: unknown): string => {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (/^[a-z0-9-]{1,40}$/.test(s)) return `i:${s}`;
+  if (/^i:[a-z0-9-]{1,40}$/.test(s)) return s;
+  return s.startsWith("i:") || s.startsWith("img:") ? "" : s.slice(0, 8);
+};
 
 /* ───────── ตัวสร้างค่าใหม่ ───────── */
 const rid = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
@@ -399,7 +383,7 @@ export function megaPreset(template: MegaTemplate, ctx: { categories: { key: str
   if (template === "B") {
     const byType = newMegaBlock("links", "เลือกช้อปตามประเภท");
     byType.style = "icon";
-    byType.links = cats.slice(0, 6).map((c, i) => ({ ...newMegaLink("", megaCategoryHref(c.key)), icon: ["handbag", "backpack", "briefcase", "luggage", "clutch", "wallet"][i % 6] }));
+    byType.links = cats.slice(0, 6).map((c, i) => ({ ...newMegaLink("", megaCategoryHref(c.key)), icon: `i:${["handbag", "backpack", "briefcase", "luggage", "clutch", "wallet"][i % 6]}` }));
     const byStyle = newMegaBlock("groups", "เลือกช้อปตามสไตล์");
     byStyle.groups = [
       { ...newMegaGroup("สำหรับผู้หญิง"), links: [newMegaLink("ใบเล็ก", "/shop"), newMegaLink("ถือ/สะพาย", "/shop")] },
@@ -450,7 +434,7 @@ function cleanLink(r: Record<string, unknown>, i: number): MegaLink | null {
     label,
     href,
     desc: str(r.desc, 120),
-    icon: typeof r.icon === "string" && ICON_KEYS.has(r.icon) ? r.icon : "",
+    icon: megaIconOf(r.icon),
     iconKey: key(r.iconKey),
     color: hex(r.color),
     imageKey: key(r.imageKey),

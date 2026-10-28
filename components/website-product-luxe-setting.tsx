@@ -11,6 +11,7 @@ import { RangeInput } from "@/components/range-input";
 import { ColorPicker } from "@/components/color-picker";
 import { LUXE_CHOICES, LUXE_MEDIA_WIDTH, LUXE_TRUST_MAX, type ProductLuxe } from "@/lib/website-product-luxe";
 import { webForm } from "@/lib/website-form-styles";
+import { SiteIconPicker } from "@/components/site-icon-picker";
 
 const lbl = webForm.labelPlain;
 const sel = "w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm bg-white";
@@ -154,12 +155,13 @@ export function ProductLuxeSetting({
           <input type="checkbox" checked={v.trust.show} onChange={(e) => setTrust({ show: e.target.checked })} />
           ✔ แถวความมั่นใจใต้ปุ่มซื้อ
         </label>
-        <p className="text-[11px] text-slate-400 mb-2">ใส่เฉพาะเรื่องที่ร้านทำได้จริง (เช่น ส่งฟรีเมื่อไร · คืนได้กี่วัน) — ไอคอนใส่อีโมจิได้ · ข้อความอังกฤษ: ปุ่ม 🌐 แปลภาษา</p>
+        <p className="text-[11px] text-slate-400 mb-2">ใส่เฉพาะเรื่องที่ร้านทำได้จริง (เช่น ส่งฟรีเมื่อไร · คืนได้กี่วัน) — ไอคอน: เลือกไอคอนเส้น (สีตามตัวอักษร) / อีโมจิ / อัปโหลด · ข้อความอังกฤษ: ปุ่ม 🌐 แปลภาษา</p>
         {v.trust.show && (
           <div className="space-y-1.5">
             {items.map((it, i) => (
               <div key={it.id} className="flex items-center gap-2">
-                <input className="w-12 rounded-lg border border-slate-200 px-1 py-1.5 text-center text-sm" value={it.icon} maxLength={8} aria-label="ไอคอน" onChange={(e) => setTrust({ items: items.map((x, j) => (j === i ? { ...x, icon: e.target.value } : x)) })} />
+                {/* 🔣 ไอคอนเส้น (ชุดกลาง) / อีโมจิ / อัปโหลด — ของกลาง SiteIconPicker */}
+                <SiteIconPicker value={it.icon} onChange={(icon) => setTrust({ items: items.map((x, j) => (j === i ? { ...x, icon } : x)) })} />
                 <input className={inp} value={it.text} maxLength={60} placeholder="ข้อความสั้น ๆ" onChange={(e) => setTrust({ items: items.map((x, j) => (j === i ? { ...x, text: e.target.value } : x)) })} />
                 <button type="button" onClick={() => setTrust({ items: items.filter((_, j) => j !== i) })} className="text-slate-400 hover:text-red-600 text-sm px-1" aria-label="ลบ">
                   ✕
@@ -167,7 +169,7 @@ export function ProductLuxeSetting({
               </div>
             ))}
             {items.length < LUXE_TRUST_MAX && (
-              <button type="button" onClick={() => setTrust({ items: [...items, { id: `t${Date.now().toString(36).slice(-5)}`, icon: "✔", text: "" }] })} className="text-xs text-blue-600 hover:underline">
+              <button type="button" onClick={() => setTrust({ items: [...items, { id: `t${Date.now().toString(36).slice(-5)}`, icon: "i:circle-check", text: "" }] })} className="text-xs text-blue-600 hover:underline">
                 ＋ เพิ่มข้อ ({items.length}/{LUXE_TRUST_MAX})
               </button>
             )}

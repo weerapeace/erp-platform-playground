@@ -26,6 +26,7 @@ import {
   CART_TAB_LABELS,
   CART_WIDTHS,
   DEFAULT_CART_ICONS,
+  EMOJI_CART_ICONS,
   DEFAULT_RECS_SET,
   DEFAULT_TRUST_ITEMS,
   MAX_RECS_SETS,
@@ -136,20 +137,6 @@ function StyleThumb({ style }: { style: CartStyle }) {
 }
 
 /** ช่องไอคอนอีโมจิ (ว่าง = ไม่มีไอคอน) */
-function IconInput({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
-  return (
-    <input
-      className="w-12 shrink-0 h-8 rounded-lg border border-slate-200 px-1 text-center text-base focus:outline-none focus:border-blue-400"
-      value={value}
-      maxLength={8}
-      placeholder="—"
-      onChange={(e) => onChange(e.target.value)}
-      aria-label={label}
-      title="ไอคอน (วางอีโมจิ · ว่าง = ไม่มีไอคอน)"
-    />
-  );
-}
-
 /** 🛍 ตั้งค่าสินค้าแนะนำ 1 ชุด */
 /** หมวดเว็บของร้าน (ชิปเลือกหลายหมวด) */
 export type CartCatChoice = { key: string; label: string; parent?: string | null };
@@ -603,25 +590,25 @@ export function CartSettings({
 
       {/* ── ฟังก์ชันเพิ่ม ── */}
       <Card title="✨ ฟังก์ชันเพิ่มในตะกร้า" hint="ลูกค้ากรอก/เลือกในตะกร้า → ไปต่อหน้าชำระเงินให้เอง (ไม่ต้องกรอกซ้ำ)">
-        <p className="text-[11px] text-slate-500">ช่องซ้าย = ไอคอน (วางอีโมจิอะไรก็ได้ · ว่าง = ไม่มีไอคอน) · ข้อความว่าง = ใช้ข้อความเริ่มต้น</p>
+        <p className="text-[11px] text-slate-500">ช่องซ้าย = ไอคอน (กดเลือก ไอคอนเส้น/อีโมจิ/อัปโหลด · ไอคอนเส้นเปลี่ยนสีตามตัวอักษรของร้าน) · ข้อความว่าง = ใช้ข้อความเริ่มต้น</p>
         <div className="space-y-3">
           <div className="flex items-start gap-2">
-            <IconInput label="ไอคอนโค้ดส่วนลด" value={icon("coupon")} onChange={(v) => setIcon("coupon", v)} />
+            <SiteIconPicker label="ไอคอนโค้ดส่วนลด" value={icon("coupon")} onChange={(v) => setIcon("coupon", v)} />
             <Check label="ช่องโค้ดส่วนลด" hint="ตรวจโค้ด + โชว์ส่วนลดให้ดูก่อน (ใช้คูปองในแท็บ 🎟️ คูปอง)" checked={c.coupon} onChange={(coupon) => set({ coupon })} />
           </div>
           <div className="flex items-start gap-2">
-            <IconInput label="ไอคอนแต้ม" value={icon("points")} onChange={(v) => setIcon("points", v)} />
+            <SiteIconPicker label="ไอคอนแต้ม" value={icon("points")} onChange={(v) => setIcon("points", v)} />
             <Check label="แต้มที่จะได้" hint="สมาชิก: “สั่งครั้งนี้ได้ ~N แต้ม” · ยังไม่สมัคร: ชวนสมัคร (ต้องเปิดระบบแต้มในข้อมูลร้าน)" checked={c.points} onChange={(points) => set({ points })} />
           </div>
           <div className="flex items-start gap-2">
-            <IconInput label="ไอคอนห่อของขวัญ" value={icon("gift")} onChange={(v) => setIcon("gift", v)} />
+            <SiteIconPicker label="ไอคอนห่อของขวัญ" value={icon("gift")} onChange={(v) => setIcon("gift", v)} />
             <div className="flex-1 min-w-0 space-y-1.5">
               <Check label="ห่อของขวัญ" hint="ติ๊กห่อในตะกร้า (ต้องเปิดห่อของขวัญในข้อมูลร้าน · ค่าห่อตั้งที่ข้อมูลร้าน)" checked={c.gift} onChange={(gift) => set({ gift })} />
               {c.gift && <Text label="ข้อความ (ว่าง = ชื่อบริการในข้อมูลร้าน)" obj={c.labels} k="gift" onPatch={(p) => set({ labels: { ...c.labels, ...p } })} placeholder="ห่อเป็นของขวัญ" max={60} />}
             </div>
           </div>
           <div className="flex items-start gap-2">
-            <IconInput label="ไอคอนการ์ด" value={icon("card")} onChange={(v) => setIcon("card", v)} />
+            <SiteIconPicker label="ไอคอนการ์ด" value={icon("card")} onChange={(v) => setIcon("card", v)} />
             <div className="flex-1 min-w-0 space-y-1.5">
               <Check
                 label="เขียนการ์ดอวยพร (แยกจากห่อ)"
@@ -651,18 +638,23 @@ export function CartSettings({
             </div>
           )}
           <div className="flex items-start gap-2">
-            <IconInput label="ไอคอนหมายเหตุ" value={icon("note")} onChange={(v) => setIcon("note", v)} />
+            <SiteIconPicker label="ไอคอนหมายเหตุ" value={icon("note")} onChange={(v) => setIcon("note", v)} />
             <div className="flex-1 min-w-0 space-y-1.5">
               <Check label="หมายเหตุถึงร้าน" hint="เช่น โทรก่อนส่ง — ไปเติมช่องหมายเหตุหน้าชำระเงิน" checked={c.note} onChange={(note) => set({ note })} />
               {c.note && <Text label="ข้อความ (ว่าง = เพิ่มหมายเหตุถึงร้าน)" obj={c.labels} k="note" onPatch={(p) => set({ labels: { ...c.labels, ...p } })} placeholder="เพิ่มหมายเหตุถึงร้าน" max={60} />}
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <IconInput label="ไอคอนวันที่คาดว่าได้รับ" value={icon("eta")} onChange={(v) => setIcon("eta", v)} />
+            <SiteIconPicker label="ไอคอนวันที่คาดว่าได้รับ" value={icon("eta")} onChange={(v) => setIcon("eta", v)} />
             <span className="text-[11px] text-slate-500">ไอคอนหน้า “วันที่คาดว่าได้รับ” (ตั้งเปิด/ปิดด้านล่าง)</span>
-            <button type="button" onClick={() => set({ icons: { ...DEFAULT_CART_ICONS } })} className="ml-auto text-xs text-slate-500 hover:underline shrink-0">
-              ↺ ไอคอนเริ่มต้น
-            </button>
+            <span className="ml-auto flex gap-3 shrink-0">
+              <button type="button" onClick={() => set({ icons: { ...DEFAULT_CART_ICONS } })} className="text-xs text-slate-500 hover:underline" data-cart-icons-line>
+                ↺ ชุดไอคอนเส้น
+              </button>
+              <button type="button" onClick={() => set({ icons: { ...EMOJI_CART_ICONS } })} className="text-xs text-slate-500 hover:underline">
+                😀 ชุดอีโมจิเดิม
+              </button>
+            </span>
           </div>
         </div>
       </Card>
@@ -740,7 +732,7 @@ export function CartSettings({
           </div>
         </div>
         <p className="text-[11px] text-slate-500">
-          ถ้าลูกค้าดูวันนี้จะเห็น: <b className="text-slate-700">{c.icons.eta} {etaLine(c)}</b>
+          ถ้าลูกค้าดูวันนี้จะเห็น: <b className="text-slate-700"><SiteIcon value={c.icons.eta} size={14} className="inline-block align-[-2px] mr-1" />{etaLine(c)}</b>
         </p>
       </Card>
     </div>

@@ -57,7 +57,7 @@ export interface CartRecsSet {
   /** outline ขอบมน (เดิม) · brand ทึบสีแบรนด์ · text ข้อความ */
   btnStyle: "outline" | "brand" | "text";
 }
-/** ✨ ไอคอนของตัวเลือกในตะกร้า (อีโมจิ · "" = ไม่มีไอคอน) */
+/** ✨ ไอคอนของตัวเลือกในตะกร้า — "i:<ไอคอนเส้น>" · "img:<รูป>" · อีโมจิ (ค่าเดิม) · "" = ไม่มีไอคอน (รูปแบบ = lib/website-icons) */
 export interface CartIcons {
   coupon: string;
   gift: string;
@@ -198,15 +198,17 @@ export const DEFAULT_TRUST_ITEMS: CartTrustItem[] = [
 ];
 export const TRUST_ICON_SIZE = { def: 14, min: 10, max: 32 } as const;
 
-/** ไอคอนแถบความมั่นใจ — กฎเดียวกับ cleanSiteIcon (lib/website-icons · ไฟล์นี้ห้าม import): i:<key> / img:<r2 key> เก็บเต็ม · อีโมจิ ≤ 8 ตัว */
-const trustIconOf = (v: unknown): string => {
+/** ไอคอนในตะกร้า (แถบความมั่นใจ + cfg.icons) — กฎเดียวกับ cleanSiteIcon (lib/website-icons · ไฟล์นี้ห้าม import): i:<key> / img:<r2 key> เก็บเต็ม · อีโมจิ ≤ 8 ตัว */
+const siteIconOf = (v: unknown): string => {
   const s = typeof v === "string" ? v.trim() : "";
   if (/^i:[a-z0-9-]{1,40}$/.test(s)) return s;
   if (s.startsWith("img:")) return /^[\w\-./%()]{1,200}$/.test(s.slice(4)) ? s : "";
   return s.startsWith("i:") ? "" : s.slice(0, 8);
 };
 
-export const DEFAULT_CART_ICONS: CartIcons = { coupon: "🎟️", gift: "🎀", card: "💌", note: "📝", points: "⭐", eta: "🚚" };
+/** ชุดเริ่มต้น = ไอคอนเส้น (สีตามตัวอักษร) · ชุดอีโมจิเดิมยังเลือกได้ (ร้านที่บันทึกอีโมจิไว้แล้วโชว์เหมือนเดิม) */
+export const DEFAULT_CART_ICONS: CartIcons = { coupon: "i:tag", gift: "i:gift", card: "i:mail", note: "i:message", points: "i:star", eta: "i:truck" };
+export const EMOJI_CART_ICONS: CartIcons = { coupon: "🎟️", gift: "🎀", card: "💌", note: "📝", points: "⭐", eta: "🚚" };
 export const DEFAULT_CART_LABELS: CartLabels = { gift: "", card: "", note: "" };
 /** ชุดแนะนำเริ่มต้น = หน้าตาเดิม (ลิ้นชักเลื่อนข้าง · หน้า /cart ตาราง · ใต้รายการ · ทุกครั้ง) */
 export const DEFAULT_RECS_SET: CartRecsSet = {
@@ -370,7 +372,7 @@ const int = (v: unknown, fb: number, lo: number, hi: number) => {
 
 const codesOf = (v: unknown) =>
   Array.isArray(v) ? [...new Set((v as unknown[]).map((c) => String(c ?? "").trim().toUpperCase()).filter((c) => /^[A-Z0-9._-]{1,40}$/.test(c)))].slice(0, 24) : [];
-const iconOf = (v: unknown, fb: string) => (typeof v === "string" ? v.trim().slice(0, 8) : fb);
+const iconOf = (v: unknown, fb: string) => (typeof v === "string" ? siteIconOf(v) : fb);
 /** รหัสหมวดเว็บ (ตัวเล็ก ตัวเลข ขีด) ≤ 20 หมวด */
 const catsOf = (v: unknown) =>
   Array.isArray(v) ? [...new Set((v as unknown[]).map((c) => String(c ?? "").trim().toLowerCase()).filter((c) => /^[a-z0-9-]{1,40}$/.test(c)))].slice(0, 20) : [];
@@ -441,7 +443,7 @@ export function normalizeCart(raw: unknown): CartConfig {
   const trustItems = trustRaw
     ? trustRaw
         .map((x) => (x && typeof x === "object" ? (x as Record<string, unknown>) : {}))
-        .map((x) => ({ icon: trustIconOf(x.icon), text: str(x.text, "", 60).trim() }))
+        .map((x) => ({ icon: siteIconOf(x.icon), text: str(x.text, "", 60).trim() }))
         .filter((x) => x.text)
         .slice(0, 4)
     : d.trustItems.map((x) => ({ ...x }));

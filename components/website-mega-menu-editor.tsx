@@ -6,7 +6,7 @@
  * MegaModeChips   = เลือกหน้าตาเมนูย่อย: เมนูย่อยธรรมดา / แบบ A / แบบ B / แบบ C / แม่แบบที่บันทึก
  * MegaPanelEditor = แก้แผง: คอลัมน์ (รายการลิงก์ · กลุ่มหัวข้อย่อย · การ์ดสินค้า · รูปเด่น · การ์ดรูป) หรือแท็บ (การ์ดคอลเลกชัน)
  * MenuTemplatesModal / บันทึกแม่แบบ = /api/website/menu-templates (ใช้ข้ามร้านได้ · ใช้แล้วได้สำเนา)
- * MegaIcon = วาดไอคอนชุดกลาง MEGA_ICONS (เว็บร้านวาดแบบเดียวกัน)
+ * ไอคอนลิงก์ = ของกลาง SiteIconPicker (ชุดไอคอนกลาง lib/website-icons · อีโมจิ · อัปโหลด → iconKey) — เว็บร้านวาดด้วย SiteIcon
  * ระหว่างแก้: ส่ง window event "website-menu-pin" → หน้าดีไซน์สั่งพรีวิวเปิดแผงของเมนูนี้ค้างไว้
  * ข้อมูล/ตัวกรอง: lib/website-mega-menu (มิเรอร์ storefront src/lib/mega-menu.ts)
  */
@@ -20,7 +20,9 @@ import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list
 import { WheelSelect } from "@/components/wheel-select";
 import { Seg } from "@/components/website-block-editor";
 import { LinkTargetPicker } from "@/components/website-link-picker";
-import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
+import { ImageUploadField } from "@/components/website-theme-media";
+import { SiteIconPicker } from "@/components/site-icon-picker";
+import { imageIconValue, lineIconValue } from "@/lib/website-icons";
 import { ColorInput } from "@/components/color-picker";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { WebsiteProductPicker } from "@/components/website-product-picker";
@@ -39,7 +41,6 @@ import {
   type MegaAutoData,
   type MegaProductLike,
   MEGA_BLOCK_KINDS,
-  MEGA_ICONS,
   MEGA_LIMITS,
   MEGA_LINK_STYLES,
   MEGA_RATIOS,
@@ -83,23 +84,6 @@ const lbl = webForm.labelPlain;
 const KIND_ICON: Record<MegaBlockKind, string> = { links: "☰", groups: "⋮☰", products: "🛍", feature: "🖼", cards: "🗂" };
 const range = (a: number, b: number) => Array.from({ length: b - a + 1 }, (_, i) => a + i);
 
-/** ไอคอนชุดกลาง (เส้น) — iconKey (รูปอัปโหลด) มาก่อน */
-export function MegaIcon({ name, iconKey, size = 20 }: { name: string; iconKey?: string | null; size?: number }) {
-  if (iconKey) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={keyUrl(iconKey, 96) ?? undefined} alt="" style={{ width: size, height: size, objectFit: "contain" }} />;
-  }
-  const ic = MEGA_ICONS.find((i) => i.key === name);
-  if (!ic) return null;
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      {ic.d.map((d, i) => (
-        <path key={i} d={d} />
-      ))}
-    </svg>
-  );
-}
-
 /* ───────── ช่องลิงก์แบบย่อ: โชว์ปลายทาง · กด = เปิดตัวเลือกลิงก์กลาง ───────── */
 function LinkField({ value, onChange, ctx }: { value: string; onChange: (href: string) => void; ctx: SchemaFormContext }) {
   const [open, setOpen] = useState(false);
@@ -120,40 +104,11 @@ function LinkField({ value, onChange, ctx }: { value: string; onChange: (href: s
   );
 }
 
-/* ───────── เลือกไอคอน: ชุดในตัว หรืออัปโหลดเอง ───────── */
+/* ───────── เลือกไอคอน: ของกลาง SiteIconPicker (ไอคอนเส้นชุดกลาง · อีโมจิ · อัปโหลด) ───────── */
+/** ค่าไอคอนของลิงก์ในรูปแบบกลาง — รูปอัปโหลด (iconKey) มาก่อน · ชื่อเปล่าแบบเก่า ("belt") = ไอคอนเส้น */
+const linkIconValue = (l: MegaLink) => (l.iconKey ? imageIconValue(l.iconKey) : /^[a-z0-9-]+$/.test(l.icon) ? lineIconValue(l.icon) : l.icon);
 function IconPicker({ link, onChange }: { link: MegaLink; onChange: (p: Partial<MegaLink>) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div>
-      <button type="button" onClick={() => setOpen((v) => !v)} className={`${mini} inline-flex items-center gap-1`} title="เลือกไอคอน">
-        <span className="w-5 h-5 inline-flex items-center justify-center text-slate-700">{link.icon || link.iconKey ? <MegaIcon name={link.icon} iconKey={link.iconKey} size={16} /> : "—"}</span>
-        ไอคอน ▾
-      </button>
-      {open && (
-        <div className="mt-1.5 rounded-lg border border-slate-200 bg-white p-2 w-[260px]">
-          <div className="grid grid-cols-8 gap-1">
-            <button type="button" onClick={() => onChange({ icon: "", iconKey: null })} className={`h-7 rounded border text-[10px] ${!link.icon && !link.iconKey ? "border-blue-500 bg-blue-50" : "border-slate-200"}`} title="ไม่มีไอคอน">
-              —
-            </button>
-            {MEGA_ICONS.map((ic) => (
-              <button
-                key={ic.key}
-                type="button"
-                title={ic.label}
-                onClick={() => onChange({ icon: ic.key, iconKey: null })}
-                className={`h-7 rounded border inline-flex items-center justify-center text-slate-700 ${link.icon === ic.key && !link.iconKey ? "border-blue-500 bg-blue-50" : "border-slate-200 hover:border-slate-400"}`}
-              >
-                <MegaIcon name={ic.key} size={16} />
-              </button>
-            ))}
-          </div>
-          <div className="mt-2">
-            <ImageUploadField label="หรืออัปโหลดไอคอนเอง (PNG/SVG พื้นใส)" value={link.iconKey} onChange={(k) => onChange({ iconKey: k })} height={36} />
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return <SiteIconPicker value={linkIconValue(link)} onChange={(v) => onChange(v.startsWith("img:") ? { icon: "", iconKey: v.slice(4) } : { icon: v, iconKey: null })} />;
 }
 
 /* ───────── 🔎 ตรวจลิงก์เสีย (ส่งผ่าน context ทั้งตัวจัด) ───────── */

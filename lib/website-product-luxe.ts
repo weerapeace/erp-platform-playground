@@ -13,7 +13,7 @@ export type LuxeCraftBg = "ink" | "brand" | "brandDeep" | "surface" | "page" | "
 
 export interface LuxeTrustItem {
   id: string;
-  /** อีโมจิ/สัญลักษณ์สั้น ๆ */
+  /** "i:<ไอคอนเส้น>" · "img:<รูป>" · อีโมจิ/สัญลักษณ์ (ค่าเดิม) — รูปแบบเดียวกับชุดไอคอนกลาง (ERP lib/website-icons ↔ เว็บร้าน site-icons) */
   icon: string;
   text: string;
 }
@@ -54,10 +54,10 @@ export const DEFAULT_PRODUCT_LUXE: ProductLuxe = {
   trust: {
     show: false,
     items: [
-      { id: "t1", icon: "🚚", text: "ส่งฟรีทั่วประเทศ" },
-      { id: "t2", icon: "↩", text: "เปลี่ยน/คืนได้ใน 14 วัน" },
-      { id: "t3", icon: "✔", text: "หนังแท้ 100%" },
-      { id: "t4", icon: "✦", text: "ผลิตในไทย" },
+      { id: "t1", icon: "i:truck", text: "ส่งฟรีทั่วประเทศ" },
+      { id: "t2", icon: "i:arrow-back-up", text: "เปลี่ยน/คืนได้ใน 14 วัน" },
+      { id: "t3", icon: "i:badge-check", text: "หนังแท้ 100%" },
+      { id: "t4", icon: "i:map-pin", text: "ผลิตในไทย" },
     ],
   },
 };
@@ -115,6 +115,13 @@ export const LUXE_CHOICES = {
 const HEX6 = /^#[0-9a-fA-F]{6}$/;
 const pick = <T extends string>(v: unknown, ok: readonly T[], fb: T): T => (typeof v === "string" && (ok as readonly string[]).includes(v) ? (v as T) : fb);
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
+/** ไอคอน — กฎเดียวกับ cleanSiteIcon (ไฟล์นี้ห้าม import): i:<key> / img:<r2 key> เก็บเต็ม · อีโมจิ ≤ 8 ตัว (ค่าเดิมโชว์เหมือนเดิม) */
+const iconOf = (v: unknown): string => {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (/^i:[a-z0-9-]{1,40}$/.test(s)) return s;
+  if (s.startsWith("img:")) return /^[\w\-./%()]{1,200}$/.test(s.slice(4)) ? s : "";
+  return s.startsWith("i:") ? "" : s.slice(0, 8);
+};
 
 export function normalizeProductLuxe(raw: unknown): ProductLuxe {
   const d = DEFAULT_PRODUCT_LUXE;
@@ -127,7 +134,7 @@ export function normalizeProductLuxe(raw: unknown): ProductLuxe {
     ? (tr.items as unknown[])
         .filter((x): x is Record<string, unknown> => !!x && typeof x === "object")
         .slice(0, LUXE_TRUST_MAX)
-        .map((x, i) => ({ id: str(x.id, 40) || `t${i + 1}`, icon: str(x.icon, 8), text: str(x.text, 60) }))
+        .map((x, i) => ({ id: str(x.id, 40) || `t${i + 1}`, icon: iconOf(x.icon), text: str(x.text, 60) }))
     : d.trust.items.map((x) => ({ ...x }));
   return {
     gridCols: Number(r.gridCols) === 2 ? 2 : 1,
