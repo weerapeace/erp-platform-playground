@@ -91,6 +91,38 @@ export interface ListingConfig {
   soldOut: ListingSoldOut;
   /** 📌 แถบค้นหา/ตัวกรอง/เรียง ติดบนจอตอนเลื่อนลง (อยู่ใต้หัวเว็บถ้าหัวเว็บติดจอ) */
   stickyBar: boolean;
+  /** 🎨 การ์ดในหน้ารายการ: parent = 1 การ์ด/รุ่น (เดิม) · sku = 1 การ์ด/สี · auto = หมวดที่มีไม่ถึง cardAutoMax รุ่น → ทีละสี */
+  cardMode: ListingCardMode;
+  /** อัตโนมัติ: หมวดที่มีรุ่นน้อยกว่าเท่านี้ = แตกเป็นทีละสี */
+  cardAutoMax: number;
+  /** การ์ดทีละสี: mix = สลับรุ่น (สีแรกของทุกรุ่นก่อน) · group = ทุกสีของรุ่นแรกก่อน */
+  skuOrder: "mix" | "group";
+  /** ตั้งรายหมวด { รหัสหมวด | "all" (หน้าสินค้าทั้งหมด): parent | sku } — ไม่มี = ตามค่าทั้งเว็บ */
+  cardModeByCat: Record<string, "parent" | "sku">;
+  /** ลูกค้าสลับเองได้ (ปุ่ม "ดูแบบรุ่น | ดูทีละสี" บนหน้า) */
+  cardSwitch: boolean;
+}
+
+/**
+ * 🎨 การ์ดทีละสี (SKU) ในหน้าหมวด/สินค้าทั้งหมด (2026-10-28 · เจ้าของ: "บางหมวดของน้อย อยากโชว์แบบ SKU")
+ *   เว็บร้านแตกการ์ดด้วยของกลาง src/lib/sku-cards.ts expandSkuCards (ตัวเดียวกับ Section ตารางสินค้า)
+ */
+export type ListingCardMode = "parent" | "sku" | "auto";
+export const LISTING_CARD_MODES: { value: ListingCardMode; label: string; hint: string }[] = [
+  { value: "parent", label: "แบบรุ่น (เดิม)", hint: "1 การ์ด / รุ่น · มีจุดสีใต้การ์ด" },
+  { value: "sku", label: "แบบทีละสี ทุกหมวด", hint: "1 การ์ด / สี · รูปของสีนั้น · ชื่อ \"รุ่น · สี\"" },
+  { value: "auto", label: "อัตโนมัติ (หมวดของน้อย)", hint: "หมวดที่มีรุ่นไม่ถึงที่ตั้ง = แตกเป็นทีละสี" },
+];
+export const LISTING_CARD_AUTO_RANGE = { min: 2, max: 30 } as const;
+/** รหัสหน้า "สินค้าทั้งหมด" ในการตั้งรายหมวด */
+export const LISTING_ALL_KEY = "all";
+
+/** หน้านี้ (หมวด / "all") ใช้การ์ดแบบไหน — models = จำนวนรุ่นในหมวดนั้น (ไม่นับคำค้น/ตัวกรอง) */
+export function listingCardModeFor(cfg: Pick<ListingConfig, "cardMode" | "cardAutoMax" | "cardModeByCat">, category: string, models: number): "parent" | "sku" {
+  const own = cfg.cardModeByCat?.[category];
+  if (own === "parent" || own === "sku") return own;
+  if (cfg.cardMode === "auto") return models < cfg.cardAutoMax ? "sku" : "parent";
+  return cfg.cardMode === "sku" ? "sku" : "parent";
 }
 export type ListingSoldOut = "normal" | "last" | "hide";
 export const LISTING_SOLD_OUT: { value: ListingSoldOut; label: string; hint: string }[] = [
@@ -258,7 +290,7 @@ export const normalizeSizeBreaks = (v: unknown) => {
 
 
 export const MAX_LISTING_INSERTS = 20;
-export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30, columns: null, paging: "all", pageSize: 24, defaultSort: "featured", sorts: LISTING_SORTS.map((s) => s.value), header: { ...DEFAULT_LISTING_HEADER }, soldOut: "last", stickyBar: false };
+export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30, columns: null, paging: "all", pageSize: 24, defaultSort: "featured", sorts: LISTING_SORTS.map((s) => s.value), header: { ...DEFAULT_LISTING_HEADER }, soldOut: "last", stickyBar: false, cardMode: "parent", cardAutoMax: 6, skuOrder: "mix", cardModeByCat: {}, cardSwitch: false };
 
 export const LISTING_SIZES: { value: ListingInsertSize; label: string; hint: string }[] = [
   { value: "1x1", label: "1 ช่อง (เท่าการ์ดสินค้า)", hint: "มือถือ: 1 ช่อง" },
@@ -409,7 +441,7 @@ export function normalizeListing(raw: unknown): ListingConfig {
 }
 
 /** 📐 ต่อแถว · 📄 แบ่งหน้า · ↕ การเรียง · หัวหน้า (ส่วนที่เพิ่มรอบ 2026-10-17) */
-function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig, "columns" | "paging" | "pageSize" | "defaultSort" | "sorts" | "header" | "soldOut" | "stickyBar"> {
+function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig, "columns" | "paging" | "pageSize" | "defaultSort" | "sorts" | "header" | "soldOut" | "stickyBar" | "cardMode" | "cardAutoMax" | "skuOrder" | "cardModeByCat" | "cardSwitch"> {
   const int = (v: unknown, fb: number, lo: number, hi: number) => {
     const n = Number(v);
     return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : fb;
@@ -435,6 +467,19 @@ function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig,
     header: { eyebrow: txt(h.eyebrow, 60), title: txt(h.title, 80), subtitle: txt(h.subtitle, 240), showSearch: h.showSearch !== false, showCount: h.showCount !== false },
     soldOut: r.soldOut === "normal" || r.soldOut === "hide" ? r.soldOut : "last",
     stickyBar: r.stickyBar === true,
+    cardMode: r.cardMode === "sku" || r.cardMode === "auto" ? r.cardMode : "parent",
+    cardAutoMax: int(r.cardAutoMax, 6, LISTING_CARD_AUTO_RANGE.min, LISTING_CARD_AUTO_RANGE.max),
+    skuOrder: r.skuOrder === "group" ? "group" : "mix",
+    cardModeByCat: normalizeCardModeByCat(r.cardModeByCat),
+    cardSwitch: r.cardSwitch === true,
   };
+}
+
+/** ตั้งรายหมวด: รหัสหมวดที่ใช้ได้ + ค่า parent/sku เท่านั้น (ไม่เกิน 200 หมวด) */
+function normalizeCardModeByCat(v: unknown): Record<string, "parent" | "sku"> {
+  const out: Record<string, "parent" | "sku"> = {};
+  if (!v || typeof v !== "object" || Array.isArray(v)) return out;
+  for (const [k, m] of Object.entries(v as Record<string, unknown>).slice(0, 200)) if (/^[\w-]{1,40}$/.test(k) && (m === "parent" || m === "sku")) out[k] = m;
+  return out;
 }
 
