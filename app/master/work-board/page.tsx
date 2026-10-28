@@ -42,6 +42,7 @@ import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
 import { CatchUpModal } from "./catch-up-modal";
+import { dispatchRowIssues, isHireDesk, parentKeyOf } from "@/lib/work-entry-rules";
 import { CopyPieceworkModal } from "./copy-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
@@ -732,7 +733,9 @@ function WorkBoardPageInner() {
 
   const submitDispatch = async () => {
     if (!dispMO || !dispDept) return;
-    if (!(dispQty > 0)) { toast.error("จำนวนต้องมากกว่า 0"); return; }
+    // กฎกลาง (lib/work-entry-rules) — ตัวเดียวกับป๊อป 🔄 อัปเดตงาน
+    const bad = dispatchRowIssues({ qty: dispQty, remaining: dispMO.remaining, deskName: dispDept.name, crewCount: dispCrew.length }).find((x) => x.level === "error");
+    if (bad) { toast.error(bad.msg); return; }
     // ค่าแรงว่างได้ — จ่ายก่อน ค่อยมาใส่ทีหลัง (ปุ่ม 💰 ใส่ค่าแรง ที่การ์ดในโต๊ะ / ตอนส่งงาน)
     const crew = crewList(dispCrew, deptCraftsmen);   // เฉพาะคนที่ยังอยู่ในโต๊ะนี้ (เปลี่ยนโต๊ะ/ย้ายคน → ตัดทิ้ง)
     setDispSaving(true);
@@ -792,13 +795,13 @@ function WorkBoardPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
   // ช่างในแผนก — ยกเว้นแผนก "ช่างเหมา" (ชื่อมีคำว่า เหมา) ให้เลือกพนักงานได้ทุกคน
-  const dispIsHire = useMemo(() => !!dispDept && /เหมา/.test(dispDept.name), [dispDept]);
+  const dispIsHire = useMemo(() => isHireDesk(dispDept?.name), [dispDept]);
   const deptCraftsmen = useMemo(() => {
     if (!dispDept) return [];
     return dispIsHire ? craftsmen : craftsmen.filter((c) => c.department_id === dispDept.id);
   }, [dispDept, dispIsHire, craftsmen]);
   // กลุ่ม B: ประวัติงานเสีย — Parent SKU จากรหัส (ตัดท้าย -NN) เช่น TTM094-02 → TTM094
-  const parentKeyOf = (sku: string | null | undefined) => (sku ?? "").trim().toUpperCase().replace(/-\d+$/, "");
+
   // ประวัติงานเสียของผู้รับงาน "เฉพาะ Parent SKU เดียวกับ MO ที่กำลังจ่าย" (ไม่ใช่ทุกงาน)
   const defectScoped = useCallback((name: string | null | undefined, parentKey: string) => {
     const d = name ? defectByWorker[name.trim().toLowerCase()] : undefined;
@@ -3752,7 +3755,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     if (!dept) { toast.error("เลือกโต๊ะ/แผนกก่อน"); return; }
     const list = pending.filter((m) => sel.has(m.id) && m.remaining > 0);
     if (!list.length) { toast.error("ใบที่ติ๊กไว้ไม่มีจำนวนคงเหลือให้จ่าย"); return; }
-    const hire = /เหมา/.test(dept.name);
+    const hire = isHireDesk(dept.name);
     const crew = crewList(dispCrew, hire ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id));
     // งานเหมา = ต้องระบุคน (กฎเดียวกับป๊อปจ่ายงานปกติ)
     if (hire && !crew.length) { toast.error("งานเหมา ต้องเลือกช่างก่อน"); return; }

@@ -8,6 +8,7 @@
  * เจ้าของอนุมัติชุดสถานะ 2026-10-28 · ดู docs/work-board-catch-up.md
  */
 import type { CatchUpSnapshot, CatchUpWo } from "@/app/api/mo/catch-up/route";
+import { dispatchRowIssues, notReadyIssue, wageIssues, returnRowIssues, qcReceiveIssues, dateIssues, todayYmd, type EntryIssue } from "@/lib/work-entry-rules";
 
 export type CuStage = "have" | "prep" | "cut" | "dispatch" | "return" | "qc_in" | "ship" | "close";
 /** ลำดับขั้นจริงของใบสั่งผลิต (ซื้อ → เตรียม → ตัด → จ่าย → ช่างส่งคืน → QC รับเข้าชั้น → ส่งออก → ปิดใบ) */
@@ -121,27 +122,30 @@ export function cuDefaultQty(f: CuFacts, k: CuTargetKey) {
   return { dispatchQty, returnQty: k === "return_part" ? 0 : outstanding, qcGood: r2(f.received + outstanding - f.qcPulled), qcBad: 0 };
 }
 
-/** แถวจ่ายงาน 1 แถว = ใบจ่ายงาน 1 ใบ (จ่ายหลายช่าง/หลายโต๊ะ = หลายแถว) */
-export type CuDispLine = { key: string; deptId: string; qty: number; date: string | null };
-/** แถวส่งคืน 1 แถว = ส่งงาน 1 ครั้ง · ref = "auto" (ไล่ใบเก่าก่อน) | id ใบจ่ายเดิม | "new:<key แถวจ่าย>" */
-export type CuRetLine = { key: string; ref: string; qty: number; date: string | null };
+/** แถวจ่ายงาน 1 แถว = ใบจ่ายงาน 1 ใบ · deskName/crewCount = หน้าจอส่งมาให้ตรวจกฎโต๊ะเหมา · rate = ค่าแรง/ชิ้น (ว่าง = ให้เซิร์ฟเวอร์เติมราคากลาง) */
+export type CuDispLine = { key: string; deptId: string; qty: number; date: string | null; deskName?: string | null; crewCount?: number; rate?: number | null };
+/** แถวส่งคืน 1 แถว = ส่งงาน 1 ครั้ง · ref = "auto" (ไล่ใบเก่าก่อน) | id ใบจ่ายเดิม | "new:<key แถวจ่าย>" · wage = ค่าแรง/ชิ้น (ว่าง = ยังไม่ลงค่าแรง) */
+export type CuRetLine = { key: string; ref: string; qty: number; date: string | null; wage?: number | null };
 /** วันที่จริงของแต่ละขั้น (null = จำไม่ได้/ข้าม) */
 export type CuDates = { have: string | null; ready: string | null; qc: string | null; ship: string | null; close: string | null; cancel: string | null };
 export const CU_NO_DATES: CuDates = { have: null, ready: null, qc: null, ship: null, close: null, cancel: null };
-/** missing = รหัสวัตถุดิบที่ "ยังขาด" (ใช้เมื่อติ๊ก short) */
+/** missing = รหัสวัตถุดิบที่ "ยังขาด" · badReason = สาเหตุของเสีย (จากรายการ) · centralRate = ค่าแรงกลาง/ชิ้น (ไว้เตือนค่าแรงผิดปกติ) */
 export type CuInputs = {
   disp: CuDispLine[]; ret: CuRetLine[];
   qcGood: number; qcBad: number; shelfId: string; cancelReason: string; missing?: string[]; dates: CuDates;
+  badReason?: string; centralRate?: number | null; today?: string;
 };
 export type CuStep =
   | { kind: "skip_buy"; date: string | null }
   | { kind: "mark_ready"; parts: ("prep" | "cut")[]; except?: string[]; date: string | null }
-  | { kind: "dispatch"; line: string; qty: number; date: string | null }
-  | { kind: "return"; ref: string; qty: number; date: string | null }
+  | { kind: "dispatch"; line: string; qty: number; date: string | null; rate?: number | null }
+  | { kind: "return"; ref: string; qty: number; date: string | null; wage?: number | null }
   | { kind: "qc_in"; good: number; bad: number; date: string | null }
   | { kind: "ship"; qty: number; date: string | null }
   | { kind: "close"; date: string | null }
   | { kind: "cancel"; reason: string; date: string | null };
+/** ปัญหาที่ช่อง (กฎกลาง lib/work-entry-rules) + where = บอกว่าแถวไหน (ไว้โชว์ในสรุป) */
+export type CuIssue = EntryIssue & { where?: string };
 
 /** "2026-10-12" → "12 ต.ค. 69" · null → "ไม่ระบุวัน" */
 export const cuDateText = (d: string | null) => d ? new Date(`${d}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "ไม่ระบุวัน";
@@ -153,8 +157,8 @@ export function cuStepLabel(s: CuStep, who?: (s: CuStep) => string): string {
   switch (s.kind) {
     case "skip_buy": return `ติดป้าย "ของครบ (อัปเดตย้อนหลัง)" ที่ขั้นซื้อของ${d}`;
     case "mark_ready": return `ติ๊ก${s.parts.includes("prep") ? " เตรียม" : ""}${s.parts.length === 2 ? " +" : ""}${s.parts.includes("cut") ? " ตัด" : ""} ${s.except?.length ? `ยกเว้นของที่ยังขาด ${s.except.length} รายการ` : "ครบทั้งใบ"}${d}`;
-    case "dispatch": return `สร้างใบจ่ายงาน ${fmt(s.qty)} ชิ้น${w ? ` → ${w}` : ""}${d}`;
-    case "return": return `บันทึกช่างส่งคืน ${fmt(s.qty)} ชิ้น${w ? ` (${w})` : ""}${d} · ยังไม่ลงค่าแรง`;
+    case "dispatch": return `สร้างใบจ่ายงาน ${fmt(s.qty)} ชิ้น${w ? ` → ${w}` : ""}${s.rate ? ` · ค่าแรง ฿${fmt(s.rate)}/ชิ้น` : ""}${d}`;
+    case "return": return `บันทึกช่างส่งคืน ${fmt(s.qty)} ชิ้น${w ? ` (${w})` : ""}${d} · ${s.wage != null ? `ค่าแรง ฿${fmt(s.wage)}/ชิ้น` : "ยังไม่ลงค่าแรง"}`;
     case "qc_in": return `รับเข้าชั้น QC · ของดี ${fmt(s.good)}${s.bad > 0 ? ` · ของเสีย ${fmt(s.bad)}` : ""} ชิ้น${d}`;
     case "ship": return `ส่งออกจากชั้น QC ${fmt(s.qty)} ชิ้น${d}`;
     case "close": return `ปิดใบสั่งผลิต${d}`;
@@ -162,67 +166,101 @@ export function cuStepLabel(s: CuStep, who?: (s: CuStep) => string): string {
   }
 }
 
-/** แปลงสิ่งที่เลือก → ขั้นที่จะบันทึกจริง (เรียงตามลำดับ) + ข้อผิดพลาดภาษาคน (มี error = ห้ามบันทึก) */
-export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: CuInputs, wos: CatchUpWo[] = []): { steps: CuStep[]; errors: string[] } {
-  const steps: CuStep[] = [], errors: string[] = [];
-  const D = inp.dates;
+/**
+ * แปลงสิ่งที่เลือก → ขั้นที่จะบันทึกจริง (เรียงตามลำดับ) + ปัญหารายช่อง
+ * issues: error = ต้องแก้ (ห้ามบันทึก) · warn = เตือนสีเหลือง บันทึกได้ — กฎแต่ละช่องมาจาก lib/work-entry-rules (ตัวเดียวกับป๊อปจ่ายงานปกติ)
+ * errors = ข้อความ error ทั้งหมด (มีชื่อแถวนำหน้า) ไว้โชว์สรุป/ทดสอบ
+ */
+export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: CuInputs, wos: CatchUpWo[] = []): { steps: CuStep[]; errors: string[]; issues: CuIssue[] } {
+  const steps: CuStep[] = [], issues: CuIssue[] = [];
+  const D = inp.dates, today = inp.today ?? todayYmd();
+  const add = (list: EntryIssue[], where?: string) => { for (const x of list) issues.push(where ? { ...x, where } : x); };
+  const done = () => {
+    if (!issues.some((x) => x.level === "error") && !steps.length) issues.push({ level: "error", field: "target", msg: "ระบบบันทึกขั้นนี้ไว้ครบแล้ว ไม่มีอะไรต้องอัปเดต" });
+    return { steps, issues, errors: issues.filter((x) => x.level === "error").map((x) => (x.where ? `${x.where}: ${x.msg}` : x.msg)) };
+  };
   const blocked = cuTargetBlocked(f, k);
-  if (blocked) return { steps, errors: [blocked] };
+  if (blocked) { issues.push({ level: "error", field: "target", msg: blocked }); return done(); }
   if (k === "cancel") {
-    if (!inp.cancelReason.trim()) errors.push("ใส่เหตุผลที่ยกเลิกก่อน");
+    if (!inp.cancelReason.trim()) issues.push({ level: "error", field: "cancel:reason", msg: "ใส่เหตุผลที่ยกเลิกก่อน" });
     else steps.push({ kind: "cancel", reason: inp.cancelReason.trim(), date: D.cancel });
-    return { steps, errors };
+    add(dateIssues(D.cancel, "cancel:date", { today }));
+    return done();
   }
   const rows = cuRows(f, k, ticks);
   const on = (st: CuStage) => rows.some((r) => r.stage === st && (r.state === "need" || (r.state === "opt" && !!ticks[st])));
 
+  // ── ของครบ / ยังขาดของ / เตรียม / ตัด
   const short = rows.some((r) => r.stage === "have" && r.state === "short");
   const missing = short ? [...new Set(inp.missing ?? [])] : [];
-  if (short && f.materials > 0 && missing.length === 0) errors.push("เลือกของที่ยังขาดอย่างน้อย 1 รายการ (หรือเอาติ๊ก \"ยังขาดของอยู่\" ออก)");
-  if (on("have") && !on("prep")) steps.push({ kind: "skip_buy", date: D.have });
+  if (short && f.materials > 0 && missing.length === 0) issues.push({ level: "error", field: "short", msg: "เลือกของที่ยังขาดอย่างน้อย 1 รายการ (หรือเอาติ๊ก \"ยังขาดของอยู่\" ออก)" });
+  if (on("have") && !on("prep")) { steps.push({ kind: "skip_buy", date: D.have }); add(dateIssues(D.have, "have:date", { today })); }
   const parts = (["prep", "cut"] as const).filter((p) => on(p));
-  if (parts.length) steps.push(missing.length ? { kind: "mark_ready", parts: [...parts], except: missing, date: D.ready } : { kind: "mark_ready", parts: [...parts], date: D.ready });
+  if (parts.length) {
+    steps.push(missing.length ? { kind: "mark_ready", parts: [...parts], except: missing, date: D.ready } : { kind: "mark_ready", parts: [...parts], date: D.ready });
+    add(dateIssues(D.ready, "ready:date", { today }));
+  }
 
-  // ── จ่ายงาน: หลายแถว (หลายช่าง/หลายโต๊ะ) · เคยจ่ายไปบางส่วนแล้ว = จ่ายเพิ่ม 0 ได้
+  // ── จ่ายงาน: หลายแถว (หลายช่าง/หลายโต๊ะ) · เคยจ่ายไปบางส่วนแล้ว = แถวเดียวที่จำนวน 0 คือไม่จ่ายเพิ่ม
   const remain = r2(f.qty - f.dispatched);
   const cap = new Map<string, number>();   // ใบที่ส่งคืนได้: id ใบเดิม / "new:key" → ชิ้นที่ยังค้างช่าง
-  for (const w of wos) if (w.status !== "done") cap.set(w.id, r2(w.qty - w.received_qty));
+  const dateOfRef = new Map<string, string | null>();
+  for (const w of wos) if (w.status !== "done") { cap.set(w.id, r2(w.qty - w.received_qty)); dateOfRef.set(w.id, w.dispatch_date); }
+  let dispatched = f.dispatched;
   if (on("dispatch")) {
-    const lines = inp.disp.filter((l) => l.qty > 0);
-    const total = r2(lines.reduce((a, l) => a + l.qty, 0));
-    if (inp.disp.some((l) => l.qty < 0)) errors.push("จำนวนที่จ่ายติดลบไม่ได้");
-    if (total <= EPS && f.dispatched <= EPS) errors.push("ใส่จำนวนที่จ่ายก่อน");
-    if (total > remain + EPS) errors.push(`จ่ายรวม ${fmt(total)} ชิ้น เกินที่เหลือ ${fmt(remain)} ชิ้น`);
-    lines.forEach((l) => { if (!l.deptId) errors.push(`แถวจ่าย ${inp.disp.indexOf(l) + 1}: เลือกโต๊ะก่อน`); });
-    if (total <= remain + EPS) for (const l of lines) {
-      steps.push({ kind: "dispatch", line: l.key, qty: r2(l.qty), date: l.date });
-      cap.set(`new:${l.key}`, r2(l.qty));
+    const skipAll = f.dispatched > EPS && inp.disp.length === 1 && !(inp.disp[0].qty > 0);
+    if (!skipAll) {
+      const total = r2(inp.disp.reduce((a, l) => a + (l.qty > 0 ? l.qty : 0), 0));
+      inp.disp.forEach((l, i) => {
+        const where = inp.disp.length > 1 ? `แถวจ่าย ${i + 1}` : "จ่ายงาน";
+        add(dispatchRowIssues({ qty: l.qty, remaining: remain, deskName: l.deptId ? (l.deskName ?? "โต๊ะ") : null, crewCount: l.crewCount ?? 1 }, `disp:${l.key}`)
+          .map((x) => (x.field.endsWith(":qty") && !(l.qty > 0) && inp.disp.length > 1 ? { ...x, msg: "ใส่จำนวน หรือกด ✕ ลบแถวนี้" } : x)), where);
+        add(wageIssues(l.rate ?? null, inp.centralRate, `disp:${l.key}:rate`), where);
+        add(dateIssues(l.date, `disp:${l.key}:date`, { today }), where);
+      });
+      if (total > remain + EPS) issues.push({ level: "error", field: "disp", msg: `จ่ายรวม ${fmt(total)} ชิ้น เกินที่เหลือ ${fmt(remain)} ชิ้น` });
+      const rowErr = issues.some((x) => x.level === "error" && x.field.startsWith("disp"));
+      if (!rowErr) for (const l of inp.disp) {
+        steps.push({ kind: "dispatch", line: l.key, qty: r2(l.qty), date: l.date, ...(l.rate != null && l.rate > 0 ? { rate: l.rate } : {}) });
+        cap.set(`new:${l.key}`, r2(l.qty)); dateOfRef.set(`new:${l.key}`, l.date);
+      }
+      dispatched = r2(dispatched + total);
+      // กติกาเดียวกับลากการ์ด: เตรียม/ตัดไม่ครบ = เตือน (จ่ายต่อได้)
+      const nr = notReadyIssue(f.prepDone || on("prep"), f.cutDone || on("cut"));
+      if (nr) issues.push(nr);
+      if (total > 0 && dispatched < f.qty - EPS) issues.push({ level: "warn", field: "disp", msg: `ยังเหลือ ${fmt(f.qty - dispatched)} ชิ้นที่ยังไม่จ่าย — ใบยังอยู่แท็บรอจ่าย` });
     }
   }
-  const dispatched = r2(f.dispatched + steps.reduce((a, s) => a + (s.kind === "dispatch" ? s.qty : 0), 0));
 
   // ── ช่างส่งคืน: หลายรอบ (ส่งไม่พร้อมกัน) แต่ละรอบมีวันที่ · เลือกได้ว่ามาจากใบไหน
   let received = f.received;
+  let lastRetDate: string | null = null;
   if (on("return")) {
     const out = r2(dispatched - received);
-    const lines = inp.ret.filter((l) => l.qty > 0);
-    const total = r2(lines.reduce((a, l) => a + l.qty, 0));
-    if (inp.ret.some((l) => l.qty < 0)) errors.push("จำนวนส่งคืนติดลบไม่ได้");
-    if (out <= EPS) errors.push("ยังไม่มีงานค้างที่ช่างให้ส่งคืน");
-    else if (total <= EPS) errors.push("ใส่จำนวนที่ช่างส่งคืนก่อน");
-    else if (total > out + EPS) errors.push(`ส่งคืนรวม ${fmt(total)} ชิ้น เกินที่ค้างช่าง ${fmt(out)} ชิ้น`);
+    const total = r2(inp.ret.reduce((a, l) => a + (l.qty > 0 ? l.qty : 0), 0));
+    if (out <= EPS) issues.push({ level: "error", field: "ret", msg: "ยังไม่มีงานค้างที่ช่างให้ส่งคืน" });
     else {
       const left = new Map(cap);
-      let bad = false;
-      for (const l of lines.filter((x) => x.ref !== "auto")) {
-        const c = left.get(l.ref) ?? 0;
-        if (l.qty > c + EPS) { errors.push(`รอบส่งคืน ${inp.ret.indexOf(l) + 1}: ใบนั้นค้างช่างแค่ ${fmt(c)} ชิ้น`); bad = true; }
-        left.set(l.ref, r2(c - l.qty));
-      }
-      if (!bad) {
+      inp.ret.forEach((l, i) => {
+        const where = inp.ret.length > 1 ? `รอบส่งคืน ${i + 1}` : "ส่งคืน";
+        const base = returnRowIssues({ qty: l.qty, outstanding: out }, `ret:${l.key}`);
+        add(base.map((x) => (!(l.qty > 0) && inp.ret.length > 1 ? { ...x, msg: "ใส่จำนวน หรือกด ✕ ลบรอบนี้" } : x)), where);
+        if (!base.length && l.ref !== "auto") {
+          const c = left.get(l.ref) ?? 0;
+          if (l.qty > c + EPS) issues.push({ level: "error", field: `ret:${l.key}:qty`, msg: `ใบนั้นค้างช่างแค่ ${fmt(c)} ชิ้น`, where });
+          left.set(l.ref, r2(c - l.qty));
+        }
+        add(wageIssues(l.wage ?? null, inp.centralRate, `ret:${l.key}:wage`), where);
+        add(dateIssues(l.date, `ret:${l.key}:date`, { today, notBefore: l.ref !== "auto" ? dateOfRef.get(l.ref) : null, notBeforeLabel: "วันที่จ่าย" }), where);
+        if (l.date && (!lastRetDate || l.date > lastRetDate)) lastRetDate = l.date;
+      });
+      if (total > out + EPS) issues.push({ level: "error", field: "ret", msg: `ส่งคืนรวม ${fmt(total)} ชิ้น เกินที่ค้างช่าง ${fmt(out)} ชิ้น` });
+      received = r2(received + Math.min(total, out));   // ตรวจขั้นถัดไปต่อได้แม้รอบส่งคืนยังมีจุดต้องแก้
+      if (!issues.some((x) => x.level === "error" && x.field.startsWith("ret"))) {
         // ใบที่ระบุชัดก่อน แล้วค่อย "อัตโนมัติ" (กันอัตโนมัติไปกินยอดของใบที่ระบุ)
-        for (const l of [...lines.filter((x) => x.ref !== "auto"), ...lines.filter((x) => x.ref === "auto")]) steps.push({ kind: "return", ref: l.ref, qty: r2(l.qty), date: l.date });
-        received = r2(received + total);
+        for (const l of [...inp.ret.filter((x) => x.ref !== "auto"), ...inp.ret.filter((x) => x.ref === "auto")])
+          steps.push({ kind: "return", ref: l.ref, qty: r2(l.qty), date: l.date, ...(l.wage != null ? { wage: l.wage } : {}) });
+        if (k !== "return_part" && received < dispatched - EPS) issues.push({ level: "warn", field: "ret", msg: `ยังอยู่กับช่าง ${fmt(dispatched - received)} ชิ้น` });
       }
     }
   }
@@ -230,25 +268,23 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
   let good = 0;
   if (on("qc_in")) {
     const avail = r2(received - f.qcPulled);
-    const tot = r2((inp.qcGood || 0) + (inp.qcBad || 0));
-    if (avail <= EPS) errors.push("ไม่มีของรอ QC รับเข้า");
-    else if (inp.qcGood < 0 || inp.qcBad < 0 || !(tot > 0) || tot > avail + EPS) errors.push(`ของดี + ของเสีย ต้องรวมกัน 1 ถึง ${fmt(avail)} ชิ้น`);
-    else if (inp.qcGood > 0 && !inp.shelfId) errors.push("เลือกชั้นที่วางของดีก่อน");
-    else { good = r2(inp.qcGood); steps.push({ kind: "qc_in", good, bad: r2(inp.qcBad), date: D.qc }); }
+    const qi = qcReceiveIssues({ good: inp.qcGood, bad: inp.qcBad, available: avail, shelfChosen: !!inp.shelfId, reasonChosen: !!inp.badReason?.trim() });
+    add(qi, "QC");
+    add(dateIssues(D.qc, "qc:date", { today, notBefore: lastRetDate, notBeforeLabel: "วันที่ส่งคืน" }), "QC");
+    if (!qi.length) { good = r2(inp.qcGood); steps.push({ kind: "qc_in", good, bad: r2(inp.qcBad), date: D.qc }); }
   }
 
   if (on("ship")) {
-    if (good > 0) steps.push({ kind: "ship", qty: good, date: D.ship });
-    else if (!on("qc_in") && f.shelfGood > EPS) errors.push(`ของดีบนชั้น QC เดิม ${fmt(f.shelfGood)} ชิ้น — ส่งออกที่หน้าโกดัง QC`);
-    else if (on("qc_in")) errors.push("ไม่มีของดีให้ส่งออก");
+    if (good > 0) { steps.push({ kind: "ship", qty: good, date: D.ship }); add(dateIssues(D.ship, "ship:date", { today, notBefore: D.qc, notBeforeLabel: "วันที่ QC รับเข้า" })); }
+    else if (!on("qc_in") && f.shelfGood > EPS) issues.push({ level: "error", field: "ship", msg: `ของดีบนชั้น QC เดิม ${fmt(f.shelfGood)} ชิ้น — ส่งออกที่หน้าโกดัง QC` });
+    else if (on("qc_in") && !issues.some((x) => x.field.startsWith("qc"))) issues.push({ level: "error", field: "qc:good", msg: "ไม่มีของดีให้ส่งออก" });
   }
 
   if (on("close")) {
-    if (received < f.qty - EPS) errors.push(`ปิดใบได้เมื่อช่างส่งคืนครบ ${fmt(f.qty)} ชิ้น (ตอนนี้ ${fmt(received)})`);
-    else steps.push({ kind: "close", date: D.close });
+    if (received < f.qty - EPS) issues.push({ level: "error", field: "close", msg: `ปิดใบได้เมื่อช่างส่งคืนครบ ${fmt(f.qty)} ชิ้น (ตอนนี้ ${fmt(received)})` });
+    else { steps.push({ kind: "close", date: D.close }); add(dateIssues(D.close, "close:date", { today, notBefore: D.ship ?? D.qc ?? lastRetDate, notBeforeLabel: "ขั้นก่อนหน้า" })); }
   }
-  if (!errors.length && !steps.length) errors.push("ระบบบันทึกขั้นนี้ไว้ครบแล้ว ไม่มีอะไรต้องอัปเดต");
-  return { steps, errors };
+  return done();
 }
 
 /** แบ่งจำนวนลงหลายแถวตามลำดับ (เก่าก่อน) ไม่เกินเพดานของแต่ละแถว */
@@ -288,8 +324,9 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
   const newWo = new Map<string, string>();   // key แถวจ่าย → id ใบจ่ายที่เพิ่งสร้าง
   const goodItems: { id: string; qty: number }[] = [];
   const results: CuResult[] = [];
-  const submit = async (woId: string, qty: number, date: string | null) => {
-    await api("/api/mo/submissions", { wo_id: woId, qty, wage: null, info_pending: true, quiet: true, ...(date ? { submitted_at: date } : {}) });
+  // ค่าแรง: หน้าจอใส่ "ต่อชิ้น" → ส่งเป็นยอดรวม (เหมือนป๊อปส่งงานหน้า QC) · ไม่ใส่ค่าแรงหรือไม่ใส่วัน = ติดป้าย "ยังไม่ลงวันที่/ค่าแรง"
+  const submit = async (woId: string, qty: number, date: string | null, wage?: number | null) => {
+    await api("/api/mo/submissions", { wo_id: woId, qty, wage: wage != null ? r2(wage * qty) : null, info_pending: wage == null || !date, quiet: true, ...(date ? { submitted_at: date } : {}) });
     const w = wos.find((x) => x.id === woId); if (w) w.received_qty = r2(w.received_qty + qty);
   };
   for (let i = 0; i < steps.length; i++) {
@@ -311,6 +348,8 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
             mo_no: mo.mo_no, product_sku: mo.product_sku, product_name: mo.product_name,
             stage: stageOfDept(d.dept.name), department_id: d.dept.id, department_name: d.dept.name,
             ...d.who, qty: step.qty, uom: "ชิ้น", dispatch_date: step.date,
+            // ค่าแรง/ชิ้น × จำนวน (ไม่ใส่ = เซิร์ฟเวอร์เติมจากราคากลางในสูตรให้เอง — เหมือนจ่ายงานหลายใบ)
+            ...(step.rate ? { labor_cost: r2(step.rate * step.qty) } : {}),
             due_date: mo.internal_due_date || mo.due_date || null, note: `อัปเดตงานย้อนหลัง (ใบสั่งผลิต ${mo.mo_no})`, quiet: true,
           });
           const id = String(j.id);
@@ -321,11 +360,11 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
         }
         case "return":
           if (step.ref === "auto") {
-            for (const a of cuAllocate(wos.filter((w) => w.status !== "done"), step.qty, (w) => w.qty - w.received_qty)) await submit(a.id, a.qty, step.date);
+            for (const a of cuAllocate(wos.filter((w) => w.status !== "done"), step.qty, (w) => w.qty - w.received_qty)) await submit(a.id, a.qty, step.date, step.wage);
           } else {
             const id = step.ref.startsWith("new:") ? newWo.get(step.ref.slice(4)) : step.ref;
             if (!id) throw new Error("หาใบจ่ายงานของรอบนี้ไม่เจอ");
-            await submit(id, step.qty, step.date);
+            await submit(id, step.qty, step.date, step.wage);
           }
           break;
         case "qc_in": {

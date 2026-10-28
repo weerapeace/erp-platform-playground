@@ -9,7 +9,7 @@ const snap = (o: { mo?: Partial<CatchUpSnapshot["mo"]>; progress?: CatchUpSnapsh
     has_bom: true, prep_total: 4, prep_ready: 0, cut_total: 2, cut_ready: 0, prep_done: false, cut_done: false, skipped: {}, ...o.mo },
   progress: o.progress === undefined ? { total: 4, buy: 2, requested: 0, ordered: 0 } : o.progress,
   materials: [{ sku: "FAB", name: "ผ้า", status: "have", ready: false }, { sku: "ZIP", name: "ซิป", status: "buy", ready: false }],
-  wos: o.wos ?? [], shelves: [], shelf: { good: o.good ?? 0, defect: 0, repairing: 0 },
+  wos: o.wos ?? [], shelves: [], shelf: { good: o.good ?? 0, defect: 0, repairing: 0 }, rates: [], reasons: [],
 });
 /** ค่าตั้งต้น = จ่าย 1 แถว 100 ชิ้น โต๊ะ d1 · ส่งคืน 1 รอบ 100 ชิ้น (อัตโนมัติ) */
 const inp = (o: Partial<CuInputs> & { dq?: number; rq?: number } = {}): CuInputs => {
@@ -56,12 +56,12 @@ describe("cuBuildSteps", () => {
   it("QC รับเข้าชั้น → ติ๊ก/จ่าย/คืน/รับเข้า ครบ และต้องเลือกชั้น", () => {
     const f = cuFacts(snap());
     expect(cuBuildSteps(f, "qc_in", cuDefaultTicks(f, "qc_in"), inp()).steps.map((s) => s.kind)).toEqual(["mark_ready", "dispatch", "return", "qc_in"]);
-    expect(cuBuildSteps(f, "qc_in", cuDefaultTicks(f, "qc_in"), inp({ shelfId: "" })).errors).toContain("เลือกชั้นที่วางของดีก่อน");
+    expect(cuBuildSteps(f, "qc_in", cuDefaultTicks(f, "qc_in"), inp({ shelfId: "" })).errors.join(" ")).toMatch(/เลือกชั้นที่วางของดี/);
   });
   it("ส่งคืนบางส่วนต้องใส่จำนวน และไม่เกินที่ค้างช่าง", () => {
     const f = cuFacts(snap({ mo: { prep_ready: 4, cut_ready: 2 }, wos: [wo({ qty: 100 })] }));
     expect(cuDefaultQty(f, "return_part").returnQty).toBe(0);
-    expect(cuBuildSteps(f, "return_part", cuDefaultTicks(f, "return_part"), inp({ rq: 0 })).errors[0]).toMatch(/ใส่จำนวน/);
+    expect(cuBuildSteps(f, "return_part", cuDefaultTicks(f, "return_part"), inp({ rq: 0 })).errors[0]).toMatch(/มากกว่า 0/);
     expect(cuBuildSteps(f, "return_part", cuDefaultTicks(f, "return_part"), inp({ rq: 120 })).errors[0]).toMatch(/เกินที่ค้างช่าง 100/);
     expect(cuBuildSteps(f, "return_part", cuDefaultTicks(f, "return_part"), inp({ rq: 60 })).steps).toEqual([{ kind: "return", ref: "auto", qty: 60, date: null }]);
   });
@@ -134,6 +134,45 @@ describe("แยกแถว + วันที่", () => {
     expect(by("qc-warehouse")[0]).toMatchObject({ action: "receive", date: "2026-10-10" });
     expect(by("qc-warehouse")[1]).toMatchObject({ action: "ship", item_id: "it1", date: "2026-10-11" });
     expect(by("bulk-status")[0]).toMatchObject({ action: "close", date: "2026-10-12", source: "catch_up" });
+  });
+});
+
+describe("เตือนรายช่อง (กฎเดียวกับป๊อปปกติ)", () => {
+  const f = cuFacts(snap());
+  const warns = (r: ReturnType<typeof cuBuildSteps>) => r.issues.filter((x) => x.level === "warn").map((x) => x.msg).join(" | ");
+  it("ช่องที่ผิดบอกตำแหน่ง (field) ไว้ทำกรอบแดง", () => {
+    const r = cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({ disp: [{ key: "a", deptId: "", qty: 10, date: null }] }));
+    expect(r.issues.find((x) => x.level === "error")).toMatchObject({ field: "disp:a:dept", msg: "เลือกโต๊ะก่อน" });
+  });
+  it("โต๊ะเหมาต้องเลือกช่าง", () => {
+    const r = cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({ disp: [{ key: "a", deptId: "d2", deskName: "ช่างเหมา", crewCount: 0, qty: 100, date: null }] }));
+    expect(r.issues.find((x) => x.field === "disp:a:crew")?.msg).toMatch(/งานเหมา/);
+  });
+  it("จ่ายก่อนตัด = เตือนยังไม่พร้อม · จ่ายไม่ครบ = เตือน (บันทึกได้)", () => {
+    const r = cuBuildSteps(f, "dispatch", { have: true, prep: true, cut: false, dispatch: true }, inp({ dq: 60 }));
+    expect(r.errors).toEqual([]);
+    expect(warns(r)).toMatch(/ยังไม่ได้ติ๊กตัด/);
+    expect(warns(r)).toMatch(/ยังเหลือ 40 ชิ้นที่ยังไม่จ่าย/);
+  });
+  it("วันที่ส่งคืนก่อนวันจ่าย / อยู่ในอนาคต = เตือน", () => {
+    const r = cuBuildSteps(f, "return", cuDefaultTicks(f, "return"), inp({ today: "2026-10-28",
+      disp: [{ key: "a", deptId: "d1", qty: 100, date: "2026-10-10" }], ret: [{ key: "r", ref: "new:a", qty: 60, date: "2026-10-05" }, { key: "s", ref: "new:a", qty: 40, date: "2026-11-02" }] }));
+    expect(r.errors).toEqual([]);
+    expect(r.issues.find((x) => x.field === "ret:r:date")?.msg).toMatch(/ก่อนวันที่จ่าย/);
+    expect(r.issues.find((x) => x.field === "ret:s:date")?.msg).toMatch(/อนาคต/);
+  });
+  it("ค่าแรง/ชิ้นสูงกว่าราคากลางเกิน 2 เท่า = เตือน · ของเสียต้องเลือกสาเหตุ", () => {
+    const r = cuBuildSteps(f, "qc_in", cuDefaultTicks(f, "qc_in"), inp({ centralRate: 20, ret: [{ key: "r", ref: "auto", qty: 100, date: null, wage: 2000 }], qcGood: 95, qcBad: 5 }));
+    expect(r.issues.find((x) => x.field === "ret:r:wage")?.level).toBe("warn");
+    expect(r.issues.find((x) => x.field === "qc:reason")).toMatchObject({ level: "error", msg: "เลือกสาเหตุของเสีย" });
+    expect(cuBuildSteps(f, "qc_in", cuDefaultTicks(f, "qc_in"), inp({ qcGood: 95, qcBad: 5, badReason: "เย็บเบี้ยว" })).errors).toEqual([]);
+  });
+  it("ค่าแรงไปถึง API: จ่าย = ต่อชิ้น×จำนวน · ส่งคืนมีค่าแรง+วัน = ไม่ติดป้ายค้าง", async () => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const api = async (url: string, body: unknown) => { calls.push({ url, body: body as Record<string, unknown> }); return url.endsWith("work-orders") ? { id: "new1", wo_no: "WO-1" } : {}; };
+    await cuRun([{ kind: "dispatch", line: "a", qty: 10, date: null, rate: 25 }, { kind: "return", ref: "new:a", qty: 10, date: "2026-10-20", wage: 25 }], ctx(), api);
+    expect(calls[0].body).toMatchObject({ labor_cost: 250 });
+    expect(calls[1].body).toMatchObject({ wage: 250, info_pending: false, submitted_at: "2026-10-20" });
   });
 });
 

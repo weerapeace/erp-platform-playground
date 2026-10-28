@@ -37,6 +37,10 @@ export type CatchUpSnapshot = {
   shelves: { id: string; name: string; kind: string }[];
   /** ของของใบนี้ที่อยู่บนชั้น QC ตอนนี้ */
   shelf: { good: number; defect: number; repairing: number };
+  /** ค่าแรง/ชิ้นจากสูตร (bom_labor_rates ปัจจุบัน) — craftsman_id null = ราคากลาง · ไว้ตั้งค่าเริ่มต้น + เตือนค่าแรงผิดปกติ */
+  rates: { craftsman_id: string | null; rate: number }[];
+  /** สาเหตุของเสีย (รายการเดียวกับหน้าโกดัง QC) */
+  reasons: { id: string; name: string }[];
 };
 
 const n = (v: unknown) => Number(v) || 0;
@@ -48,13 +52,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const { data: mo } = await admin.from("manufacturing_orders")
-    .select("id, mo_no, product_sku, product_name, qty, status, due_date, internal_due_date, prep_done, cut_done, skipped_stages")
+    .select("id, mo_no, product_sku, product_name, qty, status, due_date, internal_due_date, prep_done, cut_done, skipped_stages, bom_code")
     .eq("mo_no", moNo).eq("is_active", true).maybeSingle();
   if (!mo) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
   const m = mo as Row;
   const skipped = parseSkipped(m.skipped_stages);
 
-  const [sumsRes, matsRes, wosRes, shelvesRes, itemsRes, links] = await Promise.all([
+  const bomCode = (m.bom_code as string) ?? null;
+  const [sumsRes, matsRes, wosRes, shelvesRes, itemsRes, links, ratesRes, reasonsRes] = await Promise.all([
     admin.from("mo_material_summary").select("id, mo_no, component_sku, component_name, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence").eq("mo_no", moNo).eq("is_active", true).order("sequence"),
     admin.from("mo_materials").select("material_type, cut_block_code, cut_length, pieces, cut_done").eq("mo_no", moNo).eq("is_active", true),
     admin.from("mo_work_orders").select("id, wo_no, qty, received_qty, qc_pulled_qty, status, department_name, assignee_name, dispatch_date, created_at")
@@ -62,6 +67,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     admin.from("qc_shelves").select("id, name, kind, sort_order").eq("is_active", true).order("sort_order"),
     admin.from("qc_warehouse_items").select("qty, status").eq("mo_no", moNo),
     loadMoPurchaseLinks(admin, [moNo]),
+    bomCode ? admin.from("bom_labor_rates").select("craftsman_id, rate").eq("bom_code", bomCode).eq("is_active", true).eq("is_current", true)
+      : Promise.resolve({ data: [] as Row[], error: null }),
+    admin.from("qc_defect_reasons").select("id, name").eq("is_active", true).order("sort_order"),
   ]);
   if (sumsRes.error || wosRes.error) return NextResponse.json({ data: null, error: "โหลดข้อมูลใบงานไม่สำเร็จ" }, { status: 500 });
 
@@ -112,6 +120,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     })),
     shelves: ((shelvesRes.data ?? []) as Row[]).map((s) => ({ id: String(s.id), name: String(s.name ?? ""), kind: String(s.kind ?? "") })),
     shelf,
+    rates: ((ratesRes.data ?? []) as Row[]).map((r) => ({ craftsman_id: (r.craftsman_id as string) ?? null, rate: n(r.rate) })).filter((r) => r.rate > 0),
+    reasons: ((reasonsRes.data ?? []) as Row[]).map((r) => ({ id: String(r.id), name: String(r.name ?? "") })),
   };
   return NextResponse.json({ data, error: null });
 }
