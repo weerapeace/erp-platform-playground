@@ -18,7 +18,7 @@ import { Icon, ICON_SETTINGS_API, commitIconSettings, iconImageUrl, previewIconS
 import { IconPickerModal } from "@/components/icon/icon-picker-modal";
 import {
   DEFAULT_ICON_SETTINGS, ICON_GROUP_LABEL, ICON_MEANINGS, ICON_MODE_LABEL,
-  cleanIconSettings, emojisOfMeaning, meaningIconValue, meaningOfEmoji, normEmoji,
+  cleanIconSettings, displayEmoji, emojisOfMeaning, meaningIconValue, meaningOfEmoji, normEmoji,
   type IconGroup, type IconMeaning, type IconMode, type IconSettings,
 } from "@/lib/icon-registry";
 
@@ -290,7 +290,7 @@ export function IconsAdmin() {
             <div className="space-y-1.5">
               {unknownMenuEmoji.map(([e, names]) => (
                 <div key={e} className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="text-xl w-8 text-center">{e}</span>
+                  <span className="text-xl w-8 text-center">{displayEmoji(e)}</span>
                   <span className="text-xs text-slate-500 flex-1 min-w-[140px] truncate" title={names.join(" · ")}>{names.join(", ")}</span>
                   <select value="" onChange={(ev) => ev.target.value && mapEmoji(e, ev.target.value)} className="h-8 px-2 rounded-lg border border-slate-200 text-sm bg-white">
                     <option value="">หมายถึง…</option>
@@ -317,7 +317,7 @@ export function IconsAdmin() {
               const m = ICON_MEANINGS.find((x) => x.key === k);
               return (
                 <span key={e} className="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-lg bg-slate-50 border border-slate-200 text-sm">
-                  <span className="text-lg">{e}</span> → <Icon name={k} settings={draft} mode={iconMode} /> {m?.label}
+                  <span className="text-lg">{displayEmoji(e)}</span> →<Icon name={k} settings={draft} mode={iconMode} /> {m?.label}
                   <button type="button" onClick={() => mapEmoji(e, null)} className="ml-1 w-6 h-6 rounded text-slate-400 hover:text-red-600 hover:bg-white" title="เลิกจับคู่"><Icon value="i:x" /></button>
                 </span>
               );

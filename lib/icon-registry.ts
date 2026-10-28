@@ -266,11 +266,15 @@ export function meaningOfEmoji(emoji: string, s: IconSettings): IconMeaning | nu
   return key ? MEANING_BY_KEY.get(key) ?? null : null;
 }
 
-/** อีโมจิทั้งหมดที่ชี้มาที่ความหมายนี้ (ตารางพื้นฐาน + ที่แอดมินจับคู่เพิ่ม) */
+/** อีโมจิสำหรับโชว์ — ตัวที่ปกติเป็นตัวอักษรขาวดำ (✏ ⚙ ⚠) เติม FE0F กลับให้เป็นอีโมจิสี */
+export const displayEmoji = (e: string): string =>
+  /^\p{Extended_Pictographic}$/u.test(e) && !/\p{Emoji_Presentation}/u.test(e) ? `${e}️` : e;
+
+/** อีโมจิทั้งหมดที่ชี้มาที่ความหมายนี้ (ตารางพื้นฐาน + ที่แอดมินจับคู่เพิ่ม) — แบบพร้อมโชว์ */
 export function emojisOfMeaning(key: string, s: IconSettings): string[] {
   const out: string[] = [];
-  for (const [e, k] of BASE_EMOJI_MAP) if (k === key && s.emojiMap[e] === undefined) out.push(e);
-  for (const [e, k] of Object.entries(s.emojiMap)) if (k === key) out.push(e);
+  for (const [e, k] of BASE_EMOJI_MAP) if (k === key && s.emojiMap[e] === undefined) out.push(displayEmoji(e));
+  for (const [e, k] of Object.entries(s.emojiMap)) if (k === key) out.push(displayEmoji(e));
   return out;
 }
 
