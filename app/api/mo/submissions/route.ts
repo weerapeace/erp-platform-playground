@@ -93,7 +93,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (newReceived >= Number(wo.qty ?? 0)) patch.status = "done";
   await admin.from("mo_work_orders").update(patch).eq("id", wo_id);
 
-  await writeAudit(admin, { action: "wo.submit", entityType: "wo_submissions", entityId: wo_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { sku: wo.product_sku, qty, wage, worker: effWorker, worker_changed: !!overrideWorker, done: newReceived >= Number(wo.qty ?? 0) } });
+  const quiet = body.quiet === true;   // อัปเดตงานย้อนหลัง (โหมด 🔄 อัปเดตงาน) → ไม่แจ้งกระดิ่ง/LINE เรื่องงานเก่า
+  await writeAudit(admin, { action: "wo.submit", entityType: "wo_submissions", entityId: wo_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { sku: wo.product_sku, qty, wage, worker: effWorker, worker_changed: !!overrideWorker, done: newReceived >= Number(wo.qty ?? 0), ...(quiet ? { catch_up: true } : {}) } });
+  if (quiet) return NextResponse.json({ error: null });
 
   // แจ้งเตือน "มีงานรอ QC" (best-effort): กระดิ่ง (หัวหน้า) + LINE กลุ่ม QC
   await notifyEvent(admin, "qc.pending", "mo_work_order", wo_id, user?.id ?? null, {

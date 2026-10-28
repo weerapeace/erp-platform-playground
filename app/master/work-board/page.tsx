@@ -41,6 +41,7 @@ import type { PurchaseStatusRow } from "@/app/api/mo/purchase-status/route";
 import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
+import { CatchUpModal } from "./catch-up-modal";
 import { CopyPieceworkModal } from "./copy-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
@@ -1462,6 +1463,8 @@ function WorkBoardPageInner() {
   const isXl = useIsDesktopXl();
   const [moreOpen, setMoreOpen] = useState(false);
   const [moreSec, setMoreSec] = useState<"" | "print">("");
+  // 🔄 โหมดอัปเดตงาน (ย้อนหลัง) — ทุกแถวในตารางมีปุ่ม "อัปเดต" (ดู ./catch-up.ts)
+  const [catchUpMode, setCatchUpMode] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const planSel = printPlan || (activePlan !== "real" ? activePlan : plans[0]?.id) || "";
   const planHref = planSel ? `/print/work-board?type=plan&plan=${encodeURIComponent(planSel)}` : "";
@@ -1478,6 +1481,11 @@ function WorkBoardPageInner() {
           <a href="/master/work-submissions" className={menuItem}>📤 ตารางส่งงาน</a>
           <a href="/master/manufacturing-orders" className={menuItem}>🏭 ใบสั่งผลิต</a>
           <a href="/master/mo-backlog" className={menuItem}>🧹 จัดการใบค้าง <span className="ml-auto text-[11px] text-slate-400">ปิด · ยกเลิก · ตั้งวัน</span></a>
+          {canDispatch && (
+            <button type="button" onClick={() => { closeMore(); setCatchUpMode(true); if (viewMode !== "table") setViewMode("table"); }} className={menuItem}>
+              🔄 อัปเดตงาน <span className="ml-auto text-[11px] text-slate-400">บอกว่าใบไปถึงขั้นไหนแล้ว</span>
+            </button>
+          )}
           <div className="my-1 border-t border-slate-100" />
           <button type="button" onClick={() => setMoreSec((s) => (s === "print" ? "" : "print"))} className={menuItem}>
             🖨 พิมพ์รายงาน <span className="ml-auto text-slate-400">{moreSec === "print" ? "▴" : "▾"}</span>
@@ -1637,6 +1645,7 @@ function WorkBoardPageInner() {
         <BoardTable pending={board.pending} workOrders={board.workOrders}
           departments={board.departments} craftsmen={craftsmen} canEdit={canDispatch} canSeeMoney={isAdmin} deliveryPlans={board.deliveryPlans}
           canMoveStaff={canMoveStaff} onStaffChanged={reloadAssignees}
+          catchUp={catchUpMode && canDispatch} onExitCatchUp={() => setCatchUpMode(false)}
           onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : viewMode === "shop" ? (
         <div className="space-y-3">
@@ -3366,8 +3375,10 @@ function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefine
   );
 }
 
-function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged }: {
+function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged, catchUp = false, onExitCatchUp }: {
   pending: PendingMO[]; workOrders: WorkOrder[]; deliveryPlans: DeliveryPlan[];
+  /** 🔄 โหมดอัปเดตงาน — ทุกแถวมีปุ่ม "อัปเดต" เปิดป๊อป CatchUpModal */
+  catchUp?: boolean; onExitCatchUp?: () => void;
   departments: Dept[]; craftsmen: Assignee[]; canEdit: boolean;
   /** ย้ายคนเข้า/ออกโต๊ะได้ (สิทธิ์ฝ่ายบุคคล) · ย้าย/เพิ่มแล้วให้หน้าแม่โหลดรายชื่อใหม่ */
   canMoveStaff?: boolean; onStaffChanged?: () => void | Promise<void>;
@@ -3380,6 +3391,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const disp = useTableDisplay(canSeeMoney);
   const dc = disp.cfg;
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
+  const [cuMo, setCuMo] = useState<string | null>(null);   // ใบที่เปิดป๊อปอัปเดตงานอยู่
+  const cuBtn = (moNo: string | null | undefined) => catchUp && moNo ? (
+    <button type="button" onClick={(e) => { e.stopPropagation(); setCuMo(moNo); }} title="บอกว่าใบนี้ไปถึงขั้นไหนแล้ว (ติ๊กขั้นก่อนหน้าให้อัตโนมัติ)"
+      className={`shrink-0 rounded-md bg-indigo-600 px-2 font-medium text-white hover:bg-indigo-700 ${touch ? "h-9 text-sm" : "h-7 text-[12px]"}`}>🔄 อัปเดต</button>
+  ) : null;
   const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม / แก้กำหนดเสร็จ
   // คำค้นร่วมของทั้ง 2 ตาราง — พิมพ์ที่ไหนก็กรองทั้ง "รอจ่าย" และ "จ่ายแล้ว" (เดิมต่างคนต่างค้น หาของที่จ่ายไปแล้วไม่เจอ)
   const [tableSearch, setTableSearch] = useState("");
@@ -3904,6 +3920,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             {m.product_name && m.product_name !== m.product_sku && <div className="text-[11px] text-slate-400 truncate">{m.product_name}</div>}
             <div className="font-mono text-[10px] text-slate-400">{m.mo_no}</div>
           </div>
+          {cuBtn(m.mo_no)}
           <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }} title="เปิดเช็กลิสต์เตรียม/ตัด"
             className={`shrink-0 text-slate-300 hover:text-blue-600 ${touch ? "text-lg px-1" : ""}`}>📋</button>
         </div>
@@ -4137,7 +4154,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   );
 
   const woCols: MiniColumn<WorkOrder>[] = [
-    { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (w) => w.product_sku ?? "", sortLabel: "ชื่อสินค้า", cell: (w) => <ProdCell url={w.image_url} sku={w.product_sku} name={w.product_name} /> },
+    { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (w) => w.product_sku ?? "", sortLabel: "ชื่อสินค้า",
+      cell: (w) => catchUp ? <div className="flex min-w-0 items-center gap-1.5"><div className="min-w-0 flex-1"><ProdCell url={w.image_url} sku={w.product_sku} name={w.product_name} /></div>{cuBtn(w.mo_no)}</div>
+        : <ProdCell url={w.image_url} sku={w.product_sku} name={w.product_name} /> },
     { key: "wo", header: "ใบจ่ายงาน", width: "9rem", sortValue: (w) => w.wo_no, sortLabel: "เลขใบจ่ายงาน", cell: (w) => <span className="font-mono text-[11px] text-slate-500">{w.wo_no}</span> },
     { key: "group", header: "กลุ่ม", width: "minmax(7rem,1fr)", sortValue: (w) => groupNameOf(w.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (w) => <GroupCell moNo={w.mo_no} /> },
     { key: "dept", header: "แผนก/ช่าง", width: "minmax(8rem,1fr)", sortValue: (w) => w.department_name ?? "", sortLabel: "แผนก", cell: (w) => <span className="text-[12px] text-slate-600">{w.department_name ?? "—"}{w.assignee_name ? ` · ${w.assignee_name}` : ""}</span> },
@@ -4163,7 +4182,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
 
   // ── ตาราง "รอ QC รับเข้า" (คอลัมน์) · ทุกแท็บเลือกคอลัมน์ได้ จำต่อคน แยกคอม/iPad
   const qcCols: MiniColumn<QcQueueRow>[] = [
-    { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (q) => q.sku ?? "", sortLabel: "ชื่อสินค้า", cell: (q) => <ProdCell url={q.image_key ? `/api/r2-image?key=${encodeURIComponent(q.image_key)}` : null} sku={q.sku} name={q.name} /> },
+    { key: "prod", header: "สินค้า", width: "minmax(12rem,1.6fr)", sortValue: (q) => q.sku ?? "", sortLabel: "ชื่อสินค้า",
+      cell: (q) => {
+        const pc = <ProdCell url={q.image_key ? `/api/r2-image?key=${encodeURIComponent(q.image_key)}` : null} sku={q.sku} name={q.name} />;
+        return catchUp ? <div className="flex min-w-0 items-center gap-1.5"><div className="min-w-0 flex-1">{pc}</div>{cuBtn(q.mo_no)}</div> : pc;
+      } },
     { key: "mo", header: "ใบสั่งผลิต", width: "9rem", sortValue: (q) => q.mo_no ?? "", sortLabel: "เลขใบสั่งผลิต", cell: (q) => <span className="font-mono text-[11px] text-slate-500">{q.mo_no ?? "—"}</span> },
     { key: "worker", header: "ช่างที่ส่ง", width: "minmax(8rem,1fr)", sortValue: (q) => q.worker ?? "", sortLabel: "ช่าง", cell: (q) => <span className="text-[12px] text-slate-600">{q.worker ?? "—"}</span> },
     { key: "qty", header: "รอรับเข้า", width: "6rem", align: "right", sortValue: (q) => q.remaining, sortLabel: "จำนวน", cell: (q) => <span className="tabular-nums font-semibold text-slate-700">{fmt(q.remaining)}</span> },
@@ -4348,6 +4371,15 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       {full && <PageChromeBar variant="page" className="shrink-0" />}
 
       <div className={`flex min-h-0 flex-col gap-3 ${tab === "pend" ? "flex-1" : "shrink-0"}`} style={zoomStyle}>
+        {catchUp && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            <span className="font-medium">🔄 โหมดอัปเดตงาน</span>
+            <span className="min-w-0 flex-1 text-[13px]">กดปุ่ม "🔄 อัปเดต" ท้ายชื่อสินค้า เพื่อบอกว่าใบนั้นไปถึงขั้นไหนแล้ว — ระบบติ๊กขั้นก่อนหน้าให้</span>
+            <button type="button" onClick={onExitCatchUp} className="h-8 shrink-0 rounded-lg border border-amber-300 bg-white px-3 text-[13px] hover:bg-amber-100">ออกจากโหมด</button>
+          </div>
+        )}
+        <CatchUpModal moNo={cuMo} onClose={() => setCuMo(null)} onDone={() => onReload?.()}
+          departments={departments} craftsmen={craftsmen} workOrders={workOrders} />
       {/* เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรองให้ตารางได้ที่เต็ม (เหมือนแอป) · แตะแถบนี้หรือเลื่อนขึ้น = กลับมา
           สลับด้วย CSS: กล่องมี data-top="hidden" → แถบย่อโผล่ · ส่วนแท็บ/ตัวกรองซ่อน (ไม่ render ใหม่) */}
         <button type="button" onClick={() => setTopHidden(false)}

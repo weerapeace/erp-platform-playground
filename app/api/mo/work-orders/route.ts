@@ -62,6 +62,8 @@ type CreateBody = {
   stage?: string; assignee_type?: string; assignee_id?: string | null; assignee_name?: string | null;
   assignees?: { id: string | null; name: string }[];   // คนรับงานหลายคน (ป๊อปจ่ายงาน)
   department_id?: string | null; department_name?: string | null;
+  /** quiet: อัปเดตงานย้อนหลัง (โหมด 🔄 อัปเดตงาน) → ไม่ส่ง LINE กลุ่ม / ไม่ DM ช่าง เรื่องงานเก่า */
+  quiet?: boolean;
   /** dispatch_date: ไม่ส่ง/ว่าง = วันนี้ · null = จำไม่ได้ว่าจ่ายวันไหน (บันทึกเป็นว่าง) */
   qty?: number; uom?: string | null; dispatch_date?: string | null; due_date?: string | null; note?: string | null;
   labor_cost?: number | null;   // ค่าแรงผลิตรวม (กรอกตั้งแต่ตอนจ่ายงาน — default ราคากลาง × จำนวน)
@@ -135,7 +137,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ error: "จ่ายงานไม่สำเร็จ: " + error.message }, { status: 400 });
 
   await writeAudit(admin, { action: "create", entityType: "mo_work_order", entityId: wo.id, actorId: user.id,
-    actorName: user.email ?? null, metadata: { wo_no: woNo, mo_no: body.mo_no, qty, stage: body.stage } });
+    actorName: user.email ?? null, metadata: { wo_no: woNo, mo_no: body.mo_no, qty, stage: body.stage, ...(body.quiet ? { catch_up: true } : {}) } });
 
   // B1: จ่ายงานใบแรกของ MO → ย้ายวัตถุดิบตาม BOM จาก WH-RAW → WH-WIP อัตโนมัติ (ระดับ MO ครั้งเดียว)
   // best-effort — ถ้าย้ายไม่สำเร็จ (ไม่มี BOM/คลัง) ก็ให้การจ่ายงานสำเร็จไปก่อน ไม่บล็อค
@@ -148,6 +150,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
   } catch (e) { console.error("[dispatch] ย้ายวัตถุดิบเข้า WIP ไม่สำเร็จ:", e instanceof Error ? e.message : e); }
 
+  // อัปเดตย้อนหลัง = งานเก่าที่จ่ายไปนานแล้ว → ไม่แจ้งใคร
+  if (body.quiet === true) return NextResponse.json({ id: wo.id, wo_no: woNo, error: null });
   // แจ้งเตือน (best-effort): DM ช่างที่รับงาน + LINE กลุ่มผลิต (จ่ายงานบ่อย จึงไม่เด้งกระดิ่ง)
   const isCraft = body.assignee_type === "craftsman" && !!body.assignee_id;
   const link = boardLink("/master/work-board");

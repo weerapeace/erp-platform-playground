@@ -105,20 +105,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         if (!dsid) return NextResponse.json({ error: "ยังไม่มีชั้นของเสีย" }, { status: 400 });
         for (const b of bad) rows.push({ ...base, shelf_id: dsid, qty: b.qty, status: "defect", reason: b.reason });
       }
-      const ins = await admin.from("qc_warehouse_items").insert(rows);
+      const ins = await admin.from("qc_warehouse_items").insert(rows).select("id, status, qty");
       if (ins.error) return NextResponse.json({ error: friendlyDbError(ins.error.message) }, { status: 400 });
       await admin.from("mo_work_orders").update({ qc_pulled_qty: Number(wo.qc_pulled_qty ?? 0) + good + badTotal }).eq("id", wo_id);
       for (const b of bad) { await logDefect(admin, { sku: wo.product_sku, worker: wo.assignee_name, qty: b.qty, reason: b.reason, kind: "defect", mo_no: wo.mo_no }); await logParentIssue(admin, actor, { sku: wo.product_sku, reason: b.reason }); }
-      await writeAudit(admin, { action: "qc.receive", entityType: "qc_warehouse_items", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, good, bad: badTotal } });
+      const quiet = body.quiet === true;   // อัปเดตงานย้อนหลัง (โหมด 🔄 อัปเดตงาน) → ไม่แจ้งเรื่องของเสียเก่า (ประวัติของเสียยังลงครบ)
+      await writeAudit(admin, { action: "qc.receive", entityType: "qc_warehouse_items", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, good, bad: badTotal, ...(quiet ? { catch_up: true } : {}) } });
       // แจ้งเตือน "พบของเสีย" ตอนรับเข้า (best-effort): กระดิ่ง + LINE กลุ่ม QC + DM ช่าง
-      if (badTotal > 0) {
+      if (badTotal > 0 && !quiet) {
         const reasons = bad.map((b) => `${b.reason} ${b.qty}`).join(", ");
         const link = boardLink("/master/qc-warehouse");
         await notifyEvent(admin, "qc.defect", "qc_warehouse_items", wo_id, actor.actorId, { sku: wo.product_sku, product_name: wo.product_name ?? wo.product_sku, reason: reasons, qty: badTotal, worker: wo.assignee_name ?? "—", mo_no: wo.mo_no });
         await pushLineTpl(admin, "qc", "qc_defect", { sku: wo.product_sku ?? "", product_name: wo.product_name ?? "", reason: reasons, qty: badTotal, worker: wo.assignee_name ?? "—", link });
         await dmEmployeeByName(admin, wo.assignee_name, `⚠️ งานมีของเสีย\n${wo.product_sku ?? ""} · ${wo.product_name ?? ""}\n${reasons} (${badTotal} ชิ้น)\n🔗 ${link}`);
       }
-      return NextResponse.json({ error: null });
+      // items = แถวที่เพิ่งเข้าชั้น (โหมดอัปเดตงานใช้ส่งออกต่อทันที)
+      return NextResponse.json({ items: (ins.data ?? []).map((r) => ({ id: String(r.id), status: String(r.status), qty: Number(r.qty) || 0 })), error: null });
     }
 
     // ── ย้ายชั้น ──

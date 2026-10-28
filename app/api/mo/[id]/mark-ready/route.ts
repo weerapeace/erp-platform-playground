@@ -1,6 +1,7 @@
 /**
  * mark ใบสั่งผลิตเป็น "เตรียม/ตัดครบ" ทั้งใบ (ใช้ตอนจ่ายงานจากหน้าช้อป — ติ๊กงานที่ตัด/เตรียมครบพร้อมจ่าย)
- * PATCH /api/mo/[id]/mark-ready  body: { ready?: boolean }  (default true)
+ * PATCH /api/mo/[id]/mark-ready  body: { ready?: boolean, parts?: ("prep"|"cut")[] }  (default true · ทั้งเตรียม+ตัด)
+ *   parts = ["prep"] → ติ๊กแค่ "เตรียม" (โหมดอัปเดตงานย้อนหลัง เลือกขั้น "เตรียมแล้ว รอตัด")
  *   → manufacturing_orders.prep_done/cut_done = ready (ครอบคลุมใบไม่มี BOM)
  *   → mo_material_summary.is_ready = ready ทุกแถวของใบ (เตรียมครบ)
  *   → mo_materials.cut_done = ready ทุกแถวของใบ (ตัดครบ) — ครอบคลุมใบมี BOM
@@ -15,7 +16,7 @@ import { friendlyDbError } from "../../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Body = { ready?: boolean };
+type Body = { ready?: boolean; parts?: unknown };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -26,23 +27,28 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   try { body = await request.json(); } catch { body = {}; }
   const ready = body.ready !== false;   // default = true
   const now = new Date().toISOString();
+  const parts = Array.isArray(body.parts) ? body.parts.filter((p) => p === "prep" || p === "cut") : [];
+  const doPrep = parts.length === 0 || parts.includes("prep");
+  const doCut = parts.length === 0 || parts.includes("cut");
 
   const admin = supabaseAdmin();
   const { data: existing } = await admin.from("manufacturing_orders").select("mo_no").eq("id", id).maybeSingle();
   if (!existing) return NextResponse.json({ error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
   const moNo = (existing as { mo_no: string }).mo_no;
 
-  const { error } = await admin.from("manufacturing_orders")
-    .update({ prep_done: ready, prep_done_at: ready ? now : null, cut_done: ready, cut_done_at: ready ? now : null }).eq("id", id);
+  const patch: Record<string, unknown> = {};
+  if (doPrep) { patch.prep_done = ready; patch.prep_done_at = ready ? now : null; }
+  if (doCut) { patch.cut_done = ready; patch.cut_done_at = ready ? now : null; }
+  const { error } = await admin.from("manufacturing_orders").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
   // ใบมี BOM: ความพร้อมคิดจากวัตถุดิบ → เซ็ตทั้งใบให้ครบ
-  await admin.from("mo_material_summary").update({ is_ready: ready }).eq("mo_no", moNo).eq("is_active", true);
-  await admin.from("mo_materials").update({ cut_done: ready, cut_done_at: ready ? now : null }).eq("mo_no", moNo).eq("is_active", true);
+  if (doPrep) await admin.from("mo_material_summary").update({ is_ready: ready }).eq("mo_no", moNo).eq("is_active", true);
+  if (doCut) await admin.from("mo_materials").update({ cut_done: ready, cut_done_at: ready ? now : null }).eq("mo_no", moNo).eq("is_active", true);
 
   await admin.from("audit_logs").insert({
     actor_user_id: user?.id ?? null, action: "update", entity_type: "mo", entity_id: id,
-    metadata: { mo_no: moNo, mark_ready: ready },
+    metadata: { mo_no: moNo, mark_ready: ready, parts: doPrep && doCut ? ["prep", "cut"] : doPrep ? ["prep"] : ["cut"] },
   }).then(() => {}, () => {});
 
   return NextResponse.json({ id, mo_no: moNo, ready, error: null });

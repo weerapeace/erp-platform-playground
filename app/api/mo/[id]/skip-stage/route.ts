@@ -4,11 +4,14 @@
  *   skip=true  → ติดป้ายข้ามที่ manufacturing_orders.skipped_stages (เก็บ ใคร/เมื่อไหร่/เหตุผล)
  *   skip=false → ลบป้าย (กลับเป็นเหมือนเดิม — ข้อมูลอื่นไม่เคยถูกแตะ)
  * ขั้นที่ต้องใส่เหตุผล (จ่ายงาน / รับคืน) ดูที่ของกลาง lib/mo-skip (MO_SKIP_META) · audit ลง audit_logs รายขั้น
+ *
+ * ข้อยกเว้นเดียว (เจ้าของอนุมัติ 2026-10-28): โหมด "🔄 อัปเดตงาน" บนบอร์ดจ่ายงาน ติดป้าย "ของครบ" ได้ด้วยสิทธิ์จ่ายงาน
+ *   body { stages: ["buy"], skip: true, via: "catch_up" } + work_board.dispatch → ผ่าน (เอาป้ายออก/ขั้นอื่น ยังต้องแอดมิน)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
 import { requestActor } from "@/lib/request-actor";
 import { MO_SKIP_META, isMoSkipStage, parseSkipped, type MoSkipStage } from "@/lib/mo-skip";
 
@@ -16,12 +19,14 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "admin.users"); if (denied) return denied;
   const { id } = await params;
-  let body: { stages?: unknown; skip?: unknown; reason?: unknown };
+  let body: { stages?: unknown; skip?: unknown; reason?: unknown; via?: unknown };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const stages = Array.isArray(body.stages) ? [...new Set(body.stages.filter(isMoSkipStage))] as MoSkipStage[] : [];
   const skip = body.skip !== false;
+  const catchUpBuy = body.via === "catch_up" && skip && stages.length === 1 && stages[0] === "buy";
+  const denied = catchUpBuy && await apiCan(request, "work_board.dispatch") ? null : await guardApi(request, "admin.users");
+  if (denied) return denied;
   const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
   if (stages.length === 0) return NextResponse.json({ error: "ไม่ได้เลือกขั้นตอน" }, { status: 400 });
   const needReason = stages.filter((s) => MO_SKIP_META[s].needReason);
@@ -50,7 +55,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   await admin.from("audit_logs").insert(changed.map((s) => ({
     actor_user_id: actor.id, action: skip ? "skip_stage" : "unskip_stage", entity_type: "mo", entity_id: id,
-    metadata: { mo_no: m.mo_no, stage: s, stage_label: MO_SKIP_META[s].label, reason: skip ? reason || null : null },
+    metadata: { mo_no: m.mo_no, stage: s, stage_label: MO_SKIP_META[s].label, reason: skip ? reason || null : null, ...(catchUpBuy ? { via: "catch_up" } : {}) },
   }))).then(() => {}, () => {});
   return NextResponse.json({ skipped_stages: next, error: null });
 }
