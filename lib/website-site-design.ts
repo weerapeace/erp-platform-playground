@@ -102,6 +102,18 @@ export interface LoginLook {
   imageKey: string | null;
   title: string;
   text: string;
+  /** 🎨 ป๊อป/หน้าเข้าสู่ระบบ + ปุ่มสมัครบนหัวเว็บ (ชุดปรับหน้าตาชิ้นส่วน · 2026-10-28) — ค่าเริ่ม = หน้าตาเดิม */
+  /** หัวป๊อป ("" = "สมาชิก") · ข้อความปุ่มสมัครบนหัวเว็บ ("" = "สมัครสมาชิก") — มีช่อง _en */
+  popupTitle: string;
+  signupLabel: string;
+  /** กล่องข้อดีของสมาชิกในแท็บสมัคร · ข้อความเอง (ว่าง = ข้อความตั้งต้น · สูงสุด 6 บรรทัด) */
+  perksOn: boolean;
+  perks: string[];
+  /** ลิงก์ "สั่งซื้อได้เลยโดยไม่ต้องสมัคร" */
+  guestLink: boolean;
+  /** สีปุ่ม Google/LINE/Facebook: brand = สีของแต่ละเจ้า (เดิม) · mono = สีเข้มของร้านทุกปุ่ม · outline = ขอบเส้น */
+  providerStyle: "brand" | "mono" | "outline";
+  parts: PartStyles;
 }
 
 /** 🎄 ของตกแต่งเทศกาล (ชุด 5) — โปรยลงมา หรือ ห้อยใต้หัวเว็บ (lantern/flags) · none = ไม่มี (เดิม) */
@@ -437,7 +449,7 @@ export const DEFAULT_SITE_PAGE: SitePageDesign = {
   thanks: { top: "emoji", imageKey: null, mobileImageKey: null, link: "", coupon: "", follow: false, products: false },
   popup: { layout: "center", imageKey: null, trigger: "delay", again: "once" },
   share: { style: "photo", bg: "paper" },
-  login: { layout: "center", imageKey: null, title: "", text: "" },
+  login: { layout: "center", imageKey: null, title: "", text: "", popupTitle: "", signupLabel: "", perksOn: true, perks: [], guestLink: true, providerStyle: "brand", parts: {} },
   account: DEFAULT_ACCOUNT_LOOK,
   festive: { kind: "none", amount: "some", where: "home", mobile: true },
   proof: { viewers: false, viewersMin: 5, sold: false, soldMin: 10, soldSource: "web", soldPeriod: "30d", onCard: false },
@@ -579,7 +591,14 @@ export function normalizeShare(raw: unknown): ShareLook {
 export function normalizeLogin(raw: unknown): LoginLook {
   const r = obj(raw);
   const layout = r.layout === "split" || r.layout === "cover" ? r.layout : "center";
-  return keepEn({ layout, imageKey: imgKey(r.imageKey), title: txt(r.title, 80), text: txt(r.text, 240) }, r, ["title", "text"], 240);
+  const perks = Array.isArray(r.perks) ? r.perks.map((x) => txt(x, 80)).filter(Boolean).slice(0, 6) : [];
+  const providerStyle = r.providerStyle === "mono" || r.providerStyle === "outline" ? r.providerStyle : "brand";
+  return keepEn(
+    { layout, imageKey: imgKey(r.imageKey), title: txt(r.title, 80), text: txt(r.text, 240), popupTitle: txt(r.popupTitle, 40), signupLabel: txt(r.signupLabel, 30), perksOn: r.perksOn !== false, perks, guestLink: r.guestLink !== false, providerStyle, parts: normalizePartStyles(r.parts) },
+    r,
+    ["title", "text", "popupTitle", "signupLabel"],
+    240
+  );
 }
 export function normalizeFestive(raw: unknown): FestiveLook {
   const r = obj(raw);

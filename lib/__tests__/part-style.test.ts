@@ -49,3 +49,23 @@ describe("ทะเบียนชิ้นส่วน หน้าบัญช
     for (const p of ACCOUNT_PARTS) for (const g of p.groups) expect(PART_GROUP_FIELDS[g].length).toBeGreaterThan(0);
   });
 });
+
+describe("normalizeLogin (ป๊อปสมัคร · ขั้น 2)", () => {
+  it("ไม่มีค่า = หน้าตาเดิม", () => {
+    expect(normalizeSitePage({}).login).toEqual(DEFAULT_SITE_PAGE.login);
+    expect(DEFAULT_SITE_PAGE.login).toMatchObject({ perksOn: true, perks: [], guestLink: true, providerStyle: "brand", parts: {} });
+  });
+  it("ข้อดีสูงสุด 6 บรรทัด ตัดบรรทัดว่าง · สีปุ่มรับเฉพาะ 3 แบบ · เก็บช่องแปล _en · parts ผ่านตัวตรวจกลาง", () => {
+    const l = normalizeSitePage({ login: { perks: ["a", "", "b", "c", "d", "e", "f", "g"], providerStyle: "neon", popupTitle: "Members", popupTitle_en: "Join us", parts: { "login.tab": { all: { activeBg: "brand", junk: 1 } }, "Bad Key": { all: { size: 10 } } } } }).login;
+    expect(l.perks).toEqual(["a", "b", "c", "d", "e", "f"]);
+    expect(l.providerStyle).toBe("brand");
+    expect((l as unknown as Record<string, unknown>).popupTitle_en).toBe("Join us");
+    expect(l.parts).toEqual({ "login.tab": { all: { activeBg: "brand" } } });
+  });
+  it("ทะเบียนชิ้นส่วนหน้าเข้าสู่ระบบ: คีย์ไม่ซ้ำ ผ่านตัวตรวจ", async () => {
+    const { LOGIN_PARTS } = await import("../website-page-parts");
+    const keys = LOGIN_PARTS.map((p) => p.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(Object.keys(normalizePartStyles(Object.fromEntries(keys.map((k) => [k, { all: { size: 12 } }]))))).toEqual(keys);
+  });
+});

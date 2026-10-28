@@ -85,3 +85,20 @@ export const PART_COLOR_LABEL: Partial<Record<keyof PartStyleValue, string>> = {
   activeColor: "สีตัวอักษร (ที่เลือก)",
   activeBorder: "สีขอบ (ที่เลือก)",
 };
+
+/** 👤 หน้าเข้าสู่ระบบ + ป๊อปสมัคร + ปุ่มสมัครบนหัวเว็บ (เว็บร้าน MemberAuthHost / MemberAuthPanel / LoginShell / Navbar) */
+export const LOGIN_PARTS: PartDef[] = [
+  { key: "login.hbtn", label: "ปุ่มสมัครบนหัวเว็บ", hint: "ปุ่มเด่นข้างไอคอน 👤", groups: ["text", "box"] },
+  { key: "login.modal", label: "กรอบป๊อป", hint: "มือถือ = แผ่นเลื่อนจากล่าง", groups: ["box", "layout"] },
+  { key: "login.mtitle", label: "หัวป๊อป", groups: ["text", "hide"] },
+  { key: "login.tabs", label: "แถบแท็บ", hint: "สมัคร / เข้าสู่ระบบ", groups: ["box"] },
+  { key: "login.tab", label: "ปุ่มแท็บ", groups: ["text", "box", "active"] },
+  { key: "login.perks", label: "กล่องข้อดีสมาชิก", groups: ["text", "box"] },
+  { key: "login.consent", label: "ข้อความยินยอม", hint: "ช่องติ๊ก PDPA", groups: ["text"] },
+  { key: "login.provider", label: "ปุ่ม Google/LINE/Facebook", groups: ["text", "box"] },
+  { key: "login.note", label: "ข้อความเล็ก", hint: "ใต้ปุ่ม / ต้อนรับกลับ", groups: ["text", "hide"] },
+  { key: "login.guest", label: "ลิงก์สั่งโดยไม่สมัคร", groups: ["text"] },
+  { key: "login.card", label: "กรอบหน้าเข้าสู่ระบบ", hint: "หน้า /account/login", groups: ["box", "layout"] },
+  { key: "login.heading", label: "หัวข้อหน้าเข้าสู่ระบบ", groups: ["text"] },
+  { key: "login.intro", label: "ข้อความต้อนรับ", groups: ["text", "hide"] },
+];

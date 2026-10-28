@@ -45,6 +45,7 @@ import {
 } from "@/lib/website-site-design";
 import { webForm } from "@/lib/website-form-styles";
 import { AccountPageSetting } from "@/components/website-account-design";
+import { LoginExtraSetting } from "@/components/website-login-design";
 import type { SiteTheme } from "@/lib/website-theme";
 
 type Colors = { brand: string; ink: string; page: string; onBrand: string };
@@ -800,6 +801,8 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
             <LangInput className={inputCls} obj={lg} k="text" maxLength={240} placeholder="สะสมแต้มทุกออเดอร์ · รับสิทธิ์ก่อนใคร" onPatch={(p) => setLg(p)} />
           </div>
         </div>
+        {/* 💬 ป๊อปสมัคร + ปุ่มสมัครบนหัวเว็บ + 🎨 ปรับละเอียด (ชุดปรับหน้าตาชิ้นส่วน — ของกลาง) */}
+        {colors && <LoginExtraSetting value={lg} onChange={(p) => setLg(p)} colors={colors} onPreview={onPreview} />}
       </div>
 
       {/* ── หน้าบัญชีของฉัน (ชุดปรับหน้าตาละเอียด — ของกลาง) ── */}
