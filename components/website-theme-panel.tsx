@@ -2729,7 +2729,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               {/* ✨ ลูกเล่นทั้งเว็บ (ชุด 2): Section โผล่ · หน้าโหลดแรก · เคอร์เซอร์ · แถบเลื่อนอ่าน · ปุ่มกลับขึ้นบน */}
               <SiteMotionSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} />
               {/* 📱 มือถือและช่วยขาย (ชุด 3): แถบเมนูล่าง · ปุ่มแชท · ค้นหาตอนยังไม่พิมพ์ · แถบคุกกี้ */}
-              <SiteSalesSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} />
+              <SiteSalesSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={theme.colors} onPreview={setPage} />
               {/* 🧱 ฐานหน้าตาทั้งเว็บ (ชุด 1) — components/website-site-design-setting · เว็บร้าน src/lib/site-design-css.ts */}
               <SitePageSetting value={theme.page} onChange={(p) => apply({ ...theme, page: { ...theme.page, ...p } })} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />
               <SiteControlsSetting value={theme.shape} onChange={(p) => setShape(p)} colors={{ brand: theme.colors.brand, ink: theme.colors.ink, page: theme.colors.page, onBrand: resolveOnBrand(theme.colors) }} />

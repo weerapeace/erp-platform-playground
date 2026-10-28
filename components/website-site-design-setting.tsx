@@ -46,6 +46,8 @@ import {
 import { webForm } from "@/lib/website-form-styles";
 import { AccountPageSetting } from "@/components/website-account-design";
 import { LoginExtraSetting } from "@/components/website-login-design";
+import { PartStyleFold } from "@/components/website-part-style-editor";
+import { COOKIE_PARTS, NF_PARTS, POPUP_PARTS, THANKS_PARTS } from "@/lib/website-page-parts";
 import type { SiteTheme } from "@/lib/website-theme";
 
 type Colors = { brand: string; ink: string; page: string; onBrand: string };
@@ -458,7 +460,7 @@ const NAV_LABEL: Record<MobileNavItem, string> = { home: "หน้าแรก"
 const inputCls = webForm.inputBasic;
 
 /** 📱 ชุด 3 — มือถือและช่วยขาย (theme.page: mobileNav · chat · searchEmpty · cookie) · เว็บร้าน MobileNav / FloatingChat / SearchOverlay / Tracking */
-export function SiteSalesSetting({ value, onChange }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void }) {
+export function SiteSalesSetting({ value, onChange, colors, onPreview }: { value: SitePageDesign; onChange: (v: Partial<SitePageDesign>) => void; /** สีร้าน + พาพรีวิวไปหน้าตัวอย่าง (ตัวปรับละเอียดแถบคุกกี้) */ colors?: SiteTheme["colors"]; onPreview?: (path: string) => void }) {
   const nav = value.mobileNav;
   const setNav = (p: Partial<SitePageDesign["mobileNav"]>) => onChange({ mobileNav: { ...nav, ...p } });
   const chat = value.chat;
@@ -578,7 +580,12 @@ export function SiteSalesSetting({ value, onChange }: { value: SitePageDesign; o
             <LangInput className={inputCls} obj={ck} k="text" multiline rows={2} maxLength={400} placeholder="เราใช้คุกกี้ที่จำเป็นให้เว็บทำงาน และขออนุญาตใช้คุกกี้วัดผลและโฆษณา…" onPatch={(p) => setCk(p)} />
           </div>
         </div>
-        <p className="text-[11px] text-slate-400 mt-1">ปุ่ม &quot;เฉพาะที่จำเป็น&quot; อยู่ข้างปุ่ม &quot;ยอมรับทั้งหมด&quot; เสมอทุกแบบ (PDPA ให้ปฏิเสธได้ง่ายเท่ายอมรับ) · แถบนี้โผล่เมื่อใส่รหัสวัดผลในแท็บ ข้อมูลร้าน › 📊 · ไม่ขึ้นในพรีวิว</p>
+        <p className="text-[11px] text-slate-400 mt-1">ปุ่ม &quot;เฉพาะที่จำเป็น&quot; อยู่ข้างปุ่ม &quot;ยอมรับทั้งหมด&quot; เสมอทุกแบบ (PDPA ให้ปฏิเสธได้ง่ายเท่ายอมรับ) · แถบนี้โผล่เมื่อใส่รหัสวัดผลในแท็บ ข้อมูลร้าน › 📊 · พรีวิวโชว์เป็นตัวอย่างตอนเปิดตัวปรับละเอียด (กดปุ่มในตัวอย่างไม่บันทึกอะไร)</p>
+        {colors && (
+          <div className="mt-3">
+            <PartStyleFold parts={COOKIE_PARTS} value={ck.parts} onChange={(parts) => setCk({ parts })} colors={colors} onOpen={() => onPreview?.("/?pv=cookie")} hint="กรอบ · ข้อความ · ปุ่ม" testId="cookie" />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -666,6 +673,11 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
             สินค้าแนะนำ 4 ชิ้น (แนะนำของร้าน → ขายดี → มาใหม่)
           </label>
         </div>
+        {colors && (
+          <div className="mt-3">
+            <PartStyleFold parts={NF_PARTS} value={nf.parts} onChange={(parts) => setNf({ parts })} colors={colors} onOpen={() => onPreview("/zz-page-not-found")} hint="404 · หัวข้อ · ปุ่ม · ช่องค้นหา" testId="notfound" />
+          </div>
+        )}
       </div>
 
       {/* ── หน้าขอบคุณ ── */}
@@ -713,6 +725,11 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
             ⭐ สินค้าแนะนำ 4 ชิ้นใต้การ์ด
           </label>
         </div>
+        {colors && (
+          <div className="mt-3">
+            <PartStyleFold parts={THANKS_PARTS} value={th.parts} onChange={(parts) => setTh({ parts })} colors={colors} onOpen={() => onPreview("/checkout?pv=thanks")} hint="หัวข้อ · เลขออเดอร์ · คูปอง · โซเชียล" testId="thanks" />
+          </div>
+        )}
       </div>
 
       {/* ── ป๊อปอัป ── */}
@@ -747,6 +764,11 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
             <Choice<"once" | "7d"> value={pp.again} onChange={(v) => setPp({ again: v })} options={[{ v: "once", l: "ครั้งเดียว" }, { v: "7d", l: "ทุก 7 วัน ถ้ายังไม่รับโค้ด" }]} />
           </div>
         </div>
+        {colors && (
+          <div className="mt-3">
+            <PartStyleFold parts={POPUP_PARTS} value={pp.parts} onChange={(parts) => setPp({ parts })} colors={colors} onOpen={() => onPreview("/?pv=popup")} hint="กรอบ · หัวข้อ · ช่องกรอก · ปุ่ม · โค้ด" testId="popup" />
+          </div>
+        )}
       </div>
 
       {/* ── รูปตอนแชร์ ── */}

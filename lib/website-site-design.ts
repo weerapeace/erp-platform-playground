@@ -48,6 +48,8 @@ export type SearchEmpty = "cats" | "terms" | "prods";
 export type CookieLayout = "card" | "bar" | "center";
 /** 🍪 แถบขอความยินยอมคุกกี้ — ปุ่ม "เฉพาะที่จำเป็น" อยู่ข้างปุ่มยอมรับเสมอ (PDPA: ปฏิเสธต้องง่ายเท่ายอมรับ) */
 export interface CookieLook {
+  /** 🎨 ปรับละเอียดทีละชิ้น (ck.*) */
+  parts: PartStyles;
   layout: CookieLayout;
   /** การ์ด: มุมซ้าย/ขวา (จอคอม) */
   side: "left" | "right";
@@ -61,6 +63,8 @@ export type PayLogoStyle = "text" | "color" | "mono";
 export type ShipIcon = "thaipost" | "kerry" | "flash" | "jt" | "ninja" | "dhl";
 /** 📄 ชุด 4 — หน้าพิเศษ (ทุกตัวค่าเริ่ม = หน้าตาเดิม · ข้อความว่าง = ข้อความตั้งต้น · แปลอังกฤษได้ <key>_en) */
 export interface NotFoundLook {
+  /** 🎨 ปรับละเอียดทีละชิ้น (nf.*) */
+  parts: PartStyles;
   /** plain = ไอคอน + ข้อความ (เดิม) · image = รูปใหญ่ + ข้อความ · big = ตัวเลข 404 ใหญ่แบบแบรนด์ */
   style: "plain" | "image" | "big";
   imageKey: string | null;
@@ -71,6 +75,8 @@ export interface NotFoundLook {
   products: boolean;
 }
 export interface ThanksLook {
+  /** 🎨 ปรับละเอียดทีละชิ้น (th.*) */
+  parts: PartStyles;
   /** emoji = 🎉 (เดิม) · image = รูปแบนเนอร์ · none = ไม่มี */
   top: "emoji" | "image" | "none";
   imageKey: string | null;
@@ -85,6 +91,8 @@ export interface ThanksLook {
   products: boolean;
 }
 export interface PopupLook {
+  /** 🎨 ปรับละเอียดทีละชิ้น (pp.*) */
+  parts: PartStyles;
   layout: "center" | "split" | "sheet" | "corner";
   imageKey: string | null;
   /** delay = หลังเข้าเว็บ X วิ (เดิม · ตั้งวินาทีที่ข้อมูลร้าน) · scroll = เลื่อนถึงครึ่งหน้า · exit = เมาส์ออกนอกหน้า (คอม · มือถือใช้ scroll แทน) */
@@ -338,6 +346,17 @@ export interface AccountEmptyText {
   href: string;
 }
 export type AccountEmptyKey = "orders" | "wishlist" | "addresses";
+/** ส่วนในหน้าบัญชีที่เรียงลำดับได้ (body = เมนู + เนื้อหา) */
+export type AccountBlock = "notice" | "header" | "body" | "help" | "reco";
+export const ACCOUNT_BLOCKS: AccountBlock[] = ["notice", "header", "body", "help", "reco"];
+/** กล่องข้างขวา (แบบเมนูด้านซ้าย/หน้าต่างแอป · จอกว้าง) เช่น คู่มือ/โปรโมชันสมาชิก */
+export interface AccountAside {
+  on: boolean;
+  icon: string;
+  title: string;
+  text: string;
+  href: string;
+}
 export interface AccountLook {
   header: "simple" | "center" | "banner" | "card";
   imageKey: string | null;
@@ -348,7 +367,11 @@ export interface AccountLook {
   showTier: boolean;
   showPoints: boolean;
   showSince: boolean;
-  nav: "pills" | "under" | "side" | "tiles";
+  /** panel = หน้าต่างแอป (กรอบมนใหญ่ · เมนูข้างในกรอบ · หัวข้อหน้า · รูปโปรไฟล์มุมขวาบน) */
+  nav: "pills" | "under" | "side" | "tiles" | "panel";
+  /** หัวเมนูข้าง (หน้าต่างแอป · ว่าง = "บัญชีของฉัน") · เมนูอยู่ซ้าย/ขวา */
+  panelTitle: string;
+  navSide: "left" | "right";
   navIcons: "emoji" | "line" | "none";
   showCounts: boolean;
   tabs: AccountTabSetting[];
@@ -360,6 +383,18 @@ export interface AccountLook {
   recommend: boolean;
   help: boolean;
   width: "site" | "narrow";
+  /** แท็บโปรไฟล์: ฟอร์ม (เดิม) หรือ แถวข้อมูลกดแก้ (แบบหน้าตั้งค่าแอป) */
+  profileStyle: "form" | "rows";
+  aside: AccountAside;
+  /** ลำดับส่วนในหน้า */
+  order: AccountBlock[];
+  /** ✨ ลูกเล่น — พื้นหลัง (วงกลมเบลอ/ไล่สีจาง) · กล่องกระจกฝ้า · ทักทายตามเวลา · ตัวเลขแต้มวิ่ง · เปลี่ยนแท็บแบบนุ่ม · บัตรสมาชิกเอียงตามเมาส์ */
+  decor: "none" | "blobs" | "wash";
+  glass: boolean;
+  timeGreeting: boolean;
+  countUp: boolean;
+  tabAnim: "none" | "fade" | "slide";
+  tilt: boolean;
   parts: PartStyles;
 }
 const EMPTY_TEXT: AccountEmptyText = { text: "", button: "", href: "" };
@@ -373,6 +408,8 @@ export const DEFAULT_ACCOUNT_LOOK: AccountLook = {
   showPoints: false,
   showSince: false,
   nav: "pills",
+  panelTitle: "",
+  navSide: "left",
   navIcons: "emoji",
   showCounts: true,
   tabs: ACCOUNT_TABS.map((key) => ({ key, label: "", hidden: false, icon: "" })),
@@ -384,6 +421,15 @@ export const DEFAULT_ACCOUNT_LOOK: AccountLook = {
   recommend: false,
   help: false,
   width: "site",
+  profileStyle: "form",
+  aside: { on: false, icon: "", title: "", text: "", href: "" },
+  order: [...ACCOUNT_BLOCKS],
+  decor: "none",
+  glass: false,
+  timeGreeting: false,
+  countUp: false,
+  tabAnim: "none",
+  tilt: false,
   parts: {},
 };
 
@@ -413,6 +459,9 @@ export function normalizeAccount(raw: unknown): AccountLook {
     empty[k] = { text: txt(e.text, 200), button: txt(e.button, 40), href: accHref(e.href) };
   }
   const n = obj(r.notice);
+  const a = obj(r.aside);
+  const order = Array.isArray(r.order) ? [...new Set(r.order.filter((x): x is AccountBlock => (ACCOUNT_BLOCKS as readonly unknown[]).includes(x)))] : [];
+  for (const b of ACCOUNT_BLOCKS) if (!order.includes(b)) order.push(b);
   return {
     header: oneOf(r.header, ["simple", "center", "banner", "card"] as const, d.header),
     imageKey: typeof r.imageKey === "string" && r.imageKey.trim() ? r.imageKey.trim().slice(0, 300) : null,
@@ -422,7 +471,9 @@ export function normalizeAccount(raw: unknown): AccountLook {
     showTier: r.showTier !== false,
     showPoints: r.showPoints === true,
     showSince: r.showSince === true,
-    nav: oneOf(r.nav, ["pills", "under", "side", "tiles"] as const, d.nav),
+    nav: oneOf(r.nav, ["pills", "under", "side", "tiles", "panel"] as const, d.nav),
+    panelTitle: txt(r.panelTitle, 40),
+    navSide: r.navSide === "right" ? "right" : "left",
     navIcons: oneOf(r.navIcons, ["emoji", "line", "none"] as const, d.navIcons),
     showCounts: r.showCounts !== false,
     tabs,
@@ -434,6 +485,15 @@ export function normalizeAccount(raw: unknown): AccountLook {
     recommend: r.recommend === true,
     help: r.help === true,
     width: r.width === "narrow" ? "narrow" : "site",
+    profileStyle: r.profileStyle === "rows" ? "rows" : "form",
+    aside: { on: a.on === true, icon: txt(a.icon, 300), title: txt(a.title, 60), text: txt(a.text, 200), href: accHref(a.href) },
+    order,
+    decor: oneOf(r.decor, ["none", "blobs", "wash"] as const, d.decor),
+    glass: r.glass === true,
+    timeGreeting: r.timeGreeting === true,
+    countUp: r.countUp === true,
+    tabAnim: oneOf(r.tabAnim, ["none", "fade", "slide"] as const, d.tabAnim),
+    tilt: r.tilt === true,
     parts: normalizePartStyles(r.parts),
   };
 }
@@ -444,10 +504,10 @@ export const DEFAULT_SITE_PAGE: SitePageDesign = {
   mobileNav: { style: "off", items: ["home", "shop", "search", "wishlist", "cart"], hideOnScroll: false },
   chat: { color: "brand", shape: "pill", where: "all" },
   searchEmpty: "cats",
-  cookie: { layout: "card", side: "left", icon: true, title: "", text: "" },
-  notFound: { style: "plain", imageKey: null, title: "", text: "", search: false, products: false },
-  thanks: { top: "emoji", imageKey: null, mobileImageKey: null, link: "", coupon: "", follow: false, products: false },
-  popup: { layout: "center", imageKey: null, trigger: "delay", again: "once" },
+  cookie: { layout: "card", side: "left", icon: true, title: "", text: "", parts: {} },
+  notFound: { style: "plain", imageKey: null, title: "", text: "", search: false, products: false, parts: {} },
+  thanks: { top: "emoji", imageKey: null, mobileImageKey: null, link: "", coupon: "", follow: false, products: false, parts: {} },
+  popup: { layout: "center", imageKey: null, trigger: "delay", again: "once", parts: {} },
   share: { style: "photo", bg: "paper" },
   login: { layout: "center", imageKey: null, title: "", text: "", popupTitle: "", signupLabel: "", perksOn: true, perks: [], guestLink: true, providerStyle: "brand", parts: {} },
   account: DEFAULT_ACCOUNT_LOOK,
@@ -547,7 +607,7 @@ export function normalizeChatLook(raw: unknown): ChatLook {
 export function normalizeCookieLook(raw: unknown): CookieLook {
   const r = obj(raw);
   // ⚠️ คงช่องแปล <key>_en ไว้ (ระบบแปลธีมทับทีหลัง) — เก็บเฉพาะ title_en / text_en
-  const out: CookieLook & Record<string, unknown> = { layout: oneOf(r.layout, COOKIE_LAYOUTS, "card"), side: r.side === "right" ? "right" : "left", icon: r.icon !== false, title: txt(r.title, 60), text: txt(r.text, 400) };
+  const out: CookieLook & Record<string, unknown> = { layout: oneOf(r.layout, COOKIE_LAYOUTS, "card"), side: r.side === "right" ? "right" : "left", icon: r.icon !== false, title: txt(r.title, 60), text: txt(r.text, 400), parts: normalizePartStyles(r.parts) };
   if (typeof r.title_en === "string" && r.title_en.trim()) out.title_en = txt(r.title_en, 60);
   if (typeof r.text_en === "string" && r.text_en.trim()) out.text_en = txt(r.text_en, 400);
   return out;
@@ -566,14 +626,14 @@ function keepEn<T extends object>(out: T, r: Record<string, unknown>, keys: stri
 export function normalizeNotFound(raw: unknown): NotFoundLook {
   const r = obj(raw);
   const s = r.style === "image" || r.style === "big" ? r.style : "plain";
-  return keepEn({ style: s, imageKey: imgKey(r.imageKey), title: txt(r.title, 80), text: txt(r.text, 240), search: r.search === true, products: r.products === true }, r, ["title", "text"], 240);
+  return keepEn({ style: s, imageKey: imgKey(r.imageKey), title: txt(r.title, 80), text: txt(r.text, 240), search: r.search === true, products: r.products === true, parts: normalizePartStyles(r.parts) }, r, ["title", "text"], 240);
 }
 export function normalizeThanks(raw: unknown): ThanksLook {
   const r = obj(raw);
   const top = r.top === "image" || r.top === "none" ? r.top : "emoji";
   const coupon = typeof r.coupon === "string" ? r.coupon.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 32) : "";
   const link = typeof r.link === "string" ? r.link.trim().slice(0, 500) : "";
-  return { top, imageKey: imgKey(r.imageKey), mobileImageKey: imgKey(r.mobileImageKey), link: /^(\/(?!\/)|https?:\/\/)/i.test(link) ? link : "", coupon, follow: r.follow === true, products: r.products === true };
+  return { top, imageKey: imgKey(r.imageKey), mobileImageKey: imgKey(r.mobileImageKey), link: /^(\/(?!\/)|https?:\/\/)/i.test(link) ? link : "", coupon, follow: r.follow === true, products: r.products === true, parts: normalizePartStyles(r.parts) };
 }
 export function normalizePopup(raw: unknown): PopupLook {
   const r = obj(raw);
@@ -582,6 +642,7 @@ export function normalizePopup(raw: unknown): PopupLook {
     imageKey: imgKey(r.imageKey),
     trigger: r.trigger === "scroll" || r.trigger === "exit" ? r.trigger : "delay",
     again: r.again === "7d" ? "7d" : "once",
+    parts: normalizePartStyles(r.parts),
   };
 }
 export function normalizeShare(raw: unknown): ShareLook {

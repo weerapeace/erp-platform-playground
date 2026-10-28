@@ -69,3 +69,52 @@ describe("normalizeLogin (ป๊อปสมัคร · ขั้น 2)", () =>
     expect(Object.keys(normalizePartStyles(Object.fromEntries(keys.map((k) => [k, { all: { size: 12 } }]))))).toEqual(keys);
   });
 });
+
+describe("หน้าบัญชี: หน้าต่างแอป · จัดวาง · ลูกเล่น", () => {
+  it("ไม่มีค่า = แบบเดิม (ไม่มีลูกเล่น · ลำดับเดิม · โปรไฟล์แบบฟอร์ม)", () => {
+    expect(DEFAULT_ACCOUNT_LOOK).toMatchObject({ nav: "pills", navSide: "left", profileStyle: "form", decor: "none", glass: false, timeGreeting: false, countUp: false, tabAnim: "none", tilt: false });
+    expect(DEFAULT_ACCOUNT_LOOK.order).toEqual(["notice", "header", "body", "help", "reco"]);
+    expect(DEFAULT_ACCOUNT_LOOK.aside.on).toBe(false);
+  });
+  it("ลำดับ: ตัดค่าแปลก/ซ้ำ · ส่วนที่ขาดต่อท้ายให้ครบ", () => {
+    const a = normalizeAccount({ order: ["reco", "body", "reco", "evil", 3] });
+    expect(a.order).toEqual(["reco", "body", "notice", "header", "help"]);
+  });
+  it("ค่าแปลก = ค่าเริ่ม · ลิงก์กล่องข้างรับเฉพาะ /หน้า หรือ https://", () => {
+    const a = normalizeAccount({ nav: "panel", navSide: "up", decor: "fire", tabAnim: "spin", profileStyle: "rows", glass: 1, aside: { on: true, title: "คู่มือ", href: "javascript:alert(1)" } });
+    expect(a.nav).toBe("panel");
+    expect(a.navSide).toBe("left");
+    expect(a.decor).toBe("none");
+    expect(a.tabAnim).toBe("none");
+    expect(a.profileStyle).toBe("rows");
+    expect(a.glass).toBe(false);
+    expect(a.aside).toMatchObject({ on: true, title: "คู่มือ", href: "" });
+  });
+});
+
+describe("ขั้น 3: 404 · ขอบคุณ · ป๊อปอัป · คุกกี้", () => {
+  it("ไม่มีค่า = parts ว่าง (หน้าตาเดิม)", () => {
+    const p = normalizeSitePage({});
+    for (const k of ["notFound", "thanks", "popup", "cookie"] as const) expect(p[k].parts).toEqual({});
+  });
+  it("parts ผ่านตัวตรวจกลาง (ทิ้งคีย์/ช่องแปลก)", () => {
+    const p = normalizeSitePage({
+      notFound: { parts: { "nf.title": { all: { size: 40, evil: "x" } }, "BAD": { all: { size: 1 } } } },
+      thanks: { parts: { "th.code": { mobile: { color: "brand" } } } },
+      popup: { parts: { "pp.btn": { all: { radius: 99 } } } },
+      cookie: { parts: { "ck.box": { all: { hidden: true } } } },
+    });
+    expect(p.notFound.parts).toEqual({ "nf.title": { all: { size: 40 } } });
+    expect(p.thanks.parts).toEqual({ "th.code": { mobile: { color: "brand" } } });
+    expect(Object.keys(p.popup.parts)).toEqual(["pp.btn"]);
+    expect(p.cookie.parts["ck.box"]?.all?.hidden).toBe(true);
+  });
+  it("ทะเบียนชิ้นส่วนทุกหน้า: คีย์ไม่ซ้ำข้ามหน้า ผ่านตัวตรวจคีย์ ทุกกลุ่มมีช่อง", async () => {
+    const R = await import("../website-page-parts");
+    const all = [...R.ACCOUNT_PARTS, ...R.LOGIN_PARTS, ...R.NF_PARTS, ...R.THANKS_PARTS, ...R.POPUP_PARTS, ...R.COOKIE_PARTS];
+    const keys = all.map((p) => p.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(Object.keys(normalizePartStyles(Object.fromEntries(keys.map((k) => [k, { all: { size: 12 } }]))))).toEqual(keys);
+    for (const p of all) for (const g of p.groups) expect(PART_GROUP_FIELDS[g].length).toBeGreaterThan(0);
+  });
+});

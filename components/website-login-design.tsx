@@ -8,9 +8,9 @@
  * ค่า theme.page.login (normalizeLogin — มิเรอร์ lib/website-site-design ↔ เว็บร้าน) · ค่าเริ่ม = หน้าตาเดิม
  * พรีวิว: /account/login (ร้านที่ยังไม่ตั้งช่องทาง = ปุ่มตัวอย่าง) · ?auth=signup = เปิดป๊อปทันที
  */
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { LangInput } from "@/components/bilingual-field";
-import { PartStyleEditor } from "@/components/website-part-style-editor";
+import { PartStyleFold } from "@/components/website-part-style-editor";
 import { webForm } from "@/lib/website-form-styles";
 import type { LoginLook } from "@/lib/website-site-design";
 import { LOGIN_PARTS } from "@/lib/website-page-parts";
@@ -27,7 +27,6 @@ const Toggle = ({ checked, onChange, children }: { checked: boolean; onChange: (
 );
 
 export function LoginExtraSetting({ value, onChange, colors, onPreview }: { value: LoginLook; onChange: (p: Partial<LoginLook>) => void; colors: SiteTheme["colors"]; onPreview: (path: string) => void }) {
-  const [fine, setFine] = useState(false);
   const perks = value.perks;
   const setPerk = (i: number, text: string) => onChange({ perks: perks.map((p, j) => (j === i ? text : p)) });
 
@@ -103,26 +102,7 @@ export function LoginExtraSetting({ value, onChange, colors, onPreview }: { valu
         </div>
       </div>
 
-      <div className="rounded-lg border border-slate-200 bg-white">
-        <button
-          type="button"
-          onClick={() => {
-            setFine((v) => !v);
-            if (!fine) onPreview("/account/login?auth=signup");
-          }}
-          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700"
-          data-open-login-part-editor
-        >
-          🎨 ปรับละเอียดทีละชิ้น (ป๊อป · ปุ่ม · หน้าเข้าสู่ระบบ · ปุ่มสมัครบนหัวเว็บ)
-          <span className="ml-auto text-xs text-slate-400">{Object.keys(value.parts).length ? `ปรับแล้ว ${Object.keys(value.parts).length} ชิ้น` : "ยังไม่ได้ปรับ"}</span>
-          <span className="text-slate-400">{fine ? "▾" : "▸"}</span>
-        </button>
-        {fine && (
-          <div className="px-3 pb-3">
-            <PartStyleEditor parts={LOGIN_PARTS} value={value.parts} onChange={(parts) => onChange({ parts })} colors={colors} />
-          </div>
-        )}
-      </div>
+      <PartStyleFold parts={LOGIN_PARTS} value={value.parts} onChange={(parts) => onChange({ parts })} colors={colors} onOpen={() => onPreview("/account/login?auth=signup")} hint="ป๊อป · ปุ่ม · หน้าเข้าสู่ระบบ · ปุ่มสมัครบนหัวเว็บ" testId="login" />
     </div>
   );
 }

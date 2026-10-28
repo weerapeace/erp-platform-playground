@@ -289,3 +289,34 @@ export function PartStyleEditor({ parts, value, onChange, colors, title = "🎨 
     </div>
   );
 }
+
+/**
+ * 🎨 ปุ่มพับ "ปรับละเอียดทีละชิ้น" (ของกลาง) — วางท้ายการ์ดของหน้าไหนก็ได้ในแท็บดีไซน์
+ * <PartStyleFold parts={NF_PARTS} value={nf.parts} onChange={(parts) => setNf({ parts })} colors={colors} onOpen={() => onPreview("/zz")} hint="404 · ปุ่ม" />
+ * เปิดครั้งแรก = เรียก onOpen (พาพรีวิวไปหน้านั้น ให้คลิกเลือกชิ้นได้ทันที)
+ */
+export function PartStyleFold({ parts, value, onChange, colors, onOpen, hint, testId }: { parts: PartDef[]; value: PartStyles; onChange: (v: PartStyles) => void; colors: SiteTheme["colors"]; onOpen?: () => void; hint?: string; testId?: string }) {
+  const [open, setOpen] = useState(false);
+  const n = Object.keys(value).length;
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white" data-part-fold={testId}>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((v) => !v);
+          if (!open) onOpen?.();
+        }}
+        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm font-medium text-slate-700"
+      >
+        <span className="min-w-0">🎨 ปรับละเอียดทีละชิ้น{hint ? <span className="font-normal text-slate-500"> ({hint})</span> : null}</span>
+        <span className="ml-auto shrink-0 text-xs text-slate-400">{n ? `ปรับแล้ว ${n} ชิ้น` : "ยังไม่ได้ปรับ"}</span>
+        <span className="text-slate-400">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && (
+        <div className="px-3 pb-3">
+          <PartStyleEditor parts={parts} value={value} onChange={onChange} colors={colors} />
+        </div>
+      )}
+    </div>
+  );
+}

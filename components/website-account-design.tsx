@@ -4,17 +4,19 @@
  * 👤 ตั้งค่าหน้าตา "บัญชีของฉัน" ของเว็บร้าน — การ์ดในแท็บดีไซน์ › 📄 หน้าพิเศษ (theme.page.account)
  *
  * ① ส่วนหัว (4 แบบ · ข้อความทักทาย · ป้ายใต้ชื่อ) ② เมนู (4 แบบ · ไอคอนอีโมจิ/เส้น/ไม่มี · ลำดับ/ชื่อ/ไอคอน/ซ่อน · แท็บแรก)
- * ③ กล่องเนื้อหา (แบบกล่อง · กล่องเพิ่มออเดอร์เก่า · ข้อความตอนว่าง) ④ ส่วนเสริม (แถบประกาศ · สินค้าแนะนำ · ช่วยเหลือ · ความกว้าง)
+ * ③ กล่องเนื้อหา (แบบกล่อง · กล่องเพิ่มออเดอร์เก่า · ข้อความตอนว่าง · โปรไฟล์แบบฟอร์ม/แถว) ④ ส่วนเสริม (แถบประกาศ · สินค้าแนะนำ · ช่วยเหลือ · ความกว้าง · กล่องข้างขวา)
+ * ⑤ จัดวาง (ลำดับส่วนในหน้า · เมนูซ้าย/ขวา) ✨ ลูกเล่น (พื้นหลังวงกลมเบลอ · กระจกฝ้า · ทักทายตามเวลา · เลขแต้มวิ่ง · เปลี่ยนแท็บนุ่ม · บัตรเอียงตามเมาส์)
+ * ⚡ แบบสำเร็จรูป "หน้าต่างแอป" = ตั้งหลายช่องในคลิกเดียว (ปรับต่อเองได้ทุกช่อง)
  * 🎨 ปรับละเอียดทีละชิ้น = ของกลาง PartStyleEditor + ทะเบียนชิ้นส่วน ACCOUNT_PARTS (คลิกเลือกในพรีวิวได้)
  * ค่าเริ่ม = หน้าตาเดิม · ตัวตรวจค่า normalizeAccount (lib/website-site-design — มิเรอร์กับเว็บร้าน) · เว็บร้าน components/account/AccountClient
  * พรีวิว: /account ในกรอบพรีวิว = ข้อมูลตัวอย่าง (ไม่ต้องล็อกอิน)
  */
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { ImageInput } from "@/components/image-input";
 import { SiteIconPicker } from "@/components/site-icon-picker";
-import { PartStyleEditor } from "@/components/website-part-style-editor";
+import { PartStyleFold } from "@/components/website-part-style-editor";
 import { webForm } from "@/lib/website-form-styles";
-import { ACCOUNT_TAB_DEFAULTS, DEFAULT_ACCOUNT_LOOK, type AccountEmptyKey, type AccountLook, type AccountTabKey } from "@/lib/website-site-design";
+import { ACCOUNT_TAB_DEFAULTS, DEFAULT_ACCOUNT_LOOK, type AccountBlock, type AccountEmptyKey, type AccountLook, type AccountTabKey } from "@/lib/website-site-design";
 import { ACCOUNT_PARTS } from "@/lib/website-page-parts";
 import type { SiteTheme } from "@/lib/website-theme";
 
@@ -52,6 +54,58 @@ function Section({ title, children, open = false }: { title: string; children: R
   );
 }
 
+const BLOCK_LABEL: Record<AccountBlock, string> = {
+  notice: "📢 แถบประกาศ",
+  header: "🙂 ส่วนหัว (รูป + ชื่อ)",
+  body: "📑 เมนู + เนื้อหา",
+  help: "💬 กล่องช่วยเหลือ",
+  reco: "🛍 สินค้าแนะนำ",
+};
+
+/** ⚡ แบบสำเร็จรูป — ตั้งหลายช่องพร้อมกัน (ค่าอื่นคงเดิม · ปรับต่อเองได้) */
+const PRESETS: { k: string; l: string; d: string; p: Partial<AccountLook> }[] = [
+  {
+    k: "app",
+    l: "🪟 หน้าต่างแอป",
+    d: "กรอบมนใหญ่ · เมนูในกรอบ · วงกลมเบลอ · กระจกฝ้า",
+    p: {
+      nav: "panel",
+      navIcons: "line",
+      navSide: "left",
+      profileStyle: "rows",
+      decor: "blobs",
+      glass: true,
+      tabAnim: "fade",
+      aside: { on: true, icon: "💡", title: "คู่มือใช้งานบัญชี", text: "ดูออเดอร์ · ใช้คูปอง · แก้ข้อมูล ได้ในที่เดียว", href: "" },
+    },
+  },
+  {
+    k: "card",
+    l: "💳 บัตรสมาชิก",
+    d: "หัวเป็นบัตรเอียงได้ · เลขแต้มวิ่ง · ไอคอนแบบแอป",
+    p: { header: "card", nav: "tiles", tilt: true, countUp: true, timeGreeting: true, decor: "wash", glass: false, tabAnim: "slide" },
+  },
+  {
+    k: "plain",
+    l: "↺ แบบเดิม",
+    d: "คืนเฉพาะการจัดวาง + ลูกเล่น",
+    p: {
+      header: DEFAULT_ACCOUNT_LOOK.header,
+      nav: DEFAULT_ACCOUNT_LOOK.nav,
+      navSide: "left",
+      profileStyle: "form",
+      order: [...DEFAULT_ACCOUNT_LOOK.order],
+      decor: "none",
+      glass: false,
+      timeGreeting: false,
+      countUp: false,
+      tabAnim: "none",
+      tilt: false,
+      aside: { ...DEFAULT_ACCOUNT_LOOK.aside },
+    },
+  },
+];
+
 const EMPTY_FALLBACK: Record<AccountEmptyKey, { label: string; text: string; button: string; href: string }> = {
   orders: { label: "📦 ยังไม่มีออเดอร์", text: "ยังไม่มีออเดอร์ในบัญชี", button: "เลือกซื้อสินค้า", href: "/shop" },
   wishlist: { label: "❤️ ยังไม่มีรายการโปรด", text: "ยังไม่มีรายการโปรด — กด ♡ ที่สินค้าที่ชอบ เก็บไว้ดูทีหลัง", button: "เลือกดูสินค้า", href: "/shop" },
@@ -60,7 +114,6 @@ const EMPTY_FALLBACK: Record<AccountEmptyKey, { label: string; text: string; but
 
 export function AccountPageSetting({ value, onChange, colors, onPreview }: { value: AccountLook; onChange: (v: AccountLook) => void; colors: SiteTheme["colors"]; onPreview: (path: string) => void }) {
   const set = (p: Partial<AccountLook>) => onChange({ ...value, ...p });
-  const [fine, setFine] = useState(false);
   const d = DEFAULT_ACCOUNT_LOOK;
   const tabs = value.tabs;
   const setTab = (i: number, p: Partial<(typeof tabs)[number]>) => set({ tabs: tabs.map((t, j) => (j === i ? { ...t, ...p } : t)) });
@@ -73,10 +126,30 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
   };
   const setEmpty = (k: AccountEmptyKey, p: Partial<AccountLook["empty"][AccountEmptyKey]>) => set({ empty: { ...value.empty, [k]: { ...value.empty[k], ...p } } });
   const visibleTabs = tabs.filter((t) => !t.hidden);
+  const moveBlock = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= value.order.length) return;
+    const next = [...value.order];
+    [next[i], next[j]] = [next[j], next[i]];
+    set({ order: next });
+  };
+  const setAside = (p: Partial<AccountLook["aside"]>) => set({ aside: { ...value.aside, ...p } });
 
   return (
     <div className="space-y-2" data-account-design>
+      <div className="rounded-lg border border-violet-200 bg-violet-50/60 p-2.5 space-y-1.5">
+        <span className="block text-[11px] font-medium text-violet-800">⚡ แบบสำเร็จรูป — กดแล้วปรับต่อเองได้ทุกช่อง</span>
+        <div className="flex flex-wrap gap-1.5">
+          {PRESETS.map((x) => (
+            <button key={x.k} type="button" onClick={() => set(x.p)} className="rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-left text-xs leading-tight hover:bg-violet-50" data-account-preset={x.k}>
+              <span className="block font-medium text-slate-800">{x.l}</span>
+              <span className="block text-[10px] text-slate-500">{x.d}</span>
+            </button>
+          ))}
+        </div>
+      </div>
       <Section title="① ส่วนหัว" open>
+        {value.nav === "panel" && <p className="rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800">แบบเมนู &quot;หน้าต่างแอป&quot; ย่อส่วนหัวไปอยู่มุมขวาบนในกรอบ (ชื่อ · ป้าย · รูปโปรไฟล์) — แบบหัวด้านล่างใช้กับเมนูแบบอื่น</p>}
         <Opt
           value={value.header}
           def={d.header}
@@ -122,8 +195,23 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
             { v: "under", l: "ขีดเส้นใต้" },
             { v: "side", l: "เมนูด้านซ้าย", d: "มือถือ = แถบบน" },
             { v: "tiles", l: "ไอคอนแบบแอป", d: "ตาราง" },
+            { v: "panel", l: "หน้าต่างแอป", d: "กรอบมน · เมนูในกรอบ" },
           ]}
         />
+        {(value.nav === "side" || value.nav === "panel") && (
+          <div className="flex flex-wrap items-end gap-3">
+            {value.nav === "panel" && (
+              <label className="block">
+                <span className={webForm.label}>หัวเมนูข้าง</span>
+                <input className={`${webForm.input} !w-44`} value={value.panelTitle} onChange={(e) => set({ panelTitle: e.target.value })} placeholder="บัญชีของฉัน" maxLength={40} />
+              </label>
+            )}
+            <div className="space-y-1">
+              <span className={webForm.label}>เมนูอยู่ฝั่ง (จอคอม)</span>
+              <Opt value={value.navSide} def={d.navSide} onChange={(v) => set({ navSide: v })} options={[{ v: "left", l: "◧ ซ้าย" }, { v: "right", l: "◨ ขวา" }]} />
+            </div>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-3">
           <span className="text-[11px] text-slate-500">ไอคอนหน้าชื่อเมนู</span>
           <Opt value={value.navIcons} def={d.navIcons} onChange={(v) => set({ navIcons: v })} options={[{ v: "emoji", l: "อีโมจิ" }, { v: "line", l: "ไอคอนเส้น" }, { v: "none", l: "ไม่มี" }]} />
@@ -186,6 +274,10 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
           <span className={webForm.label}>กล่อง &quot;เคยสั่งแบบไม่ได้สมัคร?&quot;</span>
           <Opt value={value.claim} def={d.claim} onChange={(v) => set({ claim: v })} options={[{ v: "box", l: "กล่องเต็ม" }, { v: "link", l: "ย่อเป็นลิงก์" }, { v: "hide", l: "ซ่อน" }]} />
         </div>
+        <div className="space-y-1">
+          <span className={webForm.label}>แท็บโปรไฟล์</span>
+          <Opt value={value.profileStyle} def={d.profileStyle} onChange={(v) => set({ profileStyle: v })} options={[{ v: "form", l: "ฟอร์ม" }, { v: "rows", l: "แถวข้อมูล ›", d: "กดแถวแก้ทีละช่อง" }]} />
+        </div>
         {(Object.keys(EMPTY_FALLBACK) as AccountEmptyKey[]).map((k) => {
           const fb = EMPTY_FALLBACK[k];
           const e = value.empty[k];
@@ -232,28 +324,65 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
           <span className={webForm.label}>ความกว้างหน้า</span>
           <Opt value={value.width} def={d.width} onChange={(v) => set({ width: v })} options={[{ v: "site", l: "ตามทั้งเว็บ" }, { v: "narrow", l: "แคบ อ่านง่าย" }]} />
         </div>
-      </Section>
-
-      <div className="rounded-lg border border-slate-200 bg-white">
-        <button
-          type="button"
-          onClick={() => {
-            setFine((v) => !v);
-            if (!fine) onPreview("/account");
-          }}
-          className="w-full flex items-center gap-2 px-3 py-2 text-sm font-medium text-slate-700"
-          data-open-part-editor
-        >
-          🎨 ปรับละเอียดทีละชิ้น (สี · ฟอนต์ · ขนาด · ระยะ · ขอบ · เงา · ตำแหน่ง)
-          <span className="ml-auto text-xs text-slate-400">{Object.keys(value.parts).length ? `ปรับแล้ว ${Object.keys(value.parts).length} ชิ้น` : "ยังไม่ได้ปรับ"}</span>
-          <span className="text-slate-400">{fine ? "▾" : "▸"}</span>
-        </button>
-        {fine && (
-          <div className="px-3 pb-3">
-            <PartStyleEditor parts={ACCOUNT_PARTS} value={value.parts} onChange={(parts) => set({ parts })} colors={colors} />
+        <Toggle checked={value.aside.on} onChange={(v) => setAside({ on: v })}>
+          กล่องข้างขวา (คู่มือ / โปรสมาชิก) — จอกว้างอยู่ขวา · จอเล็กอยู่ท้ายเนื้อหา
+        </Toggle>
+        {value.aside.on && (
+          <div className="grid sm:grid-cols-[auto_1fr_1fr] gap-2 items-end" data-account-aside>
+            <SiteIconPicker value={value.aside.icon} onChange={(v) => setAside({ icon: v })} label="ไอคอน" />
+            <label className="block">
+              <span className={webForm.label}>หัวข้อ</span>
+              <input className={webForm.input} value={value.aside.title} onChange={(e) => setAside({ title: e.target.value })} placeholder="คู่มือใช้งานบัญชี" maxLength={60} />
+            </label>
+            <label className="block">
+              <span className={webForm.label}>กดแล้วไปที่ (ว่าง = กดไม่ได้)</span>
+              <input className={webForm.input} value={value.aside.href} onChange={(e) => setAside({ href: e.target.value })} placeholder="/help หรือ https://" maxLength={300} />
+            </label>
+            <label className="block sm:col-span-3">
+              <span className={webForm.label}>ข้อความ</span>
+              <textarea className={webForm.input} rows={2} value={value.aside.text} onChange={(e) => setAside({ text: e.target.value })} placeholder="เช่น สมาชิก Gold รับส่วนลด 10% ทุกออเดอร์" maxLength={200} />
+            </label>
           </div>
         )}
-      </div>
+      </Section>
+
+      <Section title="⑤ จัดวาง — ลำดับส่วนในหน้า">
+        <div className="space-y-1.5">
+          {value.order.map((b, i) => (
+            <div key={b} className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-xs text-slate-700" data-account-block={b}>
+              <button type="button" className="h-7 w-7 rounded border border-slate-200 bg-white disabled:opacity-30" disabled={i === 0} onClick={() => moveBlock(i, -1)} aria-label="เลื่อนขึ้น">
+                ↑
+              </button>
+              <button type="button" className="h-7 w-7 rounded border border-slate-200 bg-white disabled:opacity-30" disabled={i === value.order.length - 1} onClick={() => moveBlock(i, 1)} aria-label="เลื่อนลง">
+                ↓
+              </button>
+              <span className="flex-1">{BLOCK_LABEL[b]}</span>
+              {b === "header" && value.nav === "panel" && <span className="text-[10px] text-slate-400">อยู่ในกรอบแล้ว</span>}
+            </div>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-500">เปิด/ปิดแต่ละส่วนที่ ① และ ④ · ปรับระยะ/สี/ขนาดละเอียดที่ 🎨 ด้านล่าง</p>
+      </Section>
+
+      <Section title="✨ ลูกเล่น">
+        <div className="space-y-1">
+          <span className={webForm.label}>พื้นหลังหน้า</span>
+          <Opt value={value.decor} def={d.decor} onChange={(v) => set({ decor: v })} options={[{ v: "none", l: "เรียบ" }, { v: "blobs", l: "วงกลมเบลอ", d: "สีตามสีหลักร้าน" }, { v: "wash", l: "ไล่สีจาง", d: "จากบนลงล่าง" }]} />
+        </div>
+        <div className="space-y-1">
+          <span className={webForm.label}>ตอนเปลี่ยนแท็บ</span>
+          <Opt value={value.tabAnim} def={d.tabAnim} onChange={(v) => set({ tabAnim: v })} options={[{ v: "none", l: "ทันที" }, { v: "fade", l: "ค่อย ๆ ปรากฏ" }, { v: "slide", l: "เลื่อนขึ้นนุ่ม ๆ" }]} />
+        </div>
+        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+          <Toggle checked={value.glass} onChange={(v) => set({ glass: v })}>กล่องกระจกฝ้า (สวยคู่กับพื้นวงกลมเบลอ)</Toggle>
+          <Toggle checked={value.timeGreeting} onChange={(v) => set({ timeGreeting: v })}>ทักทายตามเวลา (อรุณสวัสดิ์ ☀️ / ราตรีสวัสดิ์ 🌙 · ใช้เมื่อไม่ได้ตั้งข้อความทักทาย)</Toggle>
+          <Toggle checked={value.countUp} onChange={(v) => set({ countUp: v })}>ตัวเลขแต้มวิ่งจาก 0</Toggle>
+          <Toggle checked={value.tilt} onChange={(v) => set({ tilt: v })}>บัตรสมาชิกเอียงตามเมาส์ + แสงสะท้อน (หัวแบบบัตรสมาชิก)</Toggle>
+        </div>
+        <p className="text-[11px] text-slate-500">ลูกค้าที่ตั้งเครื่องให้ &quot;ลดการเคลื่อนไหว&quot; จะไม่เห็นภาพเคลื่อนไหว (เพื่อความสบายตา)</p>
+      </Section>
+
+      <PartStyleFold parts={ACCOUNT_PARTS} value={value.parts} onChange={(parts) => set({ parts })} colors={colors} onOpen={() => onPreview("/account")} hint="สี · ฟอนต์ · ขนาด · ระยะ · ขอบ · เงา · ตำแหน่ง" testId="account" />
     </div>
   );
 }

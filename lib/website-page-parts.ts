@@ -56,6 +56,12 @@ export const ACCOUNT_PARTS: PartDef[] = [
   { key: "acc.btn", label: "ปุ่มหลัก", hint: "ปุ่มทึบ", groups: ["text", "box"] },
   { key: "acc.btn2", label: "ปุ่มรอง", hint: "ปุ่มขอบ", groups: ["text", "box"] },
   { key: "acc.input", label: "ช่องกรอก", groups: ["text", "box"] },
+  { key: "acc.frame", label: "กรอบหน้าต่างแอป", hint: "เมนูแบบหน้าต่างแอป", groups: ["box", "layout"] },
+  { key: "acc.sidebar", label: "แถบเมนูข้าง", hint: "หน้าต่างแอป", groups: ["box", "layout"] },
+  { key: "acc.stitle", label: "หัวเมนูข้าง", hint: "หน้าต่างแอป", groups: ["text", "hide"] },
+  { key: "acc.ptitle", label: "หัวข้อหน้า", hint: "ชื่อแท็บที่เปิดอยู่ · หน้าต่างแอป", groups: ["text", "hide"] },
+  { key: "acc.row", label: "แถวข้อมูลโปรไฟล์", hint: "โปรไฟล์แบบแถว", groups: ["text", "box"] },
+  { key: "acc.aside", label: "กล่องข้างขวา", hint: "คู่มือ / โปรสมาชิก", groups: ["text", "box", "icon"] },
 ];
 
 /** ช่วงแถบเลื่อนในแผง (แคบกว่าที่ระบบรับ — พิมพ์ตัวเลขเกินได้ถึงขอบ PART_RANGES) + ค่าโชว์ตอนยังไม่ตั้ง */
@@ -101,4 +107,48 @@ export const LOGIN_PARTS: PartDef[] = [
   { key: "login.card", label: "กรอบหน้าเข้าสู่ระบบ", hint: "หน้า /account/login", groups: ["box", "layout"] },
   { key: "login.heading", label: "หัวข้อหน้าเข้าสู่ระบบ", groups: ["text"] },
   { key: "login.intro", label: "ข้อความต้อนรับ", groups: ["text", "hide"] },
+];
+
+/** 🔍 หน้าไม่พบ 404 (เว็บร้าน components/layout/NotFoundView) */
+export const NF_PARTS: PartDef[] = [
+  { key: "nf.big", label: "ตัวเลข 404 / รูป", groups: ["text", "layout", "hide"] },
+  { key: "nf.title", label: "หัวข้อ", groups: ["text"] },
+  { key: "nf.text", label: "ข้อความ", groups: ["text", "hide"] },
+  { key: "nf.search", label: "ช่องค้นหา", groups: ["text", "box"] },
+  { key: "nf.btn", label: "ปุ่มหลัก", groups: ["text", "box"] },
+  { key: "nf.btn2", label: "ปุ่มรอง", groups: ["text", "box", "hide"] },
+  { key: "nf.reco", label: "หัวข้อสินค้าแนะนำ", groups: ["text", "layout"] },
+];
+
+/** 🎉 หน้าขอบคุณหลังสั่งซื้อ (เว็บร้าน CheckoutClient + components/checkout/ThanksExtras) */
+export const THANKS_PARTS: PartDef[] = [
+  { key: "th.card", label: "กรอบหน้า", groups: ["box", "layout"] },
+  { key: "th.title", label: "หัวข้อขอบคุณ", groups: ["text"] },
+  { key: "th.text", label: "ข้อความใต้หัวข้อ", groups: ["text", "hide"] },
+  { key: "th.no", label: "กล่องเลขที่คำสั่งซื้อ", groups: ["text", "box"] },
+  { key: "th.coupon", label: "กล่องคูปองครั้งหน้า", groups: ["text", "box"] },
+  { key: "th.code", label: "โค้ดคูปอง", groups: ["text", "box"] },
+  { key: "th.follow", label: "ข้อความชวนติดตาม", groups: ["text", "hide"] },
+  { key: "th.social", label: "ปุ่มโซเชียล", groups: ["text", "box"] },
+  { key: "th.pay", label: "กล่องวิธีชำระเงิน", groups: ["box"] },
+  { key: "th.reco", label: "หัวข้อสินค้าแนะนำ", groups: ["text", "layout"] },
+];
+
+/** 🎁 ป๊อปอัปแจกโค้ด (เว็บร้าน components/layout/PromoPopup) */
+export const POPUP_PARTS: PartDef[] = [
+  { key: "pp.box", label: "กรอบป๊อป", groups: ["box", "layout"] },
+  { key: "pp.title", label: "หัวข้อ", groups: ["text"] },
+  { key: "pp.text", label: "ข้อความ", groups: ["text", "hide"] },
+  { key: "pp.input", label: "ช่องกรอกอีเมล", groups: ["text", "box"] },
+  { key: "pp.btn", label: "ปุ่ม", groups: ["text", "box"] },
+  { key: "pp.code", label: "โค้ดที่ได้", groups: ["text", "box"] },
+];
+
+/** 🍪 แถบคุกกี้ (เว็บร้าน components/layout/Tracking) */
+export const COOKIE_PARTS: PartDef[] = [
+  { key: "ck.box", label: "กรอบแถบคุกกี้", groups: ["box", "layout"] },
+  { key: "ck.title", label: "หัวข้อ", groups: ["text", "hide"] },
+  { key: "ck.text", label: "ข้อความ", groups: ["text"] },
+  { key: "ck.btn", label: "ปุ่มยอมรับ", groups: ["text", "box"] },
+  { key: "ck.btn2", label: "ปุ่มรอง", hint: "ใช้เฉพาะที่จำเป็น", groups: ["text", "box"] },
 ];
