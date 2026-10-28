@@ -27,3 +27,22 @@ export async function activeShopBySlug<T extends ShopRow = ShopRow>(sb: Supabase
   const shop = await shopBySlug<T & { status: string }>(sb, slug, withStatus);
   return shop && shop.status === "active" ? shop : null;
 }
+
+/**
+ * 🌐 origin ที่เว็บร้านส่งมา (ลิงก์ในอีเมล / ที่อยู่ callback ของ OAuth) ต้องเป็นโดเมนของร้านนี้ (shop_domains) — กันพาไปเว็บปลอม
+ * https เท่านั้น · รับทั้งมี/ไม่มี www · เครื่อง dev (NODE_ENV=development) อนุญาต localhost · ไม่ผ่าน = null
+ */
+export async function trustedShopOrigin(sb: SupabaseClient, shopId: string, raw: unknown): Promise<string | null> {
+  let u: URL;
+  try {
+    u = new URL(String(raw ?? ""));
+  } catch {
+    return null;
+  }
+  if (process.env.NODE_ENV === "development" && /^(localhost|127\.0\.0\.1)$/.test(u.hostname)) return u.origin;
+  if (u.protocol !== "https:") return null;
+  const { data } = await sb.from("shop_domains").select("domain").eq("shop_id", shopId);
+  const hosts = ((data ?? []) as { domain: string }[]).map((d) => d.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase());
+  const host = u.hostname.toLowerCase();
+  return hosts.some((h) => h === host || `www.${h}` === host || h === `www.${host}`) ? u.origin : null;
+}

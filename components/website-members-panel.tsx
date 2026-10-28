@@ -9,6 +9,8 @@
  * ⭐ แต้ม/ระดับ: คอลัมน์แต้ม (กด = ประวัติ + ปรับแต้ม) · ปุ่ม "ระดับสมาชิก" มุมขวาบน — components/website-member-points
  * 👤 กดแถว = ประวัติลูกค้าหน้าเดียว (components/website-customer-profile)
  * 🎯 ปุ่มกลุ่มลูกค้า (รับข่าวสาร/ซื้อซ้ำ/ยังไม่ซื้อ/ห่างหาย/ระดับ) + ส่งออก CSV เฉพาะคนที่ยินยอม — lib/website-member-segments
+ * 🧪 สมาชิกทดลอง (components/website-member-trial): ไม่นับในกลุ่ม/จำนวน/CSV — ดูได้จากปุ่มกรอง "🧪 ทดลอง" · แถวมีปุ่ม "เปิดเว็บ"
+ * 🔑 ตั้งค่าการเข้าสู่ระบบ Google/LINE/Facebook ต่อร้าน (components/website-member-login-settings) + แถบสถานะด้านบน
  */
 import { useCallback, useEffect, useState } from "react";
 import { MiniTable } from "@/components/mini-table";
@@ -20,6 +22,8 @@ import { MemberPointsModal, MemberTiersModal } from "@/components/website-member
 import { WebsiteCustomerProfile, type CustomerRef } from "@/components/website-customer-profile";
 import type { MemberTier } from "@/lib/member-points";
 import { MEMBER_SEGMENTS, inSegment } from "@/lib/website-member-segments";
+import { MemberTrialModal, openAsTrialMember } from "@/components/website-member-trial";
+import { MemberLoginSettingsModal } from "@/components/website-member-login-settings";
 
 type Member = {
   id: string;
@@ -39,7 +43,11 @@ type Member = {
   spend12m: number;
   lastOrderAt: string | null;
   tier: { key: string; name: string; color: string } | null;
+  isTest: boolean;
 };
+
+const TRIAL_SEG = "trial";
+const LOGIN_LABEL: Record<string, string> = { google: "Google", line: "LINE", facebook: "Facebook" };
 
 const day = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", year: "2-digit" }) : "—");
 const baht = (n: number) => `฿${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}`;
@@ -57,6 +65,10 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
   const [profile, setProfile] = useState<CustomerRef | null>(null);
   const [seg, setSeg] = useState("all");
   const [exporting, setExporting] = useState(false);
+  const [loginReady, setLoginReady] = useState<Record<string, boolean>>({});
+  const [trialOpen, setTrialOpen] = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
+  const [opening, setOpening] = useState<string | null>(null);
 
   const load = useCallback(() => {
     apiFetch(`/api/website/members?shop=${encodeURIComponent(shopSlug)}`)
@@ -66,6 +78,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
         setRows(j.members ?? []);
         setTiers(j.tiers ?? []);
         setPointsOn(!!j.pointsEnabled);
+        setLoginReady(j.loginReady ?? {});
       })
       .catch(() => {
         toast.error("โหลดสมาชิกไม่สำเร็จ");
@@ -118,15 +131,41 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
     }
   };
 
+  // 🧪 เปิดเว็บร้านในฐานะสมาชิกทดลอง (แท็บใหม่)
+  const openTrial = async (m: Member) => {
+    setOpening(m.id);
+    const err = await openAsTrialMember(shopSlug, m.id);
+    setOpening(null);
+    if (err) toast.error(err);
+  };
+
   if (rows === null) return <div className="py-16 text-center text-sm text-slate-400">กำลังโหลด…</div>;
-  const segOpts = [...MEMBER_SEGMENTS.map((x) => ({ key: x.key as string, label: x.label, hint: x.hint })), ...tiers.map((t) => ({ key: `tier:${t.key}`, label: `⭐ ${t.name}`, hint: `ระดับ ${t.name}` }))];
-  const shown = rows.filter((m) => inSegment(m, seg));
-  const optInShown = shown.filter((m) => m.marketingOptIn && m.status === "active").length;
+  // 🧪 สมาชิกทดลองไม่นับในกลุ่ม/จำนวน/CSV — โชว์เฉพาะตอนเลือกปุ่มกรอง "🧪 ทดลอง"
+  const real = rows.filter((m) => !m.isTest);
+  const trial = rows.filter((m) => m.isTest);
+  const segOpts = [
+    ...MEMBER_SEGMENTS.map((x) => ({ key: x.key as string, label: x.label, hint: x.hint, count: real.filter((m) => inSegment(m, x.key)).length })),
+    ...tiers.map((t) => ({ key: `tier:${t.key}`, label: `⭐ ${t.name}`, hint: `ระดับ ${t.name}`, count: real.filter((m) => inSegment(m, `tier:${t.key}`)).length })),
+    ...(trial.length ? [{ key: TRIAL_SEG, label: "🧪 ทดลอง", hint: "สมาชิกทดลอง (ไม่นับในยอด/สถิติ/CSV)", count: trial.length }] : []),
+  ];
+  const shown = seg === TRIAL_SEG ? trial : real.filter((m) => inSegment(m, seg));
+  const optInShown = seg === TRIAL_SEG ? 0 : shown.filter((m) => m.marketingOptIn && m.status === "active").length;
+  const readyList = Object.keys(LOGIN_LABEL).filter((p) => loginReady[p]);
   // แสดงคอลัมน์แต้ม/ระดับเมื่อร้านเปิดแต้ม หรือเคยมีแต้ม/ตั้งระดับไว้ (ปิดทีหลังแต้มเดิมยังอยู่)
   const showPoints = pointsOn || tiers.length > 0 || rows.some((r) => r.points !== 0);
 
   return (
     <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500" data-login-strip>
+        <b className="text-slate-700">การเข้าสู่ระบบของร้านนี้:</b>
+        {Object.entries(LOGIN_LABEL).map(([p, label]) => (
+          <span key={p} className={loginReady[p] ? "text-emerald-700 font-medium" : "text-slate-400"}>
+            {label} {loginReady[p] ? "✓" : "ยังไม่ตั้ง"}
+          </span>
+        ))}
+        <span className="text-violet-700 font-medium">🧪 สมาชิกทดลอง ✓ พร้อมใช้</span>
+        <span className="ml-auto text-[11px] text-slate-400">{readyList.length ? "ลูกค้ากดสมัครที่ปุ่มบนหัวเว็บได้แล้ว" : "ยังไม่มีปุ่มสมัครบนเว็บ — ตั้งค่าอย่างน้อย 1 ช่องทาง"}</span>
+      </div>
       {rows.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5" data-member-segments>
           {segOpts.map((o) => (
@@ -137,7 +176,7 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
               onClick={() => setSeg(o.key)}
               className={`h-8 px-3 rounded-full text-xs border ${seg === o.key ? "bg-blue-600 border-blue-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}
             >
-              {o.label} <span className="opacity-70">{rows.filter((m) => inSegment(m, o.key)).length}</span>
+              {o.label} <span className="opacity-70">{o.count}</span>
             </button>
           ))}
         </div>
@@ -150,6 +189,12 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
         countUnit="คน"
         actions={
           <span className="flex flex-wrap gap-1.5">
+          <button type="button" onClick={() => setTrialOpen(true)} className="h-8 px-3 rounded-lg border border-violet-300 bg-violet-50 text-violet-800 text-xs" data-open-trial>
+            🧪 สมาชิกทดลอง{trial.length ? ` (${trial.length})` : ""}
+          </button>
+          <button type="button" onClick={() => setLoginOpen(true)} className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs" data-open-login-settings>
+            🔑 ตั้งค่าการเข้าสู่ระบบ
+          </button>
           <button type="button" disabled={exporting || !optInShown} onClick={() => void exportCsv(shown)} className="h-8 px-3 rounded-lg border border-slate-200 bg-white text-slate-700 text-xs disabled:opacity-40" title="ส่งออกเฉพาะคนที่ยินยอมรับข่าวสาร (PDPA)" data-export-members>
             {exporting ? "กำลังส่งออก…" : `⬇️ ส่งออก CSV (${optInShown} คนที่รับข่าวสาร)`}
           </button>
@@ -160,11 +205,15 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
         }
         searchText={(r) => `${r.name} ${r.email ?? ""} ${r.phone}`}
         searchPlaceholder="ค้นหาชื่อ / อีเมล / เบอร์"
-        groupBy={(r) => (r.status === "blocked" ? "ระงับอยู่" : "ใช้งาน")}
+        groupBy={(r) => (r.isTest ? "🧪 สมาชิกทดลอง (ไม่นับในยอด/สถิติ/CSV)" : r.status === "blocked" ? "ระงับอยู่" : "ใช้งาน")}
         emptyText={
           <div className="py-6 text-center">
             <p className="text-sm text-slate-600">ยังไม่มีสมาชิก</p>
-            <p className="text-xs text-slate-400 mt-1">ลูกค้าสมัครเองที่หน้าเว็บ (ปุ่ม 👤 มุมขวาบน) — ต้องตั้งค่าการเข้าสู่ระบบ (Google/LINE/Facebook) ที่เว็บร้านก่อน ดูวิธีใน docs/website-members.md</p>
+            <p className="text-xs text-slate-400 mt-1">
+              {readyList.length
+                ? "ลูกค้ากดปุ่ม “สมัครสมาชิก” บนหัวเว็บร้านได้แล้ว — สมัครเมื่อไหร่จะขึ้นที่นี่"
+                : "ลูกค้าจะสมัครได้เมื่อตั้งค่าการเข้าสู่ระบบ (Google / LINE / Facebook) อย่างน้อย 1 ช่องทาง — กดปุ่ม 🔑 ด้านบน · อยากลองดูหน้าบัญชีก่อน กด 🧪 สมาชิกทดลอง"}
+            </p>
           </div>
         }
         columns={[
@@ -182,7 +231,10 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
                   <span className="w-7 h-7 rounded-full bg-slate-200 text-slate-500 text-xs flex items-center justify-center shrink-0">{r.name.slice(0, 1) || "?"}</span>
                 )}
                 <span className="min-w-0">
-                  <span className="block text-sm text-slate-800 truncate">{r.name}</span>
+                  <span className="block text-sm text-slate-800 truncate">
+                    {r.name}
+                    {r.isTest && <span className="ml-1.5 px-1.5 py-px rounded text-[10px] font-bold bg-violet-100 text-violet-700" data-test-badge>🧪 ทดลอง</span>}
+                  </span>
                   <span className="block text-[11px] text-slate-400 truncate">
                     {r.email ?? "ไม่มีอีเมล"}
                     {r.phone && ` · ${r.phone}`}
@@ -239,7 +291,11 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
             header: "",
             width: "5rem",
             align: "right",
-            cell: (r) => (
+            cell: (r) => r.isTest ? (
+              <button type="button" disabled={opening === r.id || r.status !== "active"} onClick={(e) => { e.stopPropagation(); void openTrial(r); }} className="h-7 px-2 text-[11px] rounded-md bg-blue-600 text-white disabled:opacity-40" data-trial-open-row>
+                {opening === r.id ? "…" : "เปิดเว็บ ↗"}
+              </button>
+            ) : (
               <button type="button" onClick={(e) => { e.stopPropagation(); setAsk(r); }} className={`h-7 px-2 text-[11px] rounded-md border ${r.status === "blocked" ? "border-emerald-300 text-emerald-700" : "border-slate-200 text-red-600 hover:border-red-300"}`}>
                 {r.status === "blocked" ? "เปิดบัญชี" : "ระงับ"}
               </button>
@@ -251,6 +307,8 @@ export function WebsiteMembersPanel({ shopSlug }: { shopSlug: string }) {
       <MemberPointsModal member={pointsOf} onClose={() => setPointsOf(null)} onChanged={load} />
       <WebsiteCustomerProfile shopSlug={shopSlug} who={profile} onClose={() => setProfile(null)} />
       <MemberTiersModal open={tierEdit} shopSlug={shopSlug} onClose={() => setTierEdit(false)} onSaved={load} />
+      <MemberTrialModal open={trialOpen} shopSlug={shopSlug} members={trial} onClose={() => setTrialOpen(false)} onChanged={load} />
+      <MemberLoginSettingsModal open={loginOpen} shopSlug={shopSlug} onClose={() => setLoginOpen(false)} onSaved={load} />
       <ConfirmDialog
         open={!!ask}
         onClose={() => !busy && setAsk(null)}

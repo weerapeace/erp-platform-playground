@@ -38,6 +38,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .eq("shop_id", shopId)
       .eq("status", "active")
       .eq("marketing_opt_in", true)
+      // 🧪 สมาชิกทดลองไม่ใช่ลูกค้าจริง — ไม่ส่งออกเสมอ
+      .eq("is_test", false)
       .in("id", ids.slice(i, i + 500));
     rows.push(...((data ?? []) as Row[]));
   }

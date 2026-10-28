@@ -13,7 +13,8 @@
  * ลิงก์ในอีเมลชี้โดเมนร้านที่ลงทะเบียนใน shop_domains เท่านั้น (กันลิงก์ไปเว็บปลอม)
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardMember, guardStorefront, storefrontJson, type MemberRow } from "@/lib/storefront-internal";
+import { denyTestMember, guardMember, guardStorefront, memberLoginBody, storefrontJson, MEMBER_ROW_COLS, type MemberRow } from "@/lib/storefront-internal";
+import { trustedShopOrigin } from "@/lib/website-shop";
 import { memberSummary } from "@/lib/website-members-db";
 import { sendEmail, emailDevEcho, type EmailMessage } from "@/lib/email";
 import { resetPasswordMessage, verifyEmailMessage } from "@/lib/member-emails";
@@ -33,7 +34,7 @@ import {
 export const dynamic = "force-dynamic";
 
 type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
-const COLS = "id, shop_id, email, email_verified, name, phone, avatar_url, marketing_opt_in, status, created_at, password_hash, failed_login_count, locked_until";
+const COLS = `${MEMBER_ROW_COLS}, password_hash, failed_login_count, locked_until`;
 type Row = MemberRow & { password_hash: string | null; failed_login_count: number; locked_until: string | null };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -42,21 +43,8 @@ const GENERIC_FAIL = "อีเมลหรือรหัสผ่านไม�
 // hash ตัวอย่างไว้เทียบเมื่อไม่พบบัญชี — เวลาตอบเท่ากัน (ไม่บอกว่าอีเมลนี้มีบัญชีไหม)
 const DUMMY_HASH = hashPassword("dummy-password-1");
 
-/** origin ที่เว็บร้านส่งมา ต้องเป็นโดเมนของร้านนี้ (shop_domains) · เครื่อง dev อนุญาต localhost */
-async function trustedOrigin(sb: Admin, shopId: string, raw: unknown): Promise<string | null> {
-  let u: URL;
-  try {
-    u = new URL(String(raw ?? ""));
-  } catch {
-    return null;
-  }
-  if (process.env.NODE_ENV === "development" && /^(localhost|127\.0\.0\.1)$/.test(u.hostname)) return u.origin;
-  if (u.protocol !== "https:") return null;
-  const { data } = await sb.from("shop_domains").select("domain").eq("shop_id", shopId);
-  const hosts = ((data ?? []) as { domain: string }[]).map((d) => d.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase());
-  const host = u.hostname.toLowerCase();
-  return hosts.some((h) => h === host || `www.${h}` === host || h === `www.${host}`) ? u.origin : null;
-}
+/** origin ที่เว็บร้านส่งมา ต้องเป็นโดเมนของร้านนี้ — ของกลาง lib/website-shop trustedShopOrigin (ใช้ร่วมกับ OAuth) */
+const trustedOrigin = trustedShopOrigin;
 
 async function issueToken(sb: Admin, customerId: string, kind: "verify" | "reset"): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
   const since = new Date(Date.now() - 3600_000).toISOString();
@@ -95,6 +83,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (action === "change") {
     const g = await guardMember(request);
     if (g instanceof NextResponse) return g;
+    const denied = denyTestMember(g.member, "ตั้งรหัสผ่าน");
+    if (denied) return denied;
     const prob = passwordProblem(body.password);
     if (prob) return storefrontJson({ ok: false, error: prob }, 400);
     const { data } = await g.sb.from("store_customers").select(COLS).eq("id", g.member.id).maybeSingle();
@@ -176,7 +166,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!id) return storefrontJson({ ok: false, error: "ลิงก์ยืนยันหมดอายุหรือถูกใช้แล้ว — ขอลิงก์ใหม่ได้ที่หน้าเข้าสู่ระบบ" }, 400);
     const { data } = await sb.from("store_customers").update({ email_verified: true, last_login_at: now, updated_at: now }).eq("id", id).eq("shop_id", shop.id).eq("status", "active").select(COLS).maybeSingle();
     if (!data) return storefrontJson({ ok: false, error: "ไม่พบบัญชี" }, 404);
-    return storefrontJson({ ok: true, member: await memberSummary(sb, data as Row) }, 200);
+    return storefrontJson({ ok: true, ...memberLoginBody(shop, await memberSummary(sb, data as Row)) }, 200);
   }
 
   if (action === "reset") {
@@ -196,7 +186,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!data) return storefrontJson({ ok: false, error: "ไม่พบบัญชี" }, 404);
     await sb.from("store_customer_tokens").update({ used_at: now }).eq("customer_id", id).eq("kind", "reset").is("used_at", null);
     await ensurePasswordIdentity(sb, data as Row);
-    return storefrontJson({ ok: true, member: await memberSummary(sb, data as Row) }, 200);
+    return storefrontJson({ ok: true, ...memberLoginBody(shop, await memberSummary(sb, data as Row)) }, 200);
   }
 
   if (action === "login") {
@@ -222,7 +212,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!m.email_verified) return storefrontJson({ ok: false, code: "unverified", error: "ยังไม่ได้ยืนยันอีเมล — เปิดลิงก์ในอีเมลก่อน (ขอลิงก์ใหม่ได้)" }, 403);
     await sb.from("store_customers").update({ failed_login_count: 0, locked_until: null, last_login_at: now }).eq("id", m.id);
     await ensurePasswordIdentity(sb, m);
-    return storefrontJson({ ok: true, member: await memberSummary(sb, m) }, 200);
+    return storefrontJson({ ok: true, ...memberLoginBody(shop, await memberSummary(sb, m), m.is_test) }, 200);
   }
 
   return storefrontJson({ ok: false, error: "ไม่รู้จักคำสั่ง" }, 400);

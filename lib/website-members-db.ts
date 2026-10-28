@@ -2,8 +2,8 @@
  * 👤 สมาชิกเว็บร้าน — ส่วนที่อ่าน/เขียนฐานข้อมูล (ฝั่งเซิร์ฟเวอร์เท่านั้น) · กฎอยู่ lib/website-members.ts
  * ใช้ที่: /api/storefront-member/* (เว็บร้านเรียกด้วยกุญแจภายใน) · /api/website/members (ERP แท็บสมาชิก)
  */
-import { resolveLogin, type MemberLoginInput, type MemberProvider } from "@/lib/website-members";
-import type { MemberRow } from "@/lib/storefront-internal";
+import { PROVIDER_LABEL, resolveLogin, type MemberLoginInput, type MemberProvider } from "@/lib/website-members";
+import { MEMBER_ROW_COLS, type MemberRow } from "@/lib/storefront-internal";
 
 type Admin = ReturnType<typeof import("@/lib/supabase-admin").supabaseAdmin>;
 
@@ -17,6 +17,8 @@ export interface MemberSummary {
   marketingOptIn: boolean;
   providers: MemberProvider[];
   createdAt: string;
+  /** 🧪 สมาชิกทดลอง (เว็บร้านโชว์ป้าย + ปิดปุ่มสั่งซื้อ) */
+  isTest: boolean;
 }
 
 export async function memberSummary(sb: Admin, m: MemberRow): Promise<MemberSummary> {
@@ -31,13 +33,34 @@ export async function memberSummary(sb: Admin, m: MemberRow): Promise<MemberSumm
     marketingOptIn: m.marketing_opt_in,
     providers: [...new Set(((data ?? []) as { provider: MemberProvider }[]).map((r) => r.provider))],
     createdAt: m.created_at,
+    isTest: !!m.is_test,
   };
 }
 
-const MEMBER_COLS = "id, shop_id, email, email_verified, name, phone, avatar_url, marketing_opt_in, status, created_at";
+const MEMBER_COLS = MEMBER_ROW_COLS;
+
+/**
+ * แท็บในป๊อปเว็บร้าน: signup = ต้องติ๊กยอมรับนโยบาย (consent) ก่อนสร้างบัญชีใหม่ · login = ไม่สร้างบัญชีใหม่ (ยังไม่เคยสมัคร → need_signup)
+ * ไม่ส่ง mode (เว็บร้านรุ่นเก่า) = สร้างให้เลยแบบเดิม
+ */
+export interface LoginIntent {
+  mode?: "login" | "signup";
+  consent?: boolean;
+  marketing?: boolean;
+}
+export function sanitizeLoginIntent(raw: unknown): LoginIntent {
+  const r = (raw ?? {}) as Record<string, unknown>;
+  const mode = r.mode === "login" || r.mode === "signup" ? r.mode : undefined;
+  return { mode, consent: r.consent === true, marketing: r.marketing === true };
+}
 
 /** เข้าสู่ระบบ: หา/ผูก/สร้างสมาชิกของร้านนี้ตามกฎ resolveLogin */
-export async function loginMember(sb: Admin, shopId: string, input: MemberLoginInput): Promise<{ ok: true; member: MemberRow; created: boolean } | { ok: false; error: string; status: number }> {
+export async function loginMember(
+  sb: Admin,
+  shopId: string,
+  input: MemberLoginInput,
+  intent: LoginIntent = {}
+): Promise<{ ok: true; member: MemberRow; created: boolean } | { ok: false; error: string; status: number; code?: "need_signup" | "need_consent" }> {
   const now = new Date().toISOString();
   const { data: ident } = await sb
     .from("store_customer_identities")
@@ -64,6 +87,9 @@ export async function loginMember(sb: Admin, shopId: string, input: MemberLoginI
 
   const d = resolveLogin(input, { byIdentity, byEmail });
   if (d.kind === "blocked") return { ok: false, error: "บัญชีนี้ถูกระงับ — ติดต่อร้านค้า", status: 403 };
+  // ✅ PDPA: สร้างบัญชีใหม่ได้เฉพาะตอนติ๊กยอมรับนโยบายแล้ว (แท็บสมัคร) · แท็บเข้าสู่ระบบ = ไม่สร้างให้เงียบ ๆ
+  if (d.kind === "create" && intent.mode === "login") return { ok: false, error: "ยังไม่มีบัญชีด้วยช่องทางนี้ — ติ๊กยอมรับนโยบายแล้วกดสมัครสมาชิก", status: 409, code: "need_signup" };
+  if (d.kind === "create" && intent.mode === "signup" && !intent.consent) return { ok: false, error: "กรุณาติ๊กยอมรับนโยบายความเป็นส่วนตัวก่อนสมัคร", status: 400, code: "need_consent" };
 
   let customerId: string;
   let created = false;
@@ -78,6 +104,7 @@ export async function loginMember(sb: Admin, shopId: string, input: MemberLoginI
         name: input.name || (input.email ? input.email.split("@")[0] : "สมาชิก"),
         avatar_url: input.avatarUrl,
         last_login_at: now,
+        ...(intent.mode === "signup" ? { terms_accepted_at: now, marketing_opt_in: !!intent.marketing } : {}),
       })
       .select("id")
       .maybeSingle();
@@ -97,6 +124,11 @@ export async function loginMember(sb: Admin, shopId: string, input: MemberLoginI
   const { data: cur } = await sb.from("store_customers").select(MEMBER_COLS).eq("id", customerId).maybeSingle();
   const m = cur as MemberRow;
   const patch: Record<string, unknown> = { last_login_at: now };
+  // สมาชิกเดิมกดจากแท็บสมัคร + ติ๊กยอมรับ = บันทึกเวลายอมรับล่าสุด · ติ๊กรับข่าวสาร = เปิดรับ (ไม่ติ๊ก = ไม่ปิดของเดิม)
+  if (intent.mode === "signup" && intent.consent && !created) {
+    patch.terms_accepted_at = now;
+    if (intent.marketing) patch.marketing_opt_in = true;
+  }
   if (!m.avatar_url && input.avatarUrl) patch.avatar_url = input.avatarUrl;
   if (!m.email && input.email && input.emailVerified) {
     patch.email = input.email;
@@ -141,4 +173,32 @@ export async function lastOrderDates(sb: Admin, customerIds: string[]): Promise<
     }
   }
   return out;
+}
+
+/**
+ * 🔗 เชื่อมช่องทางเข้าสู่ระบบเพิ่มเข้าบัญชีที่ล็อกอินอยู่ (ใช้ร่วม: /api/storefront-member/link และ /oauth โหมดเชื่อม)
+ * ล็อกอินอยู่แล้ว = ยืนยันตัวตนแล้ว จึงผูก LINE/Facebook ได้โดยไม่พึ่งอีเมล · ช่องทางนี้เป็นของสมาชิกคนอื่น = 409 (ไม่ย้ายให้เอง)
+ * 🧪 สมาชิกทดลองเชื่อมไม่ได้ (ไม่งั้นพนักงานเข้าด้วย Google ตัวเองแล้วเด้งเข้าบัญชีทดลอง)
+ */
+export async function linkIdentity(
+  sb: Admin,
+  shopId: string,
+  member: MemberRow,
+  p: MemberLoginInput
+): Promise<{ ok: true; already: boolean; member: MemberSummary } | { ok: false; error: string; status: number }> {
+  if (member.is_test) return { ok: false, error: "บัญชีทดลองเชื่อมช่องทางเข้าสู่ระบบไม่ได้ — ใช้ดูหน้าตาเว็บเท่านั้น", status: 403 };
+  const { data: cur } = await sb.from("store_customer_identities").select("customer_id").eq("shop_id", shopId).eq("provider", p.provider).eq("provider_user_id", p.providerUserId).maybeSingle();
+  const owner = (cur as { customer_id: string } | null)?.customer_id;
+  if (owner && owner !== member.id) return { ok: false, error: `บัญชี ${PROVIDER_LABEL[p.provider]} นี้ใช้กับสมาชิกอีกคนแล้ว — ออกจากระบบแล้วเข้าด้วย ${PROVIDER_LABEL[p.provider]} เพื่อใช้บัญชีนั้น`, status: 409 };
+  if (!owner) {
+    const { error } = await sb.from("store_customer_identities").insert({ customer_id: member.id, shop_id: shopId, provider: p.provider, provider_user_id: p.providerUserId, email: p.email, last_login_at: new Date().toISOString() });
+    if (error) return { ok: false, error: "เชื่อมไม่สำเร็จ กรุณาลองใหม่", status: 500 };
+  }
+  // บัญชียังไม่มีอีเมล + ช่องทางใหม่ส่งอีเมลที่ยืนยันแล้ว (Google) → ใช้เป็นอีเมลบัญชี (ถ้าไม่ซ้ำกับสมาชิกอื่นในร้าน)
+  if (!member.email && p.email && p.emailVerified) {
+    const { data: taken } = await sb.from("store_customers").select("id").eq("shop_id", shopId).eq("email", p.email).neq("status", "deleted").maybeSingle();
+    if (!taken) await sb.from("store_customers").update({ email: p.email, email_verified: true, updated_at: new Date().toISOString() }).eq("id", member.id);
+  }
+  const { data: m } = await sb.from("store_customers").select(MEMBER_COLS).eq("id", member.id).maybeSingle();
+  return { ok: true, already: !!owner, member: await memberSummary(sb, (m ?? member) as MemberRow) };
 }

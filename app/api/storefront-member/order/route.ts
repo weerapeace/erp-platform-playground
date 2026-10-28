@@ -6,7 +6,7 @@
  * ⭐ redeemPoints = แต้มที่ขอใช้ลด (ตรวจ + ตัดแต้มแบบล็อกแถวใน createStorefrontOrder)
  */
 import { NextRequest, NextResponse, after } from "next/server";
-import { guardMember, storefrontJson } from "@/lib/storefront-internal";
+import { denyTestMember, guardMember, storefrontJson } from "@/lib/storefront-internal";
 import { createStorefrontOrder } from "@/lib/website-orders";
 import { notifyOrderCustomer } from "@/lib/order-notify";
 import { notifyStaffNewOrder } from "@/lib/webshop-line";
@@ -17,6 +17,9 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const g = await guardMember(request);
   if (g instanceof NextResponse) return g;
+  // 🧪 สมาชิกทดลองสั่งซื้อจริงไม่ได้ (ไม่ปนยอดขาย + ลบบัญชีทดลองทิ้งได้เสมอ)
+  const denied = denyTestMember(g.member, "สั่งซื้อจริง");
+  if (denied) return denied;
   const body = await request.json().catch(() => null);
   if (!body) return storefrontJson({ ok: false, error: "ข้อมูลไม่ถูกต้อง" }, 400);
   const { data: shop } = await g.sb.from("shops").select("id, slug, status, field_map").eq("id", g.shop.id).maybeSingle();

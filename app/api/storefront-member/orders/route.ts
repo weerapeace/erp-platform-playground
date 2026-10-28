@@ -6,7 +6,7 @@
  * ด่าน: กุญแจภายใน + สมาชิก
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardMember, storefrontJson } from "@/lib/storefront-internal";
+import { denyTestMember, guardMember, storefrontJson } from "@/lib/storefront-internal";
 import { memberOrderRows } from "@/lib/website-members-db";
 import { toOrderView, type ItemRow, type OrderRow } from "@/lib/website-orders";
 import { readSiteInfo } from "@/lib/website-site-info";
@@ -34,6 +34,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const g = await guardMember(request);
   if (g instanceof NextResponse) return g;
+  // 🧪 สมาชิกทดลองห้ามดึงออเดอร์จริงของลูกค้าเข้าบัญชี
+  const denied = denyTestMember(g.member, "เพิ่มออเดอร์เก่าเข้าบัญชี");
+  if (denied) return denied;
   const body = (await request.json().catch(() => null)) as { orderNo?: string; phone?: string } | null;
   const no = String(body?.orderNo ?? "").trim().toUpperCase().slice(0, 40);
   const phone = String(body?.phone ?? "").replace(/\D/g, "");

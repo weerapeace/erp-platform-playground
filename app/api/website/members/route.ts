@@ -2,6 +2,7 @@
  * 👥 สมาชิกเว็บร้าน (ERP แท็บสมาชิก) — /api/website/members
  * GET   ?shop=<slug> → { members: [...สรุป + วิธีเข้าสู่ระบบ + จำนวนออเดอร์ + ยอดซื้อ (ไม่นับยกเลิก) + ⭐ แต้ม/ระดับ], tiers, pointsEnabled }
  *       ยอด/แต้มคิดใน DB (store_member_stats) — ไม่ดึงแถวมารวมเอง (ติดเพดาน 1,000 แถว)
+ *       + isTest (🧪 สมาชิกทดลอง — หน้าจอไม่นับในกลุ่ม/สถิติ) · loginReady = ช่องทางเข้าสู่ระบบที่ตั้งครบแล้ว (ไม่มีรหัสลับ)
  * PATCH { id, status: "active" | "blocked" } → ระงับ/เปิดบัญชี (ระงับ = เข้าสู่ระบบไม่ได้ · ออเดอร์เดิมไม่หาย) + audit
  * ด่าน: guardApi (พนักงาน) — ไม่ใช่เส้นของเว็บร้าน
  */
@@ -16,10 +17,11 @@ import { tierFor } from "@/lib/member-points";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { lastOrderDates } from "@/lib/website-members-db";
 import { shopBySlug } from "@/lib/website-shop";
+import { OAUTH_PROVIDERS, providerReady, readLoginProviders } from "@/lib/storefront-oauth";
 
 export const dynamic = "force-dynamic";
 
-type Row = { id: string; email: string | null; email_verified: boolean; name: string; phone: string | null; avatar_url: string | null; marketing_opt_in: boolean; status: string; created_at: string; last_login_at: string | null };
+type Row = { id: string; email: string | null; email_verified: boolean; name: string; phone: string | null; avatar_url: string | null; marketing_opt_in: boolean; status: string; created_at: string; last_login_at: string | null; is_test: boolean };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view");
@@ -31,7 +33,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const shopId = (shop as { id: string }).id;
   const { data, error } = await sb
     .from("store_customers")
-    .select("id, email, email_verified, name, phone, avatar_url, marketing_opt_in, status, created_at, last_login_at")
+    .select("id, email, email_verified, name, phone, avatar_url, marketing_opt_in, status, created_at, last_login_at, is_test")
     .eq("shop_id", shopId)
     .neq("status", "deleted")
     .order("created_at", { ascending: false })
@@ -45,11 +47,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: "โหลดสรุปสมาชิกไม่สำเร็จ" }, { status: 500 });
   }
-  const [{ data: idents }, tiers, info, lastOrder] = await Promise.all([
+  const [{ data: idents }, tiers, info, lastOrder, logins] = await Promise.all([
     ids.length ? sb.from("store_customer_identities").select("customer_id, provider").in("customer_id", ids) : Promise.resolve({ data: [] }),
     readTiers(sb, shopId),
     readSiteInfo(sb, shopId),
     lastOrderDates(sb, ids).catch(() => new Map<string, string>()),
+    readLoginProviders(sb, shopId).catch(() => new Map()),
   ]);
   const prov = new Map<string, Set<MemberProvider>>();
   for (const i of (idents ?? []) as { customer_id: string; provider: MemberProvider }[]) prov.set(i.customer_id, (prov.get(i.customer_id) ?? new Set()).add(i.provider));
@@ -66,6 +69,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         status: r.status,
         createdAt: r.created_at,
         lastLoginAt: r.last_login_at,
+        isTest: !!r.is_test,
         providers: [...(prov.get(r.id) ?? [])],
         orderCount: stats.get(r.id)?.orderCount ?? 0,
         orderTotal: stats.get(r.id)?.orderTotal ?? 0,
@@ -79,6 +83,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       })),
       tiers,
       pointsEnabled: info.points_enabled,
+      loginReady: Object.fromEntries(OAUTH_PROVIDERS.map((p) => [p, providerReady(logins.get(p))])),
     },
     { headers: { "Cache-Control": "no-store" } }
   );

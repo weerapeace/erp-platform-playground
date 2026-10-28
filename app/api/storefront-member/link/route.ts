@@ -4,35 +4,24 @@
  *        (ทำตอนล็อกอินอยู่แล้วเท่านั้น = ยืนยันตัวตนแล้ว จึงผูก LINE/Facebook ได้โดยไม่ต้องพึ่งอีเมล)
  *        ช่องทางนี้ผูกกับสมาชิกคนอื่นอยู่ = 409 (ไม่ย้ายให้เอง กันแย่งบัญชี)
  * DELETE ?provider=line → ยกเลิกเชื่อม (ต้องเหลืออย่างน้อย 1 วิธี — lib/website-members canUnlink)
- * ด่าน: กุญแจภายใน + สมาชิก
+ * ด่าน: POST = ⚠️ ต้องมีกุญแจภายในเสมอ (เชื่อโปรไฟล์ที่เว็บร้านส่งมา — บัตรสมาชิกอย่างเดียวไม่พอ ไม่งั้นลูกค้ายิงตรงมาผูก Google ของคนอื่นได้)
+ *       ร้านที่ตั้งรหัสใน ERP เชื่อมผ่าน /api/storefront-member/oauth (ERP แลก code เอง) · DELETE = บัตรสมาชิกพอ
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardMember, storefrontJson } from "@/lib/storefront-internal";
-import { canUnlink, MEMBER_PROVIDERS, PROVIDER_LABEL, sanitizeLoginInput, type MemberProvider } from "@/lib/website-members";
-import { memberSummary } from "@/lib/website-members-db";
+import { guardMember, storefrontJson, storefrontKeyOk } from "@/lib/storefront-internal";
+import { canUnlink, MEMBER_PROVIDERS, sanitizeLoginInput, type MemberProvider } from "@/lib/website-members";
+import { linkIdentity, memberSummary } from "@/lib/website-members-db";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  if (!storefrontKeyOk(request)) return storefrontJson({ ok: false, error: "forbidden" }, 403);
   const g = await guardMember(request);
   if (g instanceof NextResponse) return g;
   const v = sanitizeLoginInput(await request.json().catch(() => null));
   if (!v.ok) return storefrontJson({ ok: false, error: v.error }, 400);
-  const p = v.input;
-  const { data: cur } = await g.sb.from("store_customer_identities").select("customer_id").eq("shop_id", g.shop.id).eq("provider", p.provider).eq("provider_user_id", p.providerUserId).maybeSingle();
-  const owner = (cur as { customer_id: string } | null)?.customer_id;
-  if (owner && owner !== g.member.id) return storefrontJson({ ok: false, error: `บัญชี ${PROVIDER_LABEL[p.provider]} นี้ใช้กับสมาชิกอีกคนแล้ว — ออกจากระบบแล้วเข้าด้วย ${PROVIDER_LABEL[p.provider]} เพื่อใช้บัญชีนั้น` }, 409);
-  if (!owner) {
-    const { error } = await g.sb.from("store_customer_identities").insert({ customer_id: g.member.id, shop_id: g.shop.id, provider: p.provider, provider_user_id: p.providerUserId, email: p.email, last_login_at: new Date().toISOString() });
-    if (error) return storefrontJson({ ok: false, error: "เชื่อมไม่สำเร็จ กรุณาลองใหม่" }, 500);
-  }
-  // บัญชียังไม่มีอีเมล + ช่องทางใหม่ส่งอีเมลที่ยืนยันแล้ว (Google) → ใช้เป็นอีเมลบัญชี (ถ้าไม่ซ้ำกับสมาชิกอื่นในร้าน)
-  if (!g.member.email && p.email && p.emailVerified) {
-    const { data: taken } = await g.sb.from("store_customers").select("id").eq("shop_id", g.shop.id).eq("email", p.email).neq("status", "deleted").maybeSingle();
-    if (!taken) await g.sb.from("store_customers").update({ email: p.email, email_verified: true, updated_at: new Date().toISOString() }).eq("id", g.member.id);
-  }
-  const { data: m } = await g.sb.from("store_customers").select("id, shop_id, email, email_verified, name, phone, avatar_url, marketing_opt_in, status, created_at").eq("id", g.member.id).maybeSingle();
-  return storefrontJson({ ok: true, already: !!owner, member: await memberSummary(g.sb, (m ?? g.member) as typeof g.member) }, 200);
+  const r = await linkIdentity(g.sb, g.shop.id, g.member, v.input);
+  return r.ok ? storefrontJson(r, 200) : storefrontJson({ ok: false, error: r.error }, r.status);
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
