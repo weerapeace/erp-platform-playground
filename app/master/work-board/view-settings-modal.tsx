@@ -284,7 +284,7 @@ export function ViewSettingsModal({ open, onClose, isAdmin, team, mine, onSave, 
           {countOf && (
             <div className="rounded-md bg-blue-50 px-2.5 py-1.5 text-[13px] text-blue-800">
               🔎 มุมมองนี้เจอ <b className="tabular-nums">{countOf(cur)}</b> ใบ{total != null ? <> จาก <span className="tabular-nums">{total}</span></> : null}
-              <span className="ml-1 text-[11px] text-blue-600/80">(นับสดตามที่แก้ · ยังไม่รวมแบรนด์ที่กดชิปบนแถบ)</span>
+              <span className="ml-1 text-[11px] text-blue-600/80">(นับสดตามที่แก้)</span>
             </div>
           )}
           {/* แท็บย่อย — ฟอร์มยาวแบ่งเป็นช่วง ไม่ต้องเลื่อนหา */}

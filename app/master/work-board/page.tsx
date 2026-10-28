@@ -3468,7 +3468,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const rowQ = (m: PendingMO) => qvRowMap.get(m.id) ?? qvRowOf(m);
   const viewCount = (v: QuickView) => pending.filter((m) => qvMatch(v, rowQ(m))).length;
   const pendShown = (() => {
-    const rows = pending.filter((m) => brandOk(m.brand) && qvMatch(view, rowQ(m)));
+    // แท็บรอจ่ายกรองแบรนด์ผ่านมุมมองอย่างเดียว (เจ้าของสั่งเอาชิปแบรนด์ออก 2026-10-28) — ชิปแบรนด์เหลือแท็บกำลังผลิต
+    const rows = pending.filter((m) => qvMatch(view, rowQ(m)));
     if (view.sort1 !== "none" || view.sort2 !== "none") return qvSort(rows, rowQ, view);
     // มุมมองไม่ได้ตั้งเรียง → ใช้ "ค่าเริ่มต้นตอนเปิด" ของชุดหน้าตา (กดหัวตารางเรียงทับได้)
     if (dc.sortDef === "urgent") return [...rows].sort((a, b) => lateDays(b) - lateDays(a) || (b.priority ?? 0) - (a.priority ?? 0)
@@ -3540,8 +3541,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     else toast.warning("มุมมองในลิงก์นี้คุณยังไม่เห็น (อาจตั้งให้เฉพาะบางคน หรือถูกซ่อน/ลบไปแล้ว)");
   }, [qvStore.teamLoaded]);   // eslint-disable-line react-hooks/exhaustive-deps
   const saveAsView = () => {
-    const bl = brandF === "__none__" ? "ไม่ระบุแบรนด์" : brandF;
-    const v = copyAsMine(view, brandF ? { name: `${view.name} · ${bl}`, brands: [brandF] } : {});
+    const v = copyAsMine(view);
     setMgr({ open: true, tab: "views", newMine: v });
   };
   // ความกว้างคอลัมน์ของมุมมอง: ลากในตาราง = ร่าง (มีแถบให้กดบันทึก) · มุมมองของฉัน = เก็บในมุมมอง · มุมมองทีม = แอดมินเก็บให้ทุกคน / คนอื่นเก็บเฉพาะตัว
@@ -4078,8 +4078,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const hit = (s: string) => !qq || s.toLowerCase().includes(qq);
   // แท็บกำลังผลิตกรองแบรนด์ด้วย (ชิปเดียวกัน) · ชิปแบรนด์นับจากแท็บที่เปิดอยู่ (ไม่กรองด่วน)
   const wosShown = brandF ? wos.filter((w) => brandOk(w.brand)) : wos;
-  const brandChips = (() => {
-    const src: { brand?: string | null; brand_color?: string | null }[] = tab === "wip" ? wos : pending;
+  // ชิปแบรนด์ = เฉพาะแท็บกำลังผลิต (รอจ่ายใช้มุมมองด่วนกรองแบรนด์แทน)
+  const brandChips = tab !== "wip" ? [] : (() => {
+    const src: { brand?: string | null; brand_color?: string | null }[] = wos;
     const m = new Map<string, { n: number; color: string | null }>();
     for (const r of src) { const k = r.brand || "__none__"; const e = m.get(k) ?? { n: 0, color: r.brand_color ?? null }; e.n += 1; m.set(k, e); }
     if (brandF && !m.has(brandF)) m.set(brandF, { n: 0, color: null });   // แบรนด์ที่จำไว้แต่แท็บนี้ไม่มี = ยังโชว์ชิปให้กดล้างได้
@@ -4244,7 +4245,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           <span className="font-medium text-slate-800">{tabCards.find(([k]) => k === tab)?.[2] ?? ""}</span>
           <span className="truncate text-slate-500">
             {tab === "pend" ? `· ${view.icon} ${view.name} ` : ""}
-            {brandF && tab !== "qc" ? `· ${brandF === "__none__" ? "ไม่ระบุแบรนด์" : brandF}` : ""}
+            {brandF && tab === "wip" ? `· ${brandF === "__none__" ? "ไม่ระบุแบรนด์" : brandF}` : ""}
           </span>
           <span className="ml-auto shrink-0 text-[11px] text-slate-400">แตะเพื่อแสดงแท็บ/ตัวกรอง</span>
         </button>
@@ -4384,8 +4385,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         grouped={pendGroup !== "none"} onGroupedChange={(v) => pickGroup(v ? (pendGroup === "none" ? lastGroupRef.current : pendGroup) : "none")}
         groupExtra={groupSum}
         footnote={dc.show.foot ? `${dc.expand ? (dev === "ipadP" ? `${touch ? "แตะ" : "กด"}การ์ด = กางรายละเอียด (สลับแท็บได้)` : `${touch ? "แตะ" : "กด"}ช่องไหน = กางรายละเอียดเรื่องนั้น (ซื้อของ → BOM · สินค้า → รายละเอียดงาน · กำหนดส่ง → แก้วัน/งวดส่ง · เตรียม/ตัด → ติ๊กได้ · เหลือ → จ่ายงาน)`) : `${touch ? "แตะ" : "กด"}แถว = เปิดเช็กลิสต์`} · 📋 = เปิดเช็กลิสต์เต็ม${dc.stage === "dots" ? ` · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน${touch ? "" : " (ชี้ที่จุดเพื่อดูตัวเลข)"}` : ""}${canSeeMoney ? ` · ราคาต่ำกว่า ฿${PRICE_MIN} หรือยังไม่ตั้ง = ไม่นับรวมยอด` : ""}` : undefined}
-        emptyText={pending.length ? `ไม่มีใบในมุมมอง “${view.name}”${brandF ? " (มีชิปแบรนด์เปิดอยู่)" : ""}` : "ไม่มีงานรอจ่าย"}
-        noMatchText={(q) => `ไม่พบ “${q}” ในมุมมอง “${view.name}”${brandF ? " (มีชิปแบรนด์เปิดอยู่)" : ""}`}
+        emptyText={pending.length ? `ไม่มีใบในมุมมอง “${view.name}”` : "ไม่มีงานรอจ่าย"}
+        noMatchText={(q) => `ไม่พบ “${q}” ในมุมมอง “${view.name}”`}
       />
       </>)}
       </div>
