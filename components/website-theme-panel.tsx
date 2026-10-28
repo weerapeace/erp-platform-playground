@@ -27,7 +27,7 @@ import { SitePagesSetting } from "@/components/website-site-design-setting";
 import { CampaignTab, ScheduleBanner, SchedulePublishModal, cancelSchedule, useThemeSchedules } from "@/components/website-theme-schedule";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
 import { type MegaAutoData } from "@/lib/website-mega-menu";
-import { setPreviewFrame } from "@/lib/storefront-preview-bus";
+import { setPreviewFrame, usePreviewMessages } from "@/lib/storefront-preview-bus";
 import { ProductTab } from "@/components/website-design/product-tab";
 import { CardTab } from "@/components/website-design/card-tab";
 import { ColorsTab } from "@/components/website-design/colors-tab";
@@ -47,7 +47,7 @@ import { DesignOverview } from "@/components/website-design/overview";
 import { DesignCard, DesignCardsProvider, DesignCardsToggleAll } from "@/components/website-design/design-card";
 import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
 import { Icon } from "@/components/icon";
-import { DESIGN_GROUPS, DESIGN_PAGES, designGroupOf, dirtyDesignPages, isDesignPageKey, normTitle, searchDesign, type DesignPageKey } from "@/lib/website-design-nav";
+import { DESIGN_GROUPS, DESIGN_PAGES, PREVIEW_PART_RULES, designGroupOf, dirtyDesignPages, isDesignPageKey, normTitle, previewFocusOf, previewRuleOf, searchDesign, type DesignPageKey } from "@/lib/website-design-nav";
 const FINE_COLOR_LABEL = "สีละเอียด";
 /** หน้าในแท็บดีไซน์ = ทะเบียนกลาง lib/website-design-nav (เมนูซ้ายจัดหมวด) */
 type TabKey = DesignPageKey;
@@ -84,6 +84,8 @@ const PAGES = [
 ];
 
 const eq = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+/** กฎป้ายในพรีวิว (prefix → "แก้: <ชื่อ>") ส่งให้เว็บร้านตอนเปิดโหมดคลิกเลือกส่วน */
+const AREA_RULES = PREVIEW_PART_RULES.map(({ prefix, label }) => ({ prefix, label }));
 
 export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
@@ -229,6 +231,27 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     cartPin.current = open;
     iframeRef.current?.contentWindow?.postMessage({ type: "storefront-cart-pin", open }, "*");
   }, [tab]);
+  // 🎯 โหมดคลิกเลือกส่วน: คลิกชิ้นในพรีวิว → เปิดหน้าตั้งค่านั้น (เว็บร้าน DesignAreaBridge · กฎ PREVIEW_PART_RULES)
+  const [areaPick, setAreaPick] = useState(false);
+  const areaPickRef = useRef(false);
+  useEffect(() => {
+    areaPickRef.current = areaPick;
+    iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-pick", on: areaPick, rules: AREA_RULES }, "*");
+  }, [areaPick]);
+  // 👁 เปิดหน้าตั้งค่า → พรีวิวเลื่อนไปส่วนที่กำลังแก้ (มาจากคลิกในพรีวิว = เห็นอยู่แล้ว ไม่เลื่อน · ไม่พาพรีวิวไปหน้าอื่น)
+  const fromPick = useRef(false);
+  const focusRef = useRef<string[]>([]);
+  useEffect(() => {
+    focusRef.current = fromPick.current ? [] : previewFocusOf(tab);
+    if (focusRef.current.length) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-focus", prefixes: focusRef.current }, "*");
+  }, [tab]);
+  usePreviewMessages((d) => {
+    if (d.type !== "storefront-area-picked" || typeof d.part !== "string") return;
+    const rule = previewRuleOf(d.part);
+    if (!rule) return;
+    if (rule.page !== tab) fromPick.current = true;
+    goTo(rule.page, rule.card);
+  });
   // วัดกล่องพรีวิวจริง เพื่อย่อ "พอดีจอ" (เดิม hardcode 400px → จอคอมถูกบีบเหลือ ~28%)
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(420);
@@ -342,6 +365,10 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   // แท็บที่มีผลทุกหน้า (สี/ตัวอักษร/โลโก้/Header/เมนู/Footer/รูปทรง) = อยู่หน้าเดิม
   // ถ้าในพรีวิวกดลิงก์ไปหน้าอื่นมาแล้ว (state ยังเป็น path เดิม) → สั่ง iframe ไปใหม่ตรง ๆ
   useEffect(() => {
+    if (fromPick.current) {
+      fromPick.current = false;
+      return;
+    }
     const path = TAB_PREVIEW_PAGE[tab] === "product" ? (sampleProduct ? `/product/${sampleProduct}` : null) : TAB_PREVIEW_PAGE[tab] ?? null;
     if (!path) return;
     if (page !== path) setPage(path);
@@ -438,6 +465,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       }
       if ((e.data as { type?: string })?.type === "storefront-preview-ready" && shownTheme) {
         iframeRef.current?.contentWindow?.postMessage({ type: "storefront-theme-preview", theme: shownTheme }, "*");
+      }
+      // 🎯 พรีวิวโหลดหน้าใหม่ → ส่งโหมดคลิกเลือกส่วน + ส่วนที่กำลังแก้ซ้ำ
+      if ((e.data as { type?: string })?.type === "storefront-preview-ready") {
+        if (areaPickRef.current) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-pick", on: true, rules: AREA_RULES }, "*");
+        if (focusRef.current.length) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-focus", prefixes: focusRef.current }, "*");
       }
     };
     window.addEventListener("message", onMsg);
@@ -768,9 +800,28 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
               </button>
             )}
             {previewSrc && <a href={previewSrc} target="_blank" rel="noreferrer" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↗</a>}
-            <button onClick={() => iframeRef.current?.contentWindow?.location.reload()} title="โหลดใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
+            {/* โหลดใหม่ = ตั้ง src ซ้ำ (เว็บร้านอยู่คนละโดเมน — contentWindow.location.reload() ถูกเบราว์เซอร์บล็อก) */}
+            <button onClick={() => { if (iframeRef.current) iframeRef.current.src = iframeRef.current.src; }} title="โหลดใหม่" className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">↻</button>
+            {previewSrc && (
+              <button
+                type="button"
+                onClick={() => setAreaPick((v) => !v)}
+                aria-pressed={areaPick}
+                title="เปิดแล้วคลิกส่วนในพรีวิว (หัวเว็บ · เมนู · การ์ดสินค้า · ท้ายเว็บ ฯลฯ) → ไปหน้าตั้งค่าของส่วนนั้น"
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs transition ${areaPick ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}
+                data-area-pick-btn
+              >
+                <Icon name="target" />
+                คลิกเลือกส่วน
+              </button>
+            )}
             <span className="text-[10px] text-slate-400 ml-auto">{dev.w}px · {Math.round(scale * 100)}%</span>
           </div>
+          {areaPick && (
+            <p className="mb-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] text-blue-800">
+              <Icon name="target" /> ชี้ส่วนในพรีวิวแล้วคลิก → เมนูซ้ายไปหน้าตั้งค่านั้น + กางการ์ดให้ · ลิงก์ในส่วนที่มีกรอบจะไม่เปลี่ยนหน้าระหว่างนี้ · กดปุ่มอีกครั้งเพื่อปิด
+            </p>
+          )}
 
           {/* 🔗 ลิงก์พรีวิว — คัดลอกส่งทีม/เปิดบนมือถือ เห็น "ร่างที่บันทึกแล้ว" ก่อนเผยแพร่ (ลูกค้าทั่วไปไม่เห็น) */}
           {previewSrc && (

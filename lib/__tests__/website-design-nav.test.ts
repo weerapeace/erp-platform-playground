@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DESIGN_GROUPS, DESIGN_PAGES, DESIGN_PAGE_KEYS, dirtyDesignPages, normTitle, searchDesign } from "../website-design-nav";
+import { DESIGN_GROUPS, DESIGN_PAGES, DESIGN_PAGE_KEYS, PREVIEW_PART_RULES, dirtyDesignPages, normTitle, previewFocusOf, previewRuleOf, searchDesign } from "../website-design-nav";
 import { DEFAULT_THEME } from "../website-theme";
 
 /** 🧭 สารบัญหน้าดีไซน์ — ทุกค่าในธีมต้องมีหน้าอยู่ (จุดส้มจะได้ขึ้นถูกหน้า) */
@@ -38,5 +38,25 @@ describe("website-design-nav", () => {
     expect(searchDesign("เมนู")[0]).toMatchObject({ page: "menu" });
     expect(searchDesign("zzzz-ไม่มี")).toEqual([]);
     expect(normTitle("🧺  หน้าตาตะกร้า")).toBe("หน้าตาตะกร้า");
+  });
+
+  it("คลิกในพรีวิว: ชิ้นเจาะจงชนะชิ้นกว้าง · การ์ดที่อ้างมีอยู่จริงในหน้านั้น", () => {
+    expect(previewRuleOf("hd.logo")?.page).toBe("logo");
+    expect(previewRuleOf("hd.link")?.page).toBe("menu");
+    expect(previewRuleOf("hd.bar")?.page).toBe("header");
+    expect(previewRuleOf("pc.name")?.page).toBe("card");
+    expect(previewRuleOf("block-x")).toBeNull();
+    for (const r of PREVIEW_PART_RULES) {
+      if (!r.card) continue;
+      const titles = DESIGN_PAGES[r.page].cards.map((c) => normTitle(c.title));
+      expect(titles, `${r.prefix} → ${r.card}`).toContain(normTitle(r.card));
+    }
+    // กฎเจาะจงต้องมาก่อนกฎกว้างที่ครอบมัน (ไม่งั้นไม่มีวันถูกเลือก)
+    PREVIEW_PART_RULES.forEach((r, i) => {
+      const earlier = PREVIEW_PART_RULES.slice(0, i).find((x) => r.prefix.startsWith(x.prefix));
+      expect(earlier, `${r.prefix} ถูก ${earlier?.prefix} บังอยู่`).toBeUndefined();
+    });
+    expect(previewFocusOf("footer")).toEqual(["ft."]);
+    expect(previewFocusOf("colors")).toEqual([]);
   });
 });

@@ -323,3 +323,42 @@ export function searchDesign(q: string, limit = 8): DesignHit[] {
     })
     .slice(0, limit);
 }
+
+/**
+ * 🎯 ชิ้นส่วนในพรีวิว → หน้าตั้งค่า (โหมด "คลิกเลือกส่วน" บนแถบพรีวิว + เลื่อนพรีวิวไปส่วนที่กำลังแก้)
+ * อิงป้าย data-part ของชุดปรับหน้าตาชิ้นส่วนที่เว็บร้านติดไว้แล้ว (hd.* ft.* pc.* …) — เว็บร้านตัวรับ src/components/layout/DesignAreaBridge
+ * เรียงจากเจาะจง → กว้าง (ตัวแรกที่ขึ้นต้นตรงชนะ) · card = ชื่อการ์ดที่จะกางให้ (ไม่ใส่ = เปิดหน้าเฉย ๆ)
+ */
+export interface PreviewPartRule {
+  prefix: string;
+  page: Exclude<DesignPageKey, "overview">;
+  card?: string;
+  /** ป้ายบนกรอบในพรีวิว "แก้: <label>" */
+  label: string;
+}
+
+export const PREVIEW_PART_RULES: PreviewPartRule[] = [
+  { prefix: "hd.logo", page: "logo", card: "รูปแบบโลโก้", label: "โลโก้" },
+  { prefix: "hd.link", page: "menu", card: "เมนูด้านบน", label: "เมนู" },
+  { prefix: "hd.dd", page: "menu", card: "เมนูด้านบน", label: "เมนู" },
+  { prefix: "hd.drawer", page: "menu", card: "เมนูด้านบน", label: "เมนูมือถือ" },
+  { prefix: "hd.", page: "header", label: "หัวเว็บ" },
+  { prefix: "ft.", page: "footer", label: "ท้ายเว็บ" },
+  { prefix: "pc.", page: "card", card: "หน้าตาการ์ด — ชุดสำเร็จรูป · รูปแบบ · ช่องหลัก", label: "การ์ดสินค้า" },
+  { prefix: "pd.", page: "product", label: "หน้าสินค้า" },
+  { prefix: "cart.", page: "cart", label: "ตะกร้า" },
+  { prefix: "co.", page: "checkout", label: "หน้าชำระเงิน" },
+  { prefix: "sr.", page: "mobile", card: "มือถือและช่วยขาย", label: "ค้นหา" },
+  { prefix: "ck.", page: "mobile", card: "มือถือและช่วยขาย", label: "แถบคุกกี้" },
+  { prefix: "pp.", page: "pages", card: "ป๊อปอัปรับส่วนลด", label: "ป๊อปอัปรับส่วนลด" },
+  { prefix: "nf.", page: "pages", card: "หน้า 404 (ไม่พบหน้า)", label: "หน้า 404" },
+  { prefix: "th.", page: "pages", card: "หน้าขอบคุณหลังสั่งซื้อ", label: "หน้าขอบคุณ" },
+  { prefix: "login.", page: "pages", card: "หน้าเข้าสู่ระบบ / สมัครสมาชิก", label: "หน้าเข้าสู่ระบบ" },
+  { prefix: "acc.", page: "pages", card: "หน้าบัญชีของฉัน", label: "หน้าบัญชีของฉัน" },
+];
+
+/** ชิ้นที่คลิกในพรีวิว (data-part) → กฎที่ตรง (ไม่ตรง = null) */
+export const previewRuleOf = (part: string): PreviewPartRule | null => PREVIEW_PART_RULES.find((r) => part.startsWith(r.prefix)) ?? null;
+
+/** เปิดหน้านี้แล้วพรีวิวเลื่อนไปชิ้นไหน (prefix ของหน้านั้น · ไม่มี = ไม่เลื่อน) */
+export const previewFocusOf = (page: DesignPageKey): string[] => PREVIEW_PART_RULES.filter((r) => r.page === page).map((r) => r.prefix);
