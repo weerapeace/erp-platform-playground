@@ -43,8 +43,8 @@
 | ของครบ | ข้อความในป้าย (เหตุผล "ของครบเมื่อ …") |
 | เตรียม/ตัด | `manufacturing_orders.prep_done_at/cut_done_at` + `mo_materials.cut_done_at` (`mark-ready` `done_date`) |
 | จ่ายงาน | `mo_work_orders.dispatch_date` |
-| ส่งคืน | `wo_submissions.submitted_at` (ไม่ใส่ = ว่าง · ยังโผล่ในรายงาน "ยังไม่ครบ" เพราะค่าแรงยังไม่ลง) |
-| QC รับเข้า | `qc_warehouse_items.created_at` (receive `date`) |
+| ส่งคืน | `wo_submissions.submitted_at` — ช่องนี้ DB บังคับห้ามว่าง (ค่าเริ่มต้น = วันนี้) → ไม่ใส่วัน = ลงเป็นวันที่อัปเดต + ติดป้าย "ยังไม่ลงวันที่/ค่าแรง" (info_pending) ไปแก้วันทีหลังได้ที่ตารางส่งงาน |
+| QC รับเข้า | `qc_warehouse_items.created_at` (receive `date` · ไม่ใส่ = เวลาที่อัปเดต) |
 | ส่งออก / ปิดใบ / ยกเลิก | ไม่มีช่องในตาราง → เก็บใน audit (`date`, `source: catch_up`) |
 
 วันที่ทุกช่องเก็บเป็นเที่ยงวันเวลาไทย (กันวันเพี้ยนข้ามโซนเวลา)
