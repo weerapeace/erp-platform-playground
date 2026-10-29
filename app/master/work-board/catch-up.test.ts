@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cuFacts, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuRows, cuTargetBlocked, cuAllocate, cuRun, cuUndo, cuIrreversible, CU_NO_DATES, type CuInputs, type CuContext } from "./catch-up";
+import { cuFacts, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuRows, cuTargetBlocked, cuAllocate, cuRun, cuUndo, cuIrreversible, CU_NO_DATES, cuFactsDiff, cuWhen, type CuInputs, type CuContext } from "./catch-up";
 import type { CatchUpSnapshot, CatchUpWo } from "@/app/api/mo/catch-up/route";
 
 const wo = (o: Partial<CatchUpWo>): CatchUpWo => ({ id: "w1", wo_no: "WO-1", qty: 0, received_qty: 0, qc_pulled_qty: 0, status: "dispatched",
@@ -327,5 +327,27 @@ describe("cuRun", () => {
     const res = await cuRun([{ kind: "skip_buy", date: null }, { kind: "mark_ready", parts: ["prep"], date: null }, { kind: "close", date: null }], ctx(), api);
     expect(res.map((r) => r.ok)).toEqual([true, false]);
     expect(res[1].msg).toBe("ไม่มีสิทธิ์");
+  });
+});
+
+describe("คำขออัปเดตงาน (พนักงานส่ง → หัวหน้ายืนยัน)", () => {
+  it("ใบไม่เปลี่ยนหลังส่งคำขอ = ไม่มีอะไรเตือน · เปลี่ยน = บอกทีละเรื่อง", () => {
+    const before = cuFacts(snap({ wos: [wo({ qty: 10, received_qty: 0 })] }));
+    expect(cuFactsDiff(before, before)).toEqual([]);
+    const now = cuFacts(snap({ mo: { status: "done" }, wos: [wo({ qty: 10, received_qty: 10 }), wo({ id: "w2", qty: 5, received_qty: 0 })] }));
+    const d = cuFactsDiff(before, now);
+    expect(d).toContain("จ่ายงาน 10 → 15 ชิ้น");
+    expect(d).toContain("ช่างส่งคืน 0 → 10 ชิ้น");
+    expect(d.some((x) => x.startsWith("สถานะใบ"))).toBe(true);
+  });
+  it("เวลาส่งคำขอแบบอ่านง่าย (เวลาไทย ไม่ขึ้นกับเครื่อง)", () => {
+    const now = new Date("2026-10-29T05:00:00Z");   // 12:00 เวลาไทย
+    expect(cuWhen("2026-10-29T04:59:40Z", now)).toBe("เมื่อสักครู่");
+    expect(cuWhen("2026-10-29T04:45:00Z", now)).toBe("15 นาทีที่แล้ว");
+    expect(cuWhen("2026-10-29T02:00:00Z", now)).toBe("3 ชม.ที่แล้ว");
+    expect(cuWhen("2026-10-28T22:30:00Z", now)).toBe("วันนี้ 05:30");
+    expect(cuWhen("2026-10-28T07:05:00Z", now)).toBe("เมื่อวาน 14:05");
+    expect(cuWhen("2026-10-26T16:59:00Z", now)).toBe("26 ต.ค. 23:59");
+    expect(cuWhen("ไม่ใช่วันที่", now)).toBe("");
   });
 });

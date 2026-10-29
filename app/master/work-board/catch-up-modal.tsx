@@ -6,11 +6,12 @@
  *   ขั้น 2: เติมเฉพาะข้อมูลที่ยังไม่มี — จ่ายงานหลายแถว · ส่งคืนหลายรอบ · ทุกขั้นมีวันที่ (ข้ามได้)
  *           เตือนรายช่อง (กรอบแดง = ต้องแก้ · เหลือง = เตือน) ด้วยกฎกลาง lib/work-entry-rules ตัวเดียวกับป๊อปจ่ายงานปกติ
  *   ขั้น 3: ผลการบันทึกทีละขั้น (พังขั้นไหน หยุดตรงนั้น บอกว่าสำเร็จถึงไหน)
+ *   ไม่มีสิทธิ์ "บันทึกได้เลย" (mode="request") = ส่งให้หัวหน้ายืนยันก่อน (/api/mo/catch-up/requests) · หัวหน้าเปิดใบที่มีคำขอค้าง = ข้อมูลที่พนักงานกรอกขึ้นให้ แก้ได้ แล้ว "ยืนยันและบันทึก" / "ตีกลับ"
  * กติกาทั้งหมดอยู่ที่ ./catch-up.ts (ทดสอบแล้ว) · ข้อมูลตั้งต้นจาก GET /api/mo/catch-up
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
-import { askConfirm } from "@/components/modal/ask-dialog";
+import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { QC_WAREHOUSES } from "@/lib/qc-ship";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
@@ -18,13 +19,14 @@ import { apiFetch } from "@/lib/api";
 import { defectNote, isHireDesk, todayYmd } from "@/lib/work-entry-rules";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { CatchUpSnapshot } from "@/app/api/mo/catch-up/route";
+import type { CuRequest } from "@/app/api/mo/catch-up/requests/route";
 import { CrewPick, crewFields, crewList, lastCrewIds } from "./crew-pick";
 import { DispatchDatePick } from "./dispatch-date-pick";
 import { DeskStaffPanel } from "./desk-staff-panel";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuStageDone, cuCanShort,
-  CU_SEVERITY, cuUndo, cuIrreversible, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuDispLine, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
+  CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuDispLine, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
 } from "./catch-up";
 
 type DeptLite = { id: string; name: string };
@@ -48,7 +50,7 @@ type CuLast = { deptId?: string; crewIds?: string[]; shelfId?: string };
 const readLast = (): CuLast => { try { return JSON.parse(localStorage.getItem(LAST_KEY) ?? "{}") as CuLast; } catch { return {}; } };
 const writeLast = (v: CuLast) => { try { localStorage.setItem(LAST_KEY, JSON.stringify(v)); } catch { /* ไม่มี storage ก็ข้าม */ } };
 
-export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel }: {
+export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel, mode = "direct", canApprove = false, onRequestsChanged }: {
   /** ใบสั่งผลิตที่จะอัปเดต (null = ปิดป๊อป) */
   moNo: string | null;
   onClose: () => void;
@@ -62,6 +64,12 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   onDesksChanged?: () => void;
   /** ไปใบถัดไปในตาราง (โหมดอัปเดตงาน — ไล่ใบค้างทีละใบโดยไม่ต้องปิดป๊อป) · nextLabel = รหัสสินค้าใบถัดไป */
   onNext?: () => void; nextLabel?: string | null;
+  /** direct = บันทึกเลย · request = ส่งให้หัวหน้ายืนยันก่อน (ไม่มีสิทธิ์ work_board.catch_up_direct) */
+  mode?: "direct" | "request";
+  /** ยืนยัน/แก้/ตีกลับ คำขอของคนอื่นได้ (work_board.catch_up_approve) — เปิดใบที่มีคำขอค้าง = โหมดตรวจ */
+  canApprove?: boolean;
+  /** ส่ง/ยกเลิก/ยืนยัน/ตีกลับ คำขอแล้ว → หน้าแม่โหลดคิวใหม่ */
+  onRequestsChanged?: () => void;
 }) {
   const toast = useToast();
   const [snap, setSnap] = useState<CatchUpSnapshot | null>(null);
@@ -92,6 +100,11 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const [undoing, setUndoing] = useState(false);
   const [running, setRunning] = useState(-1);
   const [results, setResults] = useState<CuResult[]>([]);
+  // ── คำขออัปเดตงาน (พนักงานส่ง → หัวหน้ายืนยัน)
+  const [req, setReq] = useState<CuRequest | null>(null);              // คำขอที่ยังไม่จบของใบนี้
+  const [rejected, setRejected] = useState<CuRequest | null>(null);    // คำขอล่าสุดของฉันที่ถูกตีกลับ
+  const [sent, setSent] = useState<{ updated: boolean } | null>(null);  // ส่งคำขอแล้ว (หน้า 3)
+  const [reqBusy, setReqBusy] = useState(false);
   const seq = useRef(0);
   const nk = (p: string) => `${p}${++seq.current}`;
 
@@ -100,18 +113,27 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     setSnap(null); setLoadErr(""); setPage(1); setTarget(null); setTicks({}); setDisp([]); setRet([]); setRetSet(false); setQcSet(false); setDates(CU_NO_DATES);
     setShelfId(""); setBadReason(""); setNewReason(null); setCancelReason(""); setMissing([]); setDeskPanelFor(null); setResults([]); setRunning(-1);
     setProblems([]); setTeamNote(""); setSaveBom(true); setShipMode("sales_wh"); setShipWh(QC_WAREHOUSES[0]); setUndoRes(null); setUndoing(false);
+    setReq(null); setRejected(null); setSent(null); setReqBusy(false);
     let alive = true;
     void (async () => {
       try {
-        const r = await apiFetch(`/api/mo/catch-up?mo_no=${encodeURIComponent(moNo)}`);
+        const [r, rq] = await Promise.all([
+          apiFetch(`/api/mo/catch-up?mo_no=${encodeURIComponent(moNo)}`),
+          apiFetch(`/api/mo/catch-up/requests?mo_no=${encodeURIComponent(moNo)}`).then((x) => (x.ok ? x.json() : null)).catch(() => null),
+        ]);
         const j = await r.json();
         if (!alive) return;
         if (!r.ok || j.error) throw new Error(j.error || "โหลดข้อมูลใบงานไม่สำเร็จ");
         const s = j.data as CatchUpSnapshot;
-        setSnap(s); setReasons(s.reasons ?? []);
+        const open = (rq?.data?.open ?? null) as CuRequest | null;
+        const rej = (rq?.data?.rejected ?? null) as CuRequest | null;
+        setSnap(s); setReasons(s.reasons ?? []); setReq(open); setRejected(open ? null : rej);
+        // เปิดใบที่มีคำขอค้าง (ของฉันเอง / หัวหน้าตรวจ) = ใส่ข้อมูลที่กรอกไว้ให้เลย แก้ต่อได้ทุกช่อง
+        if (open?.draft && (open.mine ? open.status === "pending" : canApprove)) hydrate(open.draft as CuDraft);
       } catch (e) { if (alive) setLoadErr(e instanceof Error ? e.message : "โหลดข้อมูลใบงานไม่สำเร็จ"); }
     })();
     return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moNo]);
 
   const f = useMemo(() => (snap ? cuFacts(snap) : null), [snap]);
@@ -134,6 +156,15 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     setQc({ good: q.qcGood, bad: 0 });
     const good = snap?.shelves.filter((s) => s.kind !== "defect") ?? [];
     setShelfId(good.length === 1 ? good[0].id : good.some((s) => s.id === last.shelfId) ? last.shelfId! : "");
+  };
+  /** ใส่ข้อมูลจากคำขอ (ที่พนักงานกรอกไว้) กลับเข้าป๊อป */
+  const hydrate = (d: CuDraft) => {
+    seq.current = Math.max(seq.current, 1000);   // กันคีย์แถวใหม่ซ้ำกับแถวในคำขอ
+    setTarget(d.target); setTicks(d.ticks ?? {}); setDisp(d.disp ?? []); setRet(d.ret ?? []); setRetSet(!!d.retSet);
+    setQc(d.qc ?? { good: 0, bad: 0 }); setQcSet(!!d.qcSet); setDates({ ...CU_NO_DATES, ...(d.dates ?? {}) });
+    setShelfId(d.shelfId ?? ""); setBadReason(d.badReason ?? ""); setCancelReason(d.cancelReason ?? ""); setMissing(d.missing ?? []);
+    setProblems(d.problems ?? []); setTeamNote(d.teamNote ?? ""); setSaveBom(d.saveBom !== false);
+    setShipMode(d.shipMode === "sell" ? "sell" : "sales_wh"); setShipWh(d.shipWh || QC_WAREHOUSES[0]);
   };
   const rows = f && target ? cuRows(f, target, ticks) : [];
   const selIdx = target ? flow.findIndex((t) => t.key === target) : -1;
@@ -277,9 +308,46 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     } catch (e) { toast.error(e instanceof Error ? e.message : "เพิ่มสาเหตุไม่สำเร็จ"); }
   };
 
+  // ── โหมดของป๊อป: บันทึกเลย / ส่งให้หัวหน้า / หัวหน้าตรวจคำขอ / ใบนี้มีคำขอของคนอื่นค้าง
+  const reviewing = !!req && !req.mine && canApprove && !!req.draft;
+  const editingMine = !!req && !!req.mine && req.status === "pending";
+  const blockedBy = !!req && !reviewing && !editingMine;
+  const asRequest = !reviewing && (mode === "request" || editingMine);
+  const reqDraft = (req?.draft ?? null) as CuDraft | null;
+  const reqDiff = reviewing && f && reqDraft?.facts ? cuFactsDiff(reqDraft.facts, f) : [];
+  const stepLabels = built.steps.map((s) => cuStepLabel(s, whoOf));
+  const draftNow = (): CuDraft | null => (f && target
+    ? { v: 1, target, ticks, disp, ret, retSet, qc, qcSet, dates, shelfId, badReason, cancelReason, missing, problems, teamNote, saveBom, shipMode, shipWh, facts: f }
+    : null);
+  const postReq = async (body: Record<string, unknown>) => {
+    const r = await apiFetch("/api/mo/catch-up/requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || j?.error) throw new Error(j?.error || "ทำรายการไม่สำเร็จ");
+    return j as { data?: { id?: string; updated?: boolean } };
+  };
+
   const save = async () => {
     if (!snap || !built.steps.length) return;
     if (errs.length) { goFirstError(); return; }
+    // ส่งให้หัวหน้ายืนยัน — ยังไม่บันทึกอะไรลงใบงาน
+    if (asRequest) {
+      setReqBusy(true);
+      try {
+        const j = await postReq({ action: "submit", mo_no: snap.mo.mo_no, target, draft: draftNow(), summary: stepLabels });
+        setSent({ updated: !!j.data?.updated }); setPage(3); onRequestsChanged?.();
+        const d0 = disp.find((r) => r.deptId);
+        writeLast({ ...readLast(), ...(d0 ? { deptId: d0.deptId, crewIds: d0.crewIds } : {}), ...(shelfId ? { shelfId } : {}) });
+      } catch (e) { toast.error(e instanceof Error ? e.message : "ส่งคำขอไม่สำเร็จ"); }
+      finally { setReqBusy(false); }
+      return;
+    }
+    // หัวหน้ายืนยันคำขอ: จองคำขอก่อน (กันสองคนยืนยันซ้อน) แล้วบันทึกด้วยสิทธิ์ของหัวหน้าเอง
+    if (reviewing) {
+      setReqBusy(true);
+      try { await postReq({ action: "claim", id: req!.id, draft: draftNow(), summary: stepLabels }); }
+      catch (e) { setReqBusy(false); toast.error(e instanceof Error ? e.message : "เริ่มบันทึกคำขอไม่สำเร็จ"); return; }
+      setReqBusy(false);
+    }
     setPage(3); setResults([]);
     const ctxDisp: Record<string, { dept: DeptLite; who: Record<string, unknown> }> = {};
     for (const r of disp) { const d = deptOf(r.deptId); if (d) ctxDisp[r.key] = { dept: d, who: crewFields(crewList(r.crewIds, poolOf(d)), d.name) }; }
@@ -290,11 +358,39 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
       return j as Record<string, unknown>;
     }, setRunning, (s) => cuStepLabel(s, whoOf));
     setRunning(-1); setResults(res);
+    if (reviewing) {
+      // ปิดคำขอพร้อมผลทีละขั้น (แจ้งเตือนกลับไปหาคนส่ง) — ลอง 2 ครั้ง กันเน็ตสะดุด
+      const steps = built.steps.map((s, i) => ({ label: cuStepLabel(s, whoOf), ok: !!res[i]?.ok, msg: res[i]?.msg ?? "ยังไม่ได้ทำ" }));
+      const ok = res.length === built.steps.length && res.every((x) => x.ok);
+      let closed = false;
+      for (let i = 0; i < 2 && !closed; i++) { try { await postReq({ action: "finish", id: req!.id, result: { ok, steps } }); closed = true; } catch { /* ลองใหม่ */ } }
+      if (!closed) toast.error("บันทึกงานแล้ว แต่ปิดคำขอไม่สำเร็จ — คำขอยังค้างในคิว ให้กด \"ตีกลับ\" พร้อมหมายเหตุว่าบันทึกแล้ว (อย่ายืนยันซ้ำ)");
+      onRequestsChanged?.();
+    }
     if (res.some((x) => x.ok)) {
       const d0 = disp.find((r) => r.deptId);
       writeLast({ ...readLast(), ...(d0 ? { deptId: d0.deptId, crewIds: d0.crewIds } : {}), ...(shelfId ? { shelfId } : {}) });
       onDone();
     }
+  };
+
+  const rejectReq = async () => {
+    if (!req) return;
+    const who = req.requested_name ?? "พนักงาน";
+    const note = await askText({ title: "ตีกลับคำขอนี้?", message: `บอก ${who} ว่าต้องแก้อะไร — ระบบแจ้งเตือนกลับไปให้ (ยังไม่มีอะไรถูกบันทึกลงใบงาน)`,
+      placeholder: "เช่น จำนวนส่งคืนไม่ตรง / ลืมใส่วันที่ส่ง", required: true, confirmText: "ตีกลับ", variant: "danger" });
+    if (note === null) return;
+    setReqBusy(true);
+    try { await postReq({ action: "reject", id: req.id, note }); toast.success(`ตีกลับให้ ${who} แล้ว`); onRequestsChanged?.(); if (onNext) onNext(); else onClose(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "ตีกลับไม่สำเร็จ"); }
+    finally { setReqBusy(false); }
+  };
+  const cancelReq = async () => {
+    if (!req || !(await askConfirm({ title: "ยกเลิกคำขอนี้?", message: "หัวหน้าจะไม่เห็นคำขอนี้แล้ว (ยังไม่มีอะไรถูกบันทึกลงใบงาน)", confirmText: "ยกเลิกคำขอ", variant: "danger" }))) return;
+    setReqBusy(true);
+    try { await postReq({ action: "cancel", id: req.id }); toast.success("ยกเลิกคำขอแล้ว"); setReq(null); onRequestsChanged?.(); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "ยกเลิกคำขอไม่สำเร็จ"); }
+    finally { setReqBusy(false); }
   };
 
   // ── ย้อนการอัปเดตนี้ (ลบสิ่งที่เพิ่งสร้าง จากหลังไปหน้า) — ส่งออก/ปิด/ยกเลิกแล้ว = ย้อนไม่ได้
@@ -327,7 +423,44 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     ...(missing.length && ticks.short ? [{ text: `ยังขาดของ ${missing.length} รายการ — ยังขึ้นในหน้าขอซื้อให้ฝ่ายจัดซื้อตามต่อ` }] : []),
     ...issues.filter((x) => x.level === "warn" && (x.field === "qc:good" || x.field === salesField) && (x.msg.startsWith("ยังเหลือรอ QC") || x.msg.includes("ใบขาย"))).map((x) => ({ text: x.msg })),
   ] as { text: string; href?: string }[];
-  const busy = page === 3 && results.length === 0;
+  const busy = page === 3 && results.length === 0 && !sent;
+  const warnTxt = warns.length ? ` (มีคำเตือน ${warns.length})` : "";
+  const saveLabel = reqBusy ? "กำลังส่ง…" : asRequest ? `${editingMine ? "ส่งคำขอที่แก้" : "ส่งให้หัวหน้ายืนยัน"}${warnTxt}`
+    : reviewing ? `ยืนยันและบันทึก${warnTxt}` : target === "cancel" ? "ยืนยันยกเลิกใบ" : warns.length ? `บันทึก (มีคำเตือน ${warns.length})` : "✓ บันทึกอัปเดต";
+  /** แถบบนสุดของขั้น 1–2: ตรวจคำขอ / คำขอของฉันที่รออยู่ / ใบนี้มีคำขอของคนอื่น / ถูกตีกลับ / จะส่งให้หัวหน้า */
+  const reqBanner: ReactNode = reviewing ? (
+    <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[13px] text-indigo-900">
+      <div className="flex flex-wrap items-center gap-2">
+        <Icon name="request" />
+        <span className="min-w-0 flex-1"><b className="font-medium">คำขอจาก {req!.requested_name ?? "พนักงาน"}</b> · {cuWhen(req!.requested_at)} — ตรวจ/แก้ได้ทุกช่อง แล้วกด &ldquo;ยืนยันและบันทึก&rdquo;</span>
+        <button type="button" disabled={reqBusy} onClick={() => void rejectReq()} className="h-8 shrink-0 rounded-lg border border-rose-200 bg-white px-3 text-[12px] text-rose-700 hover:bg-rose-50 disabled:opacity-40"><Icon name="back" /> ตีกลับ</button>
+      </div>
+      {req!.status === "processing" && <div className="mt-1 text-[12px] text-amber-800">{req!.reviewed_name ?? "หัวหน้าอีกคน"} กำลังบันทึกคำขอนี้อยู่ — ถ้าค้างเกิน 10 นาที ยืนยันต่อได้</div>}
+      {reqDiff.length > 0 && <div className="mt-1.5 rounded-md bg-amber-50 px-2 py-1.5 text-[12px] text-amber-900"><b className="font-medium">ใบนี้เปลี่ยนไปหลังส่งคำขอ — ตรวจก่อนยืนยัน:</b> {reqDiff.join(" · ")}</div>}
+    </div>
+  ) : editingMine ? (
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+      <Icon name="waiting" />
+      <span className="min-w-0 flex-1">คุณส่งอัปเดตใบนี้ไว้แล้ว ({cuWhen(req!.requested_at)}) รอหัวหน้ายืนยัน — แก้แล้วกด &ldquo;ส่งคำขอที่แก้&rdquo; ได้</span>
+      <button type="button" disabled={reqBusy} onClick={() => void cancelReq()} className="h-8 shrink-0 rounded-lg border border-amber-300 bg-white px-3 text-[12px] hover:bg-amber-100 disabled:opacity-40">ยกเลิกคำขอ</button>
+    </div>
+  ) : blockedBy ? (
+    <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[13px] text-amber-900">
+      <Icon name="waiting" className="mt-0.5" />
+      <span>{req!.status === "processing" ? `${req!.reviewed_name ?? "หัวหน้า"} กำลังบันทึกอัปเดตของใบนี้อยู่` : `ใบนี้มีอัปเดตรอหัวหน้ายืนยันอยู่ (ส่งโดย ${req!.requested_name ?? "คนอื่น"} · ${cuWhen(req!.requested_at)})`} — รอให้จบก่อน แล้วค่อยอัปเดตใหม่</span>
+    </div>
+  ) : (rejected || asRequest) ? (
+    <>
+      {rejected && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-900">
+          <Icon name="back" />
+          <span className="min-w-0 flex-1">อัปเดตครั้งก่อนถูกตีกลับโดย {rejected.reviewed_name ?? "หัวหน้า"} ({cuWhen(rejected.reviewed_at ?? rejected.requested_at)}): <b className="font-medium">{rejected.review_note}</b></span>
+          {!!rejected.draft && <button type="button" onClick={() => { hydrate(rejected.draft as CuDraft); setRejected(null); }} className="h-8 shrink-0 rounded-lg border border-rose-200 bg-white px-3 text-[12px] hover:bg-rose-100">ใช้ข้อมูลเดิมแก้ต่อ</button>}
+        </div>
+      )}
+      {asRequest && <div className="flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-1.5 text-[12px] text-slate-600"><Icon name="permission" /> อัปเดตของคุณจะส่งให้หัวหน้ายืนยันก่อน — ยังไม่บันทึกลงใบงานจนกว่าจะยืนยัน</div>}
+    </>
+  ) : null;
   const m = snap?.mo, p = snap?.progress;
   const buyTxt = !m ? "" : m.skipped.buy ? "ป้ายของครบ" : !p ? "ยังไม่มีสูตร" : f?.buyDone ? "ของครบ"
     : `ต้องซื้อ ${p.buy}${p.requested ? ` · รออนุมัติ ${p.requested}` : ""}${p.ordered ? ` · รอของ ${p.ordered}` : ""}`;
@@ -335,16 +468,16 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const footer = page === 1 ? (<>
     <button type="button" onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ยกเลิก</button>
     {onNext && <button type="button" onClick={onNext} title={nextLabel ? `ข้ามไป ${nextLabel}` : undefined} className="h-9 px-3 text-sm text-slate-600 rounded-lg hover:bg-slate-50">ข้ามใบนี้ →</button>}
-    <button type="button" disabled={!target} onClick={() => setPage(2)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">ถัดไป: เติมข้อมูล →</button>
+    <button type="button" disabled={!target || blockedBy} onClick={() => setPage(2)} className="h-9 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-40">ถัดไป: เติมข้อมูล →</button>
   </>) : page === 2 ? (<>
     <button type="button" onClick={() => setPage(1)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">← กลับ</button>
     {errs.length > 0 ? (
       <button type="button" onClick={goFirstError} title="กดเพื่อไปที่ช่องที่ต้องแก้"
         className="h-9 px-4 text-sm font-medium rounded-lg border border-rose-300 bg-white text-rose-700 hover:bg-rose-50">ยังขาด {errs.length} จุด — ไปแก้</button>
     ) : (
-      <button type="button" disabled={built.steps.length === 0} onClick={() => void save()}
+      <button type="button" disabled={built.steps.length === 0 || reqBusy || blockedBy} onClick={() => void save()}
         className={`h-9 px-4 text-sm font-medium text-white rounded-lg disabled:opacity-40 ${target === "cancel" ? "bg-rose-600 hover:bg-rose-700" : "bg-indigo-600 hover:bg-indigo-700"}`}>
-        {target === "cancel" ? "ยืนยันยกเลิกใบ" : warns.length ? `บันทึก (มีคำเตือน ${warns.length})` : "✓ บันทึกอัปเดต"}
+        {saveLabel}
       </button>
     )}
   </>) : (
@@ -357,12 +490,13 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   return (
     <ERPModal open={!!moNo} onClose={onClose} size="lg" storageKey="wb-catchup" footer={footer}
       hasUnsavedChanges={page === 2} closeOnBackdrop={page === 1}
-      title={`🔄 อัปเดตงาน${m ? ` · ${m.product_sku ?? m.mo_no}` : ""}`}
+      title={`🔄 ${reviewing ? "ตรวจคำขออัปเดตงาน" : "อัปเดตงาน"}${m ? ` · ${m.product_sku ?? m.mo_no}` : ""}`}
       description={m ? `${m.mo_no}${m.product_name && m.product_name !== m.product_sku ? ` · ${m.product_name}` : ""} · สั่งผลิต ${fmt(m.qty)} ชิ้น` : undefined}>
       {loadErr ? <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{loadErr}</div>
         : !snap || !f || !m ? <div className="py-10 text-center text-sm text-slate-400">กำลังโหลดข้อมูลใบงาน…</div>
         : page === 1 ? (
           <div className="space-y-4">
+            {reqBanner}
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-[12px]">
               <div className="mb-1 font-medium text-slate-500">ระบบบันทึกไว้ตอนนี้</div>
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-700">
@@ -514,6 +648,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
           </div>
         ) : page === 2 ? (
           <div className="space-y-3">
+            {reqBanner}
             {/* แถบสรุป: ต้องแก้ / เตือน / วันที่ที่ยังว่าง */}
             <div className={`flex flex-wrap items-center gap-2 rounded-lg px-3 py-2 text-[13px] ${errs.length ? "bg-rose-50" : "bg-emerald-50"}`}>
               {errs.length
@@ -807,6 +942,20 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
               <div className="mt-1 text-[11px] text-slate-400">วันที่ที่ไม่ใส่ = จำไม่ได้ (ข้ามได้) · ทุกขั้นลงประวัติว่าใครอัปเดต · ไม่ส่งแจ้งเตือน LINE เรื่องงานเก่า</div>
             </div>
           </div>
+        ) : sent ? (
+          <div className="space-y-3">
+            <div className="flex items-start gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              <Icon name="done" className="mt-0.5" />
+              <div>
+                <div className="font-medium">{sent.updated ? "แก้คำขอแล้ว — รอหัวหน้ายืนยัน" : "ส่งให้หัวหน้ายืนยันแล้ว"}</div>
+                <div className="text-[12px] text-emerald-700">ยังไม่บันทึกลงใบงาน — บันทึกจริงเมื่อหัวหน้ากดยืนยัน (แจ้งเตือนหัวหน้าให้แล้ว) · ต้องแก้: เปิดใบนี้อีกครั้งได้จนกว่าจะยืนยัน</div>
+              </div>
+            </div>
+            <div className="rounded-lg border border-slate-200 px-3 py-2 text-[13px]">
+              <div className="mb-1 font-medium text-slate-600">สิ่งที่จะบันทึกเมื่อหัวหน้ายืนยัน</div>
+              {stepLabels.map((x, i) => <div key={i} className="text-slate-700">• {x}</div>)}
+            </div>
+          </div>
         ) : (
           <div className="space-y-2">
             {built.steps.map((s, i) => {
@@ -824,7 +973,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
               );
             })}
             {results.length > 0 && !undoRes && (results.every((r) => r.ok) && results.length === built.steps.length
-              ? <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">อัปเดตแล้ว — บอร์ดโหลดใหม่ให้แล้ว · บนบอร์ด: {tabAfter}</div>
+              ? <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">อัปเดตแล้ว — บอร์ดโหลดใหม่ให้แล้ว · บนบอร์ด: {tabAfter}{reviewing ? ` · ยืนยันคำขอของ ${req!.requested_name ?? "พนักงาน"} แล้ว (แจ้งเตือนกลับให้แล้ว)` : ""}</div>
               : <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">บันทึกได้บางขั้น — ขั้นที่สำเร็จเก็บไว้แล้ว เปิดป๊อปนี้ใหม่เพื่อทำต่อได้</div>)}
             {results.length > 0 && !undoRes && followUps.length > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-[13px]">

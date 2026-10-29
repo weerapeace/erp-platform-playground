@@ -69,6 +69,22 @@ import { QrCode, useQrDataUrl } from "@/components/qr-code";
   - หน้าต่างเด้ง (ตั้งค่าการ์ด / เปิดลิงก์แจ้งเตือน) อยู่นอกกรอบพรีวิว → เต็มจอจริงเสมอ
   - ยังไม่ได้ปรับตาม `layout`: มุมมอง แผนงาน / รายการ / widget เสริม (ยังใช้ `sm:`/`lg:` = ถูกต้องบนเครื่องจริง แต่ในกรอบพรีวิวบนจอคอมอาจแน่นกว่าของจริง)
 
+## ป๊อป "ติดตั้งแอป" (ของกลาง `components/install-app`)
+
+ใช้เมื่อหน้าไหนอยากมีปุ่ม "ติดตั้งแอป" ในเมนู ⋯ (เริ่มที่บอร์ดจ่ายงาน)
+
+```tsx
+const [installOpen, setInstallOpen] = useState(false);
+<button onClick={() => setInstallOpen(true)}><Icon name="mobile" /> ติดตั้งแอป</button>
+<InstallAppModal open={installOpen} onClose={() => setInstallOpen(false)} />
+```
+
+- ข้างในคือ `DeviceQrPanel` ตัวเดียวกับเมนูผู้ใช้ (แท็บ เปิดหน้านี้ / ติดตั้งเป็นแอป · เลือกแอป · QR · ไอคอนตัวอย่าง · ขั้นตอน · คัดลอกลิงก์) + ปุ่มใหญ่ **"ติดตั้ง … บนเครื่องนี้"** (`renderInstallHere`)
+- `DeviceQrPanel` รับเพิ่ม: `defaultTab` (เปิดแท็บไหนก่อน) · `renderInstallHere(app, goPath)` (ปุ่มติดตั้งบนเครื่องนี้ใต้ชิปเลือกแอป — มีแล้วจะซ่อนปุ่ม "เปิดหน้าติดตั้งบนคอมเครื่องนี้")
+- **ทำไมบางทีต้องกด 2 ครั้ง:** เบราว์เซอร์ติดตั้งได้เฉพาะแอปของหน้าที่เปิดอยู่ (manifest ของหน้านั้น) — หน้าปกติของระบบไม่ใช่หน้าของแอป "ผลิต" → ปุ่มพาไป `/app/<key>?go=<หน้านี้>&install=1` แล้วเชลล์แอปเดี่ยวเด้งการ์ด `InstallHereBanner` ให้กด "ติดตั้ง" อีกครั้ง · อยู่ในแอปนั้นอยู่แล้ว = กดครั้งเดียว (หน้าใน iframe ส่ง postMessage `erp-pwa-install` ให้เชลล์เด้ง)
+- iPhone/iPad: Apple ไม่ให้เว็บติดตั้งเอง → การ์ดบอกวิธี แชร์ → เพิ่มไปยังหน้าจอโฮม · Samsung Internet → พาไปเปิดใน Chrome · ติดตั้งแล้ว (โหมดแอป) = ปุ่มขึ้น "ติดตั้งแล้ว" / การ์ดไม่โผล่
+- ไม่มี permission/audit (แค่พาไปหน้าแอป — ตัวกั้นสิทธิ์จริงอยู่ที่เชลล์ `/app/<key>`)
+
 ## ปฏิทินกลาง ScheduleBoard รองรับ layout
 
 `components/schedule-board` รับ prop `layout` (`desktop` / `tablet` / `phone`) จาก device-view ได้เลย:

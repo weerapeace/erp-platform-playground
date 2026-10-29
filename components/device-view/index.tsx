@@ -196,12 +196,19 @@ export type DeviceQrOpts = {
   appLabel?: string;
   installGo?: string;    // path ที่จะเปิดหลังติดตั้ง (ไม่ส่ง = path ปัจจุบัน)
 };
+/** ส่วนเสริมของแผง (ป๊อปติดตั้งแอป components/install-app ใช้) */
+type DeviceQrExtra = {
+  defaultTab?: "open" | "install";   // แท็บที่เปิดมาก่อน (ไม่ส่ง = คอมเปิด "ติดตั้ง" · เครื่องอื่นเปิด "เปิดหน้านี้")
+  /** ปุ่ม "ติดตั้งบนเครื่องนี้" ของแอปที่เลือก — วางใต้ชิปเลือกแอปในแท็บติดตั้ง (แทนปุ่มเปิดหน้าติดตั้งบนคอม) */
+  renderInstallHere?: (app: AppLite, goPath?: string) => ReactNode;
+};
 
 /** แผง QR + ลิงก์ (ของกลาง) — แท็บ 1: สแกนเปิดหน้านี้บนเครื่องจริง · แท็บ 2: สแกนเพื่อติดตั้งเป็นแอป (PWA) บนเครื่อง
  *  layout = "desktop" (คอม): ไม่มี QR (คอมไม่สแกน) → ปุ่มเปิดหน้าติดตั้งบนคอมเครื่องนี้ + คัดลอกลิงก์ไปเปิดบนคอมเครื่องอื่น · เปิดมาที่แท็บติดตั้งก่อน */
-export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, appKey: appKeyProp, appLabel, installGo }: { layout: DeviceLayout; className?: string } & DeviceQrOpts) {
-  const [tab, setTab] = useState<"open" | "install">(layout === "desktop" ? "install" : "open");
-  useEffect(() => { setTab(layout === "desktop" ? "install" : "open"); }, [layout]);
+export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, appKey: appKeyProp, appLabel, installGo, defaultTab, renderInstallHere }: { layout: DeviceLayout; className?: string } & DeviceQrOpts & DeviceQrExtra) {
+  const firstTab = defaultTab ?? (layout === "desktop" ? "install" : "open");
+  const [tab, setTab] = useState<"open" | "install">(firstTab);
+  useEffect(() => { setTab(firstTab); }, [firstTab]);
   const isDesktop = layout === "desktop";
   const [openUrl, setOpenUrl] = useState("");
   const [copied, setCopied] = useState(false);
@@ -260,13 +267,21 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
               ))}
             </div>
           )}
+          {app && renderInstallHere && (
+            <>
+              {renderInstallHere(app, installGo)}
+              <div className="flex w-full items-center gap-2 text-[11px] text-slate-400"><span className="h-px flex-1 bg-slate-200" />หรือติดตั้งบนเครื่องอื่น<span className="h-px flex-1 bg-slate-200" /></div>
+            </>
+          )}
           {isDesktop ? (
             <>
               {/* คอม: เปิดหน้าแอปเดี่ยวในแท็บใหม่ แล้วกดติดตั้งที่นั่น (manifest ของแอปนั้น = ได้ไอคอนแอปนั้น ไม่ใช่ทั้งระบบ) */}
-              <button type="button" disabled={!url} onClick={() => { if (url) window.open(url, "_blank", "noopener"); }}
-                className="h-10 w-full rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-40">
-                {DEVICE_ICON.desktop} เปิดหน้าติดตั้งบนคอมเครื่องนี้ ↗
-              </button>
+              {!renderInstallHere && (
+                <button type="button" disabled={!url} onClick={() => { if (url) window.open(url, "_blank", "noopener"); }}
+                  className="h-10 w-full rounded-lg bg-slate-900 px-3 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-40">
+                  {DEVICE_ICON.desktop} เปิดหน้าติดตั้งบนคอมเครื่องนี้ ↗
+                </button>
+              )}
               {app && <HomeIconPreview app={app} />}
               <div className="text-left text-[11px] leading-snug text-slate-500">
                 <div className="mb-0.5 text-center font-semibold text-slate-700">ติดตั้งแอป &ldquo;{app?.label}&rdquo; บนคอม</div>

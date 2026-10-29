@@ -547,3 +547,60 @@ export async function cuUndo(results: CuResult[], ctx: CuContext, api: CuApi, la
   }
   return out;
 }
+
+// ── คำขออัปเดตงาน (พนักงานส่ง → หัวหน้ายืนยัน) — เก็บที่ตาราง work_catch_up_requests ผ่าน /api/mo/catch-up/requests
+
+/** สิ่งที่พนักงานกรอกในป๊อป (ครบพอให้หัวหน้าเปิดมาเห็นเหมือนกัน แล้วแก้ต่อได้) + facts ตอนส่ง (ไว้เทียบว่ามีคนแก้ใบหลังส่งไหม) */
+export type CuDraft = {
+  v: 1;
+  target: CuTargetKey; ticks: CuTicks;
+  disp: (CuDispLine & { crewIds: string[]; rateSet?: boolean })[];
+  ret: CuRetLine[]; retSet: boolean;
+  qc: { good: number; bad: number }; qcSet: boolean;
+  dates: CuDates; shelfId: string; badReason: string; cancelReason: string; missing: string[];
+  problems: CuProblem[]; teamNote: string; saveBom: boolean;
+  shipMode: "sales_wh" | "sell"; shipWh: string;
+  facts: CuFacts;
+};
+
+/** สิทธิ์ของโหมดอัปเดตงาน (ตั้งตามตำแหน่ง/รายคน) */
+export const CU_PERM = {
+  use: "work_board.catch_up",            // ใช้โหมดได้ (ส่งให้หัวหน้ายืนยัน) — คนจ่ายงานได้ใช้ได้อยู่แล้ว
+  direct: "work_board.catch_up_direct",  // บันทึกได้เลย ไม่ต้องรอ
+  approve: "work_board.catch_up_approve", // ยืนยัน/แก้/ตีกลับ คำขอของคนอื่น
+} as const;
+
+/** ใบงานเปลี่ยนอะไรไปบ้างตั้งแต่พนักงานส่งคำขอ — ว่าง = เหมือนเดิม (ยืนยันได้สบายใจ) */
+export function cuFactsDiff(before: CuFacts, now: CuFacts): string[] {
+  const out: string[] = [];
+  const num = (label: string, a: number, b: number) => { if (Math.abs(a - b) > EPS) out.push(`${label} ${fmt(a)} → ${fmt(b)} ชิ้น`); };
+  const flag = (label: string, a: boolean, b: boolean) => { if (a !== b) out.push(`${label} ${a ? "ครบ" : "ยังไม่ครบ"} → ${b ? "ครบ" : "ยังไม่ครบ"}`); };
+  if (before.status !== now.status) out.push(`สถานะใบ ${before.status} → ${now.status}`);
+  num("จำนวนสั่งผลิต", before.qty, now.qty);
+  flag("ซื้อของ", before.buyDone, now.buyDone);
+  flag("เตรียม", before.prepDone, now.prepDone);
+  flag("ตัด", before.cutDone, now.cutDone);
+  num("จ่ายงาน", before.dispatched, now.dispatched);
+  num("ช่างส่งคืน", before.received, now.received);
+  num("QC รับเข้า", before.qcPulled, now.qcPulled);
+  num("ของบนชั้น QC", before.shelfGood, now.shelfGood);
+  return out;
+}
+
+/** เวลาส่งคำขอแบบอ่านง่าย: "เมื่อสักครู่" · "15 นาทีที่แล้ว" · "3 ชม.ที่แล้ว" · "เมื่อวาน 14:05" · "27 ต.ค. 09:30" (เวลาไทย) */
+export function cuWhen(iso: string, now: Date = new Date()): string {
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return "";
+  const min = Math.floor((now.getTime() - t.getTime()) / 60000);
+  if (min < 1) return "เมื่อสักครู่";
+  if (min < 60) return `${min} นาทีที่แล้ว`;
+  if (min < 6 * 60) return `${Math.floor(min / 60)} ชม.ที่แล้ว`;
+  const th = (d: Date) => new Date(d.getTime() + 7 * 3600000);   // เวลาไทย (UTC+7) ไม่ขึ้นกับเครื่อง
+  const a = th(t), b = th(now);
+  const hm = `${String(a.getUTCHours()).padStart(2, "0")}:${String(a.getUTCMinutes()).padStart(2, "0")}`;
+  const dayDiff = Math.round((Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate()) - Date.UTC(a.getUTCFullYear(), a.getUTCMonth(), a.getUTCDate())) / 86400000);
+  if (dayDiff === 0) return `วันนี้ ${hm}`;
+  if (dayDiff === 1) return `เมื่อวาน ${hm}`;
+  const MON = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  return `${a.getUTCDate()} ${MON[a.getUTCMonth()]} ${hm}`;
+}

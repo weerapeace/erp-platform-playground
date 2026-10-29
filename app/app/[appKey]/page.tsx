@@ -14,6 +14,8 @@ import { useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ShellPresentContext } from "@/components/playground-shell";
 import { PwaInstallButton } from "@/components/pwa-install-button";
+import { InstallHereBanner } from "@/components/install-app";
+import { appIconSrc } from "@/components/device-view";
 import { NotificationBell } from "@/components/notification-bell";
 import { LangToggle } from "@/components/i18n";
 import { AccountMenu } from "@/components/account-menu";
@@ -73,6 +75,8 @@ export default function StandaloneApp() {
   const initedRef = useRef(false);   // ตั้งหน้าเริ่มต้น (default landing) แค่ครั้งแรก
   const [deepSrc, setDeepSrc] = useState<string | null>(null);   // หน้าลึกที่จำไว้ (กัน refresh เด้งหน้าแรก)
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  // เปิดมาจากปุ่ม "ติดตั้งบนเครื่องนี้" (?install=1) → การ์ดติดตั้งเด้ง · อ่านตอนเปิดครั้งแรก (?go จะล้าง URL ทีหลัง)
+  const [installAsk] = useState(() => { try { return new URLSearchParams(window.location.search).get("install") === "1"; } catch { return false; } });
   const lastSavedRef = useRef<string>("");
   const stripEmbed = (p: string) => p.replace(/([?&])embed=1(&?)/, (_m, p1, p2) => (p2 ? p1 : "")).replace(/[?&]$/, "");
   // มุมมองอุปกรณ์ (เมนูผู้ใช้ → 📟): เลือกแท็บเล็ต/มือถือบนจอคอม = ครอบเนื้อหาด้วยกรอบจำลอง (ของกลาง device-view, ผูก ?device=)
@@ -219,6 +223,7 @@ export default function StandaloneApp() {
     // h-dvh + flex column: header บน · เนื้อหาเต็มกว้าง · เมนูแบบพับ-ขยาย (iPad: ☰ drawer ซ้าย · มือถือ: แถบล่าง)
     <div className="h-[100dvh] flex flex-col bg-slate-100 overflow-hidden">
       <GlobalSearch open={searchOpen} onClose={() => setSearchOpen(false)} scope={searchScope} />
+      <InstallHereBanner appLabel={app?.label ?? appKey} iconSrc={appIconSrc(app?.icon_url)} autoShow={installAsk} />
       <header className="relative flex-shrink-0 z-20 text-white px-3 sm:px-4"
         style={{ ...appHeaderStyle(app ?? {}), paddingTop: "env(safe-area-inset-top)" }}>
         <div className="py-2.5 flex items-center gap-2 w-full min-w-0">

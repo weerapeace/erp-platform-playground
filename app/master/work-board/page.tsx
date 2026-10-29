@@ -42,6 +42,8 @@ import type { MoIssue } from "@/app/api/mo/issues/route";
 import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
 import { CatchUpModal } from "./catch-up-modal";
+import { CatchUpQueue } from "./catch-up-queue";
+import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
 import { dispatchRowIssues, isHireDesk, parentKeyOf } from "@/lib/work-entry-rules";
 import { CopyPieceworkModal } from "./copy-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
@@ -73,7 +75,8 @@ import { MiniTable, ColumnChooser, useColumnPrefs, type MiniColumn } from "@/com
 import { HoverImage } from "@/components/hover-image";
 import { SearchableSelect } from "@/components/searchable-select";
 import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
-import { PwaInstallButton } from "@/components/pwa-install-button";
+import { InstallAppModal } from "@/components/install-app";
+import { Icon } from "@/components/icon";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import { DeskStaffPanel } from "./desk-staff-panel";
 import { CrewPick, crewFields, crewList, crewIdsOf, lastCrewIds } from "./crew-pick";
@@ -262,6 +265,11 @@ function WorkBoardPageInner() {
   const canEdit = usePermission("products.edit");
   // สิทธิ์ "จ่ายงานเข้าแผนก" แยกต่างหาก — ตั้งค่ารายตำแหน่งได้ที่ /admin/roles-permissions
   const canDispatch = usePermission("work_board.dispatch");
+  // 🔄 โหมดอัปเดตงาน: ใช้ได้ = คนจ่ายงาน หรือมีสิทธิ์ catch_up · บันทึกเลย / ต้องรอหัวหน้ายืนยัน / ยืนยันคำขอของคนอื่น (ตั้งตามตำแหน่ง + รายคน)
+  const cuUseP = usePermission("work_board.catch_up");
+  const cuDirect = usePermission("work_board.catch_up_direct");
+  const cuApprove = usePermission("work_board.catch_up_approve");
+  const canCatchUp = canDispatch || cuUseP || cuDirect || cuApprove;
   // ย้ายคนเข้า/ออกโต๊ะ = เปลี่ยนแผนกในข้อมูลพนักงาน → เฉพาะสิทธิ์ฝ่ายบุคคล (เรียก hook แยก — ห้าม && ระหว่าง hook)
   const hrApp = usePermission("app.payroll");
   const hrEdit = usePermission("employees.edit");
@@ -282,6 +290,7 @@ function WorkBoardPageInner() {
   const viewMode = viewRaw === "exec" && !isAdmin ? "board" : viewRaw;
   const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
   const [lineSettingsOpen, setLineSettingsOpen] = useState(false);   // ป๊อปตั้งค่าแจ้งเตือน LINE
+  const [installOpen, setInstallOpen] = useState(false);             // ป๊อปติดตั้งแอป (ของกลาง components/install-app)
 
   const [moCreateOpen, setMoCreateOpen] = useState(false);           // ป๊อปสร้างใบสั่งผลิต (ของกลาง)
   const [pendingCols] = useState<number | null>(null);     // (เลิกใช้) คอลัมน์โซนรอจ่าย — รอจ่ายย้ายไปป๊อปอัปแล้ว
@@ -1367,6 +1376,12 @@ function WorkBoardPageInner() {
   // โหมด "เช็กลิสต์อย่างเดียว": หน้าอื่นฝังหน้านี้ใน iframe (?embed=1&mo=<id> — ของกลาง lib/mo-checklist-embed)
   // → เช็กลิสต์เต็มกรอบ ไม่โชว์บอร์ด · ปิด/ลบแล้วแจ้งหน้าแม่ให้ถอยกลับเอง
   const popupOnly = searchParams.get("embed") === "1" && !!searchParams.get("mo");
+  // ?cu=requests — ลิงก์จากแจ้งเตือน "รอยืนยันอัปเดตงาน" → เข้าโหมดอัปเดตงาน (มุมมองตาราง) + เปิดคิวคำขอ
+  const [cuQueueAsk, setCuQueueAsk] = useState(false);
+  useEffect(() => {
+    if (searchParams.get("cu") !== "requests" || !canCatchUp) return;
+    setCatchUpMode(true); setViewMode("table"); setCuQueueAsk(true);
+  }, [searchParams, canCatchUp, setViewMode]);
   const [urlOpened, setUrlOpened] = useState(false);   // เปิดเช็กลิสต์จาก URL ไปแล้ว (ใช้เลือกข้อความบนฉากบังบอร์ด)
 
   const closeChecklist = useCallback(() => {
@@ -1484,7 +1499,7 @@ function WorkBoardPageInner() {
           <a href="/master/work-submissions" className={menuItem}>📤 ตารางส่งงาน</a>
           <a href="/master/manufacturing-orders" className={menuItem}>🏭 ใบสั่งผลิต</a>
           <a href="/master/mo-backlog" className={menuItem}>🧹 จัดการใบค้าง <span className="ml-auto text-[11px] text-slate-400">ปิด · ยกเลิก · ตั้งวัน</span></a>
-          {canDispatch && (
+          {canCatchUp && (
             <button type="button" onClick={() => { closeMore(); setCatchUpMode(true); if (viewMode !== "table") setViewMode("table"); }} className={menuItem}>
               🔄 อัปเดตงาน <span className="ml-auto text-[11px] text-slate-400">บอกว่าใบไปถึงขั้นไหนแล้ว</span>
             </button>
@@ -1520,7 +1535,7 @@ function WorkBoardPageInner() {
           )}
           <div className="my-1 border-t border-slate-100" />
           <div className={menuHead}>ตั้งค่า</div>
-          <PwaInstallButton className={menuItem} />
+          <button type="button" onClick={() => { closeMore(); setInstallOpen(true); }} className={menuItem}><Icon name="mobile" /> ติดตั้งแอป <span className="ml-auto text-[11px] text-slate-400">เครื่องนี้ / QR</span></button>
           <button type="button" onClick={() => { closeMore(); void openColor(); }} className={menuItem}>🎨 ตั้งสีแบรนด์</button>
           {canDispatch && (
             <button type="button" onClick={() => { closeMore(); setLineSettingsOpen(true); }} className={menuItem}>🔔 แจ้งเตือน <span className="ml-auto text-[11px] text-slate-400">กลุ่ม LINE</span></button>
@@ -1648,7 +1663,8 @@ function WorkBoardPageInner() {
         <BoardTable pending={board.pending} workOrders={board.workOrders}
           departments={board.departments} craftsmen={craftsmen} canEdit={canDispatch} canSeeMoney={isAdmin} deliveryPlans={board.deliveryPlans}
           canMoveStaff={canMoveStaff} onStaffChanged={reloadAssignees}
-          catchUp={catchUpMode && canDispatch} onExitCatchUp={() => setCatchUpMode(false)}
+          catchUp={catchUpMode && canCatchUp} onExitCatchUp={() => setCatchUpMode(false)}
+          cuMode={cuDirect ? "direct" : "request"} cuApprove={cuApprove} cuQueueAsk={cuQueueAsk} onCuQueueSeen={() => setCuQueueAsk(false)}
           onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : viewMode === "shop" ? (
         <div className="space-y-3">
@@ -2061,6 +2077,7 @@ function WorkBoardPageInner() {
       </ERPModal>
 
       <BoardLineSettings open={lineSettingsOpen} onClose={() => setLineSettingsOpen(false)} />
+      <InstallAppModal open={installOpen} onClose={() => setInstallOpen(false)} />
 
       {/* สร้างใบสั่งผลิตจากบอร์ด — ของกลางตัวเดียวกับหน้า /master/manufacturing-orders */}
       <MoCreateModal open={moCreateOpen} onClose={() => setMoCreateOpen(false)} onCreated={() => void load(true)} />
@@ -3378,10 +3395,12 @@ function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefine
   );
 }
 
-function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged, catchUp = false, onExitCatchUp }: {
+function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged, catchUp = false, onExitCatchUp, cuMode = "direct", cuApprove = false, cuQueueAsk = false, onCuQueueSeen }: {
   pending: PendingMO[]; workOrders: WorkOrder[]; deliveryPlans: DeliveryPlan[];
   /** 🔄 โหมดอัปเดตงาน — ทุกแถวมีปุ่ม "อัปเดต" เปิดป๊อป CatchUpModal */
   catchUp?: boolean; onExitCatchUp?: () => void;
+  /** direct = บันทึกเลย · request = ส่งให้หัวหน้ายืนยัน · cuApprove = ยืนยันคำขอของคนอื่นได้ · cuQueueAsk = เปิดคิวคำขอทันที (ลิงก์แจ้งเตือน) */
+  cuMode?: "direct" | "request"; cuApprove?: boolean; cuQueueAsk?: boolean; onCuQueueSeen?: () => void;
   departments: Dept[]; craftsmen: Assignee[]; canEdit: boolean;
   /** ย้ายคนเข้า/ออกโต๊ะได้ (สิทธิ์ฝ่ายบุคคล) · ย้าย/เพิ่มแล้วให้หน้าแม่โหลดรายชื่อใหม่ */
   canMoveStaff?: boolean; onStaffChanged?: () => void | Promise<void>;
@@ -3403,11 +3422,38 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     setCuList([...new Set(rows.filter(Boolean))]); setCuMo(moNo);
   };
   const cuNext = cuMo ? cuList[cuList.indexOf(cuMo) + 1] ?? null : null;
+  // ── คำขออัปเดตงาน (รอหัวหน้ายืนยัน): ป้ายบนแถว + คิว — โหลดตอนอยู่ในโหมด ทุก 1 นาที และทุกครั้งที่ส่ง/ยืนยัน/ตีกลับ
+  const [cuReqs, setCuReqs] = useState<{ queue: CuRequest[]; mine: CuRequest[]; open: CuOpenTag[] }>({ queue: [], mine: [], open: [] });
+  const [cuQueueOpen, setCuQueueOpen] = useState(false);
+  const loadCuReqs = useCallback(async () => {
+    try { const r = await apiFetch("/api/mo/catch-up/requests"); const j = await r.json(); if (r.ok && j?.data) setCuReqs(j.data); } catch { /* ป้ายไม่ขึ้นก็ยังอัปเดตงานได้ */ }
+  }, []);
+  useEffect(() => {
+    if (!catchUp) return;
+    void loadCuReqs();
+    const t = window.setInterval(() => void loadCuReqs(), 60000);
+    return () => window.clearInterval(t);
+  }, [catchUp, loadCuReqs]);
+  useEffect(() => { if (catchUp && cuQueueAsk) { setCuQueueOpen(true); onCuQueueSeen?.(); } }, [catchUp, cuQueueAsk, onCuQueueSeen]);
+  const cuWaiting = cuApprove ? cuReqs.queue.filter((q) => !q.mine).length : cuReqs.mine.filter((q) => q.status === "pending" || q.status === "rejected").length;
   const skuOfMo = (mo: string) => pending.find((m) => m.mo_no === mo)?.product_sku ?? workOrders.find((w) => w.mo_no === mo)?.product_sku ?? qQueue.find((q) => q.mo_no === mo)?.sku ?? mo;
-  const cuBtn = (moNo: string | null | undefined) => catchUp && moNo ? (
-    <button type="button" onClick={(e) => { e.stopPropagation(); openCu(moNo); }} title="บอกว่าใบนี้ไปถึงขั้นไหนแล้ว (ติ๊กขั้นก่อนหน้าให้อัตโนมัติ)"
-      className={`shrink-0 rounded-md bg-indigo-600 px-2 font-medium text-white hover:bg-indigo-700 ${touch ? "h-9 text-sm" : "h-7 text-[12px]"}`}>🔄 อัปเดต</button>
-  ) : null;
+  const cuBtn = (moNo: string | null | undefined) => {
+    if (!catchUp || !moNo) return null;
+    const t = cuReqs.open.find((o) => o.mo_no === moNo);   // ใบนี้มีคำขอรอยืนยันอยู่
+    const review = !!t && !t.mine && cuApprove;
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1">
+        {t && (
+          <span title={t.status === "processing" ? "หัวหน้ากำลังบันทึก" : `ส่งโดย ${t.requested_name ?? "—"} · รอหัวหน้ายืนยัน`}
+            className={`inline-flex items-center gap-0.5 whitespace-nowrap rounded-full px-1.5 text-[11px] ${t.status === "processing" ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-800"}`}>
+            <Icon name="waiting" />{t.status === "processing" ? "กำลังบันทึก" : t.mine ? "รอยืนยัน" : `รอยืนยัน · ${t.requested_name ?? ""}`}
+          </span>
+        )}
+        <button type="button" onClick={(e) => { e.stopPropagation(); openCu(moNo); }} title={review ? "ตรวจคำขอ แก้ได้ แล้วยืนยันหรือตีกลับ" : "บอกว่าใบนี้ไปถึงขั้นไหนแล้ว (ติ๊กขั้นก่อนหน้าให้อัตโนมัติ)"}
+          className={`shrink-0 rounded-md px-2 font-medium text-white ${review ? "bg-amber-600 hover:bg-amber-700" : "bg-indigo-600 hover:bg-indigo-700"} ${touch ? "h-9 text-sm" : "h-7 text-[12px]"}`}>{review ? "ตรวจ" : "🔄 อัปเดต"}</button>
+      </span>
+    );
+  };
   const [sel, setSel] = useState<Set<string>>(new Set());   // เลือกใบรอจ่าย (by id) → จัดกลุ่ม / แก้กำหนดเสร็จ
   // คำค้นร่วมของทั้ง 2 ตาราง — พิมพ์ที่ไหนก็กรองทั้ง "รอจ่าย" และ "จ่ายแล้ว" (เดิมต่างคนต่างค้น หาของที่จ่ายไปแล้วไม่เจอ)
   const [tableSearch, setTableSearch] = useState("");
@@ -4386,14 +4432,27 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         {catchUp && (
           <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             <span className="font-medium">🔄 โหมดอัปเดตงาน</span>
-            <span className="min-w-0 flex-1 text-[13px]">กดปุ่ม "🔄 อัปเดต" ท้ายชื่อสินค้า เพื่อบอกว่าใบนั้นไปถึงขั้นไหนแล้ว — ระบบติ๊กขั้นก่อนหน้าให้</span>
+            <span className="min-w-0 flex-1 text-[13px]">กดปุ่ม "🔄 อัปเดต" ท้ายชื่อสินค้า เพื่อบอกว่าใบนั้นไปถึงขั้นไหนแล้ว — ระบบติ๊กขั้นก่อนหน้าให้{cuMode === "request" ? " · อัปเดตของคุณจะส่งให้หัวหน้ายืนยันก่อน" : ""}</span>
+            {(cuApprove || cuMode === "request" || cuReqs.mine.length > 0) && (
+              <button type="button" onClick={() => setCuQueueOpen(true)}
+                className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-3 text-[13px] ${cuWaiting ? "border-amber-400 bg-amber-100 font-medium text-amber-900 hover:bg-amber-200" : "border-amber-300 bg-white hover:bg-amber-100"}`}>
+                <Icon name="request" /> {cuApprove ? "รอยืนยัน" : "คำขอของฉัน"}{cuWaiting ? <span className="rounded-full bg-rose-600 px-1.5 text-[11px] font-semibold text-white">{cuWaiting}</span> : null}
+              </button>
+            )}
             <button type="button" onClick={onExitCatchUp} className="h-8 shrink-0 rounded-lg border border-amber-300 bg-white px-3 text-[13px] hover:bg-amber-100">ออกจากโหมด</button>
           </div>
         )}
         <CatchUpModal moNo={cuMo} onClose={() => setCuMo(null)} onDone={() => onReload?.()}
           departments={departments} craftsmen={craftsmen} workOrders={workOrders}
           canMoveStaff={canMoveStaff} canAddNew={canEdit} onStaffChanged={() => onStaffChanged?.()} onDesksChanged={() => onReload?.()}
-          onNext={cuNext ? () => setCuMo(cuNext) : undefined} nextLabel={cuNext ? skuOfMo(cuNext) : null} />
+          onNext={cuNext ? () => setCuMo(cuNext) : undefined} nextLabel={cuNext ? skuOfMo(cuNext) : null}
+          mode={cuMode} canApprove={cuApprove} onRequestsChanged={() => void loadCuReqs()} />
+        <CatchUpQueue open={cuQueueOpen} onClose={() => setCuQueueOpen(false)} queue={cuReqs.queue} mine={cuReqs.mine} canApprove={cuApprove}
+          onOpenMo={(moNo) => {
+            // ไล่ตรวจทีละใบ: "ใบถัดไป" ในป๊อป = คำขอถัดไปในคิว
+            const list = (cuApprove ? cuReqs.queue.filter((q) => !q.mine) : cuReqs.mine.filter((q) => q.status === "pending" || q.status === "rejected")).map((q) => q.mo_no);
+            setCuList([...new Set(list)]); setCuQueueOpen(false); setCuMo(moNo);
+          }} />
       {/* เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรองให้ตารางได้ที่เต็ม (เหมือนแอป) · แตะแถบนี้หรือเลื่อนขึ้น = กลับมา
           สลับด้วย CSS: กล่องมี data-top="hidden" → แถบย่อโผล่ · ส่วนแท็บ/ตัวกรองซ่อน (ไม่ render ใหม่) */}
         <button type="button" onClick={() => setTopHidden(false)}
