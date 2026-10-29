@@ -418,7 +418,7 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
           const id = String(j.id);
           newWo.set(step.line, id);
           wos.push({ id, wo_no: String(j.wo_no ?? ""), qty: step.qty, received_qty: 0, qc_pulled_qty: 0, status: "dispatched",
-            department_name: d.dept.name, assignee_name: String(d.who.assignee_name ?? ""), dispatch_date: step.date, created_at: new Date().toISOString() });
+            department_name: d.dept.name, assignee_name: String(d.who.assignee_name ?? ""), dispatch_date: step.date, created_at: new Date().toISOString(), labor_cost: step.rate ? r2(step.rate * step.qty) : 0 });
           undo = { kind: "dispatch", woId: id };
           break;
         }
@@ -603,4 +603,48 @@ export function cuWhen(iso: string, now: Date = new Date()): string {
   if (dayDiff === 1) return `เมื่อวาน ${hm}`;
   const MON = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
   return `${a.getUTCDate()} ${MON[a.getUTCMonth()]} ${hm}`;
+}
+
+// ── ตอนนี้ของอยู่ไหน (แท็บ "ทั้งหมด" ของโหมดอัปเดตงาน + หน้าผลลัพธ์หลังบันทึก) — กติกาเดียวกับแท็บบนบอร์ด
+
+/** ขั้นที่ของอยู่ · pend/wip/qc = แท็บบนบอร์ด · shelf/close_wait/closed/cancelled = ไม่อยู่บนบอร์ดแล้ว (หาในแท็บ "ทั้งหมด") */
+export type CuWhereKey = "pend" | "wip" | "qc" | "shelf" | "defect" | "close_wait" | "closed" | "cancelled";
+export type CuWherePart = { key: CuWhereKey; label: string; qty: number | null };
+export type CuWhere = { key: CuWhereKey; label: string; parts: CuWherePart[]; onBoard: boolean };
+export type CuWhereInput = {
+  qty: number; status: string; dispatched: number; received: number; qcPulled: number;
+  shelfAt: { name: string; qty: number; status: string }[];
+};
+export const CU_WHERE_LABEL: Record<CuWhereKey, string> = {
+  pend: "รอจ่าย", wip: "อยู่กับช่าง", qc: "รอ QC รับเข้า", shelf: "อยู่โกดัง QC", defect: "ของเสียในโกดัง QC",
+  close_wait: "ครบแล้ว รอปิดใบ", closed: "ปิดใบแล้ว", cancelled: "ยกเลิกแล้ว",
+};
+/** ลำดับขั้น (เรียงแท็บ "ทั้งหมด") */
+export const CU_WHERE_ORDER: CuWhereKey[] = ["pend", "wip", "qc", "shelf", "defect", "close_wait", "closed", "cancelled"];
+
+/** ใบนี้มีของอยู่ขั้นไหนบ้าง (ใบเดียวอยู่หลายขั้นพร้อมกันได้ เช่น จ่ายไปครึ่ง อีกครึ่งรอจ่าย) — ขั้นแรก = ขั้นหลัก */
+export function cuLocate(x: CuWhereInput): CuWhere {
+  const parts: CuWherePart[] = [];
+  const add = (key: CuWhereKey, qty: number | null, label = CU_WHERE_LABEL[key]) => parts.push({ key, label, qty });
+  if (x.status === "cancelled") add("cancelled", null);
+  else if (x.status === "done") add("closed", null);
+  else {
+    if (x.qty - x.dispatched > EPS) add("pend", r2(x.qty - x.dispatched));
+    if (x.dispatched - x.received > EPS) add("wip", r2(x.dispatched - x.received));
+    if (x.received - x.qcPulled > EPS) add("qc", r2(x.received - x.qcPulled));
+  }
+  for (const s of x.shelfAt) {
+    if (!(s.qty > EPS)) continue;
+    if (s.status === "good") add("shelf", r2(s.qty), `โกดัง QC · ${s.name}`);
+    else add("defect", r2(s.qty), `${s.status === "repairing" ? "ส่งซ่อม" : "ของเสีย"} · ${s.name}`);
+  }
+  if (!parts.length) add("close_wait", null);
+  const key = parts[0].key;
+  return { key, label: CU_WHERE_LABEL[key], parts, onBoard: key === "pend" || key === "wip" || key === "qc" };
+}
+
+/** ตำแหน่งจากข้อมูลตั้งต้นของป๊อป (GET /api/mo/catch-up) */
+export function cuLocateSnap(s: CatchUpSnapshot): CuWhere {
+  const f = cuFacts(s);
+  return cuLocate({ qty: f.qty, status: f.status, dispatched: f.dispatched, received: f.received, qcPulled: f.qcPulled, shelfAt: s.shelfAt ?? [] });
 }

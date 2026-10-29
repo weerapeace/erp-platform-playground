@@ -8,6 +8,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { syncWoLabor } from "@/lib/wo-labor";
 import { notifyEvent, pushLineTpl, boardLink } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
@@ -89,10 +90,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // 2) อัปเดตใบจ่ายงาน — บวกยอดส่ง + ค่าแรง + ปิดใบถ้าส่งครบ + แก้ช่างถ้ามีการแก้
   const patch: Record<string, unknown> = { received_qty: newReceived };
-  if (wage != null) patch.labor_cost = wage;   // ยังไม่ลงค่าแรง → ไม่ไปล้างค่าแรงเดิมของใบงาน
   if (overrideWorker) { patch.assignee_name = effWorker; if (overrideWorkerId) { patch.assignee_id = overrideWorkerId; patch.assignee_type = "craftsman"; } }
   if (newReceived >= Number(wo.qty ?? 0)) patch.status = "done";
   await admin.from("mo_work_orders").update(patch).eq("id", wo_id);
+  // ค่าแรงรวมของใบ = รวมทุกรอบที่ลงค่าแรง (เดิมเขียนทับด้วยรอบล่าสุด) · ยังไม่ลงค่าแรง → ไม่แตะค่าเดิม
+  if (wage != null) await syncWoLabor(admin, wo_id);
 
   const quiet = body.quiet === true;   // อัปเดตงานย้อนหลัง (โหมด 🔄 อัปเดตงาน) → ไม่แจ้งกระดิ่ง/LINE เรื่องงานเก่า
   await writeAudit(admin, { action: "wo.submit", entityType: "wo_submissions", entityId: wo_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { sku: wo.product_sku, qty, wage, worker: effWorker, worker_changed: !!overrideWorker, done: newReceived >= Number(wo.qty ?? 0), ...(quiet ? { catch_up: true } : {}) } });
@@ -141,7 +143,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   // ใส่ค่าแรงแล้ว → ใบจ่ายงานต้องเห็นด้วย (ยอดค่าแรงรวมของโต๊ะคิดจากตรงนี้)
-  if (sub.wo_id && nextWage != null) await admin.from("mo_work_orders").update({ labor_cost: nextWage }).eq("id", sub.wo_id);
+  if (sub.wo_id && nextWage != null) await syncWoLabor(admin, String(sub.wo_id));
 
   await writeAudit(admin, { action: "wo.submit_fill", entityType: "wo_submissions", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: patch });
   return NextResponse.json({ data: { id, ...patch }, error: null });
@@ -170,6 +172,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
     }
   }
   await admin.from("wo_submissions").delete().eq("id", id);
+  if (sub.wo_id) await syncWoLabor(admin, String(sub.wo_id));   // เหลือรอบที่ลงค่าแรง → คิดค่าแรงรวมใหม่
   await writeAudit(admin, { action: "wo.submit_undo", entityType: "wo_submissions", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { wo_id: sub.wo_id, qty: sub.qty } });
   return NextResponse.json({ error: null });
 }

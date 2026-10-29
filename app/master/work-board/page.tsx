@@ -44,6 +44,8 @@ import { AddPieceworkModal } from "./add-piecework-modal";
 import { CatchUpModal } from "./catch-up-modal";
 import { CatchUpQueue } from "./catch-up-queue";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
+import type { CuAllRow } from "@/app/api/mo/catch-up/all/route";
+import { CU_WHERE_ORDER, type CuWhereKey } from "./catch-up";
 import { dispatchRowIssues, isHireDesk, parentKeyOf } from "@/lib/work-entry-rules";
 import { CopyPieceworkModal } from "./copy-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
@@ -3416,7 +3418,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const [cuMo, setCuMo] = useState<string | null>(null);   // ใบที่เปิดป๊อปอัปเดตงานอยู่
   const [cuList, setCuList] = useState<string[]>([]);      // ลำดับใบของแท็บที่เปิดอยู่ (ตอนกดอัปเดต) — ไว้ไป "ใบถัดไป"
   const openCu = (moNo: string) => {
-    const rows = tab === "pend" ? pendShown.filter((m) => hit(pendText(m))).map((m) => m.mo_no)
+    const rows = tab === "all" ? allShown.map((r) => r.mo_no)
+      : tab === "pend" ? pendShown.filter((m) => hit(pendText(m))).map((m) => m.mo_no)
       : tab === "wip" ? wosShown.filter((w) => hit(woText(w))).map((w) => w.mo_no)
       : qQueue.filter((q) => hit(qcText(q))).map((q) => q.mo_no ?? "");
     setCuList([...new Set(rows.filter(Boolean))]); setCuMo(moNo);
@@ -3435,6 +3438,14 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     return () => window.clearInterval(t);
   }, [catchUp, loadCuReqs]);
   useEffect(() => { if (catchUp && cuQueueAsk) { setCuQueueOpen(true); onCuQueueSeen?.(); } }, [catchUp, cuQueueAsk, onCuQueueSeen]);
+  // ── แท็บ "ทั้งหมด" (เฉพาะโหมดอัปเดตงาน): ทุกใบ + ตอนนี้ของอยู่ไหน — อัปเดตแล้วใบหลุดจากแท็บอื่น (โกดัง QC / รอปิดใบ) ก็ยังหาเจอ
+  const [cuAll, setCuAll] = useState(false);
+  const [cuAllRows, setCuAllRows] = useState<CuAllRow[] | null>(null);
+  const [cuRecent, setCuRecent] = useState<string[]>([]);   // ใบที่เพิ่งอัปเดตรอบนี้ (ล่าสุดก่อน)
+  const loadCuAll = useCallback(async () => {
+    try { const r = await apiFetch("/api/mo/catch-up/all"); const j = await r.json(); if (r.ok && Array.isArray(j?.data)) setCuAllRows(j.data as CuAllRow[]); } catch { /* แท็บว่างก็ยังใช้แท็บอื่นได้ */ }
+  }, []);
+  useEffect(() => { if (catchUp) void loadCuAll(); else setCuAll(false); }, [catchUp, loadCuAll]);
   const cuWaiting = cuApprove ? cuReqs.queue.filter((q) => !q.mine).length : cuReqs.mine.filter((q) => q.status === "pending" || q.status === "rejected").length;
   const skuOfMo = (mo: string) => pending.find((m) => m.mo_no === mo)?.product_sku ?? workOrders.find((w) => w.mo_no === mo)?.product_sku ?? qQueue.find((q) => q.mo_no === mo)?.sku ?? mo;
   const cuBtn = (moNo: string | null | undefined) => {
@@ -4260,12 +4271,22 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const tabPref = useViewPref("wb_table_tab", ["pend", "wip", "qc"] as const, "pend");
   // แท็บที่ชุดหน้าตาซ่อนไว้ / ไม่มีสิทธิ์ QC → ไปแท็บแรกที่ยังโชว์
   const tabVisible = (t: "pend" | "wip" | "qc") => dc.tabs[t] && (t !== "qc" || qcSectionOn);
-  const tab = tabVisible(tabPref.view) ? tabPref.view : ((["pend", "wip", "qc"] as const).find(tabVisible) ?? "pend");
-  const pickTab = (t: "pend" | "wip" | "qc") => { tabPref.setView(t); void tabPref.saveDefault(t); };
+  const tab: "pend" | "wip" | "qc" | "all" = catchUp && cuAll ? "all" : tabVisible(tabPref.view) ? tabPref.view : ((["pend", "wip", "qc"] as const).find(tabVisible) ?? "pend");
+  const pickTab = (t: "pend" | "wip" | "qc" | "all") => {
+    if (t === "all") { setCuAll(true); return; }
+    setCuAll(false); tabPref.setView(t); void tabPref.saveDefault(t);
+  };
   // ค้นหาร่วม 3 แท็บ — คำเดียวกรองทุกตาราง · ตัวเลขบนแท็บ = จำนวนที่ค้นเจอในแท็บนั้น (กติกาเดียวกับช่องค้นของตาราง)
   const pendText = (m: PendingMO) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`;
   const woText = (w: WorkOrder) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""}`;
   const qcText = (q: QcQueueRow) => `${q.sku ?? ""} ${q.name ?? ""} ${q.mo_no ?? ""} ${q.worker ?? ""}`;
+  const allText = (r: CuAllRow) => `${r.product_sku ?? ""} ${r.product_name ?? ""} ${r.mo_no} ${r.where.parts.map((x) => x.label).join(" ")}`;
+  // เพิ่งอัปเดตขึ้นก่อน → แล้วเรียงตามขั้น (รอจ่าย → … → ปิดแล้ว)
+  const allShown = (cuAllRows ?? []).filter((r) => hit(allText(r))).sort((a, b) => {
+    const ra = cuRecent.indexOf(a.mo_no), rb = cuRecent.indexOf(b.mo_no);
+    if (ra !== rb) return ra < 0 ? 1 : rb < 0 ? -1 : ra - rb;
+    return CU_WHERE_ORDER.indexOf(a.where.key) - CU_WHERE_ORDER.indexOf(b.where.key) || (a.product_sku ?? "").localeCompare(b.product_sku ?? "");
+  });
   const qq = searchQ.trim().toLowerCase();
   const hit = (s: string) => !qq || s.toLowerCase().includes(qq);
   // แท็บกำลังผลิตกรองแบรนด์ด้วย (ชิปเดียวกัน) · ชิปแบรนด์นับจากแท็บที่เปิดอยู่ (ไม่กรองด่วน)
@@ -4298,11 +4319,34 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     if (d > 8 && top > 120) setTopHidden(true);
     else if (d < -24 && !atBottom) setTopHidden(false);
   }, [setTopHidden]);
+  const WHERE_TONE: Record<CuWhereKey, string> = {
+    pend: "bg-slate-100 text-slate-700", wip: "bg-indigo-50 text-indigo-700", qc: "bg-amber-50 text-amber-800", shelf: "bg-emerald-50 text-emerald-700",
+    defect: "bg-rose-50 text-rose-700", close_wait: "bg-sky-50 text-sky-700", closed: "bg-slate-100 text-slate-400", cancelled: "bg-slate-100 text-slate-400",
+  };
+  const allCols: MiniColumn<CuAllRow>[] = [
+    { key: "prod", header: "สินค้า", width: "minmax(15rem,2fr)", sortValue: (r) => r.product_sku ?? "", sortLabel: "รหัสสินค้า",
+      cell: (r) => <div className="flex min-w-0 items-center gap-1.5"><div className="min-w-0 flex-1"><ProdCell url={r.image_url} sku={r.product_sku} name={r.product_name} /></div>
+        {cuRecent.includes(r.mo_no) && <span className="shrink-0 rounded-full bg-indigo-50 px-1.5 text-[11px] text-indigo-700">เพิ่งอัปเดต</span>}{cuBtn(r.mo_no)}</div> },
+    { key: "mo", header: "ใบสั่งผลิต", width: "8.5rem", sortValue: (r) => r.mo_no, cell: (r) => <span className="text-[12px] text-slate-500">{r.mo_no}</span> },
+    { key: "where", header: "ตอนนี้ของอยู่ไหน", width: "minmax(16rem,2.4fr)", sortValue: (r) => CU_WHERE_ORDER.indexOf(r.where.key), sortLabel: "ขั้น",
+      cell: (r) => <div className="flex flex-wrap items-center gap-1">{r.where.parts.map((x, i) => (
+        <span key={i} className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[12px] ${i === 0 ? `font-medium ${WHERE_TONE[x.key]}` : "bg-white text-slate-500 ring-1 ring-slate-200"}`}>{x.label}{x.qty != null ? ` ${fmt(x.qty)}` : ""}</span>
+      ))}</div> },
+    { key: "prog", header: "จ่าย / คืน / QC", width: "minmax(9rem,1fr)", sortValue: (r) => r.dispatched,
+      cell: (r) => <span className="text-[12px] tabular-nums text-slate-600">{fmt(r.dispatched)}/{fmt(r.qty)} · {fmt(r.received)} · {fmt(r.qc_pulled)}</span> },
+    { key: "go", header: "", width: "8.5rem",
+      cell: (r) => r.where.onBoard
+        ? <button type="button" onClick={(e) => { e.stopPropagation(); pickTab(r.where.key as "pend" | "wip" | "qc"); }} className="h-7 rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-600 hover:bg-slate-50">ไปแท็บ{r.where.label}</button>
+        : r.where.parts.some((x) => x.key === "shelf" || x.key === "defect")
+          ? <a href="/master/qc-warehouse" target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="inline-flex h-7 items-center rounded-md border border-slate-200 bg-white px-2 text-[12px] text-slate-600 hover:bg-slate-50">โกดัง QC ↗</a>
+          : null },
+  ];
   const tabCards = ([
     ["pend", "📥", "รอจ่าย", pendShown.filter((m) => hit(pendText(m))).length, pending.length, "ยังไม่ได้จ่ายให้โต๊ะ/ช่าง"],
     ["wip", "🛠", "กำลังผลิต", wosShown.filter((w) => hit(woText(w))).length, wos.length, "จ่ายแล้ว รอช่างส่งคืน"],
     ["qc", "✅", "รอ QC รับเข้า", qQueue.filter((q) => hit(qcText(q))).length, qQueue.length, "ช่างส่งแล้ว รอตรวจ/เข้าชั้น"],
-  ] as ["pend" | "wip" | "qc", string, string, number, number, string][]).filter(([k]) => tabVisible(k));
+    ...(catchUp ? [["all", <Icon key="i" name="list" />, "ทั้งหมด", allShown.length, cuAllRows?.length ?? 0, "ทุกใบ (รวมที่อยู่โกดัง QC / รอปิดใบ / ปิดแล้ว 30 วัน) + บอกว่าของอยู่ไหน"]] : []),
+  ] as ["pend" | "wip" | "qc" | "all", React.ReactNode, string, number, number, string][]).filter(([k]) => k === "all" || tabVisible(k));
   // แถบสรุปของแท็บ "กำลังผลิต" / "รอ QC"
   const wipCards: [string, string, string][] = [
     ["กำลังผลิต", `${fmt(wos.length)} ใบ`, `จ่ายไปแล้ว ${fmt(wos.reduce((s, w) => s + (Number(w.qty) || 0), 0))} ชิ้น`],
@@ -4433,6 +4477,15 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
             <span className="font-medium">🔄 โหมดอัปเดตงาน</span>
             <span className="min-w-0 flex-1 text-[13px]">กดปุ่ม "🔄 อัปเดต" ท้ายชื่อสินค้า เพื่อบอกว่าใบนั้นไปถึงขั้นไหนแล้ว — ระบบติ๊กขั้นก่อนหน้าให้{cuMode === "request" ? " · อัปเดตของคุณจะส่งให้หัวหน้ายืนยันก่อน" : ""}</span>
+            {cuRecent.length > 0 && (
+              <span className="flex min-w-0 basis-full flex-wrap items-center gap-1 text-[12px] sm:basis-auto">
+                <span className="text-amber-700">เพิ่งอัปเดต:</span>
+                {cuRecent.slice(0, 5).map((no) => (
+                  <button key={no} type="button" onClick={() => { setCuAll(true); setTableSearch(skuOfMo(no)); void loadCuAll(); }} title="หาใบนี้ในแท็บ ทั้งหมด"
+                    className="h-6 rounded-full border border-amber-300 bg-white px-2 hover:bg-amber-100">{skuOfMo(no)}</button>
+                ))}
+              </span>
+            )}
             {(cuApprove || cuMode === "request" || cuReqs.mine.length > 0) && (
               <button type="button" onClick={() => setCuQueueOpen(true)}
                 className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-3 text-[13px] ${cuWaiting ? "border-amber-400 bg-amber-100 font-medium text-amber-900 hover:bg-amber-200" : "border-amber-300 bg-white hover:bg-amber-100"}`}>
@@ -4442,7 +4495,13 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <button type="button" onClick={onExitCatchUp} className="h-8 shrink-0 rounded-lg border border-amber-300 bg-white px-3 text-[13px] hover:bg-amber-100">ออกจากโหมด</button>
           </div>
         )}
-        <CatchUpModal moNo={cuMo} onClose={() => setCuMo(null)} onDone={() => onReload?.()}
+        <CatchUpModal moNo={cuMo} onClose={() => setCuMo(null)}
+          onDone={() => {
+            // ⚠️ คิว "รอ QC รับเข้า" โหลดแยก — เดิมไม่โหลดใหม่หลังอัปเดต ใบที่ช่างเพิ่งส่งคืนเลยหายจากทุกแท็บจนกด F5
+            onReload?.(); void loadQcQueue(); void loadCuAll();
+            if (cuMo) setCuRecent((rs) => [cuMo, ...rs.filter((x) => x !== cuMo)].slice(0, 8));
+          }}
+          onLocate={(no, sku) => { setCuMo(null); setCuAll(true); setTableSearch(sku ?? no); void loadCuAll(); }}
           departments={departments} craftsmen={craftsmen} workOrders={workOrders}
           canMoveStaff={canMoveStaff} canAddNew={canEdit} onStaffChanged={() => onStaffChanged?.()} onDesksChanged={() => onReload?.()}
           onNext={cuNext ? () => setCuMo(cuNext) : undefined} nextLabel={cuNext ? skuOfMo(cuNext) : null}
@@ -4794,6 +4853,20 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           searchValue={searchQ} onSearchChange={setTableSearch}
           emptyText="ไม่มีงานรอรับเข้า QC"
           noMatchText={(q) => `ไม่พบ “${q}” ในแท็บรอ QC`}
+        />
+      </div>)}
+      {/* 🗂 ทั้งหมด (โหมดอัปเดตงาน) — ทุกใบ + ตอนนี้ของอยู่ไหน (กติกา cuLocate) */}
+      {tab === "all" && (<div className="flex min-h-0 flex-1 flex-col gap-3" style={zoomStyle}>
+        <MiniTable
+          rows={allShown} rowKey={(r) => r.mo_no}
+          fill stickyCols={1} inlineActions lazyRows onScrollTop={onTableScroll}
+          touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
+          columns={allCols} countUnit="ใบ"
+          actions={<a href="/master/qc-warehouse" className="h-8 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">เปิดโกดัง QC ↗</a>}
+          searchText={allText} hideSearch
+          searchValue={searchQ} onSearchChange={setTableSearch}
+          emptyText={cuAllRows ? "ไม่มีใบสั่งผลิต" : "กำลังโหลดรายการทั้งหมด…"}
+          noMatchText={(q) => `ไม่พบ “${q}” — ลองค้นด้วยรหัสสินค้า หรือเลขใบสั่งผลิต`}
         />
       </div>)}
 

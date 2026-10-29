@@ -26,7 +26,7 @@ import { DeskStaffPanel } from "./desk-staff-panel";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuStageDone, cuCanShort,
-  CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuDispLine, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
+  CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, cuLocateSnap, CU_WHERE_LABEL, type CuWhere, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuDispLine, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
 } from "./catch-up";
 
 type DeptLite = { id: string; name: string };
@@ -50,7 +50,7 @@ type CuLast = { deptId?: string; crewIds?: string[]; shelfId?: string };
 const readLast = (): CuLast => { try { return JSON.parse(localStorage.getItem(LAST_KEY) ?? "{}") as CuLast; } catch { return {}; } };
 const writeLast = (v: CuLast) => { try { localStorage.setItem(LAST_KEY, JSON.stringify(v)); } catch { /* ไม่มี storage ก็ข้าม */ } };
 
-export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel, mode = "direct", canApprove = false, onRequestsChanged }: {
+export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel, mode = "direct", canApprove = false, onRequestsChanged, onLocate }: {
   /** ใบสั่งผลิตที่จะอัปเดต (null = ปิดป๊อป) */
   moNo: string | null;
   onClose: () => void;
@@ -70,6 +70,8 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   canApprove?: boolean;
   /** ส่ง/ยกเลิก/ยืนยัน/ตีกลับ คำขอแล้ว → หน้าแม่โหลดคิวใหม่ */
   onRequestsChanged?: () => void;
+  /** "ไปดูใบนี้ในตาราง" หลังบันทึก — หน้าแม่สลับไปแท็บ "ทั้งหมด" + ค้นใบนี้ */
+  onLocate?: (moNo: string, sku: string | null) => void;
 }) {
   const toast = useToast();
   const [snap, setSnap] = useState<CatchUpSnapshot | null>(null);
@@ -105,6 +107,8 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const [rejected, setRejected] = useState<CuRequest | null>(null);    // คำขอล่าสุดของฉันที่ถูกตีกลับ
   const [sent, setSent] = useState<{ updated: boolean } | null>(null);  // ส่งคำขอแล้ว (หน้า 3)
   const [reqBusy, setReqBusy] = useState(false);
+  const [wageOpen, setWageOpen] = useState<Record<string, boolean>>({});   // รอบส่งคืนที่กด "เปลี่ยน" ค่าแรง (ไม่ใช้ค่าแรงตามใบจ่าย)
+  const [whereNow, setWhereNow] = useState<CuWhere | null>(null);         // หลังบันทึก: ตอนนี้ของอยู่ไหน
   const seq = useRef(0);
   const nk = (p: string) => `${p}${++seq.current}`;
 
@@ -113,6 +117,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     setSnap(null); setLoadErr(""); setPage(1); setTarget(null); setTicks({}); setDisp([]); setRet([]); setRetSet(false); setQcSet(false); setDates(CU_NO_DATES);
     setShelfId(""); setBadReason(""); setNewReason(null); setCancelReason(""); setMissing([]); setDeskPanelFor(null); setResults([]); setRunning(-1);
     setProblems([]); setTeamNote(""); setSaveBom(true); setShipMode("sales_wh"); setShipWh(QC_WAREHOUSES[0]); setUndoRes(null); setUndoing(false);
+    setWageOpen({}); setWhereNow(null);
     setReq(null); setRejected(null); setSent(null); setReqBusy(false);
     let alive = true;
     void (async () => {
@@ -211,17 +216,29 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const retSources = [
     ...(snap?.wos ?? []).filter((w) => w.status !== "done" && w.qty - w.received_qty > 0.0001).map((w) => {
       const who = nickOf(w.assignee_name) || w.department_name || "—", cap = r2(w.qty - w.received_qty);
-      return { ref: w.id, cap, short: `${who} · ${w.wo_no}`, label: `${who} · ${w.wo_no} (ค้าง ${fmt(cap)})` };
+      // ค่าแรง/ชิ้นของใบเดิม = ค่าแรงรวมของใบ ÷ จำนวนจ่าย (ไม่มีค่าแรง = ให้พิมพ์เอง)
+      const rate = (w.labor_cost ?? 0) > 0 && w.qty > 0 ? r2(w.labor_cost / w.qty) : null;
+      return { ref: w.id, cap, rate, short: `${who} · ${w.wo_no}`, label: `${who} · ${w.wo_no} (ค้าง ${fmt(cap)})` };
     }),
     ...(on("dispatch") ? disp.filter((r) => r.qty > 0).map((r) => {
       const d = deptOf(r.deptId);
       const who = poolOf(d).filter((c) => r.crewIds.includes(c.id)).map((c) => c.nickname?.trim() || c.name).join(", ") || "ทั้งโต๊ะ";
-      return { ref: `new:${r.key}`, cap: r2(r.qty), short: `${who} · ${d?.name ?? "โต๊ะ"}`, label: `${who} · ${d?.name ?? "โต๊ะ"} (จ่ายรอบนี้ ${fmt(r.qty)})` };
+      return { ref: `new:${r.key}`, cap: r2(r.qty), rate: r.rate != null && r.rate > 0 ? r.rate : null, short: `${who} · ${d?.name ?? "โต๊ะ"}`, label: `${who} · ${d?.name ?? "โต๊ะ"} (จ่ายรอบนี้ ${fmt(r.qty)})` };
     }) : []),
   ];
   const srcSig = retSources.map((s) => `${s.ref}:${s.cap}`).join("|");
   /** รอบที่ยังไม่ได้เลือกที่มา = ช่างที่จ่าย (ตามลำดับรอบ) · ไม่มีใครค้าง = แบ่งอัตโนมัติ */
-  const retEff = ret.map((r, i) => ({ ...r, ref: r.ref || (retSources.length ? retSources[Math.min(i, retSources.length - 1)].ref : "auto") }));
+  /** ค่าแรง/ชิ้นตามใบจ่ายของที่มานั้น · "แบ่งอัตโนมัติ" = ใช้ได้เมื่อทุกที่มาราคาเดียวกัน */
+  const rateOf = (ref: string): number | null => {
+    if (ref !== "auto") return retSources.find((o) => o.ref === ref)?.rate ?? null;
+    const rs = [...new Set(retSources.map((o) => o.rate))];
+    return rs.length === 1 ? rs[0] : null;
+  };
+  // ค่าแรงที่พิมพ์เองมาก่อน · ไม่ได้พิมพ์ = ตามใบจ่าย (เจ้าของ: "ไม่ต้องใส่ก็ได้เพราะมีข้อมูลข้างบนอยู่แล้ว")
+  const retEff = ret.map((r, i) => {
+    const ref = r.ref || (retSources.length ? retSources[Math.min(i, retSources.length - 1)].ref : "auto");
+    return { ...r, ref, wage: r.wage != null ? r.wage : rateOf(ref) };
+  });
   // ── ยอดตามกันอัตโนมัติ (จนกว่าจะพิมพ์แก้เอง): ส่งคืน = 1 รอบต่อ 1 ช่างที่จ่าย (ยอดเท่าที่ค้าง) · ของดี QC ← ยอดส่งคืน
   useEffect(() => {
     if (!target || retSet || !retSources.length) return;
@@ -272,7 +289,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const qcAfter = f ? r2(f.qcPulled + (on("qc_in") ? (qc.good || 0) + (qc.bad || 0) : 0)) : 0;
   const tabOf = (s: { status: string; disp: number; ret: number; qc: number; qty: number }) =>
     s.status === "done" || s.status === "cancelled" ? "หายจากบอร์ด (ปิด/ยกเลิกแล้ว)"
-      : s.disp < s.qty - 0.0001 ? "รอจ่าย" : s.ret < s.disp - 0.0001 ? "กำลังผลิต" : s.ret > s.qc + 0.0001 ? "รอ QC รับเข้า" : "ครบแล้ว รอปิดใบ";
+      : s.disp < s.qty - 0.0001 ? "รอจ่าย" : s.ret < s.disp - 0.0001 ? "กำลังผลิต" : s.ret > s.qc + 0.0001 ? "รอ QC รับเข้า" : "ไม่อยู่บนบอร์ดแล้ว (โกดัง QC / รอปิดใบ) — หาได้ที่แท็บ \"ทั้งหมด\"";
   const tabBefore = f ? tabOf({ status: f.status, disp: f.dispatched, ret: f.received, qc: f.qcPulled, qty: f.qty }) : "";
   const tabAfter = f ? tabOf({ status: target === "cancel" ? "cancelled" : on("close") ? "done" : f.status, disp: dispAfter, ret: retAfter, qc: qcAfter, qty: f.qty }) : "";
   const errs = issues.filter((x) => x.level === "error"), warns = issues.filter((x) => x.level === "warn");
@@ -371,7 +388,16 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
       const d0 = disp.find((r) => r.deptId);
       writeLast({ ...readLast(), ...(d0 ? { deptId: d0.deptId, crewIds: d0.crewIds } : {}), ...(shelfId ? { shelfId } : {}) });
       onDone();
+      void locateNow(snap.mo.mo_no);
     }
+  };
+  /** ตอนนี้ของอยู่ไหน (ข้อมูลหลังบันทึก — ใบหลุดจากแท็บบนบอร์ดแล้วจะได้หาเจอ) */
+  const locateNow = async (no: string) => {
+    try {
+      const r = await apiFetch(`/api/mo/catch-up?mo_no=${encodeURIComponent(no)}`);
+      const j = await r.json();
+      if (r.ok && j?.data) setWhereNow(cuLocateSnap(j.data as CatchUpSnapshot));
+    } catch { /* ไม่รู้ตำแหน่งก็ยังดูผลได้ */ }
   };
 
   const rejectReq = async () => {
@@ -407,15 +433,17 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
       if (!r.ok || j?.error) throw new Error(r.status === 401 || r.status === 403 ? "คุณไม่มีสิทธิ์ย้อนขั้นนี้" : (j?.error || "ย้อนไม่สำเร็จ"));
       return j as Record<string, unknown>;
     }, (s) => cuStepLabel(s, whoOf));
-    setUndoing(false); setUndoRes(out);
+    setUndoing(false); setUndoRes(out); setWhereNow(null);
     if (out.some((x) => x.ok)) onDone();
   };
   const irreversible = cuIrreversible(results);
   const canUndo = results.some((r) => r.undo && r.undo.kind !== "none");
   // ── ยังต้องตามต่อ (หลังบันทึก)
   const followUps = !results.length ? [] : [
-    ...(() => { const n = built.steps.filter((s) => s.kind === "return" && (s.wage == null || !s.date)).length;
-      return n ? [{ text: `ส่งคืน ${n} รอบ ยังไม่ลงค่าแรง/วันที่ — เติมที่ตารางส่งงาน แท็บ "ยังไม่ครบ"`, href: "/master/work-submissions" }] : []; })(),
+    ...(() => {
+      const rs = built.steps.filter((s) => s.kind === "return" && (s.wage == null || !s.date));
+      const what = [rs.some((s) => s.kind === "return" && s.wage == null) ? "ไม่ลงค่าแรง" : "", rs.some((s) => s.kind === "return" && !s.date) ? "ไม่ใส่วันที่" : ""].filter(Boolean).join("/");
+      return rs.length ? [{ text: `ส่งคืน ${rs.length} รอบ ยัง${what} — เติมที่ตารางส่งงาน แท็บ "ยังไม่ครบ"`, href: "/master/work-submissions" }] : []; })(),
     ...(() => { const n = built.steps.filter((s) => s.kind === "dispatch" && !(disp.find((r) => r.key === s.line)?.crewIds.length)).length;
       return n ? [{ text: `จ่ายเป็น "ทั้งโต๊ะ" ${n} ใบ — ระบุคนทีหลังได้ที่รายละเอียดใบงาน (✏️ แก้)` }] : []; })(),
     ...(() => { const n = built.steps.filter((s) => s.kind !== "return" && "date" in s && !s.date).length;
@@ -787,8 +815,19 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                           <Msg field={`${k}:qty`} />
                         </div>
                         <div id={`cu-${k}:wage`}>
-                          <label className={lbl} title="ค่าแรงต่อชิ้น — ว่าง = ยังไม่ลงค่าแรง (ไปใส่ทีหลังที่ตารางส่งงาน)">ค่าแรง/ชิ้น</label>
-                          <input type="number" min={0} step="any" value={r.wage ?? ""} placeholder="ยังไม่ลง" onChange={(e) => setRetRow(r.key, { wage: numOrNull(e.target.value) })} className={`${numIn}${ring(`${k}:wage`)}`} />
+                          {(() => {
+                            const src = rateOf(retEff[i]?.ref ?? "auto");
+                            // มีค่าแรงในใบจ่ายแล้ว = ไม่ต้องพิมพ์ซ้ำ (กด "เปลี่ยน" ถ้าตอนส่งคืนได้ไม่เท่าตอนจ่าย)
+                            if (src != null && r.wage == null && !wageOpen[r.key]) return (<>
+                              <label className={lbl} title="ค่าแรงต่อชิ้นตามใบจ่ายงาน">ค่าแรง/ชิ้น</label>
+                              <div className={`flex h-9 items-center rounded-lg border border-emerald-200 bg-emerald-50/70 px-2 text-sm font-medium text-emerald-800${ring(`${k}:wage`)}`}>฿{fmt(src)}</div>
+                              <button type="button" onClick={() => setWageOpen((o) => ({ ...o, [r.key]: true }))} className="mt-0.5 text-[11px] text-slate-500 hover:text-indigo-700">ตามใบจ่าย · <span className="underline decoration-dotted">เปลี่ยน</span></button>
+                            </>);
+                            return (<>
+                              <label className={lbl} title="ค่าแรงต่อชิ้น — ว่าง = ตามใบจ่าย (ใบจ่ายไม่มีค่าแรง = ยังไม่ลงค่าแรง ไปใส่ทีหลังที่ตารางส่งงาน)">ค่าแรง/ชิ้น</label>
+                              <input type="number" min={0} step="any" value={r.wage ?? ""} placeholder={src != null ? `฿${fmt(src)}` : "ยังไม่ลง"} onChange={(e) => setRetRow(r.key, { wage: numOrNull(e.target.value) })} className={`${numIn}${ring(`${k}:wage`)}`} />
+                            </>);
+                          })()}
                           <Msg field={`${k}:wage`} />
                         </div>
                         <div id={`cu-${k}:date`}><label className={lbl}>วันที่ส่งคืน</label><DispatchDatePick value={r.date} onChange={(v) => setRetRow(r.key, { date: v })} /><Msg field={`${k}:date`} /></div>
@@ -804,7 +843,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                   onClick={() => { setRetSet(true); setRet((rs) => [...rs.map((x, j) => ({ ...x, ref: retEff[j]?.ref ?? x.ref })), { key: nk("r"), ref: "", qty: Math.max(0, r2(outstanding - retTotal)), date: null, wage: rs[rs.length - 1]?.wage ?? null }]); }}>
                   ＋ เพิ่มรอบส่งคืน (ส่งไม่พร้อมกัน)
                 </button>
-                <div className="mt-2 text-[11px] text-slate-500">💰 ค่าแรงว่าง หรือไม่ใส่วันที่ = ติดป้าย "ยังไม่ลงวันที่/ค่าแรง" ไปเติมทีหลังที่ตารางส่งงาน (เงินเดือนยังไม่นับ)</div>
+                <div className="mt-2 text-[11px] text-slate-500">💰 ค่าแรงตอนส่งคืนใช้ตามใบจ่ายให้เลย (กด &ldquo;เปลี่ยน&rdquo; ถ้าได้ไม่เท่าตอนจ่าย) · ใบจ่ายที่ไม่มีค่าแรง หรือไม่ใส่วันที่ = ติดป้าย &ldquo;ยังไม่ลงวันที่/ค่าแรง&rdquo; ไปเติมทีหลังที่ตารางส่งงาน</div>
               </section>
             )}
             {on("qc_in") && (
@@ -973,8 +1012,22 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
               );
             })}
             {results.length > 0 && !undoRes && (results.every((r) => r.ok) && results.length === built.steps.length
-              ? <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">อัปเดตแล้ว — บอร์ดโหลดใหม่ให้แล้ว · บนบอร์ด: {tabAfter}{reviewing ? ` · ยืนยันคำขอของ ${req!.requested_name ?? "พนักงาน"} แล้ว (แจ้งเตือนกลับให้แล้ว)` : ""}</div>
+              ? <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">อัปเดตแล้ว — บอร์ดโหลดใหม่ให้แล้ว{reviewing ? ` · ยืนยันคำขอของ ${req!.requested_name ?? "พนักงาน"} แล้ว (แจ้งเตือนกลับให้แล้ว)` : ""}</div>
               : <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">บันทึกได้บางขั้น — ขั้นที่สำเร็จเก็บไว้แล้ว เปิดป๊อปนี้ใหม่เพื่อทำต่อได้</div>)}
+            {results.length > 0 && !undoRes && whereNow && (
+              <div className="rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-[13px] text-sky-900">
+                <div><b className="font-medium">ตอนนี้ของอยู่:</b> {whereNow.parts.map((x) => `${x.label}${x.qty != null ? ` ${fmt(x.qty)} ชิ้น` : ""}`).join(" · ")}</div>
+                <div className="mt-0.5 text-[12px] text-sky-800">
+                  {whereNow.onBoard ? `บนบอร์ด: แท็บ "${CU_WHERE_LABEL[whereNow.key]}"`
+                    : whereNow.key === "shelf" || whereNow.key === "defect" ? "ไม่อยู่บนบอร์ดแล้ว — ของอยู่หน้าโกดัง QC (หรือดูแท็บ \"ทั้งหมด\")"
+                    : "ไม่อยู่บนบอร์ดแล้ว — ดูได้ที่แท็บ \"ทั้งหมด\""}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {onLocate && m && <button type="button" onClick={() => onLocate(m.mo_no, m.product_sku)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-sky-300 bg-white px-3 text-[12px] hover:bg-sky-100"><Icon name="search" /> ไปดูใบนี้ในตาราง</button>}
+                  {whereNow.parts.some((x) => x.key === "shelf" || x.key === "defect") && <a href="/master/qc-warehouse" target="_blank" rel="noreferrer" className="inline-flex h-8 items-center gap-1 rounded-lg border border-sky-300 bg-white px-3 text-[12px] hover:bg-sky-100"><Icon name="warehouse" /> เปิดโกดัง QC ↗</a>}
+                </div>
+              </div>
+            )}
             {results.length > 0 && !undoRes && followUps.length > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-[13px]">
                 <div className="mb-1 font-medium text-amber-900">ยังต้องตามต่อ</div>

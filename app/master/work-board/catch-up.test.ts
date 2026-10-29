@@ -1,15 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { cuFacts, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuRows, cuTargetBlocked, cuAllocate, cuRun, cuUndo, cuIrreversible, CU_NO_DATES, cuFactsDiff, cuWhen, type CuInputs, type CuContext } from "./catch-up";
+import { cuFacts, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuRows, cuTargetBlocked, cuAllocate, cuRun, cuUndo, cuIrreversible, CU_NO_DATES, cuFactsDiff, cuWhen, cuLocate, cuLocateSnap, type CuInputs, type CuContext } from "./catch-up";
 import type { CatchUpSnapshot, CatchUpWo } from "@/app/api/mo/catch-up/route";
 
 const wo = (o: Partial<CatchUpWo>): CatchUpWo => ({ id: "w1", wo_no: "WO-1", qty: 0, received_qty: 0, qc_pulled_qty: 0, status: "dispatched",
-  department_name: null, assignee_name: null, dispatch_date: null, created_at: "", ...o });
+  department_name: null, assignee_name: null, dispatch_date: null, created_at: "", labor_cost: 0, ...o });
 const snap = (o: { mo?: Partial<CatchUpSnapshot["mo"]>; progress?: CatchUpSnapshot["progress"]; wos?: CatchUpWo[]; good?: number } = {}): CatchUpSnapshot => ({
   mo: { id: "m1", mo_no: "MO-1", product_sku: "SKU", product_name: "ชื่อ", qty: 100, status: "draft", due_date: null, internal_due_date: null,
     has_bom: true, prep_total: 4, prep_ready: 0, cut_total: 2, cut_ready: 0, prep_done: false, cut_done: false, skipped: {}, bom_code: "BOM-1", note: null, ...o.mo },
   progress: o.progress === undefined ? { total: 4, buy: 2, requested: 0, ordered: 0 } : o.progress,
   materials: [{ sku: "FAB", name: "ผ้า", status: "have", ready: false }, { sku: "ZIP", name: "ซิป", status: "buy", ready: false }],
-  wos: o.wos ?? [], shelves: [], shelf: { good: o.good ?? 0, defect: 0, repairing: 0 }, rates: [], reasons: [], past: { mo: [], model: [] }, sales: { so: [], dn: [] },
+  wos: o.wos ?? [], shelves: [], shelf: { good: o.good ?? 0, defect: 0, repairing: 0 }, shelfAt: [], rates: [], reasons: [], past: { mo: [], model: [] }, sales: { so: [], dn: [] },
 });
 /** ค่าตั้งต้น = จ่าย 1 แถว 100 ชิ้น โต๊ะ d1 · ส่งคืน 1 รอบ 100 ชิ้น (อัตโนมัติ) */
 const inp = (o: Partial<CuInputs> & { dq?: number; rq?: number } = {}): CuInputs => {
@@ -349,5 +349,31 @@ describe("คำขออัปเดตงาน (พนักงานส่�
     expect(cuWhen("2026-10-28T07:05:00Z", now)).toBe("เมื่อวาน 14:05");
     expect(cuWhen("2026-10-26T16:59:00Z", now)).toBe("26 ต.ค. 23:59");
     expect(cuWhen("ไม่ใช่วันที่", now)).toBe("");
+  });
+});
+
+describe("ตอนนี้ของอยู่ไหน", () => {
+  const base = { qty: 20, status: "draft", dispatched: 0, received: 0, qcPulled: 0, shelfAt: [] as { name: string; qty: number; status: string }[] };
+  it("ยังไม่จ่าย = รอจ่าย (อยู่บนบอร์ด)", () => {
+    expect(cuLocate(base)).toMatchObject({ key: "pend", onBoard: true, parts: [{ key: "pend", qty: 20 }] });
+  });
+  it("ช่างส่งคืนครบ ยังไม่รับเข้า QC = รอ QC รับเข้า (เคส PIX12-01)", () => {
+    expect(cuLocate({ ...base, dispatched: 20, received: 20 })).toMatchObject({ key: "qc", label: "รอ QC รับเข้า", parts: [{ key: "qc", qty: 20 }] });
+  });
+  it("รับเข้า QC แล้ว = อยู่โกดัง QC ชั้นไหน (ไม่อยู่บนบอร์ดแล้ว)", () => {
+    const w = cuLocate({ ...base, dispatched: 20, received: 20, qcPulled: 20, shelfAt: [{ name: "งานรอตรวจ", qty: 18, status: "good" }, { name: "ชั้นของเสีย", qty: 2, status: "defect" }] });
+    expect(w).toMatchObject({ key: "shelf", onBoard: false });
+    expect(w.parts.map((p) => p.label)).toEqual(["โกดัง QC · งานรอตรวจ", "ของเสีย · ชั้นของเสีย"]);
+  });
+  it("ใบเดียวอยู่หลายขั้น: รอจ่าย + อยู่กับช่าง + รอ QC", () => {
+    expect(cuLocate({ ...base, dispatched: 15, received: 8, qcPulled: 3 }).parts.map((p) => [p.key, p.qty])).toEqual([["pend", 5], ["wip", 7], ["qc", 5]]);
+  });
+  it("ส่งออกครบแล้ว = รอปิดใบ · ปิดแล้ว/ยกเลิก", () => {
+    expect(cuLocate({ ...base, dispatched: 20, received: 20, qcPulled: 20 }).key).toBe("close_wait");
+    expect(cuLocate({ ...base, status: "done" }).key).toBe("closed");
+    expect(cuLocate({ ...base, status: "cancelled" }).key).toBe("cancelled");
+  });
+  it("จากข้อมูลตั้งต้นของป๊อป", () => {
+    expect(cuLocateSnap(snap({ mo: { qty: 10 }, wos: [wo({ qty: 10, received_qty: 10 })] })).key).toBe("qc");
   });
 });
