@@ -399,8 +399,12 @@ export interface AccountLook {
   aside: AccountAside;
   /** ลำดับส่วนในหน้า */
   order: AccountBlock[];
-  /** ✨ ลูกเล่น — พื้นหลัง (วงกลมเบลอ/ไล่สีจาง) · กล่องกระจกฝ้า · ทักทายตามเวลา · ตัวเลขแต้มวิ่ง · เปลี่ยนแท็บแบบนุ่ม · บัตรสมาชิกเอียงตามเมาส์ */
-  decor: "none" | "blobs" | "wash";
+  /** ✨ ลูกเล่น — พื้นหลัง (วงกลมเบลอ/ไล่สีจาง/รูปภาพ) · กล่องกระจกฝ้า · ทักทายตามเวลา · ตัวเลขแต้มวิ่ง · เปลี่ยนแท็บแบบนุ่ม · บัตรสมาชิกเอียงตามเมาส์ */
+  decor: "none" | "blobs" | "wash" | "image";
+  /** 🖼 รูปพื้นหลัง (decor = image) · bgFade = สีพื้นเว็บทับรูปกี่ % (มาก = ตัวหนังสืออ่านง่าย) · bgBlur = เบลอรูป */
+  bgImageKey: string | null;
+  bgFade: number;
+  bgBlur: boolean;
   glass: boolean;
   timeGreeting: boolean;
   countUp: boolean;
@@ -442,6 +446,9 @@ export const DEFAULT_ACCOUNT_LOOK: AccountLook = {
   aside: { on: false, icon: "", title: "", text: "", href: "" },
   order: [...ACCOUNT_BLOCKS],
   decor: "none",
+  bgImageKey: null,
+  bgFade: 60,
+  bgBlur: false,
   glass: false,
   timeGreeting: false,
   countUp: false,
@@ -509,7 +516,10 @@ export function normalizeAccount(raw: unknown): AccountLook {
     profileStyle: r.profileStyle === "rows" ? "rows" : "form",
     aside: keepEn({ on: a.on === true, icon: txt(a.icon, 300), title: txt(a.title, 60), text: txt(a.text, 200), href: accHref(a.href) }, a, ["title", "text"], 200),
     order,
-    decor: oneOf(r.decor, ["none", "blobs", "wash"] as const, d.decor),
+    decor: oneOf(r.decor, ["none", "blobs", "wash", "image"] as const, d.decor),
+    bgImageKey: imgKey(r.bgImageKey),
+    bgFade: clampInt(r.bgFade, ACCOUNT_BG_FADE_RANGE.min, ACCOUNT_BG_FADE_RANGE.max, d.bgFade),
+    bgBlur: r.bgBlur === true,
     glass: r.glass === true,
     timeGreeting: r.timeGreeting === true,
     countUp: r.countUp === true,
@@ -548,6 +558,8 @@ export const SITE_DENSITY_K: Record<SiteDensity, number> = { dense: 0.6, normal:
 export const SITE_MAX_W: Record<SiteWidth, string> = { narrow: "1080px", normal: "1240px", wide: "1440px", full: "none" };
 export const MOBILE_SCALE_RANGE = { min: 85, max: 125 };
 export const TEXTURE_STRENGTH_RANGE = { min: 10, max: 100 };
+/** หน้าบัญชี: สีพื้นเว็บทับรูปพื้นหลังกี่ % (0 = เห็นรูปเต็ม · 90 = รูปจางมาก) */
+export const ACCOUNT_BG_FADE_RANGE = { min: 0, max: 90 };
 
 export const DENSITIES: SiteDensity[] = ["normal", "dense", "airy"];
 export const SITE_WIDTHS: SiteWidth[] = ["normal", "narrow", "wide", "full"];

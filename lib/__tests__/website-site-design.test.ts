@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeTheme, mergeTheme, themeFontNames } from "../website-theme";
-import { DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizeChatLook, normalizeCookieLook, normalizeLogin, normalizeMobileNav, normalizeNotFound, normalizePopup, normalizeShare, normalizeThanks, normalizePageTransition, normalizeSitePage, normalizeSiteShape, sectionMotionOf } from "../website-site-design";
+import { ACCOUNT_BG_FADE_RANGE, DEFAULT_ACCOUNT_LOOK, DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizeAccount, normalizeChatLook, normalizeCookieLook, normalizeLogin, normalizeMobileNav, normalizeNotFound, normalizePopup, normalizeShare, normalizeThanks, normalizePageTransition, normalizeSitePage, normalizeSiteShape, sectionMotionOf } from "../website-site-design";
 import { popularTermsOf } from "../website-site-info";
 import { mergePopularTerms } from "../website-search-terms";
 import { sanitizeStyle, MOTION_ENTRANCES } from "../website-blocks";
@@ -164,5 +164,19 @@ describe("หน้าพิเศษ", () => {
     expect(normalizePopup({ layout: "full", trigger: "click", again: "daily" })).toEqual({ layout: "center", imageKey: null, trigger: "delay", again: "once" });
     expect(normalizeShare({ style: "video", bg: "red" })).toEqual({ style: "photo", bg: "paper" });
     expect(normalizeLogin({ layout: "side", title_en: "   " })).toEqual({ layout: "center", imageKey: null, title: "", text: "" });
+  });
+});
+
+describe("หน้าบัญชี: พื้นหลังรูปภาพ", () => {
+  it("ธีมเก่า = ไม่มีรูป · จาง 60% · ไม่เบลอ", () => {
+    const a = normalizeAccount({ decor: "blobs" });
+    expect(a.decor).toBe("blobs");
+    expect([a.bgImageKey, a.bgFade, a.bgBlur]).toEqual([DEFAULT_ACCOUNT_LOOK.bgImageKey, 60, false]);
+  });
+  it("รูปภาพ: คีย์ต้องเป็นคีย์ R2 ปลอดภัย · ความจางถูกบีบในช่วง", () => {
+    const a = normalizeAccount({ decor: "image", bgImageKey: "website-pages/bg.jpg", bgFade: 200, bgBlur: true });
+    expect([a.decor, a.bgImageKey, a.bgFade, a.bgBlur]).toEqual(["image", "website-pages/bg.jpg", ACCOUNT_BG_FADE_RANGE.max, true]);
+    const b = normalizeAccount({ decor: "video", bgImageKey: "../../etc/passwd", bgFade: -5 });
+    expect([b.decor, b.bgImageKey, b.bgFade]).toEqual(["none", null, ACCOUNT_BG_FADE_RANGE.min]);
   });
 });

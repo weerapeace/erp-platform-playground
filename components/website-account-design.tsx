@@ -5,7 +5,7 @@
  *
  * ① ส่วนหัว (4 แบบ · ข้อความทักทาย · ป้ายใต้ชื่อ) ② เมนู (4 แบบ · ไอคอนอีโมจิ/เส้น/ไม่มี · ลำดับ/ชื่อ/ไอคอน/ซ่อน · แท็บแรก)
  * ③ กล่องเนื้อหา (แบบกล่อง · กล่องเพิ่มออเดอร์เก่า · ข้อความตอนว่าง · โปรไฟล์แบบฟอร์ม/แถว) ④ ส่วนเสริม (แถบประกาศ · สินค้าแนะนำ · ช่วยเหลือ · ความกว้าง · กล่องข้างขวา)
- * ⑤ จัดวาง (ลำดับส่วนในหน้า · เมนูซ้าย/ขวา) ✨ ลูกเล่น (พื้นหลังวงกลมเบลอ · กระจกฝ้า · ทักทายตามเวลา · เลขแต้มวิ่ง · เปลี่ยนแท็บนุ่ม · บัตรเอียงตามเมาส์)
+ * ⑤ จัดวาง (ลำดับส่วนในหน้า · เมนูซ้าย/ขวา) ✨ ลูกเล่น (พื้นหลังวงกลมเบลอ/รูปภาพ · กระจกฝ้า · ทักทายตามเวลา · เลขแต้มวิ่ง · เปลี่ยนแท็บนุ่ม · บัตรเอียงตามเมาส์)
  * ⚡ แบบสำเร็จรูป "หน้าต่างแอป" = ตั้งหลายช่องในคลิกเดียว (ปรับต่อเองได้ทุกช่อง)
  * 🎨 ปรับละเอียดทีละชิ้น = ของกลาง PartStyleEditor + ทะเบียนชิ้นส่วน ACCOUNT_PARTS (คลิกเลือกในพรีวิวได้)
  * ค่าเริ่ม = หน้าตาเดิม · ตัวตรวจค่า normalizeAccount (lib/website-site-design — มิเรอร์กับเว็บร้าน) · เว็บร้าน components/account/AccountClient
@@ -14,10 +14,11 @@
 import { type ReactNode } from "react";
 import { LangInput } from "@/components/bilingual-field";
 import { ImageInput } from "@/components/image-input";
+import { RangeInput } from "@/components/range-input";
 import { SiteIconPicker } from "@/components/site-icon-picker";
 import { PartStyleFold } from "@/components/website-part-style-editor";
 import { webForm } from "@/lib/website-form-styles";
-import { ACCOUNT_TAB_DEFAULTS, DEFAULT_ACCOUNT_LOOK, type AccountBlock, type AccountEmptyKey, type AccountLook, type AccountTabKey } from "@/lib/website-site-design";
+import { ACCOUNT_BG_FADE_RANGE, ACCOUNT_TAB_DEFAULTS, DEFAULT_ACCOUNT_LOOK, type AccountBlock, type AccountEmptyKey, type AccountLook, type AccountTabKey } from "@/lib/website-site-design";
 import { ACCOUNT_PARTS } from "@/lib/website-page-parts";
 import type { SiteTheme } from "@/lib/website-theme";
 
@@ -383,14 +384,31 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
       <Section title="✨ ลูกเล่น">
         <div className="space-y-1">
           <span className={webForm.label}>พื้นหลังหน้า</span>
-          <Opt value={value.decor} def={d.decor} onChange={(v) => set({ decor: v })} options={[{ v: "none", l: "เรียบ" }, { v: "blobs", l: "วงกลมเบลอ", d: "สีตามสีหลักร้าน" }, { v: "wash", l: "ไล่สีจาง", d: "จากบนลงล่าง" }]} />
+          <Opt
+            value={value.decor}
+            def={d.decor}
+            onChange={(v) => set({ decor: v })}
+            options={[{ v: "none", l: "เรียบ" }, { v: "blobs", l: "วงกลมเบลอ", d: "สีตามสีหลักร้าน" }, { v: "wash", l: "ไล่สีจาง", d: "จากบนลงล่าง" }, { v: "image", l: "รูปภาพ", d: "อัปโหลดรูปเอง" }]}
+          />
         </div>
+        {/* 🖼 พื้นหลังแบบรูปภาพ */}
+        {value.decor === "image" && (
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+            <ImageInput value={value.bgImageKey} onChange={(k) => set({ bgImageKey: k || null })} folder="website-pages" />
+            {!value.bgImageKey && <p className="text-[11px] text-amber-700">ยังไม่ได้เลือกรูป — หน้าจะเป็นพื้นเรียบไปก่อน</p>}
+            <div className="space-y-1">
+              <span className={webForm.label}>ความจางของรูป (มาก = ตัวหนังสืออ่านง่าย · 0 = เห็นรูปเต็ม)</span>
+              <RangeInput value={value.bgFade} onChange={(n) => set({ bgFade: n })} min={ACCOUNT_BG_FADE_RANGE.min} max={ACCOUNT_BG_FADE_RANGE.max} step={5} unit="%" ariaLabel="ความจางของรูปพื้นหลัง" />
+            </div>
+            <Toggle checked={value.bgBlur} onChange={(v) => set({ bgBlur: v })}>เบลอรูป (นุ่มตา · สวยคู่กับกล่องกระจกฝ้า)</Toggle>
+          </div>
+        )}
         <div className="space-y-1">
           <span className={webForm.label}>ตอนเปลี่ยนแท็บ</span>
           <Opt value={value.tabAnim} def={d.tabAnim} onChange={(v) => set({ tabAnim: v })} options={[{ v: "none", l: "ทันที" }, { v: "fade", l: "ค่อย ๆ ปรากฏ" }, { v: "slide", l: "เลื่อนขึ้นนุ่ม ๆ" }]} />
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-          <Toggle checked={value.glass} onChange={(v) => set({ glass: v })}>กล่องกระจกฝ้า (สวยคู่กับพื้นวงกลมเบลอ)</Toggle>
+          <Toggle checked={value.glass} onChange={(v) => set({ glass: v })}>กล่องกระจกฝ้า (สวยคู่กับพื้นวงกลมเบลอ / รูปภาพ)</Toggle>
           <Toggle checked={value.timeGreeting} onChange={(v) => set({ timeGreeting: v })} off={value.greeting.trim() ? "ใช้เมื่อช่องข้อความทักทายว่าง" : value.nav === "panel" ? "แบบหน้าต่างแอปไม่มีข้อความทักทาย" : undefined}>ทักทายตามเวลา (อรุณสวัสดิ์ ☀️ / ราตรีสวัสดิ์ 🌙 · ใช้เมื่อไม่ได้ตั้งข้อความทักทาย)</Toggle>
           <Toggle checked={value.countUp} onChange={(v) => set({ countUp: v })}>ตัวเลขแต้มวิ่งจาก 0</Toggle>
           <Toggle checked={value.tilt} onChange={(v) => set({ tilt: v })} off={cardOff}>บัตรสมาชิกเอียงตามเมาส์ + แสงสะท้อน (หัวแบบบัตรสมาชิก)</Toggle>
