@@ -26,7 +26,8 @@ const FIELD: Record<P, { id: string; secret: string; idHint: string }> = {
 const TONE: Record<P, string> = { google: "border-red-200", line: "border-green-200", facebook: "border-blue-200" };
 
 type ProvState = { clientId: string; secretSet: boolean; secretTail: string; enabled: boolean; ready: boolean; updatedAt: string | null };
-type Loaded = { providers: Record<P, ProvState>; domains: string[]; callbacks: Record<P, string[]>; tokensReady: boolean };
+type EmailLogin = { password: boolean; otp: boolean };
+type Loaded = { providers: Record<P, ProvState>; domains: string[]; callbacks: Record<P, string[]>; tokensReady: boolean; email: EmailLogin & { canMail: boolean } };
 type Draft = Record<P, { clientId: string; secret: string; enabled: boolean }>;
 
 const toDraft = (l: Loaded): Draft => Object.fromEntries(PROVIDERS.map((p) => [p, { clientId: l.providers[p].clientId, secret: "", enabled: l.providers[p].enabled }])) as Draft;
@@ -94,6 +95,7 @@ export function MemberLoginSettingsModal({ open, shopSlug, shopName, onClose, on
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [guide, setGuide] = useState<P | null>(null);
+  const [em, setEm] = useState<EmailLogin>({ password: false, otp: false });
 
   const load = useCallback(() => {
     setErr("");
@@ -103,6 +105,7 @@ export function MemberLoginSettingsModal({ open, shopSlug, shopName, onClose, on
         if (!r.ok) throw new Error(j.error ?? (r.status === 403 ? "ต้องมีสิทธิ์แก้ไขเว็บไซต์" : "โหลดไม่สำเร็จ"));
         setData(j as Loaded);
         setDraft(toDraft(j as Loaded));
+        setEm({ password: !!(j as Loaded).email?.password, otp: !!(j as Loaded).email?.otp });
       })
       .catch((e: Error) => setErr(e.message));
   }, [shopSlug]);
@@ -110,7 +113,8 @@ export function MemberLoginSettingsModal({ open, shopSlug, shopName, onClose, on
     if (open) load();
   }, [open, load]);
 
-  const dirty = !!data && !!draft && PROVIDERS.some((p) => draft[p].clientId.trim() !== data.providers[p].clientId || !!draft[p].secret.trim() || draft[p].enabled !== data.providers[p].enabled);
+  const emDirty = !!data && (em.password !== !!data.email?.password || em.otp !== !!data.email?.otp);
+  const dirty = !!data && !!draft && (emDirty || PROVIDERS.some((p) => draft[p].clientId.trim() !== data.providers[p].clientId || !!draft[p].secret.trim() || draft[p].enabled !== data.providers[p].enabled));
   const set = (p: P, patch: Partial<Draft[P]>) => setDraft((d) => (d ? { ...d, [p]: { ...d[p], ...patch } } : d));
 
   const save = async () => {
@@ -120,7 +124,7 @@ export function MemberLoginSettingsModal({ open, shopSlug, shopName, onClose, on
       const r = await apiFetch("/api/website/members/login-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shop: shopSlug, providers: Object.fromEntries(PROVIDERS.map((p) => [p, { clientId: draft[p].clientId.trim(), clientSecret: draft[p].secret.trim(), enabled: draft[p].enabled }])) }),
+        body: JSON.stringify({ shop: shopSlug, providers: Object.fromEntries(PROVIDERS.map((p) => [p, { clientId: draft[p].clientId.trim(), clientSecret: draft[p].secret.trim(), enabled: draft[p].enabled }])), email: em }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok || !j.ok) return toast.error(j.error ?? "บันทึกไม่สำเร็จ");
@@ -139,7 +143,7 @@ export function MemberLoginSettingsModal({ open, shopSlug, shopName, onClose, on
       open={open}
       onClose={onClose}
       title={`🔑 ตั้งค่าการเข้าสู่ระบบ${shopName ? ` · ${shopName}` : ""}`}
-      description="วางรหัสจาก Google / LINE / Facebook เพื่อให้ลูกค้ากดสมัครสมาชิกได้ · ช่องไหนว่าง ปุ่มนั้นไม่ขึ้นบนเว็บ"
+      description="สมัครด้วยอีเมลบนเว็บ (ไม่ต้องตั้งอะไรเพิ่ม) และ/หรือ วางรหัสจาก Google / LINE / Facebook · ช่องไหนว่าง ปุ่มนั้นไม่ขึ้นบนเว็บ"
       size="lg"
       hasUnsavedChanges={dirty}
       loading={busy}
@@ -163,6 +167,29 @@ export function MemberLoginSettingsModal({ open, shopSlug, shopName, onClose, on
         <div className="space-y-3">
           {!data.tokensReady && <p className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">ERP ยังออกบัตรสมาชิกไม่ได้ (ไม่มีกุญแจของระบบ) — แจ้งผู้ดูแลระบบ</p>}
           {data.domains.length === 0 && <p className="rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">ร้านนี้ยังไม่มีโดเมนเว็บ — เพิ่มโดเมนในแท็บข้อมูลร้านก่อน (ต้องใช้ทำที่อยู่ callback)</p>}
+          {/* ✉️ สมัคร/เข้าด้วยอีเมล — ไม่ต้องตั้งรหัสกับผู้ให้บริการ · ERP ส่งอีเมลยืนยัน/รหัสให้ (lib/member-email-login) */}
+          <div className="rounded-xl border border-slate-200 bg-white p-3 space-y-2" data-login-email>
+            <div className="flex items-center gap-2">
+              <b className="text-sm text-slate-800">✉️ สมัครด้วยอีเมลบนเว็บ</b>
+              <span className={`ml-auto text-[11px] font-medium ${data.email?.canMail ? "text-emerald-700" : "text-amber-700"}`}>{data.email?.canMail ? "✓ ระบบส่งอีเมลพร้อม" : "⚠ ยังส่งอีเมลไม่ได้"}</span>
+            </div>
+            <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" className="mt-1" checked={em.password} onChange={(e) => setEm((v) => ({ ...v, password: e.target.checked }))} data-login-email-password />
+              <span>
+                อีเมล + รหัสผ่าน
+                <span className="block text-[11px] text-slate-500">ลูกค้าตั้งรหัสเอง · ยืนยันอีเมลด้วยลิงก์ · ลืมรหัสขอลิงก์ตั้งใหม่ได้ · ใส่ผิด 5 ครั้งล็อก 15 นาที</span>
+              </span>
+            </label>
+            <label className="flex items-start gap-2 text-sm text-slate-700 cursor-pointer">
+              <input type="checkbox" className="mt-1" checked={em.otp} onChange={(e) => setEm((v) => ({ ...v, otp: e.target.checked }))} data-login-email-otp />
+              <span>
+                อีเมล + รหัส 6 หลัก (ไม่ต้องจำรหัสผ่าน)
+                <span className="block text-[11px] text-slate-500">ใส่อีเมล → ได้รหัสทางอีเมล (ใช้ได้ 10 นาที) → เข้าได้เลย · ขอใหม่ได้ทุก 60 วินาที</span>
+              </span>
+            </label>
+            {!data.email?.canMail && <p className="rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-1.5 text-[11px] text-amber-800">ERP ยังไม่ได้ตั้งระบบส่งอีเมล — เปิดไว้ได้ แต่ปุ่มจะยังไม่ขึ้นบนเว็บจนกว่าผู้ดูแลระบบตั้งค่าการส่งอีเมล</p>}
+            <p className="text-[11px] text-slate-400">เปิดทั้ง 2 แบบ = ลูกค้าเลือกได้ในป๊อปสมัคร · ปิดแบบรหัสผ่าน = ไม่รับสมัครใหม่ด้วยรหัสผ่าน (สมาชิกเดิมยังเข้าได้)</p>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {PROVIDERS.map((p) => {
               const s = data.providers[p];

@@ -18,6 +18,21 @@ function build(to: string, shopName: string, link: string, lang: Lang, c: { subj
   };
 }
 
+/** ✉️ รหัส 6 หลักสำหรับเข้าสู่ระบบ/สมัคร (ไม่มีปุ่ม — ลูกค้าพิมพ์รหัสในหน้าเว็บ) */
+export function otpEmailMessage(to: string, shopName: string, code: string, lang: Lang = "th"): EmailMessage {
+  const c =
+    lang === "en"
+      ? { subject: `Your code: ${code}`, title: `Your sign-in code is ${code}`, lines: [`Enter this code on the ${shopName} website to continue. It expires in 10 minutes.`, "Never share this code with anyone. The shop will never ask you for it."], foot: "If you didn't request this code, you can ignore this email." }
+      : { subject: `รหัสของคุณ: ${code}`, title: `รหัสเข้าสู่ระบบ: ${code}`, lines: [`ใส่รหัสนี้ในหน้าเว็บ ${shopName} เพื่อดำเนินการต่อ (ใช้ได้ 10 นาที)`, "อย่าบอกรหัสนี้กับใคร — ร้านจะไม่ขอรหัสนี้จากคุณ"], foot: "ถ้าคุณไม่ได้ขอรหัสนี้ ไม่ต้องทำอะไร" };
+  return {
+    to,
+    fromName: shopName,
+    subject: `${c.subject} — ${shopName}`,
+    html: emailLayout({ lang, shopName, title: c.title, lines: c.lines, foot: c.foot }),
+    text: `${c.title}\n\n${c.lines.join("\n")}\n\n${c.foot}`,
+  };
+}
+
 export function verifyEmailMessage(to: string, shopName: string, link: string, lang: Lang = "th"): EmailMessage {
   return build(
     to,

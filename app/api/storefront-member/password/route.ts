@@ -8,20 +8,33 @@
  *  forgot   { email, origin }                 → ส่งลิงก์ตั้งรหัสใหม่ (ตอบ ok เสมอ)
  *  reset    { token, password }               → ตั้งรหัสใหม่ + ถือว่ายืนยันอีเมลแล้ว → { member }
  *  change   { current?, password } + x-storefront-member → ตั้ง/เปลี่ยนรหัส (มีรหัสเดิม = ต้องใส่รหัสเดิม)
+ *  otp-send   { email, mode: signup|login, name?, consent?, marketing?, lang } → ส่งรหัส 6 หลักทางอีเมล (ร้านต้องเปิด "อีเมล + รหัส 6 หลัก")
+ *             ยังไม่มีบัญชี: signup + ติ๊กยอมรับ = สร้างบัญชี (ยังไม่ยืนยัน) · login = code "need_signup" · ขอใหม่ได้ทุก 60 วิ ไม่เกิน 5 ครั้ง/ชม.
+ *  otp-verify { email, code } → { member } (ยืนยันอีเมลไปในตัว) · ผิด 5 ครั้งล็อก 15 นาที · รหัสใช้ได้ 10 นาที ครั้งเดียว
+ *  🔀 เปิด/ปิดต่อร้าน (lib/member-email-login): ปิด "อีเมล + รหัสผ่าน" = ไม่รับสมัครใหม่ด้วยรหัสผ่าน (สมาชิกเดิมยังเข้าได้)
  *
- * ด่าน: กุญแจภายใน (lib/storefront-internal) · อีเมลส่งด้วยของกลาง lib/email (ยังไม่ตั้ง Resend = บอก email-not-configured)
+ * ด่าน: ร้าน (guardShop — ไม่ต้องมีกุญแจภายใน/env ฝั่งเว็บ เหมือน OAuth: ERP ตรวจรหัสผ่าน/รหัส 6 หลัก/ลิงก์เองทั้งหมด แล้วออกบัตรสมาชิกให้) · change = บัตรสมาชิก (guardMember)
+ *   เดิมใช้ guardStorefront (ต้องตั้ง STOREFRONT_INTERNAL_KEY ทั้ง 2 ฝั่ง) — ย้ายมาเพื่อเปิด/ปิดจาก ERP ได้ทันที (2026-10-29)
+ * อีเมลส่งด้วยของกลาง lib/email (ยังไม่ตั้ง Resend = บอก email-not-configured)
  * ลิงก์ในอีเมลชี้โดเมนร้านที่ลงทะเบียนใน shop_domains เท่านั้น (กันลิงก์ไปเว็บปลอม)
  */
 import { NextRequest, NextResponse } from "next/server";
-import { denyTestMember, guardMember, guardStorefront, memberLoginBody, storefrontJson, MEMBER_ROW_COLS, type MemberRow } from "@/lib/storefront-internal";
+import { denyTestMember, guardMember, guardShop, memberLoginBody, storefrontJson, MEMBER_ROW_COLS, type MemberRow } from "@/lib/storefront-internal";
 import { trustedShopOrigin } from "@/lib/website-shop";
 import { memberSummary } from "@/lib/website-members-db";
 import { sendEmail, emailDevEcho, type EmailMessage } from "@/lib/email";
-import { resetPasswordMessage, verifyEmailMessage } from "@/lib/member-emails";
+import { otpEmailMessage, resetPasswordMessage, verifyEmailMessage } from "@/lib/member-emails";
+import { readEmailLogin } from "@/lib/member-email-login";
 import { customerLang } from "@/lib/customer-messages";
 import {
   LOGIN_LOCK_MIN,
   LOGIN_MAX_FAILS,
+  OTP_MAX_PER_HOUR,
+  OTP_RE,
+  OTP_RESEND_SEC,
+  OTP_TTL_MIN,
+  newOtpCode,
+  otpHash,
   TOKEN_MAX_PER_HOUR,
   TOKEN_TTL_MIN,
   hashPassword,
@@ -96,7 +109,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return storefrontJson({ ok: true, member: await memberSummary(g.sb, m) }, 200);
   }
 
-  const g = await guardStorefront(request);
+  const g = await guardShop(request);
   if (g instanceof NextResponse) return g;
   const { sb, shop } = g;
   const now = new Date().toISOString();
@@ -113,6 +126,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     let m = ex as Row | null;
 
     if (action === "register") {
+      if ((await readEmailLogin(sb, shop.id)).password === false) return storefrontJson({ ok: false, error: "ร้านปิดการสมัครด้วยอีเมล + รหัสผ่านแล้ว — ใช้ช่องทางอื่นแทน" }, 403);
       const prob = passwordProblem(body.password);
       if (prob) return storefrontJson({ ok: false, error: prob }, 400);
       const name = String(body.name ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
@@ -189,6 +203,69 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     await sb.from("store_customer_tokens").update({ used_at: now }).eq("customer_id", id).eq("kind", "reset").is("used_at", null);
     await ensurePasswordIdentity(sb, data as Row);
     return storefrontJson({ ok: true, ...memberLoginBody(shop, await memberSummary(sb, data as Row)) }, 200);
+  }
+
+  // ✉️ รหัส 6 หลักทางอีเมล
+  if (action === "otp-send" || action === "otp-verify") {
+    if (!(await readEmailLogin(sb, shop.id)).otp) return storefrontJson({ ok: false, error: "ร้านยังไม่เปิดการเข้าสู่ระบบด้วยรหัสทางอีเมล" }, 404);
+    const email = cleanEmail(body.email);
+    if (!EMAIL_RE.test(email)) return storefrontJson({ ok: false, error: "กรุณากรอกอีเมลให้ถูกต้อง" }, 400);
+    const { data: ex } = await sb.from("store_customers").select(COLS).eq("shop_id", shop.id).eq("email", email).neq("status", "deleted").maybeSingle();
+    let m = ex as Row | null;
+    if (m && m.status === "blocked") return storefrontJson({ ok: false, error: "บัญชีนี้ถูกระงับ — ติดต่อร้านค้า" }, 403);
+    if (m?.locked_until && new Date(m.locked_until) > new Date()) {
+      const min = Math.ceil((new Date(m.locked_until).getTime() - Date.now()) / 60_000);
+      return storefrontJson({ ok: false, error: `ใส่รหัสผิดหลายครั้ง กรุณารออีก ${min} นาที` }, 429);
+    }
+
+    if (action === "otp-send") {
+      const lang = customerLang(body.lang);
+      if (!m) {
+        if (body.mode !== "signup") return storefrontJson({ ok: false, code: "need_signup", error: "ยังไม่มีบัญชีของอีเมลนี้ — สมัครสมาชิกก่อนนะ" }, 404);
+        if (body.consent !== true) return storefrontJson({ ok: false, error: "กรุณาติ๊กยอมรับนโยบายความเป็นส่วนตัวก่อนสมัคร" }, 400);
+        const name = String(body.name ?? "").replace(/\s+/g, " ").trim().slice(0, 120);
+        if (name.length < 1) return storefrontJson({ ok: false, error: "กรุณากรอกชื่อ" }, 400);
+        const { data: created, error } = await sb.from("store_customers").insert({ shop_id: shop.id, email, email_verified: false, name, terms_accepted_at: now, marketing_opt_in: body.marketing === true }).select(COLS).maybeSingle();
+        if (error || !created) return storefrontJson({ ok: false, error: "สมัครไม่สำเร็จ กรุณาลองใหม่" }, 500);
+        m = created as Row;
+      }
+      // ขอถี่เกิน: รอ 60 วิ · ไม่เกิน 5 ครั้ง/ชม. (กันใช้ยิงอีเมลรบกวนคนอื่น)
+      const { data: recent } = await sb.from("store_customer_tokens").select("created_at").eq("customer_id", m.id).eq("kind", "otp").gte("created_at", new Date(Date.now() - 3600_000).toISOString()).order("created_at", { ascending: false });
+      const list = (recent ?? []) as { created_at: string }[];
+      if (list.length >= OTP_MAX_PER_HOUR) return storefrontJson({ ok: false, error: "ขอรหัสบ่อยเกินไป กรุณารอสักครู่แล้วลองใหม่" }, 429);
+      const wait = list[0] ? Math.ceil(OTP_RESEND_SEC - (Date.now() - new Date(list[0].created_at).getTime()) / 1000) : 0;
+      if (wait > 0) return storefrontJson({ ok: false, code: "wait", wait, error: `ขอรหัสใหม่ได้อีกใน ${wait} วินาที` }, 429);
+      // รหัสเก่าที่ยังไม่ใช้ = ยกเลิก (ใช้ได้เฉพาะรหัสล่าสุด)
+      await sb.from("store_customer_tokens").update({ used_at: now }).eq("customer_id", m.id).eq("kind", "otp").is("used_at", null);
+      const code = newOtpCode();
+      const { error: tErr } = await sb.from("store_customer_tokens").insert({ customer_id: m.id, kind: "otp", token_hash: otpHash(m.id, code), expires_at: new Date(Date.now() + OTP_TTL_MIN * 60_000).toISOString() });
+      if (tErr) return storefrontJson({ ok: false, error: "สร้างรหัสไม่สำเร็จ กรุณาลองใหม่" }, 500);
+      const r = await sendEmail(otpEmailMessage(email, shop.name, code, lang));
+      if (!r.ok) return storefrontJson({ ok: false, error: emailError(r.error) }, 503);
+      return storefrontJson({ ok: true, resendIn: OTP_RESEND_SEC, expiresIn: OTP_TTL_MIN * 60, ...(r.devEcho && emailDevEcho() ? { devCode: code } : {}) }, 200);
+    }
+
+    // otp-verify
+    const code = String(body.code ?? "").replace(/\s+/g, "");
+    if (!OTP_RE.test(code)) return storefrontJson({ ok: false, error: "ใส่รหัสตัวเลข 6 หลัก" }, 400);
+    const BAD = "รหัสไม่ถูกต้องหรือหมดอายุ — ขอรหัสใหม่ได้";
+    if (!m) return storefrontJson({ ok: false, error: BAD }, 401);
+    const { data: tok } = await sb.from("store_customer_tokens").select("id, expires_at, used_at").eq("customer_id", m.id).eq("kind", "otp").eq("token_hash", otpHash(m.id, code)).maybeSingle();
+    const t = tok as { id: string; expires_at: string; used_at: string | null } | null;
+    const claimed = t && !t.used_at && new Date(t.expires_at) > new Date() ? await sb.from("store_customer_tokens").update({ used_at: now }).eq("id", t.id).is("used_at", null).select("id").maybeSingle() : null;
+    if (!claimed?.data) {
+      const fails = (m.failed_login_count ?? 0) + 1;
+      const lock = fails >= LOGIN_MAX_FAILS;
+      await sb.from("store_customers").update({ failed_login_count: lock ? 0 : fails, locked_until: lock ? new Date(Date.now() + LOGIN_LOCK_MIN * 60_000).toISOString() : null }).eq("id", m.id);
+      // ล็อกแล้ว = รหัสที่ค้างอยู่ใช้ไม่ได้ (ต้องขอใหม่หลังพ้นล็อก)
+      if (lock) await sb.from("store_customer_tokens").update({ used_at: now }).eq("customer_id", m.id).eq("kind", "otp").is("used_at", null);
+      return storefrontJson({ ok: false, error: lock ? `ใส่รหัสผิด ${LOGIN_MAX_FAILS} ครั้ง — ล็อก ${LOGIN_LOCK_MIN} นาที` : BAD }, 401);
+    }
+    // รหัสถูก = เป็นเจ้าของอีเมลจริง → ยืนยันอีเมล + ปลดล็อก + เข้าสู่ระบบ
+    const { data: upd } = await sb.from("store_customers").update({ email_verified: true, failed_login_count: 0, locked_until: null, last_login_at: now, updated_at: now }).eq("id", m.id).eq("status", "active").select(COLS).maybeSingle();
+    if (!upd) return storefrontJson({ ok: false, error: "ไม่พบบัญชี" }, 404);
+    await ensurePasswordIdentity(sb, upd as Row);
+    return storefrontJson({ ok: true, ...memberLoginBody(shop, await memberSummary(sb, upd as Row), (upd as Row).is_test) }, 200);
   }
 
   if (action === "login") {

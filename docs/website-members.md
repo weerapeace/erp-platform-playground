@@ -152,3 +152,12 @@ RLS เปิด ไม่มี policy (service role ผ่าน API เท่
 - **ความปลอดภัย:** `store_coupons.owner_id` = เจ้าของคนเดียว — คนอื่นใส่โค้ดได้ผลเหมือน "ไม่พบโค้ด" · ลูกค้าที่ยังไม่เข้าสู่ระบบ = บอกให้เข้าสู่ระบบก่อน (lib/website-coupons-db checkCoupon) · ไม่โชว์ในแท็บคูปอง ERP
 - **มูลค่า** อ่านจากที่ตั้งร้านตอนตรวจเสมอ (เปลี่ยนส่วนลด/ปิด = ทุกใบตาม) — กฎ `lib/website-birthday.ts` · ฐานข้อมูล `lib/website-birthday-db.ts` · migration `202611060200_member_birthday_coupon`
 - เว็บร้าน: แบนเนอร์ 🎂 บนหน้าบัญชีเมื่อมีคูปองวันเกิดที่ยังไม่ใช้ (ชิ้นส่วน `acc.bday`) · ป้ายในแท็บคูปอง · เปิดพลุฉลอง = ยิงพลุปีละครั้งต่อเครื่อง
+
+## ✉️ สมัคร/เข้าสู่ระบบด้วยอีเมลบนเว็บ (2026-10-29 · เจ้าของเลือกแบบ A + B)
+- **เปิด/ปิด:** ERP › สมาชิก › 🔑 ตั้งค่าการเข้าสู่ระบบ › ✉️ สมัครด้วยอีเมลบนเว็บ — ไม่ต้องตั้ง env ฝั่งเว็บ (เก็บ store_settings `member_email_password` / `member_email_otp` · lib/member-email-login)
+  - A **อีเมล + รหัสผ่าน** (ระบบเดิม M3): ยืนยันอีเมลด้วยลิงก์ · ลืมรหัส · ผิด 5 ครั้งล็อก 15 นาที · ปิด = ไม่รับสมัครใหม่ (สมาชิกเดิมยังเข้าได้)
+  - B **อีเมล + รหัส 6 หลัก** (ไม่มีรหัสผ่าน): `otp-send` / `otp-verify` ใน /api/storefront-member/password · รหัสใช้ได้ 10 นาที ครั้งเดียว · ขอใหม่ทุก 60 วิ ≤ 5 ครั้ง/ชม. · ผิด 5 ครั้งล็อก 15 นาที · โทเคนชนิด `otp` ในตารางเดิม (hash ผูกกับคน)
+- เว็บร้านโชว์เฉพาะเมื่อ "เปิด + ERP ส่งอีเมลได้จริง" (member-config `email`) · เปิดทั้ง 2 แบบ = ลูกค้าเลือก "รับรหัสทางอีเมล / ใช้รหัสผ่าน" ในป๊อป (ช่องติ๊กยอมรับ PDPA ใช้ร่วมกับปุ่ม Google/LINE/Facebook)
+- **ด่าน:** เส้นอีเมลย้ายจาก guardStorefront (ต้องมีกุญแจภายในทั้ง 2 ฝั่ง) → guardShop เหมือน OAuth — ERP ตรวจรหัสผ่าน/รหัส/ลิงก์เองทั้งหมดแล้วออกบัตรสมาชิก · ร้านที่ยังไม่เคยตั้งใน ERP = ใช้ env เดิม `MEMBER_EMAIL_LOGIN`
+- ไฟล์: lib/member-password (OTP_*) · lib/member-emails `otpEmailMessage` · เว็บร้าน components/account/EmailAuthForms (`EmailOtpForm` · `EmailAuthSection`) · lib/member/config (`emailMethods`)
+- migration `202611060300_member_email_otp` (เพิ่มชนิดโทเคน otp) — **ต้อง apply ก่อนเปิดแบบ B**

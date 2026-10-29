@@ -4,7 +4,7 @@
  * รหัสผ่าน: scrypt (N=16384, r=8, p=1) + salt สุ่ม 16 ไบต์ → เก็บ "scrypt$N$r$p$salt$hash" (base64url) · เทียบแบบเวลาคงที่
  * โทเคน (ยืนยันอีเมล/ตั้งรหัสใหม่): สุ่ม 32 ไบต์ ส่งในลิงก์ · ฐานข้อมูลเก็บแค่ sha256 (หลุดฐานข้อมูลก็ใช้ลิงก์ไม่ได้)
  */
-import { createHash, randomBytes, scryptSync, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, randomInt, scryptSync, timingSafeEqual } from "crypto";
 
 const N = 16384;
 const R = 8;
@@ -51,3 +51,15 @@ export const TOKEN_MAX_PER_HOUR = 3;
 /** ผิดกี่ครั้งถึงล็อก · ล็อกกี่นาที */
 export const LOGIN_MAX_FAILS = 5;
 export const LOGIN_LOCK_MIN = 15;
+
+/**
+ * ✉️ รหัส 6 หลักทางอีเมล (เข้าสู่ระบบ/สมัครโดยไม่ใช้รหัสผ่าน) — เก็บใน store_customer_tokens kind "otp"
+ * hash ผูกกับคน (รหัส 6 หลักซ้ำข้ามคนได้ ไม่ชน unique ของ token_hash) · ใช้ได้ครั้งเดียว · เดาผิดใช้ตัวนับเดียวกับรหัสผ่าน (5 ครั้ง ล็อก 15 นาที)
+ */
+export const OTP_TTL_MIN = 10;
+/** ขอรหัสใหม่ได้ทุกกี่วินาที · ไม่เกินกี่ครั้งต่อชั่วโมง */
+export const OTP_RESEND_SEC = 60;
+export const OTP_MAX_PER_HOUR = 5;
+export const OTP_RE = /^\d{6}$/;
+export const newOtpCode = (): string => String(randomInt(0, 1_000_000)).padStart(6, "0");
+export const otpHash = (customerId: string, code: string) => tokenHash(`otp:${customerId}:${String(code).trim()}`);

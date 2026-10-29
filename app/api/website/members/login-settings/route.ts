@@ -2,7 +2,8 @@
  * 🔑 ตั้งค่าการเข้าสู่ระบบของเว็บร้าน (Google / LINE / Facebook) ต่อร้าน — /api/website/members/login-settings
  * GET ?shop=<slug> → { providers: { google: { clientId, secretSet, secretTail, enabled, ready, updatedAt } … }, domains, callbacks, tokensReady }
  *     รหัสลับไม่ส่งกลับเด็ดขาด — เห็นแค่ "••••" + 4 ตัวท้าย (lib/settings-secrets SECRET_MASK)
- * PUT { shop, providers: { google?: { clientId, clientSecret?, enabled } … } }
+ *     + email: { password, otp, canMail } (สมัคร/เข้าด้วยอีเมล · canMail = ERP ตั้งระบบส่งอีเมลแล้ว)
+ * PUT { shop, providers: { google?: { clientId, clientSecret?, enabled } … }, email?: { password, otp } }
  *     clientSecret ว่าง / ขึ้นต้นด้วย •••• = คงค่าเดิม · ตรวจรูปแบบรหัสคร่าว ๆ (กันวางผิดช่อง) · audit (ไม่บันทึกค่าลับ) · ล้างแคชเว็บร้าน
  * ด่าน: guardApi products.edit · ตาราง store_login_providers อ่านได้ผ่าน service role เท่านั้น
  */
@@ -16,6 +17,8 @@ import { SECRET_MASK } from "@/lib/settings-secrets";
 import { memberTokensReady } from "@/lib/storefront-member-token";
 import { callbackUrl, OAUTH_LABEL, OAUTH_PROVIDERS, providerReady, readLoginProviders, type OAuthProvider } from "@/lib/storefront-oauth";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
+import { readEmailLogin, writeEmailLogin } from "@/lib/member-email-login";
+import { emailConfigured } from "@/lib/email";
 
 export const dynamic = "force-dynamic";
 
@@ -37,7 +40,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sb = supabaseAdmin();
   const shop = await shopBySlug(sb, request.nextUrl.searchParams.get("shop"));
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
-  const [rows, domains] = await Promise.all([readLoginProviders(sb, shop.id), shopDomains(sb, shop.id)]);
+  const [rows, domains, em] = await Promise.all([readLoginProviders(sb, shop.id), shopDomains(sb, shop.id), readEmailLogin(sb, shop.id)]);
   const providers = Object.fromEntries(
     OAUTH_PROVIDERS.map((p) => {
       const r = rows.get(p);
@@ -46,13 +49,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     })
   );
   const callbacks = Object.fromEntries(OAUTH_PROVIDERS.map((p) => [p, domains.map((d) => callbackUrl(`https://${d}`, p))]));
-  return NextResponse.json({ providers, domains, callbacks, tokensReady: memberTokensReady() }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ providers, domains, callbacks, tokensReady: memberTokensReady(), email: { password: em.password === true, otp: em.otp, canMail: emailConfigured() } }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
   const denied = await guardWebsite(request, "edit");
   if (denied) return denied;
-  const body = ((await request.json().catch(() => null)) ?? {}) as { shop?: unknown; providers?: Record<string, { clientId?: unknown; clientSecret?: unknown; enabled?: unknown }> };
+  const body = ((await request.json().catch(() => null)) ?? {}) as { shop?: unknown; providers?: Record<string, { clientId?: unknown; clientSecret?: unknown; enabled?: unknown }>; email?: { password?: unknown; otp?: unknown } };
   const sb = supabaseAdmin();
   const shop = await shopBySlug<{ id: string; slug: string }>(sb, body.shop, "id, slug");
   if (!shop) return NextResponse.json({ error: "ไม่พบร้าน" }, { status: 404 });
@@ -81,6 +84,16 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     const { error } = await sb.from("store_login_providers").upsert({ shop_id: shop.id, provider: p, client_id: clientId, client_secret: secret, enabled, updated_at: now, updated_by: user?.id ?? null }, { onConflict: "shop_id,provider" });
     if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
     changes.push({ provider: p, client_id_changed: (old?.client_id ?? "") !== clientId, secret_changed: (old?.client_secret ?? "") !== secret, enabled, ready: providerReady({ client_id: clientId, client_secret: secret, enabled }) });
+  }
+
+  // ✉️ สมัคร/เข้าด้วยอีเมล (เปิด/ปิด)
+  if (body.email) {
+    const oldEm = await readEmailLogin(sb, shop.id);
+    const nextEm = { password: body.email.password === true, otp: body.email.otp === true };
+    if (oldEm.password !== nextEm.password || oldEm.otp !== nextEm.otp) {
+      if (!(await writeEmailLogin(sb, shop.id, nextEm))) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
+      changes.push({ provider: "email", password_before: oldEm.password, password: nextEm.password, otp_before: oldEm.otp, otp: nextEm.otp });
+    }
   }
 
   if (changes.length) {
