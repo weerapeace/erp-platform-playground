@@ -6,6 +6,7 @@
  *      JEAN08_1.jpg = รูปบนเว็บ · JEAN08-01_2.jpg = รูปสี · JEAN08_hero(.jpg / _m) = Hero คอม/มือถือ · โฟลเดอร์ชื่อรหัสก็ได้
  *      🎬 วิดีโอ (mp4/webm/mov) = Hero เสมอ: JEAN08.mp4 = คอม · JEAN08_m.mp4 = มือถือ (≤ 200 MB · ไฟล์ > 4 MB ส่งตรงเข้า R2)
  * 2) ตรวจก่อนลง: แยกตามสินค้า → ช่อง (บอกรหัส SKU + ร้านที่ลง) → รูปใหม่ตามลำดับ · ไฟล์ที่ต้องดู (ไม่พบรหัส/สีไม่มี/เกินเพดาน/Hero ซ้ำ/ข้ามเอง) เลือกช่องเองได้
+ *    แต่ละแถวโชว์รูปเดิมบนเว็บจางๆ ก่อนรูปใหม่ (ต่อท้าย = เลขต่อจากของเดิม · แทนที่ = ขีดฆ่า "จะเอาออก")
  *    ↕ ลากรูปสลับลำดับในแถว (หรือ ‹ ›) · ✎ ย้ายทั้งแถวไปสินค้า/ช่องอื่น · 🔁 เปลี่ยนสินค้าทั้งรุ่น (อ่านชื่อผิด — สีจับคู่ตามเลขสีเดิม)
  *    ค่าเริ่มต้น = เพิ่มต่อท้าย (ของเดิมอยู่ครบ) · แทนที่ = เฉพาะช่องที่มีรูปใหม่ · เกิน 20 สินค้า + แทนที่ = พิมพ์ CONFIRM
  * 3) กดลงรูป → รูปย่อ ≤ 2000px (uploadResizedImage) · วิดีโอใช้ตัวอัปกลาง uploadMediaFile (ตัวเดียวกับช่อง Hero ทีละตัว) → R2 (ทีละ 3 ไฟล์ · ไฟล์ที่ไม่ได้ลงจะไม่อัป) → POST /api/website/listings/images (รวมกับรูปล่าสุดใน DB + audit + ล้างแคชเว็บ)
@@ -18,6 +19,7 @@ import { ERPModal } from "@/components/modal";
 import { useFileDrop, FileDropHint, filePathOf } from "@/components/file-drop";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { uploadResizedImage } from "@/components/image-attach";
+import { r2ImageUrl } from "@/lib/r2-image";
 import { uploadMediaFile, MediaUploadError } from "@/lib/media-upload";
 import { BIG_VIDEO_MAX_BYTES, fileMb } from "@/lib/media-upload-limits";
 import {
@@ -57,6 +59,15 @@ type Result = { uploaded: number; uploadFailed: { name: string; why: string }[];
 const CONFIRM_OVER = 20;
 const UPLOAD_CONCURRENCY = 3;
 const seg = (on: boolean) => `px-3 py-1 text-xs rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
+/** รูปเดิมบนเว็บของช่องนั้น (R2 key ตามลำดับที่โชว์) */
+const existingKeys = (t: ImageTarget, p: CatalogParent): string[] => {
+  if (t.kind === "gallery") return p.webImages;
+  const sk = t.kind === "hero" ? null : p.skus.find((x) => x.id === t.skuId);
+  if (t.kind === "sku") return sk?.webImages ?? [];
+  const h = t.kind === "hero" ? p.hero : sk?.hero;
+  const k = h?.[t.slot];
+  return k ? [k] : [];
+};
 /** ค่า select ช่องรูป ↔ ImageTarget (เลือกเอง: รูปบนเว็บ · รูปสี · Hero รุ่น) */
 const encT = (t: ImageTarget | null) => (!t ? "" : t.kind === "gallery" ? "g" : t.kind === "sku" ? `s:${t.skuId}` : t.kind === "hero" ? `h:${t.slot}` : `sh:${t.skuId}:${t.slot}`);
 const decT = (v: string): ImageTarget | null => {
@@ -349,7 +360,7 @@ export function WebsiteImageMassUpload({
           </>
         ) : (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={it.url} alt="" loading="lazy" decoding="async" draggable={false} {...(opts.handle ?? {})} title={opts.handle ? "กดค้างแล้วลาก = สลับลำดับ (รูปแรก = รูปหลัก)" : it.path} className={`h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-100 ${opts.handle ? "cursor-grab active:cursor-grabbing" : ""}`} />
+          <img src={it.url} alt="" loading="lazy" decoding="async" draggable={false} {...(opts.handle ?? {})} title={opts.handle ? "กดค้างแล้วลาก = สลับลำดับ (เลข 1 = รูปหลัก)" : it.path} className={`h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-100 ${opts.handle ? "cursor-grab active:cursor-grabbing" : ""}`} />
         )}
         {opts.index != null && !it.video && <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/55 px-1 text-[10px] leading-4 text-white">{opts.index + 1}</span>}
         {opts.onMove && phase === "pick" && (
@@ -511,6 +522,10 @@ export function WebsiteImageMassUpload({
                         const hasVideo = d.fileIds.some((id) => itemById.get(id)?.video);
                         const editing = editDest?.key === d.key ? editDest : null;
                         const ep = editing ? byId.get(editing.pid) : undefined;
+                        const old = existingKeys(d.target, p);
+                        // ต่อท้าย = เลขรูปใหม่ต่อจากของเดิม · แทนที่/Hero = รูปใหม่เริ่ม 1
+                        const base = d.replaces ? 0 : old.length;
+                        const numbered = !isHero && (d.fileIds.length > 1 || base > 0);
                         return (
                           <div key={d.key} className="mt-2 grid grid-cols-[11rem_minmax(0,1fr)] items-start gap-2 border-t border-slate-100 pt-2">
                             <div className="min-w-0">
@@ -523,6 +538,16 @@ export function WebsiteImageMassUpload({
                               )}
                             </div>
                             <div className="flex flex-wrap items-end gap-2">
+                              {old.length > 0 && (
+                                <>
+                                  <OldThumbs keys={old} gone={d.replaces} hero={isHero} />
+                                  <span className="mb-[18px] flex h-20 flex-col items-center justify-center gap-1 px-0.5 text-[10px] leading-3 text-blue-600" aria-hidden>
+                                    <span className="h-full w-px bg-blue-200" />
+                                    {d.replaces ? "แทน" : "ใหม่"}
+                                    <span className="h-full w-px bg-blue-200" />
+                                  </span>
+                                </>
+                              )}
                               <DestThumbs
                                 group={d.key}
                                 ids={d.fileIds}
@@ -532,7 +557,7 @@ export function WebsiteImageMassUpload({
                                   thumb(id, {
                                     onSkip: () => setManual(id, "skip"),
                                     handle,
-                                    index: d.fileIds.length > 1 ? i : undefined,
+                                    index: numbered ? base + i : undefined,
                                     onMove: d.fileIds.length > 1 ? (dir) => reorderDest(d.fileIds, i, i + dir) : undefined,
                                     canPrev: i > 0,
                                     canNext: i < d.fileIds.length - 1,
@@ -726,6 +751,36 @@ export function WebsiteImageMassUpload({
 
 
 /** ↕ แถวรูปของช่องเดียว — กดค้างที่รูปแล้วลาก = สลับลำดับ (ของกลาง useDragReorder · group = ช่องนั้น ลากข้ามแถวไม่ได้) */
+/** รูปเดิมบนเว็บ (จางๆ · ชี้ดูชัด) — gone = โหมดแทนที่/Hero ใหม่ → ขีดฆ่า "จะเอาออก" */
+function OldThumbs({ keys, gone, hero }: { keys: string[]; gone: boolean; hero: boolean }) {
+  return (
+    <>
+      {keys.map((k, i) => {
+        const tip = gone ? "รูปเดิม — จะถูกเอาออกจากเว็บ (ไฟล์ยังอยู่ในคลัง)" : `รูปเดิมบนเว็บ ลำดับ ${i + 1} — ไม่ถูกแตะ`;
+        return (
+          <div key={`${k}:${i}`} className="w-16 shrink-0" title={tip}>
+            <div className={`relative h-20 w-16 overflow-hidden rounded-md border border-dashed border-slate-300 transition-opacity hover:opacity-100 ${gone ? "opacity-35" : "opacity-45"}`}>
+              {isVideoName(k) ? (
+                <span className="flex h-full w-full items-center justify-center bg-slate-700 text-lg">🎬</span>
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={r2ImageUrl(k, 128) ?? ""} alt="" loading="lazy" decoding="async" draggable={false} className="h-full w-full bg-slate-100 object-cover" />
+              )}
+              {!hero && !gone && <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/45 px-1 text-[10px] leading-4 text-white">{i + 1}</span>}
+              {gone && (
+                <span className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                  <span className="rounded bg-rose-600/85 px-1 text-[10px] leading-4 text-white">✕ ออก</span>
+                </span>
+              )}
+            </div>
+            <p className={`mt-0.5 truncate text-[10px] ${gone ? "text-rose-500 line-through" : "text-slate-400"}`}>{gone ? "จะเอาออก" : "รูปเดิม"}</p>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
 function DestThumbs({ group, ids, canDrag, onReorder, render }: {
   group: string;
   ids: string[];
