@@ -7,10 +7,11 @@
  *      🎬 วิดีโอ (mp4/webm/mov) = Hero เสมอ: JEAN08.mp4 = คอม · JEAN08_m.mp4 = มือถือ (≤ 200 MB · ไฟล์ > 4 MB ส่งตรงเข้า R2)
  * 2) ตรวจก่อนลง: แยกตามสินค้า → ช่อง (บอกรหัส SKU + ร้านที่ลง) → รูปใหม่ตามลำดับ · ไฟล์ที่ต้องดู (ไม่พบรหัส/สีไม่มี/เกินเพดาน/Hero ซ้ำ/ข้ามเอง) เลือกช่องเองได้
  *    แต่ละแถวโชว์รูปเดิมบนเว็บจางๆ ก่อนรูปใหม่ (ต่อท้าย = เลขต่อจากของเดิม · แทนที่ = ขีดฆ่า "จะเอาออก")
- *    ↕ ลากรูปสลับลำดับในแถว (หรือ ‹ ›) · ✎ ย้ายทั้งแถวไปสินค้า/ช่องอื่น · 🔁 เปลี่ยนสินค้าทั้งรุ่น (อ่านชื่อผิด — สีจับคู่ตามเลขสีเดิม)
+ *    ↕ ลากรูปสลับลำดับในแถว (หรือ ‹ ›) — เลือกได้ว่าแถวอื่นตำแหน่งเดียวกันสลับตาม (ทุกสีในรุ่น / ทุกแถวที่ลากมา · จำต่อคน)
+ *    ✕ ไม่ลงทั้งแถว / ทั้งสินค้า (ลงซ้ำของที่มีแล้ว) → ไปกล่อง "ข้ามไว้" เอากลับได้ทีละกลุ่ม · ✎ ย้ายทั้งแถวไปสินค้า/ช่องอื่น · 🔁 เปลี่ยนสินค้าทั้งรุ่น (อ่านชื่อผิด — สีจับคู่ตามเลขสีเดิม)
  *    ค่าเริ่มต้น = เพิ่มต่อท้าย (ของเดิมอยู่ครบ) · แทนที่ = เฉพาะช่องที่มีรูปใหม่ · เกิน 20 สินค้า + แทนที่ = พิมพ์ CONFIRM
  * 3) กดลงรูป → รูปย่อ ≤ 2000px (uploadResizedImage) · วิดีโอใช้ตัวอัปกลาง uploadMediaFile (ตัวเดียวกับช่อง Hero ทีละตัว) → R2 (ทีละ 3 ไฟล์ · ไฟล์ที่ไม่ได้ลงจะไม่อัป) → POST /api/website/listings/images (รวมกับรูปล่าสุดใน DB + audit + ล้างแคชเว็บ)
- * ของกลาง: ERPModal · useFileDrop(folders) · useDragReorder · uploadResizedImage · uploadMediaFile · toast
+ * ของกลาง: ERPModal · useFileDrop(folders) · useDragReorder · useUserPref · uploadResizedImage · uploadMediaFile · toast
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
@@ -20,6 +21,7 @@ import { useFileDrop, FileDropHint, filePathOf } from "@/components/file-drop";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { uploadResizedImage } from "@/components/image-attach";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { useUserPref } from "@/lib/use-user-pref";
 import { uploadMediaFile, MediaUploadError } from "@/lib/media-upload";
 import { BIG_VIDEO_MAX_BYTES, fileMb } from "@/lib/media-upload-limits";
 import {
@@ -34,6 +36,7 @@ import {
   type ImageMatch,
   type ImageTarget,
   type MassMode,
+  type PlanDest,
   type PlanFile,
 } from "@/lib/website-image-match";
 
@@ -48,14 +51,24 @@ type Item = {
   video: boolean;
   /** ลงไม่ได้ เช่น ไฟล์ใหญ่เกิน */
   invalid?: string;
-  /** เลือกช่องเอง (ทับผลจับคู่) · "skip" = ข้ามไฟล์นี้ */
-  manual?: { parentId: string; target: ImageTarget | null } | "skip";
+  /** เลือกช่องเอง (ทับผลจับคู่) */
+  manual?: { parentId: string; target: ImageTarget | null };
+  /** ✕ ไม่ลงไฟล์นี้ (เก็บช่องเดิมไว้ → เอากลับแล้วกลับแถวเดิม) */
+  skip?: boolean;
   /** ↕ ลำดับที่ลากสลับเอง (ทับเลขท้ายชื่อไฟล์) */
   pos?: number;
 };
 type Phase = "pick" | "uploading" | "saving" | "done";
 type Result = { uploaded: number; uploadFailed: { name: string; why: string }[]; updated: number; failed: number; skippedShops: number };
 
+/** สลับลำดับแล้วแถวอื่น "ตำแหน่งเดียวกัน" ตามด้วยไหม: แถวเดียว / ทุกสีในรุ่น / ทุกแถวที่ลากมา (ชนิดช่องเดียวกัน) */
+type LinkReorder = "row" | "product" | "all";
+const LINK_OPTS: { v: LinkReorder; label: string }[] = [
+  { v: "row", label: "แถวนี้แถวเดียว" },
+  { v: "product", label: "ทุกสีในรุ่นเดียวกัน" },
+  { v: "all", label: "ทุกแถวที่ลากมา" },
+];
+const parseLink = (v: unknown): LinkReorder | null => (v === "row" || v === "product" || v === "all" ? v : null);
 const CONFIRM_OVER = 20;
 const UPLOAD_CONCURRENCY = 3;
 const seg = (on: boolean) => `px-3 py-1 text-xs rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
@@ -98,6 +111,7 @@ export function WebsiteImageMassUpload({
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [items, setItems] = useState<Item[]>([]);
   const [mode, setMode] = useState<MassMode>("append");
+  const [linkReorder, setLinkReorder] = useUserPref<LinkReorder>("website_mass_upload_link_reorder", "all", parseLink);
   const [alsoShops, setAlsoShops] = useState<Set<string>>(new Set());
   const [typed, setTyped] = useState("");
   const [phase, setPhase] = useState<Phase>("pick");
@@ -195,9 +209,8 @@ export function WebsiteImageMassUpload({
       const m = it.manual;
       const base = { video: it.video, invalid: it.invalid };
       const order = it.pos ?? it.match.order;
-      if (m === "skip") return { ...base, id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order, skip: true };
-      if (m) return { ...base, id: it.id, name: it.path, parentId: m.parentId, target: m.target, order };
-      return { ...base, id: it.id, name: it.path, parentId: it.match.parentId, target: it.match.target, order };
+      const at = m ? { parentId: m.parentId, target: m.target } : { parentId: it.match.parentId, target: it.match.target };
+      return { ...base, id: it.id, name: it.path, ...at, order, ...(it.skip ? { skip: true } : {}) };
     });
     return planImageUpload(ins, parents, mode);
   }, [items, parents, mode]);
@@ -205,7 +218,19 @@ export function WebsiteImageMassUpload({
   const itemById = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
   const uploadIds = plan.dests.flatMap((d) => d.fileIds);
   const touched = [...new Set(plan.dests.map((d) => d.parentId))];
-  const needLook = plan.files.filter((f) => f.plan !== "upload");
+  const needLook = plan.files.filter((f) => f.plan !== "upload" && f.plan !== "skip");
+  // ⏭ ข้ามไว้ — จัดกลุ่มตามแถวที่จะลง (เอากลับทีละกลุ่ม)
+  const skipped = useMemo(() => {
+    const g = new Map<string, { parentId: string | null; target: ImageTarget | null; ids: string[] }>();
+    for (const f of plan.files) {
+      if (f.plan !== "skip") continue;
+      const k = `${f.parentId ?? ""}|${encT(f.target)}`;
+      const x = g.get(k) ?? { parentId: f.parentId, target: f.target, ids: [] };
+      x.ids.push(f.id);
+      g.set(k, x);
+    }
+    return [...g.entries()].map(([key, x]) => ({ key, ...x }));
+  }, [plan]);
   const countOf = (p: PlanFile["plan"]) => plan.files.filter((f) => f.plan === p).length;
   const needConfirm = mode === "replace" && touched.length > CONFIRM_OVER;
 
@@ -217,12 +242,34 @@ export function WebsiteImageMassUpload({
       .filter((s) => s.has > 0);
   }, [catalog, touched, byId]);
 
-  const setManual = (id: string, manual: Item["manual"]) => setItems((xs) => xs.map((it) => (it.id === id ? { ...it, manual } : it)));
-  // ↕ สลับลำดับในช่องเดียวกัน (รูปแรก = รูปหลักของช่องนั้นบนเว็บ) — ทับเลขท้ายชื่อไฟล์
-  const reorderDest = (ids: string[], from: number, to: number) => {
-    const next = moveItem(ids, from, to);
-    setItems((xs) => xs.map((it) => { const i = next.indexOf(it.id); return i >= 0 ? { ...it, pos: i + 1 } : it; }));
+  const setManual = (id: string, manual: Item["manual"]) => setItems((xs) => xs.map((it) => (it.id === id ? { ...it, manual, skip: false } : it)));
+  // ✕ ไม่ลง / ↩ เอากลับ (หลายไฟล์ทีเดียว)
+  const setSkip = (ids: string[], skip: boolean) => {
+    const set = new Set(ids);
+    setItems((xs) => xs.map((it) => (set.has(it.id) ? { ...it, skip } : it)));
   };
+  const skipMany = (ids: string[], what: string) => {
+    if (!ids.length) return;
+    setSkip(ids, true);
+    toast.action(`ไม่ลง ${ids.length} รูปของ ${what} — อยู่ในกล่อง "ข้ามไว้" ด้านล่าง`, "เอากลับ", () => setSkip(ids, false));
+  };
+  // ↕ สลับลำดับ (เลขตามลำดับใหม่ · ทับเลขท้ายชื่อไฟล์) — แถวอื่นชนิดเดียวกัน "ตำแหน่งเดียวกัน" สลับตามตามที่ตั้งไว้
+  const reorderDest = (d: PlanDest, from: number, to: number) => {
+    if (from === to) return;
+    const rows =
+      linkReorder === "row" ? [d] : plan.dests.filter((x) => x.target.kind === d.target.kind && (linkReorder === "all" || x.parentId === d.parentId));
+    const pos = new Map<string, number>();
+    let n = 0;
+    for (const r of rows) {
+      // แถวที่รูปไม่ถึงตำแหน่งนั้น = ไม่แตะ
+      if (r.key !== d.key && Math.max(from, to) >= r.fileIds.length) continue;
+      moveItem(r.fileIds, from, to).forEach((id, i) => pos.set(id, i + 1));
+      n++;
+    }
+    setItems((xs) => xs.map((it) => (pos.has(it.id) ? { ...it, pos: pos.get(it.id) } : it)));
+    if (n > 1) toast.info(`สลับลำดับพร้อมกัน ${n} แถว (รูปใหม่ลำดับที่ ${from + 1} → ${to + 1})`);
+  };
+  const linkable = plan.dests.filter((x) => x.fileIds.length > 1).length > 1;
   // ✎ ระบบอ่านชื่อผิด → ย้ายรูปทั้งแถวไปสินค้า/ช่องที่เลือกเอง
   const [editDest, setEditDest] = useState<{ key: string; pid: string } | null>(null);
   // รูปที่ย้ายมา = ต่อท้ายแถวปลายทาง (คงลำดับเดิมของแถวที่ย้าย)
@@ -492,6 +539,18 @@ export function WebsiteImageMassUpload({
                   </span>
                 </div>
 
+                {linkable && phase === "pick" && (
+                  <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs">
+                    <span className="text-slate-700">↕ สลับลำดับรูปแล้ว แถวอื่นตำแหน่งเดียวกันสลับตาม:</span>
+                    {LINK_OPTS.map((o) => (
+                      <button key={o.v} type="button" onClick={() => setLinkReorder(o.v)} className={seg(linkReorder === o.v)}>
+                        {o.label}
+                      </button>
+                    ))}
+                    <span className="text-[11px] text-slate-400">เฉพาะแถวชนิดเดียวกัน (รูปสี↔รูปสี) ที่มีรูปถึงตำแหน่งนั้น</span>
+                  </div>
+                )}
+
                 {/* ② แยกตามสินค้า */}
                 {touched.map((pid) => {
                   const p = byId.get(pid)!;
@@ -514,6 +573,16 @@ export function WebsiteImageMassUpload({
                               ))}
                             </select>
                           )}
+                          {phase === "pick" && (
+                            <button
+                              type="button"
+                              onClick={() => skipMany(plan.files.filter((f) => f.parentId === pid && f.plan !== "skip").map((f) => f.id), p.code)}
+                              className="h-7 rounded-md border border-slate-300 bg-white px-2 text-[11px] text-slate-600 hover:border-rose-300 hover:text-rose-600"
+                              title="ไม่ลงรูปทั้งหมดของสินค้านี้ (เอากลับได้)"
+                            >
+                              ✕ ไม่ลงสินค้านี้
+                            </button>
+                          )}
                         </div>
                       </div>
                       {dests.map((d) => {
@@ -532,9 +601,14 @@ export function WebsiteImageMassUpload({
                               <p className="truncate text-xs font-medium text-slate-700" title={dl.title}>{dl.title}</p>
                               <p className="truncate text-[11px] text-slate-500" title={dl.sub}>{dl.sub}</p>
                               {phase === "pick" && (
-                                <button type="button" onClick={() => setEditDest(editing ? null : { key: d.key, pid })} className="mt-0.5 text-[11px] text-blue-600 hover:underline">
-                                  {editing ? "ปิด" : "✎ ย้ายแถวนี้ (อ่านผิด)"}
-                                </button>
+                                <div className="mt-0.5 flex flex-col items-start gap-0.5">
+                                  <button type="button" onClick={() => setEditDest(editing ? null : { key: d.key, pid })} className="text-[11px] text-blue-600 hover:underline">
+                                    {editing ? "ปิด" : "✎ ย้ายแถวนี้ (อ่านผิด)"}
+                                  </button>
+                                  <button type="button" onClick={() => skipMany(d.fileIds, dl.title.replace(/^\S+\s/, ""))} className="text-[11px] text-slate-500 hover:text-rose-600 hover:underline" title="ไม่ลงรูปทั้งแถวนี้ (เช่น ลงซ้ำของที่มีแล้ว · เอากลับได้)">
+                                    ✕ ไม่ลงแถวนี้
+                                  </button>
+                                </div>
                               )}
                             </div>
                             <div className="flex flex-wrap items-end gap-2">
@@ -552,13 +626,13 @@ export function WebsiteImageMassUpload({
                                 group={d.key}
                                 ids={d.fileIds}
                                 canDrag={phase === "pick" && d.fileIds.length > 1}
-                                onReorder={(from, to) => reorderDest(d.fileIds, from, to)}
+                                onReorder={(from, to) => reorderDest(d, from, to)}
                                 render={(id, i, handle) =>
                                   thumb(id, {
-                                    onSkip: () => setManual(id, "skip"),
+                                    onSkip: () => setSkip([id], true),
                                     handle,
                                     index: numbered ? base + i : undefined,
-                                    onMove: d.fileIds.length > 1 ? (dir) => reorderDest(d.fileIds, i, i + dir) : undefined,
+                                    onMove: d.fileIds.length > 1 ? (dir) => reorderDest(d, i, i + dir) : undefined,
                                     canPrev: i > 0,
                                     canNext: i < d.fileIds.length - 1,
                                   })
@@ -614,17 +688,16 @@ export function WebsiteImageMassUpload({
                     <p className="mb-1 text-sm font-medium text-slate-800">ไฟล์ที่ต้องดู ({needLook.length})</p>
                     {needLook.map((f) => {
                       const it = itemById.get(f.id)!;
-                      const man = it.manual && it.manual !== "skip" ? it.manual : null;
+                      const man = it.manual ?? null;
                       const pid = man?.parentId ?? f.parentId ?? "";
                       const p = pid ? byId.get(pid) : undefined;
-                      const why =
-                        f.plan === "skip" ? "ข้ามไว้" : man && !man.target ? "เลือกช่องรูปต่อ" : f.plan === "unmatched" ? it.match.reason || "ยังไม่ได้เลือกช่อง" : f.note || "";
+                      const why = man && !man.target ? "เลือกช่องรูปต่อ" : f.plan === "unmatched" ? it.match.reason || "ยังไม่ได้เลือกช่อง" : f.note || "";
                       return (
                         <div key={f.id} className="flex flex-wrap items-center gap-2 border-t border-amber-100 py-2 first:border-t-0">
                           {thumb(f.id, { muted: true })}
                           <div className="min-w-[10rem] flex-1">
                             <p className="truncate text-xs text-slate-700">{it.path}</p>
-                            <p className={`text-[11px] ${f.plan === "skip" ? "text-slate-500" : "text-amber-800"}`}>{why}</p>
+                            <p className="text-[11px] text-amber-800">{why}</p>
                           </div>
                           {phase === "pick" && (
                             <div className="flex flex-wrap items-center gap-1.5">
@@ -632,7 +705,7 @@ export function WebsiteImageMassUpload({
                                 value={pid}
                                 onChange={(e) => {
                                   const np = e.target.value;
-                                  if (!np) return setManual(f.id, "skip");
+                                  if (!np) return;
                                   // เลือกสินค้าแล้วรอเลือกช่องในแถวเดิม (ยังไม่ย้ายไฟล์ออกจากรายการนี้)
                                   setManual(f.id, { parentId: np, target: null });
                                 }}
@@ -660,12 +733,51 @@ export function WebsiteImageMassUpload({
                                   {slotOptions(p, it.video)}
                                 </select>
                               )}
-                              {f.plan !== "skip" && (
-                                <button type="button" onClick={() => setManual(f.id, "skip")} className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50">
-                                  ข้าม
-                                </button>
-                              )}
+                              <button type="button" onClick={() => setSkip([f.id], true)} className="h-8 rounded-lg border border-slate-200 bg-white px-2.5 text-xs text-slate-600 hover:bg-slate-50">
+                                ข้าม
+                              </button>
                             </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* ⏭ ข้ามไว้ — เอากลับทีละกลุ่ม */}
+                {skipped.length > 0 && (
+                  <div className="rounded-xl border border-slate-200 bg-slate-50/60 px-3.5 py-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-slate-700">⏭ ข้ามไว้ — ไม่ลง ({countOf("skip")} รูป)</p>
+                      {phase === "pick" && skipped.length > 1 && (
+                        <button type="button" onClick={() => setSkip(skipped.flatMap((g) => g.ids), false)} className="text-[11px] text-blue-600 hover:underline">
+                          ↩ เอากลับทั้งหมด
+                        </button>
+                      )}
+                    </div>
+                    {skipped.map((g) => {
+                      const sp = g.parentId ? byId.get(g.parentId) : undefined;
+                      const label = sp && g.target ? `${sp.code} · ${destLabel(g.target, sp).title}` : sp ? `${sp.code} · ยังไม่ได้เลือกช่อง` : "ไม่พบรหัสสินค้า";
+                      return (
+                        <div key={g.key} className="mt-1.5 flex flex-wrap items-center gap-2 border-t border-slate-200 pt-1.5">
+                          <span className="w-56 truncate text-xs text-slate-600" title={label}>{label}</span>
+                          <div className="flex flex-1 flex-wrap gap-1">
+                            {g.ids.slice(0, 10).map((id) => {
+                              const it = itemById.get(id);
+                              if (!it) return null;
+                              return it.video ? (
+                                <span key={id} title={it.path} className="flex h-10 w-8 items-center justify-center rounded border border-slate-200 bg-slate-700 text-xs opacity-60">🎬</span>
+                              ) : (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img key={id} src={it.url} alt="" title={it.path} loading="lazy" decoding="async" className="h-10 w-8 rounded border border-slate-200 object-cover opacity-50 grayscale" />
+                              );
+                            })}
+                            {g.ids.length > 10 && <span className="self-center text-[11px] text-slate-400">+{g.ids.length - 10}</span>}
+                          </div>
+                          {phase === "pick" && (
+                            <button type="button" onClick={() => setSkip(g.ids, false)} className="h-7 rounded-md border border-slate-300 bg-white px-2 text-[11px] text-slate-700 hover:bg-slate-100">
+                              ↩ เอากลับ {g.ids.length} รูป
+                            </button>
                           )}
                         </div>
                       );
