@@ -847,3 +847,29 @@ describe("📂 หมวดสินค้า — 🔁 เปลี่ยนร�
     expect(fd("cycleImg").hidden).toBe(true);
   });
 });
+
+describe("🚪 หน้าเปิดแบ่งช่อง (split-entry)", () => {
+  type SE = { cut: string; height: string; grow: string; overlay: number; gapSize: number; panels: { title: string; primary: { text: string; href: string } }[] };
+  it("วางใหม่ = 2 ช่อง แบ่งตรง เต็มจอ ชี้แล้วขยายกลาง · ช่องยังไม่มีลิงก์ = error (กันเผยแพร่ช่องที่กดไม่ไปไหน)", () => {
+    const b = newBlock("split-entry", 1) as unknown as SE;
+    expect(b.panels).toHaveLength(2);
+    expect([b.cut, b.height, b.grow]).toEqual(["straight", "full", "medium"]);
+    expect(b.panels[0].primary.text).toBe("เข้าชม");
+    const issues = validateBlocks([b as unknown as Block]);
+    expect(issues.filter((i) => i.level === "error" && i.message.includes("กดแล้วไปหน้าไหน"))).toHaveLength(2);
+    expect(issues.some((i) => i.level === "warning" && i.message.includes("ยังไม่มีรูปหรือคลิป"))).toBe(true);
+  });
+  it("ตั้งครบ (ลิงก์ + รูป) = ไม่มี error · ค่ามั่วกลับเป็นค่าเริ่ม/บีบเข้าช่วง · เกิน 3 ช่องถูกตัด", () => {
+    const panel = (t: string) => ({ title: t, primary: { text: "เข้า", href: "/shop" }, imageKey: "lib/a.jpg" });
+    const [n] = normalizeBlocks([{ id: "x", type: "split-entry", cut: "zigzag", grow: "huge", overlay: 500, gapSize: 99, panels: [panel("ก"), panel("ข"), panel("ค"), panel("ง")] }]);
+    const b = n as unknown as SE;
+    expect([b.cut, b.grow, b.overlay, b.gapSize]).toEqual(["straight", "medium", 80, 32]);
+    expect(b.panels).toHaveLength(3);
+    expect(validateBlocks([n]).filter((i) => i.level === "error")).toEqual([]);
+  });
+  it("ช่องไฟ/มุมโค้ง โชว์เฉพาะแบบมีช่องไฟ", () => {
+    const fd = SECTION_SCHEMAS["split-entry"].fields.find((x) => x.key === "gapSize")!;
+    expect(matchShowIf(fd, { cut: "straight" })).toBe(false);
+    expect(matchShowIf(fd, { cut: "gap" })).toBe(true);
+  });
+});

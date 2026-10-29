@@ -35,6 +35,7 @@ export type BlockType =
   | "announcement"
   | "hero"
   | "two-tracks"
+  | "split-entry"
   | "categories"
   | "featured"
   | "products"
@@ -574,6 +575,31 @@ export interface TwoTracksBlock extends BlockBase {
     primary: CtaLink;
     secondary: CtaLink;
     dark: boolean;
+  })[];
+}
+
+/** 🚪 หน้าเปิดแบ่งช่อง — 1–3 ช่องเต็มจอ กดแล้วเข้าแต่ละส่วนของเว็บ (schema: lib/website-schema.ts "split-entry") */
+export interface SplitEntryBlock extends BlockBase {
+  type: "split-entry";
+  cut: "straight" | "gap" | "diag";
+  gapSize: number;
+  radius: number;
+  height: "full" | "tall" | "medium";
+  grow: "off" | "small" | "medium" | "large";
+  textPos: "bottom-left" | "bottom" | "center";
+  mobileHeight: "split" | "tall";
+  overlay: number;
+  panels: (ChildBase & {
+    eyebrow: string;
+    title: string;
+    desc: string;
+    primary: CtaLink;
+    secondary: CtaLink;
+    imageKey: string | null;
+    mobileImageKey: string | null;
+    imageAlt: string;
+    videoFile: string | null;
+    bg: string;
   })[];
 }
 
@@ -1320,6 +1346,7 @@ export type Block =
   | AnnouncementBlock
   | HeroBlock
   | TwoTracksBlock
+  | SplitEntryBlock
   | CategoriesBlock
   | FeaturedBlock
   | ProductsBlock

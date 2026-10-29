@@ -2253,6 +2253,114 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         .join(" / ") || "2 การ์ด",
   },
 
+  // 🚪 หน้าเปิดแบ่งช่อง (2026-10-29) — แบ่งจอ 1–3 ช่อง รูป/คลิปเต็มช่อง กดแล้วเข้าแต่ละส่วนของเว็บ (เช่น รับผลิต | ขายอะไหล่)
+  //   ชี้แล้วช่องขยาย (คอม) · มือถือเรียงบน-ล่าง · Section แรกของหน้า = Header โปร่งใสทับได้ · เว็บร้าน: src/components/home/SplitEntry.tsx
+  "split-entry": {
+    type: "split-entry",
+    meta: { label: "หน้าเปิดแบ่งช่อง", icon: "🚪", hint: "แบ่งจอ 1–3 ช่อง รูป/คลิปเต็มช่อง กดแล้วเข้าแต่ละส่วนของเว็บ", group: "พื้นฐาน" },
+    fields: [
+      f("cut", "เส้นแบ่งช่อง", "select", {
+        group: "layout",
+        default: "straight",
+        display: "seg",
+        options: [
+          { v: "straight", l: "ตรง" },
+          { v: "gap", l: "มีช่องไฟ" },
+          { v: "diag", l: "เฉียง" },
+        ],
+      }),
+      f("gapSize", "ช่องไฟ (px)", "range", { group: "layout", default: 8, min: 2, numMax: 32, step: 1, showIf: { key: "cut", eq: "gap" } }),
+      f("radius", "มุมโค้งของช่อง (px)", "range", { group: "layout", default: 12, min: 0, numMax: 40, step: 1, showIf: { key: "cut", eq: "gap" } }),
+      f("height", "ความสูง", "select", {
+        group: "layout",
+        default: "full",
+        options: [
+          { v: "full", l: "เต็มจอ" },
+          { v: "tall", l: "สูง (75% ของจอ)" },
+          { v: "medium", l: "กลาง (55% ของจอ)" },
+        ],
+        hint: "เต็มจอพอดีเมื่อหัวเว็บลอยทับ (ดีไซน์ › หัวเว็บ → โปร่งใสตอนอยู่บนสุด) · ไม่ลอย = เลื่อนเกินจอเท่าความสูงหัวเว็บ",
+      }),
+      f("grow", "ชี้แล้วช่องขยาย (คอม)", "select", {
+        group: "layout",
+        default: "medium",
+        display: "seg",
+        options: [
+          { v: "off", l: "ไม่ขยาย" },
+          { v: "small", l: "นิดหน่อย" },
+          { v: "medium", l: "กลาง" },
+          { v: "large", l: "มาก" },
+        ],
+        hint: "ชี้เมาส์ช่องไหน ช่องนั้นกว้างขึ้น · มือถือไม่มีการชี้ จึงไม่ขยาย",
+      }),
+      f("textPos", "ตำแหน่งข้อความ", "select", {
+        group: "layout",
+        default: "bottom-left",
+        display: "seg",
+        options: [
+          { v: "bottom-left", l: "ล่างซ้าย" },
+          { v: "bottom", l: "ล่างกลาง" },
+          { v: "center", l: "กลางช่อง" },
+        ],
+      }),
+      f("mobileHeight", "มือถือ: ความสูงแต่ละช่อง", "select", {
+        group: "layout",
+        default: "split",
+        options: [
+          { v: "split", l: "แบ่งความสูงเท่า ๆ กัน (เห็นครบทุกช่อง)" },
+          { v: "tall", l: "ช่องละ 70% ของจอ (เลื่อนลงดูช่องถัดไป)" },
+        ],
+        hint: "มือถือเรียงช่องบน-ล่างเสมอ",
+      }),
+      f("overlay", "ความทึบสีทับรูป (%)", "range", { group: "media", default: 35, min: 0, numMax: 80, step: 5, hint: "เพิ่มถ้ารูปสว่างจนอ่านตัวหนังสือไม่ออก" }),
+    ],
+    children: {
+      key: "panels",
+      label: "ช่อง",
+      itemLabel: "ช่อง",
+      icon: "🚪",
+      min: 1,
+      max: 3,
+      fields: [
+        text("eyebrow", "คำโปรยเล็กด้านบน", { default: "", max: 60 }),
+        text("title", "หัวข้อ", { default: "", max: 80, required: true, requiredMessage: "ช่องนี้ยังไม่ได้ใส่หัวข้อ" }),
+        area("desc", "คำอธิบายสั้น", { default: "", max: 200 }),
+        link("primary", "ปุ่มหลัก — กดตรงไหนของช่องก็ไปลิงก์นี้", "เข้าชม", ""),
+        link("secondary", "ปุ่มรอง (ไม่บังคับ)", "", "", { hint: "เหมาะกับแบบช่องเดียวที่มี 2 ทางเลือก" }),
+        image("imageKey", "รูป", { hint: "แนะนำรูปแนวตั้งหรือจัตุรัส กว้าง 1600px+ (ช่องแคบกว่าจอ รูปจะถูกครอปให้เต็มช่อง)", minPx: 1600 }),
+        image("mobileImageKey", "รูป (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · ใส่ไว้ = มือถือโชว์รูปนี้แทนคลิป (ประหยัดเน็ตลูกค้า) · มือถือช่องเป็นแนวนอน แนะนำ 1200×900" }),
+        text("imageAlt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200, hint: "มีผลกับ SEO" }),
+        f("videoFile", "🎬 คลิปวนเล่น (แทนรูป)", "videoFile", {
+          group: "media",
+          default: null,
+          wide: true,
+          hint: "เล่นวนเงียบ ๆ เฉพาะตอนเห็นบนจอ · รูปโชว์ระหว่างโหลด · แนะนำ MP4 สั้น 6–15 วินาที",
+        }),
+        f("bg", "สีพื้นช่อง (ตอนยังไม่มีรูป)", "color", { group: "media", default: "" }),
+      ],
+      summary: (it) => s(it.title) || "ช่อง",
+      starter: () => [{ title: "ช่องที่ 1" }, { title: "ช่องที่ 2" }],
+    },
+    summary: (b) => {
+      const ps = arr(b.panels).filter((p) => p.enabled !== false);
+      return ps.length ? `${count(ps.length, "ช่อง")}: ${ps.map((p) => s(p.title) || "ช่อง").join(" | ")}` : "ยังไม่มีช่อง";
+    },
+    validate: (b, label) => {
+      const out: Omit<ValidationIssue, "blockId">[] = [];
+      const ps = arr(b.panels).filter((p) => p.enabled !== false);
+      if (!ps.length) out.push({ level: "error", message: `${label}: ยังไม่มีช่อง — เพิ่มอย่างน้อย 1 ช่อง` });
+      ps.forEach((p, i) => {
+        const name = `ช่อง "${s(p.title) || i + 1}"`;
+        const pr = (p.primary ?? {}) as { text?: string; href?: string };
+        const se = (p.secondary ?? {}) as { text?: string; href?: string };
+        if (!s(pr.href)) out.push({ level: "error", message: `${label}: ${name} ยังไม่ได้เลือกว่ากดแล้วไปหน้าไหน (ปุ่มหลัก)` });
+        if (s(se.text) && !s(se.href)) out.push({ level: "error", message: `${label}: ${name} ปุ่มรองยังไม่มีลิงก์` });
+        if (!p.imageKey && !p.videoFile) out.push({ level: "warning", message: `${label}: ${name} ยังไม่มีรูปหรือคลิป (ลูกค้าจะเห็นเป็นสีพื้น)` });
+      });
+      return out;
+    },
+  },
+
   // 🕰 ไทม์ไลน์ / เรื่องราวแบรนด์ (2026-10-15) — เว็บร้าน: src/components/home/TimelineSection.tsx
   timeline: {
     type: "timeline",
