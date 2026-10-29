@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { SECTION_SCHEMAS, SECTION_TYPES, blankChild, sectionHasHeading, matchShowIf, PRODUCT_TILE_LAYOUTS } from "../website-schema";
+import { SECTION_SCHEMAS, SECTION_TYPES, blankChild, sectionHasHeading, matchShowIf, PRODUCT_TILE_LAYOUTS, SLIDE_FX_PRESETS } from "../website-schema";
 import { normalizeBlocks, newBlock, validateBlocks, blockSummary, BLOCK_META, DEFAULT_BLOCK_STYLE, type Block } from "../website-blocks";
 
 /**
@@ -138,7 +138,7 @@ describe("Block ย่อย + schema ใหม่", () => {
   it("slideshow: สไลด์ไม่มีรูป = error · overlay เกินช่วงถูกบีบ", () => {
     const [b] = normalizeBlocks([{ id: "s", type: "slideshow", slides: [{ title: "x", overlay: 500 }] }]);
     expect((b as { slides: { overlay: number }[] }).slides[0].overlay).toBe(90);
-    expect(validateBlocks([b]).some((i) => i.message.includes("ยังไม่มีรูปในสไลด์"))).toBe(true);
+    expect(validateBlocks([b]).some((i) => i.message.includes("ยังไม่มีรูป/คลิปในสไลด์"))).toBe(true);
   });
 
   it("video/map กรองลิงก์ผิดโฮสต์ทิ้ง (เหมือนเดิม)", () => {
@@ -358,6 +358,45 @@ describe("slideshow: รูปทรง / ปุ่มเลื่อน / ต�
     expect(s).toMatchObject({ shape: "21:9", shapeMobile: "4:5", width: "contained", transition: "peek", arrows: "hover", indicator: "progress", navColor: "dark", titleSize: "xl", textColor: "dark" });
     expect(s.slides[0]).toMatchObject({ textPos: "bottom-right", overlayStyle: "gradient", wholeLink: true });
     expect(norm({ shape: "7:3", transition: "spin", slides: [{ imageKey: "a/b.jpg", textPos: "nowhere" }] })).toMatchObject({ shape: "height", transition: "fade" });
+  });
+
+  it("✨ เอฟเฟกต์: สไลด์โชว์เดิม = ไม่มีเอฟเฟกต์ใหม่ (หน้าตาเดิม)", () => {
+    const s = norm({ autoplay: true, interval: 5, height: "medium", slides: [{ imageKey: "a/b.jpg" }] });
+    expect(s).toMatchObject({ transition: "fade", speed: "normal", kenBurns: "off", vignette: false, grain: false, textReveal: "together", drag: false, arrows: "always", arrowStyle: "circle", indicator: "dots", fxPreset: "" });
+    expect(s.slides[0]).toMatchObject({ videoKey: null, mobileVideoKey: null });
+  });
+
+  it("✨ เอฟเฟกต์: ค่าที่ตั้งถูกเก็บ · ค่ามั่ว = ค่าเริ่ม · สไลด์คลิปล้วนผ่านตัวตรวจ", () => {
+    const s = norm({ transition: "curtain", speed: "slower", kenBurns: "mix", vignette: true, grain: true, textReveal: "stagger", drag: true, arrows: "cursor", arrowStyle: "thin", indicator: "stories", slides: [{ videoKey: "videos/a.mp4", mobileVideoKey: "videos/b.mp4" }] });
+    expect(s).toMatchObject({ transition: "curtain", speed: "slower", kenBurns: "mix", vignette: true, grain: true, textReveal: "stagger", drag: true, arrows: "cursor", arrowStyle: "thin", indicator: "stories" });
+    expect(s.slides[0]).toMatchObject({ videoKey: "videos/a.mp4", mobileVideoKey: "videos/b.mp4" });
+    expect(validateBlocks([s as unknown as Block]).some((i) => i.message.includes("ยังไม่มีรูป/คลิปในสไลด์"))).toBe(false);
+    expect(norm({ speed: "warp", kenBurns: "spin", textReveal: "dance", arrowStyle: "fat", indicator: "stars", fxPreset: "nope", slides: [{ imageKey: "a/b.jpg" }] })).toMatchObject({ speed: "normal", kenBurns: "off", textReveal: "together", arrowStyle: "circle", indicator: "dots", fxPreset: "" });
+  });
+
+  it("✨ ชุดสำเร็จรูป: ทุกค่าอยู่ในตัวเลือกจริง · ไม่แตะรูป/ข้อความ/รูปทรง/เวลา", () => {
+    const fields = SECTION_SCHEMAS.slideshow.fields;
+    const allowed = new Set(["transition", "speed", "kenBurns", "vignette", "grain", "textReveal", "drag", "arrows", "arrowStyle", "indicator"]);
+    for (const p of SLIDE_FX_PRESETS) {
+      for (const [k, v] of Object.entries(p.set)) {
+        expect(allowed.has(k), `${p.v}.${k}`).toBe(true);
+        const fd = fields.find((x) => x.key === k)!;
+        if (fd.type === "select") expect(fd.options!.map((o) => o.v), `${p.v}.${k}=${v}`).toContain(v);
+        else expect(typeof v).toBe("boolean");
+      }
+      // ใช้ชุดแล้ว normalize = ค่าตามชุด (ไม่ถูกตัดทิ้ง)
+      expect(norm({ ...p.set, slides: [{ imageKey: "a/b.jpg" }] })).toMatchObject(p.set);
+    }
+    expect(fields.find((x) => x.key === "fxPreset")!.presets!.orig).toMatchObject({ transition: "fade", arrows: "always", indicator: "dots", kenBurns: "off" });
+  });
+
+  it("✨ ช่องโชว์ตามเงื่อนไข: หน้าตาปุ่ม = เฉพาะมีปุ่ม · สีปุ่ม/ตัวบอก โชว์กับเคอร์เซอร์/ขีดนับเวลา", () => {
+    const fd = (k: string) => SECTION_SCHEMAS.slideshow.fields.find((x) => x.key === k)!;
+    expect(matchShowIf(fd("arrowStyle"), { arrows: "hover" })).toBe(true);
+    expect(matchShowIf(fd("arrowStyle"), { arrows: "cursor" })).toBe(false);
+    expect(matchShowIf(fd("navColor"), { arrows: "cursor", indicator: "none" })).toBe(true);
+    expect(matchShowIf(fd("navColor"), { arrows: "none", indicator: "stories" })).toBe(true);
+    expect(matchShowIf(fd("navColor"), { arrows: "none", indicator: "thumbs" })).toBe(false);
   });
 });
 

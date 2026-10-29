@@ -1052,15 +1052,28 @@ export interface SlideshowBlock extends BlockBase {
   shape?: "height" | "21:9" | "16:9" | "3:2" | "1:1" | "4:5" | "full";
   shapeMobile?: "same" | "height" | "16:9" | "3:2" | "1:1" | "4:5" | "3:4" | "full";
   width?: "full" | "contained";
-  transition?: "fade" | "slide" | "zoom" | "peek";
-  arrows?: "always" | "hover" | "none";
-  indicator?: "dots" | "lines" | "number" | "progress" | "none";
+  /** แบบเปลี่ยน — fadezoom/curtain/circle/parallax/blur = ซ้อนชั้น (เว็บร้าน .ss-lay) */
+  transition?: "fade" | "slide" | "zoom" | "peek" | "fadezoom" | "curtain" | "circle" | "parallax" | "blur";
+  /** ✨ เอฟเฟกต์ (กลุ่ม fx · ค่าเริ่ม = แบบเดิม): ความเร็ว · ซูม/แพนช้า ๆ · ขอบมืด · เกรนฟิล์ม · ข้อความไล่โผล่ · ลากตามมือ · fxPreset = ปุ่มชุดสำเร็จรูป (ไม่จำค่า) */
+  fxPreset?: string;
+  speed?: "fast" | "normal" | "slow" | "slower";
+  kenBurns?: "off" | "in" | "out" | "pan" | "mix";
+  vignette?: boolean;
+  grain?: boolean;
+  textReveal?: "together" | "stagger";
+  drag?: boolean;
+  arrows?: "always" | "hover" | "cursor" | "none";
+  arrowStyle?: "circle" | "thin";
+  indicator?: "dots" | "lines" | "number" | "progress" | "stories" | "counter" | "thumbs" | "none";
   navColor?: "light" | "dark";
   titleSize?: "s" | "m" | "l" | "xl";
   textColor?: "light" | "dark";
   slides: (ChildBase & {
     imageKey: string | null;
     mobileImageKey: string | null;
+    /** 🎬 คลิปวนเงียบแทนรูป (r2 key) — คอม / มือถือ */
+    videoKey?: string | null;
+    mobileVideoKey?: string | null;
     alt: string;
     eyebrow: string;
     title: string;

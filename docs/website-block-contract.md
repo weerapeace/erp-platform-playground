@@ -250,6 +250,13 @@ Section ที่มีรูปเต็มจอ (hero · image · slideshow/�
 - ช่องใหม่ทุกช่องค่าเริ่ม = หน้าตาเดิม: `shape` (height/21:9/16:9/3:2/1:1/4:5/full · ปุ่มรูปย่อ `ss-*`) · `shapeMobile` (same + 3:4) · `width` (full/contained) · `transition` (fade/slide/zoom/peek) · `arrows` (always/hover/none) · `indicator` (dots/lines/number/progress/none) · `navColor` · `titleSize` · `textColor` · รายสไลด์ `textPos` (auto + 9 จุด `pos-*` ของกลาง) · `overlayStyle` (solid/gradient) · `wholeLink`
 - กรอบ crop ของชิ้นสไลด์ = `cropRatio: "shape"` ของ Section แม่ · ค่าไม่ใช่สัดส่วน (height/full) → ใช้ `cropBox` "16:7" (ของกลาง CropField: ค่า Section ไม่ใช่ N:N + มี cropBox = ใช้ cropBox)
 - เว็บร้าน `src/components/home/Slideshow.tsx` + CSS `.ss-*` (globals.css): รูปทรงคอม/มือถือแยกด้วยตัวแปร `--ss-ar/-m` `--ss-h/-m` `--ss-minh/-m` · ปัดนิ้ว · ชี้เมาส์ = หยุด · ลดการเคลื่อนไหว = ไม่เลื่อนเอง/ไม่ซูม · "อยู่ในกรอบ" ไม่นับเป็นรูปเต็มจอ (Header โปร่งใส)
+- ✨ **เอฟเฟกต์ (2026-10-29 · กลุ่มช่องใหม่ `fx` "เอฟเฟกต์ / การเคลื่อนไหว")** — ค่าเริ่มทุกช่อง = หน้าตาเดิม
+  - `fxPreset` = ปุ่มชุดสำเร็จรูป (`SLIDE_FX_PRESETS`: แบบเดิม / หรูเงียบ / แฟชั่นจัด / นิตยสาร / มินิมอล · ใช้ `presets` ของกลาง ไม่จำค่า · ตั้งเฉพาะ การเปลี่ยน/ซูม/ข้อความ/ปุ่ม/ตัวบอก)
+  - `transition` เพิ่ม fadezoom / curtain / circle / parallax / blur (ซ้อนชั้น `.ss-lay` + `.ss-t-*` · `--ss-dur` · `--ss-dir` 1/-1 · สไลด์แรกตอนเปิดหน้า `.ss-still` = ไม่เล่นท่าเข้า) · `speed` fast/normal/slow/slower (×0.6/1/1.6/2.4 ของเวลาเดิม: จาง 0.7 วิ · เลื่อน 0.6 วิ · ซ้อนชั้น 0.9 วิ)
+  - `kenBurns` off/in/out/pan/mix (ชั้น `.ss-kb` · ใช้ได้ทุกแบบเปลี่ยน · "zoom" แบบเดิมยังซูมเข้าในตัวเมื่อ off) · `vignette` · `grain` · `textReveal` together/stagger (`.ss-rise` + `--ss-d`) · `drag` (Pointer Events แตะ DOM ตรงระหว่างลาก · ลากแล้วไม่นับเป็นคลิก)
+  - `arrows` เพิ่ม cursor (วงกลมตามเมาส์ เฉพาะ `(hover:hover) and (pointer:fine)` · ซ่อนเคอร์เซอร์พิเศษของเว็บด้วย `html.ss-cur-on` · สไลด์ที่กดได้ทั้งใบ: ขอบ 30% = เปลี่ยนสไลด์ · กลาง = ไปลิงก์) · `arrowStyle` circle/thin · `indicator` เพิ่ม stories / counter / thumbs (รูปย่ออยู่ใต้กล่อง)
+  - รายสไลด์ `videoKey` / `mobileVideoKey` (ชนิดช่อง `videoFile` ของกลาง) — สไลด์ที่มีแค่คลิปก็นับว่ามีสื่อ
+  - เลื่อนเอง = นาฬิกา CSS `.ss-clock` (onAnimationEnd) หยุดพร้อมแถบเวลาเมื่อ ชี้เมาส์/ลาก/พ้นจอ/สลับแท็บ/ก่อน hydrate · ปุ่ม ← → เมื่อโฟกัสกล่อง · ลดการเคลื่อนไหวปิดให้ลูกค้า ยกเว้น `html.pv-edit`
 
 ## ⚡ พรีวิวสด (ตัวจัดหน้า → iframe เว็บร้าน)
 

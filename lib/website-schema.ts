@@ -89,7 +89,7 @@ export type FieldType =
   | "shopPattern" // 🎨 ลายของร้าน { name, vb, parts+สี } (จาก SVG ที่อัป · lib/website-frames normalizeShopPattern) — ตั้งผ่านคลังของตกแต่ง (hidden)
   | "patternSlots"; // 🎨 สีใหม่ของแต่ละสีในไฟล์ ["" | สีธีม | #rrggbb] (โหมดแยกตามสี · hidden — แผงลายของร้านตั้งให้)
 
-export type FieldGroup = "content" | "media" | "action" | "layout" | "products" | "grid" | "caption" | "card";
+export type FieldGroup = "content" | "media" | "action" | "layout" | "products" | "grid" | "caption" | "fx" | "card";
 
 /** 🎨 ลายของร้าน: เปลี่ยนสีแบบไหน (⚠️ ตรงกับ SHOP_PATTERN_MODES ใน lib/website-frames) */
 export const PATTERN_MODE_OPTIONS: FieldOption[] = [
@@ -106,6 +106,7 @@ export const FIELD_GROUP_LABEL: Record<FieldGroup, string> = {
   products: "สินค้า",
   grid: "🗂 ตารางสินค้าด้านบน",
   caption: "ข้อความประกอบรูป",
+  fx: "เอฟเฟกต์ / การเคลื่อนไหว",
   card: "🃏 การ์ดในส่วนนี้",
 };
 
@@ -1304,6 +1305,16 @@ const SLIDE_SHAPES: FieldOption[] = [
   { v: "full", l: "เต็มจอ", sketch: "ss-full", hint: "สูงเท่าหน้าจอ" },
 ];
 
+/** ✨ สไลด์โชว์ — ชุดเอฟเฟกต์สำเร็จรูป (กดทีเดียวตั้ง การเปลี่ยน/ซูม/ข้อความ/ปุ่ม/ตัวบอก · ไม่แตะรูป ข้อความ รูปทรง เวลาต่อสไลด์ สี) */
+const SLIDE_FX_BASE: Record<string, unknown> = { transition: "fade", speed: "normal", kenBurns: "off", vignette: false, grain: false, textReveal: "together", drag: false, arrows: "always", arrowStyle: "circle", indicator: "dots" };
+export const SLIDE_FX_PRESETS: { v: string; l: string; hint: string; set: Record<string, unknown> }[] = [
+  { v: "orig", l: "แบบเดิม", hint: "จางเข้า · ปุ่มวงกลม · จุด", set: SLIDE_FX_BASE },
+  { v: "luxe", l: "หรูเงียบ", hint: "จาง + ซูมออกช้า · รูปซูมเข้าช้า ๆ · ขอบมืด · ข้อความไล่โผล่ · ลูกศรเส้นบาง · ขีดนับเวลา", set: { ...SLIDE_FX_BASE, transition: "fadezoom", speed: "slow", kenBurns: "in", vignette: true, textReveal: "stagger", drag: true, arrows: "hover", arrowStyle: "thin", indicator: "stories" } },
+  { v: "edit", l: "แฟชั่นจัด", hint: "ม่านเปิด · ซูม/แพนสลับ · เกรนฟิล์ม · เคอร์เซอร์ตามเมาส์ · เลข 01/05", set: { ...SLIDE_FX_BASE, transition: "curtain", kenBurns: "mix", grain: true, textReveal: "stagger", drag: true, arrows: "cursor", indicator: "counter" } },
+  { v: "mag", l: "นิตยสาร", hint: "เลื่อนซ้อนชั้นช้า ๆ · แพนข้าง · ลูกศรเส้นบาง · เลข 01/05", set: { ...SLIDE_FX_BASE, transition: "parallax", speed: "slow", kenBurns: "pan", textReveal: "stagger", drag: true, arrowStyle: "thin", indicator: "counter" } },
+  { v: "mini", l: "มินิมอล", hint: "เบลอเปลี่ยน · ลูกศรเส้นบางตอนชี้ · รูปย่อใต้สไลด์", set: { ...SLIDE_FX_BASE, transition: "blur", textReveal: "stagger", drag: true, arrows: "hover", arrowStyle: "thin", indicator: "thumbs" } },
+];
+
 /* ─────────── SECTION LIBRARY ─────────── */
 
 export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
@@ -2043,17 +2054,7 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "contained", l: "อยู่ในกรอบ มุมมน" },
         ],
       }),
-      f("transition", "แบบเปลี่ยนสไลด์", "select", {
-        group: "layout",
-        default: "fade",
-        options: [
-          { v: "fade", l: "จางเข้า (แบบเดิม)" },
-          { v: "slide", l: "เลื่อนข้าง" },
-          { v: "zoom", l: "จาง + ซูมช้า ๆ" },
-          { v: "peek", l: "เลื่อนข้าง เห็นขอบสไลด์ข้าง ๆ" },
-        ],
-      }),
-      f("autoplay", "เลื่อนเองอัตโนมัติ", "toggle", { group: "layout", default: true, hint: "เอาเมาส์ชี้ = หยุด" }),
+      f("autoplay", "เลื่อนเองอัตโนมัติ", "toggle", { group: "layout", default: true, hint: "เอาเมาส์ชี้ / เลื่อนพ้นจอ = หยุด" }),
       f("interval", "เวลาต่อสไลด์ (วินาที)", "number", { group: "layout", default: 5, min: 2, numMax: 20, showIf: { key: "autoplay", eq: true } }),
       f("arrows", "ปุ่มเลื่อน ‹ ›", "select", {
         group: "layout",
@@ -2061,8 +2062,18 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
         options: [
           { v: "always", l: "โชว์ตลอด (แบบเดิม)" },
           { v: "hover", l: "โผล่ตอนชี้เมาส์" },
+          { v: "cursor", l: "เคอร์เซอร์วงกลมตามเมาส์ (คอม)" },
           { v: "none", l: "ไม่มี (ปัดนิ้ว / กดตัวบอก)" },
         ],
+      }),
+      f("arrowStyle", "หน้าตาปุ่มเลื่อน", "select", {
+        group: "layout",
+        default: "circle",
+        options: [
+          { v: "circle", l: "วงกลม ‹ › (แบบเดิม)" },
+          { v: "thin", l: "ลูกศรเส้นบาง ขยับตอนชี้" },
+        ],
+        showIf: { key: "arrows", eq: ["always", "hover"] },
       }),
       f("indicator", "ตัวบอกตำแหน่ง", "select", {
         group: "layout",
@@ -2072,6 +2083,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "lines", l: "ขีด" },
           { v: "number", l: "ตัวเลข 1 / 5" },
           { v: "progress", l: "แถบเวลา" },
+          { v: "stories", l: "ขีดนับเวลา (แบบสตอรี่)" },
+          { v: "counter", l: "เลข 01 / 05 + เส้นเวลา" },
+          { v: "thumbs", l: "รูปย่อใต้สไลด์" },
           { v: "none", l: "ไม่มี" },
         ],
       }),
@@ -2082,8 +2096,8 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "light", l: "ขาว (แบบเดิม)" },
           { v: "dark", l: "ดำ" },
         ],
-        // มีปุ่มเลื่อน หรือ มีตัวบอกตำแหน่ง (ค่าของ 2 ช่องไม่ซ้ำกัน ยกเว้น none)
-        showIf: { key: "arrows", eq: ["always", "hover", "dots", "lines", "number", "progress"], orKey: "indicator" },
+        // มีปุ่มเลื่อน หรือ มีตัวบอกบนรูป (ค่าของ 2 ช่องไม่ซ้ำกัน ยกเว้น none · รูปย่ออยู่ใต้สไลด์ ไม่ใช้สีนี้)
+        showIf: { key: "arrows", eq: ["always", "hover", "cursor", "dots", "lines", "number", "progress", "stories", "counter"], orKey: "indicator" },
       }),
       f("titleSize", "ขนาดหัวข้อบนรูป", "select", {
         group: "caption",
@@ -2103,6 +2117,65 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           { v: "dark", l: "ดำ + สีทับขาว (รูปสว่าง)" },
         ],
       }),
+      // ✨ เอฟเฟกต์ / การเคลื่อนไหว (2026-10-29) — เว็บร้าน .ss-lay / .ss-kb-* / .ss-rise ฯลฯ ใน globals.css · ค่าเริ่ม = หน้าตาเดิม
+      f("fxPreset", "ชุดสำเร็จรูป", "select", {
+        group: "fx",
+        default: "",
+        wide: true,
+        display: "seg",
+        hint: "กดแล้วตั้งช่องข้างล่าง + ปุ่ม/ตัวบอก ให้ทีเดียว (ไม่แตะรูป ข้อความ รูปทรง เวลา สี) · ปรับต่อทีละช่องได้",
+        options: SLIDE_FX_PRESETS.map((p) => ({ v: p.v, l: p.l, hint: p.hint })),
+        presets: Object.fromEntries(SLIDE_FX_PRESETS.map((p) => [p.v, p.set])),
+      }),
+      f("transition", "แบบเปลี่ยนสไลด์", "select", {
+        group: "fx",
+        default: "fade",
+        options: [
+          { v: "fade", l: "จางเข้า (แบบเดิม)" },
+          { v: "slide", l: "เลื่อนข้าง" },
+          { v: "zoom", l: "จาง + ซูมช้า ๆ" },
+          { v: "peek", l: "เลื่อนข้าง เห็นขอบสไลด์ข้าง ๆ" },
+          { v: "fadezoom", l: "จาง + ซูมออกนุ่ม" },
+          { v: "curtain", l: "ม่านเปิด" },
+          { v: "circle", l: "วงกลมขยาย" },
+          { v: "parallax", l: "เลื่อนซ้อนชั้น" },
+          { v: "blur", l: "เบลอเปลี่ยน" },
+        ],
+      }),
+      f("speed", "ความเร็วตอนเปลี่ยน", "select", {
+        group: "fx",
+        default: "normal",
+        display: "seg",
+        options: [
+          { v: "fast", l: "เร็ว" },
+          { v: "normal", l: "ปกติ (แบบเดิม)" },
+          { v: "slow", l: "ช้า" },
+          { v: "slower", l: "ช้ามาก" },
+        ],
+      }),
+      f("kenBurns", "ตอนอยู่นิ่ง: รูปซูม/แพนช้า ๆ", "select", {
+        group: "fx",
+        default: "off",
+        options: [
+          { v: "off", l: "ไม่มี (แบบเดิม)" },
+          { v: "in", l: "ซูมเข้าช้า ๆ" },
+          { v: "out", l: "ซูมออกช้า ๆ" },
+          { v: "pan", l: "แพนข้าง" },
+          { v: "mix", l: "สลับทุกสไลด์" },
+        ],
+        hint: "ใช้ได้กับทุกแบบเปลี่ยน · \"จาง + ซูมช้า ๆ\" มีซูมเข้าในตัวอยู่แล้ว",
+      }),
+      f("textReveal", "ข้อความบนรูป", "select", {
+        group: "fx",
+        default: "together",
+        options: [
+          { v: "together", l: "โผล่พร้อมกัน (แบบเดิม)" },
+          { v: "stagger", l: "ไล่โผล่ทีละบรรทัด" },
+        ],
+      }),
+      f("vignette", "ขอบมืดนุ่ม (vignette)", "toggle", { group: "fx", default: false }),
+      f("grain", "เกรนฟิล์มจาง ๆ", "toggle", { group: "fx", default: false }),
+      f("drag", "ลากแล้วรูปขยับตามมือ", "toggle", { group: "fx", default: false, wide: true, hint: "เมาส์ + นิ้ว · ปิด = ปัดนิ้วแบบเดิม · ลูกค้าที่ตั้ง \"ลดการเคลื่อนไหว\" จะไม่เห็นเอฟเฟกต์ (พรีวิวในตัวจัดหน้ายังเห็น)" }),
     ],
     children: {
       key: "slides",
@@ -2114,6 +2187,9 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
       fields: [
         image("imageKey", "รูปสไลด์", { hint: "แนะนำกว้าง 2400px+ (เต็มจอคมชัด)", minPx: 2400 }),
         image("mobileImageKey", "รูปสไลด์ (มือถือ)", { hint: "ไม่ใส่ = ใช้รูปเดียวกับคอม · แนะนำแนวตั้ง 1080×1350+", minPx: 1080 }),
+        // 🎬 คลิปวนเงียบแทนรูป (ช่องคลิปกลาง videoFile ตัวเดียวกับแบนเนอร์หลัก) — เว็บร้านเล่นเฉพาะสไลด์ที่โชว์ + อยู่บนจอ
+        f("videoKey", "คลิปวนเงียบแทนรูป (คอม)", "videoFile", { group: "media", default: null, wide: true, hint: "เล่นวนเงียบ ๆ ตอนสไลด์นี้โชว์ · ใส่รูปสไลด์ด้วย = ภาพระหว่างโหลด · MP4 แนวเดียวกับรูปทรงสไลด์" }),
+        f("mobileVideoKey", "คลิปวนเงียบ (มือถือ)", "videoFile", { group: "media", default: null, wide: true, hint: "ไม่ใส่ = ใช้คลิปคอม · ใส่แค่คลิปมือถือ = คอมโชว์รูป" }),
         f("crop", "ส่วนที่เห็น / ซูม", "crop", { group: "media", default: { x: 50, y: 50, zoom: 100 }, wide: true, cropImage: "imageKey", cropRatio: "shape", cropBox: "16:7", hint: "กรอบ = รูปทรงสไลด์บนจอคอม (ตามความสูง / เต็มจอ ≈ 16:7)" }),
         text("alt", "คำบรรยายรูป (Alt)", { group: "media", default: "", max: 200 }),
         text("eyebrow", "คำโปรยเล็ก", { default: "", max: 80 }),
@@ -2142,10 +2218,10 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
           ],
         }),
       ],
-      summary: (it) => s(it.title) || (it.imageKey ? "สไลด์" : "ยังไม่เลือกรูป"),
+      summary: (it) => s(it.title) || (it.imageKey ? "สไลด์" : it.videoKey ? "สไลด์คลิป" : "ยังไม่เลือกรูป"),
     },
     summary: (b) => count(arr(b.slides).length, "สไลด์"),
-    validate: (b, label) => (!arr(b.slides).some((sl) => sl.imageKey) ? [{ level: "error", message: `${label}: ยังไม่มีรูปในสไลด์` }] : []),
+    validate: (b, label) => (!arr(b.slides).some((sl) => sl.imageKey || sl.videoKey) ? [{ level: "error", message: `${label}: ยังไม่มีรูป/คลิปในสไลด์` }] : []),
   },
 
   "two-tracks": {
