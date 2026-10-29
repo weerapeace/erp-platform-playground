@@ -32,6 +32,7 @@ import { WebsiteReviewsPanel } from "@/components/website-reviews-panel";
 import { WebsiteStatsPanel } from "@/components/website-stats-panel";
 import { WebsiteReturnsPanel } from "@/components/website-returns-panel";
 import { WebsiteImageSetsPanel } from "@/components/website-image-sets-panel";
+import { WebsiteSiteImagesPanel } from "@/components/website-site-images-panel";
 import { ImageSetsProvider } from "@/components/website-image-sets-context";
 import { WebsitePromotionsPanel } from "@/components/website-promotions-panel";
 import { WebsiteTranslationCenter } from "@/components/website-translation-center";
@@ -58,8 +59,11 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  type TabKey = "listings" | "categories" | "collections" | "newdrops" | "sizeguides" | "fieldmap" | "design" | "layout" | "pages" | "info" | "shipping" | "i18n" | "orders" | "coupons" | "members" | "reviews" | "promotions" | "stats" | "returns" | "imagesets";
+  type TabKey = "listings" | "categories" | "collections" | "newdrops" | "sizeguides" | "fieldmap" | "design" | "layout" | "pages" | "info" | "shipping" | "i18n" | "orders" | "coupons" | "members" | "reviews" | "promotions" | "stats" | "returns" | "imagesets" | "webimages";
   const [tab, setTab] = useState<TabKey>("listings");
+  // 🗂 รูปบนเว็บ → "✏️ ไปแก้" Section ในหน้าแรก = เปิดแท็บหน้าแรกแล้วเลือก Section นั้นให้
+  const [layoutFocus, setLayoutFocus] = useState<string | null>(null);
+  const clearLayoutFocus = useCallback(() => setLayoutFocus(null), []);
   // ⚠️ สลับแท็บตอนแท็บเดิมยังไม่บันทึก → ถามก่อน (เดิมของที่แก้หายเงียบ)
   const guard = useUnsavedGuardHost();
   const [pendingTab, setPendingTab] = useState<TabKey | null>(null);
@@ -82,7 +86,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
   // ลิงก์จากที่อื่น (เช่น ป๊อปตรวจก่อนเผยแพร่ → "ไปแก้") เปิดแท็บที่ระบุ ?tab= · ⚠️ ไม่ใช้ useSearchParams (อยู่ใน PlaygroundShell)
   useEffect(() => {
     const t = new URLSearchParams(window.location.search).get("tab");
-    const ok = ["listings", "categories", "collections", "fieldmap", "design", "layout", "pages", "info", "shipping", "i18n", "orders", "coupons", "members", "reviews", "promotions", "stats", "returns", "imagesets"] as const;
+    const ok = ["listings", "categories", "collections", "fieldmap", "design", "layout", "pages", "info", "shipping", "i18n", "orders", "coupons", "members", "reviews", "promotions", "stats", "returns", "imagesets", "webimages"] as const;
     if (t && (ok as readonly string[]).includes(t)) setTab(t as (typeof ok)[number]);
   }, []);
 
@@ -232,6 +236,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
               { k: "design", l: "🎨 ดีไซน์" },
               { k: "layout", l: "🧱 หน้าแรก" },
               { k: "imagesets", l: "🖼 ชุดรูป" },
+              { k: "webimages", l: "🗂 รูปบนเว็บ" },
               { k: "pages", l: "📄 หน้าเว็บ" },
               { k: "info", l: "🏪 ข้อมูลร้าน" },
               { k: "shipping", l: "🚚 การจัดส่ง" },
@@ -311,7 +316,7 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         {tab === "design" && shop && <WebsiteThemePanel shopSlug={shop.slug} shopId={shop.id} />}
 
         {/* แท็บจัดหน้าแรก (บล็อก) */}
-        {tab === "layout" && shop && <WebsiteLayoutPanel shopSlug={shop.slug} shopId={shop.id} />}
+        {tab === "layout" && shop && <WebsiteLayoutPanel shopSlug={shop.slug} shopId={shop.id} focusBlockId={layoutFocus} onFocused={clearLayoutFocus} />}
 
         {/* แท็บหน้าเว็บอื่น ๆ */}
         {tab === "pages" && shop && <WebsitePagesPanel shopSlug={shop.slug} shopId={shop.id} />}
@@ -333,6 +338,15 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
         {tab === "stats" && shop && <WebsiteStatsPanel shopId={shop.id} />}
         {tab === "returns" && shop && <WebsiteReturnsPanel shopSlug={shop.slug} />}
         {tab === "imagesets" && shop && <WebsiteImageSetsPanel shopSlug={shop.slug} shopId={shop.id} />}
+        {tab === "webimages" && shop && (
+          <WebsiteSiteImagesPanel
+            shopSlug={shop.slug}
+            onGo={(g) => {
+              if (g.tab === "layout") setLayoutFocus(g.blockId ?? null);
+              goTab(g.tab);
+            }}
+          />
+        )}
         </ImageSetsProvider>
         </UnsavedGuardProvider>
       </div>

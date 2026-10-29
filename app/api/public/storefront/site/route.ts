@@ -27,6 +27,7 @@ import { resolveThemeSchedules } from "@/lib/website-theme-schedule-db";
 import { applyCampaign } from "@/lib/website-theme-schedule";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { resolveForStorefront } from "@/lib/website-image-sets-db";
+import { IMAGE_ALTS_SETTING, cleanImageAlts } from "@/lib/website-site-images";
 import { storefrontCors, corsPreflight } from "@/lib/storefront-cors";
 
 export const dynamic = "force-dynamic";
@@ -200,5 +201,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   };
   // 🖼 ชุดรูปกลาง: ช่องรูปที่ผูกชุด (imgset/<id>) → รูปปัจจุบันของชุด (ตามเวลาที่ตั้ง) + รูปมือถือ/ลิงก์ของชุด · imageFocus = จุดสำคัญของรูป (lib/website-image-sets)
   const resolved = await resolveForStorefront(sb, s.id, { layout: body.layout, theme: body.theme, collections: body.collections, info: body.info }, { draft: preview });
-  return json({ ...body, ...resolved.parts, ...(Object.keys(resolved.focus).length ? { imageFocus: resolved.focus } : {}) });
+  // 📝 คำอธิบายรูปที่ใส่เอง {r2key: ข้อความ} (ERP › 🗂 รูปบนเว็บ) → เว็บร้าน LoadImg เติมให้รูปที่ยังไม่มีคำอธิบาย (lib/website-site-images)
+  const { data: altRow } = await sb.from("store_settings").select("value").eq("shop_id", s.id).eq("key", IMAGE_ALTS_SETTING).maybeSingle();
+  const imageAlt = cleanImageAlts((altRow as { value: string | null } | null)?.value ?? null);
+  return json({ ...body, ...resolved.parts, ...(Object.keys(resolved.focus).length ? { imageFocus: resolved.focus } : {}), ...(Object.keys(imageAlt).length ? { imageAlt } : {}) });
 }

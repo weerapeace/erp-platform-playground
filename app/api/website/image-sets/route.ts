@@ -11,8 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAuditFor } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
-import { SECTION_SCHEMAS } from "@/lib/website-schema";
-import { blockDisplayName } from "@/lib/website-blocks";
+import { blockLabel, blockPath, themeArea, themePath } from "@/lib/website-site-images";
 import { IMAGE_SET_SELECT } from "@/lib/website-image-sets-db";
 import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import {
@@ -49,43 +48,6 @@ async function previewOf(sb: Admin, shop: { id: string; slug: string }) {
   return { siteUrl, previewKey: siteUrl ? issuePreviewKey(shop.slug) : null };
 }
 
-/** ตำแหน่งในธีม → ป้ายภาษาคน */
-const THEME_LABEL: Record<string, string> = {
-  menu: "เมนู",
-  listing: "รูปคั่นสินค้า (หน้ารายการสินค้า)",
-  logo: "โลโก้",
-  header: "หัวเว็บ",
-  footer: "ท้ายเว็บ",
-  product: "หน้าสินค้า",
-  cart: "ตะกร้า",
-  checkout: "หน้าชำระเงิน",
-};
-const PAGE_LABEL: Record<string, string> = { thanks: "หน้าขอบคุณหลังสั่งซื้อ", popup: "ป๊อปอัปโปร", notFound: "หน้า 404", login: "หน้าเข้าสู่ระบบ", share: "รูปแชร์" };
-function themeLabel(path: (string | number)[]): string {
-  const [a, b] = path;
-  if (a === "page" && typeof b === "string") return PAGE_LABEL[b] ?? `หน้าพิเศษ (${b})`;
-  return THEME_LABEL[String(a)] ?? String(a ?? "");
-}
-/** ตำแหน่งในธีม → หน้าเว็บที่เห็นที่นั้น (เมนู/ป๊อปอัป = หน้าแรก) */
-function themePath(path: (string | number)[]): string {
-  const [a, b] = path;
-  if (a === "listing") return "/shop";
-  if (a === "page" && b === "thanks") return "/checkout?pv=thanks";
-  return "/";
-}
-/** Section ในโครงหน้า → ลิงก์เลื่อนไปที่ Section นั้น */
-const blockPath = (prefix: string) => (path: (string | number)[], root: unknown): string => {
-  const b = Array.isArray(root) && typeof path[0] === "number" ? (root[path[0]] as Record<string, unknown> | undefined) : undefined;
-  return typeof b?.id === "string" ? `${prefix}#s-${b.id}` : prefix;
-};
-function blockLabel(path: (string | number)[], root: unknown): string {
-  const b = Array.isArray(root) && typeof path[0] === "number" ? (root[path[0]] as Record<string, unknown> | undefined) : undefined;
-  if (!b) return "";
-  const meta = SECTION_SCHEMAS[String(b.type)]?.meta;
-  const title = typeof b.title === "string" && b.title.trim() ? ` “${b.title.trim().slice(0, 30)}”` : "";
-  return `${meta ? `${meta.icon} ${blockDisplayName(b)}` : String(b.type)}${title}`;
-}
-
 /** ใช้อยู่ที่ไหนบ้าง (หน้าแรก · หน้าเว็บ · ธีม — ทั้งเผยแพร่และร่าง) */
 async function usesOf(sb: Admin, shopId: string) {
   const [{ data: shop }, { data: pages }] = await Promise.all([
@@ -96,8 +58,8 @@ async function usesOf(sb: Admin, shopId: string) {
   const docs: Parameters<typeof findImageSetUses>[0] = [
     { label: "หน้าแรก", state: "live", data: s.home_layout, labelOf: blockLabel, pathOf: blockPath("/") },
     { label: "หน้าแรก", state: "draft", data: s.home_layout_draft, labelOf: blockLabel, pathOf: blockPath("/") },
-    { label: "ดีไซน์", state: "live", data: s.theme, labelOf: themeLabel, pathOf: themePath },
-    { label: "ดีไซน์", state: "draft", data: s.theme_draft, labelOf: themeLabel, pathOf: themePath },
+    { label: "ดีไซน์", state: "live", data: s.theme, labelOf: themeArea, pathOf: themePath },
+    { label: "ดีไซน์", state: "draft", data: s.theme_draft, labelOf: themeArea, pathOf: themePath },
   ];
   for (const p of (pages ?? []) as { title: string; slug: string; layout: unknown; draft_layout: unknown }[]) {
     const label = `หน้า “${p.title || p.slug}”`;

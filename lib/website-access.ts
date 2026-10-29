@@ -27,7 +27,7 @@ export interface WebsiteGroupDef {
 
 export const WEBSITE_GROUPS: WebsiteGroupDef[] = [
   { key: "products", label: "สินค้าบนเว็บ", icon: "🛍", editable: true, tabs: ["listings", "categories", "collections", "newdrops", "sizeguides", "fieldmap", "imagesets"], hint: "สินค้า หมวด คอลเลกชัน มาใหม่ ตารางไซส์ ชุดรูป" },
-  { key: "design", label: "หน้าตาเว็บ", icon: "🎨", editable: true, tabs: ["design", "layout", "pages", "i18n"], hint: "ดีไซน์ หน้าแรก หน้าเว็บ แปลภาษา" },
+  { key: "design", label: "หน้าตาเว็บ", icon: "🎨", editable: true, tabs: ["design", "layout", "pages", "webimages", "i18n"], hint: "ดีไซน์ หน้าแรก หน้าเว็บ รูปบนเว็บ แปลภาษา" },
   { key: "orders", label: "ออเดอร์และลูกค้า", icon: "🧾", editable: true, tabs: ["orders", "returns", "members", "reviews"], hint: "ออเดอร์ คืน/เปลี่ยน สมาชิก รีวิว (ข้อมูลส่วนตัวลูกค้า)" },
   { key: "promos", label: "โปรโมชัน", icon: "🏷", editable: true, tabs: ["coupons", "promotions"], hint: "คูปอง โปรโมชัน ระดับสมาชิก" },
   { key: "settings", label: "ตั้งค่าร้าน", icon: "🏪", editable: true, tabs: ["info", "shipping"], hint: "ข้อมูลร้าน การจัดส่ง การชำระเงิน การเข้าสู่ระบบสมาชิก" },
@@ -83,6 +83,7 @@ const API_GROUPS: [string, WebsiteGroup[]][] = [
   ["size-guides", ["products"]],
   ["field-map", ["products", "design"]],
   ["image-sets", ["products", "design"]],
+  ["site-images", ["design"]],
   ["category-rename", ["products"]],
   ["card-badges", ["products", "design"]],
   ["restock", ["products", "orders"]],

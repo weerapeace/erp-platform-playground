@@ -21,7 +21,8 @@ import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
 import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
 import { VersionHistoryDrawer } from "@/components/website-version-history";
 
-export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
+/** focusBlockId = เปิดมาแล้วเลือก Section นี้ให้เลย (เช่น 🗂 รูปบนเว็บ → "✏️ ไปแก้") · onFocused = เลือกแล้ว (ล้างคำขอ) */
+export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }: { shopSlug: string; shopId: string; focusBlockId?: string | null; onFocused?: () => void }) {
   const toast = useToast();
 
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
@@ -93,6 +94,13 @@ export function WebsiteLayoutPanel({ shopSlug, shopId }: { shopSlug: string; sho
 
   // สรุปว่าร่างต่างจากที่เผยแพร่ตรงไหน (ชื่อ Section อ่านออก) — โชว์ตอนกดป้าย "ยังไม่เผยแพร่"
   const changes: ChangeSummary = useMemo(() => summarizeChanges(dp.blocks, dp.published, types), [dp.blocks, dp.published, types]);
+
+  // 🎯 มาจากที่อื่นพร้อม Section ที่ต้องการแก้ → โหลดเสร็จแล้วเลือกให้ (พรีวิวเลื่อนไปที่ Section นั้นเอง)
+  useEffect(() => {
+    if (loading || !focusBlockId) return;
+    if (dp.blocks.some((b) => b.id === focusBlockId)) setSelection({ blockId: focusBlockId });
+    onFocused?.();
+  }, [loading, focusBlockId, dp.blocks, onFocused]);
 
   const discard = async () => {
     if (!(await askConfirm({ title: "ละทิ้งการเปลี่ยนแปลงทั้งหมด?", message: "ร่างหน้าแรกจะหาย กลับไปใช้หน้าที่เผยแพร่อยู่", variant: "danger", confirmText: "ละทิ้ง" }))) return;
