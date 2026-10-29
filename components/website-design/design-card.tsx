@@ -11,6 +11,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { useUserPref } from "@/lib/use-user-pref";
 import { normTitle } from "@/lib/website-design-nav";
+import { cardHiddenIn, useDesignMode } from "./mode";
 
 type OpenMap = Record<string, boolean>;
 interface CardsCtx {
@@ -92,9 +93,11 @@ export function DesignCard({
   className?: string;
 }) {
   const ctx = useContext(Ctx);
+  // 👷 พนักงานแก้บางหัวข้อ: การ์ดที่ใช้สิทธิ์เต็ม / การตั้งค่าละเอียด (แบบง่าย) ซ่อน — ไม่ลงทะเบียน (ใบแรกที่กางเองยังถูก)
+  const hidden = cardHiddenIn(useDesignMode(), title);
   const key = ctx ? `${ctx.page}:${normTitle(title)}` : "";
   const register = ctx?.register;
-  useEffect(() => (register ? register(key, defaultOpen) : undefined), [register, key, defaultOpen]);
+  useEffect(() => (register && !hidden ? register(key, defaultOpen) : undefined), [register, key, defaultOpen, hidden]);
   const open = ctx ? effectiveOpen(ctx, key, defaultOpen) : true;
   const setOpen = (v: boolean) => ctx?.setSaved({ ...ctx.saved, [key]: v });
   // ค้นหาเจอการ์ดนี้ → กางให้
@@ -111,6 +114,7 @@ export function DesignCard({
     return () => window.removeEventListener("website-design-focus", on);
   }, [ctx, title]);
 
+  if (hidden) return null;
   if (!ctx) {
     return (
       <div className={`rounded-xl border border-slate-200 bg-white p-4 ${className}`} data-design-card={title}>

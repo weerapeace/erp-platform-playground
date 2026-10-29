@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { applyDesignPages, designCardLevel } from "../website-design-nav";
 import { DESIGN_GROUPS, DESIGN_PAGES, DESIGN_PAGE_KEYS, PREVIEW_PART_RULES, dirtyDesignPages, normTitle, previewFocusOf, previewRuleOf, searchDesign } from "../website-design-nav";
 import { DEFAULT_THEME } from "../website-theme";
 
@@ -58,5 +59,32 @@ describe("website-design-nav", () => {
     });
     expect(previewFocusOf("footer")).toEqual(["ft."]);
     expect(previewFocusOf("colors")).toEqual([]);
+  });
+});
+
+describe("👷 คัดค่าเฉพาะหัวข้อ (พนักงานแก้บางหัวข้อ)", () => {
+  it("ทับเฉพาะ path ของหน้าที่เลือก · หน้าอื่นคงค่าเดิม · ไม่แตะต้นฉบับ", () => {
+    const base = structuredClone(DEFAULT_THEME);
+    const src = structuredClone(DEFAULT_THEME);
+    src.colors.brand = "#123456";
+    src.menu = { ...src.menu, items: [{ label: "ทดสอบ", href: "/x" }] } as unknown as typeof src.menu;
+    (src.page as unknown as Record<string, unknown>).festive = { kind: "snow" };
+    const out = applyDesignPages(base, src, ["menu"]);
+    expect(out.menu).toEqual(src.menu);
+    expect(out.colors.brand).toBe(DEFAULT_THEME.colors.brand);
+    expect((out.page as unknown as Record<string, unknown>).festive).toEqual((DEFAULT_THEME.page as unknown as Record<string, unknown>).festive);
+    expect(base.menu).toEqual(DEFAULT_THEME.menu);
+    // path ซ้อน (page.festive) ของหัวข้อแคมเปญ
+    const camp = applyDesignPages(base, src, ["campaign"]);
+    expect((camp.page as unknown as Record<string, unknown>).festive).toEqual({ kind: "snow" });
+    expect(camp.menu).toEqual(DEFAULT_THEME.menu);
+  });
+  it("ระดับการ์ด: ปรับละเอียด = advanced · ใช้สิทธิ์เต็ม = full · การ์ดทั่วไป = null (หัวการ์ดมีอีโมจิได้)", () => {
+    expect(designCardLevel("🎨 ปรับสีละเอียด")).toBe("advanced");
+    expect(designCardLevel("ปรับละเอียดทีละชิ้น")).toBe("advanced");
+    expect(designCardLevel("⏰ ตั้งเวลาเผยแพร่")).toBe("full");
+    expect(designCardLevel("🎨 ธีมทั้งชุด (กดครั้งเดียว)")).toBe("full");
+    expect(designCardLevel("เมนูด้านบน")).toBeNull();
+    expect(designCardLevel("สี")).toBeNull();
   });
 });

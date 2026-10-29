@@ -20,6 +20,12 @@ export interface DesignCardDef {
   title: string;
   /** คำค้นเพิ่ม: ชื่อช่องในการ์ด / คำอังกฤษ / คำที่คนน่าจะพิมพ์ */
   keywords?: string;
+  /**
+   * 👷 พนักงานที่แก้ได้บางหัวข้อ (lib/website-access · designAccess):
+   *   advanced = ซ่อนในแบบง่าย (ไม่มีสิทธิ์ "โชว์การตั้งค่าละเอียด")
+   *   full     = ซ่อนเสมอ — ใช้ API ที่ต้องแก้ได้ทุกหัวข้อ หรือเปลี่ยนหลายหัวข้อพร้อมกัน
+   */
+  level?: "advanced" | "full";
 }
 
 export interface DesignPageDef {
@@ -57,11 +63,11 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
     paths: ["colors"],
     keywords: "สี color theme preset palette",
     cards: [
-      { title: "ธีมที่บันทึกไว้", keywords: "saved theme บันทึกธีม ข้ามร้าน" },
-      { title: "ธีมทั้งชุด (กดครั้งเดียว)", keywords: "preset ธีมสำเร็จรูป" },
+      { title: "ธีมที่บันทึกไว้", level: "full", keywords: "saved theme บันทึกธีม ข้ามร้าน" },
+      { title: "ธีมทั้งชุด (กดครั้งเดียว)", level: "full", keywords: "preset ธีมสำเร็จรูป" },
       { title: "ชุดสีสำเร็จรูป", keywords: "palette ชุดสี" },
       { title: "สี", keywords: "สีหลักแบรนด์ สีหลักเข้ม สีตัวอักษร สีพื้นหลังเว็บ สีพื้นการ์ด brand" },
-      { title: "ปรับสีละเอียด", keywords: "สีลิงก์ สีราคา ราคาลด พร้อมส่ง เหลือน้อย เส้นขอบ ตัวอักษรบนปุ่ม สีอ่อน" },
+      { title: "ปรับสีละเอียด", level: "advanced", keywords: "สีลิงก์ สีราคา ราคาลด พร้อมส่ง เหลือน้อย เส้นขอบ ตัวอักษรบนปุ่ม สีอ่อน" },
       { title: "ตรวจความอ่านง่าย (WCAG)", keywords: "contrast อ่านยาก ความคมชัด" },
     ],
   },
@@ -72,7 +78,7 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
     keywords: "font ฟอนต์ typography",
     cards: [
       { title: "ฟอนต์หลัก", keywords: "ฟอนต์หัวข้อ ฟอนต์เนื้อหา ฟอนต์อังกฤษ" },
-      { title: "ปรับละเอียดรายบทบาท", keywords: "ขนาดตัวอักษร น้ำหนัก ตัวพิมพ์ใหญ่ ระยะห่างตัวอักษร หัวข้อใหญ่ ราคา เมนู" },
+      { title: "ปรับละเอียดรายบทบาท", level: "advanced", keywords: "ขนาดตัวอักษร น้ำหนัก ตัวพิมพ์ใหญ่ ระยะห่างตัวอักษร หัวข้อใหญ่ ราคา เมนู" },
     ],
   },
   shape: {
@@ -125,7 +131,7 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
       { title: "ปุ่มบนหัวเว็บ · เมนูมือถือ", keywords: "ปุ่ม ลิงก์ เมนูมือถือ ลิ้นชัก ซ่อนตอนเลื่อน" },
       { title: "หัวเว็บทับรูปใหญ่ (โปร่งใสตอนอยู่บนสุด)", keywords: "โปร่งใส ทับรูป hero" },
       { title: "ไอคอนบนหัวเว็บ", keywords: "ไอคอน เส้น ทึบ" },
-      { title: "ปรับละเอียดทีละชิ้น", keywords: "แถบประกาศ ลิงก์เมนู ป้ายตะกร้า" },
+      { title: "ปรับละเอียดทีละชิ้น", level: "advanced", keywords: "แถบประกาศ ลิงก์เมนู ป้ายตะกร้า" },
     ],
   },
   menu: {
@@ -160,7 +166,7 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
       { title: "จุดสีบนการ์ด", keywords: "swatch สี" },
       { title: "ป้าย · รูปบนการ์ด · ชื่อ/ราคา · ดูด่วน", keywords: "ป้ายลดราคา ป้ายสินค้าใหม่ ขายดี รูปในกรอบ quick view" },
       { title: "ระหว่างรอรูปโหลด", keywords: "placeholder" },
-      { title: "ปรับละเอียดทีละชิ้น" },
+      { title: "ปรับละเอียดทีละชิ้น", level: "advanced" },
     ],
   },
   listing: {
@@ -246,8 +252,8 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
     paths: ["page.festive", "page.proof"],
     keywords: "campaign schedule แคมเปญ",
     cards: [
-      { title: "ตั้งเวลาเผยแพร่", keywords: "schedule" },
-      { title: "ธีมแคมเปญตามช่วงวันที่", keywords: "11.11 โปรโมชัน" },
+      { title: "ตั้งเวลาเผยแพร่", level: "full", keywords: "schedule" },
+      { title: "ธีมแคมเปญตามช่วงวันที่", level: "full", keywords: "11.11 โปรโมชัน" },
       { title: "ของตกแต่งเทศกาล (ธีมปกติ)", keywords: "หิมะ ปีใหม่" },
       { title: "ป้ายคนดู / ขายแล้ว", keywords: "social proof" },
     ],
@@ -368,3 +374,42 @@ export const previewRuleOf = (part: string): PreviewPartRule | null => PREVIEW_P
 
 /** เปิดหน้านี้แล้วพรีวิวเลื่อนไปชิ้นไหน (prefix ของหน้านั้น · ไม่มี = ไม่เลื่อน) */
 export const previewFocusOf = (page: DesignPageKey): string[] => PREVIEW_PART_RULES.filter((r) => r.page === page).map((r) => r.prefix);
+
+/** ตั้งค่าตาม path จุด (สร้างก้อนกลางทางให้ · ค่า undefined = ลบ) */
+function setAt(obj: Record<string, unknown>, path: string, v: unknown) {
+  const keys = path.split(".");
+  let cur = obj;
+  for (const k of keys.slice(0, -1)) {
+    const next = cur[k];
+    if (next == null || typeof next !== "object" || Array.isArray(next)) cur[k] = {};
+    cur = cur[k] as Record<string, unknown>;
+  }
+  const last = keys[keys.length - 1];
+  if (v === undefined) delete cur[last];
+  else cur[last] = v;
+}
+
+/**
+ * 👷 คัดเฉพาะค่าของหน้าที่ระบุจาก src ไปทับ base (คืนก้อนใหม่ · ค่าหน้าอื่นใน base ไม่ถูกแตะ)
+ *   API ธีมใช้กับพนักงานที่แก้ได้บางหัวข้อ: ร่างในระบบ + เฉพาะหัวข้อที่เขาแก้ → ไม่ทับงานคนอื่น/หัวข้อที่ไม่มีสิทธิ์
+ */
+export function applyDesignPages<T>(base: T, src: unknown, pages: readonly DesignPageKey[]): T {
+  const out = structuredClone(base ?? {}) as Record<string, unknown>;
+  for (const p of pages) {
+    if (p === "overview" || !(p in DESIGN_PAGES)) continue;
+    for (const path of DESIGN_PAGES[p].paths) {
+      const v = valueAt(src, path);
+      setAt(out, path, v === undefined ? undefined : structuredClone(v));
+    }
+  }
+  return out as T;
+}
+
+/** การ์ดที่ซ่อนสำหรับพนักงานที่แก้ได้บางหัวข้อ (หัวการ์ดบนจอ → ระดับ · เทียบแบบขึ้นต้นด้วยชื่อในทะเบียน) */
+const CARD_LEVELS: [string, "advanced" | "full"][] = DESIGN_PAGE_KEYS.flatMap((k) =>
+  DESIGN_PAGES[k].cards.filter((c) => c.level).map((c) => [normTitle(c.title), c.level!] as [string, "advanced" | "full"])
+);
+export function designCardLevel(title: string): "advanced" | "full" | null {
+  const t = normTitle(title);
+  return CARD_LEVELS.find(([k]) => t.startsWith(k))?.[1] ?? null;
+}

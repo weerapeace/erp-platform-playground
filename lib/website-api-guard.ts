@@ -10,7 +10,7 @@
 import { NextResponse } from "next/server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { websiteApiGroups, websiteGroupDef, websitePerm, websiteShopPerm } from "@/lib/website-access";
+import { DESIGN_TOPIC_PERMS, designAccess, websiteApiGroups, websiteGroupDef, websitePerm, websiteShopPerm, type DesignAccess } from "@/lib/website-access";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHOP_TTL = 5 * 60_000;
@@ -75,4 +75,22 @@ export async function guardWebsite(request: Request, level: "view" | "edit"): Pr
 /** ร้านที่ผู้ใช้เข้าได้ (กรองรายชื่อร้าน) */
 export async function websiteCanShop(request: Request, slug: string): Promise<boolean> {
   return apiCan(request, websiteShopPerm(slug));
+}
+
+const NO_DESIGN: DesignAccess = { full: false, topics: [], publish: false, advanced: false };
+
+/**
+ * 👷 ด่านแก้หน้าดีไซน์: แก้ได้ทุกหัวข้อ (website.design.edit — แบบเดิม) หรือ บางหัวข้อ (ดูได้ + website.design.topic.*)
+ *   denied = แก้ไม่ได้เลย / ไม่มีสิทธิ์ร้าน · access.full = แบบเดิม · บางหัวข้อ → route ต้องคัดเฉพาะค่าของหัวข้อนั้นเอง (applyDesignPages)
+ */
+export async function guardDesignEdit(request: Request): Promise<{ denied: NextResponse | null; access: DesignAccess }> {
+  const fullDenied = await guardWebsite(request, "edit");
+  if (!fullDenied) return { denied: null, access: designAccess(() => true) };
+  const viewDenied = await guardWebsite(request, "view");
+  if (viewDenied) return { denied: viewDenied, access: NO_DESIGN };
+  const keys = [websitePerm("design", "view"), ...DESIGN_TOPIC_PERMS];
+  const oks = await Promise.all(keys.map((k) => apiCan(request, k)));
+  const got = new Set(keys.filter((_, i) => oks[i]));
+  const access = designAccess((k) => got.has(k));
+  return access.topics.length ? { denied: null, access } : { denied: fullDenied, access };
 }

@@ -5,6 +5,7 @@
  *   แถว = ตำแหน่ง (ค่าเริ่มของทุกคนในตำแหน่ง) + รายคน (ยกเว้นเฉพาะคน · ชนะตำแหน่ง)
  *   คอลัมน์ = 6 กลุ่มงาน (กดสลับ ไม่เห็น → ดูได้ → แก้ได้) + ร้านที่เข้าได้ (ติ๊ก)
  *   website.access (เห็นเมนู) ตั้งให้เอง = เห็นอย่างน้อย 1 กลุ่ม
+ *   👷 หน้าตาเว็บ "ดูได้" + ติ๊กหัวข้อดีไซน์ = พนักงานแก้ได้บางหัวข้อ (หน้าดีไซน์แบบง่าย · ส่งให้หัวหน้าเผยแพร่) — ส่วนล่างของหน้า
  *   ร่าง → SaveBar ทีเดียว (POST /api/website/access) · ผู้ดูแลระบบได้ทุกอย่างเสมอ
  * ของกลาง: lib/website-access · SaveBar · UserPicker · ระบบสิทธิ์เดิม (ตำแหน่ง/รายคน)
  */
@@ -13,7 +14,14 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { SaveBar } from "@/components/save-bar";
 import { UserPicker } from "@/components/pickers";
+import { DESIGN_GROUPS, DESIGN_PAGES } from "@/lib/website-design-nav";
 import {
+  designAccess,
+  designTopicKeys,
+  DESIGN_TOPIC_PRESETS,
+  isDesignTopic,
+  websitePerm,
+  type DesignTopic,
   nextWebsiteLevel,
   websiteLevel,
   websiteLevelKeys,
@@ -46,6 +54,75 @@ const LEVEL_CLS: Record<WebsiteLevel, string> = {
   edit: "border-blue-300 bg-blue-50 text-blue-800",
 };
 
+/** ระดับกลุ่ม → คีย์ (หน้าตาเว็บ ไม่ใช่ "ดูได้" = ล้างหัวข้อดีไซน์ — แก้ได้ = ทุกหัวข้ออยู่แล้ว) */
+const levelKeys = (g: WebsiteGroup, lv: WebsiteLevel) => (g === "design" && lv !== "view" ? { ...websiteLevelKeys(g, lv), ...designTopicKeys([], false, false) } : websiteLevelKeys(g, lv));
+const topicLabel = (t: DesignTopic) => DESIGN_PAGES[t].label;
+
+/** 👷 ตั้งหัวข้อดีไซน์ที่แก้ได้ของแถวหนึ่ง (ตำแหน่ง/คน) — ติ๊กแล้ว "หน้าตาเว็บ" เป็นดูได้ + บางหัวข้อ */
+function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onPatch: (keys: Record<string, boolean>) => void }) {
+  const acc = designAccess(has);
+  const topics = acc.full ? [] : acc.topics;
+  const set = (next: DesignTopic[], publish = acc.full ? false : acc.publish, advanced = acc.full ? false : acc.advanced) =>
+    onPatch(next.length ? { ...designTopicKeys(next, publish, advanced), [websitePerm("design", "view")]: true, [websitePerm("design", "edit")]: false } : designTopicKeys([], false, false));
+  const toggle = (t: DesignTopic) => set(topics.includes(t) ? topics.filter((x) => x !== t) : [...topics, t]);
+  return (
+    <div className="space-y-2" data-design-topics-editor>
+      {acc.full && <p className="text-[11px] text-blue-700">ตอนนี้แก้ได้ทุกหัวข้อ (ช่อง “หน้าตาเว็บ” = แก้ได้) — ติ๊กหัวข้อด้านล่างเพื่อจำกัดให้แก้ได้เฉพาะบางหัวข้อ</p>}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-[11px] text-slate-500">ชุดสำเร็จรูป:</span>
+        {DESIGN_TOPIC_PRESETS.map((p) => (
+          <button key={p.label} type="button" onClick={() => set(p.topics)} className="rounded-full border border-slate-200 px-2.5 py-0.5 text-[11px] text-slate-600 hover:border-blue-400 hover:text-blue-700">
+            {p.label}
+          </button>
+        ))}
+        {topics.length > 0 && (
+          <button type="button" onClick={() => set([])} className="rounded-full px-2 py-0.5 text-[11px] text-slate-400 hover:text-red-600">
+            ล้าง
+          </button>
+        )}
+      </div>
+      <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-5">
+        {DESIGN_GROUPS.map((g) => {
+          const pages = g.pages.filter(isDesignTopic);
+          if (!pages.length) return null;
+          return (
+            <div key={g.key}>
+              <p className="text-[11px] font-medium text-slate-400">{g.label}</p>
+              {pages.map((t) => (
+                <label key={t} className="flex items-center gap-1.5 py-0.5 text-xs text-slate-700 cursor-pointer">
+                  <input type="checkbox" checked={topics.includes(t)} onChange={() => toggle(t)} className="h-3.5 w-3.5 accent-blue-600" />
+                  {topicLabel(t)}
+                </label>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+      <div className={`flex flex-wrap gap-x-5 gap-y-1 text-xs ${topics.length ? "text-slate-700" : "text-slate-400"}`}>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input type="checkbox" disabled={!topics.length} checked={!acc.full && acc.publish} onChange={(e) => set(topics, e.target.checked, acc.advanced)} className="h-3.5 w-3.5 accent-blue-600" />
+          เผยแพร่เองได้ (ไม่ติ๊ก = บันทึกร่างแล้วส่งให้หัวหน้าเผยแพร่)
+        </label>
+        <label className="flex items-center gap-1.5 cursor-pointer">
+          <input type="checkbox" disabled={!topics.length} checked={!acc.full && acc.advanced} onChange={(e) => set(topics, acc.publish, e.target.checked)} className="h-3.5 w-3.5 accent-blue-600" />
+          โชว์การตั้งค่าละเอียด (ไม่ติ๊ก = แบบง่าย)
+        </label>
+      </div>
+    </div>
+  );
+}
+
+/** สรุปบรรทัดเดียวของแถว */
+function designSummary(has: (k: string) => boolean): { text: string; tone: string } {
+  const acc = designAccess(has);
+  if (acc.full) return { text: "แก้ได้ทุกหัวข้อ", tone: "text-blue-700" };
+  if (!acc.topics.length) return { text: "ไม่ได้แก้หน้าดีไซน์", tone: "text-slate-400" };
+  return {
+    text: `แก้ได้: ${acc.topics.map(topicLabel).join(", ")} · ${acc.publish ? "เผยแพร่เองได้" : "ส่งให้หัวหน้าเผยแพร่"}${acc.advanced ? "" : " · แบบง่าย"}`,
+    tone: "text-amber-800",
+  };
+}
+
 const cloneSets = (s: RoleSets): RoleSets => Object.fromEntries(Object.entries(s).map(([k, v]) => [k, new Set(v)]));
 const cloneOv = (o: Overrides): Overrides => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, { ...v }]));
 const anyGroup = (has: (k: string) => boolean) => WEBSITE_GROUPS.some((g) => websiteLevel(has, g.key) !== "none");
@@ -65,6 +142,7 @@ export function WebsiteAccessSettings() {
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [topicsOpen, setTopicsOpen] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const j = await apiFetch("/api/website/access").then((r) => r.json()).catch(() => ({ error: "โหลดไม่สำเร็จ" }));
@@ -174,16 +252,18 @@ export function WebsiteAccessSettings() {
   // ── ช่องในตาราง ──
   const levelCell = (has: (k: string) => boolean, g: WebsiteGroup, onSet: ((lv: WebsiteLevel) => void) | null) => {
     const lv = websiteLevel(has, g);
+    const nTopics = g === "design" && lv === "view" ? designAccess(has).topics.length : 0;
     return (
       <td key={g} className="px-1 py-1">
         <button
           type="button"
           disabled={!onSet}
           onClick={() => onSet?.(nextWebsiteLevel(g, lv))}
-          className={`w-full min-w-[64px] rounded-md border px-1.5 py-1 text-xs ${LEVEL_CLS[lv]} ${onSet ? "hover:brightness-95" : "cursor-default opacity-80"}`}
-          data-website-level={lv}
+          className={`w-full min-w-[64px] rounded-md border px-1.5 py-1 text-xs ${nTopics ? "border-amber-300 bg-amber-50 text-amber-800" : LEVEL_CLS[lv]} ${onSet ? "hover:brightness-95" : "cursor-default opacity-80"}`}
+          data-website-level={nTopics ? "topics" : lv}
+          title={nTopics ? "ดูได้ + แก้บางหัวข้อ (ตั้งที่ส่วน “หน้าดีไซน์แบบง่าย” ด้านล่าง)" : undefined}
         >
-          {WEBSITE_LEVEL_LABEL[lv]}
+          {nTopics ? `แก้บางหัวข้อ (${nTopics})` : WEBSITE_LEVEL_LABEL[lv]}
         </button>
       </td>
     );
@@ -262,7 +342,7 @@ export function WebsiteAccessSettings() {
                     </td>
                     {rowCells(
                       has,
-                      editable ? (g, lv) => patchRole(r.key, websiteLevelKeys(g, lv)) : null,
+                      editable ? (g, lv) => patchRole(r.key, levelKeys(g, lv)) : null,
                       editable ? (slug, on) => patchRole(r.key, { [websiteShopPerm(slug)]: on }) : null
                     )}
                   </tr>
@@ -301,7 +381,7 @@ export function WebsiteAccessSettings() {
                       )}
                     </div>
                   </td>
-                  {rowCells(has, (g, lv) => patchUser(id, websiteLevelKeys(g, lv)), (slug, on) => patchUser(id, { [websiteShopPerm(slug)]: on }))}
+                  {rowCells(has, (g, lv) => patchUser(id, levelKeys(g, lv)), (slug, on) => patchUser(id, { [websiteShopPerm(slug)]: on }))}
                 </tr>
               );
             })}
@@ -323,6 +403,50 @@ export function WebsiteAccessSettings() {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      {/* 👷 หน้าดีไซน์แบบง่ายสำหรับพนักงาน — แก้ได้บางหัวข้อ */}
+      <div className="rounded-xl border border-slate-200 bg-white" data-design-topics>
+        <div className="border-b border-slate-100 px-4 py-3">
+          <p className="text-sm font-medium text-slate-800">หน้าดีไซน์แบบง่ายสำหรับพนักงาน — เลือกหัวข้อที่แก้ได้</p>
+          <p className="text-xs text-slate-500">
+            ติ๊กหัวข้อแล้วคนนั้นเปิดแท็บดีไซน์จะเห็นแค่หัวข้อนั้น · บันทึกได้เฉพาะหัวข้อที่ติ๊ก (ระบบกันฝั่งเซิร์ฟเวอร์) · ไม่ให้เผยแพร่เอง = แก้แล้วกด “ส่งให้หัวหน้าตรวจ” (เด้งกระดิ่งถึงคนที่แก้ดีไซน์ได้ทุกหัวข้อ)
+          </p>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {[
+            ...roles.filter((r) => r.key !== "admin").map((r) => ({ id: `role:${r.key}`, name: r.label, sub: "ตำแหน่ง", has: (k: string) => !!roleSets[r.key]?.has(k), patch: data.canRoles ? (keys: Record<string, boolean>) => patchRole(r.key, keys) : null })),
+            ...people.flatMap((id) => {
+              const u = userById.get(id);
+              return u ? [{ id: `user:${id}`, name: u.name, sub: roleLabel(u.role), has: effOf(roleSets[u.role ?? ""], ov[id]), patch: (keys: Record<string, boolean>) => patchUser(id, keys) }] : [];
+            }),
+          ].map((row) => {
+            const sum = designSummary(row.has);
+            const open = topicsOpen === row.id;
+            return (
+              <div key={row.id} className="px-4 py-2" data-design-topics-row={row.id}>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm text-slate-800">{row.name}</span>
+                  <span className="text-[11px] text-slate-400">{row.sub}</span>
+                  <span className={`min-w-0 flex-1 truncate text-xs ${sum.tone}`}>{sum.text}</span>
+                  {row.patch ? (
+                    <button type="button" onClick={() => setTopicsOpen(open ? null : row.id)} className="shrink-0 rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:border-blue-400 hover:text-blue-700">
+                      {open ? "ปิด" : "ตั้งหัวข้อ"}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-slate-400">ดูอย่างเดียว</span>
+                  )}
+                </div>
+                {open && row.patch && (
+                  <div className="mt-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+                    <DesignTopicsEditor has={row.has} onPatch={row.patch} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <p className="px-4 py-2 text-[11px] text-slate-400">ตั้งรายคน: เพิ่มคนในตารางด้านบน (“＋ เพิ่มคนที่ต้องตั้งต่างจากตำแหน่ง”) แล้วเขาจะขึ้นในรายการนี้</p>
       </div>
 
       <SaveBar

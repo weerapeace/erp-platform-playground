@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { DESIGN_ADVANCED_PERM, DESIGN_PUBLISH_PERM, DESIGN_TOPICS, designAccess, designTopicKeys, designTopicPerm } from "./website-access";
+import { DESIGN_PAGE_KEYS } from "./website-design-nav";
 import { nextWebsiteLevel, websiteApiGroups, websiteGroupOfTab, websiteLevel, websiteLevelKeys, websitePerm, WEBSITE_GROUP_PERMS, WEBSITE_GROUPS } from "./website-access";
 
 describe("website-access", () => {
@@ -40,5 +42,31 @@ describe("website-access", () => {
     expect(websiteApiGroups("/api/website/listings/images")).toBeNull();
     expect(websiteApiGroups("/api/website/listings/catalog")).toEqual(["products"]);
     expect(websiteApiGroups("/api/other")).toBeNull();
+  });
+});
+
+describe("👷 หน้าดีไซน์บางหัวข้อ", () => {
+  const of = (keys: string[]) => designAccess((k) => keys.includes(k));
+  it("หัวข้อ = หน้าดีไซน์ทุกหน้า ยกเว้นประวัติ (เพิ่มหน้าใหม่แล้วต้องเพิ่มที่นี่ด้วย)", () => {
+    expect([...DESIGN_TOPICS].sort()).toEqual(DESIGN_PAGE_KEYS.filter((k) => k !== "history").sort());
+  });
+  it("แก้ได้ (design.edit) = ทุกหัวข้อ + เผยแพร่ + ละเอียด (แบบเดิม)", () => {
+    expect(of([websitePerm("design", "edit")])).toMatchObject({ full: true, publish: true, advanced: true, topics: [...DESIGN_TOPICS] });
+  });
+  it("ดูได้ + หัวข้อ = แก้บางหัวข้อ · ไม่มีดูได้ = ไม่นับหัวข้อ", () => {
+    const a = of([websitePerm("design", "view"), designTopicPerm("menu"), designTopicPerm("listing")]);
+    expect(a).toEqual({ full: false, topics: ["menu", "listing"], publish: false, advanced: false });
+    expect(of([designTopicPerm("menu"), DESIGN_PUBLISH_PERM]).topics).toEqual([]);
+    expect(of([websitePerm("design", "view"), designTopicPerm("menu"), DESIGN_PUBLISH_PERM, DESIGN_ADVANCED_PERM])).toMatchObject({ publish: true, advanced: true });
+  });
+  it("ไม่มีหัวข้อ = เผยแพร่/ละเอียดไม่มีผล", () => {
+    expect(of([websitePerm("design", "view"), DESIGN_PUBLISH_PERM, DESIGN_ADVANCED_PERM])).toEqual({ full: false, topics: [], publish: false, advanced: false });
+  });
+  it("designTopicKeys ตั้งครบทุกคีย์ · ว่าง = ปิดหมด", () => {
+    const k = designTopicKeys(["menu"], true, false);
+    expect(k[designTopicPerm("menu")]).toBe(true);
+    expect(k[designTopicPerm("colors")]).toBe(false);
+    expect([k[DESIGN_PUBLISH_PERM], k[DESIGN_ADVANCED_PERM]]).toEqual([true, false]);
+    expect(Object.values(designTopicKeys([], true, true)).every((v) => v === false)).toBe(true);
   });
 });

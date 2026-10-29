@@ -67,6 +67,12 @@
   - บนตัวเว็บ: เว็บร้านส่ง `storefront-preview-pan {dx, dy}` (px บนจอ) → ERP `panBy` เลื่อนกรอบนอกก่อน ส่วนขึ้น-ลงที่เหลือส่งกลับ `storefront-preview-scroll {dy}` ให้หน้าเว็บเลื่อน · พื้นเทารอบพรีวิว ERP จับเอง
 - ท่าทางซูม/ลากของเว็บร้านเปิดเฉพาะเมื่อ ERP ส่ง `storefront-preview-gestures {on:true}` (แท็บดีไซน์ส่งทุกครั้งที่พรีวิวพร้อม) — หน้าแก้อื่นที่ใช้พรีวิว (จัดหน้าแรก · Section) ลูกกลิ้งทำงานแบบเดิม
 
+## 👷 พนักงานแก้บางหัวข้อ
+
+- ตั้งที่ /website/access (ดู docs/website-access.md) · โหมดอ่านจาก `designAccess` (lib/website-access) ใน website-theme-panel → `DesignModeCtx` (components/website-design/mode.tsx: limited · simple)
+- การ์ดใหม่ที่ใช้ API สิทธิ์เต็ม / เปลี่ยนหลายหัวข้อพร้อมกัน → ใส่ `level: "full"` · การตั้งค่าเชิงลึก → `level: "advanced"` ใน cards ของ lib/website-design-nav (DesignCard ซ่อนให้เอง)
+- หน้าดีไซน์ใหม่ → เพิ่มใน `DESIGN_TOPICS` ของ lib/website-access ด้วย (เทสต์ฟ้องถ้าไม่ตรง)
+
 ## ข้อจำกัด / ทีหลัง
 
 - ส่วนที่ไม่มีป้าย data-part (Section ของหน้าแรก · ปุ่มแชท · แถบเมนูล่างมือถือ) ยังคลิกไม่ได้ — Section หน้าแรกแก้ที่แท็บ 🧱 จัดหน้าแรก

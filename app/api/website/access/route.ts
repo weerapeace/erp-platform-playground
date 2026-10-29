@@ -4,7 +4,7 @@
  * POST { roles: [{role_key, permission_key, granted}], users: [{user_id, permission_key, mode: grant|revoke|default}] }
  *      → ตำแหน่ง: RPC erp_role_permission_toggle (ต้อง admin.roles · audit ในตัว)
  *      → รายคน: erp_user_permissions (ต้อง admin.users) + audit website_access.user
- *      สิทธิ์ร้านที่ยังไม่มีในทะเบียน (ร้านใหม่) สร้างให้ก่อน
+ *      สิทธิ์ร้านที่ยังไม่มีในทะเบียน (ร้านใหม่) + 👷 หัวข้อดีไซน์ (website.design.topic.* / publish / advanced) สร้างให้ก่อน
  * ของกลาง: lib/website-access (กลุ่ม/คีย์) · ระบบสิทธิ์เดิม (erp_role_permissions / erp_user_permissions / erp_can)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -12,7 +12,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { WEBSITE_ACCESS_PERM, WEBSITE_GROUP_PERMS, websiteShopPerm } from "@/lib/website-access";
+import { DESIGN_ADVANCED_PERM, DESIGN_PUBLISH_PERM, DESIGN_TOPIC_PERMS, DESIGN_TOPICS, designTopicPerm, WEBSITE_ACCESS_PERM, WEBSITE_GROUP_PERMS, websiteShopPerm } from "@/lib/website-access";
+import { DESIGN_PAGES } from "@/lib/website-design-nav";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const sb = supabaseAdmin();
   const { data: shopRows } = await sb.from("shops").select("id, slug, name");
   const shops = (shopRows ?? []) as Shop[];
-  const allowedKeys = new Set([WEBSITE_ACCESS_PERM, ...WEBSITE_GROUP_PERMS, ...shops.map((s) => websiteShopPerm(s.slug))]);
+  const allowedKeys = new Set([WEBSITE_ACCESS_PERM, ...WEBSITE_GROUP_PERMS, ...DESIGN_TOPIC_PERMS, ...shops.map((s) => websiteShopPerm(s.slug))]);
   const roleChanges = (body.roles ?? []).filter((c) => c.role_key && c.role_key !== "admin" && allowedKeys.has(c.permission_key ?? "") && typeof c.granted === "boolean");
   const userChanges = (body.users ?? []).filter((c) => c.user_id && allowedKeys.has(c.permission_key ?? "") && ["grant", "revoke", "default"].includes(c.mode ?? ""));
   if (!roleChanges.length && !userChanges.length) return NextResponse.json({ ok: true, errors: [], error: null });
@@ -67,6 +68,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ร้านใหม่ที่ยังไม่มีสิทธิ์ในทะเบียน → สร้างก่อน (toggle/override ต้องมีคีย์ในทะเบียน)
   const shopKeys = shops.map((s) => ({ key: websiteShopPerm(s.slug), label: `เว็บไซต์ · เข้าร้าน ${s.name}`, category: "เว็บไซต์", is_dangerous: false, sort_order: 2220 }));
   if (shopKeys.length) await sb.from("erp_permissions").upsert(shopKeys, { onConflict: "key", ignoreDuplicates: true });
+  // 👷 หัวข้อดีไซน์ (หน้าดีไซน์แบบง่ายของพนักงาน) — มีในทะเบียนครั้งแรกที่บันทึก
+  if ([...roleChanges, ...userChanges].some((c) => DESIGN_TOPIC_PERMS.includes(c.permission_key ?? ""))) {
+    const designKeys = [
+      ...DESIGN_TOPICS.map((t) => ({ key: designTopicPerm(t), label: `เว็บไซต์ · ดีไซน์แก้ได้: ${DESIGN_PAGES[t].label}`, category: "เว็บไซต์", is_dangerous: false, sort_order: 2215 })),
+      { key: DESIGN_PUBLISH_PERM, label: "เว็บไซต์ · ดีไซน์: เผยแพร่เองได้ (คนที่แก้บางหัวข้อ)", category: "เว็บไซต์", is_dangerous: false, sort_order: 2216 },
+      { key: DESIGN_ADVANCED_PERM, label: "เว็บไซต์ · ดีไซน์: โชว์การตั้งค่าละเอียด (คนที่แก้บางหัวข้อ)", category: "เว็บไซต์", is_dangerous: false, sort_order: 2217 },
+    ];
+    await sb.from("erp_permissions").upsert(designKeys, { onConflict: "key", ignoreDuplicates: true });
+  }
 
   const errors: string[] = [];
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();

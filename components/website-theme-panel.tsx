@@ -42,6 +42,9 @@ import { HistoryTab } from "@/components/website-design/history-tab";
 import { CheckoutTab, CartTab } from "@/components/website-design/sell-tabs";
 import { LogoSettings } from "@/components/website-design/logo-tab";
 import { DesignCtx, type DesignCtxValue } from "@/components/website-design/context";
+import { DesignModeCtx } from "@/components/website-design/mode";
+import { useAuth, type Permission } from "@/components/auth";
+import { designAccess } from "@/lib/website-access";
 import { MotionTab, MobileSalesTab } from "@/components/website-design/shape-tab";
 import { DesignOverview } from "@/components/website-design/overview";
 import { DesignCard, DesignCardsProvider, DesignCardsToggleAll } from "@/components/website-design/design-card";
@@ -123,6 +126,21 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       /* เปลี่ยนลิงก์ไม่ได้ก็ไม่เป็นไร */
     }
   }, []);
+  // 👷 สิทธิ์หน้าดีไซน์: ทุกหัวข้อ (แบบเดิม) หรือ พนักงานแก้บางหัวข้อ (lib/website-access · ตั้งที่ /website/access)
+  //    บางหัวข้อ = เมนูซ้ายเฉพาะหัวข้อนั้น · ไม่มีภาพรวม/ประวัติ/ตั้งเวลา · บันทึกเฉพาะค่าของหัวข้อ (API คัดซ้ำ) · เผยแพร่ไม่ได้ = ส่งให้หัวหน้าตรวจ
+  const { can, permsReady, user: me } = useAuth();
+  const knowPerms = permsReady || me?.role === "admin";
+  const access = useMemo(() => designAccess((k) => !knowPerms || can(k as Permission)), [knowPerms, can]);
+  const limited = !access.full && access.topics.length > 0;
+  const allowedPage = useCallback((k: TabKey) => !limited || (access.topics as string[]).includes(k), [limited, access]);
+  const designMode = useMemo(() => ({ limited, simple: limited && !access.advanced }), [limited, access.advanced]);
+  useEffect(() => {
+    if (limited && !allowedPage(tab)) setTabState(access.topics[0]);
+  }, [limited, allowedPage, tab, access.topics]);
+  // 🎯 คลิกเลือกส่วนในพรีวิว: เฉพาะส่วนของหัวข้อที่แก้ได้
+  const areaRules = useMemo(() => (limited ? PREVIEW_PART_RULES.filter((r) => allowedPage(r.page)).map(({ prefix, label }) => ({ prefix, label })) : AREA_RULES), [limited, allowedPage]);
+  const areaRulesRef = useRef(areaRules);
+  areaRulesRef.current = areaRules;
   // 🔎 ไปหน้า + การ์ดที่ค้นเจอ → เลื่อนให้เห็นแล้วกะพริบกรอบ (หาจากหัวการ์ดบนจอ)
   const settingsColRef = useRef<HTMLDivElement>(null);
   const goTo = useCallback((k: TabKey, card?: string) => {
@@ -240,8 +258,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const areaPickRef = useRef(false);
   useEffect(() => {
     areaPickRef.current = areaPick;
-    iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-pick", on: areaPick, rules: AREA_RULES }, "*");
-  }, [areaPick]);
+    iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-pick", on: areaPick, rules: areaRulesRef.current }, "*");
+  }, [areaPick, areaRules]);
   // 👁 เปิดหน้าตั้งค่า → พรีวิวเลื่อนไปส่วนที่กำลังแก้ (มาจากคลิกในพรีวิว = เห็นอยู่แล้ว ไม่เลื่อน · ไม่พาพรีวิวไปหน้าอื่น)
   const fromPick = useRef(false);
   const focusRef = useRef<string[]>([]);
@@ -263,6 +281,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (d.type !== "storefront-area-picked" || typeof d.part !== "string") return;
     const rule = previewRuleOf(d.part);
     if (!rule) return;
+    if (!allowedPage(rule.page)) return toast.info(`หัวข้อ “${DESIGN_PAGES[rule.page as Exclude<TabKey, "overview">]?.label ?? rule.label}” ไม่ได้รับสิทธิ์แก้`);
     if (rule.page !== tab) fromPick.current = true;
     goTo(rule.page, rule.card);
   });
@@ -547,7 +566,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       // 🎯 พรีวิวโหลดหน้าใหม่ → ส่งโหมดคลิกเลือกส่วน + ส่วนที่กำลังแก้ซ้ำ
       if ((e.data as { type?: string })?.type === "storefront-preview-ready") {
         iframeRef.current?.contentWindow?.postMessage({ type: "storefront-preview-gestures", on: true }, "*");
-        if (areaPickRef.current) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-pick", on: true, rules: AREA_RULES }, "*");
+        if (areaPickRef.current) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-pick", on: true, rules: areaRulesRef.current }, "*");
         if (focusRef.current.length) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-focus", prefixes: focusRef.current }, "*");
       }
     };
@@ -604,7 +623,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
   const save = async (mode: "draft" | "publish") => {
     if (!theme) return;
-    if (mode === "publish" && !confirm("ยืนยันเผยแพร่ธีมนี้ไปยังเว็บไซต์จริง?\nผู้เข้าชมจะเห็นการเปลี่ยนแปลงภายในประมาณ 1 นาที")) return;
+    // 👷 บางหัวข้อ: ส่งเฉพาะหัวข้อที่แก้ (และมีสิทธิ์) — เซิร์ฟเวอร์คัดค่าซ้ำอีกชั้น
+    const changed = limited ? dirtyDesignPages(theme, mode === "publish" ? published : saved) : [];
+    const pages = changed.filter((k) => allowedPage(k));
+    if (limited && !pages.length) return toast.info(changed.length ? "ส่วนที่แก้ไม่อยู่ในหัวข้อที่ได้รับสิทธิ์ — บันทึกไม่ได้" : "ยังไม่มีอะไรเปลี่ยน");
+    if (mode === "publish" && !confirm(limited ? `ยืนยันเผยแพร่หัวข้อ ${pages.map((k) => DESIGN_PAGES[k].label).join(", ")} ไปยังเว็บไซต์จริง?\nผู้เข้าชมจะเห็นการเปลี่ยนแปลงภายในประมาณ 1 นาที` : "ยืนยันเผยแพร่ธีมนี้ไปยังเว็บไซต์จริง?\nผู้เข้าชมจะเห็นการเปลี่ยนแปลงภายในประมาณ 1 นาที")) return;
     // ค่าที่ส่งจริง — ถ้าแก้ต่อระหว่างรอบันทึก ส่วนที่แก้เพิ่มยังนับเป็น "ยังไม่บันทึก"
     const sent = theme;
     setBusy(mode);
@@ -612,11 +635,28 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       const r = await apiFetch("/api/website/theme", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ shopId, theme: sent, mode }),
+        body: JSON.stringify({ shopId, theme: sent, mode, ...(limited ? { pages } : {}) }),
       });
       const j = await r.json();
       if (!j.ok) {
         toast.error(j.error ?? "บันทึกไม่สำเร็จ");
+        return;
+      }
+      if (limited) {
+        // ค่าในระบบหลังคัดหัวข้อ (รวมงานคนอื่นในหัวข้ออื่น) — แก้ต่อระหว่างรอ = เก็บที่แก้ไว้
+        const fresh = (mode === "publish" ? (j.draft ?? j.theme) : j.theme) as Theme;
+        setSaved(fresh);
+        setTheme((cur) => (cur === sent ? fresh : cur));
+        if (mode === "publish") {
+          setPublished(j.theme);
+          setHadDraft(Boolean(j.draft));
+          setLastVersion({ version_no: j.version, created_at: new Date().toISOString() });
+          toast.success(`เผยแพร่แล้ว (เวอร์ชัน ${j.version}) — เว็บจะอัปเดตภายใน ~1 นาที`);
+        } else {
+          setHadDraft(true);
+          toast.success(access.publish ? "บันทึกร่างแล้ว — เว็บไซต์จริงยังไม่เปลี่ยน" : "บันทึกร่างแล้ว — แก้เสร็จกด “ส่งให้หัวหน้าตรวจ”");
+        }
+        if (changed.length > pages.length) toast.info("บางส่วนที่แก้ไม่อยู่ในหัวข้อที่ได้รับสิทธิ์ — ไม่ถูกบันทึก");
         return;
       }
       setSaved(sent);
@@ -637,6 +677,12 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   };
 
   const discard = async () => {
+    // 👷 บางหัวข้อ: ทิ้งเฉพาะที่ยังไม่บันทึก (ร่างในระบบมีงานคนอื่นด้วย — ละทิ้งทั้งก้อนต้องเป็นหัวหน้า)
+    if (limited) {
+      if (!confirm("ทิ้งที่แก้ (ยังไม่บันทึก) แล้วโหลดร่างล่าสุด?")) return;
+      await load();
+      return toast.info("โหลดร่างล่าสุดแล้ว");
+    }
     if (!confirm("ละทิ้งการเปลี่ยนแปลงทั้งหมด กลับไปใช้ธีมที่เผยแพร่อยู่?")) return;
     try {
       await apiFetch(`/api/website/theme?shopId=${encodeURIComponent(shopId)}`, { method: "DELETE" });
@@ -645,6 +691,30 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     }
     await load();
     toast.info("ละทิ้งการเปลี่ยนแปลงแล้ว");
+  };
+
+  // 👷 ส่งร่างให้หัวหน้าตรวจ (กระดิ่ง · /api/website/theme/review) — หัวข้อที่ร่างต่างจากเว็บจริง
+  const [reviewing, setReviewing] = useState(false);
+  const requestReview = async () => {
+    if (!saved || !published) return;
+    const pages = dirtyDesignPages(saved, published).filter((k) => allowedPage(k));
+    if (!pages.length) return toast.info("ร่างยังไม่ต่างจากเว็บจริง — แก้แล้วบันทึกร่างก่อน");
+    const note = window.prompt(`ส่งให้หัวหน้าตรวจหัวข้อ: ${pages.map((k) => DESIGN_PAGES[k].label).join(", ")}\nฝากข้อความถึงหัวหน้า (ไม่ใส่ก็ได้)`, "");
+    if (note === null) return;
+    setReviewing(true);
+    try {
+      const j = await apiFetch("/api/website/theme/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shopId, pages, note }),
+      }).then((r) => r.json());
+      if (!j.ok) toast.error(j.error ?? "ส่งไม่สำเร็จ");
+      else toast.success(j.sent ? `ส่งให้หัวหน้าแล้ว (${j.sent} คน) — รอหัวหน้าเผยแพร่` : "บันทึกคำขอแล้ว แต่ยังไม่มีหัวหน้าที่เข้าร้านนี้ได้ — แจ้งผู้ดูแลระบบ");
+    } catch {
+      toast.error("เชื่อมต่อไม่ได้");
+    } finally {
+      setReviewing(false);
+    }
   };
 
   const loadVersions = useCallback(async () => {
@@ -697,12 +767,13 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   // 🟠 หน้าที่แก้แล้วยังไม่บันทึก (เทียบค่าในธีมตามทะเบียน lib/website-design-nav)
   const dirtyPages = dirtyDesignPages(theme, saved);
   // 🧭 เมนูซ้ายจัดหมวด (ของกลาง SettingsNavLayout) — ภาพรวม + 5 หมวด
+  //    👷 บางหัวข้อ = เฉพาะหัวข้อที่แก้ได้ (ไม่มีภาพรวม/ประวัติ)
   const navGroups: SettingsNavGroup<TabKey>[] = [
-    { label: "", items: [{ key: "overview", label: "ภาพรวม", desc: "สถานะ · สิ่งที่ควรทำ · ทางลัด", icon: <Icon name="home" /> }] },
-    ...DESIGN_GROUPS.map((g) => ({
+    ...(limited ? [] : [{ label: "", items: [{ key: "overview" as TabKey, label: "ภาพรวม", desc: "สถานะ · สิ่งที่ควรทำ · ทางลัด", icon: <Icon name="home" /> }] }]),
+    ...DESIGN_GROUPS.filter((g) => g.pages.some((k) => allowedPage(k))).map((g) => ({
       label: g.label,
       icon: <Icon name={g.icon} />,
-      items: g.pages.map((k) => ({ key: k, label: DESIGN_PAGES[k].label, desc: DESIGN_PAGES[k].desc, keywords: `${DESIGN_PAGES[k].keywords ?? ""} ${DESIGN_PAGES[k].cards.map((c) => c.title).join(" ")}`, dot: dirtyPages.includes(k) })),
+      items: g.pages.filter((k) => allowedPage(k)).map((k) => ({ key: k, label: DESIGN_PAGES[k].label, desc: DESIGN_PAGES[k].desc, keywords: `${DESIGN_PAGES[k].keywords ?? ""} ${DESIGN_PAGES[k].cards.map((c) => c.title).join(" ")}`, dot: dirtyPages.includes(k) })),
     })),
   ];
   const curPage = tab === "overview" ? null : DESIGN_PAGES[tab];
@@ -717,6 +788,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   };
 
   return (
+    <DesignModeCtx.Provider value={designMode}>
     <ContentLangProvider lang={contentLang} onLangChange={setContentLang}>
     <DesignCtx.Provider value={designCtx}>
     <PageHealthCtx.Provider value={pagesReady ? storePages : null}>
@@ -731,7 +803,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           {isDirty ? "● มีการแก้ไขที่ยังไม่บันทึก" : hadDraft ? "● มีร่างที่ยังไม่เผยแพร่" : "✓ เผยแพร่แล้ว"}
         </span>
         <span className="text-[11px] text-slate-500">
-          กำลังแก้ธีมของเว็บจริง · “บันทึกร่าง” ยังไม่เปลี่ยนหน้าเว็บ จนกว่าจะกด “เผยแพร่”
+          กำลังแก้ธีมของเว็บจริง · “บันทึกร่าง” ยังไม่เปลี่ยนหน้าเว็บ จนกว่า{limited && !access.publish ? "หัวหน้าจะกด" : "จะกด"} “เผยแพร่”
           {lastVersion && <span className="text-slate-400"> · เผยแพร่ล่าสุด เวอร์ชัน {lastVersion.version_no} · {timeAgo(lastVersion.created_at)}</span>}
         </span>
         <div className="ml-auto flex items-center gap-1">
@@ -757,13 +829,20 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         showHeader={false}
         compact
         searchPlaceholder="ค้นหา เช่น โลโก้ ส่งฟรี favicon"
-        searchHits={(q) => searchDesign(q).filter((h) => h.card).map((h) => ({ id: `${h.page}|${h.card}`, label: h.label, crumb: h.crumb, onPick: () => goTo(h.page, h.card) }))}
+        searchHits={(q) => searchDesign(q).filter((h) => h.card && allowedPage(h.page)).map((h) => ({ id: `${h.page}|${h.card}`, label: h.label, crumb: h.crumb, onPick: () => goTo(h.page, h.card) }))}
       >
       <div ref={split.containerRef} className="grid gap-4 xl:gap-x-0 xl:grid-cols-[minmax(0,1fr)_14px_var(--pv-w)] items-start" style={split.style("minmax(320px,40%)")}>
         {/* ── ซ้าย: ตั้งค่า ── */}
         <div ref={settingsColRef} className="min-w-0 space-y-3">
           {/* 🗂 การ์ดในหน้านี้พับ/กางได้ + จำต่อคน (components/website-design/design-card) */}
           <DesignCardsProvider page={tab}>
+          {limited && (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900" data-design-limited>
+              <b className="font-medium">โหมดแก้บางหัวข้อ</b> — แก้ได้ {access.topics.map((k) => DESIGN_PAGES[k].label).join(", ")}
+              {access.publish ? " · เผยแพร่เองได้ (เฉพาะหัวข้อของคุณ)" : " · แก้เสร็จกด “บันทึกร่าง” แล้ว “ส่งให้หัวหน้าตรวจ” — ลูกค้ายังไม่เห็นจนหัวหน้าเผยแพร่"}
+              {designMode.simple && " · แบบง่าย (ซ่อนการตั้งค่าละเอียด)"}
+            </div>
+          )}
           {curPage && (
             <div className="flex items-end gap-2">
               <div className="min-w-0 flex-1">
@@ -1013,12 +1092,28 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           <button onClick={() => void save("draft")} disabled={busy !== null} className="px-4 py-2 rounded-lg border border-slate-300 text-sm text-slate-700 hover:border-slate-500 disabled:opacity-50 whitespace-nowrap">
             {busy === "draft" ? "กำลังบันทึก…" : "บันทึกร่าง"}
           </button>
-          <button onClick={() => setScheduleOpen(true)} disabled={busy !== null} title="ตั้งเวลาให้ระบบเผยแพร่เอง" className="px-3.5 py-2 rounded-lg border border-blue-300 text-sm text-blue-700 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap" data-schedule-btn>
-            ⏰ ตั้งเวลา
-          </button>
-          <button onClick={() => void save("publish")} disabled={busy !== null} className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">
-            {busy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}
-          </button>
+          {!limited && (
+            <button onClick={() => setScheduleOpen(true)} disabled={busy !== null} title="ตั้งเวลาให้ระบบเผยแพร่เอง" className="px-3.5 py-2 rounded-lg border border-blue-300 text-sm text-blue-700 hover:bg-blue-50 disabled:opacity-50 whitespace-nowrap" data-schedule-btn>
+              ⏰ ตั้งเวลา
+            </button>
+          )}
+          {access.publish ? (
+            <button onClick={() => void save("publish")} disabled={busy !== null} className="px-6 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">
+              {busy === "publish" ? "กำลังเผยแพร่…" : "เผยแพร่"}
+            </button>
+          ) : (
+            limited && (
+              <button
+                onClick={() => void requestReview()}
+                disabled={busy !== null || reviewing || isDirty || !hadDraft}
+                title={isDirty ? "บันทึกร่างก่อน แล้วค่อยส่ง" : !hadDraft ? "ยังไม่มีร่าง — แก้แล้วบันทึกร่างก่อน" : "แจ้งหัวหน้าให้เปิดดูร่างแล้วเผยแพร่"}
+                className="px-5 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap"
+                data-review-btn
+              >
+                {reviewing ? "กำลังส่ง…" : "ส่งให้หัวหน้าตรวจ"}
+              </button>
+            )
+          )}
         </div>
       </div>
 
@@ -1026,5 +1121,6 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     </PageHealthCtx.Provider>
     </DesignCtx.Provider>
     </ContentLangProvider>
+    </DesignModeCtx.Provider>
   );
 }

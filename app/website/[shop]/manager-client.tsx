@@ -43,7 +43,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { UnsavedGuardProvider, useUnsavedGuardHost } from "@/components/save-bar";
 import { AccessDenied, useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { WEBSITE_LEVEL_LABEL, websiteGroupDef, websiteGroupOfTab, websiteLevel, websiteShopPerm, WEBSITE_GROUPS } from "@/lib/website-access";
+import { designAccess, WEBSITE_LEVEL_LABEL, websiteGroupDef, websiteGroupOfTab, websiteLevel, websiteShopPerm, WEBSITE_GROUPS } from "@/lib/website-access";
 
 /** ↔ ความกว้างหน้าจัดการเว็บ (จำรายคน · useViewPref) — กว้าง = ค่าเริ่มต้น จัดดีไซน์/พรีวิวสะดวกขึ้น */
 const PAGE_WIDTHS = ["normal", "wide", "full"] as const;
@@ -141,8 +141,10 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
       </PlaygroundShell>
     );
 
-  const tabLevel = levelOfTab(tab);
   const tabGroup = websiteGroupOfTab(tab);
+  // 👷 หน้าตาเว็บ "ดูได้" + ได้แก้บางหัวข้อ → แท็บดีไซน์แก้ได้ (หน้าดีไซน์จัดการเอง) ไม่ขึ้นแถบดูอย่างเดียว
+  const designTopics = designAccess(has).topics.length > 0;
+  const viewOnlyTab = (k: string) => levelOfTab(k) === "view" && !(k === "design" && designTopics);
 
   // ไม่มีเว็บร้านชื่อนี้ — บอกให้ชัด ดีกว่าพาไปร้านอื่นแบบเงียบ ๆ
   if (notFound && !loading)
@@ -252,14 +254,14 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
                 }`}
               >
                 {t.l}
-                {know && levelOfTab(t.k) === "view" && <span className="ml-1 text-[10px] text-slate-400" title="ดูได้อย่างเดียว">👁</span>}
+                {know && viewOnlyTab(t.k) && <span className="ml-1 text-[10px] text-slate-400" title="ดูได้อย่างเดียว">👁</span>}
               </button>
             ))}
           </div>
         )}
 
         {/* 👁 กลุ่มนี้ดูได้อย่างเดียว — ปุ่มบันทึกยังกดได้ แต่ระบบไม่ให้บันทึก (API ตรวจสิทธิ์) */}
-        {shop && know && tabLevel === "view" && tabGroup && (
+        {shop && know && viewOnlyTab(tab) && tabGroup && (
           <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800" data-website-view-only>
             👁 ส่วน “{websiteGroupDef(tabGroup).label}” คุณ{WEBSITE_LEVEL_LABEL.view}อย่างเดียว — แก้แล้วบันทึกไม่ได้ · ขอสิทธิ์แก้ได้ที่ผู้ดูแลระบบ
           </div>

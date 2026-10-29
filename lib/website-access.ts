@@ -129,5 +129,53 @@ export function websiteApiGroups(pathname: string): WebsiteGroup[] | null {
   return null;
 }
 
+// ── 👷 หน้าดีไซน์แบบง่ายสำหรับพนักงาน: "หน้าตาเว็บ" ระดับดูได้ + เลือกหัวข้อที่แก้ได้ ──
+/**
+ * หัวข้อในหน้าดีไซน์ที่ให้พนักงานแก้ได้ (= หน้าใน lib/website-design-nav ยกเว้น ภาพรวม/ประวัติ · เทสต์ตรวจว่าตรงกัน)
+ *   คีย์: website.design.topic.<หน้า> · website.design.publish (เผยแพร่เองได้) · website.design.advanced (โชว์การตั้งค่าละเอียด)
+ *   มี website.design.edit = แก้ได้ทุกหัวข้อ + เผยแพร่ + ละเอียด (แบบเดิม) · API ธีมบังคับฝั่งเซิร์ฟเวอร์ (บันทึกเฉพาะค่าของหัวข้อที่มีสิทธิ์)
+ */
+export const DESIGN_TOPICS = ["colors", "fonts", "shape", "motion", "mobile", "logo", "header", "menu", "footer", "card", "listing", "product", "related", "cart", "checkout", "pages", "campaign"] as const;
+export type DesignTopic = (typeof DESIGN_TOPICS)[number];
+export const designTopicPerm = (t: DesignTopic) => `website.design.topic.${t}`;
+export const DESIGN_PUBLISH_PERM = "website.design.publish";
+export const DESIGN_ADVANCED_PERM = "website.design.advanced";
+export const DESIGN_TOPIC_PERMS: string[] = [...DESIGN_TOPICS.map(designTopicPerm), DESIGN_PUBLISH_PERM, DESIGN_ADVANCED_PERM];
+export const isDesignTopic = (k: unknown): k is DesignTopic => typeof k === "string" && (DESIGN_TOPICS as readonly string[]).includes(k);
+
+/** ชุดสำเร็จรูปในหน้าตั้งสิทธิ์ */
+export const DESIGN_TOPIC_PRESETS: { label: string; topics: DesignTopic[] }[] = [
+  { label: "ดูแลเมนู/หัวเว็บ", topics: ["logo", "header", "menu", "footer"] },
+  { label: "ดูแลหน้าสินค้า", topics: ["card", "listing", "product", "related"] },
+  { label: "แคมเปญ/ป๊อปอัป", topics: ["campaign", "pages"] },
+];
+
+export interface DesignAccess {
+  /** แก้ได้ทุกหัวข้อ (website.design.edit — แบบเดิม) */
+  full: boolean;
+  /** หัวข้อที่แก้ได้ (full = ทุกหัวข้อ · ว่าง = แก้ไม่ได้) */
+  topics: DesignTopic[];
+  /** เผยแพร่เองได้ (ไม่ได้ = บันทึกร่างแล้วส่งให้หัวหน้า) */
+  publish: boolean;
+  /** โชว์การตั้งค่าละเอียด (ไม่ได้ = แบบง่าย) */
+  advanced: boolean;
+}
+
+/** สิทธิ์หน้าดีไซน์ของคน (has = เช็กคีย์) — บางหัวข้อต้องมี "ดูได้" ด้วย */
+export function designAccess(has: (key: string) => boolean): DesignAccess {
+  if (has(websitePerm("design", "edit"))) return { full: true, topics: [...DESIGN_TOPICS], publish: true, advanced: true };
+  const topics = has(websitePerm("design", "view")) ? DESIGN_TOPICS.filter((t) => has(designTopicPerm(t))) : [];
+  return { full: false, topics, publish: topics.length > 0 && has(DESIGN_PUBLISH_PERM), advanced: topics.length > 0 && has(DESIGN_ADVANCED_PERM) };
+}
+
+/** ตั้งบางหัวข้อ → คีย์ที่ต้องเปิด/ปิดทั้งชุด (ไม่มีหัวข้อ = ปิดเผยแพร่/ละเอียดด้วย) */
+export function designTopicKeys(topics: readonly DesignTopic[], publish: boolean, advanced: boolean): Record<string, boolean> {
+  const on = topics.length > 0;
+  const out: Record<string, boolean> = Object.fromEntries(DESIGN_TOPICS.map((t) => [designTopicPerm(t), topics.includes(t)]));
+  out[DESIGN_PUBLISH_PERM] = on && publish;
+  out[DESIGN_ADVANCED_PERM] = on && advanced;
+  return out;
+}
+
 /** ช่องที่บอกร้านในคำขอ API (query / body) */
 export const WEBSITE_SHOP_FIELDS = { slug: ["shop", "shopSlug"], id: ["shopId", "shop_id"] } as const;

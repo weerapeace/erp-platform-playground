@@ -18,6 +18,7 @@ import { GOOGLE_FONTS, type SiteTheme } from "@/lib/website-theme";
 import { PART_COLOR_KEYS, PART_COLOR_TOKENS, PART_RANGES, type PartColorToken, type PartStyleEntry, type PartStyleValue, type PartStyles } from "@/lib/website-site-design";
 import { PART_COLOR_LABEL, PART_GROUP_FIELDS, PART_GROUP_LABEL, PART_SLIDER, type PartDef } from "@/lib/website-page-parts";
 import { sendToPreview, usePreviewMessages } from "@/lib/storefront-preview-bus";
+import { useDesignMode } from "@/components/website-design/mode";
 
 type Device = "all" | "mobile";
 type Field = keyof PartStyleValue;
@@ -297,7 +298,10 @@ export function PartStyleEditor({ parts, value, onChange, colors, title = "🎨 
  */
 export function PartStyleFold({ parts, value, onChange, colors, onOpen, hint, testId }: { parts: PartDef[]; value: PartStyles; onChange: (v: PartStyles) => void; colors: SiteTheme["colors"]; onOpen?: () => void; hint?: string; testId?: string }) {
   const [open, setOpen] = useState(false);
+  // 👷 หน้าดีไซน์แบบง่าย (พนักงานไม่มีสิทธิ์โชว์การตั้งค่าละเอียด) = ซ่อนปรับละเอียดทีละชิ้น
+  const { simple } = useDesignMode();
   const n = Object.keys(value).length;
+  if (simple) return null;
   return (
     <div className="rounded-lg border border-slate-200 bg-white" data-part-fold={testId}>
       <button
