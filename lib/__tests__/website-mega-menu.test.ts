@@ -148,6 +148,12 @@ describe("แผงเมนูใหญ่ รอบ 2", () => {
     expect(normalizeMenuBehavior({ delay: 999, open: "x" })).toEqual(DEFAULT_MENU_BEHAVIOR);
     expect(normalizeMenu({ items: [] }).behavior).toEqual(DEFAULT_MENU_BEHAVIOR);
   });
+  it("📂 กางเมนูย่อยไว้เลย (มือถือ/ลิ้นชัก): เดิม = กดเอง · ค่าแปลก = กดเอง", () => {
+    expect(DEFAULT_MENU_BEHAVIOR.mobileOpen).toBe("none");
+    expect(normalizeMenuBehavior({ mobileOpen: "all" }).mobileOpen).toBe("all");
+    expect(normalizeMenuBehavior({ mobileOpen: "first" }).mobileOpen).toBe("first");
+    expect(normalizeMenuBehavior({ mobileOpen: "everything" }).mobileOpen).toBe("none");
+  });
 });
 
 describe("แผงเมนูใหญ่: เลือกคอลัมน์ย่อยรายลิงก์ (2026-10-22)", () => {

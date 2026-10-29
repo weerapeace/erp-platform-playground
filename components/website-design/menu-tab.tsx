@@ -14,7 +14,7 @@ import { DROP_STATUS_LABEL } from "@/lib/website-new-drops";
 import { ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
-import { DEFAULT_MENU_BEHAVIOR, DESKTOP_MENU_STYLES, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MenuBehavior } from "@/lib/website-mega-menu";
+import { DEFAULT_MENU_BEHAVIOR, DESKTOP_MENU_STYLES, MENU_DELAYS, MOBILE_MENU_OPENS, NAV_HOVERS, SUB_HOVERS, type MenuBehavior } from "@/lib/website-mega-menu";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { type Choices, roleOf } from "./shared";
 import { useRoleEditor } from "./fonts-tab";
@@ -169,6 +169,14 @@ export function MenuBehaviorSettings({ value, onChange, typo }: { value: MenuBeh
           <span className="text-[11px] text-slate-500">📱 มือถือ</span>
           <button type="button" className={seg(value.mobileStyle === "accordion")} onClick={() => onChange({ mobileStyle: "accordion" })}>พับ-กาง</button>
           <button type="button" className={seg(value.mobileStyle === "drill")} onClick={() => onChange({ mobileStyle: "drill" })}>เลื่อนเข้าหน้าถัดไป (แบบแอป)</button>
+        </div>
+        <div className="flex items-center gap-1.5" title="เปิดเมนู (มือถือ / ☰ จอคอม) แล้วเมนูย่อย เช่น SHOP ALL กางให้เห็นเลย ไม่ต้องกด ▾ อีกครั้ง · แบบแอป = เข้าหน้าของเมนูอันแรกเลย">
+          <span className="text-[11px] text-slate-500">📂 กางเมนูย่อยไว้เลย</span>
+          {MOBILE_MENU_OPENS.map((o) => (
+            <button key={o.value} type="button" className={seg((value.mobileOpen ?? "none") === o.value)} onClick={() => onChange({ mobileOpen: o.value })}>
+              {o.label}
+            </button>
+          ))}
         </div>
         <label className="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer" title="รูปหมวดวงกลมเลื่อนแนวนอนบนสุดของเมนูมือถือ (ต้องใส่รูปหมวดในแท็บหมวดหมู่)">
           <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={value.mobileCats} onChange={(e) => onChange({ mobileCats: e.target.checked })} />

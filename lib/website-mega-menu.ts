@@ -175,6 +175,8 @@ export interface MenuBehavior {
   dim: boolean;
   /** มือถือ: พับ-กาง / เลื่อนเข้าหน้าถัดไป (แบบแอป) */
   mobileStyle: "accordion" | "drill";
+  /** 📂 มือถือ/ลิ้นชัก: เปิดเมนูแล้วเมนูย่อยกางไว้เลย — ไม่ (กดเอง · เดิม) / อันแรก / ทุกอัน (แบบแอป = เข้าหน้าของอันแรกเลย) */
+  mobileOpen: "none" | "first" | "all";
   /** มือถือ: แถบรูปหมวดวงกลมเลื่อนแนวนอนบนสุดของเมนู */
   mobileCats: boolean;
   /** ✨ ตอนชี้ลิงก์เมนูด้านบน: จางลง (เดิม) / เปลี่ยนสี / เส้นใต้ (+เปลี่ยนสี) / ขยายนิดหน่อย */
@@ -188,6 +190,11 @@ export interface MenuBehavior {
   /** คำข้างปุ่ม ☰ (แบบ burger-text · "" = MENU) */
   burgerLabel: string;
 }
+export const MOBILE_MENU_OPENS: { value: MenuBehavior["mobileOpen"]; label: string }[] = [
+  { value: "none", label: "กดเอง (เดิม)" },
+  { value: "first", label: "อันแรก" },
+  { value: "all", label: "ทุกอัน" },
+];
 export const DESKTOP_MENU_STYLES: { value: MenuBehavior["desktopStyle"]; label: string }[] = [
   { value: "links", label: "คำเมนูเรียงในแถบ (เดิม)" },
   { value: "burger", label: "☰ อย่างเดียว" },
@@ -206,7 +213,7 @@ export const SUB_HOVERS: { value: MenuBehavior["subHover"]; label: string }[] = 
   { value: "none", label: "ไม่มี" },
 ];
 /** 🔠 ฟอนต์/สี/ขนาด/ตัวพิมพ์ใหญ่ของเมนู = theme.typography.nav (เมนูด้านบน) + .menu (เมนูย่อย/แผงเมนู) — ไม่เก็บซ้ำที่นี่ */
-export const DEFAULT_MENU_BEHAVIOR: MenuBehavior = { open: "hover", delay: 0, dim: false, mobileStyle: "accordion", mobileCats: false, navHover: "fade", subHover: "color", hoverColor: "", desktopStyle: "links", burgerLabel: "" };
+export const DEFAULT_MENU_BEHAVIOR: MenuBehavior = { open: "hover", delay: 0, dim: false, mobileStyle: "accordion", mobileOpen: "none", mobileCats: false, navHover: "fade", subHover: "color", hoverColor: "", desktopStyle: "links", burgerLabel: "" };
 export const MENU_DELAYS = [0, 100, 150, 200, 300, 400, 600] as const;
 
 /** แม่แบบแผงเมนูที่บันทึกไว้ (ตาราง website_menu_templates · /api/website/menu-templates) */
@@ -574,6 +581,7 @@ export function normalizeMenuBehavior(raw: unknown): MenuBehavior {
     delay: (MENU_DELAYS as readonly number[]).includes(delay) ? delay : d.delay,
     dim: r.dim === true,
     mobileStyle: oneOf(r.mobileStyle, ["accordion", "drill"] as const, d.mobileStyle),
+    mobileOpen: oneOf(r.mobileOpen, ["none", "first", "all"] as const, d.mobileOpen),
     mobileCats: r.mobileCats === true,
     navHover: oneOf(r.navHover, ["fade", "color", "underline", "grow"] as const, d.navHover),
     subHover: oneOf(r.subHover, ["color", "underline", "grow", "none"] as const, d.subHover),
