@@ -274,14 +274,14 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
               </div>
             </div>
           );
-        // 🔤 หัวข้อ: ตัวหนังสือกดไม่ได้ (ไม่มีช่องลิงก์) · ⋯ = ตัวหนา/สี/ชื่ออังกฤษ/ตั้งเวลา
+        // 🔤 หัวข้อ: ตัวหนังสือหัวกลุ่ม · ใส่ลิงก์ได้ (ว่าง = กดไม่ได้) · ⋯ = ตัวหนา/สี/ชื่ออังกฤษ/ตั้งเวลา
         const heading = kind === "heading";
         return (
           <div key={l.id} {...drag.rowProps(i)} className={`rounded-md border ${more ? "border-blue-300" : "border-slate-200"} bg-white p-1.5 ${drag.rowCls(i)}`}>
             <div className="flex items-center gap-1">
               <DragHandle {...drag.handleProps(i)} />
               {heading && (
-                <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700" title="หัวข้อ — ตัวหนังสือหัวกลุ่ม ลูกค้ากดไม่ได้">
+                <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700" title={l.href.trim() ? "หัวข้อ — ลูกค้ากดแล้วไปลิงก์ที่ตั้งไว้" : "หัวข้อ — ตัวหนังสือหัวกลุ่ม ยังไม่ใส่ลิงก์ = ลูกค้ากดไม่ได้"}>
                   🔤 หัวข้อ
                 </span>
               )}
@@ -316,7 +316,7 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                   </>
                 );
               })()}
-              {!heading && <IssueBadge href={l.href} />}
+              {(!heading || !!l.href.trim()) && <IssueBadge href={l.href} />}
               {/* ลิงก์ที่ไม่ใส่ปลายทาง (เคยใช้ทำหัวข้อ เช่น NEW ARRIVAL ตัวหนา) → เปลี่ยนเป็นหัวข้อจริงได้คลิกเดียว */}
               {!heading && !l.href.trim() && !!l.label.trim() && (
                 <button type="button" onClick={() => set(l.id, { kind: "heading", href: "" })} className="shrink-0 rounded border border-violet-200 px-1.5 h-7 text-[10px] text-violet-700 hover:bg-violet-50" title="ลิงก์นี้ยังไม่มีปลายทาง — เปลี่ยนเป็นหัวข้อ (ตัวหนังสือ ลูกค้ากดไม่ได้)" data-to-heading>
@@ -325,11 +325,10 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
               )}
               {/* แบ่งคอลัมน์ย่อย: เลือกว่าลิงก์นี้อยู่คอลัมน์ไหน · อัตโนมัติ = ลงคอลัมน์ที่สั้นกว่า (megaSplitColumns) */}
               {colPick}
-              {!heading && (
-                <div className="w-36 shrink-0">
-                  <LinkField value={l.href} onChange={(href) => set(l.id, { href })} ctx={ctx.link} />
-                </div>
-              )}
+              {/* 🔗 ลิงก์ (หัวข้อ: ไม่ใส่ = กดไม่ได้) — ตัวเลือกลิงก์กลางตัวเดียวกับลิงก์อื่น */}
+              <div className="w-36 shrink-0" title={heading ? "ลิงก์ของหัวข้อ — ไม่ใส่ = ตัวหนังสือกดไม่ได้" : undefined}>
+                <LinkField value={l.href} onChange={(href) => set(l.id, { href })} ctx={ctx.link} />
+              </div>
               {!plainOnly && (
                 <button
                   type="button"

@@ -6,7 +6,7 @@ import { categoryChoiceLabel } from "@/lib/website-category-tree";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { LangInput } from "@/components/bilingual-field";
-import { TEXT_ROLE_DEFS, MENU_KINDS, newMenuItem, menuItemHref, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
+import { TEXT_ROLE_DEFS, MENU_KINDS, MENU_ITEM_LOOKS, newMenuItem, menuItemHref, type MenuItem, type MenuConfig, type MenuKind } from "@/lib/website-theme";
 import { pageLinkIssue, countLinkWarnings } from "@/lib/website-link-health";
 import { ConfirmDialog } from "@/components/modal";
 import { NEW_DROP_LINKS } from "@/lib/website-links";
@@ -327,6 +327,7 @@ export function MenuEditor({ items, onChange, choices, pages, depth = 0, parentM
                 <LangInput className={`${mini} flex-1 min-w-0 ${it.hidden ? "line-through text-slate-400" : ""}`} obj={it} k="label" maxLength={60} onPatch={(p) => setItem(it.id, p)} placeholder="ชื่อเมนู" />
                 {it.hidden && <span className="shrink-0 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600">ปิดอยู่</span>}
                 {depth === 0 && it.pin && <span className="shrink-0 text-[11px]" title="ติดหัวเว็บ — ตอนเมนูจอคอมเป็นปุ่ม ☰ ยังโชว์คำนี้ข้างปุ่ม">📌</span>}
+                {depth === 0 && it.look && <span className="shrink-0 text-[11px] text-slate-500" title="จอคอมแสดงเมนูนี้เป็นไอคอน ☰ (ชี้แล้วแผงยังเปิดเหมือนเดิม)">☰</span>}
                 <select className={mini} value={it.kind} onChange={(e) => setItem(it.id, { kind: e.target.value as MenuKind, value: "" })}>
                   {MENU_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
                 </select>
@@ -352,6 +353,17 @@ export function MenuEditor({ items, onChange, choices, pages, depth = 0, parentM
                       <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={!!it.pin} onChange={(e) => setItem(it.id, { pin: e.target.checked })} />
                       📌 ติดหัวเว็บ — ตอนเมนูจอคอมเป็นปุ่ม ☰ ยังโชว์เมนูนี้เป็นคำข้างปุ่ม (เช่น ALL PRODUCTS)
                     </label>
+                  )}
+                  {depth === 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-600" data-menu-look>
+                      🖥 บนแถบเมนูจอคอม แสดงเป็น
+                      {MENU_ITEM_LOOKS.map((o) => (
+                        <button key={o.value || "word"} type="button" onClick={() => setItem(it.id, { look: o.value })} className={`h-7 rounded-md border px-2 ${(it.look ?? "") === o.value ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}>
+                          {o.label}
+                        </button>
+                      ))}
+                      <span className="text-slate-400">· ชี้แล้วแผง/เมนูย่อยยังเปิดเหมือนเดิม · มือถือไม่เปลี่ยน</span>
+                    </div>
                   )}
                   {depth === 0 && megaCtx && (
                     <MegaMenuEditor itemId={it.id} panel={it.panel} onChange={(panel) => setItem(it.id, { panel })} ctx={megaCtx} />

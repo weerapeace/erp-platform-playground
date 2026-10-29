@@ -21,10 +21,10 @@ export type MegaTemplate = "A" | "B" | "C";
 export type MegaLayout = "columns" | "tabs";
 export type MegaBlockKind = "links" | "groups" | "products" | "feature" | "cards";
 export type MegaLinkStyle = "plain" | "icon" | "dot" | "thumb";
-/** ชนิดแถวในรายการลิงก์: ลิงก์ (เดิม) · หัวข้อ (ตัวหนังสือ กดไม่ได้) · เส้นคั่น · เว้นบรรทัด — ข้อมูลเก่าไม่มี = ลิงก์ */
+/** ชนิดแถวในรายการลิงก์: ลิงก์ (เดิม) · หัวข้อ (ตัวหนังสือหัวกลุ่ม · ใส่ลิงก์ได้) · เส้นคั่น · เว้นบรรทัด — ข้อมูลเก่าไม่มี = ลิงก์ */
 export type MegaLinkKind = "link" | "heading" | "divider" | "space";
 export const MEGA_LINK_KINDS: { value: Exclude<MegaLinkKind, "link">; label: string; hint: string }[] = [
-  { value: "heading", label: "🔤 หัวข้อ", hint: "ตัวหนังสือหัวกลุ่ม กดไม่ได้ เช่น NEW ARRIVAL" },
+  { value: "heading", label: "🔤 หัวข้อ", hint: "ตัวหนังสือหัวกลุ่ม เช่น NEW ARRIVAL · ใส่ลิงก์ได้ (ไม่ใส่ = กดไม่ได้)" },
   { value: "divider", label: "➖ เส้นคั่น", hint: "เส้นบาง ๆ คั่นระหว่างลิงก์" },
   { value: "space", label: "↕ เว้นบรรทัด", hint: "ช่องว่างหนึ่งบรรทัด" },
 ];
@@ -35,7 +35,7 @@ export type MegaAuto = "" | "categories" | "collections" | "colors";
 
 export interface MegaLink {
   id: string;
-  /** ➖ ชนิดแถว: link = ลิงก์ · heading = หัวข้อกดไม่ได้ (ใช้ label) · divider/space = ตัวคั่น (ไม่มีชื่อ/ลิงก์) */
+  /** ➖ ชนิดแถว: link = ลิงก์ · heading = หัวข้อ (ใช้ label · มี href = กดได้ · ว่าง = กดไม่ได้) · divider/space = ตัวคั่น (ไม่มีชื่อ/ลิงก์) */
   kind: MegaLinkKind;
   label: string;
   href: string;
@@ -479,8 +479,8 @@ function cleanLink(r: Record<string, unknown>, i: number): MegaLink | null {
   if (kind === "divider" || kind === "space")
     return { ...newMegaLink("", "", kind), id: id(r.id, "l", i), showFrom: when(r.showFrom), showUntil: when(r.showUntil), col: int(r.col, 0, 0, 3) };
   const label = str(r.label, 60);
-  // 🔤 หัวข้อ = ตัวหนังสือกดไม่ได้ (ไม่เก็บลิงก์)
-  const href = kind === "heading" ? "" : cleanHref(r.href);
+  // 🔤 หัวข้อเก็บลิงก์ได้ (ว่าง = ตัวหนังสือกดไม่ได้ เหมือนเดิม)
+  const href = cleanHref(r.href);
   // ชื่อว่าง = ทิ้ง · ยกเว้นลิงก์หมวด (ชื่อว่าง = ใช้ชื่อหมวดปัจจุบัน — megaLinkLabel)
   if (!label && !megaCategoryKeyOf(href)) return null;
   return {

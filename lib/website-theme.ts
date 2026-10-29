@@ -1295,7 +1295,15 @@ export interface MenuItem {
   hidden: boolean;
   /** 📌 ติดหัวเว็บ: ตอนเมนูจอคอมเป็นปุ่ม ☰ (behavior.desktopStyle) เมนูนี้ยังโชว์เป็นคำข้างปุ่ม — เฉพาะเมนูบนสุด */
   pin: boolean;
+  /** ☰ หน้าตาบนแถบเมนูจอคอม: "" = คำ (เดิม) · icon = ไอคอน ☰ อย่างเดียว · icon-text = ☰ + คำ — ชี้แล้วแผง/เมนูย่อยยังเปิดเหมือนเดิม · มือถือไม่เปลี่ยน · เฉพาะเมนูบนสุด */
+  look: MenuItemLook;
 }
+export type MenuItemLook = "" | "icon" | "icon-text";
+export const MENU_ITEM_LOOKS: { value: MenuItemLook; label: string }[] = [
+  { value: "", label: "คำ (เดิม)" },
+  { value: "icon", label: "☰ ไอคอน" },
+  { value: "icon-text", label: "☰ + คำ" },
+];
 export interface MenuConfig {
   /** null = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ติดต่อ) */
   items: MenuItem[] | null;
@@ -1315,7 +1323,7 @@ export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
   { value: "contact", label: "ติดต่อ", hint: "/contact" },
   { value: "url", label: "ลิงก์อื่น", hint: "URL ภายนอก/ภายใน" },
 ];
-export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, also: "", badge: "", mega: false, imageKey: null, children: [], panel: null, showFrom: "", showUntil: "", hidden: false, pin: false });
+export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, also: "", badge: "", mega: false, imageKey: null, children: [], panel: null, showFrom: "", showUntil: "", hidden: false, pin: false, look: "" });
 function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
   if (!Array.isArray(raw)) return [];
   const out: MenuItem[] = [];
@@ -1340,6 +1348,7 @@ function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
       showUntil: typeof r.showUntil === "string" && /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(r.showUntil) ? r.showUntil : "",
       hidden: r.hidden === true,
       pin: depth === 0 && r.pin === true,
+      look: depth === 0 && (r.look === "icon" || r.look === "icon-text") ? r.look : "",
     });
   });
   return out.slice(0, 40);

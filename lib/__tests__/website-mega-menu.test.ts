@@ -196,7 +196,7 @@ describe("แผงเมนูใหญ่: เลือกคอลัมน�
 
 describe("เมนู: ตัวคั่น · ซ่อนเมนู · ☰ จอคอม (2026-10-29)", () => {
   const panelWith = (links: unknown[]) => normalizeMegaPanel({ template: "A", layout: "columns", blocks: [{ kind: "links", links, cols: 2 }] });
-  it("เส้นคั่น/เว้นบรรทัด เก็บได้แม้ไม่มีชื่อ/ลิงก์ · หัวข้อไม่เก็บลิงก์ · ข้อมูลเก่าไม่มี kind = ลิงก์", () => {
+  it("เส้นคั่น/เว้นบรรทัด เก็บได้แม้ไม่มีชื่อ/ลิงก์ · หัวข้อเก็บลิงก์ได้ · ข้อมูลเก่าไม่มี kind = ลิงก์", () => {
     const p = panelWith([
       { kind: "heading", label: "NEW ARRIVAL", href: "/shop", bold: true, col: 2 },
       { label: "กระเป๋าเป้", href: "/c/backpack" },
@@ -207,7 +207,7 @@ describe("เมนู: ตัวคั่น · ซ่อนเมนู · ☰
     ])!;
     const links = p.blocks[0].links;
     expect(links.map((l) => l.kind)).toEqual(["heading", "link", "divider", "space", "link"]);
-    expect(links[0]).toMatchObject({ label: "NEW ARRIVAL", href: "", bold: true, col: 2 });
+    expect(links[0]).toMatchObject({ label: "NEW ARRIVAL", href: "/shop", bold: true, col: 2 });
     expect(links[2]).toMatchObject({ label: "", href: "", col: 1 });
   });
   it("newMegaRow: หัวข้อตั้งต้นตัวหนา · ตัวคั่นไม่มีชื่อ · แผงที่มีแต่ตัวคั่น = ยังไม่มีเนื้อหา", () => {
