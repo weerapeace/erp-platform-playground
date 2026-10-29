@@ -972,6 +972,8 @@ export interface SiteTheme {
     /** เลื่อนลงซ่อน เลื่อนขึ้นโผล่ */
     hideOnScroll: boolean;
     mobileMenuSide: "left" | "right" | "top";
+    /** 🌐 มือถือ: ปุ่ม TH/EN บนหัวเว็บ (เดิม) / ย้ายไปในเมนู ☰ (จอคอมยังอยู่บนหัวเว็บ) */
+    langMobile: "bar" | "menu";
     button: { text: string; href: string };
     /** 🛒 ⚙ ตะกร้า (lib/website-header-els) */
     cart: HeaderCart;
@@ -1595,7 +1597,7 @@ export const DEFAULT_THEME: SiteTheme = {
     height: 34,
     placeholder: { ...DEFAULT_IMAGE_PLACEHOLDER },
   },
-  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, overPages: defaultOverPages(false), hideOnScroll: false, mobileMenuSide: "top", button: { text: "", href: "/shop" }, cart: { ...DEFAULT_HEADER_CART }, search: { ...DEFAULT_HEADER_SEARCH }, iconStyle: DEFAULT_HEADER_ICON_STYLE },
+  header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, overPages: defaultOverPages(false), hideOnScroll: false, mobileMenuSide: "top", langMobile: "bar", button: { text: "", href: "/shop" }, cart: { ...DEFAULT_HEADER_CART }, search: { ...DEFAULT_HEADER_SEARCH }, iconStyle: DEFAULT_HEADER_ICON_STYLE },
   menu: { items: null, mobileItems: null, behavior: { ...DEFAULT_MENU_BEHAVIOR } },
   footer: { ...DEFAULT_FOOTER },
   listing: { ...DEFAULT_LISTING },
@@ -1919,6 +1921,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       })(),
       hideOnScroll: h.hideOnScroll === true,
       mobileMenuSide: pick(h.mobileMenuSide, ["left", "right", "top"] as const, "top"),
+      langMobile: h.langMobile === "menu" ? "menu" : "bar",
       button: (() => {
         const b = (h.button && typeof h.button === "object" ? h.button : {}) as Record<string, unknown>;
         return { text: typeof b.text === "string" ? b.text.trim().slice(0, 30) : "", href: typeof b.href === "string" && b.href.trim() ? b.href.trim().slice(0, 500) : "/shop" };

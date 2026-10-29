@@ -167,7 +167,7 @@ export function HeaderTab() {
 
     <DesignCard
       title="ปุ่มบนหัวเว็บ · เมนูมือถือ"
-      summary={`${theme.header.button.text ? `ปุ่ม “${theme.header.button.text}”` : "ไม่มีปุ่ม"} · เมนูมือถือ${theme.header.mobileMenuSide === "top" ? "คลี่ลง" : theme.header.mobileMenuSide === "left" ? "จากซ้าย" : "จากขวา"}${theme.header.hideOnScroll ? " · เลื่อนลงซ่อน" : ""}`}
+      summary={`${theme.header.button.text ? `ปุ่ม “${theme.header.button.text}”` : "ไม่มีปุ่ม"} · เมนูมือถือ${theme.header.mobileMenuSide === "top" ? "คลี่ลง" : theme.header.mobileMenuSide === "left" ? "จากซ้าย" : "จากขวา"}${theme.header.langMobile === "menu" ? " · TH/EN ในเมนู" : ""}${theme.header.hideOnScroll ? " · เลื่อนลงซ่อน" : ""}`}
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
@@ -185,6 +185,14 @@ export function HeaderTab() {
             <option value="left">ลิ้นชักจากซ้าย</option>
             <option value="right">ลิ้นชักจากขวา</option>
           </select>
+        </div>
+        <div>
+          <label className={labelCls}>มือถือ: ปุ่มภาษา TH / EN</label>
+          <select className={inputCls} value={theme.header.langMobile} onChange={(e) => setHeader({ langMobile: e.target.value as "bar" | "menu" })}>
+            <option value="bar">บนหัวเว็บ (แบบเดิม)</option>
+            <option value="menu">ย้ายไปในเมนู ☰</option>
+          </select>
+          <p className="text-[11px] text-slate-400 mt-1">จอคอมยังอยู่บนหัวเว็บเหมือนเดิม · โชว์เฉพาะร้านที่เปิดภาษาอังกฤษ</p>
         </div>
         <div className="flex flex-col gap-2 justify-end pb-1">
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
