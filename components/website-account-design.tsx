@@ -5,7 +5,7 @@
  *
  * ① ส่วนหัว (4 แบบ · ข้อความทักทาย · ป้ายใต้ชื่อ) ② เมนู (4 แบบ · ไอคอนอีโมจิ/เส้น/ไม่มี · ลำดับ/ชื่อ/ไอคอน/ซ่อน · แท็บแรก)
  * ③ กล่องเนื้อหา (แบบกล่อง · กล่องเพิ่มออเดอร์เก่า · ข้อความตอนว่าง · โปรไฟล์แบบฟอร์ม/แถว) ④ ส่วนเสริม (แถบประกาศ · สินค้าแนะนำ · ช่วยเหลือ · ความกว้าง · กล่องข้างขวา)
- * ⑤ จัดวาง (ลำดับส่วนในหน้า · เมนูซ้าย/ขวา) ✨ ลูกเล่น (พื้นหลังวงกลมเบลอ/รูปภาพ · กระจกฝ้า · ทักทายตามเวลา · เลขแต้มวิ่ง · เปลี่ยนแท็บนุ่ม · บัตรเอียงตามเมาส์)
+ * ⑤ จัดวาง (ลำดับส่วนในหน้า · เมนูซ้าย/ขวา) ✨ ลูกเล่น (พื้นหลังวงกลมเบลอ/รูปภาพ · ของลอย · กระจกฝ้า · ทักทายตามเวลา · เลขแต้มวิ่ง · เปลี่ยนแท็บนุ่ม · บัตรเอียงตามเมาส์)
  * ⚡ แบบสำเร็จรูป "หน้าต่างแอป" = ตั้งหลายช่องในคลิกเดียว (ปรับต่อเองได้ทุกช่อง)
  * 🎨 ปรับละเอียดทีละชิ้น = ของกลาง PartStyleEditor + ทะเบียนชิ้นส่วน ACCOUNT_PARTS (คลิกเลือกในพรีวิวได้)
  * ค่าเริ่ม = หน้าตาเดิม · ตัวตรวจค่า normalizeAccount (lib/website-site-design — มิเรอร์กับเว็บร้าน) · เว็บร้าน components/account/AccountClient
@@ -18,7 +18,7 @@ import { RangeInput } from "@/components/range-input";
 import { SiteIconPicker } from "@/components/site-icon-picker";
 import { PartStyleFold } from "@/components/website-part-style-editor";
 import { webForm } from "@/lib/website-form-styles";
-import { ACCOUNT_BG_FADE_RANGE, ACCOUNT_TAB_DEFAULTS, DEFAULT_ACCOUNT_LOOK, type AccountBlock, type AccountEmptyKey, type AccountLook, type AccountTabKey } from "@/lib/website-site-design";
+import { ACCOUNT_BG_FADE_RANGE, ACCOUNT_TAB_DEFAULTS, DEFAULT_ACCOUNT_LOOK, FLOAT_COUNT_RANGE, type AccountBlock, type AccountEmptyKey, type AccountLook, type AccountTabKey } from "@/lib/website-site-design";
 import { ACCOUNT_PARTS } from "@/lib/website-page-parts";
 import type { SiteTheme } from "@/lib/website-theme";
 
@@ -401,6 +401,36 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
               <RangeInput value={value.bgFade} onChange={(n) => set({ bgFade: n })} min={ACCOUNT_BG_FADE_RANGE.min} max={ACCOUNT_BG_FADE_RANGE.max} step={5} unit="%" ariaLabel="ความจางของรูปพื้นหลัง" />
             </div>
             <Toggle checked={value.bgBlur} onChange={(v) => set({ bgBlur: v })}>เบลอรูป (นุ่มตา · สวยคู่กับกล่องกระจกฝ้า)</Toggle>
+          </div>
+        )}
+        {/* 🫧 ของลอยในพื้นหลัง — ทับบนพื้นหลังแบบไหนก็ได้ */}
+        <div className="space-y-1">
+          <span className={webForm.label}>ของลอยในพื้นหลัง (เคลื่อนไหวตลอด · ไม่ต้องใช้ไฟล์ · สีตามสีหลักร้าน)</span>
+          <Opt
+            value={value.floatKind}
+            def={d.floatKind}
+            onChange={(v) => set({ floatKind: v })}
+            options={[
+              { v: "none", l: "ไม่มี" },
+              { v: "bubbles", l: "ฟองลอยขึ้น" },
+              { v: "hearts", l: "หัวใจลอย" },
+              { v: "sparkle", l: "ประกายระยิบ" },
+              { v: "petals", l: "กลีบดอกไม้โปรย" },
+              { v: "blobs", l: "วงกลมเบลอเคลื่อนไหว" },
+            ]}
+          />
+        </div>
+        {value.floatKind !== "none" && (
+          <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+            <p className="text-[11px] text-slate-500">ลอยอยู่หลังเนื้อหา — เห็นชัดตามช่องว่างและขอบจอ (จอกว้างเห็นมาก) · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหวจะไม่เห็น</p>
+            <div className="space-y-1">
+              <span className={webForm.label}>จำนวน{value.floatKind === "blobs" ? " (วงกลมใช้ 1 วงต่อ 5)" : ""}</span>
+              <RangeInput value={value.floatCount} onChange={(n) => set({ floatCount: n })} min={FLOAT_COUNT_RANGE.min} max={FLOAT_COUNT_RANGE.max} step={1} ariaLabel="จำนวนของลอย" />
+            </div>
+            <div className="space-y-1">
+              <span className={webForm.label}>ความเร็ว</span>
+              <Opt value={value.floatSpeed} def={d.floatSpeed} onChange={(v) => set({ floatSpeed: v })} options={[{ v: "slow", l: "ช้า" }, { v: "normal", l: "กลาง" }, { v: "fast", l: "เร็ว" }]} />
+            </div>
           </div>
         )}
         <div className="space-y-1">

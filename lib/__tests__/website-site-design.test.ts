@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { normalizeTheme, mergeTheme, themeFontNames } from "../website-theme";
-import { ACCOUNT_BG_FADE_RANGE, DEFAULT_ACCOUNT_LOOK, DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizeAccount, normalizeChatLook, normalizeCookieLook, normalizeLogin, normalizeMobileNav, normalizeNotFound, normalizePopup, normalizeShare, normalizeThanks, normalizePageTransition, normalizeSitePage, normalizeSiteShape, sectionMotionOf } from "../website-site-design";
+import { ACCOUNT_BG_FADE_RANGE, DEFAULT_ACCOUNT_LOOK, FLOAT_COUNT_RANGE, DEFAULT_SITE_PAGE, DEFAULT_SITE_SHAPE, formatMoneyAs, normalizeAccount, normalizeChatLook, normalizeCookieLook, normalizeLogin, normalizeMobileNav, normalizeNotFound, normalizePopup, normalizeShare, normalizeThanks, normalizePageTransition, normalizeSitePage, normalizeSiteShape, sectionMotionOf } from "../website-site-design";
 import { popularTermsOf } from "../website-site-info";
 import { mergePopularTerms } from "../website-search-terms";
 import { sanitizeStyle, MOTION_ENTRANCES } from "../website-blocks";
@@ -178,5 +178,18 @@ describe("หน้าบัญชี: พื้นหลังรูปภา�
     expect([a.decor, a.bgImageKey, a.bgFade, a.bgBlur]).toEqual(["image", "website-pages/bg.jpg", ACCOUNT_BG_FADE_RANGE.max, true]);
     const b = normalizeAccount({ decor: "video", bgImageKey: "../../etc/passwd", bgFade: -5 });
     expect([b.decor, b.bgImageKey, b.bgFade]).toEqual(["none", null, ACCOUNT_BG_FADE_RANGE.min]);
+  });
+});
+
+describe("หน้าบัญชี: ของลอยในพื้นหลัง", () => {
+  it("ธีมเก่า = ไม่มีของลอย", () => {
+    const a = normalizeAccount({});
+    expect([a.floatKind, a.floatCount, a.floatSpeed]).toEqual(["none", 14, "normal"]);
+  });
+  it("ค่าที่ตั้ง + ค่าแปลก", () => {
+    const a = normalizeAccount({ floatKind: "hearts", floatCount: 99, floatSpeed: "fast" });
+    expect([a.floatKind, a.floatCount, a.floatSpeed]).toEqual(["hearts", FLOAT_COUNT_RANGE.max, "fast"]);
+    const b = normalizeAccount({ floatKind: "snow", floatCount: 1, floatSpeed: "turbo" });
+    expect([b.floatKind, b.floatCount, b.floatSpeed]).toEqual(["none", FLOAT_COUNT_RANGE.min, "normal"]);
   });
 });

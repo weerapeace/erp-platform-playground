@@ -405,6 +405,10 @@ export interface AccountLook {
   bgImageKey: string | null;
   bgFade: number;
   bgBlur: boolean;
+  /** 🫧 ของลอยในพื้นหลัง (วาดเอง ไม่ใช้ไฟล์ · สีตามสีหลักร้าน) — ทับบนพื้นหลังแบบไหนก็ได้ · จำนวน · ความเร็ว */
+  floatKind: "none" | FloatKind;
+  floatCount: number;
+  floatSpeed: "slow" | "normal" | "fast";
   glass: boolean;
   timeGreeting: boolean;
   countUp: boolean;
@@ -449,6 +453,9 @@ export const DEFAULT_ACCOUNT_LOOK: AccountLook = {
   bgImageKey: null,
   bgFade: 60,
   bgBlur: false,
+  floatKind: "none",
+  floatCount: 14,
+  floatSpeed: "normal",
   glass: false,
   timeGreeting: false,
   countUp: false,
@@ -520,6 +527,9 @@ export function normalizeAccount(raw: unknown): AccountLook {
     bgImageKey: imgKey(r.bgImageKey),
     bgFade: clampInt(r.bgFade, ACCOUNT_BG_FADE_RANGE.min, ACCOUNT_BG_FADE_RANGE.max, d.bgFade),
     bgBlur: r.bgBlur === true,
+    floatKind: oneOf(r.floatKind, ["none", ...FLOAT_KINDS] as const, d.floatKind),
+    floatCount: clampInt(r.floatCount, FLOAT_COUNT_RANGE.min, FLOAT_COUNT_RANGE.max, d.floatCount),
+    floatSpeed: oneOf(r.floatSpeed, ["slow", "normal", "fast"] as const, d.floatSpeed),
     glass: r.glass === true,
     timeGreeting: r.timeGreeting === true,
     countUp: r.countUp === true,
@@ -560,6 +570,10 @@ export const MOBILE_SCALE_RANGE = { min: 85, max: 125 };
 export const TEXTURE_STRENGTH_RANGE = { min: 10, max: 100 };
 /** หน้าบัญชี: สีพื้นเว็บทับรูปพื้นหลังกี่ % (0 = เห็นรูปเต็ม · 90 = รูปจางมาก) */
 export const ACCOUNT_BG_FADE_RANGE = { min: 0, max: 90 };
+/** 🫧 ของลอยในพื้นหลัง (เว็บร้าน FloatLayer) — ฟองลอยขึ้น · หัวใจลอยขึ้น · ประกายระยิบ · กลีบดอกไม้โปรย · วงกลมเบลอเคลื่อนไหว */
+export const FLOAT_KINDS = ["bubbles", "hearts", "sparkle", "petals", "blobs"] as const;
+export type FloatKind = (typeof FLOAT_KINDS)[number];
+export const FLOAT_COUNT_RANGE = { min: 4, max: 30 };
 
 export const DENSITIES: SiteDensity[] = ["normal", "dense", "airy"];
 export const SITE_WIDTHS: SiteWidth[] = ["normal", "narrow", "wide", "full"];
