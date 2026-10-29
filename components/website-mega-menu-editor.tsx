@@ -42,17 +42,20 @@ import {
   type MegaProductLike,
   MEGA_BLOCK_KINDS,
   MEGA_LIMITS,
+  MEGA_LINK_KINDS,
   MEGA_LINK_STYLES,
   MEGA_RATIOS,
   MEGA_TEMPLATES,
   megaCategoryHref,
   megaCategoryKeyOf,
   megaHasContent,
+  megaIsSep,
   megaPreset,
   newMegaBlock,
   newMegaCard,
   newMegaGroup,
   newMegaLink,
+  newMegaRow,
   newMegaTab,
   type MegaBlock,
   type MegaBlockKind,
@@ -225,12 +228,55 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
       {links.map((l, i) => {
         const more = moreId === l.id;
         const extras = (l.hoverImageKey ? 1 : 0) + (l.bold ? 1 : 0) + (l.textColor ? 1 : 0) + (l.showFrom || l.showUntil ? 1 : 0);
+        const kind = l.kind ?? "link";
+        const colPick = cols > 1 && (
+          <select
+            className={`${mini} w-[5.5rem] shrink-0 ${l.col ? "border-blue-300 text-blue-700" : "text-slate-500"}`}
+            value={l.col > cols ? cols : l.col}
+            onChange={(e) => set(l.id, { col: Number(e.target.value) })}
+            title="แถวนี้อยู่คอลัมน์ไหน (ตอนแบ่งคอลัมน์ย่อย)"
+          >
+            <option value={0}>คอลัมน์: อัตโนมัติ</option>
+            {Array.from({ length: cols }, (_, c) => (
+              <option key={c} value={c + 1}>
+                คอลัมน์ {c + 1}
+              </option>
+            ))}
+          </select>
+        );
+        const delBtn = (
+          <button type="button" onClick={() => onChange(links.filter((x) => x.id !== l.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบ">
+            ✕
+          </button>
+        );
+        // ➖ ตัวคั่น (เส้น / เว้นบรรทัด): แถวเตี้ย ไม่มีชื่อ/ลิงก์ — ลากย้าย + เลือกคอลัมน์ได้เหมือนลิงก์
+        if (megaIsSep(l))
+          return (
+            <div key={l.id} {...drag.rowProps(i)} data-mega-sep={kind} className={`rounded-md border border-dashed border-slate-300 bg-slate-50/60 px-1.5 py-1 ${drag.rowCls(i)}`}>
+              <div className="flex items-center gap-1">
+                <DragHandle {...drag.handleProps(i)} />
+                <span className="shrink-0 text-[11px] text-slate-600">{kind === "divider" ? "➖ เส้นคั่น" : "↕ เว้นบรรทัด"}</span>
+                <span className="flex-1 min-w-0 px-2" aria-hidden>
+                  {kind === "divider" ? <span className="block border-t border-slate-400" /> : <span className="block h-2" />}
+                </span>
+                {colPick}
+                {delBtn}
+              </div>
+            </div>
+          );
+        // 🔤 หัวข้อ: ตัวหนังสือกดไม่ได้ (ไม่มีช่องลิงก์) · ⋯ = ตัวหนา/สี/ชื่ออังกฤษ/ตั้งเวลา
+        const heading = kind === "heading";
         return (
           <div key={l.id} {...drag.rowProps(i)} className={`rounded-md border ${more ? "border-blue-300" : "border-slate-200"} bg-white p-1.5 ${drag.rowCls(i)}`}>
             <div className="flex items-center gap-1">
               <DragHandle {...drag.handleProps(i)} />
+              {heading && (
+                <span className="shrink-0 rounded bg-violet-50 px-1.5 py-0.5 text-[10px] text-violet-700" title="หัวข้อ — ตัวหนังสือหัวกลุ่ม ลูกค้ากดไม่ได้">
+                  🔤 หัวข้อ
+                </span>
+              )}
               {(() => {
-                const c = catOf(l.href);
+                const c = heading ? null : catOf(l.href);
                 const auto = !!c && !l.label.trim();
                 return (
                   <>
@@ -240,7 +286,7 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                       obj={l}
                       k="label"
                       maxLength={60}
-                      placeholder={c ? `${c.label}` : "ชื่อลิงก์"}
+                      placeholder={c ? `${c.label}` : heading ? "ข้อความหัวข้อ" : "ชื่อลิงก์"}
                       // ชื่อตามหมวด (ไม่ได้ตั้งเอง) → โหมด EN เห็นชื่อหมวดภาษาอังกฤษเป็นตัวจาง
                       enPlaceholder={c ? String((c as { label_en?: string }).label_en || c.label) : undefined}
                       title={auto ? "ชื่อตามหมวด — เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · พิมพ์ทับ = ตั้งชื่อเอง" : undefined}
@@ -260,26 +306,20 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                   </>
                 );
               })()}
-              <IssueBadge href={l.href} />
-              {/* แบ่งคอลัมน์ย่อย: เลือกว่าลิงก์นี้อยู่คอลัมน์ไหน · อัตโนมัติ = ลงคอลัมน์ที่สั้นกว่า (megaSplitColumns) */}
-              {cols > 1 && (
-                <select
-                  className={`${mini} w-[5.5rem] shrink-0 ${l.col ? "border-blue-300 text-blue-700" : "text-slate-500"}`}
-                  value={l.col > cols ? cols : l.col}
-                  onChange={(e) => set(l.id, { col: Number(e.target.value) })}
-                  title="ลิงก์นี้อยู่คอลัมน์ไหน (ตอนแบ่งคอลัมน์ย่อย)"
-                >
-                  <option value={0}>คอลัมน์: อัตโนมัติ</option>
-                  {Array.from({ length: cols }, (_, c) => (
-                    <option key={c} value={c + 1}>
-                      คอลัมน์ {c + 1}
-                    </option>
-                  ))}
-                </select>
+              {!heading && <IssueBadge href={l.href} />}
+              {/* ลิงก์ที่ไม่ใส่ปลายทาง (เคยใช้ทำหัวข้อ เช่น NEW ARRIVAL ตัวหนา) → เปลี่ยนเป็นหัวข้อจริงได้คลิกเดียว */}
+              {!heading && !l.href.trim() && !!l.label.trim() && (
+                <button type="button" onClick={() => set(l.id, { kind: "heading", href: "" })} className="shrink-0 rounded border border-violet-200 px-1.5 h-7 text-[10px] text-violet-700 hover:bg-violet-50" title="ลิงก์นี้ยังไม่มีปลายทาง — เปลี่ยนเป็นหัวข้อ (ตัวหนังสือ ลูกค้ากดไม่ได้)" data-to-heading>
+                  → 🔤 หัวข้อ
+                </button>
               )}
-              <div className="w-36 shrink-0">
-                <LinkField value={l.href} onChange={(href) => set(l.id, { href })} ctx={ctx.link} />
-              </div>
+              {/* แบ่งคอลัมน์ย่อย: เลือกว่าลิงก์นี้อยู่คอลัมน์ไหน · อัตโนมัติ = ลงคอลัมน์ที่สั้นกว่า (megaSplitColumns) */}
+              {colPick}
+              {!heading && (
+                <div className="w-36 shrink-0">
+                  <LinkField value={l.href} onChange={(href) => set(l.id, { href })} ctx={ctx.link} />
+                </div>
+              )}
               {!plainOnly && (
                 <button
                   type="button"
@@ -290,11 +330,9 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                   ⋯{extras ? ` ${extras}` : ""}
                 </button>
               )}
-              <button type="button" onClick={() => onChange(links.filter((x) => x.id !== l.id))} className="text-slate-300 hover:text-rose-600 px-1" title="ลบ">
-                ✕
-              </button>
+              {delBtn}
             </div>
-            {st !== "plain" && (
+            {st !== "plain" && !heading && (
               <div className="mt-1 pl-6 flex flex-wrap items-start gap-1.5">
                 {st === "icon" && <IconPicker link={l} onChange={(p) => set(l.id, p)} />}
                 {st === "dot" && (
@@ -314,9 +352,11 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
             {more && (
               <div className="mt-1.5 pl-6 pt-1.5 border-t border-slate-100 space-y-1.5">
                 <div className="flex flex-wrap items-start gap-3">
-                  <span className="w-44">
-                    <ImageUploadField label="🖼 รูปตอนชี้ (เปลี่ยนรูปเด่นในแผง)" value={l.hoverImageKey} onChange={(k) => set(l.id, { hoverImageKey: k })} height={44} />
-                  </span>
+                  {!heading && (
+                    <span className="w-44">
+                      <ImageUploadField label="🖼 รูปตอนชี้ (เปลี่ยนรูปเด่นในแผง)" value={l.hoverImageKey} onChange={(k) => set(l.id, { hoverImageKey: k })} height={44} />
+                    </span>
+                  )}
                   <div className="space-y-1.5">
                     <label className="flex items-center gap-1 text-[11px] text-slate-600 cursor-pointer">
                       <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={l.bold} onChange={(e) => set(l.id, { bold: e.target.checked })} />
@@ -362,6 +402,13 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
         <button type="button" disabled={links.length >= max} onClick={() => onChange([...links, newMegaLink()])} className="text-[11px] text-blue-600 hover:underline disabled:opacity-40">
           ＋ เพิ่มลิงก์
         </button>
+        {/* ➖ ตัวคั่น / 🔤 หัวข้อ — ต่อท้ายรายการ แล้วลากไปวางตรงที่ต้องการ */}
+        {!plainOnly &&
+          MEGA_LINK_KINDS.map((k) => (
+            <button key={k.value} type="button" disabled={links.length >= max} onClick={() => onChange([...links, newMegaRow(k.value)])} className="text-[11px] text-slate-600 hover:text-blue-700 hover:underline disabled:opacity-40" title={`${k.hint} — เพิ่มท้ายรายการ แล้วลากไปวางตรงที่ต้องการ`} data-add-row={k.value}>
+              ＋ {k.label}
+            </button>
+          ))}
         {copiedNames.length > 0 && (
           <button type="button" onClick={() => followCategory(new Set(copiedNames.map((l) => l.id)))} className="text-[11px] text-emerald-700 hover:underline" title="ลิงก์หมวดที่ชื่อเหมือนชื่อหมวด (คัดลอกมา) → ให้ใช้ชื่อหมวดปัจจุบัน เปลี่ยนชื่อหมวดแล้วเมนูเปลี่ยนตาม · ชื่อที่ตั้งเองอย่างอื่นไม่แตะ">
             🔗 ให้ใช้ชื่อหมวด ({copiedNames.length})

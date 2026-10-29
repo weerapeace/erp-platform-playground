@@ -1283,6 +1283,10 @@ export interface MenuItem {
   /** ⏰ ตั้งเวลาแสดง (เวลาไทย "YYYY-MM-DD" / "YYYY-MM-DDTHH:mm" · ว่าง = ไม่จำกัด · inShowWindow) */
   showFrom: string;
   showUntil: string;
+  /** 👁 ปิดไว้ (ไม่ลบ) — เว็บร้านไม่โชว์เมนูนี้ (และเมนูย่อย) จนกว่าจะเปิดสวิตช์ */
+  hidden: boolean;
+  /** 📌 ติดหัวเว็บ: ตอนเมนูจอคอมเป็นปุ่ม ☰ (behavior.desktopStyle) เมนูนี้ยังโชว์เป็นคำข้างปุ่ม — เฉพาะเมนูบนสุด */
+  pin: boolean;
 }
 export interface MenuConfig {
   /** null = อัตโนมัติ (สินค้าทั้งหมด + หน้าที่สร้าง + ติดต่อ) */
@@ -1303,7 +1307,7 @@ export const MENU_KINDS: { value: MenuKind; label: string; hint: string }[] = [
   { value: "contact", label: "ติดต่อ", hint: "/contact" },
   { value: "url", label: "ลิงก์อื่น", hint: "URL ภายนอก/ภายใน" },
 ];
-export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, also: "", badge: "", mega: false, imageKey: null, children: [], panel: null, showFrom: "", showUntil: "" });
+export const newMenuItem = (label = "เมนูใหม่", kind: MenuKind = "shop", value = ""): MenuItem => ({ id: `m${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, label, kind, value, also: "", badge: "", mega: false, imageKey: null, children: [], panel: null, showFrom: "", showUntil: "", hidden: false, pin: false });
 function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
   if (!Array.isArray(raw)) return [];
   const out: MenuItem[] = [];
@@ -1326,6 +1330,8 @@ function normalizeMenuItems(raw: unknown, depth: number): MenuItem[] {
       panel: depth === 0 ? normalizeMegaPanel(r.panel) : null,
       showFrom: typeof r.showFrom === "string" && /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(r.showFrom) ? r.showFrom : "",
       showUntil: typeof r.showUntil === "string" && /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/.test(r.showUntil) ? r.showUntil : "",
+      hidden: r.hidden === true,
+      pin: depth === 0 && r.pin === true,
     });
   });
   return out.slice(0, 40);

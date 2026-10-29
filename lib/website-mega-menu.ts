@@ -21,6 +21,13 @@ export type MegaTemplate = "A" | "B" | "C";
 export type MegaLayout = "columns" | "tabs";
 export type MegaBlockKind = "links" | "groups" | "products" | "feature" | "cards";
 export type MegaLinkStyle = "plain" | "icon" | "dot" | "thumb";
+/** ชนิดแถวในรายการลิงก์: ลิงก์ (เดิม) · หัวข้อ (ตัวหนังสือ กดไม่ได้) · เส้นคั่น · เว้นบรรทัด — ข้อมูลเก่าไม่มี = ลิงก์ */
+export type MegaLinkKind = "link" | "heading" | "divider" | "space";
+export const MEGA_LINK_KINDS: { value: Exclude<MegaLinkKind, "link">; label: string; hint: string }[] = [
+  { value: "heading", label: "🔤 หัวข้อ", hint: "ตัวหนังสือหัวกลุ่ม กดไม่ได้ เช่น NEW ARRIVAL" },
+  { value: "divider", label: "➖ เส้นคั่น", hint: "เส้นบาง ๆ คั่นระหว่างลิงก์" },
+  { value: "space", label: "↕ เว้นบรรทัด", hint: "ช่องว่างหนึ่งบรรทัด" },
+];
 export type MegaRatio = "1:1" | "3:4" | "4:5" | "4:3" | "16:9";
 export type MegaSort = "new" | "best" | "price-asc" | "price-desc" | "discount" | "random";
 /** รายการลิงก์อัตโนมัติ: "" = ใส่เอง · หมวด/คอลเลกชัน/สี = ดึงจากข้อมูลร้าน (เพิ่มใหม่แล้วขึ้นเอง) */
@@ -28,6 +35,8 @@ export type MegaAuto = "" | "categories" | "collections" | "colors";
 
 export interface MegaLink {
   id: string;
+  /** ➖ ชนิดแถว: link = ลิงก์ · heading = หัวข้อกดไม่ได้ (ใช้ label) · divider/space = ตัวคั่น (ไม่มีชื่อ/ลิงก์) */
+  kind: MegaLinkKind;
   label: string;
   href: string;
   /** คำอธิบายบรรทัดล่าง (แบบไอคอน/จุดสี/รูปเล็ก) */
@@ -174,7 +183,16 @@ export interface MenuBehavior {
   subHover: "color" | "underline" | "grow" | "none";
   /** สีตอนชี้ ("" = สีลิงก์ของธีม) */
   hoverColor: string;
+  /** ☰ จอคอม: คำเมนูเรียงในแถบ (เดิม) / ปุ่ม ☰ อย่างเดียว / ☰ + คำ — กดแล้วเปิดลิ้นชักตัวเดียวกับมือถือ · เมนูที่ติ๊ก "ติดหัวเว็บ" (MenuItem.pin) ยังโชว์ข้างปุ่ม */
+  desktopStyle: "links" | "burger" | "burger-text";
+  /** คำข้างปุ่ม ☰ (แบบ burger-text · "" = MENU) */
+  burgerLabel: string;
 }
+export const DESKTOP_MENU_STYLES: { value: MenuBehavior["desktopStyle"]; label: string }[] = [
+  { value: "links", label: "คำเมนูเรียงในแถบ (เดิม)" },
+  { value: "burger", label: "☰ อย่างเดียว" },
+  { value: "burger-text", label: "☰ + คำว่า MENU" },
+];
 export const NAV_HOVERS: { value: MenuBehavior["navHover"]; label: string }[] = [
   { value: "fade", label: "จางลง (เดิม)" },
   { value: "color", label: "เปลี่ยนสี" },
@@ -188,7 +206,7 @@ export const SUB_HOVERS: { value: MenuBehavior["subHover"]; label: string }[] = 
   { value: "none", label: "ไม่มี" },
 ];
 /** 🔠 ฟอนต์/สี/ขนาด/ตัวพิมพ์ใหญ่ของเมนู = theme.typography.nav (เมนูด้านบน) + .menu (เมนูย่อย/แผงเมนู) — ไม่เก็บซ้ำที่นี่ */
-export const DEFAULT_MENU_BEHAVIOR: MenuBehavior = { open: "hover", delay: 0, dim: false, mobileStyle: "accordion", mobileCats: false, navHover: "fade", subHover: "color", hoverColor: "" };
+export const DEFAULT_MENU_BEHAVIOR: MenuBehavior = { open: "hover", delay: 0, dim: false, mobileStyle: "accordion", mobileCats: false, navHover: "fade", subHover: "color", hoverColor: "", desktopStyle: "links", burgerLabel: "" };
 export const MENU_DELAYS = [0, 100, 150, 200, 300, 400, 600] as const;
 
 /** แม่แบบแผงเมนูที่บันทึกไว้ (ตาราง website_menu_templates · /api/website/menu-templates) */
@@ -261,7 +279,11 @@ const megaIconOf = (v: unknown): string => {
 
 /* ───────── ตัวสร้างค่าใหม่ ───────── */
 const rid = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-export const newMegaLink = (label = "ลิงก์ใหม่", href = ""): MegaLink => ({ id: rid("l"), label, href, desc: "", icon: "", iconKey: null, color: "", imageKey: null, badge: "", hoverImageKey: null, bold: false, textColor: "", showFrom: "", showUntil: "", col: 0 });
+export const newMegaLink = (label = "ลิงก์ใหม่", href = "", kind: MegaLinkKind = "link"): MegaLink => ({ id: rid("l"), kind, label, href, desc: "", icon: "", iconKey: null, color: "", imageKey: null, badge: "", hoverImageKey: null, bold: false, textColor: "", showFrom: "", showUntil: "", col: 0 });
+/** ➖ แถวตัวคั่น (เส้น/เว้นบรรทัด) — ข้อมูลที่ยังไม่ผ่าน normalize อาจไม่มี kind = ลิงก์ */
+export const megaIsSep = (l: { kind?: MegaLinkKind }) => l.kind === "divider" || l.kind === "space";
+/** แถวตัวคั่น/หัวข้อใหม่ (ปุ่มข้าง "＋ เพิ่มลิงก์") — หัวข้อตั้งต้นเป็นตัวหนา */
+export const newMegaRow = (kind: Exclude<MegaLinkKind, "link">): MegaLink => ({ ...newMegaLink(kind === "heading" ? "หัวข้อ" : "", "", kind), bold: kind === "heading" });
 export const newMegaGroup = (label = "หัวข้อใหม่"): MegaGroup => ({ id: rid("g"), label, href: "", links: [] });
 export const newMegaCard = (title = "การ์ดใหม่", href = "", imageKey: string | null = null): MegaCard => ({ id: rid("c"), title, desc: "", href, imageKey });
 export const newMegaTab = (label = "แท็บใหม่", href = ""): MegaTab => ({ id: rid("t"), label, href, cards: [] });
@@ -425,12 +447,18 @@ const when = (v: unknown) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}(T\d{2
 const arr = (v: unknown, max: number) => (Array.isArray(v) ? v.filter((x) => x && typeof x === "object").slice(0, max) : []) as Record<string, unknown>[];
 
 function cleanLink(r: Record<string, unknown>, i: number): MegaLink | null {
+  const kind = oneOf(r.kind, ["link", "heading", "divider", "space"] as const, "link");
+  // ➖ ตัวคั่น: ไม่มีชื่อ/ลิงก์ — เก็บแค่คอลัมน์ + เวลาแสดง
+  if (kind === "divider" || kind === "space")
+    return { ...newMegaLink("", "", kind), id: id(r.id, "l", i), showFrom: when(r.showFrom), showUntil: when(r.showUntil), col: int(r.col, 0, 0, 3) };
   const label = str(r.label, 60);
-  const href = cleanHref(r.href);
+  // 🔤 หัวข้อ = ตัวหนังสือกดไม่ได้ (ไม่เก็บลิงก์)
+  const href = kind === "heading" ? "" : cleanHref(r.href);
   // ชื่อว่าง = ทิ้ง · ยกเว้นลิงก์หมวด (ชื่อว่าง = ใช้ชื่อหมวดปัจจุบัน — megaLinkLabel)
   if (!label && !megaCategoryKeyOf(href)) return null;
   return {
     id: id(r.id, "l", i),
+    kind,
     label,
     href,
     desc: str(r.desc, 120),
@@ -550,6 +578,8 @@ export function normalizeMenuBehavior(raw: unknown): MenuBehavior {
     navHover: oneOf(r.navHover, ["fade", "color", "underline", "grow"] as const, d.navHover),
     subHover: oneOf(r.subHover, ["color", "underline", "grow", "none"] as const, d.subHover),
     hoverColor: hex(r.hoverColor),
+    desktopStyle: oneOf(r.desktopStyle, ["links", "burger", "burger-text"] as const, d.desktopStyle),
+    burgerLabel: str(r.burgerLabel, 20).trim(),
   };
 }
 
@@ -571,7 +601,7 @@ export function inShowWindow(from: string | undefined, until: string | undefined
 export function megaHasContent(p: MegaPanel | null | undefined): boolean {
   if (!p) return false;
   if (p.layout === "tabs") return p.tabs.some((t) => t.cards.length > 0);
-  return p.blocks.some((b) => (b.kind === "links" ? b.links.length > 0 : b.kind === "groups" ? b.groups.length > 0 : b.kind === "cards" ? b.cards.length > 0 : b.kind === "feature" ? !!b.imageKey || !!b.caption : true));
+  return p.blocks.some((b) => (b.kind === "links" ? b.links.some((l) => !megaIsSep(l)) : b.kind === "groups" ? b.groups.length > 0 : b.kind === "cards" ? b.cards.length > 0 : b.kind === "feature" ? !!b.imageKey || !!b.caption : true));
 }
 
 /** ข้อมูลสินค้าขั้นต่ำที่ใช้คัด (เว็บร้านส่ง Product มาได้เลย) */

@@ -1,7 +1,9 @@
 "use client";
 
 /** หัวเว็บ (Header) — สี/ความสูง · ตำแหน่งชิ้นส่วน (ซ้าย·กลาง·ขวา) + ป๊อป ⚙ ตั้งค่าชิ้นส่วน (แยกจาก components/website-theme-panel.tsx — ค่าทุกช่องยังอยู่ในธีมเดิม) */
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { apiFetch } from "@/lib/api";
+import { MemberLoginSettingsModal } from "@/components/website-member-login-settings";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import { LangInput } from "@/components/bilingual-field";
 import { TEXT_ROLE_DEFS, HEADER_EL_DEFS, type HeaderEl, type HeaderZones } from "@/lib/website-theme";
@@ -30,6 +32,8 @@ export function HeaderTab() {
   const [zoneCfg, setZoneCfg] = useState<HeaderEl | null>(null);
   const zoneNames = (els: HeaderEl[]) => els.map((k) => HEADER_EL_DEFS.find((d) => d.key === k)?.label ?? k).join(" ") || "—";
   const z = theme.header.zones;
+  const memberLogin = useMemberLoginReady(shopSlug, [...z.left, ...z.center, ...z.right].includes("account"));
+  const [loginOpen, setLoginOpen] = useState(false);
   return (
     <>
     <DesignCard
@@ -91,8 +95,18 @@ export function HeaderTab() {
       summary={`ซ้าย ${zoneNames(z.left)} · กลาง ${zoneNames(z.center)} · ขวา ${zoneNames(z.right)}`}
     >
       <div>
-        <ZonesEditor zones={theme.header.zones} onChange={(zones) => setHeader({ zones })} onConfig={setZoneCfg} />
+        <ZonesEditor zones={theme.header.zones} onChange={(zones) => setHeader({ zones })} onConfig={setZoneCfg} hiddenEls={memberLogin.ready === false ? { account: "ยังซ่อนอยู่บนเว็บร้าน — ยังไม่ได้ตั้งช่องทางเข้าสู่ระบบ" } : undefined} />
         <p className="text-[11px] text-slate-400 mt-1.5">กดชื่อชิ้นที่มี ⚙ (โลโก้ · เมนู · ค้นหา · ตะกร้า · โซเชียล) เพื่อตั้งค่าในป๊อปได้เลย · “บัญชีสมาชิก” โชว์เมื่อเว็บเปิดระบบสมาชิกแล้ว (ตั้งช่องทางเข้าสู่ระบบ)</p>
+        {/* 👤 วางชิ้นบัญชีสมาชิกไว้ แต่ยังไม่มีช่องทางเข้าสู่ระบบที่พร้อม = เว็บร้านซ่อนไอคอน (memberEnabled) → บอกเหตุผล + เปิดป๊อปตั้งค่าได้เลย */}
+        {memberLogin.ready === false && (
+          <div data-member-hint className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+            <span className="flex-1 min-w-[14rem]">👤 ไอคอน “บัญชีสมาชิก” ยังไม่ขึ้นบนเว็บร้าน เพราะยังไม่ได้ตั้งช่องทางเข้าสู่ระบบ (Google / LINE / Facebook) สักทาง — ลูกค้าจะกดเข้าไปแล้วสมัครไม่ได้ ระบบเลยซ่อนไว้ให้</span>
+            <button type="button" onClick={() => setLoginOpen(true)} className="h-7 shrink-0 rounded-md bg-amber-600 px-3 text-[11px] font-medium text-white hover:bg-amber-700">
+              🔑 ตั้งค่าการเข้าสู่ระบบ
+            </button>
+          </div>
+        )}
+        <MemberLoginSettingsModal open={loginOpen} shopSlug={shopSlug} onClose={() => setLoginOpen(false)} onSaved={memberLogin.reload} />
         {/* ⚙ ป๊อปตั้งค่าชิ้นส่วน: เมนู = แก้ในธีม (บันทึกร่าง/เผยแพร่พร้อมดีไซน์) · โซเชียล = ข้อมูลร้าน บันทึกทันที */}
         <ERPModal
           open={zoneCfg === "menu"}
@@ -200,10 +214,28 @@ export function HeaderTab() {
   );
 }
 
+/** 👤 เว็บร้านโชว์ไอคอนบัญชีสมาชิกเมื่อมีช่องทางเข้าสู่ระบบพร้อมอย่างน้อย 1 ทาง (เว็บร้าน memberEnabled ← member-config)
+ *  ready: true/false · null = ยังไม่รู้ (ไม่ได้วางชิ้น / ไม่มีสิทธิ์ดู / โหลดพลาด → ไม่เตือน) */
+function useMemberLoginReady(shopSlug: string, placed: boolean) {
+  const [ready, setReady] = useState<boolean | null>(null);
+  const reload = useCallback(() => {
+    if (!placed || !shopSlug) return setReady(null);
+    apiFetch(`/api/website/members/login-settings?shop=${encodeURIComponent(shopSlug)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { tokensReady?: boolean; providers?: Record<string, { ready?: boolean }> } | null) => setReady(j ? !!j.tokensReady && Object.values(j.providers ?? {}).some((p) => p.ready) : null))
+      .catch(() => setReady(null));
+  }, [shopSlug, placed]);
+  useEffect(() => {
+    reload();
+  }, [reload]);
+  return { ready, reload };
+}
+
 /* ─────────── Header: จัดชิ้นส่วน 3 โซน ─────────── */
 /** ชิ้นที่กดแล้วเปิดป๊อปตั้งค่าได้ */
 export const ZONE_CONFIGURABLE: HeaderEl[] = ["logo", "menu", "search", "cart", "social"];
-export function ZonesEditor({ zones, onChange, onConfig }: { zones: HeaderZones; onChange: (z: HeaderZones) => void; onConfig?: (el: HeaderEl) => void }) {
+/** hiddenEls = ชิ้นที่วางไว้แต่เว็บร้านยังซ่อนอยู่ (เหตุผล) → ป้าย ⚠ บนชิ้นนั้น */
+export function ZonesEditor({ zones, onChange, onConfig, hiddenEls }: { zones: HeaderZones; onChange: (z: HeaderZones) => void; onConfig?: (el: HeaderEl) => void; hiddenEls?: Partial<Record<HeaderEl, string>> }) {
   const ZK = ["left", "center", "right"] as const;
   const ZL: Record<(typeof ZK)[number], string> = { left: "ซ้าย", center: "กลาง", right: "ขวา" };
   const placed = new Set([...zones.left, ...zones.center, ...zones.right]);
@@ -220,12 +252,12 @@ export function ZonesEditor({ zones, onChange, onConfig }: { zones: HeaderZones;
   return (
     <div className="grid grid-cols-3 gap-2">
       {ZK.map((z) => (
-        <ZoneColumn key={z} title={ZL[z]} items={zones[z]} label={label} onConfig={onConfig} canLeft={z !== "left"} canRight={z !== "right"} missing={missing} onReorder={(from, to) => onChange({ ...zones, [z]: moveItem(zones[z], from, to) })} onMove={(i, d) => move(z, i, d)} onRemove={(i) => remove(z, i)} onAdd={(el) => add(z, el)} />
+        <ZoneColumn key={z} title={ZL[z]} items={zones[z]} label={label} onConfig={onConfig} hiddenEls={hiddenEls} canLeft={z !== "left"} canRight={z !== "right"} missing={missing} onReorder={(from, to) => onChange({ ...zones, [z]: moveItem(zones[z], from, to) })} onMove={(i, d) => move(z, i, d)} onRemove={(i) => remove(z, i)} onAdd={(el) => add(z, el)} />
       ))}
     </div>
   );
 }
-export function ZoneColumn({ title, items, label, onConfig, canLeft, canRight, missing, onReorder, onMove, onRemove, onAdd }: { title: string; items: HeaderEl[]; label: (k: HeaderEl) => string; onConfig?: (el: HeaderEl) => void; canLeft: boolean; canRight: boolean; missing: { key: HeaderEl; label: string }[]; onReorder: (from: number, to: number) => void; onMove: (i: number, dir: -1 | 1) => void; onRemove: (i: number) => void; onAdd: (el: HeaderEl) => void }) {
+export function ZoneColumn({ title, items, label, onConfig, hiddenEls, canLeft, canRight, missing, onReorder, onMove, onRemove, onAdd }: { title: string; items: HeaderEl[]; label: (k: HeaderEl) => string; onConfig?: (el: HeaderEl) => void; hiddenEls?: Partial<Record<HeaderEl, string>>; canLeft: boolean; canRight: boolean; missing: { key: HeaderEl; label: string }[]; onReorder: (from: number, to: number) => void; onMove: (i: number, dir: -1 | 1) => void; onRemove: (i: number) => void; onAdd: (el: HeaderEl) => void }) {
   const drag = useDragReorder(onReorder);
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 min-h-[96px]">
@@ -241,6 +273,11 @@ export function ZoneColumn({ title, items, label, onConfig, canLeft, canRight, m
               </button>
             ) : (
               <span className="flex-1 truncate" title={HEADER_EL_DEFS.find((d) => d.key === el)?.hint}>{label(el)}</span>
+            )}
+            {hiddenEls?.[el] && (
+              <span data-el-hidden={el} className="shrink-0 rounded bg-amber-100 px-1 text-[10px] text-amber-800" title={hiddenEls[el]}>
+                ⚠ ซ่อนอยู่
+              </span>
             )}
             <button type="button" disabled={!canLeft} onClick={() => onMove(i, -1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-20 px-0.5" title="ย้ายไปโซนซ้าย">◀</button>
             <button type="button" disabled={!canRight} onClick={() => onMove(i, 1)} className="text-slate-400 hover:text-blue-600 disabled:opacity-20 px-0.5" title="ย้ายไปโซนขวา">▶</button>

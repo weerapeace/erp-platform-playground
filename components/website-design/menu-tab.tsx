@@ -14,7 +14,8 @@ import { DROP_STATUS_LABEL } from "@/lib/website-new-drops";
 import { ColorInput } from "@/components/color-picker";
 import { WheelSelect } from "@/components/wheel-select";
 import { MegaMenuEditor, ShowWindowFields, type MegaEditorCtx } from "@/components/website-mega-menu-editor";
-import { DEFAULT_MENU_BEHAVIOR, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MenuBehavior } from "@/lib/website-mega-menu";
+import { DEFAULT_MENU_BEHAVIOR, DESKTOP_MENU_STYLES, MENU_DELAYS, NAV_HOVERS, SUB_HOVERS, type MenuBehavior } from "@/lib/website-mega-menu";
+import { ToggleSwitch } from "@/components/toggle-switch";
 import { type Choices, roleOf } from "./shared";
 import { useRoleEditor } from "./fonts-tab";
 import { PageHealthCtx, IssueNote } from "./link-health";
@@ -145,6 +146,23 @@ export function MenuBehaviorSettings({ value, onChange, typo }: { value: MenuBeh
           <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={value.dim} onChange={(e) => onChange({ dim: e.target.checked })} />
           ฉากหลังมืดลงตอนแผงเปิด
         </label>
+      </div>
+      {/* ☰ จอคอม: เปลี่ยนแถบคำเมนูเป็นปุ่ม ☰ (เปิดลิ้นชักตัวเดียวกับมือถือ) */}
+      <div className="space-y-1" data-desktop-style>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-slate-500">🖥 เมนูจอคอม</span>
+          {DESKTOP_MENU_STYLES.map((o) => (
+            <button key={o.value} type="button" className={seg((value.desktopStyle ?? "links") === o.value)} onClick={() => onChange({ desktopStyle: o.value })}>
+              {o.label}
+            </button>
+          ))}
+          {value.desktopStyle === "burger-text" && (
+            <input className="h-7 w-28 rounded-md border border-slate-200 px-2 text-[11px]" value={value.burgerLabel ?? ""} maxLength={20} placeholder="MENU" onChange={(e) => onChange({ burgerLabel: e.target.value })} title="คำข้างปุ่ม ☰ (ว่าง = MENU)" />
+          )}
+        </div>
+        {value.desktopStyle && value.desktopStyle !== "links" && (
+          <p className="text-[11px] text-slate-500 pl-0.5">กด ☰ แล้วเปิดลิ้นชักเมนูตัวเดียวกับมือถือ · เมนูที่ติ๊ก 📌 ติดหัวเว็บ (กด ✎ ที่เมนูนั้น) ยังโชว์เป็นคำข้างปุ่ม เช่น ALL PRODUCTS</p>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <div className="flex items-center gap-1.5">
@@ -293,10 +311,14 @@ export function MenuEditor({ items, onChange, choices, pages, depth = 0, parentM
           const iss = issueOf(it);
           const kidWarn = health && it.children.length ? countLinkWarnings(it.children, health) : 0;
           return (
-            <li key={it.id} {...drag.rowProps(i)} className={`rounded-lg border ${open ? "border-blue-300" : iss?.level === "warn" ? "border-amber-300" : "border-slate-200"} bg-white ${drag.rowCls(i)}`}>
+            <li key={it.id} {...drag.rowProps(i)} data-menu-row={it.id} className={`rounded-lg border ${open ? "border-blue-300" : iss?.level === "warn" ? "border-amber-300" : "border-slate-200"} ${it.hidden ? "bg-slate-50" : "bg-white"} ${drag.rowCls(i)}`}>
               <div className="flex items-center gap-1.5 px-2 py-1.5">
                 <DragHandle {...drag.handleProps(i)} />
-                <LangInput className={`${mini} flex-1 min-w-0`} obj={it} k="label" maxLength={60} onPatch={(p) => setItem(it.id, p)} placeholder="ชื่อเมนู" />
+                {/* 👁 เปิด/ปิดเมนูนี้ (ไม่ต้องลบ) — ปิด = เว็บร้านไม่โชว์ (รวมเมนูย่อย) */}
+                <ToggleSwitch size="sm" on={!it.hidden} onChange={(v) => setItem(it.id, { hidden: !v })} title={it.hidden ? "ปิดอยู่ — ลูกค้าไม่เห็นเมนูนี้ · กดเพื่อเปิด" : "เปิดอยู่ · กดเพื่อปิดชั่วคราว (ไม่ลบ)"} />
+                <LangInput className={`${mini} flex-1 min-w-0 ${it.hidden ? "line-through text-slate-400" : ""}`} obj={it} k="label" maxLength={60} onPatch={(p) => setItem(it.id, p)} placeholder="ชื่อเมนู" />
+                {it.hidden && <span className="shrink-0 rounded bg-slate-200 px-1.5 py-0.5 text-[10px] text-slate-600">ปิดอยู่</span>}
+                {depth === 0 && it.pin && <span className="shrink-0 text-[11px]" title="ติดหัวเว็บ — ตอนเมนูจอคอมเป็นปุ่ม ☰ ยังโชว์คำนี้ข้างปุ่ม">📌</span>}
                 <select className={mini} value={it.kind} onChange={(e) => setItem(it.id, { kind: e.target.value as MenuKind, value: "" })}>
                   {MENU_KINDS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}
                 </select>
@@ -317,6 +339,12 @@ export function MenuEditor({ items, onChange, choices, pages, depth = 0, parentM
                     </div>
                   </div>
                   <ShowWindowFields from={it.showFrom} until={it.showUntil} onChange={(p) => setItem(it.id, p)} />
+                  {depth === 0 && (
+                    <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer" title="ใช้ตอนตั้ง 🖥 เมนูจอคอม เป็นปุ่ม ☰ (ด้านล่าง)">
+                      <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={!!it.pin} onChange={(e) => setItem(it.id, { pin: e.target.checked })} />
+                      📌 ติดหัวเว็บ — ตอนเมนูจอคอมเป็นปุ่ม ☰ ยังโชว์เมนูนี้เป็นคำข้างปุ่ม (เช่น ALL PRODUCTS)
+                    </label>
+                  )}
                   {depth === 0 && megaCtx && (
                     <MegaMenuEditor itemId={it.id} panel={it.panel} onChange={(panel) => setItem(it.id, { panel })} ctx={megaCtx} />
                   )}

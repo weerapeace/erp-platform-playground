@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanHref, cloneMegaBlock, DEFAULT_MENU_BEHAVIOR, inShowWindow, megaBlockLinks, megaHasContent, megaLinkIssue, megaPreset, megaSplitColumns, newMegaBlock, newMegaLink, normalizeMegaPanel, normalizeMenuBehavior, pickMegaProducts } from "@/lib/website-mega-menu";
+import { cleanHref, cloneMegaBlock, DEFAULT_MENU_BEHAVIOR, inShowWindow, megaBlockLinks, megaHasContent, megaIsSep, megaLinkIssue, megaPreset, megaSplitColumns, newMegaBlock, newMegaLink, newMegaRow, normalizeMegaPanel, normalizeMenuBehavior, pickMegaProducts } from "@/lib/website-mega-menu";
 import { normalizeMenu } from "@/lib/website-theme";
 
 const cats = [
@@ -166,5 +166,50 @@ describe("แผงเมนูใหญ่: เลือกคอลัมน�
     expect(cols.map((c) => c.map((l) => l.label))).toEqual([["ดูทั้งหมด", "มาใหม่", "HANDBAGS"], ["BAG CHARMS", "ITA BAGS", "WALLETS"]]);
     const bal = megaSplitColumns([L("a", 1), L("b"), L("c"), L("d")], 2)!;
     expect(bal.map((c) => c.map((l) => l.label))).toEqual([["a", "c"], ["b", "d"]]);
+  });
+});
+
+describe("เมนู: ตัวคั่น · ซ่อนเมนู · ☰ จอคอม (2026-10-29)", () => {
+  const panelWith = (links: unknown[]) => normalizeMegaPanel({ template: "A", layout: "columns", blocks: [{ kind: "links", links, cols: 2 }] });
+  it("เส้นคั่น/เว้นบรรทัด เก็บได้แม้ไม่มีชื่อ/ลิงก์ · หัวข้อไม่เก็บลิงก์ · ข้อมูลเก่าไม่มี kind = ลิงก์", () => {
+    const p = panelWith([
+      { kind: "heading", label: "NEW ARRIVAL", href: "/shop", bold: true, col: 2 },
+      { label: "กระเป๋าเป้", href: "/c/backpack" },
+      { kind: "divider", label: "x", href: "/shop", col: 1 },
+      { kind: "space" },
+      { kind: "heading", label: "" },
+      { kind: "อะไรก็ไม่รู้", label: "ลิงก์", href: "/shop" },
+    ])!;
+    const links = p.blocks[0].links;
+    expect(links.map((l) => l.kind)).toEqual(["heading", "link", "divider", "space", "link"]);
+    expect(links[0]).toMatchObject({ label: "NEW ARRIVAL", href: "", bold: true, col: 2 });
+    expect(links[2]).toMatchObject({ label: "", href: "", col: 1 });
+  });
+  it("newMegaRow: หัวข้อตั้งต้นตัวหนา · ตัวคั่นไม่มีชื่อ · แผงที่มีแต่ตัวคั่น = ยังไม่มีเนื้อหา", () => {
+    expect(newMegaRow("heading")).toMatchObject({ kind: "heading", label: "หัวข้อ", bold: true, href: "" });
+    expect(newMegaRow("divider")).toMatchObject({ kind: "divider", label: "", href: "" });
+    expect(megaIsSep({ kind: "space" })).toBe(true);
+    expect(megaIsSep({})).toBe(false);
+    expect(megaHasContent(panelWith([{ kind: "divider" }, { kind: "space" }]))).toBe(false);
+    expect(megaHasContent(panelWith([{ kind: "divider" }, { kind: "heading", label: "SALE" }]))).toBe(true);
+  });
+  it("ตัวคั่นลงคอลัมน์ที่เลือกได้เหมือนลิงก์", () => {
+    const links = panelWith([
+      { label: "A", href: "/shop", col: 1 },
+      { kind: "divider", col: 1 },
+      { label: "B", href: "/shop", col: 2 },
+    ])!.blocks[0].links;
+    expect(megaSplitColumns(links, 2)?.map((c) => c.map((l) => l.kind))).toEqual([["link", "divider"], ["link"]]);
+  });
+  it("☰ จอคอม: ค่าเริ่ม = คำเมนูเดิม · ค่าแปลก = เดิม · คำข้างปุ่มตัดที่ 20 ตัว", () => {
+    expect(DEFAULT_MENU_BEHAVIOR).toMatchObject({ desktopStyle: "links", burgerLabel: "" });
+    expect(normalizeMenuBehavior({ desktopStyle: "burger-text", burgerLabel: "  MENU MENU MENU MENU MENU " })).toMatchObject({ desktopStyle: "burger-text", burgerLabel: "MENU MENU MENU MENU" });
+    expect(normalizeMenuBehavior({ desktopStyle: "x" }).desktopStyle).toBe("links");
+  });
+  it("เมนู: สวิตช์ปิด (hidden) เก็บไว้ใน ERP · 📌 ติดหัวเว็บ เฉพาะเมนูบนสุด", () => {
+    const m = normalizeMenu({ items: [{ label: "All Products", kind: "shop", pin: true, hidden: true, children: [{ label: "ย่อย", kind: "shop", pin: true }] }, { label: "Shop all", kind: "shop" }] });
+    expect(m.items?.[0]).toMatchObject({ hidden: true, pin: true });
+    expect(m.items?.[0].children[0]).toMatchObject({ hidden: false, pin: false });
+    expect(m.items?.[1]).toMatchObject({ hidden: false, pin: false });
   });
 });
