@@ -17,6 +17,8 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { apiSave } from "@/lib/save-toast";
 import { formatDateTime } from "@/lib/date";
+import { woRatePerPiece, roundWage, laborBomTarget } from "@/lib/wo-labor";
+import { RecvWageHint } from "./recv-wage-hint";
 import { MoProgressCell } from "@/components/mo-material-progress";
 import { PendDetail, CELL_PANE, HistTab, DETAIL_PREFS_DEFAULT, parseDetailPrefs, type PendPane } from "./pend-detail";
 import { useUserPref } from "@/lib/use-user-pref";
@@ -729,11 +731,15 @@ function WorkBoardPageInner() {
     catch { toast.error("บันทึกสีไม่สำเร็จ"); }
   };
 
+  // ช่องค่าแรงตอนรับงานคืน = ค่าแรง/ชิ้น · ตั้งต้นตามใบจ่าย (labor_cost = ค่าแรงรวมทั้งใบ ÷ จำนวนจ่าย) · ไม่มี = ให้พิมพ์เอง
+  // เดิมใส่ยอดรวมทั้งใบมาให้ → ส่งคืนบางส่วนแล้วกดเลย ค่าแรงรอบนั้นเท่าทั้งใบ (ค่าแรงรวมบวม) + ติ๊กเข้า BOM ได้ยอดรวมเป็นราคาต่อชิ้น
+  const woRateStr = (wo: WorkOrder) => { const r = woRatePerPiece(wo.labor_cost, wo.qty); return r == null ? "" : String(r); };
+  const recvWage = () => roundWage(Number(recvLabor) || 0, recvQty);
   // เปิดป๊อปอัปเช็กลิสต์จากใบจ่ายงาน (มีแท็บ "รับงานคืน" เป็นแท็บแรก) — ถ้าไม่รู้ MO id ใช้ป๊อปอัปเดิม
   const openWO = (wo: WorkOrder) => {
-    if (!wo.mo_id) { setDetailWO(wo); setRecvLabor(wo.labor_cost != null ? String(wo.labor_cost) : ""); setSaveLaborBom(false); return; }
+    if (!wo.mo_id) { setDetailWO(wo); setRecvLabor(woRateStr(wo)); setSaveLaborBom(false); return; }
     setClWO(wo); setClTab("recv"); setWoDue((wo.due_date ?? "").slice(0, 10)); setWoQty(String(wo.qty ?? ""));
-    setRecvLabor(wo.labor_cost != null ? String(wo.labor_cost) : ""); setSaveLaborBom(false);
+    setRecvLabor(woRateStr(wo)); setSaveLaborBom(false);
     setChecklistMO({
       id: wo.mo_id, mo_no: wo.mo_no, product_sku: wo.product_sku, product_name: wo.product_name,
       qty: wo.qty || 0, dispatched: 0, remaining: 0, due_date: wo.due_date, status: wo.status,
@@ -830,7 +836,7 @@ function WorkBoardPageInner() {
     if (recvLabor.trim() === "") { toast.error("กรุณาใส่ค่าแรงก่อนส่งงาน"); return; }
     setRecvSaving(true);
     try {
-      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: detailWO.id, qty: recvQty, wage: Number(recvLabor) || 0, submitted_at: todayLocal() }) });
+      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: detailWO.id, qty: recvQty, wage: recvWage(), submitted_at: todayLocal() }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success("บันทึกส่งงานแล้ว"); setDetailWO(null); await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
@@ -895,31 +901,35 @@ function WorkBoardPageInner() {
     finally { setPieceSaving(false); }
   };
   // รับงานคืน/ยกเลิก จากแท็บ "รับงานคืน" ในป๊อปอัปเช็กลิสต์ (clWO)
-  // บันทึกค่าแรงผลิตของใบจ่ายงาน (+ เลือกบันทึกกลับเข้า BOM) — ใช้ร่วมตอนรับงานคืน
-  const persistLabor = async (wo: WorkOrder) => {
-    const labor = recvLabor.trim() === "" ? null : Number(recvLabor) || 0;
-    if (recvLabor.trim() !== "") {
-      await apiFetch(`/api/mo/work-orders/${wo.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ labor_cost: labor }) }).catch(() => {});
-      if (saveLaborBom && labor != null) {
-        await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ product_sku: wo.product_sku, craftsman_id: wo.assignee_type === "craftsman" ? wo.assignee_id : null, craftsman_name: wo.assignee_name, rate: labor }) }).catch(() => {});
-      }
-    }
+  // BOM เก็บค่าแรง "ต่อชิ้น" (laborBomTarget: ใบของช่าง = ราคาช่าง · ใบของโต๊ะ/แผนก = ราคากลาง)
+  const saveRateToBom = async (wo: WorkOrder, rate: number) => {
+    if (!wo.product_sku || !(rate > 0)) return;
+    await apiFetch("/api/bom/labor-rates", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product_sku: wo.product_sku, ...laborBomTarget(wo), rate }) }).catch(() => {});
   };
+  // "บันทึกค่าแรง" (ยังไม่รับคืน) = ตั้งค่าแรงรวมทั้งใบ = ค่าแรง/ชิ้น × จำนวนจ่าย (+ เลือกบันทึกกลับเข้า BOM)
   const saveLabor = async () => {
     if (!clWO) return;
-    try { await persistLabor(clWO); toast.success(`บันทึกค่าแรงแล้ว${saveLaborBom ? " + เข้า BOM" : ""}`); }
-    catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    if (recvLabor.trim() === "") { toast.error("ใส่ค่าแรง/ชิ้นก่อน"); return; }
+    const rate = Number(recvLabor) || 0;
+    try {
+      const res = await apiFetch(`/api/mo/work-orders/${clWO.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ labor_cost: roundWage(rate, clWO.qty) }) });
+      const j = await res.json().catch(() => ({})); if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      if (saveLaborBom) await saveRateToBom(clWO, rate);
+      toast.success(`บันทึกค่าแรง ฿${fmt(rate)}/ชิ้นแล้ว${saveLaborBom ? " + เข้า BOM" : ""}`);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
   };
   const submitReceiveTab = async () => {
     if (!clWO) return;
     if (recvLabor.trim() === "") { toast.error("กรุณาใส่ค่าแรงก่อนส่งงาน"); return; }
     setRecvSaving(true);
     try {
-      if (saveLaborBom) await persistLabor(clWO);   // บันทึกค่าแรงกลับเข้า BOM (ถ้าติ๊ก)
-      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: clWO.id, qty: recvQty, wage: Number(recvLabor) || 0, submitted_at: todayLocal() }) });
+      // ค่าแรงรวมของใบ: ระบบส่งงานคิดใหม่จากทุกรอบให้เอง (lib/wo-labor) — ไม่ต้องเขียนทับเอง
+      const res = await apiFetch("/api/mo/submissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ wo_id: clWO.id, qty: recvQty, wage: recvWage(), submitted_at: todayLocal() }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      toast.success("บันทึกส่งงานแล้ว"); closeChecklist();
+      if (saveLaborBom) await saveRateToBom(clWO, Number(recvLabor) || 0);
+      toast.success(`บันทึกส่งงานแล้ว${saveLaborBom ? " + เข้า BOM" : ""}`); closeChecklist();
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
     finally { setRecvSaving(false); }
   };
@@ -2048,9 +2058,10 @@ function WorkBoardPageInner() {
                 <label className="block"><span className="text-[11px] text-slate-500">ส่งรอบนี้ (ชิ้น)</span>
                   <input type="number" min={0} step="any" max={detailWO.qty - detailWO.received_qty} value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))}
                     className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" /></label>
-                <label className="block"><span className="text-[11px] text-slate-500">💰 ค่าแรง (บาท)</span>
+                <label className="block"><span className="text-[11px] text-slate-500">ค่าแรง/ชิ้น (บาท)</span>
                   <input type="number" min={0} step="any" value={recvLabor} onChange={(e) => setRecvLabor(e.target.value)} placeholder="—"
-                    className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" /></label>
+                    className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <RecvWageHint rate={recvLabor} fromSlip={woRateStr(detailWO)} total={recvWage()} /></label>
               </div>
             )}
           </div>
@@ -2396,14 +2407,15 @@ function WorkBoardPageInner() {
                           <label className="block"><span className="text-[11px] text-slate-500">ส่งรอบนี้ (ชิ้น)</span>
                             <input type="number" min={0} step="any" value={recvQty} onChange={(e) => setRecvQty(Number(e.target.value))} disabled={!canEdit}
                               className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50" /></label>
-                          <label className="block"><span className="text-[11px] text-slate-500">💰 ค่าแรงผลิต (บาท)</span>
+                          <label className="block"><span className="text-[11px] text-slate-500">ค่าแรง/ชิ้น (บาท)</span>
                             <input type="number" min={0} step="any" value={recvLabor} onChange={(e) => setRecvLabor(e.target.value)} disabled={!canEdit} placeholder="—"
-                              className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" /></label>
+                              className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                            <RecvWageHint rate={recvLabor} fromSlip={woRateStr(clWO)} total={recvWage()} /></label>
                         </div>
                         {canEdit && (
                           <label className="flex items-center gap-2 text-xs text-slate-600">
                             <input type="checkbox" checked={saveLaborBom} onChange={(e) => setSaveLaborBom(e.target.checked)} className="w-4 h-4 accent-indigo-600" />
-                            บันทึกค่าแรงนี้กลับเข้า BOM (ราคาของช่าง {clWO.assignee_name ?? "—"})
+                            บันทึกค่าแรง/ชิ้นนี้กลับเข้า BOM ({laborBomTarget(clWO).craftsman_id ? `ราคาของช่าง ${clWO.assignee_name ?? "—"}` : "ราคากลาง"})
                           </label>
                         )}
                         {canEdit && (
@@ -3396,6 +3408,7 @@ function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefine
     </div>
   );
 }
+
 
 function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged, catchUp = false, onExitCatchUp, cuMode = "direct", cuApprove = false, cuQueueAsk = false, onCuQueueSeen }: {
   pending: PendingMO[]; workOrders: WorkOrder[]; deliveryPlans: DeliveryPlan[];

@@ -35,3 +35,20 @@ export async function syncWoLabor(admin: Admin, woId: string): Promise<void> {
     ((subs ?? []) as { qty: unknown; wage: unknown }[]).map((s) => ({ qty: Number(s.qty) || 0, wage: s.wage == null ? null : Number(s.wage) })));
   if (total != null) await admin.from("mo_work_orders").update({ labor_cost: total }).eq("id", woId);
 }
+
+/** ค่าแรง/ชิ้นตามใบจ่าย = ค่าแรงรวมทั้งใบ ÷ จำนวนจ่าย · null = ใบยังไม่มีค่าแรง (ให้พิมพ์เอง) */
+export function woRatePerPiece(laborCost: number | null | undefined, qty: number): number | null {
+  return (laborCost ?? 0) > 0 && qty > 0 ? r2((laborCost as number) / qty) : null;
+}
+
+/** ยอดค่าแรงของรอบส่งงาน (wo_submissions.wage เก็บเป็นยอดของรอบ ไม่ใช่ต่อชิ้น) = ค่าแรง/ชิ้น × จำนวนที่ส่ง */
+export function roundWage(rate: number, qty: number): number {
+  return r2((rate || 0) * (qty || 0));
+}
+
+/** BOM เก็บค่าแรง "ต่อชิ้น" · ใบของช่าง = ราคาของช่างคนนั้น · ใบของโต๊ะ/แผนก = ราคากลาง (แบบเดียวกับโหมดอัปเดตงาน) */
+export function laborBomTarget(wo: { assignee_type?: string | null; assignee_id?: string | null; assignee_name?: string | null }): { craftsman_id: string | null; craftsman_name: string | null } {
+  return wo.assignee_type === "craftsman" && wo.assignee_id
+    ? { craftsman_id: wo.assignee_id, craftsman_name: wo.assignee_name ?? null }
+    : { craftsman_id: null, craftsman_name: "ราคากลาง" };
+}
