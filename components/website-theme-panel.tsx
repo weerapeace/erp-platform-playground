@@ -255,6 +255,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       zoomBy(d.deltaY < 0 ? 0.05 : -0.05);
       return;
     }
+    // ✋ กดปุ่มลูกกลิ้งค้างแล้วลากบนพรีวิว → เว็บร้านส่งระยะที่ลาก (px บนจอ) มา
+    if (d.type === "storefront-preview-pan" && typeof d.dx === "number" && typeof d.dy === "number") {
+      panBy(d.dx, d.dy);
+      return;
+    }
     if (d.type !== "storefront-area-picked" || typeof d.part !== "string") return;
     const rule = previewRuleOf(d.part);
     if (!rule) return;
@@ -285,6 +290,48 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, [loading, zoomBy]);
+  // ✋ มือจับ (กดปุ่มลูกกลิ้งค้างแล้วลาก): เลื่อนกรอบนอกก่อน (ซูมใหญ่ = เว็บใหญ่กว่ากล่อง) · ขึ้น-ลงที่เหลือ → สั่งหน้าเว็บในพรีวิวเลื่อน
+  const previewScrollRef = useRef<HTMLDivElement>(null);
+  const panBy = useCallback((dx: number, dy: number) => {
+    const sc = previewScrollRef.current;
+    if (!sc) return;
+    sc.scrollLeft -= dx;
+    const before = sc.scrollTop;
+    sc.scrollTop = before - dy;
+    const rest = dy - (before - sc.scrollTop);
+    if (Math.abs(rest) >= 0.5) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-preview-scroll", dy: -rest / scaleRef.current }, "*");
+  }, []);
+  // ลากตรงพื้นเทารอบพรีวิว (ในตัวเว็บ เว็บร้านจับเองแล้วส่ง storefront-preview-pan มา)
+  const panAt = useRef<{ x: number; y: number } | null>(null);
+  const [panning, setPanning] = useState(false);
+  const endPan = () => {
+    panAt.current = null;
+    setPanning(false);
+  };
+  const panProps = {
+    // ปุ่มกลาง: ไม่เข้าโหมดเลื่อนอัตโนมัติของ Windows (วงกลมลูกศร)
+    onMouseDown: (e: React.MouseEvent) => e.button === 1 && e.preventDefault(),
+    onAuxClick: (e: React.MouseEvent) => e.button === 1 && e.preventDefault(),
+    onPointerDown: (e: React.PointerEvent<HTMLDivElement>) => {
+      if (e.button !== 1 || e.pointerType !== "mouse") return;
+      panAt.current = { x: e.clientX, y: e.clientY };
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {
+        /* ไม่มี pointer จริง */
+      }
+      setPanning(true);
+    },
+    onPointerMove: (e: React.PointerEvent<HTMLDivElement>) => {
+      const p = panAt.current;
+      if (!p) return;
+      if (!(e.buttons & 4)) return endPan();
+      panBy(e.clientX - p.x, e.clientY - p.y);
+      panAt.current = { x: e.clientX, y: e.clientY };
+    },
+    onPointerUp: (e: React.PointerEvent<HTMLDivElement>) => e.button === 1 && endPan(),
+    onPointerCancel: endPan,
+  };
   // ↔ ความกว้างพรีวิว — ลากเส้นแบ่ง (ของกลาง components/split-handle · จำต่อคน · ดับเบิลคลิก = ค่าเริ่ม 40%)
   const split = useSplitWidth("website-design-preview", { min: 300, reserve: 420 + SPLIT_HANDLE_W });
 
@@ -499,6 +546,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
       }
       // 🎯 พรีวิวโหลดหน้าใหม่ → ส่งโหมดคลิกเลือกส่วน + ส่วนที่กำลังแก้ซ้ำ
       if ((e.data as { type?: string })?.type === "storefront-preview-ready") {
+        iframeRef.current?.contentWindow?.postMessage({ type: "storefront-preview-gestures", on: true }, "*");
         if (areaPickRef.current) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-pick", on: true, rules: AREA_RULES }, "*");
         if (focusRef.current.length) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-focus", prefixes: focusRef.current }, "*");
       }
@@ -889,7 +937,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
 
           <div ref={previewBoxRef} className="rounded-xl border border-slate-200 bg-slate-100 overflow-hidden" style={{ height: "72vh", minHeight: 420 }}>
             {previewSrc ? (
-              <div className="w-full h-full overflow-auto py-2">
+              <div ref={previewScrollRef} className="w-full h-full overflow-auto py-2" style={{ cursor: panning ? "grabbing" : undefined }} {...panProps}>
                 {/* กล่องนอกกว้างเท่า "ขนาดหลังย่อ" — transform ไม่ย่อกล่อง layout ถ้าไม่ครอบแบบนี้จะเหลือที่ว่างมหาศาล */}
                 <div style={{ width: dev.w * scale, height: frameH * scale, margin: "0 auto", overflow: "hidden" }}>
                   <iframe
@@ -909,8 +957,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       // ⚠️ สำคัญ: ถ้าไม่ล็อก iframe จะโดนบีบให้แคบตามกล่อง → เว็บข้างในสลับไปหน้าตามือถือ
                       flexShrink: 0,
                       display: "block",
-                      // ระหว่างลากเส้นแบ่ง: กันพรีวิวกินเมาส์ (ลากผ่านพรีวิวแล้วหลุด)
-                      pointerEvents: split.dragging ? "none" : undefined,
+                      // ระหว่างลากเส้นแบ่ง/ลากพื้นรอบพรีวิว: กันพรีวิวกินเมาส์ (ลากผ่านพรีวิวแล้วหลุด)
+                      pointerEvents: split.dragging || panning ? "none" : undefined,
                     }}
                   />
                 </div>
@@ -923,7 +971,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             )}
           </div>
           <p className="text-[10px] text-slate-400 mt-1.5 text-center">
-            สี/ฟอนต์เปลี่ยนทันที · โลโก้/Header/การ์ด กด ↻ หลังบันทึกร่างเพื่อดูผล · Ctrl+เลื่อนลูกกลิ้ง = ซูมพรีวิว · ลากเส้นแบ่งซ้าย = ปรับความกว้าง
+            สี/ฟอนต์เปลี่ยนทันที · โลโก้/Header/การ์ด กด ↻ หลังบันทึกร่างเพื่อดูผล · Ctrl+เลื่อนลูกกลิ้ง = ซูมพรีวิว · กดลูกกลิ้งค้างแล้วลาก = เลื่อนดู · ลากเส้นแบ่งซ้าย = ปรับความกว้าง
           </p>
         </div>
       </div>
