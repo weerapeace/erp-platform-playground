@@ -10,6 +10,8 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
+import { askConfirm } from "@/components/modal/ask-dialog";
+import { QC_WAREHOUSES } from "@/lib/qc-ship";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
@@ -22,7 +24,7 @@ import { DeskStaffPanel } from "./desk-staff-panel";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuStageDone, cuCanShort,
-  CU_SEVERITY, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuDispLine, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
+  CU_SEVERITY, cuUndo, cuIrreversible, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuDispLine, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
 } from "./catch-up";
 
 type DeptLite = { id: string; name: string };
@@ -84,6 +86,10 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const [saveBom, setSaveBom] = useState(true);            // บันทึกค่าแรง/ชิ้นกลับเข้า BOM (เจ้าของสั่ง: ค่าเริ่ม = บันทึก)
   const [deskPanelFor, setDeskPanelFor] = useState<string | null>(null);   // แถวจ่ายที่เปิด "จัดคนในโต๊ะ"
   const [defects, setDefects] = useState<Record<string, { sku: string | null }[]> | null>(null);   // ประวัติงานเสียรายช่าง (โหลดตอนใช้)
+  const [shipMode, setShipMode] = useState<"sales_wh" | "sell">("sales_wh");   // ส่งออกจาก QC ไปไหน (เหมือนหน้าโกดัง QC)
+  const [shipWh, setShipWh] = useState(QC_WAREHOUSES[0]);
+  const [undoRes, setUndoRes] = useState<{ msg: string; ok: boolean }[] | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const [running, setRunning] = useState(-1);
   const [results, setResults] = useState<CuResult[]>([]);
   const seq = useRef(0);
@@ -93,7 +99,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     if (!moNo) return;
     setSnap(null); setLoadErr(""); setPage(1); setTarget(null); setTicks({}); setDisp([]); setRet([]); setRetSet(false); setQcSet(false); setDates(CU_NO_DATES);
     setShelfId(""); setBadReason(""); setNewReason(null); setCancelReason(""); setMissing([]); setDeskPanelFor(null); setResults([]); setRunning(-1);
-    setProblems([]); setTeamNote(""); setSaveBom(true);
+    setProblems([]); setTeamNote(""); setSaveBom(true); setShipMode("sales_wh"); setShipWh(QC_WAREHOUSES[0]); setUndoRes(null); setUndoing(false);
     let alive = true;
     void (async () => {
       try {
@@ -122,7 +128,8 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     const lastDept = last.deptId ? departments.find((d) => d.id === last.deptId) ?? null : null;
     const lastCrew = lastDept ? (last.crewIds ?? []).filter((id) => poolOf(lastDept).some((c) => c.id === id)) : [];
     setDisp([{ key: nk("d"), deptId: lastDept?.id ?? "", crewIds: lastCrew, qty: q.dispatchQty, date: null, rate: lastCrew.length ? rateFor(lastCrew) : centralRate }]);
-    setRet([{ key: nk("r"), ref: "auto", qty: q.returnQty, date: null, wage: null }]);
+    // ส่งคืน: ปกติ = 1 รอบต่อ 1 ช่างที่จ่าย (ตามยอดอัตโนมัติ) · ส่งคืนบางส่วน = 1 รอบว่าง ให้ใส่จำนวนเอง
+    setRet(k === "return_part" ? [{ key: nk("r"), ref: "", qty: 0, date: null, wage: null }] : []);
     setRetSet(k === "return_part"); setQcSet(false);
     setQc({ good: q.qcGood, bad: 0 });
     const good = snap?.shelves.filter((s) => s.kind !== "defect") ?? [];
@@ -152,16 +159,6 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const retTotal = r2(ret.reduce((a, r) => a + (r.qty > 0 ? r.qty : 0), 0));
   const qcAvail = f ? r2(Math.max(0, f.received + (on("return") ? retTotal : 0) - f.qcPulled)) : 0;
 
-  // ── ยอดตามกันอัตโนมัติ (จนกว่าจะพิมพ์แก้เอง): ส่งคืน ← ยอดจ่าย · ของดี QC ← ยอดส่งคืน
-  useEffect(() => {
-    if (page !== 2 || retSet || ret.length !== 1) return;
-    if (ret[0].qty !== outstanding) setRet((rs) => rs.map((r, i) => (i === 0 ? { ...r, qty: outstanding } : r)));
-  }, [page, retSet, outstanding, ret]);
-  useEffect(() => {
-    if (page !== 2 || qcSet) return;
-    const g = r2(Math.max(0, qcAvail - (qc.bad || 0)));
-    if (qc.good !== g) setQc((q) => ({ ...q, good: g }));
-  }, [page, qcSet, qcAvail, qc.bad, qc.good]);
 
   // ── ประวัติงานเสียรายช่าง (เตือนที่ชื่อช่างเหมือนป๊อปจ่ายงานปกติ) — โหลดครั้งเดียวตอนเปิดหน้าจ่ายงาน
   const needDefects = page === 2 && on("dispatch");
@@ -178,16 +175,40 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   }, [needDefects, defects]);
   const defectOf = (name: string) => defectNote(defects?.[name.trim().toLowerCase()], snap?.mo.product_sku);
 
-  // ใบที่ส่งคืนได้: ใบจ่ายเดิมที่ยังค้างช่าง + แถวจ่ายใหม่
-  const retOptions = [
-    ...(snap?.wos ?? []).filter((w) => w.status !== "done" && w.qty - w.received_qty > 0.0001)
-      .map((w) => ({ ref: w.id, label: `${w.wo_no} · ${w.assignee_name ?? w.department_name ?? "—"} (ค้าง ${fmt(w.qty - w.received_qty)})` })),
-    ...(on("dispatch") ? disp.filter((r) => r.qty > 0).map((r) => ({ ref: `new:${r.key}`, label: `ใหม่: ${dispLabel(r)} (${fmt(r.qty)})` })) : []),
+  // ── ส่งคืนจากใคร: ใบจ่ายเดิมที่ยังค้างช่าง + แถวจ่ายใหม่ — เรียกด้วยชื่อเล่นช่าง (ไม่ใช่เลขใบ)
+  const nickOf = (full: string | null | undefined) => (full ?? "").split(", ").map((n) => craftsmen.find((c) => c.name === n)?.nickname?.trim() || n).filter(Boolean).join(", ");
+  const retSources = [
+    ...(snap?.wos ?? []).filter((w) => w.status !== "done" && w.qty - w.received_qty > 0.0001).map((w) => {
+      const who = nickOf(w.assignee_name) || w.department_name || "—", cap = r2(w.qty - w.received_qty);
+      return { ref: w.id, cap, short: `${who} · ${w.wo_no}`, label: `${who} · ${w.wo_no} (ค้าง ${fmt(cap)})` };
+    }),
+    ...(on("dispatch") ? disp.filter((r) => r.qty > 0).map((r) => {
+      const d = deptOf(r.deptId);
+      const who = poolOf(d).filter((c) => r.crewIds.includes(c.id)).map((c) => c.nickname?.trim() || c.name).join(", ") || "ทั้งโต๊ะ";
+      return { ref: `new:${r.key}`, cap: r2(r.qty), short: `${who} · ${d?.name ?? "โต๊ะ"}`, label: `${who} · ${d?.name ?? "โต๊ะ"} (จ่ายรอบนี้ ${fmt(r.qty)})` };
+    }) : []),
   ];
+  const srcSig = retSources.map((s) => `${s.ref}:${s.cap}`).join("|");
+  /** รอบที่ยังไม่ได้เลือกที่มา = ช่างที่จ่าย (ตามลำดับรอบ) · ไม่มีใครค้าง = แบ่งอัตโนมัติ */
+  const retEff = ret.map((r, i) => ({ ...r, ref: r.ref || (retSources.length ? retSources[Math.min(i, retSources.length - 1)].ref : "auto") }));
+  // ── ยอดตามกันอัตโนมัติ (จนกว่าจะพิมพ์แก้เอง): ส่งคืน = 1 รอบต่อ 1 ช่างที่จ่าย (ยอดเท่าที่ค้าง) · ของดี QC ← ยอดส่งคืน
+  useEffect(() => {
+    if (!target || retSet || !retSources.length) return;
+    setRet((rs) => {
+      const next = retSources.map((s) => { const old = rs.find((r) => r.ref === s.ref); return { key: old?.key ?? `r-${s.ref}`, ref: s.ref, qty: s.cap, date: old?.date ?? null, wage: old?.wage ?? null }; });
+      return next.length === rs.length && next.every((n, i) => rs[i].ref === n.ref && rs[i].qty === n.qty) ? rs : next;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target, retSet, srcSig]);
+  useEffect(() => {
+    if (!target || qcSet) return;
+    const g = r2(Math.max(0, qcAvail - (qc.bad || 0)));
+    if (qc.good !== g) setQc((q) => ({ ...q, good: g }));
+  }, [target, qcSet, qcAvail, qc.bad, qc.good]);
   /** ชื่อโต๊ะ/คน ที่โชว์ในสรุปขั้น */
   const whoOf = (s: CuStep) => {
     if (s.kind === "dispatch") { const r = disp.find((x) => x.key === s.line); return r ? dispLabel(r) : ""; }
-    if (s.kind === "return") return s.ref === "auto" ? "" : retOptions.find((o) => o.ref === s.ref)?.label.replace(/ \((ค้าง )?[\d,.]+\)$/, "").replace(/^ใหม่: /, "") ?? "";
+    if (s.kind === "return") return s.ref === "auto" ? "แบ่งอัตโนมัติ" : retSources.find((o) => o.ref === s.ref)?.short ?? "";
     return "";
   };
 
@@ -198,15 +219,31 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const built = f && target
     ? cuBuildSteps(f, target, ticks, {
         disp: disp.map((r) => ({ ...r, deskName: deptOf(r.deptId)?.name ?? null, crewCount: r.crewIds.length })),
-        ret, qcGood: qc.good, qcBad: qc.bad, shelfId, cancelReason, missing, dates, badReason, centralRate, today: todayYmd(),
-        problems, teamNote, bomRate: bomOffer && saveBom ? bomCandidate : null,
+        ret: retEff, qcGood: qc.good, qcBad: qc.bad, shelfId, cancelReason, missing, dates, badReason, centralRate, today: todayYmd(),
+        problems, teamNote, bomRate: bomOffer && saveBom ? bomCandidate : null, shipMode, shipWh,
       }, snap?.wos ?? [])
     : { steps: [] as CuStep[], errors: [] as string[], issues: [] as CuIssue[] };
   // เตือนงานเสียของช่างที่เลือก (ข้อมูลอยู่ฝั่งจอ) — เตือนเฉย ๆ บันทึกได้
   const defectIssues: CuIssue[] = on("dispatch") ? disp.flatMap((r) => crewList(r.crewIds, poolOf(deptOf(r.deptId)))
     .map((c) => ({ c, d: defectOf(c.name) })).filter((x) => x.d)
     .map((x) => ({ level: "warn" as const, field: `disp:${r.key}:crew`, msg: `${x.c.name} ${x.d}` }))) : [];
-  const issues = [...built.issues, ...defectIssues];
+  // เช็กใบขาย (จับคู่รหัสสินค้า) ตอนส่งออก/ปิดใบ — เตือนเฉย ๆ บันทึกได้
+  const sales = snap?.sales ?? { so: [], dn: [] };
+  const salesField = on("close") ? "close" : "ship";
+  const salesIssues: CuIssue[] = !(on("close") || on("ship")) ? []
+    : !sales.so.length ? [{ level: "warn", field: salesField, msg: "ยังไม่พบใบขายของสินค้านี้ — ตรวจว่าเก็บเข้าสต๊อก หรือขายแล้วแต่ยังไม่ได้ลงใบขาย" }]
+    : !sales.dn.some((d) => d.delivered) ? [{ level: "warn", field: salesField, msg: `มีใบขายแล้ว (${sales.so.map((x) => x.no).slice(0, 2).join(", ")}) แต่ยังไม่มีใบส่งของที่ส่งแล้ว` }]
+    : [];
+  const issues = [...built.issues, ...defectIssues, ...salesIssues];
+  // ── ตอนนี้ → หลังบันทึก (บอกว่าแต่ละหัวข้อจะเปลี่ยนเป็นอะไร + ใบย้ายไปแท็บไหนบนบอร์ด)
+  const dispAfter = f ? r2(f.dispatched + (on("dispatch") ? dispTotal : 0)) : 0;
+  const retAfter = f ? r2(f.received + (on("return") ? retTotal : 0)) : 0;
+  const qcAfter = f ? r2(f.qcPulled + (on("qc_in") ? (qc.good || 0) + (qc.bad || 0) : 0)) : 0;
+  const tabOf = (s: { status: string; disp: number; ret: number; qc: number; qty: number }) =>
+    s.status === "done" || s.status === "cancelled" ? "หายจากบอร์ด (ปิด/ยกเลิกแล้ว)"
+      : s.disp < s.qty - 0.0001 ? "รอจ่าย" : s.ret < s.disp - 0.0001 ? "กำลังผลิต" : s.ret > s.qc + 0.0001 ? "รอ QC รับเข้า" : "ครบแล้ว รอปิดใบ";
+  const tabBefore = f ? tabOf({ status: f.status, disp: f.dispatched, ret: f.received, qc: f.qcPulled, qty: f.qty }) : "";
+  const tabAfter = f ? tabOf({ status: target === "cancel" ? "cancelled" : on("close") ? "done" : f.status, disp: dispAfter, ret: retAfter, qc: qcAfter, qty: f.qty }) : "";
   const errs = issues.filter((x) => x.level === "error"), warns = issues.filter((x) => x.level === "warn");
   /** ช่องวันที่ที่ยังว่าง (ข้ามได้ — แค่นับให้รู้) */
   const noDates = built.steps.filter((s) => "date" in s && !s.date).length;
@@ -260,6 +297,36 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     }
   };
 
+  // ── ย้อนการอัปเดตนี้ (ลบสิ่งที่เพิ่งสร้าง จากหลังไปหน้า) — ส่งออก/ปิด/ยกเลิกแล้ว = ย้อนไม่ได้
+  const undo = async () => {
+    if (!snap) return;
+    const items = results.filter((r) => r.undo && r.undo.kind !== "none").map((r) => `• ${cuStepLabel(r.step, whoOf)}`);
+    if (!(await askConfirm({ title: "ย้อนการอัปเดตนี้?", variant: "danger", confirmText: "ย้อนกลับ",
+      message: <div className="space-y-1 text-sm"><div>ระบบจะลบ/คืนสิ่งที่เพิ่งบันทึก:</div>{items.map((x, i) => <div key={i} className="text-slate-600">{x}</div>)}</div> }))) return;
+    setUndoing(true);
+    const ctxDisp: Record<string, { dept: DeptLite; who: Record<string, unknown> }> = {};
+    const out = await cuUndo(results, { snap, disp: ctxDisp, shelfId, badReason }, async (url, body, method = "POST") => {
+      const r = await apiFetch(url, method === "DELETE" ? { method } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.error) throw new Error(r.status === 401 || r.status === 403 ? "คุณไม่มีสิทธิ์ย้อนขั้นนี้" : (j?.error || "ย้อนไม่สำเร็จ"));
+      return j as Record<string, unknown>;
+    }, (s) => cuStepLabel(s, whoOf));
+    setUndoing(false); setUndoRes(out);
+    if (out.some((x) => x.ok)) onDone();
+  };
+  const irreversible = cuIrreversible(results);
+  const canUndo = results.some((r) => r.undo && r.undo.kind !== "none");
+  // ── ยังต้องตามต่อ (หลังบันทึก)
+  const followUps = !results.length ? [] : [
+    ...(() => { const n = built.steps.filter((s) => s.kind === "return" && (s.wage == null || !s.date)).length;
+      return n ? [{ text: `ส่งคืน ${n} รอบ ยังไม่ลงค่าแรง/วันที่ — เติมที่ตารางส่งงาน แท็บ "ยังไม่ครบ"`, href: "/master/work-submissions" }] : []; })(),
+    ...(() => { const n = built.steps.filter((s) => s.kind === "dispatch" && !(disp.find((r) => r.key === s.line)?.crewIds.length)).length;
+      return n ? [{ text: `จ่ายเป็น "ทั้งโต๊ะ" ${n} ใบ — ระบุคนทีหลังได้ที่รายละเอียดใบงาน (✏️ แก้)` }] : []; })(),
+    ...(() => { const n = built.steps.filter((s) => s.kind !== "return" && "date" in s && !s.date).length;
+      return n ? [{ text: `ไม่ใส่วันที่ ${n} ขั้น — แก้วันที่จ่ายได้ที่รายละเอียดใบงาน` }] : []; })(),
+    ...(missing.length && ticks.short ? [{ text: `ยังขาดของ ${missing.length} รายการ — ยังขึ้นในหน้าขอซื้อให้ฝ่ายจัดซื้อตามต่อ` }] : []),
+    ...issues.filter((x) => x.level === "warn" && (x.field === "qc:good" || x.field === salesField) && (x.msg.startsWith("ยังเหลือรอ QC") || x.msg.includes("ใบขาย"))).map((x) => ({ text: x.msg })),
+  ] as { text: string; href?: string }[];
   const busy = page === 3 && results.length === 0;
   const m = snap?.mo, p = snap?.progress;
   const buyTxt = !m ? "" : m.skipped.buy ? "ป้ายของครบ" : !p ? "ยังไม่มีสูตร" : f?.buyDone ? "ของครบ"
@@ -306,6 +373,17 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                   <span key={k}><span className="text-slate-400">{k}</span> {v}</span>
                 ))}
               </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+              <span className="text-slate-500">ใบขาย (จับคู่รหัส {m.product_sku ?? "—"}):</span>
+              {sales.so.length ? sales.so.map((x) => (
+                <span key={x.no} className={`rounded-full px-2 py-0.5 ${x.status === "confirmed" ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                  {x.no} · {x.status === "confirmed" ? "ยืนยันแล้ว" : x.status === "draft" ? "ร่าง" : x.status} · {fmt(x.qty)} ชิ้น</span>
+              )) : <span className="text-slate-400">ยังไม่พบ</span>}
+              <span className="ml-1 text-slate-500">ใบส่งของ:</span>
+              {sales.dn.length ? sales.dn.map((x) => (
+                <span key={x.no} className={`rounded-full px-2 py-0.5 ${x.delivered ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{x.no} · {x.delivered ? "ส่งแล้ว" : "ยังไม่ส่ง"} · {fmt(x.qty)}</span>
+              )) : <span className="text-slate-400">ยังไม่มี</span>}
             </div>
             {(snap.past.mo.length > 0 || snap.past.model.length > 0) && (
               <details className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2 text-[12px] text-amber-900">
@@ -406,6 +484,31 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                     );
                   })}
                 </div>
+              </div>
+            )}
+            {target && target !== "cancel" && (
+              <div className="rounded-lg bg-slate-50 px-3 py-2 text-[12px]">
+                <div className="mb-1 font-medium text-slate-600">จะอัปเดตอะไร เป็นอะไร</div>
+                <table className="w-full"><tbody>
+                  {([
+                    ["ซื้อของ", buyTxt, f.buyDone ? null : rows.some((r) => r.stage === "have" && r.state === "short") ? `ยังขาด ${missing.length} รายการ` : on("prep") ? "ของครบ (ติ๊กเตรียม)" : on("have") ? "ของครบ (ติดป้าย)" : null],
+                    ["เตรียม", m.has_bom ? `${m.prep_ready}/${m.prep_total}` : m.prep_done ? "ครบ" : "—", on("prep") ? (m.has_bom ? `${m.prep_total - (ticks.short ? missing.length : 0)}/${m.prep_total}` : "ครบ") : null],
+                    ["ตัด", m.has_bom ? (m.cut_total ? `${m.cut_ready}/${m.cut_total}` : "ไม่มีชิ้นต้องตัด") : m.cut_done ? "ครบ" : "—", on("cut") ? (m.has_bom ? (ticks.short && missing.length ? "ครบ (ยกเว้นของที่ขาด)" : `${m.cut_total}/${m.cut_total}`) : "ครบ") : null],
+                    ["จ่ายงาน", `${fmt(f.dispatched)}/${fmt(f.qty)}`, on("dispatch") && dispTotal > 0 ? `${fmt(dispAfter)}/${fmt(f.qty)} (ใบจ่ายใหม่ ${disp.filter((r) => r.qty > 0).length} ใบ)` : null],
+                    ["ช่างคืน", fmt(f.received), on("return") ? `${fmt(retAfter)}${retAfter < dispAfter - 0.0001 ? ` (ค้างช่าง ${fmt(dispAfter - retAfter)})` : ""}` : null],
+                    ["QC รับเข้า", fmt(f.qcPulled), on("qc_in") ? `${fmt(qcAfter)}${on("ship") ? ` · ส่งออก ${fmt(qc.good)}` : ""}` : null],
+                    ["สถานะใบ", "เปิดอยู่", on("close") ? "ปิดใบแล้ว" : null],
+                  ] as [string, string, string | null][]).map(([k, before, after]) => (
+                    <tr key={k} className="border-b border-slate-200/70 last:border-0">
+                      <td className="w-24 py-1 text-slate-400">{k}</td>
+                      <td className="py-1">{after
+                        ? <><span className="text-slate-400">{before}</span><span className="mx-1.5 text-slate-300">→</span><span className="font-medium text-emerald-700">{after}</span></>
+                        : <span className="text-slate-400">{before} · ไม่เปลี่ยน</span>}</td>
+                    </tr>
+                  ))}
+                </tbody></table>
+                <div className="mt-1.5 text-slate-600">บนบอร์ด: {tabBefore === tabAfter ? <>อยู่แท็บ <b className="font-medium">{tabBefore}</b> เหมือนเดิม</> : <>ย้ายจาก <b className="font-medium">{tabBefore}</b> → <b className="font-medium text-emerald-700">{tabAfter}</b></>}
+                  <span className="text-slate-400"> · จำนวน/คน/วันที่ ใส่ในขั้นถัดไป</span></div>
               </div>
             )}
           </div>
@@ -532,11 +635,16 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                     return (
                       <div key={r.key} id={`cu-${k}`} className="grid grid-cols-1 gap-2 rounded-lg bg-slate-50/70 p-2.5 sm:grid-cols-[minmax(0,1.5fr)_6rem_6.5rem_minmax(0,1fr)_auto]">
                         <div>
-                          <label className={lbl}>{ret.length > 1 ? `รอบ ${i + 1} · ` : ""}ส่งจากใบไหน</label>
-                          <select value={r.ref} onChange={(e) => setRetRow(r.key, { ref: e.target.value })} className={numIn}>
-                            <option value="auto">อัตโนมัติ (ใบเก่าก่อน)</option>
-                            {retOptions.map((o) => <option key={o.ref} value={o.ref}>{o.label}</option>)}
-                          </select>
+                          <label className={lbl}>{ret.length > 1 ? `รอบ ${i + 1} · ` : ""}ส่งคืนจาก</label>
+                          {retSources.length <= 1 ? (
+                            // ที่มามีที่เดียว = ช่างที่จ่าย → ไม่ต้องเลือก
+                            <div className="flex h-9 items-center rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700">{retSources[0]?.short ?? "ทั้งโต๊ะ"}</div>
+                          ) : (
+                            <select value={retEff[i]?.ref ?? "auto"} onChange={(e) => setRetRow(r.key, { ref: e.target.value })} className={numIn}>
+                              {retSources.map((o) => <option key={o.ref} value={o.ref}>{o.label}</option>)}
+                              <option value="auto">แบ่งให้อัตโนมัติ (คนที่จ่ายก่อนได้ก่อน)</option>
+                            </select>
+                          )}
                         </div>
                         <div id={`cu-${k}:qty`}>
                           <label className={lbl}>จำนวน</label>
@@ -558,7 +666,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                   })}
                 </div>
                 <button type="button" className={`${addBtn} mt-2`}
-                  onClick={() => { setRetSet(true); setRet((rs) => [...rs, { key: nk("r"), ref: "auto", qty: Math.max(0, r2(outstanding - retTotal)), date: null, wage: rs[rs.length - 1]?.wage ?? null }]); }}>
+                  onClick={() => { setRetSet(true); setRet((rs) => [...rs.map((x, j) => ({ ...x, ref: retEff[j]?.ref ?? x.ref })), { key: nk("r"), ref: "", qty: Math.max(0, r2(outstanding - retTotal)), date: null, wage: rs[rs.length - 1]?.wage ?? null }]); }}>
                   ＋ เพิ่มรอบส่งคืน (ส่งไม่พร้อมกัน)
                 </button>
                 <div className="mt-2 text-[11px] text-slate-500">💰 ค่าแรงว่าง หรือไม่ใส่วันที่ = ติดป้าย "ยังไม่ลงวันที่/ค่าแรง" ไปเติมทีหลังที่ตารางส่งงาน (เงินเดือนยังไม่นับ)</div>
@@ -619,7 +727,20 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
               <section id="cu-close" className="rounded-lg border border-slate-200 p-3">
                 <div className="mb-2 text-sm font-medium text-slate-700">{on("ship") && on("close") ? "📤 ส่งออก / 🏁 ปิดใบ" : on("ship") ? "📤 ส่งออกจาก QC" : "🏁 ปิดใบ"}</div>
                 <Msg field="ship" /><Msg field="close" />
-                {on("ship") && qc.good > 0 && <div className="mb-2 text-[12px] text-slate-500">ของดี {fmt(qc.good)} ชิ้นที่รับเข้า จะถูกส่งออกจากชั้นต่อทันที</div>}
+                {on("ship") && qc.good > 0 && (
+                  <div className="mb-2 rounded-lg bg-slate-50/70 p-2.5 text-[13px]">
+                    <div className="mb-1.5 text-[12px] text-slate-500">ของดี {fmt(qc.good)} ชิ้นที่รับเข้า ส่งออกไปที่ไหน (เหมือนป๊อปส่งออกหน้าโกดัง QC)</div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="radio" checked={shipMode === "sales_wh"} onChange={() => setShipMode("sales_wh")} className="accent-indigo-600" /> เข้าคลังขาย</label>
+                      {shipMode === "sales_wh" && (
+                        <select value={shipWh} onChange={(e) => setShipWh(e.target.value)} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[13px]">
+                          {QC_WAREHOUSES.map((w) => <option key={w} value={w}>{w}</option>)}
+                        </select>
+                      )}
+                      <label className="inline-flex cursor-pointer items-center gap-1.5"><input type="radio" checked={shipMode === "sell"} onChange={() => setShipMode("sell")} className="accent-indigo-600" /> ขายออกเลย</label>
+                    </div>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   {on("ship") && <div><label className={lbl}>ส่งออกเมื่อ</label><DispatchDatePick value={dates.ship} onChange={(v) => setDates((d) => ({ ...d, ship: v }))} /><Msg field="ship:date" /></div>}
                   {on("close") && <div><label className={lbl}>ปิดใบเมื่อ</label><DispatchDatePick value={dates.close} onChange={(v) => setDates((d) => ({ ...d, close: v }))} /><Msg field="close:date" /></div>}
@@ -702,9 +823,31 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                 </div>
               );
             })}
-            {results.length > 0 && (results.every((r) => r.ok) && results.length === built.steps.length
-              ? <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">อัปเดตแล้ว — บอร์ดโหลดใหม่ให้แล้ว</div>
+            {results.length > 0 && !undoRes && (results.every((r) => r.ok) && results.length === built.steps.length
+              ? <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">อัปเดตแล้ว — บอร์ดโหลดใหม่ให้แล้ว · บนบอร์ด: {tabAfter}</div>
               : <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">บันทึกได้บางขั้น — ขั้นที่สำเร็จเก็บไว้แล้ว เปิดป๊อปนี้ใหม่เพื่อทำต่อได้</div>)}
+            {results.length > 0 && !undoRes && followUps.length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/50 px-3 py-2 text-[13px]">
+                <div className="mb-1 font-medium text-amber-900">ยังต้องตามต่อ</div>
+                {followUps.map((x, i) => <div key={i} className="text-amber-900">• {x.href ? <a href={x.href} target="_blank" rel="noreferrer" className="underline decoration-dotted hover:text-indigo-700">{x.text}</a> : x.text}</div>)}
+              </div>
+            )}
+            {results.length > 0 && !undoRes && (canUndo || irreversible) && (
+              <div className="flex flex-wrap items-center gap-2 text-[12px]">
+                {irreversible
+                  ? <span className="text-slate-500">ย้อนจากที่นี่ไม่ได้: {irreversible.why}</span>
+                  : <button type="button" disabled={undoing} onClick={() => void undo()}
+                      className="h-8 rounded-lg border border-rose-200 bg-white px-3 text-rose-700 hover:bg-rose-50 disabled:opacity-40">{undoing ? "กำลังย้อน…" : "↶ ย้อนการอัปเดตนี้"}</button>}
+                {!irreversible && <span className="text-slate-400">กดผิด? ย้อนได้ทันที — ลบใบจ่าย/ส่งคืน/ของเข้า QC/ปัญหาที่เพิ่งสร้าง และคืนค่าเดิม</span>}
+              </div>
+            )}
+            {undoRes && (
+              <div className="rounded-lg border border-slate-200 px-3 py-2 text-[13px]">
+                <div className="mb-1 font-medium text-slate-700">ผลการย้อน</div>
+                {undoRes.map((x, i) => <div key={i} className={x.ok ? "text-emerald-700" : "text-rose-600"}>{x.ok ? "✓" : "✕"} {x.msg}</div>)}
+                <div className="mt-1 text-[11px] text-slate-400">บอร์ดโหลดใหม่ให้แล้ว · วัตถุดิบที่ย้ายเข้า WIP ตอนจ่ายใบแรก ระบบไม่ย้อนให้</div>
+              </div>
+            )}
           </div>
         )}
     </ERPModal>

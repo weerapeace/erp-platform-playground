@@ -19,11 +19,11 @@ import { BoardLineSettings } from "@/components/board-line-settings";
 import { SearchableSelect } from "@/components/searchable-select";
 import type { QcShelf, QcItem, QcReason, QcSource, QcQueueCard, QcDeskCard } from "@/app/api/qc-warehouse/route";
 import type { DefectLog } from "@/app/api/qc-warehouse/defect-history/route";
+import { QC_WAREHOUSES as WAREHOUSES } from "@/lib/qc-ship";   // ปลายทางส่งออก (ของกลาง — ป๊อปอัปเดตงานใช้ร่วม)
 
 // "ผลิต" สำหรับของจากการผลิต · โค้ดเดิม (stock/purchase…) แปลไทย · ที่เหลือ = ชื่อที่ตั้งเอง
 const sourceLabel = (s?: string | null) => !s || s === "production" ? "ผลิต" : s === "stock" ? "สต็อกเดิม" : s === "purchase" ? "ซื้อมา" : s === "return" ? "รับคืน" : s === "other" ? "อื่นๆ" : s;
 
-const WAREHOUSES = ["โกดังขายหลัก", "โกดังสาขา 1", "โกดังออนไลน์ (E-commerce)"];
 const PALETTE = ["#60a5fa", "#34d399", "#f472b6", "#fb923c", "#a78bfa", "#22d3ee", "#facc15"];
 const SHELF_CAP = 20;   // โชว์ไม่เกิน 20 ใบต่อชั้น ที่เหลือกด "+เพิ่มเติม"
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");

@@ -30,6 +30,8 @@ export type CatchUpSnapshot = {
     /** สูตรที่ใช้ (ไว้บันทึกค่าแรงกลับเข้า BOM) · หมายเหตุเดิมของใบ (ไว้ต่อท้าย) */
     bom_code: string | null; note: string | null;
   };
+  /** เช็กใบขาย — ใบสั่งผลิตยังไม่ผูกใบขายตรง ๆ จึงจับคู่ด้วยรหัสสินค้า (ไม่นับที่ยกเลิก · ล่าสุดก่อน) */
+  sales: { so: { no: string; status: string; qty: number; date: string | null }[]; dn: { no: string; status: string; qty: number; delivered: boolean }[] };
   /** ปัญหาที่เคยแจ้ง: ของใบนี้ (กล่องปัญหาบนบอร์ด) + ของรุ่นนี้ (จำไว้ทุกสี) — โชว์บนป๊อปกันแจ้งซ้ำ */
   past: { mo: { text: string; severity: string | null; qty: number | null }[]; model: string[] };
   /** null = ใบยังไม่มีสูตร (ไม่มีรายการวัตถุดิบ) */
@@ -64,7 +66,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const bomCode = (m.bom_code as string) ?? null;
   const sku = (m.product_sku as string) ?? "";
-  const [sumsRes, matsRes, wosRes, shelvesRes, itemsRes, links, ratesRes, reasonsRes, moIssuesRes, skuRes] = await Promise.all([
+  const [sumsRes, matsRes, wosRes, shelvesRes, itemsRes, links, ratesRes, reasonsRes, moIssuesRes, skuRes, soRes, dnRes] = await Promise.all([
     admin.from("mo_material_summary").select("id, mo_no, component_sku, component_name, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence").eq("mo_no", moNo).eq("is_active", true).order("sequence"),
     admin.from("mo_materials").select("material_type, cut_block_code, cut_length, pieces, cut_done").eq("mo_no", moNo).eq("is_active", true),
     admin.from("mo_work_orders").select("id, wo_no, qty, received_qty, qc_pulled_qty, status, department_name, assignee_name, dispatch_date, created_at")
@@ -77,7 +79,25 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     admin.from("qc_defect_reasons").select("id, name").eq("is_active", true).order("sort_order"),
     admin.from("defect_logs").select("defect_type, severity, qty").eq("source_job", moNo).eq("is_active", true).order("created_at", { ascending: false }).limit(20),
     sku ? admin.from("skus_v2").select("parent_sku_id").eq("code", sku).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    sku ? admin.from("erp_playground_so_lines").select("qty, erp_playground_sales_orders!inner(so_number, status, order_date, created_at)").eq("sku", sku).limit(50)
+      : Promise.resolve({ data: [] as Row[], error: null }),
+    sku ? admin.from("erp_playground_delivery_note_lines").select("qty, erp_playground_delivery_notes!inner(dn_number, status, delivered_at, created_at)").eq("sku", sku).limit(50)
+      : Promise.resolve({ data: [] as Row[], error: null }),
   ]);
+  // รวมยอดต่อใบ (1 ใบมีหลายบรรทัดสินค้าเดียวกันได้) · ไม่นับใบที่ยกเลิก
+  const soMap = new Map<string, { no: string; status: string; qty: number; date: string | null; at: string }>();
+  for (const r of (soRes.data ?? []) as Row[]) {
+    const h = r.erp_playground_sales_orders as Row | undefined; if (!h || h.status === "cancelled") continue;
+    const no = String(h.so_number ?? ""); const cur = soMap.get(no) ?? { no, status: String(h.status ?? ""), qty: 0, date: (h.order_date as string) ?? null, at: String(h.created_at ?? "") };
+    cur.qty += n(r.qty); soMap.set(no, cur);
+  }
+  const dnMap = new Map<string, { no: string; status: string; qty: number; delivered: boolean; at: string }>();
+  for (const r of (dnRes.data ?? []) as Row[]) {
+    const h = r.erp_playground_delivery_notes as Row | undefined; if (!h || h.status === "cancelled") continue;
+    const no = String(h.dn_number ?? ""); const cur = dnMap.get(no) ?? { no, status: String(h.status ?? ""), qty: 0, delivered: !!h.delivered_at, at: String(h.created_at ?? "") };
+    cur.qty += n(r.qty); dnMap.set(no, cur);
+  }
+  const byNewest = <T extends { at: string }>(a: T, b: T) => b.at.localeCompare(a.at);
   const parentId = (skuRes.data as { parent_sku_id: string | null } | null)?.parent_sku_id ?? null;
   const { data: modelIssues } = parentId
     ? await admin.from("parent_sku_issues").select("problem_text").eq("parent_sku_id", parentId).eq("is_active", true).order("created_at", { ascending: false }).limit(20)
@@ -122,6 +142,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       cut_total: cutTotal, cut_ready: skipped.cut ? cutTotal : cutDone,
       prep_done: m.prep_done === true || !!skipped.prep, cut_done: m.cut_done === true || !!skipped.cut, skipped,
       bom_code: bomCode, note: (m.note as string) ?? null,
+    },
+    sales: {
+      so: [...soMap.values()].sort(byNewest).slice(0, 8).map(({ at: _at, ...x }) => x),
+      dn: [...dnMap.values()].sort(byNewest).slice(0, 8).map(({ at: _at, ...x }) => x),
     },
     past: {
       mo: ((moIssuesRes.data ?? []) as Row[]).map((r) => ({ text: String(r.defect_type ?? ""), severity: (r.severity as string) ?? null, qty: r.qty != null ? n(r.qty) : null })).filter((x) => x.text),

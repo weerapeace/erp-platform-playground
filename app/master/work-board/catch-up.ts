@@ -139,6 +139,8 @@ export type CuInputs = {
   badReason?: string; centralRate?: number | null; today?: string;
   /** ข้อมูลเพิ่มเติม (ไม่บังคับ): ปัญหาที่เจอ · บันทึกต่อท้ายหมายเหตุใบสั่งผลิต · ค่าแรง/ชิ้นที่จะบันทึกกลับเข้าสูตร (BOM) */
   problems?: CuProblem[]; teamNote?: string; bomRate?: number | null;
+  /** ส่งออกจาก QC ไปที่ไหน (เหมือนหน้าโกดัง QC): sales_wh = เข้าคลังขาย (shipWh) · sell = ขายออก */
+  shipMode?: "sales_wh" | "sell"; shipWh?: string | null;
 };
 export type CuStep =
   | { kind: "skip_buy"; date: string | null }
@@ -146,7 +148,7 @@ export type CuStep =
   | { kind: "dispatch"; line: string; qty: number; date: string | null; rate?: number | null; note?: string }
   | { kind: "return"; ref: string; qty: number; date: string | null; wage?: number | null }
   | { kind: "qc_in"; good: number; bad: number; date: string | null }
-  | { kind: "ship"; qty: number; date: string | null }
+  | { kind: "ship"; qty: number; date: string | null; mode?: "sales_wh" | "sell"; wh?: string | null }
   | { kind: "close"; date: string | null }
   | { kind: "cancel"; reason: string; date: string | null }
   | { kind: "problem"; text: string; severity: CuProblem["severity"]; qty: number | null; model: boolean }
@@ -168,7 +170,7 @@ export function cuStepLabel(s: CuStep, who?: (s: CuStep) => string): string {
     case "dispatch": return `สร้างใบจ่ายงาน ${fmt(s.qty)} ชิ้น${w ? ` → ${w}` : ""}${s.rate ? ` · ค่าแรง ฿${fmt(s.rate)}/ชิ้น` : ""}${d}${s.note ? ` · หมายเหตุ: ${s.note}` : ""}`;
     case "return": return `บันทึกช่างส่งคืน ${fmt(s.qty)} ชิ้น${w ? ` (${w})` : ""}${d} · ${s.wage != null ? `ค่าแรง ฿${fmt(s.wage)}/ชิ้น` : "ยังไม่ลงค่าแรง"}`;
     case "qc_in": return `รับเข้าชั้น QC · ของดี ${fmt(s.good)}${s.bad > 0 ? ` · ของเสีย ${fmt(s.bad)}` : ""} ชิ้น${d}`;
-    case "ship": return `ส่งออกจากชั้น QC ${fmt(s.qty)} ชิ้น${d}`;
+    case "ship": return `ส่งออกจากชั้น QC ${fmt(s.qty)} ชิ้น → ${s.mode === "sell" ? "ขายออก" : `เข้าคลัง ${s.wh ?? "ขาย"}`}${d}`;
     case "close": return `ปิดใบสั่งผลิต${d}`;
     case "cancel": return `ยกเลิกใบ (เหตุผล: ${s.reason})${d}`;
     case "problem": return `แจ้งปัญหา: ${s.text} (${CU_SEVERITY[s.severity]}${s.qty ? ` · ${fmt(s.qty)} ชิ้น` : ""})${s.model ? " + จำเป็นปัญหาของรุ่นนี้" : ""}`;
@@ -244,9 +246,10 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
         if (l.qty > 0) before = r2(before + l.qty);
       });
       const rowErr = issues.some((x) => x.level === "error" && x.field.startsWith("disp"));
-      if (!rowErr) for (const l of inp.disp) {
-        steps.push({ kind: "dispatch", line: l.key, qty: r2(l.qty), date: l.date, ...(l.rate != null && l.rate > 0 ? { rate: l.rate } : {}), ...(l.note?.trim() ? { note: l.note.trim() } : {}) });
-        cap.set(`new:${l.key}`, r2(l.qty)); dateOfRef.set(`new:${l.key}`, l.date);
+      for (const l of inp.disp) {
+        // นับยอดของแถวจ่ายใหม่ไว้ให้ "ส่งคืน" ตรวจต่อได้เสมอ (แม้แถวจ่ายยังมีจุดต้องแก้ — กันเตือนซ้อนผิด ๆ ว่า "ค้างช่าง 0")
+        cap.set(`new:${l.key}`, r2(Math.max(0, l.qty))); dateOfRef.set(`new:${l.key}`, l.date);
+        if (!rowErr && l.qty > 0) steps.push({ kind: "dispatch", line: l.key, qty: r2(l.qty), date: l.date, ...(l.rate != null && l.rate > 0 ? { rate: l.rate } : {}), ...(l.note?.trim() ? { note: l.note.trim() } : {}) });
       }
       dispatched = r2(dispatched + total);
       // กติกาเดียวกับลากการ์ด: เตรียม/ตัดไม่ครบ = เตือน (จ่ายต่อได้)
@@ -307,7 +310,7 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
   }
 
   if (on("ship")) {
-    if (good > 0) { steps.push({ kind: "ship", qty: good, date: D.ship }); add(dateIssues(D.ship, "ship:date", { today, notBefore: D.qc, notBeforeLabel: "วันที่ QC รับเข้า" })); }
+    if (good > 0) { steps.push({ kind: "ship", qty: good, date: D.ship, mode: inp.shipMode ?? "sales_wh", wh: inp.shipMode === "sell" ? null : inp.shipWh ?? null }); add(dateIssues(D.ship, "ship:date", { today, notBefore: D.qc, notBeforeLabel: "วันที่ QC รับเข้า" })); }
     else if (!on("qc_in") && f.shelfGood > EPS) issues.push({ level: "error", field: "ship", msg: `ของดีบนชั้น QC เดิม ${fmt(f.shelfGood)} ชิ้น — ส่งออกที่หน้าโกดัง QC` });
     else if (on("qc_in") && !issues.some((x) => x.field.startsWith("qc"))) issues.push({ level: "error", field: "qc:good", msg: "ไม่มีของดีให้ส่งออก" });
   }
@@ -337,18 +340,32 @@ export function cuAllocate<T extends { id: string }>(rows: T[], qty: number, cap
 /** โต๊ะตัด/เตรียม = stage "cut" · โต๊ะอื่น = ประกอบ (กติกาเดียวกับป๊อปจ่ายงาน) */
 export const stageOfDept = (name: string) => (name.includes("ตัด") || name.includes("เตรียม") ? "cut" : "assemble");
 
-export type CuApi = (url: string, body: unknown, method?: "POST" | "PATCH") => Promise<Record<string, unknown>>;
+export type CuApi = (url: string, body: unknown, method?: "POST" | "PATCH" | "DELETE") => Promise<Record<string, unknown>>;
 export type CuContext = {
   snap: CatchUpSnapshot;
   /** แถวจ่ายงาน key → โต๊ะ + ผลจาก crewFields() (คนรับ / ทั้งโต๊ะ) */
   disp: Record<string, { dept: { id: string; name: string }; who: Record<string, unknown> }>;
   shelfId: string; badReason: string;
 };
-export type CuResult = { step: CuStep; ok: boolean; msg: string };
+/** สิ่งที่ต้องทำเพื่อ "ย้อนการอัปเดต" ของขั้นนั้น (เก็บ id ที่เพิ่งสร้าง) · none = ย้อนไม่ได้ + เหตุผล */
+export type CuUndo =
+  | { kind: "skip_buy" }
+  | { kind: "mark_ready"; prepOnly?: string[]; cut?: boolean; flags?: ("prep" | "cut")[]; except?: string[]; impossible?: string }
+  | { kind: "dispatch"; woId: string }
+  | { kind: "return"; subIds: string[] }
+  | { kind: "qc_in"; itemIds: string[] }
+  | { kind: "problem"; issueId?: string; parentIssueId?: string }
+  | { kind: "note"; prevNote: string | null }
+  | { kind: "bom_rate"; newId?: string; prevRate: number | null }
+  | { kind: "none"; why: string };
+export type CuResult = { step: CuStep; ok: boolean; msg: string; undo?: CuUndo };
+
+/** ขั้นที่ทำแล้วย้อนจากป๊อปนี้ไม่ได้ (ของออกจากชั้น / ปิด-ยกเลิกใบ) → ถ้าสำเร็จแล้ว ปุ่มย้อนจะไม่ให้กด */
+export const cuIrreversible = (results: CuResult[]) => results.find((r) => r.ok && r.undo?.kind === "none")?.undo as { kind: "none"; why: string } | undefined;
 
 /**
  * บันทึกทีละขั้นตามลำดับ ผ่าน API เดิม — ขั้นไหนพัง = หยุด (ขั้นหลังพึ่งขั้นก่อน) แล้วรายงานว่าสำเร็จถึงไหน
- * api ต้องโยน Error ข้อความภาษาคนเมื่อไม่สำเร็จ
+ * แต่ละขั้นที่สำเร็จเก็บ undo (id ที่สร้าง) ไว้ให้ cuUndo ย้อนได้ · api ต้องโยน Error ข้อความภาษาคนเมื่อไม่สำเร็จ
  */
 export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgress?: (i: number) => void, label: (s: CuStep) => string = (s) => cuStepLabel(s)): Promise<CuResult[]> {
   const { snap } = ctx, mo = snap.mo;
@@ -358,21 +375,34 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
   const results: CuResult[] = [];
   // ค่าแรง: หน้าจอใส่ "ต่อชิ้น" → ส่งเป็นยอดรวม (เหมือนป๊อปส่งงานหน้า QC) · ไม่ใส่ค่าแรงหรือไม่ใส่วัน = ติดป้าย "ยังไม่ลงวันที่/ค่าแรง"
   const submit = async (woId: string, qty: number, date: string | null, wage?: number | null) => {
-    await api("/api/mo/submissions", { wo_id: woId, qty, wage: wage != null ? r2(wage * qty) : null, info_pending: wage == null || !date, quiet: true, ...(date ? { submitted_at: date } : {}) });
+    const j = await api("/api/mo/submissions", { wo_id: woId, qty, wage: wage != null ? r2(wage * qty) : null, info_pending: wage == null || !date, quiet: true, ...(date ? { submitted_at: date } : {}) });
     const w = wos.find((x) => x.id === woId); if (w) w.received_qty = r2(w.received_qty + qty);
+    return j.id ? String(j.id) : null;
   };
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i];
     onProgress?.(i);
+    let undo: CuUndo | undefined;
     try {
       switch (step.kind) {
         case "skip_buy":
           await api(`/api/mo/${mo.id}/skip-stage`, { stages: ["buy"], skip: true, via: "catch_up",
             reason: `อัปเดตงานย้อนหลัง: ของครบแล้ว${step.date ? ` (ครบเมื่อ ${step.date})` : ""}` }, "PATCH");
+          undo = { kind: "skip_buy" };
           break;
-        case "mark_ready":
+        case "mark_ready": {
           await api(`/api/mo/${mo.id}/mark-ready`, { ready: true, parts: step.parts, ...(step.except?.length ? { except: step.except } : {}), ...(step.date ? { done_date: step.date } : {}) }, "PATCH");
+          // ย้อนได้แม่น = คืนเฉพาะตัวที่ "เพิ่งติ๊ก" · ตัดไว้บางส่วนก่อนหน้า = ไม่รู้ว่าบล็อกไหนเดิม → ให้ย้อนเองที่หน้าใบสั่งผลิต
+          const ex = new Set(step.except ?? []);
+          if (!mo.has_bom) undo = { kind: "mark_ready", flags: step.parts.filter((p) => (p === "prep" ? !mo.prep_done : !mo.cut_done)) };
+          else undo = {
+            kind: "mark_ready", except: step.except,
+            prepOnly: step.parts.includes("prep") ? snap.materials.filter((x) => !x.ready && !ex.has(x.sku)).map((x) => x.sku) : undefined,
+            cut: step.parts.includes("cut") && mo.cut_ready === 0,
+            impossible: step.parts.includes("cut") && mo.cut_ready > 0 ? "เดิมตัดไว้บางส่วน — ย้อนติ๊ก \"ตัด\" เองที่หน้าใบสั่งผลิต" : undefined,
+          };
           break;
+        }
         case "dispatch": {
           const d = ctx.disp[step.line];
           if (!d) throw new Error("ยังไม่ได้เลือกโต๊ะ");
@@ -389,65 +419,131 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
           newWo.set(step.line, id);
           wos.push({ id, wo_no: String(j.wo_no ?? ""), qty: step.qty, received_qty: 0, qc_pulled_qty: 0, status: "dispatched",
             department_name: d.dept.name, assignee_name: String(d.who.assignee_name ?? ""), dispatch_date: step.date, created_at: new Date().toISOString() });
+          undo = { kind: "dispatch", woId: id };
           break;
         }
-        case "return":
+        case "return": {
+          const subIds: string[] = [];
           if (step.ref === "auto") {
-            for (const a of cuAllocate(wos.filter((w) => w.status !== "done"), step.qty, (w) => w.qty - w.received_qty)) await submit(a.id, a.qty, step.date, step.wage);
+            for (const a of cuAllocate(wos.filter((w) => w.status !== "done"), step.qty, (w) => w.qty - w.received_qty)) {
+              const sid = await submit(a.id, a.qty, step.date, step.wage); if (sid) subIds.push(sid);
+            }
           } else {
             const id = step.ref.startsWith("new:") ? newWo.get(step.ref.slice(4)) : step.ref;
             if (!id) throw new Error("หาใบจ่ายงานของรอบนี้ไม่เจอ");
-            await submit(id, step.qty, step.date, step.wage);
+            const sid = await submit(id, step.qty, step.date, step.wage); if (sid) subIds.push(sid);
           }
+          undo = { kind: "return", subIds };
           break;
+        }
         case "qc_in": {
           const capQ = new Map(wos.map((w) => [w.id, r2(w.received_qty - w.qc_pulled_qty)]));
           const goodBy = cuAllocate(wos, step.good, (w) => capQ.get(w.id) ?? 0);
           for (const a of goodBy) capQ.set(a.id, r2((capQ.get(a.id) ?? 0) - a.qty));
           const badBy = cuAllocate(wos, step.bad, (w) => capQ.get(w.id) ?? 0);
+          const itemIds: string[] = [];
           for (const w of wos) {
             const g = goodBy.find((a) => a.id === w.id)?.qty ?? 0, b = badBy.find((a) => a.id === w.id)?.qty ?? 0;
             if (g + b <= EPS) continue;
             const j = await api("/api/qc-warehouse/items", { action: "receive", wo_id: w.id, shelf_id: ctx.shelfId, good: g,
               bad: b > 0 ? [{ reason: ctx.badReason.trim() || "ของเสีย (อัปเดตย้อนหลัง)", qty: b }] : [], quiet: true, ...(step.date ? { date: step.date } : {}) });
-            for (const it of (j.items as { id: string; status: string; qty: number }[] | undefined) ?? []) if (it.status === "good") goodItems.push({ id: it.id, qty: it.qty });
+            for (const it of (j.items as { id: string; status: string; qty: number }[] | undefined) ?? []) {
+              itemIds.push(it.id);
+              if (it.status === "good") goodItems.push({ id: it.id, qty: it.qty });
+            }
             w.qc_pulled_qty = r2(w.qc_pulled_qty + g + b);
           }
+          undo = { kind: "qc_in", itemIds };
           break;
         }
         case "ship":
-          for (const it of goodItems) await api("/api/qc-warehouse/items", { action: "ship", item_id: it.id, mode: "catch_up", wh: null, ...(step.date ? { date: step.date } : {}) });
+          // ปลายทางเหมือนป๊อปส่งออกหน้าโกดัง QC: เข้าคลังขาย (เลือกคลัง) / ขายออก
+          for (const it of goodItems) await api("/api/qc-warehouse/items", { action: "ship", item_id: it.id, mode: step.mode ?? "sales_wh", wh: step.mode === "sell" ? null : step.wh ?? null, ...(step.date ? { date: step.date } : {}) });
+          undo = { kind: "none", why: "ส่งออกจากชั้น QC แล้ว — ของออกจากชั้นไปแล้ว ย้อนจากที่นี่ไม่ได้" };
           break;
-        case "problem":
+        case "problem": {
           // กล่อง "ปัญหา" ของใบงาน (ตัวเดียวกับที่แจ้งบนบอร์ด) + ถ้าติ๊ก = ปัญหาของรุ่น (เตือนตอนจ่ายรุ่นนี้ครั้งหน้า)
-          await api("/api/mo/issues", { mo_no: mo.mo_no, defect_type: step.text, severity: step.severity, qty: step.qty });
+          const j = await api("/api/mo/issues", { mo_no: mo.mo_no, defect_type: step.text, severity: step.severity, qty: step.qty });
+          undo = { kind: "problem", issueId: j.id ? String(j.id) : undefined };
           if (step.model) {
-            try { await api("/api/parent-sku-issues", { sku: mo.product_sku, problem_text: step.text }); }
-            catch (e) { throw new Error(`ลงปัญหาของใบงานแล้ว แต่จำเป็นปัญหาของรุ่นไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); }
+            try {
+              const p = await api("/api/parent-sku-issues", { sku: mo.product_sku, problem_text: step.text });
+              if (p.id && !p.duplicated) undo = { ...undo, parentIssueId: String(p.id) };   // มีอยู่แล้ว = ไม่ใช่ของเรา ไม่ลบตอนย้อน
+            } catch (e) {
+              // ปัญหาของใบงานลงแล้ว → แนบ undo ไปกับขั้นที่พัง ให้ย้อนลบได้
+              throw Object.assign(new Error(`ลงปัญหาของใบงานแล้ว แต่จำเป็นปัญหาของรุ่นไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`), { undo });
+            }
           }
           break;
+        }
         case "note": {
           const line = `[อัปเดตงาน ${cuDateText(todayYmd())}] ${step.text}`;
           await api(`/api/mo/${mo.id}`, { note: mo.note ? `${mo.note}\n${line}` : line }, "PATCH");
+          undo = { kind: "note", prevNote: mo.note };
           break;
         }
-        case "bom_rate":
-          await api("/api/bom/labor-rates", { bom_code: mo.bom_code ?? undefined, product_sku: mo.product_sku, craftsman_id: null, craftsman_name: "ราคากลาง", rate: step.rate });
+        case "bom_rate": {
+          const j = await api("/api/bom/labor-rates", { bom_code: mo.bom_code ?? undefined, product_sku: mo.product_sku, craftsman_id: null, craftsman_name: "ราคากลาง", rate: step.rate });
+          undo = { kind: "bom_rate", newId: j.id ? String(j.id) : undefined, prevRate: snap.rates.find((x) => !x.craftsman_id)?.rate ?? null };
           break;
+        }
         case "close":
         case "cancel": {
           const j = await api("/api/mo/bulk-status", { ids: [mo.id], action: step.kind, source: "catch_up",
             ...(step.kind === "cancel" ? { reason: step.reason } : {}), ...(step.date ? { date: step.date } : {}) });
           const sk = (j.skipped as { reason: string }[] | undefined) ?? [];
           if (sk.length) throw new Error(sk[0].reason);
+          undo = { kind: "none", why: step.kind === "close" ? "ปิดใบแล้ว — ย้อนจากที่นี่ไม่ได้" : "ยกเลิกใบแล้ว — ย้อนจากที่นี่ไม่ได้" };
           break;
         }
       }
-      results.push({ step, ok: true, msg: label(step) });
+      results.push({ step, ok: true, msg: label(step), undo });
     } catch (e) {
-      results.push({ step, ok: false, msg: e instanceof Error ? e.message : "ไม่สำเร็จ" });
+      results.push({ step, ok: false, msg: e instanceof Error ? e.message : "ไม่สำเร็จ", undo: (e as { undo?: CuUndo }).undo });
       break;
     }
   }
   return results;
+}
+
+/**
+ * ย้อนการอัปเดต: ไล่ขั้นที่สำเร็จ "จากหลังไปหน้า" แล้วทำกลับทีละขั้นผ่าน API เดิม (QC → ส่งคืน → ใบจ่าย …)
+ * มีขั้นที่ย้อนไม่ได้สำเร็จอยู่ (ส่งออก/ปิด/ยกเลิก) = ไม่ทำอะไรเลย · ขั้นไหนย้อนไม่สำเร็จ = ทำขั้นอื่นต่อ แล้วรายงานรายขั้น
+ */
+export async function cuUndo(results: CuResult[], ctx: CuContext, api: CuApi, label: (s: CuStep) => string = (s) => cuStepLabel(s)): Promise<{ msg: string; ok: boolean }[]> {
+  const block = cuIrreversible(results);
+  if (block) return [{ ok: false, msg: block.why }];
+  const mo = ctx.snap.mo, out: { msg: string; ok: boolean }[] = [];
+  for (const r of [...results].reverse()) {
+    if (!r.undo) continue;   // ขั้นที่พังปกติไม่มี undo (ยกเว้นทำไปได้ครึ่งขั้น เช่น ปัญหาของใบงานลงแล้ว)
+    const u = r.undo, name = `ย้อน: ${label(r.step)}`;
+    try {
+      switch (u.kind) {
+        case "skip_buy": await api(`/api/mo/${mo.id}/skip-stage`, { stages: ["buy"], skip: false, via: "catch_up" }, "PATCH"); break;
+        case "mark_ready":
+          if (u.prepOnly?.length) await api(`/api/mo/${mo.id}/mark-ready`, { ready: false, parts: ["prep"], only: u.prepOnly }, "PATCH");
+          if (u.cut) await api(`/api/mo/${mo.id}/mark-ready`, { ready: false, parts: ["cut"], ...(u.except?.length ? { except: u.except } : {}) }, "PATCH");
+          if (u.flags?.length) await api(`/api/mo/${mo.id}/mark-ready`, { ready: false, parts: u.flags }, "PATCH");
+          if (u.impossible) { out.push({ ok: false, msg: `${name} — ${u.impossible}` }); continue; }
+          break;
+        case "qc_in": for (const id of u.itemIds) await api("/api/qc-warehouse/items", { action: "return_queue", item_id: id }); break;
+        case "return": for (const id of u.subIds) await api(`/api/mo/submissions?id=${encodeURIComponent(id)}`, null, "DELETE"); break;
+        case "dispatch": await api(`/api/mo/work-orders/${u.woId}`, null, "DELETE"); break;
+        case "problem":
+          if (u.parentIssueId) await api(`/api/parent-sku-issues?id=${encodeURIComponent(u.parentIssueId)}`, null, "DELETE");
+          if (u.issueId) await api(`/api/mo/issues?id=${encodeURIComponent(u.issueId)}`, null, "DELETE");
+          break;
+        case "note": await api(`/api/mo/${mo.id}`, { note: u.prevNote }, "PATCH"); break;
+        case "bom_rate":
+          if (u.newId) await api(`/api/bom/labor-rates?id=${encodeURIComponent(u.newId)}`, null, "DELETE");
+          if (u.prevRate) await api("/api/bom/labor-rates", { bom_code: mo.bom_code ?? undefined, product_sku: mo.product_sku, craftsman_id: null, craftsman_name: "ราคากลาง", rate: u.prevRate, note: "คืนค่าเดิม (ย้อนการอัปเดตงาน)" });
+          break;
+        case "none": continue;
+      }
+      out.push({ ok: true, msg: name });
+    } catch (e) {
+      out.push({ ok: false, msg: `${name} — ${e instanceof Error ? e.message : "ไม่สำเร็จ"}` });
+    }
+  }
+  return out;
 }

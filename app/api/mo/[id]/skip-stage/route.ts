@@ -7,6 +7,7 @@
  *
  * ข้อยกเว้นเดียว (เจ้าของอนุมัติ 2026-10-28): โหมด "🔄 อัปเดตงาน" บนบอร์ดจ่ายงาน ติดป้าย "ของครบ" ได้ด้วยสิทธิ์จ่ายงาน
  *   body { stages: ["buy"], skip: true, via: "catch_up" } + work_board.dispatch → ผ่าน (เอาป้ายออก/ขั้นอื่น ยังต้องแอดมิน)
+ *   ย้อนการอัปเดต: { stages: ["buy"], skip: false, via: "catch_up" } เอาออกได้เฉพาะป้ายที่โหมดอัปเดตงานติดเอง (เหตุผลขึ้นต้น "อัปเดตงานย้อนหลัง")
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -24,8 +25,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const stages = Array.isArray(body.stages) ? [...new Set(body.stages.filter(isMoSkipStage))] as MoSkipStage[] : [];
   const skip = body.skip !== false;
-  const catchUpBuy = body.via === "catch_up" && skip && stages.length === 1 && stages[0] === "buy";
-  const denied = catchUpBuy && await apiCan(request, "work_board.dispatch") ? null : await guardApi(request, "admin.users");
+  const catchUpBuy = body.via === "catch_up" && stages.length === 1 && stages[0] === "buy";
+  let catchUpOk = false;
+  if (catchUpBuy && await apiCan(request, "work_board.dispatch")) {
+    if (skip) catchUpOk = true;
+    else {   // ย้อน: เฉพาะป้ายที่โหมดอัปเดตงานติดไว้
+      const { data: cur } = await supabaseAdmin().from("manufacturing_orders").select("skipped_stages").eq("id", id).maybeSingle();
+      catchUpOk = (parseSkipped((cur as { skipped_stages?: unknown } | null)?.skipped_stages).buy?.reason ?? "").startsWith("อัปเดตงานย้อนหลัง");
+    }
+  }
+  const denied = catchUpOk ? null : await guardApi(request, "admin.users");
   if (denied) return denied;
   const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
   if (stages.length === 0) return NextResponse.json({ error: "ไม่ได้เลือกขั้นตอน" }, { status: 400 });

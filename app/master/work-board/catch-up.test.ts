@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cuFacts, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuRows, cuTargetBlocked, cuAllocate, cuRun, CU_NO_DATES, type CuInputs, type CuContext } from "./catch-up";
+import { cuFacts, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuRows, cuTargetBlocked, cuAllocate, cuRun, cuUndo, cuIrreversible, CU_NO_DATES, type CuInputs, type CuContext } from "./catch-up";
 import type { CatchUpSnapshot, CatchUpWo } from "@/app/api/mo/catch-up/route";
 
 const wo = (o: Partial<CatchUpWo>): CatchUpWo => ({ id: "w1", wo_no: "WO-1", qty: 0, received_qty: 0, qc_pulled_qty: 0, status: "dispatched",
@@ -9,7 +9,7 @@ const snap = (o: { mo?: Partial<CatchUpSnapshot["mo"]>; progress?: CatchUpSnapsh
     has_bom: true, prep_total: 4, prep_ready: 0, cut_total: 2, cut_ready: 0, prep_done: false, cut_done: false, skipped: {}, bom_code: "BOM-1", note: null, ...o.mo },
   progress: o.progress === undefined ? { total: 4, buy: 2, requested: 0, ordered: 0 } : o.progress,
   materials: [{ sku: "FAB", name: "ผ้า", status: "have", ready: false }, { sku: "ZIP", name: "ซิป", status: "buy", ready: false }],
-  wos: o.wos ?? [], shelves: [], shelf: { good: o.good ?? 0, defect: 0, repairing: 0 }, rates: [], reasons: [], past: { mo: [], model: [] },
+  wos: o.wos ?? [], shelves: [], shelf: { good: o.good ?? 0, defect: 0, repairing: 0 }, rates: [], reasons: [], past: { mo: [], model: [] }, sales: { so: [], dn: [] },
 });
 /** ค่าตั้งต้น = จ่าย 1 แถว 100 ชิ้น โต๊ะ d1 · ส่งคืน 1 รอบ 100 ชิ้น (อัตโนมัติ) */
 const inp = (o: Partial<CuInputs> & { dq?: number; rq?: number } = {}): CuInputs => {
@@ -237,6 +237,72 @@ describe("ข้อมูลเพิ่มเติม + ค่าแรงก�
     expect(calls[3].url).toBe("/api/mo/m1");
     expect(String(calls[3].body.note)).toMatch(/^เดิม\n\[อัปเดตงาน .+\] ลูกค้าขอเลื่อน$/);
     expect(calls[4]).toMatchObject({ url: "/api/bom/labor-rates", body: { bom_code: "BOM-1", craftsman_id: null, craftsman_name: "ราคากลาง", rate: 25 } });
+  });
+});
+
+describe("ย้อนการอัปเดต + ปลายทางส่งออก", () => {
+  it("แถวจ่ายยังไม่เลือกโต๊ะ → ส่งคืนจากแถวนั้นไม่เตือนซ้อนว่าค้างช่าง 0", () => {
+    const f = cuFacts(snap({ mo: { prep_ready: 4, cut_ready: 2 } }));
+    const r = cuBuildSteps(f, "return", cuDefaultTicks(f, "return"), inp({ disp: [{ key: "a", deptId: "", qty: 100, date: null }], ret: [{ key: "r", ref: "new:a", qty: 100, date: null }] }));
+    expect(r.errors).toEqual(["จ่ายงาน: เลือกโต๊ะก่อน"]);
+  });
+  const fakeApi = (calls: { url: string; body: unknown; method?: string }[]) => async (url: string, body: unknown, method?: string) => {
+    calls.push({ url, body, method });
+    if (url === "/api/mo/work-orders") return { id: "w1", wo_no: "WO-1" };
+    if (url === "/api/mo/submissions") return { id: `s${calls.length}` };
+    if (url === "/api/qc-warehouse/items" && (body as { action: string }).action === "receive") return { items: [{ id: "it1", status: "good", qty: 8 }, { id: "it2", status: "defect", qty: 2 }] };
+    if (url === "/api/mo/issues") return { id: "iss1" };
+    if (url === "/api/parent-sku-issues") return { id: "pi1", duplicated: true };
+    if (url === "/api/bom/labor-rates") return { id: "br1" };
+    return {};
+  };
+  it("ย้อนจากหลังไปหน้า: QC คืนคิว → ลบส่งคืน → ยกเลิกใบจ่าย → คืนติ๊กเฉพาะตัวที่เพิ่งติ๊ก · ไม่ลบปัญหาของรุ่นที่มีอยู่ก่อน", async () => {
+    const calls: { url: string; body: unknown; method?: string }[] = [];
+    const s0 = snap({ mo: { prep_ready: 1, cut_ready: 0 } });
+    s0.materials = [{ sku: "FAB", name: "ผ้า", status: "have", ready: true }, { sku: "ZIP", name: "ซิป", status: "buy", ready: false }];
+    s0.rates = [{ craftsman_id: null, rate: 20 }];
+    const res = await cuRun([
+      { kind: "mark_ready", parts: ["prep", "cut"], date: null },
+      { kind: "dispatch", line: "a", qty: 10, date: null },
+      { kind: "return", ref: "new:a", qty: 10, date: null },
+      { kind: "qc_in", good: 8, bad: 2, date: null },
+      { kind: "problem", text: "ผ้าไม่ตรงสี", severity: "medium", qty: null, model: true },
+      { kind: "bom_rate", rate: 30 },
+    ], { ...ctx(s0), badReason: "เย็บเบี้ยว" }, fakeApi(calls));
+    expect(res.every((r) => r.ok)).toBe(true);
+    expect(cuIrreversible(res)).toBeUndefined();
+    const undoCalls: { url: string; body: unknown; method?: string }[] = [];
+    const out = await cuUndo(res, ctx(s0), fakeApi(undoCalls));
+    expect(out.every((x) => x.ok)).toBe(true);
+    expect(undoCalls.map((c) => `${c.method ?? "POST"} ${c.url}`)).toEqual([
+      "DELETE /api/bom/labor-rates?id=br1", "POST /api/bom/labor-rates",
+      "DELETE /api/mo/issues?id=iss1",
+      "POST /api/qc-warehouse/items", "POST /api/qc-warehouse/items",
+      "DELETE /api/mo/submissions?id=s3",
+      "DELETE /api/mo/work-orders/w1",
+      "PATCH /api/mo/m1/mark-ready", "PATCH /api/mo/m1/mark-ready",
+    ]);
+    expect(undoCalls[1].body).toMatchObject({ rate: 20 });   // คืนราคากลางเดิม
+    expect(undoCalls[3].body).toEqual({ action: "return_queue", item_id: "it1" });
+    expect(undoCalls[7].body).toEqual({ ready: false, parts: ["prep"], only: ["ZIP"] });   // FAB ติ๊กไว้ก่อนแล้ว ไม่คืน
+    expect(undoCalls[8].body).toEqual({ ready: false, parts: ["cut"] });
+  });
+  it("ส่งออก/ปิดใบสำเร็จแล้ว = ย้อนไม่ได้ทั้งชุด · ส่งออกไปคลังที่เลือก", async () => {
+    const calls: { url: string; body: unknown; method?: string }[] = [];
+    const res = await cuRun([
+      { kind: "qc_in", good: 8, bad: 0, date: null },
+      { kind: "ship", qty: 8, date: null, mode: "sales_wh", wh: "โกดังขายหลัก" },
+    ], ctx(snap({ wos: [wo({ qty: 10, received_qty: 10 })] })), fakeApi(calls));
+    expect(calls[1].body).toMatchObject({ action: "ship", item_id: "it1", mode: "sales_wh", wh: "โกดังขายหลัก" });
+    expect(cuIrreversible(res)?.why).toMatch(/ส่งออก/);
+    const out = await cuUndo(res, ctx(), fakeApi([]));
+    expect(out).toEqual([{ ok: false, msg: expect.stringMatching(/ย้อนจากที่นี่ไม่ได้/) }]);
+  });
+  it("ตัดไว้บางส่วนก่อนหน้า = ย้อนติ๊กตัดไม่ได้ (บอกให้ย้อนเอง)", async () => {
+    const s0 = snap({ mo: { cut_ready: 1 } });
+    const res = await cuRun([{ kind: "mark_ready", parts: ["cut"], date: null }], ctx(s0), fakeApi([]));
+    const out = await cuUndo(res, ctx(s0), fakeApi([]));
+    expect(out[0]).toMatchObject({ ok: false, msg: expect.stringMatching(/ตัดไว้บางส่วน/) });
   });
 });
 
