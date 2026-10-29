@@ -78,8 +78,6 @@ const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listi
 const PAGES = [
   { path: "/", label: "หน้าแรก" },
   { path: "/shop", label: "สินค้าทั้งหมด (ร้านค้า)" },
-  { path: "/oem", label: "รับผลิต" },
-  { path: "/quote", label: "ขอใบเสนอราคา" },
   { path: "/contact", label: "ติดต่อ" },
   { path: "/cart", label: "ตะกร้า (เต็มหน้า)" },
   { path: "/new", label: "มาใหม่" },

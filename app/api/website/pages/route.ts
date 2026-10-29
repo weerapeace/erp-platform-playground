@@ -33,12 +33,11 @@ export const revalidate = 0;
 /**
  * slug ที่ห้ามใช้ เพราะชนกับหน้าที่เว็บร้านเขียนไว้ในโค้ดตัวเอง
  * หน้าที่ฝังในโค้ดเว็บจะชนะหน้าที่มาจากที่นี่เสมอ → สร้างได้แต่เผยแพร่ไปก็ไม่ขึ้น เสียเวลาเปล่า
- * (about/contact/gallery/oem = หน้าที่เว็บ IG International มีอยู่แล้ว)
+ * (about/gallery/oem/quote เคยเป็นหน้าฝังของเว็บ IG — เอาออกแล้ว 2026-10-29 ทุกร้านสร้างหน้าชื่อนี้จาก ERP ได้)
  */
 const RESERVED = new Set([
-  "shop", "product", "checkout", "quote", "api", "_next", "cart", "home", "blog", "review", "feeds",
+  "shop", "product", "checkout", "api", "_next", "cart", "home", "blog", "review", "feeds",
   // contact = หน้าในโค้ดที่ "ยอมให้หน้าเว็บชื่อเดียวกันมาแทน" (ศูนย์ช่วยเหลือ · เหมือน privacy/track) จึงไม่อยู่ในรายการนี้
-  "about", "gallery", "oem",
 ]);
 
 const cleanSlug = (v: unknown) =>

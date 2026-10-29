@@ -52,7 +52,7 @@ export function normalizeOverPages(raw: unknown, overHero = false): OverPages {
 }
 
 /** หน้าที่เว็บร้านมีเอง (ไม่ใช่หน้าที่สร้างเอง) — ส่วนแรกของ path */
-const BUILTIN_OTHER = new Set(["about", "account", "belt-builder", "canvas-edit", "cart", "checkout", "contact", "gallery", "materials", "oem", "privacy", "quote", "track"]);
+const BUILTIN_OTHER = new Set(["account", "belt-builder", "canvas-edit", "cart", "checkout", "contact", "materials", "privacy", "track"]);
 
 /** path (ตัด /en ออกแล้ว) → ประเภทหน้า */
 export function overPageKind(pathname: string): OverPageKind {
