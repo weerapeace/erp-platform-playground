@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMassItems, matchImagePath, parseSuffix, planImageUpload, targetLabel, type CatalogParent, type PlanFileIn } from "./website-image-match";
+import { buildMassItems, matchImagePath, parseSuffix, planImageUpload, splitRounds, targetLabel, type CatalogParent, type PlanDest, type PlanFileIn } from "./website-image-match";
 
 const S1 = "11111111-1111-1111-1111-111111111111";
 const S2 = "22222222-2222-2222-2222-222222222222";
@@ -130,5 +130,18 @@ describe("targetLabel", () => {
   it("ชื่อช่องภาษาคน", () => {
     expect(targetLabel({ kind: "sku", skuId: S1 }, parents[0])).toBe("สี 01 น้ำเงิน");
     expect(targetLabel({ kind: "hero", slot: "mobile" }, parents[0])).toBe("Hero มือถือ");
+  });
+});
+
+describe("splitRounds", () => {
+  const d = (parentId: string, key: string): PlanDest => ({ key, parentId, target: { kind: "gallery" }, fileIds: [key], existing: 0, total: 1, replaces: false, limit: 12 });
+  it("รอบละ ≤ n สินค้า · คงลำดับ · ช่องของสินค้าเดียวกันอยู่รอบเดียว", () => {
+    const rs = splitRounds([d("A", "a1"), d("B", "b1"), d("A", "a2"), d("C", "c1"), d("D", "d1")], 2);
+    expect(rs.map((r) => r.parentIds)).toEqual([["A", "B"], ["C", "D"]]);
+    expect(rs[0].dests.map((x) => x.key)).toEqual(["a1", "a2", "b1"]);
+  });
+  it("ไม่มีแผน = ไม่มีรอบ · n แปลก = อย่างน้อย 1", () => {
+    expect(splitRounds([], 20)).toEqual([]);
+    expect(splitRounds([d("A", "a1"), d("B", "b1")], 0)).toHaveLength(2);
   });
 });

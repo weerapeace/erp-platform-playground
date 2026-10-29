@@ -19,6 +19,10 @@ export const MAX_WEB_IMAGES = 12;
 export const MAX_SKU_WEB_IMAGES = 8;
 /** ลากทีละไม่เกินนี้ (กันเบราว์เซอร์ค้าง/อัปนานเกิน) */
 export const MAX_MASS_FILES = 300;
+/** 📸 ลงรูปเว็บทีละมาก — รับได้มากกว่า (รูปพรีวิวย่อ · แสดงทีละ 30 สินค้า · ลงเป็นรอบ) */
+export const MAX_WEB_MASS_FILES = 1000;
+/** ลงเว็บทีละกี่สินค้าต่อรอบ (เน็ตหลุดกลางทาง = รอบก่อนหน้าขึ้นเว็บแล้ว) */
+export const ROUND_PRODUCTS = 20;
 
 export type HeroSlot = "desktop" | "mobile";
 export type ImageTarget =
@@ -277,6 +281,27 @@ export function buildMassItems(dests: PlanDest[], keyOf: (fileId: string) => str
     items.set(d.parentId, it);
   }
   return [...items.values()];
+}
+
+/** แบ่งแผนเป็นรอบ รอบละ ≤ size สินค้า (คงลำดับสินค้าตามแผน · ทุกช่องของสินค้าเดียวกันอยู่รอบเดียวกัน) */
+export function splitRounds(dests: PlanDest[], size = ROUND_PRODUCTS): { parentIds: string[]; dests: PlanDest[] }[] {
+  const order: string[] = [];
+  const by = new Map<string, PlanDest[]>();
+  for (const d of dests) {
+    const list = by.get(d.parentId);
+    if (list) list.push(d);
+    else {
+      by.set(d.parentId, [d]);
+      order.push(d.parentId);
+    }
+  }
+  const out: { parentIds: string[]; dests: PlanDest[] }[] = [];
+  const n = Math.max(1, Math.floor(size));
+  for (let i = 0; i < order.length; i += n) {
+    const parentIds = order.slice(i, i + n);
+    out.push({ parentIds, dests: parentIds.flatMap((p) => by.get(p) ?? []) });
+  }
+  return out;
 }
 
 /** ชื่อช่องแบบภาษาคน */

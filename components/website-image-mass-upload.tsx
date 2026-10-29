@@ -10,8 +10,11 @@
  *    ↕ ลากรูปสลับลำดับในแถว (หรือ ‹ ›) — เลือกได้ว่าแถวอื่นตำแหน่งเดียวกันสลับตาม (ทุกสีในรุ่น / ทุกแถวที่ลากมา · จำต่อคน)
  *    ✕ ไม่ลงทั้งแถว / ทั้งสินค้า (ลงซ้ำของที่มีแล้ว) → ไปกล่อง "ข้ามไว้" เอากลับได้ทีละกลุ่ม · ✎ ย้ายทั้งแถวไปสินค้า/ช่องอื่น · 🔁 เปลี่ยนสินค้าทั้งรุ่น (อ่านชื่อผิด — สีจับคู่ตามเลขสีเดิม)
  *    ค่าเริ่มต้น = เพิ่มต่อท้าย (ของเดิมอยู่ครบ) · แทนที่ = เฉพาะช่องที่มีรูปใหม่ · เกิน 20 สินค้า + แทนที่ = พิมพ์ CONFIRM
- * 3) กดลงรูป → รูปย่อ ≤ 2000px (uploadResizedImage) · วิดีโอใช้ตัวอัปกลาง uploadMediaFile (ตัวเดียวกับช่อง Hero ทีละตัว) → R2 (ทีละ 3 ไฟล์ · ไฟล์ที่ไม่ได้ลงจะไม่อัป) → POST /api/website/listings/images (รวมกับรูปล่าสุดใน DB + audit + ล้างแคชเว็บ)
- * ของกลาง: ERPModal · useFileDrop(folders) · useDragReorder · useUserPref · uploadResizedImage · uploadMediaFile · toast
+ *    ครั้งละ ≤ 1,000 ไฟล์: รูปพรีวิวย่อ (สูง 160px · ทำทีละ 3 รูปเบื้องหลัง) · แสดงทีละ 30 สินค้า
+ *    👀 เตือนรูปหน้าตาเหมือนรูปเดิมบนเว็บ (lib/image-similarity · เทียบกับรูปบนเว็บ+รูปสีของสินค้านั้น · โหมดต่อท้าย · เตือนอย่างเดียว)
+ * 3) กดลงรูป → ลงเป็นรอบ รอบละ 20 สินค้า (อัปรูป → บันทึกลงเว็บทันที) · runBackgroundTask = ปิดหน้าต่างได้ · ลงซ้ำเฉพาะไฟล์ที่พลาด (ไม่อัปใหม่ไฟล์ที่อัปแล้ว · ช่องที่บันทึกแล้ว = ต่อท้าย)
+ *    รูปย่อ ≤ 2000px (uploadResizedImage) · วิดีโอใช้ตัวอัปกลาง uploadMediaFile (ตัวเดียวกับช่อง Hero ทีละตัว) → R2 (ทีละ 3 ไฟล์ · ไฟล์ที่ไม่ได้ลงจะไม่อัป) → POST /api/website/listings/images (รวมกับรูปล่าสุดใน DB + audit + ล้างแคชเว็บ)
+ * ของกลาง: ERPModal · useFileDrop(folders) · useDragReorder · useUserPref · runBackgroundTask · image-similarity · uploadResizedImage · uploadMediaFile · toast
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
@@ -22,15 +25,20 @@ import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { uploadResizedImage } from "@/components/image-attach";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useUserPref } from "@/lib/use-user-pref";
+import { runBackgroundTask } from "@/lib/background-tasks";
+import { Icon } from "@/components/icon";
+import { similarity, visualPrintFromSource, visualPrintOf, type SimilarLevel, type VisualPrint } from "@/lib/image-similarity";
 import { uploadMediaFile, MediaUploadError } from "@/lib/media-upload";
 import { BIG_VIDEO_MAX_BYTES, fileMb } from "@/lib/media-upload-limits";
 import {
-  MAX_MASS_FILES,
+  MAX_WEB_MASS_FILES,
+  ROUND_PRODUCTS,
   buildCodeIndex,
   buildMassItems,
   isVideoName,
   matchImagePath,
   planImageUpload,
+  splitRounds,
   targetLabel,
   type CatalogParent,
   type ImageMatch,
@@ -58,8 +66,24 @@ type Item = {
   /** ↕ ลำดับที่ลากสลับเอง (ทับเลขท้ายชื่อไฟล์) */
   pos?: number;
 };
-type Phase = "pick" | "uploading" | "saving" | "done";
-type Result = { uploaded: number; uploadFailed: { name: string; why: string }[]; updated: number; failed: number; skippedShops: number };
+type Phase = "pick" | "uploading" | "done";
+/** ผลรวมทุกรอบ (ลงซ้ำ = บวกต่อ) · failed = ไฟล์ที่ยังไม่ขึ้นเว็บร้านนี้ (ลงซ้ำได้) */
+type Result = { ok: number; failed: { id: string; name: string; why: string }[]; updated: number; otherShopFails: number; skippedShops: number };
+type RoundView = { codes: string[]; files: number; status: "wait" | "run" | "ok" | "part" | "fail" };
+/** หน้าตาเหมือนรูปเดิมบนเว็บ (เตือนให้ดูด้วยตา ไม่ข้ามเอง) */
+type Dup = { level: SimilarLevel; where: string };
+const ROUND_LABEL: Record<RoundView["status"], { text: string; cls: string; icon?: string }> = {
+  wait: { text: "รอคิว", cls: "text-slate-400" },
+  run: { text: "กำลังลง…", cls: "text-blue-600", icon: "waiting" },
+  ok: { text: "ขึ้นเว็บแล้ว", cls: "text-emerald-700", icon: "done" },
+  part: { text: "ขึ้นเว็บบางส่วน", cls: "text-amber-700", icon: "warning" },
+  fail: { text: "ไม่สำเร็จ", cls: "text-rose-600", icon: "cancel" },
+};
+/** แสดงทีละกี่สินค้า / กี่ไฟล์ในกล่อง "ไฟล์ที่ต้องดู" (ลาก 1,000 รูปแล้วหน้าไม่หนัก) */
+const SHOW_PRODUCTS = 30;
+const SHOW_LOOK = 50;
+/** รูปเดิมบนเว็บที่โหลดมาเทียบหน้าตาได้สูงสุดต่อครั้ง (รูปย่อ 96px) */
+const OLD_PRINT_MAX = 800;
 
 /** สลับลำดับแล้วแถวอื่น "ตำแหน่งเดียวกัน" ตามด้วยไหม: แถวเดียว / ทุกสีในรุ่น / ทุกแถวที่ลากมา (ชนิดช่องเดียวกัน) */
 type LinkReorder = "row" | "product" | "all";
@@ -120,6 +144,23 @@ export function WebsiteImageMassUpload({
   const [videoPct, setVideoPct] = useState<number | null>(null);
   const [result, setResult] = useState<Result | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [rounds, setRounds] = useState<RoundView[]>([]);
+  const [shown, setShown] = useState(SHOW_PRODUCTS);
+  const [lookShown, setLookShown] = useState(SHOW_LOOK);
+  /** รูปพรีวิวย่อ + ลายนิ้วมือภาพ ต่อไฟล์ (ไม่เปิดรูปเต็มทุกรูป = ลาก 1,000 รูปเครื่องไม่ค้าง) */
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [prints, setPrints] = useState<Record<string, VisualPrint | null>>({});
+  /** ลายนิ้วมือภาพของรูปเดิมบนเว็บ (key R2) */
+  const [oldPrints, setOldPrints] = useState<Record<string, VisualPrint | null>>({});
+  const prepAsked = useRef(new Set<string>());
+  const oldAsked = useRef(new Set<string>());
+  const previewsRef = useRef(previews);
+  previewsRef.current = previews;
+  /** ตอนลง: ไฟล์ที่อัปแล้ว (id → key · ลงซ้ำไม่อัปใหม่) · ช่องที่บันทึกแล้ว (ลงซ้ำ = ต่อท้าย) · แผนตอนกดลง (ลงซ้ำใช้แผนเดิม) */
+  const keysRef = useRef(new Map<string, string>());
+  const savedDestRef = useRef(new Set<string>());
+  const runPlanRef = useRef<PlanDest[]>([]);
+  const runningRef = useRef(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const dirRef = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
@@ -128,7 +169,13 @@ export function WebsiteImageMassUpload({
 
   const clearItems = () => {
     for (const it of itemsRef.current) URL.revokeObjectURL(it.url);
+    for (const u of Object.values(previewsRef.current)) URL.revokeObjectURL(u);
+    prepAsked.current = new Set();
     setItems([]);
+    setPreviews({});
+    setPrints({});
+    setShown(SHOW_PRODUCTS);
+    setLookShown(SHOW_LOOK);
   };
 
   const load = async () => {
@@ -146,7 +193,9 @@ export function WebsiteImageMassUpload({
 
   useEffect(() => {
     if (!open) return;
+    if (runningRef.current || (phase === "done" && result?.failed.length)) return;
     clearItems();
+    setRounds([]);
     setMode("append");
     setAlsoShops(new Set());
     setTyped("");
@@ -184,8 +233,8 @@ export function WebsiteImageMassUpload({
     if (imgs.some((f) => /\.mov$/i.test(f.name) || f.type === "video/quicktime")) toast.warning("ไฟล์ .MOV บางไฟล์เล่นบน Chrome/Android ไม่ได้ — แนะนำแปลงเป็น MP4 (H.264)");
     const have = new Set(itemsRef.current.map((it) => `${it.path}|${it.file.size}`));
     const fresh = imgs.filter((f) => !have.has(`${filePathOf(f)}|${f.size}`));
-    const room = MAX_MASS_FILES - itemsRef.current.length;
-    if (fresh.length > room) toast.warning(`ลงได้ครั้งละไม่เกิน ${MAX_MASS_FILES} ไฟล์ — รับ ${Math.max(0, room)} ไฟล์แรก`);
+    const room = MAX_WEB_MASS_FILES - itemsRef.current.length;
+    if (fresh.length > room) toast.warning(`ลงได้ครั้งละไม่เกิน ${MAX_WEB_MASS_FILES.toLocaleString()} ไฟล์ — รับ ${Math.max(0, room)} ไฟล์แรก`);
     const next = fresh.slice(0, Math.max(0, room)).map((file) => {
       const path = filePathOf(file);
       const video = isVid(file);
@@ -216,6 +265,59 @@ export function WebsiteImageMassUpload({
   }, [items, parents, mode]);
   const planById = useMemo(() => new Map(plan.files.map((f) => [f.id, f])), [plan]);
   const itemById = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
+
+  // 🖼 รูปพรีวิวย่อ (สูง 160px) + ลายนิ้วมือภาพ — ถอดรหัสครั้งเดียวต่อไฟล์ ทีละ 3 รูป · ส่งเข้า state ทุก 250 ms
+  useEffect(() => {
+    const want = items.filter((it) => !it.video && !it.invalid && !prepAsked.current.has(it.id));
+    if (!want.length) return;
+    want.forEach((it) => prepAsked.current.add(it.id));
+    const pv: Record<string, string> = {};
+    const pr: Record<string, VisualPrint | null> = {};
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      timer = null;
+      const alive = new Set(itemsRef.current.map((x) => x.id));
+      const a: [string, string][] = [];
+      for (const [id, u] of Object.entries(pv)) {
+        if (alive.has(id)) a.push([id, u]);
+        else URL.revokeObjectURL(u);
+        delete pv[id];
+      }
+      const b = Object.entries(pr).filter(([id]) => alive.has(id));
+      for (const id of Object.keys(pr)) delete pr[id];
+      if (a.length) setPreviews((m) => ({ ...m, ...Object.fromEntries(a) }));
+      if (b.length) setPrints((m) => ({ ...m, ...Object.fromEntries(b) }));
+    };
+    let next = 0;
+    const worker = async () => {
+      while (next < want.length) {
+        const it = want[next++];
+        if (!itemsRef.current.some((x) => x.id === it.id)) continue;
+        let url: string | null = null;
+        let vp: VisualPrint | null = null;
+        try {
+          const bm = await createImageBitmap(it.file, { resizeHeight: 160, resizeQuality: "medium" });
+          vp = visualPrintFromSource(bm);
+          const c = document.createElement("canvas");
+          c.width = bm.width;
+          c.height = bm.height;
+          c.getContext("2d")?.drawImage(bm, 0, 0);
+          bm.close();
+          const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/webp", 0.8));
+          if (blob) url = URL.createObjectURL(blob);
+        } catch {
+          /* ถอดรหัสไม่ได้ (เช่น HEIC) = โชว์ไฟล์เต็ม · ไม่เทียบหน้าตา */
+        }
+        pv[it.id] = url ?? it.url;
+        pr[it.id] = vp;
+        if (!timer) timer = setTimeout(flush, 250);
+      }
+    };
+    void Promise.all(Array.from({ length: 3 }, worker)).then(() => {
+      if (timer) clearTimeout(timer);
+      flush();
+    });
+  }, [items]);
   const uploadIds = plan.dests.flatMap((d) => d.fileIds);
   const touched = [...new Set(plan.dests.map((d) => d.parentId))];
   const needLook = plan.files.filter((f) => f.plan !== "upload" && f.plan !== "skip");
@@ -234,6 +336,81 @@ export function WebsiteImageMassUpload({
   const countOf = (p: PlanFile["plan"]) => plan.files.filter((f) => f.plan === p).length;
   const needConfirm = mode === "replace" && touched.length > CONFIRM_OVER;
 
+  // 👀 รูปเดิมบนเว็บของสินค้าที่จะลง (รูปบนเว็บ + รูปสี · ไม่รวม Hero) → ลายนิ้วมือจากรูปย่อ 96px (ทีละ 6 · สูงสุด 800)
+  const oldOf = useMemo(() => {
+    const by = new Map<string, { key: string; where: string }[]>();
+    for (const p of parents) {
+      const list = p.webImages.map((key, i) => ({ key, where: `รูปบนเว็บ ${p.code} รูปที่ ${i + 1}` }));
+      for (const sk of p.skus) sk.webImages.forEach((key, i) => list.push({ key, where: `รูปสี ${sk.code} รูปที่ ${i + 1}` }));
+      by.set(p.parentId, list);
+    }
+    return by;
+  }, [parents]);
+  const touchedKey = touched.join(",");
+  useEffect(() => {
+    if (mode !== "append" || !touchedKey) return;
+    const want = touchedKey
+      .split(",")
+      .flatMap((pid) => oldOf.get(pid) ?? [])
+      .map((o) => o.key)
+      .filter((k) => !isVideoName(k) && !oldAsked.current.has(k))
+      .slice(0, Math.max(0, OLD_PRINT_MAX - oldAsked.current.size));
+    if (!want.length) return;
+    want.forEach((k) => oldAsked.current.add(k));
+    const got: Record<string, VisualPrint | null> = {};
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      timer = null;
+      const b = { ...got };
+      for (const k of Object.keys(got)) delete got[k];
+      if (Object.keys(b).length) setOldPrints((m) => ({ ...m, ...b }));
+    };
+    let next = 0;
+    const worker = async () => {
+      while (next < want.length) {
+        const key = want[next++];
+        let vp: VisualPrint | null = null;
+        try {
+          const r = await fetch(r2ImageUrl(key, 96) ?? "");
+          if (r.ok) vp = await visualPrintOf(await r.blob());
+        } catch {
+          /* โหลดรูปเดิมไม่ได้ = ไม่เทียบรูปนั้น */
+        }
+        got[key] = vp;
+        if (!timer) timer = setTimeout(flush, 300);
+      }
+    };
+    void Promise.all(Array.from({ length: 6 }, worker)).then(() => {
+      if (timer) clearTimeout(timer);
+      flush();
+    });
+  }, [touchedKey, oldOf, mode]);
+  const dupOf = useMemo(() => {
+    const out = new Map<string, Dup>();
+    if (mode !== "append") return out;
+    for (const d of plan.dests) {
+      if (d.target.kind === "hero" || d.target.kind === "skuHero") continue;
+      const olds = (oldOf.get(d.parentId) ?? []).filter((o) => oldPrints[o.key]);
+      if (!olds.length) continue;
+      for (const id of d.fileIds) {
+        const vp = prints[id];
+        if (!vp) continue;
+        let best: Dup | null = null;
+        for (const o of olds) {
+          const lv = similarity(vp, oldPrints[o.key] as VisualPrint);
+          if (lv && (!best || (lv === "same" && best.level === "near"))) best = { level: lv, where: o.where };
+          if (best?.level === "same") break;
+        }
+        if (best) out.set(id, best);
+      }
+    }
+    return out;
+  }, [plan, oldOf, oldPrints, prints, mode]);
+  const dupSameIds = [...dupOf].filter(([, v]) => v.level === "same").map(([id]) => id);
+  const imgTotal = items.filter((it) => !it.video && !it.invalid).length;
+  const imgPrepped = items.filter((it) => !it.video && !it.invalid && it.id in prints).length;
+  const oldPending = mode === "append" ? [...oldAsked.current].filter((k) => !(k in oldPrints)).length : 0;
+
   // ร้านอื่นที่มีรุ่นที่จะลงรูป
   const otherShops = useMemo(() => {
     if (!catalog) return [];
@@ -251,7 +428,7 @@ export function WebsiteImageMassUpload({
   const skipMany = (ids: string[], what: string) => {
     if (!ids.length) return;
     setSkip(ids, true);
-    toast.action(`ไม่ลง ${ids.length} รูปของ ${what} — อยู่ในกล่อง "ข้ามไว้" ด้านล่าง`, "เอากลับ", () => setSkip(ids, false));
+    toast.action(`ไม่ลง ${ids.length} รูป · ${what} — อยู่ในกล่อง "ข้ามไว้" ด้านล่าง`, "เอากลับ", () => setSkip(ids, false));
   };
   // ↕ สลับลำดับ (เลขตามลำดับใหม่ · ทับเลขท้ายชื่อไฟล์) — แถวอื่นชนิดเดียวกัน "ตำแหน่งเดียวกัน" สลับตามตามที่ตั้งไว้
   const reorderDest = (d: PlanDest, from: number, to: number) => {
@@ -328,67 +505,139 @@ export function WebsiteImageMassUpload({
     </>
   );
 
-  const run = async () => {
+  const run = async (retry = false) => {
     setErr(null);
-    if (!uploadIds.length) return setErr("ยังไม่มีรูปที่จะลง");
-    if (needConfirm && typed !== "CONFIRM") return setErr(`แทนที่รูป ${touched.length} สินค้าพร้อมกัน — พิมพ์ CONFIRM ก่อน`);
-    setPhase("uploading");
-    setProgress({ done: 0, total: uploadIds.length });
-    const keys = new Map<string, string>();
-    const failedNames: { name: string; why: string }[] = [];
-    let next = 0;
-    let done = 0;
-    const worker = async () => {
-      while (next < uploadIds.length) {
-        const id = uploadIds[next++];
-        const it = itemById.get(id);
-        if (!it) continue;
-        try {
-          if (it.video) {
-            // วิดีโอ: ตัวอัปกลางตัวเดียวกับช่อง Hero ทีละตัว (≤ 4 MB ผ่าน ERP · ใหญ่กว่านั้นส่งตรงเข้า R2 มีแถบ %)
-            keys.set(id, await uploadMediaFile(it.file, { folder: "storefront-hero", onProgress: (pct) => setVideoPct(pct) }));
-            setVideoPct(null);
-          } else keys.set(id, (await uploadResizedImage(it.file, { folder: "storefront-products", max: 2000 })).r2_key);
-        } catch (e) {
-          setVideoPct(null);
-          failedNames.push({ name: it.path, why: e instanceof MediaUploadError || e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ" });
-        }
-        setProgress({ done: ++done, total: uploadIds.length });
-      }
+    if (runningRef.current) return;
+    const prev = retry ? result : null;
+    if (retry && !prev?.failed.length) return;
+    if (!retry && !uploadIds.length) return setErr("ยังไม่มีรูปที่จะลง");
+    if (!retry && needConfirm && typed !== "CONFIRM") return setErr(`แทนที่รูป ${touched.length} สินค้าพร้อมกัน — พิมพ์ CONFIRM ก่อน`);
+    if (!retry) {
+      keysRef.current = new Map();
+      savedDestRef.current = new Set();
+      runPlanRef.current = plan.dests;
+    }
+    const want = prev ? new Set(prev.failed.map((x) => x.id)) : null;
+    const dests = runPlanRef.current.map((d) => (want ? { ...d, fileIds: d.fileIds.filter((id) => want.has(id)) } : d)).filter((d) => d.fileIds.length);
+    const rs = splitRounds(dests, ROUND_PRODUCTS);
+    const total = dests.reduce((n, d) => n + d.fileIds.length, 0);
+    const files = new Map(itemsRef.current.map((it) => [it.id, it]));
+    const shopIds = [shop.id, ...[...alsoShops].filter((x) => otherShops.some((o) => o.id === x))];
+    const view: RoundView[] = rs.map((r) => ({ codes: r.parentIds.map((pid) => byId.get(pid)?.code ?? "?"), files: r.dests.reduce((n, d) => n + d.fileIds.length, 0), status: "wait" }));
+    const setStatus = (i: number, status: RoundView["status"]) => {
+      view[i] = { ...view[i], status };
+      setRounds([...view]);
     };
-    await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, worker));
-    const massItems = buildMassItems(plan.dests, (id) => keys.get(id) ?? null, (id) => !!itemById.get(id)?.video);
-    if (!massItems.length) {
-      setPhase("pick");
-      return setErr("อัปโหลดรูปไม่สำเร็จเลย — ตรวจการเชื่อมต่อแล้วลองใหม่");
-    }
-    setPhase("saving");
-    try {
-      const shopIds = [shop.id, ...[...alsoShops].filter((s) => otherShops.some((o) => o.id === s))];
-      const r = await apiFetch("/api/website/listings/images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopIds, mode, items: massItems }) });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
-      const res: Result = {
-        uploaded: keys.size,
-        uploadFailed: failedNames,
-        updated: Number(j.updated) || 0,
-        failed: Array.isArray(j.failed) ? j.failed.length : 0,
-        skippedShops: Array.isArray(j.skipped) ? j.skipped.filter((s: { shopId: string }) => s.shopId !== shop.id).length : 0,
-      };
-      setResult(res);
+    setRounds([...view]);
+    setResult(null);
+    setPhase("uploading");
+    setProgress({ done: 0, total });
+    runningRef.current = true;
+    // ปิดแท็บระหว่างลง = งานหยุด → เตือนก่อน (ไปหน้าอื่นใน ERP ได้ งานวิ่งต่อ)
+    const warnLeave = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnLeave);
+    const failed = new Map<string, string>();
+    const prevOk = prev?.ok ?? 0;
+    let ok = prevOk;
+    let updated = prev?.updated ?? 0;
+    let otherShopFails = prev?.otherShopFails ?? 0;
+    let skippedShops = prev?.skippedShops ?? 0;
+    let done = 0;
+    const keyOf = (id: string) => keysRef.current.get(id) ?? null;
+    const isVid = (id: string) => !!files.get(id)?.video;
+    const finish = () => {
+      window.removeEventListener("beforeunload", warnLeave);
+      runningRef.current = false;
+      const failList = [...failed].map(([id, why]) => ({ id, name: files.get(id)?.path ?? id, why }));
+      setResult({ ok, failed: failList, updated, otherShopFails, skippedShops });
       setPhase("done");
-      if (res.failed || res.uploadFailed.length) toast.warning("ลงรูปเสร็จ แต่มีบางรายการไม่สำเร็จ — ดูสรุปในหน้าต่าง");
-      else toast.success(`ลงรูป ${res.uploaded} ไฟล์แล้ว — เว็บเปลี่ยนตามทันที`);
+      setVideoPct(null);
       void onDone();
-    } catch (e) {
-      setPhase("pick");
-      setErr(`${(e as Error).message} — รูปอัปขึ้นคลังแล้ว ${keys.size} ไฟล์ กดลงรูปอีกครั้งได้`);
-    }
+      return failList;
+    };
+    runBackgroundTask({
+      label: `ลงรูปเว็บ ${total} ไฟล์ · ${shop.name}${retry ? " (ลงซ้ำ)" : ""}`,
+      total,
+      run: async (report) => {
+        try {
+          for (let ri = 0; ri < rs.length; ri++) {
+            setStatus(ri, "run");
+            const ids = rs[ri].dests.flatMap((d) => d.fileIds);
+            let next = 0;
+            const worker = async () => {
+              while (next < ids.length) {
+                const id = ids[next++];
+                const it = files.get(id);
+                if (!it) failed.set(id, "ไม่พบไฟล์ — ลากมาใหม่");
+                else if (!keysRef.current.has(id)) {
+                  try {
+                    // วิดีโอ: ตัวอัปกลางตัวเดียวกับช่อง Hero ทีละตัว (≤ 4 MB ผ่าน ERP · ใหญ่กว่านั้นส่งตรงเข้า R2 มีแถบ %)
+                    if (it.video) keysRef.current.set(id, await uploadMediaFile(it.file, { folder: "storefront-hero", onProgress: (pct) => setVideoPct(pct) }));
+                    else keysRef.current.set(id, (await uploadResizedImage(it.file, { folder: "storefront-products", max: 2000 })).r2_key);
+                  } catch (e) {
+                    failed.set(id, e instanceof MediaUploadError || e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ");
+                  } finally {
+                    if (it.video) setVideoPct(null);
+                  }
+                }
+                done++;
+                setProgress({ done, total });
+                report(done, total);
+              }
+            };
+            await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, worker));
+            // บันทึกรอบนี้ลงเว็บทันที: ช่องที่ยังไม่เคยบันทึก = ตามโหมดที่เลือก · ช่องที่บันทึกแล้ว (ลงซ้ำ) = ต่อท้าย
+            const groups: [PlanDest[], MassMode][] = [
+              [rs[ri].dests.filter((d) => !savedDestRef.current.has(d.key)), mode],
+              [rs[ri].dests.filter((d) => savedDestRef.current.has(d.key)), "append"],
+            ];
+            for (const [group, m] of groups) {
+              const body = buildMassItems(group, keyOf, isVid);
+              if (!body.length) continue;
+              const got = (d: PlanDest) => d.fileIds.filter((id) => keyOf(id));
+              try {
+                const r = await apiFetch("/api/website/listings/images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shopIds, mode: m, items: body }) });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+                updated += Number(j.updated) || 0;
+                const fails: { shopId: string; parentId: string }[] = Array.isArray(j.failed) ? j.failed : [];
+                const mine = new Set(fails.filter((x) => x.shopId === shop.id).map((x) => x.parentId));
+                otherShopFails += fails.filter((x) => x.shopId !== shop.id).length;
+                skippedShops += Array.isArray(j.skipped) ? j.skipped.filter((x: { shopId: string }) => x.shopId !== shop.id).length : 0;
+                for (const d of group) {
+                  const ids2 = got(d);
+                  if (!ids2.length) continue;
+                  if (mine.has(d.parentId)) ids2.forEach((id) => failed.set(id, "บันทึกลงเว็บไม่สำเร็จ"));
+                  else {
+                    savedDestRef.current.add(d.key);
+                    ok += ids2.length;
+                  }
+                }
+              } catch (e) {
+                for (const d of group) got(d).forEach((id) => failed.set(id, `บันทึกลงเว็บไม่สำเร็จ: ${(e as Error).message}`));
+              }
+            }
+            const bad = ids.filter((id) => failed.has(id)).length;
+            setStatus(ri, bad === 0 ? "ok" : bad === ids.length ? "fail" : "part");
+          }
+        } catch (e) {
+          setErr((e as Error).message || "เกิดข้อผิดพลาด");
+        }
+        const failList = finish();
+        const runOk = ok - prevOk;
+        if (failList.length || otherShopFails) toast.warning(`ลงรูปเสร็จ แต่ยังไม่ขึ้นเว็บ ${failList.length} ไฟล์ — เปิดหน้าต่าง ลงรูปเว็บทีละมาก แล้วกด "ลงซ้ำเฉพาะที่พลาด"`);
+        else toast.success(`ลงรูป ${runOk} ไฟล์แล้ว — เว็บเปลี่ยนตามทันที`);
+        return { ok: runOk, fail: failList.length, message: failList.length ? `ขึ้นเว็บ ${runOk} · ยังไม่ขึ้น ${failList.length}` : `ลงครบ ${runOk} ไฟล์` };
+      },
+    });
   };
 
-  const busy = phase === "uploading" || phase === "saving";
+  const busy = phase === "uploading";
   const close = () => {
-    if (busy) return toast.info("กำลังลงรูปอยู่ รอให้เสร็จก่อน");
+    if (busy) toast.info("ลงรูปต่อเบื้องหลัง — ดูความคืบหน้าที่กล่องมุมขวาล่าง (ไปหน้าอื่นได้ แต่อย่าปิดแท็บเบราว์เซอร์)");
     onClose();
   };
 
@@ -398,17 +647,22 @@ export function WebsiteImageMassUpload({
     const parts = it.path.split("/");
     const fileName = parts.pop();
     const folder = parts.pop();
+    const src = previews[id];
+    const dup = dupOf.get(id);
     return (
-      <div key={id} className={`group relative w-16 shrink-0 ${opts.muted ? "opacity-50" : ""}`} title={it.path}>
+      <div key={id} className={`group relative w-16 shrink-0 ${opts.muted ? "opacity-50" : ""}`} title={dup ? `${it.path}\n${dup.level === "same" ? "หน้าตาเหมือน" : "คล้าย"}${dup.where} (ดูรูปจางด้านซ้าย)` : it.path}>
         {it.video ? (
           <>
             <video src={`${it.url}#t=0.1`} muted playsInline preload="metadata" className="h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-800" />
             <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] leading-4 text-white">🎬 {fileMb(it.file.size)}</span>
           </>
-        ) : (
+        ) : src ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={it.url} alt="" loading="lazy" decoding="async" draggable={false} {...(opts.handle ?? {})} title={opts.handle ? "กดค้างแล้วลาก = สลับลำดับ (เลข 1 = รูปหลัก)" : it.path} className={`h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-100 ${opts.handle ? "cursor-grab active:cursor-grabbing" : ""}`} />
+          <img src={src} alt="" loading="lazy" decoding="async" draggable={false} {...(opts.handle ?? {})} title={opts.handle ? "กดค้างแล้วลาก = สลับลำดับ (เลข 1 = รูปหลัก)" : it.path} className={`h-20 w-16 rounded-md border object-cover bg-slate-100 ${dup ? "border-amber-400" : "border-slate-200"} ${opts.handle ? "cursor-grab active:cursor-grabbing" : ""}`} />
+        ) : (
+          <div {...(opts.handle ?? {})} className="h-20 w-16 animate-pulse rounded-md border border-slate-200 bg-slate-100" />
         )}
+        {dup && <span className={`pointer-events-none absolute right-1 top-1 rounded px-1 text-[10px] leading-4 text-white ${dup.level === "same" ? "bg-amber-600" : "bg-amber-500/90"}`}>{dup.level === "same" ? "ซ้ำเดิม" : "คล้ายเดิม"}</span>}
         {opts.index != null && !it.video && <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/55 px-1 text-[10px] leading-4 text-white">{opts.index + 1}</span>}
         {opts.onMove && phase === "pick" && (
           <span className="absolute bottom-[22px] right-0.5 flex gap-0.5">
@@ -432,13 +686,17 @@ export function WebsiteImageMassUpload({
         {err ? (
           <span className="text-rose-600">{err}</span>
         ) : phase === "done" && result ? (
-          <span className={result.failed || result.uploadFailed.length ? "text-amber-700" : "text-emerald-700"}>
-            ลงรูป {result.uploaded} ไฟล์ · อัปเดต {result.updated} รายการ{result.failed ? ` · ไม่สำเร็จ ${result.failed}` : ""}
+          <span className={result.failed.length || result.otherShopFails ? "text-amber-700" : "text-emerald-700"}>
+            ขึ้นเว็บแล้ว {result.ok} ไฟล์{result.failed.length ? ` · ยังไม่ขึ้น ${result.failed.length}` : ""}
           </span>
         ) : busy ? (
-          <span className="text-slate-600">{phase === "saving" ? "กำลังบันทึกลงเว็บ…" : `กำลังอัปโหลด ${progress.done}/${progress.total}${videoPct !== null ? ` · วิดีโอ ${videoPct}%` : ""}`}</span>
+          <span className="text-slate-600">กำลังลงรูป {progress.done}/{progress.total} ไฟล์{videoPct !== null ? ` · วิดีโอ ${videoPct}%` : ""} · ปิดหน้าต่างได้ ลงต่อเบื้องหลัง</span>
         ) : (
-          <span className="text-slate-500">{uploadIds.length ? `จะลง ${uploadIds.length} ไฟล์ → ${touched.length} สินค้า${alsoShops.size ? ` (+ร้านอื่น ${alsoShops.size})` : ""}` : "ยังไม่มีรูปที่จะลง"}</span>
+          <span className="text-slate-500">
+            {uploadIds.length
+              ? `จะลง ${uploadIds.length} ไฟล์ → ${touched.length} สินค้า${touched.length > ROUND_PRODUCTS ? ` (${Math.ceil(touched.length / ROUND_PRODUCTS)} รอบ)` : ""}${alsoShops.size ? ` (+ร้านอื่น ${alsoShops.size})` : ""}`
+              : "ยังไม่มีรูปที่จะลง"}
+          </span>
         )}
       </div>
       {needConfirm && phase === "pick" && (
@@ -446,22 +704,26 @@ export function WebsiteImageMassUpload({
       )}
       {phase === "done" ? (
         <>
-          <button type="button" onClick={() => { clearItems(); setResult(null); setPhase("pick"); void load(); }} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">
+          <button type="button" onClick={() => { clearItems(); setResult(null); setRounds([]); setPhase("pick"); void load(); }} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">
             ลงชุดต่อไป
           </button>
           <button type="button" onClick={onClose} className="h-9 rounded-lg bg-slate-800 px-4 text-sm text-white">
             ปิด
           </button>
         </>
+      ) : busy ? (
+        <button type="button" onClick={close} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">
+          ปิดหน้าต่าง (ลงต่อเบื้องหลัง)
+        </button>
       ) : (
         <>
-          {items.length > 0 && !busy && (
+          {items.length > 0 && (
             <button type="button" onClick={clearItems} className="h-9 rounded-lg border border-slate-200 px-3 text-sm text-slate-600 hover:bg-slate-50">
               ล้างไฟล์ทั้งหมด
             </button>
           )}
-          <button type="button" onClick={() => void run()} disabled={busy || !uploadIds.length || (needConfirm && typed !== "CONFIRM")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
-            {busy ? "กำลังลงรูป…" : uploadIds.length ? `ลงรูป ${uploadIds.length} ไฟล์ → ${touched.length} สินค้า` : "ลงรูป"}
+          <button type="button" onClick={() => void run()} disabled={!uploadIds.length || (needConfirm && typed !== "CONFIRM")} className="h-9 rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-40">
+            {uploadIds.length ? `ลงรูป ${uploadIds.length} ไฟล์ → ${touched.length} สินค้า` : "ลงรูป"}
           </button>
         </>
       )}
@@ -475,7 +737,7 @@ export function WebsiteImageMassUpload({
       title={`📸 ลงรูปเว็บทีละมาก — ${shop.name}`}
       description={scope ? `เฉพาะ ${scope.size} รายการที่ติ๊กไว้ · จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์` : "จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์กับรหัสสินค้าและสี · ตรวจก่อนลงทุกครั้ง"}
       size="xl"
-      hasUnsavedChanges={items.length > 0 && phase !== "done"}
+      hasUnsavedChanges={items.length > 0 && phase === "pick"}
       closeOnBackdrop={false}
       footer={footer}
     >
@@ -518,7 +780,7 @@ export function WebsiteImageMassUpload({
                   <br />
                   🎬 วิดีโอ (mp4) = Hero อัตโนมัติ: <code className="rounded bg-white px-1">JEAN08.mp4</code> → คอม · <code className="rounded bg-white px-1">JEAN08_m.mp4</code> → มือถือ · ≤ 200 MB (แนะนำ ≤ 15 MB · 6–10 วินาที)
                   <br />
-                  หรือแยกโฟลเดอร์ชื่อ <code className="rounded bg-white px-1">JEAN08/</code> · <code className="rounded bg-white px-1">JEAN08-01/</code> ก็ได้ · เลขท้าย _1 _2 (2) = ลำดับรูป · ครั้งละ ≤ {MAX_MASS_FILES} ไฟล์
+                  หรือแยกโฟลเดอร์ชื่อ <code className="rounded bg-white px-1">JEAN08/</code> · <code className="rounded bg-white px-1">JEAN08-01/</code> ก็ได้ · เลขท้าย _1 _2 (2) = ลำดับรูป · ครั้งละ ≤ {MAX_WEB_MASS_FILES.toLocaleString()} ไฟล์
                 </p>
                 <input ref={fileRef} type="file" accept="image/*,video/mp4,video/webm,.mp4,.m4v,.webm,.mov" multiple hidden onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
                 <input ref={dirRef} type="file" multiple hidden {...{ webkitdirectory: "" }} onChange={(e) => { addFiles(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
@@ -534,10 +796,52 @@ export function WebsiteImageMassUpload({
                   {countOf("over") + countOf("dupHero") > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-0.5 text-rose-700">เกิน/ซ้ำ {countOf("over") + countOf("dupHero")}</span>}
                   {countOf("invalid") > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-0.5 text-rose-700">ลงไม่ได้ {countOf("invalid")}</span>}
                   {countOf("skip") > 0 && <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-slate-600">ข้าม {countOf("skip")}</span>}
+                  {dupOf.size > 0 && (
+                    <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-amber-800" title="เทียบหน้าตารูปใหม่กับรูปเดิมบนเว็บของสินค้านั้น — เตือนให้ดูด้วยตา ไม่ข้ามเอง">
+                      <Icon name="view" className="mr-0.5 inline-block align-[-2px]" />หน้าตาเหมือนรูปเดิม {dupOf.size}
+                    </span>
+                  )}
+                  {dupSameIds.length > 0 && phase === "pick" && (
+                    <button type="button" onClick={() => skipMany(dupSameIds, "หน้าตาซ้ำรูปเดิม")} className="rounded-full border border-amber-300 bg-white px-2.5 py-0.5 text-amber-800 hover:bg-amber-50">
+                      <Icon name="cancel" className="mr-0.5 inline-block align-[-2px]" />ไม่ลงรูปที่ซ้ำทั้งหมด ({dupSameIds.length})
+                    </button>
+                  )}
+                  {phase === "pick" && (imgPrepped < imgTotal || oldPending > 0) && (
+                    <span className="text-slate-400">
+                      {imgPrepped < imgTotal ? `กำลังเตรียมรูป ${imgPrepped}/${imgTotal}` : "กำลังโหลดรูปเดิมมาเทียบ"}
+                      {mode === "append" ? " · เทียบหน้าตากับรูปเดิมบนเว็บ…" : "…"}
+                    </span>
+                  )}
                   <span className="ml-auto text-slate-400">
                     {items.length} ไฟล์ · {touched.length} สินค้า
                   </span>
                 </div>
+
+                {phase !== "pick" && rounds.length > 0 && (
+                  <div className="rounded-xl border border-blue-200 bg-blue-50/40 px-3.5 py-2.5 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-sm font-medium text-slate-800">
+                        {phase === "uploading" ? `กำลังลงรูป ${progress.done}/${progress.total} ไฟล์${videoPct !== null ? ` · วิดีโอ ${videoPct}%` : ""}` : "ลงรูปเสร็จแล้ว"}
+                      </span>
+                      <span className="text-slate-500">ลงทีละรอบ รอบละ {ROUND_PRODUCTS} สินค้า · รอบที่เสร็จขึ้นเว็บทันที</span>
+                    </div>
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-white">
+                      <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }} />
+                    </div>
+                    <div className="mt-1 divide-y divide-blue-100">
+                      {rounds.map((r, i) => (
+                        <div key={i} className="flex items-center gap-2 py-1">
+                          <span className="w-12 shrink-0 text-slate-700">รอบ {i + 1}</span>
+                          <span className="min-w-0 flex-1 truncate text-slate-500" title={r.codes.join(", ")}>
+                            {r.codes.length} สินค้า · {r.files} ไฟล์ · {r.codes.slice(0, 4).join(", ")}{r.codes.length > 4 ? " …" : ""}
+                          </span>
+                          <span className={`shrink-0 ${ROUND_LABEL[r.status].cls}`}>{ROUND_LABEL[r.status].icon && <Icon name={ROUND_LABEL[r.status].icon} className="mr-0.5 inline-block align-[-2px]" />}{ROUND_LABEL[r.status].text}</span>
+                        </div>
+                      ))}
+                    </div>
+                    {phase === "uploading" && <p className="mt-1 text-[11px] text-slate-500">ปิดหน้าต่างนี้ได้ — ลงต่อเบื้องหลัง (ดูกล่องมุมขวาล่าง) · ไปหน้าอื่นใน ERP ได้ แต่อย่าปิดแท็บเบราว์เซอร์จนกว่าจะเสร็จ</p>}
+                  </div>
+                )}
 
                 {linkable && phase === "pick" && (
                   <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs">
@@ -552,7 +856,7 @@ export function WebsiteImageMassUpload({
                 )}
 
                 {/* ② แยกตามสินค้า */}
-                {touched.map((pid) => {
+                {touched.slice(0, shown).map((pid) => {
                   const p = byId.get(pid)!;
                   const dests = plan.dests.filter((d) => d.parentId === pid);
                   return (
@@ -595,6 +899,8 @@ export function WebsiteImageMassUpload({
                         // ต่อท้าย = เลขรูปใหม่ต่อจากของเดิม · แทนที่/Hero = รูปใหม่เริ่ม 1
                         const base = d.replaces ? 0 : old.length;
                         const numbered = !isHero && (d.fileIds.length > 1 || base > 0);
+                        const dups = d.fileIds.filter((id) => dupOf.has(id));
+                        const dupSame = dups.filter((id) => dupOf.get(id)?.level === "same");
                         return (
                           <div key={d.key} className="mt-2 grid grid-cols-[11rem_minmax(0,1fr)] items-start gap-2 border-t border-slate-100 pt-2">
                             <div className="min-w-0">
@@ -647,6 +953,16 @@ export function WebsiteImageMassUpload({
                                     ? `แทนที่รูปเดิม ${d.existing} รูป → เหลือ ${d.total}/${d.limit}`
                                     : `+${d.fileIds.length} ต่อท้าย${d.existing ? ` (เดิม ${d.existing} → รวม ${d.total}/${d.limit})` : ` (รวม ${d.total}/${d.limit})`}`}
                               </span>
+                              {dups.length > 0 && (
+                                <span className="flex flex-wrap items-center gap-1.5 self-center">
+                                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800"><Icon name="view" className="mr-0.5 inline-block align-[-2px]" />หน้าตาเหมือนรูปเดิม {dups.length}/{d.fileIds.length}</span>
+                                  {phase === "pick" && dupSame.length > 0 && (
+                                    <button type="button" onClick={() => skipMany(dupSame, `ซ้ำรูปเดิม · ${dl.title.replace(/^\S+\s/, "")}`)} className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-[11px] text-amber-800 hover:bg-amber-50">
+                                      <Icon name="cancel" className="mr-0.5 inline-block align-[-2px]" />ไม่ลงรูปที่ซ้ำ ({dupSame.length})
+                                    </button>
+                                  )}
+                                </span>
+                              )}
                             </div>
                             {editing && (
                               <div className="col-span-2 flex flex-wrap items-center gap-1.5 rounded-lg bg-blue-50/70 px-2.5 py-2">
@@ -682,11 +998,17 @@ export function WebsiteImageMassUpload({
                   );
                 })}
 
+                {touched.length > shown && (
+                  <button type="button" onClick={() => setShown((n) => n + SHOW_PRODUCTS)} className="w-full rounded-xl border border-dashed border-slate-300 py-2 text-xs text-slate-600 hover:bg-slate-50">
+                    แสดงอีก {Math.min(SHOW_PRODUCTS, touched.length - shown)} สินค้า (เหลือ {touched.length - shown} จาก {touched.length})
+                  </button>
+                )}
+
                 {/* ③ ไฟล์ที่ต้องดู */}
                 {needLook.length > 0 && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50/40 px-3.5 py-2.5">
                     <p className="mb-1 text-sm font-medium text-slate-800">ไฟล์ที่ต้องดู ({needLook.length})</p>
-                    {needLook.map((f) => {
+                    {needLook.slice(0, lookShown).map((f) => {
                       const it = itemById.get(f.id)!;
                       const man = it.manual ?? null;
                       const pid = man?.parentId ?? f.parentId ?? "";
@@ -741,6 +1063,11 @@ export function WebsiteImageMassUpload({
                         </div>
                       );
                     })}
+                    {needLook.length > lookShown && (
+                      <button type="button" onClick={() => setLookShown((n) => n + SHOW_LOOK)} className="mt-1 w-full rounded-lg border border-dashed border-amber-300 py-1.5 text-xs text-amber-800 hover:bg-amber-50">
+                        แสดงอีก {Math.min(SHOW_LOOK, needLook.length - lookShown)} ไฟล์ (เหลือ {needLook.length - lookShown})
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -769,7 +1096,7 @@ export function WebsiteImageMassUpload({
                                 <span key={id} title={it.path} className="flex h-10 w-8 items-center justify-center rounded border border-slate-200 bg-slate-700 text-xs opacity-60">🎬</span>
                               ) : (
                                 // eslint-disable-next-line @next/next/no-img-element
-                                <img key={id} src={it.url} alt="" title={it.path} loading="lazy" decoding="async" className="h-10 w-8 rounded border border-slate-200 object-cover opacity-50 grayscale" />
+                                <img key={id} src={previews[id] ?? it.url} alt="" title={it.path} loading="lazy" decoding="async" className="h-10 w-8 rounded border border-slate-200 object-cover opacity-50 grayscale" />
                               );
                             })}
                             {g.ids.length > 10 && <span className="self-center text-[11px] text-slate-400">+{g.ids.length - 10}</span>}
@@ -822,26 +1149,28 @@ export function WebsiteImageMassUpload({
                       ? `โหมดแทนที่: รูปเดิมของช่องที่มีรูปใหม่จะถูกเอาออกจากเว็บ (ไฟล์ยังอยู่ในคลัง · ช่องอื่นไม่แตะ)${touched.length > CONFIRM_OVER ? " · เกิน 20 สินค้าต้องพิมพ์ CONFIRM" : ""}`
                       : "รูปย่อเหลือกว้าง ≤ 2000px อัตโนมัติ · ไฟล์ที่ข้ามจะไม่อัปโหลด · Hero มีช่องละ 1 ไฟล์ รูปหรือวิดีโอ (ไฟล์ใหม่แทนของเดิม) · บันทึกประวัติว่าใครลงรูปอะไร"}
                   </p>
-                  {busy && (
-                    <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                      <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${phase === "saving" ? 100 : Math.round((progress.done / Math.max(1, progress.total)) * 100)}%` }} />
-                    </div>
-                  )}
                 </div>
 
                 {/* ⑤ สรุปผล */}
                 {phase === "done" && result && (
-                  <div className={`rounded-xl border px-3.5 py-3 text-sm ${result.failed || result.uploadFailed.length ? "border-amber-200 bg-amber-50/50" : "border-emerald-200 bg-emerald-50/50"}`}>
+                  <div className={`rounded-xl border px-3.5 py-3 text-sm ${result.failed.length || result.otherShopFails ? "border-amber-200 bg-amber-50/50" : "border-emerald-200 bg-emerald-50/50"}`}>
                     <p className="font-medium text-slate-800">
-                      ✓ ลงรูป {result.uploaded} ไฟล์ · อัปเดต {result.updated} รายการ — เว็บเปลี่ยนตามทันที
+                      <Icon name="done" className="mr-0.5 inline-block align-[-2px]" />ขึ้นเว็บแล้ว {result.ok} ไฟล์ · อัปเดต {result.updated} รายการ — เว็บเปลี่ยนตามทันที
                     </p>
                     {result.skippedShops > 0 && <p className="mt-1 text-xs text-slate-500">ร้านอื่น: ข้าม {result.skippedShops} รายการที่ไม่มีสินค้านั้นในร้าน</p>}
-                    {result.failed > 0 && <p className="mt-1 text-xs text-rose-700">บันทึกไม่สำเร็จ {result.failed} รายการ — ลองลงชุดนั้นใหม่อีกครั้ง</p>}
-                    {result.uploadFailed.length > 0 && (
-                      <p className="mt-1 text-xs text-rose-700">
-                        อัปโหลดไม่สำเร็จ {result.uploadFailed.length} ไฟล์: {result.uploadFailed.slice(0, 8).map((f) => `${f.name} (${f.why})`).join(" · ")}
-                        {result.uploadFailed.length > 8 ? " …" : ""}
-                      </p>
+                    {result.otherShopFails > 0 && <p className="mt-1 text-xs text-rose-700">ร้านอื่น: บันทึกไม่สำเร็จ {result.otherShopFails} รายการ</p>}
+                    {result.failed.length > 0 && (
+                      <div className="mt-1.5 text-xs text-rose-700">
+                        <p>ยังไม่ขึ้นเว็บ {result.failed.length} ไฟล์ — รอบอื่นขึ้นครบแล้ว ไม่ต้องลงใหม่ทั้งชุด</p>
+                        <p className="mt-0.5 text-rose-600">
+                          {result.failed.slice(0, 8).map((x) => `${x.name} (${x.why})`).join(" · ")}
+                          {result.failed.length > 8 ? " …" : ""}
+                        </p>
+                        <button type="button" onClick={() => void run(true)} className="mt-2 h-8 rounded-lg bg-rose-600 px-3 text-xs font-medium text-white hover:bg-rose-700">
+                          <Icon name="refresh" className="mr-0.5 inline-block align-[-2px]" />ลงซ้ำเฉพาะ {result.failed.length} ไฟล์ที่พลาด
+                        </button>
+                        <span className="ml-2 text-[11px] text-slate-500">ไฟล์ที่อัปแล้วไม่อัปใหม่ · แถวที่ขึ้นเว็บบางส่วนแล้ว = ต่อท้าย</span>
+                      </div>
                     )}
                   </div>
                 )}

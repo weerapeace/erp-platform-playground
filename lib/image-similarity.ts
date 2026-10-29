@@ -1,6 +1,6 @@
 /**
  * 👀 "ลายนิ้วมือภาพ" — จับรูปที่หน้าตาเหมือน/คล้ายกันแม้เป็นคนละไฟล์ (ย่อ · บันทึกใหม่ · export ใหม่ · ส่งผ่าน LINE)
- * ของกลาง ใช้ที่ components/product-image-router (📂 จัดรูปหลายโฟลเดอร์) — ต่างจากลายนิ้วมือไฟล์ (SHA-256) ที่จับได้เฉพาะไฟล์เดียวกันเป๊ะ
+ * ของกลาง ใช้ที่ components/product-image-router (📂 จัดรูปหลายโฟลเดอร์) + components/website-image-mass-upload (📸 ลงรูปเว็บทีละมาก) — ต่างจากลายนิ้วมือไฟล์ (SHA-256) ที่จับได้เฉพาะไฟล์เดียวกันเป๊ะ
  *
  * 2 ส่วน (ต้องใกล้กันทั้งคู่):
  *   รูปทรง = dHash 64 บิต (ย่อเหลือ 9×8 สีเทา แล้วเทียบความสว่างช่องติดกัน) — ทนการย่อ/บีบอัด
@@ -57,24 +57,41 @@ export function similarity(a: VisualPrint, b: VisualPrint): SimilarLevel | null 
 }
 export const similarRank = (l: SimilarLevel | null) => (l === "same" ? 2 : l === "near" ? 1 : 0);
 
-/** คำนวณลายนิ้วมือภาพในเบราว์เซอร์ (ไฟล์ หรือรูปย่อที่โหลดมา) — อ่านไม่ได้ = null (ไม่เตือน) */
-export async function visualPrintOf(src: Blob): Promise<VisualPrint | null> {
+/** จากรูปที่ถอดรหัสแล้ว (ImageBitmap / canvas ขนาดไหนก็ได้) — ย่อเป็น 64×64 ก่อน ให้ได้ค่าเท่ากับ visualPrintOf */
+export function visualPrintFromSource(src: CanvasImageSource): VisualPrint | null {
   try {
-    const bm = await createImageBitmap(src, { resizeWidth: 64, resizeHeight: 64, resizeQuality: "high" });
-    const draw = (w: number, h: number) => {
+    const canvas = (w: number, h: number) => {
       const c = document.createElement("canvas");
       c.width = w;
       c.height = h;
       const x = c.getContext("2d", { willReadFrequently: true });
+      if (x) x.imageSmoothingQuality = "high";
+      return { c, x };
+    };
+    const base = canvas(64, 64);
+    if (!base.x) return null;
+    base.x.drawImage(src, 0, 0, 64, 64);
+    const draw = (w: number, h: number) => {
+      const { x } = canvas(w, h);
       if (!x) return null;
-      x.imageSmoothingQuality = "high";
-      x.drawImage(bm, 0, 0, w, h);
+      x.drawImage(base.c, 0, 0, w, h);
       return x.getImageData(0, 0, w, h).data;
     };
     const d98 = draw(9, 8);
     const d44 = draw(4, 4);
-    bm.close();
     return d98 && d44 ? printFromPixels(d98, d44) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** คำนวณลายนิ้วมือภาพในเบราว์เซอร์ (ไฟล์ หรือรูปย่อที่โหลดมา) — อ่านไม่ได้ = null (ไม่เตือน) */
+export async function visualPrintOf(src: Blob): Promise<VisualPrint | null> {
+  try {
+    const bm = await createImageBitmap(src, { resizeWidth: 64, resizeHeight: 64, resizeQuality: "high" });
+    const vp = visualPrintFromSource(bm);
+    bm.close();
+    return vp;
   } catch {
     return null;
   }
