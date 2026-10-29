@@ -2,18 +2,22 @@
 
 /**
  * 🏠 ภาพรวมดีไซน์ — หน้าแรกของแท็บดีไซน์ (เมนูซ้าย "ภาพรวม")
- * สถานะร่าง/เผยแพร่ · สิ่งที่ควรทำ (อ่านยาก · ไม่มี Favicon · คำแปลที่ขาด) · การ์ดทางลัดทุกหัวข้อพร้อมสรุปค่าปัจจุบัน
+ * สถานะร่าง/เผยแพร่ · สิ่งที่ควรทำ (อ่านยาก · ไม่มี Favicon · คำแปลที่ขาด) · การ์ดหมวดพร้อมตัวอย่างหน้าตาจริงย่อ ๆ
+ * (สี ฟอนต์ ปุ่ม · หัว-ท้ายเว็บ · รูปสินค้า) + รายการหัวข้อพร้อมสรุปค่าปัจจุบัน
  * กดการ์ด = ไปหน้านั้น (หัวข้อ/สรุปจากทะเบียนกลาง lib/website-design-nav)
  */
 import { useMemo, type ReactNode } from "react";
 import { Icon } from "@/components/icon";
 import { coverageOf, collectTextPaths } from "@/lib/content-i18n";
-import { THEME_TEXT_KEYS } from "@/lib/website-theme";
+import { THEME_TEXT_KEYS, resolveOnBrand } from "@/lib/website-theme";
 import { FULL_THEME_PRESETS } from "@/lib/website-theme-presets";
 import { CART_STYLES } from "@/lib/website-cart";
 import { DESIGN_GROUPS, DESIGN_PAGES, type DesignPageKey } from "@/lib/website-design-nav";
 import { colorChecks } from "./colors-tab";
-import { timeAgo, type Choices, type Theme } from "./shared";
+import { timeAgo, type Choices, type SampleItem, type Theme } from "./shared";
+import { RATIO_CSS } from "./sample-card";
+import { keyUrl } from "@/components/website-theme-media";
+import { contrastRatio } from "@/lib/color-utils";
 import { useDesign } from "./context";
 
 type PageKey = Exclude<DesignPageKey, "overview">;
@@ -93,7 +97,7 @@ export function DesignOverview({
   /** สลับไปแก้ภาษาอังกฤษ */
   onEnglish: () => void;
 }) {
-  const { theme, choices, schedules } = useDesign();
+  const { theme, choices, schedules, sampleItems } = useDesign();
   const failCount = useMemo(() => colorChecks(theme).filter((c) => c.level === "fail").length, [theme]);
   const enMissing = useMemo(() => coverageOf(collectTextPaths(theme, THEME_TEXT_KEYS)).missing, [theme]);
   const pending = (schedules ?? []).filter((s) => s.status === "pending").length;
@@ -128,29 +132,144 @@ export function DesignOverview({
         )}
       </div>
 
-      {DESIGN_GROUPS.map((g) => (
-        <section key={g.key}>
-          <h3 className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 mb-1.5 mt-1">
-            <Icon name={g.icon} />
-            {g.label}
-          </h3>
-          <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3">
-            {g.pages.map((k) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => onGo(k)}
-                data-design-tile={k}
-                className="relative text-left rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 hover:border-blue-400 hover:shadow-sm transition"
-              >
-                <span className="block text-sm font-semibold text-slate-800 pr-4">{DESIGN_PAGES[k].label}</span>
-                <span className="block text-xs text-slate-500 mt-0.5 truncate">{pageSummary(k, theme, choices, { schedules: pending, lastVersion })}</span>
-                {dirty.includes(k) && <span className="absolute top-3 right-3 w-2 h-2 rounded-full bg-amber-500" title="แก้แล้ว ยังไม่บันทึก" />}
-              </button>
-            ))}
-          </div>
-        </section>
-      ))}
+      {/* การ์ดหมวด + ตัวอย่างหน้าตาจริงย่อ ๆ (เจ้าของเลือกแบบ C 2026-10-29) */}
+      <div className="grid gap-3 grid-cols-[repeat(auto-fill,minmax(min(100%,320px),1fr))]">
+        {DESIGN_GROUPS.map((g) => (
+          <section key={g.key} className="rounded-xl border border-slate-200 bg-white overflow-hidden" data-design-group={g.key}>
+            <button type="button" onClick={() => onGo(g.pages[0])} className="w-full flex items-center gap-1.5 px-3.5 pt-3 pb-2 text-left text-xs font-semibold text-slate-500 hover:text-slate-800">
+              <Icon name={g.icon} />
+              {g.label}
+              {g.pages.some((k) => dirty.includes(k)) && <span className="ml-1 w-2 h-2 rounded-full bg-amber-500" title="มีหัวข้อที่แก้แล้ว ยังไม่บันทึก" />}
+            </button>
+            <GroupPreview group={g.key} theme={theme} sampleItems={sampleItems} onGo={onGo} />
+            <div className="mt-1">
+              {g.pages.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => onGo(k)}
+                  data-design-tile={k}
+                  className="w-full flex items-center gap-2 px-3.5 py-1.5 border-t border-slate-100 text-left hover:bg-slate-50"
+                >
+                  <span className="text-sm font-medium text-slate-800 whitespace-nowrap">{DESIGN_PAGES[k].label}</span>
+                  <span className="ml-auto min-w-0 truncate text-xs text-slate-500 text-right">{pageSummary(k, theme, choices, { schedules: pending, lastVersion })}</span>
+                  {dirty.includes(k) && <span className="w-2 h-2 shrink-0 rounded-full bg-amber-500" title="แก้แล้ว ยังไม่บันทึก" />}
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
     </div>
   );
+}
+
+/** สีตัวอักษรอ่านง่ายบนพื้นนี้ (ตั้งเองไว้ = ใช้ค่าที่ตั้ง) */
+const readableOn = (bg: string, ink: string, set?: string) => set || (contrastRatio("#FFFFFF", bg) >= contrastRatio(ink, bg) ? "#FFFFFF" : ink);
+const RADIUS_PX: Record<string, number> = { sharp: 2, soft: 10, round: 18 };
+/** รูปสินค้าจาก /api/r2-image → ขอขนาดเล็ก (รูปเต็มใหญ่หลายพัน px) */
+const thumbOf = (url: string) => (url.includes("/api/r2-image") && !/[?&]w=/.test(url) ? `${url}&w=240` : url);
+const fontOf = (name: string) => `"${name}", sans-serif`;
+
+/** 👁 ตัวอย่างหน้าตาจริงย่อ ๆ ของหมวด — กดตรงไหนไปหน้านั้น (หมวดที่ไม่มีภาพ = ไม่มีตัวอย่าง) */
+function GroupPreview({ group, theme, sampleItems, onGo }: { group: string; theme: Theme; sampleItems: SampleItem[]; onGo: (page: PageKey) => void }) {
+  const c = theme.colors;
+  const box = "mx-3.5 mb-2 rounded-lg border border-slate-200 p-2.5 cursor-pointer hover:border-blue-400 transition";
+  if (group === "site") {
+    const btnRadius = theme.shape.button === "pill" ? 999 : theme.shape.button === "rounded" ? 8 : 2;
+    return (
+      <div className={box} style={{ background: c.page }} onClick={() => onGo("colors")} title="สีและธีม">
+        <div className="flex gap-1">
+          {[c.brand, c.brandDeep, c.ink, c.muted, c.surface].map((x, i) => (
+            <span key={i} className="h-5 flex-1 rounded border border-black/10" style={{ background: x }} />
+          ))}
+        </div>
+        <div className="mt-2 flex items-center gap-3">
+          <span className="shrink-0 whitespace-nowrap text-2xl leading-none" style={{ fontFamily: fontOf(theme.fonts.display), color: c.ink }}>
+            Aa กข
+          </span>
+          <span className="shrink-0 whitespace-nowrap px-3 py-1 text-xs" style={{ background: c.brand, color: resolveOnBrand(c), borderRadius: btnRadius, fontFamily: fontOf(theme.fonts.body) }}>
+            ปุ่มหลัก
+          </span>
+          <span className="ml-auto min-w-0 text-[11px] truncate" style={{ color: c.muted, fontFamily: fontOf(theme.fonts.body) }}>
+            {theme.fonts.display} / {theme.fonts.body}
+          </span>
+        </div>
+      </div>
+    );
+  }
+  if (group === "frame") {
+    const h = theme.header;
+    const headBg = h.bgKind === "custom" ? h.bgColor : h.bg === "brand" ? c.brand : h.bg === "ink" ? c.ink : h.bg === "surface" ? c.surface : c.page;
+    const headFg = readableOn(headBg, c.ink, h.textColor);
+    const f = theme.footer;
+    const footBg = f.bg === "custom" ? f.bgColor : f.bg === "brand" ? c.brand : f.bg === "surface" ? c.surface : c.ink;
+    const footFg = readableOn(footBg, c.ink, f.textColor);
+    const menu = (theme.menu.items ?? []).slice(0, 3).map((m) => m.label).filter(Boolean);
+    const logoImg = theme.logo.mode === "image" && theme.logo.imageKey ? keyUrl(theme.logo.imageKey, 160) : null;
+    return (
+      <div className="mx-3.5 mb-2 rounded-lg border border-slate-200 overflow-hidden" style={{ background: c.page }}>
+        <div className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:opacity-90" style={{ background: headBg, color: headFg }} onClick={() => onGo("header")} title="หัวเว็บ">
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              onGo("logo");
+            }}
+            title="โลโก้"
+            className="shrink-0"
+          >
+            {logoImg ? (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={logoImg} alt="" className="h-4 w-auto" />
+            ) : (
+              <span className="text-[11px] font-semibold">{theme.logo.text || theme.logo.mark}</span>
+            )}
+          </span>
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              onGo("menu");
+            }}
+            title="เมนู"
+            className="min-w-0 truncate text-[10px] opacity-90"
+          >
+            {menu.length ? menu.join(" · ") : "เมนูอัตโนมัติ"}
+          </span>
+          <span className="ml-auto shrink-0 opacity-80">
+            <Icon name="cart" />
+          </span>
+        </div>
+        <div className="h-5" />
+        <div className="flex items-end gap-1.5 px-2.5 py-1.5 cursor-pointer hover:opacity-90" style={{ background: footBg }} onClick={() => onGo("footer")} title="ท้ายเว็บ">
+          {Array.from({ length: Math.min(6, Math.max(2, f.columns?.length ?? 3)) }, (_, i) => (
+            <span key={i} className="h-1.5 flex-1 rounded-full" style={{ background: footFg, opacity: 0.45 }} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (group === "product") {
+    const ratio = RATIO_CSS[theme.card.imageRatio] ?? "4 / 5";
+    const r = theme.shape.cardRadius ?? RADIUS_PX[theme.radius] ?? 10;
+    const items = Array.from({ length: 4 }, (_, i) => sampleItems[i] ?? null);
+    return (
+      <div className={box} style={{ background: c.page }} onClick={() => onGo("card")} title="การ์ดสินค้า">
+        <div className="grid grid-cols-4 gap-1.5">
+          {items.map((it, i) => (
+            <div key={i} className="min-w-0">
+              <div className="w-full overflow-hidden border border-black/5" style={{ aspectRatio: ratio, borderRadius: Math.min(r, 12), background: c.surface }}>
+                {it?.images?.[0] && (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={thumbOf(it.images[0])} alt="" className="w-full h-full object-cover" />
+                )}
+              </div>
+              <span className="mt-1 block h-1 w-3/4 rounded-full" style={{ background: c.ink, opacity: 0.25 }} />
+              <span className="mt-0.5 block h-1 w-1/3 rounded-full" style={{ background: c.price || c.brand, opacity: 0.6 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return null;
 }
