@@ -39,10 +39,14 @@ function Opt<T extends string>({ value, onChange, options, def }: { value: T; on
   );
 }
 
-const Toggle = ({ checked, onChange, children }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode }) => (
-  <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+/** off = ปุ่มนี้ไม่มีผลกับแบบที่เลือกอยู่ (ยังกดได้ — แค่จาง + บอกเหตุผล ไม่งั้นกดแล้วงงว่าทำไมพรีวิวไม่เปลี่ยน) */
+const Toggle = ({ checked, onChange, children, off }: { checked: boolean; onChange: (v: boolean) => void; children: ReactNode; off?: string }) => (
+  <label className={`flex items-center gap-2 text-xs cursor-pointer ${off ? "text-slate-400" : "text-slate-700"}`} title={off}>
     <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-    {children}
+    <span>
+      {children}
+      {off && <span className="ml-1 text-[10px] text-amber-700">· {off}</span>}
+    </span>
   </label>
 );
 
@@ -138,6 +142,9 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
     set({ order: next });
   };
   const setAside = (p: Partial<AccountLook["aside"]>) => set({ aside: { ...value.aside, ...p } });
+  // ปุ่มที่มีผลเฉพาะบางแบบ (เว็บร้าน AccountClient) — จาง + บอกเหตุผล
+  const cardOff = value.nav === "panel" ? "แบบหน้าต่างแอปไม่มีบัตรสมาชิก" : value.header !== "card" ? "ใช้ได้เมื่อส่วนหัวเป็นแบบ “บัตรสมาชิก”" : undefined;
+  const customIcons = visibleTabs.filter((t) => t.icon).length;
 
   return (
     <div className="space-y-2" data-account-design>
@@ -154,6 +161,7 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
       </div>
       <Section title="① ส่วนหัว" open>
         {value.nav === "panel" && <p className="rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-800">แบบเมนู &quot;หน้าต่างแอป&quot; ย่อส่วนหัวไปอยู่มุมขวาบนในกรอบ (ชื่อ · ป้าย · รูปโปรไฟล์) — แบบหัวด้านล่างใช้กับเมนูแบบอื่น</p>}
+        <div className={value.nav === "panel" ? "opacity-50" : undefined} title={value.nav === "panel" ? "แบบหน้าต่างแอปไม่ใช้แบบส่วนหัวนี้" : undefined}>
         <Opt
           value={value.header}
           def={d.header}
@@ -165,6 +173,7 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
             { v: "card", l: "บัตรสมาชิก", d: "สีตามระดับ + แต้ม" },
           ]}
         />
+        </div>
         {value.header === "banner" && (
           <div className="max-w-xs">
             <span className={webForm.label}>รูปปก (ไม่ใส่ = ไล่สีจากสีหลัก)</span>
@@ -221,6 +230,9 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
           <Opt value={value.navIcons} def={d.navIcons} onChange={(v) => set({ navIcons: v })} options={[{ v: "emoji", l: "อีโมจิ" }, { v: "line", l: "ไอคอนเส้น" }, { v: "none", l: "ไม่มี" }]} />
           <Toggle checked={value.showCounts} onChange={(v) => set({ showCounts: v })}>โชว์ตัวเลขจำนวน</Toggle>
         </div>
+        {value.navIcons !== "none" && customIcons > 0 && (
+          <p className="text-[11px] text-amber-700">เมนู {customIcons} แถวเลือกไอคอนเองไว้ — เปลี่ยน อีโมจิ/ไอคอนเส้น แล้วแถวนั้นไม่เปลี่ยนตาม (กด ↺ ที่แถวเพื่อกลับไปใช้ไอคอนตามแบบ)</p>
+        )}
         <div className="space-y-1.5">
           <span className={webForm.label}>ลำดับ · ชื่อ · ไอคอน · ซ่อน (แต้ม/คูปองโชว์เฉพาะร้านที่เปิด · โปรไฟล์ซ่อนไม่ได้)</span>
           {tabs.map((t, i) => {
@@ -379,10 +391,10 @@ export function AccountPageSetting({ value, onChange, colors, onPreview }: { val
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1.5">
           <Toggle checked={value.glass} onChange={(v) => set({ glass: v })}>กล่องกระจกฝ้า (สวยคู่กับพื้นวงกลมเบลอ)</Toggle>
-          <Toggle checked={value.timeGreeting} onChange={(v) => set({ timeGreeting: v })}>ทักทายตามเวลา (อรุณสวัสดิ์ ☀️ / ราตรีสวัสดิ์ 🌙 · ใช้เมื่อไม่ได้ตั้งข้อความทักทาย)</Toggle>
+          <Toggle checked={value.timeGreeting} onChange={(v) => set({ timeGreeting: v })} off={value.greeting.trim() ? "ใช้เมื่อช่องข้อความทักทายว่าง" : value.nav === "panel" ? "แบบหน้าต่างแอปไม่มีข้อความทักทาย" : undefined}>ทักทายตามเวลา (อรุณสวัสดิ์ ☀️ / ราตรีสวัสดิ์ 🌙 · ใช้เมื่อไม่ได้ตั้งข้อความทักทาย)</Toggle>
           <Toggle checked={value.countUp} onChange={(v) => set({ countUp: v })}>ตัวเลขแต้มวิ่งจาก 0</Toggle>
-          <Toggle checked={value.tilt} onChange={(v) => set({ tilt: v })}>บัตรสมาชิกเอียงตามเมาส์ + แสงสะท้อน (หัวแบบบัตรสมาชิก)</Toggle>
-          <Toggle checked={value.flip} onChange={(v) => set({ flip: v })}>🔄 บัตรสมาชิกกดพลิกได้ — ด้านหลัง: สิทธิ์ของระดับ + QR ชวนเพื่อน (หัวแบบบัตรสมาชิก)</Toggle>
+          <Toggle checked={value.tilt} onChange={(v) => set({ tilt: v })} off={cardOff}>บัตรสมาชิกเอียงตามเมาส์ + แสงสะท้อน (หัวแบบบัตรสมาชิก)</Toggle>
+          <Toggle checked={value.flip} onChange={(v) => set({ flip: v })} off={cardOff}>🔄 บัตรสมาชิกกดพลิกได้ — ด้านหลัง: สิทธิ์ของระดับ + QR ชวนเพื่อน (หัวแบบบัตรสมาชิก)</Toggle>
           <Toggle checked={value.celebrate} onChange={(v) => set({ celebrate: v })}>🎉 พลุฉลองตอนเลื่อนระดับ / เข้าบัญชีครั้งแรก (ครั้งเดียวต่อเครื่อง)</Toggle>
           <Toggle checked={value.orderTimeline} onChange={(v) => set({ orderTimeline: v })}>🛤 ไทม์ไลน์สถานะในแต่ละออเดอร์ (รับคำสั่งซื้อ → เตรียมของ → จัดส่ง → สำเร็จ)</Toggle>
         </div>

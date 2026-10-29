@@ -16,7 +16,7 @@ import { ERPModal } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { GROUP_ORDER, SchemaForm, type SchemaFormContext } from "@/components/website-schema-form";
 import { FIELD_GROUP_LABEL, fieldChanged, matchShowIf, type FieldDef, type FieldGroup, type SectionSchema } from "@/lib/website-schema";
-import { getLayoutPref, setLayoutPref } from "@/lib/modal-layout-pref";
+import { SplitHandle, useSplitWidth } from "@/components/split-handle";
 
 type Nav = FieldGroup | "style" | "motion" | "items";
 type StudioDevice = { k: string; w: number; h: number; icon: string; label: string };
@@ -174,17 +174,8 @@ export function SectionStudio({
   }, [dev, scale, open, blockId, frameRef]);
 
   /* ── ความกว้างพรีวิว (ลากเส้นแบ่ง) ── */
-  const gridRef = useRef<HTMLDivElement>(null);
-  const [pvW, setPvW] = useState<number | null>(() => getLayoutPref(PV_PREF)?.w ?? null);   // null = ค่าเริ่ม 38%
-  const [dragging, setDragging] = useState(false);
-  const dragRef = useRef(false);   // อ่านใน pointermove ได้ทันที (state อัปเดตไม่ทันระหว่างลากเร็ว)
-  const maxPv = () => Math.max(PV_MIN, (gridRef.current?.clientWidth ?? 1200) - NAV_W - FIELDS_MIN - SPLIT_W);
-  const fitPv = (w: number) => Math.round(Math.max(PV_MIN, Math.min(maxPv(), w)));
-  const savePv = (w: number | null) => {
-    setPvW(w);
-    setLayoutPref(PV_PREF, w == null ? null : { w });
-  };
-  const isMaxPv = pvW != null && pvW >= maxPv() - 4;
+  // ↔ ของกลาง components/split-handle (ลาก = สด · ปล่อย = จำต่อคน · ดับเบิลคลิก = ค่าเริ่ม 38%)
+  const split = useSplitWidth(PV_PREF, { min: PV_MIN, reserve: NAV_W + FIELDS_MIN + SPLIT_W });
 
   const navBtn = (k: Nav, label: string, count: number | null, changed: number | boolean) => (
     <button
@@ -218,9 +209,9 @@ export function SectionStudio({
       storageKey="website-section-studio"
     >
       <div
-        ref={gridRef}
+        ref={split.containerRef}
         className="grid h-full min-h-[480px] gap-3 lg:gap-x-0 grid-cols-1 lg:grid-cols-[180px_minmax(320px,1fr)_14px_var(--pv-w)]"
-        style={{ ["--pv-w" as string]: pvW != null ? `min(${pvW}px, calc(100% - ${NAV_W + FIELDS_MIN + SPLIT_W}px))` : "minmax(320px,38%)" }}
+        style={split.style("minmax(320px,38%)")}
       >
         {/* ซ้าย: หมวด */}
         <nav className="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-y-auto lg:border-r lg:border-slate-200 lg:pr-3">
@@ -278,36 +269,7 @@ export function SectionStudio({
         </div>
 
         {/* เส้นแบ่ง: ลากปรับความกว้างพรีวิว · ดับเบิลคลิก = ค่าเริ่ม */}
-        <div
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="ปรับความกว้างพรีวิว"
-          title="ลากเพื่อปรับความกว้างพรีวิว · ดับเบิลคลิก = ค่าเริ่ม"
-          className="group hidden lg:flex cursor-col-resize select-none items-center justify-center"
-          style={{ touchAction: "none" }}
-          onPointerDown={(e) => {
-            try {
-              e.currentTarget.setPointerCapture(e.pointerId);
-            } catch {
-              /* ไม่มี pointer จริง (เช่น สคริปต์) — ลากต่อได้ตามเดิม */
-            }
-            dragRef.current = true;
-            setDragging(true);
-          }}
-          onPointerMove={(e) => {
-            if (!dragRef.current || !gridRef.current) return;
-            setPvW(fitPv(gridRef.current.getBoundingClientRect().right - e.clientX - SPLIT_W / 2));
-          }}
-          onPointerUp={(e) => {
-            if (!dragRef.current || !gridRef.current) return;
-            dragRef.current = false;
-            setDragging(false);
-            savePv(fitPv(gridRef.current.getBoundingClientRect().right - e.clientX - SPLIT_W / 2));
-          }}
-          onDoubleClick={() => savePv(null)}
-        >
-          <span className={`h-16 w-1 rounded-full transition-colors ${dragging ? "bg-blue-500" : "bg-slate-200 group-hover:bg-blue-400"}`} />
-        </div>
+        <SplitHandle split={split} />
 
         {/* ขวา: พรีวิวสด */}
         <div className="flex min-h-[360px] min-w-0 flex-col">
@@ -318,9 +280,9 @@ export function SectionStudio({
             <div className="flex items-center gap-1">
               <button
                 type="button"
-                onClick={() => savePv(isMaxPv ? null : fitPv(Number.MAX_SAFE_INTEGER))}
-                title={isMaxPv ? "คืนความกว้างพรีวิวเริ่มต้น" : "พรีวิวกว้างสุด (ช่องตั้งค่าแคบลง) — หรือลากเส้นแบ่งเอง"}
-                className={`hidden lg:inline-flex h-7 items-center rounded-md px-2 text-xs ${isMaxPv ? "bg-blue-600 text-white" : "border border-slate-200 text-slate-600 hover:border-slate-400"}`}
+                onClick={split.toggleMax}
+                title={split.isMax ? "คืนความกว้างพรีวิวเริ่มต้น" : "พรีวิวกว้างสุด (ช่องตั้งค่าแคบลง) — หรือลากเส้นแบ่งเอง"}
+                className={`hidden lg:inline-flex h-7 items-center rounded-md px-2 text-xs ${split.isMax ? "bg-blue-600 text-white" : "border border-slate-200 text-slate-600 hover:border-slate-400"}`}
               >
                 ⇔
               </button>
@@ -342,7 +304,7 @@ export function SectionStudio({
                   src={`${previewSrc}&_r=studio${nonce}`}
                   title="พรีวิว Section"
                   className="block border-0 bg-white"
-                  style={{ width: device.w, height: box.h / scale, transform: `scale(${scale})`, transformOrigin: "top left", pointerEvents: dragging ? "none" : undefined }}
+                  style={{ width: device.w, height: box.h / scale, transform: `scale(${scale})`, transformOrigin: "top left", pointerEvents: split.dragging ? "none" : undefined }}
                 />
               </div>
             ) : (

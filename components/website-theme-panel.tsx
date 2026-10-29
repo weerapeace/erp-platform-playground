@@ -47,6 +47,7 @@ import { DesignOverview } from "@/components/website-design/overview";
 import { DesignCard, DesignCardsProvider, DesignCardsToggleAll } from "@/components/website-design/design-card";
 import { SettingsNavLayout, type SettingsNavGroup } from "@/components/settings-nav";
 import { Icon } from "@/components/icon";
+import { SPLIT_HANDLE_W, SplitHandle, useSplitWidth } from "@/components/split-handle";
 import { DESIGN_GROUPS, DESIGN_PAGES, PREVIEW_PART_RULES, designGroupOf, dirtyDesignPages, isDesignPageKey, normTitle, previewFocusOf, previewRuleOf, searchDesign, type DesignPageKey } from "@/lib/website-design-nav";
 const FINE_COLOR_LABEL = "สีละเอียด";
 /** หน้าในแท็บดีไซน์ = ทะเบียนกลาง lib/website-design-nav (เมนูซ้ายจัดหมวด) */
@@ -63,7 +64,10 @@ const DEVICES: { k: Device; label: string; w: number; h: number; icon: string }[
 const withPreview = (path: string, pk: string | null) => withPreviewKey(`${path}${path.includes("?") ? "&" : "?"}preview=1`, pk);
 
 /** ระดับการย่อพรีวิว — "fit" = ย่อให้พอดีกล่อง (เหมือนแท็บจัดหน้าแรก) */
-type Zoom = "fit" | 0.5 | 0.75 | 1;
+/** "fit" = ย่อให้พอดีกล่อง · ตัวเลข = ซูมเอง (Ctrl+ลูกกลิ้ง / ปุ่ม − + · 25%–150%) */
+type Zoom = "fit" | number;
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 1.5;
 
 /** แท็บ → หน้าที่พรีวิว ("product" = สินค้าตัวอย่างของร้าน) · ไม่อยู่ในรายการ = อยู่หน้าเดิม */
 const TAB_PREVIEW_PAGE: Partial<Record<TabKey, string>> = { card: "/shop", listing: "/shop", product: "product", related: "product", checkout: "/checkout", pages: "/zz-page-not-found", campaign: "/" };
@@ -246,6 +250,11 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
     if (focusRef.current.length) iframeRef.current?.contentWindow?.postMessage({ type: "storefront-area-focus", prefixes: focusRef.current }, "*");
   }, [tab]);
   usePreviewMessages((d) => {
+    // 🔍 Ctrl+ลูกกลิ้ง/บีบนิ้วบนพรีวิว → เว็บร้าน (DesignAreaBridge) ส่งมาให้ซูมเฉพาะพรีวิว
+    if (d.type === "storefront-preview-zoom" && typeof d.deltaY === "number") {
+      zoomBy(d.deltaY < 0 ? 0.05 : -0.05);
+      return;
+    }
     if (d.type !== "storefront-area-picked" || typeof d.part !== "string") return;
     const rule = previewRuleOf(d.part);
     if (!rule) return;
@@ -256,6 +265,28 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   const previewBoxRef = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState(420);
   const [boxH, setBoxH] = useState(600);
+  // 🔍 ซูมเฉพาะพรีวิว: เริ่มจากขนาดที่เห็นอยู่ (พอดีจอ = scale ปัจจุบัน) แล้วขยับทีละ 5%
+  const scaleRef = useRef(1);
+  const zoomBy = useCallback((d: number) => {
+    // อัปเดต ref ทันที — หมุนลูกกลิ้งเร็ว ๆ หลายครั้งก่อน render จะได้สะสมต่อกัน
+    const next = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round((scaleRef.current + d) * 20) / 20));
+    scaleRef.current = next;
+    setZoom(next);
+  }, []);
+  // Ctrl+ลูกกลิ้งตรงขอบ/พื้นรอบพรีวิว (บนตัวเว็บ เบราว์เซอร์ส่งให้หน้าในกรอบ → มาทาง storefront-preview-zoom)
+  useEffect(() => {
+    const el = previewBoxRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      zoomBy(e.deltaY < 0 ? 0.05 : -0.05);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [loading, zoomBy]);
+  // ↔ ความกว้างพรีวิว — ลากเส้นแบ่ง (ของกลาง components/split-handle · จำต่อคน · ดับเบิลคลิก = ค่าเริ่ม 40%)
+  const split = useSplitWidth("website-design-preview", { min: 300, reserve: 420 + SPLIT_HANDLE_W });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -611,6 +642,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
   // 🌐 กำลังแก้ภาษาอังกฤษ → พรีวิวหน้าเว็บฉบับ /en (ลูกค้าภาษาอังกฤษเห็นแบบนี้)
   const previewSrc = previewSrcTh && contentLang === "en" ? previewInEnglish(previewSrcTh) : previewSrcTh;
   const scale = zoom === "fit" ? Math.min(1, Math.max(0.1, (boxW - 16) / dev.w)) : zoom;
+  scaleRef.current = scale;
   // สูงพอให้เนื้อเว็บเต็มกล่องหลังย่อแล้ว (ไม่งั้นเหลือที่ว่างข้างล่าง)
   const frameH = Math.max(dev.h, Math.round((boxH - 16) / scale));
 
@@ -679,7 +711,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
         searchPlaceholder="ค้นหา เช่น โลโก้ ส่งฟรี favicon"
         searchHits={(q) => searchDesign(q).filter((h) => h.card).map((h) => ({ id: `${h.page}|${h.card}`, label: h.label, crumb: h.crumb, onPick: () => goTo(h.page, h.card) }))}
       >
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,40%)] items-start">
+      <div ref={split.containerRef} className="grid gap-4 xl:gap-x-0 xl:grid-cols-[minmax(0,1fr)_14px_var(--pv-w)] items-start" style={split.style("minmax(320px,40%)")}>
         {/* ── ซ้าย: ตั้งค่า ── */}
         <div ref={settingsColRef} className="min-w-0 space-y-3">
           {/* 🗂 การ์ดในหน้านี้พับ/กางได้ + จำต่อคน (components/website-design/design-card) */}
@@ -772,6 +804,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
           </DesignCardsProvider>
         </div>
 
+        {/* ↔ ลากปรับความกว้างพรีวิว */}
+        <SplitHandle split={split} className="hidden xl:flex xl:sticky xl:top-4 xl:h-[72vh]" />
+
         {/* ── ขวา: พรีวิวเว็บจริง ── */}
         <div className="xl:sticky xl:top-4 min-w-0">
           <div className="flex flex-wrap items-center gap-1.5 mb-2">
@@ -783,17 +818,26 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             <select value={page} onChange={(e) => setPage(e.target.value)} className={inputCls} style={{ width: "auto" }}>
               {[...PAGES, ...(sampleProduct ? [{ path: `/product/${sampleProduct}`, label: "หน้าสินค้า (ตัวอย่าง)" }] : [])].map((p) => <option key={p.path} value={p.path}>{p.label}</option>)}
             </select>
-            <select
-              value={String(zoom)}
-              onChange={(e) => setZoom(e.target.value === "fit" ? "fit" : (Number(e.target.value) as Zoom))}
-              title="ขนาดที่แสดง"
-              className="rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-700"
-            >
-              <option value="fit">พอดีจอ</option>
-              <option value="0.5">50%</option>
-              <option value="0.75">75%</option>
-              <option value="1">100%</option>
-            </select>
+            {/* 🔍 ซูมพรีวิว: − ขนาด + (Ctrl+ลูกกลิ้ง/บีบนิ้วบนพรีวิวก็ได้) */}
+            <div className="inline-flex items-center rounded-lg border border-slate-200" data-preview-zoom>
+              <button type="button" onClick={() => zoomBy(-0.1)} title="ย่อพรีวิว (หรือ Ctrl+เลื่อนลูกกลิ้งลงบนพรีวิว)" className="px-2 py-1 text-xs text-slate-600 hover:text-slate-900">−</button>
+              <select
+                value={zoom === "fit" ? "fit" : String(zoom)}
+                onChange={(e) => setZoom(e.target.value === "fit" ? "fit" : Number(e.target.value))}
+                title="ขนาดที่แสดง · Ctrl+เลื่อนลูกกลิ้งบนพรีวิวเพื่อซูม"
+                className="border-x border-slate-200 px-1.5 py-1 text-xs text-slate-700 bg-white"
+              >
+                <option value="fit">พอดีจอ</option>
+                {zoom !== "fit" && ![0.5, 0.75, 1].includes(zoom) && <option value={String(zoom)}>{Math.round(zoom * 100)}%</option>}
+                <option value="0.5">50%</option>
+                <option value="0.75">75%</option>
+                <option value="1">100%</option>
+              </select>
+              <button type="button" onClick={() => zoomBy(0.1)} title="ขยายพรีวิว (หรือ Ctrl+เลื่อนลูกกลิ้งขึ้นบนพรีวิว)" className="px-2 py-1 text-xs text-slate-600 hover:text-slate-900">+</button>
+            </div>
+            <button type="button" onClick={split.toggleMax} title={split.isMax ? "คืนความกว้างพรีวิวเริ่มต้น" : "พรีวิวกว้างสุด — หรือลากเส้นแบ่งเอง"} className={`hidden xl:inline-flex px-2.5 py-1 rounded-lg border text-xs ${split.isMax ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 text-slate-600 hover:border-slate-400"}`}>
+              ⇔
+            </button>
             {campPreview && (
               <button type="button" onClick={() => setCampPreview(null)} className="px-2.5 py-1 rounded-lg border border-blue-400 bg-blue-50 text-xs text-blue-700" title="กลับไปดูธีมปกติ" data-camp-preview>
                 👁 ตัวอย่างแคมเปญ &quot;{campPreview.name}&quot; ✕
@@ -815,7 +859,9 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                 คลิกเลือกส่วน
               </button>
             )}
-            <span className="text-[10px] text-slate-400 ml-auto">{dev.w}px · {Math.round(scale * 100)}%</span>
+            <span className="text-[10px] text-slate-400 ml-auto cursor-pointer" title="ดับเบิลคลิก = พอดีจอ" onDoubleClick={() => setZoom("fit")}>
+              {dev.w}px · {Math.round(scale * 100)}%
+            </span>
           </div>
           {areaPick && (
             <p className="mb-2 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] text-blue-800">
@@ -863,6 +909,8 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
                       // ⚠️ สำคัญ: ถ้าไม่ล็อก iframe จะโดนบีบให้แคบตามกล่อง → เว็บข้างในสลับไปหน้าตามือถือ
                       flexShrink: 0,
                       display: "block",
+                      // ระหว่างลากเส้นแบ่ง: กันพรีวิวกินเมาส์ (ลากผ่านพรีวิวแล้วหลุด)
+                      pointerEvents: split.dragging ? "none" : undefined,
                     }}
                   />
                 </div>
@@ -875,7 +923,7 @@ export function WebsiteThemePanel({ shopSlug, shopId }: { shopSlug: string; shop
             )}
           </div>
           <p className="text-[10px] text-slate-400 mt-1.5 text-center">
-            สี/ฟอนต์เปลี่ยนทันที · โลโก้/Header/การ์ด กด ↻ หลังบันทึกร่างเพื่อดูผล
+            สี/ฟอนต์เปลี่ยนทันที · โลโก้/Header/การ์ด กด ↻ หลังบันทึกร่างเพื่อดูผล · Ctrl+เลื่อนลูกกลิ้ง = ซูมพรีวิว · ลากเส้นแบ่งซ้าย = ปรับความกว้าง
           </p>
         </div>
       </div>
