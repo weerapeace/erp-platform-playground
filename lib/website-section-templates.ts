@@ -5,7 +5,7 @@
  *          ตัด id ทิ้ง — ตอน "ใช้" ได้ id ใหม่ของ Section และชิ้นย่อยทุกครั้ง (ใช้ซ้ำหลายที่ไม่ชนกัน)
  * รับเฉพาะชนิด Section ที่ schema รู้จัก (กันเก็บของแปลก/บล็อกเก่าที่แก้ไม่ได้)
  */
-import { normalizeBlocks } from "@/lib/website-blocks";
+import { cleanBlockName, normalizeBlocks } from "@/lib/website-blocks";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
 
 export interface SectionTemplate {
@@ -36,6 +36,8 @@ export const cleanTemplateName = (v: unknown) => String(v ?? "").replace(/\s+/g,
 
 /** ชื่อตั้งต้นตอนกดบันทึก = ชื่อชนิด + หัวข้อของ Section (ถ้ามี) */
 export function defaultTemplateName(block: Record<string, unknown>): string {
+  const own = cleanBlockName(block.name);
+  if (own) return cleanTemplateName(own);
   const meta = SECTION_SCHEMAS[String(block.type)]?.meta;
   const title = typeof block.title === "string" ? block.title.trim() : "";
   return cleanTemplateName([meta?.label ?? String(block.type), title].filter(Boolean).join(" — "));

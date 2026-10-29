@@ -6,9 +6,13 @@ import {
   defaultLayout,
   BLOCK_META,
   DEFAULT_BLOCK_STYLE,
+  BLOCK_NAME_MAX,
+  blockDisplayName,
+  toPublicBlocks,
   type Block,
   type BlockType,
 } from "../website-blocks";
+import { defaultTemplateName } from "../website-section-templates";
 
 /**
  * กันบั๊กที่เคยเกิดจริง 2 ตัว:
@@ -215,5 +219,42 @@ describe("Section วิดีโอ — อัปโหลดเอง + ตั
     expect(up.some((i) => i.level === "error" && i.message.includes("ยังไม่ได้อัปโหลดคลิป"))).toBe(true);
     const link = validateBlocks(normalizeBlocks([{ id: "v4", type: "video", enabled: true, url: "https://youtu.be/abc" }]));
     expect(link.some((i) => i.message.includes("อัปโหลด"))).toBe(false);
+  });
+});
+
+describe("🏷 ชื่อ Section ที่ตั้งเอง (ไว้หาในตัวจัดหน้า)", () => {
+  const raw = [
+    { id: "g1", type: "hero", enabled: true, title: "สวัสดี", name: "  แบนเนอร์   ต้อนรับ  " },
+    { id: "g2", type: "hero", enabled: true, title: "x", name: "   " },
+    { id: "g3", type: "hero", enabled: true, title: "x", name: 42 },
+    { id: "g4", type: "hero", enabled: true, title: "x", name: "ก".repeat(80) },
+  ];
+  it("บันทึกแล้วชื่อไม่หาย · ตัดช่องว่างซ้ำ · ว่าง/ไม่ใช่ข้อความ = ไม่มีชื่อ · ยาวสุด 60", () => {
+    const out = normalizeBlocks(raw);
+    expect(out[0].name).toBe("แบนเนอร์ ต้อนรับ");
+    expect("name" in out[1]).toBe(false);
+    expect("name" in out[2]).toBe(false);
+    expect(out[3].name).toHaveLength(BLOCK_NAME_MAX);
+  });
+  it("ชื่อที่โชว์: ชื่อที่ตั้งเอง → ชื่อชนิด Section", () => {
+    const [named, plain] = normalizeBlocks(raw);
+    expect(blockDisplayName(named)).toBe("แบนเนอร์ ต้อนรับ");
+    expect(blockDisplayName(plain)).toBe(BLOCK_META.hero.label);
+    expect(blockDisplayName({ type: "product-grid" })).toBe("product-grid");
+  });
+  it("ส่งเว็บร้าน: ตัดชื่อออก (ลูกค้าไม่เห็น) · ของอื่นอยู่ครบ · ไม่แก้ของเดิม", () => {
+    const blocks = normalizeBlocks(raw);
+    const pub = toPublicBlocks(blocks);
+    expect(pub.some((b) => "name" in b)).toBe(false);
+    expect(pub[0]).toEqual((({ name: _n, ...rest }) => rest)(blocks[0]));
+    expect(blocks[0].name).toBe("แบนเนอร์ ต้อนรับ");
+  });
+  it("คำเตือนก่อนเผยแพร่บอกชื่อที่ตั้งเอง (หา Section เจอเร็ว)", () => {
+    const issues = validateBlocks(normalizeBlocks([{ id: "h1", type: "hero", enabled: true, name: "แบนเนอร์ลดราคา", visibility: { desktop: false, tablet: false, mobile: false } }]));
+    expect(issues.some((i) => i.message.startsWith("แบนเนอร์ลดราคา: ซ่อนทุกอุปกรณ์"))).toBe(true);
+  });
+  it("บันทึกเป็นแม่แบบ: ชื่อตั้งต้น = ชื่อที่ตั้งเอง", () => {
+    expect(defaultTemplateName({ type: "hero", title: "สวัสดี", name: "แบนเนอร์ต้อนรับ" })).toBe("แบนเนอร์ต้อนรับ");
+    expect(defaultTemplateName({ type: "hero", title: "สวัสดี" })).toBe(`${BLOCK_META.hero.label} — สวัสดี`);
   });
 });

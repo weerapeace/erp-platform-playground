@@ -12,6 +12,7 @@ import { guardWebsite } from "@/lib/website-api-guard";
 import { writeAuditFor } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { SECTION_SCHEMAS } from "@/lib/website-schema";
+import { blockDisplayName } from "@/lib/website-blocks";
 import { IMAGE_SET_SELECT } from "@/lib/website-image-sets-db";
 import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import {
@@ -82,7 +83,7 @@ function blockLabel(path: (string | number)[], root: unknown): string {
   if (!b) return "";
   const meta = SECTION_SCHEMAS[String(b.type)]?.meta;
   const title = typeof b.title === "string" && b.title.trim() ? ` “${b.title.trim().slice(0, 30)}”` : "";
-  return `${meta ? `${meta.icon} ${meta.label}` : String(b.type)}${title}`;
+  return `${meta ? `${meta.icon} ${blockDisplayName(b)}` : String(b.type)}${title}`;
 }
 
 /** ใช้อยู่ที่ไหนบ้าง (หน้าแรก · หน้าเว็บ · ธีม — ทั้งเผยแพร่และร่าง) */

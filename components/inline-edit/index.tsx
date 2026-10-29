@@ -14,6 +14,7 @@
  *   <InlineEdit type="number" value={qty}  onSave={(v) => saveQty(Number(v))} suffix="ชิ้น" />
  *   <InlineEdit type="text"   value={note} onSave={setNote} placeholder="หมายเหตุ" />
  *   <InlineEdit type="date" trigger="dblclick" .../>   // ในตาราง: คลิกแถวคือเปิดรายละเอียด จึงใช้ดับเบิลคลิกแก้
+ *   <InlineEdit dense trigger="dblclick" editKey={n} .../> // แถวแน่น ๆ (ต้นไม้/รายการ) · เปลี่ยน editKey = เปิดแก้จากเมนู "ตั้งชื่อ"
  *
  * หมายเหตุ: onSave จะได้ string เสมอ (ค่าว่าง = "") · ฝั่งเรียกเป็นคนตัดสินใจว่าจะบันทึกยังไง/เด้ง toast อะไร
  */
@@ -31,6 +32,9 @@ export type InlineEditProps = {
   className?: string;        // คลาสของข้อความตอนอ่านอย่างเดียว
   trigger?: "click" | "dblclick";   // ในตารางที่คลิกแถวมีความหมายอยู่แล้ว ให้ใช้ "dblclick"
   compact?: boolean;         // ใช้ในตาราง — ไม่ต้องมีปุ่ม ✏️ ให้รก
+  dense?: boolean;           // แถวแน่น ๆ (ต้นไม้ Section ฯลฯ) — ข้อความใช้ขนาดตามแถว ไม่เพิ่มความสูง
+  maxLength?: number;
+  editKey?: number;          // เปลี่ยนเป็นเลขใหม่ (ไม่ใช่ 0) = เปิดโหมดแก้ทันที เช่น กดเมนู "ตั้งชื่อ"
 };
 
 const thDate = (v: string) => {
@@ -42,7 +46,7 @@ const thDate = (v: string) => {
 export function InlineEdit({
   value, onSave, type = "text", disabled = false,
   placeholder = "— ใส่ค่า —", suffix, width, align = "left", className = "",
-  trigger = "click", compact = false,
+  trigger = "click", compact = false, dense = false, maxLength, editKey = 0,
 }: InlineEditProps) {
   const raw = value == null ? "" : String(value);
   const [editing, setEditing] = useState(false);
@@ -51,6 +55,7 @@ export function InlineEdit({
 
   useEffect(() => { if (!editing) setDraft(raw); }, [raw, editing]);
   useEffect(() => { if (editing) { ref.current?.focus(); if (type !== "date") ref.current?.select(); } }, [editing, type]);
+  useEffect(() => { if (editKey && !disabled) setEditing(true); }, [editKey, disabled]);
 
   const commit = async () => {
     setEditing(false);
@@ -62,17 +67,20 @@ export function InlineEdit({
   if (editing) {
     return (
       <input
-        ref={ref} type={type} value={draft} disabled={disabled}
+        ref={ref} type={type} value={draft} disabled={disabled} maxLength={maxLength}
         onChange={(e) => setDraft(e.target.value)}
         onBlur={() => void commit()}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
+        // อยู่ในแถวที่ลากย้ายได้ → ลากเลือกข้อความในช่องต้องไม่กลายเป็นลากแถว
+        onPointerDown={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
           if (e.key === "Enter") { e.preventDefault(); void commit(); }
-          if (e.key === "Escape") { setDraft(raw); setEditing(false); }
+          // Esc = ยกเลิกแค่ช่องนี้ (ไม่ให้ไปปิดป๊อป/เมนูที่ครอบอยู่)
+          if (e.key === "Escape") { e.stopPropagation(); setDraft(raw); setEditing(false); }
         }}
         style={width ? { width } : undefined}
-        className={`h-7 px-1.5 text-sm border border-blue-400 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 ${align === "right" ? "text-right" : ""} ${width ? "" : "w-full"}`}
+        className={`${dense ? "h-6 px-1 text-xs" : "h-7 px-1.5 text-sm"} border border-blue-400 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 ${align === "right" ? "text-right" : ""} ${width ? "" : "w-full"}`}
       />
     );
   }
@@ -89,8 +97,8 @@ export function InlineEdit({
       onClick={(e) => { if (trigger === "dblclick") return; if (!disabled) setEditing(true); e.stopPropagation(); }}
       onDoubleClick={(e) => { if (trigger !== "dblclick") return; if (!disabled) setEditing(true); e.stopPropagation(); }}
       title={disabled ? undefined : (trigger === "dblclick" ? "ดับเบิลคลิกเพื่อแก้" : "กดเพื่อแก้")}
-      className={`group inline-flex items-center gap-1 h-7 px-1.5 rounded-lg max-w-full ${disabled ? "cursor-default" : "hover:bg-slate-100"} ${align === "right" ? "justify-end" : ""}`}>
-      <span className={`truncate ${has ? `text-sm ${className || "text-slate-700"}` : "text-[12px] text-slate-400 italic"} ${type === "number" ? "tabular-nums" : ""}`}>{shown}</span>
+      className={`group inline-flex items-center gap-1 max-w-full ${dense ? "rounded text-left" : `h-7 px-1.5 rounded-lg ${disabled ? "cursor-default" : "hover:bg-slate-100"}`} ${align === "right" ? "justify-end" : ""}`}>
+      <span className={`truncate ${has ? `${dense ? "" : "text-sm"} ${className || "text-slate-700"}` : `${dense ? "" : "text-[12px]"} text-slate-400 italic`} ${type === "number" ? "tabular-nums" : ""}`}>{shown}</span>
       {has && suffix && <span className="text-[11px] text-slate-400 shrink-0">{suffix}</span>}
       {!disabled && !compact && <span className="text-[10px] text-slate-300 group-hover:text-blue-500 shrink-0">✏️</span>}
       {!disabled && compact && <span className="text-[10px] text-transparent group-hover:text-blue-400 shrink-0">✏️</span>}

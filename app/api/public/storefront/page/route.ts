@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { allowDraftPreview } from "@/lib/storefront-preview-access";
-import { normalizeBlocks } from "@/lib/website-blocks";
+import { normalizeBlocks, toPublicBlocks } from "@/lib/website-blocks";
 import { resolveForStorefront } from "@/lib/website-image-sets-db";
 import { cleanPageMeta, pageLive } from "@/lib/website-help-center";
 import { storefrontCors, corsPreflight } from "@/lib/storefront-cors";
@@ -142,7 +142,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     title: row.title,
     title_en: orUndef(meta.name_en),
     seo: { title: meta.title, description: meta.description, title_en: orUndef(meta.title_en), description_en: orUndef(meta.description_en) },
-    layout: normalizeBlocks(layout),
+    layout: toPublicBlocks(normalizeBlocks(layout)),
     help,
     pageType: row.page_type === "post" ? "post" : "static",
     bare: meta.bare || undefined,

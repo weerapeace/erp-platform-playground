@@ -25,9 +25,10 @@
  */
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, SECTION_PRESETS, childPlacePatch, matchShowIf, newChildId, newChildValues, sectionHasHeading, type ChildAddOption, type ChildSpec, type SectionPreset } from "@/lib/website-schema";
-import { blockSummary, normalizeBlocks, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, patchDecorPlace, type BlockStyle, type BlockType, type DecorScreen, type ValidationIssue } from "@/lib/website-blocks";
+import { blockDisplayName, blockSummary, cleanBlockName, normalizeBlocks, BLOCK_NAME_MAX, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, patchDecorPlace, type BlockStyle, type BlockType, type DecorScreen, type ValidationIssue } from "@/lib/website-blocks";
 import { buildAiPrompt } from "@/lib/website-ai-prompt";
 import { ERPModal } from "@/components/modal";
+import { InlineEdit } from "@/components/inline-edit";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { keyFromUrl } from "@/components/website-canvas-media";
 import { loadStorefrontProducts } from "@/lib/website-data";
@@ -211,6 +212,8 @@ export function WebsiteBuilder({
   const [txError, setTxError] = useState<{ scope: string; msg: string } | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  // 🏷 เมนู "ตั้งชื่อ" → เปิดช่องแก้ชื่อในแถวของ Section นั้น (n = เลขใหม่ทุกครั้งที่กด)
+  const [renameReq, setRenameReq] = useState<{ id: string; n: number } | null>(null);
   /* ลากวาง */
   const [drag, setDrag] = useState<Drag | null>(null);
   const [ghost, setGhost] = useState({ x: 0, y: 0 });
@@ -349,12 +352,29 @@ export function WebsiteBuilder({
       const i = cur.findIndex((b) => b.id === id);
       if (i < 0) return;
       const copy = freshCopy(cur[i]);
+      if (copy.name) copy.name = cleanBlockName(`${copy.name} (สำเนา)`);
       const next = [...cur];
       next.splice(i + 1, 0, copy);
       onChange(next);
       onSelect({ blockId: copy.id });
     },
     [onChange, onSelect]
+  );
+  /** 🏷 ตั้งชื่อ Section (ว่าง / ตรงกับชื่อชนิด = ลบชื่อ กลับไปใช้ชื่อชนิด) */
+  const renameSection = useCallback(
+    (id: string, raw: string) => {
+      const b = blocksRef.current.find((x) => x.id === id);
+      if (!b) return;
+      const name = cleanBlockName(raw);
+      const typeLabel = SECTION_SCHEMAS[b.type]?.meta.label ?? b.type;
+      if (!name || name === typeLabel) {
+        if (!("name" in b)) return;
+        onChange(blocksRef.current.map((x) => { if (x.id !== id) return x; const c = { ...x }; delete c.name; return c; }));
+        return;
+      }
+      if (name !== b.name) patchBlock(id, { name });
+    },
+    [onChange, patchBlock]
   );
 
   // 🧪 ทดสอบ A/B: Section นี้เป็นแบบ A + ทำสำเนาเป็นแบบ B ต่อท้าย (ชื่อการทดสอบเดียวกัน) → แก้แบบ B ได้เลย
@@ -523,7 +543,7 @@ export function WebsiteBuilder({
   const formCtx = useMemo<SchemaFormContext>(
     () => ({
       ...ctx,
-      sections: blocks.map((b, i) => ({ id: b.id, label: `${i + 1}. ${SECTION_SCHEMAS[b.type]?.meta.label ?? b.type} — ${blockSummary(b as unknown as Record<string, unknown>)}`.slice(0, 80) })),
+      sections: blocks.map((b, i) => ({ id: b.id, label: `${i + 1}. ${blockDisplayName(b)} — ${blockSummary(b as unknown as Record<string, unknown>)}`.slice(0, 80) })),
     }),
     [ctx, blocks]
   );
@@ -941,7 +961,7 @@ export function WebsiteBuilder({
   const missingBySection = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of pageSlots) if (s.status === "empty" || s.status === "stale") m.set(s.blockId, (m.get(s.blockId) ?? 0) + 1);
-    return blocks.filter((b) => m.has(b.id)).map((b) => ({ id: b.id, label: SECTION_SCHEMAS[b.type]?.meta.label ?? b.type, icon: SECTION_SCHEMAS[b.type]?.meta.icon ?? "🧩", n: m.get(b.id)! }));
+    return blocks.filter((b) => m.has(b.id)).map((b) => ({ id: b.id, label: blockDisplayName(b), icon: SECTION_SCHEMAS[b.type]?.meta.icon ?? "🧩", n: m.get(b.id)! }));
   }, [pageSlots, blocks]);
 
   /**
@@ -1272,6 +1292,7 @@ export function WebsiteBuilder({
           const isOpen = expanded.has(b.id);
           const hasIssue = errors.some((x) => x.blockId === b.id);
           const label = info?.label ?? b.type;
+          const own = cleanBlockName(b.name);
           const icon = info?.icon ?? "🧩";
           return (
             <Fragment key={b.id}>
@@ -1301,8 +1322,24 @@ export function WebsiteBuilder({
                   )}
                   <span className="text-sm leading-none">{icon}</span>
                   <span className="flex-1 min-w-0">
-                    <span className={`block text-xs truncate ${b.enabled ? "text-slate-800" : "text-slate-400 line-through"} ${isSel ? "font-medium" : ""}`}>{label}</span>
+                    {schema ? (
+                      <span data-sec-name className="flex min-w-0 text-xs">
+                        <InlineEdit
+                          dense
+                          compact
+                          trigger="dblclick"
+                          value={own || label}
+                          maxLength={BLOCK_NAME_MAX}
+                          editKey={renameReq?.id === b.id ? renameReq.n : 0}
+                          onSave={(v) => renameSection(b.id, v)}
+                          className={`${b.enabled ? "text-slate-800" : "text-slate-400 line-through"} ${isSel || own ? "font-medium" : ""}`}
+                        />
+                      </span>
+                    ) : (
+                      <span className={`block text-xs truncate ${b.enabled ? "text-slate-800" : "text-slate-400 line-through"} ${isSel ? "font-medium" : ""}`}>{label}</span>
+                    )}
                     <span className="block text-[10px] text-slate-400 truncate">
+                      {own && `${label} · `}
                       {schema ? blockSummary(b) : "บล็อกของระบบเดิม"}
                       {c && !isOpen && ` · ${c.spec.itemLabel} ${c.list.length}`}
                       {visibilityLabel(b.visibility) && ` · ${visibilityLabel(b.visibility)}`}
@@ -1418,6 +1455,9 @@ export function WebsiteBuilder({
     <>
       <div className="fixed inset-0 z-40" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }} />
       <div className="fixed z-50 w-52 rounded-xl border border-slate-200 bg-white shadow-lg py-1" style={{ left: Math.max(4, Math.min(menu.x, window.innerWidth - 220)), top: Math.max(4, Math.min(menu.y, window.innerHeight - 330)) }}>
+        {SECTION_SCHEMAS[menuBlock.type] && (
+          <button className={menuItem} onClick={() => { setRenameReq({ id: menuBlock.id, n: Date.now() }); setMenu(null); }}>🏷 ตั้งชื่อ <span className="ml-auto text-slate-400">ดับเบิลคลิก</span></button>
+        )}
         <button className={menuItem} onClick={() => { duplicateSection(menuBlock.id); setMenu(null); }}>📑 ทำสำเนา <span className="ml-auto text-slate-400">Ctrl+D</span></button>
         <button className={menuItem} onClick={() => { patchBlock(menuBlock.id, { enabled: !menuBlock.enabled }); setMenu(null); }}>{menuBlock.enabled ? "🚫 ซ่อน Section" : "👁️ แสดง Section"}</button>
         <button className={menuItem} disabled={menuIdx <= 0} onClick={() => { moveSection(menuBlock.id, -1); setMenu(null); }}>▲ เลื่อนขึ้น</button>
@@ -1629,6 +1669,19 @@ export function WebsiteBuilder({
           <button onClick={() => duplicateSection(selBlock.id)} title="ทำสำเนา (Ctrl+D)" className={iconBtn}>📑</button>
           <button onClick={() => setTplSave(selBlock)} title="บันทึกเป็นแม่แบบ (ใช้ซ้ำกับหน้าอื่น/ร้านอื่น)" className={iconBtn}>💾</button>
           <button onClick={() => removeSection(selBlock.id)} title="ลบ (Delete)" className={`${iconBtn} hover:!border-red-300 hover:!text-red-600`}>🗑️</button>
+        </div>
+        <div data-sec-name-field className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-400">
+          <span className="shrink-0">🏷 ชื่อ</span>
+          <span className="flex-1 min-w-0 flex text-xs">
+            <InlineEdit
+              dense
+              value={cleanBlockName(selBlock.name)}
+              maxLength={BLOCK_NAME_MAX}
+              placeholder="ตั้งชื่อไว้หาเอง (ลูกค้าไม่เห็น)"
+              onSave={(v) => renameSection(selBlock.id, v)}
+              className="text-slate-700 font-medium"
+            />
+          </span>
         </div>
         {!selBlock.enabled && <p className="mt-1 text-[11px] text-amber-600">Section นี้ซ่อนอยู่ — ไม่แสดงบนเว็บ</p>}
         <div className="flex mt-1.5">

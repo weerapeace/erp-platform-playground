@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { allowDraftPreview } from "@/lib/storefront-preview-access";
 import { dropPageLayout } from "@/lib/website-drop-page";
+import { toPublicBlocks } from "@/lib/website-blocks";
 import { storefrontCors, corsPreflight, corsJson } from "@/lib/storefront-cors";
 import { shopBySlug } from "@/lib/website-shop";
 
@@ -40,5 +41,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const { data } = await sb.from("store_new_drops").select("layout, draft_layout").eq("id", id).eq("shop_id", s.id).maybeSingle();
   if (!data) return json({ layout: null });
-  return json({ layout: dropPageLayout(data as { layout: unknown; draft_layout: unknown }, preview) });
+  const layout = dropPageLayout(data as { layout: unknown; draft_layout: unknown }, preview);
+  return json({ layout: layout && toPublicBlocks(layout) });
 }

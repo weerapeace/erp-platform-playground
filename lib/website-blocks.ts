@@ -467,6 +467,27 @@ export interface BlockBase {
   style: BlockStyle;
   /** 🧪 ทดสอบ A/B — Section ที่ชื่อการทดสอบเดียวกัน: ลูกค้าครึ่งหนึ่งเห็นแบบ A อีกครึ่งเห็นแบบ B (ไม่ตั้ง = เห็นทุกคน) */
   ab?: BlockAb;
+  /** 🏷 ชื่อที่ตั้งเอง ไว้หา Section ในตัวจัดหน้า (ไม่ส่งไปเว็บร้าน · ว่าง = ใช้ชื่อชนิด Section) */
+  name?: string;
+}
+
+/** 🏷 ชื่อ Section ที่ตั้งเอง: ตัดช่องว่างซ้ำ · ยาวสุด 60 ตัว · ไม่ใช่ข้อความ = "" */
+export const BLOCK_NAME_MAX = 60;
+export const cleanBlockName = (v: unknown): string => (typeof v === "string" ? v.replace(/\s+/g, " ").trim().slice(0, BLOCK_NAME_MAX) : "");
+
+/** ชื่อที่โชว์ในตัวจัดหน้า/คำเตือน/ที่ที่ผูกรูป: ชื่อที่ตั้งเอง → ชื่อชนิด Section → รหัสชนิด */
+export function blockDisplayName(b: { type?: unknown; name?: unknown }): string {
+  return cleanBlockName(b.name) || SECTION_SCHEMAS[String(b.type)]?.meta.label || String(b.type ?? "");
+}
+
+/** ส่งให้เว็บร้าน: ตัดของที่ใช้เฉพาะหลังบ้าน (🏷 ชื่อที่ตั้งไว้หา Section) — ลูกค้าไม่ต้องเห็น */
+export function toPublicBlocks(blocks: Block[]): Block[] {
+  return blocks.map((b) => {
+    if (!b || typeof b !== "object" || !("name" in b)) return b;
+    const c = { ...b };
+    delete c.name;
+    return c;
+  });
 }
 
 export interface BlockAb {
@@ -1873,6 +1894,8 @@ export function normalizeBlocks(raw: unknown): Block[] {
     };
     const ab = sanitizeAb(b.ab);
     if (ab) block.ab = ab;
+    const name = cleanBlockName(b.name);
+    if (name) block.name = name;
     for (const fd of schema.fields) block[fd.key] = sanitizeField(fd, b[fd.key]);
     sanitizeTranslations(schema.fields, b, block); // 🌐 ภาษาอังกฤษ (`<key>_en`) — ไม่งั้นถูกทิ้งตอนบันทึก
     if (schema.children) block[schema.children.key] = sanitizeChildren(schema.children, b[schema.children.key], id);
@@ -1919,7 +1942,7 @@ export function validateBlocks(blocks: Block[], opts: { helpPage?: boolean } = {
     const schema = SECTION_SCHEMAS[b.type];
     // บล็อกชนิดที่ไม่รู้จัก (ของร้านระบบเดิม) ไม่มี schema — ข้ามไป อย่าตรวจ อย่าพัง
     if (!schema) continue;
-    const label = schema.meta.label;
+    const label = blockDisplayName(b);
     const rec = b as unknown as Record<string, unknown>;
 
     const v = b.visibility;

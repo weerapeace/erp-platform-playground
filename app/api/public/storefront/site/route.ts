@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { allowDraftPreview } from "@/lib/storefront-preview-access";
-import { normalizeBlocks } from "@/lib/website-blocks";
+import { normalizeBlocks, toPublicBlocks } from "@/lib/website-blocks";
 import { normalizeTheme } from "@/lib/website-theme";
 import { loadParentWebFields } from "@/lib/website-parent-fields";
 import { normalizeFieldMap } from "@/lib/website-field-map";
@@ -140,7 +140,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     ...(thanksCoupon ? { thanksCoupon } : {}),
     /** โครงหน้าแรก — [] = ยังไม่เคยตั้ง ให้เว็บใช้โครงเริ่มต้นของตัวเอง */
     // normalize ก่อนส่ง: เติม id ให้ Block ย่อยเหมือนที่ตัวจัดหน้าเห็น (บล็อกชนิดเก่าของร้านอื่นถูกเก็บไว้ทั้งก้อน)
-    layout: normalizeBlocks(layoutSource),
+    layout: toPublicBlocks(normalizeBlocks(layoutSource)),
     /**
      * หมวดสินค้าของร้าน [{key,label,icon}] — เจ้าของเพิ่ม/แก้เองได้ในแท็บจับคู่ฟิลด์
      * เว็บร้านต้องวาดเมนูหมวดจากรายการนี้ ห้ามฝังไว้ในโค้ดเว็บ ไม่งั้นเพิ่มหมวดแล้วไม่ขึ้น
