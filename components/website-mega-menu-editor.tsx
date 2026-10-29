@@ -43,6 +43,8 @@ import {
   MEGA_BLOCK_KINDS,
   MEGA_LIMITS,
   MEGA_LINK_KINDS,
+  MEGA_LINK_EFFECTS,
+  MEGA_ARROW_CHAR,
   MEGA_LINK_STYLES,
   MEGA_RATIOS,
   MEGA_TEMPLATES,
@@ -62,11 +64,19 @@ import {
   type MegaCard,
   type MegaLink,
   type MegaLinkStyle,
+  type MegaLinkEffect,
   type MegaPanel,
   type MegaTemplate,
   type MenuTemplate,
 } from "@/lib/website-mega-menu";
 import { webForm } from "@/lib/website-form-styles";
+import { FontSelect } from "@/components/font-select";
+import { DEFAULT_FONT_NAMES, canvasFontNames, canvasFontOptions, fontFamilyOf } from "@/components/website-text-pickers";
+
+/** 🔤 ฟอนต์ลิงก์/หัวข้อในแผงเมนู (ชุดเดียวกับ CANVAS_FONTS · auto = ตามเมนู) */
+const LINK_FONT_OPTIONS = canvasFontOptions(DEFAULT_FONT_NAMES, "ตามเมนู");
+const LINK_FONT_NAMES = canvasFontNames(DEFAULT_FONT_NAMES);
+const fontFamilyCss = (f: string) => `"${fontFamilyOf(f, DEFAULT_FONT_NAMES)}", sans-serif`;
 
 export interface MegaEditorCtx {
   link: SchemaFormContext;
@@ -227,7 +237,7 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
     <div className="space-y-1">
       {links.map((l, i) => {
         const more = moreId === l.id;
-        const extras = (l.hoverImageKey ? 1 : 0) + (l.bold ? 1 : 0) + (l.textColor ? 1 : 0) + (l.showFrom || l.showUntil ? 1 : 0);
+        const extras = (l.hoverImageKey ? 1 : 0) + (l.bold ? 1 : 0) + (l.textColor ? 1 : 0) + (l.showFrom || l.showUntil ? 1 : 0) + (l.effect ? 1 : 0) + (l.font ? 1 : 0) + (l.arrow ? 1 : 0) + (l.underline ? 1 : 0);
         const kind = l.kind ?? "link";
         const colPick = cols > 1 && (
           <select
@@ -281,8 +291,8 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                 return (
                   <>
                     <LangInput
-                      className={`${mini} flex-1 min-w-0 ${l.bold ? "font-semibold" : ""} ${auto ? "placeholder:text-slate-700" : ""}`}
-                      style={l.textColor ? { color: l.textColor } : undefined}
+                      className={`${mini} flex-1 min-w-0 ${l.bold ? "font-semibold" : ""} ${l.underline ? "underline underline-offset-2" : ""} ${auto ? "placeholder:text-slate-700" : ""}`}
+                      style={l.textColor || l.font ? { color: l.textColor || undefined, fontFamily: l.font ? fontFamilyCss(l.font) : undefined } : undefined}
                       obj={l}
                       k="label"
                       maxLength={60}
@@ -325,7 +335,7 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                   type="button"
                   onClick={() => setMoreId(more ? null : l.id)}
                   className={`h-7 px-1.5 rounded-md border text-[11px] ${more ? "border-blue-500 text-blue-700 bg-blue-50" : extras ? "border-blue-200 text-blue-700" : "border-slate-200 text-slate-500"}`}
-                  title="รูปตอนชี้ · ตัวหนา/สี · ตั้งเวลาแสดง"
+                  title="รูปตอนชี้ · ตัวหนา/สี · ✨ เอฟเฟกต์/ฟอนต์/ลูกศร/เส้นใต้ · ตั้งเวลาแสดง"
                 >
                   ⋯{extras ? ` ${extras}` : ""}
                 </button>
@@ -374,6 +384,43 @@ function LinksEditor({ links, style, onChange, ctx, max = MEGA_LIMITS.links, pla
                       )}
                     </div>
                   </div>
+                </div>
+                {/* ✨ หน้าตาตัวอักษร: เอฟเฟกต์ · ฟอนต์ · ลูกศรท้ายชื่อ · เส้นใต้ (ค่าเริ่ม = เหมือนเดิม) */}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-slate-600" data-mega-link-look>
+                  <label className="flex items-center gap-1">
+                    ✨ เอฟเฟกต์
+                    <select className={`${mini} w-[7.5rem] ${l.effect ? "border-blue-300 text-blue-700" : ""}`} value={l.effect ?? ""} onChange={(e) => set(l.id, { effect: e.target.value as MegaLinkEffect })}>
+                      {MEGA_LINK_EFFECTS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <span className="flex items-center gap-1">
+                    🔤 ฟอนต์
+                    <span className="w-44">
+                      <FontSelect size="sm" value={l.font || "auto"} options={LINK_FONT_OPTIONS} googleFonts={LINK_FONT_NAMES} onChange={(v) => set(l.id, { font: v === "auto" ? "" : v })} />
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-1">
+                    ลูกศร
+                    {(["", "right", "up-right", "chevron"] as const).map((a) => (
+                      <button
+                        key={a || "none"}
+                        type="button"
+                        onClick={() => set(l.id, { arrow: a })}
+                        className={`h-7 min-w-[1.9rem] rounded-md border px-1.5 ${(l.arrow ?? "") === a ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-500 hover:border-slate-400"}`}
+                        title={a ? `ลูกศร ${MEGA_ARROW_CHAR[a]} ท้ายชื่อ (ชี้แล้วขยับ)` : "ไม่มีลูกศร"}
+                      >
+                        {a ? MEGA_ARROW_CHAR[a] : "ไม่มี"}
+                      </button>
+                    ))}
+                  </span>
+                  <label className="flex items-center gap-1 cursor-pointer">
+                    <input type="checkbox" className="w-3.5 h-3.5 accent-blue-600" checked={!!l.underline} onChange={(e) => set(l.id, { underline: e.target.checked })} />
+                    เส้นใต้
+                  </label>
                 </div>
                 {/* 🌐 ชื่อภาษาอังกฤษของลิงก์ (หน้า /en) — ว่าง = ลิงก์หมวดใช้ชื่ออังกฤษของหมวด · ลิงก์อื่นใช้ชื่อไทย */}
                 {(() => {

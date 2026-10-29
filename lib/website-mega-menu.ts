@@ -61,7 +61,27 @@ export interface MegaLink {
   showUntil: string;
   /** คอลัมน์ย่อยที่ลิงก์นี้อยู่ เมื่อแบ่งคอลัมน์ (1-3) · 0 = อัตโนมัติ (ลงคอลัมน์ที่สั้นกว่า) */
   col: number;
+  /** ✨ เอฟเฟกต์ตัวอักษร ("" = ไม่มี) · ฟอนต์ ("" = ตามเมนู) · ลูกศรท้ายชื่อ · เส้นใต้ — ลิงก์และหัวข้อ */
+  effect: MegaLinkEffect;
+  font: string;
+  arrow: MegaLinkArrow;
+  underline: boolean;
 }
+/** ✨ เอฟเฟกต์ตัวอักษรของลิงก์/หัวข้อในแผงเมนู — เว็บร้านใช้ data-loop ของกลาง (shake = wiggle · blink = twinkle) */
+export type MegaLinkEffect = "" | "shake" | "pulse" | "bounce" | "float" | "blink" | "shine";
+export const MEGA_LINK_EFFECTS: { value: MegaLinkEffect; label: string }[] = [
+  { value: "", label: "ไม่มี" },
+  { value: "shake", label: "สั่นเป็นระยะ" },
+  { value: "pulse", label: "เต้นตุบ ๆ" },
+  { value: "bounce", label: "เด้ง" },
+  { value: "float", label: "ลอยขึ้นลง" },
+  { value: "blink", label: "กะพริบ" },
+  { value: "shine", label: "แสงวิ้งผ่าน" },
+];
+export type MegaLinkArrow = "" | "right" | "up-right" | "chevron";
+export const MEGA_ARROW_CHAR: Record<Exclude<MegaLinkArrow, "">, string> = { right: "→", "up-right": "↗", chevron: "›" };
+/** ฟอนต์ที่เลือกได้ — ชื่อตรงกับ CANVAS_FONTS (ERP) / CANVAS_FONT_FAMILIES (เว็บร้านโหลดเอง) · display/body = ฟอนต์ธีม */
+export const MEGA_LINK_FONTS = ["display", "body", "Parisienne", "Great Vibes", "Cormorant Garamond", "Playfair Display", "Trirong", "Charm", "Mali", "Itim", "Kanit", "Prompt"] as const;
 export interface MegaGroup {
   id: string;
   label: string;
@@ -286,7 +306,7 @@ const megaIconOf = (v: unknown): string => {
 
 /* ───────── ตัวสร้างค่าใหม่ ───────── */
 const rid = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-export const newMegaLink = (label = "ลิงก์ใหม่", href = "", kind: MegaLinkKind = "link"): MegaLink => ({ id: rid("l"), kind, label, href, desc: "", icon: "", iconKey: null, color: "", imageKey: null, badge: "", hoverImageKey: null, bold: false, textColor: "", showFrom: "", showUntil: "", col: 0 });
+export const newMegaLink = (label = "ลิงก์ใหม่", href = "", kind: MegaLinkKind = "link"): MegaLink => ({ id: rid("l"), kind, label, href, desc: "", icon: "", iconKey: null, color: "", imageKey: null, badge: "", hoverImageKey: null, bold: false, textColor: "", showFrom: "", showUntil: "", col: 0, effect: "", font: "", arrow: "", underline: false });
 /** ➖ แถวตัวคั่น (เส้น/เว้นบรรทัด) — ข้อมูลที่ยังไม่ผ่าน normalize อาจไม่มี kind = ลิงก์ */
 export const megaIsSep = (l: { kind?: MegaLinkKind }) => l.kind === "divider" || l.kind === "space";
 /** แถวตัวคั่น/หัวข้อใหม่ (ปุ่มข้าง "＋ เพิ่มลิงก์") — หัวข้อตั้งต้นเป็นตัวหนา */
@@ -480,6 +500,10 @@ function cleanLink(r: Record<string, unknown>, i: number): MegaLink | null {
     showFrom: when(r.showFrom),
     showUntil: when(r.showUntil),
     col: int(r.col, 0, 0, 3),
+    effect: oneOf(r.effect, ["", "shake", "pulse", "bounce", "float", "blink", "shine"] as const, ""),
+    font: oneOf(r.font, ["", ...MEGA_LINK_FONTS] as const, ""),
+    arrow: oneOf(r.arrow, ["", "right", "up-right", "chevron"] as const, ""),
+    underline: r.underline === true,
   };
 }
 const cleanLinks = (v: unknown, max: number) => arr(v, max).map(cleanLink).filter((x): x is MegaLink => !!x);

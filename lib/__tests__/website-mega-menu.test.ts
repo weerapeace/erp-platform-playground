@@ -154,6 +154,25 @@ describe("แผงเมนูใหญ่ รอบ 2", () => {
     expect(normalizeMenuBehavior({ mobileOpen: "first" }).mobileOpen).toBe("first");
     expect(normalizeMenuBehavior({ mobileOpen: "everything" }).mobileOpen).toBe("none");
   });
+  it("✨ ลิงก์/หัวข้อ: เอฟเฟกต์ · ฟอนต์ · ลูกศร · เส้นใต้ — เดิม = ไม่มี · ค่าแปลก = ไม่มี", () => {
+    const l = newMegaLink("All Products", "/shop");
+    expect([l.effect, l.font, l.arrow, l.underline]).toEqual(["", "", "", false]);
+    const panel = normalizeMegaPanel({
+      layout: "columns",
+      blocks: [
+        {
+          kind: "links",
+          links: [
+            { label: "SALE", href: "/shop", effect: "shake", font: "Parisienne", arrow: "up-right", underline: true },
+            { label: "หัวข้อ", kind: "heading", effect: "explode", font: "Comic Sans", arrow: "left", underline: "yes" },
+          ],
+        },
+      ],
+    });
+    const [a, b] = panel!.blocks[0].links;
+    expect([a.effect, a.font, a.arrow, a.underline]).toEqual(["shake", "Parisienne", "up-right", true]);
+    expect([b.effect, b.font, b.arrow, b.underline]).toEqual(["", "", "", false]);
+  });
 });
 
 describe("แผงเมนูใหญ่: เลือกคอลัมน์ย่อยรายลิงก์ (2026-10-22)", () => {
