@@ -360,9 +360,11 @@ export function SchemaField(props: {
       </FieldBox>
     );
   // 🃏 ช่องเลือก "ชุดสำเร็จรูป" (presets) — เลือกแล้วตั้งหลายช่องทีเดียว + ช่องนี้กลับเป็นค่าเริ่ม (ทำงานเหมือนปุ่ม)
+  // ค่าตอนนี้ตรงกับชุดไหนครบทุกช่อง = ไฮไลต์ชุดนั้น (กดแล้วเห็นว่าติด) · ปรับช่องใดช่องหนึ่งต่อ = ไฮไลต์หายเอง
   if (fd.presets && onPatch) {
     const presets = fd.presets;
-    return <SchemaFieldInner {...props} value={fd.default ?? ""} onChange={(v) => presets[String(v)] && onPatch({ ...presets[String(v)], [fd.key]: fd.default ?? "" })} />;
+    const matched = Object.keys(presets).find((v) => Object.entries(presets[v]).every(([k, x]) => item?.[k] === x));
+    return <SchemaFieldInner {...props} value={matched ?? fd.default ?? ""} onChange={(v) => presets[String(v)] && onPatch({ ...presets[String(v)], [fd.key]: fd.default ?? "" })} />;
   }
   // 🖼 ช่องสินค้าที่ตั้งรูปรายรุ่นได้ (เช่น แท็บรุ่นสินค้า) — แก้ 3 ช่องพร้อมกัน: รหัสรุ่น + รูปอัปโหลด/คลัง (images) + รูปจาก SKU (skus)
   if (fd.type === "products" && fd.rowImages && onPatch && item) {
