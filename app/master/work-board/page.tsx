@@ -4294,14 +4294,15 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const woText = (w: WorkOrder) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""}`;
   const qcText = (q: QcQueueRow) => `${q.sku ?? ""} ${q.name ?? ""} ${q.mo_no ?? ""} ${q.worker ?? ""}`;
   const allText = (r: CuAllRow) => `${r.product_sku ?? ""} ${r.product_name ?? ""} ${r.mo_no} ${r.where.parts.map((x) => x.label).join(" ")}`;
+  const qq = searchQ.trim().toLowerCase();
+  const hit = (s: string) => !qq || s.toLowerCase().includes(qq);
+  // ต้องอยู่หลัง hit — filter เรียก hit ทันที (เคยอยู่ก่อน = หน้าพัง "Cannot access before initialization" ตอนแท็บทั้งหมดมีข้อมูล)
   // เพิ่งอัปเดตขึ้นก่อน → แล้วเรียงตามขั้น (รอจ่าย → … → ปิดแล้ว)
   const allShown = (cuAllRows ?? []).filter((r) => hit(allText(r))).sort((a, b) => {
     const ra = cuRecent.indexOf(a.mo_no), rb = cuRecent.indexOf(b.mo_no);
     if (ra !== rb) return ra < 0 ? 1 : rb < 0 ? -1 : ra - rb;
     return CU_WHERE_ORDER.indexOf(a.where.key) - CU_WHERE_ORDER.indexOf(b.where.key) || (a.product_sku ?? "").localeCompare(b.product_sku ?? "");
   });
-  const qq = searchQ.trim().toLowerCase();
-  const hit = (s: string) => !qq || s.toLowerCase().includes(qq);
   // แท็บกำลังผลิตกรองแบรนด์ด้วย (ชิปเดียวกัน) · ชิปแบรนด์นับจากแท็บที่เปิดอยู่ (ไม่กรองด่วน)
   const wosShown = brandF ? wos.filter((w) => brandOk(w.brand)) : wos;
   // ชิปแบรนด์ = เฉพาะแท็บกำลังผลิต (รอจ่ายใช้มุมมองด่วนกรองแบรนด์แทน)
