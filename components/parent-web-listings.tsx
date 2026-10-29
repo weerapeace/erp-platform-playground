@@ -33,6 +33,8 @@ import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { useFooterSave } from "@/components/footer-save";
 import { CopyButton } from "@/components/copy-button";
+import { Icon } from "@/components/icon";
+import { askConfirm } from "@/components/modal/ask-dialog";
 import { ColorSwatchButton } from "@/components/color-swatch-manager";
 import { RestockBadge } from "@/components/website-restock-panel";
 import type { ListingIssue } from "@/lib/website-listing-health";
@@ -644,6 +646,8 @@ export function ParentWebListings({
   };
 
   /* ───────── 📝 รายละเอียดบนเว็บ: ชื่อ · หน่วย/สต๊อก/ป้าย · คำอธิบาย · ข้อมูลที่เชื่อม · ตั้งค่าเพิ่มเติม ───────── */
+  /** คำอธิบายที่เว็บใช้ตอนช่องว่าง (ตัวจางในช่อง + ปุ่ม "ใช้ข้อความนี้") */
+  const autoDescOf = (s: ShopState) => s.auto.description || data.erpDescription || "";
   const renderDetail = (s: ShopState) => (
     <div className="space-y-3">
       <div>
@@ -672,28 +676,21 @@ export function ParentWebListings({
             );
           })}
         </div>
-        <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 min-w-0">
-          <span className="truncate flex-1 min-w-0" title={s.autoName}>
-            {s.webName.trim() ? (
-              "⚠️ ใช้ชื่อที่พิมพ์เอง — แก้ชื่อที่ Parent SKU แล้วเว็บจะไม่เปลี่ยนตาม"
-            ) : (
-              <>
-                ชื่อที่เว็บจะโชว์: <span className="text-slate-700">{s.autoName}</span>
-              </>
-            )}
-          </span>
-          {s.webName.trim() ? (
-            <button type="button" onClick={() => patchShop(s.shopId, { webName: "" })} className="shrink-0 rounded-md border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50" title="ลบชื่อที่พิมพ์ — กลับไปใช้ชื่ออัตโนมัติ (เปลี่ยนตาม Parent SKU)">
-              ↺ กลับเป็นอัตโนมัติ
-            </button>
-          ) : (
-            s.autoName && (
-              <button type="button" onClick={() => patchShop(s.shopId, { webName: s.autoName })} className="shrink-0 rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-blue-700 hover:bg-blue-100" title="เติมชื่ออัตโนมัติลงช่อง แล้วแก้ต่อได้">
-                ↓ ใช้ชื่อนี้
-              </button>
-            )
-          )}
-        </div>
+        <AutoValueRow
+          custom={!!s.webName.trim()}
+          autoText={s.autoName}
+          emptyNote={
+            <>
+              ชื่อที่เว็บจะโชว์: <span className="text-slate-700">{s.autoName}</span>
+            </>
+          }
+          customNote="ใช้ชื่อที่พิมพ์เอง — แก้ชื่อที่ Parent SKU แล้วเว็บจะไม่เปลี่ยนตาม"
+          useLabel="ใช้ชื่อนี้"
+          useTitle="เติมชื่ออัตโนมัติลงช่อง แล้วแก้ต่อได้"
+          resetTitle="ลบชื่อที่พิมพ์ — กลับไปใช้ชื่ออัตโนมัติ (เปลี่ยนตาม Parent SKU)"
+          onUse={() => patchShop(s.shopId, { webName: s.autoName })}
+          onReset={() => patchShop(s.shopId, { webName: "" })}
+        />
       </div>
 
       <div className="grid gap-2 sm:grid-cols-3">
@@ -718,7 +715,25 @@ export function ParentWebListings({
         </label>
       </div>
 
-      <Field textarea label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={s.auto.description || data.erpDescription || "—"} />
+      <div>
+        <Field textarea rows={s.webDescription.trim() ? 6 : 2} label="คำอธิบายบนเว็บ (ว่าง = ใช้จาก ERP)" value={s.webDescription} onChange={(v) => patchShop(s.shopId, { webDescription: v })} placeholder={autoDescOf(s) || "—"} />
+        {/* ว่าง = เว็บใช้คำอธิบายจาก ERP → ปุ่มเติมข้อความนั้นลงช่องแล้วแก้ต่อ (เหมือนชื่อบนเว็บ) */}
+        <AutoValueRow
+          custom={!!s.webDescription.trim()}
+          autoText={autoDescOf(s)}
+          emptyNote="ตอนนี้เว็บใช้คำอธิบายจาก ERP (ตัวจางในช่อง)"
+          customNote="ใช้คำอธิบายที่พิมพ์เอง — แก้คำอธิบายใน ERP แล้วเว็บจะไม่เปลี่ยนตาม"
+          useLabel="ใช้ข้อความนี้"
+          useTitle="เติมคำอธิบายจาก ERP ลงช่อง แล้วแก้ต่อได้"
+          resetTitle="ลบคำอธิบายที่พิมพ์ — กลับไปใช้คำอธิบายจาก ERP"
+          onUse={() => patchShop(s.shopId, { webDescription: autoDescOf(s) })}
+          onReset={async () => {
+            // ข้อความยาวที่แก้ไปแล้ว → ถามก่อนลบ (ยังไม่ขึ้นเว็บจนกว่าจะบันทึก)
+            if (s.webDescription.trim() !== autoDescOf(s).trim() && !(await askConfirm({ title: "ลบคำอธิบายที่พิมพ์เอง?", message: "ช่องจะว่าง แล้วเว็บกลับไปใช้คำอธิบายจาก ERP (ยังไม่ขึ้นเว็บจนกว่าจะกดบันทึก)", variant: "danger", confirmText: "ลบ" }))) return;
+            patchShop(s.shopId, { webDescription: "" });
+          }}
+        />
+      </div>
       {s.linked?.length ? <LinkedPanel rows={s.linked} onOpenParent={onOpenParent} /> : null}
 
       {/* ตัวเลือกกรอกเอง + สีตัวอย่าง — ใช้กับร้านวัสดุ (ร้านกระเป๋าใช้สีจาก SKU อัตโนมัติ) */}
@@ -1418,12 +1433,63 @@ function Toggle({ label, on, onClick }: { label: string; on: boolean; onClick: (
   );
 }
 
-function Field({ label, value, onChange, placeholder, textarea }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; textarea?: boolean }) {
+/** แถวใต้ช่อง "ว่าง = ใช้ค่าอัตโนมัติ" (ชื่อ / คำอธิบายบนเว็บ) — ว่าง: ปุ่มเติมค่าอัตโนมัติลงช่องแล้วแก้ต่อ · พิมพ์เอง: เตือน + ปุ่มกลับเป็นอัตโนมัติ */
+function AutoValueRow({
+  custom,
+  autoText,
+  emptyNote,
+  customNote,
+  useLabel,
+  useTitle,
+  resetTitle,
+  onUse,
+  onReset,
+}: {
+  custom: boolean;
+  autoText: string;
+  emptyNote: ReactNode;
+  customNote: string;
+  useLabel: string;
+  useTitle: string;
+  resetTitle: string;
+  onUse: () => void;
+  onReset: () => void;
+}) {
+  return (
+    <div className="mt-1 flex items-center gap-2 text-[11px] text-slate-500 min-w-0">
+      <span className="truncate flex-1 min-w-0" title={custom ? undefined : autoText}>
+        {custom ? (
+          <>
+            <Icon name="warning" className="mr-1 align-[-2px]" />
+            {customNote}
+          </>
+        ) : (
+          emptyNote
+        )}
+      </span>
+      {custom ? (
+        <button type="button" onClick={onReset} className="shrink-0 rounded-md border border-slate-300 px-2 py-0.5 text-slate-600 hover:bg-slate-50" title={resetTitle}>
+          <Icon name="back" className="mr-1 align-[-2px]" />
+          กลับเป็นอัตโนมัติ
+        </button>
+      ) : (
+        autoText && (
+          <button type="button" onClick={onUse} className="shrink-0 rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-blue-700 hover:bg-blue-100" title={useTitle}>
+            <Icon name="download" className="mr-1 align-[-2px]" />
+            {useLabel}
+          </button>
+        )
+      )}
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, placeholder, textarea, rows = 2 }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string; textarea?: boolean; rows?: number }) {
   return (
     <label className="block">
       <span className={labelCls}>{label}</span>
       {textarea ? (
-        <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={2} className={inputCls} />
+        <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} rows={rows} className={inputCls} />
       ) : (
         <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className={inputCls} />
       )}
