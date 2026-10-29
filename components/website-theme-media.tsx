@@ -4,11 +4,13 @@
  * ของกลางเล็ก ๆ — ช่องอัปโหลดรูปสำหรับหน้าตั้งค่าธีม (โลโก้ / favicon)
  * อัปผ่าน /api/admin/upload (R2) แล้วเก็บเป็น r2_key · แสดงผลผ่าน /api/r2-image
  * 🖼 ในหน้าเว็บไซต์ของร้าน (มี ImageSetsContext) = มีปุ่ม "🔗 ใช้ชุดรูป" → เก็บค่า imgset/<id> (เปลี่ยนรูปของชุดทีเดียว ทุกที่ที่ผูกเปลี่ยนตาม)
+ * 📥 ลากไฟล์รูปจากเครื่องมาวางที่ช่องได้ (ของกลาง useFileDrop) = เหมือนกด "อัปโหลดรูป" · หลายไฟล์ = ใช้ไฟล์แรก
  */
 import { useContext, useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
+import { useFileDrop } from "@/components/file-drop";
 import { removeBackground, type RemoveBgStage } from "@/lib/remove-bg";
 import { ImageSetsContext } from "@/components/website-image-sets-context";
 import { imgSetIdOf, imgSetRef } from "@/lib/website-image-sets";
@@ -110,6 +112,15 @@ export function ImageUploadField({
   };
   const canUndo = !!cut && cut.to === value;
   const working = busy || !!cutStage;
+  // 📥 ลากรูปมาวาง = อัปโหลดเหมือนกดปุ่ม (ผูกชุดรูปอยู่ = เปลี่ยนเป็นรูปของช่องนี้เอง แบบเดียวกับกดอัปโหลด)
+  const drop = useFileDrop((files) => void upload(files[0]), {
+    accept: "image/",
+    disabled: working,
+    onReject: () => toast.error("ลากได้เฉพาะไฟล์รูป (PNG / JPG / WebP / GIF)"),
+    onBusy: () => toast.info("กำลังอัปโหลดอยู่ — รอสักครู่แล้วลากใหม่"),
+  });
+  const dropping = drop.over === "img";
+  const emptyText = dropping ? "วางเพื่ออัปโหลด" : "ยังไม่มีรูป · ลากมาวางได้";
 
   const url = keyUrl(setId ? linked?.desk ?? linked?.mob ?? null : value, 300);
   const previewStyle = removeBg && value ? CHECKER : previewBg;
@@ -180,7 +191,7 @@ export function ImageUploadField({
   );
 
   return (
-    <div ref={boxRef} className="min-w-0">
+    <div ref={boxRef} {...drop.zone("img")} className={`min-w-0 rounded-lg transition-shadow ${dropping ? "ring-2 ring-blue-400 ring-offset-2 bg-blue-50/50" : ""}`}>
       <label className="block text-[11px] font-medium text-slate-500 mb-1">
         {label}
         {hint && <span className="text-slate-400"> · {hint}</span>}
@@ -201,7 +212,7 @@ export function ImageUploadField({
               /* eslint-disable-next-line @next/next/no-img-element */
               <img src={url} alt={label} style={{ maxHeight: height - 6, maxWidth: "94%", objectFit: "contain" }} />
             ) : (
-              <span className="text-[10px] text-slate-400">ยังไม่มีรูป</span>
+              <span className={`px-1 text-center text-[10px] leading-tight ${dropping ? "font-medium text-blue-600" : "text-slate-400"}`}>{emptyText}</span>
             )}
           </button>
           <div className="flex flex-wrap gap-1">
@@ -239,7 +250,7 @@ export function ImageUploadField({
             /* eslint-disable-next-line @next/next/no-img-element */
             <img src={url} alt={label} style={{ maxHeight: height - 8, maxWidth: 88, objectFit: "contain" }} />
           ) : (
-            <span className="text-[10px] text-slate-400">ยังไม่มีรูป</span>
+            <span className={`px-1 text-center text-[10px] leading-tight ${dropping ? "font-medium text-blue-600" : "text-slate-400"}`}>{emptyText}</span>
           )}
         </div>
 
