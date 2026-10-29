@@ -70,6 +70,11 @@ const isoOf = (v: unknown): string | null => {
 
 export const EMPTY_VERSION: ImageSetVersion = { desk: null, mob: null, fx: 50, fy: 50, mfx: 50, mfy: 50 };
 
+/** ไม่มีรูปเลย (ทั้งคอมและมือถือ) */
+export const isEmptyVersion = (v: Pick<ImageSetVersion, "desk" | "mob">) => !v.desk && !v.mob;
+/** ค่าใน DB เป็นร่างจริงไหม — null / {} = ไม่มีร่าง · มีช่อง desk/mob (แม้เป็น null = "เอารูปออกหมด") = มีร่าง */
+const isDraftValue = (v: unknown) => !!v && typeof v === "object" && !Array.isArray(v) && ("desk" in v || "mob" in v);
+
 export function cleanVersion(raw: unknown): ImageSetVersion {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   return { desk: keyOf(o.desk), mob: keyOf(o.mob), fx: pct(o.fx), fy: pct(o.fy), mfx: pct(o.mfx), mfy: pct(o.mfy) };
@@ -108,7 +113,8 @@ export function rowToImageSet(r: Record<string, unknown>): ImageSet {
     link: cleanSetLink(r.link),
     alt: typeof r.alt === "string" ? r.alt.trim().slice(0, 160) : "",
     cur: cleanVersion(r.cur),
-    draft: ((d) => (d.desk || d.mob ? d : null))(cleanVersion(r.draft)),
+    // ร่างที่ "เอารูปออกหมด" ก็ยังเป็นร่าง (เดิมถูกนับเป็นไม่มีร่าง → กดเอารูปออกแล้วรูปเดิมเด้งกลับ)
+    draft: isDraftValue(r.draft) ? cleanVersion(r.draft) : null,
     queue: queue.sort((a, b) => a.at.localeCompare(b.at)).slice(0, IMAGE_SET_QUEUE_MAX),
     history: history.slice(0, IMAGE_SET_HISTORY_MAX),
   };
@@ -146,6 +152,16 @@ export function settleImageSet(set: ImageSet, now = Date.now()): { set: ImageSet
     else keep.push(q);
   }
   return { set: changed ? { ...out, queue: keep } : set, changed };
+}
+
+/**
+ * 📝 เก็บร่าง (แก้รูป/จุดสำคัญในแท็บ) — เว็บจริงยังเห็นรูปเดิม · ร่างเหมือนของบนเว็บทุกอย่าง = ไม่มีร่าง
+ *   เอารูปออกหมด = ร่าง "ไม่มีรูป" (เดิมทิ้งไป → กดเอารูปออกแล้วรูปเดิมเด้งกลับ) · ขึ้นเว็บต้องยืนยันก่อนในแท็บ
+ */
+export function withImageSetDraft(set: ImageSet, raw: unknown): ImageSet {
+  const v = cleanVersion(raw);
+  const same = (Object.keys(v) as (keyof ImageSetVersion)[]).every((k) => v[k] === set.cur[k]);
+  return { ...set, draft: same ? null : v };
 }
 
 /** 📝 ใช้ร่างขึ้นเว็บ: เปลี่ยนรูป = รูปเดิมเข้าประวัติ · แค่ขยับจุดสำคัญ = ไม่นับเป็นประวัติ · ไม่มีร่าง = null */

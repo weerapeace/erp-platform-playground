@@ -152,9 +152,33 @@ describe("ชุดรูป: ร่าง → ดูตัวอย่าง �
     expect([b.cur.fx, b.history.length]).toEqual([70, 0]);
     expect(publishImageSetDraft(set())).toBeNull();
   });
-  it("แถวจาก DB: ร่างว่าง (ไม่มีรูป) = ไม่มีร่าง", () => {
+  it("แถวจาก DB: ไม่มีช่องรูปเลย = ไม่มีร่าง", () => {
     expect(rowToImageSet({ id: ID, cur: {}, draft: { fx: 10 } }).draft).toBeNull();
     expect(rowToImageSet({ id: ID, cur: {}, draft: { desk: "a/x.jpg" } }).draft?.desk).toBe("a/x.jpg");
+  });
+  it("🗑 เอารูปออกหมด = ร่าง 'ไม่มีรูป' (เดิมถูกทิ้ง → รูปเดิมเด้งกลับ) · null/{} = ไม่มีร่าง", async () => {
+    const { publishImageSetDraft, isEmptyVersion } = await import("../website-image-sets");
+    const row = rowToImageSet({ id: ID, cur: { desk: "a/desk1.jpg" }, draft: { desk: null, mob: null, fx: 50, fy: 50, mfx: 50, mfy: 50 } });
+    expect(row.draft).not.toBeNull();
+    expect(isEmptyVersion(row.draft!)).toBe(true);
+    expect(rowToImageSet({ id: ID, cur: {}, draft: null }).draft).toBeNull();
+    expect(rowToImageSet({ id: ID, cur: {}, draft: {} }).draft).toBeNull();
+    expect(rowToImageSet({ id: ID, cur: {}, draft: [] }).draft).toBeNull();
+    // พรีวิวเห็นว่าไม่มีรูป · เว็บจริงยังเห็นรูปเดิม
+    const sets = new Map([[ID, set({ draft: v(null, null) })]]);
+    expect(resolveImageSets({ imageKey: imgSetRef(ID) }, sets, Date.now(), { draft: true }).data.imageKey).toBeNull();
+    expect(resolveImageSets({ imageKey: imgSetRef(ID) }, sets).data.imageKey).toBe("a/desk1.jpg");
+    // ขึ้นเว็บ = ไม่มีรูป · รูปเดิมเข้าประวัติ (ย้อนได้)
+    const p = publishImageSetDraft(set({ draft: v(null, null) }))!;
+    expect([p.cur.desk, p.cur.mob, p.draft, p.history[0].desk]).toEqual([null, null, null, "a/desk1.jpg"]);
+  });
+  it("เก็บร่าง (ตัวเดียวกับ API): เอารูปออก = ร่างไม่มีรูป · เหมือนบนเว็บ = ไม่มีร่าง · ชุดที่ยังไม่มีรูป เอาออกอีก = ไม่มีร่าง", async () => {
+    const { withImageSetDraft } = await import("../website-image-sets");
+    const one = set({ cur: v("a/desk1.jpg", null, 51, 75) });
+    expect(withImageSetDraft(one, { ...one.cur, desk: null, fx: 50, fy: 50 }).draft).toEqual(v(null, null));
+    expect(withImageSetDraft(one, one.cur).draft).toBeNull();
+    expect(withImageSetDraft(set({ cur: v(null, null) }), v(null, null)).draft).toBeNull();
+    expect(withImageSetDraft(one, { ...one.cur, desk: "a/new.jpg" }).draft?.desk).toBe("a/new.jpg");
   });
   it("รูปในผืนผ้าใบ (imageKey ไม่มีช่องมือถือคู่) → ส่ง mobileImageKey ไปด้วย · ลิงก์ของชุดทับ href ของชิ้น", () => {
     const item = { id: "i1", kind: "image", imageKey: imgSetRef(ID), href: "" };

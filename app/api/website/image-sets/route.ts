@@ -20,6 +20,7 @@ import {
   cleanScheduled,
   cleanSetLink,
   cleanVersion,
+  withImageSetDraft,
   findImageSetUses,
   publishImageSetDraft,
   rowToImageSet,
@@ -172,10 +173,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       next = v.desk === next.cur.desk && v.mob === next.cur.mob ? { ...next, cur: v } : withNewCurrent(next, v);
     }
   } else if (action === "draft") {
-    // 📝 แก้รูป/จุดสำคัญ = เก็บเป็นร่าง (เว็บจริงยังเห็นรูปเดิม) · ร่างเหมือนของบนเว็บทุกอย่าง = ไม่มีร่าง
-    const v = cleanVersion(body?.version);
-    const same = (Object.keys(v) as (keyof typeof v)[]).every((k) => v[k] === next.cur[k]);
-    next = { ...next, draft: same || (!v.desk && !v.mob) ? null : v };
+    // 📝 แก้รูป/จุดสำคัญ = เก็บเป็นร่าง (เอารูปออกหมดก็เป็นร่าง "ไม่มีรูป") — lib/website-image-sets
+    next = withImageSetDraft(next, body?.version);
   } else if (action === "publish") {
     const p = publishImageSetDraft(next);
     if (!p) return json({ error: "ยังไม่มีร่างให้ใช้" }, 400);

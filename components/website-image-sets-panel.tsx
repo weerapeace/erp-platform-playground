@@ -12,9 +12,9 @@ import { useToast } from "@/components/toast";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ImageSetsContext, notifyImageSetsChanged } from "@/components/website-image-sets-context";
 import { LinkTargetPicker } from "@/components/website-link-picker";
-import { ERPModal } from "@/components/modal";
+import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { withPreviewKey } from "@/lib/storefront-preview-link";
-import { effectiveVersion, type ImageSet, type ImageSetUse, type ImageSetVersion } from "@/lib/website-image-sets";
+import { effectiveVersion, isEmptyVersion, type ImageSet, type ImageSetUse, type ImageSetVersion } from "@/lib/website-image-sets";
 
 type SetRow = ImageSet & { updatedAt?: string | null; updatedBy?: string | null };
 
@@ -110,6 +110,8 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
   // 👁 พรีวิวทุกที่ (เว็บจริง ?preview=1 = เห็นร่างของชุด)
   const [site, setSite] = useState<{ siteUrl: string | null; previewKey: string | null }>({ siteUrl: null, previewKey: null });
   const [pv, setPv] = useState<{ path: string; device: "desktop" | "mobile" } | null>(null);
+  // ร่าง "ไม่มีรูป" → ขึ้นเว็บต้องยืนยัน (ทุกที่ที่ผูกจะไม่มีรูป)
+  const [askEmpty, setAskEmpty] = useState(false);
 
   const load = useCallback(() => {
     apiFetch(`/api/website/image-sets?shop=${encodeURIComponent(shopSlug)}`)
@@ -159,7 +161,15 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
   };
   // 📝 แก้รูป/จุดสำคัญ = เป็นร่างก่อน (เว็บจริงยังเห็นรูปเดิม) → ดูตัวอย่างทุกที่ → "ใช้รูปนี้"
   const work = sel ? sel.draft ?? sel.cur : null;
-  const setWork = (p: Partial<ImageSetVersion>) => sel && work && void patch({ action: "draft", version: { ...work, ...p } }, "เก็บเป็นร่างแล้ว — กด “ใช้รูปนี้” เมื่อพร้อมขึ้นเว็บ");
+  const setWork = (p: Partial<ImageSetVersion>) => {
+    if (!sel || !work) return;
+    const v = { ...work, ...p };
+    void patch({ action: "draft", version: v }, isEmptyVersion(v) && !isEmptyVersion(sel.cur) ? "เอารูปออกแล้ว (เป็นร่าง) — เว็บจริงยังเห็นรูปเดิม จนกว่าจะใส่รูปใหม่หรือกดขึ้นเว็บ" : "เก็บเป็นร่างแล้ว — กด “ใช้รูปนี้” เมื่อพร้อมขึ้นเว็บ");
+  };
+  const draftEmpty = !!sel?.draft && isEmptyVersion(sel.draft);
+  const publish = () => patch({ action: "publish" }, draftEmpty ? "เอารูปออกจากเว็บแล้ว — ย้อนได้ด้วยปุ่ม “ย้อนรูปก่อนหน้า”" : "ใช้รูปนี้แล้ว — ขึ้นเว็บจริงทุกที่");
+  // นับที่ที่ผูกบนเว็บจริง (ไม่นับร่างของหน้า) — บอกในป๊อปยืนยัน
+  const liveUses = (id: string) => new Set(usesOf(id).filter((u) => u.state === "live").map((u) => u.where)).size;
 
   const create = async () => {
     const name = newName.trim();
@@ -265,7 +275,7 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
               {/* 📝 ร่าง: เว็บจริงยังเห็นรูปเดิม จนกด "ใช้รูปนี้" */}
               {sel.draft ? (
                 <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2">
-                  <span className="text-xs font-semibold text-amber-800">📝 มีร่างที่ยังไม่ขึ้นเว็บ</span>
+                  <span className="text-xs font-semibold text-amber-800">{draftEmpty ? "📝 ร่าง: เอารูปออกหมด (ยังไม่ขึ้นเว็บ)" : "📝 มีร่างที่ยังไม่ขึ้นเว็บ"}</span>
                   <span className="flex items-center gap-1 text-[11px] text-amber-700">
                     บนเว็บตอนนี้:
                     {[sel.cur.desk, sel.cur.mob].map((k, i) => {
@@ -280,9 +290,15 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
                     <button type="button" onClick={() => setPv({ path: usesOf(sel.id)[0]?.path ?? "/", device: "desktop" })} className={btn}>
                       👁 ดูตัวอย่างทุกที่
                     </button>
-                    <button type="button" disabled={busy} onClick={() => void patch({ action: "publish" }, "ใช้รูปนี้แล้ว — ขึ้นเว็บจริงทุกที่")} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
-                      ✅ ใช้รูปนี้ (ขึ้นเว็บ)
-                    </button>
+                    {draftEmpty ? (
+                      <button type="button" disabled={busy} onClick={() => setAskEmpty(true)} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50">
+                        เอารูปออกจากเว็บ
+                      </button>
+                    ) : (
+                      <button type="button" disabled={busy} onClick={() => void publish()} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
+                        ✅ ใช้รูปนี้ (ขึ้นเว็บ)
+                      </button>
+                    )}
                     <button type="button" disabled={busy} onClick={() => void patch({ action: "discard" }, "ทิ้งร่างแล้ว — กลับไปเป็นรูปบนเว็บ")} className={btn}>
                       ทิ้งร่าง
                     </button>
@@ -465,9 +481,15 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
                 </div>
                 {sel.draft && (
                   <div className="flex justify-end gap-2">
-                    <button type="button" disabled={busy} onClick={async () => (await patch({ action: "publish" }, "ใช้รูปนี้แล้ว — ขึ้นเว็บจริงทุกที่")) && setPv(null)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
-                      ✅ ใช้รูปนี้ (ขึ้นเว็บ)
-                    </button>
+                    {draftEmpty ? (
+                      <button type="button" disabled={busy} onClick={() => setAskEmpty(true)} className="rounded-lg bg-red-600 px-3 py-1.5 text-xs text-white hover:bg-red-700 disabled:opacity-50">
+                        เอารูปออกจากเว็บ
+                      </button>
+                    ) : (
+                      <button type="button" disabled={busy} onClick={async () => (await publish()) && setPv(null)} className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs text-white hover:bg-emerald-700 disabled:opacity-50">
+                        ✅ ใช้รูปนี้ (ขึ้นเว็บ)
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -475,6 +497,28 @@ export function WebsiteImageSetsPanel({ shopSlug, shopId }: { shopSlug: string; 
           </ERPModal>
         );
       })()}
+
+      {/* ร่าง "ไม่มีรูป" → ยืนยันก่อนขึ้นเว็บ (ทุกที่ที่ผูกจะไม่มีรูป) */}
+      <ConfirmDialog
+        open={askEmpty && draftEmpty}
+        onClose={() => setAskEmpty(false)}
+        onConfirm={async () => {
+          const ok = await publish();
+          setAskEmpty(false);
+          if (ok) setPv(null);
+        }}
+        title="เอารูปออกจากเว็บ?"
+        message={
+          <>
+            ชุด “{sel?.name}” จะไม่มีรูป — {sel && liveUses(sel.id) ? `ที่ที่ผูกไว้ ${liveUses(sel.id)} ที่` : "ทุกที่ที่ผูกไว้"} จะไม่มีรูปบนเว็บจนกว่าจะใส่รูปใหม่
+            <br />
+            ย้อนกลับได้ด้วยปุ่ม “↩ ย้อนรูปก่อนหน้า”
+          </>
+        }
+        confirmText="เอารูปออก"
+        variant="danger"
+        loading={busy}
+      />
     </div>
   );
 }
