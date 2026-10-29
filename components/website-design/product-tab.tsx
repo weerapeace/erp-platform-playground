@@ -21,6 +21,8 @@ import { RelatedSettings } from "@/components/website-related-settings";
 import { MaterialViewSetting } from "@/components/website-material-view-setting";
 import { ProductExtrasSetting } from "@/components/website-product-extras-setting";
 import { ProductLuxeSetting } from "@/components/website-product-luxe-setting";
+import { PolicySettings, WishSettings } from "@/components/website-wish-policy-settings";
+import { POLICY_TEXT } from "@/lib/website-wish-policy";
 import { FONT_LABELS, FONT_SIZES, type ProductTitleStyle, type ProductImageBg, type ProductSection, type ProductGalleryStyle, type ProductDetailsStyle, type ProductDetailsOpen, type DetailSource, type DetailApply, type DetailOpen, type DetailItem, PRODUCT_DETAIL_SOURCES, SHOP_DETAIL_SOURCES, type Theme, inputCls, labelCls } from "./shared";
 import { useDesign } from "./context";
 import { DesignCard } from "./design-card";
@@ -28,7 +30,7 @@ import { useAreaFold } from "./shared";
 import { PRODUCT_PARTS } from "@/lib/website-page-parts";
 
 export function ProductTab() {
-  const { shopSlug, theme, published, choices, setChoices, toast, setProduct, setDevice, editDevice, setEditDevice } = useDesign();
+  const { shopSlug, theme, published, choices, setChoices, toast, setProduct, setDevice, editDevice, setEditDevice, storePages } = useDesign();
   const areaFold = useAreaFold();
   const setMobile = (p: Partial<ProductMobile>) => theme && setProduct({ mobile: { ...theme.product.mobile, ...p } });
   const viewProduct = (t: Theme) => (editDevice === "mobile" ? resolveMobileProduct(t.product) : t.product);
@@ -792,6 +794,22 @@ export function ProductTab() {
 
       <p className="text-[11px] text-slate-400 mt-3">ดูผล: พรีวิวด้านขวาเปิด &quot;หน้าสินค้า (ตัวอย่าง)&quot; ให้แล้ว (เลือกหน้าอื่นได้จากเมนูบนพรีวิว) — ยังไม่ขึ้นเว็บจริงจนกว่าจะกดเผยแพร่</p>
     </DesignCard>
+    {(() => {
+      // 📜 หัวข้อรายละเอียดที่ดึง "การจัดส่ง & ชำระเงิน" — ปุ่มเปลี่ยนชื่อเป็น "การจัดส่งและคืนสินค้า" เมื่อเปิดบรรทัด/ลิงก์นโยบาย
+      const ship = theme.product.detailItems.find((x) => x.source === "shipping");
+      return (
+        <PolicySettings
+          value={theme.product.policy}
+          onChange={(x) => setProduct({ policy: { ...theme.product.policy, ...x } })}
+          pages={storePages}
+          shopSlug={shopSlug}
+          returnsDays={choices.returnsDays}
+          shippingTitle={ship?.label}
+          onRenameShipping={ship ? () => setDetailItem(ship.id, { label: POLICY_TEXT.shipping.th }) : undefined}
+        />
+      );
+    })()}
+    <WishSettings value={theme.product.wish} onChange={(x) => setProduct({ wish: { ...theme.product.wish, ...x } })} />
     {areaFold("product", PRODUCT_PARTS, "ชื่อ · ราคา · ตัวเลือก · ปุ่มใส่ตะกร้า · แถบลอย · หัวข้อ")}
     </>
   );
@@ -1205,6 +1223,7 @@ export function BuyItemsEditor({ buy, onChange, fields = [] }: { buy: ProductPar
                           <option value="">คำอธิบาย (ตามที่จับคู่ฟิลด์)</option>
                           {fields.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
                         </select>
+                        {it.field && <p className="text-[11px] text-slate-500 mt-1">สินค้าไหนช่องนี้ว่าง = ใช้คำอธิบายแทน (ข้อความไม่หาย) · Introduction = “คำแนะนำสินค้า”</p>}
                       </div>
                     <div>
                       <label className={lbl}>ตัดกี่บรรทัด</label>

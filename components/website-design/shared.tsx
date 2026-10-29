@@ -50,6 +50,8 @@ export interface Choices {
   detailSources?: { value: DetailSource; label: string; hint: string }[];
   /** บรรทัดอัตโนมัติของ "การจัดส่ง & ชำระเงิน" ตามข้อมูลร้านตอนนี้ */
   shippingAuto?: { key: ShippingAutoKey; text: string }[];
+  /** 📜 ข้อมูลร้าน › การคืนสินค้า (วัน) — ตัวอย่างบรรทัด "เปลี่ยน/คืนได้ภายใน N วัน" */
+  returnsDays?: number;
   /** 💳 ช่องทางจ่ายที่เปิดอยู่ (เตือนในแท็บหน้าชำระเงิน) */
   payInfo?: CheckoutPayInfo;
   specFields?: { key: string; label: string; group?: string }[];

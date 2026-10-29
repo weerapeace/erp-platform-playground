@@ -488,7 +488,7 @@ export function CartSettings({
             )}
           </div>
           <Check label="โชว์ราคาเต็มขีดฆ่า + “ประหยัด ฿X”" hint="เฉพาะสินค้าที่ตั้งราคาเต็มไว้" checked={c.showCompare} onChange={(showCompare) => set({ showCompare })} />
-          <Check label="♡ ปุ่ม “ย้ายไปรายการโปรด”" hint="เอาออกจากตะกร้า + เก็บในรายการโปรด (ต้องเปิดระบบสมาชิก · ยังไม่เข้าสู่ระบบ = ไปหน้าเข้าสู่ระบบ)" checked={c.wishlist} onChange={(wishlist) => set({ wishlist })} />
+          <Check label="♡ ปุ่ม “ย้ายไปรายการโปรด”" hint="เอาออกจากตะกร้า + เก็บในรายการโปรด · ใครกดได้ตั้งที่ หน้าสินค้า › ♡ รายการโปรด (เฉพาะสมาชิก = ต้องเปิดระบบสมาชิก · ไม่ต้องสมัคร = ทุกคน)" checked={c.wishlist} onChange={(wishlist) => set({ wishlist })} />
         </div>
       </Card>
 

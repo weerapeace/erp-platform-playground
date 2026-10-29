@@ -131,6 +131,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       detailSources: DETAIL_SOURCES,
       /** 📚 คลังแหล่งข้อมูล: บรรทัดอัตโนมัติของ "การจัดส่ง & ชำระเงิน" ตามข้อมูลร้านตอนนี้ (โชว์ 🔒 ในป๊อป) */
       shippingAuto: shippingAutoPreview(siteInfo),
+      /** 📜 หน้าสินค้า › นโยบาย: จำนวนวันขอคืน/เปลี่ยน (ข้อมูลร้าน › การคืนสินค้า) */
+      returnsDays: siteInfo.returns_days,
       /** 💳 แท็บหน้าชำระเงิน: ช่องทางจ่ายที่เปิดอยู่ (เตือนเมื่อเปิดพร้อมเพย์แต่ยังไม่มีเลข = ลูกค้าไม่เห็น) */
       payInfo: { cod: siteInfo.pay_cod, promptpay: siteInfo.pay_promptpay, promptpayNumber: Boolean(siteInfo.promptpay_number?.trim()) },
       specFields: parentFields.map((f) => ({ key: f.key, label: f.label, group: f.group })),

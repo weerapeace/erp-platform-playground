@@ -175,7 +175,11 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
     desc: "Style · ลำดับส่วน · รูป · รายละเอียด",
     paths: ["product", "page.areaParts.product"],
     keywords: "product page pdp หน้าสินค้า",
-    cards: [{ title: "หน้าสินค้า — เลือก Style", keywords: "ลำดับส่วนประกอบ รูปสินค้า พื้นหลังรูป หัวข้อรายละเอียด แบนเนอร์ ขนาดตัวอักษร มือถือ ราคา ตะกร้า วัสดุ หรู luxe" }],
+    cards: [
+      { title: "หน้าสินค้า — เลือก Style", keywords: "ลำดับส่วนประกอบ รูปสินค้า พื้นหลังรูป หัวข้อรายละเอียด แบนเนอร์ ขนาดตัวอักษร มือถือ ราคา ตะกร้า วัสดุ หรู luxe introduction คำแนะนำสินค้า" },
+      { title: "📜 นโยบายจัดส่ง & คืนสินค้า", keywords: "policy shipping returns นโยบาย คืนสินค้า เปลี่ยนสินค้า ลิงก์" },
+      { title: "♡ รายการโปรด", keywords: "wishlist หัวใจ ถูกใจ favorite" },
+    ],
   },
   related: {
     label: "แนะนำสินค้า",
@@ -216,7 +220,9 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
       { title: "ช่องที่ลูกค้ากรอก", keywords: "อีเมล หมายเหตุ" },
       { title: "การจัดวาง", keywords: "คอลัมน์" },
       { title: "ช่องทางชำระเงิน", keywords: "พร้อมเพย์ โอน ปลายทาง cod" },
+      { title: "🔒 หัวเว็บ + มือถือ", keywords: "หัวเว็บเรียบ simple header สรุปพับ ปุ่มติดล่างจอ sticky" },
       { title: "แถบความมั่นใจใต้ปุ่มยืนยัน" },
+      { title: "📜 นโยบาย + ยอมรับเงื่อนไข", keywords: "policy terms ข้อกำหนด ยอมรับ ติ๊ก" },
       { title: "หน้าขอบคุณ (หลังกดสั่ง)" },
     ],
   },

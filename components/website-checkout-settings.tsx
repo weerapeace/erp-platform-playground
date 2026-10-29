@@ -7,7 +7,7 @@
  * เปิด/ปิดช่องทางจ่าย · เลขพร้อมเพย์ · ค่าส่ง = แท็บข้อมูลร้าน
  */
 import { Seg } from "@/components/website-block-editor";
-import { Card, Text } from "@/components/website-cart-settings";
+import { Card, Check, Text } from "@/components/website-cart-settings";
 import { CHECKOUT_TEXT, type CheckoutConfig } from "@/lib/website-checkout";
 
 export interface CheckoutPayInfo {
@@ -94,6 +94,21 @@ export function CheckoutSettings({
         </div>
       </Card>
 
+      <Card title="🔒 หัวเว็บ + มือถือ" hint="ลดลูกค้าหลุดออกระหว่างจ่าย · ทำให้กดยืนยันง่ายบนมือถือ">
+        <div>
+          <span className="block text-[11px] font-medium text-slate-500 mb-1">หัวเว็บตอนชำระเงิน</span>
+          <Seg value={c.header} onChange={(header) => set({ header })} options={[{ v: "full", l: "เต็ม (เดิม)" }, { v: "simple", l: "เรียบ: โลโก้ + ชำระเงินปลอดภัย" }]} />
+          {c.header === "simple" && <p className="text-[11px] text-slate-500 mt-1">ซ่อนเมนู · ไอคอน · แถบประกาศ · ท้ายเว็บ เหลือโลโก้กลาง + ← ตะกร้า + 🔒 ชำระเงินปลอดภัย</p>}
+        </div>
+        <div>
+          <span className="block text-[11px] font-medium text-slate-500 mb-1">มือถือ: สรุปคำสั่งซื้อ</span>
+          <Seg value={c.mobileSummary} onChange={(mobileSummary) => set({ mobileSummary })} options={[{ v: "bottom", l: "อยู่ท้ายหน้า (เดิม)" }, { v: "collapse", l: "แถบพับได้บนสุด" }]} />
+          {c.mobileSummary === "collapse" && <p className="text-[11px] text-slate-500 mt-1">บนสุดเป็นแถบ “ดูสรุปคำสั่งซื้อ ▼ ฿…” กดแล้วกางรายการ/โค้ดส่วนลด · จอคอมเหมือนเดิม</p>}
+        </div>
+        <Check label="มือถือ: ยอดรวม + ปุ่มยืนยันติดล่างจอ" hint="เลื่อนไปตรงไหนก็กดสั่งได้เลย" checked={c.stickyConfirm} onChange={(stickyConfirm) => set({ stickyConfirm })} />
+        <Check label="ยอดรวมในปุ่มยืนยัน" hint="เช่น “ยืนยันคำสั่งซื้อ · ฿948”" checked={c.confirmTotal} onChange={(confirmTotal) => set({ confirmTotal })} />
+      </Card>
+
       <Card title="💳 ช่องทางชำระเงิน" hint="ชื่อ/คำอธิบายที่ลูกค้าเห็น · เปิด-ปิดช่องทาง เลขบัญชี ค่าส่ง ตั้งที่แท็บ 🏪 ข้อมูลร้าน">
         <div className="grid gap-3 sm:grid-cols-2">
           <Text label="เก็บเงินปลายทาง: ชื่อ" obj={c} k="codLabel" onPatch={set} placeholder={PH("codLabel")} enPlaceholder={CHECKOUT_TEXT.codLabel.en} max={40} />
@@ -112,7 +127,13 @@ export function CheckoutSettings({
         <Text label="ข้อความ (คั่นแต่ละข้อด้วย ·)" obj={c} k="trustText" onPatch={set} placeholder={PH("trustText")} enPlaceholder={CHECKOUT_TEXT.trustText.en} max={160} />
       </Card>
 
-      <Card title="🙏 หน้าขอบคุณ (หลังกดสั่ง)" hint="เลขที่ออเดอร์ · วิธีจ่าย · สรุปรายการ ยังโชว์ตามเดิม">
+      <Card title="📜 นโยบาย + ยอมรับเงื่อนไข" hint="ลิงก์ ข้อกำหนด · การจัดส่งและคืนสินค้า · ความเป็นส่วนตัว ใต้ปุ่มยืนยัน">
+        <Check label="ลิงก์นโยบายใต้ปุ่มยืนยัน" hint="โชว์เฉพาะหน้าที่เผยแพร่แล้ว (ศูนย์ช่วยเหลือ) · เปิดแบบเดียวกับที่ตั้งใน หน้าสินค้า › 📜 นโยบาย" checked={c.policyLinks} onChange={(policyLinks) => set({ policyLinks })} />
+        <Check label="ต้องติ๊กยอมรับเงื่อนไขก่อนสั่ง" hint="ไม่ติ๊ก = กดยืนยันไม่ได้ (ขึ้นข้อความเตือน) · เปิดแล้วลิงก์นโยบายโชว์ด้วยเสมอ" checked={c.acceptTerms} onChange={(acceptTerms) => set({ acceptTerms })} />
+        {c.acceptTerms && <Text label="ข้อความข้างช่องติ๊ก" obj={c} k="acceptText" onPatch={set} placeholder={PH("acceptText")} enPlaceholder={CHECKOUT_TEXT.acceptText.en} max={160} />}
+      </Card>
+
+      <Card title="🙏 หน้าขอบคุณ (หลังกดสั่ง)" hint="เลขที่ออเดอร์ · วิธีจ่าย · สรุปรายการ ยังโชว์ตามเดิม · รูปบนสุด/คูปองครั้งหน้า/ติดตามโซเชียล/สินค้าแนะนำ ตั้งที่แท็บ 📄 หน้าพิเศษ">
         <div className="grid gap-3 sm:grid-cols-2">
           <Text label="หัวข้อ" obj={c} k="thanksTitle" onPatch={set} placeholder={PH("thanksTitle")} enPlaceholder={CHECKOUT_TEXT.thanksTitle.en} max={60} />
           <Text label="ข้อความใต้หัวข้อ ({shop} = ชื่อร้าน)" obj={c} k="thanksText" onPatch={set} placeholder={PH("thanksText")} enPlaceholder={CHECKOUT_TEXT.thanksText.en} max={200} />

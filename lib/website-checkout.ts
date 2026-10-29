@@ -30,6 +30,21 @@ export interface CheckoutConfig {
   trust: boolean;
   /** คั่นแต่ละข้อด้วย · (ว่าง = ค่าเริ่มต้น) */
   trustText: string;
+  /* ── หัวเว็บ + มือถือ ── */
+  /** หัวเว็บตอนชำระเงิน: เต็ม (เดิม) · เรียบ = โลโก้ + "ชำระเงินปลอดภัย" ซ่อนเมนู/ไอคอน/ท้ายเว็บ/เมนูลัดมือถือ (ลูกค้าไม่หลุดออกระหว่างจ่าย) */
+  header: "full" | "simple";
+  /** มือถือ: สรุปคำสั่งซื้อ อยู่ท้ายหน้า (เดิม) · แถบพับได้บนสุด "ดูสรุปคำสั่งซื้อ ฿…" */
+  mobileSummary: "bottom" | "collapse";
+  /** มือถือ: ยอดรวม + ปุ่มยืนยันติดล่างจอ */
+  stickyConfirm: boolean;
+  /** ยอดรวมในปุ่ม "ยืนยันคำสั่งซื้อ · ฿948" */
+  confirmTotal: boolean;
+  /* ── นโยบาย (หน้าในศูนย์ช่วยเหลือ — เปิดแบบเดียวกับหน้าสินค้า › นโยบาย) ── */
+  /** ลิงก์ ข้อกำหนด · การจัดส่งและคืนสินค้า · ความเป็นส่วนตัว ใต้ปุ่มยืนยัน (เฉพาะหน้าที่เผยแพร่แล้ว) */
+  policyLinks: boolean;
+  /** ต้องติ๊กยอมรับเงื่อนไขก่อนกดยืนยัน (เปิด = โชว์ลิงก์นโยบายด้วยเสมอ) */
+  acceptTerms: boolean;
+  acceptText: string;
   /* ── หน้าขอบคุณ (หลังกดสั่ง) ── */
   thanksTitle: string;
   /** {shop} = ชื่อร้าน */
@@ -47,6 +62,7 @@ export const CHECKOUT_TEXT = {
   trustText: { th: "ชำระเงินปลอดภัย · จัดส่งไว · สอบถามร้านได้ทุกเมื่อ", en: "Secure checkout · Fast delivery · Questions? Just ask" },
   thanksTitle: { th: "รับคำสั่งซื้อแล้ว", en: "Order received" },
   thanksText: { th: "ขอบคุณที่อุดหนุน {shop}", en: "Thank you for shopping with {shop}" },
+  acceptText: { th: "ฉันอ่านและยอมรับเงื่อนไขการสั่งซื้อและนโยบายการคืนสินค้า", en: "I have read and agree to the terms of sale and returns policy" },
 } as const;
 export type CheckoutTextKey = keyof typeof CHECKOUT_TEXT;
 
@@ -64,6 +80,13 @@ export const DEFAULT_CHECKOUT: CheckoutConfig = {
   promptpayHint: "",
   trust: false,
   trustText: "",
+  header: "full",
+  mobileSummary: "bottom",
+  stickyConfirm: false,
+  confirmTotal: false,
+  policyLinks: false,
+  acceptTerms: false,
+  acceptText: "",
   thanksTitle: "",
   thanksText: "",
 };
@@ -88,6 +111,13 @@ export function normalizeCheckout(raw: unknown): CheckoutConfig {
     promptpayHint: str(r.promptpayHint, 80),
     trust: typeof r.trust === "boolean" ? r.trust : d.trust,
     trustText: str(r.trustText, 160),
+    header: pick(r.header, ["full", "simple"] as const, d.header),
+    mobileSummary: pick(r.mobileSummary, ["bottom", "collapse"] as const, d.mobileSummary),
+    stickyConfirm: typeof r.stickyConfirm === "boolean" ? r.stickyConfirm : d.stickyConfirm,
+    confirmTotal: typeof r.confirmTotal === "boolean" ? r.confirmTotal : d.confirmTotal,
+    policyLinks: typeof r.policyLinks === "boolean" ? r.policyLinks : d.policyLinks,
+    acceptTerms: typeof r.acceptTerms === "boolean" ? r.acceptTerms : d.acceptTerms,
+    acceptText: str(r.acceptText, 160),
     thanksTitle: str(r.thanksTitle, 60),
     thanksText: str(r.thanksText, 200),
   };
