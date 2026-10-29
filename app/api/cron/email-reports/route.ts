@@ -13,6 +13,7 @@ import { guardApi } from "@/lib/api-auth";
 import { isDue, nowTH, runEmailReport } from "@/lib/email-report/send";
 import { toEmailReport } from "../../admin/email-reports/shared";
 import { emailErrorText, emailSenderAddress, verifyEmailTransport } from "@/lib/email";
+import { pushDuePopups } from "@/lib/email-report/popup-push";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -53,7 +54,11 @@ async function handle(request: NextRequest): Promise<NextResponse> {
     const res = await runEmailReport(admin, r, { trigger: "schedule", actor: { id: null, name: "ระบบ (ส่งตามเวลา)" } });
     results.push({ id: r.id, name: r.name, status: res.status, sent: res.sent, recipients: res.recipients, message: res.message });
   }
-  return NextResponse.json({ ok: true, now, enabled: reports.length, due: due.length, results });
+  // ป๊อปเตือนงานถึงเวลา → เด้งที่เบราว์เซอร์/มือถือของคนที่เปิดรับ (วันละครั้งต่อคนต่อรายงาน) · พังไม่กระทบอีเมล
+  let popupPush: unknown = null;
+  try { popupPush = await pushDuePopups(admin); }
+  catch (e) { console.error("[cron] popup push", e); popupPush = { error: e instanceof Error ? e.message : String(e) }; }
+  return NextResponse.json({ ok: true, now, enabled: reports.length, due: due.length, results, popupPush });
 }
 
 export const GET = handle;

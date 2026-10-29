@@ -164,7 +164,12 @@ function NotifyHome() {
     } catch { /* ครั้งถัดไปที่โหลดจะแก้ให้ */ }
   }, []);
 
-  const openItem = useCallback((n: Notification) => { void markRead(n); setViewer(n); }, [markRead]);
+  const openItem = useCallback((n: Notification) => {
+    void markRead(n);
+    // ป๊อปเตือนงาน (?popup=) ไม่ขึ้นในกรอบ → เปิดหน้าเต็มให้ป๊อปเด้ง
+    if (n.link_url && /[?&]popup=/.test(n.link_url)) { window.location.href = n.link_url; return; }
+    setViewer(n);
+  }, [markRead]);
 
   const openById = useCallback(async (id: string | null) => {
     if (!id) { setViewer(null); setView("list"); void load(); return; }

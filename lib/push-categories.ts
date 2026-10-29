@@ -22,6 +22,7 @@ export const PUSH_CATEGORIES: PushCategory[] = [
   { key: "sales", icon: "💼", label: "งานขาย: ใบสั่งขาย / ข้อความจากเว็บ", hint: "SO ยืนยัน/จัดส่ง/ปิด ข้อความลูกค้าจากเว็บร้าน", match: ["so.*", "storefront_contact.*"] },
   { key: "production", icon: "🏭", label: "ผลิต / QC / ของเสีย", hint: "งานรอ QC พบของเสีย", match: ["qc.*", "wo.*"] },
   { key: "security", icon: "🔐", label: "ความปลอดภัย: ล็อกอินเครื่องใหม่", hint: "มีคนเข้าบัญชีของคุณจากเครื่องที่ไม่เคยใช้", match: ["security.*"] },
+  { key: "work_popup", icon: "🗓️", label: "ป๊อปเตือนงานประจำวัน", hint: "สรุปงานค้างตามรายงานอัตโนมัติ (เช่น งานออกแบบที่ค้าง) ตอนถึงเวลาป๊อป", match: ["report.*"] },
   { key: "other", icon: "🔔", label: "อื่น ๆ", hint: "เตือนความจำ สะกิด ต่ออายุบริการ และเรื่องใหม่ที่ยังไม่จัดประเภท", match: [] },
 ];
 

@@ -19,7 +19,7 @@ self.addEventListener("push", (event) => {
     tag: d.id || "erp-summary",
     renotify: true,
     requireInteraction: d.priority === "high",
-    data: { id: d.id || null, url: d.url || null },
+    data: { id: d.id || null, url: d.url || null, direct: !!d.direct },
   };
 
   const jobs = [self.registration.showNotification(title, options)];
@@ -35,7 +35,13 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const id = (event.notification.data && event.notification.data.id) || null;
+  const data = event.notification.data || {};
+  const id = data.id || null;
+  // ป๊อปเตือนงาน (direct) → เปิดหน้า ERP พร้อมป๊อปเลย ไม่ผ่านแอปแจ้งเตือน
+  if (data.direct && data.url) {
+    event.waitUntil(self.clients.openWindow(data.url));
+    return;
+  }
   const target = "/notify" + (id ? "?open=" + encodeURIComponent(id) : "");
   event.waitUntil((async () => {
     const list = await self.clients.matchAll({ type: "window", includeUncontrolled: true });

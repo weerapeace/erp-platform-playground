@@ -19,8 +19,11 @@ describe("pushCategoryOf", () => {
   });
   it("event ใหม่ที่ไม่รู้จัก → อื่น ๆ", () => {
     expect(pushCategoryOf("gif_poke")).toBe("other");
-    expect(pushCategoryOf("report.popup_later")).toBe("other");
     expect(pushCategoryOf("something.brand_new")).toBe("other");
+  });
+  it("ป๊อปเตือนงาน (รายงานอัตโนมัติ) แยกประเภทของตัวเอง", () => {
+    expect(pushCategoryOf("report.popup")).toBe("work_popup");
+    expect(pushCategoryOf("report.popup_later")).toBe("work_popup");
   });
 });
 

@@ -21,9 +21,13 @@ export const revalidate = 0;
 export type PushDevice = {
   id: string; device_label: string | null; created_at: string; last_success_at: string | null;
   last_error: string | null; last_error_at: string | null; endpoint_host: string; endpoint_tail: string;
+  /** null = ทุกเรื่อง · ["report.popup"] = เด้งที่เบราว์เซอร์ (ป๊อปเตือนงานอย่างเดียว) */
+  event_filter: string[] | null;
 };
 
-const DEVICE_COLS = "id, device_label, endpoint, created_at, last_success_at, last_error, last_error_at";
+const DEVICE_COLS = "id, device_label, endpoint, created_at, last_success_at, last_error, last_error_at, event_filter";
+/** เปิดจากสวิตช์ "เด้งที่เบราว์เซอร์นี้" ในเมนูผู้ใช้ = รับเฉพาะป๊อปเตือนงาน (เจ้าของเลือก 2026-10-29) */
+const BROWSER_POPUP_EVENTS = ["report.popup"];
 const MAX_DEVICES_PER_USER = 10;
 
 function toDevice(r: Record<string, unknown>): PushDevice {
@@ -33,6 +37,7 @@ function toDevice(r: Record<string, unknown>): PushDevice {
     id: String(r.id), device_label: (r.device_label as string) ?? null, created_at: String(r.created_at),
     last_success_at: (r.last_success_at as string) ?? null, last_error: (r.last_error as string) ?? null,
     last_error_at: (r.last_error_at as string) ?? null, endpoint_host: host, endpoint_tail: ep.slice(-12),
+    event_filter: Array.isArray(r.event_filter) ? (r.event_filter as string[]) : null,
   };
 }
 
@@ -59,7 +64,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 }
 
-type PostBody = { subscription?: { endpoint?: string; keys?: { p256dh?: string; auth?: string } }; standalone?: boolean };
+/** scope: "all" = ทุกเรื่อง (เปิดจากแอป /notify) · "popup" = ป๊อปเตือนงานอย่างเดียว (สวิตช์ในเมนูผู้ใช้) · ไม่ส่ง = คงของเดิม (ต่ออายุ) */
+type PostBody = { subscription?: { endpoint?: string; keys?: { p256dh?: string; auth?: string } }; standalone?: boolean; scope?: "all" | "popup" };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const client = supabaseFromRequest(request);
@@ -83,8 +89,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     : deviceLabel(p.deviceType, p.browser, p.os);
 
   const admin = supabaseAdmin();
-  const { data: existing } = await admin.from("erp_push_subscriptions").select("id, user_id").eq("endpoint", endpoint).maybeSingle();
-  const prev = existing as { id: string; user_id: string } | null;
+  const { data: existing } = await admin.from("erp_push_subscriptions").select("id, user_id, event_filter").eq("endpoint", endpoint).maybeSingle();
+  const prev = existing as { id: string; user_id: string; event_filter: string[] | null } | null;
+  // ตัวกรองเรื่องที่เครื่องนี้รับ: เครื่องที่รับทุกเรื่องอยู่แล้ว (รวมป๊อป) ไม่ลดเหลือแค่ป๊อป
+  const mineBefore = prev && prev.user_id === actor.id ? prev : null;
+  const eventFilter: string[] | null | undefined =
+    body.scope === "all" ? null
+    : body.scope === "popup" ? (mineBefore && mineBefore.event_filter === null ? null : BROWSER_POPUP_EVENTS)
+    : mineBefore ? undefined : null;
 
   if (!prev) {
     const { count } = await admin.from("erp_push_subscriptions").select("id", { count: "exact", head: true }).eq("user_id", actor.id);
@@ -97,6 +109,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await admin.from("erp_push_subscriptions").upsert({
     user_id: actor.id, endpoint, p256dh, auth, user_agent: ua.slice(0, 400), device_label: label,
     updated_at: now, fail_count: 0, last_error: null,
+    ...(eventFilter !== undefined ? { event_filter: eventFilter } : {}),
   }, { onConflict: "endpoint" }).select(DEVICE_COLS).single();
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 

@@ -16,6 +16,7 @@ import { getTheme, setTheme } from "@/lib/theme";
 import { DeviceModeToggle, DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, type DeviceMode, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
 import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INSTALL_HINT, openInChrome } from "@/components/pwa-install-button";
 import { WorkPopupFloatToggle } from "@/components/work-popup/float";
+import { BrowserPushToggle } from "@/components/web-push";
 import { PageViewOptionsSection } from "@/components/page-chrome";
 
 /** มุมมองอุปกรณ์ (ส่งมาจากเชลล์แอปเดี่ยว) — เลือกดูแบบแท็บเล็ต/มือถือบนจอนี้ + QR เปิด/ติดตั้งบนเครื่องจริง */
@@ -89,6 +90,8 @@ export function AccountMenu({ onDark = false, device, compact = false }: { onDar
 
             {/* ป๊อปเตือนงาน (ลอยมุมจอ) — เปิด/ซ่อน + มุมจอ · จำต่อคน */}
             <WorkPopupFloatToggle />
+            {/* ป๊อปเตือนงานเด้งเป็นแจ้งเตือนของเบราว์เซอร์ (มุมจอ) — ตั้งรายเครื่อง */}
+            <BrowserPushToggle />
 
             {/* มุมมองอุปกรณ์ — ดูแอปนี้แบบแท็บเล็ต/มือถือบนจอคอม (กรอบจำลอง) + QR สแกนเปิดบนเครื่องจริง */}
             {device && (

@@ -29,6 +29,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (action === "ack") {
     const { error } = await admin.from("erp_popup_acks").upsert(row, { onConflict: "report_id,user_id,ack_date" });
     if (error) return NextResponse.json({ ok: false, error: "บันทึกไม่สำเร็จ" }, { status: 500 });
+    // รับทราบแล้ว → แจ้งเตือนของป๊อปนี้ในกระดิ่ง (เด้งที่เบราว์เซอร์ / ไว้ทีหลัง) ถือว่าอ่านแล้ว
+    await admin.from("erp_notifications").update({ read_at: new Date().toISOString() })
+      .eq("user_id", actor.id).eq("entity_id", reportId).in("event_type", ["report.popup", "report.popup_later"]).is("read_at", null);
     return NextResponse.json({ ok: true, error: null });
   }
 

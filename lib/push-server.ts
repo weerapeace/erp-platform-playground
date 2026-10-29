@@ -47,13 +47,22 @@ export async function getVapidKeys(admin: Admin): Promise<VapidKeys> {
 
 export type PushSubscriptionRow = {
   id: string; user_id: string; endpoint: string; p256dh: string; auth: string; fail_count: number | null;
+  /** null = ทุกเรื่อง · ไม่ null = รับเฉพาะ event_type ในรายการ (เช่น เด้งที่เบราว์เซอร์ = ป๊อปเตือนงานอย่างเดียว) */
+  event_filter: string[] | null;
 };
 
 type NotifRow = { id: string; user_id: string; event_type: string; title: string; body: string | null; link_url: string | null; priority: string | null; created_at: string };
 
 export type PushPayload = {
   id: string | null; title: string; body: string; url: string | null; priority: string; unread: number | null;
+  /** กดแจ้งเตือน = เปิดลิงก์ตรง (ไม่ผ่านแอป /notify) — ป๊อปเตือนงาน */
+  direct?: boolean;
 };
+
+/** เครื่องนี้รับเรื่องนี้ไหม (ส่งทดสอบผ่านเสมอ) */
+export function subscriptionAccepts(filter: string[] | null | undefined, eventType: string): boolean {
+  return !filter || eventType === "push.test" || filter.includes(eventType);
+}
 
 export type DispatchStats = { notifications: number; sent: number; failed: number; removed: number; skipped: number };
 
@@ -75,6 +84,7 @@ export function buildPayloads(rows: NotifRow[], unread: number | null): PushPayl
     return rows.map((n) => ({
       id: n.id, title: clip(n.title, 120) || "แจ้งเตือนใหม่", body: clip(n.body, 300), url: n.link_url,
       priority: n.priority ?? "normal", unread,
+      ...(n.event_type.startsWith("report.") && n.link_url ? { direct: true } : {}),
     }));
   }
   const first = rows.slice(0, 3).map((n) => `• ${clip(n.title, 60)}`);
@@ -104,7 +114,7 @@ export async function dispatchPush(admin: Admin, ids: string[]): Promise<Dispatc
 
   const userIds = Array.from(new Set(rows.map((r) => r.user_id)));
   const [{ data: subsData }, { data: prefData }] = await Promise.all([
-    admin.from("erp_push_subscriptions").select("id, user_id, endpoint, p256dh, auth, fail_count").in("user_id", userIds),
+    admin.from("erp_push_subscriptions").select("id, user_id, endpoint, p256dh, auth, fail_count, event_filter").in("user_id", userIds),
     admin.from("user_ui_prefs").select("user_id, value").eq("key", PUSH_PREFS_KEY).in("user_id", userIds),
   ]);
   const subs = (subsData ?? []) as PushSubscriptionRow[];
@@ -123,8 +133,12 @@ export async function dispatchPush(admin: Admin, ids: string[]): Promise<Dispatc
     const wanted = mine.filter((r) => pushEnabledFor(p, r.event_type));
     stats.skipped += mine.length - wanted.length;
     if (!wanted.length) continue;
-    const payloads = buildPayloads(wanted, await unreadCount(admin, uid));
-    for (const s of mySubs) for (const payload of payloads) jobs.push({ sub: s, payload });
+    const unread = await unreadCount(admin, uid);
+    // แต่ละเครื่องเลือกรับได้ (เด้งที่เบราว์เซอร์ = ป๊อปเตือนงานอย่างเดียว) → ประกอบข้อความต่อเครื่อง
+    for (const s of mySubs) {
+      const forSub = wanted.filter((r) => subscriptionAccepts(s.event_filter, r.event_type));
+      for (const payload of buildPayloads(forSub, unread)) jobs.push({ sub: s, payload });
+    }
   }
 
   // ส่งพร้อมกันทีละ 20
