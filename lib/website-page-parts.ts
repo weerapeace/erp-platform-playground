@@ -125,6 +125,7 @@ export const NF_PARTS: PartDef[] = [
 /** 🎉 หน้าขอบคุณหลังสั่งซื้อ (เว็บร้าน CheckoutClient + components/checkout/ThanksExtras) */
 export const THANKS_PARTS: PartDef[] = [
   { key: "th.card", label: "กรอบหน้า", groups: ["box", "layout"] },
+  { key: "th.icon", label: "ไอคอนด้านบน", groups: ["icon", "layout"] },
   { key: "th.title", label: "หัวข้อขอบคุณ", groups: ["text"] },
   { key: "th.text", label: "ข้อความใต้หัวข้อ", groups: ["text", "hide"] },
   { key: "th.no", label: "กล่องเลขที่คำสั่งซื้อ", groups: ["text", "box"] },
@@ -132,7 +133,10 @@ export const THANKS_PARTS: PartDef[] = [
   { key: "th.code", label: "โค้ดคูปอง", groups: ["text", "box"] },
   { key: "th.follow", label: "ข้อความชวนติดตาม", groups: ["text", "hide"] },
   { key: "th.social", label: "ปุ่มโซเชียล", groups: ["text", "box"] },
+  { key: "th.steps", label: "แถบขั้นตอนถัดไป", groups: ["text", "layout", "hide"] },
+  { key: "th.note", label: "ข้อความจากร้าน", groups: ["text", "box"] },
   { key: "th.pay", label: "กล่องวิธีชำระเงิน", groups: ["box"] },
+  { key: "th.items", label: "สรุปรายการสินค้า", groups: ["text", "layout"] },
   { key: "th.reco", label: "หัวข้อสินค้าแนะนำ", groups: ["text", "layout"] },
 ];
 

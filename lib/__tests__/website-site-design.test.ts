@@ -138,7 +138,7 @@ describe("หน้าพิเศษ", () => {
   it("ธีมเก่า = หน้าตาเดิมทั้ง 5 หน้า", () => {
     const p = normalizeTheme({}).page;
     expect(p.notFound).toEqual({ style: "plain", imageKey: null, title: "", text: "", search: false, products: false });
-    expect(p.thanks).toEqual({ top: "emoji", imageKey: null, mobileImageKey: null, link: "", coupon: "", follow: false, products: false });
+    expect(p.thanks).toEqual({ top: "emoji", icon: "party", anim: "none", items: "none", layout: "one", steps: false, note: "", imageKey: null, mobileImageKey: null, link: "", coupon: "", follow: false, products: false, parts: {} });
     expect(p.popup).toEqual({ layout: "center", imageKey: null, trigger: "delay", again: "once" });
     expect(p.share).toEqual({ style: "photo", bg: "paper" });
     expect(p.login).toEqual({ layout: "center", imageKey: null, title: "", text: "" });
@@ -148,7 +148,7 @@ describe("หน้าพิเศษ", () => {
   it("ค่าที่เลือกรอดการบันทึก (รวมคำแปลอังกฤษ)", () => {
     const page = {
       notFound: { style: "big", imageKey: "website/404.jpg", title: "หลงทาง", title_en: "Lost", text: "ลองค้นหา", search: true, products: true },
-      thanks: { top: "image", imageKey: "website/thanks.png", coupon: "BACK10", follow: true, products: true },
+      thanks: { top: "image", imageKey: "website/thanks.png", coupon: "BACK10", follow: true, products: true, icon: "heart", anim: "hearts", items: "thumb", layout: "two", steps: true, note: "แพ็กภายใน 1–2 วัน", note_en: "Packed within 1–2 days" },
       popup: { layout: "split", imageKey: "website/pop.webp", trigger: "exit", again: "7d" },
       share: { style: "card", bg: "ink" },
       login: { layout: "cover", imageKey: "website/login.jpg", title: "ยินดีต้อนรับ", text: "สะสมแต้ม", text_en: "Earn points" },
@@ -161,6 +161,8 @@ describe("หน้าพิเศษ", () => {
     expect(normalizeNotFound({ style: "huge", imageKey: "../secret", search: "yes", title: "x".repeat(99) })).toMatchObject({ style: "plain", imageKey: null, search: false, title: "x".repeat(80) });
     expect(normalizeNotFound({ imageKey: "https://evil.com/a.jpg" }).imageKey).toBeNull();
     expect(normalizeThanks({ top: "gif", coupon: " back-10 ฿ ", follow: 1 })).toMatchObject({ top: "emoji", coupon: "BACK-10", follow: false });
+    expect(normalizeThanks({ icon: "skull", anim: "explode", items: "big", layout: "three", steps: "yes", note: 5 })).toMatchObject({ icon: "party", anim: "none", items: "none", layout: "one", steps: false, note: "" });
+    expect(normalizeThanks({ note: "  " + "ก".repeat(400) }).note).toHaveLength(300);
     expect(normalizePopup({ layout: "full", trigger: "click", again: "daily" })).toEqual({ layout: "center", imageKey: null, trigger: "delay", again: "once" });
     expect(normalizeShare({ style: "video", bg: "red" })).toEqual({ style: "photo", bg: "paper" });
     expect(normalizeLogin({ layout: "side", title_en: "   " })).toEqual({ layout: "center", imageKey: null, title: "", text: "" });

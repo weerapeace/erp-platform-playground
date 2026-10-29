@@ -42,8 +42,11 @@ import {
   type SiteShapeDesign,
   type SiteTexture,
   type SiteWidth,
+  type ThanksAnim,
+  type ThanksIcon,
 } from "@/lib/website-site-design";
 import { webForm } from "@/lib/website-form-styles";
+import { Text as LangText } from "@/components/website-cart-settings";
 import { AccountPageSetting } from "@/components/website-account-design";
 import { LoginExtraSetting } from "@/components/website-login-design";
 import { PartStyleFold } from "@/components/website-part-style-editor";
@@ -673,9 +676,81 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
       </DesignCard>
 
       {/* ── หน้าขอบคุณ ── */}
-      <DesignCard title="🎉 หน้าขอบคุณหลังสั่งซื้อ" hint="หัวข้อ/ข้อความของหน้านี้ตั้งที่แท็บ 💳 หน้าชำระเงิน · ที่นี่เพิ่มของเสริม" right={<>{pvBtn("/checkout?pv=thanks", "ดูในพรีวิว")}</>}>
+      <DesignCard title="🎉 หน้าขอบคุณหลังสั่งซื้อ" hint="หัวข้อ/ข้อความของหน้านี้ตั้งที่แท็บ 💳 หน้าชำระเงิน · ที่นี่: ไอคอน/ลูกเล่น · รูปสินค้า · 2 คอลัมน์ · ขั้นตอนถัดไป · ข้อความจากร้าน · ของเสริม" right={<>{pvBtn("/checkout?pv=thanks", "ดูในพรีวิว")}</>}>
         <label className={labelCls}>ด้านบนการ์ด<Def show={th.top === "emoji"} /></label>
-        <Choice<"emoji" | "image" | "none"> value={th.top} onChange={(v) => setTh({ top: v })} options={[{ v: "emoji", l: "อีโมจิ 🎉" }, { v: "image", l: "รูปแบนเนอร์" }, { v: "none", l: "ไม่มี" }]} />
+        <Choice<"emoji" | "image" | "none"> value={th.top} onChange={(v) => setTh({ top: v })} options={[{ v: "emoji", l: "ไอคอน" }, { v: "image", l: "รูปแบนเนอร์" }, { v: "none", l: "ไม่มี" }]} />
+        {th.top === "emoji" && (
+          <div className="mt-2">
+            <Choice<ThanksIcon>
+              value={th.icon}
+              onChange={(v) => setTh({ icon: v })}
+              options={[
+                { v: "party", l: "ปาร์ตี้", d: "แบบเดิม" },
+                { v: "check", l: "ติ๊กถูกในวง" },
+                { v: "heart", l: "หัวใจ" },
+                { v: "gift", l: "กล่องของขวัญ" },
+              ]}
+            />
+            <p className="text-[11px] text-slate-400 mt-1">ไอคอนเส้นใช้สีหลักของร้าน · ปรับขนาด/สีละเอียดได้ที่ชิ้น “ไอคอนด้านบน” ในตัวปรับละเอียดด้านล่าง</p>
+          </div>
+        )}
+        <label className={`${labelCls} mt-3`}>
+          ลูกเล่นตอนเปิดหน้า<Def show={th.anim === "none"} />
+        </label>
+        <Choice<ThanksAnim>
+          value={th.anim}
+          onChange={(v) => setTh({ anim: v })}
+          options={[
+            { v: "none", l: "ไม่มี" },
+            { v: "confetti", l: "กระดาษสีพุ่ง", d: "ฉลองแบบสนุก" },
+            { v: "hearts", l: "หัวใจลอย", d: "สีหลักร้าน" },
+            { v: "sparkle", l: "ประกายวิบวับ", d: "เรียบหรู" },
+            { v: "pop", l: "ไอคอนเด้ง", d: "เบาที่สุด" },
+            { v: "check", l: "ติ๊กถูกวาดเอง", d: "แทนไอคอน" },
+          ]}
+        />
+        <p className="text-[11px] text-slate-400 mt-1">
+          เล่นครั้งเดียวตอนหน้าขึ้น (1–3 วินาที) แล้วหายไป ไม่บังปุ่ม · ลูกค้าที่ตั้งเครื่องให้ลดการเคลื่อนไหว = ไม่เล่น · เปลี่ยนแบบแล้วพรีวิวเล่นให้ดูทันที
+          {(th.anim === "pop" || th.anim === "check") && th.top !== "emoji" && <span className="text-amber-700"> · ⚠️ แบบนี้ใช้กับ “ด้านบนการ์ด = ไอคอน” เท่านั้น</span>}
+        </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className={labelCls}>
+              รูปสินค้าในสรุปรายการ<Def show={th.items === "none"} />
+            </label>
+            <Choice<"none" | "thumb" | "grid">
+              value={th.items}
+              onChange={(v) => setTh({ items: v })}
+              options={[
+                { v: "none", l: "ไม่มี" },
+                { v: "thumb", l: "รูปเล็ก + ชื่อ", d: "แนะนำ" },
+                { v: "grid", l: "การ์ดรูปใหญ่" },
+              ]}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>
+              เค้าโครงจอคอม<Def show={th.layout === "one"} />
+            </label>
+            <Choice<"one" | "two">
+              value={th.layout}
+              onChange={(v) => setTh({ layout: v })}
+              options={[
+                { v: "one", l: "คอลัมน์เดียว" },
+                { v: "two", l: "2 คอลัมน์", d: "ซ้ายวิธีจ่าย · ขวาสรุปรายการ" },
+              ]}
+            />
+            <p className="text-[11px] text-slate-400 mt-1">มือถือเรียงลงมาเหมือนเดิมเสมอ</p>
+          </div>
+        </div>
+        <label className="mt-3 flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+          <input type="checkbox" className="w-4 h-4 accent-blue-600" checked={th.steps} onChange={(e) => setTh({ steps: e.target.checked })} />
+          แถบขั้นตอนถัดไป (สั่งแล้ว → ร้านแพ็กของ → จัดส่ง → ได้รับของ)
+        </label>
+        <p className="text-[11px] text-slate-400 ml-6">จ่ายพร้อมเพย์ที่ยังไม่โอน = มีขั้น “โอนเงิน” เพิ่มให้เอง</p>
+        <div className="mt-3">
+          <LangText label="ข้อความจากร้าน ({shop} = ชื่อร้าน · ว่าง = ไม่มีกล่อง)" obj={th} k="note" onPatch={(p) => setTh(p as Partial<SitePageDesign["thanks"]>)} max={300} placeholder="เช่น ร้านจะแพ็กของภายใน 1–2 วัน และส่งเลขพัสดุทาง SMS" enPlaceholder="e.g. We'll pack your order within 1–2 days and text you the tracking number" />
+        </div>
         {/* ช่องรูปของกลางเว็บ = มีปุ่ม 🔗 ใช้ชุดรูป (เปลี่ยนรูปทีเดียวหลายที่) */}
         {th.top === "image" && (
           <div className="mt-2 grid gap-3 sm:grid-cols-2">
@@ -714,7 +789,7 @@ export function SitePagesSetting({ value, onChange, shopSlug, onPreview, colors 
         </div>
         {colors && (
           <div className="mt-3">
-            <PartStyleFold parts={THANKS_PARTS} value={th.parts} onChange={(parts) => setTh({ parts })} colors={colors} onOpen={() => onPreview("/checkout?pv=thanks")} hint="หัวข้อ · เลขออเดอร์ · คูปอง · โซเชียล" testId="thanks" />
+            <PartStyleFold parts={THANKS_PARTS} value={th.parts} onChange={(parts) => setTh({ parts })} colors={colors} onOpen={() => onPreview("/checkout?pv=thanks")} hint="หัวข้อ · ไอคอน · เลขออเดอร์ · ขั้นตอน · ข้อความจากร้าน · รายการสินค้า · คูปอง · โซเชียล" testId="thanks" />
           </div>
         )}
       </DesignCard>

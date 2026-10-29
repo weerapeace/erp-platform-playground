@@ -133,7 +133,7 @@ export function CheckoutSettings({
         {c.acceptTerms && <Text label="ข้อความข้างช่องติ๊ก" obj={c} k="acceptText" onPatch={set} placeholder={PH("acceptText")} enPlaceholder={CHECKOUT_TEXT.acceptText.en} max={160} />}
       </Card>
 
-      <Card title="🙏 หน้าขอบคุณ (หลังกดสั่ง)" hint="เลขที่ออเดอร์ · วิธีจ่าย · สรุปรายการ ยังโชว์ตามเดิม · รูปบนสุด/คูปองครั้งหน้า/ติดตามโซเชียล/สินค้าแนะนำ ตั้งที่แท็บ 📄 หน้าพิเศษ">
+      <Card title="🙏 หน้าขอบคุณ (หลังกดสั่ง)" hint="เลขที่ออเดอร์ · วิธีจ่าย · สรุปรายการ ยังโชว์ตามเดิม · ไอคอน/ลูกเล่นตอนเปิด/รูปสินค้า/2 คอลัมน์/ขั้นตอนถัดไป/ข้อความจากร้าน/คูปองครั้งหน้า/โซเชียล/สินค้าแนะนำ ตั้งที่แท็บ 📄 หน้าพิเศษ">
         <div className="grid gap-3 sm:grid-cols-2">
           <Text label="หัวข้อ" obj={c} k="thanksTitle" onPatch={set} placeholder={PH("thanksTitle")} enPlaceholder={CHECKOUT_TEXT.thanksTitle.en} max={60} />
           <Text label="ข้อความใต้หัวข้อ ({shop} = ชื่อร้าน)" obj={c} k="thanksText" onPatch={set} placeholder={PH("thanksText")} enPlaceholder={CHECKOUT_TEXT.thanksText.en} max={200} />

@@ -233,7 +233,7 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
     keywords: "special pages",
     cards: [
       { title: "หน้า 404 (ไม่พบหน้า)", keywords: "not found" },
-      { title: "หน้าขอบคุณหลังสั่งซื้อ", keywords: "thank you" },
+      { title: "หน้าขอบคุณหลังสั่งซื้อ", keywords: "thank you ลูกเล่น animation confetti รูปสินค้า ขั้นตอนถัดไป ข้อความจากร้าน 2 คอลัมน์" },
       { title: "ป๊อปอัปรับส่วนลด", keywords: "popup สมัครสมาชิก" },
       { title: "รูปตอนแชร์ลิงก์สินค้า (Facebook · LINE)", keywords: "og image share" },
       { title: "หน้าเข้าสู่ระบบ / สมัครสมาชิก", keywords: "login signup" },

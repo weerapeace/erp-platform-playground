@@ -74,11 +74,27 @@ export interface NotFoundLook {
   /** สินค้าแนะนำ 4 ชิ้น (แนะนำของร้าน → ขายดี → มาใหม่) */
   products: boolean;
 }
+/** 🎉 ลูกเล่นตอนเปิดหน้าขอบคุณ (เล่นครั้งเดียว · เครื่องที่ตั้งลดการเคลื่อนไหว = ไม่เล่น) — pop/check ใช้กับแบบไอคอนเท่านั้น */
+export type ThanksAnim = "none" | "confetti" | "hearts" | "sparkle" | "pop" | "check";
+export const THANKS_ANIMS: ThanksAnim[] = ["none", "confetti", "hearts", "sparkle", "pop", "check"];
+/** ไอคอนด้านบน (top = emoji) — party = 🎉 (เดิม) */
+export type ThanksIcon = "party" | "check" | "heart" | "gift";
+export const THANKS_ICONS: ThanksIcon[] = ["party", "check", "heart", "gift"];
 export interface ThanksLook {
   /** 🎨 ปรับละเอียดทีละชิ้น (th.*) */
   parts: PartStyles;
-  /** emoji = 🎉 (เดิม) · image = รูปแบนเนอร์ · none = ไม่มี */
+  /** emoji = ไอคอน (เดิม 🎉 · เลือกแบบที่ icon) · image = รูปแบนเนอร์ · none = ไม่มี */
   top: "emoji" | "image" | "none";
+  icon: ThanksIcon;
+  anim: ThanksAnim;
+  /** รูปสินค้าในสรุปรายการ: none = ไม่มี (เดิม) · thumb = รูปเล็ก + ชื่อ · grid = การ์ดรูปใหญ่ */
+  items: "none" | "thumb" | "grid";
+  /** จอคอม: one = คอลัมน์เดียว (เดิม) · two = ซ้ายข้อความ/วิธีจ่าย ขวาสรุปรายการ (มือถือเรียงลงเหมือนเดิม) */
+  layout: "one" | "two";
+  /** แถบขั้นตอนถัดไป: สั่งแล้ว → (โอนเงิน) → ร้านแพ็กของ → จัดส่ง → ได้รับของ */
+  steps: boolean;
+  /** ข้อความจากร้าน (2 ภาษา · {shop} = ชื่อร้าน · ว่าง = ไม่มีกล่อง) */
+  note: string;
   imageKey: string | null;
   /** รูปแบนเนอร์จอมือถือ (ไม่ใส่ = ใช้รูปคอม) */
   mobileImageKey: string | null;
@@ -550,7 +566,7 @@ export const DEFAULT_SITE_PAGE: SitePageDesign = {
   searchEmpty: "cats",
   cookie: { layout: "card", side: "left", icon: true, title: "", text: "", parts: {} },
   notFound: { style: "plain", imageKey: null, title: "", text: "", search: false, products: false, parts: {} },
-  thanks: { top: "emoji", imageKey: null, mobileImageKey: null, link: "", coupon: "", follow: false, products: false, parts: {} },
+  thanks: { top: "emoji", icon: "party", anim: "none", items: "none", layout: "one", steps: false, note: "", imageKey: null, mobileImageKey: null, link: "", coupon: "", follow: false, products: false, parts: {} },
   popup: { layout: "center", imageKey: null, trigger: "delay", again: "once", parts: {} },
   share: { style: "photo", bg: "paper" },
   login: { layout: "center", imageKey: null, title: "", text: "", popupTitle: "", signupLabel: "", perksOn: true, perks: [], guestLink: true, providerStyle: "brand", parts: {} },
@@ -685,7 +701,22 @@ export function normalizeThanks(raw: unknown): ThanksLook {
   const top = r.top === "image" || r.top === "none" ? r.top : "emoji";
   const coupon = typeof r.coupon === "string" ? r.coupon.trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 32) : "";
   const link = typeof r.link === "string" ? r.link.trim().slice(0, 500) : "";
-  return { top, imageKey: imgKey(r.imageKey), mobileImageKey: imgKey(r.mobileImageKey), link: /^(\/(?!\/)|https?:\/\/)/i.test(link) ? link : "", coupon, follow: r.follow === true, products: r.products === true, parts: normalizePartStyles(r.parts) };
+  return {
+    top,
+    icon: THANKS_ICONS.includes(r.icon as ThanksIcon) ? (r.icon as ThanksIcon) : "party",
+    anim: THANKS_ANIMS.includes(r.anim as ThanksAnim) ? (r.anim as ThanksAnim) : "none",
+    items: r.items === "thumb" || r.items === "grid" ? r.items : "none",
+    layout: r.layout === "two" ? "two" : "one",
+    steps: r.steps === true,
+    note: typeof r.note === "string" ? r.note.trim().slice(0, 300) : "",
+    imageKey: imgKey(r.imageKey),
+    mobileImageKey: imgKey(r.mobileImageKey),
+    link: /^(\/(?!\/)|https?:\/\/)/i.test(link) ? link : "",
+    coupon,
+    follow: r.follow === true,
+    products: r.products === true,
+    parts: normalizePartStyles(r.parts),
+  };
 }
 export function normalizePopup(raw: unknown): PopupLook {
   const r = obj(raw);
