@@ -2,6 +2,7 @@
 /**
  * ⚙️ ตั้งค่าแอปเดี่ยว (ของกลาง) — เปิดจากแถบบนของ /app/<key> (แอดมิน)
  *   แท็บ 👁 ใครเห็นเมนูไหน: ติ๊กตำแหน่งต่อเมนู (ไม่ติ๊ก = ทุกคน) + 👤 รายคน (ให้เห็นเพิ่ม / ซ่อนจาก) + ดูแทนตำแหน่ง
+ *   แท็บ 👤 ตามพนักงาน: มุมกลับของแท็บบน — เลือกคน → ติ๊กเมนูที่คนนี้เห็น (./by-user · ข้อมูลชุดเดียวกัน)
  *     เก็บที่ erp_menu_items.audience (กฎ lib/menu-audience) · บันทึกแบบร่าง → 💾 · PATCH /api/menu (admin.users + ประวัติ)
  *     มีผลกับแถบเมนูแอปเดี่ยว · เมนูซ้าย · หน้ารวมแอป — "ซ่อน/โชว์" เท่านั้น กันเข้าจริงใช้สิทธิ์ตำแหน่ง
  *   แท็บ ↕️ จัดเรียง / ซ่อนเมนู: ลากเรียง · บนแถบ / รวมในปุ่ม "เพิ่มเติม ▾" / ซ่อน · ชื่อปุ่มรวมเมนู (./menu-layout · กฎ lib/app-menu-layout)
@@ -17,6 +18,8 @@ import { cleanAudience, describeAudience, menuVisibleTo, type MenuAudience } fro
 import type { UserPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "@/app/tasks/multi-user-picker";
 import { MenuLayoutTab } from "./menu-layout";
+import { MenuByUserTab } from "./by-user";
+import { saveMenuAudiences, sameAudience as same } from "./audience-save";
 import { MenuPermissionMatrix } from "@/components/menu-permissions";
 import { Icon } from "@/components/icon";
 
@@ -33,8 +36,6 @@ export const APP_SETTINGS_PAGES: Record<string, AppSettingsPage[]> = {
   payroll: [{ href: "/payroll/settings", label: "ตั้งค่าเงินเดือน" }],
 };
 
-const same = (a: MenuAudience | null, b: MenuAudience | null) => JSON.stringify(a) === JSON.stringify(b);
-
 export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHref, items, onSaved }: {
   appKey: string; appLabel: string;
   /** erp_app_groups.id / menu_more_label / default_href — ใช้ในแท็บจัดเรียง/ซ่อนเมนู */
@@ -46,7 +47,7 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
 }) {
   const { can } = useAuth();
   const pages = (APP_SETTINGS_PAGES[appKey] ?? []).filter((p) => !p.perm || can(p.perm));
-  const [tab, setTab] = useState<"who" | "layout" | "perm" | string>("who");   // "who" / "layout" / "perm" หรือ href ของหน้าที่ฝัง
+  const [tab, setTab] = useState<"who" | "person" | "layout" | "perm" | string>("who");   // "who" / "person" / "layout" / "perm" หรือ href ของหน้าที่ฝัง
   const page = pages.find((p) => p.href === tab) ?? null;
   const tabCls = (on: boolean) => `-mb-px border-b-2 px-3 py-2 text-sm whitespace-nowrap ${on ? "border-violet-600 font-medium text-violet-700" : "border-transparent text-slate-500 hover:text-slate-800"}`;
   return (
@@ -55,6 +56,7 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
         <h1 className="text-lg font-semibold text-slate-800">⚙️ ตั้งค่า {appLabel}</h1>
         <div className="mt-2 flex flex-wrap items-end gap-1">
           <button type="button" onClick={() => setTab("who")} className={tabCls(tab === "who")}>👁 ใครเห็นเมนูไหน</button>
+          <button type="button" onClick={() => setTab("person")} className={tabCls(tab === "person")}><Icon name="user" /> ตามพนักงาน</button>
           <button type="button" onClick={() => setTab("layout")} className={tabCls(tab === "layout")}>↕️ จัดเรียง / ซ่อนเมนู</button>
           <button type="button" onClick={() => setTab("perm")} className={tabCls(tab === "perm")}><Icon name="permission" /> สิทธิ์ตามเมนู</button>
           {pages.map((p) => (
@@ -68,6 +70,8 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
       </div>
       {page
         ? <iframe key={page.href} src={`${page.href}?embed=1`} title={page.label} className="flex-1 w-full border-0 bg-white" />
+        : tab === "person"
+          ? <MenuByUserTab appKey={appKey} items={items} onSaved={onSaved} />
         : tab === "layout"
           ? <MenuLayoutTab appKey={appKey} appId={appId} moreLabel={moreLabel} defaultHref={defaultHref} items={items} onSaved={onSaved} />
           : tab === "perm"
@@ -120,15 +124,7 @@ function WhoSeesWhat({ items, onSaved }: { items: AppSettingsMenuItem[]; onSaved
   const save = async () => {
     if (!changed.length || saving) return;
     setSaving(true);
-    let ok = 0; const errs: string[] = [];
-    for (const it of changed) {
-      try {
-        const r = await apiFetch("/api/menu", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: it.id, patch: { audience: cleanAudience(draft[it.id]) } }) });
-        const j = await r.json().catch(() => ({}));
-        if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-        ok++;
-      } catch (e) { errs.push(`${it.label}: ${e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"}`); }
-    }
+    const { ok, errs } = await saveMenuAudiences(changed, draft);
     setSaving(false);
     if (errs.length) toast.error(errs.slice(0, 3).join(" · "));
     if (ok) { toast.success(`บันทึกแล้ว ${ok} เมนู — คนที่เปิดแอปอยู่จะเห็นเมื่อรีเฟรช`); onSaved(); }

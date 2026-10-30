@@ -49,3 +49,48 @@ export function describeAudience(raw: unknown, roleLabel: (key: string) => strin
   if (a.hide_users?.length) parts.push(`ซ่อนจาก ${a.hide_users.length} คน`);
   return parts.join(" · ");
 }
+
+// ── มุมมอง "ตามพนักงาน" (เลือกคน → ติ๊กเมนูที่คนนั้นเห็น) — ใช้ข้อมูล audience ชุดเดียวกัน ──
+
+type Person = { id: string; role?: string | null };
+
+/** เหตุผลที่คนนี้เห็น/ไม่เห็นเมนู — admin · everyone ทุกคนเห็น · role/role_no ตามตำแหน่ง · list_only เห็นเฉพาะรายชื่อ · user_show/user_hide ตั้งเฉพาะคนนี้ */
+export type MenuReason = "admin" | "everyone" | "role" | "role_no" | "list_only" | "user_show" | "user_hide";
+
+export function explainMenuFor(raw: unknown, user: Person): { visible: boolean; reason: MenuReason } {
+  const a = cleanAudience(raw);
+  if (user.role === "admin") return { visible: true, reason: "admin" };
+  if (a?.hide_users?.includes(user.id)) return { visible: false, reason: "user_hide" };
+  if (a?.users?.includes(user.id)) return { visible: true, reason: "user_show" };
+  if (!a?.roles?.length && !a?.users?.length) return { visible: true, reason: "everyone" };
+  if (!a.roles?.length) return { visible: false, reason: "list_only" };
+  return user.role && a.roles.includes(user.role) ? { visible: true, reason: "role" } : { visible: false, reason: "role_no" };
+}
+
+/** ตำแหน่งสมมติที่ไม่มีใครอยู่ (นอกจากแอดมินที่เห็นทุกเมนูอยู่แล้ว) — ใช้แทน "ยังจำกัดอยู่ แต่ไม่เหลือใครในรายชื่อ" ไม่ให้กลายเป็นทุกคนเห็น */
+export const ADMIN_ONLY_ROLE = "admin";
+
+/** ถอดคนนี้ออกจากรายชื่อเห็น/ซ่อน — ถ้าเมนูเคยเห็นเฉพาะรายชื่อแล้วไม่เหลือใคร = คงจำกัดไว้ (เฉพาะแอดมิน) ไม่ใช่เปิดให้ทุกคน */
+function withoutPerson(a: MenuAudience | null, id: string) {
+  const restricted = !!(a?.roles?.length || a?.users?.length);
+  let roles = [...(a?.roles ?? [])];
+  const users = (a?.users ?? []).filter((x) => x !== id);
+  const hide = (a?.hide_users ?? []).filter((x) => x !== id);
+  if (restricted && !roles.length && !users.length) roles = [ADMIN_ONLY_ROLE];
+  return { restricted, roles, users, hide };
+}
+
+/** ตั้งให้ "คนนี้" เห็น/ไม่เห็นเมนู โดยไม่กระทบคนอื่น (ตำแหน่งเดียวกันยังเห็นเหมือนเดิม) */
+export function setMenuVisibleFor(raw: unknown, user: Person, visible: boolean): MenuAudience | null {
+  const { restricted, roles, users, hide } = withoutPerson(cleanAudience(raw), user.id);
+  const byRole = !restricted || (!!user.role && roles.includes(user.role));
+  if (visible && !byRole) users.push(user.id);
+  if (!visible && byRole) hide.push(user.id);
+  return cleanAudience({ roles, users, hide_users: hide });
+}
+
+/** ล้างค่าที่ตั้งเฉพาะคนนี้ → กลับไปเห็นตามตำแหน่ง */
+export function resetMenuFor(raw: unknown, user: Person): MenuAudience | null {
+  const { roles, users, hide } = withoutPerson(cleanAudience(raw), user.id);
+  return cleanAudience({ roles, users, hide_users: hide });
+}
