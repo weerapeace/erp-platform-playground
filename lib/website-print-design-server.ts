@@ -93,7 +93,8 @@ export async function printLibraryFor(sb: Admin, cfg: PrintDesignConfig, origin:
     const a = byId.get(id);
     if (!a || !a.r2_key || a.status === "trashed" || (a.asset_type && a.asset_type !== "image")) continue;
     const set = sets.find((s) => s.collectionId === setOf.get(id))!;
-    const ar = a.width && a.height ? a.height / a.width : 1;
+    // ไม่มีกว้าง/สูงในคลัง = 0 → เว็บวัดสัดส่วนจากรูปจริงก่อนวาง (เดิมเดาเป็นจัตุรัส ลายยืด/บีบ)
+    const ar = a.width && a.height ? a.height / a.width : 0;
     out.push({
       id: a.id,
       name: (a.title || a.file_name || "ลาย").replace(/\.[a-z0-9]{2,4}$/i, "").slice(0, 60),
@@ -123,7 +124,7 @@ async function libLookupFor(sb: Admin, cfg: PrintDesignConfig, assetIds: string[
   return (id) => {
     const a = byId.get(id);
     if (!a || !extraOf.has(id) || a.status === "trashed" || !a.r2_key) return null;
-    return { ar: a.width && a.height ? a.height / a.width : 1, extra: extraOf.get(id)!, name: (a.title || a.file_name || "ลาย").replace(/\.[a-z0-9]{2,4}$/i, "").slice(0, 60) };
+    return { ar: a.width && a.height ? a.height / a.width : null, extra: extraOf.get(id)!, name: (a.title || a.file_name || "ลาย").replace(/\.[a-z0-9]{2,4}$/i, "").slice(0, 60) };
   };
 }
 

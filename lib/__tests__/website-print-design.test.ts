@@ -27,7 +27,7 @@ const cfg: PrintDesignConfig = normalizePrintDesign({
     { id: "pocket", label: "ช่องหน้า", x: 40, y: 40, w: 20, h: 20, widthCm: 9, heightCm: 9 },
   ],
 });
-const lib: PrintLibLookup = (id) => (id === "a1" ? { ar: 1, extra: 20, name: "ดอกไม้ชมพู" } : id === "a2" ? { ar: 0.5, extra: 0, name: "รุ้ง" } : null);
+const lib: PrintLibLookup = (id) => (id === "a1" ? { ar: 1, extra: 20, name: "ดอกไม้ชมพู" } : id === "a2" ? { ar: 0.5, extra: 0, name: "รุ้ง" } : id === "a3" ? { ar: null, extra: 0, name: "ไม่มีขนาด" } : null);
 const uploadOk = (p: string) => p.startsWith("shop-1/");
 
 describe("normalizePrintDesign", () => {
@@ -116,6 +116,12 @@ describe("normalizePlacements", () => {
     const three = [1, 2, 3].map(() => ({ zone: "front", kind: "lib", assetId: "a1" }));
     expect(normalizePlacements(three, cfg, { lib, uploadOk })).toMatchObject({ ok: false, error: "ตัวกระเป๋า ใส่ได้สูงสุด 2 ลาย" });
     expect(normalizePlacements([], cfg, { lib, uploadOk }).ok).toBe(false);
+  });
+  it("ลายคลังที่ไม่มีขนาดรูป = ใช้สัดส่วนจากหน้าเว็บ (กันค่าแปลก)", () => {
+    const r = normalizePlacements([{ zone: "front", kind: "lib", assetId: "a3", w: 4, h: 8 }, { zone: "front", kind: "lib", assetId: "a3", w: 4, h: 999 }], cfg, { lib, uploadOk });
+    if (!r.ok) throw new Error(r.error);
+    expect(r.placements[0]).toMatchObject({ w: 4, h: 8 });
+    expect(r.placements[1].h / r.placements[1].w).toBeCloseTo(20, 0);
   });
   it("ร้านปิดอัปรูป = รับเฉพาะลายคลัง", () => {
     const r = normalizePlacements([{ zone: "front", kind: "upload", upload: { path: "shop-1/x.png", w: 10, h: 10 } }], { ...cfg, allowUpload: false }, { lib, uploadOk });

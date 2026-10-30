@@ -207,10 +207,14 @@ export type PrintPlacement = {
   rot: number;
 };
 
-/** ลายในคลังที่ลูกค้าเลือกได้ (API สาธารณะส่งให้เว็บ) */
+/** ลายในคลังที่ลูกค้าเลือกได้ (API สาธารณะส่งให้เว็บ) · ar 0 = คลังไม่ได้บันทึกขนาดรูป (เว็บวัดจากรูปจริงเอง) */
 export type PrintLibraryItem = { id: string; name: string; url: string; ar: number; extra: number; set: string };
 
-export type PrintLibLookup = (assetId: string) => { ar: number; extra: number; name: string } | null;
+/** ar null = ไม่รู้สัดส่วน (ไฟล์ในคลังไม่มีกว้าง/สูง) → ใช้สัดส่วนที่หน้าเว็บวัดจากรูป */
+export type PrintLibLookup = (assetId: string) => { ar: number | null; extra: number; name: string } | null;
+
+/** สัดส่วน สูง/กว้าง ที่ยอมรับ (กันค่าแปลก) */
+export const clampPrintAr = (ar: number) => (Number.isFinite(ar) && ar > 0 ? Math.min(20, Math.max(0.05, ar)) : 1);
 
 /**
  * ตรวจ + จัดลายที่ลูกค้าวาง (ERP ใช้ตอนบันทึกแบบ) — สัดส่วนลายยึดจากไฟล์จริง ไม่เชื่อตัวเลขจากหน้าเว็บ
@@ -240,7 +244,7 @@ export function normalizePlacements(
       const assetId = str(p.assetId, 40);
       const hit = assetId ? ctx.lib(assetId) : null;
       if (!hit) return { ok: false, error: "มีลายที่ร้านปิดไปแล้ว เอาลายนั้นออกแล้วลองใหม่" };
-      ar = hit.ar;
+      ar = hit.ar ?? clampPrintAr(num(p.h, 0) / num(p.w, 0));
       name = hit.name;
       extra = { assetId };
     } else if (p.kind === "upload") {
