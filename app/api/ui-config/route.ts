@@ -4,7 +4,7 @@
  * PATCH { key, value } → บันทึก (merge ทับทั้งก้อน)
  * ของกลาง: guardApi + supabaseAdmin · ตาราง ui_config(key, value jsonb) · PATCH บันทึก audit (setting_change)
  * key ขึ้นต้น "admin_" = ค่ากลางที่แอดมินเท่านั้นแก้ได้ (เช่น admin_wb_table_presets ชุดหน้าตาตารางบอร์ด) — อ่านได้ตามปกติ
- * LOGIN_READ_KEYS = อ่านได้แค่ล็อกอิน (ไม่ต้อง products.view) เช่น admin_launcher_orbit หน้าตาวงแอป
+ * LOGIN_READ_KEYS = อ่านได้แค่ล็อกอิน (ไม่ต้อง products.view) เช่น admin_launcher_orbit หน้าตาวงแอป · admin_launcher_theme แต่งหน้าแรกของทีม
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -12,12 +12,13 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { ORBIT_TEAM_KEY } from "@/lib/app-orbit-style";
+import { THEME_TEAM_KEY } from "@/lib/launcher-theme";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // ค่ากลางที่ "ทุกคนที่ล็อกอิน" ต้องอ่านได้ (ไม่ต้องมีสิทธิ์สินค้า) — เช่น หน้าตาวงแอปหน้าแรก /apps · แก้ยังต้อง admin.users (ขึ้นต้น admin_)
-const LOGIN_READ_KEYS = new Set<string>([ORBIT_TEAM_KEY]);
+const LOGIN_READ_KEYS = new Set<string>([ORBIT_TEAM_KEY, THEME_TEAM_KEY]);
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const key = (new URL(request.url).searchParams.get("key") ?? "").trim();

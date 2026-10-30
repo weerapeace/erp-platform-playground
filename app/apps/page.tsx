@@ -19,7 +19,10 @@ import type { MenuRow, AppGroup } from "@/components/playground-shell";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, useSortable, arrayMove, rectSortingStrategy, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ColorInput } from "@/components/color-picker";
+import { LauncherBackdrop } from "@/components/launcher-theme/backdrop";
+import { LauncherThemePanel, type LauncherThemeScope } from "@/components/launcher-theme/panel";
+import { askConfirm } from "@/components/modal/ask-dialog";
+import { BG_KEYS, DEFAULT_LAUNCHER_THEME, THEME_MINE_KEY, THEME_TEAM_KEY, cleanLauncherTheme, fontCssOf, hasOwnBg, pageBgStyle, resolveLauncherTheme, type LauncherDecor, type LauncherTheme } from "@/lib/launcher-theme";
 import { uploadResizedImage } from "@/components/image-attach";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { menuVisibleTo } from "@/lib/menu-audience";
@@ -31,26 +34,7 @@ import { useMediaQuery } from "@/lib/use-media-query";
 import { useToast } from "@/components/toast";
 import { ConfirmDialog } from "@/components/modal";
 
-// ธีมหน้าแรกรายคน (เก็บใน user_ui_prefs key=launcher_theme)
-type LauncherTheme = { bg: string | null; bgGradient: { from: string; to: string } | null; bgImage: string | null; accent: string | null; font: string | null };
-const DEFAULT_LAUNCHER_THEME: LauncherTheme = { bg: null, bgGradient: null, bgImage: null, accent: null, font: null };
-const BG_PRESETS: { from: string; to: string }[] = [
-  { from: "#f8fafc", to: "#eff6ff" }, { from: "#fef3c7", to: "#fff7ed" }, { from: "#ecfdf5", to: "#f0fdfa" },
-  { from: "#faf5ff", to: "#fdf2f8" }, { from: "#eff6ff", to: "#e0e7ff" }, { from: "#fff1f2", to: "#fef2f2" },
-];
-const LAUNCHER_FONTS: { key: string; label: string; css: string }[] = [
-  { key: "", label: "ค่าเริ่มต้น", css: "" },
-  { key: "sarabun", label: "Sarabun", css: "'Sarabun', sans-serif" },
-  { key: "tahoma", label: "Tahoma", css: "Tahoma, sans-serif" },
-  { key: "angsana", label: "Angsana (ทางการ)", css: "'Angsana New', 'TH Sarabun New', serif" },
-  { key: "mono", label: "Monospace", css: "'Courier New', monospace" },
-];
-function fontCssOf(t: LauncherTheme): string { return LAUNCHER_FONTS.find((f) => f.key === (t.font ?? ""))?.css ?? ""; }
-function launcherBgStyle(t: LauncherTheme): React.CSSProperties {
-  if (t.bgImage) { const u = r2ImageUrl(t.bgImage); return u ? { backgroundImage: `linear-gradient(rgba(248,250,252,0.9),rgba(248,250,252,0.94)), url(${u})`, backgroundSize: "cover", backgroundAttachment: "fixed" } : {}; }
-  if (t.bgGradient) return { background: `linear-gradient(160deg, ${t.bgGradient.from}, ${t.bgGradient.to})` };
-  return t.bg ? { background: t.bg } : {};
-}
+// ธีมหน้าแรก (ค่ากลางทีม + ของฉัน · ความชัด/ตำแหน่งรูป · ของตกแต่ง) → lib/launcher-theme + components/launcher-theme
 
 // ค่าปรับแต่งหน้าแรกรายคน (เก็บใน user_ui_prefs key=launcher_prefs)
 type LauncherPrefs = {
@@ -508,29 +492,76 @@ export default function AppLauncherPage() {
   };
   const searching = query.trim().length > 0;
 
-  // ---- ธีมหน้าแรกรายคน: พื้นหลัง / สี / ฟอนต์ ----
-  const [theme, setTheme] = useState<LauncherTheme>(DEFAULT_LAUNCHER_THEME);
+  // ---- 🎨 แต่งหน้าแรก: ค่ากลางทีม (ui_config) ← ของฉัน (user_ui_prefs) · กฎ lib/launcher-theme ----
+  const [themeTeam, setThemeTeam] = useState<LauncherTheme>(DEFAULT_LAUNCHER_THEME);
+  const [themeMine, setThemeMine] = useState<LauncherTheme>(DEFAULT_LAUNCHER_THEME);
   const [themeOpen, setThemeOpen] = useState(false);
-  const [bgBusy, setBgBusy] = useState(false);
+  const [themeScope, setThemeScope] = useState<LauncherThemeScope>("mine");
+  const [themeDraft, setThemeDraft] = useState<LauncherTheme>(DEFAULT_LAUNCHER_THEME);
+  const [savingTheme, setSavingTheme] = useState(false);
+  const [decorSel, setDecorSel] = useState<string | null>(null);
   useEffect(() => {
-    apiFetch("/api/user-prefs?key=launcher_theme").then((r) => r.json()).then((j) => {
-      const v = (j.value ?? {}) as Partial<LauncherTheme>;
-      setTheme({ bg: v.bg ?? null, bgGradient: v.bgGradient ?? null, bgImage: v.bgImage ?? null, accent: v.accent ?? null, font: v.font ?? null });
-    }).catch(() => {});
+    apiFetch(`/api/ui-config?key=${THEME_TEAM_KEY}`).then((r) => r.json()).then((j) => setThemeTeam(cleanLauncherTheme(j.value))).catch(() => { /* ไม่มี = หน้าตาเดิม */ });
+    apiFetch(`/api/user-prefs?key=${THEME_MINE_KEY}`).then((r) => r.json()).then((j) => setThemeMine(cleanLauncherTheme(j.value))).catch(() => { /* ไม่มี = ตามทีม */ });
   }, []);
-  const updateTheme = useCallback((patch: Partial<LauncherTheme>) => {
-    setTheme((prev) => {
-      const next = { ...prev, ...patch };
-      apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "launcher_theme", value: next }) }).catch(() => {});
+  // ของฉัน: บันทึกอัตโนมัติ (รอหยุดลาก/เลื่อนแถบ 0.5 วิ)
+  const mineSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveMineTheme = useCallback((value: LauncherTheme) => {
+    if (mineSaveTimer.current) clearTimeout(mineSaveTimer.current);
+    mineSaveTimer.current = setTimeout(() => {
+      apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: THEME_MINE_KEY, value }) }).catch(() => {});
+    }, 500);
+  }, []);
+  const editingTeamTheme = themeOpen && themeScope === "team";
+  const themeTeamDirty = JSON.stringify(cleanLauncherTheme(themeDraft)) !== JSON.stringify(cleanLauncherTheme(themeTeam));
+  const theme = editingTeamTheme ? resolveLauncherTheme(themeDraft, null) : resolveLauncherTheme(themeTeam, themeMine);
+  const patchTheme = useCallback((patch: Partial<LauncherTheme>) => {
+    if (editingTeamTheme) { setThemeDraft((d) => ({ ...d, ...patch })); return; }
+    setThemeMine((prev) => {
+      let next: LauncherTheme = { ...prev };
+      // ปรับรูปพื้นหลังทีละช่อง (ความชัด/ตำแหน่ง ฯลฯ) ตอนยังใช้พื้นหลังของทีม → เริ่มจากชุดของทีม
+      if (!hasOwnBg(prev) && BG_KEYS.some((k) => k in patch) && !("bg" in patch || "bgGradient" in patch || "bgImage" in patch))
+        next = { ...next, ...Object.fromEntries(BG_KEYS.map((k) => [k, themeTeam[k]])) };
+      next = { ...next, ...patch };
+      saveMineTheme(next);
       return next;
     });
-  }, []);
-  const onPickBg = async (file: File | null | undefined) => {
-    if (!file) return;
-    setBgBusy(true);
-    try { const up = await uploadResizedImage(file, { folder: "launcher-bg", max: 1920 }); updateTheme({ bgImage: up.r2_key, bg: null, bgGradient: null }); }
-    catch { alert("อัปโหลดรูปไม่สำเร็จ"); }
-    finally { setBgBusy(false); }
+  }, [editingTeamTheme, themeTeam, saveMineTheme]);
+  // ลากของตกแต่ง (อัปเดตจากค่าล่าสุดเสมอ — กันค่าค้างระหว่างลาก)
+  const moveDecor = useCallback((id: string, xy: Pick<LauncherDecor, "x" | "y">) => {
+    const apply = (arr: LauncherDecor[]) => arr.map((d) => (d.id === id ? { ...d, ...xy } : d));
+    if (editingTeamTheme) { setThemeDraft((d) => ({ ...d, decor: apply(d.decor ?? []) })); return; }
+    setThemeMine((prev) => { const next = { ...prev, decor: apply(prev.decor ?? themeTeam.decor ?? []) }; saveMineTheme(next); return next; });
+  }, [editingTeamTheme, themeTeam, saveMineTheme]);
+  const followTeamPart = (part: "bg" | "decor") => setThemeMine((prev) => {
+    const next: LauncherTheme = { ...prev };
+    if (part === "bg") for (const k of BG_KEYS) (next as Record<string, unknown>)[k] = null;
+    else delete next.decor;
+    saveMineTheme(next);
+    return next;
+  });
+  const resetTheme = () => {
+    setDecorSel(null);
+    if (editingTeamTheme) { setThemeDraft({ ...DEFAULT_LAUNCHER_THEME }); return; }
+    setThemeMine({ ...DEFAULT_LAUNCHER_THEME }); saveMineTheme({ ...DEFAULT_LAUNCHER_THEME });
+  };
+  const onThemeScope = (sc: LauncherThemeScope) => { if (sc === "team" && !themeTeamDirty) setThemeDraft({ ...themeTeam }); setThemeScope(sc); setDecorSel(null); };
+  const saveTeamTheme = async () => {
+    setSavingTheme(true);
+    try {
+      const value = cleanLauncherTheme(themeDraft);
+      const r = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: THEME_TEAM_KEY, value }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || `HTTP ${r.status}`);
+      setThemeTeam(value);
+      toast.success("บันทึกหน้าแรกของทั้งทีมแล้ว — คนที่ยังไม่ได้แต่งเองจะเห็นแบบนี้");
+    } catch (e) { toast.error(`บันทึกไม่สำเร็จ: ${e instanceof Error ? e.message : String(e)}`); }
+    finally { setSavingTheme(false); }
+  };
+  const closeTheme = async () => {
+    if (editingTeamTheme && themeTeamDirty && !(await askConfirm({ title: "คุณมีข้อมูลที่ยังไม่ได้บันทึก", message: "ต้องการออกโดยไม่บันทึกหรือไม่?", confirmText: "ออกโดยไม่บันทึก", cancelText: "อยู่ต่อ", variant: "danger" }))) return;
+    if (editingTeamTheme) setThemeDraft({ ...themeTeam });
+    setThemeOpen(false); setDecorSel(null);
   };
   const accent = theme.accent || undefined;
 
@@ -565,8 +596,10 @@ export default function AppLauncherPage() {
   );
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30"
-      style={{ ...launcherBgStyle(theme), ...(fontCssOf(theme) ? { fontFamily: fontCssOf(theme) } : {}) }}>
+    <div className="relative isolate min-h-screen bg-gradient-to-br from-slate-50 via-white to-blue-50/30"
+      style={{ ...pageBgStyle(theme), ...(fontCssOf(theme) ? { fontFamily: fontCssOf(theme) } : {}) }}>
+      {/* 🎨 รูปพื้นหลัง + ของตกแต่ง (เปิดแผงแต่ง = ลากย้ายได้) */}
+      <LauncherBackdrop theme={theme} editing={themeOpen && !editMode} selectedId={decorSel} onSelect={setDecorSel} onChange={moveDecor} />
       {/* ============= Top bar ============= */}
       <header className="sticky top-0 z-10 backdrop-blur bg-white/80 border-b border-slate-200/70">
         <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
@@ -699,54 +732,13 @@ export default function AppLauncherPage() {
             )}
             {!editMode && (
               <div className="relative">
-                <button type="button" onClick={() => setThemeOpen((o) => !o)} className="h-8 px-3 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🎨 แต่งหน้าแรก</button>
+                <button type="button" onClick={() => (themeOpen ? void closeTheme() : setThemeOpen(true))} className="h-8 px-3 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🎨 แต่งหน้าแรก</button>
                 {themeOpen && (
-                  <>
-                    <div className="fixed inset-0 z-[60]" onClick={() => setThemeOpen(false)} />
-                    <div className="absolute right-0 z-[61] mt-1 w-80 max-w-[92vw] bg-white border border-slate-200 rounded-xl shadow-xl p-3 space-y-3 text-left">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-slate-700">🎨 แต่งหน้าแรก (ของฉัน)</p>
-                        <button type="button" onClick={() => updateTheme({ ...DEFAULT_LAUNCHER_THEME })} className="text-[11px] text-slate-400 hover:text-blue-600">รีเซ็ต</button>
-                      </div>
-                      {/* พื้นหลัง */}
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-medium text-slate-600">พื้นหลัง</span>
-                          <button type="button" onClick={() => updateTheme({ bg: null, bgGradient: null, bgImage: null })} className="text-[11px] text-slate-400 hover:text-slate-700">ล้าง</button>
-                        </div>
-                        <div className="flex flex-wrap gap-1.5 mt-1.5">
-                          {BG_PRESETS.map((p, i) => (
-                            <button key={i} type="button" onClick={() => updateTheme({ bgGradient: p, bg: null, bgImage: null })} title="พื้นหลังไล่สี"
-                              className="h-8 w-8 rounded-lg border border-slate-200 hover:scale-110 transition-transform" style={{ background: `linear-gradient(160deg,${p.from},${p.to})` }} />
-                          ))}
-                          <label className="h-8 px-2 rounded-lg border border-dashed border-slate-300 text-[11px] text-slate-500 hover:bg-slate-50 cursor-pointer flex items-center gap-1">
-                            {bgBusy ? "กำลังอัปโหลด…" : "🖼 รูป"}
-                            <input type="file" accept="image/*" className="hidden" disabled={bgBusy} onChange={(e) => onPickBg(e.target.files?.[0])} />
-                          </label>
-                        </div>
-                        <div className="flex items-center gap-2 mt-2">
-                          <span className="text-[11px] text-slate-400 w-12 shrink-0">สีเดียว</span>
-                          <div className="flex-1 min-w-0"><ColorInput value={theme.bg ?? "#f8fafc"} onChange={(c) => updateTheme({ bg: c, bgGradient: null, bgImage: null })} /></div>
-                        </div>
-                      </div>
-                      {/* สีหลัก (คำทักทาย/เน้น) */}
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs font-medium text-slate-600 w-12 shrink-0">สีหลัก</span>
-                        <div className="flex-1 min-w-0"><ColorInput value={theme.accent ?? "#0f172a"} onChange={(c) => updateTheme({ accent: c })} /></div>
-                        <button type="button" onClick={() => updateTheme({ accent: null })} className="text-[11px] text-slate-400 hover:text-slate-700 shrink-0">ล้าง</button>
-                      </div>
-                      {/* ฟอนต์ */}
-                      <div>
-                        <span className="text-xs font-medium text-slate-600">ฟอนต์</span>
-                        <div className="flex flex-wrap gap-1.5 mt-1.5">
-                          {LAUNCHER_FONTS.map((f) => (
-                            <button key={f.key} type="button" onClick={() => updateTheme({ font: f.key || null })} style={f.css ? { fontFamily: f.css } : undefined}
-                              className={`h-7 px-2.5 text-xs rounded border ${(theme.font ?? "") === f.key ? "bg-blue-50 border-blue-300 text-blue-700 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </>
+                  <LauncherThemePanel value={theme} onPatch={patchTheme} onReset={resetTheme} onClose={() => void closeTheme()}
+                    scope={canTeamOrbit ? themeScope : "mine"} onScope={onThemeScope} canTeam={canTeamOrbit}
+                    ownBg={hasOwnBg(themeMine)} ownDecor={themeMine.decor !== undefined} onUseTeam={followTeamPart}
+                    teamDirty={themeTeamDirty} savingTeam={savingTheme} onSaveTeam={() => void saveTeamTheme()} onCancelTeam={() => setThemeDraft({ ...themeTeam })}
+                    selectedId={decorSel} onSelect={setDecorSel} />
                 )}
               </div>
             )}
