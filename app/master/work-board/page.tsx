@@ -45,6 +45,7 @@ import type { DispatchHistRow } from "@/app/api/mo/dispatch-history/route";
 import { AddPieceworkModal } from "./add-piecework-modal";
 import { CatchUpModal } from "./catch-up-modal";
 import { CatchUpQueue } from "./catch-up-queue";
+import { CatchUpBatch } from "./catch-up-batch";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
 import type { CuAllRow } from "@/app/api/mo/catch-up/all/route";
 import { CU_WHERE_ORDER, type CuWhereKey } from "./catch-up";
@@ -3454,7 +3455,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   // ── แท็บ "ทั้งหมด" (เฉพาะโหมดอัปเดตงาน): ทุกใบ + ตอนนี้ของอยู่ไหน — อัปเดตแล้วใบหลุดจากแท็บอื่น (โกดัง QC / รอปิดใบ) ก็ยังหาเจอ
   const [cuAll, setCuAll] = useState(false);
   const [cuAllRows, setCuAllRows] = useState<CuAllRow[] | null>(null);
-  const [cuRecent, setCuRecent] = useState<string[]>([]);   // ใบที่เพิ่งอัปเดตรอบนี้ (ล่าสุดก่อน)
+  const [cuRecent, setCuRecent] = useState<string[]>([]);
+  // 🔄 อัปเดตเป็นชุด: ใบที่ติ๊กมา (null = ปิด) · เลือกในแท็บ "ทั้งหมด" · ป๊อปทีละใบ (เปิดแบบละเอียด) ปิดแล้ว = ให้ตารางโหลดใบนั้นใหม่
+  const [cuBatch, setCuBatch] = useState<string[] | null>(null);
+  const [cuAllSel, setCuAllSel] = useState<Set<string>>(new Set());
+  const [cuBatchRefresh, setCuBatchRefresh] = useState<{ mo: string; n: number } | null>(null);   // ใบที่เพิ่งอัปเดตรอบนี้ (ล่าสุดก่อน)
   const loadCuAll = useCallback(async () => {
     try { const r = await apiFetch("/api/mo/catch-up/all"); const j = await r.json(); if (r.ok && Array.isArray(j?.data)) setCuAllRows(j.data as CuAllRow[]); } catch { /* แท็บว่างก็ยังใช้แท็บอื่นได้ */ }
   }, []);
@@ -3787,7 +3792,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     toast.success(scope === "view" && !isMineView ? `บันทึกคอลัมน์ในมุมมอง “${view.name}” แล้ว (ทุกคนที่เห็น)` : `บันทึกคอลัมน์ของ “${view.name}” แล้ว`);
   };
   // ปิดช่องติ๊กในชุดหน้าตา → ล้างที่เลือกค้างไว้ (ปุ่มทำหลายใบจะได้ไม่โผล่)
-  useEffect(() => { if (!dc.check) { setSel(new Set()); setWoSel(new Set()); setQSel(new Set()); } }, [dc.check]);
+  useEffect(() => { if (!dc.check) { setSel(new Set()); setWoSel(new Set()); setQSel(new Set()); setCuAllSel(new Set()); } }, [dc.check]);
   const applyDue = useCallback(async () => {
     const ids = pending.filter((m) => sel.has(m.id)).map((m) => m.id);
     if (!ids.length) return;
@@ -4509,7 +4514,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <button type="button" onClick={onExitCatchUp} className="h-8 shrink-0 rounded-lg border border-amber-300 bg-white px-3 text-[13px] hover:bg-amber-100">ออกจากโหมด</button>
           </div>
         )}
-        <CatchUpModal moNo={cuMo} onClose={() => setCuMo(null)}
+        <CatchUpModal moNo={cuMo} onClose={() => { if (cuBatch && cuMo) { const mo = cuMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } setCuMo(null); }}
           onDone={() => {
             // ⚠️ คิว "รอ QC รับเข้า" โหลดแยก — เดิมไม่โหลดใหม่หลังอัปเดต ใบที่ช่างเพิ่งส่งคืนเลยหายจากทุกแท็บจนกด F5
             onReload?.(); void loadQcQueue(); void loadCuAll();
@@ -4520,6 +4525,14 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           canMoveStaff={canMoveStaff} canAddNew={canEdit} onStaffChanged={() => onStaffChanged?.()} onDesksChanged={() => onReload?.()}
           onNext={cuNext ? () => setCuMo(cuNext) : undefined} nextLabel={cuNext ? skuOfMo(cuNext) : null}
           mode={cuMode} canApprove={cuApprove} onRequestsChanged={() => void loadCuReqs()} />
+        <CatchUpBatch moNos={cuBatch} onClose={() => setCuBatch(null)}
+          onDone={(saved) => {
+            onReload?.(); void loadQcQueue(); void loadCuAll();
+            if (saved.length) { setCuRecent((rs) => [...saved, ...rs.filter((x) => !saved.includes(x))].slice(0, 8)); setSel(new Set()); setWoSel(new Set()); setQSel(new Set()); setCuAllSel(new Set()); }
+          }}
+          departments={departments} craftsmen={craftsmen} workOrders={workOrders}
+          mode={cuMode} canApprove={cuApprove} onRequestsChanged={() => void loadCuReqs()}
+          onOpenSingle={(mo) => { setCuList([]); setCuMo(mo); }} refresh={cuBatchRefresh} />
         <CatchUpQueue open={cuQueueOpen} onClose={() => setCuQueueOpen(false)} queue={cuReqs.queue} mine={cuReqs.mine} canApprove={cuApprove}
           onOpenMo={(moNo) => {
             // ไล่ตรวจทีละใบ: "ใบถัดไป" ในป๊อป = คำขอถัดไปในคิว
@@ -4873,6 +4886,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       {tab === "all" && (<div className="flex min-h-0 flex-1 flex-col gap-3" style={zoomStyle}>
         <MiniTable
           rows={allShown} rowKey={(r) => r.mo_no}
+          selectable={dc.check} selected={cuAllSel} onSelectedChange={setCuAllSel}
           fill stickyCols={1} inlineActions lazyRows onScrollTop={onTableScroll}
           touch={touch || dc.row === "l"} dense={dc.row === "s"} zebra={dc.zebra} hideToolbar={!dc.show.tools}
           columns={allCols} countUnit="ใบ"
@@ -4891,16 +4905,22 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         countOf={viewCount} total={pending.length} />
       {/* แถบคำสั่งลอยด้านล่าง (ของกลาง BulkActionBar) — โผล่เมื่อติ๊กเลือกหลายใบ แทนปุ่มกระจายบนหัวตาราง */}
       <BulkActionBar count={tab === "pend" ? selMoNos.length : 0} unit="ใบ" onClear={() => setSel(new Set())} spacer={false}>
+        {catchUp && <button type="button" onClick={() => setCuBatch(selMoNos)} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}
         <button type="button" onClick={() => setAssignOpen(true)} className="h-9 rounded-lg bg-violet-500 px-3 text-sm font-medium text-white hover:bg-violet-600">🗂 จับเข้ากลุ่ม</button>
         <button type="button" onClick={() => setDueOpen(true)} className="h-9 rounded-lg bg-amber-500 px-3 text-sm font-medium text-white hover:bg-amber-600">📅 แก้วันกำหนด</button>
         {canEdit && <button type="button" onClick={() => openDispatchFor(sel)} className="h-9 rounded-lg bg-emerald-500 px-3 text-sm font-medium text-white hover:bg-emerald-600">🚚 จ่ายงาน</button>}
       </BulkActionBar>
       <BulkActionBar count={tab === "wip" ? selWos.length : 0} unit="ใบ" onClear={() => setWoSel(new Set())} spacer={false}>
+        {catchUp && <button type="button" onClick={() => setCuBatch([...new Set(selWos.map((w) => w.mo_no).filter((x): x is string => !!x))])} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}
         {canEdit && <button type="button" onClick={openQc} title="ส่งงานที่ติ๊กไว้เข้า QC (ลงวันที่ย้อนหลังได้)" className="h-9 rounded-lg bg-emerald-500 px-3 text-sm font-medium text-white hover:bg-emerald-600">📤 ส่งงาน QC</button>}
         <button type="button" onClick={() => setWoLaborOpen(true)} className="h-9 rounded-lg bg-indigo-500 px-3 text-sm font-medium text-white hover:bg-indigo-600">💰 ใส่ค่าแรง</button>
       </BulkActionBar>
-      <BulkActionBar count={tab === "qc" && canEdit ? qSel.size : 0} unit="ใบ" onClear={() => setQSel(new Set())} spacer={false}>
-        <button type="button" onClick={openRecv} className="h-9 rounded-lg bg-teal-500 px-3 text-sm font-medium text-white hover:bg-teal-600">📥 รับเข้าชั้น</button>
+      <BulkActionBar count={tab === "qc" && (canEdit || catchUp) ? qSel.size : 0} unit="ใบ" onClear={() => setQSel(new Set())} spacer={false}>
+        {catchUp && <button type="button" onClick={() => setCuBatch([...new Set(qQueue.filter((q) => qSel.has(q.wo_id)).map((q) => q.mo_no).filter((x): x is string => !!x))])} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}
+        {canEdit && <button type="button" onClick={openRecv} className="h-9 rounded-lg bg-teal-500 px-3 text-sm font-medium text-white hover:bg-teal-600">📥 รับเข้าชั้น</button>}
+      </BulkActionBar>
+      <BulkActionBar count={tab === "all" && catchUp ? cuAllSel.size : 0} unit="ใบ" onClear={() => setCuAllSel(new Set())} spacer={false}>
+        {catchUp && <button type="button" onClick={() => setCuBatch((cuAllRows ?? []).filter((r) => cuAllSel.has(r.mo_no) && r.status !== "done" && r.status !== "cancelled").map((r) => r.mo_no))} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}
       </BulkActionBar>
       {/* ป๊อปรับเข้าชั้น QC (หลายใบ) */}
       {(() => {

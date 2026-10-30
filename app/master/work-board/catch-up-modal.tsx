@@ -26,12 +26,12 @@ import { DeskStaffPanel } from "./desk-staff-panel";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuStageDone, cuCanShort,
-  CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, cuLocateSnap, CU_WHERE_LABEL, type CuWhere, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuDispLine, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
+  CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, cuLocateSnap, CU_WHERE_LABEL, type CuWhere, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
 } from "./catch-up";
+import { cuCentralRate, cuRateFor, cuRetSources, cuRateOfRef, cuRetEffective, cuAutoReturns, cuBomCandidate, cuReadLast as readLast, cuWriteLast as writeLast, type CuDispRow } from "./catch-up-lines";
 
 type DeptLite = { id: string; name: string };
-/** แถวจ่ายงานบนจอ = แถวตามกติกา + คนรับ · rateSet = พิมพ์ค่าแรงเองแล้ว (ไม่เปลี่ยนตามช่าง) */
-type DispRow = CuDispLine & { crewIds: string[]; rateSet?: boolean };
+type DispRow = CuDispRow;
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -44,11 +44,6 @@ const MAT_LABEL: Record<string, string> = { buy: "ต้องซื้อ", req
 const flow = CU_TARGETS.filter((t) => t.key !== "cancel");
 const phases = [...new Set(flow.map((t) => t.group))];
 const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
-/** จำโต๊ะ/คนรับ/ชั้น QC ล่าสุดไว้ให้ใบถัดไป (ต่อเครื่อง — ไม่จำวันที่ กันวันผิดติดไปเงียบ ๆ) */
-const LAST_KEY = "wb-catchup-last";
-type CuLast = { deptId?: string; crewIds?: string[]; shelfId?: string };
-const readLast = (): CuLast => { try { return JSON.parse(localStorage.getItem(LAST_KEY) ?? "{}") as CuLast; } catch { return {}; } };
-const writeLast = (v: CuLast) => { try { localStorage.setItem(LAST_KEY, JSON.stringify(v)); } catch { /* ไม่มี storage ก็ข้าม */ } };
 
 export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel, mode = "direct", canApprove = false, onRequestsChanged, onLocate }: {
   /** ใบสั่งผลิตที่จะอัปเดต (null = ปิดป๊อป) */
@@ -143,8 +138,8 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
 
   const f = useMemo(() => (snap ? cuFacts(snap) : null), [snap]);
   /** ค่าแรง/ชิ้นจากสูตร: เรตเฉพาะช่าง (เลือกคนเดียว) → ไม่งั้นราคากลาง (กติกาเดียวกับป๊อปจ่ายงานปกติ) */
-  const centralRate = snap?.rates.find((x) => !x.craftsman_id)?.rate ?? null;
-  const rateFor = (crewIds: string[]) => (crewIds.length === 1 ? snap?.rates.find((x) => x.craftsman_id === crewIds[0])?.rate : undefined) ?? centralRate;
+  const centralRate = cuCentralRate(snap);
+  const rateFor = (crewIds: string[]) => cuRateFor(snap, crewIds);
 
   const pick = (k: CuTargetKey) => {
     if (!f) return;
@@ -213,39 +208,21 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
 
   // ── ส่งคืนจากใคร: ใบจ่ายเดิมที่ยังค้างช่าง + แถวจ่ายใหม่ — เรียกด้วยชื่อเล่นช่าง (ไม่ใช่เลขใบ)
   const nickOf = (full: string | null | undefined) => (full ?? "").split(", ").map((n) => craftsmen.find((c) => c.name === n)?.nickname?.trim() || n).filter(Boolean).join(", ");
-  const retSources = [
-    ...(snap?.wos ?? []).filter((w) => w.status !== "done" && w.qty - w.received_qty > 0.0001).map((w) => {
-      const who = nickOf(w.assignee_name) || w.department_name || "—", cap = r2(w.qty - w.received_qty);
-      // ค่าแรง/ชิ้นของใบเดิม = ค่าแรงรวมของใบ ÷ จำนวนจ่าย (ไม่มีค่าแรง = ให้พิมพ์เอง)
-      const rate = (w.labor_cost ?? 0) > 0 && w.qty > 0 ? r2(w.labor_cost / w.qty) : null;
-      return { ref: w.id, cap, rate, short: `${who} · ${w.wo_no}`, label: `${who} · ${w.wo_no} (ค้าง ${fmt(cap)})` };
-    }),
-    ...(on("dispatch") ? disp.filter((r) => r.qty > 0).map((r) => {
-      const d = deptOf(r.deptId);
-      const who = poolOf(d).filter((c) => r.crewIds.includes(c.id)).map((c) => c.nickname?.trim() || c.name).join(", ") || "ทั้งโต๊ะ";
-      return { ref: `new:${r.key}`, cap: r2(r.qty), rate: r.rate != null && r.rate > 0 ? r.rate : null, short: `${who} · ${d?.name ?? "โต๊ะ"}`, label: `${who} · ${d?.name ?? "โต๊ะ"} (จ่ายรอบนี้ ${fmt(r.qty)})` };
-    }) : []),
-  ];
+  const retSources = cuRetSources(snap, disp, on("dispatch"), {
+    nickOf,
+    newWho: (r) => poolOf(deptOf(r.deptId)).filter((c) => r.crewIds.includes(c.id)).map((c) => c.nickname?.trim() || c.name).join(", "),
+    deskName: (r) => deptOf(r.deptId)?.name ?? null,
+  });
   const srcSig = retSources.map((s) => `${s.ref}:${s.cap}`).join("|");
   /** รอบที่ยังไม่ได้เลือกที่มา = ช่างที่จ่าย (ตามลำดับรอบ) · ไม่มีใครค้าง = แบ่งอัตโนมัติ */
   /** ค่าแรง/ชิ้นตามใบจ่ายของที่มานั้น · "แบ่งอัตโนมัติ" = ใช้ได้เมื่อทุกที่มาราคาเดียวกัน */
-  const rateOf = (ref: string): number | null => {
-    if (ref !== "auto") return retSources.find((o) => o.ref === ref)?.rate ?? null;
-    const rs = [...new Set(retSources.map((o) => o.rate))];
-    return rs.length === 1 ? rs[0] : null;
-  };
+  const rateOf = (ref: string): number | null => cuRateOfRef(retSources, ref);
   // ค่าแรงที่พิมพ์เองมาก่อน · ไม่ได้พิมพ์ = ตามใบจ่าย (เจ้าของ: "ไม่ต้องใส่ก็ได้เพราะมีข้อมูลข้างบนอยู่แล้ว")
-  const retEff = ret.map((r, i) => {
-    const ref = r.ref || (retSources.length ? retSources[Math.min(i, retSources.length - 1)].ref : "auto");
-    return { ...r, ref, wage: r.wage != null ? r.wage : rateOf(ref) };
-  });
+  const retEff = cuRetEffective(ret, retSources);
   // ── ยอดตามกันอัตโนมัติ (จนกว่าจะพิมพ์แก้เอง): ส่งคืน = 1 รอบต่อ 1 ช่างที่จ่าย (ยอดเท่าที่ค้าง) · ของดี QC ← ยอดส่งคืน
   useEffect(() => {
     if (!target || retSet || !retSources.length) return;
-    setRet((rs) => {
-      const next = retSources.map((s) => { const old = rs.find((r) => r.ref === s.ref); return { key: old?.key ?? `r-${s.ref}`, ref: s.ref, qty: s.cap, date: old?.date ?? null, wage: old?.wage ?? null }; });
-      return next.length === rs.length && next.every((n, i) => rs[i].ref === n.ref && rs[i].qty === n.qty) ? rs : next;
-    });
+    setRet((rs) => cuAutoReturns(retSources, rs));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target, retSet, srcSig]);
   useEffect(() => {
@@ -261,8 +238,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   };
 
   // ค่าแรง/ชิ้นที่พิมพ์เอง (ต่างจากราคากลางในสูตร) → เสนอบันทึกกลับเข้า BOM
-  const bomCandidate = (on("dispatch") ? disp.find((r) => r.rateSet && r.rate != null && r.rate > 0)?.rate : undefined)
-    ?? (on("return") ? ret.find((r) => r.wage != null && r.wage > 0)?.wage : undefined) ?? null;
+  const bomCandidate = cuBomCandidate(disp, on("dispatch"), ret, on("return"));
   const bomOffer = bomCandidate != null && bomCandidate !== centralRate && !!snap?.mo.product_sku;
   const built = f && target
     ? cuBuildSteps(f, target, ticks, {
