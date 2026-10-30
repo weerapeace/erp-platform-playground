@@ -5,6 +5,11 @@ import {
   normalizePlacements,
   normalizePrintDesign,
   normRot,
+  cleanPrintText,
+  printNeedsReview,
+  printPlacementFiles,
+  printPlacementMask,
+  printTextFontsHref,
   printDesignExtra,
   printDesignUsable,
   printLineSuffix,
@@ -198,5 +203,58 @@ describe("ทรงของส่วนพิมพ์", () => {
     expect(out.length).toBeGreaterThan(4);
     expect(printZoneClip(p)?.startsWith("polygon(0% 100%, ")).toBe(true);
     expect(printZonePath(p)).toContain("C");
+  });
+});
+
+describe("ข้อความ + ฟอนต์", () => {
+  const tcfg = normalizePrintDesign({
+    enabled: true,
+    allowUpload: false,
+    zones: [{ id: "front", label: "หน้า", x: 10, y: 10, w: 80, h: 50, widthCm: 20, heightCm: 10 }],
+    text: { enabled: true, fonts: ["Kanit", "Comic Sans", "Pacifico"], colors: ["#FF0000", "red", "#111111"], maxChars: 8 },
+  });
+  const ok = (p: string) => p.startsWith("shop-1/");
+  it("กรองฟอนต์/สีที่ไม่รู้จัก · ค่าเดิมไม่มี text = ปิด", () => {
+    expect(tcfg.text.fonts).toEqual(["Kanit", "Pacifico"]);
+    expect(tcfg.text.colors).toEqual(["#ff0000", "#111111"]);
+    expect(printDesignUsable(tcfg)).toBe(true);
+    expect(normalizePrintDesign({ enabled: true }).text.enabled).toBe(false);
+    expect(printTextFontsHref(["Kanit", "Dancing Script", "x"])).toBe("https://fonts.googleapis.com/css2?family=Kanit:wght@600&family=Dancing+Script:wght@700&display=swap");
+  });
+  it("ล้างข้อความ: ตัดอักขระควบคุม ช่องว่างซ้ำ และความยาว", () => {
+    expect(cleanPrintText("  มะลิ\n\t ♥ ", 10)).toBe("มะลิ ♥");
+    expect(cleanPrintText("abcdefghij", 4)).toBe("abcd");
+  });
+  it("ลายข้อความต้องใช้ฟอนต์/สีที่เปิด + มีรูปที่วาดแล้ว · ไม่ต้องตรวจ", () => {
+    const base = { zone: "front", kind: "text", upload: { path: "shop-1/202610/t.png", w: 400, h: 100 }, x: 10, y: 5, w: 8 };
+    const r = normalizePlacements([{ ...base, text: { value: " Mint  Choco ", font: "Kanit", color: "#FF0000" } }], tcfg, { lib: () => null, uploadOk: ok });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.placements[0].text).toEqual({ value: "Mint Cho", font: "Kanit", color: "#ff0000" });
+      expect(r.placements[0].h).toBeCloseTo(2, 5);
+      expect(r.placements[0].upload?.alpha).toBe(true);
+      expect(printNeedsReview(r.placements)).toBe(false);
+      expect(printPlacementFiles(r.placements)).toEqual(["shop-1/202610/t.png"]);
+    }
+    expect(normalizePlacements([{ ...base, text: { value: "x", font: "Lobster", color: "#ff0000" } }], tcfg, { lib: () => null, uploadOk: ok }).ok).toBe(false);
+    expect(normalizePlacements([{ ...base, text: { value: "   ", font: "Kanit", color: "#ff0000" } }], tcfg, { lib: () => null, uploadOk: ok }).ok).toBe(false);
+    expect(normalizePlacements([{ ...base, upload: { path: "other/x.png", w: 1, h: 1 }, text: { value: "x", font: "Kanit", color: "#ff0000" } }], tcfg, { lib: () => null, uploadOk: ok }).ok).toBe(false);
+    expect(printNeedsReview([{ kind: "lib" }, { kind: "upload" }])).toBe(true);
+  });
+});
+
+describe("ตัดไฟล์พิมพ์ตามทรง", () => {
+  it("สี่เหลี่ยม = ไม่ต้องตัด", () => {
+    expect(printPlacementMask({ shape: "rect", widthCm: 10, heightCm: 10 }, { x: 5, y: 5, w: 4, h: 4, rot: 0 })).toBeNull();
+  });
+  it("สามเหลี่ยมเต็มกรอบ ลายเต็มกรอบไม่หมุน = จุดเดิม", () => {
+    const m = printPlacementMask({ shape: "tri", pts: [{ x: 0.5, y: 0, hx: 0, hy: 0 }, { x: 1, y: 1, hx: 0, hy: 0 }, { x: 0, y: 1, hx: 0, hy: 0 }], widthCm: 10, heightCm: 8 }, { x: 5, y: 4, w: 10, h: 8, rot: 0 });
+    expect(m).toEqual([[0.5, 0], [1, 1], [0, 1]]);
+  });
+  it("ลายหมุน 90° = ทรงหมุนกลับในกรอบของลาย", () => {
+    const m = printPlacementMask({ shape: "quad", pts: [{ x: 0, y: 0, hx: 0, hy: 0 }, { x: 1, y: 0, hx: 0, hy: 0 }, { x: 1, y: 1, hx: 0, hy: 0 }, { x: 0, y: 1, hx: 0, hy: 0 }], widthCm: 10, heightCm: 10 }, { x: 5, y: 5, w: 10, h: 10, rot: 90 });
+    // มุมซ้ายบนของส่วนพิมพ์ = มุมขวาบนของลายเมื่อหมุนลายไปทางขวา 90°
+    expect(m?.[0]).toEqual([0, 1]);
+    expect(m?.[1]).toEqual([0, 0]);
   });
 });

@@ -8,15 +8,21 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { newDesignCode } from "@/lib/product-configurator";
+import { writeAudit } from "@/lib/audit";
 import {
   normalizePlacements,
   normalizePrintDesign,
+  normRot,
+  fitPlacement,
   printDesignExtra,
   printDesignLabel,
   printDesignUsable,
+  printNeedsReview,
+  printPlacementFiles,
   PRINT_UPLOAD_MAX_BYTES,
   PRINT_UPLOAD_TYPES,
   type PrintDesignConfig,
+  type PrintDesignView,
   type PrintLibLookup,
   type PrintLibraryItem,
   type PrintMethod,
@@ -128,18 +134,26 @@ async function libLookupFor(sb: Admin, cfg: PrintDesignConfig, assetIds: string[
   };
 }
 
-/** ลิงก์อัปโหลดชั่วคราว (2 ชม.) สำหรับรูปลูกค้า — ไฟล์อยู่ใต้โฟลเดอร์ร้าน <shop_id>/<yyyymm>/<uuid>.<ext> */
-export async function createPrintUpload(
-  sb: Admin,
-  shopId: string,
-  body: { product?: unknown; type?: unknown; size?: unknown },
-): Promise<{ ok: true; path: string; url: string; token: string } | { ok: false; error: string; status: number }> {
+type UploadUrl = { ok: true; path: string; url: string; token: string } | { ok: false; error: string; status: number };
+
+/**
+ * ลิงก์อัปโหลดชั่วคราว (2 ชม.) สำหรับรูปลูกค้า / รูปข้อความ (purpose "text" = PNG ที่หน้าเว็บวาดจากข้อความ)
+ * ไฟล์อยู่ใต้โฟลเดอร์ร้าน <shop_id>/<yyyymm>/<uuid>.<ext>
+ */
+export async function createPrintUpload(sb: Admin, shopId: string, body: { product?: unknown; type?: unknown; size?: unknown; purpose?: unknown }): Promise<UploadUrl> {
   const cfg = await readListingPrint(sb, shopId, String(body.product ?? ""));
   if (!cfg) return { ok: false, error: "สินค้านี้ยังไม่เปิดให้ออกแบบลาย", status: 404 };
-  if (!cfg.allowUpload) return { ok: false, error: "รุ่นนี้ไม่รับรูปที่อัปเอง เลือกจากคลังลายของร้านได้", status: 400 };
-  const type = String(body.type ?? "");
+  if (body.purpose === "text") {
+    if (!cfg.text.enabled) return { ok: false, error: "รุ่นนี้ไม่รับข้อความ", status: 400 };
+    if (body.type !== "image/png") return { ok: false, error: "รูปข้อความต้องเป็น PNG", status: 400 };
+  } else if (!cfg.allowUpload) return { ok: false, error: "รุ่นนี้ไม่รับรูปที่อัปเอง เลือกจากคลังลายของร้านได้", status: 400 };
+  return signedUpload(sb, shopId, body.type, body.size);
+}
+
+async function signedUpload(sb: Admin, shopId: string, type0: unknown, size0: unknown): Promise<UploadUrl> {
+  const type = String(type0 ?? "");
   if (!PRINT_UPLOAD_TYPES.includes(type)) return { ok: false, error: "รับเฉพาะรูป PNG, JPG หรือ WebP", status: 400 };
-  const size = Number(body.size) || 0;
+  const size = Number(size0) || 0;
   if (size <= 0 || size > PRINT_UPLOAD_MAX_BYTES) return { ok: false, error: "ไฟล์ต้องไม่เกิน 25 MB", status: 400 };
   const now = new Date();
   const path = `${shopId}/${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, "0")}/${crypto.randomUUID()}.${EXT[type]}`;
@@ -175,20 +189,23 @@ async function existingUploads(sb: Admin, shopId: string, paths: string[]): Prom
 export async function savePrintDesign(
   sb: Admin,
   shopId: string,
-  body: { product?: unknown; optionId?: unknown; placements?: unknown },
+  body: { product?: unknown; optionId?: unknown; placements?: unknown; views?: unknown },
 ): Promise<{ ok: true; design: { id: string; code: string; extra: number; count: number; label: string; hasUpload: boolean } } | { ok: false; error: string; status: number }> {
   const productId = String(body.product ?? "");
   const cfg = await readListingPrint(sb, shopId, productId);
   if (!cfg) return { ok: false, error: "สินค้านี้ยังไม่เปิดให้ออกแบบลาย", status: 404 };
   const raw = Array.isArray(body.placements) ? (body.placements as Record<string, unknown>[]).slice(0, 80) : [];
   const assetIds = raw.filter((p) => p?.kind === "lib").map((p) => String(p.assetId ?? ""));
-  const uploadPaths = raw.filter((p) => p?.kind === "upload").map((p) => String((p.upload as Record<string, unknown> | undefined)?.path ?? ""));
+  const uploadPaths = raw.filter((p) => p?.kind === "upload" || p?.kind === "text").map((p) => String((p.upload as Record<string, unknown> | undefined)?.path ?? ""));
   const [lib, uploads] = await Promise.all([libLookupFor(sb, cfg, assetIds), existingUploads(sb, shopId, uploadPaths)]);
   const norm = normalizePlacements(raw, cfg, { lib, uploadOk: (p) => uploads.has(p) });
   if (!norm.ok) return { ok: false, error: norm.error, status: 400 };
   const extra = printDesignExtra(cfg, norm.placements, lib);
-  const usedZones = cfg.zones.filter((z) => norm.placements.some((p) => p.zone === z.id));
-  const hasUpload = norm.placements.some((p) => p.kind === "upload");
+  // รูปพื้นของส่วนพิมพ์ = รูปสีที่ลูกค้าเห็นตอนออกแบบ (หน้าเว็บส่ง URL รูปมา) → ภาพในตะกร้า/ออเดอร์เป็นสีที่สั่งจริง
+  const views = (body.views && typeof body.views === "object" ? body.views : {}) as Record<string, unknown>;
+  const usedZones = cfg.zones.filter((z) => norm.placements.some((p) => p.zone === z.id)).map((z) => ({ ...z, imageKey: viewKey(views[z.id]) ?? z.imageKey }));
+  // has_upload = มีไฟล์ในที่เก็บส่วนตัว (รูปลูกค้า/รูปข้อความ — ลบตามวันเก็บ) · ต้องตรวจไหมดูจากชนิดลาย (printNeedsReview)
+  const hasUpload = printPlacementFiles(norm.placements).length > 0;
   const optionId = String(body.optionId ?? "").trim().slice(0, 60) || null;
   for (let attempt = 0; attempt < 5; attempt++) {
     const code = newDesignCode();
@@ -197,10 +214,21 @@ export async function savePrintDesign(
       .insert({ shop_id: shopId, parent_sku_id: productId, option_id: optionId, code, method: cfg.method, placements: norm.placements, zones: usedZones, extra_price: extra, has_upload: hasUpload })
       .select("id")
       .single();
-    if (!error && data) return { ok: true, design: { id: data.id as string, code, extra, count: norm.placements.length, label: printDesignLabel(cfg.method, norm.placements.length), hasUpload } };
+    if (!error && data) return { ok: true, design: { id: data.id as string, code, extra, count: norm.placements.length, label: printDesignLabel(cfg.method, norm.placements.length), hasUpload: printNeedsReview(norm.placements) } };
     if (error?.code !== "23505") return { ok: false, error: "บันทึกลายไม่สำเร็จ ลองใหม่อีกครั้ง", status: 500 };
   }
   return { ok: false, error: "บันทึกลายไม่สำเร็จ ลองใหม่อีกครั้ง", status: 500 };
+}
+
+/** key รูปจาก URL รูปสินค้าของเว็บร้าน (…/api/r2-image?key=…) · ใช้ไม่ได้ = null */
+function viewKey(v: unknown): string | null {
+  if (typeof v !== "string" || v.length > 1500) return null;
+  try {
+    const key = new URL(v).searchParams.get("key") ?? "";
+    return key && key.length <= 400 && !key.includes("..") && /^[\w\-./ %()]+$/.test(key) ? key : null;
+  } catch {
+    return null;
+  }
 }
 
 /** แบบที่ผูกกับรายการในออเดอร์ (โหลดครั้งเดียวต่อออเดอร์) */
@@ -234,7 +262,7 @@ export async function markPrintDesignsOrdered(sb: Admin, designs: PrintDesignRow
   for (const d of designs) {
     await sb
       .from("store_print_designs")
-      .update({ status: "ordered", order_ref: orderNo, ordered_at: now, review_status: d.has_upload ? "pending" : "approved", updated_at: now })
+      .update({ status: "ordered", order_ref: orderNo, ordered_at: now, review_status: printNeedsReview(Array.isArray(d.placements) ? d.placements : []) ? "pending" : "approved", updated_at: now })
       .eq("id", d.id)
       .eq("status", "draft");
   }
@@ -272,7 +300,7 @@ export async function purgePrintUploads(sb: Admin, now = new Date()): Promise<{ 
   }
   let files = 0;
   for (const d of done) {
-    const paths = (Array.isArray(d.placements) ? d.placements : []).map((p) => p.upload?.path).filter((p): p is string => !!p);
+    const paths = printPlacementFiles(Array.isArray(d.placements) ? d.placements : []);
     if (paths.length) {
       const { error } = await sb.storage.from(PRINT_BUCKET).remove(paths);
       if (error) continue;
@@ -281,4 +309,135 @@ export async function purgePrintUploads(sb: Admin, now = new Date()): Promise<{ 
     await sb.from("store_print_designs").update({ uploads_purged_at: now.toISOString() }).eq("id", d.id);
   }
   return { designs: done.length, files };
+}
+
+/* ── ภาพแบบสำหรับลูกค้า (ตะกร้า / หน้าตามออเดอร์ / บัญชีสมาชิก) ── */
+
+/**
+ * แบบหลายใบ → ข้อมูลวาดภาพจำลอง (ส่วนพิมพ์ + ลาย) · รูปลูกค้า/รูปข้อความ = ลิงก์ชั่วคราว 1 ชม.
+ * รหัสแบบเป็น uuid สุ่ม (ลูกค้าได้จากตะกร้า/ออเดอร์ของตัวเองเท่านั้น) → ใช้เป็นกุญแจดูภาพของแบบนั้น
+ */
+export async function printDesignViews(sb: Admin, shopId: string, ids: string[], origin: string): Promise<PrintDesignView[]> {
+  const list = [...new Set(ids.filter((x) => UUID.test(x)))].slice(0, 30);
+  if (!list.length) return [];
+  const { data } = await sb.from("store_print_designs").select(PRINT_DESIGN_SELECT).eq("shop_id", shopId).in("id", list);
+  const rows = (data ?? []) as PrintDesignRow[];
+  if (!rows.length) return [];
+  const img = (key: string, w = 1000) => `${origin}/api/r2-image?key=${encodeURIComponent(key)}&w=${w}`;
+  const assetIds = [...new Set(rows.flatMap((d) => (Array.isArray(d.placements) ? d.placements : []).map((p) => p.assetId ?? "")).filter((x) => UUID.test(x)))];
+  const parentIds = [...new Set(rows.map((d) => d.parent_sku_id))];
+  const [{ data: assets }, { data: parents }, signed] = await Promise.all([
+    assetIds.length ? sb.from("assets").select("id, r2_key").in("id", assetIds) : Promise.resolve({ data: [] }),
+    sb.from("parent_skus_v2").select("id, cover_image_r2_key").in("id", parentIds),
+    signedPrintUrls(sb, rows.filter((d) => !d.uploads_purged_at).flatMap((d) => printPlacementFiles(Array.isArray(d.placements) ? d.placements : [])), 3600),
+  ]);
+  const assetKey = new Map(((assets ?? []) as { id: string; r2_key: string | null }[]).map((a) => [a.id, a.r2_key]));
+  const cover = new Map(((parents ?? []) as { id: string; cover_image_r2_key: string | null }[]).map((p) => [p.id, p.cover_image_r2_key]));
+  return list
+    .map((id) => rows.find((d) => d.id === id))
+    .filter((d): d is PrintDesignRow => !!d)
+    .map((d) => {
+      const fallback = cover.get(d.parent_sku_id) ?? null;
+      const placements = Array.isArray(d.placements) ? d.placements : [];
+      return {
+        id: d.id,
+        code: d.code,
+        method: d.method,
+        extra: Number(d.extra_price) || 0,
+        status: d.status,
+        review: d.review_status,
+        note: d.review_status === "reupload" || d.review_status === "rejected" ? d.review_note : null,
+        orderRef: d.order_ref,
+        zones: (Array.isArray(d.zones) ? d.zones : []).map((z) => ({ ...z, imageUrl: z.imageKey ? img(z.imageKey) : fallback ? img(fallback) : "" })),
+        items: placements.map((p) => {
+          const key = p.assetId ? assetKey.get(p.assetId) : null;
+          return {
+            zone: p.zone,
+            kind: p.kind,
+            name: p.name,
+            url: p.upload ? signed.get(p.upload.path) ?? null : key ? img(key, 600) : null,
+            x: p.x,
+            y: p.y,
+            w: p.w,
+            h: p.h,
+            rot: p.rot,
+          };
+        }),
+      };
+    });
+}
+
+/* ── ลูกค้าส่งรูปใหม่ (ร้าน "ขอรูปใหม่") — ยืนยันตัวด้วยเลขออเดอร์ + เบอร์โทรเหมือนหน้าตามออเดอร์ ── */
+
+const digitsOf = (v: unknown) => String(v ?? "").replace(/\D/g, "");
+
+/** แบบที่ร้านขอรูปใหม่ ของออเดอร์นี้ (เลขออเดอร์ + เบอร์ 9 หลักท้ายตรง) · ไม่ผ่าน = ข้อความภาษาคน */
+async function reuploadTarget(
+  sb: Admin,
+  shopId: string,
+  body: { design?: unknown; orderNo?: unknown; phone?: unknown },
+): Promise<{ ok: true; design: PrintDesignRow; orderId: string } | { ok: false; error: string; status: number }> {
+  const id = String(body.design ?? "");
+  const no = String(body.orderNo ?? "").trim().toUpperCase().slice(0, 40);
+  const ph = digitsOf(body.phone);
+  if (!UUID.test(id) || !no || ph.length < 9) return { ok: false, error: "ข้อมูลไม่ครบ ลองเปิดหน้าออเดอร์ใหม่", status: 400 };
+  const { data: o } = await sb.from("store_orders").select("id, customer_phone").eq("shop_id", shopId).eq("order_no", no).maybeSingle();
+  if (!o || digitsOf(o.customer_phone).slice(-9) !== ph.slice(-9)) return { ok: false, error: "ไม่พบออเดอร์นี้", status: 404 };
+  const { data: line } = await sb.from("store_order_items").select("id").eq("order_id", o.id).eq("print_design_id", id).limit(1).maybeSingle();
+  if (!line) return { ok: false, error: "ไม่พบลายนี้ในออเดอร์", status: 404 };
+  const { data: d } = await sb.from("store_print_designs").select(PRINT_DESIGN_SELECT).eq("shop_id", shopId).eq("id", id).maybeSingle();
+  if (!d) return { ok: false, error: "ไม่พบลายนี้ในออเดอร์", status: 404 };
+  if ((d as PrintDesignRow).review_status !== "reupload") return { ok: false, error: "ร้านไม่ได้ขอรูปใหม่สำหรับลายนี้แล้ว", status: 409 };
+  return { ok: true, design: d as PrintDesignRow, orderId: o.id as string };
+}
+
+/** ลิงก์อัปรูปใหม่ (ตรวจออเดอร์ก่อน · ไม่ขึ้นกับว่ารุ่นยังเปิดลายรีดอยู่ไหม) */
+export async function createReuploadUrl(sb: Admin, shopId: string, body: Record<string, unknown>): Promise<UploadUrl> {
+  const t = await reuploadTarget(sb, shopId, body);
+  if (!t.ok) return t;
+  return signedUpload(sb, shopId, body.type, body.size);
+}
+
+/**
+ * แทนรูปลูกค้าในลายที่ร้านขอใหม่ — คงตำแหน่ง/ความกว้างเดิม (สูงตามสัดส่วนรูปใหม่) · ราคาเดิม (จ่ายแล้ว)
+ * → กลับเป็น "รอตรวจลาย" + ลบไฟล์เก่า (ร้านขอเปลี่ยนเพราะใช้ไม่ได้) + audit
+ */
+export async function replacePrintUpload(
+  sb: Admin,
+  shopId: string,
+  body: Record<string, unknown>,
+): Promise<{ ok: true; index: number } | { ok: false; error: string; status: number }> {
+  const t = await reuploadTarget(sb, shopId, body);
+  if (!t.ok) return t;
+  const d = t.design;
+  const placements = Array.isArray(d.placements) ? [...d.placements] : [];
+  const index = Math.floor(Number(body.index));
+  const cur = placements[index];
+  if (!cur || cur.kind !== "upload" || !cur.upload) return { ok: false, error: "เลือกรูปที่จะเปลี่ยนไม่ถูกต้อง", status: 400 };
+  const u = (body.upload && typeof body.upload === "object" ? body.upload : {}) as Record<string, unknown>;
+  const path = String(u.path ?? "").slice(0, 300);
+  const w = Math.round(Number(u.w) || 0);
+  const h = Math.round(Number(u.h) || 0);
+  if (!path || path === cur.upload.path || !(await existingUploads(sb, shopId, [path])).has(path)) return { ok: false, error: "ไม่พบรูปที่อัปโหลด ลองอัปใหม่อีกครั้ง", status: 400 };
+  if (w < 1 || h < 1 || w > 30000 || h > 30000) return { ok: false, error: "ขนาดรูปไม่ถูกต้อง", status: 400 };
+  const zone = (Array.isArray(d.zones) ? d.zones : []).find((z) => z.id === cur.zone);
+  const geo = { x: cur.x, y: cur.y, w: cur.w, h: (cur.w * h) / w, rot: normRot(cur.rot) };
+  placements[index] = { ...cur, upload: { path, w, h, alpha: u.alpha === true }, ...(zone ? fitPlacement(geo, zone) : geo) };
+  const now = new Date().toISOString();
+  const { error } = await sb
+    .from("store_print_designs")
+    .update({ placements, review_status: "pending", review_note: null, reviewed_at: null, reviewed_by: null, has_upload: true, uploads_purged_at: null, updated_at: now })
+    .eq("id", d.id)
+    .eq("review_status", "reupload");
+  if (error) return { ok: false, error: "บันทึกรูปใหม่ไม่สำเร็จ ลองใหม่อีกครั้ง", status: 500 };
+  await sb.storage.from(PRINT_BUCKET).remove([cur.upload.path]);
+  await writeAudit(sb, {
+    action: "print_customer_reupload",
+    entityType: "store_print_designs",
+    entityId: d.id,
+    actorId: null,
+    actorName: "ลูกค้า (เว็บร้าน)",
+    metadata: { order_no: d.order_ref, index, old_path: cur.upload.path, new_path: path, w, h },
+  });
+  return { ok: true, index };
 }

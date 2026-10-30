@@ -6,6 +6,7 @@
  * - คลังลาย = อัลบั้มในคลังไฟล์ (เลือกได้หลายอัลบั้ม + ราคาเพิ่มต่ออัลบั้ม)
  * - ส่วนพิมพ์ = กรอบบนรูปสินค้า (ทุกส่วนบนรูปเดียวกันเห็นพร้อมกัน คนละสี) · ย้าย/ย่อ/ขยาย/หมุน + ขนาดจริง ซม.
  * - ทรง: สี่เหลี่ยม · วงกลม · สามเหลี่ยม · สี่เหลี่ยมดัดทรง (ขยับทีละมุม) · ปากกา (วาดเอง เส้นตรง/โค้ง) — ลายที่เกินขอบทรงถูกตัด
+ * - ✍️ ข้อความ: เปิด/ปิด · ฟอนต์ที่ให้เลือก (เห็นหน้าตาฟอนต์จริง) · สี · ยาวสุดกี่ตัว — ราคาคิดตามขนาดเหมือนลาย
  * กฎกลาง: lib/website-print-design (เว็บร้านใช้สำเนาเดียวกัน) · ของกลาง: MoneyInput · StepInput · ToggleSwitch
  */
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
@@ -18,11 +19,15 @@ import {
   newPrintZone,
   normRot,
   printDesignUsable,
+  printTextFontsHref,
   printZoneOutline,
   printZonePath,
   printZoneShapeLabel,
   PRINT_MAX_PER_ZONE,
   PRINT_MAX_ZONES,
+  PRINT_TEXT_FONTS,
+  PRINT_TEXT_MAX_CHARS,
+  PRINT_TEXT_MAX_COLORS,
   PRINT_TIER_MAX_CM,
   PRINT_ZONE_MAX_POINTS,
   PRINT_ZONE_SHAPES,
@@ -90,7 +95,7 @@ export function PrintDesignEditor({
       <div className="flex flex-wrap items-center gap-3">
         <ToggleSwitch on={v.enabled} onChange={(on) => set({ enabled: on, zones: on && !v.zones.length ? [newPrintZone(0)] : v.zones })} label="เปิดให้ลูกค้าออกแบบลายรีดบนรุ่นนี้" />
         {v.enabled && !usable && (
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800">ยังไม่พร้อม: ต้องมีส่วนพิมพ์ และเปิดอัปรูปหรือเลือกอัลบั้มลายอย่างน้อย 1 อย่าง</span>
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] text-amber-800">ยังไม่พร้อม: ต้องมีส่วนพิมพ์ และเปิดอัปรูป/ข้อความ หรือเลือกอัลบั้มลายอย่างน้อย 1 อย่าง</span>
         )}
       </div>
 
@@ -157,6 +162,8 @@ export function PrintDesignEditor({
         <p className="text-[11px] text-slate-400">ลูกค้าเห็นรูปตัวอย่างของไฟล์ในอัลบั้ม · ไฟล์พิมพ์ตัวจริงใช้ "ไฟล์พิมพ์ PNG" ของลายนั้นในคลัง</p>
       </section>
 
+      <TextSettings value={v.text} onChange={(text) => set({ text })} />
+
       <section className="space-y-2">
         <div className="text-xs font-semibold text-slate-500">
           ส่วนที่พิมพ์ได้ ({v.zones.length}/{PRINT_MAX_ZONES})
@@ -164,6 +171,89 @@ export function PrintDesignEditor({
         <ZonesBoard zones={v.zones} onChange={(zones) => set({ zones })} imageOptions={imageOptions} fallbackImageKey={fallbackImageKey} />
       </section>
     </div>
+  );
+}
+
+/** ✍️ ตั้งค่าข้อความ: ฟอนต์ (ปุ่มเขียนด้วยฟอนต์นั้นจริง) · สี · ยาวสุด */
+function TextSettings({ value: t, onChange }: { value: PrintDesignConfig["text"]; onChange: (next: PrintDesignConfig["text"]) => void }) {
+  const set = (patch: Partial<PrintDesignConfig["text"]>) => onChange({ ...t, ...patch });
+  const [pick, setPick] = useState("#000000");
+  const href = useMemo(() => printTextFontsHref(PRINT_TEXT_FONTS.map((f) => f.name)), []);
+  const toggleFont = (name: string) => {
+    const on = t.fonts.includes(name);
+    if (on && t.fonts.length <= 1) return;
+    set({ fonts: on ? t.fonts.filter((x) => x !== name) : PRINT_TEXT_FONTS.map((f) => f.name).filter((n) => n === name || t.fonts.includes(n)) });
+  };
+  return (
+    <section className="space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <ToggleSwitch on={t.enabled} onChange={(on) => set({ enabled: on })} label="ให้ลูกค้าพิมพ์ข้อความเอง (เช่น ชื่อ)" size="sm" />
+        <span className="text-[11px] text-slate-400">ราคาคิดตามขนาดเหมือนลาย · ข้อความไม่ต้องรอตรวจ (ตรวจเฉพาะรูปที่ลูกค้าอัปเอง)</span>
+      </div>
+      {t.enabled && (
+        <div className="space-y-2 rounded-lg border border-slate-200 p-2.5">
+          {href && <link rel="stylesheet" href={href} />}
+          <div className="space-y-1">
+            <div className="text-xs font-semibold text-slate-500">ฟอนต์ที่ให้เลือก ({t.fonts.length})</div>
+            <div className="flex flex-wrap gap-1.5">
+              {PRINT_TEXT_FONTS.map((f) => {
+                const on = t.fonts.includes(f.name);
+                return (
+                  <button
+                    key={f.name}
+                    type="button"
+                    onClick={() => toggleFont(f.name)}
+                    aria-pressed={on}
+                    title={`${f.name}${f.thai ? " · มีตัวไทย" : " · อังกฤษอย่างเดียว"}`}
+                    className={`rounded-lg border px-2.5 py-1 text-left ${on ? "border-violet-500 bg-violet-50 text-violet-900" : "border-slate-200 text-slate-500"}`}
+                  >
+                    <span className="block text-base leading-tight" style={{ fontFamily: `"${f.name}"`, fontWeight: f.weight }}>
+                      {f.thai ? "มะลิ Mali" : "Mali Rose"}
+                    </span>
+                    <span className="block text-[10px] text-slate-400">
+                      {f.name}
+                      {f.thai ? "" : " · EN"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-end gap-4">
+            <div className="space-y-1">
+              <div className="text-xs font-semibold text-slate-500">
+                สีตัวอักษร ({t.colors.length}/{PRINT_TEXT_MAX_COLORS})
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {t.colors.map((c) => (
+                  <span key={c} className="group relative">
+                    <span className="block h-7 w-7 rounded-full border border-slate-300" style={{ background: c }} title={c} />
+                    {t.colors.length > 1 && (
+                      <button type="button" onClick={() => set({ colors: t.colors.filter((x) => x !== c) })} className="absolute -right-1 -top-1 hidden h-4 w-4 place-items-center rounded-full bg-slate-700 text-[10px] leading-none text-white group-hover:grid" aria-label={`ลบสี ${c}`}>
+                        ×
+                      </button>
+                    )}
+                  </span>
+                ))}
+                {t.colors.length < PRINT_TEXT_MAX_COLORS && (
+                  <span className="flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-1.5 py-0.5">
+                    <input type="color" value={pick} onChange={(e) => setPick(e.target.value)} className="h-5 w-6 cursor-pointer border-0 bg-transparent p-0" aria-label="เลือกสีใหม่" />
+                    <button type="button" onClick={() => !t.colors.includes(pick.toLowerCase()) && set({ colors: [...t.colors, pick.toLowerCase()] })} className="text-xs text-slate-600">
+                      ＋ เพิ่มสี
+                    </button>
+                  </span>
+                )}
+              </div>
+            </div>
+            <label className="space-y-0.5">
+              <span className="block text-xs font-semibold text-slate-500">ยาวสุด</span>
+              <StepInput value={t.maxChars} onChange={(n) => set({ maxChars: Math.min(PRINT_TEXT_MAX_CHARS, Math.max(1, Math.round(n ?? 1))) })} min={1} max={PRINT_TEXT_MAX_CHARS} integer unit="ตัวอักษร" className="h-8 w-36" />
+            </label>
+          </div>
+          <p className="text-[11px] text-slate-400">ลูกค้าพิมพ์ได้ 1 บรรทัด · เว็บวาดข้อความเป็นรูป PNG พื้นใสความละเอียดสูง = ไฟล์พิมพ์ (ดู/โหลดได้ในออเดอร์) · ฟอนต์อังกฤษไม่มีตัวไทย</p>
+        </div>
+      )}
+    </section>
   );
 }
 

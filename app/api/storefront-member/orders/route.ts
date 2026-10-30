@@ -21,7 +21,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rows = await memberOrderRows<OrderRow & { customer_id: string | null; customer_email: string | null }>(g.sb, g.shop.id, g.member, "*");
   if (!rows.length) return storefrontJson({ ok: true, orders: [] }, 200);
   const [{ data: items }, info] = await Promise.all([
-    g.sb.from("store_order_items").select("order_id, name, variant_label, name_en, variant_label_en, unit_price, qty, line_total").in("order_id", rows.map((r) => r.id)).order("id"),
+    g.sb.from("store_order_items").select("order_id, name, variant_label, name_en, variant_label_en, unit_price, qty, line_total, print_design_id").in("order_id", rows.map((r) => r.id)).order("id"),
     readSiteInfo(g.sb, g.shop.id),
   ]);
   const byOrder = new Map<string, ItemRow[]>();

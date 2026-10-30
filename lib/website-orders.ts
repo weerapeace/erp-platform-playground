@@ -162,6 +162,8 @@ export interface OrderLineView {
   gift?: ItemGift;
   /** 🔤 ปั๊มชื่อ + 📸 ภาพรอยปั๊ม ณ ตอนสั่ง (ไม่มี = ไม่ส่ง) */
   personalize?: OrderPersonalize;
+  /** 🖨 ลายรีด — เว็บร้านดึงภาพแบบ/สถานะตรวจลายด้วยรหัสนี้ (ไม่มี = ไม่ส่ง) */
+  printDesignId?: string;
 }
 
 export interface OrderView {
@@ -922,6 +924,8 @@ export type ItemRow = {
   gift?: unknown;
   /** 🔤 ปั๊มชื่อ (store_order_items.personalize — มีภาพ ณ ตอนสั่งในออเดอร์ใหม่) */
   personalize?: unknown;
+  /** 🖨 ลายรีด (store_order_items.print_design_id) */
+  print_design_id?: string | null;
 };
 
 /** viewLang = ภาษาที่จะโชว์ชื่อสินค้า (ไม่ส่ง = ภาษาที่ลูกค้าใช้ตอนสั่ง) · พนักงาน = "th" เสมอ */
@@ -952,6 +956,7 @@ export function toOrderView(o: OrderRow, items: ItemRow[], info: SiteInfo | null
         lineTotal: num(i.line_total),
         ...(gift ? { gift } : {}),
         ...(personalize ? { personalize } : {}),
+        ...(i.print_design_id ? { printDesignId: i.print_design_id } : {}),
       };
     }),
     subtotal: num(o.subtotal),
@@ -1002,7 +1007,7 @@ export async function findStorefrontOrder(
   if (digits(row.customer_phone).slice(-9) !== ph.slice(-9)) return null;
 
   const [{ data: items }, info, { data: slips }] = await Promise.all([
-    sb.from("store_order_items").select("name, variant_label, name_en, variant_label_en, unit_price, qty, line_total, gift").eq("order_id", row.id).order("id"),
+    sb.from("store_order_items").select("name, variant_label, name_en, variant_label_en, unit_price, qty, line_total, gift, print_design_id").eq("order_id", row.id).order("id"),
     readSiteInfo(sb, shopId),
     sb.from("store_payments").select("status, auto_result, reject_reason, slip_uploaded_at").eq("order_id", row.id).not("slip_path", "is", null).order("slip_uploaded_at", { ascending: false }).limit(1),
   ]);

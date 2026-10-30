@@ -25,6 +25,71 @@ export const PRINT_MAX_ZONES = 6;
 export const PRINT_MAX_PER_ZONE = 12;
 export const PRINT_MAX_LIBRARY_SETS = 10;
 
+/* ── ✍️ ข้อความบนกระเป๋า: ลูกค้าพิมพ์เอง + เลือกฟอนต์/สีที่ร้านเปิด → หน้าเว็บวาดเป็นรูป PNG พื้นใสแล้วอัปเหมือนรูปลูกค้า ── */
+/** ฟอนต์ที่ร้านเลือกเปิดได้ (Google Fonts · น้ำหนักเดียวต่อฟอนต์ ให้ภาพบนจอกับไฟล์พิมพ์ตรงกัน) */
+export const PRINT_TEXT_FONTS: readonly { name: string; weight: number; thai: boolean }[] = [
+  { name: "Kanit", weight: 600, thai: true },
+  { name: "Mitr", weight: 500, thai: true },
+  { name: "Prompt", weight: 700, thai: true },
+  { name: "Sriracha", weight: 400, thai: true },
+  { name: "Itim", weight: 400, thai: true },
+  { name: "Mali", weight: 600, thai: true },
+  { name: "Charm", weight: 700, thai: true },
+  { name: "Pattaya", weight: 400, thai: true },
+  { name: "Chakra Petch", weight: 600, thai: true },
+  { name: "Srisakdi", weight: 700, thai: true },
+  { name: "Playfair Display", weight: 700, thai: false },
+  { name: "Pacifico", weight: 400, thai: false },
+  { name: "Dancing Script", weight: 700, thai: false },
+  { name: "Lobster", weight: 400, thai: false },
+  { name: "Bebas Neue", weight: 400, thai: false },
+  { name: "Great Vibes", weight: 400, thai: false },
+];
+export const PRINT_TEXT_MAX_CHARS = 40;
+export const PRINT_TEXT_MAX_COLORS = 12;
+export type PrintTextConfig = { enabled: boolean; fonts: string[]; colors: string[]; maxChars: number };
+export const DEFAULT_PRINT_TEXT: PrintTextConfig = {
+  enabled: false,
+  fonts: ["Kanit", "Sriracha", "Charm", "Pacifico", "Dancing Script", "Bebas Neue"],
+  colors: ["#111111", "#ffffff", "#c9a227", "#e11d48", "#2563eb", "#16a34a"],
+  maxChars: 20,
+};
+/** ข้อความที่ลูกค้าพิมพ์ + ฟอนต์ + สี (เก็บไว้ในลาย — ไฟล์พิมพ์คือรูป PNG ที่หน้าเว็บวาดจากค่านี้) */
+export type PrintTextStyle = { value: string; font: string; color: string };
+
+export const printTextFont = (name: string) => PRINT_TEXT_FONTS.find((f) => f.name === name) ?? null;
+
+/** ลิงก์ Google Fonts ของฟอนต์ข้อความ (โหลดเฉพาะที่ใช้) */
+export function printTextFontsHref(names: string[]): string | null {
+  const list = [...new Set(names)].map(printTextFont).filter((f): f is (typeof PRINT_TEXT_FONTS)[number] => !!f);
+  if (!list.length) return null;
+  return `https://fonts.googleapis.com/css2?${list.map((f) => `family=${f.name.replace(/ /g, "+")}:wght@${f.weight}`).join("&")}&display=swap`;
+}
+
+/** ข้อความ 1 บรรทัด: ตัดอักขระควบคุม/ช่องว่างซ้ำ · ยาวไม่เกิน max ตัว */
+export function cleanPrintText(v: unknown, max: number): string {
+  // อักขระควบคุม / ตัวกลับทิศทาง / ตัวมองไม่เห็น → ช่องว่าง
+  const bad = (c: number) => c < 32 || (c >= 0x7f && c <= 0x9f) || (c >= 0x200b && c <= 0x200f) || (c >= 0x2028 && c <= 0x202e) || (c >= 0x2066 && c <= 0x2069);
+  const one = Array.from(String(v ?? ""))
+    .map((ch) => (bad(ch.codePointAt(0) ?? 0) ? " " : ch))
+    .join("")
+    .replace(/\s+/g, " ")
+    .trim();
+  return Array.from(one).slice(0, Math.max(1, max)).join("").trim();
+}
+
+function normText(raw: unknown): PrintTextConfig {
+  const t = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const fonts = [...new Set((Array.isArray(t.fonts) ? t.fonts : []).map((x) => String(x ?? "").trim()))].filter((n) => !!printTextFont(n));
+  const colors = [...new Set((Array.isArray(t.colors) ? t.colors : []).map((x) => String(x ?? "").trim().toLowerCase()))].filter((c) => /^#[0-9a-f]{6}$/.test(c)).slice(0, PRINT_TEXT_MAX_COLORS);
+  return {
+    enabled: t.enabled === true,
+    fonts: fonts.length ? fonts : [...DEFAULT_PRINT_TEXT.fonts],
+    colors: colors.length ? colors : [...DEFAULT_PRINT_TEXT.colors],
+    maxChars: clamp(Math.round(num(t.maxChars, DEFAULT_PRINT_TEXT.maxChars)), 1, PRINT_TEXT_MAX_CHARS),
+  };
+}
+
 /**
  * ทรงของส่วนพิมพ์ — ทุกทรงตัดลายตามขอบ (ส่วนของลายที่เกินขอบทรงไม่ถูกพิมพ์ · ลายไม่บิดตามทรง)
  * tri/quad/pen ใช้จุด pts · rect/ellipse ใช้กรอบตรง ๆ
@@ -79,6 +144,8 @@ export type PrintDesignConfig = {
   allowUpload: boolean;
   library: PrintLibrarySet[];
   zones: PrintZone[];
+  /** ✍️ ให้ลูกค้าพิมพ์ข้อความ (ค่าเดิมที่ไม่มี = ปิด) */
+  text: PrintTextConfig;
 };
 
 export const DEFAULT_PRINT_DESIGN: PrintDesignConfig = {
@@ -89,6 +156,7 @@ export const DEFAULT_PRINT_DESIGN: PrintDesignConfig = {
   allowUpload: true,
   library: [],
   zones: [],
+  text: DEFAULT_PRINT_TEXT,
 };
 
 const num = (v: unknown, d: number) => {
@@ -188,12 +256,13 @@ export function normalizePrintDesign(raw: unknown): PrintDesignConfig {
     allowUpload: r.allowUpload !== false,
     library,
     zones,
+    text: normText(r.text),
   };
 }
 
-/** เปิดอยู่ + มีส่วนพิมพ์ + มีทางให้ลูกค้าเพิ่มลาย (คลังหรืออัปรูป) */
+/** เปิดอยู่ + มีส่วนพิมพ์ + มีทางให้ลูกค้าเพิ่มลาย (คลัง / อัปรูป / ข้อความ) */
 export function printDesignUsable(cfg: PrintDesignConfig | null | undefined): cfg is PrintDesignConfig {
-  return !!cfg && cfg.enabled && cfg.zones.length > 0 && (cfg.allowUpload || cfg.library.length > 0);
+  return !!cfg && cfg.enabled && cfg.zones.length > 0 && (cfg.allowUpload || cfg.library.length > 0 || cfg.text.enabled);
 }
 
 /** ขนาดกรอบหลังหมุน (ซม.) */
@@ -268,7 +337,23 @@ export function printZoneClip(z: ShapeLike): string | undefined {
     .join(", ")})`;
 }
 
-type Geo ={ x: number; y: number; w: number; h: number; rot: number };
+type Geo = { x: number; y: number; w: number; h: number; rot: number };
+
+/**
+ * ทรงของส่วนพิมพ์ในกรอบของลาย (สัดส่วน 0..1 ของลายก่อนหมุน) — ใช้ตัดไฟล์พิมพ์ให้ตรงกับที่ลูกค้าเห็น
+ * สี่เหลี่ยม = null (ลายอยู่ในกรอบทั้งชิ้นอยู่แล้ว ไม่ต้องตัด)
+ */
+export function printPlacementMask(zone: ShapeLike & { widthCm: number; heightCm: number }, p: Geo): [number, number][] | null {
+  if (!zone.shape || zone.shape === "rect") return null;
+  const a = (p.rot * Math.PI) / 180;
+  const c = Math.cos(a);
+  const s = Math.sin(a);
+  return printZoneOutline(zone, 16).map(([u, v]): [number, number] => {
+    const dx = u * zone.widthCm - p.x;
+    const dy = v * zone.heightCm - p.y;
+    return [r3((dx * c + dy * s) / p.w + 0.5), r3((-dx * s + dy * c) / p.h + 0.5)];
+  });
+}
 
 /**
  * จัดลายให้อยู่ในส่วนพิมพ์: ย่อถ้าใหญ่เกิน · ไม่ต่ำกว่าขนาดเล็กสุด · เลื่อนให้กรอบหลังหมุนอยู่ในพื้นที่ทั้งชิ้น
@@ -306,13 +391,16 @@ export function printQuality(pxW: number, cm: number): { level: "ok" | "warn" | 
   return { level: dpi >= PRINT_DPI_GOOD ? "ok" : dpi >= PRINT_DPI_MIN ? "warn" : "bad", dpi, goodCm: r1((pxW / PRINT_DPI_GOOD) * 2.54) };
 }
 
+export type PrintKind = "lib" | "upload" | "text";
 export type PrintPlacement = {
   zone: string;
-  kind: "lib" | "upload";
+  kind: PrintKind;
   /** ลายคลังร้าน: id ไฟล์ในคลัง (assets) */
   assetId?: string;
-  /** รูปลูกค้า: ที่อยู่ในที่เก็บส่วนตัว + ขนาดพิกเซลจริง + มีพื้นใสไหม */
+  /** รูปลูกค้า / รูปข้อความที่หน้าเว็บวาด: ที่อยู่ในที่เก็บส่วนตัว + ขนาดพิกเซลจริง + มีพื้นใสไหม */
   upload?: { path: string; w: number; h: number; alpha: boolean };
+  /** ✍️ ข้อความ: ค่าที่ลูกค้าพิมพ์ + ฟอนต์ + สี */
+  text?: PrintTextStyle;
   name: string;
   /** กึ่งกลางลาย ห่างขอบซ้าย/บนของส่วนพิมพ์ (ซม.) */
   x: number;
@@ -355,7 +443,7 @@ export function normalizePlacements(
     perZone.set(zone.id, n);
     let ar: number;
     let name: string;
-    let extra: Pick<PrintPlacement, "assetId" | "upload">;
+    let extra: Pick<PrintPlacement, "assetId" | "upload" | "text">;
     if (p.kind === "lib") {
       const assetId = str(p.assetId, 40);
       const hit = assetId ? ctx.lib(assetId) : null;
@@ -365,15 +453,24 @@ export function normalizePlacements(
       extra = { assetId };
     } else if (p.kind === "upload") {
       if (!cfg.allowUpload) return { ok: false, error: "รุ่นนี้ไม่รับรูปที่อัปเอง" };
-      const u = (p.upload && typeof p.upload === "object" ? p.upload : {}) as Record<string, unknown>;
-      const path = str(u.path, 300);
-      const pw = Math.round(num(u.w, 0));
-      const ph = Math.round(num(u.h, 0));
-      if (!path || !ctx.uploadOk(path)) return { ok: false, error: "ไม่พบรูปที่อัปโหลด ลองอัปใหม่อีกครั้ง" };
-      if (pw < 1 || ph < 1 || pw > 30000 || ph > 30000) return { ok: false, error: "ขนาดรูปไม่ถูกต้อง" };
-      ar = ph / pw;
+      const up = uploadOf(p.upload, ctx.uploadOk);
+      if (!up.ok) return up;
+      ar = up.upload.h / up.upload.w;
       name = str(p.name, 60) || "รูปของฉัน";
-      extra = { upload: { path, w: pw, h: ph, alpha: u.alpha === true } };
+      extra = { upload: up.upload };
+    } else if (p.kind === "text") {
+      if (!cfg.text.enabled) return { ok: false, error: "รุ่นนี้ไม่รับข้อความ" };
+      const t = (p.text && typeof p.text === "object" ? p.text : {}) as Record<string, unknown>;
+      const value = cleanPrintText(t.value, cfg.text.maxChars);
+      if (!value) return { ok: false, error: "ใส่ข้อความก่อน" };
+      const font = String(t.font ?? "");
+      const color = String(t.color ?? "").toLowerCase();
+      if (!cfg.text.fonts.includes(font) || !cfg.text.colors.includes(color)) return { ok: false, error: "ฟอนต์หรือสีนี้ร้านปิดไปแล้ว เลือกใหม่แล้วลองอีกครั้ง" };
+      const up = uploadOf(p.upload, ctx.uploadOk);
+      if (!up.ok) return up;
+      ar = up.upload.h / up.upload.w;
+      name = `“${value}”`.slice(0, 60);
+      extra = { text: { value, font, color }, upload: { ...up.upload, alpha: true } };
     } else return { ok: false, error: "ชนิดลายไม่ถูกต้อง" };
     const w = num(p.w, 5);
     const geo = fitPlacement({ x: num(p.x, zone.widthCm / 2), y: num(p.y, zone.heightCm / 2), w: w > 0 ? w : 5, h: (w > 0 ? w : 5) * (ar > 0 ? ar : 1), rot: normRot(num(p.rot, 0)) }, zone);
@@ -381,6 +478,21 @@ export function normalizePlacements(
   }
   return { ok: true, placements: out };
 }
+
+function uploadOf(raw: unknown, ok: (path: string) => boolean): { ok: true; upload: NonNullable<PrintPlacement["upload"]> } | { ok: false; error: string } {
+  const u = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const path = str(u.path, 300);
+  const w = Math.round(num(u.w, 0));
+  const h = Math.round(num(u.h, 0));
+  if (!path || !ok(path)) return { ok: false, error: "ไม่พบรูปที่อัปโหลด ลองอัปใหม่อีกครั้ง" };
+  if (w < 1 || h < 1 || w > 30000 || h > 30000) return { ok: false, error: "ขนาดรูปไม่ถูกต้อง" };
+  return { ok: true, upload: { path, w, h, alpha: u.alpha === true } };
+}
+
+/** ต้องให้ร้านตรวจก่อนผลิตไหม — เจ้าของเลือก: ตรวจเฉพาะรูปที่ลูกค้าอัปเอง (ลายคลัง/ข้อความ = ผ่านเลย) */
+export const printNeedsReview = (placements: Pick<PrintPlacement, "kind">[]) => placements.some((p) => p.kind === "upload");
+/** ไฟล์ในที่เก็บส่วนตัวของแบบ (รูปลูกค้า + รูปข้อความ) — ลบตามวันเก็บ */
+export const printPlacementFiles = (placements: Pick<PrintPlacement, "upload">[]) => placements.map((p) => p.upload?.path).filter((x): x is string => !!x);
 
 /** ราคาเพิ่มของ 1 ลาย = ราคาตามขนาด + ราคาเพิ่มของชุดลาย (คลังร้าน) */
 export function printPlacementPrice(cfg: PrintDesignConfig, p: Pick<PrintPlacement, "w" | "h">, extra = 0): number {
@@ -395,6 +507,25 @@ export function printDesignExtra(cfg: PrintDesignConfig, placements: PrintPlacem
 export function printDesignLabel(method: PrintMethod, count: number, lang: "th" | "en" = "th"): string {
   return lang === "en" ? `${method} print ×${count}` : `ลายรีด ${method} ${count} ลาย`;
 }
+
+/* ── ภาพแบบที่ลูกค้าเห็นในตะกร้า / หน้าออเดอร์ (API สาธารณะของ ERP ส่งให้) ── */
+export type PrintReviewStatus = "pending" | "approved" | "reupload" | "rejected";
+export type PrintDesignView = {
+  id: string;
+  code: string;
+  method: PrintMethod;
+  /** ราคาเพิ่มต่อใบ (บาท) */
+  extra: number;
+  status: "draft" | "ordered";
+  review: PrintReviewStatus | null;
+  /** เหตุผลที่ร้านแจ้ง (ขอรูปใหม่ / ปฏิเสธ) */
+  note: string | null;
+  orderRef: string | null;
+  /** ส่วนพิมพ์ ณ ตอนออกแบบ + URL รูปพื้น (สีที่ลูกค้าเลือก) */
+  zones: PrintZone[];
+  /** ลาย: url = รูปที่ใช้แสดง (ลิงก์ชั่วคราวสำหรับรูปลูกค้า · ลบตามวันเก็บแล้ว = null) */
+  items: { zone: string; kind: PrintKind; name: string; url: string | null; x: number; y: number; w: number; h: number; rot: number }[];
+};
 
 /* ── รหัสบรรทัดในตะกร้าเว็บร้าน: "<ตัวเลือก>[#pz:…]#pd:<id แบบ>:<ราคาเพิ่ม>:<จำนวนลาย>" (ต่อท้ายสุดเสมอ) ── */
 export const PRINT_LINE_SEP = "#pd:";

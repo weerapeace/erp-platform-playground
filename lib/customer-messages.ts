@@ -282,3 +282,47 @@ export function restockMessage(
 /** ลิงก์หน้าสินค้าตามภาษาลูกค้า (/en/product/...) */
 export const localizedUrl = (siteUrl: string | null, path: string, lang: CustomerLang): string | null =>
   siteUrl ? `${siteUrl}${lang === "en" ? "/en" : ""}${path}` : null;
+
+/* ─────────── 🖨 ลายรีด: ร้านขอรูปใหม่ / ปฏิเสธลาย ─────────── */
+
+export type PrintReviewEvent = "reupload" | "rejected";
+
+/** ข้อความแจ้งผลตรวจลายรีด (ใช้ทั้งส่งอัตโนมัติ LINE/อีเมล และปุ่มคัดลอกในแท็บออเดอร์) */
+export function printReviewMessage(
+  ev: PrintReviewEvent,
+  o: { orderNo: string; customerName: string; designCode: string; note: string },
+  shop: MessageShop,
+  lang: CustomerLang
+): CustomerMessage {
+  const t = T[lang];
+  const en = lang === "en";
+  const why = o.note.trim();
+  const title = ev === "reupload" ? (en ? "Please send a new photo for your print" : "ร้านขอรูปใหม่สำหรับลายรีด") : en ? "We can't print this design" : "ร้านขออภัย พิมพ์ลายนี้ไม่ได้";
+  const lines = [
+    t.hello(o.customerName),
+    ev === "reupload"
+      ? en
+        ? `We checked the custom print on order ${o.orderNo} (design ${o.designCode}) and need a new photo: ${why}`
+        : `ร้านตรวจลายรีดในออเดอร์ ${o.orderNo} (ลาย ${o.designCode}) แล้ว ขอรูปใหม่เพราะ ${why}`
+      : en
+        ? `Sorry — we can't print the design on order ${o.orderNo} (design ${o.designCode}): ${why}`
+        : `ร้านขออภัย ไม่สามารถพิมพ์ลายในออเดอร์ ${o.orderNo} (ลาย ${o.designCode}) ได้ เพราะ ${why}`,
+    ev === "reupload"
+      ? en
+        ? "Open your order below, enter the phone number you ordered with, then tap “Send a new photo”. We'll check it again before printing."
+        : "กดปุ่มด้านล่าง กรอกเบอร์โทรที่ใช้สั่ง แล้วกด “ส่งรูปใหม่” ได้เลย ร้านจะตรวจอีกครั้งก่อนผลิต"
+      : en
+        ? "We'll contact you about refunding the print add-on."
+        : "ร้านจะติดต่อเรื่องคืนเงินค่ารีดลายส่วนนี้ให้นะคะ",
+  ];
+  const href = trackUrl(shop.siteUrl, o.orderNo, lang);
+  const contact = t.contact(shop.contactLine, shop.contactPhone);
+  const foot = [contact ? `${t.contactPrefix}: ${contact}` : "", shop.name].filter(Boolean).join("\n");
+  const linkText = ev === "reupload" ? (en ? "Send a new photo" : "ส่งรูปใหม่") : t.track;
+  const text = [title, "", ...lines, ...(href ? ["", `${linkText}: ${href}`] : []), "", foot].join("\n");
+  return { subject: `${title} — ${o.orderNo} — ${shop.name}`, title, lines, table: [], link: href ? { text: linkText, href } : null, foot, text };
+}
+
+export function printReviewEmail(to: string, m: CustomerMessage, shopName: string, lang: CustomerLang): EmailMessage {
+  return { to, fromName: shopName, subject: m.subject, html: emailLayout({ lang, shopName, title: m.title, lines: m.lines, table: m.table, button: m.link ?? undefined, foot: m.foot }), text: m.text };
+}
