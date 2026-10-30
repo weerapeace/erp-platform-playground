@@ -20,6 +20,8 @@ import { LangSync } from "@/components/lang-sync";
 import { GlobalSearch } from "@/components/global-search";
 import { PageChromeBar, PageViewOptionsSection, useChromeHost, useIsDesktopXl, usePageChromeHas } from "@/components/page-chrome";
 import { AccountMenu } from "@/components/account-menu";
+import { WorkPopupFloatToggle } from "@/components/work-popup/float";
+import { BrowserPushToggle } from "@/components/web-push";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { DevicePreviewButton } from "@/components/device-preview";
@@ -949,7 +951,10 @@ function UserSwitcher({ collapsed }: { collapsed?: boolean }) {
             className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">👤 {t("โปรไฟล์ของฉัน", "My Profile")}</Link>
           <Link href="/account/security" onClick={() => setOpen(false)}
             className="block w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50">🔐 {t("ความปลอดภัย (อุปกรณ์ที่เข้าใช้)", "Security (devices)")}</Link>
-          <div className="px-3 py-1.5 flex items-center justify-between gap-2">
+          {/* ป๊อปเตือนงาน: เปิด/ปิด + มุมจอ · เด้งที่เบราว์เซอร์นี้ (ตัวเดียวกับ AccountMenu — ปิดถาวรทำได้ที่นี่ที่เดียว) */}
+          <WorkPopupFloatToggle />
+          <BrowserPushToggle />
+          <div className="px-3 py-1.5 flex items-center justify-between gap-2 border-t border-slate-100">
             <span className="text-xs text-slate-500">🌐 ภาษา / Language</span>
             <LangToggle />
           </div>
