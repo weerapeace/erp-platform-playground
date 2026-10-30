@@ -590,6 +590,8 @@ export interface SplitEntryBlock extends BlockBase {
   textPos: "bottom-left" | "bottom" | "center";
   mobileHeight: "split" | "tall";
   overlay: number;
+  /** ช่องที่มีคลิป: hover = ปกเป็นรูป ชี้แล้วเล่น เอาออกหยุด · auto = เล่นวนตลอด */
+  videoPlay: "hover" | "auto";
   panels: (ChildBase & {
     eyebrow: string;
     title: string;

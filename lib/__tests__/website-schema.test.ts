@@ -867,6 +867,13 @@ describe("🚪 หน้าเปิดแบ่งช่อง (split-entry)", 
     expect(b.panels).toHaveLength(3);
     expect(validateBlocks([n]).filter((i) => i.level === "error")).toEqual([]);
   });
+  it("🎬 คลิป: ค่าเริ่ม = ชี้แล้วเล่น (ปกเป็นรูป) · Section ที่วางไว้ก่อนมีช่องนี้ = ชี้แล้วเล่น · ค่ามั่ว = ชี้แล้วเล่น · เลือกเล่นวนตลอดได้", () => {
+    expect((newBlock("split-entry", 1) as unknown as { videoPlay: string }).videoPlay).toBe("hover");
+    const vp = (raw: Record<string, unknown>) => (normalizeBlocks([{ id: "x", type: "split-entry", panels: [{ title: "ก" }], ...raw }])[0] as unknown as { videoPlay: string }).videoPlay;
+    expect(vp({})).toBe("hover");
+    expect(vp({ videoPlay: "spin" })).toBe("hover");
+    expect(vp({ videoPlay: "auto" })).toBe("auto");
+  });
   it("ช่องไฟ/มุมโค้ง โชว์เฉพาะแบบมีช่องไฟ", () => {
     const fd = SECTION_SCHEMAS["split-entry"].fields.find((x) => x.key === "gapSize")!;
     expect(matchShowIf(fd, { cut: "straight" })).toBe(false);
