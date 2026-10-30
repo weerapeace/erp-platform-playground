@@ -16,6 +16,7 @@ import { ERPModal } from "@/components/modal";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { useRefresh } from "@/lib/refresh-bus";
 import { TaskLinkList } from "@/components/record-tasks/task-links";
 import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } from "@/lib/email-report/popup";
 // หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง (รายการกลาง lib/chromeless-routes)
@@ -187,7 +188,8 @@ export function WorkPopupHost() {
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);   // ค่าคงที่ — การ์ดผูกตัวฟัง "กดข้างนอก" ครั้งเดียว
 
-  const check = useCallback(async (reportId?: string) => {
+  // quiet = โหลดข้อมูลใหม่เงียบ ๆ (หลังมีการแก้ / กดกาง / กลับมาที่แท็บ) — ไม่เด้งกางเอง
+  const check = useCallback(async (reportId?: string, quiet = false) => {
     if (!uid) return;
     if (!reportId && !enabled) return;
     lastCheck.current = Date.now();
@@ -202,7 +204,8 @@ export function WorkPopupHost() {
         .map((p) => ({ ...p, due: !!reportId || (p.due !== false && !seen.includes(p.report_id)) }));
       if (allDay) setQueue(list);   // ทั้งวัน = แทนทั้งชุด (ของที่หมดวัน/ปิดรายงานแล้วหายไปด้วย)
       else if (list.length) setQueue((q) => [...q.filter((x) => !list.some((y) => y.report_id === x.report_id)), ...list]);
-      if (list.some((p) => p.due)) setExpanded(true);
+      setDone(new Set());   // ข้อมูลใหม่จากเซิร์ฟเวอร์ = ความจริงล่าสุด (ข้อที่ติ๊กแล้วหายไปเอง)
+      if (!quiet && list.some((p) => p.due)) setExpanded(true);
     } catch { /* เงียบ — ป๊อปไม่ขึ้นไม่ทำให้หน้าพัง */ }
   }, [uid, enabled, wide]);
 
@@ -219,13 +222,29 @@ export function WorkPopupHost() {
     if (enabled && !prevEnabled.current && uid && !skip && lastCheck.current) void check();
     prevEnabled.current = enabled;
   }, [enabled, uid, skip, check]);
+  // มีการบันทึก/แก้ข้อมูลในระบบ (กริ่งกลาง refresh-bus) → ป๊อปลอยโหลดใหม่เงียบ ๆ
+  const queueLenRef = useRef(0);
+  queueLenRef.current = queue.length;
+  useRefresh(() => { if (wide && enabled && queueLenRef.current > 0 && !skip) void check(undefined, true); });
+  // การ์ดกางค้างไว้ → โหลดใหม่ทุก 2 นาที (แก้จากหน้าในกรอบแอปเดี่ยว / เครื่องอื่น กริ่งด้านบนไม่ได้ยิน)
+  useEffect(() => {
+    if (!wide || !enabled || !expanded || skip || !uid) return;
+    const t = window.setInterval(() => { if (document.visibilityState === "visible" && queueLenRef.current > 0) void check(undefined, true); }, 2 * 60_000);
+    return () => window.clearInterval(t);
+  }, [wide, enabled, expanded, skip, uid, check]);
   // เปิดแท็บค้างไว้ทั้งวัน → กลับมาที่แท็บเกิน 30 นาที ถามใหม่ (เผื่อเพิ่งเข้าช่วงเวลาเด้ง)
+  // ป๊อปลอย (จอคอม) มีอยู่แล้ว → กลับมาที่แท็บเกิน 1 นาที = โหลดข้อมูลใหม่เงียบ ๆ (งานที่แก้จากที่อื่นอัปเดตตาม)
   useEffect(() => {
     if (!uid) return;
-    const onVis = () => { if (document.visibilityState === "visible" && lastCheck.current && Date.now() - lastCheck.current > RECHECK_MS && !skip) void check(); };
+    const onVis = () => {
+      if (document.visibilityState !== "visible" || !lastCheck.current || skip) return;
+      const age = Date.now() - lastCheck.current;
+      if (age > RECHECK_MS) void check();
+      else if (wide && queueLenRef.current > 0 && age > 60_000) void check(undefined, true);
+    };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [uid, skip, check]);
+  }, [uid, skip, check, wide]);
 
   // จอคอม: แสดงตัวที่ถึงเวลาก่อน ไม่มีก็ตัวแรก (เป็นปุ่มเล็ก) · จอเล็ก: เฉพาะตัวที่ถึงเวลา (หน้าต่างกลางจอแบบเดิม)
   const cur = (wide ? (queue.find((x) => x.due) ?? queue[0]) : queue.find((x) => x.due !== false)) ?? null;
@@ -282,7 +301,7 @@ export function WorkPopupHost() {
       {visible && cur && (wide ? (
         <WorkPopupFloatCard pref={floatPref} minimized={!expanded} title={title} subtitle={subtitle} pill={pill} footer={footer}
           onMinimize={collapse}
-          onExpand={() => setExpanded(true)}>
+          onExpand={() => { setExpanded(true); void check(undefined, true); }}>
           <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
         </WorkPopupFloatCard>
       ) : (
