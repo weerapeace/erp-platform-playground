@@ -129,7 +129,7 @@ export function PrintDesignOrderPanel({ shopSlug, designId, onChanged }: { shopS
             {data.zones
               .filter((z) => (z.imageUrl ?? "") === url)
               .map((z) => (
-                <div key={z.id} className="absolute border border-dashed border-violet-500" style={{ left: `${z.x}%`, top: `${z.y}%`, width: `${z.w}%`, height: `${z.h}%` }}>
+                <div key={z.id} className="absolute border border-dashed border-violet-500" style={{ left: `${z.x}%`, top: `${z.y}%`, width: `${z.w}%`, height: `${z.h}%`, transform: z.rot ? `rotate(${z.rot}deg)` : undefined }}>
                   {data.placements.map((p, i) =>
                     p.zone !== z.id ? null : (
                       <div

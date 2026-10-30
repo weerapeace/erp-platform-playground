@@ -34,11 +34,13 @@ export type PrintZone = {
   imageKey: string | null;
   /** เว็บร้านได้ URL รูปจาก API (ERP ไม่เก็บ) */
   imageUrl?: string;
-  /** กรอบพื้นที่พิมพ์บนรูป เป็น % ของกว้าง/สูงรูป */
+  /** กรอบพื้นที่พิมพ์บนรูป เป็น % ของกว้าง/สูงรูป (กรอบก่อนหมุน) */
   x: number;
   y: number;
   w: number;
   h: number;
+  /** หมุนกรอบรอบจุดกึ่งกลาง (องศา −180..180) — รูปที่ถ่ายกระเป๋าเอียง · ลายในกรอบหมุนตาม */
+  rot: number;
   /** ขนาดจริงของกรอบ (ซม.) */
   widthCm: number;
   heightCm: number;
@@ -81,7 +83,7 @@ const baht = (v: unknown, d: number) => Math.round(clamp(num(v, d), 0, 100000));
 
 /** ส่วนพิมพ์ใหม่ (ค่าเริ่ม: กลางรูป 50×40% = 25×15 ซม.) */
 export function newPrintZone(index: number): PrintZone {
-  return { id: `z${index + 1}`, label: index === 0 ? "ด้านหน้า" : `ส่วนที่ ${index + 1}`, labelEn: index === 0 ? "Front" : "", imageKey: null, x: 25, y: 30, w: 50, h: 40, widthCm: 25, heightCm: 15 };
+  return { id: `z${index + 1}`, label: index === 0 ? "ด้านหน้า" : `ส่วนที่ ${index + 1}`, labelEn: index === 0 ? "Front" : "", imageKey: null, x: 25, y: 30, w: 50, h: 40, rot: 0, widthCm: 25, heightCm: 15 };
 }
 
 export function normalizePrintZone(raw: unknown, index: number): PrintZone {
@@ -98,6 +100,7 @@ export function normalizePrintZone(raw: unknown, index: number): PrintZone {
     y: r2(y),
     w: r2(clamp(num(z.w, 50), 1, 100 - x)),
     h: r2(clamp(num(z.h, 40), 1, 100 - y)),
+    rot: normRot(num(z.rot, 0)),
     widthCm: r1(clamp(num(z.widthCm, 25), 2, 120)),
     heightCm: r1(clamp(num(z.heightCm, 15), 2, 120)),
   };

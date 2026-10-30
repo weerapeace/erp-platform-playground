@@ -41,7 +41,7 @@ describe("normalizePrintDesign", () => {
       method: "XX",
       prices: { S: -5, M: "80", L: null },
       maxPerZone: 99,
-      zones: [{ id: "A b!", x: 95, w: 50, widthCm: 500 }, { id: "ab" }],
+      zones: [{ id: "A b!", x: 95, w: 50, widthCm: 500, rot: 200 }, { id: "ab" }],
       library: [{ collectionId: "c" }, { collectionId: "c" }],
     });
     expect(c.method).toBe("DTF");
@@ -51,6 +51,9 @@ describe("normalizePrintDesign", () => {
     expect(c.zones[0].w).toBe(5);
     expect(c.zones[0].widthCm).toBe(120);
     expect(c.zones[1].id).toBe("ab-2");
+    // หมุนกรอบ: เกิน 180 → วนกลับ · ไม่มีค่า = 0
+    expect(c.zones[0].rot).toBe(-160);
+    expect(c.zones[1].rot).toBe(0);
     expect(c.library).toHaveLength(1);
   });
   it("ใช้งานได้เมื่อเปิด + มีส่วนพิมพ์ + มีทางเพิ่มลาย", () => {

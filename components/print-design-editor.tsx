@@ -4,7 +4,7 @@
  *
  * - เปิด/ปิด · วิธีพิมพ์ (ร้านกำหนดตามวัสดุ) · ราคาเพิ่มต่อลายตามขนาด · ลายสูงสุดต่อส่วน · ให้อัปรูปเองไหม
  * - คลังลาย = อัลบั้มในคลังไฟล์ (เลือกได้หลายอัลบั้ม + ราคาเพิ่มต่ออัลบั้ม)
- * - ส่วนพิมพ์ = ลากกรอบบนรูปสินค้า (ย้าย/ย่อขยายที่มุม) + ขนาดจริง ซม.
+ * - ส่วนพิมพ์ = ลากกรอบบนรูปสินค้า (ย้าย · ย่อ/ขยายทุกมุม/ทุกด้าน · หมุน) + ขนาดจริง ซม.
  * กฎกลาง: lib/website-print-design (เว็บร้านใช้สำเนาเดียวกัน) · ของกลาง: MoneyInput · StepInput · ToggleSwitch
  */
 import { useEffect, useRef, useState } from "react";
@@ -14,6 +14,7 @@ import { StepInput } from "@/components/step-input";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import {
   newPrintZone,
+  normRot,
   printDesignUsable,
   PRINT_MAX_PER_ZONE,
   PRINT_MAX_ZONES,
@@ -187,9 +188,15 @@ function ZoneCard({
   onRemove: () => void;
 }) {
   const key = zone.imageKey ?? fallbackImageKey;
+  // สัดส่วนรูป (สูง/กว้าง) — ใช้เทียบว่ากรอบบนรูปกับขนาดจริง ซม. สัดส่วนตรงกันไหม (ไม่ตรง = ลายบนเว็บดูยืด/บีบ)
+  const [imgAr, setImgAr] = useState<number | null>(null);
+  const boxRatio = imgAr ? zone.w / (zone.h * imgAr) : null;
+  const cmRatio = zone.widthCm / zone.heightCm;
+  const off = boxRatio ? Math.abs(boxRatio / cmRatio - 1) > 0.12 : false;
+  const fitH = boxRatio ? Math.min(120, Math.max(2, Math.round((zone.widthCm / boxRatio) * 2) / 2)) : zone.heightCm;
   return (
     <div className="grid gap-3 rounded-lg border border-slate-200 p-3 md:grid-cols-[minmax(0,1fr)_16rem]">
-      <ZoneRectEditor imageKey={key} zone={zone} onChange={onChange} />
+      <ZoneRectEditor imageKey={key} zone={zone} onChange={onChange} onImageAr={setImgAr} />
       <div className="space-y-2">
         <label className="block space-y-0.5">
           <span className="text-[11px] text-slate-500">ชื่อส่วน (ลูกค้าเห็น)</span>
@@ -220,6 +227,27 @@ function ZoneCard({
             <StepInput value={zone.heightCm} onChange={(n) => onChange({ heightCm: Math.min(120, Math.max(2, n ?? 2)) })} step={0.5} min={2} max={120} unit="ซม." className="h-8 w-full" />
           </label>
         </div>
+        <div className="space-y-0.5">
+          <div className="flex items-center justify-between text-[11px] text-slate-500">
+            <span>หมุนกรอบ</span>
+            {zone.rot !== 0 && (
+              <button type="button" onClick={() => onChange({ rot: 0 })} className="text-blue-600 hover:underline">
+                ตั้งตรง (0°)
+              </button>
+            )}
+          </div>
+          <StepInput value={zone.rot} onChange={(n) => onChange({ rot: normRot(n ?? 0) })} step={1} min={-180} max={180} integer unit="°" className="h-8 w-full" />
+        </div>
+        {off && boxRatio && (
+          <div className="space-y-1 rounded-md bg-amber-50 px-2 py-1.5 text-[11px] text-amber-800">
+            <p>
+              สัดส่วนกรอบบนรูป (กว้าง:สูง ≈ {boxRatio.toFixed(2)}) ไม่ตรงกับขนาดจริง ({cmRatio.toFixed(2)}) — ลายบนเว็บจะดูยืดหรือบีบ
+            </p>
+            <button type="button" onClick={() => onChange({ heightCm: fitH })} className="rounded border border-amber-300 bg-white px-2 py-0.5 hover:bg-amber-100">
+              ปรับความสูงจริงให้ตรงกรอบ ({fitH} ซม.)
+            </button>
+          </div>
+        )}
         <p className="text-[11px] text-slate-400">วัดพื้นที่ที่รีดได้จริงบนกระเป๋า (เว้นตะเข็บ/หูหิ้ว) · รูปทุกสีควรถ่ายมุมเดียวกัน เว็บจะสลับรูปตามสีที่ลูกค้าเลือกให้เอง</p>
         <button type="button" onClick={onRemove} className="text-xs text-rose-600 hover:underline">
           ลบส่วนนี้
@@ -229,31 +257,94 @@ function ZoneCard({
   );
 }
 
-/** ลากกรอบพื้นที่พิมพ์บนรูป: ลากกลางกรอบ = ย้าย · ลากมุมขวาล่าง = ย่อ/ขยาย (เก็บเป็น % ของรูป) */
-function ZoneRectEditor({ imageKey, zone, onChange }: { imageKey: string | null; zone: PrintZone; onChange: (patch: Partial<PrintZone>) => void }) {
+type Handle = { sx: -1 | 0 | 1; sy: -1 | 0 | 1 };
+/** จุดจับย่อ/ขยาย: 4 มุม + กลาง 4 ด้าน (sx/sy = ด้านไหนของกรอบ · 0 = กลาง) */
+const HANDLES: Handle[] = [
+  { sx: -1, sy: -1 },
+  { sx: 0, sy: -1 },
+  { sx: 1, sy: -1 },
+  { sx: 1, sy: 0 },
+  { sx: 1, sy: 1 },
+  { sx: 0, sy: 1 },
+  { sx: -1, sy: 1 },
+  { sx: -1, sy: 0 },
+];
+const handleCursor = (h: Handle) => (h.sx === 0 ? "ns-resize" : h.sy === 0 ? "ew-resize" : h.sx === h.sy ? "nwse-resize" : "nesw-resize");
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
+/**
+ * ลากกรอบพื้นที่พิมพ์บนรูป (เก็บเป็น % ของรูป + องศา)
+ * ลากกลางกรอบ = ย้าย · จุดมุม/กลางด้าน = ย่อ/ขยาย (ฝั่งตรงข้ามอยู่กับที่ — คิดตามแนวที่กรอบหมุนอยู่) · วงกลมด้านบน = หมุน (ดีดเข้า 0/90/180 เมื่อใกล้)
+ */
+function ZoneRectEditor({
+  imageKey,
+  zone,
+  onChange,
+  onImageAr,
+}: {
+  imageKey: string | null;
+  zone: PrintZone;
+  onChange: (patch: Partial<PrintZone>) => void;
+  onImageAr?: (ar: number) => void;
+}) {
+  const wrap = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ mode: "move" | "size"; px: number; py: number; z: PrintZone } | null>(null);
+  const img = useRef<HTMLImageElement>(null);
+  // รูปที่โหลดจากแคชก่อนหน้าจอพร้อม = onLoad ไม่ยิง → อ่านสัดส่วนเองหลังวาด
+  useEffect(() => {
+    const el = img.current;
+    if (el?.complete && el.naturalWidth) onImageAr?.(el.naturalHeight / el.naturalWidth);
+  }, [imageKey, onImageAr]);
+  const drag = useRef<{ mode: "move" | "rot" | "size"; h?: Handle; px: number; py: number; z: PrintZone; W: number; H: number; L: number; T: number } | null>(null);
   const r2 = (n: number) => Math.round(n * 100) / 100;
 
-  const start = (mode: "move" | "size") => (e: React.PointerEvent) => {
+  const start = (mode: "move" | "rot" | "size", h?: Handle) => (e: React.PointerEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    drag.current = { mode, px: e.clientX, py: e.clientY, z: zone };
+    const r = box.current?.getBoundingClientRect();
+    if (!r) return;
+    drag.current = { mode, h, px: e.clientX, py: e.clientY, z: zone, W: r.width, H: r.height, L: r.left, T: r.top };
     try {
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      wrap.current?.setPointerCapture(e.pointerId);
     } catch {
-      /* บางเบราว์เซอร์ไม่ให้จับ — ยังลากได้ตราบที่เมาส์อยู่ในรูป */
+      /* บางเบราว์เซอร์ไม่ให้จับ — ยังลากได้ตราบที่เมาส์อยู่ในกรอบรูป */
     }
   };
   const move = (e: React.PointerEvent) => {
     const d = drag.current;
-    const el = box.current;
-    if (!d || !el) return;
-    const r = el.getBoundingClientRect();
-    const dx = ((e.clientX - d.px) / r.width) * 100;
-    const dy = ((e.clientY - d.py) / r.height) * 100;
-    if (d.mode === "move") onChange({ x: r2(Math.min(100 - d.z.w, Math.max(0, d.z.x + dx))), y: r2(Math.min(100 - d.z.h, Math.max(0, d.z.y + dy))) });
-    else onChange({ w: r2(Math.min(100 - d.z.x, Math.max(3, d.z.w + dx))), h: r2(Math.min(100 - d.z.y, Math.max(3, d.z.h + dy))) });
+    if (!d) return;
+    const { z, W, H } = d;
+    const a = (z.rot * Math.PI) / 180;
+    const cos = Math.cos(a);
+    const sin = Math.sin(a);
+    const zw = (z.w / 100) * W;
+    const zh = (z.h / 100) * H;
+    const cx = ((z.x + z.w / 2) / 100) * W;
+    const cy = ((z.y + z.h / 2) / 100) * H;
+    const px = e.clientX - d.L;
+    const py = e.clientY - d.T;
+    if (d.mode === "move") {
+      onChange({ x: r2(clamp(z.x + ((e.clientX - d.px) / W) * 100, 0, 100 - z.w)), y: r2(clamp(z.y + ((e.clientY - d.py) / H) * 100, 0, 100 - z.h)) });
+    } else if (d.mode === "rot") {
+      let deg = normRot((Math.atan2(py - cy, px - cx) * 180) / Math.PI + 90);
+      for (const snap of [-180, -90, 0, 90, 180]) if (Math.abs(deg - snap) <= 3) deg = snap === -180 ? 180 : snap;
+      onChange({ rot: deg });
+    } else if (d.h) {
+      const { sx, sy } = d.h;
+      // จุดยึด = มุม/กลางด้านฝั่งตรงข้าม (พิกัดจอ) — ไม่ขยับระหว่างลาก
+      const ox = cx + ((-sx * zw) / 2) * cos - ((-sy * zh) / 2) * sin;
+      const oy = cy + ((-sx * zw) / 2) * sin + ((-sy * zh) / 2) * cos;
+      // ตำแหน่งเมาส์ในแนวของกรอบ (หมุนกลับ)
+      const vx = (px - ox) * cos + (py - oy) * sin;
+      const vy = -(px - ox) * sin + (py - oy) * cos;
+      const nw = sx ? Math.max(0.03 * W, sx * vx) : zw;
+      const nh = sy ? Math.max(0.03 * H, sy * vy) : zh;
+      const ncx = ox + ((sx * nw) / 2) * cos - ((sy * nh) / 2) * sin;
+      const ncy = oy + ((sx * nw) / 2) * sin + ((sy * nh) / 2) * cos;
+      const w = Math.min(100, (nw / W) * 100);
+      const h = Math.min(100, (nh / H) * 100);
+      onChange({ w: r2(w), h: r2(h), x: r2(clamp((ncx / W) * 100 - w / 2, 0, 100 - w)), y: r2(clamp((ncy / H) * 100 - h / 2, 0, 100 - h)) });
+    }
   };
   const end = () => {
     drag.current = null;
@@ -262,21 +353,45 @@ function ZoneRectEditor({ imageKey, zone, onChange }: { imageKey: string | null;
   if (!imageKey) return <div className="grid min-h-40 place-items-center rounded-md bg-slate-100 text-xs text-slate-400">ยังไม่มีรูปสินค้า — เพิ่มรูปเว็บก่อน</div>;
   return (
     <div className="space-y-1">
-      <div ref={box} className="relative select-none overflow-hidden rounded-md bg-slate-100" style={{ touchAction: "none" }} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={imgUrl(imageKey)} alt="" className="block w-full" draggable={false} />
-        <div
-          onPointerDown={start("move")}
-          className="absolute cursor-move border-2 border-dashed border-pink-500 bg-pink-500/10"
-          style={{ left: `${zone.x}%`, top: `${zone.y}%`, width: `${zone.w}%`, height: `${zone.h}%` }}
-        >
-          <span className="absolute -top-6 left-0 whitespace-nowrap rounded-full bg-pink-600 px-2 py-0.5 text-[11px] text-white">
-            {zone.label} · {zone.widthCm}×{zone.heightCm} ซม.
-          </span>
-          <span onPointerDown={start("size")} className="absolute -bottom-2 -right-2 h-4 w-4 cursor-nwse-resize rounded-full border-2 border-white bg-pink-600 shadow" />
+      {/* เว้นขอบรอบรูป ให้จุดจับที่อยู่ริมรูปกดได้ */}
+      <div ref={wrap} className="select-none rounded-md bg-slate-100 p-5" style={{ touchAction: "none" }} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+        <div ref={box} className="relative">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            ref={img}
+            src={imgUrl(imageKey)}
+            alt=""
+            className="block w-full rounded"
+            draggable={false}
+            onLoad={(e) => e.currentTarget.naturalWidth && onImageAr?.(e.currentTarget.naturalHeight / e.currentTarget.naturalWidth)}
+          />
+          <div
+            onPointerDown={start("move")}
+            className="absolute cursor-move border-2 border-dashed border-pink-500 bg-pink-500/10"
+            style={{ left: `${zone.x}%`, top: `${zone.y}%`, width: `${zone.w}%`, height: `${zone.h}%`, transform: `rotate(${zone.rot}deg)` }}
+          >
+            <span className="pointer-events-none absolute -bottom-6 left-0 whitespace-nowrap rounded-full bg-pink-600 px-2 py-0.5 text-[11px] text-white">
+              {zone.label} · {zone.widthCm}×{zone.heightCm} ซม.{zone.rot ? ` · ${zone.rot}°` : ""}
+            </span>
+            <span className="pointer-events-none absolute left-1/2 top-0 h-5 w-px -translate-y-full bg-pink-500" />
+            <span
+              onPointerDown={start("rot")}
+              title="ลากเพื่อหมุน"
+              className="absolute left-1/2 top-0 h-5 w-5 -translate-x-1/2 -translate-y-[calc(100%+18px)] cursor-grab rounded-full border-2 border-pink-600 bg-white shadow"
+            />
+            {HANDLES.map((h) => (
+              <span
+                key={`${h.sx}${h.sy}`}
+                onPointerDown={start("size", h)}
+                title="ลากเพื่อย่อ/ขยาย"
+                className="absolute h-3.5 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-sm border-2 border-white bg-pink-600 shadow"
+                style={{ left: `${(h.sx + 1) * 50}%`, top: `${(h.sy + 1) * 50}%`, cursor: handleCursor(h) }}
+              />
+            ))}
+          </div>
         </div>
       </div>
-      <p className="text-[11px] text-slate-400">ลากกรอบชมพูไปวางตรงพื้นที่ที่รีดได้ · จุดมุมขวาล่าง = ย่อ/ขยาย</p>
+      <p className="text-[11px] text-slate-400">ลากกลางกรอบ = ย้าย · จุดที่มุม/กลางด้าน = ย่อ/ขยาย · วงกลมด้านบน = หมุน (ใกล้ 0°/90° จะดีดเข้าเอง)</p>
     </div>
   );
 }
