@@ -17,6 +17,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
+import { canDeleteAttachment } from "@/lib/attachment-delete-perm";
 import { useFileDrop, FileDropHint, filePathOf } from "@/components/file-drop";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { uploadResizedImage } from "@/components/image-attach";
@@ -156,7 +157,7 @@ export function ProductImageRouter({
 }) {
   const toast = useToast();
   const { can, user } = useAuth();
-  const canDelete = can("attachments.delete");
+  const canDelete = canDeleteAttachment(can, "skus_v2");   // แทนที่รูปเดิมในแกลเลอรีสินค้า = ลบไฟล์ หรือ ลบรูปสินค้า (lib/attachment-delete-perm)
   const actor = user?.name ?? user?.email ?? null;
   const [template, setTemplate] = useUserPref<RouteTemplate>("product_image_router_template", DEFAULT_TEMPLATE, parseTemplate);
   const [resizePref, setResizePref] = useUserPref<ResizePref>("product_image_router_resize", { mode: "auto", px: 2000 }, parseResize);

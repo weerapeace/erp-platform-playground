@@ -9,6 +9,8 @@ import { withImageWidth } from "@/lib/r2-image";
 import { downscaleImageWidth } from "@/lib/image-resize";
 import { AssetPicker } from "@/components/asset-picker";
 import { ConfirmDialog } from "@/components/modal";
+import { useAuth } from "@/components/auth";
+import { canDeleteAttachment } from "@/lib/attachment-delete-perm";
 import { copyImageToClipboard, downloadImageAsJpg, canCopyImage } from "@/lib/image-clipboard";
 
 // ============================================================
@@ -174,6 +176,9 @@ export function ImageManager({
   const maxSizeMb = Math.round((maxSizeBytes / 1024 / 1024) * 10) / 10;
   const atMaxItems = maxItems > 0 && items.length >= maxItems;
   const [pickerOpen, setPickerOpen] = useState(false);   // เลือกไฟล์จากคลังกลาง
+  // 🗑 ปุ่มลบ/ล้างทั้งหมด เฉพาะคนที่ลบได้จริง (กฎเดียวกับ DB — lib/attachment-delete-perm) · เดิมปุ่มขึ้นแต่กดแล้วขึ้น "ไม่มีสิทธิ์"
+  const { can } = useAuth();
+  const canDelete = !readonly && canDeleteAttachment(can, entityType);
 
   const fetchList = useCallback(async () => {
     setLoading(true);
@@ -380,8 +385,10 @@ export function ImageManager({
               <button onClick={() => setPrimary(a.id)} title="ตั้งเป็นรูปหลัก"
                 className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-blue-50">⭐</button>
             )}
-            <button onClick={() => remove(a.id)} title="ลบ"
-              className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-red-50 text-red-600">🗑</button>
+            {canDelete && (
+              <button onClick={() => remove(a.id)} title="ลบ"
+                className="h-7 w-7 flex items-center justify-center bg-white rounded-full text-xs hover:bg-red-50 text-red-600">🗑</button>
+            )}
           </div>
         </div>
       )}
@@ -435,7 +442,7 @@ export function ImageManager({
           {description && <p className="mt-0.5 text-[11px] text-slate-400">{description}</p>}
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          {layout === "gallery" && !readonly && items.length > 0 && (
+          {layout === "gallery" && canDelete && items.length > 0 && (
             <button type="button" onClick={() => setClearOpen(true)} disabled={clearing || uploading}
               title="ลบรูปทั้งหมดออกจากสินค้านี้ (ลบไฟล์ออกจากคลัง/R2 ด้วย)"
               className="h-7 px-2.5 text-[11px] border border-rose-200 text-rose-600 bg-rose-50 rounded-md hover:bg-rose-100 disabled:opacity-50 whitespace-nowrap flex items-center gap-1">

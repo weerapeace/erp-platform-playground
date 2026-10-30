@@ -11,7 +11,7 @@ import { useT } from "@/components/i18n";
 
 export type Permission =
   | "products.view" | "products.create" | "products.edit" | "products.delete"
-  | "products.cost.view"
+  | "products.cost.view" | "products.images.delete"   // ลบรูปแกลเลอรี Parent/SKU — lib/attachment-delete-perm
   | "pr.view" | "pr.create" | "pr.edit" | "pr.submit" | "pr.approve" | "pr.reject" | "pr.cancel"
   | "suppliers.view" | "suppliers.create" | "suppliers.edit"
   | "fields.view" | "admin.field_registry.edit" | "admin.field_registry.bulk_edit"
@@ -80,7 +80,7 @@ export type Role = "admin" | "manager" | "staff" | "viewer";
 // role → permissions (ตรงกับ backend erp_can — แก้แล้วต้อง sync ทั้ง 2 ที่)
 const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   admin: [
-    "products.view", "products.create", "products.edit", "products.delete", "products.cost.view",
+    "products.view", "products.create", "products.edit", "products.delete", "products.cost.view", "products.images.delete",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.approve", "pr.reject", "pr.cancel",
     "suppliers.view", "suppliers.create", "suppliers.edit",
     "fields.view", "admin.field_registry.edit", "admin.field_registry.bulk_edit",
@@ -119,7 +119,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts", "platform_orders.view", "platform_orders.manage", "work_board.dispatch", "production.piecework", "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair", "task_template.view", "task_template.create", "task_template.edit", "task_template.delete", "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],
   manager: [
-    "products.view", "products.create", "products.edit", "products.cost.view",
+    "products.view", "products.create", "products.edit", "products.cost.view", "products.images.delete",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.approve", "pr.reject", "pr.cancel",
     "suppliers.view", "suppliers.create", "suppliers.edit",
     "fields.view", "numbering.view", "approval.view", "notifications.view", "saved_views.share",
@@ -137,7 +137,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "products.platforms.view", "products.platforms.edit", "products.platforms.publish", "products.platforms.manage_accounts", "platform_orders.view", "platform_orders.manage", "work_board.dispatch", "production.piecework", "qc.view", "qc.receive", "qc.move", "qc.ship", "qc.defect", "qc.repair", "task_template.view", "task_template.create", "task_template.edit", "task_template.delete", "task_subtask.approve", "task_subtask.revise", "task_subtask.cancel", "product_media.sync", "sku_description.sync",
   ],
   staff: [
-    "products.view", "products.create", "products.edit",
+    "products.view", "products.create", "products.edit", "products.images.delete",
     "pr.view", "pr.create", "pr.edit", "pr.submit", "pr.cancel",
     "suppliers.view", "suppliers.create",
     "fields.view", "numbering.view", "approval.view", "notifications.view", "workflow.view", "reports.view", "plugins.view", "table_layouts.view",

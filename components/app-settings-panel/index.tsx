@@ -5,6 +5,7 @@
  *     เก็บที่ erp_menu_items.audience (กฎ lib/menu-audience) · บันทึกแบบร่าง → 💾 · PATCH /api/menu (admin.users + ประวัติ)
  *     มีผลกับแถบเมนูแอปเดี่ยว · เมนูซ้าย · หน้ารวมแอป — "ซ่อน/โชว์" เท่านั้น กันเข้าจริงใช้สิทธิ์ตำแหน่ง
  *   แท็บ ↕️ จัดเรียง / ซ่อนเมนู: ลากเรียง · บนแถบ / รวมในปุ่ม "เพิ่มเติม ▾" / ซ่อน · ชื่อปุ่มรวมเมนู (./menu-layout · กฎ lib/app-menu-layout)
+ *   แท็บ สิทธิ์ตามเมนู: ติ๊กสิทธิ์ต่อตำแหน่ง/รายคน จัดกลุ่มตามเมนูบนแถบ (components/menu-permissions · กฎ lib/menu-permissions)
  *   แท็บ 🔧 ตั้งค่า<แอป>: หน้าตั้งค่าเฉพาะของแอปนั้น (ถ้ามี เช่น จัดการงาน → /tasks/settings + 🔔 รายงานและแจ้งเตือนอัตโนมัติ) ฝังในกรอบ · หลายแท็บได้
  */
 import { useEffect, useMemo, useState } from "react";
@@ -16,6 +17,8 @@ import { cleanAudience, describeAudience, menuVisibleTo, type MenuAudience } fro
 import type { UserPickerValue } from "@/components/pickers";
 import { MultiUserPicker } from "@/app/tasks/multi-user-picker";
 import { MenuLayoutTab } from "./menu-layout";
+import { MenuPermissionMatrix } from "@/components/menu-permissions";
+import { Icon } from "@/components/icon";
 
 export type AppSettingsMenuItem = { id: string; label: string; icon: string | null; href: string; permission_key: string | null; parent_id?: string | null; audience?: unknown; sort_order: number; app_overrides?: unknown };
 type Role = { key: string; label: string; active?: boolean };
@@ -43,7 +46,7 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
 }) {
   const { can } = useAuth();
   const pages = (APP_SETTINGS_PAGES[appKey] ?? []).filter((p) => !p.perm || can(p.perm));
-  const [tab, setTab] = useState<"who" | "layout" | string>("who");   // "who" / "layout" หรือ href ของหน้าที่ฝัง
+  const [tab, setTab] = useState<"who" | "layout" | "perm" | string>("who");   // "who" / "layout" / "perm" หรือ href ของหน้าที่ฝัง
   const page = pages.find((p) => p.href === tab) ?? null;
   const tabCls = (on: boolean) => `-mb-px border-b-2 px-3 py-2 text-sm whitespace-nowrap ${on ? "border-violet-600 font-medium text-violet-700" : "border-transparent text-slate-500 hover:text-slate-800"}`;
   return (
@@ -53,6 +56,7 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
         <div className="mt-2 flex flex-wrap items-end gap-1">
           <button type="button" onClick={() => setTab("who")} className={tabCls(tab === "who")}>👁 ใครเห็นเมนูไหน</button>
           <button type="button" onClick={() => setTab("layout")} className={tabCls(tab === "layout")}>↕️ จัดเรียง / ซ่อนเมนู</button>
+          <button type="button" onClick={() => setTab("perm")} className={tabCls(tab === "perm")}><Icon name="permission" /> สิทธิ์ตามเมนู</button>
           {pages.map((p) => (
             <button key={p.href} type="button" onClick={() => setTab(p.href)} className={tabCls(tab === p.href)}>{p.icon ?? "🔧"} {p.label}</button>
           ))}
@@ -66,7 +70,9 @@ export function AppSettingsPanel({ appKey, appLabel, appId, moreLabel, defaultHr
         ? <iframe key={page.href} src={`${page.href}?embed=1`} title={page.label} className="flex-1 w-full border-0 bg-white" />
         : tab === "layout"
           ? <MenuLayoutTab appKey={appKey} appId={appId} moreLabel={moreLabel} defaultHref={defaultHref} items={items} onSaved={onSaved} />
-          : <WhoSeesWhat items={items} onSaved={onSaved} />}
+          : tab === "perm"
+            ? <div className="flex-1 min-h-0 overflow-y-auto"><div className="mx-auto max-w-5xl p-4 pb-16"><MenuPermissionMatrix appKey={appKey} /></div></div>
+            : <WhoSeesWhat items={items} onSaved={onSaved} />}
     </div>
   );
 }

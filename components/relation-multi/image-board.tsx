@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { useAuth } from "@/components/auth";
+import { canDeleteAttachment } from "@/lib/attachment-delete-perm";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { useCanHover } from "@/lib/use-can-hover";
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
@@ -110,7 +111,7 @@ export function ChildImageBoard({ rows, titleField, subtitle, entityType, module
 }) {
   const toast = useToast();
   const { can } = useAuth();
-  const canDelete = canDrop && can("attachments.delete");   // ลบรูป = admin/manager (DB ตรวจซ้ำ)
+  const canDelete = canDrop && canDeleteAttachment(can, entityType);   // ลบรูป = ลบไฟล์ / ลบรูปสินค้า (DB ตรวจซ้ำ — lib/attachment-delete-perm)
   const [delAsk, setDelAsk] = useState<{ row: Row; att: Att } | null>(null);
   const [delBusy, setDelBusy] = useState(false);
   const [imgs, setImgs] = useState<Record<string, Att[]> | null>(null);
