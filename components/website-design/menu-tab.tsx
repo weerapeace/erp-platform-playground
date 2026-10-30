@@ -21,14 +21,19 @@ import { useRoleEditor } from "./fonts-tab";
 import { PageHealthCtx, IssueNote } from "./link-health";
 import { useDesign } from "./context";
 import { DesignCard } from "./design-card";
+import { SiteZonesCard } from "./zones-card";
 
 export function MenuTab() {
   const { theme, choices, apply, setMenu, storePages, megaCtx } = useDesign();
   const roleEditor = useRoleEditor();
   return (
-    <DesignCard title="เมนูด้านบน" hint="จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ใส่ป้ายเล็ก · เมนูย่อย (dropdown หรือแผง Mega มีรูป) · ตั้งชุดมือถือแยกได้">
-      <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} typo={{ nav: roleOf(theme, "nav").uppercase, menu: roleOf(theme, "menu").uppercase, setUpper: (k, v) => apply({ ...theme, typography: { ...theme.typography, [k]: { ...roleOf(theme, k), uppercase: v } } }), editors: TEXT_ROLE_DEFS.filter((d) => d.key === "nav" || d.key === "menu").map(roleEditor) }} />
-    </DesignCard>
+    <>
+      <DesignCard title="เมนูด้านบน" hint="จัดลำดับ ลิงก์ไปหน้า/หมวด/สินค้า/URL · ใส่ป้ายเล็ก · เมนูย่อย (dropdown หรือแผง Mega มีรูป) · ตั้งชุดมือถือแยกได้">
+        <MenuSettings menu={theme.menu} setMenu={setMenu} choices={choices} pages={storePages} megaCtx={megaCtx} typo={{ nav: roleOf(theme, "nav").uppercase, menu: roleOf(theme, "menu").uppercase, setUpper: (k, v) => apply({ ...theme, typography: { ...theme.typography, [k]: { ...roleOf(theme, k), uppercase: v } } }), editors: TEXT_ROLE_DEFS.filter((d) => d.key === "nav" || d.key === "menu").map(roleEditor) }} />
+      </DesignCard>
+      {/* 🚪 แบ่งเว็บเป็นโซนที่เมนูต่างกัน + แถบสลับบนสุด (components/website-design/zones-card) */}
+      <SiteZonesCard />
+    </>
   );
 }
 

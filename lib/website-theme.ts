@@ -19,6 +19,7 @@ import { carryTranslations } from "@/lib/content-i18n";
 import { newDropHref, categoryHref } from "@/lib/website-links";
 import { normalizeContentSources, type ContentSource } from "@/lib/website-content-sources";
 import { defaultOverPages, normalizeOverPages, type OverPages } from "@/lib/website-header-over";
+import { defaultSiteZones, normalizeSiteZones, type SiteZoneConfig } from "@/lib/website-site-zones";
 import { DEFAULT_POLICY, DEFAULT_WISH, normalizePolicy, normalizeWish, type ProductPolicy, type ProductWish } from "@/lib/website-wish-policy";
 export type LogoMode = "icon-text" | "image" | "text" | "icon";
 export type HeaderBg = "surface" | "page" | "ink" | "brand" | "transparent";
@@ -983,6 +984,8 @@ export interface SiteTheme {
     iconStyle: HeaderIconStyle;
   };
   menu: MenuConfig;
+  /** 🚪 โซนของเว็บ — เมนูแยกต่อส่วนของเว็บ + แถบสลับโซนบนสุด (lib/website-site-zones · ปิดเป็นค่าเริ่ม) · คนละเรื่องกับ header.zones (ตำแหน่งชิ้นซ้าย/กลาง/ขวา) */
+  siteZones: SiteZoneConfig<MenuItem>;
   footer: FooterConfig;
   /** 🖼 หน้ารายการสินค้า: รูปแทรกในกริด (ดู lib/website-listing.ts) */
   listing: ListingConfig;
@@ -1608,6 +1611,7 @@ export const DEFAULT_THEME: SiteTheme = {
   },
   header: { height: 72, sticky: true, bg: "page", menuAlign: "center", showCart: true, border: true, bgKind: "preset", bgColor: "#FFFFFF", textColor: "", zones: { left: ["logo"], center: ["menu"], right: ["account", "cart"], v: 2 }, overHero: false, overPages: defaultOverPages(false), hideOnScroll: false, mobileMenuSide: "top", langMobile: "bar", button: { text: "", href: "/shop" }, cart: { ...DEFAULT_HEADER_CART }, search: { ...DEFAULT_HEADER_SEARCH }, iconStyle: DEFAULT_HEADER_ICON_STYLE },
   menu: { items: null, mobileItems: null, behavior: { ...DEFAULT_MENU_BEHAVIOR } },
+  siteZones: defaultSiteZones(),
   footer: { ...DEFAULT_FOOTER },
   listing: { ...DEFAULT_LISTING },
   cart: { ...DEFAULT_CART },
@@ -1826,11 +1830,13 @@ export const THEME_TEXT_KEYS = [
   "copyrightText",
   // 📜 ลิงก์นโยบาย (หน้าสินค้า/ตะกร้า) · ช่องติ๊กยอมรับเงื่อนไข (หน้าชำระเงิน)
   "linkText", "acceptText",
+  // 🚪 แถบสลับโซน: ลิงก์กลับหน้าแรก (ชื่อโซน = label · ปุ่มของโซน = text)
+  "homeText",
 ] as const;
 
 /** ป้ายตำแหน่ง (ภาษาคน) ในตารางคำแปลของธีม */
 const THEME_CRUMB: Record<string, string> = {
-  menu: "เมนู", items: "เมนูคอม", mobileItems: "เมนูมือถือ", children: "เมนูย่อย", panel: "แผงเมนูใหญ่", blocks: "กล่อง",
+  menu: "เมนู", siteZones: "โซนของเว็บ", bar: "แถบสลับโซน", homeText: "ลิงก์หน้าแรก", items: "เมนูคอม", mobileItems: "เมนูมือถือ", children: "เมนูย่อย", panel: "แผงเมนูใหญ่", blocks: "กล่อง",
   links: "ลิงก์", groups: "กลุ่ม", cards: "การ์ด", tabs: "แท็บ", footer: "ท้ายเว็บ", columns: "คอลัมน์", bottomLinks: "ลิงก์แถวล่าง",
   header: "หัวเว็บ", button: "ปุ่ม", cart: "ตะกร้า", search: "ค้นหา", logo: "โลโก้", product: "หน้าสินค้า",
   detailItems: "หัวข้อรายละเอียด", contentSources: "แหล่งข้อมูล", lines: "บรรทัด", parts: "ส่วนประกอบ", buy: "ส่วนซื้อ", banner: "แบนเนอร์", related: "สินค้าที่เกี่ยวข้อง", recent: "สินค้าที่ดูล่าสุด",
@@ -1940,6 +1946,7 @@ function normalizeThemeBase(raw: unknown): SiteTheme {
       iconStyle: normalizeHeaderIconStyle(h.iconStyle),
     },
     menu: normalizeMenu(r.menu),
+    siteZones: normalizeSiteZones(r.siteZones, (x) => normalizeMenuItems(x, 0)),
     footer: normalizeFooter(r.footer),
     listing: normalizeListing(r.listing),
     cart: normalizeCart(r.cart),

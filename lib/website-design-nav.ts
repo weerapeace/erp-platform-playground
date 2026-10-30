@@ -137,9 +137,12 @@ export const DESIGN_PAGES: Record<Exclude<DesignPageKey, "overview">, DesignPage
   menu: {
     label: "เมนู",
     desc: "รายการเมนู · เมนูย่อย/แผงใหญ่",
-    paths: ["menu"],
+    paths: ["menu", "siteZones"],
     keywords: "menu nav เมนู",
-    cards: [{ title: "เมนูด้านบน", keywords: "ลิงก์ไป ป้ายเล็ก แสดงช่วง เมนูย่อย แผงเมนูใหญ่ mega dropdown แบบ A แบบ B แบบ C แม่แบบ ชี้เมาส์ หน่วงเวลา เมนูมือถือ" }],
+    cards: [
+      { title: "เมนูด้านบน", keywords: "ลิงก์ไป ป้ายเล็ก แสดงช่วง เมนูย่อย แผงเมนูใหญ่ mega dropdown แบบ A แบบ B แบบ C แม่แบบ ชี้เมาส์ หน่วงเวลา เมนูมือถือ" },
+      { title: "โซนของเว็บ", keywords: "โซน ส่วนของเว็บ แถบสลับ หน้าเปิด รับผลิต ร้านค้า เมนูแยก zone switch" },
+    ],
   },
   footer: {
     label: "ท้ายเว็บ (Footer)",
