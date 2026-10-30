@@ -17,6 +17,7 @@ import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks } from "@/lib/website-blocks";
 import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
 import { VersionHistoryDrawer } from "@/components/website-version-history";
+import { useDesignTabAccess } from "@/components/website-tab-review";
 import { ERPDateTime24 } from "@/components/form";
 import { ImageUploadField } from "@/components/website-theme-media";
 import { webForm } from "@/lib/website-form-styles";
@@ -81,6 +82,8 @@ function groupPages(pages: PageRow[]): { name: string; kind: "plain" | "posts" |
 
 export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shopId: string }) {
   const toast = useToast();
+  // 👷 ติ๊กหัวข้อแท็บ "หน้าเว็บ": สร้าง/แก้ร่างได้ · เผยแพร่ไม่ได้ = ส่งหัวหน้า (ชื่อหน้า/SEO ขึ้นเว็บทันที จึงล็อก) · ลบ/สลับลำดับ/ประวัติ = แก้ได้ทั้งหมด
+  const tabAcc = useDesignTabAccess("webpages", shopId);
 
   const [pages, setPages] = useState<PageRow[]>([]);
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
@@ -297,7 +300,8 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
     return (
       <div className="space-y-3">
         {showSeo && (
-          <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+          <fieldset disabled={!tabAcc.canPublish} className="min-w-0 rounded-xl border border-slate-200 bg-white p-4 space-y-4">
+            {!tabAcc.canPublish && <p className="text-[11px] rounded-lg bg-amber-50 text-amber-800 px-3 py-2">ชื่อหน้า / กลุ่ม / SEO ขึ้นเว็บทันทีเมื่อบันทึก (ไม่มีร่าง) — คุณยังเผยแพร่เองไม่ได้ จึงแก้ช่องเหล่านี้ไม่ได้ · ฝากหัวหน้าแก้ตอนส่งให้ตรวจ</p>}
             <div className="grid gap-3 sm:grid-cols-3">
               <div>
                 <label className={labelCls}>ชื่อหน้า (ไทย)</label>
@@ -403,7 +407,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
               </div>
             </div>
             <p className="text-[11px] text-slate-400">ชื่อหน้า / กลุ่ม / SEO บันทึกพร้อมปุ่ม “บันทึกร่าง” หรือ “เผยแพร่”</p>
-          </div>
+          </fieldset>
         )}
 
         <WebsiteBuilder
@@ -442,8 +446,10 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
             saving: dp.busy === "draft",
             issues,
             changes: summarizeChanges(dp.blocks, dp.published, types),
-            onHistory: () => setShowVersions(true),
+            onHistory: tabAcc.full ? () => setShowVersions(true) : undefined,
             publishLabel: "เผยแพร่หน้านี้",
+            // 👷 เผยแพร่เองไม่ได้ → บันทึกร่างแล้วส่งให้หัวหน้าตรวจ
+            ...(tabAcc.canPublish ? {} : { publishLabel: tabAcc.reviewing ? "กำลังส่ง…" : "ส่งให้หัวหน้าตรวจ", onPublish: () => void tabAcc.requestReview(dp.saveDraft, editTitle || editSlug) }),
           }}
         />
         <PublishCheckDialog
@@ -534,7 +540,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
         <ul className="space-y-2">
           {g.pages.map((p, i) => (
             <li key={p.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
-              {g.kind === "help" ? (
+              {g.kind === "help" && tabAcc.full ? (
                 <span className="flex flex-col -my-1">
                   <button type="button" disabled={i === 0} onClick={() => void movePage(g.pages, i, -1)} className="text-[10px] leading-none text-slate-400 hover:text-blue-600 disabled:opacity-20" title="ย้ายขึ้น">▲</button>
                   <button type="button" disabled={i === g.pages.length - 1} onClick={() => void movePage(g.pages, i, 1)} className="text-[10px] leading-none text-slate-400 hover:text-blue-600 disabled:opacity-20" title="ย้ายลง">▼</button>
@@ -559,7 +565,7 @@ export function WebsitePagesPanel({ shopSlug, shopId }: { shopSlug: string; shop
                 <a href={`${siteUrl}/${p.pageType === "post" ? "blog/" : ""}${p.slug}`} target="_blank" rel="noreferrer" className="text-xs text-slate-500 hover:text-blue-600" title="เปิดหน้าจริง">↗</a>
               )}
               <button onClick={() => void openPage(p.id)} className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:border-slate-400">แก้ไข</button>
-              <button onClick={() => void removePage(p)} className="text-xs text-red-500 hover:underline">ลบ</button>
+              {tabAcc.full && <button onClick={() => void removePage(p)} className="text-xs text-red-500 hover:underline">ลบ</button>}
             </li>
           ))}
         </ul>

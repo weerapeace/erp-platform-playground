@@ -5,10 +5,13 @@
  * PATCH { shop, action:"make-set", key, name }    → 🔗 สร้างชุดรูปกลางจากรูปนี้ + ผูกทุกที่ที่ใช้รูปนี้ (ลงร่างเหมือนกัน)
  * PATCH { shop, action:"alt", key, alt }          → 📝 คำอธิบายรูป (store_settings "image_alts") — ไม่เปลี่ยนหน้าตา ขึ้นเว็บทันที
  * ชุดมาใหม่ = ดูอย่างเดียว (แก้ที่แท็บ 🆕 มาใหม่) · สิทธิ์กลุ่ม "หน้าตาเว็บ" (lib/website-access) · ทุกการแก้ = audit
+ * 🗂 ติ๊กหัวข้อแท็บ "รูปบนเว็บ" (ไม่ใช่แก้ได้ทั้งหมด) = ใส่คำอธิบายได้ · เปลี่ยนรูปลงร่างเฉพาะหน้าแรก/หน้าเว็บที่ติ๊กหัวข้อไว้ด้วย
+ *    ร่างดีไซน์ไม่แตะ (มีงานหัวข้ออื่นของคนอื่น) → นับเป็น noAccess ให้หน้าจอบอกว่าต้องให้หัวหน้าเปลี่ยน
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardWebsite } from "@/lib/website-api-guard";
+import { guardDesignTab, guardWebsite } from "@/lib/website-api-guard";
+import type { DesignAccess } from "@/lib/website-access";
 import { writeAuditFor } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { issuePreviewKey } from "@/lib/storefront-preview-key";
@@ -110,16 +113,23 @@ async function fileInfo(sb: Admin, keys: string[]) {
  * แทนรูปในร่างของทุกที่ที่แก้ได้ (หน้าแรก · ดีไซน์ · หน้าเว็บ) — ไม่มีร่าง = เริ่มร่างจากตัวที่เผยแพร่
  * คืนรายการที่เปลี่ยน (ป้าย · แท็บที่ต้องไปกดเผยแพร่) + จำนวนที่อยู่ในชุดมาใหม่ (ต้องเปลี่ยนเองที่แท็บ 🆕 มาใหม่)
  */
-async function replaceEverywhere(sb: Admin, shopId: string, from: string, to: string) {
+async function replaceEverywhere(sb: Admin, shopId: string, from: string, to: string, access: DesignAccess) {
   const docs = await loadDocs(sb, shopId);
   const changed: { kind: SiteDoc["kind"]; id: string; label: string; count: number }[] = [];
   let readOnly = 0;
+  let noAccess = 0;
+  // 👷 แก้ได้ทั้งหมด = ทุกที่ · ติ๊กหัวข้อแท็บ = เฉพาะหน้าแรก/หน้าเว็บที่ติ๊กไว้ (ร่างดีไซน์ไม่แตะ)
+  const mine = (kind: SiteDoc["kind"]) => access.full || (kind === "home" && access.tabs.includes("home")) || (kind === "page" && access.tabs.includes("webpages"));
   for (const d of docs) {
     const base = d.draft != null ? d.draft : d.live;
     const r = replaceMedia(base, from, to);
     if (!r.count) continue;
     if (!d.editable) {
       readOnly += r.count;
+      continue;
+    }
+    if (!mine(d.kind)) {
+      noAccess += r.count;
       continue;
     }
     const q =
@@ -132,7 +142,7 @@ async function replaceEverywhere(sb: Admin, shopId: string, from: string, to: st
     if (error) throw new Error(`บันทึก${d.label}ไม่สำเร็จ`);
     changed.push({ kind: d.kind, id: d.id, label: d.label, count: r.count });
   }
-  return { changed, readOnly };
+  return { changed, readOnly, noAccess };
 }
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -151,7 +161,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardWebsite(request, "edit");
+  const { denied, access } = await guardDesignTab(request, "webimages");
   if (denied) return denied;
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   const sb = supabaseAdmin();
@@ -185,9 +195,9 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       if (!set) return json({ error: "ไม่พบชุดรูปนี้" }, 400);
     }
     try {
-      const r = await replaceEverywhere(sb, shop.id, from, to);
-      if (!r.changed.length && !r.readOnly) return json({ error: "ไม่พบรูปนี้ในหน้าที่แก้ได้แล้ว — ลองโหลดใหม่" }, 409);
-      await writeAuditFor(request, sb, { action: "update", entityType: "store_site_images", entityId: shop.id, metadata: { shop_id: shop.id, op: "replace", from, to, changed: r.changed, read_only: r.readOnly } });
+      const r = await replaceEverywhere(sb, shop.id, from, to, access);
+      if (!r.changed.length && !r.readOnly && !r.noAccess) return json({ error: "ไม่พบรูปนี้ในหน้าที่แก้ได้แล้ว — ลองโหลดใหม่" }, 409);
+      await writeAuditFor(request, sb, { action: "update", entityType: "store_site_images", entityId: shop.id, metadata: { shop_id: shop.id, op: "replace", from, to, changed: r.changed, read_only: r.readOnly, no_access: r.noAccess } });
       return json({ ok: true, ...r });
     } catch (e) {
       return json({ error: e instanceof Error ? e.message : "เปลี่ยนรูปไม่สำเร็จ" }, 500);
@@ -210,7 +220,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const set = rowToImageSet(data as Record<string, unknown>);
     await writeAuditFor(request, sb, { action: "create", entityType: "store_image_sets", entityId: set.id, metadata: { shop_id: shop.id, name, from_image: key } });
     try {
-      const r = await replaceEverywhere(sb, shop.id, key, imgSetRef(set.id));
+      const r = await replaceEverywhere(sb, shop.id, key, imgSetRef(set.id), access);
       await writeAuditFor(request, sb, { action: "update", entityType: "store_site_images", entityId: shop.id, metadata: { shop_id: shop.id, op: "make-set", key, set_id: set.id, changed: r.changed, read_only: r.readOnly } });
       return json({ ok: true, set: { id: set.id, name: set.name }, ...r });
     } catch (e) {

@@ -11,12 +11,15 @@
  *
  * ใช้ตาราง store_pages (มีอยู่เดิม): layout = เผยแพร่ · draft_layout = ร่าง
  * หน้าแรก (is_home) จัดที่แท็บ "หน้าแรก" แทน — API นี้จึงไม่แตะ
+ *
+ * 🗂 สิทธิ์: หน้าตาเว็บ "แก้ได้" หรือ ติ๊กหัวข้อแท็บ "หน้าเว็บ" (guardDesignTab) — ติ๊กหัวข้อ = สร้างหน้า (เป็นร่าง) + แก้ร่างได้
+ *    เผยแพร่ / เปลี่ยนชื่อหน้า+SEO (ขึ้นเว็บทันที ไม่มีร่าง) = ต้องเผยแพร่เองได้ · สลับลำดับ / ลบหน้า = แก้ได้ทั้งหมดเท่านั้น
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardWebsite } from "@/lib/website-api-guard";
+import { guardDesignTab, guardWebsite, PUBLISH_NEEDS_REVIEW, websiteCanShop } from "@/lib/website-api-guard";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeBlocks, blockTypesFor } from "@/lib/website-blocks";
@@ -133,7 +136,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardWebsite(request, "edit");
+  const { denied } = await guardDesignTab(request, "webpages");
   if (denied) return denied;
   const {
     data: { user },
@@ -227,7 +230,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardWebsite(request, "edit");
+  const { denied, access } = await guardDesignTab(request, "webpages");
   if (denied) return denied;
   const {
     data: { user },
@@ -251,12 +254,31 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   const sb = supabaseAdmin();
   const publish = body.mode === "publish";
   const blocks = body.blocks !== undefined ? normalizeBlocks(body.blocks) : null;
+  const reorder = typeof body.sortOrder === "number" && Number.isFinite(body.sortOrder);
+
+  // 👷 ติ๊กหัวข้อแท็บ (ไม่ใช่แก้ได้ทั้งหมด): คำขอบอกแค่ pageId → เช็กร้านของหน้านั้นเอง · สลับลำดับไม่ได้ · ยังเผยแพร่เองไม่ได้ = ร่างอย่างเดียว
+  let metaSkipped = false;
+  if (!access.full) {
+    const { data: pg } = await sb.from("store_pages").select("shop_id").eq("id", body.pageId).maybeSingle();
+    const shopId = (pg as { shop_id?: string } | null)?.shop_id;
+    const { data: sh } = shopId ? await sb.from("shops").select("slug").eq("id", shopId).maybeSingle() : { data: null };
+    const slug = (sh as { slug?: string } | null)?.slug;
+    if (!slug || !(await websiteCanShop(request, slug))) return NextResponse.json({ error: "ไม่มีสิทธิ์เข้าร้านของหน้านี้ — ขอสิทธิ์ได้ที่ผู้ดูแลระบบ" }, { status: 403 });
+    if (reorder) return NextResponse.json({ error: "สลับลำดับหน้าได้เฉพาะคนที่แก้หน้าตาเว็บได้ทั้งหมด" }, { status: 403 });
+    if (publish && !access.publish) return NextResponse.json({ error: PUBLISH_NEEDS_REVIEW }, { status: 403 });
+    // ชื่อหน้า/SEO ไม่มีร่าง (ขึ้นเว็บทันที) → คนที่ยังเผยแพร่เองไม่ได้ ข้ามไป (หน้าจอล็อกช่องไว้แล้ว)
+    if (!access.publish && (body.title !== undefined || body.seo !== undefined)) {
+      metaSkipped = true;
+      body.title = undefined;
+      body.seo = undefined;
+    }
+  }
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (body.title !== undefined) patch.title = text(body.title, 120);
   // seo = ข้อมูลเสริมทั้งก้อน (SEO 2 ภาษา · ชื่ออังกฤษ · กลุ่มศูนย์ช่วยเหลือ) — lib/website-help-center.ts cleanPageMeta
   if (body.seo !== undefined) patch.seo = cleanPageMeta(body.seo);
-  if (typeof body.sortOrder === "number" && Number.isFinite(body.sortOrder)) patch.sort_order = Math.max(0, Math.min(100000, Math.round(body.sortOrder)));
+  if (reorder) patch.sort_order = Math.max(0, Math.min(100000, Math.round(body.sortOrder as number)));
 
   if (blocks) {
     if (publish) {
@@ -312,7 +334,11 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     if (shopId) purged = await purgeStorefrontCache(sb, shopId);
   }
 
-  return NextResponse.json({ ok: true, mode: publish ? "publish" : "draft", blocks: blocks ?? undefined, purged });
+  // 👷 พนักงานที่ติ๊กหัวข้อแท็บ: เก็บประวัติว่าใครแก้ร่าง (หัวหน้าเห็นก่อนเผยแพร่)
+  if (!access.full && !publish && blocks)
+    await writeAudit(sb, { action: "update", entityType: "store_page", entityId: body.pageId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { op: "draft", blocks: blocks.length, by: "topic" } });
+
+  return NextResponse.json({ ok: true, mode: publish ? "publish" : "draft", blocks: blocks ?? undefined, purged, metaSkipped: metaSkipped || undefined });
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {

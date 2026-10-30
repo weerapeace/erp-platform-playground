@@ -91,7 +91,7 @@ export function WebsiteSiteImagesPanel({ shopSlug, onGo }: { shopSlug: string; o
   const [swap, setSwap] = useState<{ to: string | null } | null>(null);
   const [mkSet, setMkSet] = useState<{ name: string } | null>(null);
   // ผลล่าสุด: ลงร่างที่ไหนบ้าง → ปุ่มไปกดเผยแพร่
-  const [done, setDone] = useState<{ what: string; changed: Changed[]; readOnly: number } | null>(null);
+  const [done, setDone] = useState<{ what: string; changed: Changed[]; readOnly: number; noAccess?: number } | null>(null);
 
   const load = useCallback(() => {
     setError(null);
@@ -169,7 +169,7 @@ export function WebsiteSiteImagesPanel({ shopSlug, onGo }: { shopSlug: string; o
     const j = await patch({ action: "replace", from: sel.key, to: swap.to });
     if (!j) return;
     setSwap(null);
-    setDone({ what: `เปลี่ยน “${mediaFileName(sel.key)}”`, changed: j.changed ?? [], readOnly: j.readOnly ?? 0 });
+    setDone({ what: `เปลี่ยน “${mediaFileName(sel.key)}”`, changed: j.changed ?? [], readOnly: j.readOnly ?? 0, noAccess: j.noAccess ?? 0 });
     toast.success("ลงร่างแล้ว — ลูกค้ายังเห็นรูปเดิมจนกว่าจะกดเผยแพร่");
     load();
   };
@@ -180,7 +180,7 @@ export function WebsiteSiteImagesPanel({ shopSlug, onGo }: { shopSlug: string; o
     if (!j) return;
     setMkSet(null);
     notifyImageSetsChanged();
-    setDone({ what: `ผูกชุดรูป “${j.set?.name ?? mkSet.name}”`, changed: j.changed ?? [], readOnly: j.readOnly ?? 0 });
+    setDone({ what: `ผูกชุดรูป “${j.set?.name ?? mkSet.name}”`, changed: j.changed ?? [], readOnly: j.readOnly ?? 0, noAccess: j.noAccess ?? 0 });
     toast.success("สร้างชุดรูปแล้ว — ปรับรูป/ตั้งเวลาต่อได้ที่แท็บ 🖼 ชุดรูป");
     load();
   };
@@ -219,6 +219,8 @@ export function WebsiteSiteImagesPanel({ shopSlug, onGo }: { shopSlug: string; o
             <span className="flex-1">
               📝 {done.what} — ลงร่างแล้ว {done.changed.map((c) => `${c.label} (${c.count})`).join(" · ") || "ไม่มีที่ที่แก้ได้"}
               {done.readOnly > 0 && ` · อีก ${done.readOnly} ที่อยู่ในชุดมาใหม่ ต้องเปลี่ยนเองที่แท็บ 🆕 มาใหม่`}
+              {/* 👷 ติ๊กหัวข้อแท็บ: ไม่แตะร่างดีไซน์/หน้าที่ไม่มีสิทธิ์ */}
+              {(done.noAccess ?? 0) > 0 && ` · อีก ${done.noAccess} ที่อยู่ในส่วนที่คุณไม่มีสิทธิ์แก้ (เช่น ดีไซน์) — ให้หัวหน้าเปลี่ยน`}
               <br />
               ลูกค้ายังเห็นรูปเดิมจนกว่าจะกด “เผยแพร่” ที่แท็บเหล่านี้:
             </span>

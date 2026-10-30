@@ -8,6 +8,7 @@
  * ร่าง/เผยแพร่/บันทึกอัตโนมัติ/ย้อน = ของกลาง useDraftPublish (components/website-draft-publish — ใช้ร่วมหน้าเว็บ + หน้าชุดมาใหม่)
  *
  * ข้อมูล: /api/website/layout · /api/website/layout/versions
+ * 👷 พนักงานที่ติ๊กหัวข้อแท็บ "หน้าแรก": เผยแพร่เองไม่ได้ = ปุ่มส่งให้หัวหน้าตรวจ · ไม่มีละทิ้งร่าง/ประวัติ (components/website-tab-review)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -20,10 +21,12 @@ import type { Block, BlockTypeInfo } from "@/components/website-block-editor";
 import { validateBlocks, type ValidationIssue } from "@/lib/website-blocks";
 import { useShopPublishIssues, PublishCheckDialog } from "@/components/website-publish-check";
 import { VersionHistoryDrawer } from "@/components/website-version-history";
+import { useDesignTabAccess } from "@/components/website-tab-review";
 
 /** focusBlockId = เปิดมาแล้วเลือก Section นี้ให้เลย (เช่น 🗂 รูปบนเว็บ → "✏️ ไปแก้") · onFocused = เลือกแล้ว (ล้างคำขอ) */
 export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }: { shopSlug: string; shopId: string; focusBlockId?: string | null; onFocused?: () => void }) {
   const toast = useToast();
+  const tabAcc = useDesignTabAccess("home", shopId);
 
   const [types, setTypes] = useState<BlockTypeInfo[]>([]);
   const [categories, setCategories] = useState<{ key: string; label: string }[]>([]);
@@ -138,8 +141,10 @@ export function WebsiteLayoutPanel({ shopSlug, shopId, focusBlockId, onFocused }
           changes,
           autoSave,
           onAutoSave: setAutoSave,
-          onHistory: () => setShowVersions(true),
-          onDiscard: () => void discard(),
+          onHistory: tabAcc.full ? () => setShowVersions(true) : undefined,
+          onDiscard: tabAcc.full ? () => void discard() : undefined,
+          // 👷 เผยแพร่เองไม่ได้ → บันทึกร่างแล้วส่งให้หัวหน้าตรวจ
+          ...(tabAcc.canPublish ? {} : { publishLabel: tabAcc.reviewing ? "กำลังส่ง…" : "ส่งให้หัวหน้าตรวจ", onPublish: () => void tabAcc.requestReview(dp.saveDraft) }),
         }}
       />
 

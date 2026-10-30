@@ -6,6 +6,9 @@
  * PUT { shopId, blocks, mode:"publish" }  → เผยแพร่ (เว็บจริงเปลี่ยน + ล้างร่าง)
  * DELETE ?shopId=<id>                     → ละทิ้งร่าง
  *
+ * 🗂 สิทธิ์: หน้าตาเว็บ "แก้ได้" หรือ ติ๊กหัวข้อแท็บ "หน้าแรก" (lib/website-api-guard guardDesignTab)
+ *    ติ๊กหัวข้อแต่เผยแพร่เองไม่ได้ = บันทึกร่างได้อย่างเดียว (หน้าจอส่งให้หัวหน้าตรวจ) · ละทิ้งร่าง = แก้ได้ทั้งหมดเท่านั้น (ร่างมีงานคนอื่นด้วย)
+ *
  * shops.home_layout = ที่เผยแพร่ · shops.home_layout_draft = ร่าง (null = ไม่มี)
  * ⚠️ บล็อกชนิดที่ระบบไม่รู้จัก (ของร้านอื่น เช่น product-grid ของ Pixiedustie)
  *    จะถูกกรองออกตอน normalize จึงต้องแก้เฉพาะร้านที่ใช้ชนิดบล็อกชุดนี้เท่านั้น
@@ -14,7 +17,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { issuePreviewKey } from "@/lib/storefront-preview-key";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardWebsite } from "@/lib/website-api-guard";
+import { guardDesignTab, guardWebsite, PUBLISH_NEEDS_REVIEW } from "@/lib/website-api-guard";
 import { writeAudit, writeAuditFor } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeBlocks, defaultLayout, blockTypesFor } from "@/lib/website-blocks";
@@ -74,7 +77,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PUT(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardWebsite(request, "edit");
+  const { denied, access } = await guardDesignTab(request, "home");
   if (denied) return denied;
   const {
     data: { user },
@@ -90,6 +93,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
 
   const blocks = normalizeBlocks(body.blocks);
   const publish = body.mode === "publish";
+  if (publish && !access.publish) return NextResponse.json({ error: PUBLISH_NEEDS_REVIEW }, { status: 403 });
   const sb = supabaseAdmin();
 
   if (!publish) {
@@ -97,6 +101,9 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     if (error) return NextResponse.json({ error: "บันทึกร่างไม่สำเร็จ" }, { status: 500 });
     // รูป/ของตกแต่งบนผืนผ้าใบ → บันทึกว่าถูกใช้ (คลังไฟล์กันลบของที่ยังใช้อยู่)
     await syncCanvasAssetUsages(sb, { module: "website_home", recordId: body.shopId, recordLabel: "หน้าแรกเว็บ (ร่าง)", field: "draft", blocks });
+    // 👷 พนักงานที่ติ๊กหัวข้อแท็บ: เก็บประวัติว่าใครแก้ร่าง (หัวหน้าเห็นก่อนเผยแพร่)
+    if (!access.full)
+      await writeAudit(sb, { action: "update", entityType: "shop_home_layout", entityId: body.shopId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { op: "draft", blocks: blocks.length, by: "topic" } });
     return NextResponse.json({ ok: true, mode: "draft", blocks });
   }
 

@@ -10,7 +10,7 @@
 import { NextResponse } from "next/server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { DESIGN_TOPIC_PERMS, designAccess, websiteApiGroups, websiteGroupDef, websitePerm, websiteShopPerm, type DesignAccess } from "@/lib/website-access";
+import { DESIGN_TOPIC_PERMS, designAccess, websiteApiGroups, websiteGroupDef, websitePerm, websiteShopPerm, type DesignAccess, type DesignTabTopic } from "@/lib/website-access";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const SHOP_TTL = 5 * 60_000;
@@ -77,20 +77,41 @@ export async function websiteCanShop(request: Request, slug: string): Promise<bo
   return apiCan(request, websiteShopPerm(slug));
 }
 
-const NO_DESIGN: DesignAccess = { full: false, topics: [], publish: false, advanced: false };
+const NO_DESIGN: DesignAccess = { full: false, topics: [], tabs: [], publish: false, advanced: false };
+
+/** สิทธิ์หน้าตาเว็บของคำขอ: แก้ได้ทั้งหมด → full · ดูได้ → คีย์หัวข้อ/แท็บ · ดูไม่ได้ = viewDenied */
+async function designAccessOf(request: Request): Promise<{ fullDenied: NextResponse | null; viewDenied: NextResponse | null; access: DesignAccess }> {
+  const fullDenied = await guardWebsite(request, "edit");
+  if (!fullDenied) return { fullDenied: null, viewDenied: null, access: designAccess(() => true) };
+  const viewDenied = await guardWebsite(request, "view");
+  if (viewDenied) return { fullDenied, viewDenied, access: NO_DESIGN };
+  const keys = [websitePerm("design", "view"), ...DESIGN_TOPIC_PERMS];
+  const oks = await Promise.all(keys.map((k) => apiCan(request, k)));
+  const got = new Set(keys.filter((_, i) => oks[i]));
+  return { fullDenied, viewDenied: null, access: designAccess((k) => got.has(k)) };
+}
 
 /**
  * 👷 ด่านแก้หน้าดีไซน์: แก้ได้ทุกหัวข้อ (website.design.edit — แบบเดิม) หรือ บางหัวข้อ (ดูได้ + website.design.topic.*)
  *   denied = แก้ไม่ได้เลย / ไม่มีสิทธิ์ร้าน · access.full = แบบเดิม · บางหัวข้อ → route ต้องคัดเฉพาะค่าของหัวข้อนั้นเอง (applyDesignPages)
  */
 export async function guardDesignEdit(request: Request): Promise<{ denied: NextResponse | null; access: DesignAccess }> {
-  const fullDenied = await guardWebsite(request, "edit");
-  if (!fullDenied) return { denied: null, access: designAccess(() => true) };
-  const viewDenied = await guardWebsite(request, "view");
-  if (viewDenied) return { denied: viewDenied, access: NO_DESIGN };
-  const keys = [websitePerm("design", "view"), ...DESIGN_TOPIC_PERMS];
-  const oks = await Promise.all(keys.map((k) => apiCan(request, k)));
-  const got = new Set(keys.filter((_, i) => oks[i]));
-  const access = designAccess((k) => got.has(k));
+  const { fullDenied, viewDenied, access } = await designAccessOf(request);
+  if (!fullDenied) return { denied: null, access };
+  if (viewDenied) return { denied: viewDenied, access };
   return access.topics.length ? { denied: null, access } : { denied: fullDenied, access };
 }
+
+/**
+ * 🗂 ด่านแท็บอื่นในกลุ่มหน้าตาเว็บ (หน้าแรก / หน้าเว็บ / รูปบนเว็บ): แก้ได้ทั้งหมด หรือ ติ๊กแท็บนั้นไว้
+ *   access.publish = เผยแพร่เองได้ (ไม่ได้ = route ให้บันทึกได้แค่ร่าง) · access.full = ลบ/ละทิ้งร่าง/สลับลำดับได้
+ */
+export async function guardDesignTab(request: Request, tab: DesignTabTopic): Promise<{ denied: NextResponse | null; access: DesignAccess }> {
+  const { fullDenied, viewDenied, access } = await designAccessOf(request);
+  if (!fullDenied) return { denied: null, access };
+  if (viewDenied) return { denied: viewDenied, access };
+  return access.tabs.includes(tab) ? { denied: null, access } : { denied: fullDenied, access };
+}
+
+/** ข้อความตอนคนที่ยังเผยแพร่เองไม่ได้กดเผยแพร่ (หน้าจอเปลี่ยนเป็นปุ่มส่งหัวหน้าอยู่แล้ว — กันยิงตรง) */
+export const PUBLISH_NEEDS_REVIEW = "ยังเผยแพร่เองไม่ได้ — บันทึกร่างไว้แล้วกด “ส่งให้หัวหน้าตรวจ”";

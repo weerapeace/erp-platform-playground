@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { DESIGN_ADVANCED_PERM, DESIGN_PUBLISH_PERM, DESIGN_TOPIC_PERMS, DESIGN_TOPICS, designTopicPerm, WEBSITE_ACCESS_PERM, WEBSITE_GROUP_PERMS, websiteShopPerm } from "@/lib/website-access";
+import { DESIGN_ADVANCED_PERM, DESIGN_PUBLISH_PERM, DESIGN_TAB_TOPIC_DEFS, DESIGN_TAB_TOPICS, DESIGN_TOPIC_PERMS, DESIGN_TOPICS, designTopicPerm, WEBSITE_ACCESS_PERM, WEBSITE_GROUP_PERMS, websiteShopPerm } from "@/lib/website-access";
 import { DESIGN_PAGES } from "@/lib/website-design-nav";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +72,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if ([...roleChanges, ...userChanges].some((c) => DESIGN_TOPIC_PERMS.includes(c.permission_key ?? ""))) {
     const designKeys = [
       ...DESIGN_TOPICS.map((t) => ({ key: designTopicPerm(t), label: `เว็บไซต์ · ดีไซน์แก้ได้: ${DESIGN_PAGES[t].label}`, category: "เว็บไซต์", is_dangerous: false, sort_order: 2215 })),
+      // 🗂 แท็บอื่นในกลุ่มหน้าตาเว็บ (หน้าแรก/หน้าเว็บ/รูปบนเว็บ)
+      ...DESIGN_TAB_TOPICS.map((t) => ({ key: designTopicPerm(t), label: `เว็บไซต์ · แก้ได้: แท็บ${DESIGN_TAB_TOPIC_DEFS[t].label}`, category: "เว็บไซต์", is_dangerous: false, sort_order: 2215 })),
       { key: DESIGN_PUBLISH_PERM, label: "เว็บไซต์ · ดีไซน์: เผยแพร่เองได้ (คนที่แก้บางหัวข้อ)", category: "เว็บไซต์", is_dangerous: false, sort_order: 2216 },
       { key: DESIGN_ADVANCED_PERM, label: "เว็บไซต์ · ดีไซน์: โชว์การตั้งค่าละเอียด (คนที่แก้บางหัวข้อ)", category: "เว็บไซต์", is_dangerous: false, sort_order: 2217 },
     ];

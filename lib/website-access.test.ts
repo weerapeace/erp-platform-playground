@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DESIGN_ADVANCED_PERM, DESIGN_PUBLISH_PERM, DESIGN_TOPICS, designAccess, designTopicKeys, designTopicPerm } from "./website-access";
+import { DESIGN_ADVANCED_PERM, DESIGN_PUBLISH_PERM, DESIGN_TAB_TOPIC_DEFS, DESIGN_TAB_TOPICS, DESIGN_TOPIC_PERMS, DESIGN_TOPICS, designAccess, designTabTopicOf, designTopicKeys, designTopicPerm } from "./website-access";
 import { DESIGN_PAGE_KEYS } from "./website-design-nav";
 import { nextWebsiteLevel, websiteApiGroups, websiteGroupOfTab, websiteLevel, websiteLevelKeys, websitePerm, WEBSITE_GROUP_PERMS, WEBSITE_GROUPS } from "./website-access";
 
@@ -7,7 +7,7 @@ describe("website-access", () => {
   it("แท็บทุกตัวอยู่กลุ่มเดียว", () => {
     const tabs = WEBSITE_GROUPS.flatMap((g) => g.tabs);
     expect(new Set(tabs).size).toBe(tabs.length);
-    expect(tabs).toHaveLength(20);
+    expect(tabs).toHaveLength(21);
     expect(websiteGroupOfTab("design")).toBe("design");
     expect(websiteGroupOfTab("orders")).toBe("orders");
     expect(websiteGroupOfTab("nope")).toBeNull();
@@ -55,12 +55,12 @@ describe("👷 หน้าดีไซน์บางหัวข้อ", () =>
   });
   it("ดูได้ + หัวข้อ = แก้บางหัวข้อ · ไม่มีดูได้ = ไม่นับหัวข้อ", () => {
     const a = of([websitePerm("design", "view"), designTopicPerm("menu"), designTopicPerm("listing")]);
-    expect(a).toEqual({ full: false, topics: ["menu", "listing"], publish: false, advanced: false });
+    expect(a).toEqual({ full: false, topics: ["menu", "listing"], tabs: [], publish: false, advanced: false });
     expect(of([designTopicPerm("menu"), DESIGN_PUBLISH_PERM]).topics).toEqual([]);
     expect(of([websitePerm("design", "view"), designTopicPerm("menu"), DESIGN_PUBLISH_PERM, DESIGN_ADVANCED_PERM])).toMatchObject({ publish: true, advanced: true });
   });
   it("ไม่มีหัวข้อ = เผยแพร่/ละเอียดไม่มีผล", () => {
-    expect(of([websitePerm("design", "view"), DESIGN_PUBLISH_PERM, DESIGN_ADVANCED_PERM])).toEqual({ full: false, topics: [], publish: false, advanced: false });
+    expect(of([websitePerm("design", "view"), DESIGN_PUBLISH_PERM, DESIGN_ADVANCED_PERM])).toEqual({ full: false, topics: [], tabs: [], publish: false, advanced: false });
   });
   it("designTopicKeys ตั้งครบทุกคีย์ · ว่าง = ปิดหมด", () => {
     const k = designTopicKeys(["menu"], true, false);
@@ -68,5 +68,33 @@ describe("👷 หน้าดีไซน์บางหัวข้อ", () =>
     expect(k[designTopicPerm("colors")]).toBe(false);
     expect([k[DESIGN_PUBLISH_PERM], k[DESIGN_ADVANCED_PERM]]).toEqual([true, false]);
     expect(Object.values(designTopicKeys([], true, true)).every((v) => v === false)).toBe(true);
+  });
+});
+
+describe("🗂 แท็บอื่นในกลุ่มหน้าตาเว็บ (หน้าแรก/หน้าเว็บ/รูปบนเว็บ)", () => {
+  const of = (keys: string[]) => designAccess((k) => keys.includes(k));
+  it("แท็บที่ติ๊กได้อยู่ในกลุ่มหน้าตาเว็บจริง · ไม่ชนชื่อหัวข้อดีไซน์", () => {
+    for (const t of DESIGN_TAB_TOPICS) {
+      expect(websiteGroupOfTab(DESIGN_TAB_TOPIC_DEFS[t].tab)).toBe("design");
+      expect(designTabTopicOf(DESIGN_TAB_TOPIC_DEFS[t].tab)).toBe(t);
+      expect((DESIGN_TOPICS as readonly string[]).includes(t)).toBe(false);
+      expect(DESIGN_TOPIC_PERMS).toContain(designTopicPerm(t));
+    }
+    expect(designTabTopicOf("design")).toBeNull();
+    expect(designTabTopicOf("i18n")).toBeNull();
+  });
+  it("แก้ได้ทั้งหมด = ทุกแท็บ · ดูได้ + ติ๊กแท็บ = แท็บนั้น · ไม่มีดูได้ = ไม่นับ", () => {
+    expect(of([websitePerm("design", "edit")]).tabs).toEqual([...DESIGN_TAB_TOPICS]);
+    expect(of([websitePerm("design", "view"), designTopicPerm("home")])).toEqual({ full: false, topics: [], tabs: ["home"], publish: false, advanced: false });
+    expect(of([designTopicPerm("home")]).tabs).toEqual([]);
+  });
+  it("ติ๊กแค่แท็บ + เผยแพร่เองได้ = เผยแพร่ได้ · ละเอียดนับเฉพาะหัวข้อดีไซน์", () => {
+    expect(of([websitePerm("design", "view"), designTopicPerm("webpages"), DESIGN_PUBLISH_PERM, DESIGN_ADVANCED_PERM])).toMatchObject({ tabs: ["webpages"], publish: true, advanced: false });
+  });
+  it("designTopicKeys ตั้งแท็บด้วย · ไม่ส่งแท็บ = ปิดแท็บ", () => {
+    const k = designTopicKeys([], true, true, ["home", "webimages"]);
+    expect([k[designTopicPerm("home")], k[designTopicPerm("webpages")], k[designTopicPerm("webimages")]]).toEqual([true, false, true]);
+    expect([k[DESIGN_PUBLISH_PERM], k[DESIGN_ADVANCED_PERM]]).toEqual([true, false]);
+    expect(designTopicKeys(["menu"], false, false)[designTopicPerm("home")]).toBe(false);
   });
 });

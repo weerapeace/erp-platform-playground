@@ -18,8 +18,11 @@ import { DESIGN_GROUPS, DESIGN_PAGES } from "@/lib/website-design-nav";
 import {
   designAccess,
   designTopicKeys,
+  DESIGN_TAB_TOPIC_DEFS,
+  DESIGN_TAB_TOPICS,
   DESIGN_TOPIC_PRESETS,
   isDesignTopic,
+  type DesignTabTopic,
   websitePerm,
   type DesignTopic,
   nextWebsiteLevel,
@@ -58,30 +61,37 @@ const LEVEL_CLS: Record<WebsiteLevel, string> = {
 const levelKeys = (g: WebsiteGroup, lv: WebsiteLevel) => (g === "design" && lv !== "view" ? { ...websiteLevelKeys(g, lv), ...designTopicKeys([], false, false) } : websiteLevelKeys(g, lv));
 const topicLabel = (t: DesignTopic) => DESIGN_PAGES[t].label;
 
-/** 👷 ตั้งหัวข้อดีไซน์ที่แก้ได้ของแถวหนึ่ง (ตำแหน่ง/คน) — ติ๊กแล้ว "หน้าตาเว็บ" เป็นดูได้ + บางหัวข้อ */
+/** 👷 ตั้งหัวข้อดีไซน์ + 🗂 แท็บอื่น (หน้าแรก/หน้าเว็บ/รูปบนเว็บ) ที่แก้ได้ของแถวหนึ่ง (ตำแหน่ง/คน) — ติ๊กแล้ว "หน้าตาเว็บ" เป็นดูได้ + บางหัวข้อ */
 function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onPatch: (keys: Record<string, boolean>) => void }) {
   const acc = designAccess(has);
   const topics = acc.full ? [] : acc.topics;
-  const set = (next: DesignTopic[], publish = acc.full ? false : acc.publish, advanced = acc.full ? false : acc.advanced) =>
-    onPatch(next.length ? { ...designTopicKeys(next, publish, advanced), [websitePerm("design", "view")]: true, [websitePerm("design", "edit")]: false } : designTopicKeys([], false, false));
+  const tabs = acc.full ? [] : acc.tabs;
+  const any = topics.length + tabs.length > 0;
+  const set = (next: DesignTopic[], nextTabs: DesignTabTopic[] = tabs, publish = acc.full ? false : acc.publish, advanced = acc.full ? false : acc.advanced) =>
+    onPatch(
+      next.length || nextTabs.length
+        ? { ...designTopicKeys(next, publish, advanced, nextTabs), [websitePerm("design", "view")]: true, [websitePerm("design", "edit")]: false }
+        : designTopicKeys([], false, false)
+    );
   const toggle = (t: DesignTopic) => set(topics.includes(t) ? topics.filter((x) => x !== t) : [...topics, t]);
+  const toggleTab = (t: DesignTabTopic) => set(topics, tabs.includes(t) ? tabs.filter((x) => x !== t) : [...tabs, t]);
   return (
     <div className="space-y-2" data-design-topics-editor>
       {acc.full && <p className="text-[11px] text-blue-700">ตอนนี้แก้ได้ทุกหัวข้อ (ช่อง “หน้าตาเว็บ” = แก้ได้) — ติ๊กหัวข้อด้านล่างเพื่อจำกัดให้แก้ได้เฉพาะบางหัวข้อ</p>}
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-[11px] text-slate-500">ชุดสำเร็จรูป:</span>
         {DESIGN_TOPIC_PRESETS.map((p) => (
-          <button key={p.label} type="button" onClick={() => set(p.topics)} className="rounded-full border border-slate-200 px-2.5 py-0.5 text-[11px] text-slate-600 hover:border-blue-400 hover:text-blue-700">
+          <button key={p.label} type="button" onClick={() => set(p.topics, p.tabs ?? [])} className="rounded-full border border-slate-200 px-2.5 py-0.5 text-[11px] text-slate-600 hover:border-blue-400 hover:text-blue-700">
             {p.label}
           </button>
         ))}
-        {topics.length > 0 && (
-          <button type="button" onClick={() => set([])} className="rounded-full px-2 py-0.5 text-[11px] text-slate-400 hover:text-red-600">
+        {any && (
+          <button type="button" onClick={() => set([], [])} className="rounded-full px-2 py-0.5 text-[11px] text-slate-400 hover:text-red-600">
             ล้าง
           </button>
         )}
       </div>
-      <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-6">
         {DESIGN_GROUPS.map((g) => {
           const pages = g.pages.filter(isDesignTopic);
           if (!pages.length) return null;
@@ -97,14 +107,24 @@ function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onP
             </div>
           );
         })}
+        {/* 🗂 แท็บอื่นในกลุ่มหน้าตาเว็บ — ติ๊กแล้วแท็บนั้นแก้ได้ (เผยแพร่ตามช่อง "เผยแพร่เองได้") */}
+        <div>
+          <p className="text-[11px] font-medium text-slate-400">แท็บอื่น (นอกหน้าดีไซน์)</p>
+          {DESIGN_TAB_TOPICS.map((t) => (
+            <label key={t} className="flex items-center gap-1.5 py-0.5 text-xs text-slate-700 cursor-pointer">
+              <input type="checkbox" checked={tabs.includes(t)} onChange={() => toggleTab(t)} className="h-3.5 w-3.5 accent-blue-600" />
+              {DESIGN_TAB_TOPIC_DEFS[t].label}
+            </label>
+          ))}
+        </div>
       </div>
-      <div className={`flex flex-wrap gap-x-5 gap-y-1 text-xs ${topics.length ? "text-slate-700" : "text-slate-400"}`}>
+      <div className={`flex flex-wrap gap-x-5 gap-y-1 text-xs ${any ? "text-slate-700" : "text-slate-400"}`}>
         <label className="flex items-center gap-1.5 cursor-pointer">
-          <input type="checkbox" disabled={!topics.length} checked={!acc.full && acc.publish} onChange={(e) => set(topics, e.target.checked, acc.advanced)} className="h-3.5 w-3.5 accent-blue-600" />
+          <input type="checkbox" disabled={!any} checked={!acc.full && acc.publish} onChange={(e) => set(topics, tabs, e.target.checked, acc.advanced)} className="h-3.5 w-3.5 accent-blue-600" />
           เผยแพร่เองได้ (ไม่ติ๊ก = บันทึกร่างแล้วส่งให้หัวหน้าเผยแพร่)
         </label>
         <label className="flex items-center gap-1.5 cursor-pointer">
-          <input type="checkbox" disabled={!topics.length} checked={!acc.full && acc.advanced} onChange={(e) => set(topics, acc.publish, e.target.checked)} className="h-3.5 w-3.5 accent-blue-600" />
+          <input type="checkbox" disabled={!topics.length} checked={!acc.full && acc.advanced} onChange={(e) => set(topics, tabs, acc.publish, e.target.checked)} className="h-3.5 w-3.5 accent-blue-600" />
           โชว์การตั้งค่าละเอียด (ไม่ติ๊ก = แบบง่าย)
         </label>
       </div>
@@ -116,9 +136,9 @@ function DesignTopicsEditor({ has, onPatch }: { has: (k: string) => boolean; onP
 function designSummary(has: (k: string) => boolean): { text: string; tone: string } {
   const acc = designAccess(has);
   if (acc.full) return { text: "แก้ได้ทุกหัวข้อ", tone: "text-blue-700" };
-  if (!acc.topics.length) return { text: "ไม่ได้แก้หน้าดีไซน์", tone: "text-slate-400" };
+  if (!acc.topics.length && !acc.tabs.length) return { text: "ไม่ได้แก้หน้าดีไซน์", tone: "text-slate-400" };
   return {
-    text: `แก้ได้: ${acc.topics.map(topicLabel).join(", ")} · ${acc.publish ? "เผยแพร่เองได้" : "ส่งให้หัวหน้าเผยแพร่"}${acc.advanced ? "" : " · แบบง่าย"}`,
+    text: `แก้ได้: ${[...acc.topics.map(topicLabel), ...acc.tabs.map((t) => `แท็บ${DESIGN_TAB_TOPIC_DEFS[t].label}`)].join(", ")} · ${acc.publish ? "เผยแพร่เองได้" : "ส่งให้หัวหน้าเผยแพร่"}${acc.advanced ? "" : " · แบบง่าย"}`,
     tone: "text-amber-800",
   };
 }
@@ -252,7 +272,7 @@ export function WebsiteAccessSettings() {
   // ── ช่องในตาราง ──
   const levelCell = (has: (k: string) => boolean, g: WebsiteGroup, onSet: ((lv: WebsiteLevel) => void) | null) => {
     const lv = websiteLevel(has, g);
-    const nTopics = g === "design" && lv === "view" ? designAccess(has).topics.length : 0;
+    const nTopics = g === "design" && lv === "view" ? (({ topics, tabs }) => topics.length + tabs.length)(designAccess(has)) : 0;
     return (
       <td key={g} className="px-1 py-1">
         <button

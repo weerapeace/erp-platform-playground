@@ -138,17 +138,33 @@ export function websiteApiGroups(pathname: string): WebsiteGroup[] | null {
  */
 export const DESIGN_TOPICS = ["colors", "fonts", "shape", "motion", "mobile", "logo", "header", "menu", "footer", "card", "listing", "product", "related", "cart", "checkout", "pages", "campaign"] as const;
 export type DesignTopic = (typeof DESIGN_TOPICS)[number];
-export const designTopicPerm = (t: DesignTopic) => `website.design.topic.${t}`;
+/**
+ * 🗂 แท็บอื่นในกลุ่ม "หน้าตาเว็บ" ที่ติ๊กให้พนักงานแก้ได้ (นอกหน้าดีไซน์) — คีย์ชุดเดียวกัน website.design.topic.<x>
+ *   home = แท็บหน้าแรก · webpages = แท็บหน้าเว็บ (สร้างหน้า/แก้ร่าง · ลบ/สลับลำดับ = แก้ได้ทั้งหมดเท่านั้น) · webimages = แท็บรูปบนเว็บ
+ *   เผยแพร่เอง/ส่งหัวหน้า = website.design.publish ตัวเดียวกับหน้าดีไซน์ · แปลภาษายังไม่รวม (บันทึกลงหลายกลุ่มสิทธิ์)
+ */
+export const DESIGN_TAB_TOPICS = ["home", "webpages", "webimages"] as const;
+export type DesignTabTopic = (typeof DESIGN_TAB_TOPICS)[number];
+export const DESIGN_TAB_TOPIC_DEFS: Record<DesignTabTopic, { label: string; tab: string }> = {
+  home: { label: "หน้าแรก", tab: "layout" },
+  webpages: { label: "หน้าเว็บ", tab: "pages" },
+  webimages: { label: "รูปบนเว็บ", tab: "webimages" },
+};
+/** แท็บในหน้าร้าน → หัวข้อแท็บ (ไม่ใช่แท็บที่ติ๊กได้ = null) */
+export const designTabTopicOf = (tab: string): DesignTabTopic | null => DESIGN_TAB_TOPICS.find((t) => DESIGN_TAB_TOPIC_DEFS[t].tab === tab) ?? null;
+export const designTopicPerm = (t: DesignTopic | DesignTabTopic) => `website.design.topic.${t}`;
 export const DESIGN_PUBLISH_PERM = "website.design.publish";
 export const DESIGN_ADVANCED_PERM = "website.design.advanced";
-export const DESIGN_TOPIC_PERMS: string[] = [...DESIGN_TOPICS.map(designTopicPerm), DESIGN_PUBLISH_PERM, DESIGN_ADVANCED_PERM];
+export const DESIGN_TOPIC_PERMS: string[] = [...DESIGN_TOPICS.map(designTopicPerm), ...DESIGN_TAB_TOPICS.map(designTopicPerm), DESIGN_PUBLISH_PERM, DESIGN_ADVANCED_PERM];
 export const isDesignTopic = (k: unknown): k is DesignTopic => typeof k === "string" && (DESIGN_TOPICS as readonly string[]).includes(k);
+export const isDesignTabTopic = (k: unknown): k is DesignTabTopic => typeof k === "string" && (DESIGN_TAB_TOPICS as readonly string[]).includes(k);
 
-/** ชุดสำเร็จรูปในหน้าตั้งสิทธิ์ */
-export const DESIGN_TOPIC_PRESETS: { label: string; topics: DesignTopic[] }[] = [
+/** ชุดสำเร็จรูปในหน้าตั้งสิทธิ์ (กด = แทนหัวข้อ + แท็บทั้งหมด) */
+export const DESIGN_TOPIC_PRESETS: { label: string; topics: DesignTopic[]; tabs?: DesignTabTopic[] }[] = [
   { label: "ดูแลเมนู/หัวเว็บ", topics: ["logo", "header", "menu", "footer"] },
   { label: "ดูแลหน้าสินค้า", topics: ["card", "listing", "product", "related"] },
   { label: "แคมเปญ/ป๊อปอัป", topics: ["campaign", "pages"] },
+  { label: "ดูแลหน้าแรก/หน้าเว็บ", topics: [], tabs: ["home", "webpages", "webimages"] },
 ];
 
 export interface DesignAccess {
@@ -156,6 +172,8 @@ export interface DesignAccess {
   full: boolean;
   /** หัวข้อที่แก้ได้ (full = ทุกหัวข้อ · ว่าง = แก้ไม่ได้) */
   topics: DesignTopic[];
+  /** 🗂 แท็บอื่นที่แก้ได้ (หน้าแรก/หน้าเว็บ/รูปบนเว็บ · full = ทุกแท็บ) */
+  tabs: DesignTabTopic[];
   /** เผยแพร่เองได้ (ไม่ได้ = บันทึกร่างแล้วส่งให้หัวหน้า) */
   publish: boolean;
   /** โชว์การตั้งค่าละเอียด (ไม่ได้ = แบบง่าย) */
@@ -164,17 +182,20 @@ export interface DesignAccess {
 
 /** สิทธิ์หน้าดีไซน์ของคน (has = เช็กคีย์) — บางหัวข้อต้องมี "ดูได้" ด้วย */
 export function designAccess(has: (key: string) => boolean): DesignAccess {
-  if (has(websitePerm("design", "edit"))) return { full: true, topics: [...DESIGN_TOPICS], publish: true, advanced: true };
-  const topics = has(websitePerm("design", "view")) ? DESIGN_TOPICS.filter((t) => has(designTopicPerm(t))) : [];
-  return { full: false, topics, publish: topics.length > 0 && has(DESIGN_PUBLISH_PERM), advanced: topics.length > 0 && has(DESIGN_ADVANCED_PERM) };
+  if (has(websitePerm("design", "edit"))) return { full: true, topics: [...DESIGN_TOPICS], tabs: [...DESIGN_TAB_TOPICS], publish: true, advanced: true };
+  const view = has(websitePerm("design", "view"));
+  const topics = view ? DESIGN_TOPICS.filter((t) => has(designTopicPerm(t))) : [];
+  const tabs = view ? DESIGN_TAB_TOPICS.filter((t) => has(designTopicPerm(t))) : [];
+  return { full: false, topics, tabs, publish: topics.length + tabs.length > 0 && has(DESIGN_PUBLISH_PERM), advanced: topics.length > 0 && has(DESIGN_ADVANCED_PERM) };
 }
 
-/** ตั้งบางหัวข้อ → คีย์ที่ต้องเปิด/ปิดทั้งชุด (ไม่มีหัวข้อ = ปิดเผยแพร่/ละเอียดด้วย) */
-export function designTopicKeys(topics: readonly DesignTopic[], publish: boolean, advanced: boolean): Record<string, boolean> {
-  const on = topics.length > 0;
+/** ตั้งบางหัวข้อ → คีย์ที่ต้องเปิด/ปิดทั้งชุด (ไม่มีหัวข้อ/แท็บ = ปิดเผยแพร่/ละเอียดด้วย) */
+export function designTopicKeys(topics: readonly DesignTopic[], publish: boolean, advanced: boolean, tabs: readonly DesignTabTopic[] = []): Record<string, boolean> {
+  const on = topics.length + tabs.length > 0;
   const out: Record<string, boolean> = Object.fromEntries(DESIGN_TOPICS.map((t) => [designTopicPerm(t), topics.includes(t)]));
+  for (const t of DESIGN_TAB_TOPICS) out[designTopicPerm(t)] = tabs.includes(t);
   out[DESIGN_PUBLISH_PERM] = on && publish;
-  out[DESIGN_ADVANCED_PERM] = on && advanced;
+  out[DESIGN_ADVANCED_PERM] = topics.length > 0 && advanced;
   return out;
 }
 

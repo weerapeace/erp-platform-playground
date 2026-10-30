@@ -44,7 +44,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { UnsavedGuardProvider, useUnsavedGuardHost } from "@/components/save-bar";
 import { AccessDenied, useAuth, type Permission } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { designAccess, WEBSITE_LEVEL_LABEL, websiteGroupDef, websiteGroupOfTab, websiteLevel, websiteShopPerm, WEBSITE_GROUPS } from "@/lib/website-access";
+import { designAccess, designTabTopicOf, WEBSITE_LEVEL_LABEL, websiteGroupDef, websiteGroupOfTab, websiteLevel, websiteShopPerm, WEBSITE_GROUPS } from "@/lib/website-access";
 
 /** ↔ ความกว้างหน้าจัดการเว็บ (จำรายคน · useViewPref) — กว้าง = ค่าเริ่มต้น จัดดีไซน์/พรีวิวสะดวกขึ้น */
 const PAGE_WIDTHS = ["normal", "wide", "full"] as const;
@@ -147,8 +147,14 @@ export function ShopManager({ shopSlug }: { shopSlug: string }) {
 
   const tabGroup = websiteGroupOfTab(tab);
   // 👷 หน้าตาเว็บ "ดูได้" + ได้แก้บางหัวข้อ → แท็บดีไซน์แก้ได้ (หน้าดีไซน์จัดการเอง) ไม่ขึ้นแถบดูอย่างเดียว
-  const designTopics = designAccess(has).topics.length > 0;
-  const viewOnlyTab = (k: string) => levelOfTab(k) === "view" && !(k === "design" && designTopics);
+  //    🗂 ติ๊กหัวข้อแท็บ (หน้าแรก/หน้าเว็บ/รูปบนเว็บ) → แท็บนั้นแก้ได้ (เผยแพร่ไม่ได้ = หน้าจอเปลี่ยนเป็นส่งหัวหน้าเอง)
+  const myDesign = designAccess(has);
+  const designTopics = myDesign.topics.length > 0;
+  const tabTopicOn = (k: string) => {
+    const t = designTabTopicOf(k);
+    return t != null && myDesign.tabs.includes(t);
+  };
+  const viewOnlyTab = (k: string) => levelOfTab(k) === "view" && !(k === "design" && designTopics) && !tabTopicOn(k);
 
   // ไม่มีเว็บร้านชื่อนี้ — บอกให้ชัด ดีกว่าพาไปร้านอื่นแบบเงียบ ๆ
   if (notFound && !loading)
