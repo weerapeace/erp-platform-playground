@@ -2579,6 +2579,22 @@ export const SECTION_SCHEMAS: Record<string, SectionSchema> = {
     summary: () => "เลือกสาย/หัว/หู → พรีวิว + ราคา",
   },
 
+  // 👜 ตัวประกอบสินค้า (2026-10-30) — ข้อมูลจาก /admin/product-configurator · เว็บร้าน: src/components/configurator/*
+  configurator: {
+    type: "configurator",
+    meta: { label: "ตัวประกอบสินค้า (ออกแบบเอง)", icon: "👜", hint: "ลูกค้าเลือกวัสดุ สี อะไหล่ ทีละขั้น เห็นรูปที่ประกอบ + ราคา", group: "สินค้า",
+      manage: { label: "จัดการทรงและรูป →", href: "/admin/product-configurator", hint: "สตูดิโอ: ช่องตัวเลือก ราคา ชั้นรูป แม่แบบถ่ายรูป · ต้องเปิดทรงก่อนลูกค้าจะเห็น (พรีวิวเห็นทรงที่ปิดอยู่ได้)" } },
+    fields: [
+      ...headFields({ eyebrow: "Made for you", title: "ออกแบบในแบบของคุณ", subtitle: true }),
+      text("model", "รหัสทรงที่จะโชว์", { group: "layout", default: "", max: 40, placeholder: "เช่น TOTE · ว่าง = ทรงแรกที่เปิดอยู่", hint: "ดูรหัสทรงได้ที่หน้าตัวประกอบสินค้า (แท็บข้อมูลทรง)" }),
+      f("showModelPicker", "ให้ลูกค้าสลับทรงได้", "toggle", { group: "layout", default: true, hint: "เปิดอยู่หลายทรง = โชว์ปุ่มเลือกทรงด้านบน" }),
+      f("showPrice", "โชว์ราคา", "toggle", { group: "layout", default: true, hint: "ปิด = โชว์เฉพาะรูป (เหมาะตอนยังไม่ตั้งราคา)" }),
+      f("imageSide", "รูปอยู่ด้าน", "select", { group: "layout", default: "left", display: "seg", options: [{ v: "left", l: "ซ้าย" }, { v: "right", l: "ขวา" }] }),
+      text("ctaLabel", "ข้อความปุ่มบันทึกแบบ", { group: "layout", default: "บันทึกแบบนี้", max: 40 }),
+    ],
+    summary: (b) => (s(b.model) ? `ทรง ${s(b.model)} → รูปซ้อนชั้น + ราคา` : "ทรงแรกที่เปิดอยู่ → รูปซ้อนชั้น + ราคา"),
+  },
+
   // 🛍 ลุคบุ๊กกดซื้อได้ (2026-10-15) — เว็บร้าน: src/components/home/LookbookBody.tsx (วาดสดในพรีวิวด้วยข้อมูลสินค้า)
   lookbook: {
     type: "lookbook",

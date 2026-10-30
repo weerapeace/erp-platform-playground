@@ -14,7 +14,8 @@
  * ชื่อไฟล์รูป = {ทรง}_{มุม}_{ชั้น}_{ตัวเลือก...}.png เช่น TOTE_FRONT_BODY_PEBBLE_NOIR.png → ระบบจับคู่ให้เอง
  * ทุกรูปต้องกว้าง×สูงเท่าผืนผ้าใบของทรง (พื้นใส) จึงวางซ้อนตรงกันโดยไม่ต้องตั้งจุดยึด
  *
- * ใช้ที่: API app/api/configurator/* (ตรวจค่า) · สตูดิโอ components/product-configurator/* · เว็บร้าน (ก้อนถัดไป · ต้องมิเรอร์)
+ * ใช้ที่: API app/api/configurator/* + /api/public/storefront/configurator* (ตรวจค่า/คิดราคาซ้ำ) · สตูดิโอ components/product-configurator/*
+ * ⚠️ มิเรอร์ทั้งไฟล์: เว็บร้าน (repo storefront) src/lib/product-configurator.ts — แก้กฎต้องแก้ 2 ที่ให้เหมือนกันทุกบรรทัด
  * เอกสาร: docs/product-configurator.md
  */
 

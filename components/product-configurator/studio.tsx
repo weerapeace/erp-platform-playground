@@ -14,6 +14,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { ERPFormField, ERPInput } from "@/components/form";
 import { Icon } from "@/components/icon";
+import { withPreviewKey } from "@/lib/storefront-preview-link";
 import {
   activeSlots, countDesigns, expectedImages, normalizeSelection, normCode, optionsOf, priceOf, VIEW_LABEL,
   type CfgModel, type ConfigData, type ConfigView, type Selection,
@@ -218,6 +219,13 @@ export function ConfiguratorStudio({ shopId: initialShop, modelId: initialModel,
                 <button key={v} type="button" onClick={() => setView(v)} className={`rounded-full px-3 py-1 text-sm ${view === v ? "bg-slate-800 text-white" : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{VIEW_LABEL[v].th}</button>
               ))}
               <span className={`ml-auto rounded-full px-2 py-0.5 text-xs ${data.model.is_active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{data.model.is_active ? "เปิดให้ลูกค้าใช้" : "ปิดอยู่ (ลูกค้ายังไม่เห็น)"}</span>
+              {(() => {
+                const shop = shops.find((s) => s.id === shopId);
+                if (!shop?.site_url) return null;
+                // พรีวิวพร้อมรหัสพรีวิว = เห็นทรงนี้บนเว็บร้านแม้ยังปิดอยู่ / เว็บยังปิด
+                const href = withPreviewKey(`${shop.site_url.replace(/\/$/, "")}/configurator?model=${encodeURIComponent(data.model.code)}&preview=1`, shop.preview_key);
+                return <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-xs text-slate-600 hover:bg-slate-50"><Icon name="view" /> ดูบนเว็บร้าน</a>;
+              })()}
             </div>
             <ConfigPreview data={data} view={view} selection={selection} focusLayerId={focusLayer} />
             <div className="grid grid-cols-3 gap-2 text-center">

@@ -299,3 +299,13 @@ Section ที่วางชิ้นตำแหน่งอิสระ — �
   - คลิปใช้ `AutoLoopVideo` กลาง (เล่นเฉพาะตอนเห็นบนจอ · ลดการเคลื่อนไหว = ไม่เล่น)
 - ⚠️ ความสูง "เต็มจอ" พอดีจอเมื่อหัวเว็บลอยทับ (ดีไซน์ › หัวเว็บ → โปร่งใสตอนอยู่บนสุด ของประเภทหน้านั้น) · ไม่ลอย = หน้าเปิดสูงเกินจอเท่าความสูงหัวเว็บ
 - แผนต่อ (ยังไม่ทำ): "โซน" ต่อร้าน — เมนูแยกต่อส่วนของเว็บ + แถบสลับโซนบนสุด เปิดทีละร้านด้วยสวิตช์ข้อมูลร้าน
+
+## 👜 Section "ตัวประกอบสินค้า" (configurator) — 2026-10-30 · ทุกร้าน (เริ่ม IG)
+
+- ใช้ทำอะไร: ลูกค้าออกแบบสินค้าเองทีละขั้นตามช่องที่ร้านตั้ง (วัสดุ สี ซิป สาย ซับใน ปั๊มชื่อ …) เห็นรูปที่ประกอบจากรูปถ่ายพื้นใสหลายชั้น + ราคา + วันผลิต แล้วบันทึกเป็นรหัสแบบ
+- ห้ามใช้เมื่อ: สินค้าสำเร็จรูปที่แค่เลือกสี/ไซซ์ (ใช้หน้าสินค้าปกติ) · เข็มขัด (ยังใช้ Section "ออกแบบเข็มขัด" จนกว่าจะย้ายเข้าระบบนี้)
+- ข้อมูลทั้งหมดตั้งที่ `/admin/product-configurator` (docs/product-configurator.md) · ทรงที่ "ปิดอยู่" ลูกค้าไม่เห็น แต่พรีวิวที่มีรหัสพรีวิวเห็นได้
+- ERP `lib/website-schema.ts` "configurator": head fields · `model` (รหัสทรง · ว่าง = ทรงแรกที่เปิด) · `showModelPicker` · `showPrice` · `imageSide` left/right · `ctaLabel` · `meta.manage` → สตูดิโอ · `LIVE_RELOAD_TYPES` มี configurator (บันทึกร่างแล้วพรีวิวโหลดใหม่)
+- API สาธารณะ: `GET /api/public/storefront/configurator?shop=&model=&preview=1&pk=` → `{ models, data }` (lib/product-configurator-public · ส่งเฉพาะที่เปิดอยู่ ไม่มี shop_id/ค่าแม่แบบ) · `POST/GET /api/public/storefront/configurator-designs` (บันทึก/เปิดแบบ · คิดราคาซ้ำฝั่ง ERP · กันยิงรัว 30 ครั้ง/ชม./IP)
+- เว็บร้าน: `src/lib/product-configurator.ts` (**มิเรอร์ทั้งไฟล์จาก ERP** แก้ 2 ที่) · `src/lib/configurator.ts` (ดึง/บันทึก) · `src/components/configurator/{ConfiguratorView,ConfiguratorBody,ConfiguratorPreview}.tsx` (SERVER_TYPES) · หน้า `/configurator?model=&design=` (ไม่มีทรงเปิด = 404) · CSS `.cfg-*` ต่อจาก `.belt-*` · หน้า configurator อยู่ใน BUILTIN_OTHER ของ header-over ทั้ง 2 repo
+- ยังไม่มี: ใส่ตะกร้า/ออเดอร์ (ปุ่ม "ติดต่อสั่งทำ" แนบรหัสแบบไปหน้าติดต่อ — หน้าติดต่อยังไม่อ่านรหัส)

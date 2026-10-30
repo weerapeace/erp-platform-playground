@@ -70,6 +70,7 @@ export type BlockType =
   | "collections"
   | "fitcheck"
   | "beltbuilder"
+  | "configurator"
   | "drop"
   | "doc"
   | "order-track"
@@ -941,6 +942,19 @@ export interface BeltBuilderBlock extends BlockBase {
   subtitle: string;
   showPrice: boolean;
   showSizeGuide: boolean;
+  ctaLabel: string;
+}
+/** 👜 ตัวประกอบสินค้า — ลูกค้าเลือกทีละขั้น (วัสดุ สี อะไหล่ …) → รูปซ้อนชั้น + ราคา (lib/product-configurator · ทรงต้องเปิดใน /admin/product-configurator) */
+export interface ConfiguratorBlock extends BlockBase {
+  type: "configurator";
+  eyebrow: string;
+  title: string;
+  subtitle: string;
+  /** รหัสทรง (ว่าง = ทรงแรกที่เปิดอยู่) */
+  model: string;
+  showModelPicker: boolean;
+  showPrice: boolean;
+  imageSide: "left" | "right";
   ctaLabel: string;
 }
 /** 📐 เช็คขนาด — ลูกค้าเลือกตุ๊กตา/ของ (หรือพิมพ์ขนาดเอง) → รุ่นที่ใส่ได้ (lib/fit-check · ร้านต้องเปิดเช็คขนาด) */
