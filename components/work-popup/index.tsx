@@ -17,6 +17,7 @@ import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { useRefresh } from "@/lib/refresh-bus";
+import { isStandaloneAppPath, openInStandaloneApp } from "@/lib/app-go";
 import { TaskLinkList } from "@/components/record-tasks/task-links";
 import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } from "@/lib/email-report/popup";
 // หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง (รายการกลาง lib/chromeless-routes)
@@ -259,7 +260,13 @@ export function WorkPopupHost() {
     }
     void apiFetch("/api/popups/ack", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ report_id: p.report_id, action }) }).catch(() => {});
   };
-  const open = (p: WorkPopupPayload, path: string, action: "ack" | "later") => { finish(p, action); router.push(path); };
+  // อยู่ในแอปเดี่ยว (/app/<key>) → เปิดในแท็บเมนูของแอปนั้น · แอปนั้นไม่มีเมนูหน้านี้ → ERP เต็มในแท็บใหม่ (หน้าแอปเดิมยังอยู่)
+  const open = (p: WorkPopupPayload, path: string, action: "ack" | "later") => {
+    finish(p, action);
+    if (openInStandaloneApp(path)) return;
+    if (isStandaloneAppPath(pathname)) { window.open(path, "_blank", "noopener"); return; }
+    router.push(path);
+  };
   const tick = async (taskId: string, isDone: boolean) => {
     setDone((s) => { const n = new Set(s); if (isDone) n.add(taskId); else n.delete(taskId); return n; });
     try {

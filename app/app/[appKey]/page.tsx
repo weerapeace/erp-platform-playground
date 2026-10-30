@@ -27,6 +27,7 @@ import { useViewportLayout, useDeviceMode, DevicePreviewFrame, type DeviceLayout
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { applyAppOverrides, menuPlace, moreLabelOf } from "@/lib/app-menu-layout";
 import { FloatingDropdown } from "@/components/floating-dropdown";
+import { useAppGo } from "@/lib/app-go";
 
 // ⚙️ ตั้งค่าแอป (แอดมิน) — ใครเห็นเมนูไหน + หน้าตั้งค่าเฉพาะแอป · โหลดเมื่อกดครั้งแรก
 const AppSettingsPanel = dynamic(() => import("@/components/app-settings-panel").then((m) => m.AppSettingsPanel), { ssr: false });
@@ -74,6 +75,7 @@ export default function StandaloneApp() {
   const closeMoreMenu = useCallback(() => setMoreMenuOpen(false), []);
   const initedRef = useRef(false);   // ตั้งหน้าเริ่มต้น (default landing) แค่ครั้งแรก
   const [deepSrc, setDeepSrc] = useState<string | null>(null);   // หน้าลึกที่จำไว้ (กัน refresh เด้งหน้าแรก)
+  const [goNonce, setGoNonce] = useState(0);   // เปิดลิงก์จากของลอย → โหลดกรอบใหม่เสมอ (แม้ลิงก์เดิมซ้ำ)
   const iframeRef = useRef<HTMLIFrameElement>(null);
   // เปิดมาจากปุ่ม "ติดตั้งบนเครื่องนี้" (?install=1) → การ์ดติดตั้งเด้ง · อ่านตอนเปิดครั้งแรก (?go จะล้าง URL ทีหลัง)
   const [installAsk] = useState(() => { try { return new URLSearchParams(window.location.search).get("install") === "1"; } catch { return false; } });
@@ -153,6 +155,18 @@ export default function StandaloneApp() {
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [openMenu]);
+
+  // ของลอย (ป๊อปเตือนงาน ฯลฯ) ขอเปิดหน้า → เปิดในแท็บเมนูของแอปนี้ (ไม่หลุดไป ERP เต็ม) · ไม่มีเมนูตรง = ไม่รับ
+  useAppGo((path) => {
+    const base = (h: string) => h.split("?")[0];
+    let idx = -1;
+    items.forEach((m, i) => { const b = base(m.href); if (b !== "/" && base(path).startsWith(b) && (idx < 0 || b.length > base(items[idx].href).length)) idx = i; });
+    if (idx < 0) return false;
+    setSettingsOn(false); setMoreOpen(false); setActive(idx); setDeepSrc(path); setGoNonce((n) => n + 1);
+    lastSavedRef.current = path;
+    try { sessionStorage.setItem(`appdeep:${appKey}`, path); } catch { /* noop */ }
+    return true;
+  });
 
   if (!ready) return <AppLoading />;
   if (!user) return (
@@ -363,7 +377,7 @@ export default function StandaloneApp() {
           </div>
         ) : cur ? (
           // หน้า custom → แสดงหน้าจริงแบบ embed (ไม่มี sidebar ของ shell) เต็มพื้นที่ที่เหลือ
-          <iframe ref={iframeRef} key={cur.href} src={embedSrc} title={cur.label} className="flex-1 w-full border-0" />
+          <iframe ref={iframeRef} key={`${cur.href}#${goNonce}`} src={embedSrc} title={cur.label} className="flex-1 w-full border-0" />
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-10 text-center gap-2">
             <div className="text-4xl mb-1">🗂️</div>
