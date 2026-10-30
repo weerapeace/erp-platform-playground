@@ -215,7 +215,8 @@ export function WorkPopupHost() {
   // เปิดกลับจากเมนูโปรไฟล์ → ถามใหม่ทันที (ป๊อปที่ยังไม่รับทราบวันนี้กลับมา)
   const prevEnabled = useRef(enabled);
   useEffect(() => {
-    if (enabled && !prevEnabled.current && uid && !skip) void check();
+    // ยังไม่เคยถาม (เปิดหน้าแรกด้วยค่าเก่า "ปิด") = ให้ตัวถามครั้งแรกด้านบนทำ ไม่ถามซ้ำ 2 รอบ
+    if (enabled && !prevEnabled.current && uid && !skip && lastCheck.current) void check();
     prevEnabled.current = enabled;
   }, [enabled, uid, skip, check]);
   // เปิดแท็บค้างไว้ทั้งวัน → กลับมาที่แท็บเกิน 30 นาที ถามใหม่ (เผื่อเพิ่งเข้าช่วงเวลาเด้ง)

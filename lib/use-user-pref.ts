@@ -52,26 +52,39 @@ export function useUserPref<T>(key: string, fallback: T, parse: (raw: unknown) =
       /* ignore */
     }
     setValueState(local !== null ? local : fallbackRef.current);
-    apiFetch(`/api/user-prefs?key=${encodeURIComponent(key)}`)
-      .then((r) => r.json())
-      .then((j) => {
-        if (cancel || touched.current) return;
-        const raw = (j?.value as { v?: unknown } | undefined)?.v;
-        if (raw === undefined) return;
-        const v = parseRef.current(raw);
-        if (v === null) return;
-        setValueState(v);
-        try {
-          localStorage.setItem(lsKey, JSON.stringify(raw));
-        } catch {
-          /* ignore */
-        }
-      })
-      .catch(() => {
-        /* ignore — ใช้ค่าในเครื่อง */
-      });
+    // เปิดหน้าแรก ๆ ระบบล็อกอินอาจยังไม่พร้อม (กำลังต่ออายุโทเคน) → ได้ 401 → ถามซ้ำ ไม่งั้นค่าในเครื่องที่เก่าค้างตลอด
+    // (เจอจริง 2026-10-30: ป๊อปเตือนงานไม่ถามเลย เพราะค่าในเครื่องยังเป็น "ปิด" ทั้งที่เปิดแล้วจากเครื่อง/แท็บอื่น)
+    let tries = 0;
+    let retry: ReturnType<typeof setTimeout> | null = null;
+    const fetchServer = () => {
+      apiFetch(`/api/user-prefs?key=${encodeURIComponent(key)}`)
+        .then(async (r) => {
+          if (cancel) return;
+          if (r.status === 401) {
+            if (tries < 5) { tries += 1; retry = setTimeout(fetchServer, 2000 * tries); }
+            return;
+          }
+          const j = await r.json();
+          if (cancel || touched.current) return;
+          const raw = (j?.value as { v?: unknown } | undefined)?.v;
+          if (raw === undefined) return;
+          const v = parseRef.current(raw);
+          if (v === null) return;
+          setValueState(v);
+          try {
+            localStorage.setItem(lsKey, JSON.stringify(raw));
+          } catch {
+            /* ignore */
+          }
+        })
+        .catch(() => {
+          /* ignore — ใช้ค่าในเครื่อง */
+        });
+    };
+    fetchServer();
     return () => {
       cancel = true;
+      if (retry) clearTimeout(retry);
     };
   }, [key, lsKey]);
 
