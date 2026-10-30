@@ -16,7 +16,7 @@
  */
 
 import { NextRequest } from "next/server";
-import { isSafeR2Key, r2GetObject, r2GetRange } from "@/lib/r2";
+import { isSafeR2Key, r2GetObject, r2GetRange, r2HeadSize } from "@/lib/r2";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { IMGSET_RE } from "@/lib/website-image-sets";
 import { imageSetKeyNow } from "@/lib/website-image-sets-db";
@@ -48,28 +48,27 @@ async function videoResponse(key: string, range: string | null): Promise<Respons
     end = Math.min(m[2] ? Number(m[2]) : Infinity, start + VIDEO_CHUNK - 1);
   } else if (m && m[2]) {
     // "bytes=-N" = N ไบต์ท้ายไฟล์ → ต้องรู้ขนาดก่อน
-    const head = await r2GetRange(key, 0, 0);
-    if (!head) return notFound(key);
-    if (head.status === "ok") await head.body.cancel().catch(() => {});
+    const total = await r2HeadSize(key);   // HEAD — ไม่อ่านเนื้อไฟล์ (เดิมอ่าน 1 ไบต์ + cancel ค้างบน Vercel)
+    if (total == null) return notFound(key);
     const n = Math.min(Number(m[2]), VIDEO_CHUNK);
-    start = Math.max(0, head.total - n);
-    end = head.total - 1;
+    start = Math.max(0, total - n);
+    end = total - 1;
+  }
+  const ext = key.split(".").pop()?.toLowerCase() ?? "";
+  const headersFor = (contentType: string) => ({
+    "Content-Type": contentType.startsWith("video/") ? contentType : VIDEO_TYPE[ext] ?? "video/mp4",
+    "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600", "CDN-Cache-Control": "no-store", Vary: "Range", "X-Content-Type-Options": "nosniff",
+  });
+  // ไม่ได้ขอช่วง → ส่งทั้งไฟล์แบบไหลต่อเนื่อง (stream) · ไม่อ่านช่วงแรกแล้ว cancel (ค้างไม่คืนค่าบน Vercel)
+  if (!asked) {
+    const full = await r2GetObject(key);
+    if (!full) return notFound(key);
+    return new Response(full.body, { status: 200, headers: { ...headersFor(full.httpMetadata?.contentType ?? ""), ...lengthHeader(full.size) } });
   }
   const r = await r2GetRange(key, start, end);
   if (!r) return notFound(key);
   if (r.status === "unsatisfiable") return new Response(null, { status: 416, headers: { "Content-Range": `bytes */${r.total}` } });
-  const ext = key.split(".").pop()?.toLowerCase() ?? "";
-  const ct = r.contentType.startsWith("video/") ? r.contentType : VIDEO_TYPE[ext] ?? "video/mp4";
-  const headers = { "Content-Type": ct, "Accept-Ranges": "bytes", "Cache-Control": "public, max-age=3600", "CDN-Cache-Control": "no-store", Vary: "Range", "X-Content-Type-Options": "nosniff" };
-  const whole = r.start === 0 && r.end >= r.total - 1;
-  // ไม่ได้ขอช่วง: ไฟล์เล็ก (ก้อนเดียวครบ) = 200 แบบเดิม · ไฟล์ใหญ่ = ส่งทั้งไฟล์แบบไหลต่อเนื่อง (stream)
-  if (!asked && whole) return new Response(r.body, { status: 200, headers: { ...headers, "Content-Length": String(r.total) } });
-  if (!asked) {
-    await r.body.cancel().catch(() => {});
-    const full = await r2GetObject(key);
-    if (!full) return notFound(key);
-    return new Response(full.body, { status: 200, headers: { ...headers, "Content-Length": String(r.total) } });
-  }
+  const headers = headersFor(r.contentType);
   return new Response(r.body, {
     status: 206,
     headers: { ...headers, "Content-Length": String(r.end - r.start + 1), "Content-Range": `bytes ${r.start}-${r.end}/${r.total}` },

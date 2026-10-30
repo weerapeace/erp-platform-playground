@@ -482,7 +482,7 @@ function UploadTab({ actor, typeFilter, kinds, onUploaded }: {
       className={`cursor-pointer rounded-xl border-2 border-dashed p-10 text-center ${dragOver ? "border-indigo-400 bg-indigo-50" : "border-slate-300 bg-slate-50"}`}
     >
       <div className="text-4xl mb-2">{busy ? "⏳" : "⬆️"}</div>
-      <p className="text-sm font-medium text-slate-700">{busy ? (pct ? `กำลังอัปโหลด ${pct.name}${pct.pct != null ? ` · ${pct.pct}%` : "…"}` : "กำลังอัปโหลด…") : "ลากไฟล์มาวาง หรือ คลิกเลือก"}</p>
+      <p className="text-sm font-medium text-slate-700">{busy ? (pct ? (pct.pct === 100 ? `ส่ง ${pct.name} ครบแล้ว · กำลังบันทึกเข้าคลัง…` : `กำลังอัปโหลด ${pct.name}${pct.pct != null ? ` · ${pct.pct}%` : "…"}`) : "กำลังอัปโหลด…") : "ลากไฟล์มาวาง หรือ คลิกเลือก"}</p>
       {pct?.pct != null && (
         <div className="mx-auto mt-2 h-1.5 w-56 overflow-hidden rounded-full bg-indigo-100">
           <div className="h-full bg-indigo-500 transition-all" style={{ width: `${pct.pct}%` }} />

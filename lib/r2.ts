@@ -309,12 +309,21 @@ export async function r2PresignGet(key: string, expiresSec = 900): Promise<strin
 
 /** ขนาดไฟล์ใน R2 (ไบต์) — null = ไม่พบ (ใช้ยืนยันว่าอัปโหลดตรงสำเร็จจริง) */
 export async function r2HeadSize(key: string): Promise<number | null> {
-  const r = await r2GetRange(key, 0, 0);
-  if (!r) return null;
-  if (r.status === "ok") {
-    try { await r.body.cancel(); } catch { /* noop */ }
+  // ถามขนาดด้วย HEAD (ไม่มีเนื้อไฟล์) — เดิมอ่าน 1 ไบต์แล้ว body.cancel() ซึ่งบน Vercel ค้างไม่คืนค่า
+  // → /api/assets/register ค้างจนหมดเวลา 300 วิ (อัปวิดีโอค้าง 100%) · /api/r2-image ขอท้ายไฟล์ค้าง
+  const s3 = s3Access();
+  if (s3) {
+    const res = await s3.client.fetch(s3.urlFor(key), { method: "HEAD" });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error(`R2(S3) head ${res.status}`);
+    const n = Number(res.headers.get("content-length") ?? NaN);
+    return Number.isFinite(n) ? n : null;
   }
-  return r.total;
+  // บน Cloudflare: binding ถามขนาดได้เอง
+  const bucket = (await getR2Binding()) as unknown as { head(k: string): Promise<{ size: number } | null> } | null;
+  if (!bucket) throw new Error("R2 binding ไม่พร้อม (R2_IMAGES)");
+  const h = await bucket.head(key);
+  return h ? h.size : null;
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */

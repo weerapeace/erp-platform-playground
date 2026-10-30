@@ -146,13 +146,18 @@ async function uploadCore(input: File, opts: UploadOpts): Promise<{ key: string;
   // 📚 ลงคลังกลาง (ERP ไม่เห็นเนื้อไฟล์ทางนี้ → แจ้งให้ลงทะเบียน) · ลงไม่สำเร็จ = ไฟล์ยังใช้ได้ แค่ไม่อยู่ในคลัง
   let assetId: string | null = null;
   let duplicate = false;
+  // ⏱ จำกัด 60 วิ — เคยค้างฝั่ง server 300 วิ (หน้าจอค้าง 100%) · หมดเวลา = ไฟล์ยังใช้ได้ แค่ยังไม่ขึ้นในคลัง
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 60_000);
   try {
-    const reg = await apiFetch("/api/assets/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: j.key, name: file.name, type: file.type }) });
+    const reg = await apiFetch("/api/assets/register", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: j.key, name: file.name, type: file.type }), signal: ctl.signal });
     const rj = await reg.json().catch(() => ({}));
     assetId = (rj.data?.id as string | undefined) ?? null;
     duplicate = rj.duplicate === true;
   } catch {
     /* ลงคลังไม่ได้ ไม่กระทบการอัปโหลด */
+  } finally {
+    clearTimeout(timer);
   }
   return { key: j.key as string, assetId, duplicate };
 }
