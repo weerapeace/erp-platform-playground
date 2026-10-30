@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { bestFit, compartmentsProblem, fitInto, fitLabel, fitNames, fitReport, fitTargetOf, fitText, parseCompartments, withFitLines, type Compartment, type FitTarget } from "../fit-check";
+import { areaPath, bestFit, compartmentsProblem, fitInto, fitLabel, fitNames, fitPose, fitReport, fitTargetOf, fitText, parseArea, parseCompartments, withFitLines, type Compartment, type FitTarget } from "../fit-check";
 
 /** 📐 ใส่ได้ไหม / กี่ชิ้น — ตอบลูกค้าตรง ๆ จึงต้องถูกเสมอ */
 const labubu: FitTarget = { id: "l", name: "Labubu", w: 9.5, h: 17, d: 7, soft: true };
@@ -87,5 +87,47 @@ describe("ตัวกรองหน้ารวมสินค้า + รู�
   it("รูปจากทะเบียน (ว่าง = ไม่ใส่)", () => {
     expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: 9, depth_cm: 7, image_key: " dolls/a.png " })?.imageKey).toBe("dolls/a.png");
     expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: 9, depth_cm: 7, image_key: "" })).not.toHaveProperty("imageKey");
+  });
+});
+
+describe("กรอบช่องบนรูป + ชื่ออังกฤษ (ป๊อปเทียบขนาด)", () => {
+  it("เก็บ name_en + area · ตัดกรอบที่ล้นรูป · ทรงไม่รู้จัก = มุมมน (ไม่เก็บ)", () => {
+    const [c] = parseCompartments([{ id: "a", name: "ช่องหน้า", name_en: " Front pocket ", w: 22, h: 11, d: 5, area: { img: "p/1.jpg", x: 10, y: 20, w: 95, h: 30, shape: "heart" } }])!;
+    expect(c).toEqual({ id: "a", name: "ช่องหน้า", name_en: "Front pocket", w: 22, h: 11, d: 5, area: { img: "p/1.jpg", x: 10, y: 20, w: 90, h: 30, shape: "heart" } });
+    expect(parseArea({ x: 1, y: 1, w: 5, h: 5, shape: "star" })).toEqual({ x: 1, y: 1, w: 5, h: 5 });
+    expect(parseArea({ x: 99.5, y: 1, w: 5, h: 5 })).toBeNull(); // เหลือในรูปไม่ถึง 1%
+    expect(parseArea({ x: "a", y: 1, w: 5, h: 5 })).toBeNull();
+    expect(parseCompartments([{ name: "x", w: 1, h: 1, d: 1, area: "bad" }])![0]).not.toHaveProperty("area");
+  });
+  it("เส้นกรอบทุกทรงเริ่มจากในกล่อง", () => {
+    for (const s of ["rect", "round", "ellipse", "heart", undefined] as const) expect(areaPath(s, 10, 20, 30, 40)).toMatch(/^M[\d.]+ [\d.]+/);
+    expect(areaPath("rect", 0, 0, 10, 5)).toBe("M0 0H10V5H0Z");
+  });
+});
+
+describe("บีบได้กี่ % ตั้งต่อตุ๊กตา", () => {
+  const pocket = { w: 22, h: 11, d: 5 }; // PIX43 ช่องหน้า
+  it("ไม่ตั้ง = 10% (Labubu หนา 7 ใส่ช่องลึก 5 ไม่ได้) · ตั้ง 30% = ใส่ได้แต่แน่น", () => {
+    expect(fitInto(labubu, pocket)).toBeNull();
+    expect(fitInto({ ...labubu, squeeze: 0.3 }, pocket)).toEqual({ status: "snug", count: 1 });
+  });
+  it("ของแข็งไม่สนค่าบีบ · ค่าเกิน 50% ใช้ค่ากลาง", () => {
+    expect(fitInto({ ...labubu, soft: false, squeeze: 0.3 }, pocket)).toBeNull();
+    expect(fitInto({ ...labubu, squeeze: 0.9 }, pocket)).toBeNull();
+  });
+  it("อ่านจากทะเบียน squeeze_pct (ว่าง = ไม่ใส่ · เฉพาะของนุ่ม · เพดาน 50)", () => {
+    expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: 9, depth_cm: 7, is_soft: true, squeeze_pct: 25 })?.squeeze).toBe(0.25);
+    expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: 9, depth_cm: 7, is_soft: true, squeeze_pct: 80 })?.squeeze).toBe(0.5);
+    expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: 9, depth_cm: 7, is_soft: true, squeeze_pct: null })).not.toHaveProperty("squeeze");
+    expect(fitTargetOf({ id: "1", name: "A", width_cm: 9, height_cm: 9, depth_cm: 7, squeeze_pct: 25 })).not.toHaveProperty("squeeze");
+  });
+  it("ท่าที่ใช้บอกขนาดตามแนวช่อง (ภาพหน้า/ข้าง)", () => {
+    const p = fitPose(figure, pocket)!;
+    expect(p.status).toBe("snug");
+    expect(p.along[2]).toBeLessThanOrEqual(5);
+    expect(fitPose({ ...labubu, squeeze: 0.3 }, pocket)).toMatchObject({ squeezed: true, count: 1 });
+  });
+  it("ชื่ออังกฤษติดไปด้วย (เว็บ /en สลับเอง)", () => {
+    expect(fitTargetOf({ id: "1", name: "ตุ๊กตา", name_en: " Doll ", width_cm: 9, height_cm: 9, depth_cm: 7 })).toMatchObject({ name: "ตุ๊กตา", name_en: "Doll" });
   });
 });

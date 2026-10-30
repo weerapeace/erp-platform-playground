@@ -131,7 +131,8 @@ export const SITE_INFO_FIELDS: SiteInfoField[] = [
   { key: "belt_engraving_fee", label: "ค่าสลักชื่อ (฿)", hint: "บวกเมื่อลูกค้าพิมพ์ชื่อ · 0 = ฟรี", group: "belt", type: "number", isPublic: true, placeholder: "0" },
   { key: "belt_engraving_max", label: "สลักชื่อได้สูงสุดกี่ตัวอักษร", hint: "แนะนำ 12 · 0 = ปิดสลักชื่อ", group: "belt", type: "number", isPublic: true, placeholder: "12" },
   { key: "belt_lead_time", label: "ระยะเวลาทำ (ข้อความ)", hint: "โชว์ใต้ราคา เช่น ทำ 7–10 วันทำการ", group: "belt", type: "text", isPublic: true, placeholder: "ทำ 7–10 วันทำการ", i18n: true },
-  { key: "fit_check_enabled", label: "เปิดเช็คขนาด (ใส่ตุ๊กตา/ของได้ไหม)", hint: "รอบนี้: ERP คำนวณ + เตือนรุ่นที่ยังไม่วัด · หน้าเช็คขนาดบนเว็บจะตามมาในรอบถัดไป", group: "fit", type: "bool", isPublic: true },
+  { key: "fit_check_enabled", label: "เปิดเช็คขนาด (ใส่ตุ๊กตา/ของได้ไหม)", hint: "เปิดแล้ว: Section เช็คขนาด · บรรทัด \"ใส่ได้ … ประมาณ N ตัว\" ในหัวข้อขนาด · ป๊อป 📏 เทียบขนาด แท็บช่องใส่ตุ๊กตา · เตือนรุ่นที่ยังไม่วัดช่อง", group: "fit", type: "bool", isPublic: true },
+  { key: "fit_compare_fit_only", label: "ป๊อปเทียบขนาด: โชว์เฉพาะตุ๊กตาที่ใส่ได้", hint: "ปิด = โชว์ตุ๊กตาทุกตัว ตัวที่ใส่ไม่ได้เป็นสีเทา (ลูกค้าเห็นว่าตัวไหนใหญ่เกิน)", group: "fit", type: "bool", isPublic: true },
   { key: "points_min_redeem", label: "ใช้ขั้นต่ำครั้งละกี่แต้ม", hint: "กันใช้ทีละนิด เช่น 10", group: "points", type: "number", isPublic: true, placeholder: "10" },
 
   // ─── 📊 วัดผล & โฆษณา (เว็บร้าน src/lib/analytics.ts — โหลดหลังลูกค้ายินยอมคุกกี้เท่านั้น) ───
@@ -377,6 +378,7 @@ export interface SiteInfo {
   points_max_redeem_pct: number;
   points_min_redeem: number;
   fit_check_enabled: boolean;
+  fit_compare_fit_only: boolean;
   belt_enabled: boolean;
   belt_base_price: number;
   belt_engraving_fee: number;
@@ -496,6 +498,7 @@ export const DEFAULT_SITE_INFO: SiteInfo = {
   points_max_redeem_pct: 50,
   points_min_redeem: 10,
   fit_check_enabled: false,
+  fit_compare_fit_only: false,
   belt_enabled: false,
   belt_base_price: 0,
   belt_engraving_fee: 0,

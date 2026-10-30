@@ -107,7 +107,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // 📐 เช็คขนาด: ตุ๊กตา/ของที่มีขนาด (ทะเบียน product_fit_items · ตุ๊กตาขึ้นก่อน) — ร้านไม่เปิด = ไม่ส่ง
   let fitTargets: FitTarget[] | undefined;
   if (info.fit_check_enabled) {
-    const { data: fr } = await sb.from("product_fit_items").select("id, name, name_en, is_active, kind, width_cm, height_cm, depth_cm, is_soft, size_estimated, sort_order, image_key").eq("is_active", true).order("sort_order");
+    // * = ได้ squeeze_pct (บีบได้ %) เมื่อมีคอลัมน์แล้ว — ก่อน migration 202611080200 ก็ไม่พัง
+    const { data: fr } = await sb.from("product_fit_items").select("*").eq("is_active", true).order("sort_order");
     const all = ((fr ?? []) as Parameters<typeof fitTargetOf>[0][]).map((r) => fitTargetOf(r)).filter((x): x is FitTarget => !!x);
     fitTargets = [...all.filter((t) => t.kind === "doll"), ...all.filter((t) => t.kind !== "doll")];
   }

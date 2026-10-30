@@ -4,18 +4,22 @@
  * 📐 ช่องใส่ของ (ขนาดด้านใน) ของ Parent SKU — ของกลาง ใช้ 3 ที่ หน้าตา/กฎเดียวกัน:
  *   1) ลิ้นชักตั้งค่าเว็บของสินค้า (components/parent-web-listings → แท็บ 🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด) — บันทึกเอง
  *   2) ฟอร์ม Parent SKU หน้า "ดู" (บันทึกเอง) / หน้า "แก้ไข" (ใส่ค่าในฟอร์ม) — ParentCompartmentsField
- * ค่า: null = ยังไม่ได้วัด · [] = ไม่มีช่องใส่ของ (ไม่ใช่กระเป๋า) · [{id,name,w,h,d,window}]
+ * ค่า: null = ยังไม่ได้วัด · [] = ไม่มีช่องใส่ของ (ไม่ใช่กระเป๋า) · [{id,name,name_en,w,h,d,window,area}]
+ *   name_en = ชื่อช่องภาษาอังกฤษ (เว็บ /en) · area = กรอบของช่องบนรูป (📍 → components/compartment-area-dialog) ป๊อป 📏 เทียบขนาดบนเว็บวาดเส้นช่องตามนี้
  * ผลคำนวณ "ใส่อะไรได้" สด ๆ จากทะเบียน product_fit_items ที่มีขนาด (ตุ๊กตา/ของ) ด้วยกฎกลาง lib/fit-check
  * บันทึก: PATCH /api/master-v2/parent-skus/<id> (สิทธิ์ products.edit + สิทธิ์รายฟิลด์ + audit ของกลาง)
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
-import { compartmentsProblem, fitReport, fitTargetOf, parseCompartments, MAX_COMPARTMENTS, type Compartment, type FitTarget } from "@/lib/fit-check";
+import { compartmentsProblem, fitReport, fitTargetOf, parseCompartments, MAX_COMPARTMENTS, type Compartment, type CompartmentArea, type FitTarget } from "@/lib/fit-check";
+import { Icon } from "@/components/icon";
+import { CompartmentAreaDialog } from "@/components/compartment-area-dialog";
 
-type Row = { id: string; name: string; w: string; h: string; d: string; window: boolean };
+type Row = { id: string; name: string; name_en: string; w: string; h: string; d: string; window: boolean; area?: CompartmentArea };
 
-const toRows = (c: Compartment[]): Row[] => c.map((x) => ({ id: x.id, name: x.name, w: String(x.w), h: String(x.h), d: String(x.d), window: !!x.window }));
+const toRows = (c: Compartment[]): Row[] =>
+  c.map((x) => ({ id: x.id, name: x.name, name_en: x.name_en ?? "", w: String(x.w), h: String(x.h), d: String(x.d), window: !!x.window, ...(x.area ? { area: x.area } : {}) }));
 const newId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 5)}`;
 const inputCls = "w-full h-8 rounded-md border border-slate-200 px-2 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-orange-400";
 
@@ -40,6 +44,8 @@ export function CompartmentsEditor({
   canEdit = true,
   outer,
   toggle = false,
+  imagesOf,
+  coverKey,
 }: {
   value: unknown;
   /** มี = บันทึกเองด้วยปุ่มในกล่อง · ไม่มี = ส่งค่าออกทาง onChange (ฟอร์มบันทึกเอง) */
@@ -52,6 +58,10 @@ export function CompartmentsEditor({
   /** true = ยังไม่ได้วัด → ย่อเหลือช่องติ๊กบรรทัดเดียว ติ๊กก่อนถึงจะใส่ได้ (ฟอร์ม Parent SKU — เจ้าของขอ "จะได้ไม่รก" 2026-10-17)
    *  ที่มีปุ่มพับ/กางของตัวเองอยู่แล้ว (ลิ้นชักเว็บ แผง 📐) ไม่ต้องเปิด */
   toggle?: boolean;
+  /** Parent SKU ที่ใช้หารูปให้ 📍 ชี้ตำแหน่งช่อง (ว่าง = ใช้ parentId) */
+  imagesOf?: string | null;
+  /** รูปปก (R2 key) ถ้ามีในมือ — ไม่มี = ป๊อปโหลดเอง */
+  coverKey?: string | null;
 }) {
   const toast = useToast();
   const initial = parseCompartments(value);
@@ -62,6 +72,7 @@ export function CompartmentsEditor({
   const stash = useRef<Row[]>([]);
   const [targets, setTargets] = useState<FitTarget[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [areaIdx, setAreaIdx] = useState<number | null>(null);
   const selfSave = !!parentId && !onChange;
 
   useEffect(() => {
@@ -114,7 +125,7 @@ export function CompartmentsEditor({
     emit("rows", next);
   };
   const addRow = () => {
-    const next = [...rows, { id: newId(), name: rows.length ? "" : "ช่องหลัก", w: "", h: "", d: "", window: false }];
+    const next = [...rows, { id: newId(), name: rows.length ? "" : "ช่องหลัก", name_en: rows.length ? "" : "Main compartment", w: "", h: "", d: "", window: false }];
     setRows(next);
     setState("rows");
     emit("rows", next);
@@ -223,7 +234,8 @@ export function CompartmentsEditor({
             <span />
           </div>
           {rows.map((r, i) => (
-            <div key={r.id} className="grid grid-cols-[minmax(0,1fr)_4.2rem_4.2rem_4.2rem_3.6rem_1.8rem] gap-1.5 items-center" data-compartment-row>
+            <div key={r.id} className="space-y-1">
+            <div className="grid grid-cols-[minmax(0,1fr)_4.2rem_4.2rem_4.2rem_3.6rem_1.8rem] gap-1.5 items-center" data-compartment-row>
               <input aria-label="ชื่อช่อง" className={inputCls} value={r.name} maxLength={40} disabled={!canEdit} placeholder={`เช่น ${i ? "ช่องหน้าใส" : "ช่องหลัก"}`} onChange={(e) => setRow(i, { name: e.target.value })} />
               {(["w", "h", "d"] as const).map((k) => (
                 <input key={k} aria-label={{ w: "กว้าง", h: "สูง", d: "หนา" }[k]} className={`${inputCls} text-right`} type="number" inputMode="decimal" step="0.1" min={0} disabled={!canEdit} value={r[k]} placeholder="ซม." onChange={(e) => setRow(i, { [k]: e.target.value })} />
@@ -239,13 +251,50 @@ export function CompartmentsEditor({
                 <span />
               )}
             </div>
+            {(canEdit || r.name_en || r.area) && (
+              <div className="flex items-center gap-1.5 pb-1" data-compartment-extra>
+                <input aria-label="ชื่อช่องภาษาอังกฤษ" className={`${inputCls} h-7 max-w-[14rem] text-xs`} value={r.name_en} maxLength={40} disabled={!canEdit} placeholder="EN เช่น Front pocket" onChange={(e) => setRow(i, { name_en: e.target.value })} />
+                <button
+                  type="button"
+                  onClick={() => setAreaIdx(i)}
+                  disabled={!canEdit && !r.area}
+                  className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs ${r.area ? "border-pink-200 bg-pink-50 text-pink-700" : "border-dashed border-slate-300 text-slate-600 hover:bg-slate-50"}`}
+                  title="ชี้ว่าช่องนี้อยู่ตรงไหนของรูป — ป๊อปเทียบขนาดบนเว็บวาดเส้นช่อง + ขนาดให้ลูกค้าเห็น"
+                  data-compartment-area={r.area ? "set" : "none"}
+                >
+                  <Icon name="pin" /> {r.area ? "ชี้บนรูปแล้ว · แก้" : "ชี้ตำแหน่งบนรูป"}
+                </button>
+              </div>
+            )}
+            </div>
           ))}
           {canEdit && rows.length < MAX_COMPARTMENTS && (
             <button type="button" onClick={addRow} className="h-7 px-2.5 rounded-lg border border-dashed border-slate-300 text-xs text-slate-600">
               ＋ เพิ่มช่อง
             </button>
           )}
-          <p className="text-[11px] text-slate-400">ขนาดด้านใน หน่วย ซม. · วัดตอนกระเป๋าว่าง · ช่องใส = ช่องโชว์ตุ๊กตาด้านหน้า</p>
+          <p className="text-[11px] text-slate-400">ขนาดด้านใน หน่วย ซม. · วัดตอนกระเป๋าว่าง · ช่องใส = ช่องโชว์ตุ๊กตาด้านหน้า · 📍 ชี้บนรูป = ป๊อปเทียบขนาดบนเว็บวาดเส้นช่องให้</p>
+          {areaIdx !== null && (
+            <CompartmentAreaDialog
+              open
+              onClose={() => setAreaIdx(null)}
+              rows={rows}
+              index={areaIdx}
+              parentId={imagesOf ?? parentId ?? null}
+              coverKey={coverKey}
+              onApply={(area) => {
+                const i = areaIdx;
+                const next = rows.map((r, j) => {
+                  if (j !== i) return r;
+                  const { area: _old, ...rest } = r;
+                  void _old;
+                  return area ? { ...rest, area } : rest;
+                });
+                setRows(next);
+                emit("rows", next);
+              }}
+            />
+          )}
         </>
       )}
 
@@ -307,10 +356,12 @@ export function CompartmentsEditor({
 }
 
 /** ฟิลด์ในฟอร์ม Parent SKU (ต่อสาย 2 ที่: app/master/parent-skus/page.tsx + MasterRecordDrawer ใน components/master-crud) */
-export function ParentCompartmentsField(p: { value: unknown; mode: "edit" | "view"; onChange?: (v: unknown) => void; onSaved?: (v: unknown) => void; recordId?: string | null; canEdit?: boolean }) {
+export function ParentCompartmentsField(p: { value: unknown; mode: "edit" | "view"; onChange?: (v: unknown) => void; onSaved?: (v: unknown) => void; recordId?: string | null; canEdit?: boolean; form?: Record<string, unknown> }) {
+  // รูปปกจากฟอร์ม (มี = ป๊อป 📍 ไม่ต้องโหลดเอง)
+  const cover = typeof p.form?.cover_image_r2_key === "string" && p.form.cover_image_r2_key ? (p.form.cover_image_r2_key as string) : null;
   return p.mode === "edit" ? (
-    <CompartmentsEditor value={p.value} canEdit={p.canEdit} onChange={(v) => p.onChange?.(v)} toggle />
+    <CompartmentsEditor value={p.value} canEdit={p.canEdit} onChange={(v) => p.onChange?.(v)} toggle imagesOf={p.recordId ?? null} coverKey={cover} />
   ) : (
-    <CompartmentsEditor value={p.value} parentId={p.recordId ?? null} canEdit={p.canEdit} onSaved={(v) => p.onSaved?.(v)} toggle />
+    <CompartmentsEditor value={p.value} parentId={p.recordId ?? null} canEdit={p.canEdit} onSaved={(v) => p.onSaved?.(v)} toggle coverKey={cover} />
   );
 }

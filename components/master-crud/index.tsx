@@ -3861,7 +3861,7 @@ export function MasterRecordDrawer({
               ? {
                 fits: ({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean }) => <ParentFitField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
                 highlights: ({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean }) => <ParentHighlightField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
-                compartments: ({ value, onChange, disabled }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean }) => <ParentCompartmentsField mode="edit" value={value} onChange={onChange} canEdit={!disabled} />,
+                compartments: ({ value, onChange, disabled, recordId, form }: { value: unknown; onChange: (v: unknown) => void; disabled: boolean; recordId: string | null; form: Record<string, unknown> }) => <ParentCompartmentsField mode="edit" value={value} onChange={onChange} canEdit={!disabled} recordId={recordId} form={form} />,
               }
               : {}),
             ...(formRenderers ?? {}),
@@ -3876,7 +3876,7 @@ export function MasterRecordDrawer({
             ...(moduleKey === "parent-skus-v2" ? {
               fits: ({ value, recordId, editable, onSaved }: { value: unknown; recordId: string | null; editable: boolean; onSaved?: (v: unknown) => void }) => <ParentFitField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
               highlights: ({ value, recordId, editable, onSaved }: { value: unknown; recordId: string | null; editable: boolean; onSaved?: (v: unknown) => void }) => <ParentHighlightField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
-              compartments: ({ value, recordId, editable, onSaved }: { value: unknown; recordId: string | null; editable: boolean; onSaved?: (v: unknown) => void }) => <ParentCompartmentsField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} />,
+              compartments: ({ value, recordId, editable, onSaved, form }: { value: unknown; recordId: string | null; editable: boolean; onSaved?: (v: unknown) => void; form: Record<string, unknown> }) => <ParentCompartmentsField mode="view" value={value} recordId={recordId} canEdit={editable} onSaved={onSaved} form={form} />,
             } : {}),
           }
         : undefined,
