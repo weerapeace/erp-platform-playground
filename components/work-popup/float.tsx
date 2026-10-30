@@ -3,7 +3,8 @@
  * 🔔 ป๊อปเตือนงานแบบลอย (ส่วนของ WorkPopupHost) — การ์ดลอยมุมขวาล่าง/ขวาบน บนจอคอม แทนหน้าต่างกลางจอ
  * - เนื้อหา = WorkPopupBody เดิม (ติ๊กงานของคุณได้) · ปุ่ม ไว้ทีหลัง / ✓ รับทราบ / ดูทั้งหมด เหมือนเดิม
  * - ปุ่มเล็กลอยอยู่ทั้งวัน (ป๊อปของวันนี้ · /api/popups/active?all=1) · กางเองเมื่อถึงเวลาและยังไม่รับทราบ
- *   รับทราบ/ไว้ทีหลัง/นอกเวลา = ยุบเป็นปุ่ม กดดูได้ตลอด · － ย่อ / กดข้างนอก / Esc = ยุบ · ✕ ซ่อน (ไม่เด้งอีก ทุกเครื่อง) → เปิดใหม่ที่เมนูโปรไฟล์
+ *   รับทราบ/ไว้ทีหลัง/นอกเวลา = ยุบเป็นปุ่ม กดดูได้ตลอด · ✕ / กดข้างนอก / Esc = ซ่อนเป็นปุ่มเล็ก
+ *   ปิดถาวร (ไม่ถาม ไม่เด้ง) ทำได้ที่เดียว = เมนูโปรไฟล์ → 🔔 ป๊อปเตือนงาน (เจ้าของสั่ง 2026-10-30: "ปุ่มปิดคือซ่อน")
  * - ค่าตั้งต่อคน: user_ui_prefs key work_popup_float = { enabled, minimized, position } (useUserPref · บอกต่อในหน้าเดียว)
  * จอแคบกว่า FLOAT_MIN_WIDTH ยังเป็นหน้าต่างกลางจอแบบเดิม (ลอยแล้วบังงาน/ทับแถบเมนูล่าง)
  */
@@ -36,7 +37,7 @@ export function useFloatScreen(): boolean {
 const POS: Record<WorkPopupFloatPosition, string> = { br: "bottom-4 right-4", tr: "top-16 right-4" };
 
 /** การ์ดลอย (กรอบอย่างเดียว — เนื้อหา/ปุ่มส่งมาจาก WorkPopupHost) */
-export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, footer, onMinimize, onExpand, onHide, children }: {
+export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, footer, onMinimize, onExpand, children }: {
   pref: WorkPopupFloatPref;
   /** ยุบเป็นปุ่มเล็ก (ค่าเริ่ม: ยุบ · กางเองเมื่อมีป๊อปถึงเวลา) */
   minimized: boolean;
@@ -45,12 +46,12 @@ export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, foo
   /** ข้อความบนปุ่มตอนย่อ เช่น "งานค้าง 54 · ของคุณ 2" */
   pill: string;
   footer: ReactNode;
+  /** ✕ / กดข้างนอก / Esc = ซ่อนเป็นปุ่มเล็ก */
   onMinimize: () => void;
   onExpand: () => void;
-  onHide: () => void;
   children: ReactNode;
 }) {
-  // กดข้างนอกการ์ด / กด Esc = ยุบเป็นปุ่มเล็ก (ไม่ใช่ซ่อน — ปุ่มยังลอยอยู่ กดกางใหม่ได้)
+  // กดข้างนอกการ์ด / กด Esc = ซ่อนเป็นปุ่มเล็ก (ปุ่มยังลอยอยู่ กดกางใหม่ได้)
   const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (minimized) return;
@@ -79,15 +80,13 @@ export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, foo
           <div className="text-sm font-semibold text-slate-800 truncate">{title}</div>
           <div className="text-[11px] text-slate-500 truncate">{subtitle}</div>
         </div>
-        <button type="button" onClick={onMinimize} aria-label="ย่อ" title="ย่อเหลือปุ่มเล็ก"
-          className="w-8 h-8 rounded-md text-slate-400 hover:bg-white hover:text-slate-700">－</button>
-        <button type="button" onClick={onHide} aria-label="ซ่อน" title={`ซ่อน (${WORK_POPUP_HIDE_HINT})`}
+        <button type="button" onClick={onMinimize} aria-label="ซ่อน" title="ซ่อนเป็นปุ่มเล็ก (กดปุ่มเพื่อเปิดกลับ)"
           className="w-8 h-8 rounded-md text-slate-400 hover:bg-white hover:text-slate-700">✕</button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto p-3">{children}</div>
       <div className="border-t border-slate-100 px-3 py-2">{footer}</div>
       <p className="bg-amber-50 px-3 py-1.5 text-[11px] leading-snug text-amber-800">
-        💡 ไม่อยากเห็นป๊อปนี้? กด <b>✕</b> เพื่อซ่อน · {WORK_POPUP_HIDE_HINT}
+        💡 กด <b>✕</b> = ซ่อนเป็นปุ่มเล็กมุมจอ · {WORK_POPUP_HIDE_HINT}
       </p>
     </div>
   );

@@ -178,7 +178,7 @@ export function WorkPopupHost() {
   const inFrame = typeof window !== "undefined" && window.self !== window.top;
   const skip = inFrame || isChromelessPath(pathname);
   // ลอยมุมจอ (จอคอม) / ซ่อน — ค่าตั้งต่อคนจากเมนูโปรไฟล์ (./float) · ปิดอยู่ = ไม่ถาม ไม่เด้ง (ยกเว้นกดลิงก์ ?popup= จากกระดิ่งเอง)
-  const [floatPref, setFloatPref] = useWorkPopupFloatPref();
+  const [floatPref] = useWorkPopupFloatPref();
   const wide = useFloatScreen();
   const [forced, setForced] = useState<Set<string>>(new Set());
   const enabled = floatPref.enabled;
@@ -251,15 +251,7 @@ export function WorkPopupHost() {
     }
   };
 
-  // ✕ ซ่อน (ลอย) → ปิดในเมนูโปรไฟล์ด้วย · ไม่ส่ง "รับทราบ/ไว้ทีหลัง" (เปิดกลับวันนี้ = ป๊อปยังอยู่)
-  const hide = () => {
-    setFloatPref({ ...floatPref, enabled: false, minimized: false });
-    setQueue([]);
-    setForced(new Set());
-    setExpanded(false);
-    toast.info(`ซ่อนป๊อปเตือนงานแล้ว — ${WORK_POPUP_HIDE_HINT}`);
-  };
-
+  // ปิดถาวรทำได้ที่เดียว = เมนูโปรไฟล์ (สวิตช์ในนั้นตั้ง enabled) · ✕ บนการ์ด = แค่ซ่อนเป็นปุ่มเล็ก (collapse)
   const visible = !!cur && !skip && (enabled || forced.has(cur.report_id));
   const title = cur ? `${cur.audience === "mine" ? "งานที่รอคุณอยู่" : cur.heading}` : "";
   const subtitle = cur
@@ -289,8 +281,7 @@ export function WorkPopupHost() {
       {visible && cur && (wide ? (
         <WorkPopupFloatCard pref={floatPref} minimized={!expanded} title={title} subtitle={subtitle} pill={pill} footer={footer}
           onMinimize={collapse}
-          onExpand={() => setExpanded(true)}
-          onHide={hide}>
+          onExpand={() => setExpanded(true)}>
           <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
         </WorkPopupFloatCard>
       ) : (
@@ -300,7 +291,7 @@ export function WorkPopupHost() {
           description={subtitle}
           footer={footer}>
           <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
-          <p className="mt-3 text-[11px] text-slate-400">💡 ไม่อยากเห็นป๊อปนี้? ไปที่ เมนูโปรไฟล์ (มุมขวาบน) → 🔔 ป๊อปเตือนงาน แล้วปิดสวิตช์</p>
+          <p className="mt-3 text-[11px] text-slate-400">💡 {WORK_POPUP_HIDE_HINT} แล้วปิดสวิตช์</p>
         </ERPModal>
       ))}
     </>
