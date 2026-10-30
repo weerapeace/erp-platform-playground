@@ -22,6 +22,8 @@ import type { AssetRow } from "@/app/api/assets/shared";
 import type { DetailOverride } from "@/lib/website-detail-overrides";
 import { DEFAULT_PERSONALIZE, type PersonalizeConfig } from "@/lib/website-personalize";
 import { PersonalizeEditor } from "@/components/personalize-editor";
+import { PrintDesignEditor } from "@/components/print-design-editor";
+import { DEFAULT_PRINT_DESIGN, printDesignUsable, type PrintDesignConfig } from "@/lib/website-print-design";
 import { ProductBannersEditor } from "@/components/product-banners-editor";
 import type { ProductBanner } from "@/lib/website-banners";
 import type { CardColors } from "@/lib/website-card-colors";
@@ -79,6 +81,8 @@ type ShopState = {
   webSkuImages: Record<string, string[]>;
   webDetails: Record<string, DetailOverride>;
   webPersonalize: PersonalizeConfig | null;
+  /** 🖨 ลายรีดบนกระเป๋า */
+  webPrint?: PrintDesignConfig | null;
   webBanners: ProductBanner[];
   /** 🎴 สีที่โชว์บนการ์ด + สีหลัก (colors null = ทุกสี) */
   webCardColors: CardColors;
@@ -151,7 +155,7 @@ const STOCKS = STOCK_STATUS_OPTIONS;
 /** ค่าที่ปุ่มบันทึกส่ง (saveShop) รวมเป็นข้อความเดียว — ใช้เทียบว่ามีของแก้ค้างไหม */
 const snapOf = (s: ShopState) =>
   JSON.stringify([
-    s.published, s.featured, s.webPrice, s.webName, s.webDescription, s.webImages, s.webSkuImages, s.webDetails, s.webPersonalize, s.webBanners, s.webCardColors, s.webHero,
+    s.published, s.featured, s.webPrice, s.webName, s.webDescription, s.webImages, s.webSkuImages, s.webDetails, s.webPersonalize, s.webPrint ?? null, s.webBanners, s.webCardColors, s.webHero,
     s.webUnit, s.webCategories, s.webBadge, s.webStockStatus, s.webSwatch, s.webOptions, s.webVariantOff ?? [], s.webSizeGuide ?? "", s.webRelated ?? [], s.webSeo ?? null,
   ]);
 
@@ -207,6 +211,7 @@ export function ParentWebListings({
   const [fitOpen, setFitOpen] = useState(false);
   // ร้านที่กางแผง "ปั๊มชื่อ" อยู่
   const [pzOpen, setPzOpen] = useState<Set<string>>(new Set());
+  const [prOpen, setPrOpen] = useState<Set<string>>(new Set());
   // แท็บที่เปิดอยู่ต่อร้าน (ค่าเริ่ม = ขายบนเว็บ)
   const [tabOf, setTabOf] = useState<Record<string, Tab>>({});
   // ค่าที่บันทึกล่าสุดต่อร้าน (เทียบหา "มีของแก้ค้าง" → ปุ่ม 💾 บันทึก แถบล่าง)
@@ -423,6 +428,7 @@ export function ParentWebListings({
             webSkuImages: s.webSkuImages,
             webDetails: s.webDetails,
             webPersonalize: s.webPersonalize,
+            webPrint: s.webPrint ?? null,
             webBanners: s.webBanners,
             webCardColors: s.webCardColors,
             webHero: s.webHero,
@@ -1128,6 +1134,34 @@ export function ParentWebListings({
             <div className="border-t border-slate-100 p-3">
               {!s.fitCheck && <p className="text-[11px] text-slate-400 mb-2">ร้านนี้ยังไม่เปิด "เช็คขนาด" (ข้อมูลร้าน → 📐) — วัดเก็บไว้ก่อนได้</p>}
               <CompartmentsEditor value={comps} parentId={parentId} outer={data.outer ?? null} onSaved={() => void load(true)} />
+            </div>
+          )}
+        </div>
+
+        {/* 🖨 ลายรีดบนกระเป๋า (DTF/UV) — ลูกค้าเลือกลาย/อัปรูป วางบนส่วนที่พิมพ์ได้ */}
+        <div className="rounded-lg border border-slate-200">
+          <button type="button" onClick={() => flip(setPrOpen, s.shopId)} className="w-full flex items-center justify-between px-3 py-2 text-left">
+            <span className="text-xs font-medium text-slate-600">
+              🖨 ลายรีดบนกระเป๋า (DTF/UV)
+              {s.webPrint?.enabled && (
+                <span className={`ml-2 text-[10px] rounded-full px-1.5 py-0.5 ${printDesignUsable(s.webPrint) ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>
+                  {printDesignUsable(s.webPrint) ? `เปิดอยู่ · ${s.webPrint.method} · ${s.webPrint.zones.length} ส่วน` : "เปิดแต่ยังตั้งค่าไม่ครบ"}
+                </span>
+              )}
+            </span>
+            <span className="text-xs text-slate-400">{prOpen.has(s.shopId) ? "▴ ซ่อน" : "▾ ตั้งค่า"}</span>
+          </button>
+          {prOpen.has(s.shopId) && (
+            <div className="border-t border-slate-100 p-3">
+              <PrintDesignEditor
+                value={s.webPrint ?? DEFAULT_PRINT_DESIGN}
+                onChange={(next) => patchShop(s.shopId, { webPrint: next })}
+                imageOptions={imageOptionsOf(s)}
+                fallbackImageKey={s.webImages[0] ?? data.variants[0]?.erpImageKey ?? null}
+              />
+              <p className="text-[11px] text-slate-400 mt-2">
+                ลูกค้าเห็นกล่อง &quot;ออกแบบลายเอง&quot; ในหน้าสินค้า · ออเดอร์ที่มีรูปอัปเองเข้าคิว 🖨 รอตรวจลาย ในแท็บออเดอร์ · กด &quot;บันทึก&quot; ด้านล่างเพื่อใช้งาน
+              </p>
             </div>
           )}
         </div>

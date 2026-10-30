@@ -99,6 +99,7 @@ const API_GROUPS: [string, WebsiteGroup[]][] = [
   ["menu-templates", ["design"]],
   ["translations", ["design"]],
   ["orders", ["orders"]],
+  ["print-designs", ["orders"]],
   ["returns", ["orders"]],
   ["members/tiers", ["promos", "orders"]],
   ["members/login-settings", ["settings"]],

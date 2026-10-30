@@ -49,6 +49,7 @@ import {
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { normalizePersonalize } from "@/lib/website-personalize";
+import { normalizePrintDesign } from "@/lib/website-print-design";
 import { cleanListingSeo, cleanRelatedCodes, listingPatchToRow, toKeyList, type ListingPatch } from "@/lib/website-listing-patch";
 import { computeListingDisplay } from "@/lib/website-listing-display";
 import { readFitCheckShops, readSiteInfo } from "@/lib/website-site-info";
@@ -238,6 +239,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       webDetails: cleanDetailOverrides(l?.web_details),
       /** 🔤 ปั๊มชื่อ (null = ยังไม่เคยตั้ง → UI ใช้ค่าเริ่มต้นปิดอยู่) */
       webPersonalize: l?.web_personalize ? normalizePersonalize(l.web_personalize) : null,
+      webPrint: l?.web_print ? normalizePrintDesign(l.web_print) : null,
       /** 🖼 แบนเนอร์หน้าสินค้าเฉพาะรุ่น (ว่าง = ใช้แบนเนอร์กลางของธีม) */
       webBanners: normalizeBanners(l?.web_banners),
       /** 🎴 สีที่โชว์บนการ์ด + สีหลัก (ว่าง = ทุกสีตามลำดับเดิม) */

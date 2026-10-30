@@ -20,6 +20,7 @@ import { MiniTable } from "@/components/mini-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { CopyButton } from "@/components/copy-button";
 import { PersonalizeOrderPreview } from "@/components/personalize-stamp";
+import { PrintDesignOrderPanel } from "@/components/print-design-order-panel";
 import type { OrderPersonalize } from "@/lib/website-personalize";
 import { GiftCardPreview } from "@/components/website-gift-cards-editor";
 import { normalizeGiftCards, DEFAULT_GIFT_DESIGN, type GiftCardConfig, type OrderGiftCard } from "@/lib/website-gift-cards";
@@ -36,7 +37,7 @@ import { ShippopBox, ShippopBulkButton, type ShippopSettings } from "@/component
 import type { ShippopInfo } from "@/lib/shippop";
 
 /** gift = 🎀 ห่อ/💌 การ์ด รายชิ้น (ดีไซน์ตะกร้า "เลือกรายชิ้น") */
-type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number; gift?: { wrap: boolean; card: boolean; message: string; styleName?: string; cardInfo?: OrderGiftCard | null }; personalize?: OrderPersonalize };
+type Line = { name: string; variantLabel: string | null; unitPrice: number; qty: number; lineTotal: number; gift?: { wrap: boolean; card: boolean; message: string; styleName?: string; cardInfo?: OrderGiftCard | null }; personalize?: OrderPersonalize; /** 🖨 ลายรีด */ printDesignId?: string; printReview?: string | null };
 type Order = {
   id: string;
   orderNo: string;
@@ -140,7 +141,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
     setLoading(true);
     try {
       // 💳 "รอตรวจเงิน" เป็นสถานะชำระเงิน ไม่ใช่สถานะออเดอร์ → โหลดทั้งหมดแล้วกรองในหน้าจอ
-      const r = await apiFetch(`/api/website/orders?shop=${encodeURIComponent(shopSlug)}&status=${encodeURIComponent(filter === "verifying" || filter === "toPack" ? "all" : filter)}`);
+      const r = await apiFetch(`/api/website/orders?shop=${encodeURIComponent(shopSlug)}&status=${encodeURIComponent(filter === "verifying" || filter === "toPack" || filter === "printReview" ? "all" : filter)}`);
       const j = await r.json();
       if (j.error) {
         toast.error(j.error);
@@ -218,7 +219,14 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
   };
 
   const total = statuses.reduce((a, s) => a + (counts[s.key] ?? 0), 0);
-  const shown = filter === "verifying" ? orders.filter((o) => o.paymentStatus === "verifying") : filter === "toPack" ? orders.filter(isReadyToPack) : orders;
+  const shown =
+    filter === "verifying"
+      ? orders.filter((o) => o.paymentStatus === "verifying")
+      : filter === "toPack"
+        ? orders.filter(isReadyToPack)
+        : filter === "printReview"
+          ? orders.filter((o) => o.items.some((i) => i.printReview === "pending"))
+          : orders;
   // 📦 ทำหลายใบ: เปลี่ยนสถานะ (ทีละใบผ่าน API — audit/แต้ม/แจ้งลูกค้าครบเหมือนทีละใบ)
   const bulkStatus = async (status: string, label: string) => {
     setBusy(true);
@@ -287,6 +295,11 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
         <Chip active={filter === "toPack"} onClick={() => setFilter("toPack")}>
           📦 พร้อมแพ็ก <span className={(counts.toPack ?? 0) > 0 && filter !== "toPack" ? "rounded-full bg-blue-500 px-1.5 text-white" : "opacity-60"}>{counts.toPack ?? 0}</span>
         </Chip>
+        {((counts.printReview ?? 0) > 0 || filter === "printReview") && (
+          <Chip active={filter === "printReview"} onClick={() => setFilter("printReview")}>
+            🖨 รอตรวจลาย <span className={(counts.printReview ?? 0) > 0 && filter !== "printReview" ? "rounded-full bg-violet-500 px-1.5 text-white" : "opacity-60"}>{counts.printReview ?? 0}</span>
+          </Chip>
+        )}
         <Chip active={filter === "verifying"} onClick={() => setFilter("verifying")}>
           💳 รอตรวจเงิน <span className={(counts.verifying ?? 0) > 0 && filter !== "verifying" ? "rounded-full bg-amber-400 px-1.5 text-white" : "opacity-60"}>{counts.verifying ?? 0}</span>
         </Chip>
@@ -328,6 +341,8 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                 ? "ไม่มีสลิปรอตรวจ — ลูกค้าแนบสลิปเมื่อไร (และระบบตรวจอัตโนมัติไม่ผ่าน) จะขึ้นที่นี่"
                 : filter === "toPack"
                   ? "ไม่มีออเดอร์ที่พร้อมแพ็ก — ออเดอร์ที่จ่ายแล้ว (หรือเก็บปลายทาง) และยังไม่ส่งจะขึ้นที่นี่"
+                : filter === "printReview"
+                  ? "ไม่มีลายรอตรวจ — ออเดอร์ที่ลูกค้าอัปรูปเองมาให้รีดจะขึ้นที่นี่"
                 : "ไม่มีออเดอร์ในสถานะนี้"
           }
           searchText={(o) => `${o.giftWrap ? "ห่อของขวัญ " : ""}${o.giftCardOnly ? "การ์ด " : ""}${o.orderNo} ${o.customerName} ${o.customerPhone} ${o.skuCodes.join(" ")} ${o.items.map((i) => i.name).join(" ")}`}
@@ -348,6 +363,11 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                   {o.taxInvoice && (
                     <span className="inline-block mt-0.5 mr-1 text-[10px] px-1.5 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200" data-tax-badge>
                       {o.taxInvoiceNo ? "🧾 ออกใบกำกับแล้ว" : "🧾 ขอใบกำกับภาษี"}
+                    </span>
+                  )}
+                  {o.items.some((i) => i.printDesignId) && (
+                    <span className={`inline-block mt-0.5 mr-1 text-[10px] px-1.5 py-0.5 rounded-full border ${o.items.some((i) => i.printReview === "pending") ? "bg-violet-100 text-violet-800 border-violet-300" : "bg-violet-50 text-violet-700 border-violet-200"}`}>
+                      {o.items.some((i) => i.printReview === "pending") ? "🖨 รอตรวจลาย" : "🖨 มีลายรีด"}
                     </span>
                   )}
                   {(o.giftWrap || o.giftCardOnly) && (
@@ -592,6 +612,7 @@ export function WebsiteOrdersPanel({ shopSlug }: { shopSlug: string; shopId: str
                         <span className="text-slate-800 shrink-0">{money(i.lineTotal)}</span>
                       </div>
                       {i.personalize && <PersonalizeOrderPreview pz={i.personalize} />}
+                      {i.printDesignId && <PrintDesignOrderPanel shopSlug={shopSlug} designId={i.printDesignId} onChanged={() => void load()} />}
                       {i.gift?.card && (
                         <div className="mt-1 flex items-start gap-2 rounded-md bg-pink-50 px-2 py-1.5 text-xs text-pink-900">
                           <span className="shrink-0">💌 การ์ดของชิ้นนี้</span>

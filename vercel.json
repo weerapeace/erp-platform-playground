@@ -2,6 +2,7 @@
   "crons": [
     { "path": "/api/cron/subscriptions-renewals", "schedule": "0 1 * * *" },
     { "path": "/api/cron/wo-due-soon", "schedule": "0 2 * * *" },
-    { "path": "/api/cron/lazada-token", "schedule": "30 0 * * *" }
+    { "path": "/api/cron/lazada-token", "schedule": "30 0 * * *" },
+    { "path": "/api/cron/print-uploads-purge", "schedule": "15 3 * * *" }
   ]
 }

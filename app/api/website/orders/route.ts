@@ -74,7 +74,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (ids.length) {
     const { data: items } = await sb
       .from("store_order_items")
-      .select("order_id, name, variant_label, name_en, variant_label_en, sku_code, unit_price, qty, line_total, gift, personalize")
+      .select("order_id, name, variant_label, name_en, variant_label_en, sku_code, unit_price, qty, line_total, gift, personalize, print_design_id")
       .in("order_id", ids)
       .order("id");
     for (const it of (items ?? []) as Record<string, unknown>[]) {
@@ -93,6 +93,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (isReadyToPack({ status: r.status, paymentMethod: r.payment_method, paymentStatus: r.payment_status })) counts.toPack = (counts.toPack ?? 0) + 1;
   }
   const slips = await slipsForOrders(sb, ids);
+  // 🖨 ลายรีด: สถานะตรวจลายของแต่ละรายการ + จำนวนที่รอตรวจทั้งร้าน (ตัวกรอง "รอตรวจลาย")
+  const printIds = [...itemsByOrder.values()].flat().map((it) => it.print_design_id as string | null).filter((x): x is string => !!x);
+  const printReview = new Map<string, string | null>();
+  if (printIds.length) {
+    const { data: pds } = await sb.from("store_print_designs").select("id, review_status").in("id", printIds);
+    for (const d of (pds ?? []) as { id: string; review_status: string | null }[]) printReview.set(d.id, d.review_status);
+  }
+  const { count: printPending } = await sb.from("store_print_designs").select("id", { count: "exact", head: true }).eq("shop_id", s.id).eq("review_status", "pending");
+  counts.printReview = printPending ?? 0;
 
   // 💬 ข้อมูลประกอบข้อความถึงลูกค้า (ปุ่มคัดลอก/ส่งอีเมล ในรายละเอียดออเดอร์)
   const [info, urls] = await Promise.all([readSiteInfo(sb, s.id), loadShopSiteUrls(sb, [s.id])]);
@@ -126,7 +135,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const row = r as unknown as Parameters<typeof toOrderView>[0];
       const lines = items as unknown as Parameters<typeof toOrderView>[1];
       // พนักงานเห็นชื่อไทยเสมอ · ข้อความถึงลูกค้าใช้ชื่อในภาษาที่ลูกค้าสั่ง
-      const view = toOrderView(row, lines, info, "th");
+      const view0 = toOrderView(row, lines, info, "th");
+      const view = items.some((it) => it.print_design_id)
+        ? { ...view0, items: view0.items.map((vi, idx) => { const pid = items[idx]?.print_design_id as string | null | undefined; return pid ? { ...vi, printDesignId: pid, printReview: printReview.get(pid) ?? null } : vi; }) }
+        : view0;
       const lang = customerLang(r.lang);
       return {
         id: r.id,

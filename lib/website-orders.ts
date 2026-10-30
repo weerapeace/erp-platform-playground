@@ -38,6 +38,7 @@ import { normalizeOrderCard, readOrderCard, wrapFeeFor, type OrderGiftCard } fro
 import { readGiftCards } from "@/lib/website-gift-cards-db";
 import { writeAudit } from "@/lib/audit";
 import { beltDesignLine, type BeltDesignRow } from "@/lib/belt-builder-order";
+import { loadPrintDesigns, markPrintDesignsOrdered, printDesignForLine, type PrintDesignRow } from "@/lib/website-print-design-server";
 import { SwatchIndex, rowToSwatchEntry, SWATCH_SELECT } from "@/lib/color-swatch";
 import { customerLang, type CustomerLang } from "@/lib/customer-messages";
 import { dropFromRow, hiddenDropCodes } from "@/lib/website-new-drops";
@@ -125,6 +126,8 @@ export interface PublicOrderItem {
   beltDesignId?: string;
   /** 🎀 ห่อ/💌 การ์ด รายชิ้น (ดีไซน์ตะกร้า giftMode = item · lib/website-item-gift) */
   gift?: ItemGiftChoice | null;
+  /** 🖨 ลายรีดที่ลูกค้าออกแบบ (store_print_designs.id) — ราคาเพิ่มเอาจากแบบที่ ERP คิดไว้ตอนบันทึก */
+  printDesignId?: string;
 }
 
 export interface PublicOrderInput {
@@ -251,6 +254,7 @@ export function validateOrderInput(raw: unknown): { ok: true; input: PublicOrder
       qty,
       personalize: o.personalize && typeof o.personalize === "object" ? (o.personalize as PublicOrderItem["personalize"]) : null,
       gift: cleanItemGift(o.gift),
+      ...(UUID.test(clean(o.printDesignId, 40)) ? { printDesignId: clean(o.printDesignId, 40) } : {}),
     });
   }
 
@@ -404,6 +408,8 @@ type LineInsert = {
   personalize: (PersonalizeChoice & { preview?: PersonalizePreviewSnap | null }) | null;
   /** 🧵 แบบเข็มขัด (belt_designs.id) — รายการสินค้าปกติ = null */
   belt_design_id?: string | null;
+  /** 🖨 แบบลายรีด (store_print_designs.id) */
+  print_design_id?: string | null;
   /** 🎀 ห่อ/💌 การ์ด รายชิ้น (ไม่มี = ไม่ใส่คีย์) */
   gift?: ItemGift;
 };
@@ -453,6 +459,9 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
     const { data: bd } = await sb.from("belt_designs").select("id, status, total_price, selections, order_ref").eq("shop_id", shop.id).in("id", beltIds);
     for (const d of (bd ?? []) as BeltDesignRow[]) beltById.set(d.id, d);
   }
+  // 🖨 ลายรีด: แบบต้องเป็นของร้านนี้ ยังไม่เคยสั่ง และตรงรุ่น/สีที่สั่ง (lib/website-print-design-server)
+  const printById = await loadPrintDesigns(sb, shop.id, input.items.map((i) => i.printDesignId ?? ""));
+  const printUsed: PrintDesignRow[] = [];
 
   const [{ data: listData }, { data: parents }, { data: children }, { data: swatchRows }, { data: dropRows }] = await Promise.all([
     sb
@@ -574,9 +583,25 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       itemWrap ||= ig.gift.wrap;
       itemCard ||= ig.gift.card;
     }
-    const lineTotal = Math.round(price * it.qty * 100) / 100;
+    // 🖨 ลายรีด: ราคาเพิ่มต่อใบ (คิดตอนบันทึกแบบ) รวมในราคาต่อชิ้น · 1 แบบใช้ได้รายการเดียว
+    let printExtra = 0;
+    let printId: string | null = null;
+    if (it.printDesignId) {
+      const d = printById.get(it.printDesignId);
+      const pl = printUsed.some((x) => x.id === it.printDesignId) ? ({ ok: false, error: "ลายเดียวกันอยู่ในตะกร้า 2 รายการ — รวมเป็นรายการเดียวแล้วสั่งใหม่" } as const) : printDesignForLine(d, it.productId, it.optionId);
+      if (!pl.ok) return { ok: false, error: `สินค้า ${resolved.name}: ${pl.error}`, status: 409 };
+      printExtra = pl.extra;
+      printId = it.printDesignId;
+      printUsed.push(d!);
+      const baseEn = variantEn ?? variant;
+      variant = [variant, pl.label].filter(Boolean).join(" · ");
+      variantEn = [baseEn, pl.labelEn].filter(Boolean).join(" · ");
+    }
+    const unitPrice = Math.round((price + printExtra) * 100) / 100;
+    const lineTotal = Math.round(unitPrice * it.qty * 100) / 100;
     subtotal += lineTotal;
     lines.push({
+      ...(printId ? { print_design_id: printId } : {}),
       personalize,
       sku_id: picked.sku?.id ?? null,
       sku_code: picked.sku?.code ?? null,
@@ -586,7 +611,7 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       // ช่อง name_en ที่กรอกเป็นไทย (ข้อมูลเก่า) = ไม่ถือเป็นชื่ออังกฤษ
       name_en: resolved.name_en && !/[฀-๿]/.test(resolved.name_en) ? resolved.name_en : null,
       variant_label_en: variantEn && variantEn !== variant ? variantEn : null,
-      unit_price: price,
+      unit_price: unitPrice,
       qty: it.qty,
       line_total: lineTotal,
       ...(ig.gift ? { gift: ig.gift } : {}),
@@ -749,6 +774,14 @@ export async function createStorefrontOrder(sb: Admin, shop: OrderShop, raw: unk
       const { error: bdErr } = await sb.from("belt_designs").update({ status: "ordered", order_ref: order.order_no, updated_at: new Date().toISOString() }).in("id", beltIds);
       if (bdErr) console.error("[website-orders] mark belt designs ordered", bdErr);
       for (const id of beltIds) await writeAudit(sb, { action: "order", entityType: "belt_designs", entityId: id, actorName: input.customer.phone, metadata: { order_no: order.order_no, order_id: order.id, shop: shop.slug } });
+    }
+    // 🖨 แบบลายรีด → สั่งแล้ว · มีรูปอัปเอง = เข้าคิวรอตรวจลาย (พังก็ไม่ล้มออเดอร์ — แค่ log)
+    if (printUsed.length) {
+      try {
+        await markPrintDesignsOrdered(sb, printUsed, order.order_no);
+      } catch (e) {
+        console.error("[website-orders] mark print designs ordered", e);
+      }
     }
 
     // ⭐ ตัดแต้มจริง (ล็อกแถวสมาชิก) — ไม่พอแล้ว (ใช้ไปกับอีกออเดอร์พร้อมกัน) = ยกเลิกออเดอร์นี้ทั้งใบ ไม่ให้ได้ส่วนลดฟรี

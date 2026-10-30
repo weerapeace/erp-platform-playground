@@ -8,6 +8,7 @@
 import { cleanCategoryKey } from "@/lib/website-field-map";
 import { cleanDetailOverrides, type DetailOverride } from "@/lib/website-detail-overrides";
 import { normalizePersonalize, type PersonalizeConfig } from "@/lib/website-personalize";
+import { normalizePrintDesign, type PrintDesignConfig } from "@/lib/website-print-design";
 import { normalizeBanners } from "@/lib/website-banners";
 import { normalizeCardColors, isEmptyCardColors } from "@/lib/website-card-colors";
 import { normalizeHero } from "@/lib/website-hero";
@@ -36,6 +37,8 @@ export type ListingPatch = {
   webOptions?: unknown;
   webDetails?: Record<string, DetailOverride>;
   webPersonalize?: PersonalizeConfig | null;
+  /** 🖨 ลายรีดบนกระเป๋า (lib/website-print-design) */
+  webPrint?: PrintDesignConfig | null;
   webBanners?: unknown;
   webCardColors?: unknown;
   webHero?: unknown;
@@ -115,6 +118,7 @@ export function listingPatchToRow(p: ListingPatch): Record<string, unknown> {
     row.web_details = Object.keys(clean).length ? clean : null;
   }
   if (p.webPersonalize !== undefined) row.web_personalize = p.webPersonalize ? normalizePersonalize(p.webPersonalize) : null;
+  if (p.webPrint !== undefined) row.web_print = p.webPrint ? normalizePrintDesign(p.webPrint) : null;
   if (p.webBanners !== undefined) {
     const banners = normalizeBanners(p.webBanners);
     row.web_banners = banners.length ? banners : null;

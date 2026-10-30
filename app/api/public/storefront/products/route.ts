@@ -29,6 +29,7 @@ import {
 import { cleanDetailOverrides } from "@/lib/website-detail-overrides";
 import { loadParentWebFields, loadParentImageFields, resolveRelatedValues, productWebAttrs } from "@/lib/website-parent-fields";
 import { normalizePersonalize } from "@/lib/website-personalize";
+import { normalizePrintDesign, printDesignUsable } from "@/lib/website-print-design";
 import { baseColor } from "@/lib/website-size-options";
 import { productDimensions, bilingualDimensions, fitLabels, type FitItem, type DimensionRow } from "@/lib/product-fits";
 import { fitNames, fitTargetOf, parseCompartments, withFitLines, type FitTarget } from "@/lib/fit-check";
@@ -97,7 +98,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: listData } = await sb
     .from("store_listings")
     .select(
-      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_categories, web_options, web_badge, web_stock_status, web_swatch, web_variant_off, web_size_guide, web_related, web_seo"
+      "parent_sku_id, is_published, featured, sort_order, web_name, web_price, web_description, web_images, web_sku_images, web_details, web_personalize, web_print, web_banners, web_card_colors, web_hero, created_at, web_unit, web_category, web_categories, web_options, web_badge, web_stock_status, web_swatch, web_variant_off, web_size_guide, web_related, web_seo"
     )
     .eq("shop_id", s.id)
     .eq("is_published", true)
@@ -275,6 +276,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
             colorOverrides: Object.fromEntries(Object.entries(pz.colorOverrides).map(([skuId, o]) => [optIdOfSku(skuId), o])),
           }
         : null;
+      // 🖨 ลายรีดบนกระเป๋า: ส่งเฉพาะรุ่นที่เปิดและตั้งครบ · รูปพื้นของส่วนพิมพ์ → URL (เว็บสลับเป็นรูปมุมเดียวกันของสีที่เลือกเอง)
+      const pr = l.web_print ? normalizePrintDesign(l.web_print) : null;
+      const printDesign = printDesignUsable(pr)
+        ? { ...pr, zones: pr.zones.map((z) => ({ ...z, imageUrl: imageUrl(z.imageKey ?? r.images[0] ?? p.cover_image_r2_key ?? "") })) }
+        : null;
       const attrs = productWebAttrs(p as unknown as Record<string, unknown>, parentFields, relatedValues);
       return {
         id: p.id,
@@ -427,6 +433,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         detailOverrides: Object.keys(detailOverrides).length ? detailOverrides : undefined,
         /** ปั๊มชื่อ (null = รุ่นนี้ปั๊มไม่ได้) */
         personalize,
+        ...(printDesign ? { printDesign } : {}),
         /** 🎴 การ์ดสินค้า: id ตัวเลือกที่โชว์เป็นจุดสี (เรียงตามที่ตั้ง · [] = ไม่โชว์) + สีหลัก (รูปแรกบนการ์ด) — ไม่มี = ทุกสีตามลำดับเดิม */
         ...(() => {
           const cc = resolveCardColors(r.options?.items ?? [], normalizeCardColors(l.web_card_colors));
