@@ -10,6 +10,9 @@ import {
   printLineSuffix,
   printQuality,
   printTierOf,
+  printZoneClip,
+  printZoneOutline,
+  printZonePath,
   splitPrintLine,
   type PrintDesignConfig,
   type PrintLibLookup,
@@ -156,5 +159,44 @@ describe("รหัสบรรทัดตะกร้า", () => {
     expect(splitPrintLine(line)).toEqual({ rest: "sku-1234abcd#pz:emboss:center:AB", design: { id, extra: 200, count: 3 } });
     expect(splitPrintLine("sku-1")).toEqual({ rest: "sku-1", design: null });
     expect(splitPrintLine("sku-1#pd:nope:1:1").design).toBeNull();
+  });
+});
+
+describe("ทรงของส่วนพิมพ์", () => {
+  const base = { id: "a", x: 10, y: 10, w: 50, h: 40, widthCm: 20, heightCm: 16 };
+  it("ข้อมูลเก่าไม่มีทรง = สี่เหลี่ยม ไม่ตัดลาย", () => {
+    const z = normalizePrintDesign({ zones: [base] }).zones[0];
+    expect(z.shape).toBe("rect");
+    expect(z.pts).toEqual([]);
+    expect(printZoneClip(z)).toBeUndefined();
+    expect(printZonePath(z)).toBe("M0 0L100 0L100 100L0 100L0 0Z");
+  });
+  it("สามเหลี่ยม/สี่เหลี่ยมดัดทรง จุดไม่ครบ → ใช้จุดเริ่ม · ปากกาจุดไม่ถึง 3 → กลับเป็นสี่เหลี่ยม", () => {
+    const zs = normalizePrintDesign({
+      zones: [
+        { ...base, id: "t", shape: "tri", pts: [{ x: 0, y: 0 }] },
+        { ...base, id: "q", shape: "quad", pts: [{ x: 0.1, y: 0 }, { x: 1, y: 0.2 }, { x: 0.9, y: 1 }, { x: 0, y: 0.8, hx: 0.5 }] },
+        { ...base, id: "p", shape: "pen", pts: [{ x: 0, y: 0 }, { x: 1, y: 1 }] },
+        { ...base, id: "s", shape: "star" },
+      ],
+    }).zones;
+    expect(zs[0].pts.map((p) => [p.x, p.y])).toEqual([[0.5, 0], [1, 1], [0, 1]]);
+    expect(zs[1].pts[3]).toEqual({ x: 0, y: 0.8, hx: 0, hy: 0 });
+    expect(zs[2].shape).toBe("rect");
+    expect(zs[3].shape).toBe("rect");
+  });
+  it("วงกลมตัดด้วย ellipse() · ปากกาโค้งแบ่งเป็นจุดย่อยอยู่ในกรอบ", () => {
+    const [c, p] = normalizePrintDesign({
+      zones: [
+        { ...base, id: "c", shape: "ellipse" },
+        { ...base, id: "p", shape: "pen", pts: [{ x: 0, y: 1 }, { x: 0.5, y: 0, hx: 0.3, hy: 0 }, { x: 1, y: 1 }, { x: 9, y: -3, hx: 7 }] },
+      ],
+    }).zones;
+    expect(printZoneClip(c)).toBe("ellipse(50% 50% at 50% 50%)");
+    expect(p.pts[3]).toEqual({ x: 1, y: 0, hx: 2, hy: 0 });
+    const out = printZoneOutline(p);
+    expect(out.length).toBeGreaterThan(4);
+    expect(printZoneClip(p)?.startsWith("polygon(0% 100%, ")).toBe(true);
+    expect(printZonePath(p)).toContain("C");
   });
 });

@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { CopyButton } from "@/components/copy-button";
-import type { PrintPlacement, PrintZone } from "@/lib/website-print-design";
+import { printZoneClip, printZonePath, printZoneShapeLabel, type PrintPlacement, type PrintZone } from "@/lib/website-print-design";
 
 type ZoneView = PrintZone & { imageUrl: string | null };
 type PlacementView = PrintPlacement & {
@@ -128,9 +128,11 @@ export function PrintDesignOrderPanel({ shopSlug, designId, onChanged }: { shopS
             )}
             {data.zones
               .filter((z) => (z.imageUrl ?? "") === url)
-              .map((z) => (
-                <div key={z.id} className="absolute border border-dashed border-violet-500" style={{ left: `${z.x}%`, top: `${z.y}%`, width: `${z.w}%`, height: `${z.h}%`, transform: z.rot ? `rotate(${z.rot}deg)` : undefined }}>
-                  {data.placements.map((p, i) =>
+              .map((z) => {
+                // ทรงอื่นที่ไม่ใช่สี่เหลี่ยม: ลายส่วนที่เกินขอบทรงไม่พิมพ์ → วาดจาง + ชั้นที่ตัดตามทรงทับ
+                const clip = printZoneClip(z);
+                const layer = (mode: "img" | "badge") =>
+                  data.placements.map((p, i) =>
                     p.zone !== z.id ? null : (
                       <div
                         key={i}
@@ -143,20 +145,40 @@ export function PrintDesignOrderPanel({ shopSlug, designId, onChanged }: { shopS
                           transform: `translate(-50%, -50%) rotate(${p.rot}deg)`,
                         }}
                       >
-                        {p.previewUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={p.previewUrl} alt="" className="h-full w-full object-fill" />
+                        {mode === "img" ? (
+                          p.previewUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={p.previewUrl} alt="" className="h-full w-full object-fill" />
+                          ) : (
+                            <div className="h-full w-full bg-violet-200/60" />
+                          )
                         ) : (
-                          <div className="h-full w-full bg-violet-200/60" />
+                          <span className="absolute -left-1.5 -top-1.5 grid h-4 w-4 place-items-center rounded-full bg-violet-600 text-[9px] font-semibold text-white" style={{ transform: `rotate(${-p.rot}deg)` }}>
+                            {i + 1}
+                          </span>
                         )}
-                        <span className="absolute -left-1.5 -top-1.5 grid h-4 w-4 place-items-center rounded-full bg-violet-600 text-[9px] font-semibold text-white" style={{ transform: `rotate(${-p.rot}deg)` }}>
-                          {i + 1}
-                        </span>
                       </div>
                     ),
-                  )}
-                </div>
-              ))}
+                  );
+                return (
+                  <div key={z.id} className="absolute" style={{ left: `${z.x}%`, top: `${z.y}%`, width: `${z.w}%`, height: `${z.h}%`, transform: z.rot ? `rotate(${z.rot}deg)` : undefined }}>
+                    {clip ? (
+                      <>
+                        <div className="absolute inset-0 opacity-30">{layer("img")}</div>
+                        <div className="absolute inset-0" style={{ clipPath: clip }}>
+                          {layer("img")}
+                        </div>
+                      </>
+                    ) : (
+                      layer("img")
+                    )}
+                    <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none">
+                      <path d={printZonePath(z)} fill="none" stroke="#8b5cf6" strokeWidth={1.5} strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+                    </svg>
+                    {layer("badge")}
+                  </div>
+                );
+              })}
           </div>
         ))}
       </div>
@@ -189,7 +211,10 @@ export function PrintDesignOrderPanel({ shopSlug, designId, onChanged }: { shopS
                       <span className="max-w-[10rem] truncate">{p.name}</span>
                     </span>
                   </td>
-                  <td className="px-2 py-1">{z?.label ?? p.zone}</td>
+                  <td className="px-2 py-1">
+                    {z?.label ?? p.zone}
+                    {z?.shape && z.shape !== "rect" && <span className="text-slate-400"> ({printZoneShapeLabel(z.shape)} · ตัดตามขอบ)</span>}
+                  </td>
                   <td className="px-2 py-1 font-mono">
                     {f1(p.w)} × {f1(p.h)} <span className="text-slate-400">({p.tier})</span>
                   </td>

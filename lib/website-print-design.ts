@@ -25,6 +25,22 @@ export const PRINT_MAX_ZONES = 6;
 export const PRINT_MAX_PER_ZONE = 12;
 export const PRINT_MAX_LIBRARY_SETS = 10;
 
+/**
+ * ทรงของส่วนพิมพ์ — ทุกทรงตัดลายตามขอบ (ส่วนของลายที่เกินขอบทรงไม่ถูกพิมพ์ · ลายไม่บิดตามทรง)
+ * tri/quad/pen ใช้จุด pts · rect/ellipse ใช้กรอบตรง ๆ
+ */
+export type PrintZoneShape = "rect" | "ellipse" | "tri" | "quad" | "pen";
+export const PRINT_ZONE_SHAPES: readonly { id: PrintZoneShape; label: string; labelEn: string }[] = [
+  { id: "rect", label: "สี่เหลี่ยม", labelEn: "Rectangle" },
+  { id: "ellipse", label: "วงกลม/วงรี", labelEn: "Circle" },
+  { id: "tri", label: "สามเหลี่ยม", labelEn: "Triangle" },
+  { id: "quad", label: "สี่เหลี่ยมดัดทรง", labelEn: "Free quad" },
+  { id: "pen", label: "ปากกา", labelEn: "Pen" },
+];
+/** จุดของทรง (สัดส่วน 0..1 ของกรอบก่อนหมุน) · hx/hy = ก้านดัดโค้งของปากกา (หน่วยเดียวกัน · 0 = มุมแหลม) */
+export type PrintZonePoint = { x: number; y: number; hx: number; hy: number };
+export const PRINT_ZONE_MAX_POINTS = 40;
+
 export type PrintZone = {
   /** a-z 0-9 - (≤20) */
   id: string;
@@ -41,7 +57,11 @@ export type PrintZone = {
   h: number;
   /** หมุนกรอบรอบจุดกึ่งกลาง (องศา −180..180) — รูปที่ถ่ายกระเป๋าเอียง · ลายในกรอบหมุนตาม */
   rot: number;
-  /** ขนาดจริงของกรอบ (ซม.) */
+  /** ทรงของส่วนพิมพ์ · ข้อมูลเก่าที่ไม่มี = สี่เหลี่ยม */
+  shape: PrintZoneShape;
+  /** จุดของทรง สามเหลี่ยม/สี่เหลี่ยมดัดทรง/ปากกา · สี่เหลี่ยม/วงกลม = [] */
+  pts: PrintZonePoint[];
+  /** ขนาดจริงของกรอบ (ซม.) — ทรงอื่นวัดจากกรอบสี่เหลี่ยมที่ครอบทรง */
   widthCm: number;
   heightCm: number;
 };
@@ -79,11 +99,45 @@ const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n
 const str = (v: unknown, max: number) => String(v ?? "").trim().slice(0, max);
 const r1 = (n: number) => Math.round(n * 10) / 10;
 const r2 = (n: number) => Math.round(n * 100) / 100;
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const baht = (v: unknown, d: number) => Math.round(clamp(num(v, d), 0, 100000));
 
 /** ส่วนพิมพ์ใหม่ (ค่าเริ่ม: กลางรูป 50×40% = 25×15 ซม.) */
 export function newPrintZone(index: number): PrintZone {
-  return { id: `z${index + 1}`, label: index === 0 ? "ด้านหน้า" : `ส่วนที่ ${index + 1}`, labelEn: index === 0 ? "Front" : "", imageKey: null, x: 25, y: 30, w: 50, h: 40, rot: 0, widthCm: 25, heightCm: 15 };
+  return { id: `z${index + 1}`, label: index === 0 ? "ด้านหน้า" : `ส่วนที่ ${index + 1}`, labelEn: index === 0 ? "Front" : "", imageKey: null, x: 25, y: 30, w: 50, h: 40, rot: 0, shape: "rect", pts: [], widthCm: 25, heightCm: 15 };
+}
+
+/** จุดเริ่มของทรงที่ใช้จุด (ปากกาเริ่มว่าง — วาดเอง) */
+export function defaultShapePoints(shape: PrintZoneShape): PrintZonePoint[] {
+  const p = (x: number, y: number): PrintZonePoint => ({ x, y, hx: 0, hy: 0 });
+  if (shape === "tri") return [p(0.5, 0), p(1, 1), p(0, 1)];
+  if (shape === "quad") return [p(0, 0), p(1, 0), p(1, 1), p(0, 1)];
+  return [];
+}
+
+function normPoints(raw: unknown, curves: boolean): PrintZonePoint[] {
+  const out: PrintZonePoint[] = [];
+  for (const p0 of Array.isArray(raw) ? raw : []) {
+    if (out.length >= PRINT_ZONE_MAX_POINTS) break;
+    const p = (p0 && typeof p0 === "object" ? p0 : {}) as Record<string, unknown>;
+    out.push({
+      x: r3(clamp(num(p.x, 0), 0, 1)),
+      y: r3(clamp(num(p.y, 0), 0, 1)),
+      hx: curves ? r3(clamp(num(p.hx, 0), -2, 2)) : 0,
+      hy: curves ? r3(clamp(num(p.hy, 0), -2, 2)) : 0,
+    });
+  }
+  return out;
+}
+
+/** ทรง + จุดที่ใช้ได้จริง (สามเหลี่ยม 3 จุด · สี่เหลี่ยมดัดทรง 4 จุด · ปากกา ≥3 จุด ไม่งั้นกลับเป็นสี่เหลี่ยม) */
+function normShape(shape: unknown, pts: unknown): { shape: PrintZoneShape; pts: PrintZonePoint[] } {
+  const s = PRINT_ZONE_SHAPES.find((x) => x.id === shape)?.id ?? "rect";
+  if (s === "rect" || s === "ellipse") return { shape: s, pts: [] };
+  const list = normPoints(pts, s === "pen");
+  if (s === "pen") return list.length >= 3 ? { shape: s, pts: list } : { shape: "rect", pts: [] };
+  const n = s === "tri" ? 3 : 4;
+  return { shape: s, pts: list.length === n ? list : defaultShapePoints(s) };
 }
 
 export function normalizePrintZone(raw: unknown, index: number): PrintZone {
@@ -101,6 +155,7 @@ export function normalizePrintZone(raw: unknown, index: number): PrintZone {
     w: r2(clamp(num(z.w, 50), 1, 100 - x)),
     h: r2(clamp(num(z.h, 40), 1, 100 - y)),
     rot: normRot(num(z.rot, 0)),
+    ...normShape(z.shape, z.pts),
     widthCm: r1(clamp(num(z.widthCm, 25), 2, 120)),
     heightCm: r1(clamp(num(z.heightCm, 15), 2, 120)),
   };
@@ -155,7 +210,65 @@ export function normRot(rot: number): number {
   return r - 180;
 }
 
-type Geo = { x: number; y: number; w: number; h: number; rot: number };
+/* ── ทรงของส่วนพิมพ์ (รับข้อมูลเก่าที่ไม่มี shape ได้ = สี่เหลี่ยม) ── */
+type ShapeLike = { shape?: PrintZoneShape; pts?: PrintZonePoint[] };
+const shapePoints = (z: ShapeLike): PrintZonePoint[] =>
+  (z.shape === "tri" || z.shape === "quad" || z.shape === "pen") && z.pts && z.pts.length >= 3 ? z.pts : defaultShapePoints("quad");
+
+export function printZoneShapeLabel(shape: PrintZoneShape | undefined, lang: "th" | "en" = "th"): string {
+  const s = PRINT_ZONE_SHAPES.find((x) => x.id === (shape ?? "rect")) ?? PRINT_ZONE_SHAPES[0];
+  return lang === "en" ? s.labelEn : s.label;
+}
+
+/** เส้นขอบของทรงเป็นจุดต่อกัน (สัดส่วน 0..1 ของกรอบ) — ใช้ตัดลาย/หากรอบที่ครอบทรง · โค้งของปากกาแบ่งเป็นเส้นสั้น */
+export function printZoneOutline(z: ShapeLike, steps = 12): [number, number][] {
+  if (z.shape === "ellipse") {
+    return Array.from({ length: 64 }, (_, i): [number, number] => {
+      const a = (i / 64) * Math.PI * 2;
+      return [r3(0.5 + 0.5 * Math.cos(a)), r3(0.5 + 0.5 * Math.sin(a))];
+    });
+  }
+  const pts = shapePoints(z);
+  const out: [number, number][] = [];
+  pts.forEach((a, i) => {
+    const b = pts[(i + 1) % pts.length];
+    out.push([r3(a.x), r3(a.y)]);
+    if (!(a.hx || a.hy || b.hx || b.hy)) return;
+    const c1 = [a.x + a.hx, a.y + a.hy];
+    const c2 = [b.x - b.hx, b.y - b.hy];
+    for (let k = 1; k < steps; k++) {
+      const t = k / steps;
+      const u = 1 - t;
+      const bez = (p0: number, p1: number, p2: number, p3: number) => u * u * u * p0 + 3 * u * u * t * p1 + 3 * u * t * t * p2 + t * t * t * p3;
+      out.push([r3(bez(a.x, c1[0], c2[0], b.x)), r3(bez(a.y, c1[1], c2[1], b.y))]);
+    }
+  });
+  return out;
+}
+
+/** เส้นขอบทรงแบบ SVG path (พิกัด 0..100 ของกรอบ — ใช้กับ viewBox="0 0 100 100" preserveAspectRatio="none") */
+export function printZonePath(z: ShapeLike): string {
+  if (z.shape === "ellipse") return "M0 50A50 50 0 1 0 100 50A50 50 0 1 0 0 50Z";
+  const pts = shapePoints(z);
+  const f = (n: number) => r2(n * 100);
+  let d = `M${f(pts[0].x)} ${f(pts[0].y)}`;
+  pts.forEach((a, i) => {
+    const b = pts[(i + 1) % pts.length];
+    d += a.hx || a.hy || b.hx || b.hy ? `C${f(a.x + a.hx)} ${f(a.y + a.hy)} ${f(b.x - b.hx)} ${f(b.y - b.hy)} ${f(b.x)} ${f(b.y)}` : `L${f(b.x)} ${f(b.y)}`;
+  });
+  return `${d}Z`;
+}
+
+/** CSS clip-path ของทรง (ใส่ที่ชั้นลายในกรอบ — ส่วนที่เกินขอบไม่ถูกพิมพ์) · สี่เหลี่ยม = ไม่ต้องตัด (ลายถูกจัดให้อยู่ในกรอบอยู่แล้ว) */
+export function printZoneClip(z: ShapeLike): string | undefined {
+  if (!z.shape || z.shape === "rect") return undefined;
+  if (z.shape === "ellipse") return "ellipse(50% 50% at 50% 50%)";
+  return `polygon(${printZoneOutline(z)
+    .map(([x, y]) => `${r2(x * 100)}% ${r2(y * 100)}%`)
+    .join(", ")})`;
+}
+
+type Geo ={ x: number; y: number; w: number; h: number; rot: number };
 
 /**
  * จัดลายให้อยู่ในส่วนพิมพ์: ย่อถ้าใหญ่เกิน · ไม่ต่ำกว่าขนาดเล็กสุด · เลื่อนให้กรอบหลังหมุนอยู่ในพื้นที่ทั้งชิ้น
