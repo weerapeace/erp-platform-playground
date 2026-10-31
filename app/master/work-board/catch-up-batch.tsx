@@ -509,6 +509,12 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     await loadSales(rows.map((x) => x.moNo)); setSalesBusy(false);
     toast.success(`${canLinkSales ? "ผูกใบขาย" : "ตั้งขั้นส่งออก"} ${ok} ใบ — ตั้งขั้น "ส่งออกจาก QC แล้ว · ขายออกเลย" ให้แล้ว (ขั้นก่อนหน้ายังต้องกรอก)`);
   };
+  // 🧾 ใบที่ผูกใบขายครบจำนวนแล้ว (เช่น มาจาก "อัปเดตงานจากใบขาย") → ตั้งขั้นส่งออกทีเดียวทุกใบ · ผูกไม่ครบ = ให้เลือกที่เหลือทีละใบเหมือนเดิม
+  const linkedFullRows = rows.filter((r) => { const m = sales?.[r.moNo]; return r.snap && r.phase === "edit" && !modeOf(r).blockedBy && m?.kind === "linked" && m.covered >= m.qty - 0.0001; });
+  const shipAllLinked = () => {
+    for (const r of linkedFullRows) { const m = sales?.[r.moNo]; if (m) toShip(r, m.linked); }
+    toast.success(`ตั้งขั้น "ส่งออกจาก QC แล้ว · ขายออกเลย" ${linkedFullRows.length} ใบ — วันส่ง = วันที่ใบขาย (ขั้นก่อนหน้ายังต้องกรอก)`);
+  };
   const salesCell = (r: BRow) => {
     if (!sales) return <span className="text-[11px] text-slate-400">กำลังเช็กใบขาย…</span>;
     const m = sales[r.moNo];
@@ -1027,6 +1033,12 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
             <button type="button" disabled={busy || salesBusy} onClick={() => void linkAllExact()} title="ใบที่จำนวนตรงกับใบขาย (ส่งลูกค้าแล้ว) — ผูกแล้วตั้งขั้นส่งออกให้ทุกใบ"
               className="inline-flex h-9 items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-40">
               <Icon name="receipt" /> {canLinkSales ? "ผูกใบขายที่ตรงจำนวน" : "ใช้ใบขายที่ตรงจำนวน"} ({exactRows.length}) → ขั้นส่งออก
+            </button>
+          )}
+          {linkedFullRows.length > 0 && (
+            <button type="button" disabled={busy || salesBusy} onClick={shipAllLinked} title="ใบที่ผูกใบขายครบจำนวนแล้ว — ตั้งขั้นส่งออก (วันส่ง = วันที่ใบขาย) ให้ทุกใบ"
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-40">
+              <Icon name="receipt" /> ใบที่ผูกใบขายครบแล้ว ({linkedFullRows.length}) → ขั้นส่งออก
             </button>
           )}
           <span className="text-[11px] text-slate-400">ใบไหนซับซ้อน (ยังขาดของบางรายการ / แจ้งปัญหา / จัดคนในโต๊ะ) กด &ldquo;เปิดแบบละเอียด&rdquo;</span>
