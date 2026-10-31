@@ -1071,7 +1071,8 @@ const WO_EXTRAS_CSS = `
 `;
 
 // CSS ทับท้าย — ปรับเส้นตาราง (หนา · สี · แบบเส้น) ใช้ทั้งบนจอและตอนพิมพ์ให้เห็นเหมือนกัน
-function woStyleCss(style: WoPrintStyle): string {
+// export: ใบรวมทั้งรุ่น (lib/family-print) ใช้ค่าเดียวกัน
+export function woStyleCss(style: WoPrintStyle): string {
   const w = `${style.border_mm}mm`, c = style.border_color;
   const cells = ".summary-table th, .summary-table td, .doc-table th, .doc-table td";
   const rule =

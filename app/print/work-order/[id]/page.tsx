@@ -10,6 +10,8 @@ import { buildReportHtml, buildReportHtmlMulti, type ReportTemplate } from "@/li
 import { buildWorkOrderTemplate, woSectionDataList, woScalars, woTableRows, buildWoHtmlData, woBarcodeHtml, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
 import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
+import { Icon } from "@/components/icon";
+import { familyPrintUrl } from "@/lib/family-print";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Font, Plugins, Schema, Template } from "@pdfme/common";
 
@@ -196,6 +198,10 @@ export default function PrintWorkOrderPage() {
         </label>
         {/* ปรับความกว้างคอลัมน์ / เปิด-ปิดช่องรูป — ใช้ได้กับเทมเพลตค่าเริ่มต้น (HTML) เท่านั้น */}
         {!pdfmeTemplate && <WoColumnSettings onPreview={setPreviewCols} onSaved={reloadCols} />}
+        {/* รวมของที่ต้องซื้อ-ตัด ของทุกสีในรุ่นเดียวกัน (ทุกใบที่ยังเปิด) ในแผ่นเดียว */}
+        <a href={familyPrintUrl({ mo: id })} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 no-underline hover:bg-slate-50">
+          <Icon name="print" /> พิมพ์รวมทั้งรุ่น
+        </a>
         <div className="flex-1" />
         {pdfmeTemplate ? (
           <>

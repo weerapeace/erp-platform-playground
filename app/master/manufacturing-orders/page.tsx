@@ -27,6 +27,7 @@ import { WorkInstructionPanel } from "@/components/work-instruction";
 import { ParentIssuesPanel } from "@/components/parent-issues-panel";
 import { MoStockActions } from "@/components/mo-stock-actions";
 import { MoCreateModal } from "@/components/mo-create";
+import { familyPrintUrl } from "@/lib/family-print";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
 type PreviewMat = {
@@ -497,6 +498,7 @@ export default function MoWorkspacePage() {
           bulkActions={[
             { label: "🗂 จัดกลุ่มใบสั่งงาน", onClick: (rows) => { const nos = rows.map((r) => r.mo_no).filter(Boolean); if (nos.length) setAssignMos(nos); } },
             { label: "🖨️ พิมพ์ใบสั่งงาน", onClick: (rows) => { const ids = rows.map((r) => r.id).filter(Boolean).join(","); if (ids) window.open(`/print/work-order?ids=${ids}`, "_blank", "noopener"); } },
+            { label: "พิมพ์รวมทั้งรุ่น (ของ × สี)", onClick: (rows) => { const ids = rows.map((r) => r.id).filter(Boolean); if (ids.length) window.open(familyPrintUrl({ ids }), "_blank", "noopener"); } },
             { label: "🧷 พิมพ์ใบงานเข็มขัด", onClick: (rows) => { const nos = rows.map((r) => r.mo_no).filter(Boolean).join(","); if (nos) window.open(`/print/belt-work-order?mos=${encodeURIComponent(nos)}`, "_blank", "noopener"); } },
           ]}
           rowActions={canEdit ? [

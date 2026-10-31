@@ -14,6 +14,8 @@ import { buildReportHtmlMulti } from "@/lib/template";
 import { buildWorkOrderTemplate, woSectionDataList, buildWoHtmlData, woBarcodeHtml, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
 import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
+import { Icon } from "@/components/icon";
+import { familyPrintUrl } from "@/lib/family-print";
 
 function BulkPrintInner() {
   const sp = useSearchParams();
@@ -74,6 +76,10 @@ function BulkPrintInner() {
         <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
         <span className="text-sm text-slate-600">🖨️ พิมพ์ใบสั่งงานรวม <b>{ids.length}</b> ใบ {data === null && `(กำลังโหลด ${done}/${ids.length})`}</span>
         <WoColumnSettings onPreview={setPreviewCols} onSaved={reloadCols} />
+        {/* ใบที่เลือกแบบรวมทั้งรุ่น: ตาราง ของ × สี (รุ่นละ 1 แผ่น) */}
+        <a href={familyPrintUrl({ ids })} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 no-underline hover:bg-slate-50">
+          <Icon name="print" /> รวมทั้งรุ่น (ของ × สี)
+        </a>
         <div className="flex-1" />
         <PrintDocLinkButton html={html} fileName={docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`)}
           className="inline-flex h-9 items-center rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
