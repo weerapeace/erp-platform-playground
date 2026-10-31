@@ -205,6 +205,10 @@ export default function PrintWorkOrderPage() {
         <a href={familyPrintUrl({ mo: id })} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 no-underline hover:bg-slate-50">
           <Icon name="print" /> พิมพ์รวมทั้งรุ่น
         </a>
+        {/* ใบลงรายการแบบเขียน: ช่างที่จ่าย · ค่าแรง · วันจ่าย/รับ · จำนวน ของทั้งรุ่น (แบบ A + D) */}
+        <a href={familyPrintUrl({ mo: id }, "track")} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 no-underline hover:bg-slate-50">
+          <Icon name="list" /> ใบติดตามงานทั้งรุ่น
+        </a>
         <div className="flex-1" />
         {pdfmeTemplate ? (
           <>

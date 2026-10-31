@@ -3,7 +3,8 @@
  *   ?ids=<id>,<id>   ใบที่เลือก (ติ๊กหลายใบ) → แยกเป็นรุ่น ๆ ละ 1 แผ่น
  *   ?mo=<id>         ใบเดียว → ขยายเป็น "ทุกใบที่ยังเปิด" ของรุ่นเดียวกัน
  *   ?parent=<code>   รหัสสินค้าแม่ → ทุกใบที่ยังเปิดของรุ่นนั้น
- * คืนข้อมูลดิบต่อรุ่น (ใบ · สี · วัตถุดิบ+สถานะซื้อ · บล็อกตัด) → หน้าพิมพ์ประกอบเป็นตารางด้วย lib/family-print
+ * คืนข้อมูลดิบต่อรุ่น (ใบ · สี · วัตถุดิบ+สถานะซื้อ · บล็อกตัด · ความคืบหน้า: ใบจ่ายงาน/รอบส่งงาน/QC)
+ *   → หน้าพิมพ์ประกอบเป็นใบซื้อ-ตัด (lib/family-print) หรือใบติดตามงาน A/D (lib/family-track)
  * ของกลาง: guardApi(products.view) · สถานะซื้อ = lib/mo-material-status (กติกาเดียวกับบอร์ด/หน้าขอซื้อ) · fetchAllPages กันตัด 1,000 แถว
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -11,14 +12,15 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { loadMoPurchaseLinks, computeMatStatus, linkKey } from "@/lib/mo-material-status";
-import type { FamilyBuyLine, FamilyCutLine, FamilyInput, FamilyMo, FamilyPrintResponse } from "@/lib/family-print";
+import { parseSkipped } from "@/lib/mo-skip";
+import type { FamilyBuyLine, FamilyCutLine, FamilyInput, FamilyMo, FamilyPrintResponse, FamilyWorkOrder } from "@/lib/family-print";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Row = Record<string, unknown>;
-const MO_COLS = "id, mo_no, product_sku, qty, due_date, status, size_breakdown";
+const MO_COLS = "id, mo_no, product_sku, qty, due_date, status, size_breakdown, internal_due_date, prep_done, prep_done_at, cut_done, cut_done_at, materials_issued, finished_received, skipped_stages";
 const CLOSED = "(done,cancelled)";
 const MAX_MOS = 300;
 const CHUNK = 100;
@@ -68,7 +70,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   /* 2) SKU (สี/รูป) + สินค้าแม่ + วัตถุดิบ + บล็อกตัด + ใบขอซื้อ — ยิงพร้อมกัน */
   const moNos = [...new Set(mos.map((m) => str(m.mo_no)))];
   const skuCodes = [...new Set(mos.map((m) => str(m.product_sku)))];
-  const [skuRes, sums, mats, links] = await Promise.all([
+  const byMo = (table: string, cols: string, order: string) => Promise.all(chunks(moNos).map((c) => fetchAllPages<Row>((from, to) =>
+    admin.from(table).select(cols).in("mo_no", c).order("mo_no").order(order).order("id").range(from, to)))).then((x) => x.flat());
+  const [skuRes, sums, mats, links, wos, subs, qcs] = await Promise.all([
     Promise.all(chunks(skuCodes, 200).map((c) => admin.from("skus_v2").select("code, color_th, color, attribute_values, cover_image_r2_key, parent_sku_id").in("code", c).eq("is_active", true))),
     Promise.all(chunks(moNos).map((c) => fetchAllPages<Row>((from, to) => admin.from("mo_material_summary")
       .select("id, mo_no, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence")
@@ -77,6 +81,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .select("id, mo_no, component_sku, component_name, material_type, cut_block_code, cut_width, cut_length, pieces, size_label, cut_done, sequence")
       .in("mo_no", c).eq("is_active", true).order("mo_no").order("sequence", { ascending: true, nullsFirst: false }).order("id").range(from, to)))).then((x) => x.flat()),
     loadMoPurchaseLinks(admin, moNos),
+    // ใบติดตามงาน: ใบจ่ายงาน (ที่ยังใช้อยู่) · รอบส่งงาน · ของที่เข้าโกดัง QC
+    byMo("mo_work_orders", "id, wo_no, mo_no, assignee_type, assignee_name, assignees, department_name, qty, dispatch_date, due_date, labor_cost, received_qty, qc_pulled_qty, status, is_active", "created_at")
+      .then((r) => r.filter((w) => w.is_active)),
+    byMo("wo_submissions", "id, wo_id, mo_no, qty, wage, submitted_at, craftsman_name", "submitted_at"),
+    byMo("qc_warehouse_items", "id, wo_id, mo_no, qty, status", "created_at"),
   ]);
   const skuByCode = new Map<string, Row>();
   for (const s of skuRes.flatMap((r) => (r.data ?? []) as Row[])) if (!skuByCode.has(str(s.code))) skuByCode.set(str(s.code), s);
@@ -97,7 +106,35 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const parentById = new Map(((parRes.data ?? []) as Row[]).map((p) => [String(p.id), p]));
 
-  /* 3) จัดกลุ่มตามรุ่น */
+  /* 3) ใบจ่ายงานต่อใบสั่งผลิต (+ รอบส่งงาน + ผล QC) */
+  const thDay = (ts: unknown) => (ts ? new Date(new Date(String(ts)).getTime() + 7 * 3600e3).toISOString().slice(0, 10) : null);   // timestamp → วันที่ไทย
+  const subsByWo = new Map<string, FamilyWorkOrder["submissions"]>();
+  for (const s of subs) {
+    const k = str(s.wo_id);
+    subsByWo.set(k, [...(subsByWo.get(k) ?? []), { date: (s.submitted_at as string) ?? null, qty: Number(s.qty) || 0, wage: Number(s.wage) || 0, who: str(s.craftsman_name) || null }]);
+  }
+  const qcByWo = new Map<string, FamilyWorkOrder["qc"]>();
+  for (const q of qcs) {
+    const k = str(q.wo_id), cur = qcByWo.get(k) ?? { good: 0, defect: 0, repairing: 0 };
+    const st = str(q.status) as keyof FamilyWorkOrder["qc"];
+    if (st in cur) cur[st] += Number(q.qty) || 0;
+    qcByWo.set(k, cur);
+  }
+  const wosByMo = new Map<string, FamilyWorkOrder[]>();
+  for (const w of wos) {
+    const people = Array.isArray(w.assignees) ? (w.assignees as { name?: unknown }[]).map((a) => str(a.name)).filter(Boolean) : [];
+    const wo: FamilyWorkOrder = {
+      id: String(w.id), wo_no: str(w.wo_no), who: people.join(", ") || str(w.assignee_name) || str(w.department_name) || "-",
+      dept: str(w.department_name) || null, is_craftsman: w.assignee_type === "craftsman",
+      qty: Number(w.qty) || 0, dispatch_date: (w.dispatch_date as string) ?? null, due_date: (w.due_date as string) ?? null,
+      labor_cost: w.labor_cost != null ? Number(w.labor_cost) : null,
+      received: Number(w.received_qty) || 0, qc_pulled: Number(w.qc_pulled_qty) || 0, status: str(w.status),
+      submissions: subsByWo.get(String(w.id)) ?? [], qc: qcByWo.get(String(w.id)) ?? { good: 0, defect: 0, repairing: 0 },
+    };
+    wosByMo.set(str(w.mo_no), [...(wosByMo.get(str(w.mo_no)) ?? []), wo]);
+  }
+
+  /* 4) จัดกลุ่มตามรุ่น */
   const moByNo = new Map(mos.map((m) => [str(m.mo_no), m]));
   const groups = new Map<string, FamilyInput>();
   const groupOfMo = new Map<string, FamilyInput>();
@@ -112,7 +149,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       groups.set(key, g);
     }
     const sizes = Array.isArray(m.size_breakdown) ? (m.size_breakdown as { label?: unknown; qty?: unknown }[]).map((s) => ({ label: str(s.label), qty: Number(s.qty) || 0 })) : null;
-    const fm: FamilyMo = { id: String(m.id), mo_no: str(m.mo_no), product_sku: str(m.product_sku), qty: Number(m.qty) || 0, due_date: (m.due_date as string) ?? null, status: (m.status as string) ?? null, size_breakdown: sizes };
+    const fm: FamilyMo = {
+      id: String(m.id), mo_no: str(m.mo_no), product_sku: str(m.product_sku), qty: Number(m.qty) || 0, due_date: (m.due_date as string) ?? null, status: (m.status as string) ?? null, size_breakdown: sizes,
+      track: {
+        prep_done: !!m.prep_done, prep_at: thDay(m.prep_done_at), cut_done: !!m.cut_done, cut_at: thDay(m.cut_done_at),
+        internal_due: (m.internal_due_date as string) ?? null, materials_issued: !!m.materials_issued, finished_received: !!m.finished_received,
+        skipped: Object.keys(parseSkipped(m.skipped_stages)),
+        work_orders: wosByMo.get(str(m.mo_no)) ?? [],
+      },
+    };
     g.mos.push(fm);
     groupOfMo.set(fm.mo_no, g);
     if (!g.skus.some((s) => s.code === fm.product_sku)) {

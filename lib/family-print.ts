@@ -19,6 +19,26 @@ export type FamilyMo = {
   id: string; mo_no: string; product_sku: string; qty: number;
   due_date?: string | null; status?: string | null;
   size_breakdown?: { label: string; qty: number }[] | null;
+  /** ความคืบหน้างาน (ใบติดตามงาน lib/family-track) — ไม่มี = ใบซื้อ-ตัดอย่างเดียว */
+  track?: FamilyMoTrack;
+};
+/** สถานะงานของใบ: ติ๊กเตรียม/ตัดระดับใบ · ขั้นที่แอดมินข้าม · เบิกของ/เข้าคลัง · ใบจ่ายงาน */
+export type FamilyMoTrack = {
+  prep_done: boolean; prep_at: string | null; cut_done: boolean; cut_at: string | null;
+  internal_due: string | null; materials_issued: boolean; finished_received: boolean;
+  /** ขั้นที่แอดมินข้าม (lib/mo-skip) เช่น ["prep","cut"] */
+  skipped: string[];
+  work_orders: FamilyWorkOrder[];
+};
+/** ใบจ่ายงาน 1 ใบ (mo_work_orders) + รอบส่งงาน (wo_submissions) + ผล QC (qc_warehouse_items) */
+export type FamilyWorkOrder = {
+  id: string; wo_no: string; who: string; dept: string | null; is_craftsman: boolean;
+  qty: number; dispatch_date: string | null; due_date: string | null;
+  /** ค่าแรงรวมของใบ (เรต × จำนวน) — ไม่ใช่เรตต่อชิ้น */
+  labor_cost: number | null;
+  received: number; qc_pulled: number; status: string;
+  submissions: { date: string | null; qty: number; wage: number; who: string | null }[];
+  qc: { good: number; defect: number; repairing: number };
 };
 export type FamilySku = { code: string; variant: string | null; image_url: string | null };
 /** 1 แถวของ mo_material_summary + สถานะซื้อที่คำนวณแล้ว (computeMatStatus) */
@@ -311,12 +331,16 @@ export function buildFamilySheet(input: FamilyInput): FamilySheet {
   };
 }
 
+/** ใบที่พิมพ์ได้: buy = ซื้อ-ตัด (ของ × สี) · route = ติดตามงานแบบ A · status = ตามสถานะแบบ D · track = A + D */
+export type FamilySheetKind = "buy" | "route" | "status" | "track";
+
 /** ลิงก์หน้าพิมพ์รวมทั้งรุ่น — ทุกทางเข้าเรียกตัวนี้ (หน้าพิมพ์ใบเดียว · พิมพ์รวม · รายการใบสั่งผลิต · หัวกลุ่มบนบอร์ด) */
-export function familyPrintUrl(by: { mo: string } | { ids: string[] } | { parent: string }): string {
+export function familyPrintUrl(by: { mo: string } | { ids: string[] } | { parent: string }, sheet?: FamilySheetKind): string {
   const p = new URLSearchParams();
   if ("mo" in by) p.set("mo", by.mo);
   else if ("ids" in by) p.set("ids", by.ids.join(","));
   else p.set("parent", by.parent);
+  if (sheet && sheet !== "buy") p.set("sheet", sheet);
   return `/print/work-order/family?${p.toString().replace(/%2C/g, ",")}`;
 }
 
@@ -330,15 +354,16 @@ export type FamilyPrintOptions = {
 };
 export const FAMILY_DEFAULT_OPTIONS: FamilyPrintOptions = { buy: true, cut: true, only_to_buy: false, printed: "" };
 
-const esc = (v: unknown) => txt(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
-const num = (n: number) => r2(n).toLocaleString("th-TH", { maximumFractionDigits: 2 });
-const thDate = (iso: string | null) => {
+// ตัวช่วย HTML — export ให้ใบติดตามงาน (lib/family-track) ใช้ชุดเดียวกัน
+export const esc = (v: unknown) => txt(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+export const num = (n: number) => r2(n).toLocaleString("th-TH", { maximumFractionDigits: 2 });
+export const thDate = (iso: string | null) => {
   if (!iso) return "-";
   const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
 };
-const img = (url: string | null, cls: string) => (url ? `<img class="${cls}" src="${esc(url)}" alt="" />` : `<span class="${cls} fp-noimg"></span>`);
-const TICK = `<span class="tick-box"></span>`;
+export const img = (url: string | null, cls: string) => (url ? `<img class="${cls}" src="${esc(url)}" alt="" />` : `<span class="${cls} fp-noimg"></span>`);
+export const TICK = `<span class="tick-box"></span>`;
 
 export const FAMILY_STATUS_LABEL: Record<FamilyCellStatus, string> = {
   buy: "", partial: "ขาด", requested: "ขอซื้อแล้ว", ordered: "สั่งแล้ว", received: "รับแล้ว", have: "มีของ", ready: "เตรียมแล้ว", skip: "ไม่ต้องซื้อ",

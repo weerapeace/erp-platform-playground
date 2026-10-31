@@ -5,7 +5,9 @@
  *   ?mo=<id>        จากใบเดียว → รวมทุกใบที่ยังเปิดของรุ่นเดียวกัน
  *   ?parent=<code>  จากรหัสสินค้าแม่ (หัวกลุ่มบนบอร์ด)
  *   ?ids=a,b,c      ใบที่ติ๊กเลือก → แยกรุ่นละ 1 แผ่น
- * ตาราง "ของ × สี": ของที่ต้องซื้อ + บล็อกตัด ของทุกสีในแผ่นเดียว (lib/family-print) · ใช้ระบบพิมพ์กลาง + เส้น/ตัวอักษรจาก "ตั้งค่าใบพิมพ์" ใบสั่งงาน
+ *   ?sheet=         buy (ค่าเริ่ม) · route · status · track (= route + status)
+ * ใบ "ซื้อ-ตัด" = ตาราง ของ × สี (lib/family-print) · ใบ "ติดตามงาน" แบบเขียนมือ A/D (lib/family-track)
+ * ใช้ระบบพิมพ์กลาง + เส้น/ตัวอักษรจาก "ตั้งค่าใบพิมพ์" ใบสั่งงาน
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -18,11 +20,17 @@ import { WO_DEFAULT_STYLE, woStyleCss } from "@/lib/work-order-print";
 import { useWoPrintColumns } from "@/components/wo-print-columns";
 import {
   FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, familyHtmlData, familyOrientation,
-  type FamilyPrintOptions, type FamilyPrintResponse,
+  type FamilyPrintOptions, type FamilyPrintResponse, type FamilySheetKind,
 } from "@/lib/family-print";
+import {
+  TRACK_CSS, TRACK_EXTRAS, buildFamilyTrack, familyTrackHtmlData, normalizeTrackExtras,
+  type TrackExtras, type TrackOptions,
+} from "@/lib/family-track";
 
 type Sections = "both" | "buy" | "cut";
 type Paper = "auto" | "landscape" | "portrait";
+const SHEETS: FamilySheetKind[] = ["buy", "route", "status", "track"];
+const EXTRAS_KEY = "erp.familyTrack.extras.v1";   // ช่องเสริมที่ติ๊กไว้ — จำต่อเครื่อง
 
 function Seg<T extends string>({ value, options, onChange }: { value: T; options: { v: T; label: string }[]; onChange: (v: T) => void }) {
   return (
@@ -46,10 +54,25 @@ function FamilyPrintInner() {
 
   const [data, setData] = useState<FamilyPrintResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [sheet, setSheet] = useState<FamilySheetKind>(() => (SHEETS as string[]).includes(sp.get("sheet") ?? "") ? (sp.get("sheet") as FamilySheetKind) : "buy");
   const [sections, setSections] = useState<Sections>("both");
   const [onlyToBuy, setOnlyToBuy] = useState(false);
   const [paper, setPaper] = useState<Paper>("auto");
+  const [blank, setBlank] = useState(false);
+  const [extras, setExtras] = useState<TrackExtras>(() => normalizeTrackExtras(null));
   const { cols } = useWoPrintColumns();   // เส้นตาราง/ขนาดตัวอักษร = ค่ากลางเดียวกับใบสั่งงาน
+  const isTrack = sheet !== "buy";
+
+  // อ่านค่าที่จำไว้หลังเปิดหน้า (อ่านตอน render แรกจะไม่ตรงกับฝั่ง server)
+  useEffect(() => {
+    try { setExtras(normalizeTrackExtras(JSON.parse(localStorage.getItem(EXTRAS_KEY) ?? "null"))); } catch { /* ไม่มี/อ่านไม่ได้ = ค่าเริ่ม */ }
+  }, []);
+
+  const toggleExtra = (k: keyof TrackExtras) => setExtras((cur) => {
+    const next = { ...cur, [k]: !cur[k] };
+    try { localStorage.setItem(EXTRAS_KEY, JSON.stringify(next)); } catch { /* โหมดส่วนตัว — ไม่จำก็ได้ */ }
+    return next;
+  });
 
   useEffect(() => {
     if (!query) { setError("ไม่ได้เลือกใบสั่งผลิตหรือรุ่น"); return; }
@@ -67,17 +90,25 @@ function FamilyPrintInner() {
 
   const sheets = useMemo(() => (data?.families ?? []).map(buildFamilySheet), [data]);
   const title = sheets.length === 1 ? sheets[0].title_code : `${sheets.length} รุ่น`;
-  const fileName = docFileName("ใบสั่งผลิตรวมทั้งรุ่น", title);
+  const fileName = docFileName(isTrack ? "ใบติดตามงานผลิต" : "ใบสั่งผลิตรวมทั้งรุ่น", title);
 
   const html = useMemo(() => {
-    if (!sheets.length) return "";
-    const opt: FamilyPrintOptions = {
-      ...FAMILY_DEFAULT_OPTIONS, buy: sections !== "cut", cut: sections !== "buy", only_to_buy: onlyToBuy,
-      printed: new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "Asia/Bangkok" }),
-    };
+    if (!sheets.length || !data) return "";
+    const printed = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "Asia/Bangkok" });
+    const style = woStyleCss(cols?.style ?? WO_DEFAULT_STYLE);
+    if (isTrack) {
+      const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);   // วันนี้เวลาไทย (นับวันค้าง)
+      const opt: TrackOptions = { extras, blank, printed, today };
+      const tracks = data.families.map((f) => buildFamilyTrack(f, today));
+      const kinds = sheet === "track" ? (["route", "status"] as const) : ([sheet] as const);
+      const pages = tracks.flatMap((t) => kinds.map((k) => familyTrackHtmlData(t, k, opt)));
+      // ใบติดตามงานคอลัมน์เยอะ → แนวนอนเป็นค่าเริ่ม
+      return buildReportHtmlMulti(buildFamilyTemplate(paper === "auto" ? "landscape" : paper, TRACK_CSS + style), pages, fileName);
+    }
+    const opt: FamilyPrintOptions = { ...FAMILY_DEFAULT_OPTIONS, buy: sections !== "cut", cut: sections !== "buy", only_to_buy: onlyToBuy, printed };
     const orientation = paper === "auto" ? familyOrientation(sheets) : paper;
-    return buildReportHtmlMulti(buildFamilyTemplate(orientation, woStyleCss(cols?.style ?? WO_DEFAULT_STYLE)), sheets.map((s) => familyHtmlData(s, opt)), fileName);
-  }, [sheets, sections, onlyToBuy, paper, cols, fileName]);
+    return buildReportHtmlMulti(buildFamilyTemplate(orientation, style), sheets.map((s) => familyHtmlData(s, opt)), fileName);
+  }, [sheets, data, isTrack, sheet, extras, blank, sections, onlyToBuy, paper, cols, fileName]);
 
   const summary = sheets.length === 1
     ? `${sheets[0].title_code} · ${sheets[0].stats.skus} สี · ${sheets[0].stats.mos} ใบสั่งผลิต · ${sheets[0].stats.qty.toLocaleString("th-TH")} ชิ้น`
@@ -85,21 +116,47 @@ function FamilyPrintInner() {
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
-        <button type="button" onClick={() => router.back()} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">
-          <Icon name="back" /> กลับ
-        </button>
-        <span className="text-sm text-slate-600">พิมพ์ใบสั่งผลิตรวมทั้งรุ่น {data && <b className="text-slate-800">{summary}</b>}</span>
-        <Seg value={sections} onChange={setSections} options={[{ v: "both", label: "ซื้อ + ตัด" }, { v: "buy", label: "เฉพาะซื้อ" }, { v: "cut", label: "เฉพาะตัด" }]} />
-        <label className={`inline-flex items-center gap-1.5 text-sm ${sections === "cut" ? "text-slate-300" : "text-slate-600"}`}>
-          <input type="checkbox" checked={onlyToBuy} disabled={sections === "cut"} onChange={(e) => setOnlyToBuy(e.target.checked)} /> เฉพาะที่ยังต้องซื้อ
-        </label>
-        <Seg value={paper} onChange={setPaper} options={[{ v: "auto", label: "กระดาษอัตโนมัติ" }, { v: "landscape", label: "แนวนอน" }, { v: "portrait", label: "แนวตั้ง" }]} />
-        <div className="flex-1" />
-        <PrintDocLinkButton html={html} fileName={fileName}
-          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
-          <Icon name="print" /> พิมพ์ / บันทึก PDF
-        </PrintDocLinkButton>
+      <div className="no-print sticky top-0 z-10 flex flex-col gap-2 border-b border-slate-200 bg-slate-100 px-6 py-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <button type="button" onClick={() => router.back()} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">
+            <Icon name="back" /> กลับ
+          </button>
+          <span className="text-sm text-slate-600">พิมพ์รวมทั้งรุ่น {data && <b className="text-slate-800">{summary}</b>}</span>
+          <Seg value={sheet} onChange={setSheet} options={[
+            { v: "buy", label: "ซื้อ-ตัด (ของ × สี)" }, { v: "route", label: "ติดตามงาน A" }, { v: "status", label: "ตามสถานะ D" }, { v: "track", label: "A + D" },
+          ]} />
+          <div className="flex-1" />
+          <PrintDocLinkButton html={html} fileName={fileName}
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
+            <Icon name="print" /> พิมพ์ / บันทึก PDF
+          </PrintDocLinkButton>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          {isTrack ? (
+            <>
+              <Seg value={blank ? "blank" : "sys"} onChange={(v) => setBlank(v === "blank")} options={[{ v: "sys", label: "เติมจากระบบ + ช่องเขียน" }, { v: "blank", label: "ฟอร์มเปล่า" }]} />
+              {sheet !== "status" && (
+                <span className="flex flex-wrap items-center gap-1.5 text-sm text-slate-500">
+                  ช่องเสริม (แบบ A):
+                  {TRACK_EXTRAS.map((e) => (
+                    <button key={e.key} type="button" onClick={() => toggleExtra(e.key)}
+                      className={`h-8 rounded-lg border px-2.5 text-sm ${extras[e.key] ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                      {extras[e.key] && <Icon name="done" />} {e.label}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              <Seg value={sections} onChange={setSections} options={[{ v: "both", label: "ซื้อ + ตัด" }, { v: "buy", label: "เฉพาะซื้อ" }, { v: "cut", label: "เฉพาะตัด" }]} />
+              <label className={`inline-flex items-center gap-1.5 text-sm ${sections === "cut" ? "text-slate-300" : "text-slate-600"}`}>
+                <input type="checkbox" checked={onlyToBuy} disabled={sections === "cut"} onChange={(e) => setOnlyToBuy(e.target.checked)} /> เฉพาะที่ยังต้องซื้อ
+              </label>
+            </>
+          )}
+          <Seg value={paper} onChange={setPaper} options={[{ v: "auto", label: "กระดาษอัตโนมัติ" }, { v: "landscape", label: "แนวนอน" }, { v: "portrait", label: "แนวตั้ง" }]} />
+        </div>
       </div>
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500"><Icon name="warning" /> {error}</div>
