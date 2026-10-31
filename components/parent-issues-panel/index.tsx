@@ -6,6 +6,8 @@
  * ของกลาง วางได้ทุกจุด: ป๊อป QC (รายละเอียด/ส่งงาน/รับเข้า) · หน้า Parent SKU · ใบสั่งผลิต
  * ส่ง sku (ตัวลูก) หรือ parentSkuId ก็ได้ — API หา parent ให้เอง
  * editable=true → เพิ่ม/แก้/ลบได้ (เลือกจากสาเหตุกลาง หรือพิมพ์เอง) · ปัญหาที่มาจาก QC แก้ข้อความไม่ได้ (ลบได้)
+ * ส่ง sku (เปิดจากสีใดสีหนึ่ง) → ตอนเพิ่มเลือกได้ว่า "ทุกสีในรุ่น" หรือ "เฉพาะสีนี้" · ป้ายบอกขอบเขตทุกแถว
+ * ใบสั่งงานผลิตพิมพ์รายการนี้ในกล่อง "ข้อควรระวัง — ปัญหาที่เคยเกิด" (lib/work-order-print)
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -28,6 +30,8 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = f
   const [saving, setSaving] = useState(false);
   const [ed, setEd] = useState<{ id: string; text: string } | null>(null);   // ✏️ แก้ในแถว
   const [delAsk, setDelAsk] = useState<string | null>(null);                 // 🗑 ถามยืนยันในแถว (ไม่ใช้ป๊อปซ้อน — แผงนี้อยู่ในป๊อปหลายชั้น)
+  const [scope, setScope] = useState<"all" | "sku">("all");                  // เพิ่มใหม่: ทุกสีในรุ่น / เฉพาะสีนี้ (มีเมื่อส่ง sku มา)
+  const canScopeSku = !!sku && !parentSkuId;
 
   const q = parentSkuId ? `parent_sku_id=${encodeURIComponent(parentSkuId)}` : sku ? `sku=${encodeURIComponent(sku)}` : "";
 
@@ -49,7 +53,7 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = f
     if (!q) return;
     setSaving(true);
     try {
-      const body = { ...(parentSkuId ? { parent_sku_id: parentSkuId } : { sku }), ...payload };
+      const body = { ...(parentSkuId ? { parent_sku_id: parentSkuId } : { sku }), ...(canScopeSku && scope === "sku" ? { scope: "sku" } : {}), ...payload };
       const j = await apiFetch("/api/parent-sku-issues", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       if (j.duplicated) toast.info("ปัญหานี้มีอยู่แล้ว");
@@ -86,7 +90,7 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = f
 
   return (
     <div className={bare ? "" : "pt-1 border-t border-slate-100"}>
-      <div className="text-[11px] text-slate-500 mb-1.5">⚠️ ปัญหาของสินค้านี้ (รวมทุกสี){items.length > 0 ? ` (${items.length})` : ""}</div>
+      <div className="text-[11px] text-slate-500 mb-1.5">⚠️ ปัญหาของสินค้านี้ (ทั้งรุ่น{canScopeSku ? " + เฉพาะสีนี้" : " + เฉพาะบางสี"}){items.length > 0 ? ` (${items.length})` : ""}</div>
       {items.length === 0 && !loading && <div className="text-[11px] text-slate-300 mb-1">— ยังไม่มีปัญหาที่บันทึกไว้ —</div>}
       {items.length > 0 && (
         <div className="space-y-1 max-h-40 overflow-auto">
@@ -100,7 +104,10 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = f
             </div>
           ) : (
             <div key={it.id} className="text-[12px] flex items-center justify-between gap-2 rounded-md bg-amber-50/60 border border-amber-100 px-2 py-1">
-              <span className="text-amber-800 truncate">⚠️ {it.problem_text}{it.source === "qc" ? <span className="text-[10px] text-amber-500"> · จาก QC</span> : null}</span>
+              <span className="text-amber-800 truncate">⚠️ {it.problem_text}{it.source === "qc" ? <span className="text-[10px] text-amber-500"> · จาก QC</span> : null}
+                {/* ขอบเขต: ทุกสี / เฉพาะสีไหน */}
+                <span className={`ml-1 text-[10px] px-1 rounded ${it.sku ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-500"}`}>{it.sku ? `เฉพาะ ${it.sku}` : "ทุกสี"}</span>
+              </span>
               <span className="flex items-center gap-1.5 shrink-0">
                 {it.created_by_name && delAsk !== it.id && <span className="text-[10px] text-slate-400 whitespace-nowrap">{it.created_by_name.split("@")[0]}</span>}
                 {editable && it.source !== "qc" && delAsk !== it.id && <button onClick={() => setEd({ id: it.id, text: it.problem_text })} title="แก้ข้อความ" className="text-slate-300 hover:text-blue-600 text-xs leading-none">✏️</button>}
@@ -112,6 +119,15 @@ export function ParentIssuesPanel({ sku, parentSkuId, editable = false, bare = f
                 ) : <button onClick={() => setDelAsk(it.id)} title="ลบ" className="text-slate-300 hover:text-rose-500 text-xs leading-none">✕</button>)}
               </span>
             </div>
+          ))}
+        </div>
+      )}
+      {editable && canScopeSku && (
+        <div className="mt-1.5 flex items-center gap-1 text-[11px]">
+          <span className="text-slate-500">ใช้กับ</span>
+          {([["all", "ทุกสีในรุ่นนี้"], ["sku", `เฉพาะสีนี้ (${sku})`]] as const).map(([v, label]) => (
+            <button key={v} type="button" onClick={() => setScope(v)}
+              className={`h-6 px-2 rounded border ${scope === v ? "border-amber-500 bg-amber-50 text-amber-800" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{label}</button>
           ))}
         </div>
       )}

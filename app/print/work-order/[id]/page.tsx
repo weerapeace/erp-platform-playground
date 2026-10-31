@@ -65,7 +65,7 @@ export default function PrintWorkOrderPage() {
 
   useEffect(() => {
     Promise.all([
-      apiFetch(`/api/mo/${id}`).then((res) => res.json()),
+      apiFetch(`/api/mo/${id}?issues=1`).then((res) => res.json()),   // ?issues=1 = ขอปัญหาที่เคยเกิดมาพิมพ์ด้วย
       apiFetch("/api/admin/report-templates?entity_type=wo").then((res) => res.json()).catch(() => ({ data: [] })),
     ])
       .then(async ([moRes, tplRes]) => {

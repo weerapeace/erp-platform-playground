@@ -15,9 +15,9 @@ import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list
 import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import {
-  WO_BORDER_COLORS, WO_BORDER_MODES, WO_DEFAULT_COLUMNS, WO_DEFAULT_EXTRAS, WO_DEFAULT_HEADER, WO_DEFAULT_SECTIONS, WO_DEFAULT_SIGNOFF, WO_DEFAULT_STYLE,
+  WO_BORDER_COLORS, WO_BORDER_MODES, WO_DEFAULT_COLUMNS, WO_DEFAULT_EXTRAS, WO_DEFAULT_HEADER, WO_DEFAULT_ISSUES, WO_DEFAULT_SECTIONS, WO_DEFAULT_SIGNOFF, WO_DEFAULT_STYLE,
   WO_EXTRA_LABELS, WO_HEADER_BLOCKS, WO_HEADER_FIELDS, WO_HEADER_SIZES, WO_SECTION_LABELS, WO_SECTION_PRESETS, WO_SHEETS, isBlankWoColumn, normalizeWoColumns,
-  type WoBoxKey, type WoColumn, type WoExtras, type WoHeader, type WoHeaderBlock, type WoPrintColumns, type WoSheet, type WoSignoff,
+  type WoBoxKey, type WoColumn, type WoExtras, type WoHeader, type WoIssuesCfg, type WoHeaderBlock, type WoPrintColumns, type WoSheet, type WoSignoff,
 } from "@/lib/work-order-print";
 
 const CONFIG_KEY = "wo_print_columns";
@@ -153,6 +153,8 @@ export function WoColumnSettings({ onPreview, onSaved }: {
   const setHdr = (p: Partial<WoHeader>) => setDraft((d) => ({ ...d, header: { ...(d.header ?? WO_DEFAULT_HEADER), ...p } }));
   const setSo = (p: Partial<WoSignoff>) => setDraft((d) => ({ ...d, signoff: { ...(d.signoff ?? WO_DEFAULT_SIGNOFF), ...p } }));
   const setEx = (p: Partial<WoExtras>) => setDraft((d) => ({ ...d, extras: { ...(d.extras ?? WO_DEFAULT_EXTRAS), ...p } }));
+  const iss = draft.issues ?? WO_DEFAULT_ISSUES;
+  const setIss = (p: Partial<WoIssuesCfg>) => setDraft((d) => ({ ...d, issues: { ...(d.issues ?? WO_DEFAULT_ISSUES), ...p } }));
   // "ช่องติ๊กเตรียมรายวัตถุดิบ" = คอลัมน์ ☑ ในตารางสรุปที่มีอยู่แล้ว — แค่สลับเปิด/ปิดให้จากตรงนี้
   const tickOn = draft.summary.some((c) => c.key === "check" && c.show);
   const setTick = (on: boolean) => setDraft((d) => ({ ...d, summary: d.summary.map((c) => (c.key === "check" ? { ...c, show: on } : c)) }));
@@ -497,6 +499,41 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                   </div>
                 </div>
 
+                {/* 7) ปัญหาที่เคยเกิด — รุ่นนี้ (ทุกสี) | SKU นี้ (จดเฉพาะสี + ของเสีย QC) */}
+                <div>
+                  <div className="text-[12px] font-bold text-slate-700 mb-1">7) ข้อควรระวัง — ปัญหาที่เคยเกิด</div>
+                  <div className="border border-slate-200 rounded-lg px-2 py-1.5 space-y-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-20 shrink-0">กล่องปัญหา</span>
+                      <Seg value={iss.show ? "on" : "off"} onChange={(v) => setIss({ show: v === "on" })} options={[{ value: "on", label: "โชว์" }, { value: "off", label: "ไม่โชว์" }]} />
+                    </div>
+                    <div className={`space-y-1.5 ${iss.show ? "" : "opacity-50"}`}>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-slate-500 w-20 shrink-0">วางไว้</span>
+                        <Seg value={iss.pos} onChange={(pos) => setIss({ pos })} options={[{ value: "top", label: "ใต้หัวใบ" }, { value: "bottom", label: "ท้ายตาราง" }]} />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-slate-500 w-20 shrink-0">สูงสุดต่อกลุ่ม</span>
+                        <Seg value={String(iss.max)} onChange={(v) => setIss({ max: Number(v) })} options={[{ value: "3", label: "3" }, { value: "5", label: "5" }, { value: "0", label: "ทั้งหมด" }]} />
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[11px] text-slate-500 w-20 shrink-0">ยังไม่มีบันทึก</span>
+                        <Seg value={iss.empty} onChange={(empty) => setIss({ empty })} options={[
+                          { value: "hide", label: "ซ่อนกล่อง" }, { value: "blank", label: "เว้นให้ช่างเขียน", hint: "เส้นว่างให้ช่างจดปัญหาใหม่ที่เจอ แล้วค่อยนำมาจดเข้าระบบ" },
+                        ]} />
+                      </div>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={iss.stats} onChange={(e) => setIss({ stats: e.target.checked })} className="w-4 h-4 accent-indigo-600 shrink-0" />
+                        <span className="text-[11px] text-slate-600">โชว์จำนวนครั้ง · ชิ้น · ล่าสุด (ของเสียจาก QC)</span>
+                      </label>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-snug">
+                      ซ้าย = ปัญหาทั้งรุ่น (ทุกสี) · ขวา = ปัญหาเฉพาะ SKU นี้ + ของเสียที่ QC บันทึก
+                      <br />จดปัญหาได้ที่: ป๊อป QC (จดให้อัตโนมัติตอนกดของเสีย) · หน้า Parent SKU แท็บ "ปัญหา" · หน้าใบสั่งผลิต — เลือก "ทุกสี" หรือ "เฉพาะสีนี้"
+                    </p>
+                  </div>
+                </div>
+
                 <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 leading-snug">
                   ⚠️ ช่อง <b>รูป</b> ขึ้นเฉพาะวัตถุดิบที่มีรูปปกในระบบ — ตัวที่ยังไม่มีรูป ช่องจะว่าง
                 </p>
@@ -504,7 +541,7 @@ export function WoColumnSettings({ onPreview, onSaved }: {
               </div>
 
               <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-slate-100">
-                <button onClick={() => setDraft({ ...WO_DEFAULT_COLUMNS, style: WO_DEFAULT_STYLE, sections: WO_DEFAULT_SECTIONS, header: WO_DEFAULT_HEADER, signoff: WO_DEFAULT_SIGNOFF, extras: WO_DEFAULT_EXTRAS })} disabled={saving}
+                <button onClick={() => setDraft({ ...WO_DEFAULT_COLUMNS, style: WO_DEFAULT_STYLE, sections: WO_DEFAULT_SECTIONS, header: WO_DEFAULT_HEADER, signoff: WO_DEFAULT_SIGNOFF, extras: WO_DEFAULT_EXTRAS, issues: WO_DEFAULT_ISSUES })} disabled={saving}
                   className="h-8 px-2 text-[11px] border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-50">↺ ค่าเริ่มต้น</button>
                 <div className="flex-1" />
                 <button onClick={closePanel} disabled={saving} className="h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>

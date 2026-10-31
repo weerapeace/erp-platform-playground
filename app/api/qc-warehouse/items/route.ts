@@ -59,8 +59,8 @@ async function logParentIssue(admin: Admin, actor: { actorId: string | null; act
     const { data: s } = await admin.from("skus_v2").select("parent_sku_id").eq("code", sku).maybeSingle();
     const parentId = (s as { parent_sku_id: string | null } | null)?.parent_sku_id ?? null;
     if (!parentId) return;
-    // ปัญหาข้อความเดียวกัน (active) มีแล้ว → ไม่เพิ่มซ้ำ
-    const { data: dup } = await admin.from("parent_sku_issues").select("id").eq("parent_sku_id", parentId).eq("is_active", true).ilike("problem_text", reason).maybeSingle();
+    // ปัญหาข้อความเดียวกัน (active) ระดับทั้งรุ่น มีแล้ว → ไม่เพิ่มซ้ำ (แถว "เฉพาะสี" ไม่นับ — กัน maybeSingle เจอ 2 แถวแล้วพัง)
+    const { data: dup } = await admin.from("parent_sku_issues").select("id").eq("parent_sku_id", parentId).eq("is_active", true).is("sku", null).ilike("problem_text", reason).limit(1).maybeSingle();
     if (dup) return;
     // จับ reason_id ถ้าชื่อสาเหตุตรงกับพิกลิสต์กลาง
     const { data: r } = await admin.from("qc_defect_reasons").select("id").eq("is_active", true).ilike("name", reason).maybeSingle();

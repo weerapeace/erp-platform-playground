@@ -75,7 +75,12 @@ export type MoDetail = {
   qty_from?: number | null;       // จำนวนตอนสั่งครั้งแรก ถ้าเคยลด/เพิ่ม (mo_qty_changes ที่ยังไม่ย้อน)
   qty_change_reason?: string | null;
   split_from?: string | null;     // ใบนี้แยกออกมาจากใบไหน
+  issues?: MoIssues | null;       // ปัญหาที่เคยเกิด (มีเมื่อหน้าพิมพ์ขอ ?issues=1)
 };
+/** ปัญหาที่เคยเกิด 1 รายการ — times/qty มีเฉพาะของเสียจาก QC ที่รวมเป็นรายสาเหตุ */
+export type MoIssue = { text: string; source: "QC" | "จดเอง"; times?: number; qty?: number; last_at?: string | null };
+/** จาก /api/mo/[id]?issues=1 — model = ปัญหาทั้งรุ่น (ทุกสี) · sku = เฉพาะสีนี้ (จดเอง + ของเสีย QC) */
+export type MoIssues = { parent_code: string | null; siblings: number; model: MoIssue[]; sku: MoIssue[] };
 export type MoWorkOrder = {
   wo_no?: string | null;
   stage?: string | null;
@@ -257,7 +262,16 @@ export type WoPrintColumns = {
   header?: WoHeader; signoff?: WoSignoff; extras?: WoExtras;
   /** ตาราง "รายการวัตถุดิบ / บล็อกตัด" โชว์เฉพาะแถวที่มีทั้งกว้างและยาว (ค่าเริ่ม = โชว์ทุกแถว) */
   lines_cut_only?: boolean;
+  issues?: WoIssuesCfg;
 };
+
+/**
+ * กล่อง "ข้อควรระวัง — ปัญหาที่เคยเกิด" (รุ่นนี้ทุกสี | SKU นี้)
+ * max = โชว์สูงสุดต่อกลุ่ม (0 = ทั้งหมด) · stats = จำนวนครั้ง/ชิ้น/ล่าสุด · empty = ยังไม่มีบันทึก → ซ่อนกล่อง / กล่องว่างให้ช่างเขียน
+ * ⚠️ ปัญหาจดได้ที่: ป๊อป QC (จดให้อัตโนมัติตอนกดของเสีย) · หน้า Parent SKU แท็บปัญหา · หน้าใบสั่งผลิต (ParentIssuesPanel)
+ */
+export type WoIssuesCfg = { show: boolean; pos: "top" | "bottom"; max: number; stats: boolean; empty: "hide" | "blank" };
+export const WO_DEFAULT_ISSUES: WoIssuesCfg = { show: true, pos: "top", max: 5, stats: true, empty: "hide" };
 
 export const WO_DEFAULT_STYLE: WoPrintStyle = { border_mm: 0.12, border_color: "#94a3b8", border_mode: "all", font_scale: 1 };
 export const WO_DEFAULT_SECTIONS: WoSections = { summary: true, lines: true, detail: true, signature: true, split: false };
@@ -440,6 +454,7 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
     signoff: normalizeWoSignoff(obj.signoff),
     extras: normalizeWoExtras(obj.extras),
     lines_cut_only: bool((obj as { lines_cut_only?: unknown }).lines_cut_only, false),
+    issues: normalizeWoIssues((obj as { issues?: unknown }).issues),
   };
 }
 
@@ -490,6 +505,18 @@ function normalizeWoPlace(raw: unknown): Record<WoBoxKey, WoSheetSet> {
   })) as Record<WoBoxKey, WoSheetSet>;
 }
 
+export function normalizeWoIssues(raw: unknown): WoIssuesCfg {
+  const s = (raw ?? {}) as Partial<Record<keyof WoIssuesCfg, unknown>>;
+  const d = WO_DEFAULT_ISSUES;
+  return {
+    show: bool(s.show, d.show),
+    pos: oneOf(s.pos, ["top", "bottom"] as const, d.pos),
+    max: intIn(s.max, 0, 50, d.max),
+    stats: bool(s.stats, d.stats),
+    empty: oneOf(s.empty, ["hide", "blank"] as const, d.empty),
+  };
+}
+
 export function normalizeWoExtras(raw: unknown): WoExtras {
   const e = (raw ?? {}) as Partial<Record<keyof WoExtras, unknown>>;
   const d = WO_DEFAULT_EXTRAS;
@@ -517,7 +544,9 @@ function specLabel(key: string, fallback: string) {
 }
 
 export function woScalars(mo: MoDetail, spec: ProductSpec | null): Record<string, string> {
-  const size = spec?.parent?.size_summary || "-";
+  // ขนาดที่ไม่มีตัวเลขจริงเลย ("0 x 0 cm." / ว่าง) = ไม่พิมพ์ (ใบที่เปิดอยู่ 38% เป็น 0 x 0)
+  const rawSize = text(spec?.parent?.size_summary);
+  const size = /[1-9]/.test(rawSize) ? rawSize : "";
   const note = mo.note || spec?.parent?.work_instruction_notes || "-";
   return {
     mo_number: mo.mo_no,
@@ -616,6 +645,38 @@ export function woSignoffBoxes(mo: MoDetail, so: WoSignoff, ex: WoExtras): (Sign
   }
   if (ex.qc) boxes.push({ id: "qc", title: "QC ตรวจรับ", lines: [{ kind: "pair", left: "ดี", right: "เสีย" }, { kind: "sign" }, date(null)] });
   return boxes;
+}
+
+/**
+ * กล่อง "ข้อควรระวัง — ปัญหาที่เคยเกิด": ซ้าย = รุ่นนี้ (ทุกสี) · ขวา = SKU นี้ (จดเฉพาะสี + ของเสียจาก QC)
+ * ไม่มีบันทึกเลย → ซ่อนกล่อง หรือเว้นเส้นว่างให้ช่างเขียนปัญหาใหม่ (ตามตั้งค่า) · ไม่ได้โหลดปัญหามา = ไม่มีกล่อง
+ */
+export function woIssuesHtml(mo: MoDetail, cfg: WoIssuesCfg): string {
+  const iss = mo.issues;
+  if (!cfg.show || !iss) return "";
+  const blank = cfg.empty === "blank";
+  if (iss.model.length === 0 && iss.sku.length === 0 && !blank) return "";
+  const line = `<div class="sgn-ln wo-issue-line"></div>`;
+  const list = (arr: MoIssue[]) => {
+    if (arr.length === 0) return blank ? line + line : `<div class="wo-issue-none">— ยังไม่มีบันทึก —</div>`;
+    const shown = cfg.max > 0 ? arr.slice(0, cfg.max) : arr;
+    const more = arr.length - shown.length;
+    const rows = shown.map((i) => {
+      const stat = cfg.stats && i.times
+        ? ` <span class="wo-issue-stat">— ${numTh(i.times)} ครั้ง${i.qty ? ` · ${numTh(i.qty)} ชิ้น` : ""}${i.last_at ? ` · ล่าสุด ${esc(thaiDate(i.last_at))}` : ""}</span>`
+        : "";
+      return `<li><span class="wo-issue-text">${esc(i.text)}${stat}</span><span class="wo-issue-src">${esc(i.source)}</span></li>`;
+    }).join("");
+    return `<ul class="wo-issue-list">${rows}</ul>${more > 0 ? `<div class="wo-issue-more">+ อีก ${numTh(more)} รายการ</div>` : ""}${blank ? line : ""}`;
+  };
+  const model = `รุ่นนี้${iss.parent_code ? ` ${esc(iss.parent_code)}` : ""} <span class="wo-issue-sub">(ทุกสี${iss.siblings ? ` · ${numTh(iss.siblings)} SKU` : ""})</span>`;
+  return `<section class="wo-issues">
+  <div class="wo-issues-title">ข้อควรระวัง — ปัญหาที่เคยเกิด</div>
+  <div class="wo-issues-grid">
+    <div><div class="wo-issues-head">${model}</div>${list(iss.model)}</div>
+    <div class="wo-issues-sku"><div class="wo-issues-head">SKU นี้ ${esc(mo.product_sku)}</div>${list(iss.sku)}</div>
+  </div>
+</section>`;
 }
 
 /** ตารางบันทึกส่งคืนงาน (3 แถวว่าง) + กล่องหมายเหตุถึงช่าง — แยกชิ้นตาม key ให้คัดไปวางคนละแผ่นได้ */
@@ -741,6 +802,7 @@ export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null, cols?: W
     lines,
     lines_cut_empty: cutOnly && lines.length === 0 && allLines.length > 0,
     lines_hidden: linesHidden > 0 ? numTh(linesHidden) : "",
+    issues_html: woIssuesHtml(mo, cols?.issues ?? WO_DEFAULT_ISSUES),
     signoff_html: signHtml(boxes),
     wo_extras_html: extras.map((p) => p.html).join("\n"),
     ...perSheet,
@@ -755,6 +817,9 @@ function woBodyHtml(cols: WoPrintColumns): string {
   const parts: string[] = [];
   // กล่องลงชื่อ — HTML สร้างต่อใบใน buildWoHtmlData (ปิด "กล่องลงชื่อ" = ค่าว่าง) · วางใต้หัวใบหรือท้ายใบตามตั้งค่า
   const signTop = (cols.signoff ?? WO_DEFAULT_SIGNOFF).pos === "top";
+  // กล่องปัญหาที่เคยเกิด — ใต้หัวใบ (ก่อนทุกอย่าง ช่างเห็นก่อน) หรือท้ายตาราง · ทุกแผ่นตอนแยกใบ (ทุกคนที่รับงานต้องเห็น)
+  const issuesTop = (cols.issues ?? WO_DEFAULT_ISSUES).pos === "top";
+  if (issuesTop) parts.push("{{{issues_html}}}");
   if (signTop) parts.push("{{{signoff_html}}}");
   // ห่อด้วย {{#sec_x}} เสมอ — โหมดปกติส่ง flag เป็น true ทุกตัว, โหมดแยกใบส่งทีละตัวต่อแผ่น (woSectionDataList)
   if (sections.summary) parts.push(`{{#sec_summary}}<section class="summary-section">
@@ -799,7 +864,7 @@ function woBodyHtml(cols: WoPrintColumns): string {
   <div class="detail-photo">{{{product_image_html}}}</div>
   <div class="detail-main">
     <div class="detail-title">{{product_name}}</div>
-    <div class="detail-sub">ขนาด: {{product_size}}</div>
+    {{#product_size}}<div class="detail-sub">ขนาด: {{product_size}}</div>{{/product_size}}
     <table class="detail-table">
       {{#product_spec_rows}}
       <tr>
@@ -812,6 +877,7 @@ function woBodyHtml(cols: WoPrintColumns): string {
   </div>
 </section>{{/sec_detail}}`);
 
+  if (!issuesTop) parts.push("{{{issues_html}}}");
   if (!signTop) parts.push("{{{signoff_html}}}");
   parts.push("{{{wo_extras_html}}}");
   return parts.join("\n\n");
@@ -828,7 +894,7 @@ function woHeaderHtml(h: WoHeader): string {
     <div class="product-name">{{product_name}}</div>` : ""}${s.code ? `
     <div class="product-code">{{product_sku}}</div>` : ""}${s.variant ? `
     {{#product_variant}}<div class="product-variant">{{product_variant}}</div>{{/product_variant}}` : ""}${s.size ? `
-    <div class="product-size">{{product_size}}</div>` : ""}
+    {{#product_size}}<div class="product-size">{{product_size}}</div>{{/product_size}}` : ""}
   </div>` : "",
     qty: s.qty || s.bom
       ? `<div class="wo-qty">${s.qty ? `
@@ -975,6 +1041,23 @@ function woHeaderCss(h: WoHeader): string {
 }
 
 // ส่วนเสริมท้ายใบ (ตารางส่งคืน · หมายเหตุถึงช่าง)
+// กล่องปัญหาที่เคยเกิด — ขอบส้มให้สะดุดตา (พิมพ์ขาวดำก็ยังเห็นเป็นกล่อง) · เส้นเป็น มม.
+const WO_ISSUES_CSS = `
+.wo-issues { border: 0.25mm solid #f59e0b; border-radius: 0.6mm; background: #fffbeb; padding: 1.6mm 2mm; margin: 0 0 3mm; break-inside: avoid; page-break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.wo-issues-title { font-weight: 800; color: #92400e; margin-bottom: 1mm; }
+.wo-issues-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3mm; }
+.wo-issues-sku { border-left: 0.15mm solid #fcd34d; padding-left: 3mm; }
+.wo-issues-head { font-weight: 700; margin-bottom: 0.6mm; }
+.wo-issue-sub { font-weight: 400; color: #64748b; }
+.wo-issue-list { margin: 0; padding-left: 4mm; }
+.wo-issue-list li { margin: 0.3mm 0; }
+.wo-issue-list li > .wo-issue-src { float: right; margin-left: 2mm; color: #94a3b8; font-size: 0.85em; }
+.wo-issue-stat { color: #64748b; }
+.wo-issue-more, .wo-issue-none { color: #94a3b8; }
+.wo-issue-line { display: block; height: 5mm; }
+@media print { .wo-issues { margin-bottom: 1.5mm; padding: 1.2mm 1.6mm; } }
+`;
+
 const WO_EXTRAS_CSS = `
 .wo-returns { margin-top: 3mm; break-inside: avoid; page-break-inside: avoid; }
 .returns-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -1022,7 +1105,7 @@ export function buildWorkOrderTemplate(columns?: WoPrintColumns | null): ReportT
     body_html: woBodyHtml(cols),
     // ช่องลงชื่อท้ายใบแบบเดิม (ผู้สั่งผลิต / ผู้รับงานผลิต) → ย้ายไปอยู่ในกล่องลงชื่อชุดใหม่ (signoff_html ใน body)
     footer_html: "",
-    custom_css: (WORKORDER_PRINT_TEMPLATE.custom_css ?? "") + SIGNOFF_CSS + WO_EXTRAS_CSS + woHeaderCss(header) + woHeaderSizeCss(header) + woStyleCss(cols.style ?? WO_DEFAULT_STYLE),
+    custom_css: (WORKORDER_PRINT_TEMPLATE.custom_css ?? "") + SIGNOFF_CSS + WO_EXTRAS_CSS + WO_ISSUES_CSS + woHeaderCss(header) + woHeaderSizeCss(header) + woStyleCss(cols.style ?? WO_DEFAULT_STYLE),
   };
 }
 
@@ -1040,7 +1123,7 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
     <div class="product-name">{{product_name}}</div>
     <div class="product-code">{{product_sku}}</div>
     {{#product_variant}}<div class="product-variant">{{product_variant}}</div>{{/product_variant}}
-    <div class="product-size">{{product_size}}</div>
+    {{#product_size}}<div class="product-size">{{product_size}}</div>{{/product_size}}
   </div>
   <div class="wo-qty">
     <div class="muted">จำนวนผลิต</div>

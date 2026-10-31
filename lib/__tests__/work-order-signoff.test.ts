@@ -5,7 +5,7 @@ import { BLANK_DATE, signoffHtml } from "@/lib/print-signoff";
 import { buildReportHtml, buildReportHtmlMulti } from "@/lib/template";
 import {
   WO_DEFAULT_COLUMNS, WO_DEFAULT_EXTRAS, WO_DEFAULT_SIGNOFF, buildWoHtmlData, buildWorkOrderTemplate,
-  normalizeWoColumns, woBoxSheets, woSectionDataList, woSignoffBoxes, type MoDetail, type WoPrintColumns,
+  normalizeWoColumns, woBoxSheets, woIssuesHtml, woSectionDataList, woSignoffBoxes, type MoDetail, type WoPrintColumns,
 } from "@/lib/work-order-print";
 
 // ข้อมูลจริงจาก DB (2026-10-31)
@@ -152,6 +152,60 @@ describe("ตารางบล็อกตัด: เฉพาะแถวท�
   });
 });
 
+describe("ข้อควรระวัง — ปัญหาที่เคยเกิด + ขนาด 0 x 0", () => {
+  // ข้อมูลจริง TTM061-04 (defect_logs 3 แถว รวมเป็น 2 สาเหตุ) + ปัญหารุ่น/เฉพาะสีที่จดเอง (สมมติ)
+  const WITH_ISSUES: MoDetail = {
+    id: "i", mo_no: "MO-2026-00411", product_sku: "TTM061-04", qty: 100,
+    issues: {
+      parent_code: "TTM061", siblings: 8,
+      model: [{ text: "ขอบหนังลอก ทาสีขอบ 2 รอบ", source: "จดเอง", last_at: "2026-10-01T00:00:00Z" }],
+      sku: [
+        { text: "สีนี้หนังบาง ระวังเย็บถี่", source: "จดเอง", last_at: "2026-10-02T00:00:00Z" },
+        { text: "เย็บไม่เรียบ", source: "QC", times: 2, qty: 30, last_at: "2026-06-17T00:00:00Z" },
+        { text: "หนังมีตำหนิ", source: "QC", times: 1, qty: 2, last_at: "2026-06-17T00:00:00Z" },
+      ],
+    },
+  };
+  const NONE: MoDetail = { ...WITH_ISSUES, issues: { parent_code: "CTL041M", siblings: 1, model: [], sku: [] } };
+  const cfg = (o: object = {}) => normalizeWoColumns({ issues: o }).issues!;
+
+  it("โชว์ 2 ฝั่ง: รุ่นนี้ (ทุกสี) | SKU นี้ · จำนวนครั้ง/ชิ้นของเสีย QC", () => {
+    const h = woIssuesHtml(WITH_ISSUES, cfg());
+    expect(h).toContain("รุ่นนี้ TTM061");
+    expect(h).toContain("ทุกสี · 8 SKU");
+    expect(h).toContain("SKU นี้ TTM061-04");
+    expect(h).toContain("ขอบหนังลอก");
+    expect(h).toContain("เย็บไม่เรียบ <span class=\"wo-issue-stat\">— 2 ครั้ง · 30 ชิ้น · ล่าสุด");
+    expect(woIssuesHtml(WITH_ISSUES, cfg({ stats: false }))).not.toContain("wo-issue-stat");
+  });
+
+  it("จำกัดต่อกลุ่ม → + อีก N รายการ", () => {
+    expect(woIssuesHtml(WITH_ISSUES, cfg({ max: 1 }))).toContain("+ อีก 2 รายการ");
+  });
+
+  it("ยังไม่มีบันทึก: ซ่อนกล่อง (ค่าเริ่ม) หรือเว้นเส้นให้ช่างเขียน · ไม่ได้โหลดปัญหามา = ไม่มีกล่อง", () => {
+    expect(woIssuesHtml(NONE, cfg())).toBe("");
+    expect(woIssuesHtml(NONE, cfg({ empty: "blank" }))).toContain("wo-issue-line");
+    expect(woIssuesHtml({ ...NONE, issues: null }, cfg({ empty: "blank" }))).toBe("");
+    expect(woIssuesHtml(WITH_ISSUES, cfg({ show: false }))).toBe("");
+  });
+
+  it("วางใต้หัวใบ (ค่าเริ่ม) หรือท้ายตาราง", () => {
+    const top = buildWorkOrderTemplate(normalizeWoColumns(null)).body_html;
+    expect(top.indexOf("{{{issues_html}}}")).toBeLessThan(top.indexOf("sec_summary"));
+    const bottom = buildWorkOrderTemplate(normalizeWoColumns({ issues: { pos: "bottom" } })).body_html;
+    expect(bottom.indexOf("{{{issues_html}}}")).toBeGreaterThan(bottom.indexOf("sec_lines"));
+  });
+
+  it("ขนาด 0 x 0 / ว่าง ไม่พิมพ์ · ขนาดจริงพิมพ์ตามเดิม", () => {
+    const html = (size: string) => buildReportHtml(buildWorkOrderTemplate(normalizeWoColumns(null)),
+      { ...buildWoHtmlData(NONE, { parent: { size_summary: size } }, null), qr_html: "", sec_detail: true });
+    expect(html("0 x 0 cm.")).not.toContain("0 x 0 cm.");
+    expect(html("0 x 0 cm.")).not.toContain("ขนาด:");
+    expect(html("11 x 9 x 1.2 cm.")).toContain("11 x 9 x 1.2 cm.");
+  });
+});
+
 describe("หัวใบ + ค่าที่บันทึกไว้", () => {
   it("ค่าเก่า (ไม่มี header/signoff/extras) ได้ค่าเริ่มต้น · ลำดับกล่องหัวซ่อมให้ครบ", () => {
     const n = normalizeWoColumns({ header: { order: ["meta", "meta", "bogus"], photo_mm: 999, show: { qr: false } } });
@@ -224,6 +278,17 @@ describe("หัวใบ + ค่าที่บันทึกไว้", () =
     for (const [name, mo, cols] of cases) {
       const html = buildReportHtml(buildWorkOrderTemplate(cols), { ...buildWoHtmlData(mo, null, cols), qr_html: "" });
       writeFileSync(`${process.env.WO_PREVIEW_DIR}/${name}.html`, html, "utf8");
+    }
+    // กล่องปัญหาที่เคยเกิด (ข้อมูล TTM061-04 จริง + ปัญหาที่จดเองสมมติ) · ขนาด 0 x 0 ไม่พิมพ์
+    {
+      const cols = normalizeWoColumns({ header: { size: "compact", photo_mm: 34, title_inline: true } });
+      const mo: MoDetail = { ...TWO_CRAFTSMEN, mo_no: "MO-2026-00411", product_sku: "TTM061-04", issues: {
+        parent_code: "TTM061", siblings: 8,
+        model: [{ text: "ขอบหนังลอกถ้าทาสีขอบรอบเดียว — ทา 2 รอบ", source: "จดเอง" }],
+        sku: [{ text: "เย็บไม่เรียบ", source: "QC", times: 2, qty: 30, last_at: "2026-06-17T00:00:00Z" }, { text: "หนังมีตำหนิ", source: "QC", times: 1, qty: 2, last_at: "2026-06-17T00:00:00Z" }],
+      } };
+      const html = buildReportHtml(buildWorkOrderTemplate(cols), { ...woSectionDataList(buildWoHtmlData(mo, { parent: { size_summary: "0 x 0 cm." } }, cols), cols)[0], qr_html: "" });
+      writeFileSync(`${process.env.WO_PREVIEW_DIR}/h-issues.html`, html, "utf8");
     }
     // ขนาดหัวใบ 3 แบบ (รูป/บรรทัดเดียวตามปุ่มในแผง)
     for (const [size, photo_mm, title_inline] of [["normal", 46, false], ["compact", 34, true], ["tight", 26, true]] as const) {

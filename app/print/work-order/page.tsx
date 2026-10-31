@@ -36,7 +36,7 @@ function BulkPrintInner() {
         const specCache = new Map<string, ProductSpec | null>();
         const out: { mo: MoDetail; spec: ProductSpec | null; qr_html: string; barcode_html: string }[] = [];
         for (const id of ids) {
-          const moRes = await apiFetch(`/api/mo/${id}`).then((r) => r.json()).catch(() => ({ error: "load" }));
+          const moRes = await apiFetch(`/api/mo/${id}?issues=1`).then((r) => r.json()).catch(() => ({ error: "load" }));
           if (moRes.error || !moRes.data) { setDone((d) => d + 1); continue; }
           const mo = moRes.data as MoDetail;
           let spec: ProductSpec | null = null;

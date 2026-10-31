@@ -2,7 +2,9 @@
  * รายการปัญหาของสินค้า — ผูกที่ Parent SKU (แชร์ทุกสี/ตัวลูก)
  *
  * GET    ?parent_sku_id=... | ?sku=<child sku>   → รายการปัญหา (active, ใหม่→เก่า) + ชื่อสาเหตุ
- * POST   { parent_sku_id? | sku?, reason_id?, problem_text? }  → เพิ่มปัญหา (กันซ้ำต่อ parent)
+ *        ?sku= → ปัญหาทั้งรุ่น + ปัญหาเฉพาะสีนี้ (ไม่เอาปัญหาเฉพาะสีอื่น) · ?parent_sku_id= → ทุกแถว (มี sku บอกว่าเฉพาะสีไหน)
+ * POST   { parent_sku_id? | sku?, reason_id?, problem_text?, scope?: "sku" }  → เพิ่มปัญหา (กันซ้ำต่อ parent + ขอบเขตเดียวกัน)
+ *        scope "sku" = จดเฉพาะสีนี้ (เก็บ sku) · ไม่ส่ง = ทั้งรุ่น (sku = null แบบเดิม)
  * PATCH  { id, problem_text }                     → แก้ข้อความที่พิมพ์ผิด (ปัญหาที่มาจาก QC แก้ไม่ได้ — เป็นบันทึกจากการตรวจ)
  * DELETE ?id=...                                  → ลบ (soft is_active=false)
  *
@@ -21,7 +23,12 @@ export type ParentIssue = {
   id: string; parent_sku_id: string; reason_id: string | null;
   problem_text: string; source: string; note: string | null;
   created_by_name: string | null; created_at: string;
+  /** null = ปัญหาของทั้งรุ่น (ทุกสี) · มีค่า = เฉพาะ SKU นี้ */
+  sku: string | null;
 };
+
+// ค่า sku ใช้ในตัวกรอง .or() ของ PostgREST — ตัดอักขระที่ทำให้ตัวกรองเพี้ยน (รหัสจริงเป็นตัวอักษร/ตัวเลข/ขีด)
+const skuForFilter = (s: string) => s.replace(/["(),]/g, "");
 
 // หา parent_sku_id จาก sku ลูก (หรือรับ parent_sku_id ตรง ๆ)
 async function resolveParentId(admin: ReturnType<typeof supabaseAdmin>, parentSkuId: string, sku: string): Promise<string | null> {
@@ -35,13 +42,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "qc.view"); if (denied) return denied;
   const sp = new URL(request.url).searchParams;
   const admin = supabaseAdmin();
-  const parentId = await resolveParentId(admin, (sp.get("parent_sku_id") ?? "").trim(), (sp.get("sku") ?? "").trim());
+  const byParent = (sp.get("parent_sku_id") ?? "").trim();
+  const sku = (sp.get("sku") ?? "").trim();
+  const parentId = await resolveParentId(admin, byParent, sku);
   if (!parentId) return NextResponse.json({ data: [], parent_sku_id: null, error: null });
 
-  const { data, error } = await admin.from("parent_sku_issues")
-    .select("id, parent_sku_id, reason_id, problem_text, source, note, created_by_name, created_at")
-    .eq("parent_sku_id", parentId).eq("is_active", true)
-    .order("created_at", { ascending: false });
+  let query = admin.from("parent_sku_issues")
+    .select("id, parent_sku_id, reason_id, problem_text, source, note, created_by_name, created_at, sku")
+    .eq("parent_sku_id", parentId).eq("is_active", true);
+  // ดูจากสีใดสีหนึ่ง → เห็นปัญหาทั้งรุ่น + ของสีนี้ (ปัญหาเฉพาะสีอื่นไม่เกี่ยว)
+  if (!byParent && sku) query = query.or(`sku.is.null,sku.eq."${skuForFilter(sku)}"`);
+  const { data, error } = await query.order("created_at", { ascending: false });
   if (error) return NextResponse.json({ data: [], parent_sku_id: parentId, error: error.message }, { status: 500 });
   return NextResponse.json({ data: (data ?? []) as ParentIssue[], parent_sku_id: parentId, error: null });
 }
@@ -64,14 +75,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (!text) return NextResponse.json({ error: "เลือกสาเหตุ หรือพิมพ์ปัญหาก่อน" }, { status: 400 });
 
-  // กันซ้ำ: ปัญหาข้อความเดียวกันต่อ parent ที่ยัง active อยู่ → ไม่เพิ่มซ้ำ
-  const { data: dup } = await admin.from("parent_sku_issues")
-    .select("id").eq("parent_sku_id", parentId).eq("is_active", true).ilike("problem_text", text).maybeSingle();
+  // ขอบเขต: เฉพาะสีนี้ (เก็บ sku) หรือทั้งรุ่น (null แบบเดิม)
+  const scopeSku = body.scope === "sku" ? String(body.sku ?? "").trim() : "";
+  if (body.scope === "sku" && !scopeSku) return NextResponse.json({ error: "ไม่รู้ว่าเป็นสีไหน (ไม่มีรหัส SKU)" }, { status: 400 });
+
+  // กันซ้ำ: ข้อความเดียวกัน ขอบเขตเดียวกัน ต่อ parent ที่ยัง active อยู่ → ไม่เพิ่มซ้ำ
+  const dupQ = admin.from("parent_sku_issues").select("id").eq("parent_sku_id", parentId).eq("is_active", true).ilike("problem_text", text);
+  const { data: dup } = await (scopeSku ? dupQ.eq("sku", scopeSku) : dupQ.is("sku", null)).limit(1).maybeSingle();
   if (dup) return NextResponse.json({ error: null, duplicated: true, id: (dup as { id: string }).id });
 
   const source = String(body.source ?? "manual").trim() || "manual";
   const { data: ins, error } = await admin.from("parent_sku_issues").insert({
-    parent_sku_id: parentId, reason_id: reasonId, problem_text: text, source,
+    parent_sku_id: parentId, reason_id: reasonId, problem_text: text, source, sku: scopeSku || null,
     note: String(body.note ?? "").trim() || null,
     created_by: user?.id ?? null, created_by_name: user?.email ?? null,
   }).select("id").single();
@@ -80,7 +95,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   await writeAudit(admin, {
     action: "create", entityType: "parent_sku_issue", entityId: (ins as { id: string }).id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { parent_sku_id: parentId, problem_text: text, source },
+    metadata: { parent_sku_id: parentId, problem_text: text, source, sku: scopeSku || null },
   });
   return NextResponse.json({ error: null, id: (ins as { id: string }).id });
 }
@@ -94,15 +109,16 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
   if (!text) return NextResponse.json({ error: "พิมพ์ปัญหาก่อน" }, { status: 400 });
   const admin = supabaseAdmin();
-  const { data: cur } = await admin.from("parent_sku_issues").select("id, parent_sku_id, problem_text, source, is_active").eq("id", id).maybeSingle();
-  const c = cur as { parent_sku_id: string; problem_text: string; source: string; is_active: boolean } | null;
+  const { data: cur } = await admin.from("parent_sku_issues").select("id, parent_sku_id, problem_text, source, is_active, sku").eq("id", id).maybeSingle();
+  const c = cur as { parent_sku_id: string; problem_text: string; source: string; is_active: boolean; sku: string | null } | null;
   if (!c || c.is_active === false) return NextResponse.json({ error: "ไม่พบรายการปัญหานี้" }, { status: 404 });
   if (c.source === "qc") return NextResponse.json({ error: "ปัญหานี้บันทึกมาจากการตรวจ QC แก้ข้อความไม่ได้ — ถ้าไม่ใช่ให้ลบแล้วเพิ่มใหม่" }, { status: 400 });
   if (text === c.problem_text) return NextResponse.json({ error: null, updated: false });
 
-  // กันซ้ำกับปัญหาอื่นของสินค้าเดียวกัน
-  const { data: dup } = await admin.from("parent_sku_issues")
-    .select("id").eq("parent_sku_id", c.parent_sku_id).eq("is_active", true).ilike("problem_text", text).neq("id", id).maybeSingle();
+  // กันซ้ำกับปัญหาอื่นของสินค้าเดียวกัน (ขอบเขตเดียวกัน: ทั้งรุ่น / สีเดียวกัน)
+  const dupQ = admin.from("parent_sku_issues")
+    .select("id").eq("parent_sku_id", c.parent_sku_id).eq("is_active", true).ilike("problem_text", text).neq("id", id);
+  const { data: dup } = await (c.sku ? dupQ.eq("sku", c.sku) : dupQ.is("sku", null)).limit(1).maybeSingle();
   if (dup) return NextResponse.json({ error: "มีปัญหาข้อความนี้อยู่แล้ว" }, { status: 400 });
 
   // พิมพ์เองแล้ว = ไม่ผูกกับสาเหตุกลางอีก (ข้อความไม่ตรงกับชื่อสาเหตุแล้ว)

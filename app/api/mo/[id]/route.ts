@@ -11,6 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { explodeBom, fabricModeOf } from "../shared";
 import { prLineCodeResolver } from "@/lib/pr-line-code";
+import type { MoIssue, MoIssues } from "@/lib/work-order-print";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,7 +34,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     supabaseAdmin().from("purchase_requests_v2").select("item_name, item_sku_id, qty, status")
       .contains("source_mo_nos", [moNo]).eq("is_active", true).not("status", "in", "(rejected,cancelled)"),   // m2m: เช็กทุกใบที่ผูก MO นี้
     productSku
-      ? supabase.from("skus_v2").select("cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").eq("code", productSku).eq("is_active", true).maybeSingle()
+      ? supabase.from("skus_v2").select("cover_image_r2_key, parent_sku_id, parent_skus_v2 ( cover_image_r2_key, code )").eq("code", productSku).eq("is_active", true).maybeSingle()
       : Promise.resolve({ data: null }),
     // ใบจ่ายงานของใบนี้ → กล่อง "ช่างรับงาน" ในใบพิมพ์ (index mo_no · ใบละไม่กี่แถว)
     supabase.from("mo_work_orders").select("wo_no, stage, department_name, assignee_type, assignee_name, assignees, qty, dispatch_date, status")
@@ -64,13 +65,16 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
   // รูปสินค้า — ใช้รูป SKU รุ่นนั้นก่อน (fallback รูป parent)
   let product_image: string | null = null;
-  const sk = skRes.data as { cover_image_r2_key?: string | null; parent_skus_v2?: unknown } | null;
+  const sk = skRes.data as { cover_image_r2_key?: string | null; parent_sku_id?: string | null; parent_skus_v2?: unknown } | null;
+  const parRel = sk?.parent_skus_v2;
+  const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { cover_image_r2_key?: string | null; code?: string | null } | null;
   if (sk) {
-    const parRel = sk.parent_skus_v2;
-    const par = (Array.isArray(parRel) ? parRel[0] : parRel) as { cover_image_r2_key?: string | null } | null;
     const key = sk.cover_image_r2_key || par?.cover_image_r2_key || "";
     if (key) product_image = `/api/r2-image?key=${encodeURIComponent(key)}`;
   }
+  // ปัญหาที่เคยเกิด (ใบพิมพ์ขอด้วย ?issues=1 เท่านั้น — ป๊อปเช็กลิสต์บอร์ดใช้ endpoint นี้ ไม่ต้องจ่ายค่า query เพิ่ม)
+  const wantIssues = new URL(_request.url).searchParams.get("issues") === "1";
+  const issuesP = wantIssues && productSku ? loadMoIssues(productSku, sk?.parent_sku_id ?? null, par?.code ?? null) : Promise.resolve(null);
 
   // รูปวัตถุดิบ — วัตถุดิบเก็บใน skus_v2 เหมือนสินค้า (ผูกด้วย code = component_sku) → map เป็น URL รูปย่อ
   const matCodes = [...new Set([...(materials ?? []), ...(summary ?? [])]
@@ -86,10 +90,53 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const withImage = <T extends { component_sku?: string | null }>(rows: T[]) =>
     rows.map((r) => ({ ...r, image_url: matImages[String(r.component_sku ?? "").trim()] ?? null }));
 
+  const issues = await issuesP;
   return NextResponse.json({ data: {
     ...header, materials: withImage(materials ?? []), summary: withImage(summary ?? []), requested, product_image,
     work_orders: woRes.data ?? [], qty_from, qty_change_reason, split_from,
+    ...(issues ? { issues } : {}),
   }, error: null });
+}
+
+/**
+ * ปัญหาที่เคยเกิด → กล่อง "ข้อควรระวัง" บนใบสั่งงานผลิต
+ *  • model = ปัญหาทั้งรุ่น (parent_sku_issues ที่ sku ว่าง — จดเอง + QC จดให้อัตโนมัติ)
+ *  • sku   = ปัญหาที่จดเฉพาะสีนี้ (parent_sku_issues.sku) + ของเสียที่ QC บันทึกกับ SKU นี้ (defect_logs) รวมเป็นรายสาเหตุ
+ * อ่านด้วย service role (ผ่านด่าน products.view แล้ว) · ไม่มีข้อมูล/พัง = คืนรายการว่าง ใบพิมพ์ไม่พัง
+ */
+async function loadMoIssues(sku: string, parentId: string | null, parentCode: string | null): Promise<MoIssues> {
+  const admin = supabaseAdmin();
+  const safeSku = sku.replace(/["(),]/g, "");
+  const [issRes, defRes, sibRes] = await Promise.all([
+    parentId
+      ? admin.from("parent_sku_issues").select("problem_text, source, sku, created_at").eq("parent_sku_id", parentId).eq("is_active", true)
+        .or(`sku.is.null,sku.eq."${safeSku}"`).order("created_at", { ascending: false }).limit(50)
+      : Promise.resolve({ data: [] as unknown[] }),
+    admin.from("defect_logs").select("defect_type, cause, qty, created_at").eq("sku", sku).eq("is_active", true).order("created_at", { ascending: false }).limit(200),
+    parentId
+      ? admin.from("skus_v2").select("id", { count: "exact", head: true }).eq("parent_sku_id", parentId).eq("is_active", true)
+      : Promise.resolve({ count: 0 }),
+  ]);
+  type IssueRow = { problem_text: string; source: string; sku: string | null; created_at: string };
+  const rows = (issRes.data ?? []) as IssueRow[];
+  const item = (r: IssueRow): MoIssue => ({ text: r.problem_text, source: r.source === "qc" ? "QC" : "จดเอง", last_at: r.created_at });
+  // ของเสียจาก QC รวมเป็นรายสาเหตุ: กี่ครั้ง · กี่ชิ้น · ล่าสุดเมื่อไร (ใหม่ก่อน)
+  const byCause = new Map<string, MoIssue>();
+  for (const d of (defRes.data ?? []) as { defect_type: string | null; cause: string | null; qty: number | null; created_at: string }[]) {
+    const t = String(d.defect_type || d.cause || "").trim();
+    if (!t) continue;
+    const cur = byCause.get(t) ?? { text: t, source: "QC", times: 0, qty: 0, last_at: d.created_at };
+    cur.times = (cur.times ?? 0) + 1;
+    cur.qty = (cur.qty ?? 0) + (Number(d.qty) || 0);
+    if (d.created_at > (cur.last_at ?? "")) cur.last_at = d.created_at;
+    byCause.set(t, cur);
+  }
+  return {
+    parent_code: parentCode,
+    siblings: (sibRes as { count?: number | null }).count ?? 0,
+    model: rows.filter((r) => !r.sku).map(item),
+    sku: [...rows.filter((r) => r.sku).map(item), ...[...byCause.values()].sort((a, b) => String(b.last_at).localeCompare(String(a.last_at)))],
+  };
 }
 
 type MatEdit = { id: string; on_hand_qty: number; is_ready: boolean; to_purchase_qty: number };
