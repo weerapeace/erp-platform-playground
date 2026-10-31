@@ -1,11 +1,14 @@
 "use client";
 
+import { useEffect, useRef } from "react";
+
 /**
  * 📅 DispatchDatePick — ช่อง "วันที่จ่าย" ของป๊อปจ่ายงาน / รายละเอียดใบงาน
  * ตั้งต้น = วันนี้ · ย้อนวันได้ · คีย์ย้อนหลังแล้วจำไม่ได้ว่าวันไหน → กด "จำไม่ได้" = ไม่ระบุวัน (value null → บันทึกเป็นว่าง)
  *
  * เปิดปุ่ม "จำไม่ได้" (บันทึกวันว่าง) ได้เมื่อ DB ปลดข้อบังคับห้ามว่างแล้ว
  * — DB ปลดแล้ว 2026-10-28 (เจ้าของอนุมัติ · migration 202611030200_mo_work_orders_dispatch_date_nullable)
+ * กด "ไม่ระบุวัน" = ใส่วันนี้แล้วเปิดปฏิทินให้เลย (คลิกช่องวันที่ = เปิดปฏิทิน — ของกลาง DatePickerOnClick)
  */
 export const ALLOW_UNKNOWN_DATE = true;
 
@@ -17,9 +20,16 @@ export function DispatchDatePick({ value, onChange, disabled = false }: {
   onChange: (v: string | null) => void;
   disabled?: boolean;
 }) {
+  const ref = useRef<HTMLInputElement>(null);
+  const openNext = useRef(false);   // เพิ่งกด "ไม่ระบุวัน" → ช่องวันที่โผล่แล้วเปิดปฏิทินต่อเลย
+  useEffect(() => {
+    if (value === null || !openNext.current) return;
+    openNext.current = false;
+    try { (ref.current as (HTMLInputElement & { showPicker?: () => void }) | null)?.showPicker?.(); } catch { /* ไม่รองรับ = กดไอคอนเอง */ }
+  }, [value]);
   if (value === null) return (
     <div>
-      <button type="button" onClick={() => onChange(todayLocal())} disabled={disabled} title="กดเพื่อใส่วันที่จ่าย"
+      <button type="button" onClick={() => { openNext.current = true; onChange(todayLocal()); }} disabled={disabled} title="กดเพื่อใส่วันที่จ่าย"
         className="w-full h-9 px-2 text-sm text-left border border-dashed border-amber-300 bg-amber-50 text-amber-700 rounded-lg hover:bg-amber-100 disabled:opacity-50">
         🤷 ไม่ระบุวัน
       </button>
@@ -28,7 +38,7 @@ export function DispatchDatePick({ value, onChange, disabled = false }: {
   );
   return (
     <div>
-      <input type="date" value={value} onChange={(e) => onChange(e.target.value || todayLocal())} disabled={disabled}
+      <input ref={ref} type="date" value={value} onChange={(e) => onChange(e.target.value || todayLocal())} disabled={disabled}
         title="วันที่จ่ายงานจริง — ตั้งต้นเป็นวันนี้ ย้อนวันได้ถ้าคีย์ตามหลัง"
         className="w-full h-9 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50" />
       {ALLOW_UNKNOWN_DATE && (

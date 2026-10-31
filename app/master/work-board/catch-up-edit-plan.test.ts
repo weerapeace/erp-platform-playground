@@ -244,4 +244,11 @@ describe("แสดงผลแบบอ่านง่าย (cuStepParts)", ()
     expect(p.date).toEqual({ t: "ไม่ระบุวัน", none: true });
     expect(cuStepParts({ kind: "reduce", from: 30, to: 35, reason: "x", mode: "add" }).title).toBe("เพิ่มจำนวน");
   });
+  it("จ่ายงาน/ส่งคืน: ค่าแรง/ชิ้น × จำนวน = ยอดรวม (ตัวหนา)", () => {
+    const d = cuStepParts({ kind: "dispatch", line: "a", qty: 40, date: null, rate: 25 }, () => "ช่างเหมา");
+    expect(d.main.map((x) => x.t).join("")).toBe("40 ชิ้น → ช่างเหมา · ฿25/ชิ้น × 40 = ฿1,000");
+    expect(d.main.at(-1)).toEqual({ t: "฿1,000", b: true });
+    const r = cuStepParts({ kind: "return", ref: "auto", qty: 15, date: "2026-10-29", wage: 50 });
+    expect(r.main.at(-1)).toEqual({ t: "฿750", b: true });
+  });
 });

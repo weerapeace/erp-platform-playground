@@ -238,6 +238,8 @@ export function cuStepParts(s: CuStep, who?: (s: CuStep) => string): CuStepParts
   const date = "date" in s ? { t: cuDateText(s.date), none: !s.date } : null;
   const T = (t: string, o: Omit<CuSeg, "t"> = {}): CuSeg => ({ t, ...o });
   const by = (pre: string): CuSeg[] => (w ? [T(pre), T(w, { who: true })] : []);
+  // ค่าแรง/ชิ้น × จำนวน = ยอดรวม (เจ้าของขอ 2026-10-31) — ยอดรวมตัวหนา
+  const pay = (rate: number, qty: number): CuSeg[] => [T(` · ฿${fmt(rate)}/ชิ้น × ${fmt(qty)} = `, { dim: true }), T(`฿${fmt(rate * qty)}`, { b: true })];
   switch (s.kind) {
     case "reduce": {
       const d = r2(Math.abs(s.to - s.from));
@@ -255,12 +257,12 @@ export function cuStepParts(s: CuStep, who?: (s: CuStep) => string): CuStepParts
     };
     case "dispatch": return {
       tone: "disp", title: "จ่ายงาน",
-      main: [T(fmt(s.qty), { b: true }), T(" ชิ้น"), ...by(" → "), ...(s.rate ? [T(` · ฿${fmt(s.rate)}/ชิ้น`, { dim: true })] : []), ...(s.note ? [T(` · ${s.note}`, { it: true, dim: true })] : [])],
+      main: [T(fmt(s.qty), { b: true }), T(" ชิ้น"), ...by(" → "), ...(s.rate ? pay(s.rate, s.qty) : []), ...(s.note ? [T(` · ${s.note}`, { it: true, dim: true })] : [])],
       date, chips: s.rate ? [] : [{ t: "ไม่มีค่าแรง", tone: "warn" }],
     };
     case "return": return {
       tone: "ret", title: "ช่างส่งคืน",
-      main: [T(fmt(s.qty), { b: true }), T(" ชิ้น"), ...by(" จาก "), ...(s.wage != null ? [T(` · ฿${fmt(s.wage)}/ชิ้น`, { dim: true })] : [])],
+      main: [T(fmt(s.qty), { b: true }), T(" ชิ้น"), ...by(" จาก "), ...(s.wage != null ? pay(s.wage, s.qty) : [])],
       date, chips: s.wage == null ? [{ t: "ยังไม่ลงค่าแรง", tone: "warn" }] : [],
     };
     case "qc_in": return {
