@@ -146,7 +146,7 @@ function aggregateRecurring(items: Row[], period: Row): Map<string, Row[]> {
 }
 const sumRecurring = (items: Row[], type: string) => items.filter((i) => i.item_type === type).reduce((t, i) => t + money(i.applied_amount), 0);
 
-function aggregateMidMonth(batches: Row[]): Map<string, number> {
+export function aggregateMidMonth(batches: Row[]): Map<string, number> {
   const m = new Map<string, number>();
   for (const b of batches) {
     if (!["mid_month", "special"].includes(String(b.batch_type)) || !["approved", "paid"].includes(String(b.status))) continue;

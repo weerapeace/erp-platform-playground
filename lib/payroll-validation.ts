@@ -1,5 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { money } from "@/lib/payroll-calc";
+import { aggregateMidMonth } from "@/lib/payroll-calc-engine";
 import { buildPayrollIssueFix, type PayrollIssueFix } from "@/lib/payroll-validation-actions";
 import { countEmployeesMissingCurrentContract, payrollWageProblem } from "@/lib/payroll-issue-filters";
 
@@ -68,7 +69,7 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
     issues.push(issue("error", "missing_hours_per_day", "ชั่วโมงต่อวันว่าง", "ตั้งค่า default_hours_per_day ให้มากกว่า 0 ก่อนคำนวณ"));
   }
 
-  const [empRes, conRes, allConRes, recRes, runRes, midRes] = await Promise.all([
+  const [empRes, conRes, allConRes, recRes, runRes, midRes, lastRunRes] = await Promise.all([
     admin.from("employees").select("id, employee_code, first_name, employment_status").eq("employment_status", "active"),
     (() => {
       let q = admin.from("employee_contracts").select("id, employee_id, contract_no, status, is_current, company_id, contract_type, employment_type, wage_type, base_salary, daily_wage, hourly_wage")
@@ -83,6 +84,7 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
     admin.from("payroll_runs").select("id", { count: "exact", head: true }).eq("payroll_period_id", periodId),
     admin.from("payment_batches").select("id, batch_no, batch_type, status, payment_batch_lines(employee_id, paid_amount, status)")
       .eq("payroll_period_id", periodId).in("batch_type", ["mid_month", "special"]),
+    admin.from("payroll_runs").select("id, run_no").eq("payroll_period_id", periodId).order("run_no", { ascending: false }).limit(1),
   ]);
   if (empRes.error) throw new Error(empRes.error.message);
   if (conRes.error) throw new Error(conRes.error.message);
@@ -90,6 +92,7 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
   if (recRes.error) throw new Error(recRes.error.message);
   if (runRes.error) throw new Error(runRes.error.message);
   if (midRes.error) throw new Error(midRes.error.message);
+  if (lastRunRes.error) throw new Error(lastRunRes.error.message);
 
   const employees = (empRes.data ?? []) as Row[];
   const contracts = (conRes.data ?? []) as Row[];
@@ -142,6 +145,27 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
       hasSpecial ? "มีรอบจ่ายกลางเดือน/รอบพิเศษยังไม่อนุมัติ" : "มีรอบจ่ายกลางเดือนยังไม่อนุมัติ",
       `${batchNos ? `${batchNos} · ` : ""}${people} คน · ฿${amount.toLocaleString("th-TH")} — ยอดนี้จะยังไม่ถูกหักจากเงินเดือนปลายเดือน ถ้าคำนวณตอนนี้ คนที่เบิกไปแล้วจะได้เงินซ้ำ ให้อนุมัติรอบนี้ก่อน (หรือยกเลิกถ้าไม่ได้จ่ายจริง) แล้วค่อยคำนวณ`,
       unapprovedMid.length));
+  }
+
+  // รอบกลางเดือนอนุมัติ "หลัง" คำนวณครั้งล่าสุด — ผลที่บันทึกไว้ยังไม่ได้หักยอดนั้น
+  // เทียบยอดที่ควรหัก (กฎเดียวกับเครื่องคำนวณ) กับ mid_month_paid ในรอบคำนวณล่าสุด รายคน
+  const lastRun = (lastRunRes.data?.[0] ?? null) as Row | null;
+  const midDue = aggregateMidMonth(((midRes.data ?? []) as Row[]).map((b) => ({ ...b, lines: b.payment_batch_lines })));
+  if (lastRun && midDue.size > 0) {
+    const { data: runLines, error: runLinesError } = await admin.from("payroll_lines")
+      .select("employee_id, mid_month_paid").eq("payroll_run_id", String(lastRun.id)).in("employee_id", [...midDue.keys()]);
+    if (runLinesError) throw new Error(runLinesError.message);
+    let people = 0;
+    let missing = 0;
+    for (const line of (runLines ?? []) as Row[]) {
+      const short = money(midDue.get(String(line.employee_id))) - money(line.mid_month_paid);
+      if (short > 0.005) { people += 1; missing += short; }
+    }
+    if (people > 0) {
+      issues.push(issue("warning", "mid_month_after_calc", "ผลคำนวณล่าสุดยังไม่ได้หักเงินกลางเดือน",
+        `รอบคำนวณที่ ${String(lastRun.run_no ?? "")} หักเงินกลางเดือนไม่ครบ ${people} คน · ขาด ฿${missing.toLocaleString("th-TH")} (น่าจะอนุมัติรอบกลางเดือนหลังคำนวณ) — กด "คำนวณ + เทียบ" แล้วบันทึกผลใหม่ ถ้าสร้างรอบจ่ายปลายเดือนไว้แล้ว ให้กด "อัปเดตยอดจากคำนวณล่าสุด" ในหน้ารอบจ่ายด้วย`,
+        people));
+    }
   }
 
   if ((runRes.count ?? 0) > 0) {
