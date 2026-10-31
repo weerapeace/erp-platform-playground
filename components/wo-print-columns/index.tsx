@@ -16,8 +16,8 @@ import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import {
   WO_BORDER_COLORS, WO_BORDER_MODES, WO_DEFAULT_COLUMNS, WO_DEFAULT_EXTRAS, WO_DEFAULT_HEADER, WO_DEFAULT_SECTIONS, WO_DEFAULT_SIGNOFF, WO_DEFAULT_STYLE,
-  WO_EXTRA_LABELS, WO_HEADER_BLOCKS, WO_HEADER_FIELDS, WO_SECTION_LABELS, WO_SECTION_PRESETS, isBlankWoColumn, normalizeWoColumns,
-  type WoColumn, type WoExtras, type WoHeader, type WoHeaderBlock, type WoPrintColumns, type WoSignoff,
+  WO_EXTRA_LABELS, WO_HEADER_BLOCKS, WO_HEADER_FIELDS, WO_SECTION_LABELS, WO_SECTION_PRESETS, WO_SHEETS, isBlankWoColumn, normalizeWoColumns,
+  type WoBoxKey, type WoColumn, type WoExtras, type WoHeader, type WoHeaderBlock, type WoPrintColumns, type WoSheet, type WoSignoff,
 } from "@/lib/work-order-print";
 
 const CONFIG_KEY = "wo_print_columns";
@@ -156,6 +156,35 @@ export function WoColumnSettings({ onPreview, onSaved }: {
   // "ช่องติ๊กเตรียมรายวัตถุดิบ" = คอลัมน์ ☑ ในตารางสรุปที่มีอยู่แล้ว — แค่สลับเปิด/ปิดให้จากตรงนี้
   const tickOn = draft.summary.some((c) => c.key === "check" && c.show);
   const setTick = (on: boolean) => setDraft((d) => ({ ...d, summary: d.summary.map((c) => (c.key === "check" ? { ...c, show: on } : c)) }));
+
+  // ตาราง "กล่องไหนโชว์ · อยู่แผ่นไหน" — ช่องโชว์ผูกกับค่าที่มีอยู่แล้ว (ส่วนเสริม / ช่างรับงาน / ตัด-เตรียม) ไม่ซ้ำซ้อน
+  const sec = draft.sections ?? WO_DEFAULT_SECTIONS;
+  const splitOn = sec.split;
+  const sheetCols = splitOn ? WO_SHEETS.filter((s) => sec[s.key]) : [];
+  const extraRow = (key: keyof WoExtras & WoBoxKey, label: string) => {
+    const meta = WO_EXTRA_LABELS.find((x) => x.key === key);
+    return { key, label, hint: meta?.hint, show: ex[key], setShow: (on: boolean) => setEx({ [key]: on }) };
+  };
+  const boxRows: { key: WoBoxKey; label: string; hint?: string; show: boolean; setShow: (on: boolean) => void }[] = [
+    extraRow("approve", "ผู้สั่งผลิต + หัวหน้าอนุมัติ"),
+    ...(so.prep === "split"
+      ? [
+        { key: "prep" as const, label: "เตรียมวัตถุดิบ", show: so.prep_show, setShow: (on: boolean) => setSo({ prep_show: on }) },
+        { key: "cut" as const, label: "ตัด", show: so.cut_show, setShow: (on: boolean) => setSo({ cut_show: on }) },
+      ]
+      : [{ key: "prepcut" as const, label: "แผนกตัด/เตรียม", show: so.prep === "one", setShow: (on: boolean) => setSo({ prep: on ? "one" : "off" }) }]),
+    { key: "worker", label: "ช่างรับงาน (ทุกกล่อง)", hint: "1 กล่องต่อใบจ่ายงานจริงของใบนี้ · ยังไม่จ่าย = กล่องว่างให้เขียนเอง", show: so.worker, setShow: (on) => setSo({ worker: on }) },
+    extraRow("qc", "QC ตรวจรับ (ดี / เสีย)"),
+    extraRow("returns", "ตารางส่งคืนงาน"),
+    extraRow("note", "หมายเหตุถึงช่าง"),
+  ];
+  const setPlace = (key: WoBoxKey, sheet: WoSheet, on: boolean) =>
+    setDraft((d) => {
+      const cur = d.signoff ?? WO_DEFAULT_SIGNOFF;
+      return { ...d, signoff: { ...cur, place: { ...cur.place, [key]: { ...cur.place[key], [sheet]: on } } } };
+    });
+  // โชว์อยู่แต่ไม่ได้เลือกแผ่นที่พิมพ์เลย → จะไปแผ่นสุดท้าย (บอกให้รู้ ไม่ให้งง)
+  const orphanBoxes = sheetCols.length === 0 ? [] : boxRows.filter((r) => r.show && !sheetCols.some((s) => so.place[r.key][s.key])).map((r) => r.label);
 
   // ลากย้ายแผง (จับที่แถบหัว) — clamp ไม่ให้หลุดจอ
   const onHeadPointerDown = (e: React.PointerEvent) => {
@@ -370,15 +399,10 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                         { value: "off", label: "ไม่ใส่" }, { value: "one", label: "1 กล่องรวม" }, { value: "split", label: "แยก เตรียม/ตัด" },
                       ]} />
                     </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[11px] text-slate-500 w-20 shrink-0">ช่างรับงาน</span>
-                      <Seg value={so.worker ? "on" : "off"} onChange={(v) => setSo({ worker: v === "on" })} options={[
-                        { value: "off", label: "ไม่ใส่" }, { value: "on", label: "1 กล่อง/ใบจ่ายงาน", hint: "ดึงโต๊ะ/ช่าง + จำนวนที่รับ จากใบจ่ายงานจริงของใบนี้" },
-                      ]} />
-                    </div>
                     {so.worker && (
                       <>
-                        <label className="flex items-center gap-1.5 cursor-pointer pl-[86px]">
+                        <label className="flex items-center gap-1.5 cursor-pointer" title="ช่างรับงาน = 1 กล่องต่อใบจ่ายงานจริงของใบนี้ (โต๊ะ/ช่าง + จำนวนที่รับ)">
+                          <span className="text-[11px] text-slate-500 w-20 shrink-0">ช่างรับงาน</span>
                           <input type="checkbox" checked={so.merge} onChange={(e) => setSo({ merge: e.target.checked })} className="w-4 h-4 accent-indigo-600 shrink-0" />
                           <span className="text-[11px] text-slate-600">รวมกล่องโต๊ะ/ช่างเดียวกัน (จ่ายหลายรอบ)</span>
                         </label>
@@ -411,17 +435,38 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                   </div>
                 </div>
 
-                {/* 6) ส่วนเสริม */}
+                {/* 6) กล่องไหนโชว์ · อยู่แผ่นไหน (แผ่น = โหมดแยกใบในข้อ 0) */}
                 <div>
-                  <div className="text-[12px] font-bold text-slate-700 mb-1">6) ส่วนเสริม</div>
+                  <div className="text-[12px] font-bold text-slate-700 mb-1">6) กล่องไหนโชว์ · อยู่แผ่นไหน</div>
                   <div className={`border border-slate-200 rounded-lg px-2 py-1.5 space-y-1 ${signOn ? "" : "opacity-50"}`}>
-                    {WO_EXTRA_LABELS.map((x) => (
-                      <label key={x.key} title={x.hint} className="flex items-center gap-1.5 cursor-pointer">
-                        <input type="checkbox" checked={ex[x.key]} onChange={(e) => setEx({ [x.key]: e.target.checked })} className="w-4 h-4 accent-indigo-600 shrink-0" />
-                        <span className={`text-[12px] ${ex[x.key] ? "text-slate-700" : "text-slate-400"}`}>{x.label}</span>
-                      </label>
-                    ))}
-                    <label title="คอลัมน์ ☑ ในตาราง “สรุปวัตถุดิบ” (ข้อ 1)" className="flex items-center gap-1.5 cursor-pointer">
+                    <table className="w-full text-[11px]">
+                      <thead>
+                        <tr className="text-slate-500">
+                          <th className="text-left font-normal py-0.5">กล่อง</th>
+                          <th className="font-normal w-9">โชว์</th>
+                          {sheetCols.map((s) => <th key={s.key} className="font-normal w-14 leading-tight">{s.short}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {boxRows.map((r) => (
+                          <tr key={r.key} className="border-t border-slate-100" title={r.hint}>
+                            <td className={`py-1 pr-1 ${r.show ? "text-slate-700" : "text-slate-400"}`}>{r.label}</td>
+                            <td className="text-center"><input type="checkbox" checked={r.show} onChange={(e) => r.setShow(e.target.checked)} aria-label={`โชว์ ${r.label}`} className="w-4 h-4 accent-indigo-600 align-middle" /></td>
+                            {sheetCols.map((s) => (
+                              <td key={s.key} className="text-center">
+                                <input type="checkbox" checked={so.place[r.key][s.key]} disabled={!r.show}
+                                  onChange={(e) => setPlace(r.key, s.key, e.target.checked)} aria-label={`${r.label} บน${s.label}`}
+                                  className="w-4 h-4 accent-indigo-600 align-middle disabled:opacity-30" />
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {splitOn
+                      ? orphanBoxes.length > 0 && <p className="text-[10px] text-amber-700 leading-snug">ไม่ได้เลือกแผ่นที่พิมพ์ให้: {orphanBoxes.join(", ")} → จะไปอยู่แผ่นสุดท้ายแทน (ไม่หายเงียบ)</p>
+                      : <p className="text-[10px] text-slate-400 leading-snug">ติ๊ก <b>แยกใบ</b> ในข้อ 0 ถ้าอยากให้แต่ละกล่องไปอยู่คนละแผ่น (เช่น กล่องตัดอยู่ใบบล็อกตัด กล่องช่างอยู่ใบรายละเอียด)</p>}
+                    <label title="คอลัมน์ ☑ ในตาราง “สรุปวัตถุดิบ” (ข้อ 1)" className="flex items-center gap-1.5 cursor-pointer border-t border-slate-100 pt-1">
                       <input type="checkbox" checked={tickOn} onChange={(e) => setTick(e.target.checked)} className="w-4 h-4 accent-indigo-600 shrink-0" />
                       <span className={`text-[12px] ${tickOn ? "text-slate-700" : "text-slate-400"}`}>ช่องติ๊กเตรียมรายวัตถุดิบ</span>
                     </label>

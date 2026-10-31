@@ -2,10 +2,10 @@ import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import { BLANK_DATE, signoffHtml } from "@/lib/print-signoff";
-import { buildReportHtml } from "@/lib/template";
+import { buildReportHtml, buildReportHtmlMulti } from "@/lib/template";
 import {
   WO_DEFAULT_COLUMNS, WO_DEFAULT_EXTRAS, WO_DEFAULT_SIGNOFF, buildWoHtmlData, buildWorkOrderTemplate,
-  normalizeWoColumns, woSignoffBoxes, type MoDetail, type WoPrintColumns,
+  normalizeWoColumns, woBoxSheets, woSectionDataList, woSignoffBoxes, type MoDetail, type WoPrintColumns,
 } from "@/lib/work-order-print";
 
 // ข้อมูลจริงจาก DB (2026-10-31)
@@ -71,6 +71,46 @@ describe("กล่องลงชื่อใบสั่งงานผลิ�
   });
 });
 
+describe("กล่องไหนโชว์ · อยู่แผ่นไหน (แยกใบ)", () => {
+  const split = (extra: object = {}) => normalizeWoColumns({
+    sections: { summary: true, lines: true, detail: true, signature: true, split: true },
+    signoff: { prep: "split" }, extras: { qc: true, note: true }, ...extra,
+  });
+  const sheetBoxes = (cols: WoPrintColumns) => woSectionDataList(buildWoHtmlData(QTY_CHANGED, null, cols), cols)
+    .map((d) => (String(d.signoff_html).match(/sgn-head"><span>([^<]+)</g) ?? []).map((m) => m.replace(/.*<span>/, "").replace("<", "")));
+
+  it("ค่าเริ่มต้น: เตรียม→ใบสรุป · ตัด→ใบบล็อกตัด · ช่าง+QC→ใบรายละเอียด", () => {
+    expect(sheetBoxes(split())).toEqual([
+      ["ผู้สั่งผลิต", "หัวหน้าอนุมัติ", "เตรียมวัตถุดิบ"],
+      ["ตัด"],
+      ["ช่างรับงาน", "QC ตรวจรับ"],
+    ]);
+    const docs = woSectionDataList(buildWoHtmlData(QTY_CHANGED, null, split()), split());
+    expect(String(docs[2].wo_extras_html)).toContain("หมายเหตุถึงช่าง");
+    expect(String(docs[0].wo_extras_html)).toBe("");
+  });
+
+  it("ซ่อนเฉพาะกล่องเตรียม · ย้ายกล่องช่างไปใบบล็อกตัด", () => {
+    const cols = split({ signoff: { prep: "split", prep_show: false, place: { worker: { lines: true, detail: false } } } });
+    expect(sheetBoxes(cols)).toEqual([["ผู้สั่งผลิต", "หัวหน้าอนุมัติ"], ["ตัด", "ช่างรับงาน"], ["QC ตรวจรับ"]]);
+  });
+
+  it("แผ่นที่เลือกไม่ได้พิมพ์ = ไปแผ่นสุดท้ายที่พิมพ์ (ไม่หายเงียบ)", () => {
+    const cols = normalizeWoColumns({ sections: { summary: true, lines: true, detail: false, signature: true, split: true } });
+    expect(woBoxSheets("worker", cols)).toEqual(["lines"]);
+    expect(woBoxSheets("prepcut", cols)).toEqual(["summary", "lines"]);
+    const html = buildReportHtmlMulti(buildWorkOrderTemplate(cols), woSectionDataList(buildWoHtmlData(NOT_DISPATCHED, null, cols), cols));
+    expect(html.match(/ช่างรับงาน/g)).toHaveLength(2);   // กล่องว่าง 2 กล่อง อยู่ใบบล็อกตัดใบเดียว ไม่ซ้ำ
+  });
+
+  it("ใบเดียว (ไม่แยก) = ทุกกล่องที่โชว์อยู่ในใบเดียว ไม่สนตั้งค่าแผ่น", () => {
+    const cols = normalizeWoColumns({ signoff: { place: { worker: { summary: false, lines: false, detail: false } } } });
+    const docs = woSectionDataList(buildWoHtmlData(NOT_DISPATCHED, null, cols), cols);
+    expect(docs).toHaveLength(1);
+    expect(String(docs[0].signoff_html)).toContain("ช่างรับงาน");
+  });
+});
+
 describe("หัวใบ + ค่าที่บันทึกไว้", () => {
   it("ค่าเก่า (ไม่มี header/signoff/extras) ได้ค่าเริ่มต้น · ลำดับกล่องหัวซ่อมให้ครบ", () => {
     const n = normalizeWoColumns({ header: { order: ["meta", "meta", "bogus"], photo_mm: 999, show: { qr: false } } });
@@ -119,5 +159,9 @@ describe("หัวใบ + ค่าที่บันทึกไว้", () =
       const html = buildReportHtml(buildWorkOrderTemplate(cols), { ...buildWoHtmlData(mo, null, cols), qr_html: "" });
       writeFileSync(`${process.env.WO_PREVIEW_DIR}/${name}.html`, html, "utf8");
     }
+    // แยกใบ 3 แผ่น — กล่องกระจายตามแผ่น
+    const split = normalizeWoColumns({ sections: { summary: true, lines: true, detail: true, signature: true, split: true }, signoff: { prep: "split" }, extras: { qc: true, note: true } });
+    const docs = woSectionDataList(buildWoHtmlData(TWO_CRAFTSMEN, null, split), split);
+    writeFileSync(`${process.env.WO_PREVIEW_DIR}/e-split.html`, buildReportHtmlMulti(buildWorkOrderTemplate(split), docs), "utf8");
   });
 });

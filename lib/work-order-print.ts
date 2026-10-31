@@ -164,12 +164,39 @@ export const WO_DEFAULT_HEADER: WoHeader = {
  * blanks = ยังไม่จ่ายงาน → กล่องว่างให้เขียนชื่อเอง N กล่อง · extra = จ่ายแล้วเผื่อกล่องว่างอีก
  * date   = วันที่ตรงลายเซ็น: เว้นให้เขียนมือ / เติมวันที่ที่ระบบรู้ (วันจ่ายงาน · วันเตรียม/ตัดเสร็จ · วันสั่ง)
  * pos    = วางใต้หัวใบ / ท้ายใบ
+ * prep_show / cut_show = โหมดแยกกล่อง: เลือกโชว์เฉพาะกล่องเตรียม หรือเฉพาะกล่องตัดได้
+ * place  = โหมด "แยกใบ": กล่องไหนไปอยู่แผ่นไหน (ติ๊กได้หลายแผ่น) · แผ่นที่เลือกไม่ได้พิมพ์ = ไปแผ่นสุดท้ายแทน (ไม่หายเงียบ)
  */
+export type WoSheet = "summary" | "lines" | "detail";
+export const WO_SHEETS: { key: WoSheet; label: string; short: string }[] = [
+  { key: "summary", label: "ใบสรุปวัตถุดิบ", short: "สรุป" },
+  { key: "lines", label: "ใบบล็อกตัด", short: "บล็อกตัด" },
+  { key: "detail", label: "ใบรายละเอียดสินค้า", short: "รายละเอียด" },
+];
+/** กล่องที่เลือกแผ่นได้ — prepcut = กล่องรวมตัด/เตรียม (โหมด 1 กล่อง) · approve = ผู้สั่ง + หัวหน้า (คู่กัน) · worker = ทุกกล่องช่าง */
+export type WoBoxKey = "approve" | "prepcut" | "prep" | "cut" | "worker" | "qc" | "returns" | "note";
+export type WoSheetSet = Record<WoSheet, boolean>;
+const sheetSet = (...on: WoSheet[]): WoSheetSet => ({ summary: on.includes("summary"), lines: on.includes("lines"), detail: on.includes("detail") });
+export const WO_DEFAULT_PLACE: Record<WoBoxKey, WoSheetSet> = {
+  approve: sheetSet("summary"),
+  prepcut: sheetSet("summary", "lines"),
+  prep: sheetSet("summary"),
+  cut: sheetSet("lines"),
+  worker: sheetSet("detail"),
+  qc: sheetSet("detail"),
+  returns: sheetSet("detail"),
+  note: sheetSet("detail"),
+};
 export type WoSignoff = {
   prep: "off" | "one" | "split"; worker: boolean; merge: boolean; multi: "each" | "one";
   blanks: number; extra: number; date: "blank" | "fill"; pos: "top" | "bottom";
+  prep_show: boolean; cut_show: boolean;
+  place: Record<WoBoxKey, WoSheetSet>;
 };
-export const WO_DEFAULT_SIGNOFF: WoSignoff = { prep: "one", worker: true, merge: false, multi: "each", blanks: 2, extra: 0, date: "blank", pos: "bottom" };
+export const WO_DEFAULT_SIGNOFF: WoSignoff = {
+  prep: "one", worker: true, merge: false, multi: "each", blanks: 2, extra: 0, date: "blank", pos: "bottom",
+  prep_show: true, cut_show: true, place: WO_DEFAULT_PLACE,
+};
 /** ส่วนเสริม — ผู้สั่ง+หัวหน้าอนุมัติ (แทนช่องลงชื่อเดิม 2 ช่อง) · QC ตรวจรับ · ตารางส่งคืนงาน · หมายเหตุถึงช่าง */
 export type WoExtras = { approve: boolean; qc: boolean; returns: boolean; note: boolean };
 export const WO_DEFAULT_EXTRAS: WoExtras = { approve: true, qc: false, returns: false, note: false };
@@ -215,8 +242,24 @@ export function woSectionDataList(base: Record<string, unknown>, cols?: WoPrintC
     { on: sec.lines, flag: "sec_lines" },
     { on: sec.detail, flag: "sec_detail" },
   ];
-  const docs = keys.filter((k) => k.on).map((k) => ({ ...base, sec_summary: false, sec_lines: false, sec_detail: false, [k.flag]: true }));
+  // แต่ละแผ่นได้กล่องลงชื่อ/ส่วนเสริมเฉพาะที่เลือกให้แผ่นนั้น (buildWoHtmlData เตรียม signoff_html_<แผ่น> ไว้ให้)
+  const perSheet = (flag: string) => {
+    const sheet = flag.replace("sec_", "");
+    const pick = (k: string) => (`${k}_${sheet}` in base ? base[`${k}_${sheet}`] : base[k]);
+    return { signoff_html: pick("signoff_html"), wo_extras_html: pick("wo_extras_html") };
+  };
+  const docs = keys.filter((k) => k.on).map((k) => ({ ...base, sec_summary: false, sec_lines: false, sec_detail: false, [k.flag]: true, ...perSheet(k.flag) }));
   return docs.length > 0 ? docs : [{ ...base, sec_summary: false, sec_lines: false, sec_detail: false }];
+}
+
+/** กล่องนี้ไปอยู่แผ่นไหน (เฉพาะแผ่นที่พิมพ์จริง) — เลือกไว้แต่แผ่นนั้นไม่ได้พิมพ์/ไม่ได้เลือกเลย = แผ่นสุดท้ายที่พิมพ์ */
+export function woBoxSheets(key: WoBoxKey, cols?: WoPrintColumns | null): WoSheet[] {
+  const sec = cols?.sections ?? WO_DEFAULT_SECTIONS;
+  const printed = WO_SHEETS.map((s) => s.key).filter((s) => sec[s]);
+  if (printed.length === 0) return [];
+  const want = (cols?.signoff ?? WO_DEFAULT_SIGNOFF).place[key] ?? WO_DEFAULT_PLACE[key];
+  const chosen = printed.filter((s) => want[s]);
+  return chosen.length > 0 ? chosen : [printed[printed.length - 1]];
 }
 export const WO_BORDER_COLORS: { label: string; value: string }[] = [
   { label: "จางมาก", value: "#e2e8f0" },
@@ -381,7 +424,18 @@ export function normalizeWoSignoff(raw: unknown): WoSignoff {
     extra: intIn(s.extra, 0, 4, d.extra),
     date: oneOf(s.date, ["blank", "fill"] as const, d.date),
     pos: oneOf(s.pos, ["top", "bottom"] as const, d.pos),
+    prep_show: bool(s.prep_show, d.prep_show),
+    cut_show: bool(s.cut_show, d.cut_show),
+    place: normalizeWoPlace(s.place),
   };
+}
+
+function normalizeWoPlace(raw: unknown): Record<WoBoxKey, WoSheetSet> {
+  const p = (raw ?? {}) as Partial<Record<WoBoxKey, Partial<Record<WoSheet, unknown>>>>;
+  return Object.fromEntries((Object.keys(WO_DEFAULT_PLACE) as WoBoxKey[]).map((k) => {
+    const d = WO_DEFAULT_PLACE[k];
+    return [k, { summary: bool(p[k]?.summary, d.summary), lines: bool(p[k]?.lines, d.lines), detail: bool(p[k]?.detail, d.detail) }];
+  })) as Record<WoBoxKey, WoSheetSet>;
 }
 
 export function normalizeWoExtras(raw: unknown): WoExtras {
@@ -476,19 +530,19 @@ function workerGroups(mo: MoDetail, merge: boolean): WorkerGroup[] {
   return [...byKey.values()];
 }
 
-export function woSignoffBoxes(mo: MoDetail, so: WoSignoff, ex: WoExtras): SignBox[] {
+export function woSignoffBoxes(mo: MoDetail, so: WoSignoff, ex: WoExtras): (SignBox & { id: WoBoxKey })[] {
   const fill = so.date === "fill";
   const date = (iso: string | null | undefined): SignLine => ({ kind: "date", value: fill && iso ? thaiDate(iso) : null });
-  const boxes: SignBox[] = [];
+  const boxes: (SignBox & { id: WoBoxKey })[] = [];
   if (ex.approve) {
-    boxes.push({ title: "ผู้สั่งผลิต", lines: [{ kind: "sign" }, date(mo.order_date || mo.created_at)] });
-    boxes.push({ title: "หัวหน้าอนุมัติ", lines: [{ kind: "sign" }, date(null)] });
+    boxes.push({ id: "approve", title: "ผู้สั่งผลิต", lines: [{ kind: "sign" }, date(mo.order_date || mo.created_at)] });
+    boxes.push({ id: "approve", title: "หัวหน้าอนุมัติ", lines: [{ kind: "sign" }, date(null)] });
   }
   if (so.prep === "one") {
-    boxes.push({ title: "แผนกตัด/เตรียม", lines: [{ kind: "write", label: "ผู้ตัด/เตรียม" }, { kind: "sign" }, date(mo.cut_done_at || mo.prep_done_at)] });
+    boxes.push({ id: "prepcut", title: "แผนกตัด/เตรียม", lines: [{ kind: "write", label: "ผู้ตัด/เตรียม" }, { kind: "sign" }, date(mo.cut_done_at || mo.prep_done_at)] });
   } else if (so.prep === "split") {
-    boxes.push({ title: "เตรียมวัตถุดิบ", lines: [{ kind: "write", label: "ผู้เตรียม" }, { kind: "sign" }, date(mo.prep_done_at)] });
-    boxes.push({ title: "ตัด", lines: [{ kind: "write", label: "ผู้ตัด" }, { kind: "sign" }, date(mo.cut_done_at)] });
+    if (so.prep_show) boxes.push({ id: "prep", title: "เตรียมวัตถุดิบ", lines: [{ kind: "write", label: "ผู้เตรียม" }, { kind: "sign" }, date(mo.prep_done_at)] });
+    if (so.cut_show) boxes.push({ id: "cut", title: "ตัด", lines: [{ kind: "write", label: "ผู้ตัด" }, { kind: "sign" }, date(mo.cut_done_at)] });
   }
   if (so.worker) {
     const groups = workerGroups(mo, so.merge);
@@ -500,30 +554,30 @@ export function woSignoffBoxes(mo: MoDetail, so: WoSignoff, ex: WoExtras): SignB
         if (i > 0) lines.push({ kind: "sep" });
         lines.push({ kind: "text", text: p }, { kind: "sign" }, date(g.date));
       });
-      boxes.push({ title: "ช่างรับงาน", note: g.wos.join(", "), lines });
+      boxes.push({ id: "worker", title: "ช่างรับงาน", note: g.wos.join(", "), lines });
     }
     // ยังไม่จ่ายงาน = กล่องว่างให้เขียนเอง (ส่วนใหญ่พิมพ์ใบก่อนจ่าย) · จ่ายแล้วเผื่อเพิ่มได้
     const blanks = groups.length === 0 ? Math.max(1, so.blanks) : so.extra;
     for (let i = 0; i < blanks; i++) {
-      boxes.push({ title: "ช่างรับงาน", note: "เขียนเอง", lines: [{ kind: "write", label: "โต๊ะ/ช่าง" }, { kind: "write", label: "จำนวนรับ" }, { kind: "sign" }, date(null)] });
+      boxes.push({ id: "worker", title: "ช่างรับงาน", note: "เขียนเอง", lines: [{ kind: "write", label: "โต๊ะ/ช่าง" }, { kind: "write", label: "จำนวนรับ" }, { kind: "sign" }, date(null)] });
     }
   }
-  if (ex.qc) boxes.push({ title: "QC ตรวจรับ", lines: [{ kind: "pair", left: "ดี", right: "เสีย" }, { kind: "sign" }, date(null)] });
+  if (ex.qc) boxes.push({ id: "qc", title: "QC ตรวจรับ", lines: [{ kind: "pair", left: "ดี", right: "เสีย" }, { kind: "sign" }, date(null)] });
   return boxes;
 }
 
-/** ตารางบันทึกส่งคืนงาน (3 แถวว่าง) + กล่องหมายเหตุถึงช่าง */
-function woExtrasHtml(mo: MoDetail, ex: WoExtras): string {
-  const parts: string[] = [];
+/** ตารางบันทึกส่งคืนงาน (3 แถวว่าง) + กล่องหมายเหตุถึงช่าง — แยกชิ้นตาม key ให้คัดไปวางคนละแผ่นได้ */
+function woExtrasParts(mo: MoDetail, ex: WoExtras): { id: WoBoxKey; html: string }[] {
+  const parts: { id: WoBoxKey; html: string }[] = [];
   if (ex.returns) {
     const heads = ["ครั้งที่", "วันที่", "จำนวนส่ง", "ดี", "เสีย", "ผู้ส่ง", "ผู้รับ"];
     const rows = [1, 2, 3].map((n) => `<tr><td class="text-center">${n}</td>${"<td></td>".repeat(heads.length - 1)}</tr>`).join("");
-    parts.push(`<section class="wo-returns"><div class="section-title">บันทึกส่งคืนงาน</div><table class="doc-table returns-table"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></section>`);
+    parts.push({ id: "returns", html: `<section class="wo-returns"><div class="section-title">บันทึกส่งคืนงาน</div><table class="doc-table returns-table"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></section>` });
   }
   if (ex.note) {
-    parts.push(`<section class="wo-note-box"><span class="label">หมายเหตุถึงช่าง:</span> ${esc(mo.note)}<div class="sgn-ln wo-note-line"></div><div class="sgn-ln wo-note-line"></div></section>`);
+    parts.push({ id: "note", html: `<section class="wo-note-box"><span class="label">หมายเหตุถึงช่าง:</span> ${esc(mo.note)}<div class="sgn-ln wo-note-line"></div><div class="sgn-ln wo-note-line"></div></section>` });
   }
-  return parts.join("\n");
+  return parts;
 }
 
 // เรียงวัตถุดิบแบบเดียวกันทุกที่ (ตาราง HTML + ตาราง pdfme) — แยกออกมาให้ zip รูปเข้าแถวได้ตรงกัน
@@ -607,16 +661,29 @@ export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null, cols?: W
     cut_size: row[4], total_pieces: row[5], required: row[6], uom: row[7], code: row[8] || "-",
     image_html: matImgHtml(mats[i]?.image_url),
   }));
-  const signOn = (cols?.sections ?? WO_DEFAULT_SECTIONS).signature;
+  const sec = cols?.sections ?? WO_DEFAULT_SECTIONS;
   const ex = cols?.extras ?? WO_DEFAULT_EXTRAS;
+  const boxes = sec.signature ? woSignoffBoxes(mo, cols?.signoff ?? WO_DEFAULT_SIGNOFF, ex) : [];
+  const extras = sec.signature ? woExtrasParts(mo, ex) : [];
+  const signHtml = (list: SignBox[]) => signoffHtml(list, { title: "ลงชื่อรับ-ส่งงาน" });
+  // โหมดแยกใบ: เตรียม HTML ต่อแผ่นไว้ — woSectionDataList หยิบ signoff_html_<แผ่น> ไปใส่แผ่นนั้น
+  const perSheet: Record<string, string> = {};
+  if (sec.split) {
+    for (const { key } of WO_SHEETS) {
+      const here = (id: WoBoxKey) => woBoxSheets(id, cols).includes(key);
+      perSheet[`signoff_html_${key}`] = signHtml(boxes.filter((b) => here(b.id)));
+      perSheet[`wo_extras_html_${key}`] = extras.filter((p) => here(p.id)).map((p) => p.html).join("\n");
+    }
+  }
   return {
     ...woScalars(mo, spec),
     product_image_html: photoHtml(spec?.image_url ?? spec?.parent?.image_url),
     material_summary: materialSummaryRows(mo),
     product_spec_rows: productSpecRows(spec),
     lines,
-    signoff_html: signOn ? signoffHtml(woSignoffBoxes(mo, cols?.signoff ?? WO_DEFAULT_SIGNOFF, ex), { title: "ลงชื่อรับ-ส่งงาน" }) : "",
-    wo_extras_html: signOn ? woExtrasHtml(mo, ex) : "",
+    signoff_html: signHtml(boxes),
+    wo_extras_html: extras.map((p) => p.html).join("\n"),
+    ...perSheet,
   };
 }
 

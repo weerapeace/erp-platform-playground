@@ -27,7 +27,8 @@ export type SignLine =
   /** เส้นคั่นบาง ๆ (เช่น คั่นระหว่างช่างแต่ละคนในกล่องเดียว) */
   | { kind: "sep" };
 
-export type SignBox = { title: string; note?: string | null; lines: SignLine[] };
+/** id = กลุ่มของกล่อง (ไม่พิมพ์) — ใช้คัดกล่องไปวางคนละแผ่น เช่น ใบสั่งงานผลิตแยกใบ */
+export type SignBox = { id?: string; title: string; note?: string | null; lines: SignLine[] };
 
 /** ช่องวันที่เปล่าให้เขียนมือ */
 export const BLANK_DATE = "____/____/______";
