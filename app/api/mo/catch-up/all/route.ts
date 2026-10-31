@@ -21,6 +21,8 @@ export type CuAllRow = {
   qty_from?: number | null; split_from?: string | null;
   /** split = ที่เหลือตอนลดจำนวน · extra = ส่วนเกินตอนทำได้มากกว่าสั่ง */
   split_kind?: "split" | "extra" | null;
+  /** ค้างช่างตั้งแต่วันไหน (วันจ่ายเก่าสุดของใบจ่ายที่ยังค้าง · ไม่ระบุ = วันสร้างใบ) — ป้าย "ค้างช่าง" แดงเมื่อเกิน 14 วัน */
+  out_since?: string | null;
 };
 const DAYS_CLOSED = 30;
 const n = (v: unknown) => Number(v) || 0;
@@ -32,7 +34,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const [mosRes, wosRes, itemsRes, shelvesRes, qtyRes] = await Promise.all([
     admin.from("manufacturing_orders").select("mo_no, product_sku, product_name, qty, status, updated_at").eq("is_active", true)
       .or(`status.not.in.(done,cancelled),updated_at.gte.${since}`).limit(5000),
-    admin.from("mo_work_orders").select("mo_no, qty, received_qty, qc_pulled_qty").eq("is_active", true).neq("status", "cancelled").limit(10000),
+    admin.from("mo_work_orders").select("mo_no, qty, received_qty, qc_pulled_qty, dispatch_date, created_at").eq("is_active", true).neq("status", "cancelled").limit(10000),
     admin.from("qc_warehouse_items").select("mo_no, qty, status, shelf_id").gt("qty", 0).limit(10000),
     admin.from("qc_shelves").select("id, name"),
     admin.from("mo_qty_changes").select("mo_no, from_qty, new_mo_no, mode, created_at").is("reverted_at", null).order("created_at").limit(5000),
@@ -40,9 +42,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (mosRes.error || wosRes.error) return NextResponse.json({ data: [], error: "โหลดรายการใบสั่งผลิตไม่สำเร็จ" }, { status: 500 });
 
   const sum = new Map<string, { d: number; r: number; q: number }>();
+  const outSince = new Map<string, string>();
   for (const w of (wosRes.data ?? []) as Row[]) {
     const k = String(w.mo_no ?? ""); const cur = sum.get(k) ?? { d: 0, r: 0, q: 0 };
     cur.d += n(w.qty); cur.r += n(w.received_qty); cur.q += n(w.qc_pulled_qty); sum.set(k, cur);
+    if (n(w.qty) - n(w.received_qty) > 0.0001) {
+      const d = String(w.dispatch_date ?? w.created_at ?? "").slice(0, 10);
+      if (d && (!outSince.has(k) || d < outSince.get(k)!)) outSince.set(k, d);
+    }
   }
   const shelfName = new Map(((shelvesRes.data ?? []) as Row[]).map((s) => [String(s.id), String(s.name ?? "")]));
   const shelfAt = new Map<string, { name: string; qty: number; status: string }[]>();
@@ -79,6 +86,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return {
       mo_no: moNo, product_sku: sku, product_name: (m.product_name as string | null) ?? null, image_url: sku ? img.get(sku.trim()) ?? null : null,
       qty: n(m.qty), status: String(m.status ?? ""), dispatched: s.d, received: s.r, qc_pulled: s.q,
+      out_since: outSince.get(moNo) ?? null,
       qty_from: qtyFrom.get(moNo) ?? null, split_from: splitFrom.get(moNo)?.from ?? null, split_kind: splitFrom.get(moNo)?.kind ?? null,
       where: cuLocate({ qty: n(m.qty), status: String(m.status ?? ""), dispatched: s.d, received: s.r, qcPulled: s.q, shelfAt: shelfAt.get(moNo) ?? [] }),
     };

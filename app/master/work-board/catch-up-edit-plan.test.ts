@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { ceInitial, ceBuild, ceRun, ymdTh, type CeForm } from "./catch-up-edit-plan";
-import { cuBuildSteps, cuFacts, cuReduceSnap, cuRun, cuUndo, cuDefaultTicks, cuStepParts, CU_NO_DATES, type CuInputs, type CuReduce } from "./catch-up";
+import { cuBuildSteps, cuFacts, cuReduceSnap, cuRun, cuUndo, cuDefaultTicks, cuStepParts, cuOutstanding, cuDaysSince, CU_NO_DATES, type CuInputs, type CuReduce } from "./catch-up";
 import { shrinkWos, reduceQtyIssue, increaseQtyIssue, increaseIsBig } from "@/lib/mo-qty-reduce";
 import type { CatchUpSnapshot, CatchUpWo, CatchUpSub } from "@/app/api/mo/catch-up/route";
 
@@ -250,5 +250,26 @@ describe("แสดงผลแบบอ่านง่าย (cuStepParts)", ()
     expect(d.main.at(-1)).toEqual({ t: "฿1,000", b: true });
     const r = cuStepParts({ kind: "return", ref: "auto", qty: 15, date: "2026-10-29", wage: 50 });
     expect(r.main.at(-1)).toEqual({ t: "฿750", b: true });
+  });
+});
+
+describe("ค้างช่าง (จ่าย − คืน)", () => {
+  it("รวมทุกใบจ่าย + ค้างมากี่วัน (วันจ่าย · ไม่ระบุ = วันสร้างใบ) · ใบยกเลิกไม่นับ", () => {
+    const o = cuOutstanding([
+      wo({ id: "a", qty: 69, received_qty: 30, status: "partial_return", dispatch_date: "2026-08-15" }),
+      wo({ id: "b", qty: 10, received_qty: 10, status: "done" }),
+      wo({ id: "c", qty: 5, received_qty: 0, status: "dispatched", dispatch_date: null, created_at: "2026-10-30T02:00:00Z" }),
+      wo({ id: "d", qty: 9, received_qty: 0, status: "cancelled" }),
+    ], "2026-10-31");
+    expect(o.total).toBe(44);
+    expect(o.days).toBe(77);
+    expect(o.rows.find((x) => x.id === "b")?.days).toBeNull();
+    expect(o.rows.find((x) => x.id === "c")?.days).toBe(1);
+    expect(cuDaysSince(null)).toBeNull();
+  });
+  it("ป๊อปแก้ไข: แก้จำนวนใบจ่าย → บอกค้างช่างก่อน → หลังในรายการแก้", () => {
+    const s = snap({ wos: [wo({ qty: 69, received_qty: 30, status: "partial_return", labor_cost: 3450 })], subs: [sub({ qty: 30, wage: null })] });
+    const r = edit(s, (f) => { f.wos[0].qty = 75; f.reduce = red(75, "add", "ของพอทำเพิ่ม"); });
+    expect(r.ops[0].label).toMatch(/จำนวน 69 → 75 · ค้างช่าง 39 → 45/);
   });
 });

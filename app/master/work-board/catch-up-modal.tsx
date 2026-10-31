@@ -26,7 +26,7 @@ import { DeskStaffPanel } from "./desk-staff-panel";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuStageDone, cuCanShort,
-  CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, cuLocateSnap, CU_WHERE_LABEL, type CuWhere, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuRetLine, type CuDates, type CuIssue, type CuProblem, cuReduceSnap, type CuReduce,
+  CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, cuLocateSnap, cuOutstanding, CU_LATE_DAYS, CU_WHERE_LABEL, type CuWhere, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuRetLine, type CuDates, type CuIssue, type CuProblem, cuReduceSnap, type CuReduce,
 } from "./catch-up";
 import { ReducePanel } from "./catch-up-reduce";
 import { CuStepList } from "./catch-up-step-line";
@@ -47,7 +47,7 @@ const flow = CU_TARGETS.filter((t) => t.key !== "cancel");
 const phases = [...new Set(flow.map((t) => t.group))];
 const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
-export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel, mode = "direct", canApprove = false, onRequestsChanged, onLocate }: {
+export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, workOrders, canMoveStaff = false, canAddNew = false, onStaffChanged, onDesksChanged, onNext, nextLabel, mode = "direct", canApprove = false, onRequestsChanged, onLocate, initialTarget = null }: {
   /** ใบสั่งผลิตที่จะอัปเดต (null = ปิดป๊อป) */
   moNo: string | null;
   onClose: () => void;
@@ -69,6 +69,8 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   onRequestsChanged?: () => void;
   /** "ไปดูใบนี้ในตาราง" หลังบันทึก — หน้าแม่สลับไปแท็บ "ทั้งหมด" + ค้นใบนี้ */
   onLocate?: (moNo: string, sku: string | null) => void;
+  /** เปิดมาที่ขั้นนี้เลย (เช่น ปุ่ม "บันทึกส่งคืนเพิ่ม" ในป๊อปแก้ไข → "return") — ข้ามหน้าเลือกขั้นไปหน้าเติมข้อมูล */
+  initialTarget?: CuTargetKey | null;
 }) {
   const toast = useToast();
   const [snap, setSnap] = useState<CatchUpSnapshot | null>(null);
@@ -172,6 +174,16 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     const good = snap?.shelves.filter((s) => s.kind !== "defect") ?? [];
     setShelfId(good.length === 1 ? good[0].id : good.some((s) => s.id === last.shelfId) ? last.shelfId! : "");
   };
+  // เปิดมาพร้อมขั้น (ครั้งเดียวต่อการเปิด) — ใบที่มีคำขอค้าง/เลือกขั้นไม่ได้ = อยู่หน้าเลือกขั้นตามปกติ
+  const autoPicked = useRef<string | null>(null);
+  useEffect(() => {
+    if (!moNo || !f || !initialTarget || target || req || autoPicked.current === moNo) return;
+    autoPicked.current = moNo;
+    if (cuTargetBlocked(f, initialTarget)) return;
+    pick(initialTarget); setPage(2);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moNo, f, initialTarget, target, req]);
+  useEffect(() => { if (!moNo) autoPicked.current = null; }, [moNo]);
   /** ใส่ข้อมูลจากคำขอ (ที่พนักงานกรอกไว้) กลับเข้าป๊อป */
   const hydrate = (d: CuDraft) => {
     seq.current = Math.max(seq.current, 1000);   // กันคีย์แถวใหม่ซ้ำกับแถวในคำขอ
@@ -440,6 +452,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
       return n ? [{ text: `จ่ายเป็น "ทั้งโต๊ะ" ${n} ใบ — ระบุคนทีหลังได้ที่รายละเอียดใบงาน (✏️ แก้)` }] : []; })(),
     ...(() => { const n = built.steps.filter((s) => s.kind !== "return" && "date" in s && !s.date).length;
       return n ? [{ text: `ไม่ใส่วันที่ ${n} ขั้น — แก้วันที่จ่ายได้ที่รายละเอียดใบงาน` }] : []; })(),
+    ...(() => { const w = whereNow?.parts.find((p) => p.key === "wip"); return w?.qty ? [{ text: `ช่างยังค้างส่ง ${fmt(w.qty)} ชิ้น — ได้ของแล้วกด "อัปเดต" เลือกขั้น "ช่างส่งคืน"` }] : []; })(),
     ...(missing.length && ticks.short ? [{ text: `ยังขาดของ ${missing.length} รายการ — ยังขึ้นในหน้าขอซื้อให้ฝ่ายจัดซื้อตามต่อ` }] : []),
     ...issues.filter((x) => x.level === "warn" && (x.field === "qc:good" || x.field === salesField) && (x.msg.startsWith("ยังเหลือรอ QC") || x.msg.includes("ใบขาย"))).map((x) => ({ text: x.msg })),
   ] as { text: string; href?: string }[];
@@ -526,6 +539,11 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                   ["QC รับเข้า", `${fmt(f.qcPulled)}${f.shelfGood ? ` (บนชั้น ${fmt(f.shelfGood)})` : ""}`]] as [string, string][]).map(([k, v]) => (
                   <span key={k}><span className="text-slate-400">{k}</span> {v}</span>
                 ))}
+                {(() => {
+                  // ค้างช่าง (จ่าย − คืน) + ค้างมากี่วัน — เห็นตั้งแต่หน้าแรก ไม่ต้องลบเลขเอง
+                  const o = cuOutstanding(snap.wos);
+                  return o.total > 0 ? <span className={`font-medium ${(o.days ?? 0) > CU_LATE_DAYS ? "text-rose-700" : "text-amber-700"}`}>ค้างช่าง {fmt(o.total)} ชิ้น{o.days != null ? ` · ค้างมา ${o.days} วัน` : ""}</span> : null;
+                })()}
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-1.5 text-[12px]">

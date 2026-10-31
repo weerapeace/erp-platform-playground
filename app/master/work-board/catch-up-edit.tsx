@@ -8,6 +8,7 @@
  * กติกา/ตัวบันทึก = ./catch-up-edit-plan.ts (ceBuild / ceRun) · ลดจำนวน = ของกลาง ./catch-up-reduce.tsx + lib/mo-qty-reduce
  * สิทธิ์: แก้ได้เฉพาะคนที่ "บันทึกได้เลย" หรือ "ยืนยันคำขอ" — คนอื่นเปิดดูได้อย่างเดียว · ส่งออก/ปิด/ยกเลิก ยังย้อนไม่ได้
  * ลดใบจ่ายต่ำกว่ายอดที่ช่างคืนแล้ว = กล่องเหลือง "แก้ตามให้ทั้งชุด" (รอบส่งคืน/ของ QC/ที่เหลือ) — กติกา ceApplyCascade
+ * ทุกใบจ่ายมีแถบ คืนแล้ว / ค้างช่าง + ค้างมากี่วัน (cuOutstanding) · ส่วนช่างส่งคืนมีปุ่ม "บันทึกส่งคืนเพิ่ม" → ป๊อปอัปเดตขั้นส่งคืน
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
@@ -18,7 +19,7 @@ import { apiFetch } from "@/lib/api";
 import { isHireDesk } from "@/lib/work-entry-rules";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { CatchUpSnapshot } from "@/app/api/mo/catch-up/route";
-import { cuDateText, cuWhen } from "./catch-up";
+import { cuDateText, cuWhen, cuDaysSince, cuOutstanding, CU_LATE_DAYS, type CuTargetKey } from "./catch-up";
 import { ceInitial, ceBuild, ceRun, ymdTh, type CeForm, type CeOp, type CeRest } from "./catch-up-edit-plan";
 import { REDUCE_REASONS, REDUCE_MODE_LABEL } from "@/lib/mo-qty-reduce";
 import { ReducePanel } from "./catch-up-reduce";
@@ -27,6 +28,7 @@ import { DispatchDatePick } from "./dispatch-date-pick";
 
 type DeptLite = { id: string; name: string };
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
+const r2 = (n: number) => Math.round(n * 100) / 100;
 const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 const inp = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50 disabled:text-slate-500";
 const lbl = "mb-0.5 block text-[11px] text-slate-500";
@@ -53,7 +55,7 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
   /** แก้ได้ (สิทธิ์บันทึกได้เลย / ยืนยันคำขอ) — ไม่ได้ = ดูอย่างเดียว */
   canEdit: boolean;
   /** ไปป๊อปอัปเดต (พาใบไปขั้นถัดไป) */
-  onOpenUpdate?: (moNo: string) => void;
+  onOpenUpdate?: (moNo: string, target?: CuTargetKey) => void;
 }) {
   const toast = useToast();
   const [snap, setSnap] = useState<CatchUpSnapshot | null>(null);
@@ -137,6 +139,14 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
   const dispNow = form && snap ? snap.wos.reduce((a, w) => { const x = form.wos.find((y) => y.id === w.id); return x?.cancel ? a : a + (x && x.qty > 0 ? x.qty : w.qty); }, 0) : 0;
   const rateChanged = !!form && !!snap && form.wos.some((w) => { const o = snap.wos.find((x) => x.id === w.id); return !!o && Math.abs((w.rate ?? -1) - ((o.labor_cost > 0 && o.qty > 0) ? Math.round((o.labor_cost / o.qty) * 100) / 100 : -1)) > 0.0001; });
   const recvNow = snap ? snap.wos.reduce((a, w) => a + w.received_qty, 0) : 0;
+  // ค้างช่าง (ตามที่บันทึกอยู่ตอนนี้) — หัวส่วนช่างส่งคืน + ปุ่มบันทึกส่งคืนเพิ่ม
+  const outNow = snap ? cuOutstanding(snap.wos) : { total: 0, days: null, rows: [] };
+  /** ยอดคืนของใบจ่าย "หลังแก้" (รวมรอบส่งคืนที่แก้/ลบ/แก้ตามให้) — แถบคืนแล้ว/ค้างช่าง ตามที่พิมพ์ */
+  const effRecv = (woId: string, base: number) => {
+    const e = built?.eff ?? form;
+    if (!e || !snap) return base;
+    return r2(base + (snap.subs ?? []).filter((x) => x.wo_id === woId).reduce((a, x) => { const y = e.subs.find((z) => z.id === x.id); return !y ? a : a + (y.del ? -x.qty : y.qty - x.qty); }, 0));
+  };
   const buyReasonCu = !!m?.skipped.buy?.reason?.startsWith("อัปเดตงานย้อนหลัง");
 
   const footer = (<>
@@ -225,11 +235,30 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                           <div className="mb-1.5 flex flex-wrap items-center gap-2 text-[12px]">
                             <b className="font-medium text-slate-700">{w.wo_no}</b>
                             <span className="rounded-full bg-slate-100 px-2 text-slate-600">{WO_STATUS[w.status] ?? w.status}</span>
-                            <span className="text-slate-500">ส่งคืนแล้ว {fmt(w.received_qty)}/{fmt(w.qty)}{w.qc_pulled_qty > 0 ? ` · เข้า QC ${fmt(w.qc_pulled_qty)}` : ""}</span>
+                            {w.qc_pulled_qty > 0 && <span className="text-slate-500">เข้า QC แล้ว {fmt(w.qc_pulled_qty)}</span>}
                             {canEdit && <button type="button" disabled={lock} onClick={() => setWo(w.id, { cancel: !f.cancel })}
                               className={`ml-auto inline-flex h-7 items-center gap-1 rounded-md px-2 ${f.cancel ? "bg-white text-slate-600 hover:bg-slate-50" : "text-rose-600 hover:bg-rose-50"}`}>
                               {f.cancel ? <><Icon name="back" /> ไม่ยกเลิกแล้ว</> : <><Icon name="delete" /> ยกเลิกใบจ่ายนี้</>}</button>}
                           </div>
+                          {!f.cancel && (() => {
+                            // แถบ คืนแล้ว / ค้างช่าง ตามจำนวนที่พิมพ์ (เทียบของเดิม) + ค้างมากี่วัน
+                            const qtyShown = f.qty > 0 ? f.qty : w.qty, recv = effRecv(w.id, w.received_qty);
+                            const out = r2(Math.max(0, qtyShown - recv)), outBefore = r2(Math.max(0, w.qty - w.received_qty));
+                            const days = out > 0 ? cuDaysSince(w.dispatch_date ?? w.created_at) : null;
+                            const pct = (n: number) => `${qtyShown > 0 ? Math.min(100, (n / qtyShown) * 100) : 0}%`;
+                            return (
+                              <div className="mb-2">
+                                <div className="flex h-2 overflow-hidden rounded-full bg-slate-100" aria-hidden><div className="bg-emerald-500" style={{ width: pct(Math.min(recv, qtyShown)) }} /><div className="bg-amber-400" style={{ width: pct(out) }} /></div>
+                                <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px]">
+                                  <span><span className="text-emerald-600">●</span> คืนแล้ว <b className="font-semibold text-slate-800">{fmt(recv)}</b></span>
+                                  {out > 0 ? <span><span className="text-amber-500">●</span> ค้างช่าง <b className="font-semibold text-amber-700">{fmt(out)}</b></span> : <span className="font-medium text-emerald-700">คืนครบแล้ว</span>}
+                                  <span className="text-slate-400">จากใบจ่าย {fmt(qtyShown)} ชิ้น</span>
+                                  {days != null && <span className={`rounded-full px-1.5 text-[11px] ${days > CU_LATE_DAYS ? "bg-rose-50 text-rose-700" : "bg-slate-100 text-slate-600"}`}>ค้างมา {days} วัน</span>}
+                                  {Math.abs(out - outBefore) > 0.0001 && <span className="text-amber-700">ค้างส่งจะเป็น {fmt(out)} (เดิม {fmt(outBefore)})</span>}
+                                </div>
+                              </div>
+                            );
+                          })()}
                           <Msg field={`${key}:cancel`} /><Msg field={`${key}:qc`} />
                           {!f.cancel && (
                             <div className="grid grid-cols-2 gap-2 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1.6fr)_5rem_6rem_minmax(0,1.2fr)]">
@@ -301,9 +330,18 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
               </Step>
 
               {/* 5 รอบส่งคืน */}
-              <Step no={5} title="ช่างส่งคืน" done={recvNow > 0} right={rateChanged ? (
-                <label className="flex items-center gap-1.5 text-[12px] text-slate-600"><input type="checkbox" disabled={lock} checked={form.reRateSubs} onChange={(e) => set({ reRateSubs: e.target.checked })} className="h-4 w-4 accent-indigo-600" /> เปลี่ยนค่าแรง/ชิ้นของใบจ่าย → คิดค่าแรงรอบส่งคืนใหม่ด้วย</label>
-              ) : null}>
+              <Step no={5} title="ช่างส่งคืน" done={recvNow > 0} right={<>
+                {snap.wos.length > 0 && <span className="rounded-full bg-emerald-50 px-2 text-[11px] text-emerald-700">คืนแล้ว {fmt(recvNow)}</span>}
+                {outNow.total > 0 && <span className={`rounded-full px-2 text-[11px] ${(outNow.days ?? 0) > CU_LATE_DAYS ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-800"}`}>ค้างส่ง {fmt(outNow.total)} ชิ้น{outNow.days != null ? ` · ${outNow.days} วัน` : ""}</span>}
+                {rateChanged && <label className="flex items-center gap-1.5 text-[12px] text-slate-600"><input type="checkbox" disabled={lock} checked={form.reRateSubs} onChange={(e) => set({ reRateSubs: e.target.checked })} className="h-4 w-4 accent-indigo-600" /> เปลี่ยนค่าแรง/ชิ้นของใบจ่าย → คิดค่าแรงรอบส่งคืนใหม่ด้วย</label>}
+              </>}>
+                {outNow.total > 0 && onOpenUpdate && moNo && m.status !== "done" && m.status !== "cancelled" && (
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <button type="button" disabled={dirty} onClick={() => onOpenUpdate(moNo, "return")} title={dirty ? "บันทึกหรือยกเลิกการแก้ในป๊อปนี้ก่อน" : undefined}
+                      className="h-8 rounded-lg border border-amber-300 bg-amber-50 px-3 text-[12px] font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-40">บันทึกส่งคืนเพิ่ม {fmt(outNow.total)} ชิ้น →</button>
+                    <span className="text-[11px] text-slate-500">เปิดป๊อปอัปเดตขั้น &ldquo;ช่างส่งคืน&rdquo; ใส่จำนวนที่ค้างให้แล้ว (ส่งไม่ครบก็แก้ตัวเลขได้)</span>
+                  </div>
+                )}
                 <Msg field="rerate" />
                 {!(snap.subs ?? []).length ? <div className="text-[12px] text-slate-400">{recvNow > 0 ? `มียอดส่งคืน ${fmt(recvNow)} ชิ้นแต่ไม่มีรายการส่งคืนรายรอบ (ข้อมูลเก่า) — แก้ที่ใบจ่าย` : "ยังไม่มีการส่งคืน"}</div> : (
                   <div className="space-y-1.5">
@@ -384,7 +422,7 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                       <span className="text-slate-400">{cuWhen(c.at)}</span>
                       <span className={c.reverted ? "line-through" : ""}>{c.split_from
                         ? (c.mode === "extra" ? `ใบนี้คือส่วนที่ทำเพิ่มจาก ${c.mo_no} (${c.reason})` : `ใบนี้แยกมาจาก ${c.mo_no} (ลด ${fmt(c.from)} → ${fmt(c.to)} · ${c.reason})`)
-                        : c.mode === "add" ? `เพิ่มจำนวน ${fmt(c.from)} → ${fmt(c.to)} · ${c.reason}`
+                        : c.mode === "add" ? `เพิ่มจำนวน ${fmt(c.from)} → ${fmt(c.to)} · ${c.reason}${!c.reverted && i === (snap.qtyLog ?? []).findIndex((x) => !x.split_from && !x.reverted) && outNow.total > 0 ? ` · ตอนนี้ช่างค้างส่ง ${fmt(outNow.total)}` : ""}`
                         : c.mode === "extra" ? `ทำเพิ่ม ${fmt(c.to - c.from)} ชิ้น เป็นใบ ${c.new_mo_no ?? "ใหม่"} · ${c.reason}`
                         : `ลดจำนวน ${fmt(c.from)} → ${fmt(c.to)} · ${c.reason}${c.new_mo_no ? ` · ที่เหลือไปใบ ${c.new_mo_no}` : " · ที่เหลือไม่ทำแล้ว"}`}</span>
                       {c.by && <span className="text-slate-400">· {c.by}</span>}

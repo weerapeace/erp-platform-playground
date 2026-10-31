@@ -217,7 +217,12 @@ export function ceBuild(s: CatchUpSnapshot, form0: CeForm, ctx: { departments: {
     const rate0 = woRatePerPiece(w.labor_cost, w.qty);
     const qtyCh = f.qty > 0 && Math.abs(f.qty - w.qty) > EPS;
     const rateCh = Math.abs((f.rate ?? -1) - (rate0 ?? -1)) > EPS;
-    if (qtyCh) { patch.qty = f.qty; ch.push(`จำนวน ${fmt(w.qty)} → ${fmt(f.qty)}`); }
+    if (qtyCh) {
+      patch.qty = f.qty; ch.push(`จำนวน ${fmt(w.qty)} → ${fmt(f.qty)}`);
+      // ค้างช่าง (จ่าย − คืน) ก่อน → หลัง — เพิ่มจำนวนเพราะตัดได้เพิ่ม แต่ช่างยังส่งไม่ครบ
+      const ob = r2(Math.max(0, w.qty - w.received_qty)), oa = r2(Math.max(0, f.qty - recv));
+      if (Math.abs(ob - oa) > EPS) ch.push(`ค้างช่าง ${fmt(ob)} → ${fmt(oa)}`);
+    }
     if (rateCh) { ch.push(`ค่าแรง/ชิ้น ${baht(rate0)} → ${baht(f.rate)}`); if (f.rate != null) reRated.set(w.id, f.rate); }
     if ((qtyCh || rateCh) && f.rate != null && f.qty > 0) patch.labor_cost = roundWage(f.rate, f.qty);
     if ((f.date ?? null) !== (w.dispatch_date ?? null)) { patch.dispatch_date = f.date ?? null; ch.push(`วันจ่าย ${cuDateText(w.dispatch_date)} → ${cuDateText(f.date)}`); }

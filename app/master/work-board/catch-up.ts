@@ -804,3 +804,26 @@ export function cuLocateSnap(s: CatchUpSnapshot): CuWhere {
   const f = cuFacts(s);
   return cuLocate({ qty: f.qty, status: f.status, dispatched: f.dispatched, received: f.received, qcPulled: f.qcPulled, shelfAt: s.shelfAt ?? [] });
 }
+
+/** ค้างนานเกินกี่วัน = ป้ายแดง (ค้างช่าง) */
+export const CU_LATE_DAYS = 14;
+/** กี่วันแล้ว นับจากวันที่ (YYYY-MM-DD หรือเวลาเต็ม) ถึงวันนี้ — null = ไม่รู้วัน */
+export function cuDaysSince(d: string | null | undefined, today: string = todayYmd()): number | null {
+  if (!d) return null;
+  const ymd = (x: string) => Date.UTC(Number(x.slice(0, 4)), Number(x.slice(5, 7)) - 1, Number(x.slice(8, 10)));
+  const a = ymd(String(d).slice(0, 10)), b = ymd(today);
+  return Number.isFinite(a) && Number.isFinite(b) ? Math.max(0, Math.round((b - a) / 864e5)) : null;
+}
+/**
+ * ค้างช่าง = จ่ายแล้ว − คืนแล้ว (รายใบจ่าย + รวม) · ค้างมากี่วัน นับจากวันจ่าย (ไม่ระบุวันจ่าย = วันสร้างใบจ่าย)
+ * ใช้ที่ ป๊อปแก้ไข (แถบคืนแล้ว/ค้างช่าง) · ป๊อปอัปเดต (ระบบบันทึกไว้) — เจ้าของขอ 2026-10-31 (เพิ่มจำนวนเพราะตัดได้เพิ่ม แต่ช่างส่งไม่ครบ)
+ */
+export function cuOutstanding(wos: Pick<CatchUpWo, "id" | "wo_no" | "qty" | "received_qty" | "status" | "dispatch_date" | "created_at">[], today?: string) {
+  const rows = wos.filter((w) => w.status !== "cancelled").map((w) => {
+    const out = r2(Math.max(0, w.qty - w.received_qty));
+    return { id: w.id, wo_no: w.wo_no, qty: w.qty, recv: w.received_qty, out, days: out > EPS ? cuDaysSince(w.dispatch_date ?? w.created_at, today) : null };
+  });
+  const total = r2(rows.reduce((a, x) => a + x.out, 0));
+  const days = rows.reduce<number | null>((m, x) => (x.days == null ? m : Math.max(m ?? 0, x.days)), null);
+  return { total, days, rows };
+}

@@ -49,7 +49,7 @@ import { CatchUpBatch } from "./catch-up-batch";
 import { CatchUpEdit } from "./catch-up-edit";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
 import type { CuAllRow } from "@/app/api/mo/catch-up/all/route";
-import { CU_WHERE_ORDER, type CuWhereKey } from "./catch-up";
+import { CU_WHERE_ORDER, CU_LATE_DAYS, cuDaysSince, type CuWhereKey, type CuTargetKey } from "./catch-up";
 import { dispatchRowIssues, isHireDesk, parentKeyOf } from "@/lib/work-entry-rules";
 import { CopyPieceworkModal } from "./copy-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
@@ -3433,6 +3433,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const [cuMo, setCuMo] = useState<string | null>(null);   // ใบที่เปิดป๊อปอัปเดตงานอยู่
   const [cuList, setCuList] = useState<string[]>([]);      // ลำดับใบของแท็บที่เปิดอยู่ (ตอนกดอัปเดต) — ไว้ไป "ใบถัดไป"
   const [cuEditMo, setCuEditMo] = useState<string | null>(null);   // ใบที่เปิดป๊อป "แก้ไข" (แก้สิ่งที่บันทึกแล้ว / ลดจำนวน)
+  const [cuInitTarget, setCuInitTarget] = useState<CuTargetKey | null>(null);   // เปิดป๊อปอัปเดตมาที่ขั้นนี้เลย (ปุ่ม "บันทึกส่งคืนเพิ่ม")
   const openCu = (moNo: string) => {
     const rows = tab === "all" ? allShown.map((r) => r.mo_no)
       : tab === "pend" ? pendShown.filter((m) => hit(pendText(m))).map((m) => m.mo_no)
@@ -3484,7 +3485,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         )}
         {(() => {
           const a = cuAllMap.get(moNo);
+          // ค้างช่าง (จ่าย − คืน) · ค้างนานเกิน 14 วัน = แดง
+          const out = a ? Math.round((a.dispatched - a.received) * 100) / 100 : 0;
+          const days = out > 0 ? cuDaysSince(a?.out_since ?? null) : null;
           return <>
+            {out > 0 && <span title={days != null ? `ช่างยังค้างส่ง ${out.toLocaleString("th-TH")} ชิ้น · ค้างมา ${days} วัน` : `ช่างยังค้างส่ง ${out.toLocaleString("th-TH")} ชิ้น`} className={`whitespace-nowrap rounded-full px-1.5 text-[11px] ${(days ?? 0) > CU_LATE_DAYS ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-800"}`}>ค้างช่าง {out.toLocaleString("th-TH")}</span>}
             {a?.qty_from != null && <span title="เปลี่ยนจำนวนไปแล้ว (ดูประวัติในปุ่มแก้ไข)" className="whitespace-nowrap rounded-full bg-amber-50 px-1.5 text-[11px] text-amber-800">เดิม {a.qty_from.toLocaleString("th-TH")}</span>}
             {a?.split_from && <span title={a.split_kind === "extra" ? "ใบนี้คือส่วนที่ทำเพิ่มเกินจำนวนสั่งของใบเดิม" : "ใบนี้แยกออกมาจากใบที่ลดจำนวน (ที่เหลือ รอของ)"} className="whitespace-nowrap rounded-full bg-indigo-50 px-1.5 text-[11px] text-indigo-700">{a.split_kind === "extra" ? "ทำเพิ่มจาก" : "แยกจาก"} {a.split_from}</span>}
           </>;
@@ -4527,7 +4532,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <button type="button" onClick={onExitCatchUp} className="h-8 shrink-0 rounded-lg border border-amber-300 bg-white px-3 text-[13px] hover:bg-amber-100">ออกจากโหมด</button>
           </div>
         )}
-        <CatchUpModal moNo={cuMo} onClose={() => { if (cuBatch && cuMo) { const mo = cuMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } setCuMo(null); }}
+        <CatchUpModal moNo={cuMo} initialTarget={cuInitTarget} onClose={() => { if (cuBatch && cuMo) { const mo = cuMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } setCuMo(null); setCuInitTarget(null); }}
           onDone={() => {
             // ⚠️ คิว "รอ QC รับเข้า" โหลดแยก — เดิมไม่โหลดใหม่หลังอัปเดต ใบที่ช่างเพิ่งส่งคืนเลยหายจากทุกแท็บจนกด F5
             onReload?.(); void loadQcQueue(); void loadCuAll();
@@ -4549,7 +4554,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         <CatchUpEdit moNo={cuEditMo} departments={departments} craftsmen={craftsmen} canEdit={cuMode === "direct" || cuApprove}
           onClose={() => { if (cuBatch && cuEditMo) { const mo = cuEditMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } setCuEditMo(null); }}
           onDone={() => { onReload?.(); void loadQcQueue(); void loadCuAll(); if (cuEditMo) { const mo = cuEditMo; setCuRecent((rs) => [mo, ...rs.filter((x) => x !== mo)].slice(0, 8)); } }}
-          onOpenUpdate={(mo) => { setCuEditMo(null); setCuList([]); setCuMo(mo); }} />
+          onOpenUpdate={(mo, t) => { setCuEditMo(null); setCuList([]); setCuInitTarget(t ?? null); setCuMo(mo); }} />
         <CatchUpQueue open={cuQueueOpen} onClose={() => setCuQueueOpen(false)} queue={cuReqs.queue} mine={cuReqs.mine} canApprove={cuApprove}
           onOpenMo={(moNo) => {
             // ไล่ตรวจทีละใบ: "ใบถัดไป" ในป๊อป = คำขอถัดไปในคิว

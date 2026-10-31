@@ -757,15 +757,17 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                         const okSteps = r.results.filter((x) => x.ok).map((x) => x.step);
                         const pend = okSteps.filter((x) => x.kind === "return" && (x.wage == null || !x.date)).length;
                         const newMo = r.results.map((x) => (x.undo?.kind === "reduce" ? x.undo.newMo : null)).find(Boolean);
+                        const wip = r.after?.where.parts.find((p) => p.key === "wip")?.qty ?? 0;   // ช่างยังค้างส่ง (หลังบันทึก)
                         return (
                           <div className="mt-2 space-y-1.5">
                             <CuStepList items={r.results.map((x) => ({ step: x.step, state: x.ok ? "ok" as const : "fail" as const, msg: x.ok ? undefined : x.msg }))} who={d?.whoOf} />
                             {r.undoRes?.map((x, i) => <div key={`u${i}`} className={`text-[12px] ${x.ok ? "text-slate-500" : "text-amber-700"}`}>{x.ok ? "↶" : "!"} {x.msg}</div>)}
-                            {!r.undoRes && (pend > 0 || newMo) && (
+                            {!r.undoRes && (pend > 0 || newMo || wip > 0) && (
                               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-500">
                                 <span className="inline-flex items-center gap-1"><Icon name="navigate" /> ยังต้องตามต่อ:</span>
                                 {pend > 0 && <a href="/master/work-submissions" target="_blank" rel="noreferrer" className="text-indigo-700 underline underline-offset-2 hover:text-indigo-900">ใส่ค่าแรง/วันที่ส่งคืน {pend} รอบ (ตารางส่งงาน แท็บยังไม่ครบ)</a>}
                                 {newMo && <span>ใบใหม่ <b className="font-semibold text-slate-700">{newMo}</b> อยู่แท็บรอจ่าย</span>}
+                                {wip > 0 && <span className="text-amber-700">ช่างยังค้างส่ง <b className="font-semibold">{fmt(wip)}</b> ชิ้น</span>}
                               </div>
                             )}
                           </div>
