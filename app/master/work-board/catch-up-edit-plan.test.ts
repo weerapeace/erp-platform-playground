@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ceInitial, ceBuild, ceRun, ymdTh, type CeForm } from "./catch-up-edit-plan";
+import { ceInitial, ceBuild, ceRun, ymdTh, ceRestRecommend, type CeForm } from "./catch-up-edit-plan";
 import { cuBuildSteps, cuFacts, cuReduceSnap, cuRun, cuUndo, cuDefaultTicks, cuStepParts, cuOutstanding, cuDaysSince, CU_NO_DATES, type CuInputs, type CuReduce } from "./catch-up";
 import { shrinkWos, reduceQtyIssue, increaseQtyIssue, increaseIsBig } from "@/lib/mo-qty-reduce";
 import type { CatchUpSnapshot, CatchUpWo, CatchUpSub } from "@/app/api/mo/catch-up/route";
@@ -271,5 +271,39 @@ describe("ค้างช่าง (จ่าย − คืน)", () => {
     const s = snap({ wos: [wo({ qty: 69, received_qty: 30, status: "partial_return", labor_cost: 3450 })], subs: [sub({ qty: 30, wage: null })] });
     const r = edit(s, (f) => { f.wos[0].qty = 75; f.reduce = red(75, "add", "ของพอทำเพิ่ม"); });
     expect(r.ops[0].label).toMatch(/จำนวน 69 → 75 · ค้างช่าง 39 → 45/);
+  });
+});
+
+describe("จ่ายช่างคนอื่นต่อ / จ่ายเพิ่ม", () => {
+  const s69 = () => snap({ mo: { qty: 69 }, wos: [wo({ qty: 69, received_qty: 30, status: "partial_return", labor_cost: 3450 })], subs: [sub({ qty: 30, wage: null })] });
+  it("แนะนำตามเหตุผล", () => {
+    expect([ceRestRecommend("ของไม่พอ"), ceRestRecommend("ลูกค้าลดจำนวน"), ceRestRecommend("ช่างส่งคืนไม่ครบ"), ceRestRecommend("ลงจำนวนผิด")]).toEqual(["split", "drop", "disp", "disp"]);
+  });
+  it("แก้ตามให้ 69 → 26 + จ่ายช่างคนอื่นต่อ 43 → ใบจ่ายใหม่ (จำนวนสั่งคง 69 · ไม่มีลดจำนวน) ลำดับหลังแก้ใบเดิม", () => {
+    const r = edit(s69(), (f) => {
+      f.wos[0].qty = 26; f.rest = { mode: "disp", pick: "ช่างส่งคืนไม่ครบ", detail: "" };
+      f.newDisp = [{ key: "a", deptId: "d2", crewIds: ["p1"], qty: 43, rate: 50, date: "2026-10-31" }];
+    });
+    expect(r.errors).toEqual([]);
+    expect(r.restDisp).toBe(true);
+    expect(r.ops.map((o) => o.kind)).toEqual(["sub", "wo", "dispatch"]);
+    expect(r.ops.at(-1)).toMatchObject({ payload: { qty: 43, department_id: "d2", assignee_name: "พี่แอน", labor_cost: 2150, dispatch_date: "2026-10-31", quiet: true, note: "จ่ายต่อจาก WO-1 (แก้ไขใบงาน)" } });
+    expect(r.ops.at(-1)?.label).toContain("จ่ายใหม่ 43 ชิ้น → ช่างเหมา · พี่แอน · ฿50/ชิ้น × 43 = ฿2,150");
+  });
+  it("จ่ายไม่ครบ = เตือนว่ากลับไปรอจ่าย · จ่ายเกิน = ห้าม · ไม่ใส่แถว = ต้องแก้ · งานเหมาต้องเลือกคน", () => {
+    const base = (rows: CeForm["newDisp"]) => edit(s69(), (f) => { f.wos[0].qty = 26; f.rest = { mode: "disp", pick: "ช่างส่งคืนไม่ครบ", detail: "" }; f.newDisp = rows; });
+    expect(base([{ key: "a", deptId: "d1", crewIds: [], qty: 33, rate: 50, date: null }]).issues.some((x) => x.field === "nd" && /อีก 10 ชิ้น/.test(x.msg))).toBe(true);
+    expect(base([{ key: "a", deptId: "d1", crewIds: [], qty: 50, rate: 50, date: null }]).errors.join(" ")).toMatch(/เกิน 7 ชิ้น — ใส่ได้ 43/);
+    expect(base([]).errors.join(" ")).toMatch(/แถวจ่ายอย่างน้อย 1 แถว/);
+    expect(base([{ key: "a", deptId: "d2", crewIds: [], qty: 43, rate: 50, date: null }]).errors.join(" ")).toMatch(/งานเหมาต้องเลือกคนรับ/);
+  });
+  it("+ จ่ายเพิ่ม ส่วนที่ยังไม่จ่าย (ไม่มีแก้ตามให้)", () => {
+    const s = snap({ mo: { qty: 69 }, wos: [wo({ qty: 26, received_qty: 0 })], subs: [] });
+    const r = edit(s, (f) => { f.newDisp = [{ key: "a", deptId: "d1", crewIds: [], qty: 43, rate: null, date: null }]; });
+    expect(r.errors).toEqual([]);
+    expect(r.dispRoom).toBe(43);
+    expect(r.ops).toHaveLength(1);
+    expect(r.ops[0]).toMatchObject({ kind: "dispatch", payload: { qty: 43, note: "จ่ายเพิ่ม (แก้ไขใบงาน)", assignee_type: "department", assignee_name: "โต๊ะแต๋ว" } });
+    expect((r.ops[0] as { payload: Record<string, unknown> }).payload.labor_cost).toBeUndefined();
   });
 });

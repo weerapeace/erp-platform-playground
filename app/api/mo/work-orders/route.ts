@@ -137,7 +137,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ error: "จ่ายงานไม่สำเร็จ: " + error.message }, { status: 400 });
 
   await writeAudit(admin, { action: "create", entityType: "mo_work_order", entityId: wo.id, actorId: user.id,
-    actorName: user.email ?? null, metadata: { wo_no: woNo, mo_no: body.mo_no, qty, stage: body.stage, ...(body.quiet ? { catch_up: true } : {}) } });
+    actorName: user.email ?? null, metadata: { wo_no: woNo, mo_no: body.mo_no, qty, stage: body.stage, ...(body.quiet ? { catch_up: true } : {}),
+      ...(typeof (body as { via?: unknown }).via === "string" ? { via: String((body as { via?: unknown }).via).slice(0, 30), label: String((body as { label?: unknown }).label ?? "").slice(0, 300) } : {}) } });
 
   // B1: จ่ายงานใบแรกของ MO → ย้ายวัตถุดิบตาม BOM จาก WH-RAW → WH-WIP อัตโนมัติ (ระดับ MO ครั้งเดียว)
   // best-effort — ถ้าย้ายไม่สำเร็จ (ไม่มี BOM/คลัง) ก็ให้การจ่ายงานสำเร็จไปก่อน ไม่บล็อค

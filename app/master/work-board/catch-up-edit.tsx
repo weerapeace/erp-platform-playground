@@ -9,18 +9,20 @@
  * สิทธิ์: แก้ได้เฉพาะคนที่ "บันทึกได้เลย" หรือ "ยืนยันคำขอ" — คนอื่นเปิดดูได้อย่างเดียว · ส่งออก/ปิด/ยกเลิก ยังย้อนไม่ได้
  * ลดใบจ่ายต่ำกว่ายอดที่ช่างคืนแล้ว = กล่องเหลือง "แก้ตามให้ทั้งชุด" (รอบส่งคืน/ของ QC/ที่เหลือ) — กติกา ceApplyCascade
  * ทุกใบจ่ายมีแถบ คืนแล้ว / ค้างช่าง + ค้างมากี่วัน (cuOutstanding) · ส่วนช่างส่งคืนมีปุ่ม "บันทึกส่งคืนเพิ่ม" → ป๊อปอัปเดตขั้นส่งคืน
+ * จ่ายใหม่: "จ่ายช่างคนอื่นต่อ" (ที่เหลือในกล่องแก้ตามให้) / "+ จ่ายเพิ่ม" (ส่วนที่ยังไม่จ่าย) — แถวจ่ายหลายแถว (newDisp)
  */
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { isHireDesk } from "@/lib/work-entry-rules";
+import { isHireDesk, todayYmd } from "@/lib/work-entry-rules";
+import { woRatePerPiece } from "@/lib/wo-labor";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { CatchUpSnapshot } from "@/app/api/mo/catch-up/route";
 import { cuDateText, cuWhen, cuDaysSince, cuOutstanding, CU_LATE_DAYS, type CuTargetKey } from "./catch-up";
-import { ceInitial, ceBuild, ceRun, ymdTh, type CeForm, type CeOp, type CeRest } from "./catch-up-edit-plan";
+import { ceInitial, ceBuild, ceRun, ymdTh, ceRestRecommend, type CeForm, type CeOp, type CeRest, type CeDispRow } from "./catch-up-edit-plan";
 import { REDUCE_REASONS, REDUCE_MODE_LABEL } from "@/lib/mo-qty-reduce";
 import { ReducePanel } from "./catch-up-reduce";
 import { CrewPick } from "./crew-pick";
@@ -95,7 +97,21 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
   const casSub = new Map(cascades.flatMap((c) => c.subs.map((x) => [x.id, x] as const)));
   const casQc = new Set(cascades.flatMap((c) => c.qcBack.map((x) => x.id)));
   const restTotal = cascades.reduce((a, c) => a + c.rest, 0);
-  const setRest = (p: Partial<CeRest>) => setForm((f) => (f ? { ...f, rest: { ...f.rest, ...p } } : f));
+  // จ่ายใหม่: ค่าแรง/ชิ้นตั้งต้น = ใบจ่ายที่แก้ตามให้ (หรือใบจ่ายล่าสุด) → ไม่งั้นราคากลางในสูตร · วันจ่ายตั้งต้น = วันนี้
+  const ndSeq = useRef(0);
+  const ndRate = (() => {
+    const w = snap?.wos.find((x) => x.id === cascades[0]?.woId) ?? snap?.wos[snap.wos.length - 1];
+    return (w ? woRatePerPiece(w.labor_cost, w.qty) : null) ?? snap?.rates.find((r) => !r.craftsman_id)?.rate ?? null;
+  })();
+  const ndRow = (qty: number): CeDispRow => ({ key: `nd${++ndSeq.current}`, deptId: "", crewIds: [], qty, rate: ndRate, date: todayYmd() });
+  const setNd = (key: string, p: Partial<CeDispRow>) => setForm((f) => (f ? { ...f, newDisp: f.newDisp.map((x) => (x.key === key ? { ...x, ...p } : x)) } : f));
+  // เปลี่ยนเหตุผล = เลือกทางที่แนะนำให้ · เลือก "จ่ายช่างคนอื่นต่อ" ครั้งแรก = ใส่แถวจ่ายเท่าที่เหลือให้ 1 แถว · เลิกเลือก = ล้างแถว
+  const setRest = (p: Partial<CeRest>) => setForm((f) => {
+    if (!f) return f;
+    const rest = { ...f.rest, ...p, ...(p.pick && !p.mode ? { mode: ceRestRecommend(p.pick) } : {}) };
+    const newDisp = rest.mode === "disp" ? (f.newDisp.length ? f.newDisp : [ndRow(restTotal)]) : f.rest.mode === "disp" ? [] : f.newDisp;
+    return { ...f, rest, newDisp };
+  });
   const ring = (field: string) => { const i = issues.find((x) => x.field === field && x.level === "error") ?? issues.find((x) => x.field === field); return !i ? "" : i.level === "error" ? " !border-rose-400 !bg-rose-50/40" : " !border-amber-400"; };
   const Msg = ({ field }: { field: string }): ReactNode => {
     const list = issues.filter((x) => x.field === field);
@@ -148,6 +164,49 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
     return r2(base + (snap.subs ?? []).filter((x) => x.wo_id === woId).reduce((a, x) => { const y = e.subs.find((z) => z.id === x.id); return !y ? a : a + (y.del ? -x.qty : y.qty - x.qty); }, 0));
   };
   const buyReasonCu = !!m?.skipped.buy?.reason?.startsWith("อัปเดตงานย้อนหลัง");
+
+  /** แถวจ่ายใหม่ (จ่ายช่างคนอื่นต่อ / จ่ายเพิ่ม) · room = ยังจ่ายได้อีกกี่ชิ้น */
+  const dispEditor = (room: number) => {
+    if (!form) return null;
+    const total = r2(form.newDisp.reduce((a, x) => a + (x.qty > 0 ? x.qty : 0), 0));
+    return (
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[12px]">
+          <span className="text-slate-600">จ่ายให้ใคร (แบ่งหลายคน/หลายโต๊ะได้)</span>
+          <span className={total > room + 0.0001 ? "font-medium text-rose-600" : total < room - 0.0001 ? "text-amber-700" : "text-emerald-700"}>
+            จ่ายรวม {fmt(total)}/{fmt(room)}{total < room - 0.0001 ? ` · อีก ${fmt(room - total)} ชิ้นกลับไปรอจ่าย` : total > room + 0.0001 ? ` · เกิน ${fmt(total - room)}` : " · ครบ"}</span>
+        </div>
+        {form.newDisp.map((x) => {
+          const d = deptOf(x.deptId), key = `nd:${x.key}`;
+          return (
+            <div key={x.key} className="rounded-lg border border-slate-200 bg-white p-2">
+              <div className="grid grid-cols-2 items-start gap-2 sm:grid-cols-[minmax(0,1.2fr)_minmax(0,1.8fr)_4.5rem_5.5rem_minmax(0,1.3fr)_2rem]">
+                <div><span className={lbl}>โต๊ะ</span>
+                  <select disabled={lock} value={x.deptId} onChange={(e) => setNd(x.key, { deptId: e.target.value, crewIds: [] })} className={`${inp}${ring(`${key}:dept`)}`}>
+                    <option value="">— เลือกโต๊ะ —</option>
+                    {departments.map((dd) => <option key={dd.id} value={dd.id}>{dd.name}</option>)}
+                  </select></div>
+                <div><span className={lbl}>คนรับ</span>
+                  {d ? <CrewPick people={poolOf(d)} value={x.crewIds} onChange={(ids) => setNd(x.key, { crewIds: ids })} required={isHireDesk(d.name)} />
+                    : <div className={`${inp} flex items-center text-slate-400`}>เลือกโต๊ะก่อน</div>}</div>
+                <div><span className={lbl}>จำนวน</span>
+                  <input type="number" min={0} disabled={lock} value={x.qty || ""} onChange={(e) => setNd(x.key, { qty: Number(e.target.value) || 0 })} className={`${inp} text-right${ring(`${key}:qty`)}`} /></div>
+                <div><span className={lbl}>ค่าแรง/ชิ้น</span>
+                  <input type="number" min={0} disabled={lock} value={x.rate ?? ""} placeholder="ตามสูตร" onChange={(e) => setNd(x.key, { rate: numOrNull(e.target.value) })} className={`${inp} text-right${ring(`${key}:rate`)}`} /></div>
+                <div><span className={lbl}>วันจ่าย</span><DispatchDatePick disabled={lock} value={x.date} onChange={(v) => setNd(x.key, { date: v })} /></div>
+                <button type="button" disabled={lock} title="ลบแถวนี้" onClick={() => setForm((ff) => (ff ? { ...ff, newDisp: ff.newDisp.filter((y) => y.key !== x.key) } : ff))}
+                  className="mt-4 h-9 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon name="cancel" /></button>
+              </div>
+              <Msg field={`${key}:dept`} /><Msg field={`${key}:crew`} /><Msg field={`${key}:qty`} /><Msg field={`${key}:rate`} /><Msg field={`${key}:date`} />
+            </div>
+          );
+        })}
+        <Msg field="nd" />
+        <button type="button" disabled={lock} onClick={() => setForm((ff) => (ff ? { ...ff, newDisp: [...ff.newDisp, ndRow(Math.max(0, r2(room - total)))] } : ff))}
+          className="inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-indigo-300 bg-white px-3 text-[12px] text-indigo-700 hover:bg-indigo-50">+ เพิ่มแถว (แบ่งให้อีกคน)</button>
+      </div>
+    );
+  };
 
   const footer = (<>
     {results && <span className={`mr-auto text-[12px] ${results.every((x) => x.ok) ? "text-emerald-700" : "text-rose-600"}`}>{results.every((x) => x.ok) ? `แก้แล้ว ${results.length} รายการ` : `ไม่สำเร็จ: ${results.find((x) => !x.ok)?.msg ?? ""}`}</span>}
@@ -306,15 +365,17 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                                       <input disabled={lock} value={form.rest.detail} onChange={(e) => setRest({ detail: e.target.value })} placeholder={form.rest.pick === "อื่น ๆ" ? "พิมพ์เหตุผล" : "ระบุเพิ่ม (ไม่บังคับ)"}
                                         className={`h-8 min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-2 text-[12px]${ring("reduce:reason")}`} style={{ minWidth: 120 }} />
                                     </div>
-                                    <div className="grid gap-1.5 sm:grid-cols-3">
-                                      {([["split", `ใบใหม่ ${fmt(restTotal)} ชิ้น · ใบนี้เหลือ ${fmt(m.qty - restTotal)}`], ["drop", `ใบนี้เหลือ ${fmt(m.qty - restTotal)}`], ["keep", `ใบยังเป็น ${fmt(m.qty)} · ${fmt(restTotal)} ชิ้นกลับไปแท็บรอจ่าย`]] as const).map(([k, sub]) => (
+                                    <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
+                                      {([["disp", `ใบจ่ายใหม่ · จำนวนสั่งคง ${fmt(m.qty)}`], ["split", `ใบใหม่ ${fmt(restTotal)} ชิ้น · ใบนี้เหลือ ${fmt(m.qty - restTotal)}`], ["drop", `ใบนี้เหลือ ${fmt(m.qty - restTotal)}`], ["keep", `ใบยังเป็น ${fmt(m.qty)} · ${fmt(restTotal)} ชิ้นกลับไปแท็บรอจ่าย`]] as const).map(([k, sub]) => (
                                         <button key={k} type="button" disabled={lock} onClick={() => setRest({ mode: k })} aria-pressed={form.rest.mode === k}
                                           className={`rounded-lg border bg-white px-2.5 py-1.5 text-left ${form.rest.mode === k ? "border-indigo-500 ring-1 ring-indigo-500" : "border-amber-200 hover:border-amber-400"}`}>
-                                          <div className="text-[12px] font-medium text-slate-800">{k === "keep" ? "ค้างไว้ในใบนี้" : REDUCE_MODE_LABEL[k]}{k === "split" && <span className="ml-1 rounded bg-indigo-50 px-1 text-[10px] font-normal text-indigo-700">แนะนำ</span>}</div>
+                                          <div className="text-[12px] font-medium text-slate-800">{k === "disp" ? "จ่ายช่างคนอื่นต่อ" : k === "keep" ? "ค้างไว้ในใบนี้" : REDUCE_MODE_LABEL[k]}
+                                            {ceRestRecommend(form.rest.pick) === k && <span className="ml-1 rounded bg-indigo-50 px-1 text-[10px] font-normal text-indigo-700">แนะนำ</span>}</div>
                                           <div className="text-[11px] text-slate-500">{sub}</div>
                                         </button>
                                       ))}
                                     </div>
+                                    {form.rest.mode === "disp" && built && dispEditor(built.dispRoom)}
                                     <Msg field="reduce:qty" />
                                   </div>
                                 ))}
@@ -328,6 +389,15 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                   </div>
                 )}
               </Step>
+
+              {canEdit && built && !built.restDisp && m.status !== "done" && m.status !== "cancelled" && (form.newDisp.length > 0 || built.dispRoom > 0) && (
+                <div className="-mt-1 mb-2 ml-[2.4rem]">
+                  {form.newDisp.length === 0
+                    ? <button type="button" disabled={lock} onClick={() => setForm((ff) => (ff ? { ...ff, newDisp: [ndRow(built.dispRoom)] } : ff))}
+                        className="inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-indigo-300 bg-white px-3 text-[12px] font-medium text-indigo-700 hover:bg-indigo-50">+ จ่ายเพิ่ม (ยังไม่จ่าย {fmt(built.dispRoom)} ชิ้น)</button>
+                    : <div className="rounded-lg border border-indigo-200 bg-indigo-50/40 p-2.5"><div className="mb-1 text-[13px] font-medium text-indigo-900">จ่ายเพิ่ม</div>{dispEditor(built.dispRoom)}</div>}
+                </div>
+              )}
 
               {/* 5 รอบส่งคืน */}
               <Step no={5} title="ช่างส่งคืน" done={recvNow > 0} right={<>
