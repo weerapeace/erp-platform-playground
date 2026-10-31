@@ -20,6 +20,7 @@ import { formatDateTime } from "@/lib/date";
 import { woRatePerPiece, roundWage, laborBomTarget } from "@/lib/wo-labor";
 import { RecvWageHint } from "./recv-wage-hint";
 import { MoProgressCell } from "@/components/mo-material-progress";
+import { MyNoteCell, useMyNotes } from "@/components/my-note";
 import { PendDetail, CELL_PANE, HistTab, DETAIL_PREFS_DEFAULT, parseDetailPrefs, type PendPane } from "./pend-detail";
 import { useUserPref } from "@/lib/use-user-pref";
 import type { MoSkipped } from "@/lib/mo-skip";
@@ -4124,6 +4125,15 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     </div>;
   };
   const hid = (k: string) => (touch ? !PEND_SHOWN_IPAD.has(k) : PEND_HIDDEN_PC.has(k));
+  // โน้ตส่วนตัว (ของกลาง components/my-note) — ผูกเลขใบสั่งผลิต · โน้ตเดียวกันขึ้นทั้ง 3 แท็บ · เห็นคนเดียว
+  const myNotes = useMyNotes("mo");
+  const noteHeader = <span className="inline-flex items-center gap-1"><Icon name="notes" /> โน้ตของฉัน</span>;
+  const noteCell = (moNo: string | null | undefined) => moNo
+    ? <MyNoteCell note={myNotes.notes[moNo]} onSave={(t) => myNotes.setNote(moNo, t)} /> : <span className="text-slate-300">—</span>;
+  const noteSum = (moNos: (string | null | undefined)[]) => {
+    const n = new Set(moNos.filter((k) => !!myNotes.text(k))).size;
+    return n ? <span className="text-[11px] text-amber-700 whitespace-nowrap">{fmt(n)} โน้ต</span> : <span className="text-slate-300">—</span>;
+  };
   const pendCols: MiniColumn<PendingMO>[] = [
     { key: "img", header: "รูป", group: "พื้นฐาน", locked: true, width: imgPx > 40 ? `${imgPx / 16 + 0.25}rem` : "2.5rem", cell: (m) => <HoverImage url={m.image_url} size={imgPx} previewSize={256} /> },
     { key: "prod", header: "สินค้า / ใบสั่งผลิต", group: "พื้นฐาน", locked: true, width: "minmax(11rem,1.6fr)", sortValue: (m) => m.product_sku ?? "", sortLabel: "ชื่อสินค้า",
@@ -4226,6 +4236,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     { key: "issues", header: "ปัญหา", group: "อื่น ๆ", isNew: true, defaultHidden: hid("issues"), width: "5.5rem", sortValue: (m) => -(m.issue_count ?? 0), sortLabel: "ปัญหามากก่อน",
       cell: (m) => (m.issue_count ?? 0) > 0 ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 whitespace-nowrap">⚠️ {m.issue_count} เรื่อง</span> : <span className="text-slate-300">—</span> },
     { key: "group", header: "กลุ่ม", group: "อื่น ๆ", defaultHidden: hid("group"), width: "minmax(6rem,0.8fr)", sortValue: (m) => groupNameOf(m.mo_no) ?? "~", sortLabel: "กลุ่ม", cell: (m) => <GroupCell moNo={m.mo_no} /> },
+    { key: "mynote", header: noteHeader, label: "โน้ตของฉัน (เห็นคนเดียว)", group: "อื่น ๆ", isNew: true, defaultHidden: hid("mynote"), width: "minmax(9rem,1fr)",
+      sortValue: (m) => myNotes.text(m.mo_no) || "~", sortLabel: "โน้ตของฉัน", cell: (m) => noteCell(m.mo_no) },
   ];
   // จำคอลัมน์ที่เลือก "ต่อคน" แยกจอคอม / iPad (การ์ดแนวตั้งหน้าตาตายตัว ไม่ใช้ตัวเลือกคอลัมน์)
   const pendColPrefs = useColumnPrefs(touch ? "wb_table_cols_ipad" : "wb_table_cols_pc", pendCols);
@@ -4439,6 +4451,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         ? <span className="tabular-nums text-slate-600">฿{fmt(Math.round(((w.labor_cost as number) / w.qty) * 100) / 100)}</span>
         : <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 whitespace-nowrap">ยังไม่ใส่</span> },
     { key: "status", header: "สถานะ", width: "7rem", align: "center", sortValue: (w) => (WO_STATUS[w.status]?.label ?? w.status), sortLabel: "สถานะ", cell: (w) => { const st = WO_STATUS[w.status] ?? WO_STATUS.dispatched; return <span className={`text-[10px] px-2 py-0.5 rounded border whitespace-nowrap ${st.cls}`}>{st.label}</span>; } },
+    { key: "mynote", header: noteHeader, label: "โน้ตของฉัน (เห็นคนเดียว)", width: "minmax(9rem,1fr)", sortValue: (w) => myNotes.text(w.mo_no) || "~", sortLabel: "โน้ตของฉัน", cell: (w) => noteCell(w.mo_no) },
   ];
 
   // ── ตาราง "รอ QC รับเข้า" (คอลัมน์) · ทุกแท็บเลือกคอลัมน์ได้ จำต่อคน แยกคอม/iPad
@@ -4453,11 +4466,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     { key: "qty", header: "รอรับเข้า", width: "6rem", align: "right", sortValue: (q) => q.remaining, sortLabel: "จำนวน", cell: (q) => <span className="tabular-nums font-semibold text-slate-700">{fmt(q.remaining)}</span> },
     { key: "recv", header: "วันที่ช่างส่ง", width: "minmax(8rem,1fr)", sortValue: (q) => q.received_at ?? "9999", sortLabel: "วันที่ช่างส่ง", cell: (q) => <span className="text-[12px] text-slate-500">{q.received_at ? dueDateText(q.received_at) : "—"}</span> },
     { key: "due", header: "กำหนดเสร็จ", width: "minmax(9rem,1fr)", sortValue: (q) => q.due_date ?? "9999", sortLabel: "กำหนดเสร็จ", cell: (q) => <DueCell d={q.due_date} /> },
+    { key: "mynote", header: noteHeader, label: "โน้ตของฉัน (เห็นคนเดียว)", width: "minmax(9rem,1fr)", sortValue: (q) => myNotes.text(q.mo_no) || "~", sortLabel: "โน้ตของฉัน", cell: (q) => noteCell(q.mo_no) },
   ];
   const withMeta = <R,>(cols: MiniColumn<R>[], ipadHidden: string[]) =>
     cols.map((c) => ({ ...c, locked: c.key === "prod", defaultHidden: touch && ipadHidden.includes(c.key) }));
-  const woColPrefs = useColumnPrefs(touch ? "wb_table_cols_wip_ipad" : "wb_table_cols_wip_pc", withMeta(woCols, ["group", "wo"]));
-  const qcColPrefs = useColumnPrefs(touch ? "wb_table_cols_qc_ipad" : "wb_table_cols_qc_pc", withMeta(qcCols, ["mo"]));
+  const woColPrefs = useColumnPrefs(touch ? "wb_table_cols_wip_ipad" : "wb_table_cols_wip_pc", withMeta(woCols, ["group", "wo", "mynote"]));
+  const qcColPrefs = useColumnPrefs(touch ? "wb_table_cols_qc_ipad" : "wb_table_cols_qc_pc", withMeta(qcCols, ["mo", "mynote"]));
 
   // ── 3 แท็บ: 📥 รอจ่าย · 🛠 กำลังผลิต · ✅ รอ QC รับเข้า — จำแท็บล่าสุด "ต่อคน" (ตามไปทุกเครื่อง)
   const tabPref = useViewPref("wb_table_tab", ["pend", "wip", "qc"] as const, "pend");
@@ -4470,9 +4484,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     setCuAll(false); tabPref.setView(t); void tabPref.saveDefault(t);
   };
   // ค้นหาร่วม 3 แท็บ — คำเดียวกรองทุกตาราง · ตัวเลขบนแท็บ = จำนวนที่ค้นเจอในแท็บนั้น (กติกาเดียวกับช่องค้นของตาราง)
-  const pendText = (m: PendingMO) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no}`;
-  const woText = (w: WorkOrder) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""}`;
-  const qcText = (q: QcQueueRow) => `${q.sku ?? ""} ${q.name ?? ""} ${q.mo_no ?? ""} ${q.worker ?? ""}`;
+  // ค้นหาเจอจากโน้ตส่วนตัวด้วย (myNotes.text)
+  const pendText = (m: PendingMO) => `${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.mo_no} ${myNotes.text(m.mo_no)}`;
+  const woText = (w: WorkOrder) => `${w.product_sku ?? ""} ${w.product_name ?? ""} ${w.wo_no} ${w.department_name ?? ""} ${w.assignee_name ?? ""} ${myNotes.text(w.mo_no)}`;
+  const qcText = (q: QcQueueRow) => `${q.sku ?? ""} ${q.name ?? ""} ${q.mo_no ?? ""} ${q.worker ?? ""} ${myNotes.text(q.mo_no)}`;
   const allText = (r: CuAllRow) => `${r.product_sku ?? ""} ${r.product_name ?? ""} ${r.mo_no} ${r.where.parts.map((x) => x.label).join(" ")}`;
   const qq = searchQ.trim().toLowerCase();
   const hit = (s: string) => !qq || s.toLowerCase().includes(qq);
@@ -4680,6 +4695,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     },
     issues: (rs) => { const n = sumOf(rs, (m) => m.issue_count); return n > 0 ? <span className="text-[11px] text-rose-700 whitespace-nowrap">⚠️ {fmt(n)} เรื่อง</span> : <span className="text-slate-300">—</span>; },
     group: (rs) => distinctCell(rs.map((m) => groupNameOf(m.mo_no)), "กลุ่ม"),
+    mynote: (rs) => noteSum(rs.map((m) => m.mo_no)),
   };
   /** หัวกลุ่มบรรทัดสอง (โหมดตาราง): จำนวนชิ้นอยู่ในคอลัมน์แล้ว → เหลือแค่มูลค่าค้างจ่าย (เฉพาะคนดูเงินได้) */
   const groupMoney = (rows: PendingMO[]) => {
@@ -4719,6 +4735,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         <span key={lb} className="whitespace-nowrap rounded-full border border-slate-200 bg-white px-1.5 text-[10px] leading-4 text-slate-600">{lb} {c}</span>
       ))}</div>;
     },
+    mynote: (rs) => noteSum(rs.map((w) => w.mo_no)),
   };
   const qcGroupCells: GCells<QcQueueRow> = {
     mo: (rs) => <span className="text-[12px] text-slate-600">{fmt(rs.length)} ใบ</span>,
@@ -4727,6 +4744,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     recv: (rs) => { const first = rs.map((q) => q.received_at).filter((d): d is string => !!d).sort()[0];
       return first ? <div className="leading-tight"><div className="text-[12px] text-slate-500">{dueDateText(first.slice(0, 10))}</div>{gNote("ส่งมาเก่าสุด")}</div> : <span className="text-slate-300">—</span>; },
     due: (rs) => dueSumCell(rs.map((q) => q.due_date)),
+    mynote: (rs) => noteSum(rs.map((q) => q.mo_no)),
   };
   const renderWipCard = (w: WorkOrder) => {
     const left = woLeft(w);
