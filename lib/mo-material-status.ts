@@ -25,6 +25,10 @@ export type MatPurchaseLink = {
   po_line_id: string | null; line_qty: number; qty_received: number; qty_defective: number; line_status: string | null;
   /** บรรทัดจบแล้ว (รับครบ / ปิดยอด / ยกเลิก) — ไม่รอของเพิ่ม */
   line_closed: boolean;
+  /** วันที่ขอซื้อ (สร้างใบขอซื้อ · เวลาไทย) */
+  pr_date?: string | null;
+  /** วันที่สั่งซื้อ (order_date ของ PO) */
+  po_date?: string | null;
 };
 /** ผลคำนวณของวัตถุดิบ 1 บรรทัด (ไม่รวมชื่อ/รูป/สต๊อก) */
 export type MatStatusCalc = {
@@ -55,7 +59,7 @@ export async function loadMoPurchaseLinks(admin: SupabaseClient, moNos: string[]
   const out = new Map<string, MatPurchaseLink[]>();
   if (moNos.length === 0) return out;
   const prRows = await fetchAllPages<Row>((from, to) => {
-    let q = admin.from("purchase_requests_v2").select("id, pr_no, item_name, item_sku_id, qty, status, po_id, source_mo_nos");
+    let q = admin.from("purchase_requests_v2").select("id, pr_no, item_name, item_sku_id, qty, status, po_id, source_mo_nos, created_at");
     q = moNos.length === 1 ? q.contains("source_mo_nos", moNos) : q.overlaps("source_mo_nos", moNos);
     return q.eq("is_active", true).not("status", "in", "(rejected,cancelled)")
       .order("created_at", { ascending: true }).order("id", { ascending: true }).range(from, to);
@@ -65,7 +69,7 @@ export async function loadMoPurchaseLinks(admin: SupabaseClient, moNos: string[]
   const poIds = [...new Set(prRows.map((p) => p.po_id).filter(Boolean).map(String))];
   const prIds = prRows.map((p) => String(p.id));
   const [poRes, lineRes, prCode] = await Promise.all([
-    Promise.all(chunks(poIds).map((c) => admin.from("purchase_orders_v2").select("id, po_no, status, expected_date, seller_name").in("id", c))),
+    Promise.all(chunks(poIds).map((c) => admin.from("purchase_orders_v2").select("id, po_no, status, expected_date, seller_name, order_date").in("id", c))),
     Promise.all(chunks(prIds).map((c) => admin.from("purchase_order_lines_v2").select("id, pr_id, qty, qty_received, qty_defective, line_status").in("pr_id", c).eq("is_active", true))),
     prLineCodeResolver(admin, prRows),
   ]);
@@ -87,6 +91,8 @@ export async function loadMoPurchaseLinks(admin: SupabaseClient, moNos: string[]
       expected_date: (po?.expected_date as string) ?? null, seller_name: (po?.seller_name as string) ?? null,
       po_line_id: ln ? String(ln.id) : null, line_qty: lineQty, qty_received: rec, qty_defective: r4(Number(ln?.qty_defective) || 0),
       line_status: lineStatus, line_closed: !!ln && (LINE_CLOSED.includes(lineStatus ?? "") || (lineQty > 0 && rec >= lineQty - EPS)),
+      pr_date: p.created_at ? new Date(new Date(String(p.created_at)).getTime() + 7 * 3600e3).toISOString().slice(0, 10) : null,
+      po_date: (po?.order_date as string) ?? null,
     };
     const nos = Array.isArray(p.source_mo_nos) ? [...new Set((p.source_mo_nos as unknown[]).map(String))] : [];
     for (const mo of nos) {

@@ -38,7 +38,8 @@ export type MatStock = {
   counted_at: string | null; counted_by: string | null; counted_qty: number | null;
   reserved_other: number; reserved_this: number; available: number | null;
 };
-export type MoMaterialStatusResult = { mo_no: string; mo_qty: number; items: MoMaterialStatus[] };
+/** mo_date = วันเปิดใบสั่งผลิต (order_date → ไม่มีใช้วันสร้าง) — ใช้นับว่า "ยังไม่ซื้อมากี่วัน" */
+export type MoMaterialStatusResult = { mo_no: string; mo_qty: number; mo_date?: string | null; items: MoMaterialStatus[] };
 
 type Row = Record<string, unknown>;
 
@@ -105,7 +106,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ใบขอซื้อ → PO (เลขใบ/สถานะ/วันของถึง) + บรรทัด PO (รับแล้วเท่าไร) — ของกลาง lib/mo-material-status
   const [{ data: mo }, { data: sums, error: sErr }, linksByKey] = await Promise.all([
-    admin.from("manufacturing_orders").select("mo_no, qty").eq("mo_no", moNo).eq("is_active", true).maybeSingle(),
+    admin.from("manufacturing_orders").select("mo_no, qty, order_date, created_at").eq("mo_no", moNo).eq("is_active", true).maybeSingle(),
     admin.from("mo_material_summary")
       .select("id, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence")
       .eq("mo_no", moNo).eq("is_active", true)
@@ -143,6 +144,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     };
   });
 
-  const data: MoMaterialStatusResult = { mo_no: moNo, mo_qty: moQty, items };
+  const moRow = mo as Row;
+  const moDate = (moRow.order_date as string) ?? (moRow.created_at ? new Date(new Date(String(moRow.created_at)).getTime() + 7 * 3600e3).toISOString().slice(0, 10) : null);
+  const data: MoMaterialStatusResult = { mo_no: moNo, mo_qty: moQty, mo_date: moDate, items };
   return NextResponse.json({ data, error: null });
 }
