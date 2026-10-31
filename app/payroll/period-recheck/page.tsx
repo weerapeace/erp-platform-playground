@@ -1,20 +1,22 @@
 "use client";
 
 /**
- * Payroll — ตรวจทั้งงวด (อ่านอย่างเดียว)
+ * Payroll — ตรวจทั้งงวด (ไม่แก้ข้อมูลเอง · ปุ่ม "คิดราคาใหม่" ถามยืนยันก่อนทุกครั้ง)
  * เปิดงวดเดียว เห็น "ที่มาที่ไป" ของเงินทุกบาท: สะพานเงินทั้งงวด → ตรวจอัตโนมัติ → รายคน (สูตร + รายการต้นทาง)
  * ข้อมูล/สูตรทั้งหมดมาจาก lib/payroll-period-recheck (ใช้กฎกลางเดียวกับเครื่องคำนวณ) ผ่าน /api/payroll/period-recheck
- * ใช้ของกลาง: MiniTable (รายชื่อ) · Drawer (ที่มาของเงินรายคน) · Icon · state-views
+ * ใช้ของกลาง: MiniTable (รายชื่อ) · Drawer (ที่มาของเงินรายคน) · ERPModal + ConfirmDialog (คิดราคาใหม่) · Toast · Icon · state-views
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
-import { Drawer } from "@/components/modal";
+import { ConfirmDialog, Drawer, ERPModal } from "@/components/modal";
+import { useToast } from "@/components/toast";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { Icon } from "@/components/icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
-import type { PeriodRecheck, RecheckCheck, RecheckFlag, RecheckItem, RecheckPerson } from "@/lib/payroll-period-recheck";
+import type { PeriodRecheck, RecheckCheck, RecheckFlag, RecheckItem, RecheckPerson, RepriceItem } from "@/lib/payroll-period-recheck";
+import type { RepriceResult } from "@/lib/payroll-period-recheck-db";
 
 const baht = (n: number) => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const bahtInt = (n: number) => `฿${Math.round(Number(n || 0)).toLocaleString("th-TH")}`;
@@ -45,6 +47,7 @@ export default function PeriodRecheckPage() {
   const [onlyFlagged, setOnlyFlagged] = useState(false);
   const [filter, setFilter] = useState<PeopleFilter>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [repriceOpen, setRepriceOpen] = useState(false);
 
   const load = useCallback(async (pid: string) => {
     if (!pid) return;
@@ -68,6 +71,7 @@ export default function PeriodRecheckPage() {
   }, [data, onlyFlagged, filter]);
   const flaggedCount = data?.people.filter((p) => p.flags.length).length ?? 0;
   const open = data?.people.find((p) => p.employee_id === openId) ?? null;
+  const editable = !!data && ["draft", "review"].includes(data.period.status);
 
   const showPeople = (f: PeopleFilter) => {
     setFilter(f); setOnlyFlagged(false);
@@ -92,7 +96,7 @@ export default function PeriodRecheckPage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-xl font-bold text-slate-800"><Icon name="calc" /> ตรวจทั้งงวด</h1>
-          <p className="mt-1 text-sm text-slate-500">ดูที่มาที่ไปของเงินทุกบาทในงวด — ยอดรวม · ตรวจอัตโนมัติ · รายคนพร้อมสูตรและรายการต้นทาง (อ่านอย่างเดียว ไม่แก้ข้อมูล)</p>
+          <p className="mt-1 text-sm text-slate-500">ดูที่มาที่ไปของเงินทุกบาทในงวด — ยอดรวม · ตรวจอัตโนมัติ · รายคนพร้อมสูตรและรายการต้นทาง (หน้านี้ไม่แก้ข้อมูลเอง ยกเว้นกด "คิดราคาใหม่" ซึ่งถามก่อนเสมอ)</p>
         </div>
         <div className="flex items-end gap-2">
           <label className="block">
@@ -151,6 +155,10 @@ export default function PeriodRecheckPage() {
                       <button type="button" onClick={() => showPeople({ label: c.title, ids: new Set(c.employee_ids) })}
                         className="rounded-lg border border-slate-200 px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-50">ดูรายคน ({c.employee_ids.length})</button>
                     ) : null}
+                    {c.code === "old_price" && editable && data.reprice.length > 0 && (
+                      <button type="button" onClick={() => setRepriceOpen(true)}
+                        className="flex items-center gap-1 rounded-lg bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700"><Icon name="calc" /> คิดราคาใหม่</button>
+                    )}
                     {c.fix && <Link href={c.fix.href} className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 hover:bg-amber-100">{c.fix.label}</Link>}
                   </div>
                 </div>
@@ -186,6 +194,8 @@ export default function PeriodRecheckPage() {
         description={open ? `${open.wage_label}${open.work_days ? ` · วันทำงานในงวด ${open.work_days.payable} วัน (${open.work_days.range})` : ""}` : undefined}>
         {open && <PersonDetail p={open} />}
       </Drawer>
+
+      {data && <RepricePanel open={repriceOpen} onClose={() => setRepriceOpen(false)} data={data} onDone={() => void load(data.period.id)} />}
     </div>
   );
 }
@@ -295,5 +305,121 @@ function ItemRow({ it }: { it: RecheckItem }) {
       {it.sources.some((s) => s.counted === false) && <div className="mt-1 text-[11px] text-slate-400">ขีดฆ่า = มีรายการแต่เครื่องคำนวณไม่นับ (ชี้เพื่อดูเหตุผล)</div>}
       {it.warn && <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-800">{it.warn}</div>}
     </div>
+  );
+}
+
+/** คิดราคาใหม่ — ตัวอย่างทุกรายการก่อน → ยืนยัน (เยอะ = พิมพ์ CONFIRM) → server ตรวจซ้ำแล้วเขียน + audit */
+function RepricePanel({ open, onClose, data, onDone }: { open: boolean; onClose: () => void; data: PeriodRecheck; onDone: () => void }) {
+  const toast = useToast();
+  const [ask, setAsk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<RepriceResult | null>(null);
+  useEffect(() => { if (!open) { setAsk(false); setResult(null); } }, [open]);
+
+  const items = data.reprice;
+  const people = new Set(items.map((it) => it.employee_id)).size;
+  const netEffect = items.reduce((t, it) => t + it.net_effect, 0);
+  const { id: periodId, work_days, hours_per_day } = data.period;
+  const effectText = (n: number) => `${n < 0 ? "ได้น้อยลง" : "ได้เพิ่ม"} ฿${baht(Math.abs(n))}`;
+
+  const run = async () => {
+    setBusy(true);
+    try {
+      const j = await apiFetch("/api/payroll/period-recheck/reprice", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ period_id: periodId, items: items.map(({ key, new_amount }) => ({ key, new_amount })) }),
+      }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      const res = j.data as RepriceResult;
+      setResult(res); setAsk(false);
+      if (res.updated) toast.success(`คิดราคาใหม่แล้ว ${res.updated} รายการ`);
+      if (res.skipped.length) toast.warning(`ข้าม ${res.skipped.length} รายการ — ดูเหตุผลในหน้าต่าง`);
+      onDone();
+    } catch (e) {
+      setAsk(false);
+      toast.error(e instanceof Error ? e.message : "คิดราคาใหม่ไม่สำเร็จ");
+    } finally { setBusy(false); }
+  };
+
+  const columns: MiniColumn<RepriceItem>[] = [
+    { key: "who", header: "พนักงาน", width: "minmax(9rem,1.3fr)", sortValue: (it) => it.code, cell: (it) => <span className="block truncate"><b className="text-slate-800">{it.code}</b> <span className="text-slate-500">{it.name}</span></span> },
+    { key: "what", header: "รายการ", width: "minmax(8.5rem,1.5fr)", sortValue: (it) => it.label, cell: (it) => <span className="block truncate text-slate-700" title={it.item_label}>{it.label}</span> },
+    { key: "old", header: "ราคาเดิม", width: "6rem", align: "right", sortValue: (it) => it.old_amount, cell: (it) => <span className="tabular-nums text-slate-400 line-through">{baht(it.old_amount)}</span> },
+    { key: "new", header: "ราคาใหม่", width: "6rem", align: "right", sortValue: (it) => it.new_amount, cell: (it) => <span className="tabular-nums font-medium text-slate-800">{baht(it.new_amount)}</span> },
+    { key: "net", header: "ผลต่อสุทธิ", width: "6.5rem", align: "right", sortValue: (it) => it.net_effect,
+      cell: (it) => <span className={`tabular-nums ${it.net_effect < 0 ? "text-red-600" : "text-emerald-700"}`}>{it.net_effect > 0 ? "+" : "−"}{baht(Math.abs(it.net_effect))}</span> },
+  ];
+
+  const calcHref = `/payroll/calc-run?period_id=${periodId}`;
+  return (
+    <>
+      <ERPModal open={open} onClose={onClose} size="lg" storageKey="payroll-reprice" loading={busy}
+        title="คิดราคาใหม่ตามสูตรตอนนี้"
+        description={`${data.period.name} · ตั้งค่างวดตอนนี้ ${work_days} วัน × ${hours_per_day} ชม./วัน`}
+        footer={result ? (
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50">ปิด</button>
+            {result.updated > 0 && <Link href={calcHref} className="flex h-9 items-center rounded-lg bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700">ไปคำนวณงวดใหม่</Link>}
+          </div>
+        ) : (
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+            <button type="button" onClick={() => setAsk(true)} disabled={busy || !items.length}
+              className="h-9 rounded-lg bg-amber-600 px-4 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-50">คิดราคาใหม่ {items.length} รายการ</button>
+          </div>
+        )}>
+        {result ? (
+          <div className="space-y-3 text-sm">
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">
+              <div className="flex items-center gap-2 font-semibold"><Icon name="done" /> คิดราคาใหม่แล้ว {result.updated} รายการ</div>
+              {result.updated > 0 && <div className="mt-1 text-xs">พนักงาน{effectText(result.net_effect)} (รวมทั้งงวด) · บันทึกประวัติทุกรายการแล้ว</div>}
+            </div>
+            {result.updated > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+                <div className="font-semibold">ขั้นต่อไป (ยอดเงินเดือนยังเป็นยอดเดิมจนกว่าจะคำนวณใหม่)</div>
+                <ol className="mt-1 list-decimal space-y-0.5 pl-4">
+                  <li>ไปหน้าคำนวณงวด กด &quot;คำนวณ + เทียบ&quot; แล้วบันทึกผล</li>
+                  <li>ไปหน้ารอบจ่าย กด &quot;อัปเดตยอดจากคำนวณล่าสุด&quot; ในรอบปลายเดือน</li>
+                </ol>
+              </div>
+            )}
+            {result.skipped.length > 0 && (
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                <div className="text-xs font-semibold text-slate-700">ข้าม {result.skipped.length} รายการ</div>
+                <ul className="mt-1 space-y-0.5 text-xs text-slate-500">
+                  {result.skipped.slice(0, 20).map((s) => <li key={s.key}>{s.label} — {s.reason}</li>)}
+                  {result.skipped.length > 20 && <li>และอีก {result.skipped.length - 20} รายการ</li>}
+                </ul>
+              </div>
+            )}
+          </div>
+        ) : !items.length ? (
+          <EmptyState title="ทุกรายการราคาตรงสูตรแล้ว" hint="ไม่มีอะไรต้องคิดราคาใหม่" />
+        ) : (
+          <div className="space-y-3 text-sm">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <Stat label="รายการ" value={String(items.length)} />
+              <Stat label="พนักงาน" value={`${people} คน`} />
+              <div className="col-span-2 sm:col-span-1"><Stat label="ผลต่อยอดโอนรวม" value={`${netEffect < 0 ? "−" : "+"}฿${baht(Math.abs(netEffect))}`} hint={netEffect < 0 ? "พนักงานได้น้อยลง" : "พนักงานได้เพิ่ม"} /></div>
+            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600">
+              ราคาสาย/ขาด/ลา/OT ถูกคิดไว้ตอนลงรายการ ถ้าแก้วันทำงานของงวดหรือเงินเดือนในสัญญาทีหลัง รายการเดิมยังใช้ราคาเก่า
+              ปุ่มนี้คิดราคาใหม่ด้วย<b className="text-slate-800">ตั้งค่าตอนนี้ ({work_days} วัน × {hours_per_day} ชม./วัน)</b> — จำนวนนาที/ชั่วโมงไม่เปลี่ยน เปลี่ยนแค่ราคา
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+              ถ้า {work_days} วันไม่ถูก ให้<Link href="/payroll/periods" className="font-semibold underline">แก้ตั้งค่างวด</Link>ก่อน แล้วกลับมากด &quot;ตรวจใหม่&quot; · หลังคิดราคาใหม่ต้องคำนวณงวดใหม่ + บันทึก ยอดเงินเดือนถึงจะเปลี่ยน
+            </div>
+            <MiniTable rows={items} columns={columns} rowKey={(it) => it.key}
+              searchText={(it) => `${it.code} ${it.name} ${it.label} ${it.item_label}`} searchPlaceholder="ค้นรหัส / ชื่อ / วันที่"
+              groupBy={(it) => it.item_label.replace(/\s[\d,.]+\sนาที$/, "")} groupLabel="จัดกลุ่มตามประเภท" emptyText="ไม่พบรายการ" />
+          </div>
+        )}
+      </ERPModal>
+
+      <ConfirmDialog open={ask} onClose={() => setAsk(false)} onConfirm={() => void run()} loading={busy}
+        title={`ยืนยันคิดราคาใหม่ ${items.length} รายการ?`}
+        message={<>รายการของ {people} คนจะเปลี่ยนราคาตามตั้งค่างวดตอนนี้ ({work_days} วัน) · พนักงาน{effectText(netEffect)} รวมทั้งงวด · ระบบบันทึกประวัติทุกรายการ แล้วต้องไปคำนวณงวดใหม่ต่อ</>}
+        confirmText="คิดราคาใหม่" requireTyped={items.length >= 20 ? "CONFIRM" : undefined} />
+    </>
   );
 }

@@ -23,6 +23,13 @@ export type RecheckSource = {
   warn?: string;           // ราคาไม่ตรงสูตรตอนนี้ ฯลฯ
   expected?: number;       // ราคาตามสูตรตอนนี้ (มีเมื่อไม่ตรงกับที่บันทึก)
   href?: string;           // ไปแก้รายการต้นทาง
+  ref?: RecheckRef;        // แถวต้นทางใน DB (ใช้ตอนคิดราคาใหม่)
+};
+/** ชี้แถว + ช่องราคาของรายการต้นทาง — ปุ่ม "คิดราคาใหม่" เขียนกลับที่ช่องนี้ */
+export type RecheckRef = {
+  table: "attendance_entries" | "overtime_entries" | "leave_entries";
+  id: string;
+  field: "late_deduction" | "absence_deduction" | "overtime_amount" | "unpaid_leave_deduction";
 };
 export type RecheckItem = {
   key: string;
@@ -66,6 +73,7 @@ export type PeriodRecheck = {
   bridge: RecheckBridgeRow[];
   checks: RecheckCheck[];
   people: RecheckPerson[];
+  reprice: RepriceItem[];              // รายการที่ราคาไม่ตรงสูตรตอนนี้ + ราคาใหม่ (ปุ่ม "คิดราคาใหม่")
 };
 
 export type RecheckInput = {
@@ -106,6 +114,9 @@ const WAGE_LABEL: Record<string, string> = { monthly: "รายเดือน"
 
 /** ราคาที่บันทึกไว้ในรายการ เทียบกับสูตรตอนนี้ — ต่าง = ตั้งวันทำงานงวด/เงินเดือนเปลี่ยนหลังลงรายการ
  *  perHour = ราคาต่อชั่วโมงของรายการ (ชั่วโมงเก็บทศนิยม 2 ตำแหน่ง เช่น 3 ชม. 40 นาที = 3.67 → ยอมต่างได้ครึ่ง 0.01 ชม.) */
+const refOf = (table: RecheckRef["table"], field: RecheckRef["field"], r: Row): RecheckRef | undefined =>
+  r.id ? { table, field, id: String(r.id) } : undefined;
+
 function priceCheck(counted: boolean, expected: number, stored: number, perHour: number): Pick<RecheckSource, "warn" | "expected"> {
   if (!counted || Math.abs(expected - stored) <= perHour * 0.005 + EPS) return {};
   return { warn: `สูตรตอนนี้ได้ ฿${fmtBaht(expected)}`, expected };
@@ -195,7 +206,7 @@ function buildPerson(L: Row, ctx: {
       label: `${fmtDay(o.work_date)} ${fmtNum(money(o.hours))} ชม. ×${fmtNum(mult)}`, amount: money(o.overtime_amount), counted,
       note: counted ? undefined : `สถานะ ${String(o.status)} — ไม่นับ`,
       ...priceCheck(counted, expected, money(o.overtime_amount), rate * mult),
-      href: editHref,
+      href: editHref, ref: refOf("overtime_entries", "overtime_amount", o),
     };
   });
   push({ key: "overtime_amount", label: "OT", sign: 1, amount: ot, formula: `ชั่วโมง × ${rateText} × ตัวคูณ OT`, sources: otSources, warn: sourceWarn(otSources, ot) });
@@ -213,13 +224,13 @@ function buildPerson(L: Row, ctx: {
       label: `${fmtDay(r.work_date)} ขาด ${fmtNum(money(r.absence_hours))} ชม.`, amount: money(r.absence_deduction), counted,
       note: counted ? undefined : attNote(r),
       ...priceCheck(counted, expected, money(r.absence_deduction), rate),
-      href: editHref,
+      href: editHref, ref: refOf("attendance_entries", "absence_deduction", r),
     };
   });
   // รายวัน: ขาดงานไม่หักเป็นเงิน แต่ลดจำนวนวันที่ได้ค่าแรงแทน (เครื่องคำนวณตั้ง absence_deduction = 0)
   const dailyPay = !contractor && dailyLike && contract.wage_type !== "hourly" && money(contract.daily_wage) > 0;
   if (dailyPay && absence === 0 && absSources.length) {
-    push({ key: "absence_info", label: "ขาดงาน (รายวัน)", sign: 0, amount: 0, formula: "รายวันไม่หักเป็นเงิน — นับเป็นวันที่ไม่ได้ค่าแรงแทน", sources: absSources.map((s) => ({ ...s, amount: undefined, warn: undefined })) });
+    push({ key: "absence_info", label: "ขาดงาน (รายวัน)", sign: 0, amount: 0, formula: "รายวันไม่หักเป็นเงิน — นับเป็นวันที่ไม่ได้ค่าแรงแทน", sources: absSources.map((s) => ({ ...s, amount: undefined, warn: undefined, expected: undefined })) });
   } else {
     push({
       key: "absence_deduction", label: "หักขาดงาน", sign: -1, amount: absence,
@@ -236,7 +247,7 @@ function buildPerson(L: Row, ctx: {
       label: `${fmtDay(r.work_date)} สาย ${fmtNum(money(r.late_minutes))} นาที`, amount: money(r.late_deduction), counted,
       note: counted ? undefined : attNote(r),
       ...priceCheck(counted, expected, money(r.late_deduction), 0),
-      href: editHref,
+      href: editHref, ref: refOf("attendance_entries", "late_deduction", r),
     };
   });
   const lateMinutes = att.filter(attCounted).reduce((t, r) => t + money(r.late_minutes), 0);
@@ -249,10 +260,16 @@ function buildPerson(L: Row, ctx: {
   const lv = ctx.leave.slice().sort(sortByDate("leave_date"));
   const lvCounted = (r: Row) => !contractor && isManualStatus(r.status) && isPayableWorkDate(String(r.leave_date), contract, period);
   const unpaidLeave = money(L.unpaid_leave_deduction);
-  const unpaidSources = lv.filter((r) => money(r.unpaid_leave_deduction) > 0).map((r) => ({
-    label: `${fmtDay(r.leave_date)} ลาไม่รับเงิน ${fmtNum(money(r.days))} วัน`, amount: money(r.unpaid_leave_deduction), counted: lvCounted(r),
-    note: lvCounted(r) ? undefined : "วันหยุด/นอกช่วงสัญญา/ไม่อนุมัติ — ไม่นับ", href: editHref,
-  }));
+  const unpaidSources = lv.filter((r) => money(r.unpaid_leave_deduction) > 0).map((r) => {
+    const counted = lvCounted(r);
+    const expected = absenceDeduction(money(r.hours) || roundMoney(money(r.days) * hoursPerDay), rate);
+    return {
+      label: `${fmtDay(r.leave_date)} ลาไม่รับเงิน ${fmtNum(money(r.days))} วัน`, amount: money(r.unpaid_leave_deduction), counted,
+      note: counted ? undefined : "วันหยุด/นอกช่วงสัญญา/ไม่อนุมัติ — ไม่นับ",
+      ...priceCheck(counted, expected, money(r.unpaid_leave_deduction), rate),
+      href: editHref, ref: refOf("leave_entries", "unpaid_leave_deduction", r),
+    };
+  });
   push({ key: "unpaid_leave_deduction", label: "หักลาไม่รับเงิน", sign: -1, amount: unpaidLeave, formula: `ค่าแรงต่อวัน × วันที่ลา`, sources: unpaidSources, warn: sourceWarn(unpaidSources, unpaidLeave) });
   const paidLeave = lv.filter((r) => money(r.unpaid_leave_deduction) <= 0);
   if (paidLeave.length) {
@@ -475,12 +492,17 @@ export function buildPeriodRecheck(input: RecheckInput): PeriodRecheck {
 
   const oldPrice = people.filter((p) => p.flags.includes("old_price"));
   if (oldPrice.length) {
-    const rows = oldPrice.flatMap((p) => p.items.flatMap((it) => it.sources.filter((s) => s.expected !== undefined).map((s) => ({ s, sign: it.sign }))));
-    const diff = roundMoney(rows.reduce((t, { s }) => t + (money(s.expected) - money(s.amount)), 0));
+    // ผลต่อสุทธิ: รายการหัก (sign −1) ราคาขึ้น = ได้น้อยลง · OT (sign +1) ราคาขึ้น = ได้เพิ่ม
+    const rows = oldPrice.flatMap((p) => p.items.filter((it) => it.sign !== 0).flatMap((it) => it.sources.filter((s) => s.expected !== undefined)
+      .map((s) => ({ ot: it.key === "overtime_amount", effect: it.sign * (roundMoney(money(s.expected)) - money(s.amount)) }))));
+    const net = roundMoney(rows.reduce((t, r) => t + r.effect, 0));
+    const dedUp = roundMoney(-rows.filter((r) => !r.ot).reduce((t, r) => t + r.effect, 0));
+    const otUp = roundMoney(rows.filter((r) => r.ot).reduce((t, r) => t + r.effect, 0));
+    const parts = [dedUp ? `หัก${dedUp > 0 ? "เพิ่ม" : "ลด"} ฿${fmtBaht(Math.abs(dedUp))}` : "", otUp ? `OT ${otUp > 0 ? "เพิ่ม" : "ลด"} ฿${fmtBaht(Math.abs(otUp))}` : ""].filter(Boolean).join(" · ");
     checks.push({
       level: "warning", code: "old_price",
-      title: `สาย/ขาด/OT ${rows.length} รายการ (${oldPrice.length} คน) คิดราคาไม่ตรงสูตรตอนนี้ — ต่างรวม ฿${fmtBaht(Math.abs(diff))}`,
-      detail: `ราคาถูกคิดไว้ตอนลงรายการ ถ้าแก้วันทำงานของงวด (ตอนนี้ ${fmtNum(money(period.default_work_days))} วัน) หรือเงินเดือนในสัญญาทีหลัง รายการเดิมยังใช้ราคาเก่า · ${codes(oldPrice)}`,
+      title: `สาย/ขาด/ลา/OT ${rows.length} รายการ (${oldPrice.length} คน) คิดราคาไม่ตรงสูตรตอนนี้ — ถ้าคิดใหม่ พนักงาน${net < 0 ? "ได้น้อยลง" : "ได้เพิ่ม"}รวม ฿${fmtBaht(Math.abs(net))}`,
+      detail: `${parts ? `${parts} · ` : ""}ราคาถูกคิดไว้ตอนลงรายการ ถ้าแก้วันทำงานของงวด (ตอนนี้ ${fmtNum(money(period.default_work_days))} วัน) หรือเงินเดือนในสัญญาทีหลัง รายการเดิมยังใช้ราคาเก่า · ${codes(oldPrice)}`,
       employee_ids: ids(oldPrice),
     });
   }
@@ -505,5 +527,44 @@ export function buildPeriodRecheck(input: RecheckInput): PeriodRecheck {
     basis,
     run: input.run ? { id: String(input.run.id), run_no: money(input.run.run_no), calculated_at: (input.run.calculated_at ?? input.run.created_at ?? null) as string | null } : null,
     totals, bridge, checks, people,
+    reprice: buildRepricePlan(people),
   };
+}
+
+// ---------- คิดราคาใหม่ (รายการที่ราคาไม่ตรงสูตรตอนนี้) ----------
+
+export type RepriceItem = {
+  key: string;               // table:id:field — ใช้ยืนยันรายการเดียวกันตอนกดบันทึก
+  ref: RecheckRef;
+  employee_id: string;
+  code: string;
+  name: string;
+  item_label: string;        // เช่น "หักสาย 12 นาที"
+  label: string;             // เช่น "11 ต.ค. สาย 3 นาที"
+  old_amount: number;
+  new_amount: number;
+  net_effect: number;        // ผลต่อสุทธิของพนักงาน (+ = ได้เพิ่ม · − = ได้น้อยลง)
+};
+
+export const repriceKey = (r: RecheckRef) => `${r.table}:${r.id}:${r.field}`;
+
+/** รายการที่ราคาบันทึกไว้ไม่ตรงสูตรตอนนี้ (ป้ายเหลือง "สูตรตอนนี้ได้ ฿…") พร้อมราคาใหม่ — ไม่แตะ DB
+ *  ราคาใหม่มาจาก buildPeriodRecheck ซึ่งใช้สูตรกลางชุดเดียวกับฟอร์มลงสาย/ขาด/OT */
+export function buildRepricePlan(people: RecheckPerson[]): RepriceItem[] {
+  const out: RepriceItem[] = [];
+  for (const p of people) {
+    for (const it of p.items) {
+      if (it.sign === 0) continue;
+      for (const s of it.sources) {
+        if (s.expected === undefined || !s.ref) continue;
+        const oldAmount = money(s.amount), newAmount = roundMoney(s.expected);
+        out.push({
+          key: repriceKey(s.ref), ref: s.ref, employee_id: p.employee_id, code: p.code, name: p.name,
+          item_label: it.label, label: s.label, old_amount: oldAmount, new_amount: newAmount,
+          net_effect: roundMoney(it.sign * (newAmount - oldAmount)),
+        });
+      }
+    }
+  }
+  return out;
 }

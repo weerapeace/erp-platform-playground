@@ -1,11 +1,14 @@
 /**
- * ตัวโหลดข้อมูลหน้า "ตรวจทั้งงวด" (server-only) — อ่านอย่างเดียว ไม่เขียน DB
- * ดึงผลคำนวณที่บันทึก + รายการต้นทางทั้งหมดของงวด + คำนวณสดเทียบ แล้วส่งให้ buildPeriodRecheck
+ * ตัวโหลดข้อมูลหน้า "ตรวจทั้งงวด" (server-only)
+ * - loadPeriodRecheck: อ่านอย่างเดียว — ดึงผลคำนวณที่บันทึก + รายการต้นทางทั้งหมดของงวด + คำนวณสดเทียบ แล้วส่งให้ buildPeriodRecheck
+ * - applyPeriodReprice: ปุ่ม "คิดราคาใหม่" — เขียนราคาสาย/ขาด/ลา/OT ตามสูตรตอนนี้ (เฉพาะรายการที่ผู้ใช้เห็นในตัวอย่าง + audit)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { computePeriodPreview } from "@/lib/payroll-calc-engine";
 import { validatePayrollPeriod } from "@/lib/payroll-validation";
-import { buildPeriodRecheck, type PeriodRecheck } from "@/lib/payroll-period-recheck";
+import { buildPeriodRecheck, type PeriodRecheck, type RepriceItem } from "@/lib/payroll-period-recheck";
+import { money, roundMoney } from "@/lib/payroll-calc";
+import { writeAuditMany } from "@/lib/audit";
 
 type Row = Record<string, unknown>;
 
@@ -64,4 +67,66 @@ export async function loadPeriodRecheck(periodId: string): Promise<PeriodRecheck
     batches: (batchRes.data ?? []) as Row[],
     validationIssues: validation?.issues,
   });
+}
+
+const EDITABLE = new Set(["draft", "review"]);
+
+export type RepriceResult = {
+  updated: number;
+  net_effect: number;                                        // ผลต่อสุทธิรวมของรายการที่เปลี่ยนแล้ว
+  skipped: { key: string; label: string; reason: string }[];
+};
+
+/** คิดราคาใหม่ตามสูตรตอนนี้ — ตรวจทั้งงวดใหม่ฝั่ง server (ไม่เชื่อราคาจากหน้าจอ) แล้วเขียนเฉพาะรายการที่
+ *  ผู้ใช้ยืนยันและราคาใหม่ยังเท่ากับที่เห็นในตัวอย่าง · กันทับคนอื่น: อัปเดตเฉพาะแถวที่ราคายังเป็นค่าเดิม
+ *  จำนวนชั่วโมง/นาทีไม่เปลี่ยน · ผลคำนวณที่บันทึกไว้ไม่เปลี่ยน (ต้องคำนวณงวดใหม่เอง) */
+export async function applyPeriodReprice(
+  periodId: string,
+  confirmed: { key: string; new_amount: number }[],
+  actor: { id: string | null; name: string | null },
+): Promise<RepriceResult> {
+  const recheck = await loadPeriodRecheck(periodId);
+  if (!EDITABLE.has(recheck.period.status)) throw new Error(`งวดสถานะ "${recheck.period.status}" แก้ไม่ได้แล้ว`);
+  const plan = new Map(recheck.reprice.map((it) => [it.key, it]));
+  const skipped: RepriceResult["skipped"] = [];
+  const todo: RepriceItem[] = [];
+  for (const c of confirmed) {
+    const it = plan.get(c.key);
+    if (!it) { skipped.push({ key: c.key, label: "รายการนี้", reason: "ราคาตรงสูตรแล้ว หรือรายการถูกแก้/ลบไปแล้ว" }); continue; }
+    if (Math.abs(it.new_amount - money(c.new_amount)) > 0.005) {
+      skipped.push({ key: c.key, label: `${it.code} ${it.label}`, reason: `ราคาใหม่เปลี่ยนเป็น ฿${it.new_amount} ระหว่างที่เปิดดู — เปิดดูใหม่แล้วกดอีกครั้ง` });
+      continue;
+    }
+    todo.push(it);
+  }
+
+  const a = supabaseAdmin();
+  const now = new Date().toISOString();
+  const done: RepriceItem[] = [];
+  for (let i = 0; i < todo.length; i += 10) {
+    await Promise.all(todo.slice(i, i + 10).map(async (it) => {
+      const { data, error } = await a.from(it.ref.table)
+        .update({ [it.ref.field]: it.new_amount, updated_at: now })
+        .eq("id", it.ref.id).eq("payroll_period_id", periodId)
+        .gte(it.ref.field, it.old_amount - 0.005).lte(it.ref.field, it.old_amount + 0.005)
+        .select("id");
+      if (error) {
+        console.error(`[payroll-reprice] ${it.key}:`, error.message);
+        skipped.push({ key: it.key, label: `${it.code} ${it.label}`, reason: "บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง" });
+      } else if (!data?.length) {
+        skipped.push({ key: it.key, label: `${it.code} ${it.label}`, reason: "รายการถูกแก้ระหว่างนี้ — เปิดดูใหม่" });
+      } else done.push(it);
+    }));
+  }
+
+  const { period } = recheck;
+  await writeAuditMany(a, done.map((it) => ({
+    action: "reprice", entityType: it.ref.table, entityId: it.ref.id, actorId: actor.id, actorName: actor.name,
+    metadata: {
+      period_id: periodId, period_name: period.name, employee_id: it.employee_id, employee_code: it.code, item: `${it.item_label} · ${it.label}`,
+      field_name: it.ref.field, old_value: it.old_amount, new_value: it.new_amount,
+      reason: `คิดราคาใหม่ตามตั้งค่างวดตอนนี้ (${period.work_days} วัน × ${period.hours_per_day} ชม.)`,
+    },
+  })));
+  return { updated: done.length, net_effect: roundMoney(done.reduce((t, it) => t + it.net_effect, 0)), skipped };
 }

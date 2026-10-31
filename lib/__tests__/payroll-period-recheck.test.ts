@@ -74,7 +74,36 @@ describe("payroll-period-recheck", () => {
     const r = buildPeriodRecheck(input({ attendance: att, savedLines: [{ ...line, absence_deduction: 533.33 }], liveLines: null }));
     expect(r.people[0].flags).toContain("old_price");
     expect(r.people[0].flags).not.toContain("source_mismatch");
-    expect(r.checks.find((c) => c.code === "old_price")?.title).toContain("1 รายการ (1 คน)");
+    const c = r.checks.find((x) => x.code === "old_price")!;
+    expect(c.title).toContain("1 รายการ (1 คน)");
+    expect(c.title).toContain("ได้น้อยลงรวม ฿20.52");   // หักขาดงานเพิ่ม 533.33 → 553.85
+  });
+
+  it("does not count absence prices of daily workers (they lose the day's wage, not a deduction)", () => {
+    const daily = new Map([[EMP, { id: "c1", contract_type: "permanent", wage_type: "daily", daily_wage: 400, start_date: "2026-01-01" }]]);
+    const att = [{ id: "a-1", employee_id: EMP, work_date: "2026-09-10", absence_hours: 8, absence_deduction: 123, status: "approved" }];
+    const r = buildPeriodRecheck(input({ contracts: daily, attendance: att, savedLines: [{ ...line, base_salary: 0, absence_deduction: 0, late_deduction: 0 }], liveLines: null }));
+    expect(r.people[0].items.find((it) => it.key === "absence_info")).toBeTruthy();
+    expect(r.people[0].flags).not.toContain("old_price");
+    expect(r.reprice).toEqual([]);
+  });
+
+  it("lists old-price entries to re-price with the current rule (only rows with an id)", () => {
+    const att = input().attendance.map((a, i) => ({
+      ...a, id: `att-${i}`,
+      ...(a.work_date === "2026-09-10" ? { absence_deduction: 533.33 } : {}),
+      ...(a.work_date === "2026-09-11" ? { late_deduction: 3.33 } : {}),
+    }));
+    const ot = [{ id: "ot-1", employee_id: EMP, work_date: "2026-09-12", hours: 2, rate_multiplier: 1.5, overtime_amount: 200, status: "approved" }];
+    const r = buildPeriodRecheck(input({ attendance: att, overtime: ot, liveLines: null }));
+    expect(r.reprice.map((it) => [it.key, it.old_amount, it.new_amount, it.net_effect])).toEqual([
+      ["overtime_entries:ot-1:overtime_amount", 200, 207.69, 7.69],
+      ["attendance_entries:att-0:absence_deduction", 533.33, 553.85, -20.52],
+      ["attendance_entries:att-1:late_deduction", 3.33, 3.46, -0.13],
+    ]);
+    expect(r.reprice[1]).toMatchObject({ code: "ISG-006", item_label: "หักขาดงาน", label: "10 ก.ย. ขาด 8 ชม." });
+    // แถวที่ไม่มี id (ข้อมูลเก่า/ทดสอบ) ไม่อยู่ในรายการคิดราคาใหม่
+    expect(buildPeriodRecheck(input({ attendance: att.map(({ id: _id, ...a }) => a), liveLines: null })).reprice).toEqual([]);
   });
 
   it("warns when an approved mid-month payment was not deducted", () => {
