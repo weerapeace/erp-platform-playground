@@ -50,7 +50,7 @@ describe("work board print", () => {
 
   it("follows column order, renamed labels and write-in columns", () => {
     const { html } = run("pending", { columns: [{ key: "name", on: true, label: "สินค้า" }, { key: "sku", on: true }, { key: "x_check", on: true }] });
-    expect(html).toContain("<th>สินค้า</th><th class=\"mono\">SKU</th><th class=\"c xb\">ตรวจแล้ว</th>");
+    expect(html).toContain('<th data-col="name">สินค้า</th><th class="mono" data-col="sku">SKU</th><th class="c xb" data-col="x_check">ตรวจแล้ว</th>');
     expect(html).not.toContain("รหัส MO");
   });
 

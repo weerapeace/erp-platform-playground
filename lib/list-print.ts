@@ -79,6 +79,10 @@ export const EXTRA_COLUMNS: ListPrintColumn[] = [
   { key: "x_sign", label: "ลายเซ็นรับ", blank: "line", widthMm: 26 },
 ];
 const EXTRA_BY_KEY = new Map(EXTRA_COLUMNS.map((c) => [c.key, c]));
+/** ความกว้างคอลัมน์ที่ปรับได้ (มม.) */
+export const MIN_COL_MM = 6;
+export const MAX_COL_MM = 150;
+export const clampColMm = (mm: number) => Math.min(MAX_COL_MM, Math.max(MIN_COL_MM, Math.round(mm)));
 /** ช่องที่ผู้ใช้เพิ่มเองและตั้งชื่อเอง (key = "c_<รหัส>") — เพิ่มได้หลายช่อง */
 export const isCustomColumn = (key: string) => /^c_[a-z0-9]{1,12}$/.test(key);
 /** ช่องเขียนมือ (สำเร็จรูป หรือ เพิ่มเอง) — ลบออกจากรายการได้ */
@@ -123,11 +127,9 @@ export function cleanListPrintSettings(raw: unknown, available: ListPrintColumn[
       if (isCustomColumn(key) && !label) continue;   // ช่องที่เพิ่มเองต้องมีชื่อ
       seen.add(key);
       const pref: ListPrintColumnPref = { key, on: x.on !== false, ...(label ? { label } : {}) };
-      if (isExtraColumn(key)) {
-        if (x.blank === "line" || x.blank === "box") pref.blank = x.blank;
-        const w = Number(x.widthMm);
-        if (Number.isFinite(w) && w > 0) pref.widthMm = Math.min(80, Math.max(8, Math.round(w)));
-      }
+      if (isExtraColumn(key) && (x.blank === "line" || x.blank === "box")) pref.blank = x.blank;
+      const w = Number(x.widthMm);
+      if (x.widthMm != null && Number.isFinite(w) && w > 0) pref.widthMm = clampColMm(w);
       columns.push(pref);
     }
   const base = Array.isArray(o.columns) ? columns : fallback.columns.map((c) => ({ ...c }));
@@ -174,9 +176,10 @@ export function resolveListColumns(s: ListPrintSettings, available: ListPrintCol
     if (!def) continue;
     if (def.key === "img" && s.image === "none") continue;
     const col: ListPrintColumn = { ...def, label: pref.label || def.label };
+    // ความกว้างที่ลากปรับเอง (รูป = ตามขนาดรูป ไม่ปรับ)
+    if (def.key !== "img") col.widthMm = pref.widthMm ?? def.widthMm;
     if (def.blank) {
       col.blank = pref.blank ?? def.blank;
-      col.widthMm = pref.widthMm ?? def.widthMm;
       col.align = col.blank === "box" ? "center" : undefined;
     }
     out.push(col);
@@ -198,8 +201,9 @@ const blankHtml = (c: ListPrintColumn) => (c.blank === "box" ? `<span class="chk
  */
 export function renderListTable(cols: ListPrintColumn[], rows: Record<string, string>[], foot?: { label: string; cells: Record<string, string> }): string {
   if (cols.length === 0) return `<div class="wb-empty">ยังไม่ได้เลือกคอลัมน์ที่จะพิมพ์</div>`;
-  const colgroup = `<colgroup>${cols.map((c) => `<col${c.widthMm ? ` style="width:${c.widthMm}mm"` : c.key === "img" ? ` class="img"` : ""} />`).join("")}</colgroup>`;
-  const thead = `<thead><tr>${cols.map((c) => `<th${clsAttr(c)}>${escapeHtml(c.label)}</th>`).join("")}</tr></thead>`;
+  // data-col = ให้พรีวิวรู้ว่าขอบไหนคือคอลัมน์ไหน (ลากปรับความกว้าง — components/report/list-print-resize)
+  const colgroup = `<colgroup>${cols.map((c) => `<col data-col="${escapeHtml(c.key)}"${c.widthMm ? ` style="width:${c.widthMm}mm"` : c.key === "img" ? ` class="img"` : ""} />`).join("")}</colgroup>`;
+  const thead = `<thead><tr>${cols.map((c) => `<th${clsAttr(c)} data-col="${escapeHtml(c.key)}">${escapeHtml(c.label)}</th>`).join("")}</tr></thead>`;
   const tbody = `<tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td${clsAttr(c)}>${c.blank ? blankHtml(c) : r[c.key] ?? ""}</td>`).join("")}</tr>`).join("")}</tbody>`;
   let tfoot = "";
   if (foot) {
@@ -221,6 +225,8 @@ export function listPrintCss(s: ListPrintSettings): string {
 .wb-title { font-size: ${f + 7}px; }
 .wb-t th, .wb-t td, .grp-rows th, .grp-rows td { font-size: ${f}px; padding: ${pad}mm 2mm; }
 .wb-t.fixed { table-layout: fixed; }
+.wb-t.fixed th, .wb-t.fixed td { overflow-wrap: anywhere; }
+.wb-t.fixed .mono, .wb-t.fixed td.r, .wb-t.fixed th.r { white-space: normal; }
 td.img, th.img, col.img { width: ${img + 2}mm; }
 .wb-t td.img { padding: ${Math.min(pad, 1)}mm 1mm; }
 .thumb { width: ${img}mm; height: ${img}mm; }

@@ -154,6 +154,13 @@ export function ListPrintPanel({
       </Section>
 
       <Section title="คอลัมน์" hint="ติ๊ก · เลื่อนลำดับ · แก้ชื่อหัว">
+        <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-slate-500">
+          <Icon value="i:arrows-exchange" className="mt-0.5 shrink-0 text-slate-400" />
+          <span className="flex-1">ปรับความกว้าง: ลากขอบหัวคอลัมน์ในใบพรีวิว · ดับเบิลคลิกขอบ = กลับค่าเดิม</span>
+          {s.columns.some((c) => c.widthMm != null && !isExtraColumn(c.key)) && (
+            <button type="button" onClick={state.resetColumnWidths} className="shrink-0 text-blue-600 hover:underline">คืนเดิมทั้งหมด</button>
+          )}
+        </div>
         <div className="space-y-1">
           {visibleCols.map((c, i) => (
             <div key={c.key}>
@@ -164,6 +171,10 @@ export function ListPrintPanel({
                 onChange={(e) => patchCol(c.key, { label: e.target.value || undefined })}
                 onBlur={(e) => { if (isCustomColumn(c.key) && !e.target.value.trim()) patchCol(c.key, { label: "ช่องใหม่" }); }}
                 className={`h-7 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-xs ${c.on ? "text-slate-800" : "text-slate-400"} placeholder:text-slate-500`} />
+              {c.widthMm != null && !isExtraColumn(c.key) && (
+                <button type="button" onClick={() => state.setColumnWidth(c.key, null)} title="ความกว้างที่ลากปรับไว้ — กดเพื่อกลับค่าเดิม"
+                  className="h-7 shrink-0 rounded px-1 text-[10px] text-slate-400 hover:bg-slate-100 hover:text-slate-700">{c.widthMm}มม.</button>
+              )}
               <button type="button" disabled={i === 0} onClick={() => move(c.key, -1)} aria-label="เลื่อนขึ้น" className="h-7 w-6 shrink-0 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"><Icon value="i:chevron-up" /></button>
               <button type="button" disabled={i === visibleCols.length - 1} onClick={() => move(c.key, 1)} aria-label="เลื่อนลง" className="h-7 w-6 shrink-0 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"><Icon value="i:chevron-down" /></button>
               {isExtraColumn(c.key)

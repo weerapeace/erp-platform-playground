@@ -6,7 +6,8 @@
  *   (โฟลเดอร์ _demos ไม่ build — ก๊อปไปไว้ใต้ app/ ชั่วคราวถ้าจะเปิดดู)
  */
 import { useMemo, useState } from "react";
-import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
+import { printReportHtmlInNewWindow } from "@/components/report";
+import { ListPrintFrame } from "@/components/report/list-print-frame";
 import { ListPrintPanel } from "@/components/report/list-print-panel";
 import { useListPrintSettings } from "@/components/report/use-list-print-settings";
 import { defaultListPrintSettings, estimateListPages } from "@/lib/list-print";
@@ -51,7 +52,7 @@ export default function ListPrintPreviewPage() {
         <button type="button" onClick={() => printReportHtmlInNewWindow(result.html)} className="h-8 rounded-lg bg-blue-600 px-4 text-sm text-white">พิมพ์</button>
       </div>
       <div className="flex flex-col items-start gap-4 lg:flex-row">
-        <div className="w-full min-w-0 flex-1"><PrintFrame html={result.html} maxWidth={print.settings.orientation === "landscape" ? 1180 : 840} fit /></div>
+        <div className="w-full min-w-0 flex-1"><ListPrintFrame html={result.html} state={print} maxWidth={print.settings.orientation === "landscape" ? 1180 : 840} /></div>
         <aside className="w-full shrink-0 rounded-xl border border-slate-200 bg-white p-4 lg:sticky lg:top-4 lg:w-[330px]">
           <ListPrintPanel state={print} available={available} sorts={WORK_BOARD_SORTS} groups={workBoardPrintGroups(type)} builtinPresets={WORK_BOARD_PRINT_PRESETS}
             companies={[{ id: "c1", name: "บริษัท ตัวอย่าง จำกัด" }]} estimatedPages={estimateListPages(result.groupCounts, print.settings)}

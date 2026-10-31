@@ -50,18 +50,26 @@ describe("list print settings", () => {
       ...D,
       columns: [{ key: "name", on: true }, { ...c, widthMm: 999 }, { key: "c_box1", on: true, label: "ผ่าน QC", blank: "box" }, { key: "c_noname", on: true, label: " " }, { key: "c_BAD!", on: true, label: "x" }],
     }, AVAIL, D);
-    expect(s.columns.slice(0, 3)).toEqual([{ key: "name", on: true }, { ...c, widthMm: 80 }, { key: "c_box1", on: true, label: "ผ่าน QC", blank: "box" }]);
+    expect(s.columns.slice(0, 3)).toEqual([{ key: "name", on: true }, { ...c, widthMm: 150 }, { key: "c_box1", on: true, label: "ผ่าน QC", blank: "box" }]);
     expect(s.columns.some((x) => x.key === "c_noname")).toBe(false);
     const cols = resolveListColumns(s, AVAIL);
     expect(cols.slice(0, 3).map((x) => [x.key, x.label, x.blank, x.widthMm, x.align])).toEqual([
       ["name", "ชื่อสินค้า", undefined, undefined, undefined],
-      [c.key, "วันที่รับ", "line", 80, undefined],
+      [c.key, "วันที่รับ", "line", 150, undefined],
       ["c_box1", "ผ่าน QC", "box", 25, "center"],
     ]);
     const html = renderListTable(cols.slice(0, 3), [{ name: "ก" }]);
-    expect(html).toContain('<th class="xb">วันที่รับ</th>');
-    expect(html).toContain(`<col style="width:80mm" />`);
+    expect(html).toContain(`<th class="xb" data-col="${c.key}">วันที่รับ</th>`);
+    expect(html).toContain(`<col data-col="${c.key}" style="width:150mm" />`);
     expect(html).toContain(`<td class="c xb"><span class="chk"></span></td>`);
+  });
+
+  it("any column can get a dragged width (clamped); image width follows image size", () => {
+    const s1 = cleanListPrintSettings({ ...D, columns: [{ key: "sku", on: true, widthMm: 33.4 }, { key: "name", on: true, widthMm: 2 }, { key: "img", on: true, widthMm: 50 }, { key: "qty", on: true, widthMm: "x" }] }, AVAIL, D);
+    expect(s1.columns.map((c) => c.widthMm)).toEqual([33, 6, 50, undefined]);
+    const cols = resolveListColumns(s1, AVAIL);
+    expect(cols.map((c) => [c.key, c.widthMm])).toEqual([["sku", 33], ["name", 6], ["img", undefined], ["qty", undefined]]);
+    expect(renderListTable(cols, [])).toContain('<col data-col="sku" style="width:33mm" />');
   });
 
   it("a quick write-in column can switch to a tick box and change width", () => {

@@ -44,17 +44,18 @@ export const WORK_BOARD_PRINT_TITLE: Record<WorkBoardPrintType, string> = {
 };
 
 // ── คอลัมน์ ──
+// ความกว้างเริ่มต้น (มม.) — ชื่อสินค้าไม่กำหนด = ได้ที่ที่เหลือทั้งหมด · ผู้ใช้ลากปรับในพรีวิวได้ (จำต่อคนต่อใบ)
 const C: Record<string, ListPrintColumn> = {
   img: { key: "img", label: "รูป", align: "center" },
-  assignee: { key: "assignee", label: "ช่าง" },
-  mo: { key: "mo", label: "รหัส MO", mono: true },
-  job: { key: "job", label: "งาน (เหมา)" },
-  sku: { key: "sku", label: "SKU", mono: true },
+  assignee: { key: "assignee", label: "ช่าง", widthMm: 22 },
+  mo: { key: "mo", label: "รหัส MO", mono: true, widthMm: 30 },
+  job: { key: "job", label: "งาน (เหมา)", widthMm: 26 },
+  sku: { key: "sku", label: "SKU", mono: true, widthMm: 26 },
   name: { key: "name", label: "ชื่อสินค้า" },
-  due: { key: "due", label: "กำหนดส่ง", align: "right" },
-  qty: { key: "qty", label: "จำนวน", align: "right" },
-  rate: { key: "rate", label: "ค่าแรง/ชิ้น", align: "right" },
-  labor: { key: "labor", label: "ยอดรวม", align: "right" },
+  due: { key: "due", label: "กำหนดส่ง", align: "right", widthMm: 20 },
+  qty: { key: "qty", label: "จำนวน", align: "right", widthMm: 17 },
+  rate: { key: "rate", label: "ค่าแรง/ชิ้น", align: "right", widthMm: 19 },
+  labor: { key: "labor", label: "ยอดรวม", align: "right", widthMm: 20 },
 };
 const cols = (...keys: string[]) => keys.map((k) => C[k]);
 const PENDING_COLS = [C.img, C.mo, C.sku, C.name, C.due, { ...C.qty, label: "เหลือจ่าย" }, C.rate, C.labor];

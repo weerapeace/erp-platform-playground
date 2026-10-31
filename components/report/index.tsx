@@ -644,7 +644,11 @@ export function ReportLayoutControls({
 }
 
 /** fit = ย่อกระดาษให้พอดีกรอบเมื่อที่แคบ (เช่น มีแผงตั้งค่าอยู่ข้าง ๆ) — ย่อเฉพาะบนจอ ไม่กระทบตอนพิมพ์ */
-export function PrintFrame({ html, maxWidth = 840, onPrint, fileName, fit = false }: { html: string; maxWidth?: number; onPrint?: () => void; fileName?: string; fit?: boolean }) {
+export function PrintFrame({ html, maxWidth = 840, onPrint, fileName, fit = false, onDocLoad }: {
+  html: string; maxWidth?: number; onPrint?: () => void; fileName?: string; fit?: boolean;
+  /** เอกสารพรีวิวโหลดเสร็จ (ทุกครั้งที่ html เปลี่ยน) — เช่น ติดตัวจับลากปรับความกว้างคอลัมน์ (ListPrintFrame) */
+  onDocLoad?: (doc: Document) => void;
+}) {
   const ref = useRef<HTMLIFrameElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const [h, setH] = useState(400);
@@ -677,6 +681,7 @@ export function PrintFrame({ html, maxWidth = 840, onPrint, fileName, fit = fals
     const doc = ref.current?.contentDocument;
     // ตั้งชื่อเอกสารไว้ล่วงหน้า → กด Ctrl+P เองก็ได้ชื่อไฟล์ถูกเหมือนกดปุ่ม
     if (doc && fileName) doc.title = fileName;
+    if (doc && onDocLoad) onDocLoad(doc);
     if (doc) {
       doc.addEventListener("keydown", (e: KeyboardEvent) => {
         if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {

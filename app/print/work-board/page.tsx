@@ -7,7 +7,8 @@
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
+import { printReportHtmlInNewWindow } from "@/components/report";
+import { ListPrintFrame } from "@/components/report/list-print-frame";
 import { ListPrintPanel } from "@/components/report/list-print-panel";
 import { useListPrintSettings } from "@/components/report/use-list-print-settings";
 import { useAuth } from "@/components/auth";
@@ -140,7 +141,7 @@ function WorkBoardPrintInner() {
         <div className="w-full min-w-0 flex-1">
           {error ? <div className="py-20 text-center text-red-500"><Icon value="i:alert-triangle" className="mr-1" />{error}</div>
             : !result ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
-            : <PrintFrame html={html} maxWidth={frameWidth} onPrint={doPrint} fit />}
+            : <ListPrintFrame html={html} state={print} maxWidth={frameWidth} onPrint={doPrint} />}
         </div>
         {panelOpen && (
           <aside className="no-print order-first w-full shrink-0 rounded-xl border border-slate-200 bg-white p-4 lg:order-none lg:sticky lg:top-[68px] lg:max-h-[calc(100vh-84px)] lg:w-[330px] lg:overflow-y-auto" aria-label="ตั้งค่าหน้าพิมพ์">

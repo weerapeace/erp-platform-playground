@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useUserPref } from "@/lib/use-user-pref";
 import {
-  PRINT_TEAM_PRESETS_KEY, cleanListPrintSettings,
+  PRINT_TEAM_PRESETS_KEY, clampColMm, cleanListPrintSettings,
   type ListPrintColumn, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
 
@@ -29,6 +29,9 @@ export interface ListPrintSettingsState {
   settings: ListPrintSettings;
   setSettings: (next: ListPrintSettings) => void;
   reset: () => void;
+  /** ความกว้างคอลัมน์ (มม.) · null = กลับค่าเดิม */
+  setColumnWidth: (key: string, mm: number | null) => void;
+  resetColumnWidths: () => void;
   myPresets: ListPrintPreset[];
   teamPresets: ListPrintPreset[];
   saveMyPreset: (name: string) => void;
@@ -83,10 +86,23 @@ export function useListPrintSettings({ reportKey, family, available, defaults }:
   }, [teamAll, family]);
 
   const settings = live ?? saved;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const dropWidth = ({ widthMm: _w, ...rest }: ListPrintSettings["columns"][number]) => rest;
+  const setColumnWidth = useCallback((key: string, mm: number | null) => {
+    const cur = settingsRef.current;
+    setSettings({ ...cur, columns: cur.columns.map((c) => (c.key !== key ? c : mm == null ? dropWidth(c) : { ...c, widthMm: clampColMm(mm) })) });
+  }, [setSettings]);
+  const resetColumnWidths = useCallback(() => {
+    const cur = settingsRef.current;
+    setSettings({ ...cur, columns: cur.columns.map(dropWidth) });
+  }, [setSettings]);
   return {
     settings,
     setSettings,
     reset,
+    setColumnWidth,
+    resetColumnWidths,
     myPresets,
     teamPresets,
     saveMyPreset: (name) => setMyPresets([...myPresets, { id: newPresetId(), name: name.trim().slice(0, 40), settings }]),
