@@ -7,6 +7,7 @@
  * แก้แล้วโชว์ "ก่อน → หลัง" ก่อนบันทึก · ระบบกันข้อมูลขัดกัน (เช่น ลดใบจ่ายต่ำกว่าที่ช่างส่งคืน = ต้องแก้รอบส่งคืนก่อน)
  * กติกา/ตัวบันทึก = ./catch-up-edit-plan.ts (ceBuild / ceRun) · ลดจำนวน = ของกลาง ./catch-up-reduce.tsx + lib/mo-qty-reduce
  * สิทธิ์: แก้ได้เฉพาะคนที่ "บันทึกได้เลย" หรือ "ยืนยันคำขอ" — คนอื่นเปิดดูได้อย่างเดียว · ส่งออก/ปิด/ยกเลิก ยังย้อนไม่ได้
+ * ลดใบจ่ายต่ำกว่ายอดที่ช่างคืนแล้ว = กล่องเหลือง "แก้ตามให้ทั้งชุด" (รอบส่งคืน/ของ QC/ที่เหลือ) — กติกา ceApplyCascade
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
@@ -18,7 +19,8 @@ import { isHireDesk } from "@/lib/work-entry-rules";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { CatchUpSnapshot } from "@/app/api/mo/catch-up/route";
 import { cuDateText, cuWhen } from "./catch-up";
-import { ceInitial, ceBuild, ceRun, ymdTh, type CeForm, type CeOp } from "./catch-up-edit-plan";
+import { ceInitial, ceBuild, ceRun, ymdTh, type CeForm, type CeOp, type CeRest } from "./catch-up-edit-plan";
+import { REDUCE_REASONS, REDUCE_MODE_LABEL } from "@/lib/mo-qty-reduce";
 import { ReducePanel } from "./catch-up-reduce";
 import { CrewPick } from "./crew-pick";
 import { DispatchDatePick } from "./dispatch-date-pick";
@@ -86,6 +88,12 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
   const issues = built?.issues ?? [];
   const errs = issues.filter((x) => x.level === "error" && x.field !== "none");
   const ops = built?.ops ?? [];
+  // แก้ตามให้ทั้งชุด — รอบส่งคืน/ของ QC ที่ระบบแก้ให้ โชว์ค่าหลังแก้ (แก้ช่องนั้นเองไม่ได้ จนกว่าจะปิดแก้ตามให้)
+  const cascades = built?.cascades ?? [];
+  const casSub = new Map(cascades.flatMap((c) => c.subs.map((x) => [x.id, x] as const)));
+  const casQc = new Set(cascades.flatMap((c) => c.qcBack.map((x) => x.id)));
+  const restTotal = cascades.reduce((a, c) => a + c.rest, 0);
+  const setRest = (p: Partial<CeRest>) => setForm((f) => (f ? { ...f, rest: { ...f.rest, ...p } } : f));
   const ring = (field: string) => { const i = issues.find((x) => x.field === field && x.level === "error") ?? issues.find((x) => x.field === field); return !i ? "" : i.level === "error" ? " !border-rose-400 !bg-rose-50/40" : " !border-amber-400"; };
   const Msg = ({ field }: { field: string }): ReactNode => {
     const list = issues.filter((x) => x.field === field);
@@ -233,6 +241,49 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                             </div>
                           )}
                           <Msg field={`${key}:qty`} /><Msg field={`${key}:rate`} /><Msg field={`${key}:date`} />
+                          {canEdit && !f.cancel && form.noCascade.includes(w.id) && issues.some((x) => x.field === `${key}:qty` && x.level === "error") && (
+                            <button type="button" disabled={lock} onClick={() => set({ noCascade: form.noCascade.filter((x) => x !== w.id) })}
+                              className="mt-1 h-8 rounded-lg border border-amber-300 bg-amber-50 px-3 text-[12px] font-medium text-amber-900 hover:bg-amber-100">ทำได้จริงแค่ {fmt(f.qty)} — ให้ระบบแก้ตามให้ทั้งชุด</button>
+                          )}
+                          {(() => {
+                            const c = cascades.find((x) => x.woId === w.id);
+                            if (!c) return null;
+                            const first = cascades[0] === c;
+                            return (
+                              <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-900">
+                                <div className="font-medium"><Icon name="tip" /> ช่างส่งคืนไปแล้ว {fmt(c.recvFrom)} — ถ้าจริง ๆ ทำได้แค่ {fmt(c.to)} ระบบแก้ตามให้ทั้งชุด</div>
+                                <ul className="mt-1 list-disc space-y-0.5 pl-5">
+                                  {c.qcBack.map((q) => <li key={q.id}>ย้อนของ {fmt(q.qty)} ชิ้นจาก &ldquo;{q.shelf}&rdquo; กลับไปรอรับ — หลังบันทึกกด &ldquo;อัปเดต&rdquo; รับเข้าใหม่</li>)}
+                                  {c.subs.map((x) => <li key={x.id}>{x.to > 0 ? `รอบส่งคืน ${cuDateText(x.date)}: ${fmt(x.from)} → ${fmt(x.to)} ชิ้น · ค่าแรงคิดตามจำนวนใหม่` : `ลบรอบส่งคืน ${cuDateText(x.date)} (${fmt(x.from)} ชิ้น)`}</li>)}
+                                  <li>ใบจ่าย {fmt(c.from)} → {fmt(c.to)} ชิ้น{f.rate != null ? ` · ค่าแรงรวม ฿${fmt(f.rate * c.to)}` : ""}</li>
+                                </ul>
+                                {c.rest > 0 && (form.reduce ? <div className="mt-1.5 text-amber-800">อีก {fmt(c.rest)} ชิ้นที่ไม่ได้ทำ: ใช้ตามช่อง &ldquo;จำนวนสั่งผลิต&rdquo; ด้านล่าง</div>
+                                  : !first ? <div className="mt-1.5 text-amber-800">อีก {fmt(c.rest)} ชิ้นที่ไม่ได้ทำ: ตามที่เลือกในกล่องแรก</div> : (
+                                  <div className="mt-1.5 space-y-1.5">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span>อีก <b className="font-medium">{fmt(restTotal)}</b> ชิ้นที่ไม่ได้ทำ · เพราะ</span>
+                                      <select disabled={lock} value={form.rest.pick} onChange={(e) => setRest({ pick: e.target.value })} className="h-8 rounded-lg border border-amber-300 bg-white px-2 text-[12px]">
+                                        {REDUCE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                                      </select>
+                                      <input disabled={lock} value={form.rest.detail} onChange={(e) => setRest({ detail: e.target.value })} placeholder={form.rest.pick === "อื่น ๆ" ? "พิมพ์เหตุผล" : "ระบุเพิ่ม (ไม่บังคับ)"}
+                                        className={`h-8 min-w-0 flex-1 rounded-lg border border-amber-300 bg-white px-2 text-[12px]${ring("reduce:reason")}`} style={{ minWidth: 120 }} />
+                                    </div>
+                                    <div className="grid gap-1.5 sm:grid-cols-3">
+                                      {([["split", `ใบใหม่ ${fmt(restTotal)} ชิ้น · ใบนี้เหลือ ${fmt(m.qty - restTotal)}`], ["drop", `ใบนี้เหลือ ${fmt(m.qty - restTotal)}`], ["keep", `ใบยังเป็น ${fmt(m.qty)} · ${fmt(restTotal)} ชิ้นกลับไปแท็บรอจ่าย`]] as const).map(([k, sub]) => (
+                                        <button key={k} type="button" disabled={lock} onClick={() => setRest({ mode: k })} aria-pressed={form.rest.mode === k}
+                                          className={`rounded-lg border bg-white px-2.5 py-1.5 text-left ${form.rest.mode === k ? "border-indigo-500 ring-1 ring-indigo-500" : "border-amber-200 hover:border-amber-400"}`}>
+                                          <div className="text-[12px] font-medium text-slate-800">{k === "keep" ? "ค้างไว้ในใบนี้" : REDUCE_MODE_LABEL[k]}{k === "split" && <span className="ml-1 rounded bg-indigo-50 px-1 text-[10px] font-normal text-indigo-700">แนะนำ</span>}</div>
+                                          <div className="text-[11px] text-slate-500">{sub}</div>
+                                        </button>
+                                      ))}
+                                    </div>
+                                    <Msg field="reduce:qty" />
+                                  </div>
+                                ))}
+                                {canEdit && <button type="button" disabled={lock} onClick={() => set({ noCascade: [...form.noCascade, w.id] })} className="mt-1.5 h-7 rounded-md px-2 text-[12px] text-amber-800 underline decoration-dotted hover:bg-amber-100">ไม่ใช่ — แก้เฉพาะใบจ่าย</button>}
+                              </div>
+                            );
+                          })()}
                         </div>
                       );
                     })}
@@ -256,13 +307,16 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                             <div className="font-medium text-slate-700">รอบ {i + 1} · {x.wo_no}</div>
                             <div className="text-slate-500">{x.craftsman_name ?? "—"}{x.info_pending ? " · ยังไม่ลงค่าแรง/วันที่" : ""}</div>
                           </div>
-                          {f.del ? <div className="col-span-2 self-center text-[12px] text-rose-700 sm:col-span-3">จะลบรอบนี้ ({fmt(x.qty)} ชิ้น)</div> : (<>
+                          {casSub.has(x.id) ? (
+                            <div className="col-span-2 self-center text-[12px] text-amber-800 sm:col-span-3">
+                              {casSub.get(x.id)!.to > 0 ? <>จำนวน {fmt(casSub.get(x.id)!.from)} → <b className="font-medium">{fmt(casSub.get(x.id)!.to)}</b> ชิ้น</> : <>จะลบรอบนี้ ({fmt(casSub.get(x.id)!.from)} ชิ้น)</>} · แก้ตามใบจ่ายให้แล้ว</div>
+                          ) : f.del ? <div className="col-span-2 self-center text-[12px] text-rose-700 sm:col-span-3">จะลบรอบนี้ ({fmt(x.qty)} ชิ้น)</div> : (<>
                             <div><span className={lbl}>จำนวน</span><input type="number" min={0} disabled={lock} value={f.qty || ""} onChange={(e) => setSub(x.id, { qty: Number(e.target.value) || 0 })} className={`${inp} text-right${ring(`${key}:qty`)}`} /></div>
                             <div><span className={lbl}>ค่าแรงรอบนี้ (฿)</span><input type="number" min={0} disabled={lock} value={f.wage ?? ""} placeholder="ยังไม่ลง" onChange={(e) => setSub(x.id, { wage: numOrNull(e.target.value) })} className={`${inp} text-right${ring(`${key}:wage`)}`} />
                               {f.wage != null && f.qty > 0 && <div className="text-[11px] text-slate-400">= ฿{fmt(f.wage / f.qty)}/ชิ้น</div>}</div>
                             <div><span className={lbl}>วันที่ส่ง</span><input type="date" disabled={lock} value={f.date ?? ""} onChange={(e) => setSub(x.id, { date: e.target.value || null })} className={`${inp}${ring(`${key}:date`)}`} /></div>
                           </>)}
-                          {canEdit && <button type="button" disabled={lock} onClick={() => setSub(x.id, { del: !f.del })} title={f.del ? "ไม่ลบแล้ว" : "ลบรอบนี้ (ส่งผิด)"}
+                          {canEdit && !casSub.has(x.id) && <button type="button" disabled={lock} onClick={() => setSub(x.id, { del: !f.del })} title={f.del ? "ไม่ลบแล้ว" : "ลบรอบนี้ (ส่งผิด)"}
                             className={`mt-4 h-9 rounded-lg border px-2 text-[12px] ${f.del ? "border-slate-200 bg-white text-slate-600" : "border-slate-200 text-rose-600 hover:border-rose-300 hover:bg-rose-50"}`}>{f.del ? "ไม่ลบ" : <Icon name="delete" />}</button>}
                           <div className="col-span-2 sm:col-span-5"><Msg field={`${key}:qty`} /><Msg field={`${key}:wage`} /><Msg field={`${key}:date`} /></div>
                         </div>
@@ -277,13 +331,13 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                 {!(snap.qcItems ?? []).length ? <div className="text-[12px] text-slate-400">ยังไม่มีของของใบนี้บนชั้น QC{snap.shelfAt.length === 0 && snap.wos.some((w) => w.qc_pulled_qty > 0) ? " (ส่งออกไปแล้ว)" : ""}</div> : (
                   <div className="space-y-1">
                     {(snap.qcItems ?? []).map((it) => {
-                      const back = form.qcBack.includes(it.id);
+                      const auto = casQc.has(it.id), back = auto || form.qcBack.includes(it.id);
                       return (
                         <label key={it.id} className={`flex flex-wrap items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[12px] ${back ? "border-amber-300 bg-amber-50" : "border-slate-200"}`}>
-                          <input type="checkbox" disabled={lock} checked={back} onChange={(e) => set({ qcBack: e.target.checked ? [...form.qcBack, it.id] : form.qcBack.filter((x) => x !== it.id) })} className="h-4 w-4 accent-amber-500" />
+                          <input type="checkbox" disabled={lock || auto} checked={back} onChange={(e) => set({ qcBack: e.target.checked ? [...form.qcBack, it.id] : form.qcBack.filter((x) => x !== it.id) })} className="h-4 w-4 accent-amber-500" />
                           <span className="font-medium text-slate-700">{fmt(it.qty)} ชิ้น · {QC_STATUS[it.status] ?? it.status}</span>
                           <span className="text-slate-500">{it.shelf_name}{it.reason ? ` · ${it.reason}` : ""} · {cuDateText(ymdTh(it.created_at))}</span>
-                          <span className="ml-auto text-slate-400">{back ? "จะย้อนกลับไปรอ QC รับ" : "ย้อนกลับไปรอรับ"}</span>
+                          <span className="ml-auto text-slate-400">{auto ? "ย้อนให้ (แก้ตามใบจ่าย)" : back ? "จะย้อนกลับไปรอ QC รับ" : "ย้อนกลับไปรอรับ"}</span>
                         </label>
                       );
                     })}
@@ -295,7 +349,9 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
               {/* 7 ลดจำนวน */}
               {m.status !== "done" && m.status !== "cancelled" && (
                 <Step no={7} title="จำนวนสั่งผลิต" right={<span className="text-[11px] text-slate-400">ตอนนี้ {fmt(m.qty)} ชิ้น</span>}>
-                  {canEdit ? <ReducePanel qty={m.qty} received={recvNow} sized={!!m.sized} wos={snap.wos} value={form.reduce} onChange={(v) => set({ reduce: v })} issues={issues} allowKeep={false} />
+                  {built?.reduceFromCascade && built.eff.reduce ? (
+                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-900">ลดตามใบจ่าย: {fmt(m.qty)} → <b className="font-medium">{fmt(built.eff.reduce.qty)}</b> ชิ้น · {REDUCE_MODE_LABEL[built.eff.reduce.mode === "split" ? "split" : "drop"]} <span className="text-amber-700">(ตั้งที่กล่องสีเหลืองของใบจ่ายด้านบน)</span><Msg field="reduce:qty" /></div>
+                  ) : canEdit ? <ReducePanel qty={m.qty} received={recvNow} sized={!!m.sized} wos={snap.wos} value={form.reduce} onChange={(v) => set({ reduce: v })} issues={issues} allowKeep={false} />
                     : <div className="text-[12px] text-slate-400">ลดจำนวนได้เฉพาะหัวหน้า</div>}
                 </Step>
               )}

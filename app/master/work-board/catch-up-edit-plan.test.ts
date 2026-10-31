@@ -94,13 +94,50 @@ describe("ป๊อปแก้ไข (ceBuild)", () => {
     expect(r.ops[0]).toMatchObject({ patch: { dispatch_date: "2026-10-21" } });
     expect(r.ops[1]).toMatchObject({ part: "prep", ready: true, date: "2026-10-20" });
   });
-  it("ลดจำนวนใบจ่ายต่ำกว่ายอดส่งคืนไม่ได้ จนกว่าจะแก้รอบส่งคืนด้วย", () => {
-    expect(edit(snap(), (f) => { f.wos[0].qty = 18; }).errors.join(" ")).toMatch(/ส่งคืนแล้ว 20/);
+  it("แก้เฉพาะใบจ่าย (ปิดแก้ตามให้): ลดต่ำกว่ายอดส่งคืนไม่ได้ จนกว่าจะแก้รอบส่งคืนเอง", () => {
+    expect(edit(snap(), (f) => { f.wos[0].qty = 18; f.noCascade = ["w1"]; }).errors.join(" ")).toMatch(/ส่งคืนแล้ว 20/);
     const r = edit(snap(), (f) => { f.wos[0].qty = 18; f.subs[0].qty = 18; });
     expect(r.errors).toEqual([]);
     expect(r.ops.map((o) => o.kind)).toEqual(["sub", "wo"]);   // รอบส่งคืนก่อน แล้วค่อยใบจ่าย
     expect(r.ops[0]).toMatchObject({ patch: { qty: 18, wage: 900 } });   // ค่าแรงตามราคาต่อชิ้นเดิมของรอบ ฿50
     expect(r.ops[1]).toMatchObject({ patch: { qty: 18, labor_cost: 900 } });
+  });
+  it("แก้ตามให้ทั้งชุด: ใบจ่าย 20 → 15 (คืนแล้ว 20) → รอบส่งคืน 15 · ค่าแรง ฿750 · ลดจำนวนสั่ง แยกที่เหลือ 5", () => {
+    const r = edit(snap(), (f) => { f.wos[0].qty = 15; });
+    expect(r.errors).toEqual([]);
+    expect(r.cascades).toMatchObject([{ woId: "w1", from: 20, to: 15, recvFrom: 20, rest: 5, subs: [{ id: "s1", from: 20, to: 15 }], qcBack: [] }]);
+    expect(r.ops.map((o) => o.kind)).toEqual(["sub", "wo", "reduce"]);
+    expect(r.ops[0]).toMatchObject({ patch: { qty: 15, wage: 750 } });
+    expect(r.ops[1]).toMatchObject({ patch: { qty: 15, labor_cost: 750 } });
+    expect(r.ops[2]).toMatchObject({ qty: 15, mode: "split", reason: "ของไม่พอ" });
+    expect(r.reduceFromCascade).toBe(true);
+  });
+  it("แก้ตามให้: หลายรอบ = ลดจากรอบล่าสุดก่อน (เหลือ 0 = ลบรอบ) · ไม่ทำแล้ว / ค้างไว้ = จดหมายเหตุ", () => {
+    const s = snap({ subs: [sub({ id: "s1", qty: 12, wage: 600, submitted_at: "2026-10-20" }), sub({ id: "s2", qty: 8, wage: 400, submitted_at: "2026-10-26" })] });
+    const r = edit(s, (f) => { f.wos[0].qty = 10; f.rest = { mode: "drop", pick: "ลงจำนวนผิด", detail: "" }; });
+    expect(r.errors).toEqual([]);
+    expect(r.ops.map((o) => o.kind)).toEqual(["sub_del", "sub", "wo", "reduce"]);
+    expect(r.ops[1]).toMatchObject({ id: "s1", patch: { qty: 10, wage: 500 } });
+    expect(r.ops[3]).toMatchObject({ qty: 10, mode: "drop", reason: "ลงจำนวนผิด" });
+    const k = edit(s, (f) => { f.wos[0].qty = 15; f.rest = { mode: "keep", pick: "ของไม่พอ", detail: "ผ้าหมด" }; });
+    expect(k.ops.map((o) => o.kind)).toEqual(["sub", "wo", "note"]);
+    expect(k.ops.at(-1)).toMatchObject({ note: expect.stringContaining("ทำได้ 15/20 ชิ้น เพราะ ของไม่พอ: ผ้าหมด — อีก 5 ชิ้นค้างไว้ในใบนี้") });
+  });
+  it("แก้ตามให้: ของขึ้นชั้น QC เกินยอดใหม่ → ย้อนกลับไปรอรับให้ (ทั้งก้อน ล่าสุดก่อน)", () => {
+    const s = snap({ wos: [wo({ received_qty: 20, qc_pulled_qty: 20, status: "done" })], qcItems: [
+      { id: "q1", wo_id: "w1", qty: 12, status: "good", shelf_name: "QC แล้ว", reason: null, created_at: "2026-10-28" },
+      { id: "q2", wo_id: "w1", qty: 8, status: "good", shelf_name: "QC แล้ว", reason: null, created_at: "2026-10-29" }] });
+    const r = edit(s, (f) => { f.wos[0].qty = 15; });
+    expect(r.errors).toEqual([]);
+    expect(r.cascades[0].qcBack.map((x) => x.id)).toEqual(["q2"]);   // เหลือบนชั้น 12 ≤ 15
+    expect(r.ops.map((o) => o.kind)).toEqual(["qc_back", "sub", "wo", "reduce"]);
+  });
+  it("แก้ตามให้: ใส่ช่องลดจำนวนเองไว้แล้ว = ใช้ของที่ใส่ (ไม่ซ้อน) · เปลี่ยนใจพิมพ์กลับ 20 = ไม่มีอะไรค้าง", () => {
+    const r = edit(snap(), (f) => { f.wos[0].qty = 15; f.reduce = { qty: 15, pick: "อื่น ๆ", detail: "ลูกค้าขอ", mode: "drop" }; });
+    expect(r.ops.filter((o) => o.kind === "reduce")).toHaveLength(1);
+    expect(r.ops.at(-1)).toMatchObject({ reason: "ลูกค้าขอ" });
+    expect(r.reduceFromCascade).toBe(false);
+    expect(edit(snap(), (f) => { f.wos[0].qty = 15; f.wos[0].qty = 20; }).errors).toEqual(["ยังไม่ได้แก้อะไร"]);
   });
   it("เปลี่ยนค่าแรง/ชิ้นของใบจ่าย → รอบส่งคืนคิดใหม่ (ติ๊กไว้ตั้งต้น) · พิมพ์ค่าแรงรอบเองไม่ทับ", () => {
     const r = edit(snap(), (f) => { f.wos[0].rate = 45; });

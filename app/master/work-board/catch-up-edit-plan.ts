@@ -4,13 +4,15 @@
  * แก้สิ่งที่บันทึกไปแล้ว รวมขั้นก่อนหน้าที่เคยข้าม: ติ๊กเตรียม/ตัด + วันที่ · ใบจ่าย (โต๊ะ/คน/จำนวน/ค่าแรงต่อชิ้น/วันจ่าย/หมายเหตุ/ยกเลิก)
  * · รอบส่งคืน (จำนวน/ค่าแรง/วันที่/ลบ) · ของบนชั้น QC (ย้อนกลับไปรอรับ) · ลดจำนวน (lib/mo-qty-reduce)
  * เทียบ "ก่อน → หลัง" → รายการแก้ (CeOp) เรียงตามลำดับที่ไม่ขัดกัน แล้วบันทึกทีละรายการผ่าน API เดิม (ติด via=cu_edit + label ลง audit)
- * ลำดับ: QC ย้อนกลับ → ลบรอบส่งคืน → แก้รอบส่งคืน → แก้ใบจ่าย → ยกเลิกใบจ่าย → เตรียม/ตัด → ป้ายของครบ → ลดจำนวน
+ * ลำดับ: QC ย้อนกลับ → ลบรอบส่งคืน → แก้รอบส่งคืน → แก้ใบจ่าย → ยกเลิกใบจ่าย → เตรียม/ตัด → ป้ายของครบ → ลดจำนวน → หมายเหตุ
+ * แก้ตามให้ทั้งชุด (ceApplyCascade): ลดใบจ่ายต่ำกว่ายอดที่ช่างคืนแล้ว (ลงผิด/ทำได้จริงแค่นั้น) → ลดรอบส่งคืน (รอบล่าสุดก่อน) + ย้อนของจากชั้น QC
+ *   + ที่เหลือที่ไม่ได้ทำ: แยกใบใหม่ / ไม่ทำแล้ว (= ลดจำนวนสั่ง) / ค้างไว้ในใบนี้ (= จดหมายเหตุ) — เจ้าของอนุมัติ 2026-10-31
  * เจ้าของอนุมัติแบบ 2026-10-31 · ดู docs/work-board-catch-up.md
  */
 import type { CatchUpSnapshot, CatchUpWo } from "@/app/api/mo/catch-up/route";
 import { dateIssues, todayYmd } from "@/lib/work-entry-rules";
 import { woRatePerPiece, roundWage } from "@/lib/wo-labor";
-import { reduceQtyIssue, shrinkWos } from "@/lib/mo-qty-reduce";
+import { reduceQtyIssue, shrinkWos, REDUCE_MODE_LABEL } from "@/lib/mo-qty-reduce";
 import { cuDateText, cuReduceReason, stageOfDept, type CuApi, type CuIssue, type CuReduce } from "./catch-up";
 import { crewFields, crewList, type CrewPerson } from "./crew-pick";
 
@@ -24,6 +26,14 @@ export type CeWo = { id: string; deptId: string; crewIds: string[]; qty: number;
 /** รอบส่งคืน 1 รอบ · wage = ยอดของรอบ (ไม่ใช่ต่อชิ้น · null = ยังไม่ลงค่าแรง) */
 export type CeSub = { id: string; qty: number; wage: number | null; date: string | null; del: boolean };
 export type CeStep = { done: boolean; date: string | null };
+/** ที่เหลือที่ไม่ได้ทำ ตอนแก้ตามให้ทั้งชุด · keep = ค้างไว้ในใบนี้ (ไม่ลดจำนวนสั่ง กลับไปแท็บรอจ่าย) */
+export type CeRest = { mode: "split" | "drop" | "keep"; pick: string; detail: string };
+/** แก้ตามให้ของใบจ่าย 1 ใบ (ไว้โชว์ในกล่อง) · rest = ชิ้นที่ใบจ่ายลดลง */
+export type CeCascade = {
+  woId: string; woNo: string; from: number; to: number; recvFrom: number; rest: number;
+  subs: { id: string; date: string | null; from: number; to: number }[];
+  qcBack: { id: string; qty: number; shelf: string }[];
+};
 export type CeForm = {
   prep: CeStep; cut: CeStep; unskipBuy: boolean;
   wos: CeWo[]; subs: CeSub[];
@@ -32,6 +42,9 @@ export type CeForm = {
   /** เปลี่ยนค่าแรง/ชิ้นของใบจ่าย → คิดค่าแรงรอบส่งคืนที่ลงแล้วใหม่ตามราคาใหม่ */
   reRateSubs: boolean;
   reduce: CuReduce | null;
+  /** ใบจ่ายที่กด "ไม่ใช่ — แก้เฉพาะใบจ่าย" (ไม่แก้ตามให้) */
+  noCascade: string[];
+  rest: CeRest;
 };
 
 export type CeOp =
@@ -42,7 +55,8 @@ export type CeOp =
   | { kind: "wo_cancel"; id: string; label: string }
   | { kind: "ready"; part: "prep" | "cut"; ready: boolean; date: string | null; label: string }
   | { kind: "unskip_buy"; label: string }
-  | { kind: "reduce"; qty: number; reason: string; mode: "split" | "drop"; label: string };
+  | { kind: "reduce"; qty: number; reason: string; mode: "split" | "drop"; label: string }
+  | { kind: "note"; note: string; label: string };
 
 /** "2026-10-30T05:00:00+00:00" → "2026-10-30" ตามเวลาไทย */
 export const ymdTh = (iso: string | null | undefined): string | null => {
@@ -69,7 +83,63 @@ export function ceInitial(s: CatchUpSnapshot): CeForm {
     wos: s.wos.map((w) => ({ id: w.id, deptId: w.department_id ?? "", crewIds: crewOf(w), qty: w.qty, rate: woRatePerPiece(w.labor_cost, w.qty), date: w.dispatch_date, note: w.note ?? "", cancel: false })),
     subs: (s.subs ?? []).map((x) => ({ id: x.id, qty: x.qty, wage: x.wage, date: x.submitted_at, del: false })),
     qcBack: [], reRateSubs: true, reduce: null,
+    noCascade: [], rest: { mode: "split", pick: "ของไม่พอ", detail: "" },
   };
+}
+
+/**
+ * แก้ตามให้ทั้งชุด: ใบจ่ายที่ลดต่ำกว่ายอดส่งคืน (หลังแก้ในฟอร์ม) → ลดรอบส่งคืนจากรอบล่าสุด (เหลือ 0 = ลบรอบ)
+ * + ของบนชั้น QC ของใบนั้นที่เกินยอดใหม่ → ย้อนกลับไปรอรับ (ทั้งก้อน — ยอดผูกกับใบจ่าย แก้บนชั้นตรง ๆ ไม่ได้)
+ * + ชิ้นที่ใบจ่ายลดลง: แยกใบใหม่ / ไม่ทำแล้ว = ลดจำนวนสั่ง (ถ้ายังไม่ได้ใส่ช่องลดจำนวนเอง) · ค้างไว้ = จดหมายเหตุ
+ * คืนฟอร์ม "หลังแก้ตาม" (ceBuild ใช้ต่อ) — ไม่แตะฟอร์มที่ผู้ใช้กรอก จึงพิมพ์จำนวนกลับไปกลับมาได้
+ */
+export function ceApplyCascade(s: CatchUpSnapshot, form: CeForm): { form: CeForm; cascades: CeCascade[]; reduceFromCascade: boolean; keepNote: string | null } {
+  const subs = form.subs.map((x) => ({ ...x }));
+  const qcBack = [...form.qcBack];
+  const cascades: CeCascade[] = [];
+  for (const w of s.wos) {
+    const f = form.wos.find((y) => y.id === w.id);
+    if (!f || f.cancel || !(f.qty > 0) || (form.noCascade ?? []).includes(w.id)) continue;
+    const mine = (s.subs ?? []).filter((x) => x.wo_id === w.id);
+    const recv = r2(w.received_qty + mine.reduce((a, x) => { const y = subs.find((z) => z.id === x.id); return !y ? a : a + (y.del ? -x.qty : y.qty - x.qty); }, 0));
+    if (f.qty >= recv - EPS) continue;
+    let need = r2(recv - f.qty);
+    const changed: CeCascade["subs"] = [];
+    const draft = subs.map((x) => ({ ...x }));
+    for (const x of [...mine].reverse()) {
+      if (need <= EPS) break;
+      const y = draft.find((z) => z.id === x.id);
+      if (!y || y.del || !(y.qty > 0)) continue;
+      const take = r2(Math.min(y.qty, need)), to = r2(y.qty - take);
+      changed.push({ id: x.id, date: x.submitted_at, from: y.qty, to });
+      if (to <= EPS) y.del = true; else y.qty = to;
+      need = r2(need - take);
+    }
+    if (need > EPS) continue;   // ยอดคืนไม่มีรอบส่งคืนรองรับ (ข้อมูลเก่า) — ปล่อยให้ขึ้นข้อความห้ามตามเดิม
+    for (const y of draft) { const z = subs.find((q) => q.id === y.id); if (z) Object.assign(z, y); }
+    let qcAfter = r2(w.qc_pulled_qty - (s.qcItems ?? []).filter((it) => it.wo_id === w.id && qcBack.includes(it.id)).reduce((a, it) => a + it.qty, 0));
+    const backs: CeCascade["qcBack"] = [];
+    for (const it of [...(s.qcItems ?? [])].filter((i) => i.wo_id === w.id && !qcBack.includes(i.id)).reverse()) {
+      if (qcAfter <= f.qty + EPS) break;
+      qcBack.push(it.id); backs.push({ id: it.id, qty: it.qty, shelf: it.shelf_name });
+      qcAfter = r2(qcAfter - it.qty);
+    }
+    cascades.push({ woId: w.id, woNo: w.wo_no, from: w.qty, to: f.qty, recvFrom: recv, rest: r2(Math.max(0, w.qty - f.qty)), subs: changed, qcBack: backs });
+  }
+  if (!cascades.length) return { form, cascades, reduceFromCascade: false, keepNote: null };
+  const rest = r2(cascades.reduce((a, c) => a + c.rest, 0));
+  let reduce = form.reduce, keepNote: string | null = null, reduceFromCascade = false;
+  if (!form.reduce && rest > EPS) {
+    const reason = cuReduceReason({ qty: 0, ...form.rest });
+    if (form.rest.mode === "keep") {
+      const disp = r2(s.wos.reduce((a, w) => { const f = form.wos.find((y) => y.id === w.id); return f?.cancel ? a : a + (f && f.qty > 0 ? f.qty : w.qty); }, 0));
+      keepNote = `ทำได้ ${fmt(disp)}/${fmt(s.mo.qty)} ชิ้น${reason ? ` เพราะ ${reason}` : ""} — อีก ${fmt(rest)} ชิ้นค้างไว้ในใบนี้ (กลับไปรอจ่าย)`;
+    } else {
+      reduce = { qty: r2(s.mo.qty - rest), pick: form.rest.pick, detail: form.rest.detail, mode: form.rest.mode };
+      reduceFromCascade = true;
+    }
+  }
+  return { form: { ...form, subs, qcBack, reduce }, cascades, reduceFromCascade, keepNote };
 }
 
 const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
@@ -78,7 +148,13 @@ const sameIds = (a: string[], b: string[]) => a.length === b.length && a.every((
  * เทียบฟอร์มกับของเดิม → รายการแก้ + ปัญหารายช่อง (error = ห้ามบันทึก · warn = เตือน)
  * field ของปัญหา: wo:<id>:qty|rate|date|cancel · sub:<id>:qty|wage|date · prep:date · cut:date · reduce:qty|reason · disp
  */
-export function ceBuild(s: CatchUpSnapshot, form: CeForm, ctx: { departments: { id: string; name: string }[]; people: CrewPerson[]; today?: string }): { ops: CeOp[]; issues: CuIssue[]; errors: string[] } {
+export function ceBuild(s: CatchUpSnapshot, form0: CeForm, ctx: { departments: { id: string; name: string }[]; people: CrewPerson[]; today?: string }): {
+  ops: CeOp[]; issues: CuIssue[]; errors: string[];
+  /** แก้ตามให้ทั้งชุด (โชว์กล่องใต้ใบจ่าย) · eff = ฟอร์มหลังแก้ตาม (หน้าจอโชว์ค่ารอบส่งคืน/ของ QC ตามนี้) */
+  cascades: CeCascade[]; eff: CeForm; reduceFromCascade: boolean;
+} {
+  const cas = ceApplyCascade(s, form0);
+  const form = cas.form;
   const today = ctx.today ?? todayYmd();
   const issues: CuIssue[] = [];
   const err = (field: string, msg: string, where?: string) => issues.push({ level: "error", field, msg, where });
@@ -209,16 +285,21 @@ export function ceBuild(s: CatchUpSnapshot, form: CeForm, ctx: { departments: { 
       });
       const shr = shrinkWos(after, red.qty);
       const extra = shr.map((x) => (x.cancel ? ` · ยกเลิกใบจ่าย ${x.wo_no}` : ` · ลดใบจ่าย ${x.wo_no} ${fmt(x.from)} → ${fmt(x.to)}`)).join("");
-      tail.push({ kind: "reduce", qty: r2(red.qty), reason, mode: red.mode, label: `ลดจำนวน ${fmt(s.mo.qty)} → ${fmt(red.qty)} ชิ้น (${reason}) · ${red.mode === "split" ? `แยกที่เหลือ ${fmt(s.mo.qty - red.qty)} ชิ้นเป็นใบใหม่ รอของ` : `ที่เหลือ ${fmt(s.mo.qty - red.qty)} ชิ้น ไม่ทำแล้ว`}${extra}` });
+      tail.push({ kind: "reduce", qty: r2(red.qty), reason, mode: red.mode, label: `ลดจำนวนสั่งผลิต ${fmt(s.mo.qty)} → ${fmt(red.qty)} ชิ้น (${reason}) · ${red.mode === "split" ? `แยกที่เหลือ ${fmt(s.mo.qty - red.qty)} ชิ้นเป็นใบใหม่ รอของ` : `ที่เหลือ ${fmt(s.mo.qty - red.qty)} ชิ้น ${REDUCE_MODE_LABEL.drop}`}${extra}` });
       moQty = r2(red.qty);
     }
   }
   // จ่ายรวมเกินจำนวนสั่งผลิต (ลดจำนวนอยู่ด้วย = เซิร์ฟเวอร์ลดยอดค้างให้เอง)
   if (dispatched > s.mo.qty + EPS && moQty === s.mo.qty) err("disp", `จ่ายรวม ${fmt(dispatched)} ชิ้น เกินจำนวนสั่งผลิต ${fmt(s.mo.qty)}`);
 
+  if (cas.keepNote) {
+    const line = `[แก้ไขใบงาน ${cuDateText(today)}] ${cas.keepNote}`;
+    tail.push({ kind: "note", note: s.mo.note ? `${s.mo.note}\n${line}` : line, label: `จดต่อท้ายหมายเหตุใบสั่งผลิต: ${cas.keepNote}` });
+  }
   const ops = [...qcBack, ...subDel, ...subEd, ...woEd, ...woCancel, ...tail];
   if (!issues.some((x) => x.level === "error") && !ops.length) err("none", "ยังไม่ได้แก้อะไร");
-  return { ops, issues, errors: issues.filter((x) => x.level === "error").map((x) => (x.where ? `${x.where}: ${x.msg}` : x.msg)) };
+  return { ops, issues, errors: issues.filter((x) => x.level === "error").map((x) => (x.where ? `${x.where}: ${x.msg}` : x.msg)),
+    cascades: cas.cascades, eff: form, reduceFromCascade: cas.reduceFromCascade };
 }
 
 const VIA = "cu_edit";
@@ -241,6 +322,7 @@ export async function ceRun(ops: CeOp[], moId: string, api: CuApi, onProgress?: 
         case "ready": await api(`/api/mo/${moId}/mark-ready`, { ready: op.ready, parts: [op.part], ...(op.date ? { done_date: op.date } : {}), ...tag }, "PATCH"); break;
         case "unskip_buy": await api(`/api/mo/${moId}/skip-stage`, { stages: ["buy"], skip: false, via: "catch_up" }, "PATCH"); break;
         case "reduce": await api(`/api/mo/${moId}/reduce-qty`, { qty: op.qty, reason: op.reason, mode: op.mode, source: "edit" }); break;
+        case "note": await api(`/api/mo/${moId}`, { note: op.note }, "PATCH"); break;
       }
       out.push({ op, ok: true, msg: op.label });
     } catch (e) {

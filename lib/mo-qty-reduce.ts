@@ -9,7 +9,7 @@
 export type ReduceMode = "split" | "drop";
 export const REDUCE_MODE_LABEL: Record<ReduceMode, string> = { split: "แยกเป็นใบใหม่ รอของ", drop: "ไม่ทำแล้ว" };
 /** เหตุผลให้เลือก (ตัวสุดท้าย = พิมพ์เอง) */
-export const REDUCE_REASONS = ["ของไม่พอ", "ของเสียตอนตัด/ผลิต", "ช่างส่งคืนไม่ครบ", "ลูกค้าลดจำนวน", "อื่น ๆ"] as const;
+export const REDUCE_REASONS = ["ของไม่พอ", "ของเสียตอนตัด/ผลิต", "ช่างส่งคืนไม่ครบ", "ลงจำนวนผิด", "ลูกค้าลดจำนวน", "อื่น ๆ"] as const;
 
 const EPS = 0.0001;
 const r2 = (n: number) => Math.round(n * 100) / 100;
