@@ -12,6 +12,7 @@ import { Drawer, ERPModal } from "@/components/modal";
 import { DateInput } from "@/components/date-input";
 import { formatDate } from "@/lib/date";
 import { buildPayrollCalcRunHref } from "@/lib/payroll-flow";
+import { OT_DEFAULT_BREAK, formatOtRangeNote, otNetMinutes, otRangeCoversBreak, otRangeMinutes as calcOtRangeMinutes, parseOtRangeNote } from "@/lib/payroll-ot-range";
 import { usePayrollPeriod } from "@/components/payroll/payroll-period-context";
 import { AttendanceImportPreview } from "@/components/payroll/attendance-import-preview";
 
@@ -2224,6 +2225,10 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   // OT กรอกเป็นช่วงเวลาได้ (17.00–20.00) แล้วระบบคิดชั่วโมงให้เอง — ไม่ต้องคำนวณในหัว
   const [otFrom, setOtFrom] = useState("");
   const [otTo, setOtTo] = useState("");
+  // หักเวลาพักออกจากช่วง OT — ติ๊กให้อัตโนมัติเมื่อช่วงคร่อมพักเที่ยง จนกว่าผู้ใช้จะติ๊ก/แก้เอง
+  const [otBreak, setOtBreak] = useState(false);
+  const [otBreakMinutes, setOtBreakMinutes] = useState(String(OT_DEFAULT_BREAK.minutes));
+  const [otBreakTouched, setOtBreakTouched] = useState(false);
   const [leaveReason, setLeaveReason] = useState<LeaveReason>("unpaid");
   const [hasMedicalCertificate, setHasMedicalCertificate] = useState(false);
   const [certificateDate, setCertificateDate] = useState("");
@@ -2259,7 +2264,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     setLateHours("");
     setLateMinutes("");
     setDurationPreset("custom");
-    setCustomHours(""); setOtFrom(""); setOtTo("");
+    setCustomHours(""); clearOtRange();
     setCustomMinutes("");
     setLeaveReason("unpaid");
     setHasMedicalCertificate(false);
@@ -2282,11 +2287,16 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     if (drawerTab === "ot") setDurationPreset("custom");
   }, [drawerTab, editingTimeItem]);
 
+  function clearOtRange() {
+    setOtFrom(""); setOtTo("");
+    setOtBreak(false); setOtBreakMinutes(String(OT_DEFAULT_BREAK.minutes)); setOtBreakTouched(false);
+  }
+
   function resetTimeForm() {
     setLateHours("");
     setLateMinutes("");
     setDurationPreset("custom");
-    setCustomHours(""); setOtFrom(""); setOtTo("");
+    setCustomHours(""); clearOtRange();
     setCustomMinutes("");
     setLeaveReason("unpaid");
     setHasMedicalCertificate(false);
@@ -2305,7 +2315,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
       setLateHours(totalMinutes >= 60 ? String(Math.floor(totalMinutes / 60)) : "");
       setLateMinutes(totalMinutes % 60 ? String(totalMinutes % 60) : totalMinutes ? "0" : "");
       setDurationPreset("custom");
-      setCustomHours(""); setOtFrom(""); setOtTo("");
+      setCustomHours(""); clearOtRange();
       setCustomMinutes("");
       return;
     }
@@ -2314,13 +2324,13 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     const halfValue = kind === "ot" ? STANDARD_HOURS_PER_DAY / 2 : 0.5;
     if (Math.abs(value - fullValue) < 0.001) {
       setDurationPreset("full");
-      setCustomHours(""); setOtFrom(""); setOtTo("");
+      setCustomHours(""); clearOtRange();
       setCustomMinutes("");
       return;
     }
     if (Math.abs(value - halfValue) < 0.001) {
       setDurationPreset("half");
-      setCustomHours(""); setOtFrom(""); setOtTo("");
+      setCustomHours(""); clearOtRange();
       setCustomMinutes("");
       return;
     }
@@ -2340,6 +2350,17 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
     setTDate(it.work_date ?? todayIso());
     setTNote(it.note ?? "");
     setDurationFromValue(it.kind, Number(it.value));
+    // OT ที่เคยกรอกเป็นช่วงเวลา → เปิดช่วงเวลา/เวลาพักกลับมาให้แก้ต่อ (ถ้ายอดชั่วโมงยังตรงกับช่วงนั้น)
+    const savedRange = it.kind === "ot" ? parseOtRangeNote(it.note ?? "") : null;
+    const savedTotal = savedRange ? calcOtRangeMinutes(savedRange.from, savedRange.to) : null;
+    if (savedRange && savedTotal !== null && otNetMinutes(savedTotal, savedRange.breakMinutes) === Math.round(Number(it.value) * 60)) {
+      setDurationPreset("custom");
+      setOtFrom(savedRange.from); setOtTo(savedRange.to);
+      setOtBreak(savedRange.breakMinutes > 0);
+      setOtBreakMinutes(String(savedRange.breakMinutes || OT_DEFAULT_BREAK.minutes));
+      setOtBreakTouched(true);
+      setTNote(savedRange.rest);
+    }
     setLeaveReason(it.kind === "leave" && it.paid_leave ? "sick_paid" : "unpaid");
     setHasMedicalCertificate(it.kind === "leave" && it.paid_leave === true);
     setCertificateDate("");
@@ -2400,32 +2421,41 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
   }
 
   /** อ่านเวลาได้หลายแบบที่คนพิมพ์จริง: 17:00 · 17.00 · 17 00 · 1700 → นาทีจากเที่ยงคืน */
-  function timeToMinutes(value: string): number | null {
-    const t = String(value ?? "").trim().replace(/[.\s]/g, ":");
-    const m = t.match(/^(\d{1,2}):(\d{2})$/) ?? t.match(/^(\d{2})(\d{2})$/);
-    if (!m) return null;
-    const h = Number(m[1]), mi = Number(m[2]);
-    if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
-    return h * 60 + mi;
-  }
   /** ช่วง OT → นาที (ถ้าเวลาสิ้นสุดน้อยกว่าเริ่ม ถือว่าข้ามเที่ยงคืน) */
   function otRangeMinutes(): number | null {
-    const from = timeToMinutes(otFrom), to = timeToMinutes(otTo);
-    if (from === null || to === null) return null;
-    const diff = to > from ? to - from : to === from ? 0 : to + 1440 - from;
-    return diff > 0 ? diff : null;
+    return calcOtRangeMinutes(otFrom, otTo);
   }
-  // กรอกช่วงเวลาครบ → เติมชั่วโมง/นาทีให้อัตโนมัติ
+  /** นาทีพักที่จะหักจริง (ยังไม่ติ๊กเอง = ติ๊กตามว่าคร่อมพักเที่ยงไหม) */
+  function otBreakApplied(): number {
+    const on = otBreakTouched ? otBreak : otRangeCoversBreak(otFrom, otTo);
+    return on ? Math.max(0, Math.round(Number(otBreakMinutes) || 0)) : 0;
+  }
+  // กรอกช่วงเวลาครบ → ติ๊กหักพักให้อัตโนมัติ + เติมชั่วโมง/นาที (หลังหักพัก) ให้
   useEffect(() => {
+    if (!otBreakTouched) setOtBreak(otRangeCoversBreak(otFrom, otTo));
     const total = otRangeMinutes();
     if (total === null) return;
-    setCustomHours(String(Math.floor(total / 60)));
-    setCustomMinutes(String(total % 60));
+    const net = otNetMinutes(total, otBreakApplied());
+    if (net === null) return;
+    setCustomHours(String(Math.floor(net / 60)));
+    setCustomMinutes(String(net % 60));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [otFrom, otTo]);
+  }, [otFrom, otTo, otBreak, otBreakMinutes, otBreakTouched]);
+
+  /** หมายเหตุอัตโนมัติของช่วง OT — ใส่เฉพาะตอนที่ชั่วโมงในฟอร์มยังมาจากช่วงเวลานี้จริง */
+  function otRangeNote(): string {
+    if (tKind !== "ot" || durationPreset !== "custom") return "";
+    const total = otRangeMinutes();
+    if (total === null) return "";
+    const net = otNetMinutes(total, otBreakApplied());
+    const entered = Math.round(((Number(customHours) || 0) * 60) + (Number(customMinutes) || 0));
+    if (net === null || net !== entered) return "";
+    return formatOtRangeNote(otFrom, otTo, otBreakApplied());
+  }
 
   function timeNote() {
     const note = tNote.trim();
+    if (tKind === "ot") return [otRangeNote(), note].filter(Boolean).join(" · ");
     if (tKind !== "leave") return note;
     const cert = hasMedicalCertificate ? "มีใบรับรองแพทย์" : "";
     const certDetails = hasMedicalCertificate ? [
@@ -2744,6 +2774,22 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                                 className="h-9 w-full px-3 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
                             </label>
                           </div>
+                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                            <label className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 cursor-pointer">
+                              <input type="checkbox" checked={otBreak}
+                                onChange={(e) => { setOtBreak(e.target.checked); setOtBreakTouched(true); }} />
+                              หักเวลาพัก
+                            </label>
+                            <input value={otBreakMinutes} type="number" min="0" step="5" aria-label="นาทีพัก"
+                              onChange={(e) => { setOtBreakMinutes(e.target.value); setOtBreak(true); setOtBreakTouched(true); }}
+                              className="h-8 w-20 px-2 border border-slate-300 rounded-lg text-sm tabular-nums bg-white" />
+                            <span className="text-xs text-slate-500">นาที</span>
+                            {!otBreakTouched && otRangeMinutes() !== null && (
+                              <span className="text-[11px] text-slate-400">
+                                {otBreak ? "ติ๊กให้อัตโนมัติ เพราะคร่อมพักเที่ยง 12.00–13.00" : "ไม่คร่อมพักเที่ยง เลยไม่หักให้"}
+                              </span>
+                            )}
+                          </div>
                           {(() => {
                             const total = otRangeMinutes();
                             if (total === null) {
@@ -2751,8 +2797,11 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                                 ? <p className="mt-1 text-[11px] text-amber-600">กรอกให้ครบทั้ง 2 ช่อง เช่น 17.00 ถึง 20.00</p>
                                 : <p className="mt-1 text-[11px] text-slate-400">พิมพ์ได้ทั้ง 17.00 · 17:00 · 1700 · ข้ามเที่ยงคืนได้</p>;
                             }
-                            const h = Math.floor(total / 60), m = total % 60;
-                            return <p className="mt-1 text-[11px] font-medium text-emerald-700">= OT {h ? `${h} ชั่วโมง` : ""}{m ? `${h ? " " : ""}${m} นาที` : h ? "" : "0 นาที"}</p>;
+                            const brk = otBreakApplied();
+                            const net = otNetMinutes(total, brk);
+                            const fmt = (n: number) => { const h = Math.floor(n / 60), m = n % 60; return `${h ? `${h} ชั่วโมง` : ""}${m ? `${h ? " " : ""}${m} นาที` : h ? "" : "0 นาที"}`; };
+                            if (net === null) return <p className="mt-1 text-[11px] text-amber-600">เวลาพักต้องน้อยกว่าช่วง OT ({fmt(total)})</p>;
+                            return <p className="mt-1 text-[11px] font-medium text-emerald-700">= OT {fmt(net)}{brk ? <span className="font-normal text-slate-500"> ({fmt(total)} − พัก {fmt(brk)})</span> : null}</p>;
                           })()}
                         </div>
                       )}
@@ -2776,6 +2825,7 @@ function AdjustDrawer({ row, periodId, editable, initialDate, initialKind, initi
                     <span className="block text-xs text-slate-500 mb-1">หมายเหตุ</span>
                     <textarea value={tNote} onChange={(e) => setTNote(e.target.value)} rows={2} placeholder="เช่น มาสายรถติด / ลากิจไม่รับเงิน / ไม่สแกนนิ้ว"
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none bg-white" />
+                    {otRangeNote() && <span className="mt-1 block text-[11px] text-slate-400">ระบบจะบันทึก &quot;{otRangeNote()}&quot; ไว้หน้าหมายเหตุให้อัตโนมัติ</span>}
                   </label>
                 </div>
 
