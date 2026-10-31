@@ -83,6 +83,8 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
 import { InstallAppModal } from "@/components/install-app";
 import { Icon } from "@/components/icon";
+import { PrintHistoryBadge, printWhen } from "@/components/print-history";
+import { printQtyChanged, type PrintSummary } from "@/lib/print-log";
 import { ScanInput } from "@/components/scan-input";
 import { useScanGun } from "@/components/scan-input/use-scan-gun";
 import { parseScanned } from "@/lib/scan-code";
@@ -108,6 +110,8 @@ type PendingMO = {
   image_url: string | null; brand: string | null; brand_color: string | null; color?: string | null;
   /** สินค้าแม่ (Parent SKU) — จัดกลุ่ม "ตามสินค้าแม่" */
   parent_code?: string | null; parent_name?: string | null; parent_image_url?: string | null;
+  /** 🖨 พิมพ์ใบงานแล้วกี่ครั้ง (lib/print-log) — null = ยังไม่เคยพิมพ์ (เริ่มเก็บ 31 ต.ค. 69) */
+  print?: PrintSummary | null;
   prep_done: boolean; cut_done: boolean;
   // Phase 2: เช็กลิสต์วัตถุดิบจาก BOM
   has_bom: boolean; prep_total: number; prep_ready: number; cut_total: number; cut_ready: number; ready: boolean;
@@ -2165,6 +2169,7 @@ function WorkBoardPageInner() {
                     </span>
                   );
                 })()}
+                <PrintHistoryBadge docType="mo" docId={checklistMO.id} currentQty={checklistMO.qty} label="ใบงาน" />
                 <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${ready ? "bg-emerald-50 text-emerald-700 border-emerald-300" : "bg-amber-50 text-amber-700 border-amber-200"}`}>{ready ? "พร้อมจ่าย ✓" : "ยังไม่พร้อม"}</span>
               </div>
               {/* จำนวนสั่งผลิต — ปกติ "อ่านอย่างเดียว" ต้องกด ✏️ ก่อนถึงแก้ได้
@@ -3721,7 +3726,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const viewCount = (v: QuickView) => pending.filter((m) => qvMatch(v, rowQ(m))).length;
   const pendShown = (() => {
     // แท็บรอจ่ายกรองแบรนด์ผ่านมุมมองอย่างเดียว (เจ้าของสั่งเอาชิปแบรนด์ออก 2026-10-28) — ชิปแบรนด์เหลือแท็บกำลังผลิต
-    const rows = pending.filter((m) => qvMatch(view, rowQ(m)));
+    const rows = pending.filter((m) => qvMatch(view, rowQ(m)) && (!unprintedOnly || !m.print));
     if (view.sort1 !== "none" || view.sort2 !== "none") return qvSort(rows, rowQ, view);
     // มุมมองไม่ได้ตั้งเรียง → ใช้ "ค่าเริ่มต้นตอนเปิด" ของชุดหน้าตา (กดหัวตารางเรียงทับได้)
     if (dc.sortDef === "urgent") return [...rows].sort((a, b) => lateDays(b) - lateDays(a) || (b.priority ?? 0) - (a.priority ?? 0)
@@ -4065,6 +4070,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   useEffect(() => { if (!dc.show.tools) { setPendGroup("none"); setWoGroup("none"); } }, [dc.show.tools]);
   const [woGroup, setWoGroup] = useState<"none" | "group" | "status" | "crew" | "desk" | "parent">("none");
   const [qcGroup, setQcGroup] = useState<"none" | "parent">("none");   // แท็บรอ QC: จัดกลุ่มตามสินค้าแม่
+  const [unprintedOnly, setUnprintedOnly] = useState(false);            // แท็บรอจ่าย: เฉพาะใบที่ยังไม่พิมพ์ใบงาน
   // จัดกลุ่มตามช่าง: ใบที่ทำร่วมหลายคน ขึ้นในกลุ่มของทุกคน (แถวซ้ำ key = id::ชื่อ) · จ่ายให้ทั้งโต๊ะ = "<โต๊ะ> (ทั้งโต๊ะ)"
   const crewOf = (w: WorkOrder): string[] => {
     const names = (w.assignees ?? []).map((a) => a.name).filter(Boolean);
@@ -4098,7 +4104,16 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           <div className="min-w-0 flex-1">
             <div className={`font-semibold text-slate-800 truncate ${touch ? "text-[15px]" : ""}`} title={m.priority_note ?? undefined}>{prioIcon(m)}{m.product_sku}</div>
             {m.product_name && m.product_name !== m.product_sku && <div className="text-[11px] text-slate-400 truncate">{m.product_name}</div>}
-            <div className="font-mono text-[10px] text-slate-400">{m.mo_no}</div>
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="font-mono text-[10px] text-slate-400">{m.mo_no}</span>
+              {m.print && (() => {
+                const changed = printQtyChanged(m.print, m.qty);
+                return <span title={`พิมพ์ใบงานแล้ว ${m.print.n} ครั้ง · ล่าสุด ${printWhen(m.print.last)}${changed ? ` · ตอนพิมพ์ ${fmt(m.print.qty ?? 0)} ชิ้น ตอนนี้ ${fmt(m.qty)} — ควรพิมพ์ใหม่` : ""}`}
+                  className={`inline-flex items-center gap-0.5 rounded-full px-1.5 text-[10px] leading-4 ${changed ? "bg-amber-50 text-amber-800 ring-1 ring-amber-300" : "bg-emerald-50 text-emerald-700"}`}>
+                  <Icon name={changed ? "warning" : "print"} />{changed ? "จำนวนเปลี่ยน" : `พิมพ์แล้ว${m.print.n > 1 ? ` ×${m.print.n}` : ""}`}
+                </span>;
+              })()}
+            </div>
           </div>
           {cuBtn(m.mo_no)}
           <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }} title="เปิดเช็กลิสต์เตรียม/ตัด"
@@ -5008,6 +5023,10 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </button>
           {dev === "pc" && dc.img === "s" && <button type="button" onClick={toggleImg} title="สลับขนาดรูปในตาราง (จำไว้ให้ครั้งหน้า)"
             className="h-8 px-3 text-sm rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-slate-50">🖼 รูป{imgBig ? "เล็ก" : "ใหญ่"}</button>}
+          <button type="button" onClick={() => setUnprintedOnly((v) => !v)} title="ดูเฉพาะใบที่ยังไม่พิมพ์ใบงาน (นับตั้งแต่ 31 ต.ค. 69)"
+            className={`inline-flex h-8 items-center gap-1 rounded-lg border px-3 text-sm ${unprintedOnly ? "border-indigo-300 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+            <Icon name="print" /> ยังไม่พิมพ์ใบงาน{unprintedOnly ? ` (${fmt(pending.filter((m) => !m.print).length)}) ✓` : ""}
+          </button>
           <select value={pendGroup} onChange={(e) => pickGroup(e.target.value as "none" | "group" | "ready" | "stage" | "brand" | "parent")} className={grpSelectCls} title="จัดกลุ่มตาราง">
             <option value="none">ไม่จัดกลุ่ม</option>
             <option value="parent">จัดกลุ่มตามสินค้าแม่ (Parent SKU)</option>

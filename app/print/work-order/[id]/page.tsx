@@ -12,6 +12,7 @@ import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 import { Icon } from "@/components/icon";
 import { familyPrintUrl } from "@/lib/family-print";
+import { usePrintLog } from "@/components/report/use-print-log";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Font, Plugins, Schema, Template } from "@pdfme/common";
 
@@ -54,6 +55,8 @@ export default function PrintWorkOrderPage() {
   const { cols: savedCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางของระบบ)
   const [previewCols, setPreviewCols] = useState<WoPrintColumns | null>(null);   // ค่าที่กำลังปรับในแผง (ยังไม่บันทึก)
   const woCols = previewCols ?? savedCols;
+  // 🖨 ประวัติการพิมพ์ (ป้าย "พิมพ์ใบงานแล้ว" บนบอร์ด/เช็กลิสต์) — จับปุ่มพิมพ์ / Ctrl+P / PDF ให้เอง
+  const trackPrint = usePrintLog("mo", mo ? [{ doc_id: mo.id, doc_no: mo.mo_no, qty: mo.qty ?? null }] : []);
 
   useEffect(() => {
     if (!mo) { setQrHtml(""); setBarcodeHtml(""); return; }
@@ -209,13 +212,14 @@ export default function PrintWorkOrderPage() {
             <a
               href={pdfUrl ?? undefined}
               download={`${fileName}.pdf`}
+              onClick={() => trackPrint("pdf")}
               aria-disabled={!pdfUrl}
               className={`h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 inline-flex items-center no-underline ${pdfUrl ? "" : "pointer-events-none opacity-50"}`}
             >
               ⬇ ดาวน์โหลด PDF
             </a>
             <button
-              onClick={() => pdfUrl && window.open(pdfUrl, "_blank")}
+              onClick={() => { if (pdfUrl) { trackPrint("pdf"); window.open(pdfUrl, "_blank"); } }}
               disabled={!pdfUrl}
               className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"
             >

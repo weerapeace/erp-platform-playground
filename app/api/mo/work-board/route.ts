@@ -7,6 +7,7 @@
  * อ่านผ่าน supabaseAdmin + guardApi (join ข้ามตาราง master)
  */
 import { NextRequest, NextResponse } from "next/server";
+import { printSummaryOf } from "@/lib/print-log-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
@@ -244,11 +245,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // งวดส่ง (แบ่งส่งหลายวันต่อ 1 ใบ) — ปฏิทินนัดส่งลูกค้าเอาไปโชว์ทีละงวด
   const openMoIds = allMos.map((m) => m.id);
-  const { data: plans } = openMoIds.length
-    ? await admin.from("mo_delivery_plan").select("id, mo_id, mo_no, due_date, qty, note, shipped, shipped_at, dn_number, delivery_note_id")
-        .in("mo_id", openMoIds).eq("is_active", true).order("due_date", { ascending: true })
-    : { data: [] as Record<string, unknown>[] };
+  // 🖨 ป้าย "พิมพ์ใบงานแล้ว" (lib/print-log) — ยิงพร้อมงวดส่ง
+  const [{ data: plans }, printBy] = await Promise.all([
+    openMoIds.length
+      ? admin.from("mo_delivery_plan").select("id, mo_id, mo_no, due_date, qty, note, shipped, shipped_at, dn_number, delivery_note_id")
+          .in("mo_id", openMoIds).eq("is_active", true).order("due_date", { ascending: true })
+      : Promise.resolve({ data: [] as Record<string, unknown>[] }),
+    printSummaryOf(admin, "mo", pendingEnriched.map((p) => p.id)),
+  ]);
 
-  return NextResponse.json({ departments, workOrders: enrichedWO, pending: pendingEnriched,
+  return NextResponse.json({ departments, workOrders: enrichedWO, pending: pendingEnriched.map((p) => ({ ...p, print: printBy.get(p.id) ?? null })),
     dispatched_mos: dispatchedMos, delivery_plans: plans ?? [], pending_piece: pendingPiece, error: null });
 }

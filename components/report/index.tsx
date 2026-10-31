@@ -1,5 +1,6 @@
 "use client";
 
+import { PRINT_EVENT, type PrintHow } from "@/lib/print-log";
 import React, { useEffect, useRef, useState } from "react";
 import {
   compactReportLayout,
@@ -137,7 +138,13 @@ export function PrintDocument({
  * @param fileName ชื่อไฟล์ตั้งต้นตอนเลือก "บันทึกเป็น PDF" — เบราว์เซอร์อ่านจาก <title> ของเอกสารที่พิมพ์
  *   ตั้งทั้งใน iframe และหน้าแม่ (แต่ละเบราว์เซอร์หยิบคนละที่) แล้วคืนค่าเดิมหลังหน้าต่างพิมพ์อ่านไปแล้ว
  */
+/** ประกาศว่ากำลังพิมพ์ (หน้าพิมพ์ที่ใช้ usePrintLog บันทึกประวัติการพิมพ์ — lib/print-log.ts) */
+function announcePrint(how: PrintHow) {
+  try { window.dispatchEvent(new CustomEvent(PRINT_EVENT, { detail: { how } })); } catch { /* ไม่มีใครฟังก็ไม่เป็นไร */ }
+}
+
 export function printReportFrameOrWindow(fileName?: string) {
+  announcePrint("print");
   const name = typeof fileName === "string" ? fileName.trim() : "";
   const frame = document.querySelector<HTMLIFrameElement>('iframe[data-report-print-frame="true"]');
   const frameWindow = frame?.contentWindow;
@@ -203,6 +210,7 @@ function showPopupBlockedBar(url: string) {
  * ป๊อปอัปโดนบล็อก → โชว์ลิงก์ให้กดเอง (ห้ามถอยไปพิมพ์ iframe เงียบ ๆ — เอกสารหลายแผ่นจะออกไม่ครบ)
  */
 export function printReportHtmlInNewWindow(html: string) {
+  announcePrint("print");
   try {
     const url = URL.createObjectURL(new Blob([printDocHtml(html)], { type: "text/html" }));
     const w = window.open(url, "_blank");
@@ -268,7 +276,7 @@ export function PrintDocLinkButton({ html, fileName, className, children }: {
 
   if (!url) return <span className={`${className ?? ""} pointer-events-none opacity-50`}>{children}</span>;
   return (
-    <a href={url} target="_blank" rel="noopener" download={undefined} title={fileName} className={className}>
+    <a href={url} target="_blank" rel="noopener" download={undefined} title={fileName} className={className} onClick={() => announcePrint("link")}>
       {children}
     </a>
   );

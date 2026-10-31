@@ -16,6 +16,7 @@ import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 import { Icon } from "@/components/icon";
 import { familyPrintUrl } from "@/lib/family-print";
+import { usePrintLog } from "@/components/report/use-print-log";
 
 function BulkPrintInner() {
   const sp = useSearchParams();
@@ -29,6 +30,9 @@ function BulkPrintInner() {
   const { cols: savedCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางเดียวกับหน้าพิมพ์ใบเดียว)
   const [previewCols, setPreviewCols] = useState<WoPrintColumns | null>(null);   // ค่าที่กำลังปรับในแผง (ยังไม่บันทึก)
   const woCols = previewCols ?? savedCols;
+  // 🖨 ประวัติการพิมพ์ — พิมพ์รวมหลายใบ = บันทึกให้ทุกใบ (batch_size = จำนวนใบ)
+  const logItems = useMemo(() => (data ?? []).map((d) => ({ doc_id: d.mo.id, doc_no: d.mo.mo_no, qty: d.mo.qty ?? null })), [data]);
+  usePrintLog("mo", logItems);
 
   useEffect(() => {
     if (ids.length === 0) { setError("ไม่ได้เลือกใบสั่งงาน"); setData([]); return; }
