@@ -1,6 +1,7 @@
 /**
  * 🧾 จับคู่ใบสั่งผลิต ↔ ใบขาย (บิลที่ส่งลูกค้าแล้ว) — กติกา lib/mo-sales-match.ts · ตาราง mo_sales_links
  *   GET    ?mo_nos=MO-…,MO-…        → ต่อใบ: ผูกแล้ว / ที่ระบบเสนอ (ใบเก่าได้ก่อน — คิดจากทุกใบที่รหัสสินค้าเดียวกัน ไม่ใช่แค่ที่ส่งมา)
+ *   GET    ?mo_no=MO-…&detail=1     → หน้าต่างเลือกใบขายเอง: ทุกบรรทัดใบขายของ SKU นี้ (เหลือผูกได้ · ผูกกับใบไหน · ระบบเสนอให้ใบไหน · ก่อนวันเปิดใบ) + ใบที่อาจเปิดซ้ำ
  *   POST   { mo_no, parts: [{ sale_line_id, qty }] } → ผูก (ตรวจยอดคงเหลือของบรรทัดใบขายซ้ำที่เซิร์ฟเวอร์)
  *   DELETE ?mo_no=MO-…               → ยกเลิกผูก (เก็บประวัติ is_active=false)
  * ใบขาย = erp_playground_sales_orders + so_lines (ไม่นับร่าง/ยกเลิก) · ผูก/ยกเลิก = audit mo.sales_link / mo.sales_unlink
@@ -10,7 +11,10 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { matchSales, type MatchMo, type SaleLine, type SalesLinkRow } from "@/lib/mo-sales-match";
+import { bkkDate, matchSales, type MatchMo, type SaleLine, type SalesLinkRow } from "@/lib/mo-sales-match";
+
+export type SaleLineOption = SaleLine & { left: number; linked: { mo_no: string; qty: number }[]; suggested: { mo_no: string; qty: number }[]; before: boolean };
+export type SalesDetail = { mo: { mo_no: string; sku: string; qty: number; from: string }; lines: SaleLineOption[]; mine: { sale_line_id: string; qty: number }[]; dupes: { mo_no: string; qty: number; from: string }[] };
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +56,8 @@ async function loadFor(admin: Admin, skus: string[]) {
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
+  const sp = new URL(request.url).searchParams;
+  if (sp.get("detail") === "1") return detail(sp.get("mo_no") ?? "");
   const moNos = [...new Set((new URL(request.url).searchParams.get("mo_nos") ?? "").split(",").map((s) => s.trim()).filter(Boolean))].slice(0, 300);
   if (!moNos.length) return NextResponse.json({ data: {} });
   const admin = supabaseAdmin();
@@ -110,4 +116,31 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   if (rows.length) await writeAudit(admin, { action: "mo.sales_unlink", entityType: "mo", entityId: String(rows[0].mo_id), actorId: me?.id ?? null, actorName: me?.name ?? null,
     metadata: { mo_no: moNo, parts: rows.map((r) => ({ so_number: r.so_number, qty: r.qty })) } });
   return NextResponse.json({ ok: true, n: rows.length });
+}
+
+/** หน้าต่างเลือกใบขายเอง — ทุกบรรทัดใบขายของ SKU ของใบนี้ · เหลือผูกได้ = จำนวนในบรรทัด − ที่ผูกกับใบอื่น (ของใบนี้เองไม่นับ เพราะเลือกใหม่จะยกเลิกของเดิมก่อน) */
+async function detail(moNo: string): Promise<NextResponse> {
+  if (!moNo.trim()) return bad("ระบุใบสั่งผลิต");
+  const admin = supabaseAdmin();
+  const { data: mo } = await admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, created_at").eq("mo_no", moNo.trim()).limit(1).maybeSingle();
+  if (!mo) return bad("ไม่พบใบสั่งผลิต", 404);
+  const m = mo as Row, sku = String(m.product_sku ?? "").trim(), from = bkkDate(String(m.created_at ?? ""));
+  const ctx = await loadFor(admin, [sku]);
+  const res = matchSales(ctx.mos, ctx.lines, ctx.links);
+  const noById = new Map(ctx.mos.map((x) => [x.id, x.mo_no]));
+  const linked = new Map<string, { mo_no: string; qty: number }[]>(), sugg = new Map<string, { mo_no: string; qty: number }[]>();
+  for (const k of ctx.links) (linked.get(k.sale_line_id) ?? linked.set(k.sale_line_id, []).get(k.sale_line_id)!).push({ mo_no: noById.get(k.mo_id) ?? "—", qty: k.qty });
+  for (const x of res.values()) for (const p of x.suggest) (sugg.get(p.line.id) ?? sugg.set(p.line.id, []).get(p.line.id)!).push({ mo_no: x.mo_no, qty: p.qty });
+  const lines: SaleLineOption[] = ctx.lines.map((l) => {
+    const others = (linked.get(l.id) ?? []).filter((x) => x.mo_no !== m.mo_no);
+    return { ...l, left: Math.max(0, Math.round((l.qty - others.reduce((a, x) => a + x.qty, 0)) * 100) / 100), linked: linked.get(l.id) ?? [], suggested: sugg.get(l.id) ?? [], before: l.date < from };
+  }).sort((a, b) => Number(a.before) - Number(b.before) || a.date.localeCompare(b.date) || a.so_number.localeCompare(b.so_number));
+  const mine = ctx.links.filter((k) => k.mo_id === String(m.id)).map((k) => ({ sale_line_id: k.sale_line_id, qty: k.qty }));
+  // ใบที่อาจเปิดซ้ำ: SKU เดียวกัน จำนวนเท่ากัน ยังไม่ปิด/ไม่ยกเลิก ยังไม่ผูกใบขาย
+  const linkedMo = new Set(ctx.links.map((k) => k.mo_id));
+  const { data: open } = await admin.from("manufacturing_orders").select("id, mo_no, qty, created_at, status").in("product_sku", [sku, sku + " "]).not("status", "in", "(done,cancel,cancelled)").limit(200);
+  const dupes = ((open ?? []) as Row[]).filter((x) => x.mo_no !== m.mo_no && n(x.qty) === n(m.qty) && !linkedMo.has(String(x.id)))
+    .map((x) => ({ mo_no: String(x.mo_no), qty: n(x.qty), from: bkkDate(String(x.created_at ?? "")) }));
+  const out: SalesDetail = { mo: { mo_no: String(m.mo_no), sku, qty: n(m.qty), from }, lines, mine, dupes };
+  return NextResponse.json({ data: out });
 }

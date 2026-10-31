@@ -142,9 +142,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const item_id = String(body.item_id ?? "");
       const item = await getItem(admin, item_id);
       if (!item) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
-      const del = await admin.from("qc_warehouse_items").delete().eq("id", item_id);
-      if (del.error) return NextResponse.json({ error: friendlyDbError(del.error.message) }, { status: 400 });
-      await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: item.qty, mode: body.mode, wh: body.wh,
+      // qty (ไม่บังคับ) = ส่งออกบางส่วน (เช่น ขายออกตามใบขาย 50 จาก 100 · ที่เหลือเข้าคลัง/ค้างชั้น) · ไม่ส่ง = ทั้งก้อน
+      const part = body.qty == null ? null : num(body.qty);
+      if (part != null && (part < 1 || part > Number(item.qty))) return NextResponse.json({ error: "จำนวนที่ส่งออกไม่ถูกต้อง" }, { status: 400 });
+      const shipQty = part ?? Number(item.qty);
+      const res = shipQty < Number(item.qty)
+        ? await admin.from("qc_warehouse_items").update({ qty: Number(item.qty) - shipQty }).eq("id", item_id)
+        : await admin.from("qc_warehouse_items").delete().eq("id", item_id);
+      if (res.error) return NextResponse.json({ error: friendlyDbError(res.error.message) }, { status: 400 });
+      await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: shipQty, ...(shipQty < Number(item.qty) ? { partial_of: item.qty } : {}), mode: body.mode, wh: body.wh,
         ...(typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? { date: body.date } : {}) } });
       return NextResponse.json({ error: null });
     }

@@ -181,6 +181,8 @@ export type CuInputs = {
   shipMode?: "sales_wh" | "sell"; shipWh?: string | null;
   /** ทำได้ไม่ครบ (ลดจำนวน) — null = ทำครบตามสั่ง */
   reduce?: CuReduce | null;
+  /** ใบขายผูกได้แค่บางส่วน: ขายออกกี่ชิ้น · ที่เหลือ sales_wh = เข้าคลังขาย (shipWh) / keep = ค้างบนชั้น QC — null = ส่งออกทั้งหมดตาม shipMode */
+  shipSell?: number | null; shipRest?: "sales_wh" | "keep";
 };
 export type CuStep =
   | { kind: "reduce"; from: number; to: number; reason: string; mode: QtyChangeMode }
@@ -450,7 +452,17 @@ export function cuBuildSteps(f0: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: C
   }
 
   if (on("ship")) {
-    if (good > 0) { steps.push({ kind: "ship", qty: good, date: D.ship, mode: inp.shipMode ?? "sales_wh", wh: inp.shipMode === "sell" ? null : inp.shipWh ?? null }); add(dateIssues(D.ship, "ship:date", { today, notBefore: D.qc, notBeforeLabel: "วันที่ QC รับเข้า" })); }
+    if (good > 0) {
+      // ขายออกตามใบขายบางส่วน (shipSell) → ขั้นส่งออก 2 ขั้น: ขายออก + ที่เหลือเข้าคลังขาย (หรือค้างชั้น QC = ไม่มีขั้นที่สอง)
+      const sell = inp.shipSell != null && inp.shipSell > EPS && inp.shipSell < good - EPS ? r2(inp.shipSell) : null;
+      if (inp.shipSell != null && inp.shipSell > good + EPS) issues.push({ level: "error", field: "ship", msg: `ขายออก ${fmt(inp.shipSell)} ชิ้น มากกว่าของดีที่ QC รับเข้า (${fmt(good)}) — แก้จำนวนที่ผูกใบขาย หรือของดี`, where: "ส่งออก" });
+      else if (sell != null) {
+        steps.push({ kind: "ship", qty: sell, date: D.ship, mode: "sell", wh: null });
+        if (inp.shipRest === "keep") issues.push({ level: "warn", field: "ship", msg: `อีก ${fmt(r2(good - sell))} ชิ้นค้างบนชั้น QC (รอส่งรอบหน้า)`, where: "ส่งออก" });
+        else steps.push({ kind: "ship", qty: r2(good - sell), date: D.ship, mode: "sales_wh", wh: inp.shipWh ?? null });
+      } else steps.push({ kind: "ship", qty: good, date: D.ship, mode: inp.shipMode ?? "sales_wh", wh: inp.shipMode === "sell" ? null : inp.shipWh ?? null });
+      add(dateIssues(D.ship, "ship:date", { today, notBefore: D.qc, notBeforeLabel: "วันที่ QC รับเข้า" }));
+    }
     else if (!on("qc_in") && f.shelfGood > EPS) issues.push({ level: "error", field: "ship", msg: `ของดีบนชั้น QC เดิม ${fmt(f.shelfGood)} ชิ้น — ส่งออกที่หน้าโกดัง QC` });
     else if (on("qc_in") && !issues.some((x) => x.field.startsWith("qc"))) issues.push({ level: "error", field: "qc:good", msg: "ไม่มีของดีให้ส่งออก" });
   }
@@ -609,11 +621,20 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
           undo = { kind: "qc_in", itemIds };
           break;
         }
-        case "ship":
+        case "ship": {
           // ปลายทางเหมือนป๊อปส่งออกหน้าโกดัง QC: เข้าคลังขาย (เลือกคลัง) / ขายออก
-          for (const it of goodItems) await api("/api/qc-warehouse/items", { action: "ship", item_id: it.id, mode: step.mode ?? "sales_wh", wh: step.mode === "sell" ? null : step.wh ?? null, ...(step.date ? { date: step.date } : {}) });
+          // ส่งตามจำนวนของขั้นนี้ (แบ่งส่ง = ขายออกบางส่วน แล้วขั้นถัดไปเอาที่เหลือ) · ชิ้นงานใหญ่กว่าที่ต้องการ = ส่งบางส่วน
+          let need = step.qty;
+          for (const it of goodItems) {
+            if (need <= EPS) break;
+            if (it.qty <= EPS) continue;
+            const take = r2(Math.min(it.qty, need));
+            await api("/api/qc-warehouse/items", { action: "ship", item_id: it.id, ...(take < it.qty - EPS ? { qty: take } : {}), mode: step.mode ?? "sales_wh", wh: step.mode === "sell" ? null : step.wh ?? null, ...(step.date ? { date: step.date } : {}) });
+            it.qty = r2(it.qty - take); need = r2(need - take);
+          }
           undo = { kind: "none", why: "ส่งออกจากชั้น QC แล้ว — ของออกจากชั้นไปแล้ว ย้อนจากที่นี่ไม่ได้" };
           break;
+        }
         case "problem": {
           // กล่อง "ปัญหา" ของใบงาน (ตัวเดียวกับที่แจ้งบนบอร์ด) + ถ้าติ๊ก = ปัญหาของรุ่น (เตือนตอนจ่ายรุ่นนี้ครั้งหน้า)
           const j = await api("/api/mo/issues", { mo_no: mo.mo_no, defect_type: step.text, severity: step.severity, qty: step.qty });
@@ -717,6 +738,8 @@ export type CuDraft = {
   facts: CuFacts;
   /** ทำได้ไม่ครบ (คำขอรุ่นใหม่ — ของเก่าไม่มีช่องนี้) */
   reduce?: CuReduce | null;
+  /** แบ่งส่งออกตามใบขาย (คำขอรุ่นใหม่) */
+  shipSell?: number | null; shipRest?: "sales_wh" | "keep";
 };
 
 /** สิทธิ์ของโหมดอัปเดตงาน (ตั้งตามตำแหน่ง/รายคน) */

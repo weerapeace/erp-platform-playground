@@ -377,3 +377,40 @@ describe("ตอนนี้ของอยู่ไหน", () => {
     expect(cuLocateSnap(snap({ mo: { qty: 10 }, wos: [wo({ qty: 10, received_qty: 10 })] })).key).toBe("qc");
   });
 });
+
+describe("แบ่งส่งออกตามใบขาย (ขายออกบางส่วน)", () => {
+  const f = cuFacts(snap({ mo: { prep_ready: 4, cut_ready: 2 } }));
+  const ship = (o: Partial<CuInputs>) => cuBuildSteps(f, "ship", cuDefaultTicks(f, "ship"), inp({ shipMode: "sell", ...o }));
+  it("ขาย 50 · ที่เหลือเข้าคลังขาย = ส่งออก 2 ขั้น", () => {
+    const r = ship({ shipSell: 50, shipRest: "sales_wh", shipWh: "คลังหลัก" });
+    expect(r.errors).toEqual([]);
+    expect(r.steps.filter((s) => s.kind === "ship")).toEqual([
+      { kind: "ship", qty: 50, date: null, mode: "sell", wh: null },
+      { kind: "ship", qty: 50, date: null, mode: "sales_wh", wh: "คลังหลัก" },
+    ]);
+  });
+  it("ขาย 50 · ที่เหลือค้างชั้น QC = ส่งออกขั้นเดียว + เตือน", () => {
+    const r = ship({ shipSell: 50, shipRest: "keep" });
+    expect(r.steps.filter((s) => s.kind === "ship").map((s) => s.kind === "ship" && s.qty)).toEqual([50]);
+    expect(r.issues.some((x) => x.level === "warn" && x.msg.includes("ค้างบนชั้น QC"))).toBe(true);
+  });
+  it("ขายเท่าของดี = ส่งออกทั้งหมดขั้นเดียว · ขายเกินของดี = ห้าม", () => {
+    expect(ship({ shipSell: 100 }).steps.filter((s) => s.kind === "ship")).toHaveLength(1);
+    expect(ship({ shipSell: 120 }).errors.join(" ")).toMatch(/มากกว่าของดี/);
+  });
+  it("cuRun แบ่งชิ้นงาน: ขาย 6 จากชิ้น 8 (ส่งบางส่วน) แล้วที่เหลือ 2 เข้าคลัง", async () => {
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const api = async (url: string, body: unknown) => {
+      calls.push({ url, body: body as Record<string, unknown> });
+      if (url === "/api/qc-warehouse/items" && (body as { action: string }).action === "receive") return { items: [{ id: "it1", status: "good", qty: 8 }] };
+      return {};
+    };
+    const res = await cuRun([{ kind: "qc_in", good: 8, bad: 0, date: null }, { kind: "ship", qty: 6, date: null, mode: "sell", wh: null }, { kind: "ship", qty: 2, date: null, mode: "sales_wh", wh: "คลังหลัก" }], ctx(snap({ wos: [wo({ id: "w1", qty: 8, received_qty: 8 })] })), api);
+    expect(res.every((r) => r.ok)).toBe(true);
+    const ships = calls.filter((c) => c.body.action === "ship").map((c) => c.body);
+    expect(ships).toEqual([
+      { action: "ship", item_id: "it1", qty: 6, mode: "sell", wh: null },
+      { action: "ship", item_id: "it1", mode: "sales_wh", wh: "คลังหลัก" },
+    ]);
+  });
+});
