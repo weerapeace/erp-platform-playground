@@ -82,6 +82,8 @@ export type MiniTableProps<T> = {
   groupExtra?: (rows: T[]) => ReactNode;
   /** หัวกลุ่มแบบกำหนดเอง (เช่น รูป + รหัสสินค้าแม่ + ชื่อรุ่น) — ไม่ส่ง = ชื่อกลุ่มตัวหนังสือ */
   groupHead?: (groupName: string, rows: T[]) => ReactNode;
+  /** ปุ่มท้ายหัวกลุ่ม (ต่อจากจำนวนแถว) เช่น "พิมพ์ทั้งรุ่น" — กดแล้วไม่กาง/ย่อกลุ่ม */
+  groupActions?: (groupName: string, rows: T[]) => ReactNode;
   /** กดหัวกลุ่ม = กาง/ย่อกลุ่มนั้น + ปุ่ม "กางทั้งหมด / พับทั้งหมด" (พับทั้งหมด = เห็นแค่หัวกลุ่ม = ภาพรวม) */
   groupCollapsible?: boolean;
   /** แถวสรุปของกลุ่ม (โหมดตาราง) — key = MiniColumn.key · คอลัมน์ที่มีฟังก์ชัน = หัวกลุ่มโชว์ยอดรวมตรงคอลัมน์นั้น
@@ -166,7 +168,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
     rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange, hideSearch,
     sortKey: sortKeyProp, sortDir: sortDirProp, onSortChange,
-    groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra, groupHead, groupCollapsible, groupCells,
+    groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra, groupHead, groupActions, groupCollapsible, groupCells,
     selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded, onCellClick, activeCell,
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
@@ -510,6 +512,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       {groupCollapsible && <span className="w-3 shrink-0 text-[10px] text-slate-400">{gClosed(g.name) ? "▸" : "▾"}</span>}
       {groupHead ? groupHead(g.name, g.rows) : <span className="text-xs font-semibold text-slate-600">{g.name}</span>}
       <span className="shrink-0 text-[10px] text-slate-400">({g.rows.length})</span>
+      {groupActions && <span className="shrink-0" onClick={(e) => e.stopPropagation()}>{groupActions(g.name, g.rows)}</span>}
       {groupExtra && <span className="ml-auto shrink-0 text-[11px] text-slate-500">{groupExtra(g.rows)}</span>}
     </div>
   );
@@ -538,6 +541,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
             {groupCollapsible && <span className="w-3 shrink-0 text-[10px] text-slate-400">{gClosed(g.name) ? "▸" : "▾"}</span>}
             {groupHead ? groupHead(g.name, g.rows) : <span className="truncate text-xs font-semibold text-slate-700">{g.name}</span>}
             <span className="shrink-0 text-[10px] text-slate-400">({g.rows.length})</span>
+            {groupActions && <span className="shrink-0" onClick={(e) => e.stopPropagation()}>{groupActions(g.name, g.rows)}</span>}
           </div>
           {groupExtra && <div className="mt-0.5 truncate text-[11px] text-slate-500">{groupExtra(g.rows)}</div>}
         </div>

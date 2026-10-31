@@ -84,6 +84,7 @@ import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-
 import { InstallAppModal } from "@/components/install-app";
 import { Icon } from "@/components/icon";
 import { PrintHistoryBadge, printWhen } from "@/components/print-history";
+import { FamilyPrintMenu } from "@/components/family-print-menu";
 import { printQtyChanged, type PrintSummary } from "@/lib/print-log";
 import { ScanInput } from "@/components/scan-input";
 import { useScanGun } from "@/components/scan-input/use-scan-gun";
@@ -4516,15 +4517,22 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     if (name === NO_PARENT) return <span className="text-xs font-semibold text-slate-500">{NO_PARENT}</span>;
     const p = skus.map(parentOf).find(Boolean) ?? null;
     const kinds = new Set(skus.filter(Boolean)).size;
+    // รูปใหญ่ (เจ้าของขอ 2026-10-31) · รหัส + จำนวนแบบ บรรทัดบน · ชื่อรุ่นบรรทัดล่าง
     return (
-      <span className="flex min-w-0 items-center gap-2">
-        <HoverImage url={p?.img ?? imgs.find(Boolean) ?? null} size={touch ? 36 : 28} previewSize={240} />
-        <span className="shrink-0 text-xs font-semibold text-slate-700">{name}</span>
-        {p?.name && <span className="min-w-0 truncate text-[11px] text-slate-500" title={p.name}>{p.name}</span>}
-        <span className="shrink-0 rounded-full bg-white px-1.5 text-[10px] text-slate-500">{kinds} แบบ</span>
+      <span className="flex min-w-0 items-center gap-2.5">
+        <HoverImage url={p?.img ?? imgs.find(Boolean) ?? null} size={touch ? 64 : 56} previewSize={320} />
+        <span className="min-w-0">
+          <span className="flex items-center gap-1.5">
+            <span className="shrink-0 text-[13px] font-semibold text-slate-800">{name}</span>
+            <span className="shrink-0 rounded-full bg-white px-1.5 text-[10px] text-slate-500">{kinds} แบบ</span>
+          </span>
+          {p?.name && <span className="block truncate text-[11px] text-slate-500" title={p.name}>{p.name}</span>}
+        </span>
       </span>
     );
   };
+  // 🖨 ปุ่มพิมพ์ทั้งรุ่นท้ายหัวกลุ่มสินค้าแม่ (ทุกใบที่ยังเปิดของรุ่น · ของกลาง components/family-print-menu)
+  const parentActions = (name: string) => (name === NO_PARENT ? null : <FamilyPrintMenu by={{ parent: name }} />);
   const woGroupSum = (rows: WorkOrder[]) => {
     const shared = woGroup === "crew" ? rows.filter((r) => crewOf(r).length > 1).length : 0;
     return `${fmt(rows.length)} ใบ · ${fmt(rows.reduce((n, w) => n + (Number(w.qty) || 0), 0))} ชิ้น · ค้าง ${fmt(rows.reduce((n, w) => n + woLeft(w), 0))}${shared ? ` · ทำร่วม ${shared} ใบ` : ""}`;
@@ -5211,6 +5219,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           : pendGroup === "brand" ? (m) => (m.brand ? `${m.brand}${m.brand_oem ? " · OEM" : ""}` : NO_BRAND) : undefined}
         groupOrder={pendGroup === "stage" ? stageOrder : pendGroup === "brand" ? (g) => (g === NO_BRAND ? 1 : 0) : pendGroup === "parent" ? parentOrder : undefined}
         groupHead={pendGroup === "parent" ? (n, rs) => parentHead(n, rs.map((m) => m.product_sku), rs.map((m) => m.image_url)) : undefined}
+        groupActions={pendGroup === "parent" ? parentActions : undefined}
         groupCollapsible={pendGroup !== "none"}
         groupLabel={pendGroup === "parent" ? "จัดกลุ่มตามสินค้าแม่" : pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : pendGroup === "brand" ? "จัดกลุ่มตามแบรนด์" : "จัดกลุ่มตามความพร้อม"}
         grouped={pendGroup !== "none"} onGroupedChange={(v) => pickGroup(v ? (pendGroup === "none" ? lastGroupRef.current : pendGroup) : "none")}
@@ -5419,6 +5428,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         groupLabel={woGroup === "parent" ? "จัดกลุ่มตามสินค้าแม่" : woGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : woGroup === "status" ? "จัดกลุ่มตามสถานะ" : woGroup === "crew" ? "จัดกลุ่มตามช่าง" : "จัดกลุ่มตามโต๊ะ"} defaultGrouped={woGroup !== "none"}
         groupOrder={woGroup === "parent" ? parentOrder : undefined}
         groupHead={woGroup === "parent" ? (n, rs) => parentHead(n, rs.map((w) => w.product_sku), rs.map((w) => w.image_url)) : undefined}
+        groupActions={woGroup === "parent" ? parentActions : undefined}
         groupCollapsible={woGroup !== "none"}
         groupExtra={layoutOf("wip") === "cards" && (woGroup === "crew" || woGroup === "desk" || woGroup === "parent") ? woGroupSum : undefined} groupCells={woGroupCells}
         footnote={woGroup === "crew" ? "งานที่ทำร่วมหลายคน ขึ้นในกลุ่มของทุกคน (จำนวนแถวจึงอาจมากกว่าจำนวนใบ)" : undefined}
@@ -5452,7 +5462,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           searchText={qcText} hideSearch
           searchValue={searchQ} onSearchChange={setTableSearch}
           groupBy={qcGroup === "parent" ? (q) => parentKey(q.sku) : undefined} groupOrder={parentOrder} groupLabel="จัดกลุ่มตามสินค้าแม่" defaultGrouped={qcGroup !== "none"}
-          groupHead={(n, rs) => parentHead(n, rs.map((q) => q.sku), [])} groupCollapsible
+          groupHead={(n, rs) => parentHead(n, rs.map((q) => q.sku), [])} groupActions={parentActions} groupCollapsible
           groupExtra={layoutOf("qc") === "cards" ? (rs) => `${fmt(rs.length)} ใบ · รอรับ ${fmt(rs.reduce((n, q) => n + (q.remaining || 0), 0))} ชิ้น` : undefined} groupCells={qcGroupCells}
           emptyText="ไม่มีงานรอรับเข้า QC"
           noMatchText={(q) => `ไม่พบ “${q}” ในแท็บรอ QC`}
@@ -5482,6 +5492,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       {/* แถบคำสั่งลอยด้านล่าง (ของกลาง BulkActionBar) — โผล่เมื่อติ๊กเลือกหลายใบ แทนปุ่มกระจายบนหัวตาราง */}
       <BulkActionBar count={tab === "pend" ? selMoNos.length : 0} unit="ใบ" onClear={() => setSel(new Set())} spacer={false}>
         {catchUp && <button type="button" onClick={() => setCuBatch(selMoNos)} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}
+        <FamilyPrintMenu by={{ ids: [...sel] }} label="พิมพ์รวมทั้งรุ่น" title="พิมพ์ใบรวมทั้งรุ่นเฉพาะใบที่ติ๊ก (สีที่เลือกอยู่ในแผ่นเดียว)"
+          className="inline-flex h-9 items-center gap-1 rounded-lg bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700" />
         <button type="button" onClick={() => setAssignOpen(true)} className="h-9 rounded-lg bg-violet-500 px-3 text-sm font-medium text-white hover:bg-violet-600">🗂 จับเข้ากลุ่ม</button>
         <button type="button" onClick={() => setDueOpen(true)} className="h-9 rounded-lg bg-amber-500 px-3 text-sm font-medium text-white hover:bg-amber-600">📅 แก้วันกำหนด</button>
         {canEdit && <button type="button" onClick={() => openDispatchFor(sel)} className="h-9 rounded-lg bg-emerald-500 px-3 text-sm font-medium text-white hover:bg-emerald-600">🚚 จ่ายงาน</button>}
