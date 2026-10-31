@@ -39,4 +39,13 @@ describe("payroll-validation-actions", () => {
     expect(filter.__payroll_issue.value).toBe("recurring_missing_contract");
     expect(filter.__period_id.value).toBe(PERIOD_ID);
   });
+
+  it("sends unapproved mid-month batches to the payments page with that batch open", () => {
+    const fix = buildPayrollIssueFix("mid_month_unapproved", PERIOD_ID, 1, { batchId: "b-1" });
+    expect(fix?.label).toBe("ไปอนุมัติรอบกลางเดือน");
+    const url = new URL(fix!.href, "http://localhost");
+    expect(url.pathname).toBe("/payroll/payments");
+    expect(url.searchParams.get("period_id")).toBe(PERIOD_ID);
+    expect(url.searchParams.get("batch_id")).toBe("b-1");
+  });
 });

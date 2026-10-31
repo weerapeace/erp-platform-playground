@@ -180,7 +180,13 @@ export default function PayrollPaymentsPage() {
       if (json.error) throw new Error(json.error);
       const rows = (json.data ?? []) as Batch[];
       setBatches(rows);
-      setSelectedBatchId((current) => current && rows.some((row) => row.id === current) ? current : rows[0]?.id ?? "");
+      // ?batch_id= (เช่น ลิงก์ "ไปอนุมัติรอบกลางเดือน" จากหน้าคำนวณงวด) → เปิดรอบนั้นก่อน
+      const urlBatchId = typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("batch_id") ?? "";
+      setSelectedBatchId((current) => {
+        if (current && rows.some((row) => row.id === current)) return current;
+        if (urlBatchId && rows.some((row) => row.id === urlBatchId)) return urlBatchId;
+        return rows[0]?.id ?? "";
+      });
       if (!rows.length) setDetail(null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "โหลดรอบจ่ายไม่สำเร็จ");

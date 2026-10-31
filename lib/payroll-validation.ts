@@ -68,7 +68,7 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
     issues.push(issue("error", "missing_hours_per_day", "ชั่วโมงต่อวันว่าง", "ตั้งค่า default_hours_per_day ให้มากกว่า 0 ก่อนคำนวณ"));
   }
 
-  const [empRes, conRes, allConRes, recRes, runRes] = await Promise.all([
+  const [empRes, conRes, allConRes, recRes, runRes, midRes] = await Promise.all([
     admin.from("employees").select("id, employee_code, first_name, employment_status").eq("employment_status", "active"),
     (() => {
       let q = admin.from("employee_contracts").select("id, employee_id, contract_no, status, is_current, company_id, contract_type, employment_type, wage_type, base_salary, daily_wage, hourly_wage")
@@ -81,12 +81,15 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
     admin.from("employee_recurring_pay_items").select("id, employee_id, contract_id, item_name, item_type, amount_per_period, calculation_method, quantity_default, rate_default, status, start_date, end_date")
       .eq("status", "active").lte("start_date", endDate || "9999-12-31"),
     admin.from("payroll_runs").select("id", { count: "exact", head: true }).eq("payroll_period_id", periodId),
+    admin.from("payment_batches").select("id, batch_no, batch_type, status, payment_batch_lines(employee_id, paid_amount, status)")
+      .eq("payroll_period_id", periodId).in("batch_type", ["mid_month", "special"]),
   ]);
   if (empRes.error) throw new Error(empRes.error.message);
   if (conRes.error) throw new Error(conRes.error.message);
   if (allConRes.error) throw new Error(allConRes.error.message);
   if (recRes.error) throw new Error(recRes.error.message);
   if (runRes.error) throw new Error(runRes.error.message);
+  if (midRes.error) throw new Error(midRes.error.message);
 
   const employees = (empRes.data ?? []) as Row[];
   const contracts = (conRes.data ?? []) as Row[];
@@ -125,6 +128,22 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
     issues.push(issue("error", "recurring_invalid_amount", "มีรายการประจำยอดไม่ถูกต้อง", "ยอด/จำนวน/อัตราต้องมากกว่า 0", recurringBadAmount));
   }
 
+  // รอบจ่ายกลางเดือน/พิเศษที่ยังไม่อนุมัติ — เครื่องคำนวณหักเฉพาะรอบ approved/paid (aggregateMidMonth)
+  // ถ้าคำนวณตอนนี้ ยอดที่เบิกไปแล้วจะไม่ถูกหักจากปลายเดือน → คนเบิกได้เงินซ้ำ
+  const unapprovedMid = ((midRes.data ?? []) as Row[]).filter((b) => !["approved", "paid", "cancelled"].includes(String(b.status)));
+  if (unapprovedMid.length > 0) {
+    const midLines = unapprovedMid.flatMap((b) => ((b.payment_batch_lines as Row[] | null) ?? []))
+      .filter((l) => String(l.status) !== "cancelled" && money(l.paid_amount) > 0);
+    const people = new Set(midLines.map((l) => String(l.employee_id))).size;
+    const amount = midLines.reduce((sum, l) => sum + money(l.paid_amount), 0);
+    const hasSpecial = unapprovedMid.some((b) => String(b.batch_type) === "special");
+    const batchNos = unapprovedMid.map((b) => String(b.batch_no ?? "")).filter(Boolean).join(", ");
+    issues.push(issue("warning", "mid_month_unapproved",
+      hasSpecial ? "มีรอบจ่ายกลางเดือน/รอบพิเศษยังไม่อนุมัติ" : "มีรอบจ่ายกลางเดือนยังไม่อนุมัติ",
+      `${batchNos ? `${batchNos} · ` : ""}${people} คน · ฿${amount.toLocaleString("th-TH")} — ยอดนี้จะยังไม่ถูกหักจากเงินเดือนปลายเดือน ถ้าคำนวณตอนนี้ คนที่เบิกไปแล้วจะได้เงินซ้ำ ให้อนุมัติรอบนี้ก่อน (หรือยกเลิกถ้าไม่ได้จ่ายจริง) แล้วค่อยคำนวณ`,
+      unapprovedMid.length));
+  }
+
   if ((runRes.count ?? 0) > 0) {
     issues.push(issue("warning", "existing_runs", "งวดนี้เคยคำนวณแล้ว", "ถ้าบันทึกอีกครั้ง ระบบจะสร้างรอบคำนวณใหม่ ไม่ลบของเดิม", runRes.count ?? 0));
   }
@@ -133,7 +152,7 @@ export async function validatePayrollPeriod(periodId: string): Promise<PayrollVa
   const warnings = issues.filter((i) => i.level === "warning").length;
   const issuesWithFixes = issues.map((it) => ({
     ...it,
-    fix: buildPayrollIssueFix(it.code, periodId, it.count),
+    fix: buildPayrollIssueFix(it.code, periodId, it.count, it.code === "mid_month_unapproved" ? { batchId: String(unapprovedMid[0]?.id ?? "") } : undefined),
   }));
   return {
     period_id: periodId,

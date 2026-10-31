@@ -15,7 +15,7 @@ function issueFilterHref(path: string, issueCode: string, periodId: string): str
   return `${path}?flt=${flt}`;
 }
 
-export function buildPayrollIssueFix(issueCode: string, periodId: string, count?: number): PayrollIssueFix | undefined {
+export function buildPayrollIssueFix(issueCode: string, periodId: string, count?: number, opts?: { batchId?: string }): PayrollIssueFix | undefined {
   if (!periodId) return undefined;
 
   if (
@@ -50,6 +50,12 @@ export function buildPayrollIssueFix(issueCode: string, periodId: string, count?
       label: `ไปแก้เงินประจำ${countText(count)}`,
       href: issueFilterHref("/payroll/recurring", issueCode, periodId),
     };
+  }
+
+  if (issueCode === "mid_month_unapproved") {
+    const qs = new URLSearchParams({ period_id: periodId });
+    if (opts?.batchId) qs.set("batch_id", opts.batchId);
+    return { label: "ไปอนุมัติรอบกลางเดือน", href: `/payroll/payments?${qs.toString()}` };
   }
 
   if (issueCode === "existing_runs") {
