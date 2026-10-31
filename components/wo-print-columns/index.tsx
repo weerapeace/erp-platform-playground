@@ -37,19 +37,30 @@ export function useWoPrintColumns() {
   return { cols, reload };
 }
 
-function ColumnRows({ list, onChange }: { list: WoColumn[]; onChange: (next: WoColumn[]) => void }) {
+/**
+ * ของกลาง — รายการคอลัมน์ปรับได้ (ติ๊กแสดง · ลากเรียง · พิมพ์ชื่อหัว · แถบความกว้าง) ใช้ทั้งใบสั่งงานและใบติดตามงานทั้งรุ่น
+ * shownOf = คอลัมน์ที่เปิด/ปิดจากที่อื่น (เช่นปุ่มช่องเสริมบนแถบ) → คืน true/false แทนช่องติ๊ก + lockHint บอกว่าไปเปิดที่ไหน
+ */
+export function ColumnRows<T extends WoColumn>({ list, onChange, maxWidth = 60, shownOf, lockHint }: {
+  list: T[]; onChange: (next: T[]) => void; maxWidth?: number;
+  shownOf?: (c: T) => boolean | null; lockHint?: string;
+}) {
   const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => onChange(moveItem(list, from, to)));
-  const shown = list.filter((c) => c.show);
+  const isShown = (c: T) => shownOf?.(c) ?? c.show;
+  const shown = list.filter(isShown);
   const total = shown.reduce((n, c) => n + c.width, 0) || 1;
   const patch = (i: number, p: Partial<WoColumn>) => onChange(list.map((c, k) => (k === i ? { ...c, ...p } : c)));
+  const inputMax = Math.max(80, maxWidth);
 
   return (
     <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
       {list.map((c, i) => (
-        <div key={c.key} {...rowProps(i)} className={`flex items-center gap-1.5 px-1.5 py-1 ${rowCls(i)} ${c.show ? "" : "bg-slate-50"}`}>
+        <div key={c.key} {...rowProps(i)} className={`flex items-center gap-1.5 px-1.5 py-1 ${rowCls(i)} ${isShown(c) ? "" : "bg-slate-50"}`}>
           <DragHandle {...handleProps(i)} />
-          <input type="checkbox" checked={c.show} onChange={(e) => patch(i, { show: e.target.checked })}
-            title="แสดงคอลัมน์นี้" className="w-4 h-4 accent-indigo-600 shrink-0" />
+          {shownOf?.(c) != null
+            ? <span title={lockHint} className={`text-[9px] shrink-0 px-1 py-0.5 rounded ${isShown(c) ? "bg-blue-50 text-blue-600" : "bg-slate-100 text-slate-400"}`}>{isShown(c) ? "เปิด" : "ปิด"}</span>
+            : <input type="checkbox" checked={c.show} onChange={(e) => patch(i, { show: e.target.checked })}
+                title="แสดงคอลัมน์นี้" className="w-4 h-4 accent-indigo-600 shrink-0" />}
           {c.key === "image" && <span className="text-[11px] shrink-0">🖼</span>}
           {c.key === "check" && <span className="text-[11px] shrink-0">☑</span>}
           {isBlankWoColumn(c.key) && <span className="text-[9px] shrink-0 px-1 py-0.5 rounded bg-slate-100 text-slate-400">ว่าง {c.key.replace("blank", "")}</span>}
@@ -58,15 +69,15 @@ function ColumnRows({ list, onChange }: { list: WoColumn[]; onChange: (next: WoC
             onChange={(e) => patch(i, { label: e.target.value })}
             placeholder={isBlankWoColumn(c.key) ? "ตั้งชื่อหัวช่องว่าง…" : "ชื่อหัวคอลัมน์"}
             title="พิมพ์เปลี่ยนชื่อหัวคอลัมน์ได้"
-            className={`min-w-0 flex-1 h-6 px-1 text-[12px] rounded bg-transparent border border-transparent hover:border-slate-200 focus:border-indigo-300 focus:bg-white focus:outline-none ${c.show ? "text-slate-700" : "text-slate-400 line-through"}`} />
-          <input type="range" min={3} max={60} value={c.width} disabled={!c.show}
+            className={`min-w-0 flex-1 h-6 px-1 text-[12px] rounded bg-transparent border border-transparent hover:border-slate-200 focus:border-indigo-300 focus:bg-white focus:outline-none ${isShown(c) ? "text-slate-700" : "text-slate-400 line-through"}`} />
+          <input type="range" min={3} max={maxWidth} value={c.width} disabled={!isShown(c)}
             onChange={(e) => patch(i, { width: Number(e.target.value) })}
             className="w-20 accent-indigo-600 disabled:opacity-30" />
-          <input type="number" min={1} max={80} value={c.width} disabled={!c.show}
-            onChange={(e) => patch(i, { width: Math.max(1, Math.min(80, Number(e.target.value) || 1)) })}
+          <input type="number" min={1} max={inputMax} value={c.width} disabled={!isShown(c)}
+            onChange={(e) => patch(i, { width: Math.max(1, Math.min(inputMax, Number(e.target.value) || 1)) })}
             className="w-12 h-6 px-1 text-[11px] text-right border border-slate-200 rounded disabled:opacity-30" />
           <span className="w-9 text-right text-[10px] text-slate-400 tabular-nums shrink-0">
-            {c.show ? `${Math.round((c.width / total) * 100)}%` : "—"}
+            {isShown(c) ? `${Math.round((c.width / total) * 100)}%` : "—"}
           </span>
         </div>
       ))}

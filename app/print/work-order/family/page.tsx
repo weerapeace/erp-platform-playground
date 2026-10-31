@@ -23,7 +23,7 @@ import { FamilyPrintSettingsButton, useFamilyPrintSettings } from "@/components/
 import { FamilyDataCheck } from "@/components/family-data-check";
 import { familyIssues, issueFlags } from "@/lib/family-checks";
 import {
-  FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, familyHtmlData, familyOrientation,
+  FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, familyHtmlData, familyOrientation, familySizeCss,
   type FamilyPrintOptions, type FamilyPrintResponse, type FamilyPrintSettings, type FamilySheetKind, type MoCodes,
 } from "@/lib/family-print";
 import {
@@ -121,10 +121,11 @@ function FamilyPrintInner() {
   const build = (withFlags: boolean) => {
     if (!sheets.length || !data) return "";
     const printed = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "Asia/Bangkok" });
-    const style = woStyleCss(cols?.style ?? WO_DEFAULT_STYLE);
+    // เส้น/ตัวอักษรจากตั้งค่าใบสั่งงาน + ขนาดแต่ละจุดของใบรวมทั้งรุ่น (ต่อท้าย = ชนะกฎเดิม)
+    const style = woStyleCss(cols?.style ?? WO_DEFAULT_STYLE) + familySizeCss(settings.sizes);
     if (isTrack) {
       const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);   // วันนี้เวลาไทย (นับวันค้าง)
-      const opt: TrackOptions = { extras, blank, printed, today, barcode: settings.barcode, codes };
+      const opt: TrackOptions = { extras, blank, printed, today, barcode: settings.barcode, codes, cols: settings.track_cols };
       const tracks = data.families.map((f) => buildFamilyTrack(f, today));
       const kinds = sheet === "track" ? (["route", "status"] as const) : ([sheet] as const);
       const pages = tracks.flatMap((t) => kinds.map((k) => familyTrackHtmlData(t, k, opt)));
@@ -196,7 +197,7 @@ function FamilyPrintInner() {
             </>
           )}
           <Seg value={paper} onChange={setPaper} options={[{ v: "auto", label: "กระดาษอัตโนมัติ" }, { v: "landscape", label: "แนวนอน" }, { v: "portrait", label: "แนวตั้ง" }]} />
-          <FamilyPrintSettingsButton current={savedSettings} onPreview={setPreviewSettings} onSaved={reloadSettings} />
+          <FamilyPrintSettingsButton current={savedSettings} onPreview={setPreviewSettings} onSaved={reloadSettings} extras={extras} />
           <FamilyDataCheck issues={issues} options={data?.options ?? { uoms: [], types: [] }} open={checkOpen}
             onOpenChange={(o) => { setCheckOpen(o); if (!o) setActiveIssue(null); }} active={activeIssue}
             onFixed={() => setReloadKey((k) => k + 1)} />

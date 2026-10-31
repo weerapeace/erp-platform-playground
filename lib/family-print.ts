@@ -92,9 +92,87 @@ export type FamilyPrintSettings = {
   img: "show" | "hide" | "none";
   /** บาร์โค้ดเลขใบ (การ์ดสี + ใบติดตามงาน) */
   barcode: "both" | "line" | "qr" | "none";
+  /** ขนาดแต่ละจุด (หัวใบ · การ์ดสี · ตาราง · ขอบกระดาษ) — ค่าเริ่ม = หน้าตาเดิม */
+  sizes: FamilySizes;
+  /** คอลัมน์ใบติดตามงาน (แบบ A): ลำดับ · ชื่อหัว · ความกว้าง · โชว์ — null = ค่าเริ่ม (lib/family-track normalizeTrackCols) */
+  track_cols: PrintColCfg[] | null;
+};
+/** คอลัมน์ที่ปรับได้ (รูปแบบเดียวกับตั้งค่าคอลัมน์ใบสั่งงาน) — width = น้ำหนัก ≈ มม. */
+export type PrintColCfg = { key: string; label: string; width: number; show: boolean };
+
+/* ─────────────── ขนาดแต่ละจุด ───────────────
+ * ตัวอักษรเป็น px (ขนาดตอนพิมพ์) · รูป/บาร์โค้ด/ขอบเป็น มม. · per_row 0 = อัตโนมัติ (มีบาร์โค้ดเส้น 3 · ไม่มี 6)
+ * card_img / head_img = 0 → ไม่แสดงรูปจุดนั้น · บาร์โค้ดเส้นปรับได้แค่ความสูง (กว้างตายตัว ~55 มม. ให้เครื่องยิงอ่านได้)
+ */
+export type FamilySizes = {
+  hero_img: number; hero_code: number; hero_qty: number;
+  per_row: number; card_img: number; mo_no: number; bc_h: number; qr: number;
+  head_img: number; mat_img: number; name: number; qty: number; code: number; tick: number; pad: "tight" | "normal" | "airy";
+  cut_size: number; cut_sub: number;
+  margin: number;
+};
+export const FAMILY_DEFAULT_SIZES: FamilySizes = {
+  hero_img: 24, hero_code: 16, hero_qty: 20,
+  per_row: 0, card_img: 14, mo_no: 9.5, bc_h: 8, qr: 13,
+  head_img: 9, mat_img: 8.5, name: 9, qty: 9.5, code: 8.5, tick: 3.2, pad: "normal",
+  cut_size: 13, cut_sub: 8.5,
+  margin: 7,
+};
+type SizeNumKey = Exclude<keyof FamilySizes, "pad">;
+export const FAMILY_SIZE_FIELDS: { zone: string; fields: { key: SizeNumKey; label: string; min: number; max: number; step: number; unit: string }[] }[] = [
+  { zone: "หัวใบ", fields: [
+    { key: "hero_img", label: "รูปสินค้า", min: 12, max: 40, step: 1, unit: "มม." },
+    { key: "hero_code", label: "รหัสสินค้า", min: 10, max: 24, step: 0.5, unit: "px" },
+    { key: "hero_qty", label: "จำนวนรวม", min: 12, max: 30, step: 1, unit: "px" },
+  ] },
+  { zone: "การ์ดสี", fields: [
+    { key: "per_row", label: "การ์ดต่อแถว (0 = อัตโนมัติ)", min: 0, max: 6, step: 1, unit: "ใบ" },
+    { key: "card_img", label: "รูปสี (0 = ไม่แสดง)", min: 0, max: 24, step: 1, unit: "มม." },
+    { key: "mo_no", label: "เลขใบ", min: 7, max: 13, step: 0.5, unit: "px" },
+    { key: "bc_h", label: "บาร์โค้ดเส้น สูง", min: 5, max: 12, step: 0.5, unit: "มม." },
+    { key: "qr", label: "QR", min: 10, max: 20, step: 0.5, unit: "มม." },
+  ] },
+  { zone: "ตารางของที่ต้องซื้อ", fields: [
+    { key: "head_img", label: "รูปหัวคอลัมน์ (0 = ไม่แสดง)", min: 0, max: 16, step: 1, unit: "มม." },
+    { key: "mat_img", label: "รูปวัตถุดิบ", min: 4, max: 16, step: 0.5, unit: "มม." },
+    { key: "name", label: "ชื่อวัตถุดิบ", min: 7, max: 13, step: 0.5, unit: "px" },
+    { key: "qty", label: "ตัวเลข", min: 8, max: 14, step: 0.5, unit: "px" },
+    { key: "code", label: "รหัส/สีในช่อง", min: 6, max: 10, step: 0.5, unit: "px" },
+    { key: "tick", label: "ช่องติ๊ก", min: 2.5, max: 5, step: 0.1, unit: "มม." },
+  ] },
+  { zone: "ตารางบล็อกตัด", fields: [
+    { key: "cut_size", label: "ขนาดตัด", min: 9, max: 18, step: 0.5, unit: "px" },
+    { key: "cut_sub", label: "รหัสบล็อก/วัตถุดิบ", min: 7, max: 11, step: 0.5, unit: "px" },
+  ] },
+  { zone: "ทั้งใบ", fields: [
+    { key: "margin", label: "ขอบกระดาษ", min: 4, max: 12, step: 0.5, unit: "มม." },
+  ] },
+];
+export const FAMILY_SIZE_PADS: { v: FamilySizes["pad"]; label: string }[] = [{ v: "tight", label: "แน่น" }, { v: "normal", label: "ปกติ" }, { v: "airy", label: "โปร่ง" }];
+/** ชุดสำเร็จ (ตามที่เจ้าของเห็นใน widget 2026-10-31) */
+export const FAMILY_SIZE_PRESETS: { label: string; value: FamilySizes }[] = [
+  { label: "ประหยัดกระดาษ", value: { hero_img: 16, hero_code: 13, hero_qty: 16, per_row: 4, card_img: 10, mo_no: 8, bc_h: 6.5, qr: 11, head_img: 0, mat_img: 7, name: 8, qty: 8.5, code: 6.5, tick: 2.8, pad: "tight", cut_size: 11, cut_sub: 7.5, margin: 5 } },
+  { label: "ปกติ", value: FAMILY_DEFAULT_SIZES },
+  { label: "ตัวใหญ่ อ่านง่าย", value: { hero_img: 32, hero_code: 20, hero_qty: 26, per_row: 3, card_img: 18, mo_no: 11, bc_h: 10, qr: 16, head_img: 12, mat_img: 12, name: 11, qty: 12, code: 8.5, tick: 4, pad: "airy", cut_size: 16, cut_sub: 10, margin: 8 } },
+];
+export function normalizeFamilySizes(raw: unknown): FamilySizes {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const out = { ...FAMILY_DEFAULT_SIZES };
+  for (const z of FAMILY_SIZE_FIELDS) for (const f of z.fields) {
+    const n = Number(o[f.key]);
+    if (o[f.key] !== undefined && o[f.key] !== null && Number.isFinite(n)) out[f.key] = Math.min(f.max, Math.max(f.min, n));
+  }
+  if (FAMILY_SIZE_PADS.some((p) => p.v === o.pad)) out.pad = o.pad as FamilySizes["pad"];
+  return out;
+}
+const sanitizeCols = (raw: unknown): PrintColCfg[] | null => {
+  if (!Array.isArray(raw)) return null;
+  const out = raw.filter((c): c is Record<string, unknown> => !!c && typeof c === "object" && typeof (c as { key?: unknown }).key === "string")
+    .map((c) => ({ key: String(c.key), label: typeof c.label === "string" ? c.label.slice(0, 40) : "", width: Number(c.width) || 0, show: c.show !== false }));
+  return out.length ? out : null;
 };
 /** ค่าที่เจ้าของเลือก (2026-10-31 "ใช้ค่าแนะนำ") */
-export const FAMILY_DEFAULT_SETTINGS: FamilyPrintSettings = { merge: "auto", group: "type", cell: "code", empty: "blank", tick: "before", img: "hide", barcode: "both" };
+export const FAMILY_DEFAULT_SETTINGS: FamilyPrintSettings = { merge: "auto", group: "type", cell: "code", empty: "blank", tick: "before", img: "hide", barcode: "both", sizes: FAMILY_DEFAULT_SIZES, track_cols: null };
 export const FAMILY_SETTING_FIELDS: { key: keyof FamilyPrintSettings; label: string; options: { v: string; label: string }[] }[] = [
   { key: "merge", label: "วิธีรวมแถว", options: [{ v: "auto", label: "อัตโนมัติ" }, { v: "strict", label: "แบบเดิม (เข้ม)" }, { v: "none", label: "ไม่รวม (แถวละรหัส)" }] },
   { key: "group", label: "จัดหมวด", options: [{ v: "type", label: "ตามชนิดวัตถุดิบ" }, { v: "kind", label: "ต่างสี / ใช้ทุกสี" }] },
@@ -107,10 +185,42 @@ export const FAMILY_SETTING_FIELDS: { key: keyof FamilyPrintSettings; label: str
 /** อ่านค่าที่บันทึกไว้แบบปลอดภัย — คีย์ใหม่ที่ยังไม่เคยบันทึก/ค่าเพี้ยน = ค่าเริ่มต้น */
 export function normalizeFamilySettings(raw: unknown): FamilyPrintSettings {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-  const out = { ...FAMILY_DEFAULT_SETTINGS } as Record<string, string>;
+  const out = { ...FAMILY_DEFAULT_SETTINGS } as Record<string, unknown>;
   for (const f of FAMILY_SETTING_FIELDS) if (typeof o[f.key] === "string" && f.options.some((x) => x.v === o[f.key])) out[f.key] = o[f.key] as string;
+  out.sizes = normalizeFamilySizes(o.sizes);
+  out.track_cols = sanitizeCols(o.track_cols);
   return out as FamilyPrintSettings;
 }
+
+/** CSS ขนาดแต่ละจุด — ต่อท้ายเทมเพลต · เฉพาะค่าที่ต่างจากค่าเริ่ม (ค่าเริ่มทั้งหมด = ไม่ปล่อย CSS เพิ่ม หน้าตาเดิมเป๊ะ)
+ *  ใช้ค่าเดียวกันทั้งบนจอและตอนพิมพ์ (บนจอเห็นขนาดจริงที่จะพิมพ์) */
+export function familySizeCss(z: FamilySizes | null | undefined): string {
+  if (!z) return "";
+  const d = FAMILY_DEFAULT_SIZES, r: string[] = [];
+  const ch = (k: keyof FamilySizes) => z[k] !== d[k];
+  if (ch("hero_img")) r.push(`.fp-hero { grid-template-columns: ${z.hero_img + 6}mm 1.4fr 30mm 1.3fr; }`, `.fp-heroimg { max-height: ${z.hero_img}mm; }`, `.fp-heroimg.fp-noimg { width: ${z.hero_img}mm; height: ${z.hero_img}mm; }`);
+  if (ch("hero_code")) r.push(`.product-code { font-size: ${z.hero_code}px; }`);
+  if (ch("hero_qty")) r.push(`.qty-big { font-size: ${z.hero_qty}px; }`);
+  if (ch("card_img")) r.push(z.card_img > 0 ? `.fp-cardimg, .fp-cardimg.fp-noimg { width: ${z.card_img}mm; height: ${z.card_img}mm; }` : `.fp-cardimg { display: none !important; }`);
+  if (ch("mo_no")) r.push(`.fp-mo-no { font-size: ${z.mo_no}px; }`);
+  if (ch("bc_h")) r.push(`.fp-bc-line .wo-barcode-svg { height: ${z.bc_h}mm; }`);
+  if (ch("qr")) r.push(`.fp-bc-qr .wo-qr { width: ${z.qr}mm; height: ${z.qr}mm; }`);
+  if (ch("head_img")) r.push(z.head_img > 0 ? `.fp-skuimg, .fp-skuimg.fp-noimg { width: ${z.head_img}mm; height: ${z.head_img}mm; }` : `.fp-skuimg { display: none !important; }`);
+  if (ch("mat_img")) r.push(`.mat-img { max-height: ${z.mat_img}mm; }`, `.img-cell .fp-noimg { width: ${z.mat_img}mm; height: ${z.mat_img}mm; }`);
+  if (ch("name")) r.push(`.fp-name { font-size: ${z.name}px; }`);
+  if (ch("qty")) r.push(`.fp-q, .fp-tot { font-size: ${z.qty}px; }`);
+  if (ch("code")) r.push(`.fp-cell .fp-sub { font-size: ${z.code}px; }`);
+  if (ch("tick")) r.push(`.tick-box { width: ${z.tick}mm; height: ${z.tick}mm; }`);
+  if (ch("pad")) r.push(`.summary-table th, .summary-table td, .doc-table th, .doc-table td { padding: ${z.pad === "tight" ? "0.3mm 0.4mm" : "1.3mm 1mm"}; }`);
+  if (ch("cut_size")) r.push(`.fp-size { font-size: ${z.cut_size}px; }`);
+  if (ch("cut_sub")) r.push(`.fp-size + .fp-sub { font-size: ${z.cut_sub}px; }`);
+  if (ch("margin")) r.push(`.doc { padding: ${z.margin}mm ${z.margin + 1}mm !important; }`);
+  if (!r.length) return "";
+  const css = r.join("\n");
+  return `\n/* ขนาดแต่ละจุด — ตั้งจากแผง "ตั้งค่าใบรวมทั้งรุ่น" */\n${css}\n@media print {\n${css}\n}\n`;
+}
+/** ความกว้างคอลัมน์รูปวัตถุดิบ — โตตามขนาดรูปที่ตั้ง (ค่าเริ่ม 12 มม. เท่าเดิม) */
+const imgColW = (s: FamilyPrintSettings) => `${Math.max(12, Math.round((s.sizes?.mat_img ?? FAMILY_DEFAULT_SIZES.mat_img) + 3.5))}mm`;
 
 /* ─────────────── ผลลัพธ์ (ตาราง) ─────────────── */
 /** partial = ขอ/สั่งไปแล้วบางส่วน ยังขาด */
@@ -524,7 +634,7 @@ const typeLabel = (t: string) => (t === "อื่น ๆ" ? "อื่น ๆ (
 
 function buySectionHtml(s: FamilySheet, opt: FamilyPrintOptions): string {
   const st = opt.settings, n = s.columns.length;
-  const lead = st.img === "none" ? ["44mm"] : ["12mm", "44mm"];
+  const lead = st.img === "none" ? ["44mm"] : [imgColW(st), "44mm"];
   const tail = st.tick === "row" ? ["22mm", "7mm"] : ["22mm"];
   const span = n + lead.length + tail.length;
   const gh = (label: string, rows: string) => (rows ? `<tr class="fp-gh"><td colspan="${span}">${esc(label)}</td></tr>${rows}` : "");
@@ -550,7 +660,7 @@ function buySectionHtml(s: FamilySheet, opt: FamilyPrintOptions): string {
 
 function cutSectionHtml(s: FamilySheet, no: number, opt: FamilyPrintOptions): string {
   const st = opt.settings, n = s.columns.length;
-  const lead = st.img === "none" ? ["44mm", "11mm"] : ["12mm", "44mm", "11mm"];
+  const lead = st.img === "none" ? ["44mm", "11mm"] : [imgColW(st), "44mm", "11mm"];
   const span = n + lead.length + 1;
   let body = "";
   for (const g of s.cut) {
@@ -582,7 +692,7 @@ export function familyHeadHtml(s: FamilySheet, opt: FamilyPrintOptions): string 
     + c.mos.map((m) => `<div class="fp-mo"><span class="fp-mo-no">${esc(m.mo_no)}</span>${c.mos.length > 1 ? ` <span class="fp-sub">${num(m.qty)} ชิ้น</span>` : ""}${moCodesHtml(m.mo_no, opt.codes, bc)}</div>`).join("")
     + `</div>`; }).join("");
   // บาร์โค้ดเส้นกว้าง ~5.5 ซม. → การ์ดแถวละ 3 · ไม่มีเส้น = แถวละ 6 เหมือนเดิม
-  const perRow = bc === "both" || bc === "line" ? 3 : 6;
+  const perRow = opt.settings.sizes?.per_row || (bc === "both" || bc === "line" ? 3 : 6);   // ตั้งเองได้ในแผง (0 = อัตโนมัติ)
   return `<div class="doc-head-inline"><div class="doc-title">ใบสั่งผลิตรวมทั้งรุ่น</div><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
 <section class="fp-hero">
   <div class="fp-photo">${img(s.image_url, "fp-heroimg")}</div>
