@@ -187,7 +187,7 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                     {departments.map((dd) => <option key={dd.id} value={dd.id}>{dd.name}</option>)}
                   </select></div>
                 <div><span className={lbl}>คนรับ</span>
-                  {d ? <CrewPick people={poolOf(d)} value={x.crewIds} onChange={(ids) => setNd(x.key, { crewIds: ids })} required={isHireDesk(d.name)} />
+                  {d ? <CrewPick people={poolOf(d)} everyone={craftsmen} desks={departments} value={x.crewIds} onChange={(ids) => setNd(x.key, { crewIds: ids })} required={isHireDesk(d.name)} />
                     : <div className={`${inp} flex items-center text-slate-400`}>เลือกโต๊ะก่อน</div>}</div>
                 <div><span className={lbl}>จำนวน</span>
                   <input type="number" min={0} disabled={lock} value={x.qty || ""} onChange={(e) => setNd(x.key, { qty: Number(e.target.value) || 0 })} className={`${inp} text-right${ring(`${key}:qty`)}`} /></div>
@@ -328,7 +328,7 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                                 </select><Msg field={`${key}:dept`} /></div>
                               <div><span className={lbl}>คนรับ</span>
                                 {lock ? <div className={`${inp} flex items-center truncate bg-slate-50`}>{w.assignee_name ?? "ทั้งโต๊ะ"}</div>
-                                  : <CrewPick people={pool} value={f.crewIds} onChange={(ids) => setWo(w.id, { crewIds: ids })} required={isHireDesk(d?.name)} />}</div>
+                                  : <CrewPick people={pool} everyone={craftsmen} desks={departments} value={f.crewIds} onChange={(ids) => setWo(w.id, { crewIds: ids })} required={isHireDesk(d?.name)} />}</div>
                               <div><span className={lbl}>จำนวน</span>
                                 <input type="number" min={0} disabled={lock} value={f.qty || ""} onChange={(e) => setWo(w.id, { qty: Number(e.target.value) || 0 })} className={`${inp} text-right${ring(`${key}:qty`)}`} /></div>
                               <div><span className={lbl}>ค่าแรง/ชิ้น</span>

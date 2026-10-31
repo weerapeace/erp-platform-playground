@@ -769,7 +769,7 @@ function WorkBoardPageInner() {
     const bad = dispatchRowIssues({ qty: dispQty, remaining: dispMO.remaining, deskName: dispDept.name, crewCount: dispCrew.length }).find((x) => x.level === "error");
     if (bad) { toast.error(bad.msg); return; }
     // ค่าแรงว่างได้ — จ่ายก่อน ค่อยมาใส่ทีหลัง (ปุ่ม 💰 ใส่ค่าแรง ที่การ์ดในโต๊ะ / ตอนส่งงาน)
-    const crew = crewList(dispCrew, deptCraftsmen);   // เฉพาะคนที่ยังอยู่ในโต๊ะนี้ (เปลี่ยนโต๊ะ/ย้ายคน → ตัดทิ้ง)
+    const crew = crewList(dispCrew, craftsmen);   // ทุกคน (รวมคนนอกโต๊ะที่เลือกเอง)   // เฉพาะคนที่ยังอยู่ในโต๊ะนี้ (เปลี่ยนโต๊ะ/ย้ายคน → ตัดทิ้ง)
     setDispSaving(true);
     try {
       const res = await apiFetch("/api/mo/work-orders", { method: "POST", headers: { "Content-Type": "application/json" },
@@ -805,7 +805,7 @@ function WorkBoardPageInner() {
   };
   const saveCrew = () => {
     if (!detailWO || crewEdit === null) return;
-    const f = crewFields(crewList(crewEdit, crewPoolOf(detailWO)), detailWO.department_name ?? "");
+    const f = crewFields(crewList(crewEdit, craftsmen), detailWO.department_name ?? "");
     void saveWoFix(f, f.assignees.length ? `บันทึกคนรับงานแล้ว: ${f.assignee_name}` : "ตั้งเป็นทั้งโต๊ะรับงาน (ไม่ระบุคน) แล้ว");
   };
 
@@ -1944,7 +1944,7 @@ function WorkBoardPageInner() {
               <div>
                 <span className="text-[11px] text-slate-500">{dispIsHire ? "👥 คนรับงาน (งานเหมา — ต้องเลือก *)" : `👥 คนรับงานใน ${dispDept.name} — กดได้หลายคน`}</span>
                 <div className="mt-1">
-                  <CrewPick people={deptCraftsmen} value={dispCrew} onChange={setDispCrew} required={dispIsHire}
+                  <CrewPick people={deptCraftsmen} everyone={craftsmen} desks={board.departments} value={dispCrew} onChange={setDispCrew} required={dispIsHire}
                     recent={lastCrewIds(board.workOrders, dispDept.id, deptCraftsmen)}
                     flag={(p) => { const d = defectScoped(p.name, parentKeyOf(dispMO.product_sku)); return d ? `เคยทำรุ่นนี้เสีย ${d.count} ครั้ง` : null; }} />
                 </div>
@@ -2049,7 +2049,7 @@ function WorkBoardPageInner() {
               return (
                 <div className="rounded-lg border border-violet-200 bg-violet-50/40 p-2 space-y-2">
                   <div className="text-[11px] font-medium text-violet-800">👥 คนรับงานใบนี้ — กดได้หลายคน</div>
-                  <CrewPick people={pool} value={crewEdit} onChange={setCrewEdit} required={hire} recent={lastCrewIds(board.workOrders, detailWO.department_id, pool)} />
+                  <CrewPick people={pool} everyone={craftsmen} desks={board.departments} value={crewEdit} onChange={setCrewEdit} required={hire} recent={lastCrewIds(board.workOrders, detailWO.department_id, pool)} />
                   <div className="flex justify-end gap-2">
                     <button type="button" onClick={() => setCrewEdit(null)} disabled={woFixSaving} className="h-8 px-3 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50">ยกเลิก</button>
                     <button type="button" onClick={saveCrew} disabled={woFixSaving || (hire && crewEdit.length === 0)} className="h-8 px-3 text-xs bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50">{woFixSaving ? "กำลังบันทึก…" : "บันทึกคนรับ"}</button>
@@ -3920,7 +3920,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     const over = list.find((m) => qtyOf(m) > m.remaining + 0.0001);
     if (over) { toast.error(`${over.product_sku ?? over.mo_no}: จ่ายได้ไม่เกิน ${fmt(over.remaining)} ชิ้น`); return; }
     const hire = isHireDesk(dept.name);
-    const crew = crewList(dispCrew, hire ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id));
+    const crew = crewList(dispCrew, craftsmen);   // ทุกคน (รวมคนนอกโต๊ะที่เลือกเอง)
     // งานเหมา = ต้องระบุคน (กฎเดียวกับป๊อปจ่ายงานปกติ)
     if (hire && !crew.length) { toast.error("งานเหมา ต้องเลือกช่างก่อน"); return; }
     const who = crewFields(crew, dept.name);
@@ -3971,7 +3971,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       const l = rows[i];
       const dept = departments.find((d) => d.id === l.deptId);
       if (!dept) continue;
-      const who = crewFields(crewList(l.crewIds, isHireDesk(dept.name) ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id)), dept.name);
+      const who = crewFields(crewList(l.crewIds, craftsmen), dept.name);
       const rate = Number(l.rate) || 0;
       setDispMsg(`กำลังจ่าย ${i + 1}/${rows.length} · ${dept.name}`);
       try {
@@ -5368,7 +5368,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
                 <div>
                   <span className="text-[11px] text-slate-500">{isHire ? "👥 คนรับงาน (งานเหมา — ต้องเลือก *)" : `👥 คนรับงานใน ${dept.name} — กดได้หลายคน`}</span>
                   <div className="mt-1">
-                    <CrewPick people={deptCrafts} value={dispCrew} onChange={setDispCrew} required={isHire} recent={lastCrewIds(workOrders, dept.id, deptCrafts)} />
+                    <CrewPick people={deptCrafts} everyone={craftsmen} desks={departments} value={dispCrew} onChange={setDispCrew} required={isHire} recent={lastCrewIds(workOrders, dept.id, deptCrafts)} />
                   </div>
                 </div>
               )}

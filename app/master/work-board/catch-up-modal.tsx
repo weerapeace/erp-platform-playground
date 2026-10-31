@@ -210,7 +210,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const poolOf = (d: DeptLite | null) => (d ? (isHireDesk(d.name) ? craftsmen : craftsmen.filter((c) => c.department_id === d.id)) : []);
   const setRow = (key: string, patch: Partial<DispRow>) => setDisp((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const setRetRow = (key: string, patch: Partial<CuRetLine>) => setRet((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
-  const crewNames = (r: DispRow) => crewList(r.crewIds, poolOf(deptOf(r.deptId))).map((x) => x.name).join(", ");
+  const crewNames = (r: DispRow) => crewList(r.crewIds, craftsmen).map((x) => x.name).join(", ");
   const dispLabel = (r: DispRow) => { const d = deptOf(r.deptId); const n = crewNames(r); return d ? `${d.name}${n ? ` · ${n}` : ""}` : `แถวจ่าย ${disp.indexOf(r) + 1}`; };
   const dispTotal = r2(disp.reduce((a, r) => a + (r.qty > 0 ? r.qty : 0), 0));
   const remain = f ? Math.max(0, f.qty - f.dispatched) : 0;
@@ -276,7 +276,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
       }, snap?.wos ?? [])
     : { steps: [] as CuStep[], errors: [] as string[], issues: [] as CuIssue[], received: 0 };
   // เตือนงานเสียของช่างที่เลือก (ข้อมูลอยู่ฝั่งจอ) — เตือนเฉย ๆ บันทึกได้
-  const defectIssues: CuIssue[] = on("dispatch") ? disp.flatMap((r) => crewList(r.crewIds, poolOf(deptOf(r.deptId)))
+  const defectIssues: CuIssue[] = on("dispatch") ? disp.flatMap((r) => crewList(r.crewIds, craftsmen)
     .map((c) => ({ c, d: defectOf(c.name) })).filter((x) => x.d)
     .map((x) => ({ level: "warn" as const, field: `disp:${r.key}:crew`, msg: `${x.c.name} ${x.d}` }))) : [];
   // เช็กใบขาย (จับคู่รหัสสินค้า) ตอนส่งออก/ปิดใบ — เตือนเฉย ๆ บันทึกได้
@@ -371,7 +371,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     }
     setPage(3); setResults([]);
     const ctxDisp: Record<string, { dept: DeptLite; who: Record<string, unknown> }> = {};
-    for (const r of disp) { const d = deptOf(r.deptId); if (d) ctxDisp[r.key] = { dept: d, who: crewFields(crewList(r.crewIds, poolOf(d)), d.name) }; }
+    for (const r of disp) { const d = deptOf(r.deptId); if (d) ctxDisp[r.key] = { dept: d, who: crewFields(crewList(r.crewIds, craftsmen), d.name) }; }   // รวมคนนอกโต๊ะที่เลือกเอง
     const res = await cuRun(built.steps, { snap, disp: ctxDisp, shelfId, badReason }, async (url, body, method = "POST") => {
       const r = await apiFetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await r.json().catch(() => ({}));
@@ -781,7 +781,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                         {d && (
                           <div id={`cu-${k}:crew`} className="mt-2">
                             <label className={lbl}>คนรับ {hire ? "(โต๊ะเหมา ต้องเลือกคน)" : "(เลือกได้หลายคน)"}</label>
-                            <CrewPick people={pool} value={r.crewIds} required={hire} recent={lastCrewIds(workOrders, d.id, pool)}
+                            <CrewPick people={pool} everyone={craftsmen} desks={departments} value={r.crewIds} required={hire} recent={lastCrewIds(workOrders, d.id, pool)}
                               flag={(pp) => defectOf(pp.name)}
                               onChange={(ids) => setRow(r.key, { crewIds: ids, ...(r.rateSet ? {} : { rate: rateFor(ids) }) })} />
                             <Msg field={`${k}:crew`} />

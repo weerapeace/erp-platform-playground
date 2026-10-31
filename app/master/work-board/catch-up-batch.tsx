@@ -126,7 +126,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   const deptOf = (id: string) => departments.find((d) => d.id === id) ?? null;
   const poolOf = (d: DeptLite | null) => (d ? (isHireDesk(d.name) ? craftsmen : craftsmen.filter((c) => c.department_id === d.id)) : []);
   const nickOf = (full: string | null | undefined) => (full ?? "").split(", ").map((n) => craftsmen.find((c) => c.name === n)?.nickname?.trim() || n).filter(Boolean).join(", ");
-  const crewNick = (r: CuDispRow) => poolOf(deptOf(r.deptId)).filter((c) => r.crewIds.includes(c.id)).map((c) => c.nickname?.trim() || c.name).join(", ");
+  const crewNick = (r: CuDispRow) => craftsmen.filter((c) => r.crewIds.includes(c.id)).map((c) => c.nickname?.trim() || c.name).join(", ");
   const dispLabel = (r: CuDispRow, i: number) => { const d = deptOf(r.deptId); const n = crewNick(r); return d ? `${d.name} · ${n || "ทั้งโต๊ะ"}` : `แถวจ่าย ${i + 1}`; };
 
   // ── โหลดข้อมูลตั้งต้นของทุกใบ (ทีละ 4 ใบ กันเซิร์ฟเวอร์หนัก) + คำขอที่ค้างของแต่ละใบ
@@ -296,7 +296,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
       let left = cuDefaultQty(f, k).dispatchQty;
       const disp = F.disp.map((x, i) => {
         const pool = poolOf(deptOf(x.deptId));
-        const crewIds = x.crewIds.filter((id) => pool.some((c) => c.id === id));
+        const crewIds = x.crewIds.filter((id) => pool.some((c) => c.id === id) || craftsmen.some((c) => c.id === id));
         const qty = i === F.disp.length - 1 ? left : r2(Math.min(left, Math.max(0, x.qty)));
         left = r2(Math.max(0, left - qty));
         return { key: nk("d"), deptId: x.deptId, crewIds, qty, date: x.date, note: x.note, rateSet: x.rateSet, rate: x.rateSet ? x.rate : cuRateFor(r.snap, crewIds) };
@@ -364,7 +364,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
         catch (e) { patchRow(r.moNo, { phase: "edit", runMsg: e instanceof Error ? e.message : "เริ่มบันทึกคำขอไม่สำเร็จ" }); continue; }
       }
       const ctxDisp: Record<string, { dept: DeptLite; who: Record<string, unknown> }> = {};
-      for (const x of r.disp) { const dept = deptOf(x.deptId); if (dept) ctxDisp[x.key] = { dept, who: crewFields(crewList(x.crewIds, poolOf(dept)), dept.name) }; }
+      for (const x of r.disp) { const dept = deptOf(x.deptId); if (dept) ctxDisp[x.key] = { dept, who: crewFields(crewList(x.crewIds, craftsmen), dept.name) }; }   // ทุกคน (รวมคนนอกโต๊ะที่เลือกเอง)
       const res = await cuRun(d.built.steps, { snap: r.snap!, disp: ctxDisp, shelfId: r.shelfId, badReason: r.badReason }, api, undefined, (s) => cuStepLabel(s, d.whoOf));
       const ok = res.length === d.built.steps.length && res.every((x) => x.ok);
       if (m.reviewing) {
@@ -664,7 +664,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     return { disp: x.r.disp.map((l) => ({ ...l, ...f(l) })) };
   };
   const fillDesk = fillDisp((s0, x) => {
-    const pool = poolOf(deptOf(s0.deptId)), crewIds = s0.crewIds.filter((id) => pool.some((c) => c.id === id));
+    const pool = poolOf(deptOf(s0.deptId)), crewIds = s0.crewIds.filter((id) => pool.some((c) => c.id === id) || craftsmen.some((c) => c.id === id));
     return (l) => ({ deptId: s0.deptId, crewIds, ...(l.rateSet ? {} : { rate: cuRateFor(x.r.snap, crewIds) }) });
   });
   const dispSec = section("disp", <>
@@ -713,7 +713,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                 <Msg d={d} field={`${fk}:dept`} />
               </td>
               <td className={td}>
-                {dept ? <CrewPick people={pool} value={x.crewIds} required={hire} recent={lastCrewIds(workOrders, dept.id, pool)}
+                {dept ? <CrewPick people={pool} everyone={craftsmen} desks={departments} value={x.crewIds} required={hire} recent={lastCrewIds(workOrders, dept.id, pool)}
                   onChange={(ids) => setDisp(r.moNo, x.key, { crewIds: ids, ...(x.rateSet ? {} : { rate: cuRateFor(r.snap, ids) }) })} />
                   : <span className="text-[12px] text-slate-400">เลือกโต๊ะก่อน</span>}
                 <Msg d={d} field={`${fk}:crew`} />

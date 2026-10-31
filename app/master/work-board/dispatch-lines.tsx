@@ -81,7 +81,7 @@ export function DispatchLines({ lines, onChange, remaining, desks, deskLabel, cr
             {d && (
               <div className="pl-7">
                 <div className="mb-1 text-[11px] text-slate-500">{hire ? "คนรับงาน (งานเหมา — ต้องเลือก)" : `คนรับงานใน ${d.name} — ไม่เลือก = ทั้งโต๊ะ · กดได้หลายคน`}</div>
-                <CrewPick people={pool} value={l.crewIds} onChange={(ids) => set(l.key, { crewIds: ids })} required={hire} recent={lastCrewIds(workOrders, d.id, pool)} />
+                <CrewPick people={pool} everyone={craftsmen} desks={desks} value={l.crewIds} onChange={(ids) => set(l.key, { crewIds: ids })} required={hire} recent={lastCrewIds(workOrders, d.id, pool)} />
               </div>
             )}
             {err && <div className="pl-7 text-[11px] text-rose-600">{err}</div>}
