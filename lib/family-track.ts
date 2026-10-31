@@ -46,6 +46,8 @@ export type TrackOptions = {
   codes?: Record<string, MoCodes>;
   /** คอลัมน์แบบ A ที่ตั้งไว้ (ค่ากลาง family_print_settings.track_cols) — null = ค่าเริ่ม */
   cols?: PrintColCfg[] | null;
+  /** "แผ่น 3/4" เมื่อพิมพ์รวมกับใบซื้อ-ตัด (หัวกำกับแผ่น) */
+  page_label?: string;
 };
 /** ความกว้างช่องเลขใบ (น้ำหนัก ≈ มม.) — บาร์โค้ดเส้นกว้าง ~6 ซม. · เส้น + QR ต้องวางข้างกันได้ ไม่งั้นแถวสูงเปลือง */
 const moColW = (bc?: FamilyPrintSettings["barcode"]) => (bc === "both" ? 86 : bc === "line" ? 66 : bc === "qr" ? 36 : 28);
@@ -241,7 +243,7 @@ function headHtml(t: FamilyTrack, title: string, opt: TrackOptions): string {
   const s = t.stats;
   const facts = opt.blank ? "" : `<div><span class="label">ค่าแรงรวม:</span> ${num(s.labor)} บาท</div><div><span class="label">จ่ายแล้ว / รับแล้ว:</span> ${num(s.dispatched)} / ${num(s.received)} ชิ้น</div>`
     + `<div><span class="label">ค้างที่ช่าง:</span> ${num(s.outstanding)} · <span class="label">ยังไม่จ่าย:</span> ${num(s.undispatched)} ชิ้น</div>`;
-  return `<div class="doc-head-inline"><div class="doc-title">${esc(title)}</div><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
+  return `<div class="doc-head-inline"><div class="doc-title">${esc(title)}${opt.page_label ? ` <span class="fp-page">${esc(opt.page_label)}</span>` : ""}</div><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
 <section class="fp-hero">
   <div class="fp-photo">${img(t.image_url, "fp-heroimg")}</div>
   <div class="fp-model"><div class="muted">รุ่น (สินค้าแม่)</div><div class="product-code">${esc(t.title_code)}</div>${t.title_name ? `<div class="product-name">${esc(t.title_name)}</div>` : ""}</div>

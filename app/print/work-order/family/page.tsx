@@ -5,9 +5,11 @@
  *   ?mo=<id>        จากใบเดียว → รวมทุกใบที่ยังเปิดของรุ่นเดียวกัน
  *   ?parent=<code>  จากรหัสสินค้าแม่ (หัวกลุ่มบนบอร์ด)
  *   ?ids=a,b,c      ใบที่ติ๊กเลือก → แยกรุ่นละ 1 แผ่น
- *   ?sheet=         buy (ค่าเริ่ม) · route · status · track (= route + status)
+ *   ?sheet=         buy (ซื้อ+ตัด · ค่าเริ่ม) · route · status · track (= A + D) · all (= ซื้อ+ตัด + A)
+ * เลือกแผ่นที่จะพิมพ์รวมกันได้: เตรียม/ซื้อ · ตัด · ติดตามงาน A · ตามสถานะ D (เจ้าของ 2026-10-31: "จะได้พิมพ์ทีเดียว")
+ *   ซื้อกับตัดอยู่แผ่นเดียวกัน หรือแยกแผ่น (ส่งคนละแผนก) — ทุกแผ่นมีหัวกำกับ (ชื่อใบ + แผ่น x/y)
  * ใบ "ซื้อ-ตัด" = ตาราง ของ × สี (lib/family-print) · ใบ "ติดตามงาน" แบบเขียนมือ A/D (lib/family-track)
- * ใช้ระบบพิมพ์กลาง + เส้น/ตัวอักษรจาก "ตั้งค่าใบพิมพ์" ใบสั่งงาน
+ * ใช้ระบบพิมพ์กลาง + เส้น/ขนาดจาก "ตั้งค่าใบรวมทั้งรุ่น"
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -16,14 +18,13 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
-import { WO_DEFAULT_STYLE, woBarcodeHtml, woQrHtml, woStyleCss } from "@/lib/work-order-print";
+import { woBarcodeHtml, woQrHtml } from "@/lib/work-order-print";
 import { scanUrl } from "@/lib/scan-code";
-import { useWoPrintColumns } from "@/components/wo-print-columns";
 import { FamilyPrintSettingsButton, useFamilyPrintSettings } from "@/components/family-print-settings";
 import { FamilyDataCheck } from "@/components/family-data-check";
 import { familyIssues, issueFlags } from "@/lib/family-checks";
 import {
-  FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, familyHtmlData, familyOrientation, familySizeCss,
+  FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, familyHtmlData, familyLineCss, familyOrientation, familySizeCss,
   type FamilyPrintOptions, type FamilyPrintResponse, type FamilyPrintSettings, type FamilySheetKind, type MoCodes,
 } from "@/lib/family-print";
 import {
@@ -31,9 +32,21 @@ import {
   type TrackExtras, type TrackOptions,
 } from "@/lib/family-track";
 
-type Sections = "both" | "buy" | "cut";
 type Paper = "auto" | "landscape" | "portrait";
-const SHEETS: FamilySheetKind[] = ["buy", "route", "status", "track"];
+type PageKind = "buy" | "cut" | "route" | "status";
+type Pages = Record<PageKind, boolean>;
+const PAGES_KEY = "erp.familyPrint.pages.v1";   // แผ่นที่เลือก + แยกแผ่น — จำต่อเครื่อง
+const P = (buy: boolean, cut: boolean, route: boolean, status: boolean): Pages => ({ buy, cut, route, status });
+/** ?sheet= (ลิงก์เดิม) → แผ่นที่จะพิมพ์ */
+const SHEET_PAGES: Record<FamilySheetKind, Pages> = {
+  buy: P(true, true, false, false), route: P(false, false, true, false), status: P(false, false, false, true),
+  track: P(false, false, true, true), all: P(true, true, true, false),
+};
+const PAGE_CHIPS: { k: PageKind; label: string }[] = [
+  { k: "buy", label: "เตรียม / ซื้อ" }, { k: "cut", label: "ตัด" }, { k: "route", label: "ติดตามงาน A" }, { k: "status", label: "ตามสถานะ D" },
+];
+/** ชื่อใบบนหัวกำกับแต่ละแผ่น */
+const PAGE_TITLE = { buycut: "ใบสั่งผลิตรวมทั้งรุ่น", buy: "ใบเตรียมของ (ของที่ต้องซื้อ)", cut: "ใบตัด (บล็อกตัด)" } as const;
 const EXTRAS_KEY = "erp.familyTrack.extras.v1";   // ช่องเสริมที่ติ๊กไว้ — จำต่อเครื่อง
 
 function Seg<T extends string>({ value, options, onChange }: { value: T; options: { v: T; label: string }[]; onChange: (v: T) => void }) {
@@ -58,13 +71,13 @@ function FamilyPrintInner() {
 
   const [data, setData] = useState<FamilyPrintResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [sheet, setSheet] = useState<FamilySheetKind>(() => (SHEETS as string[]).includes(sp.get("sheet") ?? "") ? (sp.get("sheet") as FamilySheetKind) : "buy");
-  const [sections, setSections] = useState<Sections>("both");
+  const urlPages = SHEET_PAGES[sp.get("sheet") as FamilySheetKind] ?? null;
+  const [pages, setPages] = useState<Pages>(() => urlPages ?? SHEET_PAGES.buy);
+  const [split, setSplit] = useState(false);   // ซื้อกับตัดคนละแผ่น
   const [onlyToBuy, setOnlyToBuy] = useState(false);
   const [paper, setPaper] = useState<Paper>("auto");
   const [blank, setBlank] = useState(false);
   const [extras, setExtras] = useState<TrackExtras>(() => normalizeTrackExtras(null));
-  const { cols } = useWoPrintColumns();   // เส้นตาราง/ขนาดตัวอักษร = ค่ากลางเดียวกับใบสั่งงาน
   const { settings: savedSettings, reload: reloadSettings } = useFamilyPrintSettings();   // วิธีรวมแถว/ช่องติ๊ก/บาร์โค้ด (ค่ากลาง)
   const [previewSettings, setPreviewSettings] = useState<FamilyPrintSettings | null>(null);   // ค่าที่กำลังปรับในแผง (ยังไม่บันทึก)
   const settings = previewSettings ?? savedSettings;
@@ -72,12 +85,32 @@ function FamilyPrintInner() {
   const [reloadKey, setReloadKey] = useState(0);                 // แก้ข้อมูลจากแผงตรวจแล้ว → โหลดใหม่
   const [checkOpen, setCheckOpen] = useState(false);
   const [activeIssue, setActiveIssue] = useState<string | null>(null);   // กดกรอบเหลืองบนเอกสาร (แบบ B)
-  const isTrack = sheet !== "buy";
+  const anyTrack = pages.route || pages.status;
+  const anyBuyCut = pages.buy || pages.cut;
 
   // อ่านค่าที่จำไว้หลังเปิดหน้า (อ่านตอน render แรกจะไม่ตรงกับฝั่ง server)
   useEffect(() => {
     try { setExtras(normalizeTrackExtras(JSON.parse(localStorage.getItem(EXTRAS_KEY) ?? "null"))); } catch { /* ไม่มี/อ่านไม่ได้ = ค่าเริ่ม */ }
   }, []);
+
+  // แผ่นที่เลือกครั้งก่อน (ไม่มี ?sheet= ในลิงก์) — จำต่อเครื่อง
+  useEffect(() => {
+    if (urlPages) return;
+    try {
+      const o = JSON.parse(localStorage.getItem(PAGES_KEY) ?? "null") as { pages?: Partial<Pages>; split?: boolean } | null;
+      if (o?.pages && PAGE_CHIPS.some((c) => o.pages?.[c.k])) setPages({ ...P(false, false, false, false), ...o.pages });
+      if (typeof o?.split === "boolean") setSplit(o.split);
+    } catch { /* ไม่มี/อ่านไม่ได้ = ค่าเริ่ม */ }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const remember = (p: Pages, sp2: boolean) => { try { localStorage.setItem(PAGES_KEY, JSON.stringify({ pages: p, split: sp2 })); } catch { /* ไม่จำก็ได้ */ } };
+  const togglePage = (k: PageKind) => {
+    const next = { ...pages, [k]: !pages[k] };
+    if (!PAGE_CHIPS.some((c) => next[c.k])) return;   // ต้องเหลืออย่างน้อย 1 แผ่น
+    setPages(next);
+    remember(next, split);
+  };
+  const changeSplit = (v: boolean) => { setSplit(v); remember(pages, v); };
 
   const toggleExtra = (k: keyof TrackExtras) => setExtras((cur) => {
     const next = { ...cur, [k]: !cur[k] };
@@ -112,7 +145,7 @@ function FamilyPrintInner() {
 
   const sheets = useMemo(() => (data?.families ?? []).map((f) => buildFamilySheet(f, settings.merge)), [data, settings.merge]);
   const title = sheets.length === 1 ? sheets[0].title_code : `${sheets.length} รุ่น`;
-  const fileName = docFileName(isTrack ? "ใบติดตามงานผลิต" : "ใบสั่งผลิตรวมทั้งรุ่น", title);
+  const fileName = docFileName(anyBuyCut ? "ใบสั่งผลิตรวมทั้งรุ่น" : "ใบติดตามงานผลิต", title);
 
   // ตรวจข้อมูล: ปัญหา + ธงบนเอกสาร (เฉพาะพรีวิวบนจอ — ไฟล์ที่พิมพ์/บันทึก PDF ไม่มีธง)
   const issues = useMemo(() => (data?.families ?? []).flatMap(familyIssues), [data]);
@@ -121,26 +154,37 @@ function FamilyPrintInner() {
   const build = (withFlags: boolean) => {
     if (!sheets.length || !data) return "";
     const printed = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "Asia/Bangkok" });
-    // เส้น/ตัวอักษรจากตั้งค่าใบสั่งงาน + ขนาดแต่ละจุดของใบรวมทั้งรุ่น (ต่อท้าย = ชนะกฎเดิม)
-    const style = woStyleCss(cols?.style ?? WO_DEFAULT_STYLE) + familySizeCss(settings.sizes);
-    if (isTrack) {
-      const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);   // วันนี้เวลาไทย (นับวันค้าง)
-      const opt: TrackOptions = { extras, blank, printed, today, barcode: settings.barcode, codes, cols: settings.track_cols };
-      const tracks = data.families.map((f) => buildFamilyTrack(f, today));
-      const kinds = sheet === "track" ? (["route", "status"] as const) : ([sheet] as const);
-      const pages = tracks.flatMap((t) => kinds.map((k) => familyTrackHtmlData(t, k, opt)));
-      // ใบติดตามงานคอลัมน์เยอะ → แนวนอนเป็นค่าเริ่ม
-      return buildReportHtmlMulti(buildFamilyTemplate(paper === "auto" ? "landscape" : paper, TRACK_CSS + style), pages, fileName);
-    }
-    const opt: FamilyPrintOptions = { ...FAMILY_DEFAULT_OPTIONS, buy: sections !== "cut", cut: sections !== "buy", only_to_buy: onlyToBuy, printed, settings, codes, flags: withFlags ? flags : undefined };
-    const orientation = paper === "auto" ? familyOrientation(sheets) : paper;
-    return buildReportHtmlMulti(buildFamilyTemplate(orientation, style), sheets.map((s) => familyHtmlData(s, opt)), fileName);
+    // เส้นตาราง + ขนาดแต่ละจุด (ตั้งค่าใบรวมทั้งรุ่น · ต่อท้าย = ชนะกฎเดิม)
+    const style = familyLineCss(settings.line) + familySizeCss(settings.sizes);
+    const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);   // วันนี้เวลาไทย (นับวันค้าง)
+    const trackOpt: TrackOptions = { extras, blank, printed, today, barcode: settings.barcode, codes, cols: settings.track_cols };
+    // แผ่นต่อรุ่นตามที่เลือก: ซื้อ+ตัดแผ่นเดียว หรือแยก · แล้วต่อด้วยใบติดตามงาน
+    const kinds: ("buycut" | "buy" | "cut" | "route" | "status")[] = [];
+    if (pages.buy && pages.cut && !split) kinds.push("buycut");
+    else { if (pages.buy) kinds.push("buy"); if (pages.cut) kinds.push("cut"); }
+    if (pages.route) kinds.push("route");
+    if (pages.status) kinds.push("status");
+    const docs = data.families.flatMap((f, fi) => {
+      const track = anyTrack ? buildFamilyTrack(f, today) : null;
+      return kinds.map((k, ki) => {
+        const page_label = kinds.length > 1 ? `แผ่น ${ki + 1}/${kinds.length}` : "";
+        if (k === "route" || k === "status") return familyTrackHtmlData(track!, k, { ...trackOpt, page_label });
+        const opt: FamilyPrintOptions = {
+          ...FAMILY_DEFAULT_OPTIONS, buy: k !== "cut", cut: k !== "buy", only_to_buy: onlyToBuy, printed, settings, codes,
+          flags: withFlags ? flags : undefined, title: PAGE_TITLE[k], page_label,
+        };
+        return familyHtmlData(sheets[fi], opt);
+      });
+    });
+    // มีใบติดตามงาน (คอลัมน์เยอะ) → แนวนอน · ไม่มี → ตามจำนวนสี
+    const orientation = paper === "auto" ? (anyTrack ? "landscape" : familyOrientation(sheets)) : paper;
+    return buildReportHtmlMulti(buildFamilyTemplate(orientation, (anyTrack ? TRACK_CSS : "") + style), docs, fileName);
   };
-  const deps = [sheets, data, isTrack, sheet, extras, blank, sections, onlyToBuy, paper, cols, fileName, settings, codes, flags];
+  const deps = [sheets, data, pages, split, anyTrack, extras, blank, onlyToBuy, paper, fileName, settings, codes, flags];
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const html = useMemo(() => build(false), deps);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const previewHtml = useMemo(() => (isTrack ? html : build(true)), [...deps, html]);
+  const previewHtml = useMemo(() => (anyBuyCut ? build(true) : html), [...deps, html, anyBuyCut]);
   // แบบ B: กดแถว/การ์ดกรอบเหลืองในพรีวิว → เปิดแผงตรวจข้อมูลที่การ์ดนั้น
   const onDocLoad = (doc: Document) => {
     doc.addEventListener("click", (e) => {
@@ -163,9 +207,20 @@ function FamilyPrintInner() {
             <Icon name="back" /> กลับ
           </button>
           <span className="text-sm text-slate-600">พิมพ์รวมทั้งรุ่น {data && <b className="text-slate-800">{summary}</b>}</span>
-          <Seg value={sheet} onChange={setSheet} options={[
-            { v: "buy", label: "ซื้อ-ตัด (ของ × สี)" }, { v: "route", label: "ติดตามงาน A" }, { v: "status", label: "ตามสถานะ D" }, { v: "track", label: "A + D" },
-          ]} />
+          {/* แผ่นที่จะพิมพ์ — เลือกรวมกันได้ จะได้พิมพ์ทีเดียว */}
+          <span className="inline-flex flex-wrap items-center gap-1 text-sm text-slate-500">
+            พิมพ์:
+            {PAGE_CHIPS.map((c) => (
+              <button key={c.k} type="button" onClick={() => togglePage(c.k)}
+                className={`inline-flex h-9 items-center gap-1 rounded-lg border px-3 text-sm ${pages[c.k] ? "border-blue-300 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                {pages[c.k] && <Icon name="done" />} {c.label}
+              </button>
+            ))}
+          </span>
+          {pages.buy && pages.cut && (
+            <Seg value={split ? "split" : "one"} onChange={(v) => changeSplit(v === "split")}
+              options={[{ v: "one", label: "เตรียม+ตัด แผ่นเดียว" }, { v: "split", label: "แยกคนละแผ่น" }]} />
+          )}
           <div className="flex-1" />
           <PrintDocLinkButton html={html} fileName={fileName}
             className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700">
@@ -173,10 +228,10 @@ function FamilyPrintInner() {
           </PrintDocLinkButton>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          {isTrack ? (
+          {anyTrack && (
             <>
               <Seg value={blank ? "blank" : "sys"} onChange={(v) => setBlank(v === "blank")} options={[{ v: "sys", label: "เติมจากระบบ + ช่องเขียน" }, { v: "blank", label: "ฟอร์มเปล่า" }]} />
-              {sheet !== "status" && (
+              {pages.route && (
                 <span className="flex flex-wrap items-center gap-1.5 text-sm text-slate-500">
                   ช่องเสริม (แบบ A):
                   {TRACK_EXTRAS.map((e) => (
@@ -188,13 +243,11 @@ function FamilyPrintInner() {
                 </span>
               )}
             </>
-          ) : (
-            <>
-              <Seg value={sections} onChange={setSections} options={[{ v: "both", label: "ซื้อ + ตัด" }, { v: "buy", label: "เฉพาะซื้อ" }, { v: "cut", label: "เฉพาะตัด" }]} />
-              <label className={`inline-flex items-center gap-1.5 text-sm ${sections === "cut" ? "text-slate-300" : "text-slate-600"}`}>
-                <input type="checkbox" checked={onlyToBuy} disabled={sections === "cut"} onChange={(e) => setOnlyToBuy(e.target.checked)} /> เฉพาะที่ยังต้องซื้อ
-              </label>
-            </>
+          )}
+          {pages.buy && (
+            <label className="inline-flex items-center gap-1.5 text-sm text-slate-600">
+              <input type="checkbox" checked={onlyToBuy} onChange={(e) => setOnlyToBuy(e.target.checked)} /> เฉพาะที่ยังต้องซื้อ
+            </label>
           )}
           <Seg value={paper} onChange={setPaper} options={[{ v: "auto", label: "กระดาษอัตโนมัติ" }, { v: "landscape", label: "แนวนอน" }, { v: "portrait", label: "แนวตั้ง" }]} />
           <FamilyPrintSettingsButton current={savedSettings} onPreview={setPreviewSettings} onSaved={reloadSettings} extras={extras} />

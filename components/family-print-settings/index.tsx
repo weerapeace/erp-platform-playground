@@ -14,8 +14,8 @@ import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { ColumnRows } from "@/components/wo-print-columns";
 import {
-  FAMILY_DEFAULT_SETTINGS, FAMILY_SETTING_FIELDS, FAMILY_SIZE_FIELDS, FAMILY_SIZE_PADS, FAMILY_SIZE_PRESETS, normalizeFamilySettings,
-  type FamilyPrintSettings, type FamilySizes, type PrintColCfg,
+  FAMILY_DEFAULT_SETTINGS, FAMILY_LINE_COLORS, FAMILY_LINE_MODES, FAMILY_LINE_WIDTHS, FAMILY_SETTING_FIELDS, FAMILY_SIZE_FIELDS, FAMILY_SIZE_PADS, FAMILY_SIZE_PRESETS,
+  normalizeFamilySettings, type FamilyLine, type FamilyPrintSettings, type FamilySizes, type PrintColCfg,
 } from "@/lib/family-print";
 import { TRACK_EXTRA_COL, normalizeTrackCols, type TrackExtras } from "@/lib/family-track";
 
@@ -56,6 +56,7 @@ export function FamilyPrintSettingsButton({ current, onPreview, onSaved, extras 
   };
   const apply = (next: FamilyPrintSettings) => { const n = normalizeFamilySettings(next); setDraft(n); onPreview(n); };
   const setSize = (p: Partial<FamilySizes>) => apply({ ...draft, sizes: { ...draft.sizes, ...p } });
+  const setLine = (p: Partial<FamilyLine>) => apply({ ...draft, line: { ...draft.line, ...p } });
   const trackCols = normalizeTrackCols(draft.track_cols, draft.barcode);
   const setTrackCols = (list: PrintColCfg[]) => apply({ ...draft, track_cols: list });
   const openPanel = () => { setDraft(current); setOpen(true); };
@@ -113,6 +114,28 @@ export function FamilyPrintSettingsButton({ current, onPreview, onSaved, extras 
                 )}
               </div>
             ))}
+
+            {/* เส้นตาราง — ความหนา · สี · แบบเส้น (ใช้กับตาราง + กรอบหัวใบ/การ์ดสี ทุกแผ่น) */}
+            <div className="rounded-lg border border-slate-200 px-2 py-1.5">
+              <div className="mb-1 text-[12px] font-bold text-slate-700">เส้นตาราง</div>
+              {([
+                ["ความหนา", FAMILY_LINE_WIDTHS.map((w) => ({ key: String(w.v), label: w.label, on: draft.line.width === w.v, pick: () => setLine({ width: w.v }) }))],
+                ["สี", FAMILY_LINE_COLORS.map((c) => ({ key: c.value, label: c.label, swatch: c.value, on: draft.line.color === c.value, pick: () => setLine({ color: c.value }) }))],
+                ["แบบเส้น", FAMILY_LINE_MODES.map((m) => ({ key: m.value, label: m.label, on: draft.line.mode === m.value, pick: () => setLine({ mode: m.value }) }))],
+              ] as [string, { key: string; label: string; swatch?: string; on: boolean; pick: () => void }[]][]).map(([label, opts]) => (
+                <div key={label} className="mt-1 flex items-center gap-1.5">
+                  <span className="w-14 shrink-0 text-[11px] text-slate-500">{label}</span>
+                  <div className="flex flex-1 flex-wrap gap-1">
+                    {opts.map((o) => (
+                      <button key={o.key} type="button" onClick={o.pick}
+                        className={`inline-flex h-6 items-center gap-1 rounded border px-1.5 text-[11px] ${o.on ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                        {o.swatch && <span className="inline-block h-3 w-3 rounded-sm border border-slate-300" style={{ background: o.swatch }} />}{o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
 
             {/* ขนาดแต่ละจุด — ชุดสำเร็จ + แถบเลื่อนต่อจุด (ค่าเริ่ม = หน้าตาเดิม) */}
             <details className="rounded-lg border border-slate-200 px-2 py-1.5" open>

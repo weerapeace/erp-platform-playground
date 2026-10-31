@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildReportHtmlMulti } from "@/lib/template";
 import {
   FAMILY_DEFAULT_OPTIONS, FAMILY_DEFAULT_SETTINGS, buildFamilySheet, buildFamilyTemplate, colourWord, familyHtmlData, familyOrientation, normalizeFamilySettings,
-  clusterByName, sharedLabel, shortCodes, type FamilyBuyLine, type FamilyCutLine, type FamilyInput,
+  clusterByName, familyLineCss, normalizeFamilyLine, sharedLabel, shortCodes, type FamilyBuyLine, type FamilyCutLine, type FamilyInput,
 } from "@/lib/family-print";
 
 // ข้อมูลจริงจาก DB (2026-10-31) — รุ่น PIX25 ใบเปิด 6 ใบ (สีละใบ)
@@ -344,5 +344,27 @@ describe("แยกเฉพาะตัวที่ชื่อแปลก ไ
     expect(groups.map((g) => g.length).sort()).toEqual([1, 3]);
     expect(groups.find((g) => g.length === 1)).toEqual(["ZIP-N-NO.5#G515"]);
     expect(clusterByName(["พียู A สีดำ", "พียู A สีแดง"], (x) => x, true)).toHaveLength(1);
+  });
+});
+
+describe("เส้นตาราง + หัวกำกับแผ่น (เจ้าของ: เส้นหนาไป · แยกเตรียม/ตัดคนละแผ่น)", () => {
+  it("เส้น: ค่าเริ่มบางลง · ค่าเพี้ยน = ค่าเริ่ม · บันทึกไว้แล้วไม่หาย", () => {
+    expect(FAMILY_DEFAULT_SETTINGS.line).toEqual({ width: 0.08, color: "#cbd5e1", mode: "all" });
+    expect(normalizeFamilyLine({ width: 9, color: "red", mode: "zz" })).toEqual({ width: 0.5, color: "#cbd5e1", mode: "all" });
+    expect(normalizeFamilySettings({ line: { width: 0.05, color: "#e2e8f0", mode: "h" } }).line).toEqual({ width: 0.05, color: "#e2e8f0", mode: "h" });
+    const css = familyLineCss({ width: 0.05, color: "#e2e8f0", mode: "h" });
+    expect(css).toContain("0.05mm solid #e2e8f0");
+    expect(css).toContain(".fp-hero { border: 0; border-bottom: 0.05mm solid #e2e8f0; }");
+  });
+
+  it("หัวกำกับ: ชื่อใบ + แผ่น x/y · แผ่นตัดอย่างเดียวเลขหัวข้อเป็น 1)", () => {
+    const s = buildFamilySheet(pix25());
+    const cut = familyHtmlData(s, { ...FAMILY_DEFAULT_OPTIONS, buy: false, cut: true, title: "ใบตัด (บล็อกตัด)", page_label: "แผ่น 2/3" });
+    expect(cut.head_html as string).toContain('ใบตัด (บล็อกตัด) <span class="fp-page">แผ่น 2/3</span>');
+    expect(cut.body_html as string).toContain("1) บล็อกตัด");
+    expect(cut.body_html as string).not.toContain("ของที่ต้องซื้อ / เตรียม");
+    expect(cut.body_html as string).toContain("ผู้ตัด");
+    expect(cut.body_html as string).not.toContain("ผู้ซื้อ / เตรียมของ");
+    expect(familyHtmlData(s, FAMILY_DEFAULT_OPTIONS).head_html as string).toContain('<div class="doc-title">ใบสั่งผลิตรวมทั้งรุ่น</div>');
   });
 });

@@ -13,6 +13,7 @@ import { needsCut } from "@/lib/cut-rules";
 import { signoffHtml, SIGNOFF_CSS, type SignBox } from "@/lib/print-signoff";
 import type { MatStatus } from "@/lib/mo-material-status";
 import type { ReportTemplate } from "@/lib/template";
+import { WO_BORDER_COLORS, WO_BORDER_MODES, woStyleCss, type WoBorderMode } from "@/lib/work-order-print";
 
 /* ─────────────── ข้อมูลเข้า (จาก API) ─────────────── */
 export type FamilyMo = {
@@ -96,7 +97,38 @@ export type FamilyPrintSettings = {
   sizes: FamilySizes;
   /** คอลัมน์ใบติดตามงาน (แบบ A): ลำดับ · ชื่อหัว · ความกว้าง · โชว์ — null = ค่าเริ่ม (lib/family-track normalizeTrackCols) */
   track_cols: PrintColCfg[] | null;
+  /** เส้นตาราง + กรอบหัวใบ/การ์ด (เจ้าของ: "เส้นดูหนาไป" → ตั้งเองได้ ค่าเริ่มบางลง) */
+  line: FamilyLine;
 };
+/** เส้นตาราง — ความหนา (มม.) · สี · แบบ (ตาราง / เส้นนอน / ไม่มีเส้น) ชุดตัวเลือกเดียวกับตั้งค่าใบสั่งงาน */
+export type FamilyLine = { width: number; color: string; mode: WoBorderMode };
+export const FAMILY_DEFAULT_LINE: FamilyLine = { width: 0.08, color: "#cbd5e1", mode: "all" };
+export const FAMILY_LINE_WIDTHS: { v: number; label: string }[] = [
+  { v: 0.05, label: "บางมาก" }, { v: 0.08, label: "บาง" }, { v: 0.12, label: "ปกติ" }, { v: 0.2, label: "หนา" }, { v: 0.3, label: "หนามาก" },
+];
+export const FAMILY_LINE_COLORS = WO_BORDER_COLORS;
+export const FAMILY_LINE_MODES = WO_BORDER_MODES;
+export function normalizeFamilyLine(raw: unknown): FamilyLine {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const w = Number(o.width);
+  return {
+    width: Number.isFinite(w) && w > 0 ? Math.min(0.5, Math.max(0.03, w)) : FAMILY_DEFAULT_LINE.width,
+    color: typeof o.color === "string" && /^#[0-9a-f]{6}$/i.test(o.color) ? o.color : FAMILY_DEFAULT_LINE.color,
+    mode: FAMILY_LINE_MODES.some((m) => m.value === o.mode) ? (o.mode as WoBorderMode) : FAMILY_DEFAULT_LINE.mode,
+  };
+}
+/** CSS เส้น: ตาราง (ตัวกลาง woStyleCss) + กรอบหัวใบ/การ์ดสีใช้ความหนา/สีเดียวกัน (เดิมกรอบหัวใบดำ 0.25 มม. ดูหนัก) */
+export function familyLineCss(l: FamilyLine): string {
+  const b = `${l.width}mm solid ${l.color}`;
+  const box = l.mode === "none" ? "border: 0;" : l.mode === "h" ? `border: 0; border-bottom: ${b};` : `border: ${b};`;
+  return woStyleCss({ border_mm: l.width, border_color: l.color, border_mode: l.mode, font_scale: 1 })
+    + `
+.fp-hero { ${box} }
+.fp-card { border: ${l.mode === "none" ? "0" : b}; }
+.fp-qty { border-color: ${l.color}; }
+@media print { .fp-hero { ${box} } }
+`;
+}
 /** คอลัมน์ที่ปรับได้ (รูปแบบเดียวกับตั้งค่าคอลัมน์ใบสั่งงาน) — width = น้ำหนัก ≈ มม. */
 export type PrintColCfg = { key: string; label: string; width: number; show: boolean };
 
@@ -172,7 +204,7 @@ const sanitizeCols = (raw: unknown): PrintColCfg[] | null => {
   return out.length ? out : null;
 };
 /** ค่าที่เจ้าของเลือก (2026-10-31 "ใช้ค่าแนะนำ") */
-export const FAMILY_DEFAULT_SETTINGS: FamilyPrintSettings = { merge: "auto", group: "type", cell: "code", empty: "blank", tick: "before", img: "hide", barcode: "both", sizes: FAMILY_DEFAULT_SIZES, track_cols: null };
+export const FAMILY_DEFAULT_SETTINGS: FamilyPrintSettings = { merge: "auto", group: "type", cell: "code", empty: "blank", tick: "before", img: "hide", barcode: "both", sizes: FAMILY_DEFAULT_SIZES, track_cols: null, line: FAMILY_DEFAULT_LINE };
 export const FAMILY_SETTING_FIELDS: { key: keyof FamilyPrintSettings; label: string; options: { v: string; label: string }[] }[] = [
   { key: "merge", label: "วิธีรวมแถว", options: [{ v: "auto", label: "อัตโนมัติ" }, { v: "strict", label: "แบบเดิม (เข้ม)" }, { v: "none", label: "ไม่รวม (แถวละรหัส)" }] },
   { key: "group", label: "จัดหมวด", options: [{ v: "type", label: "ตามชนิดวัตถุดิบ" }, { v: "kind", label: "ต่างสี / ใช้ทุกสี" }] },
@@ -189,6 +221,7 @@ export function normalizeFamilySettings(raw: unknown): FamilyPrintSettings {
   for (const f of FAMILY_SETTING_FIELDS) if (typeof o[f.key] === "string" && f.options.some((x) => x.v === o[f.key])) out[f.key] = o[f.key] as string;
   out.sizes = normalizeFamilySizes(o.sizes);
   out.track_cols = sanitizeCols(o.track_cols);
+  out.line = normalizeFamilyLine(o.line);
   return out as FamilyPrintSettings;
 }
 
@@ -530,7 +563,7 @@ export function buildFamilySheet(input: FamilyInput, merge: FamilyMergeMode = "a
 }
 
 /** ใบที่พิมพ์ได้: buy = ซื้อ-ตัด (ของ × สี) · route = ติดตามงานแบบ A · status = ตามสถานะแบบ D · track = A + D */
-export type FamilySheetKind = "buy" | "route" | "status" | "track";
+export type FamilySheetKind = "buy" | "route" | "status" | "track" | "all";
 
 /** ลิงก์หน้าพิมพ์รวมทั้งรุ่น — ทุกทางเข้าเรียกตัวนี้ (หน้าพิมพ์ใบเดียว · พิมพ์รวม · รายการใบสั่งผลิต · หัวกลุ่มบนบอร์ด) */
 export function familyPrintUrl(by: { mo: string } | { ids: string[] } | { parent: string }, sheet?: FamilySheetKind): string {
@@ -547,6 +580,9 @@ export type FamilyPrintOptions = {
   buy: boolean; cut: boolean;
   /** เฉพาะที่ยังต้องซื้อ — ช่องที่ขอ/สั่ง/มีของแล้วเป็น "–" และซ่อนแถวที่ครบแล้ว */
   only_to_buy: boolean;
+  /** หัวกำกับแผ่น: ชื่อใบ (ไม่ส่ง = "ใบสั่งผลิตรวมทั้งรุ่น") + "แผ่น 2/3" เมื่อพิมพ์หลายแผ่นต่อรุ่น */
+  title?: string;
+  page_label?: string;
   /** วันที่พิมพ์ (ข้อความพร้อมโชว์) */
   printed: string;
   /** ตั้งค่าหน้าตา (ค่ากลาง family_print_settings) */
@@ -693,7 +729,7 @@ export function familyHeadHtml(s: FamilySheet, opt: FamilyPrintOptions): string 
     + `</div>`; }).join("");
   // บาร์โค้ดเส้นกว้าง ~5.5 ซม. → การ์ดแถวละ 3 · ไม่มีเส้น = แถวละ 6 เหมือนเดิม
   const perRow = opt.settings.sizes?.per_row || (bc === "both" || bc === "line" ? 3 : 6);   // ตั้งเองได้ในแผง (0 = อัตโนมัติ)
-  return `<div class="doc-head-inline"><div class="doc-title">ใบสั่งผลิตรวมทั้งรุ่น</div><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
+  return `<div class="doc-head-inline"><div class="doc-title">${esc(opt.title || "ใบสั่งผลิตรวมทั้งรุ่น")}${opt.page_label ? ` <span class="fp-page">${esc(opt.page_label)}</span>` : ""}</div><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
 <section class="fp-hero">
   <div class="fp-photo">${img(s.image_url, "fp-heroimg")}</div>
   <div class="fp-model"><div class="muted">รุ่น (สินค้าแม่)</div><div class="product-code">${esc(s.title_code)}</div>${s.title_name ? `<div class="product-name">${esc(s.title_name)}</div>` : ""}</div>
@@ -761,6 +797,7 @@ const FAMILY_CSS = `
   .fp-pen { display: inline-block; margin-left: 1.5mm; padding: 0 1.5mm; border-radius: 1mm; background: #f59e0b; color: #fff; font-size: 9px; font-weight: 700; line-height: 1.6; vertical-align: 0.3mm; }
 }
 @media print { .fp-pen { display: none !important; } }
+.fp-page { margin-left: 2mm; padding: 0.3mm 1.6mm; border: 0.2mm solid #94a3b8; border-radius: 0.8mm; font-size: 10px; font-weight: 700; color: #475569; vertical-align: 0.8mm; white-space: nowrap; }
 .fp-size { font-size: 13px; font-weight: 800; line-height: 1.15; white-space: nowrap; }
 .fp-cardimg { width: 14mm; height: 14mm; object-fit: contain; flex-shrink: 0; background: #fff; }
 .fp-cardtxt { min-width: 0; line-height: 1.3; }
