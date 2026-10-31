@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AccessDenied, useAuth } from "@/components/auth";
+import { Icon } from "@/components/icon";
 import { ConfirmDialog, ERPModal } from "@/components/modal";
 import { apiFetch } from "@/lib/api";
 
@@ -208,6 +209,12 @@ export default function PayrollLineMembersPage() {
     });
   }, [data.not_linked, query, statusFilter]);
 
+  // บัตร QR สมัคร LINE — เปิดหน้าพิมพ์แท็บใหม่ (ออกบัตรใหม่ทุกครั้งที่เปิด · อายุ 14 วัน)
+  const openInviteCards = (employeeIds: string[]) => {
+    if (!employeeIds.length) return;
+    window.open(`/print/payroll-line-invites?ids=${employeeIds.join(",")}`, "_blank", "noopener");
+  };
+
   const runAction = async () => {
     if (!pendingAction) return;
     setSaving(true);
@@ -285,7 +292,7 @@ export default function PayrollLineMembersPage() {
             <div className="text-xs font-semibold uppercase tracking-wide text-emerald-600">Employee Portal</div>
             <h1 className="mt-1 text-2xl font-bold text-slate-900">LINE พนักงาน</h1>
             <p className="mt-1 text-sm text-slate-500">
-              จัดการการผูกบัญชี LINE กับพนักงาน ใช้สำหรับ Employee Portal และต่อยอดแจ้งเตือนเงินเดือน/คำขอในอนาคต
+              จัดการการผูกบัญชี LINE กับพนักงาน — พิมพ์บัตร QR แจกพนักงาน สแกนด้วย LINE แล้วผูกได้เลย (ใช้ส่งสลิปเงินเดือน/แจ้งเตือน)
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -295,6 +302,14 @@ export default function PayrollLineMembersPage() {
               className="inline-flex h-10 items-center rounded-lg border border-emerald-200 bg-emerald-50 px-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               เพิ่มพนักงาน
+            </button>
+            <button
+              onClick={() => openInviteCards(filteredNotLinked.map((emp) => emp.id))}
+              disabled={!canEdit || !filteredNotLinked.length}
+              title="พิมพ์บัตร QR ให้พนักงานที่ยังไม่ผูก LINE (ตามที่กรอง/ค้นหาอยู่) — สแกนแล้วผูก LINE ได้เลย ไม่ต้องกรอกเบอร์"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Icon name="print" /> พิมพ์บัตร QR สมัคร ({filteredNotLinked.length.toLocaleString("th-TH")})
             </button>
             <Link
               href="/employee-line?preview=1"
@@ -448,7 +463,15 @@ export default function PayrollLineMembersPage() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-slate-400">-</td>
-                        <td className="px-4 py-3 text-right text-xs text-slate-400">ให้พนักงานเปิดลิงก์และสมัครเอง</td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            onClick={() => openInviteCards([emp.id])}
+                            disabled={!canEdit}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:opacity-40"
+                          >
+                            <Icon name="print" /> พิมพ์บัตร QR
+                          </button>
+                        </td>
                       </tr>
                     ))}
 

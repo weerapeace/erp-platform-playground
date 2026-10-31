@@ -1,4 +1,6 @@
+import { APPROVE_CHANNEL_ID } from "@/lib/approval-token";
 import { writeAudit } from "@/lib/audit";
+import { LINE_INVITE_TTL_DAYS, lineInviteLink, signLineInviteToken, verifyLineInviteToken, type LineInvite } from "@/lib/line-invite-token";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 type Row = Record<string, unknown>;
@@ -186,6 +188,17 @@ export async function registerLineMember(input: { id_token?: unknown; nonce?: un
   }
   if (text(employee.employment_status) !== "active") throw new Error("บัญชีพนักงานนี้ไม่อยู่ในสถานะใช้งาน กรุณาติดต่อ HR");
 
+  const member = await linkLineToEmployee(employee, profile, { method: "phone", employee_code: employeeCode });
+  return { status: "registered", line_profile: lineProfilePayload(profile), employee: publicEmployee(employee), member };
+}
+
+/**
+ * ผูก LINE (profile จาก id_token ที่ยืนยันแล้ว) เข้ากับพนักงาน — ใช้ร่วมทั้งสมัครด้วยเบอร์และด้วยบัตร QR
+ * กัน: LINE นี้ผูกคนอื่นอยู่ · พนักงานนี้ผูก LINE อื่นอยู่ · ถูกระงับ
+ */
+async function linkLineToEmployee(employee: Row, profile: Row, meta: Record<string, unknown>) {
+  const admin = supabaseAdmin();
+  const lineUserId = text(profile.sub);
   const existingLine = await activeLineMembership(lineUserId);
   if (existingLine && text(existingLine.employee_id) !== text(employee.id)) throw new Error("บัญชี LINE นี้ถูกใช้กับพนักงานอื่นแล้ว");
 
@@ -215,7 +228,8 @@ export async function registerLineMember(input: { id_token?: unknown; nonce?: un
     ? admin.from("line_memberships").update(body).eq("id", text(existingLine.id))
     : admin.from("line_memberships").insert(body);
   const { data: saved, error: saveError } = await query.select(MEMBER_SELECT).limit(1);
-  if (saveError) throw new Error(saveError.message);
+  // 23505 = กดซ้ำพร้อมกัน/สแกนสองเครื่องพร้อมกัน ชน unique index (LINE หรือพนักงานผูกได้ทีละหนึ่ง)
+  if (saveError) throw new Error(saveError.code === "23505" ? "บัญชีนี้เพิ่งถูกผูกไปแล้ว กรุณาเปิดลิงก์ใหม่อีกครั้ง" : saveError.message);
 
   const { error: employeeUpdateError } = await admin
     .from("employees")
@@ -233,10 +247,134 @@ export async function registerLineMember(input: { id_token?: unknown; nonce?: un
     action: "line_register_success",
     entityType: "line_memberships",
     entityId: text(row?.id),
-    metadata: { employee_id: text(employee.id), employee_code: employeeCode, line_user_id: lineUserId },
+    metadata: { employee_id: text(employee.id), line_user_id: lineUserId, ...meta },
   });
 
-  return { status: "registered", line_profile: lineProfilePayload(profile), employee: publicEmployee(employee), member: row ? normalizeMember(row) : null };
+  return row ? normalizeMember(row) : null;
+}
+
+// ── สมัครด้วยบัตร QR (HR พิมพ์แจกทีละคน · lib/line-invite-token) ──
+
+type InviteState = { invite: LineInvite; employee: Row };
+
+/** ตรวจบัตร QR → พนักงานเจ้าของบัตร · ใช้ทั้งพรีวิวและตอนผูกจริง (กฎเดียวกัน) */
+async function resolveInvite(token: unknown): Promise<InviteState> {
+  const invite = verifyLineInviteToken(text(token));
+  if (!invite) throw new Error("บัตร QR นี้ใช้ไม่ได้หรือหมดอายุแล้ว กรุณาขอบัตรใหม่จาก HR");
+  const admin = supabaseAdmin();
+  const { data, error } = await admin.from("employees").select(`${EMPLOYEE_SELECT},payslip_language`).eq("id", invite.employeeId).limit(1);
+  if (error) throw new Error(error.message);
+  const employee = (data?.[0] ?? null) as unknown as Row | null;
+  if (!employee) throw new Error("ไม่พบข้อมูลพนักงานของบัตรนี้ กรุณาติดต่อ HR");
+  if (text(employee.employment_status) !== "active") throw new Error("บัญชีพนักงานนี้ไม่อยู่ในสถานะใช้งาน กรุณาติดต่อ HR");
+  // HR ปลดผูกหลังพิมพ์บัตรใบนี้ → บัตรใบนี้ใช้ไม่ได้แล้ว (ต้องพิมพ์ใบใหม่)
+  const { data: unlinked, error: unlinkedError } = await admin
+    .from("line_memberships")
+    .select("unlinked_at")
+    .eq("employee_id", invite.employeeId)
+    .not("unlinked_at", "is", null)
+    .order("unlinked_at", { ascending: false })
+    .limit(1);
+  if (unlinkedError) throw new Error(unlinkedError.message);
+  const lastUnlinked = text((unlinked?.[0] as Row | undefined)?.unlinked_at);
+  if (lastUnlinked && Date.parse(lastUnlinked) >= invite.iat * 1000) {
+    throw new Error("บัตร QR นี้ถูกยกเลิกแล้ว กรุณาขอบัตรใหม่จาก HR");
+  }
+  return { invite, employee };
+}
+
+async function linkedLineOf(employeeId: string) {
+  const { data, error } = await supabaseAdmin()
+    .from("line_memberships")
+    .select("line_user_id,status")
+    .eq("employee_id", employeeId)
+    .in("status", ["linked", "blocked"])
+    .limit(1);
+  if (error) throw new Error(error.message);
+  return (data?.[0] ?? null) as Row | null;
+}
+
+function invitePreviewPayload(state: InviteState, linked: boolean) {
+  const e = state.employee;
+  return {
+    status: linked ? "linked" : "ready",
+    employee_code: text(e.employee_code),
+    nickname: text(e.nickname),
+    first_name: text(e.first_name),
+    language: text(e.payslip_language) === "en" ? "en" : "th",
+    expires_at: new Date(state.invite.exp * 1000).toISOString(),
+  };
+}
+
+/** พรีวิวบัตร (หน้า /a?join=) — โชว์รหัส + ชื่อเล่น ให้พนักงานเช็กว่าเป็นบัตรของตัวเอง */
+export async function lineInvitePreview(token: unknown) {
+  const state = await resolveInvite(token);
+  const linked = await linkedLineOf(text(state.employee.id));
+  return invitePreviewPayload(state, !!linked);
+}
+
+/** ผูก LINE ด้วยบัตร QR — ยืนยัน LINE ผ่าน channel เดียวกับหน้าอนุมัติ (ISG ERP Login) */
+export async function registerLineMemberByInvite(input: { token?: unknown; id_token?: unknown }) {
+  const state = await resolveInvite(input.token);
+  const profile = await verifyLineIdToken(input.id_token, undefined, APPROVE_CHANNEL_ID);
+  const lineUserId = text(profile.sub);
+  const linked = await linkedLineOf(text(state.employee.id));
+  if (linked && text(linked.line_user_id) === lineUserId && text(linked.status) === "linked") {
+    // สแกนซ้ำด้วย LINE เดิม = ผูกไว้แล้ว ไม่ต้องทำอะไร
+    return { ...invitePreviewPayload(state, true), line_profile: lineProfilePayload(profile) };
+  }
+  if (linked) {
+    await writeAudit(supabaseAdmin(), {
+      action: "line_register_failed",
+      entityType: "line_memberships",
+      metadata: { reason: "invite_already_used", employee_id: text(state.employee.id), line_user_id: lineUserId },
+    });
+    throw new Error("บัตรนี้ถูกใช้ผูก LINE ไปแล้ว ถ้าไม่ใช่คุณ กรุณาแจ้ง HR ทันที");
+  }
+  await linkLineToEmployee(state.employee, profile, { method: "invite", invite_iat: state.invite.iat });
+  return { ...invitePreviewPayload(state, true), line_profile: lineProfilePayload(profile) };
+}
+
+/** HR ออกบัตร QR ให้พนักงานหลายคน (เฉพาะคนที่ทำงานอยู่ + ยังไม่ผูก LINE) */
+export async function issueLineInvites(employeeIds: string[], actor: { id?: string | null; name?: string | null } = {}) {
+  const ids = Array.from(new Set(employeeIds.map(text).filter(Boolean))).slice(0, 300);
+  if (!ids.length) throw new Error("ยังไม่ได้เลือกพนักงาน");
+  const admin = supabaseAdmin();
+  const [employeesResult, membersResult] = await Promise.all([
+    admin.from("employees").select("id,employee_code,first_name,last_name,nickname,employment_status,payslip_language").in("id", ids),
+    admin.from("line_memberships").select("employee_id").in("employee_id", ids).in("status", ["linked", "blocked"]),
+  ]);
+  if (employeesResult.error) throw new Error(employeesResult.error.message);
+  if (membersResult.error) throw new Error(membersResult.error.message);
+  const linkedIds = new Set(((membersResult.data ?? []) as Row[]).map((r) => text(r.employee_id)));
+  const found = new Map(((employeesResult.data ?? []) as Row[]).map((e) => [text(e.id), e]));
+  const skipped: { employee_id: string; reason: "not_found" | "inactive" | "linked" }[] = [];
+  const invites = ids.flatMap((id) => {
+    const e = found.get(id);
+    if (!e) { skipped.push({ employee_id: id, reason: "not_found" }); return []; }
+    if (text(e.employment_status) !== "active") { skipped.push({ employee_id: id, reason: "inactive" }); return []; }
+    if (linkedIds.has(id)) { skipped.push({ employee_id: id, reason: "linked" }); return []; }
+    const token = signLineInviteToken(id);
+    const exp = verifyLineInviteToken(token)?.exp ?? 0;
+    return [{
+      employee_id: id,
+      employee_code: text(e.employee_code),
+      full_name: [text(e.first_name), text(e.last_name)].filter(Boolean).join(" "),
+      nickname: text(e.nickname),
+      language: text(e.payslip_language) === "en" ? "en" : "th",
+      link: lineInviteLink(token),
+      expires_at: new Date(exp * 1000).toISOString(),
+    }];
+  }).sort((a, b) => a.employee_code.localeCompare(b.employee_code));
+
+  await writeAudit(admin, {
+    action: "line_invite_issued",
+    entityType: "line_memberships",
+    actorId: actor.id ?? null,
+    actorName: actor.name ?? null,
+    metadata: { count: invites.length, employee_ids: invites.map((i) => i.employee_id), skipped, ttl_days: LINE_INVITE_TTL_DAYS },
+  });
+  return { invites, skipped };
 }
 
 export async function employeeLineMe(input: { id_token?: unknown; nonce?: unknown }) {
