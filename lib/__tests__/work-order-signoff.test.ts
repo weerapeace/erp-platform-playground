@@ -194,6 +194,17 @@ describe("หัวใบ + ค่าที่บันทึกไว้", () =
     expect(none).not.toContain("wo-due");
   });
 
+  it("ขนาดหัวใบ: ปกติไม่ปล่อย CSS เพิ่ม · กะทัดรัด/เล็กสุดย่อตอนพิมพ์ · บรรทัดเดียว", () => {
+    const css = (header: object) => buildWorkOrderTemplate(normalizeWoColumns({ header })).custom_css ?? "";
+    expect(css({})).not.toContain("doc-head-inline");
+    expect(css({ size: "compact" })).toContain("padding-top: 6mm !important");
+    expect(css({ size: "tight" })).toContain("padding-top: 5mm !important");
+    expect(normalizeWoColumns({ header: { size: "huge" } }).header!.size).toBe("normal");
+    const inline = buildWorkOrderTemplate(normalizeWoColumns({ header: { title_inline: true } })).header_html;
+    expect(inline).toContain('<div class="doc-head-inline"><div class="doc-title">ใบสั่งงานผลิต</div><div class="company-name">');
+    expect(css({ title_inline: true })).toContain(".doc-head-inline {");
+  });
+
   it("ปิด 'กล่องลงชื่อ' ในส่วนที่จะพิมพ์ = ไม่มีกล่องเลย", () => {
     const cols = normalizeWoColumns({ sections: { signature: false }, extras: { returns: true } });
     const data = buildWoHtmlData(NOT_DISPATCHED, null, cols);
@@ -213,6 +224,12 @@ describe("หัวใบ + ค่าที่บันทึกไว้", () =
     for (const [name, mo, cols] of cases) {
       const html = buildReportHtml(buildWorkOrderTemplate(cols), { ...buildWoHtmlData(mo, null, cols), qr_html: "" });
       writeFileSync(`${process.env.WO_PREVIEW_DIR}/${name}.html`, html, "utf8");
+    }
+    // ขนาดหัวใบ 3 แบบ (รูป/บรรทัดเดียวตามปุ่มในแผง)
+    for (const [size, photo_mm, title_inline] of [["normal", 46, false], ["compact", 34, true], ["tight", 26, true]] as const) {
+      const cols = normalizeWoColumns({ header: { size, photo_mm, title_inline } });
+      const html = buildReportHtml(buildWorkOrderTemplate(cols), { ...buildWoHtmlData(NOT_DISPATCHED, null, cols), qr_html: "" });
+      writeFileSync(`${process.env.WO_PREVIEW_DIR}/g-size-${size}.html`, html, "utf8");
     }
     // แยกใบ 3 แผ่น — กล่องกระจายตามแผ่น
     const split = normalizeWoColumns({ sections: { summary: true, lines: true, detail: true, signature: true, split: true }, signoff: { prep: "split" }, extras: { qc: true, note: true } });

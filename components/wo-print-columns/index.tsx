@@ -16,7 +16,7 @@ import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import {
   WO_BORDER_COLORS, WO_BORDER_MODES, WO_DEFAULT_COLUMNS, WO_DEFAULT_EXTRAS, WO_DEFAULT_HEADER, WO_DEFAULT_SECTIONS, WO_DEFAULT_SIGNOFF, WO_DEFAULT_STYLE,
-  WO_EXTRA_LABELS, WO_HEADER_BLOCKS, WO_HEADER_FIELDS, WO_SECTION_LABELS, WO_SECTION_PRESETS, WO_SHEETS, isBlankWoColumn, normalizeWoColumns,
+  WO_EXTRA_LABELS, WO_HEADER_BLOCKS, WO_HEADER_FIELDS, WO_HEADER_SIZES, WO_SECTION_LABELS, WO_SECTION_PRESETS, WO_SHEETS, isBlankWoColumn, normalizeWoColumns,
   type WoBoxKey, type WoColumn, type WoExtras, type WoHeader, type WoHeaderBlock, type WoPrintColumns, type WoSheet, type WoSignoff,
 } from "@/lib/work-order-print";
 
@@ -375,6 +375,19 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                 <div>
                   <div className="text-[12px] font-bold text-slate-700 mb-1">4) หัวใบ</div>
                   <div className="border border-slate-200 rounded-lg px-2 py-1.5 space-y-1.5">
+                    {/* ขนาดหัวใบ — กดทีเดียวย่อทั้งชุด (ตั้งขนาดรูป + บรรทัดเดียวให้ด้วย ปรับต่อเองได้) */}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-14 shrink-0">ขนาดหัวใบ</span>
+                      <Seg value={hdr.size} onChange={(size) => {
+                        const p = WO_HEADER_SIZES.find((x) => x.value === size)!;
+                        setHdr({ size, photo_mm: p.photo_mm, title_inline: p.title_inline });
+                      }} options={WO_HEADER_SIZES.map((x) => ({ value: x.value, label: x.label, hint: x.hint }))} />
+                    </div>
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={hdr.title_inline} onChange={(e) => setHdr({ title_inline: e.target.checked })}
+                        className="w-4 h-4 accent-indigo-600 shrink-0" />
+                      <span className="text-[11px] text-slate-600">ชื่อบริษัท + หัวข้อ บรรทัดเดียว (ประหยัดความสูง)</span>
+                    </label>
                     <div className="flex flex-wrap gap-1">
                       {WO_HEADER_FIELDS.map((f) => {
                         const on = hdr.show[f.key];
@@ -386,7 +399,7 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                     </div>
                     <div className="flex items-center gap-1.5">
                       <span className="text-[11px] text-slate-500 w-14 shrink-0">ขนาดรูป</span>
-                      <input type="range" min={25} max={60} step={1} value={hdr.photo_mm} disabled={!hdr.show.photo}
+                      <input type="range" min={20} max={60} step={1} value={hdr.photo_mm} disabled={!hdr.show.photo}
                         onChange={(e) => setHdr({ photo_mm: Number(e.target.value) })}
                         className="flex-1 accent-indigo-600 disabled:opacity-30" />
                       <span className="w-14 text-right text-[11px] text-slate-500 tabular-nums">{hdr.photo_mm} มม.</span>

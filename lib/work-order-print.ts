@@ -170,7 +170,19 @@ export type WoHeaderField =
   | "company" | "title" | "photo" | "name" | "code" | "variant" | "size"
   | "qty" | "bom" | "mo_no" | "created" | "status" | "qr" | "barcode" | "due" | "qty_from";
 export type WoHeaderBlock = "photo" | "product" | "qty" | "meta";
-export type WoHeader = { show: Record<WoHeaderField, boolean>; photo_mm: number; order: WoHeaderBlock[] };
+/** ขนาดหัวใบ — ย่อระยะ/ตัวอักษร/QR/บาร์โค้ด ให้ประหยัดพื้นที่ (ปกติ = หน้าตาเดิม) */
+export type WoHeaderSize = "normal" | "compact" | "tight";
+export type WoHeader = {
+  show: Record<WoHeaderField, boolean>; photo_mm: number; order: WoHeaderBlock[];
+  size: WoHeaderSize;
+  /** ชื่อบริษัท + หัวข้อ อยู่บรรทัดเดียวกัน (หัวข้อซ้าย · บริษัทขวา) แทน 2 บรรทัดกลางหน้า */
+  title_inline: boolean;
+};
+export const WO_HEADER_SIZES: { value: WoHeaderSize; label: string; hint: string; photo_mm: number; title_inline: boolean }[] = [
+  { value: "normal", label: "ปกติ", hint: "หน้าตาเดิม", photo_mm: 46, title_inline: false },
+  { value: "compact", label: "กะทัดรัด", hint: "ระยะ/ตัวอักษรเล็กลง · รูป 34 มม. · ชื่อบริษัท+หัวข้อบรรทัดเดียว", photo_mm: 34, title_inline: true },
+  { value: "tight", label: "เล็กสุด", hint: "ย่อทุกอย่างให้เหลือพื้นที่ตารางมากที่สุด · รูป 26 มม.", photo_mm: 26, title_inline: true },
+];
 export const WO_HEADER_FIELDS: { key: WoHeaderField; label: string }[] = [
   { key: "company", label: "ชื่อบริษัท" }, { key: "title", label: "หัวข้อใบ" }, { key: "photo", label: "รูปสินค้า" },
   { key: "name", label: "ชื่อสินค้า" }, { key: "code", label: "รหัส" }, { key: "variant", label: "สี/ตัวเลือก" },
@@ -186,6 +198,8 @@ export const WO_DEFAULT_HEADER: WoHeader = {
   show: Object.fromEntries(WO_HEADER_FIELDS.map((f) => [f.key, true])) as Record<WoHeaderField, boolean>,
   photo_mm: 46,
   order: ["photo", "product", "qty", "meta"],
+  size: "normal",
+  title_inline: false,
 };
 
 /* ─────────────── กล่องลงชื่อ (ของกลาง lib/print-signoff) ───────────────
@@ -438,12 +452,16 @@ const intIn = (v: unknown, min: number, max: number, d: number) => {
 
 /** หัวใบ — ค่าที่ไม่รู้จักทิ้ง · ลำดับกล่องต้องครบ 4 กล่องไม่ซ้ำ (ขาดตัวไหนต่อท้ายให้) */
 export function normalizeWoHeader(raw: unknown): WoHeader {
-  const h = (raw ?? {}) as { show?: Record<string, unknown>; photo_mm?: unknown; order?: unknown };
+  const h = (raw ?? {}) as { show?: Record<string, unknown>; photo_mm?: unknown; order?: unknown; size?: unknown; title_inline?: unknown };
   const show = Object.fromEntries(WO_HEADER_FIELDS.map((f) => [f.key, bool(h.show?.[f.key], WO_DEFAULT_HEADER.show[f.key])])) as Record<WoHeaderField, boolean>;
   const keys = WO_HEADER_BLOCKS.map((b) => b.key);
   const saved = Array.isArray(h.order) ? (h.order as unknown[]).filter((k): k is WoHeaderBlock => keys.includes(k as WoHeaderBlock)) : [];
   const order = [...new Set([...saved, ...WO_DEFAULT_HEADER.order])];
-  return { show, photo_mm: intIn(h.photo_mm, 25, 60, WO_DEFAULT_HEADER.photo_mm), order };
+  return {
+    show, photo_mm: intIn(h.photo_mm, 20, 60, WO_DEFAULT_HEADER.photo_mm), order,
+    size: oneOf(h.size, ["normal", "compact", "tight"] as const, WO_DEFAULT_HEADER.size),
+    title_inline: bool(h.title_inline, WO_DEFAULT_HEADER.title_inline),
+  };
 }
 
 export function normalizeWoSignoff(raw: unknown): WoSignoff {
@@ -834,7 +852,11 @@ function woHeaderHtml(h: WoHeader): string {
   // แถบล่างเต็มความกว้างของกล่องหัวเอกสาร: บาร์โค้ดเส้น (ซ้าย) + กำหนดส่ง (ขวา)
   // (กล่องเลขที่+QR แคบไป — บาร์โค้ดเลขใบกว้าง ~55 มม. · วันที่ส่งก็เคยถูกตัดขึ้นบรรทัดใหม่)
   const due = s.barcode || s.due ? `<div class="wo-due">${s.barcode ? `<div class="wo-barcode">{{{barcode_html}}}<div class="wo-barcode-text">{{mo_number}}</div></div>` : ""}${s.due ? `<div class="wo-due-text"><span class="label">กำหนดส่ง:</span> <span class="due-big">{{due_date_th}}</span></div>` : ""}</div>` : "";
-  const top = `${s.company ? `<div class="doc-header">
+  const top = h.title_inline && (s.company || s.title)
+    // บรรทัดเดียว: หัวข้อซ้าย · ชื่อบริษัทขวา (ประหยัดความสูง ~1 ซม.)
+    ? `<div class="doc-head-inline">${s.title ? `<div class="doc-title">ใบสั่งงานผลิต</div>` : ""}${s.company ? `<div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div>` : ""}</div>
+`
+    : `${s.company ? `<div class="doc-header">
   <div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div>
 </div>
 ` : ""}${s.title ? `<div class="doc-title">ใบสั่งงานผลิต</div>
@@ -844,6 +866,81 @@ function woHeaderHtml(h: WoHeader): string {
   ${cells.join("\n  ")}
   ${due}
 </section>`;
+}
+
+/**
+ * ขนาดหัวใบ (ปกติ / กะทัดรัด / เล็กสุด) + ชื่อบริษัท-หัวข้อบรรทัดเดียว — ทับกฎเดิมท้าย custom_css
+ * ปกติ = ไม่ปล่อยกฎขนาดเพิ่มเลย (หน้าตาเดิมเป๊ะ) · ความกว้างเส้นบาร์โค้ดไม่ย่อ (0.33 มม. ตายตัว) ย่อแค่ความสูง
+ */
+function woHeaderSizeCss(h: WoHeader): string {
+  const inline = `
+.doc-head-inline { display: flex; align-items: baseline; justify-content: space-between; gap: 4mm; border-bottom: 0.15mm solid #e2e8f0; padding-bottom: 1mm; margin-bottom: 2.5mm; }
+.doc-head-inline .doc-title { margin: 0; text-align: left; }
+.doc-head-inline .company-name { text-align: right; }
+@media print { .doc-head-inline { margin-bottom: 1.5mm; padding-bottom: 0.8mm; } }
+`;
+  if (h.size === "compact") return `${inline}
+/* หัวใบ: กะทัดรัด */
+.doc { padding-top: 12mm; }
+.doc-header { margin-bottom: 1.5mm; }
+.company-name { font-size: 11px; }
+.doc-title { font-size: 18px; margin: 1.5mm 0 3mm; }
+.wo-hero { padding: 2mm; gap: 2mm; margin-bottom: 3mm; }
+.product-code { font-size: 16px; }
+.qty-big { font-size: 24px; }
+.wo-qr { width: 15mm; height: 15mm; }
+.wo-due { margin-top: 1.2mm; padding-top: 1mm; }
+.wo-barcode-svg { height: 8mm; }
+@media print {
+  .doc { padding-top: 6mm !important; }
+  .doc-header { margin-bottom: 0.5mm; }
+  .company-name { font-size: 9px; }
+  .doc-title { font-size: 15px; margin: 0.5mm 0 1.5mm; }
+  .wo-hero { padding: 1.5mm; gap: 1.5mm; margin-bottom: 1.5mm; }
+  .product-name { font-size: 10px; }
+  .product-code { font-size: 14px; }
+  .qty-big { font-size: 19px; }
+  .wo-qr { width: 13mm; height: 13mm; }
+  .wo-due { margin-top: 1mm; padding-top: 0.8mm; }
+  .wo-barcode-svg { height: 7mm; }
+}
+`;
+  if (h.size === "tight") return `${inline}
+/* หัวใบ: เล็กสุด */
+.doc { padding-top: 9mm; }
+.doc-header { margin-bottom: 1mm; }
+.company-name { font-size: 10px; }
+.doc-title { font-size: 15px; margin: 1mm 0 2mm; }
+.wo-hero { padding: 1.5mm; gap: 1.5mm; margin-bottom: 2mm; }
+.product-name { font-size: 11px; }
+.product-code { font-size: 14px; }
+.product-variant { font-size: 11px; }
+.qty-big { font-size: 20px; }
+.wo-qr { width: 12mm; height: 12mm; }
+.wo-due { margin-top: 1mm; padding-top: 0.8mm; }
+.due-big { font-size: 14px; }
+.wo-barcode-svg { height: 7mm; }
+.wo-barcode-text { font-size: 8px; }
+@media print {
+  .doc { padding-top: 5mm !important; }
+  .doc-header { margin-bottom: 0; }
+  .company-name { font-size: 8px; }
+  .doc-title { font-size: 12.5px; margin: 0 0 1mm; }
+  .wo-hero { padding: 1mm; gap: 1mm; margin-bottom: 1mm; }
+  .muted { font-size: 8px; }
+  .product-name { font-size: 9px; }
+  .product-code { font-size: 12px; margin-top: 0.5mm; }
+  .product-variant { font-size: 10px; }
+  .qty-big { font-size: 16px; }
+  .wo-meta { line-height: 1.35; }
+  .wo-qr { width: 11mm; height: 11mm; }
+  .wo-due { margin-top: 0.6mm; padding-top: 0.6mm; }
+  .due-big { font-size: 12px; }
+  .wo-barcode-svg { height: 6.5mm; }
+  .wo-barcode-text { font-size: 6.5px; }
+}
+`;
+  return h.title_inline ? inline : "";
 }
 
 /** ความกว้างคอลัมน์หัวใบตามลำดับ/ช่องที่เปิด (บนจอ + ตอนพิมพ์) · รูปปรับขนาดได้ */
@@ -925,7 +1022,7 @@ export function buildWorkOrderTemplate(columns?: WoPrintColumns | null): ReportT
     body_html: woBodyHtml(cols),
     // ช่องลงชื่อท้ายใบแบบเดิม (ผู้สั่งผลิต / ผู้รับงานผลิต) → ย้ายไปอยู่ในกล่องลงชื่อชุดใหม่ (signoff_html ใน body)
     footer_html: "",
-    custom_css: (WORKORDER_PRINT_TEMPLATE.custom_css ?? "") + SIGNOFF_CSS + WO_EXTRAS_CSS + woHeaderCss(header) + woStyleCss(cols.style ?? WO_DEFAULT_STYLE),
+    custom_css: (WORKORDER_PRINT_TEMPLATE.custom_css ?? "") + SIGNOFF_CSS + WO_EXTRAS_CSS + woHeaderCss(header) + woHeaderSizeCss(header) + woStyleCss(cols.style ?? WO_DEFAULT_STYLE),
   };
 }
 
