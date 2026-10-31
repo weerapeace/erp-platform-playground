@@ -61,6 +61,43 @@ export type FamilyInput = {
 };
 export type FamilyPrintResponse = { families: FamilyInput[] };
 
+/* ─────────────── ตั้งค่าหน้าตา (ค่ากลาง ui_config "family_print_settings") ─────────────── */
+/** auto = รวมของเดียวกันต่างสี (ชื่อขึ้นต้นเหมือนกัน รองรับภาษาไทย) · strict = แบบเดิม (ต้องมีตัวคั่น) · none = แถวละรหัส */
+export type FamilyMergeMode = "auto" | "strict" | "none";
+export type FamilyPrintSettings = {
+  merge: FamilyMergeMode;
+  /** type = หมวดตามชนิดวัตถุดิบ · kind = ต่างสี / ใช้ทุกสี (แบบเดิม) */
+  group: "type" | "kind";
+  /** ในช่องของแถวต่างสี: ตัวเลขอย่างเดียว · + รหัสย่อ · + รหัสย่อ + คำบอกสี */
+  cell: "num" | "code" | "full";
+  /** ช่องที่สีนั้นไม่ใช้ */
+  empty: "blank" | "dash" | "hatch";
+  /** ช่องติ๊ก: หน้าตัวเลขทุกช่อง · คอลัมน์ท้ายแถว */
+  tick: "before" | "row";
+  /** รูปวัตถุดิบ: แสดงกรอบว่างด้วย · ซ่อนกรอบว่าง · ไม่มีคอลัมน์รูป */
+  img: "show" | "hide" | "none";
+  /** บาร์โค้ดเลขใบ (การ์ดสี + ใบติดตามงาน) */
+  barcode: "both" | "line" | "qr" | "none";
+};
+/** ค่าที่เจ้าของเลือก (2026-10-31 "ใช้ค่าแนะนำ") */
+export const FAMILY_DEFAULT_SETTINGS: FamilyPrintSettings = { merge: "auto", group: "type", cell: "code", empty: "blank", tick: "before", img: "hide", barcode: "both" };
+export const FAMILY_SETTING_FIELDS: { key: keyof FamilyPrintSettings; label: string; options: { v: string; label: string }[] }[] = [
+  { key: "merge", label: "วิธีรวมแถว", options: [{ v: "auto", label: "อัตโนมัติ" }, { v: "strict", label: "แบบเดิม (เข้ม)" }, { v: "none", label: "ไม่รวม (แถวละรหัส)" }] },
+  { key: "group", label: "จัดหมวด", options: [{ v: "type", label: "ตามชนิดวัตถุดิบ" }, { v: "kind", label: "ต่างสี / ใช้ทุกสี" }] },
+  { key: "cell", label: "ในช่อง", options: [{ v: "num", label: "ตัวเลขอย่างเดียว" }, { v: "code", label: "+ รหัสย่อ" }, { v: "full", label: "+ รหัส + สี" }] },
+  { key: "empty", label: "ช่องที่ไม่ใช้", options: [{ v: "blank", label: "ว่าง" }, { v: "dash", label: "ขีด –" }, { v: "hatch", label: "ลายขีด" }] },
+  { key: "tick", label: "ช่องติ๊ก", options: [{ v: "before", label: "หน้าตัวเลข" }, { v: "row", label: "ท้ายแถว" }] },
+  { key: "img", label: "รูปวัตถุดิบ", options: [{ v: "show", label: "แสดงทุกช่อง" }, { v: "hide", label: "ซ่อนกรอบว่าง" }, { v: "none", label: "ไม่มีคอลัมน์รูป" }] },
+  { key: "barcode", label: "บาร์โค้ดเลขใบ", options: [{ v: "both", label: "เส้น + QR" }, { v: "line", label: "เส้น" }, { v: "qr", label: "QR" }, { v: "none", label: "ไม่แสดง" }] },
+];
+/** อ่านค่าที่บันทึกไว้แบบปลอดภัย — คีย์ใหม่ที่ยังไม่เคยบันทึก/ค่าเพี้ยน = ค่าเริ่มต้น */
+export function normalizeFamilySettings(raw: unknown): FamilyPrintSettings {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  const out = { ...FAMILY_DEFAULT_SETTINGS } as Record<string, string>;
+  for (const f of FAMILY_SETTING_FIELDS) if (typeof o[f.key] === "string" && f.options.some((x) => x.v === o[f.key])) out[f.key] = o[f.key] as string;
+  return out as FamilyPrintSettings;
+}
+
 /* ─────────────── ผลลัพธ์ (ตาราง) ─────────────── */
 /** partial = ขอ/สั่งไปแล้วบางส่วน ยังขาด */
 export type FamilyCellStatus = MatStatus | "partial";
@@ -79,6 +116,8 @@ export type FamilyBuyRow = {
   kind: "varies" | "single";
   type: string; label: string; code: string | null; codes: string[]; image_url: string | null; uom: string;
   cells: (FamilyBuyCell | null)[]; total: number; remaining: number; missing_qty: boolean;
+  /** ลำดับใน BOM (น้อย = ขึ้นก่อน) — ใช้เรียงตอนจัดหมวดตามชนิด */
+  seq: number;
 };
 export type FamilyCutCell = { pcs: number; code: string | null; short: string | null; colour: string | null; done: boolean };
 export type FamilyCutRow = {
@@ -115,14 +154,49 @@ function commonPrefix(list: string[]): string {
   while (cut > 0 && !SEP.test(p[cut - 1])) cut--;
   return p.slice(0, cut);
 }
+const ALNUM = /[A-Za-z0-9]/;
+/** ส่วนหน้าที่ทุกข้อความเหมือนกันทีละตัวอักษร (ไม่สนตัวคั่น) */
+function rawPrefix(list: string[]): string {
+  let p = list[0] ?? "";
+  for (const s of list.slice(1)) {
+    let i = 0;
+    while (i < p.length && i < s.length && p[i] === s[i]) i++;
+    p = p.slice(0, i);
+  }
+  return p;
+}
 /**
  * ชื่อแถว "ของต่างสี" = ส่วนหน้าที่ชื่อทุกตัวเหมือนกัน เช่น "พียูหนังเทียม M638" (ไม่มี = fallback)
+ *   thai = true (ค่าเริ่ม "อัตโนมัติ"): ภาษาไทยไม่เว้นวรรค → ยอมตัดกลางคำไทยได้ เช่น "ผ้าซับใน FLYNOW สีดำ" + "ผ้าซับในตัวบาง" → "ผ้าซับใน"
+ *     แต่ห้ามขาดกลางรหัส ("M638#1" → "M638") และตัดคำว่า "สี" ที่ห้อยท้ายทิ้ง ("…พร้อมหางสี" → "…พร้อมหาง") · ต้องยาว ≥ 4 ตัว
+ *   thai = false ("แบบเดิม"): ตัดได้เฉพาะที่ตัวคั่น (ช่องว่าง - # / _ . วงเล็บ) · ยาว ≥ 3 ตัว
  * ตัดเศษตัวเลขท้ายที่ขาดกลางคำทิ้ง: "พลาสติกใส 0.30" กับ "พลาสติกใส 0.5" → "พลาสติกใส" (ไม่ใช่ "พลาสติกใส 0")
  */
-export function sharedLabel(names: string[], fallback: string): string {
-  let p = commonPrefix(names).replace(/[\s\-#/_.(]+$/, "").trim();
-  if (new Set(names).size > 1) p = p.replace(/\s+[\d.,*x×]+$/, "").trim();
-  return p.length >= 3 ? p : fallback;
+export function sharedLabel(names: string[], fallback: string, thai = true): string {
+  const uniq = [...new Set(names)];
+  let p: string;
+  if (uniq.length <= 1) p = uniq[0] ?? "";
+  else if (thai) {
+    p = rawPrefix(uniq);
+    if (p && ALNUM.test(p[p.length - 1]) && uniq.some((s) => ALNUM.test(s[p.length] ?? ""))) p = p.replace(/[A-Za-z0-9]+$/, "");
+    p = p.replace(/สี$/, "");
+  } else p = commonPrefix(uniq);
+  p = p.replace(/[\s\-#/_.(]+$/, "").trim();
+  if (uniq.length > 1) p = p.replace(/\s+[\d.,*x×]+$/, "").trim();
+  return p.length >= (thai && uniq.length > 1 ? 4 : 3) ? p : fallback;
+}
+/**
+ * แบ่งของในแถวเดียวกันเป็นกลุ่ม "ชื่อขึ้นต้นเหมือนกัน" — ตัวที่ชื่อแปลกแยก (เช่น ชื่อเป็นรหัสล้วน "ZIP-N-NO.5#G515")
+ * แยกออกไปตัวเดียว ไม่ทำให้ทั้งแถวแตก · กลุ่มที่เหลือ 1 ตัว = แถวรหัสเดียว
+ */
+export function clusterByName<T>(items: T[], name: (t: T) => string, thai: boolean): T[][] {
+  if (items.length < 2 || sharedLabel(items.map(name), "", thai)) return [items];
+  const byHead = new Map<string, T[]>();
+  for (const it of items) {
+    const k = name(it).trim().slice(0, 4).toLowerCase();
+    byHead.set(k, [...(byHead.get(k) ?? []), it]);
+  }
+  return [...byHead.values()].flatMap((g) => (g.length > 1 && sharedLabel(g.map(name), "", thai) ? [g] : g.map((x) => [x])));
 }
 /** รหัสย่อในช่อง = ตัดส่วนหน้าที่ทุกรหัสเหมือนกันออก: M638-19-4004 → 19-4004 · BT-NO.5#G322 → G322 */
 export function shortCodes(codes: string[]): Map<string, string> {
@@ -145,8 +219,9 @@ function cellStatus(list: { status: MatStatus; remaining: number }[]): FamilyCel
   return "skip";
 }
 
-/** แปลงข้อมูล 1 รุ่น → ตาราง ของ × สี */
-export function buildFamilySheet(input: FamilyInput): FamilySheet {
+/** แปลงข้อมูล 1 รุ่น → ตาราง ของ × สี · merge = วิธีรวมแถว (ตั้งค่ากลาง) */
+export function buildFamilySheet(input: FamilyInput, merge: FamilyMergeMode = "auto"): FamilySheet {
+  const thai = merge === "auto";
   const skuInfo = new Map(input.skus.map((s) => [s.code, s]));
   // คอลัมน์ = SKU (เรียงรหัส) — หลายใบของสีเดียวกันรวมกัน
   const colIdx = new Map<string, number>();
@@ -190,7 +265,7 @@ export function buildFamilySheet(input: FamilyInput): FamilySheet {
   const slots = new Map<string, Map<number, CodeAgg>[]>();
   const singles: CodeAgg[] = [];
   for (const a of [...codes.values()].sort((x, y) => x.seq - y.seq || natural(x.name, y.name))) {
-    if (nCol <= 1 || usedByAll(a)) { singles.push(a); continue; }
+    if (merge === "none" || nCol <= 1 || usedByAll(a)) { singles.push(a); continue; }
     const gk = `${a.type}|${a.uom}`;
     const rows = slots.get(gk) ?? [];
     for (const c of a.cols.keys()) {
@@ -213,37 +288,31 @@ export function buildFamilySheet(input: FamilyInput): FamilySheet {
     const cs = row.cells.filter((x): x is FamilyBuyCell => !!x);
     return { ...row, total: r4(cs.reduce((n, x) => n + x.qty, 0)), remaining: r4(cs.reduce((n, x) => n + x.remaining, 0)), missing_qty: cs.some((x) => x.missing_qty) };
   };
-  const singleRow = (a: CodeAgg): FamilyBuyRow => finishRow({
-    kind: "single", type: a.type, label: a.name, code: a.code, codes: a.code ? [a.code] : [], image_url: a.image, uom: a.uom,
-    cells: columns.map((_, c) => buyCell(a, c, null)),
+  const singleRow = (a: CodeAgg, pick?: (c: number) => boolean): FamilyBuyRow => finishRow({
+    kind: "single", type: a.type, label: a.name, code: a.code, codes: a.code ? [a.code] : [], image_url: a.image, uom: a.uom, seq: a.seq,
+    cells: columns.map((_, c) => (!pick || pick(c) ? buyCell(a, c, null) : null)),
   });
 
-  const varies: { row: FamilyBuyRow; seq: number }[] = [];
-  const singleOut: { row: FamilyBuyRow; seq: number }[] = singles.map((a) => ({ row: singleRow(a), seq: a.seq }));
+  const varies: FamilyBuyRow[] = [];
+  const singleOut: FamilyBuyRow[] = singles.map((a) => singleRow(a));
   for (const rows of slots.values()) {
     for (const slot of rows) {
-      const aggs = [...new Set(slot.values())];
-      const seq = Math.min(...aggs.map((a) => a.seq));
-      // รวมเป็นแถว "ต่างสี" เฉพาะเมื่อชื่อมีส่วนหน้าร่วมกัน (ของเดียวกันคนละสี) — ถ้าคนละของจริง
-      // (เช่น รุ่นย่อย M ใช้หางซิป R ใช้หัวซิป) แยกแถวละรหัส ไม่งั้นแถวเดียวสลับของไปมาอ่านงง
-      if (aggs.length === 1 || !sharedLabel(aggs.map((a) => a.name), "")) {
-        for (const a of aggs) {
-          singleOut.push({ row: finishRow({ kind: "single", type: a.type, label: a.name, code: a.code, codes: a.code ? [a.code] : [], image_url: a.image, uom: a.uom,
-            cells: columns.map((_, c) => (slot.get(c) === a ? buyCell(a, c, null) : null)) }), seq: a.seq });
-        }
-        continue;
+      // รวมเป็นแถว "ต่างสี" เฉพาะของที่ชื่อมีส่วนหน้าร่วมกัน (ของเดียวกันคนละสี) — คนละของจริง
+      // (เช่น รุ่นย่อย M ใช้หางซิป R ใช้หัวซิป · ชื่อเป็นรหัสล้วน) แยกแถวละรหัส ไม่งั้นแถวเดียวสลับของไปมาอ่านงง
+      for (const aggs of clusterByName([...new Set(slot.values())], (a) => a.name, thai)) {
+        const inGroup = (c: number) => { const a = slot.get(c); return !!a && aggs.includes(a); };
+        if (aggs.length === 1) { singleOut.push(singleRow(aggs[0], (c) => slot.get(c) === aggs[0])); continue; }
+        const codeList = aggs.map((a) => a.code).filter((x): x is string => !!x);
+        const short = shortCodes(codeList);
+        varies.push(finishRow({
+          kind: "varies", type: aggs[0].type, label: sharedLabel(aggs.map((a) => a.name), aggs[0].type, thai), code: null, codes: codeList,
+          image_url: aggs.find((a) => a.image)?.image ?? null, uom: aggs[0].uom, seq: Math.min(...aggs.map((a) => a.seq)),
+          cells: columns.map((_, c) => (inGroup(c) ? buyCell(slot.get(c)!, c, short) : null)),
+        }));
       }
-      const codeList = aggs.map((a) => a.code).filter((x): x is string => !!x);
-      const short = shortCodes(codeList);
-      varies.push({ row: finishRow({
-        kind: "varies", type: aggs[0].type, label: sharedLabel(aggs.map((a) => a.name), aggs[0].type), code: null, codes: codeList,
-        image_url: aggs.find((a) => a.image)?.image ?? null, uom: aggs[0].uom,
-        cells: columns.map((_, c) => { const a = slot.get(c); return a ? buyCell(a, c, short) : null; }),
-      }), seq });
     }
   }
-  const ordered = (list: { row: FamilyBuyRow; seq: number }[]) =>
-    list.sort((x, y) => x.seq - y.seq || natural(x.row.label, y.row.label)).map((x) => x.row);
+  const ordered = (list: FamilyBuyRow[]) => list.sort((x, y) => x.seq - y.seq || natural(x.label, y.label));
 
   /* ── บล็อกตัด ── */
   const sizeQty = new Map<string, Map<string, number>>();
@@ -259,8 +328,10 @@ export function buildFamilySheet(input: FamilyInput): FamilySheet {
     const rowQty = l.size_label ? sizeQty.get(l.mo_no)?.get(l.size_label) ?? 0 : moQty.get(l.mo_no) ?? 0;
     const pcs = (Number(l.pieces) || 1) * rowQty;
     const type = txt(l.type) || "อื่น ๆ";
-    const bk = [type, txt(l.block), l.width ?? "", l.length ?? "", l.pieces ?? "", txt(l.size_label)].join("|");
-    const b = blocks.get(bk) ?? { type, block: txt(l.block) || null, width: l.width, length: l.length, pieces: l.pieces, size_label: txt(l.size_label) || null, seq: l.seq, cols: new Map() };
+    // ช่องกว้าง/ยาวว่าง = 0 (บางบรรทัด BOM เว้นว่าง บางบรรทัดใส่ 0 — ขนาดเดียวกัน ต้องอยู่แถวเดียวกัน)
+    const W = Number(l.width) || 0, L = Number(l.length) || 0, P = Number(l.pieces) || 1;
+    const bk = [type, txt(l.block), W, L, P, txt(l.size_label)].join("|");
+    const b = blocks.get(bk) ?? { type, block: txt(l.block) || null, width: W, length: L, pieces: P, size_label: txt(l.size_label) || null, seq: l.seq, cols: new Map() };
     b.seq = Math.min(b.seq, l.seq);
     const perCol = b.cols.get(c) ?? new Map<string, CutAgg>();
     const ck = l.code ?? `n:${txt(l.name)}`;
@@ -285,7 +356,7 @@ export function buildFamilySheet(input: FamilyInput): FamilySheet {
       cutRows.push({
         type: b.type, block: b.block, size: sizeText(b.width, b.length) + (b.size_label ? ` · ไซส์ ${b.size_label}` : ""),
         pieces_per: Number(b.pieces) || 1, varies: isVaries,
-        material: isVaries ? sharedLabel(used.map((x) => x.name), b.type) : used[0].name,
+        material: isVaries ? sharedLabel(used.map((x) => x.name), b.type, thai) : used[0].name,
         code: isVaries ? null : used[0].code, image_url: isVaries ? null : used[0].image,
         cells: pick.map((x) => (x ? { pcs: x.pcs, code: x.code, short: short && x.code ? short.get(x.code) ?? x.code : null, colour: isVaries ? colourWord(x.name) : null, done: x.done } : null)),
         total: used.reduce((n, x) => n + x.pcs, 0),
@@ -295,11 +366,14 @@ export function buildFamilySheet(input: FamilyInput): FamilySheet {
     for (let k = 0; k < depth; k++) {
       const pick = columns.map((_, c) => [...(b.cols.get(c)?.values() ?? [])].sort((x, y) => x.seq - y.seq)[k] ?? null);
       const used = pick.filter((x): x is CutAgg => !!x);
-      const keys = [...new Set(used.map((x) => x.code ?? x.name))];
-      // คนละของจริง (ชื่อไม่มีส่วนร่วม) → แยกแถวละวัตถุดิบ เหมือนฝั่งซื้อ
-      if (keys.length > 1 && !sharedLabel(used.map((x) => x.name), "")) {
-        for (const key of keys) pushRow(pick.map((x) => (x && (x.code ?? x.name) === key ? x : null)));
-      } else pushRow(pick);
+      const keyOf = (x: CutAgg) => x.code ?? x.name;
+      // ตั้ง "ไม่รวม" → แถวละวัตถุดิบ · ไม่งั้นรวมเฉพาะกลุ่มที่ชื่อขึ้นต้นเหมือนกัน (ตัวแปลกแยกออกไปแถวเดียว) เหมือนฝั่งซื้อ
+      const distinct = [...new Map(used.map((x) => [keyOf(x), x])).values()];
+      const groups = merge === "none" ? distinct.map((x) => [x]) : clusterByName(distinct, (x) => x.name, thai);
+      for (const g of groups) {
+        const keys = new Set(g.map(keyOf));
+        pushRow(pick.map((x) => (x && keys.has(keyOf(x)) ? x : null)));
+      }
     }
   }
   const cutGroups: { type: string; seq: number; rows: FamilyCutRow[] }[] = [];
@@ -351,8 +425,13 @@ export type FamilyPrintOptions = {
   only_to_buy: boolean;
   /** วันที่พิมพ์ (ข้อความพร้อมโชว์) */
   printed: string;
+  /** ตั้งค่าหน้าตา (ค่ากลาง family_print_settings) */
+  settings: FamilyPrintSettings;
+  /** บาร์โค้ดเลขใบที่สร้างไว้แล้วในเบราว์เซอร์ (woBarcodeHtml / woQrHtml) · key = เลขใบสั่งผลิต */
+  codes?: Record<string, MoCodes>;
 };
-export const FAMILY_DEFAULT_OPTIONS: FamilyPrintOptions = { buy: true, cut: true, only_to_buy: false, printed: "" };
+export const FAMILY_DEFAULT_OPTIONS: FamilyPrintOptions = { buy: true, cut: true, only_to_buy: false, printed: "", settings: FAMILY_DEFAULT_SETTINGS };
+export type MoCodes = { line: string; qr: string };
 
 // ตัวช่วย HTML — export ให้ใบติดตามงาน (lib/family-track) ใช้ชุดเดียวกัน
 export const esc = (v: unknown) => txt(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
@@ -364,6 +443,21 @@ export const thDate = (iso: string | null) => {
 };
 export const img = (url: string | null, cls: string) => (url ? `<img class="${cls}" src="${esc(url)}" alt="" />` : `<span class="${cls} fp-noimg"></span>`);
 export const TICK = `<span class="tick-box"></span>`;
+
+/** บาร์โค้ดเลขใบตามตั้งค่า: เส้น (+ เลขใต้เส้น) · QR · ทั้งคู่ — ยังไม่ได้สร้าง/ปิดไว้ = ค่าว่าง */
+export function moCodesHtml(moNo: string, codes: Record<string, MoCodes> | undefined, mode: FamilyPrintSettings["barcode"]): string {
+  const c = codes?.[moNo];
+  if (!c || mode === "none") return "";
+  const line = mode !== "qr" && c.line ? `<div class="fp-bc-line">${c.line}<div class="fp-bc-text">${esc(moNo)}</div></div>` : "";
+  const qr = mode !== "line" && c.qr ? `<div class="fp-bc-qr">${c.qr}</div>` : "";
+  return line || qr ? `<div class="fp-codes">${line}${qr}</div>` : "";
+}
+/** ช่องที่สีนั้นไม่ใช้ — ว่าง / ขีด / ลายขีด ตามตั้งค่า */
+const emptyTd = (s: FamilyPrintSettings) =>
+  s.empty === "hatch" ? `<td class="fp-empty"></td>` : s.empty === "dash" ? `<td class="fp-cell fp-dim">–</td>` : `<td></td>`;
+/** ช่องรูปวัตถุดิบ — ไม่มีคอลัมน์รูป = ค่าว่าง (ไม่มี <td>) */
+const imgTd = (url: string | null, s: FamilyPrintSettings) =>
+  s.img === "none" ? "" : `<td class="img-cell">${url ? img(url, "mat-img") : s.img === "show" ? img(null, "mat-img") : ""}</td>`;
 
 export const FAMILY_STATUS_LABEL: Record<FamilyCellStatus, string> = {
   buy: "", partial: "ขาด", requested: "ขอซื้อแล้ว", ordered: "สั่งแล้ว", received: "รับแล้ว", have: "มีของ", ready: "เตรียมแล้ว", skip: "ไม่ต้องซื้อ",
@@ -378,13 +472,15 @@ function skuHeads(cols: FamilyColumn[]) {
 }
 
 function buyCellHtml(cell: FamilyBuyCell | null, opt: FamilyPrintOptions): string {
-  if (!cell) return `<td class="fp-empty"></td>`;
-  if (cell.missing_qty) return `<td class="fp-cell fp-warn">?${cell.short ? `<div class="fp-sub">${esc(cell.short)}</div>` : ""}</td>`;
+  const s = opt.settings, tk = s.tick === "before" ? TICK : "";
+  if (!cell) return emptyTd(s);
+  const short = s.cell !== "num" && cell.short ? `<div class="fp-sub fp-code">${esc(cell.short)}</div>` : "";
+  if (cell.missing_qty) return `<td class="fp-cell fp-warn">${tk}?${short}</td>`;
   if (opt.only_to_buy && cell.remaining <= EPS) return `<td class="fp-cell fp-dim">–</td>`;
   const q = opt.only_to_buy ? cell.remaining : cell.qty;
   const st = cell.status === "partial" ? `ขาด ${num(cell.remaining)}` : FAMILY_STATUS_LABEL[cell.status];
-  return `<td class="fp-cell${DONE.includes(cell.status) && !opt.only_to_buy ? " fp-done" : ""}"><div class="fp-q">${num(q)}</div>`
-    + `${cell.short ? `<div class="fp-sub fp-code">${esc(cell.short)}</div>` : ""}${cell.colour ? `<div class="fp-sub">${esc(cell.colour)}</div>` : ""}`
+  return `<td class="fp-cell${DONE.includes(cell.status) && !opt.only_to_buy ? " fp-done" : ""}"><div class="fp-q">${tk}${num(q)}</div>`
+    + `${short}${s.cell === "full" && cell.colour ? `<div class="fp-sub">${esc(cell.colour)}</div>` : ""}`
     + `${st && !opt.only_to_buy ? `<div class="fp-st">${esc(st)}</div>` : ""}</td>`;
 }
 
@@ -398,53 +494,72 @@ function buyRowHtml(r: FamilyBuyRow, opt: FamilyPrintOptions): string {
     : opt.only_to_buy
       ? `${num(r.remaining)} ${esc(r.uom)}`
       : `${num(r.total)} ${esc(r.uom)}${r.remaining > EPS && r.remaining < r.total - EPS ? `<div class="fp-st">ต้องซื้อ ${num(r.remaining)}</div>` : r.remaining <= EPS ? `<div class="fp-st">ครบแล้ว</div>` : ""}`;
-  return `<tr><td class="img-cell">${img(r.image_url, "mat-img")}</td><td>${name}</td>${r.cells.map((c) => buyCellHtml(c, opt)).join("")}<td class="text-right fp-tot">${tot}</td><td class="text-center">${TICK}</td></tr>`;
+  return `<tr>${imgTd(r.image_url, opt.settings)}<td>${name}</td>${r.cells.map((c) => buyCellHtml(c, opt)).join("")}<td class="text-right fp-tot">${tot}</td>${opt.settings.tick === "row" ? `<td class="text-center">${TICK}</td>` : ""}</tr>`;
 }
 
+/** หมวด "ชนิดวัตถุดิบ" ที่ยังไม่ได้ตั้ง — บอกให้รู้ว่าทำไมแถวนี้ไม่ไปรวมกับพวก */
+const typeLabel = (t: string) => (t === "อื่น ๆ" ? "อื่น ๆ (ยังไม่ได้ตั้งชนิดวัตถุดิบ)" : t);
+
 function buySectionHtml(s: FamilySheet, opt: FamilyPrintOptions): string {
-  const n = s.columns.length, span = n + 4;
-  const v = s.buy.varies.map((r) => buyRowHtml(r, opt)).join("");
-  const one = s.buy.single.map((r) => buyRowHtml(r, opt)).join("");
-  const allSame = n > 1 ? "ใช้ทุกสี / บางสี (รหัสเดียวกัน)" : "วัตถุดิบ";
-  const body = (v ? `<tr class="fp-gh"><td colspan="${span}">ของชนิดเดียวกันแต่ต่างสี — แถวเดียว ช่องบอกรหัสของสีนั้น</td></tr>${v}` : "")
-    + (one ? `<tr class="fp-gh"><td colspan="${span}">${allSame}</td></tr>${one}` : "");
+  const st = opt.settings, n = s.columns.length;
+  const lead = st.img === "none" ? ["44mm"] : ["12mm", "44mm"];
+  const tail = st.tick === "row" ? ["22mm", "7mm"] : ["22mm"];
+  const span = n + lead.length + tail.length;
+  const gh = (label: string, rows: string) => (rows ? `<tr class="fp-gh"><td colspan="${span}">${esc(label)}</td></tr>${rows}` : "");
+  let body = "";
+  if (st.group === "type") {
+    // หมวดตามชนิดวัตถุดิบ: ของชนิดเดียวกันอยู่ติดกันเสมอ (แถวต่างสี + แถวรหัสเดียว) เรียงตามลำดับใน BOM
+    const all = [...s.buy.varies, ...s.buy.single].sort((x, y) => x.seq - y.seq || natural(x.label, y.label));
+    const types = [...new Set(all.map((r) => r.type))];
+    for (const t of types) body += gh(typeLabel(t), all.filter((r) => r.type === t).map((r) => buyRowHtml(r, opt)).join(""));
+  } else {
+    body = gh("ของชนิดเดียวกันแต่ต่างสี — แถวเดียว ช่องบอกรหัสของสีนั้น", s.buy.varies.map((r) => buyRowHtml(r, opt)).join(""))
+      + gh(n > 1 ? "ใช้ทุกสี / บางสี (รหัสเดียวกัน)" : "วัตถุดิบ", s.buy.single.map((r) => buyRowHtml(r, opt)).join(""));
+  }
   const legend = opt.only_to_buy
     ? "เฉพาะที่ยังต้องซื้อ · ตัวเลข = จำนวนที่ยังขาด · – = ขอ/สั่ง/มีของแล้ว"
     : "ตัวเลข = ยอดต้องใช้ของสีนั้น · ช่องเทา = สั่งแล้ว/มีของ/เตรียมแล้ว · ? = BOM ยังไม่ใส่จำนวน";
   return `<section class="fp-section"><div class="section-title">1) ของที่ต้องซื้อ / เตรียม <span class="fp-legend">${legend}</span></div>`
     + (body
-      ? `<table class="summary-table fp-table">${colgroup(n, ["12mm", "44mm"], ["22mm", "7mm"])}<thead><tr><th>รูป</th><th>วัตถุดิบ</th>${skuHeads(s.columns)}<th>รวม</th><th>✓</th></tr></thead><tbody>${body}</tbody></table>`
+      ? `<table class="summary-table fp-table">${colgroup(n, lead, tail)}<thead><tr>${st.img === "none" ? "" : "<th>รูป</th>"}<th>วัตถุดิบ</th>${skuHeads(s.columns)}<th>รวม</th>${st.tick === "row" ? "<th>✓</th>" : ""}</tr></thead><tbody>${body}</tbody></table>`
       : `<div class="fp-none">${s.buy.varies.length + s.buy.single.length === 0 ? "ใบสั่งผลิตในรุ่นนี้ยังไม่มีรายการวัตถุดิบ (ยังไม่ได้กางสูตร BOM)" : "ไม่มีของที่ต้องซื้อแล้ว"}</div>`)
     + `</section>`;
 }
 
-function cutSectionHtml(s: FamilySheet, no: number): string {
-  const n = s.columns.length, span = n + 4;
+function cutSectionHtml(s: FamilySheet, no: number, opt: FamilyPrintOptions): string {
+  const st = opt.settings, n = s.columns.length;
+  const lead = st.img === "none" ? ["44mm", "11mm"] : ["12mm", "44mm", "11mm"];
+  const span = n + lead.length + 1;
   let body = "";
   for (const g of s.cut) {
-    body += `<tr class="fp-gh"><td colspan="${span}">${esc(g.type)}</td></tr>`;
+    body += `<tr class="fp-gh"><td colspan="${span}">${esc(typeLabel(g.type))}</td></tr>`;
     for (const r of g.rows) {
-      const label = `<div class="fp-name">${r.block ? `บล็อก ${esc(r.block)} · ` : ""}${esc(r.size)}</div><div class="fp-sub">${esc(r.material)}${r.varies ? " — สีตามรุ่น" : r.code ? ` · ${esc(r.code)}` : ""}</div>`;
+      // ขนาดตัดตัวใหญ่ (สิ่งที่ช่างตัดดูก่อน) · รหัสบล็อก + วัตถุดิบตัวเล็กบรรทัดล่าง
+      const label = `<div class="fp-size">${esc(r.size)}</div><div class="fp-sub">${r.block ? `บล็อก ${esc(r.block)} · ` : ""}${esc(r.material)}${r.varies ? " — สีตามรุ่น" : r.code ? ` · ${esc(r.code)}` : ""}</div>`;
       const cells = r.cells.map((c) => (c
-        ? `<td class="fp-cell${c.done ? " fp-done" : ""}"><div class="fp-q">${num(c.pcs)} ${TICK}</div>${c.short ? `<div class="fp-sub fp-code">${esc(c.short)}</div>` : ""}${c.colour ? `<div class="fp-sub">${esc(c.colour)}</div>` : ""}${c.done ? `<div class="fp-st">ตัดแล้ว</div>` : ""}</td>`
-        : `<td class="fp-empty"></td>`)).join("");
-      body += `<tr><td class="img-cell">${img(r.image_url, "mat-img")}</td><td>${label}</td><td class="text-center">×${num(r.pieces_per)}</td>${cells}<td class="text-right fp-tot">${num(r.total)}</td></tr>`;
+        ? `<td class="fp-cell${c.done ? " fp-done" : ""}"><div class="fp-q">${st.tick === "before" ? `${TICK}${num(c.pcs)}` : `${num(c.pcs)} ${TICK}`}</div>`
+          + `${st.cell !== "num" && c.short ? `<div class="fp-sub fp-code">${esc(c.short)}</div>` : ""}${st.cell === "full" && c.colour ? `<div class="fp-sub">${esc(c.colour)}</div>` : ""}${c.done ? `<div class="fp-st">ตัดแล้ว</div>` : ""}</td>`
+        : emptyTd(st))).join("");
+      body += `<tr>${imgTd(r.image_url, st)}<td>${label}</td><td class="text-center">×${num(r.pieces_per)}</td>${cells}<td class="text-right fp-tot">${num(r.total)}</td></tr>`;
     }
   }
   return `<section class="fp-section"><div class="section-title">${no}) บล็อกตัด <span class="fp-legend">ขนาดเดียวกันตัดรวดเดียวทุกสี · ติ๊กทีละช่องเมื่อตัดสีนั้นเสร็จ · ตัวเลข = จำนวนชิ้น (ไม่รวมอะไหล่)</span></div>`
     + (body
-      ? `<table class="doc-table fp-table">${colgroup(n, ["12mm", "44mm", "11mm"], ["16mm"])}<thead><tr><th>รูป</th><th>ขนาดตัด (ซม.)</th><th>ชิ้น/ใบ</th>${skuHeads(s.columns)}<th>รวมชิ้น</th></tr></thead><tbody>${body}</tbody></table>`
+      ? `<table class="doc-table fp-table">${colgroup(n, lead, ["16mm"])}<thead><tr>${st.img === "none" ? "" : "<th>รูป</th>"}<th>ขนาดตัด (ซม.)</th><th>ชิ้น/ใบ</th>${skuHeads(s.columns)}<th>รวมชิ้น</th></tr></thead><tbody>${body}</tbody></table>`
       : `<div class="fp-none">รุ่นนี้ไม่มีบล็อกตัดในใบสั่งผลิต</div>`)
     + `</section>`;
 }
 
-/** หัวใบ: รูปรุ่น + รหัส/ชื่อ + จำนวน + การ์ดสีทุกสี (เลขใบสั่งผลิต · กำหนดส่ง) */
+/** หัวใบ: รูปรุ่น + รหัส/ชื่อ + จำนวน + การ์ดสีทุกสี (เลขใบสั่งผลิตเต็ม + บาร์โค้ด) */
 export function familyHeadHtml(s: FamilySheet, opt: FamilyPrintOptions): string {
-  const st = s.stats;
-  const cards = s.columns.map((c) => `<div class="fp-card">${img(c.image_url, "fp-cardimg")}<div class="fp-cardtxt"><div class="fp-skucode">${esc(c.sku)}</div>`
+  const st = s.stats, bc = opt.settings.barcode;
+  const cards = s.columns.map((c) => `<div class="fp-card"><div class="fp-cardtop">${img(c.image_url, "fp-cardimg")}<div class="fp-cardtxt"><div class="fp-skucode">${esc(c.sku)}</div>`
     + `${c.variant ? `<div class="fp-sub">${esc(c.variant)}</div>` : ""}<div><b>${num(c.qty)}</b> ชิ้น</div>`
-    + `${c.no_materials ? `<div class="fp-warn">ยังไม่มีรายการวัตถุดิบ</div>` : ""}`
-    + `<div class="fp-sub">${c.mos.map((m) => `${esc(m.mo_no.replace(/^MO-\d{4}-/, ""))}${c.mos.length > 1 ? ` (${num(m.qty)})` : ""}`).join(" · ")}</div></div></div>`).join("");
+    + `${c.no_materials ? `<div class="fp-warn">ยังไม่มีรายการวัตถุดิบ</div>` : ""}</div></div>`
+    + c.mos.map((m) => `<div class="fp-mo"><span class="fp-mo-no">${esc(m.mo_no)}</span>${c.mos.length > 1 ? ` <span class="fp-sub">${num(m.qty)} ชิ้น</span>` : ""}${moCodesHtml(m.mo_no, opt.codes, bc)}</div>`).join("")
+    + `</div>`).join("");
+  // บาร์โค้ดเส้นกว้าง ~5.5 ซม. → การ์ดแถวละ 3 · ไม่มีเส้น = แถวละ 6 เหมือนเดิม
+  const perRow = bc === "both" || bc === "line" ? 3 : 6;
   return `<div class="doc-head-inline"><div class="doc-title">ใบสั่งผลิตรวมทั้งรุ่น</div><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
 <section class="fp-hero">
   <div class="fp-photo">${img(s.image_url, "fp-heroimg")}</div>
@@ -453,14 +568,14 @@ export function familyHeadHtml(s: FamilySheet, opt: FamilyPrintOptions): string 
   <div class="fp-meta"><div><span class="label">พิมพ์:</span> ${esc(opt.printed || "-")}</div><div><span class="label">กำหนดส่งเร็วสุด:</span> ${esc(thDate(st.due_min))}</div>
     <div><span class="label">วัตถุดิบ:</span> ${st.codes} รหัส (ยังต้องซื้อ ${st.codes_to_buy})</div><div><span class="label">บล็อกตัด:</span> ${st.cut_rows} แบบ · ${num(st.cut_pieces)} ชิ้น</div></div>
 </section>
-<div class="fp-cards" style="grid-template-columns:repeat(${Math.min(Math.max(s.columns.length, 1), 6)},minmax(0,1fr))">${cards}</div>`;
+<div class="fp-cards" style="grid-template-columns:repeat(${Math.min(Math.max(s.columns.length, 1), perRow)},minmax(0,1fr))">${cards}</div>`;
 }
 
 /** เนื้อใบ: ซื้อ / ตัด / กล่องลงชื่อ (ตามที่เลือกพิมพ์) */
 export function familyBodyHtml(s: FamilySheet, opt: FamilyPrintOptions): string {
   const parts: string[] = [];
   if (opt.buy) parts.push(buySectionHtml(s, opt));
-  if (opt.cut) parts.push(cutSectionHtml(s, opt.buy ? 2 : 1));
+  if (opt.cut) parts.push(cutSectionHtml(s, opt.buy ? 2 : 1, opt));
   const boxes: SignBox[] = [];
   const box = (title: string): SignBox => ({ title, lines: [{ kind: "sign" }, { kind: "date" }] });
   if (opt.buy) boxes.push(box("ผู้ซื้อ / เตรียมของ"));
@@ -494,8 +609,18 @@ const FAMILY_CSS = `
 .qty-big { font-size: 24px; font-weight: 900; line-height: 1; }
 .fp-meta { line-height: 1.55; }
 .fp-cards { display: grid; gap: 1.5mm; margin-bottom: 1mm; }
-.fp-card { display: flex; gap: 1.5mm; align-items: center; border: 0.15mm solid #94a3b8; border-radius: 0.6mm; padding: 1mm; min-width: 0; break-inside: avoid; }
-.fp-cardimg { width: 12mm; height: 12mm; object-fit: contain; flex-shrink: 0; background: #fff; }
+.fp-card { border: 0.15mm solid #94a3b8; border-radius: 0.6mm; padding: 1mm; min-width: 0; break-inside: avoid; }
+.fp-cardtop { display: flex; gap: 1.5mm; align-items: center; }
+.fp-mo { margin-top: 0.8mm; }
+.fp-mo-no { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 800; font-size: 9.5px; }
+/* บาร์โค้ดเลขใบ: เส้น (ขอบว่างซ้ายขวา ≥ 10 เส้นให้เครื่องยิงจับได้) + QR */
+.fp-codes { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1.5mm; margin-top: 0.6mm; }
+.fp-bc-line { padding: 0 3.5mm; background: #fff; line-height: 1; }
+.fp-bc-line .wo-barcode-svg { display: block; height: 8mm; }
+.fp-bc-text { margin-top: 0.5mm; text-align: center; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 7.5px; letter-spacing: 0.4mm; }
+.fp-bc-qr .wo-qr { display: block; width: 13mm; height: 13mm; }
+.fp-size { font-size: 13px; font-weight: 800; line-height: 1.15; white-space: nowrap; }
+.fp-cardimg { width: 14mm; height: 14mm; object-fit: contain; flex-shrink: 0; background: #fff; }
 .fp-cardtxt { min-width: 0; line-height: 1.3; }
 .fp-skucode { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 800; }
 .section-title { font-size: 12px; font-weight: 800; margin: 3mm 0 1.2mm; }

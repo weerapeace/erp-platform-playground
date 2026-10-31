@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { buildReportHtmlMulti } from "@/lib/template";
 import {
-  FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, colourWord, familyHtmlData, familyOrientation, sharedLabel, shortCodes,
-  type FamilyBuyLine, type FamilyCutLine, type FamilyInput,
+  FAMILY_DEFAULT_OPTIONS, FAMILY_DEFAULT_SETTINGS, buildFamilySheet, buildFamilyTemplate, colourWord, familyHtmlData, familyOrientation, normalizeFamilySettings,
+  clusterByName, sharedLabel, shortCodes, type FamilyBuyLine, type FamilyCutLine, type FamilyInput,
 } from "@/lib/family-print";
 
 // ข้อมูลจริงจาก DB (2026-10-31) — รุ่น PIX25 ใบเปิด 6 ใบ (สีละใบ)
@@ -221,5 +221,128 @@ describe("HTML ใบพิมพ์", () => {
     const bad = buildFamilySheet({ ...pix25(), parent: { code: "<b>X</b>", name: null, image_url: null } });
     const html = familyHtmlData(bad, FAMILY_DEFAULT_OPTIONS).head_html as string;
     expect(html).toContain("&lt;b&gt;X&lt;/b&gt;");
+  });
+});
+
+// ข้อมูลจริงจาก DB (2026-10-31) — รุ่น BPU04 5 สี สีละ 30 ใบ (เคสที่เจ้าของบอก "ตาลาย")
+const BP = ["06", "07", "11", "21", "22"];
+const bmo = (s: string) => `MO-2026-004${79 + BP.indexOf(s)}`;
+const bl = (s: string, code: string, name: string, type: string | null, uom: string, per: number, seq: number): FamilyBuyLine => ({
+  mo_no: bmo(s), code, name, type, uom, qty_per: per, required: per * 30, remaining: per * 30, status: "buy", po_nos: [], seq, image_url: null,
+});
+function bpu04(): FamilyInput {
+  const buy: FamilyBuyLine[] = [
+    ...[["06", "352", "สีเขียว"], ["07", "232", "สีชมพู"], ["11", "240", "สีเขียวขี้ม้า"], ["21", "266", "สีชมพูพีช"], ["22", "258", "สีส้ม"]]
+      .map(([s, n, c]) => bl(s, `PU-HRH-7261#${n}`, `พียู(PU) HRH-7261 เบอร์#${n} ${c}`, "PU", "หลา", 0.1556, 1)),
+    bl("06", "LIN00004", "ผ้าซับใน FLYNOW สีดำ", "ผ้า", "หลา", 0.0435, 6),
+    bl("07", "LIN00005", "ผ้าซับใน FLYNOW สีน้ำตาล", "ผ้า", "หลา", 0.0435, 1),
+    bl("11", "LIN00006", "ผ้าซับในตัวบาง สีดำ ผ้า 210 ผ้าเก่า BSC", "ผ้า", "หลา", 0.0435, 3),
+    bl("21", "RMN066PU-106", "ผ้าซับในตัวใหม่ เหมือนงาน FLYNOW สีครีม", "ผ้า", "หลา", 0.0435, 5),
+    bl("22", "RMN066PU-106", "ผ้าซับในตัวใหม่ เหมือนงาน FLYNOW สีครีม", "ผ้า", "หลา", 0.0435, 5),
+    bl("06", "ZIP-N-NO.5#D221-22IN", "ซิปไนล่อน#5#D221 สีชมพูนู้ด ตัด22นิ้ว พร้อมหัวซิป+หางซิป", "ซิป", "หลา", 0.289, 3),
+    bl("07", "ZIP-N-NO.3#G369", "ซิปไนล่อน#5 #G369 สีชมพู", "ซิป", "หลา", 0.289, 5),
+    bl("22", "ZIP-N-NO.5#G283", "ซิปไนล่อน#5 #G283 สีแทน", "ซิป", "หลา", 0.289, 4),
+    bl("11", "ZIP-N-NO.5#G515", "ZIP-N-NO.5#G515", "ซิป", "Units", 0.2889, 6),          // หน่วยไม่ตรง
+    bl("21", "ZIP-N-NO.5#G380", "ซิปไนล่อน#5 #G380 สีชมพู", null, "หลา", 0.289, 4),     // ยังไม่ได้ตั้งชนิด
+    ...[["06", "PK"], ["07", "PK"], ["11", "OL"], ["21", "PP"]].map(([s, c]) => bl(s, `ZH-NL-NO.5-${c}+P`, `หัวซิปไนล่อน#5 พร้อมหางสี${c} YKK`, "อะไหล่", "Units", 1, 2)),
+    bl("22", "ZH-NL-NO.5-N+P", "หัวซิปไนล่อน#5 พร้อมหางสีนิเกิ้ล", "อะไหล่", "Units", 1, 3),
+    ...BP.map((s) => bl(s, "ROPE003-CM", "เชือก 8 มิล สีครีม", "สาย/เทป", "หลา", 1.2, 4)),
+  ];
+  const cut: FamilyCutLine[] = [
+    ...BP.map((s) => ({ mo_no: bmo(s), code: "ROPE003-CM", name: "เชือก 8 มิล สีครีม", type: "สาย/เทป", block: null, width: s === "06" ? null : 0, length: 108, pieces: 2, size_label: null, cut_done: false, seq: 4, image_url: null })),
+  ];
+  return {
+    key: "BPU04", parent: { code: "BPU04", name: "Louis Montini (Nikita)", image_url: null },
+    mos: BP.map((s) => ({ id: s, mo_no: bmo(s), product_sku: `BPU04-${s}`, qty: 30 })), skus: [], buy, cut,
+  };
+}
+
+describe("วิธีรวมแถว (เจ้าของถาม 'รวมจากอะไร') — BPU04 จริง", () => {
+  it("ภาษาไทยไม่เว้นวรรค: 'ผ้าซับใน…' 4 แบบ รวมเป็นแถวเดียวได้ · แบบเดิม (เข้ม) ไม่รวม", () => {
+    const names = ["ผ้าซับใน FLYNOW สีดำ", "ผ้าซับใน FLYNOW สีน้ำตาล", "ผ้าซับในตัวบาง สีดำ ผ้า 210 ผ้าเก่า BSC", "ผ้าซับในตัวใหม่ เหมือนงาน FLYNOW สีครีม"];
+    expect(sharedLabel(names, "")).toBe("ผ้าซับใน");
+    expect(sharedLabel(names, "", false)).toBe("");
+    expect(sharedLabel(["หัวซิปไนล่อน#5 พร้อมหางสีชมพู YKK", "หัวซิปไนล่อน#5 พร้อมหางสีนิเกิ้ล"], "")).toBe("หัวซิปไนล่อน#5 พร้อมหาง");
+    expect(sharedLabel(["พียู(PU) HRH-7261 เบอร์#352 สีเขียว", "พียู(PU) HRH-7261 เบอร์#232 สีชมพู"], "")).toBe("พียู(PU) HRH-7261 เบอร์");
+    expect(sharedLabel(["พียูหนังเทียม M638#12-2903 สีม่วง", "พียูหนังเทียม M638#19-4004 สีดำ"], "")).toBe("พียูหนังเทียม M638");   // ไม่ขาดกลางรหัส
+    expect(sharedLabel(["หางซิป L089 สีนิเกิ้ล", "หัวซิปไนล่อน #5 นิเกิ้ล"], "")).toBe("");   // คนละของ
+  });
+
+  it("อัตโนมัติ: PU / ผ้าซับใน / ซิป / หัวซิป เป็นแถวต่างสี · ซิปหน่วยไม่ตรง + ไม่มีชนิด แยกแถว", () => {
+    const s = buildFamilySheet(bpu04(), "auto");
+    expect(s.buy.varies.map((r) => r.label).sort()).toEqual(["ซิปไนล่อน#5", "ผ้าซับใน", "พียู(PU) HRH-7261 เบอร์", "หัวซิปไนล่อน#5 พร้อมหาง"].sort());
+    expect(s.buy.varies.find((r) => r.label === "ผ้าซับใน")!.codes).toHaveLength(4);   // -21 กับ -22 ใช้รหัสเดียวกัน
+    const singles = Object.fromEntries(s.buy.single.map((r) => [r.code, r.type]));
+    expect(singles).toMatchObject({ "ZIP-N-NO.5#G515": "ซิป", "ZIP-N-NO.5#G380": "อื่น ๆ", "ROPE003-CM": "สาย/เทป" });
+  });
+
+  it("แบบเดิม: ผ้าซับในแยก · ไม่รวม: แถวละรหัสทั้งหมด", () => {
+    const strict = buildFamilySheet(bpu04(), "strict");
+    expect(strict.buy.varies.map((r) => r.label)).not.toContain("ผ้าซับใน");
+    const none = buildFamilySheet(bpu04(), "none");
+    expect(none.buy.varies).toHaveLength(0);
+    expect(none.buy.single).toHaveLength(none.stats.codes);
+  });
+
+  it("บล็อกตัด: ช่องกว้างว่าง (null) กับ 0 = ขนาดเดียวกัน → แถวเดียว", () => {
+    const s = buildFamilySheet(bpu04());
+    expect(s.cut).toHaveLength(1);
+    expect(s.cut[0].rows).toHaveLength(1);
+    expect(s.cut[0].rows[0]).toMatchObject({ size: "ยาว 108", total: 300 });
+  });
+});
+
+describe("ตั้งค่าหน้าตา (ค่ากลาง)", () => {
+  const s = buildFamilySheet(bpu04());
+  const body = (p: Partial<typeof FAMILY_DEFAULT_SETTINGS>) => familyHtmlData(s, { ...FAMILY_DEFAULT_OPTIONS, settings: { ...FAMILY_DEFAULT_SETTINGS, ...p } }).body_html as string;
+
+  it("ค่าเพี้ยน → ค่าแนะนำ", () => {
+    expect(normalizeFamilySettings({ merge: "xx", tick: "row", junk: 1 })).toEqual({ ...FAMILY_DEFAULT_SETTINGS, tick: "row" });
+    expect(normalizeFamilySettings(null)).toEqual(FAMILY_DEFAULT_SETTINGS);
+  });
+
+  it("ช่องติ๊กหน้าตัวเลข vs ท้ายแถว", () => {
+    expect(body({ tick: "before" })).toContain('<div class="fp-q"><span class="tick-box"></span>');
+    expect(body({ tick: "before" })).not.toContain("<th>✓</th>");
+    expect(body({ tick: "row" })).toContain("<th>✓</th>");
+  });
+
+  it("จัดหมวดตามชนิด · ช่องว่าง · ไม่มีคอลัมน์รูป · ตัวเลขอย่างเดียว", () => {
+    const t = body({ group: "type" });
+    expect(t).toContain(">อื่น ๆ (ยังไม่ได้ตั้งชนิดวัตถุดิบ)<");
+    expect(t).not.toContain("ของชนิดเดียวกันแต่ต่างสี");
+    expect(body({ group: "kind" })).toContain("ของชนิดเดียวกันแต่ต่างสี");
+    expect(body({ empty: "blank" })).not.toContain("fp-empty");
+    expect(body({ empty: "hatch" })).toContain("fp-empty");
+    expect(body({ img: "none" })).not.toContain("<th>รูป</th>");
+    expect(body({ cell: "code" })).toContain(">352<");
+    expect(body({ cell: "num" })).not.toContain(">352<");
+  });
+
+  it("บล็อกตัด: ขนาดตัวใหญ่ รหัสบล็อกตัวเล็ก", () => {
+    const html = buildFamilySheet(pix25()) && familyHtmlData(buildFamilySheet({ ...pix25(), cut: pix25().cut.map((c) => ({ ...c, block: "C1-1-218" })) }), FAMILY_DEFAULT_OPTIONS).body_html as string;
+    expect(html).toContain('<div class="fp-size">26.5 × 4</div>');
+    expect(html).toContain("บล็อก C1-1-218 · ");
+  });
+
+  it("การ์ดสี: เลขใบเต็ม + บาร์โค้ดตามตั้งค่า (เส้นกว้าง → แถวละ 3)", () => {
+    const codes = Object.fromEntries(BP.map((x) => [bmo(x), { line: "<svg class=\"wo-barcode-svg\"></svg>", qr: "<img class=\"wo-qr\">" }]));
+    const head = (barcode: typeof FAMILY_DEFAULT_SETTINGS.barcode) => familyHtmlData(s, { ...FAMILY_DEFAULT_OPTIONS, codes, settings: { ...FAMILY_DEFAULT_SETTINGS, barcode } }).head_html as string;
+    expect(head("both")).toContain('<span class="fp-mo-no">MO-2026-00479</span>');
+    expect(head("both")).toContain("fp-bc-line");
+    expect(head("both")).toContain("repeat(3,");
+    expect(head("qr")).not.toContain("fp-bc-line");
+    expect(head("qr")).toContain("repeat(5,");
+    expect(head("none")).not.toContain("fp-codes");
+  });
+});
+
+describe("แยกเฉพาะตัวที่ชื่อแปลก ไม่ให้ทั้งแถวแตก", () => {
+  it("ซิป 3 ตัวชื่อไทย + 1 ตัวชื่อเป็นรหัสล้วน → กลุ่ม 3 + เดี่ยว 1", () => {
+    const names = ["ซิปไนล่อน#5#D221 สีชมพูนู้ด", "ซิปไนล่อน#5 #G369 สีชมพู", "ZIP-N-NO.5#G515", "ซิปไนล่อน#5 #G283 สีแทน"];
+    const groups = clusterByName(names, (x) => x, true);
+    expect(groups.map((g) => g.length).sort()).toEqual([1, 3]);
+    expect(groups.find((g) => g.length === 1)).toEqual(["ZIP-N-NO.5#G515"]);
+    expect(clusterByName(["พียู A สีดำ", "พียู A สีแดง"], (x) => x, true)).toHaveLength(1);
   });
 });

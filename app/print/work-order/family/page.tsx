@@ -16,11 +16,13 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
-import { WO_DEFAULT_STYLE, woStyleCss } from "@/lib/work-order-print";
+import { WO_DEFAULT_STYLE, woBarcodeHtml, woQrHtml, woStyleCss } from "@/lib/work-order-print";
+import { scanUrl } from "@/lib/scan-code";
 import { useWoPrintColumns } from "@/components/wo-print-columns";
+import { FamilyPrintSettingsButton, useFamilyPrintSettings } from "@/components/family-print-settings";
 import {
   FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, familyHtmlData, familyOrientation,
-  type FamilyPrintOptions, type FamilyPrintResponse, type FamilySheetKind,
+  type FamilyPrintOptions, type FamilyPrintResponse, type FamilyPrintSettings, type FamilySheetKind, type MoCodes,
 } from "@/lib/family-print";
 import {
   TRACK_CSS, TRACK_EXTRAS, buildFamilyTrack, familyTrackHtmlData, normalizeTrackExtras,
@@ -61,6 +63,10 @@ function FamilyPrintInner() {
   const [blank, setBlank] = useState(false);
   const [extras, setExtras] = useState<TrackExtras>(() => normalizeTrackExtras(null));
   const { cols } = useWoPrintColumns();   // เส้นตาราง/ขนาดตัวอักษร = ค่ากลางเดียวกับใบสั่งงาน
+  const { settings: savedSettings, reload: reloadSettings } = useFamilyPrintSettings();   // วิธีรวมแถว/ช่องติ๊ก/บาร์โค้ด (ค่ากลาง)
+  const [previewSettings, setPreviewSettings] = useState<FamilyPrintSettings | null>(null);   // ค่าที่กำลังปรับในแผง (ยังไม่บันทึก)
+  const settings = previewSettings ?? savedSettings;
+  const [codes, setCodes] = useState<Record<string, MoCodes>>({});
   const isTrack = sheet !== "buy";
 
   // อ่านค่าที่จำไว้หลังเปิดหน้า (อ่านตอน render แรกจะไม่ตรงกับฝั่ง server)
@@ -88,7 +94,17 @@ function FamilyPrintInner() {
     return () => { on = false; };
   }, [query]);
 
-  const sheets = useMemo(() => (data?.families ?? []).map(buildFamilySheet), [data]);
+  // บาร์โค้ดเลขใบ (เส้น Code128 + QR ชี้หน้ากลาง /s/<เลขใบ>) — สร้างครั้งเดียวต่อการโหลด ตั้งค่าแค่เลือกว่าจะโชว์แบบไหน
+  useEffect(() => {
+    const moNos = [...new Set((data?.families ?? []).flatMap((f) => f.mos.map((m) => m.mo_no)))];
+    if (!moNos.length) return;
+    let on = true;
+    void Promise.all(moNos.map(async (no) => [no, { line: await woBarcodeHtml(no), qr: await woQrHtml(scanUrl(no)) }] as const))
+      .then((list) => { if (on) setCodes(Object.fromEntries(list)); });
+    return () => { on = false; };
+  }, [data]);
+
+  const sheets = useMemo(() => (data?.families ?? []).map((f) => buildFamilySheet(f, settings.merge)), [data, settings.merge]);
   const title = sheets.length === 1 ? sheets[0].title_code : `${sheets.length} รุ่น`;
   const fileName = docFileName(isTrack ? "ใบติดตามงานผลิต" : "ใบสั่งผลิตรวมทั้งรุ่น", title);
 
@@ -98,17 +114,17 @@ function FamilyPrintInner() {
     const style = woStyleCss(cols?.style ?? WO_DEFAULT_STYLE);
     if (isTrack) {
       const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);   // วันนี้เวลาไทย (นับวันค้าง)
-      const opt: TrackOptions = { extras, blank, printed, today };
+      const opt: TrackOptions = { extras, blank, printed, today, barcode: settings.barcode, codes };
       const tracks = data.families.map((f) => buildFamilyTrack(f, today));
       const kinds = sheet === "track" ? (["route", "status"] as const) : ([sheet] as const);
       const pages = tracks.flatMap((t) => kinds.map((k) => familyTrackHtmlData(t, k, opt)));
       // ใบติดตามงานคอลัมน์เยอะ → แนวนอนเป็นค่าเริ่ม
       return buildReportHtmlMulti(buildFamilyTemplate(paper === "auto" ? "landscape" : paper, TRACK_CSS + style), pages, fileName);
     }
-    const opt: FamilyPrintOptions = { ...FAMILY_DEFAULT_OPTIONS, buy: sections !== "cut", cut: sections !== "buy", only_to_buy: onlyToBuy, printed };
+    const opt: FamilyPrintOptions = { ...FAMILY_DEFAULT_OPTIONS, buy: sections !== "cut", cut: sections !== "buy", only_to_buy: onlyToBuy, printed, settings, codes };
     const orientation = paper === "auto" ? familyOrientation(sheets) : paper;
     return buildReportHtmlMulti(buildFamilyTemplate(orientation, style), sheets.map((s) => familyHtmlData(s, opt)), fileName);
-  }, [sheets, data, isTrack, sheet, extras, blank, sections, onlyToBuy, paper, cols, fileName]);
+  }, [sheets, data, isTrack, sheet, extras, blank, sections, onlyToBuy, paper, cols, fileName, settings, codes]);
 
   const summary = sheets.length === 1
     ? `${sheets[0].title_code} · ${sheets[0].stats.skus} สี · ${sheets[0].stats.mos} ใบสั่งผลิต · ${sheets[0].stats.qty.toLocaleString("th-TH")} ชิ้น`
@@ -156,6 +172,7 @@ function FamilyPrintInner() {
             </>
           )}
           <Seg value={paper} onChange={setPaper} options={[{ v: "auto", label: "กระดาษอัตโนมัติ" }, { v: "landscape", label: "แนวนอน" }, { v: "portrait", label: "แนวตั้ง" }]} />
+          <FamilyPrintSettingsButton current={savedSettings} onPreview={setPreviewSettings} onSaved={reloadSettings} />
         </div>
       </div>
       <div className="px-4 py-6">

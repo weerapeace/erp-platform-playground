@@ -120,8 +120,22 @@ describe("HTML ใบพิมพ์", () => {
     // เปิดครบทุกช่อง → ความกว้างคอลัมน์รวมกัน = 100% (ไม่ล้นขอบกระดาษ)
     const all = familyTrackHtmlData(t, "route", { ...OPT, extras: normalizeTrackExtras({ gb: true, rounds: true, late: true, qc: true, mat: true, pay: true, sign: true }) }).body_html as string;
     const widths = [...all.matchAll(/<col style="width:([\d.]+)%"/g)].map((x) => Number(x[1]));
-    expect(widths).toHaveLength(11);
+    expect(widths).toHaveLength(12);
     expect(Math.abs(widths.reduce((n, w) => n + w, 0) - 100)).toBeLessThan(0.5);
+  });
+
+  it("แบบ A (ปรับตามเจ้าของ): ไม่มีแถวหัวสี · ช่องสีคร่อมทุกใบของสี · เลขใบเต็ม + บาร์โค้ด", () => {
+    const codes = { "MO-2026-00098": { line: "<svg class=\"wo-barcode-svg\"></svg>", qr: "<img class=\"wo-qr\">" } };
+    const html = familyTrackHtmlData(t, "route", { ...OPT, barcode: "both", codes }).body_html as string;
+    expect(html.match(/class="tr-gh"/g)).toHaveLength(1);   // เหลือแค่แถวรวมท้ายตาราง
+    expect(html).toContain('class="tr-skucell" rowspan="2"');   // TTM130-01 มี 2 ใบ
+    expect(html).toContain('<div class="tr-mo">MO-2026-00098</div>');
+    expect(html).toContain("fp-bc-line");
+    expect(html).toContain("wo-qr");
+    const qrOnly = familyTrackHtmlData(t, "route", { ...OPT, barcode: "qr", codes }).body_html as string;
+    expect(qrOnly).not.toContain("fp-bc-line");
+    const blank = familyTrackHtmlData(t, "route", { ...OPT, blank: true, barcode: "both", codes }).body_html as string;
+    expect(blank).not.toContain("wo-qr");   // ฟอร์มเปล่าไม่พิมพ์บาร์โค้ด
   });
 
   it("แบบ A: 'ของยังขาด' เตือนเฉพาะใบที่ยังไม่จ่ายงาน", () => {

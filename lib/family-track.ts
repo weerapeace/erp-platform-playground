@@ -12,8 +12,8 @@
 import { needsCut } from "@/lib/cut-rules";
 import { signoffHtml, type SignBox } from "@/lib/print-signoff";
 import {
-  buildFamilySheet, esc, img, num, thDate, TICK,
-  type FamilyColumn, type FamilyInput, type FamilyMo, type FamilyWorkOrder,
+  buildFamilySheet, esc, img, moCodesHtml, num, thDate, TICK,
+  type FamilyColumn, type FamilyInput, type FamilyMo, type FamilyPrintSettings, type FamilyWorkOrder, type MoCodes,
 } from "@/lib/family-print";
 
 /* ─────────────── ตัวเลือก ─────────────── */
@@ -41,7 +41,13 @@ export type TrackOptions = {
   printed: string;
   /** วันนี้ (YYYY-MM-DD เวลาไทย) — ไว้นับวันค้างที่ช่าง */
   today: string;
+  /** บาร์โค้ดเลขใบ (ตั้งค่ากลางเดียวกับใบซื้อ-ตัด) + โค้ดที่สร้างไว้แล้วในเบราว์เซอร์ */
+  barcode?: FamilyPrintSettings["barcode"];
+  codes?: Record<string, MoCodes>;
 };
+/** ความกว้างช่องเลขใบ (น้ำหนัก ≈ มม.) — บาร์โค้ดเส้นกว้าง ~6 ซม. · เส้น + QR ต้องวางข้างกันได้ ไม่งั้นแถวสูงเปลือง */
+const moColW = (opt: TrackOptions) => (opt.barcode === "both" ? 86 : opt.barcode === "line" ? 66 : opt.barcode === "qr" ? 36 : 28);
+const codesOf = (moNo: string, opt: TrackOptions) => (opt.blank ? "" : moCodesHtml(moNo, opt.codes, opt.barcode ?? "none"));
 
 /* ─────────────── ตาราง ─────────────── */
 export type StepState = "done" | "part" | "todo" | "skip";
@@ -178,8 +184,9 @@ const cols = (list: [string, number][]) => {
 };
 const blankRow = (n: number, h = "tr-blank") => `<tr class="${h}">${Array.from({ length: n }, () => `<td>${LN}</td>`).join("")}</tr>`;
 const rate = (w: FamilyWorkOrder) => (Number(w.labor_cost) > 0 && w.qty > 0 ? Number(w.labor_cost) / w.qty : null);
-const skuCell = (m: TrackMo, qty?: number) =>
-  `${img(m.col.image_url, "tr-img")} ${B(m.col.sku)}${m.col.variant ? ` <span class="tr-sm">${esc(m.col.variant)}</span>` : ""}${SM(`${esc(m.mo.mo_no)} · ${num(qty ?? m.mo.qty)} ชิ้น`)}`;
+const skuCell = (m: TrackMo, opt: TrackOptions, qty?: number) =>
+  `${img(m.col.image_url, "tr-img")} ${B(m.col.sku)}${m.col.variant ? ` <span class="tr-sm">${esc(m.col.variant)}</span>` : ""}`
+  + `<div class="tr-mo">${esc(m.mo.mo_no)} <span class="tr-sm">· ${num(qty ?? m.mo.qty)} ชิ้น</span></div>${codesOf(m.mo.mo_no, opt)}`;
 function stepHtml(label: string, s: TrackStep, blank: boolean): string {
   if (blank || s.state === "todo") return `<div>${TICK}${label} ${LN}</div>`;
   if (s.state === "skip") return `<div class="tr-sm">${label} — ข้าม (แอดมิน)</div>`;
@@ -208,8 +215,9 @@ function issuesHtml(t: FamilyTrack, opt: TrackOptions): string {
 }
 
 /* ── แบบ A: ตารางเส้นทางงาน ── */
-function routeCols(e: TrackExtras): [string, number][] {
-  const c: [string, number][] = [["สี / ใบ", 34], ["เตรียม - ตัด", 27], ["จ่ายงาน", 40], ["ค่าแรง", 22], ["รับงาน", 34]];
+function routeCols(opt: TrackOptions): [string, number][] {
+  const e = opt.extras;
+  const c: [string, number][] = [["สี", 30], ["ใบสั่งผลิต", moColW(opt)], ["เตรียม - ตัด", 25], ["จ่ายงาน", 38], ["ค่าแรง", 20], ["รับงาน", 32]];
   if (e.gb) c.push(["ดี / เสีย", 18]);
   if (e.late) c.push(["ค้าง / กำหนดส่ง", 22]);
   if (e.qc) c.push(["QC / เข้าคลัง", 24]);
@@ -219,18 +227,25 @@ function routeCols(e: TrackExtras): [string, number][] {
   return c;
 }
 
-function routeRows(m: TrackMo, opt: TrackOptions): string {
+type RouteLine = { w: FamilyWorkOrder | null; qty: number };
+/** แถวของใบนี้: แถวละใบจ่ายงาน + แถวว่าง "ยังไม่จ่าย" ถ้ายังจ่ายไม่ครบ (ฟอร์มเปล่า = แถวว่างแถวเดียว) */
+function routeLines(m: TrackMo, opt: TrackOptions): RouteLine[] {
+  const lines: RouteLine[] = opt.blank ? [{ w: null, qty: m.mo.qty }]
+    : [...m.wos.map((w) => ({ w, qty: w.qty })), ...(m.remaining > EPS && !m.skip_dispatch ? [{ w: null, qty: m.remaining }] : [])];
+  return lines.length ? lines : [{ w: null, qty: 0 }];
+}
+
+/** skuHtml = ช่อง "สี" (คร่อมทุกแถวของสีนั้น) — ส่งมาเฉพาะใบแรกของสี */
+function routeRows(m: TrackMo, opt: TrackOptions, skuHtml: string | null): string {
   const e = opt.extras, bl = opt.blank;
-  // แถวละใบจ่ายงาน + แถวว่าง "ยังไม่จ่าย" ถ้ายังจ่ายไม่ครบ (ฟอร์มเปล่า = แถวว่างแถวเดียว)
-  type Line = { w: FamilyWorkOrder | null; qty: number };
-  const lines: Line[] = bl ? [{ w: null, qty: m.mo.qty }] : [...m.wos.map((w) => ({ w, qty: w.qty })), ...(m.remaining > EPS && !m.skip_dispatch ? [{ w: null, qty: m.remaining }] : [])];
-  if (!lines.length) lines.push({ w: null, qty: 0 });
+  const lines = routeLines(m, opt);
   const span = lines.length > 1 ? ` rowspan="${lines.length}"` : "";
   return lines.map((ln, i) => {
     const w = ln.w, cells: string[] = [];
     if (i === 0) {
-      // "ของยังขาด" เตือนเฉพาะก่อนจ่ายงาน — จ่าย/รับไปแล้ว ของถูกเบิกใช้ไปแล้ว ไม่ต้องรก
-      cells.push(td(`${B(m.mo.mo_no.replace(/^MO-/, ""))}${SM(`${num(m.mo.qty)} ชิ้น`)}${!bl && m.buy_left && m.dispatched <= EPS ? SM(`<span class="tr-warn">ของยังขาด ${m.buy_left} รายการ</span>`) : ""}`, "", span));
+      if (skuHtml) cells.push(skuHtml);
+      // เลขใบเต็ม + บาร์โค้ด · "ของยังขาด" เตือนเฉพาะก่อนจ่ายงาน (จ่าย/รับไปแล้ว ของถูกเบิกใช้ไปแล้ว ไม่ต้องรก)
+      cells.push(td(`<div class="tr-mo">${esc(m.mo.mo_no)}</div>${SM(`${num(m.mo.qty)} ชิ้น`)}${!bl && m.buy_left && m.dispatched <= EPS ? SM(`<span class="tr-warn">ของยังขาด ${m.buy_left} รายการ</span>`) : ""}${codesOf(m.mo.mo_no, opt)}`, "", span));
       cells.push(td(stepHtml("เตรียม", m.prep, bl) + stepHtml("ตัด", m.cut, bl), "", span));
     }
     // จ่ายงาน
@@ -268,15 +283,18 @@ function routeRows(m: TrackMo, opt: TrackOptions): string {
 }
 
 export function trackRouteBodyHtml(t: FamilyTrack, opt: TrackOptions): string {
-  const c = routeCols(opt.extras);
+  const c = routeCols(opt);
   let body = "";
   for (const g of t.groups) {
+    // ไม่มีแถวหัวสีแล้ว — รูป (ใหญ่ขึ้น) + รหัส + สี อยู่ช่องแรก คร่อมทุกแถวของสีนั้น
     const q = g.mos.reduce((n, m) => n + (Number(m.mo.qty) || 0), 0);
-    body += `<tr class="tr-gh"><td colspan="${c.length}">${img(g.col.image_url, "tr-img")} ${esc(g.col.sku)}${g.col.variant ? ` · ${esc(g.col.variant)}` : ""} <span class="tr-sm">· ${g.mos.length} ใบ · ${num(q)} ชิ้น</span></td></tr>`;
-    for (const m of g.mos) body += routeRows(m, opt);
+    const rows = g.mos.reduce((n, m) => n + routeLines(m, opt).length, 0);
+    const sku = td(`<div class="tr-skuimg">${img(g.col.image_url, "tr-bigimg")}</div><div class="tr-sys">${esc(g.col.sku)}</div>`
+      + `${g.col.variant ? `<div class="tr-sm">${esc(g.col.variant)}</div>` : ""}${g.mos.length > 1 ? SM(`${g.mos.length} ใบ · ${num(q)} ชิ้น`) : ""}`, "tr-skucell", rows > 1 ? ` rowspan="${rows}"` : "");
+    g.mos.forEach((m, i) => { body += routeRows(m, opt, i === 0 ? sku : null); });
   }
   const s = t.stats;
-  body += `<tr class="tr-gh"><td>รวม ${num(s.qty)} ชิ้น</td><td></td><td>${opt.blank ? "" : `จ่าย ${num(s.dispatched)}`}</td><td>${opt.blank ? LN : num(s.labor)}</td><td>${opt.blank ? "" : `รับ ${num(s.received)} · ค้าง ${num(s.outstanding)}`}</td>${"<td></td>".repeat(c.length - 5)}</tr>`;
+  body += `<tr class="tr-gh"><td colspan="2">รวม ${num(s.qty)} ชิ้น</td><td></td><td>${opt.blank ? "" : `จ่าย ${num(s.dispatched)}`}</td><td>${opt.blank ? LN : num(s.labor)}</td><td>${opt.blank ? "" : `รับ ${num(s.received)} · ค้าง ${num(s.outstanding)}`}</td>${"<td></td>".repeat(c.length - 6)}</tr>`;
   const sign: SignBox[] = [
     { title: "ผู้บันทึก", lines: [{ kind: "sign" }, { kind: "date" }] },
     { title: "หัวหน้าผลิต", lines: [{ kind: "sign" }, { kind: "date" }] },
@@ -293,32 +311,33 @@ function section(title: string, dot: string, count: string, head: [string, numbe
 export function trackStatusBodyHtml(t: FamilyTrack, opt: TrackOptions): string {
   const b = trackBuckets(t), bl = opt.blank;
   const extra = bl ? 3 : 1;   // บรรทัดว่างท้ายแต่ละกลุ่ม
+  const firstW = Math.max(44, moColW(opt));   // ช่องสี/ใบ กว้างพอวางบาร์โค้ด
   const parts: string[] = [];
 
-  const h1: [string, number][] = [["สี / ใบ", 44], ["ของ", 30], ["เตรียม", 44], ["ตัด", 44], ["หมายเหตุ", 70], ["ลงชื่อ", 30]];
-  parts.push(section("รอของ / เตรียม / ตัด", "tr-gray", bl ? "" : `${b.pre.length} ใบ`, h1, bl ? "" : b.pre.map((m) => `<tr>${td(skuCell(m))}${td(m.buy_left ? `<span class="tr-warn">ยังขาด ${B(m.buy_left)} รายการ</span>` : `<span class="tr-ok">ครบ</span>`)}${td(stepHtml("เตรียม", m.prep, false) + SM(`วันที่ ${LN}`))}${td(stepHtml("ตัด", m.cut, false) + SM(`วันที่ ${LN}`))}${td(LNW)}${td(LN)}</tr>`).join(""), extra));
+  const h1: [string, number][] = [["สี / ใบ", firstW], ["ของ", 30], ["เตรียม", 44], ["ตัด", 44], ["หมายเหตุ", 70], ["ลงชื่อ", 30]];
+  parts.push(section("รอของ / เตรียม / ตัด", "tr-gray", bl ? "" : `${b.pre.length} ใบ`, h1, bl ? "" : b.pre.map((m) => `<tr>${td(skuCell(m, opt))}${td(m.buy_left ? `<span class="tr-warn">ยังขาด ${B(m.buy_left)} รายการ</span>` : `<span class="tr-ok">ครบ</span>`)}${td(stepHtml("เตรียม", m.prep, false) + SM(`วันที่ ${LN}`))}${td(stepHtml("ตัด", m.cut, false) + SM(`วันที่ ${LN}`))}${td(LNW)}${td(LN)}</tr>`).join(""), extra));
 
-  const h2: [string, number][] = [["สี / ใบ", 44], ["รอจ่าย", 18], ["จ่ายให้ (ช่าง / โต๊ะ)", 50], ["วันที่จ่าย", 26], ["จำนวน", 20], ["เรต / ชิ้น", 22], ["กำหนดส่ง", 26], ["ลงชื่อช่างรับงาน", 40]];
+  const h2: [string, number][] = [["สี / ใบ", firstW], ["รอจ่าย", 18], ["จ่ายให้ (ช่าง / โต๊ะ)", 50], ["วันที่จ่าย", 26], ["จำนวน", 20], ["เรต / ชิ้น", 22], ["กำหนดส่ง", 26], ["ลงชื่อช่างรับงาน", 40]];
   parts.push(section("รอจ่ายงาน", "tr-blue", bl ? "" : `${b.toDispatch.length} ใบ · ${num(b.toDispatch.reduce((n, m) => n + m.remaining, 0))} ชิ้น`, h2,
-    bl ? "" : b.toDispatch.map((m) => `<tr>${td(skuCell(m))}${td(B(num(m.remaining)))}${td(LNW)}${td(LN)}${td(LN)}${td(LN)}${td(m.due ? B(thDate(m.due)) : LN)}${td(LNW)}</tr>`).join(""), extra));
+    bl ? "" : b.toDispatch.map((m) => `<tr>${td(skuCell(m, opt))}${td(B(num(m.remaining)))}${td(LNW)}${td(LN)}${td(LN)}${td(LN)}${td(m.due ? B(thDate(m.due)) : LN)}${td(LNW)}</tr>`).join(""), extra));
 
-  const h3: [string, number][] = [["สี / ใบ", 44], ["ช่าง / โต๊ะ", 36], ["จ่ายเมื่อ", 20], ["ค้าง", 16], ["กำหนด", 20], ["ค้างรับ", 16], ["วันที่รับ", 22], ["รับ", 16], ["ดี / เสีย", 24], ["ค่าแรง", 24], ["ลงชื่อ", 28]];
+  const h3: [string, number][] = [["สี / ใบ", firstW], ["ช่าง / โต๊ะ", 36], ["จ่ายเมื่อ", 20], ["ค้าง", 16], ["กำหนด", 20], ["ค้างรับ", 16], ["วันที่รับ", 22], ["รับ", 16], ["ดี / เสีย", 24], ["ค่าแรง", 24], ["ลงชื่อ", 28]];
   parts.push(section("อยู่ที่ช่าง — รอรับงาน", "tr-red", bl ? "" : `${b.atWorker.length} ใบจ่ายงาน · ${num(b.atWorker.reduce((n, x) => n + x.w.qty - x.w.received, 0))} ชิ้น`, h3,
     bl ? "" : b.atWorker.map(({ m, w }) => {
       const d = daysSince(w.dispatch_date, opt.today), due = w.due_date ?? m.due, r = rate(w);
-      return `<tr>${td(skuCell(m, w.qty) + SM(esc(w.wo_no)))}${td(B(w.who))}${td(w.dispatch_date ? B(thDate(w.dispatch_date)) : `${LN}${SM('<span class="tr-warn">ไม่มีวันที่</span>')}`)}`
+      return `<tr>${td(skuCell(m, opt, w.qty) + SM(esc(w.wo_no)))}${td(B(w.who))}${td(w.dispatch_date ? B(thDate(w.dispatch_date)) : `${LN}${SM('<span class="tr-warn">ไม่มีวันที่</span>')}`)}`
         + `${td(d != null ? `<b class="${d > LONG_DAYS ? "tr-bad" : "tr-warn"}">${d} วัน</b>` : "-")}${td(due ? `<b class="${due < opt.today ? "tr-bad" : "tr-sys"}">${esc(thDate(due))}</b>` : LN)}`
         + `${td(B(num(w.qty - w.received)))}${td(LN)}${td(LN)}${td(`ดี ${LN}<br>เสีย ${LN}`)}${td(r != null ? `${B(num(r))}/ชิ้น` : `${LN}/ชิ้น`)}${td(LN)}</tr>`;
     }).join(""), extra));
 
-  const h4: [string, number][] = [["สี / ใบ", 44], ["ช่าง / โต๊ะ", 32], ["รับเมื่อ", 24], ["รับแล้ว", 16], ["เข้า QC แล้ว", 20], ["QC ผ่าน", 20], ["เสีย / ซ่อม", 22], ["เข้าคลังวันที่", 26], ["ที่เก็บ / ชั้น", 24], ["ลงชื่อ", 28]];
+  const h4: [string, number][] = [["สี / ใบ", firstW], ["ช่าง / โต๊ะ", 32], ["รับเมื่อ", 24], ["รับแล้ว", 16], ["เข้า QC แล้ว", 20], ["QC ผ่าน", 20], ["เสีย / ซ่อม", 22], ["เข้าคลังวันที่", 26], ["ที่เก็บ / ชั้น", 24], ["ลงชื่อ", 28]];
   parts.push(section("รับแล้ว — รอ QC / เข้าคลัง", "tr-amber", bl ? "" : `${b.received.length} ใบ · ${num(b.received.reduce((n, m) => n + m.received, 0))} ชิ้น`, h4,
     bl ? "" : b.received.map((m) => {
       const dates = [...new Set(m.wos.flatMap((w) => w.submissions.map((s) => s.date)).filter((d): d is string => !!d))].sort();
       const who = [...new Set(m.wos.map((w) => w.who))].join(", ");
       const pulled = m.wos.reduce((n, w) => n + w.qc_pulled, 0);
       const q = m.wos.reduce((a, w) => ({ good: a.good + w.qc.good, bad: a.bad + w.qc.defect + w.qc.repairing }), { good: 0, bad: 0 });
-      return `<tr>${td(skuCell(m))}${td(who ? B(who) : "-")}${td(dates.length ? B(dates.map((d) => thDate(d)).join(", ")) : m.skip_receive ? '<span class="tr-sm">ข้ามขั้นรับคืน</span>' : "-")}${td(B(num(m.received)))}`
+      return `<tr>${td(skuCell(m, opt))}${td(who ? B(who) : "-")}${td(dates.length ? B(dates.map((d) => thDate(d)).join(", ")) : m.skip_receive ? '<span class="tr-sm">ข้ามขั้นรับคืน</span>' : "-")}${td(B(num(m.received)))}`
         + `${td(pulled ? B(num(pulled)) : LN)}${td(q.good ? B(num(q.good)) : LN)}${td(q.bad ? B(num(q.bad)) : LN)}${td(LN)}${td(LN)}${td(LN)}</tr>`;
     }).join(""), extra));
 
@@ -357,6 +376,11 @@ export const TRACK_CSS = `
 .tr-gh td { background: #f1f5f9; font-weight: 700; vertical-align: middle; }
 .tr-img { width: 7mm; height: 7mm; object-fit: contain; vertical-align: middle; background: #fff; }
 .tr-img.fp-noimg { width: 6mm; height: 6mm; }
+.tr-skucell { text-align: center; vertical-align: middle !important; }
+.tr-bigimg { display: block; width: 16mm; height: 16mm; object-fit: contain; margin: 0 auto 0.8mm; background: #fff; }
+.tr-bigimg.fp-noimg { width: 14mm; height: 14mm; }
+.tr-mo { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: 800; }
+.tr-table .fp-codes { flex-wrap: nowrap; }
 .tr-blank td { height: 9mm; }
 .tr-signspace { height: 5mm; }
 .tr-section { margin-bottom: 2mm; break-inside: auto; }
