@@ -3724,6 +3724,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const qvRowMap = useMemo(() => new Map(pending.map((m) => [m.id, qvRowOf(m)])), [pending, prog, priceByMo, canSeeMoney, today]);   // eslint-disable-line react-hooks/exhaustive-deps
   const rowQ = (m: PendingMO) => qvRowMap.get(m.id) ?? qvRowOf(m);
   const viewCount = (v: QuickView) => pending.filter((m) => qvMatch(v, rowQ(m))).length;
+  // ⚠️ ต้องประกาศก่อน pendShown (คำนวณทันทีตอนวาด — เคยอยู่ทีหลัง = หน้าบอร์ดพัง "Cannot access before initialization" 2026-10-31)
+  const [unprintedOnly, setUnprintedOnly] = useState(false);            // แท็บรอจ่าย: เฉพาะใบที่ยังไม่พิมพ์ใบงาน
   const pendShown = (() => {
     // แท็บรอจ่ายกรองแบรนด์ผ่านมุมมองอย่างเดียว (เจ้าของสั่งเอาชิปแบรนด์ออก 2026-10-28) — ชิปแบรนด์เหลือแท็บกำลังผลิต
     const rows = pending.filter((m) => qvMatch(view, rowQ(m)) && (!unprintedOnly || !m.print));
@@ -4070,7 +4072,6 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   useEffect(() => { if (!dc.show.tools) { setPendGroup("none"); setWoGroup("none"); } }, [dc.show.tools]);
   const [woGroup, setWoGroup] = useState<"none" | "group" | "status" | "crew" | "desk" | "parent">("none");
   const [qcGroup, setQcGroup] = useState<"none" | "parent">("none");   // แท็บรอ QC: จัดกลุ่มตามสินค้าแม่
-  const [unprintedOnly, setUnprintedOnly] = useState(false);            // แท็บรอจ่าย: เฉพาะใบที่ยังไม่พิมพ์ใบงาน
   // จัดกลุ่มตามช่าง: ใบที่ทำร่วมหลายคน ขึ้นในกลุ่มของทุกคน (แถวซ้ำ key = id::ชื่อ) · จ่ายให้ทั้งโต๊ะ = "<โต๊ะ> (ทั้งโต๊ะ)"
   const crewOf = (w: WorkOrder): string[] => {
     const names = (w.assignees ?? []).map((a) => a.name).filter(Boolean);
