@@ -47,7 +47,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   let defectNo = "";
-  try { const { data: n } = await admin.rpc("erp_next_number", { p_key: "defect" }); if (n) defectNo = String(n); } catch { /* ไม่มี numbering ก็ปล่อยว่าง */ }
+  // ใช้เลขชุดเดียวกับของเสียจาก QC (QCD-ปปปปดด-0001) — ลงตาราง defect_logs เดียวกัน · เดิมขอ key "defect" ที่ไม่มีกฎ → เลขว่างเงียบ ๆ
+  try { const { data: n } = await admin.rpc("erp_next_number", { p_key: "qc_defect", p_branch: null }); if (n) defectNo = String(n); } catch { /* ไม่มี numbering ก็ปล่อยว่าง */ }
 
   const qty = b.qty != null && b.qty !== "" ? Number(b.qty) : null;
   const { data, error } = await admin.from("defect_logs").insert({
