@@ -21,6 +21,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { QC_WAREHOUSES } from "@/lib/qc-ship";
 import { REDUCE_REASONS } from "@/lib/mo-qty-reduce";
+import { matchShipDate, matchText, type MoMatch } from "@/lib/mo-sales-match";
 import { isHireDesk, todayYmd } from "@/lib/work-entry-rules";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { CatchUpSnapshot } from "@/app/api/mo/catch-up/route";
@@ -111,6 +112,9 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   const [busy, setBusy] = useState(false);
   const [allT, setAllT] = useState("");
   const [extraOpen, setExtraOpen] = useState(false);
+  // 🧾 เช็กกับใบขาย (บิลที่ส่งลูกค้าแล้ว) — กติกา lib/mo-sales-match · /api/mo/sales-match
+  const [sales, setSales] = useState<Record<string, MoMatch> | null>(null);
+  const [salesBusy, setSalesBusy] = useState(false);
   const seq = useRef(0);
   const nk = (p: string) => `${p}${++seq.current}`;
 
@@ -147,6 +151,13 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
       shipMode: d.shipMode === "sell" ? "sell" : "sales_wh", shipWh: d.shipWh || QC_WAREHOUSES[0], reduce: d.reduce ?? null,
     };
   };
+  const loadSales = async (list: string[]) => {
+    try {
+      const r = await apiFetch(`/api/mo/sales-match?mo_nos=${list.map(encodeURIComponent).join(",")}`);
+      const j = await r.json();
+      setSales(r.ok && j?.data ? (j.data as Record<string, MoMatch>) : {});
+    } catch { setSales({}); }
+  };
   const patchRow = (moNo: string, p: Partial<BRow> | ((r: BRow) => Partial<BRow>)) =>
     setRows((rs) => rs.map((r) => (r.moNo === moNo ? { ...r, ...(typeof p === "function" ? p(r) : p) } : r)));
 
@@ -166,6 +177,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
       };
       await Promise.all([work(), work(), work(), work()]);
     })();
+    void loadSales(moNos);
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
@@ -426,6 +438,71 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     if (d.errs.length) return chip("bg-rose-50 text-rose-700", "cancel", d.errs[0].where ? `${d.errs[0].where}: ${d.errs[0].msg}` : d.errs[0].msg, d.errs.map((x) => (x.where ? `${x.where}: ${x.msg}` : x.msg)).join("\n"));
     if (d.warns.length) return chip("bg-amber-50 text-amber-800", "warning", `พร้อม · เตือน ${d.warns.length}`, d.warns.map((x) => (x.where ? `${x.where}: ${x.msg}` : x.msg)).join("\n"));
     return chip("bg-emerald-50 text-emerald-700", "done", m.asRequest ? "พร้อมส่งให้หัวหน้า" : "พร้อม");
+  };
+
+  // ── 🧾 ใบขายที่ส่งไปแล้ว: ผูก (จำคู่ ใบขายเดียวกันไม่ถูกจับซ้ำ) + เลือกขั้น "ส่งออกจาก QC แล้ว · ขายออกเลย" + วันส่ง = วันที่ใบขาย
+  //    หัวหน้า/บันทึกได้เลย = ผูกจริง · ส่งคำขอ = ใช้ข้อมูลตั้งขั้นอย่างเดียว (ไม่ผูก)
+  const canLinkSales = mode === "direct" || canApprove;
+  const toShip = (r: BRow, m: MoMatch) => {
+    if (!r.snap || r.phase !== "edit" || modeOf(r).blockedBy || cuTargetBlocked(cuFacts(r.snap), "ship")) return;
+    const parts = m.kind === "linked" ? m.linked : m.suggest;
+    patchRow(r.moNo, (rr) => ({ ...retarget(rr, "ship"), shipMode: "sell", dates: { ...rr.dates, ship: matchShipDate(parts) }, open: true }));
+  };
+  const linkSale = async (r: BRow, m: MoMatch, quiet = false): Promise<boolean> => {
+    if (!canLinkSales || m.kind === "linked") { toShip(r, m); return true; }
+    const res = await apiFetch("/api/mo/sales-match", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mo_no: r.moNo, parts: m.suggest.map((p) => ({ sale_line_id: p.line.id, qty: p.qty })) }) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j?.error) { if (!quiet) toast.error(`${r.snap?.mo.product_sku ?? r.moNo}: ${j?.error || "ผูกใบขายไม่สำเร็จ"}`); return false; }
+    toShip(r, m);
+    return true;
+  };
+  const linkOne = async (r: BRow, m: MoMatch) => { setSalesBusy(true); await linkSale(r, m); await loadSales(rows.map((x) => x.moNo)); setSalesBusy(false); };
+  const unlinkSale = async (r: BRow) => {
+    setSalesBusy(true);
+    const res = await apiFetch(`/api/mo/sales-match?mo_no=${encodeURIComponent(r.moNo)}`, { method: "DELETE" });
+    if (!res.ok) toast.error("ยกเลิกผูกไม่สำเร็จ");
+    await loadSales(rows.map((x) => x.moNo)); setSalesBusy(false);
+  };
+  const exactRows = rows.filter((r) => r.snap && r.phase === "edit" && !modeOf(r).blockedBy && sales?.[r.moNo]?.kind === "exact");
+  const linkAllExact = async () => {
+    setSalesBusy(true);
+    let ok = 0;
+    for (const r of exactRows) { const m = sales?.[r.moNo]; if (m && await linkSale(r, m, true)) ok++; }
+    await loadSales(rows.map((x) => x.moNo)); setSalesBusy(false);
+    toast.success(`${canLinkSales ? "ผูกใบขาย" : "ตั้งขั้นส่งออก"} ${ok} ใบ — ตั้งขั้น "ส่งออกจาก QC แล้ว · ขายออกเลย" ให้แล้ว (ขั้นก่อนหน้ายังต้องกรอก)`);
+  };
+  const salesCell = (r: BRow) => {
+    if (!sales) return <span className="text-[11px] text-slate-400">กำลังเช็กใบขาย…</span>;
+    const m = sales[r.moNo];
+    if (!m || m.kind === "none") return <span className="text-[11px] text-slate-400">ไม่เจอใบขาย</span>;
+    const parts = m.kind === "linked" ? m.linked : m.suggest;
+    const date = matchShipDate(parts);
+    const cust = parts.map((p) => p.line.customer).find(Boolean);
+    const editable = r.phase === "edit" && !modeOf(r).blockedBy;
+    const btn = "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] disabled:opacity-40";
+    return (
+      <div className="space-y-1">
+        <div className="flex flex-wrap items-center gap-1">
+          {m.kind === "linked" ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200">ผูกแล้ว</span>
+            : m.kind === "exact" ? <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700">ตรงจำนวน</span>
+            : <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">บางส่วน {fmt(m.covered)}/{fmt(m.qty)}</span>}
+          <span className="text-[12px] text-slate-700">{matchText(parts)}</span>
+        </div>
+        <div className="text-[11px] text-slate-400">{date ? `ใบขายวันที่ ${date}` : ""}{cust ? ` · ${cust}` : ""}</div>
+        {editable && (
+          <div className="flex flex-wrap gap-1">
+            {m.kind === "linked" ? <>
+              <button type="button" disabled={salesBusy} onClick={() => toShip(r, m)} className={`${btn} border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50`}>ไปถึงขั้นส่งออก</button>
+              {canLinkSales && <button type="button" disabled={salesBusy} onClick={() => void unlinkSale(r)} className={`${btn} border-slate-200 bg-white text-slate-500 hover:text-rose-600`}>ยกเลิกผูก</button>}
+            </> : (
+              <button type="button" disabled={salesBusy} onClick={() => void linkOne(r, m)} title={canLinkSales ? "จำว่าใบนี้ส่งไปกับใบขายนี้ + ตั้งขั้นส่งออก" : "ตั้งขั้นส่งออกตามใบขาย (ผูกจริงตอนหัวหน้ายืนยัน)"}
+                className={`${btn} border-emerald-300 bg-emerald-50 font-medium text-emerald-800 hover:bg-emerald-100`}>{canLinkSales ? "ผูก + ไปถึงขั้นส่งออก" : "ใช้ข้อมูลนี้ → ขั้นส่งออก"}</button>
+            )}
+          </div>
+        )}
+      </div>
+    );
   };
 
   // ── แบบ B (เจ้าของเลือก 2026-10-31): ตารางใบงาน (เลือกขั้น · สถานะ · ผล) + ตารางแยกตามขั้น — แต่ละตารางมีแค่ช่องของขั้นนั้น
@@ -885,6 +962,12 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
           <button type="button" disabled={busy || !firstRow || rows.length < 2} onClick={fillFromFirst}
             title={firstRow ? `ก๊อปขั้น โต๊ะ คนรับ วันที่ หมายเหตุ ของ ${firstRow.snap?.mo.product_sku ?? firstRow.moNo} ไปทุกใบ (จำนวนตามใบนั้น · ค่าแรงตามสูตรของรุ่นนั้น)` : "เลือกขั้นของใบแรกก่อน"}
             className="inline-flex h-9 items-center gap-1 rounded-lg border border-indigo-300 bg-white px-3 text-sm text-indigo-700 hover:bg-indigo-50 disabled:opacity-40"><Icon name="list" /> ใส่ทั้งหมดตามใบแรก</button>
+          {exactRows.length > 0 && (
+            <button type="button" disabled={busy || salesBusy} onClick={() => void linkAllExact()} title="ใบที่จำนวนตรงกับใบขาย (ส่งลูกค้าแล้ว) — ผูกแล้วตั้งขั้นส่งออกให้ทุกใบ"
+              className="inline-flex h-9 items-center gap-1 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-sm font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-40">
+              <Icon name="receipt" /> {canLinkSales ? "ผูกใบขายที่ตรงจำนวน" : "ใช้ใบขายที่ตรงจำนวน"} ({exactRows.length}) → ขั้นส่งออก
+            </button>
+          )}
           <span className="text-[11px] text-slate-400">ใบไหนซับซ้อน (ยังขาดของบางรายการ / แจ้งปัญหา / จัดคนในโต๊ะ) กด &ldquo;เปิดแบบละเอียด&rdquo;</span>
           {mode === "request" && <span className="ml-auto rounded-full bg-indigo-50 px-2 py-0.5 text-[12px] text-indigo-700">อัปเดตของคุณจะส่งให้หัวหน้ายืนยันก่อน (แยกทีละใบ)</span>}
         </div>
@@ -910,12 +993,13 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
             <span className="text-[11px] text-slate-400">เลือกว่าแต่ละใบไปถึงขั้นไหน แล้วกรอกในตารางของแต่ละขั้นด้านล่าง</span>
           </div>
           <div className="overflow-x-auto rounded-lg border border-slate-200">
-            <table className="w-full min-w-[980px] border-collapse text-[13px]">
+            <table className="w-full min-w-[1180px] border-collapse text-[13px]">
               <thead className="bg-slate-50 text-left text-[12px] text-slate-500">
                 <tr>
                   <th className="w-72 py-2 pl-3 pr-2 font-medium">ใบงาน</th>
                   <th className="w-28 px-2 py-2 text-right font-medium">สั่งผลิต</th>
                   <th className="px-2 py-2 font-medium">ตอนนี้อยู่ไหน</th>
+                  <th className="w-72 px-2 py-2 font-medium">ใบขายที่ส่งแล้ว</th>
                   <th className="w-56 px-2 py-2 font-medium">ไปถึงขั้น</th>
                   <th className="px-2 py-2 font-medium">สถานะ</th>
                   <th className="px-2 py-2" />
@@ -951,6 +1035,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                           ? <span title="ตอนนี้ของอยู่ไหน (หลังบันทึก)"><span className="text-slate-400 line-through">{whereText(where)}</span> → <b className="font-semibold text-slate-800">{whereText(r.after.where)}</b></span>
                           : whereText(where)) : none}
                       </td>
+                      <td className="px-2 py-2 align-top">{salesCell(r)}</td>
                       <td className="px-2 py-2 align-top">
                         {r.snap && f && (
                           <select value={r.target ?? ""} disabled={r.phase !== "edit" || m.blockedBy || busy}
@@ -979,12 +1064,12 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                       </td>
                     </tr>
                     {canQty && r.reduce && d && (
-                      <tr><td colSpan={6} className="px-3 pb-2">
+                      <tr><td colSpan={7} className="px-3 pb-2">
                         <ReducePanel compact qty={r.snap!.mo.qty} received={d.f0.received} sized={!!r.snap!.mo.sized} wos={r.snap!.wos} value={r.reduce}
                           onChange={(v) => setReduce(r.moNo, v)} issues={d.built.issues} />
                       </td></tr>
                     )}
-                    {diff.length > 0 && <tr><td colSpan={6} className="px-3 pb-2"><div className="rounded-md bg-amber-50 px-2 py-1 text-[12px] text-amber-900">ใบนี้เปลี่ยนไปหลังส่งคำขอ — ตรวจก่อนยืนยัน: {diff.join(" · ")}</div></td></tr>}
+                    {diff.length > 0 && <tr><td colSpan={7} className="px-3 pb-2"><div className="rounded-md bg-amber-50 px-2 py-1 text-[12px] text-amber-900">ใบนี้เปลี่ยนไปหลังส่งคำขอ — ตรวจก่อนยืนยัน: {diff.join(" · ")}</div></td></tr>}
                     {r.phase === "done" && r.results.length > 0 && (() => {
                       // ยังต้องตามต่อ: รอบส่งคืนที่ยังไม่ลงค่าแรง/วันที่ · ใบใหม่ที่แยก/ทำเพิ่ม
                       const okSteps = r.results.filter((x) => x.ok).map((x) => x.step);
@@ -992,7 +1077,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                       const newMo = r.results.map((x) => (x.undo?.kind === "reduce" ? x.undo.newMo : null)).find(Boolean);
                       const wip = r.after?.where.parts.find((p) => p.key === "wip")?.qty ?? 0;   // ช่างยังค้างส่ง (หลังบันทึก)
                       return (
-                        <tr><td colSpan={6} className="px-3 pb-2">
+                        <tr><td colSpan={7} className="px-3 pb-2">
                           <div className="space-y-1.5">
                             <CuStepList items={r.results.map((x) => ({ step: x.step, state: x.ok ? "ok" as const : "fail" as const, msg: x.ok ? undefined : x.msg }))} who={d?.whoOf} />
                             {r.undoRes?.map((x, i) => <div key={`u${i}`} className={`text-[12px] ${x.ok ? "text-slate-500" : "text-amber-700"}`}>{x.ok ? "↶" : "!"} {x.msg}</div>)}
