@@ -1,0 +1,74 @@
+import { describe, expect, it } from "vitest";
+import {
+  applyListPrintPreset, cleanListPrintSettings, defaultListPrintSettings, estimateListPages, listPrintCss,
+  renderListTable, resolveListColumns, type ListPrintColumn,
+} from "@/lib/list-print";
+
+const AVAIL: ListPrintColumn[] = [
+  { key: "img", label: "รูป" }, { key: "sku", label: "SKU", mono: true }, { key: "name", label: "ชื่อสินค้า" },
+  { key: "qty", label: "จำนวน", align: "right" },
+];
+const D = defaultListPrintSettings(AVAIL);
+
+describe("list print settings", () => {
+  it("defaults turn every available column on in order", () => {
+    expect(D.columns.map((c) => c.key)).toEqual(["img", "sku", "name", "qty"]);
+    expect(D.columns.every((c) => c.on)).toBe(true);
+  });
+
+  it("clean keeps valid values, clamps numbers, drops unknown columns and appends new ones", () => {
+    const s = cleanListPrintSettings({
+      paper: "A3", orientation: "landscape", fontPx: 99, image: "huge", density: "airy", zebra: true,
+      columns: [{ key: "name", on: true, label: " ชื่อ " }, { key: "hack<", on: true }, { key: "x_note", on: true }, { key: "sku", on: false }, { key: "name", on: false }],
+      title: "x".repeat(200), companyId: null, pageNumbers: false,
+    }, AVAIL, D);
+    expect(s.paper).toBe("A4");
+    expect(s.orientation).toBe("landscape");
+    expect(s.fontPx).toBe(14);
+    expect(s.image).toBe("m");
+    expect(s.density).toBe("airy");
+    expect(s.columns).toEqual([
+      { key: "name", on: true, label: "ชื่อ" }, { key: "x_note", on: true }, { key: "sku", on: false },
+      { key: "img", on: true }, { key: "qty", on: true },
+    ]);
+    expect(s.title.length).toBe(80);
+    expect(s.pageNumbers).toBe(false);
+    expect(cleanListPrintSettings(null, AVAIL, D)).toEqual(D);
+  });
+
+  it("resolves the printed columns: order, renamed labels, extras, image off", () => {
+    const s = { ...D, columns: [{ key: "qty", on: true, label: "เหลือ" }, { key: "img", on: true }, { key: "x_check", on: true }, { key: "sku", on: false }, { key: "name", on: true }] };
+    expect(resolveListColumns(s, AVAIL).map((c) => `${c.key}:${c.label}`)).toEqual(["qty:เหลือ", "img:รูป", "x_check:ตรวจแล้ว", "name:ชื่อสินค้า"]);
+    expect(resolveListColumns({ ...s, image: "none" }, AVAIL).map((c) => c.key)).toEqual(["qty", "x_check", "name"]);
+  });
+
+  it("presets put their columns first and switch the rest off", () => {
+    const p = applyListPrintPreset(D, { id: "p", name: "ย่อ", settings: { image: "none", columns: [{ key: "name", on: true }, { key: "x_note", on: true }] } }, AVAIL);
+    expect(p.image).toBe("none");
+    expect(p.columns).toEqual([{ key: "name", on: true }, { key: "x_note", on: true }, { key: "img", on: false }, { key: "sku", on: false }, { key: "qty", on: false }]);
+  });
+
+  it("renders a table with blank write-in cells and a total row", () => {
+    const cols = resolveListColumns({ ...D, columns: [{ key: "sku", on: true }, { key: "name", on: true }, { key: "qty", on: true }, { key: "x_check", on: true }] }, AVAIL);
+    const html = renderListTable(cols, [{ sku: "A-1", name: "กระเป๋า", qty: "5" }], { label: "รวม 1 รายการ", cells: { qty: "5" } });
+    expect(html).toContain('<td class="mono">A-1</td>');
+    expect(html).toContain('<td class="c xb"><span class="chk"></span></td>');
+    expect(html).toContain('<td colspan="2">รวม 1 รายการ</td><td class="r">5</td><td class="c xb"></td>');
+    expect(renderListTable([], [])).toContain("ยังไม่ได้เลือกคอลัมน์");
+  });
+
+  it("css follows settings (page numbers, zebra, image size)", () => {
+    const css = listPrintCss({ ...D, zebra: true, image: "l", pageNumbers: true });
+    expect(css).toContain("counter(pages)");
+    expect(css).toContain("nth-child(even)");
+    expect(css).toContain(".thumb { width: 20mm; height: 20mm; }");
+    expect(listPrintCss({ ...D, pageNumbers: false })).not.toContain("counter(page)");
+  });
+
+  it("estimates fewer pages for a compact sheet without images", () => {
+    const big = estimateListPages([330], { ...D, image: "l" });
+    const small = estimateListPages([330], { ...D, image: "none", density: "compact", fontPx: 10 });
+    expect(big).toBeGreaterThan(small);
+    expect(estimateListPages([10, 10, 10], { ...D, pageBreakPerGroup: true, groupBy: "brand" })).toBe(3);
+  });
+});

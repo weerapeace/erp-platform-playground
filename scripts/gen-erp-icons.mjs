@@ -25,7 +25,7 @@ const LIST = [
   ["arrows-shuffle", "สลับ"], ["arrows-exchange", "แลกเปลี่ยน"], ["list", "ลิสต์"], ["list-check", "เช็กลิสต์"],
   ["layout-grid", "การ์ด กริด"], ["table", "ตาราง"], ["columns", "คอลัมน์"], ["layout-kanban", "บอร์ด คัมบัง"],
   ["layout-dashboard", "แดชบอร์ด"], ["dots-vertical", "เมนูเพิ่ม"], ["menu-2", "เมนู"], ["grip-vertical", "ลาก"],
-  ["maximize", "ขยาย"], ["history", "ประวัติ"], ["archive", "เก็บถาวร แฟ้ม"], ["ban", "ห้าม"], ["pin", "ปักหมุด"],
+  ["maximize", "ขยาย"], ["chevron-up", "ขึ้น เลื่อนขึ้น"], ["chevron-down", "ลง เลื่อนลง"], ["arrow-left", "กลับ ย้อน"], ["layout-sidebar-right", "แผงข้าง ตั้งค่า"], ["history", "ประวัติ"], ["archive", "เก็บถาวร แฟ้ม"], ["ban", "ห้าม"], ["pin", "ปักหมุด"],
   ["bookmark", "บุ๊กมาร์ก"], ["star", "ดาว สำคัญ"], ["heart", "หัวใจ"], ["thumb-up", "ถูกใจ"], ["flag", "ธง"],
   ["flag-check", "จบงาน เส้นชัย"], ["tag", "ป้าย"], ["tags", "ป้ายหลายอัน"], ["hash", "เลขที่"], ["numbers", "ตัวเลข นับ"],
   ["barcode", "บาร์โค้ด"], ["qrcode", "คิวอาร์"], ["scan", "สแกน"], ["camera", "กล้อง ถ่ายรูป"], ["photo", "รูปภาพ"],

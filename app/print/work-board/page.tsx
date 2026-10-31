@@ -1,238 +1,71 @@
 "use client";
 
 /**
- * พิมพ์รายงานจากบอร์ดจ่ายงาน — /print/work-board?type=pending|production&group=<ชื่อกลุ่ม>
- *   type=pending     → รายการรอจ่ายทั้งหมด (งานปกติ + งานเหมา) พร้อมค่าแรง/ชิ้น · ตัวที่ยังไม่ตั้งค่าแรง = ช่องว่างให้กรอกมือ
- *   type=production  → รายการกำลังผลิต แยกตามโต๊ะ/ช่าง (หัวโต๊ะมีสรุปจำนวน+ค่าแรง)
- *   group            → กรองตามกลุ่มใบสั่งผลิต (__all__ = ทั้งหมด, __none__ = ยังไม่จับกลุ่ม)
- * ของกลาง: ระบบพิมพ์ (buildReportHtml + PrintFrame) · ดึง /api/mo/work-board ตัวเดียวกับบอร์ด
+ * พิมพ์รายงานจากบอร์ดจ่ายงาน — /print/work-board?type=pending|piece|production|plan|all&group=<ชื่อกลุ่ม>&plan=<id>
+ *   ตัวสร้างใบ = lib/work-board-print (เทสต์ได้) · ตั้งค่าหน้าพิมพ์ = ของกลาง lib/list-print + ListPrintPanel (แผงขวา)
+ *   ค่าที่ตั้งจำต่อคน ต่อใบ (ตามไปทุกเครื่อง) · แบบของฉัน/ของทีม · ดึงข้อมูลจาก /api/mo/work-board ตัวเดียวกับบอร์ด
  */
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
+import { ListPrintPanel } from "@/components/report/list-print-panel";
+import { useListPrintSettings } from "@/components/report/use-list-print-settings";
+import { useAuth } from "@/components/auth";
+import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
-import { buildReportHtml, type ReportTemplate } from "@/lib/template";
-import type { DispatchPlanLine } from "@/app/api/mo/dispatch-plans/route";
+import { defaultListPrintSettings, estimateListPages } from "@/lib/list-print";
+import {
+  WORK_BOARD_PRINT_PRESETS, WORK_BOARD_PRINT_TITLE, WORK_BOARD_SORTS, buildWorkBoardPrint, groupLabelOf, workBoardPrintColumns, workBoardPrintGroups,
+  type AssigneeResp, type BoardResp, type MoGroup, type PlanResp, type PrintCompany, type WorkBoardPrintType,
+} from "@/lib/work-board-print";
 
-type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece_actual: number };
-type PlanResp = { id: string; name: string; status: string; start_date: string | null; end_date: string | null; lines: DispatchPlanLine[] };
-type AssigneeResp = { craftsmen: { id: string; name: string; nickname?: string | null; department_id?: string | null }[]; dept_wages: Record<string, number> };
-type PendingMO = {
-  id: string; mo_no: string; product_sku: string | null; product_name: string | null;
-  qty: number; remaining: number; due_date: string | null; internal_due_date?: string | null; order_date?: string | null;
-  brand: string | null; image_url: string | null; labor?: Labor; central_rate?: number;
-};
-type PendingPiece = { id: string; mo_no: string; job_name: string; rate: number; qty: number; product_sku: string | null; product_name: string | null; image_url: string | null };
-type WorkOrder = {
-  id: string; wo_no: string; mo_no: string; product_sku: string | null; product_name: string | null;
-  stage: string; assignee_name: string | null; assignee_id?: string | null; department_name: string | null;
-  qty: number; status: string; labor_cost?: number | null; image_url?: string | null; central_rate?: number;
-  due_date?: string | null;
-};
-type BoardResp = { departments: { id: string; name: string }[]; workOrders: WorkOrder[]; pending: PendingMO[]; pending_piece: PendingPiece[] };
-
-const FMT_OPT: Intl.DateTimeFormatOptions = { day: "2-digit", month: "2-digit", year: "numeric" };
-const num = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
-const money = (n: number) => Math.round(n * 100) / 100 === 0 ? "0" : (Math.round(n * 100) / 100).toLocaleString("th-TH", { maximumFractionDigits: 2 });
-const dueText = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" }) : "—");
-const BLANK = `<span class="blank"></span>`;
-// คอลัมน์ที่พิมพ์ได้ — ค่าเริ่มต้นเปิดทั้งหมด (ยกเว้นรหัส MO ที่ไม่ค่อยได้ใช้ในใบแผน)
-const DEFAULT_COLS = { img: true, assignee: true, mo: true, sku: true, name: true, due: true, qty: true, rate: true, labor: true };
-// ใส่ origin เต็ม + ย่อรูป — กัน path สั้น /api/... resolve ผิดฐานในหน้าต่าง Blob / iframe srcDoc (รูปไม่ขึ้น)
-const ORIGIN = () => (typeof window !== "undefined" ? window.location.origin : "");
-const thumb = (url: string | null) => (url ? `${url.startsWith("/") ? ORIGIN() : ""}${url}${url.includes("?") ? "&" : "?"}w=120` : "");
-const imgCell = (url: string | null) => (url ? `<img class="thumb" src="${thumb(url)}" alt="" />` : `<span class="no-img">—</span>`);
-
-const COMMON_CSS = `
-.doc { font-size: 11px; color: #111827; }
-.wb-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111827; padding-bottom: 3mm; margin-bottom: 3mm; }
-.wb-title { font-size: 18px; font-weight: 800; }
-.wb-sub { font-size: 10px; color: #6b7280; margin-top: 1mm; }
-.wb-no { text-align: right; font-size: 10px; color: #6b7280; }
-.wb-t { width: 100%; border-collapse: collapse; }
-.wb-t th, .wb-t td { border: 1px solid #cbd5e1; padding: 1.4mm 2mm; font-size: 10.5px; vertical-align: top; }
-.wb-t th { background: #f1f5f9; font-weight: 700; text-align: left; }
-.wb-t td.r, .wb-t th.r { text-align: right; white-space: nowrap; }
-.wb-t .mono { font-family: ui-monospace, monospace; color: #475569; white-space: nowrap; }
-td.img, th.img { width: 15mm; text-align: center; padding: 1mm; }
-.thumb { width: 13mm; height: 13mm; object-fit: cover; border: 1px solid #e2e8f0; border-radius: 3px; display: block; margin: 0 auto; }
-.no-img { color: #cbd5e1; }
-.wb-t tfoot td { background: #f8fafc; font-weight: 800; }
-.blank { display: inline-block; width: 16mm; height: 4.5mm; border: 1px solid #94a3b8; border-radius: 2px; }
-.wb-note { font-size: 9.5px; color: #94a3b8; margin-top: 2mm; }
-.wb-sec { font-size: 12px; font-weight: 800; margin: 4mm 0 1.5mm; }
-.grp-head { display: flex; justify-content: space-between; align-items: center; background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 3px; padding: 1.5mm 2.5mm; margin: 3mm 0 0; }
-.grp-name { font-size: 12px; font-weight: 800; }
-.grp-staff { font-size: 9.5px; font-weight: 400; color: #475569; margin-top: 0.5mm; }
-.grp-sum { font-size: 10.5px; color: #4338ca; font-weight: 700; }
-.grp-rows { width: 100%; border-collapse: collapse; margin-top: 0; }
-.grp-rows th, .grp-rows td { border: 1px solid #cbd5e1; border-top: none; padding: 1.3mm 2mm; font-size: 10.5px; }
-.grp-rows th { background: #f8fafc; font-weight: 700; text-align: left; }
-.grp-rows td.r, .grp-rows th.r { text-align: right; white-space: nowrap; }
-.wb-empty { text-align: center; color: #94a3b8; padding: 12mm 0; font-size: 12px; }
-@media print { .doc { padding: 12mm 12mm !important; } }`;
-
-const TEMPLATE_PENDING: ReportTemplate = {
-  paper_size: "A4", orientation: "portrait",
-  header_html: `<div class="wb-head">
-    <div><div class="wb-title">รายการรอจ่ายทั้งหมด</div><div class="wb-sub">กลุ่ม: {{group_label}} · {{count}} รายการ</div></div>
-    <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
-  </div>`,
-  body_html: `{{#has_rows}}<table class="wb-t">
-    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}{{#c_sku}}<th>SKU</th>{{/c_sku}}{{#c_name}}<th>ชื่อสินค้า</th>{{/c_name}}{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">เหลือจ่าย</th>{{/c_qty}}{{#c_rate}}<th class="r">ค่าแรง/ชิ้น</th>{{/c_rate}}{{#c_labor}}<th class="r">ยอดรวม</th>{{/c_labor}}</tr></thead>
-    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}{{#c_sku}}<td class="mono">{{sku}}</td>{{/c_sku}}{{#c_name}}<td>{{name}}</td>{{/c_name}}{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{remaining}}</td>{{/c_qty}}{{#c_rate}}<td class="r">{{{rate_cell}}}</td>{{/c_rate}}{{#c_labor}}<td class="r">{{{total_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="{{pend_span}}">รวม {{count}} รายการ</td>{{#c_qty}}<td class="r">{{total_qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r"></td>{{/c_rate}}{{#c_labor}}<td class="r">{{grand_total}}</td>{{/c_labor}}</tr></tfoot>
-  </table>
-  <div class="wb-note">ช่องว่าง = ยังไม่ตั้งค่าแรง · เขียนกรอกด้วยมือ (ยอดรวมด้านล่างนับเฉพาะรายการที่มีค่าแรงแล้ว)</div>{{/has_rows}}
-  {{#has_piece}}<div class="wb-sec">งานเหมารอจ่าย</div>
-  <table class="wb-t">
-    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>งาน</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#piece_rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td>{{job}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{qty}}</td><td class="r">{{rate}}</td><td class="r">{{total}}</td></tr>{{/piece_rows}}</tbody>
-    <tfoot><tr><td colspan="7">รวมงานเหมา {{piece_count}} รายการ</td><td class="r">{{piece_grand}}</td></tr></tfoot>
-  </table>{{/has_piece}}
-  {{#empty}}<div class="wb-empty">ไม่มีรายการรอจ่าย</div>{{/empty}}`,
-  footer_html: "", custom_css: COMMON_CSS,
-};
-
-const TEMPLATE_PIECE: ReportTemplate = {
-  paper_size: "A4", orientation: "portrait",
-  header_html: `<div class="wb-head">
-    <div><div class="wb-title">รายการรอจ่ายเหมาทั้งหมด</div><div class="wb-sub">กลุ่ม: {{group_label}} · {{count}} รายการ</div></div>
-    <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
-  </div>`,
-  body_html: `{{#has_rows}}<table class="wb-t">
-    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>งาน</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td>{{job}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{qty}}</td><td class="r">{{rate}}</td><td class="r">{{total}}</td></tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="7">รวม {{count}} รายการ</td><td class="r">{{grand_total}}</td></tr></tfoot>
-  </table>{{/has_rows}}
-  {{#empty}}<div class="wb-empty">ไม่มีงานเหมารอจ่าย</div>{{/empty}}`,
-  footer_html: "", custom_css: COMMON_CSS,
-};
-
-const TEMPLATE_PRODUCTION: ReportTemplate = {
-  paper_size: "A4", orientation: "portrait",
-  header_html: `<div class="wb-head">
-    <div><div class="wb-title">รายการกำลังผลิต — แยกตามโต๊ะ/ช่าง</div><div class="wb-sub">{{group_label}} · {{dept_count}} โต๊ะ · {{total_qty}} ชิ้น</div></div>
-    <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
-  </div>`,
-  body_html: `{{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
-  <table class="wb-t">
-    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}{{#c_sku}}<th>SKU</th>{{/c_sku}}{{#c_name}}<th>ชื่อสินค้า</th>{{/c_name}}{{#c_assignee}}<th>ช่าง</th>{{/c_assignee}}{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">จำนวน</th>{{/c_qty}}{{#c_rate}}<th class="r">ค่าแรง/ชิ้น</th>{{/c_rate}}{{#c_labor}}<th class="r">ยอดรวม</th>{{/c_labor}}</tr></thead>
-    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}{{#c_sku}}<td class="mono">{{sku}}</td>{{/c_sku}}{{#c_name}}<td>{{name}}</td>{{/c_name}}{{#c_assignee}}<td>{{assignee}}</td>{{/c_assignee}}{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r">{{{rate_cell}}}</td>{{/c_rate}}{{#c_labor}}<td class="r">{{{labor_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="{{foot_span}}">รวม {{g_count}} รายการ</td>{{#c_qty}}<td class="r">{{g_qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r"></td>{{/c_rate}}{{#c_labor}}<td class="r">{{g_labor}}</td>{{/c_labor}}</tr></tfoot>
-  </table>{{/groups}}
-  {{#empty}}<div class="wb-empty">ไม่มีงานกำลังผลิต</div>{{/empty}}
-  {{#has_groups}}<div class="grp-head" style="margin-top:4mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมทั้งหมด</span><span class="grp-sum" style="color:#334155;">{{total_qty}} ชิ้น · ฿{{total_labor}}</span></div>
-  <div class="wb-note">ช่องว่าง = ยังไม่ใส่ค่าแรงของใบจ่ายงานนั้น (เขียนกรอกด้วยมือได้) · ค่าแรง/ชิ้น = ยอดรวม ÷ จำนวน</div>{{/has_groups}}`,
-  footer_html: "", custom_css: COMMON_CSS,
-};
-
-// พิมพ์ "ทุกอย่างในใบเดียว" — รอจ่าย + งานเหมารอจ่าย + กำลังผลิต (ของจริง)
-const TEMPLATE_ALL: ReportTemplate = {
-  paper_size: "A4", orientation: "portrait",
-  header_html: `<div class="wb-head">
-    <div><div class="wb-title">สรุปงานทั้งหมดบนบอร์ด</div><div class="wb-sub">กลุ่ม: {{group_label}} · รอจ่าย {{count}} · เหมา {{piece_count}} · กำลังผลิต {{prod_count}} รายการ</div></div>
-    <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
-  </div>`,
-  body_html: `<div class="wb-sec">1) รายการรอจ่าย</div>
-  {{#has_rows}}<table class="wb-t">
-    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}{{#c_sku}}<th>SKU</th>{{/c_sku}}{{#c_name}}<th>ชื่อสินค้า</th>{{/c_name}}{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">เหลือจ่าย</th>{{/c_qty}}{{#c_rate}}<th class="r">ค่าแรง/ชิ้น</th>{{/c_rate}}{{#c_labor}}<th class="r">ยอดรวม</th>{{/c_labor}}</tr></thead>
-    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}{{#c_sku}}<td class="mono">{{sku}}</td>{{/c_sku}}{{#c_name}}<td>{{name}}</td>{{/c_name}}{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{remaining}}</td>{{/c_qty}}{{#c_rate}}<td class="r">{{{rate_cell}}}</td>{{/c_rate}}{{#c_labor}}<td class="r">{{{total_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="{{pend_span}}">รวม {{count}} รายการ</td>{{#c_qty}}<td class="r">{{total_qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r"></td>{{/c_rate}}{{#c_labor}}<td class="r">{{grand_total}}</td>{{/c_labor}}</tr></tfoot>
-  </table>{{/has_rows}}
-  {{^has_rows}}<div class="wb-empty">ไม่มีรายการรอจ่าย</div>{{/has_rows}}
-
-  <div class="wb-sec">2) งานเหมารอจ่าย</div>
-  {{#has_piece}}<table class="wb-t">
-    <thead><tr><th class="img">รูป</th><th>รหัส MO</th><th>งาน</th><th>SKU</th><th>ชื่อสินค้า</th><th class="r">จำนวน</th><th class="r">ค่าแรง/ชิ้น</th><th class="r">ยอดรวม</th></tr></thead>
-    <tbody>{{#piece_rows}}<tr><td class="img">{{{img_cell}}}</td><td class="mono">{{mo_no}}</td><td>{{job}}</td><td class="mono">{{sku}}</td><td>{{name}}</td><td class="r">{{qty}}</td><td class="r">{{rate}}</td><td class="r">{{total}}</td></tr>{{/piece_rows}}</tbody>
-    <tfoot><tr><td colspan="7">รวมงานเหมา {{piece_count}} รายการ</td><td class="r">{{piece_grand}}</td></tr></tfoot>
-  </table>{{/has_piece}}
-  {{^has_piece}}<div class="wb-empty">ไม่มีงานเหมารอจ่าย</div>{{/has_piece}}
-
-  <div class="wb-sec">3) กำลังผลิต (ของจริง — แยกตามโต๊ะ/ช่าง)</div>
-  {{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
-  <table class="wb-t">
-    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}{{#c_sku}}<th>SKU</th>{{/c_sku}}{{#c_name}}<th>ชื่อสินค้า</th>{{/c_name}}{{#c_assignee}}<th>ช่าง</th>{{/c_assignee}}{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">จำนวน</th>{{/c_qty}}{{#c_rate}}<th class="r">ค่าแรง/ชิ้น</th>{{/c_rate}}{{#c_labor}}<th class="r">ยอดรวม</th>{{/c_labor}}</tr></thead>
-    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}{{#c_sku}}<td class="mono">{{sku}}</td>{{/c_sku}}{{#c_name}}<td>{{name}}</td>{{/c_name}}{{#c_assignee}}<td>{{assignee}}</td>{{/c_assignee}}{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r">{{{rate_cell}}}</td>{{/c_rate}}{{#c_labor}}<td class="r">{{{labor_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
-    <tfoot><tr><td colspan="{{foot_span}}">รวม {{g_count}} รายการ</td>{{#c_qty}}<td class="r">{{g_qty}}</td>{{/c_qty}}{{#c_rate}}<td class="r"></td>{{/c_rate}}{{#c_labor}}<td class="r">{{g_labor}}</td>{{/c_labor}}</tr></tfoot>
-  </table>{{/groups}}
-  {{^has_groups}}<div class="wb-empty">ไม่มีงานกำลังผลิต</div>{{/has_groups}}
-  {{#has_groups}}<div class="grp-head" style="margin-top:3mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมกำลังผลิต</span><span class="grp-sum" style="color:#334155;">{{prod_qty}} ชิ้น · ฿{{prod_labor}}</span></div>{{/has_groups}}
-  <div class="wb-note">ช่องว่าง = ยังไม่ตั้งค่าแรง (เขียนกรอกด้วยมือได้) · ยอดรวมนับเฉพาะรายการที่มีค่าแรงแล้ว</div>`,
-  footer_html: "", custom_css: COMMON_CSS,
-};
-
-const TEMPLATE_PLAN: ReportTemplate = {
-  paper_size: "A4", orientation: "portrait",
-  header_html: `<div class="wb-head">
-    <div><div class="wb-title">รายการจ่ายงานตามแผน</div><div class="wb-sub">แผน: {{plan_name}} · {{date_range}} · {{count}} รายการ · เรียงตาม{{sort_label}}</div></div>
-    <div class="wb-no">บอร์ดจ่ายงาน<br/>พิมพ์ {{printed_at}}</div>
-  </div>`,
-  body_html: `{{#groups}}<div class="grp-head"><div><span class="grp-name">{{dept}}</span>{{{staff_html}}}</div><span class="grp-sum">{{g_qty}} ชิ้น · ฿{{g_labor}}</span></div>
-  <table class="grp-rows">
-    <thead><tr>{{#c_img}}<th class="img">รูป</th>{{/c_img}}{{#c_assignee}}<th>ช่าง</th>{{/c_assignee}}{{#c_mo}}<th>รหัส MO</th>{{/c_mo}}<th>สินค้า</th>{{#c_due}}<th class="r">กำหนดส่ง</th>{{/c_due}}{{#c_qty}}<th class="r">จำนวน</th>{{/c_qty}}{{#c_labor}}<th class="r">ค่าแรง</th>{{/c_labor}}</tr></thead>
-    <tbody>{{#rows}}<tr>{{#c_img}}<td class="img">{{{img_cell}}}</td>{{/c_img}}{{#c_assignee}}<td>{{assignee}}</td>{{/c_assignee}}{{#c_mo}}<td class="mono">{{mo_no}}</td>{{/c_mo}}<td>{{#c_sku}}<span class="mono">{{sku}}</span>{{/c_sku}}{{#c_name}} · {{name}}{{/c_name}}</td>{{#c_due}}<td class="r">{{due}}</td>{{/c_due}}{{#c_qty}}<td class="r">{{qty}}</td>{{/c_qty}}{{#c_labor}}<td class="r">{{{labor_cell}}}</td>{{/c_labor}}</tr>{{/rows}}</tbody>
-  </table>{{/groups}}
-  {{#empty}}<div class="wb-empty">แผนนี้ยังไม่มีรายการจ่าย</div>{{/empty}}
-  {{#has_groups}}<div class="grp-head" style="margin-top:4mm;background:#f1f5f9;border-color:#cbd5e1;"><span class="grp-name">รวมทั้งหมด</span><span class="grp-sum" style="color:#334155;">{{total_qty}} ชิ้น · ฿{{total_labor}}</span></div>
-  <div class="wb-note">ช่องว่างค่าแรง = ยังไม่ตั้งค่าแรงต่อชิ้น (เขียนกรอกด้วยมือ)</div>{{/has_groups}}`,
-  footer_html: "", custom_css: COMMON_CSS,
-};
-
-function groupLabelOf(group: string): string {
-  if (!group || group === "__all__") return "ทั้งหมด";
-  if (group === "__none__") return "ยังไม่จับกลุ่ม";
-  return group;
-}
+const TYPES: WorkBoardPrintType[] = ["pending", "piece", "production", "plan", "all"];
+const PANEL_KEY = "print:panel-open";
 
 function WorkBoardPrintInner() {
   const sp = useSearchParams();
   const router = useRouter();
-  const typeParam = sp.get("type");
-  const type = (typeParam === "production" ? "production" : typeParam === "piece" ? "piece" : typeParam === "plan" ? "plan" : typeParam === "all" ? "all" : "pending") as "pending" | "production" | "piece" | "plan" | "all";
+  const { can } = useAuth();
+  const typeParam = sp.get("type") as WorkBoardPrintType | null;
+  const type: WorkBoardPrintType = typeParam && TYPES.includes(typeParam) ? typeParam : "pending";
   const group = sp.get("group") ?? "__all__";
   const planId = sp.get("plan") ?? "";
 
-  const [board, setBoard] = useState<BoardResp | null>(null);
-  const [moGroups, setMoGroups] = useState<{ name: string; mo_nos: string[] }[]>([]);
-  const [plan, setPlan] = useState<PlanResp | null>(null);
-  const [assignees, setAssignees] = useState<AssigneeResp>({ craftsmen: [], dept_wages: {} });
-  const [error, setError] = useState<string | null>(null);
-  const withStaff = type === "plan" || type === "production" || type === "all";   // ใบที่แยกตามโต๊ะ → โชว์พนักงานในโต๊ะ
-  // เรียงรายการในแต่ละโต๊ะได้ (จำไว้ให้ในเครื่องนี้)
-  const [sortBy, setSortBy] = useState<"opened" | "name" | "due" | "qty">("opened");
-  useEffect(() => {
-    try { const v = localStorage.getItem("print:work-board:sort"); if (v === "opened" || v === "name" || v === "due" || v === "qty") setSortBy(v); } catch { /* ignore */ }
-  }, []);
-  const pickSort = (v: "opened" | "name" | "due" | "qty") => { setSortBy(v); try { localStorage.setItem("print:work-board:sort", v); } catch { /* ignore */ } };
-  const SORT_LABEL: Record<string, string> = { opened: "วันที่เปิดใบงาน", name: "ชื่อสินค้า", due: "กำหนดส่ง", qty: "จำนวน" };
+  const available = useMemo(() => workBoardPrintColumns(type), [type]);
+  const defaults = useMemo(() => defaultListPrintSettings(available, { sortBy: "opened" }), [available]);
+  const print = useListPrintSettings({ reportKey: `work-board:${type}`, family: "work-board", available, defaults });
+  const s = print.settings;
 
-  // เลือกได้ว่าจะพิมพ์คอลัมน์ไหนบ้าง (จำไว้ในเครื่องนี้)
-  const COL_LIST: [keyof typeof DEFAULT_COLS, string][] = [
-    ["img", "รูป"], ["assignee", "ช่าง"], ["mo", "รหัส MO"], ["sku", "รหัส SKU"], ["name", "ชื่อสินค้า"],
-    ["due", "กำหนดส่ง"], ["qty", "จำนวน"], ["rate", "ค่าแรง/ชิ้น"], ["labor", "ยอดรวมค่าแรง"],
-  ];
-  const [cols, setCols] = useState(DEFAULT_COLS);
-  const [colsOpen, setColsOpen] = useState(false);
+  // ย้ายค่าเดิมที่เคยจำในเครื่อง (เรียง + คอลัมน์) มาเป็นค่าตั้งใหม่ครั้งเดียว
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("print:work-board:cols");
-      if (raw) setCols({ ...DEFAULT_COLS, ...(JSON.parse(raw) as Partial<typeof DEFAULT_COLS>) });
+      const oldSort = localStorage.getItem("print:work-board:sort");
+      const oldCols = localStorage.getItem("print:work-board:cols");
+      if (!oldSort && !oldCols) return;
+      const next = { ...print.settings };
+      if (oldSort && WORK_BOARD_SORTS.some((o) => o.value === oldSort)) next.sortBy = oldSort;
+      if (oldCols) {
+        const on = JSON.parse(oldCols) as Record<string, boolean>;
+        next.columns = next.columns.map((c) => (c.key in on ? { ...c, on: !!on[c.key] } : c));
+      }
+      print.setSettings(next);
+      localStorage.removeItem("print:work-board:sort");
+      localStorage.removeItem("print:work-board:cols");
     } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const toggleCol = (k: keyof typeof DEFAULT_COLS) => setCols((p) => {
-    const next = { ...p, [k]: !p[k] };
-    try { localStorage.setItem("print:work-board:cols", JSON.stringify(next)); } catch { /* ignore */ }
-    return next;
-  });
-  // ธงคอลัมน์ที่ส่งเข้าแม่แบบ + จำนวนช่องของแถวรวม (colspan)
-  const colFlags = {
-    c_img: cols.img, c_assignee: cols.assignee, c_mo: cols.mo, c_sku: cols.sku, c_name: cols.name,
-    c_due: cols.due, c_qty: cols.qty, c_rate: cols.rate, c_labor: cols.labor,
-    foot_span: [cols.img, cols.mo, cols.sku, cols.name, cols.assignee, cols.due].filter(Boolean).length || 1,
-    pend_span: [cols.img, cols.mo, cols.sku, cols.name, cols.due].filter(Boolean).length || 1,
-  };
+
+  const [panelOpen, setPanelOpen] = useState(true);
+  useEffect(() => { try { if (localStorage.getItem(PANEL_KEY) === "0") setPanelOpen(false); } catch { /* ignore */ } }, []);
+  const togglePanel = () => setPanelOpen((v) => { try { localStorage.setItem(PANEL_KEY, v ? "0" : "1"); } catch { /* ignore */ } return !v; });
+
+  const [board, setBoard] = useState<BoardResp | null>(null);
+  const [moGroups, setMoGroups] = useState<MoGroup[]>([]);
+  const [plan, setPlan] = useState<PlanResp | null>(null);
+  const [assignees, setAssignees] = useState<AssigneeResp>({ craftsmen: [], dept_wages: {} });
+  const [companies, setCompanies] = useState<PrintCompany[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const withStaff = type === "plan" || type === "production" || type === "all";   // ใบที่แยกตามโต๊ะ → โชว์พนักงานในโต๊ะ
 
   useEffect(() => {
     let on = true;
@@ -245,13 +78,15 @@ function WorkBoardPrintInner() {
       withStaff
         ? apiFetch("/api/mo/assignees").then((r) => r.json()).catch(() => ({ craftsmen: [], dept_wages: {} }))
         : Promise.resolve({ craftsmen: [], dept_wages: {} }),
+      apiFetch("/api/admin/companies").then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] })),
     ])
-      .then(([b, g, p, a]: [BoardResp & { error?: string }, { data?: { name: string; mo_nos: unknown }[] }, { data?: PlanResp | null; error?: string }, AssigneeResp]) => {
+      .then(([b, g, p, a, co]: [BoardResp & { error?: string }, { data?: { name: string; mo_nos: unknown }[] }, { data?: PlanResp | null; error?: string }, AssigneeResp, { data?: PrintCompany[] }]) => {
         if (!on) return;
         if (b.error) throw new Error(b.error);
         setBoard(b);
         setMoGroups((g.data ?? []).map((x) => ({ name: x.name, mo_nos: (Array.isArray(x.mo_nos) ? x.mo_nos : []) as string[] })));
         setAssignees({ craftsmen: a.craftsmen ?? [], dept_wages: a.dept_wages ?? {} });
+        setCompanies((co.data ?? []).map((c) => ({ id: c.id, name: c.name, logo_key: c.logo_key ?? null })));
         if (type === "plan") {
           if (!p.data) throw new Error(p.error || "ไม่พบแผนที่เลือก");
           setPlan(p.data);
@@ -261,240 +96,68 @@ function WorkBoardPrintInner() {
     return () => { on = false; };
   }, [type, planId, withStaff]);
 
-  const html = useMemo(() => {
-    if (!board) return "";
-    const groupOf = (moNo: string) => moGroups.find((x) => x.mo_nos.includes(moNo))?.name ?? null;
-    const groupOk = (moNo: string) =>
-      group === "__all__" ? true : group === "__none__" ? groupOf(moNo) === null : groupOf(moNo) === group;
-    const printed_at = new Date().toLocaleDateString("th-TH", FMT_OPT);
-    const group_label = groupLabelOf(group);
-
-    // พนักงานในโต๊ะ (ชื่อ+จำนวน+เงินเดือนรวม) ตามชื่อโต๊ะ → โชว์ในหัวกลุ่มของใบแผน/กำลังผลิต
-    const deptIdByName = new Map<string, string>();
-    for (const d of board.departments) deptIdByName.set(d.name, d.id);
-    const namesByDeptId = new Map<string, string[]>();
-    for (const c of assignees.craftsmen) { if (!c.department_id) continue; const a = namesByDeptId.get(c.department_id) ?? []; a.push(c.nickname || c.name); namesByDeptId.set(c.department_id, a); }
-    const staffHtmlOf = (deptName: string) => {
-      if (/เหมา/.test(deptName)) return "";   // งานเหมา = ใครก็ทำได้ ไม่ต้องโชว์รายชื่อพนักงาน
-      const id = deptIdByName.get(deptName); if (!id) return "";
-      const names = namesByDeptId.get(id) ?? []; const wage = assignees.dept_wages[id] ?? 0;
-      if (names.length === 0 && wage === 0) return "";
-      return `<div class="grp-staff">👥 ${names.length} คน${names.length ? ": " + names.join(", ") : ""}${wage > 0 ? ` · เงินเดือนรวม ฿${money(wage)}` : ""}</div>`;
-    };
-    // ชื่อช่างในคอลัมน์ → ใช้ชื่อเล่น (จาก employee id ก่อน, ไม่มีก็ดึงจากวงเล็บในชื่อเต็ม)
-    const nickById = new Map<string, string>();
-    for (const c of assignees.craftsmen) if (c.nickname) nickById.set(c.id, c.nickname);
-    const shortAssignee = (name: string | null | undefined, id: string | null | undefined) => {
-      const byId = id ? nickById.get(id) : null; if (byId) return byId;
-      if (!name) return ""; const m = name.match(/\(([^)]+)\)/); return m ? m[1] : name;
-    };
-
-    const pieceRowsOf = () => board.pending_piece.filter((p) => groupOk(p.mo_no)).map((p) => {
-      const t = p.rate * p.qty;
-      return { img_cell: imgCell(p.image_url), mo_no: p.mo_no, job: p.job_name, sku: p.product_sku || "—", name: p.product_name || "—", qty: num(p.qty), rate: money(p.rate), total: money(t), _t: t };
+  const company = companies.find((c) => c.id === s.companyId) ?? null;
+  const result = useMemo(() => {
+    if (!board || (type === "plan" && !plan)) return null;
+    return buildWorkBoardPrint({
+      type, group, board, moGroups, plan, assignees, settings: s, company,
+      origin: typeof window !== "undefined" ? window.location.origin : "",
+      printedAt: new Date().toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }),
     });
-
-    if (type === "piece") {
-      const rows = pieceRowsOf();
-      const grand = rows.reduce((a, r) => a + r._t, 0);
-      return buildReportHtml(TEMPLATE_PIECE, {
-        group_label, printed_at, count: rows.length, has_rows: rows.length > 0, rows, grand_total: money(grand), empty: rows.length === 0,
-      });
-    }
-
-    // รายการรอจ่าย (ใช้ทั้งใบ "รอจ่าย" และใบ "ทั้งหมด")
-    const pendingData = () => {
-      const laborPP = (m: PendingMO) => (m.central_rate && m.central_rate > 0) ? m.central_rate : (m.qty > 0 && m.labor ? m.labor.prod_plan / m.qty : 0);
-      const pend = board.pending.filter((m) => groupOk(m.mo_no));
-      let grand = 0, qtySum = 0;
-      const rows = pend.map((m) => {
-        const pp = laborPP(m); const has = pp > 0; const total = has ? pp * m.remaining : 0;
-        if (has) grand += total; qtySum += m.remaining;
-        return { img_cell: imgCell(m.image_url), mo_no: m.mo_no, sku: m.product_sku || "—", name: m.product_name || "—", due: dueText(m.due_date),
-          remaining: num(m.remaining), rate_cell: has ? money(pp) : BLANK, total_cell: has ? money(total) : BLANK };
-      });
-      return { rows, total_qty: num(qtySum), grand_total: money(grand) };
-    };
-    // กำลังผลิต แยกตามโต๊ะ/ช่าง (ใช้ทั้งใบ "กำลังผลิต" และใบ "ทั้งหมด")
-    const productionData = () => {
-      const wos = board.workOrders.filter((w) => w.status !== "done" && w.stage !== "cut" && groupOk(w.mo_no));
-      const byDept = new Map<string, WorkOrder[]>();
-      for (const w of wos) { const k = w.department_name || "— ไม่ระบุโต๊ะ —"; const arr = byDept.get(k) ?? []; arr.push(w); byDept.set(k, arr); }
-      let tQty = 0, tLabor = 0;
-      const groups = [...byDept.entries()].map(([dept, list]) => {
-        const gQty = list.reduce((a, w) => a + (w.qty || 0), 0);
-        const gLabor = list.reduce((a, w) => a + (w.labor_cost || 0), 0);
-        tQty += gQty; tLabor += gLabor;
-        return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor), g_count: list.length,
-          rows: sortRows(list, (w) => ({ moNo: w.mo_no, name: w.product_name, qty: w.qty || 0 })).map((w) => {
-            const qty = w.qty || 0;
-            const total = (w.labor_cost != null && w.labor_cost > 0) ? w.labor_cost : 0;
-            // ค่าแรง/ชิ้น ของจริง = ยอดรวมของใบจ่ายงาน ÷ จำนวน (ยังไม่ใส่ค่าแรง = เว้นช่องให้เขียนมือ)
-            const pp = total > 0 && qty > 0 ? total / qty : 0;
-            return {
-              img_cell: imgCell(w.image_url ?? null), mo_no: w.mo_no,
-              assignee: shortAssignee(w.assignee_name, w.assignee_id) || w.department_name || "—",
-              sku: w.product_sku || "—", name: w.product_name || "—",
-              due: dueText(dueByMo.get(String(w.mo_no)) ?? null),
-              qty: num(qty), rate_cell: pp > 0 ? money(pp) : BLANK, labor_cell: total > 0 ? money(total) : BLANK,
-            };
-          }) };
-      });
-      return { groups, count: wos.length, total_qty: num(tQty), total_labor: money(tLabor) };
-    };
-
-    if (type === "all") {
-      const pd = pendingData();
-      const piece_rows = pieceRowsOf();
-      const pieceGrand = piece_rows.reduce((a, r) => a + r._t, 0);
-      const prod = productionData();
-      return buildReportHtml(TEMPLATE_ALL, {
-        ...colFlags,
-        group_label, printed_at,
-        count: pd.rows.length, has_rows: pd.rows.length > 0, rows: pd.rows, total_qty: pd.total_qty, grand_total: pd.grand_total,
-        has_piece: piece_rows.length > 0, piece_rows, piece_count: piece_rows.length, piece_grand: money(pieceGrand),
-        groups: prod.groups, has_groups: prod.groups.length > 0, prod_count: prod.count, prod_qty: prod.total_qty, prod_labor: prod.total_labor,
-      });
-    }
-
-    if (type === "pending") {
-      const pd = pendingData();
-      const piece_rows = pieceRowsOf();
-      const pieceGrand = piece_rows.reduce((a, r) => a + r._t, 0);
-      return buildReportHtml(TEMPLATE_PENDING, {
-        ...colFlags,
-        group_label, printed_at, count: pd.rows.length, has_rows: pd.rows.length > 0, rows: pd.rows,
-        total_qty: pd.total_qty, grand_total: pd.grand_total,
-        has_piece: piece_rows.length > 0, piece_rows, piece_count: piece_rows.length, piece_grand: money(pieceGrand),
-        empty: pd.rows.length === 0 && piece_rows.length === 0,
-      });
-    }
-
-    // วันกำหนดส่ง / วันที่เปิดใบ ต่อใบสั่งผลิต — ใช้ทั้งโชว์ในตารางและใช้เรียง
-    const dueByMo = new Map<string, string | null>();
-    const openedByMo = new Map<string, string>();
-    for (const m of board.pending) {
-      dueByMo.set(m.mo_no, m.internal_due_date ?? m.due_date ?? null);
-      openedByMo.set(m.mo_no, (m.order_date ?? "") || m.mo_no);   // ไม่มีวันที่เปิด → ใช้เลขใบ (เรียงตามลำดับที่สร้าง)
-    }
-    for (const w of board.workOrders) {
-      if (!dueByMo.has(w.mo_no)) dueByMo.set(w.mo_no, w.due_date ?? null);
-      if (!openedByMo.has(w.mo_no)) openedByMo.set(w.mo_no, w.mo_no);
-    }
-    /** เรียงรายการตามที่เลือกไว้ (ใช้ร่วมกันทั้งใบแผน/ใบกำลังผลิต) */
-    const sortRows = <T,>(rows: T[], get: (r: T) => { moNo: string | null; name: string | null; qty: number }) =>
-      [...rows].sort((a, b) => {
-        const A = get(a), B = get(b);
-        if (sortBy === "qty") return B.qty - A.qty;                                   // มาก → น้อย
-        if (sortBy === "name") return (A.name ?? "").localeCompare(B.name ?? "", "th");
-        if (sortBy === "due") return (dueByMo.get(A.moNo ?? "") ?? "9999").localeCompare(dueByMo.get(B.moNo ?? "") ?? "9999");
-        return (openedByMo.get(A.moNo ?? "") ?? "zzz").localeCompare(openedByMo.get(B.moNo ?? "") ?? "zzz");
-      });
-
-    if (type === "plan") {
-      if (!plan) return "";
-      // แผนที่ + ค่าแรง/รูป จากบอร์ด (plan lines ไม่มีรูป/เรต → ดึงจาก pending/workOrders ตาม sku/mo)
-      const imgBySku = new Map<string, string | null>();
-      for (const m of board.pending) if (m.product_sku) imgBySku.set(m.product_sku, m.image_url);
-      for (const w of board.workOrders) if (w.product_sku && !imgBySku.has(w.product_sku)) imgBySku.set(w.product_sku, w.image_url ?? null);
-      for (const p of board.pending_piece) if (p.product_sku && !imgBySku.has(p.product_sku)) imgBySku.set(p.product_sku, p.image_url);
-      const rateByMo = new Map<string, number>();
-      for (const m of board.pending) { const r = (m.central_rate && m.central_rate > 0) ? m.central_rate : (m.qty > 0 && m.labor ? m.labor.prod_plan / m.qty : 0); if (r > 0) rateByMo.set(m.mo_no, r); }
-      for (const w of board.workOrders) if (!rateByMo.has(w.mo_no) && w.central_rate && w.central_rate > 0) rateByMo.set(w.mo_no, w.central_rate);
-      const deptOrder = new Map<string, number>();
-      board.departments.forEach((d, i) => deptOrder.set(d.name, i));
-      const byDept = new Map<string, DispatchPlanLine[]>();
-      for (const l of plan.lines) { const k = l.department_name || "— ยังไม่จัดโต๊ะ —"; const arr = byDept.get(k) ?? []; arr.push(l); byDept.set(k, arr); }
-      let totQty = 0, totLabor = 0;
-      const groups = [...byDept.entries()].sort((a, b) => (deptOrder.get(a[0]) ?? 999) - (deptOrder.get(b[0]) ?? 999)).map(([dept, list]) => {
-        let gQty = 0, gLabor = 0;
-        const rows = sortRows(list, (l) => ({ moNo: l.mo_no, name: l.product_name, qty: l.qty || 0 })).map((l) => {
-          const rate = l.mo_no ? (rateByMo.get(l.mo_no) ?? 0) : 0; const qty = l.qty || 0; const labor = rate > 0 ? rate * qty : 0;
-          gQty += qty; if (labor > 0) gLabor += labor;
-          return { img_cell: imgCell(l.product_sku ? (imgBySku.get(l.product_sku) ?? null) : null),
-            assignee: shortAssignee(l.assignee_name, l.assignee_id) || "(ทั้งโต๊ะ)", sku: l.product_sku || "—", name: l.product_name || "—",
-            mo_no: l.mo_no || "—", due: dueText(dueByMo.get(l.mo_no ?? "") ?? null), qty: num(qty), labor_cell: rate > 0 ? money(labor) : BLANK };
-        });
-        totQty += gQty; totLabor += gLabor;
-        return { dept, staff_html: staffHtmlOf(dept), g_qty: num(gQty), g_labor: money(gLabor), rows };
-      });
-      const date_range = (plan.start_date || plan.end_date) ? `${dueText(plan.start_date)} – ${dueText(plan.end_date)}` : "ทั้งแผน";
-      return buildReportHtml(TEMPLATE_PLAN, {
-        ...colFlags,
-        plan_name: plan.name, date_range, printed_at, count: plan.lines.length, groups, has_groups: groups.length > 0,
-        sort_label: SORT_LABEL[sortBy] ?? "",
-        total_qty: num(totQty), total_labor: money(totLabor), empty: groups.length === 0,
-      });
-    }
-
-    // production
-    const prod = productionData();
-    return buildReportHtml(TEMPLATE_PRODUCTION, {
-        ...colFlags,
-      group_label, printed_at, dept_count: prod.groups.length, groups: prod.groups, has_groups: prod.groups.length > 0,
-      total_qty: prod.total_qty, total_labor: prod.total_labor, empty: prod.groups.length === 0,
-    });
-  }, [board, moGroups, plan, assignees, type, group, sortBy, cols]);
+  }, [board, moGroups, plan, assignees, type, group, s, company]);
+  const html = result?.html ?? "";
+  const pages = result ? estimateListPages(result.groupCounts, s) : 0;
+  const doPrint = () => { if (html) printReportHtmlInNewWindow(html); };
 
   // กด Ctrl/Cmd+P → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่างเกินจาก iframe)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
-        e.preventDefault();
-        if (html) printReportHtmlInNewWindow(html);
-      }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); if (html) printReportHtmlInNewWindow(html); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [html]);
 
-  const title = type === "all" ? "สรุปงานทั้งหมดบนบอร์ด" : type === "production" ? "รายการกำลังผลิต (ตามโต๊ะ/ช่าง)" : type === "piece" ? "รายการรอจ่ายเหมาทั้งหมด" : type === "plan" ? "รายการจ่ายงานตามแผน" : "รายการรอจ่ายทั้งหมด";
+  const defaultTitle = WORK_BOARD_PRINT_TITLE[type];
   const subLabel = type === "plan" ? (plan ? `แผน ${plan.name}` : "แผน…") : `กลุ่ม ${groupLabelOf(group)}`;
+  const frameWidth = s.orientation === "landscape" ? (s.paper === "A5" ? 840 : 1180) : s.paper === "A5" ? 600 : 840;
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <div className="no-print sticky top-0 z-10 flex items-center gap-3 border-b border-slate-200 bg-slate-100 px-6 py-3">
-        <button onClick={() => router.back()} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">← กลับ</button>
-        <span className="text-sm text-slate-600">🖨️ {title} · {subLabel}</span>
+      <div className="no-print sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-100 px-4 py-3 sm:gap-3 sm:px-6">
+        <button onClick={() => router.back()} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50">
+          <Icon value="i:arrow-left" /> กลับ
+        </button>
+        <span className="min-w-0 truncate text-sm text-slate-600"><Icon value="i:printer" className="mr-1.5" />{s.title.trim() || defaultTitle} · {subLabel}</span>
         <div className="flex-1" />
-        <label className="flex items-center gap-1.5 text-sm text-slate-600">
-          เรียงตาม
-          <select value={sortBy} onChange={(e) => pickSort(e.target.value as "opened" | "name" | "due" | "qty")}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-2 text-sm">
-            <option value="opened">วันที่เปิดใบงาน</option>
-            <option value="name">ชื่อสินค้า</option>
-            <option value="due">กำหนดส่ง</option>
-            <option value="qty">จำนวน (มาก→น้อย)</option>
-          </select>
-        </label>
-        <div className="relative">
-          <button onClick={() => setColsOpen((v) => !v)}
-            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50">
-            ⚙️ คอลัมน์ ({COL_LIST.filter(([k]) => cols[k]).length}/{COL_LIST.length})
-          </button>
-          {colsOpen && (
-            <>
-              <div className="fixed inset-0 z-10" onClick={() => setColsOpen(false)} />
-              <div className="absolute right-0 z-20 mt-1 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-xl">
-                <div className="mb-1 px-1 text-[11px] text-slate-400">เลือกคอลัมน์ที่จะพิมพ์</div>
-                {COL_LIST.map(([k, label]) => (
-                  <label key={k} className="flex items-center gap-2 rounded-lg px-2 py-1 text-sm text-slate-700 hover:bg-slate-50 cursor-pointer">
-                    <input type="checkbox" checked={cols[k]} onChange={() => toggleCol(k)} className="w-4 h-4 accent-blue-600" />
-                    {label}
-                  </label>
-                ))}
-                <button onClick={() => { setCols(DEFAULT_COLS); try { localStorage.removeItem("print:work-board:cols"); } catch { /* ignore */ } }}
-                  className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1 text-[11px] text-slate-500 hover:bg-slate-50">↺ เลือกทั้งหมด</button>
-              </div>
-            </>
-          )}
-        </div>
-        <button onClick={() => printReportHtmlInNewWindow(html)} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
+        <button onClick={togglePanel} aria-pressed={panelOpen}
+          className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${panelOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+          <Icon value="i:layout-sidebar-right" /> ตั้งค่าหน้าพิมพ์
+        </button>
+        <button onClick={doPrint} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
       </div>
-      <div className="px-4 py-6">
-        {error ? <div className="py-20 text-center text-red-500">⚠ {error}</div>
-          : (!board || (type === "plan" && !plan)) ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
-          : <PrintFrame html={html} onPrint={() => html && printReportHtmlInNewWindow(html)} />}
+      <div className="flex flex-col items-start gap-4 px-4 py-6 lg:flex-row">
+        <div className="w-full min-w-0 flex-1">
+          {error ? <div className="py-20 text-center text-red-500"><Icon value="i:alert-triangle" className="mr-1" />{error}</div>
+            : !result ? <div className="py-20 text-center text-slate-400">กำลังโหลด…</div>
+            : <PrintFrame html={html} maxWidth={frameWidth} onPrint={doPrint} fit />}
+        </div>
+        {panelOpen && (
+          <aside className="no-print order-first w-full shrink-0 rounded-xl border border-slate-200 bg-white p-4 lg:order-none lg:sticky lg:top-[68px] lg:max-h-[calc(100vh-84px)] lg:w-[330px] lg:overflow-y-auto" aria-label="ตั้งค่าหน้าพิมพ์">
+            <ListPrintPanel
+              state={print}
+              available={available}
+              sorts={WORK_BOARD_SORTS}
+              groups={workBoardPrintGroups(type)}
+              builtinPresets={WORK_BOARD_PRINT_PRESETS}
+              companies={companies}
+              estimatedPages={pages}
+              defaultTitle={defaultTitle}
+              canSaveTeam={can("admin.users")}
+              signatureHint={type === "production" ? "ผู้ตรวจ / หัวหน้าโต๊ะ" : "ผู้จ่ายงาน / ผู้รับงาน"}
+            />
+          </aside>
+        )}
       </div>
     </div>
   );

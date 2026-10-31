@@ -643,16 +643,34 @@ export function ReportLayoutControls({
   );
 }
 
-export function PrintFrame({ html, maxWidth = 840, onPrint, fileName }: { html: string; maxWidth?: number; onPrint?: () => void; fileName?: string }) {
+/** fit = ย่อกระดาษให้พอดีกรอบเมื่อที่แคบ (เช่น มีแผงตั้งค่าอยู่ข้าง ๆ) — ย่อเฉพาะบนจอ ไม่กระทบตอนพิมพ์ */
+export function PrintFrame({ html, maxWidth = 840, onPrint, fileName, fit = false }: { html: string; maxWidth?: number; onPrint?: () => void; fileName?: string; fit?: boolean }) {
   const ref = useRef<HTMLIFrameElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const [h, setH] = useState(400);
   // วัดความสูงเนื้อหาจริง — ซ้ำหลายรอบเผื่อฟอนต์/รูปจัดเสร็จช้า
   const measure = () => {
     const d = ref.current?.contentDocument;
     if (!d) return;
-    const hh = Math.max(d.body?.scrollHeight ?? 0, d.documentElement?.scrollHeight ?? 0);
+    if (fit) {
+      const page = d.querySelector<HTMLElement>(".doc");
+      d.documentElement.style.zoom = "1";
+      const natural = page?.offsetWidth ?? 0;
+      const avail = boxRef.current?.clientWidth ?? 0;
+      d.documentElement.style.zoom = natural > 0 && avail > 0 ? String(Math.min(1, avail / natural)) : "1";
+    }
+    // ย่อแล้ว body = ความสูงหลังย่อ (html ยังนับความสูงก่อนย่อ → เหลือที่ว่างท้ายกรอบ)
+    const hh = fit ? d.body?.scrollHeight ?? 0 : Math.max(d.body?.scrollHeight ?? 0, d.documentElement?.scrollHeight ?? 0);
     if (hh > 0) setH(hh);
   };
+  // กรอบกว้าง/แคบลง (เปิด-ปิดแผงข้าง ย่อหน้าต่าง) → ย่อกระดาษใหม่
+  useEffect(() => {
+    if (!fit || typeof ResizeObserver === "undefined" || !boxRef.current) return;
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(boxRef.current);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fit]);
   const onLoad = () => {
     measure(); setTimeout(measure, 120); setTimeout(measure, 400);
     // กด Ctrl/Cmd+P ขณะโฟกัสอยู่ใน iframe → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่าง)
@@ -669,7 +687,7 @@ export function PrintFrame({ html, maxWidth = 840, onPrint, fileName }: { html: 
     }
   };
   return (
-    <div className="mx-auto bg-white shadow-lg print-document" style={{ maxWidth }}>
+    <div ref={boxRef} className="mx-auto bg-white shadow-lg print-document" style={{ maxWidth }}>
       <iframe ref={ref} srcDoc={html} onLoad={onLoad} scrolling="no" data-report-print-frame="true"
         className="w-full bg-white border-0 block" style={{ height: h }} title="Print preview" />
     </div>
