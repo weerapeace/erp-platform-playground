@@ -47,6 +47,8 @@ export type FamilyCellStatus = MatStatus | "partial";
 export type FamilyColumn = {
   sku: string; variant: string | null; image_url: string | null; qty: number;
   mos: { id: string; mo_no: string; qty: number; due_date: string | null }[];
+  /** ใบของสีนี้ยังไม่มีรายการวัตถุดิบเลย (ยังไม่ได้กางสูตร) — ช่องว่างทั้งคอลัมน์ไม่ได้แปลว่าไม่ต้องใช้ */
+  no_materials: boolean;
 };
 export type FamilyBuyCell = {
   qty: number; remaining: number; status: FamilyCellStatus; po_nos: string[];
@@ -134,13 +136,15 @@ export function buildFamilySheet(input: FamilyInput): FamilySheet {
     if (i == null) {
       i = columns.length; colIdx.set(mo.product_sku, i);
       const s = skuInfo.get(mo.product_sku);
-      columns.push({ sku: mo.product_sku, variant: s?.variant ?? null, image_url: s?.image_url ?? null, qty: 0, mos: [] });
+      columns.push({ sku: mo.product_sku, variant: s?.variant ?? null, image_url: s?.image_url ?? null, qty: 0, mos: [], no_materials: false });
     }
     columns[i].qty += Number(mo.qty) || 0;
     columns[i].mos.push({ id: mo.id, mo_no: mo.mo_no, qty: Number(mo.qty) || 0, due_date: mo.due_date ?? null });
   }
   const moCol = new Map(input.mos.map((m) => [m.mo_no, colIdx.get(m.product_sku)!]));
   const nCol = columns.length;
+  const colsWithLines = new Set([...input.buy, ...input.cut].map((l) => moCol.get(l.mo_no)));
+  columns.forEach((c, i) => { c.no_materials = !colsWithLines.has(i); });
 
   /* ── ของที่ต้องซื้อ ── */
   type CodeAgg = { key: string; code: string | null; name: string; type: string; uom: string; image: string | null; seq: number;
@@ -385,7 +389,7 @@ function buySectionHtml(s: FamilySheet, opt: FamilyPrintOptions): string {
   return `<section class="fp-section"><div class="section-title">1) ของที่ต้องซื้อ / เตรียม <span class="fp-legend">${legend}</span></div>`
     + (body
       ? `<table class="summary-table fp-table">${colgroup(n, ["12mm", "44mm"], ["22mm", "7mm"])}<thead><tr><th>รูป</th><th>วัตถุดิบ</th>${skuHeads(s.columns)}<th>รวม</th><th>✓</th></tr></thead><tbody>${body}</tbody></table>`
-      : `<div class="fp-none">ไม่มีของที่ต้องซื้อแล้ว</div>`)
+      : `<div class="fp-none">${s.buy.varies.length + s.buy.single.length === 0 ? "ใบสั่งผลิตในรุ่นนี้ยังไม่มีรายการวัตถุดิบ (ยังไม่ได้กางสูตร BOM)" : "ไม่มีของที่ต้องซื้อแล้ว"}</div>`)
     + `</section>`;
 }
 
@@ -414,6 +418,7 @@ export function familyHeadHtml(s: FamilySheet, opt: FamilyPrintOptions): string 
   const st = s.stats;
   const cards = s.columns.map((c) => `<div class="fp-card">${img(c.image_url, "fp-cardimg")}<div class="fp-cardtxt"><div class="fp-skucode">${esc(c.sku)}</div>`
     + `${c.variant ? `<div class="fp-sub">${esc(c.variant)}</div>` : ""}<div><b>${num(c.qty)}</b> ชิ้น</div>`
+    + `${c.no_materials ? `<div class="fp-warn">ยังไม่มีรายการวัตถุดิบ</div>` : ""}`
     + `<div class="fp-sub">${c.mos.map((m) => `${esc(m.mo_no.replace(/^MO-\d{4}-/, ""))}${c.mos.length > 1 ? ` (${num(m.qty)})` : ""}`).join(" · ")}</div></div></div>`).join("");
   return `<div class="doc-head-inline"><div class="doc-title">ใบสั่งผลิตรวมทั้งรุ่น</div><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
 <section class="fp-hero">

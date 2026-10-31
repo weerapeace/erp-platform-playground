@@ -167,6 +167,17 @@ describe("กรณีพิเศษ", () => {
     expect(s.cut[0].rows.map((r) => [r.code, r.varies]).sort()).toEqual([["BONDED-0.4BK", false], ["SP004", false]]);
   });
 
+  it("ใบที่ยังไม่กางสูตร (ไม่มีวัตถุดิบเลย) → เตือนบนการ์ดสี + ไม่บอกว่า 'ซื้อครบแล้ว'", () => {
+    const base = pix25();
+    const s = buildFamilySheet({ ...base, mos: [...base.mos, { id: "x", mo_no: "MO-X", product_sku: "PIX25-07", qty: 5 }] });
+    expect(s.columns.map((c) => c.no_materials)).toEqual([false, false, false, false, false, false, true]);
+    expect(familyHtmlData(s, FAMILY_DEFAULT_OPTIONS).head_html).toContain("ยังไม่มีรายการวัตถุดิบ");
+    const empty = buildFamilySheet({ ...base, buy: [], cut: [] });
+    const body = familyHtmlData(empty, FAMILY_DEFAULT_OPTIONS).body_html as string;
+    expect(body).toContain("ยังไม่ได้กางสูตร BOM");
+    expect(body).not.toContain("ไม่มีของที่ต้องซื้อแล้ว");
+  });
+
   it("บล็อกแยกไซส์ คูณด้วยจำนวนของไซส์นั้น", () => {
     const s = buildFamilySheet({
       key: "S", parent: null,
