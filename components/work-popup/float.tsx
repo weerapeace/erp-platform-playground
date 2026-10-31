@@ -10,9 +10,10 @@
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useUserPref } from "@/lib/use-user-pref";
+import { cornerStyle, useCornerDrag } from "@/lib/use-corner-drag";
 import {
   FLOAT_MIN_WIDTH, WORK_POPUP_FLOAT_DEFAULT, WORK_POPUP_FLOAT_KEY, WORK_POPUP_HIDE_HINT, parseWorkPopupFloatPref,
-  type WorkPopupFloatPosition, type WorkPopupFloatPref,
+  type WorkPopupFloatPref, workPopupAnchor,
 } from "./float-pref";
 
 export { WORK_POPUP_HIDE_HINT } from "./float-pref";
@@ -33,8 +34,6 @@ export function useFloatScreen(): boolean {
   }, []);
   return wide;
 }
-
-const POS: Record<WorkPopupFloatPosition, string> = { br: "bottom-4 right-4", tr: "top-16 right-4" };
 
 /** การ์ดลอย (กรอบอย่างเดียว — เนื้อหา/ปุ่มส่งมาจาก WorkPopupHost) */
 export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, footer, onMinimize, onExpand, children }: {
@@ -62,31 +61,39 @@ export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, foo
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [minimized, onMinimize]);
 
+  // ลากย้ายได้ (ปุ่มเล็ก = ลากทั้งปุ่ม · การ์ด = ลากที่หัว) → จำมุม+ระยะต่อคน (ของกลาง lib/use-corner-drag)
+  const [, setPref] = useWorkPopupFloatPref();
+  const drag = useCornerDrag((a) => setPref({ ...pref, anchor: a }));
+  const anchor = workPopupAnchor(pref);
+
   if (minimized) {
     return (
-      <button type="button" onClick={onExpand} title="ป๊อปเตือนงาน — กดเพื่อกาง"
-        className={`fixed ${POS[pref.position]} z-[45] flex items-center gap-2 h-10 pl-3 pr-4 rounded-full bg-white border border-slate-200 shadow-lg text-sm font-medium text-slate-700 hover:border-amber-300 hover:text-amber-800`}>
+      <button type="button" onClick={() => { if (!drag.consumeClick()) onExpand(); }} onPointerDown={drag.onPointerDown}
+        title="ป๊อปเตือนงาน — กดเพื่อกาง · ลากเพื่อย้ายที่"
+        style={{ ...(drag.liveStyle ?? cornerStyle(anchor, { w: 160, h: 40 })), touchAction: "none" }}
+        className={`fixed z-[45] flex items-center gap-2 h-10 pl-3 pr-4 rounded-full bg-white border border-slate-200 shadow-lg text-sm font-medium text-slate-700 hover:border-amber-300 hover:text-amber-800 select-none ${drag.dragging ? "cursor-grabbing shadow-2xl" : "cursor-grab"}`}>
         <span aria-hidden>🔔</span>{pill}
       </button>
     );
   }
   return (
     <div ref={boxRef} role="dialog" aria-label={title}
-      className={`fixed ${POS[pref.position]} z-[45] w-[400px] max-w-[calc(100vw-2rem)] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden`}
-      style={{ maxHeight: pref.position === "tr" ? "calc(100vh - 5rem)" : "calc(100vh - 2rem)" }}>
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-100 bg-amber-50/60">
+      className={`fixed z-[45] w-[400px] max-w-[calc(100vw-2rem)] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden`}
+      style={{ ...(drag.liveStyle ?? cornerStyle(anchor, { w: 400, h: 120 })), maxHeight: `calc(100vh - ${Math.min(anchor.y, 400) + 16}px)` }}>
+      <div onPointerDown={drag.onPointerDown} title="ลากที่หัวเพื่อย้ายที่" style={{ touchAction: "none" }}
+        className={`flex items-center gap-2 px-3 py-2 border-b border-slate-100 bg-amber-50/60 select-none ${drag.dragging ? "cursor-grabbing" : "cursor-grab"}`}>
         <span aria-hidden className="text-lg">🔔</span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-slate-800 truncate">{title}</div>
           <div className="text-[11px] text-slate-500 truncate">{subtitle}</div>
         </div>
-        <button type="button" onClick={onMinimize} aria-label="ซ่อน" title="ซ่อนเป็นปุ่มเล็ก (กดปุ่มเพื่อเปิดกลับ)"
+        <button type="button" data-no-drag onClick={onMinimize} aria-label="ซ่อน" title="ซ่อนเป็นปุ่มเล็ก (กดปุ่มเพื่อเปิดกลับ)"
           className="w-8 h-8 rounded-md text-slate-400 hover:bg-white hover:text-slate-700">✕</button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto p-3">{children}</div>
       <div className="border-t border-slate-100 px-3 py-2">{footer}</div>
       <p className="bg-amber-50 px-3 py-1.5 text-[11px] leading-snug text-amber-800">
-        💡 กด <b>✕</b> = ซ่อนเป็นปุ่มเล็กมุมจอ · {WORK_POPUP_HIDE_HINT}
+        💡 กด <b>✕</b> = ซ่อนเป็นปุ่มเล็ก · ลากที่หัวเพื่อย้ายที่ · {WORK_POPUP_HIDE_HINT}
       </p>
     </div>
   );
@@ -107,9 +114,10 @@ export function WorkPopupFloatToggle() {
         <div className="mt-1.5 flex items-center gap-1">
           <span className="text-[11px] text-slate-400 mr-1">ลอยที่</span>
           {([["br", "↘ ขวาล่าง"], ["tr", "↗ ขวาบน"]] as const).map(([k, l]) => (
-            <button key={k} type="button" onClick={() => setPref({ ...pref, position: k })}
-              className={`h-6 px-2 rounded-md border text-[11px] ${pref.position === k ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+            <button key={k} type="button" onClick={() => setPref({ ...pref, position: k, anchor: null })}
+              className={`h-6 px-2 rounded-md border text-[11px] ${!pref.anchor && pref.position === k ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
           ))}
+          {pref.anchor && <span title="ลากป๊อปไปวางเองไว้ · กดมุมด้านซ้ายเพื่อกลับไปมุมสำเร็จรูป" className="h-6 px-2 leading-6 rounded-md border border-blue-300 bg-blue-50 text-blue-700 font-medium text-[11px]">📍 ที่ลากไว้</span>}
         </div>
       ) : (
         <p className="mt-1 text-[11px] text-slate-400">ปิดอยู่ — ป๊อปไม่เด้ง (ทุกเครื่องของคุณ)</p>
