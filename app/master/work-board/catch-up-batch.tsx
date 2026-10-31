@@ -448,13 +448,18 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   // ── 🧾 ใบขายที่ส่งไปแล้ว: ผูก (จำคู่ ใบขายเดียวกันไม่ถูกจับซ้ำ) + เลือกขั้น "ส่งออกจาก QC แล้ว · ขายออกเลย" + วันส่ง = วันที่ใบขาย
   //    หัวหน้า/บันทึกได้เลย = ผูกจริง · ส่งคำขอ = ใช้ข้อมูลตั้งขั้นอย่างเดียว (ไม่ผูก)
   const canLinkSales = mode === "direct" || canApprove;
-  /** ตั้งขั้น "ส่งออกจาก QC แล้ว · ขายออกเลย" + วันส่ง = วันที่ใบขายล่าสุด · sell = ขายออกแค่บางส่วน (ที่เหลือ rest) · cutTo = ทำได้แค่นี้ (ลดจำนวนสั่ง แยกใบใหม่) */
-  const toShip = (r: BRow, parts: MatchPart[], opt: { sell?: number | null; rest?: "sales_wh" | "keep"; cutTo?: number } = {}) => {
+  /** ตั้งขั้น "ส่งออกจาก QC แล้ว · ขายออกเลย" + วันส่ง = วันที่ใบขายล่าสุด · sell = ขายออกแค่บางส่วน (ที่เหลือ rest)
+   *  made = ทำได้แค่นี้: split = ที่เหลือแยกใบใหม่รอผลิต · keep = ที่เหลือรอผลิตในใบเดิม (จ่าย/ส่งแค่ที่ทำได้ ใบยังเท่าเดิม) · drop = ไม่ทำแล้ว */
+  const toShip = (r: BRow, parts: MatchPart[], opt: { sell?: number | null; rest?: "sales_wh" | "keep"; made?: { qty: number; mode: "split" | "keep" | "drop" } } = {}) => {
     if (!r.snap || r.phase !== "edit" || modeOf(r).blockedBy || cuTargetBlocked(cuFacts(r.snap), "ship")) return;
     patchRow(r.moNo, (rr) => {
-      const base: BRow = opt.cutTo != null ? { ...rr, reduce: { qty: opt.cutTo, pick: "ของไม่พอ", detail: "ส่งตามใบขาย", mode: "split" } } : rr;
-      return { ...(opt.cutTo != null ? { reduce: base.reduce } : {}), ...retarget(base, "ship"), shipMode: "sell", shipSell: opt.sell ?? null, shipRest: opt.rest ?? "sales_wh",
+      const m = opt.made;
+      const base: BRow = m ? { ...rr, reduce: { qty: m.qty, pick: m.mode === "drop" ? "ลูกค้าลดจำนวน" : "ของไม่พอ", detail: "ส่งตามใบขาย", mode: m.mode } } : rr;
+      const next = { ...(m ? { reduce: base.reduce } : {}), ...retarget(base, "ship"), shipMode: "sell" as const, shipSell: opt.sell ?? null, shipRest: opt.rest ?? ("sales_wh" as const),
         dates: { ...rr.dates, ship: matchShipDate(parts) }, open: true };
+      // รอผลิตในใบเดิม: ใบไม่ลดจำนวน → ตั้งต้นจ่ายเท่าที่ทำได้ (แถวจ่ายแถวเดียว) · ส่งคืน/QC ตามยอดจ่ายอัตโนมัติ
+      if (m?.mode === "keep" && next.disp && next.disp.length === 1) next.disp = [{ ...next.disp[0], qty: m.qty }];
+      return next;
     });
   };
   const partsOf = (m: MoMatch) => (m.kind === "linked" ? m.linked : m.suggest);
@@ -481,7 +486,9 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
       if (!res.ok || j?.error) { toast.error(j?.error || "ผูกใบขายไม่สำเร็จ"); await loadSales(rows.map((x) => x.moNo)); return; }
     }
     const parts: MatchPart[] = pick.parts.map((p) => ({ line: { id: p.sale_line_id, sale_id: "", so_number: p.so_number, date: p.date, customer: null, sku: "", qty: p.qty }, qty: p.qty }));
-    if (pick.rest === "cut") toShip(r, parts, { cutTo: pick.total });
+    if (pick.rest === "split") toShip(r, parts, { made: { qty: pick.total, mode: "split" } });
+    else if (pick.rest === "same") toShip(r, parts, { made: { qty: pick.total, mode: "keep" } });
+    else if (pick.rest === "drop") toShip(r, parts, { made: { qty: pick.total, mode: "drop" } });
     else if (pick.rest) toShip(r, parts, { sell: pick.total, rest: pick.rest });
     else toShip(r, parts);
     setPickMo(null);

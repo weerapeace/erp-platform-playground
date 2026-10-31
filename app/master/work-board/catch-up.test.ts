@@ -414,3 +414,26 @@ describe("แบ่งส่งออกตามใบขาย (ขายอ�
     ]);
   });
 });
+
+describe("ทำได้แค่บางส่วน แล้วส่งตามใบขาย (ที่เหลือ: ใบใหม่ / ใบเดิม / ไม่ทำ)", () => {
+  const f = cuFacts(snap({ mo: { qty: 30, prep_ready: 4, cut_ready: 2 } }));
+  const go = (mode: "split" | "keep" | "drop") => cuBuildSteps(f, "ship", cuDefaultTicks(f, "ship"),
+    inp({ dq: 20, rq: 20, qcGood: 20, shipMode: "sell", reduce: { qty: 20, pick: mode === "drop" ? "ลูกค้าลดจำนวน" : "ของไม่พอ", detail: "ส่งตามใบขาย", mode } }));
+  it("③ แยกใบใหม่ = ลด 30 → 20 (split) แล้วส่งออก 20", () => {
+    const r = go("split");
+    expect(r.errors).toEqual([]);
+    expect(r.steps.find((s) => s.kind === "reduce")).toMatchObject({ from: 30, to: 20, mode: "split" });
+    expect(r.steps.filter((s) => s.kind === "ship").map((s) => s.kind === "ship" && s.qty)).toEqual([20]);
+  });
+  it("④ รอผลิตในใบเดิม = ไม่มีขั้นลดจำนวน · จ่าย/ส่งออก 20 · จดหมายเหตุ ที่เหลือค้างในใบนี้", () => {
+    const r = go("keep");
+    expect(r.errors).toEqual([]);
+    expect(r.steps.some((s) => s.kind === "reduce")).toBe(false);
+    expect(r.steps.find((s) => s.kind === "dispatch")).toMatchObject({ qty: 20 });
+    expect(r.steps.filter((s) => s.kind === "ship").map((s) => s.kind === "ship" && s.qty)).toEqual([20]);
+    expect(JSON.stringify(r.steps)).toContain("ค้างไว้ในใบนี้");
+  });
+  it("⑤ ไม่ทำแล้ว = ลด 30 → 20 (drop)", () => {
+    expect(go("drop").steps.find((s) => s.kind === "reduce")).toMatchObject({ to: 20, mode: "drop" });
+  });
+});

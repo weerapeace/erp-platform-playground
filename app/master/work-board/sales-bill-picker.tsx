@@ -4,7 +4,8 @@
  * 🧾 หน้าต่าง "เลือกใบขาย" ของใบสั่งผลิต 1 ใบ (เจ้าของขอ 2026-10-31: "กดเลือกใบขายได้ไหม … ถ้าผลิต 100 แต่ส่ง 50 จะผูกยังไง")
  *   เห็นทุกบรรทัดใบขายของ SKU นี้ (เหลือผูกได้ · ผูกกับใบไหนแล้ว · ระบบเสนอให้ใบไหน · ใบขายก่อนวันเปิดใบซ่อนไว้) + เตือนใบที่อาจเปิดซ้ำ
  *   ติ๊ก + พิมพ์จำนวนที่ผูก (ไม่เกินที่เหลือผูกได้ และรวมไม่เกินที่ผลิต)
- *   ผูกน้อยกว่าที่ผลิต → เลือกว่าที่เหลือเป็นอย่างไร: เข้าคลังขาย (แนะนำ) / ค้างบนชั้น QC / ทำได้แค่นี้ (ลดจำนวนสั่ง)
+ *   ผูกน้อยกว่าที่ผลิต → เลือกว่าที่เหลือเป็นอย่างไร: ① เข้าคลังขาย / ② ค้างบนชั้น QC (ทำครบแล้ว)
+ *     ทำได้แค่นี้: ③ ที่เหลือแยกเป็นใบใหม่รอผลิต (แนะนำ — 1 ใบ = 1 สถานะ) / ④ ที่เหลือรอผลิตในใบเดิม (ใบเดียว 2 สถานะ) / ⑤ ไม่ทำแล้ว (ลดจำนวน)
  *   ข้อมูล = GET /api/mo/sales-match?mo_no=&detail=1 · ผูกจริง/ตั้งขั้น = หน้าที่เรียก (catch-up-batch onConfirm)
  */
 import { useEffect, useState } from "react";
@@ -13,7 +14,8 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import type { SalesDetail } from "@/app/api/mo/sales-match/route";
 
-export type BillRest = "sales_wh" | "keep" | "cut";
+/** sales_wh / keep = ทำครบแล้ว · split / same / drop = ทำได้แค่ที่ผูก (ที่เหลือ: ใบใหม่ / ใบเดิม / ไม่ทำ) */
+export type BillRest = "sales_wh" | "keep" | "split" | "same" | "drop";
 export type BillPick = { parts: { sale_line_id: string; so_number: string; date: string; qty: number }[]; total: number; rest: BillRest | null };
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
@@ -70,7 +72,9 @@ export function SalesBillPicker({ moNo, onClose, onConfirm, canLink }: {
     : left <= EPS ? `ส่งออกจาก QC ${fmt(moQty)} → ขายออก`
     : rest === "sales_wh" ? `ส่งออก ${fmt(total)} → ขายออก · อีก ${fmt(left)} → เข้าคลังขาย`
     : rest === "keep" ? `ส่งออก ${fmt(total)} → ขายออก · อีก ${fmt(left)} ค้างบนชั้น QC`
-    : `ลดจำนวนสั่ง ${fmt(moQty)} → ${fmt(total)} · ส่งออก ${fmt(total)} → ขายออก`;
+    : rest === "split" ? `ใบนี้ ${fmt(moQty)} → ${fmt(total)} ส่งออก → ขายออก · อีก ${fmt(left)} แยกเป็นใบใหม่ (แท็บรอจ่าย)`
+    : rest === "same" ? `จ่าย/ส่งออก ${fmt(total)} → ขายออก · ใบนี้ยัง ${fmt(moQty)} (อีก ${fmt(left)} รอจ่ายในใบเดิม)`
+    : `ลดจำนวนสั่ง ${fmt(moQty)} → ${fmt(total)} (ไม่ทำแล้ว ${fmt(left)}) · ส่งออก ${fmt(total)} → ขายออก`;
   const confirm = async () => {
     if (!data || !total || errors.length) return;
     setBusy(true);
@@ -151,9 +155,13 @@ export function SalesBillPicker({ moNo, onClose, onConfirm, canLink }: {
           </div>
           {total > 0 && left > EPS && (
             <div className="space-y-1.5">
-              {opt("sales_wh", "ทำครบแล้ว → ที่เหลือเข้าคลังขาย (แนะนำ)", `ขายออก ${fmt(total)} · เก็บสต๊อกคลังขาย ${fmt(left)} (ขายทีหลัง) · ใบปิดได้`)}
-              {opt("keep", "ทำครบแล้ว → ที่เหลือยังอยู่บนชั้น QC", "รอส่งรอบหน้า / รอใบขายใบใหม่ (มาผูกเพิ่มทีหลังได้)")}
-              {opt("cut", `ทำได้แค่ ${fmt(total)} ชิ้น → ลดจำนวนสั่ง`, "ที่เหลือแยกเป็นใบใหม่รอทำ / ไม่ทำแล้ว (ปรับได้ในช่องเปลี่ยนจำนวน)")}
+              <div className="text-[11px] font-medium text-slate-500">ทำครบ {fmt(moQty)} แล้ว — ที่เหลือ {fmt(left)} ชิ้นอยู่ไหน</div>
+              {opt("sales_wh", "① ที่เหลือเข้าคลังขาย", `ขายออก ${fmt(total)} · เก็บสต๊อกคลังขาย ${fmt(left)} (ขายทีหลัง) · ใบปิดได้`)}
+              {opt("keep", "② ที่เหลือยังอยู่บนชั้น QC", "รอส่งรอบหน้า / รอใบขายใบใหม่ (มาผูกเพิ่มทีหลังได้)")}
+              <div className="pt-1 text-[11px] font-medium text-slate-500">ทำได้แค่ {fmt(total)} ชิ้น — อีก {fmt(left)} ชิ้นยังไม่ได้ทำ</div>
+              {opt("split", `③ ที่เหลือ ${fmt(left)} แยกเป็นใบใหม่รอผลิต (แนะนำ)`, `ใบนี้เหลือ ${fmt(total)} ส่งออกแล้วปิดได้ · ใบใหม่ ${fmt(left)} ชิ้นไปแท็บรอจ่าย (ป้าย "แยกจาก")`)}
+              {opt("same", `④ ที่เหลือ ${fmt(left)} รอผลิตในใบเดิม`, `ใบเดียว 2 สถานะ: ส่งออก ${fmt(total)} + รอจ่าย ${fmt(left)} · ปิดใบได้เมื่อทำครบ ${fmt(moQty)}`)}
+              {opt("drop", `⑤ ไม่ทำแล้ว (ลดจำนวน ${fmt(moQty)} → ${fmt(total)})`, "ตัดที่เหลือทิ้ง เก็บเหตุผลไว้ในประวัติ")}
             </div>
           )}
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-[12px] text-slate-700"><b>ระบบจะทำ:</b> {preview}{total > 0 ? ` · วันส่ง = ${lines.filter((l) => on[l.id]).map((l) => l.date).sort().pop() ?? "—"}` : ""}</div>
