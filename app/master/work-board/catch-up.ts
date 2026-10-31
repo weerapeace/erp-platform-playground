@@ -9,6 +9,7 @@
  */
 import type { CatchUpSnapshot, CatchUpWo } from "@/app/api/mo/catch-up/route";
 import { dispatchRowIssues, notReadyIssue, wageIssues, returnRowIssues, qcReceiveIssues, dateIssues, todayYmd, type EntryIssue } from "@/lib/work-entry-rules";
+import { reduceQtyIssue, shrinkWos, type ReduceMode, type WoShrink } from "@/lib/mo-qty-reduce";
 
 export type CuStage = "have" | "prep" | "cut" | "dispatch" | "return" | "qc_in" | "ship" | "close";
 /** ลำดับขั้นจริงของใบสั่งผลิต (ซื้อ → เตรียม → ตัด → จ่าย → ช่างส่งคืน → QC รับเข้าชั้น → ส่งออก → ปิดใบ) */
@@ -51,6 +52,8 @@ export type CuFacts = {
   /** จำนวนรายการวัตถุดิบที่เลือกเป็น "ยังขาด" ได้ (0 = ใบไม่มีสูตร) */
   materials: number;
   dispatched: number; received: number; qcPulled: number; shelfGood: number;
+  /** ใบแบ่งจำนวนตามไซส์ (ลดจำนวนจากโหมดนี้ไม่ได้) */
+  sized?: boolean;
 };
 export function cuFacts(s: CatchUpSnapshot): CuFacts {
   const m = s.mo, p = s.progress;
@@ -62,6 +65,7 @@ export function cuFacts(s: CatchUpSnapshot): CuFacts {
   return {
     qty: m.qty, status: m.status, buyDone, prepDone, cutDone, materials: s.materials.length,
     dispatched: sum((w) => w.qty), received: sum((w) => w.received_qty), qcPulled: sum((w) => w.qc_pulled_qty), shelfGood: s.shelf.good,
+    sized: !!m.sized,
   };
 }
 
@@ -124,6 +128,31 @@ export function cuDefaultQty(f: CuFacts, k: CuTargetKey) {
 
 /** แถวจ่ายงาน 1 แถว = ใบจ่ายงาน 1 ใบ · deskName/crewCount = หน้าจอส่งมาให้ตรวจกฎโต๊ะเหมา · rate = ค่าแรง/ชิ้น (ว่าง = ให้เซิร์ฟเวอร์เติมราคากลาง) */
 export type CuDispLine = { key: string; deptId: string; qty: number; date: string | null; deskName?: string | null; crewCount?: number; rate?: number | null; note?: string };
+/**
+ * ทำได้ไม่ครบ (รู้ตอนเตรียมของว่าของไม่พอ / ช่างส่งคืนไม่ครบแล้วจะปิดใบ) → qty = ทำได้จริง
+ * mode: split = ที่เหลือแยกเป็นใบใหม่ (รอของ) · drop = ไม่ทำแล้ว · keep = ค้างไว้ในใบนี้ (ไม่ลด แค่จดต่อท้ายหมายเหตุ)
+ * เหตุผล = pick (รายการ REDUCE_REASONS) + detail (พิมพ์เพิ่ม) · กติกาลดจำนวนอยู่ที่ lib/mo-qty-reduce (ใช้ร่วมกับ API)
+ */
+export type CuReduce = { qty: number; pick: string; detail: string; mode: ReduceMode | "keep" };
+export const cuReduceReason = (r: CuReduce) => {
+  const d = r.detail.trim();
+  return r.pick === "อื่น ๆ" || !r.pick ? d : d ? `${r.pick}: ${d}` : r.pick;
+};
+/** ใบจ่ายหลังลดจำนวน (ใบที่ยังไม่ส่งคืนเลยแล้วต้องลดจนหมด = หายไป) */
+export function cuShrinkWos(wos: CatchUpWo[], newQty: number): CatchUpWo[] {
+  const plan = new Map(shrinkWos(wos, newQty).map((x) => [x.id, x]));
+  return wos.flatMap((w) => {
+    const p = plan.get(w.id);
+    if (!p) return [w];
+    return p.cancel ? [] : [{ ...w, qty: p.to, status: p.status_to, labor_cost: p.labor_to ?? w.labor_cost }];
+  });
+}
+/** ภาพใบงาน "หลังลดจำนวน" ไว้ให้หน้าจอคิดขั้นที่เหลือ (ติ๊ก/ยอดจ่าย/ส่งคืน) จากจำนวนใหม่ · ลดไม่ได้ = คืนของเดิม */
+export function cuReduceSnap(snap: CatchUpSnapshot, red: CuReduce | null | undefined): CatchUpSnapshot {
+  if (!red || red.mode === "keep" || !(red.qty > 0) || red.qty >= snap.mo.qty - EPS || snap.mo.sized) return snap;
+  if (red.qty < snap.wos.reduce((a, w) => a + w.received_qty, 0) - EPS) return snap;
+  return { ...snap, mo: { ...snap.mo, qty: r2(red.qty) }, wos: cuShrinkWos(snap.wos, red.qty) };
+}
 /** ปัญหาที่เจอ 1 รายการ → กล่อง "ปัญหา" ของใบงาน (/api/mo/issues) · model = จำเป็นปัญหาของรุ่น (ทุกสี) เตือนตอนจ่ายครั้งหน้า */
 export type CuProblem = { key: string; text: string; severity: "low" | "medium" | "high"; qty: number | null; model: boolean };
 export const CU_SEVERITY: Record<CuProblem["severity"], string> = { low: "เล็กน้อย", medium: "ปานกลาง", high: "รุนแรง" };
@@ -141,8 +170,11 @@ export type CuInputs = {
   problems?: CuProblem[]; teamNote?: string; bomRate?: number | null;
   /** ส่งออกจาก QC ไปที่ไหน (เหมือนหน้าโกดัง QC): sales_wh = เข้าคลังขาย (shipWh) · sell = ขายออก */
   shipMode?: "sales_wh" | "sell"; shipWh?: string | null;
+  /** ทำได้ไม่ครบ (ลดจำนวน) — null = ทำครบตามสั่ง */
+  reduce?: CuReduce | null;
 };
 export type CuStep =
+  | { kind: "reduce"; from: number; to: number; reason: string; mode: ReduceMode }
   | { kind: "skip_buy"; date: string | null }
   | { kind: "mark_ready"; parts: ("prep" | "cut")[]; except?: string[]; date: string | null }
   | { kind: "dispatch"; line: string; qty: number; date: string | null; rate?: number | null; note?: string }
@@ -165,6 +197,7 @@ export function cuStepLabel(s: CuStep, who?: (s: CuStep) => string): string {
   const w = who?.(s) ?? "";
   const d = "date" in s ? ` · ${cuDateText(s.date)}` : "";
   switch (s.kind) {
+    case "reduce": return `ลดจำนวน ${fmt(s.from)} → ${fmt(s.to)} ชิ้น (${s.reason}) · ${s.mode === "split" ? `แยกที่เหลือ ${fmt(s.from - s.to)} ชิ้นเป็นใบใหม่ รอของ` : `ที่เหลือ ${fmt(s.from - s.to)} ชิ้น ไม่ทำแล้ว`}`;
     case "skip_buy": return `ติดป้าย "ของครบ (อัปเดตย้อนหลัง)" ที่ขั้นซื้อของ${d}`;
     case "mark_ready": return `ติ๊ก${s.parts.includes("prep") ? " เตรียม" : ""}${s.parts.length === 2 ? " +" : ""}${s.parts.includes("cut") ? " ตัด" : ""} ${s.except?.length ? `ยกเว้นของที่ยังขาด ${s.except.length} รายการ` : "ครบทั้งใบ"}${d}`;
     case "dispatch": return `สร้างใบจ่ายงาน ${fmt(s.qty)} ชิ้น${w ? ` → ${w}` : ""}${s.rate ? ` · ค่าแรง ฿${fmt(s.rate)}/ชิ้น` : ""}${d}${s.note ? ` · หมายเหตุ: ${s.note}` : ""}`;
@@ -184,7 +217,10 @@ export function cuStepLabel(s: CuStep, who?: (s: CuStep) => string): string {
  * issues: error = ต้องแก้ (ห้ามบันทึก) · warn = เตือนสีเหลือง บันทึกได้ — กฎแต่ละช่องมาจาก lib/work-entry-rules (ตัวเดียวกับป๊อปจ่ายงานปกติ)
  * errors = ข้อความ error ทั้งหมด (มีชื่อแถวนำหน้า) ไว้โชว์สรุป/ทดสอบ
  */
-export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: CuInputs, wos: CatchUpWo[] = []): { steps: CuStep[]; errors: string[]; issues: CuIssue[] } {
+export function cuBuildSteps(f0: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: CuInputs, wos0: CatchUpWo[] = []): { steps: CuStep[]; errors: string[]; issues: CuIssue[]; received: number } {
+  // ลดจำนวน (ถ้ามี) ทำก่อนทุกขั้น → ขั้นที่เหลือตรวจด้วยจำนวนใหม่ + ใบจ่ายหลังลดยอดค้าง · received = ยอดส่งคืนรวมหลังบันทึก (ไว้เสนอ "ปิดยอดขาด")
+  let f = f0, wos = wos0, keepLine = "";
+  const meta = { received: f0.received };
   const steps: CuStep[] = [], issues: CuIssue[] = [];
   const D = inp.dates, today = inp.today ?? todayYmd();
   const add = (list: EntryIssue[], where?: string) => { for (const x of list) issues.push(where ? { ...x, where } : x); };
@@ -195,10 +231,11 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
       if (p.qty != null && p.qty < 0) { issues.push({ level: "error", field: `prob:${p.key}:qty`, msg: "จำนวนติดลบไม่ได้", where: `ปัญหา ${i + 1}` }); return; }
       steps.push({ kind: "problem", text: p.text.trim(), severity: p.severity, qty: p.qty != null && p.qty > 0 ? r2(p.qty) : null, model: p.model });
     });
-    if (inp.teamNote?.trim()) steps.push({ kind: "note", text: inp.teamNote.trim() });
+    const noteText = [keepLine, inp.teamNote?.trim() ?? ""].filter(Boolean).join(" · ");   // รวมเป็นขั้นเดียว (2 ขั้นจะเขียนหมายเหตุทับกัน)
+    if (noteText) steps.push({ kind: "note", text: noteText });
     if (inp.bomRate != null && inp.bomRate > 0) steps.push({ kind: "bom_rate", rate: r2(inp.bomRate) });
     if (!issues.some((x) => x.level === "error") && !steps.length) issues.push({ level: "error", field: "target", msg: "ระบบบันทึกขั้นนี้ไว้ครบแล้ว ไม่มีอะไรต้องอัปเดต" });
-    return { steps, issues, errors: issues.filter((x) => x.level === "error").map((x) => (x.where ? `${x.where}: ${x.msg}` : x.msg)) };
+    return { steps, issues, errors: issues.filter((x) => x.level === "error").map((x) => (x.where ? `${x.where}: ${x.msg}` : x.msg)), received: meta.received };
   };
   const blocked = cuTargetBlocked(f, k);
   if (blocked) { issues.push({ level: "error", field: "target", msg: blocked }); return done(); }
@@ -208,6 +245,24 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
     add(dateIssues(D.cancel, "cancel:date", { today }));
     return done();
   }
+  const red = inp.reduce;
+  if (red) {
+    const where = "ทำได้ไม่ครบ", reason = cuReduceReason(red);
+    if (red.mode === "keep") {
+      if (!(red.qty > 0) || red.qty >= f.qty - EPS) issues.push({ level: "error", field: "reduce:qty", msg: `ใส่จำนวนที่ทำได้ก่อน (น้อยกว่า ${fmt(f.qty)})`, where });
+      else keepLine = `ทำได้ก่อน ${fmt(red.qty)}/${fmt(f.qty)} ชิ้น${reason ? ` เพราะ ${reason}` : ""} — ที่เหลือค้างไว้ในใบนี้`;
+    } else {
+      const why = reduceQtyIssue({ qty: f.qty, newQty: red.qty, received: f.received, sized: f.sized, status: f.status });
+      if (why) issues.push({ level: "error", field: "reduce:qty", msg: why, where });
+      if (!reason) issues.push({ level: "error", field: "reduce:reason", msg: "ใส่เหตุผลที่ลดจำนวน", where });
+      if (!why && reason) {
+        steps.push({ kind: "reduce", from: f.qty, to: r2(red.qty), reason, mode: red.mode });
+        wos = cuShrinkWos(wos, red.qty);
+        f = { ...f, qty: r2(red.qty), dispatched: r2(Math.min(f.dispatched, red.qty)) };
+      }
+    }
+  }
+
   const rows = cuRows(f, k, ticks);
   const on = (st: CuStage) => rows.some((r) => r.stage === st && (r.state === "need" || (r.state === "opt" && !!ticks[st])));
 
@@ -287,6 +342,7 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
         if (l.date && (!lastRetDate || l.date > lastRetDate)) lastRetDate = l.date;
       });
       received = r2(received + Math.min(total, out));   // ตรวจขั้นถัดไปต่อได้แม้รอบส่งคืนยังมีจุดต้องแก้
+      meta.received = received;
       if (!issues.some((x) => x.level === "error" && x.field.startsWith("ret"))) {
         // ใบที่ระบุชัดก่อน แล้วค่อย "อัตโนมัติ" (กันอัตโนมัติไปกินยอดของใบที่ระบุ)
         for (const l of [...inp.ret.filter((x) => x.ref !== "auto"), ...inp.ret.filter((x) => x.ref === "auto")])
@@ -316,7 +372,7 @@ export function cuBuildSteps(f: CuFacts, k: CuTargetKey, ticks: CuTicks, inp: Cu
   }
 
   if (on("close")) {
-    if (received < f.qty - EPS) issues.push({ level: "error", field: "close", msg: `ปิดใบได้เมื่อช่างส่งคืนครบ ${fmt(f.qty)} ชิ้น (ตอนนี้ ${fmt(received)})` });
+    if (received < f.qty - EPS) issues.push({ level: "error", field: "close", msg: `ปิดใบได้เมื่อช่างส่งคืนครบ ${fmt(f.qty)} ชิ้น (ตอนนี้ ${fmt(received)}) — ทำได้แค่นี้จริง กด "ปิดยอดขาด" ลดจำนวนเหลือ ${fmt(received)}` });
     else { steps.push({ kind: "close", date: D.close }); add(dateIssues(D.close, "close:date", { today, notBefore: D.ship ?? D.qc ?? lastRetDate, notBeforeLabel: "ขั้นก่อนหน้า" })); }
   }
   return done();
@@ -357,6 +413,7 @@ export type CuUndo =
   | { kind: "problem"; issueId?: string; parentIssueId?: string }
   | { kind: "note"; prevNote: string | null }
   | { kind: "bom_rate"; newId?: string; prevRate: number | null }
+  | { kind: "reduce"; changeId: string; newMo: string | null }
   | { kind: "none"; why: string };
 export type CuResult = { step: CuStep; ok: boolean; msg: string; undo?: CuUndo };
 
@@ -385,6 +442,18 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
     let undo: CuUndo | undefined;
     try {
       switch (step.kind) {
+        case "reduce": {
+          const j = await api(`/api/mo/${mo.id}/reduce-qty`, { qty: step.to, reason: step.reason, mode: step.mode, source: "catch_up" });
+          const d = (j.data ?? {}) as { change_id?: string | null; new_mo_no?: string | null; wo_changes?: WoShrink[] };
+          // ใบจ่ายที่เซิร์ฟเวอร์ลดยอดค้างให้ → ตามในสำเนา (ขั้นส่งคืนอัตโนมัติจะไม่ไปลงใบที่ลดแล้ว)
+          for (const c of d.wo_changes ?? []) {
+            const i = wos.findIndex((w) => w.id === c.id);
+            if (i < 0) continue;
+            if (c.cancel) wos.splice(i, 1); else wos[i] = { ...wos[i], qty: c.to, status: c.status_to };
+          }
+          if (d.change_id) undo = { kind: "reduce", changeId: String(d.change_id), newMo: d.new_mo_no ?? null };
+          break;
+        }
         case "skip_buy":
           await api(`/api/mo/${mo.id}/skip-stage`, { stages: ["buy"], skip: true, via: "catch_up",
             reason: `อัปเดตงานย้อนหลัง: ของครบแล้ว${step.date ? ` (ครบเมื่อ ${step.date})` : ""}` }, "PATCH");
@@ -520,6 +589,7 @@ export async function cuUndo(results: CuResult[], ctx: CuContext, api: CuApi, la
     try {
       switch (u.kind) {
         case "skip_buy": await api(`/api/mo/${mo.id}/skip-stage`, { stages: ["buy"], skip: false, via: "catch_up" }, "PATCH"); break;
+        case "reduce": await api(`/api/mo/${mo.id}/reduce-qty`, { revert: u.changeId }); break;
         case "mark_ready":
           if (u.prepOnly?.length) await api(`/api/mo/${mo.id}/mark-ready`, { ready: false, parts: ["prep"], only: u.prepOnly }, "PATCH");
           if (u.cut) await api(`/api/mo/${mo.id}/mark-ready`, { ready: false, parts: ["cut"], ...(u.except?.length ? { except: u.except } : {}) }, "PATCH");
@@ -561,6 +631,8 @@ export type CuDraft = {
   problems: CuProblem[]; teamNote: string; saveBom: boolean;
   shipMode: "sales_wh" | "sell"; shipWh: string;
   facts: CuFacts;
+  /** ทำได้ไม่ครบ (คำขอรุ่นใหม่ — ของเก่าไม่มีช่องนี้) */
+  reduce?: CuReduce | null;
 };
 
 /** สิทธิ์ของโหมดอัปเดตงาน (ตั้งตามตำแหน่ง/รายคน) */

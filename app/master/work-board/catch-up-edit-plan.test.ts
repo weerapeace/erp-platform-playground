@@ -1,0 +1,151 @@
+import { describe, it, expect } from "vitest";
+import { ceInitial, ceBuild, ceRun, ymdTh, type CeForm } from "./catch-up-edit-plan";
+import { cuBuildSteps, cuFacts, cuReduceSnap, cuRun, cuUndo, cuDefaultTicks, CU_NO_DATES, type CuInputs, type CuReduce } from "./catch-up";
+import { shrinkWos, reduceQtyIssue } from "@/lib/mo-qty-reduce";
+import type { CatchUpSnapshot, CatchUpWo, CatchUpSub } from "@/app/api/mo/catch-up/route";
+
+const wo = (o: Partial<CatchUpWo>): CatchUpWo => ({ id: "w1", wo_no: "WO-1", qty: 20, received_qty: 0, qc_pulled_qty: 0, status: "dispatched",
+  department_name: "โต๊ะแต๋ว", assignee_name: "โต๊ะแต๋ว", dispatch_date: null, created_at: "2026-10-20T00:00:00Z", labor_cost: 1000,
+  assignee_type: "department", assignee_id: null, department_id: "d1", note: null, assignees: [], ...o });
+const sub = (o: Partial<CatchUpSub>): CatchUpSub => ({ id: "s1", wo_id: "w1", wo_no: "WO-1", qty: 20, wage: 1000, submitted_at: "2026-10-29", craftsman_name: "โต๊ะแต๋ว", info_pending: false, created_at: "", ...o });
+const snap = (o: { mo?: Partial<CatchUpSnapshot["mo"]>; wos?: CatchUpWo[]; subs?: CatchUpSub[]; qcItems?: CatchUpSnapshot["qcItems"] } = {}): CatchUpSnapshot => ({
+  mo: { id: "m1", mo_no: "MO-1", product_sku: "PIX12-01", product_name: "ชื่อ", qty: 20, status: "draft", due_date: null, internal_due_date: null,
+    has_bom: true, prep_total: 3, prep_ready: 0, cut_total: 2, cut_ready: 0, prep_done: false, cut_done: false, skipped: {}, bom_code: "BOM-1", note: null,
+    prep_done_at: null, cut_done_at: null, sized: false, ...o.mo },
+  progress: { total: 3, buy: 0, requested: 0, ordered: 0 }, materials: [],
+  wos: o.wos ?? [wo({ received_qty: 20, status: "done" })], shelves: [], shelf: { good: 0, defect: 0, repairing: 0 }, shelfAt: [], rates: [], reasons: [],
+  past: { mo: [], model: [] }, sales: { so: [], dn: [] }, subs: o.subs ?? [sub({})], qcItems: o.qcItems ?? [],
+});
+const ctx = { departments: [{ id: "d1", name: "โต๊ะแต๋ว" }, { id: "d2", name: "ช่างเหมา" }], people: [{ id: "p1", name: "พี่แอน" }, { id: "p2", name: "พี่หนิง" }], today: "2026-10-31" };
+const edit = (s: CatchUpSnapshot, fn: (f: CeForm) => void) => { const f = ceInitial(s); fn(f); return ceBuild(s, f, ctx); };
+const red = (qty: number, mode: CuReduce["mode"] = "split", pick = "ของไม่พอ", detail = ""): CuReduce => ({ qty, mode, pick, detail });
+
+describe("lib/mo-qty-reduce", () => {
+  it("ลดยอดค้างของใบจ่ายล่าสุดก่อน · ลดได้แค่ส่วนที่ยังไม่ส่งคืน · ใบที่ยังไม่คืนเลยแล้วลดหมด = ยกเลิก", () => {
+    const wos = [
+      { id: "a", wo_no: "WO-A", qty: 10, received_qty: 6, status: "partial_return", labor_cost: 500, created_at: "2026-10-01" },
+      { id: "b", wo_no: "WO-B", qty: 10, received_qty: 0, status: "dispatched", labor_cost: 0, created_at: "2026-10-05" },
+    ];
+    const p = shrinkWos(wos, 7);
+    expect(p.map((x) => [x.id, x.to, x.status_to, x.cancel])).toEqual([["b", 0, "cancelled", true], ["a", 7, "partial_return", false]]);
+    expect(p[1].labor_to).toBe(350);   // ราคาต่อชิ้นเดิม ฿50 × 7
+    expect(shrinkWos(wos, 6).find((x) => x.id === "a")?.status_to).toBe("done");
+    expect(shrinkWos(wos, 25)).toEqual([]);
+  });
+  it("ห้ามลดต่ำกว่ายอดส่งคืน / ใบไซส์ / เท่าเดิม", () => {
+    expect(reduceQtyIssue({ qty: 20, newQty: 15, received: 0 })).toBeNull();
+    expect(reduceQtyIssue({ qty: 20, newQty: 10, received: 12 })).toMatch(/ส่งคืนแล้ว 12/);
+    expect(reduceQtyIssue({ qty: 20, newQty: 20, received: 0 })).toMatch(/น้อยกว่า/);
+    expect(reduceQtyIssue({ qty: 20, newQty: 15, received: 0, sized: true })).toMatch(/ไซส์/);
+  });
+});
+
+describe("ทำได้ไม่ครบ ในโหมดอัปเดตงาน", () => {
+  const base = snap({ wos: [], subs: [] });
+  const inp = (o: Partial<CuInputs> = {}): CuInputs => ({ disp: [{ key: "a", deptId: "d1", qty: 15, date: null }], ret: [], qcGood: 0, qcBad: 0, shelfId: "", cancelReason: "", dates: CU_NO_DATES, ...o });
+  it("ลดเป็น 15 แยกที่เหลือ → ขั้นลดจำนวนมาก่อน แล้วจ่าย 15 ได้ครบ (ไม่เตือนว่ายังเหลือ)", () => {
+    const f = cuFacts(base);
+    const r = cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({ reduce: red(15) }));
+    expect(r.errors).toEqual([]);
+    expect(r.steps[0]).toMatchObject({ kind: "reduce", from: 20, to: 15, reason: "ของไม่พอ", mode: "split" });
+    expect(r.issues.some((x) => x.field === "disp" && /ยังเหลือ/.test(x.msg))).toBe(false);
+  });
+  it("ต้องมีเหตุผล · ค้างไว้ในใบนี้ = จดต่อท้ายหมายเหตุ ไม่ลดจำนวน", () => {
+    const f = cuFacts(base);
+    expect(cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({ reduce: red(15, "drop", "อื่น ๆ", "") })).errors.join(" ")).toMatch(/เหตุผล/);
+    const k = cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({ reduce: red(15, "keep", "ของไม่พอ", "ผ้าลายดอก"), teamNote: "เร่ง" }));
+    expect(k.steps.map((s) => s.kind)).toEqual(["mark_ready", "dispatch", "note"]);
+    expect(k.steps.at(-1)).toMatchObject({ text: "ทำได้ก่อน 15/20 ชิ้น เพราะ ของไม่พอ: ผ้าลายดอก — ที่เหลือค้างไว้ในใบนี้ · เร่ง" });
+  });
+  it("ปิดยอดขาด: ช่างคืน 15 จาก 20 → บอก received ไว้เสนอปุ่ม · ลดเหลือ 15 แล้วปิดได้", () => {
+    const s = snap({ wos: [wo({ received_qty: 15, status: "partial_return" })], subs: [] });
+    const f = cuFacts(s);
+    const a = cuBuildSteps(f, "close", cuDefaultTicks(f, "close"), inp({ disp: [], ret: [] }), s.wos);
+    expect(a.errors.join(" ")).toMatch(/ปิดยอดขาด/);
+    expect(a.received).toBe(15);
+    const b = cuBuildSteps(f, "close", { ...cuDefaultTicks(f, "close"), qc_in: false, ship: false }, inp({ disp: [], ret: [], reduce: red(15, "drop", "ช่างส่งคืนไม่ครบ") }), s.wos);
+    expect(b.errors).toEqual([]);
+    expect(b.steps.map((x) => x.kind)).toEqual(["reduce", "mark_ready", "close"]);
+  });
+  it("ภาพหลังลด: จำนวนใหม่ + ใบจ่ายลดยอดค้าง", () => {
+    const s = snap({ wos: [wo({ received_qty: 5 })], subs: [] });
+    const r = cuReduceSnap(s, red(12));
+    expect([r.mo.qty, r.wos[0].qty, r.wos[0].status]).toEqual([12, 12, "partial_return"]);
+    expect(cuReduceSnap(s, red(3))).toBe(s);   // ต่ำกว่ายอดคืน = ไม่ลด
+  });
+  it("cuRun ส่งลดจำนวนไป API แล้วย้อนได้", async () => {
+    const calls: [string, unknown][] = [];
+    const api = async (url: string, body: unknown) => { calls.push([url, body]); return url.endsWith("reduce-qty") && !(body as { revert?: string }).revert ? { data: { change_id: "c1", new_mo_no: "MO-9", wo_changes: [] } } : { id: "x" }; };
+    const res = await cuRun([{ kind: "reduce", from: 20, to: 15, reason: "ของไม่พอ", mode: "split" }], { snap: base, disp: {}, shelfId: "", badReason: "" }, api);
+    expect(res[0]).toMatchObject({ ok: true, undo: { kind: "reduce", changeId: "c1", newMo: "MO-9" } });
+    await cuUndo(res, { snap: base, disp: {}, shelfId: "", badReason: "" }, api);
+    expect(calls.at(-1)).toEqual(["/api/mo/m1/reduce-qty", { revert: "c1" }]);
+  });
+});
+
+describe("ป๊อปแก้ไข (ceBuild)", () => {
+  it("ไม่ได้แก้อะไร = บอกว่ายังไม่ได้แก้", () => {
+    expect(edit(snap(), () => {}).errors).toEqual(["ยังไม่ได้แก้อะไร"]);
+  });
+  it("ติ๊กเตรียม/ตัดที่เคยข้าม + วันที่ · วันจ่ายที่ไม่ระบุ", () => {
+    const r = edit(snap(), (f) => { f.prep = { done: true, date: "2026-10-20" }; f.cut = { done: true, date: null }; f.wos[0].date = "2026-10-21"; });
+    expect(r.errors).toEqual([]);
+    expect(r.ops.map((o) => o.kind)).toEqual(["wo", "ready", "ready"]);
+    expect(r.ops[0]).toMatchObject({ patch: { dispatch_date: "2026-10-21" } });
+    expect(r.ops[1]).toMatchObject({ part: "prep", ready: true, date: "2026-10-20" });
+  });
+  it("ลดจำนวนใบจ่ายต่ำกว่ายอดส่งคืนไม่ได้ จนกว่าจะแก้รอบส่งคืนด้วย", () => {
+    expect(edit(snap(), (f) => { f.wos[0].qty = 18; }).errors.join(" ")).toMatch(/ส่งคืนแล้ว 20/);
+    const r = edit(snap(), (f) => { f.wos[0].qty = 18; f.subs[0].qty = 18; });
+    expect(r.errors).toEqual([]);
+    expect(r.ops.map((o) => o.kind)).toEqual(["sub", "wo"]);   // รอบส่งคืนก่อน แล้วค่อยใบจ่าย
+    expect(r.ops[0]).toMatchObject({ patch: { qty: 18, wage: 900 } });   // ค่าแรงตามราคาต่อชิ้นเดิมของรอบ ฿50
+    expect(r.ops[1]).toMatchObject({ patch: { qty: 18, labor_cost: 900 } });
+  });
+  it("เปลี่ยนค่าแรง/ชิ้นของใบจ่าย → รอบส่งคืนคิดใหม่ (ติ๊กไว้ตั้งต้น) · พิมพ์ค่าแรงรอบเองไม่ทับ", () => {
+    const r = edit(snap(), (f) => { f.wos[0].rate = 45; });
+    expect(r.ops.map((o) => [o.kind, "patch" in o ? o.patch : null])).toEqual([["sub", { wage: 900 }], ["wo", { labor_cost: 900 }]]);
+    expect(edit(snap(), (f) => { f.wos[0].rate = 45; f.subs[0].wage = 1000.5; }).ops[0]).toMatchObject({ patch: { wage: 1000.5 } });
+    expect(edit(snap(), (f) => { f.wos[0].rate = 45; f.reRateSubs = false; }).issues.some((x) => x.field === "rerate")).toBe(true);
+  });
+  it("เปลี่ยนคนรับ → ส่งแบบเดียวกับตอนจ่าย + แก้ชื่อในรอบส่งคืนตาม", () => {
+    const r = edit(snap(), (f) => { f.wos[0].crewIds = ["p1", "p2"]; });
+    expect(r.ops[0]).toMatchObject({ kind: "wo", patch: { assignee_type: "craftsman", assignee_id: "p1", assignee_name: "พี่แอน, พี่หนิง", sync_subs_worker: true } });
+  });
+  it("ของอยู่ชั้น QC แล้ว → ลดยอดส่งคืนไม่ได้จนกว่าจะย้อนของกลับไปรอรับ", () => {
+    const s = snap({ wos: [wo({ received_qty: 20, qc_pulled_qty: 20, status: "done" })], qcItems: [{ id: "q1", wo_id: "w1", qty: 20, status: "good", shelf_name: "ชั้น A", reason: null, created_at: "" }] });
+    expect(edit(s, (f) => { f.subs[0].qty = 15; f.wos[0].qty = 15; }).errors.join(" ")).toMatch(/ชั้น QC แล้ว 20/);
+    const r = edit(s, (f) => { f.subs[0].qty = 15; f.wos[0].qty = 15; f.qcBack = ["q1"]; });
+    expect(r.errors).toEqual([]);
+    expect(r.ops.map((o) => o.kind)).toEqual(["qc_back", "sub", "wo"]);
+  });
+  it("ยกเลิกใบจ่ายที่ช่างส่งคืนแล้ว ต้องลบรอบส่งคืนก่อน", () => {
+    expect(edit(snap(), (f) => { f.wos[0].cancel = true; }).errors.join(" ")).toMatch(/ลบรอบส่งคืน/);
+    expect(edit(snap(), (f) => { f.wos[0].cancel = true; f.subs[0].del = true; }).ops.map((o) => o.kind)).toEqual(["sub_del", "wo_cancel"]);
+  });
+  it("ลดจำนวนจากป๊อปแก้ไข = รายการสุดท้าย · ห้ามต่ำกว่ายอดส่งคืนหลังแก้", () => {
+    const s = snap({ wos: [wo({ received_qty: 15, status: "partial_return" })], subs: [sub({ qty: 15, wage: 750 })] });
+    const r = edit(s, (f) => { f.reduce = red(15, "drop", "ช่างส่งคืนไม่ครบ"); });
+    expect(r.errors).toEqual([]);
+    expect(r.ops.at(-1)).toMatchObject({ kind: "reduce", qty: 15, mode: "drop" });
+    expect(r.ops.at(-1)?.label).toMatch(/ลดใบจ่าย WO-1 20 → 15/);
+    expect(edit(s, (f) => { f.reduce = red(10, "drop", "x"); }).errors.join(" ")).toMatch(/ส่งคืนแล้ว 15/);
+  });
+  it("ceRun ติด via=cu_edit + label ทุกคำขอ และหยุดที่รายการแรกที่พัง", async () => {
+    const calls: string[] = [];
+    const r = edit(snap(), (f) => { f.subs[0].del = true; f.wos[0].cancel = true; });
+    const res = await ceRun(r.ops, "m1", async (url, body, method) => {
+      calls.push(`${method ?? "POST"} ${url}`);
+      if (method === "DELETE" && url.includes("work-orders")) throw new Error("ไม่มีสิทธิ์");
+      expect(body === null || (body as { via?: string }).via === "cu_edit").toBe(true);
+      return {};
+    });
+    expect(calls[0]).toMatch(/^DELETE \/api\/mo\/submissions\?id=s1&via=cu_edit&label=/);
+    expect(res.map((x) => x.ok)).toEqual([true, false]);
+    expect(res[1].msg).toMatch(/ไม่มีสิทธิ์/);
+  });
+  it("วันที่ตามเวลาไทย", () => {
+    expect(ymdTh("2026-10-30T20:00:00+00:00")).toBe("2026-10-31");
+    expect(ymdTh(null)).toBeNull();
+  });
+});

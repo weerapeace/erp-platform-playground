@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { explodeBom, fabricModeOf, type SizeQty } from "./shared";
+import { explodeBom, fabricModeOf, nextMoNo, type SizeQty } from "./shared";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
@@ -29,15 +29,6 @@ export type MoMaterial = {
   qty_per: number | null; required_qty: number | null; uom: string | null;
   on_hand_qty: number; to_purchase_qty: number | null; is_ready: boolean; sequence: number | null;
 };
-
-async function nextMoNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string> {
-  const { data, error } = await admin.rpc("erp_next_number", { p_key: "mo" });
-  if (!error && data) return String(data);
-  // fallback กันพลาด
-  const yr = new Date().getFullYear();
-  const { count } = await admin.from("manufacturing_orders").select("id", { count: "exact", head: true });
-  return `MO-${yr}-${String((count ?? 0) + 1).padStart(5, "0")}`;
-}
 
 // ---- GET list ----
 export async function GET(request: NextRequest): Promise<NextResponse> {

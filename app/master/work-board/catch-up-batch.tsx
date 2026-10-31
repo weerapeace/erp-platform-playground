@@ -8,6 +8,7 @@
  * กติกา/การบันทึก/ย้อน = ตัวเดียวกับป๊อปทีละใบ (./catch-up.ts cuBuildSteps / cuRun / cuUndo + ./catch-up-lines.ts)
  * ไม่มีสิทธิ์ "บันทึกได้เลย" = ส่งเป็นคำขอแยกรายใบ · หัวหน้าเปิดใบที่มีคำขอค้าง = ข้อมูลคำขอขึ้นให้ แก้ได้ แล้วยืนยันทีเดียวหลายใบ
  * ใบซับซ้อน (ยังขาดของบางรายการ / แจ้งปัญหา / จัดคนในโต๊ะ) → "เปิดแบบละเอียด" = ป๊อปทีละใบเดิม
+ * ทำได้ไม่ครบ (ลดจำนวน) ใส่ได้รายใบ — "ใส่ทั้งหมดตามใบแรก" ไม่ก๊อป (จำนวนแต่ละใบไม่เท่ากัน)
  */
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
@@ -25,9 +26,10 @@ import { CrewPick, crewFields, crewList, lastCrewIds } from "./crew-pick";
 import { DispatchDatePick } from "./dispatch-date-pick";
 import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuUndo,
-  cuIrreversible, cuLocateSnap, cuFactsDiff,
+  cuIrreversible, cuLocateSnap, cuFactsDiff, cuReduceSnap, type CuReduce,
   type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuRetLine, type CuDates,
 } from "./catch-up";
+import { ReducePanel } from "./catch-up-reduce";
 import { cuCentralRate, cuRateFor, cuRetSources, cuRateOfRef, cuRetEffective, cuAutoReturns, cuBomCandidate, cuReadLast, cuWriteLast, type CuDispRow } from "./catch-up-lines";
 
 type DeptLite = { id: string; name: string };
@@ -42,6 +44,8 @@ type BRow = {
   qcGood: number; qcBad: number; qcSet: boolean;
   dates: CuDates; shelfId: string; badReason: string; cancelReason: string; teamNote: string; saveBom: boolean;
   shipMode: "sales_wh" | "sell"; shipWh: string;
+  /** ทำได้ไม่ครบ (ลดจำนวน) — null = ทำครบตามสั่ง */
+  reduce: CuReduce | null;
   open: boolean; phase: Phase; results: CuResult[]; runMsg: string;
   undoRes: { msg: string; ok: boolean }[] | null;
 };
@@ -58,11 +62,11 @@ const flow = CU_TARGETS.filter((t) => t.key !== "cancel");
 
 const emptyRow = (moNo: string): BRow => ({
   moNo, snap: null, err: "", req: null, target: null, ticks: {}, disp: [], ret: [], retSet: false, qcGood: 0, qcBad: 0, qcSet: false,
-  dates: CU_NO_DATES, shelfId: "", badReason: "", cancelReason: "", teamNote: "", saveBom: true, shipMode: "sales_wh", shipWh: QC_WAREHOUSES[0],
+  dates: CU_NO_DATES, shelfId: "", badReason: "", cancelReason: "", teamNote: "", saveBom: true, shipMode: "sales_wh", shipWh: QC_WAREHOUSES[0], reduce: null,
   open: true, phase: "edit", results: [], runMsg: "", undoRes: null,
 });
 
-export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, workOrders, mode = "direct", canApprove = false, onRequestsChanged, onOpenSingle, refresh }: {
+export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, workOrders, mode = "direct", canApprove = false, onRequestsChanged, onOpenSingle, onOpenEdit, refresh }: {
   /** ใบที่ติ๊กมา (null = ปิด) */
   moNos: string[] | null;
   onClose: () => void;
@@ -73,6 +77,8 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   onRequestsChanged?: () => void;
   /** "เปิดแบบละเอียด" = ป๊อปทีละใบเดิม (เปิดซ้อนบนตาราง) */
   onOpenSingle: (moNo: string) => void;
+  /** "แก้ไข" = ป๊อปแก้สิ่งที่บันทึกแล้ว (รวมขั้นก่อนหน้า / ลดจำนวน) — ปิดแล้วตารางโหลดใบนั้นใหม่ */
+  onOpenEdit?: (moNo: string) => void;
   /** ป๊อปทีละใบปิดแล้ว → โหลดใบนั้นในตารางใหม่ (n เปลี่ยน = โหลด) */
   refresh?: { mo: string; n: number } | null;
 }) {
@@ -114,7 +120,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
       target: d.target, ticks: d.ticks ?? {}, disp: d.disp ?? [], ret: d.ret ?? [], retSet: !!d.retSet,
       qcGood: d.qc?.good ?? 0, qcBad: d.qc?.bad ?? 0, qcSet: !!d.qcSet, dates: { ...CU_NO_DATES, ...(d.dates ?? {}) },
       shelfId: d.shelfId ?? "", badReason: d.badReason ?? "", cancelReason: d.cancelReason ?? "", teamNote: d.teamNote ?? "", saveBom: d.saveBom !== false,
-      shipMode: d.shipMode === "sell" ? "sell" : "sales_wh", shipWh: d.shipWh || QC_WAREHOUSES[0],
+      shipMode: d.shipMode === "sell" ? "sell" : "sales_wh", shipWh: d.shipWh || QC_WAREHOUSES[0], reduce: d.reduce ?? null,
     };
   };
   const patchRow = (moNo: string, p: Partial<BRow> | ((r: BRow) => Partial<BRow>)) =>
@@ -148,7 +154,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
 
   // ── เลือกขั้น = ค่าตั้งต้นเหมือนป๊อปทีละใบ (ติ๊กขั้นก่อนหน้า · จำนวนที่เหลือ · โต๊ะ/คน/ชั้นล่าสุด · ค่าแรงตามสูตร)
   const initFor = (r: BRow, k: CuTargetKey): Partial<BRow> => {
-    const snap = r.snap!; const f = cuFacts(snap);
+    const snap = cuReduceSnap(r.snap!, r.reduce); const f = cuFacts(snap);   // ค่าตั้งต้นตามจำนวนหลังลด (ถ้าลด)
     const q = cuDefaultQty(f, k);
     const last = cuReadLast();
     const lastDept = last.deptId ? departments.find((d) => d.id === last.deptId) ?? null : null;
@@ -176,10 +182,11 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   const derive = (r: BRow) => {
     const snap = r.snap;
     if (!snap || !r.target) return null;
-    const f = cuFacts(snap), k = r.target;
+    // f0 = ของจริงตอนนี้ (ตัวตรวจลดจำนวนเองก่อน) · f/snapR = ภาพหลังลดจำนวน (ติ๊ก/ยอด/ส่งคืนจากใคร)
+    const f0 = cuFacts(snap), snapR = cuReduceSnap(snap, r.reduce), f = cuFacts(snapR), k = r.target;
     const chk = cuRows(f, k, r.ticks);
     const on = (st: CuStage) => chk.some((x) => x.stage === st && (x.state === "need" || (x.state === "opt" && !!r.ticks[st])));
-    const sources = cuRetSources(snap, r.disp, on("dispatch"), { nickOf, newWho: crewNick, deskName: (x) => deptOf(x.deptId)?.name ?? null });
+    const sources = cuRetSources(snapR, r.disp, on("dispatch"), { nickOf, newWho: crewNick, deskName: (x) => deptOf(x.deptId)?.name ?? null });
     const ret = r.retSet ? r.ret : cuAutoReturns(sources, r.ret);   // ตามยอดจ่ายอัตโนมัติ จนกว่าจะแก้เอง
     const retEff = cuRetEffective(ret, sources);
     const dispTotal = r2(r.disp.reduce((a, x) => a + (x.qty > 0 ? x.qty : 0), 0));
@@ -191,10 +198,11 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     const centralRate = cuCentralRate(snap);
     const bomCandidate = cuBomCandidate(r.disp, on("dispatch"), ret, on("return"));
     const bomOffer = bomCandidate != null && bomCandidate !== centralRate && !!snap.mo.product_sku;
-    const built = cuBuildSteps(f, k, r.ticks, {
+    const built = cuBuildSteps(f0, k, r.ticks, {
       disp: r.disp.map((x) => ({ ...x, deskName: deptOf(x.deptId)?.name ?? null, crewCount: x.crewIds.length })),
       ret: retEff, qcGood, qcBad: r.qcBad, shelfId: r.shelfId, cancelReason: r.cancelReason, missing: [], dates: r.dates, badReason: r.badReason,
       centralRate, today: todayYmd(), problems: [], teamNote: r.teamNote, bomRate: bomOffer && r.saveBom ? bomCandidate : null, shipMode: r.shipMode, shipWh: r.shipWh,
+      reduce: k === "cancel" ? null : r.reduce,
     }, snap.wos);
     const whoOf = (s: CuStep) => {
       if (s.kind === "dispatch") { const i = r.disp.findIndex((x) => x.key === s.line); return i >= 0 ? dispLabel(r.disp[i], i) : ""; }
@@ -202,7 +210,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
       return "";
     };
     const errs = built.issues.filter((x) => x.level === "error"), warns = built.issues.filter((x) => x.level === "warn");
-    return { f, chk, on, sources, ret, retEff, dispTotal, retTotal, remain, outstanding, qcAvail, qcGood, centralRate, bomCandidate, bomOffer, built, whoOf, errs, warns };
+    return { f, f0, chk, on, sources, ret, retEff, dispTotal, retTotal, remain, outstanding, qcAvail, qcGood, centralRate, bomCandidate, bomOffer, built, whoOf, errs, warns };
   };
   type D = NonNullable<ReturnType<typeof derive>>;
 
@@ -218,6 +226,13 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   // ── แก้ค่าในแถว
   const setDisp = (moNo: string, dk: string, p: Partial<CuDispRow>) => patchRow(moNo, (r) => ({ disp: r.disp.map((x) => (x.key === dk ? { ...x, ...p } : x)) }));
   /** แก้รอบส่งคืน: เก็บรอบที่เห็นอยู่ (รวมรอบอัตโนมัติ) ลงแถวก่อน แล้วค่อยแก้ — แก้จำนวน = เลิกตามยอดจ่ายอัตโนมัติ */
+  /** ทำได้ไม่ครบ: แถวจ่ายแถวเดียวที่ยังเป็นยอดเหลือเดิม → ตามยอดเหลือใหม่ */
+  const setReduce = (moNo: string, v: CuReduce | null) => patchRow(moNo, (x) => {
+    if (!x.snap) return { reduce: v };
+    const a = cuFacts(cuReduceSnap(x.snap, x.reduce)), b = cuFacts(cuReduceSnap(x.snap, v));
+    const oldRemain = Math.max(0, a.qty - a.dispatched), newRemain = Math.max(0, b.qty - b.dispatched);
+    return { reduce: v, disp: x.disp.length === 1 && Math.abs(x.disp[0].qty - oldRemain) < 0.0001 ? [{ ...x.disp[0], qty: newRemain }] : x.disp };
+  });
   const setRet = (r: BRow, d: D, rk: string, p: Partial<CuRetLine>, manual = false) =>
     patchRow(r.moNo, { ret: d.ret.map((x, i) => (x.key === rk ? { ...x, ref: d.retEff[i]?.ref ?? x.ref, ...p } : x)), ...(manual ? { retSet: true } : {}) });
 
@@ -230,7 +245,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     setRows(rows.map((r) => {
       if (r.moNo === F.moNo || !r.snap || r.phase !== "edit" || modeOf(r).blockedBy) return r;
       const k = F.target!;
-      const f = cuFacts(r.snap);
+      const f = cuFacts(cuReduceSnap(r.snap, r.reduce));
       if (cuTargetBlocked(f, k)) { skipped++; return r; }
       const base = { ...r, ...initFor(r, k) } as BRow;
       // ติ๊กขั้นที่เลือกได้ (ของครบ/เตรียม/ตัด) ตามใบแรก — เฉพาะขั้นที่ใบนี้ก็เลือกได้
@@ -281,7 +296,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   const draftOf = (r: BRow, d: D): CuDraft => ({
     v: 1, target: r.target!, ticks: r.ticks, disp: r.disp, ret: d.ret, retSet: r.retSet, qc: { good: d.qcGood, bad: r.qcBad }, qcSet: r.qcSet,
     dates: r.dates, shelfId: r.shelfId, badReason: r.badReason, cancelReason: r.cancelReason, missing: [], problems: [], teamNote: r.teamNote, saveBom: r.saveBom,
-    shipMode: r.shipMode, shipWh: r.shipWh, facts: d.f,
+    shipMode: r.shipMode, shipWh: r.shipWh, facts: d.f0, reduce: r.reduce,
   });
   const saveAll = async () => {
     const list = rows.map((r) => ({ r, d: derive(r) })).filter((x) => readyOf(x.r, x.d)) as { r: BRow; d: D }[];
@@ -402,6 +417,15 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
         </tr>);
       return out;
     }
+    // ── ทำได้ไม่ครบ (ลดจำนวน) — ของจริงตอนนี้ ไม่ใช่ภาพหลังลด
+    out.push(
+      <tr key="reduce" className={sectionCls}>
+        <td className={`${stepTd} font-normal text-slate-500`}>จำนวนที่ทำได้</td>
+        <td className={td} colSpan={7}>
+          <ReducePanel compact qty={r.snap!.mo.qty} received={d.f0.received} sized={!!r.snap!.mo.sized} wos={r.snap!.wos} value={r.reduce}
+            onChange={(v) => setReduce(r.moNo, v)} issues={d.built.issues} />
+        </td>
+      </tr>);
     // ── ของครบ / เตรียม / ตัด: ติ๊กให้ตามขั้นที่เลือก (ขั้นที่ข้ามได้ = กดเอาออก) + วันที่เสร็จ
     const pre = d.chk.filter((x) => x.stage === "have" || x.stage === "prep" || x.stage === "cut");
     const hasSkip = d.built.steps.some((s) => s.kind === "skip_buy"), hasReady = d.built.steps.some((s) => s.kind === "mark_ready");
@@ -596,7 +620,12 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     if (d.on("close")) out.push(
       <tr key="close" className={sectionCls}>
         <td className={stepTd}><span className="inline-flex items-center gap-1"><Icon name="finish" /> ปิดใบ</span></td>
-        <td className={td} colSpan={4}><Msg d={d} field="close" /></td>
+        <td className={td} colSpan={4}><Msg d={d} field="close" />
+          {d.errs.some((x) => x.field === "close") && !r.reduce && d.built.received > 0 && (
+            <button type="button" onClick={() => setReduce(r.moNo, { qty: d.built.received, pick: "ช่างส่งคืนไม่ครบ", detail: "", mode: "drop" })}
+              className="mt-1 h-8 rounded-lg border border-amber-300 bg-amber-50 px-3 text-[12px] font-medium text-amber-900 hover:bg-amber-100">ปิดยอดขาด: ลดเหลือ {fmt(d.built.received)}</button>
+          )}
+        </td>
         <td className={td}><DispatchDatePick value={r.dates.close} onChange={(v) => patchRow(r.moNo, { dates: { ...r.dates, close: v } })} /><Msg d={d} field="close:date" /></td>
         <td className={td} colSpan={2} />
       </tr>);
@@ -675,7 +704,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
               </tr>
             </thead>
             {derived.map(({ r, d }) => {
-              const m = modeOf(r), f = r.snap ? cuFacts(r.snap) : null;
+              const m = modeOf(r), f = r.snap ? cuFacts(r.snap) : null;   // ของจริงตอนนี้ (เทียบกับตอนส่งคำขอ)
               const where = r.snap ? cuLocateSnap(r.snap) : null;
               const diff = m.reviewing && f && (r.req?.draft as CuDraft | null)?.facts ? cuFactsDiff((r.req!.draft as CuDraft).facts, f) : [];
               const canUndo = r.phase === "done" && !r.undoRes && r.results.some((x) => x.undo && x.undo.kind !== "none") && !cuIrreversible(r.results);
@@ -702,6 +731,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                         <span className="flex-1" />
                         {canUndo && <button type="button" onClick={() => void undoRow(r)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon name="back" /> ย้อน</button>}
                         {r.snap && r.phase === "edit" && <button type="button" onClick={() => onOpenSingle(r.moNo)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon name="open" /> เปิดแบบละเอียด</button>}
+                        {r.snap && r.phase === "edit" && onOpenEdit && <button type="button" onClick={() => onOpenEdit(r.moNo)} title="แก้สิ่งที่บันทึกไปแล้ว (รวมขั้นก่อนหน้า)" className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon name="edit" /> แก้ไข</button>}
                         {r.phase === "edit" && !busy && <button type="button" title="เอาใบนี้ออกจากชุด" onClick={() => setRows((rs) => rs.filter((x) => x.moNo !== r.moNo))} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon name="cancel" /></button>}
                       </div>
                       {diff.length > 0 && <div className="mt-1.5 rounded-md bg-amber-50 px-2 py-1 text-[12px] text-amber-900">ใบนี้เปลี่ยนไปหลังส่งคำขอ — ตรวจก่อนยืนยัน: {diff.join(" · ")}</div>}

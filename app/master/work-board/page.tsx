@@ -46,6 +46,7 @@ import { AddPieceworkModal } from "./add-piecework-modal";
 import { CatchUpModal } from "./catch-up-modal";
 import { CatchUpQueue } from "./catch-up-queue";
 import { CatchUpBatch } from "./catch-up-batch";
+import { CatchUpEdit } from "./catch-up-edit";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
 import type { CuAllRow } from "@/app/api/mo/catch-up/all/route";
 import { CU_WHERE_ORDER, type CuWhereKey } from "./catch-up";
@@ -3431,6 +3432,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const wos = workOrders.filter((w) => w.status !== "done" && w.stage !== "cut");
   const [cuMo, setCuMo] = useState<string | null>(null);   // ใบที่เปิดป๊อปอัปเดตงานอยู่
   const [cuList, setCuList] = useState<string[]>([]);      // ลำดับใบของแท็บที่เปิดอยู่ (ตอนกดอัปเดต) — ไว้ไป "ใบถัดไป"
+  const [cuEditMo, setCuEditMo] = useState<string | null>(null);   // ใบที่เปิดป๊อป "แก้ไข" (แก้สิ่งที่บันทึกแล้ว / ลดจำนวน)
   const openCu = (moNo: string) => {
     const rows = tab === "all" ? allShown.map((r) => r.mo_no)
       : tab === "pend" ? pendShown.filter((m) => hit(pendText(m))).map((m) => m.mo_no)
@@ -3456,6 +3458,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const [cuAll, setCuAll] = useState(false);
   const [cuAllRows, setCuAllRows] = useState<CuAllRow[] | null>(null);
   const [cuRecent, setCuRecent] = useState<string[]>([]);
+  // ป้าย "เดิม 20" / "แยกจาก MO-…" (ประวัติเปลี่ยนจำนวน) — มากับแท็บ "ทั้งหมด"
+  const cuAllMap = useMemo(() => new Map((cuAllRows ?? []).map((r) => [r.mo_no, r])), [cuAllRows]);
   // 🔄 อัปเดตเป็นชุด: ใบที่ติ๊กมา (null = ปิด) · เลือกในแท็บ "ทั้งหมด" · ป๊อปทีละใบ (เปิดแบบละเอียด) ปิดแล้ว = ให้ตารางโหลดใบนั้นใหม่
   const [cuBatch, setCuBatch] = useState<string[] | null>(null);
   const [cuAllSel, setCuAllSel] = useState<Set<string>>(new Set());
@@ -3478,8 +3482,17 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <Icon name="waiting" />{t.status === "processing" ? "กำลังบันทึก" : t.mine ? "รอยืนยัน" : `รอยืนยัน · ${t.requested_name ?? ""}`}
           </span>
         )}
+        {(() => {
+          const a = cuAllMap.get(moNo);
+          return <>
+            {a?.qty_from != null && <span title="ลดจำนวนไปแล้ว (ดูประวัติในปุ่มแก้ไข)" className="whitespace-nowrap rounded-full bg-amber-50 px-1.5 text-[11px] text-amber-800">เดิม {a.qty_from.toLocaleString("th-TH")}</span>}
+            {a?.split_from && <span title="ใบนี้แยกออกมาจากใบที่ลดจำนวน (ที่เหลือ รอของ)" className="whitespace-nowrap rounded-full bg-indigo-50 px-1.5 text-[11px] text-indigo-700">แยกจาก {a.split_from}</span>}
+          </>;
+        })()}
         <button type="button" onClick={(e) => { e.stopPropagation(); openCu(moNo); }} title={review ? "ตรวจคำขอ แก้ได้ แล้วยืนยันหรือตีกลับ" : "บอกว่าใบนี้ไปถึงขั้นไหนแล้ว (ติ๊กขั้นก่อนหน้าให้อัตโนมัติ)"}
           className={`shrink-0 rounded-md px-2 font-medium text-white ${review ? "bg-amber-600 hover:bg-amber-700" : "bg-indigo-600 hover:bg-indigo-700"} ${touch ? "h-9 text-sm" : "h-7 text-[12px]"}`}>{review ? "ตรวจ" : "🔄 อัปเดต"}</button>
+        <button type="button" onClick={(e) => { e.stopPropagation(); setCuEditMo(moNo); }} title="แก้สิ่งที่บันทึกไปแล้ว (รวมขั้นก่อนหน้า) · ลดจำนวน"
+          className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-300 bg-white px-2 font-medium text-slate-700 hover:bg-slate-50 ${touch ? "h-9 text-sm" : "h-7 text-[12px]"}`}><Icon name="edit" /> แก้ไข</button>
       </span>
     );
   };
@@ -4532,7 +4545,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           }}
           departments={departments} craftsmen={craftsmen} workOrders={workOrders}
           mode={cuMode} canApprove={cuApprove} onRequestsChanged={() => void loadCuReqs()}
-          onOpenSingle={(mo) => { setCuList([]); setCuMo(mo); }} refresh={cuBatchRefresh} />
+          onOpenSingle={(mo) => { setCuList([]); setCuMo(mo); }} onOpenEdit={(mo) => setCuEditMo(mo)} refresh={cuBatchRefresh} />
+        <CatchUpEdit moNo={cuEditMo} departments={departments} craftsmen={craftsmen} canEdit={cuMode === "direct" || cuApprove}
+          onClose={() => { if (cuBatch && cuEditMo) { const mo = cuEditMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } setCuEditMo(null); }}
+          onDone={() => { onReload?.(); void loadQcQueue(); void loadCuAll(); if (cuEditMo) { const mo = cuEditMo; setCuRecent((rs) => [mo, ...rs.filter((x) => x !== mo)].slice(0, 8)); } }}
+          onOpenUpdate={(mo) => { setCuEditMo(null); setCuList([]); setCuMo(mo); }} />
         <CatchUpQueue open={cuQueueOpen} onClose={() => setCuQueueOpen(false)} queue={cuReqs.queue} mine={cuReqs.mine} canApprove={cuApprove}
           onOpenMo={(moNo) => {
             // ไล่ตรวจทีละใบ: "ใบถัดไป" ในป๊อป = คำขอถัดไปในคิว

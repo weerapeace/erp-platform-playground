@@ -26,8 +26,9 @@ import { DeskStaffPanel } from "./desk-staff-panel";
 import type { WorkOrder } from "@/app/api/mo/work-orders/route";
 import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuStageDone, cuCanShort,
-  CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, cuLocateSnap, CU_WHERE_LABEL, type CuWhere, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuRetLine, type CuDates, type CuIssue, type CuProblem,
+  CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, cuLocateSnap, CU_WHERE_LABEL, type CuWhere, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuRetLine, type CuDates, type CuIssue, type CuProblem, cuReduceSnap, type CuReduce,
 } from "./catch-up";
+import { ReducePanel } from "./catch-up-reduce";
 import { cuCentralRate, cuRateFor, cuRetSources, cuRateOfRef, cuRetEffective, cuAutoReturns, cuBomCandidate, cuReadLast as readLast, cuWriteLast as writeLast, type CuDispRow } from "./catch-up-lines";
 
 type DeptLite = { id: string; name: string };
@@ -104,6 +105,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const [reqBusy, setReqBusy] = useState(false);
   const [wageOpen, setWageOpen] = useState<Record<string, boolean>>({});   // รอบส่งคืนที่กด "เปลี่ยน" ค่าแรง (ไม่ใช้ค่าแรงตามใบจ่าย)
   const [whereNow, setWhereNow] = useState<CuWhere | null>(null);         // หลังบันทึก: ตอนนี้ของอยู่ไหน
+  const [reduce, setReduce] = useState<CuReduce | null>(null);            // ทำได้ไม่ครบ (ลดจำนวน) — null = ทำครบตามสั่ง
   const seq = useRef(0);
   const nk = (p: string) => `${p}${++seq.current}`;
 
@@ -112,7 +114,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     setSnap(null); setLoadErr(""); setPage(1); setTarget(null); setTicks({}); setDisp([]); setRet([]); setRetSet(false); setQcSet(false); setDates(CU_NO_DATES);
     setShelfId(""); setBadReason(""); setNewReason(null); setCancelReason(""); setMissing([]); setDeskPanelFor(null); setResults([]); setRunning(-1);
     setProblems([]); setTeamNote(""); setSaveBom(true); setShipMode("sales_wh"); setShipWh(QC_WAREHOUSES[0]); setUndoRes(null); setUndoing(false);
-    setWageOpen({}); setWhereNow(null);
+    setWageOpen({}); setWhereNow(null); setReduce(null);
     setReq(null); setRejected(null); setSent(null); setReqBusy(false);
     let alive = true;
     void (async () => {
@@ -136,7 +138,19 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [moNo]);
 
-  const f = useMemo(() => (snap ? cuFacts(snap) : null), [snap]);
+  // f0 = ของจริงตอนนี้ (ส่งให้ตัวตรวจ ซึ่งลดจำนวนเองก่อน) · f/snapR = ภาพหลังลดจำนวน (ติ๊ก/ยอดตั้งต้น/ส่งคืนจากใคร คิดจากจำนวนใหม่)
+  const f0 = useMemo(() => (snap ? cuFacts(snap) : null), [snap]);
+  const snapR = useMemo(() => (snap ? cuReduceSnap(snap, reduce) : null), [snap, reduce]);
+  const f = useMemo(() => (snapR ? cuFacts(snapR) : null), [snapR]);
+  /** เปลี่ยน "ทำได้จริง" → แถวจ่ายแถวเดียวที่ยังเป็นยอดเหลือเดิม ให้ตามยอดเหลือใหม่ */
+  const onReduce = (v: CuReduce | null) => {
+    if (snap && f) {
+      const nx = cuFacts(cuReduceSnap(snap, v));
+      const oldRemain = Math.max(0, f.qty - f.dispatched), newRemain = Math.max(0, nx.qty - nx.dispatched);
+      setDisp((rs) => (rs.length === 1 && Math.abs(rs[0].qty - oldRemain) < 0.0001 ? [{ ...rs[0], qty: newRemain }] : rs));
+    }
+    setReduce(v);
+  };
   /** ค่าแรง/ชิ้นจากสูตร: เรตเฉพาะช่าง (เลือกคนเดียว) → ไม่งั้นราคากลาง (กติกาเดียวกับป๊อปจ่ายงานปกติ) */
   const centralRate = cuCentralRate(snap);
   const rateFor = (crewIds: string[]) => cuRateFor(snap, crewIds);
@@ -165,6 +179,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     setShelfId(d.shelfId ?? ""); setBadReason(d.badReason ?? ""); setCancelReason(d.cancelReason ?? ""); setMissing(d.missing ?? []);
     setProblems(d.problems ?? []); setTeamNote(d.teamNote ?? ""); setSaveBom(d.saveBom !== false);
     setShipMode(d.shipMode === "sell" ? "sell" : "sales_wh"); setShipWh(d.shipWh || QC_WAREHOUSES[0]);
+    setReduce(d.reduce ?? null);
   };
   const rows = f && target ? cuRows(f, target, ticks) : [];
   const selIdx = target ? flow.findIndex((t) => t.key === target) : -1;
@@ -208,7 +223,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
 
   // ── ส่งคืนจากใคร: ใบจ่ายเดิมที่ยังค้างช่าง + แถวจ่ายใหม่ — เรียกด้วยชื่อเล่นช่าง (ไม่ใช่เลขใบ)
   const nickOf = (full: string | null | undefined) => (full ?? "").split(", ").map((n) => craftsmen.find((c) => c.name === n)?.nickname?.trim() || n).filter(Boolean).join(", ");
-  const retSources = cuRetSources(snap, disp, on("dispatch"), {
+  const retSources = cuRetSources(snapR, disp, on("dispatch"), {
     nickOf,
     newWho: (r) => poolOf(deptOf(r.deptId)).filter((c) => r.crewIds.includes(c.id)).map((c) => c.nickname?.trim() || c.name).join(", "),
     deskName: (r) => deptOf(r.deptId)?.name ?? null,
@@ -240,13 +255,13 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   // ค่าแรง/ชิ้นที่พิมพ์เอง (ต่างจากราคากลางในสูตร) → เสนอบันทึกกลับเข้า BOM
   const bomCandidate = cuBomCandidate(disp, on("dispatch"), ret, on("return"));
   const bomOffer = bomCandidate != null && bomCandidate !== centralRate && !!snap?.mo.product_sku;
-  const built = f && target
-    ? cuBuildSteps(f, target, ticks, {
+  const built = f0 && target
+    ? cuBuildSteps(f0, target, ticks, {
         disp: disp.map((r) => ({ ...r, deskName: deptOf(r.deptId)?.name ?? null, crewCount: r.crewIds.length })),
         ret: retEff, qcGood: qc.good, qcBad: qc.bad, shelfId, cancelReason, missing, dates, badReason, centralRate, today: todayYmd(),
-        problems, teamNote, bomRate: bomOffer && saveBom ? bomCandidate : null, shipMode, shipWh,
+        problems, teamNote, bomRate: bomOffer && saveBom ? bomCandidate : null, shipMode, shipWh, reduce: target === "cancel" ? null : reduce,
       }, snap?.wos ?? [])
-    : { steps: [] as CuStep[], errors: [] as string[], issues: [] as CuIssue[] };
+    : { steps: [] as CuStep[], errors: [] as string[], issues: [] as CuIssue[], received: 0 };
   // เตือนงานเสียของช่างที่เลือก (ข้อมูลอยู่ฝั่งจอ) — เตือนเฉย ๆ บันทึกได้
   const defectIssues: CuIssue[] = on("dispatch") ? disp.flatMap((r) => crewList(r.crewIds, poolOf(deptOf(r.deptId)))
     .map((c) => ({ c, d: defectOf(c.name) })).filter((x) => x.d)
@@ -307,10 +322,10 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
   const blockedBy = !!req && !reviewing && !editingMine;
   const asRequest = !reviewing && (mode === "request" || editingMine);
   const reqDraft = (req?.draft ?? null) as CuDraft | null;
-  const reqDiff = reviewing && f && reqDraft?.facts ? cuFactsDiff(reqDraft.facts, f) : [];
+  const reqDiff = reviewing && f0 && reqDraft?.facts ? cuFactsDiff(reqDraft.facts, f0) : [];
   const stepLabels = built.steps.map((s) => cuStepLabel(s, whoOf));
   const draftNow = (): CuDraft | null => (f && target
-    ? { v: 1, target, ticks, disp, ret, retSet, qc, qcSet, dates, shelfId, badReason, cancelReason, missing, problems, teamNote, saveBom, shipMode, shipWh, facts: f }
+    ? { v: 1, target, ticks, disp, ret, retSet, qc, qcSet, dates, shelfId, badReason, cancelReason, missing, problems, teamNote, saveBom, shipMode, shipWh, facts: f0 ?? f, reduce }
     : null);
   const postReq = async (body: Record<string, unknown>) => {
     const r = await apiFetch("/api/mo/catch-up/requests", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -663,6 +678,10 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
               {errs.length > 0 && <button type="button" onClick={goFirstError} className="ml-auto h-7 rounded-md border border-rose-300 bg-white px-2 text-[12px] text-rose-700 hover:bg-rose-100">ไปที่ช่องแรก</button>}
               {errs.length > 0 && <div className="w-full text-[12px] text-rose-700">{errs.slice(0, 3).map((x) => (x.where ? `${x.where}: ${x.msg}` : x.msg)).join(" · ")}{errs.length > 3 ? ` · และอีก ${errs.length - 3}` : ""}</div>}
             </div>
+            {target !== "cancel" && (
+              <ReducePanel qty={snap.mo.qty} received={f0?.received ?? 0} sized={!!snap.mo.sized} wos={snap.wos} value={reduce} onChange={onReduce} issues={issues}
+                hint={ticks.short ? "ยังขาดของอยู่ — ทำได้แค่บางส่วนก่อนไหม?" : null} />
+            )}
             {target === "cancel" && (
               <div id="cu-cancel" className="grid grid-cols-1 gap-3 rounded-lg border border-rose-200 bg-rose-50/50 p-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
                 <div>
@@ -877,6 +896,11 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
               <section id="cu-close" className="rounded-lg border border-slate-200 p-3">
                 <div className="mb-2 text-sm font-medium text-slate-700">{on("ship") && on("close") ? "📤 ส่งออก / 🏁 ปิดใบ" : on("ship") ? "📤 ส่งออกจาก QC" : "🏁 ปิดใบ"}</div>
                 <Msg field="ship" /><Msg field="close" />
+                {issues.some((x) => x.field === "close" && x.level === "error") && !reduce && built.received > 0 && (
+                  <button type="button" onClick={() => onReduce({ qty: built.received, pick: "ช่างส่งคืนไม่ครบ", detail: "", mode: "drop" })}
+                    className="mt-1 h-8 rounded-lg border border-amber-300 bg-amber-50 px-3 text-[12px] font-medium text-amber-900 hover:bg-amber-100">
+                    ปิดยอดขาด: ลดจำนวนเหลือ {fmt(built.received)} แล้วปิดใบ</button>
+                )}
                 {on("ship") && qc.good > 0 && (
                   <div className="mb-2 rounded-lg bg-slate-50/70 p-2.5 text-[13px]">
                     <div className="mb-1.5 text-[12px] text-slate-500">ของดี {fmt(qc.good)} ชิ้นที่รับเข้า ส่งออกไปที่ไหน (เหมือนป๊อปส่งออกหน้าโกดัง QC)</div>

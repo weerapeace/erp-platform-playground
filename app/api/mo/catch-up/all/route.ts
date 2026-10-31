@@ -2,6 +2,7 @@
  * แท็บ "ทั้งหมด" ของโหมด 🔄 อัปเดตงาน — GET /api/mo/catch-up/all
  * ทุกใบสั่งผลิตที่ยังเปิดอยู่ + ที่ปิด/ยกเลิกใน 30 วันล่าสุด พร้อม "ตอนนี้ของอยู่ไหน" (กติกา cuLocate ใน catch-up.ts)
  * แก้ปัญหา: อัปเดตแล้วใบหลุดจากแท็บบนบอร์ด (รับเข้า QC แล้ว = ของอยู่โกดัง QC · ส่งออกครบ = รอปิดใบ) หาไม่เจอ
+ * qty_from / split_from = ป้าย "เดิม 20" / "แยกจาก MO-…" (ประวัติเปลี่ยนจำนวน mo_qty_changes ที่ยังไม่ย้อน)
  * อ่านอย่างเดียว · ของกลาง: guardApi(products.view) + supabaseAdmin
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -16,6 +17,8 @@ type Row = Record<string, unknown>;
 export type CuAllRow = {
   mo_no: string; product_sku: string | null; product_name: string | null; image_url: string | null;
   qty: number; status: string; dispatched: number; received: number; qc_pulled: number; where: CuWhere;
+  /** จำนวนตอนสั่งครั้งแรก (เคยลดจำนวน) · ใบนี้แยกออกมาจากใบไหน */
+  qty_from?: number | null; split_from?: string | null;
 };
 const DAYS_CLOSED = 30;
 const n = (v: unknown) => Number(v) || 0;
@@ -24,12 +27,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
   const since = new Date(Date.now() - DAYS_CLOSED * 86400000).toISOString();
-  const [mosRes, wosRes, itemsRes, shelvesRes] = await Promise.all([
+  const [mosRes, wosRes, itemsRes, shelvesRes, qtyRes] = await Promise.all([
     admin.from("manufacturing_orders").select("mo_no, product_sku, product_name, qty, status, updated_at").eq("is_active", true)
       .or(`status.not.in.(done,cancelled),updated_at.gte.${since}`).limit(5000),
     admin.from("mo_work_orders").select("mo_no, qty, received_qty, qc_pulled_qty").eq("is_active", true).neq("status", "cancelled").limit(10000),
     admin.from("qc_warehouse_items").select("mo_no, qty, status, shelf_id").gt("qty", 0).limit(10000),
     admin.from("qc_shelves").select("id, name"),
+    admin.from("mo_qty_changes").select("mo_no, from_qty, new_mo_no, created_at").is("reverted_at", null).order("created_at").limit(5000),
   ]);
   if (mosRes.error || wosRes.error) return NextResponse.json({ data: [], error: "โหลดรายการใบสั่งผลิตไม่สำเร็จ" }, { status: 500 });
 
@@ -49,6 +53,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     shelfAt.set(k, list);
   }
 
+  // เก่าก่อน → ครั้งแรกที่ลด = จำนวนตอนสั่ง
+  const qtyFrom = new Map<string, number>(), splitFrom = new Map<string, string>();
+  for (const c of (qtyRes.data ?? []) as Row[]) {
+    const k = String(c.mo_no ?? "");
+    if (!qtyFrom.has(k)) qtyFrom.set(k, n(c.from_qty));
+    if (c.new_mo_no) splitFrom.set(String(c.new_mo_no), k);
+  }
   const mos = (mosRes.data ?? []) as Row[];
   // รูปสินค้า (ปกของ SKU) — ทีละ 300 รหัส ยิงขนานกัน
   const codes = [...new Set(mos.map((m) => String(m.product_sku ?? "").trim()).filter(Boolean))];
@@ -66,6 +77,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return {
       mo_no: moNo, product_sku: sku, product_name: (m.product_name as string | null) ?? null, image_url: sku ? img.get(sku.trim()) ?? null : null,
       qty: n(m.qty), status: String(m.status ?? ""), dispatched: s.d, received: s.r, qc_pulled: s.q,
+      qty_from: qtyFrom.get(moNo) ?? null, split_from: splitFrom.get(moNo) ?? null,
       where: cuLocate({ qty: n(m.qty), status: String(m.status ?? ""), dispatched: s.d, received: s.r, qcPulled: s.q, shelfAt: shelfAt.get(moNo) ?? [] }),
     };
   });

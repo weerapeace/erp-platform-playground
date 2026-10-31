@@ -10,6 +10,16 @@ export type SizeQty = { label: string; qty: number };
 export type FabricCalcMode = "lay" | "classic";
 export const fabricModeOf = (v: unknown): FabricCalcMode => (v === "classic" ? "classic" : "lay");
 
+/** เลขใบสั่งผลิตถัดไป (เลขรันกลาง erp_next_number) — ใช้ทั้งสร้างใบใหม่ และแยกใบตอนลดจำนวน */
+export async function nextMoNo(admin: ReturnType<typeof supabaseAdmin>): Promise<string> {
+  const { data, error } = await admin.rpc("erp_next_number", { p_key: "mo" });
+  if (!error && data) return String(data);
+  // fallback กันพลาด
+  const yr = new Date().getFullYear();
+  const { count } = await admin.from("manufacturing_orders").select("id", { count: "exact", head: true });
+  return `MO-${yr}-${String((count ?? 0) + 1).padStart(5, "0")}`;
+}
+
 /**
  * กางสูตร: ดึง bom_lines ของ bomCode → insert mo_materials
  * - ไม่มีไซส์ (sizeBreakdown ว่าง): required = qty_per × moQty (เหมือนเดิม)

@@ -113,8 +113,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 /**
  * เติมข้อมูลที่ค้าง (วันที่/ค่าแรง) ของรายการส่งงาน — /api/mo/submissions PATCH
- * body { id, submitted_at?, wage?, info_pending? }
+ * body { id, submitted_at?, wage?, info_pending?, qty?, via?, label? }
  * ใส่ค่าแรงแล้ว → อัปเดต labor_cost ของใบจ่ายงานให้ด้วย + ปลดธง "ยังไม่ครบ" อัตโนมัติ
+ * qty = แก้จำนวนของรอบนี้ (ป๊อป "แก้ไข" โหมดอัปเดตงาน) → ยอดรับคืนของใบจ่ายตาม · ห้ามต่ำกว่าที่ดึงเข้า QC แล้ว / เกินยอดจ่าย
  */
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -126,7 +127,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const { data: sub } = await admin.from("wo_submissions").select("id, wo_id, qty, wage, submitted_at, info_pending").eq("id", id).single();
+  const { data: sub } = await admin.from("wo_submissions").select("id, wo_id, mo_no, qty, wage, submitted_at, info_pending").eq("id", id).single();
   if (!sub) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
 
   const patch: Record<string, unknown> = {};
@@ -137,15 +138,36 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const nextWage = "wage" in body ? wage : (sub.wage as number | null);
   if ("info_pending" in body) patch.info_pending = body.info_pending === true;
   else if (nextWage != null) patch.info_pending = false;
+  // แก้จำนวนของรอบ → ยอดรับคืนของใบจ่ายตาม (กันข้อมูลขัดกันแบบเดียวกับตอนลบรอบ)
+  let woPatch: Record<string, unknown> | null = null;
+  if (body.qty != null) {
+    const q = n(body.qty);
+    if (!(q > 0)) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0 (ถ้าไม่มีให้ลบรอบนี้)" }, { status: 400 });
+    if (Math.abs(q - n(sub.qty)) > 0.0001) {
+      patch.qty = q;
+      if (sub.wo_id) {
+        const { data: wo } = await admin.from("mo_work_orders").select("qty, received_qty, qc_pulled_qty, status").eq("id", sub.wo_id).single();
+        if (wo) {
+          const recv = Math.round((n(wo.received_qty) - n(sub.qty) + q) * 100) / 100;
+          if (recv < n(wo.qc_pulled_qty) - 0.0001) return NextResponse.json({ error: `ของใบนี้ถูกดึงเข้าโกดัง QC แล้ว ${n(wo.qc_pulled_qty)} ชิ้น — ลดยอดส่งคืนต่ำกว่านั้นไม่ได้ (ย้อนของออกจาก QC ก่อน)` }, { status: 400 });
+          if (recv > n(wo.qty) + 0.0001) return NextResponse.json({ error: `เกินยอดที่จ่าย (${n(wo.qty)} ชิ้น) — แก้จำนวนใบจ่ายก่อน` }, { status: 400 });
+          woPatch = { received_qty: recv };
+          if (wo.status !== "cancelled") woPatch.status = recv >= n(wo.qty) - 0.0001 && recv > 0 ? "done" : recv > 0 ? "partial_return" : "dispatched";
+        }
+      }
+    }
+  }
   if (Object.keys(patch).length === 0) return NextResponse.json({ data: { id }, error: null });
 
   const { error } = await admin.from("wo_submissions").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
+  if (woPatch && sub.wo_id) await admin.from("mo_work_orders").update(woPatch).eq("id", sub.wo_id);
   // ใส่ค่าแรงแล้ว → ใบจ่ายงานต้องเห็นด้วย (ยอดค่าแรงรวมของโต๊ะคิดจากตรงนี้)
-  if (sub.wo_id && nextWage != null) await syncWoLabor(admin, String(sub.wo_id));
+  if (sub.wo_id && (nextWage != null || woPatch)) await syncWoLabor(admin, String(sub.wo_id));
 
-  await writeAudit(admin, { action: "wo.submit_fill", entityType: "wo_submissions", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: patch });
+  await writeAudit(admin, { action: "wo.submit_fill", entityType: "wo_submissions", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { ...patch, mo_no: sub.mo_no ?? null, before: { qty: n(sub.qty), wage: sub.wage ?? null, submitted_at: sub.submitted_at ?? null }, ...(body.via ? { via: String(body.via).slice(0, 30), label: String(body.label ?? "").slice(0, 300) } : {}) } });
   return NextResponse.json({ data: { id, ...patch }, error: null });
 }
 
@@ -155,9 +177,11 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const id = new URL(request.url).searchParams.get("id") ?? "";
   if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
+  const url = new URL(request.url), via = url.searchParams.get("via"), label = url.searchParams.get("label");
+  const viaMeta = via ? { via: via.slice(0, 30), label: (label ?? "").slice(0, 300) } : {};
 
   const admin = supabaseAdmin();
-  const { data: sub } = await admin.from("wo_submissions").select("id, wo_id, qty, sku").eq("id", id).single();
+  const { data: sub } = await admin.from("wo_submissions").select("id, wo_id, mo_no, qty, sku").eq("id", id).single();
   if (!sub) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
 
   if (sub.wo_id) {
@@ -173,6 +197,6 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   }
   await admin.from("wo_submissions").delete().eq("id", id);
   if (sub.wo_id) await syncWoLabor(admin, String(sub.wo_id));   // เหลือรอบที่ลงค่าแรง → คิดค่าแรงรวมใหม่
-  await writeAudit(admin, { action: "wo.submit_undo", entityType: "wo_submissions", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { wo_id: sub.wo_id, qty: sub.qty } });
+  await writeAudit(admin, { action: "wo.submit_undo", entityType: "wo_submissions", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { wo_id: sub.wo_id, qty: sub.qty, mo_no: sub.mo_no ?? null, ...viaMeta } });
   return NextResponse.json({ error: null });
 }

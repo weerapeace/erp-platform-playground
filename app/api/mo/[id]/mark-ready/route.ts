@@ -18,7 +18,7 @@ import { friendlyDbError } from "../../../master-v2/[entity]/route";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Body = { ready?: boolean; parts?: unknown; except?: unknown; only?: unknown; done_date?: unknown };
+type Body = { ready?: boolean; parts?: unknown; except?: unknown; only?: unknown; done_date?: unknown; via?: unknown; label?: unknown };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
@@ -68,7 +68,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   await admin.from("audit_logs").insert({
     actor_user_id: user?.id ?? null, action: "update", entity_type: "mo", entity_id: id,
-    metadata: { mo_no: moNo, mark_ready: ready, parts: doPrep && doCut ? ["prep", "cut"] : doPrep ? ["prep"] : ["cut"], ...(except.size ? { missing: [...except] } : {}) },
+    metadata: { mo_no: moNo, mark_ready: ready, parts: doPrep && doCut ? ["prep", "cut"] : doPrep ? ["prep"] : ["cut"], ...(except.size ? { missing: [...except] } : {}),
+      ...(typeof body.done_date === "string" ? { done_date: body.done_date } : {}), ...(body.via ? { via: String(body.via).slice(0, 30), label: String(body.label ?? "").slice(0, 300) } : {}) },
   }).then(() => {}, () => {});
 
   return NextResponse.json({ id, mo_no: moNo, ready, error: null });

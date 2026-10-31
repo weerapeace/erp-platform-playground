@@ -4,6 +4,7 @@
  *   ซื้อของ (กติกาเดียวกับ /api/mo/material-progress) · เตรียม/ตัด (นับแบบเดียวกับ /api/mo/work-board)
  *   ใบจ่ายงาน (จ่าย/คืน/ดึงเข้า QC แล้ว) · ของบนชั้น QC · รายชื่อชั้น QC
  * อ่านอย่างเดียว — การบันทึกจริงไปผ่าน API เดิมของแต่ละขั้น (ดู app/master/work-board/catch-up.ts)
+ * ประวัติเปลี่ยนจำนวน (mo_qty_changes) มาด้วยทุกครั้ง · &edit=1 (ป๊อป "แก้ไข") = เพิ่มรอบส่งคืนรายรอบ + ของบนชั้น QC รายชิ้น + ประวัติการแก้
  * ของกลาง: guardApi(products.view) + supabaseAdmin
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -22,7 +23,18 @@ export type CatchUpWo = {
   department_name: string | null; assignee_name: string | null; dispatch_date: string | null; created_at: string;
   /** ค่าแรงรวมของใบ (ราคาต่อชิ้น = labor_cost / qty) — ใช้เป็นค่าแรงตอนส่งคืน */
   labor_cost: number;
+  /** ไว้แก้คนรับในป๊อปแก้ไข */
+  assignee_type?: string | null; assignee_id?: string | null; department_id?: string | null; note?: string | null;
+  assignees?: { id: string | null; name: string }[] | null;
 };
+/** รอบส่งคืน 1 รอบ (wage = ยอดของรอบ ไม่ใช่ต่อชิ้น · null = ยังไม่ลงค่าแรง) */
+export type CatchUpSub = { id: string; wo_id: string | null; wo_no: string | null; qty: number; wage: number | null; submitted_at: string | null; craftsman_name: string | null; info_pending: boolean; created_at: string };
+/** ของของใบนี้บนชั้น QC รายชิ้น (ป๊อปแก้ไข → ย้อนกลับไปรอรับ) */
+export type CatchUpQcItem = { id: string; wo_id: string | null; qty: number; status: string; shelf_name: string; reason: string | null; created_at: string };
+/** ประวัติเปลี่ยนจำนวน · split_from = ใบนี้ถูกแยกออกมาจากใบไหน (มองจากใบใหม่) */
+export type CatchUpQtyChange = { id: string; mo_no: string; from: number; to: number; reason: string; mode: string; new_mo_no: string | null; by: string | null; at: string; reverted: boolean; split_from: boolean };
+/** ประวัติการแก้ (audit ที่มาจากป๊อปแก้ไข + ลดจำนวน) */
+export type CatchUpEditLog = { at: string; by: string | null; label: string };
 export type CatchUpSnapshot = {
   mo: {
     id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; status: string;
@@ -31,6 +43,8 @@ export type CatchUpSnapshot = {
     prep_done: boolean; cut_done: boolean; skipped: MoSkipped;
     /** สูตรที่ใช้ (ไว้บันทึกค่าแรงกลับเข้า BOM) · หมายเหตุเดิมของใบ (ไว้ต่อท้าย) */
     bom_code: string | null; note: string | null;
+    /** วันที่ติ๊กเตรียม/ตัดครบ (ป๊อปแก้ไข) · sized = แบ่งจำนวนตามไซส์ (ลดจำนวนจากป๊อปไม่ได้) */
+    prep_done_at?: string | null; cut_done_at?: string | null; sized?: boolean;
   };
   /** เช็กใบขาย — ใบสั่งผลิตยังไม่ผูกใบขายตรง ๆ จึงจับคู่ด้วยรหัสสินค้า (ไม่นับที่ยกเลิก · ล่าสุดก่อน) */
   sales: { so: { no: string; status: string; qty: number; date: string | null }[]; dn: { no: string; status: string; qty: number; delivered: boolean }[] };
@@ -51,18 +65,24 @@ export type CatchUpSnapshot = {
   rates: { craftsman_id: string | null; rate: number }[];
   /** สาเหตุของเสีย (รายการเดียวกับหน้าโกดัง QC) */
   reasons: { id: string; name: string }[];
+  /** ประวัติเปลี่ยนจำนวน (ของใบนี้ + ใบนี้แยกมาจากใบไหน) ล่าสุดก่อน */
+  qtyLog?: CatchUpQtyChange[];
+  /** เฉพาะ &edit=1 */
+  subs?: CatchUpSub[]; qcItems?: CatchUpQcItem[]; edits?: CatchUpEditLog[];
 };
 
 const n = (v: unknown) => Number(v) || 0;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
-  const moNo = (new URL(request.url).searchParams.get("mo_no") ?? "").trim();
+  const sp = new URL(request.url).searchParams;
+  const moNo = (sp.get("mo_no") ?? "").trim();
+  const forEdit = sp.get("edit") === "1";
   if (!moNo) return NextResponse.json({ data: null, error: "ไม่ได้ระบุใบสั่งผลิต" }, { status: 400 });
   const admin = supabaseAdmin();
 
   const { data: mo } = await admin.from("manufacturing_orders")
-    .select("id, mo_no, product_sku, product_name, qty, status, due_date, internal_due_date, prep_done, cut_done, skipped_stages, bom_code, note")
+    .select("id, mo_no, product_sku, product_name, qty, status, due_date, internal_due_date, prep_done, cut_done, prep_done_at, cut_done_at, skipped_stages, bom_code, note, size_breakdown")
     .eq("mo_no", moNo).eq("is_active", true).maybeSingle();
   if (!mo) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
   const m = mo as Row;
@@ -73,10 +93,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const [sumsRes, matsRes, wosRes, shelvesRes, itemsRes, links, ratesRes, reasonsRes, moIssuesRes, skuRes, soRes, dnRes] = await Promise.all([
     admin.from("mo_material_summary").select("id, mo_no, component_sku, component_name, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence").eq("mo_no", moNo).eq("is_active", true).order("sequence"),
     admin.from("mo_materials").select("material_type, cut_block_code, cut_length, pieces, cut_done").eq("mo_no", moNo).eq("is_active", true),
-    admin.from("mo_work_orders").select("id, wo_no, qty, received_qty, qc_pulled_qty, status, department_name, assignee_name, dispatch_date, created_at, labor_cost")
+    admin.from("mo_work_orders").select("id, wo_no, qty, received_qty, qc_pulled_qty, status, department_name, assignee_name, dispatch_date, created_at, labor_cost, assignee_type, assignee_id, department_id, note, assignees")
       .eq("mo_no", moNo).eq("is_active", true).neq("status", "cancelled").order("created_at", { ascending: true }),
     admin.from("qc_shelves").select("id, name, kind, sort_order").eq("is_active", true).order("sort_order"),
-    admin.from("qc_warehouse_items").select("qty, status, shelf_id").eq("mo_no", moNo),
+    admin.from("qc_warehouse_items").select("id, wo_id, qty, status, shelf_id, reason, created_at").eq("mo_no", moNo).order("created_at"),
     loadMoPurchaseLinks(admin, [moNo]),
     bomCode ? admin.from("bom_labor_rates").select("craftsman_id, rate").eq("bom_code", bomCode).eq("is_active", true).eq("is_current", true)
       : Promise.resolve({ data: [] as Row[], error: null }),
@@ -106,6 +126,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: modelIssues } = parentId
     ? await admin.from("parent_sku_issues").select("problem_text").eq("parent_sku_id", parentId).eq("is_active", true).order("created_at", { ascending: false }).limit(20)
     : { data: [] as Row[] };
+  // ประวัติเปลี่ยนจำนวน (ทุกครั้ง — ป้าย "เดิม 20" / "แยกจาก") · รอบส่งคืน + ประวัติการแก้ (เฉพาะป๊อปแก้ไข)
+  const [qtyRes, subsRes, editRes] = await Promise.all([
+    admin.from("mo_qty_changes").select("id, mo_no, from_qty, to_qty, reason, mode, new_mo_no, created_by_name, created_at, reverted_at").or(`mo_no.eq."${moNo}",new_mo_no.eq."${moNo}"`).order("created_at", { ascending: false }).limit(20),
+    forEdit ? admin.from("wo_submissions").select("id, wo_id, wo_no, qty, wage, submitted_at, craftsman_name, info_pending, created_at").eq("mo_no", moNo).order("created_at")
+      : Promise.resolve({ data: [] as Row[], error: null }),
+    // audit ที่ติด via=cu_edit (ป๊อปแก้ไข) + ลดจำนวน/ย้อน — กรองตามเลขใบใน metadata (ย้อนหลัง 1 ปี)
+    forEdit ? admin.from("audit_logs").select("action, actor_name, created_at, metadata").eq("metadata->>mo_no", moNo)
+      .or("metadata->>via.eq.cu_edit,action.eq.\"mo.reduce_qty\",action.eq.\"mo.reduce_qty_revert\"").gte("created_at", new Date(Date.now() - 365 * 864e5).toISOString())
+      .order("created_at", { ascending: false }).limit(40)
+      : Promise.resolve({ data: [] as Row[], error: null }),
+  ]);
   if (sumsRes.error || wosRes.error) return NextResponse.json({ data: null, error: "โหลดข้อมูลใบงานไม่สำเร็จ" }, { status: 500 });
 
   // ซื้อของ — กติกาเดียวกับ material-progress (ข้ามซื้อของ = ของครบทุกบรรทัด)
@@ -155,6 +186,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       cut_total: cutTotal, cut_ready: skipped.cut ? cutTotal : cutDone,
       prep_done: m.prep_done === true || !!skipped.prep, cut_done: m.cut_done === true || !!skipped.cut, skipped,
       bom_code: bomCode, note: (m.note as string) ?? null,
+      prep_done_at: (m.prep_done_at as string) ?? null, cut_done_at: (m.cut_done_at as string) ?? null,
+      sized: Array.isArray(m.size_breakdown) && (m.size_breakdown as unknown[]).length > 0,
     },
     sales: {
       so: [...soMap.values()].sort(byNewest).slice(0, 8).map(({ at: _at, ...x }) => x),
@@ -170,12 +203,34 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       id: String(w.id), wo_no: String(w.wo_no ?? ""), qty: n(w.qty), received_qty: n(w.received_qty), qc_pulled_qty: n(w.qc_pulled_qty),
       status: String(w.status ?? ""), department_name: (w.department_name as string) ?? null, assignee_name: (w.assignee_name as string) ?? null,
       dispatch_date: (w.dispatch_date as string) ?? null, created_at: String(w.created_at ?? ""), labor_cost: n(w.labor_cost),
+      assignee_type: (w.assignee_type as string) ?? null, assignee_id: (w.assignee_id as string) ?? null, department_id: (w.department_id as string) ?? null, note: (w.note as string) ?? null,
+      assignees: Array.isArray(w.assignees) ? (w.assignees as { id: string | null; name: string }[]) : null,
     })),
     shelves: ((shelvesRes.data ?? []) as Row[]).map((s) => ({ id: String(s.id), name: String(s.name ?? ""), kind: String(s.kind ?? "") })),
     shelf,
     shelfAt: [...at.values()],
     rates: ((ratesRes.data ?? []) as Row[]).map((r) => ({ craftsman_id: (r.craftsman_id as string) ?? null, rate: n(r.rate) })).filter((r) => r.rate > 0),
     reasons: ((reasonsRes.data ?? []) as Row[]).map((r) => ({ id: String(r.id), name: String(r.name ?? "") })),
+    qtyLog: ((qtyRes.data ?? []) as Row[]).map((c) => ({
+      id: String(c.id), mo_no: String(c.mo_no ?? ""), from: n(c.from_qty), to: n(c.to_qty), reason: String(c.reason ?? ""), mode: String(c.mode ?? ""),
+      new_mo_no: (c.new_mo_no as string) ?? null, by: (c.created_by_name as string) ?? null, at: String(c.created_at ?? ""), reverted: !!c.reverted_at, split_from: c.mo_no !== moNo,
+    })),
+    ...(forEdit ? {
+      subs: ((subsRes.data ?? []) as Row[]).map((x) => ({
+        id: String(x.id), wo_id: (x.wo_id as string) ?? null, wo_no: (x.wo_no as string) ?? null, qty: n(x.qty), wage: x.wage == null ? null : n(x.wage),
+        submitted_at: (x.submitted_at as string) ?? null, craftsman_name: (x.craftsman_name as string) ?? null, info_pending: x.info_pending === true, created_at: String(x.created_at ?? ""),
+      })),
+      qcItems: ((itemsRes.data ?? []) as Row[]).filter((it) => n(it.qty) > 0).map((it) => ({
+        id: String(it.id), wo_id: (it.wo_id as string) ?? null, qty: n(it.qty), status: String(it.status ?? ""),
+        shelf_name: shelfName.get(String(it.shelf_id ?? "")) || "โกดัง QC", reason: (it.reason as string) ?? null, created_at: String(it.created_at ?? ""),
+      })),
+      edits: ((editRes.data ?? []) as Row[]).map((e) => {
+        const md = (e.metadata ?? {}) as Row;
+        const label = String(md.label ?? "") || (e.action === "mo.reduce_qty" ? `ลดจำนวน ${n(md.from)} → ${n(md.to)} ชิ้น (${String(md.reason ?? "")})${md.new_mo_no ? ` · แยกที่เหลือเป็น ${md.new_mo_no}` : ""}`
+          : e.action === "mo.reduce_qty_revert" ? `ย้อนการลดจำนวน ${n(md.from)} → ${n(md.to)} ชิ้น` : String(e.action ?? ""));
+        return { at: String(e.created_at ?? ""), by: (e.actor_name as string) ?? null, label };
+      }),
+    } : {}),
   };
   return NextResponse.json({ data, error: null });
 }
