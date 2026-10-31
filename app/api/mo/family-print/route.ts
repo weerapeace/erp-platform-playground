@@ -13,14 +13,14 @@ import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { loadMoPurchaseLinks, computeMatStatus, linkKey } from "@/lib/mo-material-status";
 import { parseSkipped } from "@/lib/mo-skip";
-import type { FamilyBuyLine, FamilyCutLine, FamilyInput, FamilyMo, FamilyPrintResponse, FamilyWorkOrder } from "@/lib/family-print";
+import type { FamilyBuyLine, FamilyCutLine, FamilyInput, FamilyMasters, FamilyMo, FamilyPrintResponse, FamilyWorkOrder } from "@/lib/family-print";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type Row = Record<string, unknown>;
-const MO_COLS = "id, mo_no, product_sku, qty, due_date, status, size_breakdown, internal_due_date, prep_done, prep_done_at, cut_done, cut_done_at, materials_issued, finished_received, skipped_stages";
+const MO_COLS = "id, mo_no, product_sku, qty, due_date, status, size_breakdown, internal_due_date, prep_done, prep_done_at, cut_done, cut_done_at, materials_issued, finished_received, skipped_stages, bom_code";
 const CLOSED = "(done,cancelled)";
 const MAX_MOS = 300;
 const CHUNK = 100;
@@ -73,7 +73,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const byMo = (table: string, cols: string, order: string) => Promise.all(chunks(moNos).map((c) => fetchAllPages<Row>((from, to) =>
     admin.from(table).select(cols).in("mo_no", c).order("mo_no").order(order).order("id").range(from, to)))).then((x) => x.flat());
   const [skuRes, sums, mats, links, wos, subs, qcs] = await Promise.all([
-    Promise.all(chunks(skuCodes, 200).map((c) => admin.from("skus_v2").select("code, color_th, color, attribute_values, cover_image_r2_key, parent_sku_id").in("code", c).eq("is_active", true))),
+    Promise.all(chunks(skuCodes, 200).map((c) => admin.from("skus_v2").select("id, code, color_th, color, attribute_values, cover_image_r2_key, parent_sku_id").in("code", c).eq("is_active", true))),
     Promise.all(chunks(moNos).map((c) => fetchAllPages<Row>((from, to) => admin.from("mo_material_summary")
       .select("id, mo_no, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence")
       .in("mo_no", c).eq("is_active", true).order("mo_no").order("sequence", { ascending: true, nullsFirst: false }).order("id").range(from, to)))).then((x) => x.flat()),
@@ -93,10 +93,26 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // รูปวัตถุดิบ (cover SKU → fallback รูปสินค้าแม่ของวัตถุดิบ — เหมือน /api/mo/material-status) + ข้อมูลสินค้าแม่
   const compCodes = [...new Set([...sums, ...mats].map((r) => str(r.component_sku)).filter(Boolean))];
-  const [compRes, parRes] = await Promise.all([
-    Promise.all(chunks(compCodes, 200).map((c) => admin.from("skus_v2").select("code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", c).eq("is_active", true))),
+  const [compRes, parRes, uomRes, grpRes] = await Promise.all([
+    Promise.all(chunks(compCodes, 200).map((c) => admin.from("skus_v2").select("id, code, name_th, color_th, uom_id, material_group_id, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").in("code", c).eq("is_active", true))),
     parentIds.length ? admin.from("parent_skus_v2").select("id, code, name_th, sku_name, cover_image_r2_key").in("id", parentIds) : Promise.resolve({ data: [] as Row[] }),
+    // ตรวจข้อมูล/แก้ด่วน: ชื่อหน่วย + ชนิดวัตถุดิบที่มีในระบบ (ตารางเล็ก)
+    admin.from("uoms").select("id, name, active").order("name"),
+    admin.from("material_groups").select("id, name, is_active").order("sort_order", { ascending: true, nullsFirst: false }).order("name"),
   ]);
+  const uomName = new Map(((uomRes.data ?? []) as Row[]).map((u) => [String(u.id), str(u.name)]));
+  const grpName = new Map(((grpRes.data ?? []) as Row[]).map((g) => [String(g.id), str(g.name)]));
+  const masters: FamilyMasters = { components: {}, products: {}, bom_by_mo: {} };
+  for (const c of compRes.flatMap((r) => (r.data ?? []) as Row[])) {
+    if (masters.components[str(c.code)]) continue;
+    masters.components[str(c.code)] = { id: String(c.id), name: str(c.name_th) || null, uom: uomName.get(String(c.uom_id)) ?? null, type: grpName.get(String(c.material_group_id)) ?? null, color: str(c.color_th) || null };
+  }
+  for (const s of skuByCode.values()) masters.products[str(s.code)] = { id: String(s.id), color: str(s.color_th) || str(s.color) || null };
+  for (const m of mos) masters.bom_by_mo[str(m.mo_no)] = str(m.bom_code) || null;
+  const options = {
+    uoms: [...new Set(((uomRes.data ?? []) as Row[]).filter((u) => u.active !== false).map((u) => str(u.name)).filter(Boolean))],
+    types: [...new Set(((grpRes.data ?? []) as Row[]).filter((g) => g.is_active !== false).map((g) => str(g.name)).filter(Boolean))],
+  };
   const compImg = new Map<string, string>();
   for (const c of compRes.flatMap((r) => (r.data ?? []) as Row[])) {
     const rel = c.parent_skus_v2;
@@ -145,7 +161,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     let g = groups.get(key);
     if (!g) {
       const p = pid ? parentById.get(pid) : null;
-      g = { key, parent: p ? { code: str(p.code), name: str(p.sku_name) || str(p.name_th) || null, image_url: img(p.cover_image_r2_key, 400) } : null, mos: [], skus: [], buy: [], cut: [] };
+      g = { key, parent: p ? { code: str(p.code), name: str(p.sku_name) || str(p.name_th) || null, image_url: img(p.cover_image_r2_key, 400) } : null, mos: [], skus: [], buy: [], cut: [], masters };
       groups.set(key, g);
     }
     const sizes = Array.isArray(m.size_breakdown) ? (m.size_breakdown as { label?: unknown; qty?: unknown }[]).map((s) => ({ label: str(s.label), qty: Number(s.qty) || 0 })) : null;
@@ -195,5 +211,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   const families = [...groups.values()].sort((a, b) => (a.parent?.code ?? a.mos[0].product_sku).localeCompare(b.parent?.code ?? b.mos[0].product_sku, "th", { numeric: true }));
-  return NextResponse.json({ data: { families } satisfies FamilyPrintResponse, error: null });
+  return NextResponse.json({ data: { families, options } satisfies FamilyPrintResponse, error: null });
 }

@@ -58,8 +58,22 @@ export type FamilyInput = {
   /** null = ใบที่ SKU ไม่มีสินค้าแม่ → รวมเฉพาะ SKU ตัวเอง */
   parent: { code: string; name: string | null; image_url: string | null } | null;
   mos: FamilyMo[]; skus: FamilySku[]; buy: FamilyBuyLine[]; cut: FamilyCutLine[];
+  /** ข้อมูลหลักปัจจุบัน (ไม่ใช่สำเนาในใบ) — ใช้ตรวจข้อมูล/แก้ด่วน (lib/family-checks) */
+  masters?: FamilyMasters;
 };
-export type FamilyPrintResponse = { families: FamilyInput[] };
+export type FamilyMasters = {
+  /** วัตถุดิบ: รหัส → id + ค่าในข้อมูลวัตถุดิบตอนนี้ */
+  components: Record<string, { id: string; name: string | null; uom: string | null; type: string | null; color: string | null }>;
+  /** สินค้า (สี): รหัส → id + ชื่อสี */
+  products: Record<string, { id: string; color: string | null }>;
+  /** ใบสั่งผลิต → สูตร BOM ที่ใช้ */
+  bom_by_mo: Record<string, string | null>;
+};
+export type FamilyPrintResponse = {
+  families: FamilyInput[];
+  /** ตัวเลือกของช่องแก้ด่วน (ชื่อหน่วย / ชนิดวัตถุดิบ ที่มีในระบบ) */
+  options?: { uoms: string[]; types: string[] };
+};
 
 /* ─────────────── ตั้งค่าหน้าตา (ค่ากลาง ui_config "family_print_settings") ─────────────── */
 /** auto = รวมของเดียวกันต่างสี (ชื่อขึ้นต้นเหมือนกัน รองรับภาษาไทย) · strict = แบบเดิม (ต้องมีตัวคั่น) · none = แถวละรหัส */
@@ -429,6 +443,8 @@ export type FamilyPrintOptions = {
   settings: FamilyPrintSettings;
   /** บาร์โค้ดเลขใบที่สร้างไว้แล้วในเบราว์เซอร์ (woBarcodeHtml / woQrHtml) · key = เลขใบสั่งผลิต */
   codes?: Record<string, MoCodes>;
+  /** ตรวจข้อมูล (แบบ B): รหัส → คีย์ปัญหา · แถว/การ์ดที่มีรหัสนี้ติดกรอบเหลือง + ปุ่ม "แก้" (เฉพาะบนจอ ไม่ติดตอนพิมพ์) */
+  flags?: Record<string, string>;
 };
 export const FAMILY_DEFAULT_OPTIONS: FamilyPrintOptions = { buy: true, cut: true, only_to_buy: false, printed: "", settings: FAMILY_DEFAULT_SETTINGS };
 export type MoCodes = { line: string; qr: string };
@@ -452,6 +468,11 @@ export function moCodesHtml(moNo: string, codes: Record<string, MoCodes> | undef
   const qr = mode !== "line" && c.qr ? `<div class="fp-bc-qr">${c.qr}</div>` : "";
   return line || qr ? `<div class="fp-codes">${line}${qr}</div>` : "";
 }
+/** คีย์ปัญหาของแถว (รหัสแรกที่ติดธง) — ไม่มี = ค่าว่าง */
+const flagOf = (codes: (string | null | undefined)[], opt: FamilyPrintOptions) => codes.map((c) => (c ? opt.flags?.[c] : undefined)).find(Boolean) ?? "";
+const flagAttr = (fk: string) => (fk ? ` data-fix="${esc(fk)}"` : "");
+const penHtml = (fk: string) => (fk ? `<span class="fp-pen" data-fix="${esc(fk)}">แก้</span>` : "");
+
 /** ช่องที่สีนั้นไม่ใช้ — ว่าง / ขีด / ลายขีด ตามตั้งค่า */
 const emptyTd = (s: FamilyPrintSettings) =>
   s.empty === "hatch" ? `<td class="fp-empty"></td>` : s.empty === "dash" ? `<td class="fp-cell fp-dim">–</td>` : `<td></td>`;
@@ -494,7 +515,8 @@ function buyRowHtml(r: FamilyBuyRow, opt: FamilyPrintOptions): string {
     : opt.only_to_buy
       ? `${num(r.remaining)} ${esc(r.uom)}`
       : `${num(r.total)} ${esc(r.uom)}${r.remaining > EPS && r.remaining < r.total - EPS ? `<div class="fp-st">ต้องซื้อ ${num(r.remaining)}</div>` : r.remaining <= EPS ? `<div class="fp-st">ครบแล้ว</div>` : ""}`;
-  return `<tr>${imgTd(r.image_url, opt.settings)}<td>${name}</td>${r.cells.map((c) => buyCellHtml(c, opt)).join("")}<td class="text-right fp-tot">${tot}</td>${opt.settings.tick === "row" ? `<td class="text-center">${TICK}</td>` : ""}</tr>`;
+  const fk = flagOf([r.code, ...r.codes], opt);
+  return `<tr${fk ? ` class="fp-flag"${flagAttr(fk)}` : ""}>${imgTd(r.image_url, opt.settings)}<td>${name}${penHtml(fk)}</td>${r.cells.map((c) => buyCellHtml(c, opt)).join("")}<td class="text-right fp-tot">${tot}</td>${opt.settings.tick === "row" ? `<td class="text-center">${TICK}</td>` : ""}</tr>`;
 }
 
 /** หมวด "ชนิดวัตถุดิบ" ที่ยังไม่ได้ตั้ง — บอกให้รู้ว่าทำไมแถวนี้ไม่ไปรวมกับพวก */
@@ -540,7 +562,8 @@ function cutSectionHtml(s: FamilySheet, no: number, opt: FamilyPrintOptions): st
         ? `<td class="fp-cell${c.done ? " fp-done" : ""}"><div class="fp-q">${st.tick === "before" ? `${TICK}${num(c.pcs)}` : `${num(c.pcs)} ${TICK}`}</div>`
           + `${st.cell !== "num" && c.short ? `<div class="fp-sub fp-code">${esc(c.short)}</div>` : ""}${st.cell === "full" && c.colour ? `<div class="fp-sub">${esc(c.colour)}</div>` : ""}${c.done ? `<div class="fp-st">ตัดแล้ว</div>` : ""}</td>`
         : emptyTd(st))).join("");
-      body += `<tr>${imgTd(r.image_url, st)}<td>${label}</td><td class="text-center">×${num(r.pieces_per)}</td>${cells}<td class="text-right fp-tot">${num(r.total)}</td></tr>`;
+      const fk = flagOf([r.code, ...r.cells.map((c) => c?.code)], opt);
+      body += `<tr${fk ? ` class="fp-flag"${flagAttr(fk)}` : ""}>${imgTd(r.image_url, st)}<td>${label}${penHtml(fk)}</td><td class="text-center">×${num(r.pieces_per)}</td>${cells}<td class="text-right fp-tot">${num(r.total)}</td></tr>`;
     }
   }
   return `<section class="fp-section"><div class="section-title">${no}) บล็อกตัด <span class="fp-legend">ขนาดเดียวกันตัดรวดเดียวทุกสี · ติ๊กทีละช่องเมื่อตัดสีนั้นเสร็จ · ตัวเลข = จำนวนชิ้น (ไม่รวมอะไหล่)</span></div>`
@@ -553,11 +576,11 @@ function cutSectionHtml(s: FamilySheet, no: number, opt: FamilyPrintOptions): st
 /** หัวใบ: รูปรุ่น + รหัส/ชื่อ + จำนวน + การ์ดสีทุกสี (เลขใบสั่งผลิตเต็ม + บาร์โค้ด) */
 export function familyHeadHtml(s: FamilySheet, opt: FamilyPrintOptions): string {
   const st = s.stats, bc = opt.settings.barcode;
-  const cards = s.columns.map((c) => `<div class="fp-card"><div class="fp-cardtop">${img(c.image_url, "fp-cardimg")}<div class="fp-cardtxt"><div class="fp-skucode">${esc(c.sku)}</div>`
-    + `${c.variant ? `<div class="fp-sub">${esc(c.variant)}</div>` : ""}<div><b>${num(c.qty)}</b> ชิ้น</div>`
+  const cards = s.columns.map((c) => { const fk = flagOf([c.sku], opt); return `<div class="fp-card${fk ? " fp-flag" : ""}"${flagAttr(fk)}><div class="fp-cardtop">${img(c.image_url, "fp-cardimg")}<div class="fp-cardtxt"><div class="fp-skucode">${esc(c.sku)}</div>`
+    + `${c.variant ? `<div class="fp-sub">${esc(c.variant)}${penHtml(fk)}</div>` : penHtml(fk)}<div><b>${num(c.qty)}</b> ชิ้น</div>`
     + `${c.no_materials ? `<div class="fp-warn">ยังไม่มีรายการวัตถุดิบ</div>` : ""}</div></div>`
     + c.mos.map((m) => `<div class="fp-mo"><span class="fp-mo-no">${esc(m.mo_no)}</span>${c.mos.length > 1 ? ` <span class="fp-sub">${num(m.qty)} ชิ้น</span>` : ""}${moCodesHtml(m.mo_no, opt.codes, bc)}</div>`).join("")
-    + `</div>`).join("");
+    + `</div>`; }).join("");
   // บาร์โค้ดเส้นกว้าง ~5.5 ซม. → การ์ดแถวละ 3 · ไม่มีเส้น = แถวละ 6 เหมือนเดิม
   const perRow = bc === "both" || bc === "line" ? 3 : 6;
   return `<div class="doc-head-inline"><div class="doc-title">ใบสั่งผลิตรวมทั้งรุ่น</div><div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div></div>
@@ -619,6 +642,15 @@ const FAMILY_CSS = `
 .fp-bc-line .wo-barcode-svg { display: block; height: 8mm; }
 .fp-bc-text { margin-top: 0.5mm; text-align: center; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 7.5px; letter-spacing: 0.4mm; }
 .fp-bc-qr .wo-qr { display: block; width: 13mm; height: 13mm; }
+/* ตรวจข้อมูล (แบบ B) — กรอบเหลือง + ปุ่ม "แก้" เฉพาะบนจอ */
+@media screen {
+  .fp-flag > td { background: #fef3c7 !important; }
+  .fp-flag > td:first-child, .fp-card.fp-flag { box-shadow: inset 0.8mm 0 0 #f59e0b; }
+  .fp-card.fp-flag { background: #fef3c7; outline: 0.4mm solid #f59e0b; }
+  [data-fix] { cursor: pointer; }
+  .fp-pen { display: inline-block; margin-left: 1.5mm; padding: 0 1.5mm; border-radius: 1mm; background: #f59e0b; color: #fff; font-size: 9px; font-weight: 700; line-height: 1.6; vertical-align: 0.3mm; }
+}
+@media print { .fp-pen { display: none !important; } }
 .fp-size { font-size: 13px; font-weight: 800; line-height: 1.15; white-space: nowrap; }
 .fp-cardimg { width: 14mm; height: 14mm; object-fit: contain; flex-shrink: 0; background: #fff; }
 .fp-cardtxt { min-width: 0; line-height: 1.3; }

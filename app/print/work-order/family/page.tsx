@@ -20,6 +20,8 @@ import { WO_DEFAULT_STYLE, woBarcodeHtml, woQrHtml, woStyleCss } from "@/lib/wor
 import { scanUrl } from "@/lib/scan-code";
 import { useWoPrintColumns } from "@/components/wo-print-columns";
 import { FamilyPrintSettingsButton, useFamilyPrintSettings } from "@/components/family-print-settings";
+import { FamilyDataCheck } from "@/components/family-data-check";
+import { familyIssues, issueFlags } from "@/lib/family-checks";
 import {
   FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, familyHtmlData, familyOrientation,
   type FamilyPrintOptions, type FamilyPrintResponse, type FamilyPrintSettings, type FamilySheetKind, type MoCodes,
@@ -67,6 +69,9 @@ function FamilyPrintInner() {
   const [previewSettings, setPreviewSettings] = useState<FamilyPrintSettings | null>(null);   // ค่าที่กำลังปรับในแผง (ยังไม่บันทึก)
   const settings = previewSettings ?? savedSettings;
   const [codes, setCodes] = useState<Record<string, MoCodes>>({});
+  const [reloadKey, setReloadKey] = useState(0);                 // แก้ข้อมูลจากแผงตรวจแล้ว → โหลดใหม่
+  const [checkOpen, setCheckOpen] = useState(false);
+  const [activeIssue, setActiveIssue] = useState<string | null>(null);   // กดกรอบเหลืองบนเอกสาร (แบบ B)
   const isTrack = sheet !== "buy";
 
   // อ่านค่าที่จำไว้หลังเปิดหน้า (อ่านตอน render แรกจะไม่ตรงกับฝั่ง server)
@@ -83,7 +88,7 @@ function FamilyPrintInner() {
   useEffect(() => {
     if (!query) { setError("ไม่ได้เลือกใบสั่งผลิตหรือรุ่น"); return; }
     let on = true;
-    setData(null); setError(null);
+    setError(null);
     apiFetch(`/api/mo/family-print?${query}`).then((r) => r.json())
       .then((j: { data: FamilyPrintResponse | null; error: string | null }) => {
         if (!on) return;
@@ -92,7 +97,8 @@ function FamilyPrintInner() {
       })
       .catch(() => { if (on) setError("โหลดข้อมูลไม่สำเร็จ กรุณาลองใหม่"); });
     return () => { on = false; };
-  }, [query]);
+  }, [query, reloadKey]);
+  useEffect(() => { setData(null); }, [query]);   // เปลี่ยนรุ่น = ล้างของเก่า · โหลดซ้ำหลังแก้ข้อมูล = คงเอกสารเดิมไว้ระหว่างรอ
 
   // บาร์โค้ดเลขใบ (เส้น Code128 + QR ชี้หน้ากลาง /s/<เลขใบ>) — สร้างครั้งเดียวต่อการโหลด ตั้งค่าแค่เลือกว่าจะโชว์แบบไหน
   useEffect(() => {
@@ -108,7 +114,11 @@ function FamilyPrintInner() {
   const title = sheets.length === 1 ? sheets[0].title_code : `${sheets.length} รุ่น`;
   const fileName = docFileName(isTrack ? "ใบติดตามงานผลิต" : "ใบสั่งผลิตรวมทั้งรุ่น", title);
 
-  const html = useMemo(() => {
+  // ตรวจข้อมูล: ปัญหา + ธงบนเอกสาร (เฉพาะพรีวิวบนจอ — ไฟล์ที่พิมพ์/บันทึก PDF ไม่มีธง)
+  const issues = useMemo(() => (data?.families ?? []).flatMap(familyIssues), [data]);
+  const flags = useMemo(() => issueFlags(issues), [issues]);
+
+  const build = (withFlags: boolean) => {
     if (!sheets.length || !data) return "";
     const printed = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "Asia/Bangkok" });
     const style = woStyleCss(cols?.style ?? WO_DEFAULT_STYLE);
@@ -121,10 +131,24 @@ function FamilyPrintInner() {
       // ใบติดตามงานคอลัมน์เยอะ → แนวนอนเป็นค่าเริ่ม
       return buildReportHtmlMulti(buildFamilyTemplate(paper === "auto" ? "landscape" : paper, TRACK_CSS + style), pages, fileName);
     }
-    const opt: FamilyPrintOptions = { ...FAMILY_DEFAULT_OPTIONS, buy: sections !== "cut", cut: sections !== "buy", only_to_buy: onlyToBuy, printed, settings, codes };
+    const opt: FamilyPrintOptions = { ...FAMILY_DEFAULT_OPTIONS, buy: sections !== "cut", cut: sections !== "buy", only_to_buy: onlyToBuy, printed, settings, codes, flags: withFlags ? flags : undefined };
     const orientation = paper === "auto" ? familyOrientation(sheets) : paper;
     return buildReportHtmlMulti(buildFamilyTemplate(orientation, style), sheets.map((s) => familyHtmlData(s, opt)), fileName);
-  }, [sheets, data, isTrack, sheet, extras, blank, sections, onlyToBuy, paper, cols, fileName, settings, codes]);
+  };
+  const deps = [sheets, data, isTrack, sheet, extras, blank, sections, onlyToBuy, paper, cols, fileName, settings, codes, flags];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const html = useMemo(() => build(false), deps);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const previewHtml = useMemo(() => (isTrack ? html : build(true)), [...deps, html]);
+  // แบบ B: กดแถว/การ์ดกรอบเหลืองในพรีวิว → เปิดแผงตรวจข้อมูลที่การ์ดนั้น
+  const onDocLoad = (doc: Document) => {
+    doc.addEventListener("click", (e) => {
+      const el = (e.target as Element | null)?.closest?.("[data-fix]");
+      if (!el) return;
+      setActiveIssue(el.getAttribute("data-fix"));
+      setCheckOpen(true);
+    });
+  };
 
   const summary = sheets.length === 1
     ? `${sheets[0].title_code} · ${sheets[0].stats.skus} สี · ${sheets[0].stats.mos} ใบสั่งผลิต · ${sheets[0].stats.qty.toLocaleString("th-TH")} ชิ้น`
@@ -173,13 +197,16 @@ function FamilyPrintInner() {
           )}
           <Seg value={paper} onChange={setPaper} options={[{ v: "auto", label: "กระดาษอัตโนมัติ" }, { v: "landscape", label: "แนวนอน" }, { v: "portrait", label: "แนวตั้ง" }]} />
           <FamilyPrintSettingsButton current={savedSettings} onPreview={setPreviewSettings} onSaved={reloadSettings} />
+          <FamilyDataCheck issues={issues} options={data?.options ?? { uoms: [], types: [] }} open={checkOpen}
+            onOpenChange={(o) => { setCheckOpen(o); if (!o) setActiveIssue(null); }} active={activeIssue}
+            onFixed={() => setReloadKey((k) => k + 1)} />
         </div>
       </div>
       <div className="px-4 py-6">
         {error ? <div className="py-20 text-center text-red-500"><Icon name="warning" /> {error}</div>
           : data === null ? <div className="py-20 text-center text-slate-400">กำลังรวมข้อมูลทั้งรุ่น…</div>
           : sheets.length === 0 ? <div className="py-20 text-center text-slate-400">ไม่มีใบสั่งผลิตที่ยังเปิดอยู่ในรุ่นนี้</div>
-          : <PrintFrame html={html} fileName={fileName} maxWidth={1180} onPrint={() => html && printReportHtmlInNewWindow(html)} />}
+          : <PrintFrame html={previewHtml} fileName={fileName} maxWidth={1180} onDocLoad={onDocLoad} onPrint={() => html && printReportHtmlInNewWindow(html)} />}
       </div>
     </div>
   );
