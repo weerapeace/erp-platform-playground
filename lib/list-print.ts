@@ -27,8 +27,12 @@ export interface ListPrintColumn {
 export interface ListPrintColumnPref {
   key: string;
   on: boolean;
-  /** ชื่อหัวคอลัมน์ที่แก้เอง (ว่าง = ชื่อเดิม) */
+  /** ชื่อหัวคอลัมน์ที่แก้เอง (ว่าง = ชื่อเดิม) · ช่องที่เพิ่มเอง (c_…) ต้องมีชื่อ */
   label?: string;
+  /** ช่องเขียนมือ: แบบช่อง (เส้นให้เขียน / ช่องติ๊ก) — ใช้กับช่องที่เพิ่มเอง + ช่องสำเร็จรูป */
+  blank?: "line" | "box";
+  /** ช่องเขียนมือ: ความกว้าง (มม.) */
+  widthMm?: number;
 }
 
 export interface ListPrintSettings {
@@ -75,9 +79,20 @@ export const EXTRA_COLUMNS: ListPrintColumn[] = [
   { key: "x_sign", label: "ลายเซ็นรับ", blank: "line", widthMm: 26 },
 ];
 const EXTRA_BY_KEY = new Map(EXTRA_COLUMNS.map((c) => [c.key, c]));
-export const isExtraColumn = (key: string) => EXTRA_BY_KEY.has(key);
+/** ช่องที่ผู้ใช้เพิ่มเองและตั้งชื่อเอง (key = "c_<รหัส>") — เพิ่มได้หลายช่อง */
+export const isCustomColumn = (key: string) => /^c_[a-z0-9]{1,12}$/.test(key);
+/** ช่องเขียนมือ (สำเร็จรูป หรือ เพิ่มเอง) — ลบออกจากรายการได้ */
+export const isExtraColumn = (key: string) => EXTRA_BY_KEY.has(key) || isCustomColumn(key);
+export const MAX_CUSTOM_COLUMNS = 8;
+/** ความกว้างช่องเขียนมือให้เลือก (มม.) */
+export const BLANK_WIDTHS: { mm: number; label: string }[] = [{ mm: 14, label: "แคบ" }, { mm: 25, label: "กลาง" }, { mm: 40, label: "กว้าง" }];
+/** ช่องใหม่ที่ผู้ใช้ตั้งชื่อเอง */
+export const newCustomColumn = (label: string): ListPrintColumnPref => ({
+  key: `c_${Date.now().toString(36).slice(-6)}${Math.floor(Math.random() * 1296).toString(36)}`,
+  on: true, label: label.trim().slice(0, 40), blank: "line", widthMm: 25,
+});
 
-const KEY_RE = /^[a-z_]{1,24}$/;
+const KEY_RE = /^[a-z0-9_]{1,24}$/;
 const PAPERS: ListPrintPaper[] = ["A4", "A5"];
 const IMAGES: ListPrintImage[] = ["none", "s", "m", "l"];
 const DENSITIES: ListPrintDensity[] = ["compact", "normal", "airy"];
@@ -104,9 +119,16 @@ export function cleanListPrintSettings(raw: unknown, available: ListPrintColumn[
       const key = String(x.key ?? "");
       if (!KEY_RE.test(key) || seen.has(key)) continue;
       if (!available.some((a) => a.key === key) && !isExtraColumn(key)) continue;
-      seen.add(key);
       const label = typeof x.label === "string" ? x.label.trim().slice(0, 40) : "";
-      columns.push({ key, on: x.on !== false, ...(label ? { label } : {}) });
+      if (isCustomColumn(key) && !label) continue;   // ช่องที่เพิ่มเองต้องมีชื่อ
+      seen.add(key);
+      const pref: ListPrintColumnPref = { key, on: x.on !== false, ...(label ? { label } : {}) };
+      if (isExtraColumn(key)) {
+        if (x.blank === "line" || x.blank === "box") pref.blank = x.blank;
+        const w = Number(x.widthMm);
+        if (Number.isFinite(w) && w > 0) pref.widthMm = Math.min(80, Math.max(8, Math.round(w)));
+      }
+      columns.push(pref);
     }
   const base = Array.isArray(o.columns) ? columns : fallback.columns.map((c) => ({ ...c }));
   for (const a of available) if (!base.some((c) => c.key === a.key)) base.push({ key: a.key, on: true });
@@ -147,10 +169,17 @@ export function resolveListColumns(s: ListPrintSettings, available: ListPrintCol
   const out: ListPrintColumn[] = [];
   for (const pref of s.columns) {
     if (!pref.on) continue;
-    const def = available.find((a) => a.key === pref.key) ?? EXTRA_BY_KEY.get(pref.key);
+    const def = available.find((a) => a.key === pref.key) ?? EXTRA_BY_KEY.get(pref.key)
+      ?? (isCustomColumn(pref.key) ? { key: pref.key, label: pref.label ?? "", blank: "line" as const, widthMm: 25 } : undefined);
     if (!def) continue;
     if (def.key === "img" && s.image === "none") continue;
-    out.push({ ...def, label: pref.label || def.label });
+    const col: ListPrintColumn = { ...def, label: pref.label || def.label };
+    if (def.blank) {
+      col.blank = pref.blank ?? def.blank;
+      col.widthMm = pref.widthMm ?? def.widthMm;
+      col.align = col.blank === "box" ? "center" : undefined;
+    }
+    out.push(col);
   }
   return out;
 }

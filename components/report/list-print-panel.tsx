@@ -10,7 +10,7 @@ import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import {
-  DENSITY_LABEL, EXTRA_COLUMNS, FONT_MAX, FONT_MIN, IMAGE_LABEL, applyListPrintPreset, isExtraColumn,
+  BLANK_WIDTHS, DENSITY_LABEL, EXTRA_COLUMNS, FONT_MAX, FONT_MIN, IMAGE_LABEL, MAX_CUSTOM_COLUMNS, applyListPrintPreset, isCustomColumn, isExtraColumn, newCustomColumn,
   type ListPrintColumn, type ListPrintColumnPref, type ListPrintDensity, type ListPrintImage, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
 import type { ListPrintSettingsState } from "@/components/report/use-list-print-settings";
@@ -57,7 +57,14 @@ export function ListPrintPanel({
   const s = state.settings;
   const set = (patch: Partial<ListPrintSettings>) => state.setSettings({ ...s, ...patch });
   const setCols = (columns: ListPrintColumnPref[]) => set({ columns });
-  const labelOf = (key: string) => available.find((c) => c.key === key)?.label ?? EXTRA_COLUMNS.find((c) => c.key === key)?.label ?? key;
+  const labelOf = (key: string) => available.find((c) => c.key === key)?.label ?? EXTRA_COLUMNS.find((c) => c.key === key)?.label ?? "ช่องใหม่";
+  const patchCol = (key: string, patch: Partial<ListPrintColumnPref>) => setCols(s.columns.map((x) => (x.key === key ? { ...x, ...patch } : x)));
+  const customCount = s.columns.filter((c) => isCustomColumn(c.key)).length;
+  const addCustom = async () => {
+    const name = await askText({ title: "เพิ่มช่องใหม่", message: "ตั้งชื่อหัวช่อง — ในใบจะเป็นช่องว่างไว้เขียนหรือติ๊กด้วยมือ", placeholder: "เช่น วันที่รับ, คนตัด, จำนวนเสีย", required: true });
+    if (!name?.trim()) return;
+    setCols([...s.columns, newCustomColumn(name)]);
+  };
   const visibleCols = s.columns.filter((c) => available.some((a) => a.key === c.key) || isExtraColumn(c.key));
   const move = (key: string, dir: -1 | 1) => {
     const list = [...s.columns];
@@ -149,17 +156,33 @@ export function ListPrintPanel({
       <Section title="คอลัมน์" hint="ติ๊ก · เลื่อนลำดับ · แก้ชื่อหัว">
         <div className="space-y-1">
           {visibleCols.map((c, i) => (
-            <div key={c.key} className="flex items-center gap-1">
+            <div key={c.key}>
+            <div className="flex items-center gap-1">
               <input type="checkbox" checked={c.on} aria-label={`พิมพ์คอลัมน์ ${labelOf(c.key)}`}
                 onChange={(e) => setCols(s.columns.map((x) => (x.key === c.key ? { ...x, on: e.target.checked } : x)))} className="h-4 w-4 shrink-0 accent-blue-600" />
               <input value={c.label ?? ""} placeholder={labelOf(c.key)} maxLength={40}
-                onChange={(e) => setCols(s.columns.map((x) => (x.key === c.key ? { ...x, label: e.target.value || undefined } : x)))}
+                onChange={(e) => patchCol(c.key, { label: e.target.value || undefined })}
+                onBlur={(e) => { if (isCustomColumn(c.key) && !e.target.value.trim()) patchCol(c.key, { label: "ช่องใหม่" }); }}
                 className={`h-7 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-xs ${c.on ? "text-slate-800" : "text-slate-400"} placeholder:text-slate-500`} />
               <button type="button" disabled={i === 0} onClick={() => move(c.key, -1)} aria-label="เลื่อนขึ้น" className="h-7 w-6 shrink-0 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"><Icon value="i:chevron-up" /></button>
               <button type="button" disabled={i === visibleCols.length - 1} onClick={() => move(c.key, 1)} aria-label="เลื่อนลง" className="h-7 w-6 shrink-0 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"><Icon value="i:chevron-down" /></button>
               {isExtraColumn(c.key)
                 ? <button type="button" onClick={() => setCols(s.columns.filter((x) => x.key !== c.key))} aria-label={`ลบช่อง ${labelOf(c.key)}`} className="h-7 w-6 shrink-0 rounded text-slate-300 hover:bg-red-50 hover:text-red-600"><Icon value="i:x" /></button>
                 : <span className="w-6 shrink-0" />}
+            </div>
+            {isExtraColumn(c.key) && c.on && (
+              <div className="ml-5 mt-1 flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
+                {(["line", "box"] as const).map((b) => {
+                  const cur = c.blank ?? EXTRA_COLUMNS.find((x) => x.key === c.key)?.blank ?? "line";
+                  return <button key={b} type="button" onClick={() => patchCol(c.key, { blank: b })} className={`${segBtn(cur === b)} !h-6 !px-2 !text-[11px]`}>{b === "line" ? "ช่องเขียน" : "ช่องติ๊ก ☐"}</button>;
+                })}
+                <span className="mx-1 text-slate-300">|</span>
+                {BLANK_WIDTHS.map((w) => {
+                  const cur = c.widthMm ?? EXTRA_COLUMNS.find((x) => x.key === c.key)?.widthMm ?? 25;
+                  return <button key={w.mm} type="button" onClick={() => patchCol(c.key, { widthMm: w.mm })} className={`${segBtn(cur === w.mm)} !h-6 !px-2 !text-[11px]`}>{w.label}</button>;
+                })}
+              </div>
+            )}
             </div>
           ))}
         </div>
@@ -169,6 +192,9 @@ export function ListPrintPanel({
             const has = s.columns.some((c) => c.key === x.key);
             return <button key={x.key} type="button" disabled={has} onClick={() => setCols([...s.columns, { key: x.key, on: true }])} className={`${segBtn(false)} disabled:opacity-40`}>+ {x.label}</button>;
           })}
+          <button type="button" disabled={customCount >= MAX_CUSTOM_COLUMNS} onClick={() => void addCustom()}
+            className="h-7 rounded-lg border border-dashed border-blue-400 bg-blue-50/40 px-2.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-40"
+            title={customCount >= MAX_CUSTOM_COLUMNS ? `เพิ่มเองได้สูงสุด ${MAX_CUSTOM_COLUMNS} ช่อง` : "เพิ่มช่องว่าง ตั้งชื่อเอง"}>+ ช่องใหม่ (ตั้งชื่อเอง)</button>
         </div>
       </Section>
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  applyListPrintPreset, cleanListPrintSettings, defaultListPrintSettings, estimateListPages, listPrintCss,
-  renderListTable, resolveListColumns, type ListPrintColumn,
+  applyListPrintPreset, cleanListPrintSettings, defaultListPrintSettings, estimateListPages, isCustomColumn, listPrintCss,
+  newCustomColumn, renderListTable, resolveListColumns, type ListPrintColumn,
 } from "@/lib/list-print";
 
 const AVAIL: ListPrintColumn[] = [
@@ -40,6 +40,33 @@ describe("list print settings", () => {
     const s = { ...D, columns: [{ key: "qty", on: true, label: "เหลือ" }, { key: "img", on: true }, { key: "x_check", on: true }, { key: "sku", on: false }, { key: "name", on: true }] };
     expect(resolveListColumns(s, AVAIL).map((c) => `${c.key}:${c.label}`)).toEqual(["qty:เหลือ", "img:รูป", "x_check:ตรวจแล้ว", "name:ชื่อสินค้า"]);
     expect(resolveListColumns({ ...s, image: "none" }, AVAIL).map((c) => c.key)).toEqual(["qty", "x_check", "name"]);
+  });
+
+  it("custom named columns: keep name/type/width, drop ones without a name, print as blank cells", () => {
+    const c = newCustomColumn("  วันที่รับ ");
+    expect(isCustomColumn(c.key)).toBe(true);
+    expect(c).toMatchObject({ on: true, label: "วันที่รับ", blank: "line", widthMm: 25 });
+    const s = cleanListPrintSettings({
+      ...D,
+      columns: [{ key: "name", on: true }, { ...c, widthMm: 999 }, { key: "c_box1", on: true, label: "ผ่าน QC", blank: "box" }, { key: "c_noname", on: true, label: " " }, { key: "c_BAD!", on: true, label: "x" }],
+    }, AVAIL, D);
+    expect(s.columns.slice(0, 3)).toEqual([{ key: "name", on: true }, { ...c, widthMm: 80 }, { key: "c_box1", on: true, label: "ผ่าน QC", blank: "box" }]);
+    expect(s.columns.some((x) => x.key === "c_noname")).toBe(false);
+    const cols = resolveListColumns(s, AVAIL);
+    expect(cols.slice(0, 3).map((x) => [x.key, x.label, x.blank, x.widthMm, x.align])).toEqual([
+      ["name", "ชื่อสินค้า", undefined, undefined, undefined],
+      [c.key, "วันที่รับ", "line", 80, undefined],
+      ["c_box1", "ผ่าน QC", "box", 25, "center"],
+    ]);
+    const html = renderListTable(cols.slice(0, 3), [{ name: "ก" }]);
+    expect(html).toContain('<th class="xb">วันที่รับ</th>');
+    expect(html).toContain(`<col style="width:80mm" />`);
+    expect(html).toContain(`<td class="c xb"><span class="chk"></span></td>`);
+  });
+
+  it("a quick write-in column can switch to a tick box and change width", () => {
+    const s = { ...D, columns: [{ key: "x_note", on: true, blank: "box" as const, widthMm: 14 }] };
+    expect(resolveListColumns(s, AVAIL)[0]).toMatchObject({ key: "x_note", label: "หมายเหตุ", blank: "box", widthMm: 14, align: "center" });
   });
 
   it("presets put their columns first and switch the rest off", () => {
