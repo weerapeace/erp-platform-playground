@@ -111,6 +111,47 @@ describe("กล่องไหนโชว์ · อยู่แผ่นไห
   });
 });
 
+describe("ตารางบล็อกตัด: เฉพาะแถวที่มีกว้าง x ยาว", () => {
+  // แบบเดียวกับใบจริงในรูปเจ้าของ: ซิป (ไม่มีขนาด) · แค่กว้าง · แค่ยาว · ครบกว้าง x ยาว 2 แถว
+  const MIXED: MoDetail = {
+    id: "m", mo_no: "MO-T", qty: 35, materials: [
+      { component_sku: "ZIP-1", component_name: "ซิปไนล่อน", material_type: "ซิป", qty_per: 0.27, uom: "หลา" },
+      { component_sku: "W-ONLY", component_name: "แถบกว้างอย่างเดียว", material_type: "ตัวเสริม", cut_width: 5, qty_per: 0.1, uom: "หลา" },
+      { component_sku: "L-ONLY", component_name: "แถบยาวอย่างเดียว", material_type: "ตัวเสริม", cut_length: 30, qty_per: 0.1, uom: "หลา" },
+      { component_sku: "FT-004", component_name: "ฟองน้ำ 4 มิล", material_type: "ตัวเสริม", cut_block_code: "C1-2-269", cut_width: 42, cut_length: 41, pieces: 1, qty_per: 0.18, uom: "Units" },
+      { component_sku: "V465-2", component_name: "ผ้ากิงกิต", material_type: "ผ้า", cut_block_code: "C1-2-260", cut_width: 13, cut_length: 38, pieces: 1, qty_per: 0.05, uom: "หลา" },
+    ],
+  };
+  const render = (cols: WoPrintColumns) => {
+    const data = woSectionDataList(buildWoHtmlData(MIXED, null, cols), cols)[0];
+    return buildReportHtml(buildWorkOrderTemplate(cols), data);
+  };
+
+  it("ปิดอยู่ (ค่าเริ่ม) = โชว์ครบทุกแถว", () => {
+    const html = render(normalizeWoColumns(null));
+    for (const c of ["ZIP-1", "W-ONLY", "L-ONLY", "FT-004", "V465-2"]) expect(html).toContain(c);
+    expect(html).not.toContain("ไม่แสดง");
+  });
+
+  it("เปิด = เหลือเฉพาะกว้าง x ยาว · เรียงลำดับใหม่ · บอกจำนวนที่ซ่อน", () => {
+    const cols = normalizeWoColumns({ lines_cut_only: true, sections: { summary: false } });
+    const data = buildWoHtmlData(MIXED, null, cols);
+    expect((data.lines as { code: string; idx: string }[]).map((l) => [l.idx, l.code])).toEqual([["1", "FT-004"], ["2", "V465-2"]]);   // เรียงตามชนิด: ตัวเสริม ก่อน ผ้า
+    const html = render(cols);
+    expect(html).not.toContain("ZIP-1");
+    expect(html).not.toContain("W-ONLY");
+    expect(html).not.toContain("L-ONLY");
+    expect(html).toContain("ไม่แสดง 3 รายการที่ไม่มีขนาดตัด");
+  });
+
+  it("ใบที่ไม่มีแถวกว้าง x ยาวเลย = ข้อความแจ้งแทนตารางเปล่า", () => {
+    const cols = normalizeWoColumns({ lines_cut_only: true });
+    const noCut: MoDetail = { ...MIXED, materials: MIXED.materials!.slice(0, 3) };
+    const html = buildReportHtml(buildWorkOrderTemplate(cols), woSectionDataList(buildWoHtmlData(noCut, null, cols), cols)[0]);
+    expect(html).toContain("ใบนี้ไม่มีรายการที่มีขนาดตัด");
+  });
+});
+
 describe("หัวใบ + ค่าที่บันทึกไว้", () => {
   it("ค่าเก่า (ไม่มี header/signoff/extras) ได้ค่าเริ่มต้น · ลำดับกล่องหัวซ่อมให้ครบ", () => {
     const n = normalizeWoColumns({ header: { order: ["meta", "meta", "bogus"], photo_mm: 999, show: { qr: false } } });

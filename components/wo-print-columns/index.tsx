@@ -299,6 +299,17 @@ export function WoColumnSettings({ onPreview, onSaved }: {
 
                 <div>
                   <div className="text-[12px] font-bold text-slate-700 mb-1">2) ตาราง “รายการวัตถุดิบ / บล็อกตัด”</div>
+                  {/* กรองแถว — ใบบล็อกตัดให้ช่างตัดเห็นแต่ชิ้นที่ต้องตัดจริง */}
+                  <label className="flex items-start gap-1.5 cursor-pointer mb-1"
+                    title="แถวที่มีแค่กว้าง หรือแค่ยาว หรือมีแต่จำนวน (เช่น ซิป ด้าย) จะไม่แสดง">
+                    <input type="checkbox" checked={!!draft.lines_cut_only}
+                      onChange={(e) => setDraft((d) => ({ ...d, lines_cut_only: e.target.checked }))}
+                      className="w-4 h-4 accent-indigo-600 shrink-0 mt-0.5" />
+                    <span className="text-[12px] text-slate-700 leading-snug">
+                      แสดงเฉพาะแถวที่มี <b>กว้าง x ยาว</b>
+                      <br /><span className="text-[10px] text-slate-400">มีแค่กว้าง / แค่ยาว / แค่จำนวน = ไม่แสดง · ใต้ตารางบอกจำนวนแถวที่ซ่อน</span>
+                    </span>
+                  </label>
                   <ColumnRows list={draft.lines} onChange={(lines) => setDraft((d) => ({ ...d, lines }))} />
                 </div>
 

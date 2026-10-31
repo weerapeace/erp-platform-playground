@@ -210,6 +210,8 @@ export const WO_EXTRA_LABELS: { key: keyof WoExtras; label: string; hint: string
 export type WoPrintColumns = {
   summary: WoColumn[]; lines: WoColumn[]; style?: WoPrintStyle; sections?: WoSections;
   header?: WoHeader; signoff?: WoSignoff; extras?: WoExtras;
+  /** ตาราง "รายการวัตถุดิบ / บล็อกตัด" โชว์เฉพาะแถวที่มีทั้งกว้างและยาว (ค่าเริ่ม = โชว์ทุกแถว) */
+  lines_cut_only?: boolean;
 };
 
 export const WO_DEFAULT_STYLE: WoPrintStyle = { border_mm: 0.12, border_color: "#94a3b8", border_mode: "all", font_scale: 1 };
@@ -392,6 +394,7 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
     header: normalizeWoHeader(obj.header),
     signoff: normalizeWoSignoff(obj.signoff),
     extras: normalizeWoExtras(obj.extras),
+    lines_cut_only: bool((obj as { lines_cut_only?: unknown }).lines_cut_only, false),
   };
 }
 
@@ -454,7 +457,7 @@ const colsHtml = (cols: WoColumn[], summary: boolean) => {
     const cls = summary ? (SUMMARY_CELL_OVERRIDE[c.key]?.cls ?? base.cls) : base.cls;
     return `<td${cls ? ` class="${cls}"` : ""}>${base.body}</td>`;
   }).join("\n        ");
-  return { th, td };
+  return { th, td, count: use.length };
 };
 
 function specLabel(key: string, fallback: string) {
@@ -656,11 +659,17 @@ function productSpecRows(spec: ProductSpec | null) {
 /** cols = ตั้งค่าใบพิมพ์ (ไม่ส่ง = ค่าเริ่มต้น) — ใช้สร้างกล่องลงชื่อ/ส่วนเสริมของใบนี้ */
 export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null, cols?: WoPrintColumns | null): Record<string, unknown> {
   const mats = sortedMaterials(mo);   // ลำดับเดียวกับ woTableRows → zip รูปเข้าแถวได้ตรงตัว
-  const lines = woTableRows(mo).map((row, i) => ({
+  const allLines = woTableRows(mo).map((row, i) => ({
     idx: row[0], component_name: row[1], material_type: row[2], cut_block_code: row[3],
     cut_size: row[4], total_pieces: row[5], required: row[6], uom: row[7], code: row[8] || "-",
     image_html: matImgHtml(mats[i]?.image_url),
+    has_cut: (Number(mats[i]?.cut_width) || 0) > 0 && (Number(mats[i]?.cut_length) || 0) > 0,
   }));
+  // "เฉพาะแถวที่มีขนาดตัด" — ตัดแถวที่มีแค่กว้าง / แค่ยาว / แค่จำนวน (ซิป ด้าย ฯลฯ) ออก แล้วเรียงลำดับใหม่ 1..n
+  // (เฉพาะใบพิมพ์ HTML — ตาราง pdfme ใช้ woTableRows ครบทุกแถวเหมือนเดิม)
+  const cutOnly = !!cols?.lines_cut_only;
+  const lines = cutOnly ? allLines.filter((l) => l.has_cut).map((l, i) => ({ ...l, idx: String(i + 1) })) : allLines;
+  const linesHidden = allLines.length - lines.length;
   const sec = cols?.sections ?? WO_DEFAULT_SECTIONS;
   const ex = cols?.extras ?? WO_DEFAULT_EXTRAS;
   const boxes = sec.signature ? woSignoffBoxes(mo, cols?.signoff ?? WO_DEFAULT_SIGNOFF, ex) : [];
@@ -681,6 +690,8 @@ export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null, cols?: W
     material_summary: materialSummaryRows(mo),
     product_spec_rows: productSpecRows(spec),
     lines,
+    lines_cut_empty: cutOnly && lines.length === 0 && allLines.length > 0,
+    lines_hidden: linesHidden > 0 ? numTh(linesHidden) : "",
     signoff_html: signHtml(boxes),
     wo_extras_html: extras.map((p) => p.html).join("\n"),
     ...perSheet,
@@ -729,8 +740,10 @@ function woBodyHtml(cols: WoPrintColumns): string {
         ${l.td}
       </tr>
       {{/lines}}
+      {{#lines_cut_empty}}<tr><td colspan="${l.count}" class="text-center muted">— ใบนี้ไม่มีรายการที่มีขนาดตัด (กว้าง x ยาว) —</td></tr>{{/lines_cut_empty}}
     </tbody>
   </table>
+  {{#lines_hidden}}<div class="muted lines-hidden">ไม่แสดง {{lines_hidden}} รายการที่ไม่มีขนาดตัด (กว้าง x ยาว)</div>{{/lines_hidden}}
 </section>{{/sec_lines}}`);
 
   if (sections.detail) parts.push(`{{#sec_detail}}<section class="product-detail">
@@ -839,6 +852,7 @@ const WO_EXTRAS_CSS = `
 .returns-table td { height: 7mm; }
 .wo-note-box { margin-top: 3mm; border: 0.15mm solid #94a3b8; padding: 1.6mm 2mm; break-inside: avoid; page-break-inside: avoid; }
 .wo-note-line { display: block; height: 6mm; }
+.lines-hidden { margin-top: 1mm; }
 @media print {
   .returns-table td { height: 6mm; }
 }
