@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardPayroll } from "@/lib/payroll-auth";
 import { writeAudit } from "@/lib/audit";
-import { money, roundMoney, salaryDayDivisor, lateDeduction, absenceDeduction, overtimeAmount } from "@/lib/payroll-calc";
+import { money, roundMoney, salaryDayDivisor, lateDeduction, absenceDeduction, overtimeAmount, payrollHourlyRate } from "@/lib/payroll-calc";
 import { isPayrollContractor } from "@/lib/payroll-attendance-rules";
 import { getPayrollGlobalRules } from "@/lib/payroll-global-rules-db";
 
@@ -68,16 +68,8 @@ function workableDate(start: string, end: string, holidays: Set<string>): string
   return end;
 }
 
-/** เรทค่าจ้างต่อชั่วโมง (สูตรตรงเครื่องคำนวณ) */
-function hourlyRate(contract: Row, period: Row, setting: Row): number {
-  const hoursPerDay = money(period.default_hours_per_day) || 8;
-  const wt = String(contract.wage_type ?? "monthly");
-  if (wt === "hourly") return money(contract.hourly_wage);
-  if (wt === "daily") return hoursPerDay ? money(contract.daily_wage) / hoursPerDay : 0;
-  const isOffice = String(setting?.payroll_group_id ?? "").trim().toLowerCase() === "office";
-  const divisor = salaryDayDivisor(isOffice, undefined, money(period.default_work_days));
-  return divisor && hoursPerDay ? money(contract.base_salary) / divisor / hoursPerDay : 0;
-}
+/** เรทค่าจ้างต่อชั่วโมง — กฎกลางอยู่ที่ lib/payroll-calc (หน้าตรวจทั้งงวดใช้ตัวเดียวกัน) */
+const hourlyRate = payrollHourlyRate;
 
 export async function GET(req: NextRequest) {
   const denied = await guardPayroll(req); if (denied) return denied;

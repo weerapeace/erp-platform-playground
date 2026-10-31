@@ -78,6 +78,22 @@ export function salaryDayDivisor(isOffice: boolean, scheduledWorkDays?: number, 
   return money(scheduledWorkDays) || money(defaultWorkDays) || 26;
 }
 
+/** เรทค่าจ้างต่อชั่วโมงที่ใช้ตีราคา สาย/ขาด/OT (ฟอร์มลงเวลา + หน้าตรวจทั้งงวด ใช้ตัวเดียวกัน)
+ *  รายชม. = ค่าจ้างรายชม. · รายวัน = ค่าแรง ÷ ชม./วัน · รายเดือน = เงินเดือน ÷ ตัวหารวัน ÷ ชม./วัน */
+export function payrollHourlyRate(
+  contract: { wage_type?: unknown; hourly_wage?: unknown; daily_wage?: unknown; base_salary?: unknown },
+  period: { default_hours_per_day?: unknown; default_work_days?: unknown },
+  setting: { payroll_group_id?: unknown } | null | undefined,
+): number {
+  const hoursPerDay = money(period.default_hours_per_day) || 8;
+  const wt = String(contract.wage_type ?? "monthly");
+  if (wt === "hourly") return money(contract.hourly_wage);
+  if (wt === "daily") return hoursPerDay ? money(contract.daily_wage) / hoursPerDay : 0;
+  const isOffice = String(setting?.payroll_group_id ?? "").trim().toLowerCase() === "office";
+  const divisor = salaryDayDivisor(isOffice, undefined, money(period.default_work_days));
+  return divisor && hoursPerDay ? money(contract.base_salary) / divisor / hoursPerDay : 0;
+}
+
 /** อัตรารายชั่วโมง (เหมือน attendanceHourlyRate) */
 export function attendanceHourlyRate(
   contract: { wage_type?: string; hourly_wage?: number; daily_wage?: number; base_salary?: number },

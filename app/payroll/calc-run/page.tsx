@@ -212,6 +212,12 @@ export default function PayrollCalcRunPage() {
             {progress}
           </span>
         )}
+        {periodId && (
+          <Link href={`/payroll/period-recheck?period_id=${encodeURIComponent(periodId)}`}
+            className="h-10 px-4 flex items-center rounded-lg border border-slate-300 bg-white text-sm text-slate-600 hover:bg-slate-50">
+            ตรวจทั้งงวด (ที่มาของเงิน)
+          </Link>
+        )}
       </div>
 
       <ValidationPanel validation={validation} loading={validationLoading} />
@@ -296,9 +302,14 @@ export default function PayrollCalcRunPage() {
           {saveMsg && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-emerald-50 text-emerald-800 px-4 py-2 text-sm mb-3">
               <span>{saveMsg}</span>
-              <Link href={`/payroll/review?period_id=${encodeURIComponent(periodId)}`} className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">
-                ไปตรวจยอดเงินเดือน
-              </Link>
+              <span className="flex gap-2">
+                <Link href={`/payroll/period-recheck?period_id=${encodeURIComponent(periodId)}`} className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">
+                  ตรวจทั้งงวด (ที่มาของเงิน)
+                </Link>
+                <Link href={`/payroll/review?period_id=${encodeURIComponent(periodId)}`} className="rounded-lg border border-emerald-200 bg-white px-3 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100">
+                  ไปตรวจยอดเงินเดือน
+                </Link>
+              </span>
             </div>
           )}
 

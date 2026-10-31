@@ -13,7 +13,7 @@ import { loadPeriodContractMap } from "@/lib/payroll-period-contracts-db";
 
 type Row = Record<string, unknown>;
 const MANUAL_STATUSES = new Set(["approved", "review", "draft"]);
-const isManualStatus = (s: unknown) => MANUAL_STATUSES.has(String(s ?? "approved"));
+export const isManualStatus = (s: unknown) => MANUAL_STATUSES.has(String(s ?? "approved"));
 const hasInput = (v: unknown) => v !== undefined && v !== null && v !== "";
 
 // ---- contract helpers (ตรง worker.js) ----
@@ -48,7 +48,7 @@ export function effectiveRange(period: Row, contract: Row): { start: string; end
   const valid = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
   return { start: valid(cs) && cs > ps ? cs : ps, end: valid(ce) && ce < pe ? ce : pe };
 }
-function scheduledWorkDays(period: Row, contract: Row): number {
+export function scheduledWorkDays(period: Row, contract: Row): number {
   const wd = scheduleWeekdays(contract.work_schedule_id); let n = 0;
   const { start, end } = effectiveRange(period, contract);
   eachDay(start, end, (d) => { if (wd.includes(d.getUTCDay())) n++; }); return n;
@@ -58,7 +58,7 @@ export function payableWorkDays(period: Row, contract: Row): number {
   const { start, end } = effectiveRange(period, contract);
   eachDay(start, end, (d, iso) => { if (wd.includes(d.getUTCDay()) && !hol.has(iso)) n++; }); return n;
 }
-function isPayableWorkDate(iso: string, contract: Row, period: Row): boolean {
+export function isPayableWorkDate(iso: string, contract: Row, period: Row): boolean {
   const d = new Date(`${iso}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return false;
   const { start, end } = effectiveRange(period, contract);
@@ -131,7 +131,7 @@ function aggregateAdjustments(rows: Row[]): Map<string, Row> {
 
 const recurringAmount = (it: Row) => (it.calculation_method || "fixed") === "fixed"
   ? money(it.amount_per_period) : roundMoney(money(it.quantity_default) * money(it.rate_default));
-function aggregateRecurring(items: Row[], period: Row): Map<string, Row[]> {
+export function aggregateRecurring(items: Row[], period: Row): Map<string, Row[]> {
   const m = new Map<string, Row[]>();
   for (const it of items) {
     if (it.end_date && String(it.end_date) < String(period.start_date)) continue;

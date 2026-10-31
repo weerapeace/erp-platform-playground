@@ -38,6 +38,7 @@ const FALLBACK_NAV: NavGroup[] = [
     { href: "/payroll/periods", icon: "🗓️", label: "งวดเงินเดือน" },
     { href: "/payroll/manual-input", icon: "✏️", label: "ข้อมูลคำนวณ" },
     { href: "/payroll/review", icon: "✅", label: "ตรวจสอบเงินเดือน" },
+    { href: "/payroll/period-recheck", icon: "🧮", label: "ตรวจทั้งงวด" },
     { href: "/payroll/calc-verify", icon: "🧮", label: "เทียบยอดคำนวณ" },
     { href: "/payroll/calc-run", icon: "▶️", label: "คำนวณงวด (พรีวิว)" },
     { href: "/payroll/payslips", icon: "🧾", label: "สลิปเงินเดือน" },

@@ -46,6 +46,7 @@ export const COMMANDS: SearchCommand[] = [
   { id: "new-period",     icon: "📅", label: "เปิดงวดเงินเดือนใหม่",             aliases: ["งวด", "งวดเงินเดือน", "period"],                            href: "/payroll/periods?new=1",     perm: "payroll.calculate", scope: "payroll" },
   { id: "go-resign",      icon: "🚪", label: "ไปหน้าแจ้งลาออก",                  aliases: ["ลาออก", "แจ้งลาออก", "resign", "resignation"],              href: "/payroll/resignations",      perm: "employees.view",   scope: "payroll" },
   { id: "go-calc",        icon: "🧮", label: "ไปคำนวณงวดเงินเดือน",              aliases: ["คำนวณ", "คำนวณงวด", "คิดเงินเดือน", "calc"],                 href: "/payroll/calc-run",          perm: "payroll.calculate", scope: "payroll" },
+  { id: "go-recheck",     icon: "🧮", label: "ไปตรวจทั้งงวด (ที่มาของเงิน)",       aliases: ["ตรวจทั้งงวด", "ตรวจงวด", "recheck", "ที่มาเงินเดือน", "สูตรเงินเดือน"], href: "/payroll/period-recheck",   perm: "employees.view",   scope: "payroll" },
   { id: "go-manual",      icon: "📝", label: "ไปหน้าข้อมูลคำนวณ (สาย/ขาด/OT)",   aliases: ["ข้อมูลคำนวณ", "สาย", "ขาด", "ot", "ตารางเข้างาน", "โอที"],   href: "/payroll/manual-input",      perm: "employees.view",   scope: "payroll" },
   { id: "go-payslip",     icon: "🧾", label: "ไปหน้าสลิปเงินเดือน",               aliases: ["สลิป", "payslip", "slip"],                                   href: "/payroll/payslips",          perm: "employees.view",   scope: "payroll" },
   // ---- 📝 App Subscription (scope "subscriptions") ----
