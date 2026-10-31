@@ -85,6 +85,7 @@ import { InstallAppModal } from "@/components/install-app";
 import { Icon } from "@/components/icon";
 import { PrintHistoryBadge, printWhen } from "@/components/print-history";
 import { FamilyPrintMenu } from "@/components/family-print-menu";
+import { GroupShortcuts, type GroupShortcutOption } from "@/components/group-shortcuts";
 import { printQtyChanged, type PrintSummary } from "@/lib/print-log";
 import { ScanInput } from "@/components/scan-input";
 import { useScanGun } from "@/components/scan-input/use-scan-gun";
@@ -3345,6 +3346,31 @@ const stageOf = (m: PendingMO, p: MoProgress | undefined): MoStage => {
 const stageOrder = (name: string) => Object.values(STAGE_META).find(([label]) => label === name)?.[1] ?? 99;
 /** ราคาขายต่ำกว่านี้ (฿0 / ฿1) = น่าจะยังไม่ได้ตั้งจริง → ขึ้นเตือน + ไม่นับรวมในยอดมูลค่า */
 const PRICE_MIN = 10;
+// 🧭 ทางลัดจัดกลุ่ม (components/group-shortcuts) — ตัวเลือกต่อแท็บ · ค่าตั้งต้น = แบบเดิม (รอจ่าย: ขั้นตอน)
+const GROUP_SC_OPTS: Record<"pend" | "wip" | "qc", GroupShortcutOption[]> = {
+  pend: [
+    { k: "parent", label: "สินค้าแม่", icon: "dna" },
+    { k: "stage", label: "ขั้นตอน", icon: "shuffle", title: "จัดกลุ่มตามขั้นตอน: รอซื้อของ → รอของเข้า → รอเตรียม/ตัด → พร้อมจ่าย" },
+    { k: "brand", label: "แบรนด์", icon: "tag" },
+    { k: "group", label: "กลุ่ม", icon: "folders" },
+    { k: "ready", label: "ความพร้อม", icon: "done" },
+  ],
+  wip: [
+    { k: "parent", label: "สินค้าแม่", icon: "dna" },
+    { k: "crew", label: "ช่าง", icon: "user" },
+    { k: "desk", label: "โต๊ะ", icon: "cabinet" },
+    { k: "group", label: "กลุ่ม", icon: "folders" },
+    { k: "status", label: "สถานะ", icon: "flag" },
+  ],
+  qc: [{ k: "parent", label: "สินค้าแม่", icon: "dna" }],
+};
+const GROUP_SC_DEFAULT: Record<"pend" | "wip" | "qc", string[]> = { pend: ["stage"], wip: [], qc: [] };
+const parseGroupSc = (raw: unknown): Record<"pend" | "wip" | "qc", string[]> | null => {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const pick = (t: "pend" | "wip" | "qc") => (Array.isArray(o[t]) ? (o[t] as unknown[]).filter((k): k is string => typeof k === "string" && GROUP_SC_OPTS[t].some((x) => x.k === k)) : GROUP_SC_DEFAULT[t]);
+  return { pend: pick("pend"), wip: pick("wip"), qc: pick("qc") };
+};
 const NO_PARENT = "— ไม่มีสินค้าแม่ —";   // หัวกลุ่มของใบที่สินค้าไม่ผูกสินค้าแม่ (ไว้ท้ายสุดตอนจัดกลุ่มตามสินค้าแม่)
 const NO_BRAND = "— ไม่ระบุแบรนด์ —";   // หัวกลุ่มของใบที่สินค้าไม่ผูกแบรนด์ (ไว้ท้ายสุดตอนจัดกลุ่มตามแบรนด์)
 /** แท็บที่เปิดอยู่ → ไฮไลต์ช่องไหนในแถว (ให้รู้ว่ากดช่องไหนมา) */
@@ -3725,6 +3751,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const qvRowMap = useMemo(() => new Map(pending.map((m) => [m.id, qvRowOf(m)])), [pending, prog, priceByMo, canSeeMoney, today]);   // eslint-disable-line react-hooks/exhaustive-deps
   const rowQ = (m: PendingMO) => qvRowMap.get(m.id) ?? qvRowOf(m);
   const viewCount = (v: QuickView) => pending.filter((m) => qvMatch(v, rowQ(m))).length;
+  const [groupSc, setGroupSc] = useUserPref("wb_group_shortcuts", GROUP_SC_DEFAULT, parseGroupSc);   // 🧭 ทางลัดจัดกลุ่มต่อแท็บ (จำต่อคน)
   // ⚠️ ต้องประกาศก่อน pendShown (คำนวณทันทีตอนวาด — เคยอยู่ทีหลัง = หน้าบอร์ดพัง "Cannot access before initialization" 2026-10-31)
   const [unprintedOnly, setUnprintedOnly] = useState(false);            // แท็บรอจ่าย: เฉพาะใบที่ยังไม่พิมพ์ใบงาน
   const pendShown = (() => {
@@ -5190,10 +5217,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           {dev !== "ipadP" && dc.show.colBtn && !dc.cols && !effCols && pendLayout === "table" && <ColumnChooser state={pendColPrefs}
             note={`จำแยกกันระหว่างจอคอมกับ iPad · ${canSeeMoney ? "ราคาขาย/มูลค่าเห็นเฉพาะคนที่ดูแผนผู้บริหารได้" : "ช่องราคาขาย/มูลค่าเห็นเฉพาะผู้บริหาร"}`} />}
           {dc.show.tools && <>
-          <button type="button" onClick={() => pickGroup(pendGroup === "stage" ? "none" : "stage")} title="จัดกลุ่มตามขั้นตอน: รอซื้อของ → รอของเข้า → รอเตรียม/ตัด → พร้อมจ่าย"
-            className={`h-8 px-3 text-sm rounded-lg border ${pendGroup === "stage" ? "bg-amber-50 border-amber-300 text-amber-700" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-            🪜 จัดกลุ่มตามขั้นตอน{pendGroup === "stage" ? " ✓" : ""}
-          </button>
+          <GroupShortcuts options={GROUP_SC_OPTS.pend} pinned={groupSc.pend} onPinnedChange={(v) => setGroupSc({ ...groupSc, pend: v })} tabLabel="แท็บรอจ่าย" touch={touch}
+            active={pendGroup} onPick={(k) => pickGroup(k as "none" | "group" | "ready" | "stage" | "brand" | "parent")} />
           {dev === "pc" && dc.img === "s" && <button type="button" onClick={toggleImg} title="สลับขนาดรูปในตาราง (จำไว้ให้ครั้งหน้า)"
             className="h-8 px-3 text-sm rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-slate-50">🖼 รูป{imgBig ? "เล็ก" : "ใหญ่"}</button>}
           <button type="button" onClick={() => setUnprintedOnly((v) => !v)} title="ดูเฉพาะใบที่ยังไม่พิมพ์ใบงาน (นับตั้งแต่ 31 ต.ค. 69)"
@@ -5412,6 +5437,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         actions={<div className="flex items-center gap-2 flex-wrap">
           {layoutToggle("wip")}
           {dc.show.colBtn && layoutOf("wip") === "table" && <ColumnChooser state={woColPrefs} note="จำแยกกันระหว่างจอคอมกับ iPad" />}
+          {dc.show.tools && <GroupShortcuts options={GROUP_SC_OPTS.wip} pinned={groupSc.wip} onPinnedChange={(v) => setGroupSc({ ...groupSc, wip: v })} tabLabel="แท็บกำลังผลิต" touch={touch}
+            active={woGroup} onPick={(k) => setWoGroup(k as "none" | "group" | "status" | "crew" | "desk" | "parent")} />}
           {dc.show.tools && <select value={woGroup} onChange={(e) => setWoGroup(e.target.value as "none" | "group" | "status" | "crew" | "desk" | "parent")} className={grpSelectCls} title="จัดกลุ่มตาราง">
             <option value="none">ไม่จัดกลุ่ม</option>
             <option value="parent">จัดกลุ่มตามสินค้าแม่ (Parent SKU)</option>
@@ -5452,6 +5479,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           actions={<div className="flex items-center gap-2 flex-wrap">
             {layoutToggle("qc")}
             {dc.show.colBtn && layoutOf("qc") === "table" && <ColumnChooser state={qcColPrefs} note="จำแยกกันระหว่างจอคอมกับ iPad" />}
+            {dc.show.tools && <GroupShortcuts options={GROUP_SC_OPTS.qc} pinned={groupSc.qc} onPinnedChange={(v) => setGroupSc({ ...groupSc, qc: v })} tabLabel="แท็บรอ QC" touch={touch}
+              active={qcGroup} onPick={(k) => setQcGroup(k === "parent" ? "parent" : "none")} />}
             {dc.show.tools && <select value={qcGroup} onChange={(e) => setQcGroup(e.target.value === "parent" ? "parent" : "none")} className={grpSelectCls} title="จัดกลุ่มตาราง">
               <option value="none">ไม่จัดกลุ่ม</option>
               <option value="parent">จัดกลุ่มตามสินค้าแม่ (Parent SKU)</option>
