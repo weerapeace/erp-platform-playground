@@ -4920,7 +4920,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   }, [full, framePreview, tab]);
   useEffect(() => { setTopHidden(false); lastTop.current = 0; }, [tab]);
   // กล่องตาราง: สูงตายตัวพอดีจอ (flex-col) → ตารางเลื่อนในตัว + หัวตารางติดบน · เลือกหลายใบ = เว้นล่างให้แถบคำสั่งลอย
-  const anySel = (tab === "pend" && selMoNos.length > 0) || (tab === "wip" && selWos.length > 0) || (tab === "qc" && qSel.size > 0);
+  const anySel = ((tab === "pend" || allSearch) && selMoNos.length > 0) || ((tab === "wip" || allSearch) && selWos.length > 0) || ((tab === "qc" || allSearch) && qSel.size > 0);
   const boxProps = full
     ? { ref: boxRef, className: `fixed inset-0 z-40 flex flex-col gap-3 overflow-hidden bg-slate-50 p-3 sm:p-4 ${anySel ? "pb-24" : ""}` }
     : { ref: boxRef, className: `flex flex-col gap-3 overflow-hidden ${anySel ? "pb-20" : ""}`, style: { height: fitH ? `${fitH}px` : "calc(100vh - 210px)" } };
@@ -5170,11 +5170,14 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
               <section key={k} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
                 {head}
                 {k === "pend" && <MiniTable rows={pendShown.filter((m) => hit(pendText(m))).slice(0, 50)} rowKey={(m) => m.id} columns={dev === "ipadP" ? pendCols : pendColsShown}
-                  onRowClick={(m) => onOpenMO(m)} hideToolbar dense={dc.row === "s"} zebra={dc.zebra} touch={touch || dc.row === "l"} countUnit="ใบ" />}
+                  onRowClick={(m) => onOpenMO(m)} hideToolbar dense={dc.row === "s"} zebra={dc.zebra} touch={touch || dc.row === "l"} countUnit="ใบ"
+                  selectable={dc.check} selected={sel} onSelectedChange={(v) => { setSel(v); if (v.size) { setWoSel(new Set()); setQSel(new Set()); } }} />}
                 {k === "wip" && <MiniTable rows={wosShown.filter((w) => hit(woText(w))).slice(0, 50)} rowKey={(w) => w.id} columns={woColPrefs.visible}
-                  onRowClick={(w) => onOpenWO(w)} hideToolbar dense={dc.row === "s"} zebra={dc.zebra} touch={touch || dc.row === "l"} countUnit="ใบ" />}
+                  onRowClick={(w) => onOpenWO(w)} hideToolbar dense={dc.row === "s"} zebra={dc.zebra} touch={touch || dc.row === "l"} countUnit="ใบ"
+                  selectable={dc.check} selected={woSel} onSelectedChange={(v) => { setWoSel(v); if (v.size) { setSel(new Set()); setQSel(new Set()); } }} />}
                 {k === "qc" && <MiniTable rows={qQueue.filter((q) => hit(qcText(q))).slice(0, 50)} rowKey={(q) => q.wo_id} columns={qcColPrefs.visible}
-                  hideToolbar dense={dc.row === "s"} zebra={dc.zebra} touch={touch || dc.row === "l"} countUnit="ใบ" />}
+                  hideToolbar dense={dc.row === "s"} zebra={dc.zebra} touch={touch || dc.row === "l"} countUnit="ใบ"
+                  selectable={dc.check} selected={qSel} onSelectedChange={(v) => { setQSel(v); if (v.size) { setSel(new Set()); setWoSel(new Set()); } }} />}
                 {more}
               </section>
             );
@@ -5519,7 +5522,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         openTab={mgr.tab ?? null} focus={{ kind: isMineView ? "mine" : "team", id: baseView.id }} openSel={mgr.sel ?? null} newMine={mgr.newMine ?? null} onPreview={setPreviewView}
         countOf={viewCount} total={pending.length} />
       {/* แถบคำสั่งลอยด้านล่าง (ของกลาง BulkActionBar) — โผล่เมื่อติ๊กเลือกหลายใบ แทนปุ่มกระจายบนหัวตาราง */}
-      <BulkActionBar count={tab === "pend" ? selMoNos.length : 0} unit="ใบ" onClear={() => setSel(new Set())} spacer={false}>
+      {/* ผลค้นหาทุกแท็บ (allSearch) = แถบคำสั่งของแท็บที่ติ๊กขึ้นเลย (ติ๊กได้ทีละแท็บ) */}
+      <BulkActionBar count={tab === "pend" || allSearch ? selMoNos.length : 0} unit="ใบ" onClear={() => setSel(new Set())} spacer={false}>
         {catchUp && <button type="button" onClick={() => setCuBatch(selMoNos)} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}
         <FamilyPrintMenu by={{ ids: [...sel] }} label="พิมพ์รวมทั้งรุ่น" title="พิมพ์ใบรวมทั้งรุ่นเฉพาะใบที่ติ๊ก (สีที่เลือกอยู่ในแผ่นเดียว)"
           className="inline-flex h-9 items-center gap-1 rounded-lg bg-sky-600 px-3 text-sm font-medium text-white hover:bg-sky-700" />
@@ -5527,12 +5531,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         <button type="button" onClick={() => setDueOpen(true)} className="h-9 rounded-lg bg-amber-500 px-3 text-sm font-medium text-white hover:bg-amber-600">📅 แก้วันกำหนด</button>
         {canEdit && <button type="button" onClick={() => openDispatchFor(sel)} className="h-9 rounded-lg bg-emerald-500 px-3 text-sm font-medium text-white hover:bg-emerald-600">🚚 จ่ายงาน</button>}
       </BulkActionBar>
-      <BulkActionBar count={tab === "wip" ? selWos.length : 0} unit="ใบ" onClear={() => setWoSel(new Set())} spacer={false}>
+      <BulkActionBar count={tab === "wip" || allSearch ? selWos.length : 0} unit="ใบ" onClear={() => setWoSel(new Set())} spacer={false}>
         {catchUp && <button type="button" onClick={() => setCuBatch([...new Set(selWos.map((w) => w.mo_no).filter((x): x is string => !!x))])} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}
         {canEdit && <button type="button" onClick={openQc} title="ส่งงานที่ติ๊กไว้เข้า QC (ลงวันที่ย้อนหลังได้)" className="h-9 rounded-lg bg-emerald-500 px-3 text-sm font-medium text-white hover:bg-emerald-600">📤 ส่งงาน QC</button>}
         <button type="button" onClick={() => setWoLaborOpen(true)} className="h-9 rounded-lg bg-indigo-500 px-3 text-sm font-medium text-white hover:bg-indigo-600">💰 ใส่ค่าแรง</button>
       </BulkActionBar>
-      <BulkActionBar count={tab === "qc" && (canEdit || catchUp) ? qSel.size : 0} unit="ใบ" onClear={() => setQSel(new Set())} spacer={false}>
+      <BulkActionBar count={(tab === "qc" || allSearch) && (canEdit || catchUp) ? qSel.size : 0} unit="ใบ" onClear={() => setQSel(new Set())} spacer={false}>
         {catchUp && <button type="button" onClick={() => setCuBatch([...new Set(qQueue.filter((q) => qSel.has(q.wo_id)).map((q) => q.mo_no).filter((x): x is string => !!x))])} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}
         {canEdit && <button type="button" onClick={openRecv} className="h-9 rounded-lg bg-teal-500 px-3 text-sm font-medium text-white hover:bg-teal-600">📥 รับเข้าชั้น</button>}
       </BulkActionBar>
