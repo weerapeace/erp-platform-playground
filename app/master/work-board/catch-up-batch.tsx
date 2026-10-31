@@ -1,9 +1,11 @@
 "use client";
 
 /**
- * 🔄 อัปเดตงานเป็นชุด (โหมดอัปเดตงานของบอร์ดจ่ายงาน) — ติ๊กหลายใบ → ตารางเดียว 1 ใบ = 1 กลุ่มแถว
- *   แต่ละใบเลือก "ไปถึงขั้น" ได้เอง · แถวย่อยโผล่ตามขั้น: เตรียม/ตัด · จ่าย (หลายแถว · คนรับหลายคน) · ส่งคืน (ตามยอดจ่ายอัตโนมัติ / หลายรอบ)
- *   · QC รับเข้า (ชั้น · ดี/เสีย · สาเหตุ · วันที่) · ส่งออก · ปิดใบ · ยกเลิก · บันทึกถึงทีม
+ * 🔄 อัปเดตงานเป็นชุด (โหมดอัปเดตงานของบอร์ดจ่ายงาน) — ติ๊กหลายใบ → แบบ B "แยกตารางตามขั้น" (เจ้าของเลือก 2026-10-31)
+ *   ① ตารางใบงาน: 1 ใบ = 1 แถว — เลือก "ไปถึงขั้น" · สถานะ · เปลี่ยนจำนวน · ผลหลังบันทึก / ย้อน
+ *   ② ตารางของแต่ละขั้น (โผล่เฉพาะขั้นที่มีใบต้องกรอก · หัวคอลัมน์ตรงงาน): ของครบ/เตรียม/ตัด · จ่ายงาน (หลายแถว/ใบ · รวมชิ้น+ค่าแรง)
+ *     · ช่างส่งคืน (ตามยอดจ่าย / หลายรอบ · ยังค้าง) · QC รับเข้า · ส่งออก · ปิดใบ · ยกเลิก · เพิ่มเติม (ย่อไว้)
+ *   ใบที่ผ่านหลายขั้น (เช่น ยังไม่จ่าย → ส่งคืนครบ) อยู่ทุกตารางที่เกี่ยว · "↓ ทุกใบ" ที่หัวคอลัมน์ = ค่าของใบแรกในตารางนั้นลงทุกใบ
  *   "ใส่ทั้งหมดตามใบแรก" = ก๊อปขั้น/โต๊ะ/คน/วันที่/หมายเหตุของใบแรกไปทุกใบ (จำนวนตามใบนั้น · ค่าแรงตามสูตรของรุ่นนั้น)
  * กติกา/การบันทึก/ย้อน = ตัวเดียวกับป๊อปทีละใบ (./catch-up.ts cuBuildSteps / cuRun / cuUndo + ./catch-up-lines.ts)
  * ไม่มีสิทธิ์ "บันทึกได้เลย" = ส่งเป็นคำขอแยกรายใบ · หัวหน้าเปิดใบที่มีคำขอค้าง = ข้อมูลคำขอขึ้นให้ แก้ได้ แล้วยืนยันทีเดียวหลายใบ
@@ -17,6 +19,7 @@ import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { QC_WAREHOUSES } from "@/lib/qc-ship";
+import { REDUCE_REASONS } from "@/lib/mo-qty-reduce";
 import { isHireDesk, todayYmd } from "@/lib/work-entry-rules";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { CatchUpSnapshot } from "@/app/api/mo/catch-up/route";
@@ -60,9 +63,22 @@ const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 const inp = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
 const addBtn = "inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-indigo-300 px-3 text-[12px] text-indigo-700 hover:bg-indigo-50";
 const xBtn = "h-9 w-9 shrink-0 rounded-lg border border-slate-200 bg-white text-slate-400 hover:border-rose-300 hover:text-rose-600";
-const stepTd = "whitespace-nowrap py-2 pl-3 pr-2 align-top text-[12px] font-medium text-slate-600";
 const td = "px-2 py-2 align-top";
 const flow = CU_TARGETS.filter((t) => t.key !== "cancel");
+/** ตารางแยกตามขั้น (เรียงตามลำดับงาน) · SEC_FIELDS = ช่องของขั้นนั้น (นับ "ต้องแก้" ที่ป้าย) · SEC_STAGE = ขั้นในกติกากลาง */
+type SecKey = "pre" | "disp" | "ret" | "qc" | "ship" | "close" | "cancel" | "extra";
+const SECS: { key: SecKey; label: string; icon: string }[] = [
+  { key: "pre", label: "ของครบ / เตรียม / ตัด", icon: "cut" },
+  { key: "disp", label: "จ่ายงาน", icon: "truck" },
+  { key: "ret", label: "ช่างส่งคืน", icon: "back" },
+  { key: "qc", label: "QC รับเข้า", icon: "warehouse" },
+  { key: "ship", label: "ส่งออกจาก QC", icon: "export" },
+  { key: "close", label: "ปิดใบ", icon: "finish" },
+  { key: "cancel", label: "ยกเลิกใบ", icon: "cancel" },
+  { key: "extra", label: "เพิ่มเติม", icon: "note" },
+];
+const SEC_FIELDS: Record<SecKey, string[]> = { pre: ["have", "ready"], disp: ["disp"], ret: ["ret"], qc: ["qc"], ship: ["ship"], close: ["close"], cancel: ["cancel"], extra: [] };
+const SEC_STAGE: Partial<Record<SecKey, CuStage>> = { disp: "dispatch", ret: "return", qc: "qc_in", ship: "ship", close: "close" };
 
 const emptyRow = (moNo: string): BRow => ({
   moNo, snap: null, err: "", req: null, target: null, ticks: {}, disp: [], ret: [], retSet: false, qcGood: 0, qcBad: 0, qcSet: false,
@@ -91,6 +107,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   const [review, setReview] = useState(false);
   const [busy, setBusy] = useState(false);
   const [allT, setAllT] = useState("");
+  const [extraOpen, setExtraOpen] = useState(false);
   const seq = useRef(0);
   const nk = (p: string) => `${p}${++seq.current}`;
 
@@ -408,219 +425,338 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     return chip("bg-emerald-50 text-emerald-700", "done", m.asRequest ? "พร้อมส่งให้หัวหน้า" : "พร้อม");
   };
 
-  /** แถวย่อยของ 1 ใบ ตามขั้นที่เลือก */
-  const body = (r: BRow, d: D) => {
-    const lock = r.phase !== "edit" || modeOf(r).blockedBy;
-    const out: ReactNode[] = [];
-    const k = r.target!;
-    const sectionCls = lock ? "pointer-events-none opacity-60" : "";
-    // ── ยกเลิกใบ
-    if (k === "cancel") {
-      out.push(
-        <tr key="cancel" className={sectionCls}>
-          <td className={stepTd}><span className="inline-flex items-center gap-1 text-rose-700"><Icon name="cancel" /> ยกเลิกใบ</span></td>
-          <td className={td} colSpan={4}>
-            <input value={r.cancelReason} onChange={(e) => patchRow(r.moNo, { cancelReason: e.target.value })} placeholder="เหตุผลที่ยกเลิก (บังคับ) เช่น ลูกค้ายกเลิกออเดอร์" className={`${inp}${ring(d, "cancel:reason")}`} />
-            <Msg d={d} field="cancel:reason" />
-          </td>
-          <td className={td}><DispatchDatePick value={r.dates.cancel} onChange={(v) => patchRow(r.moNo, { dates: { ...r.dates, cancel: v } })} /><Msg d={d} field="cancel:date" /></td>
-          <td className={td} colSpan={2} />
-        </tr>);
-      return out;
-    }
-    // ── ทำได้ไม่ครบ (ลดจำนวน) — ของจริงตอนนี้ ไม่ใช่ภาพหลังลด
-    out.push(
-      <tr key="reduce" className={sectionCls}>
-        <td className={`${stepTd} font-normal text-slate-500`}>จำนวนที่ทำได้</td>
-        <td className={td} colSpan={7}>
-          <ReducePanel compact qty={r.snap!.mo.qty} received={d.f0.received} sized={!!r.snap!.mo.sized} wos={r.snap!.wos} value={r.reduce}
-            onChange={(v) => setReduce(r.moNo, v)} issues={d.built.issues} />
-        </td>
-      </tr>);
-    // ── ของครบ / เตรียม / ตัด: ติ๊กให้ตามขั้นที่เลือก (ขั้นที่ข้ามได้ = กดเอาออก) + วันที่เสร็จ
+  // ── แบบ B (เจ้าของเลือก 2026-10-31): ตารางใบงาน (เลือกขั้น · สถานะ · ผล) + ตารางแยกตามขั้น — แต่ละตารางมีแค่ช่องของขั้นนั้น
+  type X = { r: BRow; d: D };
+  type Fill = (x: X, src: X) => Partial<BRow> | null;
+  const lockOf = (r: BRow) => r.phase !== "edit" || modeOf(r).blockedBy;
+  const lockCls = (r: BRow) => (lockOf(r) ? " pointer-events-none opacity-60" : "");
+  /** ใบไหนต้องกรอกในตารางขั้นไหน — ใบที่บันทึก/ส่งแล้ว ดูผลที่ตารางใบงาน */
+  const inSec = (x: { r: BRow; d: D | null }, k: SecKey): x is X => {
+    const { r, d } = x;
+    if (!d || !r.target || r.phase === "done" || r.phase === "sent" || modeOf(r).blockedBy) return false;
+    if (r.target === "cancel") return k === "cancel";
+    if (k === "pre") return d.chk.some((c) => (c.stage === "have" || c.stage === "prep" || c.stage === "cut") && (c.state === "need" || c.state === "opt"));
+    if (k === "extra") return true;
+    const st = SEC_STAGE[k];
+    return !!st && d.on(st);
+  };
+  const secs = SECS.map((s) => ({ ...s, list: derived.filter((x): x is X => inSec(x, s.key)) }));
+  const listOf = (k: SecKey) => secs.find((s) => s.key === k)?.list ?? [];
+  const errIn = (d: D, k: SecKey) => d.errs.some((e) => SEC_FIELDS[k].some((p) => e.field === p || e.field.startsWith(`${p}:`)));
+  /** "↓ ทุกใบ" = ค่าของใบแรกในตารางนั้น ลงทุกใบในตาราง (เฉพาะใบที่ยังแก้ได้) */
+  const fillDown = (k: SecKey, apply: Fill) => {
+    const list = listOf(k).filter((x) => !lockOf(x.r));
+    const p = new Map<string, Partial<BRow>>();
+    for (const x of list.slice(1)) { const v = apply(x, list[0]); if (v) p.set(x.r.moNo, v); }
+    if (p.size) setRows((rs) => rs.map((r) => (p.has(r.moNo) ? { ...r, ...p.get(r.moNo) } : r)));
+  };
+  const th = (label: ReactNode, k: SecKey, cls = "", fill?: Fill, tip?: string) => (
+    <th className={`px-2 py-2 font-medium ${cls}`}>
+      <span className="inline-flex flex-wrap items-center gap-1">{label}
+        {fill && listOf(k).filter((x) => !lockOf(x.r)).length > 1 && (
+          <button type="button" disabled={busy} onClick={() => fillDown(k, fill)} title={tip ?? "ใส่ค่าของใบแรกในตารางนี้ลงทุกใบ"}
+            className="rounded px-1 text-[11px] font-normal text-indigo-600 hover:bg-indigo-50">↓ ทุกใบ</button>
+        )}
+      </span>
+    </th>);
+  const skuCell = (r: BRow, span = 1, extra?: ReactNode) => (
+    <td rowSpan={span} className="w-40 py-2 pl-3 pr-2 align-top">
+      <div className="font-semibold text-slate-800">{r.snap!.mo.product_sku ?? r.moNo}</div>
+      <div className="text-[11px] text-slate-400">{r.moNo}</div>
+      {extra}
+    </td>);
+  const none = <span className="text-[12px] text-slate-300">—</span>;
+  const section = (k: SecKey, head: ReactNode, body: ReactNode, foot?: ReactNode, hint?: ReactNode) => {
+    const s = secs.find((x) => x.key === k)!;
+    if (!s.list.length) return null;
+    const bad = s.list.filter((x) => errIn(x.d, k)).length;
+    return (
+      <section key={k} id={`cub-${k}`} className="scroll-mt-14">
+        <div className="mb-1.5 flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800"><Icon name={s.icon} /> {s.label}</span>
+          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">{s.list.length} ใบ</span>
+          {bad > 0 && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] text-rose-700">ต้องแก้ {bad} ใบ</span>}
+          {hint && <span className="text-[11px] text-slate-400">{hint}</span>}
+        </div>
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full border-collapse text-[13px]">
+            <thead className="bg-slate-50 text-left text-[12px] text-slate-500"><tr>{head}</tr></thead>
+            {body}
+            {foot && <tfoot className="border-t-2 border-slate-200 bg-slate-50/60 text-[12px] text-slate-600">{foot}</tfoot>}
+          </table>
+        </div>
+      </section>);
+  };
+  const dateCell = (r: BRow, d: D, key: keyof CuDates, field: string) => (
+    <td className={td}><DispatchDatePick value={r.dates[key]} onChange={(v) => patchRow(r.moNo, { dates: { ...r.dates, [key]: v } })} /><Msg d={d} field={field} /></td>);
+  const fillDate = (key: keyof CuDates): Fill => (x, s) => ({ dates: { ...x.r.dates, [key]: s.r.dates[key] } });
+
+  // ── ของครบ / เตรียม / ตัด: ติ๊กให้ตามขั้นที่เลือก (ขั้นที่ข้ามได้ = กดเอาออก) + วันที่เสร็จ
+  const preUses = (kind: CuStep["kind"]) => listOf("pre").some((x) => x.d.built.steps.some((s) => s.kind === kind));
+  const preSec = section("pre", <>
+    {th("ใบงาน", "pre", "pl-3")}
+    {th("ขั้นที่ทำแล้ว (ยังไม่ได้ทำ = กดเอาออก)", "pre")}
+    {th("ของครบเมื่อ", "pre", "w-44", preUses("skip_buy") ? fillDate("have") : undefined)}
+    {th("เตรียม/ตัดเสร็จเมื่อ", "pre", "w-44", preUses("mark_ready") ? fillDate("ready") : undefined)}
+  </>, listOf("pre").map(({ r, d }) => {
     const pre = d.chk.filter((x) => x.stage === "have" || x.stage === "prep" || x.stage === "cut");
     const hasSkip = d.built.steps.some((s) => s.kind === "skip_buy"), hasReady = d.built.steps.some((s) => s.kind === "mark_ready");
-    if (pre.length) out.push(
-      <tr key="pre" className={sectionCls}>
-        <td className={stepTd}>ของครบ / เตรียม / ตัด</td>
-        <td className={td} colSpan={4}>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {pre.map((x) => {
-              const label = CU_STAGE_LABEL[x.stage];
-              if (x.state === "done") return <span key={x.stage} className="inline-flex h-7 items-center gap-1 rounded-full bg-slate-100 px-2.5 text-[12px] text-slate-500"><Icon name="done" /> {label} (มีแล้ว)</span>;
-              if (x.state === "implied") return <span key={x.stage} className="inline-flex h-7 items-center rounded-full bg-slate-50 px-2.5 text-[12px] text-slate-400">{label} (รวมในเตรียม)</span>;
-              if (x.state === "need") return <span key={x.stage} className="inline-flex h-7 items-center gap-1 rounded-full bg-indigo-600 px-2.5 text-[12px] text-white"><Icon name="done" /> {label}</span>;
-              const onT = !!r.ticks[x.stage];
-              return <button key={x.stage} type="button" onClick={() => patchRow(r.moNo, { ticks: { ...r.ticks, [x.stage]: !onT } })} title={onT ? "กดเอาออก (ทำข้ามไปก่อน)" : "กดเพื่อติ๊ก"}
-                className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[12px] ${onT ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-200 bg-white text-slate-500 hover:border-indigo-300"}`}>{onT && <Icon name="done" />}{label}</button>;
-            })}
-            {!d.f.buyDone && d.f.materials > 0 && k !== "have" && <span className="text-[11px] text-slate-400">ยังขาดของบางรายการ? กด &ldquo;เปิดแบบละเอียด&rdquo;</span>}
-          </div>
-        </td>
-        <td className={td}>
-          {hasSkip && <><div className="mb-0.5 text-[11px] text-slate-500">ของครบเมื่อ</div><DispatchDatePick value={r.dates.have} onChange={(v) => patchRow(r.moNo, { dates: { ...r.dates, have: v } })} /><Msg d={d} field="have:date" /></>}
-          {hasReady && <><div className="mb-0.5 mt-1 text-[11px] text-slate-500">เตรียม/ตัดเสร็จเมื่อ</div><DispatchDatePick value={r.dates.ready} onChange={(v) => patchRow(r.moNo, { dates: { ...r.dates, ready: v } })} /><Msg d={d} field="ready:date" /></>}
-        </td>
-        <td className={td} colSpan={2} />
-      </tr>);
-    // ── จ่ายงาน (หลายแถว · คนรับหลายคน)
-    if (d.on("dispatch")) {
-      r.disp.forEach((x, i) => {
-        const dept = deptOf(x.deptId), hire = isHireDesk(dept?.name), pool = poolOf(dept), fk = `disp:${x.key}`;
-        out.push(
-          <tr key={x.key} className={`bg-slate-50/40 ${sectionCls}`}>
-            <td className={stepTd}><span className="inline-flex items-center gap-1"><Icon name="truck" /> จ่าย{r.disp.length > 1 ? ` #${i + 1}` : ""}</span></td>
-            <td className={td}>
-              <select value={x.deptId} onChange={(e) => setDisp(r.moNo, x.key, { deptId: e.target.value, crewIds: [], ...(x.rateSet ? {} : { rate: d.centralRate }) })} className={`${inp}${ring(d, `${fk}:dept`)}`}>
-                <option value="">— เลือกโต๊ะ —</option>
-                {departments.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-              </select>
-              <Msg d={d} field={`${fk}:dept`} />
-            </td>
-            <td className={`${td} min-w-[18rem]`}>
-              {dept ? <CrewPick people={pool} value={x.crewIds} required={hire} recent={lastCrewIds(workOrders, dept.id, pool)}
-                onChange={(ids) => setDisp(r.moNo, x.key, { crewIds: ids, ...(x.rateSet ? {} : { rate: cuRateFor(r.snap, ids) }) })} />
-                : <span className="text-[12px] text-slate-400">เลือกโต๊ะก่อน</span>}
-              <Msg d={d} field={`${fk}:crew`} />
-            </td>
-            <td className={td}>
-              <input type="number" min={0} step="any" value={x.qty} onChange={(e) => setDisp(r.moNo, x.key, { qty: Number(e.target.value) })} className={`${inp}${ring(d, `${fk}:qty`)}`} />
-              <Msg d={d} field={`${fk}:qty`} />
-            </td>
-            <td className={td}>
-              <input type="number" min={0} step="any" value={x.rate ?? ""} placeholder={d.centralRate != null ? `ราคากลาง ฿${fmt(d.centralRate)}` : "ใส่ทีหลังได้"}
-                onChange={(e) => setDisp(r.moNo, x.key, { rate: numOrNull(e.target.value), rateSet: true })} className={`${inp}${ring(d, `${fk}:rate`)}`} />
-              {x.rateSet && x.rate != null && x.rate !== d.centralRate && <div className="mt-0.5 text-[11px] text-indigo-600">พิมพ์เอง</div>}
-              <Msg d={d} field={`${fk}:rate`} />
-            </td>
-            <td className={td}><DispatchDatePick value={x.date} onChange={(v) => setDisp(r.moNo, x.key, { date: v })} /><Msg d={d} field={`${fk}:date`} /></td>
-            <td className={td}>
-              <input value={x.note ?? ""} onChange={(e) => setDisp(r.moNo, x.key, { note: e.target.value })} placeholder="หมายเหตุถึงช่าง" className={inp} />
-            </td>
-            <td className={td}>
-              {r.disp.length > 1 && <button type="button" title="ลบแถวจ่ายนี้" className={xBtn}
-                onClick={() => patchRow(r.moNo, (rr) => ({ disp: rr.disp.filter((y) => y.key !== x.key), ret: rr.ret.map((y) => (y.ref === `new:${x.key}` ? { ...y, ref: "auto" } : y)) }))}><Icon name="cancel" /></button>}
-            </td>
-          </tr>);
-      });
-      out.push(
-        <tr key="disp-add" className={sectionCls}>
-          <td />
-          <td className="px-2 pb-2" colSpan={7}>
-            <div className="flex flex-wrap items-center gap-3">
-              <button type="button" className={addBtn}
-                onClick={() => patchRow(r.moNo, (rr) => ({ disp: [...rr.disp, { key: nk("d"), deptId: rr.disp[rr.disp.length - 1]?.deptId ?? "", crewIds: [], qty: Math.max(0, r2(d.remain - d.dispTotal)), date: rr.disp[rr.disp.length - 1]?.date ?? null, rate: d.centralRate }] }))}>
-                <Icon name="add" /> เพิ่มแถวจ่าย (หลายช่าง / หลายวัน)
-              </button>
-              <span className={`text-[12px] ${d.dispTotal > d.remain + 0.0001 ? "font-medium text-rose-600" : "text-slate-500"}`}>จ่ายรวม {fmt(d.dispTotal)} / เหลือให้จ่าย {fmt(d.remain)} ชิ้น</span>
-              {d.dispTotal > d.remain + 0.0001 && !r.reduce && !r.snap!.mo.sized && (
-                <button type="button" onClick={() => setReduce(r.moNo, { qty: r2(d.f0.dispatched + d.dispTotal), pick: "ของพอทำเพิ่ม", detail: "", mode: "add" })}
-                  className="h-7 rounded-md border border-indigo-300 bg-indigo-50 px-2 text-[12px] font-medium text-indigo-800 hover:bg-indigo-100">ทำได้มากกว่าสั่งจริง — เพิ่มเป็น {fmt(d.f0.dispatched + d.dispTotal)}</button>
+    return (
+      <tbody key={r.moNo} className={`border-t border-slate-200${lockCls(r)}`}>
+        <tr>
+          {skuCell(r)}
+          <td className={td}>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {pre.map((x) => {
+                const label = CU_STAGE_LABEL[x.stage];
+                if (x.state === "done") return <span key={x.stage} className="inline-flex h-7 items-center gap-1 rounded-full bg-slate-100 px-2.5 text-[12px] text-slate-500"><Icon name="done" /> {label} (มีแล้ว)</span>;
+                if (x.state === "implied") return <span key={x.stage} className="inline-flex h-7 items-center rounded-full bg-slate-50 px-2.5 text-[12px] text-slate-400">{label} (รวมในเตรียม)</span>;
+                if (x.state === "need") return <span key={x.stage} className="inline-flex h-7 items-center gap-1 rounded-full bg-indigo-600 px-2.5 text-[12px] text-white"><Icon name="done" /> {label}</span>;
+                const onT = !!r.ticks[x.stage];
+                return <button key={x.stage} type="button" onClick={() => patchRow(r.moNo, { ticks: { ...r.ticks, [x.stage]: !onT } })} title={onT ? "กดเอาออก (ทำข้ามไปก่อน)" : "กดเพื่อติ๊ก"}
+                  className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[12px] ${onT ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-200 bg-white text-slate-500 hover:border-indigo-300"}`}>{onT && <Icon name="done" />}{label}</button>;
+              })}
+              {!d.f.buyDone && d.f.materials > 0 && r.target !== "have" && <span className="text-[11px] text-slate-400">ยังขาดของบางรายการ? กด &ldquo;เปิดแบบละเอียด&rdquo;</span>}
+            </div>
+          </td>
+          {hasSkip ? dateCell(r, d, "have", "have:date") : <td className={td}>{none}</td>}
+          {hasReady ? dateCell(r, d, "ready", "ready:date") : <td className={td}>{none}</td>}
+        </tr>
+      </tbody>);
+  }));
+
+  // ── จ่ายงาน (หลายแถวต่อใบ · คนรับหลายคน) — ค่าแรงว่าง = ระบบเติมตามสูตร (รวมเป็นสีเทา)
+  const dispList = listOf("disp");
+  const lineRate = (x: CuDispRow, d: D) => x.rate ?? d.centralRate ?? null;
+  const dispSum = dispList.reduce((a, { r, d }) => {
+    for (const x of r.disp) { if (!(x.qty > 0)) continue; a.qty += x.qty; const rt = lineRate(x, d); if (rt != null) a.pay += rt * x.qty; else a.noRate = true; }
+    return a;
+  }, { qty: 0, pay: 0, noRate: false });
+  const fillDisp = (p: (s0: CuDispRow, x: X) => (l: CuDispRow) => Partial<CuDispRow>): Fill => (x, s) => {
+    const s0 = s.r.disp[0]; if (!s0) return null;
+    const f = p(s0, x);
+    return { disp: x.r.disp.map((l) => ({ ...l, ...f(l) })) };
+  };
+  const fillDesk = fillDisp((s0, x) => {
+    const pool = poolOf(deptOf(s0.deptId)), crewIds = s0.crewIds.filter((id) => pool.some((c) => c.id === id));
+    return (l) => ({ deptId: s0.deptId, crewIds, ...(l.rateSet ? {} : { rate: cuRateFor(x.r.snap, crewIds) }) });
+  });
+  const dispSec = section("disp", <>
+    {th("ใบงาน", "disp", "pl-3")}
+    {th("ยังไม่จ่าย", "disp", "w-20 text-right")}
+    {th("โต๊ะ · คนรับ", "disp", "w-44", fillDesk, "ใส่โต๊ะและคนรับของใบแรกลงทุกใบ")}
+    {th("", "disp", "min-w-[16rem]")}
+    {th("จำนวน", "disp", "w-24")}
+    {th("ค่าแรง/ชิ้น", "disp", "w-32", fillDisp((s0) => () => ({ rate: s0.rate, rateSet: true })))}
+    {th("รวมค่าแรง", "disp", "w-24 text-right")}
+    {th("วันที่จ่าย", "disp", "w-40", fillDisp((s0) => () => ({ date: s0.date })))}
+    {th("หมายเหตุถึงช่าง", "disp", "w-44", fillDisp((s0) => () => ({ note: s0.note })))}
+    <th className="w-10" />
+  </>, dispList.map(({ r, d }) => {
+    const n = r.disp.length, over = d.dispTotal > d.remain + 0.0001;
+    return (
+      <tbody key={r.moNo} className={`border-t border-slate-200${lockCls(r)}`}>
+        {r.disp.map((x, i) => {
+          const dept = deptOf(x.deptId), hire = isHireDesk(dept?.name), pool = poolOf(dept), fk = `disp:${x.key}`, rt = lineRate(x, d);
+          return (
+            <tr key={x.key} className={i ? "border-t border-dashed border-slate-100" : ""}>
+              {i === 0 && skuCell(r, n, (
+                <div className="mt-1 space-y-1">
+                  <button type="button" className={addBtn}
+                    onClick={() => patchRow(r.moNo, (rr) => ({ disp: [...rr.disp, { key: nk("d"), deptId: rr.disp[rr.disp.length - 1]?.deptId ?? "", crewIds: [], qty: Math.max(0, r2(d.remain - d.dispTotal)), date: rr.disp[rr.disp.length - 1]?.date ?? null, rate: d.centralRate }] }))}>
+                    <Icon name="add" /> แบ่งจ่าย
+                  </button>
+                  {over && !r.reduce && !r.snap!.mo.sized && (
+                    <button type="button" onClick={() => setReduce(r.moNo, { qty: r2(d.f0.dispatched + d.dispTotal), pick: "ของพอทำเพิ่ม", detail: "", mode: "add" })}
+                      className="block rounded-md border border-indigo-300 bg-indigo-50 px-2 py-0.5 text-left text-[11px] font-medium text-indigo-800 hover:bg-indigo-100">ทำได้มากกว่าสั่ง — เพิ่มเป็น {fmt(d.f0.dispatched + d.dispTotal)}</button>
+                  )}
+                  <Msg d={d} field="disp" />
+                </div>
+              ))}
+              {i === 0 && (
+                <td rowSpan={n} className={`${td} text-right`}>
+                  <div className="font-medium text-slate-700">{fmt(d.remain)}</div>
+                  {(n > 1 || over) && <div className={`text-[11px] ${over ? "font-medium text-rose-600" : "text-slate-400"}`}>จ่ายรวม {fmt(d.dispTotal)}</div>}
+                </td>
               )}
-              <Msg d={d} field="disp" />
-            </div>
-          </td>
-        </tr>);
-    }
-    // ── ช่างส่งคืน (ตามยอดจ่ายอัตโนมัติ / หลายรอบ)
-    if (d.on("return")) {
-      out.push(
-        <tr key="ret-h" className={sectionCls}>
-          <td className={stepTd}><span className="inline-flex items-center gap-1"><Icon name="back" /> ช่างส่งคืน</span></td>
-          <td className="px-2 py-2" colSpan={7}>
-            <div className="flex flex-wrap items-center gap-3 text-[12px]">
-              <label className="inline-flex cursor-pointer items-center gap-1.5">
-                <input type="checkbox" checked={!r.retSet} disabled={k === "return_part"} onChange={(e) => patchRow(r.moNo, e.target.checked ? { retSet: false } : { retSet: true, ret: d.ret.map((x, i) => ({ ...x, ref: d.retEff[i]?.ref ?? x.ref })) })} className="h-4 w-4 accent-indigo-600" />
-                ตามยอดจ่ายอัตโนมัติ (คืนตามช่างที่จ่าย)
-              </label>
-              <span className={d.retTotal > d.outstanding + 0.0001 ? "font-medium text-rose-600" : "text-slate-500"}>คืนรวม {fmt(d.retTotal)} / ค้างช่าง {fmt(d.outstanding)} ชิ้น</span>
-              <Msg d={d} field="ret" />
-            </div>
-          </td>
-        </tr>);
-      d.ret.forEach((x, i) => {
-        const fk = `ret:${x.key}`, ref = d.retEff[i]?.ref ?? "auto", src = cuRateOfRef(d.sources, ref);
-        out.push(
-          <tr key={x.key} className={`bg-slate-50/40 ${sectionCls}`}>
-            <td className={`${stepTd} pl-7 font-normal`}>รอบ {i + 1}</td>
-            <td className={td} colSpan={2}>
-              {!r.retSet || d.sources.length <= 1
-                ? <div className="flex h-9 items-center rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700">{d.sources.find((o) => o.ref === ref)?.short ?? "แบ่งอัตโนมัติ"}</div>
-                : <select value={ref} onChange={(e) => setRet(r, d, x.key, { ref: e.target.value })} className={inp}>
-                    {d.sources.map((o) => <option key={o.ref} value={o.ref}>{o.label}</option>)}
-                    <option value="auto">แบ่งให้อัตโนมัติ (คนที่จ่ายก่อนได้ก่อน)</option>
-                  </select>}
-            </td>
-            <td className={td}>
-              <input type="number" min={0} step="any" value={x.qty} onChange={(e) => setRet(r, d, x.key, { qty: Number(e.target.value) }, true)} className={`${inp}${ring(d, `${fk}:qty`)}`} />
-              <Msg d={d} field={`${fk}:qty`} />
-            </td>
-            <td className={td}>
-              <input type="number" min={0} step="any" value={x.wage ?? ""} placeholder={src != null ? `ตามใบจ่าย ฿${fmt(src)}` : "ยังไม่ลง"}
-                onChange={(e) => setRet(r, d, x.key, { wage: numOrNull(e.target.value) })} className={`${inp}${ring(d, `${fk}:wage`)}${x.wage == null && src != null ? " !border-emerald-200 !bg-emerald-50/60" : ""}`} />
-              <Msg d={d} field={`${fk}:wage`} />
-            </td>
-            <td className={td}><DispatchDatePick value={x.date} onChange={(v) => setRet(r, d, x.key, { date: v })} /><Msg d={d} field={`${fk}:date`} /></td>
-            <td className={td} />
-            <td className={td}>
-              {r.retSet && d.ret.length > 1 && <button type="button" title="ลบรอบนี้" className={xBtn} onClick={() => patchRow(r.moNo, { ret: d.ret.filter((y) => y.key !== x.key) })}><Icon name="cancel" /></button>}
-            </td>
-          </tr>);
-      });
-      if (r.retSet) out.push(
-        <tr key="ret-add" className={sectionCls}>
-          <td />
-          <td className="px-2 pb-2" colSpan={7}>
-            <button type="button" className={addBtn}
-              onClick={() => patchRow(r.moNo, { retSet: true, ret: [...d.ret.map((x, j) => ({ ...x, ref: d.retEff[j]?.ref ?? x.ref })), { key: nk("r"), ref: "", qty: Math.max(0, r2(d.outstanding - d.retTotal)), date: null, wage: null }] })}>
-              <Icon name="add" /> เพิ่มรอบส่งคืน (ส่งไม่พร้อมกัน)
-            </button>
-          </td>
-        </tr>);
-    }
-    // ── QC รับเข้าชั้น
-    if (d.on("qc_in")) {
-      const shelves = r.snap!.shelves.filter((s) => s.kind !== "defect");
-      out.push(
-        <tr key="qc" className={sectionCls}>
-          <td className={stepTd}><span className="inline-flex items-center gap-1"><Icon name="warehouse" /> QC รับเข้า</span></td>
-          <td className={td}>
-            <select value={r.shelfId} onChange={(e) => patchRow(r.moNo, { shelfId: e.target.value })} className={`${inp}${ring(d, "qc:shelf")}`}>
-              <option value="">— ชั้นที่วางของดี —</option>
-              {shelves.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              <td className={td}>
+                <select value={x.deptId} onChange={(e) => setDisp(r.moNo, x.key, { deptId: e.target.value, crewIds: [], ...(x.rateSet ? {} : { rate: d.centralRate }) })} className={`${inp}${ring(d, `${fk}:dept`)}`}>
+                  <option value="">— เลือกโต๊ะ —</option>
+                  {departments.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
+                </select>
+                <Msg d={d} field={`${fk}:dept`} />
+              </td>
+              <td className={td}>
+                {dept ? <CrewPick people={pool} value={x.crewIds} required={hire} recent={lastCrewIds(workOrders, dept.id, pool)}
+                  onChange={(ids) => setDisp(r.moNo, x.key, { crewIds: ids, ...(x.rateSet ? {} : { rate: cuRateFor(r.snap, ids) }) })} />
+                  : <span className="text-[12px] text-slate-400">เลือกโต๊ะก่อน</span>}
+                <Msg d={d} field={`${fk}:crew`} />
+              </td>
+              <td className={td}>
+                <input type="number" min={0} step="any" value={x.qty} onChange={(e) => setDisp(r.moNo, x.key, { qty: Number(e.target.value) })} className={`${inp}${ring(d, `${fk}:qty`)}`} />
+                <Msg d={d} field={`${fk}:qty`} />
+              </td>
+              <td className={td}>
+                <input type="number" min={0} step="any" value={x.rate ?? ""} placeholder={d.centralRate != null ? `สูตร ฿${fmt(d.centralRate)}` : "ใส่ทีหลังได้"}
+                  onChange={(e) => setDisp(r.moNo, x.key, { rate: numOrNull(e.target.value), rateSet: true })} className={`${inp}${ring(d, `${fk}:rate`)}`} />
+                {x.rateSet && x.rate != null && x.rate !== d.centralRate && <div className="mt-0.5 text-[11px] text-indigo-600">พิมพ์เอง</div>}
+                <Msg d={d} field={`${fk}:rate`} />
+              </td>
+              <td className={`${td} text-right`}>{rt != null && x.qty > 0 ? <span className={x.rate == null ? "text-slate-400" : "font-medium text-slate-700"}>฿{fmt(rt * x.qty)}</span> : none}</td>
+              <td className={td}><DispatchDatePick value={x.date} onChange={(v) => setDisp(r.moNo, x.key, { date: v })} /><Msg d={d} field={`${fk}:date`} /></td>
+              <td className={td}><input value={x.note ?? ""} onChange={(e) => setDisp(r.moNo, x.key, { note: e.target.value })} placeholder="ไม่บังคับ" className={inp} /></td>
+              <td className={td}>
+                {n > 1 && <button type="button" title="ลบแถวจ่ายนี้" className={xBtn}
+                  onClick={() => patchRow(r.moNo, (rr) => ({ disp: rr.disp.filter((y) => y.key !== x.key), ret: rr.ret.map((y) => (y.ref === `new:${x.key}` ? { ...y, ref: "auto" } : y)) }))}><Icon name="cancel" /></button>}
+              </td>
+            </tr>);
+        })}
+      </tbody>);
+  }), (
+    <tr>
+      <td className="py-2 pl-3" colSpan={4}>รวม {dispList.length} ใบ</td>
+      <td className="px-2 py-2 text-right font-semibold text-slate-800">{fmt(dispSum.qty)} ชิ้น</td>
+      <td />
+      <td className="px-2 py-2 text-right font-semibold text-slate-800">฿{fmt(dispSum.pay)}</td>
+      <td className="px-2 py-2" colSpan={3}>{dispSum.noRate ? "บางแถวยังไม่ใส่ค่าแรง (ใส่ทีหลังได้)" : ""}</td>
+    </tr>
+  ), "ค่าแรงสีเทา = ตามสูตรของรุ่นนั้น");
+
+  // ── ช่างส่งคืน (ตามยอดจ่ายอัตโนมัติ / หลายรอบ) — ค่าแรงว่าง = ตามใบจ่าย
+  const retList = listOf("ret");
+  const retRate = (d: D, i: number, x: CuRetLine) => x.wage ?? cuRateOfRef(d.sources, d.retEff[i]?.ref ?? "auto");
+  const retSum = retList.reduce((a, { d }) => {
+    d.ret.forEach((x, i) => { if (!(x.qty > 0)) return; a.qty += x.qty; const w = retRate(d, i, x); if (w != null) a.pay += w * x.qty; });
+    return a;
+  }, { qty: 0, pay: 0 });
+  const fillRet = (p: (s0: CuRetLine) => Partial<CuRetLine>): Fill => (x, s) => {
+    const s0 = s.d.ret[0]; if (!s0) return null;
+    return { ret: x.d.ret.map((l, i) => ({ ...l, ref: x.d.retEff[i]?.ref ?? l.ref, ...p(s0) })) };
+  };
+  const retSec = section("ret", <>
+    {th("ใบงาน", "ret", "pl-3")}
+    {th("ค้างช่าง", "ret", "w-24 text-right")}
+    {th("คืนจาก", "ret", "w-56")}
+    {th("คืนกี่ชิ้น", "ret", "w-24")}
+    {th("ค่าแรง/ชิ้น", "ret", "w-36", fillRet((s0) => ({ wage: s0.wage ?? null })))}
+    {th("รวมค่าแรง", "ret", "w-24 text-right")}
+    {th("วันที่คืน", "ret", "w-40", fillRet((s0) => ({ date: s0.date })))}
+    <th className="w-10" />
+  </>, retList.map(({ r, d }) => {
+    const n = Math.max(1, d.ret.length), left = r2(d.outstanding - d.retTotal);
+    const extra = (
+      <div className="mt-1 space-y-1">
+        <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-slate-600" title="คืนตามช่างที่จ่าย เท่าที่ค้างอยู่ — แก้จำนวนเอง = เลิกอัตโนมัติ">
+          <input type="checkbox" checked={!r.retSet} disabled={r.target === "return_part"} onChange={(e) => patchRow(r.moNo, e.target.checked ? { retSet: false } : { retSet: true, ret: d.ret.map((x, i) => ({ ...x, ref: d.retEff[i]?.ref ?? x.ref })) })} className="h-3.5 w-3.5 accent-indigo-600" />
+          ตามยอดจ่าย
+        </label>
+        {r.retSet && (
+          <button type="button" className={addBtn}
+            onClick={() => patchRow(r.moNo, { retSet: true, ret: [...d.ret.map((x, j) => ({ ...x, ref: d.retEff[j]?.ref ?? x.ref })), { key: nk("r"), ref: "", qty: Math.max(0, r2(d.outstanding - d.retTotal)), date: null, wage: null }] })}>
+            <Icon name="add" /> เพิ่มรอบ
+          </button>
+        )}
+        <Msg d={d} field="ret" />
+      </div>);
+    const owe = (
+      <td rowSpan={n} className={`${td} text-right`}>
+        <div className="font-medium text-slate-700">{fmt(d.outstanding)}</div>
+        {left < -0.0001 ? <span className="mt-0.5 inline-block rounded-full bg-rose-50 px-1.5 text-[11px] text-rose-700">เกิน {fmt(-left)}</span>
+          : left > 0.0001 ? <span className="mt-0.5 inline-block rounded-full bg-amber-50 px-1.5 text-[11px] text-amber-800">ยังค้าง {fmt(left)}</span>
+          : <span className="mt-0.5 inline-block rounded-full bg-emerald-50 px-1.5 text-[11px] text-emerald-700">คืนครบ</span>}
+      </td>);
+    return (
+      <tbody key={r.moNo} className={`border-t border-slate-200${lockCls(r)}`}>
+        {!d.ret.length && <tr>{skuCell(r, 1, extra)}{owe}<td className={`${td} text-[12px] text-slate-400`} colSpan={6}>ยังไม่มีรอบส่งคืน</td></tr>}
+        {d.ret.map((x, i) => {
+          const fk = `ret:${x.key}`, ref = d.retEff[i]?.ref ?? "auto", src = cuRateOfRef(d.sources, ref), w = retRate(d, i, x);
+          return (
+            <tr key={x.key} className={i ? "border-t border-dashed border-slate-100" : ""}>
+              {i === 0 && skuCell(r, n, extra)}
+              {i === 0 && owe}
+              <td className={td}>
+                {!r.retSet || d.sources.length <= 1
+                  ? <div className="flex h-9 items-center rounded-lg border border-slate-200 bg-slate-50 px-2 text-sm text-slate-700">{d.sources.find((o) => o.ref === ref)?.short ?? "แบ่งอัตโนมัติ"}</div>
+                  : <select value={ref} onChange={(e) => setRet(r, d, x.key, { ref: e.target.value })} className={inp}>
+                      {d.sources.map((o) => <option key={o.ref} value={o.ref}>{o.label}</option>)}
+                      <option value="auto">แบ่งให้อัตโนมัติ (คนที่จ่ายก่อนได้ก่อน)</option>
+                    </select>}
+              </td>
+              <td className={td}>
+                <input type="number" min={0} step="any" value={x.qty} onChange={(e) => setRet(r, d, x.key, { qty: Number(e.target.value) }, true)} className={`${inp}${ring(d, `${fk}:qty`)}`} />
+                <Msg d={d} field={`${fk}:qty`} />
+              </td>
+              <td className={td}>
+                <input type="number" min={0} step="any" value={x.wage ?? ""} placeholder={src != null ? `ตามใบจ่าย ฿${fmt(src)}` : "ยังไม่ลง"}
+                  onChange={(e) => setRet(r, d, x.key, { wage: numOrNull(e.target.value) })} className={`${inp}${ring(d, `${fk}:wage`)}${x.wage == null && src != null ? " !border-emerald-200 !bg-emerald-50/60" : ""}`} />
+                <Msg d={d} field={`${fk}:wage`} />
+              </td>
+              <td className={`${td} text-right`}>{w != null && x.qty > 0 ? <span className={x.wage == null ? "text-slate-400" : "font-medium text-slate-700"}>฿{fmt(w * x.qty)}</span> : none}</td>
+              <td className={td}><DispatchDatePick value={x.date} onChange={(v) => setRet(r, d, x.key, { date: v })} /><Msg d={d} field={`${fk}:date`} /></td>
+              <td className={td}>
+                {r.retSet && d.ret.length > 1 && <button type="button" title="ลบรอบนี้" className={xBtn} onClick={() => patchRow(r.moNo, { ret: d.ret.filter((y) => y.key !== x.key) })}><Icon name="cancel" /></button>}
+              </td>
+            </tr>);
+        })}
+      </tbody>);
+  }), (
+    <tr>
+      <td className="py-2 pl-3" colSpan={3}>รวม {retList.length} ใบ</td>
+      <td className="px-2 py-2 font-semibold text-slate-800">{fmt(retSum.qty)} ชิ้น</td>
+      <td />
+      <td className="px-2 py-2 text-right font-semibold text-slate-800">฿{fmt(retSum.pay)}</td>
+      <td colSpan={2} />
+    </tr>
+  ), "ค่าแรงว่าง (สีเขียว) = ตามใบจ่าย");
+
+  // ── QC รับเข้าชั้น
+  const qcSec = section("qc", <>
+    {th("ใบงาน", "qc", "pl-3")}
+    {th("รอรับ", "qc", "w-20 text-right")}
+    {th("ชั้นที่วางของดี", "qc", "w-48", (x, s) => (x.r.snap!.shelves.some((y) => y.id === s.r.shelfId && y.kind !== "defect") ? { shelfId: s.r.shelfId } : null))}
+    {th("ของดี", "qc", "w-24")}
+    {th("ของเสีย", "qc", "w-24")}
+    {th("สาเหตุของเสีย", "qc", "w-48", listOf("qc").some((x) => x.r.qcBad > 0) ? (x, s) => (x.r.qcBad > 0 && (x.r.snap!.reasons ?? []).some((y) => y.name === s.r.badReason) ? { badReason: s.r.badReason } : null) : undefined)}
+    {th("รับเข้าเมื่อ", "qc", "w-40", fillDate("qc"))}
+  </>, listOf("qc").map(({ r, d }) => (
+    <tbody key={r.moNo} className={`border-t border-slate-200${lockCls(r)}`}>
+      <tr>
+        {skuCell(r)}
+        <td className={`${td} text-right`}><div className="font-medium text-slate-700">{fmt(d.qcAvail)}</div>{!r.qcSet && <div className="text-[11px] text-slate-400">ตามยอดคืน</div>}</td>
+        <td className={td}>
+          <select value={r.shelfId} onChange={(e) => patchRow(r.moNo, { shelfId: e.target.value })} className={`${inp}${ring(d, "qc:shelf")}`}>
+            <option value="">— เลือกชั้น —</option>
+            {r.snap!.shelves.filter((s) => s.kind !== "defect").map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+          </select>
+          <Msg d={d} field="qc:shelf" />
+        </td>
+        <td className={td}><input type="number" min={0} step="any" value={d.qcGood} onChange={(e) => patchRow(r.moNo, { qcSet: true, qcGood: Number(e.target.value) })} className={`${inp}${ring(d, "qc:good")}`} /><Msg d={d} field="qc:good" /></td>
+        <td className={td}><input type="number" min={0} step="any" value={r.qcBad} onChange={(e) => patchRow(r.moNo, { qcBad: Number(e.target.value) })} className={`${inp}${ring(d, "qc:bad")}`} /><Msg d={d} field="qc:bad" /></td>
+        <td className={td}>
+          {r.qcBad > 0 ? <>
+            <select value={r.badReason} onChange={(e) => patchRow(r.moNo, { badReason: e.target.value })} className={`${inp}${ring(d, "qc:reason")}`}>
+              <option value="">— เลือกสาเหตุ —</option>
+              {(r.snap!.reasons ?? []).map((x) => <option key={x.id} value={x.name}>{x.name}</option>)}
             </select>
-            <Msg d={d} field="qc:shelf" />
-          </td>
-          <td className={td}>
-            <div className="flex flex-wrap items-center gap-2 text-[13px]">
-              <span className="text-slate-500">ดี</span>
-              <input type="number" min={0} step="any" value={d.qcGood} onChange={(e) => patchRow(r.moNo, { qcSet: true, qcGood: Number(e.target.value) })} className={`${inp} !w-24${ring(d, "qc:good")}`} />
-              <span className="text-slate-500">เสีย</span>
-              <input type="number" min={0} step="any" value={r.qcBad} onChange={(e) => patchRow(r.moNo, { qcBad: Number(e.target.value) })} className={`${inp} !w-20${ring(d, "qc:bad")}`} />
-              <span className="text-[11px] text-slate-400">รอรับ {fmt(d.qcAvail)}{!r.qcSet ? " · ของดีตามยอดส่งคืน" : ""}</span>
-            </div>
-            <Msg d={d} field="qc:good" /><Msg d={d} field="qc:bad" />
-          </td>
-          <td className={td} colSpan={2} />
-          <td className={td}><div className="mb-0.5 text-[11px] text-slate-500">รับเข้าเมื่อ</div><DispatchDatePick value={r.dates.qc} onChange={(v) => patchRow(r.moNo, { dates: { ...r.dates, qc: v } })} /><Msg d={d} field="qc:date" /></td>
-          <td className={td}>
-            {r.qcBad > 0 && <>
-              <select value={r.badReason} onChange={(e) => patchRow(r.moNo, { badReason: e.target.value })} className={`${inp}${ring(d, "qc:reason")}`}>
-                <option value="">— สาเหตุของเสีย —</option>
-                {(r.snap!.reasons ?? []).map((x) => <option key={x.id} value={x.name}>{x.name}</option>)}
-              </select>
-              <Msg d={d} field="qc:reason" />
-            </>}
-          </td>
-          <td />
-        </tr>);
-    }
-    // ── ส่งออก / ปิดใบ
-    if (d.on("ship")) out.push(
-      <tr key="ship" className={sectionCls}>
-        <td className={stepTd}><span className="inline-flex items-center gap-1"><Icon name="export" /> ส่งออกจาก QC</span></td>
-        <td className={td} colSpan={2}>
-          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+            <Msg d={d} field="qc:reason" />
+          </> : none}
+        </td>
+        {dateCell(r, d, "qc", "qc:date")}
+      </tr>
+    </tbody>
+  )));
+
+  // ── ส่งออกจาก QC
+  const shipSec = section("ship", <>
+    {th("ใบงาน", "ship", "pl-3")}
+    {th("ส่งไปที่", "ship", "", (_x, s) => ({ shipMode: s.r.shipMode, shipWh: s.r.shipWh }))}
+    {th("วันที่ส่งออก", "ship", "w-40", fillDate("ship"))}
+  </>, listOf("ship").map(({ r, d }) => (
+    <tbody key={r.moNo} className={`border-t border-slate-200${lockCls(r)}`}>
+      <tr>
+        {skuCell(r)}
+        <td className={td}>
+          <div className="flex flex-wrap items-center gap-2">
             <select value={r.shipMode} onChange={(e) => patchRow(r.moNo, { shipMode: e.target.value === "sell" ? "sell" : "sales_wh" })} className={`${inp} !w-40`}>
               <option value="sales_wh">เข้าคลังขาย</option><option value="sell">ขายออกเลย</option>
             </select>
@@ -628,40 +764,95 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
           </div>
           <Msg d={d} field="ship" />
         </td>
-        <td className={td} colSpan={2} />
-        <td className={td}><DispatchDatePick value={r.dates.ship} onChange={(v) => patchRow(r.moNo, { dates: { ...r.dates, ship: v } })} /><Msg d={d} field="ship:date" /></td>
-        <td className={td} colSpan={2} />
-      </tr>);
-    if (d.on("close")) out.push(
-      <tr key="close" className={sectionCls}>
-        <td className={stepTd}><span className="inline-flex items-center gap-1"><Icon name="finish" /> ปิดใบ</span></td>
-        <td className={td} colSpan={4}><Msg d={d} field="close" />
+        {dateCell(r, d, "ship", "ship:date")}
+      </tr>
+    </tbody>
+  )));
+
+  // ── ปิดใบ (ส่งคืนไม่ครบ = ปุ่มปิดยอดขาด)
+  const closeSec = section("close", <>
+    {th("ใบงาน", "close", "pl-3")}
+    {th("ส่งคืนแล้ว / สั่ง", "close", "w-36 text-right")}
+    {th("วันที่ปิดใบ", "close", "w-40", fillDate("close"))}
+    {th("", "close")}
+  </>, listOf("close").map(({ r, d }) => (
+    <tbody key={r.moNo} className={`border-t border-slate-200${lockCls(r)}`}>
+      <tr>
+        {skuCell(r)}
+        <td className={`${td} text-right`}><span className="font-medium text-slate-700">{fmt(d.built.received)}</span> <span className="text-slate-400">/ {fmt(d.f.qty)}</span></td>
+        {dateCell(r, d, "close", "close:date")}
+        <td className={td}>
+          <Msg d={d} field="close" />
           {d.errs.some((x) => x.field === "close") && !r.reduce && d.built.received > 0 && (
             <button type="button" onClick={() => setReduce(r.moNo, { qty: d.built.received, pick: "ช่างส่งคืนไม่ครบ", detail: "", mode: "drop" })}
               className="mt-1 h-8 rounded-lg border border-amber-300 bg-amber-50 px-3 text-[12px] font-medium text-amber-900 hover:bg-amber-100">ปิดยอดขาด: ลดเหลือ {fmt(d.built.received)}</button>
           )}
         </td>
-        <td className={td}><DispatchDatePick value={r.dates.close} onChange={(v) => patchRow(r.moNo, { dates: { ...r.dates, close: v } })} /><Msg d={d} field="close:date" /></td>
-        <td className={td} colSpan={2} />
-      </tr>);
-    // ── เพิ่มเติม: บันทึกถึงทีม + ค่าแรงกลับเข้า BOM
-    out.push(
-      <tr key="extra" className={sectionCls}>
-        <td className={`${stepTd} font-normal text-slate-400`}>เพิ่มเติม</td>
-        <td className={td} colSpan={4}>
-          <input value={r.teamNote} onChange={(e) => patchRow(r.moNo, { teamNote: e.target.value })} placeholder="บันทึกถึงทีม (ไม่บังคับ — ต่อท้ายหมายเหตุใบสั่งผลิต)" className={inp} />
+      </tr>
+    </tbody>
+  )));
+
+  // ── ยกเลิกใบ
+  const cancelSec = section("cancel", <>
+    {th("ใบงาน", "cancel", "pl-3")}
+    {th("เหตุผลที่ยกเลิก (บังคับ)", "cancel", "", (_x, s) => ({ cancelReason: s.r.cancelReason }))}
+    {th("วันที่ยกเลิก", "cancel", "w-40", fillDate("cancel"))}
+  </>, listOf("cancel").map(({ r, d }) => (
+    <tbody key={r.moNo} className={`border-t border-slate-200${lockCls(r)}`}>
+      <tr>
+        {skuCell(r)}
+        <td className={td}>
+          <input value={r.cancelReason} onChange={(e) => patchRow(r.moNo, { cancelReason: e.target.value })} placeholder="เช่น ลูกค้ายกเลิกออเดอร์" className={`${inp}${ring(d, "cancel:reason")}`} />
+          <Msg d={d} field="cancel:reason" />
         </td>
-        <td className={td} colSpan={3}>
-          {d.bomOffer && (
-            <label className="flex cursor-pointer items-start gap-1.5 text-[12px] text-indigo-900">
-              <input type="checkbox" checked={r.saveBom} onChange={(e) => patchRow(r.moNo, { saveBom: e.target.checked })} className="mt-0.5 h-4 w-4 accent-indigo-600" />
-              <span>บันทึกค่าแรง ฿{fmt(d.bomCandidate!)}/ชิ้น กลับเข้าสูตร (BOM) <span className="text-indigo-700/70">{d.centralRate ? `เดิม ฿${fmt(d.centralRate)}` : "ยังไม่เคยตั้ง"}</span></span>
-            </label>
-          )}
-        </td>
-      </tr>);
-    return out;
-  };
+        {dateCell(r, d, "cancel", "cancel:date")}
+      </tr>
+    </tbody>
+  )));
+
+  // ── เพิ่มเติม (ไม่บังคับ): บันทึกถึงทีม + ค่าแรงกลับเข้า BOM — ย่อไว้ · มีใบที่จะบันทึกค่าแรงเข้าสูตร = บอกจำนวนที่หัว
+  const extraList = listOf("extra");
+  const bomN = extraList.filter((x) => x.d.bomOffer && x.r.saveBom).length;
+  const noteN = extraList.filter((x) => x.r.teamNote.trim()).length;
+  const extraSec = extraList.length > 0 && (
+    <section id="cub-extra">
+      <button type="button" onClick={() => setExtraOpen((v) => !v)} className="mb-1.5 inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-slate-900">
+        <span className="w-3 text-slate-400">{extraOpen ? "▾" : "▸"}</span>
+        <Icon name="note" /> เพิ่มเติม (ไม่บังคับ) · บันทึกถึงทีม / ค่าแรงเข้าสูตร
+        {noteN > 0 && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">บันทึก {noteN} ใบ</span>}
+        {bomN > 0 && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700">จะบันทึกค่าแรงเข้าสูตร {bomN} ใบ</span>}
+      </button>
+      {extraOpen && (
+        <div className="overflow-x-auto rounded-lg border border-slate-200">
+          <table className="w-full border-collapse text-[13px]">
+            <thead className="bg-slate-50 text-left text-[12px] text-slate-500"><tr>
+              {th("ใบงาน", "extra", "pl-3")}
+              {th("บันทึกถึงทีม (ต่อท้ายหมายเหตุใบสั่งผลิต)", "extra", "", (_x, s) => ({ teamNote: s.r.teamNote }))}
+              {th("ค่าแรงกลับเข้าสูตร (BOM)", "extra", "w-80")}
+            </tr></thead>
+            {extraList.map(({ r, d }) => (
+              <tbody key={r.moNo} className={`border-t border-slate-200${lockCls(r)}`}>
+                <tr>
+                  {skuCell(r)}
+                  <td className={td}><input value={r.teamNote} onChange={(e) => patchRow(r.moNo, { teamNote: e.target.value })} placeholder="ไม่บังคับ" className={inp} /></td>
+                  <td className={td}>
+                    {d.bomOffer ? (
+                      <label className="flex cursor-pointer items-start gap-1.5 text-[12px] text-indigo-900">
+                        <input type="checkbox" checked={r.saveBom} onChange={(e) => patchRow(r.moNo, { saveBom: e.target.checked })} className="mt-0.5 h-4 w-4 accent-indigo-600" />
+                        <span>บันทึก ฿{fmt(d.bomCandidate!)}/ชิ้น เข้าสูตร <span className="text-indigo-700/70">{d.centralRate ? `เดิม ฿${fmt(d.centralRate)}` : "ยังไม่เคยตั้ง"}</span></span>
+                      </label>
+                    ) : none}
+                  </td>
+                </tr>
+              </tbody>
+            ))}
+          </table>
+        </div>
+      )}
+    </section>
+  );
+  const stageSecs = [preSec, dispSec, retSec, qcSec, shipSec, closeSec, cancelSec];
+  const navSecs = secs.filter((s) => s.key !== "extra" && s.list.length > 0);
 
   return (
     <ERPModal open={!!moNos?.length} onClose={() => { if (!busy) onClose(); }} size="xl" title={`อัปเดตงานเป็นชุด · ${rows.length} ใบ`} hasUnsavedChanges={dirty && !busy}
@@ -674,7 +865,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
         <button type="button" onClick={onClose} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm disabled:opacity-40">{doneN && !dirty ? "ปิด" : "ยกเลิก"}</button>
         <button type="button" onClick={() => void saveAll()} disabled={busy || !ready.length} className="h-9 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-40">{saveLabel}</button>
       </>}>
-      <div className="space-y-3">
+      <div className="space-y-4">
         {/* แถบบน: ตั้งขั้นทุกใบ · ใส่ทั้งหมดตามใบแรก */}
         <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-[13px]">
           <span className="text-slate-600">ทุกใบไปถึงขั้น</span>
@@ -704,62 +895,92 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
           </div>
         )}
 
-        <div className="overflow-x-auto rounded-lg border border-slate-200">
-          <table className="w-full min-w-[1180px] border-collapse text-[13px]">
-            <thead className="sticky top-0 z-10 bg-slate-50 text-left text-[12px] text-slate-500">
-              <tr>
-                <th className="w-36 py-2 pl-3 pr-2 font-medium">ขั้นตอน</th>
-                <th className="w-48 px-2 py-2 font-medium">โต๊ะ / ส่งคืนจาก / ชั้น</th>
-                <th className="px-2 py-2 font-medium">คนรับ / ของดี · เสีย</th>
-                <th className="w-24 px-2 py-2 font-medium">จำนวน</th>
-                <th className="w-36 px-2 py-2 font-medium">ค่าแรง/ชิ้น</th>
-                <th className="w-44 px-2 py-2 font-medium">วันที่</th>
-                <th className="w-52 px-2 py-2 font-medium">หมายเหตุ / สาเหตุเสีย</th>
-                <th className="w-12 px-2 py-2" />
-              </tr>
-            </thead>
-            {derived.map(({ r, d }) => {
-              const m = modeOf(r), f = r.snap ? cuFacts(r.snap) : null;   // ของจริงตอนนี้ (เทียบกับตอนส่งคำขอ)
-              const where = r.snap ? cuLocateSnap(r.snap) : null;
-              const diff = m.reviewing && f && (r.req?.draft as CuDraft | null)?.facts ? cuFactsDiff((r.req!.draft as CuDraft).facts, f) : [];
-              const canUndo = r.phase === "done" && !r.undoRes && r.results.some((x) => x.undo && x.undo.kind !== "none") && !cuIrreversible(r.results);
-              return (
-                <tbody key={r.moNo} className="border-t-2 border-slate-200">
-                  <tr className="bg-white">
-                    <td colSpan={8} className="px-3 py-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <button type="button" onClick={() => patchRow(r.moNo, { open: !r.open })} className="h-7 w-7 shrink-0 rounded-md text-slate-500 hover:bg-slate-100" aria-label={r.open ? "ย่อ" : "ขยาย"}>{r.open ? "▾" : "▸"}</button>
-                        <span className="font-semibold text-slate-800">{r.snap?.mo.product_sku ?? r.moNo}</span>
-                        {r.snap?.mo.product_name && <span className="max-w-[16rem] truncate text-slate-500">{r.snap.mo.product_name}</span>}
-                        <span className="text-[12px] text-slate-400">{r.moNo}{f ? <> · สั่งผลิต {r.after && Math.abs(r.after.qty - f.qty) > 0.0001 ? <><span className="line-through">{fmt(f.qty)}</span> <b className="font-semibold text-slate-700">{fmt(r.after.qty)}</b></> : fmt(f.qty)} ชิ้น</> : ""}</span>
-                        {where && (r.after
-                          ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600" title="ตอนนี้ของอยู่ไหน (หลังบันทึก)">ตอนนี้: <span className="text-slate-400 line-through">{whereText(where)}</span> → <b className="font-semibold text-slate-800">{whereText(r.after.where)}</b></span>
-                          : <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600" title="ตอนนี้ของอยู่ไหน (ก่อนบันทึก)">ตอนนี้: {whereText(where)}</span>)}
+        {/* 1) ตารางใบงาน: แต่ละใบไปถึงขั้นไหน · สถานะ · เปลี่ยนจำนวน · ผลหลังบันทึก */}
+        <section>
+          <div className="mb-1.5 flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-slate-800"><Icon name="documents" /> ใบงาน {rows.length} ใบ</span>
+            <span className="text-[11px] text-slate-400">เลือกว่าแต่ละใบไปถึงขั้นไหน แล้วกรอกในตารางของแต่ละขั้นด้านล่าง</span>
+          </div>
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full min-w-[980px] border-collapse text-[13px]">
+              <thead className="bg-slate-50 text-left text-[12px] text-slate-500">
+                <tr>
+                  <th className="w-64 py-2 pl-3 pr-2 font-medium">ใบงาน</th>
+                  <th className="w-28 px-2 py-2 text-right font-medium">สั่งผลิต</th>
+                  <th className="px-2 py-2 font-medium">ตอนนี้อยู่ไหน</th>
+                  <th className="w-56 px-2 py-2 font-medium">ไปถึงขั้น</th>
+                  <th className="px-2 py-2 font-medium">สถานะ</th>
+                  <th className="px-2 py-2" />
+                </tr>
+              </thead>
+              {derived.map(({ r, d }) => {
+                const m = modeOf(r), f = r.snap ? cuFacts(r.snap) : null;   // ของจริงตอนนี้ (เทียบกับตอนส่งคำขอ)
+                const where = r.snap ? cuLocateSnap(r.snap) : null;
+                const diff = m.reviewing && f && (r.req?.draft as CuDraft | null)?.facts ? cuFactsDiff((r.req!.draft as CuDraft).facts, f) : [];
+                const canUndo = r.phase === "done" && !r.undoRes && r.results.some((x) => x.undo && x.undo.kind !== "none") && !cuIrreversible(r.results);
+                const canQty = !!r.snap && r.phase === "edit" && !m.blockedBy && !!r.target && r.target !== "cancel";
+                const smallBtn = "inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2 text-[12px] text-slate-600 hover:bg-slate-50 disabled:opacity-40";
+                return (
+                  <tbody key={r.moNo} className="border-t border-slate-200">
+                    <tr className={r.phase === "done" ? "bg-emerald-50/30" : ""}>
+                      <td className="py-2 pl-3 pr-2 align-top">
+                        <div className="font-semibold text-slate-800">{r.snap?.mo.product_sku ?? r.moNo}</div>
+                        <div className="truncate text-[11px] text-slate-400" title={r.snap?.mo.product_name ?? undefined}>{r.moNo}{r.snap?.mo.product_name && r.snap.mo.product_name !== r.snap.mo.product_sku ? ` · ${r.snap.mo.product_name}` : ""}</div>
+                      </td>
+                      <td className="px-2 py-2 text-right align-top">
+                        {f ? (r.after && Math.abs(r.after.qty - f.qty) > 0.0001
+                          ? <><span className="text-slate-400 line-through">{fmt(f.qty)}</span> <b className="font-semibold text-slate-800">{fmt(r.after.qty)}</b></>
+                          : <span className="text-slate-700">{fmt(f.qty)}</span>) : none}
+                        {r.reduce && r.phase === "edit" && r.reduce.qty > 0 && <div className="text-[11px] text-amber-700">ทำจริง {fmt(r.reduce.qty)}</div>}
+                      </td>
+                      <td className="px-2 py-2 align-top text-[12px] text-slate-600">
+                        {where ? (r.after
+                          ? <span title="ตอนนี้ของอยู่ไหน (หลังบันทึก)"><span className="text-slate-400 line-through">{whereText(where)}</span> → <b className="font-semibold text-slate-800">{whereText(r.after.where)}</b></span>
+                          : whereText(where)) : none}
+                      </td>
+                      <td className="px-2 py-2 align-top">
                         {r.snap && f && (
                           <select value={r.target ?? ""} disabled={r.phase !== "edit" || m.blockedBy || busy}
                             onChange={(e) => { const k = e.target.value as CuTargetKey; if (k) patchRow(r.moNo, (rr) => ({ ...retarget(rr, k), open: true })); }}
-                            className={`h-8 rounded-lg border bg-white px-2 text-[13px] ${r.target ? "border-indigo-300" : "border-amber-300"}`}>
-                            <option value="">— ไปถึงขั้นไหน —</option>
+                            className={`h-9 w-full rounded-lg border bg-white px-2 text-[13px] ${r.target ? "border-indigo-300" : "border-amber-400 bg-amber-50/40"}`}>
+                            <option value="">— เลือกขั้น —</option>
                             {CU_TARGETS.map((t) => { const b = cuTargetBlocked(f, t.key); return <option key={t.key} value={t.key} disabled={!!b} title={b ?? undefined}>{t.label}{b ? " (เลือกไม่ได้)" : ""}</option>; })}
                           </select>
                         )}
-                        {statusChip(r, d)}
-                        {m.reviewing && r.phase === "edit" && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700">คำขอจาก {r.req?.requested_name ?? "พนักงาน"}</span>}
-                        <span className="flex-1" />
-                        {canUndo && <button type="button" onClick={() => void undoRow(r)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon name="back" /> ย้อน</button>}
-                        {r.snap && r.phase === "edit" && <button type="button" onClick={() => onOpenSingle(r.moNo)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon name="open" /> เปิดแบบละเอียด</button>}
-                        {r.snap && r.phase === "edit" && onOpenEdit && <button type="button" onClick={() => onOpenEdit(r.moNo)} title="แก้สิ่งที่บันทึกไปแล้ว (รวมขั้นก่อนหน้า)" className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon name="edit" /> แก้ไข</button>}
-                        {r.phase === "edit" && !busy && <button type="button" title="เอาใบนี้ออกจากชุด" onClick={() => setRows((rs) => rs.filter((x) => x.moNo !== r.moNo))} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon name="cancel" /></button>}
-                      </div>
-                      {diff.length > 0 && <div className="mt-1.5 rounded-md bg-amber-50 px-2 py-1 text-[12px] text-amber-900">ใบนี้เปลี่ยนไปหลังส่งคำขอ — ตรวจก่อนยืนยัน: {diff.join(" · ")}</div>}
-                      {r.phase === "done" && r.results.length > 0 && (() => {
-                        // ยังต้องตามต่อ: รอบส่งคืนที่ยังไม่ลงค่าแรง/วันที่ · ใบใหม่ที่แยก/ทำเพิ่ม
-                        const okSteps = r.results.filter((x) => x.ok).map((x) => x.step);
-                        const pend = okSteps.filter((x) => x.kind === "return" && (x.wage == null || !x.date)).length;
-                        const newMo = r.results.map((x) => (x.undo?.kind === "reduce" ? x.undo.newMo : null)).find(Boolean);
-                        const wip = r.after?.where.parts.find((p) => p.key === "wip")?.qty ?? 0;   // ช่างยังค้างส่ง (หลังบันทึก)
-                        return (
-                          <div className="mt-2 space-y-1.5">
+                      </td>
+                      <td className="px-2 py-2 align-top">
+                        <div className="flex flex-wrap items-center gap-1">
+                          {statusChip(r, d)}
+                          {m.reviewing && r.phase === "edit" && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-700">คำขอจาก {r.req?.requested_name ?? "พนักงาน"}</span>}
+                        </div>
+                      </td>
+                      <td className="px-2 py-2 align-top">
+                        <div className="flex flex-wrap items-center justify-end gap-1">
+                          {canQty && !r.reduce && <button type="button" disabled={!!r.snap!.mo.sized} onClick={() => setReduce(r.moNo, { qty: 0, pick: REDUCE_REASONS[0], detail: "", mode: "split" })}
+                            title={r.snap!.mo.sized ? "ใบนี้แบ่งจำนวนตามไซส์ — แก้รายไซส์ที่หน้าใบสั่งผลิต" : "ทำจริงไม่ตรงจำนวนสั่ง (ของไม่พอ / ทำเพิ่มได้ / ช่างคืนไม่ครบ)"} className={smallBtn}><Icon name="exchange" /> เปลี่ยนจำนวน</button>}
+                          {canUndo && <button type="button" onClick={() => void undoRow(r)} className={smallBtn}><Icon name="back" /> ย้อน</button>}
+                          {r.snap && r.phase === "edit" && <button type="button" onClick={() => onOpenSingle(r.moNo)} title="เปิดป๊อปทีละใบ (ขาดของบางรายการ / แจ้งปัญหา / จัดคนในโต๊ะ)" className={smallBtn}><Icon name="open" /> ละเอียด</button>}
+                          {r.snap && r.phase === "edit" && onOpenEdit && <button type="button" onClick={() => onOpenEdit(r.moNo)} title="แก้สิ่งที่บันทึกไปแล้ว (รวมขั้นก่อนหน้า)" className={smallBtn}><Icon name="edit" /> แก้ไข</button>}
+                          {r.phase === "edit" && !busy && <button type="button" title="เอาใบนี้ออกจากชุด" onClick={() => setRows((rs) => rs.filter((x) => x.moNo !== r.moNo))} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon name="cancel" /></button>}
+                        </div>
+                      </td>
+                    </tr>
+                    {canQty && r.reduce && d && (
+                      <tr><td colSpan={6} className="px-3 pb-2">
+                        <ReducePanel compact qty={r.snap!.mo.qty} received={d.f0.received} sized={!!r.snap!.mo.sized} wos={r.snap!.wos} value={r.reduce}
+                          onChange={(v) => setReduce(r.moNo, v)} issues={d.built.issues} />
+                      </td></tr>
+                    )}
+                    {diff.length > 0 && <tr><td colSpan={6} className="px-3 pb-2"><div className="rounded-md bg-amber-50 px-2 py-1 text-[12px] text-amber-900">ใบนี้เปลี่ยนไปหลังส่งคำขอ — ตรวจก่อนยืนยัน: {diff.join(" · ")}</div></td></tr>}
+                    {r.phase === "done" && r.results.length > 0 && (() => {
+                      // ยังต้องตามต่อ: รอบส่งคืนที่ยังไม่ลงค่าแรง/วันที่ · ใบใหม่ที่แยก/ทำเพิ่ม
+                      const okSteps = r.results.filter((x) => x.ok).map((x) => x.step);
+                      const pend = okSteps.filter((x) => x.kind === "return" && (x.wage == null || !x.date)).length;
+                      const newMo = r.results.map((x) => (x.undo?.kind === "reduce" ? x.undo.newMo : null)).find(Boolean);
+                      const wip = r.after?.where.parts.find((p) => p.key === "wip")?.qty ?? 0;   // ช่างยังค้างส่ง (หลังบันทึก)
+                      return (
+                        <tr><td colSpan={6} className="px-3 pb-2">
+                          <div className="space-y-1.5">
                             <CuStepList items={r.results.map((x) => ({ step: x.step, state: x.ok ? "ok" as const : "fail" as const, msg: x.ok ? undefined : x.msg }))} who={d?.whoOf} />
                             {r.undoRes?.map((x, i) => <div key={`u${i}`} className={`text-[12px] ${x.ok ? "text-slate-500" : "text-amber-700"}`}>{x.ok ? "↶" : "!"} {x.msg}</div>)}
                             {!r.undoRes && (pend > 0 || newMo || wip > 0) && (
@@ -771,16 +992,37 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                               </div>
                             )}
                           </div>
-                        );
-                      })()}
-                    </td>
-                  </tr>
-                  {r.open && r.target && d && r.phase !== "done" && body(r, d)}
-                </tbody>
+                        </td></tr>
+                      );
+                    })()}
+                  </tbody>
+                );
+              })}
+            </table>
+          </div>
+        </section>
+
+        {/* 2) ตารางแยกตามขั้น — กดป้ายเพื่อเลื่อนไปตารางนั้น */}
+        {navSecs.length > 0 ? (
+          <div className="sticky top-0 z-10 -mx-1 flex flex-wrap items-center gap-1.5 bg-white/95 px-1 py-1.5 text-[12px] backdrop-blur">
+            <span className="text-slate-500">กรอกตามขั้น:</span>
+            {navSecs.map((s) => {
+              const bad = s.list.filter((x) => errIn(x.d, s.key)).length;
+              return (
+                <button key={s.key} type="button" onClick={() => document.getElementById(`cub-${s.key}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 ${bad ? "border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100" : "border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100"}`}>
+                  <Icon name={s.icon} /> {s.label} {s.list.length}{bad ? ` · ต้องแก้ ${bad}` : ""}
+                </button>
               );
             })}
-          </table>
-        </div>
+          </div>
+        ) : rows.some((r) => r.snap && r.phase === "edit") && (
+          <div className="rounded-lg border border-dashed border-slate-300 px-4 py-6 text-center text-[13px] text-slate-500">
+            เลือก &ldquo;ไปถึงขั้น&rdquo; ของแต่ละใบในตารางด้านบน (หรือ &ldquo;ทุกใบไปถึงขั้น&rdquo;) — ตารางกรอกของแต่ละขั้นจะขึ้นตรงนี้
+          </div>
+        )}
+        {stageSecs}
+        {extraSec}
       </div>
     </ERPModal>
   );
