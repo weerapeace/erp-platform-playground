@@ -26,10 +26,11 @@ import { CrewPick, crewFields, crewList, lastCrewIds } from "./crew-pick";
 import { DispatchDatePick } from "./dispatch-date-pick";
 import {
   CU_TARGETS, CU_STAGE_LABEL, CU_NO_DATES, cuFacts, cuRows, cuDefaultTicks, cuDefaultQty, cuBuildSteps, cuTargetBlocked, cuStepLabel, cuRun, cuUndo,
-  cuIrreversible, cuLocateSnap, cuFactsDiff, cuReduceSnap, type CuReduce,
+  cuIrreversible, cuLocateSnap, cuFactsDiff, cuReduceSnap, type CuReduce, type CuWhere,
   type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuRetLine, type CuDates,
 } from "./catch-up";
 import { ReducePanel } from "./catch-up-reduce";
+import { CuStepList } from "./catch-up-step-line";
 import { cuCentralRate, cuRateFor, cuRetSources, cuRateOfRef, cuRetEffective, cuAutoReturns, cuBomCandidate, cuReadLast, cuWriteLast, type CuDispRow } from "./catch-up-lines";
 
 type DeptLite = { id: string; name: string };
@@ -44,13 +45,16 @@ type BRow = {
   qcGood: number; qcBad: number; qcSet: boolean;
   dates: CuDates; shelfId: string; badReason: string; cancelReason: string; teamNote: string; saveBom: boolean;
   shipMode: "sales_wh" | "sell"; shipWh: string;
-  /** ทำได้ไม่ครบ (ลดจำนวน) — null = ทำครบตามสั่ง */
+  /** เปลี่ยนจำนวน (ทำได้น้อย/มากกว่าสั่ง) — null = ทำตามสั่ง */
   reduce: CuReduce | null;
+  /** หลังบันทึก: ตอนนี้ของอยู่ไหน + จำนวนสั่ง (โหลดใบนั้นใหม่ — ป้าย "ตอนนี้" ไม่ค้างค่าเดิม) */
+  after: { where: CuWhere; qty: number } | null;
   open: boolean; phase: Phase; results: CuResult[]; runMsg: string;
   undoRes: { msg: string; ok: boolean }[] | null;
 };
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
+const whereText = (w: CuWhere) => w.parts.map((p) => `${p.label}${p.qty != null ? ` ${fmt(p.qty)}` : ""}`).join(" · ");
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 const inp = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
@@ -62,7 +66,7 @@ const flow = CU_TARGETS.filter((t) => t.key !== "cancel");
 
 const emptyRow = (moNo: string): BRow => ({
   moNo, snap: null, err: "", req: null, target: null, ticks: {}, disp: [], ret: [], retSet: false, qcGood: 0, qcBad: 0, qcSet: false,
-  dates: CU_NO_DATES, shelfId: "", badReason: "", cancelReason: "", teamNote: "", saveBom: true, shipMode: "sales_wh", shipWh: QC_WAREHOUSES[0], reduce: null,
+  dates: CU_NO_DATES, shelfId: "", badReason: "", cancelReason: "", teamNote: "", saveBom: true, shipMode: "sales_wh", shipWh: QC_WAREHOUSES[0], reduce: null, after: null,
   open: true, phase: "edit", results: [], runMsg: "", undoRes: null,
 });
 
@@ -333,7 +337,14 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
         if (!closed) toast.error(`${r.snap!.mo.product_sku ?? r.moNo}: บันทึกงานแล้ว แต่ปิดคำขอไม่สำเร็จ — ตีกลับพร้อมหมายเหตุว่าบันทึกแล้ว (อย่ายืนยันซ้ำ)`);
         reqChanged = true;
       }
-      if (res.some((x) => x.ok)) saved.push(r.moNo);
+      if (res.some((x) => x.ok)) {
+        saved.push(r.moNo);
+        // โหลดใบนั้นใหม่ → ป้าย "ตอนนี้" เป็นค่าหลังบันทึก (ไม่ได้ = คงค่าเดิม)
+        try {
+          const rr = await apiFetch(`/api/mo/catch-up?mo_no=${encodeURIComponent(r.moNo)}`); const jj = await rr.json();
+          if (rr.ok && jj?.data) { const ns = jj.data as CatchUpSnapshot; patchRow(r.moNo, { after: { where: cuLocateSnap(ns), qty: ns.mo.qty } }); }
+        } catch { /* ไม่รู้ตำแหน่งใหม่ก็ยังดูผลได้ */ }
+      }
       const fail = res.find((x) => !x.ok);
       patchRow(r.moNo, { phase: res.some((x) => x.ok) ? "done" : "edit", results: res, runMsg: fail ? `ไม่สำเร็จที่ "${cuStepLabel(fail.step, d.whoOf)}" — ${fail.msg}` : "" });
     }
@@ -355,7 +366,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
       message: <div className="space-y-1 text-sm"><div>ระบบจะลบ/คืนสิ่งที่เพิ่งบันทึก:</div>{items.map((x, i) => <div key={i} className="text-slate-600">{x}</div>)}</div> }))) return;
     patchRow(r.moNo, { phase: "running" });
     const out = await cuUndo(r.results, { snap: r.snap, disp: {}, shelfId: r.shelfId, badReason: r.badReason }, api, lab);
-    patchRow(r.moNo, { phase: "done", undoRes: out });
+    patchRow(r.moNo, { phase: "done", undoRes: out, after: null });
     if (out.some((x) => x.ok)) onDone([]);
   };
 
@@ -502,6 +513,10 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                 <Icon name="add" /> เพิ่มแถวจ่าย (หลายช่าง / หลายวัน)
               </button>
               <span className={`text-[12px] ${d.dispTotal > d.remain + 0.0001 ? "font-medium text-rose-600" : "text-slate-500"}`}>จ่ายรวม {fmt(d.dispTotal)} / เหลือให้จ่าย {fmt(d.remain)} ชิ้น</span>
+              {d.dispTotal > d.remain + 0.0001 && !r.reduce && !r.snap!.mo.sized && (
+                <button type="button" onClick={() => setReduce(r.moNo, { qty: r2(d.f0.dispatched + d.dispTotal), pick: "ของพอทำเพิ่ม", detail: "", mode: "add" })}
+                  className="h-7 rounded-md border border-indigo-300 bg-indigo-50 px-2 text-[12px] font-medium text-indigo-800 hover:bg-indigo-100">ทำได้มากกว่าสั่งจริง — เพิ่มเป็น {fmt(d.f0.dispatched + d.dispTotal)}</button>
+              )}
               <Msg d={d} field="disp" />
             </div>
           </td>
@@ -682,7 +697,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
               {ready.map(({ r, d }) => (
                 <div key={r.moNo} className="rounded-lg bg-white px-3 py-2 text-[12px]">
                   <div className="font-medium text-slate-800">{r.snap!.mo.product_sku ?? r.moNo} <span className="font-normal text-slate-400">· {r.moNo}{modeOf(r).asRequest ? " · ส่งคำขอ" : modeOf(r).reviewing ? " · ยืนยันคำขอ" : ""}</span></div>
-                  <ul className="mt-1 list-disc space-y-0.5 pl-4 text-slate-600">{d!.built.steps.map((s, i) => <li key={i}>{cuStepLabel(s, d!.whoOf)}</li>)}</ul>
+                  <div className="mt-1.5"><CuStepList items={d!.built.steps.map((step) => ({ step }))} who={d!.whoOf} /></div>
                 </div>
               ))}
             </div>
@@ -716,8 +731,10 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                         <button type="button" onClick={() => patchRow(r.moNo, { open: !r.open })} className="h-7 w-7 shrink-0 rounded-md text-slate-500 hover:bg-slate-100" aria-label={r.open ? "ย่อ" : "ขยาย"}>{r.open ? "▾" : "▸"}</button>
                         <span className="font-semibold text-slate-800">{r.snap?.mo.product_sku ?? r.moNo}</span>
                         {r.snap?.mo.product_name && <span className="max-w-[16rem] truncate text-slate-500">{r.snap.mo.product_name}</span>}
-                        <span className="text-[12px] text-slate-400">{r.moNo}{f ? ` · สั่งผลิต ${fmt(f.qty)} ชิ้น` : ""}</span>
-                        {where && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600" title="ตอนนี้ของอยู่ไหน (ก่อนบันทึก)">ตอนนี้: {where.parts.map((p) => `${p.label}${p.qty != null ? ` ${fmt(p.qty)}` : ""}`).join(" · ")}</span>}
+                        <span className="text-[12px] text-slate-400">{r.moNo}{f ? <> · สั่งผลิต {r.after && Math.abs(r.after.qty - f.qty) > 0.0001 ? <><span className="line-through">{fmt(f.qty)}</span> <b className="font-semibold text-slate-700">{fmt(r.after.qty)}</b></> : fmt(f.qty)} ชิ้น</> : ""}</span>
+                        {where && (r.after
+                          ? <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600" title="ตอนนี้ของอยู่ไหน (หลังบันทึก)">ตอนนี้: <span className="text-slate-400 line-through">{whereText(where)}</span> → <b className="font-semibold text-slate-800">{whereText(r.after.where)}</b></span>
+                          : <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600" title="ตอนนี้ของอยู่ไหน (ก่อนบันทึก)">ตอนนี้: {whereText(where)}</span>)}
                         {r.snap && f && (
                           <select value={r.target ?? ""} disabled={r.phase !== "edit" || m.blockedBy || busy}
                             onChange={(e) => { const k = e.target.value as CuTargetKey; if (k) patchRow(r.moNo, (rr) => ({ ...retarget(rr, k), open: true })); }}
@@ -735,12 +752,25 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                         {r.phase === "edit" && !busy && <button type="button" title="เอาใบนี้ออกจากชุด" onClick={() => setRows((rs) => rs.filter((x) => x.moNo !== r.moNo))} className="h-8 w-8 rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon name="cancel" /></button>}
                       </div>
                       {diff.length > 0 && <div className="mt-1.5 rounded-md bg-amber-50 px-2 py-1 text-[12px] text-amber-900">ใบนี้เปลี่ยนไปหลังส่งคำขอ — ตรวจก่อนยืนยัน: {diff.join(" · ")}</div>}
-                      {r.phase === "done" && r.results.length > 0 && (
-                        <div className="mt-1.5 space-y-0.5 text-[12px]">
-                          {r.results.map((x, i) => <div key={i} className={x.ok ? "text-emerald-700" : "text-rose-600"}>{x.ok ? "✓" : "✕"} {x.msg}</div>)}
-                          {r.undoRes?.map((x, i) => <div key={`u${i}`} className={x.ok ? "text-slate-500" : "text-amber-700"}>{x.ok ? "↶" : "!"} {x.msg}</div>)}
-                        </div>
-                      )}
+                      {r.phase === "done" && r.results.length > 0 && (() => {
+                        // ยังต้องตามต่อ: รอบส่งคืนที่ยังไม่ลงค่าแรง/วันที่ · ใบใหม่ที่แยก/ทำเพิ่ม
+                        const okSteps = r.results.filter((x) => x.ok).map((x) => x.step);
+                        const pend = okSteps.filter((x) => x.kind === "return" && (x.wage == null || !x.date)).length;
+                        const newMo = r.results.map((x) => (x.undo?.kind === "reduce" ? x.undo.newMo : null)).find(Boolean);
+                        return (
+                          <div className="mt-2 space-y-1.5">
+                            <CuStepList items={r.results.map((x) => ({ step: x.step, state: x.ok ? "ok" as const : "fail" as const, msg: x.ok ? undefined : x.msg }))} who={d?.whoOf} />
+                            {r.undoRes?.map((x, i) => <div key={`u${i}`} className={`text-[12px] ${x.ok ? "text-slate-500" : "text-amber-700"}`}>{x.ok ? "↶" : "!"} {x.msg}</div>)}
+                            {!r.undoRes && (pend > 0 || newMo) && (
+                              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-slate-500">
+                                <span className="inline-flex items-center gap-1"><Icon name="navigate" /> ยังต้องตามต่อ:</span>
+                                {pend > 0 && <a href="/master/work-submissions" target="_blank" rel="noreferrer" className="text-indigo-700 underline underline-offset-2 hover:text-indigo-900">ใส่ค่าแรง/วันที่ส่งคืน {pend} รอบ (ตารางส่งงาน แท็บยังไม่ครบ)</a>}
+                                {newMo && <span>ใบใหม่ <b className="font-semibold text-slate-700">{newMo}</b> อยู่แท็บรอจ่าย</span>}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </td>
                   </tr>
                   {r.open && r.target && d && r.phase !== "done" && body(r, d)}

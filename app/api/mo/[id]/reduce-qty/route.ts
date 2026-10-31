@@ -1,7 +1,8 @@
 /**
- * 📉 ลดจำนวนใบสั่งผลิต — POST /api/mo/[id]/reduce-qty
- *   { qty, reason, mode: "split" | "drop", source? }  → ลดเป็น qty (ที่เหลือ: แยกเป็นใบใหม่ / ไม่ทำแล้ว)
- *   { revert: <change_id> }                             → ย้อนการลดครั้งนั้น (ใบที่แยกออกมาต้องยังไม่เริ่มงาน)
+ * 📉📈 เปลี่ยนจำนวนใบสั่งผลิต — POST /api/mo/[id]/reduce-qty
+ *   { qty < เดิม, reason, mode: "split" | "drop", source? }  → ลด (ที่เหลือ: แยกเป็นใบใหม่ / ไม่ทำแล้ว)
+ *   { qty > เดิม, reason, mode: "add" | "extra", source? }   → เพิ่ม (เพิ่มในใบนี้ / แยกส่วนเกินเป็นใบใหม่ — ใบนี้คงเดิม)
+ *   { revert: <change_id> }                                   → ย้อนครั้งนั้น (ใบที่แยกออกมาต้องยังไม่เริ่มงาน)
  *
  * กติกากลาง lib/mo-qty-reduce (ใช้ร่วมกับหน้าจอโหมดอัปเดตงาน) · ลดได้ต่ำสุด = ยอดที่ช่างส่งคืนแล้ว
  * จ่ายไปเกินจำนวนใหม่ → ลดยอดค้างของใบจ่าย (ใบล่าสุดก่อน) · วัตถุดิบกางใหม่แบบเก็บค่าเดิม (ติ๊กเตรียม/จำนวนที่มี) แล้วยอดขอซื้อไม่ให้เกินที่ต้องใช้
@@ -13,7 +14,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { syncWoLabor } from "@/lib/wo-labor";
-import { reduceQtyIssue, shrinkWos, type ReduceMode, type WoShrink } from "@/lib/mo-qty-reduce";
+import { reduceQtyIssue, increaseQtyIssue, shrinkWos, type QtyChangeMode, type WoShrink } from "@/lib/mo-qty-reduce";
 import { explodeBom, fabricModeOf, nextMoNo } from "../../shared";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 
@@ -55,6 +56,23 @@ async function applyWo(admin: Admin, id: string, p: { qty: number; status: strin
   if (p.active) await syncWoLabor(admin, id);
 }
 
+/** สร้างใบสั่งผลิตใหม่ "พี่น้อง" (สินค้า/สูตร/กำหนดส่ง/ใบขายเดิม) — ที่เหลือตอนลด / ส่วนเกินตอนเพิ่ม · กางสูตรใหม่ (ยังไม่มีของ) */
+async function createSiblingMo(admin: Admin, mo: Row, qty: number, note: string, actor: { id: string; name: string }, meta: Row) {
+  const no = await nextMoNo(admin);
+  const { data: ins, error } = await admin.from("manufacturing_orders").insert({
+    mo_no: no, product_sku: mo.product_sku, product_name: mo.product_name ?? null, qty, status: "draft",
+    due_date: mo.due_date ?? null, internal_due_date: mo.internal_due_date ?? null, order_date: mo.order_date ?? null,
+    bom_code: mo.bom_code ?? null, bom_version: mo.bom_version ?? null, fabric_calc_mode: fabricModeOf(mo.fabric_calc_mode),
+    priority: mo.priority ?? null, priority_note: mo.priority_note ?? null, so_order_id: mo.so_order_id ?? null, so_order_no: mo.so_order_no ?? null,
+    note, is_active: true,
+  }).select("id, mo_no").single();
+  if (error || !ins) throw new Error(friendlyDbError(error?.message ?? ""));
+  const out = { id: String(ins.id), mo_no: String(ins.mo_no) };
+  await explodeBom(admin, (mo.bom_code as string) ?? null, out.mo_no, qty, null, false, fabricModeOf(mo.fabric_calc_mode));
+  await writeAudit(admin, { action: "create", entityType: "mo", entityId: out.id, actorId: actor.id, actorName: actor.name, metadata: { mo_no: out.mo_no, qty, ...meta } });
+  return out;
+}
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;   // สิทธิ์เดียวกับแก้ใบสั่งผลิต (PATCH /api/mo/[id])
   const { id } = await params;
@@ -71,13 +89,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const mo = moRow as Row;
   const moNo = String(mo.mo_no);
 
-  // ── ย้อนการลด
+  // ── ย้อน (ลด / เพิ่มในใบนี้ = คืนจำนวนเดิม · แยกส่วนเกิน = เก็บใบใหม่เข้าคลังอย่างเดียว)
   if (body.revert) {
     const { data: ch } = await admin.from("mo_qty_changes").select("*").eq("id", String(body.revert)).eq("mo_id", id).maybeSingle();
     const c = ch as Row | null;
-    if (!c) return bad("ไม่พบประวัติการลดจำนวนนี้", 404);
-    if (c.reverted_at) return bad("ย้อนการลดครั้งนี้ไปแล้ว");
-    if (Math.abs(n(mo.qty) - n(c.to_qty)) > 0.0001) return bad(`จำนวนใบนี้เปลี่ยนไปแล้ว (ตอนนี้ ${n(mo.qty)}) — ย้อนอัตโนมัติไม่ได้ แก้จำนวนเองที่หน้าใบสั่งผลิต`);
+    if (!c) return bad("ไม่พบประวัติการเปลี่ยนจำนวนนี้", 404);
+    if (c.reverted_at) return bad("ย้อนครั้งนี้ไปแล้ว");
+    const extraOnly = c.mode === "extra";
+    if (!extraOnly && Math.abs(n(mo.qty) - n(c.to_qty)) > 0.0001) return bad(`จำนวนใบนี้เปลี่ยนไปแล้ว (ตอนนี้ ${n(mo.qty)}) — ย้อนอัตโนมัติไม่ได้ แก้จำนวนเองที่หน้าใบสั่งผลิต`);
     if (c.new_mo_id) {
       const [{ data: nm }, { count }] = await Promise.all([
         admin.from("manufacturing_orders").select("status, is_active").eq("id", String(c.new_mo_id)).maybeSingle(),
@@ -86,37 +105,66 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (nm && (nm as Row).is_active !== false && ((count ?? 0) > 0 || !["draft", "", null].includes((nm as Row).status as string)))
         return bad(`ใบที่แยกออกมา (${c.new_mo_no}) เริ่มทำงานแล้ว — ย้อนอัตโนมัติไม่ได้`);
     }
-    try {
-      for (const w of ((c.wo_changes as WoShrink[] | null) ?? []))
-        await applyWo(admin, w.id, { qty: w.from, status: w.status_from, active: true, labor: w.labor_from > 0 ? w.labor_from : null });
-    } catch (e) { return bad(e instanceof Error ? e.message : "คืนยอดใบจ่ายงานไม่สำเร็จ"); }
-    const { error } = await admin.from("manufacturing_orders").update({ qty: n(c.from_qty) }).eq("id", id);
-    if (error) return bad(friendlyDbError(error.message));
-    await explodeBom(admin, (mo.bom_code as string) ?? null, moNo, n(c.from_qty), null, true, fabricModeOf(mo.fabric_calc_mode));
-    await fitPurchase(admin, moNo, "up");
+    if (!extraOnly) {
+      try {
+        for (const w of ((c.wo_changes as WoShrink[] | null) ?? []))
+          await applyWo(admin, w.id, { qty: w.from, status: w.status_from, active: true, labor: w.labor_from > 0 ? w.labor_from : null });
+      } catch (e) { return bad(e instanceof Error ? e.message : "คืนยอดใบจ่ายงานไม่สำเร็จ"); }
+      const { error } = await admin.from("manufacturing_orders").update({ qty: n(c.from_qty) }).eq("id", id);
+      if (error) return bad(friendlyDbError(error.message));
+      await explodeBom(admin, (mo.bom_code as string) ?? null, moNo, n(c.from_qty), null, true, fabricModeOf(mo.fabric_calc_mode));
+      await fitPurchase(admin, moNo, n(c.from_qty) > n(c.to_qty) ? "up" : "down");
+    }
     if (c.new_mo_id) await admin.from("manufacturing_orders").update({ is_active: false }).eq("id", String(c.new_mo_id));
     await admin.from("mo_qty_changes").update({ reverted_at: new Date().toISOString(), reverted_by: me.id }).eq("id", String(c.id));
     await writeAudit(admin, { action: "mo.reduce_qty_revert", entityType: "mo", entityId: id, actorId: me.id, actorName: me.name,
-      metadata: { mo_no: moNo, from: n(c.to_qty), to: n(c.from_qty), archived_mo: c.new_mo_no ?? null, change_id: c.id } });
-    return NextResponse.json({ data: { id, qty: n(c.from_qty), archived_mo_no: c.new_mo_no ?? null }, error: null });
+      metadata: { mo_no: moNo, from: extraOnly ? n(mo.qty) : n(c.to_qty), to: extraOnly ? n(mo.qty) : n(c.from_qty), mode: c.mode, archived_mo: c.new_mo_no ?? null, change_id: c.id } });
+    return NextResponse.json({ data: { id, qty: extraOnly ? n(mo.qty) : n(c.from_qty), archived_mo_no: c.new_mo_no ?? null }, error: null });
   }
 
-  // ── ลดจำนวน
+  // ── ลด / เพิ่ม
   const newQty = r2(n(body.qty));
   const reason = String(body.reason ?? "").trim();
-  const mode = body.mode === "split" ? "split" : body.mode === "drop" ? "drop" : null as ReduceMode | null;
   const source = typeof body.source === "string" ? body.source.slice(0, 30) : "edit";
+  if (!reason) return bad("ใส่เหตุผลที่เปลี่ยนจำนวนก่อน");
+  const fromQty = n(mo.qty);
+  const sized = Array.isArray(mo.size_breakdown) && (mo.size_breakdown as unknown[]).length > 0;
+  const status = (mo.status as string) ?? null;
+
+  // เพิ่ม (ทำได้มากกว่าสั่ง) — ใบจ่ายไม่ต้องแตะ
+  if (newQty > fromQty + 0.0001) {
+    const imode = body.mode === "add" ? "add" : body.mode === "extra" ? "extra" : null;
+    if (!imode) return bad("เลือกก่อนว่าจะเพิ่มในใบนี้ หรือแยกส่วนเกินเป็นใบใหม่");
+    const why = increaseQtyIssue({ qty: fromQty, newQty, sized, status });
+    if (why) return bad(why);
+    let newMo: { id: string; mo_no: string } | null = null;
+    if (imode === "add") {
+      const { error } = await admin.from("manufacturing_orders").update({ qty: newQty, updated_at: new Date().toISOString() }).eq("id", id);
+      if (error) return bad(friendlyDbError(error.message));
+      await explodeBom(admin, (mo.bom_code as string) ?? null, moNo, newQty, null, true, fabricModeOf(mo.fabric_calc_mode));
+      await fitPurchase(admin, moNo, "up");
+    } else {
+      try { newMo = await createSiblingMo(admin, mo, r2(newQty - fromQty), `ทำเพิ่มจาก ${moNo} — ${reason}`, me, { extra_from: moNo }); }
+      catch (e) { return bad(`สร้างใบใหม่ไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); }
+    }
+    const { data: log } = await admin.from("mo_qty_changes").insert({
+      mo_id: id, mo_no: moNo, from_qty: fromQty, to_qty: newQty, reason, mode: imode, new_mo_id: newMo?.id ?? null, new_mo_no: newMo?.mo_no ?? null,
+      wo_changes: [], source, created_by: me.id, created_by_name: me.name,
+    }).select("id").single();
+    await writeAudit(admin, { action: "mo.increase_qty", entityType: "mo", entityId: id, actorId: me.id, actorName: me.name,
+      metadata: { mo_no: moNo, from: fromQty, to: newQty, reason, mode: imode, new_mo_no: newMo?.mo_no ?? null, source } });
+    return NextResponse.json({ data: { change_id: log?.id ?? null, from: fromQty, to: newQty, new_mo_no: newMo?.mo_no ?? null, new_mo_id: newMo?.id ?? null, wo_changes: [] }, error: null });
+  }
+
+  const mode = body.mode === "split" ? "split" : body.mode === "drop" ? "drop" : null as QtyChangeMode | null;
   if (!mode) return bad("เลือกก่อนว่าที่เหลือจะแยกเป็นใบใหม่ หรือไม่ทำแล้ว");
-  if (!reason) return bad("ใส่เหตุผลที่ลดจำนวนก่อน");
 
   const { data: wosData, error: wErr } = await admin.from("mo_work_orders")
     .select("id, wo_no, qty, received_qty, status, labor_cost, created_at").eq("mo_no", moNo).eq("is_active", true).neq("status", "cancelled");
   if (wErr) return bad("โหลดใบจ่ายงานไม่สำเร็จ", 500);
   const wos = ((wosData ?? []) as Row[]).map((w) => ({ id: String(w.id), wo_no: String(w.wo_no ?? ""), qty: n(w.qty), received_qty: n(w.received_qty), status: String(w.status ?? ""), labor_cost: n(w.labor_cost), created_at: String(w.created_at ?? "") }));
-  const fromQty = n(mo.qty);
   const received = r2(wos.reduce((a, w) => a + w.received_qty, 0));
-  const sized = Array.isArray(mo.size_breakdown) && (mo.size_breakdown as unknown[]).length > 0;
-  const issue = reduceQtyIssue({ qty: fromQty, newQty, received, sized, status: (mo.status as string) ?? null });
+  const issue = reduceQtyIssue({ qty: fromQty, newQty, received, sized, status });
   if (issue) return bad(issue);
 
   const plan = shrinkWos(wos, newQty);
@@ -133,18 +181,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   let newMo: { id: string; mo_no: string } | null = null;
   if (mode === "split") {
     const rest = r2(fromQty - newQty);
-    const no = await nextMoNo(admin);
-    const { data: ins, error: iErr } = await admin.from("manufacturing_orders").insert({
-      mo_no: no, product_sku: mo.product_sku, product_name: mo.product_name ?? null, qty: rest, status: "draft",
-      due_date: mo.due_date ?? null, internal_due_date: mo.internal_due_date ?? null, order_date: mo.order_date ?? null,
-      bom_code: mo.bom_code ?? null, bom_version: mo.bom_version ?? null, fabric_calc_mode: fabricModeOf(mo.fabric_calc_mode),
-      priority: mo.priority ?? null, priority_note: mo.priority_note ?? null, so_order_id: mo.so_order_id ?? null, so_order_no: mo.so_order_no ?? null,
-      note: `แยกจาก ${moNo} — ลด ${fromQty} → ${newQty} เพราะ ${reason} (รอของ)`, is_active: true,
-    }).select("id, mo_no").single();
-    if (iErr || !ins) return bad(`ลดจำนวนแล้ว แต่สร้างใบใหม่ไม่สำเร็จ: ${friendlyDbError(iErr?.message ?? "")}`);
-    newMo = { id: String(ins.id), mo_no: String(ins.mo_no) };
-    await explodeBom(admin, (mo.bom_code as string) ?? null, newMo.mo_no, rest, null, false, fabricModeOf(mo.fabric_calc_mode));
-    await writeAudit(admin, { action: "create", entityType: "mo", entityId: newMo.id, actorId: me.id, actorName: me.name, metadata: { mo_no: newMo.mo_no, qty: rest, split_from: moNo } });
+    try { newMo = await createSiblingMo(admin, mo, rest, `แยกจาก ${moNo} — ลด ${fromQty} → ${newQty} เพราะ ${reason} (รอของ)`, me, { split_from: moNo }); }
+    catch (e) { return bad(`ลดจำนวนแล้ว แต่สร้างใบใหม่ไม่สำเร็จ: ${e instanceof Error ? e.message : ""}`); }
   }
 
   const { data: log } = await admin.from("mo_qty_changes").insert({

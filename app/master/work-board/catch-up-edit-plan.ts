@@ -12,8 +12,8 @@
 import type { CatchUpSnapshot, CatchUpWo } from "@/app/api/mo/catch-up/route";
 import { dateIssues, todayYmd } from "@/lib/work-entry-rules";
 import { woRatePerPiece, roundWage } from "@/lib/wo-labor";
-import { reduceQtyIssue, shrinkWos, REDUCE_MODE_LABEL } from "@/lib/mo-qty-reduce";
-import { cuDateText, cuReduceReason, stageOfDept, type CuApi, type CuIssue, type CuReduce } from "./catch-up";
+import { reduceQtyIssue, increaseQtyIssue, increaseIsBig, isIncreaseMode, shrinkWos, REDUCE_MODE_LABEL, type QtyChangeMode } from "@/lib/mo-qty-reduce";
+import { cuDateText, cuQtyDir, cuReduceReason, stageOfDept, type CuApi, type CuIssue, type CuReduce } from "./catch-up";
 import { crewFields, crewList, type CrewPerson } from "./crew-pick";
 
 const EPS = 0.0001;
@@ -55,7 +55,7 @@ export type CeOp =
   | { kind: "wo_cancel"; id: string; label: string }
   | { kind: "ready"; part: "prep" | "cut"; ready: boolean; date: string | null; label: string }
   | { kind: "unskip_buy"; label: string }
-  | { kind: "reduce"; qty: number; reason: string; mode: "split" | "drop"; label: string }
+  | { kind: "reduce"; qty: number; reason: string; mode: QtyChangeMode; label: string }
   | { kind: "note"; note: string; label: string };
 
 /** "2026-10-30T05:00:00+00:00" → "2026-10-30" ตามเวลาไทย */
@@ -270,11 +270,29 @@ export function ceBuild(s: CatchUpSnapshot, form0: CeForm, ctx: { departments: {
   }
   if (form.unskipBuy && s.mo.skipped.buy) tail.push({ kind: "unskip_buy", label: "เอาป้าย \"ของครบ (อัปเดตย้อนหลัง)\" ที่ขั้นซื้อของออก" });
 
-  // ── ยอดรวม + ลดจำนวน
-  let moQty = s.mo.qty;
+  // ── ยอดรวม + เปลี่ยนจำนวน (ว่าง/เท่าเดิม = ไม่เปลี่ยน)
+  let moQty = s.mo.qty, reducing = false;
   const red = form.reduce;
-  if (red && red.mode !== "keep") {
+  const dir = cuQtyDir(s.mo.qty, red);
+  if (red && dir === "up") {
     const reason = cuReduceReason(red);
+    if (!isIncreaseMode(red.mode)) err("reduce:mode", "เลือกว่าจะเพิ่มในใบนี้ หรือแยกส่วนเกินเป็นใบใหม่", "เพิ่มจำนวน");
+    else {
+      const why = increaseQtyIssue({ qty: s.mo.qty, newQty: red.qty, sized: s.mo.sized, status: s.mo.status });
+      if (why) err("reduce:qty", why, "เพิ่มจำนวน");
+      if (!reason) err("reduce:reason", "ใส่เหตุผลที่เพิ่มจำนวน", "เพิ่มจำนวน");
+      if (!why && increaseIsBig(s.mo.qty, red.qty)) issues.push({ level: "warn", field: "reduce:qty", msg: `เพิ่มเกิน 50% (${fmt(s.mo.qty)} → ${fmt(red.qty)}) — ตรวจตัวเลขอีกครั้ง`, where: "เพิ่มจำนวน" });
+      if (!why && reason) {
+        tail.push({ kind: "reduce", qty: r2(red.qty), reason, mode: red.mode, label: red.mode === "add"
+          ? `เพิ่มจำนวนสั่งผลิต ${fmt(s.mo.qty)} → ${fmt(red.qty)} ชิ้น (${reason}) · เพิ่มในใบนี้ (วัตถุดิบ/ยอดขอซื้อคิดใหม่)`
+          : `ทำเพิ่ม ${fmt(red.qty - s.mo.qty)} ชิ้น เป็นใบสั่งผลิตใหม่ (${reason}) · ใบนี้คง ${fmt(s.mo.qty)}` });
+        if (red.mode === "add") moQty = r2(red.qty);
+      }
+    }
+  } else if (red && dir === "down" && red.mode !== "keep") {
+    const reason = cuReduceReason(red);
+    reducing = true;
+    if (isIncreaseMode(red.mode)) err("reduce:mode", "เลือกว่าที่เหลือจะแยกเป็นใบใหม่ หรือไม่ทำแล้ว", "ลดจำนวน");
     const why = reduceQtyIssue({ qty: s.mo.qty, newQty: red.qty, received, sized: s.mo.sized, status: s.mo.status });
     if (why) err("reduce:qty", why, "ลดจำนวน");
     if (!reason) err("reduce:reason", "ใส่เหตุผลที่ลดจำนวน", "ลดจำนวน");
@@ -285,12 +303,12 @@ export function ceBuild(s: CatchUpSnapshot, form0: CeForm, ctx: { departments: {
       });
       const shr = shrinkWos(after, red.qty);
       const extra = shr.map((x) => (x.cancel ? ` · ยกเลิกใบจ่าย ${x.wo_no}` : ` · ลดใบจ่าย ${x.wo_no} ${fmt(x.from)} → ${fmt(x.to)}`)).join("");
-      tail.push({ kind: "reduce", qty: r2(red.qty), reason, mode: red.mode, label: `ลดจำนวนสั่งผลิต ${fmt(s.mo.qty)} → ${fmt(red.qty)} ชิ้น (${reason}) · ${red.mode === "split" ? `แยกที่เหลือ ${fmt(s.mo.qty - red.qty)} ชิ้นเป็นใบใหม่ รอของ` : `ที่เหลือ ${fmt(s.mo.qty - red.qty)} ชิ้น ${REDUCE_MODE_LABEL.drop}`}${extra}` });
+      tail.push({ kind: "reduce", qty: r2(red.qty), reason, mode: red.mode as QtyChangeMode, label: `ลดจำนวนสั่งผลิต ${fmt(s.mo.qty)} → ${fmt(red.qty)} ชิ้น (${reason}) · ${red.mode === "split" ? `แยกที่เหลือ ${fmt(s.mo.qty - red.qty)} ชิ้นเป็นใบใหม่ รอของ` : `ที่เหลือ ${fmt(s.mo.qty - red.qty)} ชิ้น ${REDUCE_MODE_LABEL.drop}`}${extra}` });
       moQty = r2(red.qty);
     }
   }
-  // จ่ายรวมเกินจำนวนสั่งผลิต (ลดจำนวนอยู่ด้วย = เซิร์ฟเวอร์ลดยอดค้างให้เอง)
-  if (dispatched > s.mo.qty + EPS && moQty === s.mo.qty) err("disp", `จ่ายรวม ${fmt(dispatched)} ชิ้น เกินจำนวนสั่งผลิต ${fmt(s.mo.qty)}`);
+  // จ่ายรวมเกินจำนวนสั่งผลิต (ลดจำนวนอยู่ด้วย = เซิร์ฟเวอร์ลดยอดค้างให้เอง · เพิ่มในใบนี้ = เทียบจำนวนใหม่)
+  if (!reducing && dispatched > moQty + EPS) err("disp", `จ่ายรวม ${fmt(dispatched)} ชิ้น เกินจำนวนสั่งผลิต ${fmt(moQty)}`);
 
   if (cas.keepNote) {
     const line = `[แก้ไขใบงาน ${cuDateText(today)}] ${cas.keepNote}`;

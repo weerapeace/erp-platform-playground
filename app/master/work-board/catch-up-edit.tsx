@@ -121,17 +121,20 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
     if (res.every((x) => x.ok)) toast.success(`แก้แล้ว ${res.length} รายการ`);
   };
   const revertReduce = async (changeId: string, label: string) => {
-    if (!snap || !(await askConfirm({ title: "ย้อนการลดจำนวนนี้?", variant: "danger", confirmText: "ย้อนกลับ",
-      message: <div className="space-y-1 text-sm"><div>{label}</div><div className="text-slate-500">คืนจำนวนเดิม + คืนยอดใบจ่ายที่ถูกลด · ใบที่แยกออกมา (ถ้ายังไม่เริ่มงาน) จะถูกเก็บเข้าคลัง</div></div> }))) return;
-    try { await api(`/api/mo/${snap.mo.id}/reduce-qty`, { revert: changeId }); toast.success("ย้อนการลดจำนวนแล้ว"); onDone(); setN((x) => x + 1); }
+    if (!snap || !(await askConfirm({ title: "ย้อนการเปลี่ยนจำนวนนี้?", variant: "danger", confirmText: "ย้อนกลับ",
+      message: <div className="space-y-1 text-sm"><div>{label}</div><div className="text-slate-500">คืนจำนวนเดิม + คืนยอดใบจ่ายที่ถูกลด · ใบที่แยกออกมา / ใบส่วนเกิน (ถ้ายังไม่เริ่มงาน) จะถูกเก็บเข้าคลัง</div></div> }))) return;
+    try { await api(`/api/mo/${snap.mo.id}/reduce-qty`, { revert: changeId }); toast.success("ย้อนการเปลี่ยนจำนวนแล้ว"); onDone(); setN((x) => x + 1); }
     catch (e) { toast.error(e instanceof Error ? e.message : "ย้อนไม่สำเร็จ"); }
   };
 
   const m = snap?.mo;
   const dirty = !!built && ops.length > 0;
-  const mine = (snap?.qtyLog ?? []).filter((c) => !c.split_from && !c.reverted);
+  const mine = (snap?.qtyLog ?? []).filter((c) => !c.split_from && !c.reverted && c.mode !== "extra");   // แยกส่วนเกิน = ใบนี้จำนวนเดิม
   const origQty = mine.length ? mine[mine.length - 1].from : null;   // ล่าสุดก่อน → ตัวท้าย = ครั้งแรก
-  const splitFrom = (snap?.qtyLog ?? []).find((c) => c.split_from && !c.reverted)?.mo_no ?? null;
+  const splitRow = (snap?.qtyLog ?? []).find((c) => c.split_from && !c.reverted);
+  const splitFrom = splitRow?.mo_no ?? null;
+  // จ่ายรวมหลังแก้ (ไว้เสนอ "เพิ่มจำนวนสั่ง" เมื่อจ่ายเกิน)
+  const dispNow = form && snap ? snap.wos.reduce((a, w) => { const x = form.wos.find((y) => y.id === w.id); return x?.cancel ? a : a + (x && x.qty > 0 ? x.qty : w.qty); }, 0) : 0;
   const rateChanged = !!form && !!snap && form.wos.some((w) => { const o = snap.wos.find((x) => x.id === w.id); return !!o && Math.abs((w.rate ?? -1) - ((o.labor_cost > 0 && o.qty > 0) ? Math.round((o.labor_cost / o.qty) * 100) / 100 : -1)) > 0.0001; });
   const recvNow = snap ? snap.wos.reduce((a, w) => a + w.received_qty, 0) : 0;
   const buyReasonCu = !!m?.skipped.buy?.reason?.startsWith("อัปเดตงานย้อนหลัง");
@@ -159,8 +162,8 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
         : (
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
-              {origQty != null && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-800">เดิมสั่ง {fmt(origQty)} → เหลือ {fmt(m.qty)}</span>}
-              {splitFrom && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-indigo-700">แยกมาจาก {splitFrom}</span>}
+              {origQty != null && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-800">เดิมสั่ง {fmt(origQty)} → ตอนนี้ {fmt(m.qty)}</span>}
+              {splitFrom && <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-indigo-700">{splitRow?.mode === "extra" ? "ทำเพิ่มจาก" : "แยกมาจาก"} {splitFrom}</span>}
               {!canEdit && <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-slate-600"><Icon name="lock" /> ดูอย่างเดียว — การแก้ต้องให้หัวหน้า (สิทธิ์บันทึกได้เลย / ยืนยันคำขอ)</span>}
               {m.status === "done" || m.status === "cancelled" ? <span className="rounded-full bg-rose-50 px-2 py-0.5 text-rose-700">ใบนี้{m.status === "done" ? "ปิดงาน" : "ยกเลิก"}แล้ว — แก้ได้เฉพาะวันที่/ค่าแรง</span> : null}
             </div>
@@ -204,7 +207,13 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
               })}
 
               {/* 4 ใบจ่าย */}
-              <Step no={4} title="จ่ายงาน" done={snap.wos.length > 0} right={<Msg field="disp" />}>
+              <Step no={4} title="จ่ายงาน" done={snap.wos.length > 0} right={<>
+                <Msg field="disp" />
+                {canEdit && !form.reduce && issues.some((x) => x.field === "disp" && x.level === "error") && (
+                  <button type="button" disabled={lock} onClick={() => set({ reduce: { qty: dispNow, pick: "ของพอทำเพิ่ม", detail: "", mode: "add" } })}
+                    className="h-7 rounded-md border border-indigo-300 bg-indigo-50 px-2 text-[12px] font-medium text-indigo-800 hover:bg-indigo-100">ทำได้มากกว่าสั่งจริง — เพิ่มจำนวนสั่งเป็น {fmt(dispNow)}</button>
+                )}
+              </>}>
                 {!snap.wos.length ? <div className="text-[12px] text-slate-400">ยังไม่ได้จ่ายงาน — ใช้ปุ่ม &ldquo;อัปเดต&rdquo;</div> : (
                   <div className="space-y-2">
                     {snap.wos.map((w) => {
@@ -352,7 +361,7 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                   {built?.reduceFromCascade && built.eff.reduce ? (
                     <div className="rounded-lg bg-amber-50 px-3 py-2 text-[12px] text-amber-900">ลดตามใบจ่าย: {fmt(m.qty)} → <b className="font-medium">{fmt(built.eff.reduce.qty)}</b> ชิ้น · {REDUCE_MODE_LABEL[built.eff.reduce.mode === "split" ? "split" : "drop"]} <span className="text-amber-700">(ตั้งที่กล่องสีเหลืองของใบจ่ายด้านบน)</span><Msg field="reduce:qty" /></div>
                   ) : canEdit ? <ReducePanel qty={m.qty} received={recvNow} sized={!!m.sized} wos={snap.wos} value={form.reduce} onChange={(v) => set({ reduce: v })} issues={issues} allowKeep={false} />
-                    : <div className="text-[12px] text-slate-400">ลดจำนวนได้เฉพาะหัวหน้า</div>}
+                    : <div className="text-[12px] text-slate-400">เปลี่ยนจำนวนได้เฉพาะหัวหน้า</div>}
                 </Step>
               )}
             </div>
@@ -373,15 +382,19 @@ export function CatchUpEdit({ moNo, onClose, onDone, departments, craftsmen, can
                   {(snap.qtyLog ?? []).map((c, i) => (
                     <div key={c.id} className="flex flex-wrap items-center gap-2 text-slate-600">
                       <span className="text-slate-400">{cuWhen(c.at)}</span>
-                      <span className={c.reverted ? "line-through" : ""}>{c.split_from ? `ใบนี้แยกมาจาก ${c.mo_no} (ลด ${fmt(c.from)} → ${fmt(c.to)} · ${c.reason})` : `ลดจำนวน ${fmt(c.from)} → ${fmt(c.to)} · ${c.reason}${c.new_mo_no ? ` · ที่เหลือไปใบ ${c.new_mo_no}` : " · ที่เหลือไม่ทำแล้ว"}`}</span>
+                      <span className={c.reverted ? "line-through" : ""}>{c.split_from
+                        ? (c.mode === "extra" ? `ใบนี้คือส่วนที่ทำเพิ่มจาก ${c.mo_no} (${c.reason})` : `ใบนี้แยกมาจาก ${c.mo_no} (ลด ${fmt(c.from)} → ${fmt(c.to)} · ${c.reason})`)
+                        : c.mode === "add" ? `เพิ่มจำนวน ${fmt(c.from)} → ${fmt(c.to)} · ${c.reason}`
+                        : c.mode === "extra" ? `ทำเพิ่ม ${fmt(c.to - c.from)} ชิ้น เป็นใบ ${c.new_mo_no ?? "ใหม่"} · ${c.reason}`
+                        : `ลดจำนวน ${fmt(c.from)} → ${fmt(c.to)} · ${c.reason}${c.new_mo_no ? ` · ที่เหลือไปใบ ${c.new_mo_no}` : " · ที่เหลือไม่ทำแล้ว"}`}</span>
                       {c.by && <span className="text-slate-400">· {c.by}</span>}
                       {c.reverted && <span className="rounded bg-slate-100 px-1 text-slate-500">ย้อนแล้ว</span>}
                       {canEdit && !c.reverted && !c.split_from && i === (snap.qtyLog ?? []).findIndex((x) => !x.split_from && !x.reverted) && (
-                        <button type="button" onClick={() => void revertReduce(c.id, `ลด ${fmt(c.from)} → ${fmt(c.to)}`)} className="h-6 rounded-md border border-slate-200 px-2 text-[11px] text-slate-600 hover:bg-slate-50"><Icon name="back" /> ย้อน</button>
+                        <button type="button" onClick={() => void revertReduce(c.id, c.mode === "extra" ? `ทำเพิ่ม ${fmt(c.to - c.from)} ชิ้น (ใบ ${c.new_mo_no ?? "ใหม่"})` : `${c.mode === "add" ? "เพิ่ม" : "ลด"} ${fmt(c.from)} → ${fmt(c.to)}`)} className="h-6 rounded-md border border-slate-200 px-2 text-[11px] text-slate-600 hover:bg-slate-50"><Icon name="back" /> ย้อน</button>
                       )}
                     </div>
                   ))}
-                  {(snap.edits ?? []).filter((e) => !e.label.startsWith("ลดจำนวน") && !e.label.startsWith("ย้อนการลด")).map((e, i) => (
+                  {(snap.edits ?? []).filter((e) => !/^(ลดจำนวน|เพิ่มจำนวน|ทำเพิ่ม|ย้อนการ)/.test(e.label)).map((e, i) => (
                     <div key={i} className="text-slate-600"><span className="text-slate-400">{cuWhen(e.at)}</span> {e.label}{e.by ? <span className="text-slate-400"> · {e.by}</span> : null}</div>
                   ))}
                 </div>

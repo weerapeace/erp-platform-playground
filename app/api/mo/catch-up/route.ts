@@ -133,7 +133,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       : Promise.resolve({ data: [] as Row[], error: null }),
     // audit ที่ติด via=cu_edit (ป๊อปแก้ไข) + ลดจำนวน/ย้อน — กรองตามเลขใบใน metadata (ย้อนหลัง 1 ปี)
     forEdit ? admin.from("audit_logs").select("action, actor_name, created_at, metadata").eq("metadata->>mo_no", moNo)
-      .or("metadata->>via.eq.cu_edit,action.eq.\"mo.reduce_qty\",action.eq.\"mo.reduce_qty_revert\"").gte("created_at", new Date(Date.now() - 365 * 864e5).toISOString())
+      .or("metadata->>via.eq.cu_edit,action.eq.\"mo.reduce_qty\",action.eq.\"mo.increase_qty\",action.eq.\"mo.reduce_qty_revert\"").gte("created_at", new Date(Date.now() - 365 * 864e5).toISOString())
       .order("created_at", { ascending: false }).limit(40)
       : Promise.resolve({ data: [] as Row[], error: null }),
   ]);
@@ -227,7 +227,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       edits: ((editRes.data ?? []) as Row[]).map((e) => {
         const md = (e.metadata ?? {}) as Row;
         const label = String(md.label ?? "") || (e.action === "mo.reduce_qty" ? `ลดจำนวน ${n(md.from)} → ${n(md.to)} ชิ้น (${String(md.reason ?? "")})${md.new_mo_no ? ` · แยกที่เหลือเป็น ${md.new_mo_no}` : ""}`
-          : e.action === "mo.reduce_qty_revert" ? `ย้อนการลดจำนวน ${n(md.from)} → ${n(md.to)} ชิ้น` : String(e.action ?? ""));
+          : e.action === "mo.increase_qty" ? (md.mode === "extra" ? `ทำเพิ่ม ${n(md.to) - n(md.from)} ชิ้น เป็นใบใหม่ ${String(md.new_mo_no ?? "")} (${String(md.reason ?? "")})` : `เพิ่มจำนวน ${n(md.from)} → ${n(md.to)} ชิ้น (${String(md.reason ?? "")})`)
+          : e.action === "mo.reduce_qty_revert" ? `ย้อนการเปลี่ยนจำนวน ${n(md.from)} → ${n(md.to)} ชิ้น` : String(e.action ?? ""));
         return { at: String(e.created_at ?? ""), by: (e.actor_name as string) ?? null, label };
       }),
     } : {}),

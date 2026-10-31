@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ceInitial, ceBuild, ceRun, ymdTh, type CeForm } from "./catch-up-edit-plan";
-import { cuBuildSteps, cuFacts, cuReduceSnap, cuRun, cuUndo, cuDefaultTicks, CU_NO_DATES, type CuInputs, type CuReduce } from "./catch-up";
-import { shrinkWos, reduceQtyIssue } from "@/lib/mo-qty-reduce";
+import { cuBuildSteps, cuFacts, cuReduceSnap, cuRun, cuUndo, cuDefaultTicks, cuStepParts, CU_NO_DATES, type CuInputs, type CuReduce } from "./catch-up";
+import { shrinkWos, reduceQtyIssue, increaseQtyIssue, increaseIsBig } from "@/lib/mo-qty-reduce";
 import type { CatchUpSnapshot, CatchUpWo, CatchUpSub } from "@/app/api/mo/catch-up/route";
 
 const wo = (o: Partial<CatchUpWo>): CatchUpWo => ({ id: "w1", wo_no: "WO-1", qty: 20, received_qty: 0, qc_pulled_qty: 0, status: "dispatched",
@@ -184,5 +184,64 @@ describe("ป๊อปแก้ไข (ceBuild)", () => {
   it("วันที่ตามเวลาไทย", () => {
     expect(ymdTh("2026-10-30T20:00:00+00:00")).toBe("2026-10-31");
     expect(ymdTh(null)).toBeNull();
+  });
+});
+
+describe("เพิ่มจำนวน (ทำได้มากกว่าสั่ง)", () => {
+  const base = snap({ wos: [], subs: [] });
+  const inp = (o: Partial<CuInputs> = {}): CuInputs => ({ disp: [{ key: "a", deptId: "d1", qty: 25, date: null }], ret: [], qcGood: 0, qcBad: 0, shelfId: "", cancelReason: "", dates: CU_NO_DATES, ...o });
+  it("กติกากลาง: ต้องมากกว่าเดิม · ใบไซส์ไม่ได้ · เกิน 50% = เตือน", () => {
+    expect(increaseQtyIssue({ qty: 20, newQty: 25 })).toBeNull();
+    expect(increaseQtyIssue({ qty: 20, newQty: 20 })).toMatch(/มากกว่า 20/);
+    expect(increaseQtyIssue({ qty: 20, newQty: 25, sized: true })).toMatch(/ไซส์/);
+    expect([increaseIsBig(20, 30), increaseIsBig(20, 31)]).toEqual([false, true]);
+  });
+  it("เพิ่มในใบนี้ 20 → 25: ขั้นแรก = เพิ่มจำนวน แล้วจ่าย 25 ได้ (ไม่เกิน)", () => {
+    const f = cuFacts(base);
+    const r = cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({ reduce: red(25, "add", "ของพอทำเพิ่ม") }));
+    expect(r.errors).toEqual([]);
+    expect(r.steps[0]).toMatchObject({ kind: "reduce", from: 20, to: 25, mode: "add" });
+    expect(r.steps.find((x) => x.kind === "dispatch")).toMatchObject({ qty: 25 });
+    expect(cuReduceSnap(base, red(25, "add")).mo.qty).toBe(25);
+  });
+  it("แยกส่วนเกินเป็นใบใหม่: ใบนี้คง 20 (จ่ายในใบนี้ได้แค่ 20)", () => {
+    const f = cuFacts(base);
+    const r = cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({ reduce: red(25, "extra", "ลูกค้าสั่งเพิ่ม") }));
+    expect(r.steps[0]).toMatchObject({ kind: "reduce", mode: "extra", to: 25 });
+    expect(r.errors.join(" ")).toMatch(/เกิน/);
+    expect(cuReduceSnap(base, red(25, "extra"))).toBe(base);
+  });
+  it("ช่องว่าง / เท่าเดิม = ไม่เปลี่ยน ไม่ขึ้นจุดต้องแก้ · โหมดไม่ตรงทิศ = ให้เลือกใหม่", () => {
+    const f = cuFacts(base);
+    const ok = inp({ disp: [{ key: "a", deptId: "d1", qty: 20, date: null }] });
+    expect(cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), { ...ok, reduce: red(0) }).errors).toEqual([]);
+    expect(cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), { ...ok, reduce: red(20) }).steps.some((x) => x.kind === "reduce")).toBe(false);
+    expect(cuBuildSteps(f, "dispatch", cuDefaultTicks(f, "dispatch"), inp({ reduce: red(25, "split") })).issues.some((x) => x.field === "reduce:mode")).toBe(true);
+  });
+  it("ป๊อปแก้ไข: ใบจ่ายเกินจำนวนสั่ง → ขึ้นข้อความ · ใส่เพิ่มในใบนี้แล้ว = ผ่าน (แก้ใบจ่ายก่อน แล้วค่อยเพิ่ม)", () => {
+    const s = snap({ wos: [wo({ received_qty: 0, status: "dispatched" })], subs: [] });
+    expect(edit(s, (f) => { f.wos[0].qty = 25; }).errors.join(" ")).toMatch(/เกินจำนวนสั่งผลิต 20/);
+    const r = edit(s, (f) => { f.wos[0].qty = 25; f.reduce = red(25, "add", "ของพอทำเพิ่ม"); });
+    expect(r.errors).toEqual([]);
+    expect(r.ops.map((o) => o.kind)).toEqual(["wo", "reduce"]);
+    expect(r.ops.at(-1)).toMatchObject({ qty: 25, mode: "add" });
+  });
+});
+
+describe("แสดงผลแบบอ่านง่าย (cuStepParts)", () => {
+  it("ตัวเลขเดิมขีดฆ่า ใหม่ตัวหนา เหตุผลเอียง + ป้าย", () => {
+    const p = cuStepParts({ kind: "reduce", from: 20, to: 15, reason: "ของไม่พอ", mode: "drop" });
+    expect(p.title).toBe("ลดจำนวน");
+    expect(p.main.filter((x) => x.old).map((x) => x.t)).toEqual(["20"]);
+    expect(p.main.filter((x) => x.b).map((x) => x.t)).toEqual(["15"]);
+    expect(p.main.find((x) => x.it)?.t).toBe("ของไม่พอ");
+    expect(p.chips).toEqual([{ t: "ไม่ทำแล้ว 5", tone: "bad" }]);
+  });
+  it("ส่งคืน: ชื่อคนขีดเส้นใต้ · ไม่มีค่าแรง = ป้ายเตือน · วันที่ว่าง = ไม่ระบุวัน", () => {
+    const p = cuStepParts({ kind: "return", ref: "auto", qty: 15, date: null, wage: null }, () => "โต๊ะแต๋ว");
+    expect(p.main.find((x) => x.who)?.t).toBe("โต๊ะแต๋ว");
+    expect(p.chips[0]).toEqual({ t: "ยังไม่ลงค่าแรง", tone: "warn" });
+    expect(p.date).toEqual({ t: "ไม่ระบุวัน", none: true });
+    expect(cuStepParts({ kind: "reduce", from: 30, to: 35, reason: "x", mode: "add" }).title).toBe("เพิ่มจำนวน");
   });
 });

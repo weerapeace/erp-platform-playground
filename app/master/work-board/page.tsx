@@ -3485,8 +3485,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         {(() => {
           const a = cuAllMap.get(moNo);
           return <>
-            {a?.qty_from != null && <span title="ลดจำนวนไปแล้ว (ดูประวัติในปุ่มแก้ไข)" className="whitespace-nowrap rounded-full bg-amber-50 px-1.5 text-[11px] text-amber-800">เดิม {a.qty_from.toLocaleString("th-TH")}</span>}
-            {a?.split_from && <span title="ใบนี้แยกออกมาจากใบที่ลดจำนวน (ที่เหลือ รอของ)" className="whitespace-nowrap rounded-full bg-indigo-50 px-1.5 text-[11px] text-indigo-700">แยกจาก {a.split_from}</span>}
+            {a?.qty_from != null && <span title="เปลี่ยนจำนวนไปแล้ว (ดูประวัติในปุ่มแก้ไข)" className="whitespace-nowrap rounded-full bg-amber-50 px-1.5 text-[11px] text-amber-800">เดิม {a.qty_from.toLocaleString("th-TH")}</span>}
+            {a?.split_from && <span title={a.split_kind === "extra" ? "ใบนี้คือส่วนที่ทำเพิ่มเกินจำนวนสั่งของใบเดิม" : "ใบนี้แยกออกมาจากใบที่ลดจำนวน (ที่เหลือ รอของ)"} className="whitespace-nowrap rounded-full bg-indigo-50 px-1.5 text-[11px] text-indigo-700">{a.split_kind === "extra" ? "ทำเพิ่มจาก" : "แยกจาก"} {a.split_from}</span>}
           </>;
         })()}
         <button type="button" onClick={(e) => { e.stopPropagation(); openCu(moNo); }} title={review ? "ตรวจคำขอ แก้ได้ แล้วยืนยันหรือตีกลับ" : "บอกว่าใบนี้ไปถึงขั้นไหนแล้ว (ติ๊กขั้นก่อนหน้าให้อัตโนมัติ)"}

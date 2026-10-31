@@ -29,6 +29,7 @@ import {
   CU_SEVERITY, cuUndo, cuIrreversible, cuFactsDiff, cuWhen, cuLocateSnap, CU_WHERE_LABEL, type CuWhere, type CuDraft, type CuTargetKey, type CuTicks, type CuResult, type CuStage, type CuStep, type CuRetLine, type CuDates, type CuIssue, type CuProblem, cuReduceSnap, type CuReduce,
 } from "./catch-up";
 import { ReducePanel } from "./catch-up-reduce";
+import { CuStepList } from "./catch-up-step-line";
 import { cuCentralRate, cuRateFor, cuRetSources, cuRateOfRef, cuRetEffective, cuAutoReturns, cuBomCandidate, cuReadLast as readLast, cuWriteLast as writeLast, type CuDispRow } from "./catch-up-lines";
 
 type DeptLite = { id: string; name: string };
@@ -707,6 +708,10 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
                 <div className="mb-2 flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-slate-700">🚚 จ่ายงาน</span>
                   <span className={`text-[12px] ${dispTotal > remain + 0.0001 ? "font-medium text-rose-600" : "text-slate-500"}`}>จ่ายรวม {fmt(dispTotal)} / เหลือให้จ่าย {fmt(remain)} ชิ้น{dispTotal > remain + 0.0001 ? ` · เกิน ${fmt(dispTotal - remain)} ชิ้น` : ""}</span>
+                  {dispTotal > remain + 0.0001 && !reduce && !snap.mo.sized && (
+                    <button type="button" onClick={() => onReduce({ qty: r2((f0?.dispatched ?? 0) + dispTotal), pick: "ของพอทำเพิ่ม", detail: "", mode: "add" })}
+                      className="h-7 rounded-md border border-indigo-300 bg-indigo-50 px-2 text-[12px] font-medium text-indigo-800 hover:bg-indigo-100">ทำได้มากกว่าสั่งจริง — เพิ่มจำนวนเป็น {fmt((f0?.dispatched ?? 0) + dispTotal)}</button>
+                  )}
                   <SecBadge prefix="disp" />
                   {f.dispatched > 0 && <span className="text-[11px] text-slate-400">· ใส่ 0 ได้ ถ้าที่เหลือยังไม่ได้จ่ายจริง</span>}
                 </div>
@@ -976,8 +981,7 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
             )}
             <div className="rounded-lg bg-slate-50 px-3 py-2">
               <div className="mb-1 text-[12px] font-medium text-slate-500">ระบบจะบันทึก</div>
-              {built.steps.length ? built.steps.map((s, i) => <div key={i} className="text-[13px] text-slate-700">• {cuStepLabel(s, whoOf)}</div>)
-                : <div className="text-[13px] text-slate-400">—</div>}
+              <CuStepList items={built.steps.map((step) => ({ step }))} who={whoOf} size="md" />
               <div className="mt-1 text-[11px] text-slate-400">วันที่ที่ไม่ใส่ = จำไม่ได้ (ข้ามได้) · ทุกขั้นลงประวัติว่าใครอัปเดต · ไม่ส่งแจ้งเตือน LINE เรื่องงานเก่า</div>
             </div>
           </div>
@@ -992,25 +996,15 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
             </div>
             <div className="rounded-lg border border-slate-200 px-3 py-2 text-[13px]">
               <div className="mb-1 font-medium text-slate-600">สิ่งที่จะบันทึกเมื่อหัวหน้ายืนยัน</div>
-              {stepLabels.map((x, i) => <div key={i} className="text-slate-700">• {x}</div>)}
+              <CuStepList items={built.steps.map((step) => ({ step }))} who={whoOf} size="md" />
             </div>
           </div>
         ) : (
           <div className="space-y-2">
-            {built.steps.map((s, i) => {
+            <CuStepList size="md" who={whoOf} items={built.steps.map((step, i) => {
               const r = results[i];
-              const st = r ? (r.ok ? "ok" : "fail") : running === i ? "run" : results.length ? "skip" : "wait";
-              return (
-                <div key={i} className="flex items-start gap-2 text-sm">
-                  <span className="w-5 shrink-0 text-center">{st === "ok" ? <Icon name="done" className="text-emerald-600" /> : st === "fail" ? <Icon name="cancel" className="text-rose-600" /> : st === "run" ? <Icon name="waiting" className="text-amber-600" /> : "▫️"}</span>
-                  <div className="min-w-0">
-                    <div className={st === "skip" ? "text-slate-400" : "text-slate-800"}>{cuStepLabel(s, whoOf)}</div>
-                    {st === "fail" && <div className="text-[12px] text-rose-600">{r!.msg}</div>}
-                    {st === "skip" && <div className="text-[11px] text-slate-400">ยังไม่ได้ทำ (ขั้นก่อนหน้าไม่สำเร็จ)</div>}
-                  </div>
-                </div>
-              );
-            })}
+              return { step, msg: r?.msg, state: r ? (r.ok ? "ok" : "fail") : running === i ? "run" : results.length ? "skip" : "plan" };
+            })} />
             {results.length > 0 && !undoRes && (results.every((r) => r.ok) && results.length === built.steps.length
               ? <div className="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">อัปเดตแล้ว — บอร์ดโหลดใหม่ให้แล้ว{reviewing ? ` · ยืนยันคำขอของ ${req!.requested_name ?? "พนักงาน"} แล้ว (แจ้งเตือนกลับให้แล้ว)` : ""}</div>
               : <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">บันทึกได้บางขั้น — ขั้นที่สำเร็จเก็บไว้แล้ว เปิดป๊อปนี้ใหม่เพื่อทำต่อได้</div>)}

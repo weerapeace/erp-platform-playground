@@ -19,6 +19,8 @@ export type CuAllRow = {
   qty: number; status: string; dispatched: number; received: number; qc_pulled: number; where: CuWhere;
   /** จำนวนตอนสั่งครั้งแรก (เคยลดจำนวน) · ใบนี้แยกออกมาจากใบไหน */
   qty_from?: number | null; split_from?: string | null;
+  /** split = ที่เหลือตอนลดจำนวน · extra = ส่วนเกินตอนทำได้มากกว่าสั่ง */
+  split_kind?: "split" | "extra" | null;
 };
 const DAYS_CLOSED = 30;
 const n = (v: unknown) => Number(v) || 0;
@@ -33,7 +35,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     admin.from("mo_work_orders").select("mo_no, qty, received_qty, qc_pulled_qty").eq("is_active", true).neq("status", "cancelled").limit(10000),
     admin.from("qc_warehouse_items").select("mo_no, qty, status, shelf_id").gt("qty", 0).limit(10000),
     admin.from("qc_shelves").select("id, name"),
-    admin.from("mo_qty_changes").select("mo_no, from_qty, new_mo_no, created_at").is("reverted_at", null).order("created_at").limit(5000),
+    admin.from("mo_qty_changes").select("mo_no, from_qty, new_mo_no, mode, created_at").is("reverted_at", null).order("created_at").limit(5000),
   ]);
   if (mosRes.error || wosRes.error) return NextResponse.json({ data: [], error: "โหลดรายการใบสั่งผลิตไม่สำเร็จ" }, { status: 500 });
 
@@ -54,11 +56,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // เก่าก่อน → ครั้งแรกที่ลด = จำนวนตอนสั่ง
-  const qtyFrom = new Map<string, number>(), splitFrom = new Map<string, string>();
+  const qtyFrom = new Map<string, number>(), splitFrom = new Map<string, { from: string; kind: "split" | "extra" }>();
   for (const c of (qtyRes.data ?? []) as Row[]) {
     const k = String(c.mo_no ?? "");
-    if (!qtyFrom.has(k)) qtyFrom.set(k, n(c.from_qty));
-    if (c.new_mo_no) splitFrom.set(String(c.new_mo_no), k);
+    if (c.mode !== "extra" && !qtyFrom.has(k)) qtyFrom.set(k, n(c.from_qty));   // แยกส่วนเกิน = ใบนี้จำนวนเดิม ไม่ต้องขึ้น "เดิม"
+    if (c.new_mo_no) splitFrom.set(String(c.new_mo_no), { from: k, kind: c.mode === "extra" ? "extra" : "split" });
   }
   const mos = (mosRes.data ?? []) as Row[];
   // รูปสินค้า (ปกของ SKU) — ทีละ 300 รหัส ยิงขนานกัน
@@ -77,7 +79,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return {
       mo_no: moNo, product_sku: sku, product_name: (m.product_name as string | null) ?? null, image_url: sku ? img.get(sku.trim()) ?? null : null,
       qty: n(m.qty), status: String(m.status ?? ""), dispatched: s.d, received: s.r, qc_pulled: s.q,
-      qty_from: qtyFrom.get(moNo) ?? null, split_from: splitFrom.get(moNo) ?? null,
+      qty_from: qtyFrom.get(moNo) ?? null, split_from: splitFrom.get(moNo)?.from ?? null, split_kind: splitFrom.get(moNo)?.kind ?? null,
       where: cuLocate({ qty: n(m.qty), status: String(m.status ?? ""), dispatched: s.d, received: s.r, qcPulled: s.q, shelfAt: shelfAt.get(moNo) ?? [] }),
     };
   });

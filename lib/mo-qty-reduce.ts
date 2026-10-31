@@ -1,5 +1,7 @@
 /**
- * 📉 ลดจำนวนใบสั่งผลิต — กติกากลาง (ไม่มี React · ใช้ทั้ง API /api/mo/[id]/reduce-qty และหน้าจอโหมดอัปเดตงาน)
+ * 📉📈 เปลี่ยนจำนวนใบสั่งผลิต (ลด / เพิ่ม) — กติกากลาง (ไม่มี React · ใช้ทั้ง API /api/mo/[id]/reduce-qty และหน้าจอโหมดอัปเดตงาน)
+ *
+ * เพิ่ม (ทำได้มากกว่าสั่ง): add = เพิ่มในใบนี้ (วัตถุดิบ/ยอดขอซื้อคิดใหม่) · extra = แยกส่วนเกินเป็นใบใหม่ (ใบนี้คงเดิม)
  *
  * ใช้ตอน "รู้ตอนเตรียมของว่าของไม่พอ ทำได้แค่บางส่วน" หรือช่างส่งคืนไม่ครบแล้วจะปิดใบ (ปิดยอดขาด)
  *   ที่เหลือ: split = แยกเป็นใบใหม่ (รอของ) · drop = ไม่ทำแล้ว · (ค้างไว้ในใบนี้ = ไม่ลด ไม่ผ่านไฟล์นี้)
@@ -10,6 +12,12 @@ export type ReduceMode = "split" | "drop";
 export const REDUCE_MODE_LABEL: Record<ReduceMode, string> = { split: "แยกเป็นใบใหม่ รอของ", drop: "ไม่ทำแล้ว" };
 /** เหตุผลให้เลือก (ตัวสุดท้าย = พิมพ์เอง) */
 export const REDUCE_REASONS = ["ของไม่พอ", "ของเสียตอนตัด/ผลิต", "ช่างส่งคืนไม่ครบ", "ลงจำนวนผิด", "ลูกค้าลดจำนวน", "อื่น ๆ"] as const;
+export type IncreaseMode = "add" | "extra";
+export type QtyChangeMode = ReduceMode | IncreaseMode;
+export const INCREASE_MODE_LABEL: Record<IncreaseMode, string> = { add: "เพิ่มในใบนี้", extra: "แยกเป็นใบใหม่ (ส่วนเกิน)" };
+/** เหตุผลตอนทำได้มากกว่าสั่ง (ตัวสุดท้าย = พิมพ์เอง) */
+export const INCREASE_REASONS = ["ของพอทำเพิ่ม", "ลูกค้าสั่งเพิ่ม", "ทำเผื่อของเสีย", "ลงจำนวนผิด", "อื่น ๆ"] as const;
+export const isIncreaseMode = (m: unknown): m is IncreaseMode => m === "add" || m === "extra";
 
 const EPS = 0.0001;
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -61,6 +69,24 @@ export function reduceQtyIssue(p: { qty: number; newQty: number; received: numbe
   if (p.newQty >= p.qty - EPS) return `ใส่น้อยกว่า ${fmt(p.qty)} (ถ้าทำได้ครบไม่ต้องลด)`;
   if (p.newQty < p.received - EPS) return `ช่างส่งคืนแล้ว ${fmt(p.received)} ชิ้น — ลดต่ำกว่านั้นไม่ได้`;
   return null;
+}
+
+/** เพิ่มเป็นจำนวนนี้ได้ไหม (null = ได้) */
+export function increaseQtyIssue(p: { qty: number; newQty: number; sized?: boolean; status?: string | null }): string | null {
+  if (p.status === "done" || p.status === "cancelled") return "ใบนี้ปิดงาน/ยกเลิกไปแล้ว";
+  if (p.sized) return "ใบนี้แบ่งจำนวนตามไซส์ — เพิ่มรายไซส์ที่หน้าใบสั่งผลิต";
+  if (!(p.newQty > p.qty + EPS)) return `ใส่มากกว่า ${fmt(p.qty)}`;
+  return null;
+}
+/** เพิ่มเยอะผิดปกติ (เกิน 50%) — เตือนให้ตรวจ บันทึกได้ */
+export const increaseIsBig = (qty: number, newQty: number) => qty > 0 && newQty > qty * 1.5 + EPS;
+
+/** ข้อความสรุปการเพิ่ม (โชว์ก่อนบันทึก) */
+export function increaseSummary(p: { from: number; to: number; mode: IncreaseMode; reason: string }): string[] {
+  const extra = r2(p.to - p.from);
+  return p.mode === "add"
+    ? [`ใบนี้ ${fmt(p.from)} → ${fmt(p.to)} ชิ้น (เพราะ ${p.reason || "—"})`, `วัตถุดิบ/ยอดขอซื้อคิดใหม่ตาม ${fmt(p.to)} ชิ้น — ส่วนที่ขาดขึ้น "ต้องซื้อ" ให้จัดซื้อเห็น`, "ติ๊กเตรียมเดิมยังอยู่ (ของที่เตรียมไว้ไม่พอ ให้เอาติ๊กออกเอง)"]
+    : [`ใบนี้คง ${fmt(p.from)} ชิ้น · สร้างใบใหม่ ${fmt(extra)} ชิ้น (เพราะ ${p.reason || "—"})`, "ใบใหม่ สินค้า/สูตร/กำหนดส่งเดิม ขึ้นแท็บรอจ่าย — จ่ายงานส่วนเกินที่ใบใหม่"];
 }
 
 /** ข้อความสรุปการลด (โชว์ก่อนบันทึก / ในประวัติ) */
