@@ -15,6 +15,9 @@
  *  - กดการ์ด = เปิดรายละเอียดงาน (ป๊อปเดียวกับบอร์ด)
  *
  * ของกลาง: apiFetch · useToast · HoverImage · /api/mo/set-due-date (ใบสั่งผลิต) · /api/mo/work-orders/<id> (ใบจ่ายงาน)
+ *
+ * ฝังในแท็บของโหมดตาราง (ดูเฉพาะงานของแท็บนั้น): lockMode = ล็อกปฏิทินเดียว · woDate = วันที่ใช้วางใบจ่ายงาน
+ *   ("due" กำหนดเสร็จ ลากตั้งวันได้ · "dispatch" วันที่จ่าย / "received" วันที่ช่างส่ง = ดูอย่างเดียว) · hideSearch = ใช้ช่องค้นของบอร์ดแทน
  */
 import { useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -34,13 +37,14 @@ type CalWO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; due_date?: string | null; department_name?: string | null; assignee_name: string | null;
   image_url?: string | null; status: string; brand?: string | null; brand_oem?: boolean;
+  dispatch_date?: string | null;
 };
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const TH_DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 
-export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, departments = [], canEdit, moGroups, groupOf, onOpenMO, onOpenWO, onReload }: {
+export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, departments = [], canEdit: canEditProp, moGroups, groupOf, onOpenMO, onOpenWO, onReload, lockMode, woDate = "due", hideSearch = false }: {
   pending: CalMO[];
   extraMos?: CalMO[];          // ใบที่จ่ายงานครบแล้ว — ยังต้องส่งลูกค้า จึงต้องอยู่ในปฏิทินนัดส่งลูกค้า
   plans?: CalPlan[];           // งวดส่ง (แบ่งส่งหลายวัน)
@@ -52,9 +56,17 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
   onOpenMO: (moId: string) => void;
   onOpenWO: (woId: string) => void;
   onReload: () => void | Promise<void>;
+  /** ล็อกให้เหลือปฏิทินเดียว (ซ่อนปุ่มสลับ) */
+  lockMode?: "customer" | "internal";
+  /** วันที่ใช้วางใบจ่ายงาน — ไม่ใช่ "due" = ดูอย่างเดียว (ลากเปลี่ยนวันไม่ได้) */
+  woDate?: "due" | "dispatch" | "received";
+  /** ซ่อนช่องค้นหาของปฏิทิน (หน้าที่ฝังมีช่องค้นของตัวเองแล้ว) */
+  hideSearch?: boolean;
 }) {
   const toast = useToast();
-  const [mode, setMode] = useState<"customer" | "internal">("customer");
+  const canEdit = canEditProp && woDate === "due";
+  const [modeState, setMode] = useState<"customer" | "internal">(lockMode ?? "customer");
+  const mode = lockMode ?? modeState;
   const [cursor, setCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState<{ kind: "mo" | "wo" | "plan"; field: "due" | "internal"; id: string; label: string } | null>(null);
@@ -110,7 +122,8 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
     }
     // ภายใน = ใบจ่ายงานที่ยังทำอยู่ + ใบสั่งผลิตที่ยังไม่ได้จ่ายงานเลย (ตั้งวันภายในล่วงหน้าได้)
     const woItems = workOrders.filter((w) => w.status !== "done").map((w) => ({
-      key: `wo:${w.id}`, kind: "wo" as const, field: "internal" as const, id: w.id, moNo: w.mo_no, date: w.due_date ?? null, sku: w.product_sku, name: w.product_name,
+      key: `wo:${w.id}`, kind: "wo" as const, field: "internal" as const, id: w.id, moNo: w.mo_no,
+      date: (woDate === "dispatch" ? w.dispatch_date : w.due_date)?.slice(0, 10) ?? null, sku: w.product_sku, name: w.product_name,
       qty: w.qty, img: w.image_url ?? null, sub: `${w.department_name ?? "—"}${w.assignee_name ? ` · ${w.assignee_name}` : ""}`, brand: w.brand ?? null, oem: !!w.brand_oem,
       desk: w.department_name ?? null,
     }));
@@ -120,7 +133,7 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
       desk: null,
     }));
     return [...woItems, ...moItems];
-  }, [mode, pending, extraMos, plans, workOrders, desksByMo, dispatchedMoNos]);
+  }, [mode, pending, extraMos, plans, workOrders, desksByMo, dispatchedMoNos, woDate]);
 
   const brandOptions = useMemo(() => [...new Set(allItems.map((i) => i.brand).filter(Boolean) as string[])].sort((a, b) => a.localeCompare(b, "th")), [allItems]);
   const deskOptions = useMemo(() => {
@@ -255,10 +268,10 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
     <div className="space-y-2">
       {/* แถบเครื่องมือ */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+        {!lockMode && <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
           <button onClick={() => setMode("customer")} className={`h-9 px-3 font-medium ${mode === "customer" ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📦 นัดส่งลูกค้า</button>
           <button onClick={() => setMode("internal")} className={`h-9 px-3 font-medium border-l border-slate-200 ${mode === "internal" ? "bg-violet-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🪑 นัดส่งงาน (ภายใน)</button>
-        </div>
+        </div>}
         <div className="inline-flex items-center gap-1">
           <button onClick={() => setCursor((c) => new Date(c.getFullYear(), c.getMonth() - 1, 1))} className="h-9 w-9 border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">‹</button>
           <span className="min-w-[150px] text-center text-sm font-semibold text-slate-700">{monthLabel}</span>
@@ -266,15 +279,15 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
           <button onClick={() => { const d = new Date(); setCursor(new Date(d.getFullYear(), d.getMonth(), 1)); }} className="h-9 px-3 text-sm border border-slate-200 rounded-lg bg-white text-slate-600 hover:bg-slate-50">วันนี้</button>
         </div>
         <span className="text-[11px] text-slate-500">
-          {mode === "customer" ? "วันกำหนดส่งของใบสั่งผลิต (ส่งลูกค้า)" : "วันที่ช่าง/โต๊ะต้องทำเสร็จ (รวมใบที่ยังไม่จ่ายงาน)"}
+          {mode === "customer" ? "วันกำหนดส่งของใบสั่งผลิต (ส่งลูกค้า)" : woDate === "dispatch" ? "วันที่จ่ายงานให้โต๊ะ/ช่าง (ดูอย่างเดียว)" : woDate === "received" ? "วันที่ช่างส่งงานคืน (ดูอย่างเดียว)" : "วันที่ช่าง/โต๊ะต้องทำเสร็จ (รวมใบที่ยังไม่จ่ายงาน)"}
           {" · "}มีวันแล้ว {items.length - noDate.length} · ยังไม่กำหนด {noDate.length}
         </span>
       </div>
 
       {/* ค้นหา + กรอง */}
       <div className="flex flex-wrap items-center gap-2">
-        <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 ค้นหา รหัส / ชื่อ / เลขใบ / โต๊ะ-ช่าง…"
-          className="h-8 px-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[220px] flex-1 max-w-sm" />
+        {!hideSearch && <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="🔍 ค้นหา รหัส / ชื่อ / เลขใบ / โต๊ะ-ช่าง…"
+          className="h-8 px-2.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400 min-w-[220px] flex-1 max-w-sm" />}
         {moGroups.length > 0 && (
           <select value={groupFilter} onChange={(e) => setGroupFilter(e.target.value)} title="กรองตามกลุ่มงาน"
             className="h-8 px-2 text-[12px] border border-slate-200 rounded-lg bg-white text-slate-600">
@@ -313,8 +326,8 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
         )}
       </div>
 
-      {/* สรุปยอดต้องส่ง (ยังไม่ติ๊กว่าส่งแล้ว) — รวมทุกลูกค้า */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      {/* สรุปยอดต้องส่ง (ยังไม่ติ๊กว่าส่งแล้ว) — รวมทุกลูกค้า · โหมดดูวันจ่าย/วันส่งคืน ไม่ใช่ "นัด" จึงไม่โชว์ */}
+      {woDate === "due" && <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {([
           ["⏰ เลยกำหนด ยังไม่ส่ง", summary.late, "border-rose-300 bg-rose-50 text-rose-700"],
           ["📦 ต้องส่งวันนี้", summary.today, "border-indigo-300 bg-indigo-50 text-indigo-700"],
@@ -326,7 +339,7 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
             <div className="text-sm font-bold tabular-nums">{v.n} ใบ <span className="font-normal opacity-70">· {fmt(v.qty)} ชิ้น</span></div>
           </div>
         ))}
-      </div>
+      </div>}
 
       {/* แถบสีประจำโต๊ะ — กดที่สีเพื่อกรองเฉพาะโต๊ะนั้น (กดซ้ำ = ยกเลิก) */}
       {deskLegend.length > 0 && (
