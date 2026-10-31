@@ -4528,6 +4528,170 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     const shared = woGroup === "crew" ? rows.filter((r) => crewOf(r).length > 1).length : 0;
     return `${fmt(rows.length)} ใบ · ${fmt(rows.reduce((n, w) => n + (Number(w.qty) || 0), 0))} ชิ้น · ค้าง ${fmt(rows.reduce((n, w) => n + woLeft(w), 0))}${shared ? ` · ทำร่วม ${shared} ใบ` : ""}`;
   };
+  // ── แถวสรุปของกลุ่ม (หัวกลุ่มโชว์ยอดรวมตรงคอลัมน์ · MiniTable groupCells) — เจ้าของขอ 2026-10-31 · ใช้กับทุกแบบจัดกลุ่ม
+  type GCells<R> = Record<string, (rs: R[]) => ReturnType<MiniColumn<R>["cell"]>>;
+  const sumOf = <R,>(rs: R[], f: (r: R) => number | null | undefined) => rs.reduce((n, r) => n + (Number(f(r)) || 0), 0);
+  const gNote = (s: string, cls = "text-slate-400") => <div className={`text-[10px] leading-tight whitespace-nowrap ${cls}`}>{s}</div>;
+  /** ชื่อเดียว = โชว์ชื่อ · หลายชื่อ = "N <หน่วย>" (ชี้ดูรายชื่อ) */
+  const distinctCell = (names: (string | null | undefined)[], unit: string) => {
+    const u = [...new Set(names.filter((s): s is string => !!s))];
+    if (!u.length) return <span className="text-slate-300">—</span>;
+    return u.length === 1 ? <span className="block truncate text-[12px] text-slate-600" title={u[0]}>{u[0]}</span>
+      : <span className="text-[12px] text-slate-600" title={u.join(", ")}>{u.length} {unit}</span>;
+  };
+  /** วันกำหนดของกลุ่ม: วันที่ใกล้สุด + เลยกำหนด/ไม่กำหนดกี่ใบ */
+  const dueSumCell = (ds: (string | null | undefined)[]) => {
+    const has = ds.filter((d): d is string => !!d).map((d) => d.slice(0, 10)).sort();
+    const late = has.filter((d) => d < today).length, none = ds.length - has.length;
+    if (!has.length) return gNote(`ยังไม่กำหนด ${fmt(none)} ใบ`);
+    return <div className="leading-tight">
+      <div className="text-[12px] whitespace-nowrap">เร็วสุด {dueText(has[0])}</div>
+      {(late > 0 || none > 0) && gNote([late > 0 ? `เลยกำหนด ${fmt(late)} ใบ` : "", none > 0 ? `ไม่กำหนด ${fmt(none)} ใบ` : ""].filter(Boolean).join(" · "), late > 0 ? "text-rose-600" : undefined)}
+    </div>;
+  };
+  /** ความคืบหน้าซื้อของรวมทั้งกลุ่ม (บวกทุกใบ) · open = ใบที่ยังมีต้องซื้อ/รออนุมัติ */
+  const progSum = (rs: PendingMO[]) => {
+    const ps = rs.map((m) => prog?.[m.mo_no]).filter((p): p is MoProgress => !!p);
+    if (!ps.length) return null;
+    const s: MoProgress = { total: 0, buy: 0, requested: 0, ordered: 0, done: 0, linked: 0, eta: null, eta_unknown: 0 };
+    for (const p of ps) {
+      s.total += p.total; s.buy += p.buy; s.requested += p.requested; s.ordered += p.ordered; s.done += p.done; s.linked += p.linked; s.eta_unknown += p.eta_unknown;
+      if (p.eta && (!s.eta || p.eta > s.eta)) s.eta = p.eta;
+    }
+    return { s, open: ps.filter((p) => p.buy + p.requested > 0).length };
+  };
+  const pendGroupCells: GCells<PendingMO> = {
+    created: (rs) => {
+      const first = rs.map((m) => m.created_at).filter((d): d is string => !!d).sort()[0];
+      if (!first) return <span className="text-slate-300">—</span>;
+      const d = Math.max(0, Math.floor((Date.now() - new Date(first).getTime()) / 86400000));
+      return <div className="leading-tight"><div className="text-[12px] text-slate-600 tabular-nums">{formatDateTime(first).slice(0, 10)}</div>
+        {gNote(`เก่าสุด · ${d === 0 ? "วันนี้" : `${fmt(d)} วัน`}`, d > 60 ? "text-rose-500" : undefined)}</div>;
+    },
+    qty: (rs) => {
+      const disp = sumOf(rs, (m) => m.dispatched);
+      return <div className="leading-tight">
+        <div className="tabular-nums whitespace-nowrap"><b className="text-rose-600">{fmt(sumOf(rs, (m) => m.remaining))}</b><span className="text-[11px] text-slate-400"> / {fmt(sumOf(rs, (m) => m.qty))}</span></div>
+        {gNote(disp > 0 ? `จ่ายแล้ว ${fmt(disp)}` : `ยังไม่จ่ายทั้ง ${fmt(rs.length)} ใบ`)}
+      </div>;
+    },
+    prep: (rs) => {
+      const b = rs.filter((m) => m.has_bom);
+      if (!b.length) return gNote(`ไม่มีสูตร ${fmt(rs.length)} ใบ`);
+      return <div className="space-y-1">
+        <PrepBar label="เตรียม" a={sumOf(b, (m) => m.prep_ready)} b={sumOf(b, (m) => m.prep_total)} />
+        <PrepBar label="ตัด" a={sumOf(b, (m) => m.cut_ready)} b={sumOf(b, (m) => m.cut_total)} />
+      </div>;
+    },
+    buy: (rs) => <MoProgressCell p={progSum(rs)?.s} loading={prog === null} />,
+    eta: (rs) => {
+      const g = progSum(rs);
+      if (!g) return <span className="text-slate-300">—</span>;
+      if (g.open > 0) return <div className="leading-tight"><div className="text-[11px] text-rose-600 whitespace-nowrap">ยังสั่งไม่ครบ {fmt(g.open)} ใบ</div>
+        {g.s.eta && gNote(`ที่สั่งแล้ว ถึง ${dueDateText(g.s.eta)}`)}</div>;
+      if (g.s.ordered === 0) return <span className="text-[11px] text-emerald-600">✓ ครบทุกใบ</span>;
+      return <div className="leading-tight text-[12px]">
+        {g.s.eta ? <div className="whitespace-nowrap">ช้าสุด {dueDateText(g.s.eta)}</div> : <div className="text-[11px] text-slate-400">PO ยังไม่ระบุวัน</div>}
+        {g.s.eta && g.s.eta_unknown > 0 && gNote(`+${g.s.eta_unknown} รายการไม่ระบุวัน`)}
+      </div>;
+    },
+    stage: (rs) => {
+      const n = new Map<MoStage, number>();
+      for (const m of rs) { const s = stageOf(m, prog?.[m.mo_no]); n.set(s, (n.get(s) ?? 0) + 1); }
+      return <div className="flex flex-wrap gap-1">
+        {[...n.entries()].sort((a, b) => STAGE_META[a[0]][1] - STAGE_META[b[0]][1]).map(([s, c]) => (
+          <span key={s} className="whitespace-nowrap rounded-full border border-slate-200 bg-white px-1.5 text-[10px] leading-4 text-slate-600">{STAGE_META[s][0]} {c}</span>
+        ))}
+      </div>;
+    },
+    due: (rs) => {
+      const line = (ic: string, lb: string, ds: (string | null | undefined)[]) => {
+        const first = ds.filter((d): d is string => !!d).map((d) => d.slice(0, 10)).sort()[0];
+        return <span className="flex items-center gap-1 text-[12px]" title={`ส่ง${lb} — วันที่ใกล้สุดในกลุ่ม`}><span className="w-4 shrink-0 text-[11px]">{ic}</span><span className="whitespace-nowrap">{dueText(first)}</span></span>;
+      };
+      const late = rs.filter(isLate).length;
+      return <div className="space-y-0.5">
+        {line("📦", "ลูกค้า", rs.map((m) => m.due_date))}
+        {line("🪑", "ภายใน", rs.map((m) => m.internal_due_date))}
+        {late > 0 && gNote(`เลยกำหนด ${fmt(late)} ใบ`, "text-rose-600")}
+      </div>;
+    },
+    price: (rs) => {
+      if (!priceByMo) return <span className="text-[11px] text-slate-300">…</span>;
+      const ps = rs.filter(priceOk).map(priceOf), bad = rs.length - ps.length;
+      if (!ps.length) return gNote(`ยังไม่ตั้ง ${fmt(bad)} ใบ`, "text-amber-700");
+      const lo = Math.min(...ps), hi = Math.max(...ps);
+      return <div className="leading-tight text-right"><div className="tabular-nums whitespace-nowrap">฿{fmt(lo)}{hi > lo ? `–${fmt(hi)}` : ""}</div>{bad > 0 && gNote(`ยังไม่ตั้ง ${fmt(bad)} ใบ`, "text-amber-700")}</div>;
+    },
+    value: (rs) => {
+      if (!priceByMo) return <span className="text-[11px] text-slate-300">…</span>;
+      const all = sumOf(rs, (m) => valueOf(m, "all")), rem = sumOf(rs, (m) => valueOf(m, "rem"));
+      return <div className="leading-tight text-right"><div className="tabular-nums font-semibold text-slate-700 whitespace-nowrap">฿{fmt(all)}</div>{rem !== all && gNote(`ค้างจ่าย ฿${fmt(rem)}`)}</div>;
+    },
+    rate: (rs) => {
+      const rs2 = rs.filter((m) => rateOf(m) > 0), miss = rs.length - rs2.length;
+      if (!rs2.length) return gNote(`ยังไม่ใส่ ${fmt(miss)} ใบ`, "text-amber-600");
+      const rates = rs2.map(rateOf), lo = Math.min(...rates), hi = Math.max(...rates);
+      return <div className="leading-tight text-right">
+        <div className="tabular-nums whitespace-nowrap text-slate-600">฿{fmt(lo)}{hi > lo ? `–${fmt(hi)}` : ""}</div>
+        {gNote(`รวม ฿${fmt(Math.round(sumOf(rs2, (m) => rateOf(m) * (m.qty || 0)) * 100) / 100)}${miss > 0 ? ` · ไม่ใส่ ${fmt(miss)}` : ""}`, miss > 0 ? "text-amber-600" : undefined)}
+      </div>;
+    },
+    brand: (rs) => distinctCell(rs.map((m) => m.brand), "แบรนด์"),
+    prio: (rs) => {
+      const hot = rs.filter((m) => (m.priority ?? 0) >= 2).length, star = rs.filter((m) => (m.priority ?? 0) === 1).length;
+      return hot + star ? <span className="text-[11px] whitespace-nowrap">{hot > 0 && <span className="text-rose-700">🔥 {hot} </span>}{star > 0 && <span className="text-amber-700">⭐ {star}</span>}</span> : <span className="text-slate-300">—</span>;
+    },
+    issues: (rs) => { const n = sumOf(rs, (m) => m.issue_count); return n > 0 ? <span className="text-[11px] text-rose-700 whitespace-nowrap">⚠️ {fmt(n)} เรื่อง</span> : <span className="text-slate-300">—</span>; },
+    group: (rs) => distinctCell(rs.map((m) => groupNameOf(m.mo_no)), "กลุ่ม"),
+  };
+  /** หัวกลุ่มบรรทัดสอง (โหมดตาราง): จำนวนชิ้นอยู่ในคอลัมน์แล้ว → เหลือแค่มูลค่าค้างจ่าย (เฉพาะคนดูเงินได้) */
+  const groupMoney = (rows: PendingMO[]) => {
+    if (!canSeeMoney || !priceByMo) return null;
+    const bad = rows.filter((m) => !priceOk(m)).length;
+    return `มูลค่าค้างจ่าย ฿${fmt(sumOf(rows, (m) => valueOf(m, "rem")))}${bad ? ` (ไม่นับ ${bad} ใบที่ราคายังไม่ถูกต้อง)` : ""}`;
+  };
+  const woGroupCells: GCells<WorkOrder> = {
+    wo: (rs) => <span className="text-[12px] text-slate-600">{fmt(new Set(rs.map((w) => w.id)).size)} ใบ</span>,
+    group: (rs) => distinctCell(rs.map((w) => groupNameOf(w.mo_no)), "กลุ่ม"),
+    dept: (rs) => {
+      const desks = new Set(rs.map((w) => w.department_name).filter(Boolean)).size;
+      const people = new Set(rs.flatMap((w) => crewOf(w)).filter((n) => !n.endsWith("(ทั้งโต๊ะ)"))).size;
+      const shared = rs.filter((w) => crewOf(w).length > 1).length;
+      return <div className="leading-tight"><div className="text-[12px] text-slate-600 whitespace-nowrap">{[desks ? `${desks} โต๊ะ` : "", people ? `${people} ช่าง` : ""].filter(Boolean).join(" · ") || "—"}</div>
+        {shared > 0 && gNote(`ทำร่วม ${fmt(shared)} ใบ`)}</div>;
+    },
+    qty: (rs) => <span className="tabular-nums font-semibold text-slate-700">{fmt(sumOf(rs, (w) => w.qty))}</span>,
+    recv: (rs) => {
+      const left = Math.round(sumOf(rs, woLeft) * 100) / 100;
+      return <span className="flex items-center justify-end gap-1 whitespace-nowrap">
+        <span className="tabular-nums text-slate-500">{fmt(sumOf(rs, (w) => w.received_qty))}</span>
+        {left > 0 ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 tabular-nums">ค้าง {fmt(left)}</span>
+          : <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">ครบ ✓</span>}
+      </span>;
+    },
+    due: (rs) => dueSumCell(rs.map((w) => w.due_date)),
+    rate: (rs) => {
+      const has = rs.filter((w) => (w.labor_cost ?? 0) > 0), miss = rs.length - has.length;
+      if (!has.length) return gNote(`ยังไม่ใส่ ${fmt(miss)} ใบ`, "text-amber-600");
+      return <div className="leading-tight text-right"><div className="tabular-nums whitespace-nowrap text-slate-600">รวม ฿{fmt(sumOf(has, (w) => w.labor_cost))}</div>{miss > 0 && gNote(`ยังไม่ใส่ ${fmt(miss)} ใบ`, "text-amber-600")}</div>;
+    },
+    status: (rs) => {
+      const n = new Map<string, number>();
+      for (const w of rs) { const lb = WO_STATUS[w.status]?.label ?? w.status; n.set(lb, (n.get(lb) ?? 0) + 1); }
+      return <div className="flex flex-wrap justify-center gap-1">{[...n.entries()].map(([lb, c]) => (
+        <span key={lb} className="whitespace-nowrap rounded-full border border-slate-200 bg-white px-1.5 text-[10px] leading-4 text-slate-600">{lb} {c}</span>
+      ))}</div>;
+    },
+  };
+  const qcGroupCells: GCells<QcQueueRow> = {
+    mo: (rs) => <span className="text-[12px] text-slate-600">{fmt(rs.length)} ใบ</span>,
+    worker: (rs) => distinctCell(rs.map((q) => q.worker), "ช่าง"),
+    qty: (rs) => <span className="tabular-nums font-semibold text-slate-700">{fmt(sumOf(rs, (q) => q.remaining))}</span>,
+    recv: (rs) => { const first = rs.map((q) => q.received_at).filter((d): d is string => !!d).sort()[0];
+      return first ? <div className="leading-tight"><div className="text-[12px] text-slate-500">{dueDateText(first.slice(0, 10))}</div>{gNote("ส่งมาเก่าสุด")}</div> : <span className="text-slate-300">—</span>; },
+    due: (rs) => dueSumCell(rs.map((q) => q.due_date)),
+  };
   const renderWipCard = (w: WorkOrder) => {
     const left = woLeft(w);
     const rate = (w.labor_cost ?? 0) > 0 && w.qty > 0 ? Math.round(((w.labor_cost as number) / w.qty) * 100) / 100 : 0;
@@ -5049,7 +5213,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         groupCollapsible={pendGroup !== "none"}
         groupLabel={pendGroup === "parent" ? "จัดกลุ่มตามสินค้าแม่" : pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : pendGroup === "brand" ? "จัดกลุ่มตามแบรนด์" : "จัดกลุ่มตามความพร้อม"}
         grouped={pendGroup !== "none"} onGroupedChange={(v) => pickGroup(v ? (pendGroup === "none" ? lastGroupRef.current : pendGroup) : "none")}
-        groupExtra={groupSum}
+        groupExtra={pendLayout === "cards" ? groupSum : groupMoney} groupCells={pendGroupCells}
         footnote={dc.show.foot ? `${dc.expand ? (dev === "ipadP" ? `${touch ? "แตะ" : "กด"}การ์ด = กางรายละเอียด (สลับแท็บได้)` : `${touch ? "แตะ" : "กด"}ช่องไหน = กางรายละเอียดเรื่องนั้น (ซื้อของ → BOM · สินค้า → รายละเอียดงาน · กำหนดส่ง → แก้วัน/งวดส่ง · เตรียม/ตัด → ติ๊กได้ · เหลือ → จ่ายงาน)`) : `${touch ? "แตะ" : "กด"}แถว = เปิดเช็กลิสต์`} · 📋 = เปิดเช็กลิสต์เต็ม${dc.stage === "dots" ? ` · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน${touch ? "" : " (ชี้ที่จุดเพื่อดูตัวเลข)"}` : ""}${canSeeMoney ? ` · ราคาต่ำกว่า ฿${PRICE_MIN} หรือยังไม่ตั้ง = ไม่นับรวมยอด` : ""}` : undefined}
         emptyText={pending.length ? `ไม่มีใบในมุมมอง “${view.name}”` : "ไม่มีงานรอจ่าย"}
         noMatchText={(q) => `ไม่พบ “${q}” ในมุมมอง “${view.name}”`}
@@ -5255,7 +5419,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         groupOrder={woGroup === "parent" ? parentOrder : undefined}
         groupHead={woGroup === "parent" ? (n, rs) => parentHead(n, rs.map((w) => w.product_sku), rs.map((w) => w.image_url)) : undefined}
         groupCollapsible={woGroup !== "none"}
-        groupExtra={woGroup === "crew" || woGroup === "desk" || woGroup === "parent" ? woGroupSum : undefined}
+        groupExtra={layoutOf("wip") === "cards" && (woGroup === "crew" || woGroup === "desk" || woGroup === "parent") ? woGroupSum : undefined} groupCells={woGroupCells}
         footnote={woGroup === "crew" ? "งานที่ทำร่วมหลายคน ขึ้นในกลุ่มของทุกคน (จำนวนแถวจึงอาจมากกว่าจำนวนใบ)" : undefined}
         emptyText="ยังไม่มีงานที่จ่าย"
         noMatchText={(q) => `ไม่พบ “${q}” ในแท็บกำลังผลิต`}
@@ -5288,7 +5452,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           searchValue={searchQ} onSearchChange={setTableSearch}
           groupBy={qcGroup === "parent" ? (q) => parentKey(q.sku) : undefined} groupOrder={parentOrder} groupLabel="จัดกลุ่มตามสินค้าแม่" defaultGrouped={qcGroup !== "none"}
           groupHead={(n, rs) => parentHead(n, rs.map((q) => q.sku), [])} groupCollapsible
-          groupExtra={(rs) => `${fmt(rs.length)} ใบ · รอรับ ${fmt(rs.reduce((n, q) => n + (q.remaining || 0), 0))} ชิ้น`}
+          groupExtra={layoutOf("qc") === "cards" ? (rs) => `${fmt(rs.length)} ใบ · รอรับ ${fmt(rs.reduce((n, q) => n + (q.remaining || 0), 0))} ชิ้น` : undefined} groupCells={qcGroupCells}
           emptyText="ไม่มีงานรอรับเข้า QC"
           noMatchText={(q) => `ไม่พบ “${q}” ในแท็บรอ QC`}
         />}

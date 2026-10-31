@@ -46,6 +46,8 @@ export type MiniColumn<T> = {
   defaultHidden?: boolean;              // ซ่อนไว้ก่อน (ผู้ใช้เปิดเองได้)
   isNew?: boolean;                      // ป้าย "ใหม่" ในเมนู
 };
+/** ช่องแถวสรุปของกลุ่ม: column key → ยอดรวมจากแถวในกลุ่ม (ดู prop groupCells) */
+export type MiniGroupCells<T> = Record<string, (rows: T[]) => ReactNode>;
 
 export type MiniTableProps<T> = {
   rows: T[];
@@ -80,8 +82,11 @@ export type MiniTableProps<T> = {
   groupExtra?: (rows: T[]) => ReactNode;
   /** หัวกลุ่มแบบกำหนดเอง (เช่น รูป + รหัสสินค้าแม่ + ชื่อรุ่น) — ไม่ส่ง = ชื่อกลุ่มตัวหนังสือ */
   groupHead?: (groupName: string, rows: T[]) => ReactNode;
-  /** กดหัวกลุ่ม = กาง/ย่อกลุ่มนั้น + แถบ "ย่อทุกกลุ่ม / กางทุกกลุ่ม" เหนือรายการ (ย่อทุกกลุ่ม = เห็นแค่หัวกลุ่ม = ภาพรวม) */
+  /** กดหัวกลุ่ม = กาง/ย่อกลุ่มนั้น + ปุ่ม "กางทั้งหมด / พับทั้งหมด" (พับทั้งหมด = เห็นแค่หัวกลุ่ม = ภาพรวม) */
   groupCollapsible?: boolean;
+  /** แถวสรุปของกลุ่ม (โหมดตาราง) — key = MiniColumn.key · คอลัมน์ที่มีฟังก์ชัน = หัวกลุ่มโชว์ยอดรวมตรงคอลัมน์นั้น
+   *  ชื่อกลุ่ม (groupHead) คร่อมคอลัมน์ซ้ายที่ยังไม่มีช่องสรุป · groupExtra ขึ้นบรรทัดที่สองใต้ชื่อ · โหมดการ์ดใช้หัวกลุ่มบรรทัดเดียวเหมือนเดิม */
+  groupCells?: MiniGroupCells<T>;
 
   // เลือกหลายแถว (controlled)
   selectable?: boolean;
@@ -161,7 +166,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
     rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange, hideSearch,
     sortKey: sortKeyProp, sortDir: sortDirProp, onSortChange,
-    groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra, groupHead, groupCollapsible,
+    groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra, groupHead, groupCollapsible, groupCells,
     selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded, onCellClick, activeCell,
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
@@ -508,16 +513,56 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       {groupExtra && <span className="ml-auto shrink-0 text-[11px] text-slate-500">{groupExtra(g.rows)}</span>}
     </div>
   );
-  // แถบ "ย่อทุกกลุ่ม / กางทุกกลุ่ม" (มีมากกว่า 1 กลุ่ม)
+  // แถวสรุป (groupCells): หัวกลุ่มเป็นแถวตาราง — ชื่อกลุ่มคร่อมคอลัมน์ซ้ายที่ไม่มีช่องสรุป · คอลัมน์อื่นโชว์ยอดรวมตรงคอลัมน์
+  const sumRow = !cards && !!groupCells && columns.some((c) => !!groupCells[c.key]);
+  const labelSpan = sumRow ? Math.max(1, columns.findIndex((c) => !!groupCells![c.key])) : 0;
+  const SumHead = ({ g, gSel, gKeys }: { g: { name: string; rows: T[] }; gSel: boolean; gKeys: string[] }) => {
+    const off = selectable ? 1 : 0;
+    // ชื่อกลุ่มคร่อมคอลัมน์ที่ล็อก → ติดซ้ายตอนเลื่อนขวา (เริ่มที่ช่องแรก · เงา/เส้นแบ่งตามช่องสุดท้ายที่ล็อก)
+    const lastLock = Math.min(off + labelSpan - 1, lockN - 1);
+    const base = off < lockN ? lockStyle(lastLock, GROUP_BG, "cell") : undefined;
+    const labelLock: CSSProperties | undefined = base && lockLefts[off] != null
+      ? { ...base, left: lockLefts[off], ...(off === 0 && lastLock !== 0 ? { boxShadow: `-12px 0 0 0 ${GROUP_BG}, ${base.boxShadow}` } : {}) }
+      : undefined;
+    return (
+      <div onClick={groupCollapsible ? () => toggleG(g.name) : undefined} title={groupCollapsible ? (gClosed(g.name) ? t("กดเพื่อกาง", "Click to expand") : t("กดเพื่อพับ", "Click to collapse")) : undefined}
+        className={`grid gap-2 px-3 ${touch ? "py-2" : "py-1.5"} items-center bg-slate-50 border-y border-slate-200 ${groupCollapsible ? "cursor-pointer" : ""}`}
+        style={{ gridTemplateColumns: tmpl, ...rowW }}>
+        {selectable && (
+          <span className="flex justify-center" onClick={(e) => e.stopPropagation()} style={lockStyle(0, GROUP_BG, "check")}>
+            <input type="checkbox" checked={gSel} onChange={() => setKeys(gKeys, !gSel)} className={boxCls} />
+          </span>
+        )}
+        <div className="min-w-0" style={{ gridColumn: `span ${labelSpan}`, ...labelLock }}>
+          <div className="flex min-w-0 items-center gap-2">
+            {groupCollapsible && <span className="w-3 shrink-0 text-[10px] text-slate-400">{gClosed(g.name) ? "▸" : "▾"}</span>}
+            {groupHead ? groupHead(g.name, g.rows) : <span className="truncate text-xs font-semibold text-slate-700">{g.name}</span>}
+            <span className="shrink-0 text-[10px] text-slate-400">({g.rows.length})</span>
+          </div>
+          {groupExtra && <div className="mt-0.5 truncate text-[11px] text-slate-500">{groupExtra(g.rows)}</div>}
+        </div>
+        {columns.slice(labelSpan).map((c, i) => (
+          <div key={c.key} data-col={c.key} style={lockStyle(labelSpan + i + off, GROUP_BG, "cell")}
+            className={`min-w-0 text-[12px] text-slate-700 ${resizable ? "overflow-hidden" : ""} ${alignCls(c.align)}`}>
+            {groupCells![c.key]?.(g.rows) ?? null}
+          </div>
+        ))}
+      </div>
+    );
+  };
+  // ปุ่ม "กางทั้งหมด / พับทั้งหมด" (มีมากกว่า 1 กลุ่ม) — อยู่ในแถบเครื่องมือ (ซ่อนแถบ = ขึ้นเหนือตารางแทน)
   const manyG = !!groupBy && grouped && groups.length > 1;
   const allClosed = manyG && groups.every((g) => closedG.has(g.name));
-  const CollapseBar = groupCollapsible && manyG ? (
-    <div className="flex items-center gap-2 px-3 py-1 text-[11px] text-slate-500" style={!cards && measureOn && viewW ? { position: "sticky", left: 0, width: viewW } : undefined}>
-      <span>{t(`${groups.length} กลุ่ม`, `${groups.length} groups`)}</span>
-      <button type="button" onClick={() => setClosedG(allClosed ? new Set() : new Set(groups.map((g) => g.name)))} className="rounded px-1.5 py-0.5 text-indigo-600 hover:bg-indigo-50">
-        {allClosed ? t("▾ กางทุกกลุ่ม", "▾ Expand all") : t("▸ ย่อทุกกลุ่ม (ดูภาพรวม)", "▸ Collapse all")}
-      </button>
-    </div>
+  const noneClosed = manyG && groups.every((g) => !closedG.has(g.name));
+  const segBtn = (on: boolean) => `px-2.5 py-1 ${on ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`;
+  const CollapseBtns = groupCollapsible && manyG ? (
+    <span className="inline-flex items-center gap-2 text-[11px] text-slate-500">
+      <span className="inline-flex overflow-hidden rounded-lg border border-slate-200 text-xs">
+        <button type="button" onClick={() => setClosedG(new Set())} title={t("กางทุกกลุ่ม", "Expand every group")} className={segBtn(noneClosed)}>▾ {t("กางทั้งหมด", "Expand all")}</button>
+        <button type="button" onClick={() => setClosedG(new Set(groups.map((g) => g.name)))} title={t("พับทุกกลุ่ม = เห็นแค่หัวกลุ่ม (ภาพรวม)", "Collapse every group (overview)")} className={`border-l border-slate-200 ${segBtn(allClosed)}`}>▸ {t("พับทั้งหมด", "Collapse all")}</button>
+      </span>
+      <span className="whitespace-nowrap">{t(`${groups.length} กลุ่ม`, `${groups.length} groups`)}</span>
+    </span>
   ) : null;
 
   const total = rows.length, shown = sorted.length;
@@ -560,12 +605,15 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
               {grouped ? `▦ ${groupLabel}` : t("▤ ไม่จัดกลุ่ม", "▤ No grouping")}
             </button>
           )}
+          {CollapseBtns}
           {resizable && Object.keys(widths).length > 0 && (
             <button onClick={resetWidths} title={t("คืนความกว้างคอลัมน์เป็นค่าเริ่มต้น", "Reset column widths to default")} className="h-8 px-2 text-xs text-slate-400 hover:text-slate-600 underline">{t("รีเซ็ตความกว้าง", "Reset widths")}</button>
           )}
           {actionsInToolbar && <div className="ml-auto">{actions}</div>}
         </div>
       )}
+
+      {!toolbarOn && CollapseBtns && shown > 0 && <div className="mb-2 flex shrink-0 items-center">{CollapseBtns}</div>}
 
       {total === 0 ? (
         <div className="text-center py-16 text-slate-300">{emptyText}</div>
@@ -578,7 +626,6 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
               <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className={boxCls} /> {t("เลือกทั้งหมด", "Select all")}
             </label>
           )}
-          {CollapseBar}
           {groups.map((g) => {
             const gKeys = g.rows.map(rowKey);
             const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
@@ -598,14 +645,13 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         <div ref={scrollerRef} onScroll={onScroll} className={`border border-slate-200 rounded-xl ${fill ? "flex-1 min-h-0 overflow-auto overscroll-contain" : "overflow-x-auto"}`}>
           {HeaderCell}
           {ColMenu}
-          {CollapseBar}
           {groups.map((g, gi) => {
             const gKeys = g.rows.map(rowKey);
             const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
             let offset = 0; for (let i = 0; i < gi; i++) offset += groups[i].rows.length;
             return (
               <div key={g.name || "_all"} style={rowW}>
-                {groupBy && grouped && GroupHead({ g, gSel, gKeys })}
+                {groupBy && grouped && (sumRow ? SumHead : GroupHead)({ g, gSel, gKeys })}
                 {!gClosed(g.name) && <div className="divide-y divide-slate-50">{g.rows.map((r, i) => Row(r, offset + i))}</div>}
               </div>
             );
@@ -619,5 +665,6 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
 
 const EMPTY: Set<string> = new Set();
 const HEAD_BG = "#f1f5f9";   // = bg-slate-100 ของหัวตาราง (ช่องหัวที่ล็อกต้องทึบสีเดียวกัน)
+const GROUP_BG = "#f8fafc";  // = bg-slate-50 ของแถวสรุปกลุ่ม
 
 export { useColumnPrefs, ColumnChooser, type ColumnPrefsState } from "./column-chooser";
