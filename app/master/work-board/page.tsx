@@ -83,6 +83,10 @@ import { SearchableSelect } from "@/components/searchable-select";
 import { AssignToGroupModal } from "@/app/master/manufacturing-orders/mo-groups-modal";
 import { InstallAppModal } from "@/components/install-app";
 import { Icon } from "@/components/icon";
+import { ScanInput } from "@/components/scan-input";
+import { useScanGun } from "@/components/scan-input/use-scan-gun";
+import { parseScanned } from "@/lib/scan-code";
+import { DispatchLines, dispLinesCheck, type DispLine } from "./dispatch-lines";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import { DeskStaffPanel } from "./desk-staff-panel";
 import { CrewPick, crewFields, crewList, crewIdsOf, lastCrewIds } from "./crew-pick";
@@ -3529,8 +3533,13 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const [dispDate2, setDispDate2] = useState<string | null>(todayLocal());   // วันที่จ่ายงาน (ตั้งต้น = วันนี้ · null = จำไม่ได้)
   const [dispRate, setDispRate] = useState("");                       // ช่อง "ใส่ให้ทุกใบ" (ตัวช่วย)
   const [dispRateBy, setDispRateBy] = useState<Record<string, string>>({});   // ค่าแรง/ชิ้น รายใบ (ตั้งต้นจากสูตรของสินค้านั้น)
+  const [dispQtyBy, setDispQtyBy] = useState<Record<string, string>>({});     // จำนวนที่จ่ายรายใบ (ว่าง = ที่เหลือทั้งหมด · 0 = ไม่จ่ายใบนี้)
+  const [dispLines, setDispLines] = useState<DispLine[]>([]);                  // ใบเดียว = แถวจ่าย (เลือกจำนวน / แบ่งหลายคน) ./dispatch-lines
   const [dispBusy, setDispBusy] = useState(false);
   const [dispMsg, setDispMsg] = useState("");
+  // 📷 สแกนหาใบงาน (บาร์โค้ดเส้น / QR บนใบสั่งงาน) — เครื่องยิง USB ยิงได้เลย · ปุ่ม "สแกน" = กล้อง
+  const [scanOpen, setScanOpen] = useState(false);
+  const [scanHit, setScanHit] = useState<{ moNo: string; sku: string | null; name: string | null; where: string; pendId: string | null; remaining: number } | null>(null);
   // 💰 ใส่ค่าแรงให้ใบจ่ายงานหลายใบพร้อมกัน (ตารางล่าง)
   const [woSel, setWoSel] = useState<Set<string>>(new Set());
   const [woLaborOpen, setWoLaborOpen] = useState(false);
@@ -3865,8 +3874,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const dispatchSelected = useCallback(async () => {
     const dept = departments.find((d) => d.id === dispDeptId);
     if (!dept) { toast.error("เลือกโต๊ะ/แผนกก่อน"); return; }
-    const list = pending.filter((m) => sel.has(m.id) && m.remaining > 0);
-    if (!list.length) { toast.error("ใบที่ติ๊กไว้ไม่มีจำนวนคงเหลือให้จ่าย"); return; }
+    // จำนวนต่อใบ: ว่าง = ที่เหลือทั้งหมด · 0 = ไม่จ่ายใบนี้ · เกินที่เหลือ = ห้าม (ที่ไม่ได้จ่าย = ค้างรอจ่าย)
+    const qtyOf = (m: PendingMO) => { const v = dispQtyBy[m.id]; return v == null || v.trim() === "" ? m.remaining : Math.max(0, Number(v) || 0); };
+    const list = pending.filter((m) => sel.has(m.id) && m.remaining > 0 && qtyOf(m) > 0);
+    if (!list.length) { toast.error("ใบที่ติ๊กไว้ไม่มีจำนวนให้จ่าย"); return; }
+    const over = list.find((m) => qtyOf(m) > m.remaining + 0.0001);
+    if (over) { toast.error(`${over.product_sku ?? over.mo_no}: จ่ายได้ไม่เกิน ${fmt(over.remaining)} ชิ้น`); return; }
     const hire = isHireDesk(dept.name);
     const crew = crewList(dispCrew, hire ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id));
     // งานเหมา = ต้องระบุคน (กฎเดียวกับป๊อปจ่ายงานปกติ)
@@ -3889,11 +3902,11 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
             stage: stageOfDept(dept.name), department_id: dept.id, department_name: dept.name,
             ...who,
-            qty: m.remaining, uom: "ชิ้น", dispatch_date: dispDate2 === null ? null : (dispDate2 || todayLocal()),
+            qty: qtyOf(m), uom: "ชิ้น", dispatch_date: dispDate2 === null ? null : (dispDate2 || todayLocal()),
             due_date: dispDue2 || m.internal_due_date || m.due_date || null,
             note: `จากใบสั่งผลิต ${m.mo_no}`,
             // ค่าแรงรายใบ (0 = ไม่ส่ง → เซิร์ฟเวอร์เติมจากใบสั่งผลิต/ราคากลางในสูตรให้เอง)
-            labor_cost: rateFor(m) > 0 ? Math.round(rateFor(m) * m.remaining * 100) / 100 : undefined,
+            labor_cost: rateFor(m) > 0 ? Math.round(rateFor(m) * qtyOf(m) * 100) / 100 : undefined,
           }) });
         const j = await res.json();
         if (!res.ok || j?.error) throw new Error(j?.error || "จ่ายไม่สำเร็จ");
@@ -3904,7 +3917,48 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     if (ok > 0) toast.success(`จ่ายเข้า ${dept.name}${crew.length ? ` · ${who.assignee_name}` : ""} แล้ว ${ok} ใบ`);
     if (fails.length) toast.error(`ไม่สำเร็จ ${fails.length} ใบ — ${fails[0]}`);
     if (ok > 0) { setDispOpen(false); setSel(new Set()); onReload?.(); }
-  }, [pending, sel, departments, craftsmen, dispDeptId, dispCrew, dispDate2, dispDue2, dispRateBy, toast, onReload]);
+  }, [pending, sel, departments, craftsmen, dispDeptId, dispCrew, dispDate2, dispDue2, dispRateBy, dispQtyBy, toast, onReload]);
+
+  // จ่ายงานใบเดียวแบบแถว (เลือกจำนวน / แบ่งหลายคน) — 1 แถว = 1 ใบจ่าย · ทีละแถว (แถวไหนพัง แถวอื่นต่อ · แถวที่พังค้างไว้ให้ลองใหม่)
+  const dispatchLines = useCallback(async () => {
+    const m = pending.find((x) => sel.has(x.id) && x.remaining > 0);
+    if (!m) { toast.error("ใบนี้ไม่มีจำนวนคงเหลือให้จ่าย"); return; }
+    const chk = dispLinesCheck(dispLines, m.remaining, departments);
+    if (chk.errors.length) { toast.error(chk.errors[0]); return; }
+    const rows = dispLines.filter((l) => l.qty > 0);
+    setDispBusy(true);
+    const done: string[] = [], fails: string[] = [], failKeys = new Set<string>();
+    for (let i = 0; i < rows.length; i++) {
+      const l = rows[i];
+      const dept = departments.find((d) => d.id === l.deptId);
+      if (!dept) continue;
+      const who = crewFields(crewList(l.crewIds, isHireDesk(dept.name) ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id)), dept.name);
+      const rate = Number(l.rate) || 0;
+      setDispMsg(`กำลังจ่าย ${i + 1}/${rows.length} · ${dept.name}`);
+      try {
+        const res = await apiFetch("/api/mo/work-orders", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
+            stage: stageOfDept(dept.name), department_id: dept.id, department_name: dept.name,
+            ...who,
+            qty: l.qty, uom: "ชิ้น", dispatch_date: dispDate2 === null ? null : (dispDate2 || todayLocal()),
+            due_date: dispDue2 || m.internal_due_date || m.due_date || null,
+            note: `จากใบสั่งผลิต ${m.mo_no}${rows.length > 1 ? ` (แบ่งจ่าย ${i + 1}/${rows.length})` : ""}`,
+            // ว่าง = ไม่ส่ง → เซิร์ฟเวอร์เติมจากใบสั่งผลิต/ราคากลางในสูตรให้เอง
+            labor_cost: rate > 0 ? Math.round(rate * l.qty * 100) / 100 : undefined,
+          }) });
+        const j = await res.json();
+        if (!res.ok || j?.error) throw new Error(j?.error || "จ่ายไม่สำเร็จ");
+        done.push(`${fmt(l.qty)} → ${String(who.assignee_name || dept.name)}`);
+      } catch (e) { failKeys.add(l.key); fails.push(`${dept.name}: ${e instanceof Error ? e.message : "ไม่สำเร็จ"}`); }
+    }
+    setDispBusy(false); setDispMsg("");
+    if (done.length) toast.success(`จ่ายงาน ${m.product_sku ?? m.mo_no} แล้ว — ${done.join(" · ")}${!fails.length && chk.left > 0 ? ` · ค้างรอจ่าย ${fmt(chk.left)} ชิ้น` : ""}`);
+    if (fails.length) toast.error(`ไม่สำเร็จ ${fails.length} แถว — ${fails[0]}`);
+    if (done.length) { setDispDeptId(rows[0].deptId); onReload?.(); }
+    if (!fails.length) { setDispOpen(false); setSel(new Set()); }
+    else setDispLines((ls) => ls.filter((l) => failKeys.has(l.key)));   // จ่ายแล้วเอาออก เหลือแถวที่พังให้ลองใหม่
+  }, [pending, sel, departments, craftsmen, dispLines, dispDate2, dispDue2, toast, onReload]);
 
   // ใส่ค่าแรง/ชิ้น ให้ใบจ่ายงานที่ติ๊กไว้ — ใบละ (ค่าแรง/ชิ้น × จำนวนของใบนั้น)
   const selWos = wos.filter((w) => woSel.has(w.id));
@@ -4163,9 +4217,46 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   // จ่ายงาน (ป๊อปเดิมของตาราง) — ค่าแรงตั้งต้น = ราคากลางในสูตรของสินค้านั้น (ไม่มีก็ถอดจากค่าแรงที่วางแผนไว้) แก้รายใบได้
   const openDispatchFor = (ids: Set<string>) => {
     const init: Record<string, string> = {};
-    for (const m of pending.filter((x) => ids.has(x.id))) { const r = rateOf(m); if (r > 0) init[m.id] = String(r); }
-    setDispRateBy(init); setDispRate(""); setDispDate2(todayLocal()); setDispOpen(true); setDispMsg("");
+    const list = pending.filter((x) => ids.has(x.id));
+    for (const m of list) { const r = rateOf(m); if (r > 0) init[m.id] = String(r); }
+    setDispRateBy(init); setDispRate(""); setDispDate2(todayLocal()); setDispOpen(true); setDispMsg(""); setDispQtyBy({});
+    // ใบเดียว = แถวจ่าย (เลือกจำนวน / แบ่งหลายคน) · แถวแรก = โต๊ะล่าสุด · จำนวน = ที่เหลือทั้งหมด · ค่าแรงตามสูตร
+    const one = list.length === 1 ? list[0] : null;
+    setDispLines(one ? [{ key: `l${Date.now()}`, deptId: dispDeptId, crewIds: [], qty: one.remaining, rate: init[one.id] ?? "" }] : []);
   };
+
+  // 📷 สแกน/ยิงบาร์โค้ด → หาใบบนบอร์ด: เลขใบสั่งผลิต · เลขใบจ่ายงาน (WO-) · QR ใบเก่า (/s/… · /print/work-order/<id>) · รหัสสินค้า (ใบเดียว)
+  //    เจอ = สลับแท็บ (+ มุมมองที่มีใบนี้) · ค้นด้วยเลขใบ · กางแผงจ่ายงาน · แถบ "เจอแล้ว" + ปุ่มลัด
+  const findScanned = (raw: string) => {
+    const p = parseScanned(raw);
+    const code = (p.code || raw).trim();
+    if (!code) return;
+    const U = code.toUpperCase();
+    const eq = (a: string | null | undefined) => !!a && a.trim().toUpperCase() === U;
+    let moNo: string | null = workOrders.find((w) => eq(w.wo_no))?.mo_no ?? null;
+    if (!moNo && p.byId) moNo = pending.find((m) => m.id === code)?.mo_no ?? workOrders.find((w) => w.mo_id === code)?.mo_no ?? null;
+    if (!moNo) moNo = [...pending.map((m) => m.mo_no), ...workOrders.map((w) => w.mo_no), ...qQueue.map((q) => q.mo_no)].find((n) => eq(n)) ?? null;
+    if (!moNo) {
+      const bySku = new Set([...pending.filter((m) => eq(m.product_sku)).map((m) => m.mo_no), ...wos.filter((w) => eq(w.product_sku)).map((w) => w.mo_no)]);
+      if (bySku.size > 1) { setScanHit(null); setTableSearch(code); toast.info(`รหัส ${code} มี ${bySku.size} ใบบนบอร์ด — กรองให้ดูแล้ว`); return; }
+      moNo = [...bySku][0] ?? null;
+    }
+    if (!moNo) { setScanHit(null); toast.error(`ไม่พบ "${code}" บนบอร์ด — ใบอาจปิดงาน/ยกเลิกแล้ว หรือยังไม่ได้สร้าง`); return; }
+    const pm = pending.find((m) => m.mo_no === moNo && m.remaining > 0) ?? null;
+    const anyW = workOrders.find((w) => w.mo_no === moNo);
+    let where = "";
+    if (pm) {
+      pickTab("pend"); where = "รอจ่าย";
+      if (dc.show.chips && !qvMatch(view, rowQ(pm))) { const v = views.find((x) => qvMatch(x, rowQ(pm))); if (v) pickView(v.id); }
+      showPane(pm.id, "dispatch");
+    } else if (wos.some((w) => w.mo_no === moNo) && tabVisible("wip")) { pickTab("wip"); where = "กำลังผลิต"; }
+    else if (qQueue.some((q) => q.mo_no === moNo) && tabVisible("qc")) { pickTab("qc"); where = "รอ QC รับเข้า"; }
+    else if (catchUp) { pickTab("all"); void loadCuAll(); where = "ทั้งหมด"; }
+    else { toast.info(`${moNo} ไม่อยู่ในแท็บที่เปิดได้ — อาจจบงานแล้ว`); }
+    setTableSearch(moNo);
+    setScanHit({ moNo, sku: pm?.product_sku ?? anyW?.product_sku ?? null, name: pm?.product_name ?? anyW?.product_name ?? null, where, pendId: pm?.id ?? null, remaining: pm?.remaining ?? 0 });
+  };
+  useScanGun(findScanned, { enabled: !scanOpen && !dispOpen });
   // งวดส่ง (API เดียวกับเช็กลิสต์ /api/mo/delivery-plan)
   const addPlan = useCallback(async (moId: string, date: string, qty: number, note: string) => {
     const r = await apiSave(toast, "/api/mo/delivery-plan", { method: "POST", body: { mo_id: moId, due_date: date, qty, note: note || null } },
@@ -4590,7 +4681,13 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const frameBoxProps = { ref: boxRef, className: "space-y-3 overflow-y-auto pr-1", style: { maxHeight: fitH ? `${fitH}px` : "calc(100vh - 210px)" } };
   // ค้นหา + มุมมองหน้านี้ → แถบบนแบบแอป (ของกลาง page-chrome): จอเล็ก = แถบบนเชลล์ + ปุ่มผู้ใช้ · จอคอม = แถบของหน้า
   usePageChrome({
-    search: dc.show.search ? { value: tableSearch, onChange: setTableSearch, placeholder: "ค้นในบอร์ด — สินค้า / เลขใบ / ใบจ่ายงาน / ช่าง" } : null,
+    search: dc.show.search ? { value: tableSearch, onChange: (v: string) => { setTableSearch(v); if (!v) setScanHit(null); }, placeholder: "ค้นในบอร์ด — สินค้า / เลขใบ / ใบจ่ายงาน / ช่าง" } : null,
+    actions: (
+      <button type="button" onClick={() => setScanOpen(true)} title="สแกนบาร์โค้ด/QR บนใบสั่งงาน เพื่อหาใบบนบอร์ด (เครื่องยิง USB ยิงได้เลยไม่ต้องกด)"
+        className={`inline-flex ${touch ? "h-11" : "h-9"} items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50`}>
+        <Icon name="camera" /> สแกน
+      </button>
+    ),
     viewOptions: (
       <div className="space-y-2">
         {dc.show.dev && (
@@ -4683,7 +4780,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           }}
           departments={departments} craftsmen={craftsmen} workOrders={workOrders}
           mode={cuMode} canApprove={cuApprove} onRequestsChanged={() => void loadCuReqs()}
-          onOpenSingle={(mo) => { setCuList([]); setCuMo(mo); }} onOpenEdit={(mo) => setCuEditMo(mo)} refresh={cuBatchRefresh} />
+          onOpenSingle={(mo) => { setCuList([]); setCuMo(mo); }} onOpenEdit={(mo) => setCuEditMo(mo)} refresh={cuBatchRefresh}
+          imageOf={(mo) => cuAllMap.get(mo)?.image_url ?? pending.find((m) => m.mo_no === mo)?.image_url ?? workOrders.find((w) => w.mo_no === mo)?.image_url ?? null} />
         <CatchUpEdit moNo={cuEditMo} departments={departments} craftsmen={craftsmen} canEdit={cuMode === "direct" || cuApprove}
           onClose={() => { if (cuBatch && cuEditMo) { const mo = cuEditMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } setCuEditMo(null); }}
           onDone={() => { onReload?.(); void loadQcQueue(); void loadCuAll(); if (cuEditMo) { const mo = cuEditMo; setCuRecent((rs) => [mo, ...rs.filter((x) => x !== mo)].slice(0, 8)); } }}
@@ -4694,6 +4792,28 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             const list = (cuApprove ? cuReqs.queue.filter((q) => !q.mine) : cuReqs.mine.filter((q) => q.status === "pending" || q.status === "rejected")).map((q) => q.mo_no);
             setCuList([...new Set(list)]); setCuQueueOpen(false); setCuMo(moNo);
           }} />
+      {scanHit && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-[13px]">
+          <Icon name="camera" />
+          <span className="font-semibold text-indigo-900">เจอแล้ว: {scanHit.sku ?? scanHit.moNo}</span>
+          <span className="min-w-0 truncate text-indigo-800/80">{scanHit.moNo}{scanHit.name && scanHit.name !== scanHit.sku ? ` · ${scanHit.name}` : ""}{scanHit.where ? ` · แท็บ${scanHit.where}` : ""}</span>
+          <span className="flex-1" />
+          {canEdit && scanHit.pendId && scanHit.remaining > 0 && (
+            <button type="button" onClick={() => { const ids = new Set([scanHit.pendId!]); setSel(ids); openDispatchFor(ids); }}
+              className="inline-flex h-8 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-[12px] font-medium text-white hover:bg-indigo-700"><Icon name="truck" /> จ่ายงาน ({fmt(scanHit.remaining)})</button>
+          )}
+          {catchUp && <button type="button" onClick={() => { setCuList([]); setCuMo(scanHit.moNo); }} className="inline-flex h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-[12px] text-indigo-800 hover:bg-indigo-100"><Icon name="refresh" /> อัปเดต</button>}
+          {catchUp && (cuMode === "direct" || cuApprove) && <button type="button" onClick={() => setCuEditMo(scanHit.moNo)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-[12px] text-indigo-800 hover:bg-indigo-100"><Icon name="edit" /> แก้ไข</button>}
+          <button type="button" onClick={() => setScanOpen(true)} className="inline-flex h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-white px-3 text-[12px] text-indigo-800 hover:bg-indigo-100">สแกนใบต่อไป</button>
+          <button type="button" title="ล้างคำค้น ดูทุกใบ" onClick={() => { setScanHit(null); setTableSearch(""); }} className="h-8 w-8 rounded-lg text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700"><Icon name="cancel" /></button>
+        </div>
+      )}
+      <ERPModal open={scanOpen} onClose={() => setScanOpen(false)} size="sm" title="สแกนหาใบงาน">
+        <div className="space-y-2">
+          <p className="text-[12px] text-slate-500">สแกนบาร์โค้ดเส้น หรือ QR บนใบสั่งงาน — หรือพิมพ์เลขใบ / เลขใบจ่ายงาน แล้วกด Enter</p>
+          <ScanInput paused={!scanOpen} onScan={(c) => { setScanOpen(false); findScanned(c); }} />
+        </div>
+      </ERPModal>
       {/* เลื่อนตารางลง = ซ่อนแท็บ/ตัวกรองให้ตารางได้ที่เต็ม (เหมือนแอป) · แตะแถบนี้หรือเลื่อนขึ้น = กลับมา
           สลับด้วย CSS: กล่องมี data-top="hidden" → แถบย่อโผล่ · ส่วนแท็บ/ตัวกรองซ่อน (ไม่ render ใหม่) */}
         <button type="button" onClick={() => setTopHidden(false)}
@@ -4905,30 +5025,46 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </div>
         </div>
       )}
-      {/* จ่ายงานหลายใบ — ใช้ของกลางชุดเดียวกับป๊อปจ่ายงานปกติ (ERPModal + SearchableSelect + กฎงานเหมา) */}
+      {/* จ่ายงาน — ใบเดียว ("จ่ายงานใบนี้") = แถวจ่าย เลือกจำนวน/แบ่งหลายคน (./dispatch-lines) · หลายใบ = โต๊ะเดียวกัน + จำนวนต่อใบ
+          ใช้ของกลางชุดเดียวกับป๊อปจ่ายงานปกติ (ERPModal + CrewPick + กฎงานเหมา) */}
       {(() => {
         const dept = departments.find((d) => d.id === dispDeptId) ?? null;
         const isHire = !!dept && /เหมา/.test(dept.name);
         const deptCrafts = !dept ? [] : (isHire ? craftsmen : craftsmen.filter((c) => c.department_id === dept.id));
-        const totalQty = selPend.reduce((n, m) => n + (m.remaining || 0), 0);
+        const single = selPend.length === 1 ? selPend[0] : null;
+        const deskOpts = departments.filter((d) => stageOfDept(d.name) !== "cut" && d.show_on_board !== false);
+        const deskLabel = (d: { id: string; name: string }) => { const n = craftsmen.filter((c) => c.department_id === d.id).length; return `${d.name}${n ? ` · ${n} คน` : " · ยังไม่มีคน"}`; };
+        const lineChk = single ? dispLinesCheck(dispLines, single.remaining, departments) : null;
+        // จัดคนในโต๊ะ = โต๊ะของแถวแรก (ใบเดียว) / โต๊ะที่เลือก (หลายใบ)
+        const staffDept = single ? departments.find((d) => d.id === dispLines[0]?.deptId) ?? null : dept;
+        const qtyOf = (m: PendingMO) => { const v = dispQtyBy[m.id]; return v == null || v.trim() === "" ? m.remaining : Math.max(0, Number(v) || 0); };
+        const totalQty = selPend.reduce((n, m) => n + qtyOf(m), 0);
+        const overMo = selPend.find((m) => qtyOf(m) > m.remaining + 0.0001);
+        const block = single ? (lineChk!.errors[0] ?? "") : !dept ? "เลือกโต๊ะก่อน" : (isHire && dispCrew.length === 0) ? "งานเหมา ต้องเลือกช่างก่อน"
+          : overMo ? `${overMo.product_sku ?? overMo.mo_no} จ่ายได้ไม่เกิน ${fmt(overMo.remaining)} ชิ้น` : totalQty <= 0 ? "ใส่จำนวนอย่างน้อย 1 ใบ" : "";
         return (
           <ERPModal open={dispOpen} onClose={() => { if (!dispBusy) setDispOpen(false); }} size="md"
-            title={`🧰 จ่ายงาน ${selPend.length} ใบ${dept ? ` → ${dept.name}` : ""}`}
+            title={single ? `🧰 จ่ายงาน ${single.product_sku ?? single.mo_no}` : `🧰 จ่ายงาน ${selPend.length} ใบ${dept ? ` → ${dept.name}` : ""}`}
             footer={<>
-              <span className="mr-auto text-[11px] text-slate-400">{dispMsg}</span>
+              <span className={`mr-auto text-[11px] ${!dispMsg && block ? "text-rose-600" : "text-slate-400"}`}>{dispMsg || block}</span>
               <button onClick={() => setDispOpen(false)} disabled={dispBusy} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
-              <button onClick={() => void dispatchSelected()} disabled={dispBusy || !dept || (isHire && dispCrew.length === 0)}
-                title={!dept ? "เลือกโต๊ะก่อน" : (isHire && dispCrew.length === 0) ? "งานเหมา ต้องเลือกช่างก่อน" : ""}
+              <button onClick={() => void (single ? dispatchLines() : dispatchSelected())} disabled={dispBusy || !!block}
+                title={block}
                 className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                {dispBusy ? "กำลังจ่าย..." : `ยืนยันจ่ายงาน ${selPend.length} ใบ`}
+                {dispBusy ? "กำลังจ่าย..." : single ? `ยืนยันจ่ายงาน ${fmt(lineChk!.total)} ชิ้น${lineChk!.n > 1 ? ` (${lineChk!.n} ใบจ่าย)` : ""}` : `ยืนยันจ่ายงาน ${selPend.length} ใบ`}
               </button>
             </>}>
             <div className="space-y-3">
-              <p className="text-[11px] text-slate-400">
-                จ่าย <b>{selPend.length}</b> ใบ · รวม <b>{fmt(totalQty)}</b> ชิ้น — จำนวนของแต่ละใบ = ยอดคงเหลือของใบนั้น
-              </p>
+              {single ? (
+                <DispatchLines lines={dispLines} onChange={setDispLines} remaining={single.remaining} desks={deskOpts} deskLabel={deskLabel}
+                  craftsmen={craftsmen} workOrders={workOrders} defaultRate={dispRateBy[single.id] ?? ""} check={lineChk!} />
+              ) : (
+                <p className="text-[11px] text-slate-400">
+                  จ่าย <b>{selPend.length}</b> ใบ · รวม <b>{fmt(totalQty)}</b> ชิ้น — แก้จำนวนต่อใบได้ในรายการด้านล่าง (จ่ายไม่ครบ = ที่เหลือค้างรอจ่าย)
+                </p>
+              )}
 
-              <label className="block"><span className="text-[11px] text-slate-500">โต๊ะ/แผนกที่จ่าย</span>
+              {!single && <label className="block"><span className="text-[11px] text-slate-500">โต๊ะ/แผนกที่จ่าย</span>
                 <select value={dispDeptId} onChange={(e) => { setDispDeptId(e.target.value); setDispCrew([]); }}
                   className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
                   <option value="">— เลือกโต๊ะ —</option>
@@ -4937,20 +5073,24 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
                     return <option key={d.id} value={d.id}>{d.name}{n ? ` · ${n} คน` : " · ยังไม่มีคน"}</option>;
                   })}
                 </select>
-              </label>
+              </label>}
               {/* 👥 จัดคนในโต๊ะได้ในป๊อปนี้เลย (ย้าย = เฉพาะสิทธิ์ฝ่ายบุคคล) */}
-              {dept && (
+              {staffDept && (
                 <div className="-mt-1.5 flex items-center gap-2 text-[12px]">
-                  <span className="text-slate-500">👥 {craftsmen.filter((c) => c.department_id === dept.id).length} คนในโต๊ะ</span>
+                  <span className="text-slate-500">👥 {craftsmen.filter((c) => c.department_id === staffDept.id).length} คนในโต๊ะ{single ? ` ${staffDept.name}` : ""}</span>
                   <button type="button" onClick={() => setDeskPanel((o) => !o)} className="text-violet-700 hover:underline">{deskPanel ? "ปิดจัดคน ▴" : "จัดคนในโต๊ะ ▾"}</button>
                 </div>
               )}
-              {dept && deskPanel && (
-                <DeskStaffPanel dept={dept} desks={departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canEdit} onChanged={() => onStaffChanged?.()}
-                  wos={workOrders} onDesksChanged={(focus) => { onReload?.(); setDispDeptId(focus ?? ""); }} />
+              {staffDept && deskPanel && (
+                <DeskStaffPanel dept={staffDept} desks={departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canEdit} onChanged={() => onStaffChanged?.()}
+                  wos={workOrders} onDesksChanged={(focus) => {
+                    onReload?.();
+                    if (single) setDispLines((ls) => ls.map((l, i) => (i === 0 ? { ...l, deptId: focus ?? "", crewIds: [] } : l)));
+                    else setDispDeptId(focus ?? "");
+                  }} />
               )}
 
-              {dept && (
+              {!single && dept && (
                 <div>
                   <span className="text-[11px] text-slate-500">{isHire ? "👥 คนรับงาน (งานเหมา — ต้องเลือก *)" : `👥 คนรับงานใน ${dept.name} — กดได้หลายคน`}</span>
                   <div className="mt-1">
@@ -4968,7 +5108,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
                   className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
               </label>
 
-              <label className="block">
+              {!single && <label className="block">
                 <span className="text-[11px] text-slate-500">💰 ใส่ค่าแรง/ชิ้น ให้ทุกใบพร้อมกัน <span className="text-slate-400">— หรือแก้รายใบด้านล่าง</span></span>
                 <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                   <input type="number" min={0} step="any" value={dispRate} onChange={(e) => setDispRate(e.target.value)} placeholder="—"
@@ -4984,15 +5124,15 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
                     setDispRateBy(init); setDispRate("");
                   }} className="h-9 px-3 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">↺ ใช้ค่าจากสูตร</button>
                 </div>
-              </label>
+              </label>}
 
-              {(() => {
-                const sumLabor = selPend.reduce((n, m) => n + (Number(dispRateBy[m.id]) || 0) * (m.remaining || 0), 0);
+              {!single && (() => {
+                const sumLabor = selPend.reduce((n, m) => n + (Number(dispRateBy[m.id]) || 0) * qtyOf(m), 0);
                 const noRate = selPend.filter((m) => !(Number(dispRateBy[m.id]) > 0)).length;
                 return (
                   <div className="rounded-lg border border-slate-200 overflow-hidden">
                     <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 text-[11px] text-slate-500">
-                      <span>ใบที่จะจ่าย ({selPend.length}) · ค่าแรง/ชิ้น ตั้งต้นจากสูตรของสินค้านั้น</span>
+                      <span>ใบที่จะจ่าย ({selPend.length}) · จำนวน (ตั้งต้น = ที่เหลือ) · ค่าแรง/ชิ้น ตั้งต้นจากสูตร</span>
                       <span>รวมค่าแรง <b className="text-slate-700">฿{fmt(sumLabor)}</b></span>
                     </div>
                     <div className="divide-y divide-slate-50 max-h-52 overflow-y-auto">
@@ -5002,13 +5142,17 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
                           <div key={m.id} className="flex items-center gap-2 px-3 py-1 text-[12px]">
                             <span className="min-w-0 flex-1">
                               <span className="block truncate text-slate-700">{m.product_sku} · {m.product_name}</span>
-                              <span className="block font-mono text-[10px] text-slate-400">{m.mo_no} · {fmt(m.remaining)} ชิ้น</span>
+                              <span className="block font-mono text-[10px] text-slate-400">{m.mo_no} · เหลือ {fmt(m.remaining)} ชิ้น</span>
                             </span>
+                            <input type="number" min={0} max={m.remaining} step="any" value={dispQtyBy[m.id] ?? String(m.remaining)}
+                              onChange={(e) => setDispQtyBy((p) => ({ ...p, [m.id]: e.target.value }))}
+                              title={`จำนวนที่จ่ายใบนี้ (ไม่เกิน ${fmt(m.remaining)} · 0 = ไม่จ่ายใบนี้ · ที่เหลือค้างรอจ่าย)`}
+                              className={`w-20 h-8 px-2 text-sm text-right border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 shrink-0 ${qtyOf(m) > m.remaining + 0.0001 ? "border-rose-400 bg-rose-50" : qtyOf(m) < m.remaining ? "border-amber-300 bg-amber-50/50" : "border-slate-200"}`} />
                             <input type="number" min={0} step="any" value={dispRateBy[m.id] ?? ""} placeholder="—"
                               onChange={(e) => setDispRateBy((p) => ({ ...p, [m.id]: e.target.value }))}
                               title="ค่าแรง/ชิ้น ของใบนี้ (เว้นว่าง = ให้ระบบเติมจากสูตรตอนบันทึก)"
                               className="w-20 h-8 px-2 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 shrink-0" />
-                            <span className="w-24 text-right tabular-nums text-slate-600 shrink-0">{r > 0 ? `฿${fmt(r * (m.remaining || 0))}` : "—"}</span>
+                            <span className="w-24 text-right tabular-nums text-slate-600 shrink-0">{r > 0 ? `฿${fmt(r * qtyOf(m))}` : "—"}</span>
                           </div>
                         );
                       })}

@@ -16,6 +16,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
+import { HoverImage } from "@/components/hover-image";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { QC_WAREHOUSES } from "@/lib/qc-ship";
@@ -86,7 +87,7 @@ const emptyRow = (moNo: string): BRow => ({
   open: true, phase: "edit", results: [], runMsg: "", undoRes: null,
 });
 
-export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, workOrders, mode = "direct", canApprove = false, onRequestsChanged, onOpenSingle, onOpenEdit, refresh }: {
+export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, workOrders, mode = "direct", canApprove = false, onRequestsChanged, onOpenSingle, onOpenEdit, refresh, imageOf }: {
   /** ใบที่ติ๊กมา (null = ปิด) */
   moNos: string[] | null;
   onClose: () => void;
@@ -101,6 +102,8 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   onOpenEdit?: (moNo: string) => void;
   /** ป๊อปทีละใบปิดแล้ว → โหลดใบนั้นในตารางใหม่ (n เปลี่ยน = โหลด) */
   refresh?: { mo: string; n: number } | null;
+  /** รูปสินค้าของใบ (จากข้อมูลบอร์ด) — โชว์ข้างรหัสทุกตาราง · ชี้ = รูปใหญ่ */
+  imageOf?: (moNo: string) => string | null;
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<BRow[]>([]);
@@ -460,9 +463,14 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
       </span>
     </th>);
   const skuCell = (r: BRow, span = 1, extra?: ReactNode) => (
-    <td rowSpan={span} className="w-40 py-2 pl-3 pr-2 align-top">
-      <div className="font-semibold text-slate-800">{r.snap!.mo.product_sku ?? r.moNo}</div>
-      <div className="text-[11px] text-slate-400">{r.moNo}</div>
+    <td rowSpan={span} className="w-48 py-2 pl-3 pr-2 align-top">
+      <div className="flex items-start gap-2">
+        {imageOf && <HoverImage url={imageOf(r.moNo)} size={36} previewSize={256} />}
+        <div className="min-w-0">
+          <div className="font-semibold text-slate-800">{r.snap!.mo.product_sku ?? r.moNo}</div>
+          <div className="text-[11px] text-slate-400">{r.moNo}</div>
+        </div>
+      </div>
       {extra}
     </td>);
   const none = <span className="text-[12px] text-slate-300">—</span>;
@@ -905,7 +913,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
             <table className="w-full min-w-[980px] border-collapse text-[13px]">
               <thead className="bg-slate-50 text-left text-[12px] text-slate-500">
                 <tr>
-                  <th className="w-64 py-2 pl-3 pr-2 font-medium">ใบงาน</th>
+                  <th className="w-72 py-2 pl-3 pr-2 font-medium">ใบงาน</th>
                   <th className="w-28 px-2 py-2 text-right font-medium">สั่งผลิต</th>
                   <th className="px-2 py-2 font-medium">ตอนนี้อยู่ไหน</th>
                   <th className="w-56 px-2 py-2 font-medium">ไปถึงขั้น</th>
@@ -924,8 +932,13 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
                   <tbody key={r.moNo} className="border-t border-slate-200">
                     <tr className={r.phase === "done" ? "bg-emerald-50/30" : ""}>
                       <td className="py-2 pl-3 pr-2 align-top">
-                        <div className="font-semibold text-slate-800">{r.snap?.mo.product_sku ?? r.moNo}</div>
-                        <div className="truncate text-[11px] text-slate-400" title={r.snap?.mo.product_name ?? undefined}>{r.moNo}{r.snap?.mo.product_name && r.snap.mo.product_name !== r.snap.mo.product_sku ? ` · ${r.snap.mo.product_name}` : ""}</div>
+                        <div className="flex items-start gap-2.5">
+                          {imageOf && <HoverImage url={imageOf(r.moNo)} size={44} previewSize={280} />}
+                          <div className="min-w-0">
+                            <div className="font-semibold text-slate-800">{r.snap?.mo.product_sku ?? r.moNo}</div>
+                            <div className="truncate text-[11px] text-slate-400" title={r.snap?.mo.product_name ?? undefined}>{r.moNo}{r.snap?.mo.product_name && r.snap.mo.product_name !== r.snap.mo.product_sku ? ` · ${r.snap.mo.product_name}` : ""}</div>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-2 py-2 text-right align-top">
                         {f ? (r.after && Math.abs(r.after.qty - f.qty) > 0.0001
