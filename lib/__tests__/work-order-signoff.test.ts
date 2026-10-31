@@ -180,6 +180,20 @@ describe("หัวใบ + ค่าที่บันทึกไว้", () =
     expect(html).toContain("ลงชื่อรับ-ส่งงาน");
   });
 
+  it("บาร์โค้ดเส้น: เปิดอยู่ค่าเริ่ม · วางแถบล่างคู่กำหนดส่ง · ปิดได้แยกจาก QR", () => {
+    const on = buildWorkOrderTemplate(normalizeWoColumns(null)).header_html;
+    expect(on).toContain("{{{barcode_html}}}");
+    expect(on).toContain('<div class="wo-barcode-text">{{mo_number}}</div>');
+    expect(on).toContain("{{{qr_html}}}");
+    const off = buildWorkOrderTemplate(normalizeWoColumns({ header: { show: { barcode: false } } })).header_html;
+    expect(off).not.toContain("barcode_html");
+    expect(off).toContain("{{{qr_html}}}");
+    expect(off).toContain("กำหนดส่ง");
+    // ปิดทั้งบาร์โค้ดและกำหนดส่ง = ไม่มีแถบล่าง
+    const none = buildWorkOrderTemplate(normalizeWoColumns({ header: { show: { barcode: false, due: false } } })).header_html;
+    expect(none).not.toContain("wo-due");
+  });
+
   it("ปิด 'กล่องลงชื่อ' ในส่วนที่จะพิมพ์ = ไม่มีกล่องเลย", () => {
     const cols = normalizeWoColumns({ sections: { signature: false }, extras: { returns: true } });
     const data = buildWoHtmlData(NOT_DISPATCHED, null, cols);

@@ -11,7 +11,7 @@ import { PrintFrame, PrintDocLinkButton, printReportHtmlInNewWindow } from "@/co
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { buildReportHtmlMulti } from "@/lib/template";
-import { buildWorkOrderTemplate, woSectionDataList, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
+import { buildWorkOrderTemplate, woSectionDataList, buildWoHtmlData, woBarcodeHtml, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
 import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 
@@ -21,7 +21,7 @@ function BulkPrintInner() {
   const ids = useMemo(() => (sp.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean), [sp]);
 
   // เก็บข้อมูลดิบต่อใบ — สร้าง HTML ทีหลังตามตั้งค่าใบพิมพ์ (กล่องลงชื่อต่อใบขึ้นกับตั้งค่า เปลี่ยนแล้วเห็นผลทันที)
-  const [data, setData] = useState<{ mo: MoDetail; spec: ProductSpec | null; qr_html: string }[] | null>(null);
+  const [data, setData] = useState<{ mo: MoDetail; spec: ProductSpec | null; qr_html: string; barcode_html: string }[] | null>(null);
   const [done, setDone] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const { cols: savedCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางเดียวกับหน้าพิมพ์ใบเดียว)
@@ -34,7 +34,7 @@ function BulkPrintInner() {
     (async () => {
       try {
         const specCache = new Map<string, ProductSpec | null>();
-        const out: { mo: MoDetail; spec: ProductSpec | null; qr_html: string }[] = [];
+        const out: { mo: MoDetail; spec: ProductSpec | null; qr_html: string; barcode_html: string }[] = [];
         for (const id of ids) {
           const moRes = await apiFetch(`/api/mo/${id}`).then((r) => r.json()).catch(() => ({ error: "load" }));
           if (moRes.error || !moRes.data) { setDone((d) => d + 1); continue; }
@@ -51,7 +51,8 @@ function BulkPrintInner() {
           }
           // QR ชี้หน้ากลาง /s/<เลขใบ> — ปลายทางเปลี่ยนทีหลังได้โดยไม่ต้องพิมพ์ใบใหม่
           const qr_html = await woQrHtml(scanUrl(mo.mo_no || mo.id));
-          out.push({ mo, spec, qr_html });
+          const barcode_html = await woBarcodeHtml(mo.mo_no);   // บาร์โค้ดเส้นเลขใบเปล่า ๆ (เครื่องยิงอ่าน)
+          out.push({ mo, spec, qr_html, barcode_html });
           if (!cancelled) setDone((d) => d + 1);
         }
         if (!cancelled) setData(out);
@@ -63,7 +64,7 @@ function BulkPrintInner() {
   // โหมด "แยกใบ" → แต่ละใบสั่งงานแตกเป็นหลายแผ่นตามส่วนที่เปิดไว้
   const html = useMemo(() => {
     if (!data || !data.length) return "";
-    const dataList = data.flatMap((d) => woSectionDataList({ ...buildWoHtmlData(d.mo, d.spec, woCols), qr_html: d.qr_html }, woCols));
+    const dataList = data.flatMap((d) => woSectionDataList({ ...buildWoHtmlData(d.mo, d.spec, woCols), qr_html: d.qr_html, barcode_html: d.barcode_html }, woCols));
     return buildReportHtmlMulti(buildWorkOrderTemplate(woCols), dataList, docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`));
   }, [data, woCols, ids.length]);
 

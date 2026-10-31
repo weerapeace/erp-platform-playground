@@ -7,7 +7,7 @@ import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { parseDesignerDescription } from "@/lib/report-designer";
 import { buildReportHtml, buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
-import { buildWorkOrderTemplate, woSectionDataList, woScalars, woTableRows, buildWoHtmlData, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
+import { buildWorkOrderTemplate, woSectionDataList, woScalars, woTableRows, buildWoHtmlData, woBarcodeHtml, woQrHtml, type MoDetail, type ProductSpec, type WoPrintColumns } from "@/lib/work-order-print";
 import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
@@ -48,15 +48,18 @@ export default function PrintWorkOrderPage() {
   const [genMsg, setGenMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [qrHtml, setQrHtml] = useState("");
+  const [barcodeHtml, setBarcodeHtml] = useState("");   // บาร์โค้ดเส้นเลขใบ (เครื่องยิงอ่าน)
   const { cols: savedCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางของระบบ)
   const [previewCols, setPreviewCols] = useState<WoPrintColumns | null>(null);   // ค่าที่กำลังปรับในแผง (ยังไม่บันทึก)
   const woCols = previewCols ?? savedCols;
 
   useEffect(() => {
-    if (!mo) { setQrHtml(""); return; }
+    if (!mo) { setQrHtml(""); setBarcodeHtml(""); return; }
     let on = true;
     // QR ชี้หน้ากลาง /s/<เลขใบ> — ปลายทางเปลี่ยนทีหลังได้โดยไม่ต้องพิมพ์ใบใหม่
     void woQrHtml(scanUrl(mo.mo_no || mo.id)).then((h) => { if (on) setQrHtml(h); });
+    // บาร์โค้ดเส้น = เลขใบเปล่า ๆ (ไม่ใช่ลิงก์) — สั้น เส้นไม่ถี่ เครื่องยิง USB อ่านง่าย
+    void woBarcodeHtml(mo.mo_no).then((h) => { if (on) setBarcodeHtml(h); });
     return () => { on = false; };
   }, [mo]);
 
@@ -152,13 +155,13 @@ export default function PrintWorkOrderPage() {
       ? sizes.map((s) => {
         const mats = (mo.materials ?? []).filter((m) => m.size_label === s.label || m.size_label == null);
         const perMo: MoDetail = { ...mo, qty: s.qty, product_name: `${mo.product_name ?? mo.product_sku ?? ""} · ไซส์ ${s.label}`, materials: mats, summary: undefined };
-        return { ...buildWoHtmlData(perMo, spec, woCols), qr_html: qrHtml };
+        return { ...buildWoHtmlData(perMo, spec, woCols), qr_html: qrHtml, barcode_html: barcodeHtml };
       })
-      : [{ ...buildWoHtmlData(mo, spec, woCols), qr_html: qrHtml }];
+      : [{ ...buildWoHtmlData(mo, spec, woCols), qr_html: qrHtml, barcode_html: barcodeHtml }];
     // โหมด "แยกใบ" → แต่ละส่วนไปคนละแผ่น (ซ้อนกับการแยกไซส์ได้)
     const dataList = baseDatas.flatMap((d) => woSectionDataList(d, woCols));
     return dataList.length > 1 ? buildReportHtmlMulti(tplObj, dataList) : buildReportHtml(tplObj, dataList[0]);
-  }, [mo, spec, selectedRow, pdfmeTemplate, qrHtml, woCols]);
+  }, [mo, spec, selectedRow, pdfmeTemplate, qrHtml, barcodeHtml, woCols]);
 
   // ชื่อไฟล์ตอนบันทึก PDF — "ใบสั่งงาน - MO-2026-00123" (ของกลาง lib/print-filename)
   const fileName = docFileName("ใบสั่งงาน", mo?.mo_no);

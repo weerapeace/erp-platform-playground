@@ -97,6 +97,36 @@ export async function woQrHtml(url: string): Promise<string> {
   return scanQrHtml(url, { className: "wo-qr", alt: "QR ใบสั่งงาน" });
 }
 
+/**
+ * บาร์โค้ดเส้น Code128 ของ "เลขใบเปล่า ๆ" (เช่น MO-2026-00198) → SVG ฝังในเทมเพลต — ให้เครื่องยิง USB อ่าน
+ * ⚠️ ห้ามใส่ลิงก์ — ยาวแล้วเส้นถี่จนเครื่องยิงราคาถูกอ่านไม่ออก (lib/scan-code parseScanned อ่านเลขใบเปล่าเป็น kind "mo" อยู่แล้ว)
+ * ความกว้างเส้นเล็กสุด (module) ตายตัว 0.33 มม. บนกระดาษ — เลขใบ 13 ตัว = 167 module ≈ 55 มม. (+ ขอบว่างซ้ายขวา)
+ * → กว้างเกินกล่องเลขที่+QR (44 มม.) จึงวางที่แถบล่างของกล่องหัวใบ (ซ้ายของกำหนดส่ง)
+ * ต้องเรียกในเบราว์เซอร์ (ใช้ document) · โหลด jsbarcode แบบ dynamic เฉพาะตอนเรียก
+ */
+export const WO_BARCODE_MODULE_MM = 0.33;
+export async function woBarcodeHtml(code: string): Promise<string> {
+  const value = text(code);
+  if (!value || typeof document === "undefined") return "";
+  try {
+    const JsBarcode = (await import("jsbarcode")).default;
+    const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    JsBarcode(el, value, { format: "CODE128", displayValue: false, width: 1, height: 30, margin: 0 });
+    const modules = parseFloat(el.getAttribute("width") ?? "0");
+    if (!(modules > 0)) return "";
+    // กว้างตามจำนวนเส้นจริง (มม.) · สูงตาม CSS — ยืดแนวตั้งอย่างเดียว เส้นไม่เพี้ยน
+    el.removeAttribute("width");
+    el.removeAttribute("height");
+    el.setAttribute("preserveAspectRatio", "none");
+    el.setAttribute("shape-rendering", "crispEdges");
+    el.setAttribute("class", "wo-barcode-svg");
+    el.setAttribute("style", `width:${r2(modules * WO_BARCODE_MODULE_MM)}mm`);
+    return el.outerHTML;
+  } catch {
+    return "";   // สร้างไม่ได้ = เหลือเลขใบเป็นตัวหนังสือ (ใบพิมพ์ไม่พัง)
+  }
+}
+
 export const thaiDate = (iso: string | null | undefined) => {
   if (!iso) return "-";
   return new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
@@ -138,7 +168,7 @@ export type WoSections = { summary: boolean; lines: boolean; detail: boolean; si
 /* ─────────────── หัวใบ (กล่องบนสุด) — เปิด/ปิดทีละช่อง · ขนาดรูป · ลำดับกล่อง ─────────────── */
 export type WoHeaderField =
   | "company" | "title" | "photo" | "name" | "code" | "variant" | "size"
-  | "qty" | "bom" | "mo_no" | "created" | "status" | "qr" | "due" | "qty_from";
+  | "qty" | "bom" | "mo_no" | "created" | "status" | "qr" | "barcode" | "due" | "qty_from";
 export type WoHeaderBlock = "photo" | "product" | "qty" | "meta";
 export type WoHeader = { show: Record<WoHeaderField, boolean>; photo_mm: number; order: WoHeaderBlock[] };
 export const WO_HEADER_FIELDS: { key: WoHeaderField; label: string }[] = [
@@ -146,7 +176,8 @@ export const WO_HEADER_FIELDS: { key: WoHeaderField; label: string }[] = [
   { key: "name", label: "ชื่อสินค้า" }, { key: "code", label: "รหัส" }, { key: "variant", label: "สี/ตัวเลือก" },
   { key: "size", label: "ขนาด" }, { key: "qty", label: "จำนวนผลิต" }, { key: "bom", label: "สูตร" },
   { key: "mo_no", label: "เลขที่" }, { key: "created", label: "วันที่สั่ง" }, { key: "status", label: "สถานะ" },
-  { key: "qr", label: "QR" }, { key: "due", label: "กำหนดส่ง" }, { key: "qty_from", label: "จำนวนเดิม (ถ้าเคยแก้)" },
+  { key: "qr", label: "QR" }, { key: "barcode", label: "บาร์โค้ดเส้น (เลขใบ — เครื่องยิงอ่าน)" },
+  { key: "due", label: "กำหนดส่ง" }, { key: "qty_from", label: "จำนวนเดิม (ถ้าเคยแก้)" },
 ];
 export const WO_HEADER_BLOCKS: { key: WoHeaderBlock; label: string }[] = [
   { key: "photo", label: "รูป" }, { key: "product", label: "ชื่อ/รหัส/สี" }, { key: "qty", label: "จำนวน" }, { key: "meta", label: "เลขที่ + QR" },
@@ -800,8 +831,9 @@ function woHeaderHtml(h: WoHeader): string {
   </div>` : "",
   };
   const cells = h.order.map((k) => block[k]).filter(Boolean);
-  // กำหนดส่ง = แถบเต็มความกว้างมุมล่างของกล่องหัวเอกสาร (ในกล่องขวาแคบไป วันที่ถูกตัดขึ้นบรรทัดใหม่)
-  const due = s.due ? `<div class="wo-due"><span class="label">กำหนดส่ง:</span> <span class="due-big">{{due_date_th}}</span></div>` : "";
+  // แถบล่างเต็มความกว้างของกล่องหัวเอกสาร: บาร์โค้ดเส้น (ซ้าย) + กำหนดส่ง (ขวา)
+  // (กล่องเลขที่+QR แคบไป — บาร์โค้ดเลขใบกว้าง ~55 มม. · วันที่ส่งก็เคยถูกตัดขึ้นบรรทัดใหม่)
+  const due = s.barcode || s.due ? `<div class="wo-due">${s.barcode ? `<div class="wo-barcode">{{{barcode_html}}}<div class="wo-barcode-text">{{mo_number}}</div></div>` : ""}${s.due ? `<div class="wo-due-text"><span class="label">กำหนดส่ง:</span> <span class="due-big">{{due_date_th}}</span></div>` : ""}</div>` : "";
   const top = `${s.company ? `<div class="doc-header">
   <div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div>
 </div>
@@ -926,8 +958,8 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
     </div>
     <div class="wo-qr-box">{{{qr_html}}}</div>
   </div>
-  <!-- กำหนดส่ง = แถบเต็มความกว้างมุมล่างของกล่องหัวเอกสาร (ในกล่องขวาแคบไป วันที่ถูกตัดขึ้นบรรทัดใหม่) -->
-  <div class="wo-due"><span class="label">กำหนดส่ง:</span> <span class="due-big">{{due_date_th}}</span></div>
+  <!-- แถบล่างเต็มความกว้างของกล่องหัวเอกสาร: บาร์โค้ดเลขใบ (ซ้าย) + กำหนดส่ง (ขวา) — ในกล่องขวาแคบไป -->
+  <div class="wo-due"><div class="wo-barcode">{{{barcode_html}}}<div class="wo-barcode-text">{{mo_number}}</div></div><div class="wo-due-text"><span class="label">กำหนดส่ง:</span> <span class="due-big">{{due_date_th}}</span></div></div>
 </section>`,
   body_html: woBodyHtml(WO_DEFAULT_COLUMNS),
   footer_html: `<section class="signatures">
@@ -954,7 +986,12 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
 .product-variant { margin-top: 0.8mm; font-size: 13px; font-weight: 700; color: #0f172a; }
 .product-size { margin-top: 1mm; color: #334155; }
 /* กำหนดส่ง = แถบล่างเต็มความกว้างของกล่องหัว ชิดขวา ไม่ตัดคำ (ช่างดูวันส่งเป็นหลัก) */
-.wo-due { grid-column: 1 / -1; margin-top: 2mm; padding-top: 1.5mm; border-top: 1px solid #e2e8f0; text-align: right; white-space: nowrap; }
+.wo-due { grid-column: 1 / -1; margin-top: 2mm; padding-top: 1.5mm; border-top: 1px solid #e2e8f0; text-align: right; white-space: nowrap; display: flex; align-items: flex-end; justify-content: space-between; gap: 4mm; }
+.wo-due-text { margin-left: auto; }
+/* บาร์โค้ดเลขใบ — ขอบว่างซ้ายขวา ≥ 10 เส้น (quiet zone) ให้เครื่องยิงจับต้น-ท้ายได้ · ความกว้างตั้งใน woBarcodeHtml (มม.) */
+.wo-barcode { padding: 0 3.5mm; background: #fff; text-align: center; line-height: 1; }
+.wo-barcode-svg { display: block; height: 10mm; }
+.wo-barcode-text { margin-top: 0.8mm; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 9px; letter-spacing: 0.5mm; color: #111827; }
 .due-big { font-size: 17px; font-weight: 800; color: #b91c1c; white-space: nowrap; }
 .wo-qty { text-align: center; border-left: 1px solid #e2e8f0; border-right: 1px solid #e2e8f0; padding: 1mm 2mm; }
 .qty-big { font-size: 30px; font-weight: 900; line-height: 1; }
@@ -992,6 +1029,8 @@ export const WORKORDER_PRINT_TEMPLATE: ReportTemplate = {
   .wo-hero { grid-template-columns: 46mm 1.3fr 22mm 44mm; gap: 2mm; padding: 2mm; margin-bottom: 2mm; }
   .wo-photo img { max-height: 44mm; }
   .wo-qr { width: 15mm; height: 15mm; }
+  .wo-barcode-svg { height: 9mm; }
+  .wo-barcode-text { font-size: 7.5px; }
   .product-name { font-size: 11px; }
   .product-code { font-size: 16px; margin-top: 1mm; }
   .product-size { margin-top: 0.5mm; }
