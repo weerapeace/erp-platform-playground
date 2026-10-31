@@ -106,6 +106,8 @@ type PendingMO = {
   qty: number; dispatched: number; remaining: number; due_date: string | null; status: string;
   internal_due_date?: string | null;   // 🪑 กำหนดส่งงานภายใน (ช่าง/โต๊ะต้องเสร็จ) — คนละอันกับ due_date ที่เป็นนัดส่งลูกค้า
   image_url: string | null; brand: string | null; brand_color: string | null; color?: string | null;
+  /** สินค้าแม่ (Parent SKU) — จัดกลุ่ม "ตามสินค้าแม่" */
+  parent_code?: string | null; parent_name?: string | null; parent_image_url?: string | null;
   prep_done: boolean; cut_done: boolean;
   // Phase 2: เช็กลิสต์วัตถุดิบจาก BOM
   has_bom: boolean; prep_total: number; prep_ready: number; cut_total: number; cut_ready: number; ready: boolean;
@@ -3337,6 +3339,7 @@ const stageOf = (m: PendingMO, p: MoProgress | undefined): MoStage => {
 const stageOrder = (name: string) => Object.values(STAGE_META).find(([label]) => label === name)?.[1] ?? 99;
 /** ราคาขายต่ำกว่านี้ (฿0 / ฿1) = น่าจะยังไม่ได้ตั้งจริง → ขึ้นเตือน + ไม่นับรวมในยอดมูลค่า */
 const PRICE_MIN = 10;
+const NO_PARENT = "— ไม่มีสินค้าแม่ —";   // หัวกลุ่มของใบที่สินค้าไม่ผูกสินค้าแม่ (ไว้ท้ายสุดตอนจัดกลุ่มตามสินค้าแม่)
 const NO_BRAND = "— ไม่ระบุแบรนด์ —";   // หัวกลุ่มของใบที่สินค้าไม่ผูกแบรนด์ (ไว้ท้ายสุดตอนจัดกลุ่มตามแบรนด์)
 /** แท็บที่เปิดอยู่ → ไฮไลต์ช่องไหนในแถว (ให้รู้ว่ากดช่องไหนมา) */
 const PANE_COL: Record<string, string> = { job: "prod", bom: "buy", prep: "prep", stage: "stage", dispatch: "qty", due: "due", group: "group", hist: "created" };
@@ -4056,11 +4059,12 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const [groupFor, setGroupFor] = useState<string[] | null>(null);   // จับเข้ากลุ่มจากแผงรายละเอียด (ทีละใบ)
   const GroupCell = ({ moNo }: { moNo: string }) => { const g = groupNameOf(moNo); return g ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-50 text-violet-700">{g}</span> : <span className="text-slate-300">—</span>; };
   // โหมดจัดกลุ่ม (เลือกได้): ไม่จัด / ตามกลุ่ม / ตามความพร้อม(รอจ่าย) หรือ ตามสถานะ(จ่ายแล้ว)
-  const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready" | "stage" | "brand">("none");
-  const lastGroupRef = useRef<"group" | "ready" | "stage" | "brand">("stage");   // กดปุ่มจัดกลุ่มในตารางเปิดกลับ = ใช้แบบล่าสุด
+  const [pendGroup, setPendGroup] = useState<"none" | "group" | "ready" | "stage" | "brand" | "parent">("none");
+  const lastGroupRef = useRef<"group" | "ready" | "stage" | "brand" | "parent">("stage");   // กดปุ่มจัดกลุ่มในตารางเปิดกลับ = ใช้แบบล่าสุด
   // ชุดหน้าตาซ่อนปุ่มจัดกลุ่ม/เรียง → เลิกจัดกลุ่ม (ไม่งั้นค้างจัดกลุ่มอยู่โดยไม่มีปุ่มให้ยกเลิก)
   useEffect(() => { if (!dc.show.tools) { setPendGroup("none"); setWoGroup("none"); } }, [dc.show.tools]);
-  const [woGroup, setWoGroup] = useState<"none" | "group" | "status" | "crew" | "desk">("none");
+  const [woGroup, setWoGroup] = useState<"none" | "group" | "status" | "crew" | "desk" | "parent">("none");
+  const [qcGroup, setQcGroup] = useState<"none" | "parent">("none");   // แท็บรอ QC: จัดกลุ่มตามสินค้าแม่
   // จัดกลุ่มตามช่าง: ใบที่ทำร่วมหลายคน ขึ้นในกลุ่มของทุกคน (แถวซ้ำ key = id::ชื่อ) · จ่ายให้ทั้งโต๊ะ = "<โต๊ะ> (ทั้งโต๊ะ)"
   const crewOf = (w: WorkOrder): string[] => {
     const names = (w.assignees ?? []).map((a) => a.name).filter(Boolean);
@@ -4357,7 +4361,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       ? ["ยังไม่ตั้งราคา", priceByMo ? `${fmt(pending.filter((m) => !priceOk(m)).length)} ใบ` : "…", `ราคา ฿0 / ต่ำกว่า ฿${PRICE_MIN} / ว่าง`]
       : ["รอซื้อของ", prog ? `${fmt(pending.filter((m) => stageOf(m, prog[m.mo_no]) === "buy").length)} ใบ` : "…", "ยังมีของต้องซื้อหรือรออนุมัติ"],
   ];
-  const pickGroup = (g: "none" | "group" | "ready" | "stage" | "brand") => { setPendGroup(g); if (g !== "none") lastGroupRef.current = g; };
+  const pickGroup = (g: "none" | "group" | "ready" | "stage" | "brand" | "parent") => { setPendGroup(g); if (g !== "none") lastGroupRef.current = g; };
   // เปลี่ยนมุมมอง (หรือแก้จัดกลุ่มของมุมมอง) → จัดกลุ่มตามที่มุมมองตั้งไว้ · ปรับเองชั่วคราวได้ที่ปุ่มจัดกลุ่ม
   const viewGroupKey = `${view.id}:${view.group}`;
   useEffect(() => { pickGroup(view.group); }, [viewGroupKey]);   // eslint-disable-line react-hooks/exhaustive-deps
@@ -4477,6 +4481,33 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
     for (const k of woSelKeys) if (!next.has(k)) ids.delete(k.split("::")[0]);
     for (const k of next) if (!woSelKeys.has(k)) ids.add(k.split("::")[0]);
     setWoSel(ids);
+  };
+  // 👪 จัดกลุ่มตามสินค้าแม่ (Parent SKU) — สีต่าง ๆ ของรุ่นเดียวกันอยู่ด้วยกัน (ข้อมูลแม่มาจาก /api/mo/work-board รายใบ)
+  //    แท็บรอ QC ไม่มีข้อมูลแม่ในแถว → หาจากรหัสสินค้าของใบอื่นบนบอร์ด
+  const parentBySku = useMemo(() => {
+    const m = new Map<string, { code: string; name: string | null; img: string | null }>();
+    const src: { product_sku: string | null; parent_code?: string | null; parent_name?: string | null; parent_image_url?: string | null; image_url?: string | null }[] = [...pending, ...workOrders];
+    for (const r of src) {
+      const k = (r.product_sku ?? "").trim();
+      if (k && r.parent_code && !m.has(k)) m.set(k, { code: r.parent_code, name: r.parent_name ?? null, img: r.parent_image_url ?? null });
+    }
+    return m;
+  }, [pending, workOrders]);
+  const parentOf = (sku: string | null | undefined) => parentBySku.get((sku ?? "").trim()) ?? null;
+  const parentKey = (sku: string | null | undefined) => parentOf(sku)?.code ?? NO_PARENT;
+  const parentOrder = (g: string) => (g === NO_PARENT ? 1 : 0);
+  const parentHead = (name: string, skus: (string | null | undefined)[], imgs: (string | null | undefined)[]) => {
+    if (name === NO_PARENT) return <span className="text-xs font-semibold text-slate-500">{NO_PARENT}</span>;
+    const p = skus.map(parentOf).find(Boolean) ?? null;
+    const kinds = new Set(skus.filter(Boolean)).size;
+    return (
+      <span className="flex min-w-0 items-center gap-2">
+        <HoverImage url={p?.img ?? imgs.find(Boolean) ?? null} size={touch ? 36 : 28} previewSize={240} />
+        <span className="shrink-0 text-xs font-semibold text-slate-700">{name}</span>
+        {p?.name && <span className="min-w-0 truncate text-[11px] text-slate-500" title={p.name}>{p.name}</span>}
+        <span className="shrink-0 rounded-full bg-white px-1.5 text-[10px] text-slate-500">{kinds} แบบ</span>
+      </span>
+    );
   };
   const woGroupSum = (rows: WorkOrder[]) => {
     const shared = woGroup === "crew" ? rows.filter((r) => crewOf(r).length > 1).length : 0;
@@ -4977,8 +5008,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           </button>
           {dev === "pc" && dc.img === "s" && <button type="button" onClick={toggleImg} title="สลับขนาดรูปในตาราง (จำไว้ให้ครั้งหน้า)"
             className="h-8 px-3 text-sm rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-slate-50">🖼 รูป{imgBig ? "เล็ก" : "ใหญ่"}</button>}
-          <select value={pendGroup} onChange={(e) => pickGroup(e.target.value as "none" | "group" | "ready" | "stage" | "brand")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+          <select value={pendGroup} onChange={(e) => pickGroup(e.target.value as "none" | "group" | "ready" | "stage" | "brand" | "parent")} className={grpSelectCls} title="จัดกลุ่มตาราง">
             <option value="none">ไม่จัดกลุ่ม</option>
+            <option value="parent">จัดกลุ่มตามสินค้าแม่ (Parent SKU)</option>
             <option value="stage">จัดกลุ่มตามขั้นตอน</option>
             <option value="brand">จัดกลุ่มตามแบรนด์</option>
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
@@ -4988,12 +5020,15 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         </div>}
         searchText={pendText} hideSearch
         searchValue={searchQ} onSearchChange={setTableSearch}
-        groupBy={pendGroup === "group" ? (m) => groupNameOf(m.mo_no) ?? "— ยังไม่จับกลุ่ม —"
+        groupBy={pendGroup === "parent" ? (m) => m.parent_code || parentKey(m.product_sku)
+          : pendGroup === "group" ? (m) => groupNameOf(m.mo_no) ?? "— ยังไม่จับกลุ่ม —"
           : pendGroup === "ready" ? (m) => (m.ready ? "✅ พร้อมจ่าย" : "⏳ ยังไม่พร้อม")
           : pendGroup === "stage" ? (m) => STAGE_META[stageOf(m, prog?.[m.mo_no])][0]
           : pendGroup === "brand" ? (m) => (m.brand ? `${m.brand}${m.brand_oem ? " · OEM" : ""}` : NO_BRAND) : undefined}
-        groupOrder={pendGroup === "stage" ? stageOrder : pendGroup === "brand" ? (g) => (g === NO_BRAND ? 1 : 0) : undefined}
-        groupLabel={pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : pendGroup === "brand" ? "จัดกลุ่มตามแบรนด์" : "จัดกลุ่มตามความพร้อม"}
+        groupOrder={pendGroup === "stage" ? stageOrder : pendGroup === "brand" ? (g) => (g === NO_BRAND ? 1 : 0) : pendGroup === "parent" ? parentOrder : undefined}
+        groupHead={pendGroup === "parent" ? (n, rs) => parentHead(n, rs.map((m) => m.product_sku), rs.map((m) => m.image_url)) : undefined}
+        groupCollapsible={pendGroup !== "none"}
+        groupLabel={pendGroup === "parent" ? "จัดกลุ่มตามสินค้าแม่" : pendGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : pendGroup === "stage" ? "จัดกลุ่มตามขั้นตอน" : pendGroup === "brand" ? "จัดกลุ่มตามแบรนด์" : "จัดกลุ่มตามความพร้อม"}
         grouped={pendGroup !== "none"} onGroupedChange={(v) => pickGroup(v ? (pendGroup === "none" ? lastGroupRef.current : pendGroup) : "none")}
         groupExtra={groupSum}
         footnote={dc.show.foot ? `${dc.expand ? (dev === "ipadP" ? `${touch ? "แตะ" : "กด"}การ์ด = กางรายละเอียด (สลับแท็บได้)` : `${touch ? "แตะ" : "กด"}ช่องไหน = กางรายละเอียดเรื่องนั้น (ซื้อของ → BOM · สินค้า → รายละเอียดงาน · กำหนดส่ง → แก้วัน/งวดส่ง · เตรียม/ตัด → ติ๊กได้ · เหลือ → จ่ายงาน)`) : `${touch ? "แตะ" : "กด"}แถว = เปิดเช็กลิสต์`} · 📋 = เปิดเช็กลิสต์เต็ม${dc.stage === "dots" ? ` · จุดขั้นตอน: เขียว = เสร็จ · วงส้ม = ขั้นที่ค้างอยู่ · วงฟ้า = ทำไปบางส่วน${touch ? "" : " (ชี้ที่จุดเพื่อดูตัวเลข)"}` : ""}${canSeeMoney ? ` · ราคาต่ำกว่า ฿${PRICE_MIN} หรือยังไม่ตั้ง = ไม่นับรวมยอด` : ""}` : undefined}
@@ -5184,8 +5219,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         actions={<div className="flex items-center gap-2 flex-wrap">
           {layoutToggle("wip")}
           {dc.show.colBtn && layoutOf("wip") === "table" && <ColumnChooser state={woColPrefs} note="จำแยกกันระหว่างจอคอมกับ iPad" />}
-          {dc.show.tools && <select value={woGroup} onChange={(e) => setWoGroup(e.target.value as "none" | "group" | "status" | "crew" | "desk")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+          {dc.show.tools && <select value={woGroup} onChange={(e) => setWoGroup(e.target.value as "none" | "group" | "status" | "crew" | "desk" | "parent")} className={grpSelectCls} title="จัดกลุ่มตาราง">
             <option value="none">ไม่จัดกลุ่ม</option>
+            <option value="parent">จัดกลุ่มตามสินค้าแม่ (Parent SKU)</option>
             <option value="crew">จัดกลุ่มตามช่าง</option>
             <option value="desk">จัดกลุ่มตามโต๊ะ</option>
             <option value="group">จัดกลุ่มตามกลุ่ม</option>
@@ -5194,10 +5230,13 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         </div>}
         searchText={woText} hideSearch
         searchValue={searchQ} onSearchChange={setTableSearch}
-        groupBy={woGroup === "group" ? (w) => groupNameOf(w.mo_no) ?? "— ยังไม่จับกลุ่ม —" : woGroup === "status" ? (w) => (WO_STATUS[w.status]?.label ?? w.status)
+        groupBy={woGroup === "parent" ? (w) => w.parent_code || parentKey(w.product_sku) : woGroup === "group" ? (w) => groupNameOf(w.mo_no) ?? "— ยังไม่จับกลุ่ม —" : woGroup === "status" ? (w) => (WO_STATUS[w.status]?.label ?? w.status)
           : woGroup === "crew" ? (w) => (w as WoRow)._crew ?? "—" : woGroup === "desk" ? (w) => w.department_name || "— ไม่ระบุโต๊ะ —" : undefined}
-        groupLabel={woGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : woGroup === "status" ? "จัดกลุ่มตามสถานะ" : woGroup === "crew" ? "จัดกลุ่มตามช่าง" : "จัดกลุ่มตามโต๊ะ"} defaultGrouped={woGroup !== "none"}
-        groupExtra={woGroup === "crew" || woGroup === "desk" ? woGroupSum : undefined}
+        groupLabel={woGroup === "parent" ? "จัดกลุ่มตามสินค้าแม่" : woGroup === "group" ? "จัดกลุ่มตามกลุ่ม" : woGroup === "status" ? "จัดกลุ่มตามสถานะ" : woGroup === "crew" ? "จัดกลุ่มตามช่าง" : "จัดกลุ่มตามโต๊ะ"} defaultGrouped={woGroup !== "none"}
+        groupOrder={woGroup === "parent" ? parentOrder : undefined}
+        groupHead={woGroup === "parent" ? (n, rs) => parentHead(n, rs.map((w) => w.product_sku), rs.map((w) => w.image_url)) : undefined}
+        groupCollapsible={woGroup !== "none"}
+        groupExtra={woGroup === "crew" || woGroup === "desk" || woGroup === "parent" ? woGroupSum : undefined}
         footnote={woGroup === "crew" ? "งานที่ทำร่วมหลายคน ขึ้นในกลุ่มของทุกคน (จำนวนแถวจึงอาจมากกว่าจำนวนใบ)" : undefined}
         emptyText="ยังไม่มีงานที่จ่าย"
         noMatchText={(q) => `ไม่พบ “${q}” ในแท็บกำลังผลิต`}
@@ -5207,6 +5246,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       {tab === "qc" && qcSectionOn && !allSearch && (<div className="flex min-h-0 flex-1 flex-col gap-3" style={zoomStyle}>
         <div className="contents [[data-top=hidden]_&]:hidden">{SumRow({ cards: qcCards, keys: qcCardKeys })}</div>
         {layoutOf("qc") === "cal" ? calBox("qc") : <MiniTable
+          key={`qc-${qcGroup}`}
           rows={qQueue} rowKey={(q) => q.wo_id}
           layout={layoutOf("qc") === "cards" ? "cards" : "table"} renderCard={renderQcCard}
           cardGrid={layoutOf("qc") === "cards" ? "repeat(auto-fill,minmax(200px,1fr))" : undefined}
@@ -5218,11 +5258,18 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
           actions={<div className="flex items-center gap-2 flex-wrap">
             {layoutToggle("qc")}
             {dc.show.colBtn && layoutOf("qc") === "table" && <ColumnChooser state={qcColPrefs} note="จำแยกกันระหว่างจอคอมกับ iPad" />}
+            {dc.show.tools && <select value={qcGroup} onChange={(e) => setQcGroup(e.target.value === "parent" ? "parent" : "none")} className={grpSelectCls} title="จัดกลุ่มตาราง">
+              <option value="none">ไม่จัดกลุ่ม</option>
+              <option value="parent">จัดกลุ่มตามสินค้าแม่ (Parent SKU)</option>
+            </select>}
 
             <a href="/master/qc-warehouse" className="h-8 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">เปิดโกดัง QC ↗</a>
           </div>}
           searchText={qcText} hideSearch
           searchValue={searchQ} onSearchChange={setTableSearch}
+          groupBy={qcGroup === "parent" ? (q) => parentKey(q.sku) : undefined} groupOrder={parentOrder} groupLabel="จัดกลุ่มตามสินค้าแม่" defaultGrouped={qcGroup !== "none"}
+          groupHead={(n, rs) => parentHead(n, rs.map((q) => q.sku), [])} groupCollapsible
+          groupExtra={(rs) => `${fmt(rs.length)} ใบ · รอรับ ${fmt(rs.reduce((n, q) => n + (q.remaining || 0), 0))} ชิ้น`}
           emptyText="ไม่มีงานรอรับเข้า QC"
           noMatchText={(q) => `ไม่พบ “${q}” ในแท็บรอ QC`}
         />}

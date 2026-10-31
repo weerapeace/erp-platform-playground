@@ -78,6 +78,10 @@ export type MiniTableProps<T> = {
   onGroupedChange?: (v: boolean) => void;
   /** ข้อความท้ายหัวกลุ่ม เช่น ยอดรวมของกลุ่ม */
   groupExtra?: (rows: T[]) => ReactNode;
+  /** หัวกลุ่มแบบกำหนดเอง (เช่น รูป + รหัสสินค้าแม่ + ชื่อรุ่น) — ไม่ส่ง = ชื่อกลุ่มตัวหนังสือ */
+  groupHead?: (groupName: string, rows: T[]) => ReactNode;
+  /** กดหัวกลุ่ม = กาง/ย่อกลุ่มนั้น + แถบ "ย่อทุกกลุ่ม / กางทุกกลุ่ม" เหนือรายการ (ย่อทุกกลุ่ม = เห็นแค่หัวกลุ่ม = ภาพรวม) */
+  groupCollapsible?: boolean;
 
   // เลือกหลายแถว (controlled)
   selectable?: boolean;
@@ -157,7 +161,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const {
     rows, columns, rowKey, searchText, searchPlaceholder: searchPlaceholderProp, searchValue, onSearchChange, hideSearch,
     sortKey: sortKeyProp, sortDir: sortDirProp, onSortChange,
-    groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra,
+    groupBy, groupLabel: groupLabelProp, defaultGrouped = true, groupOrder, grouped: groupedProp, onGroupedChange, groupExtra, groupHead, groupCollapsible,
     selectable, selected, onSelectedChange, onRowClick, expandedKeys, renderExpanded, onCellClick, activeCell,
     title, actions, countUnit: countUnitProp,
     emptyText: emptyTextProp, noMatchText,
@@ -172,6 +176,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
   const emptyText = emptyTextProp ?? t("ไม่มีข้อมูล", "No data");
 
   const sortable = columns.filter((c) => c.sortValue);
+  const [closedG, setClosedG] = useState<Set<string>>(() => new Set());   // กลุ่มที่ย่ออยู่ (groupCollapsible)
   const [qInner, setQInner] = useState("");
   // คุมจากภายนอกถ้าส่ง searchValue มา (ไม่ส่ง = ตารางเก็บคำค้นเอง เหมือนเดิม)
   const q = searchValue ?? qInner;
@@ -490,15 +495,30 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
       </div>
     );
   };
+  const gClosed = (name: string) => !!groupCollapsible && closedG.has(name);
+  const toggleG = (name: string) => setClosedG((s) => { const n = new Set(s); if (n.has(name)) n.delete(name); else n.add(name); return n; });
   const GroupHead = ({ g, gSel, gKeys }: { g: { name: string; rows: T[] }; gSel: boolean; gKeys: string[] }) => (
-    <div className={`flex items-center gap-2 px-3 ${touch ? "py-2" : "py-1.5"} bg-slate-50 border-y border-slate-100 ${cards ? "rounded-lg border-x" : ""}`}
+    <div onClick={groupCollapsible ? () => toggleG(g.name) : undefined} title={groupCollapsible ? (gClosed(g.name) ? t("กดเพื่อกาง", "Click to expand") : t("กดเพื่อย่อ", "Click to collapse")) : undefined}
+      className={`flex items-center gap-2 px-3 ${touch ? "py-2" : "py-1.5"} bg-slate-50 border-y border-slate-100 ${cards ? "rounded-lg border-x" : ""} ${groupCollapsible ? "cursor-pointer hover:bg-slate-100" : ""}`}
       style={!cards && measureOn && viewW ? { position: "sticky", left: 0, width: viewW } : undefined}>
-      {selectable && <input type="checkbox" checked={gSel} onChange={() => setKeys(gKeys, !gSel)} className={touch ? boxCls : "w-3.5 h-3.5 accent-rose-600"} />}
-      <span className="text-xs font-semibold text-slate-600">{g.name}</span>
-      <span className="text-[10px] text-slate-400">({g.rows.length})</span>
-      {groupExtra && <span className="ml-auto text-[11px] text-slate-500">{groupExtra(g.rows)}</span>}
+      {selectable && <input type="checkbox" checked={gSel} onChange={() => setKeys(gKeys, !gSel)} onClick={(e) => e.stopPropagation()} className={touch ? boxCls : "w-3.5 h-3.5 accent-rose-600"} />}
+      {groupCollapsible && <span className="w-3 shrink-0 text-[10px] text-slate-400">{gClosed(g.name) ? "▸" : "▾"}</span>}
+      {groupHead ? groupHead(g.name, g.rows) : <span className="text-xs font-semibold text-slate-600">{g.name}</span>}
+      <span className="shrink-0 text-[10px] text-slate-400">({g.rows.length})</span>
+      {groupExtra && <span className="ml-auto shrink-0 text-[11px] text-slate-500">{groupExtra(g.rows)}</span>}
     </div>
   );
+  // แถบ "ย่อทุกกลุ่ม / กางทุกกลุ่ม" (มีมากกว่า 1 กลุ่ม)
+  const manyG = !!groupBy && grouped && groups.length > 1;
+  const allClosed = manyG && groups.every((g) => closedG.has(g.name));
+  const CollapseBar = groupCollapsible && manyG ? (
+    <div className="flex items-center gap-2 px-3 py-1 text-[11px] text-slate-500" style={!cards && measureOn && viewW ? { position: "sticky", left: 0, width: viewW } : undefined}>
+      <span>{t(`${groups.length} กลุ่ม`, `${groups.length} groups`)}</span>
+      <button type="button" onClick={() => setClosedG(allClosed ? new Set() : new Set(groups.map((g) => g.name)))} className="rounded px-1.5 py-0.5 text-indigo-600 hover:bg-indigo-50">
+        {allClosed ? t("▾ กางทุกกลุ่ม", "▾ Expand all") : t("▸ ย่อทุกกลุ่ม (ดูภาพรวม)", "▸ Collapse all")}
+      </button>
+    </div>
+  ) : null;
 
   const total = rows.length, shown = sorted.length;
   const toolbarOn = !hideToolbar && !!((searchText && !hideSearch) || sortable.length > 0 || extraSorts?.length || groupBy) && total > 0;
@@ -558,13 +578,14 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
               <input type="checkbox" checked={allSel} onChange={() => setSel(allSel ? new Set() : new Set(allKeys))} className={boxCls} /> {t("เลือกทั้งหมด", "Select all")}
             </label>
           )}
+          {CollapseBar}
           {groups.map((g) => {
             const gKeys = g.rows.map(rowKey);
             const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
             return (
               <div key={g.name || "_all"} className="space-y-2">
                 {groupBy && grouped && GroupHead({ g, gSel, gKeys })}
-                {cardGrid
+                {gClosed(g.name) ? null : cardGrid
                   ? <div className="grid gap-2" style={{ gridTemplateColumns: cardGrid }}>{g.rows.map((r) => Card(r))}</div>
                   : g.rows.map((r) => Card(r))}
               </div>
@@ -577,6 +598,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         <div ref={scrollerRef} onScroll={onScroll} className={`border border-slate-200 rounded-xl ${fill ? "flex-1 min-h-0 overflow-auto overscroll-contain" : "overflow-x-auto"}`}>
           {HeaderCell}
           {ColMenu}
+          {CollapseBar}
           {groups.map((g, gi) => {
             const gKeys = g.rows.map(rowKey);
             const gSel = !!selectable && gKeys.length > 0 && gKeys.every((k) => sel.has(k));
@@ -584,7 +606,7 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
             return (
               <div key={g.name || "_all"} style={rowW}>
                 {groupBy && grouped && GroupHead({ g, gSel, gKeys })}
-                <div className="divide-y divide-slate-50">{g.rows.map((r, i) => Row(r, offset + i))}</div>
+                {!gClosed(g.name) && <div className="divide-y divide-slate-50">{g.rows.map((r, i) => Row(r, offset + i))}</div>}
               </div>
             );
           })}

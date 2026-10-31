@@ -28,6 +28,8 @@ export type WorkOrder = {
   labor_cost?: number | null;
   // เสริมจาก board API
   image_url?: string | null; brand?: string | null; brand_color?: string | null; mo_id?: string | null;
+  /** สินค้าแม่ (Parent SKU) — บอร์ดจัดกลุ่มตามสินค้าแม่ */
+  parent_code?: string | null; parent_name?: string | null; parent_image_url?: string | null;
   labor?: { prod_plan: number; prod_actual: number; piece_plan: number; piece_actual: number };
   central_rate?: number;   // ค่าแรงผลิต/ชิ้น ราคากลางจาก BOM (เติมในตอน board)
 };
