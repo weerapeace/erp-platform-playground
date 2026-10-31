@@ -4,6 +4,7 @@
  * Page Chrome — ของกลาง: ให้หน้าเอา "ชื่อหน้า / ช่องค้นหา / ปุ่ม / ตัวเลือกมุมมอง" ไปวางบนแถบบนของเชลล์ (แบบแอป)
  * --------------------------------------------------------------------------
  *   usePageChrome({ title, search, actions, viewOptions })   ← หน้าลงทะเบียน (หลายคอมโพเนนต์ลงคนละช่องได้ — รวมกันให้)
+ *     ปุ่ม (actions) หลายชุด = วางต่อกัน ไม่ทับกัน (เดิมชุดหลังทับชุดแรก → ปุ่มสแกนของตารางบอร์ดทำปุ่ม อัปเดต/คำขอ/สร้างใบ/··· หาย)
  *
  * ใครวาด:
  *   - เชลล์หลัก จอ < xl (iPad/มือถือ): แถบบน = ☰ · <PageChromeBar/> · ปุ่มผู้ใช้ (ในเมนูผู้ใช้มี "มุมมองหน้านี้" = viewOptions)
@@ -11,7 +12,7 @@
  *       → useChromeHost() บอกว่ามีเชลล์รับวาดอยู่ไหม (มี = ซ่อนแถบของหน้าที่จอเล็กด้วย "hidden xl:flex")
  * ช่องค้นหามีปุ่มสลับ "ในหน้านี้ / ทั้งระบบ" (ทั้งระบบ = เปิดค้นหากลางของเชลล์)
  */
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 
 export type PageChromeSearch = { value: string; onChange: (v: string) => void; placeholder?: string };
@@ -25,7 +26,13 @@ let nextId = 1;
 const subs = new Set<() => void>();
 const emit = () => {
   const m: PageChromeSlots = {};
-  for (const s of regs.values()) for (const [k, v] of Object.entries(s)) if (v !== undefined) (m as Record<string, unknown>)[k] = v;
+  const acts: { id: number; node: ReactNode }[] = [];
+  for (const [id, s] of regs) {
+    for (const [k, v] of Object.entries(s)) if (v !== undefined && k !== "actions") (m as Record<string, unknown>)[k] = v;
+    if (s.actions) acts.push({ id, node: s.actions });
+  }
+  // ปุ่มหลายชุด = วางต่อกัน · ชุดของคอมโพเนนต์ด้านใน (ลงทะเบียนทีหลัง) มาก่อน = ติดช่องค้นหา (เช่น "สแกน" ของตารางบอร์ด)
+  if (acts.length) m.actions = acts.length === 1 ? acts[0].node : <>{acts.sort((a, b) => b.id - a.id).map((a) => <Fragment key={a.id}>{a.node}</Fragment>)}</>;
   merged = m;
   subs.forEach((f) => f());
 };
