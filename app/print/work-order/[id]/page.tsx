@@ -152,9 +152,9 @@ export default function PrintWorkOrderPage() {
       ? sizes.map((s) => {
         const mats = (mo.materials ?? []).filter((m) => m.size_label === s.label || m.size_label == null);
         const perMo: MoDetail = { ...mo, qty: s.qty, product_name: `${mo.product_name ?? mo.product_sku ?? ""} · ไซส์ ${s.label}`, materials: mats, summary: undefined };
-        return { ...buildWoHtmlData(perMo, spec), qr_html: qrHtml };
+        return { ...buildWoHtmlData(perMo, spec, woCols), qr_html: qrHtml };
       })
-      : [{ ...buildWoHtmlData(mo, spec), qr_html: qrHtml }];
+      : [{ ...buildWoHtmlData(mo, spec, woCols), qr_html: qrHtml }];
     // โหมด "แยกใบ" → แต่ละส่วนไปคนละแผ่น (ซ้อนกับการแยกไซส์ได้)
     const dataList = baseDatas.flatMap((d) => woSectionDataList(d, woCols));
     return dataList.length > 1 ? buildReportHtmlMulti(tplObj, dataList) : buildReportHtml(tplObj, dataList[0]);

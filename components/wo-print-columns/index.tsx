@@ -13,7 +13,12 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
 import { usePermission } from "@/components/auth";
-import { WO_BORDER_COLORS, WO_BORDER_MODES, WO_DEFAULT_COLUMNS, WO_DEFAULT_SECTIONS, WO_DEFAULT_STYLE, WO_SECTION_LABELS, WO_SECTION_PRESETS, isBlankWoColumn, normalizeWoColumns, type WoColumn, type WoPrintColumns } from "@/lib/work-order-print";
+import { Icon } from "@/components/icon";
+import {
+  WO_BORDER_COLORS, WO_BORDER_MODES, WO_DEFAULT_COLUMNS, WO_DEFAULT_EXTRAS, WO_DEFAULT_HEADER, WO_DEFAULT_SECTIONS, WO_DEFAULT_SIGNOFF, WO_DEFAULT_STYLE,
+  WO_EXTRA_LABELS, WO_HEADER_BLOCKS, WO_HEADER_FIELDS, WO_SECTION_LABELS, WO_SECTION_PRESETS, isBlankWoColumn, normalizeWoColumns,
+  type WoColumn, type WoExtras, type WoHeader, type WoHeaderBlock, type WoPrintColumns, type WoSignoff,
+} from "@/lib/work-order-print";
 
 const CONFIG_KEY = "wo_print_columns";
 
@@ -69,6 +74,45 @@ function ColumnRows({ list, onChange }: { list: WoColumn[]; onChange: (next: WoC
   );
 }
 
+/** ลากเรียงกล่องหัวใบ (รูป / ชื่อ / จำนวน / เลขที่+QR) — ของกลาง sortable-list */
+function HeaderOrder({ order, onChange }: { order: WoHeaderBlock[]; onChange: (next: WoHeaderBlock[]) => void }) {
+  const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => onChange(moveItem(order, from, to)));
+  const label = (k: WoHeaderBlock) => WO_HEADER_BLOCKS.find((b) => b.key === k)?.label ?? k;
+  return (
+    <div className="flex gap-1">
+      {order.map((k, i) => (
+        <div key={k} {...rowProps(i)} className={`flex-1 flex items-center gap-0.5 border border-slate-200 rounded px-1 py-0.5 bg-white ${rowCls(i)}`}>
+          <DragHandle {...handleProps(i)} />
+          <span className="text-[10px] text-slate-600 truncate">{i + 1}. {label(k)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** ปุ่มเลือกทีละอย่าง (แบบเดียวกับปุ่ม "แบบเส้น") */
+function Seg<T extends string>({ value, options, onChange }: { value: T; options: { value: T; label: string; hint?: string }[]; onChange: (v: T) => void }) {
+  return (
+    <div className="flex gap-1 flex-1">
+      {options.map((o) => (
+        <button key={o.value} title={o.hint} onClick={() => onChange(o.value)}
+          className={`flex-1 min-h-6 px-1 rounded border text-[10px] leading-tight ${value === o.value ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function Stepper({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (v: number) => void }) {
+  const b = "w-6 h-6 rounded border border-slate-200 text-[12px] text-slate-600 hover:bg-slate-50 disabled:opacity-30";
+  return (
+    <span className="inline-flex items-center gap-1">
+      <button className={b} disabled={value <= min} onClick={() => onChange(value - 1)} aria-label="ลด">−</button>
+      <span className="w-4 text-center text-[12px] tabular-nums">{value}</span>
+      <button className={b} disabled={value >= max} onClick={() => onChange(value + 1)} aria-label="เพิ่ม">+</button>
+    </span>
+  );
+}
+
 export function WoColumnSettings({ onPreview, onSaved }: {
   onPreview?: (cols: WoPrintColumns | null) => void;   // ส่งค่าให้หน้าพิมพ์วาดสด (null = กลับไปใช้ค่าที่บันทึกไว้)
   onSaved?: () => void;
@@ -100,6 +144,18 @@ export function WoColumnSettings({ onPreview, onSaved }: {
   };
 
   const closePanel = () => { onPreview?.(null); setOpen(false); };   // ปิดโดยไม่บันทึก = เอกสารกลับเป็นค่าเดิม
+
+  // หัวใบ / กล่องลงชื่อ / ส่วนเสริม (ค่าเก่าที่ยังไม่มีคีย์เหล่านี้ = ค่าเริ่มต้น)
+  const hdr = draft.header ?? WO_DEFAULT_HEADER;
+  const so = draft.signoff ?? WO_DEFAULT_SIGNOFF;
+  const ex = draft.extras ?? WO_DEFAULT_EXTRAS;
+  const signOn = (draft.sections ?? WO_DEFAULT_SECTIONS).signature;
+  const setHdr = (p: Partial<WoHeader>) => setDraft((d) => ({ ...d, header: { ...(d.header ?? WO_DEFAULT_HEADER), ...p } }));
+  const setSo = (p: Partial<WoSignoff>) => setDraft((d) => ({ ...d, signoff: { ...(d.signoff ?? WO_DEFAULT_SIGNOFF), ...p } }));
+  const setEx = (p: Partial<WoExtras>) => setDraft((d) => ({ ...d, extras: { ...(d.extras ?? WO_DEFAULT_EXTRAS), ...p } }));
+  // "ช่องติ๊กเตรียมรายวัตถุดิบ" = คอลัมน์ ☑ ในตารางสรุปที่มีอยู่แล้ว — แค่สลับเปิด/ปิดให้จากตรงนี้
+  const tickOn = draft.summary.some((c) => c.key === "check" && c.show);
+  const setTick = (on: boolean) => setDraft((d) => ({ ...d, summary: d.summary.map((c) => (c.key === "check" ? { ...c, show: on } : c)) }));
 
   // ลากย้ายแผง (จับที่แถบหัว) — clamp ไม่ให้หลุดจอ
   const onHeadPointerDown = (e: React.PointerEvent) => {
@@ -141,8 +197,8 @@ export function WoColumnSettings({ onPreview, onSaved }: {
   return (
     <>
       <button onClick={() => (open ? closePanel() : openPanel())}
-        title="ปรับความกว้างคอลัมน์ / เปิด-ปิดช่องรูป (เห็นผลบนเอกสารทันที)"
-        className={`h-9 rounded-lg border px-3 text-sm ${open ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>⚙ ตั้งค่าตาราง</button>
+        title="ปรับหัวใบ / กล่องลงชื่อ / คอลัมน์ตาราง (เห็นผลบนเอกสารทันที)"
+        className={`h-9 rounded-lg border px-3 text-sm inline-flex items-center gap-1.5 ${open ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}><Icon name="settings" /> ตั้งค่าใบพิมพ์</button>
 
       {open && (
         <div ref={panelRef}
@@ -152,7 +208,7 @@ export function WoColumnSettings({ onPreview, onSaved }: {
           {/* แถบหัว — ลากย้ายได้ */}
           <div onPointerDown={onHeadPointerDown} onPointerMove={onHeadPointerMove} onPointerUp={endDrag} onPointerCancel={endDrag}
             className="flex items-center gap-1 px-2.5 py-1.5 border-b border-slate-100 cursor-move select-none rounded-t-xl bg-slate-50/80">
-            <span className="text-[12px] font-bold text-slate-700 flex-1 truncate">⚙ ตั้งค่าตารางวัตถุดิบ</span>
+            <span className="text-[12px] font-bold text-slate-700 flex-1 truncate inline-flex items-center gap-1"><Icon name="settings" /> ตั้งค่าใบพิมพ์ใบสั่งงาน</span>
             <button onClick={() => setDim((d) => !d)} title={dim ? "ทำให้ทึบ" : "ทำให้จาง (มองทะลุเห็นเอกสาร)"} className={btn}>{dim ? "👁 ทึบ" : "👁 จาง"}</button>
             <button onClick={() => setMini((m) => !m)} title={mini ? "กางแผง" : "ย่อแผง"} className={btn}>{mini ? "▢" : "—"}</button>
             <button onClick={closePanel} title="ปิด (ไม่บันทึก)" className={btn}>✕</button>
@@ -275,6 +331,103 @@ export function WoColumnSettings({ onPreview, onSaved }: {
                   </div>
                 </div>
 
+                {/* 4) หัวใบ — กล่องบนสุด (รูป · ชื่อ · จำนวน · เลขที่+QR · กำหนดส่ง) */}
+                <div>
+                  <div className="text-[12px] font-bold text-slate-700 mb-1">4) หัวใบ</div>
+                  <div className="border border-slate-200 rounded-lg px-2 py-1.5 space-y-1.5">
+                    <div className="flex flex-wrap gap-1">
+                      {WO_HEADER_FIELDS.map((f) => {
+                        const on = hdr.show[f.key];
+                        return (
+                          <button key={f.key} onClick={() => setHdr({ show: { ...hdr.show, [f.key]: !on } })}
+                            className={`h-6 px-1.5 rounded border text-[10px] ${on ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-400 line-through hover:bg-slate-50"}`}>{f.label}</button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-14 shrink-0">ขนาดรูป</span>
+                      <input type="range" min={25} max={60} step={1} value={hdr.photo_mm} disabled={!hdr.show.photo}
+                        onChange={(e) => setHdr({ photo_mm: Number(e.target.value) })}
+                        className="flex-1 accent-indigo-600 disabled:opacity-30" />
+                      <span className="w-14 text-right text-[11px] text-slate-500 tabular-nums">{hdr.photo_mm} มม.</span>
+                    </div>
+                    <div>
+                      <div className="text-[11px] text-slate-500 mb-0.5">เรียงกล่องหัว (ลาก ⠿ ซ้าย → ขวา)</div>
+                      <HeaderOrder order={hdr.order} onChange={(order) => setHdr({ order })} />
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-snug">"จำนวนเดิม" ขึ้นเฉพาะใบที่เคยลด/เพิ่มจำนวน (เช่น เดิม 20 · ของไม่พอ) — ตัวเลขใหญ่คือจำนวนปัจจุบันเสมอ</p>
+                  </div>
+                </div>
+
+                {/* 5) กล่องลงชื่อ — ของกลาง lib/print-signoff */}
+                <div>
+                  <div className="text-[12px] font-bold text-slate-700 mb-1 inline-flex items-center gap-1"><Icon value="i:signature" /> 5) กล่องลงชื่อ</div>
+                  <div className={`border border-slate-200 rounded-lg px-2 py-1.5 space-y-1.5 ${signOn ? "" : "opacity-50"}`}>
+                    {!signOn && <p className="text-[10px] text-rose-600">ปิดอยู่ — ติ๊ก "กล่องลงชื่อ + ส่วนเสริม" ในข้อ 0 ก่อน</p>}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-20 shrink-0">แผนกตัด/เตรียม</span>
+                      <Seg value={so.prep} onChange={(prep) => setSo({ prep })} options={[
+                        { value: "off", label: "ไม่ใส่" }, { value: "one", label: "1 กล่องรวม" }, { value: "split", label: "แยก เตรียม/ตัด" },
+                      ]} />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-20 shrink-0">ช่างรับงาน</span>
+                      <Seg value={so.worker ? "on" : "off"} onChange={(v) => setSo({ worker: v === "on" })} options={[
+                        { value: "off", label: "ไม่ใส่" }, { value: "on", label: "1 กล่อง/ใบจ่ายงาน", hint: "ดึงโต๊ะ/ช่าง + จำนวนที่รับ จากใบจ่ายงานจริงของใบนี้" },
+                      ]} />
+                    </div>
+                    {so.worker && (
+                      <>
+                        <label className="flex items-center gap-1.5 cursor-pointer pl-[86px]">
+                          <input type="checkbox" checked={so.merge} onChange={(e) => setSo({ merge: e.target.checked })} className="w-4 h-4 accent-indigo-600 shrink-0" />
+                          <span className="text-[11px] text-slate-600">รวมกล่องโต๊ะ/ช่างเดียวกัน (จ่ายหลายรอบ)</span>
+                        </label>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] text-slate-500 w-20 shrink-0">ใบเดียวหลายช่าง</span>
+                          <Seg value={so.multi} onChange={(multi) => setSo({ multi })} options={[
+                            { value: "each", label: "เซ็นแยกรายคน" }, { value: "one", label: "ช่องเซ็นเดียว" },
+                          ]} />
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] text-slate-500 w-20 shrink-0">กล่องว่าง</span>
+                          <span className="text-[11px] text-slate-600 inline-flex items-center gap-1">ยังไม่จ่าย <Stepper value={so.blanks} min={1} max={4} onChange={(blanks) => setSo({ blanks })} /></span>
+                          <span className="text-[11px] text-slate-600 inline-flex items-center gap-1">จ่ายแล้วเผื่อ <Stepper value={so.extra} min={0} max={4} onChange={(extra) => setSo({ extra })} /></span>
+                        </div>
+                      </>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-20 shrink-0">วันที่</span>
+                      <Seg value={so.date} onChange={(date) => setSo({ date })} options={[
+                        { value: "blank", label: "เขียนมือ ___/___/___" },
+                        { value: "fill", label: "เติมจากระบบ (ถ้ามี)", hint: "วันจ่ายงาน · วันเตรียม/ตัดเสร็จ · วันสั่ง — ไม่มีข้อมูล = เว้นให้เขียนมือ" },
+                      ]} />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] text-slate-500 w-20 shrink-0">วางไว้</span>
+                      <Seg value={so.pos} onChange={(pos) => setSo({ pos })} options={[
+                        { value: "top", label: "ใต้หัวใบ" }, { value: "bottom", label: "ท้ายใบ" },
+                      ]} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6) ส่วนเสริม */}
+                <div>
+                  <div className="text-[12px] font-bold text-slate-700 mb-1">6) ส่วนเสริม</div>
+                  <div className={`border border-slate-200 rounded-lg px-2 py-1.5 space-y-1 ${signOn ? "" : "opacity-50"}`}>
+                    {WO_EXTRA_LABELS.map((x) => (
+                      <label key={x.key} title={x.hint} className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={ex[x.key]} onChange={(e) => setEx({ [x.key]: e.target.checked })} className="w-4 h-4 accent-indigo-600 shrink-0" />
+                        <span className={`text-[12px] ${ex[x.key] ? "text-slate-700" : "text-slate-400"}`}>{x.label}</span>
+                      </label>
+                    ))}
+                    <label title="คอลัมน์ ☑ ในตาราง “สรุปวัตถุดิบ” (ข้อ 1)" className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={tickOn} onChange={(e) => setTick(e.target.checked)} className="w-4 h-4 accent-indigo-600 shrink-0" />
+                      <span className={`text-[12px] ${tickOn ? "text-slate-700" : "text-slate-400"}`}>ช่องติ๊กเตรียมรายวัตถุดิบ</span>
+                    </label>
+                  </div>
+                </div>
+
                 <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 leading-snug">
                   ⚠️ ช่อง <b>รูป</b> ขึ้นเฉพาะวัตถุดิบที่มีรูปปกในระบบ — ตัวที่ยังไม่มีรูป ช่องจะว่าง
                 </p>
@@ -282,7 +435,7 @@ export function WoColumnSettings({ onPreview, onSaved }: {
               </div>
 
               <div className="flex items-center gap-1.5 px-2.5 py-2 border-t border-slate-100">
-                <button onClick={() => setDraft({ ...WO_DEFAULT_COLUMNS, style: WO_DEFAULT_STYLE, sections: WO_DEFAULT_SECTIONS })} disabled={saving}
+                <button onClick={() => setDraft({ ...WO_DEFAULT_COLUMNS, style: WO_DEFAULT_STYLE, sections: WO_DEFAULT_SECTIONS, header: WO_DEFAULT_HEADER, signoff: WO_DEFAULT_SIGNOFF, extras: WO_DEFAULT_EXTRAS })} disabled={saving}
                   className="h-8 px-2 text-[11px] border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50 disabled:opacity-50">↺ ค่าเริ่มต้น</button>
                 <div className="flex-1" />
                 <button onClick={closePanel} disabled={saving} className="h-8 px-2.5 text-[11px] border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>

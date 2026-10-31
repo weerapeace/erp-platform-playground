@@ -25,7 +25,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const productSku = (header as { product_sku: string | null }).product_sku;
 
   // ยิงพร้อมกัน (ขนาน) — เดิมทำทีละตัว (sequential) ทำให้เปิดป๊อปอัปช้า
-  const [matRes, sumRes, prRes, skRes] = await Promise.all([
+  const [matRes, sumRes, prRes, skRes, woRes, qcRes] = await Promise.all([
     supabase.from("mo_materials").select("*").eq("mo_no", moNo).eq("is_active", true)
       .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true }),
     supabase.from("mo_material_summary").select("*").eq("mo_no", moNo).eq("is_active", true)
@@ -35,8 +35,22 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     productSku
       ? supabase.from("skus_v2").select("cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key )").eq("code", productSku).eq("is_active", true).maybeSingle()
       : Promise.resolve({ data: null }),
+    // ใบจ่ายงานของใบนี้ → กล่อง "ช่างรับงาน" ในใบพิมพ์ (index mo_no · ใบละไม่กี่แถว)
+    supabase.from("mo_work_orders").select("wo_no, stage, department_name, assignee_type, assignee_name, assignees, qty, dispatch_date, status")
+      .eq("mo_no", moNo).eq("is_active", true).order("created_at", { ascending: true }),
+    // ประวัติเปลี่ยนจำนวน (ยังไม่ย้อน) → "เดิม 20" / "แยกจาก MO-…" บนใบพิมพ์ · ตารางนี้อ่านผ่าน service role เหมือนจุดอื่น (ผ่านด่าน products.view แล้ว)
+    supabaseAdmin().from("mo_qty_changes").select("mo_no, from_qty, reason, mode, new_mo_no, created_at")
+      .or(`mo_no.eq."${moNo}",new_mo_no.eq."${moNo}"`).is("reverted_at", null).order("created_at", { ascending: true }).limit(20),
   ]);
   const materials = matRes.data; const summary = sumRes.data;
+
+  // เก่าก่อน → ครั้งแรกที่เปลี่ยน = จำนวนตอนสั่ง (แยกส่วนเกิน "extra" = ใบนี้จำนวนเดิม ไม่ต้องขึ้น "เดิม") — กติกาเดียวกับ /api/mo/catch-up/all
+  type QtyChange = { mo_no: string; from_qty: number | null; reason: string | null; mode: string | null; new_mo_no: string | null };
+  const changes = (qcRes.data ?? []) as QtyChange[];
+  const own = changes.filter((c) => c.mo_no === moNo && c.mode !== "extra");
+  const qty_from = own.length > 0 ? Number(own[0].from_qty) : null;
+  const qty_change_reason = own.length > 0 ? (own[own.length - 1].reason ?? null) : null;
+  const split_from = changes.find((c) => c.new_mo_no === moNo)?.mo_no ?? null;
 
   // สถานะ "ขอซื้อแล้ว" — รวมจำนวนจากใบขอซื้อ (PR v2) ที่ผูกใบสั่งผลิตนี้
   const requested: Record<string, number> = {};
@@ -72,7 +86,10 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
   const withImage = <T extends { component_sku?: string | null }>(rows: T[]) =>
     rows.map((r) => ({ ...r, image_url: matImages[String(r.component_sku ?? "").trim()] ?? null }));
 
-  return NextResponse.json({ data: { ...header, materials: withImage(materials ?? []), summary: withImage(summary ?? []), requested, product_image }, error: null });
+  return NextResponse.json({ data: {
+    ...header, materials: withImage(materials ?? []), summary: withImage(summary ?? []), requested, product_image,
+    work_orders: woRes.data ?? [], qty_from, qty_change_reason, split_from,
+  }, error: null });
 }
 
 type MatEdit = { id: string; on_hand_qty: number; is_ready: boolean; to_purchase_qty: number };

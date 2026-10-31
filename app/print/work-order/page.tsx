@@ -20,7 +20,8 @@ function BulkPrintInner() {
   const router = useRouter();
   const ids = useMemo(() => (sp.get("ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean), [sp]);
 
-  const [data, setData] = useState<Record<string, unknown>[] | null>(null);
+  // เก็บข้อมูลดิบต่อใบ — สร้าง HTML ทีหลังตามตั้งค่าใบพิมพ์ (กล่องลงชื่อต่อใบขึ้นกับตั้งค่า เปลี่ยนแล้วเห็นผลทันที)
+  const [data, setData] = useState<{ mo: MoDetail; spec: ProductSpec | null; qr_html: string }[] | null>(null);
   const [done, setDone] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const { cols: savedCols, reload: reloadCols } = useWoPrintColumns();   // ตั้งค่าคอลัมน์ (ค่ากลางเดียวกับหน้าพิมพ์ใบเดียว)
@@ -33,7 +34,7 @@ function BulkPrintInner() {
     (async () => {
       try {
         const specCache = new Map<string, ProductSpec | null>();
-        const out: Record<string, unknown>[] = [];
+        const out: { mo: MoDetail; spec: ProductSpec | null; qr_html: string }[] = [];
         for (const id of ids) {
           const moRes = await apiFetch(`/api/mo/${id}`).then((r) => r.json()).catch(() => ({ error: "load" }));
           if (moRes.error || !moRes.data) { setDone((d) => d + 1); continue; }
@@ -50,7 +51,7 @@ function BulkPrintInner() {
           }
           // QR ชี้หน้ากลาง /s/<เลขใบ> — ปลายทางเปลี่ยนทีหลังได้โดยไม่ต้องพิมพ์ใบใหม่
           const qr_html = await woQrHtml(scanUrl(mo.mo_no || mo.id));
-          out.push({ ...buildWoHtmlData(mo, spec), qr_html });
+          out.push({ mo, spec, qr_html });
           if (!cancelled) setDone((d) => d + 1);
         }
         if (!cancelled) setData(out);
@@ -62,7 +63,7 @@ function BulkPrintInner() {
   // โหมด "แยกใบ" → แต่ละใบสั่งงานแตกเป็นหลายแผ่นตามส่วนที่เปิดไว้
   const html = useMemo(() => {
     if (!data || !data.length) return "";
-    const dataList = data.flatMap((d) => woSectionDataList(d, woCols));
+    const dataList = data.flatMap((d) => woSectionDataList({ ...buildWoHtmlData(d.mo, d.spec, woCols), qr_html: d.qr_html }, woCols));
     return buildReportHtmlMulti(buildWorkOrderTemplate(woCols), dataList, docFileName("ใบสั่งงานรวม", `${ids.length} ใบ`));
   }, [data, woCols, ids.length]);
 

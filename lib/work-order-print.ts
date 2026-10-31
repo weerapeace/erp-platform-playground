@@ -5,6 +5,7 @@
  */
 import type { ReportTemplate } from "@/lib/template";
 import { scanQrHtml } from "@/lib/scan-code";
+import { SIGNOFF_CSS, signoffHtml, type SignBox, type SignLine } from "@/lib/print-signoff";
 
 export const STATUS_LABELS: Record<string, string> = {
   draft: "ร่าง",
@@ -67,6 +68,24 @@ export type MoDetail = {
   materials?: MoMat[];
   summary?: MoSummary[];
   size_breakdown?: { label: string; qty: number }[] | null;   // กลุ่ม C: จำนวนต่อไซส์
+  order_date?: string | null;
+  prep_done_at?: string | null;   // เตรียมวัตถุดิบครบ (ติ๊กบนบอร์ด) — เติมวันที่ในกล่องลงชื่อได้
+  cut_done_at?: string | null;
+  work_orders?: MoWorkOrder[];    // ใบจ่ายงานของใบนี้ → กล่อง "ช่างรับงาน" 1 กล่องต่อใบ (จาก /api/mo/[id])
+  qty_from?: number | null;       // จำนวนตอนสั่งครั้งแรก ถ้าเคยลด/เพิ่ม (mo_qty_changes ที่ยังไม่ย้อน)
+  qty_change_reason?: string | null;
+  split_from?: string | null;     // ใบนี้แยกออกมาจากใบไหน
+};
+export type MoWorkOrder = {
+  wo_no?: string | null;
+  stage?: string | null;
+  department_name?: string | null;
+  assignee_type?: string | null;
+  assignee_name?: string | null;
+  assignees?: { id?: string | null; name?: string | null }[] | null;
+  qty?: number | null;
+  dispatch_date?: string | null;
+  status?: string | null;
 };
 
 /**
@@ -115,7 +134,56 @@ export type WoPrintStyle = { border_mm: number; border_color: string; border_mod
  * split = แยกใบ: แต่ละส่วนที่เปิดไว้ไปอยู่คนละแผ่น (มีหัวเอกสารของตัวเองครบ) แทนที่จะต่อกันในใบเดียว
  */
 export type WoSections = { summary: boolean; lines: boolean; detail: boolean; signature: boolean; split: boolean };
-export type WoPrintColumns = { summary: WoColumn[]; lines: WoColumn[]; style?: WoPrintStyle; sections?: WoSections };
+
+/* ─────────────── หัวใบ (กล่องบนสุด) — เปิด/ปิดทีละช่อง · ขนาดรูป · ลำดับกล่อง ─────────────── */
+export type WoHeaderField =
+  | "company" | "title" | "photo" | "name" | "code" | "variant" | "size"
+  | "qty" | "bom" | "mo_no" | "created" | "status" | "qr" | "due" | "qty_from";
+export type WoHeaderBlock = "photo" | "product" | "qty" | "meta";
+export type WoHeader = { show: Record<WoHeaderField, boolean>; photo_mm: number; order: WoHeaderBlock[] };
+export const WO_HEADER_FIELDS: { key: WoHeaderField; label: string }[] = [
+  { key: "company", label: "ชื่อบริษัท" }, { key: "title", label: "หัวข้อใบ" }, { key: "photo", label: "รูปสินค้า" },
+  { key: "name", label: "ชื่อสินค้า" }, { key: "code", label: "รหัส" }, { key: "variant", label: "สี/ตัวเลือก" },
+  { key: "size", label: "ขนาด" }, { key: "qty", label: "จำนวนผลิต" }, { key: "bom", label: "สูตร" },
+  { key: "mo_no", label: "เลขที่" }, { key: "created", label: "วันที่สั่ง" }, { key: "status", label: "สถานะ" },
+  { key: "qr", label: "QR" }, { key: "due", label: "กำหนดส่ง" }, { key: "qty_from", label: "จำนวนเดิม (ถ้าเคยแก้)" },
+];
+export const WO_HEADER_BLOCKS: { key: WoHeaderBlock; label: string }[] = [
+  { key: "photo", label: "รูป" }, { key: "product", label: "ชื่อ/รหัส/สี" }, { key: "qty", label: "จำนวน" }, { key: "meta", label: "เลขที่ + QR" },
+];
+export const WO_DEFAULT_HEADER: WoHeader = {
+  show: Object.fromEntries(WO_HEADER_FIELDS.map((f) => [f.key, true])) as Record<WoHeaderField, boolean>,
+  photo_mm: 46,
+  order: ["photo", "product", "qty", "meta"],
+};
+
+/* ─────────────── กล่องลงชื่อ (ของกลาง lib/print-signoff) ───────────────
+ * prep   = แผนกตัด/เตรียม: ไม่ใส่ / 1 กล่องรวม / แยกกล่องเตรียม + กล่องตัด
+ * worker = ช่างที่รับงาน: 1 กล่องต่อใบจ่ายงาน (mo_work_orders) · merge = รวมใบที่โต๊ะ/ช่างเดียวกัน
+ * multi  = ใบเดียวมีช่างหลายคน → เซ็นแยกรายคน / ช่องเดียว
+ * blanks = ยังไม่จ่ายงาน → กล่องว่างให้เขียนชื่อเอง N กล่อง · extra = จ่ายแล้วเผื่อกล่องว่างอีก
+ * date   = วันที่ตรงลายเซ็น: เว้นให้เขียนมือ / เติมวันที่ที่ระบบรู้ (วันจ่ายงาน · วันเตรียม/ตัดเสร็จ · วันสั่ง)
+ * pos    = วางใต้หัวใบ / ท้ายใบ
+ */
+export type WoSignoff = {
+  prep: "off" | "one" | "split"; worker: boolean; merge: boolean; multi: "each" | "one";
+  blanks: number; extra: number; date: "blank" | "fill"; pos: "top" | "bottom";
+};
+export const WO_DEFAULT_SIGNOFF: WoSignoff = { prep: "one", worker: true, merge: false, multi: "each", blanks: 2, extra: 0, date: "blank", pos: "bottom" };
+/** ส่วนเสริม — ผู้สั่ง+หัวหน้าอนุมัติ (แทนช่องลงชื่อเดิม 2 ช่อง) · QC ตรวจรับ · ตารางส่งคืนงาน · หมายเหตุถึงช่าง */
+export type WoExtras = { approve: boolean; qc: boolean; returns: boolean; note: boolean };
+export const WO_DEFAULT_EXTRAS: WoExtras = { approve: true, qc: false, returns: false, note: false };
+export const WO_EXTRA_LABELS: { key: keyof WoExtras; label: string; hint: string }[] = [
+  { key: "approve", label: "ผู้สั่งผลิต + หัวหน้าอนุมัติ", hint: "2 กล่องลงชื่อ (แทนช่องลงชื่อท้ายใบแบบเดิม)" },
+  { key: "qc", label: "QC ตรวจรับ (ดี / เสีย)", hint: "กล่องให้ QC เขียนจำนวนดี/เสีย + ลงชื่อ + วันที่" },
+  { key: "returns", label: "ตารางบันทึกส่งคืนงาน", hint: "ตาราง 3 แถว: ครั้งที่ / วันที่ / จำนวนส่ง / ดี / เสีย / ผู้ส่ง / ผู้รับ" },
+  { key: "note", label: "หมายเหตุถึงช่าง", hint: "กล่องหมายเหตุ (ดึงหมายเหตุของใบมาให้) + เส้นว่างให้เขียนเพิ่ม" },
+];
+
+export type WoPrintColumns = {
+  summary: WoColumn[]; lines: WoColumn[]; style?: WoPrintStyle; sections?: WoSections;
+  header?: WoHeader; signoff?: WoSignoff; extras?: WoExtras;
+};
 
 export const WO_DEFAULT_STYLE: WoPrintStyle = { border_mm: 0.12, border_color: "#94a3b8", border_mode: "all", font_scale: 1 };
 export const WO_DEFAULT_SECTIONS: WoSections = { summary: true, lines: true, detail: true, signature: true, split: false };
@@ -123,7 +191,7 @@ export const WO_SECTION_LABELS: { key: keyof WoSections; label: string }[] = [
   { key: "summary", label: "สรุปวัตถุดิบที่ต้องใช้" },
   { key: "lines", label: "รายการวัตถุดิบ / บล็อกตัด" },
   { key: "detail", label: "รายละเอียดสินค้า (รูป + สเปก + หมายเหตุ)" },
-  { key: "signature", label: "ช่องลงชื่อท้ายเอกสาร" },
+  { key: "signature", label: "กล่องลงชื่อ + ส่วนเสริม (ตัด/เตรียม · ช่าง · QC · ส่งคืน)" },
 ];
 /** ชุดสำเร็จ — กดปุ่มเดียวได้เอกสารแบบที่อยากพิมพ์บ่อย ๆ */
 export const WO_SECTION_PRESETS: { label: string; hint: string; value: WoSections }[] = [
@@ -253,7 +321,7 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
     });
     return out;
   };
-  const obj = (raw ?? {}) as { summary?: unknown; lines?: unknown; style?: unknown; sections?: unknown };
+  const obj = (raw ?? {}) as { summary?: unknown; lines?: unknown; style?: unknown; sections?: unknown; header?: unknown; signoff?: unknown; extras?: unknown };
   const sec = (obj.sections ?? {}) as Partial<WoSections>;
   const sections: WoSections = {
     summary: sec.summary === undefined ? WO_DEFAULT_SECTIONS.summary : !!sec.summary,
@@ -278,7 +346,48 @@ export function normalizeWoColumns(raw: unknown): WoPrintColumns {
       font_scale: Number.isFinite(scale) && scale > 0 ? Math.min(1.6, Math.max(0.6, scale)) : WO_DEFAULT_STYLE.font_scale,
     },
     sections,
+    header: normalizeWoHeader(obj.header),
+    signoff: normalizeWoSignoff(obj.signoff),
+    extras: normalizeWoExtras(obj.extras),
   };
+}
+
+const bool = (v: unknown, d: boolean) => (v === undefined ? d : !!v);
+const oneOf = <T extends string>(v: unknown, list: readonly T[], d: T): T => (list.includes(v as T) ? (v as T) : d);
+const intIn = (v: unknown, min: number, max: number, d: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, Math.round(n))) : d;
+};
+
+/** หัวใบ — ค่าที่ไม่รู้จักทิ้ง · ลำดับกล่องต้องครบ 4 กล่องไม่ซ้ำ (ขาดตัวไหนต่อท้ายให้) */
+export function normalizeWoHeader(raw: unknown): WoHeader {
+  const h = (raw ?? {}) as { show?: Record<string, unknown>; photo_mm?: unknown; order?: unknown };
+  const show = Object.fromEntries(WO_HEADER_FIELDS.map((f) => [f.key, bool(h.show?.[f.key], WO_DEFAULT_HEADER.show[f.key])])) as Record<WoHeaderField, boolean>;
+  const keys = WO_HEADER_BLOCKS.map((b) => b.key);
+  const saved = Array.isArray(h.order) ? (h.order as unknown[]).filter((k): k is WoHeaderBlock => keys.includes(k as WoHeaderBlock)) : [];
+  const order = [...new Set([...saved, ...WO_DEFAULT_HEADER.order])];
+  return { show, photo_mm: intIn(h.photo_mm, 25, 60, WO_DEFAULT_HEADER.photo_mm), order };
+}
+
+export function normalizeWoSignoff(raw: unknown): WoSignoff {
+  const s = (raw ?? {}) as Partial<Record<keyof WoSignoff, unknown>>;
+  const d = WO_DEFAULT_SIGNOFF;
+  return {
+    prep: oneOf(s.prep, ["off", "one", "split"] as const, d.prep),
+    worker: bool(s.worker, d.worker),
+    merge: bool(s.merge, d.merge),
+    multi: oneOf(s.multi, ["each", "one"] as const, d.multi),
+    blanks: intIn(s.blanks, 1, 4, d.blanks),
+    extra: intIn(s.extra, 0, 4, d.extra),
+    date: oneOf(s.date, ["blank", "fill"] as const, d.date),
+    pos: oneOf(s.pos, ["top", "bottom"] as const, d.pos),
+  };
+}
+
+export function normalizeWoExtras(raw: unknown): WoExtras {
+  const e = (raw ?? {}) as Partial<Record<keyof WoExtras, unknown>>;
+  const d = WO_DEFAULT_EXTRAS;
+  return { approve: bool(e.approve, d.approve), qc: bool(e.qc, d.qc), returns: bool(e.returns, d.returns), note: bool(e.note, d.note) };
 }
 
 const colsHtml = (cols: WoColumn[], summary: boolean) => {
@@ -315,9 +424,106 @@ export function woScalars(mo: MoDetail, spec: ProductSpec | null): Record<string
     product_variant: spec?.sku_variant || "",
     product_size: size,
     qty: numTh(Number(mo.qty) || 0),
+    // "เดิม 20" + เหตุผล (บรรทัดใต้) ใต้จำนวน — ขึ้นเฉพาะใบที่เคยแก้จำนวน (จำนวนบนใบ = จำนวนปัจจุบันเสมอ)
+    ...qtyOrigNote(mo),
     bom_version: mo.bom_version || "-",
     note,
   };
+}
+
+// แยก 2 ช่อง: ป้ายสั้น ("เดิม 20" / "แยกจาก MO-…") + เหตุผลบรรทัดใต้ — กล่องจำนวนแคบ ต่อกันบรรทัดเดียวแล้วคำไทยขาดกลางคำ
+function qtyOrigNote(mo: MoDetail): { qty_orig_note: string; qty_orig_why: string } {
+  const parts: string[] = [];
+  let why = "";
+  const from = Number(mo.qty_from);
+  if (mo.qty_from != null && Number.isFinite(from) && from !== (Number(mo.qty) || 0)) {
+    parts.push(`เดิม ${numTh(from)}`);
+    why = text(mo.qty_change_reason);
+  }
+  if (text(mo.split_from)) parts.push(`แยกจาก ${text(mo.split_from)}`);
+  return { qty_orig_note: parts.join(" · "), qty_orig_why: why };
+}
+
+/* ─────────────── กล่องลงชื่อ + ส่วนเสริม (สร้างเป็น HTML ต่อใบ เพราะต้องรู้ใบจ่ายงาน/วันที่ของใบนั้น) ─────────────── */
+
+/** ชื่อช่างในใบจ่ายงาน — ใช้ assignees (หลายคน) ก่อน · ไม่มีก็แตก assignee_name (ต่อกันด้วย ", ") · จ่ายเป็นโต๊ะ = ไม่มีชื่อคน */
+function woPeople(w: MoWorkOrder): string[] {
+  const list = (w.assignees ?? []).map((a) => text(a?.name)).filter(Boolean);
+  if (list.length > 0) return list;
+  if (w.assignee_type === "craftsman") return text(w.assignee_name).split(",").map((s) => s.trim()).filter(Boolean);
+  return [];
+}
+
+type WorkerGroup = { dept: string; people: string[]; qty: number; wos: string[]; date: string | null };
+function workerGroups(mo: MoDetail, merge: boolean): WorkerGroup[] {
+  const rows = (mo.work_orders ?? []).map((w) => ({
+    dept: text(w.department_name) || text(w.assignee_name) || "-",
+    people: woPeople(w),
+    qty: Number(w.qty) || 0,
+    wos: [text(w.wo_no)].filter(Boolean),
+    date: w.dispatch_date ?? null,
+  }));
+  if (!merge) return rows;
+  const byKey = new Map<string, WorkerGroup>();
+  for (const r of rows) {
+    const k = `${r.dept}|${r.people.join(",")}`;
+    const cur = byKey.get(k);
+    if (!cur) { byKey.set(k, { ...r, wos: [...r.wos] }); continue; }
+    cur.qty += r.qty;
+    cur.wos.push(...r.wos);
+    if (r.date && (!cur.date || r.date < cur.date)) cur.date = r.date;   // จ่ายครั้งแรก
+  }
+  return [...byKey.values()];
+}
+
+export function woSignoffBoxes(mo: MoDetail, so: WoSignoff, ex: WoExtras): SignBox[] {
+  const fill = so.date === "fill";
+  const date = (iso: string | null | undefined): SignLine => ({ kind: "date", value: fill && iso ? thaiDate(iso) : null });
+  const boxes: SignBox[] = [];
+  if (ex.approve) {
+    boxes.push({ title: "ผู้สั่งผลิต", lines: [{ kind: "sign" }, date(mo.order_date || mo.created_at)] });
+    boxes.push({ title: "หัวหน้าอนุมัติ", lines: [{ kind: "sign" }, date(null)] });
+  }
+  if (so.prep === "one") {
+    boxes.push({ title: "แผนกตัด/เตรียม", lines: [{ kind: "write", label: "ผู้ตัด/เตรียม" }, { kind: "sign" }, date(mo.cut_done_at || mo.prep_done_at)] });
+  } else if (so.prep === "split") {
+    boxes.push({ title: "เตรียมวัตถุดิบ", lines: [{ kind: "write", label: "ผู้เตรียม" }, { kind: "sign" }, date(mo.prep_done_at)] });
+    boxes.push({ title: "ตัด", lines: [{ kind: "write", label: "ผู้ตัด" }, { kind: "sign" }, date(mo.cut_done_at)] });
+  }
+  if (so.worker) {
+    const groups = workerGroups(mo, so.merge);
+    for (const g of groups) {
+      const lines: SignLine[] = [{ kind: "text", text: g.dept, right: `รับ ${numTh(g.qty)} ชิ้น`, strong: true }];
+      if (g.people.length === 0) lines.push({ kind: "write", label: "ช่าง" }, { kind: "sign" }, date(g.date));
+      else if (so.multi === "one") lines.push({ kind: "text", text: `ช่าง: ${g.people.join(", ")}` }, { kind: "sign" }, date(g.date));
+      else g.people.forEach((p, i) => {
+        if (i > 0) lines.push({ kind: "sep" });
+        lines.push({ kind: "text", text: p }, { kind: "sign" }, date(g.date));
+      });
+      boxes.push({ title: "ช่างรับงาน", note: g.wos.join(", "), lines });
+    }
+    // ยังไม่จ่ายงาน = กล่องว่างให้เขียนเอง (ส่วนใหญ่พิมพ์ใบก่อนจ่าย) · จ่ายแล้วเผื่อเพิ่มได้
+    const blanks = groups.length === 0 ? Math.max(1, so.blanks) : so.extra;
+    for (let i = 0; i < blanks; i++) {
+      boxes.push({ title: "ช่างรับงาน", note: "เขียนเอง", lines: [{ kind: "write", label: "โต๊ะ/ช่าง" }, { kind: "write", label: "จำนวนรับ" }, { kind: "sign" }, date(null)] });
+    }
+  }
+  if (ex.qc) boxes.push({ title: "QC ตรวจรับ", lines: [{ kind: "pair", left: "ดี", right: "เสีย" }, { kind: "sign" }, date(null)] });
+  return boxes;
+}
+
+/** ตารางบันทึกส่งคืนงาน (3 แถวว่าง) + กล่องหมายเหตุถึงช่าง */
+function woExtrasHtml(mo: MoDetail, ex: WoExtras): string {
+  const parts: string[] = [];
+  if (ex.returns) {
+    const heads = ["ครั้งที่", "วันที่", "จำนวนส่ง", "ดี", "เสีย", "ผู้ส่ง", "ผู้รับ"];
+    const rows = [1, 2, 3].map((n) => `<tr><td class="text-center">${n}</td>${"<td></td>".repeat(heads.length - 1)}</tr>`).join("");
+    parts.push(`<section class="wo-returns"><div class="section-title">บันทึกส่งคืนงาน</div><table class="doc-table returns-table"><thead><tr>${heads.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></section>`);
+  }
+  if (ex.note) {
+    parts.push(`<section class="wo-note-box"><span class="label">หมายเหตุถึงช่าง:</span> ${esc(mo.note)}<div class="sgn-ln wo-note-line"></div><div class="sgn-ln wo-note-line"></div></section>`);
+  }
+  return parts.join("\n");
 }
 
 // เรียงวัตถุดิบแบบเดียวกันทุกที่ (ตาราง HTML + ตาราง pdfme) — แยกออกมาให้ zip รูปเข้าแถวได้ตรงกัน
@@ -393,19 +599,24 @@ function productSpecRows(spec: ProductSpec | null) {
   return rows.sort((a, b) => a.order - b.order).slice(0, 12);
 }
 
-export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null): Record<string, unknown> {
+/** cols = ตั้งค่าใบพิมพ์ (ไม่ส่ง = ค่าเริ่มต้น) — ใช้สร้างกล่องลงชื่อ/ส่วนเสริมของใบนี้ */
+export function buildWoHtmlData(mo: MoDetail, spec: ProductSpec | null, cols?: WoPrintColumns | null): Record<string, unknown> {
   const mats = sortedMaterials(mo);   // ลำดับเดียวกับ woTableRows → zip รูปเข้าแถวได้ตรงตัว
   const lines = woTableRows(mo).map((row, i) => ({
     idx: row[0], component_name: row[1], material_type: row[2], cut_block_code: row[3],
     cut_size: row[4], total_pieces: row[5], required: row[6], uom: row[7], code: row[8] || "-",
     image_html: matImgHtml(mats[i]?.image_url),
   }));
+  const signOn = (cols?.sections ?? WO_DEFAULT_SECTIONS).signature;
+  const ex = cols?.extras ?? WO_DEFAULT_EXTRAS;
   return {
     ...woScalars(mo, spec),
     product_image_html: photoHtml(spec?.image_url ?? spec?.parent?.image_url),
     material_summary: materialSummaryRows(mo),
     product_spec_rows: productSpecRows(spec),
     lines,
+    signoff_html: signOn ? signoffHtml(woSignoffBoxes(mo, cols?.signoff ?? WO_DEFAULT_SIGNOFF, ex), { title: "ลงชื่อรับ-ส่งงาน" }) : "",
+    wo_extras_html: signOn ? woExtrasHtml(mo, ex) : "",
   };
 }
 
@@ -415,6 +626,9 @@ function woBodyHtml(cols: WoPrintColumns): string {
   const s = colsHtml(cols.summary, true);
   const l = colsHtml(cols.lines, false);
   const parts: string[] = [];
+  // กล่องลงชื่อ — HTML สร้างต่อใบใน buildWoHtmlData (ปิด "กล่องลงชื่อ" = ค่าว่าง) · วางใต้หัวใบหรือท้ายใบตามตั้งค่า
+  const signTop = (cols.signoff ?? WO_DEFAULT_SIGNOFF).pos === "top";
+  if (signTop) parts.push("{{{signoff_html}}}");
   // ห่อด้วย {{#sec_x}} เสมอ — โหมดปกติส่ง flag เป็น true ทุกตัว, โหมดแยกใบส่งทีละตัวต่อแผ่น (woSectionDataList)
   if (sections.summary) parts.push(`{{#sec_summary}}<section class="summary-section">
   <div class="section-title">สรุปวัตถุดิบที่ต้องใช้</div>
@@ -469,8 +683,99 @@ function woBodyHtml(cols: WoPrintColumns): string {
   </div>
 </section>{{/sec_detail}}`);
 
+  if (!signTop) parts.push("{{{signoff_html}}}");
+  parts.push("{{{wo_extras_html}}}");
   return parts.join("\n\n");
 }
+
+/* ─────────────── หัวใบ — สร้างตามตั้งค่า (ช่องไหนปิด = ไม่ใส่ในเทมเพลตเลย) ─────────────── */
+function woHeaderHtml(h: WoHeader): string {
+  const s = h.show;
+  const block: Record<WoHeaderBlock, string> = {
+    photo: s.photo ? `<div class="wo-photo">{{{product_image_html}}}</div>` : "",
+    product: s.name || s.code || s.variant || s.size
+      ? `<div class="wo-product">
+    <div class="muted">สินค้า</div>${s.name ? `
+    <div class="product-name">{{product_name}}</div>` : ""}${s.code ? `
+    <div class="product-code">{{product_sku}}</div>` : ""}${s.variant ? `
+    {{#product_variant}}<div class="product-variant">{{product_variant}}</div>{{/product_variant}}` : ""}${s.size ? `
+    <div class="product-size">{{product_size}}</div>` : ""}
+  </div>` : "",
+    qty: s.qty || s.bom
+      ? `<div class="wo-qty">${s.qty ? `
+    <div class="muted">จำนวนผลิต</div>
+    <div class="qty-big">{{qty}}</div>
+    <div>ชิ้น${s.bom ? " · สูตร {{bom_version}}" : ""}</div>${s.qty_from ? `
+    {{#qty_orig_note}}<div class="qty-orig">{{qty_orig_note}}{{#qty_orig_why}}<span class="qty-orig-why">{{qty_orig_why}}</span>{{/qty_orig_why}}</div>{{/qty_orig_note}}` : ""}` : `
+    <div>สูตร {{bom_version}}</div>`}
+  </div>` : "",
+    meta: s.mo_no || s.created || s.status || s.qr
+      ? `<div class="wo-meta">
+    <div class="wo-meta-text">${s.mo_no ? `
+      <div><span class="label">เลขที่:</span> {{mo_number}}</div>` : ""}${s.created ? `
+      <div><span class="label">วันที่สั่ง:</span> {{created_at_th}}</div>` : ""}${s.status ? `
+      <div><span class="label">สถานะ:</span> {{status_label}}</div>` : ""}
+    </div>${s.qr ? `
+    <div class="wo-qr-box">{{{qr_html}}}</div>` : ""}
+  </div>` : "",
+  };
+  const cells = h.order.map((k) => block[k]).filter(Boolean);
+  // กำหนดส่ง = แถบเต็มความกว้างมุมล่างของกล่องหัวเอกสาร (ในกล่องขวาแคบไป วันที่ถูกตัดขึ้นบรรทัดใหม่)
+  const due = s.due ? `<div class="wo-due"><span class="label">กำหนดส่ง:</span> <span class="due-big">{{due_date_th}}</span></div>` : "";
+  const top = `${s.company ? `<div class="doc-header">
+  <div class="company-name">หจก.ไอ.เอส.จี. เทรดดิ้ง</div>
+</div>
+` : ""}${s.title ? `<div class="doc-title">ใบสั่งงานผลิต</div>
+` : ""}`;
+  if (cells.length === 0 && !due) return top;
+  return `${top}<section class="wo-hero">
+  ${cells.join("\n  ")}
+  ${due}
+</section>`;
+}
+
+/** ความกว้างคอลัมน์หัวใบตามลำดับ/ช่องที่เปิด (บนจอ + ตอนพิมพ์) · รูปปรับขนาดได้ */
+function woHeaderCss(h: WoHeader): string {
+  const s = h.show;
+  const on: Record<WoHeaderBlock, boolean> = {
+    photo: s.photo, product: s.name || s.code || s.variant || s.size, qty: s.qty || s.bom, meta: s.mo_no || s.created || s.status || s.qr,
+  };
+  const metaOnlyText = !s.qr;
+  // ค่าเริ่มต้น (รูป 46 มม.) = เท่าเดิมเป๊ะ: จอ 55mm 1.3fr 28mm 50mm · พิมพ์ 46mm 1.3fr 22mm 44mm
+  const w = {
+    photo: [`${Math.round(h.photo_mm * 1.2)}mm`, `${h.photo_mm}mm`],
+    product: ["1.3fr", "1.3fr"],
+    qty: ["28mm", "22mm"],
+    meta: metaOnlyText ? ["34mm", "30mm"] : ["50mm", "44mm"],
+  } as const;
+  const shown = h.order.filter((k) => on[k]);
+  if (shown.length === 0) return "";
+  const screen = shown.map((k) => w[k][0]).join(" ");
+  const print = shown.map((k) => w[k][1]).join(" ");
+  return `
+/* หัวใบ — ปรับจาก "ตั้งค่าใบพิมพ์" */
+.wo-hero { grid-template-columns: ${screen}; }
+.wo-photo img { max-height: ${Math.round(h.photo_mm * 1.13)}mm; }
+.qty-orig { margin-top: 1mm; color: #b45309; border: 0.15mm solid #f59e0b; border-radius: 0.6mm; padding: 0.2mm 1mm; font-size: 0.9em; font-weight: 700; line-height: 1.25; }
+.qty-orig-why { display: block; font-weight: 400; font-size: 0.9em; }
+@media print {
+  .wo-hero { grid-template-columns: ${print}; }
+  .wo-photo img { max-height: ${Math.max(20, h.photo_mm - 2)}mm; }
+}
+`;
+}
+
+// ส่วนเสริมท้ายใบ (ตารางส่งคืน · หมายเหตุถึงช่าง)
+const WO_EXTRAS_CSS = `
+.wo-returns { margin-top: 3mm; break-inside: avoid; page-break-inside: avoid; }
+.returns-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.returns-table td { height: 7mm; }
+.wo-note-box { margin-top: 3mm; border: 0.15mm solid #94a3b8; padding: 1.6mm 2mm; break-inside: avoid; page-break-inside: avoid; }
+.wo-note-line { display: block; height: 6mm; }
+@media print {
+  .returns-table td { height: 6mm; }
+}
+`;
 
 // CSS ทับท้าย — ปรับเส้นตาราง (หนา · สี · แบบเส้น) ใช้ทั้งบนจอและตอนพิมพ์ให้เห็นเหมือนกัน
 function woStyleCss(style: WoPrintStyle): string {
@@ -500,12 +805,14 @@ function woStyleCss(style: WoPrintStyle): string {
 /** สร้างเทมเพลตใบสั่งงานผลิตตาม "ตั้งค่าคอลัมน์" (ไม่ส่ง = ใช้ค่าเริ่มต้น) */
 export function buildWorkOrderTemplate(columns?: WoPrintColumns | null): ReportTemplate {
   const cols = columns ?? WO_DEFAULT_COLUMNS;
-  const sections = cols.sections ?? WO_DEFAULT_SECTIONS;
+  const header = cols.header ?? WO_DEFAULT_HEADER;
   return {
     ...WORKORDER_PRINT_TEMPLATE,
+    header_html: woHeaderHtml(header),
     body_html: woBodyHtml(cols),
-    footer_html: sections.signature ? WORKORDER_PRINT_TEMPLATE.footer_html : "",
-    custom_css: (WORKORDER_PRINT_TEMPLATE.custom_css ?? "") + woStyleCss(cols.style ?? WO_DEFAULT_STYLE),
+    // ช่องลงชื่อท้ายใบแบบเดิม (ผู้สั่งผลิต / ผู้รับงานผลิต) → ย้ายไปอยู่ในกล่องลงชื่อชุดใหม่ (signoff_html ใน body)
+    footer_html: "",
+    custom_css: (WORKORDER_PRINT_TEMPLATE.custom_css ?? "") + SIGNOFF_CSS + WO_EXTRAS_CSS + woHeaderCss(header) + woStyleCss(cols.style ?? WO_DEFAULT_STYLE),
   };
 }
 
