@@ -23,7 +23,7 @@ import { LauncherBackdrop } from "@/components/launcher-theme/backdrop";
 import { LauncherThemePanel, type LauncherThemeScope } from "@/components/launcher-theme/panel";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { BG_KEYS, DEFAULT_LAUNCHER_THEME, THEME_MINE_KEY, THEME_TEAM_KEY, cleanLauncherTheme, fontCssOf, hasOwnBg, pageBgStyle, resolveLauncherTheme, type LauncherDecor, type LauncherTheme } from "@/lib/launcher-theme";
-import { uploadResizedImage } from "@/components/image-attach";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { menuVisibleTo } from "@/lib/menu-audience";
 import { buildOrbitApps, type OrbitApp } from "@/lib/app-orbit";
@@ -353,10 +353,16 @@ export default function AppLauncherPage() {
   const [renameApp, setRenameApp] = useState<AppEntry | null>(null);   // แอปที่กำลังตั้งชื่อ/ไอคอน (modal)
   const [iconBusy, setIconBusy] = useState(false);
   const setAppIconImage = useCallback((key: string, r2key: string | null) => mutatePrefs((p) => { const iconImages = { ...p.iconImages }; if (r2key) iconImages[key] = r2key; else delete iconImages[key]; return { ...p, iconImages }; }), [mutatePrefs]);
-  const onPickIcon = async (key: string, file: File | null | undefined) => {
+  // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck)
+  const onPickIcon = async (key: string, file: File | null | undefined, appName: string) => {
     if (!file) return;
     setIconBusy(true);
-    try { const up = await uploadResizedImage(file, { folder: "app-icon", max: 256 }); setAppIconImage(key, up.r2_key); }
+    try {
+      const cur = prefs.iconImages[key];
+      const r = await uploadImagesWithDupCheck([file], { folder: "app-icon", max: 256, target: `ไอคอนแอป ${appName}`, existingKeys: cur ? [cur] : [], onError: () => alert("อัปโหลดรูปไม่สำเร็จ") });
+      const k = r?.keys[0];
+      if (k) setAppIconImage(key, k);
+    }
     catch { alert("อัปโหลดรูปไม่สำเร็จ"); }
     finally { setIconBusy(false); }
   };
@@ -923,7 +929,7 @@ export default function AppLauncherPage() {
                 <div className="mt-1 flex items-center gap-2">
                   <label className="h-8 px-3 rounded-lg border border-dashed border-slate-300 text-xs text-slate-600 hover:bg-slate-50 cursor-pointer flex items-center gap-1">
                     {iconBusy ? "กำลังอัปโหลด…" : "🖼 ใช้รูปเป็นไอคอน"}
-                    <input type="file" accept="image/*" className="hidden" disabled={iconBusy} onChange={(e) => onPickIcon(base.key, e.target.files?.[0])} />
+                    <input type="file" accept="image/*" className="hidden" disabled={iconBusy} onChange={(e) => onPickIcon(base.key, e.target.files?.[0], prefs.labels[base.key] || base.name)} />
                   </label>
                   {prefs.iconImages[base.key] && (
                     <button type="button" onClick={() => setAppIconImage(base.key, null)} className="text-[11px] text-red-500 hover:text-red-700">ลบรูป (ใช้อีโมจิ)</button>
