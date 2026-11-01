@@ -14,6 +14,7 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenContent, attachAssignees, validateContentFields, PARENT_LINK_PLATFORMS, loadContentProducts, normalizeProducts, replaceContentProducts, syncPrimaryProduct } from "../shared";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { normalizeTaskLinks } from "@/lib/record-tasks";
 
 // รูปหน้าปกของคอนเทนต์ (ให้การ์ดบนกระดานแคมเปญโชว์รูป) — ลำดับ: สื่อที่แนบ(รูป) → รูป SKU → รูปงานที่ผูก
 async function resolveContentCover(admin: ReturnType<typeof supabaseAdmin>, contentId: string, flat: Record<string, unknown>): Promise<string | null> {
@@ -29,7 +30,7 @@ async function resolveContentCover(admin: ReturnType<typeof supabaseAdmin>, cont
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const EDITABLE = new Set(["title", "task_id", "campaign_id", "brand_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "posted_links", "post_status", "platform_images", "platform_formats", "note", "discount_value", "discount_is_percent", "color_source", "template_icon", "assignee_id", "assignee_ids", "pillar_id", "goal", "brief", "ref_image_keys", "placements"]);
+const EDITABLE = new Set(["title", "task_id", "campaign_id", "brand_id", "sku_id", "parent_sku_id", "product_name", "post_type", "platforms", "status", "scheduled_at", "published_url", "posted_links", "post_status", "platform_images", "platform_formats", "note", "discount_value", "discount_is_percent", "color_source", "template_icon", "assignee_id", "assignee_ids", "pillar_id", "goal", "brief", "ref_image_keys", "ref_links", "placements"]);
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
@@ -72,6 +73,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   for (const [k, v] of Object.entries(body)) if (EDITABLE.has(k)) patch[k] = v === "" ? null : v;
   if (Array.isArray(body.product_links)) patch.product_links = body.product_links;
+  if ("ref_links" in body) patch.ref_links = normalizeTaskLinks(body.ref_links);   // ลิงก์อ้างอิงบรีฟ — เฉพาะ http/https ตัดซ้ำ (ตัวทำความสะอาดลิงก์กลาง)
   // สินค้าหลายตัว: แถวแรก = ตัวหลัก → ทับคอลัมน์ sku_id/parent_sku_id ให้ตรงกันเสมอ
   const prods = normalizeProducts(body.products);
   if (prods) { patch.parent_sku_id = prods[0]?.parent_sku_id ?? null; patch.sku_id = prods[0]?.sku_id ?? null; }

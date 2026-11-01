@@ -5,6 +5,7 @@
 // bullet / หัวข้อ / ตัวหนา-เอียง-ขีดเส้นใต้ / ฟอนต์ / ขนาด / สี / ตาราง / รูป (วาง/ลาก → อัปโหลด)
 // เก็บเป็น HTML string · ใช้ช่องไหนก็ได้ทั้งระบบ
 // ใช้: <RichTextEditor value={html} onChange={setHtml} onUploadImage={fn} />
+// โน้ตสั้น: toolbar="basic" (หนา/เอียง/ธรรมดา/bullet/ลำดับเลข) + onBlur (บันทึกเองตอนคลิกออก) — ข้อความเดิมที่เป็นตัวหนังสือล้วนแปลงด้วย lib/rich-note
 // ============================================================
 
 import { useEditor, EditorContent, type Editor, ReactNodeViewRenderer, NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
@@ -81,7 +82,7 @@ const SIZES = ["", "12px", "14px", "16px", "18px", "20px", "24px", "28px"];
 const COLORS = ["#0f172a", "#e11d48", "#2563eb", "#16a34a", "#d97706", "#7c3aed", "#64748b"];
 
 export function RichTextEditor({
-  value, onChange, editable = true, placeholder, onUploadImage, minHeight = 160,
+  value, onChange, editable = true, placeholder, onUploadImage, minHeight = 160, toolbar = "full", onBlur,
 }: {
   value: string;
   onChange: (html: string) => void;
@@ -90,7 +91,12 @@ export function RichTextEditor({
   /** อัปโหลดรูป (วาง/ลาก) → คืน URL ที่จะใส่ในเนื้อหา · ไม่ส่ง = ปิดการแทรกรูป */
   onUploadImage?: (file: File) => Promise<string>;
   minHeight?: number;
+  /** "basic" = แถบปุ่มย่อ (หนา / เอียง / ธรรมดา / bullet / ลำดับเลข) สำหรับโน้ตสั้น ๆ */
+  toolbar?: "full" | "basic";
+  /** คลิกออกจากกล่อง (เช่น บันทึกอัตโนมัติ) */
+  onBlur?: () => void;
 }) {
+  const onBlurRef = useRef(onBlur); onBlurRef.current = onBlur;
   const insertFiles = (editor: Editor | null, files: File[]) => {
     if (!onUploadImage || !editor) return;
     const imgs = files.filter((f) => f.type.startsWith("image/"));
@@ -114,6 +120,7 @@ export function RichTextEditor({
     ],
     content: value || "",
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
+    onBlur: () => onBlurRef.current?.(),
     editorProps: {
       attributes: { class: "tiptap-content focus:outline-none px-3 py-2", style: `min-height:${minHeight}px` },
       handlePaste: (_view, event) => {
@@ -141,6 +148,23 @@ export function RichTextEditor({
   const Btn = ({ on, active, label, title }: { on: () => void; active?: boolean; label: string; title?: string }) => (
     <button type="button" title={title} onMouseDown={(e) => { e.preventDefault(); on(); }}
       className={`h-7 min-w-7 px-1.5 text-sm rounded border ${active ? "bg-blue-100 border-blue-300 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+  );
+
+  if (toolbar === "basic") return (
+    <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
+      {editable && (
+        <div className="flex flex-wrap items-center gap-1 px-2 py-1 border-b border-slate-200 bg-slate-50">
+          <Btn on={() => editor.chain().focus().toggleBold().run()} active={editor.isActive("bold")} label="B" title="ตัวหนา" />
+          <Btn on={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive("italic")} label="I" title="ตัวเอียง" />
+          <Btn on={() => editor.chain().focus().unsetAllMarks().run()} label="ธรรมดา" title="กลับเป็นตัวธรรมดา" />
+          <span className="w-px h-5 bg-slate-200 mx-0.5" />
+          <Btn on={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive("bulletList")} label="•" title="หัวข้อย่อย" />
+          <Btn on={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive("orderedList")} label="1." title="ลำดับเลข" />
+          {placeholder && editor.isEmpty && <span className="ml-1 text-[11px] text-slate-400 truncate">{placeholder}</span>}
+        </div>
+      )}
+      <EditorContent editor={editor} />
+    </div>
   );
 
   return (

@@ -12,11 +12,11 @@ import { apiFetch } from "@/lib/api";
 const CHUNK_CHARS = 3000;
 const CHUNK_ITEMS = 60;
 
-async function translateChunk(texts: string[], to: "en" | "th"): Promise<string[]> {
+async function translateChunk(texts: string[], to: "en" | "th", free: boolean): Promise<string[]> {
   const res = await apiFetch("/api/ai/translate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ texts, to, kind: "content" }),
+    body: JSON.stringify({ texts, to, kind: "content", ...(free ? { engine: "free" } : {}) }),
   });
   const j = (await res.json().catch(() => ({}))) as { data?: { translated_list?: unknown }; error?: string };
   if (!res.ok || j.error) {
@@ -27,15 +27,40 @@ async function translateChunk(texts: string[], to: "en" | "th"): Promise<string[
   return texts.map((_, i) => String(list[i] ?? "").trim());
 }
 
-/** แปลหลายข้อความ (ค่าเริ่มต้น ไทย → อังกฤษ) */
-export async function translateContent(texts: string[], to: "en" | "th" = "en"): Promise<string[]> {
+/**
+ * แปลโน้ตจัดรูปแบบ (HTML จาก RichTextEditor) ทีละบล็อก — ย่อหน้า / bullet / ลำดับเลข คงอยู่ครบ
+ * บล็อกที่ทั้งบรรทัดเป็นตัวหนา/เอียง คงรูปแบบไว้ · ตัวหนาเฉพาะบางคำในบรรทัดจะกลายเป็นตัวธรรมดา (แปลทั้งประโยค)
+ * ใช้ในหน้าจอเท่านั้น (DOMParser) · คืน HTML ใหม่ ไม่แตะต้นฉบับ
+ */
+export async function translateNoteHtml(html: string, to: "en" | "th", opts: { free?: boolean } = {}): Promise<string> {
+  const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
+  const root = doc.body.firstElementChild as HTMLElement | null;
+  if (!root) return "";
+  const blocks = Array.from(root.querySelectorAll<HTMLElement>("p, h1, h2, h3, h4, blockquote, li"))
+    .filter((el) => !el.querySelector("p, h1, h2, h3, h4, blockquote, li, ul, ol"));
+  const got = await translateContent(blocks.map((el) => el.textContent ?? ""), to, opts);
+  blocks.forEach((el, i) => {
+    const tr = got[i]; if (!tr) return;
+    const full = (el.textContent ?? "").trim();
+    let node: Node = doc.createTextNode(tr);
+    for (const tag of ["em", "strong"] as const) {
+      const m = el.querySelector(tag === "em" ? "em, i" : "strong, b");
+      if (m && (m.textContent ?? "").trim() === full) { const w = doc.createElement(tag); w.appendChild(node); node = w; }
+    }
+    el.replaceChildren(node);
+  });
+  return root.innerHTML;
+}
+
+/** แปลหลายข้อความ (ค่าเริ่มต้น ไทย → อังกฤษ) · opts.free = ใช้ตัวแปลฟรีอย่างเดียว (ไม่เรียก GPT) */
+export async function translateContent(texts: string[], to: "en" | "th" = "en", opts: { free?: boolean } = {}): Promise<string[]> {
   const out = texts.map(() => "");
   const idx = texts.map((t, i) => (t.trim() ? i : -1)).filter((i) => i >= 0);
   let batch: number[] = [];
   let size = 0;
   const flush = async () => {
     if (!batch.length) return;
-    const got = await translateChunk(batch.map((i) => texts[i].trim().slice(0, 4000)), to);
+    const got = await translateChunk(batch.map((i) => texts[i].trim().slice(0, 4000)), to, !!opts.free);
     batch.forEach((i, k) => (out[i] = got[k] ?? ""));
     batch = [];
     size = 0;

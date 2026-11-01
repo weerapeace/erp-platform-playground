@@ -2,6 +2,7 @@
  * POST /api/ai/translate — แปลข้อความ ไทย↔อังกฤษ
  * body: { text, to? }   คืน: { data: { translated, target, engine } }
  * body: { texts[], to? } คืน: { data: { translated_list, target, engine } }  ← ชุดเดียวหลายข้อความ
+ *   engine: "free" = ใช้ Google ฟรีอย่างเดียว ไม่เรียก GPT (โหมดแปลโน้ตบรีฟในป๊อปโพสต์)
  *   kind: "labels" (ค่าเริ่มต้น = ชื่อช่องสั้น ๆ) | "content" (ข้อความบนหน้าเว็บร้าน — เรียบเรียงให้ลูกค้าอ่าน · ใช้กับ 🌐 ในตัวจัดหน้าเว็บ)
  *   (ใช้กับปุ่ม "แปลชื่อฟิลด์ทั้งโมดูล" — ยิงครั้งเดียวแทนการยิงทีละฟิลด์เป็นร้อยครั้ง
  *    ลำดับผลลัพธ์ตรงกับลำดับที่ส่งไป · ช่องที่แปลไม่ได้จะคืนเป็นค่าว่าง ไม่ใช่ทำให้ทั้งชุดพัง)
@@ -42,10 +43,11 @@ function pickTarget(sample: string, to?: string): { tlCode: string; target: stri
 
 // แปลหลายข้อความในคำขอเดียว — GPT ก่อน (ครั้งเดียวจบ) ตกไป Google ทีละข้อความ (ทีละ 5 พร้อมกัน)
 // คืนลำดับตรงกับที่ส่งมาเสมอ · ช่องที่แปลไม่ได้ = "" ให้ฝั่งเรียกข้ามไปเอง
-async function translateBatch(list: string[], to?: string, kind: "labels" | "content" = "labels"): Promise<NextResponse> {
+// free = ข้าม GPT ไปใช้ Google ฟรีเลย (เช่น โหมดแปลโน้ตบรีฟ — เจ้าของเลือก "แปลแบบไม่เสียเงิน")
+async function translateBatch(list: string[], to?: string, kind: "labels" | "content" = "labels", free = false): Promise<NextResponse> {
   const { tlCode, target } = pickTarget(list.find(Boolean) ?? "", to);
 
-  if (openAiKey()) {
+  if (openAiKey() && !free) {
     try {
       const style = pickJobPrompt(await loadPromptRows(), null, TRANSLATE_KEY);
       // labels  = ชื่อช่องในฟอร์ม (สั้น ตรงตัว) — ส่งทีละบรรทัดมีเลขกำกับ
@@ -106,7 +108,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "products.edit"))) {
     const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
   }
-  let body: { text?: string; texts?: unknown; to?: string; kind?: string };
+  let body: { text?: string; texts?: unknown; to?: string; kind?: string; engine?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   // ---- โหมดชุด (หลายข้อความในครั้งเดียว) ----
@@ -115,7 +117,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!listIn.some(Boolean)) return NextResponse.json({ error: "no text" }, { status: 400 });
     if (listIn.length > 400) return NextResponse.json({ error: "ส่งมาเกิน 400 ข้อความ" }, { status: 400 });
     if (listIn.join("").length > 12000) return NextResponse.json({ error: "ข้อความรวมกันยาวเกินไป (จำกัด 12000 ตัวอักษร)" }, { status: 400 });
-    return translateBatch(listIn, body.to, body.kind === "content" ? "content" : "labels");
+    return translateBatch(listIn, body.to, body.kind === "content" ? "content" : "labels", body.engine === "free");
   }
 
   const text = (body.text ?? "").trim();

@@ -16,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { useViewPref } from "@/lib/use-view-pref";
 import { listContent, listBrands, updateContent, type ContentItem, type BrandOption } from "@/app/tasks/data";
 import { useCreativeOptions } from "@/app/tasks/use-options";
+import { noteToText } from "@/lib/rich-note";
 import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import {
   stageOf, statusForStage, dateKeyOf, timeOf, toScheduledIso, localDateKey, weekStart, addDays, shortThaiDate, parseDateKey,
@@ -123,7 +124,7 @@ export function ContentPlanView({ canCreate, canEdit, canPillars, embedded = fal
     const t = q.trim().toLowerCase();
     return live.filter((c) => (!brandTab || c.brand_id === brandTab)
       && (!pillarFilter || (pillarFilter === "__none" ? !c.pillar_id : c.pillar_id === pillarFilter))
-      && (!t || `${c.title} ${c.content_no ?? ""} ${c.parent_sku_code ?? ""} ${c.brief ?? ""}`.toLowerCase().includes(t)));
+      && (!t || `${c.title} ${c.content_no ?? ""} ${c.parent_sku_code ?? ""} ${noteToText(c.brief)}`.toLowerCase().includes(t)));
   }, [live, brandTab, pillarFilter, q]);
   // 🔔 รอบเปลี่ยน: เทียบกฎกับคอนเทนต์ทุกชิ้นที่ไม่ยกเลิก (ไม่สนแนว/คำค้น — เตือนตามของจริง)
   const { rules: refreshRules, reload: reloadRefresh } = useRefreshRules();

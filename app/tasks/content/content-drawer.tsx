@@ -34,6 +34,7 @@ import { RowMenu, CSection } from "./content-ui";
 import { HashtagLibraryModal, RecommendedTimesModal, PlatformSettingsModal, CaptionTemplateSettings, CaptionConfigModal } from "./content-settings-modals";
 import { CaptionToolbar, CaptionCard, AiCaptionModal, PullCaptionModal } from "./caption-card";
 import { ContentAttachments } from "./content-attachments";
+import { ContentBriefCard } from "./content-brief";
 
 
 // drawer สินค้ากลาง (ของกลาง) — เปิดดู Parent SKU จากในคอนเทนต์ · dynamic กัน import วน
@@ -149,9 +150,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const wideScreen = useMediaQuery("(min-width: 1024px)");
   const isWide = wideScreen && drawerW >= 900;   // จอกว้าง + drawer กว้างพอ → 2 ฝั่ง · แคบ (มือถือ/ลากให้แคบ) → เรียงบน-ล่าง
   const { theme: dth, update: dthUpdate } = useDrawerTheme("content");   // ธีม drawer คอนเทนต์ (ต่อคน)
-  // แบบ A (2026-10): ฝั่งซ้ายเหลือการ์ด 3 ใบ — สินค้า (รวมแบรนด์/สี/ราคา) · รูป/วิดีโอ (รวมรูปจากงาน+อัปเอง) · ลิงก์สินค้า
+  // 2026-11: ซ้าย = รายการงานที่ต้องการ (บรีฟ + Ref) + สินค้า · ขวา = ตั้งเวลา + รูป/วิดีโอ (งานจริง) + แพลตฟอร์ม + ลิงก์สินค้า
   const CONTENT_SECTIONS = [
-    { key: "product", label: t("สินค้า", "Product") }, { key: "media", label: t("รูป / วิดีโอ", "Media") }, { key: "links", label: t("ลิงก์สินค้า", "Links") },
+    { key: "brief", label: t("รายการงานที่ต้องการ", "Work brief") },
+    { key: "product", label: t("สินค้า", "Product") }, { key: "media", label: t("งานจริงที่ใช้ลง (รูป / วิดีโอ)", "Final media") }, { key: "links", label: t("ลิงก์สินค้า", "Links") },
   ];
   const cSecOrder = orderedKeys(dth, CONTENT_SECTIONS.map((s) => s.key));
   const cOrderOf = (k: string) => cSecOrder.indexOf(k);   // ลำดับส่วน (CSS order) ตามที่ผู้ใช้จัด
@@ -680,25 +682,12 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         <div className={isWide ? "flex-1 flex min-h-0" : "flex-1 overflow-y-auto"} style={{ ...drawerBgStyle(dth), zoom: drawerZoom(dth.size) }}>
           {/* กลุ่ม ข้อมูล | เส้นแบ่ง | แคปชั่น — ตัวลากปรับขนาดทำงานในนี้ (รูปอยู่นอกกลุ่ม จะได้ลากแม่น) */}
           <div ref={bodyRef} className={isWide ? "flex-1 flex min-h-0 min-w-0" : "contents"} style={isWide && dth.swap ? { flexDirection: "row-reverse" } : undefined}>
-          {/* ───── ฝั่งกลาง: ข้อมูล + แนบงาน ───── */}
+          {/* ───── ฝั่งซ้าย: รายการงานที่ต้องการ + สินค้า ───── */}
           <div className={`flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} ${isWide ? "overflow-y-auto min-w-0" : ""}`} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
-            {/* status + schedule + assignee — ปักไว้บนสุดเสมอ */}
-            {/* ตั้งเวลาโพสต์ — เด่น ปักบนสุด · (สถานะ/ผู้รับผิดชอบ ย้ายไปจัดการที่งานย่อยแทน) */}
-            <div style={{ order: -1 }} className="bg-violet-50 border border-violet-200 rounded-xl p-3">
-              <div className="flex items-center justify-between">
-                <label className="text-sm font-semibold text-violet-800 flex items-center gap-1.5">🗓 {t("ตั้งเวลาโพสต์", "Schedule Post")}</label>
-                <button type="button" onClick={() => setRecOpen(true)} className="text-[11px] text-violet-700 hover:underline">⚙️ {t("เวลาแนะนำ", "Suggested times")}</button>
-              </div>
-              <div className="mt-1.5"><ERPDateTime24 value={scheduledAt} onChange={setScheduledAt} /></div>
-              {schedRec && (
-                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] text-violet-400">💡 {t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
-                  {schedRec.items.map((it) => (
-                    <button key={it.time} type="button" onClick={() => applyRecommendedTime(it.time)} title={it.note || t("เวลาแนะนำ", "Suggested time")} className="inline-flex items-center gap-0.5 text-[11px] text-violet-700 bg-white border border-violet-200 rounded-full px-2.5 py-1 hover:bg-violet-100">{it.time}{it.note ? <span className="text-violet-300">ⓘ</span> : null}</button>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* ───── รายการงานที่ต้องการ (บรีฟคุยกับพนักงาน + Ref รูป/ลิงก์) — บนสุดฝั่งซ้าย ───── */}
+            {!isHidden(dth, "brief") && (
+              <ContentBriefCard key={d.id} style={{ order: -1 }} contentId={contentId} brief={d.brief} refImageKeys={d.ref_image_keys ?? []} refLinks={d.ref_links ?? []} pushToast={pushToast} />
+            )}
 
             {/* ───── การ์ดสินค้า: สรุปสั้น (รูป + รหัส + ชื่อ + แบรนด์ + สี + ราคาบรรทัดเดียว) · กด ✏️ เพื่อแก้ ───── */}
             {!isHidden(dth, "product") && (
@@ -802,6 +791,35 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 </div>
               )}
             </div>)}
+          </div>
+
+          {/* ───── เส้นแบ่งลากได้ (เฉพาะจอกว้าง) ───── */}
+          {isWide && (
+            <div onMouseDown={startDrag} title={t("ลากเพื่อปรับขนาด", "Drag to resize")} className="w-1.5 shrink-0 cursor-col-resize bg-slate-100 hover:bg-violet-300 active:bg-violet-400 transition-colors relative">
+              <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
+            </div>
+          )}
+
+          {/* ───── ฝั่งขวา: งานจริง + ตั้งเวลา + แคปชั่นแยกแพลตฟอร์ม ───── */}
+          <div className={isWide ? `flex-1 overflow-y-auto ${densityCls(dth.density)} min-w-0 bg-slate-50/40` : `${densityCls(dth.density)} bg-slate-50/40 border-t border-slate-200`}>
+            {/* งานจริงที่ใช้ลง + ตั้งเวลาโพสต์ — ย้ายมาฝั่งขวา (ซ้าย = บรีฟคุยงาน) */}
+            <div className="space-y-3 mb-3">
+            {/* ตั้งเวลาโพสต์ — เด่น ปักบนสุด · (สถานะ/ผู้รับผิดชอบ ย้ายไปจัดการที่งานย่อยแทน) */}
+            <div className="bg-violet-50 border border-violet-200 rounded-xl p-3">
+              <div className="flex items-center justify-between">
+                <label className="text-sm font-semibold text-violet-800 flex items-center gap-1.5">🗓 {t("ตั้งเวลาโพสต์", "Schedule Post")}</label>
+                <button type="button" onClick={() => setRecOpen(true)} className="text-[11px] text-violet-700 hover:underline">⚙️ {t("เวลาแนะนำ", "Suggested times")}</button>
+              </div>
+              <div className="mt-1.5"><ERPDateTime24 value={scheduledAt} onChange={setScheduledAt} /></div>
+              {schedRec && (
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <span className="text-[11px] text-violet-400">💡 {t("เวลาแนะนำ", "Suggested")} ({schedRec.label}):</span>
+                  {schedRec.items.map((it) => (
+                    <button key={it.time} type="button" onClick={() => applyRecommendedTime(it.time)} title={it.note || t("เวลาแนะนำ", "Suggested time")} className="inline-flex items-center gap-0.5 text-[11px] text-violet-700 bg-white border border-violet-200 rounded-full px-2.5 py-1 hover:bg-violet-100">{it.time}{it.note ? <span className="text-violet-300">ⓘ</span> : null}</button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* ───── การ์ดรูป/วิดีโอ: คลังเดียว (รูปจากงาน + อัปเอง + วิดีโอ) · กด ＋ เพื่อเพิ่ม/จัดการ ───── */}
             {!isHidden(dth, "media") && (
@@ -874,7 +892,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                     <span className="bg-slate-100 rounded-full px-2 py-0.5">{t("อัปเอง", "Own")} {ownFiles}</span>
                     {linkFiles > 0 && <span className="bg-slate-100 rounded-full px-2 py-0.5">{t("ลิงก์", "Links")} {linkFiles}</span>}
                     {pathItems.length > 0 && <span className="bg-slate-100 rounded-full px-2 py-0.5">Path {pathItems.length}</span>}
-                    <span className="ml-auto text-slate-300">{t("เลือกรูปที่จะลงแต่ละแพลตฟอร์มได้ที่การ์ดฝั่งขวา", "Pick images per platform on the right")}</span>
+                    <span className="ml-auto text-slate-300">{t("เลือกรูปที่จะลงแต่ละแพลตฟอร์มได้ที่การ์ดด้านล่าง", "Pick images per platform in the cards below")}</span>
                   </div>
                   {mediaAdd && (
                     <div className="mt-3 pt-3 border-t border-slate-100">
@@ -884,39 +902,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 </>
               )}
             </div>)}
-
-            {/* ลิงก์สินค้า (ปลายทางขาย) */}
-            {!isHidden(dth, "links") && (
-            <CSection title={cLabelOf("links")} order={cOrderOf("links")} collapsed={coll("links")} onToggle={() => toggleColl("links")}
-              right={links.length > 0 ? <span className="text-[11px] text-slate-400">{links.length}</span> : undefined}>
-              <div className="space-y-2">
-                {links.map((l, i) => (
-                  <div key={i} className="flex gap-2">
-                    <select value={l.platform} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, platform: e.target.value } : x))} className="h-9 border border-slate-200 rounded-lg px-2 text-sm w-32">
-                      {platforms.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
-                    </select>
-                    <ERPInput value={l.url} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, url: e.target.value } : x))} placeholder="https://..." />
-                    <button onClick={() => setLinks((ls) => ls.filter((_, j) => j !== i))} className="h-9 px-2 text-slate-400 hover:text-red-500">✕</button>
-                  </div>
-                ))}
-                <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
-                {parent && <p className="text-[11px] text-slate-400">🔗 {t(`ลิงก์ Shopee / Lazada / TikTok จะบันทึกกลับไปที่ Parent ${parent.code} ด้วย — คอนเทนต์ครั้งหน้าของสินค้านี้มีลิงก์ให้ทันที`, `Shopee / Lazada / TikTok links are saved back to Parent ${parent.code} — future content gets them automatically`)}</p>}
-              </div>
-            </CSection>)}
-
-            {/* published url — ปักไว้ล่างสุดเสมอ */}
-            {(status === "published") && <div style={{ order: 999 }}><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
-          </div>
-
-          {/* ───── เส้นแบ่งลากได้ (เฉพาะจอกว้าง) ───── */}
-          {isWide && (
-            <div onMouseDown={startDrag} title={t("ลากเพื่อปรับขนาด", "Drag to resize")} className="w-1.5 shrink-0 cursor-col-resize bg-slate-100 hover:bg-violet-300 active:bg-violet-400 transition-colors relative">
-              <div className="absolute inset-y-0 -left-1.5 -right-1.5" />
             </div>
-          )}
 
-          {/* ───── ฝั่งขวา: แคปชั่นแยกแพลตฟอร์ม ───── */}
-          <div className={isWide ? `flex-1 overflow-y-auto ${densityCls(dth.density)} min-w-0 bg-slate-50/40` : `${densityCls(dth.density)} bg-slate-50/40 border-t border-slate-200`}>
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <p className="text-sm font-semibold text-slate-700">{t("แพลตฟอร์ม", "Platforms")} <span className="text-[11px] font-normal text-slate-400">{caps.length} {t("ช่อง", "channels")} · {t("โพสต์แล้ว", "posted")} {doneCount}/{totalCount}</span></p>
               <CaptionToolbar pinned={pinnedTools} onSavePinned={savePinnedTools} actions={[
@@ -990,6 +977,29 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   pageName={(c.platform === "facebook" || c.platform === "instagram") ? (metaStatus.facebook?.page_name ?? brandLabel) : brandLabel} avatarUrl={brands.find((b) => b.id === brandId)?.logo_url ?? null} />)}
               </div>
             )}
+            {/* ลิงก์สินค้า (ใช้ในแคปชั่น {link}) + ลิงก์โพสต์ที่เผยแพร่ — ท้ายฝั่งขวา */}
+            <div className="mt-3 space-y-3">
+            {/* ลิงก์สินค้า (ปลายทางขาย) */}
+            {!isHidden(dth, "links") && (
+            <CSection title={cLabelOf("links")} order={cOrderOf("links")} collapsed={coll("links")} onToggle={() => toggleColl("links")}
+              right={links.length > 0 ? <span className="text-[11px] text-slate-400">{links.length}</span> : undefined}>
+              <div className="space-y-2">
+                {links.map((l, i) => (
+                  <div key={i} className="flex gap-2">
+                    <select value={l.platform} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, platform: e.target.value } : x))} className="h-9 border border-slate-200 rounded-lg px-2 text-sm w-32">
+                      {platforms.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
+                    <ERPInput value={l.url} onChange={(e) => setLinks((ls) => ls.map((x, j) => j === i ? { ...x, url: e.target.value } : x))} placeholder="https://..." />
+                    <button onClick={() => setLinks((ls) => ls.filter((_, j) => j !== i))} className="h-9 px-2 text-slate-400 hover:text-red-500">✕</button>
+                  </div>
+                ))}
+                <button onClick={() => setLinks((ls) => [...ls, { platform: "shopee", url: "" }])} className="text-sm text-violet-700 hover:underline">＋ {t("เพิ่มลิงก์", "Add Link")}</button>
+                {parent && <p className="text-[11px] text-slate-400">🔗 {t(`ลิงก์ Shopee / Lazada / TikTok จะบันทึกกลับไปที่ Parent ${parent.code} ด้วย — คอนเทนต์ครั้งหน้าของสินค้านี้มีลิงก์ให้ทันที`, `Shopee / Lazada / TikTok links are saved back to Parent ${parent.code} — future content gets them automatically`)}</p>}
+              </div>
+            </CSection>)}
+            {/* published url — ปักไว้ล่างสุดเสมอ */}
+            {(status === "published") && <div><label className="text-xs text-slate-400">{t("ลิงก์โพสต์ที่เผยแพร่", "Published Post URL")}</label><ERPInput value={publishedUrl} onChange={(e) => setPublishedUrl(e.target.value)} placeholder="https://..." /></div>}
+            </div>
           </div>
           </div>
         </div>

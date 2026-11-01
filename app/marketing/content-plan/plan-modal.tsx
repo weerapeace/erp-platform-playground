@@ -14,6 +14,8 @@ import { tr } from "@/lib/lang";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { FileMultiInput } from "@/components/file-multi-input";
+import { RichTextEditor } from "@/components/rich-text";
+import { noteToHtml, noteToText, isEmptyNote } from "@/lib/rich-note";
 import { ERPDateTime24 } from "@/components/form";
 import { PlatformIcon } from "@/components/platform-icon";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -51,7 +53,7 @@ function toDraft(c: ContentItem | null, defaults: PlanDefaults): Draft {
     platforms: (c.platforms ?? []).filter((p) => !(c.placements ?? []).some((x) => parsePlacement(x)?.platform === p)),
     date: dateKeyOf(c.scheduled_at) ?? "", time: timeOf(c.scheduled_at),
     parent: c.parent_sku_id ? { id: c.parent_sku_id, code: c.parent_sku_code ?? "", name: c.parent_sku_name ?? "", image_url: c.parent_sku_image_url ?? null } : null,
-    brief: c.brief ?? "", ref_image_keys: c.ref_image_keys ?? [],
+    brief: noteToHtml(c.brief), ref_image_keys: c.ref_image_keys ?? [],
   };
 }
 
@@ -120,7 +122,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
     post_type: d.post_types.length ? joinPostTypes(d.post_types) : null,
     placements: d.placements, platforms: platformsFromPlacements(d.placements, d.platforms),   // ช่องทางรวม (ปฏิทิน/เป้า/แคปชั่นเดิมใช้)
     scheduled_at: d.date ? toScheduledIso(d.date, d.time || "10:00") : null,
-    parent_sku_id: d.parent?.id ?? null, brief: d.brief.trim() || null, ref_image_keys: d.ref_image_keys,
+    parent_sku_id: d.parent?.id ?? null, brief: isEmptyNote(d.brief) ? null : d.brief, ref_image_keys: d.ref_image_keys,
   });
 
   const save = async (): Promise<string | null> => {
@@ -155,7 +157,9 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
     try {
       const t = await createTask({
         title: d.title.trim(), brand_id: d.brand_id || null, parent_sku_id: d.parent?.id ?? null, platforms: platformsFromPlacements(d.placements, d.platforms),
-        description: d.brief.trim() || null, reference_images: d.ref_image_keys, due_date: d.date || null,
+        // บรีฟเป็นโน้ตจัดรูปแบบ → รายละเอียดงานเป็นข้อความล้วน (bullet = "- ") + ต่อท้ายลิงก์ Ref ที่ใส่ไว้ในป๊อปโพสต์
+        description: [noteToText(d.brief), ...((item?.ref_links ?? []).length ? ["", "Ref:", ...(item?.ref_links ?? []).map((l) => l.url)] : [])].join("\n").trim() || null,
+        reference_images: d.ref_image_keys, due_date: d.date || null,
       });
       await updateContent(id, { task_id: t.id });
       toast.success(tr(`ส่งเป็นงาน ${t.task_no} ให้ทีม Creative แล้ว`, `Sent as task ${t.task_no} to the Creative team`));
@@ -232,9 +236,9 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
               placeholder={t("ไอเดียคืออะไร? เช่น BBP08 แมตช์ชุดไปเที่ยว", "What's the idea? e.g. BBP08 travel outfit match")}
               className="w-full border-0 border-b border-transparent bg-transparent px-0 py-1 text-lg font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 hover:border-slate-200 focus:border-blue-500 focus:outline-none focus:ring-0 disabled:text-slate-700" />
           </div>
-          <textarea value={d.brief} onChange={(e) => set({ brief: e.target.value })} disabled={ro} rows={3} maxLength={3000}
-            placeholder={t("บรีฟ: อยากได้รูป/คลิปแนวไหน (ไม่บังคับ) — เช่น ถ่ายกลางแจ้ง โทนอุ่น · เปิดคลิปด้วยฉากเทของออกจากกระเป๋า 3 วิแรก", "Brief: what kind of photo/clip (optional) — e.g. outdoor shoot, warm tone · open with emptying the bag in the first 3 seconds")}
-            className="w-full resize-y rounded-lg border-0 bg-slate-50 px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:text-slate-600" />
+          {/* บรีฟ = โน้ตจัดรูปแบบ (ช่องเดียวกับ "รายการงานที่ต้องการ" ในป๊อปโพสต์) */}
+          <RichTextEditor toolbar="basic" value={d.brief} onChange={(v) => set({ brief: v })} editable={!ro} minHeight={72}
+            placeholder={t("บรีฟ: อยากได้รูป/คลิปแนวไหน (ไม่บังคับ)", "Brief: what kind of photo/clip (optional)")} />
         </div>
 
         {/* ── คุณสมบัติ: ป้ายซ้าย : ค่าขวา ── */}

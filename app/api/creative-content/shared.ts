@@ -19,13 +19,16 @@ export function validateContentFields(body: Record<string, unknown>): string | n
   // ── ช่องฝั่งวางแผน (หน้า /marketing/content-plan) ──
   if (body.goal != null && body.goal !== "" && !CONTENT_GOALS.has(String(body.goal)))
     return "เป้าหมายคอนเทนต์ไม่ถูกต้อง";
-  if (body.brief != null && typeof body.brief === "string" && body.brief.length > 3000)
-    return "บรีฟยาวเกินไป (ไม่เกิน 3,000 ตัวอักษร)";
+  // บรีฟเก็บเป็น HTML จากกล่องพิมพ์จัดรูปแบบ (แท็กกินที่) — เผื่อไว้ 20,000
+  if (body.brief != null && typeof body.brief === "string" && body.brief.length > 20000)
+    return "บรีฟยาวเกินไป";
   if (body.ref_image_keys != null) {
     if (!Array.isArray(body.ref_image_keys) || body.ref_image_keys.some((k) => typeof k !== "string" || !k || k.length > 500))
       return "รูปอ้างอิงไม่ถูกต้อง";
     if (body.ref_image_keys.length > 12) return "รูปอ้างอิงได้สูงสุด 12 รูป";
   }
+  if (body.ref_links != null && (!Array.isArray(body.ref_links) || body.ref_links.length > 12))
+    return "ลิงก์อ้างอิงไม่ถูกต้อง (สูงสุด 12 ลิงก์)";
   // ลงที่ไหน แบบแบ่งประเภท "ประเภท:ช่องทาง" เช่น story:instagram
   if (body.placements != null) {
     if (!Array.isArray(body.placements) || body.placements.length > 60 || body.placements.some((k) => typeof k !== "string" || !/^[a-z0-9_-]{1,40}:[a-z0-9_-]{1,60}$/i.test(k)))
@@ -41,7 +44,7 @@ export const SELECT = `id, content_no, title, task_id, campaign_id, brand_id, sk
   platforms, status, approval_status, scheduled_at, published_at, published_url, product_links, posted_links, post_status, platform_images, platform_formats, note,
   discount_value, discount_is_percent, color_source,
   is_template, template_icon, is_active, created_at, updated_at, assignee_id, assignee_ids,
-  pillar_id, goal, brief, ref_image_keys, placements,
+  pillar_id, goal, brief, ref_image_keys, ref_links, placements,
   brand:brands!brand_id(name, color, shop_channels),
   campaign:erp_creative_campaigns!campaign_id(name),
   sku:skus_v2!sku_id(code, name_th, color, color_th, list_price, fake_price),
