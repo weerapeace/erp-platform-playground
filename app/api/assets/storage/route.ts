@@ -5,11 +5,13 @@
  *
  * แยกยอดตาม "โฟลเดอร์ชั้นแรก" ของ key (เช่น products/, creative-tasks/, avatars/)
  * → เห็นว่าอะไรกินพื้นที่ · ไฟล์ที่ไม่มีโฟลเดอร์นับรวมเป็น "(root)"
+ * + others = Supabase Storage (แยก bucket) + จำนวนที่ผูก Google Drive — นับสดทุกครั้ง (lib/storage-usage-server)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { getR2Binding, r2ListObjects, R2_BUCKET } from "@/lib/r2";
+import { loadOtherStorageUsage } from "@/lib/storage-usage-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,8 +35,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const refresh = new URL(request.url).searchParams.get("refresh") === "1";
 
   if (!refresh) {
-    const { data } = await admin.from("ui_config").select("value").eq("key", CFG_KEY).maybeSingle();
-    return NextResponse.json({ data: (data?.value as R2Usage | undefined) ?? null, error: null });
+    const [{ data }, others] = await Promise.all([
+      admin.from("ui_config").select("value").eq("key", CFG_KEY).maybeSingle(),
+      loadOtherStorageUsage(admin),
+    ]);
+    return NextResponse.json({ data: (data?.value as R2Usage | undefined) ?? null, others, error: null });
   }
 
   // นับใหม่ — ต้องมีสิทธิ์จัดการคลัง (งานหนัก ไม่ให้ใครกดก็ได้)

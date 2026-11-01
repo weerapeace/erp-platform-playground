@@ -7,6 +7,7 @@ import { withImageWidth } from "@/lib/r2-image";
 import { type AssetRow } from "@/app/api/assets/shared";
 import { HoverPreview } from "@/components/hover-image";
 import { VideoThumb } from "@/components/video-thumb";
+import { StorageProviderBadge } from "@/components/storage-rules";
 import { isImage, TYPE_ICON, driveFolderNameOf } from "./asset-shared";
 
 export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSameFolder }: {
@@ -62,10 +63,13 @@ export function AssetCard({ a, selected, selectionMode, onToggle, onOpen, onSame
               : a.usage_count > 0 ? ` · ${t("ใช้อยู่", "in use at")} ${a.usage_count} ${t("ที่", "places")}` : a.status === "active" ? t(" · ยังไม่ถูกใช้", " · not used yet") : ""}
           </p>
           <div className="flex items-center gap-1.5 shrink-0">
-            {/^https?:\/\//i.test(a.master_url ?? "") && (
+            {/* ต้นฉบับอยู่ Drive = ป้ายที่เก็บกลาง (กดเปิดได้) · ลิงก์อื่น (NAS ฯลฯ) = ปุ่มเปิดธรรมดา */}
+            {/drive\.google\.com|\/folders\//i.test(a.master_url ?? "") ? (
+              <StorageProviderBadge provider="drive" small href={(a.master_url ?? "").trim()} title={t("ไฟล์ต้นฉบับอยู่ Google Drive — กดเพื่อเปิด", "Source files are on Google Drive — click to open")} />
+            ) : /^https?:\/\//i.test(a.master_url ?? "") && (
               <a href={(a.master_url ?? "").trim()} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
-                title={t("เปิดโฟลเดอร์/ไฟล์ต้นฉบับบน Google Drive", "Open source folder/file on Google Drive")}
-                className="text-[10px] text-emerald-600 hover:underline">↗ {/drive\.google\.com|\/folders\//i.test(a.master_url ?? "") ? "Drive" : t("เปิด", "Open")}</a>
+                title={t("เปิดไฟล์ต้นฉบับ", "Open source file")}
+                className="text-[10px] text-emerald-600 hover:underline">↗ {t("เปิด", "Open")}</a>
             )}
             {onSameFolder && a.source === "artwork" && /\/folders\//.test(a.master_url ?? "") && (
               <button type="button" title={t("ดูรูปทั้งหมดในโฟลเดอร์ Drive เดียวกัน", "View all images in the same Drive folder")}

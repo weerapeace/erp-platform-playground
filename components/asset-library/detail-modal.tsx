@@ -14,6 +14,7 @@ import { PrintFileSlot } from "./print-file-slot";
 import { Spinner, LoadingOverlay } from "@/components/spinner";
 import { DriveFolderFiles } from "@/components/drive-folder-files";
 import { HelpButton } from "@/components/help-guides";
+import { StorageProviderBadge } from "@/components/storage-rules";
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import { type LookupItem, isImage, TYPE_ICON, driveFolderNameOf, commonNameSeed, uploadArtworkToDrive, useArtworkPathRule, pathMatchesRule, useDriveFolderMaps, brandFolderPath } from "./asset-shared";
 import { ArtTypeMultiSelect, PrintItemsField, SizesEditor, ParentSkuField, TagPickerField, Meta, UsageList } from "./asset-fields";
@@ -330,6 +331,13 @@ export function DetailModal({ id, actor, collections, artTypes, onClose, onChang
               <tbody>
                 <Meta label={t("ชนิด", "Type")} value={ASSET_TYPE_LABEL[d.asset_type]} />
                 <Meta label={t("ขนาด", "Size")} value={formatBytes(d.size_bytes)} />
+                {/* ที่เก็บ (ป้ายกลาง) — ตัวไฟล์/รูปตัวอย่างในคลังอยู่ R2 · ต้นฉบับอยู่ Drive ถ้าผูกโฟลเดอร์ไว้ */}
+                <Meta label={t("ที่เก็บ", "Stored in")} value={
+                  <span className="inline-flex items-center gap-1.5 justify-end flex-wrap">
+                    <StorageProviderBadge provider="r2" title={t("ไฟล์ในคลัง / รูปตัวอย่าง", "Library file / preview")} />
+                    {/drive\.google\.com/i.test(d.master_url ?? "") && <StorageProviderBadge provider="drive" href={d.master_url} title={t("ไฟล์ต้นฉบับบน Google Drive", "Source files on Google Drive")} />}
+                  </span>
+                } />
                 {d.width && d.height ? <Meta label={t("ความละเอียด", "Resolution")} value={`${d.width} × ${d.height}`} /> : null}
                 <Meta label={t("ผู้อัป", "Uploaded by")} value={d.uploaded_by ?? "—"} />
                 <Meta label={t("วันที่อัป", "Uploaded at")} value={new Date(d.created_at).toLocaleString("th-TH")} />

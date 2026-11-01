@@ -22,6 +22,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/skus", prefixes: ["products."], keys: ["attachments.upload", "attachments.delete"] },
   { href: "/master/parent-skus", sameAs: "/master/skus" },
   { href: "/master/assets", prefixes: ["assets."] },
+  { href: "/master/storage-rules", sameAs: "/master/assets" },
   { href: "/website", prefixes: ["website."] },
   { href: "/marketing/skus", prefixes: ["marketing.sku."] },
 ];

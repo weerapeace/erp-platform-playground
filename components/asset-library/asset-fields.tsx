@@ -1,6 +1,6 @@
 "use client";
 // คลังไฟล์: ช่องกรอกที่ฟอร์มต่าง ๆ ใช้ร่วม (แท็ก · อัลบั้ม · ชนิดงาน · ขนาด · รายการพิมพ์ · Parent SKU · ที่ใช้งาน) — แยกจาก index.tsx (Y1)
-import { useState, useEffect } from "react";
+import { useState, useEffect, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
@@ -12,7 +12,7 @@ import { ParentSkuMultiPickerModal } from "@/components/parent-sku-multi-picker"
 import type { AssetCollection } from "@/app/api/assets/collections/route";
 import { type LookupItem, sizeText, SIZE_UNITS } from "./asset-shared";
 
-export function Meta({ label, value }: { label: string; value: string }) {
+export function Meta({ label, value }: { label: string; value: ReactNode }) {
   return (
     <tr>
       <td className="py-1 text-slate-500">{label}</td>

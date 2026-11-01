@@ -3,12 +3,17 @@
 // การ์ด "พื้นที่ที่ใช้ใน R2" — ตัวเลขจริงจากบัคเก็ต (นับด้วย ListObjectsV2 ฝั่ง server)
 // โชว์ผลที่นับไว้ล่าสุด (เร็ว) + ปุ่มนับใหม่ (งานหนัก → วิ่งเบื้องหลังผ่าน runBackgroundTask)
 // แยกยอดตามโฟลเดอร์ชั้นแรก → เห็นว่าอะไรกินพื้นที่
+// + แถวที่สอง: Supabase Storage + จำนวนที่ผูก Google Drive (นับสด) + ลิงก์ไปหน้ากฎที่เก็บไฟล์
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { formatBytes } from "@/lib/assets";
 import { useT } from "@/components/i18n";
 import { runBackgroundTask } from "@/lib/background-tasks";
+import { Icon } from "@/components/icon";
+import { StorageProviderBadge } from "@/components/storage-rules";
+import type { OtherStorageUsage } from "@/lib/storage-policy";
 import { CanvasCleanupModal } from "./canvas-cleanup-modal";
 
 type Usage = {
@@ -41,10 +46,11 @@ export function StorageCard({ canManage, pushToast }: { canManage: boolean; push
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(false);   // กางรายละเอียดรายโฟลเดอร์
   const [cleanupOpen, setCleanupOpen] = useState(false);   // ป๊อปล้างรูปกระดานที่ไม่ได้ใช้
+  const [others, setOthers] = useState<OtherStorageUsage | null>(null);   // Supabase + Drive
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { const j = await apiFetch("/api/assets/storage").then((r) => r.json()); setUsage((j.data as Usage) ?? null); }
+    try { const j = await apiFetch("/api/assets/storage").then((r) => r.json()); setUsage((j.data as Usage) ?? null); setOthers((j.others as OtherStorageUsage) ?? null); }
     catch { /* เงียบ — ไม่ให้พังหน้าคลัง */ } finally { setLoading(false); }
   }, []);
   useEffect(() => { void load(); }, [load]);
@@ -92,6 +98,22 @@ export function StorageCard({ canManage, pushToast }: { canManage: boolean; push
           </span>
         )}
       </div>
+      {others && (others.supabase || others.drive) && (
+        <div className="mt-1 flex items-center gap-x-3 gap-y-1 flex-wrap text-[11px] text-slate-500">
+          {others.supabase && (
+            <span className="inline-flex items-center gap-1.5" title={others.supabase.buckets.map((b) => `${b.bucket_id}: ${formatBytes(b.total_bytes)} (${b.total_objects})`).join("\n")}>
+              <StorageProviderBadge provider="supabase" small /><b className="text-slate-700">{formatBytes(others.supabase.total_bytes)}</b>· {others.supabase.total_objects.toLocaleString()} {t("ไฟล์", "files")}
+            </span>
+          )}
+          {others.drive && (
+            <span className="inline-flex items-center gap-1.5">
+              <StorageProviderBadge provider="drive" small />
+              {t(`ผูกไว้ในคลัง ${others.drive.asset_links.toLocaleString()} รายการ · โฟลเดอร์งาน ${others.drive.task_folders.toLocaleString()}`, `${others.drive.asset_links.toLocaleString()} library links · ${others.drive.task_folders.toLocaleString()} task folders`)}
+            </span>
+          )}
+          <Link href="/master/storage-rules" className="ml-auto inline-flex items-center gap-1 text-violet-600 hover:underline"><Icon value="i:database" />{t("กฎที่เก็บไฟล์", "Storage rules")} →</Link>
+        </div>
+      )}
       {usage?.truncated && <p className="mt-1 text-[10px] text-amber-600">⚠ {t("ไฟล์เยอะมาก — ตัวเลขนี้ยังนับไม่ครบทั้งหมด", "Very many files — this total is not complete")}</p>}
       {open && usage && (
         <div className="mt-2 space-y-1 border-t border-slate-100 pt-2">
