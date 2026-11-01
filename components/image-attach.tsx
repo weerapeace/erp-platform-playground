@@ -4,6 +4,7 @@
 // ImageAttach (ของกลาง) — แนบรูปหลายรูป: ลากวาง / Ctrl+V / เลือกไฟล์
 // ย่อขนาด ≤ 1600px อัตโนมัติก่อนอัปขึ้น R2 (คมพอสำหรับโพสต์/พิมพ์ย่อ) แล้วเรียก onAttach เก็บเป็น attachment
 // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (components/duplicate-upload) — ใช้กับ ImageAttach + ImageAttachKeys
+// ระหว่างอัป → ของกลาง UploadProgress (ขั้น ย่อรูป/ตรวจซ้ำ/อัปโหลด + รูปที่เท่าไร) แทนข้อความ "กำลังอัปโหลด..."
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
@@ -12,6 +13,7 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { useT } from "@/components/i18n";
 // ⚠️ import วนกัน (duplicate-upload ใช้ prepareResizedImage/uploadPreparedImage จากไฟล์นี้) — ปลอดภัยเพราะเรียกใช้ในฟังก์ชันเท่านั้น ไม่มีโค้ดระดับบนสุดที่ใช้ของอีกไฟล์
 import { askDuplicateUploads, uploadImagesWithDupCheck } from "@/components/duplicate-upload";
+import { UploadProgress, imageStepProgress, type UploadProgressState } from "@/components/upload-progress";
 
 type Img = { id: string; r2_key: string | null; file_name?: string | null };
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
@@ -63,7 +65,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
   hideList?: boolean; // true = โชว์แค่ช่องอัปโหลด (รูปไปโชว์ที่อื่นแล้ว เช่น คลังรูปของคอนเทนต์ — กันโชว์ซ้ำ)
 }) {
   const t = useT();
-  const [busy, setBusy] = useState(false);
+  const [up, setUp] = useState<UploadProgressState | null>(null);   // กำลังอัป → ของกลาง UploadProgress
   const [lbIndex, setLbIndex] = useState(-1);   // รูปที่กำลังเปิดดูเต็มจอ (-1 = ปิด)
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -71,24 +73,28 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
   const handleFiles = async (files: FileList | File[]) => {
     const imgs = Array.from(files).filter((f) => f && f.type.startsWith("image/")) as File[];
     if (!imgs.length) return;
-    setBusy(true);
     try {
       const cands: { file: File; original: File }[] = [];
-      for (const f of imgs) {
+      for (const [i, f] of imgs.entries()) {
+        setUp(imageStepProgress("prepare", f, i + 1, imgs.length));
         try { cands.push({ file: await prepareResizedImage(f, maxSize), original: f }); }
         catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
       }
+      if (cands.length) setUp(imageStepProgress("check", cands[0].original, 1, cands.length));
       // onAttach ต้องได้ชื่อไฟล์/ชนิด/ขนาดต่อรูป → ใช้ askDuplicateUploads (ได้แผนต่อไฟล์) แทนทางลัดที่คืนแค่ key
       const plan = await askDuplicateUploads(cands, { existingKeys: images.flatMap((im) => (im.r2_key ? [im.r2_key] : [])) });
+      const toSend = (plan ?? []).filter((p) => !p.reuse).length;
+      let sent = 0;
       for (const { item, reuse } of plan ?? []) {
         try {
+          if (!reuse) setUp(imageStepProgress("upload", item.original, ++sent, toSend));
           await onAttach(reuse
             ? { r2_key: reuse.r2_key, file_name: item.original.name, content_type: item.file.type, size_bytes: reuse.size_bytes ?? item.file.size }
             : await uploadPreparedImage(item.file, { folder: "creative-tasks", fileName: item.original.name }));
         } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
       }
     } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
-    finally { setBusy(false); }
+    finally { setUp(null); }
   };
 
   // วางรูปจากคลิปบอร์ด (Ctrl+V) ขณะ component นี้แสดงอยู่
@@ -110,7 +116,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void handleFiles(e.dataTransfer.files); }}
         className="border border-dashed border-slate-300 rounded-lg p-2.5 text-center text-xs text-slate-400">
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void handleFiles(e.target.files); e.target.value = ""; }} />
-        {busy ? t("⏳ กำลังอัปโหลด...", "⏳ Uploading...") : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span></>}
+        {up ? <UploadProgress {...up} className="text-left" /> : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span></>}
       </div>
       {!hideList && images.length > 0 && (
         <div className="grid grid-cols-4 gap-2 mt-2">
@@ -140,7 +146,7 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
   disabled?: boolean;
 }) {
   const t = useT();
-  const [busy, setBusy] = useState(false);
+  const [up, setUp] = useState<UploadProgressState | null>(null);   // กำลังอัป → ของกลาง UploadProgress
   const [err, setErr] = useState<string | null>(null);
   const [lbIndex, setLbIndex] = useState(-1);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -150,16 +156,17 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
     if (disabled) return;
     const imgs = Array.from(files).filter((f) => f && f.type.startsWith("image/")) as File[];
     if (!imgs.length) return;
-    setErr(null); setBusy(true);
+    setErr(null);
     // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck) · รูปที่อยู่ในช่องนี้แล้ว → เสนอ "ข้าม"
     try {
       const r = await uploadImagesWithDupCheck(imgs, {
         folder, max: maxSize, existingKeys: valRef.current,
         onError: (_, e) => setErr("อัปโหลดรูปไม่สำเร็จ: " + e.message),
+        onProgress: setUp,
       });
       if (r?.keys.length) onChange([...valRef.current, ...r.keys]);
     } catch (e) { setErr("อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
-    finally { setBusy(false); }
+    finally { setUp(null); }
   };
 
   // วางรูปจากคลิปบอร์ด (Ctrl+V) ขณะ component นี้แสดง (ไม่ดักตอนพิมพ์ใน input/textarea)
@@ -184,7 +191,7 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
         onDrop={(e) => { e.preventDefault(); if (e.dataTransfer.files?.length) void handleFiles(e.dataTransfer.files); }}
         className="border border-dashed border-slate-300 rounded-lg p-2.5 text-center text-xs text-slate-400">
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={(e) => { if (e.target.files) void handleFiles(e.target.files); e.target.value = ""; }} />
-        {busy ? t("⏳ กำลังอัปโหลด...", "⏳ Uploading...") : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button type="button" onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span></>}
+        {up ? <UploadProgress {...up} className="text-left" /> : <>📎 {t("ลากรูปมาวาง · วาง Ctrl+V ·", "Drag images · paste Ctrl+V ·")} <button type="button" onClick={() => fileRef.current?.click()} className="text-violet-700 underline">{t("เลือกไฟล์", "choose files")}</button> <span className="text-slate-300">({t(`ย่อ ≤${maxSize}px ให้อัตโนมัติ`, `auto-shrink ≤${maxSize}px`)})</span></>}
       </div>
       {err && <p className="text-[11px] text-red-500 mt-1">{err}</p>}
       {value.length > 0 && (

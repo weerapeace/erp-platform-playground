@@ -25,6 +25,7 @@ import { ERPModal } from "@/components/modal";
 import { mountDialog } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import { prepareResizedImage, uploadPreparedImage } from "@/components/image-attach";
+import { imageStepProgress, type UploadProgressState } from "@/components/upload-progress";
 import type { DuplicateAsset } from "@/app/api/assets/find-duplicates/route";
 
 export type { DuplicateAsset };
@@ -89,20 +90,28 @@ export async function askDuplicateUploads<T extends UploadCandidate>(items: T[],
  */
 export async function uploadImagesWithDupCheck(
   files: File[],
-  opts: DuplicateCheckOptions & { folder: string; max?: number; onError?: (file: File, err: Error) => void },
+  opts: DuplicateCheckOptions & {
+    folder: string; max?: number; onError?: (file: File, err: Error) => void;
+    /** ขั้น/รูปที่กำลังทำ → โชว์ด้วย <UploadProgress {...p} /> (components/upload-progress) · ผู้เรียกล้างเองตอนเสร็จ */
+    onProgress?: (p: UploadProgressState) => void;
+  },
 ): Promise<{ keys: string[]; uploaded: number; reused: number; skipped: number } | null> {
   const imgs = files.filter((f) => f.type.startsWith("image/"));
   const cands: (UploadCandidate & { original: File })[] = [];
-  for (const f of imgs) {
+  for (const [i, f] of imgs.entries()) {
+    opts.onProgress?.(imageStepProgress("prepare", f, i + 1, imgs.length));
     try { cands.push({ file: await prepareResizedImage(f, opts.max ?? 1600), original: f }); }
     catch (e) { opts.onError?.(f, e as Error); }
   }
+  if (cands.length) opts.onProgress?.(imageStepProgress("check", cands[0].original, 1, cands.length));
   const plan = await askDuplicateUploads(cands, opts);
   if (!plan) return null;
   const keys: string[] = [];
   let uploaded = 0, reused = 0;
+  const toSend = plan.filter((p) => !p.reuse).length;
   for (const { item, reuse } of plan) {
     if (reuse) { keys.push(reuse.r2_key); reused++; continue; }
+    opts.onProgress?.(imageStepProgress("upload", item.original, uploaded + 1, toSend));
     try { keys.push((await uploadPreparedImage(item.file, { folder: opts.folder, fileName: item.original.name })).r2_key); uploaded++; }
     catch (e) { opts.onError?.(item.original, e as Error); }
   }

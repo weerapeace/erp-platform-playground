@@ -11,7 +11,7 @@
  *   🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด — ตั้งเฉพาะรุ่นนี้ · 📐 ช่องใส่ของ (ของตัวสินค้า ทุกร้านเห็นเหมือนกัน · components/compartments-editor)
  *   ⚠️ ต้องแก้ — กฎกลาง lib/website-listing-health (ตัวเดียวกับป้ายเหลืองในหน้าสินค้าบนเว็บ) + ปุ่มพาไปแก้
  * เว้นว่าง = ใช้ของ ERP / ค่ากลางตามเดิม
- * ของกลาง: AssetPicker · uploadImagesWithDupCheck (ถามรูปซ้ำ) · MediaUploadField · PersonalizeEditor · ProductBannersEditor · footer-save (ปุ่มบันทึกแถบล่าง) · ColorSwatchButton
+ * ของกลาง: AssetPicker · uploadImagesWithDupCheck (ถามรูปซ้ำ) · UploadProgress (แถบกำลังอัปในแถว) · MediaUploadField · PersonalizeEditor · ProductBannersEditor · footer-save (ปุ่มบันทึกแถบล่าง) · ColorSwatchButton
  * API: /api/parent-web-listings (guardApi products.edit + audit + ล้างแคชเว็บร้าน · ฟิลด์ชุดเดียวกับ lib/website-listing-patch)
  */
 import { useEffect, useState, useCallback, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -31,6 +31,7 @@ import { HERO_SIZE_HINT, heroOfSku, type ProductHero } from "@/lib/website-hero"
 import { MediaUploadField, type MediaValue } from "@/components/media-upload-field";
 import { NAME_RULE_EXCLUSIVE, type NameRuleFlag } from "@/lib/website-field-map";
 import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
+import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { useFooterSave } from "@/components/footer-save";
@@ -488,6 +489,7 @@ export function ParentWebListings({
   const fileRef = useRef<HTMLInputElement>(null);
   const uploadTo = useRef<{ shopId: string; target: string } | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [upProgress, setUpProgress] = useState<UploadProgressState | null>(null);
   const startUpload = (sid: string, target: string) => {
     uploadTo.current = { shopId: sid, target };
     fileRef.current?.click();
@@ -527,6 +529,7 @@ export function ParentWebListings({
         target: s ? `${where} (${s.shopName})` : where,
         existingKeys: here,
         onError: (f, e) => toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${e.message}`),
+        onProgress: setUpProgress,
       });
       if (r?.keys.length) {
         addImages(t.shopId, t.target, r.keys);
@@ -535,8 +538,12 @@ export function ParentWebListings({
       } else if (r?.skipped) toast.info("รูปที่เลือกอยู่ในช่องนี้แล้ว — ไม่ได้เพิ่มซ้ำ");
     } finally {
       setUploading(null);
+      setUpProgress(null);
     }
   };
+  /** แถบ "กำลังอัปโหลด" ของกลาง — โชว์เฉพาะช่องที่กำลังอัป (แถวสี / รูปบนเว็บ) */
+  const uploadProgressFor = (sid: string, target: string) =>
+    uploading === `${sid}:${target}` && upProgress ? <UploadProgress {...upProgress} className="rounded-lg border border-blue-100 bg-blue-50/50 px-2.5 py-1.5" /> : null;
   const uploadBtn = (sid: string, target: string, cls: string) => {
     const busy = uploading === `${sid}:${target}`;
     return (
@@ -802,6 +809,7 @@ export function ParentWebListings({
             </button>
           </div>
         </div>
+        {uploadProgressFor(s.shopId, "gallery")}
         {s.webImages.length > 0 && (
           <SortableThumbs
             keys={s.webImages}
@@ -981,6 +989,9 @@ export function ParentWebListings({
                       )}
                     </div>
                   </div>
+
+                  {/* ⬆ กำลังอัปรูปเข้าสีนี้ — ของกลาง UploadProgress (ย่อรูป → ตรวจรูปซ้ำ → อัปโหลด · รูปที่เท่าไร) */}
+                  {uploadProgressFor(s.shopId, v.id) && <div className="pl-12">{uploadProgressFor(s.shopId, v.id)}</div>}
 
                   {/* รูปเว็บที่เลือกไว้ของสีนี้ (เรียงตามลำดับที่จะโชว์) */}
                   {chosen.length > 0 && (
