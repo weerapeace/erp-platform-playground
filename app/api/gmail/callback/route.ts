@@ -23,8 +23,12 @@ export async function GET(request: NextRequest) {
   const back = (status: "connected" | "error", extra: Record<string, string>) => {
     const ret = state?.ret ?? "/subscriptions";
     const u = new URL(ret, request.nextUrl.origin);
-    u.searchParams.set("gmail", status);
-    Object.entries(extra).forEach(([k, v]) => u.searchParams.set(k, v));
+    // กลับเข้าแอปแยก (/app/<key>?go=/หน้า — lib/top-window) → ใส่ผลไว้ที่หน้าปลายทางในกรอบ ไม่ใช่ที่ตัวแอป
+    const go = u.searchParams.get("go");
+    const target = go && go.startsWith("/") && !go.startsWith("//") ? new URL(go, request.nextUrl.origin) : u;
+    target.searchParams.set("gmail", status);
+    Object.entries(extra).forEach(([k, v]) => target.searchParams.set(k, v));
+    if (target !== u) u.searchParams.set("go", target.pathname + target.search);
     return NextResponse.redirect(u, 303);
   };
 

@@ -12,6 +12,7 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
+import { navigateTop, returnPathForTop } from "@/lib/top-window";
 import { CHROME_PROFILES_API, validateChromeProfile, type ChromeProfile, type ChromeProfileInput } from "@/lib/chrome-profiles";
 
 const INP = "w-full h-9 px-3 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 bg-white";
@@ -54,17 +55,18 @@ export function ChromeProfilesModal({ open, profiles, canEdit, start, allowConne
   }, []);
   useEffect(() => { if (open) loadGmail(); }, [open, loadGmail]);
 
-  /** เชื่อม Gmail → ขอลิงก์หน้ายินยอมของ Google แล้วพาไป (เสร็จแล้ว Google ส่งกลับหน้า subscriptions) */
+  /** เชื่อม Gmail → ขอลิงก์หน้ายินยอมของ Google แล้วพาไป (เสร็จแล้ว Google ส่งกลับหน้า subscriptions)
+   *  Google ห้ามเปิดในกรอบ → ถ้าอยู่ในแอปแยก /app/... ต้องพาทั้งหน้าต่างไป แล้วกลับเข้าแอปเดิม */
   const connectGmail = async (email: string) => {
     setConnecting(email);
     try {
       const res = await apiFetch("/api/gmail/connect", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, return_to: "/subscriptions?profiles=1" }),
+        body: JSON.stringify({ email, return_to: returnPathForTop("/subscriptions?profiles=1") }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || !j.url) { toast.error(j.error ?? "เริ่มเชื่อม Gmail ไม่สำเร็จ"); setConnecting(null); return; }
-      window.location.href = j.url;
+      navigateTop(j.url);
     } catch { toast.error("เริ่มเชื่อม Gmail ไม่สำเร็จ"); setConnecting(null); }
   };
   const disconnectGmail = async (email: string) => {

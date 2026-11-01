@@ -17,8 +17,9 @@ export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const API = "https://gmail.googleapis.com/gmail/v1/users/me";
 
-const clientId = () => process.env.GMAIL_OAUTH_CLIENT_ID ?? "";
-const clientSecret = () => process.env.GMAIL_OAUTH_CLIENT_SECRET ?? "";
+// trim: ค่าที่วางใน Vercel มักติดช่องว่าง/ขึ้นบรรทัดใหม่มาด้วย
+const clientId = () => (process.env.GMAIL_OAUTH_CLIENT_ID ?? "").trim();
+const clientSecret = () => (process.env.GMAIL_OAUTH_CLIENT_SECRET ?? "").trim();
 
 /** ตั้งค่าครบหรือยัง (ยังไม่ตั้ง = ปุ่มเชื่อม/ดึงจากเมล บอกให้ผู้ดูแลตั้งค่าก่อน) */
 export function gmailConfigured(): boolean {
