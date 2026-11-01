@@ -479,7 +479,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
               <div><Icon name="calendar" /> {t("วันสำคัญที่ใส่ให้อัตโนมัติ", "Key dates included")}: {specialDays.length ? specialDays.map((d) => `${thaiDateLabel(d.date)} ${d.label}`).join(" · ") : t("ไม่มีในช่วงนี้", "none in range")}</div>
               {recTimesText && <div><Icon name="clock" /> {t("เวลาโพสต์ประจำ (ใช้เมื่อ AI ไม่ระบุเวลา)", "Usual posting times")}: {recTimesText}</div>}
               {brief.tone && <div><Icon name="note" /> {t("ใช้แนวทางการเขียนของแบรนด์ที่ตั้งไว้ (พรอมต์แคปชั่น) ด้วย", "Uses the brand's caption prompt as tone")}</div>}
-              <div><Icon name="ai" /> {t("ปุ่ม AI ในระบบ: ใช้เวลาประมาณ 30–90 วินาที · ค่าใช้จ่ายราว 1 บาทต่อครั้ง (ไม่ส่งรูป) · ยังไม่ลงปฏิทินจนกว่าจะกดยืนยันในหน้าตรวจ", "AI in system: ~30–90s · about 1 THB per run · nothing is saved until you confirm")}</div>
+              <div><Icon name="ai" /> {t("ปุ่ม AI ในระบบ: ใช้เวลาประมาณ 30–90 วินาที · ค่าใช้จ่ายราว 1–3 บาทต่อครั้ง ตามจำนวนโพสต์ (ไม่ส่งรูป) · ยังไม่ลงปฏิทินจนกว่าจะกดยืนยันในหน้าตรวจ", "AI in system: ~30–90s · about 1–3 THB per run · nothing is saved until you confirm")}</div>
             </div>
             {setupErr && <div className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{setupErr}</div>}
           </div>

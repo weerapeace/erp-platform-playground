@@ -7,7 +7,7 @@
  * ยิง 2 จังหวะให้เร็ว + เรื่องตรงกันข้ามแพลตฟอร์ม:
  *   1) วางตาราง (วัน/เวลา/หัวข้อ/แนว/แพลตฟอร์ม/ไอเดีย) ครั้งเดียว — ข้อความสั้น
  *   2) เขียนแคปชั่น "ทีละแพลตฟอร์มพร้อมกัน" (แต่ละที่เขียนต่างกัน) — ข้ามแพลตฟอร์มที่ตั้งว่าไม่ใช้แคปชั่น
- * ไม่ส่งรูป → ถูกมาก (≈ 1 บาท/ครั้ง ด้วยรุ่นที่ตั้งไว้) · prompt เพิ่มเติมตั้งได้ที่ทะเบียน prompt key "mass_plan"
+ * ไม่ส่งรูป → ถูก (≈ 1–3 บาท/ครั้ง ตามจำนวนโพสต์ ด้วยรุ่น gpt-4.1-mini ที่ตั้งไว้) · prompt เพิ่มเติมตั้งได้ที่ทะเบียน prompt key "mass_plan"
  * สิทธิ์: tasks.create + ai.caption (มีค่าใช้จ่ายต่อครั้ง) · audit ai_mass_plan
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -31,7 +31,8 @@ const MASS_PLAN_KEY = "mass_plan";
 const MAX_DAYS = 62;
 const MAX_ROWS = 160;
 
-type PlanPost = { date: string; time: string; title: string; pillar: string; platforms: string[]; ideas: Record<string, string> };
+// ไอเดียรูป/คลิปใช้ร่วมทุกแพลตฟอร์มของโพสต์ (จังหวะแรกตอบสั้น = เร็ว ไม่โดนตัดกลางทางตอนเลือกหลายแพลตฟอร์ม)
+type PlanPost = { date: string; time: string; title: string; pillar: string; platforms: string[]; idea: string };
 const str = (v: unknown, n = 2000) => (typeof v === "string" ? v.trim().slice(0, n) : "");
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -89,12 +90,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       [{ type: "text", text: [
         context, "",
         `วันนี้คือ ${thaiDateLabel(today)} — วางตารางโพสต์ในช่วง ${start} ถึง ${end} (ยังไม่ต้องเขียนแคปชั่น)`,
-        `ตอบ JSON: {"posts":[{"date":"YYYY-MM-DD","time":"HH:MM","title":"หัวข้อสั้น","pillar":"ชื่อแนวจากรายการ","platforms":["code"],"ideas":{"code":"ไอเดียรูป/คลิปสำหรับแพลตฟอร์มนั้น"}}]}`,
+        `ตอบ JSON: {"posts":[{"date":"YYYY-MM-DD","time":"HH:MM","title":"หัวข้อสั้น","pillar":"ชื่อแนวจากรายการ","platforms":["code"],"idea":"ไอเดียรูป/คลิปสั้น ๆ 1 บรรทัด"}]}`,
         `- code ที่ใช้ได้: ${codes}`,
         `- แต่ละแพลตฟอร์มควรได้ราว ${perPlatform} โพสต์ กระจายทั้งช่วง ไม่กองวันเดียว · ลงวันสำคัญให้รับกัน`,
         "- เรื่องเดียวกันที่ลงหลายแพลตฟอร์มในวัน-เวลาเดียวกัน ให้เป็นรายการเดียว (platforms หลายตัว)",
       ].join("\n") }],
-      Math.min(8000, 600 + perPlatform * platforms.length * 120), model,
+      Math.min(12000, 800 + perPlatform * platforms.length * 60), model,
     );
     const valid = new Set(platforms.map((p) => p.code));
     plan = (Array.isArray(out.posts) ? out.posts : []).map((x): PlanPost | null => {
@@ -102,8 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const date = str(o.date, 10);
       const plats = (Array.isArray(o.platforms) ? o.platforms : []).map(String).filter((c) => valid.has(c));
       if (!isRealDate(date) || date < start || date > end || !plats.length || !str(o.title)) return null;
-      const ideas = (o.ideas && typeof o.ideas === "object" ? o.ideas : {}) as Record<string, unknown>;
-      return { date, time: normTime(str(o.time, 8)) || "10:00", title: str(o.title, 120), pillar: str(o.pillar, 60), platforms: [...new Set(plats)], ideas: Object.fromEntries(plats.map((c) => [c, str(ideas[c], 300)])) };
+      return { date, time: normTime(str(o.time, 8)) || "10:00", title: str(o.title, 120), pillar: str(o.pillar, 60), platforms: [...new Set(plats)], idea: str(o.idea, 300) };
     }).filter((p): p is PlanPost => !!p).slice(0, MAX_ROWS);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         [{ type: "text", text: [
           buildMassPlanContext(brief, [p]).join("\n"), "",
           `เขียนแคปชั่น ${p.label} ให้แต่ละโพสต์ (i = ลำดับ):`,
-          ...mine.map(({ post, i }) => `${i}) ${thaiDateLabel(post.date)} · ${post.title}${post.pillar ? ` · แนว ${post.pillar}` : ""}${post.ideas[p.code] ? ` · ไอเดีย: ${post.ideas[p.code]}` : ""}`),
+          ...mine.map(({ post, i }) => `${i}) ${thaiDateLabel(post.date)} · ${post.title}${post.pillar ? ` · แนว ${post.pillar}` : ""}${post.idea ? ` · ไอเดีย: ${post.idea}` : ""}`),
           "", `วิธีเขียน ${p.label}: ${platformRule(p)}`,
           `ตอบ JSON: {"captions":[{"i":0,"caption":"ข้อความ (ขึ้นบรรทัดใหม่ได้)","hashtags":["#tag"]}]} · ไม่ต้องใส่แฮชแท็กในแคปชั่น${p.useHashtags ? "" : " · แพลตฟอร์มนี้ไม่ใช้แฮชแท็ก (hashtags = [])"}`,
         ].join("\n") }],
@@ -142,7 +142,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const rows: MassRawRow[] = plan.flatMap((post, i) => post.platforms.map((code) => {
     const c = captions.get(`${i}|${code}`);
-    return { line: i + 1, date: post.date, time: post.time, platform: code, pillar: post.pillar, title: post.title, caption: c?.caption ?? "", hashtags: c?.hashtags ?? "", idea: post.ideas[code] ?? "" };
+    return { line: i + 1, date: post.date, time: post.time, platform: code, pillar: post.pillar, title: post.title, caption: c?.caption ?? "", hashtags: c?.hashtags ?? "", idea: post.idea };
   }));
 
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
