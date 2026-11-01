@@ -10,7 +10,7 @@ import { ColorInput } from "@/components/color-picker";
 import { RangeInput } from "@/components/range-input";
 import { AssetPicker } from "@/components/asset-picker";
 import { Icon } from "@/components/icon";
-import { uploadResizedImage } from "@/components/image-attach";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { useToast } from "@/components/toast";
 import { r2ImageUrl } from "@/lib/r2-image";
 import {
@@ -69,8 +69,17 @@ export function LauncherThemePanel({
   const onPickBg = async (file: File | null | undefined) => {
     if (!file) return;
     setBgBusy(true);
-    try { const up = await uploadResizedImage(file, { folder: "launcher-bg", max: 1920 }); onPatch({ bgImage: up.r2_key, bg: null, bgGradient: null }); }
-    catch { toast.error("อัปโหลดรูปไม่สำเร็จ"); }
+    try {
+      // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck)
+      const r = await uploadImagesWithDupCheck([file], {
+        folder: "launcher-bg", max: 1920,
+        target: mine ? "พื้นหลังหน้าแรก (ของฉัน)" : "พื้นหลังหน้าแรก (ค่ากลางทั้งทีม)",
+        existingKeys: value.bgImage ? [value.bgImage] : [],
+        onError: () => toast.error("อัปโหลดรูปไม่สำเร็จ"),
+      });
+      const key = r?.keys[0];
+      if (key) onPatch({ bgImage: key, bg: null, bgGradient: null });
+    } catch { toast.error("อัปโหลดรูปไม่สำเร็จ"); }
     finally { setBgBusy(false); }
   };
 
