@@ -11,14 +11,15 @@
  *    ✕ ไม่ลงทั้งแถว / ทั้งสินค้า (ลงซ้ำของที่มีแล้ว) → ไปกล่อง "ข้ามไว้" เอากลับได้ทีละกลุ่ม · ✎ ย้ายทั้งแถวไปสินค้า/ช่องอื่น · 🔁 เปลี่ยนสินค้าทั้งรุ่น (อ่านชื่อผิด — สีจับคู่ตามเลขสีเดิม)
  *    ค่าเริ่มต้น = เพิ่มต่อท้าย (ของเดิมอยู่ครบ) · แทนที่ = เฉพาะช่องที่มีรูปใหม่ · เกิน 20 สินค้า + แทนที่ = พิมพ์ CONFIRM
  *    ครั้งละ ≤ 1,000 ไฟล์: รูปพรีวิวย่อ (สูง 160px · ทำทีละ 3 รูปเบื้องหลัง) · แสดงทีละ 30 สินค้า
- *    👀 เตือนรูปหน้าตาเหมือนรูปเดิมบนเว็บ (lib/image-similarity · เทียบกับรูปบนเว็บ+รูปสีของสินค้านั้น · โหมดต่อท้าย · เตือนอย่างเดียว)
+ *    👀 เตือนรูปหน้าตาเหมือนรูปเดิมบนเว็บ (lib/image-hash isLookAlike · เทียบกับรูปบนเว็บ+รูปสีของสินค้านั้น · โหมดต่อท้าย · เตือนอย่างเดียว)
+ *       ใช้ตัวเทียบตัวเดียวกับคลัง (สีเทียบช่องที่ต่างมากสุด) — ถ่ายท่าเดียวกันคนละสี (เทา/เทาฝุ่น · กรมท่า/เขียวเข้ม) ไม่นับว่าซ้ำ
  *    🔁 รูปที่มีในคลังไฟล์แล้ว (ของกลาง findDuplicateMatches · ตรวจเบื้องหลังระหว่างดู ยังไม่ส่งไฟล์) → ป้าย "ใช้รูปเดิม / อัปใหม่" บนรูป
  *       ใช้รูปเดิม = ตอนลงไม่อัปไฟล์ซ้ำ ใช้ไฟล์เดิมในคลัง · รูปเดียวกับที่อยู่บนเว็บสินค้านั้นแล้ว = ป้าย "ซ้ำเดิม" (กดไม่ลงทั้งหมดได้)
  *    🔁 รูปซ้ำกันเองในชุดที่ลากมา (เทียบในเครื่อง: sha256 ไฟล์ทุกสินค้า + ลายนิ้วมือภาพในสินค้าเดียวกัน · ไม่รวม Hero) → ป้าย "ซ้ำ #n" (แถวเดียวกัน) / "= -01 #n" (ข้ามแถว)
  *       ทั้งแถวเหมือนอีกแถว = เตือนหัวแถว (ไม่ลงแถวนี้ / ย้ายแถว) · ไฟล์เดียวกันเป๊ะ = ตอนลงอัปครั้งเดียวใช้ร่วมกัน
  * 3) กดลงรูป → ลงเป็นรอบ รอบละ 20 สินค้า (อัปรูป → บันทึกลงเว็บทันที) · runBackgroundTask = ปิดหน้าต่างได้ · ลงซ้ำเฉพาะไฟล์ที่พลาด (ไม่อัปใหม่ไฟล์ที่อัปแล้ว · ช่องที่บันทึกแล้ว = ต่อท้าย)
  *    รูปย่อ ≤ 2000px (uploadResizedImage) · วิดีโอใช้ตัวอัปกลาง uploadMediaFile (ตัวเดียวกับช่อง Hero ทีละตัว) → R2 (ทีละ 3 ไฟล์ · ไฟล์ที่ไม่ได้ลงจะไม่อัป) → POST /api/website/listings/images (รวมกับรูปล่าสุดใน DB + audit + ล้างแคชเว็บ)
- * ของกลาง: ERPModal · useFileDrop(folders) · useDragReorder · useUserPref · runBackgroundTask · image-similarity · findDuplicateMatches (รูปซ้ำในคลัง) · HoverImage · uploadResizedImage · uploadMediaFile · toast
+ * ของกลาง: ERPModal · useFileDrop(folders) · useDragReorder · useUserPref · runBackgroundTask · image-hash (ลายนิ้วมือหน้าตารูป) · findDuplicateMatches (รูปซ้ำในคลัง) · HoverImage · uploadResizedImage · uploadMediaFile · toast
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
@@ -34,7 +35,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { useUserPref } from "@/lib/use-user-pref";
 import { runBackgroundTask } from "@/lib/background-tasks";
 import { Icon } from "@/components/icon";
-import { similarity, visualPrintFromSource, visualPrintOf, type SimilarLevel, type VisualPrint } from "@/lib/image-similarity";
+import { isLookAlike, lookHashOfBlob, type LookHash } from "@/lib/image-hash";
 import { uploadMediaFile, MediaUploadError } from "@/lib/media-upload";
 import { BIG_VIDEO_MAX_BYTES, fileMb } from "@/lib/media-upload-limits";
 import {
@@ -77,8 +78,8 @@ type Phase = "pick" | "uploading" | "done";
 /** ผลรวมทุกรอบ (ลงซ้ำ = บวกต่อ) · failed = ไฟล์ที่ยังไม่ขึ้นเว็บร้านนี้ (ลงซ้ำได้) */
 type Result = { ok: number; failed: { id: string; name: string; why: string }[]; updated: number; otherShopFails: number; skippedShops: number };
 type RoundView = { codes: string[]; files: number; status: "wait" | "run" | "ok" | "part" | "fail" };
-/** หน้าตาเหมือนรูปเดิมบนเว็บ (เตือนให้ดูด้วยตา ไม่ข้ามเอง) */
-type Dup = { level: SimilarLevel; where: string };
+/** หน้าตาเหมือนรูปเดิมบนเว็บ (where = รูปไหน · เตือนให้ดูด้วยตา ไม่ข้ามเอง) */
+type Dup = { where: string };
 /** รูปซ้ำกันเองในชุดที่ลากมา → ชี้ไปรูปแรก (of) ที่แถว destKey ตำแหน่ง num · exact = ไฟล์เดียวกันเป๊ะ (ไม่ใช่แค่หน้าตาเหมือน) */
 type Twin = { of: string; destKey: string; parentId: string; num: number; exact: boolean };
 const ROUND_LABEL: Record<RoundView["status"], { text: string; cls: string; icon?: string }> = {
@@ -91,7 +92,7 @@ const ROUND_LABEL: Record<RoundView["status"], { text: string; cls: string; icon
 /** แสดงทีละกี่สินค้า / กี่ไฟล์ในกล่อง "ไฟล์ที่ต้องดู" (ลาก 1,000 รูปแล้วหน้าไม่หนัก) */
 const SHOW_PRODUCTS = 30;
 const SHOW_LOOK = 50;
-/** รูปเดิมบนเว็บที่โหลดมาเทียบหน้าตาได้สูงสุดต่อครั้ง (รูปย่อ 96px) */
+/** รูปเดิมบนเว็บที่โหลดมาเทียบหน้าตาได้สูงสุดต่อครั้ง (รูปย่อกว้าง 320px) */
 const OLD_PRINT_MAX = 800;
 
 /** สลับลำดับแล้วแถวอื่น "ตำแหน่งเดียวกัน" ตามด้วยไหม: แถวเดียว / ทุกสีในรุ่น / ทุกแถวที่ลากมา (ชนิดช่องเดียวกัน) */
@@ -162,11 +163,11 @@ export function WebsiteImageMassUpload({
   const [lookShown, setLookShown] = useState(SHOW_LOOK);
   /** รูปพรีวิวย่อ + ลายนิ้วมือภาพ ต่อไฟล์ (ไม่เปิดรูปเต็มทุกรูป = ลาก 1,000 รูปเครื่องไม่ค้าง) */
   const [previews, setPreviews] = useState<Record<string, string>>({});
-  const [prints, setPrints] = useState<Record<string, VisualPrint | null>>({});
+  const [looks, setLooks] = useState<Record<string, LookHash | null>>({});
   /** ลายนิ้วมือไฟล์ต้นฉบับ (sha256) — ไฟล์เดียวกันเป๊ะในชุด = เตือน + ตอนลงอัปครั้งเดียวใช้ร่วมกัน */
   const [sums, setSums] = useState<Record<string, string | null>>({});
   /** ลายนิ้วมือภาพของรูปเดิมบนเว็บ (key R2) */
-  const [oldPrints, setOldPrints] = useState<Record<string, VisualPrint | null>>({});
+  const [oldLooks, setOldLooks] = useState<Record<string, LookHash | null>>({});
   const prepAsked = useRef(new Set<string>());
   const oldAsked = useRef(new Set<string>());
   /** 🔁 รูปที่มีในคลังแล้ว ต่อไฟล์ (null = ไม่ซ้ำ/ตรวจไม่ได้ · ไม่มี key = ยังตรวจไม่ถึง) + เลือกเอง (true = ใช้รูปเดิม · false = อัปใหม่ · ไม่มี = ตามที่ระบบแนะนำ) */
@@ -193,7 +194,7 @@ export function WebsiteImageMassUpload({
     libAsked.current = new Set();
     setItems([]);
     setPreviews({});
-    setPrints({});
+    setLooks({});
     setSums({});
     setLibDup({});
     setLibUse({});
@@ -289,13 +290,13 @@ export function WebsiteImageMassUpload({
   const planById = useMemo(() => new Map(plan.files.map((f) => [f.id, f])), [plan]);
   const itemById = useMemo(() => new Map(items.map((it) => [it.id, it])), [items]);
 
-  // 🖼 รูปพรีวิวย่อ (สูง 160px) + ลายนิ้วมือภาพ + ลายนิ้วมือไฟล์ (sha256 · หาไฟล์เดียวกันในชุด) — ถอดรหัสครั้งเดียวต่อไฟล์ ทีละ 3 รูป · ส่งเข้า state ทุก 250 ms
+  // 🖼 รูปพรีวิวย่อ (สูง 160px) + ลายนิ้วมือหน้าตารูป (lib/image-hash) + ลายนิ้วมือไฟล์ (sha256 · หาไฟล์เดียวกันในชุด) — ถอดรหัสครั้งเดียวต่อไฟล์ ทีละ 3 รูป · ส่งเข้า state ทุก 250 ms
   useEffect(() => {
     const want = items.filter((it) => !it.video && !it.invalid && !prepAsked.current.has(it.id));
     if (!want.length) return;
     want.forEach((it) => prepAsked.current.add(it.id));
     const pv: Record<string, string> = {};
-    const pr: Record<string, VisualPrint | null> = {};
+    const pr: Record<string, LookHash | null> = {};
     const sm: Record<string, string | null> = {};
     let timer: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
@@ -312,7 +313,7 @@ export function WebsiteImageMassUpload({
       const s = Object.entries(sm).filter(([id]) => alive.has(id));
       for (const id of Object.keys(sm)) delete sm[id];
       if (a.length) setPreviews((m) => ({ ...m, ...Object.fromEntries(a) }));
-      if (b.length) setPrints((m) => ({ ...m, ...Object.fromEntries(b) }));
+      if (b.length) setLooks((m) => ({ ...m, ...Object.fromEntries(b) }));
       if (s.length) setSums((m) => ({ ...m, ...Object.fromEntries(s) }));
     };
     let next = 0;
@@ -321,10 +322,9 @@ export function WebsiteImageMassUpload({
         const it = want[next++];
         if (!itemsRef.current.some((x) => x.id === it.id)) continue;
         let url: string | null = null;
-        let vp: VisualPrint | null = null;
+        let vp: LookHash | null = null;
         try {
           const bm = await createImageBitmap(it.file, { resizeHeight: 160, resizeQuality: "medium" });
-          vp = visualPrintFromSource(bm);
           const c = document.createElement("canvas");
           c.width = bm.width;
           c.height = bm.height;
@@ -332,6 +332,8 @@ export function WebsiteImageMassUpload({
           bm.close();
           const blob = await new Promise<Blob | null>((res) => c.toBlob(res, "image/webp", 0.8));
           if (blob) url = URL.createObjectURL(blob);
+          // ลายนิ้วมือหน้าตารูป (ตัวเดียวกับคลัง · ย่อจากไฟล์เต็มเหลือ 256px บนพื้นขาว) — รูปเรียบ/ถอดรหัสไม่ได้ = null ไม่เทียบ
+          vp = await lookHashOfBlob(it.file);
         } catch {
           /* ถอดรหัสไม่ได้ (เช่น HEIC) = โชว์ไฟล์เต็ม · ไม่เทียบหน้าตา */
         }
@@ -420,22 +422,23 @@ export function WebsiteImageMassUpload({
       .slice(0, Math.max(0, OLD_PRINT_MAX - oldAsked.current.size));
     if (!want.length) return;
     want.forEach((k) => oldAsked.current.add(k));
-    const got: Record<string, VisualPrint | null> = {};
+    const got: Record<string, LookHash | null> = {};
     let timer: ReturnType<typeof setTimeout> | null = null;
     const flush = () => {
       timer = null;
       const b = { ...got };
       for (const k of Object.keys(got)) delete got[k];
-      if (Object.keys(b).length) setOldPrints((m) => ({ ...m, ...b }));
+      if (Object.keys(b).length) setOldLooks((m) => ({ ...m, ...b }));
     };
     let next = 0;
     const worker = async () => {
       while (next < want.length) {
         const key = want[next++];
-        let vp: VisualPrint | null = null;
+        let vp: LookHash | null = null;
         try {
-          const r = await fetch(r2ImageUrl(key, 96) ?? "");
-          if (r.ok) vp = await visualPrintOf(await r.blob());
+          // กว้าง 320 ≥ LOOK_SIZE → ลายนิ้วมือใกล้กับที่คิดจากไฟล์เต็ม
+          const r = await fetch(r2ImageUrl(key, 320) ?? "");
+          if (r.ok) vp = await lookHashOfBlob(await r.blob());
         } catch {
           /* โหลดรูปเดิมไม่ได้ = ไม่เทียบรูปนั้น */
         }
@@ -458,28 +461,23 @@ export function WebsiteImageMassUpload({
       for (const id of d.fileIds) {
         const k = libDup[id]?.match.r2_key;
         const o = k ? webOld.find((x) => x.key === k) : undefined;
-        if (o) out.set(id, { level: "same", where: o.where });
+        if (o) out.set(id, { where: o.where });
       }
-      const olds = webOld.filter((o) => oldPrints[o.key]);
+      const olds = webOld.filter((o) => oldLooks[o.key]);
       if (!olds.length) continue;
       for (const id of d.fileIds) {
-        const vp = prints[id];
+        const vp = looks[id];
         if (!vp || out.has(id)) continue;
-        let best: Dup | null = null;
-        for (const o of olds) {
-          const lv = similarity(vp, oldPrints[o.key] as VisualPrint);
-          if (lv && (!best || (lv === "same" && best.level === "near"))) best = { level: lv, where: o.where };
-          if (best?.level === "same") break;
-        }
-        if (best) out.set(id, best);
+        const o = olds.find((x) => isLookAlike(vp, oldLooks[x.key] as LookHash));
+        if (o) out.set(id, { where: o.where });
       }
     }
     return out;
-  }, [plan, oldOf, oldPrints, prints, mode, libDup]);
-  const dupSameIds = [...dupOf].filter(([, v]) => v.level === "same").map(([id]) => id);
+  }, [plan, oldOf, oldLooks, looks, mode, libDup]);
+  const dupSameIds = [...dupOf.keys()];
   const imgTotal = items.filter((it) => !it.video && !it.invalid).length;
-  const imgPrepped = items.filter((it) => !it.video && !it.invalid && it.id in prints).length;
-  const oldPending = mode === "append" ? [...oldAsked.current].filter((k) => !(k in oldPrints)).length : 0;
+  const imgPrepped = items.filter((it) => !it.video && !it.invalid && it.id in looks).length;
+  const oldPending = mode === "append" ? [...oldAsked.current].filter((k) => !(k in oldLooks)).length : 0;
   // 🔁 สรุปรูปที่มีในคลัง (เฉพาะไฟล์ที่จะลง) · ใช้รูปเดิม = ไม่ต้องอัป
   const libChecked = items.filter((it) => !it.video && !it.invalid && it.id in libDup).length;
   const libIds = uploadIds.filter((id) => libDup[id]);
@@ -499,11 +497,11 @@ export function WebsiteImageMassUpload({
       d.fileIds.forEach((id, i) => {
         const at: Twin = { of: id, destKey: d.key, parentId: d.parentId, num: base + i + 1, exact: false };
         const s = sums[id];
-        const vp = prints[id];
+        const vp = looks[id];
         let hit = s ? firstBySum.get(s) : undefined;
         if (hit) hit = { ...hit, exact: true };
         else if (vp) {
-          const o = (firstsByParent.get(d.parentId) ?? []).find((x) => prints[x.id] && similarity(vp, prints[x.id] as VisualPrint) === "same");
+          const o = (firstsByParent.get(d.parentId) ?? []).find((x) => looks[x.id] && isLookAlike(vp, looks[x.id] as LookHash));
           if (o) hit = o.at;
         }
         if (hit) return void out.set(id, hit);
@@ -514,7 +512,7 @@ export function WebsiteImageMassUpload({
       });
     }
     return out;
-  }, [plan, sums, prints]);
+  }, [plan, sums, looks]);
   const destByKey = useMemo(() => new Map(plan.dests.map((d) => [d.key, d])), [plan]);
   const destOfFile = useMemo(() => new Map(plan.dests.flatMap((d) => d.fileIds.map((id) => [id, d.key] as const))), [plan]);
   /** ป้ายสั้นของแถว เช่น "-01" (สีในรุ่นเดียวกัน) · "TTM091-01" (คนละรุ่น) · "รูปบนเว็บ" */
@@ -801,7 +799,7 @@ export function WebsiteImageMassUpload({
       ? `${lib.kind === "look" ? "รูปหน้าตาเหมือนกัน" : "รูปนี้"}มีในคลังแล้ว: ${lib.match.file_name ?? lib.match.r2_key}${lib.match.usedIn.length ? `\nใช้อยู่ที่ ${lib.match.usedIn.join(", ")}` : ""}${lib.unsure ? "\nรายละเอียดต่างกันนิดหน่อย — ตรวจด้วยตาก่อน" : ""}\n${useLib ? "ตอนลงจะใช้รูปเดิม (ไม่อัปซ้ำ)" : "ตอนลงจะอัปรูปนี้ใหม่"} — กดเพื่อสลับ`
       : "";
     return (
-      <div key={id} className={`group relative w-16 shrink-0 ${opts.muted ? "opacity-50" : ""}`} title={dup ? `${it.path}\n${dup.level === "same" ? "หน้าตาเหมือน" : "คล้าย"}${dup.where} (ดูรูปจางด้านซ้าย)` : it.path}>
+      <div key={id} className={`group relative w-16 shrink-0 ${opts.muted ? "opacity-50" : ""}`} title={dup ? `${it.path}\nหน้าตาเหมือน${dup.where} (ดูรูปจางด้านซ้าย)` : it.path}>
         {it.video ? (
           <>
             <video src={`${it.url}#t=0.1`} muted playsInline preload="metadata" className="h-20 w-16 rounded-md border border-slate-200 object-cover bg-slate-800" />
@@ -813,7 +811,7 @@ export function WebsiteImageMassUpload({
         ) : (
           <div {...(opts.handle ?? {})} className="h-20 w-16 animate-pulse rounded-md border border-slate-200 bg-slate-100" />
         )}
-        {dup && <span className={`pointer-events-none absolute right-1 top-1 rounded px-1 text-[10px] leading-4 text-white ${dup.level === "same" ? "bg-amber-600" : "bg-amber-500/90"}`}>{dup.level === "same" ? "ซ้ำเดิม" : "คล้ายเดิม"}</span>}
+        {dup && <span className="pointer-events-none absolute right-1 top-1 rounded bg-amber-600 px-1 text-[10px] leading-4 text-white">ซ้ำเดิม</span>}
         {twin && (
           <span title={twinTip} className={`absolute right-0.5 top-0.5 max-w-[60px] truncate rounded px-1 text-[10px] leading-4 text-white ${twinSameRow ? "bg-rose-600" : "bg-amber-600"}`}>
             {twinLabel}
@@ -1101,7 +1099,7 @@ export function WebsiteImageMassUpload({
                         const base = d.replaces ? 0 : old.length;
                         const numbered = !isHero && (d.fileIds.length > 1 || base > 0);
                         const dups = d.fileIds.filter((id) => dupOf.has(id));
-                        const dupSame = dups.filter((id) => dupOf.get(id)?.level === "same");
+                        const dupSame = dups;
                         // 🔁 ทั้งแถวเหมือนอีกแถวในชุดนี้ (เช่น ลากโฟลเดอร์สีเดียวกันซ้ำ 2 สี) → เตือนที่หัวแถว
                         const rowTwins = d.fileIds.map((id) => twinOf.get(id));
                         const twinRow = !isHero && d.fileIds.length >= 2 && rowTwins.every((t) => t && t.destKey !== d.key && t.destKey === rowTwins[0]?.destKey) ? rowTwins[0]?.destKey : null;
