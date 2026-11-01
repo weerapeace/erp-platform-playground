@@ -7,7 +7,7 @@
  * - ค้นหา (ชื่อ/รหัส) + เลือกหมวด + สลับมุมมอง รายการ/การ์ด/🗂 จัดหมวด (จำต่อคนด้วย useViewPref)
  * - 🗂 จัดหมวด = components/website-category-sorter (ขั้น 1 ใส่หมวดหลักจากหมวด ERP · ขั้น 2 กระดานจัดหมวดย่อย) — ทั้งร้าน ไม่สนตัวกรอง
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
- * - 📸 ลงรูปทีละมาก (หัวตาราง = ทั้งร้าน · แถบล่าง = เฉพาะที่ติ๊ก) → components/website-image-mass-upload
+ * - 📸 ลงรูปทีละมาก (หัวตาราง = ทั้งร้าน · แถบล่าง = เฉพาะที่ติ๊ก · แถบเหลืองตอนกรองรูปบนเว็บ = รุ่นที่กรองอยู่) → components/website-image-mass-upload
  * - ▦ แก้ไขทีละมาก (ตาราง · ทุกช่องจากทะเบียนฟิลด์ · หัวตาราง/แถบล่าง) → components/website-listings-grid-edit
  * - 🎨 ทะเบียนสี (หัวตาราง) + ป้าย "สียังไม่ผูกทะเบียนสี" กดได้ = ColorSwatchButton (focusNames = สีของสินค้านั้น) · ปิดแล้วโหลดรายการใหม่เงียบ ๆ
  * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ + ✏️ แก้หลายรายการ (ช่องจากทะเบียนกลาง lib/website-listing-fields) · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
@@ -256,8 +256,13 @@ export function WebsiteListingsPanel({
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [massOpen, setMassOpen] = useState(false);
-  // 📸 ลงรูปเว็บทีละมาก — null = ปิด · [] = ทั้งร้าน · [ids] = เฉพาะที่ติ๊ก
+  // 📸 ลงรูปเว็บทีละมาก — null = ปิด · [] = ทั้งร้าน · [ids] = เฉพาะที่ติ๊ก / รุ่นที่กรองอยู่ (imgMassLabel = ชื่อชุด)
   const [imgMass, setImgMass] = useState<string[] | null>(null);
+  const [imgMassLabel, setImgMassLabel] = useState<string | null>(null);
+  const openImgMass = (ids: string[], label: string | null = null) => {
+    setImgMassLabel(label);
+    setImgMass(ids);
+  };
   // ▦ แก้ไขทีละมาก (ตาราง) — null = ปิด · [] = ทั้งร้าน · [ids] = เฉพาะที่ติ๊ก
   const [gridEdit, setGridEdit] = useState<string[] | null>(null);
   // ปุ่มลัดในแถบล่าง → เปิดป๊อปแก้หลายรายการพร้อมช่องที่ตั้งไว้ (เช่น 📂 ย้ายหมวด)
@@ -518,7 +523,7 @@ export function WebsiteListingsPanel({
           )}
           {listings.length > 0 && (
             <button
-              onClick={() => setImgMass([])}
+              onClick={() => openImgMass([])}
               title="ลากโฟลเดอร์รูปมาวาง — จับคู่ชื่อไฟล์กับรหัสสินค้า/สีให้อัตโนมัติ"
               className="px-3.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm hover:border-slate-400"
             >
@@ -534,8 +539,26 @@ export function WebsiteListingsPanel({
         </div>
       </div>
 
+      {/* 🖼 ตัวกรองรูปบนเว็บอยู่ → ลงรูปเฉพาะรุ่นที่เห็นด้วยโฟลเดอร์เดียว (ตัวลงรูปทีละมากตัวเดิม · จำกัดรุ่น = รุ่นที่กรองอยู่) */}
+      {(filter === "noimg" || filter === "partimg") && view !== "sort" && shown.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <Icon name="image" size={14} />
+          <span className="flex-1 min-w-[14rem]">
+            {shown.length} รุ่นที่{filter === "noimg" ? "ยังไม่มีรูปบนเว็บเลย" : "บางสียังไม่มีรูปเว็บ"} — ลากโฟลเดอร์รูปมาทีเดียว ระบบจับคู่ชื่อไฟล์/โฟลเดอร์กับรหัสสีให้ (เช่น <span className="font-mono">MGN364-02/1.jpg</span>) แล้วลงเฉพาะรุ่นเหล่านี้ · ตรวจก่อนลงทุกครั้ง
+          </span>
+          <button
+            type="button"
+            onClick={() => openImgMass(shown.map((l) => l.parentId), `${shown.length} รุ่นที่${filter === "noimg" ? "ยังไม่มีรูปบนเว็บเลย" : "บางสียังไม่มีรูปเว็บ"}`)}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-amber-600"
+          >
+            <Icon name="camera" size={14} />
+            ลงรูปรุ่นที่กรองอยู่ ({shown.length})
+          </button>
+        </div>
+      )}
+
       {/* 📸 ลงรูปเว็บทีละมาก — จับคู่ชื่อไฟล์/โฟลเดอร์ → รูปบนเว็บ/รูปสี/Hero (components/website-image-mass-upload) */}
-      <WebsiteImageMassUpload open={imgMass !== null} onClose={() => setImgMass(null)} shop={shop} scopeIds={imgMass} onDone={reload} />
+      <WebsiteImageMassUpload open={imgMass !== null} onClose={() => setImgMass(null)} shop={shop} scopeIds={imgMass} scopeLabel={imgMassLabel} onDone={reload} />
 
       {/* ▦ แก้ไขทีละมาก — ตารางแก้ทุกแถว ช่องจากทะเบียนฟิลด์กลาง (components/website-listings-grid-edit) */}
       {gridEdit !== null && (
@@ -841,7 +864,7 @@ export function WebsiteListingsPanel({
         <button disabled={bulkBusy || !categories.length} onClick={() => { setMassPreset({ field: "categories", categories: { mode: "move", keys: [] } }); setMassOpen(true); }} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
           📂 ย้ายหมวด
         </button>
-        <button disabled={bulkBusy} onClick={() => setImgMass([...sel])} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
+        <button disabled={bulkBusy} onClick={() => openImgMass([...sel])} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">
           📸 ลงรูป
         </button>
         <button disabled={bulkBusy} onClick={() => setGridEdit([...sel])} className="px-3 py-1.5 rounded-lg bg-white/10 text-white text-xs hover:bg-white/20 disabled:opacity-50">

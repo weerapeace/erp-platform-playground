@@ -135,6 +135,7 @@ export function WebsiteImageMassUpload({
   onClose,
   shop,
   scopeIds,
+  scopeLabel,
   onDone,
 }: {
   open: boolean;
@@ -142,6 +143,8 @@ export function WebsiteImageMassUpload({
   shop: { id: string; name: string };
   /** ติ๊กไว้ = จับคู่เฉพาะรุ่นเหล่านี้ · ไม่ส่ง = ทั้งร้าน */
   scopeIds?: string[] | null;
+  /** ชื่อชุดที่ส่งมา (เช่น "30 รุ่นที่ยังไม่มีรูปบนเว็บเลย" จากตัวกรอง) · ไม่ส่ง = "N รายการที่ติ๊กไว้" */
+  scopeLabel?: string | null;
   onDone: () => void | Promise<void>;
 }) {
   const toast = useToast();
@@ -244,7 +247,7 @@ export function WebsiteImageMassUpload({
     if (m.status === "pick" && !m.parentId && catalog && fullIndex) {
       const full = matchImagePath(path, catalog.parents, fullIndex);
       const p = full.parentId ? catalog.parents.find((x) => x.parentId === full.parentId) : null;
-      if (p) return { ...m, reason: `${p.code} ไม่ได้ติ๊กไว้ — ข้าม หรือเลือกช่องเอง` };
+      if (p) return { ...m, reason: `${p.code} ${scopeLabel ? "ไม่อยู่ในรายการนี้" : "ไม่ได้ติ๊กไว้"} — ข้าม หรือเลือกช่องเอง` };
     }
     return m;
   };
@@ -900,7 +903,7 @@ export function WebsiteImageMassUpload({
       open={open}
       onClose={close}
       title={`📸 ลงรูปเว็บทีละมาก — ${shop.name}`}
-      description={scope ? `เฉพาะ ${scope.size} รายการที่ติ๊กไว้ · จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์` : "จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์กับรหัสสินค้าและสี · ตรวจก่อนลงทุกครั้ง"}
+      description={scope ? `เฉพาะ ${scopeLabel ?? `${scope.size} รายการที่ติ๊กไว้`} · จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์` : "จับคู่จากชื่อไฟล์ / ชื่อโฟลเดอร์กับรหัสสินค้าและสี · ตรวจก่อนลงทุกครั้ง"}
       size="xl"
       hasUnsavedChanges={items.length > 0 && phase === "pick"}
       closeOnBackdrop={false}
