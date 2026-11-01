@@ -90,18 +90,24 @@ export function gmailSearchQuery(sub: MailSearchInfo, month?: string): string {
   return [scope, purpose, ...range].filter(Boolean).join(" ");
 }
 
-/** ลิงก์เปิด Gmail ของบัญชีนั้น พร้อมคำค้น — null ถ้าไม่รู้อีเมล */
+/**
+ * ลิงก์เปิด Gmail ของบัญชีนั้น พร้อมคำค้น — null ถ้าไม่รู้อีเมล
+ * ผ่านหน้าเลือกบัญชีของ Google (AccountChooser) แล้วค่อยเข้า Gmail ด้วย ?authuser=<อีเมล>
+ * ⚠️ ห้ามใช้ /mail/u/<อีเมล>/ — บัญชีที่ยังไม่ได้ล็อกอินใน Chrome นั้น Gmail ตอบ "Temporary Error (404)" แทนที่จะให้ล็อกอิน
+ *    (ทดสอบจริง 2026-11-01) · AccountChooser: ยังไม่ล็อกอิน → หน้าล็อกอินเติมอีเมลให้ แล้วพากลับมาที่คำค้น
+ */
 export function gmailSearchUrl(sub: MailSearchInfo, month?: string): string | null {
   const email = extractEmail(sub.account_email);
   if (!email) return null;
   const q = gmailSearchQuery(sub, month);
-  return `https://mail.google.com/mail/u/${encodeURIComponent(email)}/#search/${encodeURIComponent(q)}`;
+  const inbox = `https://mail.google.com/mail/?authuser=${encodeURIComponent(email)}#search/${encodeURIComponent(q)}`;
+  return `https://accounts.google.com/AccountChooser?Email=${encodeURIComponent(email)}&continue=${encodeURIComponent(inbox)}`;
 }
 
 /**
  * เปิด Gmail ของบัญชีนั้นในแท็บใหม่ทันที (ไม่ใช้ไฟล์ .bat) — ใช้ฝั่ง client เท่านั้น
- * Chrome โปรไฟล์เดียวล็อกอิน Gmail ได้หลายบัญชี + ลิงก์ระบุอีเมลไว้แล้ว → Gmail เปิดกล่องที่ถูกเอง
- * บัญชีที่ยังไม่ได้ล็อกอินใน Chrome ที่ใช้อยู่ → Gmail ให้ล็อกอินครั้งแรกครั้งเดียว
+ * Chrome โปรไฟล์เดียวล็อกอิน Gmail ได้หลายบัญชี + ลิงก์ระบุอีเมลไว้แล้ว → เข้ากล่องที่ถูกเอง
+ * บัญชีที่ยังไม่ได้ล็อกอินใน Chrome ที่ใช้อยู่ → Google ให้ล็อกอินครั้งแรกครั้งเดียว
  * คืน false ถ้าไม่รู้อีเมล
  */
 export function openGmailSearch(sub: MailSearchInfo, month?: string): boolean {
