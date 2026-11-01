@@ -42,6 +42,7 @@ import { useRefreshRules } from "@/app/marketing/content-plan/plan-refresh";
 import { refreshStatuses, bangkokDateKey, REFRESH_ALERT_STATES } from "@/lib/marketing/content-plan";
 import { usePushToast } from "@/components/toast";
 import { ErrorState, LoadingState } from "@/components/state-views";
+import { Icon } from "@/components/icon";
 
 // แท็บวางแผน โหลดเมื่อกดเข้า (ไม่ถ่วงแท็บคอนเทนต์/งาน)
 const ContentPlanView = dynamic(() => import("@/app/marketing/content-plan/view").then((m) => m.ContentPlanView), {
@@ -52,6 +53,8 @@ const ContentDrawer = dynamic(() => import("../content/content-drawer").then((m)
 const ContentCreateModal = dynamic(() => import("../content/content-create-modal").then((m) => m.ContentCreateModal), { ssr: false });
 const TaskDetailDrawer = dynamic(() => import("../task-detail-drawer").then((m) => m.TaskDetailDrawer), { ssr: false });
 const CreateTaskModal = dynamic(() => import("../create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
+// วางแผนแบบ Mass (ให้ AI ร่างหลายวันหลายแพลตฟอร์ม → ตรวจ → ลงเป็นร่างทีเดียว) — โหลดเมื่อกดเปิด
+const MassPlanModal = dynamic(() => import("./mass-plan-modal").then((m) => m.MassPlanModal), { ssr: false });
 
 type CalMode = "content" | "task" | "plan";
 /** รายการบนปฏิทิน (รูปกลางของทั้งคอนเทนต์และงาน) — แผงปฏิทินไม่ต้องรู้ว่าเป็นชนิดไหน */
@@ -257,6 +260,7 @@ export function ContentCalendarView() {
   const [offset, setOffset] = useState(0);                          // เลื่อนเดือน (0 = เดือนนี้)
   const [createOpen, setCreateOpen] = useState(false);
   const [taskCreateOpen, setTaskCreateOpen] = useState(false);
+  const [massOpen, setMassOpen] = useState(false);   // ป๊อปวางแผนแบบ Mass
   const [createDate, setCreateDate] = useState<string | null>(null);   // วันตั้งโพสต์ prefill (จากช่องที่คลิก)
   const [createPreset, setCreatePreset] = useState<ContentCreatePreset | null>(null);   // ค่าตั้งต้นฟอร์ม (โหมด Story)
   // 📖 โหมด Story: แถบเล็กใต้ทุกวันบอกว่า "ทำ Story ของวันนี้รึยัง" (เจ้าของลง Story ทุกวัน) — จำค่าไว้ในเครื่อง
@@ -653,6 +657,12 @@ export function ContentCalendarView() {
             {mode === "content"
               ? <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📋 {t("รายการคอนเทนต์", "Content list")}</a>
               : <a href="/tasks?view=kanban" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 {t("บอร์ดงาน", "Task board")}</a>}
+            {mode === "content" && can("tasks.create" as never) && (
+              <button onClick={() => setMassOpen(true)} title={t("ให้ AI ร่างโพสต์หลายวันหลายแพลตฟอร์ม แล้วลงปฏิทินเป็นร่างทีเดียว", "Let AI draft many posts, then add them as drafts at once")}
+                className="h-10 px-4 inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 border border-violet-200 bg-violet-50 rounded-lg hover:bg-violet-100">
+                <Icon name="ai" /> {t("วางแผนแบบ Mass", "Mass plan")}
+              </button>
+            )}
             <button onClick={() => openCreate(null)} className="h-10 px-4 bg-violet-600 text-white text-sm font-medium rounded-lg hover:bg-violet-700">＋ {L.create}</button>
           </div>
         </div>
@@ -963,6 +973,10 @@ export function ContentCalendarView() {
       <ContentCreateModal open={createOpen} onClose={() => { setCreateOpen(false); setCreatePreset(null); }} onCreated={() => { setCreateOpen(false); setCreatePreset(null); reload(); }} preset={createPreset}
         brands={brands} campaigns={campaigns}
         defaultBrandId={brandFilter === "all" ? null : brandFilter} defaultDate={createDate} pushToast={pushToast} />
+      {massOpen && (
+        <MassPlanModal open onClose={() => setMassOpen(false)} brands={brands} platforms={platforms} pset={pset} items={items}
+          defaultBrandId={brandFilter === "all" ? null : brandFilter} defaultMonth={ym} onCreated={reload} />
+      )}
       <CreateTaskModal open={taskCreateOpen} onClose={() => setTaskCreateOpen(false)} onCreated={() => { setTaskCreateOpen(false); void tasksSWR.revalidate(true); }} pushToast={pushToast} />
 
       {styleBrandId && (() => {

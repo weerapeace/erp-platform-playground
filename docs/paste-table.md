@@ -18,6 +18,7 @@
 | ฟังก์ชัน | ทำอะไร |
 |---|---|
 | `parsePastedTable(text)` | ข้อความที่วางมา → `string[][]` (ตัดบรรทัดว่าง) |
+| `parseTableText(text)` | อ่านครบกว่า: ตาราง Markdown ของ ChatGPT/Claude (`\| a \| b \|` ตัดเส้น `\|---\|` · `<br>` = ขึ้นบรรทัด) + ช่องที่ครอบ `"..."` มีขึ้นบรรทัด/จุลภาคข้างใน — ใช้กับคำตอบ AI / ไฟล์ CSV |
 | `dropHeaderRow(grid, /regex/)` | ตัดแถวหัวตารางออกถ้าผู้ใช้คัดลอกหัวมาด้วย |
 | `looksLikeHeaderRow(cells, /regex/)` | เช็กว่าแถวนี้เป็นหัวตารางไหม |
 | `parseNumberCell(v)` | `"1,234.50"` / `"฿1,234"` / `"(500)"` → `1234.5` / `1234` / `-500` · อ่านไม่ออก → `0` |
@@ -59,6 +60,7 @@ for (const cells of grid) {
 | `components/line-import` | ลงรายการสินค้าในใบขาย/ใบสั่งซื้อ/ใบเสนอราคา |
 | `app/od-facilities/import-modal.tsx` | นำเข้า Statement OD |
 | `app/loan-contracts/installments-modal.tsx` | วางตารางผ่อนของธนาคารทั้งใบ |
+| `lib/marketing/mass-plan.ts` (`parseTableText`) | วางคำตอบ AI ในป๊อป "วางแผนแบบ Mass" ของปฏิทินคอนเทนต์ |
 
 ## ข้อควรระวัง
 

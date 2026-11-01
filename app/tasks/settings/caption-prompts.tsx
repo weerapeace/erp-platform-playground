@@ -110,6 +110,7 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
     { value: "product_detail:introduction", label: t("📦 ↳ Introduction (คุม Introduction En ด้วย)", "📦 ↳ Introduction (covers Introduction En)") },
     { value: "product_detail:description", label: t("📦 ↳ Description (คุม English Description ด้วย)", "📦 ↳ Description (covers English Description)") },
     { value: "translate", label: t("🌐 สไตล์การแปลภาษา (ปุ่มแปลทั้งหมด)", "🌐 Translation style (translate button)") },
+    { value: "mass_plan", label: t("วางแผนแบบ Mass (ปุ่ม AI ร่างในปฏิทินคอนเทนต์)", "Mass planning (AI draft in content calendar)") },
   ], [platforms, t]);
 
   const brandName = (id: string | null) => (id ? (brands.find((b) => b.id === id)?.name ?? id.slice(0, 8)) : t("ทุกแบรนด์", "All brands"));

@@ -19,6 +19,7 @@ export {
 } from "@/lib/creative-tasks";
 
 import type { CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus, ContentStatus } from "@/lib/creative-tasks";
+import type { MassCreatePost, MassRawRow } from "@/lib/marketing/mass-plan";
 
 // ---- Types (ตรงกับ output ของ /api/creative-tasks) ----
 export type CreativeTask = {
@@ -501,6 +502,19 @@ export async function deleteContent(id: string): Promise<void> {
 export async function bulkDeleteContent(ids: string[]): Promise<{ success: number; failed: number }> {
   const j = await jsonOrThrow(await apiFetch("/api/creative-content/bulk", { method: "POST", body: JSON.stringify({ action: "delete", ids }) }));
   return { success: (j.success as number) ?? 0, failed: (j.failed as number) ?? 0 };
+}
+// ---- วางแผนแบบ Mass (ป๊อปในปฏิทินคอนเทนต์) ----
+export type MassImportResult = { created: number; ids: string[]; content_nos: string[]; skipped: { title: string; date: string; reason: string }[]; caption_error: string | null };
+/** ลงโพสต์ที่ผ่านหน้าตรวจแล้วเป็นร่างทีเดียวหลายชิ้น (ไม่ทับของเดิม) */
+export async function massImportContent(brandId: string, posts: MassCreatePost[]): Promise<MassImportResult> {
+  const j = await jsonOrThrow(await apiFetch("/api/marketing/content-plan/mass", { method: "POST", body: JSON.stringify({ brand_id: brandId, posts }) }));
+  return j.data as MassImportResult;
+}
+export type AiMassPlanInput = { brand_id: string; start: string; end: string; per_week: number; platforms: string[]; pillars: string[]; campaign?: string; extra?: string; tone?: string; recommended_times?: string };
+/** ให้ AI ในระบบร่างแผน → แถวดิบ (ยังไม่บันทึก · เข้าหน้าตรวจเหมือนวางคำตอบเอง) */
+export async function aiMassPlan(input: AiMassPlanInput): Promise<{ rows: MassRawRow[]; posts: number; model: string; warnings: string[] }> {
+  const j = await jsonOrThrow(await apiFetch("/api/ai/mass-plan", { method: "POST", body: JSON.stringify(input) }));
+  return { rows: (j.rows as MassRawRow[]) ?? [], posts: (j.posts as number) ?? 0, model: (j.model as string) ?? "", warnings: (j.warnings as string[]) ?? [] };
 }
 // แก้หลายงานทีเดียว (คำขอเดียว) + รายงานผลต่อรายการ
 export async function bulkUpdateTasks(items: { id: string; changes: Record<string, unknown> }[]): Promise<{ success: number; failed: number; failures: { id: string; error: string }[] }> {

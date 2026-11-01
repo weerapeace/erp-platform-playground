@@ -38,6 +38,48 @@ export function parsePastedGrid(text: string): string[][] {
   return rows;
 }
 
+/**
+ * อ่าน "ตารางที่เป็นข้อความ" แบบครบกว่า parsePastedTable — ใช้กับคำตอบของ AI และไฟล์ CSV
+ *   - ตาราง Markdown ของ ChatGPT/Claude (`| a | b |`) → ตัดเส้นคั่น `|---|` ทิ้ง · `<br>` ในช่อง = ขึ้นบรรทัดใหม่
+ *   - ช่องที่ครอบด้วย "..." (Excel/Google Sheets คัดลอกช่องที่มีหลายบรรทัดมาแบบนี้) → ขึ้นบรรทัด/จุลภาคในช่องไม่ทำให้ตารางเพี้ยน
+ * มี TAB ที่ไหนก็ได้ = แยกด้วย TAB · ไม่มี = จุลภาค · ตัดบรรทัดว่างทิ้งเหมือน parsePastedTable
+ */
+export function parseTableText(text: string): string[][] {
+  const src = String(text ?? "").replace(/\r\n?/g, "\n");
+  const lines = src.split("\n").filter((l) => l.trim() !== "");
+  if (lines.length > 0 && lines.every((l) => l.trim().startsWith("|"))) {
+    return lines
+      .map((l) => {
+        // "\|" = ตัวขีดตั้งในเนื้อหา (ไม่ใช่เส้นแบ่งช่อง) → พักไว้เป็นอักษรพิเศษก่อนแยก แล้วค่อยคืน
+        const cells = l.trim().replace(/\\\|/g, "\u0000").split("|").map((c) => c.replace(/\u0000/g, "|").replace(/<br\s*\/?>/gi, "\n").trim());
+        if (cells[0] === "") cells.shift();
+        if (cells.length > 0 && cells[cells.length - 1] === "") cells.pop();
+        return cells;
+      })
+      .filter((cells) => !cells.every((c) => /^:?-{2,}:?$/.test(c)))
+      .filter((cells) => cells.some((c) => c !== ""));
+  }
+  const delim = src.includes("\t") ? "\t" : ",";
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let quoted = false;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i];
+    if (quoted) {
+      if (ch !== '"') cell += ch;
+      else if (src[i + 1] === '"') { cell += '"'; i++; }
+      else quoted = false;
+    } else if (ch === '"' && cell.trim() === "") { quoted = true; cell = ""; }   // เครื่องหมายคำพูดนับเฉพาะต้นช่อง
+    else if (ch === delim) { row.push(cell.trim()); cell = ""; }
+    else if (ch === "\n") { row.push(cell.trim()); rows.push(row); row = []; cell = ""; }
+    else cell += ch;
+  }
+  row.push(cell.trim());
+  rows.push(row);
+  return rows.filter((cells) => cells.some((c) => c !== ""));
+}
+
 /** แถวแรกเป็นหัวตารางไหม (ผู้ใช้มักคัดลอกหัวมาด้วย) — ส่ง regex ที่คาดว่าจะเจอในหัว */
 export function looksLikeHeaderRow(cells: string[] | undefined, pattern: RegExp): boolean {
   if (!cells) return false;
