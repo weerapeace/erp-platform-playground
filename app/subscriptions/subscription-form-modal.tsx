@@ -19,6 +19,9 @@ import {
   type BillingCycle, type Currency, type SubInput, type SubType, type Subscription, type StreamingService,
   type SubMember, type PriceMode,
 } from "@/lib/subscriptions";
+import { chromeProfileFields, findChromeProfile, type ChromeProfile } from "@/lib/chrome-profiles";
+import { Icon } from "@/components/icon";
+import { ChromeProfilesModal, type ChromeProfilesStart } from "./chrome-profiles-modal";
 
 const INP = "w-full h-10 px-3 text-sm border border-slate-200 rounded-lg outline-none focus:border-indigo-400 focus:ring-1 focus:ring-indigo-100 bg-white";
 const INP_SM = "h-7 px-2 text-xs border border-slate-200 rounded-md outline-none focus:border-indigo-400 bg-white text-slate-600";
@@ -59,7 +62,7 @@ function thaiShortDate(iso: string): string {
   return new Date(y, m - 1, d).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" });
 }
 
-export function SubscriptionFormModal({ open, editing, categories, groups, saving, defaults, streamingServices, onQuickAddStreaming, onClose, onSave }: {
+export function SubscriptionFormModal({ open, editing, categories, groups, saving, defaults, streamingServices, onQuickAddStreaming, chromeProfiles, onChromeProfilesChanged, onClose, onSave }: {
   open: boolean;
   editing: Subscription | null;
   categories: string[];
@@ -71,6 +74,10 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
   streamingServices?: StreamingService[] | null;
   /** เพิ่ม streaming ใหม่เข้าคลัง (คืน service ที่สร้าง) — หน้าเรียก API เอง */
   onQuickAddStreaming?: (name: string) => Promise<StreamingService | null>;
+  /** ทะเบียนโปรไฟล์ Chrome — ส่งมา = ช่องโปรไฟล์เป็นตัวเลือก (เลือกแล้วอีเมล/โฟลเดอร์เติมเอง) · ไม่ส่ง = กรอกเองแบบเดิม */
+  chromeProfiles?: ChromeProfile[] | null;
+  /** ทะเบียน/รายการเปลี่ยน (เพิ่ม/แก้/ลบโปรไฟล์จากในฟอร์ม) → ให้หน้าโหลดใหม่ */
+  onChromeProfilesChanged?: () => void | Promise<void>;
   onClose: () => void;
   onSave: (input: SubInput) => void;
 }) {
@@ -84,6 +91,9 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
   const [focusUserId, setFocusUserId] = useState<string | null>(null); // ผู้ใช้ที่เพิ่งเพิ่ม → โฟกัสช่องชื่อ
   const [showLogo, setShowLogo] = useState(false);   // แผงหาโลโก้
   const [showMore, setShowMore] = useState(false);   // รายละเอียดเพิ่มเติม (พับไว้)
+  const [profStart, setProfStart] = useState<ChromeProfilesStart>(null); // ป๊อปทะเบียนโปรไฟล์ (null = ปิด)
+  const [profOpen, setProfOpen] = useState(false);
+  const [profForUser, setProfForUser] = useState<string | null>(null);   // ผู้ใช้ที่กด "เพิ่มโปรไฟล์ใหม่" → ผูกให้หลังบันทึก
   const multi = users.length >= 2;
   const perMember = multi && form.price_mode === "per_member";
   const activeUsers = users.filter((u) => u.active).length;
@@ -100,6 +110,32 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
     setDirty(true);
   };
   const toggleUserOpen = (id: string) => setOpenUsers((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+
+  // ── ทะเบียนโปรไฟล์ Chrome (ผูกด้วยชื่อเล่น) ──
+  const useRegistry = !!chromeProfiles;
+  const linkedProfile = (u: SubMember) => (useRegistry ? findChromeProfile(chromeProfiles, u.chrome_profile) : null);
+  /** ผู้ใช้ที่ผูกโปรไฟล์ → ใช้ค่าล่าสุดจากทะเบียน (ทั้งตอนแสดงและตอนบันทึก) */
+  const withProfile = (u: SubMember): SubMember => { const p = linkedProfile(u); return p ? { ...u, ...chromeProfileFields(p) } : u; };
+  const openProfiles = (start: ChromeProfilesStart, forUser: string | null = null) => { setProfStart(start); setProfForUser(forUser); setProfOpen(true); };
+  const pickProfile = (u: SubMember, value: string) => {
+    if (value === "__new") {
+      // กรอกเองอยู่ → ยกค่าที่กรอกไปตั้งต้นให้ในทะเบียน
+      const init = linkedProfile(u) ? undefined
+        : { nickname: u.chrome_profile, account_email: u.account_email, chrome_profile_dir: u.chrome_profile_dir, chrome_profile_url: u.chrome_profile_url };
+      openProfiles({ mode: "new", init }, u.id);
+      return;
+    }
+    if (!value) { patchUser(u.id, { chrome_profile: "" }); return; } // ไม่ผูก → คงอีเมล/โฟลเดอร์เดิมไว้ให้แก้ต่อเอง
+    const p = chromeProfiles?.find((x) => x.id === value);
+    if (p) patchUser(u.id, chromeProfileFields(p));
+  };
+  /** บันทึกในทะเบียนแล้ว → ผู้ใช้ที่ผูกชื่อเล่นเดิมได้ค่าใหม่ (กันกดบันทึกฟอร์มแล้วเขียนค่าเก่าทับ) · ผู้ใช้ที่กดเพิ่มใหม่ → ผูกโปรไฟล์นั้น */
+  const onProfileSaved = (p: ChromeProfile, oldNick: string | null) => {
+    const oldKey = (oldNick ?? "").trim().toLowerCase();
+    setUsers((us) => us.map((u) => (u.id === profForUser || (oldKey && u.chrome_profile.trim().toLowerCase() === oldKey)) ? { ...u, ...chromeProfileFields(p) } : u));
+    if (profForUser) setDirty(true);
+    setProfForUser(null);
+  };
   /** เพิ่มผู้ใช้ใหม่ (copyFrom = คัดลอกโปรไฟล์/ลิงก์จากคนเดิม แต่ล้างชื่อ/อีเมล/โฟลเดอร์ให้ใส่ใหม่) */
   const addUser = (copyFrom?: SubMember) => {
     const u: SubMember = {
@@ -165,16 +201,17 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
       const f = editing ? fromSub(editing) : { ...EMPTY, ...(defaults ?? {}) };
       const us = usersFromInput(f);
       setForm(f); setUsers(us); setOpenUsers(new Set(us.length === 1 ? [us[0].id] : [])); setFocusUserId(null);
-      setShowLogo(false); setShowMore(false);
+      setShowLogo(false); setShowMore(false); setProfOpen(false); setProfForUser(null);
       setDirty(false); setErr(null); setNewStreaming("");
     }
   }, [open, editing, defaults]);
 
   const submit = () => {
     // คนเดียว → เขียนกลับช่องบนแถว (members ว่าง) · หลายคน → ส่ง members (lib/toSubRow mirror คนแรกให้เอง)
-    const first = users[0];
+    const us = users.map(withProfile);
+    const first = us[0];
     const input: SubInput = multi
-      ? { ...form, members: users, cost: perMember ? round2(membersTotal(users)) : form.cost }
+      ? { ...form, members: us, cost: perMember ? round2(membersTotal(us)) : form.cost }
       : {
           ...form, members: [], price_mode: "total",
           account_email: first.account_email, chrome_profile: first.chrome_profile,
@@ -197,6 +234,7 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
   const moreFilled = [form.group_name, form.card_last4, form.card_statement_name, form.invoice_url, form.notes].filter((v) => String(v ?? "").trim()).length;
 
   return (
+    <>
     <ERPModal open={open} onClose={onClose} size="lg" storageKey="subs-form"
       hasUnsavedChanges={dirty && !saving}
       title={editing ? "แก้ไขรายการ" : "เพิ่มรายการใหม่"}
@@ -319,7 +357,9 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
             👥 ผู้ใช้ในแพ็กนี้
             <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[11px] font-medium">{users.length}</span>
           </div>
-          {users.map((u, i) => {
+          {users.map((raw, i) => {
+            const u = withProfile(raw);        // ผูกโปรไฟล์ → แสดงค่าล่าสุดจากทะเบียน
+            const prof = linkedProfile(raw);
             const isOpen = openUsers.has(u.id);
             const label = multi ? (u.name || u.account_email || `ผู้ใช้คนที่ ${i + 1}`) : (u.account_email || "ผู้ใช้หลัก");
             return (
@@ -351,29 +391,87 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
                           autoFocus={u.id === focusUserId} />
                       </Field>
                     )}
-                    <Field label="อีเมลบัญชี">
-                      <input value={u.account_email} onChange={(e) => patchUser(u.id, { account_email: e.target.value })} placeholder="อีเมลที่ใช้สมัคร" className={INP} />
-                    </Field>
                     {perMember && (
                       <Field label={`ราคาของคนนี้ (${form.currency})`}>
                         <input type="number" step="0.01" min="0" value={u.price}
                           onChange={(e) => patchUser(u.id, { price: e.target.value === "" ? 0 : Number(e.target.value) })} className={`${INP} tabular-nums`} />
                       </Field>
                     )}
-                    <Field label="โปรไฟล์ Chrome (ชื่อเล่น)">
-                      <input value={u.chrome_profile} onChange={(e) => patchUser(u.id, { chrome_profile: e.target.value })} className={INP} />
-                    </Field>
-                    <Field label="โฟลเดอร์โปรไฟล์ Chrome (สำหรับปุ่มเปิด Chrome)">
-                      <input value={u.chrome_profile_dir} onChange={(e) => patchUser(u.id, { chrome_profile_dir: e.target.value })} placeholder="เช่น Profile 3, Default" className={INP} />
-                      <span className="mt-1 block text-[11px] text-slate-400">ดูได้ที่ Chrome → เปิดโปรไฟล์นั้น → พิมพ์ chrome://version ที่ช่อง URL → ดูบรรทัด &quot;Profile Path&quot; (ท้ายสุดคือชื่อโฟลเดอร์)</span>
-                    </Field>
-                    <Field label="ลิงก์โปรไฟล์ Chrome">
-                      <input value={u.chrome_profile_url} onChange={(e) => patchUser(u.id, { chrome_profile_url: e.target.value })} placeholder="https://…" className={INP} />
-                    </Field>
+                    {useRegistry ? (
+                      <>
+                        {/* เลือกโปรไฟล์จากทะเบียน → อีเมล/โฟลเดอร์/ลิงก์ เติมเอง */}
+                        <div className="md:col-span-2">
+                          <span className="block mb-1 text-xs font-medium text-slate-600">โปรไฟล์ Chrome</span>
+                          <div className="flex gap-2">
+                            <select value={prof?.id ?? ""} onChange={(e) => pickProfile(raw, e.target.value)} aria-label="โปรไฟล์ Chrome" className={INP}>
+                              <option value="">— ไม่ผูกโปรไฟล์ (กรอกเอง) —</option>
+                              {(chromeProfiles ?? []).map((p) => (
+                                <option key={p.id} value={p.id}>{p.nickname} · {p.account_email || "ยังไม่ใส่อีเมล"}</option>
+                              ))}
+                              <option value="__new">＋ เพิ่มโปรไฟล์ใหม่…</option>
+                            </select>
+                            <button type="button" onClick={() => openProfiles(null)} title="จัดการทะเบียนโปรไฟล์ Chrome"
+                              className="h-10 px-3 shrink-0 inline-flex items-center gap-1.5 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">
+                              <Icon name="settings" /> จัดการ
+                            </button>
+                          </div>
+                        </div>
+                        {prof ? (
+                          <div className="md:col-span-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2.5 space-y-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm">
+                              <ProfileValue label="อีเมลบัญชี" value={prof.account_email} empty="ยังไม่ใส่อีเมล" warn />
+                              <ProfileValue label="โฟลเดอร์โปรไฟล์" value={prof.chrome_profile_dir} empty="ยังไม่ระบุ" />
+                              <ProfileValue label="ลิงก์โปรไฟล์" value={prof.chrome_profile_url} empty="—" />
+                            </div>
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-[11px] text-slate-400">ค่าจากทะเบียน — แก้ที่เดียว ทุกรายการที่ใช้โปรไฟล์นี้เปลี่ยนตาม</span>
+                              <button type="button" onClick={() => openProfiles({ mode: "edit", id: prof.id })}
+                                className="h-7 px-2.5 inline-flex items-center gap-1 text-xs border border-slate-200 bg-white rounded-md text-slate-600 hover:bg-slate-50">
+                                <Icon name="edit" /> แก้ในทะเบียน
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <Field label="อีเมลบัญชี">
+                              <input value={raw.account_email} onChange={(e) => patchUser(raw.id, { account_email: e.target.value })} placeholder="อีเมลที่ใช้สมัคร" className={INP} />
+                            </Field>
+                            <Field label="โฟลเดอร์โปรไฟล์ Chrome (สำหรับปุ่มเปิด Chrome)">
+                              <input value={raw.chrome_profile_dir} onChange={(e) => patchUser(raw.id, { chrome_profile_dir: e.target.value })} placeholder="เช่น Profile 3, Default" className={INP} />
+                            </Field>
+                            <Field label="ลิงก์โปรไฟล์ Chrome">
+                              <input value={raw.chrome_profile_url} onChange={(e) => patchUser(raw.id, { chrome_profile_url: e.target.value })} placeholder="https://…" className={INP} />
+                            </Field>
+                            {raw.chrome_profile.trim() && (
+                              <p className="md:col-span-2 text-[11px] text-amber-600">
+                                ชื่อโปรไฟล์เดิม &quot;{raw.chrome_profile}&quot; ยังไม่อยู่ในทะเบียน —{" "}
+                                <button type="button" onClick={() => pickProfile(raw, "__new")} className="underline hover:text-amber-700">เพิ่มเข้าทะเบียน</button>
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <>
+                        <Field label="อีเมลบัญชี">
+                          <input value={u.account_email} onChange={(e) => patchUser(u.id, { account_email: e.target.value })} placeholder="อีเมลที่ใช้สมัคร" className={INP} />
+                        </Field>
+                        <Field label="โปรไฟล์ Chrome (ชื่อเล่น)">
+                          <input value={u.chrome_profile} onChange={(e) => patchUser(u.id, { chrome_profile: e.target.value })} className={INP} />
+                        </Field>
+                        <Field label="โฟลเดอร์โปรไฟล์ Chrome (สำหรับปุ่มเปิด Chrome)">
+                          <input value={u.chrome_profile_dir} onChange={(e) => patchUser(u.id, { chrome_profile_dir: e.target.value })} placeholder="เช่น Profile 3, Default" className={INP} />
+                          <span className="mt-1 block text-[11px] text-slate-400">ดูได้ที่ Chrome → เปิดโปรไฟล์นั้น → พิมพ์ chrome://version ที่ช่อง URL → ดูบรรทัด &quot;Profile Path&quot; (ท้ายสุดคือชื่อโฟลเดอร์)</span>
+                        </Field>
+                        <Field label="ลิงก์โปรไฟล์ Chrome">
+                          <input value={u.chrome_profile_url} onChange={(e) => patchUser(u.id, { chrome_profile_url: e.target.value })} placeholder="https://…" className={INP} />
+                        </Field>
+                      </>
+                    )}
                     <div className="md:col-span-2 flex flex-wrap items-center justify-between gap-2">
                       {multi ? <Check label="ผู้ใช้นี้ยังใช้งานอยู่" checked={u.active} onChange={(v) => patchUser(u.id, { active: v })} /> : <span />}
                       <span className="flex gap-1.5">
-                        <button type="button" onClick={() => addUser(u)} className="h-8 px-3 text-xs border border-slate-200 rounded-lg hover:bg-slate-50">⧉ คัดลอกเป็นคนใหม่</button>
+                        <button type="button" onClick={() => addUser(raw)} className="h-8 px-3 text-xs border border-slate-200 rounded-lg hover:bg-slate-50">⧉ คัดลอกเป็นคนใหม่</button>
                         {multi && (
                           <button type="button" onClick={() => removeUser(u.id)} className="h-8 px-3 text-xs border border-red-200 text-red-600 rounded-lg hover:bg-red-50">เอาออก</button>
                         )}
@@ -461,6 +559,25 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
         </div>
       </div>
     </ERPModal>
+
+    {/* ทะเบียนโปรไฟล์ Chrome — ซ้อนบนฟอร์ม (เปิดทีหลัง = อยู่ข้างบน) */}
+    {useRegistry && (
+      <ChromeProfilesModal open={profOpen} profiles={chromeProfiles ?? []} canEdit start={profStart}
+        onClose={() => { setProfOpen(false); setProfForUser(null); }}
+        onChanged={() => onChromeProfilesChanged?.()}
+        onSaved={onProfileSaved} />
+    )}
+    </>
+  );
+}
+
+/** ค่าจากทะเบียนโปรไฟล์ (อ่านอย่างเดียวในฟอร์ม) */
+function ProfileValue({ label, value, empty, warn }: { label: string; value: string; empty: string; warn?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <span className="block text-[11px] text-slate-400">{label}</span>
+      <span className={`block truncate ${value ? "text-slate-700" : warn ? "text-amber-600" : "text-slate-400"}`} title={value || undefined}>{value || empty}</span>
+    </div>
   );
 }
 

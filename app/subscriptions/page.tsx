@@ -30,6 +30,8 @@ import { AllInvoicesView } from "./all-invoices-view";
 import { DownloadInvoiceModal } from "./download-invoice-modal";
 import { SubscriptionsBoard, GROUP_OPTIONS, boardPatchFor, type BoardGroupBy } from "./subscriptions-board";
 import { SubNameCell } from "./sub-name-cell";
+import { ChromeProfilesModal } from "./chrome-profiles-modal";
+import { CHROME_PROFILES_API, type ChromeProfile } from "@/lib/chrome-profiles";
 
 type ViewMode = "list" | "inuse" | "onetime" | "calendar" | "wishlist" | "invoices" | "board";
 
@@ -89,6 +91,20 @@ export default function SubscriptionsPage() {
     finally { setLoading(false); }
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
+
+  // ทะเบียนโปรไฟล์ Chrome (ฟอร์มใช้เลือกโปรไฟล์ → อีเมล/โฟลเดอร์เติมเอง)
+  const [chromeProfiles, setChromeProfiles] = useState<ChromeProfile[] | null>(null); // null = ยังโหลดไม่ได้ → ฟอร์มกรอกเองแบบเดิม
+  const [profilesOpen, setProfilesOpen] = useState(false);
+  const fetchChromeProfiles = useCallback(async () => {
+    try {
+      const res = await apiFetch(CHROME_PROFILES_API);
+      const j = await res.json();
+      if (!j.error) setChromeProfiles((j.data ?? []) as ChromeProfile[]);
+    } catch { /* โหลดไม่ได้ = ฟอร์มยังกรอกเองได้ตามเดิม */ }
+  }, []);
+  useEffect(() => { if (canView) fetchChromeProfiles(); }, [canView, fetchChromeProfiles]);
+  // แก้ทะเบียน = รายการที่ใช้โปรไฟล์ถูกอัปเดตด้วย → โหลดทั้งคู่
+  const reloadChromeProfiles = useCallback(async () => { await Promise.all([fetchChromeProfiles(), fetchList()]); }, [fetchChromeProfiles, fetchList]);
 
   // ── summary ────────────────────────────────────────────────
   const summary = useMemo(() => {
@@ -357,6 +373,10 @@ export default function SubscriptionsPage() {
                   className="h-10 px-3 text-sm font-medium border border-indigo-200 text-indigo-600 bg-white rounded-lg hover:bg-indigo-50 disabled:opacity-50">
                   {testingNotify ? "กำลังส่ง…" : "🔔 ทดสอบแจ้งเตือน"}
                 </button>
+                <button onClick={() => setProfilesOpen(true)} title="ตั้งว่าแต่ละโปรไฟล์ Chrome ใช้อีเมล/โฟลเดอร์อะไร"
+                  className="h-10 px-3 text-sm font-medium border border-indigo-200 text-indigo-600 bg-white rounded-lg hover:bg-indigo-50">
+                  🖥️ โปรไฟล์ Chrome
+                </button>
                 <button onClick={openCreate} className="h-10 px-4 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-sm">+ เพิ่มรายการ</button>
               </div>
             )}
@@ -479,7 +499,11 @@ export default function SubscriptionsPage() {
 
       {/* ป๊อปอัป */}
       <SubscriptionFormModal open={formOpen} editing={editing} categories={categories} groups={groups} saving={saving} defaults={createDefaults}
+        chromeProfiles={chromeProfiles} onChromeProfilesChanged={reloadChromeProfiles}
         onClose={() => !saving && setFormOpen(false)} onSave={handleSave} />
+
+      <ChromeProfilesModal open={profilesOpen} profiles={chromeProfiles ?? []} canEdit={canEdit}
+        onClose={() => setProfilesOpen(false)} onChanged={reloadChromeProfiles} />
 
       <InvoicesModal sub={invTarget} canEdit={canEdit} onClose={() => setInvTarget(null)} />
 
