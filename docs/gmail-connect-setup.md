@@ -19,11 +19,20 @@
    - User support email: เลือกอีเมลของคุณ
    - Audience: เลือก **External**
    - Contact information: อีเมลของคุณ → ติ๊กยอมรับ → **Create**
-5. เมนูซ้าย **Audience** → กด **Publish app** → Confirm
+5. เมนูซ้าย **Branding** (ต้องกรอกก่อน ไม่งั้นปุ่ม Publish app กดไม่ได้) → กรอกแล้ว **Save**
+   - App name: ชื่อเดิม (**ห้ามมีคำว่า Google หรือ Gmail** ในชื่อ)
+   - User support email: อีเมลของคุณ
+   - App logo: **เว้นว่าง** (ถ้าใส่โลโก้ Google จะบังคับให้ส่งตรวจ)
+   - Application home page: `https://erp-platform-playground.vercel.app`
+   - Application privacy policy link: `https://erp-platform-playground.vercel.app/privacy`
+   - Terms of service link: เว้นว่างได้
+   - Authorized domains: **Add domain** → `erp-platform-playground.vercel.app`
+   - Developer contact information: อีเมลของคุณ
+6. เมนูซ้าย **Audience** → กด **Publish app** → Confirm
    - สถานะต้องเป็น **In production** (ถ้าค้างเป็น Testing การเชื่อมจะหลุดทุก 7 วัน)
    - ถ้ามีปุ่มให้ส่งตรวจสอบ (verification) **ไม่ต้องส่ง** — ใช้กันเองไม่เกิน 100 คนไม่ต้องตรวจ
-6. เมนูซ้าย **Data Access** → **Add or remove scopes** → ค้น `gmail.readonly` → ติ๊ก → **Update** → **Save**
-7. เมนูซ้าย **Clients** → **Create client**
+7. เมนูซ้าย **Data Access** → **Add or remove scopes** → ค้น `gmail.readonly` → ติ๊ก → **Update** → **Save**
+8. เมนูซ้าย **Clients** → **Create client**
    - Application type: **Web application** · Name: `ERP`
    - **Authorized redirect URIs** → Add URI → วางบรรทัดนี้ (ต้องตรงทุกตัวอักษร):
      ```
@@ -63,6 +72,7 @@ admin.google.com → Security → Access and data control → **API controls** �
 - ดึงได้เฉพาะร้านที่ **แนบไฟล์ PDF/รูปมาในเมล** — ร้านที่ส่งแค่ลิงก์ (เช่น Adobe) ต้องเข้าเว็บร้านโหลดเอง
 
 ## สำหรับนักพัฒนา
+- หน้านโยบายความเป็นส่วนตัว (Google บังคับ): `app/privacy/page.tsx` → `/privacy` เปิดได้โดยไม่ต้อง login · ถ้าขอ scope ใหม่ต้องอัปเดตหน้านี้
 - ระบบกลาง: `lib/gmail-api.ts` (OAuth, เข้ารหัส token AES-256-GCM, ค้นเมล, ดึงไฟล์แนบ) · ตาราง `gmail_connections` (service_role เท่านั้น)
 - API: `/api/gmail/connect` · `/api/gmail/callback` (ตรวจ state ที่เซ็น HMAC แทน session) · `/api/gmail/connections`
 - ใช้กับ App Subscription: `/api/subscriptions/mail-bills` (ค้น) · `/file` (ดูไฟล์) · `/attach` (แนบหลังยืนยัน) · UI `app/subscriptions/mail-bills-modal.tsx`
