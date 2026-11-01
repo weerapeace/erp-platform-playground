@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt, resolveImageKeys } from "@/lib/ai-caption";
+import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const brandId = (content.brand_id as string | null) ?? null;
   const { data: brand } = brandId ? await admin.from("brands").select("name").eq("id", brandId).maybeSingle() : { data: null };
-  const prompt = pickPrompt(await loadPromptRows(), brandId, platform);
+  const [prompt, brandCard] = await Promise.all([loadPromptRows().then((rows) => pickPrompt(rows, brandId, platform)), brandProfileBlock(admin, brandId)]);
 
   // ── รูปของแพลตฟอร์มนี้ → base64 ──
   const { keys: imgKeys } = await resolveImageKeys(content as { id: string; task_id?: string | null; platform_images?: unknown }, platform);
@@ -51,6 +52,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const facts = [
     content.title ? `ชื่อคอนเทนต์: ${content.title}` : "",
     brand?.name ? `แบรนด์: ${brand.name}` : "",
+    brandCard,   // การ์ดรู้จักแบรนด์ (ของกลาง) — ว่าง = ยังไม่ได้ทำการ์ด
     content.post_type ? `ประเภทโพสต์: ${content.post_type}` : "",
     `แพลตฟอร์ม: ${platform}`,
     (cap?.hashtags ?? "").trim() ? `แฮชแท็กที่ผู้ใช้ใส่ไว้ (ใช้เป็นบริบท): ${cap!.hashtags}` : "",

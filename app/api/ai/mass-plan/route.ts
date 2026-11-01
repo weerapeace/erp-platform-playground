@@ -9,6 +9,7 @@
  *   1) วางตาราง (วัน/เวลา/หัวข้อ/แนว/แพลตฟอร์ม/ไอเดีย) ครั้งเดียว — ข้อความสั้น
  *   2) เขียนแคปชั่น "ทีละแพลตฟอร์มพร้อมกัน" (แต่ละที่เขียนต่างกัน) — ข้ามแพลตฟอร์มที่ตั้งว่าไม่ใช้แคปชั่น
  * ไม่ส่งรูป → ถูก (≈ 1–3 บาท/ครั้ง ตามจำนวนโพสต์ ด้วยรุ่น gpt-4.1-mini ที่ตั้งไว้) · prompt เพิ่มเติมตั้งได้ที่ทะเบียน prompt key "mass_plan"
+ * บริบทเพิ่ม (ฝั่งเซิร์ฟเวอร์โหลดเอง): การ์ดรู้จักแบรนด์ + สินค้าเด่นตอนนี้ · เทรนด์จากบอร์ด 🔥 (AI ในระบบค้นเว็บเองไม่ได้)
  * สิทธิ์: tasks.create + ai.caption (มีค่าใช้จ่ายต่อครั้ง) · audit ai_mass_plan
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -19,8 +20,10 @@ import { writeAudit } from "@/lib/audit";
 import { chatJson, loadPromptRows, normalizeHashtags, openAiKey, pickJobPrompt, productDetailModel } from "@/lib/ai-caption";
 import { isUuid } from "@/lib/marketing/sku-list";
 import { bangkokDateKey } from "@/lib/marketing/content-plan";
+import { brandHighlights, loadBrandProfile } from "@/lib/marketing/brand-profile-server";
+import { brandProfileLines } from "@/lib/marketing/brand-profile";
 import {
-  briefFreq, buildMassPlanContext, countForRange, daysInRange, isRealDate, normFreq, normTime, platformRule, specialDaysBetween, thaiDateLabel,
+  activeTrends, briefFreq, buildMassPlanContext, countForRange, daysInRange, isRealDate, normFreq, normTime, platformRule, specialDaysBetween, thaiDateLabel,
   MASS_AI_MAX_ROWS, type MassFreq, type MassPlanBrief, type MassPlatform, type MassRawRow,
 } from "@/lib/marketing/mass-plan";
 
@@ -33,7 +36,7 @@ const MAX_DAYS = 62;
 const MAX_ROWS = MASS_AI_MAX_ROWS;
 
 // ไอเดียรูป/คลิปใช้ร่วมทุกแพลตฟอร์มของโพสต์ (จังหวะแรกตอบสั้น = เร็ว ไม่โดนตัดกลางทางตอนเลือกหลายแพลตฟอร์ม)
-type PlanPost = { date: string; time: string; title: string; pillar: string; platforms: string[]; idea: string };
+type PlanPost = { date: string; time: string; title: string; pillar: string; platforms: string[]; idea: string; trend: string };
 const str = (v: unknown, n = 2000) => (typeof v === "string" ? v.trim().slice(0, n) : "");
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -56,11 +59,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const share = body.share !== false;
 
   const admin = supabaseAdmin();
-  const [{ data: brand }, { data: platRows }, { data: psetRow }, promptRows] = await Promise.all([
+  const [{ data: brand }, { data: platRows }, { data: psetRow }, promptRows, profile, highlights, { data: trendRows }] = await Promise.all([
     admin.from("brands").select("name").eq("id", brandId).maybeSingle(),
     admin.from("erp_platforms").select("code, name_th, sort_order").order("sort_order"),
     admin.from("ui_config").select("value").eq("key", "creative_platform_settings").maybeSingle(),
     loadPromptRows(),
+    loadBrandProfile(admin, brandId),
+    brandHighlights(admin, brandId),
+    admin.from("erp_creative_trends").select("title, summary, heat, brand_id, source_url, start_date, end_date, is_active").eq("is_active", true).limit(100),
   ]);
   const pset = ((psetRow as { value?: Record<string, { use_caption?: boolean; use_hashtags?: boolean; note?: string | null }> } | null)?.value ?? {});
   const wanted = new Set((Array.isArray(body.platforms) ? body.platforms : []).map(String));
@@ -79,6 +85,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     campaign: str(body.campaign, 1000), specialDays: specialDaysBetween(start, end),
     recommendedTimes: str(body.recommended_times, 300), tone: str(body.tone, 2500),
     extra: [jobRule, str(body.extra, 1000)].filter(Boolean).join("\n"),
+    brandProfile: brandProfileLines(profile, { highlights }),
+    trends: activeTrends((trendRows ?? []) as { title: string }[], brandId, start, end),
   };
   const totalRows = platforms.reduce((sum, p) => sum + countForRange(briefFreq(brief, p.code), start, end), 0);
   if (totalRows > MAX_ROWS) return NextResponse.json({ error: `ขอเยอะเกินไปสำหรับครั้งเดียว (≈ ${totalRows} โพสต์รวมทุกแพลตฟอร์ม · AI ร่างได้ครั้งละไม่เกิน ${MAX_ROWS}) — ลดความถี่หรือช่วงวัน หรือใช้ปุ่ม "ขอ prompt" แทน` }, { status: 400 });
@@ -95,7 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       [{ type: "text", text: [
         context, "",
         `วันนี้คือ ${thaiDateLabel(today)} — วางตารางโพสต์ในช่วง ${start} ถึง ${end} (ยังไม่ต้องเขียนแคปชั่น)`,
-        `ตอบ JSON: {"posts":[{"date":"YYYY-MM-DD","time":"HH:MM","title":"หัวข้อสั้น","pillar":"ชื่อแนวจากรายการ","platforms":["code"],"idea":"ไอเดียรูป/คลิปสั้น ๆ 1 บรรทัด"}]}`,
+        `ตอบ JSON: {"posts":[{"date":"YYYY-MM-DD","time":"HH:MM","title":"หัวข้อสั้น","pillar":"ชื่อแนวจากรายการ","platforms":["code"],"idea":"ไอเดียรูป/คลิปสั้น ๆ 1 บรรทัด"${brief.trends?.length ? ',"trend":"ชื่อเทรนด์จากรายการที่ใช้ (ไม่ใช้ = เว้นว่าง)"' : ""}}]}`,
         `- code ที่ใช้ได้: ${codes}`,
         "- จำนวนโพสต์ของแต่ละแพลตฟอร์มให้ใกล้ตัวเลข ≈ ที่ระบุด้านบน กระจายทั้งช่วง ไม่กองวันเดียว · ลงวันสำคัญให้รับกัน",
         share
@@ -110,7 +118,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const date = str(o.date, 10);
       const plats = (Array.isArray(o.platforms) ? o.platforms : []).map(String).filter((c) => valid.has(c));
       if (!isRealDate(date) || date < start || date > end || !plats.length || !str(o.title)) return null;
-      return { date, time: normTime(str(o.time, 8)) || "10:00", title: str(o.title, 120), pillar: str(o.pillar, 60), platforms: [...new Set(plats)], idea: str(o.idea, 300) };
+      return { date, time: normTime(str(o.time, 8)) || "10:00", title: str(o.title, 120), pillar: str(o.pillar, 60), platforms: [...new Set(plats)], idea: str(o.idea, 300), trend: str(o.trend, 120) };
     }).filter((p): p is PlanPost => !!p).slice(0, MAX_ROWS);
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });
@@ -130,7 +138,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         [{ type: "text", text: [
           buildMassPlanContext(brief, [p]).join("\n"), "",
           `เขียนแคปชั่น ${p.label} ให้แต่ละโพสต์ (i = ลำดับ):`,
-          ...mine.map(({ post, i }) => `${i}) ${thaiDateLabel(post.date)} · ${post.title}${post.pillar ? ` · แนว ${post.pillar}` : ""}${post.idea ? ` · ไอเดีย: ${post.idea}` : ""}`),
+          ...mine.map(({ post, i }) => `${i}) ${thaiDateLabel(post.date)} · ${post.title}${post.pillar ? ` · แนว ${post.pillar}` : ""}${post.idea ? ` · ไอเดีย: ${post.idea}` : ""}${post.trend ? ` · เทรนด์: ${post.trend}` : ""}`),
           "", `วิธีเขียน ${p.label}: ${platformRule(p)}`,
           `ตอบ JSON: {"captions":[{"i":0,"caption":"ข้อความ (ขึ้นบรรทัดใหม่ได้)","hashtags":["#tag"]}]} · ไม่ต้องใส่แฮชแท็กในแคปชั่น${p.useHashtags ? "" : " · แพลตฟอร์มนี้ไม่ใช้แฮชแท็ก (hashtags = [])"}`,
         ].join("\n") }],
@@ -149,13 +157,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const rows: MassRawRow[] = plan.flatMap((post, i) => post.platforms.map((code) => {
     const c = captions.get(`${i}|${code}`);
-    return { line: i + 1, date: post.date, time: post.time, platform: code, pillar: post.pillar, title: post.title, caption: c?.caption ?? "", hashtags: c?.hashtags ?? "", idea: post.idea };
+    return { line: i + 1, date: post.date, time: post.time, platform: code, pillar: post.pillar, title: post.title, caption: c?.caption ?? "", hashtags: c?.hashtags ?? "", idea: post.idea, trend: post.trend };
   }));
 
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   await writeAudit(admin, {
     action: "ai_mass_plan", entityType: "creative_content", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { brand_id: brandId, start, end, freq, share, platforms: platforms.map((p) => p.code), posts: plan.length, rows: rows.length, calls, model, warnings },
+    metadata: { brand_id: brandId, start, end, freq, share, brand_card: (brief.brandProfile?.length ?? 0) > 0, trends: brief.trends?.map((t) => t.title) ?? [], platforms: platforms.map((p) => p.code), posts: plan.length, rows: rows.length, calls, model, warnings },
   });
   return NextResponse.json({ rows, posts: plan.length, model, warnings, error: null });
 }

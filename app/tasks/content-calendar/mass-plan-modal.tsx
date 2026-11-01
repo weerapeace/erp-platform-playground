@@ -2,6 +2,7 @@
 /**
  * วางแผนแบบ Mass — ป๊อปในปฏิทินคอนเทนต์ (ปุ่ม "วางแผนแบบ Mass" ข้าง "+ สร้างคอนเทนต์")
  *   1) ตั้งโจทย์: แบรนด์ · ช่วงวัน · แพลตฟอร์ม + ความถี่ต่อแพลตฟอร์ม (ครั้ง/สัปดาห์ หรือ /เดือน · เริ่มที่ไม่ติ๊ก) · แนว · สินค้า/แคมเปญ
+ *      การ์ดรู้จักแบรนด์ (ของกลาง ../content/brand-profile-modal) + เทรนด์: ให้ AI ข้างนอกค้นเว็บเอง (ติ๊ก) และ/หรือ เทรนด์จากบอร์ด 🔥
  *      จำชุดความถี่เป็นค่าประจำแบรนด์ได้ = เป้ารายเดือน "ทุกประเภท" (ตารางเดียวกับ 🎯 เป้าเดือนในแท็บวางแผน)
  *   2) ร่าง 2 ทาง: ก๊อป prompt ไปถาม AI เอง (ฟรี) แล้ววางคำตอบ/อัปไฟล์  หรือ  ให้ AI ในระบบร่างเลย (มีค่าใช้จ่ายเล็กน้อย)
  *   3) ตรวจ (ใช้ร่วมกันทั้งสองทาง) → ลงปฏิทินเป็นร่าง · ย้อนทั้งชุดได้ทันทีหลังลง
@@ -24,15 +25,18 @@ import { dateKeyOf } from "@/lib/marketing/content-plan";
 import {
   addDaysKey, briefFromCaptions, buildMassPlanPrompt, checkPost, countForRange, daysInRange, freqFromMonthly, freqHint, groupMassPlan, matchPlatform,
   freqLabel, monthRange, monthlyFromFreq, normTime, normalizeHashtagText, parseMassPlanText, platformRule, postLevel, productionRange, rowsFromGrid, specialDaysBetween,
-  thaiDateLabel, weekdayOf, FREQ_MAX, MASS_AI_MAX_ROWS, MASS_MAX_POSTS,
+  activeTrends, massPostBrief, thaiDateLabel, trendLabel, weekdayOf, FREQ_MAX, MASS_AI_MAX_ROWS, MASS_MAX_POSTS,
+  type TrendRowLike,
   type MassFreq, type MassFreqUnit, type MassIssue, type MassPlanBrief, type MassPlatform, type MassPost, type MassRawRow,
 } from "@/lib/marketing/mass-plan";
 import {
-  aiMassPlan, bulkDeleteContent, defaultHashtags, getBrandMonthlyTargets, getCaptionConfig, getRecommendedTimes, massImportContent, resolvePrompt,
+  aiMassPlan, bulkDeleteContent, defaultHashtags, getBrandMonthlyTargets, getBrandProfile, getCaptionConfig, getRecommendedTimes, massImportContent, resolvePrompt,
   saveBrandMonthlyTargets,
   type BrandOption, type CaptionConfig, type ContentItem, type MassImportResult, type PlatformSettings, type RecommendedTimes,
 } from "../data";
 import { getBrandPlatforms, type BrandFormatMap, type BrandPlatformMap } from "../content/brand-platforms-modal";
+import { BrandProfileModal } from "../content/brand-profile-modal";
+import { brandProfileFilled, brandProfileLines, type BrandProfile } from "@/lib/marketing/brand-profile";
 import { platformMeta, type PlatformOpt } from "../use-options";
 
 type Step = "setup" | "draft" | "review" | "done";
@@ -75,17 +79,20 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
   const [bpFormats, setBpFormats] = useState<BrandFormatMap>({});
   const [capCfg, setCapCfg] = useState<CaptionConfig>({});
   const [recTimes, setRecTimes] = useState<RecommendedTimes>({});
+  const [trendRows, setTrendRows] = useState<TrendRowLike[]>([]);
   const loadedRef = useRef(false);
   useEffect(() => {
     if (!open || loadedRef.current) return;
     loadedRef.current = true;
     void (async () => {
-      const [pj, bp, cfg, rt] = await Promise.all([
+      const [pj, bp, cfg, rt, tj] = await Promise.all([
         apiFetch("/api/marketing/sku-labels?kind=pillar").then((r) => r.json()).catch(() => ({})),
         getBrandPlatforms(),
         getCaptionConfig().catch(() => ({} as CaptionConfig)),
         getRecommendedTimes().catch(() => ({} as RecommendedTimes)),
+        apiFetch("/api/creative-trends").then((r) => r.json()).catch(() => ({})),
       ]);
+      setTrendRows(((tj as { data?: TrendRowLike[] }).data ?? []));
       const ps = ((pj as { data?: Pillar[] }).data ?? []).filter((p) => p.is_active !== false);
       setPillars(ps);
       setSelPillars(new Set(ps.map((p) => p.name)));
@@ -109,6 +116,10 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
   const [share, setShare] = useState(true);
   const [remember, setRemember] = useState(false);
   const [saved, setSaved] = useState<Record<string, number>>({});   // เป้ารายเดือนที่จำไว้ของแบรนด์ { platform: ครั้ง/เดือน }
+  // การ์ดรู้จักแบรนด์ + สินค้าเด่นตอนนี้ (ฝั่ง AI ในระบบ เซิร์ฟเวอร์โหลดเอง — ตรงนี้ไว้ใส่ prompt ที่ก๊อปไป + โชว์ว่ากรอกครบไหม)
+  const [card, setCard] = useState<{ profile: BrandProfile; highlights: string[] } | null>(null);
+  const [cardOpen, setCardOpen] = useState(false);
+  const [searchTrends, setSearchTrends] = useState(true);
   const [selPillars, setSelPillars] = useState<Set<string>>(new Set());
   const [campaign, setCampaign] = useState("");
   const [extra, setExtra] = useState("");
@@ -120,6 +131,8 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
     let alive = true;
     setSaved({});
     getBrandMonthlyTargets(brandId).then((m) => { if (alive) setSaved(m); }).catch(() => {});
+    setCard(null);
+    getBrandProfile(brandId).then((r) => { if (alive) setCard({ profile: r.profile, highlights: r.highlights }); }).catch(() => {});
     return () => { alive = false; };
   }, [open, brandId]);
 
@@ -154,12 +167,16 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
   const recTimesText = useMemo(() => [1, 2, 3, 4, 5, 6, 0]
     .filter((d) => recTimes[String(d)]?.length)
     .map((d) => `${WD_TH[d]} ${recTimes[String(d)].map((x) => x.time).join("/")}`).join(" · "), [recTimes]);
-  const specialDays = useMemo(() => (start && end && start <= end ? specialDaysBetween(start, end) : []), [start, end]);
+  const rangeOk = !!start && !!end && start <= end;
+  const specialDays = useMemo(() => (rangeOk ? specialDaysBetween(start, end) : []), [rangeOk, start, end]);
   const brief: MassPlanBrief = {
     brandName, start, end, freq: Object.fromEntries(chosen.map((p) => [p.code, freqOf(p.code)])), share, platforms: chosen, pillars: pillars.filter((p) => selPillars.has(p.name)).map((p) => p.name),
     campaign, specialDays, recommendedTimes: recTimesText, tone: resolvePrompt(capCfg, brandId || null), extra,
+    brandProfile: brandProfileLines(card?.profile, { highlights: card?.highlights }),
+    trends: rangeOk ? activeTrends(trendRows, brandId || null, start, end) : [],
+    searchTrends,
   };
-  const rangeOk = !!start && !!end && start <= end;
+  const cardFilled = brandProfileFilled(card?.profile);
   const platCount = (code: string) => (rangeOk ? countForRange(freqOf(code), start < today ? today : start, end) : 0);
   const planCounts = chosen.map((p) => platCount(p.code));
   const planTotal = planCounts.reduce((a, b) => a + b, 0);
@@ -290,7 +307,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
         const plats = p.captions.map((c) => c.platform);
         return {
           date: p.date, time: normTime(p.time) || "10:00", title: p.title.trim(), pillar_id: p.pillarId,
-          brief: briefFromCaptions(p.captions, labelOf),
+          brief: massPostBrief(p, labelOf),
           platform_formats: Object.fromEntries(Object.entries(fmt).filter(([k]) => plats.includes(k))),
           captions: p.captions.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags })),
         };
@@ -331,6 +348,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
           <input value={p.title} onChange={(e) => updatePost(p.key, { title: e.target.value }, true)} className="h-8 w-full rounded border border-slate-200 px-2 text-sm font-medium" aria-label={t("หัวข้อ", "Title")} />
           <div className="mt-1 text-xs text-slate-500 truncate">
             {p.pillarId ? pillars.find((x) => x.id === p.pillarId)?.name : <span className="text-slate-400">{t("ไม่ระบุแนว", "No pillar")}</span>}
+            {p.trend && <span className="text-amber-700"> · <Icon name="hot" /> {p.trend}</span>}
             {briefFromCaptions(p.captions, labelOf) && <span className="text-slate-400"> · {briefFromCaptions(p.captions, labelOf)?.replace(/\n/g, " · ")}</span>}
           </div>
         </div>
@@ -479,6 +497,17 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
                 <input type="date" value={end} min={start || today} onChange={(e) => setEnd(e.target.value)} className={inputCls} />
               </label>
             </div>
+            {brandId && (
+              <div className={`flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs ${cardFilled.done ? "border-slate-200 bg-slate-50 text-slate-600" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                <Icon name={cardFilled.done ? "note" : "warning"} />
+                <span className="font-medium">{t("การ์ดรู้จักแบรนด์", "Brand card")}</span>
+                <span>{card == null ? t("กำลังโหลด…", "Loading…")
+                  : cardFilled.done ? t(`กรอกแล้ว ${cardFilled.done}/${cardFilled.total} — AI ใช้ข้อมูลนี้วางแผนและเขียนแคปชั่น`, `${cardFilled.done}/${cardFilled.total} filled — AI uses it`)
+                  : t("ยังไม่ได้ทำ — AI จะรู้จักแบรนด์น้อย แผนออกมากลาง ๆ", "Not set — AI knows little about this brand")}</span>
+                {!!card?.highlights.length && <span className="text-slate-500">· {t(`สินค้าเด่น ${card.highlights.length} รุ่น`, `${card.highlights.length} highlighted products`)}</span>}
+                <button type="button" onClick={() => setCardOpen(true)} className="ml-auto h-7 px-2.5 text-xs text-violet-700 border border-violet-200 bg-white rounded-lg hover:bg-violet-50">{cardFilled.done ? t("เปิดการ์ด", "Open card") : t("ทำการ์ด", "Set up card")}</button>
+              </div>
+            )}
             <div>
               <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs text-slate-500">{t("แพลตฟอร์มและความถี่ (กดชื่อเพื่อเลือก)", "Platforms and frequency (click a name to pick)")}</span>
@@ -575,6 +604,22 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
               <span className="mb-1 block text-xs text-slate-500">{t("สั่งเพิ่ม (ไม่บังคับ)", "Extra instructions (optional)")}</span>
               <input value={extra} onChange={(e) => setExtra(e.target.value)} className={inputCls} placeholder={t("เช่น เน้นลูกค้าผู้หญิงวัยทำงาน · ห้ามใช้คำว่าถูกที่สุด", "e.g. target working women")} />
             </label>
+            <div className="rounded-lg border border-slate-200 px-3 py-2 space-y-1.5">
+              <div className="text-xs font-medium text-slate-600"><Icon name="hot" /> {t("เทรนด์", "Trends")}</div>
+              <label className="flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                <input type="checkbox" checked={searchTrends} onChange={(e) => setSearchTrends(e.target.checked)} className="mt-0.5 h-4 w-4 accent-violet-600" />
+                <span>
+                  {t("ให้ AI หาเทรนด์ล่าสุดก่อนวางแผน (ค้นเว็บ + แนบลิงก์ที่มา)", "Ask the AI to search current trends first (with sources)")}
+                  <span className="block text-[11px] text-slate-400">{t("ใช้กับปุ่มขอ prompt — ChatGPT / Gemini ค้นเว็บให้ · AI ในระบบค้นเว็บเองไม่ได้ ใช้เฉพาะเทรนด์จากบอร์ด", "Prompt button only — ChatGPT/Gemini search the web · the in-system AI can't browse, it uses board trends only")}</span>
+                </span>
+              </label>
+              <div className="text-xs text-slate-600">
+                {t("เทรนด์จากบอร์ด (ทีมคัดไว้)", "Board trends")}: {brief.trends?.length
+                  ? brief.trends.map(trendLabel).join(" · ")
+                  : <span className="text-slate-400">{t("ไม่มีเทรนด์ที่ยังไม่หมดอายุในช่วงนี้", "none active in this range")}</span>}
+                {" "}<a href="/tasks/trends" target="_blank" rel="noreferrer" className="text-violet-700 hover:underline">{t("จัดการบอร์ดเทรนด์", "Manage trends")}</a>
+              </div>
+            </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 space-y-1">
               <div><Icon name="calendar" /> {t("วันสำคัญที่ใส่ให้อัตโนมัติ", "Key dates included")}: {specialDays.length ? specialDays.map((d) => `${thaiDateLabel(d.date)} ${d.label}`).join(" · ") : t("ไม่มีในช่วงนี้", "none in range")}</div>
               {recTimesText && <div><Icon name="clock" /> {t("เวลาโพสต์ประจำ (ใช้เมื่อ AI ไม่ระบุเวลา)", "Usual posting times")}: {recTimesText}</div>}
@@ -704,6 +749,10 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
           </div>
         )}
       </ERPModal>
+      {cardOpen && brandId && (
+        <BrandProfileModal brandId={brandId} brandName={brandName} onClose={() => setCardOpen(false)}
+          onSaved={(p) => setCard((c) => ({ profile: p, highlights: c?.highlights ?? [] }))} />
+      )}
       <ConfirmDialog open={undoAsk} onClose={() => setUndoAsk(false)} onConfirm={undo} loading={undoBusy} variant="danger"
         title={t("ยกเลิกทั้งชุดนี้?", "Undo this batch?")}
         message={t(`จะลบ ${result?.ids.length ?? 0} โพสต์ที่เพิ่งลงจากชุดนี้ (โพสต์อื่นไม่โดน)`, `Removes the ${result?.ids.length ?? 0} posts just added (nothing else)`)}

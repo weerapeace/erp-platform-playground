@@ -6,7 +6,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { listBrands, type BrandOption } from "../data";
+import { getBrandProfileSummary, listBrands, type BrandOption } from "../data";
+import { BrandProfileModal } from "../content/brand-profile-modal";
 import { useCreativeOptions } from "../use-options";
 import { useT } from "@/components/i18n";
 import { askConfirm } from "@/components/modal/ask-dialog";
@@ -54,6 +55,35 @@ function AiUsageCard() {
           <p className="sm:col-span-2 text-slate-400">{t("* ประมาณจากราคา gpt-4o-mini (รูปคือส่วนที่กิน token มากสุด) — ตัวเลขจริงดูได้ที่หน้า Usage ของ OpenAI", "* Estimated from gpt-4o-mini pricing — see OpenAI usage page for exact billing")}</p>
         </div>
       )}
+    </div>
+  );
+}
+
+// การ์ดรู้จักแบรนด์ (ของกลาง) — ทุกปุ่ม AI ใช้ร่วมกัน · ตรงนี้ให้เห็นทุกแบรนด์ว่ากรอกครบแค่ไหน + กดเปิดแก้
+function BrandCardsPanel({ brands }: { brands: BrandOption[] }) {
+  const t = useT();
+  const [summary, setSummary] = useState<Record<string, { done: number; total: number }>>({});
+  const [openId, setOpenId] = useState<string | null>(null);
+  const reload = useCallback(() => { getBrandProfileSummary().then(setSummary).catch(() => {}); }, []);
+  useEffect(() => { reload(); }, [reload]);
+  if (!brands.length) return null;
+  const opened = brands.find((b) => b.id === openId);
+  return (
+    <div className="rounded-lg border border-violet-200 bg-violet-50/40 px-3 py-2">
+      <div className="text-xs font-medium text-violet-800">{t("การ์ดรู้จักแบรนด์ — AI ทุกปุ่มใช้ข้อมูลนี้ (วางแผน Mass · เขียนแคปชั่น · รายละเอียดสินค้า)", "Brand cards — used by every AI button")}</div>
+      <div className="mt-1.5 flex flex-wrap gap-1.5">
+        {brands.map((b) => {
+          const s = summary[b.id];
+          const done = s?.done ?? 0;
+          return (
+            <button key={b.id} type="button" onClick={() => setOpenId(b.id)}
+              className={`h-7 px-2.5 inline-flex items-center gap-1.5 text-xs rounded-lg border bg-white hover:bg-violet-50 ${done ? "border-violet-200 text-slate-700" : "border-amber-200 text-amber-800"}`}>
+              {b.name} <span className={done ? "text-violet-600" : "text-amber-600"}>{done ? `${done}/${s?.total ?? 7}` : t("ยังไม่ทำ", "not set")}</span>
+            </button>
+          );
+        })}
+      </div>
+      {opened && <BrandProfileModal brandId={opened.id} brandName={opened.name} onClose={() => setOpenId(null)} onSaved={reload} />}
     </div>
   );
 }
@@ -146,6 +176,7 @@ export function CaptionPromptsManager({ showToast }: { showToast: (m: string) =>
       </div>
       <div className="p-5 space-y-3">
         <AiUsageCard />
+        <BrandCardsPanel brands={brands} />
         <div className="flex flex-wrap items-end gap-2">
           <label className="block">
             <span className="text-[11px] font-medium text-slate-500 block mb-0.5">{t("แบรนด์", "Brand")}</span>

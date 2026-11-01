@@ -16,6 +16,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { CAPTION_MODEL, productDetailModel, chatJson, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickJobPrompt, PRODUCT_DETAIL_KEY, PRODUCT_FIELD_KEYS, productFieldPromptKey } from "@/lib/ai-caption";
+import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -291,9 +292,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .filter((a) => a && a.q && a.a).slice(0, 8)
     .map((a) => `- ${String(a.q).slice(0, 200)} → ${String(a.a).slice(0, 300)}`).join("\n");
 
+  const brandCard = await brandProfileBlock(admin, brandId, { forProduct: true });
   const facts = [
     `รหัสสินค้า: ${p.code ?? "-"}`,
     brand?.name ? `แบรนด์: ${brand.name}` : "",
+    brandCard,   // การ์ดรู้จักแบรนด์ (ของกลาง) — ว่าง = ยังไม่ได้ทำการ์ด
     // ต้องบอกทั้ง "มี" และ "ไม่มี" — ไม่งั้น AI เดาเอาจากชื่อเดิมว่ามี Collection
     (coll as { name?: string } | null)?.name
       ? `Collection (คอลเลกชัน): ${(coll as { name?: string }).name}`

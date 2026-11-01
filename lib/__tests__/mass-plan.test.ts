@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { parseTableText } from "@/lib/paste-table";
 import {
   buildMassPlanPrompt, specialDaysBetween, countForRange, freqFromMonthly, monthlyFromFreq, productionRange, monthRange, parseMassPlanText, matchPlatform, matchPillar,
-  normTime, normalizeHashtagText, groupMassPlan, postLevel, briefFromCaptions, validateCreatePost, type MassPlatform,
+  normTime, normalizeHashtagText, groupMassPlan, postLevel, briefFromCaptions, validateCreatePost, activeTrends, massPostBrief, type MassPlatform,
 } from "@/lib/marketing/mass-plan";
 
 const PLATS: MassPlatform[] = [
@@ -160,5 +160,52 @@ describe("mass-plan: รวมโพสต์ + ตรวจ", () => {
     expect(validateCreatePost({ ...good, date: "2026-02-31" }, "2026-01-01", ok)).toBe("วันที่ไม่ถูกต้อง");
     expect(validateCreatePost({ ...good, time: "x" }, "2026-11-01", ok)).toBe("เวลาไม่ถูกต้อง");
     expect(validateCreatePost({ ...good, captions: [{ platform: "threads", caption: "", hashtags: "" }] }, "2026-11-01", ok)).toBe("แพลตฟอร์มไม่ถูกต้อง");
+  });
+});
+
+describe("mass-plan: เทรนด์ + การ์ดแบรนด์", () => {
+  const base = { brandName: "B", start: "2026-11-01", end: "2026-11-30", freq: {}, platforms: PLATS.slice(0, 2), pillars: [], campaign: "", specialDays: [] };
+  it("เทรนด์จากบอร์ด: เฉพาะที่เปิด · มาแรง/กำลังมา · แบรนด์นี้หรือทุกแบรนด์ · ช่วงวันทับกับแผน", () => {
+    const rows = [
+      { title: "Whimsy", heat: "hot", end_date: "2026-08-26" },                       // หมดอายุแล้ว
+      { title: "Cool Blue", heat: "rising", end_date: null, source_url: "https://x.y" },
+      { title: "เย็นลง", heat: "cooling" },
+      { title: "ของแบรนด์อื่น", heat: "hot", brand_id: "other" },
+      { title: "ปิดไว้", heat: "hot", is_active: false },
+      { title: "Y2K", heat: "hot", start_date: "2026-11-20", end_date: "2026-12-10" },
+    ];
+    expect(activeTrends(rows, "me", "2026-11-01", "2026-11-30").map((t) => t.title)).toEqual(["Y2K", "Cool Blue"]);
+  });
+  it("prompt: การ์ดแบรนด์ + เทรนด์จากบอร์ด + สั่งค้นเว็บ + คอลัมน์เทรนด์", () => {
+    const p = buildMassPlanPrompt({ ...base, brandProfile: ["ข้อมูลแบรนด์ (จากการ์ดรู้จักแบรนด์ — ใช้เป็นบริบท ห้ามแต่งข้อเท็จจริงเกินจากนี้):", "- ลูกค้าหลัก: สาวออฟฟิศ"],
+      trends: [{ title: "Cool Blue", summary: "โทนฟ้า", heat: "rising", url: "https://x.y" }], searchTrends: true });
+    expect(p).toContain("- ลูกค้าหลัก: สาวออฟฟิศ");
+    expect(p).toContain("- Cool Blue (กำลังมา): โทนฟ้า · ที่มา https://x.y");
+    expect(p).toContain("ขั้นที่ 1 — หาเทรนด์");
+    expect(p).toContain("ห้ามแต่งเทรนด์ขึ้นเอง");
+    expect(p).toContain("| ไอเดียรูป/คลิป | เทรนด์ที่ใช้");
+    const plain = buildMassPlanPrompt(base);
+    expect(plain).not.toContain("เทรนด์ที่ใช้");
+    expect(plain).toContain("ตอบเป็นตารางอย่างเดียว");
+  });
+  it("อ่านคำตอบที่มีสรุปเทรนด์ + ตารางเทรนด์แยก + ตารางแผน → ใช้ตารางแผน และเก็บเทรนด์ลงบรีฟ", () => {
+    const text = [
+      "เทรนด์ที่เจอ:", "- Cool Blue — https://x.y", "",
+      "| เทรนด์ | ลิงก์ |", "|---|---|", "| Cool Blue | https://x.y |", "",
+      "แผนโพสต์:",
+      "| วันที่ | เวลา | แพลตฟอร์ม | แนว | หัวข้อ | แคปชั่น | แฮชแท็ก | ไอเดียรูป/คลิป | เทรนด์ที่ใช้ |",
+      "|---|---|---|---|---|---|---|---|---|",
+      "| 3/11/2569 | 19:00 | Facebook | โชว์สินค้า | กระเป๋าฟ้า | ฟ้าใส // ใช้ได้ทุกวัน | #ฟ้า | ถ่ายกลางแจ้ง | Cool Blue (https://x.y) |",
+      "| 3/11/2569 | 19:00 | Instagram | โชว์สินค้า | กระเป๋าฟ้า | ฟ้าใส | #ฟ้า | ถ่ายกลางแจ้ง | - |",
+      "", "หวังว่าจะช่วยได้!",
+    ].join("\n");
+    const rows = parseMassPlanText(text);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].trend).toBe("Cool Blue (https://x.y)");
+    expect(rows[1].trend).toBe("");
+    const g = groupMassPlan(rows, ctx);
+    expect(g.posts).toHaveLength(1);
+    expect(g.posts[0].trend).toBe("Cool Blue (https://x.y)");
+    expect(massPostBrief(g.posts[0], (c) => c)).toBe("เทรนด์: Cool Blue (https://x.y)\nถ่ายกลางแจ้ง");
   });
 });

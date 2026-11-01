@@ -20,6 +20,7 @@ export {
 
 import type { CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus, ContentStatus } from "@/lib/creative-tasks";
 import type { MassCreatePost, MassFreq, MassRawRow } from "@/lib/marketing/mass-plan";
+import type { BrandProfile } from "@/lib/marketing/brand-profile";
 
 // ---- Types (ตรงกับ output ของ /api/creative-tasks) ----
 export type CreativeTask = {
@@ -515,6 +516,26 @@ export type AiMassPlanInput = { brand_id: string; start: string; end: string; fr
 export async function aiMassPlan(input: AiMassPlanInput): Promise<{ rows: MassRawRow[]; posts: number; model: string; warnings: string[] }> {
   const j = await jsonOrThrow(await apiFetch("/api/ai/mass-plan", { method: "POST", body: JSON.stringify(input) }));
   return { rows: (j.rows as MassRawRow[]) ?? [], posts: (j.posts as number) ?? 0, model: (j.model as string) ?? "", warnings: (j.warnings as string[]) ?? [] };
+}
+// ---- การ์ดรู้จักแบรนด์ (ข้อมูลแบรนด์ให้ AI · ของกลางทุกปุ่ม AI) ----
+export type BrandRecentCaption = { platform: string; caption: string; title: string };
+export async function getBrandProfile(brandId: string, withCaptions = false): Promise<{ profile: BrandProfile; highlights: string[]; filled: { done: number; total: number }; recent_captions?: BrandRecentCaption[] }> {
+  const j = await jsonOrThrow(await apiFetch(`/api/brand-ai-profile?brand_id=${encodeURIComponent(brandId)}${withCaptions ? "&captions=1" : ""}`));
+  return { profile: j.profile as BrandProfile, highlights: (j.highlights as string[]) ?? [], filled: j.filled as { done: number; total: number }, recent_captions: j.recent_captions as BrandRecentCaption[] | undefined };
+}
+/** ภาพรวมทุกแบรนด์: กรอกไปกี่ช่องแล้ว */
+export async function getBrandProfileSummary(): Promise<Record<string, { done: number; total: number }>> {
+  const j = await jsonOrThrow(await apiFetch("/api/brand-ai-profile"));
+  return (j.profiles as Record<string, { done: number; total: number }>) ?? {};
+}
+export async function saveBrandProfile(brandId: string, profile: BrandProfile): Promise<BrandProfile> {
+  const j = await jsonOrThrow(await apiFetch("/api/brand-ai-profile", { method: "PUT", body: JSON.stringify({ brand_id: brandId, profile }) }));
+  return j.profile as BrandProfile;
+}
+/** ให้ AI ร่างการ์ดจากข้อมูลที่ระบบมี (ยังไม่บันทึก) */
+export async function draftBrandProfile(brandId: string): Promise<{ draft: Partial<Record<keyof BrandProfile, string>>; examples: string[] }> {
+  const j = await jsonOrThrow(await apiFetch("/api/ai/brand-profile-draft", { method: "POST", body: JSON.stringify({ brand_id: brandId }) }));
+  return { draft: (j.draft as Partial<Record<keyof BrandProfile, string>>) ?? {}, examples: (j.examples as string[]) ?? [] };
 }
 /** เป้ารายเดือน "ทุกประเภท + ทุกรูปแบบ" ของแบรนด์ (ตารางเดียวกับ 🎯 เป้าเดือนในหน้าวางแผน) → { platform: จำนวน/เดือน } */
 export async function getBrandMonthlyTargets(brandId: string): Promise<Record<string, number>> {

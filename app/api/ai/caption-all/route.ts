@@ -15,6 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt, resolveImageKeys } from "@/lib/ai-caption";
+import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -73,10 +74,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     groups.set(sig, g);
   }
 
-  const promptRows = await loadPromptRows();
+  const [promptRows, brandCard] = await Promise.all([loadPromptRows(), brandProfileBlock(admin, brandId)]);
   const facts = [
     content.title ? `ชื่อคอนเทนต์: ${content.title}` : "",
     brand?.name ? `แบรนด์: ${brand.name}` : "",
+    brandCard,   // การ์ดรู้จักแบรนด์ (ของกลาง) — ว่าง = ยังไม่ได้ทำการ์ด
     content.post_type ? `ประเภทโพสต์: ${content.post_type}` : "",
     (content.note ?? "").toString().trim() ? `โน้ตเพิ่มเติม: ${content.note}` : "",
     extra ? `คำสั่งเพิ่มจากผู้ใช้ครั้งนี้ (สำคัญ ทำตามนี้ด้วย): ${extra}` : "",

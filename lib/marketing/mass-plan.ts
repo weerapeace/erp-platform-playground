@@ -145,7 +145,31 @@ export type MassPlanBrief = {
   /** แนวทางการเขียนของแบรนด์ (พรอมต์แคปชั่นที่ตั้งไว้) */
   tone?: string;
   extra?: string;
+  /** บรรทัดจากการ์ดรู้จักแบรนด์ (brandProfileLines) — ว่าง = ยังไม่ได้ทำการ์ด */
+  brandProfile?: string[];
+  /** เทรนด์ที่ทีมคัดไว้ในบอร์ด 🔥 เทรนด์ (activeTrends) */
+  trends?: MassTrend[];
+  /** สั่งให้ AI ข้างนอก (ChatGPT/Gemini) ค้นเว็บหาเทรนด์ล่าสุดก่อนวางแผน — ใช้กับ prompt ที่ก๊อปไปถามเท่านั้น */
+  searchTrends?: boolean;
 };
+
+// ── เทรนด์จากบอร์ด 🔥 เทรนด์ (erp_creative_trends) ──
+export type MassTrend = { title: string; summary: string; heat: string; url: string | null };
+export type TrendRowLike = {
+  title: string; summary?: string | null; heat?: string | null; brand_id?: string | null; source_url?: string | null;
+  start_date?: string | null; end_date?: string | null; is_active?: boolean | null;
+};
+const HEAT_TH: Record<string, string> = { hot: "มาแรงตอนนี้", rising: "กำลังมา" };
+/** เทรนด์ที่ใช้กับแผนนี้ได้ = เปิดอยู่ · มาแรง/กำลังมา · ของแบรนด์นี้หรือทุกแบรนด์ · ช่วงวันทับกับแผน (ไม่มีวันหมด = ใช้ได้) */
+export function activeTrends(rows: TrendRowLike[], brandId: string | null, start: string, end: string, limit = 8): MassTrend[] {
+  return rows
+    .filter((r) => r.is_active !== false && !!HEAT_TH[r.heat ?? ""] && (!r.brand_id || r.brand_id === brandId)
+      && (!r.end_date || r.end_date >= start) && (!r.start_date || r.start_date <= end) && r.title?.trim())
+    .sort((a, b) => (a.heat === b.heat ? 0 : a.heat === "hot" ? -1 : 1))
+    .slice(0, limit)
+    .map((r) => ({ title: r.title.trim(), summary: (r.summary ?? "").replace(/\s*\n\s*/g, " · ").trim().slice(0, 300), heat: r.heat ?? "rising", url: r.source_url?.trim() || null }));
+}
+export const trendLabel = (t: MassTrend) => `${t.title} (${HEAT_TH[t.heat] ?? t.heat})`;
 
 export const MASS_PLAN_COLUMNS = ["วันที่", "เวลา", "แพลตฟอร์ม", "แนว", "หัวข้อ", "แคปชั่น", "แฮชแท็ก", "ไอเดียรูป/คลิป"] as const;
 /** แคปชั่นในตารางต้องอยู่บรรทัดเดียว — ให้ AI ใช้เครื่องหมายนี้แทนการขึ้นบรรทัด แล้วระบบแปลงกลับ */
@@ -171,34 +195,54 @@ export function buildMassPlanContext(b: MassPlanBrief, only?: MassPlatform[]): s
   ];
   if (b.specialDays.length) lines.push(`วันสำคัญในช่วงนี้ (วางโพสต์ให้รับกัน): ${b.specialDays.map((d) => `${thaiDateLabel(d.date)} ${d.label}`).join(" · ")}`);
   if (b.recommendedTimes?.trim()) lines.push(`เวลาโพสต์ที่ใช้ประจำ: ${b.recommendedTimes.trim()}`);
+  if (b.brandProfile?.length) lines.push("", ...b.brandProfile);
   if (b.tone?.trim()) lines.push("", "แนวทางการเขียนของแบรนด์ (รอบนี้ไม่มีรูปแนบ ให้คิดจากสินค้า/แคมเปญ):", b.tone.trim());
+  if (b.trends?.length) {
+    lines.push("", "เทรนด์ที่ทีมคัดไว้ (ใช้กับโพสต์ที่เข้ากับแบรนด์เท่านั้น ไม่ต้องทุกโพสต์):",
+      ...b.trends.map((t) => `- ${trendLabel(t)}${t.summary ? `: ${t.summary}` : ""}${t.url ? ` · ที่มา ${t.url}` : ""}`));
+  }
   lines.push("", "วิธีเขียนของแต่ละแพลตฟอร์ม:", ...plats.map((p) => `- ${p.label}: ${platformRule(p)}`));
   if (b.extra?.trim()) lines.push("", `คำสั่งเพิ่มครั้งนี้: ${b.extra.trim()}`);
-  lines.push("", "ข้อห้าม: ห้ามแต่งราคา/ส่วนลด/ขนาด/วัสดุเป็นตัวเลขเอง (พูดถึงโปรได้เฉพาะที่ให้ไว้ในแคมเปญ) · ไม่ต้องใส่ลิงก์ (ระบบเติมลิงก์/ราคา/ชื่อร้านจากแม่แบบแคปชั่นให้เอง)");
+  lines.push("", "ข้อห้าม: ห้ามแต่งราคา/ส่วนลด/ขนาด/วัสดุเป็นตัวเลขเอง (พูดถึงโปรได้เฉพาะที่ให้ไว้ในแคมเปญ) · ไม่ต้องใส่ลิงก์ในแคปชั่น (ระบบเติมลิงก์/ราคา/ชื่อร้านจากแม่แบบแคปชั่นให้เอง)");
   return lines;
+}
+
+/** มีคอลัมน์ "เทรนด์ที่ใช้" ไหม (ให้ค้นเทรนด์ หรือมีเทรนด์จากบอร์ด) */
+export const usesTrends = (b: MassPlanBrief) => !!b.searchTrends || !!b.trends?.length;
+export function massPlanColumns(b: MassPlanBrief): string[] {
+  return usesTrends(b) ? [...MASS_PLAN_COLUMNS, "เทรนด์ที่ใช้"] : [...MASS_PLAN_COLUMNS];
 }
 
 /** prompt สำเร็จรูปให้ก๊อปไปถาม ChatGPT / Claude / Gemini — ตอบเป็นตารางที่วางกลับเข้าระบบได้ */
 export function buildMassPlanPrompt(b: MassPlanBrief, only?: MassPlatform[]): string {
   const plats = only ?? b.platforms;
+  const search = b.searchTrends
+    ? [
+      `ขั้นที่ 1 — หาเทรนด์: ค้นเว็บหาเทรนด์ล่าสุดบนโซเชียลไทย (TikTok / Instagram / Facebook) ที่ยังมาแรงในช่วง ${thaiDateLabel(b.start)} – ${thaiDateLabel(b.end)} และเข้ากับแบรนด์และลูกค้ากลุ่มนี้ 3–5 เรื่อง สรุปเป็นข้อสั้น ๆ (ไม่ต้องทำเป็นตาราง) พร้อมลิงก์ที่มาจริง`,
+      "- ต้องเป็นของจริงที่ค้นเจอเท่านั้น ถ้าค้นเว็บไม่ได้ให้บอกตรง ๆ แล้วใช้เฉพาะเทรนด์ที่ทีมคัดไว้ (ถ้ามี) ห้ามแต่งเทรนด์ขึ้นเอง",
+      "",
+      "ขั้นที่ 2 — ตารางแผน: ตามด้วยตารางเดียว ไม่ต้องอธิบายเพิ่ม มีคอลัมน์ตามลำดับนี้:",
+    ]
+    : ["ตอบเป็นตารางอย่างเดียว ไม่ต้องอธิบาย มีคอลัมน์ตามลำดับนี้:"];
   return [
     `คุณคือนักวางแผนคอนเทนต์โซเชียลมีเดียของแบรนด์ "${b.brandName}" ช่วยวางแผนโพสต์ตามข้อมูลนี้`,
     "",
     ...buildMassPlanContext(b, plats),
     "",
-    "ตอบเป็นตารางอย่างเดียว ไม่ต้องอธิบาย มีคอลัมน์ตามลำดับนี้:",
-    MASS_PLAN_COLUMNS.join(" | "),
+    ...search,
+    massPlanColumns(b).join(" | "),
     "- 1 แถว = 1 โพสต์ ใน 1 แพลตฟอร์ม · วันที่แบบ 3/11/2569 (พ.ศ.) · เวลาแบบ 19:00",
     `- แคปชั่นเขียนในบรรทัดเดียว ถ้าต้องการขึ้นบรรทัดใหม่ให้ใช้ " ${LINE_BREAK_MARK} " คั่น`,
     "- แฮชแท็กคั่นด้วยช่องว่าง · แพลตฟอร์มที่ไม่ใช้แคปชั่นให้เว้นช่องแคปชั่น/แฮชแท็กว่าง แต่ใส่ไอเดียรูป",
     ...(plats.length > 1 && b.share !== false ? ['- เรื่องเดียวกันที่ลงหลายแพลตฟอร์มในวัน-เวลาเดียวกัน ให้ใช้ "หัวข้อ" เดียวกันเป๊ะ (ระบบจะรวมเป็นโพสต์เดียว)'] : []),
+    ...(usesTrends(b) ? ["- เทรนด์ที่ใช้ = ชื่อเทรนด์ (+ ลิงก์ที่มา ถ้ามี) · ใส่เฉพาะโพสต์ที่ใช้เทรนด์จริง ที่เหลือเว้นว่าง"] : []),
   ].join("\n");
 }
 
 // ═══════════════ อ่านคำตอบที่วางกลับมา ═══════════════
 
-export type MassRawRow = { line: number; date: string; time: string; platform: string; pillar: string; title: string; caption: string; hashtags: string; idea: string };
-const FIELDS = ["date", "time", "platform", "pillar", "title", "caption", "hashtags", "idea"] as const;
+export type MassRawRow = { line: number; date: string; time: string; platform: string; pillar: string; title: string; caption: string; hashtags: string; idea: string; trend?: string };
+const FIELDS = ["date", "time", "platform", "pillar", "title", "caption", "hashtags", "idea", "trend"] as const;
 type Field = (typeof FIELDS)[number];
 const HEADER_ALIASES: Record<Field, RegExp> = {
   date: /^(วันที่|วัน|date|วันที่โพสต์)$/i,
@@ -209,6 +253,7 @@ const HEADER_ALIASES: Record<Field, RegExp> = {
   caption: /^(แคปชั่น|แคปชัน|caption|ข้อความ)$/i,
   hashtags: /^(แฮชแท็ก|แฮชแท็ค|hashtags?)$/i,
   idea: /^(ไอเดียรูป\/คลิป|ไอเดียรูป|ไอเดียคลิป|ไอเดีย|รูป\/คลิป|idea|visual)$/i,
+  trend: /^(เทรนด์|trend)/i,
 };
 const unbold = (s: string) => s.replace(/^\*\*([\s\S]*)\*\*$/, "$1").replace(/^__([\s\S]*)__$/, "$1").trim();
 /** เครื่องหมายขึ้นบรรทัดที่ AI ใช้ (" // " หรือ <br>) → ขึ้นบรรทัดจริง · "https://" ไม่โดนเพราะต้องมีช่องว่างหน้า-หลัง */
@@ -233,12 +278,30 @@ export function rowsFromGrid(grid: string[][]): MassRawRow[] {
       return {
         line: i + first, date: get("date"), time: get("time"), platform: get("platform"), pillar: get("pillar"),
         title: restoreBreaks(get("title")).replace(/\n/g, " "), caption: restoreBreaks(get("caption")), hashtags: get("hashtags"), idea: restoreBreaks(get("idea")),
+        trend: restoreBreaks(get("trend")).replace(/\n/g, " ").replace(/^[-–—]$/, ""),
       };
     })
     .filter((r) => r.date || r.title || r.platform || r.caption);
 }
 
+const headerHits = (row: string[]) => FIELDS.filter((f) => row.some((h) => HEADER_ALIASES[f].test(unbold(h)))).length;
+/**
+ * คำตอบที่วางกลับมา → แถวดิบ · ถ้ามีตาราง Markdown หลายก้อน (เช่น AI ทำตารางเทรนด์แยกไว้ก่อน)
+ * เลือกก้อนที่หัวตารางตรงกับคอลัมน์แผน · ไม่เจอ = ก้อนที่ยาวสุด · ข้อความอธิบายนอกตารางถูกตัดทิ้ง · ไม่มีตาราง Markdown = อ่านแบบ Tab/CSV
+ */
 export function parseMassPlanText(text: string): MassRawRow[] {
+  const blocks: string[][] = [];
+  let cur: string[] = [];
+  for (const l of String(text ?? "").replace(/\r\n?/g, "\n").split("\n")) {
+    if (l.trim().startsWith("|")) cur.push(l);
+    else if (l.trim()) { if (cur.length) blocks.push(cur); cur = []; }
+  }
+  if (cur.length) blocks.push(cur);
+  if (blocks.length) {   // มีตาราง Markdown = ใช้เฉพาะบรรทัดตาราง (ตัดข้อความอธิบาย เช่น สรุปเทรนด์ ทิ้ง)
+    const grids = blocks.map((b) => parseTableText(b.join("\n"))).filter((g) => g.length);
+    const best = grids.find((g) => headerHits(g[0]) >= 3) ?? [...grids].sort((a, b) => b.length - a.length)[0];
+    return best ? rowsFromGrid(best) : [];
+  }
   return rowsFromGrid(parseTableText(text));
 }
 
@@ -306,6 +369,8 @@ export type MassCaption = { platform: string; caption: string; hashtags: string;
 export type MassPost = {
   key: string; date: string; time: string; title: string;
   pillarId: string | null; pillarRaw: string;
+  /** เทรนด์ที่ AI บอกว่าใช้ (ช่อง "เทรนด์ที่ใช้") — ว่าง = ไม่ได้ใช้ */
+  trend: string;
   captions: MassCaption[];
   /** ผลตรวจทั้งหมด (ระดับโพสต์ + ระดับแถว) · rowIssues = เฉพาะที่มาจากแถว (ไม่เปลี่ยนเมื่อแก้วัน/หัวข้อ) */
   issues: MassIssue[]; rowIssues: MassIssue[];
@@ -340,13 +405,14 @@ export function groupMassPlan(rows: MassRawRow[], ctx: GroupContext): { posts: M
     let post = byKey.get(key);
     if (!post) {
       const pillarId = matchPillar(r.pillar, ctx.pillars);
-      post = { key, date, time, title, pillarId, pillarRaw: r.pillar, captions: [], issues: [], rowIssues: [], include: true, blocked: false, lines: [] };
+      post = { key, date, time, title, pillarId, pillarRaw: r.pillar, trend: (r.trend ?? "").trim(), captions: [], issues: [], rowIssues: [], include: true, blocked: false, lines: [] };
       if (!t) post.rowIssues.push({ level: "info", text: `ไม่มีเวลา — ใช้ ${time}` });
       if (!r.title.trim()) post.rowIssues.push({ level: "info", text: "ไม่มีหัวข้อ — ใช้ต้นแคปชั่นแทน" });
       if (r.pillar.trim() && !pillarId) post.rowIssues.push({ level: "info", text: `ไม่รู้จักแนว "${r.pillar}" — ลงแบบไม่ระบุแนว` });
       byKey.set(key, post);
     }
     post.lines.push(r.line);
+    if (!post.trend && r.trend?.trim()) post.trend = r.trend.trim();
 
     const code = matchPlatform(r.platform, ctx.platforms);
     if (!code) { post.rowIssues.push({ level: "warn", text: `ไม่มีแพลตฟอร์ม "${r.platform || "(ว่าง)"}" ในระบบ — ตัดออก` }); continue; }
@@ -418,6 +484,12 @@ export function briefFromCaptions(captions: MassCaption[], label: (code: string)
   const uniq = new Set(ideas.map((c) => c.idea.trim()));
   if (uniq.size === 1) return [...uniq][0];
   return ideas.map((c) => `${label(c.platform)}: ${c.idea.trim()}`).join("\n");
+}
+
+/** บรีฟที่ลงคอนเทนต์ = เทรนด์ที่ใช้ (ถ้ามี) + ไอเดียรูป/คลิป */
+export function massPostBrief(p: Pick<MassPost, "trend" | "captions">, label: (code: string) => string): string | null {
+  const parts = [p.trend.trim() ? `เทรนด์: ${p.trend.trim()}` : "", briefFromCaptions(p.captions, label) ?? ""].filter(Boolean);
+  return parts.length ? parts.join("\n") : null;
 }
 
 /** ตรวจโพสต์ฝั่งเซิร์ฟเวอร์ (กันข้อมูลที่ข้ามหน้าตรวจมา) · ผ่าน = null */
