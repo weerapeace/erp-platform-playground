@@ -26,17 +26,25 @@ describe("🖼 รูปเว็บรายสี", () => {
     expect(x?.names).toEqual(["แทน", "น้ำตาล"]);
     expect(x?.skuId).toBe("id-แทน");
   });
-  it("ทุกสีใช้รูปปก SKU (ไม่เคยลงรูปเว็บ) = ไม่เตือน แต่ allSku = true", () => {
+  it("รูปปก SKU ไม่นับเป็นรูปเว็บ — ทุกสีใช้รูปปก SKU = ยังไม่มีรูปบนเว็บเลย", () => {
     const colors = [c("ดำ", "sku"), c("ขาว", "sku")];
-    expect(listingIssues({ ...ok, colors }).map((i) => i.key)).toEqual([]);
-    expect(colorWebImages(colors)).toMatchObject({ webN: 0, total: 2, allSku: true, missing: [] });
+    const iss = listingIssues({ ...ok, colors });
+    expect(iss.map((i) => i.key)).toEqual(["color_no_web_image"]);
+    expect(iss[0].label).toBe("ยังไม่มีรูปบนเว็บเลย");
+    expect(colorWebImages(colors)).toMatchObject({ webN: 0, total: 2, noWeb: true });
   });
-  it("สีที่ไม่มีรูปเลย = ป้าย สีที่ยังไม่มีรูป (ไม่ซ้ำกับป้ายรูปเว็บ)", () => {
+  it("สีที่ไม่มีรูปเลย = นับในป้ายรูปเว็บป้ายเดียว (ไม่ขึ้นซ้ำ 2 ป้าย)", () => {
     const iss = listingIssues({ ...ok, colors: [c("ดำ", "web"), c("ขาว", "none")] });
-    expect(iss.map((i) => i.key)).toEqual(["color_no_image"]);
+    expect(iss.map((i) => i.key)).toEqual(["color_no_web_image"]);
     expect(iss[0].skuId).toBe("id-ขาว");
+    expect(iss[0].detail).toContain("SKU ก็ไม่มีรูป");
   });
-  it("ตัวเลือกกรอกทับเอง (ไม่มี img) = ไม่นับ", () => {
-    expect(colorWebImages([{ label: "A", swatch: null, hasImage: true }])).toMatchObject({ total: 0, allSku: false });
+  it("ลงรูปเว็บครบทุกสี = ไม่เตือน", () => {
+    expect(listingIssues({ ...ok, colors: [c("ดำ", "web"), c("ขาว", "web")] })).toEqual([]);
+  });
+  it("ตัวเลือกกรอกทับเอง (ไม่มี img) = ไม่นับรูปเว็บ แต่ยังเช็กสีที่ไม่มีรูปแบบเดิม", () => {
+    expect(colorWebImages([{ label: "A", swatch: null, hasImage: true }])).toMatchObject({ total: 0, noWeb: false });
+    const iss = listingIssues({ ...ok, colors: [{ label: "A", swatch: "#000", hasImage: true }, { label: "B", swatch: "#000", hasImage: false }] });
+    expect(iss.map((i) => i.key)).toEqual(["color_no_image"]);
   });
 });

@@ -109,7 +109,7 @@ const SUB_SKU_COLS = "color,color_th,list_price,cover_image_r2_key";
 /** หมวดของร้าน — มาจาก API (ตั้งได้เองในแท็บ ⚙️ จับคู่ฟิลด์) */
 export type CategoryDef = { key: string; label: string; icon: string; parent?: string | null };
 
-type Filter = "all" | "pub" | "hide" | "feat" | "fix" | "fit" | "noimg" | "partimg" | "skuimg";
+type Filter = "all" | "pub" | "hide" | "feat" | "fix" | "fit" | "noimg" | "partimg";
 const VIEWS = ["list", "grid", "sort"] as const;
 
 const baht = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH")}`;
@@ -124,7 +124,7 @@ const issuesOf = (l: Listing): ListingIssue[] =>
     ? listingIssues({ price: l.display.price, imageCount: l.display.imageCount, categories: l.categories ?? [], colors: l.display.colors, compartmentsMissing: l.display.compartmentsMissing })
     : [];
 
-/** จุดสี · 🖼 สีที่ยังไม่มีรูปบนเว็บ = วงรอบจุด (เหลือง = ใช้รูปปก SKU แทน · แดง = ไม่มีรูปเลย) */
+/** จุดสี · 🖼 สีที่ยังไม่ได้ลงรูปเว็บ = วงรอบจุด (เหลือง = ตอนนี้ใช้รูปปก SKU แทน · แดง = SKU ก็ไม่มีรูป) */
 function ColorDots({ colors, max = 5 }: { colors: HealthColor[]; max?: number }) {
   if (!colors.length) return <span className="text-[11px] text-slate-300">—</span>;
   const miss = new Set(colorWebImages(colors).missing.map((c) => c.label));
@@ -135,7 +135,7 @@ function ColorDots({ colors, max = 5 }: { colors: HealthColor[]; max?: number })
         return (
           <span
             key={`${c.label}-${i}`}
-            title={m ? `${c.label} — ${c.img === "none" ? "ยังไม่มีรูปเลย" : "ยังไม่มีรูปบนเว็บ (ใช้รูปปก SKU แทน)"}` : c.label}
+            title={m ? `${c.label} — ยังไม่มีรูปบนเว็บ${c.img === "none" ? " (SKU ก็ไม่มีรูป)" : " (ตอนนี้ใช้รูปปก SKU แทน)"}` : c.label}
             className={`inline-block w-3 h-3 rounded-full ${c.swatch ? "ring-1 ring-black/10" : "border border-dashed border-slate-400"} ${
               m ? `ring-2 ring-offset-1 ${c.img === "none" ? "!ring-rose-500" : "!ring-amber-400"}` : ""
             }`}
@@ -286,13 +286,13 @@ export function WebsiteListingsPanel({
   };
 
   const issuesById = useMemo(() => new Map(listings.map((l) => [l.parentId, issuesOf(l)])), [listings]);
-  // 🖼 สถานะรูปบนเว็บของรุ่น: none = ไม่มีรูปเลย (ทั้งรุ่นหรือบางสี) · part = ลงรูปเว็บบางสีแล้วแต่ยังขาด · sku = ทุกสียังใช้รูปปก SKU
+  // 🖼 สถานะรูปบนเว็บของรุ่น (นับเฉพาะรูปเว็บ — รูปปก SKU ไม่นับ): none = ยังไม่ได้ลงรูปเว็บเลยสักสี · part = ลงไว้บางสี
   const imgById = useMemo(
     () =>
       new Map(
         listings.map((l) => {
           const keys = new Set((issuesById.get(l.parentId) ?? []).map((i) => i.key));
-          const st = keys.has("no_image") || keys.has("color_no_image") ? "none" : keys.has("color_no_web_image") ? "part" : colorWebImages(l.display?.colors ?? []).allSku ? "sku" : null;
+          const st = keys.has("no_image") || colorWebImages(l.display?.colors ?? []).noWeb ? "none" : keys.has("color_no_web_image") || keys.has("color_no_image") ? "part" : null;
           return [l.parentId, st] as const;
         })
       ),
@@ -309,7 +309,6 @@ export function WebsiteListingsPanel({
       fit: listings.filter((l) => l.display?.compartmentsMissing).length,
       noimg: listings.filter((l) => imgById.get(l.parentId) === "none").length,
       partimg: listings.filter((l) => imgById.get(l.parentId) === "part").length,
-      skuimg: listings.filter((l) => imgById.get(l.parentId) === "sku").length,
     }),
     [listings, issuesById, imgById]
   );
@@ -323,7 +322,6 @@ export function WebsiteListingsPanel({
       if (filter === "fit" && !l.display?.compartmentsMissing) return false;
       if (filter === "noimg" && imgById.get(l.parentId) !== "none") return false;
       if (filter === "partimg" && imgById.get(l.parentId) !== "part") return false;
-      if (filter === "skuimg" && imgById.get(l.parentId) !== "sku") return false;
       if (cat === "__none" ? (l.categories ?? []).length > 0 : cat && !(l.categories ?? []).includes(cat)) return false;
       if (term && !`${shownName(l)} ${l.erpName} ${l.code}`.toLowerCase().includes(term)) return false;
       return true;
@@ -457,8 +455,8 @@ export function WebsiteListingsPanel({
   };
 
   // 🖼 ตัวกรองรูปบนเว็บ — โผล่เมื่อมีรุ่นเข้าเงื่อนไข (ครบแล้ว = หายไปเอง)
-  const imgFilter = (k: "noimg" | "partimg" | "skuimg", label: string, title: string, warn?: boolean) =>
-    counts[k] > 0 || filter === k ? [{ k: k as Filter, label, title, warn }] : [];
+  const imgFilter = (k: "noimg" | "partimg", label: string, title: string) =>
+    counts[k] > 0 || filter === k ? [{ k: k as Filter, label, title, warn: true }] : [];
   const FILTERS: { k: Filter; label: string; warn?: boolean; title?: string }[] = [
     { k: "all", label: "ทั้งหมด" },
     { k: "pub", label: "ขึ้นเว็บ" },
@@ -467,9 +465,8 @@ export function WebsiteListingsPanel({
     { k: "fix", label: "⚠️ ต้องแก้", warn: true },
     // 📐 โผล่เมื่อร้านเปิดเช็คขนาดและยังมีรุ่นที่ไม่ได้วัด (วัดครบ = หายไปเอง)
     ...(counts.fit > 0 || filter === "fit" ? [{ k: "fit" as Filter, label: "📐 ยังไม่วัดช่อง", warn: true }] : []),
-    ...imgFilter("noimg", "ไม่มีรูปเลย", "ทั้งรุ่น หรือบางสี ไม่มีทั้งรูปเว็บและรูปปก SKU — ลูกค้าเห็นช่องว่าง", true),
-    ...imgFilter("partimg", "บางสียังไม่มีรูปเว็บ", "ลงรูปเว็บรายสีไว้บางสีแล้ว แต่บางสียังใช้รูปปก SKU 1 รูปแทน", true),
-    ...imgFilter("skuimg", "ใช้รูป SKU ทั้งรุ่น", "ทุกสียังใช้รูปปก SKU สีละ 1 รูป (ยังไม่เคยลงรูปเว็บรายสี)"),
+    ...imgFilter("noimg", "ยังไม่มีรูปบนเว็บเลย", "ยังไม่ได้ลงรูปเว็บสักสี — ตอนนี้ลูกค้าเห็นรูปปก SKU สีละ 1 รูป (หรือช่องว่างถ้า SKU ก็ไม่มีรูป)"),
+    ...imgFilter("partimg", "บางสียังไม่มีรูปเว็บ", "ลงรูปเว็บไว้บางสีแล้ว แต่บางสียังไม่ได้ลง"),
   ];
 
   const priceText = (l: Listing) => (shownPrice(l) > 0 ? `${l.display?.priceVaries ? "เริ่ม " : ""}${baht(shownPrice(l))}` : "—");
@@ -742,7 +739,7 @@ export function WebsiteListingsPanel({
                                 className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] text-amber-800 hover:bg-amber-100 hover:border-amber-400"
                               />
                             ) : x.key === "no_image" || x.key === "color_no_image" || x.key === "color_no_web_image" ? (
-                              // 🖼 กดป้าย = เปิดหน้าแก้ เลื่อนไปแถวสีแรกที่ยังไม่มีรูป (ไม่มีรูปเลย = แดง · ยังใช้รูปปก SKU = เหลือง)
+                              // 🖼 กดป้าย = เปิดหน้าแก้ เลื่อนไปแถวสีแรกที่ยังไม่มีรูปเว็บ · ลงไว้บางสี = บอกชื่อสีที่ขาด
                               <button
                                 key={x.key}
                                 type="button"
@@ -754,7 +751,7 @@ export function WebsiteListingsPanel({
                               >
                                 <Icon name="image" size={11} />
                                 {x.label}
-                                {x.key === "color_no_web_image" && x.names?.length
+                                {x.key === "color_no_web_image" && x.names?.length && imgById.get(l.parentId) === "part"
                                   ? ` · ${x.names.slice(0, 2).join(", ")}${x.names.length > 2 ? ` +${x.names.length - 2}` : ""} ยังไม่มี`
                                   : ""}{" "}
                                 · เพิ่มรูป

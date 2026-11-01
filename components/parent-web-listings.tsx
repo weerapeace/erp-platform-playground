@@ -853,14 +853,11 @@ export function ParentWebListings({
             {web.missing.length > 0 ? (
               <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${noneN ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-amber-50 border-amber-200 text-amber-800"}`}>
                 <Icon name="image" size={12} />
-                รูปบนเว็บ {web.webN}/{web.total} สี · {missNames} ยังไม่มี{noneN ? ` (ไม่มีรูปเลย ${noneN} สี)` : ""}
+                {web.noWeb ? `ยังไม่มีรูปบนเว็บเลย (0/${web.total} สี) — ตอนนี้ลูกค้าเห็นรูปปก SKU แทน` : `รูปบนเว็บ ${web.webN}/${web.total} สี · ${missNames} ยังไม่มี`}
+                {noneN ? ` · SKU ก็ไม่มีรูป ${noneN} สี` : ""}
                 <button type="button" onClick={() => jumpToSku(s.shopId, web.missing[0].skuId!)} className="underline hover:no-underline">
-                  ไปที่สีนั้น
+                  {web.noWeb ? "ไปลงรูป" : "ไปที่สีนั้น"}
                 </button>
-              </span>
-            ) : web.allSku ? (
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500" title="ลูกค้าเห็นรูปปก SKU สีละ 1 รูป — ลงรูปเว็บรายสีได้หลายรูปที่แถวสีด้านล่าง">
-                ทุกสียังใช้รูปปก SKU — เพิ่มรูปเว็บรายสีได้ที่แถวสี
               </span>
             ) : web.total > 0 ? (
               <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] text-emerald-700">✓ รูปบนเว็บครบทุกสี</span>
@@ -899,8 +896,8 @@ export function ParentWebListings({
               const heroOpen = heroPanel?.shopId === s.shopId && heroPanel.skuId === v.id;
               const on = cardShown(s, v.label);
               const isMain = !!s.webCardColors.main && sameColor(s.webCardColors.main, v.label);
-              // 🖼 none = ไม่มีรูปเลย (แดง) · warn = รุ่นนี้ลงรูปเว็บบางสีแล้ว แต่สีนี้ยังใช้รูปปก SKU (เหลือง) · soft = ทุกสียังใช้รูปปก SKU (เทา)
-              const gap = imgOf(v) === "none" ? "none" : imgOf(v) === "sku" ? (web.webN > 0 ? "warn" : "soft") : null;
+              // 🖼 ยังไม่ได้ลงรูปเว็บ (รูปปก SKU ไม่นับ): warn = ตอนนี้ลูกค้าเห็นรูปปก SKU แทน (เหลือง) · none = SKU ก็ไม่มีรูป ลูกค้าเห็นช่องว่าง (แดง)
+              const gap = imgOf(v) === "none" ? "none" : imgOf(v) === "sku" ? "warn" : null;
               return (
                 <div
                   key={v.id}
@@ -1051,12 +1048,12 @@ export function ParentWebListings({
                         type="button"
                         onClick={() => setPicker({ shopId: s.shopId, target: v.id })}
                         className={`w-full flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed bg-white px-3 py-2.5 text-xs ${
-                          gap === "none" ? "border-rose-300 text-rose-700 hover:bg-rose-50" : gap === "warn" ? "border-amber-300 text-amber-800 hover:bg-amber-50" : "border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50"
+                          gap === "none" ? "border-rose-300 text-rose-700 hover:bg-rose-50" : "border-amber-300 text-amber-800 hover:bg-amber-50"
                         }`}
                       >
                         <Icon name="image" size={16} />
                         <span>
-                          {gap === "none" ? "ยังไม่มีรูปเลย — ลูกค้าเห็นช่องว่าง" : gap === "warn" ? "ยังไม่มีรูปบนเว็บ — ตอนนี้ลูกค้าเห็นรูปปก SKU 1 รูปแทน" : "ยังไม่มีรูปบนเว็บ (ใช้รูปปก SKU 1 รูป)"} · ลากรูปมาวาง หรือกดเลือกจากคลัง
+                          {gap === "none" ? "ยังไม่มีรูปบนเว็บ — SKU ก็ไม่มีรูป ลูกค้าเห็นช่องว่าง" : "ยังไม่มีรูปบนเว็บ — ตอนนี้ลูกค้าเห็นรูปปก SKU 1 รูปแทน"} · ลากรูปมาวาง หรือกดเลือกจากคลัง
                         </span>
                       </button>
                     </div>
