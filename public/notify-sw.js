@@ -1,7 +1,9 @@
 /*
  * 📲 Service worker ของแอป "แจ้งเตือน ERP" (/notify) — รับ push แล้วเด้งแจ้งเตือนบนเครื่อง
  * scope = /notify (ไม่มี fetch handler → ไม่ยุ่งกับการโหลดหน้าใด ๆ ของ ERP)
- * ข้อความจาก lib/push-server: { id, title, body, url, priority, unread }
+ * ข้อความจาก lib/push-server: { id, title, body, url, priority, unread, actions?, act? }
+ * actions = ปุ่มบนแจ้งเตือนของแผนงานทีม (อีก 1 ชม. / พรุ่งนี้เช้า / เสร็จแล้ว) · act = รหัสลับส่งกลับไป /api/team-plan/push-action
+ *   (Android/คอมรองรับปุ่ม · iPhone ยังไม่รองรับ → กดแจ้งเตือนเปิดแอปตามปกติ)
  */
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
@@ -19,8 +21,9 @@ self.addEventListener("push", (event) => {
     tag: d.id || "erp-summary",
     renotify: true,
     requireInteraction: d.priority === "high",
-    data: { id: d.id || null, url: d.url || null, direct: !!d.direct },
+    data: { id: d.id || null, url: d.url || null, direct: !!d.direct, act: d.act || null },
   };
+  if (Array.isArray(d.actions) && d.act) options.actions = d.actions.slice(0, 3);
 
   const jobs = [self.registration.showNotification(title, options)];
   // ตัวเลขบนไอคอนแอป (เครื่องที่รองรับ)
@@ -37,6 +40,15 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const data = event.notification.data || {};
   const id = data.id || null;
+  // ปุ่มบนแจ้งเตือนของแผนงาน → ทำให้เลยโดยไม่ต้องเปิดแอป (ไม่สำเร็จ = เปิดหน้าแผนงานให้ทำเอง)
+  if (event.action && data.act) {
+    event.waitUntil(fetch("/api/team-plan/push-action", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: data.act, action: event.action }),
+    }).then((r) => { if (!r.ok) throw new Error(String(r.status)); })
+      .catch(() => self.clients.openWindow(data.url || "/tasks/plan")));
+    return;
+  }
   // ป๊อปเตือนงาน (direct) → เปิดหน้า ERP พร้อมป๊อปเลย ไม่ผ่านแอปแจ้งเตือน
   if (data.direct && data.url) {
     event.waitUntil(self.clients.openWindow(data.url));

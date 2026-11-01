@@ -6,6 +6,7 @@
  *   2. CRON_SECRET (Authorization: Bearer <CRON_SECRET>) ถ้าตั้ง env ไว้
  *   3. แอดมินเช็กเอง (guardApi admin.email_reports) — ดูอย่างเดียว ไม่ส่ง (dry run)
  * ถึงเวลา = วันตรง · ตั้งแต่เวลาที่ตั้ง ถึง +2 ชม. · วันนี้ยังไม่ส่ง (lib/email-report/send isDue) · กันส่งซ้ำด้วยการจอง last_sent_on
+ * พ่วงรอบเดียวกัน: ป๊อปเตือนงาน (pushDuePopups) · 📋 แผนงานทีม — เตือนก่อนกำหนด/เลยกำหนด/รอคนอื่น/สรุปเช้า (runTeamPlanReminders)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -14,6 +15,7 @@ import { isDue, nowTH, runEmailReport } from "@/lib/email-report/send";
 import { toEmailReport } from "../../admin/email-reports/shared";
 import { emailErrorText, emailSenderAddress, verifyEmailTransport } from "@/lib/email";
 import { pushDuePopups } from "@/lib/email-report/popup-push";
+import { runTeamPlanReminders } from "@/lib/team-plan-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -58,7 +60,11 @@ async function handle(request: NextRequest): Promise<NextResponse> {
   let popupPush: unknown = null;
   try { popupPush = await pushDuePopups(admin); }
   catch (e) { console.error("[cron] popup push", e); popupPush = { error: e instanceof Error ? e.message : String(e) }; }
-  return NextResponse.json({ ok: true, now, enabled: reports.length, due: due.length, results, popupPush });
+  // แผนงานทีม: เตือนตามกำหนด · พังไม่กระทบอีเมล/ป๊อป
+  let teamPlan: unknown = null;
+  try { teamPlan = await runTeamPlanReminders(admin); }
+  catch (e) { console.error("[cron] team plan", e); teamPlan = { error: e instanceof Error ? e.message : String(e) }; }
+  return NextResponse.json({ ok: true, now, enabled: reports.length, due: due.length, results, popupPush, teamPlan });
 }
 
 export const GET = handle;

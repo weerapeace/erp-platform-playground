@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  dueLabel, nextDue, normalizePlanMeta, quadrantOf, quadrantPatch, quickDue, sortPlanItems, starCountFor, waitingDays,
+  dueLabel, isSummaryWindow, nextDue, normalizePlanMeta, normalizePlanSent, planMorningSummary, planReminders, remindAt, quadrantOf, quadrantPatch, quickDue, sortPlanItems, starCountFor, waitingDays,
   type PlanMeta,
 } from "@/lib/team-plan";
 
@@ -76,5 +76,70 @@ describe("แผนงานทีม — กฎกลาง", () => {
 
   it("รอมากี่วัน", () => {
     expect(waitingDays("2026-11-02T09:00:00+07:00", NOW)).toBe(2);
+  });
+});
+
+
+describe("แผนงานทีม — รอบแจ้งเตือน", () => {
+  const item = (p: Record<string, unknown> = {}) => ({
+    id: "t1", title: "สั่งผ้า", status: "open", priority: "normal" as const, due_at: null as string | null,
+    assigned_to: "u1" as string | null, plan: meta(), sent: normalizePlanSent(null), ...p,
+  });
+
+  it("เวลาเตือนก่อนกำหนด", () => {
+    expect(remindAt("2026-11-04T11:00:00Z", "before_1h")?.toISOString()).toBe("2026-11-04T10:00:00.000Z");
+    expect(remindAt("2026-11-04T11:00:00Z", "morning")?.toISOString()).toBe("2026-11-04T02:00:00.000Z");   // 09:00 ไทย
+    expect(remindAt("2026-11-04T00:30:00Z", "morning")?.toISOString()).toBe("2026-11-03T23:30:00.000Z");   // กำหนด 07:30 → ก่อน 1 ชม.
+    expect(remindAt("2026-11-04T11:00:00Z", "none")).toBeNull();
+  });
+
+  it("เตือนก่อนกำหนดครั้งเดียว · เปลี่ยนกำหนด = เตือนใหม่", () => {
+    const due = "2026-11-04T03:30:00Z";   // 10:30 ไทย · เตือน before_1h = 09:30 ≤ 10:00
+    const r1 = planReminders([item({ due_at: due, plan: meta({ remind: "before_1h", created_by_id: "u1" }) })], NOW);
+    expect(r1.notes.map((n) => n.kind)).toEqual(["before"]);
+    expect(r1.patches[0].sent.remind_for).toBe(due);
+    const again = planReminders([item({ due_at: due, plan: meta({ remind: "before_1h" }), sent: r1.patches[0].sent })], NOW);
+    expect(again.notes).toEqual([]);
+  });
+
+  it("เลยกำหนด: แจ้งครั้งเดียว + ปกติเลื่อนเป็นด่วน · ด่วนมากไม่ลดลง", () => {
+    const due = "2026-11-03T11:00:00Z";
+    const r = planReminders([item({ due_at: due }), item({ id: "t2", due_at: due, priority: "urgent" })], NOW);
+    expect(r.notes.map((n) => [n.item_id, n.kind])).toEqual([["t1", "overdue"], ["t2", "overdue"]]);
+    expect(r.patches.find((p) => p.id === "t1")?.priority).toBe("high");
+    expect(r.patches.find((p) => p.id === "t2")?.priority).toBeUndefined();
+    const again = planReminders([item({ due_at: due, priority: "high", sent: r.patches[0].sent })], NOW);
+    expect(again.notes).toEqual([]);
+  });
+
+  it("รอคนอื่นเกิน 2 วัน: ตามทุก 2 วัน · ผู้รับ = ผู้รับผิดชอบ หรือคนสร้าง", () => {
+    const w = meta({ waiting: { note: "ลูกค้าตอบ", since: "2026-11-01T10:00:00+07:00" }, created_by_id: "u9" });
+    const r = planReminders([item({ assigned_to: null, plan: w })], NOW);
+    expect(r.notes).toHaveLength(1);
+    expect(r.notes[0]).toMatchObject({ kind: "waiting", user_id: "u9" });
+    expect(planReminders([item({ plan: w, sent: { waiting_on: "2026-11-03" } })], NOW).notes).toEqual([]);
+    expect(planReminders([item({ plan: w, sent: { waiting_on: "2026-11-02" } })], NOW).notes).toHaveLength(1);
+  });
+
+  it("เลื่อนเตือนจากมือถือ: ถึงเวลาแล้วเตือนอีกครั้ง 1 ครั้ง", () => {
+    const s = { snooze_until: "2026-11-04T02:30:00Z" };
+    const r = planReminders([item({ sent: s })], NOW);
+    expect(r.notes.map((n) => n.kind)).toEqual(["snooze"]);
+    expect(planReminders([item({ sent: { ...s, snooze_sent: s.snooze_until } })], NOW).notes).toEqual([]);
+    expect(planReminders([item({ sent: { snooze_until: "2026-11-04T05:00:00Z" } })], NOW).notes).toEqual([]);   // ยังไม่ถึง
+  });
+
+  it("สรุปเช้า: ช่วง 9–12 โมง · มีงานหลัก/ครบวันนี้/เกินกำหนด ถึงส่ง", () => {
+    expect(isSummaryWindow(NOW)).toBe(true);
+    expect(isSummaryWindow(new Date("2026-11-04T13:00:00+07:00"))).toBe(false);
+    const s = planMorningSummary([
+      { title: "A", status: "open", due_at: "2026-11-04T11:00:00Z", assigned_to: "u1", plan: meta() },
+      { title: "B", status: "open", due_at: "2026-11-02T11:00:00Z", assigned_to: "u1", plan: meta() },
+      { title: "C", status: "open", due_at: null, assigned_to: "u1", plan: meta({ star_date: "2026-11-04" }) },
+      { title: "D", status: "open", due_at: null, assigned_to: "u2", plan: meta() },
+    ], "u1", NOW);
+    expect(s?.title).toBe("สรุปงานวันนี้ของคุณ (3 งานค้าง)");
+    expect(s?.body.split("\n")[0]).toBe("⭐ งานหลัก 1 · ครบกำหนดวันนี้ 1 · เกินกำหนด 1");
+    expect(planMorningSummary([{ title: "D", status: "open", due_at: null, assigned_to: "u2", plan: meta() }], "u2", NOW)).toBeNull();
   });
 });

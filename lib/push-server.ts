@@ -10,6 +10,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { appBaseUrl } from "@/lib/app-url";
 import { generateVapidKeys, sendWebPush, type VapidKeys } from "@/lib/web-push";
 import { normalizePushPrefs, pushEnabledFor, PUSH_PREFS_KEY, type PushPrefs } from "@/lib/push-categories";
+import { signPlanAction } from "@/lib/team-plan-server";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -51,13 +52,30 @@ export type PushSubscriptionRow = {
   event_filter: string[] | null;
 };
 
-type NotifRow = { id: string; user_id: string; event_type: string; title: string; body: string | null; link_url: string | null; priority: string | null; created_at: string };
+type NotifRow = {
+  id: string; user_id: string; event_type: string; title: string; body: string | null; link_url: string | null; priority: string | null; created_at: string;
+  entity_type?: string | null; entity_id?: string | null;
+};
 
 export type PushPayload = {
   id: string | null; title: string; body: string; url: string | null; priority: string; unread: number | null;
   /** กดแจ้งเตือน = เปิดลิงก์ตรง (ไม่ผ่านแอป /notify) — ป๊อปเตือนงาน */
   direct?: boolean;
+  /** ปุ่มบนแจ้งเตือน (เครื่องที่รองรับ: Android/คอม · iPhone ยังไม่รองรับ) + รหัสลับให้ service worker ส่งกลับมา */
+  actions?: { action: string; title: string }[];
+  act?: string;
 };
+
+/** ปุ่มบนแจ้งเตือนของแผนงานทีม — /api/team-plan/push-action */
+export const PLAN_PUSH_ACTIONS = [
+  { action: "snooze1h", title: "อีก 1 ชม." },
+  { action: "tomorrow", title: "พรุ่งนี้เช้า" },
+  { action: "done", title: "เสร็จแล้ว" },
+];
+/** แจ้งเตือนของงานในแผนงานทีม (ไม่ใช่สรุปเช้า) → รหัสลับของปุ่มบนแจ้งเตือน */
+const planActionToken = (n: NotifRow) =>
+  n.event_type.startsWith("team_plan.") && n.event_type !== "team_plan.summary" && n.entity_type === "team_plan" && n.entity_id
+    ? signPlanAction(n.entity_id, n.user_id) : null;
 
 /** เครื่องนี้รับเรื่องนี้ไหม (ส่งทดสอบผ่านเสมอ) */
 export function subscriptionAccepts(filter: string[] | null | undefined, eventType: string): boolean {
@@ -78,14 +96,19 @@ async function unreadCount(admin: Admin, userId: string): Promise<number | null>
   return error ? null : count ?? 0;
 }
 
-/** สร้างข้อความ push ต่อคน (เกิน BURST_LIMIT → สรุปเป็นข้อความเดียว) */
-export function buildPayloads(rows: NotifRow[], unread: number | null): PushPayload[] {
+/** สร้างข้อความ push ต่อคน (เกิน BURST_LIMIT → สรุปเป็นข้อความเดียว)
+ *  actionToken(แถว) = รหัสลับของปุ่มบนแจ้งเตือน (มี = ใส่ปุ่ม อีก 1 ชม. / พรุ่งนี้เช้า / เสร็จแล้ว) */
+export function buildPayloads(rows: NotifRow[], unread: number | null, actionToken?: (n: NotifRow) => string | null): PushPayload[] {
   if (rows.length <= BURST_LIMIT) {
-    return rows.map((n) => ({
-      id: n.id, title: clip(n.title, 120) || "แจ้งเตือนใหม่", body: clip(n.body, 300), url: n.link_url,
-      priority: n.priority ?? "normal", unread,
-      ...(n.event_type.startsWith("report.") && n.link_url ? { direct: true } : {}),
-    }));
+    return rows.map((n) => {
+      const act = actionToken?.(n) ?? null;
+      return {
+        id: n.id, title: clip(n.title, 120) || "แจ้งเตือนใหม่", body: clip(n.body, 300), url: n.link_url,
+        priority: n.priority ?? "normal", unread,
+        ...(n.event_type.startsWith("report.") && n.link_url ? { direct: true } : {}),
+        ...(act ? { actions: PLAN_PUSH_ACTIONS, act } : {}),
+      };
+    });
   }
   const first = rows.slice(0, 3).map((n) => `• ${clip(n.title, 60)}`);
   const more = rows.length - first.length;
@@ -106,7 +129,7 @@ export async function dispatchPush(admin: Admin, ids: string[]): Promise<Dispatc
   const { data: claimed, error } = await admin.from("erp_notifications")
     .update({ pushed_at: new Date().toISOString() })
     .in("id", uniq).is("pushed_at", null).gte("created_at", since)
-    .select("id, user_id, event_type, title, body, link_url, priority, created_at");
+    .select("id, user_id, event_type, title, body, link_url, priority, created_at, entity_type, entity_id");
   if (error) throw new Error(error.message);
   const rows = ((claimed ?? []) as NotifRow[]).sort((a, b) => a.created_at.localeCompare(b.created_at));
   stats.notifications = rows.length;
@@ -137,7 +160,7 @@ export async function dispatchPush(admin: Admin, ids: string[]): Promise<Dispatc
     // แต่ละเครื่องเลือกรับได้ (เด้งที่เบราว์เซอร์ = ป๊อปเตือนงานอย่างเดียว) → ประกอบข้อความต่อเครื่อง
     for (const s of mySubs) {
       const forSub = wanted.filter((r) => subscriptionAccepts(s.event_filter, r.event_type));
-      for (const payload of buildPayloads(forSub, unread)) jobs.push({ sub: s, payload });
+      for (const payload of buildPayloads(forSub, unread, planActionToken)) jobs.push({ sub: s, payload });
     }
   }
 

@@ -15,8 +15,8 @@ import { writeAudit } from "@/lib/audit";
 import { isUuid, userNames } from "@/lib/record-tasks-server";
 import { normalizeTaskLinks } from "@/lib/record-tasks";
 import { todayBangkok } from "@/lib/date";
-import { asPriority, dueLabel, MAX_STARS, nextDue, normalizePlanMeta, starCountFor, TEAM_PLAN_MODULE } from "@/lib/team-plan";
-import { notifyPlanAssignee, PLAN_COLS, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
+import { asPriority, dueLabel, MAX_STARS, normalizePlanMeta, starCountFor, TEAM_PLAN_MODULE } from "@/lib/team-plan";
+import { createNextRepeat, notifyPlanAssignee, PLAN_COLS, toPlanItem, type PlanRow } from "@/lib/team-plan-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -119,20 +119,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
   }
 
   // งานทำซ้ำเพิ่งติ๊กเสร็จ → สร้างรอบถัดไป (ผู้รับผิดชอบ/ความด่วน/เตือนเดิม · ไม่มีดาว/รอ)
-  let next: PlanRow | null = null;
-  const rowPlan = normalizePlanMeta(row.metadata?.plan, now);
-  if (patch.status === "resolved" && before.status !== "resolved" && rowPlan.repeat) {
-    const nextPlan = { ...rowPlan, star_date: null, waiting: null };
-    const { data: created } = await admin.from("erp_record_tasks").insert({
-      module_key: TEAM_PLAN_MODULE, record_id: "", record_type: "",
-      title: row.title, description: row.description, status: "open", priority: row.priority,
-      assigned_to: row.assigned_to, due_at: nextDue(row.due_at, rowPlan.repeat, now), created_by: actorName,
-      metadata: { ...(row.metadata ?? {}), plan: nextPlan },
-    }).select(PLAN_COLS).single();
-    next = (created as PlanRow | null) ?? null;
-    if (next) await writeAudit(admin, { action: "create", entityType: "record_task", entityId: next.id, actorId: user.id, actorName,
-      metadata: { module_key: TEAM_PLAN_MODULE, title: next.title, due_at: next.due_at, repeat_from: id } });
-  }
+  const next = patch.status === "resolved" && before.status !== "resolved" ? await createNextRepeat(admin, row, { id: user.id, name: actorName }, now) : null;
 
   const names = await userNames(admin, [row.assigned_to, next?.assigned_to]);
   return NextResponse.json({ data: toPlanItem(row, names), next: next ? toPlanItem(next, names) : null, error: null });

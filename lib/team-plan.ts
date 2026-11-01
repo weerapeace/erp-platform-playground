@@ -171,3 +171,96 @@ export function sortPlanItems<T extends { due_at: string | null; created_at: str
     return 0;
   });
 }
+
+// ── รอบแจ้งเตือน (ตัวตั้งเวลาเรียกทุก 15 นาที · lib/team-plan-server runTeamPlanReminders) ──
+/** สิ่งที่เตือนไปแล้ว (metadata.plan_sent) — กันเตือนซ้ำ · เปลี่ยนกำหนด = เตือนใหม่ได้ */
+export type PlanSent = {
+  remind_for?: string | null;    // เตือนก่อนกำหนดไปแล้ว สำหรับกำหนดนี้
+  overdue_for?: string | null;   // แจ้งเลยกำหนด (+เลื่อนเป็นด่วน) ไปแล้ว สำหรับกำหนดนี้
+  waiting_on?: string | null;    // ตามงาน "รอคนอื่น" ล่าสุดวันไหน (YYYY-MM-DD)
+  snooze_until?: string | null;  // กด "อีก 1 ชม. / พรุ่งนี้เช้า" จากมือถือ → เตือนอีกครั้งตอนนี้
+  snooze_sent?: string | null;   // เตือนรอบเลื่อนไปแล้ว (= snooze_until ที่ส่งแล้ว)
+};
+export function normalizePlanSent(raw: unknown): PlanSent {
+  const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const s = (k: string) => (typeof r[k] === "string" ? (r[k] as string) : null);
+  return { remind_for: s("remind_for"), overdue_for: s("overdue_for"), waiting_on: s("waiting_on"), snooze_until: s("snooze_until"), snooze_sent: s("snooze_sent") };
+}
+
+/** เวลาที่ควรเตือนก่อนกำหนด · "เช้าวันนั้น" = 09:00 ของวันกำหนด (กำหนดก่อน 9 โมง = ก่อน 1 ชม.) */
+export function remindAt(dueAt: string, mode: RemindMode): Date | null {
+  const due = Date.parse(dueAt);
+  if (mode === "before_1h") return new Date(due - 3600e3);
+  if (mode === "before_1d") return new Date(due - 86400e3);
+  if (mode === "morning") {
+    const nine = Date.parse(`${todayBangkok(new Date(due))}T09:00:00+07:00`);
+    return new Date(nine < due ? nine : due - 3600e3);
+  }
+  return null;
+}
+
+export const WAITING_FOLLOW_DAYS = 2;
+export type ReminderNote = { kind: "snooze" | "before" | "overdue" | "waiting"; item_id: string; user_id: string; title: string; body: string; high: boolean };
+type RemindItem = { id: string; title: string; status: string; priority: Priority; due_at: string | null; assigned_to: string | null; plan: PlanMeta; sent: PlanSent };
+
+/**
+ * รอบเตือน 1 รอบ (pure) — คืนข้อความที่ต้องส่ง + ค่าที่ต้องบันทึกกลับ (กันส่งซ้ำ / เลื่อนเป็นด่วน)
+ *   เลื่อนเตือน (จากมือถือ) → ก่อนกำหนด → เลยกำหนด: แจ้ง 1 ครั้ง + ปกติ/ไม่ด่วน เลื่อนเป็น "ด่วน" → รอคนอื่นเกิน 2 วัน: ตามทุก 2 วัน
+ *   ผู้รับ = ผู้รับผิดชอบ (ไม่มี = คนสร้าง)
+ */
+export function planReminders(items: RemindItem[], now: Date = new Date()): { notes: ReminderNote[]; patches: { id: string; priority?: Priority; sent: PlanSent }[] } {
+  const notes: ReminderNote[] = [];
+  const patches: { id: string; priority?: Priority; sent: PlanSent }[] = [];
+  const today = todayBangkok(now);
+  for (const t of items) {
+    if (t.status === "resolved") continue;
+    const user = t.assigned_to ?? t.plan.created_by_id;
+    if (!user) continue;
+    const sent: PlanSent = { ...t.sent };
+    let priority: Priority | undefined;
+    const push = (kind: ReminderNote["kind"], title: string, body: string, high = false) => notes.push({ kind, item_id: t.id, user_id: user, title, body, high });
+    const due = t.due_at;
+    const overdue = isOverdue(due, now);
+
+    if (sent.snooze_until && Date.parse(sent.snooze_until) <= now.getTime() && sent.snooze_sent !== sent.snooze_until) {
+      push("snooze", `เตือนอีกครั้ง: ${t.title}`, due ? `กำหนด ${dueLabel(due, now)}` : "ตามที่กดเลื่อนไว้", isUrgent(t.priority));
+      sent.snooze_sent = sent.snooze_until;
+    }
+    if (due && !overdue && t.plan.remind !== "none" && sent.remind_for !== due) {
+      const at = remindAt(due, t.plan.remind);
+      if (at && at.getTime() <= now.getTime()) {
+        push("before", `ใกล้ถึงกำหนด: ${t.title}`, `กำหนด ${dueLabel(due, now)} · ${PRIORITY_META[t.priority].label}`, isUrgent(t.priority));
+        sent.remind_for = due;
+      }
+    }
+    if (due && overdue && sent.overdue_for !== due) {
+      if (t.priority === "normal" || t.priority === "low") priority = "high";
+      push("overdue", `เลยกำหนดแล้ว: ${t.title}`, `กำหนด ${dueLabel(due, now)}${priority ? " · เลื่อนเป็น \"ด่วน\" ให้แล้ว" : ""}`, true);
+      sent.overdue_for = due;
+      sent.remind_for = due;   // เลยไปแล้ว ไม่ต้องเตือนก่อนกำหนดอีก
+    }
+    if (t.plan.waiting && waitingDays(t.plan.waiting.since, now) >= WAITING_FOLLOW_DAYS
+      && (!sent.waiting_on || Math.round((Date.parse(today) - Date.parse(sent.waiting_on)) / 86400e3) >= WAITING_FOLLOW_DAYS)) {
+      push("waiting", `รอมา ${waitingDays(t.plan.waiting.since, now)} วันแล้ว: ${t.title}`, `${t.plan.waiting.note ? `รอ: ${t.plan.waiting.note} — ` : ""}ตามงานหรือยัง?`);
+      sent.waiting_on = today;
+    }
+    if (priority || JSON.stringify(sent) !== JSON.stringify(t.sent)) patches.push({ id: t.id, ...(priority ? { priority } : {}), sent });
+  }
+  return { notes, patches };
+}
+
+/** สรุปเช้า 9:00 — ส่งช่วง 09:00–11:59 ครั้งเดียวต่อวัน (เซิร์ฟเวอร์กันซ้ำ) */
+export const isSummaryWindow = (now: Date = new Date()) => { const h = new Date(now.getTime() + 7 * 3600e3).getUTCHours(); return h >= 9 && h < 12; };
+/** สรุปงานของคนหนึ่ง (null = ไม่มีอะไรต้องบอก) */
+export function planMorningSummary(items: { title: string; status: string; due_at: string | null; assigned_to: string | null; plan: PlanMeta }[], userId: string, now: Date = new Date()): { title: string; body: string } | null {
+  const today = todayBangkok(now);
+  const mine = items.filter((t) => t.status !== "resolved" && (t.assigned_to ?? t.plan.created_by_id) === userId);
+  const stars = mine.filter((t) => t.plan.star_date === today);
+  const dueToday = mine.filter((t) => t.due_at && !isOverdue(t.due_at, now) && todayBangkok(new Date(t.due_at)) === today);
+  const overdue = mine.filter((t) => isOverdue(t.due_at, now));
+  const waiting = mine.filter((t) => t.plan.waiting);
+  if (!stars.length && !dueToday.length && !overdue.length) return null;
+  const parts = [stars.length && `⭐ งานหลัก ${stars.length}`, dueToday.length && `ครบกำหนดวันนี้ ${dueToday.length}`, overdue.length && `เกินกำหนด ${overdue.length}`, waiting.length && `รอคนอื่น ${waiting.length}`].filter(Boolean);
+  const top = [...stars, ...overdue, ...dueToday].filter((t, i, a) => a.indexOf(t) === i).slice(0, 3).map((t) => `• ${t.title}`);
+  return { title: `สรุปงานวันนี้ของคุณ (${mine.length} งานค้าง)`, body: [parts.join(" · "), ...top].join("\n") };
+}
