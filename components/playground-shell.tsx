@@ -402,7 +402,14 @@ const readySections = [
   "/admin/audit-log",
 ];
 
+// มีเชลล์ครอบอยู่แล้ว (layout /master, /m, embed ฯลฯ) → คืนแค่เนื้อหา ไม่วาด sidebar/topbar ซ้อน 2 ชั้น
+// หน้าที่เผลอห่อ <PlaygroundShell> เองใต้ layout ร่วมจึงไม่พัง (กันที่เดียว ไม่ต้องไล่แก้ทุกหน้า)
 export function PlaygroundShell({ children }: { children: React.ReactNode }) {
+  if (useShellPresent()) return <>{children}</>;
+  return <PlaygroundShellFrame>{children}</PlaygroundShellFrame>;
+}
+
+function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { can, user, ready, permsReady } = useAuth();
   const router = useRouter();
