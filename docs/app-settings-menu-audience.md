@@ -35,3 +35,4 @@
 - กฎ: `explainMenuFor` / `setMenuVisibleFor` / `resetMenuFor` ใน `lib/menu-audience.ts` (เทสต์ `lib/__tests__/menu-audience-person.test.ts` — ตั้งให้คนหนึ่งแล้วคนอื่นต้องเห็นเหมือนเดิมทุกกรณี)
   - เมนูที่เห็นเฉพาะรายชื่อ แล้วเอาคนสุดท้ายออก → เก็บเป็น `roles: ["admin"]` (ยังจำกัดอยู่) ไม่กลายเป็นทุกคนเห็น
 - โค้ด: `components/app-settings-panel/by-user.tsx` · บันทึกร่วมกับแท็บ 👁 ที่ `./audience-save.ts` · รายชื่อ `GET /api/admin/users` · สิทธิ์จริงของคน `GET /api/admin/user-permissions?user_id=`
+- (2026-11-01) **เมนูที่ต้องมีสิทธิ์** (permission_key เช่น จัดเรียงงานพิมพ์ = `nesting.view`): ติ๊กให้เห็นอย่างเดียวไม่พอ — แท็บ 👤 ตามพนักงาน: แถว "ยังไม่มีสิทธิ์ · ติ๊กเพื่อให้สิทธิ์" ติ๊กแล้วถามก่อน → ให้สิทธิ์เฉพาะคนนั้น (`POST /api/admin/user-permissions` grant · มีประวัติ `user_permission_override`) · แท็บ 👁 เตือนสีเหลืองว่าตำแหน่งไหนที่ให้เห็นแต่ยังไม่มีสิทธิ์ (จาก matrix ของ `/api/admin/roles`)

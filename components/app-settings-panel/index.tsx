@@ -92,11 +92,16 @@ function WhoSeesWhat({ items, onSaved }: { items: AppSettingsMenuItem[]; onSaved
   const [personFor, setPersonFor] = useState<AppSettingsMenuItem | null>(null);
   const [preview, setPreview] = useState<string>("");   // ดูแทนตำแหน่ง
   const [saving, setSaving] = useState(false);
+  // สิทธิ์ของแต่ละตำแหน่ง ("role|perm") + ชื่อสิทธิ์ — เตือนเมื่อตำแหน่งที่ให้เห็นยังไม่มีสิทธิ์ของเมนู (ติ๊กแล้วก็ยังไม่เห็น)
+  const [rolePerms, setRolePerms] = useState<Set<string> | null>(null);
+  const [permLabels, setPermLabels] = useState<Record<string, string>>({});
 
   useEffect(() => {
     apiFetch("/api/admin/roles").then((r) => r.json()).then((j) => {
       if (j.error) { setRolesErr(j.error); return; }
       setRoles(((j.roles ?? []) as Role[]).filter((r) => r.active !== false && r.key !== "admin"));
+      setRolePerms(new Set(((j.matrix ?? []) as { role_key: string; permission_key: string }[]).map((m) => `${m.role_key}|${m.permission_key}`)));
+      setPermLabels(Object.fromEntries(((j.permissions ?? []) as { key: string; label: string }[]).map((p) => [p.key, p.label])));
     }).catch(() => setRolesErr("โหลดรายชื่อตำแหน่งไม่สำเร็จ"));
   }, []);
   // ชื่อคนที่ตั้งไว้รายคน (ดึงเฉพาะ id ที่ใช้)
@@ -176,7 +181,15 @@ function WhoSeesWhat({ items, onSaved }: { items: AppSettingsMenuItem[]; onSaved
                       <td className={`px-3 py-2 ${it.parent_id && ids.has(it.parent_id) ? "pl-8" : ""}`}>
                         <span className="mr-1.5">{it.icon ?? "•"}</span><span className="font-medium text-slate-800">{it.label}</span>
                         {hiddenInPreview && <span className="ml-1.5 rounded bg-slate-200 px-1 text-[10px] text-slate-600">ไม่เห็น</span>}
-                        {it.permission_key && <div className="text-[10px] text-slate-400">ต้องมีสิทธิ์ {it.permission_key} ด้วย</div>}
+                        {it.permission_key && (() => {
+                          // ตำแหน่งที่ควรเห็น (ติ๊กไว้ หรือทุกตำแหน่งถ้า "ทุกคน") แต่ยังไม่มีสิทธิ์ของเมนู → ไม่เห็นอยู่ดี
+                          const target = a?.roles?.length ? cols.filter((r) => a.roles!.includes(r.key)) : everyone ? cols : [];
+                          const lacking = rolePerms ? target.filter((r) => !rolePerms.has(`${r.key}|${it.permission_key}`)) : [];
+                          const pl = permLabels[it.permission_key] ?? it.permission_key;
+                          return lacking.length
+                            ? <div className="mt-0.5 text-[11px] text-amber-700"><Icon name="warning" /> {lacking.map((r) => r.label).join(", ")} ยังไม่มีสิทธิ์ “{pl}” — ติ๊กแล้วก็ยังไม่เห็น · ให้สิทธิ์ที่แท็บ “สิทธิ์ตามเมนู” (ทั้งตำแหน่ง) หรือ “ตามพนักงาน” (รายคน)</div>
+                            : <div className="text-[10px] text-slate-400">ต้องมีสิทธิ์ “{pl}” ด้วย</div>;
+                        })()}
                       </td>
                       <td className="px-2 py-2 text-center">
                         <input type="checkbox" checked={everyone} onChange={() => setEveryone(it)} title="ทุกคนเห็น (ล้างตำแหน่ง/คนที่เลือก)" className="h-4 w-4 accent-violet-600" />

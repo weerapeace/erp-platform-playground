@@ -5,9 +5,12 @@
  *   ข้อมูลชุดเดียวกับแท็บ 👁 ใครเห็นเมนูไหน (erp_menu_items.audience · กฎ lib/menu-audience: explainMenuFor / setMenuVisibleFor / resetMenuFor)
  *   เห็นจริงบนแถบ = ไม่ถูกซ่อนทั้งแอป (↕️ จัดเรียง) + มีสิทธิ์ permission_key + ติ๊กเห็น — กฎเดียวกับแถบเมนู app/app/[appKey]
  *   ซ่อนเมนู ≠ ห้ามเข้า → เมนูที่ซ่อนแต่คนนี้ยังมีสิทธิ์ ขึ้นป้าย "ยังเข้าได้ด้วยลิงก์" (กันจริงที่แท็บ สิทธิ์ตามเมนู)
+ *   ติ๊กเมนูที่คนนี้ยังไม่มีสิทธิ์ → ถามก่อนแล้ว "ให้สิทธิ์เฉพาะคนนี้" ทันที (POST /api/admin/user-permissions · มีประวัติ)
+ *     (เจ้าของ 2026-11-01: ตั้งให้เห็นแล้วพนักงานยังไม่เห็น — เพราะเมนูต้องมีสิทธิ์ เช่น จัดเรียงงานพิมพ์ = nesting.view)
  */
 import { useEffect, useMemo, useState } from "react";
 import { useToast } from "@/components/toast";
+import { ConfirmDialog } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { cleanAudience, explainMenuFor, resetMenuFor, setMenuVisibleFor, type MenuAudience, type MenuReason } from "@/lib/menu-audience";
@@ -18,6 +21,7 @@ import { saveMenuAudiences, sameAudience } from "./audience-save";
 
 type Person = { id: string; name: string; role: string };
 type Role = { key: string; label: string };
+type PermDef = { key: string; label: string; is_dangerous?: boolean };
 
 const REASON_TEXT: Record<MenuReason, string> = {
   admin: "แอดมินเห็นทุกเมนู",
@@ -40,6 +44,9 @@ export function MenuByUserTab({ appKey, items, onSaved }: { appKey: string; item
   const [err, setErr] = useState<string | null>(null);
   const [userId, setUserId] = useState("");
   const [perms, setPerms] = useState<{ uid: string; set: Set<string> } | null>(null);   // สิทธิ์จริงของคนที่เลือก (ตำแหน่ง + ให้/ปิดรายคน)
+  const [permDefs, setPermDefs] = useState<Map<string, PermDef>>(new Map());   // ชื่อสิทธิ์ภาษาคน + สิทธิ์อันตราย
+  const [askGrant, setAskGrant] = useState<AppSettingsMenuItem | null>(null);   // เมนูที่กำลังถามว่าจะให้สิทธิ์คนนี้ไหม
+  const [granting, setGranting] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -51,6 +58,7 @@ export function MenuByUserTab({ appKey, items, onSaved }: { appKey: string; item
           .sort((a, b) => a.name.localeCompare(b.name, "th"));
         setPeople(list);
         setRoles((r.roles ?? []) as Role[]);
+        setPermDefs(new Map(((r.permissions ?? []) as PermDef[]).map((p) => [p.key, p])));
         setUserId((cur) => cur || list.find((p) => p.role !== "admin")?.id || list[0]?.id || "");
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "โหลดรายชื่อพนักงานไม่สำเร็จ"));
@@ -75,6 +83,7 @@ export function MenuByUserTab({ appKey, items, onSaved }: { appKey: string; item
   const isAdmin = person?.role === "admin";
   const permsKnown = !!perms && perms.uid === userId;
   const hasPerm = (it: AppSettingsMenuItem) => isAdmin || !it.permission_key || !permsKnown || perms!.set.has(it.permission_key);   // แอดมินมีทุกสิทธิ์ (เหมือน can())
+  const permName = (key: string) => permDefs.get(key)?.label ?? key;
 
   const ids = new Set(items.map((i) => i.id));
   const ordered = items.filter((i) => !i.parent_id || !ids.has(i.parent_id)).flatMap((p) => [p, ...items.filter((k) => k.parent_id === p.id)]);
@@ -90,6 +99,24 @@ export function MenuByUserTab({ appKey, items, onSaved }: { appKey: string; item
   const ownCount = rows.filter((r) => r.own).length;
   const changed = items.filter((it) => !sameAudience(cleanAudience(draft[it.id]), orig[it.id]));
   const setAud = (id: string, a: MenuAudience | null) => setDraft((d) => ({ ...d, [id]: cleanAudience(a) }));
+
+  // ให้สิทธิ์เฉพาะคนนี้ (มีผลทันที · มีประวัติ) แล้วติ๊กเห็นเมนูให้ด้วยถ้ายังไม่เห็น (ส่วนนี้เป็นร่าง รอกดบันทึก)
+  const grantAndShow = async () => {
+    const it = askGrant;
+    if (!it?.permission_key || !person || granting) return;
+    setGranting(true);
+    try {
+      const r = await apiFetch("/api/admin/user-permissions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ user_id: person.id, permission_key: it.permission_key, mode: "grant" }) });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j.error) throw new Error(j.error || "ให้สิทธิ์ไม่สำเร็จ");
+      setPerms((p) => (p && p.uid === person.id ? { uid: p.uid, set: new Set([...p.set, it.permission_key!]) } : p));
+      const needSave = !explainMenuFor(draft[it.id], person).visible;
+      if (needSave) setAud(it.id, setMenuVisibleFor(draft[it.id], person, true));
+      toast.success(`ให้สิทธิ์ "${permName(it.permission_key)}" แก่ ${person.name} แล้ว${needSave ? " — กดบันทึกด้านล่างเพื่อให้เห็นเมนู" : " — เห็นเมนูเมื่อรีเฟรช"}`);
+      setAskGrant(null);
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ให้สิทธิ์ไม่สำเร็จ"); }
+    finally { setGranting(false); }
+  };
 
   const save = async () => {
     if (!changed.length || saving) return;
@@ -129,18 +156,22 @@ export function MenuByUserTab({ appKey, items, onSaved }: { appKey: string; item
             <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
               {rows.map(({ it, ex, perm, shown, own }) => {
                 const dirty = !!person && explainMenuFor(orig[it.id], person).visible !== ex.visible;   // ไฮไลต์เฉพาะเมนูที่คนนี้เห็นเปลี่ยนไป (แก้ให้คนอื่นไม่นับ)
-                const blocked = appHidden(it) || !perm;
+                const blocked = appHidden(it);   // ซ่อนทั้งแอป = ต้องไปเปิดที่แท็บจัดเรียง · ไม่มีสิทธิ์ = ติ๊กแล้วถามให้สิทธิ์
                 return (
                   <label key={it.id} className={`flex items-center gap-2.5 border-t border-slate-100 px-3 py-2 text-sm first:border-t-0 ${dirty ? "bg-amber-50/60" : ""} ${blocked || isAdmin ? "cursor-default" : "cursor-pointer hover:bg-slate-50"} ${it.parent_id && ids.has(it.parent_id) ? "pl-9" : ""}`}>
                     <input type="checkbox" className="h-4 w-4 accent-violet-600" checked={shown} disabled={blocked || isAdmin || !person}
-                      onChange={(e) => person && setAud(it.id, setMenuVisibleFor(draft[it.id], person, e.target.checked))} />
+                      onChange={(e) => {
+                        if (!person) return;
+                        if (e.target.checked && !perm) { setAskGrant(it); return; }   // ติ๊กเห็น แต่ยังไม่มีสิทธิ์ → ถามก่อนให้สิทธิ์
+                        setAud(it.id, setMenuVisibleFor(draft[it.id], person, e.target.checked));
+                      }} />
                     <span className={`min-w-0 flex-1 ${shown ? "text-slate-800" : "text-slate-400"}`}>
                       <span className="mr-1.5"><Icon value={it.icon ?? "•"} /></span>{it.label}
                     </span>
                     {appHidden(it)
                       ? <span className={`${pill} bg-slate-100 text-slate-500`} title="ซ่อนจากแถบของแอปนี้สำหรับทุกคน — เปลี่ยนได้ที่แท็บจัดเรียง / ซ่อนเมนู">ซ่อนทั้งแอป</span>
                       : !perm
-                        ? <span className={`${pill} bg-slate-100 text-slate-500`} title={`คนนี้ไม่มีสิทธิ์ ${it.permission_key} — ให้สิทธิ์ได้ที่แท็บสิทธิ์ตามเมนู`}>ไม่มีสิทธิ์เข้า</span>
+                        ? <span className={`${pill} bg-rose-50 text-rose-700`} title={`เมนูนี้ต้องมีสิทธิ์ "${permName(it.permission_key ?? "")}" — ติ๊กช่องหน้าเมนูเพื่อให้สิทธิ์คนนี้`}><Icon name="lock" /> ยังไม่มีสิทธิ์ · ติ๊กเพื่อให้สิทธิ์</span>
                         : <>
                             {!ex.visible && permsKnown && <span className={`${pill} bg-amber-50 text-amber-700`} title="ซ่อนเมนูแล้ว แต่คนนี้ยังมีสิทธิ์ — ถ้ารู้ลิงก์ก็เปิดหน้านี้ได้ (กันจริงที่แท็บสิทธิ์ตามเมนู)"><Icon name="warning" /> ยังเข้าได้ด้วยลิงก์</span>}
                             <span className={`${pill} ${own ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-500"}`}>{REASON_TEXT[ex.reason]}</span>
@@ -187,6 +218,18 @@ export function MenuByUserTab({ appKey, items, onSaved }: { appKey: string; item
             </button>
           </div>
         </div>
+      )}
+
+      {askGrant && person && (
+        <ConfirmDialog open onClose={() => !granting && setAskGrant(null)} onConfirm={() => void grantAndShow()} loading={granting}
+          variant={permDefs.get(askGrant.permission_key ?? "")?.is_dangerous ? "danger" : "default"}
+          title={`ให้ ${person.name} เห็นเมนู "${askGrant.label}"`}
+          confirmText="ให้สิทธิ์และเห็นเมนู"
+          message={<div className="space-y-2 text-sm">
+            <p>{person.name} ยังไม่มีสิทธิ์ <b>“{permName(askGrant.permission_key ?? "")}”</b> ซึ่งเมนูนี้ต้องมี — ถึงติ๊กให้เห็นก็จะยังไม่ขึ้นบนแถบ</p>
+            <p>กดยืนยัน = <b>ให้สิทธิ์นี้เฉพาะ {person.name}</b> (มีผลทันที · คนอื่นตำแหน่งเดียวกันไม่เปลี่ยน · มีบันทึกประวัติ)</p>
+            <p className="text-xs text-slate-500">ถ้าอยากให้ทั้งตำแหน่ง หรือให้ทำงานในหน้านั้นได้มากขึ้น (เช่น แก้/ลบ) ตั้งต่อที่แท็บ “สิทธิ์ตามเมนู”</p>
+          </div>} />
       )}
     </div>
   );
