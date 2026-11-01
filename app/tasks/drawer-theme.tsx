@@ -8,7 +8,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { uploadResizedImage } from "@/components/image-attach";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
@@ -119,17 +119,22 @@ export function DrawerThemeButton({ theme, update, sections }: { theme: DrawerTh
     update({ order: ord });
   };
   const labelOf = (key: string) => sections.find((s) => s.key === key)?.label ?? key;
+  // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck) · null = กดยกเลิก/ข้าม
+  const uploadBg = async (file: File, folder: string, target: string, current: string | null) => {
+    const r = await uploadImagesWithDupCheck([file], { folder, max: 1600, target, existingKeys: current ? [current] : [], onError: () => toast.error(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")) });
+    return r?.keys[0] ?? null;
+  };
   const onPickBg = async (file: File | null | undefined) => {
     if (!file) return;
     setBgBusy(true);
-    try { const up = await uploadResizedImage(file, { folder: "drawer-bg", max: 1600 }); update({ bgImage: up.r2_key }); }
+    try { const key = await uploadBg(file, "drawer-bg", t("พื้นหลัง drawer", "drawer background"), theme.bgImage); if (key) update({ bgImage: key }); }
     catch { toast.error(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")); }
     finally { setBgBusy(false); }
   };
   const onPickSubCardBg = async (file: File | null | undefined) => {
     if (!file) return;
     setSubBgBusy(true);
-    try { const up = await uploadResizedImage(file, { folder: "subcard-bg", max: 1600 }); update({ subCardBgImage: up.r2_key }); }
+    try { const key = await uploadBg(file, "subcard-bg", t("พื้นหลังการ์ดงานย่อย", "subtask card background"), theme.subCardBgImage); if (key) update({ subCardBgImage: key }); }
     catch { toast.error(t("อัปโหลดรูปไม่สำเร็จ", "Upload failed")); }
     finally { setSubBgBusy(false); }
   };
