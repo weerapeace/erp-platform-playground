@@ -19,7 +19,7 @@ export {
 } from "@/lib/creative-tasks";
 
 import type { CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus, ContentStatus } from "@/lib/creative-tasks";
-import type { MassCreatePost, MassRawRow } from "@/lib/marketing/mass-plan";
+import type { MassCreatePost, MassFreq, MassRawRow } from "@/lib/marketing/mass-plan";
 
 // ---- Types (ตรงกับ output ของ /api/creative-tasks) ----
 export type CreativeTask = {
@@ -510,11 +510,23 @@ export async function massImportContent(brandId: string, posts: MassCreatePost[]
   const j = await jsonOrThrow(await apiFetch("/api/marketing/content-plan/mass", { method: "POST", body: JSON.stringify({ brand_id: brandId, posts }) }));
   return j.data as MassImportResult;
 }
-export type AiMassPlanInput = { brand_id: string; start: string; end: string; per_week: number; platforms: string[]; pillars: string[]; campaign?: string; extra?: string; tone?: string; recommended_times?: string };
+export type AiMassPlanInput = { brand_id: string; start: string; end: string; freq: Record<string, MassFreq>; share: boolean; platforms: string[]; pillars: string[]; campaign?: string; extra?: string; tone?: string; recommended_times?: string };
 /** ให้ AI ในระบบร่างแผน → แถวดิบ (ยังไม่บันทึก · เข้าหน้าตรวจเหมือนวางคำตอบเอง) */
 export async function aiMassPlan(input: AiMassPlanInput): Promise<{ rows: MassRawRow[]; posts: number; model: string; warnings: string[] }> {
   const j = await jsonOrThrow(await apiFetch("/api/ai/mass-plan", { method: "POST", body: JSON.stringify(input) }));
   return { rows: (j.rows as MassRawRow[]) ?? [], posts: (j.posts as number) ?? 0, model: (j.model as string) ?? "", warnings: (j.warnings as string[]) ?? [] };
+}
+/** เป้ารายเดือน "ทุกประเภท + ทุกรูปแบบ" ของแบรนด์ (ตารางเดียวกับ 🎯 เป้าเดือนในหน้าวางแผน) → { platform: จำนวน/เดือน } */
+export async function getBrandMonthlyTargets(brandId: string): Promise<Record<string, number>> {
+  const j = await jsonOrThrow(await apiFetch(`/api/marketing/content-plan/targets?brand_id=${encodeURIComponent(brandId)}`));
+  const rows = (j.data as { platform: string; placement_type: string | null; post_type: string | null; monthly_count: number }[]) ?? [];
+  return Object.fromEntries(rows.filter((r) => !r.placement_type && !r.post_type).map((r) => [r.platform, r.monthly_count]));
+}
+/** จำชุดเป้ารายเดือนของแบรนด์ (แทนที่ทั้งชุด · ช่องทางที่ไม่ส่ง = เอาออก) — ต้องมีสิทธิ์ marketing.label.manage */
+export async function saveBrandMonthlyTargets(brandId: string, targets: Record<string, number>): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/marketing/content-plan/targets", {
+    method: "PUT", body: JSON.stringify({ brand_id: brandId, targets: Object.entries(targets).map(([platform, monthly_count]) => ({ platform, monthly_count })) }),
+  }));
 }
 // แก้หลายงานทีเดียว (คำขอเดียว) + รายงานผลต่อรายการ
 export async function bulkUpdateTasks(items: { id: string; changes: Record<string, unknown> }[]): Promise<{ success: number; failed: number; failures: { id: string; error: string }[] }> {

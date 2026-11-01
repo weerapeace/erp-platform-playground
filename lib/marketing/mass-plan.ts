@@ -80,13 +80,64 @@ export function specialDaysBetween(start: string, end: string): SpecialDay[] {
   return out;
 }
 
-/** จำนวนโพสต์ที่ควรได้ต่อแพลตฟอร์มในช่วงนี้ */
-export function estimatePostCount(perWeek: number, start: string, end: string): number {
-  return Math.max(1, Math.round((perWeek * daysInRange(start, end)) / 7));
+// ── ความถี่ต่อแพลตฟอร์ม: n ครั้ง ต่อสัปดาห์ หรือ ต่อเดือน (ช่องที่ลงไม่บ่อย เช่น LINE OA / YouTube) ──
+export type MassFreqUnit = "week" | "month";
+export type MassFreq = { n: number; unit: MassFreqUnit };
+export const FREQ_MAX: Record<MassFreqUnit, number> = { week: 21, month: 90 };
+const WEEKS_PER_MONTH = 52 / 12;
+const DAYS_PER_MONTH = 365.25 / 12;
+
+/** ค่าตั้งต้นตอนติ๊กแพลตฟอร์ม + ช่วงที่ใช้กันทั่วไป (ค่าประมาณให้พอมีหลัก ไม่ใช่กฎ) */
+export const PLATFORM_FREQ_HINT: Record<string, { def: MassFreq; text: string }> = {
+  shopee: { def: { n: 2, unit: "week" }, text: "2–3/สัปดาห์" },
+  lazada: { def: { n: 1, unit: "week" }, text: "1–2/สัปดาห์" },
+  website: { def: { n: 1, unit: "week" }, text: "1/สัปดาห์" },
+  instagram: { def: { n: 3, unit: "week" }, text: "3–5/สัปดาห์" },
+  tiktok: { def: { n: 3, unit: "week" }, text: "3–7/สัปดาห์" },
+  facebook: { def: { n: 3, unit: "week" }, text: "3–5/สัปดาห์" },
+  line_oa: { def: { n: 2, unit: "month" }, text: "2–4/เดือน (ข้อความมีโควตา)" },
+  youtube: { def: { n: 2, unit: "month" }, text: "1–4/เดือน" },
+  pinterest: { def: { n: 3, unit: "week" }, text: "3–7/สัปดาห์" },
+  x: { def: { n: 3, unit: "week" }, text: "3–7/สัปดาห์" },
+  line_shopping: { def: { n: 1, unit: "week" }, text: "1–2/สัปดาห์" },
+};
+export const freqHint = (code: string) => PLATFORM_FREQ_HINT[code] ?? { def: { n: 3, unit: "week" as const }, text: "" };
+
+/** ค่าที่ส่งมาจากหน้าเว็บ → ความถี่ที่ใช้ได้ (ผิดรูป = null) */
+export function normFreq(v: unknown): MassFreq | null {
+  const o = (v ?? {}) as { n?: unknown; unit?: unknown };
+  const unit: MassFreqUnit = o.unit === "month" ? "month" : "week";
+  const n = Math.round(Number(o.n));
+  if (!Number.isFinite(n) || n < 1) return null;
+  return { n: Math.min(FREQ_MAX[unit], n), unit };
+}
+/** จำนวนโพสต์ของแพลตฟอร์มนี้ในช่วงวันที่ (อย่างน้อย 1) */
+export function countForRange(f: MassFreq, start: string, end: string): number {
+  const days = daysInRange(start, end);
+  return Math.max(1, Math.round(f.unit === "week" ? (f.n * days) / 7 : (f.n * days) / DAYS_PER_MONTH));
+}
+export const freqLabel = (f: MassFreq) => `${f.n} ครั้ง/${f.unit === "week" ? "สัปดาห์" : "เดือน"}`;
+/** ความถี่ → "เป้ารายเดือน" (content_plan_targets.monthly_count) */
+export const monthlyFromFreq = (f: MassFreq) => Math.min(500, Math.max(1, f.unit === "month" ? f.n : Math.round(f.n * WEEKS_PER_MONTH)));
+/** "เป้ารายเดือน" → ความถี่ที่อ่านง่าย: หารสัปดาห์ลงตัว (3/สัปดาห์ = 13/เดือน) แสดงเป็นต่อสัปดาห์ · ไม่ลงตัว/น้อยกว่า 4 = ต่อเดือน */
+export function freqFromMonthly(m: number): MassFreq {
+  const w = Math.round(m / WEEKS_PER_MONTH);
+  if (m >= 4 && w <= FREQ_MAX.week && Math.round(w * WEEKS_PER_MONTH) === m) return { n: w, unit: "week" };
+  if (m <= FREQ_MAX.month) return { n: m, unit: "month" };
+  return { n: Math.min(FREQ_MAX.week, w), unit: "week" };
+}
+/** งานรูป/คลิปที่ทีมต้องผลิตจริง — ให้ลงเรื่องเดียวกันหลายแพลตฟอร์มได้ = อย่างน้อยเท่าแพลตฟอร์มที่ลงบ่อยสุด */
+export function productionRange(counts: number[], share: boolean): { min: number; max: number } {
+  const sum = counts.reduce((a, b) => a + b, 0);
+  return { min: share && counts.length > 1 ? Math.max(0, ...counts) : sum, max: sum };
 }
 
 export type MassPlanBrief = {
-  brandName: string; start: string; end: string; perWeek: number;
+  brandName: string; start: string; end: string;
+  /** ความถี่ต่อแพลตฟอร์ม (คีย์ = code) · ไม่มี = ค่าตั้งต้นของแพลตฟอร์มนั้น */
+  freq: Record<string, MassFreq>;
+  /** เรื่องเดียวกันลงหลายแพลตฟอร์มได้ (ประหยัดงานถ่าย) · ไม่ระบุ = ได้ */
+  share?: boolean;
   platforms: MassPlatform[]; pillars: string[]; campaign: string;
   specialDays: SpecialDay[];
   /** เวลาที่ใช้ประจำต่อวัน เช่น "อา 19:00 · จ 14:00" */
@@ -101,14 +152,20 @@ export const MASS_PLAN_COLUMNS = ["วันที่", "เวลา", "แพ�
 export const LINE_BREAK_MARK = "//";
 
 /** บริบทร่วมของงานวางแผน (ใช้ทั้ง prompt ก๊อปไปถามเอง และ AI ในระบบ) */
+export const briefFreq = (b: MassPlanBrief, code: string): MassFreq => b.freq[code] ?? freqHint(code).def;
+
 export function buildMassPlanContext(b: MassPlanBrief, only?: MassPlatform[]): string[] {
   const plats = only ?? b.platforms;
-  const n = estimatePostCount(b.perWeek, b.start, b.end);
   const lines = [
     `แบรนด์: ${b.brandName}`,
     `ช่วงวันที่: ${thaiDateLabel(b.start)} – ${thaiDateLabel(b.end)}`,
-    `แพลตฟอร์ม: ${plats.map((p) => p.label).join(", ")}`,
-    `จำนวน: ประมาณ ${b.perWeek} โพสต์/สัปดาห์${plats.length > 1 ? " ต่อแพลตฟอร์ม" : ""} (≈ ${n} โพสต์ต่อแพลตฟอร์ม)`,
+    "แพลตฟอร์มและจำนวนโพสต์ (กระจายทั้งช่วง ไม่กองวันเดียว):",
+    ...plats.map((p) => { const f = briefFreq(b, p.code); return `- ${p.label}: ${freqLabel(f)} (≈ ${countForRange(f, b.start, b.end)} โพสต์ในช่วงนี้)`; }),
+    ...(plats.length > 1
+      ? [b.share === false
+        ? "- แต่ละแพลตฟอร์มต้องเป็นเรื่องของตัวเอง ห้ามใช้หัวข้อหรือไอเดียรูปซ้ำข้ามแพลตฟอร์ม"
+        : "- เรื่องเดียวกันลงหลายแพลตฟอร์มได้ (ทีมทำรูป/คลิปชุดเดียวใช้หลายที่) · แพลตฟอร์มที่ลงบ่อยกว่าค่อยเสริมเรื่องเฉพาะของตัวเอง"]
+      : []),
     `แนวคอนเทนต์ที่ใช้ได้: ${b.pillars.length ? b.pillars.join(", ") : "เลือกเองตามความเหมาะสม"}`,
     `สินค้า/แคมเปญช่วงนี้: ${b.campaign.trim() || "ไม่ระบุ — เน้นสินค้าเด่นของแบรนด์"}`,
   ];
@@ -134,7 +191,7 @@ export function buildMassPlanPrompt(b: MassPlanBrief, only?: MassPlatform[]): st
     "- 1 แถว = 1 โพสต์ ใน 1 แพลตฟอร์ม · วันที่แบบ 3/11/2569 (พ.ศ.) · เวลาแบบ 19:00",
     `- แคปชั่นเขียนในบรรทัดเดียว ถ้าต้องการขึ้นบรรทัดใหม่ให้ใช้ " ${LINE_BREAK_MARK} " คั่น`,
     "- แฮชแท็กคั่นด้วยช่องว่าง · แพลตฟอร์มที่ไม่ใช้แคปชั่นให้เว้นช่องแคปชั่น/แฮชแท็กว่าง แต่ใส่ไอเดียรูป",
-    ...(plats.length > 1 ? ['- เรื่องเดียวกันที่ลงหลายแพลตฟอร์มในวัน-เวลาเดียวกัน ให้ใช้ "หัวข้อ" เดียวกันเป๊ะ (ระบบจะรวมเป็นโพสต์เดียว)'] : []),
+    ...(plats.length > 1 && b.share !== false ? ['- เรื่องเดียวกันที่ลงหลายแพลตฟอร์มในวัน-เวลาเดียวกัน ให้ใช้ "หัวข้อ" เดียวกันเป๊ะ (ระบบจะรวมเป็นโพสต์เดียว)'] : []),
   ].join("\n");
 }
 
@@ -351,6 +408,8 @@ export type MassCreatePost = {
   captions: { platform: string; caption: string; hashtags: string }[];
 };
 export const MASS_MAX_POSTS = 200;
+/** AI ในระบบร่างได้ครั้งละไม่เกินกี่แถว (โพสต์ × แพลตฟอร์ม) — เกินนี้คำตอบยาวจนโดนตัด */
+export const MASS_AI_MAX_ROWS = 160;
 
 /** ไอเดียรูป/คลิปต่อแพลตฟอร์ม → บรีฟ (เหมือนกันทุกแพลตฟอร์ม = บรรทัดเดียว) */
 export function briefFromCaptions(captions: MassCaption[], label: (code: string) => string): string | null {

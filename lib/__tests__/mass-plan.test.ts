@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseTableText } from "@/lib/paste-table";
 import {
-  buildMassPlanPrompt, specialDaysBetween, estimatePostCount, monthRange, parseMassPlanText, matchPlatform, matchPillar,
+  buildMassPlanPrompt, specialDaysBetween, countForRange, freqFromMonthly, monthlyFromFreq, productionRange, monthRange, parseMassPlanText, matchPlatform, matchPillar,
   normTime, normalizeHashtagText, groupMassPlan, postLevel, briefFromCaptions, validateCreatePost, type MassPlatform,
 } from "@/lib/marketing/mass-plan";
 
@@ -42,18 +42,35 @@ describe("mass-plan: prompt + วันสำคัญ", () => {
     ]);
     expect(specialDaysBetween("2026-12-01", "2026-12-31").map((d) => d.label)).toEqual(["วันพ่อ", "12.12", "คริสต์มาส · เงินเดือนออก", "ส่งท้ายปีเก่า"]);
   });
-  it("จำนวนโพสต์: 3/สัปดาห์ × 30 วัน ≈ 13", () => {
-    expect(estimatePostCount(3, "2026-11-01", "2026-11-30")).toBe(13);
+  it("จำนวนโพสต์ต่อแพลตฟอร์ม: ต่อสัปดาห์ / ต่อเดือน", () => {
+    expect(countForRange({ n: 3, unit: "week" }, "2026-11-01", "2026-11-30")).toBe(13);
+    expect(countForRange({ n: 2, unit: "month" }, "2026-11-01", "2026-11-30")).toBe(2);
+    expect(countForRange({ n: 2, unit: "month" }, "2026-11-01", "2026-11-07")).toBe(1);   // อย่างน้อย 1
+  });
+  it("เป้ารายเดือน ↔ ความถี่ ไปกลับแล้วได้ค่าเดิม", () => {
+    for (const n of [1, 3, 5, 7, 14, 21]) expect(freqFromMonthly(monthlyFromFreq({ n, unit: "week" }))).toEqual({ n, unit: "week" });
+    for (const n of [1, 2, 3, 10]) expect(freqFromMonthly(monthlyFromFreq({ n, unit: "month" }))).toEqual({ n, unit: "month" });
+    expect(monthlyFromFreq({ n: 3, unit: "week" })).toBe(13);
+  });
+  it("งานผลิตจริง: ลงเรื่องเดียวกันหลายที่ = อย่างน้อยเท่าช่องที่ลงบ่อยสุด", () => {
+    expect(productionRange([13, 21, 2], true)).toEqual({ min: 21, max: 36 });
+    expect(productionRange([13, 21, 2], false)).toEqual({ min: 36, max: 36 });
+    expect(productionRange([5], true)).toEqual({ min: 5, max: 5 });
   });
   it("prompt มีกติกาแยกแพลตฟอร์ม + โน้ตรูป + คอลัมน์ที่ระบบอ่านได้", () => {
-    const p = buildMassPlanPrompt({ brandName: "Louis Montini", start: "2026-11-01", end: "2026-11-30", perWeek: 3, platforms: PLATS.slice(0, 4), pillars: ["โชว์สินค้า"], campaign: "11.11 ลด 11%", specialDays: specialDaysBetween("2026-11-01", "2026-11-30") });
+    const p = buildMassPlanPrompt({ brandName: "Louis Montini", start: "2026-11-01", end: "2026-11-30", freq: { tiktok: { n: 5, unit: "week" }, line_oa: { n: 2, unit: "month" } }, platforms: PLATS.slice(0, 4), pillars: ["โชว์สินค้า"], campaign: "11.11 ลด 11%", specialDays: specialDaysBetween("2026-11-01", "2026-11-30") });
     expect(p).toContain("Louis Montini");
     expect(p).toContain("Shopee: ไม่ต้องเขียนแคปชั่น");
     expect(p).toContain("16:9 1 รูป");
     expect(p).toContain("วันที่ | เวลา | แพลตฟอร์ม | แนว | หัวข้อ | แคปชั่น | แฮชแท็ก | ไอเดียรูป/คลิป");
     expect(p).toContain("11 พ.ย. 2569 11.11");
     expect(p).toContain("ใช้ \"หัวข้อ\" เดียวกันเป๊ะ");
-    expect(buildMassPlanPrompt({ brandName: "B", start: "2026-11-01", end: "2026-11-14", perWeek: 2, platforms: PLATS, pillars: [], campaign: "", specialDays: [] }, [PLATS[0]])).not.toContain("หัวข้อ\" เดียวกันเป๊ะ");
+    expect(p).toContain("- TikTok: 5 ครั้ง/สัปดาห์ (≈ 21 โพสต์ในช่วงนี้)");
+    expect(p).toContain("- Facebook: 3 ครั้ง/สัปดาห์ (≈ 13 โพสต์ในช่วงนี้)");   // ไม่ได้ระบุ = ค่าตั้งต้นของแพลตฟอร์ม
+    const own = buildMassPlanPrompt({ brandName: "B", start: "2026-11-01", end: "2026-11-30", freq: {}, share: false, platforms: PLATS.slice(0, 3), pillars: [], campaign: "", specialDays: [] });
+    expect(own).toContain("ห้ามใช้หัวข้อหรือไอเดียรูปซ้ำข้ามแพลตฟอร์ม");
+    expect(own).not.toContain("หัวข้อ\" เดียวกันเป๊ะ");
+    expect(buildMassPlanPrompt({ brandName: "B", start: "2026-11-01", end: "2026-11-14", freq: {}, platforms: PLATS, pillars: [], campaign: "", specialDays: [] }, [PLATS[0]])).not.toContain("หัวข้อ\" เดียวกันเป๊ะ");
   });
 });
 

@@ -1,7 +1,8 @@
 "use client";
 /**
  * วางแผนแบบ Mass — ป๊อปในปฏิทินคอนเทนต์ (ปุ่ม "วางแผนแบบ Mass" ข้าง "+ สร้างคอนเทนต์")
- *   1) ตั้งโจทย์: แบรนด์ · ช่วงวัน · โพสต์/สัปดาห์ · แพลตฟอร์ม · แนว · สินค้า/แคมเปญ
+ *   1) ตั้งโจทย์: แบรนด์ · ช่วงวัน · แพลตฟอร์ม + ความถี่ต่อแพลตฟอร์ม (ครั้ง/สัปดาห์ หรือ /เดือน · เริ่มที่ไม่ติ๊ก) · แนว · สินค้า/แคมเปญ
+ *      จำชุดความถี่เป็นค่าประจำแบรนด์ได้ = เป้ารายเดือน "ทุกประเภท" (ตารางเดียวกับ 🎯 เป้าเดือนในแท็บวางแผน)
  *   2) ร่าง 2 ทาง: ก๊อป prompt ไปถาม AI เอง (ฟรี) แล้ววางคำตอบ/อัปไฟล์  หรือ  ให้ AI ในระบบร่างเลย (มีค่าใช้จ่ายเล็กน้อย)
  *   3) ตรวจ (ใช้ร่วมกันทั้งสองทาง) → ลงปฏิทินเป็นร่าง · ย้อนทั้งชุดได้ทันทีหลังลง
  * ตัวคิดทั้งหมดอยู่ที่ lib/marketing/mass-plan · บันทึกผ่าน /api/marketing/content-plan/mass · ไม่ทับคอนเทนต์เดิมเด็ดขาด
@@ -11,6 +12,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { PlatformIcon } from "@/components/platform-icon";
+import { StepInput } from "@/components/step-input";
 import { copyText } from "@/components/copy-button";
 import { usePushToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
@@ -20,12 +22,14 @@ import { todayBangkok } from "@/lib/date";
 import { parseImportFile } from "@/lib/import";
 import { dateKeyOf } from "@/lib/marketing/content-plan";
 import {
-  addDaysKey, briefFromCaptions, buildMassPlanPrompt, checkPost, daysInRange, estimatePostCount, groupMassPlan, matchPlatform, monthRange,
-  normTime, normalizeHashtagText, parseMassPlanText, postLevel, rowsFromGrid, specialDaysBetween, thaiDateLabel, weekdayOf,
-  MASS_MAX_POSTS, type MassIssue, type MassPlanBrief, type MassPlatform, type MassPost, type MassRawRow,
+  addDaysKey, briefFromCaptions, buildMassPlanPrompt, checkPost, countForRange, daysInRange, freqFromMonthly, freqHint, groupMassPlan, matchPlatform,
+  freqLabel, monthRange, monthlyFromFreq, normTime, normalizeHashtagText, parseMassPlanText, platformRule, postLevel, productionRange, rowsFromGrid, specialDaysBetween,
+  thaiDateLabel, weekdayOf, FREQ_MAX, MASS_AI_MAX_ROWS, MASS_MAX_POSTS,
+  type MassFreq, type MassFreqUnit, type MassIssue, type MassPlanBrief, type MassPlatform, type MassPost, type MassRawRow,
 } from "@/lib/marketing/mass-plan";
 import {
-  aiMassPlan, bulkDeleteContent, defaultHashtags, getCaptionConfig, getRecommendedTimes, massImportContent, resolvePrompt,
+  aiMassPlan, bulkDeleteContent, defaultHashtags, getBrandMonthlyTargets, getCaptionConfig, getRecommendedTimes, massImportContent, resolvePrompt,
+  saveBrandMonthlyTargets,
   type BrandOption, type CaptionConfig, type ContentItem, type MassImportResult, type PlatformSettings, type RecommendedTimes,
 } from "../data";
 import { getBrandPlatforms, type BrandFormatMap, type BrandPlatformMap } from "../content/brand-platforms-modal";
@@ -62,6 +66,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
   const { can } = useAuth();
   const canAi = can("ai.caption" as never);
   const canDelete = can("tasks.delete" as never);
+  const canRemember = can("marketing.label.manage" as never);   // สิทธิ์เดียวกับแก้ 🎯 เป้าเดือน
   const today = todayBangkok();
 
   // ── ค่าตั้งต้นที่โหลดครั้งเดียวต่อการเปิด ──
@@ -98,27 +103,52 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
   const [brandId, setBrandId] = useState<string>(defaultBrandId ?? brands[0]?.id ?? "");
   const [start, setStart] = useState(() => initRange().start);
   const [end, setEnd] = useState(() => initRange().end);
-  const [perWeek, setPerWeek] = useState(3);
+  // แพลตฟอร์มเริ่มที่ "ไม่ติ๊กเลย" (เจ้าของขอ 2026-11-01) — กดเลือกทีละอัน หรือกดปุ่มใช้ค่าที่จำไว้ของแบรนด์
   const [selPlats, setSelPlats] = useState<Set<string>>(new Set());
-  const [platTouched, setPlatTouched] = useState(false);
+  const [freq, setFreq] = useState<Record<string, MassFreq>>({});
+  const [share, setShare] = useState(true);
+  const [remember, setRemember] = useState(false);
+  const [saved, setSaved] = useState<Record<string, number>>({});   // เป้ารายเดือนที่จำไว้ของแบรนด์ { platform: ครั้ง/เดือน }
   const [selPillars, setSelPillars] = useState<Set<string>>(new Set());
   const [campaign, setCampaign] = useState("");
   const [extra, setExtra] = useState("");
   const [setupErr, setSetupErr] = useState<string | null>(null);
   useEffect(() => { if (!brandId && brands[0]) setBrandId(defaultBrandId ?? brands[0].id); }, [brands, brandId, defaultBrandId]);
 
-  // แพลตฟอร์มตั้งต้น = ที่ตั้งไว้ต่อแบรนด์ (⚙️ ตั้งค่าต่อแบรนด์) · ไม่ได้ตั้ง = ทุกแพลตฟอร์มที่เปิดใช้
   useEffect(() => {
-    if (platTouched) return;
-    const mine = bpMap[brandId];
-    setSelPlats(new Set(platforms.map((p) => p.value).filter((v) => !mine || mine.includes(v))));
-  }, [brandId, bpMap, platforms, platTouched]);
+    if (!open || !brandId) return;
+    let alive = true;
+    setSaved({});
+    getBrandMonthlyTargets(brandId).then((m) => { if (alive) setSaved(m); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, brandId]);
 
   const massPlatforms: MassPlatform[] = useMemo(() => platforms.map((p) => ({
     code: p.value, label: p.label,
     useCaption: pset?.[p.value]?.use_caption !== false, useHashtags: pset?.[p.value]?.use_hashtags !== false, note: pset?.[p.value]?.note ?? null,
   })), [platforms, pset]);
   const chosen = useMemo(() => massPlatforms.filter((p) => selPlats.has(p.code)), [massPlatforms, selPlats]);
+  const savedFreq = useMemo(() => Object.fromEntries(Object.entries(saved)
+    .filter(([c]) => massPlatforms.some((p) => p.code === c)).map(([c, m]) => [c, freqFromMonthly(m)])) as Record<string, MassFreq>, [saved, massPlatforms]);
+  // ปุ่มลัด: ค่าที่จำไว้ (มีความถี่) → ไม่มี = แพลตฟอร์มที่ตั้งไว้ต่อแบรนด์ (⚙️ ตั้งค่าต่อแบรนด์ · ความถี่ตั้งต้น)
+  const preset = useMemo((): { saved: boolean; codes: string[] } | null => {
+    if (Object.keys(savedFreq).length) return { saved: true, codes: massPlatforms.map((p) => p.code).filter((c) => savedFreq[c]) };
+    const mine = bpMap[brandId];
+    const codes = mine?.length ? massPlatforms.map((p) => p.code).filter((c) => mine.includes(c)) : [];
+    return codes.length ? { saved: false, codes } : null;
+  }, [savedFreq, bpMap, brandId, massPlatforms]);
+  const freqOf = (code: string): MassFreq => freq[code] ?? savedFreq[code] ?? freqHint(code).def;
+  const setPlatFreq = (code: string, patch: Partial<MassFreq>) => setFreq((all) => {
+    const cur = all[code] ?? savedFreq[code] ?? freqHint(code).def;
+    const unit = patch.unit ?? cur.unit;
+    return { ...all, [code]: { unit, n: Math.min(FREQ_MAX[unit], Math.max(1, Math.round(patch.n ?? cur.n))) } };
+  });
+  const togglePlat = (code: string) => setSelPlats((s) => { const n = new Set(s); if (n.has(code)) n.delete(code); else n.add(code); return n; });
+  const applyPreset = () => {
+    if (!preset) return;
+    setSelPlats(new Set(preset.codes));
+    if (preset.saved) setFreq((all) => ({ ...all, ...savedFreq }));
+  };
   const labelOf = (code: string) => massPlatforms.find((p) => p.code === code)?.label ?? code;
   const brandName = brands.find((b) => b.id === brandId)?.name ?? "";
   const recTimesText = useMemo(() => [1, 2, 3, 4, 5, 6, 0]
@@ -126,17 +156,33 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
     .map((d) => `${WD_TH[d]} ${recTimes[String(d)].map((x) => x.time).join("/")}`).join(" · "), [recTimes]);
   const specialDays = useMemo(() => (start && end && start <= end ? specialDaysBetween(start, end) : []), [start, end]);
   const brief: MassPlanBrief = {
-    brandName, start, end, perWeek, platforms: chosen, pillars: pillars.filter((p) => selPillars.has(p.name)).map((p) => p.name),
+    brandName, start, end, freq: Object.fromEntries(chosen.map((p) => [p.code, freqOf(p.code)])), share, platforms: chosen, pillars: pillars.filter((p) => selPillars.has(p.name)).map((p) => p.name),
     campaign, specialDays, recommendedTimes: recTimesText, tone: resolvePrompt(capCfg, brandId || null), extra,
   };
-  const perPlatform = start && end && start <= end ? estimatePostCount(perWeek, start, end) : 0;
+  const rangeOk = !!start && !!end && start <= end;
+  const platCount = (code: string) => (rangeOk ? countForRange(freqOf(code), start < today ? today : start, end) : 0);
+  const planCounts = chosen.map((p) => platCount(p.code));
+  const planTotal = planCounts.reduce((a, b) => a + b, 0);
+  const production = productionRange(planCounts, share);
+
+  /** ติ๊ก "จำชุดนี้" → แทนที่เป้ารายเดือนทั่วไปของแบรนด์ (ทำเบื้องหลังตอนกดไปขั้นถัดไป · ไม่ขวางการร่าง) */
+  const rememberIfAsked = () => {
+    if (!remember || !canRemember || !brandId || !chosen.length) return;
+    const keep = Object.fromEntries(Object.entries(saved).filter(([c]) => !massPlatforms.some((p) => p.code === c)));   // แพลตฟอร์มที่ปิดใช้อยู่ ไม่แตะ
+    const next: Record<string, number> = { ...keep, ...Object.fromEntries(chosen.map((p) => [p.code, monthlyFromFreq(freqOf(p.code))])) };
+    const same = Object.keys(next).length === Object.keys(saved).length && Object.entries(next).every(([c, m]) => saved[c] === m);
+    if (same) return;
+    saveBrandMonthlyTargets(brandId, next)
+      .then(() => { setSaved(next); pushToast("success", t(`จำค่าประจำของ ${brandName} แล้ว`, `Saved as ${brandName} defaults`)); })
+      .catch((e) => pushToast("error", t("จำค่าประจำแบรนด์ไม่สำเร็จ: ", "Could not save brand defaults: ") + (e as Error).message));
+  };
 
   const validateSetup = (): boolean => {
     if (!brandId) { setSetupErr(t("เลือกแบรนด์ก่อน", "Pick a brand first")); return false; }
     if (!start || !end || end < start) { setSetupErr(t("ช่วงวันที่ไม่ถูกต้อง", "Invalid date range")); return false; }
     if (end < today) { setSetupErr(t("ช่วงวันที่ผ่านไปแล้วทั้งช่วง", "The whole range is in the past")); return false; }
     if (daysInRange(start, end) > 62) { setSetupErr(t("ช่วงยาวเกินไป — วางได้ครั้งละไม่เกิน 62 วัน", "Range too long — max 62 days")); return false; }
-    if (!chosen.length) { setSetupErr(t("เลือกแพลตฟอร์มอย่างน้อย 1 อัน", "Pick at least one platform")); return false; }
+    if (!chosen.length) { setSetupErr(t("เลือกแพลตฟอร์มอย่างน้อย 1 อัน (กดชื่อแพลตฟอร์ม หรือปุ่มใช้ค่าของแบรนด์)", "Pick at least one platform")); return false; }
     setSetupErr(null);
     return true;
   };
@@ -200,10 +246,15 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
   };
   const runAi = async () => {
     if (!validateSetup()) return;
+    if (planTotal > MASS_AI_MAX_ROWS) {
+      setSetupErr(t(`รวม ≈ ${planTotal} โพสต์ เกินที่ AI ในระบบร่างได้ต่อครั้ง (${MASS_AI_MAX_ROWS}) — ลดความถี่หรือช่วงวัน หรือใช้ปุ่ม "ขอ prompt" แทน`, `≈ ${planTotal} posts is over the AI limit (${MASS_AI_MAX_ROWS}) — lower frequency/range or use the prompt button`));
+      return;
+    }
+    rememberIfAsked();
     setAiBusy(true); setSetupErr(null);
     try {
       const r = await aiMassPlan({
-        brand_id: brandId, start: start < today ? today : start, end, per_week: perWeek, platforms: chosen.map((p) => p.code),
+        brand_id: brandId, start: start < today ? today : start, end, freq: brief.freq, share, platforms: chosen.map((p) => p.code),
         pillars: brief.pillars, campaign, extra, tone: brief.tone, recommended_times: recTimesText,
       });
       setAiNote({ model: r.model, warnings: r.warnings });
@@ -362,7 +413,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
       {step === "setup" && <>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         <div className="flex-1" />
-        <button onClick={() => { if (validateSetup()) setStep("draft"); }} className="h-9 px-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
+        <button onClick={() => { if (validateSetup()) { rememberIfAsked(); setStep("draft"); } }} className="h-9 px-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
           <Icon name="list" /> {t("ขอ prompt ไปถาม AI เอง (ฟรี)", "Get prompt for your own AI (free)")}
         </button>
         <button onClick={runAi} disabled={aiBusy || !canAi} title={canAi ? undefined : t("ต้องมีสิทธิ์ใช้ AI (ai.caption) — ใช้ปุ่มขอ prompt แทนได้", "Needs AI permission (ai.caption)")}
@@ -415,7 +466,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="block">
                 <span className="mb-1 block text-xs text-slate-500">{t("แบรนด์", "Brand")}</span>
-                <select value={brandId} onChange={(e) => { setBrandId(e.target.value); setPlatTouched(false); }} className={inputCls}>
+                <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className={inputCls}>
                   {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </label>
@@ -429,26 +480,75 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
               </label>
             </div>
             <div>
-              <div className="mb-1 flex items-center justify-between text-xs text-slate-500">
-                <span>{t("โพสต์ต่อสัปดาห์ (ต่อแพลตฟอร์ม)", "Posts per week (per platform)")}: <b className="text-slate-800">{perWeek}</b></span>
-                {perPlatform > 0 && <span>{t(`≈ ${perPlatform} โพสต์ต่อแพลตฟอร์ม · รวม ≈ ${perPlatform * chosen.length}`, `≈ ${perPlatform} per platform · ≈ ${perPlatform * chosen.length} total`)}</span>}
+              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-xs text-slate-500">{t("แพลตฟอร์มและความถี่ (กดชื่อเพื่อเลือก)", "Platforms and frequency (click a name to pick)")}</span>
+                <div className="flex items-center gap-1.5">
+                  {preset && (
+                    <button type="button" onClick={applyPreset} className="h-7 px-2.5 inline-flex items-center gap-1 text-xs text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">
+                      <Icon name="bookmark" /> {preset.saved ? t(`ใช้ค่าที่จำไว้ของแบรนด์ (${preset.codes.length})`, `Use saved brand set (${preset.codes.length})`) : t(`ติ๊กตามแพลตฟอร์มของแบรนด์ (${preset.codes.length})`, `Tick brand platforms (${preset.codes.length})`)}
+                    </button>
+                  )}
+                  {selPlats.size > 0 && (
+                    <button type="button" onClick={() => setSelPlats(new Set())} className="h-7 px-2.5 text-xs text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ล้าง", "Clear")}</button>
+                  )}
+                </div>
               </div>
-              <input type="range" min={1} max={14} step={1} value={perWeek} onChange={(e) => setPerWeek(Number(e.target.value))} className="w-full accent-violet-600" />
-            </div>
-            <div>
-              <div className="mb-1.5 text-xs text-slate-500">{t("แพลตฟอร์ม (ติ๊กให้ตามที่ตั้งไว้ต่อแบรนด์)", "Platforms (pre-ticked from brand settings)")}</div>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white">
                 {massPlatforms.map((p) => {
                   const on = selPlats.has(p.code);
+                  const f = freqOf(p.code);
+                  const hint = freqHint(p.code).text;
                   return (
-                    <button key={p.code} type="button" className={chipCls(on)}
-                      onClick={() => { setPlatTouched(true); setSelPlats((s) => { const n = new Set(s); if (n.has(p.code)) n.delete(p.code); else n.add(p.code); return n; }); }}>
-                      <PlatformIcon code={p.code} iconKey={platformMeta(p.code)?.icon_key ?? null} size={16} /> {p.label}
-                      {!p.useCaption && <span className="text-[11px] text-slate-400">{t("ลงแค่รูป", "image only")}</span>}
-                    </button>
+                    <div key={p.code} className={`flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-1.5 ${on ? "" : "bg-slate-50/60"}`}>
+                      <button type="button" onClick={() => togglePlat(p.code)} className="flex min-h-8 min-w-0 flex-1 items-center gap-2 text-left">
+                        <input type="checkbox" checked={on} readOnly tabIndex={-1} aria-hidden className="pointer-events-none h-4 w-4 shrink-0 accent-violet-600" />
+                        <PlatformIcon code={p.code} iconKey={platformMeta(p.code)?.icon_key ?? null} size={16} />
+                        <span className={`text-sm ${on ? "font-medium text-slate-800" : "text-slate-500"}`}>{p.label}</span>
+                        {!p.useCaption && <span className="text-[11px] text-slate-400">{t("ลงแค่รูป", "image only")}</span>}
+                        {hint && <span className="hidden truncate text-[11px] text-slate-400 sm:inline">· {t("ทั่วไป", "typical")} {hint}</span>}
+                      </button>
+                      {on && (
+                        <div className="flex items-center gap-2">
+                          <StepInput value={f.n} onChange={(v) => { if (v != null) setPlatFreq(p.code, { n: v }); }} min={1} max={FREQ_MAX[f.unit]} integer className="h-8 w-24" ariaLabel={t(`จำนวนครั้ง ${p.label}`, `${p.label} count`)} />
+                          <select value={f.unit} onChange={(e) => setPlatFreq(p.code, { unit: e.target.value as MassFreqUnit })}
+                            className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-sm focus:border-violet-400 focus:outline-none">
+                            <option value="week">{t("ครั้ง/สัปดาห์", "per week")}</option>
+                            <option value="month">{t("ครั้ง/เดือน", "per month")}</option>
+                          </select>
+                          <span className="w-16 text-right text-xs text-slate-500">≈ {platCount(p.code)} {t("ชิ้น", "posts")}</span>
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
+              {chosen.length > 0 ? (
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600">
+                  <span>{t(`เลือก ${chosen.length} แพลตฟอร์ม`, `${chosen.length} platforms`)}</span>
+                  <span>{t(`แคปชั่น/โพสต์ทั้งช่วง ≈ ${planTotal}`, `≈ ${planTotal} posts in range`)}</span>
+                  <span className="font-medium text-slate-800"><Icon name="camera" /> {t(`ทีมต้องทำรูป/คลิปจริง ≈ ${production.min === production.max ? production.max : `${production.min}–${production.max}`} ชิ้น`, `Team makes ≈ ${production.min === production.max ? production.max : `${production.min}–${production.max}`} visuals`)}</span>
+                </div>
+              ) : (
+                <div className="mt-2 text-xs text-slate-400">{t("ยังไม่ได้เลือกแพลตฟอร์ม", "No platform picked yet")}</div>
+              )}
+              {planTotal > MASS_AI_MAX_ROWS && (
+                <div className="mt-1 text-xs text-amber-700"><Icon name="warning" /> {t(`รวมเกิน ${MASS_AI_MAX_ROWS} — ปุ่ม AI ในระบบร่างครั้งเดียวไม่ไหว ลดความถี่/ช่วงวัน หรือใช้ปุ่มขอ prompt (ลงปฏิทินได้ครั้งละไม่เกิน ${MASS_MAX_POSTS} โพสต์)`, `Over ${MASS_AI_MAX_ROWS} — too many for the in-system AI`)}</div>
+              )}
+              {chosen.length > 1 && (
+                <label className="mt-2 flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} className="h-4 w-4 accent-violet-600" />
+                  {t("เรื่องเดียวกันลงหลายแพลตฟอร์มได้ (ประหยัดงานถ่าย)", "Same story can go to several platforms (less shooting)")}
+                </label>
+              )}
+              {canRemember && chosen.length > 0 && (
+                <label className="mt-1.5 flex cursor-pointer items-start gap-2 text-sm text-slate-700">
+                  <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="mt-0.5 h-4 w-4 accent-violet-600" />
+                  <span>
+                    {t(`จำชุดนี้เป็นค่าประจำของ ${brandName}`, `Remember this set for ${brandName}`)}
+                    <span className="block text-[11px] text-slate-400">{t("ครั้งหน้ากดปุ่มเดียวได้ชุดเดิม · ใช้เป็นเป้ารายเดือนในแท็บวางแผนด้วย · แพลตฟอร์มที่ไม่ได้ติ๊กจะออกจากค่าประจำ · บันทึกตอนกดไปขั้นถัดไป", "Also used as monthly targets in the Plan tab · unticked platforms are removed · saved when you continue")}</span>
+                  </span>
+                </label>
+              )}
             </div>
             {pillars.length > 0 && (
               <div>
@@ -507,7 +607,9 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
                     <div className="flex flex-wrap items-center gap-2">
                       <PlatformIcon code={p.code} iconKey={platformMeta(p.code)?.icon_key ?? null} size={16} />
                       <span className="text-sm font-medium text-slate-700 w-28">{p.label}</span>
-                      <span className="flex-1 min-w-[12rem] text-xs text-slate-500">{buildMassPlanPrompt(brief, [p]).split("\n").find((l) => l.startsWith(`- ${p.label}:`))?.slice(p.label.length + 4)}</span>
+                      <span className="flex-1 min-w-[12rem] text-xs text-slate-500">
+                        <b className="font-medium text-slate-700">{freqLabel(freqOf(p.code))} ≈ {platCount(p.code)} {t("โพสต์", "posts")}</b> · {platformRule(p)}
+                      </span>
                       <button onClick={() => setShowEach((s) => (s === p.code ? null : p.code))} className="h-7 px-2 text-xs text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50">{showEach === p.code ? t("ซ่อน", "Hide") : t("ดู prompt", "View")}</button>
                       <button onClick={() => copy(p.code, buildMassPlanPrompt(brief, [p]))} className="h-7 px-2 inline-flex items-center gap-1 text-xs text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50">
                         <Icon name={copied === p.code ? "done" : "list"} /> {copied === p.code ? t("คัดลอกแล้ว", "Copied") : t("คัดลอก", "Copy")}

@@ -1,6 +1,7 @@
 /**
  * /api/ai/mass-plan — ให้ AI ในระบบร่างแผนโพสต์ทั้งช่วง (ปุ่ม "ให้ AI ร่างเลย" ในป๊อปวางแผนแบบ Mass ของปฏิทินคอนเทนต์)
- *   POST { brand_id, start, end, per_week, platforms[], pillars[], campaign?, extra?, tone?, recommended_times? }
+ *   POST { brand_id, start, end, platforms[], freq: { [code]: { n, unit: week|month } }, share?, pillars[], campaign?, extra?, tone?, recommended_times? }
+ *     (per_week ตัวเลขเดียวแบบเดิมยังรับ — ใช้กับทุกแพลตฟอร์มที่ไม่ได้ส่ง freq)
  *     → { rows: MassRawRow[] (1 แถว = 1 โพสต์ × 1 แพลตฟอร์ม), posts, model, warnings[] }
  *   ผลลัพธ์ยังไม่บันทึก — ป๊อปเอาไปเข้าหน้าตรวจชุดเดียวกับ "วางคำตอบจาก AI ภายนอก" แล้วผู้ใช้กดลงเอง
  *
@@ -19,8 +20,8 @@ import { chatJson, loadPromptRows, normalizeHashtags, openAiKey, pickJobPrompt, 
 import { isUuid } from "@/lib/marketing/sku-list";
 import { bangkokDateKey } from "@/lib/marketing/content-plan";
 import {
-  buildMassPlanContext, daysInRange, estimatePostCount, isRealDate, normTime, platformRule, specialDaysBetween, thaiDateLabel,
-  type MassPlanBrief, type MassPlatform, type MassRawRow,
+  briefFreq, buildMassPlanContext, countForRange, daysInRange, isRealDate, normFreq, normTime, platformRule, specialDaysBetween, thaiDateLabel,
+  MASS_AI_MAX_ROWS, type MassFreq, type MassPlanBrief, type MassPlatform, type MassRawRow,
 } from "@/lib/marketing/mass-plan";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +30,7 @@ export const maxDuration = 300;
 
 const MASS_PLAN_KEY = "mass_plan";
 const MAX_DAYS = 62;
-const MAX_ROWS = 160;
+const MAX_ROWS = MASS_AI_MAX_ROWS;
 
 // ไอเดียรูป/คลิปใช้ร่วมทุกแพลตฟอร์มของโพสต์ (จังหวะแรกตอบสั้น = เร็ว ไม่โดนตัดกลางทางตอนเลือกหลายแพลตฟอร์ม)
 type PlanPost = { date: string; time: string; title: string; pillar: string; platforms: string[]; idea: string };
@@ -51,7 +52,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const start = str(body.start, 10) < today ? today : str(body.start, 10);
   if (!isRealDate(start) || !isRealDate(end) || end < start) return NextResponse.json({ error: "ช่วงวันที่ไม่ถูกต้อง (หรือผ่านไปแล้วทั้งช่วง)" }, { status: 400 });
   if (daysInRange(start, end) > MAX_DAYS) return NextResponse.json({ error: `ให้ AI ร่างได้ครั้งละไม่เกิน ${MAX_DAYS} วัน` }, { status: 400 });
-  const perWeek = Math.min(14, Math.max(1, Math.round(Number(body.per_week) || 3)));
+  const oldPerWeek = normFreq({ n: body.per_week, unit: "week" });
+  const share = body.share !== false;
 
   const admin = supabaseAdmin();
   const [{ data: brand }, { data: platRows }, { data: psetRow }, promptRows] = await Promise.all([
@@ -66,17 +68,20 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .filter((p) => wanted.has(p.code))
     .map((p) => ({ code: p.code, label: p.name_th || p.code, useCaption: pset[p.code]?.use_caption !== false, useHashtags: pset[p.code]?.use_hashtags !== false, note: pset[p.code]?.note ?? null }));
   if (!platforms.length) return NextResponse.json({ error: "เลือกแพลตฟอร์มอย่างน้อย 1 อัน" }, { status: 400 });
-  const perPlatform = estimatePostCount(perWeek, start, end);
-  if (perPlatform * platforms.length > MAX_ROWS) return NextResponse.json({ error: `ขอเยอะเกินไปสำหรับครั้งเดียว (≈ ${perPlatform * platforms.length} โพสต์) — ลดช่วงวัน/จำนวนต่อสัปดาห์/แพลตฟอร์ม` }, { status: 400 });
+  const rawFreq = (body.freq ?? {}) as Record<string, unknown>;
+  const freq: Record<string, MassFreq> = {};
+  for (const p of platforms) { const f = normFreq(rawFreq[p.code]) ?? oldPerWeek; if (f) freq[p.code] = f; }
 
   const jobRule = pickJobPrompt(promptRows, brandId, MASS_PLAN_KEY);
   const brief: MassPlanBrief = {
-    brandName: (brand as { name?: string } | null)?.name ?? "แบรนด์", start, end, perWeek, platforms,
+    brandName: (brand as { name?: string } | null)?.name ?? "แบรนด์", start, end, freq, share, platforms,
     pillars: (Array.isArray(body.pillars) ? body.pillars : []).map((x) => str(x, 60)).filter(Boolean).slice(0, 20),
     campaign: str(body.campaign, 1000), specialDays: specialDaysBetween(start, end),
     recommendedTimes: str(body.recommended_times, 300), tone: str(body.tone, 2500),
     extra: [jobRule, str(body.extra, 1000)].filter(Boolean).join("\n"),
   };
+  const totalRows = platforms.reduce((sum, p) => sum + countForRange(briefFreq(brief, p.code), start, end), 0);
+  if (totalRows > MAX_ROWS) return NextResponse.json({ error: `ขอเยอะเกินไปสำหรับครั้งเดียว (≈ ${totalRows} โพสต์รวมทุกแพลตฟอร์ม · AI ร่างได้ครั้งละไม่เกิน ${MAX_ROWS}) — ลดความถี่หรือช่วงวัน หรือใช้ปุ่ม "ขอ prompt" แทน` }, { status: 400 });
   const model = await productDetailModel();
   const context = buildMassPlanContext(brief).join("\n");
   const codes = platforms.map((p) => `${p.code} = ${p.label}`).join(", ");
@@ -92,10 +97,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         `วันนี้คือ ${thaiDateLabel(today)} — วางตารางโพสต์ในช่วง ${start} ถึง ${end} (ยังไม่ต้องเขียนแคปชั่น)`,
         `ตอบ JSON: {"posts":[{"date":"YYYY-MM-DD","time":"HH:MM","title":"หัวข้อสั้น","pillar":"ชื่อแนวจากรายการ","platforms":["code"],"idea":"ไอเดียรูป/คลิปสั้น ๆ 1 บรรทัด"}]}`,
         `- code ที่ใช้ได้: ${codes}`,
-        `- แต่ละแพลตฟอร์มควรได้ราว ${perPlatform} โพสต์ กระจายทั้งช่วง ไม่กองวันเดียว · ลงวันสำคัญให้รับกัน`,
-        "- เรื่องเดียวกันที่ลงหลายแพลตฟอร์มในวัน-เวลาเดียวกัน ให้เป็นรายการเดียว (platforms หลายตัว)",
+        "- จำนวนโพสต์ของแต่ละแพลตฟอร์มให้ใกล้ตัวเลข ≈ ที่ระบุด้านบน กระจายทั้งช่วง ไม่กองวันเดียว · ลงวันสำคัญให้รับกัน",
+        share
+          ? "- เรื่องเดียวกันที่ลงหลายแพลตฟอร์มในวัน-เวลาเดียวกัน ให้เป็นรายการเดียว (platforms หลายตัว)"
+          : "- 1 รายการ = 1 แพลตฟอร์ม (platforms มีตัวเดียว) และห้ามใช้หัวข้อซ้ำข้ามแพลตฟอร์ม",
       ].join("\n") }],
-      Math.min(12000, 800 + perPlatform * platforms.length * 60), model,
+      Math.min(12000, 800 + totalRows * 60), model,
     );
     const valid = new Set(platforms.map((p) => p.code));
     plan = (Array.isArray(out.posts) ? out.posts : []).map((x): PlanPost | null => {
@@ -148,7 +155,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   await writeAudit(admin, {
     action: "ai_mass_plan", entityType: "creative_content", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { brand_id: brandId, start, end, per_week: perWeek, platforms: platforms.map((p) => p.code), posts: plan.length, rows: rows.length, calls, model, warnings },
+    metadata: { brand_id: brandId, start, end, freq, share, platforms: platforms.map((p) => p.code), posts: plan.length, rows: rows.length, calls, model, warnings },
   });
   return NextResponse.json({ rows, posts: plan.length, model, warnings, error: null });
 }

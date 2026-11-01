@@ -5,6 +5,9 @@
  * PATCH { id, placement_type?, platform?, post_type?, monthly_count? }
  *   placement_type = ประเภทการลง (เช่น shop_decor) · null/ว่าง = ทุกประเภท
  * DELETE ?id=
+ * PUT { brand_id, targets: [{ platform, monthly_count }] } → แทนที่เป้า "ทุกประเภท + ทุกรูปแบบ" ของแบรนด์ทั้งชุด
+ *   (ช่อง "จำชุดนี้เป็นค่าประจำของแบรนด์" ในวางแผนแบบ Mass) · ช่องทางที่ไม่ได้ส่งมา = เอาเป้าทั่วไปของช่องทางนั้นออก
+ *   เป้าที่ระบุประเภทการลง/รูปแบบไว้ไม่แตะ · audit 1 รายการ
  * อ่าน = tasks.view · แก้ = marketing.label.manage · ทุกการแก้ลง audit
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -105,4 +108,54 @@ export async function DELETE(request: NextRequest) {
   const { actorId, actorName } = await actor(request);
   await writeAudit(admin, { action: "marketing.plan_target.delete", entityType: "content_plan_targets", entityId: id, actorId, actorName, metadata: { target: before } });
   return NextResponse.json({ data: { ok: true }, error: null });
+}
+
+export async function PUT(request: NextRequest) {
+  const denied = await guardApi(request, "marketing.label.manage"); if (denied) return denied;
+  let b: Record<string, unknown>;
+  try { b = await request.json(); } catch { return NextResponse.json({ data: null, error: "invalid JSON" }, { status: 400 }); }
+  if (!isUuid(b.brand_id)) return NextResponse.json({ data: null, error: "เลือกแบรนด์ก่อน" }, { status: 400 });
+  const brandId = b.brand_id as string;
+  const list = Array.isArray(b.targets) ? (b.targets as Record<string, unknown>[]) : null;
+  if (!list || list.length > 50) return NextResponse.json({ data: null, error: "รายการเป้าไม่ถูกต้อง" }, { status: 400 });
+  const want = new Map<string, number>();
+  for (const x of list) {
+    const p = String(x?.platform ?? "").trim();
+    const n = Number(x?.monthly_count);
+    if (!p || p.length > 60) return NextResponse.json({ data: null, error: "เลือกช่องทาง" }, { status: 400 });
+    if (!Number.isInteger(n) || n < 1 || n > 500) return NextResponse.json({ data: null, error: "จำนวนต่อเดือนต้องเป็นเลข 1–500" }, { status: 400 });
+    want.set(p, n);
+  }
+
+  const admin = supabaseAdmin();
+  const { data: before, error: rErr } = await admin.from("content_plan_targets").select(SEL)
+    .eq("brand_id", brandId).is("placement_type", null).is("post_type", null);
+  if (rErr) return NextResponse.json({ data: null, error: rErr.message }, { status: 500 });
+  const old = (before ?? []) as { id: string; platform: string; monthly_count: number }[];
+  const have = new Set(old.map((r) => r.platform));
+  const { actorId, actorName } = await actor(request);
+
+  const delIds = old.filter((r) => !want.has(r.platform)).map((r) => r.id);
+  if (delIds.length) {
+    const { error } = await admin.from("content_plan_targets").delete().in("id", delIds);
+    if (error) return NextResponse.json({ data: null, error: "บันทึกไม่สำเร็จ: " + error.message }, { status: 500 });
+  }
+  const adds = [...want].filter(([p]) => !have.has(p))
+    .map(([platform, monthly_count], i) => ({ brand_id: brandId, platform, placement_type: null, post_type: null, monthly_count, sort_order: i, created_by: actorId }));
+  if (adds.length) {
+    const { error } = await admin.from("content_plan_targets").insert(adds);
+    if (error) return NextResponse.json({ data: null, error: dupMsg(error) }, { status: 400 });
+  }
+  const now = new Date().toISOString();
+  for (const r of old.filter((r) => want.has(r.platform) && want.get(r.platform) !== r.monthly_count)) {
+    const { error } = await admin.from("content_plan_targets").update({ monthly_count: want.get(r.platform), updated_at: now }).eq("id", r.id);
+    if (error) return NextResponse.json({ data: null, error: "บันทึกไม่สำเร็จ: " + error.message }, { status: 500 });
+  }
+
+  await writeAudit(admin, {
+    action: "marketing.plan_target.replace", entityType: "content_plan_targets", entityId: brandId, actorId, actorName,
+    metadata: { brand_id: brandId, before: Object.fromEntries(old.map((r) => [r.platform, r.monthly_count])), after: Object.fromEntries(want) },
+  });
+  const { data } = await admin.from("content_plan_targets").select(SEL).eq("brand_id", brandId).order("sort_order").order("created_at");
+  return NextResponse.json({ data: data ?? [], error: null });
 }
