@@ -101,6 +101,8 @@ export interface ListingConfig {
   cardModeByCat: Record<string, "parent" | "sku">;
   /** ลูกค้าสลับเองได้ (ปุ่ม "ดูแบบรุ่น | ดูทีละสี" บนหน้า) */
   cardSwitch: boolean;
+  /** 🎲 การ์ดแบบรุ่น: สีหน้าการ์ด — main = ★ สีหลัก / รูปแรก (เดิม) · random = สุ่ม 1 สีต่อการเข้าแต่ละครั้ง */
+  cardColor: ListingCardColor;
 }
 
 /**
@@ -121,6 +123,16 @@ export const LISTING_SKU_ORDERS: { value: ListingSkuOrder; label: string; hint: 
   { value: "group", label: "ทีละรุ่น", hint: "ทุกสีของรุ่นเดียวกันอยู่ติดกัน" },
   { value: "code", label: "ตามรหัส SKU", hint: "เรียงรหัส A→Z เช่น PIX24-01, PIX24-02 … PIX34-01" },
   { value: "random", label: "สุ่ม", hint: "ลูกค้าเข้าแต่ละครั้งเห็นลำดับใหม่ (เลื่อนดู/ดูเพิ่ม/กลับจากหน้าสินค้า ลำดับไม่สลับ)" },
+];
+/**
+ * 🎲 สีหน้าการ์ดแบบรุ่น (2026-11-01 · เจ้าของ: "อยากให้สินค้าที่โชว์สุ่มสีมาโชว์") — เว็บร้าน src/lib/sku-cards.ts randomCardColor
+ *   สุ่มด้วยเลขต่อการเข้าหน้า (ตัวเดียวกับ "เรียงการ์ดสี: สุ่ม") → ไม่กระพริบ · เลื่อน/ดูเพิ่ม/กลับมา สีไม่เปลี่ยน
+ *   ตัวที่ตั้ง ★ สีหลักไว้ = ใช้สีหลักเสมอ · สินค้าหมด = เหมือนเดิม · สุ่มจากสีที่โชว์บนการ์ดที่มีรูป · กรองสีอยู่ = สุ่มในสีที่ตรง
+ */
+export type ListingCardColor = "main" | "random";
+export const LISTING_CARD_COLORS: { value: ListingCardColor; label: string; hint: string }[] = [
+  { value: "main", label: "สีหลัก (เดิม)", hint: "ทุกคนเห็นสี ★ หลัก / รูปแรกของรุ่น" },
+  { value: "random", label: "สุ่มสี", hint: "แต่ละการ์ดสุ่ม 1 สีมาโชว์ — เข้าใหม่เห็นสีใหม่ · ตัวที่ตั้ง ★ สีหลักไว้ใช้สีหลักเสมอ · สินค้าหมด = เหมือนเดิม" },
 ];
 /** รหัสหน้า "สินค้าทั้งหมด" ในการตั้งรายหมวด */
 export const LISTING_ALL_KEY = "all";
@@ -298,7 +310,7 @@ export const normalizeSizeBreaks = (v: unknown) => {
 
 
 export const MAX_LISTING_INSERTS = 20;
-export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30, columns: null, paging: "all", pageSize: 24, defaultSort: "featured", sorts: LISTING_SORTS.map((s) => s.value), header: { ...DEFAULT_LISTING_HEADER }, soldOut: "last", stickyBar: false, cardMode: "parent", cardAutoMax: 6, skuOrder: "mix", cardModeByCat: {}, cardSwitch: false };
+export const DEFAULT_LISTING: ListingConfig = { inserts: [], colorFilter: true, filterLayout: "side", filterSidebar: "open", filters: DEFAULT_SHOP_FILTERS, priceBreaks: DEFAULT_PRICE_BREAKS, sizeBreaks: DEFAULT_SIZE_BREAKS, newDays: 30, columns: null, paging: "all", pageSize: 24, defaultSort: "featured", sorts: LISTING_SORTS.map((s) => s.value), header: { ...DEFAULT_LISTING_HEADER }, soldOut: "last", stickyBar: false, cardMode: "parent", cardAutoMax: 6, skuOrder: "mix", cardModeByCat: {}, cardSwitch: false, cardColor: "main" };
 
 export const LISTING_SIZES: { value: ListingInsertSize; label: string; hint: string }[] = [
   { value: "1x1", label: "1 ช่อง (เท่าการ์ดสินค้า)", hint: "มือถือ: 1 ช่อง" },
@@ -449,7 +461,7 @@ export function normalizeListing(raw: unknown): ListingConfig {
 }
 
 /** 📐 ต่อแถว · 📄 แบ่งหน้า · ↕ การเรียง · หัวหน้า (ส่วนที่เพิ่มรอบ 2026-10-17) */
-function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig, "columns" | "paging" | "pageSize" | "defaultSort" | "sorts" | "header" | "soldOut" | "stickyBar" | "cardMode" | "cardAutoMax" | "skuOrder" | "cardModeByCat" | "cardSwitch"> {
+function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig, "columns" | "paging" | "pageSize" | "defaultSort" | "sorts" | "header" | "soldOut" | "stickyBar" | "cardMode" | "cardAutoMax" | "skuOrder" | "cardModeByCat" | "cardSwitch" | "cardColor"> {
   const int = (v: unknown, fb: number, lo: number, hi: number) => {
     const n = Number(v);
     return Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : fb;
@@ -480,6 +492,7 @@ function normalizeListingLayout(r: Record<string, unknown>): Pick<ListingConfig,
     skuOrder: LISTING_SKU_ORDERS.some((o) => o.value === r.skuOrder) ? (r.skuOrder as ListingSkuOrder) : "mix",
     cardModeByCat: normalizeCardModeByCat(r.cardModeByCat),
     cardSwitch: r.cardSwitch === true,
+    cardColor: r.cardColor === "random" ? "random" : "main",
   };
 }
 

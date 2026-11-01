@@ -11,7 +11,7 @@ import { Seg } from "@/components/website-block-editor";
 import { RangeInput } from "@/components/range-input";
 import { categoryTree } from "@/lib/website-category-tree";
 import { loadStorefrontProducts } from "@/lib/website-data";
-import { LISTING_ALL_KEY, LISTING_CARD_AUTO_RANGE, LISTING_CARD_MODES, LISTING_SKU_ORDERS, listingCardModeFor, type ListingConfig } from "@/lib/website-listing";
+import { LISTING_ALL_KEY, LISTING_CARD_AUTO_RANGE, LISTING_CARD_COLORS, LISTING_CARD_MODES, LISTING_SKU_ORDERS, listingCardModeFor, type ListingConfig } from "@/lib/website-listing";
 import { webForm } from "@/lib/website-form-styles";
 
 const box = "rounded-lg border border-slate-200 bg-white px-3 py-2 space-y-2";
@@ -62,6 +62,8 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
     set({ cardModeByCat: next });
   };
   const anySku = value.cardMode !== "parent" || Object.values(value.cardModeByCat).includes("sku") || value.cardSwitch;
+  // 🎲 สีหน้าการ์ด ใช้กับหน้าที่ยังเป็นการ์ดแบบรุ่น (ทีละสีทุกหน้า = ไม่ต้องตั้ง)
+  const anyParent = value.cardMode !== "sku" || Object.values(value.cardModeByCat).includes("parent") || value.cardSwitch;
 
   return (
     <div className={box}>
@@ -98,6 +100,18 @@ export function ListingCardSettings({ value, onChange, categories, shopSlug }: {
             {LISTING_SKU_ORDERS.find((o) => o.value === value.skuOrder)?.hint}
             {(value.skuOrder === "code" || value.skuOrder === "random") && " · ใช้ตอนเรียงแบบ \"แนะนำ\" — ลูกค้าเลือกเรียงราคา/ใหม่ล่าสุด หรือพิมพ์ค้นหา = เรียงตามนั้น"}
           </p>
+        </div>
+      )}
+
+      {anyParent && (
+        <div className="space-y-1" data-card-color>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-slate-700">🎲 สีหน้าการ์ดแบบรุ่น</span>
+            <div className="whitespace-nowrap">
+              <Seg<ListingConfig["cardColor"]> value={value.cardColor} onChange={(v) => set({ cardColor: v })} options={LISTING_CARD_COLORS.map((o) => ({ v: o.value, l: o.label }))} />
+            </div>
+          </div>
+          <p className="text-[11px] text-slate-500">{LISTING_CARD_COLORS.find((o) => o.value === value.cardColor)?.hint}</p>
         </div>
       )}
 
