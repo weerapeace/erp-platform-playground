@@ -150,6 +150,8 @@ function FamilyPrintInner() {
   // ตรวจข้อมูล: ปัญหา + ธงบนเอกสาร (เฉพาะพรีวิวบนจอ — ไฟล์ที่พิมพ์/บันทึก PDF ไม่มีธง)
   const issues = useMemo(() => (data?.families ?? []).flatMap(familyIssues), [data]);
   const flags = useMemo(() => issueFlags(issues), [issues]);
+  // มีใบติดตามงาน (คอลัมน์เยอะ) → แนวนอน · ไม่มี → ตามจำนวนสี · กรอบพรีวิวกว้างตามแนวกระดาษ (เดิมกว้างแนวนอนตลอด เลยดูเหมือนกดแนวตั้งแล้วไม่เปลี่ยน)
+  const orientation = paper === "auto" ? (anyTrack ? "landscape" : familyOrientation(sheets)) : paper;
 
   const build = (withFlags: boolean) => {
     if (!sheets.length || !data) return "";
@@ -176,8 +178,6 @@ function FamilyPrintInner() {
         return familyHtmlData(sheets[fi], opt);
       });
     });
-    // มีใบติดตามงาน (คอลัมน์เยอะ) → แนวนอน · ไม่มี → ตามจำนวนสี
-    const orientation = paper === "auto" ? (anyTrack ? "landscape" : familyOrientation(sheets)) : paper;
     return buildReportHtmlMulti(buildFamilyTemplate(orientation, (anyTrack ? TRACK_CSS : "") + style), docs, fileName);
   };
   const deps = [sheets, data, pages, split, anyTrack, extras, blank, onlyToBuy, paper, fileName, settings, codes, flags];
@@ -260,7 +260,7 @@ function FamilyPrintInner() {
         {error ? <div className="py-20 text-center text-red-500"><Icon name="warning" /> {error}</div>
           : data === null ? <div className="py-20 text-center text-slate-400">กำลังรวมข้อมูลทั้งรุ่น…</div>
           : sheets.length === 0 ? <div className="py-20 text-center text-slate-400">ไม่มีใบสั่งผลิตที่ยังเปิดอยู่ในรุ่นนี้</div>
-          : <PrintFrame html={previewHtml} fileName={fileName} maxWidth={1180} onDocLoad={onDocLoad} onPrint={() => html && printReportHtmlInNewWindow(html)} />}
+          : <PrintFrame html={previewHtml} fileName={fileName} maxWidth={orientation === "portrait" ? 800 : 1180} onDocLoad={onDocLoad} onPrint={() => html && printReportHtmlInNewWindow(html)} />}
       </div>
     </div>
   );

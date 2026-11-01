@@ -428,6 +428,12 @@ export function shortCodes(codes: string[]): Map<string, string> {
   const p = commonPrefix(uniq);
   return new Map(uniq.map((c) => [c, c.slice(p.length) || c]));
 }
+/** รหัสของแถวต่างสี (ช่อง "วัตถุดิบ"): ตัวแรกเต็ม ที่เหลือตัดส่วนหน้าที่ซ้ำ ตามลำดับคอลัมน์ — M518-02-0002 / 0036 / 0105 */
+export function codeSpan(codes: string[]): string {
+  const uniq = [...new Set(codes.filter(Boolean))];
+  const short = shortCodes(uniq);
+  return uniq.map((c, i) => (i ? short.get(c) ?? c : c)).join(" / ");
+}
 /** คำบอกสีในชื่อวัตถุดิบ เช่น "สีม่วง" — ไว้เช็กด้วยตาว่าตรงกับสีกระเป๋าไหม */
 export function colourWord(name: string | null | undefined): string | null {
   const m = txt(name).match(/สี[^\s#(),/]+/);
@@ -767,10 +773,11 @@ function buyTotalHtml(r: FamilyBuyRow, opt: FamilyPrintOptions, groups: FamilyTo
 
 function buyRowHtml(r: FamilyBuyRow, opt: FamilyPrintOptions): string {
   if (opt.only_to_buy && r.remaining <= EPS && !r.missing_qty) return "";
-  const name = r.kind === "varies"
-    ? `<div class="fp-name">${esc(r.label)}</div><div class="fp-sub">${esc(r.type)} · ต่างสี ${r.codes.length} รหัส</div>`
-    : `<div class="fp-name">${esc(r.label)}</div><div class="fp-sub fp-code">${esc(r.code ?? "")}</div>`;
   const s = opt.settings;
+  // แถวต่างสี: รหัสอยู่บรรทัดเดียวกับ "ต่างสี N" (สูงเท่าแถวรหัสเดียว) · จัดหมวดตามชนิด = หัวหมวดบอกชนิดแล้ว ไม่ซ้ำ
+  const name = r.kind === "varies"
+    ? `<div class="fp-name">${esc(r.label)}</div><div class="fp-sub"><span class="fp-code">${esc(codeSpan(r.cells.map((c) => c?.code ?? "")))}</span> · ${s.group === "kind" ? `${esc(r.type)} · ` : ""}ต่างสี ${r.codes.length}</div>`
+    : `<div class="fp-name">${esc(r.label)}</div><div class="fp-sub fp-code">${esc(r.code ?? "")}</div>`;
   const groups = r.kind === "varies" ? buyTotalGroups(r, s.total_by) : [];
   // ระบายช่องที่ถูกรวมกัน (เฉพาะโหมดที่ช่องรวมแยกรายการ)
   const dupIdx = new Set(s.total_mark === "on" && (s.total === "dup" || s.total === "all") ? groups.filter((g) => g.idx.length > 1).flatMap((g) => g.idx) : []);

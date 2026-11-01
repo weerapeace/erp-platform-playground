@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildReportHtmlMulti } from "@/lib/template";
 import {
   FAMILY_DEFAULT_OPTIONS, FAMILY_DEFAULT_PAGE, FAMILY_DEFAULT_SETTINGS, buildFamilySheet, buyTotalGroups, cutMaterialText, familyPageCss, normalizeFamilyPage, buildFamilyTemplate, colourWord, familyHtmlData, familyOrientation, normalizeFamilySettings,
-  clusterByName, familyLineCss, normalizeFamilyLine, sharedLabel, shortCodes, type FamilyBuyLine, type FamilyCutLine, type FamilyInput,
+  clusterByName, codeSpan, familyLineCss, normalizeFamilyLine, sharedLabel, shortCodes, type FamilyBuyLine, type FamilyCutLine, type FamilyInput,
 } from "@/lib/family-print";
 
 // ข้อมูลจริงจาก DB (2026-10-31) — รุ่น PIX25 ใบเปิด 6 ใบ (สีละใบ)
@@ -79,6 +79,14 @@ describe("buildFamilySheet — PIX25 จริง", () => {
     expect(pu.cells[0]).toMatchObject({ short: "19-4004", colour: "สีดำ", status: "buy" });
     expect(pu.cells[0]!.qty).toBeCloseTo(1.456);
     expect(pu.total).toBeCloseTo(6.552);
+  });
+
+  it("ช่องวัตถุดิบของแถวต่างสีมีรหัสด้วย: ตัวแรกเต็ม ที่เหลือรหัสย่อ ตามลำดับคอลัมน์ (เจ้าของขอ 2026-11-01)", () => {
+    // เคสจริง ROAR10: PU เคลือบเมททัลลิค + ผ้าขนลายเสือ (คอลัมน์ -01 เทา ใช้ FCL-003)
+    expect(codeSpan(["M518-02-0002", "M518-02-0036", "M518-02-0105"])).toBe("M518-02-0002 / 0036 / 0105");
+    expect(codeSpan(["FCL-003", "FCL-002", "", "FCL-001", "FCL-003"])).toBe("FCL-003 / 002 / 001");
+    const body = familyHtmlData(s, FAMILY_DEFAULT_OPTIONS).body_html as string;
+    expect(body).toContain("M638-19-4004 / 16-2124 / 12-2903 / 14-4506 / 20-0095 / 20-0082");
   });
 
   it("ซิป: 5 สีสั่งแล้ว · สีขาวยังต้องซื้อ", () => {
