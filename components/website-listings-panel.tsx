@@ -7,7 +7,7 @@
  * - ค้นหา (ชื่อ/รหัส) + เลือกหมวด + สลับมุมมอง รายการ/การ์ด/🗂 จัดหมวด (จำต่อคนด้วย useViewPref)
  * - 🗂 จัดหมวด = components/website-category-sorter (ขั้น 1 ใส่หมวดหลักจากหมวด ERP · ขั้น 2 กระดานจัดหมวดย่อย) — ทั้งร้าน ไม่สนตัวกรอง
  * - แถว: ชื่อ/ราคา/รูป/จุดสี "ที่ลูกค้าเห็นจริง" (API ส่ง display) · ป้ายรูปเปิด · ป้ายเตือนข้อมูลไม่ครบ
- * - 📸 ลงรูปทีละมาก (หัวตาราง = ทั้งร้าน · แถบล่าง = เฉพาะที่ติ๊ก · แถบเหลืองตอนกรองรูปบนเว็บ = รุ่นที่กรองอยู่) → components/website-image-mass-upload
+ * - 📸 ลงรูปทีละมาก (หัวตาราง = ทั้งร้าน · แถบล่าง = เฉพาะที่ติ๊ก · แถบเหลืองตอนกรองรูปบนเว็บ = รุ่นที่กรองอยู่ · ลากโฟลเดอร์วางบนแถว = รุ่นนั้น) → components/website-image-mass-upload
  * - ▦ แก้ไขทีละมาก (ตาราง · ทุกช่องจากทะเบียนฟิลด์ · หัวตาราง/แถบล่าง) → components/website-listings-grid-edit
  * - 🎨 ทะเบียนสี (หัวตาราง) + ป้าย "สียังไม่ผูกทะเบียนสี" กดได้ = ColorSwatchButton (focusNames = สีของสินค้านั้น) · ปิดแล้วโหลดรายการใหม่เงียบ ๆ
  * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ + ✏️ แก้หลายรายการ (ช่องจากทะเบียนกลาง lib/website-listing-fields) · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
@@ -30,6 +30,7 @@ import { FooterSaveProvider, FooterSaveButton, useFooterSaveHost } from "@/compo
 import { useViewPref } from "@/lib/use-view-pref";
 import { colorWebImages, listingIssues, type HealthColor, type ListingIssue } from "@/lib/website-listing-health";
 import { Icon } from "@/components/icon";
+import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { WebsiteAddProductsModal } from "@/components/website-add-products-modal";
 import { WebsiteListingsMassEdit } from "@/components/website-listings-mass-edit";
 import { WebsiteImageMassUpload } from "@/components/website-image-mass-upload";
@@ -259,10 +260,20 @@ export function WebsiteListingsPanel({
   // 📸 ลงรูปเว็บทีละมาก — null = ปิด · [] = ทั้งร้าน · [ids] = เฉพาะที่ติ๊ก / รุ่นที่กรองอยู่ (imgMassLabel = ชื่อชุด)
   const [imgMass, setImgMass] = useState<string[] | null>(null);
   const [imgMassLabel, setImgMassLabel] = useState<string | null>(null);
-  const openImgMass = (ids: string[], label: string | null = null) => {
+  // 📥 ไฟล์ที่ลากมาวางบนแถวสินค้า → ส่งเข้าหน้าต่างลงรูปทีละมาก (รุ่นเดียว = ไฟล์ไม่มีรหัสก็เข้ารุ่นนั้น)
+  const [imgMassFiles, setImgMassFiles] = useState<File[] | null>(null);
+  const openImgMass = (ids: string[], label: string | null = null, files: File[] | null = null) => {
     setImgMassLabel(label);
+    setImgMassFiles(files);
     setImgMass(ids);
   };
+  const rowDrop = useFileDrop(
+    (files, parentId) => {
+      const l = listings.find((x) => x.parentId === parentId);
+      if (l) openImgMass([parentId], `รุ่น ${l.code} (ลากมาวางที่แถว)`, files);
+    },
+    { accept: ["image/", "video/"], folders: true, onReject: () => toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)") }
+  );
   // ▦ แก้ไขทีละมาก (ตาราง) — null = ปิด · [] = ทั้งร้าน · [ids] = เฉพาะที่ติ๊ก
   const [gridEdit, setGridEdit] = useState<string[] | null>(null);
   // ปุ่มลัดในแถบล่าง → เปิดป๊อปแก้หลายรายการพร้อมช่องที่ตั้งไว้ (เช่น 📂 ย้ายหมวด)
@@ -558,7 +569,18 @@ export function WebsiteListingsPanel({
       )}
 
       {/* 📸 ลงรูปเว็บทีละมาก — จับคู่ชื่อไฟล์/โฟลเดอร์ → รูปบนเว็บ/รูปสี/Hero (components/website-image-mass-upload) */}
-      <WebsiteImageMassUpload open={imgMass !== null} onClose={() => setImgMass(null)} shop={shop} scopeIds={imgMass} scopeLabel={imgMassLabel} onDone={reload} />
+      <WebsiteImageMassUpload
+        open={imgMass !== null}
+        onClose={() => {
+          setImgMass(null);
+          setImgMassFiles(null);
+        }}
+        shop={shop}
+        scopeIds={imgMass}
+        scopeLabel={imgMassLabel}
+        initialFiles={imgMassFiles}
+        onDone={reload}
+      />
 
       {/* ▦ แก้ไขทีละมาก — ตารางแก้ทุกแถว ช่องจากทะเบียนฟิลด์กลาง (components/website-listings-grid-edit) */}
       {gridEdit !== null && (
@@ -680,7 +702,7 @@ export function WebsiteListingsPanel({
           })}
         </div>
       ) : (
-        <div className="rounded-xl border border-slate-200 bg-white overflow-hidden">
+        <div {...rowDrop.guard} className="rounded-xl border border-slate-200 bg-white overflow-hidden">
           {/* หัวตาราง */}
           <div className="hidden md:flex items-center gap-3 px-3 py-2 border-b border-slate-100 bg-slate-50/70 text-[11px] text-slate-500">
             <input type="checkbox" checked={allShownSelected} onChange={toggleAllShown} className="w-4 h-4 accent-blue-600" aria-label="เลือกทั้งหมดที่เห็น" />
@@ -705,7 +727,12 @@ export function WebsiteListingsPanel({
                   {...(!filtered ? drag.rowProps(idx) : {})}
                   className={`border-b border-slate-100 last:border-b-0 ${!filtered ? drag.rowCls(idx) : ""}`}
                 >
-                  <div className={`flex flex-wrap md:flex-nowrap items-center gap-3 px-3 py-2.5 hover:bg-slate-50/70 ${l.published ? "" : "bg-slate-50/60"}`}>
+                  {/* 📥 ลากโฟลเดอร์รูปมาวางที่แถว = ลงรูปรุ่นนี้ (หน้าต่างลงรูปทีละมาก · ไฟล์ไม่มีรหัสก็เข้ารุ่นนี้ · โฟลเดอร์ 01/ = สี -01) */}
+                  <div
+                    {...rowDrop.zone(l.parentId)}
+                    className={`relative flex flex-wrap md:flex-nowrap items-center gap-3 px-3 py-2.5 hover:bg-slate-50/70 ${l.published ? "" : "bg-slate-50/60"}`}
+                  >
+                    <FileDropHint show={rowDrop.over === l.parentId} label={`วางรูปลงรุ่น ${l.code} — โฟลเดอร์ 01/ 02/ = รูปของสีนั้น · ตรวจก่อนลง`} />
                     <input
                       type="checkbox"
                       checked={sel.has(l.parentId)}
@@ -832,7 +859,7 @@ export function WebsiteListingsPanel({
       {listings.length > 0 && !loading && (
         <p className="mt-2 text-[11px] text-slate-400">
           แสดง {shown.length} จาก {listings.length} รายการ ·{" "}
-          {filtered ? "ล้างตัวกรองเพื่อลาก ⠿ เรียงลำดับบนเว็บ" : "ลาก ⠿ เพื่อเรียงลำดับที่โชว์บนเว็บ"} · ติ๊กหลายรายการเพื่อทำพร้อมกัน
+          {filtered ? "ล้างตัวกรองเพื่อลาก ⠿ เรียงลำดับบนเว็บ" : "ลาก ⠿ เพื่อเรียงลำดับที่โชว์บนเว็บ"} · ติ๊กหลายรายการเพื่อทำพร้อมกัน{view === "list" ? " · ลากโฟลเดอร์รูปมาวางบนแถว = ลงรูปรุ่นนั้น" : ""}
         </p>
       )}
 

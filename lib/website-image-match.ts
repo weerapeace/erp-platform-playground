@@ -10,6 +10,7 @@
  *   JEAN08-01_hero.jpg                  → Hero ของสีนั้น
  *   🎬 วิดีโอ (mp4/webm/mov) = Hero เสมอ: JEAN08.mp4 → Hero คอม · JEAN08_m.mp4 / JEAN08_hero_m.mp4 → Hero มือถือ (สีก็ได้)
  *   โฟลเดอร์ JEAN08/ หรือ JEAN08-01/    → ไฟล์ข้างในเข้าที่นั้น (ชื่อไฟล์ไม่มีรหัสก็ได้ เช่น JEAN08-01/2.jpg)
+ *   📥 ลากใส่แถวสินค้า (รู้รุ่นแล้ว · matchIntoParent): ไม่มีรหัสก็ได้ — โฟลเดอร์เลขสี 01/ หรือ -01/ = สีนั้น · อื่น ๆ = รูปรวมรุ่น
  *
  * กันพลาด: JEAN08-03.jpg แต่รุ่นนี้ไม่มีสี -03 → ไม่เดาว่าเป็นรูปบนเว็บ ให้คนเลือกเอง (status "pick" + เดารุ่นไว้ให้)
  * วางแผนลงรูป (planImageUpload): เรียงตามเลขท้าย · Hero มีได้ช่องละ 1 รูป · เกินเพดาน (รูปบนเว็บ 12 · รูปสี 8) = ข้าม
@@ -160,6 +161,29 @@ export function matchImagePath(path: string, parents: CatalogParent[], index = b
     return { parentId: ref.parentId, target: null, order, status: "pick", reason: `ไม่พบสี ${ref.code}-${dash[1].toUpperCase()} ในรุ่นนี้`, via };
   }
   return { parentId: ref.parentId, target: hero ? { kind: "hero", slot: hero } : { kind: "gallery" }, order, status: "ok", via };
+}
+
+/**
+ * 📥 ลากโฟลเดอร์ใส่แถวสินค้า (รู้แล้วว่าเป็นรุ่นไหน) — ใช้กับไฟล์ที่ชื่อ/โฟลเดอร์ไม่มีรหัสในร้าน (เช่น รูปจากกล้อง DSC01234.jpg)
+ *   โฟลเดอร์ที่เป็นเลขสี (01 / -01 / 1) และรุ่นนี้มีสีรหัส <รุ่น>-01 = เข้าสีนั้น (โฟลเดอร์ลึกสุดก่อน)
+ *   ไม่งั้น = รูปรวมของรุ่น · ส่วนท้ายชื่อไฟล์ (_hero / _m / เลขลำดับ) อ่านตามกติกาเดิม
+ *   ชื่อไฟล์ที่เป็นเลข (02.jpg) = ลำดับรูป ไม่ใช่เลขสี
+ */
+export function matchIntoParent(path: string, parent: CatalogParent): ImageMatch {
+  const file = path.split(/[\\/]+/).filter(Boolean).pop() ?? path;
+  const { folders } = splitPath(path);
+  const colorNo = (code: string) => {
+    if (!code.toUpperCase().startsWith(parent.code.toUpperCase())) return null;
+    const m = code.slice(parent.code.length).match(/^-0*(\d+)$/);
+    return m ? Number(m[1]) : null;
+  };
+  for (const f of folders) {
+    const n = f.trim().match(/^-?0*(\d{1,3})$/);
+    if (!n) continue;
+    const sku = parent.skus.find((s) => colorNo(s.code) === Number(n[1]));
+    if (sku) return matchImagePath(`${sku.code}/${file}`, [parent]);
+  }
+  return matchImagePath(`${parent.code}/${file}`, [parent]);
 }
 
 // ───────────── วางแผนลงรูป ─────────────

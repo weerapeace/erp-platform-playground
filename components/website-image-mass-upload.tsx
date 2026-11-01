@@ -45,6 +45,7 @@ import {
   buildMassItems,
   isVideoName,
   matchImagePath,
+  matchIntoParent,
   planImageUpload,
   splitRounds,
   targetLabel,
@@ -136,15 +137,18 @@ export function WebsiteImageMassUpload({
   shop,
   scopeIds,
   scopeLabel,
+  initialFiles,
   onDone,
 }: {
   open: boolean;
   onClose: () => void;
   shop: { id: string; name: string };
-  /** ติ๊กไว้ = จับคู่เฉพาะรุ่นเหล่านี้ · ไม่ส่ง = ทั้งร้าน */
+  /** ติ๊กไว้ = จับคู่เฉพาะรุ่นเหล่านี้ · ไม่ส่ง = ทั้งร้าน · รุ่นเดียว = ไฟล์ที่ไม่มีรหัสเข้ารุ่นนั้น (matchIntoParent) */
   scopeIds?: string[] | null;
   /** ชื่อชุดที่ส่งมา (เช่น "30 รุ่นที่ยังไม่มีรูปบนเว็บเลย" จากตัวกรอง) · ไม่ส่ง = "N รายการที่ติ๊กไว้" */
   scopeLabel?: string | null;
+  /** 📥 ไฟล์ที่ลากมาวางบนแถวสินค้า — ใส่ให้ทันทีเมื่อโหลดรายการเสร็จ */
+  initialFiles?: File[] | null;
   onDone: () => void | Promise<void>;
 }) {
   const toast = useToast();
@@ -249,6 +253,8 @@ export function WebsiteImageMassUpload({
       const p = full.parentId ? catalog.parents.find((x) => x.parentId === full.parentId) : null;
       if (p) return { ...m, reason: `${p.code} ${scopeLabel ? "ไม่อยู่ในรายการนี้" : "ไม่ได้ติ๊กไว้"} — ข้าม หรือเลือกช่องเอง` };
     }
+    // 📥 รุ่นเดียว (ลากใส่แถว / ติ๊กตัวเดียว) + ไม่มีรหัสในร้าน = ของรุ่นนั้น · โฟลเดอร์เลขสี 01/ = สีนั้น
+    if (m.status === "pick" && !m.parentId && scope && parents.length === 1) return matchIntoParent(path, parents[0]);
     return m;
   };
 
@@ -270,6 +276,15 @@ export function WebsiteImageMassUpload({
     });
     if (next.length) setItems((xs) => [...xs, ...next]);
   };
+
+  // 📥 ไฟล์ที่ลากมาวางบนแถวสินค้า → ใส่ให้ครั้งเดียวหลังโหลดรายการเสร็จ
+  const fedRef = useRef<File[] | null>(null);
+  useEffect(() => {
+    if (!open || !catalog || phase !== "pick" || !initialFiles?.length || fedRef.current === initialFiles) return;
+    fedRef.current = initialFiles;
+    addFiles(initialFiles);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, catalog, phase, initialFiles]);
 
   const drop = useFileDrop((files) => addFiles(files), {
     accept: ["image/", "video/"],

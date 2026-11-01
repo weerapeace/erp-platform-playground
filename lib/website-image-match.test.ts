@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildMassItems, matchImagePath, parseSuffix, planImageUpload, splitRounds, targetLabel, type CatalogParent, type PlanDest, type PlanFileIn } from "./website-image-match";
+import { buildMassItems, matchImagePath, matchIntoParent, parseSuffix, planImageUpload, splitRounds, targetLabel, type CatalogParent, type PlanDest, type PlanFileIn } from "./website-image-match";
 
 const S1 = "11111111-1111-1111-1111-111111111111";
 const S2 = "22222222-2222-2222-2222-222222222222";
@@ -143,5 +143,22 @@ describe("splitRounds", () => {
   it("ไม่มีแผน = ไม่มีรอบ · n แปลก = อย่างน้อย 1", () => {
     expect(splitRounds([], 20)).toEqual([]);
     expect(splitRounds([d("A", "a1"), d("B", "b1")], 0)).toHaveLength(2);
+  });
+});
+
+describe("📥 matchIntoParent (ลากใส่แถวสินค้า)", () => {
+  const jean = parents[0];
+  it("ไม่มีรหัส = รูปรวมรุ่น · เลขในชื่อไฟล์ = ลำดับ (ไม่ใช่เลขสี)", () => {
+    expect(matchIntoParent("DSC01234.jpg", jean)).toMatchObject({ parentId: "p-jean", target: { kind: "gallery" }, status: "ok" });
+    expect(matchIntoParent("ถ่ายใหม่/02.jpg", jean)).toMatchObject({ target: { kind: "gallery" }, order: 2 });
+  });
+  it("โฟลเดอร์เลขสี 01 / -02 / 2 = สีนั้น", () => {
+    expect(matchIntoParent("ชุดรูป/01/1.jpg", jean)).toMatchObject({ target: { kind: "sku", skuId: S1 }, order: 1, status: "ok" });
+    expect(matchIntoParent("-02/a.jpg", jean)).toMatchObject({ target: { kind: "sku", skuId: S2 } });
+    expect(matchIntoParent("2/a.jpg", jean)).toMatchObject({ target: { kind: "sku", skuId: S2 } });
+  });
+  it("เลขสีที่รุ่นนี้ไม่มี = รูปรวมรุ่น · _hero ยังอ่านได้", () => {
+    expect(matchIntoParent("09/a.jpg", jean)).toMatchObject({ target: { kind: "gallery" } });
+    expect(matchIntoParent("01/cover_hero.jpg", jean)).toMatchObject({ target: { kind: "skuHero", skuId: S1, slot: "desktop" } });
   });
 });
