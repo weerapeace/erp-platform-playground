@@ -6,6 +6,7 @@
  * ข้อมูล = พจนานุกรมสี (erp_color_dictionary) ผ่าน /api/color-swatches · ตรรกะกลาง = lib/color-swatch.ts
  * - ซ้าย: รายชื่อสี (MiniTable) — เริ่มที่ "ต้องตั้ง" = สีที่สินค้าบนเว็บใช้อยู่แต่ยังไม่มีจุดสี
  * - ขวา: แก้สีที่เลือก — สีเดียว / หลายสีแบ่งช่อง (2–4) / รูปลาย (อัปโหลด · คลังรูป · ✂️ ครอปจากรูป SKU ที่ใช้สีนี้ = ImageCropPicker)
+ * - 💧 ดูดสี: รูป SKU ที่ใช้สีนี้ทั้งหมด (รวมตัวที่ยังไม่ขึ้นเว็บ + รูปของรุ่น · โหลดตอนกด ใช้ร่วมกับ ✂️) หรือ "เลือกรูปอื่น" จากคลัง/รูปสินค้าบนเว็บ (ImageEyedropper)
  * - ชื่อสีผสม ("กรมท่า-ครีม-ขาว") ประกอบจากสีย่อยให้เอง → ตั้งสีย่อยครบก็ขึ้นเอง หรือกด "ตั้งเองเฉพาะชื่อนี้"
  *
  * ใช้: <ColorSwatchButton /> (ปุ่ม + ป๊อปอัป) หรือ <ColorSwatchManager /> ฝังในหน้า
@@ -143,8 +144,8 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
   const [dropSlot, setDropSlot] = useState<number | null>(null);
   // ✂️ ครอปรูปลายจากรูป SKU ที่ใช้สีนี้ (โหลดรูปตอนกดเปิด)
   const [cropOpen, setCropOpen] = useState(false);
-  const [cropGroups, setCropGroups] = useState<CropSourceGroup[] | null>(null);
-  const [cropErr, setCropErr] = useState<string | null>(null);
+  // 💧/✂️ รูปสินค้าที่ใช้สีนี้ (/api/color-swatches?images=) — โหลดครั้งแรกที่กด แล้วจำต่อสี
+  const [src, setSrc] = useState<{ key: string; groups: CropSourceGroup[] | null; error: string | null } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -198,28 +199,39 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
     setDirty(false);
   };
   const edit = (patch: Partial<Draft>) => { setDraft((d) => (d ? { ...d, ...patch } : d)); setDirty(true); };
-  const openCrop = async () => {
-    if (!sel) return;
+  const loadSources = async () => {
+    if (!sel || (src?.key === sel.key && !src.error)) return;
+    const key = sel.key;
     const names = [...new Set([sel.name, sel.entry?.th, sel.entry?.en, draft?.th, draft?.en].map((s) => (s ?? "").trim()).filter(Boolean))];
-    setCropOpen(true);
-    setCropGroups(null);
-    setCropErr(null);
+    setSrc({ key, groups: null, error: null });
     try {
       const j = await apiFetch(`/api/color-swatches?images=${encodeURIComponent(names.join("|"))}`).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       type G = { skuId: string; code: string; name: string; color: string; onWeb: boolean; images: string[]; kind?: "sku" | "parent" };
       // 📦 kind parent = รูปของรุ่น (ปก/แกลเลอรี Parent + รูปเว็บ) — รูปรวมที่เห็นลายชัดกว่า
-      setCropGroups(
-        ((j.data?.groups ?? []) as G[]).map((g) =>
-          g.kind === "parent"
-            ? { key: g.skuId, label: `📦 รูปของรุ่น ${g.code}`, sub: "ปก · แกลเลอรี · รูปเว็บของรุ่น (ทุกสี)", images: g.images }
-            : { key: g.skuId, label: g.code || g.color, sub: g.name, badge: g.onWeb ? "บนเว็บ" : undefined, images: g.images },
-        ),
+      const groups = ((j.data?.groups ?? []) as G[]).map((g) =>
+        g.kind === "parent"
+          ? { key: g.skuId, label: `📦 รูปของรุ่น ${g.code}`, sub: "ปก · แกลเลอรี · รูปเว็บของรุ่น (ทุกสี)", images: g.images }
+          : { key: g.skuId, label: g.code || g.color, sub: g.name, badge: g.onWeb ? "บนเว็บ" : undefined, images: g.images },
       );
+      setSrc((cur) => (cur?.key === key ? { key, groups, error: null } : cur));
     } catch (e) {
-      setCropErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ");
+      setSrc((cur) => (cur?.key === key ? { key, groups: null, error: e instanceof Error ? e.message : "โหลดไม่สำเร็จ" } : cur));
     }
   };
+  const mySrc = sel && src?.key === sel.key ? src : null;
+  const openCrop = () => { setCropOpen(true); void loadSources(); };
+  const openDrop = (slot: number) => { setDropSlot(slot); void loadSources(); };
+  // รูปให้ดูดสี: ปก SKU บนเว็บ (มีทันที) + รูปทุก SKU ที่ใช้สีนี้/รูปของรุ่น (หลังโหลด) · ป้ายตอนชี้ = รหัส SKU
+  const drop = useMemo(() => {
+    const labels: Record<string, string> = {};
+    const images = [...(sel?.images ?? [])];
+    for (const g of mySrc?.groups ?? []) for (const k of g.images) {
+      labels[k] ??= g.sub ? `${g.label} · ${g.sub}` : g.label;
+      if (!images.includes(k) && images.length < 48) images.push(k);
+    }
+    return { images, labels };
+  }, [sel, mySrc]);
   useEffect(() => {
     if (!hasFocus || autoPicked || loading || selKey) return;
     const first = rows.filter((r) => focusKeys.has(r.key)).sort((a, b) => Number(a.status !== "unset") - Number(b.status !== "unset"))[0];
@@ -375,14 +387,11 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
             {draft.kind === "solid" && (
               <div className="flex items-center gap-1.5">
                 <div className="flex-1"><ColorInput value={draft.colors[0] ?? ""} onChange={(v) => edit({ colors: [v] })} invalid={!isHex(draft.colors[0])} /></div>
-                {sel.images.length > 0 && <button type="button" onClick={() => setDropSlot(0)} title="ดูดสีจากรูปสินค้า (SKU ที่ใช้สีนี้)" className="h-8 px-2 rounded border border-slate-200 bg-white text-sm hover:border-blue-400">💧</button>}
+                <button type="button" onClick={() => openDrop(0)} title="ดูดสีจากรูปสินค้า (SKU ที่ใช้สีนี้ หรือเลือกรูปอื่น)" className="h-8 px-2 rounded border border-slate-200 bg-white text-sm hover:border-blue-400">💧</button>
               </div>
             )}
-            {draft.kind !== "image" && sel.images.length > 0 && (
-              <p className="text-[11px] text-slate-400">💧 = ดูดสีจากรูปสินค้าที่ใช้สีนี้ ({sel.images.length} รูป) แล้วกดจุดบนรูป</p>
-            )}
-            {draft.kind !== "image" && sel.images.length === 0 && (
-              <p className="text-[11px] text-slate-400">ยังไม่มีรูป SKU ของสีนี้บนเว็บ — ดูดสีจากรูปไม่ได้</p>
+            {draft.kind !== "image" && (
+              <p className="text-[11px] text-slate-400">💧 = ดูดสีจากรูป SKU ที่ใช้สีนี้ (รวมตัวที่ยังไม่ขึ้นเว็บ) หรือกด “เลือกรูปอื่น” หารูปจากคลัง/รูปสินค้าบนเว็บ แล้วกดจุดบนรูป</p>
             )}
             {draft.kind === "split" && (
               <div className="space-y-1.5">
@@ -390,7 +399,7 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
                   <div key={i} className="flex items-center gap-1.5">
                     <span className="text-[11px] text-slate-400 w-4">{i + 1}</span>
                     <div className="flex-1"><ColorInput value={c} onChange={(v) => edit({ colors: draft.colors.map((x, j) => (j === i ? v : x)) })} invalid={!isHex(c)} /></div>
-                    {sel.images.length > 0 && <button type="button" onClick={() => setDropSlot(i)} title="ดูดสีจากรูปสินค้า" className="h-8 px-1.5 rounded border border-slate-200 bg-white text-xs hover:border-blue-400">💧</button>}
+                    <button type="button" onClick={() => openDrop(i)} title="ดูดสีจากรูปสินค้า" className="h-8 px-1.5 rounded border border-slate-200 bg-white text-xs hover:border-blue-400">💧</button>
                     {draft.colors.length > 2 && <button type="button" onClick={() => edit({ colors: draft.colors.filter((_, j) => j !== i) })} className="text-slate-400 hover:text-red-500 text-xs px-1" aria-label="ลบสีนี้">✕</button>}
                   </div>
                 ))}
@@ -422,8 +431,10 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
       </div>
 
       <ImageEyedropper
-        open={dropSlot !== null && !!sel && sel.images.length > 0}
-        images={sel?.images ?? []}
+        open={dropSlot !== null && !!sel}
+        images={drop.images}
+        labels={drop.labels}
+        loading={!!mySrc && !mySrc.groups && !mySrc.error}
         title={`💧 ดูดสีจากรูปสินค้า — ${sel?.name ?? ""}${draft && draft.kind === "split" && dropSlot !== null ? ` (สีที่ ${dropSlot + 1})` : ""}`}
         onClose={() => setDropSlot(null)}
         onPick={(hex) => {
@@ -438,8 +449,8 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
       <ImageCropPicker
         open={cropOpen}
         onClose={() => setCropOpen(false)}
-        groups={cropGroups}
-        error={cropErr}
+        groups={mySrc?.groups ?? (mySrc?.error ? [] : null)}
+        error={mySrc?.error ?? null}
         title={`✂️ ครอปรูปลาย — ${sel?.name ?? ""}`}
         description="เลือก SKU และรูปทางซ้าย → ลากกรอบไปตรงลายที่ต้องการ · จับมุมกรอบลากเพื่อย่อ/ขยาย · ผลลัพธ์ = รูปลายจัตุรัสของจุดสีนี้"
         emptyText="ยังไม่มี SKU ที่ใช้สีนี้และมีรูป — อัปโหลดรูปลายเอง หรือเลือกจากคลังรูปแทน"
