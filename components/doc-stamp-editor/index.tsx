@@ -11,7 +11,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { uploadResizedImage } from "@/components/image-attach";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import type { DocStamp } from "@/lib/doc-stamps";
 
 /** 1 มม. = กี่ CSS px (คงที่ตามมาตรฐานเบราว์เซอร์) */
@@ -44,15 +44,25 @@ export function useDocStamps(entityType: string) {
   }, []);
 
   const add = useCallback(async (kind: "signature" | "stamp", file: File) => {
-    const up = await uploadResizedImage(file, { folder: "doc-stamps", max: 1200 });
+    // รูปที่มีในคลังแล้ว (เช่น ลายเซ็นเดียวกันของเอกสารอีกชนิด) → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck)
+    const errs: Error[] = [];
+    const up = await uploadImagesWithDupCheck([file], {
+      folder: "doc-stamps", max: 1200,
+      target: kind === "signature" ? "ลายเซ็นบนเอกสาร" : "ตราประทับบนเอกสาร",
+      existingKeys: stamps.map((s) => s.image_key),
+      onError: (_, e) => errs.push(e),
+    });
+    if (errs[0]) throw errs[0];
+    const imageKey = up?.keys[0];
+    if (!imageKey) return;   // กดยกเลิก / ข้าม (รูปนี้อยู่บนเอกสารแล้ว)
     const r = await apiFetch("/api/admin/doc-stamps", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entity_type: entityType, kind, image_key: up.r2_key }),
+      body: JSON.stringify({ entity_type: entityType, kind, image_key: imageKey }),
     });
     const j = (await r.json()) as { data?: DocStamp; error?: string };
     if (!r.ok || !j.data) throw new Error(j.error ?? "เพิ่มไม่สำเร็จ");
     setStamps((ss) => [...ss, j.data as DocStamp]);
-  }, [entityType]);
+  }, [entityType, stamps]);
 
   const remove = useCallback(async (id: string) => {
     setStamps((ss) => ss.filter((s) => s.id !== id));
