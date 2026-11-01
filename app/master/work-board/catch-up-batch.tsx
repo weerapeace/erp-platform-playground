@@ -393,14 +393,16 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     if (saved.length) onDone(saved);
   };
 
-  // ── ย้อนใบเดียว (ลบสิ่งที่เพิ่งบันทึก จากหลังไปหน้า) — ส่งออก/ปิด/ยกเลิกแล้ว = ย้อนไม่ได้
+  // ── ย้อนใบเดียว (ลบสิ่งที่เพิ่งบันทึก จากหลังไปหน้า) — ส่งออก = ของกลับขึ้นชั้น · ปิด/ยกเลิกแล้ว = ย้อนไม่ได้
   const undoRow = async (r: BRow) => {
     if (!r.snap) return;
     const d = derive({ ...r, phase: "edit" });
     const lab = (s: CuStep) => cuStepLabel(s, d?.whoOf);
-    const items = r.results.filter((x) => x.undo && x.undo.kind !== "none").map((x) => `• ${lab(x.step)}`);
+    const items = r.results.filter((x) => x.undo && x.undo.kind !== "none").map((x) => `• ${lab(x.step)}${x.undo?.kind === "ship" ? " — ของกลับขึ้นชั้น QC" : ""}`);
+    const sold = r.results.some((x) => x.undo?.kind === "ship" && x.step.kind === "ship" && x.step.mode === "sell");
     if (!(await askConfirm({ title: `ย้อนการอัปเดต ${r.snap.mo.product_sku ?? r.moNo}?`, variant: "danger", confirmText: "ย้อนกลับ",
-      message: <div className="space-y-1 text-sm"><div>ระบบจะลบ/คืนสิ่งที่เพิ่งบันทึก:</div>{items.map((x, i) => <div key={i} className="text-slate-600">{x}</div>)}</div> }))) return;
+      message: <div className="space-y-1 text-sm"><div>ระบบจะลบ/คืนสิ่งที่เพิ่งบันทึก:</div>{items.map((x, i) => <div key={i} className="text-slate-600">{x}</div>)}
+        {sold && <div className="pt-1 text-[12px] text-amber-700">ใบขายที่ผูกไว้ยังผูกอยู่ — ถ้าผูกผิด ใช้ &ldquo;ผูกผิด · ย้าย&rdquo; ในหน้าต่างอัปเดตงานจากใบขาย</div>}</div> }))) return;
     patchRow(r.moNo, { phase: "running" });
     const out = await cuUndo(r.results, { snap: r.snap, disp: {}, shelfId: r.shelfId, badReason: r.badReason }, api, lab);
     patchRow(r.moNo, { phase: "done", undoRes: out, after: null });

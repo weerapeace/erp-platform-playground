@@ -40,6 +40,16 @@ function toRow(e: AuditEntry) {
   };
 }
 
+/** เหมือน writeAudit แต่คืน id ของ log (ไว้ให้ขั้นถัดไปอ้างถึงได้ เช่น ย้อนการส่งออก qc.unship) — null = เขียนไม่สำเร็จ */
+export async function writeAuditId(admin: Admin, entry: AuditEntry): Promise<string | null> {
+  const { data, error } = await admin.from("audit_logs").insert(toRow(entry)).select("id").single();
+  if (error) {
+    console.error(`[audit] เขียน log ล้มเหลว action=${entry.action} entity=${entry.entityType}:`, error.message);
+    return null;
+  }
+  return (data?.id as string | undefined) ?? null;
+}
+
 /** เขียน audit 1 รายการ — คืน true ถ้าสำเร็จ */
 export async function writeAudit(admin: Admin, entry: AuditEntry): Promise<boolean> {
   const { error } = await admin.from("audit_logs").insert(toRow(entry));

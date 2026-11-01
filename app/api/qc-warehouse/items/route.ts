@@ -3,8 +3,9 @@
  * POST /api/qc-warehouse/items  { action, ... }
  *   receive       { wo_id, shelf_id, good, bad:[{reason,qty}] }   → ดึงเข้า QC (แยกดี/เสีย) + เพิ่ม qc_pulled_qty
  *   move          { item_id, shelf_id }                           → ย้ายชั้น (ห้ามเข้า defect)
- *   ship          { item_id, mode, wh }                           → ส่งออก (ลบของออก) · audit จดชั้น/ใบจ่าย/สถานะ ไว้ให้ unship
- *   unship        { ship_audit_id, qty?, shelf_id? }              → ย้อนการส่งออก (ผูกใบขายผิด) — ของกลับขึ้นชั้นจากประวัติ qc.ship
+ *   ship          { item_id, mode, wh }                           → ส่งออก (ลบของออก) · audit จดชั้น/ใบจ่าย/สถานะ ไว้ให้ unship · คืน audit_id
+ *   unship        { ship_audit_id, qty?, shelf_id?, into_item_id? } → ย้อนการส่งออก (ผูกใบขายผิด / ย้อนการอัปเดตงาน) — ของกลับขึ้นชั้นจากประวัติ qc.ship
+ *                 into_item_id = บวกเข้าแถวนี้ (แถวที่เพิ่งย้อนกลับมาจากรอบส่งออกก่อน — ส่งแบ่ง 2 รอบจากแถวเดียว จะได้ไม่แตกเป็น 2 แถว)
  *                                                                    ไม่เกินที่ส่งออกไป (หักที่ย้อนแล้ว) · ไม่ส่ง qty = ที่เหลือทั้งหมด
  *   to_defect     { item_id, qty, reason }                        → ย้ายของดี → ชั้นของเสีย
  *   repair_send   { item_id, repair_by }                          → ส่งซ่อม
@@ -19,7 +20,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditId } from "@/lib/audit";
 import { notifyEvent, pushLineTpl, dmEmployeeByName, boardLink } from "@/lib/board-notify";
 
 export const dynamic = "force-dynamic";
@@ -152,10 +153,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ? await admin.from("qc_warehouse_items").update({ qty: Number(item.qty) - shipQty }).eq("id", item_id)
         : await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       if (res.error) return NextResponse.json({ error: friendlyDbError(res.error.message) }, { status: 400 });
-      await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: shipQty, ...(shipQty < Number(item.qty) ? { partial_of: item.qty } : {}), mode: body.mode, wh: body.wh,
+      const audit_id = await writeAuditId(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: shipQty, ...(shipQty < Number(item.qty) ? { partial_of: item.qty } : {}), mode: body.mode, wh: body.wh,
         shelf_id: item.shelf_id, wo_id: item.wo_id, status: item.status, color: item.color, source: item.source,
         ...(typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? { date: body.date } : {}) } });
-      return NextResponse.json({ error: null });
+      return NextResponse.json({ error: null, audit_id });   // ป๊อปอัปเดตงานเก็บไว้ย้อน (unship)
     }
 
     // ── ย้อนการส่งออก (ผูกใบขายผิด → ของกลับขึ้นชั้น) — คืนของบนชั้นจากประวัติ qc.ship ──
@@ -173,7 +174,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const qty = body.qty == null ? left : num(body.qty);
       if (qty < 1 || qty > left) return NextResponse.json({ error: `ย้อนได้ไม่เกิน ${left} ชิ้น` }, { status: 400 });
       const via = body.via ? { via: String(body.via).slice(0, 30), label: String(body.label ?? "").slice(0, 300) } : {};
-      const orig = a.entity_id ? await getItem(admin, String(a.entity_id)) : null;
+      // แถวปลายทาง: into_item_id (ต้องเป็นของใบเดียวกัน สถานะเดียวกัน) → แถวเดิมที่ส่งออกบางส่วน → ไม่มี = สร้างแถวใหม่
+      const into = body.into_item_id ? await getItem(admin, String(body.into_item_id)) : null;
+      const orig = into && into.mo_no === (md.mo_no ?? null) && into.status === ((md.status as string) || "good") ? into
+        : a.entity_id ? await getItem(admin, String(a.entity_id)) : null;
       if (orig) {
         const up = await admin.from("qc_warehouse_items").update({ qty: Number(orig.qty) + qty, updated_at: new Date().toISOString() }).eq("id", orig.id);
         if (up.error) return NextResponse.json({ error: friendlyDbError(up.error.message) }, { status: 400 });

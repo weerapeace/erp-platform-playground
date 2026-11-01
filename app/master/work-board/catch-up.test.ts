@@ -287,7 +287,7 @@ describe("ย้อนการอัปเดต + ปลายทางส่�
     expect(undoCalls[7].body).toEqual({ ready: false, parts: ["prep"], only: ["ZIP"] });   // FAB ติ๊กไว้ก่อนแล้ว ไม่คืน
     expect(undoCalls[8].body).toEqual({ ready: false, parts: ["cut"] });
   });
-  it("ส่งออก/ปิดใบสำเร็จแล้ว = ย้อนไม่ได้ทั้งชุด · ส่งออกไปคลังที่เลือก", async () => {
+  it("ส่งออกแต่ไม่ได้เลขประวัติ (เซิร์ฟเวอร์รุ่นเก่า) = ย้อนไม่ได้ทั้งชุด · ส่งออกไปคลังที่เลือก", async () => {
     const calls: { url: string; body: unknown; method?: string }[] = [];
     const res = await cuRun([
       { kind: "qc_in", good: 8, bad: 0, date: null },
@@ -297,6 +297,49 @@ describe("ย้อนการอัปเดต + ปลายทางส่�
     expect(cuIrreversible(res)?.why).toMatch(/ส่งออก/);
     const out = await cuUndo(res, ctx(), fakeApi([]));
     expect(out).toEqual([{ ok: false, msg: expect.stringMatching(/ย้อนจากที่นี่ไม่ได้/) }]);
+  });
+  // เซิร์ฟเวอร์ส่งเลขประวัติส่งออกกลับมา (audit_id) → ย้อนได้ · ย้อนชิ้นงานที่ส่งทั้งก้อน = ได้แถวใหม่ (new1)
+  const shipApi = (calls: { url: string; body: unknown; method?: string }[]) => {
+    const base = fakeApi(calls); let n = 0;
+    return async (url: string, body: unknown, method?: string) => {
+      const r = await base(url, body, method);
+      const b = (body ?? {}) as { action?: string; into_item_id?: string };
+      if (b.action === "ship") return { audit_id: `au${++n}` };
+      if (b.action === "unship") return { item_id: b.into_item_id ?? "new1" };
+      return r;
+    };
+  };
+  it("ส่งออกแล้วย้อนได้: ของกลับขึ้นชั้นตามประวัติส่งออก แล้วคืนคิว QC ที่แถวใหม่", async () => {
+    const s0 = snap({ wos: [wo({ qty: 10, received_qty: 10 })] });
+    const res = await cuRun([
+      { kind: "qc_in", good: 8, bad: 0, date: null },
+      { kind: "ship", qty: 8, date: null, mode: "sell", wh: null },
+    ], ctx(s0), shipApi([]));
+    expect(res[1].undo).toEqual({ kind: "ship", recs: [{ auditId: "au1", itemId: "it1" }] });
+    expect(cuIrreversible(res)).toBeUndefined();
+    const undoCalls: { url: string; body: unknown; method?: string }[] = [];
+    const out = await cuUndo(res, ctx(s0), shipApi(undoCalls));
+    expect(out.every((x) => x.ok)).toBe(true);
+    expect(undoCalls[0].body).toEqual({ action: "unship", ship_audit_id: "au1", via: "catch_up", label: "ย้อนการอัปเดตงาน" });
+    expect(undoCalls[1].body).toEqual({ action: "return_queue", item_id: "new1" });   // แถวเดิมถูกลบตอนส่งออก → คืนคิวแถวที่ย้อนกลับมา
+  });
+  it("ส่งแบ่ง 2 รอบจากชิ้นงานเดียว (ขายออก 5 + เข้าคลัง 3) → ย้อนแล้วรวมกลับแถวเดียว", async () => {
+    const s0 = snap({ wos: [wo({ qty: 10, received_qty: 10 })] });
+    const calls: { url: string; body: unknown; method?: string }[] = [];
+    const res = await cuRun([
+      { kind: "qc_in", good: 8, bad: 0, date: null },
+      { kind: "ship", qty: 5, date: null, mode: "sell", wh: null },
+      { kind: "ship", qty: 3, date: null, mode: "sales_wh", wh: "โกดังขายหลัก" },
+    ], ctx(s0), shipApi(calls));
+    expect(calls[1].body).toMatchObject({ action: "ship", item_id: "it1", qty: 5 });
+    expect(calls[2].body).toMatchObject({ action: "ship", item_id: "it1" });
+    expect(calls[2].body).not.toHaveProperty("qty");
+    const undoCalls: { url: string; body: unknown; method?: string }[] = [];
+    await cuUndo(res, ctx(s0), shipApi(undoCalls));
+    expect(undoCalls[0].body).toMatchObject({ action: "unship", ship_audit_id: "au2" });
+    expect(undoCalls[0].body).not.toHaveProperty("into_item_id");
+    expect(undoCalls[1].body).toMatchObject({ action: "unship", ship_audit_id: "au1", into_item_id: "new1" });
+    expect(undoCalls[2].body).toEqual({ action: "return_queue", item_id: "new1" });
   });
   it("ตัดไว้บางส่วนก่อนหน้า = ย้อนติ๊กตัดไม่ได้ (บอกให้ย้อนเอง)", async () => {
     const s0 = snap({ mo: { cut_ready: 1 } });

@@ -510,6 +510,8 @@ export type CuUndo =
   | { kind: "note"; prevNote: string | null }
   | { kind: "bom_rate"; newId?: string; prevRate: number | null }
   | { kind: "reduce"; changeId: string; newMo: string | null }
+  /** ส่งออกจากชั้น QC — ย้อน = เอาของกลับขึ้นชั้น (unship ตามประวัติ qc.ship ทีละชิ้นงาน) */
+  | { kind: "ship"; recs: { auditId: string; itemId: string }[] }
   | { kind: "none"; why: string };
 export type CuResult = { step: CuStep; ok: boolean; msg: string; undo?: CuUndo };
 
@@ -624,15 +626,18 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
         case "ship": {
           // ปลายทางเหมือนป๊อปส่งออกหน้าโกดัง QC: เข้าคลังขาย (เลือกคลัง) / ขายออก
           // ส่งตามจำนวนของขั้นนี้ (แบ่งส่ง = ขายออกบางส่วน แล้วขั้นถัดไปเอาที่เหลือ) · ชิ้นงานใหญ่กว่าที่ต้องการ = ส่งบางส่วน
-          let need = step.qty;
+          let need = step.qty, lost = false;
+          const recs: { auditId: string; itemId: string }[] = [];
           for (const it of goodItems) {
             if (need <= EPS) break;
             if (it.qty <= EPS) continue;
             const take = r2(Math.min(it.qty, need));
-            await api("/api/qc-warehouse/items", { action: "ship", item_id: it.id, ...(take < it.qty - EPS ? { qty: take } : {}), mode: step.mode ?? "sales_wh", wh: step.mode === "sell" ? null : step.wh ?? null, ...(step.date ? { date: step.date } : {}) });
+            const j = await api("/api/qc-warehouse/items", { action: "ship", item_id: it.id, ...(take < it.qty - EPS ? { qty: take } : {}), mode: step.mode ?? "sales_wh", wh: step.mode === "sell" ? null : step.wh ?? null, ...(step.date ? { date: step.date } : {}) });
+            if (typeof j.audit_id === "string") recs.push({ auditId: j.audit_id, itemId: it.id }); else lost = true;
             it.qty = r2(it.qty - take); need = r2(need - take);
           }
-          undo = { kind: "none", why: "ส่งออกจากชั้น QC แล้ว — ของออกจากชั้นไปแล้ว ย้อนจากที่นี่ไม่ได้" };
+          // ย้อน = เอาของกลับขึ้นชั้นตามประวัติส่งออก · ไม่ได้เลขประวัติ (เซิร์ฟเวอร์รุ่นเก่า / จด log ไม่สำเร็จ) = ย้อนไม่ได้
+          undo = lost ? { kind: "none", why: "ส่งออกจากชั้น QC แล้ว — ไม่พบประวัติส่งออกไว้ย้อน ย้อนจากที่นี่ไม่ได้" } : { kind: "ship", recs };
           break;
         }
         case "problem": {
@@ -682,12 +687,14 @@ export async function cuRun(steps: CuStep[], ctx: CuContext, api: CuApi, onProgr
 
 /**
  * ย้อนการอัปเดต: ไล่ขั้นที่สำเร็จ "จากหลังไปหน้า" แล้วทำกลับทีละขั้นผ่าน API เดิม (QC → ส่งคืน → ใบจ่าย …)
- * มีขั้นที่ย้อนไม่ได้สำเร็จอยู่ (ส่งออก/ปิด/ยกเลิก) = ไม่ทำอะไรเลย · ขั้นไหนย้อนไม่สำเร็จ = ทำขั้นอื่นต่อ แล้วรายงานรายขั้น
+ * มีขั้นที่ย้อนไม่ได้สำเร็จอยู่ (ปิด/ยกเลิก) = ไม่ทำอะไรเลย · ส่งออก = เอาของกลับขึ้นชั้น (unship) · ขั้นไหนย้อนไม่สำเร็จ = ทำขั้นอื่นต่อ แล้วรายงานรายขั้น
  */
 export async function cuUndo(results: CuResult[], ctx: CuContext, api: CuApi, label: (s: CuStep) => string = (s) => cuStepLabel(s)): Promise<{ msg: string; ok: boolean }[]> {
   const block = cuIrreversible(results);
   if (block) return [{ ok: false, msg: block.why }];
   const mo = ctx.snap.mo, out: { msg: string; ok: boolean }[] = [];
+  // ชิ้นงานที่ส่งออกทั้งก้อน (แถวถูกลบ) → ย้อนแล้วได้แถวใหม่ · จำไว้ให้รอบส่งออกก่อนหน้า (ส่งแบ่ง) บวกเข้าแถวเดียวกัน + ขั้นรับเข้า QC คืนคิวถูกแถว
+  const moved = new Map<string, string>();
   for (const r of [...results].reverse()) {
     if (!r.undo) continue;   // ขั้นที่พังปกติไม่มี undo (ยกเว้นทำไปได้ครึ่งขั้น เช่น ปัญหาของใบงานลงแล้ว)
     const u = r.undo, name = `ย้อน: ${label(r.step)}`;
@@ -701,7 +708,14 @@ export async function cuUndo(results: CuResult[], ctx: CuContext, api: CuApi, la
           if (u.flags?.length) await api(`/api/mo/${mo.id}/mark-ready`, { ready: false, parts: u.flags }, "PATCH");
           if (u.impossible) { out.push({ ok: false, msg: `${name} — ${u.impossible}` }); continue; }
           break;
-        case "qc_in": for (const id of u.itemIds) await api("/api/qc-warehouse/items", { action: "return_queue", item_id: id }); break;
+        case "ship":
+          for (const s of u.recs) {
+            const into = moved.get(s.itemId);
+            const j = await api("/api/qc-warehouse/items", { action: "unship", ship_audit_id: s.auditId, ...(into ? { into_item_id: into } : {}), via: "catch_up", label: "ย้อนการอัปเดตงาน" });
+            if (typeof j.item_id === "string" && j.item_id !== s.itemId) moved.set(s.itemId, j.item_id);
+          }
+          break;
+        case "qc_in": for (const id of u.itemIds) await api("/api/qc-warehouse/items", { action: "return_queue", item_id: moved.get(id) ?? id }); break;
         case "return": for (const id of u.subIds) await api(`/api/mo/submissions?id=${encodeURIComponent(id)}`, null, "DELETE"); break;
         case "dispatch": await api(`/api/mo/work-orders/${u.woId}`, null, "DELETE"); break;
         case "problem":

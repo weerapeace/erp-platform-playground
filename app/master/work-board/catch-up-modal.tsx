@@ -423,10 +423,10 @@ export function CatchUpModal({ moNo, onClose, onDone, departments, craftsmen, wo
     finally { setReqBusy(false); }
   };
 
-  // ── ย้อนการอัปเดตนี้ (ลบสิ่งที่เพิ่งสร้าง จากหลังไปหน้า) — ส่งออก/ปิด/ยกเลิกแล้ว = ย้อนไม่ได้
+  // ── ย้อนการอัปเดตนี้ (ลบสิ่งที่เพิ่งสร้าง จากหลังไปหน้า) — ส่งออก = ของกลับขึ้นชั้น · ปิด/ยกเลิกแล้ว = ย้อนไม่ได้
   const undo = async () => {
     if (!snap) return;
-    const items = results.filter((r) => r.undo && r.undo.kind !== "none").map((r) => `• ${cuStepLabel(r.step, whoOf)}`);
+    const items = results.filter((r) => r.undo && r.undo.kind !== "none").map((r) => `• ${cuStepLabel(r.step, whoOf)}${r.undo?.kind === "ship" ? " — ของกลับขึ้นชั้น QC" : ""}`);
     if (!(await askConfirm({ title: "ย้อนการอัปเดตนี้?", variant: "danger", confirmText: "ย้อนกลับ",
       message: <div className="space-y-1 text-sm"><div>ระบบจะลบ/คืนสิ่งที่เพิ่งบันทึก:</div>{items.map((x, i) => <div key={i} className="text-slate-600">{x}</div>)}</div> }))) return;
     setUndoing(true);
