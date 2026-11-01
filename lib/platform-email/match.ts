@@ -235,9 +235,11 @@ export function matchEmailItem(
 }
 
 /** คิวในแท็บ "รอยืนยันสินค้า" — แยกจากผลจับคู่ที่เก็บไว้ (confidence + reason ที่ matchEmailItem เขียน)
- *  guess = ระบบเดาไว้ ให้คนยืนยัน · not_found = ไม่มีรหัสนี้ใน ERP / ชื่อไม่มีรหัสรุ่น · multi = มีหลายสี เลือกจากเมลไม่ได้ */
-export type PendingQueue = "guess" | "multi" | "not_found";
-export function pendingQueueOf(raw: { confidence?: unknown; reason?: unknown; suggest_sku_id?: unknown } | null | undefined): PendingQueue {
+ *  guess = ระบบเดาไว้ ให้คนยืนยัน · not_found = ไม่มีรหัสนี้ใน ERP / ชื่อไม่มีรหัสรุ่น · multi = มีหลายสี เลือกจากเมลไม่ได้
+ *  skipped = คนกด "ข้ามไว้ก่อน" (raw.skipped_at) — ไม่โชว์ในคิวปกติ */
+export type PendingQueue = "guess" | "multi" | "not_found" | "skipped";
+export function pendingQueueOf(raw: { confidence?: unknown; reason?: unknown; suggest_sku_id?: unknown; skipped_at?: unknown } | null | undefined): PendingQueue {
+  if (raw?.skipped_at) return "skipped";
   if (raw?.suggest_sku_id) return "guess";
   const reason = String(raw?.reason ?? "");
   if (/^ไม่พบรหัส|^ชื่อสินค้าไม่มีรหัสรุ่น/.test(reason)) return "not_found";

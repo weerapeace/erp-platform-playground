@@ -7,6 +7,8 @@
  * POST { action: "confirm_sku", platform_code, item_key, sku_id } → ยืนยันคู่สินค้า + จำไว้ + ผูกทุกรายการที่ค้างด้วยคู่นี้
  * POST { action: "confirm_many", groups: [{ platform_code, item_key, sku_id }] } → ยืนยันหลายการ์ดทีเดียว (≤100 · เช่น "ยืนยันตามที่ระบบเดา")
  * POST { action: "confirm_model", groups: [{ platform_code, item_key }] } → 🎨 นับเป็นรุ่น ไม่แยกสี (≤100 · เมลไม่บอกสี เช่น Lazada)
+ * POST { action: "skip" | "unskip", groups: [{ platform_code, item_key }] } → ⏭ ข้ามไว้ก่อน / ↩ เอากลับมา (≤50)
+ * กฎที่จำไว้ (ดู/แก้/ลบ) → /api/platform-email/rules
  * POST { action: "rematch" }                           → จับคู่สินค้าที่ค้างใหม่ด้วยกฎล่าสุด (หลังปรับตัวจับคู่ / เพิ่ม SKU)
  * POST { action: "reprocess_all", status? }           → อ่านใหม่ทั้งกลุ่ม เก่า→ใหม่ (≤150 ฉบับ/ครั้ง) เช่น เมลที่เคยข้ามหลังเพิ่มประเภทเมลใหม่
  */
@@ -17,7 +19,7 @@ import { guardApi } from "@/lib/api-auth";
 import { requestActor } from "@/lib/request-actor";
 import { writeAudit } from "@/lib/audit";
 import { loadEmailSettings, loadPlatformIds, processLines, rematchPendingItems } from "@/lib/platform-email/server";
-import { bindPending, confirmModel, inboxPage, INBOX_STATUSES, pendingPage } from "@/lib/platform-email/review";
+import { bindPending, confirmModel, inboxPage, INBOX_STATUSES, pendingPage, skipGroups } from "@/lib/platform-email/review";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -124,6 +126,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const updated = done.reduce((a, d) => a + d.items, 0);
     await writeAudit(admin, { action: "match", entityType: "platform_order_item", entityId: null, actorId: actor.id, actorName: actor.name, metadata: { bulk: true, groups: done, items: updated, failed, skipped: list.length - ok.length } });
     return NextResponse.json({ ok: true, confirmed: done.length, updated, failed, skipped: list.length - ok.length, error: null });
+  }
+
+  if (body.action === "skip" || body.action === "unskip") {
+    const list = (Array.isArray(body.groups) ? body.groups : [])
+      .filter((g): g is { platform_code: string; item_key: string } => !!g && typeof g === "object"
+        && typeof (g as Record<string, unknown>).platform_code === "string" && typeof (g as Record<string, unknown>).item_key === "string")
+      .slice(0, 50);
+    if (!list.length) return NextResponse.json({ error: "ไม่ได้เลือกการ์ด" }, { status: 400 });
+    let r: { items: number };
+    try { r = await skipGroups(admin, actor.name, list, body.action === "unskip"); }
+    catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "บันทึกไม่สำเร็จ" }, { status: 500 }); }
+    await writeAudit(admin, { action: body.action, entityType: "platform_order_item", entityId: null, actorId: actor.id, actorName: actor.name, metadata: { groups: list, items: r.items } });
+    return NextResponse.json({ ok: true, items: r.items, error: null });
   }
 
   if (body.action === "confirm_model") {

@@ -95,8 +95,11 @@ export type PendingResponse = {
 export const QUEUE_META: Record<PendingQueue, { icon: string; label: string; hint: string; chip: string }> = {
   guess: { icon: "💡", label: "ระบบเดาไว้ ให้ยืนยัน", hint: "ระบบมีตัวที่น่าจะใช่ แต่ข้อมูลในเมลขัดกันนิดหน่อย — ตรวจแล้วกดยืนยัน", chip: "border-amber-200 bg-amber-50 text-amber-800" },
   multi: { icon: "🎨", label: "หลายสี เลือกจากเมลไม่ได้", hint: "รุ่นนี้มีหลายสี แต่เมลไม่บอกสี (Lazada ไม่บอกเลย) — เลือกสีเอง หรือ \"นับเป็นรุ่น (ไม่แยกสี)\" ถ้าไม่รู้สีจริง", chip: "border-violet-200 bg-violet-50 text-violet-800" },
-  not_found: { icon: "❓", label: "ไม่พบรหัสใน ERP", hint: "รหัสในชื่อสินค้ายังไม่มีใน ERP หรือชื่อไม่มีรหัส — ค้นหา SKU เอง", chip: "border-rose-200 bg-rose-50 text-rose-800" },
+  not_found: { icon: "❓", label: "ไม่พบรหัสใน ERP", hint: "รหัสในชื่อสินค้ายังไม่มีใน ERP หรือชื่อไม่มีรหัส (เช่น ชุดกิฟเซ็ท) — สร้าง SKU ใหม่ · ค้นหา SKU ที่รหัสเขียนต่างกัน · หรือข้ามไว้ก่อน", chip: "border-rose-200 bg-rose-50 text-rose-800" },
+  skipped: { icon: "⏭", label: "ข้ามไว้ก่อน", hint: "การ์ดที่กดข้ามไว้ — ไม่นับในคิวหลัก · กด ↩ เอากลับมา เมื่อพร้อมทำ (มีเมลใหม่ของสินค้าเดียวกัน = กลับเข้าคิวเอง)", chip: "border-slate-200 bg-slate-100 text-slate-600" },
 };
+
+export type { RuleView } from "@/lib/platform-email/rules";
 
 export const STATUS_META: Record<InboxRow["status"], { label: string; cls: string; hint: string }> = {
   done: { label: "อ่านแล้ว", cls: "bg-emerald-50 text-emerald-700 border-emerald-200", hint: "ระบบทำตามเมลเรียบร้อย" },

@@ -4,7 +4,7 @@
 // 📧 ดึงออเดอร์จากเมลแพลตฟอร์ม (ตั้งค่า + สถานะ + กล่องเมล + ยืนยันสินค้า + คู่มือ) — /admin/platform-email
 // การทำงาน: สคริปต์ใน Gmail (Google Apps Script) ส่งเมล Shopee/Lazada เข้า /api/platform-email/inbound ทุก 15 นาที
 //          → ERP อ่านด้วยกฎตายตัว (lib/platform-email) → ออเดอร์ใน platform_orders → รายงาน /master/platform-sales
-// แท็บ: ภาพรวม (ไฟล์นี้) · เมลที่อ่านแล้ว ./inbox-tab · รอยืนยันสินค้า ./pending-tab · ตั้งค่า+ติดตั้ง ./settings-tab · คู่มือ ./about-tab
+// แท็บ: ภาพรวม (ไฟล์นี้) · เมลที่อ่านแล้ว ./inbox-tab · รอยืนยันสินค้า ./pending-tab · กฎที่จำไว้ ./rules-tab · ตั้งค่า+ติดตั้ง ./settings-tab · คู่มือ ./about-tab
 // สิทธิ์: platform_orders.manage (ดูกุญแจ/คัดลอกสคริปต์ = admin.users) · เอกสาร docs/platform-email-orders.md
 // ============================================================
 
@@ -17,15 +17,17 @@ import { UnsavedGuardProvider, useUnsavedGuardHost } from "@/components/save-bar
 import { apiFetch } from "@/lib/api";
 import { InboxTab } from "./inbox-tab";
 import { PendingTab } from "./pending-tab";
+import { RulesTab } from "./rules-tab";
 import { SettingsTab } from "./settings-tab";
 import { AboutTab } from "./about-tab";
 import { ago, fmtDateTime, STATUS_META, type InboxRow, type SettingsResponse } from "./types";
 
-type TabKey = "overview" | "inbox" | "pending" | "settings" | "about";
+type TabKey = "overview" | "inbox" | "pending" | "rules" | "settings" | "about";
 const TABS: { key: TabKey; label: string }[] = [
   { key: "overview", label: "📊 ภาพรวม" },
   { key: "inbox", label: "📬 เมลที่อ่านแล้ว" },
   { key: "pending", label: "🔗 รอยืนยันสินค้า" },
+  { key: "rules", label: "📌 กฎที่จำไว้" },
   { key: "settings", label: "⚙️ ตั้งค่า + ติดตั้ง" },
   { key: "about", label: "📖 คู่มือ / บันทึก" },
 ];
@@ -123,6 +125,7 @@ export default function PlatformEmailPage() {
 
           {tab === "inbox" && <InboxTab initialStatus={inboxStatus} onChanged={load} />}
           {tab === "pending" && <PendingTab onChanged={load} />}
+          {tab === "rules" && <RulesTab onChanged={load} />}
           {tab === "settings" && data && <SettingsTab data={data} onSaved={load} />}
           {tab === "about" && <AboutTab />}
         </div>

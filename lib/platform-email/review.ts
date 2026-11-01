@@ -4,6 +4,7 @@
  *   inboxPage    แท็บ "เมลที่อ่านแล้ว": ทีละหน้า + ค้นหา + เรียงที่ฐานข้อมูล
  *   bindPending  ผูกรายการที่ค้างของ (แพลตฟอร์ม + สินค้า+ตัวเลือก) กับ SKU
  *   confirmModel 🎨 นับเป็นรุ่น (ไม่แยกสี) — กฎระดับรุ่น + matched_parent_sku_id
+ *   skipGroups   ⏭ ข้ามไว้ก่อน / ↩ เอากลับมา
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages, type PageResult } from "@/lib/fetch-all";
@@ -13,7 +14,7 @@ import { modelFromItemKey, modelsForItem, pendingQueueOf, type PendingQueue, typ
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 export const INBOX_STATUSES = ["done", "ignored", "unreadable", "attention"];
-const QUEUES: PendingQueue[] = ["guess", "multi", "not_found"];
+const QUEUES: PendingQueue[] = ["guess", "multi", "not_found", "skipped"];
 
 /** เลขหน้า/ขนาดหน้าจาก query (page เริ่ม 0) */
 function paging(sp: URLSearchParams, def: number, max: number) {
@@ -22,10 +23,10 @@ function paging(sp: URLSearchParams, def: number, max: number) {
   return { page, size };
 }
 
-const ITEM_SELECT = "id, name, qty, pc:raw->>platform_code, ik:raw->>item_key, variant:raw->>variant, model:raw->>model_code, reason:raw->>reason, sugg_id:raw->>suggest_sku_id, sugg_code:raw->>suggest_code, ord:platform_orders(order_no, status)";
+const ITEM_SELECT = "id, name, qty, pc:raw->>platform_code, ik:raw->>item_key, variant:raw->>variant, model:raw->>model_code, reason:raw->>reason, sugg_id:raw->>suggest_sku_id, sugg_code:raw->>suggest_code, skipped:raw->>skipped_at, ord:platform_orders(order_no, status)";
 type ItemRow = {
   id: string; name: string | null; qty: number | null;
-  pc: string | null; ik: string | null; variant: string | null; model: string | null; reason: string | null; sugg_id: string | null; sugg_code: string | null;
+  pc: string | null; ik: string | null; variant: string | null; model: string | null; reason: string | null; sugg_id: string | null; sugg_code: string | null; skipped: string | null;
   /** ออเดอร์ (หลายต่อหนึ่ง → ได้ object · กันไว้เผื่อได้ array) */
   ord: OrdRef | OrdRef[] | null;
 };
@@ -55,19 +56,20 @@ export async function pendingPage(admin: Admin, sp: URLSearchParams) {
   const items = await fetchAllPages<ItemRow>((from, to) => admin.from("platform_order_items")
     .select(ITEM_SELECT).is("matched_sku_id", null).is("matched_parent_sku_id", null).eq("raw->>source", "email").order("id").range(from, to) as unknown as PromiseLike<PageResult<ItemRow>>, { maxRows: 5000 });
 
-  const groups = new Map<string, Group & { orderSet: Set<string> }>();
+  const groups = new Map<string, Group & { orderSet: Set<string>; skipped_n: number }>();
   for (const it of items) {
-    const raw = { platform_code: it.pc, item_key: it.ik, variant: it.variant, model_code: it.model, reason: it.reason, suggest_sku_id: it.sugg_id, suggest_code: it.sugg_code };
+    const raw = { platform_code: it.pc, item_key: it.ik, variant: it.variant, model_code: it.model, reason: it.reason, suggest_sku_id: it.sugg_id, suggest_code: it.sugg_code, skipped_at: it.skipped };
     const pc = String(raw.platform_code ?? ""), key = String(raw.item_key ?? "");
     if (!pc || !key) continue;
     const g = groups.get(`${pc}|${key}`) ?? {
       platform_code: pc, item_key: key, title: it.name ?? "", variant: (raw.variant as string | null) ?? null,
       model_code: (raw.model_code as string | null) ?? null, items: 0, qty: 0, live_items: 0, order_count: 0, orders: [], orderSet: new Set<string>(),
-      queue: pendingQueueOf(raw), model_level: modelFromItemKey(key),
+      queue: pendingQueueOf({ ...raw, skipped_at: null }), skipped_n: 0, model_level: modelFromItemKey(key),
       suggest: raw.suggest_sku_id ? { id: String(raw.suggest_sku_id), code: String(raw.suggest_code ?? "") } : null,
       reason: (raw.reason as string | null) ?? null, candidates: [],
     };
     g.items++; g.qty += Number(it.qty ?? 0);
+    if (it.skipped) g.skipped_n++;
     const ord = Array.isArray(it.ord) ? it.ord[0] : it.ord;
     const o = ord ? { no: ord.order_no ?? "", cancelled: ord.status === "cancelled" } : null;
     if (!o?.cancelled) g.live_items++;
@@ -79,16 +81,21 @@ export async function pendingPage(admin: Admin, sp: URLSearchParams) {
   }
 
   // กรองเป็นชั้น ๆ → ตัวเลขบนชิปแต่ละชั้นนับจากชั้นก่อนหน้า (ชิปแพลตฟอร์มไม่ขึ้นกับคิว · ชิปคิวขึ้นกับแพลตฟอร์มที่เลือก)
-  let list = [...groups.values()].map(({ orderSet, ...g }) => ({ ...g, order_count: orderSet.size }));
+  // ข้ามไว้ = ทุกรายการในการ์ดถูกข้าม (มีเมลใหม่ของสินค้าเดียวกันเข้ามา → กลับเข้าคิวปกติ)
+  let list = [...groups.values()].map(({ orderSet, skipped_n, ...g }) => ({ ...g, order_count: orderSet.size, queue: (skipped_n === g.items ? "skipped" : g.queue) as PendingQueue }));
   const cancelledOnly = list.filter((g) => g.live_items === 0).length;
   if (hideCancelled) list = list.filter((g) => g.live_items > 0);
   if (q) list = list.filter((g) => [g.title, g.variant, g.model_code, ...g.orders.map((o) => o.no)].some((x) => String(x ?? "").toLowerCase().includes(q)));
+  // ⏭ ข้ามไว้ก่อน = ไม่นับในตัวเลขหลัก/ชิปแพลตฟอร์ม · โชว์เฉพาะตอนเลือกคิว "ข้ามไว้"
+  const active = list.filter((g) => g.queue !== "skipped");
   const byPlatform: Record<string, { groups: number; qty: number }> = {};
-  for (const g of list) { const b = (byPlatform[g.platform_code] ??= { groups: 0, qty: 0 }); b.groups++; b.qty += g.qty; }
-  const stats = { groups: list.length, qty: list.reduce((a, g) => a + g.qty, 0), by_platform: byPlatform, by_queue: { guess: 0, multi: 0, not_found: 0 } as Record<PendingQueue, number>, cancelled_only: cancelledOnly };
+  for (const g of active) { const b = (byPlatform[g.platform_code] ??= { groups: 0, qty: 0 }); b.groups++; b.qty += g.qty; }
+  const stats = { groups: active.length, qty: active.reduce((a, g) => a + g.qty, 0), by_platform: byPlatform, by_queue: { guess: 0, multi: 0, not_found: 0, skipped: 0 } as Record<PendingQueue, number>, cancelled_only: cancelledOnly };
   if (platform) list = list.filter((g) => g.platform_code === platform);
   for (const g of list) stats.by_queue[g.queue]++;
-  if (QUEUES.includes(queue as PendingQueue)) list = list.filter((g) => g.queue === queue);
+  list = queue === "skipped" ? list.filter((g) => g.queue === "skipped")
+    : QUEUES.includes(queue as PendingQueue) ? list.filter((g) => g.queue === queue)
+    : list.filter((g) => g.queue !== "skipped");
   list.sort((a, b) => b.qty - a.qty || b.items - a.items || a.title.localeCompare(b.title));
 
   const total = list.length;
@@ -200,6 +207,31 @@ export async function confirmModel(admin: Admin, actorId: string | null, groups:
     }));
   }
   return { done, skipped, failed };
+}
+
+/**
+ * ⏭ ข้ามไว้ก่อน / ↩ เอากลับมา — จดใน raw ของทุกรายการที่ค้างของการ์ด (raw.skipped_at/skipped_by) ไม่แตะโครงฐานข้อมูล
+ * ใช้กับของที่ยังทำไม่ได้ตอนนี้ (เช่น ยังไม่ตั้ง SKU) ให้คิวหลักสะอาด · เมลใหม่ของสินค้าเดียวกันจะเข้าคิวปกติอีกครั้ง
+ */
+export async function skipGroups(admin: Admin, actorName: string | null, groups: { platform_code: string; item_key: string }[], undo: boolean) {
+  let items = 0;
+  const at = new Date().toISOString();
+  for (const g of groups) {
+    const { data, error } = await admin.from("platform_order_items").select("id, raw")
+      .is("matched_sku_id", null).is("matched_parent_sku_id", null)
+      .eq("raw->>source", "email").eq("raw->>platform_code", g.platform_code).eq("raw->>item_key", g.item_key).limit(2000);
+    if (error) throw new Error("โหลดรายการสินค้าไม่สำเร็จ");
+    const rows = (data ?? []) as { id: string; raw: Record<string, unknown> | null }[];
+    for (let i = 0; i < rows.length; i += 20) {
+      const res = await Promise.all(rows.slice(i, i + 20).map((r) => {
+        const { skipped_at: _a, skipped_by: _b, ...rest } = r.raw ?? {};
+        const raw = undo ? rest : { ...rest, skipped_at: at, skipped_by: actorName };
+        return admin.from("platform_order_items").update({ raw }).eq("id", r.id).is("matched_sku_id", null);
+      }));
+      items += res.filter((x) => !x.error).length;
+    }
+  }
+  return { items };
 }
 
 const LIST_COLS = "id, message_id, received_at, from_addr, subject, platform_code, kind, external_order_id, ref_no, shop_name, status, note, order_id, updated_at";

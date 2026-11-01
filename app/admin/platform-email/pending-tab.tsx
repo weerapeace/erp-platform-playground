@@ -2,11 +2,18 @@
 
 // 🔗 แท็บ "รอยืนยันสินค้า" — สินค้าจากเมลที่ระบบยังไม่แน่ใจว่าเป็น SKU ไหน (รวมกลุ่มตาม สินค้า + ตัวเลือก)
 // ยืนยันครั้งเดียว → ผูกทุกรายการที่ค้างด้วยคู่นี้ + จำไว้ (เมลครั้งหน้าระบบจับเอง)
-// โหลดทีละหน้า (เซิร์ฟเวอร์กรอง/นับ/ตัดหน้า) · กรองแพลตฟอร์ม + แยกคิวตามสาเหตุ · คิว "ระบบเดาไว้" ติ๊กยืนยันทีละหลายการ์ดได้
-// ของกลาง: PlatformBadge · SkuPicker · Pager · BulkActionBar · ConfirmDialog · ERPInput · toast
+// โหลดทีละหน้า (เซิร์ฟเวอร์กรอง/นับ/ตัดหน้า) · กรองแพลตฟอร์ม + แยกคิวตามสาเหตุ
+// คิว 💡 ติ๊กยืนยันตามที่เดาทีละหลายการ์ด · คิว 🎨 นับเป็นรุ่น (ไม่แยกสี) · คิว ❓ สร้าง SKU ใหม่ (SkuWizard กลาง) · ⏭ ข้ามไว้ก่อน
+// ของกลาง: PlatformBadge · SkuPicker · SkuWizard · Pager · BulkActionBar · ConfirmDialog · ERPInput · toast
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+import { usePermission } from "@/components/auth";
+import type { SkuWizardResult } from "@/app/master/skus/sku-wizard";
+
+// ตัวช่วยเพิ่ม SKU ตัวเดียวกับหน้า SKU — โหลดเมื่อกดเท่านั้น
+const SkuWizard = dynamic(() => import("@/app/master/skus/sku-wizard").then((m) => m.SkuWizard), { ssr: false });
 import { PlatformBadge, platformColor } from "@/components/platform-icon";
 import { Pager } from "@/components/pager";
 import { BulkActionBar } from "@/components/bulk-action-bar";
@@ -65,6 +72,27 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
   useEffect(() => { void load(); }, [load]);
 
   const pfInfo = useMemo(() => new Map((data?.platforms ?? []).map((p) => [p.code, p])), [data?.platforms]);
+  const canCreateSku = usePermission("products.create");
+  const [creating, setCreating] = useState<PendingGroup | null>(null);
+
+  // ⏭ ข้ามไว้ก่อน / ↩ เอากลับมา
+  const skip = async (g: PendingGroup, undo: boolean) => {
+    try {
+      const res = await apiFetch("/api/platform-email/inbox", { method: "POST", body: JSON.stringify({ action: undo ? "unskip" : "skip", groups: [{ platform_code: g.platform_code, item_key: g.item_key }] }) });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      toast.success(undo ? "เอากลับเข้าคิวแล้ว" : "ข้ามไว้ก่อนแล้ว — ดูได้ที่คิว ⏭ ข้ามไว้ก่อน");
+      await load(true); onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  };
+
+  // สร้าง SKU ใหม่เสร็จ → สร้างตัวเดียว = ผูกการ์ดนี้กับ SKU นั้นเลย · หลายตัว (หลายสี) = ให้ระบบจับคู่ใหม่
+  const onSkuCreated = async (g: PendingGroup, r?: SkuWizardResult) => {
+    setCreating(null);
+    const made = r?.skus ?? [];
+    if (made.length === 1) await confirm(g, made[0]);
+    else await rematch();
+  };
 
   const confirm = async (g: PendingGroup, sku: { id: string; code: string }) => {
     try {
@@ -180,6 +208,11 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
               {QUEUE_META[k].icon} {QUEUE_META[k].label} <Count n={stats?.by_queue[k]} />
             </FilterChip>
           ))}
+          {(!!stats?.by_queue.skipped || queue === "skipped") && (
+            <FilterChip on={queue === "skipped"} onClick={() => setQueueF(queue === "skipped" ? "" : "skipped")} tone={QUEUE_META.skipped.chip} title={QUEUE_META.skipped.hint}>
+              {QUEUE_META.skipped.icon} {QUEUE_META.skipped.label} <Count n={stats?.by_queue.skipped} />
+            </FilterChip>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3 pt-1">
           <div className="w-72 max-w-full"><ERPInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อสินค้า / รหัสรุ่น / ตัวเลือก / เลขออเดอร์" /></div>
@@ -228,13 +261,19 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
           {groups.map((g) => (
             <GroupCard key={gkey(g)} g={g} platform={pfInfo.get(g.platform_code)}
               selectable={canSelect(g)} selected={selected.has(gkey(g))} onToggle={() => toggleOne(g)}
-              onConfirm={(sku) => confirm(g, sku)} onConfirmModel={() => confirmModelOne(g)} />
+              onConfirm={(sku) => confirm(g, sku)} onConfirmModel={() => confirmModelOne(g)}
+              onSkip={(undo) => skip(g, undo)} onCreateSku={canCreateSku && g.queue === "not_found" ? () => setCreating(g) : undefined} />
           ))}
         </div>
       )}
 
       {data && data.total > 0 && (
         <Pager page={page} pageSize={size} total={data.total} onPage={setPage} unitLabel="แบบ" onPageSize={setSizeF} pageSizes={[20, 50, 100]} />
+      )}
+
+      {creating && (
+        <SkuWizard open onClose={() => setCreating(null)} onCreated={(r) => void onSkuCreated(creating, r)}
+          prefill={{ code: creating.model_level ?? creating.model_code ?? undefined, name_th: creating.title }} />
       )}
 
       <BulkActionBar count={selected.size} unit="การ์ด" onClear={() => setSelected(new Map())}>
@@ -289,12 +328,16 @@ function FilterChip({ on, onClick, tone, title, children }: { on: boolean; onCli
   );
 }
 
-function GroupCard({ g, platform, selectable, selected, onToggle, onConfirm, onConfirmModel }: {
+function GroupCard({ g, platform, selectable, selected, onToggle, onConfirm, onConfirmModel, onSkip, onCreateSku }: {
   g: PendingGroup; platform?: PlatformInfo;
   selectable: boolean; selected: boolean; onToggle: () => void;
   onConfirm: (sku: { id: string; code: string }) => Promise<void>;
   /** 🎨 นับเป็นรุ่น (ไม่แยกสี) */
   onConfirmModel: () => Promise<void>;
+  /** ⏭ ข้ามไว้ก่อน (undo=true → ↩ เอากลับมา) */
+  onSkip: (undo: boolean) => Promise<void>;
+  /** ＋ สร้าง SKU ใหม่ (คิว ❓ · มีสิทธิ์สร้างสินค้า) */
+  onCreateSku?: () => void;
 }) {
   const [pick, setPick] = useState<{ id: string; code: string } | null>(g.suggest);
   const [other, setOther] = useState<SkuPickerValue | null>(null);
@@ -385,6 +428,16 @@ function GroupCard({ g, platform, selectable, selected, onToggle, onConfirm, onC
           {saving ? "กำลังบันทึก..." : chosen ? `✓ ยืนยันเป็น ${chosen.code}` : "เลือก SKU ก่อน"}
         </button>
         {canModel && !lazadaNoColor && modelBtn(false)}
+        {onCreateSku && (
+          <button type="button" onClick={onCreateSku} title="เปิดตัวช่วยเพิ่ม SKU (ตัวเดียวกับหน้า SKU) กรอกรหัส/ชื่อไว้ให้ · สร้างเสร็จระบบผูกการ์ดนี้ให้เอง"
+            className="h-9 rounded-lg border border-sky-200 bg-white px-3 text-sm font-medium text-sky-700 hover:bg-sky-50">
+            ＋ สร้าง SKU ใหม่{g.model_level ? ` ${g.model_level}` : ""}
+          </button>
+        )}
+        <button type="button" onClick={() => { setSaving(true); void onSkip(g.queue === "skipped").finally(() => setSaving(false)); }} disabled={saving}
+          className="ml-auto h-9 rounded-lg px-2 text-xs text-slate-500 hover:bg-slate-50 hover:text-slate-800 disabled:opacity-40">
+          {g.queue === "skipped" ? "↩ เอากลับมา" : "⏭ ข้ามไว้ก่อน"}
+        </button>
       </div>
     </section>
   );
