@@ -23,6 +23,8 @@ export type UnlinkedLine = SaleLine & {
   kind: UnlinkedKind;
   sku_name?: string | null;
   image_url?: string | null;
+  /** เคยผูกแล้วถูกถอดออก (ผูกผิด / ขายจากสต๊อก) — หน้าต่างไม่ติ๊กให้อัตโนมัติ (API เติม) */
+  unlinked?: { mo_no: string; at: string | null }[];
 };
 /** บรรทัดใบขายที่ผูกแล้ว 1 คู่ (บรรทัด ↔ ใบสั่งผลิต) · others = ใบขายอื่นที่ใบเดียวกันผูกอยู่ · cands = ใบที่ย้ายไปได้ */
 export type LinkedLine = SaleLine & {

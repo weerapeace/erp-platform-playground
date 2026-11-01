@@ -78,6 +78,8 @@ export function SalesMove({ row, onClose, onDone }: { row: LinkedLine; onClose: 
   const [snap, setSnap] = useState<CatchUpSnapshot | null>(null);
   const [err, setErr] = useState("");
   const [to, setTo] = useState<string | null>(row.cands.find((c) => !c.linked)?.mo_no ?? null);
+  // move = ย้ายไปใบงานอื่น · unlink = ถอดผูกอย่างเดียว (ขายจากสต๊อก / ไม่มีใบงานอื่นให้ย้าย)
+  const [mode, setMode] = useState<"move" | "unlink">(row.cands.length ? "move" : "unlink");
   const [revert, setRevert] = useState<MoveRevert | null>(null);
   const [shelf, setShelf] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
@@ -107,8 +109,8 @@ export function SalesMove({ row, onClose, onDone }: { row: LinkedLine; onClose: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [row.mo_no, row.id]);
 
-  const cand = row.cands.find((c) => c.mo_no === to) ?? null;
-  const qty = cand ? Math.min(row.link_qty, cand.qty) : 0;
+  const cand = mode === "move" ? row.cands.find((c) => c.mo_no === to) ?? null : null;
+  const qty = mode === "unlink" ? row.link_qty : cand ? Math.min(row.link_qty, cand.qty) : 0;
   const ctx = info ? { info, snap, lineId: row.id, qty } : null;
   const block = (r: MoveRevert) => (ctx ? revertBlock(r, ctx) : "กำลังโหลด…");
   const left = info ? shipLeft(info.ships) : 0;
@@ -117,13 +119,13 @@ export function SalesMove({ row, onClose, onDone }: { row: LinkedLine; onClose: 
   const toBatch = !!cand && !cand.linked && cand.stage !== "ship" && cand.stage !== "closed";
 
   const save = async () => {
-    if (!info || !cand || !revert || block(revert)) return;
+    if (!info || (mode === "move" && !cand) || !revert || block(revert)) return;
     const lines = [
-      `ถอด ${row.so_number} ออกจาก ${row.mo_no} แล้วผูกกับ ${cand.mo_no} (${fmt(qty)} ชิ้น)`,
-      ...(cand.linked ? [`${cand.mo_no} ผูก ${linkedText(cand.linked)} อยู่ — ใบขายนั้นจะกลับเป็น “ยังไม่ผูก”`] : []),
+      cand ? `ถอด ${row.so_number} ออกจาก ${row.mo_no} แล้วผูกกับ ${cand.mo_no} (${fmt(qty)} ชิ้น)` : `ถอด ${row.so_number} ออกจาก ${row.mo_no} — ไม่ผูกใบไหน (กลับไปแท็บ “ยังไม่ผูก”)`,
+      ...(cand?.linked ? [`${cand.mo_no} ผูก ${linkedText(cand.linked)} อยู่ — ใบขายนั้นจะกลับเป็น “ยังไม่ผูก”`] : []),
       `${row.mo_no}: ${MOVE_REVERT[revert].label}`,
     ];
-    if (!(await askConfirm({ title: "ย้ายใบขาย?", confirmText: "ย้าย", variant: revert === "wait" ? "danger" : undefined,
+    if (!(await askConfirm({ title: cand ? "ย้ายใบขาย?" : "ถอดผูกใบขาย?", confirmText: cand ? "ย้าย" : "ถอดผูก", variant: revert === "wait" ? "danger" : undefined,
       message: <div className="space-y-1 text-sm">{lines.map((x, i) => <div key={i}>{i + 1}. {x}</div>)}</div> }))) return;
     const api = async (url: string, body: unknown, method: "POST" | "PATCH" | "DELETE" = "POST") => {
       const res = await apiFetch(url, method === "DELETE" ? { method } : { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -132,9 +134,9 @@ export function SalesMove({ row, onClose, onDone }: { row: LinkedLine; onClose: 
       return j as Record<string, unknown>;
     };
     setRunning(true);
-    const res = await runMove({ info, lineId: row.id, soNumber: row.so_number, qty, to: { mo_no: cand.mo_no, relink: !!cand.linked }, revert, shelfId: revert === "none" ? null : shelf, api, loadSnap });
+    const res = await runMove({ info, lineId: row.id, soNumber: row.so_number, qty, to: cand ? { mo_no: cand.mo_no, relink: !!cand.linked } : null, revert, shelfId: revert === "none" ? null : shelf, api, loadSnap });
     setRunning(false); setSteps(res);
-    if (res.every((x) => x.ok)) { toast.success(`ย้าย ${row.so_number} ไป ${cand.mo_no} แล้ว`); onDone(toBatch ? cand.mo_no : null); }
+    if (res.every((x) => x.ok)) { toast.success(cand ? `ย้าย ${row.so_number} ไป ${cand.mo_no} แล้ว` : `ถอด ${row.so_number} ออกจาก ${row.mo_no} แล้ว`); onDone(toBatch && cand ? cand.mo_no : null); }
     else toast.error("ทำไม่ครบ — ดูว่าสำเร็จถึงไหนในหน้าต่าง");
   };
 
@@ -143,16 +145,16 @@ export function SalesMove({ row, onClose, onDone }: { row: LinkedLine; onClose: 
   const td = "border-b border-slate-100 px-2 py-1.5 align-top";
   return (
     <ERPModal open onClose={() => { if (!running) onClose(); }} size="lg" storageKey="wb-sales-move"
-      title={`ย้ายใบขาย ${row.so_number} (${fmt(row.link_qty)} ชิ้น)`}
-      description={`${row.sku}${row.sku_name ? ` · ${row.sku_name}` : ""} — ผูกกับ ${row.mo_no} อยู่ ย้ายไปใบที่ถูก แล้วเลือกว่าใบเดิมจะกลับเป็นแบบไหน`}
+      title={`ผูกผิด · ${row.so_number} (${fmt(row.link_qty)} ชิ้น)`}
+      description={`${row.sku}${row.sku_name ? ` · ${row.sku_name}` : ""} — ผูกกับ ${row.mo_no} อยู่ ย้ายไปใบที่ถูก หรือถอดผูกอย่างเดียว แล้วเลือกว่าใบเดิมจะกลับเป็นแบบไหน`}
       footer={steps ? (
         <div className="flex justify-end"><button type="button" onClick={() => onDone(steps.every((x) => x.ok) && toBatch && cand ? cand.mo_no : null)} className={`${btn} border-slate-200 bg-white`}>ปิด</button></div>
       ) : (
         <div className="flex flex-wrap items-center justify-end gap-2">
           <button type="button" disabled={running} onClick={onClose} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>ยกเลิก</button>
-          <button type="button" disabled={running || !cand || !revert || !!block(revert)} onClick={() => void save()}
+          <button type="button" disabled={running || (mode === "move" && !cand) || !revert || !!block(revert)} onClick={() => void save()}
             className={`${btn} border-blue-600 bg-blue-600 font-medium text-white hover:bg-blue-700`}>
-            <Icon name="shuffle" /> {running ? "กำลังย้าย…" : toBatch ? "ย้าย + ไปตั้งขั้นส่งออก" : "ย้าย"}
+            <Icon name="shuffle" /> {running ? "กำลังบันทึก…" : mode === "unlink" ? "ถอดผูก" : toBatch ? "ย้าย + ไปตั้งขั้นส่งออก" : "ย้าย"}
           </button>
         </div>
       )}>
@@ -160,7 +162,7 @@ export function SalesMove({ row, onClose, onDone }: { row: LinkedLine; onClose: 
         : !info ? <div className="py-8 text-center text-slate-400">กำลังโหลดใบงาน…</div>
         : steps ? (
           <div className="space-y-1 text-sm">
-            <div className="mb-2 font-medium text-slate-700">{steps.every((x) => x.ok) ? "ย้ายเสร็จแล้ว" : "ทำไม่ครบ — สำเร็จถึงตรงนี้ (ที่เหลือแก้ต่อที่ปุ่ม “แก้ไข” บนบอร์ด)"}</div>
+            <div className="mb-2 font-medium text-slate-700">{steps.every((x) => x.ok) ? "บันทึกเสร็จแล้ว" : "ทำไม่ครบ — สำเร็จถึงตรงนี้ (ที่เหลือแก้ต่อที่ปุ่ม “แก้ไข” บนบอร์ด)"}</div>
             {steps.map((x, i) => <div key={i} className={x.ok ? "text-slate-700" : "text-red-600"}><Icon name={x.ok ? "done" : "cancel"} /> {x.msg}</div>)}
             {steps.every((x) => x.ok) && toBatch && <div className="pt-2 text-slate-500">กด “ปิด” แล้วไปตั้งขั้นส่งออกของ {cand?.mo_no} ในหน้าอัปเดตเป็นชุด</div>}
           </div>
@@ -170,13 +172,31 @@ export function SalesMove({ row, onClose, onDone }: { row: LinkedLine; onClose: 
               <span className="text-slate-500">จากใบเดิม</span>
               <span className="flex flex-wrap items-center gap-1.5"><b className="font-mono">{row.mo_no}</b> · ผลิต {fmt(row.mo_qty)} · เปิด {thDate(row.opened)} <StageTag stage={row.stage} />
                 {row.others.length > 0 && <span className="text-[12px] text-slate-500">· ยังผูก {linkedText(row.others)} ด้วย</span>}</span>
-              <span className="text-slate-500">ย้ายไปใบ</span>
-              <div className="min-w-0">
-                <MoPick cands={row.cands} value={to} onChange={setTo} disabled={running} />
-                {!row.cands.length && <div className="mt-1 text-[12px] text-amber-700">ไม่มีใบงานอื่นของ {row.sku} ที่เปิดก่อนวันขาย ({thDate(row.date)}) — ถอดผูกอย่างเดียวได้ที่หน้าอัปเดตเป็นชุด</div>}
-                {cand?.linked && <div className="mt-1 text-[12px] text-amber-700">{cand.mo_no} ผูก {linkedText(cand.linked)} อยู่ — ใบขายนั้นจะกลับเป็น “ยังไม่ผูก” (สถานะใบ {cand.mo_no} ไม่เปลี่ยน)</div>}
-                {cand && cand.qty < row.link_qty && <div className="mt-1 text-[12px] text-amber-700">{cand.mo_no} ผลิตแค่ {fmt(cand.qty)} — ผูกได้ {fmt(cand.qty)} อีก {fmt(row.link_qty - cand.qty)} ชิ้นของใบขายจะยังไม่ผูก</div>}
+              <span className="text-slate-500">ทำอะไร</span>
+              <div className="flex flex-wrap gap-1.5">
+                {([["move", "ย้ายไปใบงานอื่น"], ["unlink", "ถอดผูกอย่างเดียว ไม่ย้าย"]] as const).map(([k, label]) => (
+                  <button key={k} type="button" disabled={running || (k === "move" && !row.cands.length)} onClick={() => setMode(k)}
+                    className={`h-8 rounded-lg border px-2.5 text-[12px] disabled:opacity-50 ${mode === k ? "border-blue-300 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+                ))}
               </div>
+              {mode === "move" ? (
+                <>
+                  <span className="text-slate-500">ย้ายไปใบ</span>
+                  <div className="min-w-0">
+                    <MoPick cands={row.cands} value={to} onChange={setTo} disabled={running} />
+                    {cand?.linked && <div className="mt-1 text-[12px] text-amber-700">{cand.mo_no} ผูก {linkedText(cand.linked)} อยู่ — ใบขายนั้นจะกลับเป็น “ยังไม่ผูก” (สถานะใบ {cand.mo_no} ไม่เปลี่ยน)</div>}
+                    {cand && cand.qty < row.link_qty && <div className="mt-1 text-[12px] text-amber-700">{cand.mo_no} ผลิตแค่ {fmt(cand.qty)} — ผูกได้ {fmt(cand.qty)} อีก {fmt(row.link_qty - cand.qty)} ชิ้นของใบขายจะยังไม่ผูก</div>}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <span />
+                  <div className="text-[12px] text-slate-500">
+                    {!row.cands.length && <>ไม่มีใบงานอื่นของ {row.sku} ที่เปิดก่อนวันขาย ({thDate(row.date)}) · </>}
+                    {row.so_number} จะกลับไปแท็บ “ยังไม่ผูก” (ไม่ติ๊กให้อัตโนมัติ) — เช่น ของนี้ขายจากสต๊อก ไม่ได้มาจากใบงานไหน
+                  </div>
+                </>
+              )}
             </div>
 
             <div>
@@ -224,6 +244,9 @@ export function SalesMove({ row, onClose, onDone }: { row: LinkedLine; onClose: 
                       <td className={td}>{MO_STAGE_LABEL[cand.stage]} · {cand.linked ? `ผูก ${linkedText(cand.linked)}` : "ไม่ผูก"}</td>
                       <td className={`${td} text-emerald-700`}>ผูก {row.so_number} ({fmt(qty)}){toBatch ? " → ไปตั้งขั้นส่งออกต่อ" : ` · ${MO_STAGE_LABEL[cand.stage]} เหมือนเดิม`}</td>
                     </tr>
+                  )}
+                  {!cand && (
+                    <tr><td className={td}>{row.so_number}</td><td className={td}>ผูก {row.mo_no} ({fmt(row.link_qty)})</td><td className={`${td} text-amber-700`}>ยังไม่ผูก</td></tr>
                   )}
                   {cand?.linked?.map((x) => (
                     <tr key={x.so_number}><td className={td}>{x.so_number}</td><td className={td}>ผูก {cand.mo_no}</td><td className={`${td} text-amber-700`}>ยังไม่ผูก (ไปผูกใหม่ที่แท็บ “ยังไม่ผูก”)</td></tr>

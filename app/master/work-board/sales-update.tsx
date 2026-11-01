@@ -16,6 +16,7 @@ import { HoverImage } from "@/components/hover-image";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
+import { bkkDate } from "@/lib/mo-sales-match";
 import { defaultPick, planLinks, type LinkedLine, type UnlinkedKind, type UnlinkedLine, type UnlinkedStats } from "@/lib/mo-sales-unlinked";
 import { MoPick, SalesMove, StageTag, thDate } from "./sales-move";
 
@@ -68,9 +69,9 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
       if (!r.ok || !j?.data) throw new Error(j?.error || "โหลดไม่สำเร็จ");
       const list = j.data.rows as UnlinkedLine[];
       setRows(list); setLinked((j.data.linked ?? []) as LinkedLine[]); setStats(j.data.stats as UnlinkedStats);
-      // ค่าเริ่ม: เลือกตามที่ระบบเสนอ (ใบแรก) ไม่งั้นใบว่างใบแรก · ติ๊กไว้เฉพาะที่ตรงจำนวน
+      // ค่าเริ่ม: เลือกตามที่ระบบเสนอ (ใบแรก) ไม่งั้นใบว่างใบแรก · ติ๊กไว้เฉพาะที่ตรงจำนวน และไม่เคยถูกถอดผูก
       setPick(new Map(list.flatMap((x) => { const d = defaultPick(x); return d ? [[x.id, d] as [string, string]] : []; })));
-      setSel(new Set(list.filter((x) => x.kind === "exact").map((x) => x.id)));
+      setSel(new Set(list.filter((x) => x.kind === "exact" && !x.unlinked?.length).map((x) => x.id)));
     } catch (e) { setErr(e instanceof Error ? e.message : "โหลดไม่สำเร็จ"); }
   }, []);
   useEffect(() => { if (open) void load(); }, [open, load]);
@@ -188,6 +189,7 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
                           {product(r, r.left < r.qty ? ` · เหลือผูก ${fmt(r.left)}` : "")}
                           <div className="min-w-0 space-y-1">
                             <span className={`inline-block rounded border px-1.5 text-[11px] ${tag.cls}`}>{tag.label}</span>
+                            {r.unlinked?.length ? <div className="text-[12px] text-amber-700">เคยถอดผูกจาก {r.unlinked.map((u) => `${u.mo_no}${u.at ? ` (${thDate(bkkDate(u.at))})` : ""}`).join(", ")} — ไม่ได้ติ๊กให้ ถ้าขายจากสต๊อกไม่ต้องผูก</div> : null}
                             {c ? (
                               <>
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">

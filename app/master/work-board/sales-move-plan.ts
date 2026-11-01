@@ -88,11 +88,12 @@ export function defaultShelf(info: MoveInfo): string | null {
 export type MoveStep = { label: string; ok: boolean; msg: string };
 /**
  * บันทึกการย้าย — ทีละขั้น พัง = หยุด แล้วรายงานว่าสำเร็จถึงไหน
+ * to null = ถอดผูกอย่างเดียว ไม่ย้ายไปใบไหน (ขายจากสต๊อก / ผูกผิดแต่ไม่มีใบงานอื่น) — บรรทัดใบขายกลับเป็น "ยังไม่ผูก" แล้วย้อนสถานะใบเดิมตามที่เลือก
  * loadSnap = โหลดใบเดิมใหม่ (GET /api/mo/catch-up?mo_no=&edit=1) หลังเอาของกลับขึ้นชั้น เพื่อให้ตัวแก้ไขใบงานเห็นของที่เพิ่งกลับมา
  */
 export async function runMove(p: {
   info: MoveInfo; lineId: string; soNumber: string; qty: number;
-  to: { mo_no: string; relink: boolean };
+  to: { mo_no: string; relink: boolean } | null;
   revert: MoveRevert; shelfId: string | null;
   api: CuApi; loadSnap: () => Promise<CatchUpSnapshot>;
 }): Promise<MoveStep[]> {
@@ -106,15 +107,18 @@ export async function runMove(p: {
   const link = (mo: string) => p.api("/api/mo/sales-match", { mo_no: mo, parts: [{ sale_line_id: p.lineId, qty: p.qty }] });
 
   if (!(await step(`ถอด ${p.soNumber} ออกจาก ${from}`, () => p.api(`/api/mo/sales-match?${q({ mo_no: from, sale_line_id: p.lineId })}`, null, "DELETE")))) return out;
-  if (p.to.relink && !(await step(`ถอดใบขายเดิมออกจาก ${p.to.mo_no}`, () => p.api(`/api/mo/sales-match?${q({ mo_no: p.to.mo_no })}`, null, "DELETE")))) return out;
-  if (!(await step(`ผูก ${p.soNumber} (${fmt(p.qty)} ชิ้น) กับ ${p.to.mo_no}`, () => link(p.to.mo_no)))) {
-    // ผูกใบใหม่ไม่ได้ → ผูกกลับใบเดิม (ใบเดิมที่ยังผูกใบขายอื่นอยู่ API ไม่รับ — บอกให้ไปผูกเองที่แท็บ "ยังไม่ผูก")
-    await step(`ผูก ${p.soNumber} กลับ ${from} เหมือนเดิม`, () => link(from));
-    return out;
+  const to = p.to;
+  if (to) {
+    if (to.relink && !(await step(`ถอดใบขายเดิมออกจาก ${to.mo_no}`, () => p.api(`/api/mo/sales-match?${q({ mo_no: to.mo_no })}`, null, "DELETE")))) return out;
+    if (!(await step(`ผูก ${p.soNumber} (${fmt(p.qty)} ชิ้น) กับ ${to.mo_no}`, () => link(to.mo_no)))) {
+      // ผูกใบใหม่ไม่ได้ → ผูกกลับใบเดิม (ใบเดิมที่ยังผูกใบขายอื่นอยู่ API ไม่รับ — บอกให้ไปผูกเองที่แท็บ "ยังไม่ผูก")
+      await step(`ผูก ${p.soNumber} กลับ ${from} เหมือนเดิม`, () => link(from));
+      return out;
+    }
   }
   if (p.revert === "none") return out;
 
-  const tag = { via: "sales_move", label: `ย้ายใบขาย ${p.soNumber} จาก ${from} ไป ${p.to.mo_no}` };
+  const tag = { via: "sales_move", label: to ? `ย้ายใบขาย ${p.soNumber} จาก ${from} ไป ${to.mo_no}` : `ถอดผูกใบขาย ${p.soNumber} ออกจาก ${from}` };
   const backs = unshipPlan(p.info.ships, p.revert === "wait" ? null : p.qty);
   for (const b of backs) {
     if (!(await step(`เอาของที่ส่งออก ${fmt(b.qty)} ชิ้นกลับขึ้นชั้น QC (${from})`,

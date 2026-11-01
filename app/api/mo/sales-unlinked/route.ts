@@ -21,7 +21,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
   // ทุกตารางโตตามข้อมูล → ดึงครบด้วย fetchAllPages (กันตัด 1,000 แถวเงียบ ๆ)
-  const [moRows, lineRows, linkRows, woRows, shipRows] = await Promise.all([
+  const [moRows, lineRows, linkRows, woRows, shipRows, offRows] = await Promise.all([
     fetchAllPages<Row>((f, t) => admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, created_at, status, is_active")
       .neq("status", "cancelled").order("id").range(f, t)),
     fetchAllPages<Row>((f, t) => admin.from("erp_playground_so_lines").select("id, so_id, sku, qty, erp_playground_sales_orders!inner(id, so_number, status, order_date, customer_name)")
@@ -30,7 +30,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     fetchAllPages<Row>((f, t) => admin.from("mo_work_orders").select("mo_no, qty, received_qty, status").eq("is_active", true).order("id").range(f, t)),
     // ส่งออกจากชั้น QC แล้วกี่ชิ้น (หักที่ย้อนกลับขึ้นชั้น) — ป้าย "ส่งออกแล้ว"
     fetchAllPages<Row>((f, t) => admin.from("audit_logs").select("id, action, metadata").eq("entity_type", "qc_warehouse_items").in("action", ["qc.ship", "qc.unship"]).order("id").range(f, t)),
+    // เคยผูกแล้วถูกถอดออก — ไม่ติ๊กให้อัตโนมัติอีก (ผูกผิด / ขายจากสต๊อก)
+    fetchAllPages<Row>((f, t) => admin.from("mo_sales_links").select("id, sale_line_id, mo_no, unlinked_at").eq("is_active", false).order("id").range(f, t)),
   ]);
+  const off = new Map<string, { mo_no: string; at: string | null }[]>();
+  for (const k of offRows) {
+    const id = String(k.sale_line_id ?? "");
+    (off.get(id) ?? off.set(id, []).get(id)!).push({ mo_no: String(k.mo_no ?? ""), at: (k.unlinked_at as string | null) ?? null });
+  }
   const shipped = new Map<string, number>();
   for (const a of shipRows) {
     const md = (a.metadata ?? {}) as Row;
@@ -62,6 +69,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const links: SalesLinkRow[] = linkRows.map((k) => ({ id: String(k.id), mo_id: String(k.mo_id), sale_line_id: String(k.sale_line_id), qty: n(k.qty), so_number: (k.so_number as string | null) ?? null, sale_date: (k.sale_date as string | null) ?? null }));
   const { rows, linked, stats } = buildUnlinked(mos, lines, links);
+  for (const r of rows) { const o = off.get(r.id); if (o?.length) r.unlinked = o; }
 
   // ชื่อ + รูปสินค้า (ปก SKU → ปกสินค้าแม่) เฉพาะรหัสที่ขึ้นในรายการ
   const codes = [...new Set([...rows, ...linked].map((r) => r.sku))];

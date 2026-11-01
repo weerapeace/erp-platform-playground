@@ -121,6 +121,17 @@ describe("บันทึกการย้าย (ลำดับเรีย�
     expect(res.map((x) => x.ok)).toEqual([true, false, true]);
   });
 
+  it("ถอดผูกอย่างเดียว (ไม่ย้าย): ถอด → ย้อนสถานะใบเดิม ไม่ผูกใบไหน", async () => {
+    const { calls, api } = mk();
+    const res = await runMove({ info: info(), lineId: "L1", soNumber: "ISG2569-10-024", qty: 20, to: null,
+      revert: "wait", shelfId: "sh-done", api, loadSnap: async () => after });
+    expect(res.every((x) => x.ok)).toBe(true);
+    expect(calls[0]).toBe("DELETE /api/mo/sales-match?mo_no=MO-2026-00335&sale_line_id=L1");
+    expect(calls.filter((c) => c.startsWith("POST /api/mo/sales-match"))).toEqual([]);
+    expect(calls[1]).toBe("POST /api/qc-warehouse/items:unship");
+    expect(calls).toHaveLength(7);
+  });
+
   it("ของกลับขึ้นชั้น: ย้อนเท่าจำนวนที่ย้าย ไม่เรียกตัวแก้ไขใบงาน", async () => {
     const { calls, api } = mk();
     await runMove({ info: info(), lineId: "L1", soNumber: "ISG2569-10-024", qty: 12, to: { mo_no: "MO-2026-00182", relink: false },
