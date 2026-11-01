@@ -123,8 +123,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   const byNewest = <T extends { at: string }>(a: T, b: T) => b.at.localeCompare(a.at);
   const parentId = (skuRes.data as { parent_sku_id: string | null } | null)?.parent_sku_id ?? null;
+  // ปัญหาทั้งรุ่น (sku ว่าง) + ที่จดเฉพาะสีนี้ — ปัญหาเฉพาะสีอื่นไม่เกี่ยว (เหมือน /api/mo/[id] และ /api/parent-sku-issues)
   const { data: modelIssues } = parentId
-    ? await admin.from("parent_sku_issues").select("problem_text").eq("parent_sku_id", parentId).eq("is_active", true).order("created_at", { ascending: false }).limit(20)
+    ? await admin.from("parent_sku_issues").select("problem_text").eq("parent_sku_id", parentId).eq("is_active", true)
+      .or(`sku.is.null,sku.eq."${sku.replace(/["(),]/g, "")}"`).order("created_at", { ascending: false }).limit(20)
     : { data: [] as Row[] };
   // ประวัติเปลี่ยนจำนวน (ทุกครั้ง — ป้าย "เดิม 20" / "แยกจาก") · รอบส่งคืน + ประวัติการแก้ (เฉพาะป๊อปแก้ไข)
   const [qtyRes, subsRes, editRes] = await Promise.all([
