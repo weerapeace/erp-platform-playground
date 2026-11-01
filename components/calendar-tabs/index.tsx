@@ -20,6 +20,7 @@ const CALENDARS: { key: string; icon: string; label: string; url: string }[] = [
   { key: "buy",     icon: "🛒", label: "ปฏิทินจัดซื้อ",    url: "/purchasing/calendar" },
   { key: "tasks",   icon: "🗂️", label: "ปฏิทินจัดการงาน", url: "/tasks?view=calendar" },
   { key: "content", icon: "🗓️", label: "ปฏิทินคอนเทนต์",  url: "/tasks/content-calendar" },
+  { key: "plan",    icon: "📋", label: "แผนงานทีม",      url: "/tasks/plan?view=calendar" },
 ];
 
 const MIN_HEIGHT = 520;

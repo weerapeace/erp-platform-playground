@@ -302,9 +302,9 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const brandNames = brands.filter((b) => brandIds.includes(b.id)).map((b) => b.name);
   const whatSummary = [
     src.label,
-    brandNames.length ? `แบรนด์ ${brandNames.slice(0, 3).join(", ")}${brandNames.length > 3 ? ` +${brandNames.length - 3}` : ""}` : GROUP_TEXT[form.filters.brand_group ?? "all"],
-    statuses.length ? `${statuses.length} สถานะ` : "ทุกสถานะที่ยังไม่ปิด",
-  ].join(" · ");
+    !src.filterUi.includes("brand") ? "" : brandNames.length ? `แบรนด์ ${brandNames.slice(0, 3).join(", ")}${brandNames.length > 3 ? ` +${brandNames.length - 3}` : ""}` : GROUP_TEXT[form.filters.brand_group ?? "all"],
+    !src.filterUi.includes("status") ? "" : statuses.length ? `${statuses.length} สถานะ` : "ทุกสถานะที่ยังไม่ปิด",
+  ].filter(Boolean).join(" · ");
   const howSummary = (
     <span className="flex flex-wrap gap-1">
       {REPORT_CHANNELS.map((c) => {
@@ -430,21 +430,26 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
           <Section n={1} title="ส่งอะไร" summary={whatSummary} open={sec === "what"} onToggle={() => toggleSec("what")}>
             <div>
               <label className={label}>ข้อมูลที่ส่ง</label>
-              <select value={form.source_key} onChange={(e) => set({ source_key: e.target.value, options: normalizeReportOptions(e.target.value, form.options) })}
+              <select value={form.source_key} onChange={(e) => {
+                const next = sourceDef(e.target.value);
+                // รายงานใหม่: ใช้วัน/เวลาส่งที่เหมาะกับแหล่งนี้ (เช่น สรุปแผนงานทีม = ศุกร์ 17:00) · แก้ต่อได้
+                set({ source_key: e.target.value, options: normalizeReportOptions(e.target.value, form.options),
+                  ...(!editing && next.defaultDays ? { days: [...next.defaultDays] } : {}), ...(!editing && next.defaultTime ? { send_time: next.defaultTime } : {}) });
+              }}
                 className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                 {EMAIL_REPORT_SOURCES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
               </select>
               <p className="mt-1 text-[11px] text-slate-400">{EMAIL_REPORT_SOURCES.find((s) => s.key === form.source_key)?.description}</p>
             </div>
-            <div>
+            {src.filterUi.includes("brand") && <div>
               <label className={label}>กลุ่มแบรนด์</label>
               <div className="flex flex-wrap gap-1">
                 {GROUPS.map((g) => (
                   <button key={g.v} type="button" onClick={() => setFilters({ brand_group: g.v, brand_ids: [] })} className={chip((form.filters.brand_group ?? "all") === g.v)}>{g.label}</button>
                 ))}
               </div>
-            </div>
-            {groupBrands.length > 0 && (
+            </div>}
+            {src.filterUi.includes("brand") && groupBrands.length > 0 && (
               <div>
                 <label className={label}>เฉพาะแบรนด์ <span className="font-normal text-slate-400">(ไม่เลือก = ทุกแบรนด์ในกลุ่ม)</span></label>
                 <div className="flex flex-wrap gap-1">
@@ -456,7 +461,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                 </div>
               </div>
             )}
-            {pendingStatuses.length > 0 && (
+            {src.filterUi.includes("status") && pendingStatuses.length > 0 && (
               <div>
                 <label className={label}>สถานะ <span className="font-normal text-slate-400">(ส่งเฉพาะงานที่ยังไม่ปิด)</span></label>
                 <div className="flex flex-wrap gap-x-3 gap-y-1">

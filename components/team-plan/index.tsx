@@ -6,6 +6,7 @@
  *   - ลากการ์ดข้ามช่อง = เปลี่ยนความด่วน (หรือ สำคัญ×ด่วน ในตาราง 4 ช่อง)
  *   - ⭐ งานหลักวันนี้ (สูงสุด 3 งานต่อคน) · ⏸ รอคนอื่น · 🔁 ทำซ้ำ · 🔔 เตือน · ลิงก์กลับเรื่องเดิม
  *   - ทั้งทีม / ของฉัน + ตัวกรอง (⭐ วันนี้ / รอคนอื่น / เกินกำหนด) · จำมุมมองต่อคน
+ *   - 📅 ปฏิทิน (ของกลาง ScheduleBoard): ลากงานลงวัน = ตั้งกำหนดวันนั้น (คงเวลาเดิม) · ลากกลับกล่อง = ไม่กำหนดวัน
  * ข้อมูล: /api/team-plan (lib/team-plan-client) · กฎ: lib/team-plan · doc: docs/team-plan.md
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
@@ -19,8 +20,10 @@ import { Icon } from "@/components/icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { WhoChip } from "@/components/record-tasks/checklist";
 import { useViewPref } from "@/lib/use-view-pref";
+import { ScheduleBoard } from "@/components/schedule-board";
+import { useViewportLayout } from "@/components/device-view";
 import {
-  dueLabel, isOverdue, isPlanDone, isStarredToday, MAX_STARS, PRIORITIES, PRIORITY_META, QUADRANT_META, quadrantOf, quadrantPatch,
+  dueLabel, dueOnDate, dueYmd, isOverdue, isPlanDone, isStarredToday, MAX_STARS, PRIORITIES, PRIORITY_META, QUADRANT_META, quadrantOf, quadrantPatch,
   REMIND_LABEL, REPEAT_LABEL, sortPlanItems, waitingDays,
   type PlanItem, type Priority, type Quadrant,
 } from "@/lib/team-plan";
@@ -29,13 +32,15 @@ import { PlanEditModal } from "./edit-modal";
 import { PlanDraftFields, usePlanDraft } from "./draft-fields";
 import { AiSplitModal } from "./ai-split-modal";
 
-const VIEWS = ["priority", "matrix"] as const;
+const VIEWS = ["priority", "matrix", "calendar"] as const;
+export type PlanView = (typeof VIEWS)[number];
 const SCOPES = ["all", "me"] as const;
 type Filter = "" | "star" | "waiting" | "overdue";
 const QUADRANTS: Quadrant[] = ["do", "schedule", "delegate", "later"];
 const chip = "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] whitespace-nowrap";
 
-export function TeamPlanBoard({ initialItemId }: { initialItemId?: string | null }) {
+/** initialView = เปิดมุมมองนี้ก่อน (เช่น ฝังในปฏิทินรวม ?view=calendar) โดยไม่ทับค่าที่ผู้ใช้จำไว้ */
+export function TeamPlanBoard({ initialItemId, initialView }: { initialItemId?: string | null; initialView?: PlanView | null }) {
   const { user, can } = useAuth();
   const toast = useToast();
   const me = user?.id ?? "";
@@ -43,9 +48,12 @@ export function TeamPlanBoard({ initialItemId }: { initialItemId?: string | null
   const canEdit = can("tasks.edit");
   const [items, setItems] = useState<PlanItem[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const viewPref = useViewPref<(typeof VIEWS)[number]>("team_plan_view", VIEWS, "priority");
+  const viewPref = useViewPref<PlanView>("team_plan_view", VIEWS, "priority");
+  const [forcedView, setForcedView] = useState<PlanView | null>(initialView ?? null);
+  const viewport = useViewportLayout();
   const scopePref = useViewPref<(typeof SCOPES)[number]>("team_plan_scope", SCOPES, "all");
-  const view = viewPref.view, scope = scopePref.view;
+  const view = forcedView ?? viewPref.view, scope = scopePref.view;
+  const pickView = (v: PlanView) => { setForcedView(null); viewPref.setView(v); void viewPref.saveDefault(v); };
   const [filter, setFilter] = useState<Filter>("");
   const [editing, setEditing] = useState<PlanItem | null>(null);
   const [showDone, setShowDone] = useState(false);
@@ -132,8 +140,9 @@ export function TeamPlanBoard({ initialItemId }: { initialItemId?: string | null
       {/* แถบเครื่องมือ */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
-          <button type="button" className={seg(view === "priority")} onClick={() => { viewPref.setView("priority"); void viewPref.saveDefault("priority"); }}>ตามความด่วน</button>
-          <button type="button" className={seg(view === "matrix")} onClick={() => { viewPref.setView("matrix"); void viewPref.saveDefault("matrix"); }}>ตาราง 4 ช่อง</button>
+          <button type="button" className={seg(view === "priority")} onClick={() => pickView("priority")}>ตามความด่วน</button>
+          <button type="button" className={seg(view === "matrix")} onClick={() => pickView("matrix")}>ตาราง 4 ช่อง</button>
+          <button type="button" className={seg(view === "calendar")} onClick={() => pickView("calendar")}><Icon name="calendar" /> ปฏิทิน</button>
         </div>
         <div className="inline-flex overflow-hidden rounded-lg border border-slate-200">
           <button type="button" className={seg(scope === "all")} onClick={() => { scopePref.setView("all"); void scopePref.saveDefault("all"); }}>ทั้งทีม</button>
@@ -169,6 +178,30 @@ export function TeamPlanBoard({ initialItemId }: { initialItemId?: string | null
       {err ? <ErrorState title="โหลดแผนงานไม่สำเร็จ" hint={err} onRetry={() => void load()} />
         : !items ? <LoadingState />
         : all.length === 0 ? <EmptyState title="ยังไม่มีงานในแผน" hint="พิมพ์งานแรกในช่องด้านบน แล้วกด Enter — เลือกความด่วน กำหนด และคนรับผิดชอบได้" />
+        : view === "calendar" ? (
+          <ScheduleBoard<PlanItem>
+            items={shown} layout={viewport} backlogTitle="ยังไม่กำหนดวัน"
+            hint={canEdit ? "ลากงานไปวางบนวัน = ตั้งกำหนดวันนั้น (คงเวลาเดิม · ไม่มีเวลา = 18:00) · ลากกลับกล่อง = ไม่กำหนดวัน" : undefined}
+            getDate={(t) => dueYmd(t.due_at)}
+            onSchedule={(t, date) => {
+              if (!canEdit) return;
+              const due = dueOnDate(t.due_at, date);
+              if (due !== t.due_at) void update(t, { due_at: due }, { due_at: due });
+            }}
+            renderCard={(t) => <PlanCardView t={t} {...cardProps} />}
+            renderChip={(t) => (
+              <button type="button" onClick={() => setEditing(t)} title={t.assigned_name ? `${t.title} — ${t.assigned_name}` : t.title}
+                className={`block w-full truncate rounded border-l-2 px-1 py-0.5 text-left text-[11px] hover:bg-violet-50 ${isOverdue(t.due_at) ? "bg-rose-50 text-rose-700" : "bg-white text-slate-700"}`}
+                style={{ borderLeftColor: PRIORITY_META[t.priority].color }}>
+                {isStarredToday(t.plan) ? "★ " : ""}{t.title}
+              </button>
+            )}
+            filters={PRIORITIES.map((p) => ({ value: p, label: PRIORITY_META[p].label, color: PRIORITY_META[p].color }))}
+            getFilter={(t) => t.priority}
+            getSearchText={(t) => `${t.title} ${t.assigned_name ?? ""}`}
+            getDotColor={(t) => PRIORITY_META[t.priority].color}
+          />
+        )
         : (
           <DndContext sensors={sensors} onDragStart={(e: DragStartEvent) => setDragId(String(e.active.id))} onDragEnd={onDragEnd} onDragCancel={() => setDragId(null)}>
             <div className={`grid gap-3 ${view === "priority" ? "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4" : "grid-cols-1 md:grid-cols-2"}`}>

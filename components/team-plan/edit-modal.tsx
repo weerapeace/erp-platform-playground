@@ -1,6 +1,7 @@
 "use client";
 /**
  * ป๊อปแก้ 1 งานในแผนงานทีม — ชื่อ · โน้ต · ความด่วน · สำคัญ · กำหนด · ผู้รับผิดชอบ · เตือน · ทำซ้ำ · รอคนอื่น · ลบ
+ * + ใส่แผนส่วนตัวของฉัน (วันนี้/พรุ่งนี้/สัปดาห์นี้ — ของกลาง lib/planner-client · ใช้แทนการลากบนมือถือ)
  * บันทึกเฉพาะช่องที่เปลี่ยน (PATCH /api/team-plan/[id]) · ปิดตอนยังไม่บันทึก = ถามก่อน (ERPModal กลาง)
  */
 import { useMemo, useState } from "react";
@@ -14,6 +15,8 @@ import {
   type PlanItem, type Priority, type RemindMode, type RepeatRule,
 } from "@/lib/team-plan";
 import { deletePlanItem, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
+import { addToPlan } from "@/lib/planner-client";
+import { bucketLabel, type PlanBucket } from "@/lib/planner";
 
 /** ISO → "YYYY-MM-DDTHH:mm" เวลาไทย (ค่าของช่อง ERPDateTime24) */
 const toLocal = (iso: string | null) => (iso ? new Date(Date.parse(iso) + 7 * 3600e3).toISOString().slice(0, 16) : "");
@@ -164,6 +167,7 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted }
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={4000} disabled={!canEdit}
             className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:bg-slate-50" />
         </div>
+        {!done && <PersonalPlanRow item={item} />}
         {item.plan.source && (
           <a href={item.plan.source.href} className="inline-flex items-center gap-1 text-sm text-blue-700 hover:underline"><Icon name="link" /> เปิดเรื่องเดิม: {item.plan.source.label}</a>
         )}
@@ -173,5 +177,31 @@ export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted }
       <ConfirmDialog open={askDelete} onClose={() => setAskDelete(false)} onConfirm={() => void remove()} loading={busy} variant="danger"
         title="ลบงานนี้?" message={`"${item.title}" จะหายจากแผนงาน (ยังมีบันทึกในประวัติ)`} confirmText="ลบ" />
     </ERPModal>
+  );
+}
+
+/** ใส่งานนี้ลงแผนส่วนตัวของฉัน (แดชบอร์ด → แผนงาน) · ใส่ซ้ำ = ระบบข้ามให้ (unique ต้นทาง) */
+function PersonalPlanRow({ item }: { item: PlanItem }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  const put = async (bucket: PlanBucket) => {
+    setBusy(true);
+    try {
+      const rows = await addToPlan({
+        title: item.title, bucket, source_type: "task", source_id: item.id,
+        link: `/tasks/plan?item=${encodeURIComponent(item.id)}`, module: "tasks", due_at: item.due_at,
+      });
+      toast.success(rows.length ? `ใส่แผนส่วนตัว "${bucketLabel(bucket)}" แล้ว — ดูที่แดชบอร์ด → แผนงาน` : "งานนี้อยู่ในแผนส่วนตัวของคุณอยู่แล้ว");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ใส่แผนส่วนตัวไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-2 text-xs text-slate-600">
+      <span><Icon name="calendar" /> ใส่แผนส่วนตัวของฉัน:</span>
+      {(["today", "tomorrow", "week"] as PlanBucket[]).map((b) => (
+        <button key={b} type="button" disabled={busy} onClick={() => void put(b)}
+          className="h-7 rounded-md border border-slate-200 bg-white px-2.5 hover:border-violet-300 hover:text-violet-700 disabled:opacity-50">{bucketLabel(b)}</button>
+      ))}
+    </div>
   );
 }

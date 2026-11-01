@@ -14,7 +14,7 @@ import { usePermission, AccessDenied } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import {
-  describeDays, sourceLabel, normalizeReportChannels, reportChannelOn, REPORT_CHANNELS, RUN_STATUS_LABEL, RUN_TRIGGER_LABEL,
+  describeDays, sourceDef, sourceLabel, normalizeReportChannels, reportChannelOn, REPORT_CHANNELS, RUN_STATUS_LABEL, RUN_TRIGGER_LABEL,
   type EmailReport, type EmailReportInput, type EmailReportRun, type ReportChannelKey, type ReportChannels,
 } from "@/lib/email-report/shared";
 import { ReportEditor, toInput } from "./report-editor";
@@ -244,7 +244,7 @@ export default function EmailReportsPage() {
                         <span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${r.is_enabled ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-500"}`}>{r.is_enabled ? "เปิดอยู่" : "ปิดอยู่"}</span>
                       </div>
                       <div className="mt-0.5 text-xs text-slate-500">
-                        {sourceLabel(r.source_key)} · {GROUP_TEXT[r.filters.brand_group ?? "all"]}{r.filters.brand_ids?.length ? ` (${r.filters.brand_ids.length} แบรนด์)` : ""}
+                        {sourceLabel(r.source_key)}{sourceDef(r.source_key).filterUi.includes("brand") && <> · {GROUP_TEXT[r.filters.brand_group ?? "all"]}{r.filters.brand_ids?.length ? ` (${r.filters.brand_ids.length} แบรนด์)` : ""}</>}
                         {" · "}<b className="font-medium text-slate-700">{describeDays(r.days)} · {r.send_time} น.</b>
                       </div>
                       {/* ป้ายช่องทาง: กด = เปิด/ปิดเฉพาะรายงานนี้ */}

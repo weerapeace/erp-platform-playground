@@ -3,8 +3,8 @@
 // ============================================================
 // มุมมอง "แผนงาน" (Personal Planner) บน /dashboard
 //
-// ซ้าย  = กล่องงานเข้า: งานที่ยังไม่ได้วางแผน รวมจาก 4 แหล่ง
-//         แจ้งเตือนของฉัน · งานย่อยที่ฉันรับผิดชอบ (Task Manager) · เดดไลน์จากปฏิทินรวม · พิมพ์เอง
+// ซ้าย  = กล่องงานเข้า: งานที่ยังไม่ได้วางแผน รวมจาก 5 แหล่ง
+//         แจ้งเตือนของฉัน · งานย่อยที่ฉันรับผิดชอบ (Task Manager) · เดดไลน์จากปฏิทินรวม · 📋 แผนงานทีมที่ฉันรับผิดชอบ · พิมพ์เอง
 // ขวา   = กระดาน 4 ช่อง: วันนี้ / พรุ่งนี้ / สัปดาห์นี้ / รอไว้ก่อน — ลากวางได้ ติ๊กเสร็จได้
 //
 // เก็บที่ตาราง erp_plan_items ผ่านของกลาง lib/planner + lib/planner-client (ส่วนตัวล้วน RLS เจ้าของคนเดียว)
@@ -23,6 +23,9 @@ import {
   type PlanBucket, type PlanDraft, type PlanItem,
 } from "@/lib/planner";
 import { addToPlan, closeDay, deletePlanItem, listPlan, movePlanItems, patchPlanItem } from "@/lib/planner-client";
+import { listPlanItems } from "@/lib/team-plan-client";
+import { isPlanDone, PRIORITY_META } from "@/lib/team-plan";
+import { useAuth } from "@/components/auth";
 import type { Notification } from "@/app/api/notifications/route";
 import type { CalendarEvent } from "@/app/api/calendar/events/route";
 
@@ -213,6 +216,8 @@ export function PlannerView({ notifications, apps, onOpenLink }: {
   }, [mutate]);
 
   const [subs, setSubs]         = useState<InboxItem[]>([]);
+  const [team, setTeam]         = useState<InboxItem[]>([]);
+  const me = useAuth().user?.id ?? "";
   const [cal, setCal]           = useState<InboxItem[]>([]);
   const [busyIds, setBusyIds]   = useState<Set<string>>(new Set());
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -246,6 +251,16 @@ export function PlannerView({ notifications, apps, onOpenLink }: {
         })));
       }).catch(() => { /* ไม่มีสิทธิ์/ล้มเหลว = ข้ามแหล่งนี้ */ });
 
+      // 📋 แผนงานทีมที่ฉันรับผิดชอบ (ยังไม่เสร็จ) — source_type "task" + id งานแผนทีม (กันใส่ซ้ำด้วย unique เดิม)
+      if (me) listPlanItems().then((rows) => {
+        if (!alive) return;
+        setTeam(rows.filter((t) => !isPlanDone(t) && (t.assigned_to ?? t.plan.created_by_id) === me).map((t) => ({
+          key: planSourceKey("task", t.id), title: t.title, source_type: "task" as const, source_id: t.id,
+          link: `/tasks/plan?item=${encodeURIComponent(t.id)}`, module: "tasks", due_at: t.due_at,
+          sub: `แผนงานทีม · ${PRIORITY_META[t.priority].label}${t.plan.source ? ` · ${t.plan.source.label}` : ""}`,
+        })));
+      }).catch(() => { /* ไม่มีสิทธิ์ tasks.view = ข้ามแหล่งนี้ */ });
+
       // เดดไลน์จากปฏิทินรวม 14 วันข้างหน้า
       const ymd = (d: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Bangkok", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
       apiFetch(`/api/calendar/events?from=${ymd(new Date())}&to=${ymd(new Date(Date.now() + 14 * dayMs))}`)
@@ -259,7 +274,7 @@ export function PlannerView({ notifications, apps, onOpenLink }: {
         }).catch(() => { /* ปฏิทินล้ม = ข้ามแหล่งนี้ */ });
     }
     return () => { alive = false; };
-  }, []);
+  }, [me]);
 
   // ---- กล่องงานเข้า: รวม 3 แหล่งระบบ แล้วตัดที่วางแผนไปแล้วออก ----
   const planned = useMemo(() => plannedKeys(plan), [plan]);
@@ -270,14 +285,14 @@ export function PlannerView({ notifications, apps, onOpenLink }: {
         key: planSourceKey("notification", n.id), title: n.title, source_type: "notification" as const, source_id: n.id,
         link: n.link_url, module: systemForEvent(n.event_type), due_at: n.due_at, sub: null,
       }));
-    const all = [...fromNotif, ...subs, ...cal].filter((i) => !planned.has(i.key));
+    const all = [...fromNotif, ...team, ...subs, ...cal].filter((i) => !planned.has(i.key));
     // เรียง: เกินกำหนด → ใกล้ครบกำหนด → ไม่มีกำหนด
     return all.sort((a, b) => {
       const av = a.due_at ? new Date(a.due_at).getTime() : Number.MAX_SAFE_INTEGER;
       const bv = b.due_at ? new Date(b.due_at).getTime() : Number.MAX_SAFE_INTEGER;
       return av - bv;
     });
-  }, [notifications, subs, cal, planned]);
+  }, [notifications, team, subs, cal, planned]);
 
   const grouped  = useMemo(() => groupPlan(plan), [plan]);
   const progress = useMemo(() => todayProgress(plan), [plan]);

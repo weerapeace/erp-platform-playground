@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   dueLabel, isSummaryWindow, nextDue, normalizePlanMeta, normalizePlanSent, planMorningSummary, planReminders, remindAt, quadrantOf, quadrantPatch, quickDue, sortPlanItems, starCountFor, waitingDays,
-  type PlanMeta,
+  dueOnDate, dueYmd, type PlanMeta,
 } from "@/lib/team-plan";
 
 // พุธ 4 พ.ย. 2026 10:00 เวลาไทย
@@ -141,5 +141,19 @@ describe("แผนงานทีม — รอบแจ้งเตือน",
     expect(s?.title).toBe("สรุปงานวันนี้ของคุณ (3 งานค้าง)");
     expect(s?.body.split("\n")[0]).toBe("⭐ งานหลัก 1 · ครบกำหนดวันนี้ 1 · เกินกำหนด 1");
     expect(planMorningSummary([{ title: "D", status: "open", due_at: null, assigned_to: "u2", plan: meta() }], "u2", NOW)).toBeNull();
+  });
+});
+
+describe("ปฏิทิน: ลากงานลงวัน", () => {
+  it("คงเวลาเดิม · ไม่มีเวลาเดิม = 18:00 · วางกลับกล่อง = ไม่มีกำหนด", () => {
+    expect(dueOnDate("2026-11-03T07:30:00.000Z", "2026-11-06")).toBe("2026-11-06T07:30:00.000Z");   // 14:30 ไทย
+    expect(dueOnDate(null, "2026-11-06")).toBe("2026-11-06T11:00:00.000Z");                         // 18:00 ไทย
+    expect(dueOnDate("2026-11-02T17:00:00.000Z", "2026-11-06")).toBe("2026-11-06T11:00:00.000Z");   // เที่ยงคืนไทย = ไม่มีเวลา
+    expect(dueOnDate("2026-11-03T07:30:00.000Z", null)).toBeNull();
+    expect(dueOnDate(null, "6/11/2026")).toBeNull();
+  });
+  it("วันที่ตามเวลาไทย (ไม่ร่นเพราะ UTC)", () => {
+    expect(dueYmd("2026-11-05T18:30:00.000Z")).toBe("2026-11-06");   // 01:30 ไทยของวันที่ 6
+    expect(dueYmd(null)).toBeNull();
   });
 });

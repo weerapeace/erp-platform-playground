@@ -118,6 +118,16 @@ export function quickDue(kind: "today" | "tomorrow" | "friday" | "none", now: Da
   return new Date(`${day}T18:00:00+07:00`).toISOString();
 }
 
+/** วันที่ (เวลาไทย YYYY-MM-DD) ของกำหนด — ใช้วางงานลงช่องวันในปฏิทิน · ไม่มีกำหนด = null */
+export const dueYmd = (dueAt: string | null) => (dueAt ? bkkYmd(dueAt) : null);
+
+/** ลากงานไปวางบนวันในปฏิทิน → กำหนดใหม่ = วันนั้น + เวลาเดิม (ไม่มีเวลาเดิม = 18:00) · วางกลับกล่อง (null) = ไม่มีกำหนด */
+export function dueOnDate(dueAt: string | null, ymd: string | null): string | null {
+  if (!ymd || !YMD.test(ymd)) return null;
+  const time = dueAt && hasTime(dueAt) ? hm(dueAt) : "18:00";
+  return new Date(`${ymd}T${time}:00+07:00`).toISOString();
+}
+
 /**
  * รอบถัดไปของงานทำซ้ำ — นับจากกำหนดเดิม (คงเวลาเดิม) เดินหน้าจนเลยตอนนี้
  * ไม่มีกำหนด = นับจากวันนี้ 18:00 · เดือนที่ไม่มีวันนั้น (31) = วันสุดท้ายของเดือน

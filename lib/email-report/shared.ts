@@ -214,6 +214,11 @@ export type EmailReportSourceDef = {
   subjectTokens: ReportChoice[];
   /** หัวเรื่องแบบเดิม (โชว์เป็นตัวอย่างในช่อง · ว่าง = ใช้แบบนี้) */
   defaultSubject: string;
+  /** ตัวกรองที่หน้าตั้งค่าโชว์ (brand = กลุ่มแบรนด์/แบรนด์ · status = สถานะใบงาน) · ว่าง = ไม่มีตัวกรอง */
+  filterUi: ("brand" | "status")[];
+  /** รายงานใหม่ที่เลือกแหล่งนี้ → ตั้งวัน/เวลาส่งให้ก่อน (แก้ได้) */
+  defaultDays?: number[];
+  defaultTime?: string;
 };
 
 export const EMAIL_REPORT_SOURCES: EmailReportSourceDef[] = [
@@ -241,6 +246,32 @@ export const EMAIL_REPORT_SOURCES: EmailReportSourceDef[] = [
       { key: "ใกล้กำหนด", label: "ใกล้กำหนดกี่งาน" }, { key: "ไม่ขยับ", label: "ไม่ขยับนานกี่งาน" },
     ],
     defaultSubject: "งานออกแบบที่ค้าง {จำนวน} งาน · {วันที่}",
+    filterUi: ["brand", "status"],
+  },
+  {
+    key: "team_plan_weekly", label: "สรุปแผนงานทีม (รายสัปดาห์)",
+    description: "เสร็จกี่งานใน 7 วัน · ค้างกี่งาน · เกินกำหนด / รอคนอื่น อะไรบ้าง ของใคร — เหมาะตั้งส่งทุกวันศุกร์เย็น (docs/team-plan.md)",
+    rowFields: [
+      { key: "who", label: "ผู้รับผิดชอบ" }, { key: "priority", label: "ความด่วน" }, { key: "due", label: "กำหนด" },
+      { key: "waiting", label: "รอคนอื่น (รออะไร)" }, { key: "note", label: "โน้ต" }, { key: "source", label: "มาจาก (ใบงาน/SKU/โพสต์)" },
+      { key: "flag", label: "ป้าย (เกิน/ใกล้กำหนด/รอ/เสร็จ)" }, { key: "open", label: "ปุ่ม \"เปิดงาน\"" },
+    ],
+    defaultRowFields: ["who", "due", "waiting", "flag", "open"],
+    stats: [
+      { key: "done_week", label: "เสร็จใน 7 วัน" }, { key: "open", label: "ค้างทั้งหมด" }, { key: "overdue", label: "เกินกำหนด" },
+      { key: "waiting", label: "รอคนอื่น" }, { key: "due_soon", label: "ใกล้กำหนด" }, { key: "stale", label: "ไม่ขยับเกิน {stale_days} วัน" },
+      { key: "by_person", label: "แยกตามคน" },
+    ],
+    defaultStats: ["done_week", "open", "overdue", "waiting", "by_person"],
+    groupBy: [{ key: "status", label: "สถานะ (เกิน/รอ/ค้าง/เสร็จ)" }, { key: "person", label: "คนรับผิดชอบ" }, { key: "priority", label: "ความด่วน" }, { key: "none", label: "ไม่จัดกลุ่ม" }],
+    sortBy: [{ key: "urgent", label: "ด่วนก่อน (เกิน/ใกล้กำหนด → ความด่วน)" }, { key: "due", label: "กำหนดใกล้สุดก่อน" }, { key: "newest", label: "งานใหม่สุดก่อน" }],
+    subjectTokens: [
+      { key: "จำนวน", label: "งานค้าง" }, { key: "เสร็จ", label: "เสร็จใน 7 วัน" },
+      { key: "เกินกำหนด", label: "เกินกำหนดกี่งาน" }, { key: "รอ", label: "รอคนอื่นกี่งาน" },
+    ],
+    defaultSubject: "สรุปแผนงานทีม · เสร็จ {เสร็จ} · ค้าง {จำนวน} · {วันที่}",
+    filterUi: [],
+    defaultDays: [5], defaultTime: "17:00",
   },
 ];
 export const sourceLabel = (key: string) => EMAIL_REPORT_SOURCES.find((s) => s.key === key)?.label ?? key;
