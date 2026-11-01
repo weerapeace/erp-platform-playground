@@ -8,7 +8,7 @@
  *   - ทั้งทีม / ของฉัน + ตัวกรอง (⭐ วันนี้ / รอคนอื่น / เกินกำหนด) · จำมุมมองต่อคน
  * ข้อมูล: /api/team-plan (lib/team-plan-client) · กฎ: lib/team-plan · doc: docs/team-plan.md
  */
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   DndContext, DragOverlay, PointerSensor, TouchSensor, useDraggable, useDroppable, useSensor, useSensors,
   type DragEndEvent, type DragStartEvent,
@@ -17,16 +17,17 @@ import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
-import { WhoChip, WhoPicker } from "@/components/record-tasks/checklist";
-import { ERPDateTime24 } from "@/components/form";
+import { WhoChip } from "@/components/record-tasks/checklist";
 import { useViewPref } from "@/lib/use-view-pref";
 import {
   dueLabel, isOverdue, isPlanDone, isStarredToday, MAX_STARS, PRIORITIES, PRIORITY_META, QUADRANT_META, quadrantOf, quadrantPatch,
-  quickDue, REMIND_LABEL, REMIND_MODES, REPEAT_LABEL, sortPlanItems, waitingDays,
-  type PlanItem, type Priority, type Quadrant, type RemindMode,
+  REMIND_LABEL, REPEAT_LABEL, sortPlanItems, waitingDays,
+  type PlanItem, type Priority, type Quadrant,
 } from "@/lib/team-plan";
 import { createPlanItem, listPlanItems, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
 import { PlanEditModal } from "./edit-modal";
+import { PlanDraftFields, usePlanDraft } from "./draft-fields";
+import { AiSplitModal } from "./ai-split-modal";
 
 const VIEWS = ["priority", "matrix"] as const;
 const SCOPES = ["all", "me"] as const;
@@ -266,34 +267,27 @@ function PlanCardView({ t, canEdit, onOpen, onUpdate }: CardProps) {
   );
 }
 
-/** เพิ่มงานเร็ว — พิมพ์ + Enter */
+/** เพิ่มงานเร็ว — พิมพ์ + Enter (ช่องตั้งค่าใช้ของกลาง PlanDraftFields) · ✨ AI แตกงานจากข้อความยาว */
 function QuickAdd({ me, meName, onAdded }: { me: string; meName: string; onAdded: (t: PlanItem) => void }) {
   const toast = useToast();
+  const draft = usePlanDraft();
   const [title, setTitle] = useState("");
-  const [priority, setPriority] = useState<Priority>("normal");
-  const [dueKind, setDueKind] = useState<"today" | "tomorrow" | "friday" | "none" | "pick">("tomorrow");
-  const [dueCustom, setDueCustom] = useState("");
-  const [who, setWho] = useState<{ id: string; name: string } | null>(null);
-  const [picking, setPicking] = useState(false);
-  const [remind, setRemind] = useState<RemindMode>("before_1h");
-  const [important, setImportant] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [aiOpen, setAiOpen] = useState(false);
 
-  const dueIso = useMemo(() => (dueKind === "pick" ? (dueCustom ? new Date(`${dueCustom}:00+07:00`).toISOString() : null) : quickDue(dueKind)), [dueKind, dueCustom]);
   const submit = async () => {
     if (!title.trim()) { setErr("พิมพ์ชื่องานก่อน"); return; }
-    if (dueKind === "pick" && !dueIso) { setErr("เลือกวันกำหนดก่อน หรือเลือก 'ไม่กำหนด'"); return; }
+    if (draft.problem) { setErr(draft.problem); return; }
     setBusy(true);
     try {
-      const t = await createPlanItem({ title, priority, due_at: dueIso, assigned_to: who?.id ?? (me || null), remind: dueIso ? remind : "none", important });
+      const t = await createPlanItem(draft.toDraft(title.trim(), me || null));
       onAdded(t);
       setTitle(""); setErr(null);
-      if (who && who.id !== me) toast.success(`มอบงานให้ ${who.name} แล้ว — เขาจะได้แจ้งเตือน`);
+      if (draft.s.who && draft.s.who.id !== me) toast.success(`มอบงานให้ ${draft.s.who.name} แล้ว — เขาจะได้แจ้งเตือน`);
     } catch (e) { setErr(e instanceof Error ? e.message : "เพิ่มงานไม่สำเร็จ"); }
     finally { setBusy(false); }
   };
-  const pc = (p: Priority) => `h-7 rounded-full border px-2.5 text-xs ${priority === p ? "font-medium" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-2.5">
@@ -305,37 +299,14 @@ function QuickAdd({ me, meName, onAdded }: { me: string; meName: string; onAdded
         <button type="button" onClick={() => void submit()} disabled={busy} className="h-9 shrink-0 rounded-lg bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">
           <Icon name="add" /> เพิ่ม
         </button>
+        <button type="button" onClick={() => setAiOpen(true)} title="วางข้อความยาว (แชทลูกค้า / โน้ตประชุม) ให้ AI แตกเป็นงานทีละข้อ"
+          className="h-9 shrink-0 rounded-lg border border-violet-200 bg-violet-50 px-3 text-sm text-violet-700 hover:bg-violet-100">
+          <Icon name="ai" /> AI แตกงาน
+        </button>
       </div>
       {err && <p className="mt-1 text-xs text-rose-600">{err}</p>}
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-slate-500">
-        <span className="flex flex-wrap items-center gap-1">ความด่วน
-          {PRIORITIES.map((p) => (
-            <button key={p} type="button" onClick={() => setPriority(p)} className={pc(p)}
-              style={priority === p ? { borderColor: PRIORITY_META[p].color, color: PRIORITY_META[p].color, background: `${PRIORITY_META[p].color}14` } : undefined}>
-              {PRIORITY_META[p].label}
-            </button>
-          ))}
-        </span>
-        <span className="flex items-center gap-1">กำหนด
-          <select value={dueKind} onChange={(e) => setDueKind(e.target.value as typeof dueKind)} className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs">
-            <option value="today">วันนี้</option><option value="tomorrow">พรุ่งนี้</option><option value="friday">ศุกร์นี้</option>
-            <option value="pick">เลือกวัน…</option><option value="none">ไม่กำหนด</option>
-          </select>
-          {dueKind === "pick" && <ERPDateTime24 value={dueCustom} onChange={setDueCustom} defaultTime="18:00" />}
-        </span>
-        <span className="flex items-center gap-1">ใคร
-          <WhoChip name={who?.name ?? (meName ? `${meName} (ฉัน)` : null)} onClick={() => setPicking((p) => !p)} title="เลือกผู้รับผิดชอบ" />
-        </span>
-        {dueKind !== "none" && (
-          <span className="flex items-center gap-1">เตือน
-            <select value={remind} onChange={(e) => setRemind(e.target.value as RemindMode)} className="h-7 rounded-md border border-slate-200 bg-white px-1.5 text-xs">
-              {REMIND_MODES.map((m) => <option key={m} value={m}>{REMIND_LABEL[m]}</option>)}
-            </select>
-          </span>
-        )}
-        <label className="flex cursor-pointer items-center gap-1"><input type="checkbox" checked={important} onChange={(e) => setImportant(e.target.checked)} className="h-3.5 w-3.5 accent-violet-600" /> สำคัญ</label>
-      </div>
-      {picking && <WhoPicker allowNone={!!who} onCancel={() => setPicking(false)} onPick={(u) => { setWho(u); setPicking(false); }} />}
+      <div className="mt-2"><PlanDraftFields draft={draft} meName={meName} /></div>
+      {aiOpen && <AiSplitModal me={me} onClose={() => setAiOpen(false)} onAdded={(list) => list.forEach(onAdded)} />}
     </div>
   );
 }

@@ -35,6 +35,7 @@ import { HashtagLibraryModal, RecommendedTimesModal, PlatformSettingsModal, Capt
 import { CaptionToolbar, CaptionCard, AiCaptionModal, PullCaptionModal } from "./caption-card";
 import { ContentAttachments } from "./content-attachments";
 import { ContentBriefCard } from "./content-brief";
+import { AddToPlanModal } from "@/components/team-plan/add-to-plan";
 
 
 // drawer สินค้ากลาง (ของกลาง) — เปิดดู Parent SKU จากในคอนเทนต์ · dynamic กัน import วน
@@ -577,6 +578,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   };
   // ลบคอนเทนต์นี้ (มีปุ่มใน footer เมื่อไม่ได้ส่ง onDelete มาจากหน้า list) — ยืนยันก่อนลบเสมอ
   const [confirmDel, setConfirmDel] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);   // 📝 ใส่แผนงาน (ของกลาง) — ลิงก์กลับโพสต์นี้
   const [deleting, setDeleting] = useState(false);
   const doDelete = async () => {
     setDeleting(true);
@@ -1007,6 +1009,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         <div className="border-t border-slate-200 px-6 py-4 shrink-0 flex items-center gap-2">
           <RowMenu up label={`⋯ ${t("เพิ่มเติม", "More")}`} items={[
             ...(!d.is_template ? [{ label: `💾 ${t("บันทึกเป็นเทมเพลต", "Save as template")}`, onClick: saveAsTemplate }] : []),
+            ...(can("tasks.create") ? [{ label: `📝 ${t("ใส่แผนงาน", "Add to plan")}`, onClick: () => setPlanOpen(true) }] : []),
             { label: `🗑 ${t("ลบคอนเทนต์นี้", "Delete this content")}`, onClick: () => (onDelete ? onDelete(d) : setConfirmDel(true)) },
           ]} />
           <button onClick={requestClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 ml-auto">{t("ปิด", "Close")}</button>
@@ -1021,6 +1024,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         confirmText={t("เอาออก", "Remove")} />
       <ConfirmDialog open={!!delAtt} onClose={() => setDelAtt(null)} onConfirm={async () => { if (!delAtt) return; const id = delAtt.id; setDelAtt(null); try { await onDelAttachment(id); pushToast("success", t("ลบไฟล์แล้ว", "File deleted")); } catch (e) { pushToast("error", (e as Error).message); } }}
         title={t("ลบไฟล์ออกจากคอนเทนต์", "Remove file")} message={<span>{t("ลบ", "Delete")} <span className="font-medium">{delAtt?.label}</span> {t("ออกจากคอนเทนต์นี้? (รูปจากงานไม่ได้รับผลกระทบ)", "from this content? (task images are unaffected)")}</span>} confirmText={t("ลบ", "Delete")} variant="danger" />
+      {planOpen && <AddToPlanModal open defaultTitle={`โพสต์: ${d.title}`} source={{ label: d.title || "โพสต์", href: `/tasks/content-calendar?content=${encodeURIComponent(contentId)}` }} onClose={() => setPlanOpen(false)} />}
       {cfgOpen && <CaptionConfigModal cfg={capCfg} brandId={brandId} brandLabel={brandLabel} platforms={platforms} onClose={() => setCfgOpen(false)} onSaved={(v) => { setCapCfg(v); setCfgOpen(false); }} pushToast={pushToast} />}
       {tplSettingsOpen && <CaptionTemplateSettings brandId={brandId} brandLabel={brandLabel} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}
       {psOpen && <PlatformSettingsModal platforms={platforms} templates={templates} settings={pset} onClose={() => setPsOpen(false)} onSaved={(v) => { setPset(v); mutateSWR(PLATFORM_SETTINGS_SWR_KEY, v); setPsOpen(false); }} pushToast={pushToast} />}

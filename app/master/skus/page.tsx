@@ -19,6 +19,8 @@ import { SkuTaobaoSource } from "@/components/sku-taobao-source";
 import { BomWhereUsed } from "@/components/bom-where-used";
 import { SkuTradeHistory } from "@/components/sku-trade-history";
 import { SkuSwatchLinks } from "@/components/sku-swatch-links";
+import { useAuth } from "@/components/auth";
+import { AddToPlanModal, type PlanSource } from "@/components/team-plan/add-to-plan";
 
 // F20: client-only render — กัน Worker 1102 (SSR component หนัก)
 const MasterCRUDPage = dynamic(
@@ -112,11 +114,22 @@ export default function SkusV2Page() {
   const toast = useToast();
   const tr = useT();
   const [tab, setTab] = useState<TabKey>("browse");   // เปิดมาเจอ "เลือกดูตามแท็ก" ก่อน (ตามที่เจ้าของขอ)
+  const { can } = useAuth();
+  const canPlan = can("tasks.create");
+  // 📝 ใส่แผนงาน (ของกลาง) — ปุ่มรายแถว → ป๊อปตั้งงาน + ลิงก์กลับ SKU นี้
+  const [planFor, setPlanFor] = useState<{ title: string; source: PlanSource } | null>(null);
 
   // เพิ่มปุ่ม "คัดลอก" รายแถว — ก๊อปทุกฟิลด์ไปเป็น SKU ใหม่ + (copy) ท้ายชื่อ + รหัสใหม่
   const config = useMemo<MasterCRUDConfig>(() => ({
     ...CONFIG,
-    extraRowActions: [{
+    extraRowActions: [...(canPlan ? [{
+      label: tr("ใส่แผนงาน", "Add to plan"), icon: "📝",
+      onClick: (row: Record<string, unknown>) => {
+        const code = String(row.code ?? "").trim();
+        const name = String(row.name ?? "").trim();
+        setPlanFor({ title: [code, name].filter(Boolean).join(" "), source: { label: code || name || "SKU", href: `/master/skus?open=${encodeURIComponent(String(row.id))}` } });
+      },
+    }] : []), {
       label: tr("คัดลอก", "Duplicate"), icon: "⧉",
       onClick: async (row) => {
         try {
@@ -146,7 +159,7 @@ export default function SkusV2Page() {
       key: "trade_history", label: "ประวัติซื้อ-ขาย-ผลิต", icon: "📜",
       render: ({ recordId }) => recordId ? <div className="p-3"><SkuTradeHistory skuId={recordId} /></div> : <div className="p-3 text-sm text-slate-400">บันทึกสินค้าก่อน แล้วประวัติจะมาแสดงที่นี่</div>,
     }],
-  }), [toast, tr]);
+  }), [toast, tr, canPlan]);
 
   return (
     <div>
@@ -163,6 +176,7 @@ export default function SkusV2Page() {
       {tab === "table"  && <MasterCRUDPage config={config} />}
       {tab === "browse" && <div className="max-w-[1200px] mx-auto px-5 py-5"><SkuTagBrowser /></div>}
       {tab === "tags"   && <TagsManagerPage />}
+      {planFor && <AddToPlanModal open defaultTitle={planFor.title} source={planFor.source} onClose={() => setPlanFor(null)} />}
     </div>
   );
 }

@@ -37,6 +37,9 @@
 | ฝั่งเซิร์ฟเวอร์ | `lib/team-plan-server.ts` |
 | เรียกจากหน้าเว็บ | `lib/team-plan-client.ts` (ใช้ทำปุ่ม "ใส่แผนงาน" จากโมดูลอื่นได้) |
 | หน้าจอ | `components/team-plan` (`TeamPlanBoard`, `PlanEditModal`) · หน้า `app/tasks/plan/page.tsx` |
+| ช่องตั้งค่างานใหม่ (ของกลาง) | `components/team-plan/draft-fields.tsx` (`usePlanDraft` + `PlanDraftFields` — ความด่วน/กำหนด/ใคร/เตือน/สำคัญ) ใช้ทั้งช่องเพิ่มเร็วและป๊อปใส่แผนงาน |
+| ปุ่ม "ใส่แผนงาน" (ของกลาง) | `components/team-plan/add-to-plan.tsx` (`AddToPlanButton` / `AddToPlanModal`) |
+| AI แตกงาน | `app/api/team-plan/ai-split/route.ts` + `components/team-plan/ai-split-modal.tsx` |
 
 ## แจ้งเตือน (รอบ 2)
 พ่วงกับตัวตั้งเวลาเดิม **`/api/cron/email-reports` (pg_cron ทุก 15 นาที)** → `runTeamPlanReminders` (ไม่มีตัวตั้งเวลา/ตารางใหม่)
@@ -52,6 +55,16 @@
 - กันส่งซ้ำ: `metadata.plan_sent` (`remind_for` / `overdue_for` = กำหนดที่เตือนแล้ว · เปลี่ยนกำหนด = เตือนใหม่ · `waiting_on` · `snooze_until`/`snooze_sent`) · สรุปเช้ากันด้วยแจ้งเตือน `team_plan.summary` ของวันนั้น
 - **ปุ่มบนแจ้งเตือนมือถือ** (อีก 1 ชม. / พรุ่งนี้เช้า / เสร็จแล้ว): `lib/push-server` ใส่ `actions` + รหัสลับ `act` (HMAC ผูกงาน+คน · 7 วัน · `signPlanAction`) → `public/notify-sw.js` ส่ง `POST /api/team-plan/push-action` · Android/คอมรองรับ · iPhone ยังไม่รองรับปุ่ม (กดแล้วเปิดแอปตามปกติ)
 
+## ใส่แผนงานจากที่อื่น + AI แตกงาน (รอบ 3)
+- **ปุ่ม "ใส่แผนงาน"** (ต้องมี tasks.create · ไม่มี = ไม่โชว์): ตั้งชื่อ/ความด่วน/กำหนด/ใคร/เตือน แล้วงานจะมี 🔗 ลิงก์กลับเรื่องเดิม (`plan.source` — รับเฉพาะลิงก์ในระบบที่ขึ้นต้น "/")
+  | ที่ | ลิงก์กลับ |
+  |---|---|
+  | ป๊อปใบงานออกแบบ — หัวป๊อป + ทุก Comment ลูกค้า (ชื่องาน "แก้ตาม Comment: …") | `/master/design-dashboard?open=<id>` |
+  | ตาราง SKU — ปุ่มรายแถว 📝 | `/master/skus?open=<id>` |
+  | ตาราง Parent SKU — ปุ่มรายแถว 📝 | `/master/parent-skus?open=<id>` |
+  | ป๊อปโพสต์คอนเทนต์ — เมนู ⋯ เพิ่มเติม | `/tasks/content-calendar?content=<id>` |
+  เพิ่มที่ใหม่ = ใส่ `<AddToPlanButton title source />` (หรือคุม `<AddToPlanModal>` เองถ้าเป็นปุ่มรายแถว) — ห้ามทำป๊อปเพิ่มงานเอง
+- **✨ AI แตกงาน** (ปุ่มข้างช่องเพิ่มงาน): วางแชท/โน้ตประชุม → `POST /api/team-plan/ai-split` (tasks.create + ai.caption · มีค่าใช้จ่ายต่อครั้ง · audit `ai_team_plan_split`) → AI แยกงาน เดาความด่วน/วันกำหนด/คน (จับคู่ชื่อจากรายชื่อทีมจริง ไม่เจอ = ให้ฉัน · วันที่ย้อนหลังถูกตัดทิ้ง) → **ยังไม่บันทึก** คนตรวจ/แก้/เอาติ๊กออกก่อน แล้วกด "เพิ่ม N งาน" (มีกำหนด = เตือนก่อน 1 ชม.)
+
 ## ยังไม่ทำ (รอบถัดไป)
-- รอบ 3: ปุ่ม "ใส่แผนงาน" ในใบงาน / Comment / SKU / โพสต์ + AI แตกงานจากข้อความยาว
 - รอบ 4: สรุปประจำสัปดาห์วันศุกร์ทางอีเมล + ลากลงปฏิทิน / แผนส่วนตัว

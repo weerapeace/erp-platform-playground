@@ -40,6 +40,7 @@ import { RichTextEditor } from "@/components/rich-text";
 import type { Attachment } from "@/app/api/attachments/route";
 import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
+import { AddToPlanButton } from "@/components/team-plan/add-to-plan";
 import { costUsagePerUnit } from "@/lib/cost-usage";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import type { SkuPickerValue } from "@/components/pickers";
@@ -1960,6 +1961,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               <button type="button" onClick={() => { if (!form.id) return; if (onOpenPresentation) onOpenPresentation(form.id); else setPresentOpen(true); }}
                 title={t("จัดใบนำเสนอ A4 สำหรับเสนอลูกค้า (เลือกรูป + ข้อความ 1-2 หน้า แล้วพิมพ์/PDF)", "Build an A4 presentation for the customer (pick images + text, 1-2 pages, then print/PDF)")}
                 className="h-9 px-3 inline-flex items-center text-sm border border-amber-300 rounded-lg text-amber-800 bg-amber-50 hover:bg-amber-100">{t("📄 ใบนำเสนอ A4", "📄 A4 presentation")}</button>
+              {/* ➕ ใส่แผนงานทีม (ของกลาง team-plan) — ลิงก์กลับใบงานนี้ */}
+              {form.id && <AddToPlanButton title={`${form.code ? `${form.code} ` : ""}${form.name}`.trim()} source={{ label: form.code || form.name, href: `/master/design-dashboard?open=${encodeURIComponent(form.id)}` }} />}
               <a href={`/print/design-sheet/${form.id}`} target="_blank" rel="noreferrer"
                 className="h-9 px-3 inline-flex items-center text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("🖨 ใบสั่งตัวอย่าง", "🖨 Sample order")}</a>
               <a href={`/print/design-sheet-quote/${form.id}`} target="_blank" rel="noreferrer"
@@ -2055,6 +2058,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                         <button title={t("รูปประกอบ", "Images")}
                           onClick={() => { const closing = openImgCid === c.id; setOpenImgCid(closing ? null : c.id); if (closing && form.id) void loadCq(form.id); }}
                           className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">🖼 {c.images.length}</button>
+                        {form.id && <AddToPlanButton label={t("แผนงาน", "Plan")}
+                          title={`${form.code ? `${form.code} ` : ""}แก้ตาม Comment: ${c.body.replace(/\s+/g, " ").slice(0, 120)}`}
+                          source={{ label: `${form.code || form.name} · Comment #${i + 1}`, href: `/master/design-dashboard?open=${encodeURIComponent(form.id)}` }}
+                          className="h-7 px-2 inline-flex items-center gap-1 text-xs border border-violet-200 rounded-lg text-violet-700 hover:bg-violet-50" />}
                         {canEdit && <button onClick={() => startEditComment(c)} title={t("แก้", "Edit")} className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">✏</button>}
                         {canEdit && <button onClick={() => setDelComment(c)} title={t("ลบ", "Delete")} className="h-7 px-2 text-xs border border-rose-200 rounded-lg text-rose-500 hover:bg-rose-50">🗑</button>}
                       </div>

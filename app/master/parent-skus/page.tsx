@@ -17,6 +17,7 @@ import { useMemo, useState } from "react";
 import type { MasterCRUDConfig } from "@/components/master-crud";
 import { parentSkuExtraTabs, parentSkuPngSlots } from "@/components/master-crud/parent-sku-extra-tabs";
 import { useAuth } from "@/components/auth";
+import { AddToPlanModal, type PlanSource } from "@/components/team-plan/add-to-plan";
 import { apiFetch } from "@/lib/api";
 
 const MasterCRUDPage = dynamic(
@@ -154,6 +155,9 @@ export default function ParentSKUsV2Page() {
   const [mgrId, setMgrId] = useState<string | null>(null);
   // null = ยังไม่เคยเปิด · เปิดแล้วคงไว้ (อัปเบื้องหลังต่อได้ + กลับมาดูผล/ย้อนทั้งชุดได้)
   const [routerOpen, setRouterOpen] = useState<boolean | null>(null);
+  // 📝 ใส่แผนงาน (ของกลาง) — ปุ่มรายแถว → ป๊อปตั้งงาน + ลิงก์กลับรุ่นนี้
+  const [planFor, setPlanFor] = useState<{ title: string; source: PlanSource } | null>(null);
+  const canPlan = can("tasks.create");
   const actor = user?.name ?? user?.email ?? undefined;
   // เพิ่ม row action "ลงขายหลายแพลตฟอร์ม" + ช่อง "รูป Description" ในฟอร์ม — config สร้างใน component เพื่อ setState/actor
   const canRoute = can("products.edit") && can("files.upload");
@@ -167,6 +171,11 @@ export default function ParentSKUsV2Page() {
     extraRowActions: [
       ...(CONFIG.extraRowActions ?? []),
       { label: "ลงขายหลายแพลตฟอร์ม", icon: "🏬", onClick: (row) => setMgrId(String(row.id)) },
+      ...(canPlan ? [{ label: "ใส่แผนงาน", icon: "📝", onClick: (row: Record<string, unknown>) => {
+        const code = String(row.code ?? "").trim();
+        const name = String(row.name ?? "").trim();
+        setPlanFor({ title: [code, name].filter(Boolean).join(" "), source: { label: code || name || "Parent SKU", href: `/master/parent-skus?open=${encodeURIComponent(String(row.id))}` } });
+      } }] : []),
     ],
     // ช่อง "หมวดกลางสำหรับลงขาย" (platform_category_id) — picker ค้นหา+เพิ่มในตัว บนแท็บข้อมูลหลัก
     formRenderers: {
@@ -197,11 +206,12 @@ export default function ParentSKUsV2Page() {
     extraTabs: parentSkuExtraTabs(),
     // 🖼 ช่องใหญ่ "รูปตัดพื้น (PNG)" ใต้รูปสินค้า (การ์ดบนฉากของเว็บร้านใช้) — ชุดเดียวกับ drawer
     sidePngSlots: parentSkuPngSlots(),
-  }), [actor, canRoute]);
+  }), [actor, canRoute, canPlan]);
   return (
     <>
       <MasterCRUDPage config={config} />
       {routerOpen !== null && <ProductImageRouter open={routerOpen} onClose={() => setRouterOpen(false)} />}
+      {planFor && <AddToPlanModal open defaultTitle={planFor.title} source={planFor.source} onClose={() => setPlanFor(null)} />}
       {mgrId && <ProductPlatformManager parentSkuId={mgrId} onClose={() => setMgrId(null)} canEdit={can("products.platforms.edit")} canPublish={can("products.platforms.publish")} />}
     </>
   );

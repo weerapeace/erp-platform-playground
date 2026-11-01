@@ -62,6 +62,7 @@ export type Permission =
   | "receipts.view" | "receipts.create" | "receipts.edit" | "receipts.cancel"
   | "belt_builder.view" | "belt_builder.edit"
   | "configurator.view" | "configurator.edit"
+  | "tasks.view" | "tasks.create" | "tasks.edit" | "tasks.delete"   // แอปจัดการงาน (แผนงานทีม / Creative) — สิทธิ์จริงอ่านจาก DB
   // ↓ คืนจาก commit 6895c54d (ไฟล์นี้เคยถูกทับด้วยฉบับเก่า 2026-07-01) — ใช้จริงในหลายหน้า · สิทธิ์จริงอ่านจาก DB (erp_my_permissions)
   | "products.platforms.view" | "products.platforms.edit" | "products.platforms.publish" | "products.platforms.manage_accounts" | "platform_orders.view" | "platform_orders.manage"
   | "work_board.dispatch" | "production.piecework" | "qc.view" | "qc.receive" | "qc.move" | "qc.ship"
