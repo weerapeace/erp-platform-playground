@@ -17,6 +17,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { fetchAllPages } from "@/lib/fetch-all";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
@@ -39,12 +40,14 @@ const chunk = <T,>(arr: T[], n: number) => Array.from({ length: Math.ceil(arr.le
 const keysOf = (v: unknown, max: number) => (Array.isArray(v) ? v.filter((k): k is string => typeof k === "string" && LISTING_KEY_RE.test(k)) : []).slice(0, max);
 const heroKey = (m: HeroMedia | null | undefined) => (m?.key ? m.key : null);
 
-/** SKU ลูกของหลายรุ่น (เฉพาะที่ใช้งาน) */
+/** SKU ลูกของหลายรุ่น (เฉพาะที่ใช้งาน) — ดึงครบทุกหน้า (fetchAllPages): 150 รุ่นมีสีได้เกิน 1,000 แถว
+ *  เดิมถูกตัดเงียบ ๆ ที่ 1,000 → รุ่นรหัสท้าย ๆ (เช่น TTM094) ขึ้น "0 สี" รูปโฟลเดอร์สีไปลงรูปบนเว็บแทน */
 async function loadKids(sb: ReturnType<typeof supabaseAdmin>, parentIds: string[]): Promise<Kid[]> {
   const out: Kid[] = [];
   for (const ids of chunk(parentIds, 150)) {
-    const { data } = await sb.from("skus_v2").select("id, code, color, color_th, attribute_values, parent_sku_id").in("parent_sku_id", ids).eq("is_active", true).order("code");
-    out.push(...((data ?? []) as Kid[]));
+    out.push(...(await fetchAllPages<Kid>((from, to) =>
+      sb.from("skus_v2").select("id, code, color, color_th, attribute_values, parent_sku_id").in("parent_sku_id", ids).eq("is_active", true)
+        .order("code").order("id").range(from, to))));
   }
   return out;
 }
