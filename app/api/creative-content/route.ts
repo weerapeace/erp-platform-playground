@@ -13,6 +13,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { nextContentNo } from "@/lib/creative-tasks-server";
+import { normalizeTaskLinks } from "@/lib/record-tasks";
 import { SELECT, flattenContent, attachAssignees, validateContentFields, attachProducts, attachReadiness, normalizeProducts, replaceContentProducts } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -61,6 +62,7 @@ type CreateBody = {
   discount_value?: number | null; discount_is_percent?: boolean; assignee_id?: string | null; assignee_ids?: string[];
   products?: { parent_sku_id?: string | null; sku_id?: string | null }[];   // สินค้าหลายตัว — แถวแรก = ตัวหลัก (ทับ sku_id/parent_sku_id)
   pillar_id?: string | null; goal?: string | null; brief?: string | null; ref_image_keys?: string[];   // ฝั่งวางแผน (หน้า /marketing/content-plan)
+  ref_links?: unknown;     // ลิงก์ Ref ของบรีฟ [{url,label?}]
   placements?: string[];   // ลงที่ไหน แบบแบ่งประเภท "ประเภท:ช่องทาง"
 };
 
@@ -91,6 +93,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     assignee_id: (Array.isArray(body.assignee_ids) ? body.assignee_ids[0] : body.assignee_id) || null,
     pillar_id: body.pillar_id || null, goal: body.goal || null, brief: body.brief?.trim() || null,
     ref_image_keys: Array.isArray(body.ref_image_keys) ? body.ref_image_keys : [],
+    ref_links: normalizeTaskLinks(body.ref_links),   // เฉพาะ http/https ตัดซ้ำ (ตัวทำความสะอาดลิงก์กลาง)
     placements: Array.isArray(body.placements) ? body.placements : [],
   });
 

@@ -6,20 +6,20 @@
  *   ปุ่ม: บันทึก · 🎬 ส่งเป็นงานให้ทีม Creative (สร้างงาน + ผูก) · 📝 รายละเอียดเต็ม/แคปชั่น (ContentDrawer เดิม) · 🗑 ลบ
  * หน้าตา (2026-10-12 เจ้าของบอก "ตาลาย"): บนสุด = หัวข้อตัวใหญ่ + บรีฟ · ล่าง = รายการ "ป้ายซ้าย : ค่าขวา" ทีละบรรทัด
  *   แนว/เป้าหมาย/แบรนด์ = dropdown (โชว์แค่ค่าที่เลือก) · ช่องทาง/รูปแบบ = ปุ่มเรียบ (ไม่มีกรอบ ตัวที่เลือกถึงเข้ม)
- * ของกลาง: ERPModal · ConfirmDialog · ParentSkuPicker · FileMultiInput · ERPDateTime24 (เวลา 24 ชม.) · SearchableSelect · PlatformIcon · Toast
+ * ของกลาง: ERPModal · ConfirmDialog · ParentSkuPicker · BriefRefSlots (Ref รูป+ลิงก์) · RichTextEditor (บรีฟ) · ERPDateTime24 (เวลา 24 ชม.) · SearchableSelect · PlatformIcon · Toast
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLang, useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
-import { FileMultiInput } from "@/components/file-multi-input";
 import { RichTextEditor } from "@/components/rich-text";
+import { BriefRefSlots, type BriefRefLink } from "@/app/tasks/content/content-brief";
 import { noteToHtml, noteToText, isEmptyNote } from "@/lib/rich-note";
 import { ERPDateTime24 } from "@/components/form";
 import { PlatformIcon } from "@/components/platform-icon";
 import { SearchableSelect } from "@/components/searchable-select";
-import { useToast } from "@/components/toast";
+import { useToast, usePushToast } from "@/components/toast";
 import { createContent, updateContent, deleteContent, createTask, POST_TYPES, splitPostTypes, joinPostTypes, type ContentItem, type BrandOption } from "@/app/tasks/data";
 import { labelName, type MarketingSkuLabel } from "@/lib/marketing/sku-list";
 import { CONTENT_GOALS, dateKeyOf, timeOf, toScheduledIso, stageOf, STAGE_META, placementId, parsePlacement, platformsFromPlacements, type PlacementType } from "@/lib/marketing/content-plan";
@@ -33,7 +33,7 @@ type Draft = {
   placements: string[];
   /** ช่องทางที่เลือกแบบไม่ระบุประเภท (ข้อมูลเดิม / ยังไม่ตั้งประเภท) */
   platforms: string[];
-  date: string; time: string; parent: ParentSkuPickerValue | null; brief: string; ref_image_keys: string[];
+  date: string; time: string; parent: ParentSkuPickerValue | null; brief: string; ref_image_keys: string[]; ref_links: BriefRefLink[];
 };
 
 /** ปุ่มเลือกแบบเรียบ (ช่องทาง/รูปแบบ) — ไม่มีกรอบ · ตัวที่เลือก = พื้นเข้ม */
@@ -44,7 +44,7 @@ type PlanDefaults = { brandId?: string | null; date?: string | null; platform?: 
 function toDraft(c: ContentItem | null, defaults: PlanDefaults): Draft {
   if (!c) return {
     title: defaults.title ?? "", brand_id: defaults.brandId ?? "", pillar_id: "", goal: "", post_types: [], placements: defaults.placements ?? [], platforms: defaults.platform ? [defaults.platform] : [],
-    date: defaults.date ?? "", time: "10:00", parent: null, brief: "", ref_image_keys: [],
+    date: defaults.date ?? "", time: "10:00", parent: null, brief: "", ref_image_keys: [], ref_links: [],
   };
   return {
     title: c.title ?? "", brand_id: c.brand_id ?? "", pillar_id: c.pillar_id ?? "", goal: c.goal ?? "",
@@ -53,7 +53,7 @@ function toDraft(c: ContentItem | null, defaults: PlanDefaults): Draft {
     platforms: (c.platforms ?? []).filter((p) => !(c.placements ?? []).some((x) => parsePlacement(x)?.platform === p)),
     date: dateKeyOf(c.scheduled_at) ?? "", time: timeOf(c.scheduled_at),
     parent: c.parent_sku_id ? { id: c.parent_sku_id, code: c.parent_sku_code ?? "", name: c.parent_sku_name ?? "", image_url: c.parent_sku_image_url ?? null } : null,
-    brief: noteToHtml(c.brief), ref_image_keys: c.ref_image_keys ?? [],
+    brief: noteToHtml(c.brief), ref_image_keys: c.ref_image_keys ?? [], ref_links: c.ref_links ?? [],
   };
 }
 
@@ -83,6 +83,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
   useLang();   // ฟังการสลับภาษา → ชื่อป้าย/แนว (labelName) เปลี่ยนตาม (หน้าแรกวาดเป็นไทยก่อน แล้วค่อยสลับ)
   const t = useT();
   const toast = useToast();
+  const pushToast = usePushToast();   // ช่อง Ref แจ้งเตือน (อัปไม่สำเร็จ / เต็มแล้ว)
   const [d, setD] = useState<Draft>(() => toDraft(item, defaults));
   const [busy, setBusy] = useState(false);
   const [askDelete, setAskDelete] = useState(false);
@@ -122,7 +123,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
     post_type: d.post_types.length ? joinPostTypes(d.post_types) : null,
     placements: d.placements, platforms: platformsFromPlacements(d.placements, d.platforms),   // ช่องทางรวม (ปฏิทิน/เป้า/แคปชั่นเดิมใช้)
     scheduled_at: d.date ? toScheduledIso(d.date, d.time || "10:00") : null,
-    parent_sku_id: d.parent?.id ?? null, brief: isEmptyNote(d.brief) ? null : d.brief, ref_image_keys: d.ref_image_keys,
+    parent_sku_id: d.parent?.id ?? null, brief: isEmptyNote(d.brief) ? null : d.brief, ref_image_keys: d.ref_image_keys, ref_links: d.ref_links,
   });
 
   const save = async (): Promise<string | null> => {
@@ -158,7 +159,7 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
       const t = await createTask({
         title: d.title.trim(), brand_id: d.brand_id || null, parent_sku_id: d.parent?.id ?? null, platforms: platformsFromPlacements(d.placements, d.platforms),
         // บรีฟเป็นโน้ตจัดรูปแบบ → รายละเอียดงานเป็นข้อความล้วน (bullet = "- ") + ต่อท้ายลิงก์ Ref ที่ใส่ไว้ในป๊อปโพสต์
-        description: [noteToText(d.brief), ...((item?.ref_links ?? []).length ? ["", "Ref:", ...(item?.ref_links ?? []).map((l) => l.url)] : [])].join("\n").trim() || null,
+        description: [noteToText(d.brief), ...(d.ref_links.length ? ["", "Ref:", ...d.ref_links.map((l) => l.url)] : [])].join("\n").trim() || null,
         reference_images: d.ref_image_keys, due_date: d.date || null,
       });
       await updateContent(id, { task_id: t.id });
@@ -319,9 +320,10 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
             <ParentSkuPicker value={d.parent} onChange={(v) => set({ parent: v })} disabled={ro || locked} disableCreate placeholder={t("เลือกรุ่นสินค้า (ไม่บังคับ)", "Pick a product model (optional)")} />
           ))}
 
-          {row("🖼️", t("รูปอ้างอิง", "Reference images"), (
-            <FileMultiInput value={d.ref_image_keys} onChange={(keys) => set({ ref_image_keys: keys })} folder="content-plan" max={12} disabled={ro} />
-          ), t("สูงสุด 12 รูป", "Up to 12 images"))}
+          {/* Ref รูป + ลิงก์ — ช่องกลางตัวเดียวกับ "รายการงานที่ต้องการ" ในป๊อปโพสต์ (รวมไม่เกิน 6) */}
+          {row("🖼️", t("Ref ตัวอย่าง", "References"), (
+            <BriefRefSlots images={d.ref_image_keys} links={d.ref_links} onImages={(keys) => set({ ref_image_keys: keys })} onLinks={(links) => set({ ref_links: links })} onMessage={pushToast} disabled={ro} />
+          ))}
         </div>
       </ERPModal>
 
