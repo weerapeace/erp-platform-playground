@@ -531,6 +531,21 @@ export function skuImageOverrides(raw: unknown): Record<string, string[]> {
 const kidImages = (k: ChildSku, overrides: Record<string, string[]>): string[] =>
   overrides[k.id]?.length ? overrides[k.id] : k.cover_image_r2_key ? [k.cover_image_r2_key] : [];
 
+/** 🖼 รูปของแต่ละสีบนเว็บมาจากไหน — web = รูปเว็บรายสีที่เลือกไว้ · sku = รูปปก SKU 1 รูปแทน · none = ไม่มีรูป */
+export type ColorImageSource = "web" | "sku" | "none";
+
+/** ต่อสี (ชื่อสีที่เว็บโชว์) → SKU ตัวแทนของสี + ที่มาของรูป · เลือกตัวแทนแบบเดียวกับ resolveOptions (SKU ตัวแรกของสีนั้น) */
+export function colorImageSources(kids: ChildSku[], webSkuImages: unknown): Map<string, { skuId: string; img: ColorImageSource }> {
+  const overrides = skuImageOverrides(webSkuImages);
+  const out = new Map<string, { skuId: string; img: ColorImageSource }>();
+  for (const k of sortKids(kids)) {
+    const label = baseColor(k);
+    if (!label || out.has(label)) continue;
+    out.set(label, { skuId: k.id, img: overrides[k.id]?.length ? "web" : k.cover_image_r2_key ? "sku" : "none" });
+  }
+  return out;
+}
+
 /** สร้างตัวเลือกจากสีของ SKU ลูก (ตัดสีซ้ำ) */
 function resolveOptions(
   map: FieldMap,

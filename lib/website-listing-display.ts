@@ -3,7 +3,7 @@
  * คืน: ค่าอัตโนมัติ (ถ้าไม่กรอกทับ) · ค่าที่เห็นจริง (ชื่อ/ราคา/รูป/สี/รูปเปิด/ลิงก์) · หมวดที่ใช้จริง · สิ่งที่ต้องแก้
  * ใช้ร่วม: /api/website/listings (หน้า "สินค้าบนเว็บ") + /api/parent-web-listings (ตัวตั้งค่าเว็บของสินค้า)
  */
-import { resolveProduct, type FieldMap, type ParentRow, type ChildSku, type ListingRow } from "@/lib/website-field-map";
+import { colorImageSources, resolveProduct, type ColorImageSource, type FieldMap, type ParentRow, type ChildSku, type ListingRow } from "@/lib/website-field-map";
 import { swatchCss, type SwatchIndex } from "@/lib/color-swatch";
 import { normalizeHero } from "@/lib/website-hero";
 import { productPageUrl } from "@/lib/website-links";
@@ -25,7 +25,8 @@ export type ListingDisplay = {
   priceVaries: boolean;
   imageKey: string | null;
   imageCount: number;
-  colors: { label: string; swatch: string | null; hasImage: boolean }[];
+  /** img = รูปของสีนี้บนเว็บมาจากไหน · skuId = SKU ตัวแทนของสี (เปิดหน้าแก้ไปที่แถวสีนั้น) · กรอกตัวเลือกทับเอง = ไม่มีทั้งคู่ */
+  colors: { label: string; swatch: string | null; hasImage: boolean; img?: ColorImageSource; skuId?: string }[];
   hero: boolean;
   productUrl: string | null;
   /** 📐 ร้านเปิดเช็คขนาด แต่ยังไม่ได้วัดช่องใส่ของ (compartments = null) */
@@ -52,6 +53,9 @@ export function computeListingDisplay(a: {
   const l = a.listing ?? {};
   const mapped = resolveProduct(a.fieldMap, a.parent, a.kids, null, a.categoryName, a.tagCategories) as unknown as ListingAuto;
   const eff = resolveProduct(a.fieldMap, a.parent, a.kids, l as ListingRow, a.categoryName, a.tagCategories);
+  // 🖼 ที่มาของรูปรายสี — เฉพาะตัวเลือกที่มาจากสีของ SKU (กรอกตัวเลือกทับเอง = รูปมากับตัวเลือก ไม่ต้องเช็ก)
+  const customOptions = !!(l.web_options as { items?: unknown[] } | null)?.items?.length;
+  const sources = customOptions ? null : colorImageSources(a.kids, l.web_sku_images);
   const display: ListingDisplay = {
     name: eff.name,
     price: eff.price,
@@ -61,7 +65,8 @@ export function computeListingDisplay(a: {
     imageCount: eff.images.length,
     colors: (eff.options?.items ?? []).map((it) => {
       const spec = it.swatch ? null : a.swatches.resolve(it.label);
-      return { label: it.label, swatch: it.swatch || (spec ? swatchCss(spec, thumb) : null), hasImage: !!(it.image || it.images?.length) };
+      const src = sources?.get(it.label);
+      return { label: it.label, swatch: it.swatch || (spec ? swatchCss(spec, thumb) : null), hasImage: !!(it.image || it.images?.length), ...(src ? { img: src.img, skuId: src.skuId } : {}) };
     }),
     hero: !!normalizeHero(l.web_hero),
     productUrl: productPageUrl(a.siteUrl, a.code),

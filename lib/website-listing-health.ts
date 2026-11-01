@@ -10,18 +10,35 @@ export interface ListingHealthInput {
   /** หมวดบนเว็บที่อยู่ */
   categories: string[];
   /** ตัวเลือก (สี) — swatch = จุดสีจากทะเบียนสี (null = ยังไม่ผูก) · hasImage = สีนี้มีรูปไหม */
-  colors: { label: string; swatch: string | null; hasImage: boolean }[];
+  colors: HealthColor[];
   /** 📐 ร้านเปิด "เช็คขนาด" แต่รุ่นนี้ยังไม่ได้วัดช่องใส่ของ (lib/fit-check) */
   compartmentsMissing?: boolean;
 }
 
+/** img = รูปของสีบนเว็บมาจากไหน (web รูปเว็บรายสี · sku รูปปก SKU แทน · none ไม่มี) · skuId = SKU ตัวแทนของสี */
+export type HealthColor = { label: string; swatch: string | null; hasImage: boolean; img?: "web" | "sku" | "none"; skuId?: string };
+
 export interface ListingIssue {
-  key: "no_price" | "no_image" | "no_category" | "swatch_missing" | "color_no_image" | "no_compartments";
+  key: "no_price" | "no_image" | "no_category" | "swatch_missing" | "color_no_image" | "color_no_web_image" | "no_compartments";
   label: string;
   /** ชื่อสีที่เกี่ยว (ถ้ามี) — โชว์ใน tooltip */
   detail?: string;
   /** ชื่อสีที่เกี่ยว (แยกรายการ) — ปุ่ม 🎨 ผูกจุดสี เปิดทะเบียนสีโชว์เฉพาะสีเหล่านี้ */
   names?: string[];
+  /** SKU ของสีแรกที่ต้องแก้ — กดป้ายแล้วเปิดหน้าแก้ไปที่แถวสีนั้น */
+  skuId?: string;
+}
+
+/**
+ * 🖼 รูปบนเว็บรายสี: ครบไหม · ใช้ร่วม ป้าย/จุดสี/ตัวกรองในหน้า "สินค้าบนเว็บ"
+ *   missing = สีที่ไม่มีรูปเลย + (ถ้ารุ่นนี้ลงรูปเว็บไว้บางสีแล้ว) สีที่ยังใช้รูปปก SKU แทน
+ *   allSku = ทุกสียังใช้รูปปก SKU (ไม่เคยลงรูปเว็บรายสี — อาจตั้งใจ จึงไม่นับเป็นเรื่องต้องแก้)
+ */
+export function colorWebImages(colors: HealthColor[]) {
+  const known = colors.filter((c) => c.img);
+  const webN = known.filter((c) => c.img === "web").length;
+  const missing = known.filter((c) => c.img === "none" || (webN > 0 && c.img === "sku"));
+  return { webN, total: known.length, missing, allSku: known.length > 0 && webN === 0 && known.some((c) => c.img === "sku") };
 }
 
 export function listingIssues(x: ListingHealthInput): ListingIssue[] {
@@ -34,7 +51,18 @@ export function listingIssues(x: ListingHealthInput): ListingIssue[] {
     out.push({ key: "swatch_missing", label: `สียังไม่ผูกทะเบียนสี ${noSwatch.length}`, detail: noSwatch.map((c) => c.label).join(", "), names: noSwatch.map((c) => c.label) });
   const noImg = x.colors.filter((c) => !c.hasImage);
   if (noImg.length && x.colors.length > 1)
-    out.push({ key: "color_no_image", label: `สีที่ยังไม่มีรูป ${noImg.length}`, detail: noImg.map((c) => c.label).join(", ") });
+    out.push({ key: "color_no_image", label: `สีที่ยังไม่มีรูป ${noImg.length}`, detail: noImg.map((c) => c.label).join(", "), skuId: noImg.find((c) => c.skuId)?.skuId });
+  // 🖼 ลงรูปเว็บไว้บางสีแล้ว แต่บางสียังใช้รูปปก SKU 1 รูปแทน (สีที่ไม่มีรูปเลยนับในป้ายด้านบนแล้ว)
+  const web = colorWebImages(x.colors);
+  const coverOnly = web.missing.filter((c) => c.img === "sku");
+  if (coverOnly.length)
+    out.push({
+      key: "color_no_web_image",
+      label: `รูปเว็บ ${web.webN}/${web.total} สี`,
+      detail: `ยังไม่มีรูปบนเว็บ (ใช้รูปปก SKU แทน): ${coverOnly.map((c) => c.label).join(", ")}`,
+      names: coverOnly.map((c) => c.label),
+      skuId: coverOnly[0].skuId,
+    });
   if (x.compartmentsMissing)
     out.push({ key: "no_compartments", label: "ยังไม่ได้วัดช่องใส่ของ", detail: "ไม่ขึ้นในหน้าเช็คขนาดตุ๊กตา — วัดขนาดด้านในของแต่ละช่อง หรือกด \"ไม่มีช่องใส่ของ\" ถ้าไม่ใช่กระเป๋า" });
   return out;

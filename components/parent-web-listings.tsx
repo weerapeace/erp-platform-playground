@@ -37,6 +37,7 @@ import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { useFooterSave } from "@/components/footer-save";
 import { CopyButton } from "@/components/copy-button";
 import { Icon } from "@/components/icon";
+import { colorWebImages } from "@/lib/website-listing-health";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { ColorSwatchButton } from "@/components/color-swatch-manager";
 import { RestockBadge } from "@/components/website-restock-panel";
@@ -55,8 +56,9 @@ import { renameCardColor } from "@/lib/website-card-colors";
 /**
  * label = ชื่อสีที่เว็บโชว์ (ไทยก่อน) · colorTh/colorEn = ค่าดิบใน SKU (สี (ไทย) / ช่อง Color) ให้แก้ในแถวสี
  * labelEn = ชื่ออังกฤษที่เว็บ /en ใช้ตอนนี้ (Color ถ้าเป็นอังกฤษ → ทะเบียนสีกลาง)
+ * qty = สต๊อกคงเหลือ · null = ยังไม่มีข้อมูลสต๊อกของ SKU นี้ในระบบ
  */
-type Variant = { id: string; code: string; label: string; colorTh: string; colorEn: string; labelEn: string; price: number; qty: number; erpImageKey: string | null; gallery: string[] };
+type Variant = { id: string; code: string; label: string; colorTh: string; colorEn: string; labelEn: string; price: number; qty: number | null; erpImageKey: string | null; gallery: string[] };
 /** ✏️ ค่าที่กำลังแก้ในแถวสี (ยังไม่บันทึก) — price เป็นข้อความดิบจาก MoneyInput */
 type SkuDraft = { colorTh: string; colorEn: string; price: string };
 const THAI_RE = /[฀-๿]/;
@@ -174,7 +176,7 @@ const inputCls = "w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-s
 const labelCls = "block text-xs text-slate-500 mb-1";
 
 /** ปัญหาแต่ละชนิด → ไปแก้ที่แท็บไหน */
-const FIX_TAB: Record<ListingIssue["key"], Tab> = { no_price: "sell", no_category: "sell", no_image: "sell", color_no_image: "sell", swatch_missing: "fix", no_compartments: "extra" };
+const FIX_TAB: Record<ListingIssue["key"], Tab> = { no_price: "sell", no_category: "sell", no_image: "sell", color_no_image: "sell", color_no_web_image: "sell", swatch_missing: "fix", no_compartments: "extra" };
 
 export function ParentWebListings({
   parentId,
@@ -263,6 +265,13 @@ export function ParentWebListings({
       window.clearTimeout(off);
     };
   }, [focusSkuId, loading, hasData]);
+
+  /** 🖼 ปุ่ม "ไปที่สีนั้น" — เลื่อนไปแถวสีในร้านนี้ + ไฮไลต์ชั่วครู่ */
+  const jumpToSku = (shopId: string, skuId: string) => {
+    document.querySelector<HTMLElement>(`[data-web-skus="${shopId}"] [data-web-sku="${skuId}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+    setFlashSku(skuId);
+    window.setTimeout(() => setFlashSku((f) => (f === skuId ? null : f)), 2500);
+  };
 
   const patchShop = (sid: string, p: Partial<ShopState>) =>
     setData((d) => (d ? { ...d, shops: d.shops.map((s) => (s.shopId === sid ? { ...s, ...p } : s)) } : d));
@@ -831,11 +840,31 @@ export function ParentWebListings({
         </div>
       );
     const noPrice = data.variants.filter((v) => !(v.price > 0)).length;
+    // 🖼 รูปบนเว็บรายสี (กฎเดียวกับป้ายในหน้า "สินค้าบนเว็บ" — lib/website-listing-health colorWebImages) · อัปเดตทันทีที่เพิ่ม/ล้างรูป
+    const imgOf = (v: Variant): "web" | "sku" | "none" => ((s.webSkuImages[v.id] ?? []).length ? "web" : v.erpImageKey ? "sku" : "none");
+    const web = colorWebImages(data.variants.map((v) => ({ label: v.label, swatch: null, hasImage: imgOf(v) !== "none", img: imgOf(v), skuId: v.id })));
+    const noneN = web.missing.filter((c) => c.img === "none").length;
+    const missNames = web.missing.slice(0, 3).map((c) => c.label).join(", ") + (web.missing.length > 3 ? ` และอีก ${web.missing.length - 3} สี` : "");
     return (
-        <div data-web-skus>
+        <div data-web-skus={s.shopId}>
           <div className="flex items-baseline gap-2 flex-wrap mb-1.5">
             <span className="text-sm font-semibold text-slate-800">🎨 SKU ในรุ่นนี้ ({data.variants.length})</span>
             {noPrice > 0 && <span className="rounded-full bg-rose-50 border border-rose-200 px-2 py-0.5 text-[11px] text-rose-700">ยังไม่มีราคา {noPrice} ตัว — ใส่ราคาในแถวได้เลย</span>}
+            {web.missing.length > 0 ? (
+              <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] ${noneN ? "bg-rose-50 border-rose-200 text-rose-700" : "bg-amber-50 border-amber-200 text-amber-800"}`}>
+                <Icon name="image" size={12} />
+                รูปบนเว็บ {web.webN}/{web.total} สี · {missNames} ยังไม่มี{noneN ? ` (ไม่มีรูปเลย ${noneN} สี)` : ""}
+                <button type="button" onClick={() => jumpToSku(s.shopId, web.missing[0].skuId!)} className="underline hover:no-underline">
+                  ไปที่สีนั้น
+                </button>
+              </span>
+            ) : web.allSku ? (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500" title="ลูกค้าเห็นรูปปก SKU สีละ 1 รูป — ลงรูปเว็บรายสีได้หลายรูปที่แถวสีด้านล่าง">
+                ทุกสียังใช้รูปปก SKU — เพิ่มรูปเว็บรายสีได้ที่แถวสี
+              </span>
+            ) : web.total > 0 ? (
+              <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] text-emerald-700">✓ รูปบนเว็บครบทุกสี</span>
+            ) : null}
           </div>
           <div className="text-[11px] text-slate-500 mb-1.5">
             ✏️ แก้ชื่อสี ไทย/EN + ราคา ในแถวได้เลย (แก้ที่ SKU ใน ERP — ทุกร้านเห็น · กด 💾 บันทึก) · เลือกรูปเว็บรายสีได้หลายรูป (ว่าง = ใช้รูปปก SKU) · กดเลือกสีบนเว็บแล้วแกลเลอรีจะโชว์รูปชุดนั้น · 📥 ลากรูปจากเครื่องมาวางที่แถวสีได้เลย · กดค้างที่รูปแล้วลาก = สลับตำแหน่ง
@@ -870,12 +899,14 @@ export function ParentWebListings({
               const heroOpen = heroPanel?.shopId === s.shopId && heroPanel.skuId === v.id;
               const on = cardShown(s, v.label);
               const isMain = !!s.webCardColors.main && sameColor(s.webCardColors.main, v.label);
+              // 🖼 none = ไม่มีรูปเลย (แดง) · warn = รุ่นนี้ลงรูปเว็บบางสีแล้ว แต่สีนี้ยังใช้รูปปก SKU (เหลือง) · soft = ทุกสียังใช้รูปปก SKU (เทา)
+              const gap = imgOf(v) === "none" ? "none" : imgOf(v) === "sku" ? (web.webN > 0 ? "warn" : "soft") : null;
               return (
                 <div
                   key={v.id}
                   data-web-sku={v.id}
                   {...fileDrop.zone(`${s.shopId}:${v.id}`)}
-                  className={`relative p-2 space-y-1.5 transition-colors duration-700 ${flashSku === v.id ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : "bg-white"}`}
+                  className={`relative p-2 space-y-1.5 transition-colors duration-700 ${flashSku === v.id ? "bg-amber-50 ring-2 ring-inset ring-amber-300" : gap === "none" ? "bg-rose-50/50" : gap === "warn" ? "bg-amber-50/50" : "bg-white"}`}
                 >
                   <FileDropHint show={fileDrop.over === `${s.shopId}:${v.id}`} label={`วางรูปเพื่ออัปโหลดเข้าสี ${v.label}`} />
                   <div className="flex items-center gap-2.5">
@@ -937,7 +968,17 @@ export function ParentWebListings({
                             )}
                           </div>
                           <div className="text-xs text-slate-400">
-                            {v.code} · สต๊อก {v.qty} · รูปใน SKU {v.gallery.length}
+                            {v.code} ·{" "}
+                            {v.qty === null ? (
+                              <span title="ระบบยังไม่มียอดสต๊อกของ SKU นี้ — เว็บใช้ป้ายสถานะสินค้าที่ตั้งเอง">ยังไม่มีข้อมูลสต๊อก</span>
+                            ) : v.qty <= 0 ? (
+                              <span className="rounded-full bg-rose-50 border border-rose-200 px-1.5 text-rose-700" title="ยอดคงเหลือในระบบ = 0">
+                                สต๊อกหมด
+                              </span>
+                            ) : (
+                              <>สต๊อก {v.qty.toLocaleString("th-TH")}</>
+                            )}{" "}
+                            · รูปใน SKU {v.gallery.length}
                             {!(v.price > 0) && <span className="text-rose-500"> · ยังไม่มีราคา (เว็บใช้ราคารุ่นแทน)</span>}
                             {enHint && <span className="text-slate-400"> · 🌐 {enHint}</span>}
                           </div>
@@ -994,14 +1035,31 @@ export function ParentWebListings({
                   {uploadProgressFor(s.shopId, v.id) && <div className="pl-12">{uploadProgressFor(s.shopId, v.id)}</div>}
 
                   {/* รูปเว็บที่เลือกไว้ของสีนี้ (เรียงตามลำดับที่จะโชว์) */}
-                  {chosen.length > 0 && (
+                  {chosen.length > 0 ? (
                     <SortableThumbs
                       className="pl-12"
                       keys={chosen}
                       onChange={(next) => setSkuImages(s, v.id, next)}
                       size="w-12 h-12"
                       badge={(i) => <span className="absolute -top-1.5 -left-1.5 text-[10px] bg-slate-700 text-white rounded px-1">{i + 1}</span>}
+                      onAdd={chosen.length < MAX_SKU_IMAGES ? () => setPicker({ shopId: s.shopId, target: v.id }) : undefined}
                     />
+                  ) : (
+                    // 🖼 ยังไม่มีรูปบนเว็บ — ช่องเส้นประให้กดเลือกจากคลัง (ลากไฟล์มาวางทั้งแถวได้อยู่แล้ว)
+                    <div className="pl-12">
+                      <button
+                        type="button"
+                        onClick={() => setPicker({ shopId: s.shopId, target: v.id })}
+                        className={`w-full flex items-center justify-center gap-1.5 rounded-lg border-2 border-dashed bg-white px-3 py-2.5 text-xs ${
+                          gap === "none" ? "border-rose-300 text-rose-700 hover:bg-rose-50" : gap === "warn" ? "border-amber-300 text-amber-800 hover:bg-amber-50" : "border-slate-200 text-slate-500 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
+                        <Icon name="image" size={16} />
+                        <span>
+                          {gap === "none" ? "ยังไม่มีรูปเลย — ลูกค้าเห็นช่องว่าง" : gap === "warn" ? "ยังไม่มีรูปบนเว็บ — ตอนนี้ลูกค้าเห็นรูปปก SKU 1 รูปแทน" : "ยังไม่มีรูปบนเว็บ (ใช้รูปปก SKU 1 รูป)"} · ลากรูปมาวาง หรือกดเลือกจากคลัง
+                        </span>
+                      </button>
+                    </div>
                   )}
 
                   {/* 🎬 แผง Hero ของสีนี้ — คอม 16:9 · มือถือ 4:5 (ว่าง = ใช้ของคอม) · รูปหรือวิดีโอ */}
@@ -1648,9 +1706,9 @@ function LinkedPanel({ rows, onOpenParent }: { rows: LinkedRow[]; onOpenParent?:
 
 /**
  * แถวรูปย่อ — กดค้างที่รูปแล้วลากไปวางบนรูปอื่น = สลับตำแหน่ง (ของกลาง useDragReorder · เมาส์/นิ้วได้)
- * + ‹ › เลื่อนทีละช่อง · ✕ เอาออก · รูปแรก = กรอบส้ม (รูปที่โชว์ก่อน)
+ * + ‹ › เลื่อนทีละช่อง · ✕ เอาออก · รูปแรก = กรอบส้ม (รูปที่โชว์ก่อน) · onAdd = ช่อง + ท้ายแถว (เพิ่มรูป)
  */
-function SortableThumbs({ keys, onChange, size, badge, className = "" }: { keys: string[]; onChange: (next: string[]) => void; size: string; badge: (i: number) => ReactNode; className?: string }) {
+function SortableThumbs({ keys, onChange, size, badge, className = "", onAdd }: { keys: string[]; onChange: (next: string[]) => void; size: string; badge: (i: number) => ReactNode; className?: string; onAdd?: () => void }) {
   const { rowProps, handleProps, rowCls } = useDragReorder((from, to) => onChange(moveItem(keys, from, to)));
   // ปุ่มบนรูปไม่เริ่มลาก (คลิกได้ตามปกติ)
   const noDrag = { onPointerDown: (e: ReactPointerEvent) => e.stopPropagation() };
@@ -1683,6 +1741,11 @@ function SortableThumbs({ keys, onChange, size, badge, className = "" }: { keys:
           </button>
         </div>
       ))}
+      {onAdd && (
+        <button type="button" onClick={onAdd} title="เพิ่มรูป (เลือกจากคลัง)" aria-label="เพิ่มรูป" className={`${size} rounded-lg border-2 border-dashed border-slate-200 text-slate-400 hover:border-slate-400 hover:text-slate-600 flex items-center justify-center`}>
+          <Icon name="add" size={16} />
+        </button>
+      )}
     </div>
   );
 }
