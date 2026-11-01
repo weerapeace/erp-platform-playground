@@ -3,7 +3,7 @@
  *
  * รวม 2 ทาง:
  *   1) งานผลิต  = ใบส่งงาน (wo_submissions) ที่ส่งในเดือนนั้น → จำนวนชิ้น + ค่าแรง
- *   2) งานเหมา  = mo_piecework ที่กด "เสร็จ" ในเดือนนั้น → rate × total_qty
+ *   2) งานเหมา  = mo_piecework ที่กด "เสร็จ" ในเดือนนั้น → rate × ชิ้นที่รับคืน (done_qty · ว่าง = total_qty)
  *
  * ตอบกลับ: รายคน (ชิ้น/เงิน/จำนวนใบ/รายการที่ยังไม่ใส่ค่าแรง) + ยอดรวมทั้งเดือน
  * ⚠️ ใบส่งงานที่ติ๊ก "รอลงวันที่/ค่าแรง" (info_pending) จะยังไม่มีเงิน — นับแยกให้เห็นว่าค้างกี่รายการ
@@ -13,6 +13,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { pwEarned } from "@/lib/piecework-dispatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .select("craftsman_name, department_name, qty, wage, info_pending, submitted_at, sku, mo_no, wo_no")
       .gte("submitted_at", from).lt("submitted_at", nextM).limit(5000),
     admin.from("mo_piecework")
-      .select("assignee_name, job_name, rate, total_qty, done_at, mo_no, status")
+      .select("assignee_name, job_name, rate, total_qty, done_qty, done_at, mo_no, status")
       .eq("is_active", true).eq("status", "done")
       .gte("done_at", from).lt("done_at", nextM).limit(5000),
   ]);
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   for (const q of (pieces ?? []) as Record<string, unknown>[]) {
     const p = get(String(q.assignee_name ?? ""), null);
     p.piece_count += 1;
-    p.piece_wage += (Number(q.rate) || 0) * (Number(q.total_qty) || 0);
+    p.piece_wage += pwEarned({ rate: q.rate as number, total_qty: q.total_qty as number, done_qty: q.done_qty as number | null });   // รับคืนไม่ครบ = คิดเท่าที่รับคืน
   }
   for (const p of by.values()) {
     p.prod_wage = r2(p.prod_wage); p.piece_wage = r2(p.piece_wage);

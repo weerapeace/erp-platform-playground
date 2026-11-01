@@ -7,7 +7,7 @@
  */
 
 /** เอกสารที่บันทึกการพิมพ์ได้ — เพิ่มชนิดใหม่ที่นี่ที่เดียว */
-export const PRINT_DOC_TYPES = ["mo"] as const;
+export const PRINT_DOC_TYPES = ["mo", "piecework"] as const;   // piecework = แถวงานเหมา (mo_piecework.id) จากใบจ่ายงานเหมา
 export type PrintDocType = (typeof PRINT_DOC_TYPES)[number];
 
 /** พิมพ์แบบไหน: print = กดพิมพ์ / Ctrl+P / บันทึก PDF จากหน้าต่างพิมพ์ · pdf = โหลด/เปิดไฟล์ PDF · link = เปิดไฟล์พิมพ์ในแท็บใหม่ / ส่งลิงก์ */

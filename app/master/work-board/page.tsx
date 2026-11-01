@@ -48,6 +48,7 @@ import { CatchUpModal } from "./catch-up-modal";
 import { CatchUpQueue } from "./catch-up-queue";
 import { CatchUpBatch } from "./catch-up-batch";
 import { SalesUpdate } from "./sales-update";
+import { PieceworkDispatch, type PwCandidate } from "./piecework-dispatch";
 import { CatchUpEdit } from "./catch-up-edit";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
 import type { CuAllRow } from "@/app/api/mo/catch-up/all/route";
@@ -1408,6 +1409,22 @@ function WorkBoardPageInner() {
   const [cuQueueAsk, setCuQueueAsk] = useState(false);
   // 🧾 เมนู ⋯ "อัปเดตงานจากใบขาย" → เข้าโหมดอัปเดตงาน (มุมมองตาราง) + เปิดหน้าต่างใบขายที่ยังไม่ผูก (./sales-update)
   const [cuSalesAsk, setCuSalesAsk] = useState(false);
+  // 🧵 หน้าต่าง "จ่ายงานเหมา" (./piecework-dispatch) — null = ปิด · mos [] = เปิดเปล่า · [mo_no…] = เปิดพร้อมใบที่ติ๊ก
+  const [pwOpen, setPwOpen] = useState<{ mos: string[]; tab: "send" | "recv" } | null>(null);
+  const pwCandidates = useMemo<PwCandidate[]>(() => {
+    const m = new Map<string, PwCandidate>();
+    const moOf = new Map([...board.pending, ...board.dispatchedMos].map((p) => [p.mo_no, p]));
+    for (const p of board.pending) m.set(p.mo_no, { mo_no: p.mo_no, sku: p.product_sku, name: p.product_name, qty: p.qty, image_url: p.image_url, where: p.dispatched > 0 ? `จ่ายแล้ว ${p.dispatched}/${p.qty}` : "รอจ่าย" });
+    for (const w of board.workOrders) {
+      if (!w.mo_no) continue;
+      const who = [w.department_name, w.assignee_name].filter(Boolean).join(" · ") || "อยู่ที่ช่าง";
+      const cur = m.get(w.mo_no);
+      if (cur) { if (!cur.where.includes(who)) cur.where = `${cur.where} · ${who}`; continue; }
+      const mo = moOf.get(w.mo_no);
+      m.set(w.mo_no, { mo_no: w.mo_no, sku: w.product_sku, name: w.product_name, qty: mo?.qty ?? w.qty, image_url: mo?.image_url ?? w.image_url ?? null, where: who });
+    }
+    return [...m.values()];
+  }, [board.pending, board.dispatchedMos, board.workOrders]);
   useEffect(() => {
     if (searchParams.get("cu") !== "requests" || !canCatchUp) return;
     setCatchUpMode(true); setViewMode("table"); setCuQueueAsk(true);
@@ -1539,6 +1556,9 @@ function WorkBoardPageInner() {
               <Icon name="receipt" /> อัปเดตงานจากใบขาย <span className="ml-auto text-[11px] text-slate-400">ขายแล้วแต่ยังไม่ผูกใบงาน</span>
             </button>
           )}
+          <button type="button" onClick={() => { closeMore(); setPwOpen({ mos: [], tab: "send" }); }} className={menuItem}>
+            <Icon name="thread" /> จ่ายงานเหมา <span className="ml-auto text-[11px] text-slate-400">หลายงาน หลายคน · รับงานคืน</span>
+          </button>
           <div className="my-1 border-t border-slate-100" />
           <button type="button" onClick={() => setMoreSec((s) => (s === "print" ? "" : "print"))} className={menuItem}>
             🖨 พิมพ์รายงาน <span className="ml-auto text-slate-400">{moreSec === "print" ? "▴" : "▾"}</span>
@@ -1701,6 +1721,7 @@ function WorkBoardPageInner() {
           catchUp={catchUpMode && canCatchUp} onExitCatchUp={() => setCatchUpMode(false)}
           cuMode={cuDirect ? "direct" : "request"} cuApprove={cuApprove} cuQueueAsk={cuQueueAsk} onCuQueueSeen={() => setCuQueueAsk(false)}
           cuSalesAsk={cuSalesAsk} onCuSalesSeen={() => setCuSalesAsk(false)}
+          onPiecework={(mos) => setPwOpen({ mos, tab: "send" })}
           onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : viewMode === "shop" ? (
         <div className="space-y-3">
@@ -1886,6 +1907,11 @@ function WorkBoardPageInner() {
             style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)", borderBottomRightRadius: 12 }} />
         </div>
       )}
+
+      {/* 🧵 จ่ายงานเหมาแบบตาราง (หลายงาน หลายคน) + รับงานคืน */}
+      <PieceworkDispatch open={pwOpen !== null} onClose={() => setPwOpen(null)} moNos={pwOpen?.mos ?? []} startTab={pwOpen?.tab ?? "send"}
+        candidates={pwCandidates} craftsmen={craftsmen} departments={board.departments} canEdit={canEdit}
+        onDone={() => { void load(true); if (checklistMO) { void apiFetch(`/api/mo/piecework?mo_id=${encodeURIComponent(checklistMO.id)}`).then((r) => r.json()).then((pj) => setClPieceRows((pj?.data ?? []) as MoPieceRow[])).catch(() => {}); } }} />
 
       {/* popup จ่ายงานเหมารายชิ้น → เลือกช่างเหมา */}
       <ERPModal open={dispPiece !== null} onClose={() => { if (pieceSaving) return; setDispPiece(null); void load(true); }} size="sm" title="🧵 จ่ายงานเหมาให้ช่าง"
@@ -2551,6 +2577,7 @@ function WorkBoardPageInner() {
                           <p className="text-slate-300 text-sm mb-3">สินค้านี้ยังไม่มีงานเหมาใน BOM</p>
                           {canEdit && (
                             <div className="flex items-center justify-center gap-2">
+                              <button onClick={() => setPwOpen({ mos: [checklistMO.mo_no], tab: "send" })} title="จ่ายงานเหมาให้ใบนี้ — หลายงาน หลายคน (บันทึกเข้า BOM ให้ด้วย)" className="inline-flex h-9 items-center gap-1 px-4 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700"><Icon name="thread" /> จ่ายงานเหมา</button>
                               <button onClick={() => setAddPieceOpen(true)} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">➕ เพิ่มงานเหมาเข้า BOM</button>
                               <button onClick={() => setCopyPieceOpen(true)} title="ยกงานเหมาจากรุ่นเดียวกันหรือสินค้าตัวอื่นมาทั้งชุด"
                                 className="h-9 px-4 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:border-blue-300 hover:text-blue-600">📋 คัดลอกจากรุ่นอื่น</button>
@@ -2569,6 +2596,7 @@ function WorkBoardPageInner() {
                                   <span className="text-slate-400"> · ทั้งหมด ฿{fmt(t.money)}</span>
                                 </span>
                               ); })()}
+                              {canEdit && <button onClick={() => setPwOpen({ mos: [checklistMO.mo_no], tab: "send" })} title="จ่ายงานเหมาแบบตาราง — งานเดียวแบ่งหลายคนได้" className="inline-flex items-center gap-0.5 text-[11px] font-medium text-violet-700 hover:underline"><Icon name="thread" /> จ่าย / แบ่งหลายคน</button>}
                               {canEdit && <button onClick={() => setCopyPieceOpen(true)} className="text-[11px] text-slate-500 hover:text-blue-600 hover:underline">📋 คัดลอกจากรุ่นอื่น</button>}
                               {canEdit && <button onClick={() => setAddPieceOpen(true)} className="text-[11px] text-blue-600 hover:underline">➕ เพิ่มงานเข้า BOM</button>}
                             </span>
@@ -2602,7 +2630,8 @@ function WorkBoardPageInner() {
                                 <span className="flex justify-center"><input type="checkbox" checked={!!r.selected_id} disabled={!canEdit} onChange={() => togglePiece(r.key)} className="w-4 h-4 accent-blue-600" title="เลือกจ่ายงานนี้" /></span>
                                 <div className="min-w-0">
                                   <p className="text-sm text-slate-800 truncate">{r.job_name} {r.is_detail && <span className="text-[10px] text-amber-600">★ละเอียด</span>}{!r.in_bom && <span className="text-[10px] text-slate-400">(เพิ่มเอง)</span>}</p>
-                                  <p className="text-[10px] text-slate-400">{fmt(r.qty_per)} × จำนวนสั่ง{r.rate ? ` · ${fmt(r.rate)} ฿/ชิ้น · รวม ฿${fmt(r.total_qty * r.rate)}` : ""}</p>
+                                  <p className="text-[10px] text-slate-400">{fmt(r.qty_per)} × จำนวนสั่ง{r.rate ? ` · ${fmt(r.rate)} ฿/ชิ้น · รวม ฿${fmt(r.total_qty * r.rate)}` : ""}
+                                    {r.assignee_name && <> · <b className="text-violet-700">{r.assignee_name}</b></>}{r.status === "done" && r.done_qty != null && r.done_qty < r.total_qty && <span className="text-amber-600"> · รับคืน {fmt(r.done_qty)}</span>}</p>
                                 </div>
                                 <span className="text-right text-sm font-semibold text-slate-700">{fmt(r.total_qty)}</span>
                                 <span className={`text-right text-sm tabular-nums ${r.selected_id ? "text-indigo-700 font-semibold" : "text-slate-400"}`}>{r.rate > 0 ? `฿${fmt(r.total_qty * r.rate)}` : "—"}</span>
@@ -3461,7 +3490,7 @@ function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefine
 }
 
 
-function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged, catchUp = false, onExitCatchUp, cuMode = "direct", cuApprove = false, cuQueueAsk = false, onCuQueueSeen, cuSalesAsk = false, onCuSalesSeen }: {
+function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged, catchUp = false, onExitCatchUp, cuMode = "direct", cuApprove = false, cuQueueAsk = false, onCuQueueSeen, cuSalesAsk = false, onCuSalesSeen, onPiecework }: {
   pending: PendingMO[]; workOrders: WorkOrder[]; deliveryPlans: DeliveryPlan[];
   /** 🔄 โหมดอัปเดตงาน — ทุกแถวมีปุ่ม "อัปเดต" เปิดป๊อป CatchUpModal */
   catchUp?: boolean; onExitCatchUp?: () => void;
@@ -3469,6 +3498,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   cuMode?: "direct" | "request"; cuApprove?: boolean; cuQueueAsk?: boolean; onCuQueueSeen?: () => void;
   /** 🧾 เปิดหน้าต่าง "อัปเดตงานจากใบขาย" (เมนู ⋯) */
   cuSalesAsk?: boolean; onCuSalesSeen?: () => void;
+  /** 🧵 เปิดหน้าต่าง "จ่ายงานเหมา" พร้อมใบที่ติ๊ก */
+  onPiecework?: (moNos: string[]) => void;
   departments: Dept[]; craftsmen: Assignee[]; canEdit: boolean;
   /** ย้ายคนเข้า/ออกโต๊ะได้ (สิทธิ์ฝ่ายบุคคล) · ย้าย/เพิ่มแล้วให้หน้าแม่โหลดรายชื่อใหม่ */
   canMoveStaff?: boolean; onStaffChanged?: () => void | Promise<void>;
@@ -5564,11 +5595,13 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
         <button type="button" onClick={() => setAssignOpen(true)} className="h-9 rounded-lg bg-violet-500 px-3 text-sm font-medium text-white hover:bg-violet-600">🗂 จับเข้ากลุ่ม</button>
         <button type="button" onClick={() => setDueOpen(true)} className="h-9 rounded-lg bg-amber-500 px-3 text-sm font-medium text-white hover:bg-amber-600">📅 แก้วันกำหนด</button>
         {canEdit && <button type="button" onClick={() => openDispatchFor(sel)} className="h-9 rounded-lg bg-emerald-500 px-3 text-sm font-medium text-white hover:bg-emerald-600">🚚 จ่ายงาน</button>}
+        {canEdit && onPiecework && <button type="button" onClick={() => onPiecework(selMoNos)} title="ใส่งานเหมาให้ใบที่ติ๊ก — หลายงาน หลายคนได้" className="inline-flex h-9 items-center gap-1 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon name="thread" /> จ่ายงานเหมา</button>}
       </BulkActionBar>
       <BulkActionBar count={tab === "wip" || allSearch ? selWos.length : 0} unit="ใบ" onClear={() => setWoSel(new Set())} spacer={false}>
         {catchUp && <button type="button" onClick={() => setCuBatch([...new Set(selWos.map((w) => w.mo_no).filter((x): x is string => !!x))])} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}
         {canEdit && <button type="button" onClick={openQc} title="ส่งงานที่ติ๊กไว้เข้า QC (ลงวันที่ย้อนหลังได้)" className="h-9 rounded-lg bg-emerald-500 px-3 text-sm font-medium text-white hover:bg-emerald-600">📤 ส่งงาน QC</button>}
         <button type="button" onClick={() => setWoLaborOpen(true)} className="h-9 rounded-lg bg-indigo-500 px-3 text-sm font-medium text-white hover:bg-indigo-600">💰 ใส่ค่าแรง</button>
+        {canEdit && onPiecework && <button type="button" onClick={() => onPiecework([...new Set(selWos.map((w) => w.mo_no).filter((x): x is string => !!x))])} title="ใส่งานเหมาให้ใบที่ติ๊ก — หลายงาน หลายคนได้" className="inline-flex h-9 items-center gap-1 rounded-lg bg-violet-600 px-3 text-sm font-medium text-white hover:bg-violet-700"><Icon name="thread" /> จ่ายงานเหมา</button>}
       </BulkActionBar>
       <BulkActionBar count={(tab === "qc" || allSearch) && (canEdit || catchUp) ? qSel.size : 0} unit="ใบ" onClear={() => setQSel(new Set())} spacer={false}>
         {catchUp && <button type="button" onClick={() => setCuBatch([...new Set(qQueue.filter((q) => qSel.has(q.wo_id)).map((q) => q.mo_no).filter((x): x is string => !!x))])} title="อัปเดตหลายใบในตารางเดียว — ใส่รายละเอียดทีละใบ หรือใส่ทั้งหมดตามใบแรก" className="inline-flex h-9 items-center gap-1 rounded-lg bg-indigo-600 px-3 text-sm font-medium text-white hover:bg-indigo-700"><Icon name="refresh" /> อัปเดตเป็นชุด</button>}

@@ -19,6 +19,8 @@ export type MoPieceRow = {
   job_id: string | null; job_name: string; rate: number;
   qty_per: number; total_qty: number; is_detail: boolean; note: string | null;
   in_bom: boolean; status: string;   // pending | done (กด "งานเหมาเสร็จ")
+  /** คนรับเหมา + รับคืนแล้วกี่ชิ้น (หน้าต่าง "จ่ายงานเหมา" — งานเดียวแบ่งหลายคน = หลายแถว) */
+  assignee_name?: string | null; done_qty?: number | null;
 };
 
 const num = (v: unknown, d = 0) => { const n = Number(v); return isFinite(n) ? n : d; };
@@ -40,7 +42,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     bomCode
       ? admin.from("bom_piecework_lines").select("job_id, job_name, rate, is_detail, qty_per, note").eq("bom_code", bomCode).eq("is_active", true).order("sequence", { ascending: true })
       : Promise.resolve({ data: [] as Record<string, unknown>[] }),
-    admin.from("mo_piecework").select("id, job_id, job_name, rate, qty_per, total_qty, is_detail, note, status").eq("mo_no", moNo).eq("is_active", true),
+    admin.from("mo_piecework").select("id, job_id, job_name, rate, qty_per, total_qty, is_detail, note, status, assignee_name, done_qty").eq("mo_no", moNo).eq("is_active", true).order("created_at"),
   ]);
 
   const map = new Map<string, MoPieceRow>();
@@ -52,10 +54,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
   for (const c of (chosen ?? []) as Record<string, unknown>[]) {
     const jobId = (c.job_id as string) ?? null; const name = String(c.job_name ?? "");
-    const k = keyOf(jobId, name); const existing = map.get(k);
-    if (existing) { existing.selected_id = String(c.id); existing.status = String(c.status ?? "pending"); }
-    else map.set(k, { key: k, selected_id: String(c.id), job_id: jobId, job_name: name,
-      rate: num(c.rate), qty_per: num(c.qty_per, 1), total_qty: num(c.total_qty), is_detail: !!c.is_detail, note: (c.note as string) ?? null, in_bom: false, status: String(c.status ?? "pending") });
+    const k0 = keyOf(jobId, name); const existing = map.get(k0);
+    const who = { assignee_name: (c.assignee_name as string) ?? null, done_qty: c.done_qty == null ? null : num(c.done_qty) };
+    // แถวแรกของงานรวมกับงานใน BOM · แถวต่อไป (แบ่งให้คนอื่น) = แถวแยก
+    if (existing && !existing.selected_id) Object.assign(existing, { selected_id: String(c.id), status: String(c.status ?? "pending"), total_qty: num(c.total_qty), rate: num(c.rate), ...who });
+    else { const k = existing ? `${k0}#${c.id}` : k0; map.set(k, { key: k, selected_id: String(c.id), job_id: jobId, job_name: name,
+      rate: num(c.rate), qty_per: num(c.qty_per, 1), total_qty: num(c.total_qty), is_detail: !!c.is_detail, note: (c.note as string) ?? null, in_bom: false, status: String(c.status ?? "pending"), ...who }); }
   }
   return NextResponse.json({ data: Array.from(map.values()), mo_qty: moQty, error: null });
 }
@@ -117,7 +121,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   // จ่าย/คืน งานเหมาให้ช่างเหมา (assignee_name) — ส่ง null = คืนเข้ารอจ่าย
   if (b.assignee_name !== undefined) patch.assignee_name = (b.assignee_name ?? "").toString().trim() || null;
   // กดเสร็จ/ยกเลิกเสร็จ
-  if (b.done !== undefined) { patch.status = b.done ? "done" : "pending"; patch.done_at = b.done ? new Date().toISOString() : null; }
+  if (b.done !== undefined) { patch.status = b.done ? "done" : "pending"; patch.done_at = b.done ? new Date().toISOString() : null; patch.done_qty = null; }   // กดในเช็กลิสต์ = เสร็จทั้งหมด
   const { error } = await admin.from("mo_piecework").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await writeAudit(admin, { action: "update", entityType: "mo_piecework", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: patch });
