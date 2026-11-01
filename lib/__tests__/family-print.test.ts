@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildReportHtmlMulti } from "@/lib/template";
 import {
-  FAMILY_DEFAULT_OPTIONS, FAMILY_DEFAULT_SETTINGS, buildFamilySheet, buyTotalGroups, cutMaterialText, buildFamilyTemplate, colourWord, familyHtmlData, familyOrientation, normalizeFamilySettings,
+  FAMILY_DEFAULT_OPTIONS, FAMILY_DEFAULT_PAGE, FAMILY_DEFAULT_SETTINGS, buildFamilySheet, buyTotalGroups, cutMaterialText, familyPageCss, normalizeFamilyPage, buildFamilyTemplate, colourWord, familyHtmlData, familyOrientation, normalizeFamilySettings,
   clusterByName, familyLineCss, normalizeFamilyLine, sharedLabel, shortCodes, type FamilyBuyLine, type FamilyCutLine, type FamilyInput,
 } from "@/lib/family-print";
 
@@ -446,5 +446,30 @@ describe("ตารางตัด: สลับตัวใหญ่ (เจ้
       .toEqual({ name: "อีเลเน่ (Bonded Leather) 0.4 mm. ดำ", note: "1 ม้วน = 100 หลา หน้ากว้าง 150 cm.", tail: "BONDED-0.4BK" });
     expect(cutMaterialText({ material: "ผ้าซับใน", varies: true, code: null })).toEqual({ name: "ผ้าซับใน", note: null, tail: "สีตามรุ่น" });
     expect(cutMaterialText({ material: "พียู(PU)", varies: true, code: null }).name).toBe("พียู(PU)");   // วงเล็บสั้น = ส่วนของชื่อ (CTL047 จริง)
+  });
+});
+
+describe("หน้ากระดาษ: ขอบ + เลขหน้า (เจ้าของ: ปรับขอบได้ + มีเลขหน้า · หน้าที่ตารางล้นไปชิดขอบบน)", () => {
+  it("ขอบบน/ล่างอยู่ที่ @page (เว้นทุกหน้ากระดาษ) · ซ้ายขวาเป็น padding · เลขหน้า หน้า n / N", () => {
+    const css = familyPageCss(FAMILY_DEFAULT_PAGE);
+    expect(css).toContain("@page { margin: 7mm 0 10mm; @bottom-right {");
+    expect(css).toContain('content: "หน้า " counter(page) " / " counter(pages)');
+    expect(css).toContain("@media print { .doc { padding: 0 8mm 0 8mm !important; } }");
+  });
+
+  it("ตำแหน่งเลขหน้า + ไม่แสดง · ขอบด้านที่มีเลขหน้าเว้นอย่างน้อย 6 มม.", () => {
+    expect(familyPageCss({ ...FAMILY_DEFAULT_PAGE, numbers: "bc" })).toContain("@bottom-center");
+    expect(familyPageCss({ ...FAMILY_DEFAULT_PAGE, numbers: "tr", top: 2 })).toContain("@page { margin: 6mm 0 10mm; @top-right");
+    expect(familyPageCss({ ...FAMILY_DEFAULT_PAGE, numbers: "br", bottom: 0 })).toContain("@page { margin: 7mm 0 6mm;");
+    const none = familyPageCss({ ...FAMILY_DEFAULT_PAGE, numbers: "none", bottom: 0 });
+    expect(none).not.toContain("counter(page)");
+    expect(none).toContain("@page { margin: 7mm 0 0mm; }");
+  });
+
+  it("ค่าเพี้ยน → ค่าเริ่ม/บีบเข้าช่วง · ขอบเดิม (ขนาดแต่ละจุด) ย้ายมาให้ถ้ายังไม่เคยตั้ง", () => {
+    expect(normalizeFamilyPage({ top: 99, left: "x", numbers: "zz" })).toEqual({ ...FAMILY_DEFAULT_PAGE, top: 25 });
+    expect(normalizeFamilySettings({ sizes: { margin: 5 } }).page).toMatchObject({ top: 5, left: 6, right: 6 });
+    expect(normalizeFamilySettings({ sizes: { margin: 5 }, page: { top: 9 } }).page.top).toBe(9);
+    expect(normalizeFamilySettings({ sizes: { margin: 7 } }).page).toEqual(FAMILY_DEFAULT_PAGE);
   });
 });

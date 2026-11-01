@@ -36,10 +36,9 @@ describe("ขนาดแต่ละจุด (ใบรวมทั้งร�
   });
 
   it("เปลี่ยนจุดไหน ปล่อยแค่จุดนั้น · ทั้งบนจอและตอนพิมพ์ · รูป 0 = ซ่อน", () => {
-    const css = familySizeCss({ ...FAMILY_DEFAULT_SIZES, qr: 16, head_img: 0, margin: 5 });
+    const css = familySizeCss({ ...FAMILY_DEFAULT_SIZES, qr: 16, head_img: 0 });
     expect(css).toContain(".fp-bc-qr .wo-qr { width: 16mm; height: 16mm; }");
     expect(css).toContain(".fp-skuimg { display: none !important; }");
-    expect(css).toContain(".doc { padding: 5mm 6mm !important; }");
     expect(css).toContain("@media print");
     expect(css).not.toContain(".product-code");
   });

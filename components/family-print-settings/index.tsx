@@ -14,8 +14,9 @@ import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { ColumnRows } from "@/components/wo-print-columns";
 import {
-  FAMILY_DEFAULT_SETTINGS, FAMILY_LINE_COLORS, FAMILY_LINE_MODES, FAMILY_LINE_WIDTHS, FAMILY_SETTING_FIELDS, FAMILY_SIZE_FIELDS, FAMILY_SIZE_PADS, FAMILY_SIZE_PRESETS,
-  normalizeFamilySettings, type FamilyLine, type FamilyPrintSettings, type FamilySizes, type PrintColCfg,
+  FAMILY_DEFAULT_SETTINGS, FAMILY_LINE_COLORS, FAMILY_LINE_MODES, FAMILY_LINE_WIDTHS, FAMILY_PAGE_NUMBERS, FAMILY_PAGE_PRESETS, FAMILY_PAGE_RANGE, FAMILY_PAGE_SIDES,
+  FAMILY_SETTING_FIELDS, FAMILY_SIZE_FIELDS, FAMILY_SIZE_PADS, FAMILY_SIZE_PRESETS,
+  normalizeFamilySettings, type FamilyLine, type FamilyPage, type FamilyPrintSettings, type FamilySizes, type PrintColCfg,
 } from "@/lib/family-print";
 import { TRACK_EXTRA_COL, normalizeTrackCols, type TrackExtras } from "@/lib/family-track";
 
@@ -57,6 +58,7 @@ export function FamilyPrintSettingsButton({ current, onPreview, onSaved, extras 
   const apply = (next: FamilyPrintSettings) => { const n = normalizeFamilySettings(next); setDraft(n); onPreview(n); };
   const setSize = (p: Partial<FamilySizes>) => apply({ ...draft, sizes: { ...draft.sizes, ...p } });
   const setLine = (p: Partial<FamilyLine>) => apply({ ...draft, line: { ...draft.line, ...p } });
+  const setPage = (p: Partial<FamilyPage>) => apply({ ...draft, page: { ...draft.page, ...p } });
   const trackCols = normalizeTrackCols(draft.track_cols, draft.barcode);
   const setTrackCols = (list: PrintColCfg[]) => apply({ ...draft, track_cols: list });
   const openPanel = () => { setDraft(current); setOpen(true); };
@@ -146,6 +148,41 @@ export function FamilyPrintSettingsButton({ current, onPreview, onSaved, extras 
                   </div>
                 </div>
               ))}
+            </div>
+
+            {/* หน้ากระดาษ — ขอบ 4 ด้าน (เว้นทุกหน้ากระดาษ) + เลขหน้า */}
+            <div className="rounded-lg border border-slate-200 px-2 py-1.5">
+              <div className="mb-1 text-[12px] font-bold text-slate-700">หน้ากระดาษ</div>
+              <div className="mb-1 flex items-center gap-1.5">
+                <span className="w-14 shrink-0 text-[11px] text-slate-500">ขอบ</span>
+                <div className="flex flex-1 flex-wrap gap-1">
+                  {FAMILY_PAGE_PRESETS.map((p) => {
+                    const on = FAMILY_PAGE_SIDES.every(({ key }) => draft.page[key] === p.value[key]);
+                    return (
+                      <button key={p.label} type="button" onClick={() => setPage(p.value)}
+                        className={`h-6 rounded border px-1.5 text-[11px] ${on ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{p.label}</button>
+                    );
+                  })}
+                </div>
+              </div>
+              {FAMILY_PAGE_SIDES.map(({ key, label }) => (
+                <label key={key} className="flex items-center gap-1.5">
+                  <span className="w-14 shrink-0 text-[11px] text-slate-500">{label}</span>
+                  <input type="range" min={FAMILY_PAGE_RANGE.min} max={FAMILY_PAGE_RANGE.max} step={FAMILY_PAGE_RANGE.step} value={draft.page[key]}
+                    onChange={(e) => setPage({ [key]: Number(e.target.value) } as Partial<FamilyPage>)} className="flex-1 accent-blue-600" />
+                  <span className="w-12 text-right text-[11px] tabular-nums text-slate-600">{draft.page[key]} มม.</span>
+                </label>
+              ))}
+              <div className="mt-1 flex items-center gap-1.5">
+                <span className="w-14 shrink-0 text-[11px] text-slate-500">เลขหน้า</span>
+                <div className="flex flex-1 flex-wrap gap-1">
+                  {FAMILY_PAGE_NUMBERS.map((n) => (
+                    <button key={n.v} type="button" onClick={() => setPage({ numbers: n.v })}
+                      className={`h-6 rounded border px-1.5 text-[11px] ${draft.page.numbers === n.v ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{n.label}</button>
+                  ))}
+                </div>
+              </div>
+              <p className="mt-1 text-[10px] leading-snug text-slate-400">ขอบเว้นทุกหน้ากระดาษ (รวมหน้าที่ตารางล้นไป) · เลขหน้า &quot;หน้า 2 / 5&quot; ขึ้นตอนพิมพ์/บันทึก PDF (พรีวิวบนจอไม่แสดง) · ขอบด้านที่มีเลขหน้าเว้นอย่างน้อย 6 มม.</p>
             </div>
 
             {/* ขนาดแต่ละจุด — ชุดสำเร็จ + แถบเลื่อนต่อจุด (ค่าเริ่ม = หน้าตาเดิม) */}

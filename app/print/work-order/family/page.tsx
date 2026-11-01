@@ -24,7 +24,7 @@ import { FamilyPrintSettingsButton, useFamilyPrintSettings } from "@/components/
 import { FamilyDataCheck } from "@/components/family-data-check";
 import { familyIssues, issueFlags } from "@/lib/family-checks";
 import {
-  FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, familyHtmlData, familyLineCss, familyOrientation, familySizeCss,
+  FAMILY_DEFAULT_OPTIONS, buildFamilySheet, buildFamilyTemplate, familyHtmlData, familyLineCss, familyOrientation, familyPageCss, familySizeCss,
   type FamilyPrintOptions, type FamilyPrintResponse, type FamilyPrintSettings, type FamilySheetKind, type MoCodes,
 } from "@/lib/family-print";
 import {
@@ -154,8 +154,8 @@ function FamilyPrintInner() {
   const build = (withFlags: boolean) => {
     if (!sheets.length || !data) return "";
     const printed = new Date().toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "Asia/Bangkok" });
-    // เส้นตาราง + ขนาดแต่ละจุด (ตั้งค่าใบรวมทั้งรุ่น · ต่อท้าย = ชนะกฎเดิม)
-    const style = familyLineCss(settings.line) + familySizeCss(settings.sizes);
+    // เส้นตาราง + ขนาดแต่ละจุด + ขอบกระดาษ/เลขหน้า (ตั้งค่าใบรวมทั้งรุ่น · ต่อท้าย = ชนะกฎเดิม)
+    const style = familyLineCss(settings.line) + familySizeCss(settings.sizes) + familyPageCss(settings.page);
     const today = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);   // วันนี้เวลาไทย (นับวันค้าง)
     const trackOpt: TrackOptions = { extras, blank, printed, today, barcode: settings.barcode, codes, cols: settings.track_cols };
     // แผ่นต่อรุ่นตามที่เลือก: ซื้อ+ตัดแผ่นเดียว หรือแยก · แล้วต่อด้วยใบติดตามงาน

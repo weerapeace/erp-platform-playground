@@ -107,6 +107,8 @@ export type FamilyPrintSettings = {
   total_mark: "off" | "on";
   /** ตารางบล็อกตัด ตัวใหญ่: group = หัวกลุ่มเป็นชื่อวัตถุดิบ แถวเป็นขนาด · material = ชื่อวัตถุดิบทุกแถว · both = ชื่อ + ขนาด · size = ขนาด (แบบเดิม) */
   cut_label: "group" | "material" | "both" | "size";
+  /** หน้ากระดาษ: ขอบ 4 ด้าน (เว้นทุกหน้ากระดาษ รวมหน้าที่ตารางล้นไป) + ตำแหน่งเลขหน้า */
+  page: FamilyPage;
 };
 /** เส้นตาราง — ความหนา (มม.) · สี · แบบ (ตาราง / เส้นนอน / ไม่มีเส้น) ชุดตัวเลือกเดียวกับตั้งค่าใบสั่งงาน */
 export type FamilyLine = { width: number; color: string; mode: WoBorderMode };
@@ -137,6 +139,59 @@ export function familyLineCss(l: FamilyLine): string {
 @media print { .fp-hero { ${box} } }
 `;
 }
+/* ─────────────── หน้ากระดาษ: ขอบ + เลขหน้า ───────────────
+ * ขอบบน/ล่างใช้ @page (เว้นซ้ำทุกหน้ากระดาษ — เดิมเว้นแค่ต้นเอกสาร หน้าที่ตารางล้นไปชิดขอบ)
+ * ขอบซ้าย/ขวาใช้ padding ของ .doc (@page ซ้ายขวา 0 — เอกสารกว้างเท่ากระดาษ) แบบเดียวกับ lib/list-print
+ * เลขหน้า "หน้า n / N" อยู่ในขอบกระดาษ (@page margin box) — เห็นตอนพิมพ์ / บันทึก PDF (พรีวิวบนจอไม่มี)
+ */
+export type FamilyPageNumbers = "br" | "bc" | "tr" | "none";
+export type FamilyPage = { top: number; bottom: number; left: number; right: number; numbers: FamilyPageNumbers };
+export const FAMILY_DEFAULT_PAGE: FamilyPage = { top: 7, bottom: 10, left: 8, right: 8, numbers: "br" };
+export const FAMILY_PAGE_SIDES: { key: "top" | "bottom" | "left" | "right"; label: string }[] = [
+  { key: "top", label: "บน" }, { key: "bottom", label: "ล่าง" }, { key: "left", label: "ซ้าย" }, { key: "right", label: "ขวา" },
+];
+export const FAMILY_PAGE_RANGE = { min: 0, max: 25, step: 0.5 };
+export const FAMILY_PAGE_PRESETS: { label: string; value: Omit<FamilyPage, "numbers"> }[] = [
+  { label: "แคบ", value: { top: 5, bottom: 8, left: 5, right: 5 } },
+  { label: "ปกติ", value: { top: 7, bottom: 10, left: 8, right: 8 } },
+  { label: "กว้าง", value: { top: 12, bottom: 14, left: 12, right: 12 } },
+];
+export const FAMILY_PAGE_NUMBERS: { v: FamilyPageNumbers; label: string }[] = [
+  { v: "br", label: "ขวาล่าง" }, { v: "bc", label: "กลางล่าง" }, { v: "tr", label: "ขวาบน" }, { v: "none", label: "ไม่แสดง" },
+];
+/** ขอบที่มีเลขหน้าต้องเว้นอย่างน้อยเท่านี้ ไม่งั้นตัวเลขโดนตัด */
+const PAGE_NUM_ROOM = 6;
+/** legacyMargin = ค่า "ขอบกระดาษ" เดิมในขนาดแต่ละจุด (sizes.margin) — ใช้เมื่อยังไม่เคยบันทึก page */
+export function normalizeFamilyPage(raw: unknown, legacyMargin?: unknown): FamilyPage {
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
+  const lm = Number(legacyMargin);
+  const base: FamilyPage = !o && Number.isFinite(lm) && lm !== 7
+    ? { ...FAMILY_DEFAULT_PAGE, top: lm, left: lm + 1, right: lm + 1 }
+    : FAMILY_DEFAULT_PAGE;
+  const out = { ...base };
+  for (const { key } of FAMILY_PAGE_SIDES) {
+    const n = Number(o?.[key]);
+    if (o && o[key] !== undefined && o[key] !== null && Number.isFinite(n)) out[key] = Math.min(FAMILY_PAGE_RANGE.max, Math.max(FAMILY_PAGE_RANGE.min, n));
+  }
+  if (FAMILY_PAGE_NUMBERS.some((x) => x.v === o?.numbers)) out.numbers = o!.numbers as FamilyPageNumbers;
+  return out;
+}
+/** CSS หน้ากระดาษ — ต่อท้ายเทมเพลต (หลัง CSS ใบ) · บนจอ = ขอบรอบเอกสาร (เห็นขนาดจริง) · ตอนพิมพ์ = @page + เลขหน้า */
+export function familyPageCss(p: FamilyPage): string {
+  const top = p.numbers === "tr" ? Math.max(p.top, PAGE_NUM_ROOM) : p.top;
+  const bottom = p.numbers === "br" || p.numbers === "bc" ? Math.max(p.bottom, PAGE_NUM_ROOM) : p.bottom;
+  const num = `content: "หน้า " counter(page) " / " counter(pages); font-size: 8px; color: #64748b;`;
+  const box = p.numbers === "br" ? ` @bottom-right { ${num} margin-right: ${p.right}mm; }`
+    : p.numbers === "bc" ? ` @bottom-center { ${num} }`
+    : p.numbers === "tr" ? ` @top-right { ${num} margin-right: ${p.right}mm; }`
+    : "";
+  return `
+.doc { padding: ${top}mm ${p.right}mm ${bottom}mm ${p.left}mm !important; }
+@media print { .doc { padding: 0 ${p.right}mm 0 ${p.left}mm !important; } }
+@page { margin: ${top}mm 0 ${bottom}mm;${box} }
+`;
+}
+
 /** คอลัมน์ที่ปรับได้ (รูปแบบเดียวกับตั้งค่าคอลัมน์ใบสั่งงาน) — width = น้ำหนัก ≈ มม. */
 export type PrintColCfg = { key: string; label: string; width: number; show: boolean };
 
@@ -149,14 +204,12 @@ export type FamilySizes = {
   per_row: number; card_img: number; mo_no: number; bc_h: number; qr: number;
   head_img: number; mat_img: number; name: number; qty: number; code: number; tick: number; pad: "tight" | "normal" | "airy";
   cut_size: number; cut_sub: number;
-  margin: number;
 };
 export const FAMILY_DEFAULT_SIZES: FamilySizes = {
   hero_img: 24, hero_code: 16, hero_qty: 20,
   per_row: 0, card_img: 14, mo_no: 9.5, bc_h: 8, qr: 13,
   head_img: 9, mat_img: 8.5, name: 9, qty: 9.5, code: 8.5, tick: 3.2, pad: "normal",
   cut_size: 13, cut_sub: 8.5,
-  margin: 7,
 };
 type SizeNumKey = Exclude<keyof FamilySizes, "pad">;
 export const FAMILY_SIZE_FIELDS: { zone: string; fields: { key: SizeNumKey; label: string; min: number; max: number; step: number; unit: string }[] }[] = [
@@ -184,16 +237,13 @@ export const FAMILY_SIZE_FIELDS: { zone: string; fields: { key: SizeNumKey; labe
     { key: "cut_size", label: "ตัวใหญ่ (ขนาดตัด / ชื่อวัตถุดิบ)", min: 9, max: 18, step: 0.5, unit: "px" },
     { key: "cut_sub", label: "ตัวเล็ก (บล็อก / รหัส)", min: 7, max: 11, step: 0.5, unit: "px" },
   ] },
-  { zone: "ทั้งใบ", fields: [
-    { key: "margin", label: "ขอบกระดาษ", min: 4, max: 12, step: 0.5, unit: "มม." },
-  ] },
 ];
 export const FAMILY_SIZE_PADS: { v: FamilySizes["pad"]; label: string }[] = [{ v: "tight", label: "แน่น" }, { v: "normal", label: "ปกติ" }, { v: "airy", label: "โปร่ง" }];
 /** ชุดสำเร็จ (ตามที่เจ้าของเห็นใน widget 2026-10-31) */
 export const FAMILY_SIZE_PRESETS: { label: string; value: FamilySizes }[] = [
-  { label: "ประหยัดกระดาษ", value: { hero_img: 16, hero_code: 13, hero_qty: 16, per_row: 4, card_img: 10, mo_no: 8, bc_h: 6.5, qr: 11, head_img: 0, mat_img: 7, name: 8, qty: 8.5, code: 6.5, tick: 2.8, pad: "tight", cut_size: 11, cut_sub: 7.5, margin: 5 } },
+  { label: "ประหยัดกระดาษ", value: { hero_img: 16, hero_code: 13, hero_qty: 16, per_row: 4, card_img: 10, mo_no: 8, bc_h: 6.5, qr: 11, head_img: 0, mat_img: 7, name: 8, qty: 8.5, code: 6.5, tick: 2.8, pad: "tight", cut_size: 11, cut_sub: 7.5 } },
   { label: "ปกติ", value: FAMILY_DEFAULT_SIZES },
-  { label: "ตัวใหญ่ อ่านง่าย", value: { hero_img: 32, hero_code: 20, hero_qty: 26, per_row: 3, card_img: 18, mo_no: 11, bc_h: 10, qr: 16, head_img: 12, mat_img: 12, name: 11, qty: 12, code: 8.5, tick: 4, pad: "airy", cut_size: 16, cut_sub: 10, margin: 8 } },
+  { label: "ตัวใหญ่ อ่านง่าย", value: { hero_img: 32, hero_code: 20, hero_qty: 26, per_row: 3, card_img: 18, mo_no: 11, bc_h: 10, qr: 16, head_img: 12, mat_img: 12, name: 11, qty: 12, code: 8.5, tick: 4, pad: "airy", cut_size: 16, cut_sub: 10 } },
 ];
 export function normalizeFamilySizes(raw: unknown): FamilySizes {
   const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
@@ -216,6 +266,7 @@ export const FAMILY_DEFAULT_SETTINGS: FamilyPrintSettings = {
   merge: "auto", group: "type", cell: "code", empty: "blank", tick: "before", img: "hide", barcode: "both",
   sizes: FAMILY_DEFAULT_SIZES, track_cols: null, line: FAMILY_DEFAULT_LINE,
   total: "dup", total_by: "code", total_mark: "off", cut_label: "group",
+  page: FAMILY_DEFAULT_PAGE,
 };
 export const FAMILY_SETTING_FIELDS: { key: keyof FamilyPrintSettings; label: string; options: { v: string; label: string }[] }[] = [
   { key: "merge", label: "วิธีรวมแถว", options: [{ v: "auto", label: "อัตโนมัติ" }, { v: "strict", label: "แบบเดิม (เข้ม)" }, { v: "none", label: "ไม่รวม (แถวละรหัส)" }] },
@@ -238,6 +289,7 @@ export function normalizeFamilySettings(raw: unknown): FamilyPrintSettings {
   out.sizes = normalizeFamilySizes(o.sizes);
   out.track_cols = sanitizeCols(o.track_cols);
   out.line = normalizeFamilyLine(o.line);
+  out.page = normalizeFamilyPage(o.page, (o.sizes as Record<string, unknown> | undefined)?.margin);
   return out as FamilyPrintSettings;
 }
 
@@ -263,7 +315,6 @@ export function familySizeCss(z: FamilySizes | null | undefined): string {
   if (ch("pad")) r.push(`.summary-table th, .summary-table td, .doc-table th, .doc-table td { padding: ${z.pad === "tight" ? "0.3mm 0.4mm" : "1.3mm 1mm"}; }`);
   if (ch("cut_size")) r.push(`.fp-size, .fp-mat { font-size: ${z.cut_size}px; }`);
   if (ch("cut_sub")) r.push(`.fp-cutl .fp-sub, .fp-mh .fp-sub { font-size: ${z.cut_sub}px; }`);
-  if (ch("margin")) r.push(`.doc { padding: ${z.margin}mm ${z.margin + 1}mm !important; }`);
   if (!r.length) return "";
   const css = r.join("\n");
   return `\n/* ขนาดแต่ละจุด — ตั้งจากแผง "ตั้งค่าใบรวมทั้งรุ่น" */\n${css}\n@media print {\n${css}\n}\n`;
