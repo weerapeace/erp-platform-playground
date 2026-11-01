@@ -19,6 +19,10 @@
 //
 // 2026-10-18: opts.group — หลายลิสต์ในหน้าเดียว (เช่น การ์ดรูปต่อ SKU) ใส่ group คนละค่า → ลากข้ามลิสต์ไม่ถูกนับเป็นที่วาง
 //   (ไม่ใส่ = ทำงานแบบเดิมทุกอย่าง)
+//
+// 2026-11-01: opts.onDropTarget — ลากไปวางนอกลิสต์ตัวเอง (เช่น ย้ายรูปไปแถวสีอื่น) · ที่วางใส่ data-reorder-drop="<key>"
+//   ปล่อยบนที่วาง (ไม่ใช่แถวในลิสต์ตัวเอง) = เรียก onDropTarget(from, key) · ที่วางที่กำลังชี้ได้ data-drop-over="true" (ไว้ไฮไลต์)
+//   (ไม่ใส่ = ทำงานแบบเดิมทุกอย่าง)
 
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 
@@ -33,14 +37,18 @@ export function moveItem<T>(arr: T[], from: number, to: number): T[] {
 
 const ROW_ATTR = "data-reorder-row";
 const GROUP_ATTR = "data-reorder-group";
+const DROP_ATTR = "data-reorder-drop";
+const DROP_OVER_ATTR = "data-drop-over";
 
-export function useDragReorder(onReorder: (from: number, to: number) => void, opts: { group?: string } = {}) {
+export function useDragReorder(onReorder: (from: number, to: number) => void, opts: { group?: string; onDropTarget?: (from: number, key: string) => void } = {}) {
   const group = opts.group;
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
   const overRef = useRef<number | null>(null);
   const onReorderRef = useRef(onReorder);
   onReorderRef.current = onReorder;
+  const onDropTargetRef = useRef(opts.onDropTarget);
+  onDropTargetRef.current = opts.onDropTarget;
 
   // props ของ "แถว" = พื้นที่วาง (drop target) — ใส่ data attribute ไว้ให้หาเจอตอนลาก
   const rowProps = (i: number) => ({
@@ -58,9 +66,15 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
       const sy = e.clientY;
       let active = false;
       overRef.current = null;
+      let dropEl: HTMLElement | null = null;
+      const setDropEl = (el: HTMLElement | null) => {
+        if (el === dropEl) return;
+        dropEl?.removeAttribute(DROP_OVER_ATTR);
+        dropEl = el;
+        dropEl?.setAttribute(DROP_OVER_ATTR, "true");
+      };
 
-      const rowAt = (x: number, y: number): number | null => {
-        const el = document.elementFromPoint(x, y) as HTMLElement | null;
+      const rowAt = (el: HTMLElement | null): number | null => {
         const row = el?.closest?.(`[${ROW_ATTR}]`) as HTMLElement | null;
         if (!row) return null;
         if (group && row.getAttribute(GROUP_ATTR) !== group) return null;   // แถวของลิสต์อื่น = ไม่ใช่ที่วาง
@@ -76,11 +90,14 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
           document.body.style.userSelect = "none";
           document.body.style.cursor = "grabbing";
         }
-        const over = rowAt(ev.clientX, ev.clientY);
+        const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+        const over = rowAt(el);
         if (over !== overRef.current) {
           overRef.current = over;
           setOverIdx(over);
         }
+        // ไม่ได้ชี้แถวในลิสต์ตัวเอง → ที่วางนอกลิสต์ (ถ้าเปิดใช้)
+        setDropEl(over === null && onDropTargetRef.current ? ((el?.closest?.(`[${DROP_ATTR}]`) as HTMLElement | null) ?? null) : null);
       };
       const up = () => {
         window.removeEventListener("pointermove", move);
@@ -89,7 +106,10 @@ export function useDragReorder(onReorder: (from: number, to: number) => void, op
         document.body.style.userSelect = "";
         document.body.style.cursor = "";
         const to = overRef.current;
+        const dropKey = dropEl?.getAttribute(DROP_ATTR) ?? null;
+        setDropEl(null);
         if (active && to !== null && to !== i) onReorderRef.current(i, to);
+        else if (active && to === null && dropKey) onDropTargetRef.current?.(i, dropKey);
         setDragIdx(null);
         setOverIdx(null);
         overRef.current = null;

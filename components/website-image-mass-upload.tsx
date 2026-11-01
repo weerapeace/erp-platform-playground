@@ -8,6 +8,8 @@
  * 2) ตรวจก่อนลง: แยกตามสินค้า → ช่อง (บอกรหัส SKU + ร้านที่ลง) → รูปใหม่ตามลำดับ · ไฟล์ที่ต้องดู (ไม่พบรหัส/สีไม่มี/เกินเพดาน/Hero ซ้ำ/ข้ามเอง) เลือกช่องเองได้
  *    แต่ละแถวโชว์รูปเดิมบนเว็บจางๆ ก่อนรูปใหม่ (ต่อท้าย = เลขต่อจากของเดิม · แทนที่ = ขีดฆ่า "จะเอาออก")
  *    ↕ ลากรูปสลับลำดับในแถว (หรือ ‹ ›) — เลือกได้ว่าแถวอื่นตำแหน่งเดียวกันสลับตาม (ทุกสีในรุ่น / ทุกแถวที่ลากมา · จำต่อคน)
+ *    🎯 โยนรูปเข้าสีเอง (ไม่สนชื่อไฟล์): ทุกสีของรุ่นมีแถว (สีที่ยังไม่มีรูปใหม่ = แถวว่างกรอบประ) · ลากไฟล์จากเครื่องวางบนแถว = เข้าแถวนั้น
+ *       ลากรูปย่อข้ามไปแถวอื่น (useDragReorder onDropTarget · data-reorder-drop = targetKey) · ⇄ "ย้ายไป…" ใต้รูป (จอสัมผัส) — ย้ายทีละรูป ต่อท้ายแถวปลายทาง
  *    ✕ ไม่ลงทั้งแถว / ทั้งสินค้า (ลงซ้ำของที่มีแล้ว) → ไปกล่อง "ข้ามไว้" เอากลับได้ทีละกลุ่ม · ✎ ย้ายทั้งแถวไปสินค้า/ช่องอื่น · 🔁 เปลี่ยนสินค้าทั้งรุ่น (อ่านชื่อผิด — สีจับคู่ตามเลขสีเดิม)
  *    ค่าเริ่มต้น = เพิ่มต่อท้าย (ของเดิมอยู่ครบ) · แทนที่ = เฉพาะช่องที่มีรูปใหม่ · เกิน 20 สินค้า + แทนที่ = พิมพ์ CONFIRM
  *    ครั้งละ ≤ 1,000 ไฟล์: รูปพรีวิวย่อ (สูง 160px · ทำทีละ 3 รูปเบื้องหลัง) · แสดงทีละ 30 สินค้า
@@ -48,6 +50,7 @@ import {
   matchIntoParent,
   planImageUpload,
   splitRounds,
+  targetKey,
   targetLabel,
   type CatalogParent,
   type ImageMatch,
@@ -110,6 +113,8 @@ const UPLOAD_CONCURRENCY = 3;
 const UPLOAD_MAX = 2000;
 /** ตรวจกับคลังทีละกี่ไฟล์ (ย่อรูปทีละชุด ไม่กินหน่วยความจำตอนลากมาเป็นร้อยไฟล์) */
 const LIB_BATCH = 20;
+/** แถวที่กำลังลากรูปข้ามมาวาง (useDragReorder ใส่ data-drop-over ให้) */
+const DROP_OVER_CLS = "data-[drop-over=true]:bg-violet-50 data-[drop-over=true]:ring-2 data-[drop-over=true]:ring-violet-300";
 const seg = (on: boolean) => `px-3 py-1 text-xs rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
 /** รูปเดิมบนเว็บของช่องนั้น (R2 key ตามลำดับที่โชว์) */
 const existingKeys = (t: ImageTarget, p: CatalogParent): string[] => {
@@ -258,7 +263,10 @@ export function WebsiteImageMassUpload({
     return m;
   };
 
-  const addFiles = (raw: File[]) => {
+  // ↘ ลำดับต่อท้ายของรูปที่โยนเข้าแถว/ย้ายมาเอง (เพิ่มขึ้นเรื่อย ๆ = มาทีหลังอยู่ท้าย)
+  const posSeq = useRef(1000);
+  /** to = โยนเข้าแถวนั้นเลย (ไม่สนชื่อไฟล์) · ไม่ส่ง = จับคู่จากชื่อไฟล์/โฟลเดอร์ */
+  const addFiles = (raw: File[], to?: { parentId: string; target: ImageTarget }) => {
     if (!catalog || phase !== "pick") return;
     const isVid = (f: File) => f.type.startsWith("video/") || isVideoName(f.name);
     const imgs = raw.filter((f) => isVid(f) || f.type.startsWith("image/") || /\.(jpe?g|png|webp|gif)$/i.test(f.name));
@@ -272,10 +280,41 @@ export function WebsiteImageMassUpload({
       const path = filePathOf(file);
       const video = isVid(file);
       const invalid = video && file.size > BIG_VIDEO_MAX_BYTES ? `วิดีโอใหญ่เกิน ${fileMb(BIG_VIDEO_MAX_BYTES)} (${fileMb(file.size)}) — ตัดคลิปให้สั้นลง/ลดความละเอียด` : undefined;
-      return { id: `f${++seq.current}`, file, path, url: URL.createObjectURL(file), match: matchOf(path), video, invalid } as Item;
+      const placed = to ? { manual: to, pos: posSeq.current++ } : {};
+      return { id: `f${++seq.current}`, file, path, url: URL.createObjectURL(file), match: matchOf(path), video, invalid, ...placed } as Item;
     });
     if (next.length) setItems((xs) => [...xs, ...next]);
   };
+
+  /** key แถว = targetKey (`<parentId>|g` · `|s:<skuId>` · `|h:<slot>` · `|sh:<skuId>:<slot>`) → สินค้า + ช่อง */
+  const slotOfKey = (key: string) => {
+    const i = key.indexOf("|");
+    const target = i > 0 ? decT(key.slice(i + 1)) : null;
+    return target ? { parentId: key.slice(0, i), target } : null;
+  };
+  // ⇄ ย้ายรูปทีละรูปไปแถวอื่น (ลากข้ามแถว / เลือก "ย้ายไป…") — ต่อท้ายแถวปลายทาง
+  const moveOneTo = (id: string, key: string) => {
+    const to = slotOfKey(key);
+    const it = itemsRef.current.find((x) => x.id === id);
+    if (!to || !it) return;
+    if (it.video && to.target.kind !== "hero" && to.target.kind !== "skuHero") return toast.warning("วิดีโอลงได้เฉพาะช่อง Hero");
+    const pos = posSeq.current++;
+    setItems((xs) => xs.map((x) => (x.id === id ? { ...x, manual: to, pos, skip: false } : x)));
+  };
+  // 📥 ลากไฟล์จากเครื่องมาวางบนแถวไหน = เข้าแถวนั้นเลย (แถวว่างของสีที่ยังไม่มีรูปก็วางได้)
+  const slotDrop = useFileDrop(
+    (files, key) => {
+      const to = slotOfKey(key);
+      if (to) addFiles(files, to);
+    },
+    {
+      accept: ["image/", "video/"],
+      folders: true,
+      disabled: phase !== "pick" || !catalog,
+      onReject: () => toast.warning("ลากได้เฉพาะไฟล์รูป (jpg / png / webp) หรือวิดีโอ (mp4 / webm)"),
+      onBusy: () => toast.info("กำลังอัปโหลดอยู่ รอสักครู่"),
+    }
+  );
 
   // 📥 ไฟล์ที่ลากมาวางบนแถวสินค้า → ใส่ให้ครั้งเดียวหลังโหลดรายการเสร็จ
   const fedRef = useRef<File[] | null>(null);
@@ -631,14 +670,19 @@ export function WebsiteImageMassUpload({
     const x = sk(t.skuId);
     return { title: `🎬 Hero ${t.slot === "desktop" ? "คอม" : "มือถือ"} · ${x?.code ?? "?"}`, sub: `รูปเปิดเมื่อเลือกสี${x?.label ?? ""}` };
   };
-  /** ตัวเลือกช่องรูปของสินค้า (ใช้ร่วม: ย้ายทั้งแถว · ไฟล์ที่ต้องดู) */
+  /** ตัวเลือกช่องรูปของสินค้า (value = encT) — ใช้ร่วม: ย้ายทั้งแถว · ไฟล์ที่ต้องดู · ⇄ ย้ายทีละรูป */
+  const slotOptionList = (p: Parent, video: boolean): { value: string; label: string }[] => [
+    ...(!video ? [{ value: "g", label: "🖼 รูปบนเว็บ (รวมทั้งรุ่น)" }] : []),
+    ...(!video ? p.skus.map((x) => ({ value: `s:${x.id}`, label: `🎨 รูปสี ${x.code} ${x.label}` })) : []),
+    { value: "h:desktop", label: "🎬 Hero คอม" },
+    { value: "h:mobile", label: "🎬 Hero มือถือ" },
+    ...(video ? p.skus.flatMap((x) => (["desktop", "mobile"] as const).map((slot) => ({ value: `sh:${x.id}:${slot}`, label: targetLabel({ kind: "skuHero", skuId: x.id, slot }, p) }))) : []),
+  ];
   const slotOptions = (p: Parent, video: boolean) => (
     <>
-      {!video && <option value="g">🖼 รูปบนเว็บ (รวมทั้งรุ่น)</option>}
-      {!video && p.skus.map((x) => <option key={x.id} value={`s:${x.id}`}>🎨 รูปสี {x.code} {x.label}</option>)}
-      <option value="h:desktop">🎬 Hero คอม</option>
-      <option value="h:mobile">🎬 Hero มือถือ</option>
-      {video && p.skus.flatMap((x) => (["desktop", "mobile"] as const).map((slot) => <option key={`${x.id}:${slot}`} value={`sh:${x.id}:${slot}`}>{targetLabel({ kind: "skuHero", skuId: x.id, slot }, p)}</option>))}
+      {slotOptionList(p, video).map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
     </>
   );
 
@@ -794,7 +838,8 @@ export function WebsiteImageMassUpload({
     onClose();
   };
 
-  const thumb = (id: string, opts: { muted?: boolean; onSkip?: () => void; handle?: Record<string, unknown>; index?: number; onMove?: (dir: -1 | 1) => void; canPrev?: boolean; canNext?: boolean } = {}) => {
+  /** moveIn = ⇄ "ย้ายไป…" ช่องอื่นของสินค้านั้น (ทีละรูป · ใช้แทนการลากบนมือถือ) */
+  const thumb = (id: string, opts: { muted?: boolean; onSkip?: () => void; handle?: Record<string, unknown>; index?: number; onMove?: (dir: -1 | 1) => void; canPrev?: boolean; canNext?: boolean; moveIn?: { p: Parent; current: string } } = {}) => {
     const it = itemById.get(id);
     if (!it) return null;
     const parts = it.path.split("/");
@@ -853,7 +898,25 @@ export function WebsiteImageMassUpload({
             {opts.canNext && <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={() => opts.onMove?.(1)} aria-label="เลื่อนไปขวา" className="h-5 w-5 rounded bg-white/90 text-[11px] leading-none text-slate-700 shadow">›</button>}
           </span>
         )}
-        <p className="mt-0.5 truncate text-[10px] text-slate-500" title={it.path}>{folder ? <span className="text-slate-400">{folder}/</span> : null}{fileName}</p>
+        <div className="relative">
+          <p className="mt-0.5 truncate text-[10px] text-slate-500" title={it.path}>{folder ? <span className="text-slate-400">{folder}/</span> : null}{fileName}</p>
+          {/* ⇄ ย้ายรูปนี้ไปช่องอื่น — ชี้ที่รูปแล้วโผล่ทับชื่อไฟล์ (จอสัมผัสโชว์ตลอด) */}
+          {opts.moveIn && phase === "pick" && (
+            <select
+              value=""
+              onPointerDown={(e) => e.stopPropagation()}
+              onChange={(e) => e.target.value && moveOneTo(id, `${opts.moveIn!.p.parentId}|${e.target.value}`)}
+              aria-label={`ย้าย ${it.path} ไปช่องอื่น`}
+              title="ย้ายรูปนี้ไปสี/ช่องอื่น"
+              className="absolute inset-0 h-full w-full cursor-pointer rounded border border-blue-300 bg-white px-0.5 text-[10px] text-blue-700 opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+            >
+              <option value="">⇄ ย้ายไป…</option>
+              {slotOptionList(opts.moveIn.p, it.video).filter((o) => `${opts.moveIn!.p.parentId}|${o.value}` !== opts.moveIn!.current).map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          )}
+        </div>
         {opts.onSkip && phase === "pick" && (
           <button type="button" onPointerDown={(e) => e.stopPropagation()} onClick={opts.onSkip} aria-label={`ข้าม ${it.path}`} title="ไม่ลงไฟล์นี้" className="absolute -right-1.5 -top-1.5 hidden h-5 w-5 items-center justify-center rounded-full bg-slate-800 text-[11px] text-white group-hover:flex">
             ✕
@@ -1076,6 +1139,9 @@ export function WebsiteImageMassUpload({
                 {touched.slice(0, shown).map((pid) => {
                   const p = byId.get(pid)!;
                   const dests = plan.dests.filter((d) => d.parentId === pid);
+                  // 🎨 สีที่ยังไม่มีรูปในชุดนี้ → แถวว่างให้โยนรูปเข้า (ลากจากเครื่อง / ลากรูปจากแถวอื่น / เลือก "ย้ายไป…")
+                  const haveSku = new Set(dests.flatMap((d) => (d.target.kind === "sku" ? [d.target.skuId] : [])));
+                  const emptySkus = phase === "pick" ? p.skus.filter((s) => !haveSku.has(s.id)) : [];
                   return (
                     <div key={pid} className="rounded-xl border border-slate-200 bg-white px-3.5 py-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1122,7 +1188,13 @@ export function WebsiteImageMassUpload({
                         const rowTwins = d.fileIds.map((id) => twinOf.get(id));
                         const twinRow = !isHero && d.fileIds.length >= 2 && rowTwins.every((t) => t && t.destKey !== d.key && t.destKey === rowTwins[0]?.destKey) ? rowTwins[0]?.destKey : null;
                         return (
-                          <div key={d.key} className="mt-2 grid grid-cols-[11rem_minmax(0,1fr)] items-start gap-2 border-t border-slate-100 pt-2">
+                          <div
+                            key={d.key}
+                            data-reorder-drop={d.key}
+                            {...slotDrop.zone(d.key)}
+                            className={`relative mt-2 grid grid-cols-[11rem_minmax(0,1fr)] items-start gap-2 rounded-lg border-t border-slate-100 pt-2 ${DROP_OVER_CLS}`}
+                          >
+                            <FileDropHint show={slotDrop.over === d.key} label={`วางรูปเข้า ${dl.title.replace(/^\S+\s/, "")}`} />
                             <div className="min-w-0">
                               <p className="truncate text-xs font-medium text-slate-700" title={dl.title}>{dl.title}</p>
                               <p className="truncate text-[11px] text-slate-500" title={dl.sub}>{dl.sub}</p>
@@ -1163,8 +1235,9 @@ export function WebsiteImageMassUpload({
                               <DestThumbs
                                 group={d.key}
                                 ids={d.fileIds}
-                                canDrag={phase === "pick" && d.fileIds.length > 1}
+                                canDrag={phase === "pick"}
                                 onReorder={(from, to) => reorderDest(d, from, to)}
+                                onDropTarget={(from, key) => key !== d.key && moveOneTo(d.fileIds[from], key)}
                                 render={(id, i, handle) =>
                                   thumb(id, {
                                     onSkip: () => setSkip([id], true),
@@ -1173,6 +1246,7 @@ export function WebsiteImageMassUpload({
                                     onMove: d.fileIds.length > 1 ? (dir) => reorderDest(d, i, i + dir) : undefined,
                                     canPrev: i > 0,
                                     canNext: i < d.fileIds.length - 1,
+                                    moveIn: { p, current: d.key },
                                   })
                                 }
                               />
@@ -1223,6 +1297,30 @@ export function WebsiteImageMassUpload({
                                 <span className="text-[11px] text-slate-500">เลือกช่องแล้วย้ายทันที</span>
                               </div>
                             )}
+                          </div>
+                        );
+                      })}
+                      {emptySkus.map((s) => {
+                        const key = targetKey(pid, { kind: "sku", skuId: s.id });
+                        return (
+                          <div
+                            key={key}
+                            data-reorder-drop={key}
+                            {...slotDrop.zone(key)}
+                            className={`relative mt-2 grid grid-cols-[11rem_minmax(0,1fr)] items-center gap-2 rounded-lg border-t border-slate-100 pt-2 ${DROP_OVER_CLS}`}
+                          >
+                            <FileDropHint show={slotDrop.over === key} label={`วางรูปเข้า รูปสี · ${s.code}`} />
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-medium text-slate-500" title={s.code}>🎨 รูปสี · {s.code}</p>
+                              <p className="truncate text-[11px] text-slate-400" title={s.label}>{s.label}</p>
+                            </div>
+                            <div className="flex h-12 items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-200 px-3 text-[11px] text-slate-400">
+                              <Icon name="image" size={14} />
+                              <span>
+                                ยังไม่มีรูปใหม่ — ลากรูปจากเครื่อง หรือลากรูปจากแถวอื่นมาวางที่นี่
+                                {s.webImages.length > 0 && <span className="text-slate-500"> · บนเว็บมีอยู่แล้ว {s.webImages.length} รูป</span>}
+                              </span>
+                            </div>
                           </div>
                         );
                       })}
@@ -1454,14 +1552,16 @@ function OldThumbs({ keys, gone, hero }: { keys: string[]; gone: boolean; hero: 
   );
 }
 
-function DestThumbs({ group, ids, canDrag, onReorder, render }: {
+function DestThumbs({ group, ids, canDrag, onReorder, onDropTarget, render }: {
   group: string;
   ids: string[];
   canDrag: boolean;
   onReorder: (from: number, to: number) => void;
+  /** ⇄ ลากไปวางแถวอื่น (data-reorder-drop) = ย้ายรูปนั้นไปแถวนั้น */
+  onDropTarget?: (from: number, key: string) => void;
   render: (id: string, i: number, handle: Record<string, unknown> | undefined) => ReactNode;
 }) {
-  const { rowProps, handleProps, rowCls } = useDragReorder(onReorder, { group: `mass:${group}` });
+  const { rowProps, handleProps, rowCls } = useDragReorder(onReorder, { group: `mass:${group}`, onDropTarget });
   return (
     <>
       {ids.map((id, i) => (
