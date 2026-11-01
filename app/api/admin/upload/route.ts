@@ -16,6 +16,7 @@ import { r2PutObject, r2DeleteObject } from "@/lib/r2";
 import { writeAudit } from "@/lib/audit";
 import { detectAssetType, extOf, sha256Hex } from "@/lib/assets";
 import { LIBRARY_FOLDER_LABEL, attachTags } from "@/app/api/assets/shared";
+import { analyzeImageBuffer } from "@/lib/image-hash-server";
 
 const ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf", "video/mp4", "video/webm", "video/quicktime", "application/json"]);
 const MAX_SIZE = 10 * 1024 * 1024;        // 10 MB (รูป/PDF บิล/ใบรับ)
@@ -34,11 +35,14 @@ async function registerToLibrary(p: { buffer: ArrayBuffer; key: string; file: Fi
     // ไฟล์เดิม (เนื้อหาเดียวกัน) อยู่ในคลังแล้ว → ไม่ลงซ้ำ แค่เพิ่มแท็กที่มา
     const { data: dup } = await admin.from("assets").select("id").eq("checksum", checksum).eq("status", "active").limit(1).maybeSingle();
     if (dup?.id) { if (tag) await attachTags(admin, dup.id as string, [tag]); return { id: dup.id as string, duplicate: true }; }
+    // ลายนิ้วมือหน้าตารูป + ขนาด — ให้ป๊อปถามรูปซ้ำ (components/duplicate-upload) จับรูปเดียวกันที่เป็นคนละไฟล์ได้ทันที
+    const img = p.file.type.startsWith("image/") ? await analyzeImageBuffer(p.buffer) : null;
     const { data: ins } = await admin.from("assets").insert({
       title: p.file.name, file_name: p.file.name, r2_key: p.key,
       asset_type: detectAssetType(p.file.type, p.file.name),
       content_type: p.file.type || null, ext: extOf(p.file.name) || null, size_bytes: p.file.size,
       checksum, status: "active", source: "upload", uploaded_by: p.uploadedBy,
+      width: img?.width ?? null, height: img?.height ?? null, phash: img?.look?.phash ?? null, phash_color: img?.look?.color ?? null,
     }).select("id").maybeSingle();
     if (ins?.id && tag) await attachTags(admin, ins.id as string, [tag]);
     return ins?.id ? { id: ins.id as string, duplicate: false } : null;
