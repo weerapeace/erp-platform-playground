@@ -14,15 +14,19 @@ import { useT } from "@/components/i18n";
 // ⚠️ import วนกัน (duplicate-upload ใช้ prepareResizedImage/uploadPreparedImage จากไฟล์นี้) — ปลอดภัยเพราะเรียกใช้ในฟังก์ชันเท่านั้น ไม่มีโค้ดระดับบนสุดที่ใช้ของอีกไฟล์
 import { askDuplicateUploads, uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { UploadProgress, imageStepProgress, type UploadProgressState } from "@/components/upload-progress";
+import { imageOpenErrorFor, toDecodableImage } from "@/lib/image-decode";
 
 type Img = { id: string; r2_key: string | null; file_name?: string | null };
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
 
 // ย่อรูปให้ด้านยาวสุด ≤ max (คงสัดส่วน) → คืน Blob
-async function resizeImage(file: File, max = 1600): Promise<{ blob: Blob; type: string }> {
+// เปิดไม่ได้ = ImageOpenError บอกสาเหตุ (ไฟล์ว่าง/อ่านไม่ได้/TIFF/PSD/ไฟล์เสีย…) · HEIC แปลงเป็น JPG ก่อน — lib/image-decode
+async function resizeImage(original: File, max = 1600): Promise<{ blob: Blob; type: string }> {
+  const file = await toDecodableImage(original);
   const url = URL.createObjectURL(file);
   try {
-    const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+    const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(null); i.src = url; })
+      .catch(async () => { throw await imageOpenErrorFor(original); });
     let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
     if (w > max || h > max) { const r = Math.min(max / w, max / h); w = Math.round(w * r); h = Math.round(h * r); }
     const canvas = document.createElement("canvas"); canvas.width = w; canvas.height = h;
@@ -46,7 +50,10 @@ export async function uploadPreparedImage(prepared: File, opts?: { folder?: stri
   fd.append("file", prepared);
   fd.append("folder", opts?.folder ?? "creative-tasks");
   const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
-  const j = await res.json(); if (j.error) throw new Error(j.error);
+  // เซิร์ฟเวอร์ตอบไม่ใช่ JSON (เช่น หมดเวลา/ไฟล์ใหญ่เกิน) → บอกเป็นภาษาคน แทน "Unexpected token…"
+  const j = await res.json().catch(() => null);
+  if (!j) throw new Error(res.status === 413 ? "ไฟล์ใหญ่เกินที่ส่งได้ — ลองย่อรูปก่อน" : `ส่งไฟล์ไม่สำเร็จ (รหัส ${res.status}) — ลองลงซ้ำ`);
+  if (j.error) throw new Error(j.error);
   return { r2_key: j.r2_key as string, file_name: opts?.fileName ?? prepared.name, content_type: (j.content_type as string) || prepared.type, size_bytes: (j.size as number) ?? prepared.size };
 }
 

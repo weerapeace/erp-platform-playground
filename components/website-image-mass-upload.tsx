@@ -38,7 +38,8 @@ import { useUserPref } from "@/lib/use-user-pref";
 import { runBackgroundTask } from "@/lib/background-tasks";
 import { Icon } from "@/components/icon";
 import { isLookAlike, lookHashOfBlob, type LookHash } from "@/lib/image-hash";
-import { uploadMediaFile, MediaUploadError } from "@/lib/media-upload";
+import { uploadMediaFile } from "@/lib/media-upload";
+import { groupFailures, uploadErrorText } from "@/lib/image-open-error";
 import { BIG_VIDEO_MAX_BYTES, fileMb } from "@/lib/media-upload-limits";
 import {
   MAX_WEB_MASS_FILES,
@@ -775,7 +776,8 @@ export function WebsiteImageMassUpload({
                     if (it.video) keysRef.current.set(id, await uploadMediaFile(it.file, { folder: "storefront-hero", onProgress: (pct) => setVideoPct(pct) }));
                     else keysRef.current.set(id, await uploadImageOnce(id, it.file));
                   } catch (e) {
-                    failed.set(id, e instanceof MediaUploadError || e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ");
+                    // สาเหตุจริง (เปิดรูปไม่ได้เพราะอะไร / เซิร์ฟเวอร์ตอบอะไร) — lib/image-open-error
+                    failed.set(id, uploadErrorText(e));
                   } finally {
                     if (it.video) setVideoPct(null);
                   }
@@ -1492,10 +1494,15 @@ export function WebsiteImageMassUpload({
                     {result.failed.length > 0 && (
                       <div className="mt-1.5 text-xs text-rose-700">
                         <p>ยังไม่ขึ้นเว็บ {result.failed.length} ไฟล์ — รอบอื่นขึ้นครบแล้ว ไม่ต้องลงใหม่ทั้งชุด</p>
-                        <p className="mt-0.5 text-rose-600">
-                          {result.failed.slice(0, 8).map((x) => `${x.name} (${x.why})`).join(" · ")}
-                          {result.failed.length > 8 ? " …" : ""}
-                        </p>
+                        {/* จัดกลุ่มตามสาเหตุ — สาเหตุละบรรทัด + ชื่อไฟล์ (เกิน 8 = …) */}
+                        <ul className="mt-1 space-y-1">
+                          {groupFailures(result.failed).map((g) => (
+                            <li key={g.why} className="text-rose-600">
+                              <span className="font-medium text-rose-700">{g.why}</span>
+                              <span className="text-rose-500"> · {g.items.length} ไฟล์: {g.items.slice(0, 8).map((x) => x.name).join(", ")}{g.items.length > 8 ? " …" : ""}</span>
+                            </li>
+                          ))}
+                        </ul>
                         <button type="button" onClick={() => void run(true)} className="mt-2 h-8 rounded-lg bg-rose-600 px-3 text-xs font-medium text-white hover:bg-rose-700">
                           <Icon name="refresh" className="mr-0.5 inline-block align-[-2px]" />ลงซ้ำเฉพาะ {result.failed.length} ไฟล์ที่พลาด
                         </button>

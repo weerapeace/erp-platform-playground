@@ -5,7 +5,7 @@
  * - ไฟล์ใหญ่ (วิดีโอ ≤ 200 MB · รูป ≤ 20 MB) → ขอลิงก์จาก /api/website/video-upload แล้วเบราว์เซอร์ส่งไฟล์ตรงเข้า R2 (มีแถบ %)
  *   เหตุผล: Vercel รับ request ได้ ~4.5 MB · ⚠️ ทางนี้ต้องตั้ง CORS ของ bucket R2 ก่อน 1 ครั้ง (docs/website-video.md)
  *   ยังไม่ตั้ง = โยน MediaUploadError("blocked") ให้หน้าจอบอกวิธี — ไม่พังเงียบ
- * - ชนิดไฟล์ดูจาก "หัวไฟล์" ก่อนเสมอ (normalizeMediaFile) — บางเครื่องส่ง MP4 มาไม่บอกชนิด
+ * - ชนิดไฟล์ดูจาก "หัวไฟล์" ก่อนเสมอ (normalizeMediaFile) — บางเครื่องส่ง MP4 มาไม่บอกชนิด · รูป HEIC แปลงเป็น JPG ให้
  * - รูปนิ่ง (JPG/PNG/WebP/BMP/AVIF) ใหญ่เกิน 4 MB → ย่อให้อัตโนมัติ (≤ 3200 px · WebP) แล้วส่งทางเล็ก — ใช้ได้เลยไม่ต้องรอ CORS
  * - 📚 ทุกไฟล์ลงคลังกลาง (assets) เอง: ทางเล็ก = /api/admin/upload · ทางใหญ่ = /api/assets/register หลังส่งเสร็จ
  *   ไฟล์ชื่อ+ขนาดเดียวกันอยู่ในคลังแล้ว = ใช้ไฟล์เดิม ไม่ส่งซ้ำ · uploadMediaAsset() คืนรายการในคลังให้ป๊อปเลือกจากคลังใช้ต่อ
@@ -14,6 +14,7 @@
 import { apiFetch } from "@/lib/api";
 import { SMALL_UPLOAD_BYTES, fileMb, uploadMaxBytes, resolveMediaType, sniffMediaType } from "@/lib/media-upload-limits";
 import { SHRINKABLE_IMAGE_TYPES, shrinkImageToFit } from "@/lib/image-resize";
+import { heicToJpeg } from "@/lib/image-decode";
 import type { AssetRow } from "@/app/api/assets/shared";
 
 export { SMALL_UPLOAD_BYTES, BIG_VIDEO_MAX_BYTES, BIG_IMAGE_MAX_BYTES, fileMb, uploadMaxBytes } from "@/lib/media-upload-limits";
@@ -30,6 +31,10 @@ export async function normalizeMediaFile(file: File): Promise<File> {
     /* อ่านหัวไฟล์ไม่ได้ = ใช้ชนิดที่เบราว์เซอร์บอก */
   }
   const type = resolveMediaType(file.type, sniffMediaType(head), file.name);
+  // 📱 รูป HEIC (iPhone) เบราว์เซอร์/เว็บเปิดไม่ได้ → แปลงเป็น JPG ในเครื่องก่อน · แปลงไม่ได้ = ส่งไฟล์เดิม (เซิร์ฟเวอร์บอกว่าไม่รองรับ) — lib/image-decode
+  if (type === "image/heic") {
+    try { return await heicToJpeg(file); } catch { /* ใช้ไฟล์เดิม */ }
+  }
   return type && type !== file.type ? new File([file], file.name, { type, lastModified: file.lastModified }) : file;
 }
 

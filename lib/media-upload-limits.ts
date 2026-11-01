@@ -59,7 +59,7 @@ export function sniffMediaType(b: Uint8Array): string {
   if (b.length >= 12 && s(4, 4) === "ftyp") {
     // MP4 ตระกูลเดียวกันใช้หัว ftyp — แยกด้วย brand: รูป HEIC/AVIF · เสียง M4A · QuickTime
     const brand = s(8, 4);
-    if (["heic", "heix", "hevc", "mif1", "msf1"].includes(brand)) return "image/heic";
+    if (["heic", "heix", "hevc", "heim", "heis", "hevm", "hevs", "mif1", "msf1"].includes(brand)) return "image/heic";
     if (brand === "avif" || brand === "avis") return "image/avif";
     if (brand === "M4A ") return "audio/mp4";
     if (brand === "qt  ") return "video/quicktime";
@@ -70,6 +70,11 @@ export function sniffMediaType(b: Uint8Array): string {
   if (b[0] === 0x89 && s(1, 3) === "PNG") return "image/png";
   if (s(0, 4) === "RIFF" && s(8, 4) === "WEBP") return "image/webp";
   if (s(0, 4) === "GIF8") return "image/gif";
+  // ชนิดที่เบราว์เซอร์เปิดเป็นรูปไม่ได้ — รู้ไว้เพื่อบอกสาเหตุให้ตรง (lib/image-open-error)
+  if ((s(0, 4) === "II*\u0000") || (s(0, 4) === "MM\u0000*")) return "image/tiff";
+  if (s(0, 4) === "8BPS") return "image/vnd.adobe.photoshop";
+  if (s(0, 5) === "%PDF-") return "application/pdf";
+  if (b[0] === 0x42 && b[1] === 0x4d && b.length >= 14) return "image/bmp";
   return "";
 }
 
