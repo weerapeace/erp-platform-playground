@@ -48,7 +48,7 @@ import { CatchUpModal } from "./catch-up-modal";
 import { CatchUpQueue } from "./catch-up-queue";
 import { CatchUpBatch } from "./catch-up-batch";
 import { SalesUpdate } from "./sales-update";
-import { PieceworkDispatch, type PwCandidate } from "./piecework-dispatch";
+import { PieceworkDispatch } from "./piecework-dispatch";
 import { CatchUpEdit } from "./catch-up-edit";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
 import type { CuAllRow } from "@/app/api/mo/catch-up/all/route";
@@ -1411,20 +1411,6 @@ function WorkBoardPageInner() {
   const [cuSalesAsk, setCuSalesAsk] = useState(false);
   // 🧵 หน้าต่าง "จ่ายงานเหมา" (./piecework-dispatch) — null = ปิด · mos [] = เปิดเปล่า · [mo_no…] = เปิดพร้อมใบที่ติ๊ก
   const [pwOpen, setPwOpen] = useState<{ mos: string[]; tab: "send" | "recv" } | null>(null);
-  const pwCandidates = useMemo<PwCandidate[]>(() => {
-    const m = new Map<string, PwCandidate>();
-    const moOf = new Map([...board.pending, ...board.dispatchedMos].map((p) => [p.mo_no, p]));
-    for (const p of board.pending) m.set(p.mo_no, { mo_no: p.mo_no, sku: p.product_sku, name: p.product_name, qty: p.qty, image_url: p.image_url, where: p.dispatched > 0 ? `จ่ายแล้ว ${p.dispatched}/${p.qty}` : "รอจ่าย" });
-    for (const w of board.workOrders) {
-      if (!w.mo_no) continue;
-      const who = [w.department_name, w.assignee_name].filter(Boolean).join(" · ") || "อยู่ที่ช่าง";
-      const cur = m.get(w.mo_no);
-      if (cur) { if (!cur.where.includes(who)) cur.where = `${cur.where} · ${who}`; continue; }
-      const mo = moOf.get(w.mo_no);
-      m.set(w.mo_no, { mo_no: w.mo_no, sku: w.product_sku, name: w.product_name, qty: mo?.qty ?? w.qty, image_url: mo?.image_url ?? w.image_url ?? null, where: who });
-    }
-    return [...m.values()];
-  }, [board.pending, board.dispatchedMos, board.workOrders]);
   useEffect(() => {
     if (searchParams.get("cu") !== "requests" || !canCatchUp) return;
     setCatchUpMode(true); setViewMode("table"); setCuQueueAsk(true);
@@ -1910,7 +1896,7 @@ function WorkBoardPageInner() {
 
       {/* 🧵 จ่ายงานเหมาแบบตาราง (หลายงาน หลายคน) + รับงานคืน */}
       <PieceworkDispatch open={pwOpen !== null} onClose={() => setPwOpen(null)} moNos={pwOpen?.mos ?? []} startTab={pwOpen?.tab ?? "send"}
-        candidates={pwCandidates} craftsmen={craftsmen} departments={board.departments} canEdit={canEdit}
+        craftsmen={craftsmen} departments={board.departments} canEdit={canEdit}
         onDone={() => { void load(true); if (checklistMO) { void apiFetch(`/api/mo/piecework?mo_id=${encodeURIComponent(checklistMO.id)}`).then((r) => r.json()).then((pj) => setClPieceRows((pj?.data ?? []) as MoPieceRow[])).catch(() => {}); } }} />
 
       {/* popup จ่ายงานเหมารายชิ้น → เลือกช่างเหมา */}

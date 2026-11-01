@@ -2,7 +2,8 @@
 
 /**
  * หน้าต่าง "จ่ายงานเหมา" (บอร์ดจ่ายงาน) — เจ้าของขอ 2026-11-01
- *   แท็บจ่าย: เลือกใบงาน (สินค้า) ก่อน → ตารางงานเหมาต่อใบ · 1 แถว = งาน 1 อย่าง × คน 1 คน (งานเดียวแบ่งหลายคนได้)
+ *   แท็บจ่าย: เลือกใบงาน (สินค้า) ก่อน (ตัวเลือกใบงานกลาง MoMultiPickerModal) → ตารางงานเหมาต่อใบ · 1 แถว = งาน 1 อย่าง × คน 1 คน (งานเดียวแบ่งหลายคนได้)
+ *     ทุกใบมี "แถวร่าง" รอเสมอ — เลือกงาน/คนในแถวร่าง = กลายเป็นแถวจริง แล้วแถวร่างใหม่โผล่ต่อท้าย (ไม่ต้องกด "+ งานเหมา")
  *     งานเหมาใน BOM ขึ้นให้เอง · "สถานะงานนี้" นับที่จ่ายไปแล้วด้วย (กันจ่ายซ้ำ) · บันทึกกลับใบงาน + BOM (ไม่เก็บชื่อคนใน BOM)
  *   แท็บรับงานคืน: งานเหมาที่ยังค้างแยกตามคน → ใส่ชิ้นที่รับคืน → เสร็จ (เข้าสรุปค่าแรงรายเดือน) · รับไม่ครบ = ที่เหลือให้คนเดิมทำต่อ / ไม่ทำแล้ว
  *   พิมพ์ใบจ่ายงานเหมา = /print/piecework (1 คน = 1 แผ่น)
@@ -15,13 +16,13 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { HoverImage } from "@/components/hover-image";
 import { Icon } from "@/components/icon";
 import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
+import { MoMultiPickerModal } from "@/components/mo-picker";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { bkkDate } from "@/lib/mo-sales-match";
 import { pwDupLines, pwJobKey, pwJobStates, pwPersonTotals, pwRestLine, pwValidate, type PwLine } from "@/lib/piecework-dispatch";
 import type { PwJob, PwMoInfo, PwRow } from "@/app/api/mo/piecework/batch/route";
 
-export type PwCandidate = { mo_no: string; sku: string | null; name: string | null; qty: number; image_url: string | null; where: string };
 type Person = { id: string; name: string; nickname?: string | null; code?: string | null; department_id?: string | null };
 type Line = PwLine & { wo_id: string | null };
 
@@ -32,13 +33,11 @@ const btn = "inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm
 const num = "h-8 w-full rounded-md border border-slate-200 px-2 text-right text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-violet-400";
 const tabBtn = (on: boolean) => `inline-flex h-8 items-center gap-1 rounded-full border px-3 text-sm ${on ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
 
-export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen, departments, canEdit, onDone, startTab = "send", asPage = false }: {
+export function PieceworkDispatch({ open, onClose, moNos, craftsmen, departments, canEdit, onDone, startTab = "send", asPage = false }: {
   open: boolean;
   onClose: () => void;
   /** ใบที่ติ๊กมาจากบอร์ด (เปิดมาพร้อมใบเหล่านี้) */
   moNos: string[];
-  /** ใบที่เพิ่มเข้ามาได้ (ยังไม่เข้า QC) — รอจ่าย + อยู่ที่ช่าง */
-  candidates: PwCandidate[];
   craftsmen: Person[];
   departments: { id: string; name: string }[];
   canEdit: boolean;
@@ -62,6 +61,7 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
   const [batchId, setBatchId] = useState(newId());
   const [result, setResult] = useState<{ batch_id: string; count: number; bom_updated: number } | null>(null);
   const [showErr, setShowErr] = useState(false);
+  const [pickOpen, setPickOpen] = useState(false);
   // ── แท็บรับคืน
   const [openRows, setOpenRows] = useState<PwRow[] | null>(null);
   const [recvSel, setRecvSel] = useState<Set<string>>(new Set());
@@ -85,8 +85,6 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
     for (const l of lines) if (!l.job_id && l.job_name && !out.some((o) => o.value === `new:${l.job_name}`)) out.push({ value: `new:${l.job_name}`, label: l.job_name, badge: "ใหม่" });
     return out;
   }, [jobs, lines]);
-  const candOpts: SelectOption[] = useMemo(() => candidates.filter((c) => !picked.includes(c.mo_no))
-    .map((c) => ({ value: c.mo_no, label: `${c.sku ?? "-"} · ${c.mo_no}`, sub: `${fmt(c.qty)} ชิ้น · ${c.where}`, searchText: c.name ?? "" })), [candidates, picked]);
 
   // โหลดข้อมูลใบที่เพิ่งเลือก → ตั้งต้นแถวจากงานเหมาใน BOM (เฉพาะที่ยังจ่ายไม่ครบ)
   useEffect(() => {
@@ -121,26 +119,31 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
     const m = info[moNo]; if (!m) return 0;
     return pwJobStates(m.qty, lines.filter((l) => l.mo_no === moNo), m.existing).find((s) => s.key === pwJobKey(jobId, name))?.left ?? 0;
   };
-  const addLine = (moNo: string) => {
-    const m = info[moNo]; const j = jobs[0];
-    setLines((ls) => [...ls, { key: newId(), mo_no: moNo, job_id: j?.id ?? null, job_name: j?.name ?? "", rate: j?.default_rate ?? 0, qty_per: 1, qty: m?.qty ?? 0, assignee_id: null, assignee_name: "", wo_id: m?.wos.length === 1 ? m.wos[0].id : null }]);
-  };
-  const setJob = (l: Line, jobId: string) => {
-    const j = jobs.find((x) => x.id === jobId) ?? (jobId.startsWith("new:") ? { id: jobId, name: jobId.slice(4), default_rate: l.rate, is_detail: false } : null); if (!j) return;
+  // ค่าของแถวเมื่อเลือกงาน: ราคา/ชิ้นต่อใบจาก BOM (ไม่มี = ราคาตั้งต้นของงาน) · จำนวน = ส่วนที่ยังไม่จ่าย
+  const jobFields = (l: Line, jobId: string, all: Line[]): Partial<Line> | null => {
+    const j = jobs.find((x) => x.id === jobId) ?? (jobId.startsWith("new:") ? { id: jobId, name: jobId.slice(4), default_rate: l.rate, is_detail: false } : null); if (!j) return null;
     const t = info[l.mo_no]?.tmpl.find((x) => x.job_id === j.id || x.job_name === j.name);
     const qtyPer = t?.qty_per ?? 1;
     const m = info[l.mo_no];
     const jk = pwJobKey(j.id.startsWith("new:") ? null : j.id, j.name);
-    const others = lines.filter((x) => x.key !== l.key && x.mo_no === l.mo_no && pwJobKey(x.job_id, x.job_name) === jk).reduce((a, x) => a + x.qty, 0);
+    const others = all.filter((x) => x.key !== l.key && x.mo_no === l.mo_no && pwJobKey(x.job_id, x.job_name) === jk).reduce((a, x) => a + x.qty, 0);
     const before = m ? pwJobStates(m.qty, [], m.existing).find((s) => s.key === jk)?.before ?? 0 : 0;
-    patch(l.key, { job_id: j.id.startsWith("new:") ? null : j.id, job_name: j.name, rate: t?.rate ?? j.default_rate, qty_per: qtyPer, qty: Math.max(0, (m?.qty ?? 0) * qtyPer - before - others) });
+    return { job_id: j.id.startsWith("new:") ? null : j.id, job_name: j.name, rate: t?.rate ?? j.default_rate, qty_per: qtyPer, qty: Math.max(0, (m?.qty ?? 0) * qtyPer - before - others) };
   };
-  const createJob = (l: Line, name: string) => {
-    const nm = name.trim(); if (!nm) return;
-    const tmp: PwJob = { id: `new:${nm}`, name: nm, default_rate: 0, is_detail: false };
-    setJobs((js) => (js.some((x) => x.name === nm) ? js : [...js, tmp]));
-    patch(l.key, { job_id: null, job_name: nm });
+  const setJob = (l: Line, jobId: string) => { const p = jobFields(l, jobId, lines); if (p) patch(l.key, p); };
+  const addTmpJob = (nm: string) => setJobs((js) => (js.some((x) => x.name === nm) ? js : [...js, { id: `new:${nm}`, name: nm, default_rate: 0, is_detail: false }]));
+  const createJob = (l: Line, name: string) => { const nm = name.trim(); if (!nm) return; addTmpJob(nm); patch(l.key, { job_id: null, job_name: nm }); };
+  // แถวร่าง (ท้ายทุกใบ): เลือกงาน / พิมพ์งานใหม่ / เลือกคน = เพิ่มเป็นแถวจริง → แถวร่างใหม่โผล่เอง
+  const draftBase = (moNo: string): Line => { const m = info[moNo]; return { key: newId(), mo_no: moNo, job_id: null, job_name: "", rate: 0, qty_per: 1, qty: 0, assignee_id: null, assignee_name: "", wo_id: m && m.wos.length === 1 ? m.wos[0].id : null }; };
+  const draftJob = (moNo: string, jobId: string) => { const b = draftBase(moNo), p = jobFields(b, jobId, lines); if (p) setLines((ls) => [...ls, { ...b, ...p }]); };
+  const draftCreate = (moNo: string, name: string) => {
+    const nm = name.trim(); if (!nm) return; addTmpJob(nm);
+    const m = info[moNo]; if (!m) return;
+    const b = { ...draftBase(moNo), job_name: nm };
+    const st = pwJobStates(m.qty, [...lines.filter((l) => l.mo_no === moNo), b], m.existing).find((s) => s.key === pwJobKey(null, nm));
+    setLines((ls) => [...ls, { ...b, qty: Math.max(0, st?.left ?? m.qty) }]);   // งานใหม่ = ทั้งใบ (1 ชิ้น/ใบ) หักที่จ่ายไปแล้ว
   };
+  const draftPerson = (moNo: string, id: string) => { const p = craftsmen.find((x) => x.id === id); if (p) setLines((ls) => [...ls, { ...draftBase(moNo), assignee_id: p.id, assignee_name: personLabel(p) }]); };
   const setPerson = (l: Line, id: string) => { const p = craftsmen.find((x) => x.id === id); if (p) patch(l.key, { assignee_id: p.id, assignee_name: personLabel(p) }); };
   const setQtyPer = (moNo: string, jobKey: string, v: number) => setLines((ls) => ls.map((l) => (l.mo_no === moNo && pwJobKey(l.job_id, l.job_name) === jobKey ? { ...l, qty_per: v } : l)));
   const split = (l: Line) => setLines((ls) => [...ls, { ...pwRestLine(l, jobLeft(l.mo_no, l.job_id, l.job_name), newId()), wo_id: l.wo_id }]);
@@ -287,15 +290,20 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
             {/* ① ใบงานที่เลือก */}
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium text-slate-700">① ใบงาน</span>
-              <div className="w-72"><SearchableSelect value="" options={candOpts} onChange={(v) => v && setPicked((ps) => (ps.includes(v) ? ps : [...ps, v]))} placeholder="+ เพิ่มใบงาน (พิมพ์รหัสสินค้า / เลขใบ)" /></div>
+              <button type="button" onClick={() => setPickOpen(true)} className={`${btn} h-8 border-violet-300 bg-white text-violet-700 hover:bg-violet-50`}><Icon name="add" /> เลือกใบงาน</button>
               <span className="text-[12px] text-slate-400">เฉพาะใบที่ยังไม่เข้า QC · ติ๊กจากบอร์ดมาได้</span>
+              <MoMultiPickerModal open={pickOpen} onClose={() => setPickOpen(false)} exclude={picked}
+                onConfirm={(rs) => setPicked((ps) => [...ps, ...rs.map((r) => r.mo_no).filter((n) => !ps.includes(n))])} />
               <div className="flex-1" />
               <label className="inline-flex items-center gap-1.5 text-sm text-slate-600">วันที่จ่าย <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-8 rounded-md border border-slate-200 px-2 text-sm" /></label>
               <button type="button" onClick={copyFirst} disabled={picked.length < 2} className={`${btn} h-8 border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}><Icon name="list" /> ใส่ทุกใบตามใบแรก</button>
             </div>
 
             {!picked.length ? (
-              <div className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">เลือกใบงานก่อน — ติ๊กบนบอร์ดแล้วกด &ldquo;จ่ายงานเหมา&rdquo; หรือเพิ่มจากช่องด้านบน</div>
+              <div className="rounded-xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">
+                <div>เลือกใบงานก่อน — ติ๊กบนบอร์ดแล้วกด &ldquo;จ่ายงานเหมา&rdquo; หรือ</div>
+                <button type="button" onClick={() => setPickOpen(true)} className={`${btn} mt-2 border-violet-600 bg-violet-600 font-medium text-white hover:bg-violet-700`}><Icon name="add" /> เลือกใบงาน</button>
+              </div>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-slate-200">
                 <table className="w-full min-w-[860px] border-collapse text-sm">
@@ -306,31 +314,28 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
                   </tr></thead>
                   <tbody>
                     {picked.map((moNo) => {
-                      const m = info[moNo], c = candidates.find((x) => x.mo_no === moNo);
+                      const m = info[moNo];
                       const ls = lines.filter((l) => l.mo_no === moNo);
                       const states = m ? pwJobStates(m.qty, ls, m.existing) : [];
                       const firstOfJob = new Set<string>(); const seen = new Set<string>();
                       for (const l of ls) { const k = pwJobKey(l.job_id, l.job_name); if (!seen.has(k)) { seen.add(k); firstOfJob.add(l.key); } }
-                      const where = m ? (m.wos.length ? m.wos.map((w) => [w.department_name, w.assignee_name].filter(Boolean).join(" · ")).join(", ") : m.in_qc ? "เข้า QC ครบแล้ว" : "รอจ่าย") : c?.where ?? "";
+                      const where = m ? (m.wos.length ? m.wos.map((w) => [w.department_name, w.assignee_name].filter(Boolean).join(" · ")).join(", ") : m.in_qc ? "เข้า QC ครบแล้ว" : "รอจ่าย") : "";
                       const doneBefore = (m?.existing ?? []).filter((e) => !ls.some((l) => pwJobKey(l.job_id, l.job_name) === pwJobKey(e.job_id, e.job_name)));
                       return [
                         <tr key={`h-${moNo}`} className="border-t border-slate-200 bg-slate-50/70">
                           <td colSpan={7} className="px-2 py-2">
                             <div className="flex flex-wrap items-center gap-2">
-                              <HoverImage url={m?.image_url ?? c?.image_url ?? null} size={36} />
-                              <span className="font-mono text-[13px] font-semibold text-slate-800">{m?.product_sku ?? c?.sku ?? moNo}</span>
-                              <span className="text-[12px] text-slate-500">{moNo} · สั่ง {fmt(m?.qty ?? c?.qty ?? 0)} · {where}</span>
+                              <HoverImage url={m?.image_url ?? null} size={36} />
+                              <span className="font-mono text-[13px] font-semibold text-slate-800">{m?.product_sku ?? moNo}</span>
+                              <span className="text-[12px] text-slate-500">{moNo}{m ? ` · สั่ง ${fmt(m.qty)} · ${where}` : ""}</span>
                               {m?.in_qc && <span className="rounded bg-rose-50 px-1.5 text-[11px] text-rose-600">ส่งเข้า QC ครบแล้ว — จ่ายไม่ได้</span>}
                               {doneBefore.map((e) => <span key={e.id} className="rounded bg-white px-1.5 text-[11px] text-slate-500 ring-1 ring-slate-200">จ่ายแล้ว {e.job_name} {fmt(e.total_qty)} · {e.assignee_name ?? "-"}{e.status === "done" ? " · เสร็จ" : ""}</span>)}
                               <div className="flex-1" />
-                              <button type="button" onClick={() => addLine(moNo)} disabled={!m} className="inline-flex h-7 items-center gap-1 rounded-md border border-violet-200 bg-white px-2 text-[12px] text-violet-700 hover:bg-violet-50"><Icon name="add" /> งานเหมา</button>
                               <button type="button" onClick={() => removeMo(moNo)} title="เอาใบนี้ออก" className="h-7 w-7 rounded-md text-slate-400 hover:bg-white hover:text-rose-600"><Icon name="cancel" /></button>
                             </div>
                           </td>
                         </tr>,
-                        !m ? <tr key={`l-${moNo}`}><td colSpan={7} className="px-3 py-2 text-[12px] text-slate-400">{loading ? "กำลังโหลด…" : "โหลดใบนี้ไม่ได้"}</td></tr>
-                        : !ls.length ? <tr key={`e-${moNo}`}><td colSpan={7} className="px-3 py-2 text-[12px] text-slate-400">ยังไม่มีงานเหมา — กด &ldquo;+ งานเหมา&rdquo; หรือ &ldquo;ใส่ทุกใบตามใบแรก&rdquo;</td></tr>
-                        : null,
+                        !m ? <tr key={`l-${moNo}`}><td colSpan={7} className="px-3 py-2 text-[12px] text-slate-400">{loading ? "กำลังโหลด…" : "โหลดใบนี้ไม่ได้"}</td></tr> : null,
                         ...ls.map((l) => {
                           const k = pwJobKey(l.job_id, l.job_name), st = states.find((s) => s.key === k);
                           const bad = showErr && issues.some((i) => i.key === l.key), dup = dups.has(l.key);
@@ -360,6 +365,14 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
                             </tr>
                           );
                         }),
+                        m && !m.in_qc ? (
+                          <tr key={`d-${moNo}`} className="border-t border-dashed border-slate-200 bg-slate-50/40">
+                            <td className="px-2 py-1.5"><SearchableSelect value="" options={jobOpts} onChange={(v) => v && draftJob(moNo, v)} onCreate={(q) => draftCreate(moNo, q)} createLabel="เพิ่มงานเหมาใหม่" placeholder="+ เลือกงานเหมา" /></td>
+                            <td className="px-2 py-1.5 opacity-70"><SearchableSelect value="" options={peopleOpts} onChange={(v) => v && draftPerson(moNo, v)} placeholder="— เลือกคน —" /></td>
+                            <td colSpan={4} className="px-2 py-1.5 text-[12px] text-slate-400">{ls.length ? "แถวร่าง — เลือกงานเพื่อเพิ่มอีกแถว (แบ่งคน = เลือกงานเดิมซ้ำ)" : "แถวร่าง — เลือกงานแล้วจำนวนที่เหลือจะใส่ให้เอง"}</td>
+                            <td />
+                          </tr>
+                        ) : null,
                       ];
                     })}
                   </tbody>

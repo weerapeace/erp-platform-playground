@@ -35,6 +35,7 @@ export const RECENT_KEYS = {
   designBrands: "erp-recent-design-brands",   // แบรนด์ที่ใช้สร้างใบงานออกแบบล่าสุด (ปุ่มลัดในฟอร์มสร้างใหม่)
   webProducts: "erp-recent-web-products",     // จัดการ Website › ตัวเลือกสินค้า (รหัสรุ่น) — เรียง "เลือกล่าสุดก่อน"
   webSkus:     "erp-recent-web-skus",         // จัดการ Website › ตัวเลือก SKU ("CODE:sku-xxx")
+  mos:         "erp-recent-mos",              // ตัวเลือกใบงาน (components/mo-picker) — id = เลขใบสั่งผลิต
 } as const;
 
 type WithId = { id: string };
