@@ -28,16 +28,27 @@ async function resizeImage(file: File, max = 1600): Promise<{ blob: Blob; type: 
   } finally { URL.revokeObjectURL(url); }
 }
 
-// ของกลาง: ย่อรูป (≤max) แล้วอัปขึ้น R2 → คืน r2_key (ใช้ซ้ำได้ทั้ง ImageAttach + ฟอร์มสร้าง SKU)
-export async function uploadResizedImage(file: File, opts?: { folder?: string; max?: number }): Promise<{ r2_key: string; file_name: string; content_type: string; size_bytes: number }> {
-  const { blob, type } = await resizeImage(file, opts?.max ?? 1600);
+// ของกลาง: ย่อรูป (≤max) → ไฟล์ที่พร้อมส่ง (ยังไม่อัป) — แยกไว้ให้ตรวจรูปซ้ำในคลังก่อนส่งได้ (components/duplicate-upload)
+export async function prepareResizedImage(file: File, max = 1600): Promise<File> {
+  const { blob, type } = await resizeImage(file, max);
   const name = file.name.replace(/\.[^.]+$/, "") + (type === "image/png" ? ".png" : ".jpg");
+  return new File([blob], name, { type });
+}
+
+// ของกลาง: อัปไฟล์ที่ย่อแล้วขึ้น R2 (เข้าคลังกลางอัตโนมัติ) → คืน r2_key · fileName = ชื่อไฟล์เดิมของผู้ใช้
+export async function uploadPreparedImage(prepared: File, opts?: { folder?: string; fileName?: string }): Promise<{ r2_key: string; file_name: string; content_type: string; size_bytes: number }> {
   const fd = new FormData();
-  fd.append("file", new File([blob], name, { type }));
+  fd.append("file", prepared);
   fd.append("folder", opts?.folder ?? "creative-tasks");
   const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
   const j = await res.json(); if (j.error) throw new Error(j.error);
-  return { r2_key: j.r2_key as string, file_name: file.name, content_type: (j.content_type as string) || type, size_bytes: (j.size as number) ?? blob.size };
+  return { r2_key: j.r2_key as string, file_name: opts?.fileName ?? prepared.name, content_type: (j.content_type as string) || prepared.type, size_bytes: (j.size as number) ?? prepared.size };
+}
+
+// ของกลาง: ย่อรูป (≤max) แล้วอัปขึ้น R2 → คืน r2_key (ใช้ซ้ำได้ทั้ง ImageAttach + ฟอร์มสร้าง SKU)
+export async function uploadResizedImage(file: File, opts?: { folder?: string; max?: number }): Promise<{ r2_key: string; file_name: string; content_type: string; size_bytes: number }> {
+  const prepared = await prepareResizedImage(file, opts?.max ?? 1600);
+  return uploadPreparedImage(prepared, { folder: opts?.folder, fileName: file.name });
 }
 
 export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1600, hideList = false }: {

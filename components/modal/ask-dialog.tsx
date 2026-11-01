@@ -19,8 +19,9 @@ import { tr } from "@/lib/lang";
 type Base = { title: string; message?: React.ReactNode; confirmText?: string; cancelText?: string; variant?: "default" | "danger" };
 export type AskTextOptions = Base & { placeholder?: string; required?: boolean; initial?: string; rows?: number };
 
-/** เปิดป๊อปชั่วคราวบน root แยก (ปิดแล้วถอดทิ้ง) */
-function mount<T>(render: (done: (v: T) => void) => React.ReactNode): Promise<T> {
+/** เปิดป๊อปชั่วคราวบน root แยก (ปิดแล้วถอดทิ้ง) — ของกลาง: ป๊อปถามแบบอื่นใช้ต่อได้ (เช่น components/duplicate-upload)
+ *  ⚠️ root แยก = ไม่มี context ของหน้า → ข้อความใช้ tr() ไม่ใช่ useT() */
+export function mountDialog<T>(render: (done: (v: T) => void) => React.ReactNode): Promise<T> {
   return new Promise<T>((resolve) => {
     const el = document.createElement("div");
     document.body.appendChild(el);
@@ -75,13 +76,13 @@ function AskTextDialog({ opts, done }: { opts: AskTextOptions; done: (v: string 
 /** ถามข้อความ — คืนข้อความ (ตัดช่องว่างหัวท้ายแล้ว) หรือ null ถ้ากดยกเลิก/ปิด */
 export function askText(opts: AskTextOptions): Promise<string | null> {
   if (typeof window === "undefined") return Promise.resolve(null);
-  return mount<string | null>((done) => <AskTextDialog opts={opts} done={done} />);
+  return mountDialog<string | null>((done) => <AskTextDialog opts={opts} done={done} />);
 }
 
 /** ถามยืนยัน — คืน true เมื่อกดยืนยัน · false เมื่อกดยกเลิก/ปิด */
 export function askConfirm(opts: Base): Promise<boolean> {
   if (typeof window === "undefined") return Promise.resolve(false);
-  return mount<boolean>((done) => (
+  return mountDialog<boolean>((done) => (
     <ConfirmDialog open onClose={() => done(false)} onConfirm={() => done(true)} title={opts.title}
       message={opts.message ?? ""} variant={opts.variant} confirmText={opts.confirmText} cancelText={opts.cancelText} />
   ));

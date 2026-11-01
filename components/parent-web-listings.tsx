@@ -11,7 +11,7 @@
  *   🔤 ปั๊มชื่อ · แบนเนอร์ · รายละเอียด — ตั้งเฉพาะรุ่นนี้ · 📐 ช่องใส่ของ (ของตัวสินค้า ทุกร้านเห็นเหมือนกัน · components/compartments-editor)
  *   ⚠️ ต้องแก้ — กฎกลาง lib/website-listing-health (ตัวเดียวกับป้ายเหลืองในหน้าสินค้าบนเว็บ) + ปุ่มพาไปแก้
  * เว้นว่าง = ใช้ของ ERP / ค่ากลางตามเดิม
- * ของกลาง: AssetPicker · MediaUploadField · PersonalizeEditor · ProductBannersEditor · footer-save (ปุ่มบันทึกแถบล่าง) · ColorSwatchButton
+ * ของกลาง: AssetPicker · uploadImagesWithDupCheck (ถามรูปซ้ำ) · MediaUploadField · PersonalizeEditor · ProductBannersEditor · footer-save (ปุ่มบันทึกแถบล่าง) · ColorSwatchButton
  * API: /api/parent-web-listings (guardApi products.edit + audit + ล้างแคชเว็บร้าน · ฟิลด์ชุดเดียวกับ lib/website-listing-patch)
  */
 import { useEffect, useState, useCallback, useRef, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -30,7 +30,7 @@ import type { CardColors } from "@/lib/website-card-colors";
 import { HERO_SIZE_HINT, heroOfSku, type ProductHero } from "@/lib/website-hero";
 import { MediaUploadField, type MediaValue } from "@/components/media-upload-field";
 import { NAME_RULE_EXCLUSIVE, type NameRuleFlag } from "@/lib/website-field-map";
-import { uploadResizedImage } from "@/components/image-attach";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { useFooterSave } from "@/components/footer-save";
@@ -484,7 +484,7 @@ export function ParentWebListings({
     setPicker(null);
   };
 
-  // ⬆ อัปโหลดรูปจากเครื่อง (หลายรูป) → ย่อด้านยาว ≤ 2000px (ของกลาง uploadResizedImage) → เข้าคลังไฟล์อัตโนมัติ → ต่อท้ายรูปของเป้าหมาย
+  // ⬆ อัปโหลดรูปจากเครื่อง (หลายรูป) → ย่อด้านยาว ≤ 2000px → ตรวจรูปซ้ำในคลังก่อนส่ง (ของกลาง uploadImagesWithDupCheck) → เข้าคลังไฟล์อัตโนมัติ → ต่อท้ายรูปของเป้าหมาย
   const fileRef = useRef<HTMLInputElement>(null);
   const uploadTo = useRef<{ shopId: string; target: string } | null>(null);
   const [uploading, setUploading] = useState<string | null>(null);
@@ -510,23 +510,32 @@ export function ParentWebListings({
       onBusy: () => toast.warning("กำลังอัปโหลดรูปชุดก่อนอยู่ — รอสักครู่แล้วลากใหม่"),
     }
   );
+  // 🔁 ของกลาง uploadImagesWithDupCheck: รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่งไฟล์ (ไม่เปลืองที่เก็บไฟล์) · รูปที่อยู่ในช่องนี้แล้ว → เสนอ "ข้าม"
   const uploadFilesTo = async (t: { shopId: string; target: string }, files: File[]) => {
     const imgs = files.filter((f) => f.type.startsWith("image/"));
     if (!imgs.length) return;
+    const s = data?.shops.find((x) => x.shopId === t.shopId);
+    const v = data?.variants.find((x) => x.id === t.target);
+    const bannerKey = t.target.startsWith("banner:") ? s?.webBanners.find((b) => b.id === t.target.slice(7))?.imageKey : null;
+    const here = !s ? [] : t.target === "gallery" ? s.webImages : bannerKey ? [bannerKey] : s.webSkuImages[t.target] ?? [];
+    const where = v ? `แถวสี ${v.code} · ${v.label}` : t.target === "gallery" ? "รูปบนเว็บ" : "แบนเนอร์";
     setUploading(`${t.shopId}:${t.target}`);
-    const keys: string[] = [];
-    for (const f of imgs) {
-      try {
-        keys.push((await uploadResizedImage(f, { folder: "storefront-products", max: 2000 })).r2_key);
-      } catch (e) {
-        toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${(e as Error).message}`);
-      }
+    try {
+      const r = await uploadImagesWithDupCheck(imgs, {
+        folder: "storefront-products",
+        max: 2000,
+        target: s ? `${where} (${s.shopName})` : where,
+        existingKeys: here,
+        onError: (f, e) => toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${e.message}`),
+      });
+      if (r?.keys.length) {
+        addImages(t.shopId, t.target, r.keys);
+        const parts = [r.uploaded && `อัปโหลด ${r.uploaded} รูป`, r.reused && `ใช้รูปเดิม ${r.reused} รูป`].filter(Boolean).join(" · ");
+        toast.success(`${parts} แล้ว — กดบันทึก เพื่อขึ้นเว็บ`);
+      } else if (r?.skipped) toast.info("รูปที่เลือกอยู่ในช่องนี้แล้ว — ไม่ได้เพิ่มซ้ำ");
+    } finally {
+      setUploading(null);
     }
-    if (keys.length) {
-      addImages(t.shopId, t.target, keys);
-      toast.success(`อัปโหลด ${keys.length} รูปแล้ว — กด 💾 บันทึก เพื่อขึ้นเว็บ`);
-    }
-    setUploading(null);
   };
   const uploadBtn = (sid: string, target: string, cls: string) => {
     const busy = uploading === `${sid}:${target}`;
