@@ -10,15 +10,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
-import { extractPdfFields } from "@/lib/parse-pdf-server";
-import { invoiceFileKind, type SubInvoice } from "@/lib/subscriptions";
+import { type SubInvoice } from "@/lib/subscriptions";
+import { saveSubInvoice, INVOICE_SIGNED_TTL as SIGNED_TTL } from "@/lib/subscription-invoices-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-const MAX = 15 * 1024 * 1024; // 15MB
-const SIGNED_TTL = 60 * 60;   // 1 ชั่วโมง
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const guard = await guardApi(request, "subscriptions.view");
@@ -56,38 +52,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const file = fd.get("file") as File | null;
   const month = String(fd.get("month") ?? "").trim();
   if (!file) return NextResponse.json({ error: "กรุณาแนบไฟล์บิล (PDF หรือรูป)" }, { status: 400 });
-  if (!/^\d{4}-\d{2}$/.test(month)) return NextResponse.json({ error: "กรุณาเลือกเดือน (YYYY-MM)" }, { status: 400 });
-  const kind = invoiceFileKind(file.name, file.type);
-  if (!kind) return NextResponse.json({ error: "รองรับเฉพาะไฟล์ PDF หรือรูปภาพ (jpg/png/webp)" }, { status: 400 });
-  if (file.size > MAX) return NextResponse.json({ error: "ไฟล์ใหญ่เกิน 15MB" }, { status: 400 });
 
-  const safeName = (file.name || (kind === "pdf" ? "invoice.pdf" : "invoice.jpg")).replace(/[^\w.\-() ]+/g, "_");
-  const path = `${id}/${month}/${safeName}`;
-
-  const db = supabaseAdmin();
-  const buf = await file.arrayBuffer();
-  const { error: upErr } = await db.storage.from("invoices")
-    .upload(path, buf, { upsert: true, contentType: kind === "pdf" ? "application/pdf" : (file.type || "application/octet-stream") });
-  if (upErr) return NextResponse.json({ error: `อัปโหลดไม่สำเร็จ: ${upErr.message}` }, { status: 500 });
-
-  // อ่านข้อความใน PDF เก็บ ยอด/สกุลเงิน/วันที่ (best-effort) · รูปอ่านไม่ได้ → ปล่อยว่างให้กรอกเอง
-  const parsed = kind === "pdf"
-    ? await extractPdfFields(buf)
-    : { amount: null as number | null, currency: null as string | null, dateISO: null as string | null };
-
-  const invId = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-  const { data: row, error: dbErr } = await db.from("subscription_invoices").insert({
-    id: invId, subscription_id: id, month, file_name: safeName, file_path: path,
-    amount: parsed.amount, currency: parsed.currency ?? "", invoice_date: parsed.dateISO, parsed_at: new Date().toISOString(),
-  }).select("*").single();
-  if (dbErr || !row) return NextResponse.json({ error: dbErr?.message ?? "บันทึกไม่สำเร็จ" }, { status: 500 });
-
-  await writeAudit(db, {
-    action: "attach", entityType: "subscription_invoices", entityId: null,
-    actorId: auth?.user?.id ?? null, actorName: null,
-    metadata: { sub_id: id, month, file: safeName },
+  const saved = await saveSubInvoice(supabaseAdmin(), {
+    subId: id, month, fileName: file.name, contentType: file.type, bytes: await file.arrayBuffer(),
+    actorId: auth?.user?.id ?? null,
   });
-
-  const { data: signed } = await db.storage.from("invoices").createSignedUrl(path, SIGNED_TTL);
-  return NextResponse.json({ data: { ...row, url: signed?.signedUrl ?? null }, error: null });
+  if ("error" in saved) return NextResponse.json({ error: saved.error }, { status: saved.status });
+  return NextResponse.json({ data: saved.data, error: null });
 }

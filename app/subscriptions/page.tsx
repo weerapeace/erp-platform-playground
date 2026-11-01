@@ -106,6 +106,25 @@ export default function SubscriptionsPage() {
   // แก้ทะเบียน = รายการที่ใช้โปรไฟล์ถูกอัปเดตด้วย → โหลดทั้งคู่
   const reloadChromeProfiles = useCallback(async () => { await Promise.all([fetchChromeProfiles(), fetchList()]); }, [fetchChromeProfiles, fetchList]);
 
+  // กลับมาจากหน้า Google หลังกด "เชื่อม Gmail" (?gmail=connected|error) → แจ้งผล + เปิดทะเบียนโปรไฟล์ให้เห็นสถานะ แล้วล้าง URL
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const g = sp.get("gmail");
+    if (!g && !sp.has("profiles")) return;
+    const email = sp.get("email") ?? "";
+    const requested = sp.get("requested");
+    if (g === "connected") {
+      toast.success(`เชื่อม Gmail ของ ${email} แล้ว`);
+      if (requested) toast.warning(`ตั้งใจเชื่อม ${requested} แต่ในหน้า Google เลือกบัญชี ${email} — ถ้าผิด กดเชื่อมใหม่แล้วเลือกบัญชีให้ตรง`);
+    } else if (g === "error") {
+      toast.error(`เชื่อม Gmail${email ? ` ของ ${email}` : ""} ไม่สำเร็จ: ${sp.get("reason") ?? "ไม่ทราบสาเหตุ"}`);
+    }
+    setProfilesOpen(true);
+    ["gmail", "email", "requested", "reason", "profiles"].forEach((k) => sp.delete(k));
+    const qs = sp.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${qs ? `?${qs}` : ""}`);
+  }, [toast]);
+
   // ── summary ────────────────────────────────────────────────
   const summary = useMemo(() => {
     const active = rows.filter((r) => r.active);

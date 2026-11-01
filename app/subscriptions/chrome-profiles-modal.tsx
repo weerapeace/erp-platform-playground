@@ -4,8 +4,9 @@
  * ป๊อปอัป "🖥️ โปรไฟล์ Chrome" — ทะเบียนว่าแต่ละโปรไฟล์ใช้อีเมล/โฟลเดอร์อะไร (ตั้งครั้งเดียว)
  * แก้ที่นี่ → ทุกรายการงานที่ใช้โปรไฟล์นี้เปลี่ยนตาม (API ไล่อัปเดตให้)
  * เปิดได้จากหัวหน้า App Subscription และจากฟอร์มรายการ (เลือก "＋ เพิ่มโปรไฟล์ใหม่…" / "แก้ในทะเบียน")
+ * แต่ละโปรไฟล์ "เชื่อม Gmail" ได้ (ระบบกลาง lib/gmail-api) → ใช้กับปุ่ม 📥 ดึงบิลจากเมล
  */
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
@@ -19,11 +20,15 @@ const BLANK: ChromeProfileInput = { nickname: "", account_email: "", chrome_prof
 /** เปิดมาให้ทำอะไรทันที: เพิ่มใหม่ (เติมค่าตั้งต้นให้ได้ เช่น จากผู้ใช้ที่กรอกเอง) หรือแก้โปรไฟล์ที่ระบุ */
 export type ChromeProfilesStart = { mode: "new"; init?: Partial<ChromeProfileInput> } | { mode: "edit"; id: string } | null;
 
-export function ChromeProfilesModal({ open, profiles, canEdit, start, onClose, onChanged, onSaved }: {
+type GmailConn = { email: string; connected_at: string; last_used_at: string | null; last_error: string };
+
+export function ChromeProfilesModal({ open, profiles, canEdit, start, allowConnect = true, onClose, onChanged, onSaved }: {
   open: boolean;
   profiles: ChromeProfile[];
   canEdit: boolean;
   start?: ChromeProfilesStart;
+  /** กด "เชื่อม Gmail" ได้ไหม (พาออกไปหน้า Google) — เปิดจากในฟอร์มที่อาจยังไม่บันทึก = false */
+  allowConnect?: boolean;
   onClose: () => void;
   /** ทะเบียน/รายการเปลี่ยน → ให้หน้าโหลดใหม่ */
   onChanged: () => void | Promise<void>;
@@ -36,6 +41,68 @@ export function ChromeProfilesModal({ open, profiles, canEdit, start, onClose, o
   const [dirty, setDirty] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [gmail, setGmail] = useState<{ configured: boolean; byEmail: Map<string, GmailConn> } | null>(null);
+  const [connecting, setConnecting] = useState<string | null>(null);
+
+  const loadGmail = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/gmail/connections");
+      const j = await res.json();
+      if (j.error) return;
+      setGmail({ configured: !!j.configured, byEmail: new Map(((j.data ?? []) as GmailConn[]).map((c) => [c.email, c])) });
+    } catch { /* สถานะ Gmail โหลดไม่ได้ = ไม่โชว์ปุ่มเชื่อม */ }
+  }, []);
+  useEffect(() => { if (open) loadGmail(); }, [open, loadGmail]);
+
+  /** เชื่อม Gmail → ขอลิงก์หน้ายินยอมของ Google แล้วพาไป (เสร็จแล้ว Google ส่งกลับหน้า subscriptions) */
+  const connectGmail = async (email: string) => {
+    setConnecting(email);
+    try {
+      const res = await apiFetch("/api/gmail/connect", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, return_to: "/subscriptions?profiles=1" }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.url) { toast.error(j.error ?? "เริ่มเชื่อม Gmail ไม่สำเร็จ"); setConnecting(null); return; }
+      window.location.href = j.url;
+    } catch { toast.error("เริ่มเชื่อม Gmail ไม่สำเร็จ"); setConnecting(null); }
+  };
+  const disconnectGmail = async (email: string) => {
+    const ok = await askConfirm({
+      title: `เลิกเชื่อม Gmail ของ ${email}?`, variant: "danger", confirmText: "เลิกเชื่อม",
+      message: "ระบบจะยกเลิกสิทธิ์อ่านเมลของกล่องนี้ ปุ่ม 📥 ดึงจากเมล จะใช้กับกล่องนี้ไม่ได้จนกว่าจะเชื่อมใหม่",
+    });
+    if (!ok) return;
+    const res = await apiFetch(`/api/gmail/connections?email=${encodeURIComponent(email)}`, { method: "DELETE" });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) { toast.error(j.error ?? "เลิกเชื่อมไม่สำเร็จ"); return; }
+    toast.success("เลิกเชื่อม Gmail แล้ว");
+    loadGmail();
+  };
+
+  /** ป้าย/ปุ่มสถานะ Gmail ของโปรไฟล์ */
+  const gmailBadge = (p: ChromeProfile) => {
+    const email = p.account_email.trim().toLowerCase();
+    if (!gmail?.configured || !email) return null;
+    const conn = gmail.byEmail.get(email);
+    const btn = "h-6 px-2 inline-flex items-center gap-1 text-[11px] rounded-md border";
+    if (conn && !conn.last_error) {
+      return (
+        <span className="inline-flex items-center gap-1">
+          <span className="h-6 px-2 inline-flex items-center gap-1 text-[11px] rounded-md bg-emerald-50 text-emerald-700"><Icon name="mail" /> เชื่อม Gmail แล้ว</span>
+          {canEdit && <button type="button" onClick={() => disconnectGmail(email)} className={`${btn} border-slate-200 text-slate-500 hover:bg-slate-50`}>เลิกเชื่อม</button>}
+        </span>
+      );
+    }
+    if (!canEdit) return <span className="text-[11px] text-slate-400">{conn ? "Gmail ต้องเชื่อมใหม่" : "ยังไม่เชื่อม Gmail"}</span>;
+    if (!allowConnect) return <span className="text-[11px] text-slate-400">{conn ? "Gmail ต้องเชื่อมใหม่" : "ยังไม่เชื่อม Gmail"} (เชื่อมได้จากปุ่ม 🖥️ โปรไฟล์ Chrome หน้าหลัก)</span>;
+    return (
+      <button type="button" onClick={() => connectGmail(email)} disabled={connecting === email}
+        className={`${btn} ${conn ? "border-amber-300 text-amber-700 hover:bg-amber-50" : "border-indigo-200 text-indigo-700 hover:bg-indigo-50"} disabled:opacity-50`}>
+        <Icon name="mail" /> {connecting === email ? "กำลังไปหน้า Google…" : conn ? "เชื่อมใหม่" : "เชื่อม Gmail"}
+      </button>
+    );
+  };
 
   const beginNew = (init?: Partial<ChromeProfileInput>) => {
     const d = { ...BLANK, ...init };
@@ -136,6 +203,11 @@ export function ChromeProfilesModal({ open, profiles, canEdit, start, onClose, o
       hasUnsavedChanges={!!editId && dirty}
       footer={<button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50">ปิด</button>}>
       <div className="space-y-2">
+        {gmail && !gmail.configured && (
+          <p className="text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+            การเชื่อม Gmail (สำหรับปุ่ม 📥 ดึงบิลจากเมล) ยังไม่พร้อม — ผู้ดูแลต้องตั้งค่า Google Cloud ก่อน ตามขั้นตอนใน docs/gmail-connect-setup.md
+          </p>
+        )}
         {canEdit && editId !== "new" && (
           <button type="button" onClick={() => beginNew()}
             className="w-full h-9 inline-flex items-center justify-center gap-1.5 text-sm text-indigo-700 border border-dashed border-indigo-200 rounded-lg hover:bg-indigo-50/50">
@@ -160,6 +232,7 @@ export function ChromeProfilesModal({ open, profiles, canEdit, start, onClose, o
                 <span className="text-slate-300"> · </span>
                 {p.chrome_profile_dir ? <span className="text-slate-500">{p.chrome_profile_dir}</span> : <span className="text-slate-400">ยังไม่ระบุโฟลเดอร์</span>}
               </span>
+              {gmailBadge(p) && <span className="mt-1 flex">{gmailBadge(p)}</span>}
             </span>
             <span className="text-[11px] text-slate-400 whitespace-nowrap">ใช้ใน {p.usage ?? 0} รายการ</span>
             {canEdit && (

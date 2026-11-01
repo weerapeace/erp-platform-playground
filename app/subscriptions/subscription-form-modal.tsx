@@ -562,7 +562,7 @@ export function SubscriptionFormModal({ open, editing, categories, groups, savin
 
     {/* ทะเบียนโปรไฟล์ Chrome — ซ้อนบนฟอร์ม (เปิดทีหลัง = อยู่ข้างบน) */}
     {useRegistry && (
-      <ChromeProfilesModal open={profOpen} profiles={chromeProfiles ?? []} canEdit start={profStart}
+      <ChromeProfilesModal open={profOpen} profiles={chromeProfiles ?? []} canEdit start={profStart} allowConnect={false}
         onClose={() => { setProfOpen(false); setProfForUser(null); }}
         onChanged={() => onChromeProfilesChanged?.()}
         onSaved={onProfileSaved} />

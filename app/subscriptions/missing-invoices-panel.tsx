@@ -2,14 +2,16 @@
 
 /**
  * พาเนล "⚠️ บิลที่ยังขาด" — รายการ (subscription × เดือน) ที่ควรมีใบเสร็จแต่ยังไม่มี
- * แต่ละแถว: ปุ่มโหลด .bat (เปิด Chrome ไปเอาบิล) หรือเปิดหน้าบิล + 📎 แนบบิล (อัปโหลดตรงจากแถวนี้) + "ข้ามบิล"
+ * แต่ละแถว: ปุ่มโหลด .bat (เปิด Chrome ไปเอาบิล) หรือเปิดหน้าบิล + 🔍 หาในเมล + 📥 ดึงจากเมล (เชื่อม Gmail แล้ว)
+ *   + 📎 แนบบิล (อัปโหลดตรงจากแถวนี้) + "ข้ามบิล"
  * แนบได้ทั้งกดปุ่มเลือกไฟล์ และลากไฟล์มาวางบนแถว (PDF หรือรูปบิล)
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { canMakeBat, downloadSubBat, subInvoiceUrl } from "@/lib/subs-bat";
-import { canSearchMail, openGmailSearch } from "@/lib/gmail-search";
+import { canSearchMail, extractEmail, openGmailSearch } from "@/lib/gmail-search";
+import { MailBillsModal, type MailBillsTarget } from "./mail-bills-modal";
 import { INVOICE_ACCEPT_ATTR, invoiceFileKind } from "@/lib/subscriptions";
 import type { MissingInvoice } from "@/app/api/subscriptions/missing-invoices/route";
 
@@ -75,6 +77,25 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter, onAttac
   /** เปิด Gmail ของบัญชีที่ผูกกับรายการในแท็บใหม่ทันที พร้อมคำค้นเมลบิลของเดือนนั้น (ไม่โหลด .bat) */
   const searchMail = (it: MissingInvoice) => {
     if (!openGmailSearch(it, it.month)) toast.warning("รายการนี้ยังไม่ได้ใส่อีเมลบัญชี — ใส่ก่อนถึงจะค้นในเมลได้");
+  };
+
+  // ── 📥 ดึงจากเมล: ต้องเชื่อม Gmail ของกล่องนั้นแล้ว (ทะเบียน 🖥️ โปรไฟล์ Chrome) ──
+  const [gmail, setGmail] = useState<{ configured: boolean; connected: Set<string> } | null>(null);
+  const [mailTarget, setMailTarget] = useState<MailBillsTarget | null>(null);
+  useEffect(() => {
+    if (!canEdit) return;
+    apiFetch("/api/gmail/connections").then((r) => r.json()).then((j) => {
+      if (j.error) return;
+      const ok = ((j.data ?? []) as { email: string; last_error: string }[]).filter((c) => !c.last_error).map((c) => c.email);
+      setGmail({ configured: !!j.configured, connected: new Set(ok) });
+    }).catch(() => { /* สถานะ Gmail โหลดไม่ได้ = ซ่อนปุ่มดึงจากเมล */ });
+  }, [canEdit, refreshKey]);
+  const mailConnected = (it: MissingInvoice) => !!gmail?.connected.has(extractEmail(it.account_email)?.toLowerCase() ?? "");
+  const pullFromMail = (it: MissingInvoice) => {
+    if (!gmail?.configured) { toast.warning("ผู้ดูแลยังไม่ได้ตั้งค่าการเชื่อม Gmail"); return; }
+    if (!canSearchMail(it)) { toast.warning("รายการนี้ยังไม่ได้ใส่อีเมลบัญชี"); return; }
+    if (!mailConnected(it)) { toast.warning(`ยังไม่ได้เชื่อม Gmail ของ ${it.account_email} — กดปุ่ม 🖥️ โปรไฟล์ Chrome ด้านบน แล้วกด "เชื่อม Gmail"`); return; }
+    setMailTarget({ subscription_id: it.subscription_id, name: it.name, month: it.month, account_email: it.account_email, invoice_url: it.invoice_url });
   };
 
   const skip = async (it: MissingInvoice) => {
@@ -166,6 +187,15 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter, onAttac
                   className="h-8 px-3 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent flex-shrink-0">
                   🔍 หาในเมล
                 </button>
+                {canEdit && gmail?.configured && (
+                  <button onClick={() => pullFromMail(it)}
+                    title={mailConnected(it)
+                      ? `ค้นเมลบิลเดือน ${fmtMonth(it.month)} แล้วให้เลือกไฟล์แนบ (ยืนยันก่อนแนบ)`
+                      : "ยังไม่ได้เชื่อม Gmail ของกล่องนี้ — เชื่อมได้ที่ปุ่ม 🖥️ โปรไฟล์ Chrome"}
+                    className={`h-8 px-3 text-xs font-medium rounded-lg border flex-shrink-0 ${mailConnected(it) ? "border-indigo-200 text-indigo-700 hover:bg-indigo-50" : "border-slate-200 text-slate-400 hover:bg-slate-50"}`}>
+                    📥 ดึงจากเมล
+                  </button>
+                )}
                 {canEdit && (
                   <button onClick={() => pickFile(it)} disabled={uploading}
                     title={`แนบไฟล์บิลของเดือน ${fmtMonth(it.month)} (PDF หรือรูป) — ลากไฟล์มาวางบนแถวนี้ก็ได้`}
@@ -185,6 +215,13 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter, onAttac
           </div>
         </div>
       )}
+
+      <MailBillsModal target={mailTarget} monthLabel={fmtMonth} onClose={() => setMailTarget(null)}
+        onAttached={(t) => {
+          setMailTarget(null);
+          setItems((prev) => prev.filter((x) => rowKey(x) !== rowKey(t)));
+          onAttached?.();
+        }} />
     </div>
   );
 }

@@ -9,6 +9,14 @@ import type { Subscription } from "@/lib/subscriptions";
 
 export type MailSearchInfo = Pick<Subscription, "name" | "account_email" | "invoice_url">;
 
+/** ผล "📥 ดึงจากเมล" (API /api/subscriptions/mail-bills) — 1 เมล + ไฟล์แนบที่ใช้เป็นบิลได้ (PDF/รูป) */
+export type MailBillFile = {
+  part_id: string; filename: string; mime: string; size: number; kind: "pdf" | "image";
+  amount: number | null; currency: string | null; date: string | null; // อ่านจาก PDF (รูป = null)
+  attached: boolean;                                                    // เคยแนบไฟล์นี้จากเมลนี้แล้ว
+};
+export type MailBillMessage = { message_id: string; subject: string; from: string; date: string | null; snippet: string; files: MailBillFile[] };
+
 // โดเมนระดับสอง (co.th / co.uk / com.au …) → ต้องตัดเอา 3 ชั้นท้าย
 const TWO_LEVEL_SLD = /^(co|com|net|org|gov|edu|ac|or|in|go)\.[a-z]{2,3}$/i;
 
