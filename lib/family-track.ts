@@ -360,7 +360,7 @@ function section(title: string, dot: string, count: string, head: [string, numbe
 export function trackStatusBodyHtml(t: FamilyTrack, opt: TrackOptions): string {
   const b = trackBuckets(t), bl = opt.blank;
   const extra = bl ? 3 : 1;   // บรรทัดว่างท้ายแต่ละกลุ่ม
-  const firstW = Math.max(44, moColW(opt));   // ช่องสี/ใบ กว้างพอวางบาร์โค้ด
+  const firstW = Math.max(44, moColW(opt.barcode));   // ช่องสี/ใบ กว้างพอวางบาร์โค้ด
   const parts: string[] = [];
 
   const h1: [string, number][] = [["สี / ใบ", firstW], ["ของ", 30], ["เตรียม", 44], ["ตัด", 44], ["หมายเหตุ", 70], ["ลงชื่อ", 30]];

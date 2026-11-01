@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildReportHtmlMulti } from "@/lib/template";
 import {
-  FAMILY_DEFAULT_OPTIONS, FAMILY_DEFAULT_SETTINGS, buildFamilySheet, buildFamilyTemplate, colourWord, familyHtmlData, familyOrientation, normalizeFamilySettings,
+  FAMILY_DEFAULT_OPTIONS, FAMILY_DEFAULT_SETTINGS, buildFamilySheet, buyTotalGroups, cutMaterialText, buildFamilyTemplate, colourWord, familyHtmlData, familyOrientation, normalizeFamilySettings,
   clusterByName, familyLineCss, normalizeFamilyLine, sharedLabel, shortCodes, type FamilyBuyLine, type FamilyCutLine, type FamilyInput,
 } from "@/lib/family-print";
 
@@ -319,8 +319,8 @@ describe("ตั้งค่าหน้าตา (ค่ากลาง)", () =
     expect(body({ cell: "num" })).not.toContain(">352<");
   });
 
-  it("บล็อกตัด: ขนาดตัวใหญ่ รหัสบล็อกตัวเล็ก", () => {
-    const html = buildFamilySheet(pix25()) && familyHtmlData(buildFamilySheet({ ...pix25(), cut: pix25().cut.map((c) => ({ ...c, block: "C1-1-218" })) }), FAMILY_DEFAULT_OPTIONS).body_html as string;
+  it("บล็อกตัด: ขนาดตัวใหญ่ รหัสบล็อกตัวเล็ก (แบบเดิม = ตั้งค่า size)", () => {
+    const html = familyHtmlData(buildFamilySheet({ ...pix25(), cut: pix25().cut.map((c) => ({ ...c, block: "C1-1-218" })) }), { ...FAMILY_DEFAULT_OPTIONS, settings: { ...FAMILY_DEFAULT_SETTINGS, cut_label: "size" } }).body_html as string;
     expect(html).toContain('<div class="fp-size">26.5 × 4</div>');
     expect(html).toContain("บล็อก C1-1-218 · ");
   });
@@ -366,5 +366,85 @@ describe("เส้นตาราง + หัวกำกับแผ่น (�
     expect(cut.body_html as string).toContain("ผู้ตัด");
     expect(cut.body_html as string).not.toContain("ผู้ซื้อ / เตรียมของ");
     expect(familyHtmlData(s, FAMILY_DEFAULT_OPTIONS).head_html as string).toContain('<div class="doc-title">ใบสั่งผลิตรวมทั้งรุ่น</div>');
+  });
+});
+
+describe("ช่องรวม (เจ้าของ: ไม่ใช่ของเดียวกันไม่ต้องรวม · ซ้ำกันรวม เช่น สีครีม ×2) — BPU04 จริง", () => {
+  const s = buildFamilySheet(bpu04());
+  const lining = s.buy.varies.find((r) => r.label === "ผ้าซับใน")!;
+  const body = (p: Partial<typeof FAMILY_DEFAULT_SETTINGS>, extra: Partial<typeof FAMILY_DEFAULT_OPTIONS> = {}) =>
+    familyHtmlData(s, { ...FAMILY_DEFAULT_OPTIONS, ...extra, settings: { ...FAMILY_DEFAULT_SETTINGS, ...p } }).body_html as string;
+  const row = (html: string, label: string) => html.split("<tr").find((x) => x.includes(`<div class="fp-name">${label}</div>`)) ?? "";
+
+  it("นับตามรหัส: ผ้าซับใน 4 รหัส → -21/-22 (RMN066PU-106) รวม ×2 · ดำ 2 ตัวเป็นคนละผ้า ไม่รวม", () => {
+    const g = buyTotalGroups(lining, "code");
+    expect(g).toHaveLength(4);
+    const cream = g.find((x) => x.idx.length === 2)!;
+    expect(cream).toMatchObject({ label: "สีครีม", idx: [3, 4], qty: 2.61 });
+    expect(g.filter((x) => x.label === "สีดำ")).toHaveLength(2);
+  });
+
+  it("นับตามสี: ดำ 2 ตัว (LIN00004 + LIN00006) ถูกรวม — ช่องรวมบอกรหัสที่ถูกรวมไว้ให้ตรวจ", () => {
+    const g = buyTotalGroups(lining, "colour");
+    const black = g.find((x) => x.label === "สีดำ")!;
+    expect(black.idx).toEqual([0, 2]);
+    expect(black.codes).toHaveLength(2);
+    expect(row(body({ total_by: "colour" }), "ผ้าซับใน")).toContain("สีดำ ×2");
+  });
+
+  it("ค่าเริ่ม (รวมเฉพาะที่ซ้ำ): ไม่บวกของคนละตัวเป็นยอดเดียว · ไม่มีซ้ำ = 'ไม่ซ้ำ' · แถวรหัสเดียวรวมเหมือนเดิม", () => {
+    const html = body({});
+    const lin = row(html, "ผ้าซับใน");
+    expect(lin).toContain("สีครีม ×2");
+    expect(lin).toContain("2.61");
+    expect(lin).not.toContain("6.53");
+    expect(lin).toContain("อีก 3 รหัสดูในช่อง");
+    expect(row(html, "หัวซิปไนล่อน#5 พร้อมหาง")).toContain(" ×2");
+    expect(row(html, "พียู(PU) HRH-7261 เบอร์")).toContain("ไม่ซ้ำ");
+    expect(row(html, "เชือก 8 มิล สีครีม")).toContain("180 หลา");
+  });
+
+  it("ตั้งค่าได้: ยอดเดียว (แบบเดิม) · แยกทุกรหัส · ไม่แสดง · ระบายช่องที่รวมกัน", () => {
+    expect(row(body({ total: "sum" }), "ผ้าซับใน")).toContain("6.53 หลา");
+    const all = row(body({ total: "all" }), "ผ้าซับใน");
+    expect(all.match(/class="fp-tl"/g)).toHaveLength(4);
+    expect(row(body({ total: "none" }), "ผ้าซับใน")).not.toContain("fp-tl");
+    expect(body({ total_mark: "off" })).not.toContain("fp-dup");
+    expect(row(body({ total_mark: "on" }), "ผ้าซับใน").match(/fp-dup/g)).toHaveLength(2);
+  });
+
+  it("เฉพาะที่ยังต้องซื้อ: กลุ่มที่ครบแล้วไม่ขึ้น", () => {
+    const done = buildFamilySheet({ ...bpu04(), buy: bpu04().buy.map((l) => (l.code === "RMN066PU-106" ? { ...l, status: "ordered" as const, remaining: 0 } : l)) });
+    const html = familyHtmlData(done, { ...FAMILY_DEFAULT_OPTIONS, only_to_buy: true }).body_html as string;
+    expect(row(html, "ผ้าซับใน")).not.toContain("×2");
+  });
+});
+
+describe("ตารางตัด: สลับตัวใหญ่ (เจ้าของ: เอาชื่อวัตถุดิบตัวใหญ่)", () => {
+  const sheet = buildFamilySheet({ ...pix25(), cut: pix25().cut.map((c) => ({ ...c, block: "C1-1-218" })) });
+  const body = (cut_label: typeof FAMILY_DEFAULT_SETTINGS.cut_label) =>
+    familyHtmlData(sheet, { ...FAMILY_DEFAULT_OPTIONS, buy: false, settings: { ...FAMILY_DEFAULT_SETTINGS, cut_label } }).body_html as string;
+
+  it("ค่าเริ่ม: หัวกลุ่ม = ชื่อวัตถุดิบตัวใหญ่ (ครั้งเดียว) · แถวเป็นขนาดตัวใหญ่ + บล็อกตัวเล็ก", () => {
+    const html = body("group");
+    expect(FAMILY_DEFAULT_SETTINGS.cut_label).toBe("group");
+    expect(html).toContain('class="fp-gh fp-mh"');
+    expect(html).toContain('<div class="fp-size">26.5 × 4</div><div class="fp-sub">บล็อก C1-1-218</div>');
+    const heads = html.match(/class="fp-gh fp-mh"/g)!.length;
+    expect(heads).toBeLessThanOrEqual(sheet.cut.reduce((n, g) => n + g.rows.length, 0));
+  });
+
+  it("ชื่อวัตถุดิบทุกแถว · ชื่อ + ขนาด · แบบเดิม", () => {
+    expect(body("material")).toContain('<th>วัตถุดิบ / ขนาดตัด (ซม.)</th>');
+    expect(body("material")).toContain('<div class="fp-cutl"><div class="fp-mat">');
+    expect(body("both")).toMatch(/<div class="fp-mat">[^<]+<\/div><div class="fp-size">/);
+    expect(body("size")).not.toContain("fp-mat");
+  });
+
+  it("ชื่อยาวตัดวงเล็บท้ายไปไว้ตัวเล็ก", () => {
+    expect(cutMaterialText({ material: "อีเลเน่ (Bonded Leather) 0.4 mm. ดำ ( 1 ม้วน = 100 หลา หน้ากว้าง 150 cm. )", varies: false, code: "BONDED-0.4BK" }))
+      .toEqual({ name: "อีเลเน่ (Bonded Leather) 0.4 mm. ดำ", note: "1 ม้วน = 100 หลา หน้ากว้าง 150 cm.", tail: "BONDED-0.4BK" });
+    expect(cutMaterialText({ material: "ผ้าซับใน", varies: true, code: null })).toEqual({ name: "ผ้าซับใน", note: null, tail: "สีตามรุ่น" });
+    expect(cutMaterialText({ material: "พียู(PU)", varies: true, code: null }).name).toBe("พียู(PU)");   // วงเล็บสั้น = ส่วนของชื่อ (CTL047 จริง)
   });
 });

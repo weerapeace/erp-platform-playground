@@ -71,7 +71,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const moNos = [...new Set(mos.map((m) => str(m.mo_no)))];
   const skuCodes = [...new Set(mos.map((m) => str(m.product_sku)))];
   const byMo = (table: string, cols: string, order: string) => Promise.all(chunks(moNos).map((c) => fetchAllPages<Row>((from, to) =>
-    admin.from(table).select(cols).in("mo_no", c).order("mo_no").order(order).order("id").range(from, to)))).then((x) => x.flat());
+    // ชื่อคอลัมน์เป็นตัวแปร → type ของ supabase เดาแถวไม่ได้ (GenericStringError) · แถวเป็น Row เสมอ
+    admin.from(table).select(cols).in("mo_no", c).order("mo_no").order(order).order("id").range(from, to) as unknown as PromiseLike<{ data: Row[] | null; error: unknown }>))).then((x) => x.flat());
   const [skuRes, sums, mats, links, wos, subs, qcs] = await Promise.all([
     Promise.all(chunks(skuCodes, 200).map((c) => admin.from("skus_v2").select("id, code, color_th, color, attribute_values, cover_image_r2_key, parent_sku_id").in("code", c).eq("is_active", true))),
     Promise.all(chunks(moNos).map((c) => fetchAllPages<Row>((from, to) => admin.from("mo_material_summary")

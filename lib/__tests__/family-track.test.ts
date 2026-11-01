@@ -138,6 +138,11 @@ describe("HTML ใบพิมพ์", () => {
     expect(blank).not.toContain("wo-qr");   // ฟอร์มเปล่าไม่พิมพ์บาร์โค้ด
   });
 
+  it("แบบ D: ช่องสี/ใบกว้างตามบาร์โค้ด (เดิมส่งตั้งค่าทั้งก้อนแทนชนิดบาร์โค้ด → แคบเท่าไม่มีบาร์โค้ด)", () => {
+    const d = (barcode: "both" | "none") => familyTrackHtmlData(t, "status", { ...OPT, barcode }).body_html as string;
+    expect(d("both")).not.toEqual(d("none"));
+  });
+
   it("แบบ A: 'ของยังขาด' เตือนเฉพาะใบที่ยังไม่จ่ายงาน", () => {
     const inp = ttm130();
     inp.buy = inp.buy.map((l) => ({ ...l, remaining: 5, status: "buy" as const }));

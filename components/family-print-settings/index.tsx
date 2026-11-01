@@ -112,6 +112,17 @@ export function FamilyPrintSettingsButton({ current, onPreview, onSaved, extras 
                     · ไม่รวม = ขาดข้อใดข้อหนึ่ง เช่น หน่วยไม่ตรง หรือยังไม่ได้ตั้งชนิดวัตถุดิบ
                   </p>
                 )}
+                {f.key === "total" && (
+                  <p className="mt-1 text-[11px] leading-snug text-slate-500">
+                    รวมเฉพาะที่ซ้ำ = ช่องที่เป็นของตัวเดียวกันรวมให้ เช่น <b>สีครีม ×2</b> · ของที่ไม่ซ้ำดูจำนวนในช่องของสีนั้น
+                    · แถวที่ใช้รหัสเดียวกันทุกสียังรวมยอดเหมือนเดิม
+                  </p>
+                )}
+                {f.key === "total_by" && draft.total_by === "colour" && (
+                  <p className="mt-1 rounded bg-amber-50 px-1.5 py-1 text-[11px] leading-snug text-amber-800">
+                    <Icon name="warning" /> คนละผ้า/คนละเบอร์ที่สีเดียวกันจะถูกรวมเป็นยอดเดียว (เช่น ผ้าซับใน FLYNOW ดำ กับ ผ้าตัวบาง 210 ดำ) — ช่องรวมจะบอกรหัสที่ถูกรวมไว้ให้ตรวจ
+                  </p>
+                )}
               </div>
             ))}
 

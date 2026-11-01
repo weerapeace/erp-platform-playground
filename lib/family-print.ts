@@ -99,6 +99,14 @@ export type FamilyPrintSettings = {
   track_cols: PrintColCfg[] | null;
   /** เส้นตาราง + กรอบหัวใบ/การ์ด (เจ้าของ: "เส้นดูหนาไป" → ตั้งเองได้ ค่าเริ่มบางลง) */
   line: FamilyLine;
+  /** ช่องรวมของแถวต่างสี: dup = รวมเฉพาะของที่ซ้ำ (×N) · all = แยกทุกรหัส · sum = ยอดเดียว (แบบเดิม — บวกของคนละตัว) · none = ไม่แสดง */
+  total: "dup" | "all" | "sum" | "none";
+  /** นับว่า "ซ้ำ" จากรหัสวัตถุดิบ หรือชื่อสี (ระวัง: คนละผ้า/คนละเบอร์ที่สีเดียวกันจะถูกรวม เช่น LIN00004 + LIN00006) */
+  total_by: "code" | "colour";
+  /** ระบายช่องที่ถูกรวมเข้าด้วยกันในช่องรวม (ให้เห็นว่าช่องไหนคู่กัน) */
+  total_mark: "off" | "on";
+  /** ตารางบล็อกตัด ตัวใหญ่: group = หัวกลุ่มเป็นชื่อวัตถุดิบ แถวเป็นขนาด · material = ชื่อวัตถุดิบทุกแถว · both = ชื่อ + ขนาด · size = ขนาด (แบบเดิม) */
+  cut_label: "group" | "material" | "both" | "size";
 };
 /** เส้นตาราง — ความหนา (มม.) · สี · แบบ (ตาราง / เส้นนอน / ไม่มีเส้น) ชุดตัวเลือกเดียวกับตั้งค่าใบสั่งงาน */
 export type FamilyLine = { width: number; color: string; mode: WoBorderMode };
@@ -173,8 +181,8 @@ export const FAMILY_SIZE_FIELDS: { zone: string; fields: { key: SizeNumKey; labe
     { key: "tick", label: "ช่องติ๊ก", min: 2.5, max: 5, step: 0.1, unit: "มม." },
   ] },
   { zone: "ตารางบล็อกตัด", fields: [
-    { key: "cut_size", label: "ขนาดตัด", min: 9, max: 18, step: 0.5, unit: "px" },
-    { key: "cut_sub", label: "รหัสบล็อก/วัตถุดิบ", min: 7, max: 11, step: 0.5, unit: "px" },
+    { key: "cut_size", label: "ตัวใหญ่ (ขนาดตัด / ชื่อวัตถุดิบ)", min: 9, max: 18, step: 0.5, unit: "px" },
+    { key: "cut_sub", label: "ตัวเล็ก (บล็อก / รหัส)", min: 7, max: 11, step: 0.5, unit: "px" },
   ] },
   { zone: "ทั้งใบ", fields: [
     { key: "margin", label: "ขอบกระดาษ", min: 4, max: 12, step: 0.5, unit: "มม." },
@@ -203,8 +211,12 @@ const sanitizeCols = (raw: unknown): PrintColCfg[] | null => {
     .map((c) => ({ key: String(c.key), label: typeof c.label === "string" ? c.label.slice(0, 40) : "", width: Number(c.width) || 0, show: c.show !== false }));
   return out.length ? out : null;
 };
-/** ค่าที่เจ้าของเลือก (2026-10-31 "ใช้ค่าแนะนำ") */
-export const FAMILY_DEFAULT_SETTINGS: FamilyPrintSettings = { merge: "auto", group: "type", cell: "code", empty: "blank", tick: "before", img: "hide", barcode: "both", sizes: FAMILY_DEFAULT_SIZES, track_cols: null, line: FAMILY_DEFAULT_LINE };
+/** ค่าที่เจ้าของเลือก (2026-10-31 "ใช้ค่าแนะนำ" · ช่องรวม/ตารางตัด 2026-11-01 "ใช้ค่าแนะนำ") */
+export const FAMILY_DEFAULT_SETTINGS: FamilyPrintSettings = {
+  merge: "auto", group: "type", cell: "code", empty: "blank", tick: "before", img: "hide", barcode: "both",
+  sizes: FAMILY_DEFAULT_SIZES, track_cols: null, line: FAMILY_DEFAULT_LINE,
+  total: "dup", total_by: "code", total_mark: "off", cut_label: "group",
+};
 export const FAMILY_SETTING_FIELDS: { key: keyof FamilyPrintSettings; label: string; options: { v: string; label: string }[] }[] = [
   { key: "merge", label: "วิธีรวมแถว", options: [{ v: "auto", label: "อัตโนมัติ" }, { v: "strict", label: "แบบเดิม (เข้ม)" }, { v: "none", label: "ไม่รวม (แถวละรหัส)" }] },
   { key: "group", label: "จัดหมวด", options: [{ v: "type", label: "ตามชนิดวัตถุดิบ" }, { v: "kind", label: "ต่างสี / ใช้ทุกสี" }] },
@@ -213,6 +225,10 @@ export const FAMILY_SETTING_FIELDS: { key: keyof FamilyPrintSettings; label: str
   { key: "tick", label: "ช่องติ๊ก", options: [{ v: "before", label: "หน้าตัวเลข" }, { v: "row", label: "ท้ายแถว" }] },
   { key: "img", label: "รูปวัตถุดิบ", options: [{ v: "show", label: "แสดงทุกช่อง" }, { v: "hide", label: "ซ่อนกรอบว่าง" }, { v: "none", label: "ไม่มีคอลัมน์รูป" }] },
   { key: "barcode", label: "บาร์โค้ดเลขใบ", options: [{ v: "both", label: "เส้น + QR" }, { v: "line", label: "เส้น" }, { v: "qr", label: "QR" }, { v: "none", label: "ไม่แสดง" }] },
+  { key: "total", label: "ช่องรวม (แถวต่างสี)", options: [{ v: "dup", label: "รวมเฉพาะที่ซ้ำ" }, { v: "all", label: "แยกทุกรหัส" }, { v: "sum", label: "ยอดเดียว (แบบเดิม)" }, { v: "none", label: "ไม่แสดง" }] },
+  { key: "total_by", label: "นับว่าซ้ำจาก", options: [{ v: "code", label: "รหัสวัตถุดิบ" }, { v: "colour", label: "ชื่อสี" }] },
+  { key: "total_mark", label: "ระบายช่องที่รวมกัน", options: [{ v: "off", label: "ไม่ระบาย" }, { v: "on", label: "ระบาย" }] },
+  { key: "cut_label", label: "ตารางตัด: ตัวใหญ่", options: [{ v: "group", label: "หัวกลุ่ม = วัตถุดิบ" }, { v: "material", label: "ชื่อวัตถุดิบ" }, { v: "both", label: "ชื่อ + ขนาด" }, { v: "size", label: "ขนาดตัด (แบบเดิม)" }] },
 ];
 /** อ่านค่าที่บันทึกไว้แบบปลอดภัย — คีย์ใหม่ที่ยังไม่เคยบันทึก/ค่าเพี้ยน = ค่าเริ่มต้น */
 export function normalizeFamilySettings(raw: unknown): FamilyPrintSettings {
@@ -245,8 +261,8 @@ export function familySizeCss(z: FamilySizes | null | undefined): string {
   if (ch("code")) r.push(`.fp-cell .fp-sub { font-size: ${z.code}px; }`);
   if (ch("tick")) r.push(`.tick-box { width: ${z.tick}mm; height: ${z.tick}mm; }`);
   if (ch("pad")) r.push(`.summary-table th, .summary-table td, .doc-table th, .doc-table td { padding: ${z.pad === "tight" ? "0.3mm 0.4mm" : "1.3mm 1mm"}; }`);
-  if (ch("cut_size")) r.push(`.fp-size { font-size: ${z.cut_size}px; }`);
-  if (ch("cut_sub")) r.push(`.fp-size + .fp-sub { font-size: ${z.cut_sub}px; }`);
+  if (ch("cut_size")) r.push(`.fp-size, .fp-mat { font-size: ${z.cut_size}px; }`);
+  if (ch("cut_sub")) r.push(`.fp-cutl .fp-sub, .fp-mh .fp-sub { font-size: ${z.cut_sub}px; }`);
   if (ch("margin")) r.push(`.doc { padding: ${z.margin}mm ${z.margin + 1}mm !important; }`);
   if (!r.length) return "";
   const css = r.join("\n");
@@ -638,7 +654,7 @@ function skuHeads(cols: FamilyColumn[]) {
   return cols.map((c) => `<th class="fp-skuh">${img(c.image_url, "fp-skuimg")}<div class="fp-skucode">${esc(c.sku)}</div><div class="fp-skuqty">${num(c.qty)} ชิ้น</div></th>`).join("");
 }
 
-function buyCellHtml(cell: FamilyBuyCell | null, opt: FamilyPrintOptions): string {
+function buyCellHtml(cell: FamilyBuyCell | null, opt: FamilyPrintOptions, dup = false): string {
   const s = opt.settings, tk = s.tick === "before" ? TICK : "";
   if (!cell) return emptyTd(s);
   const short = s.cell !== "num" && cell.short ? `<div class="fp-sub fp-code">${esc(cell.short)}</div>` : "";
@@ -646,9 +662,56 @@ function buyCellHtml(cell: FamilyBuyCell | null, opt: FamilyPrintOptions): strin
   if (opt.only_to_buy && cell.remaining <= EPS) return `<td class="fp-cell fp-dim">–</td>`;
   const q = opt.only_to_buy ? cell.remaining : cell.qty;
   const st = cell.status === "partial" ? `ขาด ${num(cell.remaining)}` : FAMILY_STATUS_LABEL[cell.status];
-  return `<td class="fp-cell${DONE.includes(cell.status) && !opt.only_to_buy ? " fp-done" : ""}"><div class="fp-q">${tk}${num(q)}</div>`
+  return `<td class="fp-cell${DONE.includes(cell.status) && !opt.only_to_buy ? " fp-done" : ""}${dup ? " fp-dup" : ""}"><div class="fp-q">${tk}${num(q)}</div>`
     + `${short}${s.cell === "full" && cell.colour ? `<div class="fp-sub">${esc(cell.colour)}</div>` : ""}`
     + `${st && !opt.only_to_buy ? `<div class="fp-st">${esc(st)}</div>` : ""}</td>`;
+}
+
+/** ช่องรวมแถวต่างสี: กลุ่มของช่องที่เป็น "ของตัวเดียวกัน" — เรียงตามคอลัมน์แรกที่เจอ */
+export type FamilyTotalGroup = {
+  key: string; label: string; codes: string[]; idx: number[];
+  qty: number; remaining: number; missing_qty: boolean;
+};
+/** จับกลุ่มช่องในแถวเดียวกัน: by = code → รหัสเดียวกันเท่านั้น · colour → ชื่อสีเดียวกัน (ช่องที่ชื่อไม่มีคำบอกสีจับตามรหัส)
+ *  label = คำบอกสี (เหมือนที่คนอ่าน "สีครีม ×2") ถ้าไม่มีใช้รหัสย่อ */
+export function buyTotalGroups(r: FamilyBuyRow, by: FamilyPrintSettings["total_by"] = "code"): FamilyTotalGroup[] {
+  const m = new Map<string, FamilyTotalGroup>();
+  r.cells.forEach((c, i) => {
+    if (!c) return;
+    const code = c.short ?? c.code ?? `#${i + 1}`;
+    const k = by === "colour" && c.colour ? `c:${c.colour}` : `k:${c.code ?? code}`;
+    const g = m.get(k) ?? { key: k, label: c.colour ?? code, codes: [], idx: [], qty: 0, remaining: 0, missing_qty: false };
+    if (!g.codes.includes(code)) g.codes.push(code);
+    g.idx.push(i);
+    g.qty = r4(g.qty + c.qty); g.remaining = r4(g.remaining + c.remaining); g.missing_qty ||= c.missing_qty;
+    m.set(k, g);
+  });
+  return [...m.values()];
+}
+
+/** ช่องรวม — แถวรหัสเดียว (ใช้ทุกสี/บางสี) รวมยอดเหมือนเดิม · แถวต่างสีทำตามตั้งค่า "ช่องรวม" (ค่าเริ่ม: รวมเฉพาะที่ซ้ำ) */
+function buyTotalHtml(r: FamilyBuyRow, opt: FamilyPrintOptions, groups: FamilyTotalGroup[]): string {
+  if (r.missing_qty && r.total <= EPS) return `<span class="fp-warn">BOM ยังไม่ใส่จำนวน</span>`;
+  const s = opt.settings, mode = r.kind === "varies" ? s.total : "sum";
+  if (mode === "sum") {
+    return opt.only_to_buy
+      ? `${num(r.remaining)} ${esc(r.uom)}`
+      : `${num(r.total)} ${esc(r.uom)}${r.remaining > EPS && r.remaining < r.total - EPS ? `<div class="fp-st">ต้องซื้อ ${num(r.remaining)}</div>` : r.remaining <= EPS ? `<div class="fp-st">ครบแล้ว</div>` : ""}`;
+  }
+  if (mode === "none") return "";
+  const list = (mode === "all" ? groups : groups.filter((g) => g.idx.length > 1))
+    .filter((g) => !opt.only_to_buy || g.remaining > EPS || g.missing_qty);
+  if (!list.length) return `<span class="fp-tmute">${opt.only_to_buy ? "–" : "ไม่ซ้ำ"}</span>`;
+  const lines = list.map((g) => {
+    const v = opt.only_to_buy ? g.remaining : g.qty;
+    // รหัสบอกเสมอ: นับตามรหัส = รหัสของกลุ่ม · นับตามสี = ทุกรหัสที่ถูกรวม (เห็นได้ว่ารวมของคนละตัว)
+    const codes = g.codes.filter((c) => c !== g.label).join(" + ");
+    return `<div class="fp-tl"><span class="fp-tk">${esc(g.label)}${g.idx.length > 1 ? ` ×${g.idx.length}` : ""}</span><span>${g.missing_qty && v <= EPS ? "?" : num(v)}</span></div>`
+      + (codes ? `<div class="fp-tsub">${esc(codes)}</div>` : "")
+      + (!opt.only_to_buy && g.remaining > EPS && g.remaining < g.qty - EPS ? `<div class="fp-st">ต้องซื้อ ${num(g.remaining)}</div>` : "");
+  }).join("");
+  const rest = groups.length - list.length;
+  return lines + `<div class="fp-tmute">${esc(r.uom)}${mode === "dup" && rest > 0 && !opt.only_to_buy ? ` · อีก ${rest} รหัสดูในช่อง` : ""}</div>`;
 }
 
 function buyRowHtml(r: FamilyBuyRow, opt: FamilyPrintOptions): string {
@@ -656,13 +719,12 @@ function buyRowHtml(r: FamilyBuyRow, opt: FamilyPrintOptions): string {
   const name = r.kind === "varies"
     ? `<div class="fp-name">${esc(r.label)}</div><div class="fp-sub">${esc(r.type)} · ต่างสี ${r.codes.length} รหัส</div>`
     : `<div class="fp-name">${esc(r.label)}</div><div class="fp-sub fp-code">${esc(r.code ?? "")}</div>`;
-  const tot = r.missing_qty && r.total <= EPS
-    ? `<span class="fp-warn">BOM ยังไม่ใส่จำนวน</span>`
-    : opt.only_to_buy
-      ? `${num(r.remaining)} ${esc(r.uom)}`
-      : `${num(r.total)} ${esc(r.uom)}${r.remaining > EPS && r.remaining < r.total - EPS ? `<div class="fp-st">ต้องซื้อ ${num(r.remaining)}</div>` : r.remaining <= EPS ? `<div class="fp-st">ครบแล้ว</div>` : ""}`;
+  const s = opt.settings;
+  const groups = r.kind === "varies" ? buyTotalGroups(r, s.total_by) : [];
+  // ระบายช่องที่ถูกรวมกัน (เฉพาะโหมดที่ช่องรวมแยกรายการ)
+  const dupIdx = new Set(s.total_mark === "on" && (s.total === "dup" || s.total === "all") ? groups.filter((g) => g.idx.length > 1).flatMap((g) => g.idx) : []);
   const fk = flagOf([r.code, ...r.codes], opt);
-  return `<tr${fk ? ` class="fp-flag"${flagAttr(fk)}` : ""}>${imgTd(r.image_url, opt.settings)}<td>${name}${penHtml(fk)}</td>${r.cells.map((c) => buyCellHtml(c, opt)).join("")}<td class="text-right fp-tot">${tot}</td>${opt.settings.tick === "row" ? `<td class="text-center">${TICK}</td>` : ""}</tr>`;
+  return `<tr${fk ? ` class="fp-flag"${flagAttr(fk)}` : ""}>${imgTd(r.image_url, s)}<td>${name}${penHtml(fk)}</td>${r.cells.map((c, i) => buyCellHtml(c, opt, dupIdx.has(i))).join("")}<td class="text-right fp-tot">${buyTotalHtml(r, opt, groups)}</td>${s.tick === "row" ? `<td class="text-center">${TICK}</td>` : ""}</tr>`;
 }
 
 /** หมวด "ชนิดวัตถุดิบ" ที่ยังไม่ได้ตั้ง — บอกให้รู้ว่าทำไมแถวนี้ไม่ไปรวมกับพวก */
@@ -671,7 +733,8 @@ const typeLabel = (t: string) => (t === "อื่น ๆ" ? "อื่น ๆ (
 function buySectionHtml(s: FamilySheet, opt: FamilyPrintOptions): string {
   const st = opt.settings, n = s.columns.length;
   const lead = st.img === "none" ? ["44mm"] : [imgColW(st), "44mm"];
-  const tail = st.tick === "row" ? ["22mm", "7mm"] : ["22mm"];
+  const totW = st.total === "dup" || st.total === "all" ? "26mm" : "22mm";   // ช่องรวมแบบแยกรายการต้องมีที่ให้ "สีครีม ×2"
+  const tail = st.tick === "row" ? [totW, "7mm"] : [totW];
   const span = n + lead.length + tail.length;
   const gh = (label: string, rows: string) => (rows ? `<tr class="fp-gh"><td colspan="${span}">${esc(label)}</td></tr>${rows}` : "");
   let body = "";
@@ -694,16 +757,38 @@ function buySectionHtml(s: FamilySheet, opt: FamilyPrintOptions): string {
     + `</section>`;
 }
 
+/** ชื่อวัตถุดิบในตารางตัด: ตัวใหญ่ตัดวงเล็บท้ายที่เป็นคำอธิบายยาว (เช่น "( 1 ม้วน = 100 หลา … )") ไปไว้ตัวเล็ก
+ *  วงเล็บสั้นเป็นส่วนของชื่อ ไม่ตัด (เช่น "พียู(PU)") · tail = สีตามรุ่น / รหัส */
+export function cutMaterialText(r: Pick<FamilyCutRow, "material" | "varies" | "code">): { name: string; note: string | null; tail: string } {
+  const full = r.material.trim(), m = full.match(/^(.*\S)\s*\(([^()]*)\)\s*$/);
+  const split = !!m && !!m[1].trim() && m[2].trim().length > 10;
+  return { name: split ? m![1].trim() : full, note: split ? m![2].trim() : null, tail: r.varies ? "สีตามรุ่น" : r.code ?? "" };
+}
+
 function cutSectionHtml(s: FamilySheet, no: number, opt: FamilyPrintOptions): string {
   const st = opt.settings, n = s.columns.length;
   const lead = st.img === "none" ? ["44mm", "11mm"] : [imgColW(st), "44mm", "11mm"];
   const span = n + lead.length + 1;
-  let body = "";
+  const mode = st.cut_label;
+  let body = "", lastMat = "";
   for (const g of s.cut) {
-    body += `<tr class="fp-gh"><td colspan="${span}">${esc(typeLabel(g.type))}</td></tr>`;
+    if (mode !== "group") body += `<tr class="fp-gh"><td colspan="${span}">${esc(typeLabel(g.type))}</td></tr>`;
     for (const r of g.rows) {
-      // ขนาดตัดตัวใหญ่ (สิ่งที่ช่างตัดดูก่อน) · รหัสบล็อก + วัตถุดิบตัวเล็กบรรทัดล่าง
-      const label = `<div class="fp-size">${esc(r.size)}</div><div class="fp-sub">${r.block ? `บล็อก ${esc(r.block)} · ` : ""}${esc(r.material)}${r.varies ? " — สีตามรุ่น" : r.code ? ` · ${esc(r.code)}` : ""}</div>`;
+      const m = cutMaterialText(r), block = r.block ? `บล็อก ${esc(r.block)}` : "";
+      const tail = [esc(m.tail), m.note ? esc(m.note) : ""].filter(Boolean).join(" · ");
+      // group: ชื่อวัตถุดิบตัวใหญ่เป็นหัวกลุ่มครั้งเดียว (แถวในชนิดเดียวกันเรียงตามวัตถุดิบอยู่แล้ว) แถวโชว์ขนาดตัวใหญ่
+      const matKey = `${g.type}|${r.material}|${r.varies ? "" : r.code ?? ""}`;
+      if (mode === "group" && matKey !== lastMat) {
+        body += `<tr class="fp-gh fp-mh"><td colspan="${span}"><span class="fp-mat">${esc(m.name)}</span> <span class="fp-sub">· ${[esc(typeLabel(g.type)), tail].filter(Boolean).join(" · ")}</span></td></tr>`;
+        lastMat = matKey;
+      }
+      const label = `<div class="fp-cutl">${
+        mode === "group" ? `<div class="fp-size">${esc(r.size)}</div>${block ? `<div class="fp-sub">${block}</div>` : ""}`
+        : mode === "material" ? `<div class="fp-mat">${esc(m.name)}</div><div class="fp-sub">ขนาด <b>${esc(r.size)}</b>${block ? ` · ${block}` : ""}${tail ? ` · ${tail}` : ""}</div>`
+        : mode === "both" ? `<div class="fp-mat">${esc(m.name)}</div><div class="fp-size">${esc(r.size)}</div><div class="fp-sub">${block ? `${block} · ` : ""}${tail}</div>`
+        // size (แบบเดิม): ขนาดตัดตัวใหญ่ · รหัสบล็อก + วัตถุดิบตัวเล็กบรรทัดล่าง
+        : `<div class="fp-size">${esc(r.size)}</div><div class="fp-sub">${block ? `${block} · ` : ""}${esc(r.material)}${r.varies ? " — สีตามรุ่น" : r.code ? ` · ${esc(r.code)}` : ""}</div>`
+      }</div>`;
       const cells = r.cells.map((c) => (c
         ? `<td class="fp-cell${c.done ? " fp-done" : ""}"><div class="fp-q">${st.tick === "before" ? `${TICK}${num(c.pcs)}` : `${num(c.pcs)} ${TICK}`}</div>`
           + `${st.cell !== "num" && c.short ? `<div class="fp-sub fp-code">${esc(c.short)}</div>` : ""}${st.cell === "full" && c.colour ? `<div class="fp-sub">${esc(c.colour)}</div>` : ""}${c.done ? `<div class="fp-st">ตัดแล้ว</div>` : ""}</td>`
@@ -714,7 +799,7 @@ function cutSectionHtml(s: FamilySheet, no: number, opt: FamilyPrintOptions): st
   }
   return `<section class="fp-section"><div class="section-title">${no}) บล็อกตัด <span class="fp-legend">ขนาดเดียวกันตัดรวดเดียวทุกสี · ติ๊กทีละช่องเมื่อตัดสีนั้นเสร็จ · ตัวเลข = จำนวนชิ้น (ไม่รวมอะไหล่)</span></div>`
     + (body
-      ? `<table class="doc-table fp-table">${colgroup(n, lead, ["16mm"])}<thead><tr>${st.img === "none" ? "" : "<th>รูป</th>"}<th>ขนาดตัด (ซม.)</th><th>ชิ้น/ใบ</th>${skuHeads(s.columns)}<th>รวมชิ้น</th></tr></thead><tbody>${body}</tbody></table>`
+      ? `<table class="doc-table fp-table">${colgroup(n, lead, ["16mm"])}<thead><tr>${st.img === "none" ? "" : "<th>รูป</th>"}<th>${mode === "material" || mode === "both" ? "วัตถุดิบ / ขนาดตัด (ซม.)" : "ขนาดตัด (ซม.)"}</th><th>ชิ้น/ใบ</th>${skuHeads(s.columns)}<th>รวมชิ้น</th></tr></thead><tbody>${body}</tbody></table>`
       : `<div class="fp-none">รุ่นนี้ไม่มีบล็อกตัดในใบสั่งผลิต</div>`)
     + `</section>`;
 }
@@ -822,6 +907,17 @@ const FAMILY_CSS = `
 .fp-empty { background: repeating-linear-gradient(135deg, #fff 0, #fff 1.2mm, #f1f5f9 1.2mm, #f1f5f9 2.4mm); }
 .fp-warn { color: #b45309; font-weight: 700; }
 .fp-tot { font-weight: 700; line-height: 1.2; }
+/* ช่องรวมแบบแยกรายการ: "สีครีม ×2   2.61" + รหัสตัวเล็ก */
+.fp-tl { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 0 1.2mm; text-align: left; }
+.fp-tl + .fp-tl, .fp-tsub + .fp-tl, .fp-st + .fp-tl { margin-top: 0.6mm; }
+.fp-tk { font-size: 8.5px; color: #334155; }
+.fp-tsub { font-size: 7.5px; font-weight: 400; color: #64748b; text-align: left; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; word-break: break-all; }
+.fp-tmute { font-size: 8px; font-weight: 400; color: #94a3b8; }
+.fp-dup { background: #fef9c3; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+/* ตารางตัด: ชื่อวัตถุดิบตัวใหญ่ (หัวกลุ่ม หรือในแถว) */
+.fp-mat { font-size: 13px; font-weight: 800; line-height: 1.2; color: #0f172a; }
+.fp-mh td { background: #f8fafc; }
+.fp-cutl .fp-size + .fp-sub, .fp-cutl .fp-mat + .fp-size { margin-top: 0.3mm; }
 .fp-none { color: #64748b; padding: 2mm 0; }
 .img-cell { text-align: center; padding: 0.4mm !important; }
 .mat-img { display: inline-block; max-width: 100%; max-height: 10mm; object-fit: contain; vertical-align: middle; }
