@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { ERPInput } from "@/components/form";
 import { ERPModal } from "@/components/modal";
-import { ImageAttach, uploadResizedImage } from "@/components/image-attach";
+import { ImageAttach } from "@/components/image-attach";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { HoverImage } from "@/components/hover-image";
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
@@ -336,8 +337,17 @@ export function SubmitWorkModal({ sub, taskId, reload, pushToast, showImages, sh
     const folder = tk.startsWith("parent:") ? "parent_skus" : "skus";
     setUploadingTk(`${dest}#${tk}`);
     try {
-      const ups: { r2_key: string; file_name: string }[] = [];
-      for (const f of imgs) { const up = await uploadResizedImage(f, { folder, max: 1500 }); ups.push({ r2_key: up.r2_key, file_name: up.file_name }); }
+      // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck) · รูปที่อยู่ในกล่องร่าง/แกลเลอรีของสินค้านี้แล้ว → เสนอ "ข้าม"
+      const where = dest === "description" ? "Description" : t("แกลเลอรี", "gallery");
+      const r = await uploadImagesWithDupCheck(imgs, {
+        folder, max: 1500,
+        target: labelMapRef.current[tk] ? `${labelMapRef.current[tk]} · ${where}` : where,
+        existingKeys: [...(draftImages[tk] ?? []).map((d) => d.r2_key), ...(dest === "gallery" ? (galleries[tk] ?? []).map((s) => s.r2_key) : [])],
+        onError: (f, e) => pushToast("error", t("อัปรูปไม่สำเร็จ: ", "Upload failed: ") + `${f.name} — ${e.message}`),
+      });
+      if (!r?.keys.length) return;
+      // ชื่อไฟล์ไม่ได้เก็บลงงาน (โหลดกลับมาเป็น "" เสมอ) → ใช้ชื่อท้าย key
+      const ups = r.keys.map((k) => ({ r2_key: k, file_name: k.split("/").pop() ?? "" }));
       const nextDrafts = { ...draftImages, [tk]: [...(draftImages[tk] ?? []), ...ups] };
       const nextRm = dest === "description"
         ? { ...replaceMap, [tk]: { ...(replaceMap[tk] ?? {}), ...Object.fromEntries(ups.map((u) => [u.r2_key, "desc:new"])) } }
