@@ -5,6 +5,7 @@
  *   - ทีละสินค้า: Hero คอม · Hero มือถือ · รูปบนเว็บ (≤ 12)   ·   ทีละสี: รูปสี (≤ 8) · Hero สี คอม · Hero สี มือถือ
  *   - ลากรูปจากเครื่องลงช่อง (useFileDrop) · ลากรูปสลับลำดับ/ย้ายข้ามช่อง · ✕ เอาออก · ⬆ อัปโหลด · 📚 คลัง (AssetPicker) · ERP = ใช้รูปจาก ERP · 🗑 ล้างช่อง
  *   - Hero รับรูปหรือวิดีโอ (วิดีโอใช้ตัวอัปกลาง uploadMediaFile ≤ 200 MB) · ช่องอื่นรับเฉพาะรูป
+ *   - รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่งไฟล์ (ของกลาง uploadImagesWithDupCheck)
  *   - ช่องที่เปลี่ยน = สีเหลือง · ยังไม่บันทึกจนกดบันทึกที่ป๊อป (ตัวแม่เรียก save() ผ่าน ref)
  * ข้อมูล: GET /api/website/listings/images (แผนที่รูปทั้งร้าน — ตัวเดียวกับ 📸 ลงรูปทีละมาก)
  * บันทึก: POST /api/website/listings/images mode "set" (ตั้งทั้งช่องตามที่เห็น · audit ค่าเดิม · ล้างแคชเว็บ)
@@ -14,7 +15,7 @@ import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, 
 import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
-import { uploadResizedImage } from "@/components/image-attach";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { uploadMediaFile } from "@/lib/media-upload";
 import { AssetPicker } from "@/components/asset-picker";
 import { MAX_SKU_WEB_IMAGES, MAX_WEB_IMAGES, isVideoName, type CatalogParent, type HeroPick } from "@/lib/website-image-match";
@@ -153,24 +154,39 @@ export const WebsiteListingsImageGrid = forwardRef<
     setSlot(sk, merged.slice(0, col.max));
   };
 
+  // รูป → ของกลาง uploadImagesWithDupCheck: รูปที่มีในคลังแล้ว ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง · รูปที่อยู่ในช่องนี้แล้ว เสนอ "ข้าม"
   const uploadFiles = async (sk: string, files: File[]) => {
     const col = colOfSlot(sk);
     const list = col.hero ? files.slice(0, 1) : files;
-    setBusy((b) => ({ ...b, [sk]: (b[sk] ?? 0) + list.length }));
-    for (const f of list) {
-      try {
-        const video = f.type.startsWith("video/") || isVideoName(f.name);
-        if (video && !col.hero) {
-          toast.warning("วิดีโอลงได้เฉพาะช่อง Hero");
-          continue;
+    const isVid = (f: File) => f.type.startsWith("video/") || isVideoName(f.name);
+    const videos = col.hero ? list.filter(isVid) : [];
+    const imgs = list.filter((f) => !isVid(f));
+    if (!col.hero && imgs.length < list.length) toast.warning("วิดีโอลงได้เฉพาะช่อง Hero");
+    const n = videos.length + imgs.length;
+    if (!n) return;
+    setBusy((b) => ({ ...b, [sk]: (b[sk] ?? 0) + n }));
+    try {
+      for (const f of videos) {
+        try {
+          addItems(sk, [{ key: await uploadMediaFile(f, { folder: "storefront-hero" }), kind: "video" }]);
+        } catch (e) {
+          toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${(e as Error).message}`);
         }
-        const key = video ? await uploadMediaFile(f, { folder: "storefront-hero" }) : (await uploadResizedImage(f, { folder: "storefront-products", max: 2000 })).r2_key;
-        addItems(sk, [{ key, kind: video ? "video" : "image" }]);
-      } catch (e) {
-        toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${(e as Error).message}`);
-      } finally {
-        setBusy((b) => ({ ...b, [sk]: Math.max(0, (b[sk] ?? 1) - 1) }));
       }
+      if (imgs.length) {
+        const row = rows.find((r) => slotKey(r, col) === sk);
+        const r = await uploadImagesWithDupCheck(imgs, {
+          folder: "storefront-products",
+          max: 2000,
+          target: row ? `${row.code} · ${col.label}` : col.label,
+          existingKeys: (draftRef.current[sk] ?? origOf(sk)).map((x) => x.key),
+          onError: (f, e) => toast.error(`อัปโหลด ${f.name} ไม่สำเร็จ: ${e.message}`),
+        });
+        if (r?.keys.length) addItems(sk, r.keys.map((key) => ({ key, kind: "image" as const })));
+        else if (r?.skipped) toast.info("รูปที่เลือกอยู่ในช่องนี้แล้ว — ไม่ได้เพิ่มซ้ำ");
+      }
+    } finally {
+      setBusy((b) => ({ ...b, [sk]: Math.max(0, (b[sk] ?? n) - n) }));
     }
   };
   const drop = useFileDrop((files, sk) => void uploadFiles(sk, files), { accept: ["image/", "video/"], onReject: () => toast.warning("ลากได้เฉพาะรูปหรือวิดีโอ") });
