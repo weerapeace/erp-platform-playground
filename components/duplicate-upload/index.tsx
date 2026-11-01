@@ -11,6 +11,7 @@
  *   ไม่ซ้ำ = อัปทันทีไม่ถาม · ซ้ำ 1 รูป = ป๊อปเทียบรูปใหม่กับรูปเดิม · ซ้ำหลายรูป = ป๊อปสรุปทุกรูป (เลือกรายรูป / ทั้งหมด)
  *   รูปเดิมที่อยู่ในช่องนี้แล้ว (existingKeys) → เสนอ "ข้าม"
  * ตรวจซ้ำไม่สำเร็จ (เน็ต/คลังมีปัญหา) = อัปตามปกติ ไม่ขวางงาน
+ * เด้งป๊อปไม่ได้ (เช่นลงรูปทีละมาก ตรวจตอนผู้ใช้ยังจัดรูปอยู่) → findDuplicateMatches = ตรวจอย่างเดียว คืนผลต่อไฟล์ไปทำป้ายเอง
  * ตรวจ 2 ระดับ:
  *   1) ไฟล์เดียวกันทุกจุด (sha256 ทั้งไฟล์หลังย่อ และไฟล์ต้นฉบับ)
  *   2) หน้าตาเหมือนกันแต่คนละไฟล์ (lib/image-hash — เซฟใหม่ / ย่อคนละขนาด / รูปปก SKU จาก Odoo)
@@ -49,6 +50,89 @@ type Size = { width: number; height: number };
 /** รูปใหม่ละเอียดกว่ารูปเดิมเกินนี้ (ด้านยาว) = แนะนำอัปใหม่ */
 const SHARPER = 1.15;
 
+/** ผลตรวจซ้ำของ 1 ไฟล์ (findDuplicateMatches) — ไว้ทำป้าย/ตัวเลือกบนรูปเอง เมื่อเด้งป๊อปไม่ได้ (เช่นลงรูปทีละมาก) */
+export type DuplicateMatch = {
+  /** รูปในคลังที่ซ้ำ */
+  match: DuplicateAsset;
+  /** same = ไฟล์เดียวกันทุกจุด · look = หน้าตาเหมือนกันแต่คนละไฟล์ */
+  kind: "same" | "look";
+  /** รูปนั้นอยู่ในช่องนี้แล้ว (existingKeys) */
+  here: boolean;
+  /** หน้าตาเหมือนแต่รายละเอียดต่างนิดหน่อย (ตัวหนังสือ/ลายผิว) — ควรให้ผู้ใช้ตรวจ */
+  unsure: boolean;
+  /** ขนาดรูปที่จะอัป (ถ้ารู้) */
+  newSize?: Size;
+  /** ทางที่แนะนำ — ใช้เป็นค่าตั้งต้นของตัวเลือก (เหมือนในป๊อป) */
+  decision: Decision;
+};
+
+/** ไฟล์ต่อ 1 คำขอ — API รับ checksum ≤ 50 (ไฟล์ละ ≤ 2 ตัว) และลายนิ้วมือ ≤ 50 */
+const CHECK_BATCH = 20;
+
+/**
+ * ตรวจซ้ำอย่างเดียว ไม่เด้งป๊อป — คืนผลเรียงตามไฟล์ (null = ไม่ซ้ำ) · ส่งกี่ไฟล์ก็ได้ (แบ่งคำขอทีละ 20 ไฟล์ให้เอง)
+ * ชุดไหนตรวจไม่สำเร็จ (เน็ต/คลังมีปัญหา) = ชุดนั้นเป็น null ทั้งหมด (ไม่ขวางงาน)
+ * คิดลายนิ้วมือทีละรูป (รูปถ่ายใหญ่หลายรูปพร้อมกันกินหน่วยความจำมาก)
+ */
+export async function findDuplicateMatches<T extends UploadCandidate>(items: T[], opts: { existingKeys?: string[] } = {}): Promise<(DuplicateMatch | null)[]> {
+  const here = new Set(opts.existingKeys ?? []);
+  const out: (DuplicateMatch | null)[] = [];
+  for (let s = 0; s < items.length; s += CHECK_BATCH) {
+    const batch = items.slice(s, s + CHECK_BATCH);
+    try { out.push(...(await matchBatch(batch, here))); }
+    catch (e) {
+      console.warn("[duplicate-upload] ตรวจรูปซ้ำไม่สำเร็จ — อัปตามปกติ", e);
+      out.push(...batch.map(() => null));
+    }
+  }
+  return out;
+}
+
+async function matchBatch(items: UploadCandidate[], here: Set<string>): Promise<(DuplicateMatch | null)[]> {
+  const sums = await Promise.all(items.map(async (c) => ({
+    file: await sha256Hex(await c.file.arrayBuffer()),
+    original: c.original && c.original !== c.file ? await sha256Hex(await c.original.arrayBuffer()) : null,
+  })));
+  const looks: Awaited<ReturnType<typeof lookHashOfBlob>>[] = [];
+  for (const c of items) looks.push(c.file.type.startsWith("image/") ? await lookHashOfBlob(c.file) : null);
+  const res = await apiFetch("/api/assets/find-duplicates", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      checksums: sums.flatMap((s) => (s.original ? [s.file, s.original] : [s.file])),
+      looks: looks.map((l) => (l ? { phash: l.phash, color: l.color } : null)),
+    }),
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+  const found = (j.data ?? {}) as Record<string, DuplicateAsset>;
+  const lookFound = Array.isArray(j.looks) ? [...(j.looks as (DuplicateAsset | null)[])] : [];
+
+  const exactOf = (i: number) => found[sums[i].file] ?? (sums[i].original ? found[sums[i].original!] : undefined) ?? null;
+  // รูปหน้าตาเหมือน: เทียบรายละเอียดกับรูปเดิมจริงอีกชั้น (ตัวเลขขนาด/ตัวหนังสือบนรูป) — ไม่ผ่านหรือเทียบไม่ได้ = ไม่ถาม (กันเสนอรูปผิด)
+  const detail: (number | undefined)[] = [];
+  for (const [i, c] of items.entries()) {
+    const m = !exactOf(i) ? lookFound[i] : null;
+    if (!m) continue;
+    try {
+      // รูปเดิมขนาด 960 คุณภาพ 90 — รูป 480 (คุณภาพปกติ) เพี้ยนจนรูปซ้ำจริงหลุดไปโซนก้ำกึ่งบ่อย
+      const r = await fetch(`${r2ImageUrl(m.r2_key, 960)}&q=90`);
+      const [a, b] = await Promise.all([detailGridOfBlob(c.file), r.ok ? r.blob().then(detailGridOfBlob) : null]);
+      detail[i] = a && b ? detailGap(a, b) : undefined;
+      if (detail[i] === undefined || detail[i]! > DETAIL_MAX) lookFound[i] = null;
+    } catch { lookFound[i] = null; }
+  }
+  return items.map((_, i) => {
+    const m = exactOf(i) ?? lookFound[i] ?? null;
+    if (!m) return null;
+    const l = looks[i];
+    const judged = {
+      match: m, here: here.has(m.r2_key), kind: (m.look ? "look" : "same") as DuplicateMatch["kind"],
+      newSize: l ? { width: l.width, height: l.height } : undefined, unsure: !!m.look && (detail[i] ?? 0) > DETAIL_SURE,
+    };
+    return { ...judged, decision: defaultDecision(judged) };
+  });
+}
+
 /**
  * ถามคลังว่าไฟล์ไหนซ้ำ แล้วให้ผู้ใช้เลือก — คืนแผนต่อไฟล์ (reuse = ใช้รูปเดิมในคลัง · null = อัปใหม่) · ไฟล์ที่กด "ข้าม" ไม่อยู่ในผล
  * คืน null = กดยกเลิก (ไม่ต้องอัปอะไร)
@@ -56,57 +140,13 @@ const SHARPER = 1.15;
 export async function askDuplicateUploads<T extends UploadCandidate>(items: T[], opts: DuplicateCheckOptions = {}): Promise<{ item: T; reuse: DuplicateAsset | null }[] | null> {
   const plain = items.map((item) => ({ item, reuse: null as DuplicateAsset | null }));
   if (!items.length) return plain;
-  let found: Record<string, DuplicateAsset> = {};
-  let lookFound: (DuplicateAsset | null)[] = [];
-  let sums: { file: string; original: string | null }[] = [];
-  let looks: Awaited<ReturnType<typeof lookHashOfBlob>>[] = [];
-  try {
-    [sums, looks] = await Promise.all([
-      Promise.all(items.map(async (c) => ({
-        file: await sha256Hex(await c.file.arrayBuffer()),
-        original: c.original && c.original !== c.file ? await sha256Hex(await c.original.arrayBuffer()) : null,
-      }))),
-      Promise.all(items.map((c) => (c.file.type.startsWith("image/") ? lookHashOfBlob(c.file) : Promise.resolve(null)))),
-    ]);
-    const checksums = sums.flatMap((s) => (s.original ? [s.file, s.original] : [s.file]));
-    const res = await apiFetch("/api/assets/find-duplicates", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ checksums, looks: looks.map((l) => (l ? { phash: l.phash, color: l.color } : null)) }),
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
-    found = (j.data ?? {}) as Record<string, DuplicateAsset>;
-    lookFound = Array.isArray(j.looks) ? (j.looks as (DuplicateAsset | null)[]) : [];
-  } catch (e) {
-    console.warn("[duplicate-upload] ตรวจรูปซ้ำไม่สำเร็จ — อัปตามปกติ", e);
-    return plain;
-  }
-  const exactOf = (i: number) => found[sums[i].file] ?? (sums[i].original ? found[sums[i].original!] : undefined) ?? null;
-  // รูปหน้าตาเหมือน: เทียบรายละเอียดกับรูปเดิมจริงอีกชั้น (ตัวเลขขนาด/ตัวหนังสือบนรูป) — ไม่ผ่านหรือเทียบไม่ได้ = ไม่ถาม (กันเสนอรูปผิด)
-  const detail: (number | undefined)[] = [];
-  await Promise.all(items.map(async (c, i) => {
-    const m = !exactOf(i) ? lookFound[i] : null;
-    if (!m) return;
-    try {
-      // รูปเดิมขนาด 960 คุณภาพ 90 — รูป 480 (คุณภาพปกติ) เพี้ยนจนรูปซ้ำจริงหลุดไปโซนก้ำกึ่งบ่อย
-      const res = await fetch(`${r2ImageUrl(m.r2_key, 960)}&q=90`);
-      const [a, b] = await Promise.all([detailGridOfBlob(c.file), res.ok ? res.blob().then(detailGridOfBlob) : null]);
-      detail[i] = a && b ? detailGap(a, b) : undefined;
-      if (detail[i] === undefined || detail[i]! > DETAIL_MAX) lookFound[i] = null;
-    } catch { lookFound[i] = null; }
-  }));
-  const matches = items.map((_, i) => exactOf(i) ?? lookFound[i] ?? null);
-  if (!matches.some(Boolean)) return plain;
+  const found = await findDuplicateMatches(items, opts);
+  if (!found.some(Boolean)) return plain;
 
-  const here = new Set(opts.existingKeys ?? []);
   const rows: DupRow[] = [];
   items.forEach((c, i) => {
-    const m = matches[i];
-    const l = looks[i];
-    if (m) rows.push({
-      index: i, file: c.file, match: m, here: here.has(m.r2_key), kind: m.look ? "look" : "same",
-      newSize: l ? { width: l.width, height: l.height } : undefined, unsure: !!m.look && (detail[i] ?? 0) > DETAIL_SURE,
-    });
+    const f = found[i];
+    if (f) rows.push({ index: i, file: c.file, match: f.match, here: f.here, kind: f.kind, newSize: f.newSize, unsure: f.unsure });
   });
   const decisions = await mountDialog<Decision[] | null>((done) => (
     <DuplicateUploadDialog rows={rows} newCount={items.length - rows.length} target={opts.target} done={done} />
@@ -167,11 +207,13 @@ export type DupDecision = Decision;
 
 const dims = (w?: number | null, h?: number | null) => (w && h ? `${w}×${h}` : "");
 const join = (xs: (string | false | null | undefined)[]) => xs.filter(Boolean).join(" · ");
+/** ส่วนที่ใช้ตัดสินค่าตั้งต้น (ใช้ทั้งแถวในป๊อป และผลของ findDuplicateMatches) */
+type Judged = Pick<DupRow, "match" | "here" | "kind" | "newSize" | "unsure">;
 /** รูปใหม่ละเอียดกว่ารูปเดิมชัดเจน (เฉพาะรูปหน้าตาเหมือน — ไฟล์เดียวกันละเอียดเท่ากันอยู่แล้ว) */
-const sharperThanExisting = (r: DupRow) =>
+const sharperThanExisting = (r: Judged) =>
   r.kind === "look" && !!r.newSize && !!r.match.width && !!r.match.height &&
   Math.max(r.newSize.width, r.newSize.height) > SHARPER * Math.max(r.match.width, r.match.height);
-const defaultDecision = (r: DupRow): Decision => (r.here ? "skip" : sharperThanExisting(r) || r.unsure ? "new" : "reuse");
+const defaultDecision = (r: Judged): Decision => (r.here ? "skip" : sharperThanExisting(r) || r.unsure ? "new" : "reuse");
 
 export function DuplicateUploadDialog({ rows, newCount, target, done }: { rows: DupRow[]; newCount: number; target?: string; done: (v: Decision[] | null) => void }) {
   const [choice, setChoice] = useState<Decision[]>(() => rows.map(defaultDecision));

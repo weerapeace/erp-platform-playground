@@ -39,6 +39,10 @@ const r = await uploadImagesWithDupCheck(files, {
 if (!r) return;               // กดยกเลิก → ไม่อัปอะไร
 add(r.keys);                  // key รูปเดิม + รูปใหม่ เรียงตามไฟล์ที่เลือก · r.uploaded / r.reused / r.skipped
 ```
+เด้งป๊อปไม่ได้ (เช่นลงรูปทีละมาก ตรวจเบื้องหลังตอนผู้ใช้ยังจัดรูป) ใช้ `findDuplicateMatches([{ file, original? }], { existingKeys })`
+→ ผลต่อไฟล์เรียงตามที่ส่ง (`null` = ไม่ซ้ำ) `{ match, kind: "same" | "look", here, unsure, newSize?, decision }` · `decision` = ค่าตั้งต้นแบบเดียวกับในป๊อป
+· ส่งกี่ไฟล์ก็ได้ (แบ่งคำขอทีละ 20 ไฟล์ให้เอง) · ชุดที่ตรวจไม่สำเร็จ = null ทั้งชุด
+
 ช่องที่อัปไฟล์เองแบบอื่น (ไม่ย่อด้วย canvas) ใช้ `askDuplicateUploads([{ file, original? }], opts)` → ได้แผนต่อไฟล์ (`reuse` = รูปเดิมในคลัง · `null` = อัปใหม่ · ไฟล์ที่ข้ามไม่อยู่ในผล · `null` ทั้งก้อน = ยกเลิก)
 
 ## ตรวจซ้ำแบบไหน (2 ระดับ)
