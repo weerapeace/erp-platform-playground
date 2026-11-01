@@ -9,7 +9,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { avatarSrc } from "@/lib/r2-image";
 import { cleanDomain, guessLogoDomain, letterBg, logoCandidates, logoImageSearchUrl } from "@/lib/app-logo";
-import { uploadResizedImage } from "@/components/image-attach";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { useToast } from "@/components/toast";
 
 export function AppLogo({ src, name, size = 32, className }: {
@@ -71,8 +71,16 @@ export function LogoPicker({ value, name, url, folder = "app-logos", onChange }:
     if (!file || !file.type.startsWith("image/")) { if (file) toast.error("รับเฉพาะไฟล์รูป"); return; }
     setBusy(true);
     try {
-      const r = await uploadResizedImage(file, { folder, max: 256 });
-      onChange(r.r2_key);
+      // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck)
+      const r = await uploadImagesWithDupCheck([file], {
+        folder, max: 256,
+        target: name.trim() ? `โลโก้ ${name.trim()}` : "โลโก้",
+        existingKeys: value && !/^https?:\/\//i.test(value) ? [value] : [],
+        onError: (_, e) => toast.error("อัปโหลดรูปไม่สำเร็จ: " + e.message),
+      });
+      const key = r?.keys[0];
+      if (!key) return;
+      onChange(key);
       toast.success("ตั้งโลโก้แล้ว");
     } catch (e) { toast.error("อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
     finally { setBusy(false); }
