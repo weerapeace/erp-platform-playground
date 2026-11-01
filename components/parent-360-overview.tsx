@@ -14,7 +14,8 @@ import type { CreativeTaskItem, CreativeContentItem } from "@/app/api/parent-sku
 
 type Overview = {
   skus: { total: number; active: number };
-  stockOnHand: number;
+  /** null = ยังไม่มี SKU ไหนมีข้อมูลสต๊อก (lib/sku-stock) */
+  stockOnHand: number | null;
   sales: { hasData: boolean; total: number; units: number; days: { date: string; sales: number; units: number }[] };
   parentCode: string;
   platforms: { drafts: number; published: number; matched: number; chips: { id: string; name_th: string; code: string; icon_key: string | null; live: boolean }[] };
@@ -129,7 +130,7 @@ export function Parent360Overview({ parentId }: { parentId: string | null }) {
       {/* แถวสถิติหลัก (กดเจาะไปหน้าที่เกี่ยวได้) */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <Stat label="SKU ลูก (ตัวขาย)" value={data.skus.total} sub={`เปิดขาย ${data.skus.active}`} tone="indigo" />
-        <Stat label="สต๊อกรวม (ทุกสี)" value={data.stockOnHand.toLocaleString()} sub="ชิ้น" tone="emerald" />
+        <Stat label="สต๊อกรวม (ทุกสี)" value={data.stockOnHand === null ? "—" : data.stockOnHand.toLocaleString()} sub={data.stockOnHand === null ? "ยังไม่มีข้อมูลสต๊อก" : "ชิ้น"} tone="emerald" />
         <Stat label="ลงขายแพลตฟอร์ม" value={data.platforms.drafts} sub={`ลงจริง ${data.platforms.published} · จับคู่ร้าน ${data.platforms.matched}`} tone="violet"
           href={data.parentCode ? `/master/platform-sku?q=${encodeURIComponent(data.parentCode)}` : undefined} />
         <Stat label="คอนเทนต์/งาน" value={creativeTotal} sub={`งาน ${c.tasks} · คอนเทนต์ ${c.content}`} tone="amber"

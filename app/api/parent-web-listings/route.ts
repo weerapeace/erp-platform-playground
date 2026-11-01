@@ -63,6 +63,7 @@ import { categoryPathLabel } from "@/lib/website-category-tree";
 import { loadTagContext } from "@/lib/website-tag-categories-db";
 import { tagRuleCategories } from "@/lib/website-tag-categories";
 import { syncStoreListingUsages } from "@/lib/store-listing-usage";
+import { loadSkuStock, type SkuStock } from "@/lib/sku-stock";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -116,11 +117,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const kidIds = kids.map((k) => k.id as string);
 
   // สต๊อก + แกลเลอรีรูปของ SKU ลูก (รูปภาพเพิ่มเติมที่อัปโหลดไว้ในหน้า SKU) — ให้เลือกเป็นรูปเว็บรายสีได้
-  const [{ data: stockRows }, { data: ledgerRows }, { data: attRows }] = kidIds.length
+  // 📦 ยอดคงเหลือ = ของกลาง lib/sku-stock (ไม่มีใน Map = ยังไม่มีข้อมูลสต๊อก → null · ต่างจากมีแถวแต่เหลือ 0 = หมดจริง)
+  const [stock, { data: attRows }] = kidIds.length
     ? await Promise.all([
-        sb.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", kidIds),
-        // 📦 ยอดคงเหลือจาก ledger กลาง (ทุกคลังรวมกัน) — ตารางเดิมด้านบนยังไม่มีใครเขียน
-        sb.from("erp_playground_stock_balances").select("product_id, qty_on_hand").in("product_id", kidIds),
+        loadSkuStock(sb, kidIds),
         sb
           .from("erp_playground_attachments")
           .select("entity_id, file_path, is_primary, sort_order, content_type")
@@ -129,15 +129,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           .order("is_primary", { ascending: false })
           .order("sort_order", { ascending: true }),
       ])
-    : [{ data: [] }, { data: [] }, { data: [] }];
-  // ไม่มีแถวยอดเลย = ยังไม่มีข้อมูลสต๊อก (null) — ต่างจาก "มีแถวแต่เหลือ 0" = หมดจริง
-  const stock = new Map<string, number>();
-  for (const s of (ledgerRows ?? []) as { product_id: string; qty_on_hand: number | string | null }[]) {
-    stock.set(s.product_id, (stock.get(s.product_id) ?? 0) + (Number(s.qty_on_hand) || 0));
-  }
-  for (const s of (stockRows ?? []) as { sku_id: string; qty_on_hand: number | string | null }[]) {
-    if (!stock.has(s.sku_id)) stock.set(s.sku_id, Number(s.qty_on_hand) || 0);
-  }
+    : [new Map<string, SkuStock>(), { data: [] }];
   const gallery = new Map<string, string[]>();
   for (const a of (attRows ?? []) as { entity_id: string; file_path: string | null; content_type: string | null }[]) {
     if (!a.file_path || !KEY_RE.test(a.file_path)) continue;
@@ -162,7 +154,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       labelEn: baseColorEn(k) || (label ? swatches.english(label) : ""),
       price: Number(k.list_price) || 0,
       /** null = ยังไม่มีข้อมูลสต๊อกของ SKU นี้ */
-      qty: stock.get(k.id as string) ?? null,
+      qty: stock.get(k.id as string)?.onHand ?? null,
       erpImageKey: cover,
       /** รูปทั้งหมดของ SKU นี้ (ปกก่อน แล้วรูปเพิ่มเติม) */
       gallery: [...new Set([...(cover ? [cover] : []), ...extra])],

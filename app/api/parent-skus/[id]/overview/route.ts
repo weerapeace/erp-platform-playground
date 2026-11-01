@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { loadSkuStock } from "@/lib/sku-stock";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -45,11 +46,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // งานที่ผูกผ่านตารางเชื่อม (erp_creative_task_parent_skus) — งานที่แท็ก parent นี้
   const linkedTasks = await cnt(a.from("erp_creative_task_parent_skus").select("task_id", { count: "exact", head: true }).eq("parent_sku_id", id));
 
-  // สต๊อกรวมของ SKU ลูก (จาก sku_stock_balances ถ้ามี)
-  let stockOnHand = 0;
+  // สต๊อกรวมของ SKU ลูก (ของกลาง lib/sku-stock) · null = ยังไม่มี SKU ไหนมีข้อมูลสต๊อก
+  let stockOnHand: number | null = null;
   if (skuIds.length) {
-    const { data: bal } = await a.from("sku_stock_balances").select("qty_on_hand").in("sku_id", skuIds);
-    for (const b of ((bal ?? []) as { qty_on_hand: number | null }[])) stockOnHand += Number(b.qty_on_hand ?? 0);
+    const stock = await loadSkuStock(a, skuIds);
+    for (const s of stock.values()) stockOnHand = (stockOnHand ?? 0) + s.onHand;
   }
 
   // แพลตฟอร์มที่ลงขายจริง (ชื่อร้าน) — เอาไปโชว์ชิป

@@ -4,10 +4,11 @@
  *   - มี family_id (หรือ search) → คืน "การ์ด SKU" (รูป/รหัส/ชื่อ/ราคาขาย/สต๊อก/สถานะ/แท็ก)
  *
  * อ่านของเดิมล้วน: product_family_groups (กลุ่ม, ซ้อนกลุ่มย่อย) · product_families (แท็ก)
- *   · skus_v2_product_family_m2m (src_id=sku, tgt_id=tag) · skus_v2 · sku_stock_balances
+ *   · skus_v2_product_family_m2m (src_id=sku, tgt_id=tag) · skus_v2 · สต๊อก (ของกลาง lib/sku-stock)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi, apiCan } from "@/lib/api-auth";
+import { loadSkuStock } from "@/lib/sku-stock";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
 
@@ -177,7 +178,7 @@ export async function GET(request: NextRequest) {
       type SupItem = { item_sku_id: string; price: number | string; currency: string | null; updated_at: string | null; is_default: boolean | null; supplier_partner: string | null };
       const [linkRes, balRes, bomRes, poRes, siRes] = await Promise.all([
         admin.from(ENT.junction).select("src_id, tgt_id").in("src_id", ids),
-        admin.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", ids),
+        loadSkuStock(admin, ids),
         admin.from("bom_headers").select("product_sku").in("product_sku", codes),
         // ราคาซื้อจริงจากบรรทัด PO (ทุกสถานะ ยกเว้นที่ปิดใช้งาน) — ใหม่สุดก่อน
         canCost ? admin.from("purchase_order_lines_v2").select("item_sku_id, price_est, currency, created_at, po_id")
@@ -189,7 +190,7 @@ export async function GET(request: NextRequest) {
           : Promise.resolve({ data: null }),
       ]);
       linkData = (linkRes.data ?? []) as { src_id: string; tgt_id: string }[];
-      for (const b of ((balRes.data ?? []) as { sku_id: string; qty_on_hand: number | string | null }[])) stock.set(b.sku_id, Number(b.qty_on_hand ?? 0));
+      for (const [skuId, s] of balRes) stock.set(skuId, s.onHand);
       for (const b of ((bomRes.data ?? []) as { product_sku: string }[])) bomSet.add(b.product_sku);
 
       if (canCost) {

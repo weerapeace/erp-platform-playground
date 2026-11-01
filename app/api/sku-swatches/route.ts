@@ -15,6 +15,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
+import { loadSkuStock } from "@/lib/sku-stock";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
@@ -110,10 +111,9 @@ export async function GET(request: NextRequest) {
     if (skuIds.length) {
       const [skuRes, balRes] = await Promise.all([
         admin.from("skus_v2").select("id, code, name_th, cover_image_r2_key, color, is_active, uom:uoms!uom_id(name)").in("id", skuIds),
-        admin.from("sku_stock_balances").select("sku_id, qty_on_hand").in("sku_id", skuIds),
+        loadSkuStock(admin, skuIds),
       ]);
-      const stock = new Map<string, number>();
-      for (const b of (balRes.data ?? []) as { sku_id: string; qty_on_hand: number | string | null }[]) stock.set(b.sku_id, Number(b.qty_on_hand ?? 0));
+      const stock = new Map<string, number>([...balRes].map(([id, s]) => [id, s.onHand]));
       for (const k of (skuRes.data ?? []) as unknown as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null; color: string | null; is_active: boolean | null; uom: { name: string | null } | { name: string | null }[] | null }[]) {
         const uomRow = Array.isArray(k.uom) ? k.uom[0] : k.uom;
         skuMap.set(k.id, {

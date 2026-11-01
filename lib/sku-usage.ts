@@ -9,6 +9,7 @@
  * ยิง count เป็นชุดละ 6 (ไม่ยิง 30 เส้นพร้อมกัน) · ตารางที่ไม่มี/นับไม่ได้ = ข้าม (ไม่ล้ม)
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { loadSkuStock } from "@/lib/sku-stock";
 
 type Ref = { table: string; column: string; by: "id" | "code"; label: string };
 
@@ -44,7 +45,7 @@ const REFS: Ref[] = [
 export type SkuUsage = {
   used: boolean;            // มีที่ใช้อย่างน้อย 1 ที่ (หรือมีสต๊อกคงเหลือ)
   total: number;            // จำนวนรายการอ้างอิงรวม
-  stock_qty: number;        // สต๊อกคงเหลือ (sku_stock_balances.qty_on_hand)
+  stock_qty: number;        // สต๊อกคงเหลือรวมทุกคลัง (ของกลาง lib/sku-stock)
   refs: { label: string; count: number }[];   // เฉพาะที่ count > 0
 };
 
@@ -68,9 +69,8 @@ export async function skuUsage(admin: Admin, sku: { id: string; code: string | n
   }
   let stockQty = 0;
   try {
-    const { data } = await admin.from("sku_stock_balances").select("qty_on_hand").eq("sku_id", sku.id).maybeSingle();
-    stockQty = Number((data as { qty_on_hand?: number } | null)?.qty_on_hand ?? 0) || 0;
-  } catch { /* ไม่มีตาราง */ }
+    stockQty = (await loadSkuStock(admin, [sku.id])).get(sku.id)?.onHand ?? 0;
+  } catch { /* อ่านสต๊อกไม่ได้ = ถือว่า 0 (ตัวนับอ้างอิงด้านบนยังกันลบอยู่) */ }
   const total = refs.reduce((n, r) => n + r.count, 0);
   return { used: total > 0 || stockQty !== 0, total, stock_qty: stockQty, refs };
 }

@@ -1,10 +1,12 @@
 /**
  * GET /api/inventory/sku-stock
- * ยอดคงเหลือต่อ SKU จริง (ขั้น 4 แบบเล็ก — คลังรวม นับจำนวน)
- * อ่านจาก sku_stock_balances + join ชื่อ/รหัสจาก skus_v2
+ * ยอดคงเหลือต่อ SKU จริง (คลังรวม นับจำนวน) — ของกลาง lib/sku-stock (ledger กลางก่อน · ตารางเก่าเป็นสำรอง)
+ * + join ชื่อ/รหัสจาก skus_v2 · ใครล็อกอินแล้วอ่านได้ (เท่าเดิม — หน้าขอซื้อใช้โชว์ยอดในป๊อปเพิ่มรายการ)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { listSkuStock } from "@/lib/sku-stock";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -17,39 +19,32 @@ export type SkuStockRow = {
   last_movement_at: string | null;
 };
 
-type BalanceRow = {
-  sku_id:           string;
-  qty_on_hand:      number | string | null;
-  last_movement_at: string | null;
-  skus_v2:          { code: string | null; name_th: string | null } | { code: string | null; name_th: string | null }[] | null;
-};
-
 export async function GET(request: NextRequest) {
-  const supabase = supabaseFromRequest(request);
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  if (!user) return NextResponse.json({ data: [], total: 0, error: "ต้องเข้าสู่ระบบก่อน" }, { status: 401 });
+
   const { searchParams } = new URL(request.url);
   const limit = Math.min(2000, Math.max(1, parseInt(searchParams.get("limit") ?? "500", 10)));
+  const admin = supabaseAdmin();
 
-  const { data, error } = await supabase
-    .from("sku_stock_balances")
-    .select("sku_id, qty_on_hand, last_movement_at, skus_v2:sku_id ( code, name_th )")
-    .order("last_movement_at", { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    console.error("[api/inventory/sku-stock] GET", error);
-    return NextResponse.json({ data: [], total: 0, error: error.message }, { status: 500 });
+  try {
+    const list = await listSkuStock(admin, limit);
+    const names = new Map<string, { code: string | null; name_th: string | null }>();
+    const ids = list.map((r) => r.skuId);
+    for (let i = 0; i < ids.length; i += 300) {
+      const { data } = await admin.from("skus_v2").select("id, code, name_th").in("id", ids.slice(i, i + 300));
+      for (const s of (data ?? []) as { id: string; code: string | null; name_th: string | null }[]) names.set(s.id, s);
+    }
+    const rows: SkuStockRow[] = list.map(({ skuId, stock }) => ({
+      sku_id:           skuId,
+      code:             names.get(skuId)?.code ?? null,
+      name_th:          names.get(skuId)?.name_th ?? null,
+      qty_on_hand:      stock.onHand,
+      last_movement_at: stock.lastMovementAt,
+    }));
+    return NextResponse.json({ data: rows, total: rows.length, error: null });
+  } catch (e) {
+    console.error("[api/inventory/sku-stock] GET", e);
+    return NextResponse.json({ data: [], total: 0, error: "โหลดยอดคงเหลือไม่สำเร็จ" }, { status: 500 });
   }
-
-  const rows: SkuStockRow[] = ((data ?? []) as unknown as BalanceRow[]).map((r) => {
-    const s = Array.isArray(r.skus_v2) ? r.skus_v2[0] : r.skus_v2;
-    return {
-      sku_id:           r.sku_id,
-      code:             s?.code ?? null,
-      name_th:          s?.name_th ?? null,
-      qty_on_hand:      Number(r.qty_on_hand ?? 0),
-      last_movement_at: r.last_movement_at,
-    };
-  });
-
-  return NextResponse.json({ data: rows, total: rows.length, error: null });
 }
