@@ -17,11 +17,11 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { FileInput } from "@/components/file-input";
+import { useFileRefUrls } from "@/components/file-ref";
 import type { GrDetail } from "@/app/api/purchasing/goods-receipt/[id]/route";
 
 const CASE_LABEL: Record<string, string> = { full: "รับครบ", full_defective: "รับครบ (มีเสีย)", partial_wait: "รับบางส่วน รอของ", partial_close: "ปิดยอด (ขาด)" };
 const stripCode = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
-const imgUrl = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
 const isPdf = (key: string) => /\.pdf$/i.test(key);
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const inp = "h-8 px-2 text-sm border border-slate-200 rounded-md bg-white tabular-nums";
@@ -127,6 +127,8 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
     ...(d.receipt_doc_r2_key ? [{ key: d.receipt_doc_r2_key, label: "📄 ใบรับของ / ใบส่งของขนส่ง" }] : []),
     ...(d.bill_doc_r2_key ? [{ key: d.bill_doc_r2_key, label: "🧾 บิล / ใบเสร็จ" }] : []),
   ] : [];
+  // ไฟล์แนบเป็น "ที่อยู่ไฟล์กลาง" — บิลใหม่อยู่ Supabase ส่วนตัว ต้องขอลิงก์ชั่วคราว (components/file-ref)
+  const docUrls = useFileRefUrls(attachments.map((a) => a.key));
   const locked = d?.voucher_status === "confirmed";
 
   return (
@@ -175,8 +177,8 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
           {editing ? (
             <div>
               <div className="grid grid-cols-2 gap-3">
-                <FileInput label="📄 ใบรับของ / ใบส่งของขนส่ง" value={docs.receipt} onChange={(k) => setDocs((p) => ({ ...p, receipt: k }))} folder="goods-receipts" hasError={!!d.receipt_doc_r2_key && !docs.receipt} />
-                <FileInput label="🧾 บิล / ใบเสร็จ" value={docs.bill} onChange={(k) => setDocs((p) => ({ ...p, bill: k }))} folder="goods-receipts" hasError={!!d.bill_doc_r2_key && !docs.bill} />
+                <FileInput label="📄 ใบรับของ / ใบส่งของขนส่ง" value={docs.receipt} onChange={(k) => setDocs((p) => ({ ...p, receipt: k }))} folder="goods-receipts" category="supplier_bills" hasError={!!d.receipt_doc_r2_key && !docs.receipt} />
+                <FileInput label="🧾 บิล / ใบเสร็จ" value={docs.bill} onChange={(k) => setDocs((p) => ({ ...p, bill: k }))} folder="goods-receipts" category="supplier_bills" hasError={!!d.bill_doc_r2_key && !docs.bill} />
               </div>
               <p className={`text-[11px] mt-1 ${docMissing ? "text-red-600" : "text-slate-400"}`}>
                 {docMissing ? "⚠ เอาไฟล์เดิมออกแล้ว ต้องแนบไฟล์ใหม่แทนก่อนบันทึก (เอกสารบังคับ)" : "แนบผิดไฟล์? กดเอาไฟล์เดิมออกแล้วแนบไฟล์ใหม่แทนได้เลย"}
@@ -185,16 +187,20 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
           ) : attachments.length > 0 && (
             <div className="flex items-center gap-2 flex-wrap text-xs">
               <span className="text-slate-400">ไฟล์แนบ</span>
-              {attachments.map((a) => (
-                <a key={a.key} href={imgUrl(a.key)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 h-8 px-2 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
-                  {isPdf(a.key) ? <span>📎</span> : (
-                    <HoverPreview url={imgUrl(a.key)} previewW={420}>
-                      <span className="inline-block w-6 h-6 rounded overflow-hidden border border-slate-100 bg-slate-50 align-middle">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={imgUrl(a.key)} alt="" className="w-full h-full object-cover" /></span>
-                    </HoverPreview>
-                  )}
-                  {a.label} ↗
-                </a>
-              ))}
+              {attachments.map((a) => {
+                const url = docUrls[a.key];
+                if (!url) return <span key={a.key} className="inline-flex items-center h-8 px-2 rounded-md border border-slate-200 bg-slate-50 text-slate-400">{a.label} {url === undefined ? "· กำลังโหลด…" : "· เปิดดูไม่ได้"}</span>;
+                return (
+                  <a key={a.key} href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 h-8 px-2 rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">
+                    {isPdf(a.key) ? <span>📎</span> : (
+                      <HoverPreview url={url} previewW={420}>
+                        <span className="inline-block w-6 h-6 rounded overflow-hidden border border-slate-100 bg-slate-50 align-middle">{/* eslint-disable-next-line @next/next/no-img-element */}<img src={url} alt="" className="w-full h-full object-cover" /></span>
+                      </HoverPreview>
+                    )}
+                    {a.label} ↗
+                  </a>
+                );
+              })}
             </div>
           )}
 

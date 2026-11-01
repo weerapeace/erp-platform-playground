@@ -8,6 +8,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { chatJson, imagesToDataUrls, productDetailModel } from "@/lib/ai-caption";
 import { recomputeVoucher } from "@/lib/purchase-voucher-server";
+import { isSupabaseRef } from "@/lib/file-ref";
+import { fileRefToDataUrl } from "@/lib/file-ref-server";
 
 type Admin = SupabaseClient;
 type Row = Record<string, unknown>;
@@ -66,9 +68,12 @@ const SYSTEM = `คุณเป็นผู้ช่วยอ่านเอก�
 กฎ: แถวที่เป็น Total / Sub-Total ไม่ใช่รายการ ห้ามใส่ใน lines · แถว EK- ที่ไม่มีสินค้า = รหัสขนส่ง ไม่ใช่รายการ · ตัวเลขทศนิยมคงค่าตามที่อ่านได้ (เช่น 0.0099) · ห้ามแต่งข้อมูลที่ไม่มีในรูป`;
 
 /** อ่านรูปใบส่งของด้วย AI → โครงสร้าง (โยน Error เป็นภาษาคนเมื่ออ่านไม่ได้) */
-export async function parseDeliveryBillImage(r2Key: string): Promise<{ parsed: DeliveryBillParsed; raw: Record<string, unknown> }> {
+export async function parseDeliveryBillImage(r2Key: string, admin?: Admin): Promise<{ parsed: DeliveryBillParsed; raw: Record<string, unknown> }> {
   if (/\.pdf$/i.test(r2Key)) throw new Error("อ่านได้เฉพาะรูปภาพ (jpg/png/webp) — ไฟล์ PDF ให้ถ่ายรูป/แปลงเป็นรูปก่อน");
-  const urls = await imagesToDataUrls([r2Key]);
+  // r2Key = ที่อยู่ไฟล์กลาง (lib/file-ref) — บิลใหม่อยู่ Supabase ส่วนตัว (กฎที่เก็บไฟล์ หมวด supplier_bills)
+  const urls = isSupabaseRef(r2Key)
+    ? (admin ? [await fileRefToDataUrl(admin, r2Key)].filter((u): u is string => !!u) : [])
+    : await imagesToDataUrls([r2Key]);
   if (urls.length === 0) throw new Error("อ่านไฟล์รูปไม่ได้ (ไฟล์อาจยังอัปโหลดไม่เสร็จ)");
   const model = await productDetailModel();
   // OCR ต้องการความละเอียดสูง — ไม่ใช้ detail:low ของ imageParts()

@@ -2,24 +2,27 @@
 
 /**
  * FileInput — อัปโหลดไฟล์แนบกลาง (ของกลาง) รองรับทั้งรูปภาพและ PDF
- * เก็บ R2 object key ในค่า value (เหมือน ImageInput) — ใช้ /api/admin/upload + /api/r2-image
- * - รูป → โชว์ thumbnail
- * - PDF → โชว์ไอคอน 📄 + ปุ่มเปิดดู
+ * ค่า value = ที่อยู่ไฟล์กลาง (ref · lib/file-ref): R2 key เดิม หรือ "sb:erp-files/…" (Supabase ส่วนตัว)
+ * - ส่ง category (หมวดในกฎที่เก็บไฟล์ เช่น "supplier_bills") → ระบบเลือกที่เก็บตามกฎ (lib/file-upload) · folder = โฟลเดอร์ R2 ถ้ากฎตั้งเป็น R2
+ * - ไม่ส่ง category → ทางเดิม /api/admin/upload (R2)
+ * - รูป → โชว์ thumbnail · PDF → โชว์ไอคอน 📄 + ปุ่มเปิดดู (ไฟล์ส่วนตัวขอลิงก์ชั่วคราวให้เอง — components/file-ref)
  * ใช้แนบเอกสาร เช่น ใบรับของ, บิล/ใบเสร็จ, สัญญา ฯลฯ
  */
 import { useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useFileUploadAccess } from "@/components/upload-permission";
-
-const isPdfKey = (k: string | null | undefined) => !!k && k.toLowerCase().endsWith(".pdf");
-const urlOf = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}`;
+import { uploadFileByRule } from "@/lib/file-upload";
+import { useFileRefUrl } from "@/components/file-ref";
+import { fileRefName, isPdfRef } from "@/lib/file-ref";
 
 export function FileInput({
-  value, onChange, folder = "uploads", required, disabled, hasError, label,
+  value, onChange, folder = "uploads", category, required, disabled, hasError, label,
 }: {
   value: string | null;
-  onChange: (r2_key: string | null) => void;
+  onChange: (ref: string | null) => void;
   folder?: string;
+  /** หมวดในกฎที่เก็บไฟล์ (/master/storage-rules) — ส่ง = ทำตามกฎ */
+  category?: string;
   required?: boolean;
   disabled?: boolean;
   hasError?: boolean;
@@ -29,11 +32,13 @@ export function FileInput({
   const [err, setErr] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const { uploadDisabled, uploadDeniedMessage } = useFileUploadAccess(disabled);
+  const viewUrl = useFileRefUrl(value);
 
   const handleFile = async (file: File) => {
     if (uploadDisabled) { setErr(uploadDeniedMessage ?? "ไม่สามารถอัปโหลดไฟล์ได้"); return; }
     setErr(null); setUploading(true);
     try {
+      if (category) { onChange(await uploadFileByRule({ category, file, r2Folder: folder })); return; }
       const fd = new FormData();
       fd.append("file", file);
       fd.append("folder", folder);
@@ -45,7 +50,7 @@ export function FileInput({
     finally { setUploading(false); if (fileRef.current) fileRef.current.value = ""; }
   };
 
-  const pdf = isPdfKey(value);
+  const pdf = isPdfRef(value);
 
   return (
     <div>
@@ -53,16 +58,20 @@ export function FileInput({
       <div className={`mt-0.5 rounded-md border-2 border-dashed transition-colors ${hasError ? "border-red-300" : "border-slate-200 hover:border-orange-300"} ${uploadDisabled ? "opacity-50" : ""}`}>
         {value ? (
           <div className="relative p-2">
-            {pdf ? (
-              <a href={urlOf(value)} target="_blank" rel="noopener noreferrer"
+            {viewUrl === undefined ? (
+              <div className="h-20 flex items-center justify-center text-xs text-slate-400">กำลังโหลดไฟล์…</div>
+            ) : viewUrl === null ? (
+              <div className="h-20 flex items-center justify-center text-xs text-slate-500">แนบไฟล์แล้ว · เปิดดูไม่ได้ (ไม่มีสิทธิ์ดูไฟล์นี้)</div>
+            ) : pdf ? (
+              <a href={viewUrl} target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-2 px-2 py-3 text-sm text-slate-700 hover:text-blue-700">
                 <span className="text-2xl">📄</span>
-                <span className="flex-1 truncate">{value.split("/").pop()}</span>
+                <span className="flex-1 truncate">{fileRefName(value)}</span>
                 <span className="text-xs text-blue-600">เปิดดู →</span>
               </a>
             ) : (
               /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={urlOf(value)} alt="preview" className="w-full max-h-44 object-contain rounded bg-slate-50" />
+              <img src={viewUrl} alt="preview" className="w-full max-h-44 object-contain rounded bg-slate-50" />
             )}
             {!disabled && (
               <div className="absolute top-1 right-1 flex gap-1">
@@ -78,7 +87,7 @@ export function FileInput({
             className="w-full h-20 flex flex-col items-center justify-center gap-1 text-slate-500 hover:text-orange-600">
             <span className="text-xl">📎</span>
             <span className="text-xs">{uploading ? "กำลังอัปโหลด..." : "คลิกเพื่อแนบไฟล์"}</span>
-            <span className="text-[10px] text-slate-400">รูป (JPG/PNG/WebP) หรือ PDF — สูงสุด 10MB</span>
+            <span className="text-[10px] text-slate-400">{category ? "รูป (JPG/PNG/WebP) หรือ PDF — เก็บตามกฎที่เก็บไฟล์" : "รูป (JPG/PNG/WebP) หรือ PDF — สูงสุด 10MB"}</span>
           </button>
         )}
       </div>

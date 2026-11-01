@@ -11,6 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { parseDeliveryBillImage, applyDeliveryBill, normDate, loadDescriptionRules, methodForDescription, type DeliveryBillLine } from "@/lib/delivery-bill";
+import { isRefForCategory } from "@/lib/file-ref";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -50,12 +51,14 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const r2Key = str(body.r2_key);
   if (!r2Key) return NextResponse.json({ error: "ไม่มีไฟล์" }, { status: 400 });
+  // ที่อยู่ไฟล์กลาง: R2 key เดิม หรือไฟล์ Supabase ของหมวดบิลเท่านั้น (กันยัดไฟล์หมวดอื่นมาให้ AI อ่าน)
+  if (!isRefForCategory(r2Key, "supplier_bills")) return NextResponse.json({ error: "ไฟล์แนบไม่ถูกต้อง — แนบไฟล์ใหม่อีกครั้ง" }, { status: 400 });
   const admin = supabaseAdmin();
   const { data: v } = await admin.from("purchase_vouchers_v2").select("id, status").eq("id", id).maybeSingle();
   if (!v) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
 
   try {
-    const { parsed, raw } = await parseDeliveryBillImage(r2Key);
+    const { parsed, raw } = await parseDeliveryBillImage(r2Key, admin);
     // เลือกวิธีคิดค่าส่งของแต่ละกล่องจากกฎ Description (BOX → คิว, CLOTH BLOCK → น้ำหนัก) — แก้ทีหลังได้
     const rules = await loadDescriptionRules(admin);
     for (const l of parsed.lines) l.method = methodForDescription(l.description, rules);

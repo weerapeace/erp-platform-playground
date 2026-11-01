@@ -54,14 +54,58 @@
 
 **เมื่อแก้ทางอัปของหมวดไหน → อัปเดต `STORAGE_WIRING` ให้ตรงเสมอ** (มีเทสต์ `lib/storage-policy.test.ts`)
 
+## เฟส 2 — ตัวอัปกลางที่ทำตามกฎ
+
+### ที่อยู่ไฟล์กลาง (file ref) — `lib/file-ref.ts`
+
+ข้อความเดียวบอกที่เก็บ เก็บในคอลัมน์เดิมได้เลย (เช่น `goods_receipts_v2.bill_doc_r2_key`) **ไม่ต้องแก้ตาราง ไม่ต้องแปลงข้อมูลเก่า**
+
+| รูปแบบ | ที่เก็บ |
+|---|---|
+| `goods-receipts/2026/a.jpg` (ไม่มีคำนำหน้า) | R2 — ค่าเดิมทั้งหมด |
+| `sb:erp-files/supplier_bills/2026-11/<เวลา>-<สุ่ม>.jpg` | Supabase bucket ส่วนตัว `erp-files` (migration `202611100700`) |
+
+- `isRefForCategory(ref, หมวด)` — ตอนบันทึกเอกสาร ยอมรับ R2 key หรือไฟล์ Supabase **ของหมวดตัวเองเท่านั้น** (กันยัดไฟล์หมวดอื่นมา)
+- ฝั่งเซิร์ฟเวอร์ `lib/file-ref-server.ts`: `readFileRef` / `fileRefToDataUrl` (ให้ AI อ่าน) / `signSupabaseRefs`
+
+### อัปไฟล์ — `uploadFileByRule({ category, file, r2Folder })` (`lib/file-upload.ts`)
+
+1. `POST /api/files/upload-target` — ตรวจสิทธิ์อัปของหมวด + ชนิด/ขนาดตามกฎ (`fileRuleProblem`)
+2. กฎ = Supabase → เบราว์เซอร์อัปตรงด้วยลิงก์อัปชั่วคราว (ข้ามลิมิต ~4.5 MB ของ Vercel) → ref `sb:…`
+   กฎ = R2 → ทางเดิม `/api/admin/upload` (≤ 4 MB · ลงคลังไฟล์กลางอัตโนมัติ) → R2 key
+   กฎ = Drive → ปฏิเสธ (ช่องอัปทั่วไปยังไม่รู้ว่าจะลงโฟลเดอร์ไหน)
+- ของกลาง `FileInput` รับ prop `category` → ทำตามกฎ (ไม่ส่ง = ทางเดิม R2)
+
+### เปิดดู — `useFileRefUrls(refs)` (`components/file-ref`)
+
+- ระบบ login เก็บ token ใน localStorage → `<img src>` ส่งสิทธิ์เองไม่ได้ จึงต้องขอลิงก์ก่อน: `POST /api/files/sign { refs }`
+- R2 → `/api/r2-image` ทันที · Supabase → ลิงก์ชั่วคราว 10 นาที เฉพาะคนที่มีสิทธิ์ดูของหมวด · ไม่มีสิทธิ์ = null
+
+### สิทธิ์ของหมวด — `STORAGE_CATEGORY_PERMISSIONS` (`lib/storage-policy.ts`)
+
+| หมวด | อัปได้ | ดูได้ |
+|---|---|---|
+| `supplier_bills` | `products.edit` (เท่ากับสิทธิ์บันทึกรับของ) | `products.view` (เท่ากับสิทธิ์ดูใบรับสินค้า) |
+
+หมวดที่ไม่อยู่ในตารางนี้ = ตัวอัปกลางไม่รับ
+
+### ช่องอัปที่ทำตามกฎแล้ว
+
+| หมวด | ช่องอัป | ที่อ่านไฟล์ |
+|---|---|---|
+| `supplier_bills` | `FileInput category="supplier_bills"` ใน `receive-line-modal` (2) · `receive-cart` (2) · `gr-detail-modal` (2) · `delivery-bill-panel` (1) | `gr-detail-modal` · `delivery-bill-panel` (`useFileRefUrls`) · AI อ่านใบส่งของ `parseDeliveryBillImage(ref, admin)` · บันทึกตรวจ `isRefForCategory` ที่ `/api/purchasing/receive` · `goods-receipt/[id]` PATCH · `vouchers/[id]/bills` POST |
+
+**เพิ่มหมวดใหม่:** ใส่สิทธิ์ใน `STORAGE_CATEGORY_PERMISSIONS` → ส่ง `category` ที่ช่องอัป → เปลี่ยนจุดแสดงไฟล์เป็น `useFileRefUrls` → ตรวจ `isRefForCategory` ตอนบันทึก → ตั้ง `STORAGE_WIRING[หมวด] = "rule"`
+
 ## ห้ามใช้ / ข้อจำกัด
 
 - เปลี่ยนกฎ **ไม่ย้ายไฟล์เดิม** — ย้ายต้องทำเป็นงานแยก (ก๊อป → ตรวจเปิดได้ → ค่อยลบของเดิม) และขออนุญาตเจ้าของก่อน
-- เฟส 1 กฎยังไม่บังคับช่องอัป และ `max_bytes` ยังไม่ถูกใช้ตรวจตอนอัป
+- `max_bytes` ใช้ตรวจเฉพาะหมวดที่ทำตามกฎแล้ว · กฎ = R2 รับได้ไม่เกิน 4 MB ไม่ว่าตั้งไว้เท่าไร
+- ไฟล์ที่อยู่ Supabase **ไม่ลงคลังไฟล์กลาง** (ตั้งใจ — เอกสารส่วนตัวไม่ควรโผล่ในคลัง)
 - กฎงานพิมพ์ยังตรวจที่ `lib/print-file-policy.ts` เหมือนเดิม (หมวด `print_files` ในตารางล็อก Drive ไว้ให้ตรงกัน)
 - Drive วัดขนาดรวมจาก API ไม่ได้ง่าย → การ์ดโชว์ "จำนวนที่ระบบผูกไว้" แทนขนาด
 
 ## แผนต่อ
 
-- **เฟส 2:** ตัวอัปไฟล์กลางตัวเดียว `uploadFile({ category, file })` อ่านกฎแล้วส่งไปที่ถูก (ใช้ทางเดิม 3 ทาง: R2 presigned / Supabase signed upload / `/api/drive/upload`) · เซิร์ฟเวอร์ตรวจกฎซ้ำ · เปลี่ยนช่องอัปทีละจุด เริ่มจากบิลซัพพลายเออร์ · Drive ไฟล์ใหญ่ > 4 MB แบบอัตโนมัติ
+- **เฟส 2 (ต่อ):** ย้ายช่องอัปหมวดอื่นมาใช้ตัวกลางทีละหมวด · ตัวอัปกลางส่ง Drive ได้ (ต้องรู้โฟลเดอร์ของงาน + ไฟล์ > 4 MB แบบ chunked)
 - **เฟส 3:** ย้ายไฟล์เก่าที่อยู่ผิดที่ (บิลซัพพลายเออร์/ใบรับของใน R2 → Supabase) แบบกู้คืนได้

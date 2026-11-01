@@ -89,11 +89,31 @@ export const STORAGE_WIRING: Record<string, StorageProvider | "rule"> = {
   task_attachments: "r2",        // /api/admin/upload → /api/creative-tasks/[id]/attachments (+ ก๊อปขึ้น Drive ถ้าเปิดโฟลเดอร์)
   board_images: "r2",            // /api/canvas-sketch
   record_files: "supabase",      // bucket record-files (/api/record-files)
-  supplier_bills: "r2",          // หน้ารับของ /api/purchasing/receive (bill_doc_r2_key) — กฎแนะนำ Supabase
+  supplier_bills: "rule",        // FileInput category="supplier_bills" → ตัวอัปกลาง lib/file-upload (เฟส 2)
   finance_private: "supabase",   // bucket invoices + payment-slips
   customer_print_uploads: "supabase", // bucket print-uploads
   customer_review_return: "r2",  // lib/website-reviews-server + website-returns-server
 };
+
+/**
+ * สิทธิ์ของหมวดที่ใช้ตัวอัปกลาง (lib/file-upload) — อัปได้ / เปิดดูไฟล์ส่วนตัว (Supabase) ได้
+ * หมวดที่ไม่อยู่ในนี้ = ตัวอัปกลางไม่รับ (กันเปิดช่องอัปโดยไม่ได้ตั้งสิทธิ์)
+ * ตั้งให้ตรงกับสิทธิ์ของหน้าที่ใช้ช่องอัปนั้น (เช่น บิล = ดูใบรับสินค้า products.view / บันทึกรับของ products.edit)
+ */
+export const STORAGE_CATEGORY_PERMISSIONS: Record<string, { upload: string; view: string }> = {
+  supplier_bills: { upload: "products.edit", view: "products.view" },
+};
+
+/** ไฟล์นี้เข้าหมวดได้ไหม (ชนิด + ขนาด) — ได้ = null · ไม่ได้ = ข้อความภาษาคน */
+export function fileRuleProblem(rule: Pick<StorageRule, "file_types" | "max_bytes">, file: { name: string; size: number }, fallbackMaxBytes: number): string | null {
+  const ext = (/\.([a-z0-9]+)$/i.exec(file.name)?.[1] ?? "").toLowerCase();
+  if (rule.file_types.length && !rule.file_types.includes(ext))
+    return `ไฟล์ชนิดนี้ (${ext ? ext.toUpperCase() : "ไม่มีนามสกุล"}) ใช้ในช่องนี้ไม่ได้ — รับเฉพาะ ${fileTypesLabel(rule.file_types)}`;
+  const max = rule.max_bytes ?? fallbackMaxBytes;
+  if (file.size > max) return `ไฟล์ใหญ่เกิน ${maxBytesLabel(max)} (ไฟล์นี้ ${maxBytesLabel(file.size)}) — ย่อรูปหรือลดขนาดไฟล์ก่อน`;
+  if (file.size <= 0) return "ไฟล์ว่าง อัปไม่ได้";
+  return null;
+}
 
 export type RuleStatus =
   | { kind: "follows" }                                 // ทางอัปอ่านกฎแล้ว

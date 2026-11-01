@@ -79,6 +79,7 @@ export function StorageRulesManager() {
   };
 
   const mismatchCount = useMemo(() => rules.filter((r) => ruleStatus(r).kind === "mismatch").length, [rules]);
+  const followsCount = useMemo(() => rules.filter((r) => ruleStatus(r).kind === "follows").length, [rules]);
 
   const columns: MiniColumn<StorageRule>[] = [
     {
@@ -127,8 +128,10 @@ export function StorageRulesManager() {
       <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-900 flex gap-2.5">
         <Icon name="info" className="mt-0.5 shrink-0" />
         <div className="space-y-0.5">
-          <p className="font-medium">{t("ตอนนี้กฎยังไม่บังคับช่องอัปไฟล์", "Rules don't control upload slots yet")}</p>
-          <p className="text-[12px] text-amber-800">{t("ช่องอัปแต่ละจุดยังส่งไฟล์ตามที่ตั้งไว้ในโค้ด คอลัมน์ “ตอนนี้ระบบส่งไปที่” บอกตามจริง · เปลี่ยนกฎแล้วไฟล์เดิมไม่ย้าย และจะมีผลกับไฟล์ใหม่เมื่อเชื่อมช่องอัปกับกฎ (เฟส 2)", "Each upload slot still sends files where the code says — the “Where uploads go now” column shows the truth · changing a rule never moves existing files; it applies to new files once the slot is connected (phase 2)")}</p>
+          <p className="font-medium">{followsCount > 0
+            ? t(`กฎบังคับใช้แล้ว ${followsCount} หมวด — หมวดอื่นยังตั้งไว้ในโค้ด`, `${followsCount} categories follow their rule — the rest are still set in code`)
+            : t("ตอนนี้กฎยังไม่บังคับช่องอัปไฟล์", "Rules don't control upload slots yet")}</p>
+          <p className="text-[12px] text-amber-800">{t("หมวดที่ขึ้น “ทำตามกฎนี้อัตโนมัติ” = เปลี่ยนกฎแล้วไฟล์ใหม่ไปที่ใหม่ทันที · หมวดอื่นช่องอัปยังส่งไฟล์ตามที่ตั้งไว้ในโค้ด (คอลัมน์ “ตอนนี้ระบบส่งไปที่” บอกตามจริง) · เปลี่ยนกฎแล้วไฟล์เดิมไม่ย้าย", "Categories showing “Follows this rule” switch new files immediately when you change the rule · other slots still send files where the code says (the “Where uploads go now” column shows the truth) · changing a rule never moves existing files")}</p>
           {mismatchCount > 0 && <p className="text-[12px] font-medium">{t(`${mismatchCount} หมวดยังไม่ตรงกับกฎ`, `${mismatchCount} categories don't match their rule yet`)}</p>}
         </div>
       </div>
@@ -239,7 +242,9 @@ export function StorageRuleEditModal({ rule, onClose, onSaved }: { rule: Storage
           <input type="number" min={0} step="0.1" inputMode="decimal" value={maxMb} onChange={(e) => setMaxMb(e.target.value)}
             placeholder={t("เว้นว่าง = ไม่กำหนด", "Leave blank = no limit")}
             className="w-40 h-9 px-3 text-sm border border-slate-200 rounded-lg" />
-          <p className="mt-1 text-[11px] text-slate-400">{t("ใช้ตรวจตอนอัปเมื่อเชื่อมช่องอัปกับกฎแล้ว (เฟส 2)", "Checked at upload once slots are connected to rules (phase 2)")}</p>
+          <p className="mt-1 text-[11px] text-slate-400">{status.kind === "follows"
+            ? t("ใช้ตรวจตอนอัปแล้ว · ถ้าเก็บที่ R2 ช่องอัปรับได้ไม่เกิน 4 MB", "Checked at upload · uploads to R2 are capped at 4 MB")
+            : t("ใช้ตรวจตอนอัปเมื่อเชื่อมช่องอัปกับกฎแล้ว", "Checked at upload once the slot is connected to rules")}</p>
         </div>
 
         {checked.error && <p className="text-[12px] text-rose-600">{checked.error}</p>}
@@ -247,7 +252,9 @@ export function StorageRuleEditModal({ rule, onClose, onSaved }: { rule: Storage
         {provider !== rule.provider && (
           <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[12px] text-amber-900 space-y-0.5">
             <p>{t("ไฟล์เดิมไม่ย้าย — มีผลกับไฟล์ใหม่เท่านั้น", "Existing files are not moved — this applies to new files only")}</p>
-            {status.kind === "mismatch" && <p>{t("ช่องอัปของหมวดนี้ยังส่งไป", "This category's upload slot still sends to")} <b>{STORAGE_PROVIDERS[status.actual].label}</b> {t("จนกว่าจะเชื่อมกับกฎ (เฟส 2)", "until it is connected to the rule (phase 2)")}</p>}
+            {status.kind === "follows" && <p>{t("ช่องอัปหมวดนี้ทำตามกฎแล้ว — ไฟล์ใหม่ไปที่", "This category's upload slot follows the rule — new files go to")} <b>{STORAGE_PROVIDERS[provider].label}</b> {t("ทันทีที่บันทึก", "as soon as you save")}</p>}
+            {status.kind === "follows" && provider === "r2" && <p>{t("R2: ลิงก์ไฟล์เปิดได้โดยไม่ต้อง login และรับไฟล์ได้ไม่เกิน 4 MB", "R2: file links open without login and uploads are capped at 4 MB")}</p>}
+            {status.kind === "mismatch" && <p>{t("ช่องอัปของหมวดนี้ยังส่งไป", "This category's upload slot still sends to")} <b>{STORAGE_PROVIDERS[status.actual].label}</b> {t("จนกว่าจะเชื่อมกับกฎ", "until it is connected to the rule")}</p>}
           </div>
         )}
 

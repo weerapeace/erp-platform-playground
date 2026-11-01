@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { FileInput } from "@/components/file-input";
 import { HoverPreview } from "@/components/hover-image";
+import { useFileRefUrls } from "@/components/file-ref";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
@@ -24,7 +25,6 @@ export type VoucherLineLite = { id: string; code: string; item_name: string; qty
 
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const stripCode = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
-const imgUrl = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
 const inp = "h-8 px-1.5 text-xs border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
 
 export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { voucherId: string; lines: VoucherLineLite[]; readonly: boolean; onApplied: () => void | Promise<void> }) {
@@ -36,6 +36,9 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
   const [draft, setDraft] = useState<Record<string, { tracking_no: string; bill_date: string; lines: DeliveryBillLine[] }>>({});
   const [mapFor, setMapFor] = useState<{ billId: string; idx: number } | null>(null);
   const [open, setOpen] = useState(true);
+  // รูปบิลเป็น "ที่อยู่ไฟล์กลาง" — บิลใหม่อยู่ Supabase ส่วนตัว ต้องขอลิงก์ชั่วคราว (components/file-ref)
+  const fileUrls = useFileRefUrls([...cands.map((c) => c.r2_key), ...bills.map((b) => b.r2_key)]);
+  const imgUrl = (ref: string) => fileUrls[ref] ?? undefined;
 
   const load = useCallback(async () => {
     try {
@@ -102,7 +105,7 @@ export function DeliveryBillPanel({ voucherId, lines, readonly, onApplied }: { v
         <div className="mt-3 space-y-4">
           {!readonly && (
             <div className="flex items-end gap-3 flex-wrap">
-              <div className="w-64"><FileInput label="📷 รูปใบส่งของ (jpg/png)" value={uploadKey} onChange={setUploadKey} folder="delivery-bills" /></div>
+              <div className="w-64"><FileInput label="📷 รูปใบส่งของ (jpg/png)" value={uploadKey} onChange={setUploadKey} folder="delivery-bills" category="supplier_bills" /></div>
               <button onClick={() => uploadKey && void parse(uploadKey)} disabled={!uploadKey || busy === "parse"} className="h-9 px-4 text-sm font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40">{busy === "parse" ? "🔍 กำลังอ่าน…" : "🔍 อ่านด้วย AI"}</button>
               {cands.filter((c) => !bills.some((b) => b.r2_key === c.r2_key)).map((c) => (
                 <button key={`${c.gr_id}-${c.kind}`} onClick={() => void parse(c.r2_key, c.gr_id)} disabled={busy === "parse"} title="ไฟล์ที่แนบไว้ตอนรับของ — ให้ AI อ่านได้เลย ไม่ต้องอัปโหลดซ้ำ"

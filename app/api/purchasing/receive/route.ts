@@ -23,6 +23,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { pushLineText } from "@/lib/board-notify";
+import { isRefForCategory } from "@/lib/file-ref";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -60,6 +61,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ยกเว้นหน้าสแกน QR (source=scan) — เจ้าของตัดสิน 2026-10-25 ให้รับหน้างานได้โดยไม่ต้องแนบ · และรับย้อนหลัง (backfill) ด้านบน
   if (body.source !== "scan" && !backfill && (!body.receipt_doc_r2_key || !body.bill_doc_r2_key)) {
     return NextResponse.json({ error: "ต้องแนบ ใบรับของ + บิล ให้ครบก่อนบันทึก" }, { status: 400 });
+  }
+  // ไฟล์แนบ = ที่อยู่ไฟล์กลาง (R2 key เดิม หรือไฟล์ Supabase ของหมวดบิล — กฎที่เก็บไฟล์ supplier_bills)
+  for (const k of ["receipt_doc_r2_key", "bill_doc_r2_key"] as const) {
+    if (body[k] && !isRefForCategory(body[k], "supplier_bills")) return NextResponse.json({ error: "ไฟล์แนบไม่ถูกต้อง — แนบไฟล์ใหม่อีกครั้ง" }, { status: 400 });
   }
 
   const poId = body.po_id;

@@ -181,8 +181,8 @@ export function ReceiveLineModal({ line, onClose, onSaved }: { line: ReceiveLine
       <div className="mt-3">
         <span className="block text-xs font-medium text-slate-600 mb-1">📎 เอกสารแนบ (บังคับ) <span className="font-normal text-slate-400">— รูปถ่ายหรือ PDF</span></span>
         <div className="grid grid-cols-2 gap-3">
-          <FileInput label="📄 ใบรับของ / ใบส่งของขนส่ง" value={receiptKey} onChange={(k) => { setReceiptKey(k); setErr(null); }} folder="goods-receipts" required hasError={!receiptKey && !!err} />
-          <FileInput label="🧾 บิล / ใบเสร็จ" value={billKey} onChange={(k) => { setBillKey(k); setErr(null); }} folder="goods-receipts" required hasError={!billKey && !!err} />
+          <FileInput label="📄 ใบรับของ / ใบส่งของขนส่ง" value={receiptKey} onChange={(k) => { setReceiptKey(k); setErr(null); }} folder="goods-receipts" category="supplier_bills" required hasError={!receiptKey && !!err} />
+          <FileInput label="🧾 บิล / ใบเสร็จ" value={billKey} onChange={(k) => { setBillKey(k); setErr(null); }} folder="goods-receipts" category="supplier_bills" required hasError={!billKey && !!err} />
         </div>
       </div>
       {err && <div className="mt-3 text-sm text-rose-600">{err}</div>}

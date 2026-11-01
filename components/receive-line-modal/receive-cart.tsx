@@ -157,8 +157,8 @@ export function ReceiveAttachBox({ cart, compact, invalid }: { cart: ReceiveCart
       <div className={compact ? "text-xs font-medium text-slate-600 mb-1" : "text-sm font-semibold text-slate-700 mb-2"}>📎 เอกสารแนบ (บังคับ) <span className="text-xs font-normal text-slate-400">— รูปถ่ายหรือ PDF</span></div>
       <div className="grid grid-cols-2 gap-3">
         {/* ใบส่งของจากขนส่ง (Delivery Bill) แนบตรงนี้ → ตอนออกใบสำคัญรับ จัดซื้อกด "อ่านด้วย AI" ได้เลย (รหัสขนส่ง EK- + น้ำหนัก/คิวรายกล่อง) */}
-        <FileInput label={compact ? "📄 ใบรับของ / ใบส่งขนส่ง" : "📄 ใบรับของ / ใบส่งของขนส่ง"} value={cart.receiptKey} onChange={(k) => { cart.setReceiptKey(k); cart.setErr(null); }} folder="goods-receipts" required hasError={!cart.receiptKey && showErr} />
-        <FileInput label="🧾 บิล / ใบเสร็จ" value={cart.billKey} onChange={(k) => { cart.setBillKey(k); cart.setErr(null); }} folder="goods-receipts" required hasError={!cart.billKey && showErr} />
+        <FileInput label={compact ? "📄 ใบรับของ / ใบส่งขนส่ง" : "📄 ใบรับของ / ใบส่งของขนส่ง"} value={cart.receiptKey} onChange={(k) => { cart.setReceiptKey(k); cart.setErr(null); }} folder="goods-receipts" category="supplier_bills" required hasError={!cart.receiptKey && showErr} />
+        <FileInput label="🧾 บิล / ใบเสร็จ" value={cart.billKey} onChange={(k) => { cart.setBillKey(k); cart.setErr(null); }} folder="goods-receipts" category="supplier_bills" required hasError={!cart.billKey && showErr} />
       </div>
     </div>
   );

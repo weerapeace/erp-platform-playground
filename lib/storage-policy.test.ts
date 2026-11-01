@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isRuleLocked, ruleStatus, validateRulePatch, maxBytesLabel, fileTypesLabel, STORAGE_WIRING, type StorageRule } from "./storage-policy";
+import { isRuleLocked, ruleStatus, validateRulePatch, maxBytesLabel, fileTypesLabel, fileRuleProblem, STORAGE_WIRING, STORAGE_CATEGORY_PERMISSIONS, type StorageRule } from "./storage-policy";
 
 const rule = (over: Partial<StorageRule> = {}): StorageRule => ({
   id: "x", rule_key: "record_files", label: "ไฟล์แนบ", label_en: null, description: null, file_types: [],
@@ -44,9 +44,21 @@ describe("storage-policy · กฎที่เก็บไฟล์กลาง"
     expect(ruleStatus({ rule_key: "zzz", provider: "r2" }, wiring)).toEqual({ kind: "unwired" });
   });
 
-  it("บิลซัพพลายเออร์ตอนนี้ยังลง R2 (กฎแนะนำ Supabase → ต้องโชว์ว่ายังไม่ตรง)", () => {
-    expect(STORAGE_WIRING.supplier_bills).toBe("r2");
-    expect(ruleStatus({ rule_key: "supplier_bills", provider: "supabase" }).kind).toBe("mismatch");
+  it("บิลซัพพลายเออร์ทำตามกฎแล้ว (เฟส 2) + มีสิทธิ์อัป/ดูของหมวด", () => {
+    expect(STORAGE_WIRING.supplier_bills).toBe("rule");
+    expect(ruleStatus({ rule_key: "supplier_bills", provider: "supabase" }).kind).toBe("follows");
+    expect(STORAGE_CATEGORY_PERMISSIONS.supplier_bills).toEqual({ upload: "products.edit", view: "products.view" });
+  });
+
+  it("ตรวจไฟล์ตามกฎ: ชนิด + ขนาด (ไม่ตั้งขนาด = ใช้ค่าสำรอง)", () => {
+    const r = { file_types: ["jpg", "pdf"], max_bytes: 1024 };
+    expect(fileRuleProblem(r, { name: "a.JPG", size: 10 }, 99)).toBeNull();
+    expect(fileRuleProblem(r, { name: "a.gif", size: 10 }, 99)).toContain("GIF");
+    expect(fileRuleProblem(r, { name: "noext", size: 10 }, 99)).toContain("ไม่มีนามสกุล");
+    expect(fileRuleProblem(r, { name: "a.pdf", size: 2048 }, 99)).toContain("ใหญ่เกิน");
+    expect(fileRuleProblem({ file_types: [], max_bytes: null }, { name: "x.zip", size: 50 }, 99)).toBeNull();
+    expect(fileRuleProblem({ file_types: [], max_bytes: null }, { name: "x.zip", size: 100 }, 99)).toContain("ใหญ่เกิน");
+    expect(fileRuleProblem({ file_types: [], max_bytes: null }, { name: "x.zip", size: 0 }, 99)).toContain("ว่าง");
   });
 
   it("ป้ายอ่านง่าย", () => {

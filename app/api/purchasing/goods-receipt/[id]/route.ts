@@ -8,6 +8,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { SKU_COVER_SELECT, resolveSkuCover, coverUrl } from "@/lib/sku-cover";
+import { isRefForCategory } from "@/lib/file-ref";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -97,6 +98,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const { id } = await params;
   let body: EditBody;
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  // ไฟล์แนบ = ที่อยู่ไฟล์กลาง (R2 key เดิม หรือไฟล์ Supabase ของหมวดบิล — กฎที่เก็บไฟล์ supplier_bills)
+  for (const k of ["receipt_doc_r2_key", "bill_doc_r2_key"] as const) {
+    const v = typeof body[k] === "string" ? String(body[k]).trim() : "";
+    if (v && !isRefForCategory(v, "supplier_bills")) return NextResponse.json({ error: "ไฟล์แนบไม่ถูกต้อง — แนบไฟล์ใหม่อีกครั้ง" }, { status: 400 });
+  }
   return editGoodsReceipt(request, id, body, {});
 }
 
