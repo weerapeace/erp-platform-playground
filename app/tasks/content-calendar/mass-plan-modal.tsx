@@ -3,17 +3,21 @@
  * วางแผนแบบ Mass — ป๊อปในปฏิทินคอนเทนต์ (ปุ่ม "วางแผนแบบ Mass" ข้าง "+ สร้างคอนเทนต์")
  *   1) ตั้งโจทย์: แบรนด์ · ช่วงวัน · แพลตฟอร์ม + ความถี่ต่อแพลตฟอร์ม (ครั้ง/สัปดาห์ หรือ /เดือน · เริ่มที่ไม่ติ๊ก) · แนว · สินค้า/แคมเปญ
  *      การ์ดรู้จักแบรนด์ (ของกลาง ../content/brand-profile-modal) + เทรนด์: ให้ AI ข้างนอกค้นเว็บเอง (ติ๊ก) และ/หรือ เทรนด์จากบอร์ด 🔥
+ *      สินค้า: เลือกรุ่นจาก SKU การตลาด (ป๊อปกลาง MarketingSkuPickerModal) → AI ใส่ "รหัสสินค้า" ต่อโพสต์ → ลงปฏิทินแล้วผูกสินค้าให้
+ *      บอร์ดเทรนด์: ติ๊กเลือกเองได้ (ค่าตั้งต้น = มาแรง/กำลังมา ที่ยังไม่หมดอายุในช่วงนี้)
  *      จำชุดความถี่เป็นค่าประจำแบรนด์ได้ = เป้ารายเดือน "ทุกประเภท" (ตารางเดียวกับ 🎯 เป้าเดือนในแท็บวางแผน)
  *   2) ร่าง 2 ทาง: ก๊อป prompt ไปถาม AI เอง (ฟรี) แล้ววางคำตอบ/อัปไฟล์  หรือ  ให้ AI ในระบบร่างเลย (มีค่าใช้จ่ายเล็กน้อย)
  *   3) ตรวจ (ใช้ร่วมกันทั้งสองทาง) → ลงปฏิทินเป็นร่าง · ย้อนทั้งชุดได้ทันทีหลังลง
  * ตัวคิดทั้งหมดอยู่ที่ lib/marketing/mass-plan · บันทึกผ่าน /api/marketing/content-plan/mass · ไม่ทับคอนเทนต์เดิมเด็ดขาด
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { PlatformIcon } from "@/components/platform-icon";
 import { StepInput } from "@/components/step-input";
+import { MarketingSkuPickerModal, type SkuPickerCatalog } from "@/components/marketing-sku-picker-modal";
+import { labelName } from "@/lib/marketing/sku-list";
 import { copyText } from "@/components/copy-button";
 import { usePushToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
@@ -25,8 +29,9 @@ import { dateKeyOf } from "@/lib/marketing/content-plan";
 import {
   addDaysKey, briefFromCaptions, buildMassPlanPrompt, checkPost, countForRange, daysInRange, freqFromMonthly, freqHint, groupMassPlan, matchPlatform,
   freqLabel, monthRange, monthlyFromFreq, normTime, normalizeHashtagText, parseMassPlanText, platformRule, postLevel, productionRange, rowsFromGrid, specialDaysBetween,
-  activeTrends, massPostBrief, thaiDateLabel, trendLabel, weekdayOf, FREQ_MAX, MASS_AI_MAX_ROWS, MASS_MAX_POSTS,
-  type TrendRowLike,
+  activeTrends, massPostBrief, selectableTrends, thaiDateLabel, toMassTrend, trendInRange, trendLabel, weekdayOf,
+  FREQ_MAX, MASS_AI_MAX_ROWS, MASS_MAX_POSTS, MASS_MAX_PRODUCTS, MASS_MAX_TRENDS,
+  type MassProduct, type TrendRowLike,
   type MassFreq, type MassFreqUnit, type MassIssue, type MassPlanBrief, type MassPlatform, type MassPost, type MassRawRow,
 } from "@/lib/marketing/mass-plan";
 import {
@@ -71,6 +76,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
   const canAi = can("ai.caption" as never);
   const canDelete = can("tasks.delete" as never);
   const canRemember = can("marketing.label.manage" as never);   // สิทธิ์เดียวกับแก้ 🎯 เป้าเดือน
+  const canPickSku = can("marketing.sku.view" as never);         // ป๊อปเลือกรุ่นอ่านจาก /api/marketing/skus
   const today = todayBangkok();
 
   // ── ค่าตั้งต้นที่โหลดครั้งเดียวต่อการเปิด ──
@@ -120,6 +126,29 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
   const [card, setCard] = useState<{ profile: BrandProfile; highlights: string[] } | null>(null);
   const [cardOpen, setCardOpen] = useState(false);
   const [searchTrends, setSearchTrends] = useState(true);
+  // บอร์ดเทรนด์ที่ใช้: null = ยังไม่แตะ (ใช้ค่าตั้งต้นตามช่วงวัน) · Set = ติ๊กเอง
+  const [trendSel, setTrendSel] = useState<Set<string> | null>(null);
+  // สินค้าที่จะดันช่วงนี้ (เลือกจาก SKU การตลาด)
+  const [products, setProducts] = useState<MassProduct[]>([]);
+  const [skuOpen, setSkuOpen] = useState(false);
+  const catalogRef = useRef<SkuPickerCatalog | null>(null);
+  const loadCatalog = useCallback(async (): Promise<SkuPickerCatalog> => {
+    let j: { data?: SkuPickerCatalog; error?: string };
+    try { j = await (await apiFetch("/api/marketing/skus")).json(); }
+    catch { throw new Error(t("โหลดรายการรุ่นไม่สำเร็จ กรุณาลองใหม่", "Couldn't load the models. Please try again.")); }
+    if (j.error || !j.data) throw new Error(j.error || t("โหลดรายการรุ่นไม่สำเร็จ กรุณาลองใหม่", "Couldn't load the models. Please try again."));
+    catalogRef.current = j.data;
+    return j.data;
+  }, [t]);
+  const addProducts = async (ids: string[]) => {
+    const cat = catalogRef.current;
+    const labelOf = (id: string | null) => { const l = cat?.labels.find((x) => x.id === id); return l ? labelName(l) : null; };
+    const picked = ids.map((id) => cat?.items.find((it) => it.parent_sku_id === id)).filter((it): it is NonNullable<typeof it> => !!it?.code)
+      .map((it) => ({ id: it.parent_sku_id, code: it.code, name: it.name, label: labelOf(it.label_id) }));
+    const next = [...products, ...picked.filter((x) => !products.some((y) => y.id === x.id))];
+    if (next.length > MASS_MAX_PRODUCTS) pushToast("warning", t(`เลือกได้ไม่เกิน ${MASS_MAX_PRODUCTS} รุ่นต่อครั้ง — ตัดส่วนเกินออก`, `Max ${MASS_MAX_PRODUCTS} models — extra ones dropped`));
+    setProducts(next.slice(0, MASS_MAX_PRODUCTS));
+  };
   const [selPillars, setSelPillars] = useState<Set<string>>(new Set());
   const [campaign, setCampaign] = useState("");
   const [extra, setExtra] = useState("");
@@ -168,12 +197,27 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
     .filter((d) => recTimes[String(d)]?.length)
     .map((d) => `${WD_TH[d]} ${recTimes[String(d)].map((x) => x.time).join("/")}`).join(" · "), [recTimes]);
   const rangeOk = !!start && !!end && start <= end;
+  const trendOptions = useMemo(() => (rangeOk ? selectableTrends(trendRows, brandId || null, start, end) : []), [trendRows, brandId, start, end, rangeOk]);
+  const defaultTrendIds = useMemo(() => {
+    const auto = new Set(activeTrends(trendRows, brandId || null, start, end).map((x) => x.title));
+    return new Set(trendOptions.filter((r) => auto.has(r.title.trim())).map((r) => r.id as string));
+  }, [trendOptions, trendRows, brandId, start, end]);
+  const selTrendIds = trendSel ?? defaultTrendIds;
+  const chosenTrends = trendOptions.filter((r) => r.id && selTrendIds.has(r.id));
+  const toggleTrend = (id: string) => setTrendSel(() => {
+    const n = new Set(selTrendIds);
+    if (n.has(id)) n.delete(id);
+    else if (n.size >= MASS_MAX_TRENDS) { pushToast("warning", t(`เลือกบอร์ดเทรนด์ได้ไม่เกิน ${MASS_MAX_TRENDS}`, `Max ${MASS_MAX_TRENDS} trends`)); return n; }
+    else n.add(id);
+    return n;
+  });
   const specialDays = useMemo(() => (rangeOk ? specialDaysBetween(start, end) : []), [rangeOk, start, end]);
   const brief: MassPlanBrief = {
     brandName, start, end, freq: Object.fromEntries(chosen.map((p) => [p.code, freqOf(p.code)])), share, platforms: chosen, pillars: pillars.filter((p) => selPillars.has(p.name)).map((p) => p.name),
     campaign, specialDays, recommendedTimes: recTimesText, tone: resolvePrompt(capCfg, brandId || null), extra,
     brandProfile: brandProfileLines(card?.profile, { highlights: card?.highlights }),
-    trends: rangeOk ? activeTrends(trendRows, brandId || null, start, end) : [],
+    trends: chosenTrends.map(toMassTrend),
+    products,
     searchTrends,
   };
   const cardFilled = brandProfileFilled(card?.profile);
@@ -242,6 +286,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
     const g = groupMassPlan(withTags, {
       ...checkCtx, pillars: pillars.map((p) => ({ id: p.id, name: p.name })),
       defaultTime: (d) => recTimes[String(weekdayOf(d))]?.[0]?.time ?? null,
+      products,
     });
     if (!g.posts.length) { setDraftErr(g.errors[0]?.text ?? t("ไม่พบแถวที่อ่านได้ — ตรวจว่าวางทั้งตาราง (มีวันที่ แพลตฟอร์ม หัวข้อ)", "No readable rows — paste the whole table")); return false; }
     setPosts(g.posts); setRowErrors(g.errors); setExpanded(new Set()); setDraftErr(null); setStep("review");
@@ -272,6 +317,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
     try {
       const r = await aiMassPlan({
         brand_id: brandId, start: start < today ? today : start, end, freq: brief.freq, share, platforms: chosen.map((p) => p.code),
+        product_ids: products.map((x) => x.id), trend_ids: chosenTrends.map((x) => x.id as string),
         pillars: brief.pillars, campaign, extra, tone: brief.tone, recommended_times: recTimesText,
       });
       setAiNote({ model: r.model, warnings: r.warnings });
@@ -308,6 +354,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
         return {
           date: p.date, time: normTime(p.time) || "10:00", title: p.title.trim(), pillar_id: p.pillarId,
           brief: massPostBrief(p, labelOf),
+          parent_sku_ids: p.productIds,
           platform_formats: Object.fromEntries(Object.entries(fmt).filter(([k]) => plats.includes(k))),
           captions: p.captions.map((c) => ({ platform: c.platform, caption: c.caption, hashtags: c.hashtags })),
         };
@@ -348,6 +395,7 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
           <input value={p.title} onChange={(e) => updatePost(p.key, { title: e.target.value }, true)} className="h-8 w-full rounded border border-slate-200 px-2 text-sm font-medium" aria-label={t("หัวข้อ", "Title")} />
           <div className="mt-1 text-xs text-slate-500 truncate">
             {p.pillarId ? pillars.find((x) => x.id === p.pillarId)?.name : <span className="text-slate-400">{t("ไม่ระบุแนว", "No pillar")}</span>}
+            {p.productIds.length > 0 && <span className="text-emerald-700"> · {t("สินค้า", "Products")}: {p.productIds.map((id) => products.find((x) => x.id === id)?.code ?? "").filter(Boolean).join(", ")}</span>}
             {p.trend && <span className="text-amber-700"> · <Icon name="hot" /> {p.trend}</span>}
             {briefFromCaptions(p.captions, labelOf) && <span className="text-slate-400"> · {briefFromCaptions(p.captions, labelOf)?.replace(/\n/g, " · ")}</span>}
           </div>
@@ -600,6 +648,24 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
               <textarea value={campaign} onChange={(e) => setCampaign(e.target.value)} rows={2} className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-violet-400 focus:outline-none"
                 placeholder={t("เช่น กระเป๋าหนังรุ่นใหม่ + โปร 11.11 ลด 11% ทั้งร้าน", "e.g. new leather bag + 11.11 sale 11% off")} />
             </label>
+            <div className="-mt-2">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {products.map((x) => (
+                  <span key={x.id} className="inline-flex max-w-full items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 py-0.5 pl-2.5 pr-1 text-xs text-emerald-800" title={x.name}>
+                    <b className="font-medium">{x.code}</b><span className="max-w-[14rem] truncate text-emerald-700">{x.name}</span>
+                    <button type="button" onClick={() => setProducts((l) => l.filter((y) => y.id !== x.id))} aria-label={t("เอาออก", "Remove")} className="flex h-5 w-5 items-center justify-center rounded-full hover:bg-emerald-100">×</button>
+                  </span>
+                ))}
+                {canPickSku ? (
+                  <button type="button" onClick={() => setSkuOpen(true)} disabled={!brandId}
+                    className="h-7 px-2.5 inline-flex items-center gap-1 text-xs text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 disabled:opacity-50">
+                    <Icon name="add" /> {t("เลือกสินค้าจาก SKU การตลาด", "Pick from marketing SKUs")}{products.length ? ` (${products.length}/${MASS_MAX_PRODUCTS})` : ""}
+                  </button>
+                ) : <span className="text-[11px] text-slate-400">{t("เลือกจาก SKU การตลาดได้เมื่อมีสิทธิ์ดูหน้า SKU การตลาด", "Picking from marketing SKUs needs marketing SKU access")}</span>}
+                {products.length > 1 && <button type="button" onClick={() => setProducts([])} className="h-7 px-2 text-xs text-slate-500 hover:text-slate-800">{t("ล้าง", "Clear")}</button>}
+              </div>
+              {products.length > 0 && <p className="mt-1 text-[11px] text-slate-400">{t("AI จะใส่รหัสสินค้าต่อโพสต์ → ลงปฏิทินแล้วระบบผูกสินค้าให้เอง (ตัวแรก = สินค้าหลัก)", "AI tags each post with product codes → products get linked when added")}</p>}
+            </div>
             <label className="block">
               <span className="mb-1 block text-xs text-slate-500">{t("สั่งเพิ่ม (ไม่บังคับ)", "Extra instructions (optional)")}</span>
               <input value={extra} onChange={(e) => setExtra(e.target.value)} className={inputCls} placeholder={t("เช่น เน้นลูกค้าผู้หญิงวัยทำงาน · ห้ามใช้คำว่าถูกที่สุด", "e.g. target working women")} />
@@ -614,11 +680,24 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
                 </span>
               </label>
               <div className="text-xs text-slate-600">
-                {t("เทรนด์จากบอร์ด (ทีมคัดไว้)", "Board trends")}: {brief.trends?.length
-                  ? brief.trends.map(trendLabel).join(" · ")
-                  : <span className="text-slate-400">{t("ไม่มีเทรนด์ที่ยังไม่หมดอายุในช่วงนี้", "none active in this range")}</span>}
+                {t("บอร์ดเทรนด์ที่ใช้ (ติ๊กเลือกได้ · ใช้ได้ทั้งสองปุ่ม)", "Trend boards to use (both buttons)")}
                 {" "}<a href="/tasks/trends" target="_blank" rel="noreferrer" className="text-violet-700 hover:underline">{t("จัดการบอร์ดเทรนด์", "Manage trends")}</a>
               </div>
+              {trendOptions.length ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {trendOptions.map((r) => {
+                    const on = !!r.id && selTrendIds.has(r.id);
+                    const expired = !trendInRange(r, start, end);
+                    return (
+                      <button key={r.id ?? r.title} type="button" onClick={() => r.id && toggleTrend(r.id)} className={chipCls(on)}>
+                        <input type="checkbox" checked={on} readOnly tabIndex={-1} aria-hidden className="pointer-events-none h-3.5 w-3.5 accent-violet-600" />
+                        {trendLabel(toMassTrend(r))}
+                        {expired && r.end_date && <span className="text-[11px] text-slate-400">{t(`หมดอายุ ${thaiDateLabel(r.end_date)}`, `ended ${r.end_date}`)}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : <div className="text-xs text-slate-400">{t("ยังไม่มีบอร์ดเทรนด์ — เพิ่มที่หน้าเทรนด์แล้วกลับมาเลือกได้", "No trend boards yet")}</div>}
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 space-y-1">
               <div><Icon name="calendar" /> {t("วันสำคัญที่ใส่ให้อัตโนมัติ", "Key dates included")}: {specialDays.length ? specialDays.map((d) => `${thaiDateLabel(d.date)} ${d.label}`).join(" · ") : t("ไม่มีในช่วงนี้", "none in range")}</div>
@@ -740,6 +819,8 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
               {result.content_nos.length > 0 && <div className="mt-1 text-xs text-emerald-700">{result.content_nos[0]}{result.content_nos.length > 1 ? ` – ${result.content_nos[result.content_nos.length - 1]}` : ""}</div>}
             </div>
             {result.caption_error && <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800"><Icon name="warning" /> {result.caption_error}</div>}
+            {result.product_error && <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800"><Icon name="warning" /> {result.product_error}</div>}
+            {!!result.product_links && <div className="text-sm text-slate-600"><Icon name="link" /> {t(`ผูกสินค้าให้แล้ว ${result.product_links} รายการ`, `${result.product_links} product links added`)}</div>}
             {result.skipped.length > 0 && (
               <div className="rounded-lg border border-slate-200 px-3 py-2 text-sm">
                 <div className="font-medium text-slate-700">{t(`ข้าม ${result.skipped.length} โพสต์`, `${result.skipped.length} skipped`)}</div>
@@ -749,6 +830,16 @@ export function MassPlanModal({ open, onClose, brands, platforms, pset, items, d
           </div>
         )}
       </ERPModal>
+      {skuOpen && (
+        <MarketingSkuPickerModal open onClose={() => setSkuOpen(false)}
+          title={t("เลือกสินค้าที่จะดันช่วงนี้", "Pick products to push")}
+          description={t("ติ๊กได้หลายรุ่น (จำข้ามแท็บ/ข้ามหน้า) แล้วกดยืนยันทีเดียว · AI จะวางโพสต์ให้ครอบคลุมรุ่นที่เลือก", "Tick models, then confirm once · the AI spreads posts across them")}
+          load={loadCatalog} takenIds={products.map((x) => x.id)} startBrandId={brandId || null}
+          taken={{ badge: t("เลือกแล้ว", "Picked"), short: t("เลือกแล้ว", "Picked"), hide: t("ซ่อนที่เลือกแล้ว", "Hide picked"), row: t("✓ เลือกแล้ว", "✓ Picked") }}
+          warn={{ label: /out\s*of\s*stock/i, note: t("รุ่นนี้ติดป้าย Out Of Stock — ยังเลือกได้ แต่อาจไม่ควรดัน", "Marked Out Of Stock") }}
+          confirmText={(n) => (n ? t(`ใช้ ${n} รุ่นนี้`, `Use ${n} models`) : t("เลือกรุ่น", "Pick models"))}
+          onConfirm={addProducts} tabPrefKey="mass_plan_sku_tab" colsPrefKey="mass-plan-sku" showFullPageLink={false} />
+      )}
       {cardOpen && brandId && (
         <BrandProfileModal brandId={brandId} brandName={brandName} onClose={() => setCardOpen(false)}
           onSaved={(p) => setCard((c) => ({ profile: p, highlights: c?.highlights ?? [] }))} />

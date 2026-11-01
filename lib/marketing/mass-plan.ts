@@ -151,23 +151,38 @@ export type MassPlanBrief = {
   trends?: MassTrend[];
   /** สั่งให้ AI ข้างนอก (ChatGPT/Gemini) ค้นเว็บหาเทรนด์ล่าสุดก่อนวางแผน — ใช้กับ prompt ที่ก๊อปไปถามเท่านั้น */
   searchTrends?: boolean;
+  /** รุ่นที่เลือกจาก SKU การตลาด — AI ใส่ "รหัสสินค้า" ต่อโพสต์ แล้วระบบผูกสินค้าให้ตอนลงปฏิทิน */
+  products?: MassProduct[];
 };
+
+/** รุ่น (Parent SKU) ที่จะดันช่วงนี้ — id ใช้ผูกคอนเทนต์ · code ให้ AI อ้างในตาราง */
+export type MassProduct = { id: string; code: string; name: string; label?: string | null; intro?: string | null };
+export const MASS_MAX_PRODUCTS = 30;
 
 // ── เทรนด์จากบอร์ด 🔥 เทรนด์ (erp_creative_trends) ──
 export type MassTrend = { title: string; summary: string; heat: string; url: string | null };
 export type TrendRowLike = {
+  id?: string;
   title: string; summary?: string | null; heat?: string | null; brand_id?: string | null; source_url?: string | null;
   start_date?: string | null; end_date?: string | null; is_active?: boolean | null;
 };
-const HEAT_TH: Record<string, string> = { hot: "มาแรงตอนนี้", rising: "กำลังมา" };
-/** เทรนด์ที่ใช้กับแผนนี้ได้ = เปิดอยู่ · มาแรง/กำลังมา · ของแบรนด์นี้หรือทุกแบรนด์ · ช่วงวันทับกับแผน (ไม่มีวันหมด = ใช้ได้) */
-export function activeTrends(rows: TrendRowLike[], brandId: string | null, start: string, end: string, limit = 8): MassTrend[] {
-  return rows
-    .filter((r) => r.is_active !== false && !!HEAT_TH[r.heat ?? ""] && (!r.brand_id || r.brand_id === brandId)
-      && (!r.end_date || r.end_date >= start) && (!r.start_date || r.start_date <= end) && r.title?.trim())
-    .sort((a, b) => (a.heat === b.heat ? 0 : a.heat === "hot" ? -1 : 1))
+const HEAT_TH: Record<string, string> = { hot: "มาแรงตอนนี้", rising: "กำลังมา", cooling: "เริ่มตกแล้ว" };
+export const MASS_MAX_TRENDS = 8;
+export const toMassTrend = (r: TrendRowLike): MassTrend =>
+  ({ title: r.title.trim(), summary: (r.summary ?? "").replace(/\s*\n\s*/g, " · ").trim().slice(0, 300), heat: r.heat ?? "rising", url: r.source_url?.trim() || null });
+/** ช่วงวันของเทรนด์ทับกับแผนไหม (ไม่มีวันเริ่ม/หมด = ทับ) */
+export const trendInRange = (r: TrendRowLike, start: string, end: string) => (!r.end_date || r.end_date >= start) && (!r.start_date || r.start_date <= end);
+/** บอร์ดเทรนด์ที่เลือกได้ในป๊อป = เปิดอยู่ · ของแบรนด์นี้หรือทุกแบรนด์ · เรียง: ยังไม่หมดอายุก่อน → มาแรง → กำลังมา → อื่น ๆ */
+export function selectableTrends<T extends TrendRowLike>(rows: T[], brandId: string | null, start: string, end: string): T[] {
+  const rank = (r: TrendRowLike) => (trendInRange(r, start, end) ? 0 : 10) + (r.heat === "hot" ? 0 : r.heat === "rising" ? 1 : 2);
+  return rows.filter((r) => r.is_active !== false && (!r.brand_id || r.brand_id === brandId) && r.title?.trim()).sort((a, b) => rank(a) - rank(b));
+}
+/** เทรนด์ที่ใช้กับแผนนี้ได้ (ค่าตั้งต้น) = เปิดอยู่ · มาแรง/กำลังมา · ของแบรนด์นี้หรือทุกแบรนด์ · ช่วงวันทับกับแผน (ไม่มีวันหมด = ใช้ได้) */
+export function activeTrends(rows: TrendRowLike[], brandId: string | null, start: string, end: string, limit = MASS_MAX_TRENDS): MassTrend[] {
+  return selectableTrends(rows, brandId, start, end)
+    .filter((r) => (r.heat === "hot" || r.heat === "rising") && trendInRange(r, start, end))
     .slice(0, limit)
-    .map((r) => ({ title: r.title.trim(), summary: (r.summary ?? "").replace(/\s*\n\s*/g, " · ").trim().slice(0, 300), heat: r.heat ?? "rising", url: r.source_url?.trim() || null }));
+    .map(toMassTrend);
 }
 export const trendLabel = (t: MassTrend) => `${t.title} (${HEAT_TH[t.heat] ?? t.heat})`;
 
@@ -191,8 +206,12 @@ export function buildMassPlanContext(b: MassPlanBrief, only?: MassPlatform[]): s
         : "- เรื่องเดียวกันลงหลายแพลตฟอร์มได้ (ทีมทำรูป/คลิปชุดเดียวใช้หลายที่) · แพลตฟอร์มที่ลงบ่อยกว่าค่อยเสริมเรื่องเฉพาะของตัวเอง"]
       : []),
     `แนวคอนเทนต์ที่ใช้ได้: ${b.pillars.length ? b.pillars.join(", ") : "เลือกเองตามความเหมาะสม"}`,
-    `สินค้า/แคมเปญช่วงนี้: ${b.campaign.trim() || "ไม่ระบุ — เน้นสินค้าเด่นของแบรนด์"}`,
+    `สินค้า/แคมเปญช่วงนี้: ${b.campaign.trim() || (b.products?.length ? "ตามรายการสินค้าด้านล่าง" : "ไม่ระบุ — เน้นสินค้าเด่นของแบรนด์")}`,
   ];
+  if (b.products?.length) {
+    lines.push("สินค้าที่จะดันช่วงนี้ (ทีมเลือกจาก SKU การตลาด — กระจายให้ทั่ว ทุกโพสต์ควรพูดถึงอย่างน้อย 1 ตัว):",
+      ...b.products.map((x) => `- รหัส ${x.code}: ${x.name}${x.label ? ` · ${x.label}` : ""}${x.intro ? ` · ${x.intro}` : ""}`));
+  }
   if (b.specialDays.length) lines.push(`วันสำคัญในช่วงนี้ (วางโพสต์ให้รับกัน): ${b.specialDays.map((d) => `${thaiDateLabel(d.date)} ${d.label}`).join(" · ")}`);
   if (b.recommendedTimes?.trim()) lines.push(`เวลาโพสต์ที่ใช้ประจำ: ${b.recommendedTimes.trim()}`);
   if (b.brandProfile?.length) lines.push("", ...b.brandProfile);
@@ -210,7 +229,7 @@ export function buildMassPlanContext(b: MassPlanBrief, only?: MassPlatform[]): s
 /** มีคอลัมน์ "เทรนด์ที่ใช้" ไหม (ให้ค้นเทรนด์ หรือมีเทรนด์จากบอร์ด) */
 export const usesTrends = (b: MassPlanBrief) => !!b.searchTrends || !!b.trends?.length;
 export function massPlanColumns(b: MassPlanBrief): string[] {
-  return usesTrends(b) ? [...MASS_PLAN_COLUMNS, "เทรนด์ที่ใช้"] : [...MASS_PLAN_COLUMNS];
+  return [...MASS_PLAN_COLUMNS, ...(b.products?.length ? ["รหัสสินค้า"] : []), ...(usesTrends(b) ? ["เทรนด์ที่ใช้"] : [])];
 }
 
 /** prompt สำเร็จรูปให้ก๊อปไปถาม ChatGPT / Claude / Gemini — ตอบเป็นตารางที่วางกลับเข้าระบบได้ */
@@ -235,14 +254,15 @@ export function buildMassPlanPrompt(b: MassPlanBrief, only?: MassPlatform[]): st
     `- แคปชั่นเขียนในบรรทัดเดียว ถ้าต้องการขึ้นบรรทัดใหม่ให้ใช้ " ${LINE_BREAK_MARK} " คั่น`,
     "- แฮชแท็กคั่นด้วยช่องว่าง · แพลตฟอร์มที่ไม่ใช้แคปชั่นให้เว้นช่องแคปชั่น/แฮชแท็กว่าง แต่ใส่ไอเดียรูป",
     ...(plats.length > 1 && b.share !== false ? ['- เรื่องเดียวกันที่ลงหลายแพลตฟอร์มในวัน-เวลาเดียวกัน ให้ใช้ "หัวข้อ" เดียวกันเป๊ะ (ระบบจะรวมเป็นโพสต์เดียว)'] : []),
+    ...(b.products?.length ? ["- รหัสสินค้า = รหัสจากรายการสินค้าด้านบนที่โพสต์นั้นพูดถึง (หลายตัวคั่นด้วย , · ไม่เกี่ยวกับสินค้าตัวไหน = เว้นว่าง) · ห้ามแต่งรหัสเอง"] : []),
     ...(usesTrends(b) ? ["- เทรนด์ที่ใช้ = ชื่อเทรนด์ (+ ลิงก์ที่มา ถ้ามี) · ใส่เฉพาะโพสต์ที่ใช้เทรนด์จริง ที่เหลือเว้นว่าง"] : []),
   ].join("\n");
 }
 
 // ═══════════════ อ่านคำตอบที่วางกลับมา ═══════════════
 
-export type MassRawRow = { line: number; date: string; time: string; platform: string; pillar: string; title: string; caption: string; hashtags: string; idea: string; trend?: string };
-const FIELDS = ["date", "time", "platform", "pillar", "title", "caption", "hashtags", "idea", "trend"] as const;
+export type MassRawRow = { line: number; date: string; time: string; platform: string; pillar: string; title: string; caption: string; hashtags: string; idea: string; trend?: string; product?: string };
+const FIELDS = ["date", "time", "platform", "pillar", "title", "caption", "hashtags", "idea", "trend", "product"] as const;
 type Field = (typeof FIELDS)[number];
 const HEADER_ALIASES: Record<Field, RegExp> = {
   date: /^(วันที่|วัน|date|วันที่โพสต์)$/i,
@@ -254,6 +274,7 @@ const HEADER_ALIASES: Record<Field, RegExp> = {
   hashtags: /^(แฮชแท็ก|แฮชแท็ค|hashtags?)$/i,
   idea: /^(ไอเดียรูป\/คลิป|ไอเดียรูป|ไอเดียคลิป|ไอเดีย|รูป\/คลิป|idea|visual)$/i,
   trend: /^(เทรนด์|trend)/i,
+  product: /^(รหัสสินค้า|รหัส\s*sku|สินค้า|sku|product)/i,
 };
 const unbold = (s: string) => s.replace(/^\*\*([\s\S]*)\*\*$/, "$1").replace(/^__([\s\S]*)__$/, "$1").trim();
 /** เครื่องหมายขึ้นบรรทัดที่ AI ใช้ (" // " หรือ <br>) → ขึ้นบรรทัดจริง · "https://" ไม่โดนเพราะต้องมีช่องว่างหน้า-หลัง */
@@ -279,6 +300,7 @@ export function rowsFromGrid(grid: string[][]): MassRawRow[] {
         line: i + first, date: get("date"), time: get("time"), platform: get("platform"), pillar: get("pillar"),
         title: restoreBreaks(get("title")).replace(/\n/g, " "), caption: restoreBreaks(get("caption")), hashtags: get("hashtags"), idea: restoreBreaks(get("idea")),
         trend: restoreBreaks(get("trend")).replace(/\n/g, " ").replace(/^[-–—]$/, ""),
+        product: get("product").replace(/^[-–—]$/, ""),
       };
     })
     .filter((r) => r.date || r.title || r.platform || r.caption);
@@ -371,6 +393,8 @@ export type MassPost = {
   pillarId: string | null; pillarRaw: string;
   /** เทรนด์ที่ AI บอกว่าใช้ (ช่อง "เทรนด์ที่ใช้") — ว่าง = ไม่ได้ใช้ */
   trend: string;
+  /** สินค้าที่โพสต์นี้พูดถึง (จับจากรหัสในตาราง เทียบกับรายการที่เลือก) · ตัวแรก = ตัวหลัก */
+  productIds: string[];
   captions: MassCaption[];
   /** ผลตรวจทั้งหมด (ระดับโพสต์ + ระดับแถว) · rowIssues = เฉพาะที่มาจากแถว (ไม่เปลี่ยนเมื่อแก้วัน/หัวข้อ) */
   issues: MassIssue[]; rowIssues: MassIssue[];
@@ -387,7 +411,21 @@ export type GroupContext = {
   existing: ExistingContent[];
   /** เวลาตั้งต้นเมื่อแถวไม่มีเวลา (ตามวันในสัปดาห์) */
   defaultTime?: (dateKey: string) => string | null;
+  /** สินค้าที่เลือกไว้ — ใช้จับรหัสในคอลัมน์ "รหัสสินค้า" */
+  products?: Pick<MassProduct, "id" | "code">[];
 };
+
+/** ข้อความในช่องรหัสสินค้า → id ที่รู้จัก + รหัสที่ไม่รู้จัก (ไม่สนตัวพิมพ์เล็ก/ใหญ่ · ช่องว่าง · ขีด) */
+export function matchProductCodes(text: string, products: Pick<MassProduct, "id" | "code">[]): { ids: string[]; unknown: string[] } {
+  const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, "");
+  const byCode = new Map(products.map((p) => [norm(p.code), p.id]));
+  const ids: string[] = [], unknown: string[] = [];
+  for (const raw of String(text ?? "").split(/[,，、;/\n]+/).map((x) => x.trim()).filter(Boolean)) {
+    const id = byCode.get(norm(raw)) ?? [...byCode.entries()].sort((a, b) => b[0].length - a[0].length).find(([c]) => c && norm(raw).includes(c))?.[1];   // "MGW313 กระเป๋า" = เจอ (รหัสยาวสุดก่อน)
+    if (id) { if (!ids.includes(id)) ids.push(id); } else unknown.push(raw);
+  }
+  return { ids, unknown };
+}
 
 export function groupMassPlan(rows: MassRawRow[], ctx: GroupContext): { posts: MassPost[]; errors: MassIssue[] } {
   const errors: MassIssue[] = [];
@@ -405,7 +443,7 @@ export function groupMassPlan(rows: MassRawRow[], ctx: GroupContext): { posts: M
     let post = byKey.get(key);
     if (!post) {
       const pillarId = matchPillar(r.pillar, ctx.pillars);
-      post = { key, date, time, title, pillarId, pillarRaw: r.pillar, trend: (r.trend ?? "").trim(), captions: [], issues: [], rowIssues: [], include: true, blocked: false, lines: [] };
+      post = { key, date, time, title, pillarId, pillarRaw: r.pillar, trend: (r.trend ?? "").trim(), productIds: [], captions: [], issues: [], rowIssues: [], include: true, blocked: false, lines: [] };
       if (!t) post.rowIssues.push({ level: "info", text: `ไม่มีเวลา — ใช้ ${time}` });
       if (!r.title.trim()) post.rowIssues.push({ level: "info", text: "ไม่มีหัวข้อ — ใช้ต้นแคปชั่นแทน" });
       if (r.pillar.trim() && !pillarId) post.rowIssues.push({ level: "info", text: `ไม่รู้จักแนว "${r.pillar}" — ลงแบบไม่ระบุแนว` });
@@ -413,6 +451,12 @@ export function groupMassPlan(rows: MassRawRow[], ctx: GroupContext): { posts: M
     }
     post.lines.push(r.line);
     if (!post.trend && r.trend?.trim()) post.trend = r.trend.trim();
+    if (r.product?.trim() && ctx.products?.length) {
+      const m = matchProductCodes(r.product, ctx.products);
+      for (const id of m.ids) if (!post.productIds.includes(id)) post.productIds.push(id);
+      const fresh = m.unknown.filter((u) => !post!.rowIssues.some((i) => i.text.includes(`"${u}"`)));
+      if (fresh.length) post.rowIssues.push({ level: "info", text: `ไม่รู้จักรหัสสินค้า ${fresh.map((u) => `"${u}"`).join(", ")} (ไม่อยู่ในรายการที่เลือก) — ไม่ผูก` });
+    }
 
     const code = matchPlatform(r.platform, ctx.platforms);
     if (!code) { post.rowIssues.push({ level: "warn", text: `ไม่มีแพลตฟอร์ม "${r.platform || "(ว่าง)"}" ในระบบ — ตัดออก` }); continue; }
@@ -470,6 +514,8 @@ export function postLevel(p: MassPost): "error" | "warn" | "ok" {
 
 export type MassCreatePost = {
   date: string; time: string; title: string; pillar_id: string | null; brief: string | null;
+  /** Parent SKU ที่ผูก (ตัวแรก = ตัวหลัก) — ไม่มี = ไม่ผูก */
+  parent_sku_ids?: string[];
   platform_formats?: Record<string, string>;
   captions: { platform: string; caption: string; hashtags: string }[];
 };

@@ -3,6 +3,7 @@
  * body { brand_id, posts: MassCreatePost[] }  (ผ่านหน้าตรวจในป๊อป "วางแผนแบบ Mass" ของปฏิทินมาแล้ว)
  *   → สร้างคอนเทนต์สถานะ draft ทีเดียวหลายชิ้น (1 โพสต์ = 1 คอนเทนต์ หลายแพลตฟอร์ม · แคปชั่นแยกแถวต่อแพลตฟอร์ม)
  * กติกา: ไม่แก้/ไม่ทับคอนเทนต์เดิมเด็ดขาด · ข้ามวันที่ผ่านแล้ว (เวลาไทย) · ข้ามหัวข้อ+วันที่ที่แบรนด์นี้มีอยู่แล้ว (กันกดซ้ำ)
+ * สินค้า: parent_sku_ids ต่อโพสต์ (ตัวแรก = ตัวหลัก → คอลัมน์ parent_sku_id + แถว erp_creative_content_products) · id ที่ไม่มีจริง = ตัดทิ้ง
  * สิทธิ์ = tasks.create · audit 1 รายการต่อการลง (เก็บ ids ไว้ตามรอย/ย้อน)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -49,6 +50,15 @@ export async function POST(request: NextRequest) {
     valid.push(p as MassCreatePost);
   }
 
+  // สินค้าที่ผูก: เก็บเฉพาะ id ที่มีอยู่จริง (ไม่เกิน 10 ตัว/โพสต์)
+  const wantedParents = [...new Set(valid.flatMap((p) => (Array.isArray(p.parent_sku_ids) ? p.parent_sku_ids : []).filter(isUuid)))].slice(0, 300);
+  const realParents = new Set<string>();
+  if (wantedParents.length) {
+    const { data: par } = await admin.from("parent_skus_v2").select("id").in("id", wantedParents);
+    for (const r of (par ?? []) as { id: string }[]) realParents.add(r.id);
+  }
+  const parentsOf = (p: MassCreatePost) => [...new Set((Array.isArray(p.parent_sku_ids) ? p.parent_sku_ids : []).filter((id) => realParents.has(id)))].slice(0, 10);
+
   // ของเดิมของแบรนด์ในช่วงนี้ → หัวข้อ+วันซ้ำ = ข้าม (กดลงซ้ำ/ลงชุดเดิมสองรอบ)
   if (valid.length) {
     const dates = valid.map((p) => p.date).sort();
@@ -76,6 +86,7 @@ export async function POST(request: NextRequest) {
       return {
         content_no: `${prefix}${String(start + i).padStart(4, "0")}`, title: cut(p.title, 200), brand_id: brandId,
         platforms, platform_formats: formats, pillar_id: isUuid(p.pillar_id) ? p.pillar_id : null, brief: cut(p.brief, 2000) || null,
+        parent_sku_id: parentsOf(p)[0] ?? null,
         status: "draft", scheduled_at: toScheduledIso(p.date, normTime(p.time)), is_template: false, created_by: user?.id ?? null,
       };
     });
@@ -107,10 +118,21 @@ export async function POST(request: NextRequest) {
     if (cErr) captionError = "ลงคอนเทนต์แล้ว แต่บันทึกแคปชั่นไม่สำเร็จ: " + cErr.message;
   }
 
+  // ผูกสินค้า (ตารางลูก — แถว is_primary ต้องตรงกับคอลัมน์ parent_sku_id ของคอนเทนต์)
+  const links = valid.flatMap((p, i) => {
+    const contentId = idByNo.get(rows[i].content_no);
+    return contentId ? parentsOf(p).map((pid, j) => ({ content_id: contentId, parent_sku_id: pid, sku_id: null, sku_ids: [], sort_order: j, is_primary: j === 0 })) : [];
+  });
+  let productError: string | null = null;
+  if (links.length) {
+    const { error: lErr } = await admin.from("erp_creative_content_products").insert(links);
+    if (lErr) productError = "ลงคอนเทนต์แล้ว แต่ผูกสินค้าเพิ่มเติมไม่สำเร็จ (สินค้าหลักผูกแล้ว): " + lErr.message;
+  }
+
   const ids = createdRows.map((r) => r.id);
   await writeAudit(admin, {
     action: "marketing.plan.mass_import", entityType: "creative_content", entityId: ids[0] ?? null, actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { brand_id: brandId, created: ids.length, captions: caps.length, ids, content_nos: createdRows.map((r) => r.content_no), skipped },
+    metadata: { brand_id: brandId, created: ids.length, captions: caps.length, product_links: links.length, ids, content_nos: createdRows.map((r) => r.content_no), skipped },
   });
-  return NextResponse.json({ data: { created: ids.length, ids, content_nos: createdRows.map((r) => r.content_no), skipped, caption_error: captionError }, error: null });
+  return NextResponse.json({ data: { created: ids.length, ids, content_nos: createdRows.map((r) => r.content_no), skipped, caption_error: captionError, product_error: productError, product_links: links.length }, error: null });
 }

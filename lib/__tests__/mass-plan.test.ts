@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { parseTableText } from "@/lib/paste-table";
 import {
   buildMassPlanPrompt, specialDaysBetween, countForRange, freqFromMonthly, monthlyFromFreq, productionRange, monthRange, parseMassPlanText, matchPlatform, matchPillar,
-  normTime, normalizeHashtagText, groupMassPlan, postLevel, briefFromCaptions, validateCreatePost, activeTrends, massPostBrief, type MassPlatform,
+  normTime, normalizeHashtagText, groupMassPlan, postLevel, briefFromCaptions, validateCreatePost, activeTrends, massPostBrief, selectableTrends, matchProductCodes, type MassPlatform,
 } from "@/lib/marketing/mass-plan";
 
 const PLATS: MassPlatform[] = [
@@ -207,5 +207,41 @@ describe("mass-plan: เทรนด์ + การ์ดแบรนด์", ()
     expect(g.posts).toHaveLength(1);
     expect(g.posts[0].trend).toBe("Cool Blue (https://x.y)");
     expect(massPostBrief(g.posts[0], (c) => c)).toBe("เทรนด์: Cool Blue (https://x.y)\nถ่ายกลางแจ้ง");
+  });
+});
+
+describe("mass-plan: เลือกสินค้า + เลือกบอร์ดเทรนด์", () => {
+  const prods = [{ id: "p1", code: "MGW313" }, { id: "p2", code: "MGW31" }, { id: "p3", code: "LM-BAG 01" }];
+  it("จับรหัสสินค้า: ไม่สนตัวพิมพ์/ขีด/ช่องว่าง · รหัสยาวสุดก่อน · ไม่รู้จัก = แจ้ง", () => {
+    expect(matchProductCodes("mgw313, lm bag01", prods)).toEqual({ ids: ["p1", "p3"], unknown: [] });
+    expect(matchProductCodes("MGW313 เข็มขัดลายดอก", prods).ids).toEqual(["p1"]);
+    expect(matchProductCodes("XYZ999", prods)).toEqual({ ids: [], unknown: ["XYZ999"] });
+  });
+  it("prompt มีรายการสินค้า + คอลัมน์รหัสสินค้า · ตารางคำตอบ → ผูกสินค้าต่อโพสต์", () => {
+    const p = buildMassPlanPrompt({ brandName: "B", start: "2026-11-01", end: "2026-11-30", freq: {}, platforms: PLATS.slice(0, 2), pillars: [], campaign: "", specialDays: [],
+      products: [{ id: "p1", code: "MGW313", name: "เข็มขัดลายดอก", label: "NEW IN" }] });
+    expect(p).toContain("- รหัส MGW313: เข็มขัดลายดอก · NEW IN");
+    expect(p).toContain("| ไอเดียรูป/คลิป | รหัสสินค้า");
+    expect(p).toContain("สินค้า/แคมเปญช่วงนี้: ตามรายการสินค้าด้านล่าง");
+    const rows = parseMassPlanText([
+      "| วันที่ | เวลา | แพลตฟอร์ม | แนว | หัวข้อ | แคปชั่น | แฮชแท็ก | ไอเดียรูป/คลิป | รหัสสินค้า |",
+      "|---|---|---|---|---|---|---|---|---|",
+      "| 3/11/2569 | 19:00 | Facebook | โชว์สินค้า | เข็มขัดใหม่ | ก | #a | รูป | MGW313 |",
+      "| 3/11/2569 | 19:00 | Instagram | โชว์สินค้า | เข็มขัดใหม่ | ข | #a | รูป | MGW313, ABC |",
+      "| 4/11/2569 | 19:00 | Facebook | ไลฟ์สไตล์ | ไม่เกี่ยวสินค้า | ค | #a | รูป | - |",
+    ].join("\n"));
+    const g = groupMassPlan(rows, { ...ctx, products: prods });
+    expect(g.posts[0].productIds).toEqual(["p1"]);
+    expect(g.posts[0].rowIssues.some((i) => i.text.includes('"ABC"'))).toBe(true);
+    expect(g.posts[1].productIds).toEqual([]);
+  });
+  it("บอร์ดเทรนด์ที่เลือกได้ = เปิดอยู่ + แบรนด์นี้/ทุกแบรนด์ · ที่ยังไม่หมดอายุขึ้นก่อน (หมดอายุแล้วยังเลือกได้)", () => {
+    const rows = [
+      { id: "a", title: "Whimsy", heat: "hot", end_date: "2026-08-26" },
+      { id: "b", title: "Cool Blue", heat: "rising" },
+      { id: "c", title: "ของแบรนด์อื่น", heat: "hot", brand_id: "other" },
+      { id: "d", title: "เย็นลง", heat: "cooling" },
+    ];
+    expect(selectableTrends(rows, "me", "2026-11-01", "2026-11-30").map((r) => r.id)).toEqual(["b", "d", "a"]);
   });
 });
