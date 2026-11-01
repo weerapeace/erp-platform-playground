@@ -40,6 +40,7 @@ import { computeListingDisplay } from "@/lib/website-listing-display";
 import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { readFitCheckShops } from "@/lib/website-site-info";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { syncStoreListingUsages } from "@/lib/store-listing-usage";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -463,6 +464,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       ...actor,
       metadata: { shopId: b.shopId },
     });
+    // เอาออกจากร้าน = รูปไม่ได้ใช้บนเว็บนี้แล้ว → ล้าง "ใช้อยู่ที่ไหน" ของร้านนี้
+    if (b.shopId && b.parentId) await syncStoreListingUsages(sb, [{ shopId: b.shopId, parentId: b.parentId }]);
     return NextResponse.json({ ok: true });
   }
 
@@ -479,5 +482,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ...actor,
     metadata: { shopId: b.shopId, patch: p },
   });
+  // 🌐 รูปที่ลงเว็บ → คลังไฟล์รู้ว่า "ใช้อยู่ที่เว็บนี้"
+  if (b.shopId && b.parentId) await syncStoreListingUsages(sb, [{ shopId: b.shopId, parentId: b.parentId }]);
   return NextResponse.json({ ok: true });
 }

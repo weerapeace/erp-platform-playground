@@ -62,6 +62,7 @@ import { readSizeGuidesMany } from "@/lib/website-size-guides-db";
 import { categoryPathLabel } from "@/lib/website-category-tree";
 import { loadTagContext } from "@/lib/website-tag-categories-db";
 import { tagRuleCategories } from "@/lib/website-tag-categories";
+import { syncStoreListingUsages } from "@/lib/store-listing-usage";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -396,6 +397,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { error } = await sb.from("store_listings").upsert(row, { onConflict: "shop_id,parent_sku_id" });
   if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
   await writeAudit(sb, { action: "update", entityType: "store_listing", entityId: b.parentId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { shopId: b.shopId, patch: p } });
+  // 🌐 รูปที่ลงเว็บ → คลังไฟล์รู้ว่า "ใช้อยู่ที่เว็บนี้" (กันลบ + โชว์ที่ใช้)
+  await syncStoreListingUsages(sb, [{ shopId: b.shopId, parentId: b.parentId }]);
   // เว็บร้านแคชรายการสินค้าไว้ → สั่งล้างให้เห็นผลทันที (ล้มเหลว = เว็บอัปเดตเองใน ≤60 วิ)
   const purged = await purgeStorefrontCache(sb, b.shopId);
   return NextResponse.json({ ok: true, purged });

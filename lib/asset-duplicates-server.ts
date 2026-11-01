@@ -94,9 +94,10 @@ async function describe(admin: Admin, rows: Row[]): Promise<Map<string, Duplicat
   const pushUse = (id: string, label: string) => usedIn.set(id, [...(usedIn.get(id) ?? []), label]);
   for (const u of (usageRows ?? []) as { asset_id: string; module: string; record_label: string | null }[]) pushUse(u.asset_id, u.record_label || u.module);
 
-  // รูปเว็บร้าน (แถวสี / รูปบนเว็บ) ไม่ได้ลง asset_usages → หาจากหน้าสินค้าเว็บที่ใช้ key นี้
+  // รูปเว็บร้าน (แถวสี / รูปบนเว็บ) ที่ยังไม่ลง asset_usages (module store_listing · lib/store-listing-usage) → หาจากหน้าสินค้าเว็บที่ใช้ key นี้
   // ทำเฉพาะตอน "เจอรูปซ้ำ" ที่มาจากโฟลเดอร์เว็บ (นาน ๆ ครั้ง) · ตาราง store_listings หลักร้อยแถว
-  const webIds = new Map(rows.filter((r) => r.r2_key.startsWith("storefront-")).map((r) => [r.r2_key, r.id]));
+  const hasWebUsage = new Set(((usageRows ?? []) as { asset_id: string; module: string }[]).filter((u) => u.module === "store_listing").map((u) => u.asset_id));
+  const webIds = new Map(rows.filter((r) => r.r2_key.startsWith("storefront-") && !hasWebUsage.has(r.id)).map((r) => [r.r2_key, r.id]));
   if (webIds.size) {
     const listings = await fetchAllPages<{ parent_sku_id: string | null; shop_id: string | null; web_images: unknown; web_sku_images: unknown }>((from, to) =>
       admin.from("store_listings").select("parent_sku_id, shop_id, web_images, web_sku_images").order("id").range(from, to));

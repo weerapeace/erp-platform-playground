@@ -3,7 +3,7 @@
 /**
  * BrandAlbumBrowser — มุมมอง "ดูตามแบรนด์" (ตัวดูอย่างเดียว)
  *
- * เดิน: แบรนด์ → Parent SKU → [รูป Parent | โฟลเดอร์ SKUs (ย่อยราย SKU) | โฟลเดอร์ Description]
+ * เดิน: แบรนด์ → Parent SKU → [รูป Parent | โฟลเดอร์ SKUs (ย่อยราย SKU) | โฟลเดอร์ Description | 🌐 รูปบนเว็บ (แยกร้าน → รูปรุ่น/รูปเปิด/แต่ละสี/แบนเนอร์)]
  * รูป = "แกลเลอรีจริง" ของสินค้า (รูปภาพเพิ่มเติม + Odoo รวมกัน) เรียงรูปหลักก่อนตามที่ตั้งในฟอร์ม Parent SKU
  * คลิกรูป → ดูรูปใหญ่ (lightbox). จัดรูป/ตั้งรูปหลัก/ลำดับ ทำที่ฟอร์ม Parent SKU
  */
@@ -16,10 +16,14 @@ import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 
 type Brand = { brand_id: string | null; brand_name: string; brand_color: string | null; parent_count: number; image_count: number };
-type ParentRow = { parent_id: string; code: string; name_th: string | null; parent_img: number; sku_count: number; sku_img: number; desc_img: number };
+type ParentRow = { parent_id: string; code: string; name_th: string | null; parent_img: number; sku_count: number; sku_img: number; desc_img: number; web_img?: number };
 type Img = { id: string; url: string; title: string };
 type SkuFolder = { id: string; code: string; name: string; color: string; img_count: number };   // lazy — รูปโหลดตอนกาง (mode=sku)
-type ParentDetail = { parent: { id: string; code: string; name: string } | null; parentImages: Img[]; skus: SkuFolder[]; description: Img[] };
+/** 🌐 รูปบนเว็บ แยกร้าน → โฟลเดอร์ (รูปรุ่น · รูปเปิด · แต่ละสี · แบนเนอร์) — มากับรายละเอียด Parent เลย ไม่ต้องโหลดเพิ่ม */
+type WebFolder = { key: string; folder: "gallery" | "sku" | "hero" | "banner"; sku_id: string | null; label: string; images: Img[] };
+type WebShop = { shop_id: string; shop_name: string; folders: WebFolder[] };
+type ParentDetail = { parent: { id: string; code: string; name: string } | null; parentImages: Img[]; skus: SkuFolder[]; description: Img[]; web?: WebShop[] };
+const WEB_FOLDER_EN: Record<string, string> = { gallery: "Model web images", hero: "Hero", banner: "Banners" };
 
 const fmt = (n: number | null | undefined) => Number(n ?? 0).toLocaleString("th-TH");
 
@@ -220,6 +224,44 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
                 ? <p className="text-[12px] text-slate-400">{t("— ยังไม่มีรูป Description —", "— No Description images —")} <span className="text-slate-300">{t("(เพิ่มได้ที่ฟอร์ม Parent SKU → ช่อง “รูป Description”)", "(add them in the Parent SKU form → “Description images” field)")}</span></p>
                 : <Grid items={detail.description} onOpen={setLightbox} />}
             </section>
+
+            {/* 🌐 รูปที่ลงเว็บ (หน้าขายบนเว็บของรุ่น) — แยกร้าน → โฟลเดอร์ · กางดูรูป */}
+            <section>
+              <p className="text-[13px] font-medium text-slate-700 mb-2">
+                {t("🌐 รูปบนเว็บ", "🌐 Website images")}{" "}
+                <span className="text-slate-400 font-normal">({fmt((detail.web ?? []).reduce((n, s) => n + s.folders.reduce((m, f) => m + f.images.length, 0), 0))})</span>
+              </p>
+              {!detail.web?.length ? (
+                <p className="text-[12px] text-slate-400">{t("— ยังไม่มีรูปที่ลงเว็บ —", "— No website images yet —")} <span className="text-slate-300">{t("(ลงได้ที่หน้า Parent SKU → แท็บเว็บไซต์)", "(add them in Parent SKU → Website tab)")}</span></p>
+              ) : (
+                <div className="flex flex-col gap-3">
+                  {detail.web.map((shop) => (
+                    <div key={shop.shop_id}>
+                      <p className="text-[12px] text-slate-500 mb-1.5">🏪 {t("ร้าน", "Shop")} {shop.shop_name}</p>
+                      <div className="flex flex-col gap-1.5">
+                        {shop.folders.map((f) => {
+                          const id = `web:${shop.shop_id}:${f.key}`;
+                          const open = openSku.has(id);
+                          const label = f.folder === "sku" ? f.label : t(f.label, WEB_FOLDER_EN[f.folder] ?? f.label);
+                          return (
+                            <div key={id} className="rounded-lg border border-slate-200 bg-white">
+                              <button onClick={() => setOpenSku((prev) => { const n = new Set(prev); if (open) n.delete(id); else n.add(id); return n; })}
+                                className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-slate-50 rounded-lg">
+                                <span className="text-slate-400 text-xs w-3">{open ? "▾" : "▸"}</span>
+                                <span className="text-base">📂</span>
+                                <span className={`text-[12px] text-slate-700 truncate flex-1 ${f.folder === "sku" ? "font-mono" : ""}`}>{label}</span>
+                                <span className="text-[11px] text-slate-400">{fmt(f.images.length)} {t("รูป", "images")}</span>
+                              </button>
+                              {open && <div className="px-3 pb-3"><Grid items={f.images} onOpen={setLightbox} /></div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
         )}
         {lightboxNode}
@@ -248,6 +290,7 @@ export function BrandAlbumBrowser({ reloadKey, openParentId }: { reloadKey?: num
                     <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-600">🖼️ {fmt(p.parent_img)}</span>
                     <span className="px-1.5 py-0.5 rounded bg-violet-50 text-violet-600">📂 SKUs {fmt(p.sku_img)}</span>
                     {p.desc_img > 0 && <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600">📂 Desc {fmt(p.desc_img)}</span>}
+                    {(p.web_img ?? 0) > 0 && <span className="px-1.5 py-0.5 rounded bg-sky-50 text-sky-700">🌐 {t("เว็บ", "Web")} {fmt(p.web_img)}</span>}
                   </div>
                 </button>
               ))}

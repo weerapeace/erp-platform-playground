@@ -8,6 +8,7 @@ import { writeAudit } from "@/lib/audit";
 import { listingPatchToRow, toKeyList } from "@/lib/website-listing-patch";
 import { normalizeHero } from "@/lib/website-hero";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
+import { syncStoreListingUsages } from "@/lib/store-listing-usage";
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -60,5 +61,7 @@ export async function undoListingChanges(
     });
     await purgeStorefrontCache(sb, shopId);
   }
+  // 🌐 รูปกลับเป็นชุดเดิม → "ใช้อยู่ที่ไหน" ในคลังไฟล์ต้องตามด้วย
+  await syncStoreListingUsages(sb, restored);
   return { restored: restored.length, changed };
 }

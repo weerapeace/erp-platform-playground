@@ -27,6 +27,7 @@ import { applyImageSlots, mergeListingImages, type ImageSlotsSet } from "@/lib/w
 import { baseColor, colorGroups } from "@/lib/website-size-options";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { LISTING_IMG_COLS, parseListingChanges, undoListingChanges } from "@/lib/website-listing-undo";
+import { syncStoreListingUsages } from "@/lib/store-listing-usage";
 import { MAX_WEB_IMAGES, type CatalogParent, type HeroPick, type HeroSlot, type MassImageItem } from "@/lib/website-image-match";
 
 export const dynamic = "force-dynamic";
@@ -204,6 +205,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       metadata: { kind: "mass_images", mode, count: mine.length, files: mine.reduce((n, j) => n + j.files, 0), parentIds: mine.map((j) => j.parentId), before: Object.fromEntries(mine.map((j) => [j.parentId, j.before])) },
     });
   }
+  // 🌐 รูปที่ลงเว็บ → คลังไฟล์รู้ว่า "ใช้อยู่ที่เว็บนี้"
+  await syncStoreListingUsages(sb, done.map((j) => ({ shopId: j.shopId, parentId: j.parentId })));
   const purged = (await Promise.all(shopIds.filter((s) => done.some((j) => j.shopId === s)).map((s) => purgeStorefrontCache(sb, s)))).every(Boolean);
   const changes = done.map((j) => ({
     shopId: j.shopId,

@@ -2,14 +2,16 @@
  * GET /api/assets/brand-tree  — มุมมอง "ดูตามแบรนด์" ของคลังไฟล์
  *   ?mode=brands                 → รายการแบรนด์ที่มีรูป (+ จำนวน)
  *   ?mode=parents&brand_id=      → Parent SKU ในแบรนด์ (เฉพาะที่มีรูป) + จำนวนต่อโฟลเดอร์  (brand_id ว่าง/none = ไม่ระบุแบรนด์)
- *   ?mode=parent&parent_id=      → รายละเอียด 1 Parent: รูป Parent + โฟลเดอร์ SKUs (ย่อยราย SKU) + Description
+ *   ?mode=parent&parent_id=      → รายละเอียด 1 Parent: รูป Parent + โฟลเดอร์ SKUs (ย่อยราย SKU) + Description + 🌐 รูปบนเว็บ (แยกร้าน → โฟลเดอร์)
  *
  * รูปผูกสินค้าผ่าน asset_usages (ของเดิม) — ไม่ดึงไฟล์ใหม่ · ของกลาง guardApi/supabaseAdmin/buildRow
+ * 🌐 รูปบนเว็บ อ่านตรงจากหน้าขายบนเว็บ (lib/brand-album-web) — ลงเว็บแล้วกดบันทึก = โผล่ในโฟลเดอร์เอง
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { webAlbumForParent as webGallery } from "@/lib/brand-album-web";
 import { buildRow, loadTags, loadUsageCounts, type AssetRow } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -113,17 +115,18 @@ export async function GET(request: NextRequest) {
       return skuList.map((s) => ({ id: s.id, code: s.code, name: s.name_th ?? "", color: s.color_th || s.color || "", img_count: cnt.get(s.id) ?? 0 })).filter((s) => s.img_count > 0);
     };
 
-    // ดึงขนาน: ข้อมูล parent + แกลเลอรีจริงของ Parent (รูปหลักก่อน) + นับ SKU + รูป Description
-    const [p, parentImages, skus, description] = await Promise.all([
+    // ดึงขนาน: ข้อมูล parent + แกลเลอรีจริงของ Parent (รูปหลักก่อน) + นับ SKU + รูป Description + รูปบนเว็บ
+    const [p, parentImages, skus, description, web] = await Promise.all([
       admin.from("parent_skus_v2").select("id, code, name_th").eq("id", parentId).maybeSingle().then((r) => r.data),
       galleryFor(admin, "parent_skus_v2", parentId, "parent_sku"),
       skuCounts(),
       usageGallery(admin, "parent_sku_description", parentId),
+      webGallery(admin, parentId),
     ]);
 
     return NextResponse.json({
       parent: p ? { id: p.id, code: p.code, name: (p.name_th as string) ?? "" } : null,
-      parentImages, skus, description, error: null,
+      parentImages, skus, description, web, error: null,
     });
   }
 
@@ -145,9 +148,10 @@ export async function GET(request: NextRequest) {
     ]);
     const skuList = (skus ?? []) as { id: string; code: string }[];
 
-    const [parentImgs, descImgs, ...skuImgsArr] = await Promise.all([
+    const [parentImgs, descImgs, web, ...skuImgsArr] = await Promise.all([
       galleryFor(admin, "parent_skus_v2", parentId, "parent_sku"),
       usageGallery(admin, "parent_sku_description", parentId),
+      webGallery(admin, parentId),
       ...skuList.map((s) => galleryFor(admin, "skus_v2", s.id, "product_sku")),
     ]);
 
@@ -159,6 +163,9 @@ export async function GET(request: NextRequest) {
     skuList.forEach((s, si) => (skuImgsArr[si] ?? []).forEach((im, i) =>
       out.push({ url: im.url, name: `SKU_${clean(s.code)}/${pad(i)}_${clean(im.title) || "image"}${guessExt(im.title)}` })));
     descImgs.forEach((im, i) => out.push({ url: im.url, name: `Description/${pad(i)}_${clean(im.title) || "image"}${guessExt(im.title)}` }));
+    // 🌐 รูปบนเว็บ → Web_<ร้าน>/<โฟลเดอร์>/ (ชื่อไฟล์เว็บมักเป็น 1.jpg ซ้ำกันทุกสี → แยกโฟลเดอร์กันชนกัน)
+    for (const shop of web) for (const f of shop.folders)
+      f.images.forEach((im, i) => out.push({ url: im.url, name: `Web_${clean(shop.shop_name)}/${clean(f.label)}/${pad(i)}_${clean(im.title) || "image"}${guessExt(im.title)}` }));
 
     return NextResponse.json({ images: out, code: (p as { code?: string } | null)?.code ?? "", error: null });
   }
