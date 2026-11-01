@@ -3,12 +3,15 @@
 // ============================================================
 // ImageAttach (ของกลาง) — แนบรูปหลายรูป: ลากวาง / Ctrl+V / เลือกไฟล์
 // ย่อขนาด ≤ 1600px อัตโนมัติก่อนอัปขึ้น R2 (คมพอสำหรับโพสต์/พิมพ์ย่อ) แล้วเรียก onAttach เก็บเป็น attachment
+// รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (components/duplicate-upload) — ใช้กับ ImageAttach + ImageAttachKeys
 // ============================================================
 
 import { useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { useT } from "@/components/i18n";
+// ⚠️ import วนกัน (duplicate-upload ใช้ prepareResizedImage/uploadPreparedImage จากไฟล์นี้) — ปลอดภัยเพราะเรียกใช้ในฟังก์ชันเท่านั้น ไม่มีโค้ดระดับบนสุดที่ใช้ของอีกไฟล์
+import { askDuplicateUploads, uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 
 type Img = { id: string; r2_key: string | null; file_name?: string | null };
 type ToastFn = (type: "success" | "error" | "info", m: string) => void;
@@ -64,17 +67,28 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
   const [lbIndex, setLbIndex] = useState(-1);   // รูปที่กำลังเปิดดูเต็มจอ (-1 = ปิด)
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck) · รูปที่แนบอยู่แล้ว → เสนอ "ข้าม"
   const handleFiles = async (files: FileList | File[]) => {
     const imgs = Array.from(files).filter((f) => f && f.type.startsWith("image/")) as File[];
     if (!imgs.length) return;
     setBusy(true);
-    for (const f of imgs) {
-      try {
-        const r = await uploadResizedImage(f, { folder: "creative-tasks", max: maxSize });
-        await onAttach(r);
-      } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
-    }
-    setBusy(false);
+    try {
+      const cands: { file: File; original: File }[] = [];
+      for (const f of imgs) {
+        try { cands.push({ file: await prepareResizedImage(f, maxSize), original: f }); }
+        catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
+      }
+      // onAttach ต้องได้ชื่อไฟล์/ชนิด/ขนาดต่อรูป → ใช้ askDuplicateUploads (ได้แผนต่อไฟล์) แทนทางลัดที่คืนแค่ key
+      const plan = await askDuplicateUploads(cands, { existingKeys: images.flatMap((im) => (im.r2_key ? [im.r2_key] : [])) });
+      for (const { item, reuse } of plan ?? []) {
+        try {
+          await onAttach(reuse
+            ? { r2_key: reuse.r2_key, file_name: item.original.name, content_type: item.file.type, size_bytes: reuse.size_bytes ?? item.file.size }
+            : await uploadPreparedImage(item.file, { folder: "creative-tasks", fileName: item.original.name }));
+        } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
+      }
+    } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
+    finally { setBusy(false); }
   };
 
   // วางรูปจากคลิปบอร์ด (Ctrl+V) ขณะ component นี้แสดงอยู่
@@ -137,13 +151,15 @@ export function ImageAttachKeys({ value, onChange, folder = "creative-tasks", ma
     const imgs = Array.from(files).filter((f) => f && f.type.startsWith("image/")) as File[];
     if (!imgs.length) return;
     setErr(null); setBusy(true);
-    const added: string[] = [];
-    for (const f of imgs) {
-      try { const r = await uploadResizedImage(f, { folder, max: maxSize }); added.push(r.r2_key); }
-      catch (e) { setErr("อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
-    }
-    if (added.length) onChange([...valRef.current, ...added]);
-    setBusy(false);
+    // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck) · รูปที่อยู่ในช่องนี้แล้ว → เสนอ "ข้าม"
+    try {
+      const r = await uploadImagesWithDupCheck(imgs, {
+        folder, max: maxSize, existingKeys: valRef.current,
+        onError: (_, e) => setErr("อัปโหลดรูปไม่สำเร็จ: " + e.message),
+      });
+      if (r?.keys.length) onChange([...valRef.current, ...r.keys]);
+    } catch (e) { setErr("อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
+    finally { setBusy(false); }
   };
 
   // วางรูปจากคลิปบอร์ด (Ctrl+V) ขณะ component นี้แสดง (ไม่ดักตอนพิมพ์ใน input/textarea)
