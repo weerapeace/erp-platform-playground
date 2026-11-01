@@ -26,6 +26,7 @@ import { useToast } from "@/components/toast";
 import { apiSave } from "@/lib/save-toast";
 import { ComponentPicker } from "@/components/material-picker";
 import { FreeTextPicker } from "@/components/free-text-picker";
+import { Icon } from "@/components/icon";
 import { fabricQty, resolveSupplyForm, sheetUnitFor, type SupplyForm } from "@/lib/bom-calc";
 
 export type EditorLine = {
@@ -99,6 +100,13 @@ export const SLOT_GROUP_CODES: Record<string, string[]> = {
 // ---- helper คำนวณ (กฎมาจากตาราง material_groups; calc_method = area_face|area_100|length|count) ----
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 const r2 = (n: number) => Math.round(n * 100) / 100;
+/** โชว์ปริมาณ: น้อยกว่า 1 โชว์ 4 ตำแหน่ง (เดิม 2 ตำแหน่ง → 0.0027 ถูกปัดโชว์เป็น 0 ทั้งที่ค่าจริงไม่ใช่ 0) */
+const fmtQty = (n: number) => {
+  const v = Number(n) || 0;
+  if (v === 0) return "0";
+  if (Math.abs(v) >= 1) return String(r2(v));
+  return r4(v) === 0 ? "<0.0001" : String(r4(v));
+};
 export const lineArea = (l: EditorLine) => (l.cut_width || 0) * (l.cut_length || 0) * (l.pieces || 1);
 const dash = <span className="text-slate-300 text-xs">—</span>;
 type GroupInfo = { calc_method: string; divisor: number };
@@ -499,6 +507,36 @@ export function BomLineEditor({
     onChange(lines.map((x) => (x.key === key ? recalc({ ...x, ...patch }) : x)));
   };
 
+  // ───── สาเหตุที่ "ปริมาณ" เป็น 0 (โชว์เป็นป้ายในแถว · เจ้าของเลือกแบบ C 2026-11-01) ─────
+  // ปริมาณที่บันทึกไว้ = ค่าที่ต้นทุน/ใบสั่งผลิตใช้จริง แต่ช่อง "คำนวณ" คิดสดทุกครั้งที่เปิด (ดึงขนาดผืน/หน้ากว้างจาก SKU มาเติม)
+  // → ถ้าใส่ข้อมูลที่ SKU ทีหลัง ช่องคำนวณมีค่า แต่ปริมาณยังเป็น 0 จนกว่าจะแก้อะไรสักอย่างในสูตร
+  // เตือนเฉพาะ "เป็น 0" — ไม่เตือนแถวที่ต่างกันนิดหน่อย (สูตรเก่าจาก Odoo คิดเผื่อเสีย 25% ตอนนี้ 15% ต่างกัน ~8% เป็นพันแถว)
+  type QtyIssue = { kind: "stale"; calc: number } | { kind: "missing"; what: string };
+  const qtyIssue = (l: EditorLine): QtyIssue | null => {
+    if (l.free_text || !l.component_sku || (Number(l.qty) || 0) > 0) return null;
+    const c = lineCalc(l);
+    if (c != null) return c > 0 ? { kind: "stale", calc: c } : null;
+    const m = methodOf(l);
+    if (m === "length") return l.cut_length ? null : { kind: "missing", what: "ความยาว" };
+    if (!isArea(l)) return null;                    // manual = พิมพ์เอง ไม่ใช่ปัญหา
+    if (!l.cut_width || !l.cut_length) return { kind: "missing", what: "กว้าง×ยาว" };
+    // ยังไม่ได้ระบุ "มาเป็น" → ระบบเดาเป็นม้วนไว้ก่อน แต่ของจริงอาจเป็นผืน/แผ่น (เช่น กระดาษแข็ง 109×79)
+    if (usesFace(l) && !l.face_width_cm) return { kind: "missing", what: l.supply_form ? "หน้ากว้าง" : "หน้ากว้าง/ผืน" };
+    if (usesSheet(l)) return { kind: "missing", what: "ขนาดผืน" };
+    return null;
+  };
+  const staleKeys = lines.filter((l) => qtyIssue(l)?.kind === "stale").map((l) => l.key);
+  const missingCount = lines.filter((l) => qtyIssue(l)?.kind === "missing").length;
+  // คิดใหม่เฉพาะแถวที่ค้าง (ไม่แตะแถวอื่น) — ปริมาณ + หน่วยตาม "มาเป็น" · ย้อนได้ · ยังต้องกด "บันทึกสูตร"
+  const applyCalc = (keys: string[]) => {
+    if (!keys.length) return;
+    const set = new Set(keys);
+    setUndoStack((u) => [...u, lines].slice(-50));
+    setRedoStack([]);
+    onChange(lines.map((x) => (set.has(x.key) ? recalc(x) : x)));
+    if (keys.length > 1) toast.success(`อัปเดตปริมาณ ${keys.length} แถวตามที่คำนวณแล้ว — อย่าลืมกด "บันทึกสูตร"`);
+  };
+
   // เลือกวัตถุดิบ → autofill ชนิด/หน้ากว้าง/เผื่อเสีย
   const pickComponent = (l: EditorLine, c: BomComponent): Partial<EditorLine> => ({
     component_id: c.id, component_sku: c.code, component_name: c.name, image_key: c.image_key ?? null,
@@ -794,25 +832,46 @@ export function BomLineEditor({
         : <span className="block px-1 text-xs text-right tabular-nums text-slate-500">{r2(lineArea(l))}</span>,
     },
     {
-      key: "calc", header: "คำนวณ", width: 84, align: "right",
+      key: "calc", header: "คำนวณ", width: 96, align: "right",
       getValue: (l) => lineCalc(l) ?? 0,
       render: (l) => {
         const c = lineCalc(l); const f = formOf(l);
+        const issue = qtyIssue(l);
+        // ข้อมูลวัตถุดิบไม่พอ → บอกว่าขาดอะไร กดเปิดรายละเอียดไปกรอก
+        if (issue?.kind === "missing") return (
+          <button type="button" onClick={() => setDetailKey(l.key)}
+            title={`คิดปริมาณไม่ได้ เพราะยังไม่มี${issue.what} — กดเพื่อเปิดรายละเอียดแล้วกรอก (หรือพิมพ์ปริมาณเองในช่องถัดไป)`}
+            className="inline-flex items-center gap-1 max-w-full text-[11px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 hover:bg-amber-100">
+            <Icon name="warning" /><span className="truncate">ไม่มี{issue.what}</span>
+          </button>
+        );
         const badge = f ? <span className={`ml-1 text-[9px] px-1 rounded align-middle ${f === "sheet" ? "bg-indigo-50 text-indigo-600" : "bg-slate-100 text-slate-500"}`} title={f === "sheet" ? "คิดแบบผืน (พื้นที่ ÷ ผืนเต็ม)" : "คิดแบบม้วน (พื้นที่ ÷ หน้ากว้าง ÷ ตัวหาร)"}>{f === "sheet" ? "ผืน" : "ม้วน"}</span> : null;
         return c == null
           ? <span className="text-slate-300 text-xs">—{badge}</span>
           : <span className="block px-1 text-xs text-right tabular-nums text-slate-500">{c}{badge}</span>; },
     },
     {
-      key: "qty", header: "ปริมาณ", width: 86, align: "right", sortable: true, summable: true,
+      key: "qty", header: "ปริมาณ", width: 112, align: "right", sortable: true, summable: true,
       getValue: (l) => l.qty,
-      render: (l, u, ro) =>
-        lineCalc(l) == null ? (
+      render: (l, u, ro) => {
+        const issue = qtyIssue(l);
+        // คิดได้แล้วแต่ปริมาณที่บันทึกยังเป็น 0 (ค้างค่าเก่า) → ป้ายกดใช้ค่าที่คำนวณ
+        if (issue?.kind === "stale") {
+          const tip = `ปริมาณที่บันทึกไว้ยังเป็น 0 แต่ตอนนี้คิดได้ ${fmtQty(issue.calc)} แล้ว (มักเกิดจากใส่ขนาดผืน/หน้ากว้างที่ SKU หลังบันทึกสูตร) · ต้นทุนและใบสั่งผลิตยังนับเป็น 0`;
+          return ro
+            ? <span className="flex items-center justify-end gap-1 px-2 text-sm tabular-nums text-amber-700" title={tip}><Icon name="warning" />0</span>
+            : <button type="button" onClick={() => applyCalc([l.key])} title={`${tip} — กดเพื่อใช้ค่าที่คำนวณ (ย้อนได้ Ctrl+Z) แล้วกด "บันทึกสูตร"`}
+                className="w-full inline-flex items-center justify-end gap-1 h-8 px-1.5 text-xs tabular-nums rounded-lg bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100">
+                <Icon name="refresh" /><span className="text-amber-500">0 →</span><b className="font-semibold">{fmtQty(issue.calc)}</b>
+              </button>;
+        }
+        return lineCalc(l) == null ? (
           <input type="number" min={0} step="any" value={l.qty} disabled={ro}
             onChange={(e) => u({ qty: Number(e.target.value) })} className={`${inputCls} text-right`} />
         ) : (
-          <span className="block px-2 text-sm text-right tabular-nums font-semibold text-emerald-700" title="คำนวณอัตโนมัติ">{r2(l.qty)}</span>
-        ),
+          <span className="block px-2 text-sm text-right tabular-nums font-semibold text-emerald-700" title={`คำนวณอัตโนมัติ · ค่าเต็ม ${l.qty}`}>{fmtQty(l.qty)}</span>
+        );
+      },
     },
     {
       key: "uom", header: "หน่วย", width: 96,
@@ -875,6 +934,20 @@ export function BomLineEditor({
           </div>
         )}
       </div>
+      {/* แถบสรุปแถวที่ปริมาณเป็น 0 — ค้างค่าเก่า (กดอัปเดตทีเดียว) · ข้อมูลไม่พอ (ดูป้ายในช่อง "คำนวณ") */}
+      {(staleKeys.length > 0 || missingCount > 0) && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-1 px-3 py-1.5 rounded-lg border border-amber-200 bg-amber-50 text-xs text-amber-800">
+          <Icon name="warning" />
+          {staleKeys.length > 0 && <span>ปริมาณยังเป็น 0 ทั้งที่คิดได้แล้ว <b>{staleKeys.length}</b> แถว</span>}
+          {staleKeys.length > 0 && !readonly && (
+            <button type="button" onClick={() => applyCalc(staleKeys)}
+              className="inline-flex items-center gap-1 h-6 px-2 rounded-md bg-white border border-amber-300 text-amber-800 font-medium hover:bg-amber-100">
+              <Icon name="refresh" />อัปเดตทั้งหมด
+            </button>
+          )}
+          {missingCount > 0 && <span className="text-amber-700">ข้อมูลวัตถุดิบไม่พอ คิดปริมาณไม่ได้ <b>{missingCount}</b> แถว — กดป้ายในช่อง “คำนวณ” เพื่อกรอก</span>}
+        </div>
+      )}
       <LineItemsGrid<EditorLine>
         rows={lines}
         columns={shownColumns}
