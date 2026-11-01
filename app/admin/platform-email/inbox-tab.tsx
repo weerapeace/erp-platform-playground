@@ -2,10 +2,13 @@
 
 // 📬 แท็บ "เมลที่อ่านแล้ว" — ทุกเมลที่สคริปต์ส่งเข้ามา + ระบบทำอะไรกับมัน (ใช้เป็นประวัติ/ตรวจย้อนหลัง)
 // ติ๊กหลายฉบับ → 🔄 อ่านใหม่ (หลังเพิ่มร้านในตั้งค่า/ปรับกฎ) · ✓ ปิดเรื่อง (คนตรวจแล้ว ไม่ต้องทำอะไร)
-// ของกลาง: MiniTable · ERPInput · toast · ConfirmDialog
+// โหลดทีละหน้า (50/100/200 ฉบับ) — กรอง/ค้นหา/เรียงที่เซิร์ฟเวอร์
+// ของกลาง: MiniTable · Pager · PlatformBadge · ERPInput · toast · ConfirmDialog
 
 import { useCallback, useEffect, useState } from "react";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { Pager } from "@/components/pager";
+import { PlatformBadge } from "@/components/platform-icon";
 import { ERPInput } from "@/components/form";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -22,31 +25,42 @@ const FILTERS: { v: string; label: string }[] = [
 
 export function InboxTab({ initialStatus, onChanged }: { initialStatus: string; onChanged: () => void }) {
   const toast = useToast();
-  const [status, setStatus] = useState(initialStatus);
+  const [status, setStatusRaw] = useState(initialStatus);
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
+  // โหลดทีละหน้าจากเซิร์ฟเวอร์ (เมลมีหลายพันฉบับ) — เรียงก็เรียงที่เซิร์ฟเวอร์
+  const [page, setPage] = useState(0);
+  const [size, setSizeRaw] = useState(50);
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "received_at", dir: "desc" });
   const [rows, setRows] = useState<InboxRow[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [confirmResolve, setConfirmResolve] = useState(false);
 
-  useEffect(() => { const t = setTimeout(() => setQuery(q.trim()), 300); return () => clearTimeout(t); }, [q]);
+  const setStatus = (v: string) => { setStatusRaw(v); setPage(0); };
+  const setSize = (v: number) => { setSizeRaw(v); setPage(0); };
+  const onSort = (key: string, dir: "asc" | "desc") => { setSort(key ? { key, dir } : { key: "received_at", dir: "desc" }); setPage(0); };
+  useEffect(() => {
+    const t = setTimeout(() => { const v = q.trim(); if (v !== query) { setQuery(v); setPage(0); } }, 300);
+    return () => clearTimeout(t);
+  }, [q, query]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const p = new URLSearchParams();
+      const p = new URLSearchParams({ page: String(page), size: String(size), sort: sort.key, dir: sort.dir });
       if (status) p.set("status", status);
       if (query) p.set("q", query);
       const res = await apiFetch(`/api/platform-email/inbox?${p}`);
       const j = await res.json();
       if (!res.ok || j.error) throw new Error(j.error || "โหลดไม่สำเร็จ");
-      setRows(j.rows as InboxRow[]); setSelected(new Set());
+      setRows(j.rows as InboxRow[]); setTotal(Number(j.total ?? 0)); setSelected(new Set());
     } catch (e) { setError(e instanceof Error ? e.message : "เกิดข้อผิดพลาดในการโหลดข้อมูล กรุณาลองใหม่"); }
     finally { setLoading(false); }
-  }, [status, query]);
+  }, [status, query, page, size, sort]);
   useEffect(() => { void load(); }, [load]);
 
   const act = async (action: "reprocess" | "reprocess_all" | "resolve") => {
@@ -72,8 +86,8 @@ export function InboxTab({ initialStatus, onChanged }: { initialStatus: string; 
     { key: "kind", header: "ประเภท", width: "9rem", sortValue: (r) => r.kind ?? "",
       cell: (r) => (
         <div className="text-xs leading-tight">
-          <div className="font-medium text-slate-700">{r.platform_code ? PLATFORM_LABEL[r.platform_code] ?? r.platform_code : "—"}</div>
-          <div className="text-slate-500">{KIND_LABEL[r.kind ?? ""] ?? r.kind ?? "—"}</div>
+          {r.platform_code ? <PlatformBadge code={r.platform_code} name={PLATFORM_LABEL[r.platform_code]} size="xs" /> : <div className="text-slate-400">—</div>}
+          <div className="mt-0.5 text-slate-500">{KIND_LABEL[r.kind ?? ""] ?? r.kind ?? "—"}</div>
         </div>
       ) },
     { key: "order", header: "เลขออเดอร์", width: "9.5rem", sortValue: (r) => r.external_order_id ?? r.ref_no ?? "",
@@ -117,14 +131,18 @@ export function InboxTab({ initialStatus, onChanged }: { initialStatus: string; 
         </div>
       )}
 
-      {loading ? (
+      {loading && !rows.length ? (
         <div className="space-y-2">{[0, 1, 2, 3].map((i) => <div key={i} className="h-12 animate-pulse rounded-lg bg-slate-100" />)}</div>
       ) : (
-        <MiniTable rows={rows} columns={columns} rowKey={(r) => r.id} hideSearch countUnit="ฉบับ"
-          selectable selected={selected} onSelectedChange={setSelected}
-          emptyText={status || query ? "ไม่พบเมลตามที่กรอง ลองเปลี่ยนตัวกรองหรือคำค้นหา" : "ยังไม่มีเมลเข้ามา — ติดตั้งสคริปต์ในแท็บ ตั้งค่า + ติดตั้ง แล้วรอสักครู่"}
-          maxHeightClass="max-h-[calc(100vh-280px)]"
-          footnote="แสดงล่าสุด 300 ฉบับ · 🔄 อ่านใหม่ = ให้ระบบอ่านเมลที่เก็บไว้อีกรอบด้วยกฎล่าสุด (ออเดอร์ที่สร้างแล้วจะไม่ซ้ำ)" />
+        <div className={`space-y-2 transition-opacity ${loading ? "pointer-events-none opacity-50" : ""}`}>
+          <MiniTable rows={rows} columns={columns} rowKey={(r) => r.id} hideSearch countUnit="ฉบับ"
+            sortKey={sort.key} sortDir={sort.dir} onSortChange={onSort}
+            selectable selected={selected} onSelectedChange={setSelected}
+            emptyText={status || query ? "ไม่พบเมลตามที่กรอง ลองเปลี่ยนตัวกรองหรือคำค้นหา" : "ยังไม่มีเมลเข้ามา — ติดตั้งสคริปต์ในแท็บ ตั้งค่า + ติดตั้ง แล้วรอสักครู่"}
+            maxHeightClass="max-h-[calc(100vh-320px)]"
+            footnote="🔄 อ่านใหม่ = ให้ระบบอ่านเมลที่เก็บไว้อีกรอบด้วยกฎล่าสุด (ออเดอร์ที่สร้างแล้วจะไม่ซ้ำ)" />
+          {total > 0 && <Pager page={page} pageSize={size} total={total} onPage={setPage} unitLabel="ฉบับ" onPageSize={setSize} pageSizes={[50, 100, 200]} />}
+        </div>
       )}
 
       <ConfirmDialog open={confirmResolve} onClose={() => setConfirmResolve(false)} onConfirm={() => void act("resolve")} loading={busy}

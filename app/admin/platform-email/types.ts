@@ -42,18 +42,57 @@ export type InboxRow = {
   order_id: string | null;
 };
 
+export type { PendingQueue } from "@/lib/platform-email/match";
+import type { PendingQueue } from "@/lib/platform-email/match";
+
+/** แพลตฟอร์ม (สี/โลโก้ตั้งที่หน้าแพลตฟอร์ม erp_platforms) — ใช้กับ PlatformBadge */
+export type PlatformInfo = { code: string; name: string; color: string | null; icon_key: string | null };
+
 export type PendingGroup = {
   platform_code: string;
   item_key: string;
   title: string;
   variant: string | null;
   model_code: string | null;
+  /** จำนวนรายการ / ชิ้น (รวมออเดอร์ยกเลิก) */
   items: number;
   qty: number;
-  orders: string[];
+  /** รายการที่อยู่ในออเดอร์ที่ยังไม่ยกเลิก (0 = มีแต่ออเดอร์ยกเลิก) */
+  live_items: number;
+  order_count: number;
+  /** เลขออเดอร์ (≤20) */
+  orders: { no: string; cancelled: boolean }[];
+  queue: PendingQueue;
   suggest: { id: string; code: string } | null;
   reason: string | null;
   candidates: { id: string; code: string; color: string | null; name: string | null }[];
+};
+
+/** การ์ด "ระบบเดาไว้" ทั้งหมดตามตัวกรอง (ทุกหน้า) — ใช้ "เลือกทั้งหมด" แล้วยืนยันทีเดียว */
+export type GuessRef = { platform_code: string; item_key: string; title: string; variant: string | null; qty: number; suggest: { id: string; code: string } };
+
+export type PendingResponse = {
+  groups: PendingGroup[];
+  /** จำนวนการ์ดทั้งหมดตามตัวกรอง (ใช้แบ่งหน้า) */
+  total: number;
+  page: number;
+  size: number;
+  stats: {
+    groups: number;
+    qty: number;
+    by_platform: Record<string, { groups: number; qty: number }>;
+    by_queue: Record<PendingQueue, number>;
+    /** การ์ดที่มีแต่ออเดอร์ยกเลิก */
+    cancelled_only: number;
+  };
+  platforms: PlatformInfo[];
+  guess_all?: GuessRef[];
+};
+
+export const QUEUE_META: Record<PendingQueue, { icon: string; label: string; hint: string; chip: string }> = {
+  guess: { icon: "💡", label: "ระบบเดาไว้ ให้ยืนยัน", hint: "ระบบมีตัวที่น่าจะใช่ แต่ข้อมูลในเมลขัดกันนิดหน่อย — ตรวจแล้วกดยืนยัน", chip: "border-amber-200 bg-amber-50 text-amber-800" },
+  multi: { icon: "🎨", label: "หลายสี เลือกจากเมลไม่ได้", hint: "รุ่นนี้มีหลายสี แต่เมลไม่บอกสี (Lazada ไม่บอกเลย) — เลือกสีเอง", chip: "border-violet-200 bg-violet-50 text-violet-800" },
+  not_found: { icon: "❓", label: "ไม่พบรหัสใน ERP", hint: "รหัสในชื่อสินค้ายังไม่มีใน ERP หรือชื่อไม่มีรหัส — ค้นหา SKU เอง", chip: "border-rose-200 bg-rose-50 text-rose-800" },
 };
 
 export const STATUS_META: Record<InboxRow["status"], { label: string; cls: string; hint: string }> = {

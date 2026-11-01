@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { itemKey, matchEmailItem, modelCodeFromTitle, modelsForItem, parseVariant, type SkuCandidate } from "@/lib/platform-email/match";
+import { itemKey, matchEmailItem, modelCodeFromTitle, modelsForItem, parseVariant, pendingQueueOf, type SkuCandidate } from "@/lib/platform-email/match";
 
 // ข้อมูลจริงใน skus_v2 (ตรวจ 2026-10-27 / 2026-11-01)
 const sku = (code: string, color?: string): SkuCandidate => ({ id: code, code, color_platform_th: color ?? null });
@@ -76,4 +76,18 @@ describe("matchEmailItem — ข้อมูลขัดกัน ให้ค�
   it("รุ่นมีตัวเดียวแต่สีในเมลไม่ตรง", () => expect(m("PHPB010", "Black", PHPB010).confidence).toBe("guess"));
   it("ไม่มีรหัสใน ERP = none", () => expect(m("สินค้าใหม่ ZZ999", null, []).confidence).toBe("none"));
   it("หลายสีและเดาไม่ได้ = none", () => expect(m("LYP14", "Special Edition", LYP14).confidence).toBe("none"));
+});
+
+describe("pendingQueueOf — คิวในแท็บรอยืนยัน", () => {
+  it("มีตัวที่ระบบเดา = guess", () => {
+    expect(pendingQueueOf({ confidence: "guess", suggest_sku_id: "x", reason: "สี ดำ น่าจะเป็น A-01 — ช่วยยืนยัน" })).toBe("guess");
+  });
+  it("ไม่มีรหัสใน ERP / ชื่อไม่มีรหัส = not_found", () => {
+    expect(pendingQueueOf({ confidence: "none", reason: matchEmailItem({ title: "กระเป๋า PK09", variant: null }, []).reason })).toBe("not_found");
+    expect(pendingQueueOf({ confidence: "none", reason: matchEmailItem({ title: "ชุดกิฟเซ็ท", variant: null }, []).reason })).toBe("not_found");
+  });
+  it("หลายสีเลือกไม่ได้ = multi", () => {
+    const r = matchEmailItem({ title: "Bag BSD07", variant: null }, [{ id: "1", code: "BSD07-01", color: "ดำ" }, { id: "2", code: "BSD07-02", color: "แดง" }]);
+    expect(pendingQueueOf({ confidence: r.confidence, reason: r.reason })).toBe("multi");
+  });
 });

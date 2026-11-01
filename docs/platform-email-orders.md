@@ -34,10 +34,11 @@ GET /api/platform-sales/report  →  /master/platform-sales (ตารางก�
 | `lib/platform-email/parse.ts` | อ่านเมล (pure) — HTML→บรรทัด, ป้าย→ค่า (บรรทัดเดียวกัน/บรรทัดถัดไป), วันที่ไทย→ISO (Date.UTC −7 ชม.) |
 | `lib/platform-email/match.ts` | จับคู่สินค้า (pure) — rule / exact / single / guess / none |
 | `lib/platform-email/server.ts` | ตัดสินใจ + เขียน DB (supabaseAdmin) |
+| `lib/platform-email/review.ts` | ข้อมูลแท็บในหน้า (server): `pendingPage` สินค้ารอยืนยันทีละหน้า · `inboxPage` เมลทีละหน้า · `bindPending` ผูกรายการที่ค้าง |
 | `lib/platform-email/apps-script.ts` | สร้างสคริปต์ Gmail (ฝัง URL + กุญแจ + ความถี่ + ย้อนหลัง + คำค้น) |
 | `app/api/platform-email/inbound` | รับเมลจากสคริปต์ (กุญแจ ไม่ใช่การล็อกอิน) |
 | `app/api/platform-email/settings` | GET/PATCH ตั้งค่า (`platform_orders.manage`) · POST rotate_key/script (`admin.users`) |
-| `app/api/platform-email/inbox` | รายการเมล · กลุ่มสินค้ารอยืนยัน · อ่านใหม่ / ปิดเรื่อง / ยืนยัน SKU |
+| `app/api/platform-email/inbox` | รายการเมล (ทีละหน้า) · กลุ่มสินค้ารอยืนยัน (ทีละหน้า) · อ่านใหม่ / ปิดเรื่อง / ยืนยัน SKU / ยืนยันหลายการ์ด (`confirm_many` ≤100) |
 | `app/api/platform-sales/report` | รายงานรายเดือน (`platform_orders.view`) |
 | `app/admin/platform-email/*` | หน้าตั้งค่า 5 แท็บ |
 | `app/master/platform-sales/page.tsx` | หน้ารายงาน |
@@ -87,6 +88,19 @@ GET /api/platform-sales/report  →  /master/platform-sales (ตารางก�
 6. ชำระเงิน/COD/ใหม่: มีออเดอร์พร้อมสินค้าแล้ว → ไม่ซ้ำ · ไม่มี → สร้าง status `new` (**ไม่ตัดสต๊อก**) · ยกเลิกของออเดอร์ที่ยังไม่มีสินค้า → เติมสินค้าให้
 7. จับคู่: rule > exact (รหัสเต็ม / เลขสี + ชื่อสีไม่ขัด) > single (รุ่นมี SKU เดียว) → ผูกเลย · guess / none → `matched_sku_id = null` รอแท็บยืนยัน
 8. ปรับกฎแล้วใช้ย้อนหลัง: แท็บรอยืนยัน "🔄 ให้ระบบจับคู่ใหม่" (`rematch` → `rematchPendingItems`) · แท็บเมลที่อ่านแล้ว กรองกลุ่ม → "🔄 อ่านใหม่ทั้งกลุ่มนี้" (`reprocess_all` ≤150 ฉบับ เก่า→ใหม่)
+
+## แท็บ "รอยืนยันสินค้า" (2026-11-01)
+
+- **โหลดทีละหน้า** (20/50/100 การ์ด): เซิร์ฟเวอร์รวมกลุ่มรายการที่ค้างทั้งหมด (ดึงเฉพาะช่องที่ใช้ + สถานะออเดอร์ในคำขอเดียว) แล้วกรอง/นับ/ตัดหน้า · ตัวเลือก SKU ดึงเฉพาะการ์ดในหน้าที่เปิด
+- **ป้ายแพลตฟอร์มมีสี** = ของกลาง `PlatformBadge` (`components/platform-icon.tsx`) สี/โลโก้จาก `erp_platforms.color/icon_key` (แก้ที่หน้าแพลตฟอร์มที่เดียว) · ไม่มีค่า = สีสำรองตาม code
+- **คิวตามสาเหตุ** (`pendingQueueOf` ใน match.ts อ่านจาก raw ที่ตัวจับคู่เขียน): 💡 `guess` ระบบเดาไว้ · 🎨 `multi` หลายสี เลือกจากเมลไม่ได้ · ❓ `not_found` ไม่มีรหัสใน ERP / ชื่อไม่มีรหัส
+- ชิปแพลตฟอร์มนับจากทุกคิว · ชิปคิวนับเฉพาะแพลตฟอร์มที่เลือก · ซ่อนการ์ดที่มีแต่ออเดอร์ยกเลิก (ค่าเริ่ม เปิด) · ค้นหา ชื่อ/รหัสรุ่น/ตัวเลือก/เลขออเดอร์
+- **ยืนยันหลายการ์ด** (เฉพาะคิว 💡): ติ๊กทีละใบ / ทั้งหน้า / ทั้งหมดตามตัวกรอง (`guess_all`) → แถบล่าง `BulkActionBar` → ConfirmDialog แสดงรายการ (เกิน 50 = พิมพ์ CONFIRM) → `confirm_many` ส่งทีละ 100 · audit 1 แถวต่อครั้ง (metadata.groups)
+- Lazada + หลายสี → กล่องเตือน "ยืนยันสีเดียว = ทุกออเดอร์ต่อไปนับเป็นสีนั้น"
+
+## แท็บ "เมลที่อ่านแล้ว"
+
+- โหลดทีละหน้า 50/100/200 ฉบับ (`count: exact`) · ค้นหา/กรองสถานะ/เรียงคอลัมน์ ทำที่ฐานข้อมูล (เดิมโหลดล่าสุด 300 ฉบับ — เมลเก่ากว่านั้นเปิดไม่ได้)
 
 ## ติดตั้ง/ดูแล
 

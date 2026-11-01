@@ -219,3 +219,13 @@ export function matchEmailItem(
   const firstPool = models.map(poolOf).find((p) => p.length) ?? all;
   return { confidence: "none", sku_id: null, sku_code: null, suggest: null, reason: `รุ่น ${models[0] ?? "?"} มี ${firstPool.length} สี เลือกจากเมลไม่ได้${item.variant ? "" : " (เมลไม่บอกตัวเลือก)"}` };
 }
+
+/** คิวในแท็บ "รอยืนยันสินค้า" — แยกจากผลจับคู่ที่เก็บไว้ (confidence + reason ที่ matchEmailItem เขียน)
+ *  guess = ระบบเดาไว้ ให้คนยืนยัน · not_found = ไม่มีรหัสนี้ใน ERP / ชื่อไม่มีรหัสรุ่น · multi = มีหลายสี เลือกจากเมลไม่ได้ */
+export type PendingQueue = "guess" | "multi" | "not_found";
+export function pendingQueueOf(raw: { confidence?: unknown; reason?: unknown; suggest_sku_id?: unknown } | null | undefined): PendingQueue {
+  if (raw?.suggest_sku_id) return "guess";
+  const reason = String(raw?.reason ?? "");
+  if (/^ไม่พบรหัส|^ชื่อสินค้าไม่มีรหัสรุ่น/.test(reason)) return "not_found";
+  return "multi";
+}
