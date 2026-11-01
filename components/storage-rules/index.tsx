@@ -186,7 +186,7 @@ export function StorageRuleEditModal({ rule, onClose, onSaved }: { rule: Storage
 
   const input = { provider, max_bytes: maxMb.trim() === "" ? null : Number(maxMb) * 1024 * 1024 };
   const checked = validateRulePatch(rule, input);
-  const dirty = !checked.error && Object.keys(checked.patch).length > 0;
+  const dirty = !!checked.patch && Object.keys(checked.patch).length > 0;
   const status = ruleStatus({ rule_key: rule.rule_key, provider });
 
   const save = async () => {

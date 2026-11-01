@@ -75,6 +75,7 @@
    กฎ = R2 → ทางเดิม `/api/admin/upload` (≤ 4 MB · ลงคลังไฟล์กลางอัตโนมัติ) → R2 key
    กฎ = Drive → ปฏิเสธ (ช่องอัปทั่วไปยังไม่รู้ว่าจะลงโฟลเดอร์ไหน)
 - ของกลาง `FileInput` รับ prop `category` → ทำตามกฎ (ไม่ส่ง = ทางเดิม R2)
+- ระหว่างอัป: `onProgress(pct)` / `onStart({ abort })` (เฉพาะทาง Supabase) → โชว์ด้วย `UploadProgress` (`docs/upload-progress.md`) · กดยกเลิก = `FileUploadError.aborted`
 
 ### เปิดดู — `useFileRefUrls(refs)` (`components/file-ref`)
 

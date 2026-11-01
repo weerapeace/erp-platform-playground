@@ -1,7 +1,7 @@
 /**
  * POST /api/files/upload-target — ตัวอัปกลาง: ถามว่าไฟล์หมวดนี้ต้องส่งไปที่เก็บไหน (ตามกฎ erp_storage_rules)
  *   body { category, file_name, size_bytes }
- *   → { provider: "supabase", bucket, path, token, ref }   เบราว์เซอร์อัปตรงด้วย uploadToSignedUrl (ข้ามลิมิต ~4.5 MB ของ Vercel)
+ *   → { provider: "supabase", bucket, path, token, upload_url, ref }   เบราว์เซอร์ส่งไฟล์ตรงเข้า upload_url (มี % · ข้ามลิมิต ~4.5 MB ของ Vercel)
  *   → { provider: "r2" }                                    เบราว์เซอร์อัปทางเดิม /api/admin/upload (≤ 4 MB)
  *   หมวดที่ตั้งเป็น Drive = 400 (ช่องอัปทั่วไปยังไม่รู้ว่าจะลงโฟลเดอร์ไหน)
  * ตรวจ: สิทธิ์อัปของหมวด (STORAGE_CATEGORY_PERMISSIONS) + ชนิด/ขนาดตามกฎ · ฝั่งหน้าจอ: lib/file-upload.ts
@@ -50,5 +50,5 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const { data: signed, error: signErr } = await admin.storage.from(ERP_FILES_BUCKET).createSignedUploadUrl(path);
   if (signErr || !signed) return NextResponse.json({ error: "ขอสิทธิ์อัปโหลดไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
   const finalPath = signed.path ?? path;
-  return NextResponse.json({ provider: "supabase", bucket: ERP_FILES_BUCKET, path: finalPath, token: signed.token, ref: supabaseFileRef(ERP_FILES_BUCKET, finalPath), error: null });
+  return NextResponse.json({ provider: "supabase", bucket: ERP_FILES_BUCKET, path: finalPath, token: signed.token, upload_url: signed.signedUrl, ref: supabaseFileRef(ERP_FILES_BUCKET, finalPath), error: null });
 }
