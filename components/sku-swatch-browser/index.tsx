@@ -9,7 +9,7 @@
  *   โหมดตั้งค่า — ลากสี่เหลี่ยมบนรูป → ตัวเลือก SKU เด้งให้ผูกทันที (1 กรอบ = 1 SKU) · ย้าย/ปรับขนาด/ลบได้
  * จัดหมวดด้วยแท็กกลาง (product_families) ชุดเดียวกับหน้า SKU
  *
- * ของกลางที่ใช้: ImageRegions (จุดบนรูป) · SkuPicker · TagGroupFilter · uploadResizedImage · ERPModal · ConfirmDialog
+ * ของกลางที่ใช้: ImageRegions (จุดบนรูป) · SkuPicker · TagGroupFilter · uploadImagesWithDupCheck (ถามรูปซ้ำ) · ERPModal · ConfirmDialog
  *               · MasterRecordDrawer · usePermission · useToast · apiFetch · r2ImageUrl
  * API: /api/sku-swatches (GET/POST/PATCH/DELETE) · สิทธิ์ตั้งค่า = products.edit · ดู = products.view
  */
@@ -24,7 +24,7 @@ import { usePermission } from "@/components/auth";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
-import { uploadResizedImage } from "@/components/image-attach";
+import { uploadImagesWithDupCheck, type DuplicateCheckOptions } from "@/components/duplicate-upload";
 import { ImageRegions } from "@/components/image-regions";
 import { PrCreateModal, type PrCreateItem } from "@/components/pr-create-modal";
 import { BundleAddModal, type BundleAddItem } from "@/components/bundle-add-modal";
@@ -47,10 +47,15 @@ function readImageSize(file: File): Promise<{ w: number; h: number }> {
     img.src = url;
   });
 }
-async function uploadSwatchImage(file: File) {
-  const [size, up] = await Promise.all([readImageSize(file), uploadResizedImage(file, { folder: "swatches", max: 2400 })]);
+/** อัปรูปแผ่น — รูปที่มีในคลังแล้วถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อน (ของกลาง uploadImagesWithDupCheck) · null = กดยกเลิก/ข้าม */
+async function uploadSwatchImage(file: File, dup: DuplicateCheckOptions) {
+  const errs: Error[] = [];
+  const [size, up] = await Promise.all([readImageSize(file), uploadImagesWithDupCheck([file], { folder: "swatches", max: 2400, ...dup, onError: (_, e) => errs.push(e) })]);
+  if (errs[0]) throw errs[0];
+  const key = up?.keys[0];
+  if (!key) return null;
   // รูปถูกย่อให้ด้านยาว ≤ 2400 — เก็บสัดส่วนเดิม (พิกัดจุดเป็น % จึงไม่กระทบ)
-  return { image_key: up.r2_key, image_w: size.w, image_h: size.h };
+  return { image_key: key, image_w: size.w, image_h: size.h };
 }
 
 export function SwatchBrowser({ openId, focusSpotId }: {
@@ -216,7 +221,8 @@ function CreateSwatchModal({ onClose, onCreated }: { onClose: () => void; onCrea
     if (!file || saving) return;
     setSaving(true);
     try {
-      const img = await uploadSwatchImage(file);
+      const img = await uploadSwatchImage(file, { target: name.trim() ? `แผ่น swatch ${name.trim()}` : "แผ่น swatch ใหม่" });
+      if (!img) return;
       const j = await apiFetch("/api/sku-swatches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, family_tag_ids: tags.tagIds, ...img }) }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       toast.success("เพิ่มแผ่น swatch แล้ว — ลากสี่เหลี่ยมบนรูปเพื่อผูก SKU ได้เลย");
@@ -334,7 +340,8 @@ function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged,
     if (!data) return;
     setSaving(true);
     try {
-      const img = await uploadSwatchImage(file);
+      const img = await uploadSwatchImage(file, { target: `แผ่น ${titleOf(data)} · เปลี่ยนรูป`, existingKeys: data.image_key ? [data.image_key] : [] });
+      if (!img) return;
       const j = await apiFetch("/api/sku-swatches", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: data.id, ...img }) }).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       setData({ ...data, ...img });
