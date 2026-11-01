@@ -1,0 +1,177 @@
+"use client";
+/**
+ * ป๊อปแก้ 1 งานในแผนงานทีม — ชื่อ · โน้ต · ความด่วน · สำคัญ · กำหนด · ผู้รับผิดชอบ · เตือน · ทำซ้ำ · รอคนอื่น · ลบ
+ * บันทึกเฉพาะช่องที่เปลี่ยน (PATCH /api/team-plan/[id]) · ปิดตอนยังไม่บันทึก = ถามก่อน (ERPModal กลาง)
+ */
+import { useMemo, useState } from "react";
+import { ConfirmDialog, ERPModal } from "@/components/modal";
+import { useToast } from "@/components/toast";
+import { Icon } from "@/components/icon";
+import { WhoChip, WhoPicker } from "@/components/record-tasks/checklist";
+import { ERPDateTime24 } from "@/components/form";
+import {
+  dueLabel, PRIORITIES, PRIORITY_META, REMIND_LABEL, REMIND_MODES, waitingDays,
+  type PlanItem, type Priority, type RemindMode, type RepeatRule,
+} from "@/lib/team-plan";
+import { deletePlanItem, patchPlanItem, type PlanPatch } from "@/lib/team-plan-client";
+
+/** ISO → "YYYY-MM-DDTHH:mm" เวลาไทย (ค่าของช่อง ERPDateTime24) */
+const toLocal = (iso: string | null) => (iso ? new Date(Date.parse(iso) + 7 * 3600e3).toISOString().slice(0, 16) : "");
+const fromLocal = (v: string) => (v ? new Date(`${v}:00+07:00`).toISOString() : null);
+
+export function PlanEditModal({ item, canEdit, me, onClose, onSaved, onDeleted }: {
+  item: PlanItem; canEdit: boolean; me: string;
+  onClose: () => void; onSaved: (list: PlanItem[]) => void; onDeleted: (id: string) => void;
+}) {
+  const toast = useToast();
+  const [title, setTitle] = useState(item.title);
+  const [note, setNote] = useState(item.note ?? "");
+  const [priority, setPriority] = useState<Priority>(item.priority);
+  const [important, setImportant] = useState(item.plan.important);
+  const [due, setDue] = useState(toLocal(item.due_at));
+  const [who, setWho] = useState<{ id: string; name: string } | null>(item.assigned_to ? { id: item.assigned_to, name: item.assigned_name ?? "ผู้ใช้" } : null);
+  const [picking, setPicking] = useState(false);
+  const [remind, setRemind] = useState<RemindMode>(item.plan.remind);
+  const [repeatEvery, setRepeatEvery] = useState<RepeatRule["every"] | "">(item.plan.repeat?.every ?? "");
+  const [repeatN, setRepeatN] = useState(item.plan.repeat?.n ?? 1);
+  const [waitingOn, setWaitingOn] = useState(!!item.plan.waiting);
+  const [waitingNote, setWaitingNote] = useState(item.plan.waiting?.note ?? "");
+  const [busy, setBusy] = useState(false);
+  const [askDelete, setAskDelete] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // เฉพาะช่องที่เปลี่ยน
+  const patch = useMemo<PlanPatch>(() => {
+    const p: PlanPatch = {};
+    if (title.trim() !== item.title) p.title = title.trim();
+    if ((note.trim() || null) !== (item.note || null)) p.note = note.trim() || null;
+    if (priority !== item.priority) p.priority = priority;
+    if (important !== item.plan.important) p.important = important;
+    const dueIso = fromLocal(due);
+    if ((dueIso ?? null) !== (item.due_at ? new Date(item.due_at).toISOString() : null)) p.due_at = dueIso;
+    if ((who?.id ?? null) !== item.assigned_to) p.assigned_to = who?.id ?? null;
+    if (remind !== item.plan.remind) p.remind = remind;
+    const rep: RepeatRule | null = repeatEvery ? { every: repeatEvery, n: Math.max(1, Math.min(30, Math.round(repeatN) || 1)) } : null;
+    if (JSON.stringify(rep) !== JSON.stringify(item.plan.repeat)) p.repeat = rep;
+    const wait = waitingOn ? { note: waitingNote.trim() } : null;
+    if (JSON.stringify(wait) !== JSON.stringify(item.plan.waiting ? { note: item.plan.waiting.note } : null)) p.waiting = wait;
+    return p;
+  }, [title, note, priority, important, due, who, remind, repeatEvery, repeatN, waitingOn, waitingNote, item]);
+  const dirty = Object.keys(patch).length > 0;
+
+  const save = async (extra: PlanPatch = {}) => {
+    if (!title.trim()) { setErr("ชื่องานว่างไม่ได้"); return; }
+    if (repeatEvery && !due) { setErr("งานทำซ้ำต้องมีกำหนด — ใส่วันกำหนดก่อน"); return; }
+    const body = { ...patch, ...extra };
+    if (!Object.keys(body).length) { onClose(); return; }
+    setBusy(true); setErr(null);
+    try {
+      const { item: saved, next } = await patchPlanItem(item.id, body);
+      onSaved(next ? [saved, next] : [saved]);
+      if (next) toast.success(`งานทำซ้ำ — สร้างรอบถัดไปแล้ว (${dueLabel(next.due_at)})`);
+      else toast.success(extra.status === "resolved" ? "ติ๊กเสร็จแล้ว" : "บันทึกแล้ว");
+      onClose();
+    } catch (e) { setErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+    finally { setBusy(false); }
+  };
+  const remove = async () => {
+    setBusy(true);
+    try { await deletePlanItem(item.id); toast.success("ลบงานแล้ว"); onDeleted(item.id); }
+    catch (e) { toast.error(e instanceof Error ? e.message : "ลบไม่สำเร็จ"); }
+    finally { setBusy(false); setAskDelete(false); }
+  };
+
+  const done = item.status === "resolved";
+  const lbl = "mb-1 block text-xs font-medium text-slate-600";
+  const field = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:bg-slate-50";
+
+  return (
+    <ERPModal open onClose={onClose} title="งานในแผนงาน" size="md" hasUnsavedChanges={dirty}
+      footer={<>
+        {canEdit && (item.plan.created_by_id === me) && (
+          <button type="button" onClick={() => setAskDelete(true)} disabled={busy} className="mr-auto h-9 rounded-lg px-3 text-sm text-rose-600 hover:bg-rose-50"><Icon name="delete" /> ลบ</button>
+        )}
+        <button type="button" onClick={onClose} disabled={busy} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">ปิด</button>
+        {canEdit && !done && <button type="button" onClick={() => void save({ status: "resolved" })} disabled={busy} className="h-9 rounded-lg border border-emerald-300 bg-emerald-50 px-4 text-sm text-emerald-700 hover:bg-emerald-100"><Icon name="done" /> เสร็จแล้ว</button>}
+        {canEdit && <button type="button" onClick={() => void save()} disabled={busy || !dirty} className="h-9 rounded-lg bg-violet-600 px-4 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">{busy ? "กำลังบันทึก…" : <><Icon name="save" /> บันทึก</>}</button>}
+      </>}>
+      <div className="space-y-3">
+        <div>
+          <label className={lbl}>ชื่องาน</label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} maxLength={300} disabled={!canEdit} className={field} />
+        </div>
+        <div>
+          <label className={lbl}>ความด่วน</label>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {PRIORITIES.map((p) => (
+              <button key={p} type="button" disabled={!canEdit} onClick={() => setPriority(p)}
+                className={`h-8 rounded-full border px-3 text-xs ${priority === p ? "font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}
+                style={priority === p ? { borderColor: PRIORITY_META[p].color, color: PRIORITY_META[p].color, background: `${PRIORITY_META[p].color}14` } : undefined}>
+                {PRIORITY_META[p].label}
+              </button>
+            ))}
+            <label className="ml-2 flex cursor-pointer items-center gap-1 text-xs text-slate-600">
+              <input type="checkbox" checked={important} disabled={!canEdit} onChange={(e) => setImportant(e.target.checked)} className="h-3.5 w-3.5 accent-violet-600" /> สำคัญ (ใช้ในตาราง 4 ช่อง)
+            </label>
+          </div>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className={lbl}>กำหนด</label>
+            <div className="flex items-center gap-1.5">
+              <ERPDateTime24 value={due} onChange={setDue} defaultTime="18:00" disabled={!canEdit} />
+              {due && canEdit && <button type="button" onClick={() => setDue("")} className="text-xs text-slate-400 hover:text-slate-700">ล้าง</button>}
+            </div>
+          </div>
+          <div>
+            <label className={lbl}>เตือนก่อนถึงกำหนด</label>
+            <select value={remind} disabled={!canEdit || !due} onChange={(e) => setRemind(e.target.value as RemindMode)} className={field}>
+              {REMIND_MODES.map((m) => <option key={m} value={m}>{REMIND_LABEL[m]}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className={lbl}>ผู้รับผิดชอบ</label>
+          <WhoChip name={who?.name} onClick={canEdit ? () => setPicking((p) => !p) : undefined} />
+          {picking && <WhoPicker allowNone={!!who} onCancel={() => setPicking(false)} onPick={(u) => { setWho(u); setPicking(false); }} />}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label className={lbl}><Icon name="repeat" /> ทำซ้ำ</label>
+            <div className="flex items-center gap-1.5">
+              <select value={repeatEvery} disabled={!canEdit} onChange={(e) => setRepeatEvery(e.target.value as RepeatRule["every"] | "")} className={field}>
+                <option value="">ไม่ทำซ้ำ</option><option value="day">ทุกวัน</option><option value="week">ทุกสัปดาห์</option><option value="month">ทุกเดือน</option>
+              </select>
+              {repeatEvery && <>
+                <span className="text-xs text-slate-500">ทุก</span>
+                <input type="number" min={1} max={30} value={repeatN} disabled={!canEdit} onChange={(e) => setRepeatN(Number(e.target.value))} className="h-9 w-16 rounded-lg border border-slate-200 px-2 text-sm" aria-label="ทุกกี่รอบ" />
+              </>}
+            </div>
+            {repeatEvery && <p className="mt-1 text-[11px] text-slate-400">ติ๊กเสร็จแล้วระบบสร้างรอบถัดไปให้เอง</p>}
+          </div>
+          <div>
+            <label className="mb-1 flex cursor-pointer items-center gap-1.5 text-xs font-medium text-slate-600">
+              <input type="checkbox" checked={waitingOn} disabled={!canEdit} onChange={(e) => setWaitingOn(e.target.checked)} className="h-3.5 w-3.5 accent-amber-500" />
+              <Icon name="waiting" /> รอคนอื่นอยู่
+            </label>
+            <input value={waitingNote} onChange={(e) => setWaitingNote(e.target.value)} disabled={!canEdit || !waitingOn} maxLength={120}
+              placeholder="รออะไร / รอใคร เช่น รอลูกค้าตอบ" className={field} />
+            {item.plan.waiting && waitingOn && <p className="mt-1 text-[11px] text-amber-700">รอมาแล้ว {waitingDays(item.plan.waiting.since)} วัน</p>}
+          </div>
+        </div>
+        <div>
+          <label className={lbl}>โน้ต</label>
+          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} maxLength={4000} disabled={!canEdit}
+            className="w-full rounded-lg border border-slate-200 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 disabled:bg-slate-50" />
+        </div>
+        {item.plan.source && (
+          <a href={item.plan.source.href} className="inline-flex items-center gap-1 text-sm text-blue-700 hover:underline"><Icon name="link" /> เปิดเรื่องเดิม: {item.plan.source.label}</a>
+        )}
+        <p className="text-[11px] text-slate-400">สร้างโดย {item.created_by ?? "—"}{done && item.resolved_by ? ` · เสร็จโดย ${item.resolved_by}` : ""}</p>
+        {err && <p className="text-sm text-rose-600">{err}</p>}
+      </div>
+      <ConfirmDialog open={askDelete} onClose={() => setAskDelete(false)} onConfirm={() => void remove()} loading={busy} variant="danger"
+        title="ลบงานนี้?" message={`"${item.title}" จะหายจากแผนงาน (ยังมีบันทึกในประวัติ)`} confirmText="ลบ" />
+    </ERPModal>
+  );
+}

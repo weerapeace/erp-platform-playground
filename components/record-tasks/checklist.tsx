@@ -51,7 +51,7 @@ export function WhoChip({ name, onClick, compact = false, title }: { name: strin
 
 /** เลือกผู้รับผิดชอบแบบเปิดในแถว (ไม่ซ้อน popover กับรายการของ UserPicker)
  *  3 คนที่เลือกล่าสุด = ปุ่มลัดกดได้เลย ไม่ต้องพิมพ์ (ของกลาง useRecentUsers · ประวัติเดียวกับ UserPicker) */
-function WhoPicker({ onPick, onCancel, allowNone }: { onPick: (u: { id: string; name: string } | null) => void; onCancel: () => void; allowNone: boolean }) {
+export function WhoPicker({ onPick, onCancel, allowNone }: { onPick: (u: { id: string; name: string } | null) => void; onCancel: () => void; allowNone: boolean }) {
   const { recent, remember } = useRecentUsers(3);
   return (
     <div className="ml-6 mt-1 flex flex-wrap items-center gap-1.5 rounded-md bg-slate-50 p-1.5">

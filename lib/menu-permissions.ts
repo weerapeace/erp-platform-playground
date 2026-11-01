@@ -17,6 +17,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/tasks", prefixes: ["tasks.", "task_subtask.", "task_template."], keys: ["ai.caption", "product_media.sync", "sku_description.sync"] },
   { href: "/tasks/campaigns", sameAs: "/tasks" },
   { href: "/tasks/content-calendar", sameAs: "/tasks" },
+  { href: "/tasks/plan", sameAs: "/tasks" },   // แผนงานทีม — ใช้สิทธิ์ tasks.view/create/edit/delete
   { href: "/marketing/content-plan", sameAs: "/tasks" },
   { href: "/tasks/nesting", prefixes: ["nesting."] },
   { href: "/master/skus", prefixes: ["products."], keys: ["attachments.upload", "attachments.delete"] },
