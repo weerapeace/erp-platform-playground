@@ -12,11 +12,13 @@
  *    ค่าเริ่มต้น = เพิ่มต่อท้าย (ของเดิมอยู่ครบ) · แทนที่ = เฉพาะช่องที่มีรูปใหม่ · เกิน 20 สินค้า + แทนที่ = พิมพ์ CONFIRM
  *    ครั้งละ ≤ 1,000 ไฟล์: รูปพรีวิวย่อ (สูง 160px · ทำทีละ 3 รูปเบื้องหลัง) · แสดงทีละ 30 สินค้า
  *    👀 เตือนรูปหน้าตาเหมือนรูปเดิมบนเว็บ (lib/image-similarity · เทียบกับรูปบนเว็บ+รูปสีของสินค้านั้น · โหมดต่อท้าย · เตือนอย่างเดียว)
+ *    🔁 รูปที่มีในคลังไฟล์แล้ว (ของกลาง findDuplicateMatches · ตรวจเบื้องหลังระหว่างดู ยังไม่ส่งไฟล์) → ป้าย "ใช้รูปเดิม / อัปใหม่" บนรูป
+ *       ใช้รูปเดิม = ตอนลงไม่อัปไฟล์ซ้ำ ใช้ไฟล์เดิมในคลัง · รูปเดียวกับที่อยู่บนเว็บสินค้านั้นแล้ว = ป้าย "ซ้ำเดิม" (กดไม่ลงทั้งหมดได้)
  *    🔁 รูปซ้ำกันเองในชุดที่ลากมา (เทียบในเครื่อง: sha256 ไฟล์ทุกสินค้า + ลายนิ้วมือภาพในสินค้าเดียวกัน · ไม่รวม Hero) → ป้าย "ซ้ำ #n" (แถวเดียวกัน) / "= -01 #n" (ข้ามแถว)
  *       ทั้งแถวเหมือนอีกแถว = เตือนหัวแถว (ไม่ลงแถวนี้ / ย้ายแถว) · ไฟล์เดียวกันเป๊ะ = ตอนลงอัปครั้งเดียวใช้ร่วมกัน
  * 3) กดลงรูป → ลงเป็นรอบ รอบละ 20 สินค้า (อัปรูป → บันทึกลงเว็บทันที) · runBackgroundTask = ปิดหน้าต่างได้ · ลงซ้ำเฉพาะไฟล์ที่พลาด (ไม่อัปใหม่ไฟล์ที่อัปแล้ว · ช่องที่บันทึกแล้ว = ต่อท้าย)
  *    รูปย่อ ≤ 2000px (uploadResizedImage) · วิดีโอใช้ตัวอัปกลาง uploadMediaFile (ตัวเดียวกับช่อง Hero ทีละตัว) → R2 (ทีละ 3 ไฟล์ · ไฟล์ที่ไม่ได้ลงจะไม่อัป) → POST /api/website/listings/images (รวมกับรูปล่าสุดใน DB + audit + ล้างแคชเว็บ)
- * ของกลาง: ERPModal · useFileDrop(folders) · useDragReorder · useUserPref · runBackgroundTask · image-similarity · uploadResizedImage · uploadMediaFile · toast
+ * ของกลาง: ERPModal · useFileDrop(folders) · useDragReorder · useUserPref · runBackgroundTask · image-similarity · findDuplicateMatches (รูปซ้ำในคลัง) · HoverImage · uploadResizedImage · uploadMediaFile · toast
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { apiFetch } from "@/lib/api";
@@ -24,8 +26,10 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { useFileDrop, FileDropHint, filePathOf } from "@/components/file-drop";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
-import { uploadResizedImage } from "@/components/image-attach";
-import { sha256Hex } from "@/lib/assets";
+import { prepareResizedImage, uploadResizedImage } from "@/components/image-attach";
+import { findDuplicateMatches, type DuplicateMatch } from "@/components/duplicate-upload";
+import { HoverImage } from "@/components/hover-image";
+import { formatBytes, sha256Hex } from "@/lib/assets";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useUserPref } from "@/lib/use-user-pref";
 import { runBackgroundTask } from "@/lib/background-tasks";
@@ -100,8 +104,10 @@ const LINK_OPTS: { v: LinkReorder; label: string }[] = [
 const parseLink = (v: unknown): LinkReorder | null => (v === "row" || v === "product" || v === "all" ? v : null);
 const CONFIRM_OVER = 20;
 const UPLOAD_CONCURRENCY = 3;
-/** ด้านยาวสุดของรูปที่อัป (px) */
+/** ด้านยาวสุดของรูปที่อัป (px) · ตรวจกับคลังย่อด้วยขนาดเดียวกัน → ลายนิ้วมือไฟล์ตรงกับไฟล์ที่จะอัปจริง */
 const UPLOAD_MAX = 2000;
+/** ตรวจกับคลังทีละกี่ไฟล์ (ย่อรูปทีละชุด ไม่กินหน่วยความจำตอนลากมาเป็นร้อยไฟล์) */
+const LIB_BATCH = 20;
 const seg = (on: boolean) => `px-3 py-1 text-xs rounded-md border ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:border-slate-400"}`;
 /** รูปเดิมบนเว็บของช่องนั้น (R2 key ตามลำดับที่โชว์) */
 const existingKeys = (t: ImageTarget, p: CatalogParent): string[] => {
@@ -163,6 +169,10 @@ export function WebsiteImageMassUpload({
   const [oldPrints, setOldPrints] = useState<Record<string, VisualPrint | null>>({});
   const prepAsked = useRef(new Set<string>());
   const oldAsked = useRef(new Set<string>());
+  /** 🔁 รูปที่มีในคลังแล้ว ต่อไฟล์ (null = ไม่ซ้ำ/ตรวจไม่ได้ · ไม่มี key = ยังตรวจไม่ถึง) + เลือกเอง (true = ใช้รูปเดิม · false = อัปใหม่ · ไม่มี = ตามที่ระบบแนะนำ) */
+  const [libDup, setLibDup] = useState<Record<string, DuplicateMatch | null>>({});
+  const [libUse, setLibUse] = useState<Record<string, boolean>>({});
+  const libAsked = useRef(new Set<string>());
   const previewsRef = useRef(previews);
   previewsRef.current = previews;
   /** ตอนลง: ไฟล์ที่อัปแล้ว (id → key · ลงซ้ำไม่อัปใหม่) · ช่องที่บันทึกแล้ว (ลงซ้ำ = ต่อท้าย) · แผนตอนกดลง (ลงซ้ำใช้แผนเดิม) */
@@ -180,10 +190,13 @@ export function WebsiteImageMassUpload({
     for (const it of itemsRef.current) URL.revokeObjectURL(it.url);
     for (const u of Object.values(previewsRef.current)) URL.revokeObjectURL(u);
     prepAsked.current = new Set();
+    libAsked.current = new Set();
     setItems([]);
     setPreviews({});
     setPrints({});
     setSums({});
+    setLibDup({});
+    setLibUse({});
     setShown(SHOW_PRODUCTS);
     setLookShown(SHOW_LOOK);
   };
@@ -333,6 +346,41 @@ export function WebsiteImageMassUpload({
       flush();
     });
   }, [items]);
+  // 🔁 ตรวจรูปที่มีในคลังแล้ว (ของกลาง findDuplicateMatches) — ระหว่างดูรายการ ยังไม่ส่งไฟล์ขึ้น (รูปที่กดไม่ลงจะไม่ถูกอัปเลย)
+  //    ย่อแบบเดียวกับตอนอัปจริง → ลายนิ้วมือไฟล์ตรงกัน · ทีละ LIB_BATCH ไฟล์ · ตรวจไม่ได้ = อัปตามปกติ
+  useEffect(() => {
+    if (phase !== "pick") return;
+    const want = items.filter((it) => !it.video && !it.invalid && !libAsked.current.has(it.id));
+    if (!want.length) return;
+    want.forEach((it) => libAsked.current.add(it.id));
+    void (async () => {
+      for (let i = 0; i < want.length; i += LIB_BATCH) {
+        const batch = want.slice(i, i + LIB_BATCH).filter((it) => libAsked.current.has(it.id));
+        if (!batch.length) continue;
+        const got: Record<string, DuplicateMatch | null> = {};
+        const cands: { id: string; file: File; original: File }[] = [];
+        for (const it of batch) {
+          try {
+            cands.push({ id: it.id, file: await prepareResizedImage(it.file, UPLOAD_MAX), original: it.file });
+          } catch {
+            got[it.id] = null; // ถอดรหัสไม่ได้ (เช่น HEIC) = ไม่ตรวจ
+          }
+        }
+        const res = cands.length ? await findDuplicateMatches(cands) : [];
+        cands.forEach((c, k) => {
+          got[c.id] = res[k] ?? null;
+        });
+        setLibDup((m) => ({ ...m, ...got }));
+      }
+    })();
+  }, [items, phase]);
+  /** key รูปเดิมในคลังที่จะใช้แทนการอัป (null = อัปตามปกติ) */
+  const reuseOf = (id: string): string | null => {
+    const m = libDup[id];
+    if (!m) return null;
+    return (libUse[id] ?? m.decision !== "new") ? m.match.r2_key : null;
+  };
+
   const uploadIds = plan.dests.flatMap((d) => d.fileIds);
   const touched = [...new Set(plan.dests.map((d) => d.parentId))];
   const needLook = plan.files.filter((f) => f.plan !== "upload" && f.plan !== "skip");
@@ -405,11 +453,18 @@ export function WebsiteImageMassUpload({
     if (mode !== "append") return out;
     for (const d of plan.dests) {
       if (d.target.kind === "hero" || d.target.kind === "skuHero") continue;
-      const olds = (oldOf.get(d.parentId) ?? []).filter((o) => oldPrints[o.key]);
+      // คลังบอกว่าเป็นไฟล์เดียวกับรูปที่อยู่บนเว็บสินค้านี้แล้ว = ซ้ำเดิมแน่นอน (ไม่ต้องรอเทียบหน้าตา)
+      const webOld = oldOf.get(d.parentId) ?? [];
+      for (const id of d.fileIds) {
+        const k = libDup[id]?.match.r2_key;
+        const o = k ? webOld.find((x) => x.key === k) : undefined;
+        if (o) out.set(id, { level: "same", where: o.where });
+      }
+      const olds = webOld.filter((o) => oldPrints[o.key]);
       if (!olds.length) continue;
       for (const id of d.fileIds) {
         const vp = prints[id];
-        if (!vp) continue;
+        if (!vp || out.has(id)) continue;
         let best: Dup | null = null;
         for (const o of olds) {
           const lv = similarity(vp, oldPrints[o.key] as VisualPrint);
@@ -420,11 +475,17 @@ export function WebsiteImageMassUpload({
       }
     }
     return out;
-  }, [plan, oldOf, oldPrints, prints, mode]);
+  }, [plan, oldOf, oldPrints, prints, mode, libDup]);
   const dupSameIds = [...dupOf].filter(([, v]) => v.level === "same").map(([id]) => id);
   const imgTotal = items.filter((it) => !it.video && !it.invalid).length;
   const imgPrepped = items.filter((it) => !it.video && !it.invalid && it.id in prints).length;
   const oldPending = mode === "append" ? [...oldAsked.current].filter((k) => !(k in oldPrints)).length : 0;
+  // 🔁 สรุปรูปที่มีในคลัง (เฉพาะไฟล์ที่จะลง) · ใช้รูปเดิม = ไม่ต้องอัป
+  const libChecked = items.filter((it) => !it.video && !it.invalid && it.id in libDup).length;
+  const libIds = uploadIds.filter((id) => libDup[id]);
+  const reuseIds = libIds.filter((id) => reuseOf(id));
+  const reuseBytes = reuseIds.reduce((s, id) => s + (libDup[id]?.match.size_bytes ?? 0), 0);
+  const setLibUseMany = (ids: string[], use: boolean) => setLibUse((m) => ({ ...m, ...Object.fromEntries(ids.map((id) => [id, use])) }));
 
   // 🔁 รูปซ้ำกันเองในชุดที่ลากมา (ยังไม่อัป · เทียบในเครื่อง) — ไฟล์เดียวกันเป๊ะ (sha256 · ทุกสินค้า) หรือหน้าตาเหมือน (ลายนิ้วมือภาพ · เฉพาะในสินค้าเดียวกัน)
   //    รูปแรกตามลำดับแถว = ตัวหลัก · รูปถัดไปที่ซ้ำ = ป้ายบอกว่าเหมือนรูปไหน · ไม่รวม Hero (ใช้รูปเดียวกับแกลเลอรีได้ตามปกติ) · เตือนอย่างเดียว ไม่ข้ามเอง
@@ -468,8 +529,8 @@ export function WebsiteImageMassUpload({
   };
   const twinIds = uploadIds.filter((id) => twinOf.has(id));
   const sameRowTwinIds = twinIds.filter((id) => twinOf.get(id)?.destKey === destOfFile.get(id));
-  /** ไฟล์ที่จะอัปจริง (ไฟล์เดียวกันเป๊ะนับครั้งเดียว) */
-  const uploadReal = new Set(uploadIds.map((id) => sums[id] ?? id)).size;
+  /** ไฟล์ที่จะอัปจริง (ไม่นับที่ใช้รูปเดิมในคลัง · ไฟล์เดียวกันเป๊ะนับครั้งเดียว) */
+  const uploadReal = new Set(uploadIds.filter((id) => !reuseOf(id)).map((id) => sums[id] ?? id)).size;
 
   // ร้านอื่นที่มีรุ่นที่จะลงรูป
   const otherShops = useMemo(() => {
@@ -576,6 +637,11 @@ export function WebsiteImageMassUpload({
       keysRef.current = new Map();
       savedDestRef.current = new Set();
       runPlanRef.current = plan.dests;
+      // 🔁 ใช้รูปเดิมในคลัง → ใส่ key เดิมไว้ก่อน (ตัวอัปข้ามไฟล์ที่มี key แล้ว = ไม่อัปไฟล์ซ้ำ)
+      for (const id of uploadIds) {
+        const k = reuseOf(id);
+        if (k) keysRef.current.set(id, k);
+      }
     }
     const want = prev ? new Set(prev.failed.map((x) => x.id)) : null;
     const dests = runPlanRef.current.map((d) => (want ? { ...d, fileIds: d.fileIds.filter((id) => want.has(id)) } : d)).filter((d) => d.fileIds.length);
@@ -720,13 +786,19 @@ export function WebsiteImageMassUpload({
     const folder = parts.pop();
     const src = previews[id];
     const dup = dupOf.get(id);
-    // 🔁 ซ้ำกันเองในชุดนี้ (ป้ายเดียวต่อรูป: ซ้ำเดิมบนเว็บก่อน) · ซ้ำในแถวเดียวกัน = แดง · ข้ามแถว = เหลือง
+    // 🔁 ซ้ำกันเองในชุดนี้ (ป้ายเดียวต่อรูป: ซ้ำเดิมบนเว็บ → ซ้ำในชุด → มีในคลัง) · ซ้ำในแถวเดียวกัน = แดง · ข้ามแถว = เหลือง
     const twin = !dup ? twinOf.get(id) : undefined;
     const myDest = destOfFile.get(id);
     const twinSameRow = !!twin && twin.destKey === myDest;
     const twinLabel = twin ? (twinSameRow ? `ซ้ำ #${twin.num}` : `= ${rowShort(twin.destKey, destByKey.get(myDest ?? "")?.parentId ?? "")} #${twin.num}`) : "";
     const twinTip = twin
       ? `${twin.exact ? "ไฟล์เดียวกันกับ" : "หน้าตาเหมือน"}${twinSameRow ? "รูปที่ " : `แถว ${rowShort(twin.destKey, "")} รูปที่ `}${twin.num} ในชุดที่ลากมา${twin.exact ? "\nถ้าลงทั้งคู่ ไฟล์นี้อัปครั้งเดียวแล้วใช้ร่วมกัน" : ""}`
+      : "";
+    // 🔁 มีในคลังแล้ว (ที่อื่น) — กดป้ายสลับ ใช้รูปเดิม ↔ อัปใหม่ · ชี้รูปกลมเล็ก = ดูรูปเดิมในคลัง
+    const lib = !dup && !twin && !it.video ? libDup[id] : null;
+    const useLib = !!lib && !!reuseOf(id);
+    const libTip = lib
+      ? `${lib.kind === "look" ? "รูปหน้าตาเหมือนกัน" : "รูปนี้"}มีในคลังแล้ว: ${lib.match.file_name ?? lib.match.r2_key}${lib.match.usedIn.length ? `\nใช้อยู่ที่ ${lib.match.usedIn.join(", ")}` : ""}${lib.unsure ? "\nรายละเอียดต่างกันนิดหน่อย — ตรวจด้วยตาก่อน" : ""}\n${useLib ? "ตอนลงจะใช้รูปเดิม (ไม่อัปซ้ำ)" : "ตอนลงจะอัปรูปนี้ใหม่"} — กดเพื่อสลับ`
       : "";
     return (
       <div key={id} className={`group relative w-16 shrink-0 ${opts.muted ? "opacity-50" : ""}`} title={dup ? `${it.path}\n${dup.level === "same" ? "หน้าตาเหมือน" : "คล้าย"}${dup.where} (ดูรูปจางด้านซ้าย)` : it.path}>
@@ -737,7 +809,7 @@ export function WebsiteImageMassUpload({
           </>
         ) : src ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={src} alt="" loading="lazy" decoding="async" draggable={false} {...(opts.handle ?? {})} title={opts.handle ? "กดค้างแล้วลาก = สลับลำดับ (เลข 1 = รูปหลัก)" : it.path} className={`h-20 w-16 rounded-md border object-cover bg-slate-100 ${dup ? "border-amber-400" : twin ? (twinSameRow ? "border-rose-400" : "border-amber-400") : "border-slate-200"} ${opts.handle ? "cursor-grab active:cursor-grabbing" : ""}`} />
+          <img src={src} alt="" loading="lazy" decoding="async" draggable={false} {...(opts.handle ?? {})} title={opts.handle ? "กดค้างแล้วลาก = สลับลำดับ (เลข 1 = รูปหลัก)" : it.path} className={`h-20 w-16 rounded-md border object-cover bg-slate-100 ${dup ? "border-amber-400" : twin ? (twinSameRow ? "border-rose-400" : "border-amber-400") : useLib ? "border-blue-400" : "border-slate-200"} ${opts.handle ? "cursor-grab active:cursor-grabbing" : ""}`} />
         ) : (
           <div {...(opts.handle ?? {})} className="h-20 w-16 animate-pulse rounded-md border border-slate-200 bg-slate-100" />
         )}
@@ -746,6 +818,17 @@ export function WebsiteImageMassUpload({
           <span title={twinTip} className={`absolute right-0.5 top-0.5 max-w-[60px] truncate rounded px-1 text-[10px] leading-4 text-white ${twinSameRow ? "bg-rose-600" : "bg-amber-600"}`}>
             {twinLabel}
           </span>
+        )}
+        {lib && (
+          <>
+            <button type="button" disabled={phase !== "pick"} onPointerDown={(e) => e.stopPropagation()} onClick={() => setLibUse((m) => ({ ...m, [id]: !useLib }))} title={libTip}
+              className={`absolute right-0.5 top-0.5 rounded px-1 text-[10px] leading-4 ${useLib ? "bg-blue-600 text-white" : "border border-slate-300 bg-white/95 text-slate-600"}`}>
+              {useLib ? "ใช้รูปเดิม" : "อัปใหม่"}
+            </button>
+            <span className="absolute bottom-[22px] left-0.5 rounded-full border-2 border-white bg-white shadow" onPointerDown={(e) => e.stopPropagation()} title={libTip}>
+              <HoverImage url={r2ImageUrl(lib.match.r2_key, 400)} size={18} previewSize={240} rounded="rounded-full" />
+            </span>
+          </>
         )}
         {opts.index != null && !it.video && <span className="pointer-events-none absolute left-1 top-1 rounded bg-black/55 px-1 text-[10px] leading-4 text-white">{opts.index + 1}</span>}
         {opts.onMove && phase === "pick" && (
@@ -901,9 +984,28 @@ export function WebsiteImageMassUpload({
                     </button>
                   )}
                   {uploadReal < uploadIds.length && (
-                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-blue-700" title="ไฟล์เดียวกันเป๊ะอัปครั้งเดียวแล้วใช้ร่วมกัน">
+                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-blue-700" title="ไฟล์เดียวกันเป๊ะอัปครั้งเดียวแล้วใช้ร่วมกัน · รูปที่ใช้รูปเดิมในคลังไม่ต้องอัป">
                       อัปจริง {uploadReal} จาก {uploadIds.length} ไฟล์
                     </span>
+                  )}
+                  {libIds.length > 0 && (
+                    <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-blue-700" title="รูปเดียวกันมีในคลังไฟล์แล้ว — ใช้รูปเดิม = ตอนลงไม่ต้องอัปไฟล์ซ้ำ (กดป้ายบนรูปเพื่อสลับทีละรูป)">
+                      <Icon name="library" className="mr-0.5 inline-block align-[-2px]" />มีในคลังแล้ว {libIds.length} · ใช้รูปเดิม {reuseIds.length}
+                      {reuseBytes > 0 ? ` (ไม่ต้องอัป ${formatBytes(reuseBytes)})` : ""}
+                    </span>
+                  )}
+                  {phase === "pick" && reuseIds.length < libIds.length && (
+                    <button type="button" onClick={() => setLibUseMany(libIds, true)} className="rounded-full border border-blue-300 bg-white px-2.5 py-0.5 text-blue-700 hover:bg-blue-50">
+                      ใช้รูปเดิมทั้งหมด
+                    </button>
+                  )}
+                  {phase === "pick" && reuseIds.length > 0 && (
+                    <button type="button" onClick={() => setLibUseMany(libIds, false)} className="rounded-full border border-slate-300 bg-white px-2.5 py-0.5 text-slate-600 hover:bg-slate-50">
+                      <Icon name="upload" className="mr-0.5 inline-block align-[-2px]" />อัปใหม่ทั้งหมด
+                    </button>
+                  )}
+                  {phase === "pick" && libChecked < imgTotal && (
+                    <span className="text-slate-400">ตรวจรูปซ้ำในคลัง {libChecked}/{imgTotal}…</span>
                   )}
                   {phase === "pick" && (imgPrepped < imgTotal || oldPending > 0) && (
                     <span className="text-slate-400">
