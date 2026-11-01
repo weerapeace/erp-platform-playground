@@ -21,7 +21,7 @@ import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list
 import { useViewPref } from "@/lib/use-view-pref";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { parseVariants, resolvePhrase, variantSearchText, variantsOf, VARIANT_MODE_LABEL, type VariantMode } from "@/lib/phrase-variants";
-import { uploadResizedImage } from "@/components/image-attach";
+import { uploadImagesWithDupCheck } from "@/components/duplicate-upload";
 import { useSWRLite } from "@/lib/swr-lite";
 import {
   DEFAULT_INSERT_TEMPLATES,
@@ -1869,8 +1869,15 @@ function CatalogItemDialog({
     }
     setUploading(true);
     try {
-      const up = await uploadResizedImage(file, { folder: "fit-items", max: 600 });
-      setImageKey(up.r2_key);
+      // รูปที่มีในคลังแล้ว → ถาม "ใช้รูปเดิม / อัปโหลดใหม่" ก่อนส่ง (ของกลาง uploadImagesWithDupCheck)
+      const r = await uploadImagesWithDupCheck([file], {
+        folder: "fit-items", max: 600,
+        target: name.trim() ? `รูป ${name.trim()}` : "รูปของรายการนี้",
+        existingKeys: imageKey ? [imageKey] : [],
+        onError: (_, e) => toast.error(e.message || "อัปโหลดรูปไม่สำเร็จ"),
+      });
+      const key = r?.keys[0];
+      if (key) setImageKey(key);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "อัปโหลดรูปไม่สำเร็จ");
     } finally {
