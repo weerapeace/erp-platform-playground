@@ -27,6 +27,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/marketing/skus", prefixes: ["marketing.sku."] },
   // ผลิต → จ่ายงานเหมา: ดู/จ่าย/รับคืน ใช้สิทธิ์สินค้า (เหมือน /api/mo/piecework) · ตั้งรายชื่องานเหมากลาง = production.piecework
   { href: "/master/piecework-dispatch", keys: ["products.view", "products.edit", "production.piecework"] },
+  { href: "/master/piecework-jobs", sameAs: "/master/piecework-dispatch" },
 ];
 
 /** หมวดสิทธิ์ของแอปที่ไม่ผูกกับเมนูไหน (โชว์เป็นกลุ่ม "อื่น ๆ ของแอปนี้" กันตกหล่น) */

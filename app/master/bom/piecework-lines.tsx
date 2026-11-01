@@ -70,7 +70,7 @@ export function PieceworkLines({ value, onChange, readonly }: {
           <h3 className="text-sm font-semibold text-slate-700">🧵 งานเหมารายชิ้น</h3>
           <p className="text-[11px] text-slate-400">งานที่จ้างเหมาเป็นชิ้น (เย็บ/ติดอะไหล่ ฯลฯ) — จำนวน = ตัวคูณต่อ 1 ใบสั่ง</p>
         </div>
-        <a href="/admin/piecework-jobs" target="_blank" rel="noreferrer" className="text-[11px] text-indigo-600 hover:underline shrink-0">⚙ จัดการชื่องาน</a>
+        <a href="/master/piecework-jobs" target="_blank" rel="noreferrer" className="text-[11px] text-indigo-600 hover:underline shrink-0">⚙ จัดการชื่องาน</a>
       </div>
 
       {value.length === 0 ? (
