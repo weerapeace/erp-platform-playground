@@ -3,7 +3,9 @@
  * POST /api/qc-warehouse/items  { action, ... }
  *   receive       { wo_id, shelf_id, good, bad:[{reason,qty}] }   → ดึงเข้า QC (แยกดี/เสีย) + เพิ่ม qc_pulled_qty
  *   move          { item_id, shelf_id }                           → ย้ายชั้น (ห้ามเข้า defect)
- *   ship          { item_id, mode, wh }                           → ส่งออก (ลบของออก)
+ *   ship          { item_id, mode, wh }                           → ส่งออก (ลบของออก) · audit จดชั้น/ใบจ่าย/สถานะ ไว้ให้ unship
+ *   unship        { ship_audit_id, qty?, shelf_id? }              → ย้อนการส่งออก (ผูกใบขายผิด) — ของกลับขึ้นชั้นจากประวัติ qc.ship
+ *                                                                    ไม่เกินที่ส่งออกไป (หักที่ย้อนแล้ว) · ไม่ส่ง qty = ที่เหลือทั้งหมด
  *   to_defect     { item_id, qty, reason }                        → ย้ายของดี → ชั้นของเสีย
  *   repair_send   { item_id, repair_by }                          → ส่งซ่อม
  *   repair_cancel { item_id }                                     → ยกเลิกซ่อม
@@ -25,7 +27,7 @@ export const revalidate = 0;
 
 const num = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
 const PERM: Record<string, string> = {
-  receive: "qc.receive", move: "qc.move", ship: "qc.ship", to_defect: "qc.defect",
+  receive: "qc.receive", move: "qc.move", ship: "qc.ship", unship: "qc.ship", to_defect: "qc.defect",
   repair_send: "qc.repair", repair_cancel: "qc.repair", repair_receive: "qc.repair", return_queue: "qc.move",
   add_manual: "qc.receive", add_bulk: "qc.receive", update_item: "qc.receive",
   // ลบทิ้งถาวร (ของทดสอบ/ลงผิด) — ล็อกไว้ที่ "แอดมิน" เท่านั้น เพราะลบแล้วหายจริง
@@ -151,8 +153,55 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         : await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       if (res.error) return NextResponse.json({ error: friendlyDbError(res.error.message) }, { status: 400 });
       await writeAudit(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: shipQty, ...(shipQty < Number(item.qty) ? { partial_of: item.qty } : {}), mode: body.mode, wh: body.wh,
+        shelf_id: item.shelf_id, wo_id: item.wo_id, status: item.status, color: item.color, source: item.source,
         ...(typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? { date: body.date } : {}) } });
       return NextResponse.json({ error: null });
+    }
+
+    // ── ย้อนการส่งออก (ผูกใบขายผิด → ของกลับขึ้นชั้น) — คืนของบนชั้นจากประวัติ qc.ship ──
+    //    ส่งออกบางส่วน (แถวเดิมยังอยู่ แค่ลดจำนวน) = บวกกลับแถวเดิม · ส่งออกทั้งก้อน (แถวถูกลบ) = สร้างแถวใหม่
+    //    ยอด "ดึงเข้า QC" ของใบจ่ายงานไม่ต้องแก้ (ตอนส่งออกไม่ได้ลด) · ใบเก่าที่ audit ไม่ได้จดใบจ่าย = ใบจ่ายของใบสั่งผลิตที่ช่างตรงกัน ไม่งั้นที่ดึงเข้า QC มากสุด
+    if (action === "unship") {
+      const sid = String(body.ship_audit_id ?? "");
+      const { data: a } = await admin.from("audit_logs").select("id, action, entity_id, metadata").eq("id", sid).maybeSingle();
+      if (!a || a.action !== "qc.ship") return NextResponse.json({ error: "ไม่พบประวัติการส่งออกนี้" }, { status: 404 });
+      const md = (a.metadata ?? {}) as Record<string, unknown>;
+      const { data: prev } = await admin.from("audit_logs").select("metadata").eq("entity_type", "qc_warehouse_items").eq("action", "qc.unship").eq("metadata->>ship_audit_id", sid);
+      const done = ((prev ?? []) as { metadata: Record<string, unknown> | null }[]).reduce((s, p) => s + (Number(p.metadata?.qty) || 0), 0);
+      const left = Number(md.qty ?? 0) - done;
+      if (left <= 0) return NextResponse.json({ error: "ของรอบนี้ย้อนกลับขึ้นชั้นไปหมดแล้ว" }, { status: 400 });
+      const qty = body.qty == null ? left : num(body.qty);
+      if (qty < 1 || qty > left) return NextResponse.json({ error: `ย้อนได้ไม่เกิน ${left} ชิ้น` }, { status: 400 });
+      const via = body.via ? { via: String(body.via).slice(0, 30), label: String(body.label ?? "").slice(0, 300) } : {};
+      const orig = a.entity_id ? await getItem(admin, String(a.entity_id)) : null;
+      if (orig) {
+        const up = await admin.from("qc_warehouse_items").update({ qty: Number(orig.qty) + qty, updated_at: new Date().toISOString() }).eq("id", orig.id);
+        if (up.error) return NextResponse.json({ error: friendlyDbError(up.error.message) }, { status: 400 });
+        await writeAudit(admin, { action: "qc.unship", entityType: "qc_warehouse_items", entityId: String(orig.id), ...actor,
+          metadata: { ship_audit_id: sid, qty, of: md.qty, mo_no: orig.mo_no ?? md.mo_no ?? null, sku: orig.sku ?? null, shelf_id: orig.shelf_id, wo_id: orig.wo_id, into: "same_row", ...via } });
+        return NextResponse.json({ error: null, item_id: orig.id });
+      }
+      let shelf_id = String(body.shelf_id ?? md.shelf_id ?? "");
+      if (!shelf_id) {
+        const { data: sh } = await admin.from("qc_shelves").select("id").eq("is_active", true).neq("kind", "defect").order("sort_order", { ascending: false }).limit(1).maybeSingle();
+        shelf_id = (sh?.id as string) ?? "";
+      }
+      if (!shelf_id) return NextResponse.json({ error: "ยังไม่มีชั้น QC ให้วางของ" }, { status: 400 });
+      const mo_no = (md.mo_no as string | null) ?? null;
+      let wo_id = (md.wo_id as string | null) ?? null;
+      if (!wo_id && mo_no) {
+        const { data: ws } = await admin.from("mo_work_orders").select("id, assignee_name").eq("mo_no", mo_no).eq("is_active", true).order("qc_pulled_qty", { ascending: false }).limit(20);
+        const list = (ws ?? []) as { id: string; assignee_name: string | null }[];
+        wo_id = (list.find((w) => md.worker && w.assignee_name === md.worker) ?? list[0])?.id ?? null;
+      }
+      const { data: ins, error } = await admin.from("qc_warehouse_items").insert({
+        shelf_id, wo_id, mo_no, sku: md.sku ?? null, sku_name: md.sku_name ?? null, worker: md.worker ?? null, qty,
+        status: (md.status as string) || "good", color: md.color ?? null, source: (md.source as string) || "production",
+      }).select("id").single();
+      if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+      await writeAudit(admin, { action: "qc.unship", entityType: "qc_warehouse_items", entityId: String(ins.id), ...actor,
+        metadata: { ship_audit_id: sid, qty, of: md.qty, mo_no, sku: md.sku ?? null, shelf_id, wo_id, into: "new_row", ...via } });
+      return NextResponse.json({ error: null, item_id: ins.id });
     }
 
     // ── ย้ายของดี → ชั้นของเสีย ──

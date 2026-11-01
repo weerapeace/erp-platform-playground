@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SaleLine, SalesLinkRow } from "@/lib/mo-sales-match";
-import { buildUnlinked, planLinks, type UnlinkedMo } from "@/lib/mo-sales-unlinked";
+import { buildUnlinked, defaultPick, planLinks, type UnlinkedMo } from "@/lib/mo-sales-unlinked";
 
 // ข้อมูลจริงจาก DB (2026-10-31) — ใบขายเซ็นทรัลทำ ที่ยังไม่ผูกใบงาน
 const mo = (mo_no: string, sku: string, qty: number, created: string, stage: UnlinkedMo["stage"] = "wait"): UnlinkedMo =>
@@ -26,7 +26,7 @@ const LINES = [
   line("l5", "ISG2569-09-099", "2026-09-01", "PIX12-03", 5),
 ];
 const LINKS: SalesLinkRow[] = [{ mo_id: "id-MO-2026-00218", sale_line_id: "old", qty: 200 }];
-const { rows, stats } = buildUnlinked(MOS, LINES, LINKS);
+const { rows, linked, stats } = buildUnlinked(MOS, LINES, LINKS);
 const row = (id: string) => rows.find((r) => r.id === id)!;
 
 describe("อัปเดตงานจากใบขาย — มองจากใบขาย", () => {
@@ -43,8 +43,17 @@ describe("อัปเดตงานจากใบขาย — มองจ�
     expect(row("l3").suggest[0]).toMatchObject({ mo_no: "MO-2026-00354", qty: 250, mo_full: true });
   });
 
-  it("ใบที่ผูกใบขายไว้แล้วไม่อยู่ในตัวเลือก (API ผูกไม่รับ) · เลือกใบอื่นได้", () => {
-    expect(row("l3").cands.map((c) => c.mo_no)).toEqual(["MO-2026-00354", "MO-2026-00429"]);
+  it("ใบที่ผูกใบขายอื่นแล้วยังอยู่ในตัวเลือก (ติดป้าย) แต่ระบบไม่เลือกให้เอง", () => {
+    expect(row("l3").cands.map((c) => c.mo_no)).toEqual(["MO-2026-00218", "MO-2026-00354", "MO-2026-00429"]);
+    expect(row("l3").cands[0]).toMatchObject({ stage: "work", linked: [{ so_number: "ISG2569-08-001", qty: 200 }] });
+    expect(row("l3").cands[1].linked).toBeUndefined();
+    expect(defaultPick(row("l3"))).toBe("MO-2026-00354");
+  });
+
+  it("แท็บผูกแล้ว: 1 คู่ = 1 แถว · ย้ายไปได้เฉพาะใบอื่นที่เปิดก่อนวันขาย", () => {
+    expect(linked).toHaveLength(1);
+    expect(linked[0]).toMatchObject({ id: "old", so_number: "ISG2569-08-001", mo_no: "MO-2026-00218", link_qty: 200, stage: "work", opened: "2026-08-15", others: [] });
+    expect(linked[0].cands).toEqual([]);   // ใบอื่นของ CTL075-03 เปิดหลัง 20 ส.ค.
   });
 
   it("ขายน้อยกว่าที่ผลิต = ต้องเลือก: 1,000 จาก MO-00360 ที่ผลิต 2,500", () => {
@@ -53,7 +62,7 @@ describe("อัปเดตงานจากใบขาย — มองจ�
 
   it("ไม่มีใบงานให้ผูก (ขายจากสต๊อก) · สรุปตัวเลข", () => {
     expect(row("l5")).toMatchObject({ kind: "none", cands: [] });
-    expect(stats).toEqual({ lines: 5, bills: 5, exact: 3, part: 1, none: 1, mos_waiting: 3 });
+    expect(stats).toEqual({ lines: 5, bills: 5, exact: 3, part: 1, none: 1, mos_waiting: 3, linked: 1 });
   });
 
   it("แผนผูก: รวมทุกบรรทัดของใบงานเดียวเป็นครั้งเดียว · ไม่เกินที่ใบงานผลิต", () => {
@@ -64,5 +73,11 @@ describe("อัปเดตงานจากใบขาย — มองจ�
     ]);
     // เลือกใบเล็กแทน (MO-00429 ผลิต 100) → ผูกได้แค่ 100
     expect(planLinks(rows, new Map([["l3", "MO-2026-00429"]]))).toEqual([{ mo_no: "MO-2026-00429", parts: [{ sale_line_id: "l3", qty: 100 }] }]);
+  });
+
+  it("เลือกใบที่ผูกใบขายอื่นอยู่ = แผนบอกว่าต้องถอดใบขายเดิมก่อน", () => {
+    expect(planLinks(rows, new Map([["l3", "MO-2026-00218"]]))).toEqual([
+      { mo_no: "MO-2026-00218", parts: [{ sale_line_id: "l3", qty: 200 }], relink: [{ so_number: "ISG2569-08-001", qty: 200 }] },
+    ]);
   });
 });

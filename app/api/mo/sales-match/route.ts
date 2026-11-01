@@ -3,7 +3,7 @@
  *   GET    ?mo_nos=MO-…,MO-…        → ต่อใบ: ผูกแล้ว / ที่ระบบเสนอ (ใบเก่าได้ก่อน — คิดจากทุกใบที่รหัสสินค้าเดียวกัน ไม่ใช่แค่ที่ส่งมา)
  *   GET    ?mo_no=MO-…&detail=1     → หน้าต่างเลือกใบขายเอง: ทุกบรรทัดใบขายของ SKU นี้ (เหลือผูกได้ · ผูกกับใบไหน · ระบบเสนอให้ใบไหน · ก่อนวันเปิดใบ) + ใบที่อาจเปิดซ้ำ
  *   POST   { mo_no, parts: [{ sale_line_id, qty }] } → ผูก (ตรวจยอดคงเหลือของบรรทัดใบขายซ้ำที่เซิร์ฟเวอร์)
- *   DELETE ?mo_no=MO-…               → ยกเลิกผูก (เก็บประวัติ is_active=false)
+ *   DELETE ?mo_no=MO-…[&sale_line_id=…] → ยกเลิกผูก (เก็บประวัติ is_active=false) · มี sale_line_id = เฉพาะบรรทัดนั้น (ย้ายใบขาย)
  * ใบขาย = erp_playground_sales_orders + so_lines (ไม่นับร่าง/ยกเลิก) · ผูก/ยกเลิก = audit mo.sales_link / mo.sales_unlink
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -105,12 +105,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
-  const moNo = (new URL(request.url).searchParams.get("mo_no") ?? "").trim();
+  const sp = new URL(request.url).searchParams;
+  const moNo = (sp.get("mo_no") ?? "").trim();
+  const lineId = (sp.get("sale_line_id") ?? "").trim();   // ย้ายใบขาย: ถอดเฉพาะบรรทัดนี้ (ใบขายอื่นของใบเดียวกันยังผูกอยู่)
   if (!moNo) return bad("ระบุใบสั่งผลิต");
   const admin = supabaseAdmin();
   const me = await who(request, admin);
-  const { data, error } = await admin.from("mo_sales_links").update({ is_active: false, unlinked_at: new Date().toISOString(), unlinked_by_name: me?.name ?? null })
-    .eq("mo_no", moNo).eq("is_active", true).select("mo_id, so_number, qty");
+  let upd = admin.from("mo_sales_links").update({ is_active: false, unlinked_at: new Date().toISOString(), unlinked_by_name: me?.name ?? null })
+    .eq("mo_no", moNo).eq("is_active", true);
+  if (lineId) upd = upd.eq("sale_line_id", lineId);
+  const { data, error } = await upd.select("mo_id, so_number, qty");
   if (error) return bad("ยกเลิกผูกไม่สำเร็จ", 500);
   const rows = (data ?? []) as Row[];
   if (rows.length) await writeAudit(admin, { action: "mo.sales_unlink", entityType: "mo", entityId: String(rows[0].mo_id), actorId: me?.id ?? null, actorName: me?.name ?? null,
