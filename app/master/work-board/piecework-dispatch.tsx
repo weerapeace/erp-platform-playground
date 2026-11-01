@@ -6,6 +6,7 @@
  *     งานเหมาใน BOM ขึ้นให้เอง · "สถานะงานนี้" นับที่จ่ายไปแล้วด้วย (กันจ่ายซ้ำ) · บันทึกกลับใบงาน + BOM (ไม่เก็บชื่อคนใน BOM)
  *   แท็บรับงานคืน: งานเหมาที่ยังค้างแยกตามคน → ใส่ชิ้นที่รับคืน → เสร็จ (เข้าสรุปค่าแรงรายเดือน) · รับไม่ครบ = ที่เหลือให้คนเดิมทำต่อ / ไม่ทำแล้ว
  *   พิมพ์ใบจ่ายงานเหมา = /print/piecework (1 คน = 1 แผ่น)
+ *   asPage = แสดงเป็นหน้าเต็ม (เมนู ผลิต → จ่ายงานเหมา · /master/piecework-dispatch) แทนป๊อป — ตัวเดียวกัน
  * กติกา: lib/piecework-dispatch.ts · API: /api/mo/piecework/batch
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -31,7 +32,7 @@ const btn = "inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm
 const num = "h-8 w-full rounded-md border border-slate-200 px-2 text-right text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-violet-400";
 const tabBtn = (on: boolean) => `inline-flex h-8 items-center gap-1 rounded-full border px-3 text-sm ${on ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
 
-export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen, departments, canEdit, onDone, startTab = "send" }: {
+export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen, departments, canEdit, onDone, startTab = "send", asPage = false }: {
   open: boolean;
   onClose: () => void;
   /** ใบที่ติ๊กมาจากบอร์ด (เปิดมาพร้อมใบเหล่านี้) */
@@ -43,6 +44,8 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
   canEdit: boolean;
   onDone?: () => void;
   startTab?: "send" | "recv";
+  /** แสดงเป็นหน้าเต็ม (ไม่ใช่ป๊อป) */
+  asPage?: boolean;
 }) {
   const toast = useToast();
   const [tab, setTab] = useState<"send" | "recv">(startTab);
@@ -261,11 +264,8 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
     </div>
   );
 
-  return (
-    <ERPModal open={open} onClose={() => { if (!busy) onClose(); }} size="xl" storageKey="wb-piecework-dispatch"
-      title="จ่ายงานเหมา"
-      description={tab === "send" ? "เลือกใบงานก่อน แล้วใส่งานเหมา + คนรับ — 1 แถว = งาน 1 อย่าง × คน 1 คน (งานเดียวแบ่งหลายคนได้)" : "งานเหมาที่ยังไม่รับคืน แยกตามคน — ใส่ชิ้นที่รับคืนแล้วกดเสร็จ (เข้าสรุปค่าแรงรายเดือน)"}
-      footer={footer}>
+  const description = tab === "send" ? "เลือกใบงานก่อน แล้วใส่งานเหมา + คนรับ — 1 แถว = งาน 1 อย่าง × คน 1 คน (งานเดียวแบ่งหลายคนได้)" : "งานเหมาที่ยังไม่รับคืน แยกตามคน — ใส่ชิ้นที่รับคืนแล้วกดเสร็จ (เข้าสรุปค่าแรงรายเดือน)";
+  const body = (
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-1.5">
           <button type="button" onClick={() => setTab("send")} className={tabBtn(tab === "send")}><Icon name="thread" /> จ่ายงานเหมา</button>
@@ -279,7 +279,7 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
             <div className="mt-4 flex flex-wrap justify-center gap-2">
               <a href={`/print/piecework?batch=${encodeURIComponent(result.batch_id)}`} target="_blank" rel="noreferrer" className={`${btn} border-blue-600 bg-blue-600 font-medium text-white no-underline hover:bg-blue-700`}><Icon name="print" /> พิมพ์ใบจ่ายงานเหมา</a>
               <button type="button" onClick={resetBatch} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}><Icon name="add" /> จ่ายชุดใหม่</button>
-              <button type="button" onClick={onClose} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>ปิด</button>
+              {!asPage && <button type="button" onClick={onClose} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>ปิด</button>}
             </div>
           </div>
         ) : (
@@ -427,6 +427,20 @@ export function PieceworkDispatch({ open, onClose, moNos, candidates, craftsmen,
           )
         )}
       </div>
+  );
+  if (asPage) return (
+    <div className="mx-auto max-w-[1600px] p-4">
+      <div className="mb-3">
+        <h1 className="inline-flex items-center gap-2 text-xl font-bold text-slate-800"><Icon name="thread" /> จ่ายงานเหมา</h1>
+        <p className="mt-0.5 text-xs text-slate-500">{description}</p>
+      </div>
+      {body}
+      {footer && <div className="sticky bottom-0 z-10 mt-3 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">{footer}</div>}
+    </div>
+  );
+  return (
+    <ERPModal open={open} onClose={() => { if (!busy) onClose(); }} size="xl" storageKey="wb-piecework-dispatch" title="จ่ายงานเหมา" description={description} footer={footer}>
+      {body}
     </ERPModal>
   );
 }

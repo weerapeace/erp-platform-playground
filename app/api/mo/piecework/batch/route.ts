@@ -2,6 +2,7 @@
  * จ่ายงานเหมาแบบตาราง (หน้าต่าง "จ่ายงานเหมา" บนบอร์ด) — /api/mo/piecework/batch
  *   GET ?mo_nos=a,b     → ข้อมูลตั้งต้นต่อใบ: จำนวนสั่ง · งานเหมาใน BOM · ที่จ่ายไปแล้ว · ใบจ่ายงานที่ยังไม่เข้า QC + รายชื่องานเหมา
  *   GET ?open=1         → งานเหมาที่ยังไม่รับคืน (แท็บ "รับงานคืน")
+ *   GET ?candidates=1   → ใบที่ยังไม่เข้า QC ครบ (รอจ่าย + อยู่ที่ช่าง) — ช่อง "+ เพิ่มใบงาน" ในหน้าเมนู ผลิต → จ่ายงานเหมา
  *   GET ?batch= / ?ids= → แถวสำหรับพิมพ์ใบจ่ายงานเหมา
  *   POST { batch_id, date, lines, save_bom, bom_scope }   → จ่ายงานเหมา (1 แถว = งาน × คน) + บันทึกเข้า BOM
  *        batch_id ซ้ำ = ไม่บันทึกซ้ำ (กดซ้ำ/เน็ตช้า) · ใบที่ส่งเข้า QC ครบแล้ว / ปิด / ยกเลิก = ไม่รับ
@@ -13,6 +14,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { fetchAllPages } from "@/lib/fetch-all";
 import { pwDonePlan, pwDupLines, pwJobKey, pwValidate, type PwDoneItem, type PwLine } from "@/lib/piecework-dispatch";
 
 export const dynamic = "force-dynamic";
@@ -41,6 +43,7 @@ export type PwRow = {
   product_sku?: string | null; product_name?: string | null; image_url?: string | null; mo_qty?: number;
 };
 export type PwJob = { id: string; name: string; default_rate: number; is_detail: boolean };
+export type PwCandidateRow = { mo_no: string; sku: string | null; name: string | null; qty: number; image_url: string | null; where: string };
 
 const toRow = (r: Row): PwRow => ({
   id: String(r.id), mo_no: String(r.mo_no ?? ""), job_id: (r.job_id as string) ?? null, job_name: String(r.job_name ?? ""),
@@ -95,6 +98,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ data: await withMoInfo(admin, ((data ?? []) as Row[]).map(toRow)), error: null });
   }
 
+  if (sp.get("candidates") === "1") return NextResponse.json({ data: await candidates(admin), error: null });
+
   // ── ข้อมูลตั้งต้นต่อใบสั่งผลิต
   const moNos = [...new Set((sp.get("mo_nos") ?? "").split(",").map((s) => s.trim()).filter(Boolean))].slice(0, 200);
   const { data: jobsRaw } = await admin.from("piecework_jobs").select("id, name, default_rate, is_detail").eq("is_active", true).order("sort_order").order("name");
@@ -130,6 +135,35 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     };
   });
   return NextResponse.json({ data, jobs, error: null });
+}
+
+/** ใบที่จ่ายงานเหมาได้ = ยังไม่ปิด/ยกเลิก และยังไม่ส่งเข้า QC ครบ (ไม่มีใบจ่าย = รอจ่าย) */
+async function candidates(admin: Admin): Promise<PwCandidateRow[]> {
+  const mos = await fetchAllPages<Row>((from, to) => admin.from("manufacturing_orders").select("mo_no, qty, status, product_sku, product_name")
+    .not("status", "in", "(done,cancelled,closed)").order("mo_no").range(from, to));
+  const moNos = mos.map((m) => String(m.mo_no));
+  const wos: Row[] = [];
+  for (let i = 0; i < moNos.length; i += 300) {
+    const part = await fetchAllPages<Row>((from, to) => admin.from("mo_work_orders").select("id, mo_no, assignee_name, department_id, qty, qc_pulled_qty, status")
+      .in("mo_no", moNos.slice(i, i + 300)).eq("is_active", true).order("id").range(from, to));
+    wos.push(...part);
+  }
+  const deptIds = [...new Set(wos.map((w) => w.department_id as string).filter(Boolean))];
+  const { data: depts } = deptIds.length ? await admin.from("departments").select("id, name").in("id", deptIds) : { data: [] as Row[] };
+  const deptName = new Map(((depts ?? []) as Row[]).map((d) => [String(d.id), String(d.name ?? "")]));
+  const byMo = new Map<string, Row[]>();
+  for (const w of wos) { if (w.status === "cancelled") continue; const k = String(w.mo_no); byMo.set(k, [...(byMo.get(k) ?? []), w]); }
+  const imgs = await skuInfo(admin, mos.map((m) => String(m.product_sku ?? "")));
+  const out: PwCandidateRow[] = [];
+  for (const m of mos) {
+    const moNo = String(m.mo_no), ws = byMo.get(moNo) ?? [];
+    const open = ws.filter((w) => num(w.qc_pulled_qty) < num(w.qty));
+    if (ws.length && !open.length) continue;   // ส่งเข้า QC ครบแล้ว
+    const where = open.length ? [...new Set(open.map((w) => [w.department_id ? deptName.get(String(w.department_id)) : null, w.assignee_name].filter(Boolean).join(" · ") || "อยู่ที่ช่าง"))].join(", ") : "รอจ่าย";
+    const sku = (m.product_sku as string) ?? null;
+    out.push({ mo_no: moNo, sku, name: (m.product_name as string) ?? null, qty: num(m.qty), image_url: sku ? imgs.get(sku)?.image_url ?? null : null, where });
+  }
+  return out;
 }
 
 type PostBody = {
