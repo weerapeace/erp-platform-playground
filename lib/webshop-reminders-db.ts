@@ -15,6 +15,7 @@ import { emailConfigured, sendEmail } from "@/lib/email";
 import { emailLayout } from "@/lib/email-layout";
 import { lineTextToMember } from "@/lib/webshop-line";
 import { writeAudit } from "@/lib/audit";
+import { fetchAllPages } from "@/lib/fetch-all";
 import { normalizeFieldMap, resolveProduct, attachNameRefs, nameRuleNeedsRefs, PARENT_SELECT, CHILD_SELECT, type ParentRow, type ChildSku, type ListingRow } from "@/lib/website-field-map";
 import { productHref } from "@/lib/website-links";
 import {
@@ -139,20 +140,22 @@ export async function livePrices(sb: Admin, shop: Shop, parentIds: string[]): Pr
   const out = new Map<string, LivePrice>();
   const fieldMap = normalizeFieldMap(shop.field_map);
   for (const ids of chunks([...new Set(parentIds)])) {
-    const [{ data: listings }, { data: parents }, { data: kids }] = await Promise.all([
+    const [{ data: listings }, { data: parents }, kids] = await Promise.all([
       sb
         .from("store_listings")
         .select("parent_sku_id, is_published, web_name, web_price, web_description, web_images, web_unit, web_category, web_categories, web_options, web_personalize, web_stock_status, web_variant_off")
         .eq("shop_id", shop.id)
         .in("parent_sku_id", ids),
       sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", ids),
-      sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", ids).eq("is_active", true),
+      // 150 รุ่นมี SKU ลูกเกิน 1,000 ได้ → ไล่ดึงทีละหน้า ไม่งั้นราคาบางรุ่นผิด/หาย
+      fetchAllPages<ChildSku & { parent_sku_id: string }>((from, to) =>
+        sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", ids).eq("is_active", true).order("code").order("id").range(from, to)),
     ]);
     const parentRows = (parents ?? []) as ParentRow[];
     if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, parentRows);
     const listingOf = new Map(((listings ?? []) as (ListingRow & { parent_sku_id: string; is_published: boolean; web_stock_status?: string | null })[]).map((l) => [l.parent_sku_id, l]));
     const kidsOf = new Map<string, ChildSku[]>();
-    for (const k of (kids ?? []) as (ChildSku & { parent_sku_id: string })[]) kidsOf.set(k.parent_sku_id, [...(kidsOf.get(k.parent_sku_id) ?? []), k]);
+    for (const k of kids) kidsOf.set(k.parent_sku_id, [...(kidsOf.get(k.parent_sku_id) ?? []), k]);
     for (const p of parentRows) {
       const l = listingOf.get(p.id);
       if (!l?.is_published || l.web_stock_status === "out") continue;

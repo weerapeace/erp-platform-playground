@@ -17,6 +17,7 @@ import { colorGroups, baseColor } from "@/lib/website-size-options";
 import { normalizeHero } from "@/lib/website-hero";
 import { toKeyList } from "@/lib/website-listing-patch";
 import { codePrefixes, type RouteParent, type RouteSku } from "@/lib/product-image-routing";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -63,27 +64,30 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!parentIds.length) return NextResponse.json({ parents: [], shops, truncated: false });
 
   // 2) รุ่น + สี + รูปเดิม + ร้าน
-  const [{ data: ps }, { data: kidRows }, { data: listingRows }, { data: descRows }] = await Promise.all([
+  // SKU ลูกของ 60 รุ่นเกิน 1,000 ได้ (เพดานต่อครั้งของฐานข้อมูล) → ไล่ดึงทีละหน้า ไม่งั้นรุ่นท้าย ๆ ขึ้น 0 สี
+  const [{ data: ps }, kids, { data: listingRows }, { data: descRows }] = await Promise.all([
     sb.from("parent_skus_v2").select("id, code, name_th, name_platform, png_image_r2_key").in("id", parentIds),
-    sb.from("skus_v2").select("id, code, color, color_th, attribute_values, parent_sku_id").in("parent_sku_id", parentIds).eq("is_active", true).order("code"),
+    fetchAllPages<Kid>((from, to) =>
+      sb.from("skus_v2").select("id, code, color, color_th, attribute_values, parent_sku_id").in("parent_sku_id", parentIds).eq("is_active", true).order("code").order("id").range(from, to)),
     sb.from("store_listings").select("shop_id, parent_sku_id, web_sku_images, web_hero").in("parent_sku_id", parentIds),
     sb.from("asset_usages").select("record_id").eq("module", "parent_sku_description").in("record_id", parentIds),
   ]);
-  const kids = (kidRows ?? []) as Kid[];
   const kidsBy = new Map<string, Kid[]>();
   for (const k of kids) kidsBy.set(k.parent_sku_id, [...(kidsBy.get(k.parent_sku_id) ?? []), k]);
 
   const attBy = new Map<string, CatalogItem[]>();
   const entityIds = [...parentIds, ...kids.map((k) => k.id)];
   for (const part of chunk(entityIds, 150)) {
-    const { data } = await sb
+    const data = await fetchAllPages<Att>((from, to) => sb
       .from("erp_playground_attachments")
       .select("id, entity_id, file_path, is_primary, sort_order")
       .in("entity_type", ["skus_v2", "parent_skus_v2"])
       .in("entity_id", part)
       .order("is_primary", { ascending: false })
-      .order("sort_order", { ascending: true });
-    for (const a of (data ?? []) as Att[]) {
+      .order("sort_order", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, to));
+    for (const a of data) {
       if (!a.file_path) continue;
       attBy.set(a.entity_id, [...(attBy.get(a.entity_id) ?? []), { id: a.id, key: a.file_path, primary: !!a.is_primary }]);
     }

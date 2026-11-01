@@ -51,6 +51,7 @@ import { findMaterialLinks, MATERIAL_SELECT, type MaterialRow } from "@/lib/prod
 import { cleanListingSeo, cleanRelatedCodes } from "@/lib/website-listing-patch";
 import { ratingSummaries } from "@/lib/website-reviews-server";
 import { storefrontCors, corsPreflight } from "@/lib/storefront-cors";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -111,9 +112,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const parentIds = rows.map((r) => r.parent_sku_id as string).filter(Boolean);
 
   // ดึงทุกคอลัมน์ แล้วค่อยคัดเฉพาะฟิลด์ที่อนุญาตให้ออกเว็บ (ทะเบียนฟิลด์ + บัญชีดำ) ก่อนส่ง — ต้นทุน/ข้อมูลภายในไม่หลุด
-  const [{ data: parents }, { data: children }, parentFields, { data: swatchRows }, imageFieldDefs] = await Promise.all([
+  // SKU ลูกของทุกรุ่นที่เปิดขายเกิน 1,000 ได้เมื่อร้านเปิดขายเยอะ → ไล่ดึงทีละหน้า ไม่งั้นสีบนเว็บหาย
+  const [{ data: parents }, children, parentFields, { data: swatchRows }, imageFieldDefs] = await Promise.all([
     sb.from("parent_skus_v2").select("*").in("id", parentIds),
-    sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
+    fetchAllPages<ChildSku & { parent_sku_id: string }>((from, to) =>
+      sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true).order("code").order("id").range(from, to)),
     loadParentWebFields(sb),
     // 🎨 ทะเบียนสีกลาง → จุดสีของแต่ละตัวเลือก (ดู lib/color-swatch.ts)
     sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
@@ -160,7 +163,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const proofCounts = await loadProofCounts(sb, s.id, normalizeTheme(s.theme).page.proof, new Map([...parentById.values()].map((p) => [p.id, p.code ?? ""])));
 
   const kidsByParent = new Map<string, ChildSku[]>();
-  for (const k of (children ?? []) as (ChildSku & { parent_sku_id: string })[]) {
+  for (const k of children) {
     const arr = kidsByParent.get(k.parent_sku_id) ?? [];
     arr.push(k);
     kidsByParent.set(k.parent_sku_id, arr);

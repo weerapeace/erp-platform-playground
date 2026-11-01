@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi, apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -231,12 +232,14 @@ export async function GET(request: NextRequest) {
         }
       }
     } else {
-      const [linkRes, varRes] = await Promise.all([
+      const [linkRes, varRows] = await Promise.all([
         admin.from(ENT.junction).select("src_id, tgt_id").in("src_id", ids),
-        admin.from("skus_v2").select("parent_sku_id, cover_image_r2_key").in("parent_sku_id", ids).order("code", { ascending: true }),   // นับ SKU ลูก + รูปปกลูกตัวแรก
+        // นับ SKU ลูก + รูปปกลูกตัวแรก — 120 รุ่นมีลูกเกิน 1,000 ได้ → ไล่ดึงทีละหน้า ไม่งั้นรุ่นท้าย ๆ นับได้ 0
+        fetchAllPages<{ parent_sku_id: string | null; cover_image_r2_key: string | null }>((from, to) =>
+          admin.from("skus_v2").select("parent_sku_id, cover_image_r2_key").in("parent_sku_id", ids).order("code", { ascending: true }).order("id", { ascending: true }).range(from, to)),
       ]);
       linkData = (linkRes.data ?? []) as { src_id: string; tgt_id: string }[];
-      for (const v of ((varRes.data ?? []) as { parent_sku_id: string | null; cover_image_r2_key: string | null }[])) if (v.parent_sku_id) {
+      for (const v of varRows) if (v.parent_sku_id) {
         variant.set(v.parent_sku_id, (variant.get(v.parent_sku_id) ?? 0) + 1);
         if (v.cover_image_r2_key && !childCover.has(v.parent_sku_id)) childCover.set(v.parent_sku_id, v.cover_image_r2_key);   // ลูกตัวแรก (เรียงตาม code) ที่มีรูป
       }

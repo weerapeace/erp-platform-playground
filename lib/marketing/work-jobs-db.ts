@@ -6,6 +6,7 @@ import type { NextRequest } from "next/server";
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
+import { fetchAllPages } from "@/lib/fetch-all";
 import { appBaseUrl, nextTaskNo, setTaskAssignees } from "@/lib/creative-tasks-server";
 import { defaultStatusKey } from "@/lib/creative-statuses-server";
 import {
@@ -152,8 +153,11 @@ export async function addItemsToJob(admin: Admin, job: WorkJob, ids: string[], a
   // ราคาเต็ม: ราคาขาย (list_price) ของสี/แบบที่ยังเปิด → ไม่มีใช้ราคาระดับรุ่น
   const kidPrices = new Map<string, number[]>();
   for (let i = 0; i < toAdd.length; i += CHUNK) {
-    const { data: kids } = await admin.from("skus_v2").select("parent_sku_id, list_price").in("parent_sku_id", toAdd.slice(i, i + CHUNK)).eq("is_active", true).limit(20_000);
-    for (const k of kids ?? []) {
+    // .limit(20_000) ไม่ช่วย (ฐานข้อมูลตัดที่ 1,000 แถวเสมอ) → ไล่ดึงทีละหน้า ไม่งั้นรุ่นท้าย ๆ ไม่มีราคาเต็ม
+    const part = toAdd.slice(i, i + CHUNK);
+    const kids = await fetchAllPages<{ parent_sku_id: string; list_price: number | null }>((from, to) =>
+      admin.from("skus_v2").select("parent_sku_id, list_price").in("parent_sku_id", part).eq("is_active", true).order("id").range(from, to));
+    for (const k of kids) {
       const pid = String(k.parent_sku_id);
       if (!kidPrices.has(pid)) kidPrices.set(pid, []);
       kidPrices.get(pid)!.push(Number(k.list_price));

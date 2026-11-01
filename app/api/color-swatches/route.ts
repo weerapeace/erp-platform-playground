@@ -16,6 +16,7 @@ import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { normalizeSwatchInput, rowToSwatchEntry, SWATCH_SELECT, normColorName } from "@/lib/color-swatch";
 import { swatchSourceImages } from "@/lib/color-swatch-images";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,8 +57,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // images = รูปปก SKU ของสีนั้น (≤6) — ใช้ "💧 ดูดสีจากรูปสินค้า" ในหน้าต่างทะเบียนสี
   const used = new Map<string, { name: string; skus: number; shops: Set<string>; images: string[] }>();
   for (let i = 0; i < parentIds.length; i += 200) {
-    const { data: kids } = await sb.from("skus_v2").select("parent_sku_id, color, cover_image_r2_key").in("parent_sku_id", parentIds.slice(i, i + 200)).eq("is_active", true);
-    for (const k of (kids ?? []) as { parent_sku_id: string; color: string | null; cover_image_r2_key: string | null }[]) {
+    // 200 รุ่นมี SKU ลูกเกิน 1,000 ได้ → ไล่ดึงทีละหน้า ไม่งั้นสีที่ใช้อยู่บางสีไม่ถูกนับ
+    const part = parentIds.slice(i, i + 200);
+    const kids = await fetchAllPages<{ parent_sku_id: string; color: string | null; cover_image_r2_key: string | null }>((from, to) =>
+      sb.from("skus_v2").select("parent_sku_id, color, cover_image_r2_key").in("parent_sku_id", part).eq("is_active", true).order("code").order("id").range(from, to));
+    for (const k of kids) {
       const name = (k.color ?? "").trim();
       if (!name) continue;
       const key = normColorName(name);

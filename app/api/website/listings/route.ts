@@ -39,6 +39,7 @@ import { sanitizeBulkPatch } from "@/lib/website-listing-fields";
 import { computeListingDisplay } from "@/lib/website-listing-display";
 import { loadTagCategoryResolver } from "@/lib/website-tag-categories-db";
 import { readFitCheckShops } from "@/lib/website-site-info";
+import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -137,15 +138,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const thumb = (k: string) => `/api/r2-image?key=${encodeURIComponent(k)}&w=96`;
 
   if (parentIds.length) {
-    const [{ data: parents }, { data: mapParents }, { data: children }] = await Promise.all([
+    // SKU ลูกทั้งร้านเกิน 1,000 ได้ (Louis Montini ~1,800) → ไล่ดึงทีละหน้า ไม่งั้นบางรุ่นสีหาย
+    const [{ data: parents }, { data: mapParents }, children] = await Promise.all([
       sb.from("parent_skus_v2").select(PARENT_COLS).in("id", parentIds),
       sb.from("parent_skus_v2").select(PARENT_SELECT).in("id", parentIds),
-      sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true),
+      fetchAllPages<ChildSku & { parent_sku_id: string }>((from, to) =>
+        sb.from("skus_v2").select(CHILD_SELECT).in("parent_sku_id", parentIds).eq("is_active", true).order("code").order("id").range(from, to)),
     ]);
     for (const p of (parents ?? []) as ParentRow[]) parentById.set(p.id, p);
     if (nameRuleNeedsRefs(fieldMap)) await attachNameRefs(sb, (mapParents ?? []) as MapParentRow[]);
     for (const p of (mapParents ?? []) as MapParentRow[]) mapParentById.set(p.id, p);
-    for (const k of (children ?? []) as (ChildSku & { parent_sku_id: string })[]) {
+    for (const k of children) {
       const arr = kidsByParent.get(k.parent_sku_id) ?? [];
       arr.push(k);
       kidsByParent.set(k.parent_sku_id, arr);
