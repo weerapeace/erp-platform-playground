@@ -75,10 +75,13 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     salesByDay[d].sales += sales; salesByDay[d].units += units;
     salesTotal += sales; unitsTotal += units;
   };
-  // (1) ออเดอร์จริง — order item ที่จับคู่ SKU ลูกนี้ → join วันที่สั่งซื้อ (platform_orders.ordered_at)
-  if (skuIds.length) {
-    const { data: oi } = await a.from("platform_order_items").select("order_id, qty, price").in("matched_sku_id", skuIds);
-    const items = (oi ?? []) as { order_id: string; qty: number | null; price: number | null }[];
+  // (1) ออเดอร์จริง — order item ที่จับคู่ SKU ลูกนี้ + ที่ผูกระดับรุ่นนี้ (ไม่แยกสี เช่น Lazada) → join วันที่สั่งซื้อ (platform_orders.ordered_at)
+  {
+    const [{ data: oi }, { data: oiModel }] = await Promise.all([
+      skuIds.length ? a.from("platform_order_items").select("order_id, qty, price").in("matched_sku_id", skuIds) : Promise.resolve({ data: [] }),
+      a.from("platform_order_items").select("order_id, qty, price").eq("matched_parent_sku_id", id).is("matched_sku_id", null),
+    ]);
+    const items = [...(oi ?? []), ...(oiModel ?? [])] as { order_id: string; qty: number | null; price: number | null }[];
     if (items.length) {
       const orderIds = [...new Set(items.map((x) => x.order_id))];
       const dateById = new Map<string, string>();

@@ -14,7 +14,7 @@ import { ConfirmDialog } from "@/components/modal";
 import { ERPInput } from "@/components/form";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { QUEUE_META, type GuessRef, type PendingGroup, type PendingQueue, type PendingResponse, type PlatformInfo } from "./types";
+import { QUEUE_META, type PendingGroup, type PendingQueue, type PendingResponse, type PlatformInfo, type SelectRef } from "./types";
 
 const QUEUE_ORDER: PendingQueue[] = ["guess", "multi", "not_found"];
 const gkey = (g: { platform_code: string; item_key: string }) => `${g.platform_code}|${g.item_key}`;
@@ -33,8 +33,8 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rematching, setRematching] = useState(false);
-  // ติ๊กเลือกในคิว "ระบบเดาไว้" — จำข้ามหน้า (key = แพลตฟอร์ม|สินค้า)
-  const [selected, setSelected] = useState<Map<string, GuessRef>>(new Map());
+  // ติ๊กเลือกในคิว 💡/🎨 — จำข้ามหน้า (key = แพลตฟอร์ม|สินค้า)
+  const [selected, setSelected] = useState<Map<string, SelectRef>>(new Map());
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
 
@@ -77,23 +77,39 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
   };
 
-  // ยืนยันตามที่ระบบเดา ทีละหลายการ์ด (ส่งทีละ 100)
+  // 🎨 นับเป็นรุ่น (ไม่แยกสี) — การ์ดเดียว
+  const confirmModelOne = async (g: PendingGroup) => {
+    try {
+      const res = await apiFetch("/api/platform-email/inbox", { method: "POST", body: JSON.stringify({ action: "confirm_model", groups: [{ platform_code: g.platform_code, item_key: g.item_key }] }) });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+      toast.success(`นับ ${j.updated} รายการเป็นรุ่น ${j.parent_code} (ไม่แยกสี) แล้ว — ครั้งหน้าระบบนับแบบนี้เอง`);
+      setSelected((m) => { const n = new Map(m); n.delete(gkey(g)); return n; });
+      await load(true); onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
+  };
+
+  // ทำทีละหลายการ์ด (ส่งทีละ 100): 💡 ยืนยันตามที่ระบบเดา · 🎨 นับเป็นรุ่น ไม่แยกสี
+  const bulkMode: "guess" | "model" | null = queue === "guess" ? "guess" : queue === "multi" ? "model" : null;
   const confirmSelected = async () => {
     const list = [...selected.values()];
     setBulkBusy(true);
     let confirmed = 0, updated = 0, failed = 0;
     try {
       for (let i = 0; i < list.length; i += 100) {
-        const groups = list.slice(i, i + 100).map((g) => ({ platform_code: g.platform_code, item_key: g.item_key, sku_id: g.suggest.id }));
-        const res = await apiFetch("/api/platform-email/inbox", { method: "POST", body: JSON.stringify({ action: "confirm_many", groups }) });
+        const chunk = list.slice(i, i + 100);
+        const body = bulkMode === "model"
+          ? { action: "confirm_model", groups: chunk.map((g) => ({ platform_code: g.platform_code, item_key: g.item_key })) }
+          : { action: "confirm_many", groups: chunk.filter((g) => g.suggest).map((g) => ({ platform_code: g.platform_code, item_key: g.item_key, sku_id: g.suggest!.id })) };
+        const res = await apiFetch("/api/platform-email/inbox", { method: "POST", body: JSON.stringify(body) });
         const j = await res.json();
         if (!res.ok || j.error) throw new Error(j.error || "ยืนยันไม่สำเร็จ");
         confirmed += j.confirmed; updated += j.updated; failed += (j.failed ?? 0) + (j.skipped ?? 0);
       }
-      toast.success(`ยืนยันแล้ว ${num(confirmed)} การ์ด (${num(updated)} รายการ)${failed ? ` · ไม่สำเร็จ ${failed} การ์ด ลองใหม่อีกครั้ง` : ""}`);
+      toast.success(`${bulkMode === "model" ? "นับเป็นรุ่น" : "ยืนยัน"}แล้ว ${num(confirmed)} การ์ด (${num(updated)} รายการ)${failed ? ` · ทำไม่ได้ ${failed} การ์ด (เช่น หารุ่นใน ERP ไม่เจอ)` : ""}`);
       setSelected(new Map()); setBulkOpen(false);
     } catch (e) {
-      toast.error(`${e instanceof Error ? e.message : "ยืนยันไม่สำเร็จ"}${confirmed ? ` (ยืนยันไปแล้ว ${confirmed} การ์ด)` : ""}`);
+      toast.error(`${e instanceof Error ? e.message : "ยืนยันไม่สำเร็จ"}${confirmed ? ` (ทำไปแล้ว ${confirmed} การ์ด)` : ""}`);
     } finally {
       setBulkBusy(false);
       await load(true); onChanged();
@@ -115,13 +131,14 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
 
   const stats = data?.stats;
   const groups = data?.groups ?? [];
-  const guessOnPage = groups.filter((g) => g.queue === "guess" && g.suggest);
-  const toRef = (g: PendingGroup): GuessRef => ({ platform_code: g.platform_code, item_key: g.item_key, title: g.title, variant: g.variant, qty: g.qty, suggest: g.suggest! });
-  const pageAllSelected = guessOnPage.length > 0 && guessOnPage.every((g) => selected.has(gkey(g)));
+  const canSelect = (g: PendingGroup) => (bulkMode === "guess" ? g.queue === "guess" && !!g.suggest : bulkMode === "model" ? g.queue === "multi" && !!g.model_level : false);
+  const selectableOnPage = groups.filter(canSelect);
+  const toRef = (g: PendingGroup): SelectRef => ({ platform_code: g.platform_code, item_key: g.item_key, title: g.title, variant: g.variant, qty: g.qty, suggest: g.suggest, model_level: g.model_level });
+  const pageAllSelected = selectableOnPage.length > 0 && selectableOnPage.every((g) => selected.has(gkey(g)));
   const togglePage = () => setSelected((m) => {
     const n = new Map(m);
-    if (pageAllSelected) guessOnPage.forEach((g) => n.delete(gkey(g)));
-    else guessOnPage.forEach((g) => n.set(gkey(g), toRef(g)));
+    if (pageAllSelected) selectableOnPage.forEach((g) => n.delete(gkey(g)));
+    else selectableOnPage.forEach((g) => n.set(gkey(g), toRef(g)));
     return n;
   });
   const toggleOne = (g: PendingGroup) => setSelected((m) => {
@@ -129,7 +146,7 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
     if (n.has(gkey(g))) n.delete(gkey(g)); else n.set(gkey(g), toRef(g));
     return n;
   });
-  const selectAllFiltered = () => setSelected(new Map((data?.guess_all ?? []).map((g) => [gkey(g), g])));
+  const selectAllFiltered = () => setSelected(new Map((data?.select_all ?? []).map((g) => [gkey(g), g])));
   const selectedList = [...selected.values()];
 
   return (
@@ -175,19 +192,21 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
         {queue && <div className={`rounded-lg border px-3 py-1.5 text-xs ${QUEUE_META[queue].chip}`}>{QUEUE_META[queue].icon} {QUEUE_META[queue].hint}</div>}
       </section>
 
-      {/* คิว "ระบบเดาไว้" → ติ๊กยืนยันทีละหลายการ์ด */}
-      {queue === "guess" && guessOnPage.length > 0 && (
-        <div className="flex flex-wrap items-center gap-3 rounded-lg bg-amber-50/60 px-3 py-2 text-sm">
+      {/* คิว 💡 / 🎨 → ติ๊กทำทีละหลายการ์ด */}
+      {bulkMode && selectableOnPage.length > 0 && (
+        <div className={`flex flex-wrap items-center gap-3 rounded-lg px-3 py-2 text-sm ${bulkMode === "guess" ? "bg-amber-50/60" : "bg-violet-50/60"}`}>
           <label className="flex cursor-pointer items-center gap-1.5 text-slate-700">
             <input type="checkbox" checked={pageAllSelected} onChange={togglePage} className="h-4 w-4 rounded border-slate-300" />
-            เลือกทั้งหน้านี้ ({guessOnPage.length})
+            เลือกทั้งหน้านี้ ({selectableOnPage.length})
           </label>
-          {(data?.guess_all?.length ?? 0) > guessOnPage.length && (
-            <button type="button" onClick={selectAllFiltered} className="text-amber-800 underline-offset-2 hover:underline">
-              เลือกทั้งหมดตามตัวกรอง ({num(data?.guess_all?.length ?? 0)} การ์ด)
+          {(data?.select_all?.length ?? 0) > selectableOnPage.length && (
+            <button type="button" onClick={selectAllFiltered} className={`underline-offset-2 hover:underline ${bulkMode === "guess" ? "text-amber-800" : "text-violet-800"}`}>
+              เลือกทั้งหมดตามตัวกรอง ({num(data?.select_all?.length ?? 0)} การ์ด)
             </button>
           )}
-          <span className="text-xs text-slate-500">ตรวจรหัสที่ระบบเดาในการ์ดก่อน แล้วกดยืนยันที่แถบด้านล่าง</span>
+          <span className="text-xs text-slate-500">{bulkMode === "guess"
+            ? "ตรวจรหัสที่ระบบเดาในการ์ดก่อน แล้วกดยืนยันที่แถบด้านล่าง"
+            : "ไม่รู้สีจริง (เช่น Lazada) → ติ๊กแล้วกด \"นับเป็นรุ่น\" ที่แถบด้านล่าง · ยอดขายไปลงที่รุ่น ไม่แยกสี"}</span>
         </div>
       )}
 
@@ -208,8 +227,8 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
         <div className={`space-y-2 transition-opacity ${loading ? "pointer-events-none opacity-50" : ""}`}>
           {groups.map((g) => (
             <GroupCard key={gkey(g)} g={g} platform={pfInfo.get(g.platform_code)}
-              selectable={queue === "guess" && !!g.suggest} selected={selected.has(gkey(g))} onToggle={() => toggleOne(g)}
-              onConfirm={(sku) => confirm(g, sku)} />
+              selectable={canSelect(g)} selected={selected.has(gkey(g))} onToggle={() => toggleOne(g)}
+              onConfirm={(sku) => confirm(g, sku)} onConfirmModel={() => confirmModelOne(g)} />
           ))}
         </div>
       )}
@@ -219,21 +238,30 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
       )}
 
       <BulkActionBar count={selected.size} unit="การ์ด" onClear={() => setSelected(new Map())}>
-        <button type="button" onClick={() => setBulkOpen(true)} className="h-9 rounded-lg bg-emerald-500 px-4 text-sm font-medium text-white hover:bg-emerald-600">
-          ✓ ยืนยันตามที่ระบบเดา ({num(selected.size)})
-        </button>
+        {bulkMode === "model" ? (
+          <button type="button" onClick={() => setBulkOpen(true)} className="h-9 rounded-lg bg-violet-500 px-4 text-sm font-medium text-white hover:bg-violet-600">
+            🎨 นับเป็นรุ่น ไม่แยกสี ({num(selected.size)})
+          </button>
+        ) : (
+          <button type="button" onClick={() => setBulkOpen(true)} className="h-9 rounded-lg bg-emerald-500 px-4 text-sm font-medium text-white hover:bg-emerald-600">
+            ✓ ยืนยันตามที่ระบบเดา ({num(selected.size)})
+          </button>
+        )}
       </BulkActionBar>
 
       <ConfirmDialog open={bulkOpen} onClose={() => { if (!bulkBusy) setBulkOpen(false); }} onConfirm={() => void confirmSelected()} loading={bulkBusy}
-        title={`ยืนยัน ${num(selectedList.length)} การ์ดตามที่ระบบเดา?`} confirmText="ยืนยันทั้งหมด"
+        title={bulkMode === "model" ? `นับ ${num(selectedList.length)} การ์ดเป็นรุ่น (ไม่แยกสี)?` : `ยืนยัน ${num(selectedList.length)} การ์ดตามที่ระบบเดา?`}
+        confirmText={bulkMode === "model" ? "นับเป็นรุ่นทั้งหมด" : "ยืนยันทั้งหมด"}
         requireTyped={selectedList.length > 50 ? "CONFIRM" : undefined}
         message={
           <div className="space-y-2 text-sm">
-            <p>ระบบจะผูก {num(selectedList.reduce((a, g) => a + g.qty, 0))} ชิ้นกับรหัสที่เดาไว้ และ<b>จำไว้</b>ใช้กับเมลครั้งต่อไป</p>
+            {bulkMode === "model"
+              ? <p>{num(selectedList.reduce((a, g) => a + g.qty, 0))} ชิ้นจะนับยอดขายที่<b>รุ่น</b> (ไม่แยกสี · ไม่ตัดสต๊อกรายสี) และ<b>จำไว้</b>ใช้กับเมลครั้งต่อไป — แก้ภายหลังได้ที่แท็บกฎที่จำไว้</p>
+              : <p>ระบบจะผูก {num(selectedList.reduce((a, g) => a + g.qty, 0))} ชิ้นกับรหัสที่เดาไว้ และ<b>จำไว้</b>ใช้กับเมลครั้งต่อไป</p>}
             <ul className="max-h-56 space-y-0.5 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-2 text-xs">
               {selectedList.slice(0, 30).map((g) => (
                 <li key={gkey(g)} className="flex gap-2">
-                  <code className="shrink-0 font-mono font-medium text-emerald-700">{g.suggest.code}</code>
+                  <code className={`shrink-0 font-mono font-medium ${bulkMode === "model" ? "text-violet-700" : "text-emerald-700"}`}>{bulkMode === "model" ? `รุ่น ${g.model_level ?? "?"}` : g.suggest?.code}</code>
                   <span className="truncate text-slate-600">← {g.variant ?? "—"} · {g.title}</span>
                 </li>
               ))}
@@ -261,10 +289,12 @@ function FilterChip({ on, onClick, tone, title, children }: { on: boolean; onCli
   );
 }
 
-function GroupCard({ g, platform, selectable, selected, onToggle, onConfirm }: {
+function GroupCard({ g, platform, selectable, selected, onToggle, onConfirm, onConfirmModel }: {
   g: PendingGroup; platform?: PlatformInfo;
   selectable: boolean; selected: boolean; onToggle: () => void;
   onConfirm: (sku: { id: string; code: string }) => Promise<void>;
+  /** 🎨 นับเป็นรุ่น (ไม่แยกสี) */
+  onConfirmModel: () => Promise<void>;
 }) {
   const [pick, setPick] = useState<{ id: string; code: string } | null>(g.suggest);
   const [other, setOther] = useState<SkuPickerValue | null>(null);
@@ -274,12 +304,24 @@ function GroupCard({ g, platform, selectable, selected, onToggle, onConfirm }: {
   const color = platformColor(g.platform_code, platform?.color);
   const meta = QUEUE_META[g.queue];
   const lazadaNoColor = g.platform_code === "lazada" && g.queue === "multi";
+  // นับเป็นรุ่นได้เมื่อรู้รหัสรุ่น และรุ่นมีหลายสีให้เลือก (คิว 🎨)
+  const canModel = g.queue === "multi" && !!g.model_level;
 
   const save = async () => {
     if (!chosen) return;
     setSaving(true);
     try { await onConfirm(chosen); } finally { setSaving(false); }
   };
+  const saveModel = async () => {
+    setSaving(true);
+    try { await onConfirmModel(); } finally { setSaving(false); }
+  };
+  const modelBtn = (primary: boolean) => (
+    <button type="button" onClick={() => void saveModel()} disabled={saving} title="ยอดขายไปลงที่รุ่น ไม่แยกสี · ไม่ตัดสต๊อกรายสี · ระบบจำไว้ใช้กับเมลครั้งต่อไป"
+      className={`h-9 rounded-lg px-3 text-sm font-medium disabled:opacity-40 ${primary ? "bg-violet-600 text-white hover:bg-violet-700" : "border border-violet-200 bg-white text-violet-700 hover:bg-violet-50"}`}>
+      🎨 นับเป็นรุ่น {g.model_level} (ไม่แยกสี)
+    </button>
+  );
 
   return (
     <section className={`rounded-xl border border-l-4 bg-white p-3 sm:p-4 ${selected ? "border-emerald-300 ring-1 ring-emerald-200" : "border-slate-200"}`} style={{ borderLeftColor: color }}>
@@ -314,8 +356,9 @@ function GroupCard({ g, platform, selectable, selected, onToggle, onConfirm }: {
       )}
 
       {lazadaNoColor && (
-        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          ⚠️ เมล Lazada ไม่บอกสี — ถ้ายืนยันเป็นสีเดียว ระบบจะ<b>จำไว้และนับทุกออเดอร์ต่อไปของสินค้านี้เป็นสีนั้น</b> ถ้าขายหลายสี ข้อมูลรายสีจะผิด
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <span className="min-w-0 flex-1">⚠️ เมล Lazada ไม่บอกสี — ถ้ายืนยันเป็นสีเดียว ระบบจะ<b>จำไว้และนับทุกออเดอร์ต่อไปของสินค้านี้เป็นสีนั้น</b> · ถ้าไม่รู้สีจริง แนะนำ “นับเป็นรุ่น”</span>
+          {canModel && modelBtn(true)}
         </div>
       )}
 
@@ -341,6 +384,7 @@ function GroupCard({ g, platform, selectable, selected, onToggle, onConfirm }: {
           className="h-9 rounded-lg bg-emerald-600 px-4 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-40">
           {saving ? "กำลังบันทึก..." : chosen ? `✓ ยืนยันเป็น ${chosen.code}` : "เลือก SKU ก่อน"}
         </button>
+        {canModel && !lazadaNoColor && modelBtn(false)}
       </div>
     </section>
   );

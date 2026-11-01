@@ -96,7 +96,17 @@ GET /api/platform-sales/report  →  /master/platform-sales (ตารางก�
 - **คิวตามสาเหตุ** (`pendingQueueOf` ใน match.ts อ่านจาก raw ที่ตัวจับคู่เขียน): 💡 `guess` ระบบเดาไว้ · 🎨 `multi` หลายสี เลือกจากเมลไม่ได้ · ❓ `not_found` ไม่มีรหัสใน ERP / ชื่อไม่มีรหัส
 - ชิปแพลตฟอร์มนับจากทุกคิว · ชิปคิวนับเฉพาะแพลตฟอร์มที่เลือก · ซ่อนการ์ดที่มีแต่ออเดอร์ยกเลิก (ค่าเริ่ม เปิด) · ค้นหา ชื่อ/รหัสรุ่น/ตัวเลือก/เลขออเดอร์
 - **ยืนยันหลายการ์ด** (เฉพาะคิว 💡): ติ๊กทีละใบ / ทั้งหน้า / ทั้งหมดตามตัวกรอง (`guess_all`) → แถบล่าง `BulkActionBar` → ConfirmDialog แสดงรายการ (เกิน 50 = พิมพ์ CONFIRM) → `confirm_many` ส่งทีละ 100 · audit 1 แถวต่อครั้ง (metadata.groups)
-- Lazada + หลายสี → กล่องเตือน "ยืนยันสีเดียว = ทุกออเดอร์ต่อไปนับเป็นสีนั้น"
+- Lazada + หลายสี → กล่องเตือน "ยืนยันสีเดียว = ทุกออเดอร์ต่อไปนับเป็นสีนั้น" + ปุ่ม 🎨 นับเป็นรุ่น
+
+## 🎨 นับเป็นรุ่น (ไม่แยกสี) — migration `202611101000_platform_email_model_level`
+
+- ใช้เมื่อเมลไม่บอกสี (Lazada ไม่บอกเลย) — กันข้อมูลรายสีผิดจากการเดาสีเดียว
+- DB: `platform_email_sku_rules.parent_sku_id` (→ parent_skus_v2 · sku_id กับ parent_sku_id มีได้อย่างเดียว — check constraint) · `platform_order_items.matched_parent_sku_id`
+- หารุ่น (`parentsForModels` ใน review.ts): รหัสรุ่นจากกุญแจจำคู่ (`m:BSD07|…` → `modelFromItemKey`) → SKU ที่ใช้งานของรุ่นนั้นชี้รุ่นแม่ตัวเดียว → ใช้ตัวนั้น · ไม่งั้นหา parent_skus_v2 ที่ code ตรง · หาไม่เจอ/กำกวม = ทำไม่ได้ (บอกให้ค้นหา SKU แทน)
+- `confirm_model` (≤100 การ์ด): upsert กฎ (sku_id=null, parent_sku_id) + ผูกรายการที่ค้าง `matched_parent_sku_id` + `sku_code`=รหัสรุ่น · audit `match_model`
+- ตัวจับคู่: กฎระดับรุ่น → confidence `model` (`matchEmailItem` rule.level="model") → เมลใหม่ผูกรุ่นเอง · `rematchPendingItems` ข้ามรายการที่ผูกรุ่นแล้ว
+- ผลที่อื่น: รายงานยอดขาย = แถว "รุ่น X (ไม่แยกสี)" ไม่นับเป็นค้าง · หน้ารุ่น (`/api/parent-skus/[id]/overview`) นับยอดด้วย · ตัดสต๊อกตอนยืนยันออเดอร์ **ข้าม** พร้อมเตือน "นับระดับรุ่น (ไม่รู้สี)" (ไม่รู้ว่าตัดสีไหน)
+- จำนวนค้างบนแท็บ/ภาพรวม ไม่นับรายการที่ผูกรุ่นแล้ว
 
 ## แท็บ "เมลที่อ่านแล้ว"
 

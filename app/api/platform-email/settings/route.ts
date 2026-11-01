@@ -33,7 +33,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     (await admin.from("platform_email_inbox").select("id", { count: "exact", head: true }).eq("status", status)).count ?? 0;
   const [done, ignored, unreadable, attention, pending, emailOrders, brands, canAdmin] = await Promise.all([
     inbox("done"), inbox("ignored"), inbox("unreadable"), inbox("attention"),
-    admin.from("platform_order_items").select("id", { count: "exact", head: true }).is("matched_sku_id", null).eq("raw->>source", "email").then((r) => r.count ?? 0),
+    admin.from("platform_order_items").select("id", { count: "exact", head: true }).is("matched_sku_id", null).is("matched_parent_sku_id", null).eq("raw->>source", "email").then((r) => r.count ?? 0),
     admin.from("platform_orders").select("id", { count: "exact", head: true }).eq("source", "email").then((r) => r.count ?? 0),
     admin.from("brands").select("id, name").order("name").then((r) => (r.data ?? []) as { id: string; name: string }[]),
     apiCan(request, "admin.users"),

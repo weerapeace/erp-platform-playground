@@ -5,7 +5,7 @@
  * อ่านจาก platform_orders + platform_order_items (ทุกแหล่ง: เมล / ไฟล์ / API) ตามวันที่สั่งซื้อ (เวลาไทย)
  * - ไม่นับออเดอร์ที่ยกเลิก (นับแยกเป็นตัวเลข)
  * - ยอดเงิน = ราคาสินค้า × จำนวน (ไม่รวมค่าส่ง · ยังไม่หักค่าธรรมเนียมแพลตฟอร์ม)
- * - สินค้าที่ยังไม่จับคู่ SKU ยังนับอยู่ (โชว์ชื่อจากร้าน ไม่มีรหัส)
+ * - สินค้าที่ยังไม่จับคู่ SKU ยังนับอยู่ (โชว์ชื่อจากร้าน ไม่มีรหัส) · ผูกระดับรุ่น (matched_parent_sku_id) = แถว "รุ่น X (ไม่แยกสี)" ไม่นับเป็นค้าง
  * คืน products ในรูป SoldProduct (lib/sold-products) → ใช้ตารางกลาง SoldProductsTable ได้เลย (customer = ร้าน)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 type OrderRow = { id: string; platform_id: string; brand_id: string | null; status: string; source: string | null };
-type ItemRow = { order_id: string; name: string | null; qty: number | null; price: number | null; matched_sku_id: string | null; raw: Record<string, unknown> | null };
+type ItemRow = { order_id: string; name: string | null; qty: number | null; price: number | null; matched_sku_id: string | null; matched_parent_sku_id: string | null; raw: Record<string, unknown> | null };
 
 /** ต้นเดือน/ต้นเดือนถัดไป ตามเวลาไทย (00:00 น. ไทย = 17:00 UTC ของวันก่อน) */
 function monthBoundsTh(ym: string): { from: string; to: string } {
@@ -58,7 +58,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const items: ItemRow[] = [];
   const ids = active.map((o) => o.id);
   for (let i = 0; i < ids.length; i += 300) {
-    const { data } = await admin.from("platform_order_items").select("order_id, name, qty, price, matched_sku_id, raw").in("order_id", ids.slice(i, i + 300));
+    const { data } = await admin.from("platform_order_items").select("order_id, name, qty, price, matched_sku_id, matched_parent_sku_id, raw").in("order_id", ids.slice(i, i + 300));
     items.push(...((data ?? []) as ItemRow[]));
   }
 
@@ -69,6 +69,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     for (const s of (data ?? []) as Record<string, unknown>[]) {
       skuInfo.set(String(s.id), { code: String(s.code), color: (s.color_platform_th as string | null) ?? (s.color as string | null) ?? null, image: coverUrl(resolveSkuCover(s).key) });
     }
+  }
+  // ผูกระดับรุ่น (ไม่แยกสี) เช่น Lazada ที่เมลไม่บอกสี → รวมเป็นแถว "รุ่น X (ไม่แยกสี)"
+  const parentIds = [...new Set(items.filter((i) => !i.matched_sku_id && i.matched_parent_sku_id).map((i) => i.matched_parent_sku_id as string))];
+  const parentCode = new Map<string, string>();
+  for (let i = 0; i < parentIds.length; i += 300) {
+    const { data } = await admin.from("parent_skus_v2").select("id, code").in("id", parentIds.slice(i, i + 300));
+    for (const p of (data ?? []) as { id: string; code: string }[]) parentCode.set(p.id, p.code);
   }
 
   // รวมเป็นแถวละ ร้าน × สินค้า
@@ -83,12 +90,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const q = Number(it.qty ?? 0), amt = it.price != null ? Number(it.price) * q : 0;
     if (it.price == null) noPrice.add(o.id);
     const sku = it.matched_sku_id ? skuInfo.get(it.matched_sku_id) : undefined;
-    if (!sku) pending++;
+    const model = !sku && it.matched_parent_sku_id ? parentCode.get(it.matched_parent_sku_id) : undefined;
+    if (!sku && !model) pending++;
     const variant = (it.raw?.variant as string | null) ?? null;
     const shop = shopLabel(o);
-    const name = sku ? `${it.name ?? sku.code}${sku.color ? ` · ${sku.color}` : ""}` : `${it.name ?? "(ไม่มีชื่อ)"}${variant ? ` · ${variant}` : ""} — ยังไม่จับคู่`;
-    const key = `${shop}|${sku?.code ?? name}`;
-    const r = rows.get(key) ?? { customer: shop, customer_code: null, sku: sku?.code ?? null, name, unit: "ชิ้น", qty: 0, amt: 0, image: sku?.image ?? null };
+    const name = sku ? `${it.name ?? sku.code}${sku.color ? ` · ${sku.color}` : ""}`
+      : model ? `${it.name ?? model} — รุ่น ${model} (ไม่แยกสี)`
+      : `${it.name ?? "(ไม่มีชื่อ)"}${variant ? ` · ${variant}` : ""} — ยังไม่จับคู่`;
+    const key = `${shop}|${sku?.code ?? (model ? `รุ่น:${model}` : name)}`;
+    const r = rows.get(key) ?? { customer: shop, customer_code: null, sku: sku?.code ?? model ?? null, name, unit: "ชิ้น", qty: 0, amt: 0, image: sku?.image ?? null };
     r.qty += q; r.amt += amt;
     rows.set(key, r);
     const s = byShop.get(shop) ?? { shop, orders: new Set<string>(), qty: 0, amount: 0 };

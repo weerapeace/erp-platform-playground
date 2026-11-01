@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { itemKey, matchEmailItem, modelCodeFromTitle, modelsForItem, parseVariant, pendingQueueOf, type SkuCandidate } from "@/lib/platform-email/match";
+import { itemKey, matchEmailItem, modelCodeFromTitle, modelsForItem, modelFromItemKey, parseVariant, pendingQueueOf, type SkuCandidate } from "@/lib/platform-email/match";
 
 // ข้อมูลจริงใน skus_v2 (ตรวจ 2026-10-27 / 2026-11-01)
 const sku = (code: string, color?: string): SkuCandidate => ({ id: code, code, color_platform_th: color ?? null });
@@ -89,5 +89,21 @@ describe("pendingQueueOf — คิวในแท็บรอยืนยัน
   it("หลายสีเลือกไม่ได้ = multi", () => {
     const r = matchEmailItem({ title: "Bag BSD07", variant: null }, [{ id: "1", code: "BSD07-01", color: "ดำ" }, { id: "2", code: "BSD07-02", color: "แดง" }]);
     expect(pendingQueueOf({ confidence: r.confidence, reason: r.reason })).toBe("multi");
+  });
+});
+
+describe("นับเป็นรุ่น (ไม่แยกสี)", () => {
+  it("กฎระดับรุ่น → confidence model + parent · ไม่ผูก SKU", () => {
+    const r = matchEmailItem({ title: "Bag BSD07", variant: null }, [sku("BSD07-01", "ดำ"), sku("BSD07-02", "แดง")], { id: "p1", code: "BSD07", level: "model" });
+    expect(r.confidence).toBe("model");
+    expect(r.sku_id).toBeNull();
+    expect(r.parent).toEqual({ id: "p1", code: "BSD07" });
+  });
+  it("กฎระดับ SKU เดิมยังเป็น rule", () => {
+    expect(matchEmailItem({ title: "Bag BSD07", variant: null }, [], { id: "s1", code: "BSD07-01" }).confidence).toBe("rule");
+  });
+  it("รหัสรุ่นจากกุญแจจำคู่", () => {
+    expect(modelFromItemKey(itemKey("Louis Montini กระเป๋า BSD07", null))).toBe("BSD07");
+    expect(modelFromItemKey(itemKey("ชุดกิฟเซ็ท", null))).toBeNull();
   });
 });

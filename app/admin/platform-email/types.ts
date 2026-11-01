@@ -65,11 +65,14 @@ export type PendingGroup = {
   queue: PendingQueue;
   suggest: { id: string; code: string } | null;
   reason: string | null;
+  /** รหัสรุ่นที่ "นับเป็นรุ่น (ไม่แยกสี)" ได้ · null = ชื่อไม่มีรหัสรุ่น */
+  model_level: string | null;
   candidates: { id: string; code: string; color: string | null; name: string | null }[];
 };
 
-/** การ์ด "ระบบเดาไว้" ทั้งหมดตามตัวกรอง (ทุกหน้า) — ใช้ "เลือกทั้งหมด" แล้วยืนยันทีเดียว */
-export type GuessRef = { platform_code: string; item_key: string; title: string; variant: string | null; qty: number; suggest: { id: string; code: string } };
+/** การ์ดในคิว 💡/🎨 ทั้งหมดตามตัวกรอง (ทุกหน้า) — ใช้ "เลือกทั้งหมด" แล้วทำทีเดียว
+ *  💡 ยืนยันตามที่เดา (suggest) · 🎨 นับเป็นรุ่น ไม่แยกสี (model_level) */
+export type SelectRef = { platform_code: string; item_key: string; title: string; variant: string | null; qty: number; suggest: { id: string; code: string } | null; model_level: string | null };
 
 export type PendingResponse = {
   groups: PendingGroup[];
@@ -86,12 +89,12 @@ export type PendingResponse = {
     cancelled_only: number;
   };
   platforms: PlatformInfo[];
-  guess_all?: GuessRef[];
+  select_all?: SelectRef[];
 };
 
 export const QUEUE_META: Record<PendingQueue, { icon: string; label: string; hint: string; chip: string }> = {
   guess: { icon: "💡", label: "ระบบเดาไว้ ให้ยืนยัน", hint: "ระบบมีตัวที่น่าจะใช่ แต่ข้อมูลในเมลขัดกันนิดหน่อย — ตรวจแล้วกดยืนยัน", chip: "border-amber-200 bg-amber-50 text-amber-800" },
-  multi: { icon: "🎨", label: "หลายสี เลือกจากเมลไม่ได้", hint: "รุ่นนี้มีหลายสี แต่เมลไม่บอกสี (Lazada ไม่บอกเลย) — เลือกสีเอง", chip: "border-violet-200 bg-violet-50 text-violet-800" },
+  multi: { icon: "🎨", label: "หลายสี เลือกจากเมลไม่ได้", hint: "รุ่นนี้มีหลายสี แต่เมลไม่บอกสี (Lazada ไม่บอกเลย) — เลือกสีเอง หรือ \"นับเป็นรุ่น (ไม่แยกสี)\" ถ้าไม่รู้สีจริง", chip: "border-violet-200 bg-violet-50 text-violet-800" },
   not_found: { icon: "❓", label: "ไม่พบรหัสใน ERP", hint: "รหัสในชื่อสินค้ายังไม่มีใน ERP หรือชื่อไม่มีรหัส — ค้นหา SKU เอง", chip: "border-rose-200 bg-rose-50 text-rose-800" },
 };
 

@@ -3,11 +3,12 @@
  *   pendingPage  แท็บ "รอยืนยันสินค้า": รวมกลุ่มสินค้าที่ยังไม่ผูก SKU → กรอง/นับ/ตัดหน้า · ตัวเลือก SKU ดึงเฉพาะการ์ดในหน้าที่เปิด
  *   inboxPage    แท็บ "เมลที่อ่านแล้ว": ทีละหน้า + ค้นหา + เรียงที่ฐานข้อมูล
  *   bindPending  ผูกรายการที่ค้างของ (แพลตฟอร์ม + สินค้า+ตัวเลือก) กับ SKU
+ *   confirmModel 🎨 นับเป็นรุ่น (ไม่แยกสี) — กฎระดับรุ่น + matched_parent_sku_id
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages, type PageResult } from "@/lib/fetch-all";
 import { SKU_MATCH_SELECT } from "./server";
-import { modelsForItem, pendingQueueOf, type PendingQueue, type SkuCandidate } from "./match";
+import { modelFromItemKey, modelsForItem, pendingQueueOf, type PendingQueue, type SkuCandidate } from "./match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -34,6 +35,8 @@ type Group = {
   platform_code: string; item_key: string; title: string; variant: string | null; model_code: string | null;
   items: number; qty: number; live_items: number; order_count: number; orders: { no: string; cancelled: boolean }[];
   queue: PendingQueue; suggest: { id: string; code: string } | null; reason: string | null;
+  /** รหัสรุ่นที่ใช้ "นับเป็นรุ่น (ไม่แยกสี)" ได้ (จากกุญแจจำคู่) · null = ชื่อไม่มีรหัสรุ่น */
+  model_level: string | null;
   candidates: { id: string; code: string; color: string | null; name: string | null }[];
 };
 
@@ -50,7 +53,7 @@ export async function pendingPage(admin: Admin, sp: URLSearchParams) {
 
   // ดึงเฉพาะช่องที่ใช้ใน raw + สถานะออเดอร์ในคำขอเดียว (เร็วกว่าดึง raw ทั้งก้อนแล้วค่อยหาออเดอร์ทีหลัง)
   const items = await fetchAllPages<ItemRow>((from, to) => admin.from("platform_order_items")
-    .select(ITEM_SELECT).is("matched_sku_id", null).eq("raw->>source", "email").order("id").range(from, to) as unknown as PromiseLike<PageResult<ItemRow>>, { maxRows: 5000 });
+    .select(ITEM_SELECT).is("matched_sku_id", null).is("matched_parent_sku_id", null).eq("raw->>source", "email").order("id").range(from, to) as unknown as PromiseLike<PageResult<ItemRow>>, { maxRows: 5000 });
 
   const groups = new Map<string, Group & { orderSet: Set<string> }>();
   for (const it of items) {
@@ -60,7 +63,7 @@ export async function pendingPage(admin: Admin, sp: URLSearchParams) {
     const g = groups.get(`${pc}|${key}`) ?? {
       platform_code: pc, item_key: key, title: it.name ?? "", variant: (raw.variant as string | null) ?? null,
       model_code: (raw.model_code as string | null) ?? null, items: 0, qty: 0, live_items: 0, order_count: 0, orders: [], orderSet: new Set<string>(),
-      queue: pendingQueueOf(raw),
+      queue: pendingQueueOf(raw), model_level: modelFromItemKey(key),
       suggest: raw.suggest_sku_id ? { id: String(raw.suggest_sku_id), code: String(raw.suggest_code ?? "") } : null,
       reason: (raw.reason as string | null) ?? null, candidates: [],
     };
@@ -119,20 +122,84 @@ export async function pendingPage(admin: Admin, sp: URLSearchParams) {
   const platforms = ((pf ?? []) as { code: string; name_th: string | null; color: string | null; icon_key: string | null }[])
     .map((p) => ({ code: p.code, name: p.name_th ?? p.code, color: p.color, icon_key: p.icon_key }));
 
-  // คิว "ระบบเดาไว้" → ส่งรายการย่อทุกหน้าไปด้วย ให้ติ๊ก "เลือกทั้งหมดตามตัวกรอง" ได้
-  const guess_all = queue === "guess"
-    ? list.filter((g) => g.suggest).map((g) => ({ platform_code: g.platform_code, item_key: g.item_key, title: g.title, variant: g.variant, qty: g.qty, suggest: g.suggest! }))
+  // คิว 💡 เดาไว้ / 🎨 หลายสี → ส่งรายการย่อทุกหน้าไปด้วย ให้ติ๊ก "เลือกทั้งหมดตามตัวกรอง" แล้วทำทีเดียวได้
+  //   💡 = ยืนยันตามที่เดา (ต้องมี suggest) · 🎨 = นับเป็นรุ่น ไม่แยกสี (ต้องรู้รุ่น)
+  const select_all = queue === "guess" || queue === "multi"
+    ? list.filter((g) => (queue === "guess" ? !!g.suggest : !!g.model_level))
+      .map((g) => ({ platform_code: g.platform_code, item_key: g.item_key, title: g.title, variant: g.variant, qty: g.qty, suggest: g.suggest, model_level: g.model_level }))
     : undefined;
 
-  return { groups: pageGroups, total, page, size, stats, platforms, guess_all, error: null };
+  return { groups: pageGroups, total, page, size, stats, platforms, select_all, error: null };
 }
 
 /** ผูกทุกรายการที่ค้างของ (แพลตฟอร์ม + สินค้า+ตัวเลือก) กับ SKU → จำนวนรายการที่ผูก */
 export async function bindPending(admin: Admin, pc: string, key: string, skuId: string, code: string): Promise<number> {
   const { data, error } = await admin.from("platform_order_items").update({ matched_sku_id: skuId, sku_code: code })
-    .is("matched_sku_id", null).eq("raw->>source", "email").eq("raw->>platform_code", pc).eq("raw->>item_key", key).select("id");
+    .is("matched_sku_id", null).is("matched_parent_sku_id", null)
+    .eq("raw->>source", "email").eq("raw->>platform_code", pc).eq("raw->>item_key", key).select("id");
   if (error) throw new Error("ผูกรายการสินค้าไม่สำเร็จ");
   return (data ?? []).length;
+}
+
+/**
+ * หารุ่น (parent_skus_v2) ของรหัสรุ่น: SKU ที่ใช้งานอยู่ของรุ่นนั้นชี้รุ่นแม่ตัวเดียว → ใช้ตัวนั้น · ไม่งั้นหารุ่นที่รหัสตรงกัน
+ * คืน Map รหัสรุ่น → { id, code } (หาไม่เจอ / กำกวม = ไม่มีใน Map)
+ */
+export async function parentsForModels(admin: Admin, models: string[]): Promise<Map<string, { id: string; code: string }>> {
+  const out = new Map<string, { id: string; code: string }>();
+  const safe = [...new Set(models.map((m) => m.toUpperCase()).filter((m) => /^[A-Z0-9-]{3,30}$/.test(m)))];
+  if (!safe.length) return out;
+  const parentOf = new Map<string, Set<string>>();
+  for (let i = 0; i < safe.length; i += 40) {
+    const chunk = safe.slice(i, i + 40);
+    const or = chunk.flatMap((m) => [`code.eq.${m}`, `code.ilike.${m}-*`]).join(",");
+    const { data } = await admin.from("skus_v2").select("code, parent_sku_id").or(or).eq("is_active", true).not("parent_sku_id", "is", null).limit(5000);
+    for (const s of (data ?? []) as { code: string; parent_sku_id: string }[]) {
+      const c = s.code.toUpperCase();
+      for (const m of chunk) if (c === m || c.startsWith(`${m}-`)) parentOf.set(m, (parentOf.get(m) ?? new Set()).add(s.parent_sku_id));
+    }
+  }
+  const unique = new Map([...parentOf].filter(([, ids]) => ids.size === 1).map(([m, ids]) => [m, [...ids][0]]));
+  const ids = [...new Set(unique.values())];
+  const missing = safe.filter((m) => !unique.has(m));
+  const [{ data: byId }, { data: byCode }] = await Promise.all([
+    ids.length ? admin.from("parent_skus_v2").select("id, code").in("id", ids) : Promise.resolve({ data: [] }),
+    missing.length ? admin.from("parent_skus_v2").select("id, code").in("code", missing) : Promise.resolve({ data: [] }),
+  ]);
+  const codeOf = new Map(((byId ?? []) as { id: string; code: string }[]).map((p) => [p.id, p.code]));
+  for (const [m, id] of unique) { const code = codeOf.get(id); if (code) out.set(m, { id, code }); }
+  for (const p of (byCode ?? []) as { id: string; code: string }[]) if (!out.has(p.code.toUpperCase())) out.set(p.code.toUpperCase(), p);
+  return out;
+}
+
+/**
+ * 🎨 นับเป็นรุ่น (ไม่แยกสี) — จำกฎระดับรุ่น + ผูกรายการที่ค้างกับรุ่น (matched_parent_sku_id) · ไม่ตัดสต๊อกรายสี
+ * ใช้กับสินค้าที่เมลไม่บอกสี (Lazada) — กันข้อมูลรายสีผิดจากการเดาสีเดียว
+ */
+export async function confirmModel(admin: Admin, actorId: string | null, groups: { platform_code: string; item_key: string }[]) {
+  const withModel = groups.map((g) => ({ ...g, model: modelFromItemKey(g.item_key)?.toUpperCase() ?? null }));
+  const parents = await parentsForModels(admin, withModel.map((g) => g.model).filter((m): m is string => !!m));
+  const ok = withModel.filter((g) => g.model && parents.has(g.model)).map((g) => ({ ...g, parent: parents.get(g.model!)! }));
+  const skipped = withModel.filter((g) => !g.model || !parents.has(g.model)).map((g) => ({ platform_code: g.platform_code, item_key: g.item_key, model: g.model }));
+  if (!ok.length) return { done: [] as { platform_code: string; item_key: string; parent_code: string; items: number }[], skipped, failed: 0 };
+
+  const { error: ruleErr } = await admin.from("platform_email_sku_rules").upsert(
+    ok.map((g) => ({ platform_code: g.platform_code, item_key: g.item_key, sku_id: null, parent_sku_id: g.parent.id, created_by: actorId })),
+    { onConflict: "platform_code,item_key" });
+  if (ruleErr) throw new Error("บันทึกกฎระดับรุ่นไม่สำเร็จ");
+
+  const done: { platform_code: string; item_key: string; parent_code: string; items: number }[] = [];
+  let failed = 0;
+  for (let i = 0; i < ok.length; i += 10) {
+    await Promise.all(ok.slice(i, i + 10).map(async (g) => {
+      const { data, error } = await admin.from("platform_order_items").update({ matched_parent_sku_id: g.parent.id, sku_code: g.parent.code })
+        .is("matched_sku_id", null).is("matched_parent_sku_id", null)
+        .eq("raw->>source", "email").eq("raw->>platform_code", g.platform_code).eq("raw->>item_key", g.item_key).select("id");
+      if (error) failed++;
+      else done.push({ platform_code: g.platform_code, item_key: g.item_key, parent_code: g.parent.code, items: (data ?? []).length });
+    }));
+  }
+  return { done, skipped, failed };
 }
 
 const LIST_COLS = "id, message_id, received_at, from_addr, subject, platform_code, kind, external_order_id, ref_no, shop_name, status, note, order_id, updated_at";

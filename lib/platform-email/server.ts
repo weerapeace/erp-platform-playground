@@ -12,7 +12,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { emailLines, isReadable, parsePlatformEmail, type EmailKind, type ParsedEmail, type ParsedItem, type PlatformCode } from "./parse";
-import { AUTO_CONFIDENCE, itemKey, matchEmailItem, modelCodeFromTitle, modelsForItem, type ItemMatch, type SkuCandidate } from "./match";
+import { AUTO_CONFIDENCE, itemKey, matchEmailItem, modelCodeFromTitle, modelsForItem, type ConfirmedRule, type ItemMatch, type SkuCandidate } from "./match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Row = Record<string, unknown>;
@@ -71,17 +71,23 @@ export async function matchItems(admin: Admin, platform: PlatformCode, items: re
   const itemModels = items.map((it) => modelsForItem(it).map(safeModel).filter((m): m is string => !!m));
   const models = [...new Set(itemModels.flat())];
 
-  const ruleMap = new Map<string, { id: string; code: string }>();
+  // คู่ที่คนยืนยันไว้: ชี้ SKU (สีชัด) หรือ ชี้รุ่น parent_skus_v2 (นับเป็นรุ่น ไม่แยกสี)
+  const ruleMap = new Map<string, ConfirmedRule>();
   if (keys.length) {
-    const { data: rules } = await admin.from("platform_email_sku_rules").select("item_key, sku_id").eq("platform_code", platform).in("item_key", keys);
-    const ids = [...new Set(((rules ?? []) as { sku_id: string }[]).map((r) => r.sku_id))];
-    if (ids.length) {
-      const { data: skus } = await admin.from("skus_v2").select("id, code").in("id", ids);
-      const codeOf = new Map(((skus ?? []) as { id: string; code: string }[]).map((s) => [s.id, s.code]));
-      for (const r of (rules ?? []) as { item_key: string; sku_id: string }[]) {
-        const code = codeOf.get(r.sku_id);
-        if (code) ruleMap.set(r.item_key, { id: r.sku_id, code });
-      }
+    type RuleRow = { item_key: string; sku_id: string | null; parent_sku_id: string | null };
+    const { data } = await admin.from("platform_email_sku_rules").select("item_key, sku_id, parent_sku_id").eq("platform_code", platform).in("item_key", keys);
+    const rules = (data ?? []) as RuleRow[];
+    const skuIds = [...new Set(rules.map((r) => r.sku_id).filter((x): x is string => !!x))];
+    const parentIds = [...new Set(rules.map((r) => r.parent_sku_id).filter((x): x is string => !!x))];
+    const [{ data: skus }, { data: parents }] = await Promise.all([
+      skuIds.length ? admin.from("skus_v2").select("id, code").in("id", skuIds) : Promise.resolve({ data: [] }),
+      parentIds.length ? admin.from("parent_skus_v2").select("id, code").in("id", parentIds) : Promise.resolve({ data: [] }),
+    ]);
+    const codeOf = new Map([...((skus ?? []) as { id: string; code: string }[]), ...((parents ?? []) as { id: string; code: string }[])].map((s) => [s.id, s.code]));
+    for (const r of rules) {
+      const id = r.sku_id ?? r.parent_sku_id;
+      const code = id ? codeOf.get(id) : null;
+      if (id && code) ruleMap.set(r.item_key, { id, code, level: r.sku_id ? "sku" : "model" });
     }
   }
 
@@ -112,7 +118,7 @@ export async function rematchPendingItems(admin: Admin): Promise<{ checked: numb
   const rows: It[] = [];
   for (let from = 0; from < 10000; from += 1000) {
     const { data } = await admin.from("platform_order_items").select("id, name, raw")
-      .is("matched_sku_id", null).eq("raw->>source", "email").order("id").range(from, from + 999);
+      .is("matched_sku_id", null).is("matched_parent_sku_id", null).eq("raw->>source", "email").order("id").range(from, from + 999);
     rows.push(...((data ?? []) as It[]));
     if ((data ?? []).length < 1000) break;
   }
@@ -124,12 +130,15 @@ export async function rematchPendingItems(admin: Admin): Promise<{ checked: numb
     for (let i = 0; i < list.length; i++) {
       const m = res[i], r = list[i];
       const auto = AUTO_CONFIDENCE.includes(m.confidence);
+      const model = m.confidence === "model" && !!m.parent;
       const raw = { ...(r.raw ?? {}), confidence: m.confidence, reason: m.reason, suggest_sku_id: m.suggest?.id ?? null, suggest_code: m.suggest?.code ?? null };
-      const changed = auto || raw.suggest_sku_id !== r.raw?.suggest_sku_id || raw.reason !== r.raw?.reason;
+      const changed = auto || model || raw.suggest_sku_id !== r.raw?.suggest_sku_id || raw.reason !== r.raw?.reason;
       if (!changed) continue;
-      const { error } = await admin.from("platform_order_items")
-        .update(auto ? { matched_sku_id: m.sku_id, sku_code: m.sku_code, raw } : { raw }).eq("id", r.id).is("matched_sku_id", null);
-      if (!error && auto) matched++;
+      const patch = auto ? { matched_sku_id: m.sku_id, sku_code: m.sku_code, raw }
+        : model ? { matched_parent_sku_id: m.parent!.id, sku_code: m.parent!.code, raw }
+        : { raw };
+      const { error } = await admin.from("platform_order_items").update(patch).eq("id", r.id).is("matched_sku_id", null).is("matched_parent_sku_id", null);
+      if (!error && (auto || model)) matched++;
     }
   }
   return { checked: rows.length, matched };
@@ -153,11 +162,13 @@ async function insertItems(admin: Admin, orderId: string, platform: PlatformCode
   const rows = items.map((it, i) => {
     const m = matches[i];
     const auto = AUTO_CONFIDENCE.includes(m.confidence);
-    if (!auto) pending++;
+    const model = m.confidence === "model" && m.parent ? m.parent : null;   // ยืนยันไว้ว่านับเป็นรุ่น (ไม่แยกสี)
+    if (!auto && !model) pending++;
     return {
       order_id: orderId,
-      sku_code: auto ? m.sku_code : modelCodeFromTitle(it.title),
+      sku_code: auto ? m.sku_code : model ? model.code : modelCodeFromTitle(it.title),
       matched_sku_id: auto ? m.sku_id : null,
+      matched_parent_sku_id: model ? model.id : null,
       name: it.title,
       qty: it.qty,
       price: it.price,

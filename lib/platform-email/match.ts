@@ -29,18 +29,29 @@ export type SkuCandidate = {
   is_active?: boolean | null;
 };
 
-export type MatchConfidence = "rule" | "exact" | "single" | "guess" | "none";
+/** model = คนยืนยันไว้ว่า "นับเป็นรุ่น (ไม่แยกสี)" → ผูกระดับรุ่น (parent) ไม่ผูก SKU */
+export type MatchConfidence = "rule" | "model" | "exact" | "single" | "guess" | "none";
 export const AUTO_CONFIDENCE: readonly MatchConfidence[] = ["rule", "exact", "single"];
 
 export type ItemMatch = {
   confidence: MatchConfidence;
-  /** ผูกแล้ว (rule/exact/single) */
+  /** ผูกแล้ว (rule/exact/single) · model = sku_id ว่าง แต่ sku_code = รหัสรุ่น */
   sku_id: string | null;
   sku_code: string | null;
+  /** ผูกระดับรุ่น (model) */
+  parent?: { id: string; code: string } | null;
   /** เดาไว้ให้คนยืนยัน (guess) */
   suggest: { id: string; code: string } | null;
   reason: string;
 };
+
+/** คู่ที่คนยืนยันไว้ — SKU (สีชัด) หรือ รุ่น (ไม่แยกสี) */
+export type ConfirmedRule = { id: string; code: string; level?: "sku" | "model" };
+
+/** รหัสรุ่นจากกุญแจจำคู่ ("m:BSD07|…" → BSD07) · กุญแจแบบชื่อเต็ม ("t:…") = ไม่มีรุ่น */
+export function modelFromItemKey(key: string): string | null {
+  return key.startsWith("m:") ? key.slice(2).split("|")[0] || null : null;
+}
 
 const norm = (s: string | null | undefined) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
@@ -152,8 +163,11 @@ function findByNumber(pool: SkuCandidate[], model: string, num: string): SkuCand
 export function matchEmailItem(
   item: { title: string; variant: string | null },
   candidates: readonly SkuCandidate[],
-  rule?: { id: string; code: string } | null,
+  rule?: ConfirmedRule | null,
 ): ItemMatch {
+  if (rule?.level === "model") {
+    return { confidence: "model", sku_id: null, sku_code: rule.code, parent: { id: rule.id, code: rule.code }, suggest: null, reason: `นับเป็นรุ่น ${rule.code} (ไม่แยกสี) ตามที่ยืนยันไว้` };
+  }
   if (rule) return { confidence: "rule", sku_id: rule.id, sku_code: rule.code, suggest: null, reason: "เคยยืนยันคู่นี้แล้ว" };
 
   const active = candidates.filter((c) => c.is_active !== false);

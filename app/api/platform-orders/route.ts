@@ -75,11 +75,11 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   // ยืนยัน → ตัดสต๊อก (ครั้งเดียว)
   if (newStatus === "confirmed" && !order.stock_deducted) {
     const wh = await defaultWarehouse(admin);
-    const { data: items } = await admin.from("platform_order_items").select("matched_sku_id, qty, name, sku_code").eq("order_id", id);
+    const { data: items } = await admin.from("platform_order_items").select("matched_sku_id, matched_parent_sku_id, qty, name, sku_code").eq("order_id", id);
     if (!wh) warnings.push("ไม่พบคลังออนไลน์ (WH-ONLINE) — ยังไม่ได้ตัดสต๊อก");
     else {
       for (const it of ((items ?? []) as Record<string, unknown>[])) {
-        if (!it.matched_sku_id) { warnings.push(`${it.sku_code ?? it.name ?? "?"}: จับคู่ SKU ไม่ได้ ข้ามการตัดสต๊อก`); continue; }
+        if (!it.matched_sku_id) { warnings.push(it.matched_parent_sku_id ? `${it.sku_code ?? it.name ?? "?"}: นับระดับรุ่น (ไม่รู้สี) ข้ามการตัดสต๊อก — ตัดสต๊อกสีที่ส่งจริงเอง` : `${it.sku_code ?? it.name ?? "?"}: จับคู่ SKU ไม่ได้ ข้ามการตัดสต๊อก`); continue; }
         const { error } = await admin.rpc("erp_stock_post_internal", { p_movement_type: "out", p_product_id: it.matched_sku_id as string, p_to_warehouse_id: null, p_from_warehouse_id: wh, p_qty: Number(it.qty) || 0, p_unit_cost: 0, p_reference_type: "platform_order", p_reference_id: id, p_reference_label: label, p_actor: user?.email ?? null });
         if (error) warnings.push(`${it.sku_code ?? "?"}: ตัดสต๊อกไม่สำเร็จ (${error.message})`);
       }
