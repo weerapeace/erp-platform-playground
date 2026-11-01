@@ -5,6 +5,8 @@
  * POST { action: "reprocess", ids }                    → อ่านเมลใหม่ด้วยกฎล่าสุด (หลังปรับกฎ/เพิ่มร้านในตั้งค่า)
  * POST { action: "resolve", ids }                      → ปิดเรื่อง (คนตรวจแล้ว ไม่ต้องทำอะไร)
  * POST { action: "confirm_sku", platform_code, item_key, sku_id } → ยืนยันคู่สินค้า + จำไว้ + ผูกทุกรายการที่ค้างด้วยคู่นี้
+ * POST { action: "rematch" }                           → จับคู่สินค้าที่ค้างใหม่ด้วยกฎล่าสุด (หลังปรับตัวจับคู่ / เพิ่ม SKU)
+ * POST { action: "reprocess_all", status? }           → อ่านใหม่ทั้งกลุ่ม เก่า→ใหม่ (≤150 ฉบับ/ครั้ง) เช่น เมลที่เคยข้ามหลังเพิ่มประเภทเมลใหม่
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
@@ -13,8 +15,8 @@ import { guardApi } from "@/lib/api-auth";
 import { requestActor } from "@/lib/request-actor";
 import { writeAudit } from "@/lib/audit";
 import { fetchAllPages } from "@/lib/fetch-all";
-import { loadEmailSettings, loadPlatformIds, processLines, SKU_MATCH_SELECT } from "@/lib/platform-email/server";
-import type { SkuCandidate } from "@/lib/platform-email/match";
+import { loadEmailSettings, loadPlatformIds, processLines, rematchPendingItems, SKU_MATCH_SELECT } from "@/lib/platform-email/server";
+import { modelsForItem, type SkuCandidate } from "@/lib/platform-email/match";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -55,18 +57,22 @@ async function pendingGroups(admin: ReturnType<typeof supabaseAdmin>) {
     groups.set(`${pc}|${key}`, g);
   }
 
-  const models = [...new Set([...groups.values()].map((g) => g.model_code).filter((m): m is string => !!m && /^[A-Z0-9-]{3,30}$/.test(m)))];
-  if (models.length) {
-    const or = models.flatMap((m) => [`code.eq.${m}`, `code.ilike.${m}-*`]).join(",");
-    const { data } = await admin.from("skus_v2").select(SKU_MATCH_SELECT).or(or).eq("is_active", true).order("code").limit(2000);
-    for (const g of groups.values()) {
-      if (!g.model_code) continue;
-      const m = g.model_code;
-      g.candidates = ((data ?? []) as SkuCandidate[])
-        .filter((s) => { const c = s.code.toUpperCase(); return c === m || c.startsWith(`${m}-`); })
-        .slice(0, 30)
-        .map((s) => ({ id: s.id, code: s.code, color: s.color_platform_th ?? s.color ?? null, name: s.name_th ?? null }));
-    }
+  // ตัวเลือกให้กด = SKU ของรุ่นที่เขียนในตัวเลือก (เช่น "สีดำ | MGN116") + รุ่นท้ายชื่อสินค้า
+  const safe = (m: string) => /^[A-Z0-9-]{3,30}$/.test(m);
+  const groupModels = new Map([...groups.entries()].map(([k, g]) => [k, modelsForItem({ title: g.title, variant: g.variant }).filter(safe)]));
+  const models = [...new Set([...groupModels.values()].flat())];
+  const skus: SkuCandidate[] = [];
+  for (let i = 0; i < models.length; i += 40) {
+    const or = models.slice(i, i + 40).flatMap((m) => [`code.eq.${m}`, `code.ilike.${m}-*`]).join(",");
+    const { data } = await admin.from("skus_v2").select(SKU_MATCH_SELECT).or(or).eq("is_active", true).order("code").limit(5000);
+    skus.push(...((data ?? []) as SkuCandidate[]));
+  }
+  for (const [k, g] of groups) {
+    const ms = groupModels.get(k) ?? [];
+    g.candidates = skus
+      .filter((s) => { const c = s.code.toUpperCase(); return ms.some((m) => c === m || c.startsWith(`${m}-`)); })
+      .slice(0, 30)
+      .map((s) => ({ id: s.id, code: s.code, color: s.color_platform_th ?? s.color ?? null, name: s.name_th ?? null }));
   }
   return [...groups.values()].sort((a, b) => b.qty - a.qty);
 }
@@ -95,11 +101,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const actor = await requestActor(supabaseFromRequest(request));
   const ids = (Array.isArray(body.ids) ? body.ids : []).filter((x) => typeof x === "string").slice(0, 100);
 
-  if (body.action === "reprocess") {
-    if (!ids.length) return NextResponse.json({ error: "ไม่ได้เลือกเมล" }, { status: 400 });
+  if (body.action === "rematch") {
+    const r = await rematchPendingItems(admin);
+    await writeAudit(admin, { action: "rematch", entityType: "platform_order_item", entityId: null, actorId: actor.id, actorName: actor.name, metadata: r });
+    return NextResponse.json({ ok: true, ...r, error: null });
+  }
+
+  if (body.action === "reprocess" || body.action === "reprocess_all") {
+    const all = body.action === "reprocess_all";
+    if (!all && !ids.length) return NextResponse.json({ error: "ไม่ได้เลือกเมล" }, { status: 400 });
     const settings = await loadEmailSettings(admin);
     const ctx = { shops: settings.shops, platformIds: await loadPlatformIds(admin) };
-    const { data } = await admin.from("platform_email_inbox").select("message_id, body_text, from_addr, subject, received_at").in("id", ids);
+    let sel = admin.from("platform_email_inbox").select("message_id, body_text, from_addr, subject, received_at").order("received_at", { ascending: true });
+    if (all) {
+      const st = String((body as { status?: string }).status ?? "");
+      if (STATUSES.includes(st)) sel = sel.eq("status", st);
+      sel = sel.limit(150);
+    } else sel = sel.in("id", ids);
+    const { data } = await sel;
     const results: { message_id: string; status: string; note: string }[] = [];
     for (const r of (data ?? []) as { message_id: string; body_text: string | null; from_addr: string | null; subject: string | null; received_at: string | null }[]) {
       const lines = String(r.body_text ?? "").split("\n").filter(Boolean);

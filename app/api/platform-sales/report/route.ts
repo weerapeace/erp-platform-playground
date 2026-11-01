@@ -97,9 +97,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     qty += q; amount += amt;
   }
 
-  // คำขอคืนเงินที่เข้ามาในเดือนนี้ (เมลไม่บอกเลขออเดอร์ → นับรวม ไม่หักยอด)
-  const { count: returns } = await admin.from("platform_email_inbox").select("id", { count: "exact", head: true })
-    .eq("kind", "return_requested").gte("received_at", from).lt("received_at", to);
+  // คำขอคืนเงินที่เข้ามาในเดือนนี้ — นับต่อคำขอ (ยื่นคำขอ + ผลพิจารณาของเลขเดียวกัน = 1) · ไม่หักยอด
+  const { data: ret } = await admin.from("platform_email_inbox").select("id, ref_no, external_order_id")
+    .eq("kind", "return_requested").gte("received_at", from).lt("received_at", to).limit(5000);
+  const returns = new Set(((ret ?? []) as { id: string; ref_no: string | null; external_order_id: string | null }[])
+    .map((r) => r.ref_no ?? r.external_order_id ?? r.id)).size;
 
   return NextResponse.json({
     month,
@@ -112,7 +114,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       amount,
       no_price_orders: noPrice.size,
       pending_items: pending,
-      returns: returns ?? 0,
+      returns,
       from_email: active.filter((o) => o.source === "email").length,
     },
     by_shop: [...byShop.values()].map((s) => ({ shop: s.shop, orders: s.orders.size, qty: s.qty, amount: s.amount })).sort((a, b) => b.amount - a.amount),

@@ -65,6 +65,7 @@ export const STATUS_META: Record<InboxRow["status"], { label: string; cls: strin
 
 export const KIND_LABEL: Record<string, string> = {
   order_paid: "ชำระเงินแล้ว",
+  order_cod: "เก็บเงินปลายทาง",
   order_new: "ออเดอร์ใหม่",
   order_cancelled: "ยกเลิก",
   return_requested: "ขอคืนเงิน/คืนสินค้า",

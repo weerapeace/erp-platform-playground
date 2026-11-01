@@ -164,4 +164,51 @@ describe("เมลอื่น", () => {
     expect(isReadable(p)).toBe(false);
     expect(p.problems).toContain("หาเลขออเดอร์ในเมลไม่เจอ");
   });
+  it("แจ้งสินค้าขายหมด (ขึ้นต้นด้วย สินค้า …) = other", () => {
+    const p = parsePlatformEmail({ from: SHOPEE, subject: "สินค้า … MGN116: สีดำ | MGN116,XL ของคุณขายหมดแล้ว", text: "สวัสดีคุณ louismontini_officialshop,\nสินค้า … ของคุณขายหมดแล้ว\n1. … MGN116\nตัวเลือกสินค้า:\nสีดำ | MGN116,XL\nราคา:\n฿1,150" });
+    expect(p.kind).toBe("other");
+  });
+});
+
+// ข้อความจริงจากกล่องเมล (body_text) ชุดแรก 2026-11-01 — เลข "1." อยู่บรรทัดเดียวโดด ๆ
+describe("เมลจริงชุดแรก", () => {
+  it("Shopee เก็บเงินปลายทาง → order_cod พร้อมสินค้า", () => {
+    const text = [
+      "เรียน คุณ louismontini_officialshop,", "คำสั่งซื้อขอชำระเงินปลายทางหมายเลข #26110155CSVP2M", "ได้รับการยืนยันเรียบร้อยแล้ว",
+      "กรุณาดำเนินการแจ้งเวลานัดรับสินค้ากับ Standard Delivery - ส่งธรรมดาในประเทศ ผ่านทางแอป Shopee", "รายละเอียดคำสั่งซื้อ",
+      "\"หมายเลขคำสั่งซื้อ:", "#26110155CSVP2M", "วันที่สั่งซื้อ:", "01/11/2026 03:26:37", "1.",
+      "Louis Montini (Ma Box) กระเป๋าผ้าแคนวาสสะพายข้าง ทรงกล่อง คอลเลคชั่นสุดชิค CVRB001",
+      "ตัวเลือกสินค้า:", "ครีม | 02", "จำนวน:", "1", "ราคา:", "฿490", "ยอดรวมค่าสินค้า:", "฿490", "ค่าจัดส่งสินค้า:", "฿0", "ยอดที่ต้องชำระทั้งหมด:", "฿490",
+    ].join("\n");
+    const p = parsePlatformEmail({ from: SHOPEE, subject: "คำสั่งซื้อชำระเงินปลายทาง #26110155CSVP2M จากผู้ซื้อ x ถูกยืนยันแล้ว", text });
+    expect(p.kind).toBe("order_cod");
+    expect(p.order_no).toBe("26110155CSVP2M");
+    expect(p.items).toEqual([{ title: "Louis Montini (Ma Box) กระเป๋าผ้าแคนวาสสะพายข้าง ทรงกล่อง คอลเลคชั่นสุดชิค CVRB001", variant: "ครีม | 02", qty: 1, qty_known: true, price: 490 }]);
+    expect(isReadable(p)).toBe(true);
+  });
+  it("Shopee ยกเลิกโดยผู้ซื้อ (เลข 1. บรรทัดเดียว) → ได้สินค้า", () => {
+    const text = [
+      "เรียน คุณ louismontini_officialshop,", "คำสั่งซื้อหมายเลข #26103140FSQH6H", "ถูกยกเลิกโดยร้าน armevnom เมื่อวันที่", "31 Oct 2026 16:58:56",
+      "รายละเอียดคำสั่งซื้อ", "\"หมายเลขคำสั่งซื้อ:", "#26103140FSQH6H", "วันที่สั่งซื้อ:", "31/10/2026 16:26:23", "1.",
+      "[ส่งด่วนฟรี] Louis Montini (Belt Accessories) หูเข็มขัดหนังแท้ ขนาด 1.3 นิ้ว BELTA002",
+      "ตัวเลือกสินค้า:", "ดำ | 01 (1คู่)", "จำนวน:", "1", "ราคา:", "฿35", "ยอดรวมค่าสินค้า:", "฿-29",
+    ].join("\n");
+    const p = parsePlatformEmail({ from: SHOPEE, subject: "คำสั่งซื้อหมายเลข #26103140FSQH6H ถูกทำการยกเลิกโดย armevnom", text });
+    expect(p.kind).toBe("order_cancelled");
+    expect(p.items.map((i) => [i.title.slice(-8), i.variant, i.qty, i.price])).toEqual([["BELTA002", "ดำ | 01 (1คู่)", 1, 35]]);
+  });
+  it("ข้อพิพาทคืนเงิน มีเลขออเดอร์ → order_no (ไม่ใช่เลขคำขอ)", () => {
+    const p = parsePlatformEmail({ from: SHOPEE, subject: "คำขอคืนเงิน/คืนสินค้าสำหรับคำสั่งซื้อ #261027QEW8CTRD",
+      text: "เรียนคุณ louismontini_officialshop,\nเราได้รับข้อพิพาทของคุณกรณีคำขอคืนเงิน/คืนสินค้าสำหรับคำสั่งซื้อหมายเลข #261027QEW8CTRD ช้อปปี้จะแจ้งขั้นตอนต่างๆ" });
+    expect(p).toMatchObject({ kind: "return_requested", order_no: "261027QEW8CTRD", ref_no: null, stage: "ข้อพิพาท" });
+  });
+  it("ผลการพิจารณาคำขอคืนเงิน → เลขคำขอเดิม (นับคำขอเดียวกันครั้งเดียว)", () => {
+    const p = parsePlatformEmail({ from: SHOPEE, subject: "ผลการพิจารณาคำขอคืนเงิน/คืนสินค้าหมายเลข 26103001169XJTS",
+      text: "เรียนคุณ louismontini_officialshop,\nShopee ได้ตรวจสอบคำขอคืนสินค้าหมายเลข # 26103001169XJTS แล้ว" });
+    expect(p).toMatchObject({ kind: "return_requested", order_no: null, ref_no: "26103001169XJTS", stage: "ผลการพิจารณา" });
+  });
+  it("คำขอคืนเงินอยู่ระหว่างพิจารณา (#เลขคำขอ ของผู้ซื้อ #ชื่อ)", () => {
+    const p = parsePlatformEmail({ from: SHOPEE, subject: "คำขอคืนเงิน/คืนสินค้า #26103001169XJTS ของผู้ซื้อ #4tthf1csno อยู่ระหว่างการพิจารณา", text: "เรียนคุณ louismontini_officialshop," });
+    expect(p.ref_no).toBe("26103001169XJTS");
+  });
 });

@@ -1,13 +1,19 @@
 /**
  * 🔗 จับคู่ "สินค้าในเมลแพลตฟอร์ม" → SKU ใน ERP (pure — ทดสอบที่ lib/__tests__/platform-email-match.test.ts)
  *
- * กติกา (ตรวจกับข้อมูลจริง 2026-10-27):
+ * ข้อเท็จจริงจากข้อมูลจริง (2026-10-27 + เมลจริงชุดแรก 2026-11-01):
  *   - ชื่อสินค้าบนร้านลงท้ายด้วยรหัสรุ่น เช่น "… Men's Wallet TTM061" → รุ่น TTM061
- *   - SKU ลูก = รหัสรุ่น-เลขสี (TTM061-04) และ color_platform_th = "ดำ (04)"
- *   rule   คนเคยยืนยันคู่นี้แล้ว → ใช้ที่จำไว้
- *   exact  ตัวเลือกมีเลขสีในวงเล็บ "Black (04)" → TTM061-04 · หรือในเมลมีรหัส SKU เต็มอยู่แล้ว
- *   single รุ่นนั้นมี SKU เดียว และตัวเลือกไม่ได้บอกสีที่ขัดกัน
- *   guess  เดาจากชื่อสีได้ตัวเดียว (เช่น "ดำ (Special)" → LYP14-01) → ยังไม่ผูกเอง ให้คนกดยืนยันครั้งแรก
+ *   - SKU ลูก = รหัสรุ่น-เลขสี (TTM061-04 · MGN350-01/1) · color_platform_th = "ดำ (04)" · ERP ไม่แยก SKU ตามไซซ์
+ *   - ตัวเลือกบน Shopee เขียนได้หลายแบบ: "Black (04)" · "ดำ | 01" · "ดำ/น้ำตาล (01),L" · "Black#1,L" · "สีดำ-เทา | 236-02,S"
+ *     · "ม่วงอ่อน-เทาอ่อน 01" · "เขียวขี้ม้า MCT09-08,S" (รหัสเต็มในตัวเลือก) · "สีดำ | MGN116,XL" (รุ่นในตัวเลือกต่างจากชื่อ)
+ *     → หลังจุลภาคแรกคือไซซ์/ตัวเลือกพิมพ์ ไม่ใช้จับคู่
+ *
+ * ลำดับการจับคู่:
+ *   rule   คนเคยยืนยันคู่นี้แล้ว
+ *   exact  รหัสเต็มในตัวเลือก · หรือเลขสีชี้ SKU ได้ตัวเดียวและชื่อสีไม่ขัดกัน
+ *          เลขที่เชื่อได้ "(04)" "| 04" "| 236-02" = ชื่อสีตรงบางคำก็พอ · เลขที่เชื่อได้น้อย "#1" "…สี 01" = ชื่อสีต้องตรงทุกคำ
+ *   single รุ่นนั้นมี SKU เดียว และตัวเลือกไม่ได้บอกสี/เลขที่ขัดกัน
+ *   guess  มีตัวที่น่าจะใช่ตัวเดียว แต่ข้อมูลขัดกัน (เช่น เลขบอก 18 แต่ชื่อสีไม่ตรง) → ยังไม่ผูกเอง ให้คนกดยืนยันครั้งแรก
  *   none   หาไม่เจอ → รอคนเลือกเอง
  * ผูกเองอัตโนมัติเฉพาะ rule / exact / single (AUTO_CONFIDENCE)
  */
@@ -38,6 +44,7 @@ export type ItemMatch = {
 
 const norm = (s: string | null | undefined) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+const uniq = <T,>(xs: T[]) => [...new Set(xs)];
 
 /** รหัสรุ่นท้ายชื่อสินค้า: คำสุดท้ายที่มีทั้งตัวพิมพ์ใหญ่และตัวเลข เช่น "… Baguette LYP14" → LYP14 */
 export function modelCodeFromTitle(title: string | null | undefined): string | null {
@@ -47,47 +54,99 @@ export function modelCodeFromTitle(title: string | null | undefined): string | n
   return tokens.length ? tokens[tokens.length - 1].toUpperCase() : null;
 }
 
-/** เลขสีในวงเล็บท้ายตัวเลือก: "Black (04)" → "04" · "น้ำตาล (05/1)" → "05/1" */
-export function variantNumber(variant: string | null | undefined): string | null {
-  const m = /\((\d{1,3}(?:\/\d{1,2})?)\)\s*$/.exec(String(variant ?? ""));
-  return m ? m[1] : null;
-}
-
 /** กุญแจจำคู่ที่คนยืนยัน: รุ่น + ตัวเลือก (ไม่มีรุ่น = ชื่อเต็ม + ตัวเลือก) */
 export function itemKey(title: string, variant: string | null | undefined): string {
   const model = modelCodeFromTitle(title);
   return `${model ? `m:${model}` : `t:${norm(title)}`}|${norm(variant)}`;
 }
 
-/** ชื่อสีอังกฤษ → ไทย (ตัวเลือกบน Shopee บางตัวเป็นอังกฤษ แต่ ERP เก็บสีไทย) */
-const COLOR_EN_TH: Record<string, string> = {
-  black: "ดำ", white: "ขาว", brown: "น้ำตาล", navy: "กรมท่า", blue: "น้ำเงิน", beige: "เบจ", cream: "ครีม",
-  red: "แดง", tan: "แทน", green: "เขียว", emerald: "มรกต", pink: "ชมพู", grey: "เทา", gray: "เทา",
-  yellow: "เหลือง", orange: "ส้ม", purple: "ม่วง", gold: "ทอง", silver: "เงิน", khaki: "กากี", ivory: "งาช้าง",
+/** ชื่อสีอังกฤษ (และทับศัพท์) → คำไทยที่ ERP ใช้ */
+const COLOR_EN_TH: Record<string, string[]> = {
+  black: ["ดำ"], white: ["ขาว"], brown: ["น้ำตาล"], navy: ["กรมท่า", "กรม"], blue: ["น้ำเงิน", "ฟ้า", "บลู"], beige: ["เบจ"],
+  cream: ["ครีม"], red: ["แดง"], tan: ["แทน"], green: ["เขียว"], emerald: ["มรกต"], pink: ["ชมพู", "พิงค์"],
+  grey: ["เทา"], gray: ["เทา"], yellow: ["เหลือง"], orange: ["ส้ม"], purple: ["ม่วง"], gold: ["ทอง"], silver: ["เงิน"],
+  khaki: ["กากี"], ivory: ["งาช้าง"], lavender: ["ลาเวนเดอร์"], mint: ["มิ้นต์"], olive: ["เขียวขี้ม้า"],
 };
 
-/** คำบอกสีในตัวเลือก (ตัดส่วนในวงเล็บ) → ชุดคำภาษาไทย/อังกฤษตัวเล็ก */
-export function variantColorWords(variant: string | null | undefined): string[] {
-  const words = norm(String(variant ?? "").replace(/\([^)]*\)/g, " ")).split(/[\s,/\-+]+/).filter((w) => w.length >= 2);
-  const out = new Set<string>();
-  for (const w of words) { out.add(w); if (COLOR_EN_TH[w]) out.add(COLOR_EN_TH[w]); }
-  return [...out];
-}
-
-function candidateColors(c: SkuCandidate): string[] {
-  return [c.color, c.color_th, c.color_platform_th, c.color_platform_en]
-    .map((x) => norm(String(x ?? "").replace(/\([^)]*\)/g, " ")))
-    .filter(Boolean);
-}
-
-const colorHit = (c: SkuCandidate, words: string[]) => {
-  const cs = candidateColors(c);
-  return words.some((w) => cs.some((cc) => cc === w || cc.split(" ").includes(w)));
+export type VariantInfo = {
+  /** ส่วนสี (ก่อนจุลภาคแรก) */
+  colorPart: string;
+  /** เลขสี เช่น "04" "01/1" */
+  num: string | null;
+  /** strong = (04) / | 04 / | 236-02 · weak = #1 / เลขท้ายคำ */
+  strength: "strong" | "weak" | null;
+  /** รหัส SKU เต็มที่เขียนในตัวเลือก เช่น MCT09-08 */
+  fullCode: string | null;
+  /** รหัสรุ่นที่เขียนในตัวเลือก เช่น MGN116 (มาก่อนรหัสในชื่อสินค้า) */
+  models: string[];
+  /** คำบอกสี (ตัวเล็ก ตัด "สี" นำหน้า) */
+  words: string[];
 };
+
+/** แยกตัวเลือกเป็น เลขสี / รหัส / คำบอกสี */
+export function parseVariant(variant: string | null | undefined): VariantInfo {
+  const colorPart = String(variant ?? "").split(",")[0].trim();
+  const upper = colorPart.toUpperCase();
+  const full = /(?:^|[^A-Z0-9])([A-Z]{2,}\d{1,4}[A-Z]?)-(\d{1,3}(?:\/\d{1,2})?)(?![\d/])/.exec(upper);
+  const models = uniq([...upper.matchAll(/(?:^|[^A-Z0-9])([A-Z]{2,}\d{1,4}[A-Z]?)(?![A-Z0-9])/g)].map((m) => m[1]));
+
+  let num: string | null = null, strength: VariantInfo["strength"] = null, m: RegExpExecArray | null;
+  if ((m = /\((\d{1,3}(?:\/\d{1,2})?)\)/.exec(colorPart))) { num = m[1]; strength = "strong"; }
+  else if ((m = /\|\s*(?:\d{2,4}-)?(\d{1,3}(?:\/\d{1,2})?)(?![\d/])/.exec(colorPart))) { num = m[1]; strength = "strong"; }
+  else if ((m = /#\s*(\d{1,3})(?!\d)/.exec(colorPart))) { num = m[1]; strength = "weak"; }
+  else if ((m = /(?:^|\s)(\d{2})\s*$/.exec(colorPart))) { num = m[1]; strength = "weak"; }
+
+  const words = colorPart
+    .replace(/\([^)]*\)/g, " ").replace(/\|.*$/, " ").replace(/#\s*\d+/g, " ")
+    .replace(/[A-Za-z]{2,}\d[A-Za-z0-9\-/]*/g, " ").replace(/\d+/g, " ")
+    .toLowerCase().split(/[\s,/\-+|&]+/)
+    .map((w) => w.replace(/^สี(?=.)/, "").trim())
+    .filter((w) => w.length >= 2);
+  return { colorPart, num, strength, fullCode: full ? `${full[1]}-${full[2]}` : null, models, words: uniq(words) };
+}
+
+/** รหัสรุ่นที่ต้องดึง SKU มาเทียบ (ตัวเลือกก่อน แล้วชื่อสินค้า) — ฝั่ง server ใช้เลือกว่าจะโหลด SKU ของรุ่นไหน */
+export function modelsForItem(item: { title: string; variant: string | null }): string[] {
+  const v = parseVariant(item.variant);
+  const fullModel = v.fullCode ? v.fullCode.split("-")[0] : null;
+  return uniq([fullModel, ...v.models, modelCodeFromTitle(item.title)].filter((x): x is string => !!x));
+}
+
+function candidateTokens(c: SkuCandidate): string[] {
+  return uniq([c.color, c.color_th, c.color_platform_th, c.color_platform_en]
+    .flatMap((x) => norm(x).split(/[\s,/\-+|&()]+/))
+    .filter((t) => t.length >= 2 && !/^\d+$/.test(t)));
+}
+
+function wordHit(w: string, tokens: string[]): boolean {
+  const forms = [w, ...(COLOR_EN_TH[w] ?? [])];
+  return forms.some((f) => tokens.some((t) => t.includes(f) || f.includes(t)));
+}
+const anyOverlap = (c: SkuCandidate, words: string[]) => { const t = candidateTokens(c); return words.some((w) => wordHit(w, t)); };
+const allMatch = (c: SkuCandidate, words: string[]) => { const t = candidateTokens(c); return words.every((w) => wordHit(w, t)); };
+const hasColor = (c: SkuCandidate) => candidateTokens(c).length > 0;
+
+/** SKU ของรุ่น m ที่เลขสีตรง: "02" → m-02 (ไม่มี → m-02/1 ถ้ามีตัวเดียว) · "01/1" → m-01/1 */
+function findByNumber(pool: SkuCandidate[], model: string, num: string): SkuCandidate | null {
+  const [base, sub] = num.split("/");
+  const want = parseInt(base, 10);
+  const hits = pool.filter((c) => {
+    const code = c.code.toUpperCase();
+    if (!code.startsWith(`${model}-`)) return false;
+    const s = /^(\d{1,3})(?:\/(\d{1,2}))?$/.exec(code.slice(model.length + 1));
+    if (!s || parseInt(s[1], 10) !== want) return false;
+    return sub ? s[2] === sub : true;
+  });
+  if (!sub) {
+    const plain = hits.filter((c) => !c.code.includes("/"));
+    if (plain.length === 1) return plain[0];
+  }
+  return hits.length === 1 ? hits[0] : null;
+}
 
 /**
  * จับคู่สินค้า 1 รายการ
- * @param candidates SKU ทั้งหมดของรุ่นนั้น (code = รุ่น หรือขึ้นต้นด้วย "รุ่น-")
+ * @param candidates SKU ของทุกรุ่นใน modelsForItem(item) (code = รุ่น หรือขึ้นต้นด้วย "รุ่น-")
  * @param rule คู่ที่คนยืนยันไว้ (ถ้ามี)
  */
 export function matchEmailItem(
@@ -98,38 +157,65 @@ export function matchEmailItem(
   if (rule) return { confidence: "rule", sku_id: rule.id, sku_code: rule.code, suggest: null, reason: "เคยยืนยันคู่นี้แล้ว" };
 
   const active = candidates.filter((c) => c.is_active !== false);
-  const pool = active.length ? active : [...candidates];
-  const model = modelCodeFromTitle(item.title);
-  if (!pool.length) return { confidence: "none", sku_id: null, sku_code: null, suggest: null, reason: model ? `ไม่พบรหัส ${model} ใน ERP` : "ชื่อสินค้าไม่มีรหัสรุ่น" };
-
+  const all = active.length ? active : [...candidates];
+  const models = modelsForItem(item);
+  const v = parseVariant(item.variant);
   const ok = (c: SkuCandidate, confidence: MatchConfidence, reason: string): ItemMatch =>
     ({ confidence, sku_id: c.id, sku_code: c.code, suggest: null, reason });
   const guess = (c: SkuCandidate, reason: string): ItemMatch =>
     ({ confidence: "guess", sku_id: null, sku_code: null, suggest: { id: c.id, code: c.code }, reason });
+  const poolOf = (m: string) => all.filter((c) => { const u = c.code.toUpperCase(); return u === m || u.startsWith(`${m}-`); });
+  const colorOf = (c: SkuCandidate) => c.color_platform_th ?? c.color ?? "ไม่มีชื่อสี";
 
-  // 1) เลขสีในวงเล็บ → รหัสเต็ม
-  const num = variantNumber(item.variant);
-  if (model && num) {
-    const want = `${model}-${num}`.toUpperCase();
-    const hit = pool.find((c) => c.code.toUpperCase() === want);
-    if (hit) return ok(hit, "exact", `ตัวเลือก (${num}) = ${hit.code}`);
+  if (!all.length) {
+    const m = modelCodeFromTitle(item.title);
+    return { confidence: "none", sku_id: null, sku_code: null, suggest: null, reason: models.length ? `ไม่พบรหัส ${models.join(" / ")} ใน ERP` : (m ? `ไม่พบรหัส ${m} ใน ERP` : "ชื่อสินค้าไม่มีรหัสรุ่น") };
   }
-  // 2) ในเมลมีรหัส SKU เต็มอยู่แล้ว
+
+  // 1) รหัส SKU เต็มเขียนอยู่ในตัวเลือก (MCT09-08)
+  if (v.fullCode) {
+    const hit = all.find((c) => c.code.toUpperCase() === v.fullCode);
+    if (hit) return ok(hit, "exact", `ตัวเลือกมีรหัส ${hit.code}`);
+  }
+  // 2) รหัส SKU เต็มอยู่ในชื่อสินค้า
   const text = ` ${item.title} ${item.variant ?? ""} `.toUpperCase();
-  const full = pool.filter((c) => c.code.includes("-") && new RegExp(`[^A-Z0-9]${escapeRe(c.code.toUpperCase())}[^A-Z0-9/]`).test(text));
+  const full = all.filter((c) => c.code.includes("-") && new RegExp(`[^A-Z0-9]${escapeRe(c.code.toUpperCase())}[^A-Z0-9/]`).test(text));
   if (full.length === 1) return ok(full[0], "exact", `เมลมีรหัส ${full[0].code}`);
 
-  const words = variantColorWords(item.variant);
-  // 3) รุ่นนี้มี SKU เดียว
-  if (pool.length === 1) {
-    const only = pool[0];
-    if (words.length && candidateColors(only).length && !colorHit(only, words)) return guess(only, `รุ่นนี้มีตัวเดียว (${only.code}) แต่สีในเมลไม่ตรง — ช่วยยืนยัน`);
-    return ok(only, "single", `รุ่นนี้มี SKU เดียว (${only.code})`);
+  // 3) เลขสี
+  if (v.num) {
+    for (const m of models) {
+      const hit = findByNumber(poolOf(m), m, v.num);
+      if (!hit) continue;
+      const fits = !v.words.length || !hasColor(hit) || (v.strength === "strong" ? anyOverlap(hit, v.words) : allMatch(hit, v.words));
+      return fits
+        ? ok(hit, "exact", `ตัวเลือก ${v.num} = ${hit.code}`)
+        : guess(hit, `ตัวเลือก "${v.colorPart}" เลข ${v.num} = ${hit.code} แต่ใน ERP สีนี้ชื่อ "${colorOf(hit)}" — ช่วยยืนยัน`);
+    }
   }
-  // 4) เดาจากชื่อสี
-  if (words.length) {
-    const hits = pool.filter((c) => colorHit(c, words));
-    if (hits.length === 1) return guess(hits[0], `สี "${item.variant}" น่าจะเป็น ${hits[0].code} — ช่วยยืนยัน`);
+
+  // 4) รุ่นที่มี SKU เดียว
+  for (const m of models) {
+    const p = poolOf(m);
+    if (p.length !== 1) continue;
+    const only = p[0];
+    const clash = (v.words.length && hasColor(only) && !anyOverlap(only, v.words)) || (v.num && !findByNumber(p, m, v.num));
+    return clash
+      ? guess(only, `รุ่นนี้มีตัวเดียว (${only.code} · ${colorOf(only)}) แต่ตัวเลือกในเมลคือ "${v.colorPart}" — ช่วยยืนยัน`)
+      : ok(only, "single", `รุ่นนี้มี SKU เดียว (${only.code})`);
   }
-  return { confidence: "none", sku_id: null, sku_code: null, suggest: null, reason: `รุ่น ${model ?? "?"} มี ${pool.length} สี เลือกจากเมลไม่ได้` };
+
+  // 5) เดาจากชื่อสี (ในรุ่นแรกที่มี SKU)
+  if (v.words.length) {
+    for (const m of models) {
+      const p = poolOf(m);
+      if (!p.length) continue;
+      const strict = p.filter((c) => allMatch(c, v.words));
+      const loose = strict.length ? strict : p.filter((c) => anyOverlap(c, v.words));
+      if (loose.length === 1) return guess(loose[0], `สี "${v.colorPart}" น่าจะเป็น ${loose[0].code} — ช่วยยืนยัน`);
+      break;
+    }
+  }
+  const firstPool = models.map(poolOf).find((p) => p.length) ?? all;
+  return { confidence: "none", sku_id: null, sku_code: null, suggest: null, reason: `รุ่น ${models[0] ?? "?"} มี ${firstPool.length} สี เลือกจากเมลไม่ได้${item.variant ? "" : " (เมลไม่บอกตัวเลือก)"}` };
 }

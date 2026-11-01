@@ -49,13 +49,13 @@ export function InboxTab({ initialStatus, onChanged }: { initialStatus: string; 
   }, [status, query]);
   useEffect(() => { void load(); }, [load]);
 
-  const act = async (action: "reprocess" | "resolve") => {
+  const act = async (action: "reprocess" | "reprocess_all" | "resolve") => {
     setBusy(true);
     try {
-      const res = await apiFetch("/api/platform-email/inbox", { method: "POST", body: JSON.stringify({ action, ids: [...selected] }) });
+      const res = await apiFetch("/api/platform-email/inbox", { method: "POST", body: JSON.stringify({ action, ids: [...selected], status }) });
       const j = await res.json();
       if (!res.ok || j.error) throw new Error(j.error || "ทำไม่สำเร็จ");
-      if (action === "reprocess") {
+      if (action !== "resolve") {
         const r = (j.results ?? []) as { status: string }[];
         const done = r.filter((x) => x.status === "done").length;
         toast.success(`อ่านใหม่ ${r.length} ฉบับ — สำเร็จ ${done} ฉบับ${r.length - done ? ` · ยังต้องดู ${r.length - done} ฉบับ` : ""}`);
@@ -100,6 +100,10 @@ export function InboxTab({ initialStatus, onChanged }: { initialStatus: string; 
           ))}
         </div>
         <div className="w-64"><ERPInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาเลขออเดอร์ / หัวเรื่อง / ผลที่ทำ" /></div>
+        {(status === "ignored" || status === "unreadable" || status === "attention") && rows.length > 0 && (
+          <button disabled={busy} onClick={() => void act("reprocess_all")} title="ให้ระบบอ่านเมลกลุ่มนี้ใหม่ด้วยกฎล่าสุด (ทีละ 150 ฉบับ เก่า→ใหม่)"
+            className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm hover:bg-slate-50 disabled:opacity-50">{busy ? "กำลังอ่าน..." : "🔄 อ่านใหม่ทั้งกลุ่มนี้"}</button>
+        )}
       </div>
 
       {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">⚠ {error} <button onClick={() => void load()} className="ml-2 underline">ลองใหม่</button></div>}

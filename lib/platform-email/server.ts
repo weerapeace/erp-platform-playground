@@ -12,7 +12,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { emailLines, isReadable, parsePlatformEmail, type EmailKind, type ParsedEmail, type ParsedItem, type PlatformCode } from "./parse";
-import { AUTO_CONFIDENCE, itemKey, matchEmailItem, modelCodeFromTitle, type ItemMatch, type SkuCandidate } from "./match";
+import { AUTO_CONFIDENCE, itemKey, matchEmailItem, modelCodeFromTitle, modelsForItem, type ItemMatch, type SkuCandidate } from "./match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Row = Record<string, unknown>;
@@ -65,10 +65,11 @@ export function shopBrand(shops: readonly ShopRule[], platform: string, shopName
 /** รหัสรุ่นที่ปลอดภัยพอจะใส่ในตัวกรองของฐานข้อมูล */
 const safeModel = (m: string | null) => (m && /^[A-Z0-9-]{3,30}$/.test(m) ? m : null);
 
-/** จับคู่สินค้าทั้งออเดอร์: ดึงคู่ที่จำไว้ + SKU ของทุกรุ่นในครั้งเดียว */
-export async function matchItems(admin: Admin, platform: PlatformCode, items: readonly ParsedItem[]): Promise<ItemMatch[]> {
+/** จับคู่สินค้าหลายรายการ: ดึงคู่ที่จำไว้ + SKU ของทุกรุ่น (ทั้งรุ่นในชื่อและรุ่นที่เขียนในตัวเลือก) ทีเดียว */
+export async function matchItems(admin: Admin, platform: PlatformCode, items: readonly Pick<ParsedItem, "title" | "variant">[]): Promise<ItemMatch[]> {
   const keys = items.map((it) => itemKey(it.title, it.variant));
-  const models = [...new Set(items.map((it) => safeModel(modelCodeFromTitle(it.title))).filter(Boolean) as string[])];
+  const itemModels = items.map((it) => modelsForItem(it).map(safeModel).filter((m): m is string => !!m));
+  const models = [...new Set(itemModels.flat())];
 
   const ruleMap = new Map<string, { id: string; code: string }>();
   if (keys.length) {
@@ -85,20 +86,53 @@ export async function matchItems(admin: Admin, platform: PlatformCode, items: re
   }
 
   const byModel = new Map<string, SkuCandidate[]>();
-  if (models.length) {
-    const or = models.flatMap((m) => [`code.eq.${m}`, `code.ilike.${m}-*`]).join(",");
-    const { data } = await admin.from("skus_v2").select(SKU_MATCH_SELECT).or(or).limit(2000);
+  for (let i = 0; i < models.length; i += 40) {
+    const chunk = models.slice(i, i + 40);
+    const or = chunk.flatMap((m) => [`code.eq.${m}`, `code.ilike.${m}-*`]).join(",");
+    const { data } = await admin.from("skus_v2").select(SKU_MATCH_SELECT).or(or).limit(5000);
     for (const s of (data ?? []) as SkuCandidate[]) {
       const code = s.code.toUpperCase();
-      const model = models.find((m) => code === m || code.startsWith(`${m}-`));
-      if (model) byModel.set(model, [...(byModel.get(model) ?? []), s]);
+      for (const m of chunk) if (code === m || code.startsWith(`${m}-`)) byModel.set(m, [...(byModel.get(m) ?? []), s]);
     }
   }
 
   return items.map((it, i) => {
-    const model = safeModel(modelCodeFromTitle(it.title));
-    return matchEmailItem(it, model ? byModel.get(model) ?? [] : [], ruleMap.get(keys[i]) ?? null);
+    const seen = new Set<string>();
+    const cands = itemModels[i].flatMap((m) => byModel.get(m) ?? []).filter((s) => !seen.has(s.id) && (seen.add(s.id), true));
+    return matchEmailItem(it, cands, ruleMap.get(keys[i]) ?? null);
   });
+}
+
+/**
+ * จับคู่ใหม่ด้วยกฎล่าสุด ให้สินค้าจากเมลที่ยังไม่ได้ผูก SKU (หลังปรับตัวจับคู่ / เพิ่ม SKU ใน ERP)
+ * ผูกได้ = ใส่ SKU · ยังไม่แน่ใจ = อัปเดตคำแนะนำในกล่องรอยืนยัน
+ */
+export async function rematchPendingItems(admin: Admin): Promise<{ checked: number; matched: number }> {
+  type It = { id: string; name: string | null; raw: Record<string, unknown> | null };
+  const rows: It[] = [];
+  for (let from = 0; from < 10000; from += 1000) {
+    const { data } = await admin.from("platform_order_items").select("id, name, raw")
+      .is("matched_sku_id", null).eq("raw->>source", "email").order("id").range(from, from + 999);
+    rows.push(...((data ?? []) as It[]));
+    if ((data ?? []).length < 1000) break;
+  }
+  let matched = 0;
+  for (const pf of ["shopee", "lazada"] as PlatformCode[]) {
+    const list = rows.filter((r) => r.raw?.platform_code === pf);
+    if (!list.length) continue;
+    const res = await matchItems(admin, pf, list.map((r) => ({ title: r.name ?? "", variant: (r.raw?.variant as string | null) ?? null })));
+    for (let i = 0; i < list.length; i++) {
+      const m = res[i], r = list[i];
+      const auto = AUTO_CONFIDENCE.includes(m.confidence);
+      const raw = { ...(r.raw ?? {}), confidence: m.confidence, reason: m.reason, suggest_sku_id: m.suggest?.id ?? null, suggest_code: m.suggest?.code ?? null };
+      const changed = auto || raw.suggest_sku_id !== r.raw?.suggest_sku_id || raw.reason !== r.raw?.reason;
+      if (!changed) continue;
+      const { error } = await admin.from("platform_order_items")
+        .update(auto ? { matched_sku_id: m.sku_id, sku_code: m.sku_code, raw } : { raw }).eq("id", r.id).is("matched_sku_id", null);
+      if (!error && auto) matched++;
+    }
+  }
+  return { checked: rows.length, matched };
 }
 
 type OrderRow = { id: string; status: string; source: string | null; stock_deducted: boolean | null; order_no: string | null };
@@ -162,10 +196,11 @@ export async function processParsed(
 
   if (p.kind === "return_requested") {
     const linked = p.order_no ? await findOrder(admin, platformId, p.order_no) : (p.ref_no ? await findOrder(admin, platformId, p.ref_no) : null);
-    const ref = p.ref_no ? `เลขคำขอ ${p.ref_no}` : "ไม่มีเลขคำขอ";
-    return res("done", linked
-      ? `คำขอคืนเงิน/คืนสินค้าของออเดอร์ ${linked.order_no ?? p.order_no} (${ref}) — ยังไม่หักยอด จนกว่าคืนสำเร็จ`
-      : `คำขอคืนเงิน/คืนสินค้า ${ref} — เมลไม่บอกเลขออเดอร์และสินค้า จึงยังไม่หักยอด`, linked?.id ?? null);
+    const stage = p.stage ? ` (${p.stage})` : "";
+    const ref = p.ref_no ? ` เลขคำขอ ${p.ref_no}` : "";
+    if (linked) return res("done", `คำขอคืนเงิน/คืนสินค้า${stage} ของออเดอร์ ${linked.order_no ?? p.order_no}${ref} — ยังไม่หักยอด จนกว่าคืนสำเร็จ`, linked.id);
+    if (p.order_no) return res("done", `คำขอคืนเงิน/คืนสินค้า${stage} ของออเดอร์ ${p.order_no} — ยังไม่พบออเดอร์นี้ในระบบ (เมลชำระเงินอาจเก่ากว่าที่ดึงมา) · ยังไม่หักยอด`);
+    return res("done", `คำขอคืนเงิน/คืนสินค้า${stage}${ref || " (ไม่มีเลขคำขอ)"} — เมลไม่บอกเลขออเดอร์และสินค้า จึงยังไม่หักยอด`);
   }
 
   const shop = shopBrand(ctx.shops, p.platform, p.shop_name);
@@ -177,15 +212,21 @@ export async function processParsed(
 
   const orderNo = p.order_no as string;
   const existing = await findOrder(admin, platformId, orderNo);
-  const lazNote = p.platform === "lazada" ? " (เมล Lazada ไม่บอกจำนวน/ราคา — นับรายการละ 1 ชิ้น)" : "";
+  const lazNote = p.platform === "lazada" ? " (เมล Lazada ไม่บอกจำนวน/ราคา — นับรายการละ 1 ชิ้น)" : p.kind === "order_cod" ? " (เก็บเงินปลายทาง)" : "";
 
   if (p.kind === "order_cancelled") {
     if (existing) {
-      if (existing.status === "cancelled") return res("done", `ออเดอร์ ${orderNo} ยกเลิกอยู่แล้ว`, existing.id);
+      // ออเดอร์ที่บันทึกไว้แต่ยังไม่มีรายการสินค้า (เช่น อ่านเมลรูปแบบเก่าพลาด) → เติมจากเมลยกเลิก
+      let filled = "";
+      if (existing.items === 0 && p.items.length) {
+        await insertItems(admin, existing.id, p.platform, p.items);
+        filled = ` · เติมรายการสินค้า ${itemsSummary(p)}`;
+      }
+      if (existing.status === "cancelled") return res("done", `ออเดอร์ ${orderNo} ยกเลิกอยู่แล้ว${filled}`, existing.id);
       if (existing.stock_deducted) return res("attention", `ออเดอร์ ${orderNo} ถูกยกเลิกบน ${PLATFORM_LABEL[p.platform]} แต่ใน ERP ตัดสต๊อกไปแล้ว — ไปกด "ยกเลิก" ที่หน้าออเดอร์จากแพลตฟอร์มเพื่อคืนสต๊อก`, existing.id);
       const { error } = await admin.from("platform_orders").update({ status: "cancelled", updated_at: new Date().toISOString() }).eq("id", existing.id);
       if (error) throw new Error(`ยกเลิกออเดอร์ไม่สำเร็จ: ${error.message}`);
-      return res("done", `ยกเลิกออเดอร์ ${orderNo} แล้ว (ไม่นับในยอดขาย)`, existing.id);
+      return res("done", `ยกเลิกออเดอร์ ${orderNo} แล้ว (ไม่นับในยอดขาย)${filled}`, existing.id);
     }
   } else if (existing) {
     if (existing.items > 0) return res("done", `มีออเดอร์ ${orderNo} อยู่แล้ว${existing.status === "cancelled" ? " (ยกเลิกแล้ว)" : ""} — ไม่บันทึกซ้ำ`, existing.id);

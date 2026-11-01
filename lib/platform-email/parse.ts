@@ -11,12 +11,20 @@
  *   Lazada  New Order           → order_new         เลขออเดอร์ + ชื่อสินค้า (ไม่บอกจำนวน/ราคา/ตัวเลือก → นับ 1 ชิ้น)
  * เมลอื่นของแพลตฟอร์ม (โปรโมชัน, ส่งของแล้ว ฯลฯ) = "other" → ระบบข้าม
  *
+ * เพิ่มหลังเมลจริงชุดแรกเข้า (2026-11-01 · 205 ฉบับ):
+ *   Shopee  เก็บเงินปลายทาง "คำสั่งซื้อขอชำระเงินปลายทาง… ได้รับการยืนยัน" → order_cod (นับเป็นยอดขายเหมือนชำระแล้ว)
+ *   เมล COD/ยกเลิก เลขลำดับสินค้าอยู่บรรทัดเดียวโดด ๆ ("1." แล้วชื่อสินค้าบรรทัดถัดไป) — เมลชำระเงินอยู่บรรทัดเดียวกัน
+ *   คืนเงิน: "คำขอคืนเงิน/คืนสินค้าสำหรับคำสั่งซื้อหมายเลข #<เลขออเดอร์>" (ข้อพิพาท) · "ผลการพิจารณาคำขอ…" (ผลตัดสิน) — นับคำขอเดียวกันครั้งเดียว
+ *
  * ไฟล์นี้เป็น pure (ไม่แตะ DB) — ทดสอบที่ lib/__tests__/platform-email-parse.test.ts
  * ถ้าแพลตฟอร์มเปลี่ยนหน้าตาเมล: เพิ่มป้ายใหม่ในชุด LABEL ด้านล่าง + เพิ่มเทสต์ด้วยเมลจริงฉบับใหม่ แล้วกด "อ่านใหม่" ในหน้าตั้งค่า
  */
 
 export type PlatformCode = "shopee" | "lazada";
-export type EmailKind = "order_paid" | "order_new" | "order_cancelled" | "return_requested" | "other";
+export type EmailKind = "order_paid" | "order_cod" | "order_new" | "order_cancelled" | "return_requested" | "other";
+
+/** ประเภทที่ "สร้างออเดอร์ขายได้" (ไม่รวมยกเลิก/คืนเงิน) */
+export const SALE_KINDS: readonly EmailKind[] = ["order_paid", "order_cod", "order_new"];
 
 export type ParsedItem = {
   title: string;
@@ -43,6 +51,8 @@ export type ParsedEmail = {
   total: number | null;
   /** เหตุผลภาษาคนเวลาอ่านได้ไม่ครบ */
   problems: string[];
+  /** ขั้นของเมลคืนเงิน: ยื่นคำขอ / ข้อพิพาท / ผลการพิจารณา (โชว์ในบันทึก) */
+  stage?: string | null;
 };
 
 export type EmailSource = { from?: string | null; subject?: string | null; html?: string | null; text?: string | null };
@@ -190,6 +200,8 @@ function introText(subject: string, lines: string[]): string {
 function shopeeKind(intro: string): EmailKind {
   if (/คำขอคืนเงิน|คืนเงิน\/คืนสินค้า|return\s*(?:\/\s*refund)?\s*request|refund\s*request/i.test(intro)) return "return_requested";
   if (/ถูกยกเลิก|ยกเลิกคำสั่งซื้อ|has been cancel+ed|was cancel+ed/i.test(intro)) return "order_cancelled";
+  // เก็บเงินปลายทาง: "คำสั่งซื้อขอชำระเงินปลายทางหมายเลข #… ได้รับการยืนยันเรียบร้อยแล้ว" (ไม่มีคำว่า "ยืนยันการชำระเงิน")
+  if (/ชำระเงินปลายทาง|cash\s*on\s*delivery|\bCOD\b/i.test(intro) && /ยืนยัน|confirmed/i.test(intro)) return "order_cod";
   if (/ยืนยันการชำระเงิน|ชำระเงินเรียบร้อย|payment\s*(?:has\s*been\s*)?confirmed|has been paid/i.test(intro)) return "order_paid";
   return "other";
 }
@@ -218,7 +230,8 @@ function cleanOrderNo(v: string | null | undefined): string | null {
 
 // ───────────────────────── รายการสินค้า ─────────────────────────
 
-const ITEM_START = /^(\d{1,2})\.\s*(.*\p{L}.*)$/u;
+// "1. ชื่อสินค้า" (เมลชำระเงิน) หรือ "1." บรรทัดเดียวโดด ๆ แล้วชื่ออยู่บรรทัดถัดไป (เมล COD/ยกเลิก)
+const ITEM_START = /^(\d{1,2})\.\s*(.*)$/u;
 const ITEMS_END = (l: string) => labelValue(l, LABEL.subtotal) != null || labelValue(l, LABEL.total) != null
   || labelValue(l, LABEL.shipping) != null;
 
@@ -231,9 +244,16 @@ function shopeeItems(lines: string[], from: number): ParsedItem[] {
     if (ITEMS_END(l)) break;
     const start = ITEM_START.exec(l);
     if (start) {
-      cur = { title: start[2].trim(), variant: null, qty: 1, qty_known: false, price: null };
-      items.push(cur);
-      continue;
+      let title = start[2].trim();
+      if (!title) {
+        const next = lines[i + 1];
+        if (next != null && !isLabelLine(next) && !ITEMS_END(next)) { title = next.trim(); i++; }
+      }
+      if (/\p{L}/u.test(title)) {
+        cur = { title, variant: null, qty: 1, qty_known: false, price: null };
+        items.push(cur);
+        continue;
+      }
     }
     if (!cur) continue;
     const pick = (label: RegExp) => {
@@ -294,10 +314,16 @@ export function parsePlatformEmail(src: EmailSource, linesIn?: string[]): Parsed
 
   if (platform === "shopee") {
     if (out.kind === "return_requested") {
-      // เลขในเมลคืนเงินคือ "เลขคำขอ" — ถ้าหน้าตาเหมือนเลขออเดอร์ (14 ตัว) ค่อยถือเป็นเลขออเดอร์
-      const m = /หมายเลข\s*#?\s*([A-Z0-9]{10,24})/i.exec(intro) ?? /request\s*(?:no\.?|number|id)?\s*#?\s*([A-Z0-9]{10,24})/i.exec(intro);
-      out.ref_no = m ? m[1].toUpperCase() : null;
+      // ข้อพิพาท: "…สำหรับคำสั่งซื้อ(หมายเลข) #<เลขออเดอร์ 14 ตัว>" · ยื่นคำขอ/ผลพิจารณา: "คำขอคืนเงิน/คืนสินค้าหมายเลข <เลขคำขอ 15 ตัว>"
+      const ord = /คำสั่งซื้อ(?:หมายเลข)?\s*#\s*(\d{6}[A-Z0-9]{8})(?![A-Z0-9])/i.exec(intro);
+      if (ord) out.order_no = ord[1].toUpperCase();
+      const req = /คำขอ[^#\n]{0,30}?หมายเลข\s*#?\s*([A-Z0-9]{10,24})/i.exec(intro)
+        ?? /คำขอคืนเงิน\/คืนสินค้า\s*#\s*([A-Z0-9]{10,24})/i.exec(intro)
+        ?? /request\s*(?:no\.?|number|id)?\s*#?\s*([A-Z0-9]{10,24})/i.exec(intro);
+      out.ref_no = req ? req[1].toUpperCase() : null;
+      if (out.ref_no && out.ref_no === out.order_no) out.ref_no = null;
       if (!out.order_no && out.ref_no && SHOPEE_ORDER_SN.test(out.ref_no)) out.order_no = out.ref_no;
+      out.stage = /ผลการพิจารณา|ได้ตรวจสอบคำขอ/.test(intro) ? "ผลการพิจารณา" : /ข้อพิพาท|dispute/i.test(intro) ? "ข้อพิพาท" : "ยื่นคำขอ";
       return out;
     }
     if (!out.order_no) {
@@ -317,7 +343,7 @@ export function parsePlatformEmail(src: EmailSource, linesIn?: string[]): Parsed
 
   if (out.kind !== "other") {
     if (!out.order_no) out.problems.push("หาเลขออเดอร์ในเมลไม่เจอ");
-    if ((out.kind === "order_paid" || out.kind === "order_new") && !out.items.length) out.problems.push("หารายการสินค้าในเมลไม่เจอ");
+    if (SALE_KINDS.includes(out.kind) && !out.items.length) out.problems.push("หารายการสินค้าในเมลไม่เจอ");
   }
   return out;
 }

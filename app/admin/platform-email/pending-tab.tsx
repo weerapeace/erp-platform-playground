@@ -14,6 +14,7 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
   const [groups, setGroups] = useState<PendingGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [rematching, setRematching] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -38,6 +39,19 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); }
   };
 
+  // จับคู่ใหม่ด้วยกฎล่าสุด — ใช้หลังเพิ่ม SKU ใน ERP หรือหลังปรับตัวจับคู่
+  const rematch = async () => {
+    setRematching(true);
+    try {
+      const res = await apiFetch("/api/platform-email/inbox", { method: "POST", body: JSON.stringify({ action: "rematch" }) });
+      const j = await res.json();
+      if (!res.ok || j.error) throw new Error(j.error || "จับคู่ใหม่ไม่สำเร็จ");
+      toast.success(j.matched ? `จับคู่ได้เพิ่ม ${j.matched} รายการ (จากที่ค้าง ${j.checked})` : `ตรวจ ${j.checked} รายการ — ยังจับคู่เองไม่ได้ ต้องเลือกด้วยมือ`);
+      await load(); onChanged();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "จับคู่ใหม่ไม่สำเร็จ"); }
+    finally { setRematching(false); }
+  };
+
   if (loading) return <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-28 animate-pulse rounded-xl bg-slate-100" />)}</div>;
   if (error) return <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">⚠ {error} <button onClick={() => void load()} className="ml-2 underline">ลองใหม่</button></div>;
   if (!groups.length) return (
@@ -47,9 +61,14 @@ export function PendingTab({ onChanged }: { onChanged: () => void }) {
     </div>
   );
 
+  const total = groups.reduce((a, g) => a + g.items, 0);
   return (
     <div className="space-y-3">
-      <p className="text-sm text-slate-500">สินค้าเหล่านี้ระบบยังไม่แน่ใจว่าเป็น SKU ไหน (ยังนับในรายงาน แต่โชว์เป็นชื่อจากร้าน) — เลือกครั้งเดียว ระบบจะจำไว้ใช้กับเมลครั้งต่อไป</p>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <p className="max-w-2xl text-sm text-slate-500">{groups.length} แบบ ({total} รายการ) ที่ระบบยังไม่แน่ใจว่าเป็น SKU ไหน (ยังนับในรายงาน แต่โชว์เป็นชื่อจากร้าน) — เลือกครั้งเดียว ระบบจะจำไว้ใช้กับเมลครั้งต่อไป</p>
+        <button onClick={() => void rematch()} disabled={rematching} title="ใช้หลังเพิ่ม SKU ใหม่ใน ERP"
+          className="h-9 shrink-0 rounded-lg border border-slate-200 bg-white px-3 text-sm hover:bg-slate-50 disabled:opacity-50">{rematching ? "กำลังจับคู่..." : "🔄 ให้ระบบจับคู่ใหม่"}</button>
+      </div>
       {groups.map((g) => <GroupCard key={`${g.platform_code}|${g.item_key}`} g={g} onConfirm={(sku) => confirm(g, sku)} />)}
     </div>
   );
