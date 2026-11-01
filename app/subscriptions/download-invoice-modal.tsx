@@ -8,8 +8,8 @@
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import type { Subscription } from "@/lib/subscriptions";
-import { normUrl, subInvoiceUrl, canMakeBat, downloadChromeBat, downloadSubBat } from "@/lib/subs-bat";
-import { canSearchMail, gmailSearchUrl } from "@/lib/gmail-search";
+import { normUrl, subInvoiceUrl, canMakeBat, downloadSubBat } from "@/lib/subs-bat";
+import { canSearchMail, openGmailSearch } from "@/lib/gmail-search";
 
 export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
   sub: Subscription | null;
@@ -32,16 +32,8 @@ export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
     if (sub && downloadSubBat(sub)) toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Chrome");
   };
 
-  // ค้นเมลใบเสร็จย้อน 60 วัน (ป๊อปอัปนี้ไม่ผูกกับเดือนใดเดือนหนึ่ง)
-  const searchMail = () => {
-    const url = sub ? gmailSearchUrl(sub) : null;
-    if (!url) return;
-    if (sub?.chrome_profile_dir && downloadChromeBat(sub, url, "gmail")) {
-      toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Gmail ในโปรไฟล์ที่ถูก");
-      return;
-    }
-    window.open(url, "_blank", "noopener,noreferrer");
-  };
+  // ค้นเมลใบเสร็จย้อน 60 วัน (ป๊อปอัปนี้ไม่ผูกกับเดือนใดเดือนหนึ่ง) — เปิดแท็บใหม่ทันที
+  const searchMail = () => { if (sub) openGmailSearch(sub); };
 
   return (
     <ERPModal open={open} onClose={onClose} size="sm"
@@ -91,7 +83,7 @@ export function DownloadInvoiceModal({ sub, canEdit, onClose, onEdit }: {
                 </button>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
                   เปิด Gmail ของ <b>{sub.account_email}</b> พร้อมคำค้นเมลบิลของร้านนี้ให้แล้ว (แก้คำค้นต่อได้ในหน้า Gmail)
-                  {sub.chrome_profile_dir ? <><br />รายการนี้ตั้งโปรไฟล์ Chrome ไว้ → จะได้ไฟล์ลัดมาให้ดับเบิลคลิก เพื่อเปิดในโปรไฟล์ที่ล็อกอินเมลนี้</> : null}
+<br />ถ้า Chrome ที่ใช้อยู่ยังไม่ได้ล็อกอินเมลนี้ Gmail จะให้ล็อกอินครั้งแรกครั้งเดียว ครั้งต่อไปเปิดตรงเลย
                 </p>
               </>
             ) : (

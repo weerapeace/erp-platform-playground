@@ -97,3 +97,16 @@ export function gmailSearchUrl(sub: MailSearchInfo, month?: string): string | nu
   const q = gmailSearchQuery(sub, month);
   return `https://mail.google.com/mail/u/${encodeURIComponent(email)}/#search/${encodeURIComponent(q)}`;
 }
+
+/**
+ * เปิด Gmail ของบัญชีนั้นในแท็บใหม่ทันที (ไม่ใช้ไฟล์ .bat) — ใช้ฝั่ง client เท่านั้น
+ * Chrome โปรไฟล์เดียวล็อกอิน Gmail ได้หลายบัญชี + ลิงก์ระบุอีเมลไว้แล้ว → Gmail เปิดกล่องที่ถูกเอง
+ * บัญชีที่ยังไม่ได้ล็อกอินใน Chrome ที่ใช้อยู่ → Gmail ให้ล็อกอินครั้งแรกครั้งเดียว
+ * คืน false ถ้าไม่รู้อีเมล
+ */
+export function openGmailSearch(sub: MailSearchInfo, month?: string): boolean {
+  const url = gmailSearchUrl(sub, month);
+  if (!url) return false;
+  window.open(url, "_blank", "noopener,noreferrer");
+  return true;
+}

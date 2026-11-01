@@ -8,8 +8,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { canMakeBat, downloadChromeBat, downloadSubBat, subInvoiceUrl } from "@/lib/subs-bat";
-import { canSearchMail, gmailSearchUrl } from "@/lib/gmail-search";
+import { canMakeBat, downloadSubBat, subInvoiceUrl } from "@/lib/subs-bat";
+import { canSearchMail, openGmailSearch } from "@/lib/gmail-search";
 import { INVOICE_ACCEPT_ATTR, invoiceFileKind } from "@/lib/subscriptions";
 import type { MissingInvoice } from "@/app/api/subscriptions/missing-invoices/route";
 
@@ -72,19 +72,9 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter, onAttac
 
   const pickFile = (it: MissingInvoice) => { pendingRef.current = it; fileRef.current?.click(); };
 
-  /**
-   * เปิด Gmail ของบัญชีที่ผูกกับรายการ พร้อมคำค้นเมลบิลของเดือนนั้น
-   * มีโฟลเดอร์โปรไฟล์ Chrome → โหลด .bat (การันตีว่าเปิดในโปรไฟล์ที่ล็อกอินเมลนั้น)
-   * ไม่มี → เปิดแท็บใหม่ตรง ๆ (ถ้า Chrome ที่เปิดอยู่ไม่ได้ล็อกอินเมลนี้ Gmail จะให้เลือกบัญชี)
-   */
+  /** เปิด Gmail ของบัญชีที่ผูกกับรายการในแท็บใหม่ทันที พร้อมคำค้นเมลบิลของเดือนนั้น (ไม่โหลด .bat) */
   const searchMail = (it: MissingInvoice) => {
-    const url = gmailSearchUrl(it, it.month);
-    if (!url) { toast.warning("รายการนี้ยังไม่ได้ใส่อีเมลบัญชี — ใส่ก่อนถึงจะค้นในเมลได้"); return; }
-    if (it.chrome_profile_dir && downloadChromeBat(it, url, "gmail")) {
-      toast.success("ดาวน์โหลดไฟล์แล้ว — ดับเบิลคลิกเพื่อเปิด Gmail ในโปรไฟล์ที่ถูก");
-      return;
-    }
-    window.open(url, "_blank", "noopener,noreferrer");
+    if (!openGmailSearch(it, it.month)) toast.warning("รายการนี้ยังไม่ได้ใส่อีเมลบัญชี — ใส่ก่อนถึงจะค้นในเมลได้");
   };
 
   const skip = async (it: MissingInvoice) => {
@@ -172,9 +162,7 @@ export function MissingInvoicesPanel({ canEdit, refreshKey, monthFilter, onAttac
                 <button onClick={() => searchMail(it)} disabled={!canSearchMail(it)}
                   title={!canSearchMail(it)
                     ? "ยังไม่ได้ใส่อีเมลบัญชีของรายการนี้"
-                    : it.chrome_profile_dir
-                      ? `โหลดไฟล์เปิด Gmail (โปรไฟล์ ${it.chrome_profile_dir}) พร้อมคำค้นเมลบิลเดือน ${fmtMonth(it.month)}`
-                      : `เปิด Gmail ของ ${it.account_email} พร้อมคำค้นเมลบิลเดือน ${fmtMonth(it.month)}`}
+                    : `เปิด Gmail ของ ${it.account_email} พร้อมคำค้นเมลบิลเดือน ${fmtMonth(it.month)}`}
                   className="h-8 px-3 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent flex-shrink-0">
                   🔍 หาในเมล
                 </button>
