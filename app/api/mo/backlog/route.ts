@@ -13,6 +13,7 @@ import { needsCut, type CutFields } from "@/lib/cut-rules";
 import { todayBangkok } from "@/lib/date";
 import { bangkokYmd, bucketOf, daysBetweenYmd, type MoBacklogRow } from "@/lib/mo-backlog";
 import { parseSkipped } from "@/lib/mo-skip";
+import { moProgress } from "@/lib/mo-status";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -84,7 +85,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const age = created ? Math.max(0, daysBetweenYmd(bangkokYmd(created), today)) : 0;
     const due = (m.due_date as string) ?? null;
     const dueYmd = due ? due.slice(0, 10) : null;
-    const sentAll = qty > 0 && w.recv >= qty;
+    const skipped = parseSkipped(m.skipped_stages);
+    const sentAll = moProgress({ qty, dispatched: w.disp, received: w.recv, skipped }).submittedAll;   // คำถามกลาง lib/mo-status
     const late = dueYmd && !sentAll ? daysBetweenYmd(dueYmd, today) : 0;
     const row = {
       id: String(m.id), mo_no: k,
@@ -92,7 +94,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       qty, status: String(m.status ?? "draft"), created_at: created, age_days: age,
       due_date: dueYmd, internal_due_date: ((m.internal_due_date as string) ?? null)?.slice(0, 10) ?? null,
       dispatched: r2(w.disp), received: r2(w.recv), open_work_orders: w.open, last_dispatch_date: w.last,
-      receive_skipped: !!parseSkipped(m.skipped_stages).receive,
+      receive_skipped: !!skipped.receive,
       has_bom: p.t > 0,
       // ใบไม่มีสูตร: ใช้ธงติ๊กรวมทั้งใบ (prep_done/cut_done) แทนตัวนับรายวัตถุดิบ
       prep_total: p.t > 0 ? p.t : 1, prep_ready: p.t > 0 ? p.r : (m.prep_done ? 1 : 0),
@@ -100,7 +102,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       groups: (groupsBy.get(k) ?? []).join(", "),
       overdue_days: late > 0 ? late : null,
     };
-    return { ...row, bucket: bucketOf(row) };
+    return { ...row, bucket: bucketOf({ ...row, skipped }) };
   });
 
   return NextResponse.json({ data, today, error: null });

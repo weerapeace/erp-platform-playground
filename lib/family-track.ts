@@ -10,6 +10,7 @@
  * ข้อมูลจาก /api/mo/family-print (track) · หน้าพิมพ์ /print/work-order/family?sheet=track · ไฟล์นี้ไม่ยิง DB (ทดสอบได้)
  */
 import { needsCut } from "@/lib/cut-rules";
+import { moProgress } from "@/lib/mo-status";
 import { signoffHtml, type SignBox } from "@/lib/print-signoff";
 import {
   buildFamilySheet, esc, img, moCodesHtml, num, thDate, TICK,
@@ -187,7 +188,7 @@ export function buildFamilyTrack(input: FamilyInput, today: string): FamilyTrack
     issue("dispatched_unprepped", "จ่ายงานแล้ว แต่ยังไม่ติ๊กเตรียม/ตัดครบ", (m) => m.dispatched > 0 && !(isReady(m.prep) && isReady(m.cut))),
     issue("no_labor", "จ่ายงานแล้วแต่ไม่มีค่าแรงในระบบ", (m) => m.wos.some((w) => !(Number(w.labor_cost) > 0) && !w.submissions.some((s) => s.wage > 0))),
     issue("long_outstanding", `ค้างที่ช่างเกิน ${LONG_DAYS} วัน`, (m) => m.wos.some((w) => w.status !== "done" && w.received < w.qty && (daysSince(w.dispatch_date, today) ?? 0) > LONG_DAYS)),
-    issue("received_open", "รับครบแล้ว แต่ใบยังเปิด / ยังไม่เข้าคลัง", (m) => m.received >= (Number(m.mo.qty) || 0) - EPS && m.received > 0 && m.outstanding <= EPS && !m.finished_received && m.mo.status !== "done"),
+    issue("received_open", "รับครบแล้ว แต่ใบยังเปิด / ยังไม่เข้าคลัง", (m) => moProgress({ qty: Number(m.mo.qty) || 0, dispatched: m.dispatched, received: m.received }).submittedAll && m.received > 0 && m.outstanding <= EPS && !m.finished_received && m.mo.status !== "done"),
   ].filter((i) => i.mos.length > 0);
 
   return {

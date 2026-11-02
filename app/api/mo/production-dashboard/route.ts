@@ -4,12 +4,14 @@
  *   jobs[] = 1 แถว/1 ใบสั่งผลิต + categories[] (อยู่ได้หลายกลุ่ม) + ความคืบหน้า (จ่าย/รับคืน)
  *   counts = ตัวเลขนับต่อ filter ซ้าย (all/unassigned/in_production/piecework/done_waiting)
  * นิยาม: ยังไม่จ่าย=เหลือจ่าย>0 · กำลังผลิต=จ่ายแล้วยังรับคืนไม่ครบ · เหมา=มี mo_piecework · เสร็จรอส่ง=รับคืนครบ (wo_submissions→received_qty)
+ *   "จ่ายครบ / ส่งครบ" ถามคำถามกลาง lib/mo-status moProgress (เคารพป้ายข้ามขั้น — ตรงกับหน้าขอซื้อ/ปุ่มปิดงาน)
  * ยิงครั้งเดียว (3 query หลัก) · ของกลาง guardApi(products.view)+supabaseAdmin
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { computeMoStatus, type MoStatusTone } from "@/lib/mo-status";
+import { computeMoStatus, moProgress, MO_QTY_EPS, type MoStatusTone } from "@/lib/mo-status";
+import { parseSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,7 +78,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const [{ data: mos }, { data: wos }, { data: pcs }, { data: grps }] = await Promise.all([
-    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, delivery_confirmed, created_at")
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, delivery_confirmed, created_at, skipped_stages")
       .eq("is_active", true).neq("status", "cancelled").order("created_at", { ascending: false }).limit(1000),
     admin.from("mo_work_orders").select("mo_no, qty, received_qty, status, department_name, assignee_name").eq("is_active", true).limit(3000),
     admin.from("mo_piecework").select("mo_no").eq("is_active", true).limit(3000),
@@ -121,15 +123,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const qty = Number(m.qty) || 0;
     const dispatched = r2(dispatchedByMo.get(moNo) ?? 0);
     const received = r2(receivedByMo.get(moNo) ?? 0);
-    const remaining = r2(Math.max(0, qty - dispatched));
+    const skipped = parseSkipped(m.skipped_stages);
+    const pr = moProgress({ qty, dispatched, received, skipped });
+    const remaining = pr.remaining;
     const categories: ProdJobCategory[] = [];
-    if (remaining > 0.0001) categories.push("unassigned");
-    if (dispatched - received > 0.0001) categories.push("in_production");
+    if (remaining > MO_QTY_EPS) categories.push("unassigned");
+    if (!pr.submittedAll && dispatched - received > MO_QTY_EPS) categories.push("in_production");
     if (pieceworkMo.has(moNo)) categories.push("piecework");
-    if (qty > 0 && received >= qty - 0.0001) categories.push("done_waiting");
+    if (pr.submittedAll) categories.push("done_waiting");
     const inf = info.get(String(m.product_sku)) ?? { image_url: null, brand: null, brand_color: null, category: null };
     const pc = prepCut[moNo] ?? { pd: 0, pt: 0, cd: 0, ct: 0 };
-    const st = computeMoStatus({ prepDone: pc.pd, prepTotal: pc.pt, cutDone: pc.cd, cutTotal: pc.ct, qty, dispatched, received });
+    const st = computeMoStatus({ prepDone: pc.pd, prepTotal: pc.pt, cutDone: pc.cd, cutTotal: pc.ct, qty, dispatched, received, skipped });
     counts.all += 1;
     if (categories.includes("unassigned")) counts.unassigned += 1;
     if (categories.includes("in_production")) counts.in_production += 1;

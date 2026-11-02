@@ -48,8 +48,8 @@ export const WORKFLOWS: WorkflowDef[] = [
     feeds: ["mo-materials", "piecework"],
     logicIds: ["LOG-WF-0001", "LOG-JOB-0001", "LOG-JOB-0004"],
     gaps: [
-      "คำถาม \"ใบนี้ช่างส่งงานครบหรือยัง\" ยังคิดอยู่หลายที่ และกติกาไม่ตรงกัน: lib/mo-status ไม่ดูการข้ามขั้นรับคืน · dashboard การผลิตคิดเอง",
-      "สถานะ MO ใน DB เป็น draft ทุกใบที่เปิดอยู่ — ต้องถามบอร์ดจ่ายงาน (lib/mo-dispatch) ห้ามดูจาก status",
+      "สถานะ MO ใน DB เป็น draft ทุกใบที่เปิดอยู่ — \"จ่ายงานแล้ว / จ่ายครบ / ส่งครบ\" ต้องถาม lib/mo-status moProgress (ใบเดียว) หรือ lib/mo-dispatch (หลายใบจาก DB) ห้ามดูจาก status",
+      "สถานะใบจ่ายงานรายใบ (done / partial_return) ยังคิดสูตรเดียวกันอยู่ 3 ที่: /api/mo/submissions · /api/mo/work-orders/[id] · lib/mo-qty-reduce",
     ],
   },
   {

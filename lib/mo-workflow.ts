@@ -11,6 +11,8 @@
  * ⚠️ แถวเก่าที่ถูกลบแล้วบางแถวเก็บ "in_production"/"ready" — ไม่อยู่ในกฎนี้ (ถือเป็นใบที่ยังเปิด)
  */
 
+import { moProgress } from "@/lib/mo-status";
+
 export const MO_CLOSED_STATUSES = ["done", "cancelled"] as const;
 
 export type MoBulkStatusAction = "close" | "cancel";
@@ -38,7 +40,10 @@ export function checkMoTransition(action: MoBulkStatusAction, f: MoTransitionFac
   }
   if (action === "close") {
     if (!(f.qty > 0)) return "จำนวนสั่งผลิตเป็น 0";
-    if (f.received < f.qty && !f.receiveSkipped) return `ช่างยังส่งคืนไม่ครบ (คืน ${fmt(f.received)}/${fmt(f.qty)})`;
+    // "ส่งครบ" ถามคำถามกลาง (lib/mo-status moProgress) — กติกาเดียวกับป้ายสถานะ/หน้าขอซื้อ/dashboard
+    if (!moProgress({ qty: f.qty, dispatched: f.dispatched, received: f.received, skipped: { receive: f.receiveSkipped } }).submittedAll) {
+      return `ช่างยังส่งคืนไม่ครบ (คืน ${fmt(f.received)}/${fmt(f.qty)})`;
+    }
     if (f.openWorkOrders > 0) return `ยังมีใบจ่ายงานค้าง ${f.openWorkOrders} ใบ`;
     return null;
   }

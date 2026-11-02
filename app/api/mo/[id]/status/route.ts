@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { computeMoStatus } from "@/lib/mo-status";
+import { parseSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const admin = supabaseAdmin();
 
   const { data: mo } = await admin.from("manufacturing_orders")
-    .select("id, mo_no, product_sku, product_name, qty, due_date, delivery_confirmed").eq("id", id).maybeSingle();
+    .select("id, mo_no, product_sku, product_name, qty, due_date, delivery_confirmed, skipped_stages").eq("id", id).maybeSingle();
   if (!mo) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งผลิต" }, { status: 404 });
   const moNo = String(mo.mo_no);
 
@@ -139,7 +140,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // ---- สถานะ 9 ขั้น (จ่าย/ส่ง ชนะ) ----
   const prepOk = prepTotal > 0 && prepDone >= prepTotal;
   const cutOk = cutTotal === 0 || cutDone >= cutTotal;
-  const st = computeMoStatus({ prepDone, prepTotal, cutDone, cutTotal, qty, dispatched, received });
+  const st = computeMoStatus({ prepDone, prepTotal, cutDone, cutTotal, qty, dispatched, received, skipped: parseSkipped(mo.skipped_stages) });
   const code = st.code, label = st.label;
 
   // note: จ่าย/ส่งแล้วแต่เตรียม/ตัดยังไม่ครบ

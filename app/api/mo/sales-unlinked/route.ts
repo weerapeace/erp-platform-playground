@@ -10,6 +10,8 @@ import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
 import type { SaleLine, SalesLinkRow } from "@/lib/mo-sales-match";
 import { buildUnlinked, type MoStage, type UnlinkedMo } from "@/lib/mo-sales-unlinked";
+import { moProgress, MO_QTY_EPS } from "@/lib/mo-status";
+import { parseSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +24,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   // ทุกตารางโตตามข้อมูล → ดึงครบด้วย fetchAllPages (กันตัด 1,000 แถวเงียบ ๆ)
   const [moRows, lineRows, linkRows, woRows, shipRows, offRows] = await Promise.all([
-    fetchAllPages<Row>((f, t) => admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, created_at, status, is_active")
+    fetchAllPages<Row>((f, t) => admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, created_at, status, is_active, skipped_stages")
       .neq("status", "cancelled").order("id").range(f, t)),
     fetchAllPages<Row>((f, t) => admin.from("erp_playground_so_lines").select("id, so_id, sku, qty, erp_playground_sales_orders!inner(id, so_number, status, order_date, customer_name)")
       .gt("qty", 0).order("id").range(f, t)),
@@ -46,15 +48,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   }
 
   // ตอนนี้ใบอยู่ไหน — จากใบจ่ายงาน (ไม่มี = รอจ่าย · รับคืนครบ = รับคืนแล้ว · อื่น ๆ = อยู่ที่ช่าง) · ส่งออกครบที่รับคืน = ส่งออกแล้ว
+  //   "จ่ายแล้ว / ส่งครบ" ถามคำถามกลาง lib/mo-status moProgress (เคารพป้ายข้ามขั้น)
   const wo = new Map<string, { qty: number; recv: number }>();
   for (const w of woRows) { const k = String(w.mo_no ?? ""); const c = wo.get(k) ?? { qty: 0, recv: 0 }; c.qty += n(w.qty); c.recv += n(w.received_qty); wo.set(k, c); }
   const stageOf = (m: Row): MoStage => {
     if (m.is_active === false || ["done", "cancel", "cancelled"].includes(String(m.status ?? ""))) return "closed";
-    const w = wo.get(String(m.mo_no ?? ""));
-    if (!w || w.qty <= 0) return "wait";
+    const w = wo.get(String(m.mo_no ?? "")) ?? { qty: 0, recv: 0 };
+    const pr = moProgress({ qty: n(m.qty), dispatched: w.qty, received: w.recv, skipped: parseSkipped(m.skipped_stages) });
+    if (!pr.started) return "wait";
     const sh = shipped.get(String(m.mo_no ?? "")) ?? 0;
-    if (sh > 0 && sh >= w.recv - 0.0001) return "ship";
-    return w.recv >= n(m.qty) - 0.0001 ? "recv" : "work";
+    if (sh > 0 && sh >= w.recv - MO_QTY_EPS) return "ship";
+    return pr.submittedAll ? "recv" : "work";
   };
   const mos: UnlinkedMo[] = moRows.filter((m) => m.status !== "cancel").map((m) => ({
     id: String(m.id), mo_no: String(m.mo_no), sku: String(m.product_sku ?? "").trim(), qty: n(m.qty), created_at: String(m.created_at ?? ""), stage: stageOf(m),

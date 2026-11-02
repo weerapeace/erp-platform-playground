@@ -8,7 +8,9 @@
  *   C ยังไม่จ่ายเลย อายุเกิน 90 วัน → ยกเลิก หรือยืนยันว่ายังทำ
  *   D ยังไม่จ่าย 61–90 วัน · E 31–60 วัน · F ไม่ถึง 30 วัน
  * อายุใบนับจาก created_at (มีครบทุกใบ — order_date กรอกไว้แค่บางใบ)
+ * "ส่งครบ / จ่ายครบ" ถามคำถามกลาง lib/mo-status moProgress (เคารพป้ายข้ามขั้น)
  */
+import { moProgress, type MoSkipFlags } from "@/lib/mo-status";
 
 export type MoBacklogBucket = "A" | "B" | "P" | "C" | "D" | "E" | "F";
 
@@ -49,9 +51,10 @@ export const MO_BUCKETS: Record<MoBacklogBucket, { label: string; hint: string; 
 
 export const MO_BUCKET_ORDER: MoBacklogBucket[] = ["A", "B", "P", "C", "D", "E", "F"];
 
-export function bucketOf(r: { qty: number; dispatched: number; received: number; age_days: number }): MoBacklogBucket {
-  if (r.qty > 0 && r.received >= r.qty) return "A";
-  if (r.qty > 0 && r.dispatched >= r.qty) return "B";
+export function bucketOf(r: { qty: number; dispatched: number; received: number; age_days: number; skipped?: MoSkipFlags }): MoBacklogBucket {
+  const p = moProgress(r);
+  if (p.submittedAll) return "A";
+  if (p.dispatchedAll) return "B";
   if (r.dispatched > 0) return "P";
   if (r.age_days > 90) return "C";
   if (r.age_days > 60) return "D";

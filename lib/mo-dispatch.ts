@@ -10,10 +10,12 @@
  * ใครใช้ (ต้องตรงกันทุกที่ — แก้กติกาที่ไฟล์นี้):
  *   /api/mo/purchase-needs (ไม่นับใบ) · /api/mo/material-demand (ไม่นับใบ)
  *   /api/mo/material-progress (นับทุกบรรทัดเป็นของครบ) · /api/mo/material-status (บรรทัดเป็น "มีของแล้ว · จ่ายงานแล้ว")
+ * กติกา "จ่ายงานแล้ว / ส่งครบ" มาจากคำถามกลาง lib/mo-status moProgress — ไฟล์นี้แค่โหลดข้อมูลแล้วถาม
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { parseSkipped } from "@/lib/mo-skip";
+import { moProgress } from "@/lib/mo-status";
 
 export type MoDispatchInfo = {
   /** จ่ายงานแล้ว (รวมกรณีส่งงานครบ) */
@@ -42,7 +44,7 @@ export async function loadMoDispatch(admin: SupabaseClient, mos: Row[]): Promise
   for (let i = 0; i < moNos.length; i += CHUNK) {
     const part = moNos.slice(i, i + CHUNK);
     wos.push(...await fetchAllPages<Row>((from, to) => admin.from("mo_work_orders")
-      .select("id, mo_no, received_qty, dispatch_date, assignee_name")
+      .select("id, mo_no, qty, received_qty, dispatch_date, assignee_name")
       .in("mo_no", part).eq("is_active", true)
       .order("id", { ascending: true }).range(from, to)));
   }
@@ -55,8 +57,9 @@ export async function loadMoDispatch(admin: SupabaseClient, mos: Row[]): Promise
     const list = byMo.get(moNo) ?? [];
     const skip = parseSkipped(m.skipped_stages);
     const received = list.reduce((n, w) => n + (Number(w.received_qty) || 0), 0);
-    const submitted = (qty > 0 && received >= qty) || !!skip.receive;
-    const dispatched = list.length > 0 || !!skip.dispatch || submitted;
+    const p = moProgress({ qty, dispatched: list.reduce((n, w) => n + (Number(w.qty) || 0), 0), received, skipped: skip });
+    const submitted = p.submittedAll;
+    const dispatched = list.length > 0 || p.started;
     if (!dispatched) continue;
     const dates = list.map((w) => (w.dispatch_date as string) ?? null).filter((d): d is string => !!d).sort();
     out.set(moNo, {

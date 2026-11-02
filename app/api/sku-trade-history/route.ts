@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { guardApi, apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { computeMoStatus } from "@/lib/mo-status";
+import { parseSkipped } from "@/lib/mo-skip";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -158,13 +159,13 @@ export async function GET(request: NextRequest) {
   ].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
 
   // ───── 🏭 ประวัติผลิต — ใบสั่งผลิต (manufacturing_orders) อ้างสินค้าด้วย "รหัส" ไม่ใช่ id ─────
-  type Mo = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: unknown; status: string | null; due_date: string | null; order_date: string | null; so_order_no: string | null; created_at: string; finished_received: boolean | null; delivery_confirmed: boolean | null };
+  type Mo = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: unknown; status: string | null; due_date: string | null; order_date: string | null; so_order_no: string | null; created_at: string; finished_received: boolean | null; delivery_confirmed: boolean | null; skipped_stages?: unknown };
   type Mat = { mo_no: string; required_qty: unknown; uom: string | null; cut_done: boolean | null; is_ready: boolean | null };
   type Wo = { mo_no: string; qty: unknown; received_qty: unknown; status: string | null };
   const production: ProductionRow[] = [];
   if (code) {
     const [moRes, matRes] = await Promise.all([
-      admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, order_date, so_order_no, created_at, finished_received, delivery_confirmed").eq("product_sku", code).not("is_active", "is", false),
+      admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, order_date, so_order_no, created_at, finished_received, delivery_confirmed, skipped_stages").eq("product_sku", code).not("is_active", "is", false),
       admin.from("mo_materials").select("mo_no, required_qty, uom, cut_done, is_ready").eq("component_sku", code).not("is_active", "is", false),
     ]);
     const asProduct = (moRes.data ?? []) as Mo[];
@@ -178,7 +179,7 @@ export async function GET(request: NextRequest) {
     }
     const matMoNos = [...matByMo.keys()].filter((n) => !asProduct.some((m) => m.mo_no === n));
     const matMos = matMoNos.length
-      ? ((await admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, order_date, so_order_no, created_at, finished_received, delivery_confirmed").in("mo_no", matMoNos).not("is_active", "is", false)).data ?? []) as Mo[]
+      ? ((await admin.from("manufacturing_orders").select("id, mo_no, product_sku, product_name, qty, status, due_date, order_date, so_order_no, created_at, finished_received, delivery_confirmed, skipped_stages").in("mo_no", matMoNos).not("is_active", "is", false)).data ?? []) as Mo[]
       : [];
     const allMos = [...asProduct, ...matMos];
     const allNos = [...new Set(allMos.map((m) => m.mo_no))];
@@ -197,7 +198,7 @@ export async function GET(request: NextRequest) {
     const rowOf = (m: Mo, role: ProductionRow["role"]): ProductionRow => {
       const pc = prepCut[m.mo_no] ?? { pd: 0, pt: 0, cd: 0, ct: 0 };
       const dispatched = disp.get(m.mo_no) ?? 0, received = recv.get(m.mo_no) ?? 0;
-      const st = m.status === "cancelled" ? { label: "ยกเลิก", tone: "gray" } : computeMoStatus({ prepDone: pc.pd, prepTotal: pc.pt, cutDone: pc.cd, cutTotal: pc.ct, qty: num(m.qty) ?? 0, dispatched, received });
+      const st = m.status === "cancelled" ? { label: "ยกเลิก", tone: "gray" } : computeMoStatus({ prepDone: pc.pd, prepTotal: pc.pt, cutDone: pc.cd, cutTotal: pc.ct, qty: num(m.qty) ?? 0, dispatched, received, skipped: parseSkipped(m.skipped_stages) });
       const mat = matByMo.get(m.mo_no);
       return {
         mo_id: m.id, mo_no: m.mo_no, role, product_sku: m.product_sku, product_name: m.product_name,
