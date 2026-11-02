@@ -7,7 +7,7 @@
 // ใช้ซ้ำได้ทุกที่ที่มีชุดรูป (แนบงาน, คอนเทนต์, แกลเลอรีสินค้า ฯลฯ)
 // ============================================================
 
-import { useCallback, useEffect, useRef, useState, type WheelEvent as RWheelEvent, type MouseEvent as RMouseEvent, type TouchEvent as RTouchEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode, type WheelEvent as RWheelEvent, type MouseEvent as RMouseEvent, type TouchEvent as RTouchEvent } from "react";
 import { createPortal } from "react-dom";
 import { copyImageToClipboard, downloadImageAsJpg, canCopyImage } from "@/lib/image-clipboard";
 
@@ -31,11 +31,12 @@ function jpgFileName(img: LightboxImage): string {
   return base.toLowerCase().endsWith(".jpg") ? base : `${base}.jpg`;
 }
 
-export function ImageLightbox({ images, index, onClose, onIndex }: {
+export function ImageLightbox({ images, index, onClose, onIndex, footer }: {
   images: LightboxImage[];
   index: number;                 // รูปปัจจุบัน · นอกช่วง (เช่น -1) = ปิด
   onClose: () => void;
   onIndex: (i: number) => void;  // เปลี่ยนรูป
+  footer?: (index: number) => ReactNode;   // ปุ่ม/ข้อความเสริมใต้รูป (เช่น "เลือกรูปนี้" ในป๊อปโพสต์) — ไม่ส่ง = คำใบ้ซูมเหมือนเดิม
 }) {
   const open = index >= 0 && index < images.length;
   const [scale, setScale] = useState(1);
@@ -173,8 +174,10 @@ export function ImageLightbox({ images, index, onClose, onIndex }: {
         className="max-h-[92vh] max-w-[94vw] object-contain rounded shadow-2xl" />
       {images.length > 1 && !zoomed && <button onClick={(e) => { e.stopPropagation(); go(1); }} title="ถัดไป (→)" className={`${navBtn} right-3`}>›</button>}
 
-      {/* คำใบ้ (เฉพาะยังไม่ซูม) */}
-      {!zoomed && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 text-white/45 text-[11px] pointer-events-none">ดับเบิลคลิก/ล้อเมาส์/จีบนิ้ว = ซูม</div>}
+      {/* แถบล่าง: ปุ่มเสริมของผู้เรียก (footer) หรือคำใบ้ซูม (เฉพาะยังไม่ซูม) */}
+      {footer
+        ? <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2" onClick={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()}>{footer(index)}</div>
+        : !zoomed && <div className="absolute bottom-3 left-1/2 -translate-x-1/2 text-white/45 text-[11px] pointer-events-none">ดับเบิลคลิก/ล้อเมาส์/จีบนิ้ว = ซูม</div>}
     </div>
   );
   return typeof document !== "undefined" ? createPortal(node, document.body) : node;

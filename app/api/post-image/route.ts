@@ -1,7 +1,8 @@
 /**
  * /api/post-image?k=<r2 key | drive:<fileId>> — รูปสำหรับให้แพลตฟอร์มโซเชียลดึงไปโพสต์ (ตัวยิงโพสต์ใช้ผ่าน lib/social-publish/media)
  *
- * - แปลงเป็น JPEG เสมอ (Instagram รับ JPEG เท่านั้น · PNG/WebP/HEIC จาก Drive โดนปฏิเสธ) · กว้าง ≤ 2048 · หมุนตาม EXIF · พื้นใสเป็นขาว
+ * - JPEG ที่กว้าง ≤2048 อยู่แล้ว = ส่งไฟล์เดิมเป๊ะ (ไม่บีบซ้ำ) · อย่างอื่นแปลงเป็น JPEG q92 (Instagram รับ JPEG เท่านั้น · PNG/WebP/HEIC จาก Drive โดนปฏิเสธ)
+ *   กว้าง ≤ 2048 · หมุนตาม EXIF · พื้นใสเป็นขาว
  * - รูปบน Google Drive ดึงตรงจาก Drive ตอนแพลตฟอร์มขอ (ไม่ก็อปลง R2)
  * - ไม่ต้องล็อกอิน (เซิร์ฟเวอร์ Meta เรียก) — ปลอดภัยเท่า "ต้องรู้ key" เหมือน /api/r2-image และ /api/drive-video
  */
@@ -42,7 +43,12 @@ export async function GET(request: NextRequest): Promise<Response> {
   let out: Uint8Array = src.bytes; let ct = src.type || "image/jpeg";
   try {
     const sharp = (await import("sharp")).default;
-    out = new Uint8Array(await sharp(src.bytes).rotate().resize({ width: 2048, withoutEnlargement: true }).flatten({ background: "#ffffff" }).jpeg({ quality: 90, mozjpeg: true }).toBuffer());
+    const meta = await sharp(src.bytes).metadata();
+    // เป็น JPEG อยู่แล้ว + ไม่เกิน 2048 + ไม่ต้องหมุน → ส่งไฟล์เดิมเป๊ะ (ไม่บีบอัดซ้ำ คมเท่าต้นฉบับในระบบ)
+    const keep = meta.format === "jpeg" && (meta.width ?? 0) <= 2048 && (!meta.orientation || meta.orientation === 1);
+    if (!keep) {
+      out = new Uint8Array(await sharp(src.bytes).rotate().resize({ width: 2048, withoutEnlargement: true }).flatten({ background: "#ffffff" }).jpeg({ quality: 92, mozjpeg: true }).toBuffer());
+    }
     ct = "image/jpeg";
   } catch { /* แปลงไม่ได้ → ส่งไฟล์เดิม (แพลตฟอร์มอาจปฏิเสธเองถ้าไม่ใช่ JPEG) */ }
   return new Response(out as BodyInit, {

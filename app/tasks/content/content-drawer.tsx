@@ -1177,6 +1177,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           platform={postModal.platform}
           connected={autoConnected(postModal.platform)}
           pageName={metaStatus.facebook?.page_name}
+          avatarUrl={brands.find((b) => b.id === brandId)?.logo_url ?? null}
           captionText={postModal.captionText}
           images={postImages}
           defaultSelected={platformImages[postModal.platform]?.length ? platformImages[postModal.platform] : contentImageKeys}

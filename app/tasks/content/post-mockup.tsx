@@ -15,8 +15,12 @@ type Props = {
   images: PostImage[];           // รูปที่เลือกไว้ (เรียงตามที่เลือก)
   text: string;                  // ข้อความที่ประกอบแล้ว (แม่แบบ + แคปชั่น + แฮชแท็ก)
   format?: string | null;        // รูปแบบโพสต์ (single/carousel/reels/story…)
+  ratio?: number | null;         // สัดส่วนรูปแรก (กว้าง÷สูง) — ใส่แล้วกรอบรูป IG/FB รูปเดียว ตามรูปจริง (แพลตฟอร์มครอปที่ 4:5 ถึง 1.91:1)
   t: (th: string, en: string) => string;
 };
+
+/** สัดส่วนที่แพลตฟอร์มโชว์ในฟีด: แนวตั้งสุด 4:5 · แนวนอนสุด 1.91:1 (เกินนี้ถูกครอป) */
+const feedRatio = (r?: number | null) => (r && r > 0 ? Math.min(1.91, Math.max(0.8, r)) : null);
 
 const Avatar = ({ url, name, size = 36, round = true }: { url?: string | null; name: string; size?: number; round?: boolean }) => (
   url
@@ -43,7 +47,7 @@ function RichText({ text, clampLines, linkCls = "text-blue-600", className = "" 
 const img = (im: PostImage, w: number) => r2ImageUrl(im.key, w) ?? "";
 
 /** กริดรูปแบบ Facebook: 1 รูปเต็ม · 2 ครึ่ง · 3 = 1 ใหญ่ + 2 เล็ก · 4+ = 2×2 (+N) */
-function ImageGrid({ images, max = 4, tall }: { images: PostImage[]; max?: number; tall?: boolean }) {
+function ImageGrid({ images, max = 4, tall, ratio }: { images: PostImage[]; max?: number; tall?: boolean; ratio?: number | null }) {
   if (!images.length) return null;
   const shown = images.slice(0, max); const extra = images.length - shown.length;
   const Cell = ({ im, cls, badge }: { im: PostImage; cls: string; badge?: number }) => (
@@ -54,19 +58,23 @@ function ImageGrid({ images, max = 4, tall }: { images: PostImage[]; max?: numbe
       {badge ? <span className="absolute inset-0 bg-black/50 text-white flex items-center justify-center text-2xl font-semibold">+{badge}</span> : null}
     </div>
   );
-  if (shown.length === 1) return <Cell im={shown[0]} cls={tall ? "aspect-[4/5]" : "aspect-[4/3]"} />;
+  if (shown.length === 1) {
+    const r = feedRatio(ratio);
+    if (r) return <div style={{ aspectRatio: String(r) }}><Cell im={shown[0]} cls="w-full h-full" /></div>;
+    return <Cell im={shown[0]} cls={tall ? "aspect-[4/5]" : "aspect-[4/3]"} />;
+  }
   if (shown.length === 2) return <div className="grid grid-cols-2 gap-0.5">{shown.map((im) => <Cell key={im.key} im={im} cls="aspect-square" />)}</div>;
   if (shown.length === 3) return <div className="grid grid-cols-2 gap-0.5"><Cell im={shown[0]} cls="row-span-2 aspect-auto h-full min-h-[16rem]" /><Cell im={shown[1]} cls="aspect-square" /><Cell im={shown[2]} cls="aspect-square" /></div>;
   return <div className="grid grid-cols-2 gap-0.5">{shown.map((im, i) => <Cell key={im.key} im={im} cls="aspect-square" badge={i === shown.length - 1 && extra > 0 ? extra : undefined} />)}</div>;
 }
 
 /** รูปเดียวแบบเลื่อนได้ (IG carousel) — ปุ่ม ‹ › + จุดบอกตำแหน่ง */
-function Carousel({ images, aspect = "aspect-square", dark }: { images: PostImage[]; aspect?: string; dark?: boolean }) {
+function Carousel({ images, aspect = "aspect-square", dark, ratio }: { images: PostImage[]; aspect?: string; dark?: boolean; ratio?: number | null }) {
   const [i, setI] = useState(0);
   if (!images.length) return <div className={`${aspect} bg-slate-100 flex items-center justify-center text-slate-300 text-3xl`}>🖼</div>;
   const im = images[Math.min(i, images.length - 1)];
   return (
-    <div className={`relative ${aspect} overflow-hidden ${dark ? "bg-black" : "bg-slate-100"}`}>
+    <div className={`relative ${ratio ? "" : aspect} overflow-hidden ${dark ? "bg-black" : "bg-slate-100"}`} style={ratio ? { aspectRatio: String(ratio) } : undefined}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img src={img(im, 800)} alt="" className="w-full h-full object-cover" />
       {im.type === "video" && <span className="absolute inset-0 flex items-center justify-center"><span className="h-12 w-12 rounded-full bg-black/55 text-white flex items-center justify-center text-xl">▶</span></span>}
@@ -82,7 +90,7 @@ function Carousel({ images, aspect = "aspect-square", dark }: { images: PostImag
   );
 }
 
-export function PostMockup({ platform, pageName, avatarUrl, images, text, format, t }: Props) {
+export function PostMockup({ platform, pageName, avatarUrl, images, text, format, ratio, t }: Props) {
   const name = (pageName || "").trim() || t("ชื่อเพจ/แบรนด์", "Page name");
   const handle = `@${name.toLowerCase().replace(/[^a-z0-9ก-๙._]+/gi, "").slice(0, 20) || "brand"}`;
   const now = t("เมื่อสักครู่", "Just now");
@@ -98,7 +106,7 @@ export function PostMockup({ platform, pageName, avatarUrl, images, text, format
           <span className="ml-auto text-slate-400">···</span>
         </div>
         {text.trim() && <RichText text={text} clampLines={3} className="px-3 pb-2 leading-snug" />}
-        <ImageGrid images={images} />
+        <ImageGrid images={images} ratio={ratio} />
         <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-slate-500 border-b border-slate-100"><span>👍❤️ 128</span><span>{t("ความคิดเห็น 12 รายการ · แชร์ 3 ครั้ง", "12 comments · 3 shares")}</span></div>
         <div className="grid grid-cols-3 text-center text-xs text-slate-600 py-1">
           <span className="py-1">👍 {t("ถูกใจ", "Like")}</span><span className="py-1">💬 {t("แสดงความคิดเห็น", "Comment")}</span><span className="py-1">↗ {t("แชร์", "Share")}</span>
@@ -117,7 +125,7 @@ export function PostMockup({ platform, pageName, avatarUrl, images, text, format
           <div className="font-semibold text-xs truncate">{handle.slice(1)}</div>
           <span className="ml-auto text-slate-400">···</span>
         </div>
-        <Carousel images={images} aspect={reels ? "aspect-[9/16] max-h-[26rem]" : "aspect-square"} dark={reels} />
+        <Carousel images={images} aspect={reels ? "aspect-[9/16] max-h-[26rem]" : "aspect-square"} dark={reels} ratio={reels ? null : feedRatio(ratio)} />
         <div className="px-3 pt-2 flex items-center gap-3 text-lg"><span>♡</span><span>💬</span><span>✈</span><span className="ml-auto">🔖</span></div>
         <div className="px-3 pt-1 text-xs font-semibold">{t("ถูกใจ 1,024 คน", "1,024 likes")}</div>
         <div className="px-3 pb-3 pt-0.5 text-xs leading-snug"><span className="font-semibold mr-1">{handle.slice(1)}</span><RichText text={text} clampLines={2} className="inline" /></div>
