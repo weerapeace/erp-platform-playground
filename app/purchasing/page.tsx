@@ -386,8 +386,16 @@ export default function PurchasingShopPage() {
 
   // ปุ่มย้อนกลับของเบราว์เซอร์/ปัดขวาบนมือถือ ตอนเปิดใบงานอยู่ = กลับรายการใบสั่งผลิต (ไม่หลุดออกจากหน้าขอซื้อ)
   // ของกลาง useBackClose — ป๊อปใส่จำนวน (ถ้าเปิดค้าง) ปิดตามไปด้วย ไม่ให้ค้างเด้งขึ้นตอนเปิดใบถัดไป
-  useBackClose(!!moParentSel, () => setMoParentSel(null), "mo-parent");   // รวมตามรุ่น: ย้อนกลับ = กลับการ์ดรุ่น
-  useBackClose(!!moSel, () => { setMoSel(null); setMoMatQty(null); setQ(""); }, "mo-detail");
+  // คำค้นใช้ร่วมกันทุกระดับ: ค้นหาใบ (เช่น "WL42") แล้วกดเข้าใบ → ล้างคำค้น (ไม่งั้นไปกรองวัตถุดิบจนขึ้น "ไม่พบ")
+  //   ย้อนกลับ → คืนคำค้นเดิม กดใบถัดไปในผลค้นหาต่อได้เลย · แยกเก็บต่อชั้น (รุ่น → ใบ)
+  const moListQ = useRef("");
+  const parentListQ = useRef("");
+  const openMo = (e: MoEntry) => { moListQ.current = q; setQ(""); setMoSel(e); };
+  const closeMo = () => { setMoSel(null); setMoMatQty(null); setQ(moListQ.current); };
+  const openParent = (p: { title: string; mos: MoEntry[] }) => { parentListQ.current = q; setQ(""); setMoParentSel(p); };
+  const closeParent = () => { setMoParentSel(null); setQ(parentListQ.current); };
+  useBackClose(!!moParentSel, closeParent, "mo-parent");   // รวมตามรุ่น: ย้อนกลับ = กลับการ์ดรุ่น
+  useBackClose(!!moSel, closeMo, "mo-detail");
 
   // ระดับ 2: โหลดสถานะวัตถุดิบทั้ง BOM ของใบที่เลือก (เปลี่ยนใบ = ล้างของเก่า · กดซ้ำ/บันทึก = โหลดทับเงียบ ๆ)
   const moSelNo = moSel?.mo_no ?? null;
@@ -992,8 +1000,8 @@ export default function PurchasingShopPage() {
               return (
                 <MoParentGroup title={moParentSel.title} mos={moParentSel.mos} needs={moNeeds} cols={cols}
                   canEdit={canEditMat} canStock={canStock} canStockView={canStockView} inCartQty={nos}
-                  onBack={() => setMoParentSel(null)}
-                  onOpenMo={(no) => { const e = moParentSel.mos.find(m => m.mo_no === no); if (e) setMoSel(e); }}
+                  onBack={closeParent}
+                  onOpenMo={(no) => { const e = moParentSel.mos.find(m => m.mo_no === no); if (e) openMo(e); }}
                   onHistory={(it) => setStockHist(it)}
                   onAddCart={(lines) => { setCart(p => [...p, ...moCartLines(moParentSel.title, lines)]); toast.success(`ใส่ตะกร้าแล้ว ${lines.length} รายการ (${moParentSel.title})`); }}
                   onChanged={() => void refreshMoNeeds()} />
@@ -1042,7 +1050,7 @@ export default function PurchasingShopPage() {
               })();
               const matCount = (mos: MoEntry[]) => new Set(mos.flatMap(g => g.mats.map(x => x.code ?? `nm:${x.name ?? ""}`))).size;
               const moCard = (g: MoEntry) => (
-                <button key={g.mo_no} onClick={() => setMoSel(g)}
+                <button key={g.mo_no} onClick={() => openMo(g)}
                   className="text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-rose-300 hover:shadow-md transition-all">
                   <div className="aspect-square bg-slate-50 flex items-center justify-center">
                     {g.product_image ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.product_image} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">🏭</span>}
@@ -1086,7 +1094,7 @@ export default function PurchasingShopPage() {
                 const short = (v: string) => (v.startsWith(k) && v.length > k.length ? v.slice(k.length) : v);
                 const due = mos.map(g => g.due_date).filter((d): d is string => !!d).sort()[0];
                 return (
-                  <button key={k} onClick={() => setMoParentSel({ title: k, mos })}
+                  <button key={k} onClick={() => openParent({ title: k, mos })}
                     className="text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-rose-300 hover:shadow-md transition-all">
                     <div className="relative aspect-square bg-slate-50 flex items-center justify-center">
                       {img ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">🏭</span>}
@@ -1201,7 +1209,7 @@ export default function PurchasingShopPage() {
             return (
               <>
                 <div className="flex items-center gap-3 mb-3">
-                  <button onClick={() => { setMoSel(null); setQ(""); }} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 flex-shrink-0">← ใบสั่งผลิตอื่น</button>
+                  <button onClick={closeMo} className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 flex-shrink-0">← ใบสั่งผลิตอื่น</button>
                   <div className="min-w-0">
                     <div className="text-sm font-semibold text-slate-800 truncate">{moSel.product_label} <span className="font-mono text-xs text-slate-400">· {moSel.mo_no}</span></div>
                     <div className="text-[11px] text-slate-400">วัตถุดิบทั้งหมดใน BOM {items.length || "…"} รายการ{moSel.due_date ? ` · กำหนดส่ง ${moSel.due_date}` : ""}</div>
