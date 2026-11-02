@@ -6,21 +6,11 @@
  *  • ManageGroupsModal: ดู/เปลี่ยนชื่อ/ลบ/เอาใบออกจากกลุ่ม
  * ใช้ของกลาง: ERPModal + /api/mo/groups
  */
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import type { MoGroup } from "@/app/api/mo/groups/route";
-
-function useGroups() {
-  const [groups, setGroups] = useState<MoGroup[] | null>(null);
-  const load = useCallback(async () => {
-    try { const r = await apiFetch("/api/mo/groups"); const j = await r.json(); setGroups((j.data ?? []) as MoGroup[]); }
-    catch { setGroups([]); }
-  }, []);
-  useEffect(() => { void load(); }, [load]);
-  return { groups, reload: load };
-}
+import { useMoGroups as useGroups, MoGroupOptions, rememberMoGroup, type MoGroup } from "@/components/mo-group-picker";
 
 // ── จัดกลุ่ม / ย้ายกลุ่ม MO ที่เลือก ────────────────────────────────
 //  ⚠️ 1 ใบอยู่ได้หลายกลุ่มในเชิงข้อมูล แต่หน้าจอจัดกลุ่มจะโชว์กลุ่มแรกที่เจอ → อยู่ 2 กลุ่ม = งง
@@ -58,11 +48,13 @@ export function AssignToGroupModal({ moNos, onClose, onDone }: { moNos: string[]
         if (moveOut) await removeFromOthers(null);
         const r = await apiFetch("/api/mo/groups", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, mo_nos: moNos }) });
         const j = await r.json(); if (j.error) throw new Error(j.error);
+        if (j.data?.id) rememberMoGroup({ id: j.data.id, name });
         toast.success(`สร้างกลุ่ม "${name}" + ${moveOut ? "ย้าย" : "เพิ่ม"} ${moNos.length} ใบ`);
       } else {
         if (moveOut) await removeFromOthers(target);
         const r = await apiFetch("/api/mo/groups", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: target, add_mos: moNos }) });
         const j = await r.json(); if (j.error) throw new Error(j.error);
+        const g = (groups ?? []).find((x) => x.id === target); if (g) rememberMoGroup(g);
         toast.success(`${moveOut ? "ย้าย" : "เพิ่ม"} ${moNos.length} ใบเข้ากลุ่มแล้ว`);
       }
       onDone(); onClose();
@@ -104,19 +96,9 @@ export function AssignToGroupModal({ moNos, onClose, onDone }: { moNos: string[]
         </label>
 
         {groups === null ? <div className="text-center py-3 text-sm text-slate-400">กำลังโหลดกลุ่ม…</div>
-          : groups.length > 0 && <div className="border border-slate-200 rounded-lg divide-y divide-slate-50 max-h-56 overflow-y-auto">
-            {groups.map((g) => {
-              const inThis = g.mo_nos.filter((m) => sel.has(m)).length;
-              return (
-                <label key={g.id} className="flex items-center gap-2 px-2 py-1.5 cursor-pointer hover:bg-slate-50">
-                  <input type="radio" checked={target === g.id} onChange={() => setTarget(g.id)} className="accent-blue-600" />
-                  <span className="text-sm text-slate-700 flex-1 truncate">{g.name}</span>
-                  {inThis > 0 && <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">อยู่แล้ว {inThis}</span>}
-                  <span className="text-[11px] text-slate-400">{g.mo_nos.length} ใบ</span>
-                </label>
-              );
-            })}
-          </div>}
+          : groups.length > 0 && <MoGroupOptions groups={groups} value={target} onSelect={(g) => setTarget(g.id)}
+              badge={(g) => { const inThis = g.mo_nos.filter((m) => sel.has(m)).length;
+                return inThis > 0 ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700">อยู่แล้ว {inThis}</span> : null; }} />}
 
         {/* เอาออกจากกลุ่มทั้งหมด */}
         <label className="flex items-center gap-2 p-2 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50">

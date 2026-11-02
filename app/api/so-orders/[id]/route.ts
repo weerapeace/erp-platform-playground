@@ -3,7 +3,7 @@
  *   GET    → หัวใบ + บรรทัด
  *   PATCH  { action }
  *      save     → แก้ไขใบ (หัว + บรรทัด · คิดเงินใหม่ด้วยเครื่องคิดเงินกลาง)
- *      open_mo  → เปิด/ผูกใบสั่งผลิตให้ทุกบรรทัด (กดซ้ำได้ ไม่สร้างซ้ำ)
+ *      open_mo  { group_id? } → เปิด/ผูกใบสั่งผลิตให้ทุกบรรทัด (หรือเฉพาะชุด) · กดซ้ำได้ ไม่สร้างซ้ำ · ใบที่เปิดเข้าชุดของรายการให้เอง
  *      ship     { create_invoice } → "ส่งแล้ว" · create_invoice=true = ออกใบขาย/บิลให้เลย
  *      cancel   { reason }         → ยกเลิกใบ
  *      reopen   → กลับเป็น "ยืนยันแล้ว"
@@ -15,7 +15,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { computeTotals, type SoOrderHeaderInput, type SoOrderLineInput } from "../shared";
+import { computeTotals, lineRow, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput } from "../shared";
 import { openMoForOrder } from "../open-mo";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +39,9 @@ type PatchBody = {
   lines?: SoOrderLineInput[];
   create_invoice?: boolean;
   reason?: string;
+  new_groups?: Record<string, string>;
+  /** open_mo: เปิดเฉพาะรายการของชุดนี้ (ปุ่ม "เปิดใบสั่งผลิตทั้งชุด") */
+  group_id?: string;
 };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -65,6 +68,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const lines = (b.lines ?? []).filter((l) => (l.product_name ?? "").trim() || l.sku);
     if (lines.length === 0) return NextResponse.json({ error: "ต้องมีรายการสินค้าอย่างน้อย 1 บรรทัด" }, { status: 400 });
     const totals = computeTotals(header, lines);
+    let groups: Awaited<ReturnType<typeof resolveLineGroups>>;
+    try { groups = await resolveLineGroups(admin, lines, b.new_groups, { id: user?.id ?? null, email: user?.email ?? null }); }
+    catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message : "สร้างชุดไม่สำเร็จ" }, { status: 400 }); }
 
     const { error } = await admin.from("so_orders").update({
       company_id: header.company_id ?? null, company_code: header.company_code ?? null,
@@ -83,21 +89,15 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     // บรรทัด: เขียนทับทั้งชุด แต่ "คงการผูกใบสั่งผลิตเดิม" ไว้ (ห้ามทำให้ MO หลุดจากใบ)
     await admin.from("so_order_lines").delete().eq("order_id", id);
-    await admin.from("so_order_lines").insert(lines.map((l, i) => ({
-      order_id: id, line_no: i + 1,
-      sku: l.sku ?? null, product_name: l.product_name ?? l.sku ?? "",
-      qty: Number(l.qty) || 0, unit: l.unit || "ชิ้น", unit_price: Number(l.unit_price) || 0,
-      discount_type: l.discount_type ?? "amount", discount_value: Number(l.discount_value) || 0,
-      due_date: l.due_date || null, mo_id: l.mo_id ?? null, mo_no: l.mo_no ?? null,
-      source: l.source ?? "manual", note: l.note ?? null,
-    })));
+    const { error: lineErr } = await admin.from("so_order_lines").insert(lines.map((l, i) => lineRow(id, l, i, groups.groupOf(l))));
+    if (lineErr) return NextResponse.json({ error: lineErr.message }, { status: 400 });
     await writeAudit(admin, { action: "update", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, grand_total: totals.grand_total } });
     return NextResponse.json({ ok: true, error: null });
   }
 
   // ── เปิด/ผูกใบสั่งผลิต ───────────────────────────────────
   if (action === "open_mo") {
-    const opened = await openMoForOrder(admin, id, user?.id ?? null);
+    const opened = await openMoForOrder(admin, id, user?.id ?? null, b.group_id ? { onlyGroupId: b.group_id } : undefined);
     return NextResponse.json({ ok: true, opened, error: null });
   }
 

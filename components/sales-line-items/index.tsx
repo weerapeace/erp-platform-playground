@@ -128,6 +128,16 @@ export function calculateEditorTotals(
   });
 }
 
+/** คอลัมน์เสริมของ SOLineEditor โหมดตาราง (หน้าที่เรียกเก็บค่าเอง เช่น map tempId → ชุด) */
+export type LineExtraColumn = {
+  key: string;
+  header: ReactNode;
+  /** class ของ th/td เช่น "w-44" */
+  className?: string;
+  position?: "start" | "end";
+  cell: (line: EditorLine, index: number) => ReactNode;
+};
+
 export function SOLineEditor({
   lines,
   onChange,
@@ -135,6 +145,7 @@ export function SOLineEditor({
   layout = "card",
   onSaveMasterName,
   hidePrice = false,
+  extraColumns = [],
 }: {
   lines: EditorLine[];
   onChange: (lines: EditorLine[]) => void;
@@ -145,6 +156,8 @@ export function SOLineEditor({
   onSaveMasterName?: (productId: string, name: string) => Promise<void>;
   /** ซ่อนคอลัมน์ราคา/ส่วนลด/รวม (โหมดตาราง) — เช่น ใบส่งสินค้าที่สนใจแค่จำนวน */
   hidePrice?: boolean;
+  /** คอลัมน์เสริม (โหมดตาราง) — เช่น ติ๊กเลือก / "ชุด" ของใบสั่งขาย · start = หน้าสุด · end = ก่อนปุ่มลบ */
+  extraColumns?: LineExtraColumn[];
 }) {
   const [importOpen, setImportOpen] = useState(false);   // ป๊อป "ลงจากตาราง / Excel"
 
@@ -251,6 +264,8 @@ export function SOLineEditor({
       : null;
 
   // ===== โหมดตาราง (แก้ไขในแถว) =====
+  const startCols = extraColumns.filter((c) => c.position === "start");
+  const endCols = extraColumns.filter((c) => c.position !== "start");
   if (layout === "table") {
     return (
       <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
@@ -270,6 +285,7 @@ export function SOLineEditor({
           <table className={`w-full ${hidePrice ? "min-w-[520px]" : "min-w-[860px]"} border-collapse text-sm`}>
             <thead className="bg-slate-50 text-[11px] uppercase tracking-wide text-slate-500">
               <tr className="border-b border-slate-200">
+                {startCols.map((c) => <th key={c.key} className={`px-2 py-2 text-left font-semibold ${c.className ?? ""}`}>{c.header}</th>)}
                 <th className="w-8 px-2 py-2 text-center font-semibold">#</th>
                 <th className="min-w-[240px] px-2 py-2 text-left font-semibold">สินค้า</th>
                 <th className={`${hidePrice ? "w-32" : "w-20"} px-2 py-2 text-right font-semibold`}>จำนวน</th>
@@ -279,12 +295,14 @@ export function SOLineEditor({
                   <th className="w-36 px-2 py-2 text-left font-semibold">ส่วนลด</th>
                   <th className="w-28 px-2 py-2 text-right font-semibold">รวมก่อนภาษี</th>
                 </>}
+                {endCols.map((c) => <th key={c.key} className={`px-2 py-2 text-left font-semibold ${c.className ?? ""}`}>{c.header}</th>)}
                 {!readonly && <th className="w-9 px-1 py-2"></th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {lines.map((l, i) => (
                 <tr key={l.tempId} className="align-top">
+                  {startCols.map((c) => <td key={c.key} className={`px-2 py-2 ${c.className ?? ""}`}>{c.cell(l, i)}</td>)}
                   <td className="px-2 py-2 text-center font-mono text-xs text-slate-400">{i + 1}</td>
                   <td className="px-2 py-2">
                     <div className="flex items-start gap-2">
@@ -341,6 +359,7 @@ export function SOLineEditor({
                       {formatMoney(money(lineTotal(l)))}
                     </td>
                   </>}
+                  {endCols.map((c) => <td key={c.key} className={`px-2 py-2 ${c.className ?? ""}`}>{c.cell(l, i)}</td>)}
                   {!readonly && (
                     <td className="px-1 py-2 text-center">
                       <button type="button" onClick={() => remove(i)} aria-label="ลบรายการ"
@@ -350,7 +369,7 @@ export function SOLineEditor({
                 </tr>
               ))}
               {lines.length === 0 && (
-                <tr><td colSpan={(hidePrice ? 4 : 7) + (readonly ? 0 : 1)} className="px-4 py-8 text-center text-sm text-slate-400">
+                <tr><td colSpan={(hidePrice ? 4 : 7) + (readonly ? 0 : 1) + extraColumns.length} className="px-4 py-8 text-center text-sm text-slate-400">
                   {readonly ? "ไม่มีรายการสินค้า" : 'กด "+ เพิ่มรายการ" เพื่อเริ่มเลือกสินค้า'}
                 </td></tr>
               )}

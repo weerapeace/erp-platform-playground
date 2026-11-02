@@ -1,7 +1,8 @@
 /**
  * ใบสั่งขาย — /api/so-orders
  *   GET  ?search=&status=&limit=   → รายการใบสั่งขาย (+จำนวนบรรทัด)
- *   POST { header, lines, open_mo } → สร้างใบใหม่ (เลขที่ออกให้ตามบริษัท) · open_mo=true → เปิดใบสั่งผลิตให้เลย
+ *   POST { header, lines, open_mo, new_groups } → สร้างใบใหม่ (เลขที่ออกให้ตามบริษัท) · open_mo=true → เปิดใบสั่งผลิตให้เลย
+ *        lines[].mo_group_id = ชุดเดิม · lines[].mo_group_key + new_groups{key: ชื่อ} = ชุดใหม่ (สร้างให้ตอนบันทึก)
  * สิทธิ์: ดู so.view · สร้าง so.create · ทุก action เขียน audit
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -9,7 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { computeTotals, nextOrderNo, type SoOrderHeaderInput, type SoOrderLineInput, type SoOrderRow } from "./shared";
+import { computeTotals, lineRow, nextOrderNo, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput, type SoOrderRow } from "./shared";
 import { openMoForOrder } from "./open-mo";
 
 export const dynamic = "force-dynamic";
@@ -33,15 +34,32 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const ids = (data ?? []).map((r) => (r as { id: string }).id);
   const counts = new Map<string, number>();
+  const groupIds = new Map<string, Set<string>>();          // ใบ → ชุดที่รายการอยู่
   if (ids.length) {
-    const { data: lines } = await admin.from("so_order_lines").select("order_id").in("order_id", ids);
-    for (const l of (lines ?? []) as { order_id: string }[]) counts.set(l.order_id, (counts.get(l.order_id) ?? 0) + 1);
+    const { data: lines } = await admin.from("so_order_lines").select("order_id, mo_group_id").in("order_id", ids);
+    for (const l of (lines ?? []) as { order_id: string; mo_group_id: string | null }[]) {
+      counts.set(l.order_id, (counts.get(l.order_id) ?? 0) + 1);
+      if (l.mo_group_id) (groupIds.get(l.order_id) ?? groupIds.set(l.order_id, new Set()).get(l.order_id)!).add(l.mo_group_id);
+    }
   }
-  const rows: SoOrderRow[] = (data ?? []).map((r) => ({ ...(r as Omit<SoOrderRow, "line_count">), line_count: counts.get((r as { id: string }).id) ?? 0 }));
+  const allGroupIds = [...new Set([...groupIds.values()].flatMap((s) => [...s]))];
+  const groupName = new Map<string, string>();
+  if (allGroupIds.length) {
+    const { data: gs } = await admin.from("mo_groups").select("id, name").in("id", allGroupIds);
+    for (const g of (gs ?? []) as { id: string; name: string }[]) groupName.set(g.id, g.name);
+  }
+  const rows: SoOrderRow[] = (data ?? []).map((r) => {
+    const id = (r as { id: string }).id;
+    return {
+      ...(r as Omit<SoOrderRow, "line_count" | "groups">),
+      line_count: counts.get(id) ?? 0,
+      groups: [...(groupIds.get(id) ?? [])].filter((g) => groupName.has(g)).map((g) => ({ id: g, name: groupName.get(g)! })),
+    };
+  });
   return NextResponse.json({ data: rows, error: null });
 }
 
-type CreateBody = { header?: SoOrderHeaderInput; lines?: SoOrderLineInput[]; open_mo?: boolean };
+type CreateBody = { header?: SoOrderHeaderInput; lines?: SoOrderLineInput[]; open_mo?: boolean; new_groups?: Record<string, string> };
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "so.create"); if (denied) return denied;
@@ -79,16 +97,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
 
   const orderId = (order as { id: string }).id;
-  const rows = lines.map((l, i) => ({
-    order_id: orderId, line_no: i + 1,
-    sku: l.sku ?? null, product_name: l.product_name ?? l.sku ?? "",
-    qty: Number(l.qty) || 0, unit: l.unit || "ชิ้น", unit_price: Number(l.unit_price) || 0,
-    discount_type: l.discount_type ?? "amount", discount_value: Number(l.discount_value) || 0,
-    due_date: l.due_date || null, mo_id: l.mo_id ?? null, mo_no: l.mo_no ?? null,
-    source: l.source ?? "manual", note: l.note ?? null,
-  }));
+  let groups: Awaited<ReturnType<typeof resolveLineGroups>>;
+  try { groups = await resolveLineGroups(admin, lines, b.new_groups, { id: user?.id ?? null, email: user?.email ?? null }); }
+  catch (e) {
+    await admin.from("so_orders").delete().eq("id", orderId);
+    return NextResponse.json({ error: e instanceof Error ? e.message : "สร้างชุดไม่สำเร็จ" }, { status: 400 });
+  }
+  const rows = lines.map((l, i) => lineRow(orderId, l, i, groups.groupOf(l)));
   const { error: lineErr } = await admin.from("so_order_lines").insert(rows);
-  if (lineErr) return NextResponse.json({ error: lineErr.message }, { status: 400 });
+  if (lineErr) {
+    await admin.from("so_orders").delete().eq("id", orderId);   // ไม่ทิ้งใบเปล่าไว้
+    return NextResponse.json({ error: lineErr.message }, { status: 400 });
+  }
 
   // ผูกใบสั่งผลิตที่ "ดึงมา" เข้ากับใบนี้ทันที (เจ้าของสั่ง: ยืนยันแล้ว = เปลี่ยนสถานะใบสั่งงานด้วย)
   let opened: { created: number; linked: number } | null = null;
@@ -96,7 +116,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   await writeAudit(admin, { action: "create", entityType: "so_order", entityId: orderId,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { order_no: orderNo, lines: rows.length, grand_total: totals.grand_total, opened } });
+    metadata: { order_no: orderNo, lines: rows.length, grand_total: totals.grand_total, opened, new_groups: groups.created } });
 
-  return NextResponse.json({ id: orderId, order_no: orderNo, opened, error: null });
+  return NextResponse.json({ id: orderId, order_no: orderNo, opened, new_groups: groups.created, error: null });
 }

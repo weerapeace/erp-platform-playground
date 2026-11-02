@@ -36,7 +36,22 @@ const SO_STATUS_LABEL: Record<string, string> = {
   shipped: "จัดส่งแล้ว", completed: "เสร็จสิ้น", cancelled: "ยกเลิก",
 };
 
-const CONFIGS: Record<"quotation" | "mo" | "so", ModeConfig> = {
+export type SourceDocMode = "quotation" | "mo" | "so" | "so_quote";
+
+const CONFIGS: Record<SourceDocMode, ModeConfig> = {
+  // ใบเสนอราคา → ใบสั่งขาย (so_orders): แถวมีบรรทัดสินค้ามาด้วย (rows[].lines) ผู้เรียกเอาไปตั้งรายการได้เลย
+  so_quote: {
+    title: "ดึงจากใบเสนอราคา",
+    endpoint: "/api/so-orders/sources?type=quote",
+    eligible: () => true,
+    searchText: (r) => `${r.no ?? ""} ${r.customer_name ?? ""} ${(r.lines as { sku?: string | null; product_name?: string }[] | undefined)?.map((l) => `${l.sku ?? ""} ${l.product_name ?? ""}`).join(" ") ?? ""}`,
+    columns: [
+      { key: "no", label: "เลขที่", render: (r) => <code className="font-mono text-xs text-slate-700">{String(r.no ?? "—")}</code> },
+      { key: "customer_name", label: "ลูกค้า", render: (r) => <span className="text-slate-700">{String(r.customer_name ?? "—")}</span> },
+      { key: "lines", label: "รายการ", align: "right", render: (r) => <span className="tabular-nums text-slate-500">{Array.isArray(r.lines) ? r.lines.length : 0}</span> },
+      { key: "amount", label: "ยอดรวม", align: "right", render: (r) => <span className="font-mono tabular-nums text-slate-700">{baht(r.amount)}</span> },
+    ],
+  },
   quotation: {
     title: "ดึงจากใบเสนอราคา",
     endpoint: "/api/quotations?limit=300",
@@ -85,7 +100,7 @@ export function SourceDocPickerModal({
 }: {
   open: boolean;
   onClose: () => void;
-  mode: "quotation" | "mo" | "so";
+  mode: SourceDocMode;
   onConfirm: (rows: SourceDocRow[]) => void;
 }) {
   const cfg = CONFIGS[mode];

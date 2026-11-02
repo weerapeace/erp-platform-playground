@@ -2,6 +2,7 @@
  * "ดึงรายการเข้าใบสั่งขาย" — /api/so-orders/sources
  *   GET ?type=quote&search=  → ใบเสนอราคา (พร้อมบรรทัด) ที่ยังไม่ถูกแปลง
  *   GET ?type=mo&search=     → ใบสั่งผลิตที่ยังไม่ผูกใบสั่งขาย (เอาไปตั้งเป็นบรรทัดได้เลย)
+ *   GET ?type=mo&mo_nos=a,b  → เฉพาะเลขใบที่ระบุ (ใบที่ผูกใบสั่งขายอื่นแล้วจะไม่ถูกคืน)
  * สิทธิ์: so.view (เป็นการอ่านเพื่อมาตั้งใบสั่งขาย)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -71,6 +72,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .eq("is_active", true).is("so_order_id", null)
     .not("status", "in", "(cancelled,done)")
     .order("created_at", { ascending: false }).limit(200);
+  // เจาะจงเลขใบ (มาจากตัวเลือกใบงานกลาง MoMultiPickerModal) → คืนเฉพาะใบนั้นพร้อมราคา
+  const moNos = (searchParams.get("mo_nos") ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 200);
+  if (moNos.length) q = q.in("mo_no", moNos);
   if (search) q = q.or(`mo_no.ilike.%${search}%,product_sku.ilike.%${search}%,product_name.ilike.%${search}%`);
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });

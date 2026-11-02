@@ -11,8 +11,12 @@
  *   • ยืนยันแล้ว = เปิด/ผูกใบสั่งผลิตให้ (บรรทัดที่ดึงมาจาก MO = ผูก · บรรทัดใหม่ = เปิดใบสั่งผลิตให้เลย)
  *   • ส่งแล้ว    = เลือกได้ว่าจะ "ออกใบขายให้เลย" หรือ "แค่ติ๊กว่าออกใบขายแล้ว"
  *
+ * ชุด (= กลุ่มใบสั่งงาน mo_groups): แต่ละรายการเลือกชุดได้ → เปิดใบสั่งผลิตแล้วใบเข้าชุดให้เอง
+ *   ลงทีละหลายรายการ = OrderBatchEntryModal (components/order-batch-entry)
+ *
  * ของกลาง: MiniTable · DocCalendar · SOLineEditor + SalesTotalsPreview (ตัวเดียวกับใบขาย) ·
- *          CustomerPicker · ERPModal/ConfirmDialog · useViewPref · openLink
+ *          CustomerPicker · DateInput · MoGroupPicker · SourceDocPickerModal · MoMultiPickerModal ·
+ *          OrderBatchEntryModal · ERPModal/ConfirmDialog · useViewPref · openLink
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -23,10 +27,16 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { DocCalendar, type CalDoc } from "@/components/doc-calendar";
 import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
-import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine } from "@/components/sales-line-items";
+import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine, type LineExtraColumn } from "@/components/sales-line-items";
+import { DateInput } from "@/components/date-input";
+import { Icon } from "@/components/icon";
+import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
+import { MoMultiPickerModal, type MoPickRow } from "@/components/mo-picker";
+import { MoGroupPicker, useMoGroups, rememberMoGroup, type MoGroupPick } from "@/components/mo-group-picker";
+import { OrderBatchEntryModal } from "@/components/order-batch-entry";
 import { useViewPref } from "@/lib/use-view-pref";
 import { openLink } from "@/lib/open-param";
-import type { SourceDoc } from "@/app/api/so-orders/sources/route";
+import type { SourceDoc, SourceLine } from "@/app/api/so-orders/sources/route";
 
 type Row = {
   id: string; order_no: string | null; status: string;
@@ -34,7 +44,10 @@ type Row = {
   customer_po_no: string | null; sale_person_name: string | null;
   order_date: string; due_date: string | null; grand_total: number; line_count: number;
   mo_opened_at: string | null; invoice_so_id: string | null; shipped_at: string | null;
+  groups: { id: string; name: string }[];
 };
+/** ข้อมูลประจำบรรทัดที่ SOLineEditor ไม่มีช่อง (ผูกใบสั่งผลิต · ชุด) — key = tempId */
+type LineMeta = { mo_id: string | null; mo_no: string | null; group: MoGroupPick | null };
 type Company = { id: string; company_code: string; name: string; is_default: boolean; vat_registered: boolean };
 
 const ST: Record<string, { label: string; color: string }> = {
@@ -80,8 +93,12 @@ export default function SoOrdersPage() {
   const { view, setView } = useViewPref("so_order_view", ["table", "calendar"] as const, "table");
 
   const [form, setForm] = useState<Form | null>(null);
+  const [meta, setMeta] = useState<Record<string, LineMeta>>({});
   const [saving, setSaving] = useState(false);
   const [srcOpen, setSrcOpen] = useState<null | "quote" | "mo">(null);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [groupFilter, setGroupFilter] = useState("");
+  const { groups: moGroups } = useMoGroups(canView);
   const [askShip, setAskShip] = useState<Row | Form | null>(null);
   const [askCancel, setAskCancel] = useState<Row | Form | null>(null);
 
@@ -106,8 +123,15 @@ export default function SoOrdersPage() {
     const q = search.trim().toLowerCase();
     return rows
       .filter((r) => !status || r.status === status)
+      .filter((r) => !groupFilter || (r.groups ?? []).some((g) => g.id === groupFilter))
       .filter((r) => !q || `${r.order_no ?? ""} ${r.customer_name ?? ""} ${r.customer_po_no ?? ""}`.toLowerCase().includes(q));
-  }, [rows, status, search]);
+  }, [rows, status, search, groupFilter]);
+  // ชุดที่มีใบสั่งขายอยู่ (ไว้ทำปุ่มกรอง)
+  const groupChips = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; n: number }>();
+    for (const r of rows) for (const g of r.groups ?? []) { const x = m.get(g.id) ?? { ...g, n: 0 }; x.n++; m.set(g.id, x); }
+    return [...m.values()].sort((a, b) => b.n - a.n);
+  }, [rows]);
   const counts = useMemo(() => {
     const m = new Map<string, number>();
     for (const r of rows) m.set(r.status, (m.get(r.status) ?? 0) + 1);
@@ -123,12 +147,22 @@ export default function SoOrdersPage() {
   // ---- เปิดใบ ----
   const openNew = () => {
     const def = companies.find((c) => c.is_default) ?? companies[0];
+    setMeta({});
     setForm({ ...emptyForm(), company_code: def?.company_code ?? "", company_id: def?.id ?? null });
   };
   const openRow = async (r: Row) => {
     try {
       const j = await apiFetch(`/api/so-orders/${r.id}`).then((x) => x.json());
       const d = j.data as Record<string, unknown> & { lines: Record<string, unknown>[] };
+      // ข้อมูลประจำบรรทัด (ผูกใบสั่งผลิต · ชุด) — ต้องส่งกลับตอนบันทึก ไม่งั้นการผูกหาย
+      const nameOfGroup = new Map((moGroups ?? []).map((g) => [g.id, g.name]));
+      const m: Record<string, LineMeta> = {};
+      for (const l of d.lines ?? []) {
+        const gid = (l.mo_group_id as string) ?? null;
+        m[String(l.id)] = { mo_id: (l.mo_id as string) ?? null, mo_no: (l.mo_no as string) ?? null,
+          group: gid ? { id: gid, name: nameOfGroup.get(gid) ?? (r.groups ?? []).find((g) => g.id === gid)?.name ?? "ชุด" } : null };
+      }
+      setMeta(m);
       setForm({
         id: String(d.id), company_code: (d.company_code as string) ?? "", company_id: (d.company_id as string) ?? null,
         customer: d.customer_id ? ({ id: String(d.customer_id), code: (d.customer_code as string) ?? null, name: (d.customer_name as string) ?? "" } as CustomerPickerValue) : null,
@@ -141,7 +175,7 @@ export default function SoOrdersPage() {
         mo_opened_at: (d.mo_opened_at as string) ?? null, invoice_so_id: (d.invoice_so_id as string) ?? null,
         order_no: (d.order_no as string) ?? null,
         lines: (d.lines ?? []).map((l) => ({
-          tempId: String(l.id ?? Math.random()).slice(0, 12), sku: (l.sku as string) ?? null,
+          tempId: String(l.id), sku: (l.sku as string) ?? null,
           product_name: (l.product_name as string) ?? "", qty: Number(l.qty) || 0, unit: (l.unit as string) || "ชิ้น",
           unit_price: Number(l.unit_price) || 0,
           discount_type: ((l.discount_type as string) === "percent" ? "percent" : "amount") as "percent" | "amount",
@@ -151,32 +185,57 @@ export default function SoOrdersPage() {
     } catch { toast.error("เปิดใบไม่สำเร็จ"); }
   };
 
-  // ---- ดึงรายการจากใบเสนอราคา / ใบสั่งผลิต ----
-  const applySource = (doc: SourceDoc) => {
+  // ---- ดึงรายการจากใบเสนอราคา / ใบสั่งผลิต (ตัวเลือกกลาง) ----
+  const addSourceLines = (src: SourceLine[], customerName: string | null, label: string) => {
     if (!form) return;
-    const add: EditorLine[] = doc.lines.map((l) => ({
-      tempId: String(Math.random()).slice(2), sku: l.sku, product_name: l.product_name,
+    const add: EditorLine[] = src.map((l) => ({
+      ...emptyLine(), sku: l.sku, product_name: l.product_name,
       qty: l.qty, unit: l.unit, unit_price: l.unit_price, discount_type: "amount", discount_value: 0,
       note: l.mo_no ? `จากใบสั่งผลิต ${l.mo_no}` : undefined,
     }));
     const keep = form.lines.filter((l) => l.product_name.trim() || l.sku);
     setForm({
       ...form,
-      customer: form.customer ?? (doc.kind === "quote" && doc.customer_name ? ({ id: "", name: doc.customer_name } as CustomerPickerValue) : form.customer),
-      due_date: form.due_date || (doc.lines.find((l) => l.due_date)?.due_date ?? ""),
+      customer: form.customer ?? (customerName ? ({ id: "", code: null, name: customerName } as CustomerPickerValue) : form.customer),
+      due_date: form.due_date || (src.find((l) => l.due_date)?.due_date ?? ""),
       lines: [...keep, ...add],
-      // จำ mo_id ไว้ที่บรรทัด (EditorLine ไม่มีช่องนี้ → เก็บใน map ตอนบันทึก)
     });
-    (window as unknown as { __soMoLink?: Record<string, { mo_id: string | null; mo_no: string | null }> }).__soMoLink ??= {};
-    const map = (window as unknown as { __soMoLink: Record<string, { mo_id: string | null; mo_no: string | null }> }).__soMoLink;
-    add.forEach((l, i) => { const s = doc.lines[i]; if (s.mo_id) map[l.tempId] = { mo_id: s.mo_id, mo_no: s.mo_no }; });
+    setMeta((m) => { const n = { ...m }; add.forEach((l, i) => { n[l.tempId] = { mo_id: src[i].mo_id, mo_no: src[i].mo_no, group: null }; }); return n; });
+    toast.success(`ดึง ${add.length} รายการจาก ${label} แล้ว`);
+  };
+  const onQuotesPicked = (rows: SourceDocRow[]) => {
+    const docs = rows as unknown as SourceDoc[];
+    addSourceLines(docs.flatMap((d) => d.lines), docs[0]?.customer_name ?? null, docs.length === 1 ? (docs[0].no ?? "ใบเสนอราคา") : `ใบเสนอราคา ${docs.length} ใบ`);
+  };
+  const onMosPicked = async (picked: MoPickRow[]) => {
     setSrcOpen(null);
-    toast.success(`ดึง ${add.length} รายการจาก ${doc.no ?? (doc.kind === "quote" ? "ใบเสนอราคา" : "ใบสั่งผลิต")} แล้ว`);
+    if (picked.length === 0) return;
+    try {
+      const j = await apiFetch(`/api/so-orders/sources?type=mo&mo_nos=${encodeURIComponent(picked.map((p) => p.mo_no).join(","))}`).then((x) => x.json());
+      const docs = (j.data ?? []) as SourceDoc[];
+      if (docs.length) addSourceLines(docs.flatMap((d) => d.lines), null, `ใบสั่งผลิต ${docs.length} ใบ`);
+      if (picked.length > docs.length) toast.error(`${picked.length - docs.length} ใบผูกใบสั่งขายอื่นแล้ว หรือปิด/ยกเลิกไปแล้ว — ข้าม`);
+    } catch { toast.error("ดึงใบสั่งผลิตไม่สำเร็จ"); }
   };
 
+  // ---- ชุดของบรรทัด ----
+  const setLineGroup = (tempIds: string[], g: MoGroupPick | null) =>
+    setMeta((m) => { const n = { ...m }; for (const id of tempIds) n[id] = { ...(n[id] ?? { mo_id: null, mo_no: null }), group: g }; return n; });
+  const groupColumn: LineExtraColumn[] = [{
+    key: "group", position: "end", className: "w-48", header: "ชุด",
+    cell: (l) => (
+      <div className="space-y-1">
+        <MoGroupPicker size="sm" value={meta[l.tempId]?.group ?? null} onChange={(g) => setLineGroup([l.tempId], g)}
+          placeholder="ไม่จัดชุด" disabled={form?.status === "cancelled"} />
+        {meta[l.tempId]?.mo_no && <div className="text-[10px] text-emerald-700">ผูก {meta[l.tempId]?.mo_no}</div>}
+      </div>
+    ),
+  }];
+
   const payload = (f: Form) => {
-    const map = (window as unknown as { __soMoLink?: Record<string, { mo_id: string | null; mo_no: string | null }> }).__soMoLink ?? {};
+    const newGroups: Record<string, string> = {};
     return {
+      new_groups: newGroups,
       header: {
         company_id: f.company_id, company_code: f.company_code,
         customer_id: f.customer?.id || null, customer_name: f.customer?.name ?? null, customer_code: f.customer?.code ?? null,
@@ -186,12 +245,18 @@ export default function SoOrdersPage() {
         shipping_fee: f.shipping_fee, vat_rate: f.vat_rate, vat_included: f.vat_included, wht_rate: f.wht_rate,
         note: f.note || null,
       },
-      lines: f.lines.filter((l) => l.product_name.trim() || l.sku).map((l) => ({
-        sku: l.sku, product_name: l.product_name, qty: l.qty, unit: l.unit, unit_price: l.unit_price,
-        discount_type: l.discount_type, discount_value: l.discount_value, note: l.note ?? null,
-        mo_id: map[l.tempId]?.mo_id ?? null, mo_no: map[l.tempId]?.mo_no ?? null,
-        source: map[l.tempId]?.mo_id ? "mo" : "manual",
-      })),
+      lines: f.lines.filter((l) => l.product_name.trim() || l.sku).map((l) => {
+        const m = meta[l.tempId];
+        const g = m?.group ?? null;
+        if (g && !g.id) newGroups[`new:${g.name}`] = g.name;
+        return {
+          sku: l.sku, product_name: l.product_name, qty: l.qty, unit: l.unit, unit_price: l.unit_price,
+          discount_type: l.discount_type, discount_value: l.discount_value, note: l.note ?? null,
+          mo_id: m?.mo_id ?? null, mo_no: m?.mo_no ?? null,
+          source: m?.mo_id ? "mo" : "manual",
+          mo_group_id: g?.id ?? null, mo_group_key: g && !g.id ? `new:${g.name}` : null,
+        };
+      }),
     };
   };
 
@@ -205,6 +270,8 @@ export default function SoOrdersPage() {
         ? await apiFetch(`/api/so-orders/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save", ...body }) })
         : await apiFetch("/api/so-orders", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
+      for (const m of Object.values(meta)) if (m.group?.id) rememberMoGroup({ id: m.group.id, name: m.group.name });
+      for (const g of (j.new_groups ?? []) as { id: string; name: string }[]) rememberMoGroup(g);
       const op = j.opened as { created: number; linked: number } | undefined;
       toast.success(form.id ? "บันทึกแล้ว" : `สร้างใบสั่งขาย ${j.order_no ?? ""} แล้ว${op ? ` · เปิดใบสั่งผลิต ${op.created} ใบ · ผูกเดิม ${op.linked} ใบ` : ""}`);
       setForm(null); await load();
@@ -229,6 +296,13 @@ export default function SoOrdersPage() {
     { key: "cust", header: "ลูกค้า", width: "minmax(12rem,1.6fr)", sortValue: (r) => r.customer_name ?? "", sortLabel: "ลูกค้า",
       cell: (r) => <div className="min-w-0"><div className="text-sm text-slate-700 truncate">{r.customer_name ?? "—"}</div>
         {r.sale_person_name && <div className="text-[10px] text-slate-400 truncate">ผู้ขาย {r.sale_person_name}</div>}</div> },
+    { key: "group", header: "ชุด", width: "minmax(9rem,1fr)", sortValue: (r) => r.groups?.[0]?.name ?? "", sortLabel: "ชุด",
+      cell: (r) => (r.groups?.length
+        ? <div className="flex flex-col gap-0.5 min-w-0">{r.groups.map((g) => (
+            <button key={g.id} onClick={(e) => { e.stopPropagation(); setGroupFilter(groupFilter === g.id ? "" : g.id); }} title="กรองตามชุดนี้"
+              className="inline-flex max-w-full items-center gap-1 self-start rounded-full bg-teal-50 px-2 py-0.5 text-[10px] text-teal-800 hover:bg-teal-100">
+              <Icon name="folders" /><span className="truncate">{g.name}</span></button>))}</div>
+        : <span className="text-[10px] text-slate-300">ยังไม่จัดชุด</span>) },
     { key: "order", header: "วันที่สั่ง", width: "7rem", align: "center", sortValue: (r) => r.order_date, sortLabel: "วันที่สั่ง",
       cell: (r) => <span className="text-[12px] text-slate-500">{dayText(r.order_date)}</span> },
     { key: "due", header: "กำหนดส่ง", width: "7rem", align: "center", sortValue: (r) => r.due_date ?? "9999", sortLabel: "กำหนดส่ง",
@@ -267,7 +341,9 @@ export default function SoOrdersPage() {
             <button onClick={() => setView("calendar")} className={`px-3 py-1.5 rounded-md text-sm font-medium ${view === "calendar" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>📅 ปฏิทิน</button>
           </div>
           <button onClick={() => void load()} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⟳</button>
-          {canEdit && <button onClick={openNew} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700">＋ สร้างใบสั่งขาย</button>}
+          {canEdit && <button onClick={() => setBatchOpen(true)} title="ลงออเดอร์ทีละหลายรายการ + จับชุด (วางจาก Excel / เลือกหลายตัว / ทั้งรุ่น / ใบเสนอราคา / ใบสั่งผลิต)"
+            className="h-9 px-4 inline-flex items-center gap-1.5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700"><Icon name="list" /> เพิ่มหลายรายการ</button>}
+          {canEdit && <button onClick={openNew} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">＋ สร้างทีละใบ</button>}
         </div>
       </div>
 
@@ -278,6 +354,12 @@ export default function SoOrdersPage() {
             className={`h-8 px-3 text-sm rounded-lg border ${status === k ? "text-white border-transparent" : "bg-white text-slate-600 border-slate-200"}`}
             style={status === k ? { backgroundColor: v.color } : undefined}>{v.label} ({counts.get(k)})</button>
         ))}
+        {groupChips.length > 0 && <span className="ml-2 text-[11px] text-slate-400">ชุด:</span>}
+        {groupChips.map((g) => (
+          <button key={g.id} onClick={() => setGroupFilter(groupFilter === g.id ? "" : g.id)}
+            className={`h-8 px-3 inline-flex items-center gap-1 text-sm rounded-lg border ${groupFilter === g.id ? "bg-teal-700 text-white border-teal-700" : "bg-white text-slate-600 border-slate-200"}`}>
+            <Icon name="folders" /> {g.name} ({g.n})</button>
+        ))}
       </div>
 
       {loading ? <div className="text-center py-20 text-slate-400 text-sm">กำลังโหลด…</div>
@@ -287,8 +369,8 @@ export default function SoOrdersPage() {
           searchText={(r) => `${r.order_no ?? ""} ${r.customer_name ?? ""} ${r.customer_po_no ?? ""}`}
           searchPlaceholder="ค้นหา เลขที่ / ลูกค้า / PO ลูกค้า"
           searchValue={search} onSearchChange={setSearch}
-          emptyText="ยังไม่มีใบสั่งขาย — กด ＋ สร้างใบสั่งขาย"
-          footnote="กดแถวเพื่อเปิดใบ · ใบที่เปิดใบสั่งผลิตแล้วจะมีป้าย 🏭" />
+          emptyText={groupFilter ? "ไม่มีใบสั่งขายในชุดนี้" : "ยังไม่มีใบสั่งขาย — กด “เพิ่มหลายรายการ” หรือ “สร้างทีละใบ”"}
+          footnote="กดแถวเพื่อเปิดใบ · ใบที่เปิดใบสั่งผลิตแล้วจะมีป้าย 🏭 · กดป้ายชุดเพื่อกรอง" />
       ) : (
         <DocCalendar docs={calDocs} cursor={cursor} onCursor={setCursor} onPick={(id) => { const r = rows.find((x) => x.id === id); if (r) void openRow(r); }}
           hint="วางใบตามกำหนดส่ง · ใบที่ยังไม่ใส่กำหนดส่ง (~) วางตามวันที่สั่ง" />
@@ -328,11 +410,9 @@ export default function SoOrdersPage() {
                 </select>
               </label>
               <label className="block"><span className="text-[11px] text-slate-500">วันที่สั่ง</span>
-                <input type="date" value={form.order_date} onChange={(e) => setForm({ ...form, order_date: e.target.value })}
-                  className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg" /></label>
-              <label className="block"><span className="text-[11px] text-slate-500">กำหนดส่ง</span>
-                <input type="date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-                  title="ใส่แล้วใบสั่งผลิตที่เปิดให้จะใช้กำหนดส่งนี้" className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg" /></label>
+                <div className="mt-0.5"><DateInput value={form.order_date} onChange={(v) => setForm({ ...form, order_date: v })} /></div></label>
+              <label className="block" title="ใส่แล้วใบสั่งผลิตที่เปิดให้จะใช้กำหนดส่งนี้"><span className="text-[11px] text-slate-500">กำหนดส่ง</span>
+                <div className="mt-0.5"><DateInput value={form.due_date} onChange={(v) => setForm({ ...form, due_date: v })} /></div></label>
               <label className="block"><span className="text-[11px] text-slate-500">เลข PO ลูกค้า</span>
                 <input value={form.customer_po_no} onChange={(e) => setForm({ ...form, customer_po_no: e.target.value })} placeholder="ถ้ามี"
                   className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg" /></label>
@@ -352,9 +432,15 @@ export default function SoOrdersPage() {
               <button onClick={() => setSrcOpen("quote")} className="h-8 px-3 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">📄 จากใบเสนอราคา</button>
               <button onClick={() => setSrcOpen("mo")} className="h-8 px-3 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">🏭 จากใบสั่งผลิต</button>
               <span className="text-[10px] text-slate-400">ดึงจากใบสั่งผลิต = ผูกใบนั้นเข้าใบสั่งขายให้เลย (ไม่เปิดใบใหม่ซ้ำ)</span>
+              {form.status !== "cancelled" && form.lines.length > 0 && (
+                <div className="ml-auto flex items-center gap-1.5">
+                  <span className="text-[11px] text-slate-500">ทุกรายการเข้าชุด</span>
+                  <div className="w-56"><MoGroupPicker size="sm" value={null} placeholder="เลือกชุด…" onChange={(g) => setLineGroup(form.lines.map((l) => l.tempId), g)} /></div>
+                </div>
+              )}
             </div>
 
-            <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout="table" readonly={form.status === "cancelled"} />
+            <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout="table" readonly={form.status === "cancelled"} extraColumns={groupColumn} />
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-2">
@@ -383,8 +469,13 @@ export default function SoOrdersPage() {
         )}
       </ERPModal>
 
-      {/* ── ป๊อปเลือกเอกสารต้นทาง ───────────────────────── */}
-      <SourcePicker open={srcOpen} onClose={() => setSrcOpen(null)} onPick={applySource} />
+      {/* ── เลือกเอกสารต้นทาง (ตัวเลือกกลาง) ───────────────── */}
+      {srcOpen === "quote" && <SourceDocPickerModal open mode="so_quote" onClose={() => setSrcOpen(null)} onConfirm={onQuotesPicked} />}
+      {srcOpen === "mo" && <MoMultiPickerModal open scope="open" title="ดึงจากใบสั่งผลิต" onClose={() => setSrcOpen(null)} onConfirm={(p) => void onMosPicked(p)}
+        exclude={Object.values(meta).map((m) => m.mo_no).filter((x): x is string => !!x)} />}
+
+      {/* ── ลงออเดอร์ทีละหลายรายการ + จับชุด (ของกลาง) ───── */}
+      {batchOpen && <OrderBatchEntryModal open onClose={() => setBatchOpen(false)} onSaved={() => void load()} />}
 
       {/* ── ส่งแล้ว: ออกใบขายให้เลยไหม ─────────────────── */}
       <ERPModal open={!!askShip} onClose={() => setAskShip(null)} size="sm" title="🚚 ยืนยันว่าส่งของแล้ว"
@@ -405,50 +496,5 @@ export default function SoOrdersPage() {
         message="ใบจะถูกทำเครื่องหมายว่ายกเลิก (ไม่ลบทิ้ง) · ใบสั่งผลิตที่เปิดไปแล้วจะไม่ถูกยกเลิกให้อัตโนมัติ — ต้องไปจัดการที่ใบสั่งผลิตเอง" />
     </div>
     </PlaygroundShell>
-  );
-}
-
-/** ป๊อปเลือกใบเสนอราคา / ใบสั่งผลิต เพื่อดึงรายการเข้าใบสั่งขาย */
-function SourcePicker({ open, onClose, onPick }: { open: null | "quote" | "mo"; onClose: () => void; onPick: (d: SourceDoc) => void }) {
-  const [q, setQ] = useState("");
-  const [docs, setDocs] = useState<SourceDoc[]>([]);
-  const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setBusy(true); setQ("");
-    void (async () => {
-      try {
-        const j = await apiFetch(`/api/so-orders/sources?type=${open}`).then((r) => r.json());
-        setDocs((j.data ?? []) as SourceDoc[]);
-      } catch { setDocs([]); }
-      finally { setBusy(false); }
-    })();
-  }, [open]);
-
-  const list = docs.filter((d) => !q.trim() || `${d.no ?? ""} ${d.title} ${d.customer_name ?? ""}`.toLowerCase().includes(q.trim().toLowerCase()));
-
-  return (
-    <ERPModal open={!!open} onClose={onClose} size="lg"
-      title={open === "quote" ? "📄 ดึงรายการจากใบเสนอราคา" : "🏭 ดึงรายการจากใบสั่งผลิต"}
-      footer={<button onClick={onClose} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>}>
-      <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหา เลขที่ / ลูกค้า / สินค้า…"
-        className="w-full h-9 px-2 mb-2 text-sm border border-slate-200 rounded-lg" />
-      {busy ? <div className="py-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>
-        : list.length === 0 ? <div className="py-10 text-center text-slate-300 text-sm">{open === "mo" ? "ไม่มีใบสั่งผลิตที่ยังไม่ผูกใบสั่งขาย" : "ไม่พบใบเสนอราคา"}</div>
-        : (
-        <div className="max-h-[55vh] overflow-y-auto divide-y divide-slate-100">
-          {list.map((d) => (
-            <button key={d.id} onClick={() => onPick(d)} className="w-full text-left px-2 py-2 hover:bg-slate-50 flex items-center gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium text-slate-700 truncate">{d.title}</div>
-                <div className="text-[11px] text-slate-400">{d.date ?? "—"} · {d.lines.length} รายการ{d.customer_name ? ` · ${d.customer_name}` : ""}</div>
-              </div>
-              <span className="text-sm tabular-nums text-slate-600 shrink-0">{money(d.amount)}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </ERPModal>
   );
 }
