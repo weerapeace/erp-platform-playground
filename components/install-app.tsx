@@ -4,6 +4,9 @@
  * ติดตั้งแอป (ของกลาง) — ป๊อป "ติดตั้งแอป" ที่เปิดจากเมนู ⋯ ของหน้าไหนก็ได้
  *
  *   <InstallAppModal open onClose />     ป๊อป: ปุ่ม "ติดตั้งบนเครื่องนี้" + แผง QR/ลิงก์ติดตั้งบนเครื่องอื่น (DeviceQrPanel ตัวเดียวกับเมนูผู้ใช้)
+ *                                        หน้าที่ไม่อยู่ในแอปไหน = ให้เลือกจากทุกแอปที่มีสิทธิ์เข้า
+ *   <InstallAppMenuItem onClick />       แถว "ติดตั้งแอป" ในเมนูผู้ใช้ (AccountMenu + เมนูโปรไฟล์ข้างจอ) — กดแล้วเปิด InstallAppModal
+ *                                        (ป๊อปต้องวางนอกกล่องเมนู เพราะเมนูปิดแล้วเนื้อในหายไป)
  *   <InstallHereButton app goPath />     ปุ่มใหญ่ติดตั้งแอปที่เลือกบนเครื่องที่ใช้อยู่
  *   <InstallHereBanner ... />            การ์ดลอยในหน้าแอปเดี่ยว /app/<key> — เปิดมาจากปุ่มด้านบน (?install=1) ให้กดติดตั้งต่อ 1 ครั้ง
  *
@@ -105,11 +108,23 @@ export function InstallAppModal({ open, onClose, qr }: { open: boolean; onClose:
             ))}
           </div>
         </div>
-        <DeviceQrPanel layout={layout} {...qr} className="w-full" defaultTab="install"
+        <DeviceQrPanel layout={layout} {...qr} className="w-full" defaultTab="install" fallbackAllApps
           renderInstallHere={(app, goPath) => <InstallHereButton app={app} goPath={goPath} />} />
         <p className="text-center text-[11px] leading-snug text-slate-400">ติดตั้งบนเครื่องอื่น: สแกน QR หรือส่งลิงก์ไปเปิด (ต้องล็อกอินบนเครื่องนั้นครั้งแรก)</p>
       </div>
     </ERPModal>
+  );
+}
+
+/** แถว "ติดตั้งแอป" ในเมนูผู้ใช้ — ติดตั้งแล้ว (เปิดในโหมดแอป) ยังโชว์ เพราะใช้ติดตั้งแอปอื่น/เครื่องอื่นต่อได้ */
+export function InstallAppMenuItem({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      className="flex w-full items-center gap-1.5 border-t border-slate-100 px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50">
+      <Icon name="download" />
+      <span className="flex-1">ติดตั้งแอปบนเครื่อง</span>
+      <span className="text-[10px] text-slate-400">มือถือ · แท็บเล็ต · คอม</span>
+    </button>
   );
 }
 

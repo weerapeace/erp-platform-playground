@@ -21,6 +21,7 @@
  */
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { QrCode } from "@/components/qr-code";
+import { useAuth } from "@/components/auth";
 import { cachedGetJson } from "@/lib/shell-cache";
 
 export type DeviceLayout = "desktop" | "tablet" | "phone";
@@ -117,14 +118,14 @@ export function DeviceModeToggle({ mode, viewport, onChange, compact = false, cl
 }
 
 /** iconSrc = รูปไอคอนที่เครื่องจะได้จริงตอนติดตั้ง (กติกาเดียวกับ /api/app-manifest + layout ของ /app/<key>) · customIcon = แอปตั้งไอคอนเองแล้ว */
-export type AppLite = { key: string; label: string; icon: string | null; iconSrc: string; customIcon: boolean };
+export type AppLite = { key: string; label: string; icon: string | null; iconSrc: string; customIcon: boolean; permissionKey?: string | null };
 const SAFE_ICON_KEY = /^[a-zA-Z0-9._/-]+$/;
 /** ไอคอนแอปที่ใช้ติดตั้ง: รูปที่อัปโหลด (R2) ถ้ามี ไม่งั้นไอคอนรวมของระบบ */
 export function appIconSrc(iconUrl: string | null | undefined): string {
   return iconUrl && SAFE_ICON_KEY.test(iconUrl) ? `/api/r2-image?key=${encodeURIComponent(iconUrl)}` : "/icon-192.png";
 }
-const toAppLite = (a: { key: string; label: string; icon?: string | null; icon_url?: string | null }): AppLite =>
-  ({ key: a.key, label: a.label, icon: a.icon ?? null, iconSrc: appIconSrc(a.icon_url), customIcon: !!(a.icon_url && SAFE_ICON_KEY.test(a.icon_url)) });
+const toAppLite = (a: { key: string; label: string; icon?: string | null; icon_url?: string | null; permission_key?: string | null }): AppLite =>
+  ({ key: a.key, label: a.label, icon: a.icon ?? null, iconSrc: appIconSrc(a.icon_url), customIcon: !!(a.icon_url && SAFE_ICON_KEY.test(a.icon_url)), permissionKey: a.permission_key ?? null });
 
 /**
  * แอปเดี่ยว (PWA) ที่มีหน้าปัจจุบันอยู่ในเมนู — จาก /api/menu + /api/menu/apps (แคชร่วมกับเชลล์ ไม่ยิงซ้ำ)
@@ -142,7 +143,7 @@ export function useAppsForCurrentPage(): { apps: AppLite[]; preferred: string | 
     try { const m = window.top && window.top !== window ? window.top.location.pathname.match(/^\/app\/([^/?#]+)/) : null; if (m) setPreferred(m[1]); } catch { /* cross-origin */ }
     Promise.all([
       cachedGetJson<{ data?: { href: string; app_keys?: string[] | null; is_active?: boolean }[] }>("/api/menu"),
-      cachedGetJson<{ data?: { key: string; label: string; icon?: string | null; icon_url?: string | null; is_active?: boolean }[] }>("/api/menu/apps"),
+      cachedGetJson<{ data?: { key: string; label: string; icon?: string | null; icon_url?: string | null; permission_key?: string | null; is_active?: boolean }[] }>("/api/menu/apps"),
     ]).then(([mj, aj]) => {
       if (!alive) return;
       const base = (h: string) => h.split("?")[0];
@@ -201,11 +202,13 @@ type DeviceQrExtra = {
   defaultTab?: "open" | "install";   // แท็บที่เปิดมาก่อน (ไม่ส่ง = คอมเปิด "ติดตั้ง" · เครื่องอื่นเปิด "เปิดหน้านี้")
   /** ปุ่ม "ติดตั้งบนเครื่องนี้" ของแอปที่เลือก — วางใต้ชิปเลือกแอปในแท็บติดตั้ง (แทนปุ่มเปิดหน้าติดตั้งบนคอม) */
   renderInstallHere?: (app: AppLite, goPath?: string) => ReactNode;
+  /** หน้านี้ไม่อยู่ในแอปไหน → ให้เลือกจากทุกแอปที่ผู้ใช้มีสิทธิ์เข้า (ป๊อปติดตั้งจากเมนูผู้ใช้ เปิดได้ทุกหน้า) */
+  fallbackAllApps?: boolean;
 };
 
 /** แผง QR + ลิงก์ (ของกลาง) — แท็บ 1: สแกนเปิดหน้านี้บนเครื่องจริง · แท็บ 2: สแกนเพื่อติดตั้งเป็นแอป (PWA) บนเครื่อง
  *  layout = "desktop" (คอม): ไม่มี QR (คอมไม่สแกน) → ปุ่มเปิดหน้าติดตั้งบนคอมเครื่องนี้ + คัดลอกลิงก์ไปเปิดบนคอมเครื่องอื่น · เปิดมาที่แท็บติดตั้งก่อน */
-export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, appKey: appKeyProp, appLabel, installGo, defaultTab, renderInstallHere }: { layout: DeviceLayout; className?: string } & DeviceQrOpts & DeviceQrExtra) {
+export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, appKey: appKeyProp, appLabel, installGo, defaultTab, renderInstallHere, fallbackAllApps = false }: { layout: DeviceLayout; className?: string } & DeviceQrOpts & DeviceQrExtra) {
   const firstTab = defaultTab ?? (layout === "desktop" ? "install" : "open");
   const [tab, setTab] = useState<"open" | "install">(firstTab);
   useEffect(() => { setTab(firstTab); }, [firstTab]);
@@ -213,12 +216,16 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
   const [openUrl, setOpenUrl] = useState("");
   const [copied, setCopied] = useState(false);
   const { apps: foundApps, preferred: foundPreferred, all: allApps } = useAppsForCurrentPage();
+  const { can } = useAuth();
+  // หน้านี้ไม่อยู่ในแอปไหน + เปิดจากที่ที่ให้เลือกได้ทุกแอป → โชว์ทุกแอปที่มีสิทธิ์เข้า (แอปที่ล็อกไว้แล้วไม่มีสิทธิ์ = ไม่โชว์ กันติดตั้งแล้วเจอหน้า 🔒)
+  const pickAny = fallbackAllApps && !appKeyProp && foundApps.length === 0;
   // แอปที่ส่งมาบังคับ (จากเชลล์) ขึ้นก่อน แล้วค่อยแอปที่หาเจอจากเมนู · ไอคอนหาจากรายชื่อแอปทั้งหมด
   const apps = useMemo<AppLite[]>(() => {
+    if (pickAny) return allApps.filter((a) => !a.permissionKey || can(a.permissionKey as Parameters<typeof can>[0]));
     if (!appKeyProp || foundApps.some((a) => a.key === appKeyProp)) return foundApps;
     const forced = allApps.find((a) => a.key === appKeyProp) ?? { key: appKeyProp, label: appLabel ?? appKeyProp, icon: null, iconSrc: appIconSrc(null), customIcon: false };
     return [forced, ...foundApps];
-  }, [foundApps, allApps, appKeyProp, appLabel]);
+  }, [foundApps, allApps, appKeyProp, appLabel, pickAny, can]);
   const preferred = appKeyProp ?? foundPreferred;
   const [appKey, setAppKey] = useState<string | null>(null);
   useEffect(() => { setOpenUrl(openUrlProp ?? deviceShareUrl(layout)); }, [layout, openUrlProp]);
@@ -256,6 +263,7 @@ export function DeviceQrPanel({ layout, className = "", openUrl: openUrlProp, ap
         </div>
       ) : (
         <>
+          {pickAny && <div className="text-[11px] leading-snug text-slate-500">หน้านี้ไม่ได้อยู่ในแอปไหน — เลือกแอปที่จะติดตั้ง</div>}
           {apps.length > 1 && (
             <div className="flex flex-wrap justify-center gap-1">
               {apps.map((a) => (

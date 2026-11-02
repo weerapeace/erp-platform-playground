@@ -18,6 +18,7 @@ import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INST
 import { WorkPopupFloatToggle } from "@/components/work-popup/float";
 import { BrowserPushToggle } from "@/components/web-push";
 import { PageViewOptionsSection } from "@/components/page-chrome";
+import { InstallAppMenuItem, InstallAppModal } from "@/components/install-app";
 
 /** มุมมองอุปกรณ์ (ส่งมาจากเชลล์แอปเดี่ยว) — เลือกดูแบบแท็บเล็ต/มือถือบนจอนี้ + QR เปิด/ติดตั้งบนเครื่องจริง */
 export type AccountMenuDevice = { mode: DeviceMode; viewport: DeviceLayout; onChange: (m: DeviceMode) => void; qr?: DeviceQrOpts };
@@ -35,6 +36,7 @@ export function AccountMenu({ onDark = false, device, compact = false }: { onDar
   const [qrLayout, setQrLayout] = useState<DeviceLayout>("tablet");  // QR สำหรับเครื่องแบบไหน
   const pwa = usePwaInstall();                                        // ติดตั้งแอปนี้บนเครื่องที่กำลังใช้อยู่ (แท็บเล็ต/มือถือไม่มีปุ่มที่หัว)
   const [installHint, setInstallHint] = useState<string | null>(null);
+  const [installOpen, setInstallOpen] = useState(false);              // ป๊อปติดตั้งแอป (ของกลาง) — หน้าปกติที่ไม่มีส่วน 📟
   if (!user) return null;
 
   const pick = (c: string | null) => { setTheme(c); setCur(getTheme()); };
@@ -92,6 +94,8 @@ export function AccountMenu({ onDark = false, device, compact = false }: { onDar
             <WorkPopupFloatToggle />
             {/* ป๊อปเตือนงานเด้งเป็นแจ้งเตือนของเบราว์เซอร์ (มุมจอ) — ตั้งรายเครื่อง */}
             <BrowserPushToggle />
+            {/* ติดตั้งแอปบนเครื่อง — เชลล์แอปเดี่ยวมีปุ่มในส่วน 📟 ด้านล่างอยู่แล้ว */}
+            {!device && <InstallAppMenuItem onClick={() => { setOpen(false); setInstallOpen(true); }} />}
 
             {/* มุมมองอุปกรณ์ — ดูแอปนี้แบบแท็บเล็ต/มือถือบนจอคอม (กรอบจำลอง) + QR สแกนเปิดบนเครื่องจริง */}
             {device && (
@@ -142,6 +146,8 @@ export function AccountMenu({ onDark = false, device, compact = false }: { onDar
           </div>
         </ERPModal>
       )}
+
+      {!device && <InstallAppModal open={installOpen} onClose={() => setInstallOpen(false)} />}
 
       {/* ความปลอดภัย — popup (ไม่ออกจากแอป) */}
       <ERPModal open={securityOpen} onClose={() => setSecurityOpen(false)} title="🔐 ความปลอดภัย — อุปกรณ์ที่เข้าสู่ระบบ" size="lg" storageKey="security-devices">

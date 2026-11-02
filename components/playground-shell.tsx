@@ -22,6 +22,7 @@ import { PageChromeBar, PageViewOptionsSection, useChromeHost, useIsDesktopXl, u
 import { AccountMenu } from "@/components/account-menu";
 import { WorkPopupFloatToggle } from "@/components/work-popup/float";
 import { BrowserPushToggle } from "@/components/web-push";
+import { InstallAppMenuItem, InstallAppModal } from "@/components/install-app";
 import { Logo, BRAND } from "@/components/brand";
 import { KeyboardShortcutsModal } from "@/components/keyboard-shortcuts";
 import { DevicePreviewButton } from "@/components/device-preview";
@@ -904,6 +905,7 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
 function UserSwitcher({ collapsed }: { collapsed?: boolean }) {
   const { user, logout, ready } = useAuth();
   const [open, setOpen] = useState(false);
+  const [installOpen, setInstallOpen] = useState(false);   // ป๊อปติดตั้งแอป (ของกลาง components/install-app)
   const router = useRouter();
   const t = useT();
 
@@ -961,6 +963,7 @@ function UserSwitcher({ collapsed }: { collapsed?: boolean }) {
           {/* ป๊อปเตือนงาน: เปิด/ปิด + มุมจอ · เด้งที่เบราว์เซอร์นี้ (ตัวเดียวกับ AccountMenu — ปิดถาวรทำได้ที่นี่ที่เดียว) */}
           <WorkPopupFloatToggle />
           <BrowserPushToggle />
+          <InstallAppMenuItem onClick={() => { setOpen(false); setInstallOpen(true); }} />
           <div className="px-3 py-1.5 flex items-center justify-between gap-2 border-t border-slate-100">
             <span className="text-xs text-slate-500">🌐 ภาษา / Language</span>
             <LangToggle />
@@ -969,6 +972,7 @@ function UserSwitcher({ collapsed }: { collapsed?: boolean }) {
             className="w-full text-left px-3 py-2 text-xs text-red-600 hover:bg-red-50">{t("ออกจากระบบ", "Log out")}</button>
         </div>
       )}
+      <InstallAppModal open={installOpen} onClose={() => setInstallOpen(false)} />
     </div>
   );
 }
