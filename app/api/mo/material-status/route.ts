@@ -9,11 +9,14 @@
  *   links[] มี po_id/po_line_id/สถานะรับ → การ์ดกดดู PO + รับของได้ (ReceiveLineModal)
  *   stock = ยอดคลัง WH-RAW + นับล่าสุด + ที่แบ่งให้ใบงานอื่นแล้ว → ป้าย "นับแล้ว" + ป๊อปนับสต๊อก (/api/inventory/quick-count)
  *   dispatch = ถามบอร์ดจ่ายงาน (lib/mo-dispatch) — จ่ายงานแล้ว → ทุกบรรทัด "มีของแล้ว · จ่ายงานแล้ว"
+ * GET ?mo_nos=A,B,C → หลายใบในคำขอเดียว (มุมมอง "รวมตามรุ่น" หน้าขอซื้อ) → data = MoMaterialStatusResult[] เรียงตามที่ขอ
+ *   stock.reserved_this = ที่แบ่งให้ "ใบในชุดนี้" แล้ว · reserved_other = ใบอื่นนอกชุด
  * ของกลาง: guardApi(products.view) + supabaseAdmin + lib/mo-material-status (กติกาสถานะเดียวกับ /api/mo/material-progress)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { fetchAllPages } from "@/lib/fetch-all";
 import { loadMoPurchaseLinks, computeMatStatus, linkKey, r4, type MatStatus, type MatPurchaseLink } from "@/lib/mo-material-status";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadMoDispatch, type MoDispatchInfo } from "@/lib/mo-dispatch";
@@ -51,8 +54,8 @@ export type MoMaterialStatusResult = {
 
 type Row = Record<string, unknown>;
 
-/** สต๊อก WH-RAW ต่อรหัสวัตถุดิบ: ยอดคงเหลือ · การนับล่าสุด (นับด่วนจากการ์ด / หน้านับสต๊อก) · ที่แบ่งให้ใบงานแล้ว */
-async function loadRawStock(admin: SupabaseClient, moNo: string, skuIdByCode: Map<string, string>): Promise<Map<string, MatStock>> {
+/** สต๊อก WH-RAW ต่อรหัสวัตถุดิบ: ยอดคงเหลือ · การนับล่าสุด (นับด่วนจากการ์ด / หน้านับสต๊อก) · ที่แบ่งให้ใบงานแล้ว (thisMos = ใบในชุดที่ถาม) */
+async function loadRawStock(admin: SupabaseClient, thisMos: Set<string>, skuIdByCode: Map<string, string>): Promise<Map<string, MatStock>> {
   const out = new Map<string, MatStock>();
   if (skuIdByCode.size === 0) return out;
   const { data: wh } = await admin.from("erp_playground_warehouses").select("id, code").eq("code", "WH-RAW").maybeSingle();
@@ -91,7 +94,7 @@ async function loadRawStock(admin: SupabaseClient, moNo: string, skuIdByCode: Ma
   for (const a of allocRows) {
     if (!liveMo.has(String(a.mo_no))) continue;
     const c = String(a.component_sku), q = Number(a.qty) || 0;
-    const tgt = String(a.mo_no) === moNo ? resThis : resOther;
+    const tgt = thisMos.has(String(a.mo_no)) ? resThis : resOther;
     tgt.set(c, r4((tgt.get(c) ?? 0) + q));
   }
   for (const [code, pid] of skuIdByCode) {
@@ -106,29 +109,42 @@ async function loadRawStock(admin: SupabaseClient, moNo: string, skuIdByCode: Ma
   return out;
 }
 
+const MAX_MOS = 40;   // รุ่นที่ใบเยอะสุดตอนทำ = 14 ใบ
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
-  const moNo = (new URL(request.url).searchParams.get("mo_no") ?? "").trim();
-  if (!moNo) return NextResponse.json({ data: null, error: "ต้องระบุเลขใบสั่งผลิต" }, { status: 400 });
+  const sp = new URL(request.url).searchParams;
+  const multi = sp.get("mo_nos");
+  const moNos = multi != null
+    ? [...new Set(multi.split(",").map((s) => s.trim()).filter(Boolean))].slice(0, MAX_MOS)
+    : [(sp.get("mo_no") ?? "").trim()].filter(Boolean);
+  if (moNos.length === 0) return NextResponse.json({ data: null, error: "ต้องระบุเลขใบสั่งผลิต" }, { status: 400 });
   const admin = supabaseAdmin();
+  const res = await loadStatuses(admin, moNos);
+  if (res.error) return NextResponse.json({ data: null, error: res.error }, { status: 500 });
+  if (multi != null) return NextResponse.json({ data: res.results, error: null });
+  if (res.results.length === 0) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
+  return NextResponse.json({ data: res.results[0], error: null });
+}
 
+/** สถานะวัตถุดิบทั้ง BOM ของหลายใบในรอบเดียว (ใบที่ไม่พบ/ปิดไปแล้ว ไม่อยู่ในผลลัพธ์) */
+async function loadStatuses(admin: SupabaseClient, moNos: string[]): Promise<{ results: MoMaterialStatusResult[]; error: string | null }> {
   // ใบขอซื้อ → PO (เลขใบ/สถานะ/วันของถึง) + บรรทัด PO (รับแล้วเท่าไร) — ของกลาง lib/mo-material-status
-  const [{ data: mo }, { data: sums, error: sErr }, linksByKey] = await Promise.all([
-    admin.from("manufacturing_orders").select("mo_no, qty, order_date, created_at, skipped_stages").eq("mo_no", moNo).eq("is_active", true).maybeSingle(),
-    admin.from("mo_material_summary")
-      .select("id, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence")
-      .eq("mo_no", moNo).eq("is_active", true)
-      .order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true }),
-    loadMoPurchaseLinks(admin, [moNo]),
+  const [{ data: moRows, error: mErr }, sums, linksByKey] = await Promise.all([
+    admin.from("manufacturing_orders").select("mo_no, qty, order_date, created_at, skipped_stages").in("mo_no", moNos).eq("is_active", true),
+    fetchAllPages<Row>((from, to) => admin.from("mo_material_summary")
+      .select("id, mo_no, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence")
+      .in("mo_no", moNos).eq("is_active", true)
+      .order("mo_no", { ascending: true }).order("sequence", { ascending: true, nullsFirst: false }).order("id", { ascending: true }).range(from, to)),
+    loadMoPurchaseLinks(admin, moNos),
   ]);
-  if (sErr) return NextResponse.json({ data: null, error: "โหลดวัตถุดิบของใบสั่งผลิตไม่สำเร็จ" }, { status: 500 });
-  if (!mo) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
-  const moQty = Number((mo as Row).qty) || 0;
+  if (mErr) return { results: [], error: "โหลดวัตถุดิบของใบสั่งผลิตไม่สำเร็จ" };
+  const mos = (moRows ?? []) as Row[];
   // ถามบอร์ดจ่ายงาน: จ่ายงานแล้ว → ทุกบรรทัด "มีของแล้ว · จ่ายงานแล้ว"
-  const dispatch = (await loadMoDispatch(admin, [mo as Row])).get(moNo) ?? null;
+  const dispatchByMo = await loadMoDispatch(admin, mos);
 
   // รูปวัตถุดิบ (cover SKU → fallback Parent)
-  const codes = [...new Set(((sums ?? []) as Row[]).map((s) => String(s.component_sku ?? "").trim()).filter(Boolean))];
+  const codes = [...new Set(sums.map((s) => String(s.component_sku ?? "").trim()).filter(Boolean))];
   const imgByCode = new Map<string, string>();
   const skuIdByCode = new Map<string, string>();
   if (codes.length) {
@@ -141,21 +157,29 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       if (key) imgByCode.set(String(sk.code), `/api/r2-image?key=${encodeURIComponent(key)}`);
     }
   }
-  const stockByCode = await loadRawStock(admin, moNo, skuIdByCode);
+  const stockByCode = await loadRawStock(admin, new Set(mos.map((m) => String(m.mo_no))), skuIdByCode);
 
-  const items: MoMaterialStatus[] = ((sums ?? []) as Row[]).map((s) => {
-    const code = (s.component_sku as string) ?? null;
-    const links = code ? linksByKey.get(linkKey(moNo, code)) ?? [] : [];
-    return {
-      summary_id: String(s.id), code, name: (s.component_name as string) ?? null, image: code ? imgByCode.get(code) ?? null : null,
-      type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null,
-      ...computeMatStatus(s, moQty, links, { dispatched: !!dispatch }), links,
-      stock: code ? stockByCode.get(code) ?? null : null,
-    };
-  });
-
-  const moRow = mo as Row;
-  const moDate = (moRow.order_date as string) ?? (moRow.created_at ? new Date(new Date(String(moRow.created_at)).getTime() + 7 * 3600e3).toISOString().slice(0, 10) : null);
-  const data: MoMaterialStatusResult = { mo_no: moNo, mo_qty: moQty, mo_date: moDate, items, dispatch };
-  return NextResponse.json({ data, error: null });
+  const sumsByMo = new Map<string, Row[]>();
+  for (const s of sums) sumsByMo.set(String(s.mo_no), [...(sumsByMo.get(String(s.mo_no)) ?? []), s]);
+  const moByNo = new Map(mos.map((m) => [String(m.mo_no), m]));
+  const results: MoMaterialStatusResult[] = [];
+  for (const moNo of moNos) {
+    const moRow = moByNo.get(moNo);
+    if (!moRow) continue;
+    const moQty = Number(moRow.qty) || 0;
+    const dispatch = dispatchByMo.get(moNo) ?? null;
+    const items: MoMaterialStatus[] = (sumsByMo.get(moNo) ?? []).map((s) => {
+      const code = (s.component_sku as string) ?? null;
+      const links = code ? linksByKey.get(linkKey(moNo, code)) ?? [] : [];
+      return {
+        summary_id: String(s.id), code, name: (s.component_name as string) ?? null, image: code ? imgByCode.get(code) ?? null : null,
+        type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null,
+        ...computeMatStatus(s, moQty, links, { dispatched: !!dispatch }), links,
+        stock: code ? stockByCode.get(code) ?? null : null,
+      };
+    });
+    const moDate = (moRow.order_date as string) ?? (moRow.created_at ? new Date(new Date(String(moRow.created_at)).getTime() + 7 * 3600e3).toISOString().slice(0, 10) : null);
+    results.push({ mo_no: moNo, mo_qty: moQty, mo_date: moDate, items, dispatch });
+  }
+  return { results, error: null };
 }

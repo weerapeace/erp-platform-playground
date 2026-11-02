@@ -49,7 +49,7 @@ export function usePrintNotes(report: PrintNoteReport): PrintNotesState {
         if (!on) return;
         if (!ok) { setStatus("error"); setError(j.error ?? "โหลดหมายเหตุไม่สำเร็จ"); return; }
         // ข้อความที่พิมพ์ไปก่อนโหลดเสร็จ ชนะข้อความเดิม
-        const m = new Map((j.data ?? []).map((n) => [`${n.row_key}|${n.col_key}`, n.body] as const));
+        const m = new Map<string, string>((j.data ?? []).map((n) => [`${n.row_key}|${n.col_key}`, n.body] as const));
         for (const [k, v] of live.current) m.set(k, v);
         live.current = m;
         setStatus(j.unavailable ? "unavailable" : "ready");

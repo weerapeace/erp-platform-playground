@@ -11,6 +11,9 @@
  *         ถ้าปิดด้วยปุ่มในจอเอง จะถอยประวัติคืนให้ 1 ก้าว (ประวัติไม่บวม กด back ต่อไม่ต้องกด 2 ที)
  *
  * ใช้:  useBackClose(cartOpen, () => setCartOpen(false));
+ *
+ * จอซ้อนหลายชั้น (เช่น หน้าขอซื้อ: รวมตามรุ่น → เปิดทีละใบ) — back 1 ครั้ง = ปิดแค่ชั้นบนสุด
+ *   แต่ละชั้นจำ id ก้าวของตัวเอง · ถ้า back แล้วกลับมาเจอก้าวของเรา = ชั้นที่ทับเราถูกปิด ไม่ใช่เรา → ไม่ปิด
  */
 import { useEffect, useRef } from "react";
 
@@ -25,12 +28,16 @@ export function useBackClose(open: boolean, onClose: () => void, key = "view"): 
    */
   const unmounted = useRef(false);
   useEffect(() => () => { unmounted.current = true; }, []);
+  const stepId = useRef(`${key}:${Math.random().toString(36).slice(2)}`);
 
   useEffect(() => {
     if (!open || typeof window === "undefined") return;
     let mine = true;                                  // ก้าวที่เราเพิ่มยังอยู่บนสุดไหม
-    window.history.pushState({ __backClose: key }, "");
-    const onPop = () => { mine = false; closeRef.current(); };
+    window.history.pushState({ __backClose: key, __id: stepId.current }, "");
+    const onPop = () => {
+      if ((window.history.state as { __id?: string } | null)?.__id === stepId.current) return;   // ชั้นบนเราถูกปิด — เรายังอยู่
+      mine = false; closeRef.current();
+    };
     window.addEventListener("popstate", onPop);
     return () => {
       window.removeEventListener("popstate", onPop);

@@ -36,6 +36,7 @@ import type { MoListItem } from "@/app/api/mo/route";
 import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progress/route";
 import { MO_SEGS, moProgCounts as progCounts, MoProgressBar } from "@/components/mo-material-progress";
 import { useUserPref } from "@/lib/use-user-pref";
+import { MoParentGroup, type GroupCartLine } from "./mo-parent-group";
 
 // แปลงคำสกุลเงินที่แสดง: ภายในเก็บ "YUAN" (คงข้อมูลเดิม) แต่โชว์ให้ผู้ใช้เป็น "RMB"
 const curLabel = (c: string) => (c === "YUAN" ? "RMB" : c);
@@ -58,15 +59,18 @@ type MoSort = "old" | "new" | "few" | "pct" | "many" | "sku";
 type MoGroup = "none" | "brand" | "parent";
 const MO_SORTS: [MoSort, string][] = [["old", "เลขใบ เก่า → ใหม่"], ["new", "เลขใบ ใหม่ → เก่า"], ["few", "ใกล้ครบก่อน (ต้องซื้อน้อยสุด)"], ["pct", "คืบหน้ามากสุดก่อน (%)"], ["many", "ต้องซื้อมากสุดก่อน"], ["sku", "รหัสรุ่น A → Z"]];
 const MO_GROUPS: [MoGroup, string][] = [["none", "ไม่จัดกลุ่ม"], ["brand", "แบรนด์"], ["parent", "รุ่น (ตัวแม่)"]];
-type MoListPrefs = { sort: MoSort; group: MoGroup; brand: string; folded: { brand: string[]; parent: string[] } };
+// มุมมอง: การ์ดทีละใบ (เดิม) / รวมตามรุ่น (การ์ดละ 1 Parent SKU → กดเข้าไปรวมวัตถุดิบทุกใบ app/purchasing/mo-parent-group)
+type MoView = "mo" | "parent";
+type MoListPrefs = { view: MoView; sort: MoSort; group: MoGroup; brand: string; folded: { brand: string[]; parent: string[] } };
 const MO_PREFS_KEY = "pr_mo_list";
-const MO_PREFS_DEFAULT: MoListPrefs = { sort: "old", group: "none", brand: "", folded: { brand: [], parent: [] } };
+const MO_PREFS_DEFAULT: MoListPrefs = { view: "mo", sort: "old", group: "none", brand: "", folded: { brand: [], parent: [] } };
 const parseMoPrefs = (v: unknown): MoListPrefs | null => {
   if (!v || typeof v !== "object") return null;
   const o = v as Record<string, unknown>;
   const f = (o.folded ?? {}) as Record<string, unknown>;
   const strs = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : []);
   return {
+    view: o.view === "parent" ? "parent" : "mo",
     sort: MO_SORTS.some(([k]) => k === o.sort) ? (o.sort as MoSort) : "old",
     group: MO_GROUPS.some(([k]) => k === o.group) ? (o.group as MoGroup) : "none",
     brand: typeof o.brand === "string" ? o.brand : "",
@@ -78,6 +82,13 @@ const parseMoPrefs = (v: unknown): MoListPrefs | null => {
 const MO_NEAR_MAX = 2;
 // แถบความคืบหน้าวัตถุดิบ (MO_SEGS / progCounts / MoProgressBar) = ของกลาง components/mo-material-progress
 const progPct = (p: MoProgress | undefined) => (p && p.total > 0 ? Math.round(((p.total - p.buy) / p.total) * 100) : 0);
+// วัตถุดิบรวมหลายใบ → บรรทัดตะกร้า (วัตถุดิบละ 1 บรรทัด ผูกเลขใบครบ m2m) — ใช้ทั้ง "ซื้อรวมทั้งกลุ่ม" และ "รวมตามรุ่น"
+const moCartLines = (title: string, rows: GroupCartLine[]): Line[] => rows.map((r) => ({
+  label: r.code ? `[${r.code}] ${r.name ?? ""}`.trim() : (r.name ?? "วัตถุดิบ"), qty: r.qty, uom: r.uom, seller: "—", price: 0, currency: "THB",
+  image: null, variationId: null, skuRef: r.code, skuId: null, note: `จากใบสั่งผลิต ${r.nos.join(", ")}`,
+  reason: `ใบสั่งผลิต ${r.nos.join(", ")}`, usedForId: null, usedForLabel: title, urgent: false, useDate: null,
+  sourceMoNo: r.nos[0], sourceMoNos: r.nos,
+}));
 
 // field ที่กรองได้ (ดึงจากทะเบียน field)
 // relation = field ที่เป็น FK → ต้องโชว์ "ชื่อ" จากตารางปลายทาง แต่กรองด้วย id
@@ -179,7 +190,8 @@ export default function PurchasingShopPage() {
   const [moSel, setMoSel] = useState<MoEntry | null>(null);   // null = โชว์รายการใบ · มีค่า = โชว์วัตถุดิบของใบนั้น
   // จำค่าต่อคน (ข้ามเครื่อง): เรียง / จัดกลุ่ม / ชิปแบรนด์ / กลุ่มที่พับ (แยกตามโหมดจัดกลุ่ม)
   const [moPrefs, setMoPrefs] = useUserPref<MoListPrefs>(MO_PREFS_KEY, MO_PREFS_DEFAULT, parseMoPrefs);
-  const { sort: moSort, group: moGroup, brand: moBrand } = moPrefs;
+  const { view: moView, sort: moSort, group: moGroup, brand: moBrand } = moPrefs;
+  const [moParentSel, setMoParentSel] = useState<{ title: string; mos: MoEntry[] } | null>(null);   // มุมมองรวมตามรุ่น: รุ่นที่เปิดอยู่
   const moFolded = useMemo(() => new Set(moGroup === "none" ? [] : moPrefs.folded[moGroup]), [moPrefs, moGroup]);   // กลุ่มที่พับเก็บ
   const toggleMoFold = (title: string) => {
     if (moGroup === "none") return;
@@ -337,7 +349,7 @@ export default function PurchasingShopPage() {
     if (s === source) return;
     prevQ.current = "";   // กันไม่ให้การล้างคำค้นไปกระตุ้น debounce → สลับโหมดดึงทันที
     setSource(s); setCards([]); setTotal(0); setQ(""); setPage(0); setLoading(true);
-    setMoSel(null);   // กลับมาเริ่มที่ "เลือกใบสั่งผลิต" ทุกครั้งที่สลับโหมด
+    setMoSel(null); setMoParentSel(null);   // กลับมาเริ่มที่ "เลือกใบสั่งผลิต" ทุกครั้งที่สลับโหมด
     setFilterOpen(false);   // จอเล็ก: สลับโหมดแล้วหุบลิ้นชักให้เห็นผลทันที
   };
 
@@ -374,6 +386,7 @@ export default function PurchasingShopPage() {
 
   // ปุ่มย้อนกลับของเบราว์เซอร์/ปัดขวาบนมือถือ ตอนเปิดใบงานอยู่ = กลับรายการใบสั่งผลิต (ไม่หลุดออกจากหน้าขอซื้อ)
   // ของกลาง useBackClose — ป๊อปใส่จำนวน (ถ้าเปิดค้าง) ปิดตามไปด้วย ไม่ให้ค้างเด้งขึ้นตอนเปิดใบถัดไป
+  useBackClose(!!moParentSel, () => setMoParentSel(null), "mo-parent");   // รวมตามรุ่น: ย้อนกลับ = กลับการ์ดรุ่น
   useBackClose(!!moSel, () => { setMoSel(null); setMoMatQty(null); setQ(""); }, "mo-detail");
 
   // ระดับ 2: โหลดสถานะวัตถุดิบทั้ง BOM ของใบที่เลือก (เปลี่ยนใบ = ล้างของเก่า · กดซ้ำ/บันทึก = โหลดทับเงียบ ๆ)
@@ -971,8 +984,21 @@ export default function PurchasingShopPage() {
           {/* แท็บ "ใบสั่งผลิต": เลือกใบ → โชว์วัตถุดิบที่ต้องซื้อของใบนั้นเป็นการ์ด */}
           {source === "mo" && (() => {
             const ql = q.trim().toLowerCase();
-            if (moNeeds === null && !moSel) return <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลดใบสั่งผลิต…</div>;
-            if (moList.length === 0 && !moSel) return <div className="text-center text-slate-300 py-16">ไม่มีวัตถุดิบที่ต้องซื้อจากใบสั่งผลิต 🎉</div>;
+            if (moNeeds === null && !moSel && !moParentSel) return <div className="text-center text-slate-400 py-16 text-sm">กำลังโหลดใบสั่งผลิต…</div>;
+            if (moList.length === 0 && !moSel && !moParentSel) return <div className="text-center text-slate-300 py-16">ไม่มีวัตถุดิบที่ต้องซื้อจากใบสั่งผลิต 🎉</div>;
+            // ----- รวมตามรุ่น: วัตถุดิบของทุกใบในรุ่นเดียวกัน (กดเปิดทีละใบได้ → ระดับ 2 เดิม, ย้อนกลับมาที่นี่) -----
+            if (!moSel && moParentSel) {
+              const nos = (code: string | null, mos: string[]) => cart.filter(l => code && l.skuRef === code && (l.sourceMoNos ?? []).some(n => mos.includes(n))).reduce((n, l) => n + l.qty, 0);
+              return (
+                <MoParentGroup title={moParentSel.title} mos={moParentSel.mos} needs={moNeeds} cols={cols}
+                  canEdit={canEditMat} canStock={canStock} canStockView={canStockView} inCartQty={nos}
+                  onBack={() => setMoParentSel(null)}
+                  onOpenMo={(no) => { const e = moParentSel.mos.find(m => m.mo_no === no); if (e) setMoSel(e); }}
+                  onHistory={(it) => setStockHist(it)}
+                  onAddCart={(lines) => { setCart(p => [...p, ...moCartLines(moParentSel.title, lines)]); toast.success(`ใส่ตะกร้าแล้ว ${lines.length} รายการ (${moParentSel.title})`); }}
+                  onChanged={() => void refreshMoNeeds()} />
+              );
+            }
             // ----- ระดับ 1: เลือกใบสั่งผลิต -----
             if (!moSel) {
               // ความคืบหน้าต่อใบ (กติกาเดียวกับระดับ 2) — ยังโหลดไม่เสร็จ = ใช้จำนวนวัตถุดิบที่ต้องซื้อเดิมไปก่อน
@@ -1047,22 +1073,67 @@ export default function PurchasingShopPage() {
                   {mos.map(moCard)}
                 </div>
               );
+              // มุมมอง "รวมตามรุ่น": การ์ดละ 1 Parent SKU (ใบที่ไม่มีตัวแม่ = รุ่นของตัวเอง) — รุ่นที่ใบเยอะขึ้นก่อน
+              const parents: [string, MoEntry[]][] = (() => {
+                const m = new Map<string, MoEntry[]>();
+                for (const g of list) { const k = g.parent_code || g.product_label; m.set(k, [...(m.get(k) ?? []), g]); }
+                return [...m].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+              })();
+              const parentCard = ([k, mos]: [string, MoEntry[]]) => {
+                const gp = sumProg(mos);
+                const img = mos.find(g => g.product_image)?.product_image ?? null;
+                const vars = [...new Set(mos.map(g => g.product_label))].sort();
+                const short = (v: string) => (v.startsWith(k) && v.length > k.length ? v.slice(k.length) : v);
+                const due = mos.map(g => g.due_date).filter((d): d is string => !!d).sort()[0];
+                return (
+                  <button key={k} onClick={() => setMoParentSel({ title: k, mos })}
+                    className="text-left bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-rose-300 hover:shadow-md transition-all">
+                    <div className="relative aspect-square bg-slate-50 flex items-center justify-center">
+                      {img ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={img} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-3xl">🏭</span>}
+                      <span className="absolute top-2 right-2 text-[11px] font-semibold bg-white/95 text-slate-700 border border-slate-200 rounded-full px-2 py-0.5">{mos.length} ใบ</span>
+                    </div>
+                    <div className="p-3">
+                      <div className="font-medium text-slate-800 text-[13px] leading-snug truncate" title={k}>{k}</div>
+                      <div className="text-[11px] text-slate-500 truncate" title={vars.join(", ")}>{vars.length} สี/แบบ · {vars.map(short).join(" ")}</div>
+                      {due && <div className="text-[11px] text-slate-400 mt-0.5">📅 กำหนดส่งเร็วสุด {due}</div>}
+                      <div className="text-sm font-semibold text-rose-600 mt-1">🛒 ต้องซื้อรวม {matCount(mos)} วัตถุดิบ</div>
+                      {gp.total > 0 && (
+                        <>
+                          <MoProgressBar counts={progCounts(gp)} className="h-1.5 mt-1.5" />
+                          <div className="text-[11px] text-slate-500 mt-1">ทั้งรุ่นไปแล้ว {progPct(gp)}% · กดเพื่อรวมวัตถุดิบทุกใบ ›</div>
+                        </>
+                      )}
+                    </div>
+                  </button>
+                );
+              };
+              const viewBtn = (v: MoView, label: string) => (
+                <button type="button" onClick={() => setMoPrefs({ ...moPrefs, view: v })}
+                  className={`h-8 px-3 text-xs font-medium ${moView === v ? "bg-rose-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+              );
               return (
                 <>
                   <div className="flex items-center gap-3 flex-wrap mb-3">
-                    <p className="text-sm text-slate-500 mr-auto">เลือกใบสั่งผลิต <b className="text-slate-700">{list.length}</b> ใบ — กดเพื่อดูวัตถุดิบที่ต้องซื้อ</p>
+                    <div className="inline-flex rounded-md border border-slate-200 overflow-hidden divide-x divide-slate-200" title="ดูทีละใบ หรือรวมใบรุ่นเดียวกัน (Parent SKU) แล้วกดมีของแล้ว/นับ/ขอซื้อทีเดียว">
+                      {viewBtn("mo", "รายใบสั่งผลิต")}{viewBtn("parent", "รวมตามรุ่น")}
+                    </div>
+                    {moView === "parent"
+                      ? <p className="text-sm text-slate-500 mr-auto">เลือกรุ่น <b className="text-slate-700">{parents.length}</b> รุ่น ({list.length} ใบ) — กดเพื่อรวมวัตถุดิบทุกใบในรุ่น</p>
+                      : <p className="text-sm text-slate-500 mr-auto">เลือกใบสั่งผลิต <b className="text-slate-700">{list.length}</b> ใบ — กดเพื่อดูวัตถุดิบที่ต้องซื้อ</p>}
                     <label className="flex items-center gap-1.5 text-xs text-slate-500">จัดเรียง
                       <select value={moSort} onChange={(e) => setMoPrefs({ ...moPrefs, sort: e.target.value as MoSort })}
                         className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white">
                         {MO_SORTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
                       </select>
                     </label>
-                    <label className="flex items-center gap-1.5 text-xs text-slate-500">จัดกลุ่ม
-                      <select value={moGroup} onChange={(e) => setMoPrefs({ ...moPrefs, group: e.target.value as MoGroup })}
-                        className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white">
-                        {MO_GROUPS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-                      </select>
-                    </label>
+                    {moView === "mo" && (
+                      <label className="flex items-center gap-1.5 text-xs text-slate-500">จัดกลุ่ม
+                        <select value={moGroup} onChange={(e) => setMoPrefs({ ...moPrefs, group: e.target.value as MoGroup })}
+                          className="h-8 px-2 text-sm border border-slate-200 rounded-md bg-white">
+                          {MO_GROUPS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                        </select>
+                      </label>
+                    )}
                   </div>
                   {/* ชิปกรองด่วน: แบรนด์ (จำค่าต่อคน) · ใกล้ครบ / ยังไม่ได้สั่งอะไรเลย (เลือกได้ทีละอัน ไม่จำ) */}
                   <div className="flex items-center gap-1.5 flex-wrap mb-2">
@@ -1083,7 +1154,11 @@ export default function PurchasingShopPage() {
                     </div>
                   )}
                   {list.length === 0 && <div className="text-center text-slate-300 py-16">{q.trim() ? `ไม่พบใบสั่งผลิตที่ตรงกับ “${q}”` : "ไม่มีใบสั่งผลิตที่ตรงกับตัวกรองที่เลือก"}</div>}
-                  {moGroup === "none" ? grid(list) : groups.map(([title, mos]) => {
+                  {moView === "parent" ? (
+                    <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
+                      {parents.map(parentCard)}
+                    </div>
+                  ) : moGroup === "none" ? grid(list) : groups.map(([title, mos]) => {
                     const folded = moFolded.has(title);
                     const gp = sumProg(mos);
                     return (
@@ -1726,12 +1801,7 @@ function MoGroupBuyDialog({ title, mos, needs, cart, onClose, onAdd }: { title: 
   const chosen = rows.filter((r) => pick.has(r.key) && r.nos.length > 0 && (qtys[r.key] ?? 0) > 0);
   const toggle = (k: string) => setPick((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const allOn = rows.filter((r) => r.nos.length > 0).every((r) => pick.has(r.key));
-  const add = () => onAdd(chosen.map((r) => ({
-    label: r.code ? `[${r.code}] ${r.name ?? ""}`.trim() : (r.name ?? "วัตถุดิบ"), qty: qtys[r.key], uom: r.uom, seller: "—", price: 0, currency: "THB",
-    image: null, variationId: null, skuRef: r.code, skuId: null, note: `จากใบสั่งผลิต ${r.nos.join(", ")}`,
-    reason: `ใบสั่งผลิต ${r.nos.join(", ")}`, usedForId: null, usedForLabel: title, urgent: false, useDate: null,
-    sourceMoNo: r.nos[0], sourceMoNos: r.nos,
-  })));
+  const add = () => onAdd(moCartLines(title, chosen.map((r) => ({ code: r.code, name: r.name, uom: r.uom, qty: qtys[r.key], nos: r.nos }))));
   return (
     <ERPModal open onClose={onClose} size="lg" storageKey="mo-group-buy" title={`ซื้อรวมทั้งกลุ่ม · ${title}`}
       description={`${mos.length} ใบงาน · วัตถุดิบที่ต้องซื้อ ${rows.length} รายการ — วัตถุดิบละ 1 บรรทัด ผูกเลข MO ครบทุกใบ`}
