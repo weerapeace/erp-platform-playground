@@ -67,7 +67,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const mos: Row[] = [];
   for (const c of chunks(moIds)) {
-    const { data } = await admin.from("manufacturing_orders").select("id, mo_no, qty, status, skipped_stages").in("id", c);
+    const { data } = await admin.from("manufacturing_orders").select("id, mo_no, qty, status, skipped_stages, is_active").in("id", c);
     mos.push(...((data ?? []) as Row[]));
   }
   const moOf = new Map(mos.map((m) => [String(m.id), m]));
@@ -82,7 +82,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const mo = l.mo_id ? moOf.get(String(l.mo_id)) : undefined;
     const d = mo ? disp.get(String(mo.mo_no)) : undefined;
     const stage = soLineStage({
-      orderShipped: o.status === "shipped", hasMo: !!mo, moStatus: (mo?.status as string) ?? null,
+      // ใบสั่งผลิตที่ถูกยกเลิกในข้อมูลจริง = is_active false (status ยังเป็น draft) → นับเป็นยกเลิก
+      orderShipped: o.status === "shipped", hasMo: !!mo, moStatus: mo && mo.is_active === false ? "cancelled" : ((mo?.status as string) ?? null),
       dispatched: !!d?.dispatched, submitted: !!d?.submitted,
     });
     const b = batches.get(gid) ?? { id: gid, name: groupName.get(gid)!, lines: [], reached: [0, 0, 0, 0, 0], min_stage: 4 as SoLineStage, qty: 0, customers: [], orders: [], due_min: null };
