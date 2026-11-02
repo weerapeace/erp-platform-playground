@@ -17,12 +17,45 @@ import { apiFetch } from "@/lib/api";
 import { HoverImage } from "@/components/hover-image";
 import type { MoProgress } from "@/app/api/mo/material-progress/route";
 import type { MoMaterialStatus, MoMaterialStatusResult } from "@/app/api/mo/material-status/route";
+import { MAT_STAGE_KEYS, MAT_STAGE_LABEL, type MatStage, type MatStep } from "@/lib/mo-material-stage";
 
-/** สี/ชื่อของแต่ละช่วงในแถบ — ลำดับเดียวกับ moProgCounts */
-export const MO_SEGS: [string, string][] = [["bg-rose-500", "ต้องซื้อ"], ["bg-amber-400", "ขอแล้ว รออนุมัติ"], ["bg-blue-500", "สั่งซื้อแล้ว (มี PO)"], ["bg-emerald-500", "มีของ / ได้ของแล้ว"]];
-export const moProgCounts = (p: MoProgress) => [p.buy, p.requested, p.ordered, p.done];
+/** สีของแต่ละขั้น (6 ขั้น lib/mo-material-stage) — คลาส Tailwind ต้องเป็นตัวหนังสือตรง ๆ ในไฟล์นี้ */
+export const MAT_STAGE_UI: Record<MatStage, { bar: string; chip: string }> = {
+  buy:       { bar: "bg-rose-500",    chip: "bg-rose-50 text-rose-700 border-rose-200" },
+  requested: { bar: "bg-amber-400",   chip: "bg-amber-50 text-amber-700 border-amber-200" },
+  ordered:   { bar: "bg-orange-500",  chip: "bg-orange-50 text-orange-700 border-orange-200" },
+  receiving: { bar: "bg-sky-500",     chip: "bg-sky-50 text-sky-700 border-sky-200" },
+  have:      { bar: "bg-teal-400",    chip: "bg-teal-50 text-teal-700 border-teal-200" },
+  closed:    { bar: "bg-emerald-600", chip: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+};
+/** สี/ชื่อของแต่ละช่วงในแถบ — ลำดับเดียวกับ moProgCounts (= MAT_STAGE_KEYS) */
+export const MO_SEGS: [string, string][] = MAT_STAGE_KEYS.map((k) => [MAT_STAGE_UI[k].bar, MAT_STAGE_LABEL[k]]);
+/** นับต่อขั้นของใบ (API เก่าที่ยังไม่มี stages → มีของ/ได้ของรวมอยู่ช่อง "มีของแล้ว") */
+export const moProgCounts = (p: MoProgress) => p.stages ?? [p.buy, p.requested, p.ordered, 0, p.done, 0];
 
-/** แถบสีความคืบหน้า (ต้องซื้อ / ขอแล้ว / สั่งแล้ว / มีของ) — counts เรียงตาม MO_SEGS */
+/** ป้ายขั้นสถานะ */
+export function MatStageChip({ stage, text }: { stage: MatStage; text?: string }) {
+  return <span className={`inline-block max-w-full truncate text-[11px] font-medium px-1.5 py-0.5 rounded border ${MAT_STAGE_UI[stage].chip}`}>{text ?? MAT_STAGE_LABEL[stage]}</span>;
+}
+
+/** ไทม์ไลน์เล็กบนการ์ด: ขอซื้อ → สั่งซื้อ → รับของ → ปิดงาน (หรือ มีของแล้ว → ปิดงาน) — ข้อมูลจาก matSteps() */
+export function MatStageSteps({ steps }: { steps: MatStep[] }) {
+  if (steps.length === 0) return null;
+  return (
+    <ol className="mt-1.5 space-y-0.5">
+      {steps.map((s) => (
+        <li key={s.key} className="flex items-start gap-1.5 text-[11px] leading-snug">
+          <span className={`mt-[3px] w-2.5 h-2.5 rounded-full shrink-0 ${s.state === "done" ? "bg-emerald-500" : s.state === "now" ? "border-2 border-sky-500 bg-white" : "border border-slate-300 bg-white"}`} />
+          <span className={`min-w-0 break-words ${s.state === "todo" ? "text-slate-400" : "text-slate-700"}`}>
+            <span className="font-medium">{s.label}</span>{s.detail && <span className={s.state === "todo" ? "" : "text-slate-500"}> · {s.detail}</span>}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** แถบสีความคืบหน้า 6 ขั้น — counts เรียงตาม MO_SEGS */
 export function MoProgressBar({ counts, className }: { counts: number[]; className: string }) {
   const total = counts.reduce((a, b) => a + b, 0);
   return (

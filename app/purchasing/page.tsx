@@ -28,13 +28,14 @@ import { DupOrderBadge, DupOrderList, type OpenOrder } from "./dup-order";
 import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
 import { MoShortageList, useMoShortage, shortMos, ceil2, oddMos, type MoPick } from "@/components/mo-shortage-picker";
 import { HoverImage } from "@/components/hover-image";
-import type { MoMaterialStatus, MoMaterialStatusResult, MatStatus, MatPurchaseLink } from "@/app/api/mo/material-status/route";
+import type { MoMaterialStatus, MoMaterialStatusResult, MatPurchaseLink } from "@/app/api/mo/material-status/route";
 import { PoDetailModal } from "@/components/po-detail-modal";
 import { ReceiveLineModal, type ReceiveLine } from "@/components/receive-line-modal";
 import { StockMovementHistory } from "@/components/stock-movement-history";
 import type { MoListItem } from "@/app/api/mo/route";
 import type { MoProgress, MoProgressResult } from "@/app/api/mo/material-progress/route";
-import { MO_SEGS, moProgCounts as progCounts, MoProgressBar } from "@/components/mo-material-progress";
+import { MO_SEGS, moProgCounts as progCounts, MoProgressBar, MatStageChip, MatStageSteps } from "@/components/mo-material-progress";
+import { matStage, matSteps, countStages, type MatStage } from "@/lib/mo-material-stage";
 import { useUserPref } from "@/lib/use-user-pref";
 import { MoParentGroup, type GroupCartLine } from "./mo-parent-group";
 
@@ -1198,13 +1199,16 @@ export default function PurchasingShopPage() {
             // ----- ระดับ 2: วัตถุดิบ "ทุกตัว" ใน BOM ของใบที่เลือก — ต้องซื้อ (บน) → ขอ/สั่งแล้ว → มีของ/ได้ของแล้ว (ล่าง) -----
             const items = (moStatus?.mo_no === moSel.mo_no ? moStatus.items : []);
             const shownItems = items.filter(m => !ql || (m.code ?? "").toLowerCase().includes(ql) || (m.name ?? "").toLowerCase().includes(ql));
-            const cnt = (sts: MatStatus[]) => items.filter(m => sts.includes(m.status)).length;
-            const barCounts = [cnt(["buy"]), cnt(["requested"]), cnt(["ordered"]), cnt(["received", "have", "ready", "skip"])];   // ลำดับเดียวกับ MO_SEGS
+            // ขั้นสถานะ 6 ขั้น (ของกลาง lib/mo-material-stage) — แถบสี + แยกกลุ่มการ์ดตามขั้น
+            const barCounts = countStages(items.map(m => matStage(m)));   // ลำดับเดียวกับ MO_SEGS
             const inCartQty = (code: string | null) => cart.filter(l => code && l.skuRef === code && (l.sourceMoNos ?? []).includes(moSel.mo_no)).reduce((n, l) => n + l.qty, 0);
-            const groups: { title: string; hint: string; sts: MatStatus[] }[] = [
-              { title: "🛒 ต้องซื้อ", hint: "กดการ์ดเพื่อใส่จำนวนแล้วเพิ่มลงตะกร้า", sts: ["buy"] },
-              { title: "🚚 ขอซื้อ / สั่งซื้อแล้ว", hint: "รอของเข้า", sts: ["requested", "ordered"] },
-              { title: "✅ มีของ / ได้ของแล้ว", hint: "", sts: ["received", "have", "ready", "skip"] },
+            const groups: { title: string; hint: string; st: MatStage }[] = [
+              { title: "🛒 ต้องซื้อ", hint: "กดการ์ดเพื่อใส่จำนวนแล้วเพิ่มลงตะกร้า", st: "buy" },
+              { title: "📝 ขอซื้อแล้ว · รออนุมัติ", hint: "", st: "requested" },
+              { title: "📄 สั่งซื้อแล้ว · รอของ", hint: "", st: "ordered" },
+              { title: "📥 รับของแล้วบางส่วน", hint: "ยังค้างรับ", st: "receiving" },
+              { title: "✅ มีของแล้ว", hint: "กดเอง / ใช้ของในสต๊อก / เตรียมแล้ว — ปิดงานเมื่อจ่ายงาน", st: "have" },
+              { title: "🏁 ปิดงาน", hint: "รับครบ / ปิดยอด / จ่ายงานแล้ว", st: "closed" },
             ];
             return (
               <>
@@ -1253,7 +1257,7 @@ export default function PurchasingShopPage() {
                 {moStatus && items.length === 0 && <div className="text-center text-slate-300 py-16">ใบนี้ยังไม่มีสูตรวัตถุดิบ (BOM)</div>}
                 {items.length > 0 && shownItems.length === 0 && <div className="text-center text-slate-300 py-16">ไม่พบวัตถุดิบที่ตรงกับ “{q}”</div>}
                 {groups.map(g => {
-                  const list = shownItems.filter(m => g.sts.includes(m.status));
+                  const list = shownItems.filter(m => matStage(m) === g.st);
                   if (list.length === 0) return null;
                   return (
                     <div key={g.title} className="mb-5">
@@ -1261,6 +1265,7 @@ export default function PurchasingShopPage() {
                       <div className="grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))]" style={{ "--cols": cols } as CSSProperties}>
                         {list.map(it => (
                           <MoBomCard key={it.summary_id} it={it} inCart={inCartQty(it.code)} canEdit={canEditMat} busy={haveBusy === it.summary_id}
+                            dispatchedAt={moStatus?.dispatch?.dispatched_at ?? null}
                             onAdd={() => setMoMatQty({ code: it.code, name: it.name, image: it.image, type: it.type, uom: it.uom, needed: it.remaining })}
                             onHave={(v) => void setHave(it, v)}
                             canStock={canStock} onCount={() => setStockCount(it)}
@@ -1931,9 +1936,10 @@ function StockCountDialog({ it, moNo, onClose, onSaved }: { it: MoMaterialStatus
 
 // การ์ดวัตถุดิบ 1 ตัวใน BOM (แท็บใบสั่งผลิต ระดับ 2) — ป้ายสถานะการซื้อ + ✓ มีของแล้ว / ยกเลิก
 const fmtQty = (n: number) => (Math.round(n * 1000) / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 });
-const fmtEta = (d: string | null) => (d ? new Date(d + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : null);
-function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount, canStockView, onHistory, onOpenPo, onReceive }: {
+function MoBomCard({ it, inCart, canEdit, busy, dispatchedAt, onAdd, onHave, canStock, onCount, canStockView, onHistory, onOpenPo, onReceive }: {
   it: MoMaterialStatus; inCart: number; canEdit: boolean; busy: boolean; onAdd: () => void; onHave: (have: boolean) => void;
+  /** วันที่จ่ายงานของใบนี้ (ขั้นปิดงาน) */
+  dispatchedAt?: string | null;
   /** มีสิทธิ์นับสต๊อก (stock.adjust) → โชว์ปุ่ม 🔢 นับ */
   canStock: boolean; onCount: () => void;
   /** มีสิทธิ์ดูสต๊อก (stock.view) → ป้ายสต๊อกกดดูความเคลื่อนไหวได้ */
@@ -1947,7 +1953,12 @@ function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount
   const u = it.uom ?? "";
   const prNos = [...new Set(it.links.map((l) => l.pr_no).filter(Boolean))].join(", ");
   const poLinks = it.links.filter((l) => l.po_id && l.po_no);
-  const eta = fmtEta(it.links.map((l) => l.expected_date).filter(Boolean).sort()[0] ?? null);
+  const stage = matStage(it);
+  const steps = matSteps({ ...it, usedStock: (it.stock?.reserved_this ?? 0) > 0, dispatchedAt });
+  const stageText = stage === "closed"
+    ? (it.dispatched ? "🏁 ปิดงาน · จ่ายงานแล้ว" : it.status === "skip" ? "🏁 ปิดงาน · ไม่ต้องซื้อ" : "🏁 ปิดงาน · รับครบแล้ว")
+    : stage === "have" ? (it.status === "ready" ? "✓ มีของแล้ว · เตรียมแล้ว" : "✓ มีของแล้ว")
+    : undefined;
   // สถานะรับของต่อบรรทัด PO: ยังไม่รับ / รับแล้วบางส่วน / รับครบ / ปิดยอด (ขาด)
   const recvInfo = (l: MatPurchaseLink): [string, string] => {
     if (!l.po_line_id) return ["text-slate-400", "ยังไม่มีบรรทัดรับ"];
@@ -1980,9 +1991,13 @@ function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount
             {inCart > 0 && tag("bg-blue-50 text-blue-700 border-blue-200", `🛒 อยู่ในตะกร้า ${fmtQty(inCart)} ${u}`)}
           </>
         )}
-        {it.status === "requested" && tag("bg-amber-50 text-amber-700 border-amber-200", "🕒 ขอแล้ว · รออนุมัติ", prNos || null)}
-        {it.status === "ordered" && tag("bg-blue-50 text-blue-700 border-blue-200", `📄 สั่งแล้ว${eta ? ` · ถึง ${eta}` : ""}`, poLinks.length ? null : prNos || null)}
-        {it.status === "received" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "📦 รับของแล้ว")}
+        {/* ขั้นสถานะ (ของกลาง lib/mo-material-stage): ป้าย + ไทม์ไลน์ ขอซื้อ → สั่งซื้อ → รับของ → ปิดงาน / มีของแล้ว → ปิดงาน */}
+        {!isBuy && (
+          <>
+            <div className="mt-1.5"><MatStageChip stage={stage} text={stageText} /></div>
+            <MatStageSteps steps={steps} />
+          </>
+        )}
         {/* ใบสั่งซื้อที่ผูกวัตถุดิบนี้: กดเลข PO ดูใบ · สถานะรับ · 📥 รับของจากตรงนี้ (กติกาเดียวกับหน้ารับของ) */}
         {poLinks.length > 0 && it.status !== "ready" && it.status !== "have" && (
           <div className="mt-1.5 space-y-1">
@@ -2005,9 +2020,6 @@ function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount
             })}
           </div>
         )}
-        {it.status === "have" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", it.dispatched ? "✓ มีของแล้ว · จ่ายงานแล้ว" : "✓ มีของแล้ว")}
-        {it.status === "ready" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ เตรียมแล้ว")}
-        {it.status === "skip" && tag("bg-slate-50 text-slate-500 border-slate-200", "ไม่ต้องซื้อ")}
         {/* ป้ายสต๊อกคลังวัตถุดิบ: ยังไม่เคยนับ / ในระบบ X (ยังไม่นับ) / นับแล้ว X · วันที่ (+ พร้อมใช้ ถ้าแบ่งให้ใบอื่นไปแล้ว)
             กดได้ (มีสิทธิ์ดูสต๊อก) → ป๊อปความเคลื่อนไหวสต๊อก (ของกลาง StockMovementHistory) */}
         {it.stock && it.status !== "ready" && it.status !== "skip" && (() => {

@@ -13,6 +13,7 @@ import { fetchAllPages } from "@/lib/fetch-all";
 import { loadMoPurchaseLinks, computeMatStatus, linkKey } from "@/lib/mo-material-status";
 import { parseSkipped } from "@/lib/mo-skip";
 import { loadMoDispatch } from "@/lib/mo-dispatch";
+import { matStage, MAT_STAGE_KEYS } from "@/lib/mo-material-stage";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -32,6 +33,8 @@ export type MoProgress = {
   /** จ่ายงานแล้ว (ถามบอร์ดจ่ายงาน lib/mo-dispatch) → นับทุกบรรทัดเป็นของครบ · submitted = ช่างส่งงานครบ เข้า QC แล้ว */
   dispatched?: boolean;
   submitted?: boolean;
+  /** นับต่อขั้น 6 ขั้น (lib/mo-material-stage MAT_STAGE_KEYS): ต้องซื้อ · ขอซื้อแล้ว · สั่งซื้อแล้ว · รับของแล้ว (บางส่วน) · มีของแล้ว · ปิดงาน */
+  stages?: number[];
 };
 /** mo_no → ความคืบหน้า (ใบที่ไม่มี BOM ไม่อยู่ในผลลัพธ์) */
 export type MoProgressResult = Record<string, MoProgress>;
@@ -68,8 +71,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const links = code ? linksByKey.get(linkKey(moNo, code)) ?? [] : [];
     const disp = dispatch.get(moNo);
     const { status } = computeMatStatus(s, qtyByMo.get(moNo) ?? 0, links, { dispatched: !!disp });
-    const p = data[moNo] ?? (data[moNo] = { total: 0, buy: 0, requested: 0, ordered: 0, done: 0, linked: 0, eta: null, eta_unknown: 0 });
+    const p = data[moNo] ?? (data[moNo] = { total: 0, buy: 0, requested: 0, ordered: 0, done: 0, linked: 0, eta: null, eta_unknown: 0, stages: MAT_STAGE_KEYS.map(() => 0) });
     p.total += 1;
+    p.stages![MAT_STAGE_KEYS.indexOf(matStage({ status, links, dispatched: !!disp }, { skippedBuy: buySkipped.has(moNo) }))] += 1;
     if (disp) { p.dispatched = true; if (disp.submitted) p.submitted = true; }
     if (buySkipped.has(moNo)) { p.skipped = true; p.done += 1; if (links.length > 0) p.linked += 1; continue; }   // ข้ามซื้อของ = ของครบ
     if (status === "buy") p.buy += 1;

@@ -55,8 +55,8 @@ export const WORKFLOWS: WorkflowDef[] = [
   {
     key: "mo-materials",
     label: "วัตถุดิบของใบสั่งผลิต",
-    flow: "ต้องซื้อ → ขอแล้ว (รออนุมัติ) → สั่งแล้ว (มี PO) → ได้ของ / มีของ / เตรียมแล้ว",
-    ruleFiles: ["lib/mo-material-status.ts", "lib/pr-line-code.ts", "lib/mo-group-materials.ts"],
+    flow: "ต้องซื้อ → ขอซื้อแล้ว → สั่งซื้อแล้ว (มี PO) → รับของแล้ว (บางส่วน) → ปิดงาน · ทางลัด: มีของแล้ว (กดเอง/สต๊อก) → ปิดงานเมื่อจ่ายงาน",
+    ruleFiles: ["lib/mo-material-status.ts", "lib/mo-material-stage.ts", "lib/pr-line-code.ts", "lib/mo-group-materials.ts"],
     gates: ["app/api/mo/material/route.ts", "app/api/mo/material-line/route.ts", "app/api/mo/material-allocations/route.ts", "app/api/mo/[id]/mark-ready/route.ts"],
     tables: ["mo_material_summary", "mo_material_allocations"],
     signals: ["to_purchase_qty", "source_mo_nos"],

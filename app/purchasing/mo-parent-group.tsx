@@ -14,6 +14,7 @@ import { Icon } from "@/components/icon";
 import { MO_SEGS, MoProgressBar } from "@/components/mo-material-progress";
 import { ceil2, oddMos } from "@/components/mo-shortage-picker";
 import { groupMaterials, haveItems, planStockUse, type GroupMatRow } from "@/lib/mo-group-materials";
+import { matStage, countStages } from "@/lib/mo-material-stage";
 import type { MoMaterialStatus, MoMaterialStatusResult } from "@/app/api/mo/material-status/route";
 import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
 
@@ -63,11 +64,11 @@ export function MoParentGroup({ title, mos, needs, cols, canEdit, canStock, canS
 
   const rows = useMemo(() => (results ? groupMaterials(results, variantOf, dueOf, include) : []), [results, variantOf, dueOf, include]);
   const multiColor = [...include].length > 1;
+  // แถบ 6 ขั้น (ลำดับเดียวกับ MO_SEGS) นับเป็นบรรทัด วัตถุดิบ × ใบ — ใบที่จ่ายงานแล้ว = ปิดงาน
   const lineCounts = useMemo(() => {
-    const c = [0, 0, 0, 0];   // ลำดับเดียวกับ MO_SEGS: ต้องซื้อ · ขอแล้ว · สั่งแล้ว · มีของ/ได้ของ
-    for (const r of rows) { c[0] += r.counts.buy; c[1] += r.counts.requested; c[2] += r.counts.ordered; c[3] += r.counts.done; }
-    return c;
-  }, [rows]);
+    const disp = new Set((results ?? []).filter((r) => r.dispatch).map((r) => r.mo_no));
+    return countStages(rows.flatMap((r) => r.mos.map((m) => matStage({ ...m.it, dispatched: m.it.dispatched || disp.has(m.mo_no) }))));
+  }, [rows, results]);
   const oddOf = (r: GroupMatRow) => {
     const n = needs?.find((x) => (x.component_sku ?? `nm:${x.component_name ?? ""}`) === r.key);
     return n ? oddMos(n.mos) : new Set<string>();
