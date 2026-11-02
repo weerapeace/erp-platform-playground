@@ -41,9 +41,19 @@ describe("ใบพิมพ์สรุปจับคู่ใบขาย →
     expect(pr.filter((r) => r.ticked).map((r) => r.line_id).sort()).toEqual(["l1", "l2", "l3", "l4"]);
     expect(by("l5")).toMatchObject({ match: "none", ticked: false, mo_no: "", mo_qty: null, notes: ["ขายจากสต๊อก หรือใบงานปิดไปแล้ว"] });
     expect(by("l1")).toMatchObject({ mo_no: "MO-2026-00276", match: "exact", qty: 200, suggested: null });
-    expect(by("l2")).toMatchObject({ match: "exact", notes: ["รวมกับใบขายอื่นครบ 500"] });
+    // l3 ถูกเปลี่ยนไปใบเล็ก 00429 → 00354 เหลือใบขายนี้ใบเดียว (คิดจากที่เลือกจริง ไม่ใช่แค่ที่ระบบเสนอ)
+    expect(by("l2")).toMatchObject({ match: "exact", notes: ["ใบงานได้ใบขายแค่ 250/500"] });
     expect(by("l3")).toMatchObject({ mo_no: "MO-2026-00429", match: "pick", suggested: "MO-2026-00354", qty: 100, notes: ["ผูกได้ 100 จาก 250"] });
     expect(by("l4")).toMatchObject({ match: "suggest", qty: 1000, notes: ["ใบงานได้ใบขายแค่ 1,000/2,500"] });
+  });
+
+  it("ใบงานเดียวกันหลายใบขาย = บอกเลขใบขายอื่น (วันที่ · จำนวน) · อีกใบไม่ติ๊ก = บอกด้วย (เจ้าของ 2026-11-02)", () => {
+    const both = new Map([["l2", "MO-2026-00354"], ["l3", "MO-2026-00354"]]);
+    const x = salesPrintRowsOpen(rows, both, new Set(["l2", "l3"]));
+    expect(x.find((r) => r.line_id === "l2")!.notes).toEqual(["รวมกับ ISG2569-10-028 (28 ต.ค. 69 · 250) = ครบ 500"]);
+    expect(x.find((r) => r.line_id === "l3")!.notes).toEqual(["รวมกับ ISG2569-10-022 (22 ต.ค. 69 · 250) = ครบ 500"]);
+    const y = salesPrintRowsOpen(rows, both, new Set(["l2"]));
+    expect(y.find((r) => r.line_id === "l2")!.notes).toEqual(["รวมกับ ISG2569-10-028 (28 ต.ค. 69 · 250 · ไม่ติ๊ก) = ครบ 500"]);
   });
 
   it("เลือกใบที่ผูกใบขายอื่นอยู่ = หมายเหตุถอดของเดิม", () => {

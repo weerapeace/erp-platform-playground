@@ -9,7 +9,7 @@ import {
   LIST_GROUP_ROW, defaultListPrintSettings, escapeHtml as esc, listPrintCss, renderListTable, resolveListColumns, signatureHtml,
   type ListPrintColumn, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
-import { MO_STAGE_LABEL, planLinks, type LinkedLine, type MoStage, type UnlinkedLine } from "@/lib/mo-sales-unlinked";
+import { MO_STAGE_LABEL, partnerNote, planLinks, salePartners, type LinkedLine, type MoStage, type UnlinkedLine } from "@/lib/mo-sales-unlinked";
 
 export type SalesPrintKind = "open" | "linked";
 /** exact = ตรงจำนวน (ระบบเสนอ) · suggest = ระบบเสนอแต่ไม่ครบ · pick = เลือกเอง · linked = ผูกแล้ว · none = ไม่มีใบงานให้ผูก */
@@ -47,6 +47,7 @@ export function salesPrintRowsOpen(rows: UnlinkedLine[], picks: Map<string, stri
   const qtyOf = new Map<string, number>();
   for (const p of [...planLinks(chosen, picks), ...planLinks(rows.filter((r) => !ticked.has(r.id) && has(r)), picks)])
     for (const x of p.parts) qtyOf.set(x.sale_line_id, x.qty);
+  const partners = salePartners(rows, picks, qtyOf);
   const out: SalesPrintRow[] = [];
   for (const r of rows) {
     const base = { line_id: r.id, so_number: r.so_number, date: r.date, customer: r.customer, sku: r.sku, sku_name: r.sku_name ?? null, image_url: r.image_url ?? null, sold: r.qty };
@@ -62,8 +63,9 @@ export function salesPrintRowsOpen(rows: UnlinkedLine[], picks: Map<string, stri
     const qty = qtyOf.get(r.id) ?? 0;
     const match: SalesPrintMatch = s ? (r.kind === "exact" ? "exact" : "suggest") : "pick";
     const notes: string[] = [];
-    if (s && s.mo_full && s.qty < s.mo_qty - EPS) notes.push(`รวมกับใบขายอื่นครบ ${fmt(s.mo_qty)}`);
-    if (s && !s.mo_full) notes.push(`ใบงานได้ใบขายแค่ ${fmt(s.qty)}/${fmt(s.mo_qty)}`);
+    // ใบขายอื่นที่เลือกใบงานเดียวกัน: เลขใบ (วันที่ · จำนวน) — เจ้าของ 2026-11-02 · ไม่ติ๊ก = ยังไม่ผูกด้วย
+    const pn = partnerNote(partners, c, r.id, qty, thDateShort, (id) => !ticked.has(id));
+    if (pn) notes.push(pn.text);
     if (c.linked) notes.push(`ถอดของเดิม ${linkedText(c.linked)}`);
     if (qty < r.left - EPS) notes.push(`ผูกได้ ${fmt(qty)} จาก ${fmt(r.left)}`);
     if (r.unlinked?.length) notes.push(`เคยถอดผูกจาก ${r.unlinked.map((u) => u.mo_no).join(", ")}`);

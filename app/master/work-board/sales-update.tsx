@@ -19,7 +19,7 @@ import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { bkkDate } from "@/lib/mo-sales-match";
-import { defaultPick, planLinks, type LinkedLine, type UnlinkedKind, type UnlinkedLine, type UnlinkedStats } from "@/lib/mo-sales-unlinked";
+import { defaultPick, partnerNote, planLinks, salePartners, type LinkedLine, type UnlinkedKind, type UnlinkedLine, type UnlinkedStats } from "@/lib/mo-sales-unlinked";
 import { SALES_PRINT_STORE, salesPrintRowsLinked, salesPrintRowsOpen, type SalesPrintKind, type SalesPrintPayload } from "@/lib/mo-sales-print";
 import { MoPick, SalesMove, StageTag, thDate } from "./sales-move";
 
@@ -81,6 +81,8 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
 
   const bills = useMemo(() => byBill((rows ?? []).filter((r) => filter === "all" || r.kind === filter)), [rows, filter]);
   const linkedBills = useMemo(() => byBill(linked), [linked]);
+  // ใบขายอื่นที่เลือกใบงานเดียวกันอยู่ → "รวมกับ ISG… (วันที่ · จำนวน) = ครบ N"
+  const partners = useMemo(() => salePartners(rows ?? [], pick), [rows, pick]);
 
   const chosen = (rows ?? []).filter((r) => sel.has(r.id) && pick.get(r.id));
   const plan = planLinks(chosen, pick);
@@ -248,8 +250,10 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
                                   <StageTag stage={c.stage} />
                                 </div>
                                 {c.linked && <div className="text-[12px] text-amber-700">ใบนี้ผูก {linkedText(c.linked)} อยู่ — ผูกแล้วใบขายนั้นจะกลับเป็น “ยังไม่ผูก”</div>}
-                                {s && !s.mo_full && <div className="text-[12px] text-amber-700">ใบงานนี้ได้ใบขายแค่ {fmt(s.qty)} จาก {fmt(s.mo_qty)} — ที่เหลือเลือกได้ในหน้าอัปเดตเป็นชุด (ปุ่ม “เลือกใบขาย…”)</div>}
-                                {s && s.mo_full && s.qty < s.mo_qty && <div className="text-[12px] text-slate-500">รวมกับใบขายอื่นครบ {fmt(s.mo_qty)} ชิ้น</div>}
+                                {(() => {
+                                  const pn = partnerNote(partners, c, r.id, s?.qty ?? Math.min(r.left, c.qty), thDate);
+                                  return pn && <div className={`text-[12px] ${pn.full ? "text-slate-500" : "text-amber-700"}`}>{pn.text}{pn.full ? "" : " — ที่เหลือเลือกได้ในหน้าอัปเดตเป็นชุด (ปุ่ม “เลือกใบขาย…”)"}</div>;
+                                })()}
                               </>
                             ) : r.cands.length
                               ? <div className="text-[12px] text-slate-500">ใบงานของสินค้านี้ผูกใบขายอื่นหมดแล้ว — เลือกย้ายมาผูกใบขายนี้ได้</div>

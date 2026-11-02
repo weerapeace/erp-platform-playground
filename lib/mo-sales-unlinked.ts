@@ -112,6 +112,38 @@ export function buildUnlinked(mos: UnlinkedMo[], lines: SaleLine[], links: Sales
   };
 }
 
+/**
+ * ใบขายที่เลือกใบงานเดียวกันอยู่ (ใบงาน → บรรทัดใบขาย) — ไว้บอก "รวมกับ ISG… (วันที่ · จำนวน)" (เจ้าของ 2026-11-02)
+ * คิดจากที่เลือกจริง (picks) ไม่ใช่แค่ที่ระบบเสนอ · qty = qtyOf (แผนผูกจริง) → ยอดที่ระบบเสนอ → ที่เหลือผูก (ไม่เกินที่ใบงานผลิต)
+ */
+export type SalePartner = { line_id: string; so_number: string; date: string; qty: number };
+export function salePartners(rows: UnlinkedLine[], picks: Map<string, string>, qtyOf?: Map<string, number>): Map<string, SalePartner[]> {
+  const out = new Map<string, SalePartner[]>();
+  for (const r of rows) {
+    const m = picks.get(r.id);
+    const c = m ? r.cands.find((x) => x.mo_no === m) : undefined;
+    if (!c) continue;
+    const qty = qtyOf?.get(r.id) ?? r.suggest.find((x) => x.mo_no === c.mo_no)?.qty ?? Math.min(r.left, c.qty);
+    (out.get(c.mo_no) ?? out.set(c.mo_no, []).get(c.mo_no)!).push({ line_id: r.id, so_number: r.so_number, date: r.date, qty });
+  }
+  for (const list of out.values()) list.sort((a, b) => a.date.localeCompare(b.date) || a.so_number.localeCompare(b.so_number));
+  return out;
+}
+/**
+ * ข้อความใบงานเดียวกันหลายใบขาย: "รวมกับ ISG… (28 ต.ค. 69 · 250) = ครบ 500" / "= 300/500"
+ * ไม่มีใบอื่น + ผูกไม่เต็มใบงาน = "ใบงานได้ใบขายแค่ 40/200" · full = ใบขายรวมครบที่ใบงานผลิต
+ */
+export function partnerNote(partners: Map<string, SalePartner[]>, mo: { mo_no: string; qty: number }, lineId: string, thisQty: number,
+  date: (ymd: string) => string, untickedOf?: (lineId: string) => boolean): { text: string; full: boolean } | null {
+  const fmtN = (n: number) => r2(n).toLocaleString("th-TH");
+  const others = (partners.get(mo.mo_no) ?? []).filter((p) => p.line_id !== lineId);
+  const total = r2(others.reduce((a, p) => a + p.qty, thisQty));
+  const full = total >= mo.qty - EPS;
+  if (!others.length) return full ? null : { text: `ใบงานได้ใบขายแค่ ${fmtN(total)}/${fmtN(mo.qty)}`, full };
+  const list = others.map((p) => `${p.so_number} (${date(p.date)} · ${fmtN(p.qty)}${untickedOf?.(p.line_id) ? " · ไม่ติ๊ก" : ""})`).join(", ");
+  return { text: `รวมกับ ${list} = ${full ? `ครบ ${fmtN(mo.qty)}` : `${fmtN(total)}/${fmtN(mo.qty)}`}`, full };
+}
+
 /** ใบที่ระบบเลือกให้ตั้งต้น: ที่ระบบเสนอ ไม่งั้นใบว่างใบแรก (ไม่เลือกใบที่ผูกใบขายอื่นให้เอง) */
 export const defaultPick = (r: UnlinkedLine): string | null => r.suggest[0]?.mo_no ?? r.cands.find((c) => !c.linked)?.mo_no ?? null;
 
