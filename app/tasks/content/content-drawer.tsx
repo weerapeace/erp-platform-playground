@@ -688,7 +688,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           <div className={`flex flex-col ${densityPad(dth.density)} ${densityGap(dth.density)} ${isWide ? "overflow-y-auto min-w-0" : ""}`} style={isWide ? { flexBasis: `${leftPct}%`, flexGrow: 0, flexShrink: 0 } : undefined}>
             {/* ───── รายการงานที่ต้องการ (บรีฟคุยกับพนักงาน + Ref รูป/ลิงก์) — บนสุดฝั่งซ้าย ───── */}
             {!isHidden(dth, "brief") && (
-              <ContentBriefCard key={d.id} style={{ order: -1 }} contentId={contentId} brief={d.brief} refImageKeys={d.ref_image_keys ?? []} refLinks={d.ref_links ?? []} pushToast={pushToast} />
+              <ContentBriefCard key={d.id} style={{ order: -1 }} contentId={contentId} brief={d.brief} refImageKeys={d.ref_image_keys ?? []} refLinks={d.ref_links ?? []} brandId={brandId} brands={brands} pushToast={pushToast} />
             )}
 
             {/* ───── การ์ดสินค้า: สรุปสั้น (รูป + รหัส + ชื่อ + แบรนด์ + สี + ราคาบรรทัดเดียว) · กด ✏️ เพื่อแก้ ───── */}

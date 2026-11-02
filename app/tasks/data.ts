@@ -21,6 +21,7 @@ export {
 import type { CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, SubtaskStatus, ContentStatus } from "@/lib/creative-tasks";
 import type { MassCreatePost, MassFreq, MassRawRow } from "@/lib/marketing/mass-plan";
 import type { BrandProfile } from "@/lib/marketing/brand-profile";
+import type { BriefTemplate } from "@/lib/brief-templates";
 
 // ---- Types (ตรงกับ output ของ /api/creative-tasks) ----
 export type CreativeTask = {
@@ -715,6 +716,28 @@ export async function getLinkPreview(url: string): Promise<LinkPreview> {
   const j = await res.json().catch(() => ({}));
   if (j?.data) return j.data as LinkPreview;
   throw new Error((j?.error as string) || "ดึงข้อมูลลิงก์ไม่สำเร็จ");
+}
+
+// ---- เทมเพลตบรีฟ (โน้ต + Ref ของ "รายการงานที่ต้องการ") — กติกา/ตรวจข้อมูลอยู่ที่ lib/brief-templates ----
+export type { BriefTemplate } from "@/lib/brief-templates";
+export const BRIEF_TEMPLATES_SWR_KEY = "creative:brief-templates";
+export async function listBriefTemplates(all = false): Promise<BriefTemplate[]> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-brief-templates${all ? "?all=1" : ""}`));
+  return (j.data as BriefTemplate[]) ?? [];
+}
+export async function createBriefTemplate(body: Partial<BriefTemplate>): Promise<BriefTemplate> {
+  const j = await jsonOrThrow(await apiFetch("/api/creative-brief-templates", { method: "POST", body: JSON.stringify(body) }));
+  return j.data as BriefTemplate;
+}
+export async function updateBriefTemplate(id: string, patch: Partial<BriefTemplate>): Promise<BriefTemplate> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-brief-templates/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));
+  return j.data as BriefTemplate;
+}
+export async function deleteBriefTemplate(id: string): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-brief-templates/${id}`, { method: "DELETE" }));
+}
+export async function reorderBriefTemplates(ids: string[]): Promise<void> {
+  await jsonOrThrow(await apiFetch("/api/creative-brief-templates", { method: "PUT", body: JSON.stringify({ ids }) }));
 }
 
 // ============================================================

@@ -14,7 +14,9 @@ import { tr } from "@/lib/lang";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { RichTextEditor } from "@/components/rich-text";
-import { BriefRefSlots, type BriefRefLink } from "@/app/tasks/content/content-brief";
+import { BriefRefSlots, type BriefRefLink } from "@/app/tasks/content/brief-ref-slots";
+import { BriefTemplatePicker } from "@/app/tasks/content/brief-templates";
+import { appendBriefTemplate } from "@/lib/brief-templates";
 import { noteToHtml, noteToText, isEmptyNote } from "@/lib/rich-note";
 import { ERPDateTime24 } from "@/components/form";
 import { PlatformIcon } from "@/components/platform-icon";
@@ -237,7 +239,18 @@ export function PlanModal({ open, item, defaults, brands, pillars, platforms, pl
               placeholder={t("ไอเดียคืออะไร? เช่น BBP08 แมตช์ชุดไปเที่ยว", "What's the idea? e.g. BBP08 travel outfit match")}
               className="w-full border-0 border-b border-transparent bg-transparent px-0 py-1 text-lg font-semibold text-slate-900 placeholder:font-normal placeholder:text-slate-300 hover:border-slate-200 focus:border-blue-500 focus:outline-none focus:ring-0 disabled:text-slate-700" />
           </div>
-          {/* บรีฟ = โน้ตจัดรูปแบบ (ช่องเดียวกับ "รายการงานที่ต้องการ" ในป๊อปโพสต์) */}
+          {/* บรีฟ = โน้ตจัดรูปแบบ (ช่องเดียวกับ "รายการงานที่ต้องการ" ในป๊อปโพสต์) · เทมเพลต = ต่อท้ายโน้ต + รวม Ref ในการ์ดนี้ (บันทึกตอนกดบันทึก) */}
+          {!ro && (
+            <div className="flex justify-end">
+              <BriefTemplatePicker brandId={d.brand_id || null} brands={brands} onMessage={pushToast}
+                getCurrent={() => ({ html: d.brief, images: d.ref_image_keys, links: d.ref_links })}
+                onApply={(tpl) => {
+                  const next = appendBriefTemplate({ html: d.brief, images: d.ref_image_keys, links: d.ref_links }, tpl);
+                  set({ brief: next.html, ref_image_keys: next.images, ref_links: next.links });
+                  if (next.skipped) pushToast("info", t(`Ref เต็ม 6 ช่องแล้ว — ข้าม ${next.skipped} อันของเทมเพลต`, `Refs are full (6) — skipped ${next.skipped}`));
+                }} />
+            </div>
+          )}
           <RichTextEditor toolbar="basic" value={d.brief} onChange={(v) => set({ brief: v })} editable={!ro} minHeight={72}
             placeholder={t("บรีฟ: อยากได้รูป/คลิปแนวไหน (ไม่บังคับ)", "Brief: what kind of photo/clip (optional)")} />
         </div>

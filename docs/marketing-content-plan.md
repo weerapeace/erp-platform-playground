@@ -118,6 +118,13 @@
 - **โหมดแปลฟรี:** ปุ่ม "แปลเป็น English" (ต้นฉบับไม่มีภาษาไทย = "แปลเป็นไทย") → `translateNoteHtml(html, to, { free: true })` ใน `lib/content-translate.ts` แปลทีละย่อหน้า/ข้อ (bullet อยู่ครบ · ตัวหนาเฉพาะบางคำจะหาย) · `/api/ai/translate` รับ `engine: "free"` = Google ฟรีอย่างเดียว ไม่เรียก GPT · ไม่บันทึกคำแปล
 - **Ref ≤ 6 ช่อง (รูป + ลิงก์รวมกัน)** — ของกลาง `BriefRefSlots` (ใน content-brief.tsx) ใช้ทั้งป๊อปโพสต์ (บันทึกทันที) และการ์ดไอเดียหน้าวางแผน (บันทึกตอนกดบันทึก · แทน FileMultiInput เดิม) · เพิ่มได้ 3 ทาง: กดเลือก / ลากวาง / **ชี้ที่ช่องแล้ว Ctrl+V** (รูป = อัป · ข้อความที่เป็นลิงก์ = เพิ่มเป็นลิงก์ · ดักแบบ capture ไม่ให้ตัวอัปรูปอื่นในป๊อปรับซ้ำ · กำลังพิมพ์ในโน้ต/ช่องกรอก = ไม่ยุ่ง) · รูป → `ref_image_keys` (อัปผ่าน `uploadImagesWithDupCheck` ถามซ้ำก่อนอัป) · ลิงก์ → คอลัมน์ใหม่ `ref_links jsonb` `[{url,label?}]` (migration `202611011200_content_ref_links`, ทำความสะอาดด้วย `normalizeTaskLinks` เฉพาะ http/https) · ป้ายลิงก์ = หัวข้อจาก `/api/link-preview` · บันทึกทันทีที่เพิ่ม/ลบ
 - 🎬 ส่งเป็นงาน: รายละเอียดงาน = `noteToText(บรีฟ)` + ต่อท้าย "Ref:" ลิงก์ทั้งหมด
+- **เทมเพลตงาน (2026-11-02):** ปุ่ม "เทมเพลต" บนการ์ดบรีฟ (ป๊อปโพสต์ + การ์ดไอเดีย) — `BriefTemplatePicker` (`app/tasks/content/brief-templates.tsx`)
+  - เลือก = **ต่อท้ายโน้ตเสมอ** (เจ้าของเลือก) + รวม Ref ตัวเดิม ไม่อัปซ้ำ (รวม ≤ 6 · ตัดซ้ำ · เกินแจ้ง "ข้าม N อัน") — กติกาอยู่ที่ `lib/brief-templates.ts` `appendBriefTemplate` (+ vitest)
+  - ป๊อปโพสต์ = บันทึกทันที + แถบ "ใช้เทมเพลต … แล้ว · ย้อนกลับ" · การ์ดไอเดีย = เติมในฟอร์ม บันทึกตอนกดบันทึก
+  - เรียง: แบรนด์ของโพสต์ → ใช้ได้ทุกแบรนด์ → แบรนด์อื่น (`sortBriefTemplates`) · ค้นจากชื่อ + ป้าย
+  - บันทึกบรีฟที่พิมพ์อยู่เป็นเทมเพลต (ชื่อ / ป้าย / เฉพาะแบรนด์นี้) · หน้าจัดการ `BriefTemplateManager`: ลากเรียง / แก้ (ชื่อ ป้าย แบรนด์ โน้ต Ref) / ปิดใช้ / ลบ
+  - ตาราง `erp_creative_brief_templates` (migration `202611021000_creative_brief_templates`, RLS เปิด ไม่มี policy — ผ่าน API เท่านั้น) · API `/api/creative-brief-templates` GET (`tasks.view`, `?all=1` รวมที่ปิด) / POST / PUT เรียง · `[id]` PATCH / DELETE (`tasks.edit` = ทุกคนที่แก้คอนเทนต์ได้) · audit ทุกการแก้ (`creative_brief_template`)
+  - ช่อง Ref แยกไฟล์เป็น `app/tasks/content/brief-ref-slots.tsx` (ใช้ใน 3 ที่: ป๊อปโพสต์ / การ์ดไอเดีย / ตัวแก้เทมเพลต)
 
 ## ยังไม่ทำ (ก้อนถัดไป)
 - ก้อน 3: ไอเดียจาก SKU การตลาด (Hero ไม่มีคอนเทนต์ 30 วัน / ป้ายเสริม "ใหม่" / Clearance) + วันสำคัญบนปฏิทิน
