@@ -9,8 +9,9 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { readSiteInfo } from "@/lib/website-site-info";
+import { META_API } from "@/lib/meta-graph";
 
-const GRAPH = "https://graph.facebook.com/v21.0";
+const GRAPH = META_API;   // เวอร์ชันกลางเดียวกับตัวโพสต์ (lib/meta-graph)
 
 /** ข้อมูลวัดผลที่หน้าเว็บส่งมากับออเดอร์ */
 export interface OrderTracking {

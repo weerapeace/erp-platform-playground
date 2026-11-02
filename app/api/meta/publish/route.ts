@@ -10,7 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { fbPublish, fbPublishVideo, fbPublishStory, fbPublishVideoStory, igPublishImages, igPublishStory, igCreateReels } from "@/lib/meta-graph";
+import { fbPublish, fbPublishVideo, fbPublishReel, fbPublishStory, fbPublishVideoStory, igPublishImages, igPublishStory, igCreateReels } from "@/lib/meta-graph";
 import { baseUrl, getPlatformId, loadConn } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -93,8 +93,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         await markPosted("posted", st.url);
         return NextResponse.json({ ok: true, url: st.url, scheduled: false, story: true, error: null });
       }
+      // Reels ต้องใช้ Reels API (ถ้าส่ง /videos จะขึ้นเป็นวิดีโอธรรมดา) · วิดีโอที่ไม่ได้เลือก Reels = วิดีโอปกติ
       const posted = videoUrls.length
-        ? await fbPublishVideo(conn.meta.page_id, token, caption, videoUrls[0], scheduledTime || undefined)
+        ? (format === "reels"
+          ? await fbPublishReel(conn.meta.page_id, token, caption, videoUrls[0], scheduledTime || undefined)
+          : await fbPublishVideo(conn.meta.page_id, token, caption, videoUrls[0], scheduledTime || undefined))
         : await fbPublish(conn.meta.page_id, token, caption, imageUrls, scheduledTime || undefined);
       await markPosted(posted.scheduled ? "scheduled" : "posted", posted.url);
       return NextResponse.json({ ok: true, url: posted.url, scheduled: posted.scheduled, error: null });
@@ -102,7 +105,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Instagram
     const igId = conn.meta.ig_user_id;
     if (!igId) return NextResponse.json({ error: "เพจที่เชื่อมยังไม่ได้ผูก Instagram (ต้องเป็น IG Business + ผูกกับเพจ)" }, { status: 400 });
-    if (format === "story") {   // IG Story (ต้องมีสิทธิ์ instagram_content_publish — ยังรอ App Review)
+    if (format === "story") {   // IG Story (สิทธิ์ instagram_content_publish ตัวเดียวกับโพสต์ — แอปโหมดพัฒนาใช้กับบัญชีตัวเองได้)
       const st = await igPublishStory(igId, token, (videoUrls[0] ?? imageUrls[0]), videoUrls.length > 0);
       await markPosted("posted", st.url);
       return NextResponse.json({ ok: true, url: st.url, scheduled: false, story: true, error: null });

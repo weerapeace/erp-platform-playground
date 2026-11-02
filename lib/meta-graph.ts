@@ -4,10 +4,11 @@
 // ต้องมี env: META_APP_ID + META_APP_SECRET (ตั้งใน Vercel) · token เก็บเข้ารหัสใน platform_credentials.api_key
 //
 // เฟส 1 = Facebook Page (โพสต์รูป/ข้อความบนเพจตัวเอง ใช้ได้เลย ไม่ต้อง App Review)
-// IG (instagram_content_publish) ต้องผ่าน App Review ก่อน — เตรียม ig_user_id ไว้แล้วในการเชื่อมต่อ
+// IG (instagram_content_publish) แอปโหมดพัฒนาโพสต์บัญชีตัวเองได้ · ถ้าจะให้คนนอกแอปเชื่อมต้องผ่าน App Review
 // ============================================================
 
-export const META_VER = "v21.0";
+// ⚠️ แต่ละเวอร์ชันใช้ได้ ~2 ปี (v21 หมด 21 ม.ค. 2027) → v25 (ก.พ. 2026) · เปลี่ยนเวอร์ชันที่นี่ที่เดียว (meta-capi ใช้ค่านี้ด้วย)
+export const META_VER = "v25.0";
 export const META_API = `https://graph.facebook.com/${META_VER}`;
 
 const APP_ID = () => (process.env.META_APP_ID ?? "").trim();
@@ -107,6 +108,24 @@ export async function fbPublishVideo(pageId: string, pageToken: string, descript
   const j = await graph(`${META_API}/${pageId}/videos`, { method: "POST", body: b });
   const id = String(j.id ?? "");
   return { id, url: id ? `https://www.facebook.com/${id}` : "", scheduled };
+}
+
+// Facebook Reels (Reels Publishing API) — /videos ปกติจะขึ้นเป็น "วิดีโอ" ไม่ใช่ Reels จึงต้องใช้ทางนี้
+//  start → ส่ง file_url ให้ rupload.facebook.com ดึงไฟล์เอง → finish (PUBLISHED / SCHEDULED)
+//  ข้อจำกัด Meta: แนวตั้ง 9:16 · ≥540p · 3–90 วิ · ≤30 Reels/วัน/เพจ
+export async function fbPublishReel(pageId: string, pageToken: string, description: string, videoUrl: string, scheduledTime?: number): Promise<{ url: string; id: string; scheduled: boolean }> {
+  const init = await graph(`${META_API}/${pageId}/video_reels`, { method: "POST", body: new URLSearchParams({ upload_phase: "start", access_token: pageToken }) });
+  const videoId = String(init.video_id ?? "");
+  if (!videoId) throw new Error("เริ่มอัป Reels ไม่สำเร็จ");
+  const uploadUrl = String(init.upload_url ?? "") || `https://rupload.facebook.com/video-upload/${META_VER}/${videoId}`;
+  const up = await fetch(uploadUrl, { method: "POST", headers: { Authorization: `OAuth ${pageToken}`, file_url: videoUrl } });
+  const uj = (await up.json().catch(() => ({}))) as { success?: boolean; debug_info?: { message?: string } };
+  if (!up.ok || uj.success === false) throw new Error(uj.debug_info?.message || `อัปวิดีโอ Reels ไม่สำเร็จ (HTTP ${up.status})`);
+  const scheduled = !!scheduledTime && scheduledTime > 0;
+  const fin = new URLSearchParams({ upload_phase: "finish", video_id: videoId, video_state: scheduled ? "SCHEDULED" : "PUBLISHED", description, access_token: pageToken });
+  if (scheduled) fin.set("scheduled_publish_time", String(scheduledTime));
+  await graph(`${META_API}/${pageId}/video_reels`, { method: "POST", body: fin });
+  return { id: videoId, url: `https://www.facebook.com/reel/${videoId}`, scheduled };
 }
 
 // ============================================================

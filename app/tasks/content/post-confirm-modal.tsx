@@ -45,7 +45,7 @@ export function PostConfirmModal({
   const schedFuture = schedUnix > 0 && schedUnix * 1000 - Date.now() >= 10 * 60 * 1000;   // ≥ 10 นาทีล่วงหน้า
 
   const doPublish = () => onPublish(orderedSel, mode === "schedule" && schedFuture ? schedUnix : null, fmt);
-  const storyBlocked = fmt === "story" && platform === "instagram";   // IG Story รอสิทธิ์ Meta
+  const storyBlocked = false;   // IG Story ใช้สิทธิ์เดียวกับโพสต์ IG แล้ว (ถ้า Meta ไม่ให้ จะเห็นข้อความจาก Meta ตอนกด)
   const storyNoMedia = connected && fmt === "story" && orderedSel.length === 0;   // Story ที่ลงแผนไว้ก่อน ยังไม่มีไฟล์ → ยิงไม่ได้
 
   return (

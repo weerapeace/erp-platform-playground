@@ -16,7 +16,7 @@ export type BrandFormatMap = Record<string, Record<string, string>>;   // brand 
 // รูปแบบที่แต่ละแพลตฟอร์มมีให้เลือก (ต้องตรงกับ POST_FORMATS ในหน้าคอนเทนต์)
 export const FORMATS: Record<string, { key: string; th: string; en: string }[]> = {
   instagram: [{ key: "single", th: "รูปเดียว", en: "Single" }, { key: "carousel", th: "อัลบั้ม", en: "Carousel" }, { key: "reels", th: "Reels", en: "Reels" }, { key: "story", th: "Story", en: "Story" }],
-  facebook: [{ key: "single", th: "รูปเดียว", en: "Single" }, { key: "carousel", th: "อัลบั้ม", en: "Album" }, { key: "video", th: "วิดีโอ", en: "Video" }, { key: "story", th: "Story", en: "Story" }],
+  facebook: [{ key: "single", th: "รูปเดียว", en: "Single" }, { key: "carousel", th: "อัลบั้ม", en: "Album" }, { key: "video", th: "วิดีโอ", en: "Video" }, { key: "reels", th: "Reels", en: "Reels" }, { key: "story", th: "Story", en: "Story" }],
   tiktok: [{ key: "video", th: "วิดีโอ", en: "Video" }, { key: "carousel", th: "โพสต์รูป", en: "Photo" }],
   youtube: [{ key: "video", th: "วิดีโอ", en: "Video" }, { key: "reels", th: "Shorts", en: "Shorts" }],
 };
