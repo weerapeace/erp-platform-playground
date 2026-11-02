@@ -1,5 +1,5 @@
 /**
- * GET /api/drive/thumb?id=<fileId>&w=200 — พรีวิวรูปจาก Google Drive (ย่อผ่าน sharp) สำหรับฟอร์มนำเข้า
+ * GET /api/drive/thumb?id=<fileId>&w=200 — พรีวิวรูปจาก Google Drive (ย่อผ่าน sharp) สำหรับฟอร์มนำเข้า + รูปจาก Drive ในคอนเทนต์ (r2ImageUrl("drive:<id>"))
  * no-auth เหมือน /api/r2-image (เสิร์ฟเฉพาะไฟล์ที่ service account เข้าถึง = งานเราเอง)
  */
 import { NextRequest } from "next/server";
@@ -11,7 +11,7 @@ export const revalidate = 0;
 export async function GET(request: NextRequest): Promise<Response> {
   const sp = new URL(request.url).searchParams;
   const id = (sp.get("id") ?? "").trim();
-  const w = Math.min(800, Math.max(40, Number(sp.get("w")) || 200));
+  const w = Math.min(2000, Math.max(40, Number(sp.get("w")) || 200));   // ≤2000 = ดูเต็มจอได้ (รูปจาก Drive ในคอนเทนต์)
   if (!id || !/^[a-zA-Z0-9_-]+$/.test(id)) return new Response("invalid id", { status: 400 });
   if (!driveConfigured()) return new Response("drive not configured", { status: 503 });
 

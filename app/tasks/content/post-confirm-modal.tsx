@@ -1,10 +1,12 @@
 "use client";
 
-// ป๊อปอัปยืนยันก่อนโพสต์ — ปลายทาง + พรีวิวแคปชั่น + เลือกรูป (หลายรูป) + ตั้งเวลา (Facebook จัดคิวให้)
+// ป๊อปอัปยืนยันก่อนโพสต์ — ปลายทาง + พรีวิวแคปชั่น + เลือกรูป (หลายรูป) + โพสต์เลย / ตั้งคิวให้ระบบโพสต์ตามเวลา
 // ใช้ ERPModal กลาง · ใช้ได้ทั้งโพสต์จริง (เชื่อม FB แล้ว) และโหมดมือ (คัดลอก+เปิดเพจ)
+// ตั้งคิว = คิวโพสต์กลาง (lib/social-publish/queue) — ใช้ได้ทุกรูปแบบทั้ง FB/IG รวม Story (แอป FB/IG เองตั้งเวลา Story/IG ไม่ได้)
 
 import { useState } from "react";
 import { ERPModal } from "@/components/modal";
+import { ERPDateTime24 } from "@/components/form";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { useT } from "@/components/i18n";
 import { PlatformChip } from "../platform-chip";
@@ -13,12 +15,11 @@ import { FORMATS } from "./brand-platforms-modal";
 export type PostImage = { key: string; label?: string | null; type?: "image" | "video" };
 
 export function PostConfirmModal({
-  platform, connected, allowSchedule = true, pageName, captionText, images, defaultSelected, scheduledAtLocal, busy,
-  format, onClose, onPublish, onManual,
+  platform, connected, pageName, captionText, images, defaultSelected, scheduledAtLocal, busy,
+  format, onClose, onPublish, onQueue, onManual,
 }: {
   platform: string;
   connected: boolean;              // เชื่อมแล้ว → โพสต์จริง · false → โหมดมือ
-  allowSchedule?: boolean;         // ตั้งเวลาได้ไหม (FB ได้ · IG ไม่ได้)
   pageName?: string | null;
   captionText: string;
   images: PostImage[];
@@ -28,23 +29,25 @@ export function PostConfirmModal({
   busy: boolean;
   onClose: () => void;
   onPublish: (imageKeys: string[], scheduledUnix: number | null, format: string) => void;
+  onQueue?: (imageKeys: string[], runAtLocal: string, format: string) => void;   // ตั้งคิวให้ระบบโพสต์ (ค่าเวลา YYYY-MM-DDTHH:mm เวลาเครื่อง)
   onManual: () => void;
 }) {
   const t = useT();
   const [sel, setSel] = useState<string[]>(defaultSelected);
-  const [mode, setMode] = useState<"now" | "schedule">("now");
+  const [mode, setMode] = useState<"now" | "queue">("now");
+  // เวลาคิว: ตั้งต้นจากเวลาโพสต์ของคอนเทนต์ (ถ้ายังไม่ผ่าน)
+  const [runAt, setRunAt] = useState(() => (scheduledAtLocal && new Date(scheduledAtLocal).getTime() > Date.now() + 60_000 ? scheduledAtLocal : ""));
   const [fmt, setFmt] = useState(format ?? "");   // ประเภทโพสต์ (ว่าง = อัตโนมัติจากสื่อที่เลือก)
   const fmtOpts = FORMATS[platform] ?? [];
   const toggle = (k: string) => setSel((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]));
   // เรียงรูปที่เลือกตามลำดับที่แสดง
   const orderedSel = images.filter((im) => sel.includes(im.key)).map((im) => im.key);
   const selHasVideo = images.some((im) => sel.includes(im.key) && im.type === "video");
-  const showSchedule = connected && allowSchedule;
+  const showQueue = connected && !!onQueue;
+  const runAtMs = runAt ? new Date(runAt).getTime() : NaN;
+  const runAtOk = Number.isFinite(runAtMs) && runAtMs - Date.now() >= 60_000;   // ≥ 1 นาทีล่วงหน้า
 
-  const schedUnix = scheduledAtLocal ? Math.floor(new Date(scheduledAtLocal).getTime() / 1000) : 0;
-  const schedFuture = schedUnix > 0 && schedUnix * 1000 - Date.now() >= 10 * 60 * 1000;   // ≥ 10 นาทีล่วงหน้า
-
-  const doPublish = () => onPublish(orderedSel, mode === "schedule" && schedFuture ? schedUnix : null, fmt);
+  const doPublish = () => (mode === "queue" ? onQueue?.(orderedSel, runAt, fmt) : onPublish(orderedSel, null, fmt));
   const storyBlocked = false;   // IG Story ใช้สิทธิ์เดียวกับโพสต์ IG แล้ว (ถ้า Meta ไม่ให้ จะเห็นข้อความจาก Meta ตอนกด)
   const storyNoMedia = connected && fmt === "story" && orderedSel.length === 0;   // Story ที่ลงแผนไว้ก่อน ยังไม่มีไฟล์ → ยิงไม่ได้
 
@@ -53,8 +56,8 @@ export function PostConfirmModal({
       footer={<>
         <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
         {connected ? (
-          <button onClick={doPublish} disabled={busy || storyBlocked || storyNoMedia || (mode === "schedule" && !schedFuture)} className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {busy ? t("กำลังส่ง...", "Sending...") : mode === "schedule" ? `⏰ ${t("ตั้งเวลาโพสต์", "Schedule")}` : `🚀 ${t("โพสต์เลย", "Post now")}`}
+          <button onClick={doPublish} disabled={busy || storyBlocked || storyNoMedia || (mode === "queue" && !runAtOk)} className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
+            {busy ? t("กำลังส่ง...", "Sending...") : mode === "queue" ? `⏰ ${t("ตั้งคิวโพสต์", "Queue post")}` : `🚀 ${t("โพสต์เลย", "Post now")}`}
           </button>
         ) : (
           <button onClick={onManual} className="h-9 px-5 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700">📤 {t("คัดลอก + เปิดเพจ", "Copy + open")}</button>
@@ -86,7 +89,7 @@ export function PostConfirmModal({
               <p className={`text-[11px] mt-1 ${storyBlocked ? "text-rose-600" : "text-slate-500"}`}>
                 {storyBlocked
                   ? t("Instagram Story ยังยิงอัตโนมัติไม่ได้ (รอ Meta อนุมัติสิทธิ์) — กดยกเลิกแล้วลงเองในแอป", "IG story needs Meta approval — post manually for now")
-                  : t("Story = ใช้สื่อ 1 ชิ้น · อยู่ 24 ชม. · ตั้งเวลาล่วงหน้าไม่ได้", "Story = 1 item, 24h, no scheduling")}
+                  : t("Story = ใช้สื่อ 1 ชิ้น · อยู่ 24 ชม. · ตั้งเวลาได้ด้วย “ตั้งคิวให้ระบบโพสต์”", "Story = 1 item, 24h · schedule it with the queue")}
               </p>
             )}
             {storyNoMedia && !storyBlocked && (
@@ -135,22 +138,22 @@ export function PostConfirmModal({
           {selHasVideo && <p className="text-[11px] text-amber-600 mt-1.5">🎬 {t("มีวิดีโอถูกเลือก — จะโพสต์เป็นวิดีโอ (รูปที่เลือกจะไม่ถูกใช้)", "A video is selected — it posts as a video (images ignored)")}{platform === "instagram" ? t(" · IG ลงเป็น Reels", " · IG posts as Reels") : ""}</p>}
         </div>
 
-        {/* เวลา (FB โพสต์จริงเท่านั้น — IG ตั้งเวลาไม่ได้) */}
-        {showSchedule ? (
+        {/* เวลา: โพสต์เลย / ตั้งคิวให้ระบบโพสต์ (ทุกแพลตฟอร์มที่ยิงอัตโนมัติได้ · รวม Story) */}
+        {showQueue && (
           <div>
             <p className="text-[11px] text-slate-400 mb-1">{t("เวลาโพสต์", "Timing")}</p>
             <div className="flex flex-col gap-1.5 text-sm">
               <label className="inline-flex items-center gap-2 cursor-pointer"><input type="radio" checked={mode === "now"} onChange={() => setMode("now")} /> {t("โพสต์เลย (ทันที)", "Post now")}</label>
-              <label className={`inline-flex items-center gap-2 ${schedUnix <= 0 ? "text-slate-300" : "cursor-pointer"}`}>
-                <input type="radio" disabled={schedUnix <= 0} checked={mode === "schedule"} onChange={() => setMode("schedule")} />
-                {schedUnix > 0 ? `${t("ตั้งเวลา", "Schedule")}: ${scheduledAtLocal.replace("T", " ")}` : t("ตั้งเวลา (ตั้งวันเวลาที่ช่อง 🗓 ก่อน)", "Schedule (set date/time in 🗓 first)")}
-              </label>
-              {mode === "schedule" && schedUnix > 0 && !schedFuture && <p className="text-[11px] text-rose-500">{t("ต้องตั้งล่วงหน้าอย่างน้อย 10 นาที", "Must be ≥10 minutes ahead")}</p>}
-              <p className="text-[10px] text-slate-400">💡 {t("ถ้าตั้งเวลา Facebook จะจัดคิวโพสต์ให้เองตามเวลานั้น (ไม่ต้องเปิดเครื่องรอ)", "If scheduled, Facebook publishes it at that time for you")}</p>
+              <label className="inline-flex items-center gap-2 cursor-pointer"><input type="radio" checked={mode === "queue"} onChange={() => setMode("queue")} /> {t("ตั้งคิวให้ระบบโพสต์ตามเวลา", "Queue — the system posts it on time")}</label>
+              {mode === "queue" && (
+                <div className="pl-6 space-y-1">
+                  <ERPDateTime24 value={runAt} onChange={setRunAt} />
+                  {runAt && !runAtOk && <p className="text-[11px] text-rose-500">{t("ต้องเป็นเวลาข้างหน้า (อย่างน้อย 1 นาที)", "Must be at least 1 minute ahead")}</p>}
+                  <p className="text-[10px] text-slate-400">💡 {t("ระบบโพสต์ให้เองตามเวลา (ช้าได้ไม่เกิน ~5 นาที) ไม่ต้องเปิดเครื่องรอ · ใช้แคปชั่น/รูปตามที่เห็นตอนนี้ · ยกเลิก/ดูผลได้ที่กล่อง “คิวโพสต์อัตโนมัติ”", "Posts automatically on time (up to ~5 min late) · uses this caption/media · cancel or check in the Auto-post queue box")}</p>
+                </div>
+              )}
             </div>
           </div>
-        ) : connected && (
-          <p className="text-[11px] text-slate-400">⏱ {t("Instagram โพสต์ทันทีเท่านั้น (ตั้งเวลายังไม่รองรับ)", "Instagram posts immediately (scheduling not supported)")}</p>
         )}
       </div>
     </ERPModal>

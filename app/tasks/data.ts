@@ -592,6 +592,13 @@ export async function addContentAttachment(contentId: string, body: { kind?: str
   const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/attachments`, { method: "POST", body: JSON.stringify(body) }));
   return j.data as ContentAttachment;
 }
+// ลิงก์ Google Drive → ตรวจว่าระบบอ่านได้ (แชร์ให้ service account แล้ว) · accept=image รับลิงก์โฟลเดอร์ได้ (คืนรายการรูปให้ติ๊ก)
+export type DriveFileRef = { file_id: string; name: string; mime_type: string | null; size: number | null };
+export async function resolveDriveLink(link: string, accept: "image" | "video"): Promise<{ file?: DriveFileRef; folder?: { id: string; name: string }; files?: DriveFileRef[] }> {
+  const j = await jsonOrThrow(await apiFetch("/api/drive-video/resolve", { method: "POST", body: JSON.stringify({ link, accept }) }));
+  if (j.folder) return { folder: j.folder as { id: string; name: string }, files: (j.files ?? []) as DriveFileRef[] };
+  return { file: { file_id: String(j.file_id), name: String(j.name ?? ""), mime_type: (j.mime_type as string | null) ?? null, size: (j.size as number | null) ?? null } };
+}
 export async function deleteContentAttachment(contentId: string, attId: string): Promise<void> {
   await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/attachments?attachment_id=${attId}`, { method: "DELETE" }));
 }
@@ -629,6 +636,30 @@ export async function igFinalize(contentId: string, creationId: string): Promise
   const j = await jsonOrThrow(await apiFetch("/api/meta/ig-finalize", { method: "POST", body: JSON.stringify({ content_id: contentId, creation_id: creationId }) }));
   const r = j as { url?: string; processing?: boolean };
   return { url: r.url, processing: !!r.processing };
+}
+
+// ---- 📤 คิวโพสต์อัตโนมัติ (ระบบโพสต์ให้ตามเวลา · ของกลาง lib/social-publish/queue) ----
+export type PublishJobStatus = "queued" | "running" | "processing" | "posted" | "failed" | "cancelled";
+export type PublishJob = {
+  id: string; content_id: string; platform: string; format: string | null; caption_text: string; media: PostMediaRef[];
+  run_at: string; status: PublishJobStatus; attempts: number; result_url: string | null; last_error: string | null;
+  posted_at: string | null; created_by_name: string | null; created_at: string; updated_at: string;
+  content?: { title: string | null; content_no: string | null; brand_id: string | null; scheduled_at: string | null } | null;
+};
+export type PublishJobInput = { platform: string; format?: string | null; caption_text: string; media: PostMediaRef[]; run_at: string };
+/** key แคชภาพรวมคิว (ป๊อปคิวในปฏิทิน) — ตั้ง/ยกเลิกคิวแล้ว mutateSWR key นี้ */
+export const PUBLISH_JOBS_SWR_KEY = "creative:publish-jobs";
+export async function listPublishJobs(contentId?: string): Promise<PublishJob[]> {
+  const j = await jsonOrThrow(await apiFetch(`/api/social-publish/jobs${contentId ? `?content_id=${encodeURIComponent(contentId)}` : ""}`));
+  return (j.data ?? []) as PublishJob[];
+}
+export async function queuePublishJobs(contentId: string, items: PublishJobInput[]): Promise<PublishJob[]> {
+  const j = await jsonOrThrow(await apiFetch("/api/social-publish/jobs", { method: "POST", body: JSON.stringify({ content_id: contentId, items }) }));
+  return (j.data ?? []) as PublishJob[];
+}
+export async function updatePublishJob(id: string, body: { action: "cancel" | "retry" | "caption"; run_at?: string | null; caption_text?: string }): Promise<PublishJob> {
+  const j = await jsonOrThrow(await apiFetch(`/api/social-publish/jobs/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }));
+  return j.data as PublishJob;
 }
 
 // ---- เวลาแนะนำการโพสต์ต่อวัน (จันทร์-อาทิตย์) — เก็บ ui_config key 'creative_recommended_times' ----

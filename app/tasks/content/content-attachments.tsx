@@ -3,7 +3,8 @@
 import { useRef, useState } from "react";
 import { ImageAttach } from "@/components/image-attach";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { type ContentAttachment } from "../data";
+import { type ContentAttachment, type DriveFileRef } from "../data";
+import { DriveImageAdd } from "./drive-image-add";
 import { useT } from "@/components/i18n";
 import { type ToastVariant } from "@/components/toast";
 
@@ -12,13 +13,14 @@ import { type ToastVariant } from "@/components/toast";
 // ============================================================
 // ไฟล์แนบของคอนเทนต์: รูป (ย่อก่อนอัป) / วิดีโอสั้น / ลิงก์ (พรีวิว OG เต็ม)
 // ============================================================
-export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLink, onAddDriveVideo, onDelete, pushToast, hideImageList = false }: {
+export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLink, onAddDriveVideo, onAddDriveImages, onDelete, pushToast, hideImageList = false }: {
   attachments: ContentAttachment[];
   hideImageList?: boolean;   // คลังรูปด้านบนโชว์รูปอยู่แล้ว → ตรงนี้เหลือแค่ช่องอัปโหลด
   onAttachImage: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => Promise<void>;
   onUploadVideo: (f: File) => Promise<void>;
   onAddLink: (url: string) => Promise<void>;
   onAddDriveVideo: (link: string) => Promise<void>;
+  onAddDriveImages?: (files: DriveFileRef[]) => Promise<void>;   // รูปจาก Google Drive (ไม่ก็อปลงระบบ)
   onDelete: (id: string) => Promise<void>;
   pushToast: (type: ToastVariant, m: string) => void;
 }) {
@@ -47,7 +49,8 @@ export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, 
       {/* รูปภาพ */}
       <div>
         <p className="text-xs text-slate-500 mb-1">🖼 {t("รูปภาพ", "Images")}</p>
-        <ImageAttach images={images.map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))} onAttach={onAttachImage} onDelete={onDelete} pushToast={pushToast} hideList={hideImageList} />
+        <ImageAttach images={images.filter((a) => a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))} onAttach={onAttachImage} onDelete={onDelete} pushToast={pushToast} hideList={hideImageList} />
+        {onAddDriveImages && <DriveImageAdd existingKeys={images.map((a) => a.url ?? "").filter((u) => u.startsWith("drive:"))} onAdd={onAddDriveImages} pushToast={pushToast} />}
       </div>
       {/* วิดีโอ */}
       <div>

@@ -22,6 +22,7 @@ import {
   CONTENT_STATUS_META, contentStatusLabel, type BrandCalStyle, type ContentStatus,
   listTasks, updateTask, deleteTask, isOverdue, type CreativeTask,
   getPlatformSettings, PLATFORM_SETTINGS_SWR_KEY, type PlatformSettings,
+  listPublishJobs, PUBLISH_JOBS_SWR_KEY,
 } from "../data";
 import { platformReadiness, type PlatReady } from "@/lib/content-readiness";
 import { loadCaptionTexts } from "../content/caption-assemble";
@@ -55,6 +56,7 @@ const TaskDetailDrawer = dynamic(() => import("../task-detail-drawer").then((m) 
 const CreateTaskModal = dynamic(() => import("../create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
 // วางแผนแบบ Mass (ให้ AI ร่างหลายวันหลายแพลตฟอร์ม → ตรวจ → ลงเป็นร่างทีเดียว) — โหลดเมื่อกดเปิด
 const MassPlanModal = dynamic(() => import("./mass-plan-modal").then((m) => m.MassPlanModal), { ssr: false });
+const PublishQueueModal = dynamic(() => import("../content/publish-queue").then((m) => m.PublishQueueModal), { ssr: false });
 
 type CalMode = "content" | "task" | "plan";
 /** รายการบนปฏิทิน (รูปกลางของทั้งคอนเทนต์และงาน) — แผงปฏิทินไม่ต้องรู้ว่าเป็นชนิดไหน */
@@ -104,9 +106,9 @@ function NoFileBadge() {
  *  (ไม่ต้องมีแคปชั่น: แพลตฟอร์มที่ ⚙️ ตั้ง "ไม่ใช้แคปชั่น" เช่น Shopee/Lazada · แพลตฟอร์มที่ลงเป็น Story → มีรูปก็พร้อมโพสต์) */
 const platReadiness = (e: CalEntry, pset?: PlatformSettings | null): PlatReady[] => platformReadiness(e, pset);
 const READY_RING: Record<PlatReady["state"], string> = {
-  posted: "ring-emerald-500 bg-emerald-50", scheduled: "ring-blue-500 bg-blue-50", ready: "ring-emerald-400 bg-white", missing: "ring-amber-400 bg-amber-50", skip: "ring-slate-300 bg-slate-100 opacity-50",
+  posted: "ring-emerald-500 bg-emerald-50", scheduled: "ring-blue-500 bg-blue-50", failed: "ring-rose-500 bg-rose-50", ready: "ring-emerald-400 bg-white", missing: "ring-amber-400 bg-amber-50", skip: "ring-slate-300 bg-slate-100 opacity-50",
 };
-const READY_LABEL: Record<PlatReady["state"], string> = { posted: "โพสต์แล้ว", scheduled: "ตั้งเวลาแล้ว", ready: "พร้อมโพสต์", missing: "ยังขาด", skip: "ข้าม" };
+const READY_LABEL: Record<PlatReady["state"], string> = { posted: "โพสต์แล้ว", scheduled: "ตั้งเวลาแล้ว", failed: "โพสต์อัตโนมัติไม่สำเร็จ", ready: "พร้อมโพสต์", missing: "ยังขาด", skip: "ข้าม" };
 const MISSING_LABEL = { caption: "แคปชั่น", image: "รูป" } as const;
 
 /** แถวไอคอนแพลตฟอร์มเล็ก ๆ บนการ์ด — วงสีบอกความพร้อม (เขียว=พร้อม/โพสต์แล้ว · เหลือง=ยังขาดแคปชั่นหรือรูป · เทา=ข้าม) */
@@ -199,7 +201,7 @@ function QuickView({ e, plats, open, anchor, rect, actions, onClose, onOpen }: {
               <span className="text-slate-700 w-[72px] truncate">{platformLabel(p.code)}</span>
               {/* โพสต์แล้ว + มีปุ่มติ๊ก = ปุ่มเขียวทำหน้าที่เป็นป้ายแทน (ไม่ให้ซ้ำ) */}
               {!(actions && p.state === "posted") && (
-                <span className={`text-[10px] px-1.5 py-px rounded-full ${p.state === "posted" ? "bg-emerald-100 text-emerald-700" : p.state === "scheduled" ? "bg-blue-100 text-blue-700" : p.state === "ready" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : p.state === "skip" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-800"}`}>
+                <span className={`text-[10px] px-1.5 py-px rounded-full ${p.state === "posted" ? "bg-emerald-100 text-emerald-700" : p.state === "scheduled" ? "bg-blue-100 text-blue-700" : p.state === "failed" ? "bg-rose-100 text-rose-700" : p.state === "ready" ? "bg-emerald-50 text-emerald-700 border border-emerald-200" : p.state === "skip" ? "bg-slate-100 text-slate-500" : "bg-amber-100 text-amber-800"}`}>
                   {p.state === "missing" ? `ขาด ${p.missing.map((m) => MISSING_LABEL[m]).join(" + ")}` : READY_LABEL[p.state]}
                 </span>
               )}
@@ -261,6 +263,7 @@ export function ContentCalendarView() {
   const [createOpen, setCreateOpen] = useState(false);
   const [taskCreateOpen, setTaskCreateOpen] = useState(false);
   const [massOpen, setMassOpen] = useState(false);   // ป๊อปวางแผนแบบ Mass
+  const [queueOpen, setQueueOpen] = useState(false); // 📤 ป๊อปภาพรวมคิวโพสต์อัตโนมัติ
   const [createDate, setCreateDate] = useState<string | null>(null);   // วันตั้งโพสต์ prefill (จากช่องที่คลิก)
   const [createPreset, setCreatePreset] = useState<ContentCreatePreset | null>(null);   // ค่าตั้งต้นฟอร์ม (โหมด Story)
   // 📖 โหมด Story: แถบเล็กใต้ทุกวันบอกว่า "ทำ Story ของวันนี้รึยัง" (เจ้าของลง Story ทุกวัน) — จำค่าไว้ในเครื่อง
@@ -284,6 +287,10 @@ export function ContentCalendarView() {
 
   // ใช้ cache ร่วมกับหน้าคอนเทนต์/หน้างาน (key เดียวกัน) — เข้าหน้านี้เห็นทันที · งานโหลดเฉพาะตอนอยู่โหมดงาน
   const itemsSWR = useSWRLite("creative:content", () => listContent());
+  // 📤 คิวโพสต์อัตโนมัติ — ตัวเลขบนปุ่ม (ล้ม = แดง ให้เห็นทันที) · key เดียวกับป๊อป/ drawer → ตั้ง/ยกเลิกคิวแล้วเลขเปลี่ยนตาม
+  const queueSWR = useSWRLite(mode === "content" ? PUBLISH_JOBS_SWR_KEY : null, () => listPublishJobs());
+  const queueFailed = (queueSWR.data ?? []).filter((j) => j.status === "failed").length;
+  const queueActive = (queueSWR.data ?? []).filter((j) => j.status === "queued" || j.status === "running" || j.status === "processing").length;
   const tasksSWR = useSWRLite(mode === "task" ? "creative:tasks:all" : null, () => listTasks({ sort_by: "updated_at", sort_dir: "desc" }), { refreshMs: 20000, timeoutMs: 15000 });
   const brandsSWR = useSWRLite("creative:brands", () => listBrands());
   const campaignsSWR = useSWRLite("creative:campaigns", () => listCampaigns());
@@ -657,6 +664,14 @@ export function ContentCalendarView() {
             {mode === "content"
               ? <a href="/tasks/content" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">📋 {t("รายการคอนเทนต์", "Content list")}</a>
               : <a href="/tasks?view=kanban" className="h-10 px-4 inline-flex items-center text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">🗂 {t("บอร์ดงาน", "Task board")}</a>}
+            {mode === "content" && (
+              <button onClick={() => setQueueOpen(true)} title={t("คิวโพสต์อัตโนมัติ — ระบบโพสต์ให้ตามเวลา (Facebook/Instagram)", "Auto-post queue — posts on time (Facebook/Instagram)")}
+                className="h-10 px-4 inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">
+                📤 {t("คิวโพสต์", "Post queue")}
+                {queueFailed > 0 ? <span className="text-[11px] font-semibold text-white bg-rose-500 rounded-full px-1.5">{queueFailed}</span>
+                  : queueActive > 0 ? <span className="text-[11px] font-semibold text-blue-700 bg-blue-100 rounded-full px-1.5">{queueActive}</span> : null}
+              </button>
+            )}
             {mode === "content" && can("tasks.create" as never) && (
               <button onClick={() => setMassOpen(true)} title={t("ให้ AI ร่างโพสต์หลายวันหลายแพลตฟอร์ม แล้วลงปฏิทินเป็นร่างทีเดียว", "Let AI draft many posts, then add them as drafts at once")}
                 className="h-10 px-4 inline-flex items-center gap-1.5 text-sm font-medium text-violet-700 border border-violet-200 bg-violet-50 rounded-lg hover:bg-violet-100">
@@ -973,6 +988,11 @@ export function ContentCalendarView() {
       <ContentCreateModal open={createOpen} onClose={() => { setCreateOpen(false); setCreatePreset(null); }} onCreated={() => { setCreateOpen(false); setCreatePreset(null); reload(); }} preset={createPreset}
         brands={brands} campaigns={campaigns}
         defaultBrandId={brandFilter === "all" ? null : brandFilter} defaultDate={createDate} pushToast={pushToast} />
+      {queueOpen && (
+        <PublishQueueModal canEdit={can("tasks.edit" as never)} onClose={() => setQueueOpen(false)} pushToast={pushToast}
+          brandName={(id) => brands.find((b) => b.id === id)?.name ?? ""}
+          onOpenContent={(id) => { setQueueOpen(false); setDetail({ kind: "content", id }); }} />
+      )}
       {massOpen && (
         <MassPlanModal open onClose={() => setMassOpen(false)} brands={brands} platforms={platforms} pset={pset} items={items}
           defaultBrandId={brandFilter === "all" ? null : brandFilter} defaultMonth={ym} onCreated={reload} />

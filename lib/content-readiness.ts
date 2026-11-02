@@ -11,7 +11,7 @@
  *     รูปที่อยู่แค่ในงานที่ผูกไว้ "ไม่นับ" จนกว่าจะเลือกมาใส่โพสต์ (เจ้าของเลือก 2026-10-16)
  */
 
-export type ReadyState = "posted" | "scheduled" | "skip" | "ready" | "missing";
+export type ReadyState = "posted" | "scheduled" | "failed" | "skip" | "ready" | "missing";   // failed = คิวโพสต์อัตโนมัติล้ม (lib/social-publish)
 export type ReadyMissing = "caption" | "image";
 export type PlatReady = {
   code: string;
@@ -49,7 +49,7 @@ export function platformReadiness(e: ReadinessInput, settings?: CaptionSettings 
     const missing: ReadyMissing[] = [];
     if (!captionOff && !e.captionPlatforms.includes(code)) missing.push("caption");
     if (!imgs.length) missing.push("image");
-    const state: ReadyState = st === "posted" ? "posted" : st === "scheduled" ? "scheduled" : st === "skip" ? "skip" : missing.length ? "missing" : "ready";
+    const state: ReadyState = st === "posted" ? "posted" : st === "scheduled" ? "scheduled" : st === "failed" ? "failed" : st === "skip" ? "skip" : missing.length ? "missing" : "ready";
     return { code, state, missing, images: imgs.slice(0, 4), captionOff, isStory };
   });
 }

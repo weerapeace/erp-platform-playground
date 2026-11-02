@@ -12,6 +12,8 @@
 /** สร้าง URL รูปจาก R2 key (ใส่ w เพื่อขอรูปย่อ) */
 export function r2ImageUrl(key: string | null | undefined, w?: number): string | null {
   if (!key) return null;
+  // รูปที่อยู่บน Google Drive (คีย์ drive:<fileId> — ไม่มีสำเนาใน R2) → ย่อผ่าน /api/drive/thumb
+  if (key.startsWith("drive:")) return `/api/drive/thumb?id=${encodeURIComponent(key.slice(6))}&w=${Math.round(w && w > 0 ? w : 2000)}`;
   const base = `/api/r2-image?key=${encodeURIComponent(key)}`;
   return w && w > 0 ? `${base}&w=${Math.round(w)}` : base;
 }

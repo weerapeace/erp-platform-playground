@@ -208,6 +208,7 @@ export function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPull
   const snippet = (cap.caption ?? "").split("\n").map((x) => x.trim()).find(Boolean) ?? "";
   const stBadge = postStatus === "posted" ? { cls: "bg-emerald-50 text-emerald-700 border-emerald-200", label: `✅ ${t("โพสต์แล้ว", "Posted")}` }
     : postStatus === "scheduled" ? { cls: "bg-blue-50 text-blue-700 border-blue-200", label: `⏰ ${t("ตั้งเวลาแล้ว", "Scheduled")}` }
+    : postStatus === "failed" ? { cls: "bg-rose-50 text-rose-700 border-rose-300", label: `⚠ ${t("โพสต์อัตโนมัติไม่สำเร็จ", "Auto-post failed")}` }
     : postStatus === "skip" ? { cls: "bg-rose-50 text-rose-700 border-rose-300", label: `⊘ ${t("ข้าม", "Skip")}` }
     : { cls: "bg-white text-slate-400 border-slate-200", label: t("ยังไม่โพสต์", "Not posted") };
   // เมนู ⋯ = ของที่ไม่ได้ใช้ทุกครั้ง (ยุบออกจากหัวการ์ดเพื่อลดความรก)

@@ -173,9 +173,11 @@ export async function attachReadiness(admin: Admin, items: Record<string, unknow
   const fileCount = new Map<string, number>();   // ไฟล์แนบทุกชนิด (รูป/วิดีโอ/วิดีโอ Drive/ลิงก์) — 0 = ยังไม่มีไฟล์ (Story ที่ลงแผนไว้ก่อน)
   for (const a of (atts ?? []) as { content_id: string; kind: string | null; r2_key: string | null; url: string | null }[]) {
     if (a.r2_key || (a.url ?? "").trim()) fileCount.set(a.content_id, (fileCount.get(a.content_id) ?? 0) + 1);
-    if ((a.kind ?? "image") === "link" || !a.r2_key) continue;
+    // รูปจาก Google Drive (kind image + url drive:<id> · ไม่มีสำเนาใน R2) นับเป็นรูปด้วย — คีย์ drive:<id> ใช้กับ r2ImageUrl ได้
+    const key = a.r2_key || ((a.kind ?? "image") === "image" && (a.url ?? "").startsWith("drive:") ? (a.url as string) : null);
+    if ((a.kind ?? "image") === "link" || !key) continue;
     const e = imgMap.get(a.content_id) ?? imgMap.set(a.content_id, { keys: [], count: 0 }).get(a.content_id)!;
-    e.count++; if (e.keys.length < 6) e.keys.push(a.r2_key);
+    e.count++; if (e.keys.length < 6) e.keys.push(key);
   }
   for (const it of items) {
     const id = String(it.id);

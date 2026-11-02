@@ -1,7 +1,7 @@
 "use client";
 // Drawer แก้คอนเทนต์ (ของกลางในโมดูล — เปิดจากหน้าคอนเทนต์ / ปฏิทิน / งาน / แคมเปญ) · แยกจาก content.tsx — Y1
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { mutateSWR } from "@/lib/swr-lite";
+import { mutateSWR, invalidateSWR } from "@/lib/swr-lite";
 import { renderCaption, type ShopChannel } from "@/lib/caption-template";
 import { ERPModal, ConfirmDialog, DrawerShell } from "@/components/modal";
 import { ERPInput, ERPDateTime24 } from "@/components/form";
@@ -9,12 +9,13 @@ import { SkuPicker, ParentSkuPicker } from "@/components/pickers";
 import type { SkuPickerValue, ParentSkuPickerValue, UserPickerValue } from "@/components/pickers";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { getContent, createContent, updateContent, deleteContent, getTask, listSubtasks, getCaptionTemplates, getParentSkuChildren, type ParentSkuChild, getRecommendedTimes, type RecommendedTimes, listContentAttachments, addContentAttachment, deleteContentAttachment, getPlatformSettings, savePlatformSettings, getLinkPreview, PLATFORM_SETTINGS_SWR_KEY, getMetaStatus, publishToPlatform, igFinalize, type MetaConnStatus, type PostMediaRef, getCaptionConfig, defaultHashtags, resolvePrompt, resolveBrandFromProduct, type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus, type BrandOption, type CaptionTemplate, type CaptionConfig, type ContentAttachment, type PlatformSettings } from "../data";
+import { getContent, createContent, updateContent, deleteContent, getTask, listSubtasks, getCaptionTemplates, getParentSkuChildren, type ParentSkuChild, getRecommendedTimes, type RecommendedTimes, listContentAttachments, addContentAttachment, deleteContentAttachment, getPlatformSettings, savePlatformSettings, getLinkPreview, PLATFORM_SETTINGS_SWR_KEY, getMetaStatus, publishToPlatform, igFinalize, type MetaConnStatus, type PostMediaRef, getCaptionConfig, defaultHashtags, resolvePrompt, resolveBrandFromProduct, type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus, type BrandOption, type CaptionTemplate, type CaptionConfig, type ContentAttachment, type PlatformSettings, type DriveFileRef, listPublishJobs, queuePublishJobs, PUBLISH_JOBS_SWR_KEY, type PublishJob, type PublishJobInput } from "../data";
 import { useCreativeOptions, platformLabel, platformMeta } from "../use-options";
 import { PlatformChip } from "../platform-chip";
 import { PostConfirmModal, type PostImage } from "./post-confirm-modal";
 import { AddPathForm, isLocalPath, type PathItem } from "@/components/copy-path-button";
-import { buildCaptionVars, captionsForDetail } from "./caption-assemble";
+import { buildCaptionVars, captionsForDetail, assembleCaption } from "./caption-assemble";
+import { PublishQueueBox, QueueAllModal, type QueuePlatformOption } from "./publish-queue";
 import { CopyButton } from "@/components/copy-button";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
@@ -72,6 +73,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [platformImages, setPlatformImages] = useState<Record<string, string[]>>({});   // platform → รูป(r2 key)ที่เลือกไว้ต่อแพลตฟอร์ม (โชว์บนการ์ดย่อย + default ตอนโพสต์)
   const [metaStatus, setMetaStatus] = useState<MetaConnStatus>({});   // เชื่อมต่อ Facebook/IG ของแบรนด์นี้แล้วหรือยัง (กด "โพสต์เลย" ยิงจริงได้ไหม)
   const [posting, setPosting] = useState<string | null>(null);   // แพลตฟอร์มที่กำลังยิงโพสต์จริง
+  const [jobs, setJobs] = useState<PublishJob[]>([]);             // 📤 คิวโพสต์อัตโนมัติของคอนเทนต์นี้
+  const [queueAllOpen, setQueueAllOpen] = useState(false);
   const [postModal, setPostModal] = useState<{ platform: string; captionText: string } | null>(null);   // ป๊อปอัปยืนยันก่อนโพสต์
   const [assignees, setAssignees] = useState<UserPickerValue[]>([]);   // ผู้รับผิดชอบคอนเทนต์ (หลายคน m2m)
   const [saving, setSaving] = useState(false);
@@ -287,8 +290,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const postImages: PostImage[] = (() => {
     const seen = new Set<string>(); const out: PostImage[] = [];
     for (const a of attachments) if ((a.kind === "image" || a.kind === "video") && a.r2_key && !seen.has(a.r2_key)) { seen.add(a.r2_key); out.push({ key: a.r2_key, label: a.label ?? a.file_name ?? null, type: a.kind === "video" ? "video" : "image" }); }
-    // วิดีโอที่อยู่บน Google Drive (ไม่มีไฟล์ในระบบ) — คีย์เป็น drive:<fileId>
-    for (const a of attachments) if (a.kind === "video" && !a.r2_key && (a.url ?? "").startsWith("drive:") && !seen.has(a.url as string)) { seen.add(a.url as string); out.push({ key: a.url as string, label: a.label ?? a.file_name ?? null, type: "video" }); }
+    // รูป/วิดีโอที่อยู่บน Google Drive (ไม่มีไฟล์ในระบบ) — คีย์เป็น drive:<fileId>
+    for (const a of attachments) if ((a.kind === "image" || a.kind === "video") && !a.r2_key && (a.url ?? "").startsWith("drive:") && !seen.has(a.url as string)) { seen.add(a.url as string); out.push({ key: a.url as string, label: a.label ?? a.file_name ?? null, type: a.kind === "video" ? "video" : "image" }); }
     for (const im of taskMedia.images) if (im.key && !seen.has(im.key)) { seen.add(im.key); out.push({ key: im.key, label: im.label ?? null, type: "image" }); }
     return out;
   })();
@@ -302,7 +305,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const mediaDrag = useDragReorder(reorderMedia);
   const platformImageEntries = Object.entries(platformImages).filter(([k]) => k !== "_order");   // ใช้นับว่ารูปถูกเลือกกี่แพลตฟอร์ม
   const mediaTypeOf = (k: string): "image" | "video" => postImages.find((m) => m.key === k)?.type ?? "image";
-  const contentImageKeys = attachments.filter((a) => a.kind === "image" && a.r2_key).map((a) => a.r2_key as string);
+  const contentImageKeys = attachments.filter((a) => a.kind === "image" && (a.r2_key || (a.url ?? "").startsWith("drive:"))).map((a) => (a.r2_key || a.url) as string);
 
   // ยิงโพสต์จริง (Facebook/Instagram) จากป๊อปยืนยัน · รูป/วิดีโอ/อัลบั้ม + ตั้งเวลา(FB) · IG Reels = ตามเช็กสถานะ
   const runPublish = async (platform: string, captionText: string, selectedKeys: string[], scheduledUnix: number | null, fmtOverride?: string) => {
@@ -347,6 +350,29 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     else pushToast("info", t("คัดลอกแคปชั่นแล้ว · ยังไม่ได้ตั้งลิงก์หน้าโพสต์ (⚙️ ตั้งค่าแพลตฟอร์ม)", "Caption copied · no post link set (⚙️ Platform settings)"));
     setPostModal(null);
   };
+  // 📤 คิวโพสต์อัตโนมัติ (ระบบโพสต์ให้ตามเวลา — ของกลาง lib/social-publish/queue) · สื่อเลือกแบบเดียวกับ runPublish
+  const loadJobs = useCallback(async () => { try { setJobs(await listPublishJobs(contentId)); } catch { /* ไม่มีคิว/โหลดไม่ได้ = กล่องว่าง */ } }, [contentId]);
+  useEffect(() => { void loadJobs(); }, [loadJobs]);
+  const toPostMedia = (keys: string[]): PostMediaRef[] => {
+    const videoKey = keys.find((k) => mediaTypeOf(k) === "video");
+    return videoKey ? [{ key: videoKey, type: "video" }] : keys.map((k) => ({ key: k, type: "image" as const }));
+  };
+  const queuePosts = async (items: PublishJobInput[]): Promise<boolean> => {
+    setPosting("queue");
+    try {
+      await queuePublishJobs(contentId, items);
+      setPostStatus((prev) => { const n = { ...prev }; for (const it of items) n[it.platform] = "scheduled"; return n; });
+      await loadJobs(); invalidateSWR(PUBLISH_JOBS_SWR_KEY);
+      pushToast("success", t(`ตั้งคิวแล้ว ${items.length} แพลตฟอร์ม — ระบบจะโพสต์ให้ตามเวลา ⏰`, `Queued ${items.length} platform(s) ⏰`));
+      return true;
+    } catch (e) { pushToast("error", (e as Error).message); return false; }
+    finally { setPosting(null); }
+  };
+  const runQueue = async (platform: string, captionText: string, keys: string[], runAtLocal: string, fmt: string) => {
+    const ok = await queuePosts([{ platform, format: fmt || null, caption_text: captionText, media: toPostMedia(keys), run_at: new Date(runAtLocal).toISOString() }]);
+    if (ok) setPostModal(null);
+  };
+  const autoConnected = (p: string) => (p === "facebook" && !!metaStatus.facebook?.connected) || (p === "instagram" && !!metaStatus.instagram?.connected);
   // "ใช้ทั้งหมด": เปิดป๊อปให้เลือกโหมด (ถ้าช่องต้นทางยังว่างก็ไม่ต้องเปิด)
   const openApplyAll = (fromPlatform: string) => {
     const src = caps.find((c) => c.platform === fromPlatform);
@@ -460,6 +486,13 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     } catch (e) { pushToast("error", (e as Error).message); }
   };
 
+  // 🖼 รูปจาก Google Drive — เก็บแค่ drive:<fileId> (ไม่ก็อปลง R2) · ยิงโพสต์แล้วระบบดึงจาก Drive + แปลง JPEG ให้
+  const onAddDriveImages = async (files: DriveFileRef[]) => {
+    for (const f of files) await addContentAttachment(contentId, { kind: "image", url: `drive:${f.file_id}`, label: f.name || "Google Drive", file_name: f.name || null, content_type: f.mime_type, size_bytes: f.size });
+    await loadAttachments();
+    pushToast("success", t(`เพิ่มรูปจาก Drive ${files.length} รูปแล้ว (ไม่ได้ก็อปไฟล์ลงระบบ)`, `Added ${files.length} Drive image(s) (no copy stored)`));
+  };
+
   // 📂 path ของโพสต์นี้ (ที่อยู่โฟลเดอร์/ไฟล์ในเครื่อง เช่น Z:\Work In Process\…) — เก็บเป็นไฟล์แนบ kind "path" (ตารางเดิม ไม่ต้องแก้ DB)
   //    ไว้กด 📂 คัดลอกไปวางในช่องเลือกไฟล์ตอนอัปขึ้น Shopee/TikTok ฯลฯ — ใช้กับโพสต์ที่ไม่ได้ผูกงาน (งานที่ผูกส่ง path มาให้อยู่แล้ว)
   const onAddPath = async (path: string) => { await addContentAttachment(contentId, { kind: "path", url: path }); await loadAttachments(); };
@@ -476,6 +509,19 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     sku, parent, productName: d?.product_name ?? null, skuColorTh: d?.sku_color_th ?? null, skuColorEn: d?.sku_color_en ?? null,
     children, skuIds, priceSkuId, colorSource, links, extras, shopChannels,
   }), [sku, parent, d?.product_name, d?.sku_color_th, d?.sku_color_en, children, skuIds, priceSkuId, colorSource, links, extras, shopChannels]);
+  // 📤 แคปชั่นที่ประกอบแล้ว "ตอนนี้" ต่อแพลตฟอร์ม (ต้องอยู่หลัง sharedVars — กัน TDZ) (ข้อความเดียวกับพรีวิวในการ์ด) — ใช้ตั้งคิวทีเดียว + เตือนว่าคิวใช้ข้อความเก่า
+  const latestCaptions = useMemo(() => Object.fromEntries(caps.map((c) => [c.platform, assembleCaption(c, pset[c.platform], templates, sharedVars)])), [caps, pset, templates, sharedVars]);
+  const queueOptions: QueuePlatformOption[] = caps.filter((c) => c.platform === "facebook" || c.platform === "instagram").map((c) => {
+    const p = c.platform; const fmt = platformFormats[p] ?? "";
+    const keys = (platformImages[p]?.length ? platformImages[p] : contentImageKeys).filter((k) => postImages.some((m) => m.key === k));
+    const media = toPostMedia(keys);
+    const blocked = !autoConnected(p) ? t("แบรนด์นี้ยังไม่ได้เชื่อมต่อ — ไปเชื่อมที่หน้าบัญชีแพลตฟอร์ม", "Not connected for this brand")
+      : media.length === 0 ? t("ยังไม่ได้เลือกรูป/วิดีโอในการ์ดของแพลตฟอร์มนี้", "No media selected in this platform's card")
+      : (fmt === "video" || fmt === "reels") && media[0].type !== "video" ? t("ตั้งเป็นวิดีโอ/Reels แต่ยังไม่ได้เลือกวิดีโอ", "Video/Reels format but no video selected")
+      : null;
+    return { platform: p, captionText: latestCaptions[p] ?? "", media, format: fmt || undefined, blocked };
+  });
+
   const discountAmt = (fakeVal != null && realSelling != null && fakeVal > realSelling) ? fakeVal - realSelling : null;  // ส่วนลด = ปลอม − จริง
   // เวลาแนะนำของวันที่เลือกโพสต์ (โชว์ปุ่มให้กดใช้ — มีได้หลายเวลา ตัดอันที่ตรงกับที่เลือกอยู่)
   const schedRec = useMemo(() => {
@@ -555,9 +601,19 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const save = async () => {
     setSaving(true);
     try {
+      // 📤 คิวโพสต์อาจโพสต์ให้ระหว่างเปิดหน้านี้ค้างไว้ → อย่าเอาค่าเก่าในหน้า ("ตั้งเวลาแล้ว") ไปทับผลของคิว (โพสต์แล้ว/ล้ม + ลิงก์)
+      let saveStatus = postStatus; let saveLinks = postedLinks;
+      if (Object.values(postStatus).includes("scheduled")) {
+        try {
+          const fresh = await getContent(contentId);
+          const fs = (fresh.post_status ?? {}) as Record<string, string>; const fl = (fresh.posted_links ?? {}) as Record<string, string>;
+          saveStatus = { ...postStatus }; saveLinks = { ...postedLinks };
+          for (const [p, v] of Object.entries(fs)) if ((v === "posted" || v === "failed") && postStatus[p] === "scheduled") { saveStatus[p] = v; if (fl[p] && !postedLinks[p]) saveLinks[p] = fl[p]; }
+        } catch { /* โหลดไม่ได้ = บันทึกตามหน้าเดิม */ }
+      }
       await updateContent(contentId, {
         status, scheduled_at: scheduledAt || null, published_url: publishedUrl.trim() || null, assignee_ids: assignees.map((a) => a.id), color_source: colorSource,
-        post_status: postStatus, posted_links: postedLinks, platform_images: platformImages, platform_formats: platformFormats,
+        post_status: saveStatus, posted_links: saveLinks, platform_images: platformImages, platform_formats: platformFormats,
         brand_id: brandId || null, sku_id: sku?.id ?? null, parent_sku_id: parent?.id ?? null, product_name: sku?.name ?? d?.product_name ?? null,
         // สินค้าทุกตัวในโพสต์ — ตัวหลักขึ้นก่อน (API ทับ sku_id/parent_sku_id จากแถวแรกให้ตรงกัน)
         products: [...((parent || sku) ? [{ parent_sku_id: parent?.id ?? sku?.parent_sku_id ?? null, sku_id: sku?.id ?? null, sku_ids: sku ? [] : skuIds }] : []), ...extras.map(extraToPayload)],
@@ -821,6 +877,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   ))}
                 </div>
               )}
+              <PublishQueueBox jobs={jobs} latestCaptions={latestCaptions} canEdit={can("tasks.edit")} canQueueAll={queueOptions.some((o) => !o.blocked)}
+                onChanged={() => { void loadJobs(); void getContent(contentId).then((dd) => setPostStatus((dd.post_status ?? {}) as Record<string, string>)).catch(() => {}); }}
+                onQueueAll={() => setQueueAllOpen(true)} pushToast={pushToast} />
             </div>
 
             {/* ───── การ์ดรูป/วิดีโอ: คลังเดียว (รูปจากงาน + อัปเอง + วิดีโอ) · กด ＋ เพื่อเพิ่ม/จัดการ ───── */}
@@ -898,7 +957,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   </div>
                   {mediaAdd && (
                     <div className="mt-3 pt-3 border-t border-slate-100">
-                      <ContentAttachments attachments={attachments} hideImageList onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onAddDriveVideo={onAddDriveVideo} onDelete={onDelAttachment} pushToast={pushToast} />
+                      <ContentAttachments attachments={attachments} hideImageList onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onAddDriveVideo={onAddDriveVideo} onAddDriveImages={onAddDriveImages} onDelete={onDelAttachment} pushToast={pushToast} />
                     </div>
                   )}
                 </>
@@ -948,7 +1007,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                         {(p.icon_key || p.icon) && <PlatformChip code={p.value} iconOnly />}
                         {p.label}{p.inactive && <span className="text-[9px] opacity-70">({t("ปิดใช้", "off")})</span>}
                         {on
-                          ? <span className={`h-2 w-2 rounded-full ${st === "posted" || st === "scheduled" ? "bg-emerald-400" : st === "skip" ? "bg-slate-300" : "bg-amber-300"}`} title={st === "posted" ? t("โพสต์แล้ว", "Posted") : st === "scheduled" ? t("ตั้งเวลาแล้ว", "Scheduled") : st === "skip" ? t("ข้าม", "Skipped") : t("ยังไม่โพสต์", "Not posted")} />
+                          ? <span className={`h-2 w-2 rounded-full ${st === "posted" || st === "scheduled" ? "bg-emerald-400" : st === "failed" ? "bg-rose-500" : st === "skip" ? "bg-slate-300" : "bg-amber-300"}`} title={st === "posted" ? t("โพสต์แล้ว", "Posted") : st === "scheduled" ? t("ตั้งเวลาแล้ว", "Scheduled") : st === "failed" ? t("โพสต์อัตโนมัติไม่สำเร็จ", "Auto-post failed") : st === "skip" ? t("ข้าม", "Skipped") : t("ยังไม่โพสต์", "Not posted")} />
                           : <span className="text-[10px] text-slate-300">＋</span>}
                       </button>
                     );
@@ -1039,20 +1098,24 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           onClose={() => setAiModal(null)}
           onRun={(extra, overwrite) => aiWriteAll(aiModal.platforms, extra, overwrite)} />
       )}
+      {queueAllOpen && (
+        <QueueAllModal options={queueOptions} defaultRunAt={scheduledAt} busy={posting === "queue"} onClose={() => setQueueAllOpen(false)}
+          onSubmit={(items) => { void queuePosts(items).then((ok) => { if (ok) setQueueAllOpen(false); }); }} />
+      )}
       {postModal && (
         <PostConfirmModal
           platform={postModal.platform}
           connected={(postModal.platform === "facebook" && !!metaStatus.facebook?.connected) || (postModal.platform === "instagram" && !!metaStatus.instagram?.connected)}
-          allowSchedule={postModal.platform === "facebook"}
           pageName={metaStatus.facebook?.page_name}
           captionText={postModal.captionText}
           images={postImages}
           defaultSelected={platformImages[postModal.platform]?.length ? platformImages[postModal.platform] : contentImageKeys}
           scheduledAtLocal={scheduledAt}
           format={platformFormats[postModal.platform]}
-          busy={posting === postModal.platform}
+          busy={posting === postModal.platform || posting === "queue"}
           onClose={() => setPostModal(null)}
           onPublish={(keys, sched, fmt) => { setPlatformFormats((m) => { const n = { ...m }; if (fmt) n[postModal.platform] = fmt; else delete n[postModal.platform]; return n; }); runPublish(postModal.platform, postModal.captionText, keys, sched, fmt); }}
+          onQueue={(keys, runAtLocal, fmt) => { setPlatformFormats((m) => { const n = { ...m }; if (fmt) n[postModal.platform] = fmt; else delete n[postModal.platform]; return n; }); void runQueue(postModal.platform, postModal.captionText, keys, runAtLocal, fmt); }}
           onManual={() => manualPost(postModal.platform, postModal.captionText)}
         />
       )}
