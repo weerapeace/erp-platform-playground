@@ -23,9 +23,14 @@ export function normalizeMedia(format: string, input: PostMedia[]): { media: Pos
   return { media };
 }
 
-/** แปล error ของ Meta ที่เจอบ่อยเป็นภาษาคน (เจ้าของอ่านแล้วรู้ว่าต้องทำอะไร) */
-export function friendlyMetaError(platform: string, raw: string): string {
+/** แปล error ของ Meta ที่เจอบ่อยเป็นภาษาคน (เจ้าของอ่านแล้วรู้ว่าต้องทำอะไร) · code/subcode = รหัสจาก Graph API (ถ้ามี) */
+export function friendlyMetaError(platform: string, raw: string, code?: number, subcode?: number): string {
   const m = raw || "ไม่ทราบสาเหตุ";
+  // บัญชี Facebook ของคนที่กดเชื่อมเพจ ติดด่านตรวจสอบความปลอดภัย (190 / 459·464·490) — ต้องไปเคลียร์ที่ facebook.com เอง ระบบทำแทนไม่ได้
+  if ((code === 190 && subcode != null && [459, 464, 490].includes(subcode)) || /cannot access the app till you log in|checkpoint/i.test(m))
+    return `${label(platform)}: บัญชี Facebook ที่ใช้กดเชื่อมเพจ ติดด่านตรวจสอบของ Facebook — เข้า facebook.com ด้วยบัญชีนั้น ทำตามขั้นตอนที่ Facebook ขึ้นให้ครบ แล้วกลับมากด “เชื่อมใหม่” ที่หน้าบัญชีแพลตฟอร์ม (${m})`;
+  if (code === 190)
+    return `${label(platform)}: การเชื่อมต่อหมดอายุหรือถูกยกเลิก (เช่น เปลี่ยนรหัสผ่าน หรือถูกถอดจากแอดมินเพจ) — กด “เชื่อมใหม่” ที่หน้าบัญชีแพลตฟอร์ม (${m})`;
   if (/permission|\(#10\)|\(#200\)|OAuthException|access token|session has expired/i.test(m))
     return `${label(platform)}: สิทธิ์ไม่พอหรือการเชื่อมต่อหมดอายุ — ไปกด “เชื่อมต่อใหม่” ที่หน้าบัญชีแพลตฟอร์ม (${m})`;
   if (/aspect ratio/i.test(m)) return `${label(platform)}: สัดส่วนรูปไม่ผ่าน (IG รับ 4:5 ถึง 1.91:1 · Story/Reels = แนวตั้ง 9:16) — ${m}`;

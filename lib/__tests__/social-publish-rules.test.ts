@@ -30,6 +30,14 @@ describe("friendlyMetaError", () => {
   it("สิทธิ์/โทเคน → บอกให้เชื่อมต่อใหม่", () => {
     expect(friendlyMetaError("instagram", "(#10) Application does not have permission for this action")).toContain("เชื่อมต่อใหม่");
   });
+  it("บัญชีที่กดเชื่อมติดด่านตรวจสอบ (190/459) → บอกให้เข้า facebook.com แล้วเชื่อมใหม่", () => {
+    const raw = "You cannot access the app till you log in to www.facebook.com and follow the instructions given.";
+    expect(friendlyMetaError("facebook", raw, 190, 459)).toContain("ติดด่านตรวจสอบ");
+    expect(friendlyMetaError("facebook", raw)).toContain("เชื่อมใหม่");   // ไม่มีรหัส ก็จับจากข้อความได้
+  });
+  it("token หมดอายุ (190 อื่น ๆ) → เชื่อมใหม่", () => {
+    expect(friendlyMetaError("instagram", "Error validating access token", 190, 460)).toContain("หมดอายุ");
+  });
   it("สัดส่วนรูป → บอกช่วงที่ IG รับ", () => {
     expect(friendlyMetaError("instagram", "The aspect ratio is not supported.")).toContain("4:5");
   });

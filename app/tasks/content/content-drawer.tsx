@@ -377,7 +377,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     const ok = await queuePosts([{ platform, format: fmt || null, caption_text: captionText, media: toPostMedia(keys), run_at: new Date(runAtLocal).toISOString() }]);
     if (ok) setPostModal(null);
   };
-  const autoConnected = (p: string) => (p === "facebook" && !!metaStatus.facebook?.connected) || (p === "instagram" && !!metaStatus.instagram?.connected);
+  // ยิงอัตโนมัติได้ = เชื่อมแล้ว + Meta ยืนยันว่าการเชื่อมต่อยังใช้ได้ (problem = เช่น บัญชีที่กดเชื่อมติดด่านตรวจ → ปุ่มกลับเป็นโหมดมือ)
+  const metaProblem = metaStatus.facebook?.problem ?? null;
+  const autoConnected = (p: string) => !metaProblem && ((p === "facebook" && !!metaStatus.facebook?.connected) || (p === "instagram" && !!metaStatus.instagram?.connected));
   // "ใช้ทั้งหมด": เปิดป๊อปให้เลือกโหมด (ถ้าช่องต้นทางยังว่างก็ไม่ต้องเปิด)
   const openApplyAll = (fromPlatform: string) => {
     const src = caps.find((c) => c.platform === fromPlatform);
@@ -550,7 +552,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     const p = c.platform; const fmt = platformFormats[p] ?? "";
     const keys = (platformImages[p]?.length ? platformImages[p] : contentImageKeys).filter((k) => postImages.some((m) => m.key === k));
     const media = toPostMedia(keys);
-    const blocked = !autoConnected(p) ? t("แบรนด์นี้ยังไม่ได้เชื่อมต่อ — ไปเชื่อมที่หน้าบัญชีแพลตฟอร์ม", "Not connected for this brand")
+    const blocked = metaProblem ? metaProblem
+      : !autoConnected(p) ? t("แบรนด์นี้ยังไม่ได้เชื่อมต่อ — ไปเชื่อมที่หน้าบัญชีแพลตฟอร์ม", "Not connected for this brand")
       : media.length === 0 ? t("ยังไม่ได้เลือกรูป/วิดีโอในการ์ดของแพลตฟอร์มนี้", "No media selected in this platform's card")
       : (fmt === "video" || fmt === "reels") && media[0].type !== "video" ? t("ตั้งเป็นวิดีโอ/Reels แต่ยังไม่ได้เลือกวิดีโอ", "Video/Reels format but no video selected")
       : null;
@@ -1080,8 +1083,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               <div className="text-sm text-slate-400 italic rounded-lg border border-dashed border-slate-200 px-4 py-6 text-center">☝️ {t("ยังไม่ได้เลือกว่าจะลงที่ไหน — กดปุ่มแพลตฟอร์มด้านบนเพื่อเพิ่มการ์ดแคปชั่น", "Nothing selected yet — click a platform above to add its caption card")}</div>
             ) : (
               <div className="space-y-1.5">
-                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} onPullFrom={caps.length > 1 ? () => setPullTo(c.platform) : undefined} paths={pathItems} onAddPath={onAddPath} fallbackImages={contentImageKeys} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={(c.platform === "facebook" && !!metaStatus.facebook?.connected) || (c.platform === "instagram" && !!metaStatus.instagram?.connected)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
-                  connInfo={c.platform === "facebook"
+                {caps.map((c) => <CaptionCard key={c.platform} open={openPlats.has(c.platform)} onToggle={() => togglePlat(c.platform)} contentId={contentId} canAi={canAiCaption} aiBusy={aiAllBusy} onAiWrite={() => setAiModal({ platforms: [c.platform] })} format={platformFormats[c.platform]} onSetFormat={(v) => setPlatformFormats((m) => { const n = { ...m }; if (v) n[c.platform] = v; else delete n[c.platform]; return n; })} cap={c} templates={templates} sharedVars={sharedVars} brandId={brandId} setting={pset[c.platform]} onChange={(patch) => { setCap(c.platform, patch); setTouchedCaps((s) => { const n = new Set(s); if ("caption" in patch) n.add(`${c.platform}|caption`); if ("hashtags" in patch) n.add(`${c.platform}|hashtags`); return n; }); }} onOpenSettings={() => setPsOpen(true)} onApplyAll={caps.length > 1 ? openApplyAll : undefined} onPullFrom={caps.length > 1 ? () => setPullTo(c.platform) : undefined} paths={pathItems} onAddPath={onAddPath} fallbackImages={contentImageKeys} postStatus={postStatus[c.platform] ?? "todo"} postedUrl={postedLinks[c.platform] ?? ""} onSetStatus={(s) => setPlatStatus(c.platform, s)} onSetPostedUrl={(url) => setPlatPostedUrl(c.platform, url)} onCommitPostedUrl={persistPostedLinks} onRequestPost={(text) => setPostModal({ platform: c.platform, captionText: text })} canAuto={autoConnected(c.platform)} autoLabel={c.platform === "facebook" ? "Facebook" : c.platform === "instagram" ? "Instagram" : undefined}
+                  connInfo={metaProblem && (c.platform === "facebook" || c.platform === "instagram")
+                    ? { connected: false, label: t(`การเชื่อมต่อใช้ไม่ได้ตอนนี้ — ปุ่มโพสต์เป็นโหมดมือ · ${metaProblem}`, `Connection broken — manual mode · ${metaProblem}`), href: "/admin/platform-accounts" }
+                    : c.platform === "facebook"
                     ? (metaStatus.facebook?.connected
                       ? { connected: true, label: t(`เชื่อมเพจแล้ว: ${metaStatus.facebook.page_name ?? "-"} — กดโพสต์ขึ้นเพจนี้ได้เลย`, `Connected page: ${metaStatus.facebook.page_name ?? "-"}`), href: "/admin/platform-accounts" }
                       : { connected: false, label: brandId ? t("ยังไม่เชื่อมเพจ Facebook ของแบรนด์นี้ — ปุ่มโพสต์จะเป็นโหมดมือ (คัดลอก+เปิดหน้า)", "Facebook page not connected for this brand — manual mode") : t("เลือกแบรนด์ก่อน ระบบถึงจะรู้ว่าเชื่อมเพจไหน", "Pick a brand first"), href: "/admin/platform-accounts" })
@@ -1170,7 +1175,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
       {postModal && (
         <PostConfirmModal
           platform={postModal.platform}
-          connected={(postModal.platform === "facebook" && !!metaStatus.facebook?.connected) || (postModal.platform === "instagram" && !!metaStatus.instagram?.connected)}
+          connected={autoConnected(postModal.platform)}
           pageName={metaStatus.facebook?.page_name}
           captionText={postModal.captionText}
           images={postImages}

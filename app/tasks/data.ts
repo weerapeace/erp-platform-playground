@@ -635,9 +635,10 @@ export async function savePlatformSettings(settings: PlatformSettings): Promise<
 }
 
 // ---- สถานะเชื่อมต่อ Meta (Facebook/Instagram) ต่อแบรนด์ — ใช้รู้ว่า "โพสต์เลย" ยิงจริงได้ไหม ----
-export type MetaConnStatus = { configured?: boolean; facebook?: { connected: boolean; page_name?: string | null }; instagram?: { connected: boolean } };
+// problem = การเชื่อมต่อใช้ไม่ได้จริง (ตรวจกับ Meta · เช่น บัญชีที่กดเชื่อมติดด่านตรวจสอบ) — มีค่า = ปุ่มโพสต์กลับเป็นโหมดมือ
+export type MetaConnStatus = { configured?: boolean; facebook?: { connected: boolean; page_name?: string | null; problem?: string | null }; instagram?: { connected: boolean } };
 export async function getMetaStatus(brandId: string): Promise<MetaConnStatus> {
-  try { return (await apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(brandId)}`).then((r) => r.json())) as MetaConnStatus; }
+  try { return (await apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(brandId)}&check=1`).then((r) => r.json())) as MetaConnStatus; }
   catch { return {}; }
 }
 // ยิงโพสต์คอนเทนต์ขึ้นแพลตฟอร์มจริง (facebook/instagram) — media หลายชิ้น (รูป/วิดีโอ) + ตั้งเวลา (unix, 0=ทันที)

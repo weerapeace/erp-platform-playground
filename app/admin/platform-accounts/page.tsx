@@ -59,7 +59,7 @@ export default function PlatformAccountsPage() {
   const [editKey, setEditKey] = useState<string | null>(null);      // แพลตฟอร์มที่กำลังแก้ API Key (มีคีย์แล้ว = อ่านอย่างเดียวจนกดแก้)
   const [clearKeyFor, setClearKeyFor] = useState<string | null>(null);  // แพลตฟอร์มที่กำลังยืนยัน "ล้างคีย์"
   // สถานะเชื่อมต่อ Facebook (Meta) ต่อแบรนด์
-  type FbStatus = { connected: boolean; stage: string; page_name: string | null; pages: { id: string; name: string; ig: boolean }[] };
+  type FbStatus = { connected: boolean; stage: string; page_name: string | null; pages: { id: string; name: string; ig: boolean }[]; problem?: string | null };
   const [fb, setFb] = useState<FbStatus>({ connected: false, stage: "none", page_name: null, pages: [] });
   const [fbHasIg, setFbHasIg] = useState(false);
   const [metaCfg, setMetaCfg] = useState(true);   // ตั้งค่า META_APP_ID/SECRET ในโฮสต์แล้วไหม
@@ -77,7 +77,7 @@ export default function PlatformAccountsPage() {
       const [j, kj, mj, lj] = await Promise.all([
         apiFetch(`/api/platform-accounts${bid ? `?brand_id=${encodeURIComponent(bid)}` : ""}`).then((r) => r.json()),
         bid ? apiFetch(`/api/platform-credentials?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve({ keys: {} }),
-        bid ? apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve(null),
+        bid ? apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(bid)}&check=1`).then((r) => r.json()) : Promise.resolve(null),   // check=1 = ลองกับ Meta จริงว่ายังใช้ได้
         bid ? apiFetch(`/api/lazada/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve(null),
       ]);
       setPlatforms((j.platforms ?? []) as Platform[]);
@@ -305,11 +305,20 @@ export default function PlatformAccountsPage() {
                   <div className="mt-2.5 pt-2.5 border-t border-slate-100">
                     {!metaCfg ? (
                       <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">⚠️ ยังไม่ได้ตั้ง META_APP_ID / META_APP_SECRET ในโฮสต์ (Vercel) — ตั้งก่อนจึงจะเชื่อมต่อได้</p>
+                    ) : fb.connected && fb.problem ? (
+                      // เชื่อมไว้แล้ว แต่ Meta บอกว่าใช้ไม่ได้ (เช่น บัญชีที่กดเชื่อมติดด่านตรวจสอบ / token หมดอายุ) → ต้องแก้ที่ Facebook แล้วเชื่อมใหม่
+                      <div className="flex flex-col gap-1.5">
+                        <p className="text-xs text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5 inline-flex items-start gap-1"><Icon name="warning" /><span><b>เพจ {fb.page_name}: การเชื่อมต่อใช้ไม่ได้ตอนนี้</b> — {fb.problem}</span></p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button onClick={connectFb} className="h-8 px-3 text-sm text-white bg-[#1877F2] rounded-lg hover:opacity-90">👍 เชื่อมต่อ Facebook ใหม่</button>
+                          <button onClick={disconnectFb} className="text-[11px] text-rose-500 border border-rose-200 rounded-lg px-2 py-0.5 hover:bg-rose-50">ตัดการเชื่อมต่อ</button>
+                        </div>
+                      </div>
                     ) : fb.connected ? (
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[11px] text-emerald-600 shrink-0">● เชื่อมต่อแล้ว</span>
                         <span className="text-sm text-slate-700">เพจ: <b>{fb.page_name}</b></span>
-                        {fbHasIg && <span className="text-[11px] text-pink-600 bg-pink-50 border border-pink-200 rounded-full px-2 py-0.5">มี IG ผูก (รอ Meta อนุมัติจึงโพสต์ IG ได้)</span>}
+                        {fbHasIg && <span className="text-[11px] text-pink-600 bg-pink-50 border border-pink-200 rounded-full px-2 py-0.5">มี IG ผูก — โพสต์ Instagram ได้</span>}
                         <button onClick={connectFb} className="text-[11px] text-violet-600 underline">เชื่อมใหม่/เปลี่ยนเพจ</button>
                         <button onClick={disconnectFb} className="text-[11px] text-rose-500 border border-rose-200 rounded-lg px-2 py-0.5 hover:bg-rose-50">ตัดการเชื่อมต่อ</button>
                       </div>
@@ -337,6 +346,8 @@ export default function PlatformAccountsPage() {
                       <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">⚠️ ยังไม่ได้ตั้ง META_APP_ID / META_APP_SECRET ในโฮสต์</p>
                     ) : !fb.connected ? (
                       <p className="text-xs text-slate-500">📷 Instagram โพสต์ผ่านเพจ Facebook — ไปกด <b>“เชื่อมต่อ Facebook”</b> ที่แถว Facebook ด้านบนก่อน (ตอนอนุญาตให้เปิดสิทธิ์ Instagram ด้วย)</p>
+                    ) : fbHasIg && fb.problem ? (
+                      <p className="text-xs text-rose-700">⚠️ Instagram ใช้การเชื่อมต่อเดียวกับเพจ “{fb.page_name}” ซึ่งตอนนี้ใช้ไม่ได้ — แก้ที่แถว Facebook ด้านบนก่อน</p>
                     ) : fbHasIg ? (
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[11px] text-emerald-600 shrink-0">● พร้อมโพสต์ Instagram</span>

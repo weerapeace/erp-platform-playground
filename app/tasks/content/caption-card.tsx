@@ -322,7 +322,7 @@ export function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPull
           {connInfo && (
             <div className={`flex items-center gap-1.5 text-[11px] rounded-md px-2 py-1 border ${connInfo.connected ? "bg-emerald-50 border-emerald-200 text-emerald-800" : "bg-amber-50 border-amber-200 text-amber-800"}`}>
               <span>{connInfo.connected ? "🔗" : "⚠️"}</span>
-              <span className="flex-1 min-w-0 truncate">{connInfo.label}</span>
+              <span className="flex-1 min-w-0 truncate" title={connInfo.label}>{connInfo.label}</span>
               <a href={connInfo.href} target="_blank" rel="noreferrer" className="shrink-0 underline hover:no-underline">{connInfo.connected ? t("เปลี่ยน", "Change") : t("เชื่อมบัญชี", "Connect")} ↗</a>
             </div>
           )}

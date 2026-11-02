@@ -26,15 +26,27 @@ export function metaAuthUrl(redirectUri: string, state: string, scopes: string[]
   return `https://www.facebook.com/${META_VER}/dialog/oauth?${q.toString()}`;
 }
 
-// เรียก Graph API แล้วคืน json (โยน error ที่แปลเป็นข้อความอ่านง่าย)
+/** error จาก Graph API — เก็บรหัส code/subcode ไว้ (ตัวแปลข้อความใน lib/social-publish/rules ใช้บอกสาเหตุจริงเป็นภาษาคน) */
+export class MetaApiError extends Error {
+  code?: number; subcode?: number;
+  constructor(message: string, code?: number, subcode?: number) { super(message); this.name = "MetaApiError"; this.code = code; this.subcode = subcode; }
+}
+
+// เรียก Graph API แล้วคืน json (โยน MetaApiError พร้อมรหัส)
 async function graph(url: string, init?: RequestInit): Promise<Record<string, unknown>> {
   const r = await fetch(url, init);
   const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
   if (!r.ok || j.error) {
-    const err = j.error as { message?: string; code?: number } | undefined;
-    throw new Error(err?.message || `Meta HTTP ${r.status}`);
+    const err = j.error as { message?: string; code?: number; error_subcode?: number } | undefined;
+    throw new MetaApiError(err?.message || `Meta HTTP ${r.status}`, err?.code, err?.error_subcode);
   }
   return j;
+}
+
+/** ตรวจว่า token ยังใช้ได้ (เรียก /me เบา ๆ) — null = ใช้ได้ · ไม่งั้นคืน error ของ Meta (เช่น บัญชีติดด่านตรวจสอบ / token หมดอายุ) */
+export async function metaCheckToken(token: string): Promise<MetaApiError | null> {
+  try { await graph(`${META_API}/me?fields=id&access_token=${encodeURIComponent(token)}`); return null; }
+  catch (e) { return e instanceof MetaApiError ? e : new MetaApiError((e as Error).message); }
 }
 
 // code → access token ระยะสั้น

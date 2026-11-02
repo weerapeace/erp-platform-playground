@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { writeAudit } from "@/lib/audit";
 import {
   fbPublish, fbPublishVideo, fbPublishReel, fbPublishStory, fbPublishVideoStory,
-  igPublishImages, igPublishStory, igCreateReels, igContainerStatus, igPublish,
+  igPublishImages, igPublishStory, igCreateReels, igContainerStatus, igPublish, metaCheckToken, MetaApiError,
 } from "@/lib/meta-graph";
 import { getPlatformId, loadConn } from "@/app/api/meta/shared";
 import { platformMediaUrl, type PostMedia } from "./media";
@@ -25,6 +25,12 @@ export type PublishResult =
   | { ok: true; state: "posted" | "scheduled"; url: string; story?: boolean }
   | { ok: true; state: "processing"; creationId: string }     // IG Reels — รอ IG ประมวลผล แล้วค่อย finalize
   | { ok: false; error: string; status?: number };
+
+// error ใด ๆ → ข้อความภาษาคน (ใช้รหัสของ Meta ถ้ามี)
+const metaErr = (platform: string, e: unknown): string => {
+  const me = e instanceof MetaApiError ? e : null;
+  return friendlyMetaError(platform, (e as Error)?.message ?? String(e), me?.code, me?.subcode);
+};
 
 type ContentRow = { id: string; brand_id: string | null; posted_links: Record<string, string> | null; post_status: Record<string, string> | null };
 
@@ -47,7 +53,9 @@ export async function checkMetaReady(admin: SupabaseClient, contentId: string, p
   const r = await loadContentConn(admin, contentId);
   if ("error" in r) return r.error ?? null;
   if (platform === "instagram" && !r.conn.igId) return "เพจที่เชื่อมยังไม่ได้ผูก Instagram (ต้องเป็น IG Business + ผูกกับเพจ)";
-  return null;
+  // ลองเรียก Meta จริง 1 ครั้ง — การเชื่อมต่อเสีย (บัญชีติดด่านตรวจ/หมดอายุ) จะได้รู้ตอนตั้งคิว ไม่ใช่ไปล้มตอนถึงเวลา
+  const bad = await metaCheckToken(r.conn.token);
+  return bad ? metaErr(platform, bad) : null;
 }
 
 /** บันทึกผลลงคอนเทนต์ (post_status/posted_links เดิม) + audit — อ่านค่าล่าสุดก่อนเขียน (คิวหลายแพลตฟอร์มอาจจบพร้อมกัน) */
@@ -109,7 +117,7 @@ export async function publishMeta(admin: SupabaseClient, input: {
     const posted = await igPublishImages(igId, token, caption, imageUrls);
     return done("posted", posted.url);
   } catch (e) {
-    return { ok: false, error: friendlyMetaError(platform, (e as Error).message), status: 400 };
+    return { ok: false, error: metaErr(platform, e), status: 400 };
   }
 }
 
@@ -129,7 +137,7 @@ export async function finalizeIgReel(admin: SupabaseClient, input: { contentId: 
     await markContent(admin, input.contentId, "instagram", "posted", posted.url, input.actor, { reel: true, via: input.via });
     return { ok: true, state: "posted", url: posted.url };
   } catch (e) {
-    return { ok: false, error: friendlyMetaError("instagram", (e as Error).message), status: 400 };
+    return { ok: false, error: metaErr("instagram", e), status: 400 };
   }
 }
 
