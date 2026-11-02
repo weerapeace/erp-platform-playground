@@ -4,12 +4,19 @@
 //  - friendlyMetaError: แปล error ของ Meta เป็นภาษาคน
 // ============================================================
 import type { PostMedia } from "./media";
+import { sanitizeFit } from "./fit";
 
 const label = (platform: string) => (platform === "instagram" ? "Instagram" : "Facebook");
 
 /** จัดสื่อตามรูปแบบที่เลือก (story/single/carousel/video/reels · ว่าง = เดาจากสื่อ) — ใช้ตรวจตอนตั้งคิวด้วย (บอกผู้ใช้ทันที ไม่ต้องรอพังตอนถึงเวลา) */
 export function normalizeMedia(format: string, input: PostMedia[]): { media: PostMedia[] } | { error: string } {
-  let media = input.filter((m) => m?.key).map((m) => ({ key: m.key, type: m.type === "video" ? "video" : "image" }));
+  // คงค่าปรับขอบ (fit) ของรูปไว้ — ตรวจความถูกต้องก่อน (วิดีโอไม่มี fit)
+  let media: PostMedia[] = input.filter((m) => m?.key).map((m) => {
+    const type = m.type === "video" ? "video" : "image";
+    const fit = type === "image" ? sanitizeFit(m.fit) : null;
+    const fallback = type === "image" && typeof m.fallback === "string" && /^[a-zA-Z0-9._/-]+$/.test(m.fallback) ? m.fallback : null;
+    return { key: m.key, type, ...(fit ? { fit } : {}), ...(fallback ? { fallback } : {}) };
+  });
   if (format === "story" && media.length === 0) return { error: "Story นี้ยังไม่มีไฟล์ (รูปหรือวิดีโอ) — ใส่ไฟล์ก่อนแล้วค่อยโพสต์" };
   if (format === "story") media = media.slice(0, 1);   // Story = 1 ชิ้นต่อครั้ง
   if (format === "single") media = media.filter((m) => m.type !== "video").slice(0, 1);

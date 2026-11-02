@@ -44,7 +44,8 @@ function RichText({ text, clampLines, linkCls = "text-blue-600", className = "" 
   );
 }
 
-const img = (im: PostImage, w: number) => r2ImageUrl(im.key, w) ?? "";
+// src = รูปที่ประมวลผลแล้ว (เช่น เติมขอบให้พอดี IG จาก /api/post-image) — ไม่มี = รูปในระบบย่อตามขนาดที่โชว์
+const img = (im: PostImage, w: number) => im.src ?? r2ImageUrl(im.key, w) ?? "";
 
 /** กริดรูปแบบ Facebook: 1 รูปเต็ม · 2 ครึ่ง · 3 = 1 ใหญ่ + 2 เล็ก · 4+ = 2×2 (+N) */
 function ImageGrid({ images, max = 4, tall, ratio }: { images: PostImage[]; max?: number; tall?: boolean; ratio?: number | null }) {

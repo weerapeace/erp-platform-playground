@@ -22,6 +22,7 @@ import type { CreativeStatus, CreativePriority, ApprovalStatus, AssetStatus, Sub
 import type { MassCreatePost, MassFreq, MassRawRow } from "@/lib/marketing/mass-plan";
 import type { BrandProfile } from "@/lib/marketing/brand-profile";
 import type { BriefTemplate } from "@/lib/brief-templates";
+import type { FitSpec } from "@/lib/social-publish/fit";
 
 // ---- Types (ตรงกับ output ของ /api/creative-tasks) ----
 export type CreativeTask = {
@@ -643,7 +644,8 @@ export async function getMetaStatus(brandId: string): Promise<MetaConnStatus> {
 }
 // ยิงโพสต์คอนเทนต์ขึ้นแพลตฟอร์มจริง (facebook/instagram) — media หลายชิ้น (รูป/วิดีโอ) + ตั้งเวลา (unix, 0=ทันที)
 // คืน: url+scheduled · หรือ processing+creationId (IG วิดีโอ ต้องไปตามเช็กที่ igFinalize)
-export type PostMediaRef = { key: string; type: "image" | "video" };
+// fit = ปรับรูปให้พอดีแพลตฟอร์ม (เติมขอบ/ครอป · lib/social-publish/fit) — ไม่ใส่ = ตามค่าตั้งต้นของตัวยิง
+export type PostMediaRef = { key: string; type: "image" | "video"; fit?: FitSpec | null; fallback?: string | null };   // fallback = รูปย่อ R2 เมื่อ key เป็นต้นฉบับ Drive
 export type PublishResult = { url: string; scheduled: boolean; processing: boolean; creationId?: string };
 export async function publishToPlatform(contentId: string, platform: string, captionText: string, media: PostMediaRef[], scheduledTime?: number, format?: string): Promise<PublishResult> {
   const j = await jsonOrThrow(await apiFetch("/api/meta/publish", { method: "POST", body: JSON.stringify({ content_id: contentId, platform, caption_text: captionText, media, scheduled_time: scheduledTime ?? 0, format: format ?? null }) }));

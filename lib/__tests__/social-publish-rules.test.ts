@@ -20,6 +20,12 @@ describe("normalizeMedia (กติกาเลือกสื่อของต
   it("รูปจาก Google Drive (drive:<id>) ไม่ถูกเดาเป็นวิดีโอ", () => {
     expect(normalizeMedia("", [img("drive:abc123def456")])).toEqual({ media: [img("drive:abc123def456")] });
   });
+  it("คงค่าปรับขอบ + รูปสำรอง (ต้นฉบับ Drive) · ทิ้งค่าที่ไม่ปลอดภัย", () => {
+    const fit = { mode: "pad" as const, ratio: "auto" as const, bg: "white" };
+    expect(normalizeMedia("", [{ key: "drive:abcdefghijkl", type: "image", fit, fallback: "creative/a.jpg" }])).toEqual({ media: [{ key: "drive:abcdefghijkl", type: "image", fit, fallback: "creative/a.jpg" }] });
+    expect(normalizeMedia("", [{ key: "x.jpg", type: "image", fallback: "../etc?x=1" }])).toEqual({ media: [img("x.jpg")] });
+    expect(normalizeMedia("reels", [{ key: "v.mp4", type: "video", fit }])).toEqual({ media: [vid("v.mp4")] });
+  });
   it("ไม่มีสื่อเลย = error · ชนิดแปลก ๆ ถือเป็นรูป", () => {
     expect("error" in normalizeMedia("", [])).toBe(true);
     expect(normalizeMedia("", [{ key: "x", type: "weird" }])).toEqual({ media: [img("x")] });

@@ -12,6 +12,7 @@ import {
 } from "@/lib/meta-graph";
 import { getPlatformId, loadConn } from "@/app/api/meta/shared";
 import { platformMediaUrl, type PostMedia } from "./media";
+import { DEFAULT_IG_FIT } from "./fit";
 import { normalizeMedia, friendlyMetaError } from "./rules";
 
 export { normalizeMedia, friendlyMetaError };
@@ -82,8 +83,11 @@ export async function publishMeta(admin: SupabaseClient, input: {
   if (!isMetaAutoPlatform(platform)) return { ok: false, error: "แพลตฟอร์มนี้ยังยิงอัตโนมัติไม่ได้", status: 400 };
   const nm = normalizeMedia(format, input.media);
   if ("error" in nm) return { ok: false, error: nm.error, status: 400 };
-  const videoUrls = nm.media.filter((m) => m.type === "video").map(platformMediaUrl);
-  const imageUrls = nm.media.filter((m) => m.type !== "video").map(platformMediaUrl);
+  // IG ฟีด: รูปที่ไม่ได้ตั้งการปรับขอบ → เติมขอบขาวเฉพาะรูปที่สัดส่วนหลุดช่วง (กัน IG ปฏิเสธ · รวมคิว "ตั้งคิวทุกแพลตฟอร์ม")
+  const igFeed = platform === "instagram" && format !== "story" && format !== "reels";
+  const media = nm.media.map((m) => (igFeed && m.type !== "video" && !m.fit ? { ...m, fit: DEFAULT_IG_FIT } : m));
+  const videoUrls = media.filter((m) => m.type === "video").map(platformMediaUrl);
+  const imageUrls = media.filter((m) => m.type !== "video").map(platformMediaUrl);
   const sched = input.scheduledTime && input.scheduledTime > 0 ? input.scheduledTime : undefined;
 
   const r = await loadContentConn(admin, contentId);

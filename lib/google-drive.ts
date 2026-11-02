@@ -246,6 +246,19 @@ export async function driveFileMeta(fileId: string): Promise<{ id: string; name:
   } catch { return null; }
 }
 
+/** ขนาดรูปบน Drive (กว้าง×สูงหลังหมุน + ไบต์) โดยไม่ต้องโหลดไฟล์ — ใช้บอกความคมชัดในป๊อปโพสต์ · ไม่ใช่รูป/อ่านไม่ได้ = null */
+export async function driveImageSize(fileId: string): Promise<{ width: number; height: number; bytes: number | null } | null> {
+  try {
+    const token = await getAccessToken();
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=size,imageMediaMetadata(width,height,rotation)&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return null;
+    const j = await r.json() as { size?: string; imageMediaMetadata?: { width?: number; height?: number; rotation?: number } };
+    const m = j.imageMediaMetadata; if (!m?.width || !m?.height) return null;
+    const swap = m.rotation === 1 || m.rotation === 3;   // หมุน 90°/270° = กว้าง/สูงสลับ
+    return { width: swap ? m.height : m.width, height: swap ? m.width : m.height, bytes: j.size ? Number(j.size) : null };
+  } catch { return null; }
+}
+
 /** ดึง fileId จากลิงก์ Google Drive ทุกรูปแบบที่เจอบ่อย */
 export function parseDriveFileId(url: string): string | null {
   const s = (url ?? "").trim();

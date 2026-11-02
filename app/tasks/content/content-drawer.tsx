@@ -16,10 +16,11 @@ import { getContentDriveInfo, startContentDriveUpload, finishContentDriveUpload,
 import { getContent, createContent, updateContent, deleteContent, getTask, listSubtasks, getCaptionTemplates, getParentSkuChildren, type ParentSkuChild, getRecommendedTimes, type RecommendedTimes, listContentAttachments, addContentAttachment, deleteContentAttachment, getPlatformSettings, savePlatformSettings, getLinkPreview, PLATFORM_SETTINGS_SWR_KEY, getMetaStatus, publishToPlatform, igFinalize, type MetaConnStatus, type PostMediaRef, getCaptionConfig, defaultHashtags, resolvePrompt, resolveBrandFromProduct, type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus, type BrandOption, type CaptionTemplate, type CaptionConfig, type ContentAttachment, type PlatformSettings, type DriveFileRef, listPublishJobs, queuePublishJobs, PUBLISH_JOBS_SWR_KEY, type PublishJob, type PublishJobInput } from "../data";
 import { useCreativeOptions, platformLabel, platformMeta } from "../use-options";
 import { PlatformChip } from "../platform-chip";
-import { PostConfirmModal, type PostImage } from "./post-confirm-modal";
+import { PostConfirmModal, loadPostFit, type PostImage } from "./post-confirm-modal";
 import { AddPathForm, isLocalPath, type PathItem } from "@/components/copy-path-button";
 import { buildCaptionVars, captionsForDetail, assembleCaption } from "./caption-assemble";
 import { PublishQueueBox, QueueAllModal, type QueuePlatformOption } from "./publish-queue";
+import type { FitSpec } from "@/lib/social-publish/fit";
 import { CopyButton } from "@/components/copy-button";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
@@ -294,7 +295,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   // media ที่เลือกลงโพสต์ได้ (รูป/วิดีโอแนบ + รูปจากงาน · ตัดซ้ำ) + ชนิดต่อ key
   const postImages: PostImage[] = (() => {
     const seen = new Set<string>(); const out: PostImage[] = [];
-    for (const a of attachments) if ((a.kind === "image" || a.kind === "video") && a.r2_key && !seen.has(a.r2_key)) { seen.add(a.r2_key); out.push({ key: a.r2_key, label: a.label ?? a.file_name ?? null, type: a.kind === "video" ? "video" : "image" }); }
+    // รูปที่อัปเอง: r2_key = รูปย่อ (โชว์เร็ว) · original = ต้นฉบับเต็มบน Drive (ถ้าระบบส่งขึ้นแล้ว) — ตอนโพสต์ใช้ต้นฉบับได้
+    for (const a of attachments) if ((a.kind === "image" || a.kind === "video") && a.r2_key && !seen.has(a.r2_key)) { seen.add(a.r2_key); out.push({ key: a.r2_key, label: a.label ?? a.file_name ?? null, type: a.kind === "video" ? "video" : "image", ...(a.kind === "image" && a.drive_file_id ? { original: `drive:${a.drive_file_id}` } : {}) }); }
     // รูป/วิดีโอที่อยู่บน Google Drive (ไม่มีไฟล์ในระบบ) — คีย์เป็น drive:<fileId>
     for (const a of attachments) if ((a.kind === "image" || a.kind === "video") && !a.r2_key && (a.url ?? "").startsWith("drive:") && !seen.has(a.url as string)) { seen.add(a.url as string); out.push({ key: a.url as string, label: a.label ?? a.file_name ?? null, type: a.kind === "video" ? "video" : "image" }); }
     for (const im of taskMedia.images) if (im.key && !seen.has(im.key)) { seen.add(im.key); out.push({ key: im.key, label: im.label ?? null, type: "image" }); }
@@ -313,11 +315,10 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const contentImageKeys = attachments.filter((a) => a.kind === "image" && (a.r2_key || (a.url ?? "").startsWith("drive:"))).map((a) => (a.r2_key || a.url) as string);
 
   // ยิงโพสต์จริง (Facebook/Instagram) จากป๊อปยืนยัน · รูป/วิดีโอ/อัลบั้ม + ตั้งเวลา(FB) · IG Reels = ตามเช็กสถานะ
-  const runPublish = async (platform: string, captionText: string, selectedKeys: string[], scheduledUnix: number | null, fmtOverride?: string) => {
+  const runPublish = async (platform: string, captionText: string, selectedKeys: string[], scheduledUnix: number | null, fmtOverride?: string, fit?: FitSpec | null, useOriginal = true) => {
     const label = platform === "facebook" ? "Facebook" : "Instagram";
-    // เลือกวิดีโอ → โพสต์เป็นวิดีโอ (ตัวแรก) · ไม่งั้น = รูปทั้งหมด
-    const videoKey = selectedKeys.find((k) => mediaTypeOf(k) === "video");
-    const media: PostMediaRef[] = videoKey ? [{ key: videoKey, type: "video" }] : selectedKeys.map((k) => ({ key: k, type: "image" as const }));
+    // เลือกวิดีโอ → โพสต์เป็นวิดีโอ (ตัวแรก) · ไม่งั้น = รูปทั้งหมด (+ ค่าปรับขอบ + ต้นฉบับ Drive ที่เลือกในป๊อป)
+    const media = toPostMedia(selectedKeys, fit, useOriginal);
     setPosting(platform);
     try {
       const res = await publishToPlatform(contentId, platform, captionText, media, scheduledUnix ?? undefined, fmtOverride ?? platformFormats[platform]);
@@ -358,9 +359,14 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   // 📤 คิวโพสต์อัตโนมัติ (ระบบโพสต์ให้ตามเวลา — ของกลาง lib/social-publish/queue) · สื่อเลือกแบบเดียวกับ runPublish
   const loadJobs = useCallback(async () => { try { setJobs(await listPublishJobs(contentId)); } catch { /* ไม่มีคิว/โหลดไม่ได้ = กล่องว่าง */ } }, [contentId]);
   useEffect(() => { void loadJobs(); }, [loadJobs]);
-  const toPostMedia = (keys: string[]): PostMediaRef[] => {
+  // keys = รูปที่เลือก (คีย์รูปย่อ) → สื่อที่จะส่ง: useOriginal = ใช้ต้นฉบับ Drive ถ้ามี (รูปย่อเป็นสำรองเผื่อต้นฉบับเปิดไม่ได้)
+  const toPostMedia = (keys: string[], fit?: FitSpec | null, useOriginal = true): PostMediaRef[] => {
     const videoKey = keys.find((k) => mediaTypeOf(k) === "video");
-    return videoKey ? [{ key: videoKey, type: "video" }] : keys.map((k) => ({ key: k, type: "image" as const }));
+    if (videoKey) return [{ key: videoKey, type: "video" }];
+    return keys.map((k) => {
+      const orig = useOriginal ? postImages.find((m) => m.key === k)?.original : undefined;
+      return { key: orig ?? k, type: "image" as const, ...(fit ? { fit } : {}), ...(orig ? { fallback: k } : {}) };
+    });
   };
   const queuePosts = async (items: PublishJobInput[]): Promise<boolean> => {
     setPosting("queue");
@@ -373,8 +379,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
     } catch (e) { pushToast("error", (e as Error).message); return false; }
     finally { setPosting(null); }
   };
-  const runQueue = async (platform: string, captionText: string, keys: string[], runAtLocal: string, fmt: string) => {
-    const ok = await queuePosts([{ platform, format: fmt || null, caption_text: captionText, media: toPostMedia(keys), run_at: new Date(runAtLocal).toISOString() }]);
+  const runQueue = async (platform: string, captionText: string, keys: string[], runAtLocal: string, fmt: string, fit?: FitSpec | null, useOriginal = true) => {
+    const ok = await queuePosts([{ platform, format: fmt || null, caption_text: captionText, media: toPostMedia(keys, fit, useOriginal), run_at: new Date(runAtLocal).toISOString() }]);
     if (ok) setPostModal(null);
   };
   // ยิงอัตโนมัติได้ = เชื่อมแล้ว + Meta ยืนยันว่าการเชื่อมต่อยังใช้ได้ (problem = เช่น บัญชีที่กดเชื่อมติดด่านตรวจ → ปุ่มกลับเป็นโหมดมือ)
@@ -551,7 +557,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const queueOptions: QueuePlatformOption[] = caps.filter((c) => c.platform === "facebook" || c.platform === "instagram").map((c) => {
     const p = c.platform; const fmt = platformFormats[p] ?? "";
     const keys = (platformImages[p]?.length ? platformImages[p] : contentImageKeys).filter((k) => postImages.some((m) => m.key === k));
-    const media = toPostMedia(keys);
+    // ตั้งคิวทีเดียว: ใช้ต้นฉบับ Drive (ถ้ามี) + IG ใช้ค่าปรับขอบล่าสุดที่เลือกไว้ในป๊อปโพสต์ (ไม่มี = เติมขอบขาวเฉพาะรูปที่ไม่ผ่าน)
+    const media = toPostMedia(keys, p === "instagram" ? loadPostFit("instagram") : null, true);
     const blocked = metaProblem ? metaProblem
       : !autoConnected(p) ? t("แบรนด์นี้ยังไม่ได้เชื่อมต่อ — ไปเชื่อมที่หน้าบัญชีแพลตฟอร์ม", "Not connected for this brand")
       : media.length === 0 ? t("ยังไม่ได้เลือกรูป/วิดีโอในการ์ดของแพลตฟอร์มนี้", "No media selected in this platform's card")
@@ -1185,8 +1192,9 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
           format={platformFormats[postModal.platform]}
           busy={posting === postModal.platform || posting === "queue"}
           onClose={() => setPostModal(null)}
-          onPublish={(keys, sched, fmt) => { setPlatformFormats((m) => { const n = { ...m }; if (fmt) n[postModal.platform] = fmt; else delete n[postModal.platform]; return n; }); runPublish(postModal.platform, postModal.captionText, keys, sched, fmt); }}
-          onQueue={(keys, runAtLocal, fmt) => { setPlatformFormats((m) => { const n = { ...m }; if (fmt) n[postModal.platform] = fmt; else delete n[postModal.platform]; return n; }); void runQueue(postModal.platform, postModal.captionText, keys, runAtLocal, fmt); }}
+          onPublish={(keys, sched, fmt, fit, useOriginal) => { setPlatformFormats((m) => { const n = { ...m }; if (fmt) n[postModal.platform] = fmt; else delete n[postModal.platform]; return n; }); runPublish(postModal.platform, postModal.captionText, keys, sched, fmt, fit, useOriginal); }}
+          onQueue={(keys, runAtLocal, fmt, fit, useOriginal) => { setPlatformFormats((m) => { const n = { ...m }; if (fmt) n[postModal.platform] = fmt; else delete n[postModal.platform]; return n; }); void runQueue(postModal.platform, postModal.captionText, keys, runAtLocal, fmt, fit, useOriginal); }}
+          onAddDriveImages={onAddDriveImages} pushToast={pushToast}
           onManual={() => manualPost(postModal.platform, postModal.captionText)}
         />
       )}
