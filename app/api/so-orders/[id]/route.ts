@@ -108,16 +108,29 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
     if (b.create_invoice && !invoiceId) {
       const { data: lines } = await admin.from("so_order_lines").select("*").eq("order_id", id).order("line_no");
+      const lineRows = (lines ?? []) as Record<string, unknown>[];
+      // ใบขายต้องรู้ "บริษัท" (เลือกชุดเลขใบกำกับ ISG/LOUIS) · "คลังที่ขายออก" (ยืนยัน = จอง, ส่งแล้ว = ตัดของ)
+      // และ "รหัสสินค้า" ของแต่ละบรรทัด — เดิมไม่ส่ง → ใบขายตกไปบริษัทหลัก + ไม่จอง/ไม่ตัดสต็อก
+      // คลัง = โซนสินค้าสำเร็จ WH-FG (ค่าเริ่มต้นเดียวกับฟอร์มสร้างใบขาย /sales-orders)
+      const skuCodes = [...new Set(lineRows.map((l) => (typeof l.sku === "string" ? l.sku.trim() : "")).filter(Boolean))];
+      const [{ data: fgWh }, { data: skuRows }] = await Promise.all([
+        admin.from("erp_playground_warehouses").select("id").eq("code", "WH-FG").maybeSingle(),
+        skuCodes.length ? admin.from("skus_v2").select("id, code").in("code", skuCodes).eq("is_active", true) : Promise.resolve({ data: [] as { id: string; code: string }[] }),
+      ]);
+      const skuIdByCode = new Map(((skuRows ?? []) as { id: string; code: string }[]).map((s) => [s.code, s.id]));
       const { data: newId, error: rpcErr } = await supabaseFromRequest(request).rpc("erp_playground_so_create", {
         p_header: {
+          company_id: order.company_id ?? null, customer_po_no: order.customer_po_no ?? null,
+          from_warehouse_id: (fgWh as { id: string } | null)?.id ?? null,
           customer_id: order.customer_id, customer_name: order.customer_name, customer_code: order.customer_code,
-          sale_person_name: order.sale_person_name, currency: order.currency,
+          sale_person_name: order.sale_person_name, currency: order.currency, exchange_rate: order.exchange_rate ?? null,
           order_date: order.order_date, expected_ship_date: order.due_date,
           header_discount_type: order.header_discount_type, header_discount_value: order.header_discount_value,
           shipping_fee: order.shipping_fee, vat_rate: order.vat_rate, vat_included: order.vat_included,
           wht_rate: order.wht_rate, note: `จากใบสั่งขาย ${order.order_no ?? ""}`.trim(),
         },
-        p_lines: ((lines ?? []) as Record<string, unknown>[]).map((l) => ({
+        p_lines: lineRows.map((l) => ({
+          product_id: (typeof l.sku === "string" && skuIdByCode.get(l.sku.trim())) || null,
           sku: l.sku, product_name: l.product_name, qty: l.qty, unit: l.unit,
           unit_price: l.unit_price, discount_type: l.discount_type, discount_value: l.discount_value, note: l.note,
         })),
