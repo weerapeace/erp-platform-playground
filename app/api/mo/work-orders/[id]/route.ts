@@ -28,7 +28,7 @@ type PatchBody = {
   /** คนรับหลายคน (แบบเดียวกับตอนจ่าย — crewFields) */
   assignees?: { id: string | null; name: string }[];
 };
-const isYmd = (v: unknown): v is string => typeof v === "string" && /^d{4}-d{2}-d{2}$/.test(v);
+const isYmd = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 // สถานะใบจ่ายงานที่ระบบรู้จัก — กันตั้งค่ามั่วผ่าน API
 const WO_STATUSES = new Set(["dispatched", "partial_return", "done", "cancelled"]);
