@@ -23,3 +23,22 @@ export async function prLineCodeResolver(admin: SupabaseClient, rows: PrLineRef[
   }
   return (row) => prefixOf(row) ?? (row.item_sku_id ? codeById.get(String(row.item_sku_id)) : undefined) ?? String(row.item_name ?? "");
 }
+
+/** รหัสใน "[รหัส] ชื่อ" (ใบขอซื้อจากแท็บใบสั่งผลิต / บอร์ด "ซื้อของ") · ไม่มี → null */
+export function bracketCode(name: unknown): string | null {
+  return /^\[([^\]]+)\]/.exec(String(name ?? ""))?.[1]?.trim() || null;
+}
+
+/**
+ * หา SKU id จาก "[รหัส] ชื่อ" — บรรทัดที่ไม่ได้ส่ง sku_id มา (ใบขอซื้อจาก MO/บอร์ด → PO line ไม่มี item_sku_id
+ * → รับของแล้วไม่เข้าสต็อก) · คืน Map รหัส → id เฉพาะ SKU ที่ active และรหัสตรงตัวเดียว (ซ้ำ = ไม่เดา)
+ */
+export async function skuIdsByBracketCode(admin: SupabaseClient, names: unknown[]): Promise<Map<string, string>> {
+  const codes = [...new Set(names.map(bracketCode).filter((c): c is string => !!c))];
+  const found = new Map<string, string[]>();
+  for (let i = 0; i < codes.length; i += 300) {
+    const { data } = await admin.from("skus_v2").select("id, code").in("code", codes.slice(i, i + 300)).eq("is_active", true);
+    for (const s of (data ?? []) as { id: string; code: string }[]) found.set(s.code, [...(found.get(s.code) ?? []), String(s.id)]);
+  }
+  return new Map([...found].filter(([, ids]) => ids.length === 1).map(([code, ids]) => [code, ids[0]]));
+}

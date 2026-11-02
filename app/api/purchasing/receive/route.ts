@@ -23,6 +23,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { pushLineText } from "@/lib/board-notify";
+import { bracketCode, skuIdsByBracketCode } from "@/lib/pr-line-code";
 import { isRefForCategory } from "@/lib/file-ref";
 
 export const dynamic = "force-dynamic";
@@ -86,6 +87,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     .eq("po_id", poId);
   if (plErr) return NextResponse.json({ error: plErr.message }, { status: 500 });
   const lineById = new Map((poLines ?? []).map((l) => [String(l.id), l as Record<string, unknown>]));
+  // บรรทัดเก่าที่มาจากใบขอซื้อแท็บใบสั่งผลิต/บอร์ด ไม่มี item_sku_id (ชื่อเป็น "[รหัส] ชื่อ")
+  // → หารหัสจากชื่อ แล้วติดให้บรรทัด PO ตอนรับ (ของเข้าสต็อกได้ · แก้/ลบใบรับทีหลังปรับสต็อกตรงกัน)
+  const skuFromName = new Set<string>();
+  const noSku = [...lineById.values()].filter((l) => !l.item_sku_id && bracketCode(l.item_name));
+  if (noSku.length) {
+    const codeIds = await skuIdsByBracketCode(admin, noSku.map((l) => l.item_name));
+    for (const l of noSku) {
+      const sid = codeIds.get(bracketCode(l.item_name)!);
+      if (sid) { l.item_sku_id = sid; skuFromName.add(String(l.id)); }
+    }
+  }
 
   const actor = body.actor ?? user.email ?? "system";
   const now = new Date();
@@ -129,7 +141,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const newDefective = num(pl.qty_defective) + defNow;
     const { error: updErr } = await admin
       .from("purchase_order_lines_v2")
-      .update({ qty_received: newReceived, qty_defective: newDefective, line_status: CASE_STATUS[caseType] })
+      .update({ qty_received: newReceived, qty_defective: newDefective, line_status: CASE_STATUS[caseType], ...(skuFromName.has(String(l.po_line_id)) ? { item_sku_id: pl.item_sku_id } : {}) })
       .eq("id", l.po_line_id);
     if (updErr) return NextResponse.json({ error: "อัปเดตบรรทัด PO ไม่สำเร็จ: " + updErr.message }, { status: 500 });
   }

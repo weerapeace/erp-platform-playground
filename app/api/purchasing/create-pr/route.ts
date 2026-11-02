@@ -12,6 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAuditMany } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
+import { bracketCode, skuIdsByBracketCode } from "@/lib/pr-line-code";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,6 +57,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const actor = body.actor ?? user.email ?? "system";
   const orderDate = typeof body.order_date === "string" && body.order_date ? body.order_date : new Date().toISOString().slice(0, 10);
+
+  // ---- ติดรหัส SKU ให้รายการที่ส่งมาแค่ "[รหัส] ชื่อ" (แท็บใบสั่งผลิต / บอร์ด "ซื้อของ") ----
+  // ไม่มี sku_id → PO line ไม่มี item_sku_id → รับของแล้วไม่เข้าสต็อก + ไม่ได้ร้าน/ราคาหลักด้านล่าง
+  // ชื่อยังคง "[รหัส] ชื่อ" เหมือนเดิม (lib/pr-line-code จับคู่กับ MO จากรหัสในชื่อก่อน)
+  const codeIds = await skuIdsByBracketCode(admin, items.filter((it) => !it.sku_id).map((it) => it.item_name));
+  for (const it of items) {
+    const c = it.sku_id ? null : bracketCode(it.item_name);
+    if (c && codeIds.has(c)) it.sku_id = codeIds.get(c)!;
+  }
 
   // ---- เติม "ร้าน + ราคา" จากร้านหลัก ★ ของ SKU ให้อัตโนมัติ (ของกลาง: ตารางร้านที่จำหน่าย) ----
   // ใบที่มาจาก BOM/ใบสั่งผลิตมักไม่ได้ส่งร้าน/ราคามาด้วย → ดึงจาก SKU ให้เลย จะได้ไม่ต้องมาตั้งร้านทีหลัง
