@@ -491,11 +491,11 @@ export default function SoOrdersPage() {
           <button onClick={() => setAskShip(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
           <button onClick={() => askShip && void act((askShip as { id: string }).id, { action: "ship", create_invoice: false }, "บันทึกว่าส่งแล้ว")}
             className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-700 hover:bg-slate-50">แค่ติ๊กว่าส่งแล้ว</button>
-          <button onClick={() => askShip && void act((askShip as { id: string }).id, { action: "ship", create_invoice: true }, "ส่งแล้ว + ออกใบขายให้แล้ว")}
+          <button onClick={() => askShip && void act((askShip as { id: string }).id, { action: "ship", create_invoice: true }, "ส่งแล้ว + ออกใบขาย (จัดส่ง · ตัดสต็อก) ให้แล้ว").then((j) => { if (j?.warning) toast.error(String(j.warning)); })}
             className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700">ส่งแล้ว + ออกใบขายให้เลย</button>
         </>}>
         <p className="text-sm text-slate-600">เลือกว่าจะให้ระบบ <b>ออกใบขาย/บิลให้เลย</b> (คัดลอกรายการจากใบสั่งขายไปตั้งใบขายใหม่) หรือ <b>แค่ติ๊กว่าส่งแล้ว</b> แล้วไปออกใบขายเองที่หน้าใบขาย</p>
-        <p className="text-[11px] text-slate-400 mt-2">ออกใบขายแล้วจะมีลิงก์ 🧾 ใบขาย ให้กดข้ามไปดูได้จากรายการ</p>
+        <p className="text-[11px] text-slate-400 mt-2">ออกใบขายให้เลย = ใบขายถูกยืนยันและ “จัดส่งแล้ว” ทันที → ตัดของออกจากคลังสินค้าสำเร็จ · จะมีลิงก์ 🧾 ใบขาย ให้กดข้ามไปดูได้จากรายการ</p>
       </ERPModal>
 
       <ConfirmDialog open={!!askCancel} onClose={() => setAskCancel(null)}

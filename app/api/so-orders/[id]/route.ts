@@ -140,11 +140,25 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       invoiceId = (newId as string) ?? null;
     }
 
+    // ส่งของแล้ว → ใบขายต้องเป็น "จัดส่งแล้ว" ด้วย = ตัดของออกจากคลัง (กติกา 2026-11-02: ใบขายจัดส่ง = จุดเดียวที่ตัดสต็อกตอนขาย)
+    // ใบที่เพิ่งออก (ร่าง) → ยืนยัน (ออกเลข/จองของ) → จัดส่ง (ปลดจอง + ตัดของ) ผ่านกติกาสถานะกลางของใบขาย
+    // ไม่สำเร็จ (เช่น ไม่มีสิทธิ์ยืนยัน) = ใบสั่งขายยังบันทึกส่งแล้ว + ใบขายค้างสถานะเดิม แจ้งเตือนให้ไปกดต่อที่หน้าใบขาย
+    let warning: string | null = null;
+    if (b.create_invoice && invoiceId) {
+      const sb = supabaseFromRequest(request);
+      const { data: inv } = await admin.from("erp_playground_sales_orders").select("status").eq("id", invoiceId).maybeSingle();
+      const steps = inv?.status === "draft" ? ["confirm", "ship"] : inv?.status === "confirmed" || inv?.status === "ready" ? ["ship"] : [];
+      for (const step of steps) {
+        const { error: tErr } = await sb.rpc("erp_playground_so_transition", { p_id: invoiceId, p_action: step, p_actor: user?.email ?? null, p_reason: null });
+        if (tErr) { warning = `ออกใบขายแล้ว แต่${step === "confirm" ? "ยืนยัน" : "จัดส่ง"}ใบขายไม่สำเร็จ (${tErr.message}) — ไปกดต่อที่หน้าใบขาย`; break; }
+      }
+    }
+
     const { error } = await admin.from("so_orders")
       .update({ status: "shipped", shipped_at: now, invoice_so_id: invoiceId, updated_at: now }).eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    await writeAudit(admin, { action: "so_order.ship", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, invoice_so_id: invoiceId, created_invoice: !!b.create_invoice } });
-    return NextResponse.json({ ok: true, invoice_so_id: invoiceId, error: null });
+    await writeAudit(admin, { action: "so_order.ship", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, invoice_so_id: invoiceId, created_invoice: !!b.create_invoice, ...(warning ? { warning } : {}) } });
+    return NextResponse.json({ ok: true, invoice_so_id: invoiceId, warning, error: null });
   }
 
   // ── ยกเลิก / เปิดใหม่ ───────────────────────────────────

@@ -82,13 +82,16 @@ export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChange
   const runShip = async (b: SoBatch, createInvoice: boolean) => {
     setBusy(true);
     let n = 0;
+    const warns: string[] = [];   // ออกใบขายแล้วแต่ยืนยัน/จัดส่งใบขายไม่สำเร็จ (ใบสั่งขายยังบันทึกส่งแล้ว)
     try {
       for (const o of shipPlan(b).filter((x) => !x.reason)) {
         const r = await apiFetch(`/api/so-orders/${o.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "ship", create_invoice: createInvoice }) });
         const j = await r.json(); if (!r.ok || j?.error) throw new Error(`${o.order_no ?? ""}: ${j?.error || "บันทึกส่งไม่สำเร็จ"}`);
+        if (j?.warning) warns.push(`${o.order_no ?? ""}: ${j.warning}`);
         n++;
       }
-      toast.success(`บันทึกส่งแล้ว ${n} ใบ${createInvoice ? " + ออกใบขายให้แล้ว" : ""}`);
+      toast.success(`บันทึกส่งแล้ว ${n} ใบ${createInvoice ? " + ออกใบขาย (จัดส่ง · ตัดสต็อก) ให้แล้ว" : ""}`);
+      if (warns.length) toast.error(warns.join("\n"));
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกส่งไม่สำเร็จ"); }
     finally { setBusy(false); setAskShip(null); onChanged(); }
   };
