@@ -32,8 +32,17 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
   const prevSum = new Map<string, { on_hand: number; ready: boolean; to_purchase: number | null }>();
   const prevCut = new Map<string, boolean>();
   if (preserve) {
-    const { data: oldSum } = await admin.from("mo_material_summary").select("component_sku, on_hand_qty, is_ready, to_purchase_qty").eq("mo_no", moNo);
-    for (const s of (oldSum ?? []) as Record<string, unknown>[]) { const k = s.component_sku ? String(s.component_sku) : null; if (k) prevSum.set(k, { on_hand: Number(s.on_hand_qty) || 0, ready: !!s.is_ready, to_purchase: s.to_purchase_qty != null ? Number(s.to_purchase_qty) : null }); }
+    const { data: oldSum } = await admin.from("mo_material_summary").select("component_sku, required_qty, on_hand_qty, is_ready, to_purchase_qty").eq("mo_no", moNo);
+    for (const s of (oldSum ?? []) as Record<string, unknown>[]) {
+      const k = s.component_sku ? String(s.component_sku) : null; if (!k) continue;
+      const onHand = Number(s.on_hand_qty) || 0;
+      // "ต้องซื้อ" ที่เก็บไว้ = ค่าที่คนพิมพ์ทับเอง ก็ต่อเมื่อไม่เท่ากับค่าที่ระบบคิด (ต้องใช้ − มีของ) เท่านั้น
+      // ค่าที่ระบบคิดไม่เก็บ → คิดใหม่ตามจำนวนใหม่ (เดิมเก็บไว้ทั้งหมด แก้จำนวนแล้ว "ต้องซื้อ" ค้างเป็นยอดเก่า)
+      const stored = s.to_purchase_qty != null ? Number(s.to_purchase_qty) : null;
+      const base = Math.max(0, (Number(s.required_qty) || 0) - onHand);
+      const override = stored != null && Math.round(stored * 10000) !== Math.round(base * 10000) ? stored : null;
+      prevSum.set(k, { on_hand: onHand, ready: !!s.is_ready, to_purchase: override });
+    }
     const { data: oldMat } = await admin.from("mo_materials").select("component_sku, cut_block_code, cut_done").eq("mo_no", moNo);
     for (const m of (oldMat ?? []) as Record<string, unknown>[]) { if (m.cut_done) prevCut.set(`${m.component_sku ?? ""}|${m.cut_block_code ?? ""}`, true); }
   }
@@ -222,7 +231,7 @@ export async function explodeBom(admin: ReturnType<typeof supabaseAdmin>, bomCod
       mo_no: moNo, component_sku: e.sku, component_name: e.name, material_type: e.type, uom: e.uom,
       qty_per: moQty > 0 ? r4(e.required / moQty) : 0, required_qty: required,
       on_hand_qty: prev ? prev.on_hand : 0,
-      to_purchase_qty: prev && prev.to_purchase != null ? prev.to_purchase : required,
+      to_purchase_qty: prev && prev.to_purchase != null ? prev.to_purchase : Math.max(0, r4(required - (prev ? prev.on_hand : 0))),
       is_ready: prev ? prev.ready : false, sequence: i + 1, is_active: true,
       lay_note: e.sku ? (layNoteOf.get(e.sku)?.note ?? null) : null,
       lay_length_cm: e.sku ? (layNoteOf.get(e.sku)?.length_cm ?? null) : null,

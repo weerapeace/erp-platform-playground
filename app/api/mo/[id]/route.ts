@@ -199,11 +199,16 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
   // กางสูตรใหม่เมื่อจำนวน/สูตร/ไซส์เปลี่ยน หรือสั่ง reexplode
+  // ไซส์: ฟอร์มส่ง size_breakdown มาทุกครั้งที่บันทึก → นับว่าเปลี่ยนเฉพาะเมื่อค่าต่างจากเดิมจริง
+  //   (เดิมใบแยกไซส์กางสูตรใหม่ทุกครั้งที่กดบันทึก)
+  // เก็บค่าที่เคยกรอก (เตรียม/ตัด/มีของ/ขอซื้อ) เป็นค่าเริ่มต้น — ล้างทิ้งเฉพาะเมื่อส่ง preserve: false มาชัด ๆ
+  //   (เดิมฟอร์มแก้ใบสั่งผลิตไม่ส่ง preserve → แก้จำนวน/สูตรทีไร ติ๊กหน้างานหายหมด · บอร์ด/ปุ่มอัพเดต BOM ส่ง true อยู่แล้ว)
   const qtyChanged = newQty !== (existing as { qty: number }).qty;
   const bomChanged = newBom !== (existing as { bom_code: string | null }).bom_code;
-  const reexploded = body.reexplode || qtyChanged || bomChanged || sizesProvided || newMode !== oldMode;
+  const sizesChanged = sizesProvided && JSON.stringify(effSizes) !== JSON.stringify(cleanSizes((existing as { size_breakdown?: unknown }).size_breakdown));
+  const reexploded = body.reexplode || qtyChanged || bomChanged || sizesChanged || newMode !== oldMode;
   if (reexploded) {
-    await explodeBom(admin, newBom ?? null, moNo, newQty, effSizes, body.preserve === true, newMode);
+    await explodeBom(admin, newBom ?? null, moNo, newQty, effSizes, body.preserve !== false, newMode);
   } else if (Array.isArray(body.materials)) {
     // อัปเดต checklist เตรียม/จำนวนที่มี/ขอซื้อ ที่ "สรุปต่อวัตถุดิบ" (เฉพาะเมื่อไม่ได้กางสูตรใหม่)
     for (const m of body.materials) {
