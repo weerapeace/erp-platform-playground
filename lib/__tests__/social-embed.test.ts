@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isSocialHost, parseSocialLink, socialEmbedSize, socialEmbedSrc } from "@/lib/social-embed";
+import { isSocialHost, parseSocialLink, pinRatioFromSize, pinterestFit, socialEmbedSize, socialEmbedSrc } from "@/lib/social-embed";
 
 describe("parseSocialLink — Pinterest", () => {
   it("ลิงก์พินทุกภาษา (www./es./th.) → เลขพิน + ลิงก์มาตรฐาน", () => {
@@ -73,5 +73,36 @@ describe("isSocialHost / socialEmbedSrc / socialEmbedSize", () => {
     expect(socialEmbedSize("pinterest", 564 / 689)).toEqual({ width: 345, height: 518 });
     expect(socialEmbedSize("pinterest")).toEqual({ width: 345, height: 620 });
     expect(socialEmbedSize("tiktok")).toEqual({ width: 325, height: 578 });
+  });
+});
+
+describe("pinterestFit — ยืด/หดกล่องพินแล้วไม่ถูกตัด", () => {
+  const ratio = 564 / 1002; // พินแนวตั้งที่เจ้าของวาง (กล่องเริ่ม 345×710)
+  const inside = (f: ReturnType<typeof pinterestFit>, w: number, h: number) => {
+    expect(f.left).toBeGreaterThanOrEqual(-0.01); expect(f.top).toBeGreaterThanOrEqual(-0.01);
+    expect(f.left + f.frameW * f.scale).toBeLessThanOrEqual(w + 0.01);
+    expect(f.top + f.frameH * f.scale).toBeLessThanOrEqual(h + 0.01);
+  };
+  it("ขนาดตั้งต้น = ไม่ย่อไม่ขยาย", () => {
+    const f = pinterestFit(345, 710, ratio);
+    expect(f.frameW).toBe(345); expect(f.scale).toBeCloseTo(1, 2);
+  });
+  it("หดเล็กกว่าที่ตัวฝังรับได้ (เคสในภาพเจ้าของ ~130×230) → วาดกว้าง 236 แล้วย่อทั้งก้อน", () => {
+    const f = pinterestFit(130, 230, ratio);
+    expect(f.frameW).toBe(236); expect(f.scale).toBeLessThan(1); inside(f, 130, 230);
+  });
+  it("ยืดใหญ่เกิน 600 → วาด 600 แล้วขยายให้เต็มกล่อง", () => {
+    const f = pinterestFit(900, 1850, ratio);
+    expect(f.frameW).toBe(600); expect(f.scale).toBeGreaterThan(1); inside(f, 900, 1850);
+  });
+  it("ยืดแค่ด้านเดียว (กว้างขึ้น/เตี้ยลง) → ย่อให้พอดีด้านที่แคบกว่า + จัดกลาง", () => {
+    const f = pinterestFit(500, 400, ratio); inside(f, 500, 400); expect(f.left).toBeGreaterThan(0);
+  });
+  it("ยังไม่รู้สัดส่วนรูป → ใช้สัดส่วนกล่อง (เต็มกล่องพอดี)", () => {
+    const f = pinterestFit(300, 600, null);
+    expect(f.left).toBeCloseTo(0, 5); expect(f.top).toBeCloseTo(0, 5);
+  });
+  it("สัดส่วนรูปจากขนาดที่ API คืน", () => {
+    expect(pinRatioFromSize({ width: 345, height: 518 })).toBeCloseTo(564 / 689, 2);
   });
 });

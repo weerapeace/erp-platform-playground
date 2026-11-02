@@ -37,7 +37,11 @@ const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).
 
 // กล่องฝัง (embeddable): Pinterest/TikTok ใช้ตัวฝังของเรา · ที่เหลือ (YouTube ฯลฯ) ให้ Excalidraw ตัดสิน/วาดเองตามเดิม
 const validateEmbeddable = (url: string) => (parseSocialLink(url) ? true : undefined);
-const renderEmbeddable = (el: any) => { const l = parseSocialLink(el?.link); return l ? <SocialEmbedFrame link={l} /> : null; };
+const renderEmbeddable = (el: any) => {
+  const l = parseSocialLink(el?.link); if (!l) return null;
+  const pad = 2 * (el.strokeWidth || 0); // Excalidraw เว้นขอบด้านใน = ความหนาเส้น
+  return <SocialEmbedFrame link={l} width={el.width - pad} height={el.height - pad} />;
+};
 /** กล่องข้อความที่มีแค่ลิงก์ Pinterest/TikTok (วางไว้ก่อนกระดานรองรับ) — ไม่นับข้อความในกล่อง/การ์ด */
 const socialTextsOf = (els: any[]) => els.filter((e) => !e.isDeleted && e.type === "text" && !e.containerId && !e.customData?.kind
   && /pin|tiktok/i.test(e.originalText ?? e.text ?? "") && parseSocialLink(e.originalText ?? e.text));

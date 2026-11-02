@@ -65,10 +65,27 @@ export function socialEmbedSrc(kind: SocialKind, id: string): string {
 }
 
 // ตัวฝังพินกว้าง 345 = ขนาดกลางของ Pinterest · ท้ายการ์ด (ชื่อ/ผู้ปักหมุด) สูง ~97px
-const PIN_W = 345, PIN_FOOTER = 97;
+// ตัวฝังพินยืดได้แค่กว้าง ~160–600 (เกินนี้ถูกตัด/ไม่โตตาม) และสูงตามรูปเสมอ → ต้องย่อ/ขยายทั้งก้อนเอง (pinterestFit)
+const PIN_W = 345, PIN_FOOTER = 97, PIN_MIN_W = 236, PIN_MAX_W = 600;
+const validRatio = (ratio?: number | null) => (ratio && ratio > 0.2 && ratio < 5 ? ratio : null);
 /** ขนาดกรอบบนกระดาน — ratio = กว้าง/สูง ของรูปพิน (ไม่รู้ = ใช้ขนาดกลาง ๆ แล้วให้ผู้ใช้ยืดเอง) */
 export function socialEmbedSize(kind: SocialKind, ratio?: number | null): { width: number; height: number } {
   if (kind === "tiktok") return { width: 325, height: 578 };
-  const r = ratio && ratio > 0.2 && ratio < 5 ? ratio : 0.66;
-  return { width: PIN_W, height: Math.round(PIN_W / r + PIN_FOOTER) };
+  return { width: PIN_W, height: Math.round(PIN_W / (validRatio(ratio) ?? 0.66) + PIN_FOOTER) };
+}
+
+/** สัดส่วนรูปพินจากขนาดกรอบที่ API คืน (กว้าง 345 · สูง = รูป + ท้ายการ์ด) */
+export function pinRatioFromSize(size: { width: number; height: number }): number | null {
+  return validRatio(size.width / Math.max(1, size.height - PIN_FOOTER));
+}
+
+/** วางตัวฝังพินในกล่องขนาดใดก็ได้: วาดที่ขนาดที่ตัวฝังรับได้ (กว้าง 236–600 สูงตามรูป) แล้วย่อ/ขยายทั้งก้อนให้พอดี + จัดกลาง
+ *  ratio ไม่รู้ = ถือว่ากล่องเป็นสัดส่วนเดียวกับพิน */
+export function pinterestFit(boxW: number, boxH: number, ratio?: number | null): { frameW: number; frameH: number; scale: number; left: number; top: number } {
+  const w = Math.max(1, boxW), h = Math.max(1, boxH);
+  const frameW = Math.round(Math.min(PIN_MAX_W, Math.max(PIN_MIN_W, w)));
+  const r = validRatio(ratio);
+  const frameH = r ? Math.round(frameW / r + PIN_FOOTER) : Math.round(frameW * h / w);
+  const scale = Math.min(w / frameW, h / frameH);
+  return { frameW, frameH, scale, left: (w - frameW * scale) / 2, top: (h - frameH * scale) / 2 };
 }
