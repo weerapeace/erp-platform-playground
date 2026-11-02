@@ -8,7 +8,7 @@
  */
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import {
-  LIST_GROUP_ROW, LIST_ROW_KEY, LIST_SUBGROUP_ROW, LIST_TOTAL_ROW, defaultListPrintSettings, escapeHtml as esc, listNoteKey, listPrintCss, listSummaryHtml,
+  LIST_GROUP_ROW, LIST_ROW_KEY, LIST_SUBGROUP_ROW, LIST_TOTAL_ROW, defaultListPrintSettings, escapeHtml as esc, fitListColumns, listNoteKey, listPrintCss, listSummaryHtml,
   renderListTable, resolveListColumns, signatureHtml,
   type ListPrintColumn, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
@@ -254,9 +254,9 @@ export function buildPoPrint(input: {
   };
   rows.sort(cmp[s.sortBy] ?? byName);
 
-  // 4) คอลัมน์ (รหัสบนชื่อ = ไม่มีคอลัมน์รหัสแยก)
+  // 4) คอลัมน์ (รหัสบนชื่อ = ไม่มีคอลัมน์รหัสแยก) · ย่อให้พอดีกระดาษ (แนวตั้ง/A5 ไม่หลุดขอบ)
   const avail = poPrintColumns(mode);
-  const cols = resolveListColumns(s, avail).filter((c) => !(o.stack && c.key === "code"));
+  const cols = fitListColumns(resolveListColumns(s, avail).filter((c) => !(o.stack && c.key === "code")), s);
   const nameCol = cols.find((c) => c.key === "name");
   if (nameCol && o.stack && nameCol.label === "สินค้า") nameCol.label = "รหัส / สินค้า";
   const textCols = cols.filter((c) => c.blank === "text");
