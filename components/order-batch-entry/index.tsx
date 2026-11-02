@@ -19,7 +19,8 @@ import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { CustomerPicker, type CustomerPickerValue, type SkuPickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
-import { SOLineEditor, emptyLine, type EditorLine, type LineExtraColumn } from "@/components/sales-line-items";
+import { SOLineEditor, VatModeToggle, calculateEditorTotals, emptyLine, vatRateForCompany, type EditorLine, type LineExtraColumn } from "@/components/sales-line-items";
+import { toMajor } from "@/lib/money";
 import { LineImportModal, type ImportedLine } from "@/components/line-import";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import { ParentSkuMultiPickerModal, type ParentSkuPick } from "@/components/parent-sku-multi-picker";
@@ -37,7 +38,7 @@ export type BatchSeedLine = {
   no_sku_hint?: string | null;
 };
 
-type Company = { id: string; company_code: string; name: string; is_default: boolean };
+type Company = { id: string; company_code: string; name: string; is_default: boolean; vat_registered?: boolean };
 type LineMeta = { group: MoGroupPick | null; groupManual: boolean; mo_id: string | null; mo_no: string | null; source: string; hint: string | null };
 type Picker = null | "excel" | "sku" | "parent" | "quote" | "mo";
 
@@ -79,6 +80,7 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
   const [customer, setCustomer] = useState<CustomerPickerValue | null>(null);
   const [dueDate, setDueDate] = useState("");
   const [poNo, setPoNo] = useState("");
+  const [vat, setVat] = useState({ rate: 7, included: false });   // ภาษีขาย — ตั้งต้นตามบริษัท (vatRateForCompany)
   const [defaultGroup, setDefaultGroup] = useState<MoGroupPick | null>(null);
   const [lines, setLines] = useState<EditorLine[]>([]);
   const [meta, setMeta] = useState<Record<string, LineMeta>>({});
@@ -111,7 +113,8 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
         const j = await apiFetch("/api/admin/companies").then((r) => r.json());
         const cs = (j.data ?? []) as Company[];
         setCompanies(cs);
-        setCompanyCode((cs.find((c) => c.is_default) ?? cs[0])?.company_code ?? "");
+        const def = cs.find((c) => c.is_default) ?? cs[0];
+        setCompanyCode(def?.company_code ?? ""); setVat({ rate: vatRateForCompany(def), included: false });
       } catch { /* ไม่มีบริษัท = ใช้เลขชุดกลาง */ }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,7 +231,10 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
   const filled = lines.filter((l) => l.product_name.trim() || l.sku);
   const groupNames = useMemo(() => new Set(filled.map((l) => meta[l.tempId]?.group?.name).filter(Boolean)), [filled, meta]);
   const canOpen = filled.filter((l) => l.sku && !meta[l.tempId]?.hint).length;
-  const total = filled.reduce((s, l) => s + l.qty * l.unit_price, 0);
+  const company = companies.find((c) => c.company_code === companyCode);
+  const companyNoVat = company?.vat_registered === false;
+  const vatRate = companyNoVat ? 0 : vat.rate;
+  const total = toMajor(calculateEditorTotals(filled, { vatRate, vatIncluded: vat.included, whtRate: 0, headerDiscountType: "amount", headerDiscountValue: 0, shippingFee: 0 }).grand_total.amount);
 
   const save = async () => {
     let e = "";
@@ -237,14 +243,13 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
     else { const bad = filled.filter((l) => !(l.qty > 0)).length; if (bad) e = `ใส่จำนวนให้ครบ (ยังว่าง ${bad} แถว — ติ๊กแล้วใส่ทีเดียวได้)`; }
     setErr(e); if (e) return;
 
-    const company = companies.find((c) => c.company_code === companyCode);
     const newGroups: Record<string, string> = {};
     const body = {
       header: {
         company_id: company?.id ?? null, company_code: company?.company_code ?? null,
         customer_id: customer!.id || null, customer_name: customer!.name, customer_code: customer!.code ?? null,
         customer_po_no: poNo || null, order_date: todayIso(), due_date: dueDate || null,
-        vat_rate: 7, vat_included: false, wht_rate: 0, header_discount_type: "amount", header_discount_value: 0, shipping_fee: 0,
+        vat_rate: vatRate, vat_included: vatRate > 0 && vat.included, wht_rate: 0, header_discount_type: "amount", header_discount_value: 0, shipping_fee: 0,
       },
       lines: filled.map((l) => {
         const m = meta[l.tempId];
@@ -286,7 +291,7 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
       <ERPModal open={open} onClose={() => !saving && onClose()} size="xl" title={title} hasUnsavedChanges={filled.length > 0 && !saving}
         footer={<>
           <span className="mr-auto text-[12px] text-slate-500">
-            {filled.length ? <>ได้ใบสั่งขาย 1 ใบ · {filled.length} รายการ · {groupNames.size} ชุด · รวม ฿{Math.round(total).toLocaleString("th-TH")} · เปิดผลิตได้ {canOpen}/{filled.length}</> : "ยังไม่มีรายการ"}
+            {filled.length ? <>ได้ใบสั่งขาย 1 ใบ · {filled.length} รายการ · {groupNames.size} ชุด · รวม ฿{Math.round(total).toLocaleString("th-TH")}{vatRate > 0 ? (vat.included ? " (รวม VAT แล้ว)" : " (บวก VAT แล้ว)") : " (ไม่มี VAT)"} · เปิดผลิตได้ {canOpen}/{filled.length}</> : "ยังไม่มีรายการ"}
           </span>
           <button onClick={onClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
           <button onClick={() => void save()} disabled={saving} className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
@@ -310,7 +315,7 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
               <p className="mt-1 text-[11px] text-slate-400">ใบสั่งผลิตที่เปิดจากออเดอร์นี้จะเข้าชุดเดียวกันให้เอง — ไปโผล่ที่หน้าใบสั่งผลิต / บอร์ดจ่ายงานเลย</p></div>
             {companies.length > 1 && (
               <label className="block"><span className="text-[11px] text-slate-500">บริษัท (ชุดเลขเอกสาร)</span>
-                <select value={companyCode} onChange={(e) => setCompanyCode(e.target.value)} className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
+                <select value={companyCode} onChange={(e) => { setCompanyCode(e.target.value); setVat((v) => ({ rate: vatRateForCompany(companies.find((c) => c.company_code === e.target.value)), included: v.included })); }} className="mt-0.5 h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm">
                   {companies.map((c) => <option key={c.id} value={c.company_code}>{c.name}</option>)}
                 </select></label>
             )}
@@ -348,6 +353,8 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
               setMeta((m) => { const n = { ...m }; for (const l of ls) if (!n[l.tempId]) n[l.tempId] = { ...blankMeta(), group: defaultGroup }; return n; });
               setErr("");
             }} />
+
+          <VatModeToggle rate={vatRate} included={vat.included} companyNoVat={companyNoVat} onChange={setVat} />
 
           <label className="flex items-center gap-2 text-sm text-slate-600">
             <input type="checkbox" checked={openMo} onChange={(e) => setOpenMo(e.target.checked)} className="h-4 w-4 accent-blue-600" />

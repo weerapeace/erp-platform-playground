@@ -110,7 +110,7 @@ const SORTS: { key: SortKey; label: string }[] = [
 ];
 
 export function DispatchShop({
-  pending, departments, craftsmen, canDispatch, moGroups, groupOf, laborByMo, onOpenMO, onReload,
+  pending, departments, craftsmen, canDispatch, moGroups, groupOf, laborByMo, onOpenMO, onReload, initialGroup,
 }: {
   pending: ShopMO[];
   departments: ShopDept[];
@@ -121,13 +121,15 @@ export function DispatchShop({
   laborByMo: Record<string, number>;
   onOpenMO: (mo: ShopMO) => void;
   onReload: () => void | Promise<void>;
+  /** กรองกลุ่มนี้ไว้ตั้งแต่เปิด (ชื่อกลุ่ม · มาจากลิงก์ ?group= เช่นปุ่ม "จ่ายงานชุดนี้" หน้าใบสั่งขาย) */
+  initialGroup?: string;
 }) {
   const toast = useToast();
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("due");
   const [groupMode, setGroupMode] = useState<"none" | "group" | "brand">("none");
   const [readyFilter, setReadyFilter] = useState<"all" | "ready" | "not" | "gap" | "urgent">("all");   // gap = ขาดสูตร/ค่าแรง · urgent = งานที่ผู้บริหารติดธง
-  const [groupFilter, setGroupFilter] = useState<string>("__all__");
+  const [groupFilter, setGroupFilter] = useState<string>(initialGroup || "__all__");
   // หน้าตาการ์ด (รูปใหญ่ / แบบรายการ) — จำต่อผู้ใช้ผ่านของกลาง useViewPref
   const { view: cardMode, setView: setCardMode, saveDefault: saveCardMode } = useViewPref("work_board_shop_card", CARD_MODES, "big");
   const { view: cardCols, setView: setCardCols, saveDefault: saveCardCols } = useViewPref("work_board_shop_cols", CARD_COLS, "4");

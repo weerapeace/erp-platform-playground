@@ -27,7 +27,7 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { DocCalendar, type CalDoc } from "@/components/doc-calendar";
 import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
-import { SOLineEditor, SalesTotalsPreview, calculateEditorTotals, emptyLine, type EditorLine, type LineExtraColumn } from "@/components/sales-line-items";
+import { SOLineEditor, SalesTotalsPreview, VatModeToggle, calculateEditorTotals, emptyLine, vatRateForCompany, type EditorLine, type LineExtraColumn } from "@/components/sales-line-items";
 import { DateInput } from "@/components/date-input";
 import { Icon } from "@/components/icon";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
@@ -140,6 +140,12 @@ export default function SoOrdersPage() {
     return m;
   }, [rows]);
 
+  // ผู้ออกบิลที่ไม่ได้จด VAT → บังคับ VAT = 0 (ของกลาง VatModeToggle ล็อกปุ่ม "มี VAT" ด้วย)
+  const companyNoVat = !!form && companies.find((c) => c.id === form.company_id)?.vat_registered === false;
+  useEffect(() => {
+    if (companyNoVat) setForm((f) => (f && f.vat_rate !== 0 ? { ...f, vat_rate: 0, vat_included: false } : f));
+  }, [companyNoVat]);
+
   const totals = useMemo(() => calculateEditorTotals(form?.lines ?? [], {
     vatRate: form?.vat_rate ?? 7, vatIncluded: !!form?.vat_included, whtRate: form?.wht_rate ?? 0,
     headerDiscountType: form?.header_discount_type ?? "amount", headerDiscountValue: form?.header_discount_value ?? 0,
@@ -150,9 +156,9 @@ export default function SoOrdersPage() {
   const openNew = () => {
     const def = companies.find((c) => c.is_default) ?? companies[0];
     setMeta({});
-    setForm({ ...emptyForm(), company_code: def?.company_code ?? "", company_id: def?.id ?? null });
+    setForm({ ...emptyForm(), company_code: def?.company_code ?? "", company_id: def?.id ?? null, vat_rate: vatRateForCompany(def) });
   };
-  const openRow = async (r: Row) => {
+  const openRow = async (r: { id: string; groups?: Row["groups"] }) => {
     try {
       const j = await apiFetch(`/api/so-orders/${r.id}`).then((x) => x.json());
       const d = j.data as Record<string, unknown> & { lines: Record<string, unknown>[] };
@@ -376,7 +382,8 @@ export default function SoOrdersPage() {
           emptyText={groupFilter ? "ไม่มีใบสั่งขายในชุดนี้" : "ยังไม่มีใบสั่งขาย — กด “เพิ่มหลายรายการ” หรือ “สร้างทีละใบ”"}
           footnote="กดแถวเพื่อเปิดใบ · ใบที่เปิดใบสั่งผลิตแล้วจะมีป้าย 🏭 · กดป้ายชุดเพื่อกรอง" />
       ) : view === "batch" ? (
-        <SoBatchView groupFilter={groupFilter} canEdit={canEdit} canShip={canShip} reloadKey={reloadKey} onChanged={() => void load()} />
+        <SoBatchView groupFilter={groupFilter} canEdit={canEdit} canShip={canShip} reloadKey={reloadKey} onChanged={() => void load()}
+          onOpenOrder={(id) => void openRow(rows.find((x) => x.id === id) ?? { id })} />
       ) : (
         <DocCalendar docs={calDocs} cursor={cursor} onCursor={setCursor} onPick={(id) => { const r = rows.find((x) => x.id === id); if (r) void openRow(r); }}
           hint="วางใบตามกำหนดส่ง · ใบที่ยังไม่ใส่กำหนดส่ง (~) วางตามวันที่สั่ง" />
@@ -409,7 +416,7 @@ export default function SoOrdersPage() {
           <div className="space-y-3">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <label className="block"><span className="text-[11px] text-slate-500">บริษัท (ชุดเลขเอกสาร)</span>
-                <select value={form.company_code} onChange={(e) => { const c = companies.find((x) => x.company_code === e.target.value); setForm({ ...form, company_code: e.target.value, company_id: c?.id ?? null }); }}
+                <select value={form.company_code} onChange={(e) => { const c = companies.find((x) => x.company_code === e.target.value); setForm({ ...form, company_code: e.target.value, company_id: c?.id ?? null, vat_rate: vatRateForCompany(c), vat_included: c?.vat_registered === false ? false : form.vat_included }); }}
                   disabled={!!form.id} className="w-full h-9 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg bg-white disabled:bg-slate-50">
                   <option value="">— เลือกบริษัท —</option>
                   {companies.map((c) => <option key={c.id} value={c.company_code}>{c.name}</option>)}
@@ -450,10 +457,9 @@ export default function SoOrdersPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-2">
-                <div className="grid grid-cols-3 gap-2">
-                  <label className="block"><span className="text-[11px] text-slate-500">VAT %</span>
-                    <input type="number" value={form.vat_rate} onChange={(e) => setForm({ ...form, vat_rate: Number(e.target.value) || 0 })}
-                      className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
+                <VatModeToggle rate={form.vat_rate} included={form.vat_included} companyNoVat={companyNoVat} disabled={form.status === "cancelled"}
+                  onChange={(v) => setForm({ ...form, vat_rate: v.rate, vat_included: v.included })} />
+                <div className="grid grid-cols-2 gap-2">
                   <label className="block"><span className="text-[11px] text-slate-500">ค่าส่ง</span>
                     <input type="number" value={form.shipping_fee} onChange={(e) => setForm({ ...form, shipping_fee: Number(e.target.value) || 0 })}
                       className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
@@ -461,10 +467,6 @@ export default function SoOrdersPage() {
                     <input type="number" value={form.header_discount_value} onChange={(e) => setForm({ ...form, header_discount_value: Number(e.target.value) || 0 })}
                       className="w-full h-9 mt-0.5 px-2 text-sm text-right border border-slate-200 rounded-lg" /></label>
                 </div>
-                <label className="flex items-center gap-2 text-sm text-slate-600">
-                  <input type="checkbox" checked={form.vat_included} onChange={(e) => setForm({ ...form, vat_included: e.target.checked })} className="w-4 h-4 accent-blue-600" />
-                  ราคารวม VAT แล้ว
-                </label>
                 <label className="block"><span className="text-[11px] text-slate-500">หมายเหตุ</span>
                   <textarea value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} rows={2}
                     className="w-full mt-0.5 px-2 py-1.5 text-sm border border-slate-200 rounded-lg" /></label>

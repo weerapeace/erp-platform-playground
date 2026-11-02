@@ -1402,6 +1402,9 @@ function WorkBoardPageInner() {
     const v = searchParams.get("view");
     if (v === "board" || v === "canvas" || v === "table" || v === "shop" || v === "purchase" || v === "calendar" || v === "labor" || v === "exec") setViewMode(v);
   }, [searchParams, setViewMode]);
+  // ?group=<ชื่อกลุ่ม> — ลิงก์ "จ่ายงานชุดนี้" จากหน้าใบสั่งขาย (มุมมองตามชุด) → กรองกลุ่มนี้ไว้ให้ (รอจ่าย · ช้อปจ่ายงาน · ปฏิทิน · พิมพ์)
+  const urlGroup = searchParams.get("group") || undefined;
+  useEffect(() => { if (urlGroup) setPendGroupFilter(urlGroup); }, [urlGroup]);
   // โหมด "เช็กลิสต์อย่างเดียว": หน้าอื่นฝังหน้านี้ใน iframe (?embed=1&mo=<id> — ของกลาง lib/mo-checklist-embed)
   // → เช็กลิสต์เต็มกรอบ ไม่โชว์บอร์ด · ปิด/ลบแล้วแจ้งหน้าแม่ให้ถอยกลับเอง
   const popupOnly = searchParams.get("embed") === "1" && !!searchParams.get("mo");
@@ -1647,6 +1650,7 @@ function WorkBoardPageInner() {
           canEdit={canEdit}
           moGroups={moGroups}
           groupOf={pendGroupOf}
+          initialGroup={urlGroup}
           onOpenMO={(moId) => { const mo = [...board.pending, ...board.dispatchedMos].find((x) => x.id === moId); if (mo) { setClWO(null); setChecklistMO(mo); } }}
           onOpenWO={(woId) => { const wo = board.workOrders.find((x) => x.id === woId); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
           onReload={() => load(true)}
@@ -1723,6 +1727,7 @@ function WorkBoardPageInner() {
               canDispatch={canDispatch}
               moGroups={moGroups}
               groupOf={pendGroupOf}
+              initialGroup={urlGroup}
               laborByMo={Object.fromEntries(board.pending.map((m) => [m.mo_no, pendLaborPP(m)]))}
               onOpenMO={(mo) => { const real = board.pending.find((x) => x.id === mo.id); if (real) { setClWO(null); setChecklistMO(real); } }}
               onReload={() => void load(true)}

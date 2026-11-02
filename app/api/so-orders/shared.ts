@@ -9,6 +9,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { calculateDocument } from "@/lib/tax";
+import { toMajor } from "@/lib/money";
 
 export type SoOrderStatus = "confirmed" | "shipped" | "cancelled";
 
@@ -70,15 +71,16 @@ export function computeTotals(header: SoOrderHeaderInput, lines: SoOrderLineInpu
     shipping_fee: num(header.shipping_fee),
     tax: { vat_rate: num(header.vat_rate), vat_included: !!header.vat_included, wht_rate: num(header.wht_rate) },
   });
+  // เครื่องคิดเงินกลางคืนค่าเป็นสตางค์ (Money.amount) → แปลงเป็นบาทก่อนเก็บ (เดิมเก็บสตางค์ ยอดในตารางเลยเกิน 100 เท่า)
   return {
-    subtotal:              r.subtotal.amount,
-    total_line_discount:   r.total_line_discount.amount,
-    total_header_discount: r.header_discount.amount,
-    total_shipping:        r.shipping.amount,
-    taxable:               r.taxable.amount,
-    total_vat:             r.total_vat.amount,
-    total_wht:             r.total_wht.amount,
-    grand_total:           r.grand_total.amount,
+    subtotal:              toMajor(r.subtotal.amount),
+    total_line_discount:   toMajor(r.total_line_discount.amount),
+    total_header_discount: toMajor(r.header_discount.amount),
+    total_shipping:        toMajor(r.shipping.amount),
+    taxable:               toMajor(r.taxable.amount),
+    total_vat:             toMajor(r.total_vat.amount),
+    total_wht:             toMajor(r.total_wht.amount),
+    grand_total:           toMajor(r.grand_total.amount),
   };
 }
 

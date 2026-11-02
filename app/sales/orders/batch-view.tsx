@@ -5,10 +5,13 @@
  *   1 การ์ด = 1 ชุด (กลุ่มใบสั่งงาน) · 5 ขั้น รับออเดอร์ → เปิดผลิต → กำลังผลิต → ทำเสร็จ → ส่งลูกค้า
  *   ขั้นคิดให้เองจากใบสั่งผลิต (GET /api/so-orders/batches → lib/so-order-stage) — ไม่มีปุ่มเปลี่ยนสถานะชุดเอง
  *   ปุ่มทำทั้งชุด: เปิดใบสั่งผลิต (open_mo + group_id ทีละใบสั่งขาย) · พิมพ์ใบซื้อ-ตัด (familyPrintUrl) · ส่งของ (ship ทีละใบ)
+ *   · จ่ายงานชุดนี้ = เปิดบอร์ดจ่ายงาน /master/work-board?view=shop&group=<ชื่อชุด> (บอร์ดกรองกลุ่มให้เอง)
+ *   · รายการยังไม่มี SKU → กดเลขใบสั่งขายเปิดใบ (onOpenOrder) ไปเลือก SKU ในแถว
  * ของกลาง: MiniTable · ERPModal · ConfirmDialog · Icon · familyPrintUrl
  */
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
+import { usePermission } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
@@ -21,14 +24,17 @@ const STAGE_TONE = ["bg-slate-100 text-slate-600", "bg-blue-50 text-blue-700", "
 const STAGE_BAR = ["bg-slate-400", "bg-blue-500", "bg-amber-500", "bg-teal-600", "bg-emerald-600"];
 const dayText = (s: string | null) => (s ? new Date(s + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "—");
 
-export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChanged }: {
+export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChanged, onOpenOrder }: {
   groupFilter: string;
   canEdit: boolean;
   canShip: boolean;
   reloadKey: number;
   onChanged: () => void;
+  /** เปิดใบสั่งขายใบนั้นมาแก้ (เช่น เลือก SKU ให้รายการที่ลงเป็นชื่อไว้) */
+  onOpenOrder: (orderId: string) => void;
 }) {
   const toast = useToast();
+  const canDispatch = usePermission("work_board.dispatch");
   const [batches, setBatches] = useState<SoBatch[] | null>(null);
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [askOpen, setAskOpen] = useState<SoBatch | null>(null);
@@ -89,7 +95,9 @@ export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChange
 
   const lineCols: MiniColumn<BatchLine>[] = [
     { key: "so", header: "ใบสั่งขาย", width: "8rem", sortValue: (l) => l.order_no ?? "",
-      cell: (l) => <div><div className="font-mono text-[11px] text-slate-700">{l.order_no ?? "—"}</div><div className="truncate text-[10px] text-slate-400">{l.customer_name ?? ""}</div></div> },
+      cell: (l) => <div>
+        <button type="button" onClick={() => onOpenOrder(l.order_id)} title="เปิดใบสั่งขายนี้" className="font-mono text-[11px] text-blue-700 hover:underline">{l.order_no ?? "—"}</button>
+        <div className="truncate text-[10px] text-slate-400">{l.customer_name ?? ""}</div></div> },
     { key: "sku", header: "สินค้า", width: "minmax(12rem,2fr)", sortValue: (l) => l.sku ?? l.product_name,
       cell: (l) => <div className="min-w-0"><div className="truncate text-sm text-slate-700">{l.product_name}</div>
         {l.sku ? <code className="font-mono text-[10px] text-orange-600">{l.sku}</code> : <span className="text-[10px] text-amber-700">ยังไม่มี SKU</span>}</div> },
@@ -105,7 +113,10 @@ export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChange
       {shown.map((b) => {
         const n = b.lines.length;
         const toOpen = toOpenOf(b).length;
-        const noSku = b.lines.filter((l) => l.stage === 0 && !l.sku).length;
+        const noSkuLines = b.lines.filter((l) => l.stage === 0 && !l.sku);
+        const noSku = noSkuLines.length;
+        const noSkuOrders = [...new Map(noSkuLines.map((l) => [l.order_id, l.order_no ?? "ใบสั่งขาย"])).entries()];
+        const toDispatch = b.reached[1] - b.reached[2];   // เปิดใบสั่งผลิตแล้ว แต่ยังไม่ได้จ่ายงาน
         const moIds = b.lines.map((l) => l.mo_id).filter((x): x is string => !!x);
         const isOpen = open.has(b.id);
         return (
@@ -145,6 +156,12 @@ export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChange
                   className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-slate-200 px-3 text-xs text-slate-700 hover:bg-slate-50">
                   <Icon name="print" /> พิมพ์ใบซื้อ-ตัดทั้งชุด</a>
               )}
+              {canDispatch && toDispatch > 0 && (
+                <a href={`/master/work-board?view=shop&group=${encodeURIComponent(b.name)}`} target="_blank" rel="noreferrer"
+                  title="เปิดบอร์ดจ่ายงาน กรองเฉพาะชุดนี้ไว้ให้"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-indigo-200 px-3 text-xs text-indigo-700 hover:bg-indigo-50">
+                  <Icon name="truck" /> จ่ายงานชุดนี้ ({toDispatch})</a>
+              )}
               {canShip && b.min_stage < 4 && (
                 <button onClick={() => setAskShip(b)} disabled={busy} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-emerald-200 px-3 text-xs text-emerald-700 hover:bg-emerald-50 disabled:opacity-50">
                   <Icon name="done" /> ส่งของทั้งชุด</button>
@@ -152,7 +169,16 @@ export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChange
               <button onClick={() => setOpen((s) => { const x = new Set(s); if (x.has(b.id)) x.delete(b.id); else x.add(b.id); return x; })}
                 className="ml-auto h-8 rounded-lg px-2 text-xs text-slate-500 hover:bg-slate-50">{isOpen ? "ซ่อนรายการ ▴" : `ดูรายการ (${n}) ▾`}</button>
             </div>
-            {noSku > 0 && <div className="mt-1 text-[11px] text-amber-700">มี {noSku} รายการที่ยังไม่มี SKU — สร้าง SKU แล้วแก้ในใบสั่งขายก่อน ถึงจะเปิดใบสั่งผลิตได้</div>}
+            {noSku > 0 && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-amber-700">
+                <span>มี {noSku} รายการที่ยังไม่มี SKU — สร้าง SKU ที่ใบงานออกแบบก่อน แล้วเปิดใบสั่งขายเลือก SKU ในแถว ถึงจะเปิดใบสั่งผลิตได้</span>
+                {canEdit && noSkuOrders.map(([id, no]) => (
+                  <button key={id} type="button" onClick={() => onOpenOrder(id)}
+                    className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 font-medium hover:bg-amber-100">
+                    <Icon name="edit" /> เลือก SKU ใน {no}</button>
+                ))}
+              </div>
+            )}
 
             {isOpen && (
               <div className="mt-3">

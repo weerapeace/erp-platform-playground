@@ -44,7 +44,7 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const TH_DAYS = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
 
-export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, departments = [], canEdit: canEditProp, moGroups, groupOf, onOpenMO, onOpenWO, onReload, lockMode, woDate = "due", hideSearch = false }: {
+export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, departments = [], canEdit: canEditProp, moGroups, groupOf, onOpenMO, onOpenWO, onReload, lockMode, woDate = "due", hideSearch = false, initialGroup }: {
   pending: CalMO[];
   extraMos?: CalMO[];          // ใบที่จ่ายงานครบแล้ว — ยังต้องส่งลูกค้า จึงต้องอยู่ในปฏิทินนัดส่งลูกค้า
   plans?: CalPlan[];           // งวดส่ง (แบ่งส่งหลายวัน)
@@ -62,6 +62,8 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
   woDate?: "due" | "dispatch" | "received";
   /** ซ่อนช่องค้นหาของปฏิทิน (หน้าที่ฝังมีช่องค้นของตัวเองแล้ว) */
   hideSearch?: boolean;
+  /** กรองกลุ่มนี้ไว้ตั้งแต่เปิด (ชื่อกลุ่ม · มาจากลิงก์ ?group=) */
+  initialGroup?: string;
 }) {
   const toast = useToast();
   const canEdit = canEditProp && woDate === "due";
@@ -71,7 +73,7 @@ export function BoardCalendar({ pending, extraMos = [], plans = [], workOrders, 
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState<{ kind: "mo" | "wo" | "plan"; field: "due" | "internal"; id: string; label: string } | null>(null);
   const [search, setSearch] = useState("");
-  const [groupFilter, setGroupFilter] = useState("__all__");
+  const [groupFilter, setGroupFilter] = useState(initialGroup || "__all__");
   const [brandFilter, setBrandFilter] = useState("__all__");
   const [deskFilter, setDeskFilter] = useState("__all__");   // กรองตามโต๊ะ/แผนก
   // นัดส่งลูกค้า: ปกติโชว์เฉพาะ "งานลูกค้า (OEM)" — ของแบรนด์เราเองไม่ใช่นัดส่งลูกค้า

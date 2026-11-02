@@ -725,3 +725,55 @@ function PreviewRow({ label, value, strong, accent }: { label: string; value: st
     </div>
   );
 }
+
+// ── ภาษีขาย: มี VAT / ไม่มี VAT (ของกลาง) ──
+// ผู้ออกบิลที่ไม่ได้จด VAT (companies.vat_registered = false) → ล็อก "ไม่มี VAT" ให้เลย กันลืม
+// ใช้ที่: ใบสั่งขาย (/sales/orders) · ป๊อปลงออเดอร์หลายรายการ (components/order-batch-entry)
+export const DEFAULT_VAT_RATE = 7;
+
+/** อัตรา VAT ตั้งต้นตามผู้ออกบิล — ไม่ได้จด VAT = 0 · นอกนั้น 7% */
+export function vatRateForCompany(company?: { vat_registered?: boolean | null } | null): number {
+  return company?.vat_registered === false ? 0 : DEFAULT_VAT_RATE;
+}
+
+export function VatModeToggle({
+  rate,
+  included,
+  onChange,
+  companyNoVat = false,
+  disabled = false,
+}: {
+  rate: number;
+  included: boolean;
+  onChange: (v: { rate: number; included: boolean }) => void;
+  /** ผู้ออกบิลไม่ได้จด VAT → กด "มี VAT" ไม่ได้ */
+  companyNoVat?: boolean;
+  disabled?: boolean;
+}) {
+  const on = rate > 0;
+  return (
+    <div>
+      <span className="text-[11px] text-slate-500">ภาษีขาย{companyNoVat && <span className="ml-1 text-slate-400">(บริษัทนี้ไม่ได้จด VAT)</span>}</span>
+      <div className="mt-0.5 flex flex-wrap items-center gap-3">
+        <div className="inline-flex h-9 rounded-lg border border-slate-200 bg-slate-50 p-1 text-xs">
+          {[
+            { v: true, label: `มี VAT ${on ? rate : DEFAULT_VAT_RATE}%` },
+            { v: false, label: "ไม่มี VAT" },
+          ].map((opt) => (
+            <button key={String(opt.v)} type="button" disabled={disabled || (companyNoVat && opt.v)}
+              onClick={() => onChange({ rate: opt.v ? (rate || DEFAULT_VAT_RATE) : 0, included: opt.v ? included : false })}
+              className={`rounded-md px-3 font-medium transition disabled:opacity-40 ${on === opt.v ? "bg-white text-blue-700 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+              {opt.label}
+            </button>
+          ))}
+        </div>
+        {on && (
+          <label className="flex items-center gap-2 text-sm text-slate-600">
+            <input type="checkbox" checked={included} disabled={disabled} onChange={(e) => onChange({ rate, included: e.target.checked })} className="h-4 w-4 accent-blue-600" />
+            ราคารวม VAT แล้ว
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
