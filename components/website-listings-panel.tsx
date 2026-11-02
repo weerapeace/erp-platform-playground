@@ -11,6 +11,7 @@
  * - ▦ แก้ไขทีละมาก (ตาราง · ทุกช่องจากทะเบียนฟิลด์ · หัวตาราง/แถบล่าง) → components/website-listings-grid-edit
  * - 🎨 ทะเบียนสี (หัวตาราง) + ป้าย "สียังไม่ผูกทะเบียนสี" กดได้ = ColorSwatchButton (focusNames = สีของสินค้านั้น) · ปิดแล้วโหลดรายการใหม่เงียบ ๆ
  * - ติ๊กหลายรายการ → แถบล่าง (BulkActionBar) ขึ้นเว็บ/ซ่อน/แนะนำ + ✏️ แก้หลายรายการ (ช่องจากทะเบียนกลาง lib/website-listing-fields) · ลาก ⠿ เรียงลำดับบนเว็บ (useDragReorder)
+ * - ↕ เรียงในตาราง (รหัส SKU / สถานะ / ราคา) — กดหัวคอลัมน์ (SortButton) หรือช่อง "เรียง:" · ดูอย่างเดียว ไม่แตะลำดับบนเว็บ · เรียงอยู่ = ลาก ⠿ ไม่ได้
  * - ▸ ขยาย SKU ย่อยใต้แถว (โหลดตอนกด · /api/website/listings/grid?parentIds= ตัวกลางทะเบียนฟิลด์) · กดแถว SKU = drawer เลื่อนไปแถว SKU นั้น (focusSkuId)
  * - กดการ์ด/ชื่อ/รูป/✏️ = drawer "ตั้งค่าเว็บของสินค้า" — ของกลางตัวเดียวกับแท็บ 🛍 ใน Parent SKU (ParentWebListings shopId)
  *     แท็บ ขายบนเว็บ · รูป สี และรูปเปิด · ปั๊มชื่อ/แบนเนอร์/รายละเอียด · ต้องแก้ · ◀ ▶ เลื่อนตามรายการที่เห็น · 💾 บันทึกแถบล่าง
@@ -25,6 +26,7 @@ import { useToast } from "@/components/toast";
 import { Drawer, ConfirmDialog } from "@/components/modal";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
+import { SortButton, sortRows, type SortState } from "@/components/sort-th";
 import { CopyButton } from "@/components/copy-button";
 import { FooterSaveProvider, FooterSaveButton, useFooterSaveHost } from "@/components/footer-save";
 import { useViewPref } from "@/lib/use-view-pref";
@@ -112,6 +114,16 @@ export type CategoryDef = { key: string; label: string; icon: string; parent?: s
 
 type Filter = "all" | "pub" | "hide" | "feat" | "fix" | "fit" | "noimg" | "partimg";
 const VIEWS = ["list", "grid", "sort"] as const;
+/** ↕ เรียงในตาราง (ดูอย่างเดียว ไม่เปลี่ยนลำดับบนเว็บ) · "" = ลำดับบนเว็บ (ลาก ⠿ ได้) — ค่า = `${key}:${dir}` ของ SortState */
+const SORT_OPTS = [
+  { v: "", label: "ลำดับบนเว็บ (ลาก ⠿ ได้)" },
+  { v: "code:asc", label: "รหัส SKU A→Z" },
+  { v: "code:desc", label: "รหัส SKU Z→A" },
+  { v: "status:asc", label: "สถานะ: ขึ้นเว็บก่อน" },
+  { v: "status:desc", label: "สถานะ: ซ่อนอยู่ก่อน" },
+  { v: "price:asc", label: "ราคา: ถูก→แพง" },
+  { v: "price:desc", label: "ราคา: แพง→ถูก" },
+];
 
 const baht = (n: number) => `฿${(Number(n) || 0).toLocaleString("th-TH")}`;
 const inputCls = webForm.input;
@@ -124,6 +136,9 @@ const issuesOf = (l: Listing): ListingIssue[] =>
   l.display
     ? listingIssues({ price: l.display.price, imageCount: l.display.imageCount, categories: l.categories ?? [], colors: l.display.colors, compartmentsMissing: l.display.compartmentsMissing })
     : [];
+/** ค่าที่ใช้เรียง · สถานะ: ขึ้นเว็บ+แนะนำ → ขึ้นเว็บ → ซ่อน+แนะนำ → ซ่อน (สถานะเดียวกัน = คงลำดับบนเว็บ) · ไม่มีราคา = ท้ายสุดเสมอ */
+const sortVal = (l: Listing, key: string) =>
+  key === "code" ? l.code : key === "status" ? (l.published ? 0 : 2) + (l.featured ? 0 : 1) : key === "price" ? shownPrice(l) || null : null;
 
 /** จุดสี · 🖼 สีที่ยังไม่ได้ลงรูปเว็บ = วงรอบจุด (เหลือง = ตอนนี้ใช้รูปปก SKU แทน · แดง = SKU ก็ไม่มีรูป) */
 function ColorDots({ colors, max = 5 }: { colors: HealthColor[]; max?: number }) {
@@ -253,6 +268,8 @@ export function WebsiteListingsPanel({
   }, []);
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("");
+  // ↕ เรียงในตาราง (null = ลำดับบนเว็บ) — กดหัวคอลัมน์ หรือเลือกจากช่อง "เรียง:" (มือถือ/การ์ดไม่มีหัวคอลัมน์)
+  const [sort, setSort] = useState<SortState>(null);
   const { view, setView, saveDefault } = useViewPref("website_listings_view", VIEWS, "list");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -330,7 +347,7 @@ export function WebsiteListingsPanel({
   );
   const shown = useMemo(() => {
     const term = q.trim().toLowerCase();
-    return listings.filter((l) => {
+    const rows = listings.filter((l) => {
       if (filter === "pub" && !l.published) return false;
       if (filter === "hide" && l.published) return false;
       if (filter === "feat" && !l.featured) return false;
@@ -342,8 +359,12 @@ export function WebsiteListingsPanel({
       if (term && !`${shownName(l)} ${l.erpName} ${l.code}`.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [listings, filter, q, cat, issuesById, imgById]);
+    return sortRows(rows, sort, sortVal);
+  }, [listings, filter, q, cat, sort, issuesById, imgById]);
   const filtered = filter !== "all" || !!q.trim() || !!cat;
+  // ⠿ ลากได้เฉพาะตอนเห็นครบทุกตัวตามลำดับบนเว็บ (ไม่กรอง · ไม่เรียงแบบอื่น)
+  const canDrag = !filtered && !sort;
+  const sortLabel = sort ? SORT_OPTS.find((o) => o.v === `${sort.key}:${sort.dir}`)?.label : null;
   const catLabel = (k: string) => categories.find((c) => c.key === k)?.label ?? k;
 
   // ⠿ ลากเรียงลำดับ (เฉพาะตอนเห็นครบทุกตัว ไม่มีตัวกรอง — ลำดับจะได้ตรงกับเว็บ)
@@ -595,7 +616,7 @@ export function WebsiteListingsPanel({
         <div className="flex flex-wrap items-center gap-2 mb-3">
           {view === "sort" ? <span className="flex-1" /> : <>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นหาชื่อ หรือ รหัส เช่น BBP10" className={`${inputCls} flex-1 min-w-[180px]`} />
-          <select value={cat} onChange={(e) => setCat(e.target.value)} className={`${inputCls} w-auto`}>
+          <select value={cat} onChange={(e) => setCat(e.target.value)} className={`${inputCls} !w-auto`}>
             <option value="">ทุกหมวด</option>
             {categories.map((c) => (
               <option key={c.key} value={c.key}>
@@ -603,6 +624,22 @@ export function WebsiteListingsPanel({
               </option>
             ))}
             <option value="__none">ไม่อยู่หมวดไหน</option>
+          </select>
+          <select
+            value={sort ? `${sort.key}:${sort.dir}` : ""}
+            onChange={(e) => {
+              const [key, dir] = e.target.value.split(":");
+              setSort(key ? { key, dir: dir === "desc" ? "desc" : "asc" } : null);
+            }}
+            title="เรียงรายการที่เห็น — ดูอย่างเดียว ลำดับบนเว็บไม่เปลี่ยน"
+            aria-label="เรียงตาม"
+            className={`${inputCls} !w-auto ${sort ? "!border-blue-400 !text-blue-700" : ""}`}
+          >
+            {SORT_OPTS.map((o) => (
+              <option key={o.v} value={o.v}>
+                เรียง: {o.label}
+              </option>
+            ))}
           </select>
           </>}
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden">
@@ -709,10 +746,17 @@ export function WebsiteListingsPanel({
             <span className="w-3" />
             <span className="w-5" />
             <span className="w-12" />
-            <span className="flex-1">สินค้า (ชื่อที่ลูกค้าเห็นจริง · กดชื่อเพื่อแก้ · ▸ ดู SKU ย่อย)</span>
+            <span className="flex-1">
+              <SortButton label="สินค้า · รหัส SKU" k="code" sort={sort} onSort={setSort} title="กดเรียงตามรหัส SKU (กดซ้ำ = กลับด้าน · กดครั้งที่ 3 = กลับลำดับบนเว็บ)" />
+              <span> (ชื่อที่ลูกค้าเห็นจริง · กดชื่อเพื่อแก้ · ▸ ดู SKU ย่อย)</span>
+            </span>
             <span className="w-24">สี</span>
-            <span className="w-24 text-right">ราคา</span>
-            <span className="w-28 text-center">ขึ้นเว็บ / แนะนำ</span>
+            <span className="w-24 text-right">
+              <SortButton label="ราคา" k="price" sort={sort} onSort={setSort} title="กดเรียงตามราคา (ถูก→แพง · กดซ้ำ = แพง→ถูก)" />
+            </span>
+            <span className="w-28 text-center">
+              <SortButton label="ขึ้นเว็บ / แนะนำ" k="status" sort={sort} onSort={setSort} title="กดเรียงตามสถานะ (ขึ้นเว็บก่อน · กดซ้ำ = ซ่อนอยู่ก่อน)" />
+            </span>
             <span className="w-16" />
           </div>
           <ul>
@@ -724,8 +768,8 @@ export function WebsiteListingsPanel({
               return (
                 <li
                   key={l.parentId}
-                  {...(!filtered ? drag.rowProps(idx) : {})}
-                  className={`border-b border-slate-100 last:border-b-0 ${!filtered ? drag.rowCls(idx) : ""}`}
+                  {...(canDrag ? drag.rowProps(idx) : {})}
+                  className={`border-b border-slate-100 last:border-b-0 ${canDrag ? drag.rowCls(idx) : ""}`}
                 >
                   {/* 📥 ลากโฟลเดอร์รูปมาวางที่แถว = ลงรูปรุ่นนี้ (หน้าต่างลงรูปทีละมาก · ไฟล์ไม่มีรหัสก็เข้ารุ่นนี้ · โฟลเดอร์ 01/ = สี -01) */}
                   <div
@@ -740,8 +784,8 @@ export function WebsiteListingsPanel({
                       className="w-4 h-4 accent-blue-600"
                       aria-label={`เลือก ${l.code}`}
                     />
-                    {filtered ? (
-                      <span className="w-3 text-slate-200 select-none" title="ล้างตัวกรองก่อน จึงจะลากเรียงลำดับได้">⠿</span>
+                    {!canDrag ? (
+                      <span className="w-3 text-slate-200 select-none" title={sort ? 'เลือก "เรียง: ลำดับบนเว็บ" ก่อน จึงจะลากเรียงลำดับได้' : "ล้างตัวกรองก่อน จึงจะลากเรียงลำดับได้"}>⠿</span>
                     ) : (
                       <DragHandle {...drag.handleProps(idx)} title="ลากเพื่อเรียงลำดับบนเว็บ" className="w-3" />
                     )}
@@ -859,7 +903,19 @@ export function WebsiteListingsPanel({
       {listings.length > 0 && !loading && (
         <p className="mt-2 text-[11px] text-slate-400">
           แสดง {shown.length} จาก {listings.length} รายการ ·{" "}
-          {filtered ? "ล้างตัวกรองเพื่อลาก ⠿ เรียงลำดับบนเว็บ" : "ลาก ⠿ เพื่อเรียงลำดับที่โชว์บนเว็บ"} · ติ๊กหลายรายการเพื่อทำพร้อมกัน{view === "list" ? " · ลากโฟลเดอร์รูปมาวางบนแถว = ลงรูปรุ่นนั้น" : ""}
+          {sort ? (
+            <>
+              เรียงตาม{sortLabel} (ดูอย่างเดียว ลำดับบนเว็บไม่เปลี่ยน){" "}
+              <button type="button" onClick={() => setSort(null)} className="underline hover:text-slate-600">
+                กลับลำดับบนเว็บ
+              </button>
+            </>
+          ) : filtered ? (
+            "ล้างตัวกรองเพื่อลาก ⠿ เรียงลำดับบนเว็บ"
+          ) : (
+            "ลาก ⠿ เพื่อเรียงลำดับที่โชว์บนเว็บ"
+          )}{" "}
+          · ติ๊กหลายรายการเพื่อทำพร้อมกัน{view === "list" ? " · ลากโฟลเดอร์รูปมาวางบนแถว = ลงรูปรุ่นนั้น" : ""}
         </p>
       )}
 
