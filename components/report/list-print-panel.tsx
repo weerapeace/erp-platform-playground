@@ -4,14 +4,16 @@
  * 🖨 ListPrintPanel — ของกลาง: แผงตั้งค่าหน้าพิมพ์แบบรายการ (วางข้างพรีวิว) · ค่าทั้งหมดอยู่ใน lib/list-print
  *   แบบที่บันทึกไว้ (สำเร็จรูป / ของทีม / ของฉัน) · กระดาษ · ขนาด · คอลัมน์ (เปิด/ปิด ลำดับ ชื่อ ช่องเขียนมือ)
  *   เรียง & จัดกลุ่ม · หัว-ท้ายกระดาษ · บันทึกเป็นแบบ
+ *   คอลัมน์ล็อก (locked) = ไอคอนกุญแจ ปิดไม่ได้ · textNotes = ช่องเขียนมือเลือก "พิมพ์เอง" ได้ · extra = ตัวเลือกเฉพาะใบ (วางต่อจากแบบที่บันทึกไว้)
  * ใช้คู่กับ useListPrintSettings · ใช้ที่: /print/work-board · เอกสาร docs/list-print.md
  */
+import type { ReactNode } from "react";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import {
   BLANK_WIDTHS, DENSITY_LABEL, EXTRA_COLUMNS, FONT_MAX, FONT_MIN, IMAGE_LABEL, MAX_CUSTOM_COLUMNS, applyListPrintPreset, isCustomColumn, isExtraColumn, newCustomColumn,
-  type ListPrintColumn, type ListPrintColumnPref, type ListPrintDensity, type ListPrintImage, type ListPrintPreset, type ListPrintSettings,
+  type ListPrintBlank, type ListPrintColumn, type ListPrintColumnPref, type ListPrintDensity, type ListPrintImage, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
 import type { ListPrintSettingsState } from "@/components/report/use-list-print-settings";
 
@@ -20,7 +22,7 @@ type Opt = { value: string; label: string };
 const segBtn = (on: boolean) =>
   `h-7 px-2.5 rounded-lg border text-xs transition-colors ${on ? "border-blue-500 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
 
-function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+export function Section({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
     <section className="border-t border-slate-200 py-3 first:border-t-0 first:pt-0">
       <div className="mb-2 text-[13px] font-semibold text-slate-800">{title}{hint && <span className="ml-1 text-[11px] font-normal text-slate-400">{hint}</span>}</div>
@@ -28,7 +30,7 @@ function Section({ title, hint, children }: { title: string; hint?: string; chil
     </section>
   );
 }
-function Check({ checked, onChange, children }: { checked: boolean; onChange: (v: boolean) => void; children: React.ReactNode }) {
+export function Check({ checked, onChange, children }: { checked: boolean; onChange: (v: boolean) => void; children: React.ReactNode }) {
   return (
     <label className="flex cursor-pointer select-none items-center gap-2 py-0.5 text-sm text-slate-700">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-4 w-4 accent-blue-600" />
@@ -37,8 +39,10 @@ function Check({ checked, onChange, children }: { checked: boolean; onChange: (v
   );
 }
 
+const BLANK_LABEL: Record<ListPrintBlank, string> = { line: "ช่องเขียน", box: "ช่องติ๊ก ☐", text: "พิมพ์เอง" };
+
 export function ListPrintPanel({
-  state, available, sorts, groups, builtinPresets, companies, estimatedPages, defaultTitle, canSaveTeam, signatureHint,
+  state, available, sorts, groups, builtinPresets, companies, estimatedPages, defaultTitle, canSaveTeam, signatureHint, textNotes, extra,
 }: {
   state: ListPrintSettingsState;
   available: ListPrintColumn[];
@@ -52,18 +56,27 @@ export function ListPrintPanel({
   canSaveTeam: boolean;
   /** ข้อความช่องเซ็น เช่น "ผู้จ่ายงาน / ผู้รับงาน" */
   signatureHint?: string;
+  /** หน้าพิมพ์รองรับช่อง "พิมพ์เอง" (เก็บข้อความผ่าน usePrintNotes) — เปิดตัวเลือกนี้ในช่องเขียนมือ */
+  textNotes?: boolean;
+  /** ตัวเลือกเฉพาะใบ (วางต่อจาก "แบบที่บันทึกไว้") */
+  extra?: ReactNode;
 }) {
   const toast = useToast();
   const s = state.settings;
   const set = (patch: Partial<ListPrintSettings>) => state.setSettings({ ...s, ...patch });
   const setCols = (columns: ListPrintColumnPref[]) => set({ columns });
   const labelOf = (key: string) => available.find((c) => c.key === key)?.label ?? EXTRA_COLUMNS.find((c) => c.key === key)?.label ?? "ช่องใหม่";
+  const defOf = (key: string) => available.find((c) => c.key === key) ?? EXTRA_COLUMNS.find((c) => c.key === key);
+  const blankOpts: ListPrintBlank[] = textNotes ? ["line", "box", "text"] : ["line", "box"];
+  const imgLocked = available.some((c) => c.key === "img" && c.locked);
   const patchCol = (key: string, patch: Partial<ListPrintColumnPref>) => setCols(s.columns.map((x) => (x.key === key ? { ...x, ...patch } : x)));
   const customCount = s.columns.filter((c) => isCustomColumn(c.key)).length;
   const addCustom = async () => {
     const name = await askText({ title: "เพิ่มช่องใหม่", message: "ตั้งชื่อหัวช่อง — ในใบจะเป็นช่องว่างไว้เขียนหรือติ๊กด้วยมือ", placeholder: "เช่น วันที่รับ, คนตัด, จำนวนเสีย", required: true });
     if (!name?.trim()) return;
-    setCols([...s.columns, newCustomColumn(name)]);
+    // หน้าที่รองรับช่องพิมพ์เอง → ช่องใหม่เป็น "พิมพ์เอง" ตั้งต้น
+    const col = newCustomColumn(name);
+    setCols([...s.columns, textNotes ? { ...col, blank: "text" as const, widthMm: 30 } : col]);
   };
   const visibleCols = s.columns.filter((c) => available.some((a) => a.key === c.key) || isExtraColumn(c.key));
   const move = (key: string, dir: -1 | 1) => {
@@ -127,6 +140,8 @@ export function ListPrintPanel({
         </div>
       </Section>
 
+      {extra}
+
       <Section title="กระดาษ">
         <div className="flex flex-wrap gap-1.5">
           {(["A4", "A5"] as const).map((p) => <button key={p} type="button" className={segBtn(s.paper === p)} onClick={() => set({ paper: p })}>{p}</button>)}
@@ -144,7 +159,7 @@ export function ListPrintPanel({
         </label>
         <div className="mt-2 text-xs text-slate-500">รูปสินค้า</div>
         <div className="mt-1 flex flex-wrap gap-1.5">
-          {(Object.keys(IMAGE_LABEL) as ListPrintImage[]).map((k) => <button key={k} type="button" className={segBtn(s.image === k)} onClick={() => set({ image: k })}>{IMAGE_LABEL[k]}</button>)}
+          {(Object.keys(IMAGE_LABEL) as ListPrintImage[]).filter((k) => !(imgLocked && k === "none")).map((k) => <button key={k} type="button" className={segBtn(s.image === k)} onClick={() => set({ image: k })}>{IMAGE_LABEL[k]}</button>)}
         </div>
         <div className="mt-2 text-xs text-slate-500">ความแน่นของแถว</div>
         <div className="mt-1 flex flex-wrap gap-1.5">
@@ -165,8 +180,10 @@ export function ListPrintPanel({
           {visibleCols.map((c, i) => (
             <div key={c.key}>
             <div className="flex items-center gap-1">
-              <input type="checkbox" checked={c.on} aria-label={`พิมพ์คอลัมน์ ${labelOf(c.key)}`}
-                onChange={(e) => setCols(s.columns.map((x) => (x.key === c.key ? { ...x, on: e.target.checked } : x)))} className="h-4 w-4 shrink-0 accent-blue-600" />
+              {defOf(c.key)?.locked
+                ? <span className="flex h-4 w-4 shrink-0 items-center justify-center text-emerald-600" title="บังคับพิมพ์ทุกใบ ปิดไม่ได้"><Icon value="i:lock" /></span>
+                : <input type="checkbox" checked={c.on} aria-label={`พิมพ์คอลัมน์ ${labelOf(c.key)}`}
+                    onChange={(e) => setCols(s.columns.map((x) => (x.key === c.key ? { ...x, on: e.target.checked } : x)))} className="h-4 w-4 shrink-0 accent-blue-600" />}
               <input value={c.label ?? ""} placeholder={labelOf(c.key)} maxLength={40}
                 onChange={(e) => patchCol(c.key, { label: e.target.value || undefined })}
                 onBlur={(e) => { if (isCustomColumn(c.key) && !e.target.value.trim()) patchCol(c.key, { label: "ช่องใหม่" }); }}
@@ -181,11 +198,11 @@ export function ListPrintPanel({
                 ? <button type="button" onClick={() => setCols(s.columns.filter((x) => x.key !== c.key))} aria-label={`ลบช่อง ${labelOf(c.key)}`} className="h-7 w-6 shrink-0 rounded text-slate-300 hover:bg-red-50 hover:text-red-600"><Icon value="i:x" /></button>
                 : <span className="w-6 shrink-0" />}
             </div>
-            {isExtraColumn(c.key) && c.on && (
+            {(isExtraColumn(c.key) || !!defOf(c.key)?.blank) && c.on && (
               <div className="ml-5 mt-1 flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
-                {(["line", "box"] as const).map((b) => {
-                  const cur = c.blank ?? EXTRA_COLUMNS.find((x) => x.key === c.key)?.blank ?? "line";
-                  return <button key={b} type="button" onClick={() => patchCol(c.key, { blank: b })} className={`${segBtn(cur === b)} !h-6 !px-2 !text-[11px]`}>{b === "line" ? "ช่องเขียน" : "ช่องติ๊ก ☐"}</button>;
+                {blankOpts.map((b) => {
+                  const cur = c.blank ?? defOf(c.key)?.blank ?? "line";
+                  return <button key={b} type="button" onClick={() => patchCol(c.key, { blank: b })} className={`${segBtn(cur === b)} !h-6 !px-2 !text-[11px]`}>{BLANK_LABEL[b]}</button>;
                 })}
                 <span className="mx-1 text-slate-300">|</span>
                 {BLANK_WIDTHS.map((w) => {

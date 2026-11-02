@@ -4,6 +4,8 @@
  * 🖨 ListPrintFrame — พรีวิวใบพิมพ์แบบรายการ (ของกลาง) = PrintFrame + ลากขอบหัวคอลัมน์เพื่อปรับความกว้าง
  *   ลากขอบขวาของหัวคอลัมน์ซ้าย-ขวา · ดับเบิลคลิกขอบ = กลับความกว้างเดิม · ค่าเก็บผ่าน useListPrintSettings (จำต่อคนต่อใบ)
  *   ตัวจับลากมีเฉพาะบนจอ ไม่ติดไปตอนพิมพ์ · ใช้กับตารางจาก renderListTable (th/col มี data-col)
+ *   onNote = ช่อง "พิมพ์เอง" (td.xt[data-note]) คลิกพิมพ์ในพรีวิวได้ → ส่งข้อความกลับให้หน้าเก็บ (usePrintNotes)
+ *     ข้อความที่พิมพ์อยู่ในเอกสารพรีวิว · หน้าต้องไม่สร้าง html ใหม่ทุกครั้งที่พิมพ์ (iframe โหลดใหม่ = เคอร์เซอร์หลุด)
  */
 import { useCallback, useRef } from "react";
 import { PrintFrame } from "@/components/report";
@@ -80,19 +82,46 @@ export function attachColumnResize(doc: Document, opts: { onResize: (key: string
   });
 }
 
-export function ListPrintFrame({ html, state, maxWidth, onPrint }: {
+/** ช่องพิมพ์เองในพรีวิว: คลิกแล้วพิมพ์ได้ · Enter = จบช่อง (Shift+Enter = ขึ้นบรรทัด) · วางได้แค่ตัวหนังสือ */
+export function attachNoteEditing(doc: Document, onNote: (key: string, text: string) => void, onDone?: (key: string) => void) {
+  doc.querySelectorAll<HTMLTableCellElement>("td.xt[data-note]").forEach((td) => {
+    if (td.isContentEditable) return;
+    const key = td.dataset.note ?? "";
+    if (!key) return;
+    td.contentEditable = "true";
+    td.spellcheck = false;
+    td.title = "คลิกเพื่อพิมพ์ · บันทึกให้อัตโนมัติ";
+    td.addEventListener("input", () => onNote(key, (td.innerText ?? "").replace(/\u00a0/g, " ").trimEnd().slice(0, 500)));
+    td.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); td.blur(); } });
+    td.addEventListener("blur", () => onDone?.(key));
+    td.addEventListener("paste", (e) => {
+      e.preventDefault();
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      doc.execCommand("insertText", false, text);
+    });
+  });
+}
+
+export function ListPrintFrame({ html, state, maxWidth, onPrint, onNote, onNoteDone }: {
   html: string;
   state: ListPrintSettingsState;
   maxWidth?: number;
   onPrint?: () => void;
+  /** ช่อง "พิมพ์เอง" — ไม่ส่ง = ช่องเป็นตัวหนังสือนิ่ง */
+  onNote?: (key: string, text: string) => void;
+  /** ออกจากช่องพิมพ์เอง (ใช้สั่งบันทึกทันที) */
+  onNoteDone?: (key: string) => void;
 }) {
   const stateRef = useRef(state);
   stateRef.current = state;
+  const noteRef = useRef({ onNote, onNoteDone });
+  noteRef.current = { onNote, onNoteDone };
   const onDocLoad = useCallback((doc: Document) => {
     attachColumnResize(doc, {
       onResize: (key, mm) => stateRef.current.setColumnWidth(key, mm),
       onReset: (key) => stateRef.current.setColumnWidth(key, null),
     });
+    if (noteRef.current.onNote) attachNoteEditing(doc, (k, t) => noteRef.current.onNote?.(k, t), (k) => noteRef.current.onNoteDone?.(k));
   }, []);
   return <PrintFrame html={html} maxWidth={maxWidth} onPrint={onPrint} fit onDocLoad={onDocLoad} />;
 }

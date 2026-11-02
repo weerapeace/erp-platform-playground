@@ -24,6 +24,8 @@ import { ReceiveMode } from "./receive-mode";
 import { PieceworkFromPoModal, type PieceFromPoInit } from "../piecework-from-po-modal";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
+import { Icon } from "@/components/icon";
+import { PO_PRINT_PICK_KEY } from "@/lib/purchasing-print";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { BulkAction, RowAction } from "@/components/data-table";
 // drawer เก่าตัวจริงของ MasterCRUD — dynamic กัน import วน + โหลดเฉพาะตอนเปิด
@@ -191,6 +193,11 @@ export default function PurchaseOrdersPage() {
   const toggleSelect = (id: string) => setSelectedIds((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const exitSelect = () => { setSelectMode(false); setSelectedIds(new Set()); };
   const selectedRows = useMemo(() => rows.filter((r) => selectedIds.has(r.id)), [rows, selectedIds]);
+  // 🖨 พิมพ์สรุป (สั่งซื้อ / รอรับ) — ส่งที่ติ๊กเลือกหลายชิ้นไปด้วย (รอรับ = หน้าพิมพ์อ่านตะกร้ารับของเอง)
+  const openPrintSummary = () => {
+    try { localStorage.setItem(PO_PRINT_PICK_KEY, JSON.stringify({ ids: mode === "order" && selectMode ? [...selectedIds] : [], at: Date.now() })); } catch { /* ignore */ }
+    window.open(`/print/purchasing-orders?mode=${mode === "recv" ? "recv" : "order"}`, "_blank");
+  };
   // เรียงรายการในแต่ละ section (วันที่สั่งใหม่ก่อน / ชื่อ / จำนวนมากก่อน / ราคารวมมากก่อน)
   const sortList = useCallback((list: Row[]) => {
     const arr = [...list];
@@ -463,6 +470,8 @@ export default function PurchaseOrdersPage() {
             </div>
             <button onClick={() => setRejectedOpen(true)} className="h-9 px-3 text-sm font-medium border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center whitespace-nowrap">🚫 รายการไม่อนุมัติ</button>
             </>}
+            <button type="button" onClick={openPrintSummary} title={mode === "recv" ? "พิมพ์สรุปของรอรับ (ปรับหน้ากระดาษได้)" : "พิมพ์สรุปรายการสั่งซื้อ (ปรับหน้ากระดาษได้)"}
+              className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1.5 whitespace-nowrap"><Icon value="i:printer" />พิมพ์สรุป</button>
             <a href="/m/purchase-orders-v2" className="h-9 px-3 text-sm font-medium border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center">📋 ดูใบสั่งซื้อ</a>
           </div>
         </div>

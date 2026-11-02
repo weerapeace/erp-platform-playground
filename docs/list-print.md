@@ -24,6 +24,8 @@
 | `components/report` `PrintFrame fit` | พรีวิวย่อให้พอดีกรอบ (เฉพาะบนจอ) · `onDocLoad` |
 | `components/report/list-print-frame.tsx` | `ListPrintFrame` = PrintFrame + ลากขอบหัวคอลัมน์ปรับความกว้าง (`attachColumnResize` อ่าน `th[data-col]`) |
 | `lib/work-board-print.ts` | ผู้ใช้รายแรก: ใบพิมพ์บอร์ดจ่ายงาน 5 แบบ + แบบสำเร็จรูป 3 แบบ |
+| `lib/purchasing-print.ts` + `app/print/purchasing-orders` | สรุปสั่งซื้อ / ของรอรับ (หน้าสั่งซื้อ ปุ่ม "พิมพ์สรุป") — คอลัมน์ล็อก · ช่องพิมพ์เอง · ค่าเฉพาะใบ · ช่องใบสั่งผลิตเลือกได้ 7 อย่าง |
+| `lib/print-notes.ts` + `/api/print-notes` + `components/report/use-print-notes.ts` | ข้อความช่อง "พิมพ์เอง" (ตาราง print_row_notes · ทั้งทีมเห็น · audit ทุกครั้งที่แก้) |
 
 ## ใช้กับรายงานใหม่
 1. นิยามคอลัมน์ `ListPrintColumn[]` (key, label, align, mono) + `defaultListPrintSettings(cols, {...})` — ห่อด้วย `useMemo`
@@ -33,6 +35,14 @@
 5. ค่าข้อความทุกช่องต้อง `escapeHtml` ก่อนใส่ตาราง (renderListTable ไม่ escape ให้)
 6. กลุ่มเยอะแต่แถวน้อย (เช่น ต่อใบขาย) → ใช้ตารางเดียว ใส่แถว `{ [LIST_GROUP_ROW]: "<หัวกลุ่ม HTML>" }` คั่น — หัวคอลัมน์ขึ้นครั้งเดียว (ตัวอย่าง `lib/mo-sales-print`)
 7. คอลัมน์รวมกันกว้าง (ตั้งไว้สำหรับแนวนอน) → ส่ง `fitListColumns(cols, settings)` เข้า `renderListTable` — ผู้ใช้เปลี่ยนเป็นแนวตั้ง/A5 แล้วย่อตามสัดส่วนให้พอดีกระดาษ ไม่ให้ช่องขวาหลุดขอบ · ตั้ง `minMm` ต่อคอลัมน์ได้ (ไม่ตั้ง = รหัส 28 · อื่น ๆ 12) · ขั้นต่ำรวมยังเกิน = ย่อทุกช่องเท่ากัน (เจ้าของเจอช่อง "จับคู่/หมายเหตุ" โดนตัดตอนแนวตั้ง 2026-11-02)
+
+## ของเสริม (2026-11-02)
+- **คอลัมน์ล็อก** `locked: true` = พิมพ์ทุกใบ ปิดไม่ได้ (แผงโชว์รูปกุญแจ) · คอลัมน์รูปที่ล็อก = ไม่มีตัวเลือก "ไม่แสดงรูป" (ค่าเก่าที่เป็น none ถูกเปลี่ยนเป็นขนาดกลาง)
+- **ช่อง "พิมพ์เอง"** `blank: "text"` — คลิกพิมพ์ในพรีวิวได้ (พื้นฟ้าเฉพาะบนจอ) · แถวต้องมี `[LIST_ROW_KEY]` = รหัสแถวที่คงที่ · ค่าในช่อง = ข้อความที่เก็บไว้ (escape เอง)
+  - หน้าพิมพ์: `const notes = usePrintNotes("<รายงาน>")` → `<ListPrintFrame onNote={notes.set} onNoteDone={notes.flush} />` + `<ListPrintPanel textNotes />` · ตอนสร้าง html อ่าน `notes.get(listNoteKey(rowKey, col))` และใส่ `notes.ver` ใน deps (พิมพ์ในพรีวิวไม่ทำให้สร้างใหม่ — ปุ่มพิมพ์ต้องสร้าง html ใหม่ตอนกด)
+  - รายงานใหม่ต้องเพิ่มชื่อใน `PRINT_NOTE_REPORTS` (lib/print-notes) · ตารางยังไม่สร้าง = พิมพ์ได้แต่ไม่บันทึก (แผงเตือน)
+- **ค่าเฉพาะใบ** `settings.opts` (JSON ≤ 4,000 ตัวอักษร) — จำต่อคนเหมือนค่าอื่น และติดไปกับแบบที่บันทึกไว้ (แบบสำเร็จรูปใส่เฉพาะคีย์ที่อยากเปลี่ยน ที่เหลือคงเดิม) · ตัวเลือกวางในแผงผ่าน `<ListPrintPanel extra={…}>` (ใช้ `Section` / `Check` จากไฟล์แผง)
+- แถวพิเศษในตาราง: `LIST_SUBGROUP_ROW` (หัวกลุ่มย่อยสีอ่อน) · `LIST_TOTAL_ROW` (แถวรวมท้ายกลุ่ม) · กล่องสรุป `listSummaryHtml([{label, value, tone}])`
 
 ## สิทธิ์ / ประวัติ
 - ค่าต่อคน + แบบของฉัน = ของคนนั้นคนเดียว (RLS user_ui_prefs)

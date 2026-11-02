@@ -3,6 +3,7 @@
  *   กระดาษ A4/A5 แนวตั้ง/นอน · ขนาดตัวอักษร · ขนาดรูป · ความแน่นแถว · แถวสลับสี
  *   คอลัมน์ (เปิด/ปิด · ลำดับ · ชื่อหัว · ช่องว่างให้เขียนมือ) · เรียง/จัดกลุ่ม/ขึ้นหน้าใหม่ทุกกลุ่ม
  *   หัว-ท้าย: ชื่อรายงาน · หัวบริษัท (โลโก้) · เลขหน้า · ช่องเซ็นท้ายใบ
+ *   คอลัมน์ล็อก (locked = บังคับพิมพ์ ปิดไม่ได้) · ช่อง "พิมพ์เอง" (blank text = พิมพ์ในพรีวิวได้ เก็บผ่าน print-notes) · ค่าเฉพาะใบ (opts)
  * pure ไม่มี "use client" — ใช้ได้ทั้งหน้าจอ/เทสต์ · ใช้ครั้งแรก: ใบพิมพ์บอร์ดจ่ายงาน (lib/work-board-print) · เอกสาร docs/list-print.md
  */
 
@@ -18,21 +19,24 @@ export interface ListPrintColumn {
   align?: "left" | "right" | "center";
   /** ตัวอักษรแบบรหัส (รหัส MO / SKU) */
   mono?: boolean;
-  /** ช่องว่างให้เขียนมือ (หมายเหตุ / ตรวจแล้ว / ลายเซ็นรับ) */
-  blank?: "line" | "box";
+  /** ช่องว่าง: line = เขียนมือ · box = ช่องติ๊ก · text = พิมพ์เองในพรีวิว (ค่ามาจาก rows ตาม LIST_ROW_KEY) */
+  blank?: ListPrintBlank;
   /** ความกว้างแนะนำ (มม.) — ไม่ใส่ = ยืดตามเนื้อหา */
   widthMm?: number;
   /** ย่อให้พอดีกระดาษได้ต่ำสุด (มม.) — ไม่ใส่ = รหัส 28 · อื่น ๆ 12 (fitListColumns) */
   minMm?: number;
+  /** บังคับพิมพ์ทุกใบ ปิดไม่ได้ (เช่น รูป/รหัส/ชื่อสินค้า) · คอลัมน์รูปที่ล็อก = เลือก "ไม่แสดงรูป" ไม่ได้ */
+  locked?: boolean;
 }
+export type ListPrintBlank = "line" | "box" | "text";
 /** ค่าที่ผู้ใช้ตั้งต่อคอลัมน์ (ลำดับ = ลำดับในอาร์เรย์) */
 export interface ListPrintColumnPref {
   key: string;
   on: boolean;
   /** ชื่อหัวคอลัมน์ที่แก้เอง (ว่าง = ชื่อเดิม) · ช่องที่เพิ่มเอง (c_…) ต้องมีชื่อ */
   label?: string;
-  /** ช่องเขียนมือ: แบบช่อง (เส้นให้เขียน / ช่องติ๊ก) — ใช้กับช่องที่เพิ่มเอง + ช่องสำเร็จรูป */
-  blank?: "line" | "box";
+  /** ช่องเขียนมือ: แบบช่อง (เส้นให้เขียน / ช่องติ๊ก / พิมพ์เอง) — ใช้กับช่องที่เพิ่มเอง + ช่องสำเร็จรูป + คอลัมน์ที่มี blank */
+  blank?: ListPrintBlank;
   /** ช่องเขียนมือ: ความกว้าง (มม.) */
   widthMm?: number;
 }
@@ -54,6 +58,8 @@ export interface ListPrintSettings {
   companyId: string | null;
   pageNumbers: boolean;
   signature: boolean;
+  /** ค่าเฉพาะของใบนั้น (รายงานตรวจค่าเอง) — ติดไปกับแบบที่บันทึกไว้ด้วย · JSON ล้วน ไม่เกิน OPTS_MAX_CHARS */
+  opts: Record<string, unknown>;
 }
 
 export interface ListPrintPreset {
@@ -99,6 +105,16 @@ export const newCustomColumn = (label: string): ListPrintColumnPref => ({
 });
 
 const KEY_RE = /^[a-z0-9_]{1,24}$/;
+const BLANKS: ListPrintBlank[] = ["line", "box", "text"];
+export const OPTS_MAX_CHARS = 4000;
+/** ค่าเฉพาะใบ: ต้องเป็น object JSON ล้วน ขนาดไม่เกิน OPTS_MAX_CHARS — ไม่งั้นใช้ค่าเดิม */
+function cleanOpts(v: unknown, fallback: Record<string, unknown>): Record<string, unknown> {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return fallback;
+  try {
+    const json = JSON.stringify(v);
+    return json.length <= OPTS_MAX_CHARS ? (JSON.parse(json) as Record<string, unknown>) : fallback;
+  } catch { return fallback; }
+}
 const PAPERS: ListPrintPaper[] = ["A4", "A5"];
 const IMAGES: ListPrintImage[] = ["none", "s", "m", "l"];
 const DENSITIES: ListPrintDensity[] = ["compact", "normal", "airy"];
@@ -107,7 +123,7 @@ export function defaultListPrintSettings(available: ListPrintColumn[], over: Par
   return {
     paper: "A4", orientation: "portrait", fontPx: 11, image: "m", density: "normal", zebra: false,
     columns: available.map((c) => ({ key: c.key, on: true })),
-    sortBy: "", groupBy: "", pageBreakPerGroup: false, title: "", companyId: null, pageNumbers: true, signature: false,
+    sortBy: "", groupBy: "", pageBreakPerGroup: false, title: "", companyId: null, pageNumbers: true, signature: false, opts: {},
     ...over,
   };
 }
@@ -128,8 +144,9 @@ export function cleanListPrintSettings(raw: unknown, available: ListPrintColumn[
       const label = typeof x.label === "string" ? x.label.trim().slice(0, 40) : "";
       if (isCustomColumn(key) && !label) continue;   // ช่องที่เพิ่มเองต้องมีชื่อ
       seen.add(key);
-      const pref: ListPrintColumnPref = { key, on: x.on !== false, ...(label ? { label } : {}) };
-      if (isExtraColumn(key) && (x.blank === "line" || x.blank === "box")) pref.blank = x.blank;
+      const def = available.find((a) => a.key === key);
+      const pref: ListPrintColumnPref = { key, on: x.on !== false || !!def?.locked, ...(label ? { label } : {}) };
+      if ((isExtraColumn(key) || def?.blank) && BLANKS.includes(x.blank as ListPrintBlank)) pref.blank = x.blank as ListPrintBlank;
       const w = Number(x.widthMm);
       if (x.widthMm != null && Number.isFinite(w) && w > 0) pref.widthMm = clampColMm(w);
       columns.push(pref);
@@ -137,11 +154,14 @@ export function cleanListPrintSettings(raw: unknown, available: ListPrintColumn[
   const base = Array.isArray(o.columns) ? columns : fallback.columns.map((c) => ({ ...c }));
   for (const a of available) if (!base.some((c) => c.key === a.key)) base.push({ key: a.key, on: true });
   const str = (v: unknown, max: number) => (typeof v === "string" ? v.slice(0, max) : "");
+  // รูปที่ล็อกไว้ (บังคับพิมพ์) เลือก "ไม่แสดง" ไม่ได้
+  const imgLocked = available.some((a) => a.key === "img" && a.locked);
+  const image = pick(o.image, IMAGES, fallback.image);
   return {
     paper: pick(o.paper, PAPERS, fallback.paper),
     orientation: pick(o.orientation, ["portrait", "landscape"] as const, fallback.orientation),
     fontPx: Number.isFinite(font) ? Math.min(FONT_MAX, Math.max(FONT_MIN, Math.round(font))) : fallback.fontPx,
-    image: pick(o.image, IMAGES, fallback.image),
+    image: imgLocked && image === "none" ? (fallback.image === "none" ? "m" : fallback.image) : image,
     density: pick(o.density, DENSITIES, fallback.density),
     zebra: typeof o.zebra === "boolean" ? o.zebra : fallback.zebra,
     columns: base,
@@ -152,13 +172,14 @@ export function cleanListPrintSettings(raw: unknown, available: ListPrintColumn[
     companyId: typeof o.companyId === "string" && o.companyId ? str(o.companyId, 64) : o.companyId === null ? null : fallback.companyId,
     pageNumbers: typeof o.pageNumbers === "boolean" ? o.pageNumbers : fallback.pageNumbers,
     signature: typeof o.signature === "boolean" ? o.signature : fallback.signature,
+    opts: cleanOpts(o.opts, fallback.opts ?? {}),
   };
 }
 
 /** ใช้ "แบบที่บันทึกไว้" — ค่าที่แบบระบุทับของเดิม · คอลัมน์ในแบบขึ้นก่อนตามลำดับ (ที่เหลือปิดไว้ท้าย) */
 export function applyListPrintPreset(current: ListPrintSettings, preset: ListPrintPreset, available: ListPrintColumn[]): ListPrintSettings {
   const p = preset.settings;
-  const merged = { ...current, ...p } as ListPrintSettings;
+  const merged = { ...current, ...p, opts: { ...current.opts, ...(p.opts ?? {}) } } as ListPrintSettings;
   if (p.columns) {
     const cols = p.columns.filter((c) => available.some((a) => a.key === c.key) || isExtraColumn(c.key)).map((c) => ({ ...c }));
     for (const c of current.columns) if (!cols.some((x) => x.key === c.key) && !isExtraColumn(c.key)) cols.push({ key: c.key, on: false });
@@ -172,17 +193,19 @@ export function applyListPrintPreset(current: ListPrintSettings, preset: ListPri
 export function resolveListColumns(s: ListPrintSettings, available: ListPrintColumn[]): ListPrintColumn[] {
   const out: ListPrintColumn[] = [];
   for (const pref of s.columns) {
-    if (!pref.on) continue;
     const def = available.find((a) => a.key === pref.key) ?? EXTRA_BY_KEY.get(pref.key)
       ?? (isCustomColumn(pref.key) ? { key: pref.key, label: pref.label ?? "", blank: "line" as const, widthMm: 25 } : undefined);
     if (!def) continue;
-    if (def.key === "img" && s.image === "none") continue;
+    if (!pref.on && !def.locked) continue;
+    if (def.key === "img" && s.image === "none" && !def.locked) continue;
     const col: ListPrintColumn = { ...def, label: pref.label || def.label };
     // ความกว้างที่ลากปรับเอง (รูป = ตามขนาดรูป ไม่ปรับ)
     if (def.key !== "img") col.widthMm = pref.widthMm ?? def.widthMm;
     if (def.blank) {
       col.blank = pref.blank ?? def.blank;
       col.align = col.blank === "box" ? "center" : undefined;
+      // ช่องพิมพ์เองที่ไม่ได้กำหนดกว้าง = 30 มม.
+      if (col.blank === "text" && !col.widthMm) col.widthMm = 30;
     }
     out.push(col);
   }
@@ -231,9 +254,18 @@ const cellClass = (c: ListPrintColumn) =>
   [c.key === "img" ? "img" : "", c.align === "right" ? "r" : c.align === "center" ? "c" : "", c.mono ? "mono" : "", c.blank ? "xb" : ""].filter(Boolean).join(" ");
 const clsAttr = (c: ListPrintColumn) => { const k = cellClass(c); return k ? ` class="${k}"` : ""; };
 const blankHtml = (c: ListPrintColumn) => (c.blank === "box" ? `<span class="chk"></span>` : "");
+const textCls = (c: ListPrintColumn) => { const k = cellClass(c); return ` class="${k ? k + " " : ""}xt"`; };
 
 /** แถวที่มี key นี้ = แถวหัวกลุ่มกลางตาราง (กินทุกคอลัมน์ · ค่า = HTML ผู้เรียก escape เอง) — กลุ่มเยอะแต่แถวน้อย ใช้ตารางเดียว หัวคอลัมน์ครั้งเดียว */
 export const LIST_GROUP_ROW = "__group";
+/** แถวหัวกลุ่มย่อย (สีอ่อนกว่า) เช่น ร้าน → ใบสั่งซื้อ */
+export const LIST_SUBGROUP_ROW = "__subgroup";
+/** แถวรวมท้ายกลุ่ม (ชิดขวา กินทุกคอลัมน์ · ค่า = HTML) */
+export const LIST_TOTAL_ROW = "__total";
+/** รหัสแถว (ไม่พิมพ์) — ช่อง "พิมพ์เอง" ใช้เป็นที่อยู่ของข้อความ: data-note="<รหัสแถว>|<คอลัมน์>" */
+export const LIST_ROW_KEY = "__key";
+/** ที่อยู่ข้อความในช่องพิมพ์เอง */
+export const listNoteKey = (rowKey: string, colKey: string) => `${rowKey}|${colKey}`;
 
 /**
  * ตาราง 1 ก้อน — rows = ค่า HTML ต่อคอลัมน์ (ผู้เรียก escape เอง) · ช่องเขียนมือเว้นว่างให้อัตโนมัติ
@@ -244,9 +276,18 @@ export function renderListTable(cols: ListPrintColumn[], rows: Record<string, st
   // data-col = ให้พรีวิวรู้ว่าขอบไหนคือคอลัมน์ไหน (ลากปรับความกว้าง — components/report/list-print-resize)
   const colgroup = `<colgroup>${cols.map((c) => `<col data-col="${escapeHtml(c.key)}"${c.widthMm ? ` style="width:${c.widthMm}mm"` : c.key === "img" ? ` class="img"` : ""} />`).join("")}</colgroup>`;
   const thead = `<thead><tr>${cols.map((c) => `<th${clsAttr(c)} data-col="${escapeHtml(c.key)}">${escapeHtml(c.label)}</th>`).join("")}</tr></thead>`;
+  const cellHtml = (r: Record<string, string>, c: ListPrintColumn) => {
+    if (c.blank !== "text") return `<td${clsAttr(c)}>${c.blank ? blankHtml(c) : r[c.key] ?? ""}</td>`;
+    const rk = r[LIST_ROW_KEY];
+    return `<td${textCls(c)}${rk ? ` data-note="${escapeHtml(listNoteKey(rk, c.key))}"` : ""}>${r[c.key] ?? ""}</td>`;
+  };
   const tbody = `<tbody>${rows.map((r) => (r[LIST_GROUP_ROW] !== undefined
     ? `<tr class="grp-row"><td colspan="${cols.length}">${r[LIST_GROUP_ROW]}</td></tr>`
-    : `<tr>${cols.map((c) => `<td${clsAttr(c)}>${c.blank ? blankHtml(c) : r[c.key] ?? ""}</td>`).join("")}</tr>`)).join("")}</tbody>`;
+    : r[LIST_SUBGROUP_ROW] !== undefined
+      ? `<tr class="grp-row sub"><td colspan="${cols.length}">${r[LIST_SUBGROUP_ROW]}</td></tr>`
+      : r[LIST_TOTAL_ROW] !== undefined
+        ? `<tr class="grp-total"><td colspan="${cols.length}">${r[LIST_TOTAL_ROW]}</td></tr>`
+        : `<tr>${cols.map((c) => cellHtml(r, c)).join("")}</tr>`)).join("")}</tbody>`;
   let tfoot = "";
   if (foot) {
     const first = cols.findIndex((c) => foot.cells[c.key] !== undefined);
@@ -277,6 +318,15 @@ td.img, th.img, col.img { width: ${img + 2}mm; }
 .chk { display: inline-block; width: 3.6mm; height: 3.6mm; border: 1px solid #64748b; border-radius: 0.6mm; vertical-align: middle; }
 ${s.zebra ? ".wb-t tbody tr:nth-child(even) td { background: #f8fafc; }" : ""}
 .wb-t tbody tr.grp-row td { background: #e2e8f0; font-weight: 700; color: #1e293b; }
+.wb-t tbody tr.grp-row.sub td { background: #f1f5f9; font-weight: 600; }
+.wb-t tbody tr.grp-total td { text-align: right; font-weight: 600; color: #334155; background: transparent; }
+.wb-t td.xt { overflow-wrap: anywhere; white-space: pre-wrap; }
+@media screen { .wb-t td.xt { background: #eff6ff; } .wb-t td.xt[contenteditable]:empty::before { content: "คลิกพิมพ์"; color: #94a3b8; } .wb-t td.xt[contenteditable]:focus { outline: 2px solid #93c5fd; outline-offset: -2px; background: #dbeafe; } }
+.wb-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(32mm, 1fr)); gap: 2mm; margin: 0 0 3mm; break-inside: avoid; }
+.wb-sum > div { border: 1px solid #cbd5e1; border-radius: 1mm; padding: 1.2mm 2mm; }
+.wb-sum .l { font-size: ${Math.max(9, f - 1)}px; color: #64748b; }
+.wb-sum .v { font-size: ${f + 3}px; font-weight: 700; color: #0f172a; }
+.wb-sum .v.danger { color: #b91c1c; }
 .grp-break { break-before: page; page-break-before: always; }
 .wb-co { display: flex; align-items: center; gap: 3mm; }
 .wb-logo { height: 11mm; max-width: 38mm; object-fit: contain; }
@@ -287,6 +337,10 @@ ${s.zebra ? ".wb-t tbody tr:nth-child(even) td { background: #f8fafc; }" : ""}
 @media print { .doc { padding: 0 12mm !important; } }
 @page { margin: 10mm 0 12mm;${s.pageNumbers ? ` @bottom-right { content: "หน้า " counter(page) " / " counter(pages); font-size: 9px; color: #64748b; margin-right: 12mm; }` : ""} }`;
 }
+
+/** กล่องตัวเลขสรุปบนหัวใบ (ค่า value = HTML ผู้เรียก escape เอง) */
+export const listSummaryHtml = (cards: { label: string; value: string; tone?: "danger" }[]): string =>
+  cards.length ? `<div class="wb-sum">${cards.map((c) => `<div><div class="l">${escapeHtml(c.label)}</div><div class="v${c.tone === "danger" ? " danger" : ""}">${c.value}</div></div>`).join("")}</div>` : "";
 
 /** ช่องเซ็นท้ายใบ */
 export const signatureHtml = (labels: string[]): string =>
