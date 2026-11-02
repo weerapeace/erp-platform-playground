@@ -63,15 +63,19 @@ function SalesMatchPrintView({ payload }: { payload: SalesPrintPayload }) {
   }, []);
   const company = companies.find((c) => c.id === s.companyId) ?? null;
 
+  // แท็บยังไม่ผูก: ทุกบรรทัด (ทุกใบขาย — ค่าเริ่ม) / เฉพาะที่ติ๊ก
+  const [onlyTicked, setOnlyTicked] = useState(false);
+  const tickedN = payload.rows.filter((r) => r.ticked).length;
   const result = useMemo(() => buildSalesPrint({
-    kind, rows: payload.rows, settings: s, company,
+    kind, rows: payload.rows, settings: s, company, onlyTicked: kind === "open" && onlyTicked,
     origin: typeof window !== "undefined" ? window.location.origin : "",
     printedAt: new Date().toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Bangkok" }),
-  }), [payload, kind, s, company]);
+  }), [payload, kind, s, company, onlyTicked]);
   const html = result.html;
   const pages = estimateListPages(result.groupCounts, s);
-  // ประวัติพิมพ์: 1 บรรทัดใบขาย = 1 รายการ
-  const logItems = useMemo(() => payload.rows.map((r) => ({ doc_id: r.line_id, doc_no: r.so_number, qty: r.qty })), [payload]);
+  // ประวัติพิมพ์: 1 บรรทัดใบขาย = 1 รายการ (เฉพาะที่อยู่ในใบ)
+  const logItems = useMemo(() => payload.rows.filter((r) => !(kind === "open" && onlyTicked) || r.ticked)
+    .map((r) => ({ doc_id: r.line_id, doc_no: r.so_number, qty: r.qty })), [payload, kind, onlyTicked]);
   usePrintLog("sale_line", logItems);
   const doPrint = () => { if (html) printReportHtmlInNewWindow(html); };
 
@@ -93,7 +97,15 @@ function SalesMatchPrintView({ payload }: { payload: SalesPrintPayload }) {
         <button onClick={() => router.back()} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-600 hover:bg-slate-50">
           <Icon value="i:arrow-left" /> กลับ
         </button>
-        <span className="min-w-0 truncate text-sm text-slate-600"><Icon value="i:printer" className="mr-1.5" />{s.title.trim() || defaultTitle} · {payload.rows.length} บรรทัด</span>
+        <span className="min-w-0 truncate text-sm text-slate-600"><Icon value="i:printer" className="mr-1.5" />{s.title.trim() || defaultTitle} · {kind === "open" && onlyTicked ? tickedN : payload.rows.length} บรรทัด</span>
+        {kind === "open" && (
+          <span className="inline-flex overflow-hidden rounded-lg border border-slate-200 bg-white">
+            {([[false, `ทุกใบขาย (${payload.rows.length})`], [true, `เฉพาะที่ติ๊ก (${tickedN})`]] as const).map(([v, label]) => (
+              <button key={String(v)} type="button" onClick={() => setOnlyTicked(v)}
+                className={`h-9 px-3 text-sm ${onlyTicked === v ? "bg-blue-50 font-medium text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+            ))}
+          </span>
+        )}
         <div className="flex-1" />
         <button onClick={togglePanel} aria-pressed={panelOpen}
           className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${panelOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>

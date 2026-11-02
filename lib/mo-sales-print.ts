@@ -12,14 +12,17 @@ import {
 import { MO_STAGE_LABEL, planLinks, type LinkedLine, type MoStage, type UnlinkedLine } from "@/lib/mo-sales-unlinked";
 
 export type SalesPrintKind = "open" | "linked";
-/** exact = ตรงจำนวน (ระบบเสนอ) · suggest = ระบบเสนอแต่ไม่ครบ · pick = เลือกเอง · linked = ผูกแล้ว */
-export type SalesPrintMatch = "exact" | "suggest" | "pick" | "linked";
+/** exact = ตรงจำนวน (ระบบเสนอ) · suggest = ระบบเสนอแต่ไม่ครบ · pick = เลือกเอง · linked = ผูกแล้ว · none = ไม่มีใบงานให้ผูก */
+export type SalesPrintMatch = "exact" | "suggest" | "pick" | "linked" | "none";
 export type SalesPrintRow = {
   line_id: string; so_number: string; date: string; customer: string | null;
   sku: string; sku_name: string | null; image_url: string | null;
   sold: number; qty: number;
-  mo_no: string; mo_qty: number; opened: string; stage: MoStage;
+  /** none = ว่าง (ไม่มีใบงาน) */
+  mo_no: string; mo_qty: number | null; opened: string | null; stage: MoStage | null;
   match: SalesPrintMatch; suggested: string | null; notes: string[];
+  /** แท็บยังไม่ผูก: ติ๊กไว้ = จะผูก · ไม่ติ๊ก = ยังไม่ผูก (เจ้าของ 2026-11-02: "ต้องโชว์ทุกใบ") · แท็บผูกแล้ว = true เสมอ */
+  ticked: boolean;
 };
 /** ส่งจากหน้าต่างไปหน้าพิมพ์ (localStorage) */
 export type SalesPrintPayload = { kind: SalesPrintKind; rows: SalesPrintRow[]; at: number };
@@ -33,17 +36,29 @@ export const thDateShort = (ymd: string) => {
   return Number.isNaN(d.getTime()) ? ymd : d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
 };
 
-/** แท็บยังไม่ผูก: บรรทัดที่ติ๊ก + ใบที่เลือกอยู่ → แถวพิมพ์ (จำนวนผูกตามแผนผูกจริง planLinks — ไม่เกินที่ใบงานผลิต) */
+/**
+ * แท็บยังไม่ผูก: ทุกบรรทัดใบขาย (ติ๊ก = จะผูก · ไม่ติ๊ก = ใบที่เลือกไว้แต่ยังไม่ผูก · ไม่มีใบงาน = ว่าง)
+ * จำนวนผูก = แผนผูกจริง planLinks ของที่ติ๊ก (ไม่เกินที่ใบงานผลิต) · ที่ไม่ติ๊กคิดแยกกัน (ไม่แย่งยอดของที่ติ๊ก)
+ */
 export function salesPrintRowsOpen(rows: UnlinkedLine[], picks: Map<string, string>, sel: Set<string>): SalesPrintRow[] {
-  const chosen = rows.filter((r) => sel.has(r.id) && picks.get(r.id));
+  const has = (r: UnlinkedLine) => { const m = picks.get(r.id); return !!m && r.cands.some((c) => c.mo_no === m); };
+  const chosen = rows.filter((r) => sel.has(r.id) && has(r));
+  const ticked = new Set(chosen.map((r) => r.id));
   const qtyOf = new Map<string, number>();
-  for (const p of planLinks(chosen, picks)) for (const x of p.parts) qtyOf.set(x.sale_line_id, x.qty);
+  for (const p of [...planLinks(chosen, picks), ...planLinks(rows.filter((r) => !ticked.has(r.id) && has(r)), picks)])
+    for (const x of p.parts) qtyOf.set(x.sale_line_id, x.qty);
   const out: SalesPrintRow[] = [];
-  for (const r of chosen) {
-    const mo = picks.get(r.id)!;
-    const c = r.cands.find((x) => x.mo_no === mo);
-    if (!c) continue;
-    const s = r.suggest.find((x) => x.mo_no === mo);
+  for (const r of rows) {
+    const base = { line_id: r.id, so_number: r.so_number, date: r.date, customer: r.customer, sku: r.sku, sku_name: r.sku_name ?? null, image_url: r.image_url ?? null, sold: r.qty };
+    const mo = picks.get(r.id);
+    const c = mo ? r.cands.find((x) => x.mo_no === mo) : undefined;
+    if (!c) {
+      const notes = [r.cands.length ? `ใบงานของสินค้านี้ผูกใบขายอื่นหมด (${r.cands.map((x) => x.mo_no).join(", ")})` : "ขายจากสต๊อก หรือใบงานปิดไปแล้ว"];
+      if (r.left < r.qty - EPS) notes.push(`ผูกไปแล้ว ${fmt(r.qty - r.left)} เหลือ ${fmt(r.left)}`);
+      out.push({ ...base, qty: 0, mo_no: "", mo_qty: null, opened: null, stage: null, match: "none", suggested: null, notes, ticked: false });
+      continue;
+    }
+    const s = r.suggest.find((x) => x.mo_no === c.mo_no);
     const qty = qtyOf.get(r.id) ?? 0;
     const match: SalesPrintMatch = s ? (r.kind === "exact" ? "exact" : "suggest") : "pick";
     const notes: string[] = [];
@@ -53,9 +68,8 @@ export function salesPrintRowsOpen(rows: UnlinkedLine[], picks: Map<string, stri
     if (qty < r.left - EPS) notes.push(`ผูกได้ ${fmt(qty)} จาก ${fmt(r.left)}`);
     if (r.unlinked?.length) notes.push(`เคยถอดผูกจาก ${r.unlinked.map((u) => u.mo_no).join(", ")}`);
     out.push({
-      line_id: r.id, so_number: r.so_number, date: r.date, customer: r.customer, sku: r.sku, sku_name: r.sku_name ?? null, image_url: r.image_url ?? null,
-      sold: r.qty, qty, mo_no: c.mo_no, mo_qty: c.qty, opened: c.opened, stage: c.stage,
-      match, suggested: match === "pick" ? r.suggest[0]?.mo_no ?? null : null, notes,
+      ...base, qty, mo_no: c.mo_no, mo_qty: c.qty, opened: c.opened, stage: c.stage,
+      match, suggested: match === "pick" ? r.suggest[0]?.mo_no ?? null : null, notes, ticked: ticked.has(r.id),
     });
   }
   return out;
@@ -65,7 +79,7 @@ export function salesPrintRowsOpen(rows: UnlinkedLine[], picks: Map<string, stri
 export const salesPrintRowsLinked = (rows: LinkedLine[]): SalesPrintRow[] => rows.map((r) => ({
   line_id: r.id, so_number: r.so_number, date: r.date, customer: r.customer, sku: r.sku, sku_name: r.sku_name ?? null, image_url: r.image_url ?? null,
   sold: r.qty, qty: r.link_qty, mo_no: r.mo_no, mo_qty: r.mo_qty, opened: r.opened, stage: r.stage,
-  match: "linked", suggested: null, notes: r.others.length ? [`ใบงานนี้ผูก ${linkedText(r.others)} ด้วย`] : [],
+  match: "linked", suggested: null, notes: r.others.length ? [`ใบงานนี้ผูก ${linkedText(r.others)} ด้วย`] : [], ticked: true,
 }));
 
 /** คอลัมน์ที่พิมพ์ได้ (x_check / x_note = ช่องเขียนมือของกลาง เปิดไว้ตั้งต้น) */
@@ -94,9 +108,10 @@ export const SALES_PRINT_PRESETS: ListPrintPreset[] = [
   { id: "sales-compact", name: "กระชับ ไม่มีรูป (ประหยัดกระดาษ)", settings: { orientation: "portrait", image: "none", groupBy: "bill", density: "compact", fontPx: 10 } },
 ];
 
-const MATCH_LABEL: Record<SalesPrintMatch, string> = { exact: "ตรงจำนวน", suggest: "ระบบเสนอ (ไม่ครบ)", pick: "เลือกเอง", linked: "ผูกแล้ว" };
+const MATCH_LABEL: Record<SalesPrintMatch, string> = { exact: "ตรงจำนวน", suggest: "ระบบเสนอ (ไม่ครบ)", pick: "เลือกเอง", linked: "ผูกแล้ว", none: "ไม่มีใบงาน" };
 
-export function buildSalesPrint(input: { kind: SalesPrintKind; rows: SalesPrintRow[]; settings: ListPrintSettings; printedAt: string; origin: string; company?: { name: string; logo_key: string | null } | null }): { html: string; title: string; groupCounts: number[] } {
+/** onlyTicked = แท็บยังไม่ผูก พิมพ์เฉพาะที่ติ๊ก (ค่าเริ่ม = ทุกบรรทัด ทุกใบขาย) */
+export function buildSalesPrint(input: { kind: SalesPrintKind; rows: SalesPrintRow[]; settings: ListPrintSettings; printedAt: string; origin: string; company?: { name: string; logo_key: string | null } | null; onlyTicked?: boolean }): { html: string; title: string; groupCounts: number[] } {
   const { kind, settings: s, origin } = input;
   const title = s.title.trim() || SALES_PRINT_TITLE[kind];
   const cols = resolveListColumns(s, salesPrintColumns(kind));
@@ -109,7 +124,7 @@ export function buildSalesPrint(input: { kind: SalesPrintKind; rows: SalesPrintR
   // จัดกลุ่ม = ใบขายใหม่ก่อนเสมอ แล้วเรียงในใบตามที่เลือก · ไม่จัดกลุ่ม = เรียงตามที่เลือกทั้งรายการ
   const key = (r: SalesPrintRow) => (s.sortBy === "sku" ? r.sku : s.sortBy === "mo" ? r.mo_no : "");
   const bill = (a: SalesPrintRow, b: SalesPrintRow) => b.date.localeCompare(a.date) || b.so_number.localeCompare(a.so_number);
-  const rows = [...input.rows].sort((a, b) => (grouped
+  const rows = input.rows.filter((r) => !input.onlyTicked || r.ticked).sort((a, b) => (grouped
     ? bill(a, b) || key(a).localeCompare(key(b)) || a.sku.localeCompare(b.sku)
     : key(a).localeCompare(key(b)) || bill(a, b) || a.sku.localeCompare(b.sku)));
   const img = (u: string | null) => (u ? `<img class="thumb" src="${esc(`${u.startsWith("/") ? origin : ""}${u}`)}" alt="" />` : `<span class="no-img">—</span>`);
@@ -118,10 +133,13 @@ export function buildSalesPrint(input: { kind: SalesPrintKind; rows: SalesPrintR
     bill: `${esc(r.so_number)}<div class="sub">${esc(thDateShort(r.date))}</div>`,
     sku: `<b class="mono">${esc(r.sku)}</b>${r.sku_name ? `<div class="sub">${esc(r.sku_name)}</div>` : ""}`,
     sold: `${fmt(r.sold)}${Math.abs(r.qty - r.sold) > EPS ? `<div class="sub">ผูก ${fmt(r.qty)}</div>` : ""}`,
-    mo: esc(r.mo_no),
-    made: fmt(r.mo_qty),
-    opened: `${esc(thDateShort(r.opened))}<div class="sub">${esc(MO_STAGE_LABEL[r.stage])}</div>`,
-    match: `${r.match === "pick" ? `<b>${MATCH_LABEL.pick}</b>` : esc(MATCH_LABEL[r.match])}${r.suggested ? `<div class="sub">ระบบเสนอ ${esc(r.suggested)}</div>` : ""}${r.notes.map((n) => `<div class="sub">${esc(n)}</div>`).join("")}`,
+    mo: r.mo_no ? esc(r.mo_no) : "—",
+    made: r.mo_qty == null ? "—" : fmt(r.mo_qty),
+    opened: r.opened ? `${esc(thDateShort(r.opened))}<div class="sub">${r.stage ? esc(MO_STAGE_LABEL[r.stage]) : ""}</div>` : "—",
+    // ไม่ติ๊ก (แท็บยังไม่ผูก) = บอกชัดว่ายังไม่ผูก แล้วตามด้วยที่ระบบจับคู่ไว้ · ไม่มีใบงาน / เลือกเอง = ตัวหนา
+    match: (kind === "open" && r.match !== "none" && !r.ticked ? `<b>ไม่ติ๊ก — ยังไม่ผูก</b><div class="sub">${esc(MATCH_LABEL[r.match])}</div>`
+      : r.match === "pick" || r.match === "none" ? `<b>${MATCH_LABEL[r.match]}</b>` : esc(MATCH_LABEL[r.match]))
+      + `${r.suggested ? `<div class="sub">ระบบเสนอ ${esc(r.suggested)}</div>` : ""}${r.notes.map((n) => `<div class="sub">${esc(n)}</div>`).join("")}`,
   });
   const out: Record<string, string>[] = [];
   const counts: number[] = [];
@@ -136,10 +154,13 @@ export function buildSalesPrint(input: { kind: SalesPrintKind; rows: SalesPrintR
     }
   } else { for (const r of rows) out.push(cell(r)); counts.push(rows.length); }
 
-  const bills = new Set(rows.map((r) => r.so_number)).size, mos = new Set(rows.map((r) => r.mo_no)).size;
-  const by = (m: SalesPrintMatch) => rows.filter((r) => r.match === m).length;
+  const on = rows.filter((r) => r.ticked);
+  const bills = new Set(rows.map((r) => r.so_number)).size, mos = new Set(on.map((r) => r.mo_no).filter(Boolean)).size;
+  const by = (m: SalesPrintMatch) => on.filter((r) => r.match === m).length;
+  const off = rows.filter((r) => !r.ticked && r.match !== "none").length, none = rows.filter((r) => r.match === "none").length;
   const sub = kind === "open"
-    ? `ที่ติ๊กไว้ ${fmt(rows.length)} บรรทัด · ${fmt(bills)} ใบขาย · ${fmt(mos)} ใบงาน · ตรงจำนวน ${fmt(by("exact"))} · ระบบเสนอไม่ครบ ${fmt(by("suggest"))} · เลือกเอง ${fmt(by("pick"))}`
+    ? `${input.onlyTicked ? "เฉพาะที่ติ๊ก" : "ทุกบรรทัด"} ${fmt(rows.length)} บรรทัด · ${fmt(bills)} ใบขาย · ติ๊ก (จะผูก) ${fmt(on.length)} → ${fmt(mos)} ใบงาน · ตรงจำนวน ${fmt(by("exact"))} · ระบบเสนอไม่ครบ ${fmt(by("suggest"))} · เลือกเอง ${fmt(by("pick"))}`
+      + (input.onlyTicked ? "" : ` · ไม่ติ๊ก ${fmt(off)} · ไม่มีใบงาน ${fmt(none)}`)
     : `ผูกแล้ว ${fmt(rows.length)} บรรทัด · ${fmt(bills)} ใบขาย · ${fmt(mos)} ใบงาน`;
   const co = input.company;
   const coHtml = co ? `<div class="wb-co">${co.logo_key ? `<img class="wb-logo" src="${esc(`${origin}/api/r2-image?key=${encodeURIComponent(co.logo_key)}&w=300`)}" alt="" />` : ""}<div class="wb-co-name">${esc(co.name)}</div></div>` : "";

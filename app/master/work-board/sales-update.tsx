@@ -8,7 +8,8 @@
  *   ข้อมูล = GET /api/mo/sales-unlinked (lib/mo-sales-unlinked) · ไม่มีสิทธิ์ผูกตรง (โหมดส่งคำขอ) = เปิดอัปเดตเป็นชุดอย่างเดียว ผูกตอนหัวหน้ายืนยัน
  *   2026-11-01: ตัวเลือกใบงานโชว์วันที่เปิดใบ + ใบที่ผูกใบขายอื่นแล้ว (ป้าย "ผูกแล้ว" · เลือกได้ = ถอดของเดิมก่อน)
  *     + แท็บ "ผูกแล้ว" → ผูกผิด · ย้าย (./sales-move.tsx)
- *   2026-11-02: ปุ่มพิมพ์ทั้ง 2 แท็บ → /print/sales-match (lib/mo-sales-print · ส่งแถวที่ติ๊ก/เลือกอยู่ทาง localStorage) ไว้ตรวจบนกระดาษก่อนผูก
+ *   2026-11-02: ปุ่มพิมพ์ทั้ง 2 แท็บ → /print/sales-match (lib/mo-sales-print · ส่งทุกบรรทัด + ติ๊ก/ใบที่เลือกอยู่ ทาง localStorage) ไว้ตรวจบนกระดาษก่อนผูก
+ *     + ติ๊กทั้งหมด / ไม่ติ๊กทั้งหมด (เฉพาะที่แสดงตามตัวกรอง)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
@@ -84,6 +85,11 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
   const chosen = (rows ?? []).filter((r) => sel.has(r.id) && pick.get(r.id));
   const plan = planLinks(chosen, pick);
   const toggle = (id: string, on: boolean) => setSel((s) => { const n = new Set(s); if (on) n.add(id); else n.delete(id); return n; });
+  // ติ๊กทั้งหมด / ไม่ติ๊กทั้งหมด — เฉพาะบรรทัดที่แสดงตามตัวกรอง · ติ๊กได้เฉพาะบรรทัดที่มีใบงานเลือกอยู่
+  const shown = bills.flatMap((b) => b.lines);
+  const tickable = shown.filter((r) => { const m = pick.get(r.id); return !!m && r.cands.some((c) => c.mo_no === m); });
+  const shownTicked = tickable.filter((r) => sel.has(r.id)).length;
+  const tickAll = (on: boolean) => setSel((s) => { const n = new Set(s); for (const r of on ? tickable : shown) { if (on) n.add(r.id); else n.delete(r.id); } return n; });
 
   /** ผูกตามที่เลือก (ใบละครั้ง) → เปิดหน้าอัปเดตเป็นชุด (ถ้า next) · ใบที่ผูกใบขายอื่นอยู่ = ถามก่อน แล้วถอดของเดิมออก */
   const run = async (next: boolean) => {
@@ -116,7 +122,7 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
   /** พิมพ์ / PDF — ส่งแถวตามที่ติ๊ก/เลือกอยู่ไปหน้าพิมพ์ (localStorage · ล้างของเก่าเกิน 1 วัน) */
   const openPrint = (kind: SalesPrintKind) => {
     const list = kind === "open" ? salesPrintRowsOpen(rows ?? [], pick, sel) : salesPrintRowsLinked(linked);
-    if (!list.length) { toast.error(kind === "open" ? "ยังไม่ได้ติ๊กบรรทัดที่มีใบงาน" : "ยังไม่มีบรรทัดที่ผูกแล้ว"); return; }
+    if (!list.length) { toast.error(kind === "open" ? "ไม่มีบรรทัดใบขายให้พิมพ์" : "ยังไม่มีบรรทัดที่ผูกแล้ว"); return; }
     const k = Date.now().toString(36);
     try {
       for (let i = localStorage.length - 1; i >= 0; i--) {
@@ -160,8 +166,9 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
           <span className="text-sm text-slate-600">เลือก {chosen.length} บรรทัด · {plan.length} ใบงาน</span>
           {!canLink && <span className="text-[12px] text-amber-700">โหมดส่งคำขอ — ผูกจริงตอนหัวหน้ายืนยัน</span>}
           <div className="flex-1" />
-          <button type="button" disabled={!plan.length} onClick={() => openPrint("open")} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>
-            <Icon value="i:printer" /> พิมพ์ / PDF ที่ติ๊กไว้ ({chosen.length})
+          <button type="button" disabled={!rows?.length} onClick={() => openPrint("open")} title="ทุกใบขาย — บอกว่าบรรทัดไหนติ๊ก (จะผูก) / ไม่ติ๊ก / ไม่มีใบงาน · เลือกพิมพ์เฉพาะที่ติ๊กได้ในหน้าพิมพ์"
+            className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>
+            <Icon value="i:printer" /> พิมพ์ / PDF
           </button>
           {canLink && <button type="button" disabled={busy || !plan.length} onClick={() => void run(false)} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>ผูกอย่างเดียว</button>}
           <button type="button" disabled={busy || !plan.length} onClick={() => void run(true)}
@@ -206,6 +213,18 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
                     <button key={f.v} type="button" onClick={() => setFilter(f.v)}
                       className={`h-8 rounded-lg border px-2.5 text-sm ${filter === f.v ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{f.label}</button>
                   ))}
+                  <div className="flex-1" />
+                  <span className="text-[12px] text-slate-500">ติ๊กอยู่ {fmt(shownTicked)}/{fmt(tickable.length)}</span>
+                  <button type="button" disabled={!tickable.length || shownTicked === tickable.length} onClick={() => tickAll(true)}
+                    title={filter === "all" ? "ติ๊กทุกบรรทัดที่มีใบงานให้ผูก" : "ติ๊กทุกบรรทัดที่แสดงในตัวกรองนี้"}
+                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                    <Icon value="i:checks" /> ติ๊กทั้งหมด
+                  </button>
+                  <button type="button" disabled={!shownTicked} onClick={() => tickAll(false)}
+                    title={filter === "all" ? "เอาติ๊กออกทุกบรรทัด" : "เอาติ๊กออกทุกบรรทัดที่แสดงในตัวกรองนี้"}
+                    className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+                    <Icon value="i:square" /> ไม่ติ๊กทั้งหมด
+                  </button>
                 </div>
                 {!bills.length && <div className="py-8 text-center text-slate-400">ไม่มีรายการในตัวกรองนี้</div>}
                 {bills.map((b) => (
