@@ -8,6 +8,7 @@
  *   ข้อมูล = GET /api/mo/sales-unlinked (lib/mo-sales-unlinked) · ไม่มีสิทธิ์ผูกตรง (โหมดส่งคำขอ) = เปิดอัปเดตเป็นชุดอย่างเดียว ผูกตอนหัวหน้ายืนยัน
  *   2026-11-01: ตัวเลือกใบงานโชว์วันที่เปิดใบ + ใบที่ผูกใบขายอื่นแล้ว (ป้าย "ผูกแล้ว" · เลือกได้ = ถอดของเดิมก่อน)
  *     + แท็บ "ผูกแล้ว" → ผูกผิด · ย้าย (./sales-move.tsx)
+ *   2026-11-02: ปุ่มพิมพ์ทั้ง 2 แท็บ → /print/sales-match (lib/mo-sales-print · ส่งแถวที่ติ๊ก/เลือกอยู่ทาง localStorage) ไว้ตรวจบนกระดาษก่อนผูก
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
@@ -18,6 +19,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { bkkDate } from "@/lib/mo-sales-match";
 import { defaultPick, planLinks, type LinkedLine, type UnlinkedKind, type UnlinkedLine, type UnlinkedStats } from "@/lib/mo-sales-unlinked";
+import { SALES_PRINT_STORE, salesPrintRowsLinked, salesPrintRowsOpen, type SalesPrintKind, type SalesPrintPayload } from "@/lib/mo-sales-print";
 import { MoPick, SalesMove, StageTag, thDate } from "./sales-move";
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
@@ -111,6 +113,24 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
     else void load();
   };
 
+  /** พิมพ์ / PDF — ส่งแถวตามที่ติ๊ก/เลือกอยู่ไปหน้าพิมพ์ (localStorage · ล้างของเก่าเกิน 1 วัน) */
+  const openPrint = (kind: SalesPrintKind) => {
+    const list = kind === "open" ? salesPrintRowsOpen(rows ?? [], pick, sel) : salesPrintRowsLinked(linked);
+    if (!list.length) { toast.error(kind === "open" ? "ยังไม่ได้ติ๊กบรรทัดที่มีใบงาน" : "ยังไม่มีบรรทัดที่ผูกแล้ว"); return; }
+    const k = Date.now().toString(36);
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (!key?.startsWith(SALES_PRINT_STORE)) continue;
+        let at = 0;
+        try { at = Number((JSON.parse(localStorage.getItem(key) ?? "{}") as Partial<SalesPrintPayload>).at) || 0; } catch { /* เสีย = ลบ */ }
+        if (Date.now() - at > 864e5) localStorage.removeItem(key);
+      }
+      localStorage.setItem(SALES_PRINT_STORE + k, JSON.stringify({ kind, rows: list, at: Date.now() } satisfies SalesPrintPayload));
+    } catch { toast.error("เปิดหน้าพิมพ์ไม่ได้ — เบราว์เซอร์นี้เก็บข้อมูลชั่วคราวไม่ได้"); return; }
+    window.open(`/print/sales-match?k=${k}`, "_blank", "noopener");
+  };
+
   const btn = "inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm disabled:opacity-50";
   const tabBtn = (on: boolean) => `h-9 rounded-lg border px-3 text-sm ${on ? "border-blue-300 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
   const billHead = (b: { no: string; date: string; customer: string | null }) => (
@@ -140,13 +160,24 @@ export function SalesUpdate({ open, onClose, canLink, onOpenBatch }: {
           <span className="text-sm text-slate-600">เลือก {chosen.length} บรรทัด · {plan.length} ใบงาน</span>
           {!canLink && <span className="text-[12px] text-amber-700">โหมดส่งคำขอ — ผูกจริงตอนหัวหน้ายืนยัน</span>}
           <div className="flex-1" />
+          <button type="button" disabled={!plan.length} onClick={() => openPrint("open")} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>
+            <Icon value="i:printer" /> พิมพ์ / PDF ที่ติ๊กไว้ ({chosen.length})
+          </button>
           {canLink && <button type="button" disabled={busy || !plan.length} onClick={() => void run(false)} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>ผูกอย่างเดียว</button>}
           <button type="button" disabled={busy || !plan.length} onClick={() => void run(true)}
             className={`${btn} border-emerald-600 bg-emerald-600 font-medium text-white hover:bg-emerald-700`}>
             <Icon name="refresh" /> {busy ? "กำลังผูก…" : canLink ? "ผูก + ไปขั้นส่งออก" : "ไปอัปเดตเป็นชุด"}
           </button>
         </div>
-      ) : undefined}>
+      ) : (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm text-slate-600">ผูกแล้ว {linked.length} บรรทัด</span>
+          <div className="flex-1" />
+          <button type="button" disabled={!linked.length} onClick={() => openPrint("linked")} className={`${btn} border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}>
+            <Icon value="i:printer" /> พิมพ์ / PDF ที่ผูกแล้ว
+          </button>
+        </div>
+      )}>
       {err ? <div className="py-10 text-center text-red-500">{err} <button type="button" onClick={() => void load()} className="ml-2 underline">ลองใหม่</button></div>
         : !rows ? <div className="py-10 text-center text-slate-400">กำลังหาใบขายที่ยังไม่ผูกใบงาน…</div>
         : (

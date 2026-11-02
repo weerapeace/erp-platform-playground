@@ -195,16 +195,21 @@ const cellClass = (c: ListPrintColumn) =>
 const clsAttr = (c: ListPrintColumn) => { const k = cellClass(c); return k ? ` class="${k}"` : ""; };
 const blankHtml = (c: ListPrintColumn) => (c.blank === "box" ? `<span class="chk"></span>` : "");
 
+/** แถวที่มี key นี้ = แถวหัวกลุ่มกลางตาราง (กินทุกคอลัมน์ · ค่า = HTML ผู้เรียก escape เอง) — กลุ่มเยอะแต่แถวน้อย ใช้ตารางเดียว หัวคอลัมน์ครั้งเดียว */
+export const LIST_GROUP_ROW = "__group";
+
 /**
  * ตาราง 1 ก้อน — rows = ค่า HTML ต่อคอลัมน์ (ผู้เรียก escape เอง) · ช่องเขียนมือเว้นว่างให้อัตโนมัติ
- * foot = แถวรวม: label กินช่องซ้ายจนถึงคอลัมน์แรกที่มีค่ารวม
+ * foot = แถวรวม: label กินช่องซ้ายจนถึงคอลัมน์แรกที่มีค่ารวม · แถวที่มี LIST_GROUP_ROW = แถวหัวกลุ่ม
  */
 export function renderListTable(cols: ListPrintColumn[], rows: Record<string, string>[], foot?: { label: string; cells: Record<string, string> }): string {
   if (cols.length === 0) return `<div class="wb-empty">ยังไม่ได้เลือกคอลัมน์ที่จะพิมพ์</div>`;
   // data-col = ให้พรีวิวรู้ว่าขอบไหนคือคอลัมน์ไหน (ลากปรับความกว้าง — components/report/list-print-resize)
   const colgroup = `<colgroup>${cols.map((c) => `<col data-col="${escapeHtml(c.key)}"${c.widthMm ? ` style="width:${c.widthMm}mm"` : c.key === "img" ? ` class="img"` : ""} />`).join("")}</colgroup>`;
   const thead = `<thead><tr>${cols.map((c) => `<th${clsAttr(c)} data-col="${escapeHtml(c.key)}">${escapeHtml(c.label)}</th>`).join("")}</tr></thead>`;
-  const tbody = `<tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td${clsAttr(c)}>${c.blank ? blankHtml(c) : r[c.key] ?? ""}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  const tbody = `<tbody>${rows.map((r) => (r[LIST_GROUP_ROW] !== undefined
+    ? `<tr class="grp-row"><td colspan="${cols.length}">${r[LIST_GROUP_ROW]}</td></tr>`
+    : `<tr>${cols.map((c) => `<td${clsAttr(c)}>${c.blank ? blankHtml(c) : r[c.key] ?? ""}</td>`).join("")}</tr>`)).join("")}</tbody>`;
   let tfoot = "";
   if (foot) {
     const first = cols.findIndex((c) => foot.cells[c.key] !== undefined);
@@ -234,6 +239,7 @@ td.img, th.img, col.img { width: ${img + 2}mm; }
 .wb-t td.xb { background: transparent; }
 .chk { display: inline-block; width: 3.6mm; height: 3.6mm; border: 1px solid #64748b; border-radius: 0.6mm; vertical-align: middle; }
 ${s.zebra ? ".wb-t tbody tr:nth-child(even) td { background: #f8fafc; }" : ""}
+.wb-t tbody tr.grp-row td { background: #e2e8f0; font-weight: 700; color: #1e293b; }
 .grp-break { break-before: page; page-break-before: always; }
 .wb-co { display: flex; align-items: center; gap: 3mm; }
 .wb-logo { height: 11mm; max-width: 38mm; object-fit: contain; }

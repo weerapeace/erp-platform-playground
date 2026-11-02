@@ -1,0 +1,175 @@
+/**
+ * 🖨 ใบพิมพ์ "สรุปจับคู่ใบขาย → ใบงาน" (เจ้าของอนุมัติ 2026-11-02 จาก widget) — จากหน้าต่าง "อัปเดตงานจากใบขาย"
+ *   ไว้ตรวจบนกระดาษก่อนกดผูก (แท็บยังไม่ผูก = เฉพาะบรรทัดที่ติ๊ก ตามใบงานที่เลือกอยู่) · แท็บผูกแล้ว = ตรวจย้อนหลัง
+ *   จัดกลุ่มตามใบขาย (แถวหัวกลุ่มในตารางเดียว) · ช่องตรวจ ☐ + หมายเหตุ (ช่องเขียนมือของกลาง) · ช่องเซ็น ผู้จับคู่ / ผู้ตรวจ
+ *   ตั้งค่าหน้าพิมพ์ = ของกลาง lib/list-print (ListPrintPanel) · หน้าพิมพ์ app/print/sales-match · pure ไม่มี React
+ */
+import { buildReportHtml, type ReportTemplate } from "@/lib/template";
+import {
+  LIST_GROUP_ROW, defaultListPrintSettings, escapeHtml as esc, listPrintCss, renderListTable, resolveListColumns, signatureHtml,
+  type ListPrintColumn, type ListPrintPreset, type ListPrintSettings,
+} from "@/lib/list-print";
+import { MO_STAGE_LABEL, planLinks, type LinkedLine, type MoStage, type UnlinkedLine } from "@/lib/mo-sales-unlinked";
+
+export type SalesPrintKind = "open" | "linked";
+/** exact = ตรงจำนวน (ระบบเสนอ) · suggest = ระบบเสนอแต่ไม่ครบ · pick = เลือกเอง · linked = ผูกแล้ว */
+export type SalesPrintMatch = "exact" | "suggest" | "pick" | "linked";
+export type SalesPrintRow = {
+  line_id: string; so_number: string; date: string; customer: string | null;
+  sku: string; sku_name: string | null; image_url: string | null;
+  sold: number; qty: number;
+  mo_no: string; mo_qty: number; opened: string; stage: MoStage;
+  match: SalesPrintMatch; suggested: string | null; notes: string[];
+};
+/** ส่งจากหน้าต่างไปหน้าพิมพ์ (localStorage) */
+export type SalesPrintPayload = { kind: SalesPrintKind; rows: SalesPrintRow[]; at: number };
+export const SALES_PRINT_STORE = "erp.salesPrint.";
+
+const EPS = 0.0001;
+const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
+const linkedText = (l: { so_number: string; qty: number }[]) => l.map((x) => `${x.so_number} (${fmt(x.qty)})`).join(", ");
+export const thDateShort = (ymd: string) => {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) ? ymd : d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" });
+};
+
+/** แท็บยังไม่ผูก: บรรทัดที่ติ๊ก + ใบที่เลือกอยู่ → แถวพิมพ์ (จำนวนผูกตามแผนผูกจริง planLinks — ไม่เกินที่ใบงานผลิต) */
+export function salesPrintRowsOpen(rows: UnlinkedLine[], picks: Map<string, string>, sel: Set<string>): SalesPrintRow[] {
+  const chosen = rows.filter((r) => sel.has(r.id) && picks.get(r.id));
+  const qtyOf = new Map<string, number>();
+  for (const p of planLinks(chosen, picks)) for (const x of p.parts) qtyOf.set(x.sale_line_id, x.qty);
+  const out: SalesPrintRow[] = [];
+  for (const r of chosen) {
+    const mo = picks.get(r.id)!;
+    const c = r.cands.find((x) => x.mo_no === mo);
+    if (!c) continue;
+    const s = r.suggest.find((x) => x.mo_no === mo);
+    const qty = qtyOf.get(r.id) ?? 0;
+    const match: SalesPrintMatch = s ? (r.kind === "exact" ? "exact" : "suggest") : "pick";
+    const notes: string[] = [];
+    if (s && s.mo_full && s.qty < s.mo_qty - EPS) notes.push(`รวมกับใบขายอื่นครบ ${fmt(s.mo_qty)}`);
+    if (s && !s.mo_full) notes.push(`ใบงานได้ใบขายแค่ ${fmt(s.qty)}/${fmt(s.mo_qty)}`);
+    if (c.linked) notes.push(`ถอดของเดิม ${linkedText(c.linked)}`);
+    if (qty < r.left - EPS) notes.push(`ผูกได้ ${fmt(qty)} จาก ${fmt(r.left)}`);
+    if (r.unlinked?.length) notes.push(`เคยถอดผูกจาก ${r.unlinked.map((u) => u.mo_no).join(", ")}`);
+    out.push({
+      line_id: r.id, so_number: r.so_number, date: r.date, customer: r.customer, sku: r.sku, sku_name: r.sku_name ?? null, image_url: r.image_url ?? null,
+      sold: r.qty, qty, mo_no: c.mo_no, mo_qty: c.qty, opened: c.opened, stage: c.stage,
+      match, suggested: match === "pick" ? r.suggest[0]?.mo_no ?? null : null, notes,
+    });
+  }
+  return out;
+}
+
+/** แท็บผูกแล้ว → แถวพิมพ์ */
+export const salesPrintRowsLinked = (rows: LinkedLine[]): SalesPrintRow[] => rows.map((r) => ({
+  line_id: r.id, so_number: r.so_number, date: r.date, customer: r.customer, sku: r.sku, sku_name: r.sku_name ?? null, image_url: r.image_url ?? null,
+  sold: r.qty, qty: r.link_qty, mo_no: r.mo_no, mo_qty: r.mo_qty, opened: r.opened, stage: r.stage,
+  match: "linked", suggested: null, notes: r.others.length ? [`ใบงานนี้ผูก ${linkedText(r.others)} ด้วย`] : [],
+}));
+
+/** คอลัมน์ที่พิมพ์ได้ (x_check / x_note = ช่องเขียนมือของกลาง เปิดไว้ตั้งต้น) */
+export function salesPrintColumns(kind: SalesPrintKind): ListPrintColumn[] {
+  return [
+    { key: "img", label: "รูป" },
+    { key: "bill", label: "ใบขาย", mono: true, widthMm: 30 },
+    { key: "sku", label: "สินค้า", widthMm: 46 },
+    { key: "sold", label: "ขาย", align: "right", widthMm: 16 },
+    { key: "mo", label: kind === "open" ? "ใบงานที่จะผูก" : "ใบงานที่ผูก", mono: true, widthMm: 30 },
+    { key: "made", label: "ผลิต", align: "right", widthMm: 14 },
+    { key: "opened", label: "เปิด / สถานะ", widthMm: 22 },
+    { key: "match", label: "จับคู่", widthMm: 40 },
+  ];
+}
+export const SALES_PRINT_TITLE: Record<SalesPrintKind, string> = { open: "สรุปจับคู่ใบขาย → ใบงาน (ก่อนกดผูก)", linked: "ใบขายที่ผูกใบงานแล้ว" };
+export const SALES_PRINT_GROUPS = [{ value: "bill", label: "ใบขาย (หัวกลุ่ม)" }, { value: "", label: "ไม่จัดกลุ่ม (มีคอลัมน์ใบขาย)" }];
+export const SALES_PRINT_SORTS = [{ value: "", label: "ใบขายใหม่ก่อน" }, { value: "sku", label: "รหัสสินค้า" }, { value: "mo", label: "ใบงาน" }];
+export const salesPrintDefaults = (kind: SalesPrintKind): ListPrintSettings => defaultListPrintSettings(salesPrintColumns(kind), {
+  orientation: "landscape", image: "s", groupBy: "bill", signature: true,
+  columns: [{ key: "x_check", on: true }, ...salesPrintColumns(kind).map((c) => ({ key: c.key, on: c.key !== "bill" })), { key: "x_note", on: true }],
+});
+/** แบบสำเร็จรูป */
+export const SALES_PRINT_PRESETS: ListPrintPreset[] = [
+  { id: "sales-check", name: "ตรวจก่อนผูก (ค่าเริ่ม)", settings: { orientation: "landscape", image: "s", groupBy: "bill", density: "normal" } },
+  { id: "sales-compact", name: "กระชับ ไม่มีรูป (ประหยัดกระดาษ)", settings: { orientation: "portrait", image: "none", groupBy: "bill", density: "compact", fontPx: 10 } },
+];
+
+const MATCH_LABEL: Record<SalesPrintMatch, string> = { exact: "ตรงจำนวน", suggest: "ระบบเสนอ (ไม่ครบ)", pick: "เลือกเอง", linked: "ผูกแล้ว" };
+
+export function buildSalesPrint(input: { kind: SalesPrintKind; rows: SalesPrintRow[]; settings: ListPrintSettings; printedAt: string; origin: string; company?: { name: string; logo_key: string | null } | null }): { html: string; title: string; groupCounts: number[] } {
+  const { kind, settings: s, origin } = input;
+  const title = s.title.trim() || SALES_PRINT_TITLE[kind];
+  const cols = resolveListColumns(s, salesPrintColumns(kind));
+  const grouped = s.groupBy === "bill";
+  // ไม่จัดกลุ่ม = ต้องมีคอลัมน์ใบขาย (เปิดให้เองถ้าปิดไว้)
+  if (!grouped && !cols.some((c) => c.key === "bill")) {
+    const at = Math.max(0, cols.findIndex((c) => c.key === "sku"));
+    cols.splice(at, 0, salesPrintColumns(kind).find((c) => c.key === "bill")!);
+  }
+  // จัดกลุ่ม = ใบขายใหม่ก่อนเสมอ แล้วเรียงในใบตามที่เลือก · ไม่จัดกลุ่ม = เรียงตามที่เลือกทั้งรายการ
+  const key = (r: SalesPrintRow) => (s.sortBy === "sku" ? r.sku : s.sortBy === "mo" ? r.mo_no : "");
+  const bill = (a: SalesPrintRow, b: SalesPrintRow) => b.date.localeCompare(a.date) || b.so_number.localeCompare(a.so_number);
+  const rows = [...input.rows].sort((a, b) => (grouped
+    ? bill(a, b) || key(a).localeCompare(key(b)) || a.sku.localeCompare(b.sku)
+    : key(a).localeCompare(key(b)) || bill(a, b) || a.sku.localeCompare(b.sku)));
+  const img = (u: string | null) => (u ? `<img class="thumb" src="${esc(`${u.startsWith("/") ? origin : ""}${u}`)}" alt="" />` : `<span class="no-img">—</span>`);
+  const cell = (r: SalesPrintRow): Record<string, string> => ({
+    img: img(r.image_url),
+    bill: `${esc(r.so_number)}<div class="sub">${esc(thDateShort(r.date))}</div>`,
+    sku: `<b class="mono">${esc(r.sku)}</b>${r.sku_name ? `<div class="sub">${esc(r.sku_name)}</div>` : ""}`,
+    sold: `${fmt(r.sold)}${Math.abs(r.qty - r.sold) > EPS ? `<div class="sub">ผูก ${fmt(r.qty)}</div>` : ""}`,
+    mo: esc(r.mo_no),
+    made: fmt(r.mo_qty),
+    opened: `${esc(thDateShort(r.opened))}<div class="sub">${esc(MO_STAGE_LABEL[r.stage])}</div>`,
+    match: `${r.match === "pick" ? `<b>${MATCH_LABEL.pick}</b>` : esc(MATCH_LABEL[r.match])}${r.suggested ? `<div class="sub">ระบบเสนอ ${esc(r.suggested)}</div>` : ""}${r.notes.map((n) => `<div class="sub">${esc(n)}</div>`).join("")}`,
+  });
+  const out: Record<string, string>[] = [];
+  const counts: number[] = [];
+  if (grouped) {
+    const bills = new Map<string, SalesPrintRow[]>();
+    for (const r of rows) (bills.get(r.so_number) ?? bills.set(r.so_number, []).get(r.so_number)!).push(r);
+    for (const list of bills.values()) {
+      const h = list[0];
+      out.push({ [LIST_GROUP_ROW]: `${esc(h.so_number)} · ${esc(thDateShort(h.date))}${h.customer ? ` · ${esc(h.customer)}` : ""}` });
+      for (const r of list) out.push(cell(r));
+      counts.push(list.length + 1);
+    }
+  } else { for (const r of rows) out.push(cell(r)); counts.push(rows.length); }
+
+  const bills = new Set(rows.map((r) => r.so_number)).size, mos = new Set(rows.map((r) => r.mo_no)).size;
+  const by = (m: SalesPrintMatch) => rows.filter((r) => r.match === m).length;
+  const sub = kind === "open"
+    ? `ที่ติ๊กไว้ ${fmt(rows.length)} บรรทัด · ${fmt(bills)} ใบขาย · ${fmt(mos)} ใบงาน · ตรงจำนวน ${fmt(by("exact"))} · ระบบเสนอไม่ครบ ${fmt(by("suggest"))} · เลือกเอง ${fmt(by("pick"))}`
+    : `ผูกแล้ว ${fmt(rows.length)} บรรทัด · ${fmt(bills)} ใบขาย · ${fmt(mos)} ใบงาน`;
+  const co = input.company;
+  const coHtml = co ? `<div class="wb-co">${co.logo_key ? `<img class="wb-logo" src="${esc(`${origin}/api/r2-image?key=${encodeURIComponent(co.logo_key)}&w=300`)}" alt="" />` : ""}<div class="wb-co-name">${esc(co.name)}</div></div>` : "";
+  const header = `<div class="wb-head"><div>${coHtml}<div class="wb-title">${esc(title)}</div><div class="wb-sub">${esc(sub)}</div></div>`
+    + `<div class="wb-no">อัปเดตงานจากใบขาย<br/>พิมพ์ ${esc(input.printedAt)}</div></div>`;
+  let body = rows.length ? renderListTable(cols, out) : `<div class="wb-empty">ไม่มีรายการ</div>`;
+  if (s.signature) body += signatureHtml(["ผู้จับคู่", "ผู้ตรวจ"]);
+  const tpl: ReportTemplate = {
+    paper_size: s.paper, orientation: s.orientation,
+    header_html: "{{{header}}}", body_html: "{{{body}}}", footer_html: "",
+    custom_css: SALES_PRINT_CSS + listPrintCss(s),
+  };
+  return { html: buildReportHtml(tpl, { header, body }, `${title} ${input.printedAt.replace(/\//g, "-")}`), title, groupCounts: counts.length ? counts : [0] };
+}
+
+const SALES_PRINT_CSS = `
+.doc { color: #111827; }
+.wb-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 4mm; border-bottom: 2px solid #111827; padding-bottom: 3mm; margin-bottom: 3mm; }
+.wb-title { font-weight: 800; }
+.wb-sub { font-size: 10px; color: #6b7280; margin-top: 1mm; }
+.wb-no { text-align: right; font-size: 10px; color: #6b7280; white-space: nowrap; }
+.wb-t { width: 100%; border-collapse: collapse; }
+.wb-t th, .wb-t td { border: 1px solid #cbd5e1; vertical-align: top; }
+.wb-t th { background: #f1f5f9; font-weight: 700; text-align: left; }
+.wb-t td.r, .wb-t th.r { text-align: right; white-space: nowrap; }
+.wb-t .mono { font-family: ui-monospace, monospace; }
+.wb-t td.mono { color: #334155; }
+.wb-t .sub { font-size: 0.85em; color: #64748b; font-weight: 400; font-family: inherit; }
+td.img, th.img { text-align: center; }
+.thumb { object-fit: cover; border: 1px solid #e2e8f0; border-radius: 3px; display: block; margin: 0 auto; }
+.no-img { color: #cbd5e1; }
+.wb-empty { padding: 10mm 0; text-align: center; color: #94a3b8; }
+`;
