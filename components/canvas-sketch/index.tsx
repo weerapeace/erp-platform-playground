@@ -27,11 +27,20 @@ import { avatarSrc } from "@/lib/r2-image";
 import { isUnloadSuppressed } from "@/lib/canvas-unload-guard";
 import { useCanvasRealtime } from "./use-canvas-realtime";
 import { type Scene, type SaveState, AUTOSAVE_MS, MAX_AUTOSAVE_MS, sceneSig, mergeById, resizeDataUrl, userColor, initials } from "./utils";
+import { parseSocialLink, socialEmbedSize, type SocialLink } from "@/lib/social-embed";
+import { SocialEmbedFrame, fetchSocialInfo } from "./social-embed-frame";
 
 const Excalidraw = dynamic(async () => (await import("@excalidraw/excalidraw")).Excalidraw, {
   ssr: false,
   loading: () => <div className="h-full flex items-center justify-center text-slate-400 text-sm">Loading board...</div>,
 });
+
+// กล่องฝัง (embeddable): Pinterest/TikTok ใช้ตัวฝังของเรา · ที่เหลือ (YouTube ฯลฯ) ให้ Excalidraw ตัดสิน/วาดเองตามเดิม
+const validateEmbeddable = (url: string) => (parseSocialLink(url) ? true : undefined);
+const renderEmbeddable = (el: any) => { const l = parseSocialLink(el?.link); return l ? <SocialEmbedFrame link={l} /> : null; };
+/** กล่องข้อความที่มีแค่ลิงก์ Pinterest/TikTok (วางไว้ก่อนกระดานรองรับ) — ไม่นับข้อความในกล่อง/การ์ด */
+const socialTextsOf = (els: any[]) => els.filter((e) => !e.isDeleted && e.type === "text" && !e.containerId && !e.customData?.kind
+  && /pin|tiktok/i.test(e.originalText ?? e.text ?? "") && parseSocialLink(e.originalText ?? e.text));
 
 /** ตัวควบคุมกระดานจากภายนอก (เช่น popup เจ้าของ เรียกบันทึก/ทิ้งตอนถามก่อนปิด)
  *  insert(skeletons): แทรก element ลงกลางจอ — skeletons เป็น Excalidraw skeleton (x,y นับจาก 0) แล้วระบบจะเลื่อนไปกลางจอให้ */
@@ -798,6 +807,74 @@ export function CanvasSketch({
     } finally { setTranslating(false); }
   };
 
+  // ── ลิงก์ Pinterest / TikTok → กล่องฝังรูป/วิดีโอ (lib/social-embed) ──
+  // วางเรียงเป็นแถวที่ at (ไม่ระบุ = ตำแหน่งเมาส์ล่าสุด/กลางจอ) · replaceIds = กล่องข้อความลิงก์เดิมที่จะลบทิ้ง (ปุ่มแปลง)
+  // avoidOverlap = เลื่อนทั้งแถวลงจนไม่ทับของเดิม (กล่องฝังลอยทับทุกอย่างบนกระดาน — ทับโน้ตแล้วมองไม่เห็น)
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const socialCountRef = useRef(0);
+  const [socialTextCount, setSocialTextCount] = useState(0);
+  const [convertingSocial, setConvertingSocial] = useState(false);
+  const placeSocialEmbeds = async (links: SocialLink[], opts: { at?: { x: number; y: number }; replaceIds?: string[]; avoidOverlap?: boolean } = {}) => {
+    const api = apiRef.current; if (!api || !links.length) return;
+    try {
+      const lib: any = await import("@excalidraw/excalidraw");
+      const infos = await Promise.all(links.map((l) => fetchSocialInfo(l.url))); // ย่อลิงก์สั้น + ขนาดพินตามรูปจริง
+      const st = api.getAppState();
+      const start = opts.at ?? pointerRef.current ?? lib.viewportCoordsToSceneCoords(
+        { clientX: (st.offsetLeft ?? 0) + (st.width ?? 800) / 2, clientY: (st.offsetTop ?? 0) + (st.height ?? 600) / 2 }, st);
+      let x = start.x;
+      const row = links.map((l, i) => {
+        const size = infos[i] ? { width: infos[i]!.width, height: infos[i]!.height } : socialEmbedSize(l.kind);
+        const r = { dx: x - start.x, ...size, link: infos[i]?.url ?? l.url };
+        x += size.width + 20;
+        return r;
+      });
+      const drop = new Set(opts.replaceIds ?? []);
+      let y = start.y;
+      if (opts.avoidOverlap) {
+        const box = { x: start.x, width: x - 20 - start.x, height: Math.max(...row.map((r) => r.height)) };
+        const others = (api.getSceneElements() as any[]).filter((e) => !drop.has(e.id) && e.type !== "frame" && e.type !== "magicframe");
+        for (let tries = 0; tries < 50; tries++) {
+          const hits = others.filter((e) => box.x < e.x + (e.width || 0) && box.x + box.width > e.x && y < e.y + (e.height || 0) && y + box.height > e.y);
+          if (!hits.length) break;
+          y = Math.max(...hits.map((e) => e.y + (e.height || 0))) + 40;
+        }
+      }
+      const skels = row.map((r) => ({ type: "rectangle", x: start.x + r.dx, y, width: r.width, height: r.height, strokeColor: "transparent", backgroundColor: "transparent", roundness: { type: 3 }, link: r.link }));
+      // Excalidraw ไม่มีตัวสร้างกล่องฝังให้เรียก → สร้างเป็นกล่องธรรมดาแล้วเปลี่ยนชนิด (ค่าพื้นฐานเหมือนกัน)
+      const added = (lib.convertToExcalidrawElements(skels) as any[]).map((e) => ({ ...e, type: "embeddable" }));
+      const all = (api.getSceneElementsIncludingDeleted() as any[]).map((e) => drop.has(e.id) ? { ...e, isDeleted: true, version: (e.version ?? 0) + 1 } : e);
+      api.updateScene({
+        elements: [...all, ...added],
+        appState: { selectedElementIds: Object.fromEntries(added.map((e) => [e.id, true])) },
+        // วางใหม่ = Ctrl+Z ย้อนได้เหมือนวางรูป · แปลงข้อความเดิม = ไม่บันทึกเป็นขั้นย้อน (Excalidraw ไม่รับการลบข้อความที่ยังมีแก้ค้างภายใน
+        // → ย้อนแล้วได้ครึ่ง ๆ) — ลิงก์เดิมยังอยู่ในกล่องฝัง ไม่มีอะไรหาย
+        ...(drop.size ? {} : { captureUpdate: lib.CaptureUpdateAction.IMMEDIATELY }),
+      });
+      if (editable) queueSave();
+    } catch (e) { console.error("[canvas-sketch] social embed failed:", e); }
+  };
+  // ปุ่มแปลง: กล่องข้อความลิงก์ Pinterest/TikTok ที่วางไว้ก่อนหน้า → กล่องฝัง
+  // ลิงก์ที่วางใกล้กันนับเป็นกลุ่มเดียว → เรียงเป็นแถวเริ่มที่มุมกลุ่ม แล้วเลื่อนลงไปที่ว่างใต้ของเดิม (ไม่ทับโน้ตข้าง ๆ)
+  const convertSocialTexts = async () => {
+    const api = apiRef.current; if (!api) return;
+    const texts = socialTextsOf(api.getSceneElements() as any[]).sort((a, b) => a.y - b.y || a.x - b.x);
+    if (!texts.length) return;
+    const groups: any[][] = [];
+    for (const e of texts) {
+      const g = groups.find((g) => g.some((o) => Math.abs(o.x - e.x) < 400 && Math.abs(o.y - e.y) < 400));
+      if (g) g.push(e); else groups.push([e]);
+    }
+    setConvertingSocial(true);
+    try {
+      for (const g of groups) {
+        await placeSocialEmbeds(g.map((e) => parseSocialLink(e.originalText ?? e.text) as SocialLink), {
+          at: { x: Math.min(...g.map((e) => e.x)), y: Math.min(...g.map((e) => e.y)) }, replaceIds: g.map((e) => e.id), avoidOverlap: true,
+        });
+      }
+    } finally { setConvertingSocial(false); }
+  };
+
   // โน้ตคอมเมนต์ (annotation) — วางกล่องโน้ตกลางจอ มีชื่อผู้เขียน+เวลา, กรอบสีประจำคน
   const [noteOpen, setNoteOpen] = useState(false);
   const [noteText, setNoteText] = useState("");
@@ -919,7 +996,7 @@ export function CanvasSketch({
       <div className={`flex flex-wrap items-center gap-2${stickyTop != null ? " sticky z-30 bg-white/95 backdrop-blur border-b border-slate-100 py-1.5 -mx-1 px-1" : ""}`}
         style={stickyTop != null ? { top: stickyTop } : undefined}>
         <span className="text-xs text-slate-400 flex-1 min-w-[200px]">
-          {t("🖼 วางรูป = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P", "🖼 Paste image = copy then Ctrl+V on board · ⬛ Box=R · ➡ Arrow=A · 🔤 Text=T · ✏ Draw=P")}
+          {t("🖼 วางรูป / ลิงก์ YouTube · Pinterest · TikTok = copy แล้วกด Ctrl+V ในกระดาน · ⬛ กล่อง=R · ➡ ลูกศร=A · 🔤 ข้อความ=T · ✏ วาด=P", "🖼 Paste image / YouTube · Pinterest · TikTok link = copy then Ctrl+V on board · ⬛ Box=R · ➡ Arrow=A · 🔤 Text=T · ✏ Draw=P")}
         </span>
         {editable && serverCanEdit && selFont != null && (
           <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 border border-slate-200 rounded-md px-1.5 py-0.5">
@@ -965,6 +1042,12 @@ export function CanvasSketch({
               </div>
             )}
           </div>
+        )}
+        {editable && serverCanEdit && socialTextCount > 0 && (
+          <button onClick={() => { void convertSocialTexts(); blurActive(); }} disabled={convertingSocial} title={t("ลิงก์ Pinterest/TikTok ที่วางไว้เป็นข้อความ → เปลี่ยนเป็นกล่องโชว์รูป/วิดีโอ เรียงเป็นแถวใต้จุดเดิม (ไม่ทับโน้ตข้าง ๆ · ลิงก์เดิมเก็บอยู่ในกล่อง)", "Pinterest/TikTok links pasted as text → image/video boxes in a row below where they were (won't cover nearby notes · the link is kept in the box)")}
+            className="inline-flex items-center gap-1 text-[11px] text-rose-700 border border-rose-200 rounded-md px-2 py-0.5 hover:bg-rose-50 disabled:opacity-50">
+            {convertingSocial ? t("⏳ กำลังแปลง...", "⏳ Converting...") : `📌 ${t("แปลงลิงก์ Pinterest/TikTok เป็นรูป/วิดีโอ", "Show Pinterest/TikTok links as media")} (${socialTextCount})`}
+          </button>
         )}
         {editable && serverCanEdit && (
           <button onClick={() => { setCapArmed(true); setCapMsg(null); blurActive(); }} title={t("ลากคลุมพื้นที่ → ส่งรูปเข้ากลุ่ม LINE งาน", "Drag to select an area → send image to the LINE work group")}
@@ -1033,6 +1116,8 @@ export function CanvasSketch({
             const tx = (elements as any[]).find((e) => !e.isDeleted && e.type === "text" && sel[e.id]);
             setSelFont(tx ? Math.round(tx.fontSize) : null);
             if ((elements as any[]).some((e) => !e.isDeleted)) hadContentRef.current = true; // เคยมีงานจริง
+            const nSocial = socialTextsOf(elements as any[]).length; // ปุ่ม "แปลงลิงก์" โชว์เมื่อมีลิงก์ค้างเป็นข้อความ
+            if (nSocial !== socialCountRef.current) { socialCountRef.current = nSocial; setSocialTextCount(nSocial); }
             if (readyRef.current && editable && canEditRef.current) hoistImages(files); // รูป base64 ที่เพิ่งแปะ → ย้ายขึ้น R2
             // เซฟ/ส่ง เฉพาะเมื่อ "ชิ้นงานเปลี่ยนจริง" (ข้ามการเลือก/เลื่อนจอที่ไม่กระทบเนื้อหา → กันกระพริบ/loop)
             if (readyRef.current && editable && canEditRef.current) {
@@ -1048,6 +1133,17 @@ export function CanvasSketch({
             // การ์ดของเรา (มี customData.kind) → เปิด drawer แทนการเปิดลิงก์
             const data = el?.customData as Record<string, unknown> | undefined;
             if (data?.kind && cardCbRef.current) { ev?.preventDefault?.(); cardCbRef.current(data); }
+          }}
+          validateEmbeddable={validateEmbeddable}
+          renderEmbeddable={renderEmbeddable}
+          onPointerUpdate={(p: any) => { pointerRef.current = p?.pointer ? { x: p.pointer.x, y: p.pointer.y } : pointerRef.current; }}
+          onPaste={(data: any) => {
+            // วางลิงก์ Pinterest/TikTok (อันเดียวหรือหลายบรรทัด) → กล่องโชว์รูป/วิดีโอ แทนข้อความลิงก์
+            if (!(editable && canEditRef.current) || data?.elements || data?.spreadsheet) return true;
+            const links = String(data?.text ?? "").split(/\n+/).map((s) => s.trim()).filter(Boolean).map((s) => parseSocialLink(s));
+            if (!links.length || links.some((l) => !l)) return true;
+            void placeSocialEmbeds(links as SocialLink[]);
+            return false;
           }}
         />
         {/* โหมดลากคลุมพื้นที่เพื่อแคปส่ง LINE — overlay จับเมาส์ทับกระดาน */}
