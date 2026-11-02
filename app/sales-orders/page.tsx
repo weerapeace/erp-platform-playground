@@ -52,6 +52,14 @@ function mergeLines(base: EditorLine[], incoming: EditorLine[]): EditorLine[] {
 const baht = (n: number | null | undefined) =>
   "฿" + Number(n ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
 
+// ใบขาย "จัดส่ง" = ตัดของออกจากคลัง (เจ้าของเลือก 2026-11-02 ให้เป็นจุดเดียวที่ตัดสต็อกตอนขาย)
+// ใบที่ลงวันที่ก่อนวันนี้ส่วนใหญ่ส่งของไปนานแล้ว และคลังยังไม่มียอดของพวกนั้น → กดจัดส่งจะทำให้คลังติดลบ → เตือนก่อน
+const STOCK_CUT_SINCE = "2026-11-02";
+const oldShipWarning = (rows: { order_date?: string | null }[]) => {
+  const old = rows.filter((r) => (r.order_date ?? "") < STOCK_CUT_SINCE).length;
+  return old ? `\n\n⚠️ ${old} ใบลงวันที่ก่อน ${formatDate(STOCK_CUT_SINCE)} — ระบบจะตัดของออกจากคลังด้วย (ใบเก่ามักส่งของไปนานแล้ว คลังอาจติดลบ)` : "";
+};
+
 const STATUS_LABEL: Record<string, string> = {
   draft: "ร่าง", confirmed: "ยืนยันแล้ว", in_production: "กำลังผลิต",
   ready: "พร้อมส่ง", shipped: "จัดส่งแล้ว", completed: "เสร็จสิ้น", cancelled: "ยกเลิก",
@@ -471,10 +479,37 @@ export default function SalesOrdersPage() {
     flash(`ยืนยันแล้ว ${ok} ใบ${fail ? ` · ล้มเหลว ${fail}` : ""}`);
     await fetchList();
   };
+  // จัดส่งหลายใบ = ตัดของออกจากคลังตามรายการ (จัดส่งได้เฉพาะใบที่ยืนยันแล้ว / พร้อมส่ง)
+  const bulkShip = async (rows: SOListItem[]) => {
+    const ready = rows.filter(r => r.status === "confirmed" || r.status === "ready");
+    if (ready.length === 0) { flash("ไม่มีใบที่จัดส่งได้ (จัดส่งได้เฉพาะใบที่ยืนยันแล้ว / พร้อมส่ง)"); return; }
+    if (!confirm(`จัดส่งแล้ว ${ready.length} ใบ? — ระบบจะตัดของออกจากคลังตามรายการ${oldShipWarning(ready)}`)) return;
+    setWfLoading(true);
+    let ok = 0, fail = 0;
+    for (const r of ready) {
+      try {
+        const res = await apiFetch(`/api/sales-orders/${r.id}/transition`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "ship", actor: user?.name }),
+        });
+        const j = await res.json(); if (j.error) throw new Error(j.error); ok++;
+      } catch { fail++; }
+    }
+    setWfLoading(false);
+    flash(`จัดส่งแล้ว ${ok} ใบ${fail ? ` · ล้มเหลว ${fail}` : ""}`);
+    await fetchList();
+  };
   const bulkActions: BulkAction<SOListItem>[] = [
     { label: "🧾 พิมพ์ใบกำกับภาษี", onClick: (rows) => { if (rows.length) window.open(`/print/sales-order-bulk?ids=${rows.map(r => r.id).join(",")}`, "_blank"); } },
     { label: "✓ ยืนยัน SO", onClick: (rows) => { void bulkConfirm(rows); } },
+    ...(canShip ? [{ label: "📦 จัดส่งแล้ว (ตัดสต็อก)", onClick: (rows: SOListItem[]) => { void bulkShip(rows); } }] : []),
   ];
+  // จัดส่งทีละใบ (ป๊อปรายละเอียด) — ใบเก่าเตือนก่อนเหมือนแบบหลายใบ
+  const shipOne = (so: { id: string; order_date?: string | null }) => {
+    const warn = oldShipWarning([so]);
+    if (warn && !confirm(`จัดส่งใบนี้?${warn}`)) return;
+    void transition(so.id, "ship");
+  };
 
   // ---- Columns ----
   const columns: ColumnDef<SOListItem>[] = useMemo(() => [
@@ -654,7 +689,7 @@ export default function SalesOrdersPage() {
               <>
                 <button onClick={() => transition(detail.id, "start_production")} disabled={wfLoading}
                   className="h-9 px-4 text-sm bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50">🏭 เริ่มผลิต</button>
-                <button onClick={() => transition(detail.id, "ship")} disabled={wfLoading}
+                <button onClick={() => shipOne(detail)} disabled={wfLoading}
                   className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">📦 จัดส่งเลย</button>
               </>
             )}
@@ -663,7 +698,7 @@ export default function SalesOrdersPage() {
                 className="h-9 px-4 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50">✓ พร้อมส่ง</button>
             )}
             {detail.status === "ready" && canShip && (
-              <button onClick={() => transition(detail.id, "ship")} disabled={wfLoading}
+              <button onClick={() => shipOne(detail)} disabled={wfLoading}
                 className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">📦 จัดส่ง</button>
             )}
             {detail.status === "shipped" && canComplete && (
