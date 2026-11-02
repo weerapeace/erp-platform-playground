@@ -32,6 +32,7 @@
 4. พรีวิวใช้ `<ListPrintFrame html state={print} />` (ลากปรับความกว้างได้) · วาง `<ListPrintPanel state={print} available={cols} sorts={...} groups={...} builtinPresets={...} companies={...} estimatedPages={estimateListPages(counts, settings)} defaultTitle="..." canSaveTeam={can("admin.users")} />` ข้าง `<PrintFrame fit />`
 5. ค่าข้อความทุกช่องต้อง `escapeHtml` ก่อนใส่ตาราง (renderListTable ไม่ escape ให้)
 6. กลุ่มเยอะแต่แถวน้อย (เช่น ต่อใบขาย) → ใช้ตารางเดียว ใส่แถว `{ [LIST_GROUP_ROW]: "<หัวกลุ่ม HTML>" }` คั่น — หัวคอลัมน์ขึ้นครั้งเดียว (ตัวอย่าง `lib/mo-sales-print`)
+7. คอลัมน์รวมกันกว้าง (ตั้งไว้สำหรับแนวนอน) → ส่ง `fitListColumns(cols, settings)` เข้า `renderListTable` — ผู้ใช้เปลี่ยนเป็นแนวตั้ง/A5 แล้วย่อตามสัดส่วนให้พอดีกระดาษ ไม่ให้ช่องขวาหลุดขอบ · ตั้ง `minMm` ต่อคอลัมน์ได้ (ไม่ตั้ง = รหัส 28 · อื่น ๆ 12) · ขั้นต่ำรวมยังเกิน = ย่อทุกช่องเท่ากัน (เจ้าของเจอช่อง "จับคู่/หมายเหตุ" โดนตัดตอนแนวตั้ง 2026-11-02)
 
 ## สิทธิ์ / ประวัติ
 - ค่าต่อคน + แบบของฉัน = ของคนนั้นคนเดียว (RLS user_ui_prefs)

@@ -6,7 +6,7 @@
  */
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import {
-  LIST_GROUP_ROW, defaultListPrintSettings, escapeHtml as esc, listPrintCss, renderListTable, resolveListColumns, signatureHtml,
+  LIST_GROUP_ROW, defaultListPrintSettings, escapeHtml as esc, fitListColumns, listPrintCss, renderListTable, resolveListColumns, signatureHtml,
   type ListPrintColumn, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
 import { MO_STAGE_LABEL, partnerNote, planLinks, salePartners, type LinkedLine, type MoStage, type UnlinkedLine } from "@/lib/mo-sales-unlinked";
@@ -84,17 +84,17 @@ export const salesPrintRowsLinked = (rows: LinkedLine[]): SalesPrintRow[] => row
   match: "linked", suggested: null, notes: r.others.length ? [`ใบงานนี้ผูก ${linkedText(r.others)} ด้วย`] : [], ticked: true,
 }));
 
-/** คอลัมน์ที่พิมพ์ได้ (x_check / x_note = ช่องเขียนมือของกลาง เปิดไว้ตั้งต้น) */
+/** คอลัมน์ที่พิมพ์ได้ (x_check / x_note = ช่องเขียนมือของกลาง เปิดไว้ตั้งต้น) · minMm = ย่อพอดีกระดาษได้ต่ำสุด (แนวตั้ง/A5) */
 export function salesPrintColumns(kind: SalesPrintKind): ListPrintColumn[] {
   return [
     { key: "img", label: "รูป" },
     { key: "bill", label: "ใบขาย", mono: true, widthMm: 30 },
-    { key: "sku", label: "สินค้า", widthMm: 46 },
-    { key: "sold", label: "ขาย", align: "right", widthMm: 16 },
+    { key: "sku", label: "สินค้า", widthMm: 46, minMm: 28 },
+    { key: "sold", label: "ขาย", align: "right", widthMm: 16, minMm: 12 },
     { key: "mo", label: kind === "open" ? "ใบงานที่จะผูก" : "ใบงานที่ผูก", mono: true, widthMm: 30 },
-    { key: "made", label: "ผลิต", align: "right", widthMm: 14 },
-    { key: "opened", label: "เปิด / สถานะ", widthMm: 22 },
-    { key: "match", label: "จับคู่", widthMm: 40 },
+    { key: "made", label: "ผลิต", align: "right", widthMm: 14, minMm: 12 },
+    { key: "opened", label: "เปิด / สถานะ", widthMm: 22, minMm: 16 },
+    { key: "match", label: "จับคู่", widthMm: 40, minMm: 24 },
   ];
 }
 export const SALES_PRINT_TITLE: Record<SalesPrintKind, string> = { open: "สรุปจับคู่ใบขาย → ใบงาน (ก่อนกดผูก)", linked: "ใบขายที่ผูกใบงานแล้ว" };
@@ -168,7 +168,8 @@ export function buildSalesPrint(input: { kind: SalesPrintKind; rows: SalesPrintR
   const coHtml = co ? `<div class="wb-co">${co.logo_key ? `<img class="wb-logo" src="${esc(`${origin}/api/r2-image?key=${encodeURIComponent(co.logo_key)}&w=300`)}" alt="" />` : ""}<div class="wb-co-name">${esc(co.name)}</div></div>` : "";
   const header = `<div class="wb-head"><div>${coHtml}<div class="wb-title">${esc(title)}</div><div class="wb-sub">${esc(sub)}</div></div>`
     + `<div class="wb-no">อัปเดตงานจากใบขาย<br/>พิมพ์ ${esc(input.printedAt)}</div></div>`;
-  let body = rows.length ? renderListTable(cols, out) : `<div class="wb-empty">ไม่มีรายการ</div>`;
+  // กว้างรวมเกินกระดาษ (แนวตั้ง / A5) → ย่อทุกช่องตามสัดส่วนให้พอดี ไม่ให้ช่องขวาโดนตัด
+  let body = rows.length ? renderListTable(fitListColumns(cols, s), out) : `<div class="wb-empty">ไม่มีรายการ</div>`;
   if (s.signature) body += signatureHtml(["ผู้จับคู่", "ผู้ตรวจ"]);
   const tpl: ReportTemplate = {
     paper_size: s.paper, orientation: s.orientation,

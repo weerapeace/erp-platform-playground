@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SaleLine, SalesLinkRow } from "@/lib/mo-sales-match";
 import { buildUnlinked, type UnlinkedMo } from "@/lib/mo-sales-unlinked";
 import { buildSalesPrint, salesPrintDefaults, salesPrintRowsLinked, salesPrintRowsOpen } from "@/lib/mo-sales-print";
-import { renderListTable, LIST_GROUP_ROW } from "@/lib/list-print";
+import { fitListColumns, renderListTable, LIST_GROUP_ROW } from "@/lib/list-print";
 
 // ข้อมูลแบบเดียวกับเทสต์ mo-sales-unlinked (ใบขายเซ็นทรัลทำ)
 const mo = (mo_no: string, sku: string, qty: number, created: string, stage: UnlinkedMo["stage"] = "wait"): UnlinkedMo =>
@@ -95,6 +95,29 @@ describe("ใบพิมพ์สรุปจับคู่ใบขาย →
     const html = buildSalesPrint({ kind: "open", rows: pr, settings: { ...salesPrintDefaults("open"), groupBy: "" }, printedAt: "x", origin: "" }).html;
     expect(html).not.toContain('class="grp-row"');
     expect(html).toContain('data-col="bill"');
+  });
+});
+
+describe("ตารางกลาง: ย่อคอลัมน์ให้พอดีกระดาษ", () => {
+  const cols = salesPrintDefaults("open").columns.map((c) => c.key);
+  const avail = [
+    { key: "x_check", label: "ตรวจแล้ว", blank: "box" as const, widthMm: 13 }, { key: "img", label: "รูป" },
+    { key: "bill", label: "ใบขาย", mono: true, widthMm: 30 }, { key: "sku", label: "สินค้า", widthMm: 46 }, { key: "sold", label: "ขาย", widthMm: 16 },
+    { key: "mo", label: "ใบงาน", mono: true, widthMm: 30 }, { key: "made", label: "ผลิต", widthMm: 14 }, { key: "opened", label: "เปิด", widthMm: 22 },
+    { key: "match", label: "จับคู่", widthMm: 40 }, { key: "x_note", label: "หมายเหตุ", blank: "line" as const, widthMm: 32 },
+  ];
+  const sum = (c: { key: string; widthMm?: number }[]) => c.reduce((a, x) => a + (x.key === "img" ? 0 : x.widthMm ?? 0), 0);
+  it("แนวนอน A4 พอดีอยู่แล้ว = ไม่แตะ · แนวตั้ง (เคสเจ้าของ: เปิดคอลัมน์ใบขายด้วย) = ย่อจนพอดี 178 มม. · รหัสไม่ต่ำกว่า ~28", () => {
+    expect(cols).toContain("x_note");
+    expect(fitListColumns(avail, { paper: "A4", orientation: "landscape", image: "s" })).toBe(avail);
+    const p = fitListColumns(avail, { paper: "A4", orientation: "portrait", image: "s" });
+    expect(sum(p) + 10).toBeLessThanOrEqual(178 + 0.5);
+    expect(p.find((c) => c.key === "mo")!.widthMm).toBeGreaterThanOrEqual(27);
+    expect(p.find((c) => c.key === "bill")!.widthMm).toBeGreaterThanOrEqual(27);
+    expect(p.find((c) => c.key === "x_check")!.widthMm).toBeGreaterThanOrEqual(11);
+    const html = buildSalesPrint({ kind: "open", rows: salesPrintRowsOpen(rows, new Map([["l1", "MO-2026-00276"]]), new Set(["l1"])), settings: { ...salesPrintDefaults("open"), orientation: "portrait" }, printedAt: "x", origin: "" }).html;
+    const widths = [...html.matchAll(/<col data-col="[^"]+" style="width:([\d.]+)mm"/g)].map((m) => Number(m[1]));
+    expect(widths.reduce((a, b) => a + b, 0) + 10).toBeLessThanOrEqual(178 + 0.5);
   });
 });
 

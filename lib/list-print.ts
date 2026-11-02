@@ -22,6 +22,8 @@ export interface ListPrintColumn {
   blank?: "line" | "box";
   /** ความกว้างแนะนำ (มม.) — ไม่ใส่ = ยืดตามเนื้อหา */
   widthMm?: number;
+  /** ย่อให้พอดีกระดาษได้ต่ำสุด (มม.) — ไม่ใส่ = รหัส 28 · อื่น ๆ 12 (fitListColumns) */
+  minMm?: number;
 }
 /** ค่าที่ผู้ใช้ตั้งต่อคอลัมน์ (ลำดับ = ลำดับในอาร์เรย์) */
 export interface ListPrintColumnPref {
@@ -185,6 +187,41 @@ export function resolveListColumns(s: ListPrintSettings, available: ListPrintCol
     out.push(col);
   }
   return out;
+}
+
+/** กว้างกระดาษ (มม.) */
+const PAPER_W: Record<ListPrintPaper, Record<ListPrintOrientation, number>> = { A4: { portrait: 210, landscape: 297 }, A5: { portrait: 148, landscape: 210 } };
+/** ย่อได้ต่ำสุด (มม.) — ตั้งเองต่อคอลัมน์ (minMm) · รหัส (MO/ใบขาย ~14 ตัว) ยังอยู่บรรทัดเดียว · อื่น ๆ (ช่องติ๊ก/เขียน) 12 */
+const fitMin = (c: ListPrintColumn) => Math.min(c.widthMm ?? Infinity, c.minMm ?? (c.mono ? 28 : 12));
+/**
+ * ย่อความกว้างคอลัมน์ให้พอดีหน้ากระดาษ — เปลี่ยนเป็นแนวตั้ง/A5 แล้วตารางเกินขอบ ช่องขวาสุดโดนตัด (เจ้าของเจอ 2026-11-02)
+ * พื้นที่ = กว้างกระดาษ − ขอบซ้ายขวาบนจอ (16+16 มม.) · คอลัมน์รูปกว้างตามขนาดรูป (ไม่ย่อ) · คอลัมน์ที่ไม่กำหนดกว้างเผื่อไว้ 20 มม.
+ * ย่อตามสัดส่วน ไม่ต่ำกว่าขั้นต่ำของแต่ละช่อง (ช่องที่ชนขั้นต่ำล็อกไว้ แล้วย่อที่เหลือต่อ) · พอดีอยู่แล้ว = ไม่แตะ (ไม่ขยาย)
+ * เปิดคอลัมน์เยอะจนขั้นต่ำรวมยังเกิน → ย่อทุกช่องเท่า ๆ กันให้พอดี (ยอมให้ตัดบรรทัด ดีกว่าช่องขวาหลุดกระดาษ)
+ */
+export function fitListColumns(cols: ListPrintColumn[], s: Pick<ListPrintSettings, "paper" | "orientation" | "image">): ListPrintColumn[] {
+  const flex = cols.filter((c) => c.key !== "img" && c.widthMm);
+  const room = PAPER_W[s.paper][s.orientation] - 32
+    - (cols.some((c) => c.key === "img") ? IMAGE_MM[s.image] + 2 : 0)
+    - cols.filter((c) => c.key !== "img" && !c.widthMm).length * 20;
+  if (flex.reduce((a, c) => a + c.widthMm!, 0) <= room) return cols;
+  const locked = new Set<string>();
+  const width = new Map<string, number>();
+  for (let guard = 0; guard <= flex.length; guard++) {
+    const free = flex.filter((c) => !locked.has(c.key));
+    const avail = room - flex.filter((c) => locked.has(c.key)).reduce((a, c) => a + fitMin(c), 0);
+    const factor = Math.max(0, avail) / Math.max(1, free.reduce((a, c) => a + c.widthMm!, 0));
+    let changed = false;
+    for (const c of free) {
+      const w = c.widthMm! * factor;
+      if (w < fitMin(c)) { locked.add(c.key); changed = true; } else width.set(c.key, Math.round(w * 10) / 10);
+    }
+    if (!changed) break;
+  }
+  const final = new Map(flex.map((c) => [c.key, locked.has(c.key) ? fitMin(c) : width.get(c.key) ?? c.widthMm!]));
+  const total = [...final.values()].reduce((a, w) => a + w, 0);
+  const squeeze = total > room && room > 0 ? room / total : 1;   // ขั้นต่ำรวมยังเกิน → ย่อทุกช่องให้พอดี
+  return cols.map((c) => (final.has(c.key) ? { ...c, widthMm: Math.round(final.get(c.key)! * squeeze * 10) / 10 } : c));
 }
 
 export const escapeHtml = (v: unknown): string =>
