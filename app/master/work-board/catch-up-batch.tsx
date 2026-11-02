@@ -91,9 +91,11 @@ const emptyRow = (moNo: string): BRow => ({
   open: true, phase: "edit", results: [], runMsg: "", undoRes: null,
 });
 
-export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, workOrders, mode = "direct", canApprove = false, onRequestsChanged, onOpenSingle, onOpenEdit, refresh, imageOf }: {
+export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, workOrders, mode = "direct", canApprove = false, onRequestsChanged, onOpenSingle, onOpenEdit, refresh, imageOf, openPick }: {
   /** ใบที่ติ๊กมา (null = ปิด) */
   moNos: string[] | null;
+  /** เปิดหน้าต่าง "เลือกใบขาย" ของใบนี้ให้เลยเมื่อโหลดเสร็จ (มาจากอัปเดตงานจากใบขาย: ใบงานเหลือ / ใบขายขาด) */
+  openPick?: string | null;
   onClose: () => void;
   /** บันทึกแล้วอย่างน้อย 1 ใบ → หน้าแม่โหลดบอร์ดใหม่ · ส่งรายการใบที่บันทึกไป (ขึ้น "เพิ่งอัปเดต") */
   onDone: (saved: string[]) => void;
@@ -263,6 +265,17 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     return { reviewing, editingMine, blockedBy, asRequest: !reviewing && (mode === "request" || editingMine) };
   };
   const readyOf = (r: BRow, d: D | null) => r.phase === "edit" && !!d && !modeOf(r).blockedBy && d.built.steps.length > 0 && d.errs.length === 0;
+  // openPick: รอใบ + ใบขายโหลดเสร็จก่อน (ก่อนนั้น applyPick ยังไม่รู้ว่าใบผูกอยู่ → ไม่ถอดของเดิม → ผูกไม่ผ่าน) · เปิดครั้งเดียวต่อการเปิดชุด
+  const pickedOnce = useRef("");
+  useEffect(() => {
+    if (!key) { pickedOnce.current = ""; return; }   // ปิดชุดแล้ว = เปิดใหม่ครั้งหน้าเปิดหน้าต่างให้อีก
+    if (!openPick || !sales || pickedOnce.current === `${key}:${openPick}`) return;
+    const r = rows.find((x) => x.moNo === openPick);
+    if (!r?.snap || r.phase !== "edit" || modeOf(r).blockedBy) return;
+    pickedOnce.current = `${key}:${openPick}`;
+    setPickMo(openPick);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openPick, sales, rows, key]);
 
   // ── แก้ค่าในแถว
   const setDisp = (moNo: string, dk: string, p: Partial<CuDispRow>) => patchRow(moNo, (r) => ({ disp: r.disp.map((x) => (x.key === dk ? { ...x, ...p } : x)) }));

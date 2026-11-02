@@ -4,6 +4,7 @@
  *   + ใบที่เลือกแทนได้ (SKU เดียวกัน · เปิดก่อนวันที่ใบขาย · ยังไม่ปิด) — ใบที่ผูกใบขายอื่นอยู่ก็เลือกได้ (ติดป้าย linked
  *     · ผูกจริง = ถอดใบขายเดิมออกก่อน ใบขายนั้นกลับเป็น "ยังไม่ผูก") แต่ระบบไม่เลือกให้เอง
  *   + แท็บ "ผูกแล้ว" (linked) — บรรทัดที่ผูกแล้ว 1 คู่ = 1 แถว ไว้กด "ผูกผิด · ย้าย" (app/master/work-board/sales-move-plan)
+ *     2026-11-02: + ยอดไม่ตรง (mo_left ใบงานเหลือ / line_short ใบขายขาด) ไว้กรอง + บอกยอดรวมทุกใบขายของใบงาน (linkedNote)
  *   ไม่มี React · ใช้ทั้ง API (/api/mo/sales-unlinked) และเทสต์
  */
 import { bkkDate, matchSales, type MatchMo, type SaleLine, type SalesLinkRow } from "@/lib/mo-sales-match";
@@ -12,8 +13,8 @@ import { bkkDate, matchSales, type MatchMo, type SaleLine, type SalesLinkRow } f
 export type MoStage = "wait" | "work" | "recv" | "ship" | "closed";
 export const MO_STAGE_LABEL: Record<MoStage, string> = { wait: "รอจ่าย", work: "อยู่ที่ช่าง", recv: "รับคืนแล้ว", ship: "ส่งออกแล้ว", closed: "ปิดแล้ว" };
 export type UnlinkedMo = MatchMo & { stage: MoStage };
-/** linked = ใบขายอื่นที่ใบนี้ผูกอยู่ (มี = เลือกได้แต่ต้องถอดของเดิมออกก่อน) */
-export type MoCand = { mo_no: string; qty: number; opened: string; stage: MoStage; linked?: { so_number: string; qty: number }[] };
+/** linked = ใบขายอื่นที่ใบนี้ผูกอยู่ (มี = เลือกได้แต่ต้องถอดของเดิมออกก่อน) · room = ยังรับใบขายได้อีกกี่ชิ้น (ผลิต − ผูกทุกใบขายแล้ว) */
+export type MoCand = { mo_no: string; qty: number; opened: string; stage: MoStage; room: number; linked?: { so_number: string; qty: number }[] };
 /** exact = ระบบจับคู่ครบ (ใบงานได้ใบขายครบจำนวน) · part = ต้องเลือก/ไม่ครบ · none = ไม่มีใบงานว่างให้ผูก (ขายจากสต๊อก / ใบปิดไปแล้ว / ผูกใบขายอื่นหมด) */
 export type UnlinkedKind = "exact" | "part" | "none";
 export type UnlinkedLine = SaleLine & {
@@ -26,10 +27,14 @@ export type UnlinkedLine = SaleLine & {
   /** เคยผูกแล้วถูกถอดออก (ผูกผิด / ขายจากสต๊อก) — หน้าต่างไม่ติ๊กให้อัตโนมัติ (API เติม) */
   unlinked?: { mo_no: string; at: string | null }[];
 };
-/** บรรทัดใบขายที่ผูกแล้ว 1 คู่ (บรรทัด ↔ ใบสั่งผลิต) · others = ใบขายอื่นที่ใบเดียวกันผูกอยู่ · cands = ใบที่ย้ายไปได้ */
+/**
+ * บรรทัดใบขายที่ผูกแล้ว 1 คู่ (บรรทัด ↔ ใบสั่งผลิต) · others = ใบขายอื่นที่ใบเดียวกันผูกอยู่ · cands = ใบที่ย้ายไปได้
+ * mo_left = ใบงานผลิตมากกว่าที่ผูกใบขายรวมกี่ชิ้น (ใบงานเหลือ) · line_short = ใบขายขายมากกว่าที่ผูกใบงานรวมกี่ชิ้น (ใบขายขาด)
+ */
 export type LinkedLine = SaleLine & {
   link_id: string; mo_no: string; mo_qty: number; link_qty: number; stage: MoStage; opened: string;
-  others: { so_number: string; qty: number }[];
+  others: { so_number: string; qty: number; date: string }[];
+  mo_left: number; line_short: number;
   cands: MoCand[];
   sku_name?: string | null;
   image_url?: string | null;
@@ -48,14 +53,16 @@ export function buildUnlinked(mos: UnlinkedMo[], lines: SaleLine[], links: Sales
   const moById = new Map(mos.map((m) => [m.id, m]));
   const moByNo = new Map(mos.map((m) => [m.mo_no, m]));
   // ใบสั่งผลิต → ใบขายที่ผูกอยู่
-  const linksOfMo = new Map<string, { line: string; so_number: string; qty: number }[]>();
+  const linksOfMo = new Map<string, { line: string; so_number: string; qty: number; date: string }[]>();
   for (const k of links) {
-    const so = k.so_number ?? lineById.get(k.sale_line_id)?.so_number ?? "—";
-    (linksOfMo.get(k.mo_id) ?? linksOfMo.set(k.mo_id, []).get(k.mo_id)!).push({ line: k.sale_line_id, so_number: so, qty: k.qty });
+    const l = lineById.get(k.sale_line_id);
+    const so = k.so_number ?? l?.so_number ?? "—";
+    (linksOfMo.get(k.mo_id) ?? linksOfMo.set(k.mo_id, []).get(k.mo_id)!).push({ line: k.sale_line_id, so_number: so, qty: k.qty, date: l?.date ?? (k.sale_date ?? "").slice(0, 10) });
   }
+  const linkedOf = (moId: string) => r2((linksOfMo.get(moId) ?? []).reduce((a, x) => a + x.qty, 0));
   const cand = (m: UnlinkedMo, skipLine?: string): MoCand => {
     const lk = (linksOfMo.get(m.id) ?? []).filter((x) => x.line !== skipLine).map(({ so_number, qty }) => ({ so_number, qty }));
-    return { mo_no: m.mo_no, qty: m.qty, opened: bkkDate(m.created_at), stage: m.stage, ...(lk.length ? { linked: lk } : {}) };
+    return { mo_no: m.mo_no, qty: m.qty, opened: bkkDate(m.created_at), stage: m.stage, room: Math.max(0, r2(m.qty - linkedOf(m.id))), ...(lk.length ? { linked: lk } : {}) };
   };
   // ระบบเสนอ (มองจากใบสั่งผลิต) → กลับด้านเป็นต่อบรรทัดใบขาย
   const res = matchSales(mos, lines, links);
@@ -78,7 +85,8 @@ export function buildUnlinked(mos: UnlinkedMo[], lines: SaleLine[], links: Sales
     const left = r2(l.qty - (used.get(l.id) ?? 0));
     if (left <= EPS) continue;
     const suggest = sugg.get(l.id) ?? [];
-    const cands = candsOf(l);
+    // ใบที่ผูกบรรทัดนี้เต็มใบแล้ว (ไม่มีใบขายอื่น · ไม่เหลือที่) ไม่ใช่ตัวเลือก — เดิมเลือกได้แล้วผูกไม่ผ่าน "ใบนี้ผูกใบขายไว้แล้ว"
+    const cands = candsOf(l).filter((c) => c.linked || c.room > EPS);
     // ใบที่ระบบเสนอแต่ปิดไปแล้ว ยังให้เห็น (ผูกเพื่อจดประวัติได้)
     for (const s of suggest) {
       if (cands.some((c) => c.mo_no === s.mo_no)) continue;
@@ -96,8 +104,10 @@ export function buildUnlinked(mos: UnlinkedMo[], lines: SaleLine[], links: Sales
   for (const k of links) {
     const l = lineById.get(k.sale_line_id), m = moById.get(k.mo_id);
     if (!l || !m) continue;
-    const others = (linksOfMo.get(m.id) ?? []).filter((x) => x.line !== l.id).map(({ so_number, qty }) => ({ so_number, qty }));
-    linked.push({ ...l, link_id: k.id ?? `${k.mo_id}:${k.sale_line_id}`, mo_no: m.mo_no, mo_qty: m.qty, link_qty: k.qty, stage: m.stage, opened: bkkDate(m.created_at), others, cands: candsOf(l, m.mo_no) });
+    const others = (linksOfMo.get(m.id) ?? []).filter((x) => x.line !== l.id).map(({ so_number, qty, date }) => ({ so_number, qty, date }))
+      .sort((a, b) => a.date.localeCompare(b.date) || a.so_number.localeCompare(b.so_number));
+    linked.push({ ...l, link_id: k.id ?? `${k.mo_id}:${k.sale_line_id}`, mo_no: m.mo_no, mo_qty: m.qty, link_qty: k.qty, stage: m.stage, opened: bkkDate(m.created_at), others,
+      mo_left: Math.max(0, r2(m.qty - linkedOf(m.id))), line_short: Math.max(0, r2(l.qty - (used.get(l.id) ?? 0))), cands: candsOf(l, m.mo_no) });
   }
   linked.sort(byDateDesc);
 
@@ -143,6 +153,18 @@ export function partnerNote(partners: Map<string, SalePartner[]>, mo: { mo_no: s
   const list = others.map((p) => `${p.so_number} (${date(p.date)} · ${fmtN(p.qty)}${untickedOf?.(p.line_id) ? " · ไม่ติ๊ก" : ""})`).join(", ");
   return { text: `รวมกับ ${list} = ${full ? `ครบ ${fmtN(mo.qty)}` : `${fmtN(total)}/${fmtN(mo.qty)}`}`, full };
 }
+
+/** แท็บผูกแล้ว: ยอดรวมทุกใบขายของใบงานนี้ — "รวมกับ ISG… (วันที่ · จำนวน) = ครบ 500" / "ใบงานได้ใบขายแค่ 140/380" (ข้อความเดียวกับแท็บยังไม่ผูก) */
+export function linkedNote(r: LinkedLine, date: (ymd: string) => string): { text: string; full: boolean } | null {
+  const ps: SalePartner[] = r.others.map((o, i) => ({ line_id: `other:${i}`, so_number: o.so_number, date: o.date, qty: o.qty }));
+  return partnerNote(new Map([[r.mo_no, ps]]), { mo_no: r.mo_no, qty: r.mo_qty }, r.id, r.link_qty, date);
+}
+/** ยอดไม่ตรงของบรรทัดที่ผูกแล้ว — ok = ครบพอดี · over = ใบงานเหลือ (ผลิตมากกว่าที่ขาย) · short = ใบขายขาด (ขายมากกว่าที่ผูกใบงาน) */
+export type LinkedQty = "ok" | "over" | "short";
+export const linkedQtyIs = (r: Pick<LinkedLine, "mo_left" | "line_short">, k: LinkedQty) =>
+  k === "over" ? r.mo_left > EPS : k === "short" ? r.line_short > EPS : r.mo_left <= EPS && r.line_short <= EPS;
+/** ใบขายขาด → ใบงานของสินค้าเดียวกันที่ยังรับเพิ่มได้ (เปิดก่อนวันที่ใบขาย · ยังไม่ปิด · ใบเก่าก่อน) */
+export const fillCandOf = (r: Pick<LinkedLine, "cands">): MoCand | null => r.cands.find((c) => c.room > EPS) ?? null;
 
 /** ใบที่ระบบเลือกให้ตั้งต้น: ที่ระบบเสนอ ไม่งั้นใบว่างใบแรก (ไม่เลือกใบที่ผูกใบขายอื่นให้เอง) */
 export const defaultPick = (r: UnlinkedLine): string | null => r.suggest[0]?.mo_no ?? r.cands.find((c) => !c.linked)?.mo_no ?? null;

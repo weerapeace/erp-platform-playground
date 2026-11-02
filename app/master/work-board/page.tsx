@@ -3529,6 +3529,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   }, [catchUp, loadCuReqs]);
   useEffect(() => { if (catchUp && cuQueueAsk) { setCuQueueOpen(true); onCuQueueSeen?.(); } }, [catchUp, cuQueueAsk, onCuQueueSeen]);
   const [cuSalesOpen, setCuSalesOpen] = useState(false);
+  const [cuSalesRefresh, setCuSalesRefresh] = useState(0);   // ป๊อปทีละใบที่เปิดจากหน้าต่างใบขายปิดแล้ว → หน้าต่างใบขายโหลดใหม่
   useEffect(() => { if (catchUp && cuSalesAsk) { setCuSalesOpen(true); onCuSalesSeen?.(); } }, [catchUp, cuSalesAsk, onCuSalesSeen]);
   // ── แท็บ "ทั้งหมด" (เฉพาะโหมดอัปเดตงาน): ทุกใบ + ตอนนี้ของอยู่ไหน — อัปเดตแล้วใบหลุดจากแท็บอื่น (โกดัง QC / รอปิดใบ) ก็ยังหาเจอ
   const [cuAll, setCuAll] = useState(false);
@@ -3538,6 +3539,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   const cuAllMap = useMemo(() => new Map((cuAllRows ?? []).map((r) => [r.mo_no, r])), [cuAllRows]);
   // 🔄 อัปเดตเป็นชุด: ใบที่ติ๊กมา (null = ปิด) · เลือกในแท็บ "ทั้งหมด" · ป๊อปทีละใบ (เปิดแบบละเอียด) ปิดแล้ว = ให้ตารางโหลดใบนั้นใหม่
   const [cuBatch, setCuBatch] = useState<string[] | null>(null);
+  const [cuBatchPick, setCuBatchPick] = useState<string | null>(null);   // มาจากหน้าต่างใบขาย: เปิด "เลือกใบขาย" ของใบนี้ให้เลย
   const [cuAllSel, setCuAllSel] = useState<Set<string>>(new Set());
   const [cuBatchRefresh, setCuBatchRefresh] = useState<{ mo: string; n: number } | null>(null);   // ใบที่เพิ่งอัปเดตรอบนี้ (ล่าสุดก่อน)
   const loadCuAll = useCallback(async () => {
@@ -5061,21 +5063,22 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
             <button type="button" onClick={onExitCatchUp} className="h-8 shrink-0 rounded-lg border border-amber-300 bg-white px-3 text-[13px] hover:bg-amber-100">ออกจากโหมด</button>
           </div>
         )}
-        <CatchUpModal moNo={cuMo} initialTarget={cuInitTarget} onClose={() => { if (cuBatch && cuMo) { const mo = cuMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } setCuMo(null); setCuInitTarget(null); }}
+        <CatchUpModal moNo={cuMo} initialTarget={cuInitTarget} onClose={() => { if (cuBatch && cuMo) { const mo = cuMo; setCuBatchRefresh((x) => ({ mo, n: (x?.n ?? 0) + 1 })); } if (cuSalesOpen) setCuSalesRefresh((n) => n + 1); setCuMo(null); setCuInitTarget(null); }}
           onDone={() => {
             // ⚠️ คิว "รอ QC รับเข้า" โหลดแยก — เดิมไม่โหลดใหม่หลังอัปเดต ใบที่ช่างเพิ่งส่งคืนเลยหายจากทุกแท็บจนกด F5
             onReload?.(); void loadQcQueue(); void loadCuAll();
             if (cuMo) setCuRecent((rs) => [cuMo, ...rs.filter((x) => x !== cuMo)].slice(0, 8));
           }}
-          onLocate={(no, sku) => { setCuMo(null); setCuAll(true); setTableSearch(sku ?? no); void loadCuAll(); }}
+          onLocate={(no, sku) => { setCuMo(null); setCuSalesOpen(false); setCuAll(true); setTableSearch(sku ?? no); void loadCuAll(); }}
           departments={departments} craftsmen={craftsmen} workOrders={workOrders}
           canMoveStaff={canMoveStaff} canAddNew={canEdit} onStaffChanged={() => onStaffChanged?.()} onDesksChanged={() => onReload?.()}
           onNext={cuNext ? () => setCuMo(cuNext) : undefined} nextLabel={cuNext ? skuOfMo(cuNext) : null}
           mode={cuMode} canApprove={cuApprove} onRequestsChanged={() => void loadCuReqs()} />
-        {/* 🧾 อัปเดตงานจากใบขาย → ผูกแล้วส่งใบเหล่านั้นเข้า "อัปเดตเป็นชุด" (ตั้งขั้นส่งออกที่นั่น) */}
+        {/* 🧾 อัปเดตงานจากใบขาย → ผูกแล้วส่งใบเหล่านั้นเข้า "อัปเดตเป็นชุด" (ตั้งขั้นส่งออกที่นั่น) · "อัปเดต" รายแถว = ป๊อปทีละใบเดิม (ซ้อนบนหน้าต่าง) */}
         <SalesUpdate open={cuSalesOpen} onClose={() => setCuSalesOpen(false)} canLink={cuMode === "direct" || cuApprove}
-          onOpenBatch={(mos) => setCuBatch(mos)} />
-        <CatchUpBatch moNos={cuBatch} onClose={() => setCuBatch(null)}
+          onOpenBatch={(mos, pick) => { setCuBatch(mos); setCuBatchPick(pick ?? null); }}
+          onOpenSingle={(mo) => { setCuList([]); setCuMo(mo); }} refresh={cuSalesRefresh} />
+        <CatchUpBatch moNos={cuBatch} openPick={cuBatchPick} onClose={() => { setCuBatch(null); setCuBatchPick(null); }}
           onDone={(saved) => {
             onReload?.(); void loadQcQueue(); void loadCuAll();
             if (saved.length) { setCuRecent((rs) => [...saved, ...rs.filter((x) => !saved.includes(x))].slice(0, 8)); setSel(new Set()); setWoSel(new Set()); setQSel(new Set()); setCuAllSel(new Set()); }

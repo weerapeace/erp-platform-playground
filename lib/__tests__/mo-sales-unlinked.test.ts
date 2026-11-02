@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { SaleLine, SalesLinkRow } from "@/lib/mo-sales-match";
-import { buildUnlinked, defaultPick, planLinks, type UnlinkedMo } from "@/lib/mo-sales-unlinked";
+import { buildUnlinked, defaultPick, fillCandOf, linkedNote, linkedQtyIs, planLinks, type UnlinkedMo } from "@/lib/mo-sales-unlinked";
 
 // ข้อมูลจริงจาก DB (2026-10-31) — ใบขายเซ็นทรัลทำ ที่ยังไม่ผูกใบงาน
 const mo = (mo_no: string, sku: string, qty: number, created: string, stage: UnlinkedMo["stage"] = "wait"): UnlinkedMo =>
@@ -79,5 +79,58 @@ describe("อัปเดตงานจากใบขาย — มองจ�
     expect(planLinks(rows, new Map([["l3", "MO-2026-00218"]]))).toEqual([
       { mo_no: "MO-2026-00218", parts: [{ sale_line_id: "l3", qty: 200 }], relink: [{ so_number: "ISG2569-08-001", qty: 200 }] },
     ]);
+  });
+});
+
+// ข้อมูลจริงจาก DB (2026-11-02) — แท็บ "ผูกแล้ว" ยอดไม่ตรง
+describe("แท็บผูกแล้ว — ยอดรวมทุกใบขาย / ใบงานเหลือ / ใบขายขาด", () => {
+  const th = (d: string) => d;
+  const mos2 = [
+    mo("MO-2026-00354", "CTL075-03", 500, "2026-09-17"),
+    mo("MO-2026-00026", "CTL008XS-01-1", 30, "2026-06-16", "recv"),
+    mo("MO-2026-00187", "CTL008XS-01-1", 380, "2026-08-15"),
+  ];
+  const lines2 = [
+    line("a", "ISG2569-10-022", "2026-10-22", "CTL075-03", 250),
+    line("b", "ISG2569-10-028", "2026-10-28", "CTL075-03", 250),
+    line("c", "ISG2569-08-009", "2026-08-19", "CTL008XS-01-1", 100),
+    line("d", "ISG2569-09-007", "2026-09-05", "CTL008XS-01-1", 80),
+    line("e", "ISG2569-09-010", "2026-09-10", "CTL008XS-01-1", 60),
+  ];
+  const links2: SalesLinkRow[] = [
+    { mo_id: "id-MO-2026-00354", sale_line_id: "a", qty: 250 }, { mo_id: "id-MO-2026-00354", sale_line_id: "b", qty: 250 },
+    { mo_id: "id-MO-2026-00026", sale_line_id: "c", qty: 30 },
+    { mo_id: "id-MO-2026-00187", sale_line_id: "d", qty: 80 }, { mo_id: "id-MO-2026-00187", sale_line_id: "e", qty: 60 },
+  ];
+  const b = buildUnlinked(mos2, lines2, links2);
+  const lk = (id: string, mo_no: string) => b.linked.find((r) => r.id === id && r.mo_no === mo_no)!;
+
+  it("CTL075-03 ขาย 250 แต่ใบงาน 500 = ไม่ขาด — รวมกับอีกใบขายครบ 500", () => {
+    const r = lk("b", "MO-2026-00354");
+    expect(r).toMatchObject({ mo_left: 0, line_short: 0, others: [{ so_number: "ISG2569-10-022", qty: 250, date: "2026-10-22" }] });
+    expect(linkedQtyIs(r, "ok")).toBe(true);
+    expect(linkedNote(r, th)).toEqual({ text: "รวมกับ ISG2569-10-022 (2026-10-22 · 250) = ครบ 500", full: true });
+  });
+
+  it("ใบงานเหลือ: MO-00187 ผลิต 380 ผูกใบขาย 140 → เหลือ 240", () => {
+    const r = lk("d", "MO-2026-00187");
+    expect(r).toMatchObject({ mo_left: 240, line_short: 0 });
+    expect(linkedQtyIs(r, "over")).toBe(true);
+    expect(linkedQtyIs(r, "ok")).toBe(false);
+    expect(linkedNote(r, th)?.text).toBe("รวมกับ ISG2569-09-010 (2026-09-10 · 60) = 140/380");
+  });
+
+  it("ใบขายขาด: ISG2569-08-009 ขาย 100 ผูก MO-00026 แค่ 30 → ขาด 70 · เสนอ MO-00187 ที่ยังว่าง 240", () => {
+    const r = lk("c", "MO-2026-00026");
+    expect(r).toMatchObject({ mo_left: 0, line_short: 70 });
+    expect(linkedQtyIs(r, "short")).toBe(true);
+    expect(fillCandOf(r)).toMatchObject({ mo_no: "MO-2026-00187", room: 240 });
+  });
+
+  it("แท็บยังไม่ผูก: ใบที่ผูกบรรทัดนี้เต็มใบแล้ว ไม่ขึ้นเป็นตัวเลือก (เดิมเลือกได้แล้วผูกไม่ผ่าน)", () => {
+    const r = b.rows.find((x) => x.id === "c")!;
+    expect(r.left).toBe(70);
+    expect(r.cands.map((c) => c.mo_no)).toEqual(["MO-2026-00187"]);
+    expect(r.cands[0]).toMatchObject({ room: 240, linked: [{ so_number: "ISG2569-09-007", qty: 80 }, { so_number: "ISG2569-09-010", qty: 60 }] });
   });
 });
