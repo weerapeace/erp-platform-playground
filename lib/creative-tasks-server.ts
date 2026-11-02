@@ -75,7 +75,7 @@ export async function syncTaskFilesToDrive(admin: Admin, taskId: string, opts?: 
 async function getBrandParentFolderId(admin: Admin, brandId: string | null | undefined): Promise<string | null> {
   return (await getBrandParentFolder(admin, brandId))?.folder_id || null;
 }
-async function getBrandParentFolder(admin: Admin, brandId: string | null | undefined): Promise<{ folder_id: string; name: string } | null> {
+export async function getBrandParentFolder(admin: Admin, brandId: string | null | undefined): Promise<{ folder_id: string; name: string } | null> {
   if (!brandId) return null;
   const { data } = await admin.from("china_app_settings").select("sval").eq("skey", "brand_drive_folders").maybeSingle();
   const map = ((data as { sval?: Record<string, { folder_id?: string; name?: string }> } | null)?.sval ?? {}) as Record<string, { folder_id?: string; name?: string }>;

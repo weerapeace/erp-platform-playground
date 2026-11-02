@@ -583,6 +583,7 @@ export async function deleteHashtag(id: string): Promise<void> {
 export type ContentAttachment = {
   id: string; kind: string; label: string | null; url: string | null; r2_key: string | null;
   file_name: string | null; content_type: string | null; size_bytes: number | null; created_at?: string;
+  drive_file_id?: string | null;   // ต้นฉบับใน Google Drive ที่ระบบอัปให้ (รูป: r2_key = รูปย่อ · วิดีโอ: url = drive:<id>)
 };
 export async function listContentAttachments(contentId: string): Promise<ContentAttachment[]> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/attachments`));
@@ -599,9 +600,26 @@ export async function resolveDriveLink(link: string, accept: "image" | "video"):
   if (j.folder) return { folder: j.folder as { id: string; name: string }, files: (j.files ?? []) as DriveFileRef[] };
   return { file: { file_id: String(j.file_id), name: String(j.name ?? ""), mime_type: (j.mime_type as string | null) ?? null, size: (j.size as number | null) ?? null } };
 }
-export async function deleteContentAttachment(contentId: string, attId: string): Promise<void> {
-  await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/attachments?attachment_id=${attId}`, { method: "DELETE" }));
+export async function deleteContentAttachment(contentId: string, attId: string, opts: { trashDrive?: boolean } = {}): Promise<void> {
+  await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/attachments?attachment_id=${attId}${opts.trashDrive ? "&drive=1" : ""}`, { method: "DELETE" }));
 }
+// ต้นฉบับใน Google Drive ของงานจริงที่ใช้ลง — โฟลเดอร์ปลายทาง (ดูอย่างเดียว) / เริ่มอัป / อัปเสร็จ (กติกาโฟลเดอร์ lib/content-drive)
+export type ContentDriveInfo = { ok: boolean; reason?: string; folder_url?: string | null; label?: string; pending?: boolean };
+export async function getContentDriveInfo(contentId: string): Promise<ContentDriveInfo> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/drive`));
+  return j.data as ContentDriveInfo;
+}
+export async function startContentDriveUpload(contentId: string, f: { name: string; mime: string; size: number }): Promise<{ upload_url: string; folder_url: string | null }> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/drive`, { method: "POST", body: JSON.stringify(f) }));
+  return j.data as { upload_url: string; folder_url: string | null };
+}
+export async function finishContentDriveUpload(contentId: string, body: { file_id: string; attachment_id?: string | null; kind?: "video"; name?: string; mime?: string; size?: number }): Promise<ContentAttachment> {
+  const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${contentId}/drive/finish`, { method: "POST", body: JSON.stringify(body) }));
+  return j.data as ContentAttachment;
+}
+/** ลิงก์เปิดไฟล์ต้นฉบับใน Drive / ดาวน์โหลดต้นฉบับผ่านแอป */
+export const driveFileViewUrl = (fileId: string) => `https://drive.google.com/file/d/${fileId}/view`;
+export const driveFileDownloadUrl = (fileId: string, name?: string | null) => `/api/drive-video/${fileId}?dl=${encodeURIComponent(name ?? "")}`;
 
 // ---- ตั้งค่าต่อแพลตฟอร์ม (แม่แบบเริ่มต้น/ปิดแคปชั่น-แฮชแท็ก/ลิงก์โพสต์/โน้ต) ----
 export type PlatformSetting = { template_key?: string | null; use_caption?: boolean; use_hashtags?: boolean; post_url?: string | null; note?: string | null };

@@ -9,6 +9,10 @@ import { SkuPicker, ParentSkuPicker } from "@/components/pickers";
 import type { SkuPickerValue, ParentSkuPickerValue, UserPickerValue } from "@/components/pickers";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { runBackgroundTask } from "@/lib/background-tasks";
+import { Icon } from "@/components/icon";
+import { uploadFileToDrive } from "@/lib/drive-chunk-upload";
+import { getContentDriveInfo, startContentDriveUpload, finishContentDriveUpload, driveFileViewUrl, driveFileDownloadUrl, type ContentDriveInfo } from "../data";
 import { getContent, createContent, updateContent, deleteContent, getTask, listSubtasks, getCaptionTemplates, getParentSkuChildren, type ParentSkuChild, getRecommendedTimes, type RecommendedTimes, listContentAttachments, addContentAttachment, deleteContentAttachment, getPlatformSettings, savePlatformSettings, getLinkPreview, PLATFORM_SETTINGS_SWR_KEY, getMetaStatus, publishToPlatform, igFinalize, type MetaConnStatus, type PostMediaRef, getCaptionConfig, defaultHashtags, resolvePrompt, resolveBrandFromProduct, type ContentItem, type ContentDetail, type ContentCaption, type ContentStatus, type BrandOption, type CaptionTemplate, type CaptionConfig, type ContentAttachment, type PlatformSettings, type DriveFileRef, listPublishJobs, queuePublishJobs, PUBLISH_JOBS_SWR_KEY, type PublishJob, type PublishJobInput } from "../data";
 import { useCreativeOptions, platformLabel, platformMeta } from "../use-options";
 import { PlatformChip } from "../platform-chip";
@@ -90,7 +94,8 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   const [platRemoveAsk, setPlatRemoveAsk] = useState<string | null>(null);   // ถามก่อนเอาแพลตฟอร์มที่มีแคปชั่นแล้วออก
   const [platBusy, setPlatBusy] = useState(false);
   // ลบไฟล์ที่อัปเองจากคลังรูป (ยืนยันก่อน)
-  const [delAtt, setDelAtt] = useState<{ id: string; label: string } | null>(null);
+  const [delAtt, setDelAtt] = useState<{ id: string; label: string; drive?: boolean } | null>(null);
+  const [delDrive, setDelDrive] = useState(false);   // ลบแล้วย้ายต้นฉบับใน Drive ไปถังขยะด้วย (ค่าเริ่ม = เก็บไว้ — เจ้าของเลือก)
   // แม่แบบ + ส่วนลด
   const [templates, setTemplates] = useState<CaptionTemplate[]>([]);
   const [shopChannels, setShopChannels] = useState<ShopChannel[]>([]);
@@ -460,9 +465,39 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
   };
 
   // ไฟล์แนบ: รูป (ย่อก่อนอัป) / วิดีโอสั้น (อัปตรง) / ลิงก์ (พรีวิว OG)
-  const onAttachImage = async (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => { await addContentAttachment(contentId, { kind: "image", r2_key: r.r2_key, file_name: r.file_name, content_type: r.content_type, size_bytes: r.size_bytes }); await loadAttachments(); };
-  const onDelAttachment = async (id: string) => { await deleteContentAttachment(contentId, id); await loadAttachments(); };
+  // ── ต้นฉบับขึ้น Google Drive (เจ้าของเลือก 2026-11-02): รูป = รูปย่ออยู่ R2 + ต้นฉบับเต็มไป Drive · วิดีโอ = ไป Drive ที่เดียว (url drive:<id>)
+  //    อัปทีละชิ้นเป็นงานเบื้องหลัง (กล่องมุมขวาล่าง) — ปิดป๊อปได้ระหว่างรอ · โฟลเดอร์: งานที่ผูก → ไม่งั้น แบรนด์ › Content › เลขโพสต์ (lib/content-drive)
+  const [driveInfo, setDriveInfo] = useState<ContentDriveInfo | null>(null);
+  const loadDriveInfo = useCallback(async () => { try { setDriveInfo(await getContentDriveInfo(contentId)); } catch { setDriveInfo(null); } }, [contentId]);
+  useEffect(() => { void loadDriveInfo(); }, [loadDriveInfo, d?.task_id, d?.brand_id]);
+  const sendOriginalToDrive = (file: File, opts: { attachmentId?: string; kind: "image" | "video" }) => {
+    const mb = (n: number) => Math.round((n / 1048576) * 10) / 10;
+    runBackgroundTask({
+      label: t(`ต้นฉบับ → Drive: ${file.name}`, `Original → Drive: ${file.name}`), total: mb(file.size), unit: "MB",
+      run: async (report) => {
+        const { upload_url } = await startContentDriveUpload(contentId, { name: file.name, mime: file.type || "application/octet-stream", size: file.size });
+        const fileId = await uploadFileToDrive(file, upload_url, (sent, total) => report(mb(sent), mb(total)));
+        await finishContentDriveUpload(contentId, opts.kind === "video"
+          ? { file_id: fileId, kind: "video", name: file.name, mime: file.type || "video/mp4", size: file.size }
+          : { file_id: fileId, attachment_id: opts.attachmentId ?? null });
+        void loadAttachments(); void loadDriveInfo();
+        return { ok: 1, message: opts.kind === "video" ? t("อัปวิดีโอขึ้น Drive แล้ว", "Video uploaded to Drive") : t("เก็บต้นฉบับใน Drive แล้ว", "Original saved to Drive") };
+      },
+    });
+  };
+  const onAttachImage = async (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }, original?: File) => {
+    const att = await addContentAttachment(contentId, { kind: "image", r2_key: r.r2_key, file_name: r.file_name, content_type: r.content_type, size_bytes: r.size_bytes });
+    await loadAttachments();
+    if (original && driveInfo?.ok) sendOriginalToDrive(original, { attachmentId: att.id, kind: "image" });
+  };
+  const onDelAttachment = async (id: string, trashDrive = false) => { await deleteContentAttachment(contentId, id, { trashDrive }); await loadAttachments(); };
   const onUploadVideo = async (file: File) => {
+    if (driveInfo?.ok) {   // ไป Drive ทั้งไฟล์ (ไม่จำกัด 25MB) — ไฟล์แนบสร้างให้ตอนอัปเสร็จ
+      sendOriginalToDrive(file, { kind: "video" });
+      pushToast("info", t("กำลังอัปวิดีโอขึ้น Drive — ดูความคืบหน้ามุมขวาล่าง ปิดป๊อปได้", "Uploading the video to Drive — see progress bottom-right"));
+      return;
+    }
+    if (file.size > 25 * 1024 * 1024) { pushToast("error", t("วิดีโอเกิน 25MB — ตั้งโฟลเดอร์ Drive ของแบรนด์ก่อน หรือวางลิงก์ Google Drive แทน", "Video over 25MB — set the brand's Drive folder or paste a Drive link")); return; }
     const fd = new FormData(); fd.append("file", file); fd.append("folder", "creative-content");
     const res = await apiFetch("/api/admin/upload", { method: "POST", body: fd });
     const j = await res.json().catch(() => ({ error: "อัปโหลดไม่สำเร็จ" }));
@@ -894,6 +929,20 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
               </div>
               {!coll("media") && (
                 <>
+                  {/* ต้นฉบับเก็บที่ Drive (โฟลเดอร์ของงานที่ผูก หรือ แบรนด์ › Content › เลขโพสต์) */}
+                  {driveInfo && (driveInfo.ok ? (
+                    <div className="mb-2 flex items-center gap-1.5 rounded-lg bg-emerald-50 border border-emerald-100 px-2 py-1 text-[11px] text-emerald-800">
+                      <Icon name="folder" /><span className="shrink-0">{t("ต้นฉบับเก็บที่ Drive:", "Originals in Drive:")}</span>
+                      <span className="min-w-0 truncate font-medium" title={driveInfo.label}>{driveInfo.label}</span>
+                      {driveInfo.folder_url
+                        ? <a href={driveInfo.folder_url} target="_blank" rel="noreferrer" className="ml-auto shrink-0 inline-flex items-center gap-0.5 text-emerald-700 hover:underline"><Icon name="open" /> {t("เปิดโฟลเดอร์", "Open folder")}</a>
+                        : <span className="ml-auto shrink-0 text-emerald-600/70">{t("สร้างให้ตอนอัปไฟล์แรก", "Created on first upload")}</span>}
+                    </div>
+                  ) : (
+                    <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-amber-50 border border-amber-100 px-2 py-1 text-[11px] text-amber-800">
+                      <Icon name="warning" /><span>{t("ยังเก็บต้นฉบับใน Drive ไม่ได้ — อัปได้ แต่จะเก็บแค่รูปย่อ:", "Originals can't go to Drive yet — only previews are kept:")} {driveInfo.reason}</span>
+                    </div>
+                  ))}
                   {postImages.length === 0 && !mediaAdd ? (
                     Object.values(platformFormats).includes("story") && attachments.length === 0 ? (
                       // Story ที่ลงแผนไว้ก่อน (สร้างจากแถบ 📖 ในปฏิทินโดยยังไม่ใส่ไฟล์)
@@ -910,6 +959,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                         const usedBy = platformImageEntries.filter(([, arr]) => arr.includes(im.key)).length;
                         const lbIdx = lbImages.findIndex((x) => x.key === im.key);
                         const ownAtt = attachments.find((a) => a.r2_key === im.key || a.url === im.key);   // ไฟล์ที่อัปเอง = ลบได้
+                        const driveId = ownAtt?.drive_file_id || ((ownAtt?.url ?? "").startsWith("drive:") ? (ownAtt?.url as string).slice(6) : null);   // มีต้นฉบับใน Drive
                         const gi = postImages.indexOf(im);
                         return (
                           <div key={im.key} {...mediaDrag.rowProps(gi)} {...mediaDrag.handleProps(gi)} title={t("ลากเพื่อสลับตำแหน่ง", "Drag to reorder")}
@@ -920,10 +970,16 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                               : <img src={r2ImageUrl(im.key, 240) ?? ""} alt={im.label ?? ""} onClick={() => setTmLb(lbIdx)} title={`${im.label ?? ""}${bd ? ` · ${bd.label}` : ""}`} className="w-full h-full object-cover rounded-lg border border-slate-200 cursor-zoom-in" />}
                             <span className={`absolute top-0.5 left-0.5 text-[8px] text-white px-1 py-px rounded ${isTask ? (bd?.cls ?? "bg-slate-400") : "bg-violet-500"}`}>{isTask ? t("งาน", "task") : t("อัปเอง", "own")}</span>
                             {usedBy > 0 && <span className="absolute bottom-0.5 right-0.5 text-[8px] bg-emerald-600 text-white px-1 py-px rounded" title={t(`เลือกใช้ใน ${usedBy} แพลตฟอร์ม`, `Used by ${usedBy} platform(s)`)}>✓{usedBy}</span>}
+                            {ownAtt?.drive_file_id && <span className="absolute bottom-0.5 left-0.5 text-[8px] bg-white/95 text-emerald-700 px-1 py-px rounded inline-flex items-center gap-0.5" title={t("มีต้นฉบับเต็มใน Google Drive", "Full original in Google Drive")}><Icon name="folder" size={8} />{t("ต้นฉบับ", "orig")}</span>}
                             <div className="absolute top-0.5 right-0.5 flex gap-0.5 opacity-0 group-hover:opacity-100">
                               {im.type !== "video" && <button onClick={() => copyImageUrl(im.key)} title={t("ก๊อปลิงก์รูป", "Copy image link")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">🔗</button>}
-                              {im.type !== "video" && <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>}
-                              {ownAtt && <button onClick={(e) => { e.stopPropagation(); setDelAtt({ id: ownAtt.id, label: ownAtt.file_name ?? ownAtt.label ?? im.key }); }} title={t("ลบไฟล์นี้ (เฉพาะที่อัปเอง)", "Delete this file (own uploads only)")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-rose-600 text-[10px] shadow hover:bg-rose-50">✕</button>}
+                              {driveId
+                                ? <>
+                                    <a href={driveFileViewUrl(driveId)} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} title={t("เปิดต้นฉบับใน Google Drive", "Open the original in Google Drive")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-emerald-700 text-[10px] shadow hover:text-emerald-900"><Icon name="open" size={11} /></a>
+                                    <a href={driveFileDownloadUrl(driveId, ownAtt?.file_name)} onClick={(e) => e.stopPropagation()} title={t("ดาวน์โหลดต้นฉบับ (ไฟล์เต็ม)", "Download the original (full file)")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700"><Icon name="download" size={11} /></a>
+                                  </>
+                                : im.type !== "video" && <a href={r2ImageUrl(im.key) ?? "#"} download target="_blank" rel="noreferrer" title={t("ดาวน์โหลด", "Download")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-slate-600 text-[10px] shadow hover:text-violet-700">⬇</a>}
+                              {ownAtt && <button onClick={(e) => { e.stopPropagation(); setDelAtt({ id: ownAtt.id, label: ownAtt.file_name ?? ownAtt.label ?? im.key, drive: !!driveId }); }} title={t("ลบไฟล์นี้ (เฉพาะที่อัปเอง)", "Delete this file (own uploads only)")} className="h-5 w-5 flex items-center justify-center bg-white/90 rounded-full text-rose-600 text-[10px] shadow hover:bg-rose-50">✕</button>}
                             </div>
                           </div>
                         ); })}
@@ -957,7 +1013,7 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                   </div>
                   {mediaAdd && (
                     <div className="mt-3 pt-3 border-t border-slate-100">
-                      <ContentAttachments attachments={attachments} hideImageList onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onAddDriveVideo={onAddDriveVideo} onAddDriveImages={onAddDriveImages} onDelete={onDelAttachment} pushToast={pushToast} />
+                      <ContentAttachments attachments={attachments} hideImageList onAttachImage={onAttachImage} onUploadVideo={onUploadVideo} onAddLink={onAddLink} onAddDriveVideo={onAddDriveVideo} onAddDriveImages={onAddDriveImages} onDelete={(id) => onDelAttachment(id)} pushToast={pushToast} driveReady={!!driveInfo?.ok} />
                     </div>
                   )}
                 </>
@@ -1081,8 +1137,17 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
         title={t(`เอา ${platRemoveAsk ? platformLabel(platRemoveAsk) : ""} ออกจากคอนเทนต์นี้`, `Remove ${platRemoveAsk ? platformLabel(platRemoveAsk) : ""}`)}
         message={<span>{t("แพลตฟอร์มนี้มีแคปชั่น/สถานะโพสต์อยู่แล้ว — ถ้าเอาออก แคปชั่นที่เขียนไว้จะถูกลบด้วย (เพิ่มกลับได้ แต่ต้องเขียนใหม่)", "This platform already has a caption or post status — removing it deletes the caption (you can re-add, but will need to rewrite)")}</span>}
         confirmText={t("เอาออก", "Remove")} />
-      <ConfirmDialog open={!!delAtt} onClose={() => setDelAtt(null)} onConfirm={async () => { if (!delAtt) return; const id = delAtt.id; setDelAtt(null); try { await onDelAttachment(id); pushToast("success", t("ลบไฟล์แล้ว", "File deleted")); } catch (e) { pushToast("error", (e as Error).message); } }}
-        title={t("ลบไฟล์ออกจากคอนเทนต์", "Remove file")} message={<span>{t("ลบ", "Delete")} <span className="font-medium">{delAtt?.label}</span> {t("ออกจากคอนเทนต์นี้? (รูปจากงานไม่ได้รับผลกระทบ)", "from this content? (task images are unaffected)")}</span>} confirmText={t("ลบ", "Delete")} variant="danger" />
+      <ConfirmDialog open={!!delAtt} onClose={() => { setDelAtt(null); setDelDrive(false); }} onConfirm={async () => { if (!delAtt) return; const id = delAtt.id; const trash = !!delAtt.drive && delDrive; setDelAtt(null); setDelDrive(false); try { await onDelAttachment(id, trash); pushToast("success", trash ? t("ลบไฟล์แล้ว · ต้นฉบับใน Drive ไปอยู่ถังขยะ", "Deleted · Drive original moved to trash") : t("ลบไฟล์แล้ว", "File deleted")); } catch (e) { pushToast("error", (e as Error).message); } }}
+        title={t("ลบไฟล์ออกจากคอนเทนต์", "Remove file")} confirmText={t("ลบ", "Delete")} variant="danger"
+        message={<span className="block space-y-2">
+          <span className="block">{t("ลบ", "Delete")} <span className="font-medium">{delAtt?.label}</span> {t("ออกจากคอนเทนต์นี้? (รูปจากงานไม่ได้รับผลกระทบ)", "from this content? (task images are unaffected)")}</span>
+          {delAtt?.drive && (
+            <label className="flex items-start gap-2 text-sm text-slate-600">
+              <input type="checkbox" checked={delDrive} onChange={(e) => setDelDrive(e.target.checked)} className="mt-0.5" />
+              <span>{t("ย้ายต้นฉบับใน Google Drive ไปถังขยะด้วย (กู้คืนได้ใน Drive) — ไม่ติ๊ก = เก็บต้นฉบับไว้", "Also move the Drive original to trash (recoverable in Drive) — unticked = keep it")}</span>
+            </label>
+          )}
+        </span>} />
       {planOpen && <AddToPlanModal open defaultTitle={`โพสต์: ${d.title}`} source={{ label: d.title || "โพสต์", href: `/tasks/content-calendar?content=${encodeURIComponent(contentId)}` }} onClose={() => setPlanOpen(false)} />}
       {cfgOpen && <CaptionConfigModal cfg={capCfg} brandId={brandId} brandLabel={brandLabel} platforms={platforms} onClose={() => setCfgOpen(false)} onSaved={(v) => { setCapCfg(v); setCfgOpen(false); }} pushToast={pushToast} />}
       {tplSettingsOpen && <CaptionTemplateSettings brandId={brandId} brandLabel={brandLabel} onClose={() => setTplSettingsOpen(false)} onSaved={() => { setTplSettingsOpen(false); loadTemplates(); }} pushToast={pushToast} />}

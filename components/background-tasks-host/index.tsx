@@ -34,7 +34,7 @@ function BgCard({ t }: { t: BgTask }) {
           <p className="text-[12px] font-medium text-slate-700 truncate">{t.label}</p>
           <p className={`text-[11px] ${textTone} truncate`}>
             {t.status === "running"
-              ? (t.total > 0 ? `กำลังทำ ${t.done}/${t.total}…` : "กำลังทำ…")
+              ? (t.total > 0 ? `กำลังทำ ${t.done}/${t.total}${t.unit ? ` ${t.unit}` : ""}…` : "กำลังทำ…")
               : (t.message ?? (t.status === "success" ? "เสร็จแล้ว" : "ผิดพลาด"))}
           </p>
         </div>

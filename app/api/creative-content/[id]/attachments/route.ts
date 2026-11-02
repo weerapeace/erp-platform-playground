@@ -2,7 +2,7 @@
  * Creative Content — ไฟล์/วิดีโอ/ลิงก์แนบ (ของคอนเทนต์)
  * GET    /api/creative-content/[id]/attachments
  * POST   /api/creative-content/[id]/attachments  body = { kind?: 'image'|'video'|'link', label?, url?, r2_key?, file_name?, content_type?, size_bytes? }
- * DELETE /api/creative-content/[id]/attachments?attachment_id=...
+ * DELETE /api/creative-content/[id]/attachments?attachment_id=...[&drive=1 = ต้นฉบับใน Drive ไปถังขยะด้วย]
  *
  * ใช้ตารางกลาง erp_creative_attachments (คอลัมน์ content_id) — อัปไฟล์จริงผ่าน /api/admin/upload แล้วส่ง r2_key มาเก็บ
  */
@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
+import { driveTrashFile } from "@/lib/google-drive";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -55,8 +56,14 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (!attId) return NextResponse.json({ error: "attachment_id required" }, { status: 400 });
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const admin = supabaseAdmin();
+  // ?drive=1 = ย้ายต้นฉบับใน Google Drive ไปถังขยะด้วย (กู้คืนได้ใน Drive) · ไม่ส่ง = เก็บต้นฉบับไว้ (ค่าเริ่มที่เจ้าของเลือก)
+  const trashDrive = new URL(request.url).searchParams.get("drive") === "1";
+  const { data: cur } = await admin.from("erp_creative_attachments").select("drive_file_id, url").eq("id", attId).eq("content_id", id).maybeSingle();
   const { error } = await admin.from("erp_creative_attachments").delete().eq("id", attId).eq("content_id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
-  await writeAudit(admin, { action: "attachment:remove", entityType: "creative_content", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { attachment_id: attId } });
-  return NextResponse.json({ success: true, error: null });
+  const c = cur as { drive_file_id?: string | null; url?: string | null } | null;
+  const driveId = c?.drive_file_id || ((c?.url ?? "").startsWith("drive:") ? (c?.url as string).slice(6) : "");
+  const driveTrashed = trashDrive && driveId ? await driveTrashFile(driveId).catch(() => false) : false;
+  await writeAudit(admin, { action: "attachment:remove", entityType: "creative_content", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { attachment_id: attId, ...(driveId ? { drive_file_id: driveId, drive_trashed: driveTrashed } : {}) } });
+  return NextResponse.json({ success: true, drive_trashed: driveTrashed, error: null });
 }

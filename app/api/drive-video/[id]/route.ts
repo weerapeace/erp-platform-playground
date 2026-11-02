@@ -42,5 +42,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
   if (!h.has("accept-ranges")) h.set("accept-ranges", "bytes");
   h.set("cache-control", "public, max-age=3600");
+  // ?dl=<ชื่อไฟล์> = ให้เบราว์เซอร์ดาวน์โหลดเป็นไฟล์ (ปุ่ม "ดาวน์โหลดต้นฉบับ" ในป๊อปโพสต์)
+  const dl = request.nextUrl.searchParams.get("dl");
+  if (dl != null) {
+    const name = (dl || id).replace(/[\r\n"]+/g, " ").slice(0, 150);
+    h.set("content-disposition", `attachment; filename="${name.replace(/[^\x20-\x7e]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name)}`);
+  }
   return new Response(upstream.body, { status: upstream.status, headers: h });
 }

@@ -5,7 +5,7 @@
  *   store แบบ module-level (ไม่ผูก React) → โค้ดที่ไหนก็ import ไปเรียกได้
  */
 export type BgTaskStatus = "running" | "success" | "error";
-export type BgTask = { id: string; label: string; done: number; total: number; status: BgTaskStatus; message?: string };
+export type BgTask = { id: string; label: string; done: number; total: number; status: BgTaskStatus; message?: string; unit?: string };
 
 let _tasks: BgTask[] = [];
 const _listeners = new Set<() => void>();
@@ -24,10 +24,12 @@ export function dismissBgTask(id: string): void { _tasks = _tasks.filter((t) => 
 export function runBackgroundTask(opts: {
   label: string;
   total?: number;
+  /** หน่วยต่อท้ายตัวเลขความคืบหน้า เช่น "MB" (ไม่ใส่ = นับเป็นรายการ) */
+  unit?: string;
   run: (report: (done: number, total?: number) => void) => Promise<{ ok?: number; fail?: number; message?: string } | void>;
 }): void {
   const id = `bg-${++_seq}-${Date.now()}`;
-  _tasks = [..._tasks, { id, label: opts.label, done: 0, total: opts.total ?? 0, status: "running" }];
+  _tasks = [..._tasks, { id, label: opts.label, done: 0, total: opts.total ?? 0, status: "running", unit: opts.unit }];
   emit();
 
   const patch = (p: Partial<BgTask>) => { _tasks = _tasks.map((t) => (t.id === id ? { ...t, ...p } : t)); emit(); };

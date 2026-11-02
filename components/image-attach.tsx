@@ -65,7 +65,8 @@ export async function uploadResizedImage(file: File, opts?: { folder?: string; m
 
 export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1600, hideList = false }: {
   images: Img[];
-  onAttach: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => Promise<void>;
+  /** original = ไฟล์ต้นฉบับก่อนย่อ (เช่น ป๊อปโพสต์ส่งต้นฉบับต่อขึ้น Google Drive) — ไม่ใช้ก็ไม่ต้องรับ */
+  onAttach: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }, original?: File) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   pushToast: ToastFn;
   maxSize?: number;   // ด้านยาวสุดที่ย่อก่อนอัป (ดีฟอลต์ 1600)
@@ -97,7 +98,7 @@ export function ImageAttach({ images, onAttach, onDelete, pushToast, maxSize = 1
           if (!reuse) setUp(imageStepProgress("upload", item.original, ++sent, toSend));
           await onAttach(reuse
             ? { r2_key: reuse.r2_key, file_name: item.original.name, content_type: item.file.type, size_bytes: reuse.size_bytes ?? item.file.size }
-            : await uploadPreparedImage(item.file, { folder: "creative-tasks", fileName: item.original.name }));
+            : await uploadPreparedImage(item.file, { folder: "creative-tasks", fileName: item.original.name }), item.original);
         } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }
       }
     } catch (e) { pushToast("error", "อัปโหลดรูปไม่สำเร็จ: " + (e as Error).message); }

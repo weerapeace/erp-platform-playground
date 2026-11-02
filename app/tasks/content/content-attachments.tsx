@@ -13,10 +13,13 @@ import { type ToastVariant } from "@/components/toast";
 // ============================================================
 // ไฟล์แนบของคอนเทนต์: รูป (ย่อก่อนอัป) / วิดีโอสั้น / ลิงก์ (พรีวิว OG เต็ม)
 // ============================================================
-export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLink, onAddDriveVideo, onAddDriveImages, onDelete, pushToast, hideImageList = false }: {
+export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, onAddLink, onAddDriveVideo, onAddDriveImages, onDelete, pushToast, hideImageList = false, driveReady = false }: {
   attachments: ContentAttachment[];
   hideImageList?: boolean;   // คลังรูปด้านบนโชว์รูปอยู่แล้ว → ตรงนี้เหลือแค่ช่องอัปโหลด
-  onAttachImage: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }) => Promise<void>;
+  /** โพสต์นี้มีโฟลเดอร์ Drive รับต้นฉบับแล้ว — รูป: ต้นฉบับขึ้น Drive ให้ · วิดีโอ: อัปขึ้น Drive ไม่จำกัดขนาด */
+  driveReady?: boolean;
+  /** original = ไฟล์ก่อนย่อ (ส่งต่อขึ้น Drive) */
+  onAttachImage: (r: { r2_key: string; file_name: string; content_type: string; size_bytes: number }, original?: File) => Promise<void>;
   onUploadVideo: (f: File) => Promise<void>;
   onAddLink: (url: string) => Promise<void>;
   onAddDriveVideo: (link: string) => Promise<void>;
@@ -50,14 +53,15 @@ export function ContentAttachments({ attachments, onAttachImage, onUploadVideo, 
       <div>
         <p className="text-xs text-slate-500 mb-1">🖼 {t("รูปภาพ", "Images")}</p>
         <ImageAttach images={images.filter((a) => a.r2_key).map((a) => ({ id: a.id, r2_key: a.r2_key, file_name: a.file_name }))} onAttach={onAttachImage} onDelete={onDelete} pushToast={pushToast} hideList={hideImageList} />
+        {driveReady && <p className="text-[10px] text-emerald-700 mt-0.5">{t("รูปย่อไว้โชว์และใช้โพสต์ · ต้นฉบับเต็มขึ้น Google Drive ให้อัตโนมัติ", "Previews for display/posting · full originals go to Google Drive automatically")}</p>}
         {onAddDriveImages && <DriveImageAdd existingKeys={images.map((a) => a.url ?? "").filter((u) => u.startsWith("drive:"))} onAdd={onAddDriveImages} pushToast={pushToast} />}
       </div>
       {/* วิดีโอ */}
       <div>
         <p className="text-xs text-slate-500 mb-1">🎬 {t("วิดีโอ", "Video")}</p>
         <input ref={vidRef} type="file" accept="video/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void pickVideo(f); e.target.value = ""; }} />
-        <button onClick={() => vidRef.current?.click()} disabled={vidBusy} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">{vidBusy ? t("⏳ กำลังอัป…", "⏳ Uploading…") : t("⬆ อัปวิดีโอสั้น (≤25MB)", "⬆ Upload short video (≤25MB)")}</button>
-        <span className="text-[11px] text-slate-400 ml-2">{t("คลิปใหญ่ → ใช้ Google Drive ด้านล่าง", "Big clips → use Google Drive below")}</span>
+        <button onClick={() => vidRef.current?.click()} disabled={vidBusy} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50">{vidBusy ? t("⏳ กำลังอัป…", "⏳ Uploading…") : driveReady ? t("⬆ อัปวิดีโอ (ขึ้น Google Drive)", "⬆ Upload video (to Google Drive)") : t("⬆ อัปวิดีโอสั้น (≤25MB)", "⬆ Upload short video (≤25MB)")}</button>
+        <span className="text-[11px] text-slate-400 ml-2">{driveReady ? t("ไม่จำกัดขนาด · ปิดป๊อปได้ระหว่างอัป", "No size limit · you can close the popup") : t("คลิปใหญ่ → ใช้ Google Drive ด้านล่าง", "Big clips → use Google Drive below")}</span>
         {/* คลิปใหญ่: วางลิงก์ Google Drive — ระบบไม่ก็อปไฟล์ลงระบบ ดึงจาก Drive ตอนใช้งาน */}
         <div className="flex gap-1.5 mt-2">
           <input value={driveLink} onChange={(e) => setDriveLink(e.target.value)} placeholder={t("วางลิงก์วิดีโอจาก Google Drive...", "Paste a Google Drive video link...")}
