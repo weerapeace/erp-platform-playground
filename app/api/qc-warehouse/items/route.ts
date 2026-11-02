@@ -14,14 +14,19 @@
  *   return_queue  { item_id }                                     → ย้ายกลับงานรอ QC (คืน qc_pulled_qty)
  *   update_item   { item_id, qty?, sku?, source? }                → แก้ของที่ "ใส่เข้าชั้นเอง" (ลงจำนวน/รหัสผิด)
  *                                                                    ของที่มาจากใบจ่ายงานแก้ตรงนี้ไม่ได้ (ยอดผูกกับใบจ่ายงาน → ใช้ return_queue แล้วรับเข้าใหม่)
+ *   return_worker { wo_id }                                       → คืนงานรอ QC กลับให้ช่าง (ลดยอดรับคืนส่วนที่ยังไม่ดึงเข้า QC + เปิดใบกลับ + ดึงค่าแรงรอบนั้นกลับ)
+ *
+ * 🔗 สต็อกกลาง (best-effort ไม่บล็อกงาน QC): รับเข้าของดี → +WH-FG (ตัดวัตถุดิบออกจาก WIP ตามสัดส่วน) · ของเสีย → +WH-SCRAP
+ *    ส่งออก → −FG / ย้ายเข้าคลังขาย · ย้อนส่งออก/ดึงกลับ/ลบ → คืนตามจริง · ของเสียภายหลัง FG→SCRAP · ซ่อมได้ SCRAP→FG · ใส่เอง → +FG
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
-import { writeAudit, writeAuditId } from "@/lib/audit";
+import { writeAudit, writeAuditId, writeAuditMany } from "@/lib/audit";
 import { notifyEvent, pushLineTpl, dmEmployeeByName, boardLink } from "@/lib/board-notify";
+import { syncWoLabor } from "@/lib/wo-labor";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,7 +34,7 @@ export const revalidate = 0;
 const num = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
 const PERM: Record<string, string> = {
   receive: "qc.receive", move: "qc.move", ship: "qc.ship", unship: "qc.ship", to_defect: "qc.defect",
-  repair_send: "qc.repair", repair_cancel: "qc.repair", repair_receive: "qc.repair", return_queue: "qc.move",
+  repair_send: "qc.repair", repair_cancel: "qc.repair", repair_receive: "qc.repair", return_queue: "qc.move", return_worker: "qc.move",
   add_manual: "qc.receive", add_bulk: "qc.receive", update_item: "qc.receive",
   // ลบทิ้งถาวร (ของทดสอบ/ลงผิด) — ล็อกไว้ที่ "แอดมิน" เท่านั้น เพราะลบแล้วหายจริง
   delete_item: "admin.users",
@@ -51,6 +56,52 @@ async function logDefect(admin: Admin, e: { sku?: string | null; worker?: string
     try { const { data } = await admin.rpc("erp_next_number", { p_key: "qc_defect", p_branch: null }); defect_no = (data as string) ?? null; } catch { /* no rule */ }
     await admin.from("defect_logs").insert({ defect_no, source_job: e.mo_no ?? null, defect_type: e.reason ?? null, qty: e.qty, cause: e.reason ?? null, sku: e.sku ?? null, worker: e.worker ?? null, kind: e.kind, mo_no: e.mo_no ?? null });
   } catch { /* best-effort */ }
+}
+
+// ── 🔗 สต็อกกลาง: ชั้น QC ↔ คลังสินค้าสำเร็จ WH-FG / ของเสีย WH-SCRAP ──
+// ต่อกลับ 2026-11-02 — เคยหลุดไปตอน commit 30f89f72 (11 ก.ค.) ที่บันทึกทับไฟล์ด้วยสำเนาเก่า
+// แถวที่ "ลงสต็อกแล้ว" จดไว้ในประวัติ (audit qc.stock_in ต่อ id แถว) → แถวก่อนต่อกลับไม่มีบันทึกนี้
+//   = ส่งออก/ดึงกลับ/ลบ ไม่แตะสต็อก (กันคลังติดลบ · เจ้าของเลือกไม่ย้อนข้อมูล ก.ค.–พ.ย.)
+type Actor = { actorId: string | null; actorName: string | null };
+const STOCK_MARK = "qc.stock_in";
+async function stockRpc(admin: Admin, fn: string, args: Record<string, unknown>): Promise<boolean> {
+  try {
+    const { error } = await admin.rpc(fn, args);
+    if (error) console.error(`[qc-warehouse] ${fn}:`, error.message);
+    return !error;
+  } catch (e) { console.error(`[qc-warehouse] ${fn}:`, e instanceof Error ? e.message : e); return false; }
+}
+async function markStocked(admin: Admin, actor: Actor, ids: string[], wh: "FG" | "SCRAP") {
+  if (ids.length) await writeAuditMany(admin, ids.map((id) => ({ action: STOCK_MARK, entityType: "qc_warehouse_items", entityId: id, ...actor, metadata: { wh } })));
+}
+async function isStocked(admin: Admin, id: unknown): Promise<boolean> {
+  if (!id) return false;
+  const { data } = await admin.from("audit_logs").select("id").eq("entity_id", String(id)).eq("action", STOCK_MARK).limit(1);
+  return (data ?? []).length > 0;
+}
+/** ลง/ตัด WH-FG ตรง ๆ (ย้อนส่งออก · แก้ของที่ใส่เอง) · transfer = ย้ายจากคลังขาย (ตามชื่อ) กลับเข้า FG ไม่เจอคลังขาย = รับเข้า FG */
+async function postFg(admin: Admin, a: { sku: unknown; qty: number; type: "in" | "out" | "transfer"; fromName?: unknown; ref: string; note: string; actor: string | null }): Promise<boolean> {
+  const sku = String(a.sku ?? "").trim();
+  if (!sku || !(a.qty > 0)) return false;
+  const [{ data: s }, { data: fg }] = await Promise.all([
+    admin.from("skus_v2").select("id").eq("code", sku).limit(1).maybeSingle(),
+    admin.from("erp_playground_warehouses").select("id").eq("code", "WH-FG").limit(1).maybeSingle(),
+  ]);
+  if (!s?.id || !fg?.id) return false;
+  let type: "in" | "out" | "transfer" = a.type, from: string | null = null, to: string | null = null;
+  if (type === "out") from = String(fg.id); else to = String(fg.id);
+  if (type === "transfer") {
+    const { data: d } = await admin.from("erp_playground_warehouses").select("id").eq("name", String(a.fromName ?? "")).eq("kind", "sales").limit(1).maybeSingle();
+    if (d?.id) from = String(d.id); else type = "in";
+  }
+  if (from) {   // ตัดจากคลังที่ยังไม่มีแถวยอด → สร้างแถว 0 ก่อน (แบบเดียวกับ erp_qc_ship)
+    const now = new Date().toISOString();
+    await admin.from("erp_playground_stock_balances").upsert({ product_id: s.id, warehouse_id: from, qty_on_hand: 0, qty_reserved: 0, avg_cost: 0, last_movement_at: now, updated_at: now }, { onConflict: "product_id,warehouse_id", ignoreDuplicates: true });
+  }
+  return stockRpc(admin, "erp_stock_post_internal", {
+    p_movement_type: type, p_product_id: s.id, p_to_warehouse_id: to, p_from_warehouse_id: from, p_qty: a.qty, p_unit_cost: 0,
+    p_reference_type: a.ref, p_reference_id: null, p_reference_label: null, p_note: a.note, p_actor: a.actor, p_movement_date: null,
+  });
 }
 
 // เชื่อมอัตโนมัติ: QC บันทึกของเสีย → เพิ่มเข้า "รายการปัญหา" ของ Parent SKU (แชร์ทุกสี) — best-effort + กันซ้ำ
@@ -113,6 +164,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const ins = await admin.from("qc_warehouse_items").insert(rows).select("id, status, qty");
       if (ins.error) return NextResponse.json({ error: friendlyDbError(ins.error.message) }, { status: 400 });
       await admin.from("mo_work_orders").update({ qc_pulled_qty: Number(wo.qc_pulled_qty ?? 0) + good + badTotal }).eq("id", wo_id);
+      // 🔗 สต็อก: ของดี → +FG (+ตัดวัตถุดิบออกจาก WIP ตามสัดส่วน) · ของเสีย → +SCRAP — ลงได้ค่อยจดว่าแถวนั้นลงสต็อกแล้ว
+      const insRows = (ins.data ?? []) as { id: string; status: string }[];
+      if (good > 0 && await stockRpc(admin, "erp_qc_receive_to_fg", { p_wo_id: wo_id, p_good_qty: good, p_actor: actor.actorName }))
+        await markStocked(admin, actor, insRows.filter((r) => r.status === "good").map((r) => String(r.id)), "FG");
+      if (badTotal > 0 && await stockRpc(admin, "erp_qc_receive_scrap", { p_wo_id: wo_id, p_bad_qty: badTotal, p_reason: bad.map((b) => `${b.reason} ${b.qty}`).join(", "), p_actor: actor.actorName }))
+        await markStocked(admin, actor, insRows.filter((r) => r.status === "defect").map((r) => String(r.id)), "SCRAP");
       for (const b of bad) { await logDefect(admin, { sku: wo.product_sku, worker: wo.assignee_name, qty: b.qty, reason: b.reason, kind: "defect", mo_no: wo.mo_no }); await logParentIssue(admin, actor, { sku: wo.product_sku, reason: b.reason }); }
       const quiet = body.quiet === true;   // อัปเดตงานย้อนหลัง (โหมด 🔄 อัปเดตงาน) → ไม่แจ้งเรื่องของเสียเก่า (ประวัติของเสียยังลงครบ)
       await writeAudit(admin, { action: "qc.receive", entityType: "qc_warehouse_items", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, good, bad: badTotal, ...(quiet ? { catch_up: true } : {}) } });
@@ -153,7 +210,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         ? await admin.from("qc_warehouse_items").update({ qty: Number(item.qty) - shipQty }).eq("id", item_id)
         : await admin.from("qc_warehouse_items").delete().eq("id", item_id);
       if (res.error) return NextResponse.json({ error: friendlyDbError(res.error.message) }, { status: 400 });
-      const audit_id = await writeAuditId(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: shipQty, ...(shipQty < Number(item.qty) ? { partial_of: item.qty } : {}), mode: body.mode, wh: body.wh,
+      // 🔗 สต็อก: ของดีที่ลงคลังไว้ → ขายออก = −FG · เข้าคลังขาย = ย้าย FG → คลังขาย (จด stocked ไว้ให้ unship ย้อนถูก)
+      const stocked = item.status !== "defect" && await isStocked(admin, item_id)
+        && await stockRpc(admin, "erp_qc_ship", { p_sku_code: item.sku, p_qty: shipQty, p_mode: String(body.mode ?? "sell"), p_dest_name: body.wh ? String(body.wh) : null, p_actor: actor.actorName });
+      const audit_id = await writeAuditId(admin, { action: "qc.ship", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, worker: item.worker, image_key: item.image_key, brand_color: item.brand_color, qty: shipQty, ...(shipQty < Number(item.qty) ? { partial_of: item.qty } : {}), mode: body.mode, wh: body.wh, ...(stocked ? { stocked: true } : {}),
         shelf_id: item.shelf_id, wo_id: item.wo_id, status: item.status, color: item.color, source: item.source,
         ...(typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? { date: body.date } : {}) } });
       return NextResponse.json({ error: null, audit_id });   // ป๊อปอัปเดตงานเก็บไว้ย้อน (unship)
@@ -178,9 +238,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const into = body.into_item_id ? await getItem(admin, String(body.into_item_id)) : null;
       const orig = into && into.mo_no === (md.mo_no ?? null) && into.status === ((md.status as string) || "good") ? into
         : a.entity_id ? await getItem(admin, String(a.entity_id)) : null;
+      // 🔗 สต็อก: รอบส่งออกที่ตัดสต็อกไว้ (stocked) → คืนเข้า FG (ขายออก) / ย้ายกลับจากคลังขาย
+      const restock = () => md.stocked === true && postFg(admin, { sku: md.sku, qty, type: md.mode === "sales_wh" && md.wh ? "transfer" : "in", fromName: md.wh, ref: "qc_unship", note: "ย้อนส่งออกจากโกดัง QC", actor: actor.actorName });
       if (orig) {
         const up = await admin.from("qc_warehouse_items").update({ qty: Number(orig.qty) + qty, updated_at: new Date().toISOString() }).eq("id", orig.id);
         if (up.error) return NextResponse.json({ error: friendlyDbError(up.error.message) }, { status: 400 });
+        if (await isStocked(admin, orig.id)) await restock();   // แถวปลายทางไม่ได้ลงสต็อก (ของก่อนต่อกลับ) = ไม่คืน กันยอดเกิน
         await writeAudit(admin, { action: "qc.unship", entityType: "qc_warehouse_items", entityId: String(orig.id), ...actor,
           metadata: { ship_audit_id: sid, qty, of: md.qty, mo_no: orig.mo_no ?? md.mo_no ?? null, sku: orig.sku ?? null, shelf_id: orig.shelf_id, wo_id: orig.wo_id, into: "same_row", ...via } });
         return NextResponse.json({ error: null, item_id: orig.id });
@@ -203,6 +266,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         status: (md.status as string) || "good", color: md.color ?? null, source: (md.source as string) || "production",
       }).select("id").single();
       if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+      if (await restock()) await markStocked(admin, actor, [String(ins.id)], "FG");
       await writeAudit(admin, { action: "qc.unship", entityType: "qc_warehouse_items", entityId: String(ins.id), ...actor,
         metadata: { ship_audit_id: sid, qty, of: md.qty, mo_no, sku: md.sku ?? null, shelf_id, wo_id, into: "new_row", ...via } });
       return NextResponse.json({ error: null, item_id: ins.id });
@@ -219,9 +283,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const dsid = await defectShelfId(admin);
       if (!dsid) return NextResponse.json({ error: "ยังไม่มีชั้นของเสีย" }, { status: 400 });
       const remain = Number(item.qty) - qty;
+      const wasStocked = await isStocked(admin, item_id);
       if (remain > 0) await admin.from("qc_warehouse_items").update({ qty: remain }).eq("id", item_id);
       else await admin.from("qc_warehouse_items").delete().eq("id", item_id);
-      await admin.from("qc_warehouse_items").insert({ shelf_id: dsid, wo_id: item.wo_id, mo_no: item.mo_no, sku: item.sku, sku_name: item.sku_name, worker: item.worker, qty, status: "defect", reason });
+      const { data: dRow } = await admin.from("qc_warehouse_items").insert({ shelf_id: dsid, wo_id: item.wo_id, mo_no: item.mo_no, sku: item.sku, sku_name: item.sku_name, worker: item.worker, qty, status: "defect", reason }).select("id").single();
+      // 🔗 สต็อก: ของดีที่ลงคลังไว้ถูกคัดเป็นเสีย → ย้าย FG → SCRAP
+      if (wasStocked && dRow?.id && await stockRpc(admin, "erp_fg_to_scrap", { p_sku_code: item.sku, p_qty: qty, p_reason: reason, p_actor: actor.actorName }))
+        await markStocked(admin, actor, [String(dRow.id)], "SCRAP");
       await logDefect(admin, { sku: item.sku, worker: item.worker, qty, reason, kind: "defect", mo_no: item.mo_no });
       await logParentIssue(admin, actor, { sku: item.sku, reason });
       await writeAudit(admin, { action: "qc.defect", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sku: item.sku, qty, reason } });
@@ -260,10 +328,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (!item) return NextResponse.json({ error: "ไม่พบรายการ" }, { status: 404 });
       if (good + scrap < 1 || good + scrap > Number(item.qty)) return NextResponse.json({ error: "จำนวนไม่ถูกต้อง" }, { status: 400 });
       const remain = Number(item.qty) - good - scrap;
+      const wasStocked = await isStocked(admin, item_id);
       if (remain > 0) await admin.from("qc_warehouse_items").update({ qty: remain }).eq("id", item_id);
       else await admin.from("qc_warehouse_items").delete().eq("id", item_id);
-      if (good > 0) await admin.from("qc_warehouse_items").insert({ shelf_id, wo_id: item.wo_id, mo_no: item.mo_no, sku: item.sku, sku_name: item.sku_name, worker: item.worker, qty: good, status: "good" });
+      const { data: gRow } = good > 0
+        ? await admin.from("qc_warehouse_items").insert({ shelf_id, wo_id: item.wo_id, mo_no: item.mo_no, sku: item.sku, sku_name: item.sku_name, worker: item.worker, qty: good, status: "good" }).select("id").single()
+        : { data: null };
       if (scrap > 0) await logDefect(admin, { sku: item.sku, worker: item.worker, qty: scrap, reason: item.reason, kind: "scrap", mo_no: item.mo_no });
+      // 🔗 สต็อก: ซ่อมได้ SCRAP → FG · ซ่อมไม่ได้ ตัดทิ้งจาก SCRAP (เฉพาะของเสียที่ลงคลังไว้)
+      if (wasStocked && await stockRpc(admin, "erp_qc_repair_receive", { p_sku_code: item.sku, p_good_qty: good, p_scrap_qty: scrap, p_actor: actor.actorName }) && gRow?.id)
+        await markStocked(admin, actor, [String(gRow.id)], "FG");
       await writeAudit(admin, { action: "qc.repair", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sub: "receive", good, scrap } });
       return NextResponse.json({ error: null });
     }
@@ -278,7 +352,49 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const { data: wo } = await admin.from("mo_work_orders").select("qc_pulled_qty").eq("id", item.wo_id).single();
         if (wo) await admin.from("mo_work_orders").update({ qc_pulled_qty: Math.max(0, Number(wo.qc_pulled_qty ?? 0) - Number(item.qty)) }).eq("id", item.wo_id);
       }
+      // 🔗 สต็อก: ดึงกลับ → −FG/−SCRAP + คืนวัตถุดิบเข้า WIP (เฉพาะแถวที่ลงคลังไว้)
+      if (await isStocked(admin, item_id))
+        await stockRpc(admin, "erp_qc_reverse_item", { p_wo_id: item.wo_id ?? null, p_sku_code: item.sku, p_qty: Number(item.qty), p_is_defect: item.status !== "good", p_actor: actor.actorName });
       await writeAudit(admin, { action: "qc.move", entityType: "qc_warehouse_items", entityId: item_id, ...actor, metadata: { sub: "return_queue", qty: item.qty, mo_no: item.mo_no ?? null, ...(body.via ? { via: String(body.via).slice(0, 30), label: String(body.label ?? "").slice(0, 300) } : {}) } });
+      return NextResponse.json({ error: null });
+    }
+
+    // ── คืนงานรอ QC กลับให้ช่าง (รับผิด / ต้องแก้ใหม่) ──
+    // ลดยอดรับคืนเฉพาะส่วนที่ยังไม่ดึงเข้า QC (received_qty − qc_pulled_qty) + เปิดใบกลับ → การ์ดกลับไปที่บอร์ด/โต๊ะช่าง
+    // ดึงรอบส่งงานล่าสุดกลับให้ครอบยอดที่คืน (ค่าแรงรอบนั้นหายตาม ไม่จ่ายซ้ำ) แล้วคิดค่าแรงรวมของใบใหม่
+    // (กู้คืน 2026-11-02 — หายไปพร้อมปุ่มในหน้า QC ตอนบันทึกทับไฟล์ 11 ก.ค.)
+    if (action === "return_worker") {
+      const wo_id = String(body.wo_id ?? "");
+      const { data: wo } = await admin.from("mo_work_orders").select("id, mo_no, product_sku, product_name, assignee_name, qty, received_qty, qc_pulled_qty, status, is_active").eq("id", wo_id).maybeSingle();
+      if (!wo) return NextResponse.json({ error: "ไม่พบใบจ่ายงาน" }, { status: 404 });
+      if (wo.status === "cancelled" || wo.is_active === false) return NextResponse.json({ error: "ใบจ่ายงานนี้ถูกยกเลิกแล้ว" }, { status: 400 });
+      const remaining = Number(wo.received_qty ?? 0) - Number(wo.qc_pulled_qty ?? 0);
+      if (remaining <= 0) return NextResponse.json({ error: "ไม่มีงานรอรับเข้าที่จะคืน" }, { status: 400 });
+
+      const { data: subs } = await admin.from("wo_submissions").select("id, qty, wage").eq("wo_id", wo_id).order("created_at", { ascending: false });
+      let toRemove = remaining; const delIds: string[] = [];
+      for (const s of (subs ?? []) as { id: string; qty: number; wage: number | null }[]) {
+        if (toRemove <= 0) break;
+        const sq = Number(s.qty) || 0;
+        if (sq <= toRemove) { delIds.push(s.id); toRemove -= sq; continue; }
+        const keep = sq - toRemove;   // ตัดบางส่วนของรอบนี้ → ค่าแรงลดตามสัดส่วน
+        await admin.from("wo_submissions").update({ qty: keep, ...(s.wage != null ? { wage: Math.round((Number(s.wage) * keep / sq) * 100) / 100 } : {}) }).eq("id", s.id);
+        toRemove = 0;
+      }
+      if (delIds.length) await admin.from("wo_submissions").delete().in("id", delIds);
+
+      const newReceived = Math.max(0, Number(wo.received_qty ?? 0) - remaining);
+      const patch: Record<string, unknown> = { received_qty: newReceived, updated_at: new Date().toISOString() };
+      if (wo.status === "done" && newReceived < Number(wo.qty ?? 0)) patch.status = "dispatched";   // เปิดใบกลับ → การ์ดกลับมาบนบอร์ด/โต๊ะ
+      const up = await admin.from("mo_work_orders").update(patch).eq("id", wo_id);
+      if (up.error) return NextResponse.json({ error: friendlyDbError(up.error.message) }, { status: 400 });
+      await syncWoLabor(admin, wo_id);
+      await writeAudit(admin, { action: "qc.return_worker", entityType: "mo_work_orders", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, mo_no: wo.mo_no, qty: remaining, removed_submissions: delIds.length } });
+      // แจ้งช่างว่างานถูกตีกลับ (best-effort)
+      {
+        const link = boardLink("/master/qc-warehouse");
+        await dmEmployeeByName(admin, wo.assignee_name, `↩️ งานถูกตีกลับให้แก้/ทำใหม่\n${wo.product_sku ?? ""} · ${wo.product_name ?? ""}\nจำนวน ${remaining} ชิ้น\n🔗 ${link}`);
+      }
       return NextResponse.json({ error: null });
     }
 
@@ -294,6 +410,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const { data: wo } = await admin.from("mo_work_orders").select("qc_pulled_qty").eq("id", item.wo_id).single();
         if (wo) await admin.from("mo_work_orders").update({ qc_pulled_qty: Math.max(0, Number(wo.qc_pulled_qty ?? 0) - Number(item.qty)) }).eq("id", item.wo_id);
       }
+      // 🔗 สต็อก: ลบทิ้ง = ย้อนสิ่งที่ลงคลังไว้ (เหมือนดึงกลับ)
+      if (await isStocked(admin, item_id))
+        await stockRpc(admin, "erp_qc_reverse_item", { p_wo_id: item.wo_id ?? null, p_sku_code: item.sku, p_qty: Number(item.qty), p_is_defect: item.status !== "good", p_actor: actor.actorName });
       await writeAudit(admin, { action: "qc.delete", entityType: "qc_warehouse_items", entityId: item_id, ...actor,
         metadata: { sku: item.sku, sku_name: item.sku_name, mo_no: item.mo_no, qty: item.qty, status: item.status, reason: body.reason ?? null } });
       return NextResponse.json({ error: null });
@@ -330,6 +449,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
       const { error } = await admin.from("qc_warehouse_items").update(patch).eq("id", item_id);
       if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+      // 🔗 สต็อก: แถวที่ลงคลังไว้ → ปรับ FG ตามที่แก้ (จำนวนต่าง = ลง/ตัดส่วนต่าง · เปลี่ยนรหัส = ตัดตัวเดิม ลงตัวใหม่)
+      if ((patch.qty !== undefined || patch.sku !== undefined) && await isStocked(admin, item_id)) {
+        const oldSku = item.sku, oldQty = Number(item.qty);
+        const newSku = patch.sku ?? oldSku, newQty = patch.qty !== undefined ? Number(patch.qty) : oldQty;
+        const fix = { ref: "qc_update_item", note: "แก้ของที่ใส่เข้าชั้น QC เอง", actor: actor.actorName };
+        if (newSku === oldSku) await postFg(admin, { ...fix, sku: oldSku, qty: Math.abs(newQty - oldQty), type: newQty > oldQty ? "in" : "out" });
+        else { await postFg(admin, { ...fix, sku: oldSku, qty: oldQty, type: "out" }); await postFg(admin, { ...fix, sku: newSku, qty: newQty, type: "in" }); }
+      }
       await writeAudit(admin, { action: "qc.update_item", entityType: "qc_warehouse_items", entityId: item_id, ...actor,
         metadata: { before: { sku: item.sku, qty: item.qty, source: item.source }, after: patch } });
       return NextResponse.json({ error: null, changed: Object.keys(patch).length });
@@ -346,8 +473,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (!shelf_id) return NextResponse.json({ error: "เลือกชั้นก่อน" }, { status: 400 });
       if (!sku) return NextResponse.json({ error: "เลือกสินค้าก่อน" }, { status: 400 });
       if (qty < 1) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0" }, { status: 400 });
-      const { error } = await admin.from("qc_warehouse_items").insert({ shelf_id, sku, sku_name, qty, status: "good", source, worker });
+      const { data: mRow, error } = await admin.from("qc_warehouse_items").insert({ shelf_id, sku, sku_name, qty, status: "good", source, worker }).select("id").single();
       if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+      // 🔗 สต็อก: ใส่ของเข้าชั้นเอง (นับเอง/ยอดยกมา) → +FG
+      if (mRow?.id && await stockRpc(admin, "erp_fg_manual_in", { p_sku_code: sku, p_qty: qty, p_actor: actor.actorName }))
+        await markStocked(admin, actor, [String(mRow.id)], "FG");
       await writeAudit(admin, { action: "qc.add_manual", entityType: "qc_warehouse_items", entityId: shelf_id, ...actor, metadata: { sku, qty, source } });
       return NextResponse.json({ error: null });
     }
@@ -364,8 +494,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const { data: sk } = await admin.from("skus_v2").select("code, name_th").in("code", codes);
       const nameMap = new Map((sk ?? []).map((s) => [s.code as string, s.name_th as string]));
       const ins = parsed.map((r) => ({ shelf_id, sku: r.sku, sku_name: nameMap.get(r.sku) ?? r.sku, qty: r.qty, status: "good", source }));
-      const { error } = await admin.from("qc_warehouse_items").insert(ins);
+      const { data: bRows, error } = await admin.from("qc_warehouse_items").insert(ins).select("id, sku, qty");
       if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+      // 🔗 สต็อก: นำเข้าหลายรายการ → +FG ทีละแถว
+      const okIds: string[] = [];
+      for (const r of (bRows ?? []) as { id: string; sku: string; qty: number }[])
+        if (await stockRpc(admin, "erp_fg_manual_in", { p_sku_code: r.sku, p_qty: Number(r.qty), p_actor: actor.actorName })) okIds.push(String(r.id));
+      await markStocked(admin, actor, okIds, "FG");
       await writeAudit(admin, { action: "qc.add_bulk", entityType: "qc_warehouse_items", entityId: shelf_id, ...actor, metadata: { count: ins.length, source } });
       return NextResponse.json({ error: null, count: ins.length });
     }

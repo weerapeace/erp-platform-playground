@@ -274,6 +274,7 @@ export default function QcWarehousePage() {
   const [frShelf, setFrShelf] = useState("");
   const [detail, setDetail] = useState<{ kind: "queue"; card: QcQueueCard } | { kind: "item"; shelf: ShelfWithItems; item: QcItem } | null>(null);
   const [movePick, setMovePick] = useState<QcItem | null>(null);          // ปุ่มย้ายชั้นบนการ์ด
+  const [returnWo, setReturnWo] = useState<QcQueueCard | null>(null);     // คืนงานกลับให้ช่าง (รับผิด / ต้องแก้ใหม่)
   const [overflowShelf, setOverflowShelf] = useState<ShelfWithItems | null>(null);  // ดูของเกิน 20
   const [shelfModal, setShelfModal] = useState<{ mode: "add" } | { mode: "edit"; shelf: ShelfWithItems } | null>(null);
   const [shelfName, setShelfName] = useState("");
@@ -324,6 +325,8 @@ export default function QcWarehousePage() {
   const openFromRepair = (item: QcItem) => { setFromRepair(item); setFrGood(item.qty); setFrScrap(0); setFrShelf(storeShelves[0]?.id ?? ""); };
   const submitFromRepair = async () => { if (!fromRepair) return; if (await act("/api/qc-warehouse/items", { action: "repair_receive", item_id: fromRepair.id, good: num(frGood), scrap: num(frScrap), shelf_id: frShelf })) { toast.success("รับจากซ่อมแล้ว"); setFromRepair(null); } };
   const returnQueue = async (item: QcItem) => { if (await act("/api/qc-warehouse/items", { action: "return_queue", item_id: item.id })) { toast.success("ย้ายกลับงานรอ QC แล้ว"); setDetail(null); } };
+  // คืนงานรอ QC กลับไปให้ช่างแก้/ทำใหม่ — ลดยอดรับคืน + เปิดใบกลับบนบอร์ด + ดึงค่าแรงรอบนั้นกลับ + แจ้งช่าง
+  const submitReturnWorker = async () => { if (!returnWo) return; if (await act("/api/qc-warehouse/items", { action: "return_worker", wo_id: returnWo.wo_id })) { toast.success("คืนงานกลับให้ช่างแล้ว"); setReturnWo(null); setDetail(null); } };
 
   /** ✏️ แก้ของที่ใส่เข้าชั้นเอง (ลงจำนวน/รหัสผิด) — ของจากใบจ่ายงานแก้ไม่ได้ ต้องย้ายกลับงานรอ QC */
   const [editItem, setEditItem] = useState<{ id: string; qty: string; sku: string; source: string } | null>(null);
@@ -902,6 +905,19 @@ export default function QcWarehousePage() {
         )}
       </ERPModal>
 
+      {/* คืนงานกลับให้ช่าง (รับผิด / ต้องแก้ใหม่) */}
+      <ERPModal open={returnWo !== null} onClose={() => setReturnWo(null)} size="sm" title="↩️ คืนงานกลับให้ช่าง"
+        footer={<><button onClick={() => setReturnWo(null)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>
+          <button onClick={() => void submitReturnWorker()} className="h-9 px-4 text-sm bg-amber-500 text-white rounded-lg hover:bg-amber-600">ยืนยันคืนงาน</button></>}>
+        {returnWo && (
+          <div className="space-y-2 text-sm text-slate-600">
+            <div className="text-[12px] text-slate-500"><b className="text-slate-700">{returnWo.name || returnWo.sku}</b> · {returnWo.sku} · {returnWo.mo_no}</div>
+            <p>คืนงาน <b className="text-amber-700">{fmt(returnWo.remaining)} ชิ้น</b> กลับไปให้ช่าง <b>{returnWo.worker ?? "—"}</b> แก้ไข/ทำใหม่ ใช่ไหม?</p>
+            <p className="text-[11px] text-slate-400">งานจะกลับไปอยู่ที่บอร์ด/โต๊ะช่าง ให้ส่งใหม่ · ระบบจะแจ้งช่างให้ทราบ · ค่าแรงรอบที่คืนจะถูกดึงกลับ</p>
+          </div>
+        )}
+      </ERPModal>
+
       {/* ดูของเกิน 20 (overflow) */}
       <ERPModal open={overflowShelf !== null} onClose={() => setOverflowShelf(null)} size="md" title={`${overflowShelf?.name ?? ""} — ทั้งหมด ${overflowShelf?.items.length ?? 0} รายการ`}
         footer={<button onClick={() => setOverflowShelf(null)} className="h-9 px-4 text-sm bg-slate-800 text-white rounded-lg hover:bg-slate-700">ปิด</button>}>
@@ -1221,11 +1237,14 @@ export default function QcWarehousePage() {
                 </div>
               )}
               {detail.kind === "queue" && (
-                <div className="pt-1 border-t border-slate-100"><div className="text-[11px] text-slate-500 mb-1.5">📦 รับเข้าชั้น</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {storeShelves.map((s) => (<button key={s.id} onClick={() => { const card = detail.card; setDetail(null); openReceive(card, s); }} className="text-[12px] px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">🗄️ {s.name}</button>))}
-                    {storeShelves.length === 0 && <span className="text-[11px] text-rose-500">ยังไม่มีชั้นเก็บ</span>}
-                  </div></div>
+                <div className="pt-1 border-t border-slate-100 space-y-2">
+                  <div><div className="text-[11px] text-slate-500 mb-1.5">📦 รับเข้าชั้น</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {storeShelves.map((s) => (<button key={s.id} onClick={() => { const card = detail.card; setDetail(null); openReceive(card, s); }} className="text-[12px] px-2.5 py-1.5 rounded-lg border border-indigo-200 text-indigo-700 hover:bg-indigo-50">🗄️ {s.name}</button>))}
+                      {storeShelves.length === 0 && <span className="text-[11px] text-rose-500">ยังไม่มีชั้นเก็บ</span>}
+                    </div></div>
+                  <button onClick={() => { const c = detail.card; setDetail(null); setReturnWo(c); }} className="w-full text-[12px] px-2.5 py-1.5 rounded-lg border border-amber-200 text-amber-700 hover:bg-amber-50">↩️ คืนงานกลับให้ช่าง (รับผิด / ต้องแก้ใหม่)</button>
+                </div>
               )}
               {/* ✏️ แก้ของที่ใส่เข้าชั้นเอง (ไม่ได้มาจากใบจ่ายงาน) */}
               {detail.kind === "item" && detail.shelf.kind === "store" && !detail.item.wo_id && detail.item.status === "good" && (

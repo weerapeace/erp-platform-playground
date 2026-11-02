@@ -73,6 +73,20 @@ export const WORKFLOWS: WorkflowDef[] = [
     logicIds: ["LOG-LABOR-0001"],
   },
   {
+    key: "qc-warehouse",
+    label: "โกดัง QC + สต็อกสินค้าสำเร็จ",
+    flow: "ช่างส่งงาน → รับเข้า QC (ดี +คลังสินค้าสำเร็จ / เสีย +คลังของเสีย) → ส่งออก (ขายออก / เข้าคลังขาย) · ย้อนส่งออก / ดึงกลับ / คืนงานให้ช่าง",
+    ruleFiles: ["lib/qc-ship.ts"],
+    gates: ["app/api/qc-warehouse/items/route.ts"],
+    tables: ["qc_warehouse_items", "qc_shelves", "erp_playground_stock_movements"],
+    signals: ["qc_pulled_qty"],
+    feeds: ["mo-production"],
+    gaps: [
+      "สต็อกลงเฉพาะของที่รับเข้าหลังต่อกลับ 2026-11-02 (จดใน audit qc.stock_in ต่อแถว) — ของเก่าบนชั้นไม่แตะสต็อก",
+      "ส่งออกจาก QC (ตัดคลังสินค้าสำเร็จ) กับใบขาย “ส่งแล้ว” (ตัดคลังสินค้าสำเร็จ) ยังไม่ประสานกัน — ถ้าใช้ทั้งสองทางจะตัดซ้ำ",
+    ],
+  },
+  {
     key: "purchasing",
     label: "จัดซื้อ (ขอซื้อ → สั่งซื้อ → รับของ)",
     flow: "ขอซื้อ → อนุมัติ / ไม่อนุมัติ → ออก PO (ร่าง = สั่งแล้ว) → รับของ (ครบ / บางส่วน / ปิดยอด) → ใบสำคัญรับ",
