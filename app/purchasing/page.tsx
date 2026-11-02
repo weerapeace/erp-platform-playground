@@ -25,7 +25,7 @@ import { RelationPicker } from "@/components/relation-picker";
 import { ImageGallery, HoverZoomImage, ImageInput } from "@/components/image-input";
 import { TagGroupFilter } from "@/components/tag-filter";
 import { DupOrderBadge, DupOrderList, type OpenOrder } from "./dup-order";
-import type { PurchaseNeedRow } from "@/app/api/mo/purchase-needs/route";
+import type { PurchaseNeedRow, PurchaseNeedMo } from "@/app/api/mo/purchase-needs/route";
 import { MoShortageList, useMoShortage, shortMos, ceil2, oddMos, type MoPick } from "@/components/mo-shortage-picker";
 import { HoverImage } from "@/components/hover-image";
 import type { MoMaterialStatus, MoMaterialStatusResult, MatPurchaseLink } from "@/app/api/mo/material-status/route";
@@ -84,6 +84,8 @@ const MO_NEAR_MAX = 2;
 // แถบความคืบหน้าวัตถุดิบ (MO_SEGS / progCounts / MoProgressBar) = ของกลาง components/mo-material-progress
 const progPct = (p: MoProgress | undefined) => (p && p.total > 0 ? Math.round(((p.total - p.buy) / p.total) * 100) : 0);
 // วัตถุดิบรวมหลายใบ → บรรทัดตะกร้า (วัตถุดิบละ 1 บรรทัด ผูกเลขใบครบ m2m) — ใช้ทั้ง "ซื้อรวมทั้งกลุ่ม" และ "รวมตามรุ่น"
+// 1 บรรทัดที่จะบันทึกผ่าน PATCH /api/mo/material { items } (มีของแล้ว / ยกเลิก หลายใบในครั้งเดียว)
+type HaveItem = { id: string; on_hand_qty: number; purchase_override: number | null };
 const moCartLines = (title: string, rows: GroupCartLine[]): Line[] => rows.map((r) => ({
   label: r.code ? `[${r.code}] ${r.name ?? ""}`.trim() : (r.name ?? "วัตถุดิบ"), qty: r.qty, uom: r.uom, seller: "—", price: 0, currency: "THB",
   image: null, variationId: null, skuRef: r.code, skuId: null, note: `จากใบสั่งผลิต ${r.nos.join(", ")}`,
@@ -210,7 +212,8 @@ export default function PurchasingShopPage() {
   const [moStatusErr, setMoStatusErr] = useState(false);
   const [moStatusTick, setMoStatusTick] = useState(0);
   const [haveBusy, setHaveBusy] = useState<string | null>(null);   // summary_id ที่กำลังบันทึก "มีของแล้ว"
-  const haveUndo = useRef(new Map<string, { on_hand: number; stored: number | null }>());   // ค่าเดิมก่อนกด (ไว้ยกเลิก)
+  const haveUndo = useRef(new Map<string, HaveItem[]>());   // ค่าเดิมก่อนกด ทุกใบที่บันทึกพร้อมกัน (ไว้ยกเลิก) — key = บรรทัดที่กด
+  const [haveAsk, setHaveAsk] = useState<MoMaterialStatus | null>(null);   // ป๊อป "มีของแล้ว" ถามใบอื่นที่ใช้วัตถุดิบเดียวกัน
   const canEditMat = usePermission("products.edit");
   const canStock = usePermission("stock.adjust");                          // นับสต๊อก/ใส่จำนวนปัจจุบัน (ผู้จัดซื้อได้สิทธิ์นี้แล้ว)
   const [stockCount, setStockCount] = useState<MoMaterialStatus | null>(null);   // วัตถุดิบที่กำลังนับสต๊อก (ป๊อป)
@@ -418,25 +421,44 @@ export default function PurchasingShopPage() {
   ]);
 
   // ✓ มีของแล้ว — บันทึก "มีอยู่" = ที่ต้องใช้ (ช่องเดียวกับบอร์ดจ่ายงาน/ความพร้อมวัตถุดิบ) + ล้างค่า override ต้องซื้อ → หลุดจากรายการต้องซื้อ
-  // ยกเลิก = คืนค่าเดิมถ้ากดในรอบนี้ ไม่งั้นตั้ง "มีอยู่" = 0 · API กลางเช็กสิทธิ์ products.edit + บันทึก audit
+  //   กดแล้วเปิดป๊อปถามก่อน: ใบอื่นที่ยังต้องใช้วัตถุดิบตัวนี้ (ของกลาง MoShortageList ตัวเดียวกับป๊อปขอซื้อ) ติ๊กพร้อมกันได้ → บันทึกทีเดียว
+  // ยกเลิก = คืนค่าเดิมทุกใบที่บันทึกพร้อมกันในรอบนี้ ไม่งั้นตั้ง "มีอยู่" = 0 · API กลางเช็กสิทธิ์ products.edit + บันทึก audit 1 รายการ
+  const saveMaterialItems = async (items: HaveItem[], label: string) => {
+    const res = await apiFetch("/api/mo/material", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items, label }) });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
+  };
   const setHave = async (it: MoMaterialStatus, have: boolean) => {
-    const prev = haveUndo.current.get(it.summary_id);
-    const body = have
-      ? { id: it.summary_id, on_hand_qty: it.required, purchase_override: null }
-      : { id: it.summary_id, on_hand_qty: prev?.on_hand ?? 0, purchase_override: prev ? prev.stored : null };
+    if (have) { setHaveAsk(it); return; }
+    const undo = haveUndo.current.get(it.summary_id) ?? [{ id: it.summary_id, on_hand_qty: 0, purchase_override: null }];
     setHaveBusy(it.summary_id);
     try {
-      const res = await apiFetch("/api/mo/material", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      if (have) haveUndo.current.set(it.summary_id, { on_hand: it.on_hand, stored: it.to_purchase_stored });
-      else haveUndo.current.delete(it.summary_id);
-      toast.success(have ? `บันทึกแล้ว: มี ${it.name ?? it.code} แล้ว` : `ยกเลิก "มีของแล้ว" ของ ${it.name ?? it.code}`);
+      await saveMaterialItems(undo, `ยกเลิกมีของแล้ว · ${it.code ?? it.name ?? ""} · จาก ${moSel?.mo_no ?? ""}`);
+      haveUndo.current.delete(it.summary_id);
+      toast.success(undo.length > 1 ? `ยกเลิก "มีของแล้ว" ของ ${it.name ?? it.code} ${undo.length} ใบ` : `ยกเลิก "มีของแล้ว" ของ ${it.name ?? it.code}`);
       setMoStatusTick(t => t + 1);
       void refreshMoNeeds();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ");
     } finally { setHaveBusy(null); }
+  };
+  // ป๊อปยืนยัน: ใบนี้ + ใบอื่นที่ติ๊ก → มีอยู่ = ที่ต้องใช้ของแต่ละใบ
+  const confirmHave = async (it: MoMaterialStatus, others: PurchaseNeedMo[]) => {
+    const rest = others.filter((m): m is PurchaseNeedMo & { summary_id: string } => !!m.summary_id && m.summary_id !== it.summary_id);
+    const items: HaveItem[] = [
+      { id: it.summary_id, on_hand_qty: it.required, purchase_override: null },
+      ...rest.map((m) => ({ id: m.summary_id, on_hand_qty: Math.round(m.qty_per * m.mo_qty * 10000) / 10000, purchase_override: null })),
+    ];
+    const undo: HaveItem[] = [
+      { id: it.summary_id, on_hand_qty: it.on_hand, purchase_override: it.to_purchase_stored },
+      ...rest.map((m) => ({ id: m.summary_id, on_hand_qty: m.on_hand, purchase_override: m.to_purchase_stored ?? null })),
+    ];
+    await saveMaterialItems(items, `มีของแล้ว · ${it.code ?? it.name ?? ""} · จาก ${moSel?.mo_no ?? ""}`);
+    haveUndo.current.set(it.summary_id, undo);
+    toast.success(items.length > 1 ? `บันทึกแล้ว: มี ${it.name ?? it.code} แล้ว ${items.length} ใบ` : `บันทึกแล้ว: มี ${it.name ?? it.code} แล้ว`);
+    setHaveAsk(null);
+    setMoStatusTick(t => t + 1);
+    void refreshMoNeeds();
   };
 
   // เพิ่มวัตถุดิบของใบสั่งผลิตเข้าตะกร้า — ผูก source_mo_nos ทุกใบที่เลือก (บอร์ดเด้ง "ขอแล้ว" ทุกใบ) + item_name = [รหัส] ชื่อ
@@ -1618,6 +1640,11 @@ export default function PurchasingShopPage() {
           onCount={canStock ? () => { const it = stockHist; setStockHist(null); setStockCount(it); } : undefined} />
       )}
       {/* การ์ดวัตถุดิบ → 🔢 นับสต๊อก (ใส่จำนวนปัจจุบัน) → ใช้ของในสต๊อกกับใบนี้ได้เลย */}
+      {haveAsk && moSel && (
+        <HaveOthersDialog it={haveAsk} mo={moSel} canStock={canStock} onClose={() => setHaveAsk(null)}
+          onCount={() => { setStockCount(haveAsk); setHaveAsk(null); }}
+          onConfirm={(others) => confirmHave(haveAsk, others)} />
+      )}
       {stockCount && moSel && (
         <StockCountDialog it={stockCount} moNo={moSel.mo_no} onClose={() => setStockCount(null)}
           onSaved={() => { setStockCount(null); setMoStatusTick(t => t + 1); void refreshMoNeeds(); }} />
@@ -1851,6 +1878,65 @@ function MoGroupBuyDialog({ title, mos, needs, cart, onClose, onAdd }: { title: 
           );
         })}
       </div>
+    </ERPModal>
+  );
+}
+
+// ป๊อป "✓ มีของแล้ว" (การ์ดวัตถุดิบ แท็บใบสั่งผลิต) — ถามก่อนบันทึก: ใบอื่นที่ยังต้องใช้วัตถุดิบตัวนี้ ติ๊กพร้อมกันได้
+//   รายการใบ = ของกลาง MoShortageList (ตัวเดียวกับป๊อปเพิ่มลงใบขอซื้อ: รุ่นเดียวกันขึ้นก่อน · ใบสูตรผิดปกติไม่ถูกติ๊กตอนเลือกทั้งหมด)
+//   สต๊อกยังไม่เคยนับ → แนะนำกด "นับ" แทน (ได้ยอดสต๊อกจริงด้วย)
+function HaveOthersDialog({ it, mo, canStock, onClose, onCount, onConfirm }: {
+  it: MoMaterialStatus; mo: MoEntry; canStock: boolean; onClose: () => void; onCount: () => void;
+  onConfirm: (others: PurchaseNeedMo[]) => Promise<void>;
+}) {
+  const shortage = useMoShortage(it.code);
+  const [picks, setPicks] = useState<MoPick[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const u = it.uom ?? "";
+  const picked = new Set(picks.map((p) => p.no));
+  const others = (shortage.row?.mos ?? []).filter((m) => picked.has(m.mo_no) && m.mo_no !== mo.mo_no);
+  const total = it.required + others.reduce((n, m) => n + m.qty_per * m.mo_qty, 0);
+  const s = it.stock;
+  const save = async () => {
+    setErr(null); setSaving(true);
+    try { await onConfirm(others); }
+    catch (e) { setErr(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    finally { setSaving(false); }
+  };
+  return (
+    <ERPModal open onClose={onClose} size="md" storageKey="mo-have-others" title={`มีของแล้ว · ${it.name ?? it.code ?? "วัตถุดิบ"}`}
+      description={`${it.code ? `${it.code} · ` : ""}ใบไหนมีของแล้วบ้าง ติ๊กได้เลย บันทึกทีเดียว`}
+      footer={<>
+        <span className="mr-auto text-xs text-slate-500">รวม {1 + others.length} ใบ · {fmtQty(total)} {u}</span>
+        <button onClick={onClose} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+        <button onClick={() => void save()} disabled={saving} className="px-5 h-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-40">
+          {saving ? "กำลังบันทึก…" : `✓ บันทึกมีของแล้ว ${1 + others.length} ใบ`}
+        </button>
+      </>}>
+      <div className="flex items-center gap-2.5 px-2.5 py-2 rounded-md border border-emerald-200 bg-emerald-50">
+        <span className="shrink-0 w-4 h-4 rounded border bg-emerald-600 border-emerald-600 text-white flex items-center justify-center text-[10px] font-bold">✓</span>
+        <HoverImage url={mo.product_image} size={36} previewSize={224} alt={mo.product_label} />
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium text-slate-700">{mo.mo_no}</span>
+          <span className="block text-xs text-slate-500 truncate">{mo.product_label} · ใบนี้ (ที่กดอยู่)</span>
+        </span>
+        <span className="shrink-0 text-sm font-semibold tabular-nums text-emerald-700">{fmtQty(it.required)} <span className="text-[11px] font-normal text-slate-400">{u}</span></span>
+      </div>
+      <div className="mt-3">
+        {it.code
+          ? <MoShortageList shortage={shortage} uom={u} value={picks} onChange={(p) => setPicks(p)} excludeMo={mo.mo_no} sameSku={mo.product_label} />
+          : <div className="text-xs text-slate-400 py-2">วัตถุดิบนี้ไม่มีรหัสสินค้า — หาใบอื่นที่ใช้ตัวเดียวกันไม่ได้ บันทึกเฉพาะใบนี้</div>}
+      </div>
+      {s && !s.counted_at && (
+        <div className="mt-3 flex items-start gap-2 text-[11px] bg-amber-50 text-amber-800 border border-amber-200 rounded-md px-2.5 py-2">
+          <span className="min-w-0 flex-1">📦 สต๊อกในระบบ {s.on_hand == null ? "ยังไม่มียอด" : `${fmtQty(s.on_hand)} ${u}`} · ยังไม่เคยนับ — ถ้าของอยู่ในคลังจริง แนะนำกด &quot;นับ&quot; แทน จะได้ยอดสต๊อกจริงด้วย</span>
+          {canStock && it.code && (
+            <button type="button" onClick={onCount} className="shrink-0 h-7 px-2 text-[11px] font-medium text-slate-700 bg-white border border-slate-200 rounded-md hover:bg-slate-50">🔢 นับแทน</button>
+          )}
+        </div>
+      )}
+      {err && <div className="mt-3 text-sm text-rose-600">{err}</div>}
     </ERPModal>
   );
 }

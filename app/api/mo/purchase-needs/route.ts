@@ -22,6 +22,7 @@ export type PurchaseNeedMo = {
   mo_no: string; mo_id: string; product_label: string; product_image: string | null; due_date: string | null;
   needed: number; summary_id: string | null; on_hand: number; is_ready: boolean; qty_per: number; mo_qty: number;
   requested: number;   // ขอซื้อไปแล้วบางส่วน (needed = ส่วนที่ยังเหลือ)
+  to_purchase_stored: number | null;   // ค่า "ต้องซื้อ" ที่บันทึกไว้ (override) — ป๊อปมีของแล้วเก็บไว้คืนค่าตอนกดยกเลิก
   brand: string | null;         // แบรนด์ของสินค้าที่ผลิต (ผ่าน Parent SKU) — หน้าขอซื้อใช้จัดกลุ่ม
   parent_code: string | null;   // รหัสรุ่น (Parent SKU) — จัดกลุ่ม "รุ่น" + ซื้อรวมทั้งรุ่น
 };
@@ -144,7 +145,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       product_image: imgOf(mo.product_sku as string | null),
       due_date: (mo.due_date as string) ?? null, needed: remaining,
       summary_id: s.id ? String(s.id) : null, on_hand: onHand, is_ready: !!s.is_ready, qty_per: qtyPer, mo_qty: moQty,
-      requested: r4(got),
+      requested: r4(got), to_purchase_stored: stored,
       brand: famMap.get(String(mo.product_sku ?? ""))?.brand ?? null,
       parent_code: famMap.get(String(mo.product_sku ?? ""))?.parent_code ?? null,
     });
