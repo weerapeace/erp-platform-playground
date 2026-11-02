@@ -6,6 +6,7 @@
  * เฟส 2: โหมดแก้ไข (เพิ่ม/ลบ/แก้ งาน + ขั้นตอน + ที่เก็บ + ลิงก์) — เฉพาะผู้มีสิทธิ์ products.edit
  */
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
@@ -149,6 +150,10 @@ export default function WorkFlowsGuidePage() {
           <h1 className="text-lg font-semibold text-slate-800">🗺️ {t("คู่มือ Flow งาน", "Work flow guide")}</h1>
           <p className="text-sm text-slate-500">{t("เลือกงาน → ดูว่าแต่ละขั้นตอนเก็บไฟล์/ข้อมูลอะไร ไว้ที่ไหน · กดป้าย “เก็บที่” เพื่อเปิดที่นั่น", "Pick a job → see which files/data each step keeps and where · click a “Stored at” tag to open it")}</p>
         </div>
+        {/* แผนผังการทำงานจริงของระบบ (ซื้อ · ผลิต · จ่ายงาน · ขาย — อะไรเชื่อมอะไร) */}
+        <Link href="/master/flow-map" className="h-9 px-4 inline-flex items-center text-sm rounded-lg border border-indigo-200 text-indigo-700 bg-white hover:bg-indigo-50">
+          🧭 {t("แผนผังการทำงาน", "Work flow map")}
+        </Link>
         {canEdit && (
           <button onClick={() => setEdit((e) => !e)}
             className={`h-9 px-4 text-sm rounded-lg border ${edit ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>

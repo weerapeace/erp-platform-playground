@@ -42,6 +42,7 @@ npm run where-used -- purchasing --json  # ผลแบบเครื่อง�
 - workflow ใหม่ หรือย้ายกติกาไปไฟล์ใหม่ → แก้ `WORKFLOWS` ใน `lib/workflow-registry.ts` ที่เดียว แล้วรัน `npx vitest run lib/__tests__/workflow-registry.test.ts`
 - `signals` = ชื่อคอลัมน์ที่ถ้าไฟล์อื่นอ่านเอง แปลว่าอาจคิดกติกาเอง (เช่น `received_qty`)
 - ไฟล์ทะเบียนต้อง pure (ไม่ import อะไร) — สคริปต์ Node อ่านตรงได้ และหน้าเว็บนำไปใช้ต่อได้
+- การส่งต่อระหว่างเอกสารเปลี่ยน (ปิดช่องโหว่ / เพิ่มทางใหม่) → แก้แผนผังการทำงาน `lib/flow-map.ts` ด้วย (หน้า `/master/flow-map` · ดู [flow-map.md](flow-map.md))
 
 ## ข้อจำกัด
 
