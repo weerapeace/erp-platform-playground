@@ -1142,6 +1142,18 @@ export default function PurchasingShopPage() {
                     );
                   })()}
                 </div>
+                {/* ถามบอร์ดจ่ายงาน: ใบนี้จ่ายงาน/ส่ง QC แล้ว → วัตถุดิบทุกตัวนับว่ามีของ (lib/mo-dispatch) */}
+                {moStatus?.mo_no === moSel.mo_no && moStatus.dispatch && (() => {
+                  const dp = moStatus.dispatch;
+                  const when = dp.dispatched_at ? new Date(dp.dispatched_at + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : null;
+                  return (
+                    <div className={`mb-3 text-xs rounded-lg border px-3 py-2 ${dp.submitted ? "bg-emerald-50 text-emerald-800 border-emerald-200" : "bg-indigo-50 text-indigo-800 border-indigo-200"}`}>
+                      {dp.submitted
+                        ? <>✅ ช่างส่งงานครบแล้ว ({fmtQty(dp.received)}/{fmtQty(dp.qty)}) — เข้า QC แล้ว ไม่ต้องซื้อวัตถุดิบของใบนี้</>
+                        : <>✂️ จ่ายงานแล้ว{dp.assignees.length ? ` · ${dp.assignees.join(", ")}` : ""}{when ? ` · ${when}` : ""}{dp.by_skip ? " (แอดมินข้ามขั้น)" : ""} — วัตถุดิบนับว่ามีของแล้ว</>}
+                    </div>
+                  );
+                })()}
                 {moStatusErr && (
                   <div className="text-sm text-rose-600 py-8 text-center">โหลดวัตถุดิบของใบนี้ไม่สำเร็จ <button onClick={() => setMoStatusTick(t => t + 1)} className="underline">ลองใหม่</button></div>
                 )}
@@ -1915,7 +1927,7 @@ function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount
             })}
           </div>
         )}
-        {it.status === "have" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ มีของแล้ว")}
+        {it.status === "have" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", it.dispatched ? "✓ มีของแล้ว · จ่ายงานแล้ว" : "✓ มีของแล้ว")}
         {it.status === "ready" && tag("bg-emerald-50 text-emerald-700 border-emerald-200", "✓ เตรียมแล้ว")}
         {it.status === "skip" && tag("bg-slate-50 text-slate-500 border-slate-200", "ไม่ต้องซื้อ")}
         {/* ป้ายสต๊อกคลังวัตถุดิบ: ยังไม่เคยนับ / ในระบบ X (ยังไม่นับ) / นับแล้ว X · วันที่ (+ พร้อมใช้ ถ้าแบ่งให้ใบอื่นไปแล้ว)
@@ -1957,7 +1969,7 @@ function MoBomCard({ it, inCart, canEdit, busy, onAdd, onHave, canStock, onCount
             )}
           </div>
         )}
-        {canEdit && it.status === "have" && (
+        {canEdit && it.status === "have" && !it.dispatched && (
           <button type="button" disabled={busy} onClick={() => onHave(false)}
             className="mt-2 self-start text-xs text-blue-600 hover:underline disabled:opacity-50">{busy ? "กำลังบันทึก…" : "ยกเลิก (ยังไม่มีของ)"}</button>
         )}

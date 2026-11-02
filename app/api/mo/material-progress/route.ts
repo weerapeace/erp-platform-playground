@@ -12,6 +12,7 @@ import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { loadMoPurchaseLinks, computeMatStatus, linkKey } from "@/lib/mo-material-status";
 import { parseSkipped } from "@/lib/mo-skip";
+import { loadMoDispatch } from "@/lib/mo-dispatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,6 +29,9 @@ export type MoProgress = {
   eta_unknown: number; // บรรทัด "สั่งแล้ว" ที่ PO ยังไม่ระบุวันของถึง
   /** แอดมินข้ามขั้น "ซื้อของ" (lib/mo-skip) → นับทุกบรรทัดเป็นของครบ */
   skipped?: boolean;
+  /** จ่ายงานแล้ว (ถามบอร์ดจ่ายงาน lib/mo-dispatch) → นับทุกบรรทัดเป็นของครบ · submitted = ช่างส่งงานครบ เข้า QC แล้ว */
+  dispatched?: boolean;
+  submitted?: boolean;
 };
 /** mo_no → ความคืบหน้า (ใบที่ไม่มี BOM ไม่อยู่ในผลลัพธ์) */
 export type MoProgressResult = Record<string, MoProgress>;
@@ -44,6 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (mErr) return NextResponse.json({ data: null, error: "โหลดใบสั่งผลิตไม่สำเร็จ" }, { status: 500 });
   const qtyByMo = new Map(((mos ?? []) as Row[]).map((m) => [String(m.mo_no), Number(m.qty) || 0]));
   const buySkipped = new Set(((mos ?? []) as Row[]).filter((m) => parseSkipped(m.skipped_stages).buy).map((m) => String(m.mo_no)));
+  const dispatch = await loadMoDispatch(admin, (mos ?? []) as Row[]);   // จ่ายงานแล้ว = ของครบ (ไม่ต้องซื้อ)
   const moNos = [...qtyByMo.keys()];
   if (moNos.length === 0) return NextResponse.json({ data: {}, error: null });
 
@@ -61,9 +66,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const moNo = String(s.mo_no);
     const code = (s.component_sku as string) ?? null;
     const links = code ? linksByKey.get(linkKey(moNo, code)) ?? [] : [];
-    const { status } = computeMatStatus(s, qtyByMo.get(moNo) ?? 0, links);
+    const disp = dispatch.get(moNo);
+    const { status } = computeMatStatus(s, qtyByMo.get(moNo) ?? 0, links, { dispatched: !!disp });
     const p = data[moNo] ?? (data[moNo] = { total: 0, buy: 0, requested: 0, ordered: 0, done: 0, linked: 0, eta: null, eta_unknown: 0 });
     p.total += 1;
+    if (disp) { p.dispatched = true; if (disp.submitted) p.submitted = true; }
     if (buySkipped.has(moNo)) { p.skipped = true; p.done += 1; if (links.length > 0) p.linked += 1; continue; }   // ข้ามซื้อของ = ของครบ
     if (status === "buy") p.buy += 1;
     else if (status === "requested") p.requested += 1;

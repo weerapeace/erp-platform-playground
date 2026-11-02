@@ -3,7 +3,8 @@
  * ใช้ตอนรับของเข้า: รับซิปดำมา 100 → เห็นทันทีว่ามี 3 ใบงานรออยู่ ต้องใช้รวม 120 → ยังขาด 20
  * GET ?code=ZIP-001            → วัตถุดิบตัวเดียว
  * GET ?codes=A,B,C             → หลายตัว (คืน map)
- * นับเฉพาะใบสั่งผลิตที่ยังไม่จบ · เรียงใบที่ใกล้ครบกำหนดก่อน (ควรได้ของก่อน)
+ * นับเฉพาะใบสั่งผลิตที่ยังไม่จบ + ยังไม่จ่ายงาน (จ่ายงานแล้ว = ของไปอยู่กับช่างแล้ว ไม่รอวัตถุดิบ · lib/mo-dispatch)
+ * เรียงใบที่ใกล้ครบกำหนดก่อน (ควรได้ของก่อน)
  * ของกลาง: guardApi(products.view) + supabaseAdmin
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -11,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { parseSkipped } from "@/lib/mo-skip";
+import { loadMoDispatch } from "@/lib/mo-dispatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -63,7 +65,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .select("id, mo_no, qty, product_sku, product_name, due_date, skipped_stages")
     .in("mo_no", moNos).eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000);
   // ใบที่แอดมินข้ามขั้น "ซื้อของ" (lib/mo-skip) = ไม่รอวัตถุดิบแล้ว → ไม่นับ
-  const moByNo = new Map(((mos ?? []) as Record<string, unknown>[]).filter((m) => !parseSkipped(m.skipped_stages).buy).map((m) => [String(m.mo_no), m]));
+  const waiting = ((mos ?? []) as Record<string, unknown>[]).filter((m) => !parseSkipped(m.skipped_stages).buy);
+  const dispatch = await loadMoDispatch(admin, waiting);   // จ่ายงานแล้ว = ไม่รอวัตถุดิบ
+  const moByNo = new Map(waiting.filter((m) => !dispatch.has(String(m.mo_no))).map((m) => [String(m.mo_no), m]));
 
   // รูปสินค้าของใบงาน
   const prodCodes = [...new Set([...moByNo.values()].map((m) => String(m.product_sku ?? "").trim()).filter(Boolean))];

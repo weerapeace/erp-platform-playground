@@ -11,6 +11,7 @@
  *   รับแล้ว    = บรรทัด PO ที่ผูกใบขอซื้อนั้นจบหมด (รับครบ/ปิดยอด) และได้ของพอ
  *   ปิดยอดแต่ของขาด → ส่วนที่ขาดกลับไป "ต้องซื้อ" (นับเท่าที่รับจริง)
  *   ติ๊ก "เตรียมแล้ว" = ของอยู่หน้างาน ไม่ต้องซื้อ
+ *   ใบจ่ายงานแล้ว (lib/mo-dispatch, ส่ง opts.dispatched) = มีของแล้ว (เจ้าของสั่ง 2026-11-02)
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { prLineCodeResolver } from "@/lib/pr-line-code";
@@ -34,6 +35,8 @@ export type MatPurchaseLink = {
 export type MatStatusCalc = {
   qty_per: number; required: number; on_hand: number; to_purchase_stored: number | null; is_ready: boolean;
   want: number; requested: number; remaining: number; received: number; status: MatStatus;
+  /** ใบนี้จ่ายงานแล้ว (lib/mo-dispatch) → นับว่า "มีของแล้ว" */
+  dispatched?: boolean;
 };
 
 export const r4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -104,8 +107,12 @@ export async function loadMoPurchaseLinks(admin: SupabaseClient, moNos: string[]
   return out;
 }
 
-/** คำนวณสถานะของวัตถุดิบ 1 บรรทัด (แถว mo_material_summary) จากจำนวนสั่งของใบ + ใบขอซื้อที่ผูก */
-export function computeMatStatus(s: Row, moQty: number, links: MatPurchaseLink[]): MatStatusCalc {
+/**
+ * คำนวณสถานะของวัตถุดิบ 1 บรรทัด (แถว mo_material_summary) จากจำนวนสั่งของใบ + ใบขอซื้อที่ผูก
+ * opts.dispatched = ใบนี้จ่ายงานแล้ว (ถามบอร์ดจ่ายงานผ่าน lib/mo-dispatch) → ของถูกเอาไปผลิตแล้ว = "มีของแล้ว" ไม่ต้องซื้อ
+ *   (ไม่ส่ง = กติกาเดิม — หน้าที่ยังไม่ได้ถามบอร์ดจ่ายงานไม่เปลี่ยน)
+ */
+export function computeMatStatus(s: Row, moQty: number, links: MatPurchaseLink[], opts?: { dispatched?: boolean }): MatStatusCalc {
   const qtyPer = Number(s.qty_per) || 0;
   const required = r4(qtyPer * moQty);
   const onHand = Number(s.on_hand_qty) || 0;
@@ -119,6 +126,11 @@ export function computeMatStatus(s: Row, moQty: number, links: MatPurchaseLink[]
   const received = r4(links.reduce((n, l) => n + l.qty_received, 0));
   const remaining = Math.max(0, r4(want - requested));
   const isReady = !!s.is_ready;
+  if (opts?.dispatched && !isReady) {
+    // จ่ายงานแล้ว = ของไปอยู่กับช่างแล้ว → มีของ (ไม่เหลือต้องซื้อ)
+    return { qty_per: qtyPer, required, on_hand: onHand, to_purchase_stored: stored, is_ready: false,
+      want: r4(want), requested, remaining: 0, received, status: "have", dispatched: true };
+  }
   const status: MatStatus =
     isReady ? "ready"                                                     // เตรียมแล้ว = ของอยู่หน้างาน ไม่ต้องซื้อ
     : remaining > EPS ? "buy"

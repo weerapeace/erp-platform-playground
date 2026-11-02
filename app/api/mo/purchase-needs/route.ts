@@ -4,6 +4,7 @@
  * GET ?code=<รหัสวัตถุดิบ> → เฉพาะตัวนั้น (ป๊อป "เพิ่มลงใบขอซื้อ" โชว์ใบงานที่ยังขาด) + covered_mos = ใบที่ขอซื้อครบแล้ว
  *   ต้องซื้อต่อใบ = (qty_per × จำนวนสั่ง − ของที่มี) หรือค่า override − ที่ขอซื้อไปแล้ว
  *   แต่ละใบแนบ summary_id/on_hand/is_ready (แก้ "เตรียมแล้ว+จำนวนที่มี" ได้) + รูปวัตถุดิบ + รูป SKU ของ MO
+ *   ไม่นับใบที่จ่ายงานแล้ว / ช่างส่งงานครบ (เข้า QC) — ถามบอร์ดจ่ายงานผ่าน lib/mo-dispatch
  * ของกลาง: guardApi(products.view) + supabaseAdmin
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -12,6 +13,7 @@ import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { parseSkipped } from "@/lib/mo-skip";
 import { prLineCodeResolver } from "@/lib/pr-line-code";
+import { loadMoDispatch } from "@/lib/mo-dispatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,7 +45,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .select("id, mo_no, qty, product_sku, product_name, due_date, skipped_stages")
     .eq("is_active", true).not("status", "in", "(cancelled,done)").limit(1000);
   // ใบที่แอดมินข้ามขั้น "ซื้อของ" (lib/mo-skip) = ไม่ต้องซื้อแล้ว → ไม่นับ
-  const moList = ((mos ?? []) as Record<string, unknown>[]).filter((m) => !parseSkipped(m.skipped_stages).buy);
+  const notSkipped = ((mos ?? []) as Record<string, unknown>[]).filter((m) => !parseSkipped(m.skipped_stages).buy);
+  // ถามบอร์ดจ่ายงาน: จ่ายงานแล้ว (ของไปอยู่กับช่าง) / ส่งงานครบเข้า QC = ไม่ต้องซื้อแล้ว → ไม่นับ
+  const dispatch = await loadMoDispatch(admin, notSkipped);
+  const moList = notSkipped.filter((m) => !dispatch.has(String(m.mo_no)));
   if (moList.length === 0) return NextResponse.json({ data: [], error: null });
   const moNos = moList.map((m) => String(m.mo_no));
   const moById = new Map(moList.map((m) => [String(m.mo_no), m]));

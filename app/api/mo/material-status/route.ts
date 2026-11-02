@@ -8,6 +8,7 @@
  *   ปิดยอดแต่ของขาด → ส่วนที่ขาดกลับไป "ต้องซื้อ" (นับเท่าที่รับจริง)
  *   links[] มี po_id/po_line_id/สถานะรับ → การ์ดกดดู PO + รับของได้ (ReceiveLineModal)
  *   stock = ยอดคลัง WH-RAW + นับล่าสุด + ที่แบ่งให้ใบงานอื่นแล้ว → ป้าย "นับแล้ว" + ป๊อปนับสต๊อก (/api/inventory/quick-count)
+ *   dispatch = ถามบอร์ดจ่ายงาน (lib/mo-dispatch) — จ่ายงานแล้ว → ทุกบรรทัด "มีของแล้ว · จ่ายงานแล้ว"
  * ของกลาง: guardApi(products.view) + supabaseAdmin + lib/mo-material-status (กติกาสถานะเดียวกับ /api/mo/material-progress)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -15,6 +16,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { loadMoPurchaseLinks, computeMatStatus, linkKey, r4, type MatStatus, type MatPurchaseLink } from "@/lib/mo-material-status";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { loadMoDispatch, type MoDispatchInfo } from "@/lib/mo-dispatch";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,6 +29,8 @@ export type MoMaterialStatus = {
   status: MatStatus; links: MatPurchaseLink[];
   /** สต๊อกคลังวัตถุดิบ (WH-RAW) — null = ไม่มีรหัส SKU */
   stock: MatStock | null;
+  /** ใบนี้จ่ายงานแล้ว → บรรทัดนี้ "มีของแล้ว · จ่ายงานแล้ว" (lib/mo-dispatch) */
+  dispatched?: boolean;
 };
 /**
  * ยอดในคลังวัตถุดิบ + การนับล่าสุด + ที่แบ่งให้ใบงานอื่นไปแล้ว (กันใช้ของก้อนเดียวซ้ำหลายใบ)
@@ -39,7 +43,11 @@ export type MatStock = {
   reserved_other: number; reserved_this: number; available: number | null;
 };
 /** mo_date = วันเปิดใบสั่งผลิต (order_date → ไม่มีใช้วันสร้าง) — ใช้นับว่า "ยังไม่ซื้อมากี่วัน" */
-export type MoMaterialStatusResult = { mo_no: string; mo_qty: number; mo_date?: string | null; items: MoMaterialStatus[] };
+export type MoMaterialStatusResult = {
+  mo_no: string; mo_qty: number; mo_date?: string | null; items: MoMaterialStatus[];
+  /** สถานะจากบอร์ดจ่ายงาน (null = ยังไม่จ่ายงาน) — จ่ายงานแล้ว = วัตถุดิบนับว่ามีของ · submitted = ช่างส่งงานครบ เข้า QC แล้ว */
+  dispatch?: MoDispatchInfo | null;
+};
 
 type Row = Record<string, unknown>;
 
@@ -106,7 +114,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ใบขอซื้อ → PO (เลขใบ/สถานะ/วันของถึง) + บรรทัด PO (รับแล้วเท่าไร) — ของกลาง lib/mo-material-status
   const [{ data: mo }, { data: sums, error: sErr }, linksByKey] = await Promise.all([
-    admin.from("manufacturing_orders").select("mo_no, qty, order_date, created_at").eq("mo_no", moNo).eq("is_active", true).maybeSingle(),
+    admin.from("manufacturing_orders").select("mo_no, qty, order_date, created_at, skipped_stages").eq("mo_no", moNo).eq("is_active", true).maybeSingle(),
     admin.from("mo_material_summary")
       .select("id, component_sku, component_name, material_type, uom, qty_per, on_hand_qty, to_purchase_qty, is_ready, sequence")
       .eq("mo_no", moNo).eq("is_active", true)
@@ -116,6 +124,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (sErr) return NextResponse.json({ data: null, error: "โหลดวัตถุดิบของใบสั่งผลิตไม่สำเร็จ" }, { status: 500 });
   if (!mo) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
   const moQty = Number((mo as Row).qty) || 0;
+  // ถามบอร์ดจ่ายงาน: จ่ายงานแล้ว → ทุกบรรทัด "มีของแล้ว · จ่ายงานแล้ว"
+  const dispatch = (await loadMoDispatch(admin, [mo as Row])).get(moNo) ?? null;
 
   // รูปวัตถุดิบ (cover SKU → fallback Parent)
   const codes = [...new Set(((sums ?? []) as Row[]).map((s) => String(s.component_sku ?? "").trim()).filter(Boolean))];
@@ -139,13 +149,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return {
       summary_id: String(s.id), code, name: (s.component_name as string) ?? null, image: code ? imgByCode.get(code) ?? null : null,
       type: (s.material_type as string) ?? null, uom: (s.uom as string) ?? null,
-      ...computeMatStatus(s, moQty, links), links,
+      ...computeMatStatus(s, moQty, links, { dispatched: !!dispatch }), links,
       stock: code ? stockByCode.get(code) ?? null : null,
     };
   });
 
   const moRow = mo as Row;
   const moDate = (moRow.order_date as string) ?? (moRow.created_at ? new Date(new Date(String(moRow.created_at)).getTime() + 7 * 3600e3).toISOString().slice(0, 10) : null);
-  const data: MoMaterialStatusResult = { mo_no: moNo, mo_qty: moQty, mo_date: moDate, items };
+  const data: MoMaterialStatusResult = { mo_no: moNo, mo_qty: moQty, mo_date: moDate, items, dispatch };
   return NextResponse.json({ data, error: null });
 }
