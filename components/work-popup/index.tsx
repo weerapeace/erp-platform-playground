@@ -37,6 +37,8 @@ function markSeen(uid: string, id: string) {
 
 const TONE: Record<WorkPopupFlag["tone"], string> = { danger: "text-rose-600", warn: "text-amber-600", muted: "text-slate-500", good: "text-emerald-600" };
 
+type PopupTab = "today" | "waiting" | "all";
+
 function Thumb({ src }: { src: string | null }) {
   return src
     // eslint-disable-next-line @next/next/no-img-element
@@ -98,16 +100,45 @@ export function WorkPopupBody({ data, onOpen, onTick, done, preview }: {
   const fields = new Set<string>(data.fields ?? []);
   const canTick = (t: WorkPopupTask) => t.mine || data.can_tick_all;
   const mineOpen = data.mine.reduce((n, m) => n + m.tasks.filter((t) => !done?.has(t.id)).length, 0);
+  // ชิปตัวเลข = แท็บสลับรายการในป๊อป (ต้องตามวันนี้ / มีของรอ / ค้างทั้งหมด) — ข้อมูลเก่าที่ไม่มี all = ชิปเป็นป้ายเฉย ๆ แบบเดิม
+  const [tab, setTab] = useState<PopupTab>("today");
+  const tabs = data.audience === "all" && !!data.all;
+  const tabList = !tabs || tab === "today" ? null : (data.all ?? []).filter((i) => tab === "all" || i.waiting);
+  const chip = (k: PopupTab, label: string, idle: string) => (
+    <button type="button" onClick={() => setTab(k)} aria-pressed={tab === k}
+      className={`rounded-full px-2.5 py-1 ${tab === k ? "bg-indigo-600 font-medium text-white" : `${idle} hover:ring-1 hover:ring-indigo-300`}`}>{label}</button>
+  );
   return (
     <div className="space-y-4">
-      {data.audience === "all" && data.show_stats !== false && (
+      {data.audience === "all" && (data.show_stats !== false || tabs) && (
         <div className="flex flex-wrap gap-1.5 text-xs">
-          {s.overdue > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-1 font-medium text-rose-700">เกินกำหนด {s.overdue}</span>}
-          {s.due_soon > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">ใกล้กำหนด {s.due_soon}</span>}
-          {s.waiting > 0 && <span className="rounded-full bg-blue-50 px-2.5 py-1 font-medium text-blue-700">⏳ มีของรอ {s.waiting} ใบ</span>}
-          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">ค้างทั้งหมด {s.total}</span>
+          {tabs && chip("today", `${data.urgent_label.replace(/^\S+\s/, "")} ${data.mine.length + data.urgent.length + data.more}`,"bg-white text-slate-700 border border-slate-200")}
+          {data.show_stats !== false && s.overdue > 0 && <span className="rounded-full bg-rose-50 px-2.5 py-1 font-medium text-rose-700">เกินกำหนด {s.overdue}</span>}
+          {data.show_stats !== false && s.due_soon > 0 && <span className="rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">ใกล้กำหนด {s.due_soon}</span>}
+          {s.waiting > 0 && (tabs ? chip("waiting", `⏳ มีของรอ ${s.waiting} ใบ`, "bg-blue-50 font-medium text-blue-700")
+            : data.show_stats !== false && <span className="rounded-full bg-blue-50 px-2.5 py-1 font-medium text-blue-700">⏳ มีของรอ {s.waiting} ใบ</span>)}
+          {tabs ? chip("all", `ค้างทั้งหมด ${s.total}`, "bg-slate-100 text-slate-600")
+            : data.show_stats !== false && <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-600">ค้างทั้งหมด {s.total}</span>}
         </div>
       )}
+
+      {/* แท็บ มีของรอ / ค้างทั้งหมด — รายการจาก data.all (ด่วนก่อน) · ติ๊กของรอได้ตามสิทธิ์เหมือนเดิม */}
+      {tabList && (
+        <section>
+          <h3 className="mb-1.5 text-sm font-semibold text-slate-800">{tab === "all" ? "📋 ค้างทั้งหมด (ด่วนก่อน)" : "⏳ ใบที่มีของรอ"}</h3>
+          {tabList.length > 0 ? (
+            <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
+              {tabList.map((u) => (
+                <div key={u.id} className="p-2">
+                  <ItemCard it={u} fields={fields} tasks={fields.has("wait") ? u.tasks : []} canTick={canTick} onTick={onTick} onOpen={onOpen} done={done} />
+                </div>
+              ))}
+            </div>
+          ) : <p className="rounded-xl bg-emerald-50 p-4 text-center text-sm text-emerald-700">ไม่มีรายการในแท็บนี้ 🎉</p>}
+          {tab === "all" && s.total > tabList.length && <p className="mt-1.5 text-xs text-slate-500">และอีก {s.total - tabList.length} งาน — กด "ดูทั้งหมด"</p>}
+        </section>
+      )}
+      {!tabList && (<>
 
       {/* 👤 งานของคุณ — ขึ้นก่อน · ข้อของคุณติ๊กได้เสมอ */}
       {data.mine.length > 0 && (
@@ -142,6 +173,7 @@ export function WorkPopupBody({ data, onOpen, onTick, done, preview }: {
       {data.mine.length === 0 && (data.audience === "mine" || data.urgent.length === 0) && (
         <p className="rounded-xl bg-emerald-50 p-4 text-center text-sm text-emerald-700">ไม่มีงานที่ต้องตามตอนนี้ เยี่ยมมาก 🎉</p>
       )}
+      </>)}
       {data.audience === "mine" && data.mine.length > 0 && !preview && (
         <p className="text-[11px] text-slate-400">คุณเห็นป๊อปนี้เพราะมีข้อในเช็กลิสต์ "รออะไรอยู่" ที่ใส่ชื่อคุณไว้</p>
       )}

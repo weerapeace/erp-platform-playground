@@ -141,7 +141,7 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
   const isUrgent = (e: Item) => e.daysLeft !== null && e.daysLeft <= dueSoon;
   const urgency = (e: Item): [number, number] => (isUrgent(e) ? [0, e.daysLeft!] : waitingOf(e.s).length ? [1, -e.stale] : [2, -e.stale]);
   const popupList = [...list].sort((a, b) => { const x = urgency(a), y = urgency(b); return x[0] - y[0] || x[1] - y[1]; }).slice(0, 300);
-  const coverIds = [...new Set([...(show.has("cover") ? shownIds : []), ...checklistItems.map((e) => e.s.id), ...popupList.slice(0, 10).map((e) => e.s.id)])];
+  const coverIds = [...new Set([...(show.has("cover") ? shownIds : []), ...checklistItems.map((e) => e.s.id), ...popupList.slice(0, 40).map((e) => e.s.id)])];   // ป๊อปมีแท็บ "ค้างทั้งหมด" → รูปปกได้ 40 ใบแรก
   const covers = coverIds.length ? await designSheetCoverMap(admin, coverIds) : new Map<string, string>();
   const creatorIds = show.has("creator") ? [...new Set(picked.flatMap((p) => p.items.map((e) => e.s.created_by)).filter((x): x is string => !!x))] : [];
   const creators = new Map<string, string>();

@@ -27,6 +27,8 @@ export type WorkPopupItem = {
   id: string; title: string; code: string | null; path: string; imageUrl: string | null; flag: WorkPopupFlag;
   brand: string | null; status: string | null; due: string | null; note: string | null;
   tasks: WorkPopupTask[];
+  /** มีของรอ (ข้อเช็กลิสต์ค้าง) — แท็บ "มีของรอ" ในป๊อปกรองด้วยตัวนี้ */
+  waiting?: boolean;
 };
 /** งานของคุณ: ใบที่มีข้อค้างใส่ชื่อคุณ (tasks = เฉพาะข้อของคุณ) */
 export type WorkPopupMine = WorkPopupItem;
@@ -49,6 +51,8 @@ export type WorkPopupPayload = {
   urgent_label: string;
   /** ต้องตามที่เหลือ (ไม่ได้โชว์) */
   more: number;
+  /** ค้างทั้งหมด (ด่วนก่อน · สูงสุด ALL_MAX ใบ) — แท็บ "ค้างทั้งหมด" / "มีของรอ" ในป๊อป · audience mine = ไม่ส่ง */
+  all?: WorkPopupItem[];
   view_all: string | null;
   /** ถึงเวลาเด้งไหม (อยู่ในช่วงเวลา + ยังไม่รับทราบวันนี้) — false = ส่งมาเพราะขอแบบทั้งวัน (ป๊อปลอยโชว์เป็นปุ่มเล็ก) */
   due?: boolean;
@@ -56,6 +60,7 @@ export type WorkPopupPayload = {
   acked?: boolean;
 };
 
+const ALL_MAX = 80;
 const BUILD_TTL = 60_000;   // คนเข้า ERP พร้อมกันตอนเช้า → ประกอบรายงานครั้งเดียวต่อนาที
 const buildCache = new Map<string, { at: number; built: BuiltReport }>();
 
@@ -110,7 +115,7 @@ export async function buildPopupPayload(admin: Admin, report: Pick<EmailReport, 
   ]);
   const toItem = (i: (typeof items)[number], tasks: WorkPopupTask[]): WorkPopupItem => ({
     id: i.id, title: i.title, code: i.code, path: i.path, imageUrl: i.imageUrl, flag: i.flag,
-    brand: i.brand ?? null, status: i.status ?? null, due: i.due ?? null, note: i.note ?? null, tasks,
+    brand: i.brand ?? null, status: i.status ?? null, due: i.due ?? null, note: i.note ?? null, tasks, waiting: i.waiting.length > 0,
   });
   const mineIds = new Set(items.filter((i) => (tasksBy.get(i.id) ?? []).some((t) => t.mine)).map((i) => i.id));
   // "งานของคุณ" แยกขึ้นก่อน (ปิดได้ — ผู้รับผิดชอบที่เห็นเฉพาะงานตัวเองยังเห็นเสมอ)
@@ -134,7 +139,9 @@ export async function buildPopupPayload(admin: Admin, report: Pick<EmailReport, 
     report_id: report.id, heading: built.heading, audience, require_ack: cfg.require_ack, date: nowTH().date,
     fields: cfg.fields, show_stats: cfg.show_stats, can_tick_all: canEdit,
     stats, mine, urgent, urgent_label: cfg.only_alert ? "🔥 ต้องตามวันนี้" : "📋 งานค้าง (ด่วนก่อน)",
-    more: Math.max(0, pool.length - urgent.length), view_all: built.popup?.viewAllPath ?? null,
+    more: Math.max(0, pool.length - urgent.length),
+    all: audience === "all" ? items.slice(0, ALL_MAX).map((i) => toItem(i, tasksBy.get(i.id) ?? [])) : undefined,
+    view_all: built.popup?.viewAllPath ?? null,
   };
 }
 

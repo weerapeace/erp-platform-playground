@@ -3,11 +3,13 @@
 import { parseCornerAnchor, type CornerAnchor } from "@/lib/use-corner-drag";
 
 export type WorkPopupFloatPosition = "br" | "tr";
+/** card = การ์ดลอย (กดข้างนอก = ซ่อน) · drawer = แถบข้างขวา เปิดค้างจนกด ✕ (กดข้างนอกไม่ปิด) */
+export type WorkPopupFloatMode = "card" | "drawer";
 /** anchor = ตำแหน่งที่ผู้ใช้ลากไปวางเอง (มุม+ระยะ) · null = ใช้มุมสำเร็จรูป position */
-export type WorkPopupFloatPref = { enabled: boolean; minimized: boolean; position: WorkPopupFloatPosition; anchor?: CornerAnchor | null };
+export type WorkPopupFloatPref = { enabled: boolean; minimized: boolean; position: WorkPopupFloatPosition; anchor?: CornerAnchor | null; mode?: WorkPopupFloatMode };
 
 export const WORK_POPUP_FLOAT_KEY = "work_popup_float";
-export const WORK_POPUP_FLOAT_DEFAULT: WorkPopupFloatPref = { enabled: true, minimized: false, position: "br", anchor: null };
+export const WORK_POPUP_FLOAT_DEFAULT: WorkPopupFloatPref = { enabled: true, minimized: false, position: "br", anchor: null, mode: "card" };
 /** มุมสำเร็จรูป (เลือกในเมนูโปรไฟล์) — ขวาบนเว้นแถบเมนูด้านบน */
 export const WORK_POPUP_PRESET_ANCHOR: Record<WorkPopupFloatPosition, CornerAnchor> = {
   br: { h: "r", v: "b", x: 16, y: 16 },
@@ -27,5 +29,6 @@ export function parseWorkPopupFloatPref(raw: unknown): WorkPopupFloatPref | null
     minimized: typeof r.minimized === "boolean" ? r.minimized : WORK_POPUP_FLOAT_DEFAULT.minimized,
     position: r.position === "tr" ? "tr" : "br",
     anchor: parseCornerAnchor(r.anchor),
+    mode: r.mode === "drawer" ? "drawer" : "card",
   };
 }

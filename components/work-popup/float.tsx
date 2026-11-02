@@ -50,16 +50,34 @@ export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, foo
   onExpand: () => void;
   children: ReactNode;
 }) {
-  // กดข้างนอกการ์ด / กด Esc = ซ่อนเป็นปุ่มเล็ก (ปุ่มยังลอยอยู่ กดกางใหม่ได้)
+  // แบบแถบข้าง: เปิดค้างจนกด ✕ (กดข้างนอก/Esc ไม่ปิด) · ชิดขวาใต้แถบเมนูบน (ไม่บังกระดิ่ง/โปรไฟล์ในหัวแอป)
+  const drawer = pref.mode === "drawer";
+  const [drawerTop, setDrawerTop] = useState(0);
+  useEffect(() => {
+    if (!drawer || minimized) return;
+    const measure = () => {
+      let top = 0;
+      document.querySelectorAll<HTMLElement>("[data-shell-topbar], header").forEach((el) => {
+        const r = el.getBoundingClientRect();
+        if (r.height > 0 && r.height < 160 && r.top <= 1 && r.right > window.innerWidth - 420) top = Math.max(top, r.bottom);
+      });
+      setDrawerTop(Math.round(top));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [drawer, minimized]);
+
+  // การ์ดลอย: กดข้างนอกการ์ด / กด Esc = ซ่อนเป็นปุ่มเล็ก (ปุ่มยังลอยอยู่ กดกางใหม่ได้)
   const boxRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (minimized) return;
+    if (minimized || drawer) return;
     const onDown = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) onMinimize(); };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onMinimize(); };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
-  }, [minimized, onMinimize]);
+  }, [minimized, drawer, onMinimize]);
 
   // ลากย้ายได้ (ปุ่มเล็ก = ลากทั้งปุ่ม · การ์ด = ลากที่หัว) → จำมุม+ระยะต่อคน (ของกลาง lib/use-corner-drag)
   const [, setPref] = useWorkPopupFloatPref();
@@ -76,24 +94,33 @@ export function WorkPopupFloatCard({ pref, minimized, title, subtitle, pill, foo
       </button>
     );
   }
+  // ปุ่มสลับ การ์ดลอย ⇄ แถบข้าง (จำต่อคน — เลือกได้ที่เมนูโปรไฟล์ด้วย)
+  const switchMode = () => setPref({ ...pref, mode: drawer ? "card" : "drawer" });
   return (
-    <div ref={boxRef} role="dialog" aria-label={title}
-      className={`fixed z-[45] w-[400px] max-w-[calc(100vw-2rem)] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden`}
-      style={{ ...(drag.liveStyle ?? cornerStyle(anchor, { w: 400, h: 120 })), maxHeight: `calc(100vh - ${Math.min(anchor.y, 400) + 16}px)` }}>
-      <div onPointerDown={drag.onPointerDown} title="ลากที่หัวเพื่อย้ายที่" style={{ touchAction: "none" }}
-        className={`flex items-center gap-2 px-3 py-2 border-b border-slate-100 bg-amber-50/60 select-none ${drag.dragging ? "cursor-grabbing" : "cursor-grab"}`}>
+    <div ref={boxRef} role={drawer ? "complementary" : "dialog"} aria-label={title}
+      className={drawer
+        ? "fixed right-0 bottom-0 z-[45] w-[400px] max-w-[calc(100vw-2rem)] flex flex-col bg-white border-l border-slate-200 shadow-2xl overflow-hidden"
+        : "fixed z-[45] w-[400px] max-w-[calc(100vw-2rem)] flex flex-col bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden"}
+      style={drawer ? { top: drawerTop } : { ...(drag.liveStyle ?? cornerStyle(anchor, { w: 400, h: 120 })), maxHeight: `calc(100vh - ${Math.min(anchor.y, 400) + 16}px)` }}>
+      <div onPointerDown={drawer ? undefined : drag.onPointerDown} title={drawer ? undefined : "ลากที่หัวเพื่อย้ายที่"} style={drawer ? undefined : { touchAction: "none" }}
+        className={`flex items-center gap-2 px-3 py-2 border-b border-slate-100 bg-amber-50/60 select-none ${drawer ? "" : drag.dragging ? "cursor-grabbing" : "cursor-grab"}`}>
         <span aria-hidden className="text-lg">🔔</span>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-slate-800 truncate">{title}</div>
           <div className="text-[11px] text-slate-500 truncate">{subtitle}</div>
         </div>
+        <button type="button" data-no-drag onClick={switchMode} aria-label={drawer ? "สลับเป็นการ์ดลอย" : "สลับเป็นแถบข้าง"}
+          title={drawer ? "สลับเป็นการ์ดลอย (กดข้างนอก = ซ่อน)" : "สลับเป็นแถบข้าง (เปิดค้างจนกด ✕)"}
+          className="h-8 px-2 rounded-md text-[11px] text-slate-500 hover:bg-white hover:text-slate-800">{drawer ? "▢ การ์ด" : "▕ แถบข้าง"}</button>
         <button type="button" data-no-drag onClick={onMinimize} aria-label="ซ่อน" title="ซ่อนเป็นปุ่มเล็ก (กดปุ่มเพื่อเปิดกลับ)"
           className="w-8 h-8 rounded-md text-slate-400 hover:bg-white hover:text-slate-700">✕</button>
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto p-3">{children}</div>
       <div className="border-t border-slate-100 px-3 py-2">{footer}</div>
       <p className="bg-amber-50 px-3 py-1.5 text-[11px] leading-snug text-amber-800">
-        💡 กด <b>✕</b> = ซ่อนเป็นปุ่มเล็ก · ลากที่หัวเพื่อย้ายที่ · {WORK_POPUP_HIDE_HINT}
+        {drawer
+          ? <>💡 แถบนี้เปิดค้างไว้ กดข้างนอกไม่ปิด · กด <b>✕</b> = ซ่อนเป็นปุ่มเล็ก · {WORK_POPUP_HIDE_HINT}</>
+          : <>💡 กด <b>✕</b> = ซ่อนเป็นปุ่มเล็ก · ลากที่หัวเพื่อย้ายที่ · {WORK_POPUP_HIDE_HINT}</>}
       </p>
     </div>
   );
@@ -110,7 +137,15 @@ export function WorkPopupFloatToggle() {
           onChange={(e) => setPref({ ...pref, enabled: e.target.checked, minimized: false })} />
         <span aria-hidden className="relative w-9 h-5 rounded-full bg-slate-300 peer-checked:bg-blue-600 transition-colors after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
       </label>
-      {pref.enabled ? (
+      {pref.enabled ? (<>
+        <div className="mt-1.5 flex items-center gap-1">
+          <span className="text-[11px] text-slate-400 mr-1">แบบ</span>
+          {([["card", "▢ การ์ดลอย"], ["drawer", "▕ แถบข้าง"]] as const).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => setPref({ ...pref, mode: k, minimized: false })}
+              title={k === "drawer" ? "แถบข้างขวา เปิดค้างจนกด ✕" : "การ์ดลอย ลากย้ายได้ กดข้างนอก = ซ่อน"}
+              className={`h-6 px-2 rounded-md border text-[11px] ${(pref.mode ?? "card") === k ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+          ))}
+        </div>
         <div className="mt-1.5 flex items-center gap-1">
           <span className="text-[11px] text-slate-400 mr-1">ลอยที่</span>
           {([["br", "↘ ขวาล่าง"], ["tr", "↗ ขวาบน"]] as const).map(([k, l]) => (
@@ -119,7 +154,7 @@ export function WorkPopupFloatToggle() {
           ))}
           {pref.anchor && <span title="ลากป๊อปไปวางเองไว้ · กดมุมด้านซ้ายเพื่อกลับไปมุมสำเร็จรูป" className="h-6 px-2 leading-6 rounded-md border border-blue-300 bg-blue-50 text-blue-700 font-medium text-[11px]">📍 ที่ลากไว้</span>}
         </div>
-      ) : (
+      </>) : (
         <p className="mt-1 text-[11px] text-slate-400">ปิดอยู่ — ป๊อปไม่เด้ง (ทุกเครื่องของคุณ)</p>
       )}
     </div>
