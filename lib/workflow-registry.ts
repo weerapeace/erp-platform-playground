@@ -1,0 +1,142 @@
+/**
+ * 🗺️ ทะเบียน workflow กลาง — "เส้นทางงานแต่ละเรื่อง กติกาอยู่ไฟล์ไหน แตะตารางไหน"
+ *
+ * เจ้าของสั่ง 2026-11-02: ก่อนแก้ workflow ต้องเช็กก่อนว่ามีระบบไหนใช้อยู่บ้าง
+ *   → ก่อนแก้ ให้รัน  npm run where-used -- <key หรือชื่อไฟล์>  (scripts/where-used.mjs อ่านไฟล์นี้)
+ *     แล้วแนบรายการ "หน้าไหนกระทบ" เป็นภาษาคนในแผนให้เจ้าของดูก่อน
+ *
+ * ไฟล์นี้เก็บแค่ "ของที่คนต้องบอก" (กติกาอยู่ไหน · ตารางไหน · ยังไม่เป็นของกลางตรงไหน)
+ * ส่วน "ใครใช้บ้าง" ห้ามจดมือ — สคริปต์ไล่หาจากโค้ดจริงทุกครั้ง จะได้ไม่ตกหล่น/ไม่ล้าสมัย
+ *
+ * คู่กับทะเบียนกติกาธุรกิจภาษาคน (หน้า /master/logic · ตาราง erp_logic_registry) ผ่าน logicIds
+ * เพิ่ม workflow ใหม่ / ย้ายกติกาไปไฟล์ใหม่ → แก้ที่ไฟล์นี้ที่เดียว (เทสต์เช็กว่าไฟล์ที่อ้างมีอยู่จริง)
+ * ⚠️ ไฟล์นี้ต้อง pure (ไม่ import อะไร) — สคริปต์ Node อ่านตรง และหน้าเว็บใช้ได้
+ */
+
+export type WorkflowDef = {
+  /** รหัสสั้น ใช้กับคำสั่ง where-used */
+  key: string;
+  /** ชื่อภาษาคน */
+  label: string;
+  /** เส้นทางสถานะแบบย่อ */
+  flow: string;
+  /** ไฟล์กติกากลาง (ของกลาง) — แก้กติกาที่นี่ */
+  ruleFiles: string[];
+  /** ประตูเปลี่ยนสถานะ (API ที่บันทึกสถานะจริง) */
+  gates: string[];
+  /** ตารางในฐานข้อมูลของ workflow นี้ */
+  tables: string[];
+  /** คอลัมน์/คำที่ถ้าไฟล์อื่นอ่านเอง = อาจคิดกติกาเอง (regex) */
+  signals: string[];
+  /** workflow อื่นที่ใช้ผลของ workflow นี้ → แก้ตัวนี้ ตัวนั้นกระทบด้วย */
+  feeds?: string[];
+  /** รหัสกติกาธุรกิจใน /master/logic */
+  logicIds?: string[];
+  /** จุดที่ยังไม่เป็นของกลาง (ภาษาคน) — งานค้างที่ควรเก็บ */
+  gaps?: string[];
+};
+
+export const WORKFLOWS: WorkflowDef[] = [
+  {
+    key: "mo-production",
+    label: "การผลิต (ใบสั่งผลิต)",
+    flow: "เปิดใบ → เตรียม/ตัด → จ่ายงาน → ช่างส่งงาน → QC → ปิดใบ / ยกเลิก",
+    ruleFiles: ["lib/mo-status.ts", "lib/mo-workflow.ts", "lib/mo-skip.ts", "lib/mo-dispatch.ts"],
+    gates: ["app/api/mo/[id]/status/route.ts", "app/api/mo/work-orders/route.ts", "app/api/mo/work-orders/[id]/route.ts", "app/api/mo/submissions/route.ts"],
+    tables: ["manufacturing_orders", "mo_work_orders"],
+    signals: ["received_qty", "dispatch_date", "skipped_stages"],
+    feeds: ["mo-materials", "piecework"],
+    logicIds: ["LOG-WF-0001", "LOG-JOB-0001", "LOG-JOB-0004"],
+    gaps: [
+      "คำถาม \"ใบนี้ช่างส่งงานครบหรือยัง\" ยังคิดอยู่หลายที่ และกติกาไม่ตรงกัน: lib/mo-status ไม่ดูการข้ามขั้นรับคืน · dashboard การผลิตคิดเอง",
+      "สถานะ MO ใน DB เป็น draft ทุกใบที่เปิดอยู่ — ต้องถามบอร์ดจ่ายงาน (lib/mo-dispatch) ห้ามดูจาก status",
+    ],
+  },
+  {
+    key: "mo-materials",
+    label: "วัตถุดิบของใบสั่งผลิต",
+    flow: "ต้องซื้อ → ขอแล้ว (รออนุมัติ) → สั่งแล้ว (มี PO) → ได้ของ / มีของ / เตรียมแล้ว",
+    ruleFiles: ["lib/mo-material-status.ts", "lib/pr-line-code.ts"],
+    gates: ["app/api/mo/material/route.ts", "app/api/mo/material-line/route.ts", "app/api/mo/material-allocations/route.ts", "app/api/mo/[id]/mark-ready/route.ts"],
+    tables: ["mo_material_summary", "mo_material_allocations"],
+    signals: ["to_purchase_qty", "source_mo_nos"],
+    logicIds: ["LOG-MFG-0002", "LOG-JOB-0005", "LOG-PR-0001"],
+  },
+  {
+    key: "piecework",
+    label: "จ่ายงานเหมา / ค่าแรงชิ้นงาน",
+    flow: "จ่ายงานเหมา (งาน × คน) → รับคืนชิ้นงาน → คิดค่าเหมา",
+    ruleFiles: ["lib/piecework-dispatch.ts"],
+    gates: ["app/api/mo/piecework/route.ts"],
+    tables: ["mo_piecework", "bom_piecework_lines"],
+    signals: ["done_qty"],
+    logicIds: ["LOG-LABOR-0001"],
+  },
+  {
+    key: "purchasing",
+    label: "จัดซื้อ (ขอซื้อ → สั่งซื้อ → รับของ)",
+    flow: "ขอซื้อ → อนุมัติ / ไม่อนุมัติ → ออก PO (ร่าง = สั่งแล้ว) → รับของ (ครบ / บางส่วน / ปิดยอด) → ใบสำคัญรับ",
+    ruleFiles: ["lib/po-total.ts", "lib/po-line-price.ts", "lib/po-manual.ts", "lib/pr-cart.ts", "lib/purchase-voucher-server.ts", "components/receive-line-modal/index.tsx"],
+    gates: [
+      "app/api/purchasing/pr-approve/route.ts", "app/api/purchasing/pr-delete/route.ts", "app/api/purchasing/create-po/route.ts",
+      "app/api/purchasing/receive/route.ts", "app/api/purchasing/cancel-line/route.ts",
+    ],
+    tables: ["purchase_requests_v2", "purchase_orders_v2", "purchase_order_lines_v2", "goods_receipts_v2", "goods_receipt_lines_v2"],
+    signals: ["line_closed"],
+    feeds: ["mo-materials"],
+    logicIds: ["LOG-PUR-0001", "LOG-REC-0001", "LOG-PR-0001"],
+    gaps: ["สถานะใบขอซื้อ / ใบสั่งซื้อยังไม่มีไฟล์กติกากลาง — แต่ละ API เปลี่ยนสถานะเอง (pr-approve, create-po, receive, lib/order-capture)"],
+  },
+  {
+    key: "sales-order",
+    label: "ใบขาย (SO)",
+    flow: "ร่าง → ยืนยัน → กำลังผลิต → พร้อมส่ง → ส่งแล้ว → สำเร็จ / ยกเลิก",
+    ruleFiles: ["lib/so-status.ts"],
+    gates: [],
+    tables: ["erp_playground_sales_orders"],
+    signals: [],
+    logicIds: ["LOG-SALES-0001", "LOG-SALES-0006"],
+    gaps: ["มีแค่ป้าย/สีสถานะเป็นของกลาง — ยังไม่มีกติกา \"เปลี่ยนจากสถานะไหนไปไหนได้\""],
+  },
+  {
+    key: "website-order",
+    label: "ออเดอร์เว็บร้าน",
+    flow: "รอดำเนินการ → กำลังเตรียม → ส่งแล้ว → สำเร็จ / ยกเลิก (+ สถานะจ่ายเงินแยก: ยังไม่จ่าย → จ่ายแล้ว → คืนเงิน)",
+    ruleFiles: ["lib/website-order-status.ts"],
+    gates: ["app/api/website/orders/route.ts"],
+    tables: ["store_orders", "store_order_items"],
+    signals: ["payment_status"],
+    logicIds: ["LOG-MKT-0002", "LOG-MKT-0004"],
+  },
+  {
+    key: "creative-task",
+    label: "งานครีเอทีฟ / งานย่อย + อนุมัติผลงาน",
+    flow: "ตั้งค่าได้ในระบบ (ตาราง erp_creative_statuses + เส้นทาง) · อนุมัติ / ตีกลับ / แก้ ต้องมีสิทธิ์ tasks.approve",
+    ruleFiles: ["lib/creative-statuses-server.ts", "lib/creative-status-colors.ts", "lib/approval-token.ts"],
+    gates: [],
+    tables: ["erp_creative_statuses", "erp_creative_status_transitions"],
+    signals: [],
+  },
+  {
+    key: "status-labels",
+    label: "ป้ายสถานะกลาง (ตาราง / การ์ดสรุป)",
+    flow: "ชื่อ + สีป้ายสถานะที่ตารางกลางและการ์ดสรุปใช้ร่วมกัน (ตั้งทับรายโมดูลได้)",
+    ruleFiles: ["lib/status-config.ts"],
+    gates: [],
+    tables: [],
+    signals: [],
+  },
+];
+
+/** หา workflow จาก key หรือชื่อไฟล์กติกา (เช่น "mo-dispatch" / "lib/mo-dispatch.ts") */
+export function findWorkflows(q: string): WorkflowDef[] {
+  const s = q.trim().toLowerCase().replace(/\\/g, "/");
+  if (!s) return [];
+  const byKey = WORKFLOWS.filter((w) => w.key === s);
+  if (byKey.length) return byKey;
+  return WORKFLOWS.filter((w) => w.ruleFiles.some((f) => {
+    const name = f.toLowerCase();
+    const base = name.split("/").pop()!.replace(/\.(ts|tsx)$/, "");
+    return name === s || base === s || name.replace(/\.(ts|tsx)$/, "") === s || (base === "index" && name.includes(`/${s}/`));
+  }));
+}
