@@ -44,12 +44,33 @@ type Picker = null | "excel" | "sku" | "parent" | "quote" | "mo";
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const newKey = (name: string) => `new:${name.trim()}`;
 
-export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCustomer, title = "เพิ่มออเดอร์หลายรายการ" }: {
+/** ค่าที่จำ "แบรนด์นี้ปกติเป็นลูกค้าใคร" ต่อผู้ใช้ (/api/user-prefs) — ลงออเดอร์จากใบงานครั้งถัดไปเติมให้ */
+const BRAND_CUSTOMER_PREF = "so_order_brand_customer";
+type BrandCustomerMap = Record<string, { id: string; code: string | null; name: string }>;
+
+/** ใบงานออกแบบ → รายการตั้งต้น: มี Parent SKU = กางทุกสี/แบบ · ยังไม่มี = ลงเป็นชื่อไว้ก่อน (เปิดผลิตไม่ได้จนสร้าง SKU) */
+export async function seedsFromDesignSheets(sheets: { id: string; code: string; name: string }[]): Promise<BatchSeedLine[]> {
+  const out: BatchSeedLine[] = [];
+  for (const s of sheets) {
+    let skus: { code: string; name_th: string | null; color: string | null; list_price: number | null; cover_image_r2_key: string | null }[] = [];
+    try { const j = await apiFetch(`/api/design-sheets/${s.id}/skus`).then((r) => r.json()); skus = j.data ?? []; } catch { /* ถือว่ายังไม่มี SKU */ }
+    if (skus.length) {
+      for (const k of skus) out.push({ sku: k.code, product_name: k.name_th || k.code, qty: 0, unit_price: Number(k.list_price) || 0, note: k.color, image_key: k.cover_image_r2_key, source: "design" });
+    } else {
+      out.push({ sku: null, product_name: `${s.name} (${s.code})`, qty: 0, source: "design", no_sku_hint: `ใบงาน ${s.code} ยังไม่มี SKU — สร้าง SKU ก่อนจึงเปิดใบสั่งผลิตได้` });
+    }
+  }
+  return out;
+}
+
+export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCustomer, brand, title = "เพิ่มออเดอร์หลายรายการ" }: {
   open: boolean;
   onClose: () => void;
   onSaved?: (r: { id: string; order_no: string | null }) => void;
   seedLines?: BatchSeedLine[];
   seedCustomer?: CustomerPickerValue | null;
+  /** มาจากใบงานแบรนด์เดียว → เติมลูกค้าที่เคยใช้กับแบรนด์นี้ + จำไว้หลังบันทึก */
+  brand?: { id: string; name: string | null } | null;
   title?: string;
 }) {
   const toast = useToast();
@@ -67,12 +88,24 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
   const [picker, setPicker] = useState<Picker>(null);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [brandMap, setBrandMap] = useState<BrandCustomerMap>({});
+  const [autoCustomer, setAutoCustomer] = useState(false);
 
   // ── เปิดป๊อป = เริ่มใหม่ (+ รายการตั้งต้น) ──
   useEffect(() => {
     if (!open) return;
     setCustomer(seedCustomer ?? null); setDueDate(""); setPoNo(""); setDefaultGroup(null);
     setLines([]); setMeta({}); setPicked(new Set()); setBulkQty(""); setOpenMo(true); setErr("");    if (seedLines?.length) addSeeds(seedLines, null, []);
+    setAutoCustomer(false);
+    if (brand?.id) void (async () => {
+      try {
+        const j = await apiFetch(`/api/user-prefs?key=${BRAND_CUSTOMER_PREF}`).then((r) => r.json());
+        const map = (j.value ?? {}) as BrandCustomerMap;
+        setBrandMap(map);
+        const c = map[brand.id];
+        if (c && !seedCustomer) { setCustomer({ id: c.id, code: c.code, name: c.name } as CustomerPickerValue); setAutoCustomer(true); }
+      } catch { /* ไม่มีค่าจำ = เลือกเอง */ }
+    })();
     void (async () => {
       try {
         const j = await apiFetch("/api/admin/companies").then((r) => r.json());
@@ -232,6 +265,11 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
       const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "บันทึกไม่สำเร็จ");
       for (const g of filled.map((l) => meta[l.tempId]?.group).filter((g): g is MoGroupPick => !!g?.id)) rememberMoGroup({ id: g.id!, name: g.name });
       for (const g of (j.new_groups ?? []) as { id: string; name: string }[]) rememberMoGroup(g);
+      // จำลูกค้าของแบรนด์นี้ไว้ (ลงออเดอร์จากใบงานครั้งหน้าเติมให้)
+      if (brand?.id && customer!.id && brandMap[brand.id]?.id !== customer!.id) {
+        void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: BRAND_CUSTOMER_PREF, value: { ...brandMap, [brand.id]: { id: customer!.id, code: customer!.code ?? null, name: customer!.name } } }) }).catch(() => {});
+      }
       const op = j.opened as { created: number; linked: number; grouped?: number } | null;
       toast.success(`สร้างใบสั่งขาย ${j.order_no ?? ""} · ${filled.length} รายการ${op ? ` · เปิดใบสั่งผลิต ${op.created} ใบ · ผูกเดิม ${op.linked} ใบ` : ""}${groupNames.size ? ` · เข้าชุด ${[...groupNames].join(", ")}` : ""}`);
       onSaved?.({ id: j.id, order_no: j.order_no ?? null });
@@ -258,7 +296,9 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
         <div className="space-y-3">
           <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
             <div><span className="text-[11px] text-slate-500">ลูกค้า *</span>
-              <div className="mt-0.5"><CustomerPicker value={customer} onChange={(v) => { setCustomer(v); setErr(""); }} /></div></div>
+              <div className="mt-0.5"><CustomerPicker value={customer} onChange={(v) => { setCustomer(v); setAutoCustomer(false); setErr(""); }} /></div>
+              {autoCustomer && brand?.name && <p className="mt-0.5 text-[11px] text-slate-400">เติมให้จากแบรนด์ {brand.name} (เคยใช้ครั้งก่อน · เปลี่ยนได้)</p>}
+              {!autoCustomer && brand?.id && !customer && <p className="mt-0.5 text-[11px] text-slate-400">เลือกครั้งเดียว — ครั้งหน้าระบบจำลูกค้าของแบรนด์ {brand.name ?? ""} ให้</p>}</div>
             <label className="block"><span className="text-[11px] text-slate-500">กำหนดส่ง</span>
               <div className="mt-0.5"><DateInput value={dueDate} onChange={setDueDate} /></div></label>
             <label className="block"><span className="text-[11px] text-slate-500">เลข PO ลูกค้า</span>

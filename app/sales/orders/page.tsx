@@ -34,6 +34,7 @@ import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc
 import { MoMultiPickerModal, type MoPickRow } from "@/components/mo-picker";
 import { MoGroupPicker, useMoGroups, rememberMoGroup, type MoGroupPick } from "@/components/mo-group-picker";
 import { OrderBatchEntryModal } from "@/components/order-batch-entry";
+import { SoBatchView } from "./batch-view";
 import { useViewPref } from "@/lib/use-view-pref";
 import { openLink } from "@/lib/open-param";
 import type { SourceDoc, SourceLine } from "@/app/api/so-orders/sources/route";
@@ -90,7 +91,8 @@ export default function SoOrdersPage() {
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
   const [cursor, setCursor] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
-  const { view, setView } = useViewPref("so_order_view", ["table", "calendar"] as const, "table");
+  const { view, setView } = useViewPref("so_order_view", ["table", "batch", "calendar"] as const, "table");
+  const [reloadKey, setReloadKey] = useState(0);              // บอกมุมมองตามชุดให้โหลดใหม่
 
   const [form, setForm] = useState<Form | null>(null);
   const [meta, setMeta] = useState<Record<string, LineMeta>>({});
@@ -109,7 +111,7 @@ export default function SoOrdersPage() {
       const j = await r.json();
       setRows((j.data ?? []) as Row[]);
     } catch { /* toast ด้านล่างพอ */ }
-    finally { setLoading(false); }
+    finally { setLoading(false); setReloadKey((k) => k + 1); }
   }, []);
   useEffect(() => { if (canView) void load(); }, [canView, load]);
   useEffect(() => {
@@ -338,6 +340,8 @@ export default function SoOrdersPage() {
         <div className="flex items-center gap-2">
           <div className="inline-flex bg-slate-100 rounded-lg p-0.5">
             <button onClick={() => setView("table")} className={`px-3 py-1.5 rounded-md text-sm font-medium ${view === "table" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>▦ ตาราง</button>
+            <button onClick={() => setView("batch")} title="ความคืบหน้าเป็นชุด (กลุ่มใบสั่งงาน)"
+              className={`px-3 py-1.5 rounded-md text-sm font-medium inline-flex items-center gap-1 ${view === "batch" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}><Icon name="folders" /> ตามชุด</button>
             <button onClick={() => setView("calendar")} className={`px-3 py-1.5 rounded-md text-sm font-medium ${view === "calendar" ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>📅 ปฏิทิน</button>
           </div>
           <button onClick={() => void load()} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">⟳</button>
@@ -371,6 +375,8 @@ export default function SoOrdersPage() {
           searchValue={search} onSearchChange={setSearch}
           emptyText={groupFilter ? "ไม่มีใบสั่งขายในชุดนี้" : "ยังไม่มีใบสั่งขาย — กด “เพิ่มหลายรายการ” หรือ “สร้างทีละใบ”"}
           footnote="กดแถวเพื่อเปิดใบ · ใบที่เปิดใบสั่งผลิตแล้วจะมีป้าย 🏭 · กดป้ายชุดเพื่อกรอง" />
+      ) : view === "batch" ? (
+        <SoBatchView groupFilter={groupFilter} canEdit={canEdit} canShip={canShip} reloadKey={reloadKey} onChanged={() => void load()} />
       ) : (
         <DocCalendar docs={calDocs} cursor={cursor} onCursor={setCursor} onPick={(id) => { const r = rows.find((x) => x.id === id); if (r) void openRow(r); }}
           hint="วางใบตามกำหนดส่ง · ใบที่ยังไม่ใส่กำหนดส่ง (~) วางตามวันที่สั่ง" />

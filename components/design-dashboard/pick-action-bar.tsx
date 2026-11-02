@@ -6,9 +6,15 @@ import { SEND_TO_BOARD_MAX } from "@/components/campaign-board-send";
 import { SUMMARY_MAX } from "./dashboard-helpers";
 import { useT } from "@/components/i18n";
 
-export function PickActionBar({ pickMode, pickPurpose, pickedIds, filteredSheets, canPick, setPickedIds, exitPickMode, openSummary, setCampaignPickOpen }: {
+/** ลงออเดอร์ได้ครั้งละไม่เกินกี่ใบงาน (กางสีแล้วรายการเยอะ) */
+export const ORDER_PICK_MAX = 30;
+
+export function PickActionBar({ pickMode, pickPurpose, pickedIds, filteredSheets, canPick, setPickedIds, exitPickMode, openSummary, setCampaignPickOpen, onOrder, orderLoading }: {
   pickMode: boolean;
-  pickPurpose: "board" | "summary";
+  pickPurpose: "board" | "summary" | "order";
+  /** โหมด "ลงออเดอร์" — กดแล้วเปิดป๊อปลงออเดอร์กลาง */
+  onOrder?: () => void;
+  orderLoading?: boolean;
   pickedIds: Set<string>;
   filteredSheets: DesignSheetListItem[];
   canPick: (sheet: DesignSheetListItem) => boolean;
@@ -22,15 +28,17 @@ export function PickActionBar({ pickMode, pickPurpose, pickedIds, filteredSheets
     <>{pickMode && createPortal(
             <div className="fixed inset-x-0 bottom-0 z-[80] border-t border-indigo-200 bg-white/95 px-4 py-3 shadow-[0_-6px_20px_rgba(15,23,42,0.10)] backdrop-blur">
               <div className="mx-auto flex max-w-screen-2xl flex-wrap items-center gap-3">
-                <span className="text-sm font-semibold text-slate-800">{pickPurpose === "summary" ? "📋" : "🎨"} {t(`เลือกไว้ ${pickedIds.size.toLocaleString("th-TH")} ใบ`, `${pickedIds.size.toLocaleString("th-TH")} selected`)}</span>
+                <span className="text-sm font-semibold text-slate-800">{pickPurpose === "summary" ? "📋" : pickPurpose === "order" ? "" : "🎨"} {t(`เลือกไว้ ${pickedIds.size.toLocaleString("th-TH")} ใบ`, `${pickedIds.size.toLocaleString("th-TH")} selected`)}</span>
                 <span className="text-xs text-slate-400">
                   {pickPurpose === "summary"
                     ? t(`กดการ์ดเพื่อเลือก · เฉพาะใบที่ยังไม่ปิดงาน · ไม่เกิน ${SUMMARY_MAX} ใบ`, `Click cards to select · open sheets only · up to ${SUMMARY_MAX}`)
+                    : pickPurpose === "order"
+                    ? t(`กดการ์ดเพื่อเลือก · ใบที่มี SKU กางทุกสีให้ · ยังไม่มี SKU ลงชื่อไว้ก่อน · ไม่เกิน ${ORDER_PICK_MAX} ใบ`, `Click cards to select · up to ${ORDER_PICK_MAX}`)
                     : t(`กดการ์ดเพื่อเลือก · ส่งได้ครั้งละไม่เกิน ${SEND_TO_BOARD_MAX} ใบ`, `Click cards to select · up to ${SEND_TO_BOARD_MAX} per send`)}
                 </span>
                 <div className="ml-auto flex flex-wrap items-center gap-2">
                   {(() => {
-                    const max = pickPurpose === "summary" ? SUMMARY_MAX : SEND_TO_BOARD_MAX;
+                    const max = pickPurpose === "summary" ? SUMMARY_MAX : pickPurpose === "order" ? ORDER_PICK_MAX : SEND_TO_BOARD_MAX;
                     const pickable = filteredSheets.filter(canPick);
                     return (
                       <button onClick={() => setPickedIds(new Set(pickable.map((s) => s.id).slice(0, max)))}
@@ -47,7 +55,12 @@ export function PickActionBar({ pickMode, pickPurpose, pickedIds, filteredSheets
                   <button onClick={exitPickMode} className="h-9 rounded-md border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50">
                     {t("ออกจากโหมด", "Exit mode")}
                   </button>
-                  {pickPurpose === "summary" ? (
+                  {pickPurpose === "order" ? (
+                    <button onClick={() => onOrder?.()} disabled={pickedIds.size === 0 || pickedIds.size > ORDER_PICK_MAX || orderLoading}
+                      className="h-9 rounded-md bg-orange-600 px-4 text-sm font-medium text-white hover:bg-orange-700 disabled:opacity-40">
+                      {orderLoading ? t("กำลังเตรียมรายการ…", "Preparing…") : <>{t("ลงออเดอร์", "Add orders")} →</>}
+                    </button>
+                  ) : pickPurpose === "summary" ? (
                     <button onClick={() => { const ids = Array.from(pickedIds).slice(0, SUMMARY_MAX); exitPickMode(); openSummary(null, ids); }} disabled={pickedIds.size === 0}
                       className="h-9 rounded-md bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-40">
                       {t("จัดสรุป", "Build summary")} →

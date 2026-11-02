@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { Icon } from "@/components/icon";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-board-send";
 import { useToast } from "@/components/toast";
@@ -62,6 +63,8 @@ import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 import dynamic from "next/dynamic";
 // แผงใบนำเสนอ A4 — โหลดเฉพาะตอนกด (ไม่ถ่วงป๊อปอัป)
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
+// ลงออเดอร์จากใบงานนี้ (ของกลาง ป๊อปเดียวกับหน้าใบสั่งขาย) — โหลดเฉพาะตอนกด
+const OrderBatchEntryModal = dynamic(() => import("@/components/order-batch-entry").then((m) => m.OrderBatchEntryModal), { ssr: false });
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
 type CostExtra = { label: string; amount: number };
@@ -457,6 +460,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const canCreate = usePermission("products.create");
   const canEdit = usePermission("products.edit");
   const canSeeCost = usePermission("products.cost.view");   // เห็นตัวเลขต้นทุน/กำไรของ Section สั่งจากร้าน (ผู้บริหาร/จัดซื้อ)
+  const canOrder = usePermission("so.create");               // ปุ่ม "ลงออเดอร์" (ใบสั่งขาย)
+  const [orderSeed, setOrderSeed] = useState<import("@/components/order-batch-entry").BatchSeedLine[] | null>(null);
+  const [orderLoading, setOrderLoading] = useState(false);
   const [supplierDirty, setSupplierDirty] = useState(false); // Section สั่งจากร้าน มีแก้ค้างไหม (เตือนก่อนปิด)
   const supplierSaveRef = useRef<(() => Promise<void>) | null>(null);   // ปุ่ม "บันทึกแล้วปิด" เรียกบันทึก Section นี้ได้ด้วย
   const { can, user } = useAuth();
@@ -1957,6 +1963,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   title={t("เลือกแคมเปญ แล้วไปวางการ์ดใบงานนี้บนกระดานวางแผน", "Pick a campaign, then place this design sheet card on its planning board")}
                   className="h-9 px-3 inline-flex items-center text-sm border border-indigo-200 rounded-lg text-indigo-700 hover:bg-indigo-50">{t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}</button>
               )}
+              {/* ลงออเดอร์ลูกค้าจากใบงานนี้ (กางทุกสีจาก Parent SKU · ยังไม่มี SKU = ลงชื่อไว้) → ป๊อปลงออเดอร์กลาง */}
+              {canOrder && (
+                <button type="button" disabled={orderLoading} onClick={() => void (async () => {
+                  if (!form.id) return;
+                  setOrderLoading(true);
+                  try { const { seedsFromDesignSheets } = await import("@/components/order-batch-entry"); setOrderSeed(await seedsFromDesignSheets([{ id: form.id, code: form.code, name: form.name }])); }
+                  finally { setOrderLoading(false); }
+                })()}
+                  title={t("ลงใบงานนี้เป็นออเดอร์ลูกค้า (ใบสั่งขาย) + จับชุด", "Add this sheet as a customer order")}
+                  className="h-9 px-3 inline-flex items-center gap-1 text-sm border border-orange-200 rounded-lg text-orange-700 hover:bg-orange-50 disabled:opacity-50">
+                  <Icon name="cart" /> {orderLoading ? t("กำลังเตรียม…", "Preparing…") : t("ลงออเดอร์", "Add order")}</button>
+              )}
               {/* ใบนำเสนอ A4 (เสนอลูกค้า) — แผงลอย จัดรูป/ข้อความ 1-2 หน้า แล้วพิมพ์ (ของกลาง design-sheet-present) */}
               <button type="button" onClick={() => { if (!form.id) return; if (onOpenPresentation) onOpenPresentation(form.id); else setPresentOpen(true); }}
                 title={t("จัดใบนำเสนอ A4 สำหรับเสนอลูกค้า (เลือกรูป + ข้อความ 1-2 หน้า แล้วพิมพ์/PDF)", "Build an A4 presentation for the customer (pick images + text, 1-2 pages, then print/PDF)")}
@@ -2489,6 +2507,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
       {/* Wizard สร้าง Parent SKU + SKU ลูก จากใบงาน */}
         {presentOpen && form?.id && <DesignSheetPresentPanel sheetId={form.id} open={presentOpen} onClose={() => setPresentOpen(false)} />}
+        {orderSeed && form?.id && (
+          <OrderBatchEntryModal open seedLines={orderSeed} title={`ลงออเดอร์จากใบงาน ${form.code}`} onClose={() => setOrderSeed(null)}
+            brand={form.brand_id ? { id: form.brand_id, name: brands.find((b) => b.id === form.brand_id)?.name ?? null } : null} />
+        )}
       {form?.id && (
         <SkuWizard open={skuWizard} onClose={() => setSkuWizard(false)}
           sheetId={form.id} sheetName={form.name} brandId={form.brand_id || null}

@@ -13,6 +13,7 @@ import { buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { SheetHoverSettingsButton, useSheetHoverPref } from "./sheet-hover";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { usePermission } from "@/components/auth";
+import { Icon } from "@/components/icon";
 import { CampaignBoardPicker, useCanSendToBoard } from "@/components/campaign-board-send";
 import { SummaryListMenu } from "@/components/design-sheet-summary/list-menu";
 import { RecordTasksButton } from "@/components/record-tasks";
@@ -42,10 +43,13 @@ const DesignSheetDetail = dynamic(() => import("@/components/design-sheet-detail
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 // ป๊อป "📋 สรุปงาน" (ของกลาง design-sheet-summary) — โหลดเฉพาะตอนเปิด
 const DesignSheetSummaryBuilder = dynamic(() => import("@/components/design-sheet-summary").then((m) => m.DesignSheetSummaryBuilder), { ssr: false });
+// ลงออเดอร์จากใบงาน (ของกลาง ป๊อปเดียวกับหน้าใบสั่งขาย) — โหลดเมื่อใช้
+const OrderBatchEntryModal = dynamic(() => import("@/components/order-batch-entry").then((m) => m.OrderBatchEntryModal), { ssr: false });
 
 export function DesignDashboard() {
   const t = useT();
   const canEdit = usePermission("products.edit");
+  const canOrder = usePermission("so.create");
   const canTasks = useCanSendToBoard();   // มีสิทธิ์เข้าแอปงาน (ที่กระดานแคมเปญอยู่) ไหม — ไม่มี = ไม่โชว์ปุ่ม
   const [sheets, setSheets] = useState<DesignSheetListItem[]>([]);
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
@@ -180,7 +184,10 @@ export function DesignDashboard() {
 
   // ── โหมดติ๊กเลือกใบงาน — ใช้ 2 งาน: 🎨 ส่งขึ้นกระดานแคมเปญ (ของกลาง campaign-board-send) / 📋 สรุปงาน (ของกลาง design-sheet-summary) ──
   const [pickMode, setPickMode] = useState(false);
-  const [pickPurpose, setPickPurpose] = useState<"board" | "summary">("board");
+  const [pickPurpose, setPickPurpose] = useState<"board" | "summary" | "order">("board");
+  // 📦 ลงออเดอร์: ใบงานที่ติ๊ก → รายการตั้งต้น (กางสี/แบบจาก Parent SKU · ยังไม่มี SKU = ลงชื่อไว้) → ป๊อปลงออเดอร์กลาง
+  const [orderSeed, setOrderSeed] = useState<{ seeds: import("@/components/order-batch-entry").BatchSeedLine[]; brand: { id: string; name: string | null } | null } | null>(null);
+  const [orderLoading, setOrderLoading] = useState(false);
   const [pickedIds, setPickedIds] = useState<Set<string>>(new Set());
   const [campaignPickOpen, setCampaignPickOpen] = useState(false);
   // สรุปงาน: เลือกได้เฉพาะใบที่ยังไม่ปิดงาน (เจ้าของขอ)
@@ -191,7 +198,20 @@ export function DesignDashboard() {
     setPickedIds((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   };
   const exitPickMode = () => { setPickMode(false); setPickedIds(new Set()); setCampaignPickOpen(false); };
-  const startPick = (purpose: "board" | "summary") => { setPickPurpose(purpose); setPickedIds(new Set()); setPickMode(true); };
+  const startPick = (purpose: "board" | "summary" | "order") => { setPickPurpose(purpose); setPickedIds(new Set()); setPickMode(true); };
+  const openOrderFromPicked = async () => {
+    const picked = sheets.filter((s) => pickedIds.has(s.id));
+    if (picked.length === 0) return;
+    setOrderLoading(true);
+    try {
+      const { seedsFromDesignSheets } = await import("@/components/order-batch-entry");
+      const seeds = await seedsFromDesignSheets(picked);
+      const brandIds = [...new Set(picked.map((s) => s.brand_id))];
+      const brand = brandIds.length === 1 && brandIds[0] ? { id: brandIds[0], name: picked[0].brand_name } : null;
+      exitPickMode();
+      setOrderSeed({ seeds, brand });
+    } finally { setOrderLoading(false); }
+  };
   // ป๊อปสรุปงาน + ดรอปดาวน์ "สรุปที่บันทึกไว้"
   const [summaryBuilder, setSummaryBuilder] = useState<{ id: string | null; sheetIds: string[] } | null>(null);
   const [summaryMenuOpen, setSummaryMenuOpen] = useState(false);
@@ -484,6 +504,7 @@ export function DesignDashboard() {
                   </button>
                   {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else startPick("board"); setMoreOpen(false); }}>{pickMode ? t("✕ ออกจากโหมดเลือก", "✕ Exit select mode") : t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}</button>}
                   {canEdit && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("summary"); setMoreOpen(false); }}>📋 {t("สรุปงานใหม่ (เลือกใบงาน)", "New summary (pick sheets)")}</button>}
+                  {canOrder && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("order"); setMoreOpen(false); }}><Icon name="cart" /> {t("ลงออเดอร์ (เลือกใบงาน)", "Add orders (pick sheets)")}</button>}
                   {canEdit && <button type="button" className={menuItem} onClick={() => { setMoreOpen(false); setSummaryMenuOpen(true); }}>📂 {t("สรุปที่บันทึกไว้", "Saved summaries")}</button>}
                   <button type="button" className={menuItem} onClick={() => { setBrandSettingsOpen(true); setMoreOpen(false); }}>⚙️ {t("ตั้งค่าแบรนด์", "Brand settings")}</button>
                 </div>
@@ -627,6 +648,14 @@ export function DesignDashboard() {
                     {pickMode && pickPurpose === "board" ? t("✕ ออกจากโหมดเลือก", "✕ Exit select mode") : t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}
                   </button>
                 )}
+                {/* 📦 ลงออเดอร์: ติ๊กใบงานหลายใบ → ป๊อปลงออเดอร์กลาง (ตัวเดียวกับหน้าใบสั่งขาย) */}
+                {canOrder && (
+                  <button type="button" onClick={() => (pickMode && pickPurpose === "order" ? exitPickMode() : startPick("order"))}
+                    title={t("ติ๊กเลือกใบงานแล้วลงเป็นออเดอร์ลูกค้า (ใบสั่งขาย) + จับชุด", "Select sheets and add them as customer orders")}
+                    className={`inline-flex h-9 items-center gap-1 rounded-md border px-3 text-xs font-medium transition ${pickMode && pickPurpose === "order" ? "border-orange-600 bg-orange-600 text-white" : "border-orange-200 bg-white text-orange-700 hover:bg-orange-50"}`}>
+                    {pickMode && pickPurpose === "order" ? t("✕ ออกจากโหมดลงออเดอร์", "✕ Exit order mode") : <><Icon name="cart" /> {t("ลงออเดอร์", "Add orders")}</>}
+                  </button>
+                )}
                 {/* 📋 สรุปงาน: สรุปใหม่ (ติ๊กเลือกใบที่ยังไม่ปิด) / เปิดสรุปที่บันทึกไว้ — ป๊อปของกลาง design-sheet-summary */}
                 {canEdit && (
                   <div className="relative" ref={summaryAnchorRef}>
@@ -727,7 +756,11 @@ export function DesignDashboard() {
       <DevicePreviewFrame layout={layout} viewport={viewport} onExitPreview={() => setDeviceMode("auto")}>{body}</DevicePreviewFrame>
 
       {/* แถบล่าง "เลือกไว้ N ใบ" (Bulk action bar) — โผล่เฉพาะโหมดเลือก */}
-      <PickActionBar pickMode={pickMode} pickPurpose={pickPurpose} pickedIds={pickedIds} filteredSheets={filteredSheets} canPick={canPick} setPickedIds={setPickedIds} exitPickMode={exitPickMode} openSummary={openSummary} setCampaignPickOpen={setCampaignPickOpen} />
+      <PickActionBar pickMode={pickMode} pickPurpose={pickPurpose} pickedIds={pickedIds} filteredSheets={filteredSheets} canPick={canPick} setPickedIds={setPickedIds} exitPickMode={exitPickMode} openSummary={openSummary} setCampaignPickOpen={setCampaignPickOpen}
+        onOrder={() => void openOrderFromPicked()} orderLoading={orderLoading} />
+
+      {/* 📦 ลงออเดอร์จากใบงานที่ติ๊ก (ของกลาง) */}
+      {orderSeed && <OrderBatchEntryModal open seedLines={orderSeed.seeds} brand={orderSeed.brand} title="ลงออเดอร์จากใบงานออกแบบ" onClose={() => setOrderSeed(null)} />}
 
       {/* เลือกแคมเปญปลายทาง (ของกลาง) */}
       <CampaignBoardPicker open={campaignPickOpen} onClose={() => setCampaignPickOpen(false)} sheetIds={Array.from(pickedIds)} />

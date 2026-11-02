@@ -99,6 +99,17 @@ export const WORKFLOWS: WorkflowDef[] = [
     gaps: ["มีแค่ป้าย/สีสถานะเป็นของกลาง — ยังไม่มีกติกา \"เปลี่ยนจากสถานะไหนไปไหนได้\""],
   },
   {
+    key: "so-order",
+    label: "ใบสั่งขาย (ออเดอร์ลูกค้า) + ชุด",
+    flow: "ลงออเดอร์ (จัดชุด) → เปิดใบสั่งผลิต (เข้าชุดเอง) → กำลังผลิต → ทำเสร็จ → ส่งแล้ว (ออกใบขายได้) / ยกเลิก",
+    ruleFiles: ["app/api/so-orders/open-mo.ts", "lib/so-order-stage.ts"],
+    gates: ["app/api/so-orders/route.ts", "app/api/so-orders/[id]/route.ts"],
+    tables: ["so_orders", "so_order_lines", "mo_groups"],
+    signals: ["mo_group_id", "mo_opened_at"],
+    feeds: ["mo-production", "sales-order"],
+    gaps: ["สถานะใบสั่งขาย (confirmed/shipped/cancelled) ยังเปลี่ยนตรงใน /api/so-orders/[id] — ยังไม่มีไฟล์กติกา \"จากไหนไปไหนได้\""],
+  },
+  {
     key: "website-order",
     label: "ออเดอร์เว็บร้าน",
     flow: "รอดำเนินการ → กำลังเตรียม → ส่งแล้ว → สำเร็จ / ยกเลิก (+ สถานะจ่ายเงินแยก: ยังไม่จ่าย → จ่ายแล้ว → คืนเงิน)",
