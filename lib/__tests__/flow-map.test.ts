@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { FLOW_NODES, FLOW_EDGES, FLOW_VIEWS, FLOW_METRICS, FLOW_JOURNEY, FLOW_ISSUE_APP } from "@/lib/flow-map";
+import { FLOW_NODES, FLOW_EDGES, FLOW_VIEWS, FLOW_METRICS, FLOW_JOURNEY, FLOW_ISSUE_APP, FLOW_FINANCE_ONLY, flowViewsFor } from "@/lib/flow-map";
 import { flowGeometryProblems, isRecentEdge } from "@/lib/flow-map-layout";
 import { buildFlowPrompt } from "@/lib/flow-map-prompt";
 import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
@@ -100,6 +100,26 @@ describe("ทะเบียนแผนผังการทำงาน", () =
       const spots = Object.values(v.pos).map((p) => p.join(","));
       expect(new Set(spots).size, `${v.key}: กล่องทับกัน`).toBe(spots.length);
     }
+  });
+
+  it("ผังการเงิน: คนไม่มีสิทธิ์ไม่เห็นสักผัง · มีสิทธิ์เห็นครบ · มีหัวคอลัมน์ 4 ช่อง", () => {
+    const fin = FLOW_VIEWS.filter((v) => v.finance);
+    expect(fin.map((v) => v.key)).toEqual(["cash", "cashin", "cashout", "debt", "acct"]);
+    expect(flowViewsFor(false).some((v) => v.finance)).toBe(false);
+    expect(flowViewsFor(true).length).toBe(FLOW_VIEWS.length);
+    for (const v of fin) expect(v.heads?.length, v.key).toBe(4);
+  });
+
+  it("ผังการเงิน: ตัวเลขเงินติดได้แค่กล่อง/เส้นที่มีแค่ในผังการเงิน (ผังทั่วไปไม่โชว์ช่องว่าง/ไม่หลุด)", () => {
+    const leak = [
+      ...Object.entries(FLOW_NODES).filter(([id]) => !FLOW_FINANCE_ONLY.nodes.has(id)),
+      ...Object.entries(FLOW_EDGES).filter(([id]) => !FLOW_FINANCE_ONLY.edges.has(id)),
+    ].flatMap(([id, x]) => (x.metrics ?? []).filter((m) => FLOW_METRICS[m].finance).map((m) => `${id}: ${m}`));
+    expect(leak).toEqual([]);
+    expect(FLOW_FINANCE_ONLY.nodes.has("bank")).toBe(true);
+    expect(FLOW_FINANCE_ONLY.nodes.has("bill")).toBe(false);
+    expect(FLOW_FINANCE_ONLY.edges.has("F16")).toBe(true);
+    expect(FLOW_FINANCE_ONLY.edges.has("S7")).toBe(false);
   });
 
   it("ภาพรวมมีครบ 4 ส่วน", () => {

@@ -1,15 +1,17 @@
 "use client";
 
 /**
- * พิมพ์แผนผังการทำงานเป็นกระดาษ / PDF — /print/flow-map (?view=ov|buy|make|dispatch|sell · ไม่ส่ง = ทุกผัง + ออเดอร์ 1 ใบ)
+ * พิมพ์แผนผังการทำงานเป็นกระดาษ / PDF — /print/flow-map (?view=<key ใน FLOW_VIEWS> · ไม่ส่ง = ทุกผังที่เห็น + ออเดอร์ 1 ใบ)
  * 1 หน้า A4 แนวนอน ต่อ 1 ผัง: ผัง (SVG จาก lib/flow-map-layout) + ตารางเส้น · ปิดท้ายด้วยตาราง "ออเดอร์ 1 ใบ เดินทางยังไง"
+ * ผังการเงินพิมพ์ได้เฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM (flowViewsFor)
  * ของกลาง: ระบบพิมพ์ (buildReportHtmlMulti + PrintFrame) — สั่งพิมพ์แล้วเลือก "บันทึกเป็น PDF" ได้
  */
 import { Suspense, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
+import { useAuth } from "@/components/auth";
 import { buildReportHtmlMulti, type ReportTemplate } from "@/lib/template";
-import { FLOW_VIEWS, FLOW_EDGES, FLOW_NODES, FLOW_EDGE_TYPES, FLOW_JOURNEY, FLOW_AREA_LABEL } from "@/lib/flow-map";
+import { FLOW_EDGES, FLOW_NODES, FLOW_EDGE_TYPES, FLOW_JOURNEY, FLOW_AREA_LABEL, FLOW_FINANCE_PERM, flowViewsFor } from "@/lib/flow-map";
 import { flowViewSvg, layoutFlowView, isRecentEdge } from "@/lib/flow-map-layout";
 
 const CSS = `
@@ -47,10 +49,13 @@ const legend = () => `<div class="legend">${Object.values(FLOW_EDGE_TYPES).map((
 function FlowMapPrint() {
   const sp = useSearchParams();
   const only = sp.get("view");
+  const { can } = useAuth();
+  const canFinance = can(FLOW_FINANCE_PERM);
+  const allowed = useMemo(() => flowViewsFor(canFinance), [canFinance]);
   const html = useMemo(() => {
     const now = new Date();
     const printed = now.toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" });
-    const views = FLOW_VIEWS.filter((v) => !only || v.key === only);
+    const views = allowed.filter((v) => !only || v.key === only);
     const pages = views.map((v) => {
       const rows = layoutFlowView(v).map((d) => {
         const e = FLOW_EDGES[d.id], ty = FLOW_EDGE_TYPES[e.type];
@@ -77,7 +82,7 @@ function FlowMapPrint() {
         body: `${legend()}<table><thead><tr><th class="n">#</th><th style="width:22mm">แบบ</th><th colspan="2">ขั้น / การส่งต่อ</th></tr></thead><tbody>${rows}</tbody></table>` });
     }
     return buildReportHtmlMulti(TEMPLATE, pages, "แผนผังการทำงาน");
-  }, [only]);
+  }, [only, allowed]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -90,7 +95,7 @@ function FlowMapPrint() {
   return (
     <div className="min-h-screen bg-slate-100 py-4">
       <div className="max-w-[1180px] mx-auto px-4 mb-3 flex items-center gap-2 flex-wrap">
-        <div className="flex-1 text-sm text-slate-600">พิมพ์แผนผังการทำงาน{only ? ` — ${FLOW_VIEWS.find((v) => v.key === only)?.label ?? ""}` : " — ทุกผัง + ออเดอร์ 1 ใบ"} · สั่งพิมพ์แล้วเลือก “บันทึกเป็น PDF” ได้</div>
+        <div className="flex-1 text-sm text-slate-600">พิมพ์แผนผังการทำงาน{only ? ` — ${allowed.find((v) => v.key === only)?.label ?? "ไม่มีสิทธิ์ดูผังนี้"}` : " — ทุกผัง + ออเดอร์ 1 ใบ"} · สั่งพิมพ์แล้วเลือก “บันทึกเป็น PDF” ได้</div>
         {only && <a href="/print/flow-map" className="h-9 px-3 inline-flex items-center text-sm rounded-lg border border-slate-300 bg-white text-slate-700">พิมพ์ทุกผัง</a>}
         <button type="button" onClick={() => printReportHtmlInNewWindow(html)} className="h-9 px-4 text-sm rounded-lg bg-indigo-600 text-white">พิมพ์ / บันทึก PDF</button>
       </div>

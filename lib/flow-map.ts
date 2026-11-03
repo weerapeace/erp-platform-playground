@@ -9,12 +9,17 @@
  * ทุกเส้นจด "ไฟล์ที่ทำจริง" (files) → เทสต์ lib/__tests__/flow-map.test.ts เช็กว่ายังมีอยู่
  *   ย้าย/ลบไฟล์ หรือแก้ workflow ให้การส่งต่อเปลี่ยน → แก้ไฟล์นี้ด้วย (คู่กับทะเบียน lib/workflow-registry.ts)
  * ตัวเลขสดของแต่ละกล่อง (metrics) คิดที่ /api/flow-map/health
+ * 💰 ผังการเงิน (FlowView.finance) เห็นเฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM (แอดมินมีเสมอ) — แท็บ · ตัวเลข (FlowMetric.finance) · โน้ต · หน้าพิมพ์
+ *   กล่อง/เส้นที่อยู่แค่ในผังการเงิน = FLOW_FINANCE_ONLY (API โน้ตใช้กรอง) · ห้ามใส่ตัวเลขเงินจริงในข้อความทะเบียน (ไฟล์นี้อยู่ในหน้าเว็บทุกคน) ให้ใช้ metrics
  * ⚠️ ไฟล์นี้ต้อง pure (ไม่ import อะไร) — เทสต์และหน้าเว็บใช้ร่วมกัน
- * สำรวจของจริง + ปรับตามที่แก้ 2026-11-02 (ดู docs/flow-map.md)
+ * สำรวจของจริง + ปรับตามที่แก้ 2026-11-02 · ผังการเงิน 2026-11-03 (ดู docs/flow-map.md)
  */
 
 export type FlowEdgeType = "auto" | "live" | "manual" | "missing";
-export type FlowArea = "buy" | "make" | "dispatch" | "sell" | "stock" | "hr";
+export type FlowArea = "buy" | "make" | "dispatch" | "sell" | "stock" | "hr" | "fin";
+
+/** สิทธิ์ดูผังการเงิน (แท็บ หมุนเงิน · เงินเข้า · เงินออก · เครดิต & หนี้ · บัญชี & ภาษี) */
+export const FLOW_FINANCE_PERM = "flow_map.finance.view";
 
 export type FlowNode = {
   label: string;
@@ -32,6 +37,8 @@ export type FlowNode = {
   gaps?: string[];
   /** ตัวเลขสดจาก /api/flow-map/health */
   metrics?: FlowMetricKey[];
+  /** นับอยู่ในกระแสเงินสด /cashflow (จุดเขียวในผังการเงิน) */
+  cashflow?: boolean;
 };
 
 export type FlowEdge = {
@@ -60,10 +67,11 @@ export type FlowMetricKey =
   | "qt_open" | "so_open" | "bill_draft" | "bill_unshipped" | "bill_old_reserved" | "dn_unlinked" | "bn_open" | "rc_30d" | "cn_issued"
   | "ds_active" | "mo_open" | "mat_not_ready" | "wo_open" | "sub_30d" | "qc_shelf"
   | "pr_waiting" | "pr_mo_nosku_open" | "po_lines_nosku_open" | "po_unpaid" | "gr_30d" | "pv_draft"
-  | "stock_raw" | "stock_wip" | "stock_fg" | "fg_reserved";
+  | "stock_raw" | "stock_wip" | "stock_fg" | "fg_reserved"
+  | "fin_opening" | "fin_cust_credit" | "fin_sup_credit" | "fin_po_nodue" | "fin_payrun_unmarked" | "fin_fixed" | "fin_china_wait" | "fin_loan_unalloc" | "fin_journals";
 
-/** ชื่อ + ความหมายของตัวเลขสด · bad = ยิ่งมากยิ่งต้องตาม (ขึ้นสีแดงเมื่อ > 0) */
-export const FLOW_METRICS: Record<FlowMetricKey, { label: string; unit: string; bad?: boolean }> = {
+/** ชื่อ + ความหมายของตัวเลขสด · bad = ยิ่งมากยิ่งต้องตาม (ขึ้นสีแดงเมื่อ > 0) · finance = ส่งให้เฉพาะผู้มีสิทธิ์ดูผังการเงิน */
+export const FLOW_METRICS: Record<FlowMetricKey, { label: string; unit: string; bad?: boolean; finance?: boolean }> = {
   qt_open: { label: "ใบเสนอราคาที่ยังเปิด (ร่าง/ส่งแล้ว)", unit: "ใบ" },
   so_open: { label: "ใบสั่งขายที่ยังไม่ส่ง", unit: "ใบ" },
   bill_draft: { label: "ใบขายร่าง", unit: "ใบ" },
@@ -89,6 +97,15 @@ export const FLOW_METRICS: Record<FlowMetricKey, { label: string; unit: string; 
   stock_wip: { label: "ยอดงานระหว่างทำ (WH-WIP) รวม", unit: "หน่วย" },
   stock_fg: { label: "ยอดคลังสินค้าสำเร็จ (WH-FG) รวม", unit: "ชิ้น" },
   fg_reserved: { label: "ของในคลังสินค้าสำเร็จที่ถูกใบขายจอง", unit: "ชิ้น" },
+  fin_opening: { label: "บัญชีเงินที่กรอกยอดตั้งต้นแล้ว", unit: "บัญชี", finance: true },
+  fin_cust_credit: { label: "ลูกค้าที่ตั้งเครดิตแล้ว", unit: "ราย", finance: true },
+  fin_sup_credit: { label: "ร้านค้าที่ตั้งเครดิตแล้ว", unit: "ราย", finance: true },
+  fin_po_nodue: { label: "PO ค้างจ่ายที่ไม่มีวันครบกำหนด (ระบบเดาวันจ่าย)", unit: "ใบ", bad: true, finance: true },
+  fin_payrun_unmarked: { label: "รอบจ่ายเงินเดือนอนุมัติแล้ว ยังไม่กด “จ่ายแล้ว”", unit: "รอบ", bad: true, finance: true },
+  fin_fixed: { label: "รายจ่าย/รายรับประจำที่ตั้งไว้", unit: "รายการ", finance: true },
+  fin_china_wait: { label: "บิลจีนที่ยังรอโอน", unit: "ใบ", finance: true },
+  fin_loan_unalloc: { label: "จ่ายเงินกู้แล้วแต่ยังไม่ตัดยอดเข้างวด", unit: "ครั้ง", bad: true, finance: true },
+  fin_journals: { label: "รายการในสมุดบัญชี", unit: "รายการ", finance: true },
 };
 
 export const FLOW_EDGE_TYPES: Record<FlowEdgeType, { label: string; color: string; dash: string }> = {
@@ -186,6 +203,51 @@ export const FLOW_NODES: Record<string, FlowNode> = {
     statuses: "—", metrics: ["stock_fg", "fg_reserved"] },
   stockrw: { label: "สต็อก RAW → WIP", sub: "ย้ายตอนจ่ายงาน", area: "stock", href: "/inventory/map", pages: "/inventory/map", tables: "erp_playground_stock_movements (mo_issue_wip)",
     statuses: "—", metrics: ["stock_raw", "stock_wip"], gaps: ["ย้ายทั้งสูตรแม้จ่ายงานบางส่วน"] },
+  // ── การเงิน (อยู่แค่ในผังการเงิน — เห็นเฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM) ──
+  cf: { label: "กระแสเงินสด", sub: "/cashflow", area: "fin", href: "/cashflow", pages: "/cashflow (ตาราง · กราฟ · ป้ายเตือน)",
+    tables: "อ่านสด 9 แหล่ง: ใบขาย · ใบวางบิล · PO · เงินเดือน · เงินกู้ · ดอก OD · บัตร · บิลจีน · รายการประจำ",
+    statuses: "แน่นอน · คาดว่าจะ · ประมาณการ",
+    gaps: ["เงินคงเหลือ = ยอดตั้งต้นที่กรอกเอง + รายการล่วงหน้า — ไม่รู้ว่าเงินที่รับ/จ่ายไปแล้วจริงเหลือเท่าไร"] },
+  board: { label: "กระดานเงินสด", sub: "/cashflow/board", area: "fin", href: "/cashflow/board", pages: "/cashflow/board",
+    tables: "เขียนวันลงเอกสารต้นทางตรง ๆ · โน้ตวัน cashflow_board_notes", statuses: "ลากได้: PO · ใบวางบิล · ใบขาย · บิลจีน — ล็อก: เงินกู้ · เงินเดือน · OD" },
+  bank: { label: "เงินในบัญชี", sub: "ยอดตั้งต้นกรอกเอง", area: "fin", href: "/cashflow", pages: "/cashflow → ตั้งค่า → ยอดเงินตั้งต้น",
+    tables: "cashflow_opening_balances (ยังไม่มีสมุดบัญชีธนาคาร)", statuses: "—", metrics: ["fin_opening"],
+    gaps: ["ยังไม่มีสมุดบัญชีธนาคาร — รับชำระ จ่ายซัพ เงินเดือน เงินกู้ ไม่ไปปรับยอดเงินในบัญชี", "ต้องกรอกยอดตั้งต้นใหม่เองเป็นระยะ ไม่งั้นเส้นเงินคงเหลือคลาดจากของจริง"] },
+  gl: { label: "สมุดบัญชี", sub: "/accounting", area: "fin", href: "/accounting", pages: "/accounting (ผังบัญชี · สมุดรายวัน · งบทดลอง)",
+    tables: "erp_playground_accounts · erp_playground_journals + _lines", statuses: "ร่าง → ลงบัญชีแล้ว", metrics: ["fin_journals"],
+    gaps: ["บันทึกมือได้อย่างเดียว — ไม่มีเอกสารไหนลงบัญชีให้เอง"] },
+  tb: { label: "งบทดลอง", sub: "จากสมุดบัญชี", area: "fin", href: "/accounting", pages: "/accounting แท็บงบทดลอง", tables: "คิดจาก erp_playground_journal_lines", statuses: "—" },
+  tax: { label: "รายงานภาษีขาย", sub: "/sales/tax-report", area: "fin", href: "/sales/tax-report", pages: "/sales/tax-report", tables: "อ่าน erp_playground_sales_orders", statuses: "—" },
+  ptax: { label: "รายงานภาษีซื้อ", sub: "ยังไม่มี", area: "fin", pages: "—", tables: "VAT อยู่ใน purchase_orders_v2 / purchase_vouchers_v2", statuses: "—",
+    gaps: ["ยังไม่มีรายงานภาษีซื้อ — ยื่น ภ.พ.30 ต้องรวมเอง"] },
+  cust: { label: "เครดิตลูกค้า", sub: "วันเครดิตต่อราย", area: "fin", href: "/cashflow/credit-terms", pages: "/cashflow/credit-terms · ฟอร์มคู่ค้า",
+    tables: "partners_v2.sales_credit_term (+ payment_terms_days แบบเก่า)", statuses: "ตั้ง / ไม่ตั้ง (ไม่ตั้ง = ระบบเดาวันรับเงิน)", metrics: ["fin_cust_credit"],
+    gaps: ["ลูกค้าแทบไม่มีใครตั้งเครดิต — วันคาดรับเงินในกระแสเงินสดส่วนใหญ่ระบบเดา"] },
+  sup: { label: "เครดิตซัพ", sub: "วันเครดิตต่อร้าน", area: "fin", href: "/cashflow/credit-terms", pages: "/cashflow/credit-terms · ฟอร์มคู่ค้า",
+    tables: "partners_v2.purchase_credit_term", statuses: "ตั้ง / ไม่ตั้ง (ไม่ตั้ง = ระบบเดาวันจ่าย)", metrics: ["fin_sup_credit"],
+    gaps: ["ร้านแทบไม่มีใครตั้งเครดิต + PO ไม่มีวันครบกำหนดจ่าย → วันจ่ายในกระแสเงินสดระบบเดา"] },
+  credit: { label: "ตั้งเครดิต", sub: "หลายรายพร้อมกัน", area: "fin", href: "/cashflow/credit-terms", pages: "/cashflow/credit-terms", tables: "partners_v2", statuses: "—" },
+  china: { label: "บิลจีน", sub: "China Pay", area: "fin", href: "/app/china-pay", pages: "/app/china-pay · เลือกบิลตอนติ๊กจ่าย PO", cashflow: true,
+    tables: "china_bills (PO ผูกด้วย purchase_orders_v2.china_bill_id)", statuses: "รอโอน → โอนแล้ว", metrics: ["fin_china_wait"] },
+  payrun: { label: "จ่ายเงินเดือน", sub: "/payroll/payments", area: "hr", href: "/payroll/payments", pages: "/payroll/payments", cashflow: true,
+    tables: "payment_batches (ผูกงวด payroll_periods)", statuses: "ร่าง → อนุมัติ → จ่ายแล้ว · ยกเลิก", metrics: ["fin_payrun_unmarked"],
+    gaps: ["รอบที่อนุมัติแล้วแต่ไม่กด “จ่ายแล้ว” ยังนับเป็นเงินออกที่รอจ่าย"] },
+  fixed: { label: "รายจ่ายประจำ", sub: "ค่าเช่า · น้ำไฟ · ภาษี", area: "fin", href: "/cashflow", pages: "/cashflow → ตั้งค่า → รายจ่าย/รายรับประจำ", cashflow: true,
+    tables: "cashflow_manual_items", statuses: "ทุกเดือน / ครั้งเดียว", metrics: ["fin_fixed"],
+    gaps: ["ไม่ได้กรอก = เงินออกในกระแสเงินสดต่ำกว่าจริง (ค่าเช่า น้ำไฟ ประกันสังคม ภาษี)"] },
+  loan: { label: "สัญญาเงินกู้", sub: "/loan-contracts", area: "fin", href: "/loan-contracts", pages: "/loan-contracts · /loan-dashboard",
+    tables: "loan_contracts + เวอร์ชันตารางผ่อน", statuses: "lifecycle_status · ปรับโครงสร้างได้" },
+  inst: { label: "งวดผ่อน", sub: "/loan-installments", area: "fin", href: "/loan-installments", pages: "/loan-installments", cashflow: true,
+    tables: "loan_installments (payment_status)", statuses: "ยังไม่จ่าย → จ่ายบางส่วน → จ่ายครบ",
+    gaps: ["จ่ายแล้วแต่ยังไม่ตัดยอด งวดยังขึ้นว่าค้าง → กระแสเงินสดคิดว่าต้องจ่ายซ้ำ"] },
+  lpay: { label: "จ่ายงวดเงินกู้", sub: "/loan-payments", area: "fin", href: "/loan-payments", pages: "/loan-payments · ปุ่มบันทึกจ่ายในหน้าสัญญา",
+    tables: "loan_payments → loan_payment_allocations (ตัดยอด)", statuses: "ตรวจแล้ว (verified)", metrics: ["fin_loan_unalloc"] },
+  od: { label: "วงเงิน OD", sub: "/od-facilities", area: "fin", href: "/od-facilities", pages: "/od-facilities · /od-transactions", tables: "od_facilities · od_transactions", statuses: "—" },
+  odint: { label: "ดอกเบี้ย OD", sub: "ประมาณต่อเดือน", area: "fin", href: "/od-interest-recon", pages: "/od-interest-recon", cashflow: true,
+    tables: "od_facilities.estimated_interest_this_month", statuses: "—" },
+  card: { label: "บัตรเครดิต", sub: "/debt-cards", area: "fin", href: "/debt-cards", pages: "/debt-cards", cashflow: true,
+    tables: "debt_cards (ยอดตามใบแจ้งยอด · ยอดที่จ่าย)", statuses: "ยังไม่จ่าย / จ่ายแล้ว",
+    gaps: ["จ่ายบัตรบันทึกที่ตัวบัตร ไม่ไปหักยอดเงินในบัญชี"] },
 };
 
 export const FLOW_EDGES: Record<string, FlowEdge> = {
@@ -314,13 +376,66 @@ export const FLOW_EDGES: Record<string, FlowEdge> = {
     detail: "หักยอดเฉพาะตอนแสดงในจอใบวางบิล", files: ["app/api/billing-notes/route.ts"] },
   S12: { from: "cn", to: "fg", type: "missing", title: "ใบลดหนี้ไม่คืนของ ไม่ลดยอดค้าง",
     detail: "ออกใบลดหนี้แล้ว สต็อก ยอดค้างใบขาย กระแสเงินสด รายงานขาย ไม่เปลี่ยน", files: ["app/api/credit-notes/[id]/transition/route.ts"] },
+  // ── การเงิน (อยู่แค่ในผังการเงิน) ──
+  F1: { from: "cust", to: "bill", type: "live", title: "เครดิตลูกค้า → วันคาดรับเงิน",
+    detail: "กระแสเงินสดคิดวันรับเงินของใบขาย = วันที่ใบ + เครดิตลูกค้า (หรือวันที่ลากไว้บนกระดาน)", warn: "ลูกค้าที่ไม่ตั้งเครดิต ระบบเดาวันให้ (ขึ้นป้าย “ระบบเดา”)",
+    files: ["app/api/cashflow/route.ts", "lib/credit-term.ts"], metrics: ["fin_cust_credit"] },
+  F2: { from: "sup", to: "po", type: "live", title: "เครดิตร้าน → วันครบกำหนดจ่าย",
+    detail: "กระแสเงินสดคิดวันจ่าย PO = วันครบกำหนดใน PO ถ้ามี ไม่งั้นวันสั่ง + เครดิตร้าน", warn: "PO แทบทุกใบไม่มีวันครบกำหนด และร้านแทบไม่ตั้งเครดิต → วันจ่ายส่วนใหญ่ระบบเดา",
+    files: ["app/api/cashflow/route.ts", "lib/credit-term.ts"], metrics: ["fin_po_nodue", "fin_sup_credit"] },
+  F3: { from: "credit", to: "cust", type: "auto", title: "ตั้งเครดิตลูกค้าหลายรายพร้อมกัน", detail: "เลือกหลายราย → ตั้งวันเครดิตทีเดียว", files: ["app/api/cashflow/credit-terms/route.ts"] },
+  F4: { from: "credit", to: "sup", type: "auto", title: "ตั้งเครดิตร้านหลายรายพร้อมกัน", detail: "รูปแบบเดียวกับฟอร์มคู่ค้า (lib/credit-term)", files: ["app/api/cashflow/credit-terms/route.ts"] },
+  F5: { from: "board", to: "bill", type: "auto", title: "ลากเลื่อนวันรับเงิน → เขียนลงใบขาย / ใบวางบิล",
+    detail: "ยืนยันบนกระดานแล้วเขียนวันคาดรับ (ใบขาย) / วันครบกำหนด (ใบวางบิล) ลงเอกสารต้นทางตรง ๆ ไม่มีตารางแผนซ้อน", files: ["app/api/cashflow/plan/route.ts"] },
+  F6: { from: "board", to: "po", type: "auto", title: "ลากเลื่อนวันจ่าย → เขียนลง PO / บิลจีน",
+    detail: "เขียนวันครบกำหนดจ่ายของ PO / วันโอนของบิลจีน", files: ["app/api/cashflow/plan/route.ts"] },
+  F7: { from: "bn", to: "cf", type: "live", title: "ยอดค้างรับ → เงินเข้าล่วงหน้า",
+    detail: "ใบวางบิล + ใบขายที่ยังค้าง (ยอดค้างคิดใหม่จากใบรับชำระ) · ใบขายที่ดึงเข้าใบวางบิลแล้วไม่นับซ้ำ", files: ["app/api/cashflow/route.ts", "lib/cashflow.ts"], metrics: ["bn_open"] },
+  F8: { from: "rc", to: "bank", type: "missing", title: "รับเงินแล้ว ยอดในบัญชีไม่ขยับ",
+    detail: "ยืนยันใบรับชำระลดยอดค้างได้ แต่ไม่มีสมุดบัญชีธนาคารให้บวกเงินเข้า — เงินคงเหลือยังมาจากยอดตั้งต้นที่กรอกเอง", files: ["app/api/receipts/route.ts"], metrics: ["rc_30d"] },
+  F9: { from: "bank", to: "cf", type: "manual", title: "กรอกยอดเงินตั้งต้น → เส้นเงินคงเหลือ",
+    detail: "กรอกยอดทุกบัญชี ณ วันที่ ที่ /cashflow → ตั้งค่า · กระแสเงินสดเริ่มนับจากยอดนี้", warn: "ยังไม่กรอก = เส้นเงินคงเหลือเริ่มจากศูนย์",
+    files: ["app/api/cashflow/opening-balances/route.ts"], metrics: ["fin_opening"] },
+  F10: { from: "bank", to: "gl", type: "missing", title: "เงินเข้า-ออกไม่ลงสมุดบัญชี", detail: "ไม่มีรายการบัญชีถูกสร้างจากเงินที่รับ/จ่ายจริง", files: ["app/api/accounting/journals/route.ts"], metrics: ["fin_journals"] },
+  F11: { from: "po", to: "paypo", type: "manual", title: "ติ๊ก “จ่ายแล้ว” ใน PO",
+    detail: "ใส่วันจ่าย + ยอดจ่ายเป็นบาท (+ เลือกบิลจีนถ้าโอนจีน) · PO ที่ติ๊กแล้วหลุดจากเงินออกล่วงหน้า", files: ["app/api/purchasing/mark-paid/route.ts"], metrics: ["po_unpaid"] },
+  F12: { from: "china", to: "paypo", type: "manual", title: "โอนเงินจีน → เลือกบิลตอนติ๊กจ่าย PO",
+    detail: "บิลจีนไม่รู้ว่าจ่าย PO ใบไหน จนกว่าจะเลือกบิลในช่องติ๊กจ่ายของ PO", files: ["app/api/purchasing/mark-paid/route.ts", "app/api/purchasing/china-bills/route.ts"], metrics: ["fin_china_wait"] },
+  F13: { from: "paypo", to: "bank", type: "missing", title: "จ่ายซัพแล้ว ยอดในบัญชีไม่ลด",
+    detail: "ติ๊กจ่ายใน PO / โอนจีน ไม่ได้หักเงินจากบัญชีไหน และไม่มีใบจ่ายเงินเป็นหลักฐานกลาง", files: ["app/api/purchasing/mark-paid/route.ts"] },
+  F14: { from: "payrun", to: "cf", type: "live", title: "รอบจ่ายเงินเดือน → เงินออกล่วงหน้า",
+    detail: "รอบที่ยังไม่จ่ายนับตามวันจ่าย · ไม่มีรอบ = ประมาณจากค่าเฉลี่ยแยกบริษัท", files: ["app/api/cashflow/route.ts"], metrics: ["fin_payrun_unmarked"] },
+  F15: { from: "payrun", to: "bank", type: "missing", title: "จ่ายเงินเดือนแล้ว ยอดบัญชีไม่ลด",
+    detail: "กด “จ่ายแล้ว” เปลี่ยนแค่สถานะรอบจ่าย ไม่หักเงินจากบัญชี", warn: "รอบที่อนุมัติแล้วไม่กด “จ่ายแล้ว” ยังนับเป็นเงินที่ต้องจ่าย",
+    files: ["app/api/payroll/payment-batches/[id]/mark-paid/route.ts"], metrics: ["fin_payrun_unmarked"] },
+  F16: { from: "lpay", to: "bank", type: "missing", title: "จ่ายหนี้ธนาคาร (เงินกู้ · OD · บัตร) ยอดบัญชีไม่ลด",
+    detail: "บันทึกจ่ายงวด / จ่ายบัตร อยู่ที่หน้าของมันเอง ไม่หักเงินจากบัญชีไหน", files: ["app/api/loan-payment/record/route.ts"] },
+  F17: { from: "loan", to: "inst", type: "auto", title: "สร้างตารางผ่อน", detail: "คำนวณงวดจากสัญญา (หรือกรอกตารางเอง) เป็นเวอร์ชัน · ปรับโครงสร้าง = เวอร์ชันใหม่",
+    warn: "สัญญาที่ไม่มีตารางผ่อน ตัดยอดไม่ได้", files: ["app/api/loan-schedule/generate/route.ts", "app/api/loan-schedule/manual/route.ts"] },
+  F18: { from: "lpay", to: "inst", type: "auto", title: "บันทึกจ่าย → ตัดยอดเข้างวด",
+    detail: "บันทึกผ่านหน้าเงินกู้ = ตัดดอก/เงินต้นเข้างวดให้เอง · ล้างแล้วสร้างใหม่จากต้นทาง กดซ้ำได้",
+    warn: "การจ่ายที่เข้าระบบโดยไม่ผ่านหน้าเงินกู้ไม่ถูกตัดยอด → งวดยังขึ้นว่าค้าง — กด “ตัดยอดให้ตรง” ที่ /cashflow",
+    files: ["app/api/loan-payment/record/route.ts", "app/api/cashflow/loan-reallocate/route.ts"], metrics: ["fin_loan_unalloc"] },
+  F19: { from: "od", to: "odint", type: "live", title: "ยอดใช้วงเงิน → ดอกเบี้ย OD", detail: "ประมาณดอกเบี้ยเดือนนี้จากยอดใช้ · กระทบยอดกับธนาคารที่ /od-interest-recon", files: ["app/api/cashflow/route.ts"] },
+  F20: { from: "bill", to: "tax", type: "live", title: "ใบขาย → รายงานภาษีขาย", detail: "รายงานคิดสดจากใบขายตามเดือน", files: ["app/sales/tax-report/page.tsx"] },
+  F21: { from: "bill", to: "gl", type: "missing", title: "ขายแล้วไม่ตั้งลูกหนี้ในบัญชี", detail: "ใบขายยืนยันแล้วไม่สร้างรายการบัญชี (ลูกหนี้ / รายได้ / ภาษีขาย)", files: ["app/api/accounting/journals/route.ts"] },
+  F22: { from: "rc", to: "gl", type: "missing", title: "รับเงินไม่ลงบัญชี", detail: "ใบรับชำระไม่สร้างรายการบัญชี (เงินฝาก / ลูกหนี้ / ภาษีหัก ณ ที่จ่าย)", files: ["app/api/receipts/route.ts"] },
+  F23: { from: "po", to: "gl", type: "missing", title: "ซื้อแล้วไม่ตั้งเจ้าหนี้ในบัญชี", detail: "PO / ใบสำคัญรับไม่สร้างรายการบัญชี (สินค้า / เจ้าหนี้ / ภาษีซื้อ)", files: ["app/api/accounting/journals/route.ts"] },
+  F24: { from: "paypo", to: "gl", type: "missing", title: "จ่ายเงินไม่ลงบัญชี", detail: "ติ๊กจ่าย PO ไม่สร้างรายการบัญชี (เจ้าหนี้ / เงินฝาก)", files: ["app/api/purchasing/mark-paid/route.ts"] },
+  F25: { from: "po", to: "ptax", type: "missing", title: "VAT ซื้อไม่ถูกรวมเป็นรายงาน", detail: "มีรายงานภาษีขายแล้ว แต่ฝั่งซื้อยังไม่มี", files: ["app/sales/tax-report/page.tsx"] },
+  F26: { from: "gl", to: "tb", type: "live", title: "สมุดบัญชี → งบทดลอง", detail: "รวมยอดเดบิต/เครดิตต่อบัญชีจากรายการที่ลงแล้ว", files: ["app/api/accounting/trial-balance/route.ts"] },
 };
 
-/** ตำแหน่งกล่องในผัง: [คอลัมน์ 0–3, แถว 0.. หรือ "s" = แถวคลังล่างสุด] */
-export type FlowPos = [number, number | "s"];
-/** เส้นในผัง: [id เส้น, ด้านออก, เลื่อน, ด้านเข้า, เลื่อน, ตัวเลือก] · ด้าน l/r/t/b · c = แนวเลี้ยว · bf = ตำแหน่งเลขบนเส้น · a/b = เปลี่ยนต้น/ปลายในผังนี้ */
-export type FlowViewEdge = [string, "l" | "r" | "t" | "b", number, "l" | "r" | "t" | "b", number, { c?: number; bf?: number; a?: string; b?: string }?];
-export type FlowView = { key: string; label: string; height: number; bands?: boolean; own?: string[]; gray?: string[]; pos: Record<string, FlowPos>; edges: FlowViewEdge[] };
+/** ตำแหน่งกล่องในผัง: [คอลัมน์ 0–3, แถว 0.. หรือ "s" = แถวคลังล่างสุด, สูงกี่แถว (ไม่ส่ง = 1)] */
+export type FlowPos = [number, number | "s", number?];
+type FlowSide = "l" | "r" | "t" | "b";
+/**
+ * เส้นในผัง: [id เส้น, ด้านออก, เลื่อน, ด้านเข้า, เลื่อน, ตัวเลือก] · ด้าน l/r/t/b · c = แนวเลี้ยว · bf = ตำแหน่งเลขบนเส้น · a/b = เปลี่ยนต้น/ปลายในผังนี้
+ * feed = กล่องอื่นที่ส่งต่อแบบเดียวกัน วาดเป็นเส้นสั้นมารวมกับเส้นนี้ที่แนว c (เช่น เงินกู้ + OD + บัตร → เงินในบัญชี)
+ */
+export type FlowViewEdge = [string, FlowSide, number, FlowSide, number, { c?: number; bf?: number; a?: string; b?: string; feed?: [string, FlowSide, number][] }?];
+/** heads = ชื่อหัวคอลัมน์ (ผังที่ไม่มีแถบภาพรวม) · finance = ผังการเงิน เห็นเฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM */
+export type FlowView = { key: string; label: string; height: number; bands?: boolean; heads?: string[]; finance?: boolean; own?: string[]; gray?: string[]; pos: Record<string, FlowPos>; edges: FlowViewEdge[] };
 
 export const FLOW_VIEWS: FlowView[] = [
   { key: "ov", label: "ภาพรวม", height: 524, bands: true, gray: ["pay", "raw", "wip", "fg"],
@@ -349,9 +464,34 @@ export const FLOW_VIEWS: FlowView[] = [
     edges: [["S2", "r", 0, "l", 0], ["M5", "r", -12, "l", -12, { bf: 0.3 }], ["M8", "l", 0, "r", 0], ["M11", "r", 12, "l", 12, { bf: 0.7 }], ["S1", "b", 0, "l", -10],
       ["S3", "b", 0, "t", 0], ["X10", "l", 0, "r", 0, { bf: 0.25 }], ["S4", "l", 12, "t", 20], ["S5", "b", -12, "t", -12], ["S6", "t", 12, "b", 12], ["S7", "r", 12, "t", -20],
       ["S10", "t", 20, "r", -10], ["S8", "r", -10, "l", -10], ["S9", "l", 10, "r", 10], ["S11", "t", 0, "b", 0], ["S12", "l", 0, "b", 0]] },
+  // ── ผังการเงิน (เห็นเฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM) ──
+  { key: "cash", label: "หมุนเงิน", height: 400, finance: true, gray: [], heads: ["เงินเข้า (ขาย)", "กระเป๋าเงิน", "เงินออก (ซื้อ / จ่าย)", "หนี้ธนาคาร"],
+    pos: { bill: [0, 0], bn: [0, 1], rc: [0, 2], cn: [0, 3], cf: [1, 0], bank: [1, 1, 3], gl: [1, 4],
+      po: [2, 0], paypo: [2, 1], china: [2, 2], payrun: [2, 3], fixed: [2, 4], lpay: [3, 1], od: [3, 2], card: [3, 3] },
+    edges: [["S7", "b", 0, "t", 0], ["S8", "b", 0, "t", 0], ["F8", "r", 0, "l", 0], ["S12", "l", 0, "l", 0, { c: 10, b: "bill" }], ["F9", "t", 0, "b", 0], ["F10", "b", 0, "t", 0],
+      ["F11", "b", 0, "t", 0], ["F12", "t", 0, "b", 0], ["F13", "l", 0, "r", -76], ["F15", "l", 0, "r", 76],
+      ["F16", "l", 0, "r", 38, { c: 497.5, feed: [["od", "l", 0], ["card", "l", 0]] }]] },
+  { key: "cashin", label: "เงินเข้า", height: 252, finance: true, gray: [], heads: ["ตั้งค่า / ปรับยอด", "เอกสารขาย", "เงิน", "บัญชี"],
+    pos: { cust: [0, 0], cn: [0, 2], bill: [1, 0], bn: [1, 1], rc: [1, 2], board: [2, 0], cf: [2, 1], bank: [2, 2], gl: [3, 2] },
+    edges: [["F1", "r", 0, "l", 0], ["S7", "b", -12, "t", -12], ["S10", "t", 12, "b", 12], ["S8", "b", -12, "t", -12], ["S9", "t", 12, "b", 12], ["S11", "t", 0, "l", 0],
+      ["S12", "r", -10, "l", 14, { c: 167.5, b: "bill", bf: 0.25 }], ["F5", "l", 0, "r", 0], ["F7", "r", 0, "l", 0], ["F8", "r", 0, "l", 0], ["F9", "t", 0, "b", 0], ["F10", "r", 0, "l", 0]] },
+  { key: "cashout", label: "เงินออก", height: 252, finance: true, gray: ["gr"], heads: ["ต้นทาง", "เอกสารซื้อ", "เงิน", "ค่าใช้จ่ายอื่น"],
+    pos: { sup: [0, 0], gr: [0, 1], china: [0, 2], po: [1, 0], pv: [1, 1], paypo: [1, 2], board: [2, 0], cf: [2, 1], bank: [2, 2], fixed: [3, 0], payrun: [3, 1] },
+    edges: [["F2", "r", 0, "l", 0], ["F6", "l", 0, "r", 0], ["P9", "r", 0, "l", 0], ["P10", "t", 0, "b", 0], ["P11", "b", 0, "t", 0], ["F11", "r", 12, "r", -10, { c: 332.5 }],
+      ["F12", "r", 0, "l", 0], ["F13", "r", 10, "l", 10], ["F14", "l", -10, "r", -10], ["F15", "l", 10, "r", 0, { c: 497.5 }], ["F9", "t", 0, "b", 0]] },
+  { key: "debt", label: "เครดิต & หนี้", height: 252, finance: true, gray: [], heads: ["เครดิตลูกค้า", "เครดิตซัพ · เงิน", "เงินกู้", "OD · บัตร"],
+    pos: { credit: [0, 0], cust: [0, 1], sup: [1, 1], bank: [1, 2], loan: [2, 0], inst: [2, 1], lpay: [2, 2], od: [3, 0], odint: [3, 1], card: [3, 2] },
+    edges: [["F3", "b", 0, "t", 0], ["F4", "r", 0, "t", 0], ["F17", "b", 0, "t", 0], ["F18", "t", 0, "b", 0], ["F16", "l", 0, "r", 0], ["F19", "b", 0, "t", 0]] },
+  { key: "acct", label: "บัญชี & ภาษี", height: 328, finance: true, gray: [], heads: ["ขาย", "สมุดบัญชี", "ซื้อ / จ่าย", "ภาษีซื้อ"],
+    pos: { bill: [0, 0], rc: [0, 1], tax: [1, 0], gl: [1, 1, 2], tb: [1, 3], po: [2, 0], paypo: [2, 1], ptax: [3, 0] },
+    edges: [["F20", "r", -10, "l", -10], ["F21", "r", 10, "l", -40, { c: 167.5 }], ["F22", "r", 12, "l", -26], ["F23", "l", 10, "r", -40, { c: 332.5 }], ["F24", "l", 12, "r", -26],
+      ["F25", "r", 0, "l", 0], ["F26", "b", 0, "t", 0]] },
 ];
 
-export const FLOW_AREA_LABEL: Record<FlowArea, string> = { buy: "ซื้อ", make: "ผลิต", dispatch: "จ่ายงาน", sell: "ขาย", stock: "คลัง", hr: "บุคคล" };
+/** ผังที่คนนี้เห็น (ผังการเงินต้องมีสิทธิ์ FLOW_FINANCE_PERM) */
+export const flowViewsFor = (canFinance: boolean): FlowView[] => FLOW_VIEWS.filter((v) => !v.finance || canFinance);
+
+export const FLOW_AREA_LABEL: Record<FlowArea, string> = { buy: "ซื้อ", make: "ผลิต", dispatch: "จ่ายงาน", sell: "ขาย", stock: "คลัง", hr: "บุคคล", fin: "การเงิน" };
 
 /**
  * แท็บ "ออเดอร์ 1 ใบ เดินทางยังไง" — ไล่ทีละขั้นตั้งแต่ลงออเดอร์จนเก็บเงิน
@@ -375,4 +515,16 @@ export const FLOW_JOURNEY: FlowJourneyStep[] = [
 ];
 
 /** ส่งคำขอแก้เข้า "แจ้งปัญหาการใช้งาน" (/issue-report) — ส่วนของกล่อง → ชื่อแอปในรายการ issue_report_apps */
-export const FLOW_ISSUE_APP: Record<FlowArea, string> = { buy: "จัดซื้อ", make: "ผลิต", dispatch: "จ่ายงาน", sell: "ขาย", stock: "คลังสินค้า", hr: "Payroll (HR)" };
+export const FLOW_ISSUE_APP: Record<FlowArea, string> = { buy: "จัดซื้อ", make: "ผลิต", dispatch: "จ่ายงาน", sell: "ขาย", stock: "คลังสินค้า", hr: "Payroll (HR)", fin: "งานอื่นๆ" };
+
+/** กล่อง / เส้น / ผัง ที่อยู่แค่ในผังการเงิน — ซ่อนจากคนที่ไม่มีสิทธิ์ (API โน้ตใช้กรอง) · ต้องอยู่ท้ายไฟล์ (ใช้ FLOW_VIEWS + FLOW_JOURNEY) */
+export const FLOW_FINANCE_ONLY = (() => {
+  const pub = FLOW_VIEWS.filter((v) => !v.finance), fin = FLOW_VIEWS.filter((v) => v.finance);
+  const pubNodes = new Set(pub.flatMap((v) => Object.keys(v.pos)));
+  const pubEdges = new Set([...pub.flatMap((v) => v.edges.map((e) => e[0])), ...FLOW_JOURNEY.flatMap((s) => s.edges)]);
+  return {
+    views: new Set(fin.map((v) => v.key)),
+    nodes: new Set(fin.flatMap((v) => Object.keys(v.pos)).filter((id) => !pubNodes.has(id))),
+    edges: new Set(fin.flatMap((v) => v.edges.map((e) => e[0])).filter((id) => !pubEdges.has(id))),
+  };
+})();

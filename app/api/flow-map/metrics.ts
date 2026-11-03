@@ -63,6 +63,23 @@ const stock = (code: string, field: "qty_on_hand" | "qty_reserved"): CustomDef =
   kind: "custom", count: async (a) => (await stockRows(a, code, field)).total, list: async (a) => (await stockRows(a, code, field)).rows,
 });
 
+/** จ่ายเงินกู้ที่ยังไม่ถูกตัดยอดเข้างวด (ไม่มีแถวใน loan_payment_allocations) */
+async function loanUnalloc(admin: Admin): Promise<FlowMetricRow[]> {
+  const [pays, allocs] = await Promise.all([
+    admin.from("loan_payments").select("id, payment_no, payment_date, total_paid, status, loan_contract_id").not("is_active", "is", false).neq("status", "cancelled").order("payment_date", { ascending: false }).limit(2000),
+    admin.from("loan_payment_allocations").select("payment_id").limit(20000),
+  ]);
+  if (pays.error) throw new Error(pays.error.message);
+  if (allocs.error) throw new Error(allocs.error.message);
+  const done = new Set(((allocs.data ?? []) as Row[]).map((a) => str(a.payment_id)));
+  return ((pays.data ?? []) as Row[]).filter((p) => !done.has(str(p.id)))
+    .map((p) => ({ id: str(p.id), no: str(p.payment_no) || "(ไม่มีเลข)", sub: `฿${qtyTxt(p.total_paid)}`, date: day(p.payment_date), status: str(p.status), href: "/loan-payments" }));
+}
+const partner = (apply: (q: FB) => FB, term: "sales_credit_term" | "purchase_credit_term"): CountDef => ({
+  kind: "count", table: "partners_v2", apply, cols: `id, code, display_name, name_th, payment_terms_days, ${term}, updated_at`, order: "updated_at",
+  row: (r) => ({ id: str(r.id), no: str(r.code) || str(r.display_name) || str(r.name_th), sub: `${str(r.display_name) || str(r.name_th)} · ${str(r[term]) || `${str(r.payment_terms_days)} วัน`}`, date: day(r.updated_at), status: null, href: "/cashflow/credit-terms" }),
+});
+
 async function dnUnlinked(admin: Admin): Promise<FlowMetricRow[]> {
   const { data, error } = await admin.from("erp_playground_delivery_notes").select("id, dn_number, customer_name, delivery_date, status, so_ids").neq("status", "cancelled").order("delivery_date", { ascending: false }).limit(1000);
   if (error) throw new Error(error.message);
@@ -112,6 +129,23 @@ export const FLOW_METRIC_DEFS: Record<FlowMetricKey, CountDef | CustomDef> = {
   stock_wip: stock("WH-WIP", "qty_on_hand"),
   stock_fg: stock("WH-FG", "qty_on_hand"),
   fg_reserved: stock("WH-FG", "qty_reserved"),
+  // ── การเงิน (ส่งให้เฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM — health/list เช็กก่อนเรียก) ──
+  fin_opening: { kind: "count", table: "cashflow_opening_balances", apply: (q) => q.eq("is_active", true), cols: "id, label, amount, as_of_date", order: "as_of_date",
+    row: (r) => ({ id: str(r.id), no: str(r.label), sub: `฿${qtyTxt(r.amount)}`, date: day(r.as_of_date), status: null, href: "/cashflow" }) },
+  fin_cust_credit: partner((q) => q.or("payment_terms_days.gt.0,sales_credit_term.not.is.null"), "sales_credit_term"),
+  fin_sup_credit: partner((q) => q.not("purchase_credit_term", "is", null), "purchase_credit_term"),
+  fin_po_nodue: { kind: "count", table: "purchase_orders_v2", apply: (q) => q.neq("status", "cancelled").or("payment_status.is.null,payment_status.neq.paid").is("payment_due_date", null),
+    cols: "id, po_no, seller_name, order_date, status, grand_total, currency", order: "order_date",
+    row: (r) => ({ id: str(r.id), no: str(r.po_no), sub: `${str(r.seller_name)} · ${qtyTxt(r.grand_total)} ${str(r.currency)}`, date: day(r.order_date), status: str(r.status), href: openLink("/purchasing/po-list", str(r.id)) }) },
+  fin_payrun_unmarked: { kind: "count", table: "payment_batches", apply: (q) => q.eq("status", "approved"), cols: "id, batch_no, batch_type, payment_date, status", order: "payment_date",
+    row: (r) => ({ id: str(r.id), no: str(r.batch_no), sub: str(r.batch_type), date: day(r.payment_date), status: str(r.status), href: "/payroll/payments" }) },
+  fin_fixed: { kind: "count", table: "cashflow_manual_items", apply: (q) => q.eq("is_active", true), cols: "id, label, direction, amount, repeat_kind, created_at", order: "created_at",
+    row: (r) => ({ id: str(r.id), no: str(r.label), sub: `${r.direction === "in" ? "รับ" : "จ่าย"} ฿${qtyTxt(r.amount)} · ${str(r.repeat_kind)}`, date: day(r.created_at), status: null, href: "/cashflow" }) },
+  fin_china_wait: { kind: "count", table: "china_bills", apply: (q) => q.eq("status", "รอโอน").not("is_active", "is", false), cols: "id, bill_date, amount_rmb, status, note", order: "bill_date",
+    row: (r) => ({ id: str(r.id), no: `¥${qtyTxt(r.amount_rmb)}`, sub: str(r.note), date: day(r.bill_date), status: str(r.status), href: "/app/china-pay" }) },
+  fin_loan_unalloc: { kind: "custom", count: async (a) => (await loanUnalloc(a)).length, list: loanUnalloc },
+  fin_journals: { kind: "count", table: "erp_playground_journals", apply: (q) => q, cols: "id, entry_number, entry_date, description, status", order: "entry_date",
+    row: (r) => ({ id: str(r.id), no: str(r.entry_number) || "(ร่าง)", sub: str(r.description), date: day(r.entry_date), status: str(r.status), href: "/accounting" }) },
 };
 
 export async function countFlowMetric(admin: Admin, key: FlowMetricKey): Promise<number> {

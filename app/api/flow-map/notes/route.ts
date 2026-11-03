@@ -4,13 +4,15 @@
  *   metadata = { color, view, x, y, attach, author }
  * GET ทุกโน้ต · POST สร้าง · PATCH แก้ (เจ้าของ/แอดมิน) · DELETE ?id= ลบ (เจ้าของ/แอดมิน) — สร้าง/ลบ ลง audit log
  * โน้ตส่วนตัวไม่ผ่านที่นี่ (เก็บ user_ui_prefs ต่อคน)
+ * โน้ตบนผังการเงิน / ติดกล่อง-เส้นที่มีแค่ในผังการเงิน (FLOW_FINANCE_ONLY) — ส่งกลับ/รับเฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { cleanFlowNote, FLOW_NOTE_MAX, type FlowNote, type FlowNoteData } from "@/lib/flow-map-notes";
+import { FLOW_FINANCE_ONLY, FLOW_FINANCE_PERM } from "@/lib/flow-map";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -30,14 +32,19 @@ async function who(request: NextRequest) {
   return { id: user.id, email: user.email ?? null, admin: !!prof?.active && prof.role === "admin" };
 }
 const recordOf = (d: FlowNoteData) => ({ record_type: d.attach?.kind === "n" ? "node" : d.attach?.kind === "e" ? "edge" : "view", record_id: d.attach?.id ?? d.view });
+/** โน้ตบนผังการเงิน หรือติดกล่อง/เส้นที่มีแค่ในผังการเงิน — เห็น/แปะได้เฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM */
+const isFinanceNote = (d: Pick<FlowNoteData, "view" | "attach">) =>
+  FLOW_FINANCE_ONLY.views.has(d.view) || (d.attach?.kind === "n" && FLOW_FINANCE_ONLY.nodes.has(d.attach.id)) || (d.attach?.kind === "e" && FLOW_FINANCE_ONLY.edges.has(d.attach.id));
+const financeDenied = () => NextResponse.json({ error: "โน้ตบนผังการเงินแปะได้เฉพาะผู้มีสิทธิ์ดูผังการเงิน" }, { status: 403 });
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
-  const me = await who(request);
+  const [me, finance] = await Promise.all([who(request), apiCan(request, FLOW_FINANCE_PERM)]);
   const { data, error } = await supabaseAdmin().from("erp_record_comments").select("id, body, created_by, metadata, created_at, updated_at")
     .eq("module_key", MODULE).eq("comment_type", TYPE).order("created_at", { ascending: true }).limit(1000);
   if (error) return NextResponse.json({ data: [], error: "โหลดโน้ตไม่สำเร็จ" }, { status: 500 });
-  return NextResponse.json({ data: ((data ?? []) as Row[]).map((r) => toNote(r, me?.id ?? null)).filter(Boolean), error: null });
+  const notes = ((data ?? []) as Row[]).map((r) => toNote(r, me?.id ?? null)).filter((n): n is FlowNote => !!n && (finance || !isFinanceNote(n)));
+  return NextResponse.json({ data: notes, error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -48,6 +55,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const d = cleanFlowNote(body);
   if (!d) return NextResponse.json({ error: "ข้อมูลโน้ตไม่ถูกต้อง" }, { status: 400 });
+  if (isFinanceNote(d) && !(await apiCan(request, FLOW_FINANCE_PERM))) return financeDenied();
   const admin = supabaseAdmin();
   const { data, error } = await admin.from("erp_record_comments").insert({
     module_key: MODULE, comment_type: TYPE, ...recordOf(d), body: d.text, created_by: me.id,
@@ -77,6 +85,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const cur = r.row.metadata ?? {};
   const d = cleanFlowNote({ ...cur, text: r.row.body ?? "", ...body, view: body.view ?? cur.view });
   if (!d) return NextResponse.json({ error: "ข้อมูลโน้ตไม่ถูกต้อง" }, { status: 400 });
+  if (isFinanceNote(d) && !(await apiCan(request, FLOW_FINANCE_PERM))) return financeDenied();
   const { data, error } = await supabaseAdmin().from("erp_record_comments").update({
     ...recordOf(d), body: d.text.slice(0, FLOW_NOTE_MAX), updated_at: new Date().toISOString(),
     metadata: { ...cur, color: d.color, view: d.view, x: d.x, y: d.y, attach: d.attach },

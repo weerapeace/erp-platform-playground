@@ -5,6 +5,7 @@
  * วาดจากทะเบียน lib/flow-map.ts (กล่อง/เส้น/ผัง) + เรขาคณิต lib/flow-map-layout.ts + ตัวเลขสดจาก /api/flow-map/health
  * ของเสริม: ช่องอยากแก้ + สร้าง prompt + ตะกร้า + ส่งรายงานปัญหา (./request) · กดตัวเลขดูรายการ (./metric-list)
  *          แท็บออเดอร์ 1 ใบ (./journey) · ป้ายเพิ่งแก้ (FlowEdge.changed) · พิมพ์ /print/flow-map
+ *          ผังการเงิน 5 แท็บ เฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM (flowViewsFor) · กล่องสูงหลายแถว · เส้นรวมสาย (feeds)
  * ใช้ที่ /master/flow-map · แก้เนื้อหาแผนผังที่ lib/flow-map.ts ที่เดียว (ดู docs/flow-map.md)
  */
 import { useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent, type ReactNode } from "react";
@@ -12,11 +13,12 @@ import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
+import { useAuth } from "@/components/auth";
 import {
-  FLOW_NODES, FLOW_EDGES, FLOW_VIEWS, FLOW_METRICS, FLOW_EDGE_TYPES, FLOW_AREA_LABEL, FLOW_RECENT_DAYS,
+  FLOW_NODES, FLOW_EDGES, FLOW_METRICS, FLOW_EDGE_TYPES, FLOW_AREA_LABEL, FLOW_RECENT_DAYS, FLOW_FINANCE_PERM, flowViewsFor,
   type FlowEdgeType, type FlowMetricKey,
 } from "@/lib/flow-map";
-import { FM_W, FM_H, FM_CX, FM_BAND_LABELS, fmXY, layoutFlowView, isRecentEdge, type FmDrawn } from "@/lib/flow-map-layout";
+import { FM_W, FM_CX, FM_BAND_LABELS, FM_CASHFLOW_DOT, fmXY, fmBox, fmTouches, layoutFlowView, isRecentEdge, type FmDrawn } from "@/lib/flow-map-layout";
 import { FlowRequestBox, FlowBasketPanel, useFlowBasket } from "./request";
 import { FlowMetricListModal } from "./metric-list";
 import { FlowJourney } from "./journey";
@@ -104,6 +106,9 @@ function MetricRows({ keys, health, onOpen }: { keys?: FlowMetricKey[]; health: 
 
 export function FlowMap() {
   const t = useT();
+  const { can } = useAuth();
+  const canFinance = can(FLOW_FINANCE_PERM);
+  const views = useMemo(() => flowViewsFor(canFinance), [canFinance]);   // ผังการเงินเฉพาะผู้มีสิทธิ์ (แอดมินมีเสมอ)
   const basket = useFlowBasket();
   const notesApi = useFlowNotes();
   const [placeMode, setPlaceMode] = useState(false);
@@ -130,7 +135,7 @@ export function FlowMap() {
   }, []);
 
   const isJourney = viewKey === JOURNEY;
-  const view = FLOW_VIEWS.find((v) => v.key === viewKey) ?? FLOW_VIEWS[0];
+  const view = views.find((v) => v.key === viewKey) ?? views[0];
   const drawn = useMemo(() => layoutFlowView(view), [view]);
   const shown = drawn.filter((e) => !hide[e.type]);
   const numOf = (id: string) => { const d = drawn.find((x) => x.id === id); return isJourney || !d ? null : d.i + 1; };
@@ -144,12 +149,12 @@ export function FlowMap() {
     const n = FLOW_NODES[id];
     return !!n.gaps?.length || !!n.metrics?.some((k) => FLOW_METRICS[k].bad && (health?.[k] ?? 0) > 0);
   };
-  const edgeOn = (e: FmDrawn) => !sel || (sel.k === "n" ? e.a === sel.id || e.b === sel.id : sel.id === e.id);
+  const edgeOn = (e: FmDrawn) => !sel || (sel.k === "n" ? fmTouches(e, sel.id) : sel.id === e.id);
   const nodeOn = (id: string) => {
     if (!sel) return true;
-    if (sel.k === "n") return sel.id === id || shown.some((e) => (e.a === sel.id && e.b === id) || (e.b === sel.id && e.a === id));
+    if (sel.k === "n") return sel.id === id || shown.some((e) => fmTouches(e, sel.id) && fmTouches(e, id));
     const d = drawn.find((x) => x.id === sel.id);
-    return !d || d.a === id || d.b === id;
+    return !d || fmTouches(d, id);
   };
   const pick = (s: Sel) => { setSel(s); setBasketOpen(false); };
 
@@ -168,7 +173,7 @@ export function FlowMap() {
   };
   /** ปุ่ม "แปะโน้ต" ในแผงรายละเอียด — วางใกล้กล่อง/เลขของเส้นในผังที่ดูอยู่ (แท็บออเดอร์ = วางบนภาพรวม) */
   const addNoteFor = (kind: "n" | "e", id: string) => {
-    const v = isJourney ? FLOW_VIEWS[0] : view;
+    const v = isJourney ? views[0] : view;
     const lay = layoutFlowView(v);
     let at: [number, number] = [24, 24];
     if (kind === "n" && v.pos[id]) { const [x, y] = fmXY(v.pos[id]); at = [x + FM_W - 30, Math.max(0, y - 60)]; }
@@ -243,7 +248,7 @@ export function FlowMap() {
     const n = FLOW_NODES[sel.id];
     const rel = isJourney
       ? Object.keys(FLOW_EDGES).filter((id) => FLOW_EDGES[id].from === sel.id || FLOW_EDGES[id].to === sel.id).map((id) => ({ id, a: FLOW_EDGES[id].from, b: FLOW_EDGES[id].to, type: FLOW_EDGES[id].type }))
-      : drawn.filter((e) => e.a === sel.id || e.b === sel.id);
+      : drawn.filter((e) => fmTouches(e, sel.id));
     panel = (
       <div className="space-y-2">
         <div className="rounded-xl border border-slate-200 bg-white p-4 text-[13px] leading-relaxed">
@@ -324,12 +329,22 @@ export function FlowMap() {
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-1.5">
-        {FLOW_VIEWS.map((v) => (
+        {views.filter((v) => !v.finance).map((v) => (
           <button key={v.key} type="button" onClick={() => pickView(v.key)}
             className={`h-8 px-3 text-[13px] rounded-lg border ${v.key === viewKey ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{v.label}</button>
         ))}
         <button type="button" onClick={() => pickView(JOURNEY)}
           className={`h-8 px-3 text-[13px] rounded-lg border ${isJourney ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{t("ออเดอร์ 1 ใบ เดินทางยังไง", "One order's journey")}</button>
+        {canFinance && <>
+          <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden="true" />
+          <span className="h-8 px-2 inline-flex items-center gap-1 text-[12px] rounded-lg bg-amber-50 text-amber-800 border border-amber-200" title={t("เห็นเฉพาะผู้มีสิทธิ์ดูผังการเงิน (แอดมินมีเสมอ)", "Only people allowed to see finance maps")}>
+            <Icon value="🔒" />{t("การเงิน · เฉพาะแอดมิน", "Finance · admin only")}
+          </span>
+          {views.filter((v) => v.finance).map((v) => (
+            <button key={v.key} type="button" onClick={() => pickView(v.key)}
+              className={`h-8 px-3 text-[13px] rounded-lg border ${v.key === viewKey ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{v.label}</button>
+          ))}
+        </>}
         {!isJourney && <>
           <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden="true" />
           {(Object.keys(FLOW_EDGE_TYPES) as FlowEdgeType[]).map((k) => (
@@ -377,24 +392,32 @@ export function FlowMap() {
                   <text x={22} y={438} dominantBaseline="central" fontSize={11} fill="#64748b">{t("คลังสินค้า (สต็อก)", "Stock")}</text>
                 </g>
               )}
+              {view.heads?.map((h, i) => (
+                <g key={h}>
+                  <rect x={FM_CX[i] - 8} y={28} width={FM_W + 16} height={view.height - 34} rx={12} fill="#f8fafc" />
+                  <text x={FM_CX[i] + FM_W / 2} y={16} textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={600} fill="#334155">{h}</text>
+                </g>
+              ))}
               {shown.map((e) => {
-                const ty = FLOW_EDGE_TYPES[e.type];
+                const ty = FLOW_EDGE_TYPES[e.type], w = e.type === "missing" ? 2 : 1.5;
                 return (
                   <g key={e.id} opacity={edgeOn(e) ? 1 : 0.12}>
-                    <path d={e.d} fill="none" stroke={ty.color} strokeWidth={e.type === "missing" ? 2 : 1.5} strokeDasharray={ty.dash} strokeLinecap="round" markerEnd="url(#fm-arrow)" />
-                    <path d={e.d} fill="none" stroke="transparent" strokeWidth={10} className="cursor-pointer" onClick={(ev) => onEdgeClick(ev, e.id, false)} />
+                    {e.feeds.map((f) => <path key={f.node} d={f.d} fill="none" stroke={ty.color} strokeWidth={w} strokeDasharray={ty.dash} strokeLinecap="round" />)}
+                    <path d={e.d} fill="none" stroke={ty.color} strokeWidth={w} strokeDasharray={ty.dash} strokeLinecap="round" markerEnd="url(#fm-arrow)" />
+                    {[e.d, ...e.feeds.map((f) => f.d)].map((d) => <path key={d} d={d} fill="none" stroke="transparent" strokeWidth={10} className="cursor-pointer" onClick={(ev) => onEdgeClick(ev, e.id, false)} />)}
                   </g>
                 );
               })}
               {Object.entries(view.pos).map(([id, p]) => {
-                const [x, y] = fmXY(p), n = FLOW_NODES[id], g = isGray(id), on = nodeOn(id), picked = sel?.k === "n" && sel.id === id;
+                const { x, y, h } = fmBox(p), n = FLOW_NODES[id], g = isGray(id), on = nodeOn(id), picked = sel?.k === "n" && sel.id === id;
                 return (
                   <g key={id} className="cursor-pointer" opacity={on ? 1 : 0.4} onClick={(ev) => onNodeClick(ev, id, picked)}>
                     <title>{n.label}</title>
-                    <rect x={x} y={y} width={FM_W} height={FM_H} rx={8} fill={g ? "#f8fafc" : "#eef2ff"} stroke={picked ? "#4f46e5" : g ? "#cbd5e1" : "#a5b4fc"} strokeWidth={picked ? 2 : 0.75} />
-                    <text x={x + FM_W / 2} y={y + 16} textAnchor="middle" dominantBaseline="central" fontSize={13} fontWeight={600} fill={g ? "#334155" : "#312e81"}>{n.label}</text>
-                    <text x={x + FM_W / 2} y={y + 32} textAnchor="middle" dominantBaseline="central" fontSize={11} fill={g ? "#64748b" : "#6366f1"}>{n.sub}</text>
+                    <rect x={x} y={y} width={FM_W} height={h} rx={8} fill={g ? "#f8fafc" : "#eef2ff"} stroke={picked ? "#4f46e5" : g ? "#cbd5e1" : "#a5b4fc"} strokeWidth={picked ? 2 : 0.75} />
+                    <text x={x + FM_W / 2} y={y + h / 2 - 6} textAnchor="middle" dominantBaseline="central" fontSize={13} fontWeight={600} fill={g ? "#334155" : "#312e81"}>{n.label}</text>
+                    <text x={x + FM_W / 2} y={y + h / 2 + 10} textAnchor="middle" dominantBaseline="central" fontSize={11} fill={g ? "#64748b" : "#6366f1"}>{n.sub}</text>
                     {nodeAlert(id) && <circle cx={x + FM_W - 9} cy={y + 9} r={3.5} fill="#dc2626" />}
+                    {view.finance && n.cashflow && <circle cx={x + 9} cy={y + 9} r={3.5} fill={FM_CASHFLOW_DOT}><title>{t("นับในกระแสเงินสด", "Counted in cash flow")}</title></circle>}
                   </g>
                 );
               })}
@@ -417,6 +440,7 @@ export function FlowMap() {
             <div className="px-2 pt-1 text-[11px] text-slate-400 flex flex-wrap gap-x-3">
               <span><span className="inline-block w-2 h-2 rounded-full bg-red-600 mr-1 align-middle" />{t("มีช่องโหว่ / ตัวเลขที่ต้องตาม", "Gap or number to follow")}</span>
               <span><span className="inline-block w-2 h-2 rounded-full bg-violet-600 mr-1 align-middle" />{t(`เพิ่งแก้ (${FLOW_RECENT_DAYS} วัน)`, `Updated (${FLOW_RECENT_DAYS} days)`)}</span>
+              {view.finance && <span><span className="inline-block w-2 h-2 rounded-full mr-1 align-middle" style={{ background: FM_CASHFLOW_DOT }} />{t("นับในกระแสเงินสด /cashflow", "Counted in /cashflow")}</span>}
               <span>{t("กล่องสีเทา = อยู่ส่วนอื่น", "Grey box = other area")}</span>
               <span>{t("โน้ต: ลากแถบบนเพื่อย้าย · กดรูปกุญแจ/คน สลับส่วนตัว ↔ ทั้งทีม", "Notes: drag the top strip · toggle private / team")}</span>
             </div>
@@ -426,7 +450,7 @@ export function FlowMap() {
       </div>
 
       <p className="mt-4 text-[11px] text-slate-400">
-        {t("แผนผังนี้อ่านจากทะเบียนกลาง lib/flow-map.ts (ตรวจกับระบบจริง 2 พ.ย. 2569) · แก้ระบบแล้วต้องแก้ทะเบียน มีเทสต์เตือนเมื่อไฟล์ที่อ้างหายไป", "Built from the central registry lib/flow-map.ts — update it when the system changes")}
+        {t("แผนผังนี้อ่านจากทะเบียนกลาง lib/flow-map.ts (ตรวจกับระบบจริง 2 พ.ย. 2569 · ผังการเงิน 3 พ.ย.) · แก้ระบบแล้วต้องแก้ทะเบียน มีเทสต์เตือนเมื่อไฟล์ที่อ้างหายไป", "Built from the central registry lib/flow-map.ts — update it when the system changes")}
         {healthErr ? t(" · โหลดตัวเลขสดไม่สำเร็จ", " · live numbers failed to load") : healthAt ? t(` · ตัวเลขสด ณ ${new Date(healthAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.`, ` · numbers as of ${new Date(healthAt).toLocaleTimeString()}`) : ""}
       </p>
       <FlowMetricListModal metric={metric} onClose={() => setMetric(null)} />
