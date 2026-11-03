@@ -7,6 +7,7 @@
  * ยังไม่กรอกยอดเงินในบัญชี = ข้าม (เส้นเริ่มจากศูนย์ จะเตือนมั่วทุกวัน)
  *
  * เรียกได้ 2 ทาง: Vercel Cron (lib/cron-auth) · คนมีสิทธิ์ cashflow.manage กดทดสอบ ?dry=1 = ดูผลอย่างเดียว ไม่ส่ง (ปุ่มในแท็บตั้งค่า)
+ * ⚠️ ถ้ายังไม่ตั้ง env CRON_SECRET ใน Vercel → header x-vercel-cron ใครก็ปลอมได้ — จึง (1) ทาง cron ไม่ส่งตัวเลขเงินกลับ (2) ส่งกระดิ่งวันละครั้งพอ
  * ค่าตั้ง: /api/cashflow/settings (lib/cashflow-settings)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -33,12 +34,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const admin = supabaseAdmin();
     const { data: st } = await admin.from("china_app_settings").select("sval").eq("skey", CASHFLOW_SETTINGS_KEY).maybeSingle();
     const settings = cleanCashflowSettings((st as { sval?: unknown } | null)?.sval);
-    if (!settings.alertEnabled) return NextResponse.json({ ok: true, dry, skipped: "ปิดการแจ้งเตือนไว้", settings, error: null });
+    if (!settings.alertEnabled) return NextResponse.json({ ok: true, dry, skipped: "ปิดการแจ้งเตือนไว้", ...(cron ? {} : { settings }), error: null });
 
     const from = todayISO(), to = addDaysISO(from, settings.alertDays);
     const cf = await loadCashflow(admin, { from, to, incomeBasis: "both", customerDefaultDays: GUESS_DAYS, supplierDefaultDays: GUESS_DAYS, rmbRateParam: 0 });
     if (!cf.meta.openingAccounts.length) {
-      return NextResponse.json({ ok: true, dry, skipped: "ยังไม่ได้กรอกยอดเงินในบัญชี — เตือนไม่ได้ (เส้นเริ่มจากศูนย์)", settings, error: null });
+      return NextResponse.json({ ok: true, dry, skipped: "ยังไม่ได้กรอกยอดเงินในบัญชี — เตือนไม่ได้ (เส้นเริ่มจากศูนย์)", ...(cron ? {} : { settings }), error: null });
     }
     const series = buildDailySeries(cf.events, cf.meta.openingBalance, from, to);
     const check = findLowCash(series, settings.safetyBuffer, from);
@@ -47,8 +48,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: ods } = await admin.from("od_facilities").select("limit_amount, current_used_amount").not("is_active", "is", false);
     const odHeadroom = ((ods ?? []) as Record<string, unknown>[]).reduce((s, o) => s + Math.max(0, num(o.limit_amount) - num(o.current_used_amount)), 0);
 
-    let sent = 0;
+    let sent = 0, already = false;
     if (check.first && !dry) {
+      // ส่งวันละครั้งพอ — กันคนยิงซ้ำ (ถ้ายังไม่ได้ตั้ง CRON_SECRET header ของ cron ปลอมได้) แล้วกระดิ่งแอดมินท่วม
+      const thStart = new Date(Date.parse(`${new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10)}T00:00:00+07:00`)).toISOString();
+      const { count } = await admin.from("erp_notifications").select("id", { count: "exact", head: true })
+        .eq("event_type", "cashflow.low_cash").gte("created_at", thStart);
+      already = (count ?? 0) > 0;
+    }
+    if (check.first && !dry && !already) {
       const { data: admins } = await admin.from("user_profiles").select("id").eq("role", "admin").eq("active", true);
       const ids = ((admins ?? []) as { id: string }[]).map((a) => a.id);
       const days = Math.max(0, Math.round((Date.parse(check.first.date) - Date.parse(from)) / 86400000));
@@ -65,11 +73,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         else console.error("[cron/cashflow-alert] erp_notify:", error.message);
       }
     }
+    // ตัวเลขเงินส่งกลับเฉพาะคนที่ล็อกอิน + มีสิทธิ์ (ปุ่มทดสอบ) — ทาง cron ตอบแค่ส่งแล้วกี่คน (กันเลขหลุดถ้า header cron ถูกปลอม)
+    if (cron) return NextResponse.json({ ok: true, sent, already, error: null });
     return NextResponse.json({
       ok: true, dry, from, to, settings, opening: cf.meta.openingBalance, startBalance: series.startBalance,
       first: check.first, low: check.low, shortfall: check.shortfall, odHeadroom, sent, error: null,
     });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "cron failed" }, { status: 500 });
+    console.error("[cron/cashflow-alert]", e instanceof Error ? e.message : e);
+    return NextResponse.json({ ok: false, error: cron ? "cron failed" : e instanceof Error ? e.message : "cron failed" }, { status: 500 });
   }
 }
