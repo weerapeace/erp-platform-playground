@@ -6,6 +6,7 @@
  * GET  ?setup=1                        → (แอดมิน) กลุ่มไลน์ที่บอทอยู่ ให้กด "ใช้กลุ่มนี้" (ตั้งผ่าน /api/admin/line-console)
  * POST (multipart: text + images[])    → วางเอง (สำรองตอนไลน์มีปัญหา / ทดสอบ) → AI อ่าน → คืนร่างใหม่
  * PATCH { id, action: reject|restore|reread, reason? }
+ * PATCH { id, action: merge, target_inbox_id | target_sheet_id }   "รวมกับงาน…" (ร่างอื่นที่รอ / ใบงานที่มีแล้ว)
  *
  * เปิดใบงานจากร่าง = POST /api/design-sheets พร้อม line_inbox_id (สร้างใบ + แนบรูป + ผูกร่าง ในคำขอเดียว)
  * สิทธิ์: ดู = products.view · แก้/วางเอง = products.edit (เท่าปุ่ม "เพิ่มงาน" เดิม)
@@ -18,7 +19,8 @@ import { guardApi } from "@/lib/api-auth";
 import { requestActor } from "@/lib/request-actor";
 import { loadLineGroupSetup } from "@/lib/line-intake";
 import {
-  DESIGN_INTAKE_SLOT, countPending, createManualDraft, listInbox, readDraftWithAi, rejectInbox, restoreInbox,
+  DESIGN_INTAKE_SLOT, attachInboxToSheet, countPending, createManualDraft, listInbox, mergeInboxInto, readDraftWithAi,
+  rejectInbox, restoreInbox,
 } from "@/lib/design-line-inbox";
 import type { LineInboxTab } from "@/lib/design-line-inbox-shared";
 
@@ -80,7 +82,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
-  let body: { id?: string; action?: string; reason?: string };
+  let body: { id?: string; action?: string; reason?: string; target_inbox_id?: string; target_sheet_id?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const id = str(body.id);
   if (!UUID.test(id)) return NextResponse.json({ error: "id ไม่ถูกต้อง" }, { status: 400 });
@@ -100,6 +102,12 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const row = await readDraftWithAi(admin, id, null);
     if (!row) return NextResponse.json({ error: "ไม่พบงานนี้" }, { status: 404 });
     return NextResponse.json({ ok: true, ai_error: row.ai_error ?? null, error: null });
+  }
+  if (body.action === "merge") {
+    const toInbox = str(body.target_inbox_id), toSheet = str(body.target_sheet_id);
+    if (!!toInbox === !!toSheet || !UUID.test(toInbox || toSheet)) return NextResponse.json({ error: "เลือกงานที่จะรวมก่อน" }, { status: 400 });
+    const r = toInbox ? await mergeInboxInto(admin, id, toInbox, who) : await attachInboxToSheet(admin, id, toSheet, who);
+    return r.ok ? NextResponse.json({ ...r, error: null }) : NextResponse.json({ error: r.error }, { status: 409 });
   }
   return NextResponse.json({ error: "คำสั่งไม่ถูกต้อง" }, { status: 400 });
 }

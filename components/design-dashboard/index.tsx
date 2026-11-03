@@ -33,7 +33,7 @@ import { StatusBoard } from "./status-board";
 import { AuditFeed } from "./audit-feed";
 import { PickActionBar } from "./pick-action-bar";
 import { LineInboxButton, LineInboxDrawer, useLineInboxCount } from "./line-inbox";
-import { lineTextToDetailHtml, type LineInboxItem } from "@/lib/design-line-inbox-shared";
+import { lineTextToDetailHtml, type LineInboxItem, type MergeSheetOption } from "@/lib/design-line-inbox-shared";
 import type { DesignSheetPrefill } from "@/components/design-sheet-detail";
 
 const WorkflowStatusManager = dynamic(
@@ -87,6 +87,10 @@ export function DesignDashboard() {
     setInboxOpen(false);
     setCreateOpen(true);
   };
+  // ใบงานบนบอร์ด (แก้ล่าสุดก่อน) ให้กล่องเลือกตอน "รวมกับงาน…" แนบรูปเข้าใบที่มีแล้ว — ไม่ต้องโหลดซ้ำ
+  const mergeSheets = useMemo<MergeSheetOption[]>(() => sheets.map((s) => ({
+    id: s.id, code: s.code, name: s.name, brand_name: s.brand_name, cover_url: s.cover_url, updated_at: s.updated_at,
+  })), [sheets]);
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
   const [viewMode, setViewMode] = useState<"board" | "gallery">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี)
   const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
@@ -843,7 +847,7 @@ export function DesignDashboard() {
             const url = new URL(window.location.href); url.searchParams.delete("inbox"); window.history.replaceState(null, "", url.toString());
           }
         }}
-          canEdit={canEdit} isAdmin={isAdmin}
+          canEdit={canEdit} isAdmin={isAdmin} sheets={mergeSheets}
           onConvert={convertFromInbox}
           onOpenSheet={(id) => { setInboxOpen(false); openDetail(id); }}
           onChanged={() => setInboxKey((k) => k + 1)} />

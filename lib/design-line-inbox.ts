@@ -11,6 +11,8 @@
  *   - ผล AI เป็นแค่ "ร่าง" — ใบงานจริง (เลข DS) เกิดเมื่อคนกดบันทึกเท่านั้น
  *   - ยืนยันว่ารูปมาจากไลน์จริงด้วยการดึงรูปจากไลน์ด้วยโทเคนบอท (ของกลาง lib/line-intake)
  *   - ข้อความคุยเล่นล้วน (ไม่มีรูป) ที่ AI ว่าไม่ใช่งาน → บอทเงียบ + ย้ายไป "ไม่ใช่งาน" ให้เอง (กู้คืนได้)
+ *   - หลายรูป: บอทตอบ 1 ครั้งต่อชุดที่ส่งติดกัน (รอเงียบ 6 วิ) บอกจำนวนรูปรวม · ขึ้นต้น "งานใหม่" = เปิดร่างใหม่ทันที
+ *     · รูปมาช้าเกิน 5 นาที / คนอื่นส่งช่วย → ในกล่องกด "รวมกับงาน…" (ร่างอื่น = mergeInboxInto · ใบงานที่มีแล้ว = attachInboxToSheet)
  *   - ไม่ push แจ้งเตือน (ประหยัดโควตาไลน์ — เจ้าของเลือก 2026-11-03) ตอบกลับแบบ reply เท่านั้น
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
@@ -22,7 +24,8 @@ import {
   fetchLineImage, isLineMessageId, lineMemberName, lineReply, putLineImage, sha256Hex, type LineEvent,
 } from "@/lib/line-intake";
 import {
-  sanitizeDesignAi, todayBangkok, type InboxBrand, type LineInboxDup, type LineInboxItem, type LineInboxTab,
+  decideDesignReply, sanitizeDesignAi, splitNewJobKeyword, todayBangkok,
+  type InboxBrand, type LineInboxDup, type LineInboxItem, type LineInboxTab,
 } from "@/lib/design-line-inbox-shared";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -128,45 +131,86 @@ async function autoReject(admin: Admin, id: string): Promise<void> {
 const thaiDate = (d: string) =>
   new Date(`${d}T00:00:00Z`).toLocaleDateString("th-TH", { day: "numeric", month: "short", timeZone: "UTC" });
 
-/** ข้อความตอบกลับในกลุ่ม (ข้อความเดียว) */
-export function buildDesignReply(row: Rec, brandName: string | null): string {
+/** ข้อความตอบกลับในกลุ่ม (ข้อความเดียว) — first = ตอบงานนี้ครั้งแรก · added = รูปที่เพิ่มจากตอบครั้งก่อน */
+export function buildDesignReply(row: Rec, brandName: string | null, first = true, added = 0): string {
   const n = arr(row.image_keys).length;
-  const lines = ["📥 รับงานแล้ว (รอทีมออกแบบเปิดใบงาน)"];
+  const lines = [first ? "📥 รับงานแล้ว (รอทีมออกแบบเปิดใบงาน)" : `📥 อัปเดตงานแล้ว${added > 0 ? ` · รูปเพิ่ม +${added}` : ""}`];
   lines.push(str(row.ai_name) || "งานใหม่ (ยังไม่มีชื่อ)");
   lines.push(`แบรนด์ ${brandName ?? "ไม่ระบุ"} · ส่ง ${row.ai_deadline ? thaiDate(str(row.ai_deadline)) : "ไม่ระบุวัน"}`);
   lines.push(`รูป ${n} · ส่งรูป/ข้อความเพิ่มได้ภายใน ${Math.round(INBOX_WINDOW_SECONDS / 60)} นาที`);
+  if (first) lines.push(`งานอื่นต่อเลย พิมพ์ "งานใหม่" นำหน้า`);
   lines.push(`ดูในระบบ 👉 ${inboxLink()}`);
   return lines.join("\n");
 }
 
+/** รอให้ "ชุดที่ส่งติดกัน" จบก่อนค่อยตอบ (เลือกหลายรูปส่งทีเดียว ไลน์ส่งมาทีละรูป) — ตอบครั้งเดียวพร้อมจำนวนรูปที่ถูก */
+const REPLY_QUIET_MS = 6000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** เหตุการณ์ที่อาจต้องตอบ (ตัวล่าสุดของร่างนั้นในคำขอนี้) */
+type ReplyCandidate = { id: string; msgId: string; replyToken: string | undefined };
+
 /**
  * รับข้อความ/รูปจากไลน์ทีละเหตุการณ์ (เรียกจาก webhook ใน after() — ตอบ 200 ให้ไลน์ไปก่อนแล้ว)
- * ตอบกลับเมื่อ: เปิดร่างใหม่ · ร่างที่ AI เคยตีตกกลับมาเป็นงาน · ข้อความแรกตามหลังรูป (สรุปใหม่ให้เห็นชื่อ/แบรนด์/วัน)
+ * ตอบกลับ 1 ครั้งต่อ 1 ชุดที่ส่งติดกัน: รอเงียบ REPLY_QUIET_MS แล้วเช็กว่าข้อความของเรายังเป็นชิ้นล่าสุดของร่างไหม
+ *   ใช่ = จบชุด → ตอบ (ตามกติกา decideDesignReply) · ไม่ใช่ = มีชิ้นใหม่ตามมา ให้ตัวนั้นตอบแทน
  */
 export async function handleDesignEvents(admin: Admin, cfg: LineCfg, events: LineEvent[]): Promise<void> {
   const token = str(cfg.token);
   const names = new Map<string, string | null>();
+  const candidates = new Map<string, ReplyCandidate>();
   for (const ev of events) {
-    try { await handleOne(admin, token, ev, names); }
-    catch (e) { console.error("[design-line-inbox] handle event", e); }
+    try {
+      const c = await handleOne(admin, token, ev, names);
+      if (c) candidates.set(c.id, c);
+    } catch (e) { console.error("[design-line-inbox] handle event", e); }
+  }
+  if (candidates.size === 0) return;
+  await sleep(REPLY_QUIET_MS);
+  for (const c of candidates.values()) {
+    try { await replyIfBatchDone(admin, token, c); }
+    catch (e) { console.error("[design-line-inbox] reply", e); }
   }
 }
 
-async function handleOne(admin: Admin, token: string, ev: LineEvent, names: Map<string, string | null>): Promise<void> {
+async function replyIfBatchDone(admin: Admin, token: string, c: ReplyCandidate): Promise<void> {
+  const row = await loadRaw(admin, c.id);
+  if (!row || row.status !== "pending") return;
+  const ids = arr(row.line_message_ids);
+  if (ids[ids.length - 1] !== c.msgId) return;   // มีข้อความ/รูปใหม่ตามมา → ตัวนั้นตอบแทน
+  const n = arr(row.image_keys).length;
+  const hasText = !!str(row.text_body);
+  const d = decideDesignReply({
+    replied_at: str(row.replied_at) || null, replied_images: row.replied_images == null ? null : Number(row.replied_images),
+    replied_text: row.replied_text === true, image_count: n, has_text: hasText,
+  });
+  if (!d.reply) return;
+  let brandName: string | null = null;
+  if (row.ai_brand_id) {
+    const { data: b } = await admin.from("brands").select("name").eq("id", String(row.ai_brand_id)).maybeSingle();
+    brandName = str((b as Rec | null)?.name) || null;
+  }
+  await lineReply(token, c.replyToken, buildDesignReply(row, brandName, d.first, d.added));
+  await admin.from(INBOX_TABLE).update({ replied_at: new Date().toISOString(), replied_images: n, replied_text: hasText }).eq("id", c.id);
+}
+
+async function handleOne(admin: Admin, token: string, ev: LineEvent, names: Map<string, string | null>): Promise<ReplyCandidate | null> {
   const msgId = str(ev.message?.id);
   const groupId = str(ev.source?.groupId);
   const userId = str(ev.source?.userId) || null;
   const isText = ev.message?.type === "text";
-  const text = isText ? str(ev.message?.text).slice(0, 4000) : "";
+  // ขึ้นต้น "งานใหม่" = เปิดร่างใหม่ทันที (ตัดคำนำออกจากข้อความที่เก็บ)
+  const kw = splitNewJobKeyword(isText ? str(ev.message?.text) : "");
+  const text = kw.text.slice(0, 4000);
 
   // ไลน์ส่งซ้ำ (redelivery) — เช็กก่อนดึงรูป (ตัวรวมใน DB กันซ้ำอีกชั้น)
   const { data: seen } = await admin.from(INBOX_TABLE).select("id").filter("line_message_ids", "cs", JSON.stringify([msgId])).limit(1);
-  if ((seen ?? []).length > 0) return;
+  if ((seen ?? []).length > 0) return null;
 
   let key: string | null = null, hash: string | null = null, dataUrl: string | null = null;
   if (!isText) {
     const img = await fetchLineImage(token, msgId);
-    if (!img) return;   // ดึงไม่ได้ = ข้อความปลอม/หมดอายุ → ไม่บันทึก
+    if (!img) return null;   // ดึงไม่ได้ = ข้อความปลอม/หมดอายุ → ไม่บันทึก
     key = await putLineImage(IMAGE_FOLDER, img.bytes, img.type);
     hash = await sha256Hex(img.bytes);
     dataUrl = `data:${img.type};base64,${Buffer.from(img.bytes).toString("base64")}`;
@@ -175,44 +219,39 @@ async function handleOne(admin: Admin, token: string, ev: LineEvent, names: Map<
   if (!names.has(nameKey)) names.set(nameKey, await lineMemberName(token, groupId, userId ?? undefined));
   const senderName = names.get(nameKey) ?? null;
   // ข้อความดึงจากไลน์ซ้ำไม่ได้เหมือนรูป → ยืนยันด้วย "คนส่งเป็นสมาชิกกลุ่มจริง" แทน (ถามไลน์ไม่ได้ = ไม่บันทึก)
-  if (isText && !senderName) return;
+  if (isText && !senderName) return null;
 
   const { data, error } = await admin.rpc("design_line_inbox_ingest", {
     p_group: groupId, p_sender: userId, p_sender_name: senderName, p_message_id: msgId,
     p_text: text || null, p_image_key: key, p_image_hash: hash, p_window_seconds: INBOX_WINDOW_SECONDS,
+    p_force_new: kw.forceNew,
   });
-  if (error) { console.error("[design-line-inbox] ingest", error.message); return; }
+  if (error) { console.error("[design-line-inbox] ingest", error.message); return null; }
   const r = ((data ?? []) as Rec[])[0];
-  if (!r || r.duplicate) return;
+  if (!r || r.duplicate) return null;
   const id = String(r.inbox_id);
-  const isNew = r.is_new === true;
-  const hadText = r.had_text === true;
 
-  // AI: ข้อความใหม่ = อ่านทั้งร่างใหม่ · ร่างใหม่ที่มีแต่รูป = ตั้งชื่อจากรูป · รูปที่ต่อท้ายร่างเดิม = ไม่ต้องอ่าน
-  const row = isText ? await readDraftWithAi(admin, id, null)
-    : isNew ? await readDraftWithAi(admin, id, dataUrl)
-    : await loadRaw(admin, id);
-  if (!row) return;
+  // AI: ข้อความใหม่ = อ่านทั้งร่างใหม่ · รูปของร่างที่ยังไม่มีข้อความและ AI ยังไม่เคยอ่าน = ตั้งชื่อจากรูป
+  //     (ร่างใหม่ที่มีแต่รูป / พิมพ์แค่ "งานใหม่" แล้วส่งรูป) · รูปที่ต่อท้ายร่างที่อ่านแล้ว = ไม่ต้องอ่าน
+  let row = await loadRaw(admin, id);
+  if (!row) return null;
+  if (isText && text) row = await readDraftWithAi(admin, id, null);
+  else if (!isText && !str(row.text_body) && !row.ai_read_at) row = await readDraftWithAi(admin, id, dataUrl);
+  if (!row) return null;
 
   const hasImages = arr(row.image_keys).length > 0;
   if (!hasImages && row.ai_is_job === false) {
     if (row.status === "pending") await autoReject(admin, id);
-    return;   // คุยเล่น → บอทเงียบ
+    return null;   // คุยเล่น → บอทเงียบ
   }
-  let revived = false;
   if (row.status === "rejected" && row.rejected_by === "AI") {
+    // ร่างที่ AI เคยตีตก กลับมาเป็นงาน (มีรูป/ข้อความสั่งงานตามมา) → ตอบใหม่เหมือนงานใหม่
     const now = new Date().toISOString();
-    await admin.from(INBOX_TABLE).update({ status: "pending", rejected_by: null, rejected_at: null, reject_reason: null, updated_at: now })
-      .eq("id", id).eq("status", "rejected");
-    revived = true;
+    await admin.from(INBOX_TABLE).update({
+      status: "pending", rejected_by: null, rejected_at: null, reject_reason: null, replied_at: null, replied_images: null, updated_at: now,
+    }).eq("id", id).eq("status", "rejected");
   }
-  if (!(isNew || revived || (isText && !hadText))) return;
-  let brandName: string | null = null;
-  if (row.ai_brand_id) {
-    const { data: b } = await admin.from("brands").select("name").eq("id", String(row.ai_brand_id)).maybeSingle();
-    brandName = str((b as Rec | null)?.name) || null;
-  }
-  await lineReply(token, ev.replyToken, buildDesignReply(row, brandName));
+  return { id, msgId, replyToken: ev.replyToken };
 }
 
 // ---------------------------------------------------------------- อัปเอง (สำรอง/ทดสอบ จากหน้าเว็บ)
@@ -382,8 +421,13 @@ export async function releaseInboxClaim(admin: Admin, id: string): Promise<void>
 
 const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" };
 
-/** ผูกร่างกับใบงานที่สร้างแล้ว + แนบรูปเข้าใบงาน (ใช้ไฟล์เดิมใน R2 ไม่อัปซ้ำ) + บันทึกประวัติ — คืนจำนวนรูปที่แนบ */
-export async function finishInboxConvert(admin: Admin, row: Rec, sheet: { id: string; code: string }, actor: Actor): Promise<number> {
+/**
+ * ผูกร่างกับใบงาน + แนบรูปเข้าใบงาน (ใช้ไฟล์เดิมใน R2 ไม่อัปซ้ำ) + บันทึกประวัติ — คืนจำนวนรูปที่แนบ
+ * ใช้ทั้งตอนเปิดใบงานใหม่ และตอน "รวมกับงาน…" เข้าใบงานที่มีอยู่แล้ว (attachToExisting = true → ไม่ตั้งรูปหลักทับของเดิม)
+ */
+export async function finishInboxConvert(
+  admin: Admin, row: Rec, sheet: { id: string; code: string }, actor: Actor, attachToExisting = false,
+): Promise<number> {
   const id = String(row.id);
   await admin.from(INBOX_TABLE).update({ sheet_id: sheet.id, updated_at: new Date().toISOString() }).eq("id", id);
   const keys = arr(row.image_keys);
@@ -391,7 +435,7 @@ export async function finishInboxConvert(admin: Admin, row: Rec, sheet: { id: st
   if (keys.length) {
     const { count } = await admin.from("erp_playground_attachments").select("id", { count: "exact", head: true })
       .eq("entity_type", "design_sheet").eq("entity_id", sheet.id);
-    const base = count ?? 0;
+    const base = count ?? 0;   // ใบที่มีรูปอยู่แล้ว → รูปจากไลน์ต่อท้าย ไม่ตั้งรูปหลักทับ
     const rows = keys.map((k, i) => {
       const ext = (k.split(".").pop() || "jpg").toLowerCase();
       return {
@@ -406,7 +450,7 @@ export async function finishInboxConvert(admin: Admin, row: Rec, sheet: { id: st
   }
   await writeAudit(admin, {
     action: "convert", entityType: INBOX_TABLE, entityId: id, actorId: actor.id, actorName: actor.name,
-    metadata: { sheet_id: sheet.id, code: sheet.code, images: attached, source: row.source },
+    metadata: { sheet_id: sheet.id, code: sheet.code, images: attached, source: row.source, ...(attachToExisting ? { mode: "attach_existing" } : {}) },
   });
   if (attached) {
     await writeAudit(admin, {
@@ -437,4 +481,44 @@ export async function restoreInbox(admin: Admin, id: string, actor: Actor): Prom
   if (!data) return false;
   await writeAudit(admin, { action: "restore", entityType: INBOX_TABLE, entityId: id, actorId: actor.id, actorName: actor.name, metadata: {} });
   return true;
+}
+
+// ---------------------------------------------------------------- รวมกับงาน… (รูปส่งช้าเกิน 5 นาที / คนอื่นส่งรูปช่วย)
+
+type MergeResult = { ok: true; images: number; target_label: string } | { ok: false; error: string };
+
+/** รวมร่างนี้เข้าร่างอื่นที่ยังรอเปิดใบงาน — ร่างนี้ปิดเป็น merged (หายจากกล่อง) · มีข้อความติดมา = AI อ่านร่างปลายทางใหม่ */
+export async function mergeInboxInto(admin: Admin, sourceId: string, targetId: string, actor: Actor): Promise<MergeResult> {
+  const { data, error } = await admin.rpc("design_line_inbox_merge", {
+    p_source: sourceId, p_target: targetId, p_actor_id: actor.id, p_actor_name: actor.name,
+  });
+  if (error) return { ok: false, error: "รวมงานไม่สำเร็จ ลองใหม่อีกครั้ง" };
+  const r = ((data ?? []) as Rec[])[0];
+  if (!r?.ok) return { ok: false, error: str(r?.error) || "รวมงานไม่สำเร็จ" };
+  const images = Number(r.images) || 0;
+  const target = r.had_text === true ? await readDraftWithAi(admin, targetId, null) : await loadRaw(admin, targetId);
+  const label = str(target?.ai_name) || "งานในกล่อง";
+  await writeAudit(admin, {
+    action: "merge", entityType: INBOX_TABLE, entityId: sourceId, actorId: actor.id, actorName: actor.name,
+    metadata: { into_inbox: targetId, images, text: r.had_text === true },
+  });
+  await writeAudit(admin, {
+    action: "merge_in", entityType: INBOX_TABLE, entityId: targetId, actorId: actor.id, actorName: actor.name,
+    metadata: { from_inbox: sourceId, images, text: r.had_text === true },
+  });
+  return { ok: true, images, target_label: label };
+}
+
+/** แนบรูปของร่างนี้เข้าใบงานที่มีอยู่แล้ว — ร่างย้ายไป "เปิดใบงานแล้ว" ผูกกับใบนั้น (ข้อความไม่แตะรายละเอียดใบงาน) */
+export async function attachInboxToSheet(admin: Admin, sourceId: string, sheetId: string, actor: Actor): Promise<MergeResult> {
+  const { data: s } = await admin.from("design_sheets").select("id, code, is_active").eq("id", sheetId).maybeSingle();
+  const sheet = s as Rec | null;
+  if (!sheet || sheet.is_active === false) return { ok: false, error: "ไม่พบใบงานนี้ (อาจถูกลบไปแล้ว)" };
+  const src = await loadRaw(admin, sourceId);
+  if (src && arr(src.image_keys).length === 0) return { ok: false, error: "งานนี้ไม่มีรูปให้แนบ — ใช้ \"ไม่ใช่งาน\" หรือรวมกับร่างอื่นแทน" };
+  const claim = await claimInboxForSheet(admin, sourceId, actor);
+  if (!claim.ok) return claim;
+  const code = str(sheet.code);
+  const images = await finishInboxConvert(admin, claim.row, { id: sheetId, code }, actor, true);
+  return { ok: true, images, target_label: code || "ใบงาน" };
 }

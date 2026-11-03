@@ -71,6 +71,31 @@ export function sanitizeDesignAi(raw: Record<string, unknown>, brands: InboxBran
   return { is_job: isJob, name, brand_id: brand?.id ?? null, deadline };
 }
 
+// ---------------------------------------------------------------- หลายรูป / หลายงาน
+
+/** ขึ้นต้นข้อความด้วย "งานใหม่" (หรือ "#งานใหม่" / "new job") = เริ่มงานใหม่ทันที ไม่รวมกับงานก่อนหน้าใน 5 นาที — คืนข้อความที่ตัดคำนำออกแล้ว */
+export function splitNewJobKeyword(text: string | null | undefined): { forceNew: boolean; text: string } {
+  const raw = String(text ?? "");
+  const m = /^\s*[#＃]?\s*(?:งานใหม่|new\s+job\b)\s*[:：\-–—.,]?\s*/i.exec(raw);
+  return m ? { forceNew: true, text: raw.slice(m[0].length).trim() } : { forceNew: false, text: raw.trim() };
+}
+
+/**
+ * บอทควรตอบในกลุ่มไหม — เรียกตอน "ชุดที่ส่งติดกันจบแล้ว" (เงียบไปสักพัก) เท่านั้น
+ * ตอบเมื่อ: ยังไม่เคยตอบงานนี้ · มีรูปเพิ่มจากตอนตอบครั้งก่อน · ข้อความแรกมาถึงหลังตอบไปแล้ว (มีชื่อ/แบรนด์/วันใหม่ให้ดู)
+ * ไม่ตอบ: ข้อความเพิ่มเติมทีหลัง (เช่น "ขอบคุณ" / แก้รายละเอียด) — AI อ่านใหม่เงียบ ๆ ในระบบ
+ */
+export function decideDesignReply(s: {
+  replied_at: string | null; replied_images: number | null; replied_text: boolean; image_count: number; has_text: boolean;
+}): { reply: boolean; first: boolean; added: number } {
+  if (!s.replied_at) return { reply: true, first: true, added: s.image_count };
+  const added = Math.max(0, s.image_count - (s.replied_images ?? 0));
+  return { reply: added > 0 || (s.has_text && !s.replied_text), first: false, added };
+}
+
+/** ใบงานที่ให้เลือกตอนกด "รวมกับงาน…" (หน้าแม่ส่งมาจากรายการบนบอร์ด) */
+export type MergeSheetOption = { id: string; code: string; name: string; brand_name: string | null; cover_url: string | null; updated_at: string };
+
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
