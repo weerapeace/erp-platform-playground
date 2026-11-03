@@ -22,7 +22,7 @@ import { apiFetch } from "@/lib/api";
 import { QC_WAREHOUSES } from "@/lib/qc-ship";
 import { REDUCE_REASONS } from "@/lib/mo-qty-reduce";
 import { matchShipDate, matchText, type MatchPart, type MoMatch } from "@/lib/mo-sales-match";
-import { SalesBillPicker, type BillPick } from "./sales-bill-picker";
+import { BILL_REST_ORDER, billRestGroup, billRestTitle, SalesBillPicker, type BillPick, type BillRest } from "./sales-bill-picker";
 import { isHireDesk, todayYmd } from "@/lib/work-entry-rules";
 import type { Assignee } from "@/app/api/mo/assignees/route";
 import type { CatchUpSnapshot } from "@/app/api/mo/catch-up/route";
@@ -64,6 +64,8 @@ type BRow = {
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const whereText = (w: CuWhere) => w.parts.map((p) => `${p.label}${p.qty != null ? ` ${fmt(p.qty)}` : ""}`).join(" · ");
 const r2 = (n: number) => Math.round(n * 100) / 100;
+/** ป้ายในช่องลดจำนวนที่ตั้งจากใบขาย (ทำได้แค่ที่ผูก) — ใช้อ่านกลับว่าแถวเลือก "ที่เหลือ" แบบไหนไว้ */
+const SHIP_BY_BILL = "ส่งตามใบขาย";
 const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 const inp = "h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500";
 const addBtn = "inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-indigo-300 px-3 text-[12px] text-indigo-700 hover:bg-indigo-50";
@@ -463,19 +465,40 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
   // ── 🧾 ใบขายที่ส่งไปแล้ว: ผูก (จำคู่ ใบขายเดียวกันไม่ถูกจับซ้ำ) + เลือกขั้น "ส่งออกจาก QC แล้ว · ขายออกเลย" + วันส่ง = วันที่ใบขาย
   //    หัวหน้า/บันทึกได้เลย = ผูกจริง · ส่งคำขอ = ใช้ข้อมูลตั้งขั้นอย่างเดียว (ไม่ผูก)
   const canLinkSales = mode === "direct" || canApprove;
+  /** ยอดที่ยังต้องจ่ายตามจำนวนที่จะทำ — "รอผลิตในใบเดิม" (keep) ใบไม่ลดจำนวน แต่จ่ายแค่ที่ทำได้ */
+  const remainOf = (snap: CatchUpSnapshot, v: CuReduce | null) => {
+    const f = cuFacts(cuReduceSnap(snap, v));
+    return Math.max(0, (v?.mode === "keep" ? v.qty : f.qty) - f.dispatched);
+  };
   /** ตั้งขั้น "ส่งออกจาก QC แล้ว · ขายออกเลย" + วันส่ง = วันที่ใบขายล่าสุด · sell = ขายออกแค่บางส่วน (ที่เหลือ rest)
-   *  made = ทำได้แค่นี้: split = ที่เหลือแยกใบใหม่รอผลิต · keep = ที่เหลือรอผลิตในใบเดิม (จ่าย/ส่งแค่ที่ทำได้ ใบยังเท่าเดิม) · drop = ไม่ทำแล้ว */
-  const toShip = (r: BRow, parts: MatchPart[], opt: { sell?: number | null; rest?: "sales_wh" | "keep"; made?: { qty: number; mode: "split" | "keep" | "drop" } } = {}) => {
+   *  made = ทำได้แค่นี้: split = ที่เหลือแยกใบใหม่รอผลิต · keep = ที่เหลือรอผลิตในใบเดิม (จ่าย/ส่งแค่ที่ทำได้ ใบยังเท่าเดิม) · drop = ไม่ทำแล้ว
+   *  full = ทำครบแล้ว (เปลี่ยนใจจาก "ทำได้แค่นี้") → เอาลดจำนวนออก · เปลี่ยนไปมา = แถวจ่ายแถวเดียวที่ยังเป็นยอดเหลือเดิมตามยอดใหม่ (เหมือน setReduce) */
+  const toShip = (r: BRow, parts: MatchPart[], opt: { sell?: number | null; rest?: "sales_wh" | "keep"; made?: { qty: number; mode: "split" | "keep" | "drop" }; full?: boolean } = {}) => {
     if (!r.snap || r.phase !== "edit" || modeOf(r).blockedBy || cuTargetBlocked(cuFacts(r.snap), "ship")) return;
     patchRow(r.moNo, (rr) => {
       const m = opt.made;
-      const base: BRow = m ? { ...rr, reduce: { qty: m.qty, pick: m.mode === "drop" ? "ลูกค้าลดจำนวน" : "ของไม่พอ", detail: "ส่งตามใบขาย", mode: m.mode } } : rr;
-      const next = { ...(m ? { reduce: base.reduce } : {}), ...retarget(base, "ship"), shipMode: "sell" as const, shipSell: opt.sell ?? null, shipRest: opt.rest ?? ("sales_wh" as const),
+      const base: BRow = m ? { ...rr, reduce: { qty: m.qty, pick: m.mode === "drop" ? "ลูกค้าลดจำนวน" : "ของไม่พอ", detail: SHIP_BY_BILL, mode: m.mode } } : opt.full ? { ...rr, reduce: null } : rr;
+      const next = { ...(m || opt.full ? { reduce: base.reduce } : {}), ...retarget(base, "ship"), shipMode: "sell" as const, shipSell: opt.sell ?? null, shipRest: opt.rest ?? ("sales_wh" as const),
         dates: { ...rr.dates, ship: matchShipDate(parts) }, open: true };
+      if ((m || opt.full) && rr.snap && rr.target && next.disp?.length === 1 && Math.abs(next.disp[0].qty - remainOf(rr.snap, rr.reduce)) < 0.0001)
+        next.disp = [{ ...next.disp[0], qty: remainOf(rr.snap, base.reduce) }];
       // รอผลิตในใบเดิม: ใบไม่ลดจำนวน → ตั้งต้นจ่ายเท่าที่ทำได้ (แถวจ่ายแถวเดียว) · ส่งคืน/QC ตามยอดจ่ายอัตโนมัติ
       if (m?.mode === "keep" && next.disp && next.disp.length === 1) next.disp = [{ ...next.disp[0], qty: m.qty }];
       return next;
     });
+  };
+  /** ใบขายผูกไม่ครบ: ที่เหลือเป็นแบบไหน → ตั้งขั้นส่งออก — กติกาเดียวทั้งหน้าต่างเลือกใบขาย และช่อง "ที่เหลือ N ชิ้น" ในแถว
+   *  ทำครบแล้ว: ① เข้าคลังขาย / ② ค้างชั้น QC (ขายออกแค่ total) · ทำได้แค่ total: ③ แยกใบใหม่ / ④ รอผลิตในใบเดิม / ⑤ ไม่ทำแล้ว (ลดจำนวน) */
+  const shipWithRest = (r: BRow, parts: MatchPart[], total: number, rest: BillRest | null) => {
+    if (rest === "split" || rest === "same" || rest === "drop") toShip(r, parts, { made: { qty: total, mode: rest === "same" ? "keep" : rest } });
+    else if (rest) toShip(r, parts, { sell: total, rest, full: true });
+    else toShip(r, parts);
+  };
+  /** ที่เลือกไว้ตอนนี้ของแถว (อ่านจากค่าในแถว — ไม่เก็บแยก) · "" = ยังไม่ได้เลือก */
+  const restOf = (r: BRow): BillRest | "" => {
+    if (r.target !== "ship") return "";
+    if (r.reduce?.detail === SHIP_BY_BILL) return r.reduce.mode === "keep" ? "same" : r.reduce.mode === "split" || r.reduce.mode === "drop" ? r.reduce.mode : "";
+    return r.shipSell != null && !r.reduce ? r.shipRest : "";
   };
   const partsOf = (m: MoMatch) => (m.kind === "linked" ? m.linked : m.suggest);
   const linkSale = async (r: BRow, m: MoMatch, quiet = false): Promise<boolean> => {
@@ -501,15 +524,21 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
       if (!res.ok || j?.error) { toast.error(j?.error || "ผูกใบขายไม่สำเร็จ"); await loadSales(rows.map((x) => x.moNo)); return; }
     }
     const parts: MatchPart[] = pick.parts.map((p) => ({ line: { id: p.sale_line_id, sale_id: "", so_number: p.so_number, date: p.date, customer: null, sku: "", qty: p.qty }, qty: p.qty }));
-    if (pick.rest === "split") toShip(r, parts, { made: { qty: pick.total, mode: "split" } });
-    else if (pick.rest === "same") toShip(r, parts, { made: { qty: pick.total, mode: "keep" } });
-    else if (pick.rest === "drop") toShip(r, parts, { made: { qty: pick.total, mode: "drop" } });
-    else if (pick.rest) toShip(r, parts, { sell: pick.total, rest: pick.rest });
-    else toShip(r, parts);
+    shipWithRest(r, parts, pick.total, pick.rest);
     setPickMo(null);
     await loadSales(rows.map((x) => x.moNo));
   };
   const linkOne = async (r: BRow, m: MoMatch) => { setSalesBusy(true); await linkSale(r, m); await loadSales(rows.map((x) => x.moNo)); setSalesBusy(false); };
+  /** ช่อง "ที่เหลือ N ชิ้น" ในแถว (เจ้าของ 2026-11-03 "อยากให้มีเลือกจากตรงนี้") · ยังไม่ผูก (บางส่วน) = ผูกตามที่ระบบเสนอก่อน */
+  const chooseRest = async (r: BRow, m: MoMatch, rest: BillRest) => {
+    if (m.kind === "partial" && canLinkSales) {
+      setSalesBusy(true);
+      const ok = await linkSale(r, m);
+      await loadSales(rows.map((x) => x.moNo)); setSalesBusy(false);
+      if (!ok) return;
+    }
+    shipWithRest(r, partsOf(m), m.covered, rest);
+  };
   const unlinkSale = async (r: BRow) => {
     setSalesBusy(true);
     const res = await apiFetch(`/api/mo/sales-match?mo_no=${encodeURIComponent(r.moNo)}`, { method: "DELETE" });
@@ -544,6 +573,7 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
     const date = matchShipDate(parts);
     const cust = parts.map((p) => p.line.customer).find(Boolean);
     const editable = r.phase === "edit" && !modeOf(r).blockedBy;
+    const left = r2(m.qty - m.covered), rest = restOf(r);
     const btn = "inline-flex h-7 items-center gap-1 rounded-md border px-2 text-[11px] disabled:opacity-40";
     return (
       <div className="space-y-1">
@@ -554,15 +584,32 @@ export function CatchUpBatch({ moNos, onClose, onDone, departments, craftsmen, w
           <span className="text-[12px] text-slate-700">{matchText(parts)}</span>
         </div>
         <div className="text-[11px] text-slate-400">{date ? `ใบขายวันที่ ${date}` : ""}{cust ? ` · ${cust}` : ""}</div>
+        {editable && left > 0.0001 && (m.kind === "linked" || m.kind === "partial") && (
+          // ผูกไม่ครบ: เลือกที่เหลือตรงนี้เลย (ทางเลือกเดียวกับหน้าต่างเลือกใบขาย) — เลือกแล้ว = ตั้งขั้นส่งออกให้
+          <label className="flex flex-wrap items-center gap-1.5 text-[11px]">
+            <span className="font-medium text-amber-800">ที่เหลือ {fmt(left)} ชิ้น:</span>
+            <select value={rest} disabled={salesBusy} onChange={(e) => void chooseRest(r, m, e.target.value as BillRest)}
+              title="เลือกแล้วตั้งขั้น “ส่งออกจาก QC แล้ว” ให้ — ขายออกตามใบขาย ที่เหลือตามที่เลือก"
+              className={`h-7 max-w-full rounded-md border px-1.5 text-[12px] ${rest ? "border-slate-200 bg-white text-slate-700" : "border-amber-300 bg-amber-50 text-amber-900"}`}>
+              <option value="" disabled>— ทำอะไรกับที่เหลือ —</option>
+              {[true, false].map((made) => (
+                <optgroup key={String(made)} label={billRestGroup(made, m.qty, m.covered, left)}>
+                  {BILL_REST_ORDER.filter((k) => (k === "sales_wh" || k === "keep") === made).map((k) => <option key={k} value={k}>{billRestTitle(k, m.qty, m.covered, left)}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+        )}
         {editable && (
           <div className="flex flex-wrap gap-1">
             {m.kind === "linked" ? <>
-              <button type="button" disabled={salesBusy} onClick={() => toShip(r, m.linked, m.covered < m.qty - 0.0001 ? { sell: m.covered, rest: "sales_wh" } : {})} className={`${btn} border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50`}>ไปถึงขั้นส่งออก</button>
+              {/* ผูกไม่ครบ = ใช้ช่อง "ที่เหลือ" ด้านบน (เดิมปุ่มนี้ส่งที่เหลือเข้าคลังขายเงียบ ๆ) */}
+              {left <= 0.0001 && <button type="button" disabled={salesBusy} onClick={() => toShip(r, m.linked)} className={`${btn} border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50`}>ไปถึงขั้นส่งออก</button>}
               <button type="button" disabled={salesBusy} onClick={() => setPickMo(r.moNo)} className={`${btn} border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}>เปลี่ยนใบขาย…</button>
               {canLinkSales && <button type="button" disabled={salesBusy} onClick={() => void unlinkSale(r)} className={`${btn} border-slate-200 bg-white text-slate-500 hover:text-rose-600`}>ยกเลิกผูก</button>}
             </> : m.kind === "partial" ? (
-              <button type="button" disabled={salesBusy} onClick={() => setPickMo(r.moNo)} title="จำนวนในใบขายน้อยกว่าที่ผลิต — เลือกว่าที่เหลือเป็นอย่างไร"
-                className={`${btn} border-amber-300 bg-amber-50 font-medium text-amber-900 hover:bg-amber-100`}>เลือกใบขาย / ที่เหลือ…</button>
+              <button type="button" disabled={salesBusy} onClick={() => setPickMo(r.moNo)} title="เลือกใบขายอื่น / หลายใบ / จำนวนเอง — ที่เหลือเลือกได้ในช่องด้านบน"
+                className={`${btn} border-slate-200 bg-white text-slate-600 hover:bg-slate-50`}>เลือกใบขายเอง…</button>
             ) : (<>
               <button type="button" disabled={salesBusy} onClick={() => void linkOne(r, m)} title={canLinkSales ? "จำว่าใบนี้ส่งไปกับใบขายนี้ + ตั้งขั้นส่งออก" : "ตั้งขั้นส่งออกตามใบขาย (ผูกจริงตอนหัวหน้ายืนยัน)"}
                 className={`${btn} border-emerald-300 bg-emerald-50 font-medium text-emerald-800 hover:bg-emerald-100`}>{canLinkSales ? "ผูก + ไปถึงขั้นส่งออก" : "ใช้ข้อมูลนี้ → ขั้นส่งออก"}</button>

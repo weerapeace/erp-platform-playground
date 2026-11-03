@@ -22,6 +22,18 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const EPS = 0.0001;
 
+/** ชื่อทางเลือก "ที่เหลือ" — ใช้ทั้งหน้าต่างนี้และช่องเลือกในแถวของอัปเดตเป็นชุด (ข้อความเดียวกัน) · total = ที่ผูกใบขาย · left = ที่เหลือ */
+export const BILL_REST_ORDER: BillRest[] = ["sales_wh", "keep", "split", "same", "drop"];
+export const billRestGroup = (made: boolean, moQty: number, total: number, left: number) =>
+  made ? `ทำครบ ${fmt(moQty)} แล้ว — ที่เหลือ ${fmt(left)} ชิ้นอยู่ไหน` : `ทำได้แค่ ${fmt(total)} ชิ้น — อีก ${fmt(left)} ชิ้นยังไม่ได้ทำ`;
+export const billRestTitle = (k: BillRest, moQty: number, total: number, left: number) => ({
+  sales_wh: "① ที่เหลือเข้าคลังขาย",
+  keep: "② ที่เหลือยังอยู่บนชั้น QC",
+  split: `③ ที่เหลือ ${fmt(left)} แยกเป็นใบใหม่รอผลิต (แนะนำ)`,
+  same: `④ ที่เหลือ ${fmt(left)} รอผลิตในใบเดิม`,
+  drop: `⑤ ไม่ทำแล้ว (ลดจำนวน ${fmt(moQty)} → ${fmt(total)})`,
+} satisfies Record<BillRest, string>)[k];
+
 export function SalesBillPicker({ moNo, onClose, onConfirm, canLink }: {
   moNo: string | null;
   onClose: () => void;
@@ -155,13 +167,13 @@ export function SalesBillPicker({ moNo, onClose, onConfirm, canLink }: {
           </div>
           {total > 0 && left > EPS && (
             <div className="space-y-1.5">
-              <div className="text-[11px] font-medium text-slate-500">ทำครบ {fmt(moQty)} แล้ว — ที่เหลือ {fmt(left)} ชิ้นอยู่ไหน</div>
-              {opt("sales_wh", "① ที่เหลือเข้าคลังขาย", `ขายออก ${fmt(total)} · เก็บสต๊อกคลังขาย ${fmt(left)} (ขายทีหลัง) · ใบปิดได้`)}
-              {opt("keep", "② ที่เหลือยังอยู่บนชั้น QC", "รอส่งรอบหน้า / รอใบขายใบใหม่ (มาผูกเพิ่มทีหลังได้)")}
-              <div className="pt-1 text-[11px] font-medium text-slate-500">ทำได้แค่ {fmt(total)} ชิ้น — อีก {fmt(left)} ชิ้นยังไม่ได้ทำ</div>
-              {opt("split", `③ ที่เหลือ ${fmt(left)} แยกเป็นใบใหม่รอผลิต (แนะนำ)`, `ใบนี้เหลือ ${fmt(total)} ส่งออกแล้วปิดได้ · ใบใหม่ ${fmt(left)} ชิ้นไปแท็บรอจ่าย (ป้าย "แยกจาก")`)}
-              {opt("same", `④ ที่เหลือ ${fmt(left)} รอผลิตในใบเดิม`, `ใบเดียว 2 สถานะ: ส่งออก ${fmt(total)} + รอจ่าย ${fmt(left)} · ปิดใบได้เมื่อทำครบ ${fmt(moQty)}`)}
-              {opt("drop", `⑤ ไม่ทำแล้ว (ลดจำนวน ${fmt(moQty)} → ${fmt(total)})`, "ตัดที่เหลือทิ้ง เก็บเหตุผลไว้ในประวัติ")}
+              <div className="text-[11px] font-medium text-slate-500">{billRestGroup(true, moQty, total, left)}</div>
+              {opt("sales_wh", billRestTitle("sales_wh", moQty, total, left), `ขายออก ${fmt(total)} · เก็บสต๊อกคลังขาย ${fmt(left)} (ขายทีหลัง) · ใบปิดได้`)}
+              {opt("keep", billRestTitle("keep", moQty, total, left), "รอส่งรอบหน้า / รอใบขายใบใหม่ (มาผูกเพิ่มทีหลังได้)")}
+              <div className="pt-1 text-[11px] font-medium text-slate-500">{billRestGroup(false, moQty, total, left)}</div>
+              {opt("split", billRestTitle("split", moQty, total, left), `ใบนี้เหลือ ${fmt(total)} ส่งออกแล้วปิดได้ · ใบใหม่ ${fmt(left)} ชิ้นไปแท็บรอจ่าย (ป้าย "แยกจาก")`)}
+              {opt("same", billRestTitle("same", moQty, total, left), `ใบเดียว 2 สถานะ: ส่งออก ${fmt(total)} + รอจ่าย ${fmt(left)} · ปิดใบได้เมื่อทำครบ ${fmt(moQty)}`)}
+              {opt("drop", billRestTitle("drop", moQty, total, left), "ตัดที่เหลือทิ้ง เก็บเหตุผลไว้ในประวัติ")}
             </div>
           )}
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-[12px] text-slate-700"><b>ระบบจะทำ:</b> {preview}{total > 0 ? ` · วันส่ง = ${lines.filter((l) => on[l.id]).map((l) => l.date).sort().pop() ?? "—"}` : ""}</div>
