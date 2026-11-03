@@ -157,10 +157,13 @@ export function ListPrintPanel({
           <input type="range" min={FONT_MIN} max={FONT_MAX} step={1} value={s.fontPx} onChange={(e) => set({ fontPx: Number(e.target.value) })} className="flex-1 accent-blue-600" />
           <span className="w-9 text-right font-mono">{s.fontPx}px</span>
         </label>
-        <div className="mt-2 text-xs text-slate-500">รูปสินค้า</div>
-        <div className="mt-1 flex flex-wrap gap-1.5">
-          {(Object.keys(IMAGE_LABEL) as ListPrintImage[]).filter((k) => !(imgLocked && k === "none")).map((k) => <button key={k} type="button" className={segBtn(s.image === k)} onClick={() => set({ image: k })}>{IMAGE_LABEL[k]}</button>)}
-        </div>
+        {/* ใบที่ไม่มีคอลัมน์รูป (เช่น สรุปบิลจีน) ไม่ต้องโชว์ขนาดรูป */}
+        {available.some((c) => c.key === "img") && <>
+          <div className="mt-2 text-xs text-slate-500">รูปสินค้า</div>
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {(Object.keys(IMAGE_LABEL) as ListPrintImage[]).filter((k) => !(imgLocked && k === "none")).map((k) => <button key={k} type="button" className={segBtn(s.image === k)} onClick={() => set({ image: k })}>{IMAGE_LABEL[k]}</button>)}
+          </div>
+        </>}
         <div className="mt-2 text-xs text-slate-500">ความแน่นของแถว</div>
         <div className="mt-1 flex flex-wrap gap-1.5">
           {(Object.keys(DENSITY_LABEL) as ListPrintDensity[]).map((k) => <button key={k} type="button" className={segBtn(s.density === k)} onClick={() => set({ density: k })}>{DENSITY_LABEL[k]}</button>)}

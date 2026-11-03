@@ -25,6 +25,7 @@
 | `components/report/list-print-frame.tsx` | `ListPrintFrame` = PrintFrame + ลากขอบหัวคอลัมน์ปรับความกว้าง (`attachColumnResize` อ่าน `th[data-col]`) |
 | `lib/work-board-print.ts` | ผู้ใช้รายแรก: ใบพิมพ์บอร์ดจ่ายงาน 5 แบบ + แบบสำเร็จรูป 3 แบบ |
 | `lib/purchasing-print.ts` + `app/print/purchasing-orders` | สรุปสั่งซื้อ / ของรอรับ (หน้าสั่งซื้อ ปุ่ม "พิมพ์สรุป") — คอลัมน์ล็อก · ช่องพิมพ์เอง · ค่าเฉพาะใบ · ช่องใบสั่งผลิตเลือกได้ 7 อย่าง |
+| `lib/china-bills-print.ts` + `app/app/china-pay/print` | สรุปบิลจีน (แอปโอนเงินจีน แท็บ "บิลจีนทั้งหมด" ปุ่ม "พิมพ์") — สวิตช์ เรท / ค่าโอน / บัญชีร้าน ใน `opts` · ปิดสวิตช์ = คอลัมน์ของมันหายจากแผงด้วย (ส่ง `available` ที่กรองแล้วให้แผง) |
 | `lib/print-notes.ts` + `/api/print-notes` + `components/report/use-print-notes.ts` | ข้อความช่อง "พิมพ์เอง" (ตาราง print_row_notes · ทั้งทีมเห็น · audit ทุกครั้งที่แก้) |
 
 ## ใช้กับรายงานใหม่
@@ -42,6 +43,7 @@
   - หน้าพิมพ์: `const notes = usePrintNotes("<รายงาน>")` → `<ListPrintFrame onNote={notes.set} onNoteDone={notes.flush} />` + `<ListPrintPanel textNotes />` · ตอนสร้าง html อ่าน `notes.get(listNoteKey(rowKey, col))` และใส่ `notes.ver` ใน deps (พิมพ์ในพรีวิวไม่ทำให้สร้างใหม่ — ปุ่มพิมพ์ต้องสร้าง html ใหม่ตอนกด)
   - รายงานใหม่ต้องเพิ่มชื่อใน `PRINT_NOTE_REPORTS` (lib/print-notes) · ตารางยังไม่สร้าง = พิมพ์ได้แต่ไม่บันทึก (แผงเตือน)
 - **ค่าเฉพาะใบ** `settings.opts` (JSON ≤ 4,000 ตัวอักษร) — จำต่อคนเหมือนค่าอื่น และติดไปกับแบบที่บันทึกไว้ (แบบสำเร็จรูปใส่เฉพาะคีย์ที่อยากเปลี่ยน ที่เหลือคงเดิม) · ตัวเลือกวางในแผงผ่าน `<ListPrintPanel extra={…}>` (ใช้ `Section` / `Check` จากไฟล์แผง)
+- **สวิตช์ที่ซ่อนคอลัมน์** (เช่น ปิดค่าโอน = ไม่มีช่องค่าโอน/รวม): ส่ง `available` ที่กรองแล้วให้ `ListPrintPanel` แต่ให้ hook ใช้รายการเต็ม และห่อ `setSettings` ของแผงด้วย `cleanListPrintSettings(next, รายการเต็ม, defaults)` — ไม่งั้นกดแบบที่บันทึกไว้แล้วคอลัมน์ที่ซ่อนอยู่หลุดหาย (ตัวอย่าง `app/app/china-pay/print`) · แผงซ่อนตัวเลือกขนาดรูปเองเมื่อใบไม่มีคอลัมน์ `img`
 - แถวพิเศษในตาราง: `LIST_SUBGROUP_ROW` (หัวกลุ่มย่อยสีอ่อน) · `LIST_TOTAL_ROW` (แถวรวมท้ายกลุ่ม) · กล่องสรุป `listSummaryHtml([{label, value, tone}])`
 
 ## สิทธิ์ / ประวัติ

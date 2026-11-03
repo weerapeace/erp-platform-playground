@@ -15,6 +15,11 @@ import { RelationPicker, type RelationConfig } from "@/components/relation-picke
 import { FileMultiInput } from "@/components/file-multi-input";
 import { GlobalSearch } from "@/components/global-search";
 import { useSearchHotkey } from "@/lib/search-hotkey";
+import {
+  ALL_FILTERS, RATE_TABLE, TIER_NAMES, billDisplayName, billInFilter, billSlips, billStatus3, billTotalRmb, billTypeLabel,
+  buyRmbWithThb, isThbBill, rateForRmb, slipSumRmb, tierIdxForRmb, type Slip,
+} from "@/lib/china-pay";
+import { CHINA_BILLS_PRINT_PICK_KEY } from "@/lib/china-bills-print";
 
 const SUPPLIER_CFG: RelationConfig = {
   target_table: "partners_v2", target_module_key: "partners-v2",
@@ -128,42 +133,7 @@ function feeFor(amt: number): number {
   if (amt <= 49999) return 30;
   return 50;
 }
-// เรทตามชั้นยอด — กรอกแค่ R1, R2-R4 = R1 ลบส่วนต่างคงที่
-// ★ บันไดชั้นเรทนับเป็น "หยวน (¥)" ไม่ใช่บาท (ยืนยันกับร้านรับโอน 2026-08-24)
-//   เดิมโค้ดเอา "ยอดบาท" ไปเทียบบันได → โอนเกิน ฿5,000 (≈¥1,000) ก็ได้ R2 ทันที R1 แทบไม่เคยถูกใช้
-const RATE_OFFSET = { r2: 0.035, r3: 0.075, r4: 0.08 };
-const RATE_TABLE = [
-  { tier: "R1", label: "¥1 – 5,000", off: 0 }, { tier: "R2", label: "¥5,001 – 99,999", off: RATE_OFFSET.r2 },
-  { tier: "R3", label: "¥100,000 – 399,999", off: RATE_OFFSET.r3 }, { tier: "R4", label: "¥400,000 ขึ้นไป", off: RATE_OFFSET.r4 },
-];
-const TIER_NAMES = ["R1", "R2", "R3", "R4"];
-const TIER_MIN = [0, 5001, 100000, 400000];                                    // ¥ ขั้นต่ำของแต่ละชั้น
-const TIER_OFF = [0, RATE_OFFSET.r2, RATE_OFFSET.r3, RATE_OFFSET.r4];
-
-// รู้ "จำนวนหยวน" อยู่แล้ว → บอกชั้น/เรทได้ตรง ๆ
-function tierIdxForRmb(rmb: number): number {
-  if (rmb <= 5000) return 0;
-  if (rmb <= 99999) return 1;
-  if (rmb <= 399999) return 2;
-  return 3;
-}
-function rateForRmb(rmb: number, r1: number): number {
-  if (!r1) return 0;
-  const off = TIER_OFF[tierIdxForRmb(rmb)];
-  return off ? +(r1 - off).toFixed(4) : r1;
-}
-
-// รู้แค่ "จำนวนบาทที่โอน" → หาว่าซื้อหยวนได้เท่าไร (เรทขึ้นกับจำนวนหยวน = วนกันเอง)
-// วิธีตัด: ไล่จากชั้นสูงลงต่ำ ชั้นไหน "ใช้เรทชั้นนั้นแล้วซื้อหยวนได้ถึงขั้นต่ำของชั้นจริง" = ใช้ชั้นนั้น
-function buyRmbWithThb(thb: number, r1: number): { tierIdx: number; rate: number; rmb: number } {
-  if (!r1 || thb <= 0) return { tierIdx: 0, rate: r1 || 0, rmb: 0 };
-  for (let i = TIER_MIN.length - 1; i >= 1; i--) {
-    const rate = +(r1 - TIER_OFF[i]).toFixed(4);
-    const rmb = rate > 0 ? thb / rate : 0;
-    if (rmb >= TIER_MIN[i]) return { tierIdx: i, rate, rmb };
-  }
-  return { tierIdx: 0, rate: r1, rmb: thb / r1 };
-}
+// ชั้นเรท R1–R4 (นับเป็นหยวน) + สถานะบิล = สูตรกลาง lib/china-pay (ใช้ร่วมกับหน้าพิมพ์สรุปบิล)
 
 type Tab = "dashboard" | "bill" | "transfer" | "transfers" | "all" | "rate" | "ctw" | "suppliers" | "automation" | "menusettings";
 
@@ -295,29 +265,6 @@ function toDatetimeLocal(text: string): string {
   if (isNaN(d.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-// ---- สถานะบิลจีน 3 ระดับ (คิดจากยอดรวมสลิปเทียบยอดบิล) ----
-type Slip = { key: string; amount_rmb: number; at?: string };
-const billSlips = (b: Record<string, unknown>): Slip[] =>
-  Array.isArray(b.slips) ? (b.slips as Record<string, unknown>[]).map((s) => ({ key: String(s.key ?? ""), amount_rmb: num(s.amount_rmb), at: s.at ? String(s.at) : undefined })) : [];
-const billTotalRmb = (b: Record<string, unknown>) => num(b.amount_rmb) + num(b.fee_rmb);
-const slipSumRmb = (b: Record<string, unknown>) => billSlips(b).reduce((a, s) => a + s.amount_rmb, 0);
-// บิลแบบบาท (ค่าส่ง/VAT) — ยอดเป็น ฿ ตรง ไม่ใช้เรท ไม่มีสลิป ¥
-const isThbBill = (b: Record<string, unknown>): boolean => !!b.is_shipping || !!b.vat_type;
-const billTypeLabel = (b: Record<string, unknown>): string =>
-  b.is_shipping ? "ค่าส่ง" : b.vat_type ? `VAT ${String(b.vat_type)}` : "";
-// ชื่อที่โชว์ในรายการ: ประเภท (ค่าส่ง/VAT) หรือชื่อร้าน
-const billDisplayName = (b: Record<string, unknown>): string =>
-  billTypeLabel(b) || String(b.supplier_label ?? b.supplier_id ?? "—");
-// คืนสถานะ: ยกเลิก / รอโอน / โอนแล้วบางส่วน / โอนครบแล้ว
-function billStatus3(b: Record<string, unknown>): string {
-  if (String(b.status ?? "") === "ยกเลิก") return "ยกเลิก";
-  if (isThbBill(b)) return String(b.status ?? "") === "โอนแล้ว" ? "โอนครบแล้ว" : "รอโอน";
-  const total = billTotalRmb(b), sum = slipSumRmb(b);
-  if (total > 0 && sum >= total - 0.001) return "โอนครบแล้ว";
-  if (sum > 0) return "โอนแล้วบางส่วน";
-  return "รอโอน";
 }
 
 const MENU: { k: Tab; icon: string; label: string }[] = [
@@ -1271,7 +1218,6 @@ function BillForm() {
 }
 
 // ---------------- บิลจีนทั้งหมด (รวมหน้ารอโอนเดิม) ----------------
-const ALL_FILTERS = ["ค้างโอน", "ทั้งหมด", "รอโอน", "โอนแล้วบางส่วน", "โอนครบแล้ว", "ยกเลิก"] as const;
 function AllList({ canDelete }: { canDelete: boolean }) {
   const toast = useToast();
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
@@ -1291,11 +1237,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const shown = useMemo(() => {
-    if (filter === "ทั้งหมด") return rows;
-    if (filter === "ค้างโอน") return rows.filter(r => { const s = billStatus3(r); return s === "รอโอน" || s === "โอนแล้วบางส่วน"; });
-    return rows.filter(r => billStatus3(r) === filter);
-  }, [rows, filter]);
+  const shown = useMemo(() => rows.filter(r => billInFilter(r, filter)), [rows, filter]);
   const total = useMemo(() => shown.reduce((a, r) => a + billTotalRmb(r), 0), [shown]);
   const onPrinted = (id: string, at: string) => setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -1317,6 +1259,16 @@ function AllList({ canDelete }: { canDelete: boolean }) {
       else toast.error(j.error ?? "ส่งไม่ได้");
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSendingCombined(false); }
+  };
+
+  // 🖨 พิมพ์สรุปบิล — ติ๊กไว้ = เฉพาะที่ติ๊ก · ไม่ติ๊ก = ทุกบิลในตัวกรองนี้ · เปิดแท็บใหม่ (หน้านี้ไม่จำแท็บ กลับมาแล้วรายการที่ติ๊กไม่หาย)
+  const openPrint = () => {
+    try {
+      if (sel.size) localStorage.setItem(CHINA_BILLS_PRINT_PICK_KEY, JSON.stringify({ ids: [...sel], at: Date.now() }));
+      else localStorage.removeItem(CHINA_BILLS_PRINT_PICK_KEY);
+    } catch { /* ignore */ }
+    const url = `/app/china-pay/print?filter=${encodeURIComponent(filter)}${sel.size ? "&picked=1" : ""}`;
+    if (!window.open(url, "_blank")) window.location.href = url;
   };
 
   return (
@@ -1341,9 +1293,12 @@ function AllList({ canDelete }: { canDelete: boolean }) {
 
       {/* สรุปยอด */}
       {!loading && shown.length > 0 && (
-        <div className="rounded-xl bg-white border border-slate-200 p-3 flex justify-between items-center">
+        <div className="rounded-xl bg-white border border-slate-200 p-3 flex justify-between items-center gap-2">
           <span className="text-sm text-slate-500">{filter} {shown.length} บิล</span>
-          <span className="font-bold text-orange-600">¥{fmt(total)}</span>
+          <span className="flex items-center gap-2">
+            <span className="font-bold text-orange-600">¥{fmt(total)}</span>
+            {sel.size === 0 && <button onClick={openPrint} className="h-8 px-2.5 border border-slate-300 text-slate-700 rounded-lg text-sm font-medium">🖨️ พิมพ์</button>}
+          </span>
         </div>
       )}
 
@@ -1352,6 +1307,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
         <div className="sticky top-0 z-10 rounded-xl bg-emerald-600 text-white p-2.5 flex items-center justify-between gap-2 shadow">
           <span className="text-sm font-medium pl-1">เลือก {sel.size} บิล</span>
           <div className="flex gap-2">
+            <button onClick={openPrint} className="h-9 px-3 bg-white text-emerald-700 rounded-lg text-sm font-medium">🖨️ พิมพ์</button>
             <button onClick={sendCombined} disabled={sendingCombined} className="h-9 px-3 bg-white text-emerald-700 rounded-lg text-sm font-medium disabled:opacity-50">{sendingCombined ? "กำลังส่ง…" : "📩 ส่งไลน์รวม"}</button>
             <button onClick={() => setSel(new Set())} className="h-9 px-3 bg-emerald-700/40 rounded-lg text-sm">ล้าง</button>
           </div>
