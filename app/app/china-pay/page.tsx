@@ -16,7 +16,7 @@ import { FileMultiInput } from "@/components/file-multi-input";
 import { GlobalSearch } from "@/components/global-search";
 import { useSearchHotkey } from "@/lib/search-hotkey";
 import {
-  ALL_FILTERS, RATE_TABLE, TIER_NAMES, billDisplayName, billInFilter, billSlips, billStatus3, billTotalRmb, billTypeLabel,
+  ALL_FILTERS, RATE_OFFSET, RATE_TABLE, TIER_NAMES, billDisplayName, billInFilter, billSlips, billStatus3, billTotalRmb, billTypeLabel,
   buyRmbWithThb, isThbBill, rateForRmb, slipSumRmb, tierIdxForRmb, type Slip,
 } from "@/lib/china-pay";
 import { CHINA_BILLS_PRINT_PICK_KEY } from "@/lib/china-bills-print";
