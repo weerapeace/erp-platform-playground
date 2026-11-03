@@ -1,8 +1,41 @@
 import { describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { FLOW_NODES, FLOW_EDGES, FLOW_VIEWS, FLOW_METRICS } from "@/lib/flow-map";
+import { FLOW_NODES, FLOW_EDGES, FLOW_VIEWS, FLOW_METRICS, FLOW_JOURNEY, FLOW_ISSUE_APP } from "@/lib/flow-map";
+import { flowGeometryProblems, isRecentEdge } from "@/lib/flow-map-layout";
+import { buildFlowPrompt } from "@/lib/flow-map-prompt";
 import { WORKFLOWS } from "@/lib/workflow-registry";
+
+describe("แผนผังการทำงาน — การวาดและของเสริม", () => {
+  it("ทุกผัง: เส้นไม่ทับกล่องอื่น · เลขบนเส้นไม่ซ้อนกัน/ไม่ชนกล่อง · ไม่หลุดขอบ", () => {
+    expect(FLOW_VIEWS.flatMap(flowGeometryProblems)).toEqual([]);
+  });
+  it("แท็บออเดอร์ 1 ใบ อ้างกล่อง/เส้นที่มีอยู่จริง", () => {
+    for (const s of FLOW_JOURNEY) {
+      expect(FLOW_NODES[s.node], s.title).toBeTruthy();
+      for (const id of s.edges) expect(FLOW_EDGES[id], `${s.title}: ${id}`).toBeTruthy();
+    }
+  });
+  it("ป้าย “เพิ่งแก้”: วันที่รูปแบบ YYYY-MM-DD · หมดอายุตามจำนวนวัน", () => {
+    for (const [id, e] of Object.entries(FLOW_EDGES)) if (e.changed) expect(e.changed.date, id).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(isRecentEdge("X8", new Date("2026-11-03T10:00:00+07:00"))).toBe(true);
+    expect(isRecentEdge("X8", new Date("2027-01-15T10:00:00+07:00"))).toBe(false);
+    expect(isRecentEdge("P3", new Date("2026-11-03T10:00:00+07:00"))).toBe(false);
+  });
+  it("ทุกส่วนมีแอปปลายทางของรายงานปัญหา", () => {
+    for (const n of Object.values(FLOW_NODES)) expect(FLOW_ISSUE_APP[n.area]).toBeTruthy();
+  });
+  it("prompt แนบข้อมูลของส่วนนั้น + สิ่งที่อยากแก้ + ข้อกำหนด", () => {
+    const p = buildFlowPrompt([{ kind: "n", ref: "pay", text: "ดึงค่าเหมาเข้าเงินเดือนเอง" }, { kind: "e", ref: "S4", text: "ตั้งวันเริ่มนับ" }], { stock_fg: 5 });
+    expect(p).toContain("CLAUDE.md");
+    expect(p).toContain("เงินเดือน");
+    expect(p).toContain("payroll_adjustments");
+    expect(p).toContain("ดึงค่าเหมาเข้าเงินเดือนเอง");
+    expect(p).toContain("ตั้งวันเริ่มนับ");
+    expect(p).toContain("npm run where-used -- sales-order");
+    expect(p).toContain("lib/flow-map.ts");
+  });
+});
 
 // แผนผังการทำงาน (/master/flow-map) ต้องไม่ตกยุค: ไฟล์ที่อ้างต้องมีจริง · กล่อง/เส้น/ผังต้องชี้กันถูก
 const root = resolve(__dirname, "../..");

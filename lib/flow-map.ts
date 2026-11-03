@@ -49,7 +49,12 @@ export type FlowEdge = {
   /** key ใน lib/workflow-registry.ts (ถ้ามี) */
   workflow?: string;
   metrics?: FlowMetricKey[];
+  /** แก้ครั้งล่าสุด (YYYY-MM-DD + เปลี่ยนอะไร) → หน้าแผนผังขึ้นป้าย "เพิ่งแก้" ภายใน FLOW_RECENT_DAYS วัน · แก้เส้นเมื่อไรให้อัปเดตช่องนี้ */
+  changed?: { date: string; note: string };
 };
+
+/** ป้าย "เพิ่งแก้" โชว์กี่วันนับจากวันที่แก้ */
+export const FLOW_RECENT_DAYS = 30;
 
 export type FlowMetricKey =
   | "qt_open" | "so_open" | "bill_draft" | "bill_unshipped" | "bill_old_reserved" | "dn_unlinked" | "bn_open" | "rc_30d" | "cn_issued"
@@ -185,7 +190,7 @@ export const FLOW_NODES: Record<string, FlowNode> = {
 
 export const FLOW_EDGES: Record<string, FlowEdge> = {
   // ── ซื้อ ──
-  P1: { from: "mat", to: "pr", type: "manual", title: "ขาดของ → ใส่ตะกร้า → กดขอซื้อ", workflow: "mo-materials",
+  P1: { changed: { date: "2026-11-02", note: "ขอซื้อจากหน้า MO/บอร์ด ติดรหัสสินค้าให้เองแล้ว (เดิมไม่ติด)" }, from: "mat", to: "pr", type: "manual", title: "ขาดของ → ใส่ตะกร้า → กดขอซื้อ", workflow: "mo-materials",
     detail: "ทำที่ /purchasing แท็บ MO, บอร์ด “ซื้อของ” หรือหน้าความพร้อม · ระบบออกเลขใบขอซื้อ จำเลข MO ต้นทาง ติดรหัสสินค้าจาก [รหัส] ให้ + ดึงร้าน/ราคาหลัก แจ้งกระดิ่ง + LINE",
     files: ["app/api/purchasing/create-pr/route.ts", "lib/pr-line-code.ts"], metrics: ["pr_mo_nosku_open"] },
   P2: { from: "pr", to: "mat", type: "live", title: "MO เห็น “ขอซื้อแล้ว / สั่งแล้ว / รับแล้ว”", workflow: "mo-materials",
@@ -201,7 +206,7 @@ export const FLOW_EDGES: Record<string, FlowEdge> = {
   P6: { from: "po", to: "gr", type: "manual", title: "ของมาถึง → กดรับของ", workflow: "purchasing",
     detail: "ออกเลขรับของ · บวกยอดรับในบรรทัด PO · PO เปลี่ยนเป็น รับบางส่วน / รับครบ ให้เอง · แจ้ง LINE",
     files: ["app/api/purchasing/receive/route.ts", "components/receive-line-modal/index.tsx"], metrics: ["gr_30d"] },
-  P7: { from: "gr", to: "raw", type: "auto", title: "ของดีเข้าคลังวัตถุดิบ", workflow: "purchasing",
+  P7: { changed: { date: "2026-11-02", note: "รับของบรรทัดเก่าที่ไม่มีรหัส ระบบหาจากชื่อให้ ของเข้าคลังได้แล้ว" }, from: "gr", to: "raw", type: "auto", title: "ของดีเข้าคลังวัตถุดิบ", workflow: "purchasing",
     detail: "บวกสต็อก WH-RAW ทันที · ต้นทุน = ราคา PO (ถ้าเป็นบาท) ไม่งั้นราคามาตรฐาน · บรรทัดเก่าที่ไม่มีรหัส ระบบหาจาก [รหัส] ในชื่อแล้วติดให้ · ของเสียไม่เข้า",
     warn: "บรรทัดที่หารหัสไม่เจอยังข้าม (เดิม 3 จาก 338 บรรทัด)", files: ["app/api/purchasing/receive/route.ts", "lib/pr-line-code.ts"], metrics: ["po_lines_nosku_open"] },
   P8: { from: "gr", to: "ready", type: "missing", title: "รับของแล้ว ความพร้อมไม่ขยับ",
@@ -226,7 +231,7 @@ export const FLOW_EDGES: Record<string, FlowEdge> = {
   M5: { from: "so", to: "mo", type: "auto", title: "บันทึกใบสั่งขาย = เปิด/ผูกใบสั่งผลิต", workflow: "so-order",
     detail: "บรรทัดที่ดึงจาก MO → ผูกเลขออเดอร์ + สถานะยืนยัน · บรรทัดใหม่ → เปิด MO + กางสูตร + เข้าชุดให้",
     warn: "บรรทัดที่ไม่มี SKU ถูกข้ามเงียบ ๆ · ใช้ BOM ล่าสุด ไม่ใช่ BOM หลัก", files: ["app/api/so-orders/open-mo.ts"], metrics: ["so_open"] },
-  M6: { from: "mo", to: "mat", type: "auto", title: "เปิด / แก้ MO → กางสูตรเป็นรายการวัตถุดิบ", workflow: "mo-production",
+  M6: { changed: { date: "2026-11-02", note: "แก้จำนวน/สูตร/ไซซ์ ไม่ล้างติ๊กเตรียม/ตัดแล้ว" }, from: "mo", to: "mat", type: "auto", title: "เปิด / แก้ MO → กางสูตรเป็นรายการวัตถุดิบ", workflow: "mo-production",
     detail: "คำนวณวัตถุดิบที่ต้องใช้จาก BOM × จำนวน · แก้จำนวน/สูตร/ไซซ์ เก็บติ๊กเตรียม/ตัด/ยอดมีของเดิมไว้ · “ต้องซื้อ” คิดใหม่ตามจำนวนใหม่ (ยกเว้นที่พิมพ์ทับเอง)",
     files: ["app/api/mo/[id]/route.ts", "app/api/mo/shared.ts"] },
   M7: { from: "sku", to: "mo", type: "auto", title: "ใช้ BOM ตอนเปิด MO", workflow: "mo-production",
@@ -260,10 +265,10 @@ export const FLOW_EDGES: Record<string, FlowEdge> = {
     files: ["lib/mo-workflow.ts", "app/api/mo/bulk-status/route.ts"] },
   X7: { from: "sub", to: "qc", type: "live", title: "คิวรอ QC", workflow: "qc-warehouse",
     detail: "คิว = ยอดรับคืน − ที่ดึงเข้า QC แล้ว (คิดสด) · QC กดรับ → ขึ้นชั้น ดี/เสีย + แจ้งช่างถ้าเสีย", files: ["app/api/qc-warehouse/route.ts"] },
-  X8: { from: "qc", to: "fg", type: "auto", title: "รับเข้า QC → เข้าคลังสินค้าสำเร็จ", workflow: "qc-warehouse",
+  X8: { changed: { date: "2026-11-02", note: "ต่อ QC → คลังสินค้าสำเร็จกลับมาแล้ว (หลุดไปตั้งแต่ 11 ก.ค.)" }, from: "qc", to: "fg", type: "auto", title: "รับเข้า QC → เข้าคลังสินค้าสำเร็จ", workflow: "qc-warehouse",
     detail: "ของดี +คลังสินค้าสำเร็จ (ตัดวัตถุดิบออกจาก WIP ตามสัดส่วน) · ของเสีย +คลังของเสีย · ซ่อมได้กลับเข้าคลัง · ดึงกลับ/ลบ = ย้อนให้",
     warn: "ต่อกลับเมื่อ 2 พ.ย. (หลุดไปตั้งแต่ 11 ก.ค.) — ของที่อยู่บนชั้นก่อนหน้าไม่นับย้อนหลัง", files: ["app/api/qc-warehouse/items/route.ts"], metrics: ["stock_fg"] },
-  X9: { from: "qc", to: "ship", type: "manual", title: "ส่งออก (คลังขาย / ขายเลย)", workflow: "qc-warehouse",
+  X9: { changed: { date: "2026-11-02", note: "ส่งออกไม่ตัดสต็อกแล้ว — ตัดที่ใบขาย “จัดส่งแล้ว” ที่เดียว" }, from: "qc", to: "ship", type: "manual", title: "ส่งออก (คลังขาย / ขายเลย)", workflow: "qc-warehouse",
     detail: "ลบ/ลดของบนชั้น + จดประวัติ · ย้อนกลับได้ · ไม่แตะสต็อก (ของยังนับในคลังจนใบขายกด “จัดส่งแล้ว”)", files: ["app/api/qc-warehouse/items/route.ts", "lib/qc-ship.ts"] },
   X10: { from: "ship", to: "bill", type: "manual", title: "ผูกใบสั่งผลิต ↔ ใบขาย",
     detail: "หน้าต่าง “อัปเดตงานจากใบขาย” จับคู่ SKU (ใบเก่าก่อน) แล้วกดผูก + ไปถึงขั้นส่งออก", warn: "ผูกแล้วไม่ไปกดใบขายเป็น “จัดส่งแล้ว” ให้ — ต้องกดที่หน้าใบขาย",
@@ -275,7 +280,7 @@ export const FLOW_EDGES: Record<string, FlowEdge> = {
   X13: { from: "labor", to: "pay", type: "missing", title: "ค่าแรงไม่เข้าเงินเดือนเอง",
     detail: "ฝ่ายบุคคลต้องพิมพ์ยอดงานเหมาใหม่ในหน้าเงินเดือน · จับคู่คนด้วยชื่อ ไม่ใช่รหัสพนักงาน", warn: "เสี่ยงซ้ำ ตกหล่น หรือผิดคน",
     files: ["app/payroll/manual-input/page.tsx"] },
-  X14: { from: "qc", to: "wo", type: "manual", title: "คืนงานกลับให้ช่าง (รับผิด / ต้องแก้ใหม่)", workflow: "qc-warehouse",
+  X14: { changed: { date: "2026-11-02", note: "กู้ปุ่ม “คืนงานกลับให้ช่าง” กลับมาในหน้า QC" }, from: "qc", to: "wo", type: "manual", title: "คืนงานกลับให้ช่าง (รับผิด / ต้องแก้ใหม่)", workflow: "qc-warehouse",
     detail: "ลดยอดรับคืนส่วนที่ยังไม่ดึงเข้า QC · เปิดใบจ่ายงานกลับ · ดึงค่าแรงรอบนั้นกลับ · แจ้งช่าง", files: ["app/api/qc-warehouse/items/route.ts"] },
   // ── ขาย ──
   S1: { from: "qt", to: "bill", type: "auto", title: "กด “แปลงเป็น SO”", workflow: "sales-order",
@@ -283,10 +288,10 @@ export const FLOW_EDGES: Record<string, FlowEdge> = {
     files: ["app/api/quotations/[id]/convert/route.ts"] },
   S2: { from: "qt", to: "so", type: "missing", title: "ดึงใบเสนอราคาเข้าใบสั่งขาย",
     detail: "คัดลอกบรรทัดได้ แต่ใบเสนอราคาไม่เปลี่ยนสถานะ ไม่จำว่ามาจากใบไหน · ดึงใบร่าง/ปฏิเสธ/แปลงแล้วซ้ำได้", files: ["app/api/so-orders/sources/route.ts"] },
-  S3: { from: "so", to: "bill", type: "auto", title: "กด “ส่งแล้ว + ออกใบขาย”", workflow: "so-order",
+  S3: { changed: { date: "2026-11-02", note: "ออกใบขายแล้วยืนยัน + จัดส่งให้ทันที (ติดบริษัท/คลัง/รหัสสินค้า)" }, from: "so", to: "bill", type: "auto", title: "กด “ส่งแล้ว + ออกใบขาย”", workflow: "so-order",
     detail: "ใบสั่งขายเป็น “ส่งแล้ว” · ออกใบขาย (ติดบริษัท คลัง รหัสสินค้า) แล้วยืนยัน + จัดส่งให้ทันที = ตัดของออกจากคลัง",
     warn: "ทำไม่สำเร็จ (เช่น ไม่มีสิทธิ์) ใบขายค้างสถานะเดิม ระบบเตือนให้ไปกดต่อ · ไม่สร้างใบส่งของ", files: ["app/api/so-orders/[id]/route.ts"] },
-  S4: { from: "bill", to: "fg", type: "auto", title: "ยืนยัน = จองของ · จัดส่งแล้ว = ตัดของ (จุดเดียว)", workflow: "sales-order",
+  S4: { changed: { date: "2026-11-02", note: "ใบขายจัดส่งแล้ว = จุดเดียวที่ตัดสต็อกตอนขาย · ปุ่มจัดส่งหลายใบ + เตือนใบเก่า" }, from: "bill", to: "fg", type: "auto", title: "ยืนยัน = จองของ · จัดส่งแล้ว = ตัดของ (จุดเดียว)", workflow: "sales-order",
     detail: "ทำผ่านกติกาสถานะของใบขาย (ยืนยัน → จอง · จัดส่งแล้ว → ปลดจอง + ตัดออกจากคลัง · ยกเลิก → ปลดจอง) · กดหลายใบได้ที่หน้าใบขาย",
     warn: "ใบเก่าก่อน 2 พ.ย. ยังจองค้าง — กดจัดส่งจะตัดคลังจนติดลบ (มีป๊อปเตือน)", files: ["app/api/sales-orders/[id]/transition/route.ts", "app/sales-orders/page.tsx"],
     metrics: ["bill_old_reserved", "fg_reserved"] },
@@ -344,3 +349,27 @@ export const FLOW_VIEWS: FlowView[] = [
 ];
 
 export const FLOW_AREA_LABEL: Record<FlowArea, string> = { buy: "ซื้อ", make: "ผลิต", dispatch: "จ่ายงาน", sell: "ขาย", stock: "คลัง", hr: "บุคคล" };
+
+/**
+ * แท็บ "ออเดอร์ 1 ใบ เดินทางยังไง" — ไล่ทีละขั้นตั้งแต่ลงออเดอร์จนเก็บเงิน
+ * แต่ละขั้นอ้าง id เส้นใน FLOW_EDGES → แก้เส้น (แบบ/ข้อความ) แล้วแท็บนี้เปลี่ยนตามเอง ไม่ต้องแก้ซ้ำ
+ */
+export type FlowJourneyStep = { node: string; title: string; edges: string[] };
+export const FLOW_JOURNEY: FlowJourneyStep[] = [
+  { node: "so", title: "ลงใบสั่งขาย", edges: ["M5"] },
+  { node: "mo", title: "ใบสั่งผลิต + รายการวัตถุดิบ", edges: ["M6", "P1"] },
+  { node: "pr", title: "ใบขอซื้อ → ใบสั่งซื้อ", edges: ["P3", "P2", "P6"] },
+  { node: "gr", title: "รับของ", edges: ["P7", "P8"] },
+  { node: "prep", title: "เตรียม / ตัด → จ่ายงาน", edges: ["X1", "X2"] },
+  { node: "wo", title: "ใบจ่ายงาน", edges: ["X3", "X4", "X5"] },
+  { node: "sub", title: "ช่างส่งงาน", edges: ["X7", "M8", "X13"] },
+  { node: "qc", title: "QC / ชั้นวาง", edges: ["X8", "X14", "X9", "X10"] },
+  { node: "so", title: "กด “ส่งแล้ว” ในใบสั่งขาย", edges: ["S3"] },
+  { node: "bill", title: "ใบขาย / ใบกำกับ", edges: ["S4", "S5", "S7"] },
+  { node: "dn", title: "ใบส่งของ", edges: ["S6"] },
+  { node: "bn", title: "ใบวางบิล → รับชำระ", edges: ["S8", "S9", "S10"] },
+  { node: "mo", title: "ปิดใบสั่งผลิต", edges: ["X6"] },
+];
+
+/** ส่งคำขอแก้เข้า "แจ้งปัญหาการใช้งาน" (/issue-report) — ส่วนของกล่อง → ชื่อแอปในรายการ issue_report_apps */
+export const FLOW_ISSUE_APP: Record<FlowArea, string> = { buy: "จัดซื้อ", make: "ผลิต", dispatch: "จ่ายงาน", sell: "ขาย", stock: "คลังสินค้า", hr: "Payroll (HR)" };
