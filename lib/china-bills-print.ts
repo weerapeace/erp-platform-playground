@@ -12,7 +12,7 @@ import {
   LIST_GROUP_ROW, LIST_TOTAL_ROW, defaultListPrintSettings, escapeHtml as esc, fitListColumns, listPrintCss, renderListTable, resolveListColumns, signatureHtml,
   type ListPrintColumn, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
-import { TIER_NAMES, TIER_OFF, billDisplayName, billStatus3, isThbBill, rateForRmb, slipSumRmb, tierIdxForRmb } from "@/lib/china-pay";
+import { TIER_NAMES, TIER_OFF, billDisplayName, billPaidRmb, billStatus3, isThbBill, rateForRmb, tierIdxForRmb } from "@/lib/china-pay";
 
 /** หน้า "บิลจีนทั้งหมด" เขียนก่อนเปิดหน้าพิมพ์ = id บิลที่ติ๊กไว้ { ids, at } */
 export const CHINA_BILLS_PRINT_PICK_KEY = "erp.chinaBillsPrint.pick";
@@ -25,7 +25,7 @@ export type CbPrintBill = {
   amount: number; fee: number; amountThb: number;
   /** เรทของบิล (0 = ยังไม่มี) */
   rate: number;
-  /** ยอดสลิปที่แนบแล้ว (¥) */
+  /** ยอดที่จ่ายแล้ว (¥) = ตัดโอนแล้ว หรือสลิปจ่ายร้าน (lib/china-pay billPaidRmb) */
   paid: number;
   status: string; note: string;
 };
@@ -40,7 +40,7 @@ export const cbBillsFromApi = (rows: Record<string, unknown>[]): CbPrintBill[] =
   id: str(r.id), name: billDisplayName(r), thb: isThbBill(r), supplierId: str(r.supplier_id) || null,
   date: str(r.transfer_date) || str(r.bill_date) || null,
   amount: num(r.amount_rmb), fee: num(r.fee_rmb), amountThb: num(r.amount_thb), rate: num(r.rate),
-  paid: isThbBill(r) ? 0 : slipSumRmb(r), status: billStatus3(r), note: str(r.note),
+  paid: isThbBill(r) ? 0 : billPaidRmb(r), status: billStatus3(r), note: str(r.note),
 }));
 
 // ---------- ค่าเฉพาะใบ (settings.opts) ----------

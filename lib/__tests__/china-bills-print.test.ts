@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { applyListPrintPreset, cleanListPrintSettings } from "@/lib/list-print";
-import { billInFilter, billStatus3, rateForRmb } from "@/lib/china-pay";
+import { billInFilter, billNeedsSlip, billPaidRmb, billRemainRmb, billStatus3, rateForRmb } from "@/lib/china-pay";
 import {
   CB_PRINT_COLUMNS, buildChinaBillsPrint, cbBillsFromApi, cbPrintColumnsFor, cbPrintDefaults, cbPrintOpts, cbPrintPresets, cbPrintTitle,
   type CbBank, type CbPrintBill,
@@ -11,7 +11,7 @@ const API_ROWS: Record<string, unknown>[] = [
   { id: "b1", supplier_id: "s1", supplier_label: "ร้านริบบิ้น", amount_rmb: 15066, fee_rmb: 10, rate: null, transfer_date: "2026-11-03", bill_date: "2026-11-03", status: "รอโอน", slips: [] },
   { id: "b2", supplier_id: "s2", supplier_label: "ร้านอี้หลงเจียห่าว (B242)", amount_rmb: 22498, fee_rmb: 10, rate: null, transfer_date: "2026-11-03", status: "รอโอน", slips: [] },
   { id: "b3", supplier_id: "s3", supplier_label: "K.ติง", amount_rmb: 41503, fee_rmb: 30, rate: 0, transfer_date: "2026-11-03", status: "รอโอน", slips: [] },
-  { id: "b4", supplier_id: "s1", supplier_label: "ร้านริบบิ้น", amount_rmb: 10148, fee_rmb: 10, rate: 5.145, transfer_date: "2026-09-22", status: "โอนแล้ว", slips: [{ key: "k", amount_rmb: 4000 }] },
+  { id: "b4", supplier_id: "s1", supplier_label: "ร้านริบบิ้น", amount_rmb: 10148, fee_rmb: 10, rate: 5.145, transfer_date: "2026-09-22", status: "รอโอน", slips: [{ key: "k", amount_rmb: 4000 }] },
   { id: "b5", is_shipping: true, amount_thb: 1200, status: "รอโอน", transfer_date: "2026-10-01" },
   { id: "b6", supplier_id: "s2", supplier_label: "ร้านอี้หลงเจียห่าว (B242)", amount_rmb: 500, fee_rmb: 3, status: "ยกเลิก", transfer_date: "2026-10-02" },
 ];
@@ -30,6 +30,31 @@ describe("china bills print", () => {
     expect(BILLS[3].paid).toBe(4000);
     expect(BILLS[4]).toMatchObject({ thb: true, name: "ค่าส่ง", amountThb: 1200 });
     expect(API_ROWS.filter((r) => billInFilter(r, "ค้างโอน")).map((r) => r.id)).toEqual(["b1", "b2", "b3", "b4", "b5"]);
+  });
+
+  it("counts money already cut on the ‘โอนเข้าจีน’ page as paid, without double-counting the shop slip", () => {
+    // ตัดโอนครบแล้วจากหน้าโอนเข้าจีน แต่ยังไม่แนบสลิป (ข้อมูลจริง 10/16 บิล 2026-11-03) → ไม่ใช่ค้างโอน
+    const done = { id: "t1", amount_rmb: 46510, fee_rmb: 30, rate: 5.145, paid_rmb: 46540, status: "โอนแล้ว", slips: [] };
+    expect(billStatus3(done)).toBe("โอนครบแล้ว");
+    expect(billInFilter(done, "ค้างโอน")).toBe(false);
+    expect(billRemainRmb(done)).toBe(0);
+    // ยังแนบสลิปจ่ายร้านเป็นหลักฐานได้
+    expect(billNeedsSlip(done)).toBe(true);
+    // ตัดโอนบางส่วน
+    const part = { id: "t2", amount_rmb: 10000, fee_rmb: 10, paid_rmb: 3000, status: "รอโอน", slips: [] };
+    expect(billStatus3(part)).toBe("โอนแล้วบางส่วน");
+    expect(billRemainRmb(part)).toBe(7010);
+    // สลิปกับยอดตัดโอนเป็นเงินก้อนเดียวกัน → ใช้ค่ามากสุด ไม่บวกกัน
+    const both = { ...part, slips: [{ key: "a", amount_rmb: 3000 }] };
+    expect(billPaidRmb(both)).toBe(3000);
+    // status โอนแล้วที่ตั้งเองในตาราง (ไม่มี paid_rmb) ก็นับว่าครบ · ยกเลิกยังเป็นยกเลิก
+    expect(billStatus3({ amount_rmb: 500, status: "โอนแล้ว" })).toBe("โอนครบแล้ว");
+    expect(billStatus3({ amount_rmb: 500, paid_rmb: 500, status: "ยกเลิก" })).toBe("ยกเลิก");
+    expect(billNeedsSlip({ amount_rmb: 500, status: "ยกเลิก" })).toBe(false);
+    expect(billNeedsSlip({ is_shipping: true, amount_thb: 100, status: "รอโอน" })).toBe(false);
+    // ใบพิมพ์: ช่องโอนแล้ว/คงค้าง ใช้ยอดเดียวกัน
+    const [p] = cbBillsFromApi([part]);
+    expect(p.paid).toBe(3000);
   });
 
   it("default = fee + rate on: totals include fee, unrated bills estimated with tier from their combined yuan", () => {

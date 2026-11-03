@@ -43,12 +43,19 @@ export function buyRmbWithThb(thb: number, r1: number): { tierIdx: number; rate:
   return { tierIdx: 0, rate: r1, rmb: thb / r1 };
 }
 
-// ---- สถานะบิลจีน 3 ระดับ (คิดจากยอดรวมสลิปเทียบยอดบิล) ----
+// ---- สถานะบิลจีน 3 ระดับ (ยอดที่จ่ายแล้วเทียบยอดบิล) ----
+// ยอดที่จ่ายแล้ว = มากสุดของ (ยอดที่ตัดโอนจากหน้า "โอนเข้าจีน" = paid_rmb) กับ (ยอดสลิปจ่ายร้านที่แนบ)
+//   ★ 2026-11-03 เดิมดูแค่สลิป → บิลที่ตัดโอนแล้ว (status โอนแล้ว) แต่ยังไม่แนบสลิปขึ้น "รอโอน" ในแท็บบิลจีนทั้งหมด
+//     ขณะที่ Dashboard นับจาก status (6 บิล vs 16 บิล) · ข้อมูลจริงไม่มีบิลไหนแนบสลิปเลย ทุกใบจ่ายผ่านหน้าโอนเข้าจีน
+//     ใช้ "มากสุด" ไม่ใช่ "รวม" เพราะสลิปจ่ายร้านมักเป็นหลักฐานของเงินก้อนเดียวกับที่ตัดโอน (บวกกัน = นับซ้ำ)
 export type Slip = { key: string; amount_rmb: number; at?: string };
 export const billSlips = (b: Record<string, unknown>): Slip[] =>
   Array.isArray(b.slips) ? (b.slips as Record<string, unknown>[]).map((s) => ({ key: String(s.key ?? ""), amount_rmb: num(s.amount_rmb), at: s.at ? String(s.at) : undefined })) : [];
 export const billTotalRmb = (b: Record<string, unknown>) => num(b.amount_rmb) + num(b.fee_rmb);
 export const slipSumRmb = (b: Record<string, unknown>) => billSlips(b).reduce((a, s) => a + s.amount_rmb, 0);
+export const billPaidRmb = (b: Record<string, unknown>) => Math.max(slipSumRmb(b), num(b.paid_rmb));
+/** ยอดที่ยังต้องจ่าย (¥) */
+export const billRemainRmb = (b: Record<string, unknown>) => Math.max(0, billTotalRmb(b) - billPaidRmb(b));
 // บิลแบบบาท (ค่าส่ง/VAT) — ยอดเป็น ฿ ตรง ไม่ใช้เรท ไม่มีสลิป ¥
 export const isThbBill = (b: Record<string, unknown>): boolean => !!b.is_shipping || !!b.vat_type;
 export const billTypeLabel = (b: Record<string, unknown>): string =>
@@ -59,12 +66,16 @@ export const billDisplayName = (b: Record<string, unknown>): string =>
 // คืนสถานะ: ยกเลิก / รอโอน / โอนแล้วบางส่วน / โอนครบแล้ว
 export function billStatus3(b: Record<string, unknown>): string {
   if (String(b.status ?? "") === "ยกเลิก") return "ยกเลิก";
-  if (isThbBill(b)) return String(b.status ?? "") === "โอนแล้ว" ? "โอนครบแล้ว" : "รอโอน";
-  const total = billTotalRmb(b), sum = slipSumRmb(b);
-  if (total > 0 && sum >= total - 0.001) return "โอนครบแล้ว";
-  if (sum > 0) return "โอนแล้วบางส่วน";
+  if (String(b.status ?? "") === "โอนแล้ว") return "โอนครบแล้ว";   // หน้าโอนเข้าจีนตั้งให้เมื่อตัดครบ (หรือคนตั้งเองในตาราง)
+  if (isThbBill(b)) return "รอโอน";
+  const total = billTotalRmb(b), paid = billPaidRmb(b);
+  if (total > 0 && paid >= total - 0.001) return "โอนครบแล้ว";
+  if (paid > 0) return "โอนแล้วบางส่วน";
   return "รอโอน";
 }
+/** บิลที่สลิปจ่ายร้านยังไม่ครบยอด → ตัวเลือกของปุ่มแนบสลิป (AI จับคู่ / เลือกบิลเอง) · ไม่สนว่าตัดโอนแล้วหรือยัง (สลิป = หลักฐานจ่ายร้าน) */
+export const billNeedsSlip = (b: Record<string, unknown>): boolean =>
+  !isThbBill(b) && String(b.status ?? "") !== "ยกเลิก" && slipSumRmb(b) < billTotalRmb(b) - 0.001;
 
 // ---- ตัวกรองหน้า "บิลจีนทั้งหมด" (ค้างโอน = รอโอน + บางส่วน) ----
 export const ALL_FILTERS = ["ค้างโอน", "ทั้งหมด", "รอโอน", "โอนแล้วบางส่วน", "โอนครบแล้ว", "ยกเลิก"] as const;

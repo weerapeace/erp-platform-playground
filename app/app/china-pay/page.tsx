@@ -16,7 +16,7 @@ import { FileMultiInput } from "@/components/file-multi-input";
 import { GlobalSearch } from "@/components/global-search";
 import { useSearchHotkey } from "@/lib/search-hotkey";
 import {
-  ALL_FILTERS, RATE_OFFSET, RATE_TABLE, TIER_NAMES, billDisplayName, billInFilter, billSlips, billStatus3, billTotalRmb, billTypeLabel,
+  ALL_FILTERS, RATE_OFFSET, RATE_TABLE, TIER_NAMES, billDisplayName, billInFilter, billNeedsSlip, billRemainRmb, billSlips, billStatus3, billTotalRmb, billTypeLabel,
   buyRmbWithThb, isThbBill, rateForRmb, slipSumRmb, tierIdxForRmb, type Slip,
 } from "@/lib/china-pay";
 import { CHINA_BILLS_PRINT_PICK_KEY } from "@/lib/china-bills-print";
@@ -1242,15 +1242,15 @@ function AllList({ canDelete }: { canDelete: boolean }) {
   const onPrinted = (id: string, at: string) => setRows(p => p.map(r => String(r.id) === id ? { ...r, printed_at: at } : r));
   const toggle = (id: string) => setSel(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const selRows = rows.filter(r => sel.has(String(r.id)));
-  // แนบสลิป ¥ ใช้เฉพาะบิลร้านค้าจีน — ค่าส่ง/VAT (บาท) ไม่มีสลิป ¥
-  const openBills = rows.filter(r => !isThbBill(r) && (() => { const s = billStatus3(r); return s === "รอโอน" || s === "โอนแล้วบางส่วน"; })());
+  // แนบสลิป ¥ ใช้เฉพาะบิลร้านค้าจีนที่สลิปจ่ายร้านยังไม่ครบ (ตัดโอนแล้วก็ยังแนบหลักฐานได้) — ค่าส่ง/VAT (บาท) ไม่มีสลิป ¥
+  const openBills = rows.filter(billNeedsSlip);
 
   const sendCombined = async () => {
     if (!selRows.length) return;
     setSendingCombined(true);
     try {
       let tot = 0;
-      const lines = selRows.map(r => { const rem = Math.max(0, billTotalRmb(r) - slipSumRmb(r)); tot += rem; return `• ${String(r.supplier_label ?? r.supplier_id ?? "—")} · ค้าง ¥${fmt(rem)} · ${billStatus3(r)}`; });
+      const lines = selRows.map(r => { const rem = billRemainRmb(r); tot += rem; return `• ${String(r.supplier_label ?? r.supplier_id ?? "—")} · ค้าง ¥${fmt(rem)} · ${billStatus3(r)}`; });
       const text = `🧾 บิลจีน (${selRows.length} รายการ)\n` + lines.join("\n") + `\n\nรวมค้าง ¥${fmt(tot)}`;
       const res = await apiFetch("/api/china-pay/line-push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, purpose: "china_bill" }) });
       const j = await res.json().catch(() => ({}));
@@ -1323,7 +1323,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
           const id = String(r.id), rate = num(r.rate);
           const s3 = billStatus3(r);
           const fullRmb = billTotalRmb(r);
-          const remainRmb = Math.max(0, fullRmb - slipSumRmb(r));
+          const remainRmb = billRemainRmb(r);
           const on = sel.has(id);
           return (
             <Card key={id}>
@@ -1369,7 +1369,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
               <button onClick={() => setAttachOpen(false)} className="w-8 h-8 rounded-full text-slate-400 hover:bg-slate-100 text-lg leading-none">×</button>
             </div>
             <div className="p-3 pb-[calc(1rem+env(safe-area-inset-bottom))] space-y-2">
-              <div className="text-xs text-slate-400 px-1">แสดงเฉพาะบิลที่ยังไม่ครบ (รอโอน / บางส่วน)</div>
+              <div className="text-xs text-slate-400 px-1">แสดงเฉพาะบิลที่สลิปจ่ายร้านยังไม่ครบยอด (รวมบิลที่ตัดโอนแล้ว)</div>
               {openBills.length === 0 ? <div className="text-center text-slate-300 py-8">— ไม่มีบิลค้าง —</div>
                 : openBills.map((r) => {
                   const rem = Math.max(0, billTotalRmb(r) - slipSumRmb(r));
@@ -1380,7 +1380,7 @@ function AllList({ canDelete }: { canDelete: boolean }) {
                         <div className="font-medium text-slate-800 truncate">{String(r.supplier_label ?? r.supplier_id ?? "—")}</div>
                         <div className="text-xs text-slate-400">{String(r.transfer_date ?? r.bill_date ?? "—")} · {billStatus3(r)}</div>
                       </div>
-                      <div className="text-right flex-shrink-0"><div className="font-bold text-orange-600">¥{fmt(rem)}</div><div className="text-[10px] text-slate-400">ยังขาด</div></div>
+                      <div className="text-right flex-shrink-0"><div className="font-bold text-orange-600">¥{fmt(rem)}</div><div className="text-[10px] text-slate-400">สลิปยังขาด</div></div>
                     </button>
                   );
                 })}
@@ -1512,7 +1512,7 @@ function SlipWizard({ openBills, onClose, onDone }: { openBills: Record<string, 
                     <select value={r.billId} onChange={(e) => setRow(i, { billId: e.target.value })}
                       className="w-full h-9 px-2 text-sm border border-slate-200 rounded-lg bg-white">
                       <option value="">— เลือกบิล —</option>
-                      {openBills.map(b => <option key={String(b.id)} value={String(b.id)}>{billLabel(b)} · ค้าง ¥{fmt(remainOf(b))}</option>)}
+                      {openBills.map(b => <option key={String(b.id)} value={String(b.id)}>{billLabel(b)} · สลิปยังขาด ¥{fmt(remainOf(b))}</option>)}
                     </select>
                     <div className="flex items-center gap-2">
                       <span className="text-[11px] text-slate-500 flex-shrink-0">ยอดสลิป (¥)</span>
@@ -1725,8 +1725,8 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
 
   const sum = slips.reduce((a, s) => a + num(s.amount_rmb), 0);
   const remain = Math.max(0, totalRmb - sum);
-  const status = String(bill.status ?? "") === "ยกเลิก" ? "ยกเลิก"
-    : (totalRmb > 0 && sum >= totalRmb - 0.001) ? "โอนครบแล้ว" : sum > 0 ? "โอนแล้วบางส่วน" : "รอโอน";
+  // ป้ายสถานะ = สูตรกลาง (นับยอดที่ตัดโอนแล้วด้วย) ให้ตรงกับหัวบิล · ส่วน "สลิปยังขาด" ด้านล่างนับเฉพาะสลิป
+  const status = billStatus3({ ...bill, slips });
 
   const onPick = async (files: FileList) => {
     setBusy(true);
@@ -1771,7 +1771,7 @@ function SlipSection({ bill, onChanged }: { bill: Record<string, unknown>; onCha
       <div className="rounded-lg bg-slate-50 border border-slate-100 p-3 text-sm space-y-2">
         <div className="flex justify-between text-xs"><span className="text-slate-500">ยอดบิล</span><span className="text-slate-700">¥{fmt(totalRmb)}</span></div>
         <div className="flex justify-between text-xs"><span className="text-slate-500">รวมสลิปแล้ว</span><span className="font-medium text-emerald-700">¥{fmt(sum)}</span></div>
-        <div className="flex justify-between text-xs"><span className="text-slate-500">ยังขาด</span><span className={`font-medium ${remain > 0.001 ? "text-amber-600" : "text-emerald-700"}`}>¥{fmt(remain)}</span></div>
+        <div className="flex justify-between text-xs"><span className="text-slate-500">สลิปยังขาด</span><span className={`font-medium ${remain > 0.001 ? "text-amber-600" : "text-emerald-700"}`}>¥{fmt(remain)}</span></div>
 
         {slips.length > 0 && (
           <div className="space-y-2 pt-1">
