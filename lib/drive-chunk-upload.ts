@@ -11,10 +11,24 @@ import { DRIVE_CHUNK_BYTES } from "@/lib/drive-upload-relay";
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export async function uploadFileToDrive(file: File, uploadUrl: string, onProgress?: (sent: number, total: number) => void): Promise<string> {
+/**
+ * ถาม Google ว่า session นี้รับไฟล์ไปถึงไหนแล้ว (อัปต่อจากที่ค้าง เช่น ปิดแท็บกลางคัน แล้วเลือกไฟล์เดิมใหม่)
+ * done = ครบแล้ว (มีรหัสไฟล์) · next = ไบต์ถัดไป · expired = ลิงก์หมดอายุ/ถูกยกเลิก → ต้องเริ่มใหม่
+ */
+export async function queryDriveUpload(uploadUrl: string, total: number): Promise<{ done: true; file_id: string } | { done: false; next: number } | { expired: true }> {
+  const res = await apiFetch("/api/drive/upload-chunk", { method: "POST", headers: { "x-status": "1", "x-upload-url": uploadUrl, "x-total-size": String(total) } });
+  const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+  if (j.expired) return { expired: true };
+  if (j.done && j.file_id) return { done: true, file_id: String(j.file_id) };
+  return { done: false, next: Number(j.next) || 0 };
+}
+
+/** startAt = เริ่มส่งจากไบต์นี้ (อัปต่อ · ได้จาก queryDriveUpload) */
+export async function uploadFileToDrive(file: File, uploadUrl: string, onProgress?: (sent: number, total: number) => void, startAt = 0): Promise<string> {
   const total = file.size;
   if (!total) throw new Error("ไฟล์ว่าง");
-  let start = 0;
+  let start = Math.max(0, Math.min(startAt, total - 1));
   let stall = 0;   // Google ไม่ขยับรับต่อหลายรอบติด = หยุด (กันวนไม่จบ)
   while (start < total) {
     const end = Math.min(start + DRIVE_CHUNK_BYTES, total);

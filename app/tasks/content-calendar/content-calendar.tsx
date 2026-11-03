@@ -44,6 +44,8 @@ import { refreshStatuses, bangkokDateKey, REFRESH_ALERT_STATES } from "@/lib/mar
 import { usePushToast } from "@/components/toast";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { Icon } from "@/components/icon";
+import { getContentAlbum, albumPostPreset, type ContentAlbum } from "@/components/asset-library/contents/api";
+import { CalendarAlbumsBox, useWaitingAlbums } from "./albums-box";
 
 // แท็บวางแผน โหลดเมื่อกดเข้า (ไม่ถ่วงแท็บคอนเทนต์/งาน)
 const ContentPlanView = dynamic(() => import("@/app/marketing/content-plan/view").then((m) => m.ContentPlanView), {
@@ -277,6 +279,16 @@ export function ContentCalendarView() {
   // ลากวาง: จำ id + เวลาเดิมของการ์ดที่กำลังลาก + ช่องที่เมาส์ลอยอยู่
   const dragRef = useRef<{ id: string; time: string | null } | null>(null);
   const [overKey, setOverKey] = useState<string | null>(null);
+  // 🗂 อัลบั้ม Contents (คลังไฟล์) ที่รอลง — ลากลงวัน / หยิบจากป๊อปช่องวัน = ป๊อปสร้างโพสต์พร้อมไฟล์ในอัลบั้ม
+  const albumDragRef = useRef<ContentAlbum | null>(null);
+  const [createBrandId, setCreateBrandId] = useState<string | null>(null);   // แบรนด์ของอัลบั้ม (ทับแท็บแบรนด์ที่เลือก)
+  const waitingAlbums = useWaitingAlbums(brandFilter);
+  const openAlbumPost = async (a: ContentAlbum, dayKey: string) => {
+    try {
+      const d = await getContentAlbum(a.id);
+      setCreatePreset(albumPostPreset(d)); setCreateDate(dayKey); setCreateBrandId(d.brand_id); setCreateOpen(true);
+    } catch (e) { pushToast("error", (e as Error).message); }
+  };
   // quick view ของการ์ดคอนเทนต์ (ชี้ค้าง/แตะ ⓘ) — เก็บ id + ปุ่มที่ยึดตำแหน่ง
   const [quickView, setQuickView] = useState<{ id: string; anchor: HTMLElement; rect: DOMRect } | null>(null);
   const qvTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -503,6 +515,8 @@ export function ContentCalendarView() {
 
   const onDropDay = (dayKey: string) => {
     setOverKey(null);
+    const album = albumDragRef.current; albumDragRef.current = null;
+    if (album) { void openAlbumPost(album, dayKey); return; }
     const d = dragRef.current; dragRef.current = null;
     if (!d) return;
     const e = entryById(d.id); if (!e) return;
@@ -510,6 +524,7 @@ export function ContentCalendarView() {
   };
   const onDropBacklog = () => {
     setOverKey(null);
+    albumDragRef.current = null;
     const d = dragRef.current; dragRef.current = null;
     if (!d) return;
     const e = entryById(d.id); if (e) void reschedule(e, null);
@@ -880,11 +895,12 @@ export function ContentCalendarView() {
             <p className="text-[11px] text-slate-400 mt-2">💡 {L.legend}</p>
           </div>
 
+          <div className="w-full lg:w-[260px] shrink-0 space-y-3">
           {/* กล่องค้าง "ยังไม่ลงวันที่ / ยังไม่กำหนดส่ง" — ลากไปวางในวันได้ */}
           <div onDragOver={(e) => { e.preventDefault(); if (overKey !== "backlog") setOverKey("backlog"); }}
             onDragLeave={() => setOverKey((k) => (k === "backlog" ? null : k))}
             onDrop={onDropBacklog}
-            className={`w-full lg:w-[260px] shrink-0 rounded-xl border p-3 ${overKey === "backlog" ? "border-amber-400 bg-amber-50 ring-1 ring-amber-300" : "border-slate-200 bg-slate-50"}`}>
+            className={`rounded-xl border p-3 ${overKey === "backlog" ? "border-amber-400 bg-amber-50 ring-1 ring-amber-300" : "border-slate-200 bg-slate-50"}`}>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-sm font-semibold text-slate-700">📥 {L.backlog}</span>
               <span className="ml-auto text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{unscheduled.length}</span>
@@ -920,6 +936,12 @@ export function ContentCalendarView() {
                 ))}
               </div>
             )}
+          </div>
+          {/* 🗂 อัลบั้มรอลง (คลังไฟล์ › Contents) — ลากลงวัน = ป๊อปสร้างโพสต์พร้อมไฟล์ในอัลบั้ม */}
+          {mode === "content" && waitingAlbums.available && (
+            <CalendarAlbumsBox albums={waitingAlbums.albums} platformLabel={platformLabel}
+              onDragStart={(a) => { dragRef.current = null; albumDragRef.current = a; }} onDragEnd={() => { albumDragRef.current = null; setOverKey(null); }} />
+          )}
           </div>
         </div>
         </>)}
@@ -974,6 +996,25 @@ export function ContentCalendarView() {
                 </div>
               )}
             </div>
+            {/* หยิบจากอัลบั้ม Contents (มือถือลากไม่ได้ → กดจากตรงนี้) */}
+            {mode === "content" && waitingAlbums.albums.length > 0 && (
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs font-semibold text-slate-600 inline-flex items-center gap-1"><Icon name="library" />{t("หรือสร้างโพสต์จากอัลบั้ม", "Or post from an album")}</span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-violet-100 text-violet-700">{waitingAlbums.albums.length}</span>
+                </div>
+                <div className="space-y-1.5 max-h-[30vh] overflow-y-auto pr-0.5">
+                  {waitingAlbums.albums.map((a) => (
+                    <button key={a.id} type="button" onClick={() => { const k = dayPick; setDayPick(null); void openAlbumPost(a, k); }}
+                      className="w-full text-left bg-white border border-slate-200 rounded-lg p-2 hover:border-violet-400 hover:bg-violet-50 flex items-center gap-2">
+                      <span className="text-xs font-medium text-slate-700 truncate min-w-0 flex-1">{a.name}</span>
+                      <span className="text-[11px] text-slate-400 shrink-0">{a.file_count} {t("ไฟล์", "files")}</span>
+                      <span className="text-[11px] text-violet-700 shrink-0">{t("สร้างโพสต์", "Create post")} →</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </ERPModal>
@@ -988,9 +1029,10 @@ export function ContentCalendarView() {
 
       <StoryQuickModal open={storyDay !== null} onClose={() => setStoryDay(null)} day={storyDay} brands={brands} defaultBrandId={brandFilter === "all" ? null : brandFilter}
         onCreated={() => { setStoryDay(null); reload(); }} pushToast={pushToast} />
-      <ContentCreateModal open={createOpen} onClose={() => { setCreateOpen(false); setCreatePreset(null); }} onCreated={() => { setCreateOpen(false); setCreatePreset(null); reload(); }} preset={createPreset}
+      <ContentCreateModal open={createOpen} onClose={() => { setCreateOpen(false); setCreatePreset(null); setCreateBrandId(null); }}
+        onCreated={() => { const fromAlbum = !!createPreset?.album; setCreateOpen(false); setCreatePreset(null); setCreateBrandId(null); reload(); if (fromAlbum) waitingAlbums.reload(); }} preset={createPreset}
         brands={brands} campaigns={campaigns}
-        defaultBrandId={brandFilter === "all" ? null : brandFilter} defaultDate={createDate} pushToast={pushToast} />
+        defaultBrandId={createBrandId ?? (brandFilter === "all" ? null : brandFilter)} defaultDate={createDate} pushToast={pushToast} />
       {queueOpen && (
         <PublishQueueModal canEdit={can("tasks.edit" as never)} onClose={() => setQueueOpen(false)} pushToast={pushToast}
           brandName={(id) => brands.find((b) => b.id === id)?.name ?? ""}

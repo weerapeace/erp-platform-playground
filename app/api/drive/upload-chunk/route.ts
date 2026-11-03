@@ -24,6 +24,24 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const start = Number(request.headers.get("x-range-start"));
   const total = Number(request.headers.get("x-total-size"));
   if (!isDriveUploadUrl(uploadUrl)) return NextResponse.json({ error: "ลิงก์อัปโหลดไม่ถูกต้อง" }, { status: 400 });
+
+  // x-status: 1 = ถามว่า Google รับไปถึงไหนแล้ว (อัปต่อจากที่ค้างหลังปิดหน้า) — ไม่ส่งไบต์
+  //   → { done:false, next } · { done:true, file_id } (ครบแล้ว) · { expired:true } (ลิงก์หมดอายุ ~1 สัปดาห์ → เริ่มใหม่)
+  if (request.headers.get("x-status") === "1") {
+    if (!Number.isInteger(total) || total <= 0) return NextResponse.json({ error: "ขนาดไฟล์ไม่ถูกต้อง" }, { status: 400 });
+    let st: Response;
+    try { st = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Range": `bytes */${total}` }, body: new Uint8Array(0) }); }
+    catch (e) { return NextResponse.json({ error: `ติดต่อ Drive ไม่ได้: ${(e as Error).message}` }, { status: 502 }); }
+    if (st.status === 308) return NextResponse.json({ done: false, next: nextOffsetFromRange(st.headers.get("range")) });
+    if (st.status === 200 || st.status === 201) {
+      const j = await st.json().catch(() => ({})) as { id?: string };
+      return j.id ? NextResponse.json({ done: true, file_id: j.id }) : NextResponse.json({ expired: true });
+    }
+    if (st.status === 404 || st.status === 410) return NextResponse.json({ expired: true });
+    const msg = await st.text().catch(() => "");
+    return NextResponse.json({ error: `Drive ตอบ ${st.status} ${msg.slice(0, 120)}` }, { status: 502 });
+  }
+
   if (!Number.isInteger(start) || start < 0 || !Number.isInteger(total) || total <= 0 || start >= total) return NextResponse.json({ error: "ช่วงไบต์ไม่ถูกต้อง" }, { status: 400 });
 
   const bytes = new Uint8Array(await request.arrayBuffer());

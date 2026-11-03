@@ -22,13 +22,14 @@ import { formatBytes } from "@/lib/assets";
 import { useCreativeOptions } from "@/app/tasks/use-options";
 import { listCampaigns, type BrandOption } from "@/app/tasks/data";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
-import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, uploadFilesToAlbum,
-  type AlbumDetail, type AlbumDriveInfo, type AlbumFile, type AlbumUploadStep } from "./data";
+import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, uploadFilesToAlbum, syncAlbumDrive,
+  albumPostPreset, pendingUploadsFor, clearPendingUploads,
+  type AlbumDetail, type AlbumDriveInfo, type AlbumFile, type AlbumUploadStep, type PendingUpload } from "./data";
 import { StageBadge, PlatChip, FileThumb } from "./album-bits";
 import { AlbumFormModal } from "./album-form-modal";
 
 const ContentCreateModal = nextDynamic(() => import("@/app/tasks/content/content-create-modal").then((m) => m.ContentCreateModal), { ssr: false });
-const MAX_POST_FILES = 50;
+const SYNC_ROUNDS = 15;   // ดึงไฟล์จาก Drive ครั้งละไม่กี่ไฟล์ → วนซ้ำจนครบ (กันค้างนานเกินในคำขอเดียว)
 const driveFileUrl = (id: string) => `https://drive.google.com/file/d/${id}/view`;
 const mb = (n: number) => Math.round((n / 1048576) * 10) / 10;
 
@@ -59,8 +60,12 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const [trashOpen, setTrashOpen] = useState(false);
   const [postPreset, setPostPreset] = useState<ContentCreatePreset | null>(null);
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
+  const [pending, setPending] = useState<PendingUpload[]>([]);
+  const [syncing, setSyncing] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const canEdit = can("assets.upload");
+  const refreshPending = useCallback(() => setPending(pendingUploadsFor(albumId)), [albumId]);
+  useEffect(() => { refreshPending(); }, [refreshPending]);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -96,9 +101,10 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
       run: async (report) => {
         const r = await uploadFilesToAlbum({
           albumId, albumName: album.name, files, existingKeys: album.files.map((f) => f.r2_key),
-          onStep: setStep, onFileDone: () => { void load(true); onChanged(); loadDrive(); },
+          onStep: (s) => { setStep(s); refreshPending(); }, onFileDone: () => { void load(true); onChanged(); loadDrive(); refreshPending(); },
           onBytes: (sent, tot) => report(mb(sent), mb(tot)),
         });
+        refreshPending();
         if (!r) return { ok: 0, message: t("ยกเลิกแล้ว", "Cancelled") };
         const done = r.ok + r.reused;
         const parts = [t(`ลงอัลบั้มแล้ว ${done} ไฟล์`, `${done} file(s) added`)];
@@ -137,16 +143,29 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
 
   const openPost = () => {
     if (!album) return;
-    const pool = album.picked_asset_ids.length ? album.files.filter((f) => f.picked) : album.files;
-    const ids = pool.slice(0, MAX_POST_FILES).map((f) => f.id);
-    const hasVideo = pool.some((f) => f.asset_type === "video");
-    const hasImage = pool.some((f) => f.asset_type !== "video");
     if (!campaigns.length) listCampaigns().then((cs) => setCampaigns(cs.map((c) => ({ id: c.id, name: c.name })))).catch(() => {});
-    setPostPreset({
-      title: album.name, platforms: album.planned_platforms,
-      post_types: hasVideo && hasImage ? ["image", "video"] : hasVideo ? ["video"] : ids.length > 1 ? ["album"] : ["image"],
-      album: { id: album.id, name: album.name, asset_ids: ids, caption: album.caption_draft },
-    });
+    setPostPreset(albumPostPreset(album));
+  };
+
+  // ดึงไฟล์ที่ใส่เองในโฟลเดอร์ Drive + ตรวจไฟล์ที่หาย (วนทีละชุดจนครบ)
+  const syncDrive = async () => {
+    setSyncing(t("กำลังดูโฟลเดอร์ Drive...", "Checking the Drive folder..."));
+    let added = 0, missing = 0, restored = 0;
+    try {
+      for (let round = 0; round < SYNC_ROUNDS; round++) {
+        const r = await syncAlbumDrive(albumId);
+        added += r.added; missing = r.missing; restored += r.restored;
+        if (r.added) { void load(true); onChanged(); }
+        if (!r.remaining) break;
+        setSyncing(t(`ดึงแล้ว ${added} ไฟล์ · เหลืออีก ${r.remaining}`, `${added} added · ${r.remaining} left`));
+      }
+      const parts = [added ? t(`ดึงไฟล์ใหม่ ${added} ไฟล์`, `${added} new file(s)`) : t("ไม่มีไฟล์ใหม่ในโฟลเดอร์", "No new files in the folder")];
+      if (missing) parts.push(t(`${missing} ไฟล์หายจาก Drive`, `${missing} missing in Drive`));
+      if (restored) parts.push(t(`${restored} ไฟล์กลับมาแล้ว`, `${restored} back again`));
+      if (missing) toast.error(parts.join(" · ")); else toast.success(parts.join(" · "));
+      await load(true); onChanged();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setSyncing(null); }
   };
 
   const files = album?.files ?? [];
@@ -189,10 +208,28 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
             {!drive ? t("กำลังดูโฟลเดอร์ Drive...", "Checking Drive folder...") : drive.ok ? (
               <>
                 <span className="min-w-0 break-words">Google Drive › {drive.label}{drive.pending ? t(" (สร้างให้ตอนอัปไฟล์แรก)", " (created on first upload)") : ""}</span>
-                {drive.folder_url && <a href={drive.folder_url} target="_blank" rel="noreferrer" className="ml-auto inline-flex items-center gap-1 text-violet-700 hover:underline"><Icon name="open" />{t("เปิดใน Drive", "Open in Drive")}</a>}
+                <span className="ml-auto flex flex-wrap items-center gap-3">
+                  {canEdit && drive.folder_url && (
+                    <button onClick={() => void syncDrive()} disabled={!!syncing} title={t("ไฟล์ที่อัปเองผ่านแอป Google Drive เข้าโฟลเดอร์นี้ + ตรวจไฟล์ที่ถูกลบใน Drive", "Files added straight to this Drive folder + check for files deleted in Drive")}
+                      className="inline-flex items-center gap-1 text-violet-700 hover:underline disabled:opacity-60"><Icon name="refresh" />{syncing ?? t("ดึงไฟล์ใหม่จาก Drive", "Pull new files from Drive")}</button>
+                  )}
+                  {drive.folder_url && <a href={drive.folder_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-violet-700 hover:underline"><Icon name="open" />{t("เปิดใน Drive", "Open in Drive")}</a>}
+                </span>
               </>
             ) : <span>{drive.reason}</span>}
           </div>
+          {files.some((f) => f.drive_missing) && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-red-200 bg-red-50 text-sm text-red-700">
+              <Icon name="warning" />{t(`${files.filter((f) => f.drive_missing).length} ไฟล์หายจาก Drive (ถูกลบหรืออยู่ในถังขยะ) — โพสต์ที่ใช้ไฟล์นี้จะโพสต์ไม่ได้ · กู้คืนใน Drive แล้วกด “ดึงไฟล์ใหม่จาก Drive” หรือเอาไฟล์ออกจากอัลบั้ม`, `${files.filter((f) => f.drive_missing).length} file(s) missing in Drive — posts using them will fail · restore in Drive then pull again, or remove them`)}
+            </div>
+          )}
+          {pending.length > 0 && canEdit && (
+            <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-800">
+              <Icon name="waiting" />
+              <span className="min-w-0 flex-1">{t(`อัปค้าง ${pending.length} ไฟล์ (${pending.map((p) => p.name).join(", ")}) — ลากไฟล์เดิมมาวางอีกครั้ง ระบบจะส่งต่อจากที่ค้าง ไม่ต้องเริ่มใหม่`, `${pending.length} unfinished upload(s) (${pending.map((p) => p.name).join(", ")}) — drop the same files again to resume`)}</span>
+              <button onClick={() => { clearPendingUploads(albumId); refreshPending(); }} className="text-xs text-amber-700 hover:underline">{t("ล้างรายการ", "Clear")}</button>
+            </div>
+          )}
 
           {/* ลากไฟล์มาวาง */}
           {canEdit && drive?.ok && !album.closed_at && (
@@ -202,7 +239,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
               <input ref={inputRef} type="file" multiple accept="image/*,video/*" className="hidden" onChange={(e) => { if (e.target.files?.length) startUpload(e.target.files); e.target.value = ""; }} />
               <p className="text-sm text-slate-600 flex items-center justify-center gap-2"><Icon name="upload" />{t("ลากรูป/วิดีโอมาวางที่นี่ หรือ", "Drop photos/videos here or")}
                 <button type="button" onClick={() => inputRef.current?.click()} className="text-violet-700 font-medium hover:underline">{t("เลือกไฟล์", "choose files")}</button></p>
-              <p className="text-xs text-slate-400 mt-1">{t("ไฟล์ตัวจริงขึ้น Google Drive (ไม่เกิน 5GB ต่อไฟล์) · ระบบเก็บแค่รูปย่อไว้โชว์ · อัปเบื้องหลัง ปิดหน้าต่างนี้ได้ แต่อย่าปิดแท็บจนกว่าจะเสร็จ", "Originals go to Google Drive (≤5GB each) · only small previews stay here · runs in the background; keep this tab open until done")}</p>
+              <p className="text-xs text-slate-400 mt-1">{t("ไฟล์ตัวจริงขึ้น Google Drive (ไม่เกิน 5GB ต่อไฟล์) · ระบบเก็บแค่รูปย่อไว้โชว์ · อัปเบื้องหลัง ปิดหน้าต่างนี้ได้ · ถ้าเผลอปิดแท็บกลางคัน ลากไฟล์เดิมมาวางใหม่ = ส่งต่อจากที่ค้าง (เครื่องเดิม ภายใน 6 วัน)", "Originals go to Google Drive (≤5GB each) · only small previews stay here · runs in the background · closed the tab midway? drop the same files again to resume (same device, within 6 days)")}</p>
               {step && <UploadProgress name={step.name} size={step.size} pct={step.pct} label={step.label} count={{ current: step.current, total: step.total }} className="mt-3 text-left" />}
             </div>
           )}

@@ -11,7 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { albumStatus, type AlbumPostInput, type AlbumStatus } from "@/lib/content-album-status";
 import type { CaptionSettings } from "@/lib/content-readiness";
 import { resolveBrandContentFolder, safeDriveName, driveFolderUrl } from "@/lib/content-drive";
-import { driveConfigured, driveCreateFolder, driveEnsureFolder, driveListChildFolders } from "@/lib/google-drive";
+import { driveConfigured, driveCreateFolder, driveEnsureFolder, driveListChildFolders, driveFileState } from "@/lib/google-drive";
 import { userLabelMap } from "@/lib/creative-tasks-server";
 import { attachReadiness } from "@/app/api/creative-content/shared";
 
@@ -222,6 +222,26 @@ export async function resolveAlbumDriveFolder(admin: Admin, albumId: string, cre
   const folderId = kids.find((k) => k.name === folderName)?.id ?? (await driveCreateFolder(folderName, albumsRoot)).id;
   await admin.from("content_albums").update({ drive_folder_id: folderId, updated_at: new Date().toISOString() }).eq("id", albumId);
   return { ok: true, folderId, label };
+}
+
+/**
+ * ตรวจว่าไฟล์ยังอยู่ใน Drive ไหม → assets.drive_missing_at (หาย = ลงเวลา · กลับมา/กู้คืนจากถังขยะ = ล้าง)
+ * ตอบไม่ได้ (error) = ไม่แตะ · ใช้ร่วม: cron รายวัน /api/cron/content-drive-check + ปุ่ม "ดึงไฟล์ใหม่จาก Drive" ในอัลบั้ม
+ */
+export async function checkDriveFiles(admin: Admin, rows: { id: string; drive_file_id: string; drive_missing_at: string | null }[], concurrency = 6): Promise<{ checked: number; missing: number; restored: number; errors: number }> {
+  let i = 0, checked = 0, missing = 0, restored = 0, errors = 0;
+  const now = new Date().toISOString();
+  await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, async () => {
+    while (i < rows.length) {
+      const r = rows[i++];
+      const st = await driveFileState(r.drive_file_id);
+      checked++;
+      if (st === "error") { errors++; continue; }
+      if (st === "missing" && !r.drive_missing_at) { await admin.from("assets").update({ drive_missing_at: now }).eq("id", r.id); missing++; }
+      else if (st === "ok" && r.drive_missing_at) { await admin.from("assets").update({ drive_missing_at: null }).eq("id", r.id); restored++; }
+    }
+  }));
+  return { checked, missing, restored, errors };
 }
 
 /**

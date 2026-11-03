@@ -235,6 +235,21 @@ export async function driveCreateResumableSession(name: string, mimeType: string
 /** ขอ access token ให้ route อื่นใช้ต่อ (เช่น stream ไฟล์ตรงจาก Drive โดยไม่โหลดเข้าเซิร์ฟเวอร์) */
 export async function driveAccessToken(): Promise<string> { return getAccessToken(); }
 
+/**
+ * ไฟล์ยังอยู่ใน Drive ไหม (ตัวตรวจไฟล์หาย — อัลบั้ม Contents)
+ * ok = อยู่ · missing = ไม่เจอ (ลบถาวร) หรืออยู่ในถังขยะ · error = ตอบไม่ได้ (เน็ต/สิทธิ์) → อย่าเพิ่งตัดสินว่าหาย
+ */
+export async function driveFileState(fileId: string): Promise<"ok" | "missing" | "error"> {
+  try {
+    const token = await getAccessToken();
+    const r = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,trashed&supportsAllDrives=true`, { headers: { Authorization: `Bearer ${token}` } });
+    if (r.status === 404) return "missing";
+    if (!r.ok) return "error";
+    const j = await r.json() as { trashed?: boolean };
+    return j.trashed ? "missing" : "ok";
+  } catch { return "error"; }
+}
+
 /** ข้อมูลย่อของไฟล์ (ชื่อ/ชนิด/ขนาด) — ใช้ตอนโชว์วิดีโอที่อยู่บน Drive */
 export async function driveFileMeta(fileId: string): Promise<{ id: string; name: string; mimeType: string; size?: number } | null> {
   try {
