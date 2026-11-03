@@ -76,6 +76,10 @@ export type LineItemsGridProps<T> = {
   bulkBar?:      (selectedRows: T[], clear: () => void) => React.ReactNode;
   /** ข้อความเสริมท้ายหัวกลุ่ม (ต่อจาก "รวม…") คิดจากบรรทัดในกลุ่ม — เช่น ใบตีราคา "ใช้ต่อใบ ≈ 0.30 ผืน" */
   groupNote?:    (groupRows: T[], label: string) => React.ReactNode;
+  /** หน้าตาตาราง — "boxed" (ค่าเริ่ม: กรอบรอบตาราง + ช่องกรอกเป็นกล่อง) ·
+   *  "lines" = เหลือแค่เส้นคั่นบรรทัด ช่องกรอกไม่มีกรอบ (มีเส้นใต้ตอนชี้/พิมพ์) ปุ่มลบ/ทำซ้ำ/ลาก โผล่ตอนชี้แถว
+   *  (สไตล์ช่องกรอกอยู่ที่ .lig-lines ใน app/globals.css — ปุ่มเปิด dropdown ใส่ data-field-trigger ก็แบนตาม) */
+  variant?:      "boxed" | "lines";
 };
 
 type SortState = { key: string; dir: "asc" | "desc" } | null;
@@ -88,8 +92,9 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
   groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
-  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote,
+  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed",
 }: LineItemsGridProps<T>) {
+  const lines = variant === "lines";
   const [sort, setSort]       = useState<SortState>(defaultSort);
   const [groupBy, setGroupBy] = useState<string>("");
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -297,12 +302,12 @@ export function LineItemsGrid<T>({
           {emptyAction && <div className="mt-1 flex justify-center">{emptyAction}</div>}
         </div>
       ) : (
-        <div className={`${stickyHeader ? "overflow-auto" : "overflow-x-auto"} border border-slate-200 rounded-lg`}
+        <div className={`${stickyHeader ? "overflow-auto" : "overflow-x-auto"} ${lines ? "lig-lines" : "border border-slate-200 rounded-lg"}`}
           style={stickyHeader && maxHeight ? { maxHeight } : undefined}>
           <div ref={gridRef} style={{ minWidth }}>
             {/* header */}
             <div style={{ gridTemplateColumns: template }}
-              className={`grid bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500 ${stickyHeader ? "sticky top-0 z-20" : ""}`}>
+              className={`grid ${lines ? "bg-white border-b border-slate-300 text-[11px] font-normal text-slate-400" : "bg-slate-50 border-b border-slate-200 text-xs font-medium text-slate-500"} ${stickyHeader ? "sticky top-0 z-20" : ""}`}>
               {selectable && (
                 <span className="flex items-center justify-center">
                   <input type="checkbox" aria-label="เลือกทั้งหมด" checked={allSelected} disabled={readonly || rows.length === 0}
@@ -312,7 +317,7 @@ export function LineItemsGrid<T>({
               )}
               {canDrag && <span />}
               {columns.map((c) => (
-                <div key={c.key} className="relative border-r border-slate-100 last:border-r-0">
+                <div key={c.key} className={`relative ${lines ? "" : "border-r border-slate-100 last:border-r-0"}`}>
                   <button type="button" disabled={!c.sortable} onClick={() => c.sortable && toggleSort(c.key)}
                     className={`w-full px-2 ${dense ? "py-1" : "py-2"} flex items-center gap-1 ${c.align === "right" ? "justify-end" : c.align === "center" ? "justify-center" : ""} ${c.sortable ? "hover:text-slate-800 cursor-pointer" : "cursor-default"}`}>
                     <span className="truncate" data-colhead={c.key}>{c.header}</span>
@@ -353,7 +358,7 @@ export function LineItemsGrid<T>({
                     </div>
                   ) : (
                     <GridRow key={rowId(d.row)} id={rowId(d.row)} template={template} canDrag={canDrag} readonly={readonly}
-                      columns={columns} row={d.row} dense={dense}
+                      columns={columns} row={d.row} dense={dense} lines={lines}
                       selectable={selectable} selected={selected.has(rowId(d.row))} onToggleSelect={() => toggleSel(rowId(d.row))}
                       onUpdate={(patch) => update(rowId(d.row), patch)} onRemove={() => remove(rowId(d.row))}
                       onDuplicate={onDuplicate ? () => duplicate(rowId(d.row)) : undefined} />
@@ -383,14 +388,16 @@ export function LineItemsGrid<T>({
 
 // ---- single sortable row ----
 function GridRow<T>({
-  id, template, canDrag, readonly, columns, row, onUpdate, onRemove, onDuplicate, dense = false,
+  id, template, canDrag, readonly, columns, row, onUpdate, onRemove, onDuplicate, dense = false, lines = false,
   selectable = false, selected = false, onToggleSelect,
 }: {
   id: string; template: string; canDrag: boolean; readonly: boolean;
   columns: LineColumn<T>[]; row: T;
-  onUpdate: (patch: Partial<T>) => void; onRemove: () => void; onDuplicate?: () => void; dense?: boolean;
+  onUpdate: (patch: Partial<T>) => void; onRemove: () => void; onDuplicate?: () => void; dense?: boolean; lines?: boolean;
   selectable?: boolean; selected?: boolean; onToggleSelect?: () => void;
 }) {
+  // โหมดเส้นบรรทัด: ปุ่มลาก/ทำซ้ำ/ลบ ซ่อนไว้จนชี้แถว (จอสัมผัสไม่มี hover → โชว์ตลอด)
+  const hoverOnly = lines ? "[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100" : "";
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled: !canDrag });
   const style: React.CSSProperties = {
     gridTemplateColumns: template,
@@ -399,7 +406,7 @@ function GridRow<T>({
     opacity: isDragging ? 0.5 : 1,
   };
   return (
-    <div ref={setNodeRef} style={style} className={`grid items-center border-b border-slate-100 ${selected ? "bg-indigo-50/60" : "bg-white hover:bg-slate-50/60"}`}>
+    <div ref={setNodeRef} style={style} className={`${lines ? "group" : ""} grid items-center border-b border-slate-100 ${selected ? "bg-indigo-50/60" : lines ? "bg-white hover:bg-slate-50" : "bg-white hover:bg-slate-50/60"}`}>
       {selectable && (
         <span className="flex items-center justify-center">
           <input type="checkbox" aria-label="เลือกแถวนี้" checked={selected} disabled={readonly}
@@ -408,17 +415,17 @@ function GridRow<T>({
       )}
       {canDrag && (
         <button type="button" {...attributes} {...listeners}
-          className="h-9 flex items-center justify-center text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing" title="ลากเพื่อเรียงลำดับ">⠿</button>
+          className={`h-9 flex items-center justify-center text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing ${hoverOnly}`} title="ลากเพื่อเรียงลำดับ">⠿</button>
       )}
       {columns.map((c) => (
-        <div key={c.key} data-col={c.key} className={`px-1.5 min-w-0 ${dense ? "py-1" : ""} ${c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : ""}`}>
+        <div key={c.key} data-col={c.key} className={`lig-cell px-1.5 min-w-0 ${dense ? "py-1" : lines ? "py-1" : ""} ${c.align === "right" ? "text-right" : c.align === "center" ? "text-center" : ""}`}>
           {c.render
             ? c.render(row, onUpdate, readonly)
             : <span className={`block truncate ${dense ? "text-xs" : "text-sm"} text-slate-700`} title={String(colValue(c, row) ?? "")}>{String(colValue(c, row) ?? "")}</span>}
         </div>
       ))}
       {!readonly && (
-        <div className="flex items-center justify-center">
+        <div className={`flex items-center justify-center ${hoverOnly}`}>
           {onDuplicate && (
             <button type="button" onClick={onDuplicate} title="ทำซ้ำบรรทัด"
               className="h-9 w-7 flex items-center justify-center text-slate-300 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">⧉</button>

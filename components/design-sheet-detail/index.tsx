@@ -121,6 +121,8 @@ const PIECE_NAMES = new Set(["ผ้า (ชิ้น)", "ลายพิมพ�
 const isPieceGroup = (code?: string | null, name?: string | null) =>
   (!!code && PIECE_CODES.has(code)) || (!!name && PIECE_NAMES.has(name));
 const rowIsPiece = (r: CostRow) => isPieceGroup(r.group_code, r.group_name);
+/** แถวที่เลือกวัสดุ (master) แล้วแต่ยังไม่มีชนิดหรือราคา — เช่น วัสดุที่เพิ่งพิมพ์สร้างจาก dropdown → โชว์ปุ่ม "ใส่รายละเอียด" */
+const rowNeedsItemDetails = (r: CostRow) => !!r.item_id && (!r.group_name || r.unit_price == null);
 const pieceArea = (r: { width_cm: number | null; length_cm: number | null }) =>
   (r.width_cm && r.length_cm) ? Math.round(r.width_cm * r.length_cm * 100) / 100 : null;
 
@@ -351,7 +353,7 @@ function BasisPicker({ value, options, onChange }: { value: string; options: Bas
   const cur = options.find((o) => o.value === value) ?? options[0];
   return (
     <div className="relative inline-block shrink-0">
-      <button ref={btnRef} type="button" onClick={() => setOpen((o) => !o)} title={t(`ฐานราคา: ${cur?.label ?? ""}`, `Price base: ${cur?.label ?? ""}`)}
+      <button ref={btnRef} type="button" onClick={() => setOpen((o) => !o)} title={t(`ฐานราคา: ${cur?.label ?? ""}`, `Price base: ${cur?.label ?? ""}`)} data-field-trigger
         className="h-7 px-1.5 inline-flex items-center gap-1 text-xs border border-slate-200 rounded bg-white hover:bg-slate-50 max-w-[120px]">
         <span>{cur?.symbol}</span>
         <span className="text-slate-500 truncate tabular-nums">{cur && cur.price != null ? fmtBaht(cur.price) : (cur?.note ?? cur?.label)}</span>
@@ -678,18 +680,21 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pmRows, pmSearch, pmSort, mgList]);
 
-  const loadPm = useCallback(async () => {
+  const loadPm = useCallback(async (): Promise<PmRow[]> => {
     setPmLoading(true);
+    let rows: PmRow[] = [];
     try {
       const [ir, gr, ps] = await Promise.all([
         apiFetch("/api/master-v2/design-price-items?limit=500").then((r) => r.json()),
         apiFetch("/api/bom/material-groups").then((r) => r.json()),
         apiFetch("/api/design-sheets/price-item-skus").then((r) => r.json()),
       ]);
-      setPmRows((ir.data ?? ir.rows ?? []) as PmRow[]);
+      rows = (ir.data ?? ir.rows ?? []) as PmRow[];
+      setPmRows(rows);
       setMgList((gr.data ?? []) as MaterialGroup[]);
       if (!ps.error) { setPmLinks((ps.links ?? {}) as Record<string, string[]>); setPmLinkSkus((ps.skus ?? {}) as Record<string, SkuLite>); }
     } catch { /* ignore */ } finally { setPmLoading(false); }
+    return rows;
   }, []);
 
   // ผูก/ปลด SKU ของวัสดุตีราคาแถวหนึ่ง
@@ -708,8 +713,37 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     setPmLinkFor(null);
   };
 
-  const openPm = () => { setPmOpen(true); setPmEditId(null); setPmName(""); setPmGroup(""); setPmPrice(""); setPmUom(""); setPmFace(""); setPmWidth(""); setPmLength(""); void loadPm(); };
-  const closePm = () => { setPmOpen(false); setPriceItems([]); setPriceGroups([]); };   // ปิดแล้ว dropdown วัสดุ/กลุ่มในตารางตีราคารีโหลดเอง
+  const openPm = () => { setPmOpen(true); setPmForItem(null); setPmSearch(""); setPmEditId(null); setPmName(""); setPmGroup(""); setPmPrice(""); setPmUom(""); setPmFace(""); setPmWidth(""); setPmLength(""); void loadPm(); };
+  const closePm = () => { setPmOpen(false); setPmForItem(null); setPriceItems([]); setPriceGroups([]); };   // ปิดแล้ว dropdown วัสดุ/กลุ่มในตารางตีราคารีโหลดเอง
+
+  // ปุ่ม "ใส่รายละเอียด" ในแถวตีราคา (เจ้าของขอ 2026-11-03) — วัสดุที่เพิ่งพิมพ์สร้างจาก dropdown ยังไม่มีชนิด/ราคา
+  // → เปิดป๊อปจัดการวัสดุ กรองเหลือตัวนั้น + เปิดแก้ทันที · กดบันทึกแล้วเติมชนิด/ราคาให้แถวที่ยังขาด แล้วปิดป๊อปเอง
+  const [pmForItem, setPmForItem] = useState<string | null>(null);
+  const openPmFor = async (itemId: string, name: string) => {
+    setPmOpen(true); setPmForItem(itemId); setPmSearch(name); setPmEditId(null);
+    const rows = await loadPm();
+    const r = rows.find((x) => x.id === itemId);
+    if (r) pmStartEdit(r);
+  };
+  const openPmForRef = useRef(openPmFor);
+  openPmForRef.current = openPmFor;
+  // หลังบันทึกรายละเอียด: โหลดวัสดุใหม่ แล้วเติมให้แถวที่ใช้วัสดุนี้แต่ยังไม่มีชนิด/ราคา (แถวที่ครบแล้วไม่แตะ — ราคาเปลี่ยนมีตัวเตือนเดิมอยู่)
+  const applyItemDetails = async (itemId: string) => {
+    try {
+      const pr = await apiFetch("/api/design-sheets/price-items").then((r) => r.json());
+      if (pr.error) return;
+      const items = (pr.data ?? []) as PriceItem[];
+      setPriceItems(items); setPriceGroups((pr.groups ?? []) as PriceGroup[]);
+      const it = items.find((p) => p.id === itemId);
+      if (!it) return;
+      const hit = costLines.filter((r) => r.item_id === itemId && rowNeedsItemDetails(r)).length;
+      if (hit > 0) {
+        setCostLines((ls) => ls.map((r) => (r.item_id === itemId && rowNeedsItemDetails(r) ? recomputeRow({ ...r, ...costItemPatch(it, r) }) : r)));
+        setCostDirty(true);
+        toast.success(t(`เติมรายละเอียด "${it.name}" ให้ ${hit} แถวแล้ว — อย่าลืมกดบันทึกราคา`, `Filled "${it.name}" details into ${hit} lines — remember to save the costing`));
+      }
+    } catch { /* ignore */ }
+  };
   const numOrNull = (s: string) => (s === "" ? null : Number(s));
 
   const pmAdd = async () => {
@@ -737,7 +771,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         body: JSON.stringify({ name: pmEdit.name.trim(), material_group_id: pmEdit.material_group_id || null, price_per_unit: numOrNull(pmEdit.price), uom: pmEdit.uom.trim() || null,
           face_width_cm: piece ? null : numOrNull(pmEdit.face), width_cm: piece ? numOrNull(pmEdit.width) : null, length_cm: piece ? numOrNull(pmEdit.length) : null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
-      setPmEditId(null); await loadPm(); toast.success(t("บันทึกวัสดุแล้ว", "Material saved"));
+      const savedId = pmEditId;
+      setPmEditId(null); toast.success(t("บันทึกวัสดุแล้ว", "Material saved"));
+      // เปิดมาจากปุ่ม "ใส่รายละเอียด" ในแถว → เติมให้แถว แล้วกลับไปที่ตารางเลย
+      if (pmForItem && savedId === pmForItem) { await applyItemDetails(savedId); setPmOpen(false); setPmForItem(null); }
+      else await loadPm();
     } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
   };
 
@@ -1361,7 +1399,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       setPriceItems(items); setPriceGroups((pr.groups ?? []) as PriceGroup[]);
       const it = items.find((p) => p.id === newId) ?? items.find((p) => p.name === nm);
       if (it) onPicked(it);
-      toast.success(t(`เพิ่มวัสดุ "${nm}" แล้ว — เติมราคา/ชนิดได้ที่ปุ่ม 🧮 จัดการวัสดุตีราคา`, `Added material "${nm}" — set price/type via 🧮 Manage costing materials`));
+      toast.success(t(`เพิ่มวัสดุ "${nm}" แล้ว — กด "ใส่รายละเอียด" ใต้ชื่อวัสดุ เพื่อใส่ชนิด/ราคา`, `Added material "${nm}" — press "Add details" under its name to set type/price`));
     } catch (e) { toast.error(e instanceof Error ? e.message : t("เพิ่มวัสดุไม่สำเร็จ", "Failed to add material")); }
   }, [toast, t]);
 
@@ -1409,7 +1447,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   title={r.item_sku_id
                     ? t("กลับไปเลือกจาก “วัสดุตีราคา” (master)", "Back to picking from “Costing materials” (master)")
                     : t("เลือกวัตถุดิบจากคลังสินค้า (SKU) — ดึงประเภท ราคาซื้อ หน่วย หน้ากว้าง มาให้", "Pick material from inventory (SKU) — fills type, purchase price, unit, roll width")}
-                  className={`h-7 shrink-0 rounded border px-1.5 text-xs ${r.item_sku_id ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-400 hover:border-blue-300 hover:text-blue-600"}`}>
+                  className={`h-7 shrink-0 rounded border px-1.5 text-xs ${r.item_sku_id ? "border-blue-300 bg-blue-50 text-blue-700" : "border-transparent text-slate-400 hover:border-blue-300 hover:text-blue-600"}`}>
                   🏷️
                 </button>
               )}
@@ -1436,6 +1474,20 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   ]} />
               )}
             </div>
+            {/* ใส่รายละเอียดวัสดุ — ยังไม่มีชนิด/ราคา = ปุ่มเด่นสีส้ม · ครบแล้ว = ไอคอนดินสอโผล่ตอนชี้แถว */}
+            {r.item_id && fullEdit && (rowNeedsItemDetails(r) ? (
+              <button type="button" onClick={() => void openPmForRef.current(r.item_id as string, r.item_name ?? "")}
+                title={t("ใส่ชนิด ราคา หน่วย หน้ากว้าง ของวัสดุนี้ — บันทึกแล้วแถวนี้คำนวณให้เอง", "Set this material's type, price, unit, roll width — the line recalculates after saving")}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700 hover:text-amber-800 hover:underline">
+                <Icon name="edit" /> {t("ใส่รายละเอียด (ยังไม่มีชนิด/ราคา)", "Add details (no type/price yet)")}
+              </button>
+            ) : (
+              <button type="button" onClick={() => void openPmForRef.current(r.item_id as string, r.item_name ?? "")}
+                title={t("แก้รายละเอียดวัสดุนี้ (ชนิด ราคา หน่วย หน้ากว้าง)", "Edit this material's details (type, price, unit, roll width)")}
+                className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-blue-600 [@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100">
+                <Icon name="edit" /> {t("รายละเอียดวัสดุ", "Material details")}
+              </button>
+            ))}
             {item && !rowIsPiece(r) && r.price_basis === "latest" && item.sku_latest_currency && item.sku_latest_currency !== "THB" && (
               <div className="text-[10px] text-amber-600">{t(`⚠ ราคาเป็น ${item.sku_latest_currency} — ปรับเป็นบาทเองที่ช่อง “ราคา/หน่วย”`, `⚠ Price is in ${item.sku_latest_currency} — convert to THB yourself in “Price/unit”`)}</div>
             )}
@@ -1452,22 +1504,22 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       render: (r, u) => usesWidth(r.calc_method)
         ? <input type="number" min={0} step="any" value={r.width_cm ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ width_cm: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
-        : <span className="block px-1 text-right text-slate-300 text-xs" title={t("ชนิดนี้ไม่ใช้ความกว้าง", "This type doesn't use width")}>—</span> },
+        : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้ความกว้าง", "This type doesn't use width")}></span> },
     { key: "length_cm", header: t("ยาว (ซม.)", "Length (cm)"), width: 84, align: "right", sortable: true, getValue: (r) => r.length_cm,
       render: (r, u) => usesLength(r.calc_method)
         ? <input type="number" min={0} step="any" value={r.length_cm ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ length_cm: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
-        : <span className="block px-1 text-right text-slate-300 text-xs" title={t("ชนิดนี้ไม่ใช้ความยาว", "This type doesn't use length")}>—</span> },
+        : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้ความยาว", "This type doesn't use length")}></span> },
     { key: "pieces", header: t("จำนวนชิ้น", "Pcs"), width: 80, align: "right", sortable: true, getValue: (r) => r.pieces,
       render: (r, u) => usesPieces(r.calc_method)
         ? <input type="number" min={0} step="any" value={r.pieces ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ pieces: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
-        : <span className="block px-1 text-right text-slate-300 text-xs" title={t("ชนิดนี้ไม่ใช้จำนวนชิ้น", "This type doesn't use pcs")}>—</span> },
+        : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้จำนวนชิ้น", "This type doesn't use pcs")}></span> },
     { key: "waste_percent", header: t("เผื่อเสีย %", "Waste %"), width: 84, align: "right", sortable: true, getValue: (r) => r.waste_percent,
       render: (r, u) => usesWaste(r.calc_method)
         ? <input type="number" min={0} step="any" value={r.waste_percent ?? ""} disabled={!cellEdit} title={roTip} placeholder="0"
             onChange={(e) => u({ waste_percent: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
-        : <span className="block px-1 text-right text-slate-300 text-xs" title={t("ชนิดนี้ไม่ใช้เผื่อเสีย", "This type doesn't use waste")}>—</span> },
+        : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้เผื่อเสีย", "This type doesn't use waste")}></span> },
     { key: "face_width_cm", header: t("หน้ากว้าง / พื้นที่", "Roll width / area"), width: 96, align: "right", sortable: true, getValue: (r) => r.face_width_cm,
       render: (r, u) => rowIsPiece(r)
         // ชนิดชิ้น: ไม่ใช้หน้ากว้าง — โชว์พื้นที่ cm² (กว้าง×ยาว) แทนไว้อ้างอิง
@@ -1475,7 +1527,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         : r.calc_method === "area_face"
         ? <input type="number" min={0} step="any" value={r.face_width_cm ?? ""} disabled={!cellEdit} title={roTip}
             onChange={(e) => u({ face_width_cm: e.target.value === "" ? null : Number(e.target.value) })} className={numInputCls} />
-        : <span className="block px-1 text-right text-slate-300 text-xs">—</span> },
+        : <span className="block h-7"></span> },
     { key: "qty", header: t("ปริมาณ", "Qty"), width: 96, align: "right", summable: true, sortable: true, getValue: (r) => r.qty,
       render: (r, u) => isManualM(r.calc_method) && canEdit
         ? <input type="number" min={0} step="any" value={r.qty ?? ""} placeholder={t("พิมพ์เอง", "Type in")}
@@ -2306,6 +2358,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               })()}
 
               <LineItemsGrid<CostRow>
+                variant="lines"
                 rows={curLines}
                 columns={costCols}
                 onChange={(rows) => {
@@ -2727,6 +2780,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       <ERPModal open={pmOpen} onClose={closePm} size="lg" title={t("🧮 จัดการวัสดุตีราคา", "🧮 Manage costing materials")}
         footer={<button onClick={closePm} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">{t("ปิด (รายการวัสดุในตารางจะอัปเดตเอง)", "Close (the material list in the table updates itself)")}</button>}>
         <div className="space-y-2">
+          {/* เปิดมาจากปุ่ม "ใส่รายละเอียด" ในแถว — บอกว่ากำลังแก้ตัวไหน + บันทึกแล้วเติมให้แถวเอง */}
+          {pmForItem && (
+            <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <Icon name="edit" className="mt-0.5 shrink-0" />
+              <span>{t(`กำลังใส่รายละเอียด "${pmRows.find((x) => x.id === pmForItem)?.name ?? pmSearch}" — เลือกชนิด ใส่ราคา/หน่วย แล้วกด ✓ ระบบจะเติมให้แถวในตารางตีราคาเอง`,
+                `Adding details for "${pmRows.find((x) => x.id === pmForItem)?.name ?? pmSearch}" — choose a type, enter price/unit, then press ✓ and the costing line fills itself`)}</span>
+            </div>
+          )}
           <div className="p-2 bg-slate-50 border border-slate-200 rounded-lg space-y-1">
             <div className="flex flex-wrap gap-1.5 items-center">
               <input value={pmName} onChange={(e) => setPmName(e.target.value)} placeholder={t("ชื่อวัสดุ เช่น ผ้าแคนวาส *", "Material name, e.g. canvas fabric *")}

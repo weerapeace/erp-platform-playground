@@ -99,6 +99,14 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
   }
 }
 
+/* ---- ตารางบรรทัดกลาง LineItemsGrid variant="lines" (เจ้าของขอ 2026-11-03 "เอากรอบช่องออก มีแค่เส้นบรรทัด") ----
+   ช่องกรอก/ปุ่มเปิด dropdown (data-field-trigger) ในแถว ไม่มีกรอบ — เหลือเส้นใต้จาง ๆ ตอนชี้ · สีฟ้าตอนพิมพ์ */
+.lig-lines .lig-cell :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, [data-field-trigger]) {
+  border-width: 0 0 1px 0; border-color: transparent; border-radius: 0; background-color: transparent; box-shadow: none;
+}
+.lig-lines .lig-cell :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, [data-field-trigger]):hover:not(:disabled) { border-bottom-color: #cbd5e1; }
+.lig-lines .lig-cell :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, [data-field-trigger]):focus { border-bottom-color: #3b82f6; outline: none; box-shadow: none; }
+
 /* ---- RichTextEditor (Tiptap) content ---- */
 .tiptap-content { font-size: 0.875rem; color: #334155; line-height: 1.5; }
 .tiptap-content:focus { outline: none; }

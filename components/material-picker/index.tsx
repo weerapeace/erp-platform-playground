@@ -111,7 +111,7 @@ export function ComponentPicker({ sku, name, imageKey, placeholder = "— เล
   useEffect(() => { const f = (e: MouseEvent) => { if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false); }; document.addEventListener("mousedown", f); return () => document.removeEventListener("mousedown", f); }, []);
   return (
     <div ref={boxRef} className="relative">
-      <button type="button" onClick={() => { setOpen((o) => !o); setSearch(""); }}
+      <button type="button" onClick={() => { setOpen((o) => !o); setSearch(""); }} data-field-trigger
         className="w-full h-9 px-2 text-left text-sm border border-slate-200 rounded-lg hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 flex items-center gap-1.5 overflow-hidden">
         {sku ? <><Thumb k={imageKey ?? null} /><span className="truncate"><code className="text-xs text-slate-500">{sku}</code> <span className="text-slate-700">{name}</span></span></> : <span className="text-slate-400">{placeholder}</span>}
       </button>

@@ -77,7 +77,7 @@ export function SearchableSelect({
 
   return (
     <div className={`relative ${className ?? ""}`}>
-      <button ref={btnRef} type="button" disabled={disabled} onClick={() => (open ? close() : openMenu())}
+      <button ref={btnRef} type="button" disabled={disabled} onClick={() => (open ? close() : openMenu())} data-field-trigger
         className="w-full h-9 px-2 text-sm text-left border border-slate-200 rounded-md bg-white flex items-center gap-1 disabled:opacity-50 focus:outline-none focus:ring-1 focus:ring-blue-500">
         <span className="flex-1 min-w-0 truncate">
           {cur ? <>{cur.label}{cur.badge ? ` ${cur.badge}` : ""}</> : <span className="text-slate-400">{placeholder}</span>}
