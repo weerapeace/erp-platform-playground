@@ -12,6 +12,12 @@ export type CornerAnchor = { h: "l" | "r"; v: "t" | "b"; x: number; y: number };
 
 const MARGIN = 8;
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(n, Math.max(lo, hi)));
+/** ขนาดจอที่ใช้วาง position:fixed จริง — ไม่รวมแถบเลื่อน (window.innerWidth รวมแถบเลื่อน → ปล่อยแล้วกระตุกไป ~15px) */
+export function viewportSize(): { w: number; h: number } {
+  if (typeof window === "undefined") return { w: 1920, h: 1080 };
+  const de = document.documentElement;
+  return { w: de.clientWidth || window.innerWidth, h: de.clientHeight || window.innerHeight };
+}
 
 export function parseCornerAnchor(raw: unknown): CornerAnchor | null {
   if (!raw || typeof raw !== "object") return null;
@@ -34,8 +40,7 @@ export function anchorFromRect(rect: { left: number; top: number; right: number;
 
 /** style ตำแหน่งจากมุม (กันหลุดจอ: ระยะไม่เกินจอ − ขนาดกล่องโดยประมาณ) */
 export function cornerStyle(a: CornerAnchor, box: { w: number; h: number } = { w: 0, h: 0 }): CSSProperties {
-  const vw = typeof window === "undefined" ? 1920 : window.innerWidth;
-  const vh = typeof window === "undefined" ? 1080 : window.innerHeight;
+  const { w: vw, h: vh } = viewportSize();
   const x = clamp(a.x, 0, vw - box.w - MARGIN), y = clamp(a.y, 0, vh - box.h - MARGIN);
   return { [a.h === "l" ? "left" : "right"]: x, [a.v === "t" ? "top" : "bottom"]: y };
 }
@@ -58,13 +63,14 @@ export function useCornerDrag(onDrop: (a: CornerAnchor) => void) {
       if (!moved.current && Math.hypot(dx, dy) < 5) return;
       moved.current = true;
       ev.preventDefault();   // ไม่ให้ลากแล้วไปลากเลือกข้อความทั้งหน้า
-      setLive({ left: clamp(r.left + dx, 0, window.innerWidth - r.width), top: clamp(r.top + dy, 0, window.innerHeight - r.height) });
+      const vp = viewportSize();
+      setLive({ left: clamp(r.left + dx, 0, vp.w - r.width), top: clamp(r.top + dy, 0, vp.h - r.height) });
     };
     const end = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", end);
       window.removeEventListener("pointercancel", end);
-      if (moved.current) dropRef.current(anchorFromRect(el.getBoundingClientRect(), window.innerWidth, window.innerHeight));
+      if (moved.current) { const vp = viewportSize(); dropRef.current(anchorFromRect(el.getBoundingClientRect(), vp.w, vp.h)); }
       setLive(null);
     };
     window.addEventListener("pointermove", move);

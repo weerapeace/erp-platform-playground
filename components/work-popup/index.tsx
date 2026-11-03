@@ -22,8 +22,19 @@ import { TaskLinkList } from "@/components/record-tasks/task-links";
 import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } from "@/lib/email-report/popup";
 // หน้าที่ไม่ใช่การทำงานใน ERP (ล็อกอิน / พิมพ์ / ลิงก์สาธารณะ) → ไม่เด้ง (รายการกลาง lib/chromeless-routes)
 import { isChromelessPath } from "@/lib/chromeless-routes";
-import { WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScreen, useWorkPopupFloatPref } from "./float";
+import { WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScreen, useWorkPopupFloatPref, type FloatTab } from "./float";
+import { GifInbox, type GifPoke } from "./gif-inbox";
+import { petBadge, petMood } from "@/lib/floating-pet";
+import type { UserPickerValue } from "@/components/pickers";
+import dynamic from "next/dynamic";
+// หน้าต่างส่ง GIF (ของแอปจัดการงาน) — โหลดเฉพาะตอนกดตอบกลับ/ส่ง
+const GifPokeModal = dynamic(() => import("@/app/tasks/gif-poke-modal").then((m) => m.GifPokeModal), { ssr: false });
 const RECHECK_MS = 30 * 60_000;
+const POKE_POLL_MS = 3 * 60_000;
+const pokeSeenKey = (uid: string) => `fpet-pokes-seen:${uid}`;
+function readPokeSeen(uid: string): Set<string> {
+  try { const v = JSON.parse(localStorage.getItem(pokeSeenKey(uid)) ?? "[]"); return new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []); } catch { return new Set(); }
+}
 const UUID = /^[0-9a-f-]{36}$/i;
 
 const thDate = () => new Date(Date.now() + 7 * 3600_000).toISOString().slice(0, 10);
@@ -220,6 +231,41 @@ export function WorkPopupHost() {
   // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);   // ค่าคงที่ — การ์ดผูกตัวฟัง "กดข้างนอก" ครั้งเดียว
+  const [tab, setTab] = useState<"work" | "gif">("work");
+
+  // ── แท็บ GIF: กล่องรับ "ส่ง GIF ให้เพื่อน" (จอคอมเท่านั้น — ตัว Pet อยู่บนจอคอม) ──
+  const [pokes, setPokes] = useState<GifPoke[]>([]);
+  const [pokeSeen, setPokeSeen] = useState<Set<string>>(new Set());
+  const [gifModal, setGifModal] = useState<{ reply: GifPoke | null } | null>(null);
+  useEffect(() => { if (uid) setPokeSeen(readPokeSeen(uid)); }, [uid]);
+  const loadPokes = useCallback(async () => {
+    if (!uid) return;
+    try {
+      const r = await apiFetch("/api/gif-poke");
+      if (!r.ok) return;
+      const j = (await r.json()) as { data?: GifPoke[] };
+      setPokes(Array.isArray(j.data) ? j.data : []);
+    } catch { /* เงียบ */ }
+  }, [uid]);
+  useEffect(() => {
+    if (!uid || skip || !enabled || !wide) return;
+    const first = setTimeout(() => void loadPokes(), 3000);
+    const iv = window.setInterval(() => { if (document.visibilityState === "visible") void loadPokes(); }, POKE_POLL_MS);
+    return () => { clearTimeout(first); window.clearInterval(iv); };
+  }, [uid, skip, enabled, wide, loadPokes]);
+  const dismissPoke = (id: string) => {
+    setPokes((ps) => ps.filter((p) => p.id !== id));
+    void apiFetch("/api/gif-poke", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {});
+  };
+  const newPokes = pokes.filter((p) => !pokeSeen.has(p.id));
+  // เปิดแท็บ GIF ดูแล้ว = เห็นแล้ว (ตัว Pet เลิกกระโดดเพราะ GIF)
+  useEffect(() => {
+    if (!uid || !expanded || tab !== "gif" || !newPokes.length) return;
+    const next = new Set([...pokeSeen, ...pokes.map((p) => p.id)]);
+    setPokeSeen(next);
+    try { localStorage.setItem(pokeSeenKey(uid), JSON.stringify([...next].slice(-200))); } catch { /* ignore */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uid, expanded, tab, newPokes.length]);
 
   // quiet = โหลดข้อมูลใหม่เงียบ ๆ (หลังมีการแก้ / กดกาง / กลับมาที่แท็บ) — ไม่เด้งกางเอง
   const check = useCallback(async (reportId?: string, quiet = false) => {
@@ -238,7 +284,7 @@ export function WorkPopupHost() {
       if (allDay) setQueue(list);   // ทั้งวัน = แทนทั้งชุด (ของที่หมดวัน/ปิดรายงานแล้วหายไปด้วย)
       else if (list.length) setQueue((q) => [...q.filter((x) => !list.some((y) => y.report_id === x.report_id)), ...list]);
       setDone(new Set());   // ข้อมูลใหม่จากเซิร์ฟเวอร์ = ความจริงล่าสุด (ข้อที่ติ๊กแล้วหายไปเอง)
-      if (!quiet && list.some((p) => p.due)) setExpanded(true);
+      if (!quiet && list.some((p) => p.due)) { setExpanded(true); setTab("work"); }
     } catch { /* เงียบ — ป๊อปไม่ขึ้นไม่ทำให้หน้าพัง */ }
   }, [uid, enabled, wide]);
 
@@ -274,10 +320,11 @@ export function WorkPopupHost() {
       const age = Date.now() - lastCheck.current;
       if (age > RECHECK_MS) void check();
       else if (wide && queueLenRef.current > 0 && age > 60_000) void check(undefined, true);
+      if (wide && age > 60_000) void loadPokes();
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [uid, skip, check, wide]);
+  }, [uid, skip, check, wide, loadPokes]);
 
   // จอคอม: แสดงตัวที่ถึงเวลาก่อน ไม่มีก็ตัวแรก (เป็นปุ่มเล็ก) · จอเล็ก: เฉพาะตัวที่ถึงเวลา (หน้าต่างกลางจอแบบเดิม)
   const cur = (wide ? (queue.find((x) => x.due) ?? queue[0]) : queue.find((x) => x.due !== false)) ?? null;
@@ -334,16 +381,41 @@ export function WorkPopupHost() {
     </div>
   );
 
+  // ── ศูนย์แจ้งเตือน (จอคอม): ตัว Pet + แท็บ งาน / GIF ──
+  const workCount = cur ? (cur.audience === "mine" ? mineOpen : cur.stats.total) : 0;
+  const floatOn = wide && !skip && (enabled || (!!cur && forced.has(cur.report_id))) && (!!cur || (enabled && pokes.length > 0));
+  const tabs: FloatTab[] = [
+    ...(cur && visible ? [{
+      key: "work", label: "งาน", icon: "list", count: workCount, subtitle: `${title} · ${subtitle}`, footer,
+      content: <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />,
+    }] : []),
+    ...(enabled ? [{
+      key: "gif", label: "GIF", icon: "gift", count: pokes.length, subtitle: "GIF ที่เพื่อนส่งมา",
+      content: <GifInbox pokes={pokes} newIds={new Set(newPokes.map((p) => p.id))} onDismiss={dismissPoke}
+        onReply={(p) => setGifModal({ reply: p })} onSend={() => setGifModal({ reply: null })} />,
+    }] : []),
+  ];
+  const activeTab = tabs.some((x) => x.key === tab) ? tab : (tabs[0]?.key ?? "work");
+  const petAlert = pending || newPokes.length > 0;
+  const petState = {
+    mood: petMood({ total: workCount + pokes.length, alert: petAlert }),
+    badge: petBadge(workCount + pokes.length),
+    bubble: pending ? pill : newPokes.length ? `${newPokes[newPokes.length - 1].from_name ?? "เพื่อน"} ส่ง GIF มา` : null,
+  };
+
   return (
     <>
       <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
-      {visible && cur && (wide ? (
-        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} title={title} subtitle={subtitle} pill={pill} footer={footer}
+      {wide ? (floatOn && tabs.length > 0 && (
+        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" ? "gif" : "work")} pet={petState}
           onMinimize={collapse}
-          onExpand={() => { setExpanded(true); void check(undefined, true); }}>
-          <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
-        </WorkPopupFloatCard>
-      ) : (
+          onExpand={() => {
+            setExpanded(true);
+            setTab(!pending && newPokes.length > 0 ? "gif" : cur ? "work" : "gif");
+            if (cur) void check(undefined, true);
+            void loadPokes();
+          }} />
+      )) : visible && cur && (
         <ERPModal open onClose={() => finish(cur, "later")} size="lg" defaultExpanded={false} storageKey="work-popup" zIndex={300}
           closeOnBackdrop={!cur.require_ack}
           title={`🔔 ${title}`}
@@ -352,7 +424,11 @@ export function WorkPopupHost() {
           <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />
           <p className="mt-3 text-[11px] text-slate-400">💡 {WORK_POPUP_HIDE_HINT} แล้วปิดสวิตช์</p>
         </ERPModal>
-      ))}
+      )}
+      {gifModal && (
+        <GifPokeModal open onClose={() => setGifModal(null)} onSent={() => { setGifModal(null); toast.success("ส่ง GIF แล้ว"); }} isAdmin={user?.role === "admin"}
+          prefillRecipient={gifModal.reply ? ({ id: gifModal.reply.from_user_id, name: gifModal.reply.from_name ?? "", code: null } as unknown as UserPickerValue) : null} />
+      )}
     </>
   );
 }
