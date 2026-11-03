@@ -2368,6 +2368,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 }}
                 rowId={(r) => r.key}
                 readonly={!fullEdit}
+                // ดับเบิลคลิกแถวตอนดูอย่างเดียว → เข้าโหมดแก้ไข (เหมือนกด ✏️) แล้วเคอร์เซอร์ไปช่องที่คลิก (เจ้าของขอ 2026-11-03)
+                onRequestEdit={canEdit ? () => setEditing(true) : undefined}
                 groupByOptions={[{ key: "group", label: t("ชนิดวัสดุ", "Material type") }, { key: "item", label: t("วัสดุ", "Material") }, { key: "uom", label: t("หน่วย", "Unit") }]}
                 groupNote={(rows) => {
                   // ใช้ต่อใบ (เจ้าของขอ 2026-10-26) — ผ้า/แผ่นที่คิดเป็น cm² → แปลงเป็นกี่ผืน จากขนาดผืนในทะเบียนวัสดุตีราคา (lib/cost-usage)

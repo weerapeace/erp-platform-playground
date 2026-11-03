@@ -12,6 +12,7 @@
  *   - [เฟส 2] แก้ค่าที่หัวกลุ่ม → ทุกบรรทัดในกลุ่มเปลี่ยนตาม (คอลัมน์ที่มี setValue)
  *   - [เฟส 2] ปรับขนาดคอลัมน์ (ลากขอบหัวคอลัมน์) + จำค่าไว้ (localStorage ถ้ามี storageKey)
  *   - ลากเรียงลำดับ (dnd-kit) เมื่อไม่ sort/group · เพิ่ม/ลบบรรทัด · readonly
+ *   - readonly + onRequestEdit: ดับเบิลคลิกแถว → ขอเข้าโหมดแก้ แล้ววางเคอร์เซอร์ที่ช่องที่คลิก
  */
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -80,7 +81,13 @@ export type LineItemsGridProps<T> = {
    *  "lines" = เหลือแค่เส้นคั่นบรรทัด ช่องกรอกไม่มีกรอบ (มีเส้นใต้ตอนชี้/พิมพ์) ปุ่มลบ/ทำซ้ำ/ลาก โผล่ตอนชี้แถว
    *  (สไตล์ช่องกรอกอยู่ที่ .lig-lines ใน app/globals.css — ปุ่มเปิด dropdown ใส่ data-field-trigger ก็แบนตาม) */
   variant?:      "boxed" | "lines";
+  /** ตอน readonly: ดับเบิลคลิกแถว → เรียกฟังก์ชันนี้ (หน้าเจ้าของตารางสลับเข้าโหมดแก้) ·
+   *  พอ readonly กลายเป็น false ตารางจะโฟกัสช่องที่ดับเบิลคลิกให้เอง (ช่องนั้นไม่มีที่กรอก → ช่องแรกของแถว) */
+  onRequestEdit?: (row: T) => void;
 };
+
+// ช่องที่โฟกัสได้หลังเข้าโหมดแก้ (ปุ่มเปิด dropdown ต้องมี data-field-trigger)
+const FOCUSABLE = 'input:not([disabled]):not([type="checkbox"]):not([type="radio"]), select:not([disabled]), textarea:not([disabled]), [data-field-trigger]:not([disabled])';
 
 type SortState = { key: string; dir: "asc" | "desc" } | null;
 
@@ -92,7 +99,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
   groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
-  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed",
+  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit,
 }: LineItemsGridProps<T>) {
   const lines = variant === "lines";
   const [sort, setSort]       = useState<SortState>(defaultSort);
@@ -101,6 +108,19 @@ export function LineItemsGrid<T>({
   const [widths, setWidths]   = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<Set<string>>(new Set());   // แถวที่ติ๊กเลือก (rowId)
   const gridRef = useRef<HTMLDivElement>(null);
+  const pendingFocus = useRef<{ id: string; col: string | null } | null>(null);   // ดับเบิลคลิกแถวตอน readonly
+
+  // เพิ่งออกจาก readonly เพราะดับเบิลคลิก → โฟกัสช่องที่คลิกไว้
+  useEffect(() => {
+    const pf = pendingFocus.current;
+    if (readonly || !pf) return;
+    pendingFocus.current = null;
+    // โฟกัสตรงนี้เลย (DOM อัปเดตแล้ว) — ไม่รอ requestAnimationFrame เพราะแท็บที่ยังไม่วาดจอจะไม่เรียก
+    const rowEl = gridRef.current?.querySelector<HTMLElement>(`[data-lig-row="${window.CSS.escape(pf.id)}"]`);
+    if (!rowEl) return;
+    const cell = pf.col ? rowEl.querySelector<HTMLElement>(`[data-col="${window.CSS.escape(pf.col)}"]`) : null;
+    (cell?.querySelector<HTMLElement>(FOCUSABLE) ?? rowEl.querySelector<HTMLElement>(FOCUSABLE))?.focus();
+  }, [readonly]);
 
   // ตัด id ที่หายไปออกจาก selection เมื่อ rows เปลี่ยน (สลับแท็บ/ลบแถว) → กันเลือกค้าง
   useEffect(() => {
@@ -361,7 +381,8 @@ export function LineItemsGrid<T>({
                       columns={columns} row={d.row} dense={dense} lines={lines}
                       selectable={selectable} selected={selected.has(rowId(d.row))} onToggleSelect={() => toggleSel(rowId(d.row))}
                       onUpdate={(patch) => update(rowId(d.row), patch)} onRemove={() => remove(rowId(d.row))}
-                      onDuplicate={onDuplicate ? () => duplicate(rowId(d.row)) : undefined} />
+                      onDuplicate={onDuplicate ? () => duplicate(rowId(d.row)) : undefined}
+                      onRequestEdit={readonly && onRequestEdit ? (col) => { pendingFocus.current = { id: rowId(d.row), col }; onRequestEdit(d.row); } : undefined} />
                   ),
                 )}
               </SortableContext>
@@ -389,12 +410,13 @@ export function LineItemsGrid<T>({
 // ---- single sortable row ----
 function GridRow<T>({
   id, template, canDrag, readonly, columns, row, onUpdate, onRemove, onDuplicate, dense = false, lines = false,
-  selectable = false, selected = false, onToggleSelect,
+  selectable = false, selected = false, onToggleSelect, onRequestEdit,
 }: {
   id: string; template: string; canDrag: boolean; readonly: boolean;
   columns: LineColumn<T>[]; row: T;
   onUpdate: (patch: Partial<T>) => void; onRemove: () => void; onDuplicate?: () => void; dense?: boolean; lines?: boolean;
   selectable?: boolean; selected?: boolean; onToggleSelect?: () => void;
+  onRequestEdit?: (col: string | null) => void;
 }) {
   // โหมดเส้นบรรทัด: ปุ่มลาก/ทำซ้ำ/ลบ ซ่อนไว้จนชี้แถว (จอสัมผัสไม่มี hover → โชว์ตลอด)
   const hoverOnly = lines ? "[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100" : "";
@@ -406,7 +428,11 @@ function GridRow<T>({
     opacity: isDragging ? 0.5 : 1,
   };
   return (
-    <div ref={setNodeRef} style={style} className={`${lines ? "group" : ""} grid items-center border-b border-slate-100 ${selected ? "bg-indigo-50/60" : lines ? "bg-white hover:bg-slate-50" : "bg-white hover:bg-slate-50/60"}`}>
+    <div ref={setNodeRef} style={style} data-lig-row={id}
+      // ดับเบิลคลิกตอนดูอย่างเดียว → ขอแก้แถวนี้ (ช่องที่ล็อกไม่รับเมาส์ — .lig-dbl ใน globals.css — เหตุการณ์เลยตกถึงแถว)
+      onDoubleClick={onRequestEdit ? (e) => { window.getSelection()?.removeAllRanges(); onRequestEdit((e.target as HTMLElement).closest<HTMLElement>("[data-col]")?.dataset.col ?? null); } : undefined}
+      title={onRequestEdit ? "ดับเบิลคลิกเพื่อแก้แถวนี้" : undefined}
+      className={`${onRequestEdit ? "lig-dbl" : ""} ${lines ? "group" : ""} grid items-center border-b border-slate-100 ${selected ? "bg-indigo-50/60" : lines ? "bg-white hover:bg-slate-50" : "bg-white hover:bg-slate-50/60"}`}>
       {selectable && (
         <span className="flex items-center justify-center">
           <input type="checkbox" aria-label="เลือกแถวนี้" checked={selected} disabled={readonly}

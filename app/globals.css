@@ -106,6 +106,8 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
 }
 .lig-lines .lig-cell :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, [data-field-trigger]):hover:not(:disabled) { border-bottom-color: #cbd5e1; }
 .lig-lines .lig-cell :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea, [data-field-trigger]):focus { border-bottom-color: #3b82f6; outline: none; box-shadow: none; }
+/* LineItemsGrid onRequestEdit: ช่องที่ล็อก (disabled) ไม่รับเมาส์ → ดับเบิลคลิกตกถึงแถว (เบราว์เซอร์ไม่ส่งเหตุการณ์เมาส์จากช่อง disabled) */
+.lig-dbl :is(input, select, textarea, button):disabled { pointer-events: none; }
 
 /* ---- RichTextEditor (Tiptap) content ---- */
 .tiptap-content { font-size: 0.875rem; color: #334155; line-height: 1.5; }
