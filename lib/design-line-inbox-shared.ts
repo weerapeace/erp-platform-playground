@@ -52,9 +52,11 @@ export function sanitizeDesignAi(raw: Record<string, unknown>, brands: InboxBran
   const s = (v: unknown) => String(v ?? "").trim();
   const name = s(raw.name).replace(/\s+/g, " ").slice(0, 80) || null;
   const b = s(raw.brand).toLowerCase();
-  const brand = b
-    ? brands.find((x) => x.name.toLowerCase() === b) ?? brands.find((x) => b.includes(x.name.toLowerCase()) || x.name.toLowerCase().includes(b))
-    : undefined;
+  // ตรงตัวก่อน · ไม่ตรงค่อยเทียบบางส่วน (ต้องยาว ≥ 4 ตัว และเจอแบรนด์เดียว — กัน "IG" ไปตรงกับ "Findig")
+  const partial = b.length >= 4
+    ? brands.filter((x) => b.includes(x.name.toLowerCase()) || x.name.toLowerCase().includes(b))
+    : [];
+  const brand = b ? brands.find((x) => x.name.toLowerCase() === b) ?? (partial.length === 1 ? partial[0] : undefined) : undefined;
   let deadline: string | null = null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s(raw.deadline));
   if (m) {

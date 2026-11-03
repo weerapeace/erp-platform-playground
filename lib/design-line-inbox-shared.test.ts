@@ -13,6 +13,9 @@ describe("design-line-inbox · ตรวจคำตอบ AI งานออก
     expect(sanitizeDesignAi({ brand: "pixie dustie" }, brands, TODAY).brand_id).toBe("b1");
     expect(sanitizeDesignAi({ brand: "Louis Montini Thailand" }, brands, TODAY).brand_id).toBe("b2");
     expect(sanitizeDesignAi({ brand: "Gucci" }, brands, TODAY).brand_id).toBeNull();
+    const withShort = [...brands, { id: "b4", name: "Findig" }, { id: "b5", name: "IG International" }];
+    expect(sanitizeDesignAi({ brand: "IG" }, withShort, TODAY).brand_id).toBeNull();          // สั้นเกิน เดาไม่ได้
+    expect(sanitizeDesignAi({ brand: "ig international" }, withShort, TODAY).brand_id).toBe("b5");
     expect(sanitizeDesignAi({ brand: null }, brands, TODAY).brand_id).toBeNull();
   });
 
