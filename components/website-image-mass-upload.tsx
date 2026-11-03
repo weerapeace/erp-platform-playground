@@ -1126,7 +1126,9 @@ export function WebsiteImageMassUpload({
                 )}
 
                 {linkable && phase === "pick" && (
-                  <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs">
+                  // ลอยติดขอบบนของหน้าต่างตอนเลื่อน (เปลี่ยนโหมดสลับได้ทุกแถว) — กล่องเลื่อนของ ERPModal ไม่มี overflow ซ้อน
+                  // -top-5 = ชิดขอบบนพอดี (ตัวเลื่อนของ ERPModal เว้นบน py-5 · top-0 จะเหลือช่องให้รูปโผล่เหนือแถบ)
+                  <div className="sticky -top-5 z-10 flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs shadow-sm ring-1 ring-slate-200">
                     <span className="text-slate-700">↕ สลับลำดับรูปแล้ว แถวอื่นตำแหน่งเดียวกันสลับตาม:</span>
                     {LINK_OPTS.map((o) => (
                       <button key={o.v} type="button" onClick={() => setLinkReorder(o.v)} className={seg(linkReorder === o.v)}>
