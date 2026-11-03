@@ -32,6 +32,9 @@ import { DashboardStats } from "./dashboard-stats";
 import { StatusBoard } from "./status-board";
 import { AuditFeed } from "./audit-feed";
 import { PickActionBar } from "./pick-action-bar";
+import { LineInboxButton, LineInboxDrawer, useLineInboxCount } from "./line-inbox";
+import { lineTextToDetailHtml, type LineInboxItem } from "@/lib/design-line-inbox-shared";
+import type { DesignSheetPrefill } from "@/components/design-sheet-detail";
 
 const WorkflowStatusManager = dynamic(
   () => import("@/components/workflow-status-manager").then((mod) => mod.WorkflowStatusManager),
@@ -68,6 +71,22 @@ export function DesignDashboard() {
   const [openSheetId, setOpenSheetId] = useState<string | null>(null);   // เปิด popup รายละเอียดในตัวบอร์ด
   const [presentId, setPresentId] = useState<string | null>(null);       // แผงใบนำเสนอ A4 ของใบไหน (null = ปิด)
   const [createOpen, setCreateOpen] = useState(false);                   // เปิด popup สร้างงานใหม่
+  // 📥 กล่องงานจากไลน์ — ร่างที่บอทรับจากกลุ่มส่งงานออกแบบ · กด "เปิดใบงาน" = ฟอร์มสร้างเดิมกรอกให้ (createPrefill)
+  const isAdmin = usePermission("admin.users");
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [inboxKey, setInboxKey] = useState(0);
+  const [createPrefill, setCreatePrefill] = useState<DesignSheetPrefill | null>(null);
+  const inboxCount = useLineInboxCount(inboxKey);
+  const convertFromInbox = (it: LineInboxItem) => {
+    const from = [it.sender_name, it.last_message_at ? new Date(it.last_message_at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""].filter(Boolean).join(" · ");
+    setCreatePrefill({
+      name: it.name, brand_id: it.brand_id, deadline: it.deadline, detail: lineTextToDetailHtml(it.text),
+      lineInboxId: it.id, images: it.images,
+      sourceLabel: t(`มาจากไลน์${from ? ` · ${from}` : ""} · ชื่อ/แบรนด์/วันส่ง AI กรอกให้ — ตรวจก่อนบันทึก`, `From LINE${from ? ` · ${from}` : ""} · name/brand/due date filled by AI — check before saving`),
+    });
+    setInboxOpen(false);
+    setCreateOpen(true);
+  };
   const [expandedCols, setExpandedCols] = useState<Set<string>>(new Set());   // คอลัมน์ที่กางดูงานครบ (ไม่จำกัด 8)
   const [viewMode, setViewMode] = useState<"board" | "gallery">("board");     // มุมมอง: บอร์ด Kanban / การ์ดรูปใหญ่ (แกลเลอรี)
   const { cols: galleryCols, setCols: setGalleryCols, gridStyle: galleryGridStyle } = useGalleryColumns("design-dashboard", 6);   // จำนวนการ์ดต่อแถว (ของกลาง จำรายคน)
@@ -154,8 +173,10 @@ export function DesignDashboard() {
   };
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const id = new URLSearchParams(window.location.search).get("open");
+    const sp = new URLSearchParams(window.location.search);
+    const id = sp.get("open");
     if (id) setOpenSheetId(id);   // เปิดด้วยลิงก์ ?open=ID (refresh/copy link แล้วยังเปิดงานเดิม)
+    if (sp.get("inbox") === "1") setInboxOpen(true);   // ลิงก์จากบอทไลน์ "ดูในระบบ" → เปิดกล่องงานจากไลน์
   }, []);
   const router = useRouter();
   const openDetail = (id: string | null) => {
@@ -489,12 +510,23 @@ export function DesignDashboard() {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1.5" ref={moreAnchorRef}>
+              {inboxCount.pending > 0 && (
+                <button type="button" onClick={() => setInboxOpen(true)} title={t("งานจากไลน์ รอเปิดใบงาน", "Jobs from LINE waiting")}
+                  aria-label={t(`งานจากไลน์ ${inboxCount.pending} งาน`, `${inboxCount.pending} jobs from LINE`)}
+                  className="relative flex h-9 w-9 items-center justify-center rounded-md border border-emerald-300 bg-emerald-50 text-emerald-800">
+                  <Icon name="chat" size={18} />
+                  <span className="absolute -right-1.5 -top-1.5 rounded-full bg-emerald-600 px-1 text-[10px] font-semibold leading-4 text-white">{inboxCount.pending}</span>
+                </button>
+              )}
               <DeviceModeToggle mode={deviceMode} viewport={viewport} onChange={setDeviceMode} compact />
               <button type="button" onClick={() => setMoreOpen((o) => !o)} title={t("เมนูเพิ่มเติม", "More menu")} aria-label={t("เมนูเพิ่มเติม", "More menu")}
                 className={`flex h-9 w-9 items-center justify-center rounded-md border text-lg leading-none ${moreOpen ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600"}`}>⋯</button>
               <FloatingDropdown anchorRef={moreAnchorRef} open={moreOpen} onClose={() => setMoreOpen(false)} minWidth={224} maxWidth={280}>
                 <div className="rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
                   <div className="px-1 py-0.5"><RecordTasksButton moduleKey="design_sheets" canEdit={canEdit} /></div>
+                  <button type="button" className={menuItem} onClick={() => { setInboxOpen(true); setMoreOpen(false); }}>
+                    <Icon name="chat" /> {t("งานจากไลน์", "Jobs from LINE")}{inboxCount.pending > 0 ? ` (${inboxCount.pending})` : ""}
+                  </button>
                   <a href="/master/design-sheets" className={menuItem}>📄 {t("กลับ Design Sheets", "Back to Design Sheets")}</a>
                   <button type="button" className={menuItem} onClick={() => { refreshDashboard(); setMoreOpen(false); }}>🔄 {t("รีเฟรชข้อมูล", "Refresh data")}</button>
                   {selectedBrandId && <button type="button" className={menuItem} onClick={() => { setThemeBuilderOpen(true); setMoreOpen(false); }}>🎨 {t("ปรับธีม", "Theme")} {selectedBrand?.name}</button>}
@@ -555,6 +587,7 @@ export function DesignDashboard() {
                 🎨 {t("ปรับธีม", "Theme")}
               </button>
             )}
+            <LineInboxButton count={inboxCount.pending} onClick={() => setInboxOpen(true)} />
             <button data-gg-action="primary" onClick={() => setCreateOpen(true)}
               className="inline-flex h-9 items-center rounded-md bg-slate-900 px-3 text-sm font-medium text-white shadow-sm hover:bg-slate-800">
               ＋ {t("เพิ่มงาน", "Add job")}
@@ -794,8 +827,26 @@ export function DesignDashboard() {
 
       {/* popup สร้างงานใหม่ (reuse ฟอร์มเดิม) — default แบรนด์ = แบรนด์ที่เลือกอยู่ในแถบซ้าย · ปิดแล้ว refresh เงียบ */}
       {createOpen && (
-        <DesignSheetDetail detailOnly createMode defaultBrandId={selectedBrand?.id ?? null}
-          onDetailClose={() => { setCreateOpen(false); silentRefresh(); }} />
+        <DesignSheetDetail detailOnly createMode defaultBrandId={selectedBrand?.id ?? null} prefill={createPrefill}
+          onDetailClose={() => {
+            setCreateOpen(false); silentRefresh();
+            // เปิดจากกล่องงานจากไลน์ → กลับไปที่กล่อง (ทำงานถัดไปต่อได้เลย) + โหลดป้ายจำนวนใหม่
+            if (createPrefill) { setCreatePrefill(null); setInboxKey((k) => k + 1); setInboxOpen(true); }
+          }} />
+      )}
+
+      {/* 📥 กล่องงานจากไลน์ (ร่างจากกลุ่มส่งงานออกแบบ) */}
+      {inboxOpen && (
+        <LineInboxDrawer open={inboxOpen} onClose={() => {
+          setInboxOpen(false);
+          if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("inbox")) {
+            const url = new URL(window.location.href); url.searchParams.delete("inbox"); window.history.replaceState(null, "", url.toString());
+          }
+        }}
+          canEdit={canEdit} isAdmin={isAdmin}
+          onConvert={convertFromInbox}
+          onOpenSheet={(id) => { setInboxOpen(false); openDetail(id); }}
+          onChanged={() => setInboxKey((k) => k + 1)} />
       )}
 
       {/* Brand Theme Builder — ปรับธีมของแบรนด์ที่เลือก · เผยแพร่แล้วโหลดธีมใหม่ */}

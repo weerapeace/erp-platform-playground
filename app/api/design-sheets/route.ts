@@ -4,6 +4,7 @@
  * GET  /api/design-sheets?search=&status=&brand_id=&archived=&limit=&offset=&sort_by=&sort_dir=
  *      → list (server mode) + รูปหลักจากระบบแนบไฟล์กลาง (erp_playground_attachments)
  * POST /api/design-sheets → สร้างใบงาน (เลขรันอัตโนมัติ DS-{YYYY}-{0000})
+ *      + line_inbox_id = เปิดใบงานจากร่างใน "กล่องงานจากไลน์" (จองร่างก่อน → สร้างใบ → แนบรูปจากไลน์ + ผูกร่าง)
  *
  * ของกลาง: guardApi (products.view/products.edit) + writeAudit → audit_logs
  */
@@ -18,6 +19,8 @@ import { designSheetCoverMap } from "@/lib/design-sheet-covers";
 import { loadChecklistSummaries } from "@/lib/record-tasks-server";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import type { ChecklistSummary } from "@/lib/record-tasks";
+import { requestActor } from "@/lib/request-actor";
+import { claimInboxForSheet, finishInboxConvert, releaseInboxClaim } from "@/lib/design-line-inbox";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -189,6 +192,7 @@ type CreateBody = {
   parent_sku_code?: string | null;        // เดิม (รหัสเดี่ยว) — ยังรองรับเพื่อ backward compat
   parent_sku_codes?: string[];            // ใหม่ — หลายรหัส
   parent_sku_drafts?: string[];           // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
+  line_inbox_id?: string | null;          // เปิดจากร่างในกล่องงานจากไลน์
 };
 
 // รวม/ปรับรหัส Parent SKU จาก payload (รองรับทั้งฟิลด์เดี่ยวเดิม + array ใหม่) → uppercase, ตัดช่องว่าง, ตัดซ้ำ
@@ -233,6 +237,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (s && !parentDrafts.includes(s)) parentDrafts.push(s);
   }
 
+  // เปิดจากร่างในกล่องงานจากไลน์ — จองก่อนออกเลข (กันสองคนกดพร้อมกัน / กดซ้ำ ได้ใบงานซ้ำ)
+  const inboxId = String(body.line_inbox_id ?? "").trim();
+  let inboxRow: Record<string, unknown> | null = null;
+  const actor = inboxId ? await requestActor(supabaseFromRequest(request)) : null;
+  if (inboxId) {
+    if (!/^[0-9a-f-]{36}$/i.test(inboxId)) return NextResponse.json({ error: "line_inbox_id ไม่ถูกต้อง" }, { status: 400 });
+    const claim = await claimInboxForSheet(admin, inboxId, { id: actor?.id ?? null, name: actor?.name ?? null });
+    if (!claim.ok) return NextResponse.json({ error: claim.error }, { status: 409 });
+    inboxRow = claim.row;
+  }
+
   const code = await nextDsNo(admin);
   const { data: row, error } = await admin.from("design_sheets").insert({
     code, name, brand_id: body.brand_id || null, detail: body.detail ?? null, note: body.note ?? null,
@@ -244,11 +259,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     parent_sku_drafts: parentDrafts,
     is_active: true, created_by: user?.id ?? null,
   }).select("id, code").single();
-  if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  if (error) {
+    if (inboxRow) await releaseInboxClaim(admin, inboxId);   // คืนร่างกลับเข้ากล่อง
+    return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
+  }
 
   await writeAudit(admin, {
     action: "create", entityType: "design_sheet", entityId: row.id,
-    actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { code, name },
+    actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: inboxRow ? { code, name, from_line_inbox: inboxId } : { code, name },
   });
-  return NextResponse.json({ id: row.id, code, error: null });
+  const lineImages = inboxRow
+    ? await finishInboxConvert(admin, inboxRow, { id: String(row.id), code }, { id: actor?.id ?? null, name: actor?.name ?? null })
+    : 0;
+  return NextResponse.json({ id: row.id, code, line_images: lineImages, error: null });
 }

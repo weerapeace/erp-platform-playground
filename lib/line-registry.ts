@@ -13,7 +13,7 @@
 export type LineSlotKey =
   | "production" | "qc"
   | "purchase_request" | "purchase_order" | "goods_receipt" | "purchase_capture"
-  | "creative" | "bills" | "transfers" | "webshop";
+  | "creative" | "design_intake" | "bills" | "transfers" | "webshop";
 
 export type LineSlotDef = { key: LineSlotKey; label: string; icon: string };
 
@@ -26,7 +26,7 @@ export type LineSystemDef = {
   events: LineEventDef[];
 };
 
-/** ป้ายกลุ่มปลายทาง (10 ช่อง) — purchase_capture เป็นกลุ่ม "รับเข้า" (ส่งรูปคำสั่งซื้อให้ AI อ่าน) ไม่ใช่กลุ่มแจ้งเตือน */
+/** ป้ายกลุ่มปลายทาง (11 ช่อง) — purchase_capture / design_intake เป็นกลุ่ม "รับเข้า" (ส่งของเข้าระบบ) ไม่ใช่กลุ่มแจ้งเตือน */
 export const LINE_SLOTS: Record<LineSlotKey, LineSlotDef> = {
   production:       { key: "production",       label: "กลุ่มผลิต (บอร์ดจ่ายงาน)", icon: "🏭" },
   qc:               { key: "qc",               label: "กลุ่ม QC (โกดัง)",         icon: "🔍" },
@@ -35,6 +35,7 @@ export const LINE_SLOTS: Record<LineSlotKey, LineSlotDef> = {
   goods_receipt:    { key: "goods_receipt",    label: "กลุ่มรับของ",              icon: "📥" },
   purchase_capture: { key: "purchase_capture", label: "กลุ่มส่งรูปคำสั่งซื้อ (AI อ่าน)", icon: "💬" },
   creative:        { key: "creative",         label: "กลุ่มครีเอทีฟ",            icon: "🎨" },
+  design_intake:    { key: "design_intake",    label: "กลุ่มส่งงานออกแบบ (เข้ากล่อง Design Dashboard)", icon: "📐" },
   bills:            { key: "bills",            label: "กลุ่มบิลจีน",              icon: "🧾" },
   transfers:        { key: "transfers",        label: "กลุ่มโอนเงิน/เรต",         icon: "💱" },
   webshop:          { key: "webshop",          label: "กลุ่มเว็บร้าน (ออเดอร์ออนไลน์)", icon: "🛍" },
@@ -69,8 +70,8 @@ export const LINE_SYSTEMS: LineSystemDef[] = [
     ],
   },
   {
-    key: "creative", label: "ครีเอทีฟ", icon: "🎨", slots: ["creative"],
-    events: [],   // ส่งรูปจากกระดานเป็น "กดส่งเอง" ไม่ใช่แจ้งเตือนอัตโนมัติ → จัดการแค่กลุ่ม
+    key: "creative", label: "ครีเอทีฟ", icon: "🎨", slots: ["creative", "design_intake"],
+    events: [],   // ส่งรูปจากกระดานเป็น "กดส่งเอง" ไม่ใช่แจ้งเตือนอัตโนมัติ → จัดการแค่กลุ่ม · design_intake = กลุ่มรับงานออกแบบเข้าระบบ
   },
   {
     key: "china", label: "จีน (จ่ายเงิน)", icon: "🇨🇳", slots: ["bills", "transfers"],

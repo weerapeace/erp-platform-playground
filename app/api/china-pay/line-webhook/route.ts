@@ -9,16 +9,21 @@
  * งานที่ 2 "คำสั่งซื้อจากไลน์": รูปที่ส่งในกลุ่ม slot purchase_capture → ของกลาง lib/order-capture
  *  (เก็บรูป → AI อ่าน → กล่องพักรอคนยืนยัน → ตอบกลับในกลุ่ม) · ทำใน after() เพื่อตอบ 200 ให้ LINE ทันที
  *
+ * งานที่ 3 "งานออกแบบจากไลน์": ข้อความ+รูปในกลุ่ม slot design_intake → ของกลาง lib/design-line-inbox
+ *  (ของคนเดิมใน 5 นาที = ร่างเดียว → AI เดาชื่อ/แบรนด์/วันส่ง → กล่อง "จากไลน์" บน Design Dashboard → ตอบกลับในกลุ่ม)
+ *
  * - ตอบ 200 เสมอ (LINE ต้องการ)
  * - เรียกได้โดยไม่ต้องล็อกอิน (LINE เป็นคนเรียก) → 🔒 กันของปลอม:
  *   · จับกลุ่ม: ถามกลับไปที่ LINE ด้วยโทเคนบอทว่า "บอทอยู่ในกลุ่ม/ห้องนี้จริงไหม" (audit 2026-10-21 S7)
  *   · รูปคำสั่งซื้อ: ดึงไฟล์รูปจาก LINE ด้วยโทเคนบอท — id ปลอมดึงไม่ได้ = ไม่บันทึก
+ *   · ข้อความงานออกแบบ: ต้องเป็นสมาชิกกลุ่มจริง (ถามชื่อคนส่งจาก LINE ไม่ได้ = ไม่บันทึก)
  *   · ถ้าตั้ง Channel secret ไว้ (env LINE_CHANNEL_SECRET หรือ line_config.channel_secret) จะตรวจลายเซ็น x-line-signature ก่อนทุกอย่าง
  */
 import { NextRequest, NextResponse, after } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { handleOrderImageEvents, pickOrderImageEvents, type LineEvent } from "@/lib/order-capture";
+import { handleDesignEvents, pickDesignEvents } from "@/lib/design-line-inbox";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -78,6 +83,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const orderEvents = pickOrderImageEvents(cur, events);
     if (orderEvents.length > 0) {
       after(() => handleOrderImageEvents(admin, cur, orderEvents).catch((e) => console.error("[line-webhook] order capture", e)));
+    }
+
+    const designEvents = pickDesignEvents(cur, events);
+    if (designEvents.length > 0) {
+      after(() => handleDesignEvents(admin, cur, designEvents).catch((e) => console.error("[line-webhook] design inbox", e)));
     }
   } catch { /* best-effort */ }
 

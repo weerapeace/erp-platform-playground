@@ -452,8 +452,14 @@ function CopyCostButton({ tabs, current, onCopy, lineCountOf }: { tabs: { key: s
 // onCreated = แจ้งหน้าแม่ทันทีที่ "สร้างใบงานใหม่" สำเร็จ (ป๊อปอัปยังค้างอยู่ให้แนบรูปต่อได้)
 // ใช้โดยกระดานแคมเปญ: สร้างใบงานจากบนกระดาน → วางการ์ดให้เลย
 // hideSendToBoard = ซ่อนปุ่ม "ส่งขึ้นกระดาน" (ส่งมาจากหน้ากระดานแคมเปญเอง — การ์ดอยู่บนกระดานแล้ว ปุ่มนี้ซ้ำซ้อน)
-export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, hideSendToBoard = false, onDetailClose, onCreated, onOpenPresentation }:
-  { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; hideSendToBoard?: boolean; onDetailClose?: () => void; onCreated?: (sheet: { id: string; code: string }) => void;
+// prefill = ค่าตั้งต้นของฟอร์มสร้าง (createMode) เช่น เปิดใบงานจาก "กล่องงานจากไลน์" — lineInboxId ส่งไปกับการบันทึก
+//           ให้ server แนบรูปจากไลน์เข้าใบงาน + ผูกร่าง (รูปจากไลน์ไม่อัปซ้ำ แค่ผูกไฟล์เดิม)
+export type DesignSheetPrefill = {
+  name?: string | null; brand_id?: string | null; deadline?: string | null; detail?: string | null;
+  lineInboxId?: string | null; images?: string[]; sourceLabel?: string | null;
+};
+export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, hideSendToBoard = false, prefill = null, onDetailClose, onCreated, onOpenPresentation }:
+  { detailOnly?: boolean; openId?: string | null; createMode?: boolean; defaultBrandId?: string | null; hideSendToBoard?: boolean; prefill?: DesignSheetPrefill | null; onDetailClose?: () => void; onCreated?: (sheet: { id: string; code: string }) => void;
     /** เปิดแผง "📄 ใบนำเสนอ A4" ที่หน้าแม่ (เช่น Dashboard — แผงอยู่ต่อได้แม้ปิดป๊อปอัป) · ไม่ส่ง = ป๊อปอัปเปิดแผงเอง */
     onOpenPresentation?: (sheetId: string) => void } = {}) {
   const t = useT();
@@ -1299,6 +1305,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     createdRef.current = true;
     openCreate();
     if (defaultBrandId) patch({ brand_id: defaultBrandId });
+    if (prefill) {
+      patch({
+        ...(prefill.name ? { name: prefill.name } : {}),
+        ...(prefill.brand_id ? { brand_id: prefill.brand_id } : {}),
+        ...(prefill.deadline ? { deadline: prefill.deadline } : {}),
+        ...(prefill.detail ? { detail: prefill.detail } : {}),
+      });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailOnly, createMode]);
 
@@ -1316,6 +1330,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       status: form.status, order_date: form.order_date || null, deadline: form.deadline || null, appointment_date: form.appointment_date || null, drive_link: form.drive_link || null,
       parent_sku_codes: parentCodes,
       parent_sku_drafts: form.parent_sku_drafts,
+      ...(!form.id && prefill?.lineInboxId ? { line_inbox_id: prefill.lineInboxId } : {}),   // เปิดจากกล่องงานจากไลน์
     };
     try {
       const res = form.id
@@ -1345,7 +1360,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           if (fail > 0) toast.error(t(`อัปโหลดรูปไม่สำเร็จ ${fail} ไฟล์ (สำเร็จ ${ok})`, `${fail} image(s) failed to upload (${ok} done)`));
         }
         // สร้างเสร็จ → ค้างป๊อปอัพไว้ (กลายเป็นโหมดแก้) ให้แนบรูป/comment ต่อได้เลย
-        toast.success(t(`สร้างใบงานแล้ว: ${j.code}`, `Design sheet created: ${j.code}`));
+        toast.success(j.line_images
+          ? t(`สร้างใบงานแล้ว: ${j.code} · แนบรูปจากไลน์ ${j.line_images} รูป`, `Design sheet created: ${j.code} · ${j.line_images} LINE image(s) attached`)
+          : t(`สร้างใบงานแล้ว: ${j.code}`, `Design sheet created: ${j.code}`));
         if (form.brand_id) pushRecent(RECENT_KEYS.designBrands, { id: form.brand_id });   // ปุ่มแบรนด์ล่าสุดครั้งหน้า
         patch({ id: j.id, code: j.code });
         onCreated?.({ id: String(j.id), code: String(j.code ?? "") });   // เช่น กระดานแคมเปญ → วางการ์ดใบงานที่เพิ่งสร้าง
@@ -1582,6 +1599,20 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     <ImageManager entityType="design_sheet" entityId={form.id} actor={user?.name ?? user?.email ?? undefined} readonly={!canEdit} layout="gallery" />
   ) : (
     <div>
+      {(prefill?.images?.length ?? 0) > 0 && (
+        <div className="mb-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+          <p className="mb-1.5 text-xs text-emerald-800">
+            <Icon name="chat" /> {t(`รูปจากไลน์ ${prefill!.images!.length} รูป — แนบให้ตอนกดบันทึก`, `${prefill!.images!.length} LINE image(s) — attached when you save`)}
+            {prefill?.sourceLabel ? <span className="block text-[11px] text-emerald-700/80">{prefill.sourceLabel}</span> : null}
+          </p>
+          <div className="grid grid-cols-3 gap-1.5">
+            {prefill!.images!.map((u) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={u} src={u} alt="" className="aspect-square w-full rounded-lg border border-emerald-200 object-cover" />
+            ))}
+          </div>
+        </div>
+      )}
       <div
         onDragOver={(e) => { e.preventDefault(); setPendDragging(true); }}
         onDragLeave={(e) => { e.preventDefault(); setPendDragging(false); }}

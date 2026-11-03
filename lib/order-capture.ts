@@ -16,7 +16,6 @@
  *     หน้ารายการไม่มีเลขคำสั่งซื้อ → เตือนซ้ำด้วย ร้าน+วันที่+ยอดจ่าย แทน · ให้ AI รู้ "วันนี้" กันเดาปีผิด
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
-import { r2PutObject } from "@/lib/r2";
 import { chatJson, imagesToDataUrls, openAiKey } from "@/lib/ai-caption";
 import { appBaseUrl } from "@/lib/app-url";
 import { writeAudit } from "@/lib/audit";
@@ -24,13 +23,17 @@ import { shopNameSimilarity } from "@/lib/partner-match";
 import { nameSimilarity } from "@/lib/text-similarity";
 import { computePoTotals, sumActiveLines } from "@/lib/po-total";
 import { createManualPo } from "@/lib/po-manual";
-import { LINE_SLOTS } from "@/lib/line-registry";
+import {
+  fetchLineImage, isLineMessageId, lineMemberName, lineReply, loadLineGroupSetup as loadGroupSetupFor, putLineImage,
+  type KnownLineGroup, type LineEvent,
+} from "@/lib/line-intake";
 import {
   PLATFORM_LABEL, curSym, fieldLabel, isCNY,
   type CaptureItem, type CapturePlatform, type CaptureRow, type CaptureStatus, type PoLineLite, type PoSuggestion,
 } from "@/lib/order-capture-shared";
 
 export type { CaptureItem, CapturePlatform, CaptureRow, CaptureStatus, PoLineLite, PoSuggestion };
+export type { KnownLineGroup, LineEvent };
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Rec = Record<string, unknown>;
@@ -346,68 +349,21 @@ export async function processCapture(admin: Admin, id: string, actorName = "line
 
 // ---------------------------------------------------------------- LINE
 
+// ตัวรับไลน์ที่ใช้ร่วมกับงานอื่น (ดึงรูป/ตอบกลับ/ชื่อคนส่ง/ตั้งกลุ่ม) อยู่ที่ของกลาง lib/line-intake
+
 type LineCfg = { token?: string; groups?: Record<string, string> } & Rec;
-export type LineEvent = {
-  type?: string;
-  replyToken?: string;
-  timestamp?: number;
-  deliveryContext?: { isRedelivery?: boolean };
-  source?: { type?: string; groupId?: string; roomId?: string; userId?: string };
-  message?: { id?: string; type?: string; imageSet?: { id?: string; index?: number; total?: number } };
-};
 
 /** เหตุการณ์ "รูปในกลุ่มส่งรูปคำสั่งซื้อ" เท่านั้น — กลุ่มอื่น (บิลจีน/ขอซื้อ ฯลฯ) ไม่ยุ่ง */
 export function pickOrderImageEvents(cfg: LineCfg, events: LineEvent[]): LineEvent[] {
   const gid = str(cfg.groups?.[ORDER_CAPTURE_SLOT]);
   if (!gid || !str(cfg.token)) return [];
   return events.filter((e) =>
-    e.type === "message" && e.message?.type === "image" && e.source?.groupId === gid && /^\d{5,30}$/.test(str(e.message?.id)));
+    e.type === "message" && e.message?.type === "image" && e.source?.groupId === gid && isLineMessageId(e.message?.id));
 }
-
-async function lineReply(token: string, replyToken: string | undefined, text: string): Promise<void> {
-  if (!replyToken) return;
-  try {
-    await fetch("https://api.line.me/v2/bot/message/reply", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ replyToken, messages: [{ type: "text", text: text.slice(0, 4900) }] }),
-    });
-  } catch { /* ตอบไม่ได้ก็ไม่เป็นไร — ข้อมูลอยู่ใน ERP แล้ว */ }
-}
-
-async function lineMemberName(token: string, groupId: string, userId: string | undefined): Promise<string | null> {
-  if (!userId) return null;
-  try {
-    const r = await fetch(`https://api.line.me/v2/bot/group/${encodeURIComponent(groupId)}/member/${encodeURIComponent(userId)}`,
-      { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) return null;
-    const j = (await r.json()) as { displayName?: string };
-    return str(j.displayName) || null;
-  } catch { return null; }
-}
-
-/** ดึงไฟล์รูปจากไลน์ — ทำหน้าที่ยืนยันด้วยว่าข้อความมีอยู่จริง (id ปลอม = ไลน์ตอบ 404) */
-async function fetchLineImage(token: string, messageId: string): Promise<{ bytes: Uint8Array; type: string } | null> {
-  try {
-    const r = await fetch(`https://api-data.line.me/v2/bot/message/${encodeURIComponent(messageId)}/content`,
-      { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) return null;
-    const type = (r.headers.get("content-type") || "image/jpeg").split(";")[0].trim();
-    if (!type.startsWith("image/")) return null;
-    const buf = new Uint8Array(await r.arrayBuffer());
-    if (buf.byteLength === 0 || buf.byteLength > 15 * 1024 * 1024) return null;
-    return { bytes: buf, type };
-  } catch { return null; }
-}
-
-const EXT: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" };
 
 /** อัปรูปคำสั่งซื้อขึ้น R2 — ชื่อไฟล์สุ่ม เดาไม่ได้ */
 export async function putCaptureImage(bytes: Uint8Array, type: string): Promise<string> {
-  const ym = new Date().toISOString().slice(0, 7);
-  const key = `line-orders/${ym}/${crypto.randomUUID()}.${EXT[type] ?? "jpg"}`;
-  await r2PutObject(key, bytes, type);
-  return key;
+  return putLineImage("line-orders", bytes, type);
 }
 
 /** ข้อความตอบกลับในไลน์ (ข้อความเดียวเสมอ) — caps = ทุกใบที่ได้จากรูปนี้ (รูปหน้ารายการอาจมีหลายคำสั่งซื้อ) */
@@ -809,64 +765,9 @@ export async function confirmCapture(admin: Admin, cap: CaptureRow, input: Confi
 // ---------------------------------------------------------------- ตั้งกลุ่มไลน์ (หน้าแอดมิน)
 
 /** กลุ่มที่ปกติมีรูปอื่นเยอะ — ถ้าใช้รับรูปคำสั่งซื้อ AI จะอ่านทุกรูป (เตือนในหน้าตั้งค่า) */
-const IMAGE_HEAVY_SLOTS = ["bills", "transfers", "creative", "qc", "production"];
+const IMAGE_HEAVY_SLOTS = ["bills", "transfers", "creative", "qc", "production", "design_intake"];
 
-export type KnownLineGroup = {
-  id: string; name: string | null; members: number | null;
-  /** บอทยังอยู่ในกลุ่มไหม (ถามไลน์ไม่ได้ = ออกจากกลุ่มแล้ว/ไม่ใช่กลุ่ม) */
-  reachable: boolean;
-  /** ตอนนี้กลุ่มนี้ใช้กับระบบไหนอยู่ (ป้ายไทย) */
-  uses: string[];
-  /** กลุ่มที่มีรูปอื่นเยอะ (บิล/สลิป/งานออกแบบ/QC) */
-  busy_images: boolean;
-  is_current: boolean; is_captured: boolean;
-};
-
-/**
- * กลุ่มไลน์ที่ระบบรู้จัก = กลุ่มของทุกระบบใน line_config.groups + กลุ่มล่าสุดที่บอทเห็น
- * ถามชื่อ/จำนวนคนจากไลน์ (อ่านอย่างเดียว ไม่ส่งข้อความ) ให้แอดมินกด "ใช้กลุ่มนี้" ได้ทันที
- */
-export async function loadLineGroupSetup(admin: Admin) {
-  const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-  const cfg = ((row as Rec | null)?.sval ?? {}) as Rec;
-  const token = str(cfg.token);
-  const current = str((cfg.groups as Rec | undefined)?.[ORDER_CAPTURE_SLOT]);
-  const captured = str(cfg.group_id);
-
-  const slotsOf = new Map<string, string[]>();
-  for (const [slot, gid] of Object.entries((cfg.groups ?? {}) as Rec)) {
-    const g = str(gid); if (!g || slot === ORDER_CAPTURE_SLOT) continue;
-    slotsOf.set(g, [...(slotsOf.get(g) ?? []), slot]);
-  }
-  for (const g of [current, captured]) if (g && !slotsOf.has(g)) slotsOf.set(g, []);
-  const lineGet = async (path: string): Promise<Rec | null> => {
-    if (!token) return null;
-    try {
-      const res = await fetch(`https://api.line.me/v2/bot/${path}`, { headers: { Authorization: `Bearer ${token}` } });
-      return res.ok ? ((await res.json()) as Rec) : null;
-    } catch { return null; }
-  };
-  const groups: KnownLineGroup[] = await Promise.all([...slotsOf.entries()].map(async ([gid, slots]) => {
-    const [sum, cnt] = await Promise.all([lineGet(`group/${encodeURIComponent(gid)}/summary`), lineGet(`group/${encodeURIComponent(gid)}/members/count`)]);
-    return {
-      id: gid,
-      name: sum ? str(sum.groupName) || null : null,
-      members: cnt ? Number(cnt.count) || null : null,
-      reachable: !!sum,
-      uses: slots.map((s) => (LINE_SLOTS as Record<string, { label: string }>)[s]?.label ?? s),
-      busy_images: slots.some((s) => IMAGE_HEAVY_SLOTS.includes(s)),
-      is_current: gid === current,
-      is_captured: gid === captured,
-    };
-  }));
-  // กลุ่มที่ใช้อยู่ก่อน → กลุ่มที่ใช้กับระบบอื่น (ไม่ใช่กลุ่มรูปเยอะ) → กลุ่มอื่น → กลุ่มรูปเยอะไว้ท้าย
-  const rank = (g: KnownLineGroup) => (g.is_current ? 0 : g.busy_images ? 3 : g.uses.length ? 1 : 2);
-  groups.sort((x, y) => rank(x) - rank(y));
-  return {
-    has_token: !!token,
-    has_secret: !!(process.env.LINE_CHANNEL_SECRET || cfg.channel_secret),
-    current, current_name: groups.find((g) => g.is_current)?.name ?? null,
-    captured, captured_at: (cfg.group_captured_at as string | undefined) ?? null,
-    groups,
-  };
+/** กลุ่มไลน์ที่ระบบรู้จัก (ของกลาง lib/line-intake) — มุมของ slot ส่งรูปคำสั่งซื้อ */
+export function loadLineGroupSetup(admin: Admin) {
+  return loadGroupSetupFor(admin, ORDER_CAPTURE_SLOT, IMAGE_HEAVY_SLOTS);
 }

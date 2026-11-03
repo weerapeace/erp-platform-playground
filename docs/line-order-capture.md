@@ -11,7 +11,7 @@
 
 ## ตั้งค่า (ครั้งเดียว)
 1. หน้า `/purchasing/line-orders` (แอดมิน) แถบตั้งค่าโชว์ **กลุ่มที่บอทอยู่แล้วทั้งหมด** (ชื่อจริง · จำนวนคน · ตอนนี้ใช้ทำอะไร) → กด "ใช้กลุ่มนี้" ได้ทันที
-   (`loadLineGroupSetup` ใน lib/order-capture) · กลุ่มบิล/สลิป/ครีเอทีฟ/QC/ผลิต ติดป้ายเตือน "รูปอื่นเยอะ"
+   (`loadLineGroupSetup` ใน lib/order-capture → ของกลาง lib/line-intake · แถบตั้งค่า = ของกลาง components/line-group-setup) · กลุ่มบิล/สลิป/ครีเอทีฟ/QC/ผลิต/ส่งงานออกแบบ ติดป้ายเตือน "รูปอื่นเยอะ"
    กลุ่มใหม่ = เชิญบอทเข้ากลุ่ม → พิมพ์ในกลุ่ม 1 ครั้ง → 🔄 · หรือศูนย์จัดการ LINE ช่อง "กลุ่มส่งรูปคำสั่งซื้อ (AI อ่าน)" (slot `purchase_capture`)
 2. ใช้กลุ่มเดียวกับระบบอื่นได้ (เช่น "แผนกจัดซื้อ" ที่รับแจ้งเตือนใบขอซื้อ) — ข้อความที่บอทส่งเองไม่วนกลับเข้าตัวรับ
 3. LINE Official Account Manager → ปิดข้อความตอบกลับอัตโนมัติ
@@ -25,6 +25,7 @@
 | ตัวรับไลน์กลาง (งานเดิมจับกลุ่ม + งานใหม่รับรูป) | `app/api/china-pay/line-webhook/route.ts` |
 | ของกลางฝั่ง server (เก็บรูป R2 · AI อ่าน · รวมหลายรูป · เตือนซ้ำ · เสนอ PO · ยืนยัน) | `lib/order-capture.ts` |
 | ชนิดข้อมูล + ป้ายไทย (ใช้ได้ทั้งหน้าจอ/server) | `lib/order-capture-shared.ts` |
+| ตัวรับไลน์ที่ใช้ร่วมกับงานออกแบบจากไลน์ (ดึงรูป · ตอบกลับ · ชื่อคนส่ง · รายการกลุ่ม) | `lib/line-intake.ts` (ดู docs/design-line-inbox.md) |
 | เปิด PO เอง (ใช้ร่วมกับป๊อปเปิด PO ใหม่) | `lib/po-manual.ts` |
 | API กล่องพัก | `app/api/purchasing/line-orders/route.ts` |
 | หน้าจอ | `app/purchasing/line-orders/` (inbox + capture-modal) |
