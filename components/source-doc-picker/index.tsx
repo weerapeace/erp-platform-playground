@@ -101,12 +101,20 @@ const CONFIGS: Record<SourceDocMode, ModeConfig> = {
 };
 
 export function SourceDocPickerModal({
-  open, onClose, mode, onConfirm,
+  open, onClose, mode, onConfirm, rowTag, rowRank, onRowsLoaded, hint,
 }: {
   open: boolean;
   onClose: () => void;
   mode: SourceDocMode;
   onConfirm: (rows: SourceDocRow[]) => void;
+  /** (ไม่บังคับ) ป้ายท้ายแถว — เช่น ใบวางบิลบอกว่าแถวนี้ "คนละสาขา" / "คนละบริษัท" */
+  rowTag?: (row: SourceDocRow) => React.ReactNode;
+  /** (ไม่บังคับ) ลำดับกลุ่ม เลขน้อยขึ้นก่อน — เช่น ลูกค้าเดียวกัน → สาขาอื่น → ลูกค้าอื่น */
+  rowRank?: (row: SourceDocRow) => number;
+  /** (ไม่บังคับ) แจ้งแถวที่โหลดมา ให้ผู้เรียกเตรียมข้อมูลประกอบ (เช่น เลขผู้เสียภาษีของลูกค้า) */
+  onRowsLoaded?: (rows: SourceDocRow[]) => void;
+  /** (ไม่บังคับ) ข้อความใต้หัวป๊อป แทนคำอธิบายมาตรฐาน */
+  hint?: string;
 }) {
   const cfg = CONFIGS[mode];
   const [rows, setRows] = useState<SourceDocRow[]>([]);
@@ -122,10 +130,13 @@ export function SourceDocPickerModal({
       const json = await res.json();
       if (json.error) throw new Error(json.error);
       const all = (json.data ?? []) as SourceDocRow[];
-      setRows(all.filter(cfg.eligible));
+      const eligible = all.filter(cfg.eligible);
+      setRows(eligible);
+      onRowsLoaded?.(eligible);
     } catch (err) {
       setError(err instanceof Error ? err.message : "โหลดข้อมูลไม่สำเร็จ");
     } finally { setLoading(false); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onRowsLoaded = callback แจ้งผล ไม่ต้องโหลดใหม่เมื่อมันเปลี่ยน
   }, [cfg]);
 
   useEffect(() => {
@@ -134,9 +145,9 @@ export function SourceDocPickerModal({
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) => cfg.searchText(r).toLowerCase().includes(q));
-  }, [rows, search, cfg]);
+    const hit = q ? rows.filter((r) => cfg.searchText(r).toLowerCase().includes(q)) : rows;
+    return rowRank ? [...hit].sort((a, b) => rowRank(a) - rowRank(b)) : hit;
+  }, [rows, search, cfg, rowRank]);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -155,7 +166,7 @@ export function SourceDocPickerModal({
 
   return (
     <ERPModal open={open} onClose={onClose} size="lg" title={cfg.title}
-      description="ติ๊กเลือกได้หลายใบ แล้วกดยืนยัน"
+      description={hint ?? "ติ๊กเลือกได้หลายใบ แล้วกดยืนยัน"}
       footer={
         <>
           <span className="mr-auto text-xs text-slate-500">เลือกแล้ว {selected.size} รายการ</span>
@@ -189,6 +200,7 @@ export function SourceDocPickerModal({
                   {cfg.columns.map((c) => (
                     <th key={c.key} className={`px-3 py-2 font-semibold ${c.align === "right" ? "text-right" : "text-left"}`}>{c.label}</th>
                   ))}
+                  {rowTag && <th className="px-3 py-2"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -203,6 +215,7 @@ export function SourceDocPickerModal({
                       {cfg.columns.map((c) => (
                         <td key={c.key} className={`px-3 py-2 ${c.align === "right" ? "text-right" : "text-left"}`}>{c.render(r)}</td>
                       ))}
+                      {rowTag && <td className="px-3 py-2 text-right">{rowTag(r)}</td>}
                     </tr>
                   );
                 })}

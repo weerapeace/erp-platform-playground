@@ -54,6 +54,18 @@ export async function GET(
     enriched.credit_notes = credit;
     enriched.credit_total = total;
     enriched.net_amount_due = Math.round((Number(enriched.amount_due ?? 0) - total) * 100) / 100;
+
+    // ลูกค้าของแต่ละบรรทัด (จาก SO) — ใช้ตอนแก้ใบรวมหลายสาขา/หลายลูกค้า ให้หน้าจอเตือนได้ถูกบรรทัด
+    const soIds = lines.map(l => String(l.so_id ?? "")).filter(Boolean);
+    if (soIds.length) {
+      const { data: sos } = await client.from("erp_playground_sales_orders")
+        .select("id, customer_id, customer_name").in("id", soIds);
+      const bySo = new Map((sos ?? []).map((s: Record<string, unknown>) => [String(s.id), s]));
+      enriched.lines = (enriched.lines as Record<string, unknown>[]).map(l => {
+        const so = bySo.get(String(l.so_id ?? ""));
+        return { ...l, customer_id: so?.customer_id ?? null, customer_name: so?.customer_name ?? null };
+      });
+    }
   }
   return NextResponse.json({ data: enriched, error: null });
 }
