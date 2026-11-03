@@ -13,6 +13,7 @@
  *   - [เฟส 2] ปรับขนาดคอลัมน์ (ลากขอบหัวคอลัมน์) + จำค่าไว้ (localStorage ถ้ามี storageKey)
  *   - ลากเรียงลำดับ (dnd-kit) เมื่อไม่ sort/group · เพิ่ม/ลบบรรทัด · readonly
  *   - readonly + onRequestEdit: ดับเบิลคลิกแถว → ขอเข้าโหมดแก้ แล้ววางเคอร์เซอร์ที่ช่องที่คลิก
+ *     + ปุ่ม "เพิ่มบรรทัด" โผล่ตอน readonly ด้วย (กด = ขอเข้าโหมดแก้ + เพิ่มบรรทัด + โฟกัสบรรทัดใหม่)
  */
 import React, { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import {
@@ -81,9 +82,10 @@ export type LineItemsGridProps<T> = {
    *  "lines" = เหลือแค่เส้นคั่นบรรทัด ช่องกรอกไม่มีกรอบ (มีเส้นใต้ตอนชี้/พิมพ์) ปุ่มลบ/ทำซ้ำ/ลาก โผล่ตอนชี้แถว
    *  (สไตล์ช่องกรอกอยู่ที่ .lig-lines ใน app/globals.css — ปุ่มเปิด dropdown ใส่ data-field-trigger ก็แบนตาม) */
   variant?:      "boxed" | "lines";
-  /** ตอน readonly: ดับเบิลคลิกแถว → เรียกฟังก์ชันนี้ (หน้าเจ้าของตารางสลับเข้าโหมดแก้) ·
-   *  พอ readonly กลายเป็น false ตารางจะโฟกัสช่องที่ดับเบิลคลิกให้เอง (ช่องนั้นไม่มีที่กรอก → ช่องแรกของแถว) */
-  onRequestEdit?: (row: T) => void;
+  /** ตอน readonly: ดับเบิลคลิกแถว (row) หรือกดปุ่มเพิ่มบรรทัด (null) → เรียกฟังก์ชันนี้ (หน้าเจ้าของตารางสลับเข้าโหมดแก้) ·
+   *  พอ readonly กลายเป็น false ตารางโฟกัสช่องที่ดับเบิลคลิกให้เอง (ช่องนั้นไม่มีที่กรอก → ช่องแรกของแถว)
+   *  หรือเพิ่มบรรทัดใหม่ (onAdd) แล้วโฟกัสบรรทัดนั้น */
+  onRequestEdit?: (row: T | null) => void;
 };
 
 // ช่องที่โฟกัสได้หลังเข้าโหมดแก้ (ปุ่มเปิด dropdown ต้องมี data-field-trigger)
@@ -109,18 +111,28 @@ export function LineItemsGrid<T>({
   const [selected, setSelected] = useState<Set<string>>(new Set());   // แถวที่ติ๊กเลือก (rowId)
   const gridRef = useRef<HTMLDivElement>(null);
   const pendingFocus = useRef<{ id: string; col: string | null } | null>(null);   // ดับเบิลคลิกแถวตอน readonly
+  const pendingAdd = useRef(false);   // กด "เพิ่มบรรทัด" ตอน readonly → เพิ่มให้หลังเข้าโหมดแก้
 
-  // เพิ่งออกจาก readonly เพราะดับเบิลคลิก → โฟกัสช่องที่คลิกไว้
+  // เพิ่งออกจาก readonly: กดเพิ่มบรรทัด → เพิ่มแล้วโฟกัสบรรทัดใหม่ · ดับเบิลคลิก → โฟกัสช่องที่คลิกไว้
+  // (ฟังตาม rows.length ด้วย — บรรทัดใหม่วาดเสร็จรอบถัดไปค่อยโฟกัส)
   useEffect(() => {
+    if (readonly) return;
+    if (pendingAdd.current && onAdd) {
+      pendingAdd.current = false;
+      const r = onAdd();
+      pendingFocus.current = { id: rowId(r), col: null };
+      onChange([...rows, r]);
+      return;
+    }
     const pf = pendingFocus.current;
-    if (readonly || !pf) return;
+    if (!pf) return;
     pendingFocus.current = null;
     // โฟกัสตรงนี้เลย (DOM อัปเดตแล้ว) — ไม่รอ requestAnimationFrame เพราะแท็บที่ยังไม่วาดจอจะไม่เรียก
     const rowEl = gridRef.current?.querySelector<HTMLElement>(`[data-lig-row="${window.CSS.escape(pf.id)}"]`);
     if (!rowEl) return;
     const cell = pf.col ? rowEl.querySelector<HTMLElement>(`[data-col="${window.CSS.escape(pf.col)}"]`) : null;
     (cell?.querySelector<HTMLElement>(FOCUSABLE) ?? rowEl.querySelector<HTMLElement>(FOCUSABLE))?.focus();
-  }, [readonly]);
+  }, [readonly, rows.length]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // ตัด id ที่หายไปออกจาก selection เมื่อ rows เปลี่ยน (สลับแท็บ/ลบแถว) → กันเลือกค้าง
   useEffect(() => {
@@ -402,7 +414,13 @@ export function LineItemsGrid<T>({
           {footer}
         </div>
       )}
-      {footer && (rows.length === 0 || readonly) && <div className="flex justify-end pt-1">{footer}</div>}
+      {/* ดูอย่างเดียว + onRequestEdit: ปุ่มเพิ่มบรรทัดยังอยู่ (กด = เข้าโหมดแก้ + เพิ่มบรรทัดในคลิกเดียว) */}
+      {readonly && rows.length > 0 && onAdd && onRequestEdit ? (
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <button type="button" onClick={() => { pendingAdd.current = true; onRequestEdit(null); }} className="text-sm text-blue-600 hover:text-blue-800 font-medium">{addLabel}</button>
+          {footer}
+        </div>
+      ) : footer && (rows.length === 0 || readonly) && <div className="flex justify-end pt-1">{footer}</div>}
     </div>
   );
 }
