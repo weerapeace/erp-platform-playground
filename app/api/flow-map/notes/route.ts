@@ -1,6 +1,6 @@
 /**
  * โน้ตแปะ "ทั้งทีม" บนแผนผังการทำงาน (/master/flow-map) — ตารางความคิดเห็นกลาง erp_record_comments
- *   module_key "flow_map" · comment_type "sticky" · record_type/record_id = กล่องหรือเส้นที่แปะ (ไม่แปะ = "view"/ชื่อผัง)
+ *   module_key "flow_map" · comment_type "note" · record_type/record_id = กล่องหรือเส้นที่แปะ (ไม่แปะ = "view"/ชื่อผัง)
  *   metadata = { color, view, x, y, attach, author }
  * GET ทุกโน้ต · POST สร้าง · PATCH แก้ (เจ้าของ/แอดมิน) · DELETE ?id= ลบ (เจ้าของ/แอดมิน) — สร้าง/ลบ ลง audit log
  * โน้ตส่วนตัวไม่ผ่านที่นี่ (เก็บ user_ui_prefs ต่อคน)
@@ -16,7 +16,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const MODULE = "flow_map";
-const TYPE = "sticky";
+const TYPE = "note";   // ตาราง CHECK รับแค่ comment/note/system — แยกโน้ตแผนผังด้วย module_key "flow_map"
 type Row = { id: string; body: string | null; created_by: string | null; metadata: Record<string, unknown> | null; created_at: string; updated_at: string | null };
 
 function toNote(r: Row, uid: string | null): FlowNote | null {

@@ -1,7 +1,7 @@
 /**
  * โน้ตแปะ (post-it) บนแผนผังการทำงาน — ชนิด + สี + ตัวตรวจข้อมูล (ไม่มี React · ใช้ทั้งหน้าจอและ API)
  *   ส่วนตัว = เก็บใน user_ui_prefs key "flow_map_notes" (useUserPref · ต่อคน · ไม่ต้องมีตารางใหม่)
- *   ทั้งทีม = ตารางความคิดเห็นกลาง erp_record_comments (module_key "flow_map" · comment_type "sticky") ผ่าน /api/flow-map/notes
+ *   ทั้งทีม = ตารางความคิดเห็นกลาง erp_record_comments (module_key "flow_map" · comment_type "note") ผ่าน /api/flow-map/notes
  */
 
 export type FlowNoteColor = "yellow" | "pink" | "green" | "blue";

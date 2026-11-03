@@ -38,7 +38,7 @@
 - **โน้ตแปะ (post-it)** (`lib/flow-map-notes.ts` + `components/flow-map/notes.tsx`): ปุ่ม "แปะโน้ต" → แตะบนผัง (แตะกล่อง/เส้น = ติดส่วนนั้น) หรือ "＋ แปะโน้ต" ในแผงรายละเอียด
   - 4 สี · ลากแถบบนเพื่อย้าย · Enter บันทึก · ลบข้อความหมด = ลบโน้ต · ซ่อน/แสดงโน้ตได้ · โน้ตที่ติดส่วนนั้นขึ้นในแผงรายละเอียด + แนบไปกับ prompt
   - **ส่วนตัว** = `user_ui_prefs` key `flow_map_notes` (useUserPref · ต่อคน ไม่ต้องมีตารางใหม่ · สูงสุด 300 โน้ต) — แก้สองเครื่องพร้อมกันเครื่องหลังทับ
-  - **ทั้งทีม** = ตารางความคิดเห็นกลาง `erp_record_comments` (`module_key` flow_map · `comment_type` sticky) ผ่าน `/api/flow-map/notes` — ทุกคนเห็น แก้/ลบได้เฉพาะเจ้าของ (แอดมินลบได้) · สร้าง/ลบลง audit log
+  - **ทั้งทีม** = ตารางความคิดเห็นกลาง `erp_record_comments` (`module_key` flow_map · `comment_type` note — ตารางรับแค่ comment/note/system) ผ่าน `/api/flow-map/notes` — ทุกคนเห็น แก้/ลบได้เฉพาะเจ้าของ (แอดมินลบได้) · สร้าง/ลบลง audit log
 
 ## ทำให้ไม่ตกยุค (สำคัญ)
 
