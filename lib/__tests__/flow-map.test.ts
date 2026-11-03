@@ -7,6 +7,68 @@ import { buildFlowPrompt } from "@/lib/flow-map-prompt";
 import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
 import { cleanFlowNote, FLOW_NOTE_MAX } from "@/lib/flow-map-notes";
 import { WORKFLOWS } from "@/lib/workflow-registry";
+import { LINE_SLOTS, LINE_ALL_EVENTS } from "@/lib/line-registry";
+import {
+  NOTIFY_TOPICS, NOTIFY_AREAS, NOTIFY_REPORT_FILES, notifyTargetCell, notifyTopicState, notifyGhostRules, notifyReportTopics, notifyDaysText, notifyGapNodes,
+  type NotifyLive,
+} from "@/lib/flow-map-notify";
+
+const NOTIFY_LIVE: NotifyLive = {
+  line: { token: true, main: true, groups: { purchase_request: true, creative: true }, off: { qc_defect: true } },
+  rules: [{ event: "pr.submitted", name: "เก่า", active: true }, { event: "qc.pending", name: "รอ QC", active: true }, { event: "wo.due_soon", name: "ใกล้กำหนด", active: false }],
+  staff: { active: 60, linked: 0 }, push: 0, email: true,
+  shops: { total: 3, line: 0, email: 0, oa: 0 }, stats: {}, channels: { email: true, popup: true, discord: true },
+  reports: [{ id: "r1", name: "งานค้าง", time: "08:00:00", days: [1, 2, 3, 4, 5, 6], on: true, email: false, popup: true, discord: true }],
+};
+
+describe("แผนผังการทำงาน — แท็บแจ้งเตือน", () => {
+  it("ทะเบียนอ้างของจริง: ไฟล์มีอยู่ · กล่อง/กลุ่ม LINE/สวิตช์ LINE มีจริง · id ไม่ซ้ำ", () => {
+    const ids = NOTIFY_TOPICS.map((x) => x.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const x of NOTIFY_TOPICS) {
+      expect(NOTIFY_AREAS[x.area], x.id).toBeTruthy();
+      if (x.node) expect(FLOW_NODES[x.node], `${x.id}: กล่อง ${x.node}`).toBeTruthy();
+      expect(x.send.length, x.id).toBeGreaterThan(0);
+      for (const f of x.files) expect(existsSync(resolve(process.cwd(), f)), `${x.id}: ${f}`).toBe(true);
+      for (const t of x.send) if (t.kind === "group") {
+        for (const g of t.groups) if (g !== "main") expect(LINE_SLOTS[g], `${x.id}: กลุ่ม ${g}`).toBeTruthy();
+        if (t.event) expect(LINE_ALL_EVENTS, `${x.id}: สวิตช์ ${t.event}`).toContain(t.event);
+      }
+    }
+    for (const f of NOTIFY_REPORT_FILES) expect(existsSync(resolve(process.cwd(), f)), f).toBe(true);
+    for (const a of Object.values(NOTIFY_AREAS)) for (const n of a.nodes) expect(FLOW_NODES[n], n).toBeTruthy();
+  });
+  it("สวิตช์เหตุการณ์ในศูนย์ LINE ทุกตัวมีเรื่องในทะเบียน", () => {
+    const used = new Set(NOTIFY_TOPICS.flatMap((x) => x.send.flatMap((t) => (t.kind === "group" && t.event ? [t.event] : []))));
+    expect(LINE_ALL_EVENTS.filter((e) => !used.has(e))).toEqual([]);
+  });
+  it("สถานะ: กลุ่มไม่ตั้ง = เงียบ · fallback ใช้กลุ่มถัดไป · ปิดสวิตช์ = ปิด · กฎปิด = ปิด · ช่างไม่ผูก = เงียบ", () => {
+    expect(notifyTargetCell({ kind: "group", to: "กลุ่มผลิต", groups: ["production"], event: "wo_dispatched" }, NOTIFY_LIVE).state).toBe("warn");
+    const fb = notifyTargetCell({ kind: "group", to: "กลุ่มใบสั่งซื้อ", groups: ["purchase_order", "purchase_request"] }, NOTIFY_LIVE);
+    expect(fb.state).toBe("ok");
+    expect(fb.text).toContain(LINE_SLOTS.purchase_request.label);
+    expect(notifyTargetCell({ kind: "group", to: "กลุ่ม QC", groups: ["qc"], event: "qc_defect" }, NOTIFY_LIVE).state).toBe("off");
+    expect(notifyTargetCell({ kind: "bell", to: "ผู้จัดการ", rule: "wo.due_soon" }, NOTIFY_LIVE).state).toBe("off");
+    expect(notifyTargetCell({ kind: "bell", to: "ผู้จัดการ", rule: "ไม่มีกฎ" }, NOTIFY_LIVE).state).toBe("warn");
+    expect(notifyTargetCell({ kind: "dm", to: "ช่าง" }, NOTIFY_LIVE).state).toBe("warn");
+    expect(notifyTargetCell({ kind: "email", to: "ลูกค้า", shop: true }, NOTIFY_LIVE).state).toBe("warn");
+    expect(notifyTargetCell({ kind: "group", to: "ครีเอทีฟ", groups: ["creative", "main"] }, { ...NOTIFY_LIVE, line: { ...NOTIFY_LIVE.line, token: false } }).state).toBe("warn");
+    const pr = NOTIFY_TOPICS.find((x) => x.id === "pr_created")!;
+    expect(notifyTopicState(pr, NOTIFY_LIVE)).toEqual({ state: "ok", silent: 0 });
+    const wo = NOTIFY_TOPICS.find((x) => x.id === "wo_dispatched")!;
+    expect(notifyTopicState(wo, NOTIFY_LIVE)).toEqual({ state: "warn", silent: 2 });
+  });
+  it("กฎกระดิ่งที่ไม่มีโค้ดยิง · รายงานตามเวลา · ขั้นที่ยังไม่มีแจ้งเตือน", () => {
+    expect(notifyGhostRules(NOTIFY_LIVE).map((r) => r.event)).toEqual(["pr.submitted"]);
+    const [r] = notifyReportTopics(NOTIFY_LIVE);
+    expect(r.when).toBe("08:00 น. จ–ส");
+    expect(r.send.map((x) => x.kind)).toEqual(["popup", "discord"]);
+    expect(notifyTopicState({ ...r, paused: true }, NOTIFY_LIVE).state).toBe("off");
+    expect(notifyDaysText([0, 1, 2, 3, 4, 5, 6])).toBe("ทุกวัน");
+    expect(notifyGapNodes("sell")).toContain("qt");
+    expect(notifyGapNodes("sell")).not.toContain("bill");
+  });
+});
 
 describe("แผนผังการทำงาน — คำแนะนำ + โน้ต", () => {
   it("คำแนะนำชี้เส้นที่มีอยู่จริง · คำตัดสินมีป้าย · มีเหตุผล", () => {

@@ -6,6 +6,7 @@
  * ของเสริม: ช่องอยากแก้ + สร้าง prompt + ตะกร้า + ส่งรายงานปัญหา (./request) · กดตัวเลขดูรายการ (./metric-list)
  *          แท็บออเดอร์ 1 ใบ (./journey) · ป้ายเพิ่งแก้ (FlowEdge.changed) · พิมพ์ /print/flow-map
  *          ผังการเงิน 5 แท็บ เฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM (flowViewsFor) · กล่องสูงหลายแถว · เส้นรวมสาย (feeds)
+ *          แท็บแจ้งเตือน (./notify · ทะเบียน lib/flow-map-notify.ts) + กระดิ่งบนกล่อง + หัวข้อแจ้งเตือนในแผงกล่อง
  * ใช้ที่ /master/flow-map · แก้เนื้อหาแผนผังที่ lib/flow-map.ts ที่เดียว (ดู docs/flow-map.md)
  */
 import { useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent, type ReactNode } from "react";
@@ -23,6 +24,9 @@ import { FlowRequestBox, FlowBasketPanel, useFlowBasket } from "./request";
 import { FlowMetricListModal } from "./metric-list";
 import { FlowJourney } from "./journey";
 import { useFlowNotes, FlowSticky, FlowNoteList, FLOW_NOTE_W } from "./notes";
+import { useFlowNotify, FlowNotifyBoard, FlowNotifyPanel, NodeNotifyList, notifyNodeColor } from "./notify";
+import { LineConsole } from "@/components/line-console";
+import { notifyTopicsOfNode } from "@/lib/flow-map-notify";
 import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
 import type { FlowNote, FlowNoteAttach } from "@/lib/flow-map-notes";
 
@@ -56,6 +60,9 @@ function AdviceBox({ id }: { id: string }) {
 }
 type Health = Partial<Record<FlowMetricKey, number | null>>;
 const JOURNEY = "journey";
+const NOTIFY = "notify";
+/** รูปกระดิ่งเล็กบนกล่อง (ราว 8×8 รอบจุด 0,0) */
+const BELL_D = "M0 -4.2c-1.7 0 -3 1.3 -3 3v2.2l-1 1.3h8l-1 -1.3v-2.2c0 -1.7 -1.3 -3 -3 -3zM-1 3.2a1 1 0 0 0 2 0";
 
 const TYPE_CHIP: Record<FlowEdgeType, string> = {
   auto: "bg-green-50 text-green-700 border-green-200",
@@ -108,6 +115,10 @@ export function FlowMap() {
   const t = useT();
   const { can } = useAuth();
   const canFinance = can(FLOW_FINANCE_PERM);
+  const canAdmin = can("admin.users");   // ศูนย์ LINE + หน้าตั้งกฎแจ้งเตือน ใช้สิทธิ์นี้
+  const notify = useFlowNotify();
+  const [notifySel, setNotifySel] = useState<string | null>(null);
+  const [lineOpen, setLineOpen] = useState(false);
   const views = useMemo(() => flowViewsFor(canFinance), [canFinance]);   // ผังการเงินเฉพาะผู้มีสิทธิ์ (แอดมินมีเสมอ)
   const basket = useFlowBasket();
   const notesApi = useFlowNotes();
@@ -135,6 +146,7 @@ export function FlowMap() {
   }, []);
 
   const isJourney = viewKey === JOURNEY;
+  const isNotify = viewKey === NOTIFY;
   const view = views.find((v) => v.key === viewKey) ?? views[0];
   const drawn = useMemo(() => layoutFlowView(view), [view]);
   const shown = drawn.filter((e) => !hide[e.type]);
@@ -194,6 +206,10 @@ export function FlowMap() {
     pick(toggle && sel?.k === "e" && sel.id === id ? null : { k: "e", id });
   };
   const pickView = (k: string) => { setViewKey(k); setSel(null); };
+  /** แท็บแจ้งเตือน → กล่องในผังแรกที่มีกล่องนั้น */
+  const openNodeOnMap = (id: string) => { const v = views.find((x) => x.pos[id]); setViewKey(v?.key ?? views[0].key); setSel({ k: "n", id }); setBasketOpen(false); };
+  const openNotify = (id: string | null) => { setViewKey(NOTIFY); setSel(null); setBasketOpen(false); setNotifySel(id); };
+  const closeLine = () => { setLineOpen(false); void notify.reload(); };
 
   const rowFor = (id: string, a: string, b: string, type: FlowEdgeType) => (
     <button key={id} type="button" onClick={() => pick({ k: "e", id })}
@@ -211,7 +227,9 @@ export function FlowMap() {
   const closeBtn = <button type="button" onClick={() => setSel(null)} className="mt-3 h-8 px-3 text-[12px] rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50">{t("ดูทุกเส้น", "Show all")}</button>;
 
   let panel: ReactNode;
-  if (basketOpen) {
+  if (isNotify && !basketOpen) {
+    panel = <FlowNotifyPanel api={notify} selected={notifySel} onSelect={setNotifySel} onOpenNode={openNodeOnMap} canAdmin={canAdmin} onOpenLine={() => setLineOpen(true)} />;
+  } else if (basketOpen) {
     panel = <FlowBasketPanel basket={basket} health={health} notes={promptNotes} onClose={() => setBasketOpen(false)} onPick={(kind, ref) => pick(kind === "n" ? { k: "n", id: ref } : { k: "e", id: ref })} />;
   } else if (sel?.k === "e") {
     const x = FLOW_EDGES[sel.id];
@@ -274,6 +292,7 @@ export function FlowMap() {
               {n.gaps.map((g) => <div key={g} className="flex gap-1.5 text-red-700 mt-0.5"><span aria-hidden="true">•</span>{g}</div>)}
             </div>
           ) : null}
+          <NodeNotifyList topics={notifyTopicsOfNode(sel.id)} live={notify.live} onPick={(id) => openNotify(id)} />
           <FlowNoteList notes={notesOf("n", sel.id)} onAdd={() => addNoteFor("n", sel.id)} onEdit={openNote} />
           <FlowRequestBox kind="n" target={sel.id} gaps={n.gaps ?? []} health={health} basket={basket} notes={promptNotes} />
           {closeBtn}
@@ -320,7 +339,7 @@ export function FlowMap() {
           className={`h-9 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg border ${basketOpen ? "bg-indigo-600 text-white border-indigo-600" : "border-slate-200 text-slate-600 bg-white hover:bg-slate-50"}`}>
           <Icon value="🧺" />{t("ตะกร้า", "Basket")}{basket.items.length > 0 && <span className={`ml-0.5 text-[11px] px-1.5 rounded-full ${basketOpen ? "bg-white/20" : "bg-indigo-100 text-indigo-700"}`}>{basket.items.length}</span>}
         </button>
-        <Link href={`/print/flow-map${isJourney ? "" : `?view=${view.key}`}`} target="_blank" className="h-9 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50">
+        <Link href={`/print/flow-map${isJourney || isNotify ? "" : `?view=${view.key}`}`} target="_blank" className="h-9 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50">
           <Icon value="🖨️" />{t("พิมพ์ / PDF", "Print / PDF")}
         </Link>
         <Link href="/master/work-flows" className="h-9 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg border border-slate-200 text-slate-600 bg-white hover:bg-slate-50">
@@ -335,6 +354,8 @@ export function FlowMap() {
         ))}
         <button type="button" onClick={() => pickView(JOURNEY)}
           className={`h-8 px-3 text-[13px] rounded-lg border ${isJourney ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{t("ออเดอร์ 1 ใบ เดินทางยังไง", "One order's journey")}</button>
+        <button type="button" onClick={() => openNotify(null)}
+          className={`h-8 px-3 inline-flex items-center gap-1.5 text-[13px] rounded-lg border ${isNotify ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}><Icon value="🔔" />{t("แจ้งเตือน", "Notifications")}</button>
         {canFinance && <>
           <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden="true" />
           <span className="h-8 px-2 inline-flex items-center gap-1 text-[12px] rounded-lg bg-amber-50 text-amber-800 border border-amber-200" title={t("เห็นเฉพาะผู้มีสิทธิ์ดูผังการเงิน (แอดมินมีเสมอ)", "Only people allowed to see finance maps")}>
@@ -345,7 +366,7 @@ export function FlowMap() {
               className={`h-8 px-3 text-[13px] rounded-lg border ${v.key === viewKey ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{v.label}</button>
           ))}
         </>}
-        {!isJourney && <>
+        {!isJourney && !isNotify && <>
           <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden="true" />
           {(Object.keys(FLOW_EDGE_TYPES) as FlowEdgeType[]).map((k) => (
             <button key={k} type="button" aria-pressed={!hide[k]} onClick={() => { setHide((h) => ({ ...h, [k]: !h[k] })); setSel(null); }}
@@ -369,7 +390,9 @@ export function FlowMap() {
       </div>
 
       <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
-        {isJourney ? (
+        {isNotify ? (
+          <FlowNotifyBoard api={notify} selected={notifySel} onSelect={setNotifySel} canAdmin={canAdmin} onOpenLine={() => setLineOpen(true)} />
+        ) : isJourney ? (
           <FlowJourney onPickNode={(id) => pick({ k: "n", id })} onPickEdge={(id) => pick({ k: "e", id })} />
         ) : (
           <div className="rounded-xl border border-slate-200 bg-white p-2 overflow-x-auto">
@@ -418,6 +441,18 @@ export function FlowMap() {
                     <text x={x + FM_W / 2} y={y + h / 2 + 10} textAnchor="middle" dominantBaseline="central" fontSize={11} fill={g ? "#64748b" : "#6366f1"}>{n.sub}</text>
                     {nodeAlert(id) && <circle cx={x + FM_W - 9} cy={y + 9} r={3.5} fill="#dc2626" />}
                     {view.finance && n.cashflow && <circle cx={x + 9} cy={y + 9} r={3.5} fill={FM_CASHFLOW_DOT}><title>{t("นับในกระแสเงินสด", "Counted in cash flow")}</title></circle>}
+                    {(() => {
+                      const nt = notifyTopicsOfNode(id);
+                      if (!nt.length) return null;
+                      const bx = x + (view.finance && n.cashflow ? 21 : 10), by = y + 10;
+                      return (
+                        <g transform={`translate(${bx} ${by})`} onClick={(ev) => { if (placeMode) return; ev.stopPropagation(); openNotify(nt[0].id); }}>
+                          <title>{t(`แจ้งเตือน ${nt.length} เรื่อง: ${nt.map((tp) => tp.label).join(" · ")} — กดดู`, `${nt.length} notifications — click`)}</title>
+                          <circle r={7} fill="#fff" stroke={notifyNodeColor(nt, notify.live)} strokeWidth={1.25} />
+                          <path d={BELL_D} fill={notifyNodeColor(nt, notify.live)} stroke={notifyNodeColor(nt, notify.live)} strokeWidth={0.6} strokeLinecap="round" strokeLinejoin="round" />
+                        </g>
+                      );
+                    })()}
                   </g>
                 );
               })}
@@ -440,6 +475,7 @@ export function FlowMap() {
             <div className="px-2 pt-1 text-[11px] text-slate-400 flex flex-wrap gap-x-3">
               <span><span className="inline-block w-2 h-2 rounded-full bg-red-600 mr-1 align-middle" />{t("มีช่องโหว่ / ตัวเลขที่ต้องตาม", "Gap or number to follow")}</span>
               <span><span className="inline-block w-2 h-2 rounded-full bg-violet-600 mr-1 align-middle" />{t(`เพิ่งแก้ (${FLOW_RECENT_DAYS} วัน)`, `Updated (${FLOW_RECENT_DAYS} days)`)}</span>
+              <span className="inline-flex items-center gap-1"><Icon value="🔔" />{t("มีแจ้งเตือน (เขียว = ถึงคนครบ · เหลือง = บางทางยังเงียบ) กดดู", "Has notifications (green = reaches · amber = partly silent)")}</span>
               {view.finance && <span><span className="inline-block w-2 h-2 rounded-full mr-1 align-middle" style={{ background: FM_CASHFLOW_DOT }} />{t("นับในกระแสเงินสด /cashflow", "Counted in /cashflow")}</span>}
               <span>{t("กล่องสีเทา = อยู่ส่วนอื่น", "Grey box = other area")}</span>
               <span>{t("โน้ต: ลากแถบบนเพื่อย้าย · กดรูปกุญแจ/คน สลับส่วนตัว ↔ ทั้งทีม", "Notes: drag the top strip · toggle private / team")}</span>
@@ -454,6 +490,7 @@ export function FlowMap() {
         {healthErr ? t(" · โหลดตัวเลขสดไม่สำเร็จ", " · live numbers failed to load") : healthAt ? t(` · ตัวเลขสด ณ ${new Date(healthAt).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.`, ` · numbers as of ${new Date(healthAt).toLocaleTimeString()}`) : ""}
       </p>
       <FlowMetricListModal metric={metric} onClose={() => setMetric(null)} />
+      {canAdmin && <LineConsole open={lineOpen} onClose={closeLine} />}
     </div>
   );
 }

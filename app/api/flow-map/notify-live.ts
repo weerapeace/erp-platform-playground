@@ -1,0 +1,122 @@
+/**
+ * สถานะสดของแท็บ "แจ้งเตือน" (ฝั่ง server) — ที่เดียวที่อ่านกลุ่ม LINE · กฎกระดิ่ง · ช่างผูก LINE · สวิตช์ร้าน · สถิติ 90 วัน · รายงานตามเวลา
+ * ใช้ที่ /api/flow-map/notify · คืนแค่ "ตั้งแล้วไหม / นับได้เท่าไร" (NotifyLive ใน lib/flow-map-notify.ts) ไม่มี token / group id / channel id
+ * ตัวไหนอ่านไม่สำเร็จ = ค่าว่าง (ไม่ล้มทั้งแท็บ) แล้วจดชื่อใน failed
+ */
+import type { supabaseAdmin } from "@/lib/supabase-admin";
+import { emailConfigured } from "@/lib/email";
+import { shopLineToken } from "@/lib/webshop-line";
+import { readSiteInfo } from "@/lib/website-site-info";
+import { NOTIFY_DAYS, type NotifyLive, type NotifyStat } from "@/lib/flow-map-notify";
+
+type Admin = ReturnType<typeof supabaseAdmin>;
+type Row = Record<string, unknown>;
+type LineCfg = { token?: string; group_id?: string; groups?: Record<string, string>; disabled_events?: Record<string, boolean> };
+
+async function lineState(admin: Admin): Promise<NotifyLive["line"]> {
+  const { data, error } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
+  if (error) throw new Error(error.message);
+  const cfg = ((data as { sval?: LineCfg } | null)?.sval ?? {}) as LineCfg;
+  const groups: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(cfg.groups ?? {})) groups[k] = !!String(v ?? "").trim();
+  const off: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(cfg.disabled_events ?? {})) if (v === true) off[k] = true;
+  return { token: !!cfg.token?.trim(), main: !!cfg.group_id?.trim(), groups, off };
+}
+
+async function rules(admin: Admin): Promise<NotifyLive["rules"]> {
+  const { data, error } = await admin.from("erp_notification_rules").select("event_type, name, active").order("sort_order");
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Row[]).map((r) => ({ event: String(r.event_type), name: String(r.name ?? r.event_type), active: r.active === true }));
+}
+
+async function staff(admin: Admin): Promise<NotifyLive["staff"]> {
+  const base = () => admin.from("employees").select("id", { count: "exact", head: true }).eq("employment_status", "active");
+  const [all, linked] = await Promise.all([base(), base().not("line_user_id", "is", null)]);
+  if (all.error) throw new Error(all.error.message);
+  if (linked.error) throw new Error(linked.error.message);
+  return { active: all.count ?? 0, linked: linked.count ?? 0 };
+}
+
+async function pushDevices(admin: Admin): Promise<number> {
+  const { count, error } = await admin.from("erp_push_subscriptions").select("id", { count: "exact", head: true });
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+async function shops(admin: Admin): Promise<NotifyLive["shops"]> {
+  const { data, error } = await admin.from("shops").select("id, slug");
+  if (error) throw new Error(error.message);
+  const list = (data ?? []) as { id: string; slug: string | null }[];
+  const infos = await Promise.all(list.map((s) => readSiteInfo(admin, s.id)));
+  return {
+    total: list.length,
+    line: infos.filter((i) => i.line_notify_enabled).length,
+    email: infos.filter((i) => i.order_email_enabled).length,
+    oa: list.filter((s) => !!s.slug && !!shopLineToken(s.slug)).length,
+  };
+}
+
+/** สถิติกระดิ่ง 90 วันต่อ event_type — ดึงทีละ 1,000 แถวแบบขนาน (นับจำนวนก่อน) */
+async function stats(admin: Admin): Promise<NotifyLive["stats"]> {
+  const since = new Date(Date.now() - NOTIFY_DAYS * 86400000).toISOString();
+  const { count, error } = await admin.from("erp_notifications").select("id", { count: "exact", head: true }).gte("created_at", since);
+  if (error) throw new Error(error.message);
+  const pages = Math.min(Math.ceil((count ?? 0) / 1000), 60);
+  const chunks = await Promise.all(Array.from({ length: pages }, (_, i) =>
+    admin.from("erp_notifications").select("event_type, user_id, read_at, created_at").gte("created_at", since).order("created_at").order("id").range(i * 1000, i * 1000 + 999)));
+  const acc = new Map<string, NotifyStat & { who: Set<string> }>();
+  for (const c of chunks) {
+    if (c.error) throw new Error(c.error.message);
+    for (const r of (c.data ?? []) as Row[]) {
+      const k = String(r.event_type ?? "");
+      const s = acc.get(k) ?? { n: 0, read: 0, users: 0, last: null, who: new Set<string>() };
+      s.n++;
+      if (r.read_at) s.read++;
+      if (r.user_id) s.who.add(String(r.user_id));
+      const d = String(r.created_at ?? "").slice(0, 10);
+      if (d && (!s.last || d > s.last)) s.last = d;
+      acc.set(k, s);
+    }
+  }
+  const out: Record<string, NotifyStat> = {};
+  for (const [k, s] of acc) out[k] = { n: s.n, read: s.read, users: s.who.size, last: s.last };
+  return out;
+}
+
+async function reports(admin: Admin): Promise<{ channels: NotifyLive["channels"]; reports: NotifyLive["reports"] }> {
+  const [ch, rep] = await Promise.all([
+    admin.from("erp_report_channels").select("email, popup, discord").eq("id", 1).maybeSingle(),
+    admin.from("email_reports").select("id, name, days, send_time, is_active, is_enabled, email_enabled, popup, discord").order("created_at"),
+  ]);
+  if (rep.error) throw new Error(rep.error.message);
+  const c = (ch.data ?? {}) as Row;
+  const on = (v: unknown) => !!(v && typeof v === "object" && (v as { enabled?: unknown }).enabled === true);
+  return {
+    channels: { email: c.email !== false, popup: c.popup !== false, discord: c.discord !== false },
+    reports: ((rep.data ?? []) as Row[]).map((r) => ({
+      id: String(r.id), name: String(r.name ?? "รายงาน"), time: r.send_time ? String(r.send_time) : null,
+      days: Array.isArray(r.days) ? (r.days as unknown[]).map(Number).filter((n) => Number.isFinite(n)) : [],
+      on: r.is_active !== false && r.is_enabled !== false,
+      email: r.email_enabled === true, popup: on(r.popup), discord: on(r.discord),
+    })),
+  };
+}
+
+/** รวมทุกส่วน — ส่วนไหนล้มใช้ค่าว่าง + จดชื่อใน failed */
+export async function buildNotifyLive(admin: Admin): Promise<{ data: NotifyLive; failed: string[] }> {
+  const failed: string[] = [];
+  const safe = async <T,>(name: string, fn: () => Promise<T>, empty: T): Promise<T> => {
+    try { return await fn(); } catch (e) { failed.push(name); console.error(`[flow-map/notify] ${name}:`, e instanceof Error ? e.message : e); return empty; }
+  };
+  const [line, ruleList, st, push, sh, stat, rep] = await Promise.all([
+    safe("line", () => lineState(admin), { token: false, main: false, groups: {}, off: {} }),
+    safe("rules", () => rules(admin), []),
+    safe("staff", () => staff(admin), { active: 0, linked: 0 }),
+    safe("push", () => pushDevices(admin), 0),
+    safe("shops", () => shops(admin), { total: 0, line: 0, email: 0, oa: 0 }),
+    safe("stats", () => stats(admin), {}),
+    safe("reports", () => reports(admin), { channels: { email: true, popup: true, discord: true }, reports: [] }),
+  ]);
+  return { data: { line, rules: ruleList, staff: st, push, email: emailConfigured(), shops: sh, stats: stat, ...rep }, failed };
+}
