@@ -5,10 +5,12 @@
  * (เจ้าของเลือกแบบ ข 2026-11-03)
  *
  * การ์ดอัลบั้ม + แท็บสถานะ (คิดจากโพสต์ที่ผูก · lib/content-album-status) + ชิปแบรนด์ + ค้นหา + ถังขยะ
+ * ลากไฟล์/ทั้งโฟลเดอร์มาวางที่ไหนก็ได้ในหน้า (หรือกดเลือก) → ป๊อป "ลงอัลบั้มไหน?" (อัลบั้มเดิม / สร้างใหม่ · แยกตามโฟลเดอร์ได้)
  * ใช้ของกลาง: ERPModal (ผ่าน AlbumFormModal/AlbumDetailModal) · state-views · PlatformIcon · Icon · listBrands/useCreativeOptions
  * สิทธิ์: ดู assets.view · สร้าง assets.upload
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useFileDrop } from "@/components/file-drop";
 import { useT } from "@/components/i18n";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
@@ -17,8 +19,10 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { useCreativeOptions } from "@/app/tasks/use-options";
 import { listBrands, type BrandOption } from "@/app/tasks/data";
 import { ALBUM_STAGES, ALBUM_STAGE_META, albumReminder, bangkokToday, type AlbumStage } from "@/lib/content-album-status";
-import { listContentAlbums, updateContentAlbum, type ContentAlbum } from "./api";
-import { StageBadge, PlatChip, FileThumb } from "./album-bits";
+import { listContentAlbums, updateContentAlbum, createContentAlbum, getContentAlbum, getAlbumDriveInfo, type ContentAlbum } from "./api";
+import { startAlbumUploadTask, onAlbumUpload } from "./data";
+import { StageBadge, PlatChip, FileThumb, PickMediaButtons, ALBUM_ACCEPT } from "./album-bits";
+import { UploadTargetModal, type UploadPlan } from "./upload-target-modal";
 import { AlbumFormModal } from "./album-form-modal";
 import { AlbumDetailModal } from "./album-detail";
 
@@ -41,13 +45,55 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
   const [detailId, setDetailId] = useState<string | null>(openAlbumId);
   useEffect(() => { if (openAlbumId) setDetailId(openAlbumId); }, [openAlbumId]);
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
+  // quiet = โหลดใหม่เงียบ ๆ (ไฟล์อัปเสร็จทีละไฟล์) ไม่ขึ้น "กำลังโหลด" ทับการ์ด
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
+    setError(null);
     try { setAlbums(await listContentAlbums({ trash })); }
-    catch (e) { setError((e as Error).message); }
+    catch (e) { if (!quiet) setError((e as Error).message); }
     finally { setLoading(false); }
   }, [trash]);
   useEffect(() => { void load(); }, [load]);
+  // ไฟล์อัปเสร็จ (จากหน้าไหนก็ตาม) → รีเฟรชการ์ด · รวบหลายไฟล์ติดกันเป็นครั้งเดียว
+  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => onAlbumUpload((e) => {
+    if (!e.fileDone) return;
+    if (reloadTimer.current) clearTimeout(reloadTimer.current);
+    reloadTimer.current = setTimeout(() => void load(true), 1500);
+  }), [load]);
+
+  // ── ลากไฟล์/โฟลเดอร์มาวาง หรือกดเลือก → ถามว่าลงอัลบั้มไหน ──
+  const canUpload = can("assets.upload") && !trash;
+  const [incoming, setIncoming] = useState<File[] | null>(null);
+  const drop = useFileDrop((files) => setIncoming(files), {
+    // เปิดป๊อปอัลบั้ม/ฟอร์มอยู่ = ไม่รับที่หน้ารวม (ในอัลบั้มมีช่องลากวางของมันเอง)
+    accept: ALBUM_ACCEPT, folders: true, disabled: !canUpload || !!detailId || formOpen,
+    onReject: () => toast.error(t("ลากได้เฉพาะรูปหรือวิดีโอ", "Only photos or videos")),
+    onBusy: () => canUpload ? undefined : toast.error(trash ? t("ออกจากถังขยะก่อน แล้วค่อยลากไฟล์มาวาง", "Leave the trash view first") : t("คุณยังไม่มีสิทธิ์อัปไฟล์ (assets.upload)", "You can't upload files (assets.upload)")),
+  });
+  const runPlan = async (plan: UploadPlan) => {
+    setIncoming(null);
+    try {
+      if (plan.mode === "existing") {
+        const [d, info] = await Promise.all([getContentAlbum(plan.album.id), getAlbumDriveInfo(plan.album.id)]);
+        setDetailId(d.id);
+        if (!info.ok) { toast.error(t(`ยังอัปเข้า “${d.name}” ไม่ได้: ${info.reason}`, `Can't upload to “${d.name}”: ${info.reason}`)); return; }
+        startAlbumUploadTask({ albumId: d.id, albumName: d.name, files: plan.files, existingKeys: d.files.map((f) => f.r2_key) });
+        return;
+      }
+      const made: ContentAlbum[] = [];
+      for (const g of plan.groups) {
+        const a = await createContentAlbum({ name: g.name, brand_id: plan.brandId });
+        made.push(a);
+        const info = await getAlbumDriveInfo(a.id);
+        if (!info.ok) { toast.error(t(`สร้างอัลบั้ม “${a.name}” แล้ว แต่ยังอัปไฟล์ไม่ได้: ${info.reason}`, `Album “${a.name}” created but can't upload: ${info.reason}`)); continue; }
+        startAlbumUploadTask({ albumId: a.id, albumName: a.name, files: g.files, existingKeys: [] });
+      }
+      await load(true);
+      if (made.length === 1) setDetailId(made[0].id);
+      else if (made.length) toast.success(t(`สร้าง ${made.length} อัลบั้มแล้ว — อัปทีละอัลบั้มตามคิว ดูความคืบหน้ามุมขวาล่าง`, `${made.length} albums created — uploading one by one (see bottom-right)`));
+    } catch (e) { toast.error((e as Error).message); }
+  };
   useEffect(() => { listBrands().then(setBrands).catch(() => {}); }, []);
 
   const platMeta = useMemo(() => new Map(platforms.map((p) => [p.value, p])), [platforms]);
@@ -71,12 +117,18 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
 
   const todayKey = bangkokToday();
   return (
-    <div className="space-y-4">
+    <div className="relative space-y-4" {...drop.zone("board")}>
+      {drop.over === "board" && (
+        <div className="pointer-events-none absolute inset-0 z-20 rounded-xl border-2 border-dashed border-violet-400 bg-violet-50/80 grid place-items-center">
+          <p className="text-violet-800 font-medium flex items-center gap-2"><Icon name="upload" size={22} />{t("วางเพื่ออัปไฟล์/โฟลเดอร์ แล้วเลือกว่าจะลงอัลบั้มไหน", "Drop files or folders, then pick an album")}</p>
+        </div>
+      )}
       <div className="flex flex-wrap items-start gap-3">
         <div className="min-w-0 flex-1">
           <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2"><Icon name="library" />Contents</h2>
           <p className="text-sm text-slate-500">{t("อัลบั้มรูป/วิดีโอจากการถ่าย 1 ครั้ง ไฟล์ตัวจริงอยู่ Google Drive · แตกเป็นโพสต์ในปฏิทินได้หลายโพสต์ สถานะขยับเองตามโพสต์", "Shoot albums — originals stay in Google Drive · turn into calendar posts; status follows the posts")}</p>
         </div>
+        {canUpload && <PickMediaButtons onFiles={setIncoming} />}
         {can("assets.upload") && !trash && (
           <button onClick={() => setFormOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700">
             <Icon name="add" />{t("สร้างอัลบั้ม", "New album")}
@@ -126,7 +178,7 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
       {loading ? <LoadingState /> : error ? <ErrorState hint={error} onRetry={() => void load()} /> : shown.length === 0 ? (
         <EmptyState icon={<Icon name="library" size={36} />}
           title={trash ? t("ถังขยะว่าง", "Trash is empty") : albums.length === 0 ? t("ยังไม่มีอัลบั้ม", "No albums yet") : t("ไม่มีอัลบั้มในแท็บนี้", "No albums here")}
-          hint={!trash && albums.length === 0 ? t("กด “สร้างอัลบั้ม” แล้วลากรูป/วิดีโอจากการถ่ายมาวาง ไฟล์จะขึ้น Google Drive ของแบรนด์ให้", "Create an album, then drop the shoot's photos/videos — they go to the brand's Google Drive") : undefined}
+          hint={!trash && albums.length === 0 ? t("ลากรูป/วิดีโอ หรือทั้งโฟลเดอร์จากการถ่ายมาวางที่หน้านี้ได้เลย ระบบจะถามว่าลงอัลบั้มไหน หรือสร้างใหม่ · ไฟล์ตัวจริงขึ้น Google Drive ของแบรนด์", "Drop photos/videos or whole folders here — you'll pick an album or create one · originals go to the brand's Google Drive") : undefined}
           action={!trash && albums.length === 0 && can("assets.upload") ? { label: t("สร้างอัลบั้ม", "New album"), onClick: () => setFormOpen(true) } : undefined} />
       ) : (
         <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -185,7 +237,11 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
       <AlbumFormModal open={formOpen} album={null} brands={brands} defaultBrandId={brandId || null} onClose={() => setFormOpen(false)}
         onSaved={(a) => { setFormOpen(false); toast.success(t("สร้างอัลบั้มแล้ว — ลากไฟล์มาวางได้เลย", "Album created — drop files in")); void load(); setDetailId(a.id); }} />
       {detailId && (
-        <AlbumDetailModal albumId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => void load()} />
+        <AlbumDetailModal albumId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => void load(true)} />
+      )}
+      {incoming && (
+        <UploadTargetModal files={incoming} albums={albums} brands={brands} defaultBrandId={brandId || null}
+          onClose={() => setIncoming(null)} onConfirm={(plan) => void runPlan(plan)} />
       )}
     </div>
   );

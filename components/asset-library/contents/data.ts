@@ -14,6 +14,7 @@ import { prepareResizedImage } from "@/components/image-attach";
 import { askDuplicateUploads } from "@/components/duplicate-upload";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { tr } from "@/lib/lang";
+import { runBackgroundTask } from "@/lib/background-tasks";
 import { json, send } from "./api";
 
 export * from "./api";
@@ -78,9 +79,52 @@ export async function uploadFilesToAlbum(p: {
   onStep?: (s: AlbumUploadStep | null) => void; onFileDone?: () => void;
   onBytes?: (sent: number, total: number) => void;
 }): Promise<{ ok: number; reused: number; skipped: number; failed: { name: string; error: string }[] } | null> {
+  // ส่งความคืบหน้าออกช่องกลางด้วย — หน้าในอัลบั้มที่เปิดอยู่เห็นแถบอัป/ไฟล์ใหม่ ไม่ว่าเริ่มอัปจากหน้าไหน
+  const q = {
+    ...p,
+    onStep: (st: AlbumUploadStep | null) => { p.onStep?.(st); emitAlbumUpload({ albumId: p.albumId, step: st }); },
+    onFileDone: () => { p.onFileDone?.(); emitAlbumUpload({ albumId: p.albumId, step: undefined, fileDone: true }); },
+  };
   uploadStarted();
-  try { return await runAlbumUpload(p); }
-  finally { uploadEnded(); p.onStep?.(null); }
+  try { return await runAlbumUpload(q); }
+  finally { uploadEnded(); q.onStep(null); }
+}
+
+// ── ช่องกลางบอกความคืบหน้าการอัป (ต่ออัลบั้ม) ──
+export type AlbumUploadEvent = { albumId: string; step?: AlbumUploadStep | null; fileDone?: boolean };
+const uploadListeners = new Set<(e: AlbumUploadEvent) => void>();
+function emitAlbumUpload(e: AlbumUploadEvent) { uploadListeners.forEach((l) => { try { l(e); } catch { /* ผู้ฟังพังไม่กระทบการอัป */ } }); }
+/** ฟังความคืบหน้าการอัปทุกอัลบั้ม → คืนฟังก์ชันเลิกฟัง */
+export function onAlbumUpload(cb: (e: AlbumUploadEvent) => void): () => void { uploadListeners.add(cb); return () => { uploadListeners.delete(cb); }; }
+
+const mb = (n: number) => Math.round((n / 1048576) * 10) / 10;
+/**
+ * เริ่มอัปไฟล์เข้าอัลบั้มเป็นงานเบื้องหลัง (กล่องความคืบหน้ามุมขวาล่าง · ปิดป๊อปได้) — ใช้ร่วม: ลากวางในอัลบั้ม + ลากวาง/เลือกโฟลเดอร์ที่หน้ารวม
+ * ความคืบหน้ารายไฟล์ออกทาง onAlbumUpload · onEnd = จบงาน (สำเร็จ/ยกเลิก/พัง)
+ */
+let uploadQueue: Promise<void> = Promise.resolve();
+export function startAlbumUploadTask(p: { albumId: string; albumName: string; files: File[]; existingKeys: string[]; onEnd?: () => void }): void {
+  const total = p.files.reduce((n, f) => n + f.size, 0);
+  // หลายอัลบั้มพร้อมกัน (ลากหลายโฟลเดอร์) = ต่อคิวทีละอัลบั้ม
+  const prev = uploadQueue;
+  let release: () => void = () => {};
+  uploadQueue = new Promise<void>((r) => { release = r; });
+  runBackgroundTask({
+    label: tr(`อัปเข้าอัลบั้ม ${p.albumName} (${p.files.length} ไฟล์)`, `Upload to ${p.albumName} (${p.files.length} files)`), total: mb(total), unit: "MB",
+    run: async (report) => {
+      await prev;
+      try {
+        const r = await uploadFilesToAlbum({ albumId: p.albumId, albumName: p.albumName, files: p.files, existingKeys: p.existingKeys, onBytes: (sent, tot) => report(mb(sent), mb(tot)) });
+        if (!r) return { ok: 0, message: tr("ยกเลิกแล้ว", "Cancelled") };
+        const done = r.ok + r.reused;
+        const parts = [tr(`ลงอัลบั้มแล้ว ${done} ไฟล์`, `${done} file(s) added`)];
+        if (r.reused) parts.push(tr(`ใช้ไฟล์เดิม ${r.reused}`, `${r.reused} reused`));
+        if (r.skipped) parts.push(tr(`ข้าม ${r.skipped}`, `${r.skipped} skipped`));
+        if (r.failed.length) parts.push(tr(`ไม่สำเร็จ: ${r.failed.map((f) => `${f.name} (${f.error})`).join(", ")}`, `Failed: ${r.failed.map((f) => `${f.name} (${f.error})`).join(", ")}`));
+        return { ok: done, fail: r.failed.length, message: parts.join(" · ") };
+      } finally { release(); p.onEnd?.(); }
+    },
+  });
 }
 
 type Prepared = { original: File; preview: File | null; resume: PendingUpload | null; reuseId: string | null };

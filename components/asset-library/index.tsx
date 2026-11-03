@@ -280,7 +280,7 @@ export function AssetLibrary() {
   };
   const onPageDrop = (e: React.DragEvent) => {
     setPageDrag(false);
-    if (anyModalOpen) return;
+    if (anyModalOpen || contentsView) return;   // แถบ Contents มีตัวรับลากวางของมันเอง (ถามว่าลงอัลบั้มไหน)
     const imgs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
     if (!imgs.length) return;
     e.preventDefault();
@@ -305,7 +305,7 @@ export function AssetLibrary() {
 
   return (
     <div className="max-w-[1200px] mx-auto px-5 py-5 relative"
-      onDragOver={(e) => { if (anyModalOpen) return; if (Array.from(e.dataTransfer.types).includes("Files")) { e.preventDefault(); setPageDrag(true); } }}
+      onDragOver={(e) => { if (anyModalOpen || contentsView) return; if (Array.from(e.dataTransfer.types).includes("Files")) { e.preventDefault(); setPageDrag(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setPageDrag(false); }}
       onDrop={onPageDrop}>
       {pageDrag && (

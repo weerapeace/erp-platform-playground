@@ -17,7 +17,6 @@ import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { UploadProgress } from "@/components/upload-progress";
-import { runBackgroundTask } from "@/lib/background-tasks";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { downloadImagesAsZip } from "@/lib/zip";
 import { askConfirm } from "@/components/modal/ask-dialog";
@@ -26,16 +25,16 @@ import { formatBytes } from "@/lib/assets";
 import { useCreativeOptions } from "@/app/tasks/use-options";
 import { listCampaigns, type BrandOption } from "@/app/tasks/data";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
-import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, uploadFilesToAlbum, syncAlbumDrive, aiAlbumCaption,
+import { useFileDrop } from "@/components/file-drop";
+import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, startAlbumUploadTask, onAlbumUpload, syncAlbumDrive, aiAlbumCaption,
   albumPostPreset, pendingUploadsFor, clearPendingUploads,
   type AlbumDetail, type AlbumDriveInfo, type AlbumFile, type AlbumUploadStep, type PendingUpload } from "./data";
-import { StageBadge, PlatChip, FileThumb } from "./album-bits";
+import { StageBadge, PlatChip, FileThumb, PickMediaButtons, isAlbumMedia, ALBUM_ACCEPT } from "./album-bits";
 import { AlbumFormModal } from "./album-form-modal";
 
 const ContentCreateModal = nextDynamic(() => import("@/app/tasks/content/content-create-modal").then((m) => m.ContentCreateModal), { ssr: false });
 const SYNC_ROUNDS = 15;   // ดึงไฟล์จาก Drive ครั้งละไม่กี่ไฟล์ → วนซ้ำจนครบ (กันค้างนานเกินในคำขอเดียว)
 const driveFileUrl = (id: string) => `https://drive.google.com/file/d/${id}/view`;
-const mb = (n: number) => Math.round((n / 1048576) * 10) / 10;
 
 export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   albumId: string;
@@ -53,7 +52,6 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const [error, setError] = useState<string | null>(null);
   const [drive, setDrive] = useState<AlbumDriveInfo | null>(null);
   const [step, setStep] = useState<AlbumUploadStep | null>(null);
-  const [dragOver, setDragOver] = useState(false);
   const [caption, setCaption] = useState("");
   const [captionSaving, setCaptionSaving] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -70,7 +68,6 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const [zipMsg, setZipMsg] = useState<string | null>(null);
   const [cullMsg, setCullMsg] = useState<string | null>(null);
   const [cull, setCull] = useState<{ blurry: Set<string>; groupOf: Map<string, number>; groups: number; keep: string[]; checked: number } | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
   const canEdit = can("assets.upload");
   const refreshPending = useCallback(() => setPending(pendingUploadsFor(albumId)), [albumId]);
   useEffect(() => { refreshPending(); }, [refreshPending]);
@@ -98,31 +95,22 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   };
   const saveCaption = async () => { setCaptionSaving(true); await patch({ caption_draft: caption.trim() || null }, t("บันทึกแคปชั่นร่างแล้ว", "Draft caption saved")); setCaptionSaving(false); };
 
-  // ── อัปไฟล์ (วิ่งเบื้องหลัง — ปิดป๊อปได้ ดูความคืบหน้ามุมขวาล่าง) ──
-  const startUpload = (list: FileList | File[]) => {
-    const files = [...list].filter((f) => f.type.startsWith("image/") || f.type.startsWith("video/"));
+  // ── อัปไฟล์ (วิ่งเบื้องหลัง — ปิดป๊อปได้ ดูความคืบหน้ามุมขวาล่าง) · ลากทั้งโฟลเดอร์ได้ ──
+  const startUpload = (list: File[]) => {
+    const files = list.filter(isAlbumMedia);
     if (!files.length) { toast.error(t("ลากได้เฉพาะรูปหรือวิดีโอ", "Only photos or videos")); return; }
     if (!album || !drive?.ok) return;
-    const total = files.reduce((n, f) => n + f.size, 0);
-    runBackgroundTask({
-      label: t(`อัปเข้าอัลบั้ม ${album.name} (${files.length} ไฟล์)`, `Upload to ${album.name} (${files.length} files)`), total: mb(total), unit: "MB",
-      run: async (report) => {
-        const r = await uploadFilesToAlbum({
-          albumId, albumName: album.name, files, existingKeys: album.files.map((f) => f.r2_key),
-          onStep: (s) => { setStep(s); refreshPending(); }, onFileDone: () => { void load(true); onChanged(); loadDrive(); refreshPending(); },
-          onBytes: (sent, tot) => report(mb(sent), mb(tot)),
-        });
-        refreshPending();
-        if (!r) return { ok: 0, message: t("ยกเลิกแล้ว", "Cancelled") };
-        const done = r.ok + r.reused;
-        const parts = [t(`ลงอัลบั้มแล้ว ${done} ไฟล์`, `${done} file(s) added`)];
-        if (r.reused) parts.push(t(`ใช้รูปเดิม ${r.reused}`, `${r.reused} reused`));
-        if (r.skipped) parts.push(t(`ข้าม ${r.skipped}`, `${r.skipped} skipped`));
-        if (r.failed.length) parts.push(t(`ไม่สำเร็จ: ${r.failed.map((f) => `${f.name} (${f.error})`).join(", ")}`, `Failed: ${r.failed.map((f) => `${f.name} (${f.error})`).join(", ")}`));
-        return { ok: done, fail: r.failed.length, message: parts.join(" · ") };
-      },
-    });
+    startAlbumUploadTask({ albumId, albumName: album.name, files, existingKeys: album.files.map((f) => f.r2_key), onEnd: refreshPending });
   };
+  const drop = useFileDrop((files) => startUpload(files), { accept: ALBUM_ACCEPT, folders: true, onReject: () => toast.error(t("ลากได้เฉพาะรูปหรือวิดีโอ", "Only photos or videos")) });
+  // ความคืบหน้าการอัปของอัลบั้มนี้ (เริ่มจากในนี้ หรือจากหน้ารวมก็เห็น)
+  const onChangedRef = useRef(onChanged);
+  onChangedRef.current = onChanged;
+  useEffect(() => onAlbumUpload((e) => {
+    if (e.albumId !== albumId) return;
+    if (e.step !== undefined) { setStep(e.step); refreshPending(); }
+    if (e.fileDone) { void load(true); onChangedRef.current(); loadDrive(); refreshPending(); }
+  }), [albumId, load, loadDrive, refreshPending]);
 
   const togglePick = (f: AlbumFile) => {
     if (!album) return;
@@ -254,7 +242,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
         </div>
       ) : undefined}>
       {loading && !album ? <LoadingState /> : error && !album ? <ErrorState hint={error} onRetry={() => void load()} /> : album && (
-        <div className="space-y-5">
+        <div className="space-y-5" {...drop.guard}>
           {/* หัว: สถานะ + ข้อมูลอัลบั้ม */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
             <StageBadge stage={album.status.stage} />
@@ -302,12 +290,10 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
 
           {/* ลากไฟล์มาวาง */}
           {canEdit && drive?.ok && !album.closed_at && (
-            <div onDragOver={(e) => { e.preventDefault(); setDragOver(true); }} onDragLeave={() => setDragOver(false)}
-              onDrop={(e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length) startUpload(e.dataTransfer.files); }}
-              className={`rounded-xl border-2 border-dashed p-5 text-center transition ${dragOver ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white"}`}>
-              <input ref={inputRef} type="file" multiple accept="image/*,video/*" className="hidden" onChange={(e) => { if (e.target.files?.length) startUpload(e.target.files); e.target.value = ""; }} />
-              <p className="text-sm text-slate-600 flex items-center justify-center gap-2"><Icon name="upload" />{t("ลากรูป/วิดีโอมาวางที่นี่ หรือ", "Drop photos/videos here or")}
-                <button type="button" onClick={() => inputRef.current?.click()} className="text-violet-700 font-medium hover:underline">{t("เลือกไฟล์", "choose files")}</button></p>
+            <div {...drop.zone("album")}
+              className={`rounded-xl border-2 border-dashed p-5 text-center transition ${drop.over === "album" ? "border-violet-400 bg-violet-50" : "border-slate-200 bg-white"}`}>
+              <p className="text-sm text-slate-600 flex items-center justify-center gap-2"><Icon name="upload" />{t("ลากรูป/วิดีโอ หรือทั้งโฟลเดอร์ มาวางที่นี่", "Drop photos/videos or whole folders here")}</p>
+              <PickMediaButtons onFiles={startUpload} className="mt-2 justify-center" />
               <p className="text-xs text-slate-400 mt-1">{t("ไฟล์ตัวจริงขึ้น Google Drive (ไม่เกิน 5GB ต่อไฟล์) · ระบบเก็บแค่รูปย่อไว้โชว์ · อัปเบื้องหลัง ปิดหน้าต่างนี้ได้ · ถ้าเผลอปิดแท็บกลางคัน ลากไฟล์เดิมมาวางใหม่ = ส่งต่อจากที่ค้าง (เครื่องเดิม ภายใน 6 วัน)", "Originals go to Google Drive (≤5GB each) · only small previews stay here · runs in the background · closed the tab midway? drop the same files again to resume (same device, within 6 days)")}</p>
               {step && <UploadProgress name={step.name} size={step.size} pct={step.pct} label={step.label} count={{ current: step.current, total: step.total }} className="mt-3 text-left" />}
             </div>
