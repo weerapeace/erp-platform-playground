@@ -14,6 +14,7 @@ import { writeAudit } from "@/lib/audit";
 import { ORBIT_TEAM_KEY } from "@/lib/app-orbit-style";
 import { THEME_TEAM_KEY } from "@/lib/launcher-theme";
 import { PRINT_TEAM_PRESETS_KEY } from "@/lib/list-print";
+import { docPrintPerms } from "@/lib/doc-print-prefs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,7 +24,11 @@ const LOGIN_READ_KEYS = new Set<string>([ORBIT_TEAM_KEY, THEME_TEAM_KEY, PRINT_T
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const key = (new URL(request.url).searchParams.get("key") ?? "").trim();
-  if (LOGIN_READ_KEYS.has(key)) {
+  // ค่าตั้งการพิมพ์เอกสาร (doc_print_<ชนิด>) ที่มีสิทธิ์เฉพาะ — เช่น ใบวางบิล อ่านด้วย so.view (ฝ่ายขายไม่ต้องมีสิทธิ์สินค้า)
+  const docPerm = docPrintPerms(key);
+  if (docPerm) {
+    const denied = await guardApi(request, docPerm.view); if (denied) return denied;
+  } else if (LOGIN_READ_KEYS.has(key)) {
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
     if (!user) return NextResponse.json({ value: {}, error: "unauthenticated" }, { status: 401 });
   } else {
@@ -35,10 +40,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 }
 
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   let body: { key?: string; value?: Record<string, unknown> };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const key = (body.key ?? "").trim();
+  // ค่าตั้งการพิมพ์ที่มีสิทธิ์เฉพาะ (เช่น ใบวางบิล = so.edit · เจ้าของเลือก 2026-11-03) · key อื่นใช้ products.edit เหมือนเดิม
+  const denied = await guardApi(request, docPrintPerms(key)?.edit ?? "products.edit"); if (denied) return denied;
   if (!key) return NextResponse.json({ error: "ต้องระบุ key" }, { status: 400 });
   if (key.startsWith("admin_")) { const adminDenied = await guardApi(request, "admin.users"); if (adminDenied) return adminDenied; }
   const admin = supabaseAdmin();

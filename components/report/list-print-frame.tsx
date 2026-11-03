@@ -13,26 +13,46 @@ import type { ListPrintSettingsState } from "@/components/report/use-list-print-
 
 const PX_PER_MM = 96 / 25.4;
 
-const GRIP_CSS = `@media screen {
-  .wb-t th[data-col] { position: relative; }
+const gripCss = (t: string) => `@media screen {
+  ${t} th[data-col] { position: relative; }
   .col-grip { position: absolute; top: 0; right: -5px; width: 10px; height: 100%; cursor: col-resize; z-index: 3; touch-action: none; }
   .col-grip::after { content: ""; position: absolute; top: 12%; bottom: 12%; left: 4px; width: 2px; border-radius: 1px; background: transparent; transition: background .12s; }
-  .wb-t thead:hover .col-grip::after { background: #cbd5e1; }
-  .wb-t th[data-col]:hover > .col-grip::after, .col-grip.on::after { background: #ea580c; }
+  ${t} thead:hover .col-grip::after { background: #cbd5e1; }
+  ${t} th[data-col]:hover > .col-grip::after, .col-grip.on::after { background: #ea580c; }
   .col-tip { position: fixed; z-index: 10; pointer-events: none; background: #0f172a; color: #fff; font: 600 11px/1 sans-serif; padding: 4px 6px; border-radius: 4px; transform: translate(-50%, -130%); }
   body.col-resizing, body.col-resizing * { cursor: col-resize !important; user-select: none !important; }
 }
 @media print { .col-grip, .col-tip { display: none !important; } }`;
 
-/** ติดตัวจับลากในเอกสารพรีวิว (เรียกทุกครั้งที่ iframe โหลดใหม่) */
-export function attachColumnResize(doc: Document, opts: { onResize: (key: string, mm: number) => void; onReset: (key: string) => void }) {
+/** ความกว้างจาก style ของ <col> → มม. (ตั้งไว้เป็น mm หรือ px ก็อ่านได้) */
+const colWidthMm = (c: HTMLTableColElement): number | null => {
+  const w = c.style.width;
+  if (!w) return null;
+  const n = parseFloat(w);
+  if (!Number.isFinite(n)) return null;
+  return w.endsWith("mm") ? n : n / PX_PER_MM;
+};
+
+/**
+ * ติดตัวจับลากในเอกสารพรีวิว (เรียกทุกครั้งที่ iframe โหลดใหม่)
+ *   table   = ตัวเลือกตารางที่ลากได้ (ค่าเดิม ".wb-t" = ตารางจาก renderListTable · เอกสารใช้ ".doc-t" จาก renderDocTable)
+ *   freeze  = ตอนเริ่มลาก ตรึงความกว้างคอลัมน์อื่นที่ยังเป็น "อัตโนมัติ" ไว้ตามที่เห็น (ยกเว้น col[data-flex]) กันตารางกระโดด
+ *             แล้วส่งความกว้างทุกคอลัมน์ที่ตรึงไว้กลับมาใน onResize(key, mm, all)
+ */
+export function attachColumnResize(doc: Document, opts: {
+  onResize: (key: string, mm: number, all?: Record<string, number>) => void;
+  onReset: (key: string) => void;
+  table?: string;
+  freeze?: boolean;
+}) {
   if (doc.documentElement.dataset.colResize === "1") return;
   doc.documentElement.dataset.colResize = "1";
+  const tableSel = opts.table ?? ".wb-t";
   const style = doc.createElement("style");
-  style.textContent = GRIP_CSS;
+  style.textContent = gripCss(tableSel);
   doc.head.appendChild(style);
 
-  doc.querySelectorAll<HTMLTableCellElement>(".wb-t thead th[data-col]").forEach((th) => {
+  doc.querySelectorAll<HTMLTableCellElement>(`${tableSel} thead th[data-col]`).forEach((th) => {
     const key = th.dataset.col ?? "";
     if (!key || key === "img") return;   // คอลัมน์รูปกว้างตามขนาดรูป
     const grip = doc.createElement("div");
@@ -53,6 +73,14 @@ export function attachColumnResize(doc: Document, opts: { onResize: (key: string
       const startPx = th.offsetWidth;
       const cols = [...doc.querySelectorAll<HTMLTableColElement>(`col[data-col="${CSS.escape(key)}"]`)];
       const tables = [...new Set(cols.map((c) => c.closest("table")).filter(Boolean))] as HTMLTableElement[];
+      if (opts.freeze) {
+        // ตรึงก่อนเปลี่ยนเป็น fixed (ไม่งั้นคอลัมน์อัตโนมัติจะถูกเฉลี่ยใหม่ทันที)
+        tables.forEach((t) => t.querySelectorAll<HTMLTableColElement>("col[data-col]").forEach((c) => {
+          if (c.style.width || c.dataset.flex === "1") return;
+          const h = t.querySelector<HTMLElement>(`th[data-col="${CSS.escape(c.dataset.col ?? "")}"]`);
+          if (h) c.style.width = `${h.offsetWidth}px`;
+        }));
+      }
       tables.forEach((t) => t.classList.add("fixed"));
       const tip = doc.createElement("div");
       tip.className = "col-tip";
@@ -73,7 +101,14 @@ export function attachColumnResize(doc: Document, opts: { onResize: (key: string
         grip.classList.remove("on");
         doc.body.classList.remove("col-resizing");
         tip.remove();
-        if (Math.abs(mm - startPx / PX_PER_MM) >= 0.5) opts.onResize(key, mm);
+        if (Math.abs(mm - startPx / PX_PER_MM) >= 0.5) {
+          const all: Record<string, number> = {};
+          if (opts.freeze) tables.forEach((t) => t.querySelectorAll<HTMLTableColElement>("col[data-col]").forEach((c) => {
+            const v = colWidthMm(c);
+            if (v !== null && c.dataset.col) all[c.dataset.col] = v;
+          }));
+          opts.onResize(key, mm, opts.freeze ? all : undefined);
+        }
       };
       grip.addEventListener("pointermove", move);
       grip.addEventListener("pointerup", up);

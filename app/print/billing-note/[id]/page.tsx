@@ -1,111 +1,67 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+/**
+ * หน้าพิมพ์ใบวางบิล — พรีวิวซ้าย + แผงตั้งค่าการพิมพ์ขวา (ของกลาง DocPrintPanel)
+ *   ปรับคอลัมน์ (กว้าง มม./ชื่อหัว/ลำดับ/เปิด-ปิด) · ลากขอบหัวคอลัมน์บนกระดาษ · ตัวอักษร/ระยะแถว/เส้น
+ *   ไม่กดบันทึก = ใช้กับใบนี้ · "บันทึกเป็นค่าเริ่มต้น" = ทุกคน (ui_config doc_print_billing_note · สิทธิ์ so.edit)
+ */
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { PrintToolbar, PrintFrame } from "@/components/report";
+import { attachColumnResize } from "@/components/report/list-print-frame";
+import { DocPrintPanel, measureDocColumns, useDocPrintPrefs } from "@/components/doc-print-settings";
+import { Icon } from "@/components/icon";
 import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml } from "@/lib/template";
-import { thaiBahtText } from "@/lib/quotation-print";
-import type { BillingNoteDetail } from "@/app/api/billing-notes/route";
+import { buildBillingNoteData, type BillingNotePrintDoc } from "@/lib/billing-note-print";
+import { defaultPrefs, DOC_COLUMNS, type DocPrintPrefs } from "@/lib/doc-print-prefs";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 
-type BillingNoteExt = BillingNoteDetail & {
-  customer_address?: string;
-  customer_phone?:   string;
-  customer_tax_id?:  string;
-};
-
-const baht = (n: number | null | undefined) =>
-  Number(n ?? 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
-
-const TH_MON = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
-const thaiShort = (iso: string | null | undefined) => {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return "";
-  const be2 = String((d.getFullYear() + 543) % 100).padStart(2, "0");
-  return `${String(d.getDate()).padStart(2, "0")}-${TH_MON[d.getMonth()]}-${be2}`;
-};
-
-function buildData(b: BillingNoteExt): Record<string, unknown> {
-  // ใบลดหนี้ → แสดงเป็น "บรรทัดติดลบ" ต่อท้ายรายการบิล แล้วรวมเข้ายอดสรุปเลย
-  // (เจ้าของสั่ง: ให้ขึ้นเป็นลำดับในตาราง + รวมยอดให้เสร็จ ไม่ต้องมีบรรทัดหักแยกท้ายใบ)
-  const credits = b.credit_notes ?? [];
-  const creditSub   = credits.reduce((sum, c) => sum + c.diff_amount, 0);
-  const creditVat   = credits.reduce((sum, c) => sum + c.vat_amount, 0);
-  const creditTotal = credits.reduce((sum, c) => sum + c.grand_total, 0);
-  const netSubtotal = Math.round((b.subtotal - creditSub) * 100) / 100;
-  const netVat      = Math.round((b.total_vat - creditVat) * 100) / 100;
-  const netGrand    = Math.round((b.grand_total - creditTotal) * 100) / 100;
-  const netDue      = Math.round((b.amount_due - creditTotal) * 100) / 100;
-
-  return {
-    bill_number:      b.bill_number ?? "(ยังไม่ออกเลข)",
-    bill_date:        thaiShort(b.bill_date),
-    due_date:         thaiShort(b.due_date),
-    customer_name:    b.customer_name ?? "—",
-    customer_address: b.customer_address ?? "",
-    customer_tax_id:  b.customer_tax_id ?? "",
-    // ยอดสรุปหักใบลดหนี้ไปแล้วทุกบรรทัด (ตัวเลขจึงตรงกับรายการในตาราง)
-    subtotal:         baht(netSubtotal),
-    total_vat:        baht(netVat),
-    total_wht:        baht(b.total_wht),
-    has_wht:          b.total_wht > 0 ? "1" : "",
-    grand_total:      baht(netGrand),
-    amount_due:       baht(netDue),
-    net_amount_due:   baht(netDue),
-    amount_in_words:  thaiBahtText(netDue),
-    lines: [
-      ...b.lines.map((l, i) => ({
-        idx:          i + 1,
-        so_number:    l.so_number ?? "",
-        bill_date:    thaiShort(l.bill_date),
-        due_date:     thaiShort(l.due_date),
-        amount:       baht(l.amount),
-        vat_amount:   baht(l.vat_amount),
-        total_amount: baht(l.total_amount),
-        note:         l.note ?? "",
-      })),
-      // บรรทัดใบลดหนี้ (ยอดติดลบ) — ต่อลำดับจากรายการบิล
-      ...credits.map((c, i) => ({
-        idx:          b.lines.length + i + 1,
-        so_number:    c.cn_number ?? "ใบลดหนี้",
-        bill_date:    thaiShort(c.cn_date),
-        due_date:     "",
-        amount:       baht(-c.diff_amount),
-        vat_amount:   baht(-c.vat_amount),
-        total_amount: baht(-c.grand_total),
-        note:         c.ref_invoice_no ? `ลดหนี้ ${c.ref_invoice_no}` : "ใบลดหนี้",
-      })),
-    ],
-  };
-}
+const ENTITY = "billing_note";
+const FLEX_KEYS = new Set((DOC_COLUMNS[ENTITY] ?? []).filter((c) => c.flex).map((c) => c.key));
+const halfMm = (mm: number) => Math.round(mm * 2) / 2;
 
 export default function PrintBillingNotePage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
 
-  const [doc,      setDoc]      = useState<BillingNoteExt | null>(null);
-  const [template, setTemplate] = useState<ReportTemplateRow | null>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [error,    setError]    = useState<string | null>(null);
+  const [doc,       setDoc]       = useState<BillingNotePrintDoc | null>(null);
+  const [templates, setTemplates] = useState<ReportTemplateRow[]>([]);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const { prefs, setPrefs, saved, setSaved } = useDocPrintPrefs(ENTITY);
 
   useEffect(() => {
     Promise.all([
       apiFetch(`/api/billing-notes/${id}`).then(r => r.json()),
-      apiFetch("/api/admin/report-templates?entity_type=billing_note").then(r => r.json()),
+      apiFetch(`/api/admin/report-templates?entity_type=${ENTITY}`).then(r => r.json()),
     ])
       .then(([docRes, tplRes]) => {
         if (docRes.error) throw new Error(docRes.error);
-        setDoc(docRes.data as BillingNoteExt);
-        const tpls = (tplRes as ReportTemplatesResponse).data?.filter(t => t.active) ?? [];
-        setTemplate(tpls.find(t => t.is_default) ?? tpls[0] ?? null);
+        setDoc(docRes.data as BillingNotePrintDoc);
+        setTemplates((tplRes as ReportTemplatesResponse).data?.filter(t => t.active) ?? []);
       })
       .catch(e => setError(e instanceof Error ? e.message : "โหลดไม่ได้"))
       .finally(() => setLoading(false));
   }, [id]);
+
+  // พรีวิวหน่วง ~200ms — PrintFrame ใช้ srcDoc ทุกครั้งที่ html เปลี่ยน iframe โหลดใหม่ (ลากแถบเลื่อนแล้วไม่กระพริบรัว)
+  const [viewPrefs, setViewPrefs] = useState<DocPrintPrefs | null>(null);
+  useEffect(() => {
+    if (!prefs) return;
+    const t = setTimeout(() => setViewPrefs(prefs), viewPrefs ? 200 : 0);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- หน่วงตาม prefs อย่างเดียว
+  }, [prefs]);
+
+  const template = templates.find(t => t.id === prefs?.template_id)
+    ?? templates.find(t => t.is_default) ?? templates[0] ?? null;
+  const tableSupported = !!template && /\{\{\{\s*lines_table\s*\}\}\}/.test(
+    `${template.header_html ?? ""}${template.body_html ?? ""}${template.footer_html ?? ""}`);
+  const fileName = docFileName("ใบวางบิล", doc?.bill_number);
 
   const html = useMemo(() => {
     if (!doc || !template) return "";
@@ -113,24 +69,71 @@ export default function PrintBillingNotePage() {
       { paper_size: template.paper_size, orientation: template.orientation,
         header_html: template.header_html, body_html: template.body_html,
         footer_html: template.footer_html, custom_css: template.custom_css },
-      buildData(doc),
+      buildBillingNoteData(doc, viewPrefs ?? defaultPrefs(ENTITY)),
     );
-  }, [doc, template]);
+  }, [doc, template, viewPrefs]);
+
+  // ลากขอบหัวคอลัมน์บนพรีวิว → ตั้งความกว้าง (ตรึงคอลัมน์อื่นตามที่เห็น · "หมายเหตุ" ได้ที่เหลือเสมอ)
+  const docRef = useRef<Document | null>(null);
+  const onDocLoad = useCallback((d: Document) => {
+    docRef.current = d;
+    attachColumnResize(d, {
+      table: ".doc-t",
+      freeze: true,
+      onResize: (key, mm, all) => setPrefs(p => {
+        if (!p) return p;
+        const widths = { ...(p.widths ?? {}) };
+        for (const [k, v] of Object.entries(all ?? {})) if (!FLEX_KEYS.has(k)) widths[k] = halfMm(v);
+        widths[key] = halfMm(mm);
+        return { ...p, widths };
+      }),
+      onReset: (key) => setPrefs(p => {
+        if (!p?.widths) return p;
+        const widths = { ...p.widths };
+        delete widths[key];
+        return { ...p, widths: Object.keys(widths).length ? widths : undefined };
+      }),
+    });
+  }, [setPrefs]);
+
+  const autoFit = useCallback(() => {
+    const d = docRef.current;
+    if (!d) return;
+    const widths = measureDocColumns(d, ".doc-t");
+    if (Object.keys(widths).length) setPrefs(p => (p ? { ...p, widths } : p));
+  }, [setPrefs]);
 
   return (
     <div className="min-h-screen bg-slate-100">
-      <PrintToolbar onBack={() => router.back()} fileName={docFileName("ใบวางบิล", doc?.bill_number)} />
-      <div className="py-6 px-4">
-        {loading ? (
-          <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
-        ) : error || !doc ? (
-          <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
-        ) : !template ? (
-          <div className="text-center py-20 text-amber-600">
-            ⚠️ ยังไม่มี template สำหรับใบวางบิล — สร้างที่ <a href="/admin/report-templates" className="underline">Admin · Report Templates</a>
-          </div>
-        ) : (
-          <PrintFrame html={html} fileName={docFileName("ใบวางบิล", doc?.bill_number)} />
+      <PrintToolbar onBack={() => router.back()} fileName={fileName} />
+      {!loading && doc && template && (
+        <div className="no-print flex justify-end px-4 pt-3">
+          <button type="button" onClick={() => setPanelOpen(v => !v)}
+            className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs ${panelOpen
+              ? "border-blue-600 bg-blue-600 font-medium text-white" : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"}`}>
+            <Icon name="settings" /> ตั้งค่าการพิมพ์
+          </button>
+        </div>
+      )}
+      <div className="flex items-start gap-4 px-4 py-4">
+        <div className="min-w-0 flex-1">
+          {loading ? (
+            <div className="text-center py-20 text-slate-400">กำลังโหลด...</div>
+          ) : error || !doc ? (
+            <div className="text-center py-20 text-red-500">⚠️ {error ?? "ไม่พบเอกสาร"}</div>
+          ) : !template ? (
+            <div className="text-center py-20 text-amber-600">
+              ⚠️ ยังไม่มี template สำหรับใบวางบิล — สร้างที่ <a href="/admin/report-templates" className="underline">Admin · Report Templates</a>
+            </div>
+          ) : (
+            <PrintFrame html={html} fileName={fileName} fit onDocLoad={onDocLoad} />
+          )}
+        </div>
+        {panelOpen && prefs && doc && template && (
+          <aside className="no-print sticky top-16 w-80 shrink-0 max-h-[calc(100vh-5rem)] overflow-y-auto">
+            <DocPrintPanel entityType={ENTITY} templates={templates} prefs={prefs} saved={saved}
+              onChange={setPrefs} onSaved={setSaved} onAutoFit={autoFit} tableSupported={tableSupported} />
+          </aside>
         )}
       </div>
     </div>
