@@ -1,5 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { albumStatus, type AlbumPostInput, type AlbumStatusInput } from "./content-album-status";
+import { albumStatus, albumReminder, bangkokToday, type AlbumPostInput, type AlbumStatusInput } from "./content-album-status";
+
+describe("content-album-status · เตือนอัลบั้ม", () => {
+  const a = (over: Partial<{ stage: "manage" | "caption" | "ready" | "posted" | "closed"; created_at: string; due_date: string | null }> = {}) =>
+    ({ stage: "caption" as const, created_at: "2026-11-01T08:00:00Z", due_date: null, ...over });
+  it("เลยวันที่ต้องลง", () => { expect(albumReminder(a({ due_date: "2026-11-02" }), "2026-11-03")).toBe("overdue"); });
+  it("ต้องลงพรุ่งนี้ (ข้ามเดือนได้)", () => { expect(albumReminder(a({ due_date: "2026-12-01" }), "2026-11-30")).toBe("due_soon"); });
+  it("รอจัดการครบ 3 วัน", () => {
+    expect(albumReminder(a({ stage: "manage" }), "2026-11-04")).toBe("stale");
+    expect(albumReminder(a({ stage: "manage" }), "2026-11-03")).toBeNull();
+  });
+  it("ลงแล้ว/ปิดแล้ว ไม่เตือน", () => {
+    expect(albumReminder(a({ stage: "posted", due_date: "2026-11-01" }), "2026-11-03")).toBeNull();
+    expect(albumReminder(a({ stage: "closed", due_date: "2026-11-01" }), "2026-11-03")).toBeNull();
+  });
+  it("วันนี้เวลาไทย: 18:00 UTC = วันถัดไปของไทย", () => { expect(bangkokToday(Date.parse("2026-11-03T18:00:00Z"))).toBe("2026-11-04"); });
+});
 
 const post = (over: Partial<AlbumPostInput> = {}): AlbumPostInput => ({
   platforms: ["facebook"], captionPlatforms: ["facebook"], platformImages: {}, imageKeys: ["k1"], postStatus: {},

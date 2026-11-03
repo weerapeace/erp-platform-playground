@@ -1,25 +1,28 @@
 "use client";
 
 /**
- * ป๊อปสร้าง/แก้ข้อมูลอัลบั้ม Contents — ชื่อ · แบรนด์ · วันที่ต้องลง · ผู้รับผิดชอบ · แพลตฟอร์มที่ตั้งใจลง · แคปชั่นร่าง
- * ใช้ของกลาง: ERPModal · ERPForm* · BrandSelect · UserPicker · PlatformIcon · useCreativeOptions (แพลตฟอร์มจากหน้าแพลตฟอร์มกลาง)
+ * ป๊อปสร้าง/แก้ข้อมูลอัลบั้ม Contents — ชื่อ · แบรนด์ · วันที่ต้องลง · ผู้รับผิดชอบ · แพลตฟอร์มที่ตั้งใจลง · สินค้าในรูป · แคปชั่นร่าง
+ * ใช้ของกลาง: ERPModal · ERPForm* · BrandSelect · UserPicker · ParentSkuPicker · PlatformIcon · useCreativeOptions (แพลตฟอร์มจากหน้าแพลตฟอร์มกลาง)
+ * แท็กสินค้าแล้วยังไม่เลือกแบรนด์ → เดาแบรนด์จากสินค้าให้ (resolveBrandFromProduct ตัวเดียวกับป๊อปโพสต์)
  */
 import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPTextarea } from "@/components/form";
 import { BrandSelect } from "@/components/brand-select";
-import { UserPicker, type UserPickerValue } from "@/components/pickers";
+import { UserPicker, ParentSkuPicker, type UserPickerValue, type ParentSkuPickerValue } from "@/components/pickers";
 import { PlatformIcon } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "@/app/tasks/use-options";
-import type { BrandOption } from "@/app/tasks/data";
-import { createContentAlbum, updateContentAlbum, type ContentAlbum } from "./data";
+import { resolveBrandFromProduct, type BrandOption } from "@/app/tasks/data";
+import { createContentAlbum, updateContentAlbum, type ContentAlbum } from "./api";
 
-type Form = { name: string; description: string; brand_id: string; due_date: string; assignees: { id: string; name: string }[]; planned_platforms: string[]; caption_draft: string };
+type Product = { id: string; code: string; name: string };
+type Form = { name: string; description: string; brand_id: string; due_date: string; assignees: { id: string; name: string }[]; planned_platforms: string[]; caption_draft: string; products: Product[] };
 const fromAlbum = (a: ContentAlbum | null, brandId?: string | null): Form => ({
   name: a?.name ?? "", description: a?.description ?? "", brand_id: a?.brand_id ?? brandId ?? "", due_date: a?.due_date ?? "",
   assignees: a?.assignees ?? [], planned_platforms: a?.planned_platforms ?? [], caption_draft: a?.caption_draft ?? "",
+  products: (a?.products ?? []).map((p) => ({ id: p.id, code: p.code, name: p.name })),
 });
 
 export function AlbumFormModal({ open, album, brands, defaultBrandId, onClose, onSaved }: {
@@ -40,6 +43,12 @@ export function AlbumFormModal({ open, album, brands, defaultBrandId, onClose, o
   const upd = (p: Partial<Form>) => { setForm((f) => ({ ...f, ...p })); setDirty(true); };
   const togglePlatform = (code: string) => upd({ planned_platforms: form.planned_platforms.includes(code) ? form.planned_platforms.filter((x) => x !== code) : [...form.planned_platforms, code] });
   const addPerson = (v: UserPickerValue | null) => { if (v && !form.assignees.some((a) => a.id === v.id)) upd({ assignees: [...form.assignees, { id: v.id, name: v.name }] }); };
+  const brandLocked = !!album?.drive_folder_id;
+  const addProduct = (v: ParentSkuPickerValue | null) => {
+    if (!v || form.products.some((p) => p.id === v.id)) return;
+    upd({ products: [...form.products, { id: v.id, code: v.code, name: v.name }] });
+    if (!form.brand_id && !brandLocked) resolveBrandFromProduct({ parentSkuId: v.id }).then((bid) => { if (bid) setForm((f) => (f.brand_id ? f : { ...f, brand_id: bid })); }).catch(() => {});
+  };
 
   const save = async () => {
     if (!form.name.trim()) { setErr(t("ใส่ชื่ออัลบั้มก่อน", "Enter an album name")); return; }
@@ -47,6 +56,7 @@ export function AlbumFormModal({ open, album, brands, defaultBrandId, onClose, o
     const fields = {
       name: form.name.trim(), description: form.description.trim() || null, brand_id: form.brand_id || null, due_date: form.due_date || null,
       assignee_ids: form.assignees.map((a) => a.id), planned_platforms: form.planned_platforms, caption_draft: form.caption_draft.trim() || null,
+      parent_sku_codes: form.products.map((p) => p.code).filter(Boolean),
     };
     try {
       const saved = album ? await updateContentAlbum(album.id, fields) : await createContentAlbum(fields);
@@ -72,7 +82,7 @@ export function AlbumFormModal({ open, album, brands, defaultBrandId, onClose, o
         </ERPFormField>
         <ERPFormField label={t("แบรนด์", "Brand")} hint={t("ใช้เลือกโฟลเดอร์ Drive ที่เก็บไฟล์", "Decides which Drive folder holds the files")}>
           <BrandSelect brands={brands} value={form.brand_id} onChange={(id) => upd({ brand_id: id })} emptyLabel={t("— เลือกแบรนด์ —", "— Pick a brand —")}
-            disabled={!!album?.drive_folder_id} title={album?.drive_folder_id ? t("อัปไฟล์ไปแล้ว เปลี่ยนแบรนด์ไม่ได้ (ไฟล์อยู่ในโฟลเดอร์แบรนด์เดิม)", "Files already uploaded — brand is locked to keep them together") : undefined} />
+            disabled={brandLocked} title={brandLocked ? t("อัปไฟล์ไปแล้ว เปลี่ยนแบรนด์ไม่ได้ (ไฟล์อยู่ในโฟลเดอร์แบรนด์เดิม)", "Files already uploaded — brand is locked to keep them together") : undefined} />
         </ERPFormField>
         <ERPFormField label={t("วันที่ต้องลง", "Post by")}>
           <ERPInput type="date" value={form.due_date} onChange={(e) => upd({ due_date: e.target.value })} />
@@ -103,6 +113,21 @@ export function AlbumFormModal({ open, album, brands, defaultBrandId, onClose, o
                 </button>
               );
             })}
+          </div>
+        </ERPFormField>
+        <ERPFormField label={t("สินค้าในรูป", "Products in the shoot")} span={2} hint={t("ตัวแรก = สินค้าหลักของโพสต์ที่สร้างจากอัลบั้ม · ยังไม่เลือกแบรนด์ ระบบเดาแบรนด์จากสินค้าให้", "First one becomes the post's main product · picks the brand if empty")}>
+          <div className="space-y-2">
+            {form.products.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {form.products.map((p) => (
+                  <span key={p.id} className="inline-flex items-center gap-1 h-7 pl-2.5 pr-1 rounded-full bg-slate-100 text-sm text-slate-700">
+                    <span className="font-mono text-xs">{p.code}</span>{p.name ? <span className="text-slate-500 truncate max-w-[160px]">{p.name}</span> : null}
+                    <button type="button" onClick={() => upd({ products: form.products.filter((x) => x.id !== p.id) })} className="w-5 h-5 grid place-items-center rounded-full hover:bg-slate-200" aria-label={t("เอาออก", "Remove")}><Icon name="cancel" size={12} /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <ParentSkuPicker value={null} onChange={addProduct} placeholder={t("+ แท็กสินค้า (Parent SKU)", "+ Tag a product (Parent SKU)")} disableCreate />
           </div>
         </ERPFormField>
         <ERPFormField label={t("แคปชั่นร่าง", "Draft caption")} span={2} hint={t("ส่งเข้าโพสต์ให้อัตโนมัติตอนกด “ส่งเข้าปฏิทิน” · ว่าง = อัลบั้มอยู่ “รอหา Caption”", "Copied into posts made from this album · empty = “Needs caption”")}>

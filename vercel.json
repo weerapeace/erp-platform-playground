@@ -5,6 +5,7 @@
     { "path": "/api/cron/lazada-token", "schedule": "30 0 * * *" },
     { "path": "/api/cron/print-uploads-purge", "schedule": "15 3 * * *" },
     { "path": "/api/cron/asset-look-hash", "schedule": "45 3 * * *" },
-    { "path": "/api/cron/content-drive-check", "schedule": "15 4 * * *" }
+    { "path": "/api/cron/content-drive-check", "schedule": "15 4 * * *" },
+    { "path": "/api/cron/content-album-reminders", "schedule": "30 2 * * *" }
   ]
 }

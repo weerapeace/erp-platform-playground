@@ -52,16 +52,23 @@ export async function syncAlbumDrive(id: string): Promise<{ added: number; remai
   return (await json<{ data: { added: number; remaining: number; missing: number; restored: number; skipped: number } }>(await send(`/api/content-albums/${id}/drive-sync`, "POST"))).data;
 }
 
-/** ค่าตั้งต้นป๊อปสร้างโพสต์จากอัลบั้ม (ใช้ร่วม: ปุ่มในอัลบั้ม + ลากอัลบั้มลงวันในปฏิทิน) — ไฟล์ที่เลือกไว้ก่อน ไม่เลือก = ทั้งอัลบั้ม (≤50) */
+/** ให้ AI ร่างแคปชั่นของอัลบั้ม (ไม่บันทึกเอง · สิทธิ์ ai.caption · มีค่าใช้จ่าย) */
+export async function aiAlbumCaption(id: string, extra?: string): Promise<{ caption: string; hashtags: string[]; images_used: number }> {
+  return await json<{ caption: string; hashtags: string[]; images_used: number }>(await send(`/api/content-albums/${id}/ai-caption`, "POST", { extra: extra ?? "" }));
+}
+
+/** ค่าตั้งต้นป๊อปสร้างโพสต์จากอัลบั้ม (ใช้ร่วม: ปุ่มในอัลบั้ม + ลากอัลบั้มลงวันในปฏิทิน) — ไฟล์ที่เลือกไว้ก่อน ไม่เลือก = ทั้งอัลบั้ม (≤50) · สินค้าแรกที่แท็ก = สินค้าหลักของโพสต์ */
 export const ALBUM_POST_MAX_FILES = 50;
 export function albumPostPreset(album: AlbumDetail): ContentCreatePreset {
   const pool = album.picked_asset_ids.length ? album.files.filter((f) => album.picked_asset_ids.includes(f.id)) : album.files;
   const ids = pool.slice(0, ALBUM_POST_MAX_FILES).map((f) => f.id);
   const hasVideo = pool.some((f) => f.asset_type === "video");
   const hasImage = pool.some((f) => f.asset_type !== "video");
+  const p = album.products[0];
   return {
     title: album.name, platforms: album.planned_platforms,
     post_types: hasVideo && hasImage ? ["image", "video"] : hasVideo ? ["video"] : ids.length > 1 ? ["album"] : ["image"],
+    ...(p ? { parent: { id: p.id, code: p.code, name: p.name, image_key: p.image_key } } : {}),
     album: { id: album.id, name: album.name, asset_ids: ids, caption: album.caption_draft },
   };
 }

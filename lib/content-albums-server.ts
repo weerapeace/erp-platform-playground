@@ -31,6 +31,7 @@ export type AlbumFile = {
   duration_sec: number | null;
   drive_file_id: string | null;
   drive_missing: boolean;
+  phash: string | null;        // ลายนิ้วมือหน้าตา (ช่วยคัดรูปคล้าย · lib/content-album-cull)
   picked: boolean;             // "รูปที่เลือกใช้"
   used_in: { content_id: string; label: string | null }[];   // โพสต์ที่ใช้ไฟล์นี้แล้ว (asset_usages)
   added_at: string | null;
@@ -58,6 +59,7 @@ export type ContentAlbum = {
   drive_folder_url: string | null;
   picked_asset_ids: string[];
   parent_sku_codes: string[];
+  products: { id: string; code: string; name: string; image_key: string | null }[];   // Parent SKU ที่แท็ก (หาจากรหัส)
   cover_asset_id: string | null;
   cover_key: string | null;       // รูปปก (ตั้งเอง → ไม่งั้นไฟล์ล่าสุด)
   preview_keys: string[];         // รูปย่อ ≤4 สำหรับการ์ด
@@ -79,7 +81,7 @@ type AlbumDbRow = {
 };
 const ALBUM_COLS = "id, brand_id, assignee_ids, due_date, planned_platforms, caption_draft, drive_folder_id, picked_asset_ids, parent_sku_codes, closed_at, trashed_at, created_by, created_at, updated_at";
 const POST_COLS = "id, content_no, title, status, is_active, scheduled_at, platforms, post_status, platform_images, platform_formats, album_id";
-const FILE_COLS = "id, title, file_name, r2_key, asset_type, content_type, size_bytes, width, height, duration_sec, drive_file_id, drive_missing_at, status";
+const FILE_COLS = "id, title, file_name, r2_key, asset_type, content_type, size_bytes, width, height, duration_sec, drive_file_id, drive_missing_at, phash, status";
 
 /** ตั้งค่าแพลตฟอร์ม (ใช้แคปชั่นไหม) — ตัวเดียวกับปฏิทิน · อ่านไม่ได้ = ถือว่าทุกแพลตฟอร์มต้องมีแคปชั่น */
 export async function loadCaptionSettings(admin: Admin): Promise<CaptionSettings> {
@@ -105,7 +107,8 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
   const ids = rows.map((r) => r.id);
   const brandIds = [...new Set(rows.map((r) => r.brand_id).filter(Boolean))] as string[];
 
-  const [{ data: cols }, { data: maps }, { data: posts }, { data: brands }, settings, people] = await Promise.all([
+  const skuCodes = [...new Set(rows.flatMap((r) => codes(r.parent_sku_codes)))];
+  const [{ data: cols }, { data: maps }, { data: posts }, { data: brands }, settings, people, { data: parents }] = await Promise.all([
     admin.from("asset_collections").select("id, name, description, cover_asset_id").in("id", ids),
     admin.from("asset_collection_map").select("collection_id, added_at, asset:assets!asset_id(id, r2_key, asset_type, status)")
       .in("collection_id", ids).order("added_at", { ascending: false }).limit(20000),
@@ -113,7 +116,10 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
     brandIds.length ? admin.from("brands").select("id, name, color").in("id", brandIds) : Promise.resolve({ data: [] as unknown[] }),
     loadCaptionSettings(admin),
     userLabelMap(admin, rows.flatMap((r) => r.assignee_ids ?? [])),
+    skuCodes.length ? admin.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key").in("code", skuCodes) : Promise.resolve({ data: [] as unknown[] }),
   ]);
+  const parentByCode = new Map(((parents ?? []) as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null }[])
+    .map((p) => [p.code, { id: p.id, code: p.code, name: p.name_th ?? "", image_key: p.cover_image_r2_key }]));
   const colMap = new Map(((cols ?? []) as { id: string; name: string; description: string | null; cover_asset_id: string | null }[]).map((c) => [c.id, c]));
   const brandMap = new Map(((brands ?? []) as { id: string; name: string; color: string | null }[]).map((b) => [b.id, b]));
 
@@ -156,6 +162,7 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
       drive_folder_id: r.drive_folder_id, drive_folder_url: r.drive_folder_id ? driveFolderUrl(r.drive_folder_id) : null,
       picked_asset_ids: (r.picked_asset_ids ?? []).filter((id) => files.some((f) => f.id === id)),
       parent_sku_codes: codes(r.parent_sku_codes),
+      products: codes(r.parent_sku_codes).map((c) => parentByCode.get(c)).filter((p): p is { id: string; code: string; name: string; image_key: string | null } => !!p),
       cover_asset_id: coverId, cover_key: cover?.r2_key ?? null,
       preview_keys: files.filter((f) => f.id !== cover?.id).slice(0, 3).map((f) => f.r2_key),
       file_count: files.length, video_count: files.filter((f) => f.asset_type === "video").length,
@@ -175,7 +182,7 @@ export async function loadAlbumFiles(admin: Admin, albumId: string, pickedIds: s
   const { data, error } = await admin.from("asset_collection_map").select(`added_at, asset:assets!asset_id(${FILE_COLS})`)
     .eq("collection_id", albumId).order("added_at", { ascending: false }).limit(2000);
   if (error) throw new Error(error.message);
-  type F = { id: string; title: string; file_name: string; r2_key: string; asset_type: string; content_type: string | null; size_bytes: number | null; width: number | null; height: number | null; duration_sec: number | null; drive_file_id: string | null; drive_missing_at: string | null; status: string };
+  type F = { id: string; title: string; file_name: string; r2_key: string; asset_type: string; content_type: string | null; size_bytes: number | null; width: number | null; height: number | null; duration_sec: number | null; drive_file_id: string | null; drive_missing_at: string | null; phash: string | null; status: string };
   const rows = ((data ?? []) as { added_at: string | null; asset: F | F[] | null }[])
     .map((m) => ({ added_at: m.added_at, a: Array.isArray(m.asset) ? m.asset[0] : m.asset }))
     .filter((m): m is { added_at: string | null; a: F } => !!m.a && m.a.status === "active");
@@ -190,7 +197,7 @@ export async function loadAlbumFiles(admin: Admin, albumId: string, pickedIds: s
   return rows.map(({ added_at, a }) => ({
     id: a.id, title: a.title || a.file_name, file_name: a.file_name, r2_key: a.r2_key, asset_type: a.asset_type, content_type: a.content_type,
     size_bytes: a.size_bytes, width: a.width, height: a.height, duration_sec: a.duration_sec == null ? null : Number(a.duration_sec),
-    drive_file_id: a.drive_file_id, drive_missing: !!a.drive_missing_at, picked: picked.has(a.id), used_in: useMap.get(a.id) ?? [], added_at,
+    drive_file_id: a.drive_file_id, drive_missing: !!a.drive_missing_at, phash: a.phash, picked: picked.has(a.id), used_in: useMap.get(a.id) ?? [], added_at,
   }));
 }
 

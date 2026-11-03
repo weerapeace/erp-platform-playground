@@ -53,6 +53,30 @@ const PLAT_PROGRESS: Record<AlbumPlatState, number> = { manage: 0, caption: 1, f
 const platStage = (s: AlbumPlatState): Exclude<AlbumStage, "closed"> =>
   s === "posted" ? "posted" : s === "manage" ? "manage" : s === "caption" ? "caption" : "ready";
 
+/**
+ * เตือนอัลบั้มไหม (cron รายวัน /api/cron/content-album-reminders + ป้ายบนการ์ด)
+ *   overdue = เลยวันที่ต้องลงแล้วยังไม่ลงครบ · due_soon = ต้องลงพรุ่งนี้ · stale = "รอจัดการ" มานาน ≥ STALE_DAYS วัน
+ *   ลงแล้ว / ปิดแล้ว = ไม่เตือน · today = YYYY-MM-DD เวลาไทย
+ */
+export const STALE_DAYS = 3;
+export type AlbumReminder = "overdue" | "due_soon" | "stale";
+export const ALBUM_REMINDER_META: Record<AlbumReminder, { th: string; en: string }> = {
+  overdue: { th: "เลยวันที่ต้องลง", en: "Overdue" },
+  due_soon: { th: "ต้องลงพรุ่งนี้", en: "Due tomorrow" },
+  stale: { th: `รอจัดการเกิน ${STALE_DAYS} วัน`, en: `Waiting over ${STALE_DAYS} days` },
+};
+export function albumReminder(a: { stage: AlbumStage; created_at: string; due_date: string | null }, today: string): AlbumReminder | null {
+  if (a.stage === "posted" || a.stage === "closed") return null;
+  if (a.due_date && a.due_date < today) return "overdue";
+  const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
+  if (a.due_date === tomorrow) return "due_soon";
+  const days = Math.floor((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${a.created_at.slice(0, 10)}T00:00:00Z`)) / 86400000);
+  if (a.stage === "manage" && days >= STALE_DAYS) return "stale";
+  return null;
+}
+/** วันนี้ (YYYY-MM-DD) ตามเวลาไทย — เซิร์ฟเวอร์อยู่ UTC */
+export const bangkokToday = (now = Date.now()) => new Date(now + 7 * 3600000).toISOString().slice(0, 10);
+
 /** โพสต์ที่ยังนับ (ไม่ถูกยกเลิก/ปิด) */
 export const isLiveAlbumPost = (p: { status: string; isActive: boolean }) => p.isActive && p.status !== "cancelled";
 

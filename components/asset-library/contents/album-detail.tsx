@@ -3,7 +3,8 @@
 /**
  * หน้าในอัลบั้ม Contents (ป๊อปเต็มจอ)
  *   ที่อยู่ใน Drive + ลากไฟล์มาวาง (ตัวจริงขึ้น Drive ทีละชิ้น วิ่งเบื้องหลัง ปิดป๊อปได้) · กริดไฟล์ (เลือกใช้ / ตั้งปก / ใช้แล้วที่โพสต์ไหน / หายจาก Drive)
- *   สถานะต่อแพลตฟอร์ม + โพสต์ที่สร้างจากอัลบั้ม · แคปชั่นร่าง · ส่งเข้าปฏิทิน (ป๊อปสร้างโพสต์กลาง ContentCreateModal)
+ *   สถานะต่อแพลตฟอร์ม + โพสต์ที่สร้างจากอัลบั้ม · แคปชั่นร่าง (+ AI ร่าง) · ส่งเข้าปฏิทิน (ป๊อปสร้างโพสต์กลาง ContentCreateModal)
+ *   ช่วยคัดรูป (เบลอ/คล้าย · ./cull) · ดาวน์โหลดทั้งอัลบั้มเป็น zip (lib/zip)
  * ใช้ของกลาง: ERPModal · ConfirmDialog · UploadProgress · runBackgroundTask · ContentCreateModal · askDuplicateUploads (ผ่าน ./data)
  * สิทธิ์: แก้/อัป assets.upload · ลบไฟล์ assets.delete · ลบอัลบั้ม assets.manage · สร้างโพสต์ tasks.create
  */
@@ -18,11 +19,14 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { UploadProgress } from "@/components/upload-progress";
 import { runBackgroundTask } from "@/lib/background-tasks";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { downloadImagesAsZip } from "@/lib/zip";
+import { askConfirm } from "@/components/modal/ask-dialog";
+import { analyzeAlbumPhotos } from "./cull";
 import { formatBytes } from "@/lib/assets";
 import { useCreativeOptions } from "@/app/tasks/use-options";
 import { listCampaigns, type BrandOption } from "@/app/tasks/data";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
-import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, uploadFilesToAlbum, syncAlbumDrive,
+import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, uploadFilesToAlbum, syncAlbumDrive, aiAlbumCaption,
   albumPostPreset, pendingUploadsFor, clearPendingUploads,
   type AlbumDetail, type AlbumDriveInfo, type AlbumFile, type AlbumUploadStep, type PendingUpload } from "./data";
 import { StageBadge, PlatChip, FileThumb } from "./album-bits";
@@ -62,6 +66,10 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [zipMsg, setZipMsg] = useState<string | null>(null);
+  const [cullMsg, setCullMsg] = useState<string | null>(null);
+  const [cull, setCull] = useState<{ blurry: Set<string>; groupOf: Map<string, number>; groups: number; keep: string[]; checked: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const canEdit = can("assets.upload");
   const refreshPending = useCallback(() => setPending(pendingUploadsFor(albumId)), [albumId]);
@@ -168,6 +176,61 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
     finally { setSyncing(null); }
   };
 
+  // ✨ AI ร่างแคปชั่นจากรูปที่เลือก + การ์ดแบรนด์ (ไม่บันทึกเอง ให้ตรวจแล้วกดบันทึก)
+  const aiCaption = async () => {
+    if (caption.trim() && !(await askConfirm({ title: t("ให้ AI เขียนทับแคปชั่นเดิม?", "Replace the current caption?"), message: t("แคปชั่นที่เขียนไว้จะถูกแทนที่ (ยังไม่บันทึกจนกว่าจะกดบันทึก)", "The current text will be replaced (not saved until you press save)"), confirmText: t("เขียนใหม่", "Rewrite") }))) return;
+    setAiBusy(true);
+    try {
+      const r = await aiAlbumCaption(albumId);
+      setCaption([r.caption, r.hashtags.join(" ")].filter(Boolean).join("\n\n"));
+      toast.success(r.images_used ? t(`AI ร่างจาก ${r.images_used} รูปแล้ว — ตรวจแล้วกดบันทึก`, `Drafted from ${r.images_used} photo(s) — review and save`) : t("AI ร่างแล้ว (ไม่มีรูปให้ดู) — ตรวจแล้วกดบันทึก", "Drafted without photos — review and save"));
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setAiBusy(false); }
+  };
+
+  // ⬇ ดาวน์โหลดรูปทั้งอัลบั้ม (ต้นฉบับจาก Drive · ไฟล์ใหญ่เกิน 30MB ใช้รูปย่อ) — วิดีโอไม่รวม (เปิดจาก Drive)
+  const downloadZip = async () => {
+    if (!album) return;
+    const photos = (album.picked_asset_ids.length ? album.files.filter((f) => f.picked) : album.files).filter((f) => f.asset_type !== "video");
+    if (!photos.length) { toast.error(t("ไม่มีรูปให้ดาวน์โหลด (วิดีโอเปิดจาก Drive)", "No photos to download (open videos in Drive)")); return; }
+    const big = 30 * 1024 * 1024;
+    const useOriginal = (f: AlbumFile) => !!f.drive_file_id && !f.drive_missing && (f.size_bytes ?? 0) <= big;
+    const total = photos.reduce((n, f) => n + (useOriginal(f) ? f.size_bytes ?? 0 : 0), 0);
+    if (total > 600 * 1024 * 1024 && !(await askConfirm({ title: t("ไฟล์รวมใหญ่มาก", "Very large download"), message: t(`รวมราว ${Math.round(total / 1048576)} MB อาจใช้เวลานานและกินหน่วยความจำเครื่อง — ดาวน์โหลดต่อไหม?`, `About ${Math.round(total / 1048576)} MB — continue?`), confirmText: t("ดาวน์โหลด", "Download") }))) return;
+    setZipMsg(t("กำลังเตรียม…", "Preparing…"));
+    try {
+      const n = await downloadImagesAsZip(photos.map((f) => ({
+        url: useOriginal(f) ? `/api/drive-video/${f.drive_file_id}` : (r2ImageUrl(f.r2_key) ?? ""),
+        name: f.file_name,
+      })), album.name || "album", (d, tot) => setZipMsg(t(`กำลังโหลด ${d}/${tot}`, `Downloading ${d}/${tot}`)));
+      if (!n) toast.error(t("โหลดรูปไม่ได้เลย ลองใหม่อีกครั้ง", "Couldn't download any photo"));
+      else toast.success(t(`ดาวน์โหลด ${n} รูปแล้ว${album.video_count ? ` (วิดีโอ ${album.video_count} ไฟล์ เปิดจาก Drive)` : ""}`, `${n} photo(s) downloaded`));
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setZipMsg(null); }
+  };
+
+  // 🔍 ช่วยคัดรูป: รูปอาจเบลอ + รูปคล้ายกัน (ถ่ายรัว) → แนะนำรูปที่ควรเก็บ (ไม่มีค่าใช้จ่าย)
+  const runCull = async () => {
+    if (!album) return;
+    setCullMsg(t("กำลังดูรูป…", "Checking photos…"));
+    try {
+      const r = await analyzeAlbumPhotos(album.files, (d, tot) => setCullMsg(t(`กำลังดูรูป ${d}/${tot}`, `Checking ${d}/${tot}`)));
+      const groupOf = new Map<string, number>();
+      r.groups.forEach((g, i) => g.forEach((id) => groupOf.set(id, i + 1)));
+      setCull({ blurry: new Set(r.blurry), groupOf, groups: r.groups.length, keep: r.keep, checked: r.checked });
+      if (!r.blurry.length && !r.groups.length) toast.success(t(`ดู ${r.checked} รูปแล้ว ไม่เจอรูปเบลอหรือรูปซ้ำ`, `Checked ${r.checked} photos — nothing to cull`));
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setCullMsg(null); }
+  };
+  const applyCull = async () => {
+    if (!album || !cull) return;
+    // วิดีโอไม่ได้ถูกตรวจ → คงสถานะเลือกเดิมของวิดีโอไว้
+    const keep = [...cull.keep, ...album.files.filter((f) => f.asset_type === "video" && f.picked).map((f) => f.id)];
+    if (album.picked_asset_ids.length && !(await askConfirm({ title: t("แทนรูปที่เลือกไว้?", "Replace current picks?"), message: t(`ตอนนี้เลือกไว้ ${album.picked_asset_ids.length} ไฟล์ — จะเปลี่ยนเป็น ${keep.length} ไฟล์ตามที่แนะนำ`, `Currently ${album.picked_asset_ids.length} picked — switch to ${keep.length} suggested`), confirmText: t("ใช้ตามที่แนะนำ", "Use suggestions") }))) return;
+    await patch({ picked_asset_ids: keep }, t(`เลือกใช้ ${keep.length} ไฟล์ตามที่แนะนำแล้ว`, `${keep.length} file(s) picked`));
+    setCull(null);
+  };
+
   const files = album?.files ?? [];
   const pickedCount = album?.picked_asset_ids.length ?? 0;
   return (
@@ -200,6 +263,12 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
             {album.assignees.length > 0 && <span className="inline-flex items-center gap-1 text-slate-600"><Icon name="user" />{album.assignees.map((p) => p.name).filter(Boolean).join(", ")}</span>}
             {canEdit && <button onClick={() => setEditOpen(true)} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"><Icon name="edit" />{t("แก้ข้อมูล", "Edit")}</button>}
           </div>
+          {album.products.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <Icon name="tag" />
+              {album.products.map((p) => <span key={p.id} className="inline-flex items-center gap-1 h-6 px-2 rounded-full bg-slate-100 text-slate-700"><span className="font-mono">{p.code}</span>{p.name ? <span className="text-slate-500 truncate max-w-[180px]">{p.name}</span> : null}</span>)}
+            </div>
+          )}
           {album.description && <p className="text-sm text-slate-600 whitespace-pre-line">{album.description}</p>}
 
           {/* ที่อยู่ใน Drive */}
@@ -274,7 +343,13 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
 
           {/* แคปชั่นร่าง */}
           <section className="space-y-2">
-            <h3 className="text-sm font-semibold text-slate-700">{t("แคปชั่นร่าง", "Draft caption")}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-700">{t("แคปชั่นร่าง", "Draft caption")}</h3>
+              {canEdit && can("ai.caption") && (
+                <button onClick={() => void aiCaption()} disabled={aiBusy || !files.length} title={t("AI ดูรูปที่เลือกใช้ (สูงสุด 4 รูป) + การ์ดรู้จักแบรนด์ แล้วร่างแคปชั่น · มีค่าใช้จ่ายเล็กน้อยต่อครั้ง", "AI looks at up to 4 picked photos + the brand card · small cost per use")}
+                  className="ml-auto inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-violet-200 text-xs text-violet-700 hover:bg-violet-50 disabled:opacity-50"><Icon name="ai" />{aiBusy ? t("AI กำลังเขียน…", "AI writing…") : t("AI ร่างแคปชั่น", "AI draft")}</button>
+              )}
+            </div>
             <textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} disabled={!canEdit}
               placeholder={t("เขียนแคปชั่นไว้ก่อน ตอนส่งเข้าปฏิทินจะใส่ให้ทุกแพลตฟอร์ม", "Write a caption — it's copied into every platform of new posts")}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:bg-slate-50" />
@@ -292,7 +367,25 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
               <h3 className="text-sm font-semibold text-slate-700">{t(`ไฟล์ในอัลบั้ม (${files.length})`, `Files (${files.length})`)}</h3>
               {pickedCount > 0 && <span className="text-xs text-violet-700">{t(`เลือกใช้ ${pickedCount} ไฟล์`, `${pickedCount} picked`)}</span>}
               {canEdit && files.length > 0 && <span className="text-xs text-slate-400">{t("ติ๊กมุมซ้าย = เลือกใช้ (ส่งเข้าโพสต์เฉพาะที่เลือก) · ดาว = ปกอัลบั้ม", "Tick = pick for posts · star = cover")}</span>}
+              {files.length > 0 && (
+                <span className="ml-auto flex flex-wrap gap-2">
+                  {canEdit && files.some((f) => f.asset_type !== "video") && (
+                    <button onClick={() => void runCull()} disabled={!!cullMsg} title={t("หารูปที่อาจเบลอ + รูปคล้ายกันที่ถ่ายรัว แล้วแนะนำรูปที่ควรเก็บ (ไม่มีค่าใช้จ่าย)", "Find blurry and burst look-alike photos, suggest which to keep (free)")}
+                      className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-60"><Icon name="inspect" />{cullMsg ?? t("ช่วยคัดรูป", "Help me cull")}</button>
+                  )}
+                  <button onClick={() => void downloadZip()} disabled={!!zipMsg} title={t("รูปต้นฉบับทั้งอัลบั้ม (หรือเฉพาะที่เลือกใช้) เป็นไฟล์ zip · วิดีโอเปิดจาก Drive", "All photos (or picked ones) as a zip · videos stay in Drive")}
+                    className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-60"><Icon name="download" />{zipMsg ?? (pickedCount ? t("ดาวน์โหลดที่เลือก (zip)", "Download picked (zip)") : t("ดาวน์โหลดทั้งอัลบั้ม (zip)", "Download all (zip)"))}</button>
+                </span>
+              )}
             </div>
+            {cull && (cull.blurry.size > 0 || cull.groups > 0) && (
+              <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border border-sky-200 bg-sky-50 text-sm text-sky-800">
+                <Icon name="inspect" />
+                <span className="min-w-0 flex-1">{t(`ดู ${cull.checked} รูป · อาจเบลอ ${cull.blurry.size} รูป · รูปคล้ายกัน ${cull.groups} ชุด → แนะนำเก็บ ${cull.keep.length} รูป (ชุดคล้ายเก็บรูปที่คมสุด)`, `${cull.checked} checked · ${cull.blurry.size} maybe blurry · ${cull.groups} look-alike sets → keep ${cull.keep.length}`)}</span>
+                {canEdit && <button onClick={() => void applyCull()} className="h-7 px-2.5 rounded-lg bg-sky-600 text-white text-xs font-medium hover:bg-sky-700">{t("เลือกใช้ตามที่แนะนำ", "Pick suggested")}</button>}
+                <button onClick={() => setCull(null)} className="text-xs text-sky-700 hover:underline">{t("ปิด", "Dismiss")}</button>
+              </div>
+            )}
             {files.length === 0 ? (
               <p className="text-sm text-slate-500 py-6 text-center">{t("ยังไม่มีไฟล์ — ลากรูป/วิดีโอมาวางด้านบน", "No files yet — drop photos/videos above")}</p>
             ) : (
@@ -318,6 +411,8 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
                       )}
                       <div className="absolute inset-x-0 bottom-0 flex flex-wrap gap-0.5 p-1 pointer-events-none pr-8">
                         {f.drive_missing && <span className="px-1 rounded bg-red-600 text-white text-[10px]">{t("หายจาก Drive", "Missing in Drive")}</span>}
+                        {cull?.blurry.has(f.id) && <span className="px-1 rounded bg-amber-500 text-white text-[10px]">{t("อาจเบลอ", "Blurry?")}</span>}
+                        {cull?.groupOf.has(f.id) && <span className={`px-1 rounded text-white text-[10px] ${cull.keep.includes(f.id) ? "bg-sky-600" : "bg-slate-500"}`}>{t(`คล้าย #${cull.groupOf.get(f.id)}`, `Alike #${cull.groupOf.get(f.id)}`)}{cull.keep.includes(f.id) ? " ★" : ""}</span>}
                         {f.used_in.length > 0 && <span className="px-1 rounded bg-emerald-600 text-white text-[10px]" title={f.used_in.map((u) => u.label).filter(Boolean).join(", ")}>{t(`ใช้แล้ว ${f.used_in.length}`, `Used ${f.used_in.length}`)}</span>}
                       </div>
                     </div>

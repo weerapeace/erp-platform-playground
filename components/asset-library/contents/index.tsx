@@ -16,14 +16,13 @@ import { Icon } from "@/components/icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { useCreativeOptions } from "@/app/tasks/use-options";
 import { listBrands, type BrandOption } from "@/app/tasks/data";
-import { ALBUM_STAGES, ALBUM_STAGE_META, type AlbumStage } from "@/lib/content-album-status";
-import { listContentAlbums, updateContentAlbum, type ContentAlbum } from "./data";
+import { ALBUM_STAGES, ALBUM_STAGE_META, albumReminder, bangkokToday, type AlbumStage } from "@/lib/content-album-status";
+import { listContentAlbums, updateContentAlbum, type ContentAlbum } from "./api";
 import { StageBadge, PlatChip, FileThumb } from "./album-bits";
 import { AlbumFormModal } from "./album-form-modal";
 import { AlbumDetailModal } from "./album-detail";
 
 const DAY = 86400000;
-const STALE_DAYS = 3;   // "รอจัดการ" นานเกินนี้ = ขึ้นป้ายค้าง
 
 export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: string | null }) {
   const t = useT();
@@ -55,7 +54,8 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
   const q = search.trim().toLowerCase();
   const filtered = albums.filter((a) =>
     (!brandId || a.brand_id === brandId) &&
-    (!q || a.name.toLowerCase().includes(q) || (a.description ?? "").toLowerCase().includes(q) || a.assignees.some((p) => p.name.toLowerCase().includes(q))));
+    (!q || a.name.toLowerCase().includes(q) || (a.description ?? "").toLowerCase().includes(q) || a.assignees.some((p) => p.name.toLowerCase().includes(q))
+      || a.products.some((p) => p.code.toLowerCase().includes(q) || p.name.toLowerCase().includes(q))));
   const counts = useMemo(() => {
     const m = new Map<string, number>([["all", filtered.length]]);
     for (const a of filtered) m.set(a.status.stage, (m.get(a.status.stage) ?? 0) + 1);
@@ -69,7 +69,7 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
     catch (e) { toast.error((e as Error).message); }
   };
 
-  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const todayKey = bangkokToday();
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start gap-3">
@@ -104,7 +104,7 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative w-full sm:w-64">
           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"><Icon name="search" /></span>
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("ค้นชื่ออัลบั้ม / คน", "Search album / person")}
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("ค้นชื่ออัลบั้ม / คน / รหัสสินค้า", "Search album / person / product")}
             className="w-full h-9 pl-8 pr-3 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
         </div>
         {brandsInUse.length > 1 && (
@@ -132,8 +132,10 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
         <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
           {shown.map((a) => {
             const due = a.due_date ? new Date(`${a.due_date}T00:00:00`) : null;
-            const overdue = !!due && due < today && a.status.stage !== "posted" && a.status.stage !== "closed";
-            const staleDays = a.status.stage === "manage" ? Math.floor((Date.now() - new Date(a.created_at).getTime()) / DAY) : 0;
+            // กติกาเดียวกับกระดิ่งเตือนรายวัน (lib/content-album-status albumReminder)
+            const reminder = albumReminder({ stage: a.status.stage, created_at: a.created_at, due_date: a.due_date }, todayKey);
+            const overdue = reminder === "overdue";
+            const staleDays = reminder === "stale" ? Math.floor((Date.now() - new Date(a.created_at).getTime()) / DAY) : 0;
             return (
               <div key={a.id} className="group bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-md hover:border-slate-300 transition">
                 <button onClick={() => (trash ? undefined : setDetailId(a.id))} className="block w-full text-left" disabled={trash}>
@@ -157,10 +159,16 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
                         {a.status.platforms.map((p) => <PlatChip key={p.code} code={p.code} state={p.state} label={platMeta.get(p.code)?.label} iconKey={platMeta.get(p.code)?.icon_key} compact />)}
                       </div>
                     )}
-                    {(due || staleDays >= STALE_DAYS) && (
+                    {a.products.length > 0 && (
+                      <div className="flex flex-wrap gap-1 text-[11px]">
+                        {a.products.slice(0, 3).map((p) => <span key={p.id} className="px-1.5 h-5 inline-flex items-center rounded bg-slate-100 font-mono text-slate-600" title={p.name}>{p.code}</span>)}
+                        {a.products.length > 3 && <span className="text-slate-400">+{a.products.length - 3}</span>}
+                      </div>
+                    )}
+                    {(due || reminder === "stale") && (
                       <div className="flex flex-wrap gap-1.5 text-xs">
-                        {due && <span className={`inline-flex items-center gap-1 ${overdue ? "text-red-600 font-medium" : "text-slate-500"}`}><Icon name="calendar" />{t("ลงภายใน", "Post by")} {due.toLocaleDateString("th-TH", { day: "numeric", month: "short" })}{overdue ? ` · ${t("เลยกำหนด", "overdue")}` : ""}</span>}
-                        {staleDays >= STALE_DAYS && <span className="inline-flex items-center gap-1 text-amber-700"><Icon name="waiting" />{t(`ค้าง ${staleDays} วัน`, `${staleDays} days waiting`)}</span>}
+                        {due && <span className={`inline-flex items-center gap-1 ${overdue ? "text-red-600 font-medium" : reminder === "due_soon" ? "text-amber-700 font-medium" : "text-slate-500"}`}><Icon name="calendar" />{t("ลงภายใน", "Post by")} {due.toLocaleDateString("th-TH", { day: "numeric", month: "short" })}{overdue ? ` · ${t("เลยกำหนด", "overdue")}` : reminder === "due_soon" ? ` · ${t("พรุ่งนี้", "tomorrow")}` : ""}</span>}
+                        {reminder === "stale" && <span className="inline-flex items-center gap-1 text-amber-700"><Icon name="waiting" />{t(`ค้าง ${staleDays} วัน`, `${staleDays} days waiting`)}</span>}
                       </div>
                     )}
                   </div>

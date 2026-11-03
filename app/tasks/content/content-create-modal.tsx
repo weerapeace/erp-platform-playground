@@ -32,6 +32,8 @@ export type ContentCreatePreset = {
   title?: string; platforms?: string[]; platform_formats?: Record<string, string>; post_types?: string[];
   /** สร้างจากอัลบั้ม Contents (คลังไฟล์) — โพสต์ผูกอัลบั้ม + แนบไฟล์ที่เลือก (ชี้ไฟล์เดิมใน Drive) + แคปชั่นร่างลงทุกแพลตฟอร์ม */
   album?: { id: string; name: string; asset_ids: string[]; caption?: string | null };
+  /** สินค้าหลัก (Parent SKU) ตั้งต้น — เช่น สินค้าที่แท็กไว้ในอัลบั้ม */
+  parent?: ParentSkuPickerValue;
 };
 export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns, defaultBrandId, defaultDate, preset = null, pushToast }: {
   preset?: ContentCreatePreset | null;   // เติมค่าตั้งต้น (เช่น ปฏิทินโหมด Story: ชื่อ + IG/FB + รูปแบบ story)
@@ -67,7 +69,7 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       const rec = (recRef.current[String(day)] ?? [])[0]?.time;
       sched = `${sched}T${rec || "10:00"}`;
     }
-    setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched, ...(preset?.title ? { title: preset.title } : {}), ...(preset?.platforms ? { platforms: preset.platforms } : {}), ...(preset?.post_types ? { post_types: preset.post_types } : {}) });
+    setForm({ ...emptyForm(), brand_id: defaultBrandId ?? "", scheduled_at: sched, ...(preset?.title ? { title: preset.title } : {}), ...(preset?.platforms ? { platforms: preset.platforms } : {}), ...(preset?.post_types ? { post_types: preset.post_types } : {}), ...(preset?.parent ? { parent: preset.parent } : {}) });
     setDirty(false); setFormErr(null); setChildren([]); setSkuIds([]); setExtras([]); brandTouchedRef.current = !!defaultBrandId;
   }, [open, defaultBrandId, defaultDate, preset]);
 
