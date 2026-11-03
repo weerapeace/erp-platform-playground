@@ -7,7 +7,7 @@
  *          แท็บออเดอร์ 1 ใบ (./journey) · ป้ายเพิ่งแก้ (FlowEdge.changed) · พิมพ์ /print/flow-map
  * ใช้ที่ /master/flow-map · แก้เนื้อหาแผนผังที่ lib/flow-map.ts ที่เดียว (ดู docs/flow-map.md)
  */
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent, type ReactNode } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
@@ -20,8 +20,38 @@ import { FM_W, FM_H, FM_CX, FM_BAND_LABELS, fmXY, layoutFlowView, isRecentEdge, 
 import { FlowRequestBox, FlowBasketPanel, useFlowBasket } from "./request";
 import { FlowMetricListModal } from "./metric-list";
 import { FlowJourney } from "./journey";
+import { useFlowNotes, FlowSticky, FlowNoteList, FLOW_NOTE_W } from "./notes";
+import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
+import type { FlowNote, FlowNoteAttach } from "@/lib/flow-map-notes";
 
 type Sel = { k: "n"; id: string } | { k: "e"; id: string } | null;
+
+/** คำแนะนำของเส้น — ควรทำอัตโนมัติไหม · ข้อดี · ข้อเสีย · จุดเสี่ยง · flow แบบอื่น (lib/flow-map-advice.ts) */
+function AdviceBox({ id }: { id: string }) {
+  const t = useT();
+  const a = FLOW_ADVICE[id];
+  if (!a) return null;
+  const v = FLOW_ADVICE_VERDICTS[a.verdict];
+  const list = (title: string, items: string[] | undefined, mark: ReactNode) => items?.length ? (
+    <div className="mt-2">
+      <div className="text-[11px] text-slate-500">{title}</div>
+      {items.map((x) => <div key={x} className="flex gap-1.5 text-[12.5px] text-slate-700 mt-0.5"><span className="shrink-0 w-3 text-center" aria-hidden="true">{mark}</span>{x}</div>)}
+    </div>
+  ) : null;
+  return (
+    <div className="mt-3 rounded-lg border border-violet-100 bg-violet-50/30 p-3">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[13px] font-medium text-slate-800 flex items-center gap-1.5"><Icon value="💡" />{t("ควรทำอัตโนมัติไหม?", "Automate this?")}</span>
+        <span className={`text-[11px] px-2 py-0.5 rounded-md border ${v.chip}`}>{t("แนะนำ", "Suggest")}: {v.label}</span>
+      </div>
+      <div className="mt-1 text-[12.5px] text-slate-700">{a.why}</div>
+      {list(t("ข้อดีถ้าทำ", "Pros"), a.pros, <span className="text-green-600">+</span>)}
+      {list(t("ข้อเสีย / ทำไมไม่ทำอัตโนมัติเต็ม", "Cons"), a.cons, <span className="text-amber-600">−</span>)}
+      {list(t("จุดเสี่ยงตอนนี้", "Risks now"), a.risks, <span className="text-red-600">!</span>)}
+      {list(t("flow แบบอื่นที่ควรพิจารณา", "Other flows to consider"), a.alts, <span className="text-violet-600">→</span>)}
+    </div>
+  );
+}
 type Health = Partial<Record<FlowMetricKey, number | null>>;
 const JOURNEY = "journey";
 
@@ -75,6 +105,11 @@ function MetricRows({ keys, health, onOpen }: { keys?: FlowMetricKey[]; health: 
 export function FlowMap() {
   const t = useT();
   const basket = useFlowBasket();
+  const notesApi = useFlowNotes();
+  const [placeMode, setPlaceMode] = useState(false);
+  const [showNotes, setShowNotes] = useState(true);
+  const [editingNote, setEditingNote] = useState<string | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
   const [viewKey, setViewKey] = useState("ov");
   const [sel, setSel] = useState<Sel>(null);
   const [basketOpen, setBasketOpen] = useState(false);
@@ -117,6 +152,42 @@ export function FlowMap() {
     return !d || d.a === id || d.b === id;
   };
   const pick = (s: Sel) => { setSel(s); setBasketOpen(false); };
+
+  // ── โน้ตแปะ ──
+  const promptNotes = notesApi.notes.map((n) => ({ attach: n.attach, text: n.text, author: n.author }));
+  const notesOf = (kind: "n" | "e", id: string) => notesApi.notes.filter((n) => n.attach?.kind === kind && n.attach.id === id);
+  const viewNotes = isJourney ? [] : notesApi.notes.filter((n) => n.view === view.key);
+  const svgPoint = (e: RMouseEvent): [number, number] => {
+    const r = svgRef.current?.getBoundingClientRect();
+    if (!r || !r.width) return [20, 20];
+    return [(e.clientX - r.left) * 680 / r.width, (e.clientY - r.top) * view.height / r.height];
+  };
+  const addNote = (vKey: string, x: number, y: number, attach: FlowNoteAttach) => {
+    const id = notesApi.add({ text: "", color: "yellow", view: vKey, x: Math.round(Math.min(680 - FLOW_NOTE_W, Math.max(0, x))), y: Math.round(Math.max(0, y)), attach });
+    setShowNotes(true); setEditingNote(id); setPlaceMode(false);
+  };
+  /** ปุ่ม "แปะโน้ต" ในแผงรายละเอียด — วางใกล้กล่อง/เลขของเส้นในผังที่ดูอยู่ (แท็บออเดอร์ = วางบนภาพรวม) */
+  const addNoteFor = (kind: "n" | "e", id: string) => {
+    const v = isJourney ? FLOW_VIEWS[0] : view;
+    const lay = layoutFlowView(v);
+    let at: [number, number] = [24, 24];
+    if (kind === "n" && v.pos[id]) { const [x, y] = fmXY(v.pos[id]); at = [x + FM_W - 30, Math.max(0, y - 60)]; }
+    if (kind === "e") { const d = lay.find((x) => x.id === id); if (d) at = [d.badge[0] + 12, Math.max(0, d.badge[1] - 70)]; }
+    if (isJourney) setViewKey(v.key);
+    addNote(v.key, at[0], at[1], { kind, id });
+  };
+  const openNote = (n: FlowNote) => { if (n.view !== viewKey) setViewKey(n.view); setShowNotes(true); setEditingNote(n.mine ? n.id : null); };
+  const onMapClick = (e: RMouseEvent<SVGSVGElement>) => { if (placeMode) { const [x, y] = svgPoint(e); addNote(view.key, x - 10, y - 10, null); } };
+  const onNodeClick = (e: RMouseEvent, id: string, picked: boolean) => {
+    e.stopPropagation();
+    if (placeMode) { const [x, y] = svgPoint(e); addNote(view.key, x - 10, y - 10, { kind: "n", id }); return; }
+    pick(picked ? null : { k: "n", id });
+  };
+  const onEdgeClick = (e: RMouseEvent, id: string, toggle: boolean) => {
+    e.stopPropagation();
+    if (placeMode) { const [x, y] = svgPoint(e); addNote(view.key, x - 10, y - 10, { kind: "e", id }); return; }
+    pick(toggle && sel?.k === "e" && sel.id === id ? null : { k: "e", id });
+  };
   const pickView = (k: string) => { setViewKey(k); setSel(null); };
 
   const rowFor = (id: string, a: string, b: string, type: FlowEdgeType) => (
@@ -125,7 +196,9 @@ export function FlowMap() {
       <NumBadge n={numOf(id)} type={type} />
       <span className="flex-1 min-w-0">
         <span className="block text-[13px] text-slate-800">{FLOW_NODES[a].label} → {FLOW_NODES[b].label}</span>
-        <span className="block text-[12px] text-slate-500">{FLOW_EDGES[id].title} <RecentPill id={id} /></span>
+        <span className="block text-[12px] text-slate-500">{FLOW_EDGES[id].title} <RecentPill id={id} />
+          {FLOW_ADVICE[id] && FLOW_ADVICE[id].verdict !== "keep" && type !== "auto" && <span className="text-violet-600"> · {t("แนะนำ", "Suggest")}: {FLOW_ADVICE_VERDICTS[FLOW_ADVICE[id].verdict].label}</span>}
+        </span>
       </span>
       <TypeChip type={type} />
     </button>
@@ -134,7 +207,7 @@ export function FlowMap() {
 
   let panel: ReactNode;
   if (basketOpen) {
-    panel = <FlowBasketPanel basket={basket} health={health} onClose={() => setBasketOpen(false)} onPick={(kind, ref) => pick(kind === "n" ? { k: "n", id: ref } : { k: "e", id: ref })} />;
+    panel = <FlowBasketPanel basket={basket} health={health} notes={promptNotes} onClose={() => setBasketOpen(false)} onPick={(kind, ref) => pick(kind === "n" ? { k: "n", id: ref } : { k: "e", id: ref })} />;
   } else if (sel?.k === "e") {
     const x = FLOW_EDGES[sel.id];
     const d = isJourney ? undefined : drawn.find((e) => e.id === sel.id);   // บางผังเปลี่ยนต้น/ปลายเพื่อวาด (เช่น ภาพรวม) — แท็บออเดอร์ใช้ของจริง
@@ -160,7 +233,9 @@ export function FlowMap() {
           <div className="mt-1 font-mono break-all">{x.files.join(" · ")}</div>
           {x.workflow && <div className="mt-1 font-mono">npm run where-used -- {x.workflow}</div>}
         </details>
-        <FlowRequestBox kind="e" target={sel.id} gaps={gaps} health={health} basket={basket} />
+        <AdviceBox id={sel.id} />
+        <FlowNoteList notes={notesOf("e", sel.id)} onAdd={() => addNoteFor("e", sel.id)} onEdit={openNote} />
+        <FlowRequestBox kind="e" target={sel.id} gaps={gaps} health={health} basket={basket} notes={promptNotes} />
         {closeBtn}
       </div>
     );
@@ -194,7 +269,8 @@ export function FlowMap() {
               {n.gaps.map((g) => <div key={g} className="flex gap-1.5 text-red-700 mt-0.5"><span aria-hidden="true">•</span>{g}</div>)}
             </div>
           ) : null}
-          <FlowRequestBox kind="n" target={sel.id} gaps={n.gaps ?? []} health={health} basket={basket} />
+          <FlowNoteList notes={notesOf("n", sel.id)} onAdd={() => addNoteFor("n", sel.id)} onEdit={openNote} />
+          <FlowRequestBox kind="n" target={sel.id} gaps={n.gaps ?? []} health={health} basket={basket} notes={promptNotes} />
           {closeBtn}
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-2">
@@ -263,6 +339,17 @@ export function FlowMap() {
               <LineSample type={k} />{FLOW_EDGE_TYPES[k].label} <span className="tabular-nums text-slate-400">{counts[k]}</span>
             </button>
           ))}
+          <span className="mx-1 h-5 w-px bg-slate-200" aria-hidden="true" />
+          <button type="button" aria-pressed={placeMode} onClick={() => { setPlaceMode((p) => !p); setShowNotes(true); }}
+            className={`h-8 px-2.5 inline-flex items-center gap-1.5 text-[12px] rounded-lg border ${placeMode ? "bg-amber-400 text-amber-950 border-amber-400" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+            <Icon value="📝" />{placeMode ? t("แตะบนผังเพื่อแปะ… (กดอีกครั้งยกเลิก)", "Tap the map to place… (click to cancel)") : t("แปะโน้ต", "Add note")}
+          </button>
+          {viewNotes.length > 0 && (
+            <button type="button" aria-pressed={showNotes} onClick={() => setShowNotes((s) => !s)}
+              className={`h-8 px-2.5 inline-flex items-center gap-1.5 text-[12px] rounded-lg border bg-white border-slate-200 text-slate-600 hover:bg-slate-50 ${showNotes ? "" : "opacity-50"}`}>
+              {showNotes ? t(`ซ่อนโน้ต ${viewNotes.length}`, `Hide notes ${viewNotes.length}`) : t(`แสดงโน้ต ${viewNotes.length}`, `Show notes ${viewNotes.length}`)}
+            </button>
+          )}
         </>}
       </div>
 
@@ -271,7 +358,8 @@ export function FlowMap() {
           <FlowJourney onPickNode={(id) => pick({ k: "n", id })} onPickEdge={(id) => pick({ k: "e", id })} />
         ) : (
           <div className="rounded-xl border border-slate-200 bg-white p-2 overflow-x-auto">
-            <svg viewBox={`0 0 680 ${view.height}`} className="w-full min-w-[560px] h-auto" role="img" aria-label={t(`แผนผัง${view.label}`, `${view.label} map`)}>
+            <svg ref={svgRef} viewBox={`0 0 680 ${view.height}`} onClick={onMapClick} role="img" aria-label={t(`แผนผัง${view.label}`, `${view.label} map`)}
+              className={`w-full min-w-[560px] h-auto ${placeMode ? "cursor-copy" : ""}`}>
               <defs>
                 <marker id="fm-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                   <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
@@ -294,14 +382,14 @@ export function FlowMap() {
                 return (
                   <g key={e.id} opacity={edgeOn(e) ? 1 : 0.12}>
                     <path d={e.d} fill="none" stroke={ty.color} strokeWidth={e.type === "missing" ? 2 : 1.5} strokeDasharray={ty.dash} strokeLinecap="round" markerEnd="url(#fm-arrow)" />
-                    <path d={e.d} fill="none" stroke="transparent" strokeWidth={10} className="cursor-pointer" onClick={() => pick({ k: "e", id: e.id })} />
+                    <path d={e.d} fill="none" stroke="transparent" strokeWidth={10} className="cursor-pointer" onClick={(ev) => onEdgeClick(ev, e.id, false)} />
                   </g>
                 );
               })}
               {Object.entries(view.pos).map(([id, p]) => {
                 const [x, y] = fmXY(p), n = FLOW_NODES[id], g = isGray(id), on = nodeOn(id), picked = sel?.k === "n" && sel.id === id;
                 return (
-                  <g key={id} className="cursor-pointer" opacity={on ? 1 : 0.4} onClick={() => pick(picked ? null : { k: "n", id })}>
+                  <g key={id} className="cursor-pointer" opacity={on ? 1 : 0.4} onClick={(ev) => onNodeClick(ev, id, picked)}>
                     <title>{n.label}</title>
                     <rect x={x} y={y} width={FM_W} height={FM_H} rx={8} fill={g ? "#f8fafc" : "#eef2ff"} stroke={picked ? "#4f46e5" : g ? "#cbd5e1" : "#a5b4fc"} strokeWidth={picked ? 2 : 0.75} />
                     <text x={x + FM_W / 2} y={y + 16} textAnchor="middle" dominantBaseline="central" fontSize={13} fontWeight={600} fill={g ? "#334155" : "#312e81"}>{n.label}</text>
@@ -313,7 +401,7 @@ export function FlowMap() {
               {shown.map((e) => {
                 const ty = FLOW_EDGE_TYPES[e.type];
                 return (
-                  <g key={`b${e.id}`} className="cursor-pointer" opacity={edgeOn(e) ? 1 : 0.12} onClick={() => pick(sel?.k === "e" && sel.id === e.id ? null : { k: "e", id: e.id })}>
+                  <g key={`b${e.id}`} className="cursor-pointer" opacity={edgeOn(e) ? 1 : 0.12} onClick={(ev) => onEdgeClick(ev, e.id, true)}>
                     <title>{FLOW_EDGES[e.id].title}</title>
                     <circle cx={e.badge[0]} cy={e.badge[1]} r={9} fill="#fff" stroke={ty.color} strokeWidth={1.5} />
                     <text x={e.badge[0]} y={e.badge[1]} textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700} fill={ty.color}>{e.i + 1}</text>
@@ -321,11 +409,16 @@ export function FlowMap() {
                   </g>
                 );
               })}
+              {showNotes && viewNotes.map((n) => (
+                <FlowSticky key={n.id} note={n} api={notesApi} editing={editingNote === n.id} onEdit={setEditingNote}
+                  svgWidth={() => svgRef.current?.getBoundingClientRect().width ?? 680} />
+              ))}
             </svg>
             <div className="px-2 pt-1 text-[11px] text-slate-400 flex flex-wrap gap-x-3">
               <span><span className="inline-block w-2 h-2 rounded-full bg-red-600 mr-1 align-middle" />{t("มีช่องโหว่ / ตัวเลขที่ต้องตาม", "Gap or number to follow")}</span>
               <span><span className="inline-block w-2 h-2 rounded-full bg-violet-600 mr-1 align-middle" />{t(`เพิ่งแก้ (${FLOW_RECENT_DAYS} วัน)`, `Updated (${FLOW_RECENT_DAYS} days)`)}</span>
               <span>{t("กล่องสีเทา = อยู่ส่วนอื่น", "Grey box = other area")}</span>
+              <span>{t("โน้ต: ลากแถบบนเพื่อย้าย · กดรูปกุญแจ/คน สลับส่วนตัว ↔ ทั้งทีม", "Notes: drag the top strip · toggle private / team")}</span>
             </div>
           </div>
         )}

@@ -3,8 +3,11 @@
  * รายการอยากแก้ผูกกับกล่อง (kind "n") หรือเส้น (kind "e") → แนบข้อมูลของส่วนนั้นจาก lib/flow-map.ts ให้ AI เริ่มงานถูกที่
  */
 import { FLOW_NODES, FLOW_EDGES, FLOW_EDGE_TYPES, FLOW_METRICS, FLOW_AREA_LABEL, type FlowMetricKey } from "@/lib/flow-map";
+import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
 
 export type FlowRequestItem = { kind: "n" | "e"; ref: string; text: string };
+/** โน้ตแปะที่ติดส่วนนั้น (แนบไปกับ prompt เป็นบริบทจากทีม) */
+export type FlowPromptNote = { attach: { kind: "n" | "e"; id: string } | null; text: string; author: string | null };
 export type FlowPromptOpts = { links: boolean; numbers: boolean; planFirst: boolean };
 export const FLOW_PROMPT_DEFAULTS: FlowPromptOpts = { links: true, numbers: true, planFirst: true };
 type Health = Partial<Record<FlowMetricKey, number | null>> | null;
@@ -30,7 +33,7 @@ function workflowsOf(kind: "n" | "e", ref: string): string[] {
   return ids.map((id) => FLOW_EDGES[id]?.workflow).filter((w): w is string => !!w);
 }
 
-export function buildFlowPrompt(items: FlowRequestItem[], health: Health, opts: FlowPromptOpts = FLOW_PROMPT_DEFAULTS): string {
+export function buildFlowPrompt(items: FlowRequestItem[], health: Health, opts: FlowPromptOpts = FLOW_PROMPT_DEFAULTS, notes: FlowPromptNote[] = []): string {
   const groups = new Map<string, { kind: "n" | "e"; ref: string; texts: string[] }>();
   for (const it of items) {
     const k = `${it.kind}:${it.ref}`;
@@ -66,7 +69,14 @@ export function buildFlowPrompt(items: FlowRequestItem[], health: Health, opts: 
       if (e.warn) L.push(`- ระวัง: ${e.warn}`);
       if (opts.links) L.push(`- ไฟล์ที่ทำจริง: ${e.files.join(", ")}`);
       if (opts.numbers && e.metrics?.length) L.push(`- ตัวเลขตอนนี้: ${metricLine(e.metrics, health)}`);
+      const adv = FLOW_ADVICE[g.ref];
+      if (adv) {
+        L.push(`- คำแนะนำในแผนผัง: ${FLOW_ADVICE_VERDICTS[adv.verdict].label} — ${adv.why}`);
+        if (adv.alts?.length) L.push(`  · flow ทางเลือก: ${adv.alts.join(" / ")}`);
+      }
     }
+    const pinned = notes.filter((x) => x.attach?.kind === g.kind && x.attach.id === g.ref && x.text.trim());
+    if (pinned.length) L.push(`- โน้ตที่ทีมแปะไว้: ${pinned.map((x) => `“${x.text.trim()}”${x.author ? ` (${x.author})` : ""}`).join(" · ")}`);
     workflowsOf(g.kind, g.ref).forEach((w) => wf.add(w));
     L.push("สิ่งที่เจ้าของอยากแก้:");
     if (g.texts.length) g.texts.forEach((t, i) => L.push(`${i + 1}. ${t}`));

@@ -4,7 +4,38 @@ import { resolve } from "node:path";
 import { FLOW_NODES, FLOW_EDGES, FLOW_VIEWS, FLOW_METRICS, FLOW_JOURNEY, FLOW_ISSUE_APP } from "@/lib/flow-map";
 import { flowGeometryProblems, isRecentEdge } from "@/lib/flow-map-layout";
 import { buildFlowPrompt } from "@/lib/flow-map-prompt";
+import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
+import { cleanFlowNote, FLOW_NOTE_MAX } from "@/lib/flow-map-notes";
 import { WORKFLOWS } from "@/lib/workflow-registry";
+
+describe("แผนผังการทำงาน — คำแนะนำ + โน้ต", () => {
+  it("คำแนะนำชี้เส้นที่มีอยู่จริง · คำตัดสินมีป้าย · มีเหตุผล", () => {
+    for (const [id, a] of Object.entries(FLOW_ADVICE)) {
+      expect(FLOW_EDGES[id], `ไม่มีเส้น ${id}`).toBeTruthy();
+      expect(FLOW_ADVICE_VERDICTS[a.verdict], id).toBeTruthy();
+      expect(a.why.length, id).toBeGreaterThan(5);
+    }
+  });
+  it("เส้นที่ยังไม่เชื่อม / คนต้องกด มีคำแนะนำครบทุกเส้น", () => {
+    const missing = Object.entries(FLOW_EDGES).filter(([id, e]) => (e.type === "missing" || e.type === "manual") && !FLOW_ADVICE[id]).map(([id]) => id);
+    expect(missing).toEqual([]);
+  });
+  it("ตัวตรวจโน้ต: ข้อความยาวตัด · สี/ตำแหน่งผิดใช้ค่าตั้งต้น · ผังผิด = null", () => {
+    const d = cleanFlowNote({ text: "ก".repeat(FLOW_NOTE_MAX + 50), color: "ม่วง", view: "ov", x: 9999, y: -5, attach: { kind: "e", id: "S4" } });
+    expect(d?.text.length).toBe(FLOW_NOTE_MAX);
+    expect(d?.color).toBe("yellow");
+    expect(d?.x).toBeLessThanOrEqual(680);
+    expect(d?.y).toBe(0);
+    expect(d?.attach).toEqual({ kind: "e", id: "S4" });
+    expect(cleanFlowNote({ text: "x", view: "<script>" })).toBeNull();
+    expect(cleanFlowNote({ text: "x", view: "ov", attach: { kind: "x", id: "1" } })?.attach).toBeNull();
+  });
+  it("prompt แนบคำแนะนำของเส้น + โน้ตที่แปะไว้", () => {
+    const p = buildFlowPrompt([{ kind: "e", ref: "P1", text: "ทำกึ่งอัตโนมัติ" }], null, undefined, [{ attach: { kind: "e", id: "P1" }, text: "ซิปต้องสั่งคู่หัวซิป", author: "ตุ้ย" }]);
+    expect(p).toContain("คำแนะนำในแผนผัง");
+    expect(p).toContain("ซิปต้องสั่งคู่หัวซิป");
+  });
+});
 
 describe("แผนผังการทำงาน — การวาดและของเสริม", () => {
   it("ทุกผัง: เส้นไม่ทับกล่องอื่น · เลขบนเส้นไม่ซ้อนกัน/ไม่ชนกล่อง · ไม่หลุดขอบ", () => {

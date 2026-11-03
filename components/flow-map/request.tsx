@@ -12,7 +12,7 @@ import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { Icon } from "@/components/icon";
 import { FLOW_NODES, FLOW_EDGES, FLOW_ISSUE_APP, type FlowMetricKey } from "@/lib/flow-map";
-import { buildFlowPrompt, flowSourceLabel, FLOW_PROMPT_DEFAULTS, type FlowPromptOpts, type FlowRequestItem } from "@/lib/flow-map-prompt";
+import { buildFlowPrompt, flowSourceLabel, FLOW_PROMPT_DEFAULTS, type FlowPromptOpts, type FlowRequestItem, type FlowPromptNote } from "@/lib/flow-map-prompt";
 
 type Health = Partial<Record<FlowMetricKey, number | null>> | null;
 const BASKET_KEY = "erp.flowMap.basket";
@@ -85,8 +85,8 @@ function OptionToggles({ opts, setOpts }: { opts: FlowPromptOpts; setOpts: (o: F
 }
 
 /** ปุ่มชุดเดียวกันใช้ทั้งกล่องคำขอและตะกร้า */
-function ActionButtons({ items, health, opts, basket, onAdded, onSent }: {
-  items: FlowRequestItem[]; health: Health; opts: FlowPromptOpts; basket?: FlowBasket; onAdded?: () => void; onSent?: () => void;
+function ActionButtons({ items, health, opts, notes, basket, onAdded, onSent }: {
+  items: FlowRequestItem[]; health: Health; opts: FlowPromptOpts; notes: FlowPromptNote[]; basket?: FlowBasket; onAdded?: () => void; onSent?: () => void;
 }) {
   const t = useT();
   const toast = useToast();
@@ -96,7 +96,7 @@ function ActionButtons({ items, health, opts, basket, onAdded, onSent }: {
   const need = () => { if (items.length) return true; toast.error(t("เลือกหรือพิมพ์สิ่งที่อยากแก้อย่างน้อย 1 ข้อก่อน", "Pick or type at least one item")); return false; };
   const copy = async () => {
     if (!need()) return;
-    const text = buildFlowPrompt(items, health, opts);
+    const text = buildFlowPrompt(items, health, opts, notes);
     setPreview(text);
     if (await copyText(text)) toast.success(t("คัดลอก prompt แล้ว — วางในแชท Claude / Codex ได้เลย", "Prompt copied"));
     else toast.error(t("คัดลอกอัตโนมัติไม่ได้ — คลุมข้อความด้านล่างแล้วคัดลอกเอง", "Copy failed — select the text below"));
@@ -105,7 +105,7 @@ function ActionButtons({ items, health, opts, basket, onAdded, onSent }: {
     if (!need() || busy) return;
     setBusy(true);
     try {
-      await sendToIssueReport(items, buildFlowPrompt(items, health, opts), user?.name ?? null);
+      await sendToIssueReport(items, buildFlowPrompt(items, health, opts, notes), user?.name ?? null);
       toast.success(t("ส่งเข้า “แจ้งปัญหาการใช้งาน” แล้ว — ติดตามสถานะได้ที่หน้าแจ้งปัญหา", "Sent to issue reports"));
       onSent?.();
     } catch (e) { toast.error(e instanceof Error ? e.message : t("ส่งไม่สำเร็จ", "Send failed")); }
@@ -140,8 +140,8 @@ function ActionButtons({ items, health, opts, basket, onAdded, onSent }: {
 }
 
 /** กล่อง "อยากแก้อะไรในส่วนนี้" ในแผงรายละเอียดของกล่อง/เส้น */
-export function FlowRequestBox({ kind, target: refId, gaps, health, basket }: {
-  kind: "n" | "e"; target: string; gaps: string[]; health: Health; basket: FlowBasket;
+export function FlowRequestBox({ kind, target: refId, gaps, health, basket, notes }: {
+  kind: "n" | "e"; target: string; gaps: string[]; health: Health; basket: FlowBasket; notes: FlowPromptNote[];
 }) {
   const t = useT();
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -179,13 +179,13 @@ export function FlowRequestBox({ kind, target: refId, gaps, health, basket }: {
         </div>
       ))}
       <div className="mt-2"><OptionToggles opts={opts} setOpts={setOpts} /></div>
-      <ActionButtons items={items} health={health} opts={opts} basket={basket} onAdded={() => { setPicked(new Set()); setOwn([]); }} />
+      <ActionButtons items={items} health={health} opts={opts} notes={notes} basket={basket} onAdded={() => { setPicked(new Set()); setOwn([]); }} />
     </div>
   );
 }
 
 /** ตะกร้ารายการแก้ — รวมหลายส่วน แล้วสร้าง prompt เดียว / ส่งเข้ารายงานปัญหา */
-export function FlowBasketPanel({ basket, health, onClose, onPick }: { basket: FlowBasket; health: Health; onClose: () => void; onPick: (kind: "n" | "e", ref: string) => void }) {
+export function FlowBasketPanel({ basket, health, notes, onClose, onPick }: { basket: FlowBasket; health: Health; notes: FlowPromptNote[]; onClose: () => void; onPick: (kind: "n" | "e", ref: string) => void }) {
   const t = useT();
   const [opts, setOpts] = useState<FlowPromptOpts>(FLOW_PROMPT_DEFAULTS);
   return (
@@ -210,7 +210,7 @@ export function FlowBasketPanel({ basket, health, onClose, onPick }: { basket: F
             ))}
           </div>
           <div className="mt-2"><OptionToggles opts={opts} setOpts={setOpts} /></div>
-          <ActionButtons items={basket.items} health={health} opts={opts} onSent={basket.clear} />
+          <ActionButtons items={basket.items} health={health} opts={opts} notes={notes} onSent={basket.clear} />
           <button type="button" onClick={basket.clear} className="mt-2 text-[12px] text-slate-500 hover:text-red-600">{t("ล้างตะกร้า", "Clear basket")}</button>
         </>
       )}
