@@ -9,16 +9,17 @@ import { useT } from "@/components/i18n";
 import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { CostLine } from "@/app/api/design-sheets/[id]/cost-lines/route";
+import { cleanExtra, type SnapExtra } from "@/lib/design-sheet-cost-snapshot";
 
-export type PullExtra = { label: string; amount: number };
+export type PullExtra = SnapExtra;   // คงแบบ "หารจำนวนสั่ง" (ค่าบล็อก) มาด้วย
 export type PullMode = "append" | "replace";
 type Source = { sheet: DesignSheetListItem; lines: CostLine[]; extra: unknown; generalLabel: string; codes: string[]; drafts: string[] };
 
 const fmt = (n: number | null | undefined, d = 2) => (n == null ? "—" : Number(n).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: d }));
 const pkey = (s: string | null | undefined) => s ?? "";
 const arrOf = (a: unknown): PullExtra[] => (Array.isArray(a) ? a : [])
-  .map((c) => ({ label: String((c as PullExtra)?.label ?? ""), amount: Number((c as PullExtra)?.amount) || 0 }))
-  .filter((c) => c.label || c.amount);
+  .map(cleanExtra)
+  .filter((c) => c.label || c.amount || c.total);
 // ค่าใช้จ่ายเพิ่มของแท็บต้นทาง: เก็บได้ทั้ง object {แท็บ: [...]} (ใหม่) และ array (เดิม = แท็บทั่วไป)
 const extraOf = (raw: unknown, key: string): PullExtra[] =>
   raw && !Array.isArray(raw) && typeof raw === "object" ? arrOf((raw as Record<string, unknown>)[key]) : key === "" ? arrOf(raw) : [];

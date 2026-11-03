@@ -13,12 +13,36 @@ export type SnapLine = {
   waste_percent?: number | null; divisor?: number | null;
   qty?: number | null; uom?: string | null; unit_price?: number | null; amount?: number | null; note?: string | null;
 };
-export type SnapExtra = { label: string; amount: number };
+/** ค่าใช้จ่ายเพิ่ม 1 รายการ — amount = "ต่อชิ้น" เสมอ (ใบพิมพ์/เวอร์ชัน/มือถือ อ่าน amount ได้เลย)
+ *  mode "split" = ค่าจ่ายครั้งเดียวต่อการสั่ง เช่น ค่าบล็อกสกรีน/แม่พิมพ์ (เจ้าของขอ 2026-11-03)
+ *  → total = ยอดรวม · split_qty = จำนวนที่สั่ง · amount = total ÷ split_qty (คำนวณใหม่ทุกครั้งใน cleanExtra) */
+export type SnapExtra = { label: string; amount: number; mode?: "split"; total?: number; split_qty?: number | null };
 export type SnapExtraMap = Record<string, SnapExtra[]>;
 export type SnapTotals = Record<string, { material: number; extra: number; total: number }>;
 
 const n = (v: unknown): number | null => (v == null || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
 const r2 = (v: number) => Math.round(v * 100) / 100;
+
+/** ต่อชิ้นของค่าแบบหารจำนวนสั่ง (ยังไม่มีจำนวน = 0 — หน้าจอเตือนให้ใส่) */
+export const splitPerUnit = (total: number, qty: number | null | undefined): number =>
+  qty != null && qty > 0 ? Math.round((total / qty) * 10000) / 10000 : 0;
+
+/** ต่อชิ้นของรายการนี้ "ถ้าสั่ง qty ชิ้น" (ไม่ส่ง qty = ใช้จำนวนที่บันทึกไว้) — ใช้คิดต้นทุนตามขั้นจำนวนตอนเสนอราคา */
+export const extraAmountAt = (e: SnapExtra, qty?: number | null): number =>
+  e.mode === "split" ? splitPerUnit(n(e.total) ?? 0, qty ?? e.split_qty) : (n(e.amount) ?? 0);
+
+/** ทำความสะอาดค่าใช้จ่ายเพิ่ม 1 รายการ (ใช้ทั้ง API และหน้าจอ) — คงฟิลด์หารจำนวนสั่ง + คิด amount ใหม่ให้ตรงเสมอ */
+export function cleanExtra(raw: unknown): SnapExtra {
+  const c = (raw ?? {}) as Partial<SnapExtra>;
+  const label = String(c.label ?? "");
+  if (c.mode === "split") {
+    const total = n(c.total) ?? 0;
+    const q = n(c.split_qty);
+    const split_qty = q != null && q > 0 ? q : null;
+    return { label, amount: splitPerUnit(total, split_qty), mode: "split", total, split_qty };
+  }
+  return { label, amount: n(c.amount) ?? 0 };
+}
 
 /** ตัดฟิลด์ที่ไม่ใช่ "เนื้อหา" ออก (id/key/prev_item/price_ack/sort_order) ให้เทียบกันได้ตรง ๆ */
 export function normalizeSnapLine(l: SnapLine): SnapLine {

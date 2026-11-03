@@ -37,7 +37,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
   quotes: DesignSheetQuote[];
   sizes: Size[];                                  // ไซส์/แท็บทั้งหมดของใบ (เรียงตามแท็บตีราคา)
   sizeLabel: (code: string | null) => string;
-  currentCost: (key: string) => number;           // ตีราคาปัจจุบันของไซส์ (รวมที่ยังไม่บันทึก)
+  currentCost: (key: string, qty?: number | null) => number;   // ตีราคาปัจจุบันของไซส์ (รวมที่ยังไม่บันทึก) · ส่ง qty = คิดค่าแบบ "หารจำนวนสั่ง" (ค่าบล็อก) ตามจำนวนนั้น
   canEdit: boolean;
   costDirty: boolean; saveCost: () => Promise<boolean>;   // เพิ่มครั้งใหม่ → บันทึกตีราคาที่ค้างก่อน
   onReload: () => Promise<void>;
@@ -110,7 +110,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
     void patchCell(q, { offered_price: n });
   };
   const addCell = (b: Batch, size: string, qty: number | null) => call(async () => {
-    const cost = currentCost(size);
+    const cost = currentCost(size, qty);
     await api(`/api/design-sheets/${sheetId}/quotes`, json({ quote_date: b.date ?? todayStr(), price: cost > 0 ? cost : null, offered_price: cost > 0 ? cost : null, qty, status: b.status === "mixed" ? "pending" : b.status, note: null, parent_code: size, batch: b.batch }, "POST"));
   }, tr("เพิ่มช่องแล้ว — กดตัวเลขเพื่อแก้ราคาที่เสนอ", "Cell added — click the number to edit the offered price"));
 
@@ -203,7 +203,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
                 <tbody>
                   {b.sizes.map((size) => {
                     const first = b.quotes.find((q) => (q.parent_code ?? "") === size);
-                    const costAt = first?.price ?? null; const cur = currentCost(size); const dCost = costAt != null && cur > 0 ? cur - costAt : null;
+                    const costAt = first?.price ?? null; const cur = currentCost(size, first?.qty); const dCost = costAt != null && cur > 0 ? cur - costAt : null;
                     return (
                       <tr key={size} className="border-t border-slate-100">
                         <td className="px-3 py-1.5 text-xs font-medium text-slate-700">{sizeLabel(size)}</td>
@@ -279,7 +279,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
   copiedFrom?: number | null;   // คัดลอกมาจากครั้งที่ (โชว์ที่หัวฟอร์ม)
   editing?: Batch | null;       // ✏️ แก้ไขการ์ดนี้ (null = เสนอครั้งใหม่)
   onReload?: () => Promise<void>;   // แก้ไขแล้วพลาดกลางทาง → โหลดของจริงมาโชว์
-  sheetId: string; nextBatch: number; sizes: Size[]; sizeLabel: (code: string | null) => string; currentCost: (key: string) => number;
+  sheetId: string; nextBatch: number; sizes: Size[]; sizeLabel: (code: string | null) => string; currentCost: (key: string, qty?: number | null) => number;
   last: Batch | null; costDirty: boolean; saveCost: () => Promise<boolean>; onClose: () => void; onSaved: (batch: number) => Promise<void>;
 }) {
   const t = useT();
@@ -325,7 +325,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
     setCells((m) => { const n = { ...m }; for (const s of rowSizes) { const a = key(s.key, from); if (a in n) { n[key(s.key, to)] = n[a]; delete n[a]; } } return n; });
     setOrigQty((o) => { const n = { ...o }; if (qtyKey(from) in n) { n[qtyKey(to)] = n[qtyKey(from)]; delete n[qtyKey(from)]; } return n; });
   };
-  const fillFromCost = () => setCells((m) => { const n = { ...m }; for (const s of rowSizes) for (const qty of qtys) { const c = currentCost(s.key); if (c > 0 && !n[key(s.key, qty)]) n[key(s.key, qty)] = String(Math.round(c * 100) / 100); } return n; });
+  const fillFromCost = () => setCells((m) => { const n = { ...m }; for (const s of rowSizes) for (const qty of qtys) { const c = currentCost(s.key, qty); if (c > 0 && !n[key(s.key, qty)]) n[key(s.key, qty)] = String(Math.round(c * 100) / 100); } return n; });
   // ± บาท ทุกช่อง (เจ้าของขอ 2026-10-21: "+10 → 400 เป็น 410, 380 เป็น 390") — เฉพาะช่องที่ใส่ราคาแล้ว + ไซส์ที่ติ๊ก · ช่องว่างไม่แตะ
   const [shift, setShift] = useState("");
   const shiftAll = () => {
@@ -400,7 +400,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
         ...changes.map((c) => call(`/api/design-sheets/${sheetId}/quotes/${c.id}`, json(c.patch, "PATCH"))),
       ]);
       for (const a of adds) {   // ทีละช่อง — API นับเลข round ต่อจากล่าสุด ยิงพร้อมกันจะชนกัน
-        const c = currentCost(a.parent_code);
+        const c = currentCost(a.parent_code, a.qty);
         await call(`/api/design-sheets/${sheetId}/quotes`, json({
           quote_date: newDate ?? todayStr(), price: c > 0 ? Math.round(c * 100) / 100 : null, offered_price: a.offered, qty: a.qty,
           status: newStatus ?? "pending", note: newNote, parent_code: a.parent_code, batch: b.batch,
@@ -419,7 +419,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
     for (const s of sizes.filter((x) => onSizes.includes(x.key))) for (const qty of qtys) {
       const v = cells[key(s.key, qty)]?.trim(); if (!v) continue;
       const n = Number(v); if (!Number.isFinite(n) || n < 0) { toast.error(tr(`ราคา ${sizeLabel(s.key)} ${qty ?? ""} ไม่ถูกต้อง`, `Invalid price: ${sizeLabel(s.key)} ${qty ?? ""}`)); return; }
-      const c = currentCost(s.key);
+      const c = currentCost(s.key, qty);
       list.push({ parent_code: s.key, qty, price: c > 0 ? Math.round(c * 100) / 100 : null, offered_price: n });
     }
     if (!list.length) { toast.error(tr("ใส่ราคาที่เสนออย่างน้อย 1 ช่อง", "Enter at least 1 offered price")); return; }

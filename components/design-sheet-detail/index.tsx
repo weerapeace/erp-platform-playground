@@ -55,7 +55,7 @@ import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route
 import type { CostLine, PrevItem } from "@/app/api/design-sheets/[id]/cost-lines/route";
 import { CostVersionsModal } from "./cost-versions";
 import { QuoteRounds } from "./quote-rounds";
-import { normalizeSnapLine, type SnapExtra, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
+import { normalizeSnapLine, cleanExtra, extraAmountAt, type SnapExtra, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
 import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
@@ -67,7 +67,9 @@ const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-
 const OrderBatchEntryModal = dynamic(() => import("@/components/order-batch-entry").then((m) => m.OrderBatchEntryModal), { ssr: false });
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
-type CostExtra = { label: string; amount: number };
+// ค่าใช้จ่ายเพิ่ม: amount = ต่อชิ้นเสมอ · mode "split" = ค่าครั้งเดียวหารจำนวนสั่ง (ค่าบล็อกสกรีน) — สูตรอยู่ lib/design-sheet-cost-snapshot
+type CostExtra = SnapExtra;
+const SPLIT_TIERS = [100, 200, 500, 1000] as const;   // "ถ้าสั่ง…" ใต้สรุปต้นทุน = ขั้นจำนวนที่ใช้เสนอราคาบ่อย
 // ค่าใช้จ่ายเพิ่มเริ่มต้น (แก้/ลบ/เพิ่มได้) — ชื่อพวกนี้ "ถูกบันทึกเป็นข้อมูล" ของใบงาน (ไปโผล่ในใบพิมพ์ต้นทุน)
 // → คงภาษาไทยเสมอ ไม่แปลตามภาษาคนกด (กันข้อมูลในระบบปนไทย/อังกฤษ) — เหมือนข้อมูลอื่นที่คนพิมพ์เอง
 const defaultCostExtra = (): CostExtra[] => [
@@ -557,11 +559,40 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const extraTotal = costExtra.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const grandTotal = costTotal + extraTotal;                              // ต้นทุนสินค้าของ Parent นี้ (รวมทั้งหมด)
   // ต้นทุนสินค้ารวม (วัสดุ+ค่าใช้จ่าย) ของไซส์/แท็บใด ๆ — ใช้เด้งราคาตอนเสนอราคาตามไซส์
-  const totalForParent = useCallback((key: string) => {
+  // qty = คิดค่าแบบ "หารจำนวนสั่ง" ตามจำนวนนั้น (ขั้นราคาตอนเสนอราคา) · ไม่ส่ง = ใช้จำนวนที่ตั้งไว้ในตีราคา
+  const totalForParent = useCallback((key: string, qty?: number | null) => {
     const mat = costLines.filter((r) => pkey(r.parent_code) === key).reduce((s, r) => s + (r.amount || 0), 0);
-    const ex = (costExtraMap[key] ?? []).reduce((s, c) => s + (Number(c.amount) || 0), 0);
+    const ex = (costExtraMap[key] ?? []).reduce((s, c) => s + extraAmountAt(c, qty), 0);
     return Math.round((mat + ex) * 100) / 100;
   }, [costLines, costExtraMap]);
+  // จำนวนที่สั่ง — ใช้หารค่าแบบ "หารจำนวนสั่ง" (ค่าบล็อกสกรีน) ของแท็บที่ดูอยู่ (เจ้าของขอ 2026-11-03)
+  // ลำดับ: จำนวนที่บันทึกในรายการ > ที่พิมพ์ค้าง > รอบเสนอราคาล่าสุดของแท็บนี้ (ขั้นจำนวนน้อยสุด = ต่อชิ้นสูงสุด ปลอดภัยไว้ก่อน)
+  const quoteQtyFor = useCallback((key: string): number | null => {
+    const withQty = quotes.filter((q) => (q.qty ?? 0) > 0);
+    const mine = withQty.filter((q) => pkey(q.parent_code) === key);
+    const pool = mine.length ? mine : withQty;
+    if (!pool.length) return null;
+    const batchOf = (q: DesignSheetQuote) => q.batch ?? q.round;
+    const last = Math.max(...pool.map(batchOf));
+    return Math.min(...pool.filter((q) => batchOf(q) === last).map((q) => q.qty as number));
+  }, [quotes]);
+  const [orderQtyDraft, setOrderQtyDraft] = useState<Record<string, number | null>>({});
+  const hasSplitExtra = costExtra.some((c) => c.mode === "split");
+  const savedSplitQty = costExtra.find((c) => c.mode === "split" && c.split_qty)?.split_qty ?? null;
+  const orderQty: number | null = savedSplitQty ?? (costParent in orderQtyDraft ? orderQtyDraft[costParent] : quoteQtyFor(costParent));
+  const orderQtyFromQuote = !(costParent in orderQtyDraft) && orderQty != null && orderQty === quoteQtyFor(costParent);   // ยังไม่ได้พิมพ์เอง + ตรงกับรอบเสนอราคา
+  const setOrderQty = (q: number | null) => {
+    setOrderQtyDraft((m) => ({ ...m, [costParent]: q }));
+    if (hasSplitExtra) { setCurExtra((l) => l.map((c) => (c.mode === "split" ? cleanExtra({ ...c, split_qty: q }) : c))); setCostDirty(true); }
+  };
+  // สลับ "ต่อชิ้น" ↔ "หารจำนวนสั่ง" — ตัวเลขในช่องคงเดิม เปลี่ยนแค่ความหมาย (ต่อชิ้น ↔ ยอดรวมจ่ายครั้งเดียว)
+  const setExtraMode = (i: number, split: boolean) => {
+    setCurExtra((l) => l.map((c, xi) => (xi !== i ? c : split
+      ? cleanExtra({ label: c.label, mode: "split", total: c.amount, split_qty: orderQty })
+      : { label: c.label, amount: c.total ?? 0 })));
+    setCostDirty(true);
+  };
+  const splitFixedTotal = costExtra.reduce((s, c) => s + (c.mode === "split" ? c.total ?? 0 : 0), 0);
   // ราคาที่เสนอ (ผ่านแล้ว) ล่าสุด — ใช้เป็นราคาตั้งต้นใน Wizard สร้าง SKU
   const offeredPrice = useMemo<number | null>(() => {
     const val = (q: DesignSheetQuote) => (q.offered_price ?? q.price);
@@ -1219,7 +1250,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       });
       setSkuInput("");
       // ค่าใช้จ่ายเพิ่ม: รองรับทั้ง array (เดิม → Parent ทั่วไป) และ object {parentKey: [...]} (ใหม่ แยก Parent)
-      const normArr = (a: unknown): CostExtra[] => (Array.isArray(a) ? a : []).map((c) => ({ label: String((c as CostExtra)?.label ?? ""), amount: Number((c as CostExtra)?.amount) || 0 }));
+      const normArr = (a: unknown): CostExtra[] => (Array.isArray(a) ? a : []).map(cleanExtra);
       const rawCe = d.cost_extra;
       let ceMap: Record<string, CostExtra[]>;
       if (rawCe && !Array.isArray(rawCe) && typeof rawCe === "object") {
@@ -2441,25 +2472,57 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
               {/* ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย/อื่นๆ) — เพิ่ม/ลบ/ตั้งชื่อเองได้ */}
               <div className="border border-slate-200 rounded-lg p-2.5 space-y-1.5">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
                   <span className="text-sm font-medium text-slate-600">{t("💼 ค่าใช้จ่ายเพิ่ม (นอกจากวัสดุ)", "💼 Additional costs (besides materials)")}</span>
+                  {/* จำนวนที่สั่ง — โผล่เมื่อมีรายการแบบ "หารจำนวนสั่ง" (ค่าบล็อก/แม่พิมพ์) */}
+                  {hasSplitExtra && (
+                    <label className="ml-auto flex items-center gap-1.5 text-xs text-slate-500"
+                      title={t("ใช้หารรายการแบบ “หารจำนวนสั่ง” (เช่น ค่าบล็อกสกรีน) · ตั้งต้นจากรอบเสนอราคาล่าสุด", "Divides “÷ order qty” items (e.g. screen block) · defaults to the latest quote round")}>
+                      {t("จำนวนที่สั่ง", "Order qty")}
+                      <input type="number" min={1} step={1} value={orderQty ?? ""} disabled={!canEdit} placeholder="0"
+                        onChange={(e) => { const v = Math.round(Number(e.target.value)); setOrderQty(e.target.value === "" || !(v > 0) ? null : v); }}
+                        className="w-20 h-7 px-2 text-sm text-right tabular-nums font-medium text-slate-700 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+                      {t("ชิ้น", "pcs")}
+                      {orderQtyFromQuote && <span className="text-[10px] text-slate-400">{t("(จากรอบเสนอราคาล่าสุด)", "(from latest quote)")}</span>}
+                    </label>
+                  )}
                   {canEdit && <button onClick={() => { setCurExtra((l) => [...l, { label: "", amount: 0 }]); setCostDirty(true); }}
                     className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("＋ เพิ่มรายการ", "＋ Add item")}</button>}
                 </div>
                 {costExtra.length === 0 && <p className="text-xs text-slate-300">{t("— ยังไม่มีรายการ —", "— No items yet —")}</p>}
-                {costExtra.map((c, i) => (
-                  <div key={i} className="flex items-center gap-1.5">
-                    <input value={c.label} disabled={!canEdit} placeholder={t("ชื่อรายการ เช่น ค่าแรงผลิต", "Item name, e.g. production labor")}
+                {costExtra.map((c, i) => {
+                  const split = c.mode === "split";
+                  return (
+                  <div key={i} className="space-y-0.5">
+                  <div className="flex items-center gap-1.5">
+                    <input value={c.label} disabled={!canEdit} placeholder={split ? t("ชื่อรายการ เช่น ค่าบล็อกสกรีน", "Item name, e.g. screen block") : t("ชื่อรายการ เช่น ค่าแรงผลิต", "Item name, e.g. production labor")}
                       onChange={(e) => { setCurExtra((l) => l.map((x, xi) => (xi === i ? { ...x, label: e.target.value } : x))); setCostDirty(true); }}
-                      className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-                    <input type="number" min={0} step="any" value={c.amount || ""} disabled={!canEdit} placeholder="0.00"
-                      onChange={(e) => { setCurExtra((l) => l.map((x, xi) => (xi === i ? { ...x, amount: Number(e.target.value) || 0 } : x))); setCostDirty(true); }}
+                      className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+                    {/* คิดแบบ: ต่อชิ้น (เดิม) / หารจำนวนสั่ง (จ่ายครั้งเดียวต่อการสั่ง เช่น ค่าบล็อก) */}
+                    <div role="group" aria-label={t("คิดแบบ", "Charge as")} className="inline-flex shrink-0 border border-slate-200 rounded-lg overflow-hidden text-xs">
+                      {([false, true] as const).map((sp) => (
+                        <button key={String(sp)} type="button" aria-pressed={split === sp} disabled={!canEdit}
+                          onClick={() => { if (split !== sp) setExtraMode(i, sp); }}
+                          title={sp ? t("จ่ายครั้งเดียวต่อการสั่ง (เช่น ค่าบล็อกสกรีน) → ระบบหารจำนวนที่สั่งให้", "Paid once per order (e.g. screen block) → divided by order qty") : t("ใส่ยอดต่อชิ้น", "Amount per piece")}
+                          className={`h-8 px-2 whitespace-nowrap ${split === sp ? "bg-blue-50 text-blue-700 font-medium" : "bg-white text-slate-500 hover:bg-slate-50"} disabled:cursor-default`}>
+                          {sp ? t("หารจำนวนสั่ง", "÷ Order qty") : t("ต่อชิ้น", "Per pc")}
+                        </button>
+                      ))}
+                    </div>
+                    <input type="number" min={0} step="any" value={(split ? c.total : c.amount) || ""} disabled={!canEdit} placeholder="0.00"
+                      title={split ? t("ยอดรวม (จ่ายครั้งเดียว)", "Total (paid once)") : t("ยอดต่อชิ้น", "Amount per piece")}
+                      onChange={(e) => { const v = Number(e.target.value) || 0; setCurExtra((l) => l.map((x, xi) => (xi !== i ? x : split ? cleanExtra({ ...x, total: v }) : { ...x, amount: v }))); setCostDirty(true); }}
                       className="w-28 h-8 px-2 text-sm text-right tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
                     <span className="text-xs text-slate-400">{t("บาท", "THB")}</span>
                     {canEdit && <button onClick={() => { setCurExtra((l) => l.filter((_, xi) => xi !== i)); setCostDirty(true); }}
                       title={t("ลบ", "Delete")} className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-rose-500 border border-rose-200 rounded-lg hover:bg-rose-50">🗑</button>}
                   </div>
-                ))}
+                  {split && (c.split_qty
+                    ? <p className="pl-1 text-[11px] text-blue-600 tabular-nums">{t(`${fmtBaht(c.total ?? 0)} บาท ÷ ${c.split_qty.toLocaleString("th-TH")} ชิ้น = ${fmtBaht(c.amount)} บาทต่อชิ้น (จ่ายครั้งเดียวต่อการสั่ง)`, `${fmtBaht(c.total ?? 0)} THB ÷ ${c.split_qty.toLocaleString("en-US")} pcs = ${fmtBaht(c.amount)} THB per piece (paid once per order)`)}</p>
+                    : <p className="pl-1 text-[11px] text-amber-600">{t("ใส่ “จำนวนที่สั่ง” ด้านบนก่อน — ตอนนี้ยังไม่ได้รวมในต้นทุน", "Enter the “Order qty” above first — not included in the cost yet")}</p>)}
+                  </div>
+                  );
+                })}
               </div>
 
               {/* การ์ดสรุปต้นทุน (แยกตามชนิด + รวมวัสดุ + ค่าใช้จ่าย + ต้นทุนสินค้า) */}
@@ -2479,12 +2542,21 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 </div>
                 {costExtra.filter((c) => (c.amount || 0) !== 0).map((c, i) => (
                   <div key={i} className="flex items-center justify-between text-[13px] text-slate-300">
-                    <span>{c.label || t("ค่าใช้จ่าย", "Expense")}</span><span className="tabular-nums">{fmtBaht(c.amount)} ฿</span>
+                    <span>{c.label || t("ค่าใช้จ่าย", "Expense")}{c.mode === "split" && c.split_qty ? <span className="text-slate-400 tabular-nums"> ({fmtBaht(c.total ?? 0)} ÷ {c.split_qty.toLocaleString("th-TH")})</span> : null}</span><span className="tabular-nums">{fmtBaht(c.amount)} ฿</span>
                   </div>
                 ))}
                 <div className="flex items-center justify-between font-bold text-emerald-300 pt-1 mt-1 border-t border-slate-600">
                   <span>{t("ต้นทุนสินค้า (รวมทั้งหมด)", "Product cost (grand total)")}</span><span className="tabular-nums">{fmtBaht(grandTotal)} ฿</span>
                 </div>
+                {/* ค่าบล็อกหารจำนวนสั่ง → ต้นทุนต่อชิ้นเปลี่ยนตามจำนวน — เทียบขั้นที่เสนอราคาบ่อย */}
+                {splitFixedTotal > 0 && (
+                  <div className="pt-1 mt-1 border-t border-slate-600 text-[12px] text-slate-400 leading-relaxed">
+                    {t("ถ้าสั่ง:", "If ordering:")}{" "}
+                    {SPLIT_TIERS.map((q) => (
+                      <span key={q} className="mr-3 whitespace-nowrap">{q.toLocaleString("th-TH")} {t("ชิ้น", "pcs")} = <b className="font-semibold text-slate-100 tabular-nums">{fmtBaht(totalForParent(costParent, q))}</b> ฿</span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* 🛒 Section: คำนวณจากซัพพลายเออร์ (สินค้าสั่งจากร้าน — ราคา+ค่าส่งตามคิว → กำไร → แบ่งกำไร) */}
@@ -2546,7 +2618,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             const ts = Date.now();
             const rows: CostRow[] = lines.map((l, i) => ({ ...normalizeSnapLine(l), key: `v${ts}_${i}`, parent_code: costParent || null, sort_order: i + 1 } as CostRow));
             setCostLines((prev) => [...prev.filter((r) => pkey(r.parent_code) !== costParent), ...rows]);
-            setCostExtraMap((m) => ({ ...m, [costParent]: extra.map((e) => ({ label: e.label, amount: e.amount })) }));
+            setCostExtraMap((m) => ({ ...m, [costParent]: extra.map(cleanExtra) }));
             setCostDirty(true); if (!editing) setEditing(true);
             setVersionsOpen(false);
             toast.success(t(`ใส่เวอร์ชันที่เลือกกลับเข้าตารางแล้ว (${rows.length} บรรทัด) — กด 💾 บันทึกตีราคา เพื่อยืนยัน`, `Selected version loaded into the table (${rows.length} lines) — press 💾 Save costing to confirm`));

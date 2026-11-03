@@ -17,6 +17,7 @@ import { writeAudit } from "@/lib/audit";
 import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { isValidDsStatus } from "../shared";
+import { cleanExtra, type SnapExtra } from "@/lib/design-sheet-cost-snapshot";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -76,7 +77,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 }
 
 // field ที่แก้ได้ (whitelist)
-type CostExtra = { label: string; amount: number };
+type CostExtra = SnapExtra;   // {label, amount ต่อชิ้น} + แบบหารจำนวนสั่ง (mode/total/split_qty)
 type PatchBody = {
   name?: string; brand_id?: string | null; detail?: string | null; note?: string | null;
   status?: string; order_date?: string | null; deadline?: string | null; appointment_date?: string | null; drive_link?: string | null;
@@ -88,11 +89,11 @@ type PatchBody = {
   profit_splits?: Record<string, { name?: string; type?: string; value?: number; on?: boolean }[]>;   // แบ่งกำไรทั้งใบ (ต่อแท็บ Parent)
 };
 
-// sanitize ค่าใช้จ่ายเพิ่ม 1 ชุด (array ของ {label, amount})
+// sanitize ค่าใช้จ่ายเพิ่ม 1 ชุด — คงแบบ "หารจำนวนสั่ง" (ค่าบล็อก) + คิด amount ต่อชิ้นใหม่ฝั่งเซิร์ฟเวอร์ (lib กลาง)
 function cleanExtraArr(raw: unknown): CostExtra[] {
   return (Array.isArray(raw) ? raw : [])
-    .map((c) => ({ label: String((c as CostExtra)?.label ?? "").slice(0, 200), amount: Number((c as CostExtra)?.amount) || 0 }))
-    .filter((c) => c.label.trim() !== "" || c.amount !== 0);
+    .map((c) => { const e = cleanExtra(c); return { ...e, label: e.label.slice(0, 200) }; })
+    .filter((c) => c.label.trim() !== "" || c.amount !== 0 || (c.total ?? 0) !== 0);
 }
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
