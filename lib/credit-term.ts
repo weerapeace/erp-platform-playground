@@ -142,3 +142,14 @@ export const CREDIT_TERM_OPTIONS: CreditTermOption[] = [
 
 /** ตัวเลือกที่เอาไว้ทำปุ่มลัด "เติมให้ทุกรายที่ยังไม่ได้ตั้ง" */
 export const CREDIT_TERM_QUICK: string[] = ["days:15", "days:30", "eom", "monthday:25"];
+
+/**
+ * เครดิต "ฝั่งขาย" ของลูกค้าจากแถว partners_v2 — ช่องใหม่ sales_credit_term ก่อน
+ * ว่าง → แปลงค่าเก่า payment_terms_days (จำนวนวัน) เป็นรูปแบบเดียวกัน · null = ยังไม่ตั้ง
+ */
+export function salesCreditTermOf(p: { sales_credit_term?: unknown; payment_terms_days?: unknown } | null | undefined): string | null {
+  const t = String(p?.sales_credit_term ?? "").trim();
+  if (t && parseCreditTerm(t)) return t;
+  const days = Number(p?.payment_terms_days);
+  return Number.isFinite(days) && days > 0 ? `days:${Math.round(days)}` : null;
+}

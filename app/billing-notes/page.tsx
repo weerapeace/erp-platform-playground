@@ -12,6 +12,8 @@ import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { peekSWR, mutateSWR } from "@/lib/swr-lite";
 import { formatDate } from "@/lib/date";
+import { computeDueDate, formatCreditTerm } from "@/lib/credit-term";
+import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
 import { useOpenParam, useNewParam } from "@/lib/open-param";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
 import { ActivityFeed, type ActivityEntry } from "@/components/activity-feed";
@@ -34,7 +36,7 @@ type PickedSO = { id: string; so_number: string; grand_total: number; customer_i
 /** ผลจากสร้างทีเดียวหลายใบ (POST /api/billing-notes/batch) */
 type CreatedBill = { id: string; bill_number: string | null; customer_name: string | null; grand_total: number; so_count: number };
 // สถานะใบขายที่วางบิลได้ (ตรงกับ RPC erp_playground_billing_note_create)
-const BILLABLE_SO = new Set(["confirmed", "in_production", "ready", "shipped", "completed"]);
+// วางบิลได้ทุกสถานะ ยกเว้นยกเลิก — รวมใบร่าง (เจ้าของเลือก 2026-11-03 · ตรงกับ RPC erp_playground_billing_note_create)
 
 export default function BillingNotesPage() {
   const canView   = usePermission("so.view");
@@ -57,7 +59,13 @@ export default function BillingNotesPage() {
   const [picked,    setPicked]    = useState<PickedSO[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   // สร้างใหม่ = เลือกได้หลายลูกค้า → ออกใบวางบิลแยกตามลูกค้า (เจ้าของสั่ง 2026-11-03) · แก้ไข = ลูกค้าเดียวเหมือนเดิม
-  const [dueByCustomer, setDueByCustomer] = useState<Record<string, string>>({});
+  const [dueByCustomer, setDueByCustomer] = useState<Record<string, string>>({});   // วันครบกำหนดที่แก้เอง (ทับค่าจากเครดิต)
+  // เครดิตลูกค้า (partners_v2.sales_credit_term) → คิดวันครบกำหนดให้ · undefined = ยังโหลด · null = ยังไม่ตั้ง
+  const [terms, setTerms] = useState<Map<string, string | null>>(new Map());
+  const [creditEdit, setCreditEdit] = useState<{ customerId: string; term: string | null; saving: boolean; err: string | null } | null>(null);
+  // ใบกำกับที่อยู่ในใบวางบิลอื่นแล้ว → ล็อกในตัวเลือก (so_id → เลขใบวางบิล)
+  const [billedSo, setBilledSo] = useState<Map<string, { billId: string; billNumber: string | null }>>(new Map());
+  const canEditCredit = usePermission("so.edit");
   const [created, setCreated] = useState<CreatedBill[] | null>(null);
   const [history, setHistory] = useState<ActivityEntry[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -87,10 +95,24 @@ export default function BillingNotesPage() {
   }, []);
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
 
+  // ใบกำกับที่วางบิลไปแล้ว (โหลดทุกครั้งที่เปิดป๊อป — สดเสมอ)
+  const loadBilledSo = useCallback(async () => {
+    try {
+      const res = await apiFetch("/api/billing-notes/billed-sos");
+      const json = await res.json();
+      const m = new Map<string, { billId: string; billNumber: string | null }>();
+      for (const r of (json.data ?? []) as { so_id: string; billing_note_id: string; bill_number: string | null }[]) {
+        m.set(r.so_id, { billId: r.billing_note_id, billNumber: r.bill_number });
+      }
+      setBilledSo(m);
+    } catch { /* ล็อกบนจอไม่ได้ก็ยังมี RPC กันซ้ำ */ }
+  }, []);
+
   const openCreate = () => {
     setEditingId(null);
     setCustomer(null); setBillDate(new Date().toISOString().slice(0, 10)); setDueDate("");
-    setNote(""); setPicked([]); setDueByCustomer({}); setFormErr(null); setModalOpen(true);
+    setNote(""); setPicked([]); setDueByCustomer({}); setCreditEdit(null); setFormErr(null); setModalOpen(true);
+    void loadBilledSo();
   };
   useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
 
@@ -105,8 +127,9 @@ export default function BillingNotesPage() {
       id: l.so_id ?? "", so_number: l.so_number ?? "(ร่าง)", grand_total: Number(l.total_amount) || 0,
       customer_id: l.customer_id ?? d.customer_id ?? null, customer_name: l.customer_name ?? d.customer_name ?? "",
     })).filter(p => p.id));
-    setDueByCustomer({});
+    setDueByCustomer({}); setCreditEdit(null);
     setFormErr(null); setDetailOpen(false); setModalOpen(true);
+    void loadBilledSo();
   };
 
   // คัดลอก → ใบใหม่ ก๊อปวันที่/หมายเหตุ แต่ต้องเลือก SO ใหม่ (SO เดิมถูกวางบิลแล้ว วางซ้ำไม่ได้)
@@ -179,8 +202,47 @@ export default function BillingNotesPage() {
     }
     return [...m.values()].sort((a, b) => a.customer_name.localeCompare(b.customer_name, "th"));
   }, [picked]);
-  // ใบร่างยังวางบิลไม่ได้ (ระบบจะไม่สร้างทั้งชุด) → เตือนก่อนกด
-  const notBillable = picked.filter(p => p.status && !BILLABLE_SO.has(p.status));
+  // ใบที่ยกเลิกแล้ว/อยู่ในใบวางบิลอื่นแล้ว (ระบบจะไม่สร้างทั้งชุด) → เตือนก่อนกด · ใบร่างวางบิลได้
+  const notBillable = picked.filter(p => p.status === "cancelled"
+    || (billedSo.has(p.id) && billedSo.get(p.id)?.billId !== editingId));
+
+  // ---- กำหนดชำระจากเครดิตลูกค้า ----
+  const groupCustomerKey = groups.map(g => g.customer_id).filter(Boolean).join(",");
+  useEffect(() => {
+    const need = groupCustomerKey.split(",").filter(id => id && !terms.has(id));
+    if (!need.length) return;
+    apiFetch(`/api/billing-notes/customer-terms?ids=${need.join(",")}`).then(r => r.json())
+      .then((j: { data?: { id: string; term: string | null }[] }) => setTerms(prev => {
+        const next = new Map(prev);
+        need.forEach(id => { if (!next.has(id)) next.set(id, null); });
+        for (const t of j.data ?? []) next.set(t.id, t.term);
+        return next;
+      }))
+      .catch(() => { /* ไม่มีเครดิต = ใช้กำหนดชำระที่กรอกเอง */ });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- โหลดเฉพาะลูกค้าที่ยังไม่มีในแคช
+  }, [groupCustomerKey]);
+  /** วันครบกำหนดของใบ: แก้เอง > คิดจากเครดิต (นับจากวันที่วางบิล) > ค่าเริ่มต้นที่กรอกด้านบน */
+  const dueFor = (customerId: string) =>
+    dueByCustomer[customerId] ?? (computeDueDate(billDate, terms.get(customerId) ?? null) ?? dueDate);
+  const saveCredit = async () => {
+    if (!creditEdit) return;
+    setCreditEdit({ ...creditEdit, saving: true, err: null });
+    try {
+      const res = await apiFetch("/api/billing-notes/customer-terms", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ customer_id: creditEdit.customerId, term: creditEdit.term }),
+      });
+      const json = await res.json();
+      if (json.error) throw new Error(json.error);
+      setTerms(prev => new Map(prev).set(creditEdit.customerId, creditEdit.term));
+      // ตั้งเครดิตแล้ว → ใบนี้กลับไปใช้วันตามเครดิต (ล้างวันที่แก้เองของลูกค้านี้)
+      setDueByCustomer(prev => { const n = { ...prev }; delete n[creditEdit.customerId]; return n; });
+      setCreditEdit(null);
+      flash("บันทึกเครดิตลูกค้าแล้ว");
+    } catch (err) {
+      setCreditEdit({ ...creditEdit, saving: false, err: err instanceof Error ? err.message : "บันทึกไม่สำเร็จ" });
+    }
+  };
 
   // ยอดใบลดหนี้ที่หักจากบิลที่เปิดดูอยู่ (แยกก่อน VAT / VAT / รวม) — ใช้ทั้งในตารางรายการและยอดสรุป
   const { creditSub, creditVat, creditTotal } = useMemo(() => {
@@ -196,7 +258,10 @@ export default function BillingNotesPage() {
   const save = async () => {
     if (picked.length === 0) { setFormErr("เลือกใบกำกับภาษีอย่างน้อย 1 ใบ"); return; }
     if (notBillable.length) {
-      setFormErr(`ใบสั่งขายยังเป็นร่าง วางบิลไม่ได้: ${notBillable.map(p => p.so_number).join(", ")} — เอาออก หรือยืนยันใบสั่งขายก่อน`);
+      setFormErr(`วางบิลไม่ได้: ${notBillable.map(p => {
+        const b = billedSo.get(p.id);
+        return p.status === "cancelled" ? `${p.so_number} (ยกเลิกแล้ว)` : `${p.so_number} (อยู่ในใบวางบิล ${b?.billNumber ?? "อื่น"} แล้ว)`;
+      }).join(", ")} — เอาออกก่อน`);
       return;
     }
     if (editingId && !customer) { setFormErr("ไม่พบลูกค้า — เลือกใบกำกับภาษีก่อน"); return; }
@@ -224,7 +289,9 @@ export default function BillingNotesPage() {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             so_ids: picked.map(p => p.id), bill_date: billDate, due_date: dueDate || null, note: note || null,
-            due_by_customer: dueByCustomer, actor: user?.name,
+            // ส่งวันครบกำหนดที่เห็นบนจอของทุกใบ (แก้เอง / จากเครดิต / ค่าเริ่มต้น) — server ใช้ตามนี้
+            due_by_customer: Object.fromEntries(groups.filter(g => g.customer_id).map(g => [g.customer_id, dueFor(g.customer_id) || null])),
+            actor: user?.name,
           }),
         });
         const json = await res.json();
@@ -383,8 +450,18 @@ export default function BillingNotesPage() {
               <div className="mt-1"><DateInput value={billDate} onChange={setBillDate} /></div>
             </div>
             <div>
-              <span className="text-xs font-medium text-slate-600">กำหนดชำระ{!editingId && <span className="text-slate-400"> (ค่าเริ่มต้นทุกใบ)</span>}</span>
+              <span className="text-xs font-medium text-slate-600">กำหนดชำระ{!editingId && <span className="text-slate-400"> (ใบที่ยังไม่ตั้งเครดิต)</span>}</span>
               <div className="mt-1"><DateInput value={dueDate} onChange={setDueDate} /></div>
+              {/* แก้ไขใบเดิม: เสนอวันตามเครดิตลูกค้า (กดใช้ได้ ไม่ทับเอง) */}
+              {editingId && customer && (() => {
+                const term = terms.get(customer.id);
+                const auto = computeDueDate(billDate, term ?? null);
+                return auto && auto !== dueDate ? (
+                  <button type="button" onClick={() => setDueDate(auto)} className="mt-1 text-left text-[11px] text-blue-700 hover:underline">
+                    ใช้ตามเครดิตลูกค้า ({formatCreditTerm(term)}) → {formatDate(auto)}
+                  </button>
+                ) : null;
+              })()}
             </div>
           </div>
 
@@ -394,7 +471,7 @@ export default function BillingNotesPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">ใบกำกับภาษีที่จะวางบิล <span className="text-xs font-normal text-slate-400">({picked.length})</span></h3>
-                  <p className="mt-0.5 text-[11px] text-slate-400">ติ๊กได้หลายลูกค้า · แต่ละลูกค้า (แต่ละสาขา) ได้ใบวางบิลของตัวเอง · เฉพาะใบสั่งขายที่ยืนยันแล้ว</p>
+                  <p className="mt-0.5 text-[11px] text-slate-400">ติ๊กได้หลายลูกค้า · แต่ละลูกค้า (แต่ละสาขา) ได้ใบวางบิลของตัวเอง · วันครบกำหนดคิดจากเครดิตลูกค้า (แก้เองได้)</p>
                 </div>
                 <button type="button" onClick={() => setPickerOpen(true)} className="h-9 shrink-0 rounded-lg border border-blue-200 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50">+ เลือกใบกำกับภาษี</button>
               </div>
@@ -408,23 +485,71 @@ export default function BillingNotesPage() {
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-800" title={g.customer_name}>{g.customer_name}</span>
                     <span className="text-[11px] text-slate-500">{g.items.length} บิล</span>
                     <span className="font-mono text-sm font-semibold tabular-nums text-slate-800">{baht(g.total)}</span>
-                    {g.customer_id && (
-                      <label className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                        ครบกำหนด
-                        <span className="w-36"><DateInput value={dueByCustomer[g.customer_id] ?? dueDate}
-                          onChange={(v) => setDueByCustomer(prev => ({ ...prev, [g.customer_id]: v }))} /></span>
-                      </label>
-                    )}
+                    {g.customer_id && (() => {
+                      const term = terms.get(g.customer_id);
+                      const auto = computeDueDate(billDate, term ?? null);
+                      const manual = dueByCustomer[g.customer_id] !== undefined && dueByCustomer[g.customer_id] !== auto;
+                      return (
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                          {term === undefined ? <span className="text-slate-400">กำลังดูเครดิต…</span>
+                            : term ? (
+                              <span className="rounded bg-sky-50 px-1.5 py-0.5 text-sky-700" title="เครดิตจากทะเบียนลูกค้า นับจากวันที่วางบิล">
+                                เครดิต {formatCreditTerm(term)}
+                              </span>
+                            ) : (
+                              <span className="rounded bg-amber-50 px-1.5 py-0.5 text-amber-700">ยังไม่ตั้งเครดิต</span>
+                            )}
+                          {canEditCredit && term !== undefined && creditEdit?.customerId !== g.customer_id && (
+                            <button type="button" onClick={() => setCreditEdit({ customerId: g.customer_id, term: term ?? null, saving: false, err: null })}
+                              className="rounded border border-slate-200 bg-white px-1.5 py-0.5 text-slate-600 hover:bg-slate-50">
+                              {term ? "แก้เครดิต" : "+ ตั้งเครดิต"}
+                            </button>
+                          )}
+                          <span>ครบกำหนด</span>
+                          <span className="w-36"><DateInput value={dueFor(g.customer_id)}
+                            onChange={(v) => setDueByCustomer(prev => ({ ...prev, [g.customer_id]: v }))} /></span>
+                          {manual && auto && (
+                            <button type="button" title="กลับไปใช้วันตามเครดิต"
+                              onClick={() => setDueByCustomer(prev => { const n = { ...prev }; delete n[g.customer_id]; return n; })}
+                              className="text-blue-700 hover:underline">ตามเครดิต</button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
+                  {/* ตั้ง/แก้เครดิตลูกค้า → บันทึกกลับทะเบียนลูกค้า (ใช้กับใบถัด ๆ ไปด้วย) */}
+                  {creditEdit?.customerId === g.customer_id && (
+                    <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-sky-50/60 px-4 py-2.5">
+                      <span className="text-xs text-slate-700">เครดิตของ <b className="font-medium">{g.customer_name}</b></span>
+                      <PurchaseCreditTermInput value={creditEdit.term} onChange={(v) => setCreditEdit({ ...creditEdit, term: v, err: null })}
+                        disabled={creditEdit.saving} />
+                      <button type="button" onClick={() => void saveCredit()} disabled={creditEdit.saving || !creditEdit.term}
+                        className="h-8 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+                        {creditEdit.saving ? "กำลังบันทึก…" : "บันทึกเข้าทะเบียนลูกค้า"}
+                      </button>
+                      <button type="button" onClick={() => setCreditEdit(null)} disabled={creditEdit.saving}
+                        className="h-8 rounded-lg border border-slate-200 bg-white px-3 text-xs text-slate-600 hover:bg-slate-50">ยกเลิก</button>
+                      {creditEdit.err && <span className="text-xs text-red-600">{creditEdit.err}</span>}
+                    </div>
+                  )}
                   <table className="w-full text-sm">
                     <tbody className="divide-y divide-slate-100">
                       {g.items.map(p => {
-                        const draft = !!p.status && !BILLABLE_SO.has(p.status);
+                        const blocked = notBillable.some(n => n.id === p.id);
                         return (
-                          <tr key={p.id} className={draft ? "bg-red-50/60" : ""}>
+                          <tr key={p.id} className={blocked ? "bg-red-50/60" : ""}>
                             <td className="px-4 py-2">
                               <code className="font-mono text-xs text-slate-700">{p.so_number}</code>
-                              {draft && <span className="ml-2 text-[11px] text-red-600">ใบร่าง — ยืนยันใบสั่งขายก่อนจึงวางบิลได้</span>}
+                              {blocked && (
+                                <span className="ml-2 text-[11px] text-red-600">
+                                  {p.status === "cancelled" ? "ยกเลิกแล้ว — เอาออก" : `อยู่ในใบวางบิล ${billedSo.get(p.id)?.billNumber ?? "อื่น"} แล้ว — เอาออก`}
+                                </span>
+                              )}
+                              {!blocked && p.status === "draft" && (
+                                <span className="ml-2 text-[11px] text-amber-700" title="ยอดคัดลอกตอนสร้างใบวางบิล — ถ้าแก้ยอดใบสั่งขายทีหลัง ให้กดแก้ไขใบวางบิล → บันทึก เพื่อดึงยอดใหม่">
+                                  ใบร่าง
+                                </span>
+                              )}
                             </td>
                             <td className="px-3 py-2 text-right font-mono tabular-nums text-slate-700">{baht(p.grand_total)}</td>
                             <td className="w-10 px-1 py-2 text-center"><button type="button" onClick={() => removePicked(p.id)} aria-label="เอาออก" className="h-7 w-7 rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500">x</button></td>
@@ -442,7 +567,7 @@ export default function BillingNotesPage() {
             <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3">
               <div>
                 <h3 className="text-sm font-semibold text-slate-800">ใบกำกับภาษีที่วางบิล <span className="text-xs font-normal text-slate-400">({picked.length})</span></h3>
-                <p className="mt-0.5 text-[11px] text-slate-400">เลือกได้เฉพาะ SO ที่ยืนยันแล้วของลูกค้าเดียวกัน</p>
+                <p className="mt-0.5 text-[11px] text-slate-400">เลือกได้เฉพาะใบของลูกค้าเดียวกัน (รวมใบร่าง)</p>
               </div>
               <button type="button" onClick={() => setPickerOpen(true)} className="h-9 shrink-0 rounded-lg border border-blue-200 bg-white px-3 text-xs font-medium text-blue-700 hover:bg-blue-50">+ เลือกใบกำกับภาษี</button>
             </div>
@@ -521,7 +646,11 @@ export default function BillingNotesPage() {
       {/* SO picker */}
       {pickerOpen && (
         <SourceDocPickerModal open={pickerOpen} mode="so" onClose={() => setPickerOpen(false)} onConfirm={handlePicked}
-          hint={editingId ? undefined : "ติ๊กได้หลายลูกค้า — ตอนสร้างระบบแยกเป็นใบวางบิลตามลูกค้าให้"} />
+          hint={editingId ? undefined : "ติ๊กได้หลายลูกค้า — ตอนสร้างระบบแยกเป็นใบวางบิลตามลูกค้าให้"}
+          rowDisabled={(r) => {
+            const b = billedSo.get(r.id);
+            return b && b.billId !== editingId ? `อยู่ในใบวางบิล ${b.billNumber ?? "อื่น"} แล้ว` : null;
+          }} />
       )}
 
       {/* Detail */}

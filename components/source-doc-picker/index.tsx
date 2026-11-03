@@ -101,7 +101,7 @@ const CONFIGS: Record<SourceDocMode, ModeConfig> = {
 };
 
 export function SourceDocPickerModal({
-  open, onClose, mode, onConfirm, rowTag, rowRank, onRowsLoaded, hint,
+  open, onClose, mode, onConfirm, rowTag, rowRank, onRowsLoaded, hint, rowDisabled,
 }: {
   open: boolean;
   onClose: () => void;
@@ -115,6 +115,8 @@ export function SourceDocPickerModal({
   onRowsLoaded?: (rows: SourceDocRow[]) => void;
   /** (ไม่บังคับ) ข้อความใต้หัวป๊อป แทนคำอธิบายมาตรฐาน */
   hint?: string;
+  /** (ไม่บังคับ) แถวที่ติ๊กไม่ได้ — คืนเหตุผล (เช่น "อยู่ในใบวางบิล 20261103") · ขึ้นท้ายรายการ สีจาง */
+  rowDisabled?: (row: SourceDocRow) => string | null;
 }) {
   const cfg = CONFIGS[mode];
   const [rows, setRows] = useState<SourceDocRow[]>([]);
@@ -146,10 +148,13 @@ export function SourceDocPickerModal({
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const hit = q ? rows.filter((r) => cfg.searchText(r).toLowerCase().includes(q)) : rows;
-    return rowRank ? [...hit].sort((a, b) => rowRank(a) - rowRank(b)) : hit;
-  }, [rows, search, cfg, rowRank]);
+    const rank = (r: SourceDocRow) => (rowRank?.(r) ?? 0) + (rowDisabled?.(r) ? 1000 : 0);   // ติ๊กไม่ได้ = ไปท้าย
+    return rowRank || rowDisabled ? [...hit].sort((a, b) => rank(a) - rank(b)) : hit;
+  }, [rows, search, cfg, rowRank, rowDisabled]);
 
   const toggle = (id: string) => {
+    const row = rows.find((r) => r.id === id);
+    if (row && rowDisabled?.(row)) return;
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
@@ -200,22 +205,27 @@ export function SourceDocPickerModal({
                   {cfg.columns.map((c) => (
                     <th key={c.key} className={`px-3 py-2 font-semibold ${c.align === "right" ? "text-right" : "text-left"}`}>{c.label}</th>
                   ))}
-                  {rowTag && <th className="px-3 py-2"></th>}
+                  {(rowTag || rowDisabled) && <th className="px-3 py-2"></th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {filtered.map((r) => {
                   const checked = selected.has(r.id);
+                  const lockedWhy = rowDisabled?.(r) ?? null;
                   return (
-                    <tr key={r.id} onClick={() => toggle(r.id)}
-                      className={`cursor-pointer ${checked ? "bg-blue-50/60" : "hover:bg-slate-50"}`}>
+                    <tr key={r.id} onClick={() => toggle(r.id)} title={lockedWhy ?? undefined}
+                      className={lockedWhy ? "cursor-not-allowed opacity-50" : `cursor-pointer ${checked ? "bg-blue-50/60" : "hover:bg-slate-50"}`}>
                       <td className="px-3 py-2">
-                        <input type="checkbox" checked={checked} readOnly className="rounded border-slate-300 pointer-events-none" />
+                        <input type="checkbox" checked={checked} disabled={!!lockedWhy} readOnly className="rounded border-slate-300 pointer-events-none" />
                       </td>
                       {cfg.columns.map((c) => (
                         <td key={c.key} className={`px-3 py-2 ${c.align === "right" ? "text-right" : "text-left"}`}>{c.render(r)}</td>
                       ))}
-                      {rowTag && <td className="px-3 py-2 text-right">{rowTag(r)}</td>}
+                      {(rowTag || rowDisabled) && (
+                        <td className="px-3 py-2 text-right">
+                          {lockedWhy ? <span className="whitespace-nowrap text-[11px] text-slate-500">{lockedWhy}</span> : rowTag?.(r)}
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
