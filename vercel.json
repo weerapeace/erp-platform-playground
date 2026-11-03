@@ -6,6 +6,7 @@
     { "path": "/api/cron/print-uploads-purge", "schedule": "15 3 * * *" },
     { "path": "/api/cron/asset-look-hash", "schedule": "45 3 * * *" },
     { "path": "/api/cron/content-drive-check", "schedule": "15 4 * * *" },
-    { "path": "/api/cron/content-album-reminders", "schedule": "30 2 * * *" }
+    { "path": "/api/cron/content-album-reminders", "schedule": "30 2 * * *" },
+    { "path": "/api/cron/cashflow-alert", "schedule": "5 1 * * *" }
   ]
 }

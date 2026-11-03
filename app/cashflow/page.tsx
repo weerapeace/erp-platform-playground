@@ -29,11 +29,13 @@ import { CashflowPeriodChart } from "@/components/cashflow/period-chart";
 import { CashflowTodo, type CashflowTab } from "@/components/cashflow/todo-list";
 import { CashflowPartyTab } from "@/components/cashflow/party-tab";
 import { CashflowDebtTab, NEW_DEBT, summarizeDebts, type NewDebtKey } from "@/components/cashflow/debt-tab";
+import { CashflowAlertSettings } from "@/components/cashflow/alert-settings";
+import { DEFAULT_CASHFLOW_SETTINGS, type CashflowSettings } from "@/lib/cashflow-settings";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import {
   CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, MANUAL_CATEGORIES, THB, manualScheduleLabel,
-  addDaysISO, bucketSeries, buildDailySeries, filterEventsByCompany, firstNegativeDay, openingForCompany,
+  addDaysISO, bucketSeries, buildDailySeries, filterEventsByCompany, findLowCash, firstNegativeDay, openingForCompany,
   summarizeDays, todayISO, unassignedBySource, isCompanyAssignable, COMPANY_ASSIGNABLE,
   type CashflowBucket, type CashflowEvent, type CashflowSource,
 } from "@/lib/cashflow";
@@ -140,6 +142,16 @@ export default function CashflowPage() {
   useEffect(() => { if (canView) loadDebts(); }, [canView, loadDebts]);
   const reloadAll = () => { load(); loadDebts(); };
 
+  // ---- ค่าตั้งกลาง: เงินกันขั้นต่ำ + แจ้งเตือน (ใช้ร่วมทุกคน — lib/cashflow-settings) ----
+  const [cfSettings, setCfSettings] = useState<CashflowSettings>(DEFAULT_CASHFLOW_SETTINGS);
+  useEffect(() => {
+    if (!canView) return;
+    apiFetch("/api/cashflow/settings").then((r) => r.json())
+      .then((j) => { if (!j?.error && j?.data) setCfSettings(j.data as CashflowSettings); })
+      .catch(() => { /* ใช้ค่าตั้งต้นไปก่อน */ });
+  }, [canView]);
+  const buffer = cfSettings.safetyBuffer;
+
   // ---- แยกบริษัท (จำที่เลือกไว้ร่วมกับกระดาน) ----
   const companies: CompanyRef[] = useMemo(() => data?.meta.companies ?? [], [data]);
   const [companyFilter, setCompanyFilter] = useCompanyFilter("erp-cashflow-company", companies);
@@ -190,6 +202,7 @@ export default function CashflowPage() {
   const outTotal = series.days.reduce((s, d) => s + d.out, 0);
   const endBalance = series.days.length ? series.days[series.days.length - 1].balance : series.startBalance;
   const negative = firstNegativeDay(series.days);
+  const lowCash = useMemo(() => findLowCash(series, buffer, from), [series, buffer, from]);
   // แท็บต้องจ่าย/ต้องรับ = ทุกอย่างที่ยังค้างจนถึงปลายช่วง (รวมของค้างจากก่อนวันนี้)
   const outEvents = useMemo(() => events.filter((e) => e.direction === "out" && e.date <= to), [events, to]);
   const inEvents = useMemo(() => events.filter((e) => e.direction === "in" && e.date <= to), [events, to]);
@@ -441,17 +454,29 @@ export default function CashflowPage() {
                     เงินจะไม่พอวันที่ {formatDate(negative.date)} — ติดลบ {THB(Math.abs(negative.balance))}
                   </p>
                   <p className="text-sm text-red-600/90 mt-0.5">
-                    ต้องหาเงินเพิ่มอย่างน้อย <b>{THB(Math.abs(summary.low))}</b> ก่อนวันที่ {formatDate(negative.date)} — เก็บเงินลูกค้า · ขายเพิ่ม · หรือเลื่อนจ่ายบางรายการ
+                    ต้องหาเงินเพิ่มอย่างน้อย <b>{THB(lowCash.shortfall)}</b> ก่อนวันที่ {formatDate(negative.date)}{buffer > 0 ? ` (ให้เหลือไม่ต่ำกว่าเงินกันขั้นต่ำ ${THB(buffer)})` : ""} — เก็บเงินลูกค้า · ขายเพิ่ม · หรือเลื่อนจ่ายบางรายการ
                     {canDebtView && debtSum.odLimit > 0 && (
-                      <> · วงเงิน OD ยังเบิกได้ {THB(debtSum.odHeadroom)} ({debtSum.odHeadroom >= Math.abs(summary.low) ? "พอรับได้" : "ไม่พอ"})</>
+                      <> · วงเงิน OD ยังเบิกได้ {THB(debtSum.odHeadroom)} ({debtSum.odHeadroom >= lowCash.shortfall ? "พอรับได้" : "ไม่พอ"})</>
                     )}
                   </p>
                 </div>
                 <button type="button" onClick={() => goTab("recv")} className="h-9 px-3 text-sm rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-100">ดูลูกหนี้ที่เก็บได้</button>
               </div>
+            ) : lowCash.first ? (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3.5 flex items-center gap-3 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-amber-800">
+                    เงินจะต่ำกว่าเงินกันขั้นต่ำ {THB(buffer)} วันที่ {formatDate(lowCash.first.date)} — เหลือ {THB(lowCash.first.balance)}
+                  </p>
+                  <p className="text-sm text-amber-700/90 mt-0.5">
+                    ยังไม่ติดลบ แต่ควรหาเงินเพิ่มอย่างน้อย <b>{THB(lowCash.shortfall)}</b> (ต่ำสุด {THB(lowCash.low.balance)} วันที่ {formatDate(lowCash.low.date)}) · หรือจัดรอบจ่ายร้านค้าให้พอดีงบ
+                  </p>
+                </div>
+                <button type="button" onClick={() => goTab("pay")} className="h-9 px-3 text-sm rounded-lg bg-white border border-amber-300 text-amber-800 hover:bg-amber-100">จัดรอบจ่าย</button>
+              </div>
             ) : (
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-emerald-700">
-                ✓ ตามตัวเลขที่มีตอนนี้ เงินไม่ติดลบตลอดช่วง {formatDate(from)} – {formatDate(to)}
+                ✓ ตามตัวเลขที่มีตอนนี้ เงินไม่{buffer > 0 ? `ต่ำกว่าเงินกันขั้นต่ำ ${THB(buffer)}` : "ติดลบ"}ตลอดช่วง {formatDate(from)} – {formatDate(to)}
                 {!accounts.length && " (แต่ยังไม่ได้กรอกยอดเงินในบัญชี — เส้นเริ่มจากศูนย์)"}
               </div>
             )}
@@ -465,10 +490,11 @@ export default function CashflowPage() {
                   <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-rose-500 inline-block" /> เงินออก</span>
                   <span className="flex items-center gap-1"><i className="w-4 h-0.5 bg-blue-600 inline-block" /> เงินคงเหลือ</span>
                   {canDebtView && debtSum.odLimit > 0 && <span className="flex items-center gap-1"><i className="w-4 border-t border-dashed border-violet-600 inline-block" /> วงเงิน OD</span>}
+                  {buffer > 0 && <span className="flex items-center gap-1"><i className="w-4 border-t border-dashed border-amber-600 inline-block" /> เงินกันขั้นต่ำ</span>}
                 </div>
               </div>
               <CashflowPeriodChart buckets={buckets} startBalance={series.startBalance}
-                odHeadroom={canDebtView && debtSum.odLimit > 0 ? debtSum.odHeadroom : null}
+                odHeadroom={canDebtView && debtSum.odLimit > 0 ? debtSum.odHeadroom : null} buffer={buffer}
                 picked={picked?.start ?? null} onPick={(b) => { setPicked(b); if (b) goTab("all"); }} />
               <p className="text-[11px] text-slate-400 mt-1">
                 กดแท่งเพื่อดูรายการของช่วงนั้น · จุดแดง = ช่วงที่เงินติดลบ · เส้นเริ่มที่ {THB(series.startBalance)} (ยอดในบัญชี + ค้างรับ − ค้างจ่ายจากก่อนวันนี้)
@@ -485,7 +511,7 @@ export default function CashflowPage() {
               ))}
             </div>
 
-            {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} onChanged={load} />}
+            {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} cashNow={accounts.length ? opening : null} buffer={buffer} onChanged={load} />}
             {tab === "recv" && <CashflowPartyTab side="in" events={inEvents} today={from} canManage={canManage} canPayPo={false} canReceipt={canReceipt} onChanged={load} />}
             {tab === "debt" && (canDebtView ? (
               <CashflowDebtTab items={myDebts} loading={debtsLoading} error={debtsErr} canCreate={canDebtCreate} onChanged={reloadAll}
@@ -543,6 +569,11 @@ export default function CashflowPage() {
                   pageSize={50}
                   onRetry={load}
                 />
+              </div>
+            )}
+            {tab === "settings" && (
+              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+                <CashflowAlertSettings key={JSON.stringify(cfSettings)} value={cfSettings} canManage={canManage} onSaved={setCfSettings} />
               </div>
             )}
             {tab === "settings" && (

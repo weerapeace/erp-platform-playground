@@ -300,6 +300,49 @@ export function firstNegativeDay(days: CashflowDay[]): CashflowDay | null {
   return days.find((d) => d.balance < 0) ?? null;
 }
 
+export type LowCashResult = {
+  /** วันแรกที่เงินคงเหลือต่ำกว่าเงินกันขั้นต่ำ (null = ไม่ต่ำกว่าเลย) — นับยอดเริ่มด้วย (วันนี้ก็ต่ำแล้ว = from) */
+  first: { date: string; balance: number } | null;
+  /** จุดต่ำสุดในช่วง */
+  low: { date: string; balance: number };
+  /** ต้องหาเงินเพิ่มอย่างน้อยเท่าไรให้ไม่ต่ำกว่าเงินกันขั้นต่ำตลอดช่วง (0 = พอ) */
+  shortfall: number;
+};
+
+/** เงินจะต่ำกว่าเงินกันขั้นต่ำ (buffer) เมื่อไร — ใช้ทั้งแถบเตือนบนหน้า และ cron เตือนทุกเช้า */
+export function findLowCash(series: CashflowSeries, buffer: number, from: string): LowCashResult {
+  let low = { date: from, balance: series.startBalance };
+  let first: LowCashResult["first"] = series.startBalance < buffer ? { date: from, balance: series.startBalance } : null;
+  for (const d of series.days) {
+    if (d.balance < low.balance) low = { date: d.date, balance: d.balance };
+    if (!first && d.balance < buffer) first = { date: d.date, balance: d.balance };
+  }
+  return { first, low, shortfall: Math.max(0, Math.round((buffer - low.balance) * 100) / 100) };
+}
+
+export type PayRunPlan = {
+  /** PO ที่ควรจ่ายรอบนี้ (เก่าสุดก่อน จนเต็มงบ) */
+  picked: CashflowEvent[];
+  /** PO ที่ครบกำหนดในรอบแต่งบไม่พอ */
+  left: CashflowEvent[];
+  total: number;
+};
+
+/**
+ * จัดรอบจ่ายร้านค้าตามงบ — PO ที่ครบกำหนดภายใน until (รวมที่เลยกำหนดแล้ว) เรียง "ครบกำหนดก่อน → ยอดน้อยก่อน" แล้วหยิบจนเต็มงบ
+ * ใบที่ใหญ่เกินงบที่เหลือ ข้ามไปหยิบใบถัดไปที่ใส่ได้ (ไม่หยุดทั้งรอบเพราะใบเดียว)
+ */
+export function planPayRun(events: CashflowEvent[], budget: number, until: string): PayRunPlan {
+  const due = events.filter((e) => e.direction === "out" && e.source === "purchase_order" && e.docId && e.date <= until)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.amount - b.amount);
+  const picked: CashflowEvent[] = [], left: CashflowEvent[] = [];
+  let total = 0;
+  for (const e of due) {
+    if (total + e.amount <= budget + 0.005) { picked.push(e); total += e.amount; } else left.push(e);
+  }
+  return { picked, left, total: Math.round(total * 100) / 100 };
+}
+
 export type CashflowTotals = { in: number; out: number; net: number; count: number };
 
 export function totals(events: CashflowEvent[]): CashflowTotals {

@@ -2,18 +2,20 @@
 
 /**
  * กราฟเงินรายสัปดาห์ / รายเดือน ของหน้ากระแสเงินสด (/cashflow)
- * แท่งเขียว = เงินเข้า · แท่งแดง = เงินออก · เส้นน้ำเงิน = เงินคงเหลือสิ้นช่วง · เส้นประม่วง = เพดานวงเงิน OD ที่ยังใช้ได้
+ * แท่งเขียว = เงินเข้า · แท่งแดง = เงินออก · เส้นน้ำเงิน = เงินคงเหลือสิ้นช่วง · เส้นประม่วง = เพดานวงเงิน OD ที่ยังใช้ได้ · เส้นประส้ม = เงินกันขั้นต่ำ
  * ช่วงคิดจาก lib/cashflow bucketSeries (ของกลาง) · กดแท่ง = เลือกช่วงนั้น (หน้าแม่เอาไปกรองตาราง)
  */
 import { THB, THBShort, type CashflowBucket } from "@/lib/cashflow";
 
 export function CashflowPeriodChart({
-  buckets, startBalance, odHeadroom, picked, onPick,
+  buckets, startBalance, odHeadroom, buffer = 0, picked, onPick,
 }: {
   buckets: CashflowBucket[];
   startBalance: number;
   /** วงเงิน OD ที่ยังเบิกได้ (null = ไม่รู้ / ไม่มีสิทธิ์ดู) — วาดเป็นเส้นพื้นใต้ศูนย์ */
   odHeadroom: number | null;
+  /** เงินกันขั้นต่ำ (lib/cashflow-settings) — 0 = ไม่วาด */
+  buffer?: number;
   picked: string | null;
   onPick: (b: CashflowBucket | null) => void;
 }) {
@@ -21,7 +23,7 @@ export function CashflowPeriodChart({
   const W = 900, H = 250, L = 62, R = 16, T = 16, B = 34;
   const slot = (W - L - R) / buckets.length;
   const floor = odHeadroom && odHeadroom > 0 ? -odHeadroom : 0;
-  const vals = [startBalance, floor, ...buckets.flatMap((b) => [b.balance, b.in, b.out])];
+  const vals = [startBalance, floor, buffer, ...buckets.flatMap((b) => [b.balance, b.in, b.out])];
   const max = Math.max(1, ...vals), min = Math.min(0, ...vals);
   const y = (v: number) => T + ((max - v) / (max - min || 1)) * (H - T - B);
   const zero = y(0);
@@ -43,6 +45,12 @@ export function CashflowPeriodChart({
           <g>
             <line x1={L} x2={W - R} y1={y(floor)} y2={y(floor)} stroke="#7c3aed" strokeWidth={1.25} strokeDasharray="5 4" />
             <text x={W - R - 4} y={y(floor) - 7} textAnchor="end" fontSize={10} fill="#7c3aed">วงเงิน OD ที่ยังเบิกได้ {THBShort(odHeadroom ?? 0)}</text>
+          </g>
+        )}
+        {buffer > 0 && (
+          <g>
+            <line x1={L} x2={W - R} y1={y(buffer)} y2={y(buffer)} stroke="#d97706" strokeWidth={1.25} strokeDasharray="6 4" />
+            <text x={L + 4} y={y(buffer) - 7} fontSize={10} fill="#b45309">เงินกันขั้นต่ำ {THBShort(buffer)}</text>
           </g>
         )}
         {buckets.map((b, i) => {

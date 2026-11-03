@@ -7,6 +7,7 @@
  *   เลื่อนวัน   → POST  /api/cashflow/plan            (cashflow.manage · เฉพาะชนิดใน MOVABLE_SOURCES · audit ในตัว)
  *   ตั้งเครดิต  → PATCH /api/cashflow/credit-terms    (cashflow.manage · audit ในตัว)
  *   จ่ายแล้ว   → POST  /api/purchasing/mark-paid     (เฉพาะ PO · products.edit · audit ในตัว) + สลิป = ไฟล์แนบกลาง (uploadRecordFile → copyRecordFile)
+ *   จัดรอบจ่าย → planPayRun (lib/cashflow) → นัดจ่าย (/api/cashflow/plan) หรือ จ่ายแล้วตอนนี้ (ป๊อปจ่ายแล้ว)
  *   รับเงินแล้ว → POST  /api/receipts                 (ใบรับชำระ 1 ใบต่อลูกค้า · receipts.create · ยอดค้างคิดใหม่จากใบรับชำระ · audit ในตัว)
  */
 import { useMemo, useState } from "react";
@@ -24,7 +25,7 @@ import { RECORD_FILES_MAX } from "@/lib/record-files";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { CREDIT_TERM_OPTIONS } from "@/lib/credit-term";
-import { CASHFLOW_CERTAINTY, THB, addDaysISO, daysBetween, type CashflowEvent } from "@/lib/cashflow";
+import { CASHFLOW_CERTAINTY, THB, addDaysISO, daysBetween, planPayRun, type CashflowEvent } from "@/lib/cashflow";
 
 type Side = "out" | "in";
 type Cat = "shop" | "china" | "loan" | "od" | "card" | "payroll" | "manual" | "customer";
@@ -66,7 +67,7 @@ const AGING = [
 type Modal = { kind: "date" | "credit" | "pay" | "recv"; events: CashflowEvent[]; groups: Group[] } | null;
 
 export function CashflowPartyTab({
-  side, events, today, canManage, canPayPo, canReceipt = false, onChanged,
+  side, events, today, canManage, canPayPo, canReceipt = false, cashNow = null, buffer = 0, onChanged,
 }: {
   side: Side;
   /** รายการฝั่งนี้ทั้งหมด (รวมของค้างจากก่อนวันนี้) — กรองบริษัท/แหล่งมาแล้ว */
@@ -76,12 +77,16 @@ export function CashflowPartyTab({
   canPayPo: boolean;
   /** ออกใบรับชำระได้ (receipts.create) — ใช้ฝั่งต้องรับ */
   canReceipt?: boolean;
+  /** เงินในบัญชีตอนนี้ (null = ยังไม่กรอก) + เงินกันขั้นต่ำ — ใช้คิดงบแนะนำของ "จัดรอบจ่าย" */
+  cashNow?: number | null;
+  buffer?: number;
   onChanged: () => void;
 }) {
   const router = useRouter();
   const [cat, setCat] = useState<Cat | "all">("all");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<Modal>(null);
+  const [runOpen, setRunOpen] = useState(false);
 
   const groups = useMemo<Group[]>(() => {
     const map = new Map<string, Group>();
@@ -185,6 +190,10 @@ export function CashflowPartyTab({
           className={`h-8 px-3 text-xs rounded-full border ${cat === "all" ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
           ทั้งหมด · {THB(groups.reduce((s, g) => s + g.total, 0))}
         </button>
+        {side === "out" && (canPayPo || canManage) && (
+          <button type="button" onClick={() => setRunOpen(true)}
+            className="h-8 px-3 text-xs rounded-full bg-blue-600 text-white hover:bg-blue-700 order-first">จัดรอบจ่ายตามงบ</button>
+        )}
         {cats.map(([c, t]) => (
           <button key={c} type="button" onClick={() => setCat(c)}
             className={`h-8 px-3 text-xs rounded-full border ${cat === c ? "text-white" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
@@ -246,6 +255,9 @@ export function CashflowPartyTab({
       <DateModal modal={modal?.kind === "date" ? modal : null} today={today} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
       <CreditModal modal={modal?.kind === "credit" ? modal : null} side={side} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
       <PayModal modal={modal?.kind === "pay" ? modal : null} today={today} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
+      <PayRunModal open={runOpen} events={events} today={today} cashNow={cashNow} buffer={buffer} canManage={canManage} canPayPo={canPayPo}
+        onClose={() => setRunOpen(false)} onDone={() => { setRunOpen(false); onChanged(); }}
+        onPayNow={(picked) => { setRunOpen(false); setModal({ kind: "pay", events: picked, groups: groups.filter((g) => g.events.some((e) => picked.includes(e))) }); }} />
       <ReceiveModal modal={modal?.kind === "recv" ? modal : null} today={today} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
     </div>
   );
@@ -578,6 +590,115 @@ function ReceiveModal({ modal, today, onClose, onDone }: { modal: Modal; today: 
           </div>
         )}
         <p className="text-xs text-slate-400">รับเต็มยอดค้างของทุกใบที่เลือก (รับบางส่วน / ใส่ค่าธรรมเนียม → ทำที่หน้ารับชำระ) · ยอดค้างของใบขาย/ใบวางบิลลดเอง · ยกเลิกได้ที่หน้ารับชำระ · มีประวัติว่าใครกด</p>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+      </div>
+    </ERPModal>
+  );
+}
+
+/**
+ * จัดรอบจ่ายร้านค้าตามงบ — PO ที่ครบกำหนดภายในวันที่เลือก (รวมที่เลยกำหนด) เก่าสุดก่อนจนเต็มงบ (lib/cashflow planPayRun)
+ * งบแนะนำ = เงินในบัญชี − เงินกันขั้นต่ำ − เงินออกอย่างอื่นที่ต้องจ่ายในรอบ (เงินเดือน งวดกู้ บัตร บิลจีน ประจำ)
+ * ทำต่อได้ 2 ทาง: นัดจ่าย (เขียนวันครบกำหนดของ PO ที่เลือก = วันรอบ ผ่าน /api/cashflow/plan) · จ่ายแล้วตอนนี้ (ป๊อปจ่ายแล้ว + สลิป)
+ */
+function PayRunModal({ open, events, today, cashNow, buffer, canManage, canPayPo, onClose, onPayNow, onDone }: {
+  open: boolean; events: CashflowEvent[]; today: string; cashNow: number | null; buffer: number;
+  canManage: boolean; canPayPo: boolean; onClose: () => void; onPayNow: (picked: CashflowEvent[]) => void; onDone: () => void;
+}) {
+  const toast = useToast();
+  const [until, setUntil] = useState(addDaysISO(today, 7));
+  const [budgetText, setBudgetText] = useState("");
+  const [sel, setSel] = useState<Set<string> | null>(null);   // null = ใช้ที่ระบบเลือกตามงบ
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const locked = useMemo(() => events.filter((e) => e.direction === "out" && e.source !== "purchase_order" && e.date <= until).reduce((s, e) => s + e.amount, 0), [events, until]);
+  const suggest = cashNow == null ? null : Math.max(0, Math.round(cashNow - buffer - locked));
+  const budget = budgetText === "" ? (suggest ?? 0) : Math.max(0, Number(budgetText) || 0);
+  const plan = useMemo(() => planPayRun(events, budget, until), [events, budget, until]);
+  const candidates = useMemo(() => [...plan.picked, ...plan.left].sort((a, b) => a.date.localeCompare(b.date)), [plan]);
+  const byShop = useMemo(() => {
+    const m = new Map<string, CashflowEvent[]>();
+    for (const e of candidates) { const k = e.party || "(ไม่ระบุร้าน)"; m.set(k, [...(m.get(k) ?? []), e]); }
+    return [...m.entries()];
+  }, [candidates]);
+  if (!open) return null;
+  const pickedIds = new Set(plan.picked.map((p) => p.id));
+  const isOn = (e: CashflowEvent) => (sel ? sel.has(e.id) : pickedIds.has(e.id));
+  const chosen = candidates.filter(isOn);
+  const chosenTotal = sum(chosen);
+  const toggle = (e: CashflowEvent) => {
+    const base = new Set(sel ?? pickedIds);
+    if (base.has(e.id)) base.delete(e.id); else base.add(e.id);
+    setSel(base); setErr("");
+  };
+  const close = () => { setSel(null); setErr(""); onClose(); };
+  const schedule = async () => {
+    if (!chosen.length) { setErr("ยังไม่ได้เลือก PO"); return; }
+    setBusy(true); setErr("");
+    try {
+      const res = await apiFetch("/api/cashflow/plan", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ moves: chosen.map((e) => ({ source: e.source, docId: e.docId, date: until })) }) });
+      const j = await res.json();
+      if (j?.error) { setErr(j.error); return; }
+      const r = j.data as { moved: number; failed: { reason: string }[] };
+      if (r.failed.length) toast.warning(`นัดจ่ายแล้ว ${r.moved} ใบ · ไม่สำเร็จ ${r.failed.length} ใบ`);
+      else toast.success(`นัดจ่าย ${r.moved} ใบ วันที่ ${formatDate(until)} · ${THB(chosenTotal)}`);
+      setSel(null); onDone();
+    } catch { setErr("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง"); }
+    finally { setBusy(false); }
+  };
+  const payNow = () => { if (!chosen.length) { setErr("ยังไม่ได้เลือก PO"); return; } onPayNow(chosen); setSel(null); };
+  return (
+    <ERPModal open onClose={close} title="จัดรอบจ่ายร้านค้าตามงบ" size="lg" loading={busy} hasUnsavedChanges={!!sel && !busy}
+      footer={<>
+        <button type="button" onClick={close} className={`${btn} border border-slate-200 text-slate-600`}>ปิด</button>
+        {canManage && <button type="button" onClick={schedule} disabled={busy || !chosen.length} className={`${btn} border border-blue-200 text-blue-700 bg-white hover:bg-blue-50 disabled:opacity-40`}>นัดจ่ายวันที่ {formatDate(until)}</button>}
+        {canPayPo && <button type="button" onClick={payNow} disabled={busy || !chosen.length} className={`${btn} bg-emerald-600 text-white disabled:opacity-40`}>จ่ายแล้วตอนนี้ + แนบสลิป</button>}
+      </>}>
+      <div className="space-y-3 text-sm">
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div><label className="block text-xs text-slate-500 mb-1">จ่าย PO ที่ครบกำหนดภายในวันที่</label><DateInput value={until} onChange={(v) => { setUntil(v || addDaysISO(today, 7)); setSel(null); }} /></div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">งบที่จ่ายได้รอบนี้ (บาท)</label>
+            <input type="number" min={0} step={1000} value={budgetText === "" ? String(suggest ?? "") : budgetText} placeholder="เช่น 200000"
+              onChange={(e) => { setBudgetText(e.target.value); setSel(null); }} className="w-full h-9 px-2.5 text-sm text-right border border-slate-200 rounded-lg" />
+          </div>
+        </div>
+        <div className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+          {suggest == null
+            ? <>ยังไม่ได้กรอกยอดเงินในบัญชี (แท็บตั้งค่า) ระบบเลยแนะนำงบไม่ได้ — พิมพ์งบเองได้เลย</>
+            : <>งบแนะนำ = เงินในบัญชี {THB(cashNow ?? 0)} − เงินกันขั้นต่ำ {THB(buffer)} − ต้องจ่ายอย่างอื่นภายในวันที่นี้ (เงินเดือน งวดกู้ บัตร บิลจีน ประจำ) {THB(locked)} = <b className="text-slate-700">{THB(suggest)}</b>
+                {budgetText !== "" && <button type="button" onClick={() => { setBudgetText(""); setSel(null); }} className="ml-2 text-blue-600 underline">ใช้งบแนะนำ</button>}</>}
+        </div>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className={chosenTotal > budget + 0.005 ? "text-red-600 font-medium" : "text-slate-700"}>
+            เลือก {chosen.length} ใบ · <b className="tabular-nums">{THB(chosenTotal)}</b> จากงบ {THB(budget)}{chosenTotal > budget + 0.005 && " — เกินงบ"}
+          </span>
+          {sel && <button type="button" onClick={() => setSel(null)} className="text-xs text-blue-600 underline">ให้ระบบเลือกตามงบใหม่</button>}
+        </div>
+        {plan.left.length > 0 && !sel && <p className="text-xs text-amber-700">งบไม่พอ: ยังเหลือ PO ที่ครบกำหนดในรอบนี้ {plan.left.length} ใบ · {THB(sum(plan.left))} — ไม่ได้เลือก</p>}
+        <div className="max-h-[45vh] overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+          {!candidates.length && <p className="px-3 py-6 text-center text-slate-400">ไม่มี PO ที่ครบกำหนดภายในวันที่นี้</p>}
+          {byShop.map(([shop, list]) => (
+            <div key={shop}>
+              <div className="flex items-center justify-between px-3 py-1.5 bg-slate-50 text-xs font-medium text-slate-700">
+                <span>{shop}</span><span className="tabular-nums">{THB(sum(list.filter(isOn)))} / {THB(sum(list))}</span>
+              </div>
+              {list.map((e) => {
+                const late = daysBetween(e.date, today);
+                return (
+                  <label key={e.id} className="flex items-center gap-3 px-3 py-1.5 cursor-pointer hover:bg-slate-50">
+                    <input type="checkbox" checked={isOn(e)} onChange={() => toggle(e)} />
+                    <span className={`w-28 shrink-0 text-xs ${late > 0 ? "text-red-600" : "text-slate-600"}`}>{formatDate(e.date)}{late > 0 ? ` · เลย ${late} วัน` : ""}</span>
+                    <span className="flex-1 min-w-0 truncate">{e.ref}</span>
+                    <span className="tabular-nums text-rose-600">{THB(e.amount)}</span>
+                  </label>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+        <p className="text-xs text-slate-400">เรียง “ครบกำหนดก่อน → ยอดน้อยก่อน” แล้วหยิบจนเต็มงบ (ใบที่ใหญ่เกินงบที่เหลือข้ามไปใบถัดไป) · ติ๊กเพิ่ม/เอาออกเองได้ · นัดจ่าย = เขียนวันครบกำหนดใน PO (เลื่อนกลับได้) · ยังไม่หักยอดเงินในบัญชี</p>
         {err && <p className="text-sm text-red-600">{err}</p>}
       </div>
     </ERPModal>
