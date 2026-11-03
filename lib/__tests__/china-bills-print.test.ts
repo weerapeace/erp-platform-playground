@@ -104,19 +104,53 @@ describe("china bills print", () => {
     expect(r.html).toContain("รวม 5 บิล");
   });
 
-  it("bank switch prints the shop account under the shop name", () => {
-    const banks = new Map<string, CbBank>([["s1", { bank: "ICBC", account: "6222 0001", name: "ZHANG" }]]);
+  it("bank switch prints a bank box under the shop name; the account number never wraps and widens the shop column", () => {
+    const acc = "6236 6829 2000 1101 631";
+    const banks = new Map<string, CbBank>([["s1", { bank: "中国建设银行总行", account: acc, name: "舒云霞" }]]);
     const r = build(three, { opts: { bank: true } }, 5.2, banks);
-    expect(r.html).toContain("ICBC · 6222 0001 · ZHANG");
-    expect(r.html).toContain("ยังไม่มีเลขบัญชี");
+    expect(r.html).toContain(`<span class="k">เลขที่</span><span class="no">${acc}</span>`);
+    expect(r.html).toContain("中国建设银行总行");
+    expect(r.html).toContain(`<span class="none">ยังไม่มีเลขบัญชี</span>`);
+    expect(r.html).toMatch(/\.bk \.no \{[^}]*white-space: nowrap/);
+    const off = build(three, {}, 5.2, banks);
+    expect((r.widthHints.shop.min ?? 0)).toBeGreaterThan(off.widthHints.shop.min ?? 0);
+    // ตัวใหญ่ขึ้น → ช่องร้านต้องกว้างขึ้นตาม
+    const big = build(three, { opts: { bank: true, sz: { bank: 20 } } }, 5.2, banks);
+    expect(big.widthHints.shop.min!).toBeGreaterThan(r.widthHints.shop.min!);
+  });
+
+  it("calc box has its own switch; part sizes and money cells never wrap", () => {
+    expect(build(three, { opts: { calc: false } }).html).not.toContain(`class="cb-rate"`);
+    expect(build(three).html).toContain(`class="cb-rate"`);
+    const r = build(three, { opts: { sz: { head: 16, money: 18, calc: 20, shop: 99 } } });
+    expect(r.html).toContain(".wb-t th { font-size: 16px; }");
+    expect(r.html).toContain(".wb-t td.r { font-size: 18px; }");
+    expect(r.html).toContain(".cb-rate { font-size: 20px; }");
+    expect(r.html).toContain(".shop-n { font-size: 11px; }");   // 99 = ค่าแปลก → ตามตัวอักษรหลัก
+    expect(r.html).toContain(".wb-t.fixed td.r { white-space: nowrap;");
+    expect(cbPrintOpts(cleanListPrintSettings({ ...cbPrintDefaults(), opts: { sz: { money: 7 } } }, CB_PRINT_COLUMNS, cbPrintDefaults())).sz.money).toBe(0);
+  });
+
+  it("auto column widths grow with font size, user widths win, and too-wide sheets are flagged", () => {
+    const small = build(three, { fontPx: 11 });
+    const big = build(three, { fontPx: 22 });
+    expect(big.widthHints.thb.auto!).toBeGreaterThan(small.widthHints.thb.auto!);
+    // ~฿116,253.82 ที่ 22px ต้องกว้างพอ (ไม่ตัดบรรทัดแบบ ~5.16 / 5)
+    expect(big.widthHints.rate.auto!).toBeGreaterThanOrEqual(18);
+    expect(small.overWide).toBe(false);
+    expect(big.overWide).toBe(true);
+    expect(build(three, { fontPx: 22, orientation: "landscape" }).overWide).toBe(false);
+    // ผู้ใช้ตั้งกว้างเอง → ใช้ค่าผู้ใช้
+    const cols = cbPrintDefaults().columns.map((c) => (c.key === "thb" ? { ...c, widthMm: 50 } : c));
+    expect(build(three, { columns: cols }).html).toContain(`<col data-col="thb" style="width:50mm" />`);
   });
 
   it("columns follow the switches, presets carry the switches, and text is escaped", () => {
-    expect(cbPrintColumnsFor({ rate: false, fee: false, bank: false }).map((c) => c.key)).not.toContain("fee");
-    expect(cbPrintColumnsFor({ rate: false, fee: false, bank: false }).map((c) => c.key)).not.toContain("thb");
+    expect(cbPrintColumnsFor({ rate: false, fee: false }).map((c) => c.key)).not.toContain("fee");
+    expect(cbPrintColumnsFor({ rate: false, fee: false }).map((c) => c.key)).not.toContain("thb");
     const base = cbPrintDefaults();
     const plain = applyListPrintPreset(base, cbPrintPresets().find((p) => p.id === "cb-plain")!, CB_PRINT_COLUMNS);
-    expect(cbPrintOpts(plain)).toEqual({ rate: false, fee: false, bank: false });
+    expect(cbPrintOpts(plain)).toMatchObject({ rate: false, calc: false, fee: false, bank: false });
     const evil = cbBillsFromApi([{ id: "x", supplier_label: "<b>ร้าน</b>", amount_rmb: 1, status: "รอโอน" }]);
     expect(build(evil).html).toContain("&lt;b&gt;ร้าน");
     expect(build([]).html).toContain("ไม่มีบิลตามที่เลือก");

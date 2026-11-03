@@ -19,7 +19,7 @@ import { apiFetch } from "@/lib/api";
 import { cleanListPrintSettings, estimateListPages } from "@/lib/list-print";
 import { ALL_FILTERS, billInFilter } from "@/lib/china-pay";
 import {
-  CB_PRINT_COLUMNS, CB_PRINT_GROUPS, CB_PRINT_SIGN, CB_PRINT_SORTS, CHINA_BILLS_PRINT_PICK_KEY, buildChinaBillsPrint, cbBillsFromApi, cbPrintColumnsFor,
+  CB_PRINT_COLUMNS, CB_PRINT_GROUPS, CB_PRINT_SIGN, CB_PRINT_SORTS, CB_SIZE_MAX, CB_SIZE_MIN, CB_SIZE_PARTS, CHINA_BILLS_PRINT_PICK_KEY, buildChinaBillsPrint, cbBillsFromApi, cbPrintColumnsFor,
   cbPrintDefaults, cbPrintOpts, cbPrintPresets, cbPrintTitle, cbThDate,
   type CbBank, type CbPrintOpts,
 } from "@/lib/china-bills-print";
@@ -189,9 +189,31 @@ function ChinaBillsPrintView() {
             </p>
           </div>
         )}
+        {o.rate && <div className="ml-6"><Check checked={o.calc} onChange={(calc) => setOpts({ calc })}>กล่องคำนวณ (สีเหลือง)</Check></div>}
         <Check checked={o.fee} onChange={(fee) => setOpts({ fee })}>ค่าโอน</Check>
         {!o.fee && <p className="mb-1 ml-6 text-[11px] text-slate-400">ปิดอยู่ = ยอดทุกจุดไม่รวมค่าโอน</p>}
         <Check checked={o.bank} onChange={(bank) => setOpts({ bank })}>บัญชีธนาคารร้าน</Check>
+      </Section>
+
+      <Section title="ขนาดแต่ละส่วน" hint={`ลาก = ตั้งเอง · ตัวอักษรหลัก ${s.fontPx}px`}>
+        {result?.overWide && (
+          <p className="mb-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-800">
+            <Icon value="i:alert-triangle" className="mr-1" />ตัวเลขกว้างเกินกระดาษ — ลองแนวนอน หรือลดขนาดตัวอักษร/ตัวเลขเงิน
+          </p>
+        )}
+        {CB_SIZE_PARTS.filter((p) => (p.key !== "bank" || o.bank) && (p.key !== "calc" || (o.rate && o.calc))).map((p) => {
+          const custom = o.sz[p.key];
+          return (
+            <label key={p.key} className="flex items-center gap-2 py-0.5 text-xs text-slate-600">
+              <span className="w-20 shrink-0">{p.label}</span>
+              <input type="range" min={CB_SIZE_MIN} max={CB_SIZE_MAX} step={1} value={custom || s.fontPx} aria-label={`ขนาดตัวอักษร ${p.label}`}
+                onChange={(e) => setOpts({ sz: { ...o.sz, [p.key]: Number(e.target.value) } })} className="min-w-0 flex-1 accent-blue-600" />
+              <span className={`w-11 text-right ${custom ? "font-mono text-slate-800" : "text-slate-400"}`}>{custom ? `${custom}px` : "ตามหลัก"}</span>
+              <button type="button" onClick={() => setOpts({ sz: { ...o.sz, [p.key]: 0 } })} aria-label={`${p.label} กลับตามตัวอักษรหลัก`}
+                className={`h-6 w-6 shrink-0 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 ${custom ? "" : "invisible"}`}><Icon value="i:arrow-back-up" /></button>
+            </label>
+          );
+        })}
       </Section>
     </>
   );
@@ -237,6 +259,7 @@ function ChinaBillsPrintView() {
               canSaveTeam={can("admin.users")}
               signatureHint={CB_PRINT_SIGN.join(" / ")}
               extra={extra}
+              widthHints={result?.widthHints}
             />
           </aside>
         )}

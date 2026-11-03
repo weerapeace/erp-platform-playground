@@ -9,7 +9,7 @@
  */
 import { buildReportHtml, type ReportTemplate } from "@/lib/template";
 import {
-  LIST_GROUP_ROW, LIST_TOTAL_ROW, defaultListPrintSettings, escapeHtml as esc, fitListColumns, listPrintCss, renderListTable, resolveListColumns, signatureHtml,
+  LIST_GROUP_ROW, LIST_TOTAL_ROW, defaultListPrintSettings, escapeHtml as esc, fitListColumns, listPaperWidthMm, listPrintCss, renderListTable, resolveListColumns, signatureHtml,
   type ListPrintColumn, type ListPrintPreset, type ListPrintSettings,
 } from "@/lib/list-print";
 import { TIER_NAMES, TIER_OFF, billDisplayName, billPaidRmb, billStatus3, isThbBill, rateForRmb, tierIdxForRmb } from "@/lib/china-pay";
@@ -44,24 +44,41 @@ export const cbBillsFromApi = (rows: Record<string, unknown>[]): CbPrintBill[] =
 }));
 
 // ---------- ค่าเฉพาะใบ (settings.opts) ----------
+/** ส่วนที่ตั้งขนาดตัวอักษรแยกได้ (เจ้าของขอ 2026-11-03 รุ่น 2) */
+export type CbSizePart = "head" | "shop" | "bank" | "money" | "calc";
+export const CB_SIZE_PARTS: { key: CbSizePart; label: string }[] = [
+  { key: "head", label: "หัวตาราง" }, { key: "shop", label: "ชื่อร้าน" }, { key: "bank", label: "บัญชีธนาคาร" },
+  { key: "money", label: "ตัวเลขเงิน" }, { key: "calc", label: "กล่องคำนวณ" },
+];
+export const CB_SIZE_MIN = 8;
+export const CB_SIZE_MAX = 22;
 export type CbPrintOpts = {
-  /** คอลัมน์เรท + เงินบาท + กล่องคำนวณเงินบาท */
+  /** คอลัมน์เรท + เงินบาท */
   rate: boolean;
+  /** กล่องคำนวณเงินบาท (สีเหลือง ใต้ตาราง) — ใช้เมื่อเปิดเรท */
+  calc: boolean;
   /** คอลัมน์ค่าโอน + รวม · ปิด = ยอดไม่รวมค่าโอน */
   fee: boolean;
   /** บัญชีธนาคารร้านใต้ชื่อร้าน */
   bank: boolean;
+  /** ขนาดตัวอักษรต่อส่วน (px) · 0 = ตามตัวอักษรหลัก */
+  sz: Record<CbSizePart, number>;
 };
-const OPT_DEFAULTS: CbPrintOpts = { rate: true, fee: true, bank: false };
+const OPT_DEFAULTS = { rate: true, calc: true, fee: true, bank: false };
 export function cbPrintOpts(s: ListPrintSettings): CbPrintOpts {
   const o = (s.opts ?? {}) as Record<string, unknown>;
-  const b = (k: keyof CbPrintOpts) => (typeof o[k] === "boolean" ? (o[k] as boolean) : OPT_DEFAULTS[k]);
-  return { rate: b("rate"), fee: b("fee"), bank: b("bank") };
+  const b = (k: keyof typeof OPT_DEFAULTS) => (typeof o[k] === "boolean" ? (o[k] as boolean) : OPT_DEFAULTS[k]);
+  const raw = (o.sz && typeof o.sz === "object" ? o.sz : {}) as Record<string, unknown>;
+  const sz = Object.fromEntries(CB_SIZE_PARTS.map(({ key }) => {
+    const n = Math.round(Number(raw[key]));
+    return [key, Number.isFinite(n) && n >= CB_SIZE_MIN && n <= CB_SIZE_MAX ? n : 0];
+  })) as Record<CbSizePart, number>;
+  return { rate: b("rate"), calc: b("calc"), fee: b("fee"), bank: b("bank"), sz };
 }
 
 // ---------- คอลัมน์ / กลุ่ม / เรียง / แบบสำเร็จรูป ----------
 export const CB_PRINT_COLUMNS: ListPrintColumn[] = [
-  { key: "no", label: "#", align: "right", widthMm: 8 },
+  { key: "no", label: "#", align: "center", widthMm: 8 },
   { key: "date", label: "วันที่", widthMm: 18 },
   { key: "shop", label: "ร้าน", locked: true },
   { key: "status", label: "สถานะ", widthMm: 22 },
@@ -77,18 +94,19 @@ export const CB_PRINT_COLUMNS: ListPrintColumn[] = [
 const FEE_COLS = ["fee", "total"];
 const RATE_COLS = ["rate", "thb"];
 /** คอลัมน์ที่ใช้ได้ตามสวิตช์ (ปิดค่าโอน/เรท = คอลัมน์ของมันหายจากใบและจากรายการคอลัมน์ในแผง) */
-export const cbPrintColumnsFor = (o: CbPrintOpts) =>
+export const cbPrintColumnsFor = (o: Pick<CbPrintOpts, "fee" | "rate">) =>
   CB_PRINT_COLUMNS.filter((c) => (o.fee || !FEE_COLS.includes(c.key)) && (o.rate || !RATE_COLS.includes(c.key)));
 
 export const CB_PRINT_GROUPS = [{ value: "", label: "ไม่จัดกลุ่ม" }, { value: "status", label: "ตามสถานะ" }, { value: "shop", label: "ตามร้าน" }, { value: "date", label: "ตามวันที่" }];
 export const CB_PRINT_SORTS = [{ value: "date_desc", label: "ล่าสุดก่อน" }, { value: "date_asc", label: "เก่าสุดก่อน" }, { value: "shop", label: "ชื่อร้าน ก-ฮ" }, { value: "amount", label: "ยอดมากก่อน" }];
 
 const presetCols = (on: string[]) => CB_PRINT_COLUMNS.map((c) => ({ key: c.key, on: !!c.locked || on.includes(c.key) }));
-type PresetDef = { id: string; name: string; on: string[]; signature: boolean; opts: CbPrintOpts };
+// แบบสำเร็จรูปไม่แตะขนาดแยกส่วน (sz) — ใช้ค่าที่ผู้ใช้ตั้งไว้
+type PresetDef = { id: string; name: string; on: string[]; signature: boolean; opts: Omit<CbPrintOpts, "sz"> };
 const PRESET_DEFS: PresetDef[] = [
-  { id: "cb-full", name: "สรุปครบ (เรท + ค่าโอน)", on: ["no", "date", "amount", "fee", "total", "rate", "thb"], signature: true, opts: { rate: true, fee: true, bank: false } },
-  { id: "cb-plain", name: "ยอดบิลอย่างเดียว", on: ["no", "date", "status", "amount"], signature: false, opts: { rate: false, fee: false, bank: false } },
-  { id: "cb-transfer", name: "ใบให้คนโอน (มีบัญชีร้าน)", on: ["no", "amount", "fee", "total", "remain"], signature: true, opts: { rate: false, fee: true, bank: true } },
+  { id: "cb-full", name: "สรุปครบ (เรท + ค่าโอน)", on: ["no", "date", "amount", "fee", "total", "rate", "thb"], signature: true, opts: { rate: true, calc: true, fee: true, bank: false } },
+  { id: "cb-plain", name: "ยอดบิลอย่างเดียว", on: ["no", "date", "status", "amount"], signature: false, opts: { rate: false, calc: false, fee: false, bank: false } },
+  { id: "cb-transfer", name: "ใบให้คนโอน (มีบัญชีร้าน)", on: ["no", "amount", "fee", "total", "remain"], signature: true, opts: { rate: false, calc: false, fee: true, bank: true } },
 ];
 export const cbPrintPresets = (): ListPrintPreset[] => PRESET_DEFS.map((p) => ({
   id: p.id, name: p.name, settings: { signature: p.signature, columns: presetCols(p.on), opts: { ...p.opts } },
@@ -125,7 +143,13 @@ export function buildChinaBillsPrint(input: {
   scopeText: string; defaultTitle: string;
   banks?: Map<string, CbBank>; printedAt: string; printedBy?: string; origin: string;
   company?: { name: string; logo_key: string | null } | null;
-}): { html: string; title: string; groupCounts: number[]; count: number } {
+}): {
+  html: string; title: string; groupCounts: number[]; count: number;
+  /** ความกว้างที่คำนวณให้ (มม.) ต่อคอลัมน์ — ส่งให้แผงโชว์เป็นค่าอัตโนมัติ/เตือนแคบไป */
+  widthHints: Record<string, { auto?: number; min?: number }>;
+  /** ตัวเลขทุกช่องรวมกันกว้างเกินกระดาษ (ควรแนวนอน/ลดตัวอักษร) */
+  overWide: boolean;
+} {
   const { settings: s, origin } = input;
   const o = cbPrintOpts(s);
   const title = s.title.trim() || input.defaultTitle;
@@ -157,26 +181,30 @@ export function buildChinaBillsPrint(input: {
   const sorted = [...rows].sort(cmp[s.sortBy] ?? cmp.date_desc);
   sorted.forEach((r, i) => { r.no = i + 1; });
 
-  // 4) คอลัมน์ (สวิตช์ปิด = ตัดคอลัมน์ของมันทิ้ง) · ย่อให้พอดีกระดาษ
-  const cols = fitListColumns(resolveListColumns(s, cbPrintColumnsFor(o)), s);
   const live = (list: CRow[]) => list.filter((r) => !r.cancelled);
   const sumRmb = (list: CRow[], k: "base" | "paid" | "remain" | "amount" | "fee") => live(list).filter((r) => !r.thb).reduce((a, r) => a + r[k], 0);
   const sumThbBills = (list: CRow[]) => live(list).filter((r) => r.thb).reduce((a, r) => a + r.amountThb, 0);
   const sumBaht = (list: CRow[]) => live(list).reduce((a, r) => a + (r.thbAmt ?? 0), 0);
   const waiting = (list: CRow[]) => live(list).some((r) => !r.thb && r.thbAmt == null);
+  const pxOf = (k: CbSizePart) => o.sz[k] || s.fontPx;
 
-  const bankLine = (r: CRow) => {
+  // กล่องบัญชีธนาคารร้าน: ธนาคาร / เลขที่ / ชื่อ · เลขบัญชีห้ามตัดบรรทัด (เจ้าของขอ รุ่น 2)
+  const bankOf = (r: CRow) => (r.supplierId ? input.banks?.get(r.supplierId) : undefined);
+  const bankBox = (r: CRow) => {
     if (!o.bank || r.thb) return "";
-    const b = r.supplierId ? input.banks?.get(r.supplierId) : undefined;
-    const parts = b ? [b.bank, b.account, b.name].filter(Boolean) : [];
-    return `<div class="bank">${parts.length ? esc(parts.join(" · ")) : "ยังไม่มีเลขบัญชี"}</div>`;
+    const b = bankOf(r);
+    const rows: string[] = [];
+    if (b?.bank) rows.push(`<span class="k">ธนาคาร</span><span>${esc(b.bank)}</span>`);
+    rows.push(b?.account ? `<span class="k">เลขที่</span><span class="no">${esc(b.account)}</span>` : `<span class="k">เลขที่</span><span class="none">ยังไม่มีเลขบัญชี</span>`);
+    if (b?.name) rows.push(`<span class="k">ชื่อ</span><span>${esc(b.name)}</span>`);
+    return `<div class="bk">${rows.join("")}</div>`;
   };
   const cellsOf = (r: CRow): Record<string, string> => {
     const thbOnly = r.thb ? `<span class="sub">${baht(r.amountThb)}</span>` : "";
     const out: Record<string, string> = {
       no: String(r.no),
       date: cbThDate(r.date),
-      shop: `${esc(r.name)}${r.thb ? ` <span class="tag">บาท</span>` : ""}${bankLine(r)}`,
+      shop: `<div class="shop-n">${esc(r.name)}${r.thb ? ` <span class="tag">บาท</span>` : ""}</div>${bankBox(r)}`,
       status: esc(r.status),
       amount: r.thb ? thbOnly : rmb(r.amount),
       fee: r.thb ? "—" : r.fee ? fmt(r.fee) : "-",
@@ -231,11 +259,45 @@ export function buildChinaBillsPrint(input: {
     } as Record<string, string>,
   };
   if (!o.fee) foot.cells.amount = rmb(sumRmb(all, "base"));
+
+  // 6.5) คอลัมน์ (สวิตช์ปิด = ตัดคอลัมน์ของมันทิ้ง) · กว้างอัตโนมัติพอดีตัวเลขที่ขนาดตัวอักษรจริง (ตัวเลขไม่ตัดบรรทัด)
+  //      ช่องที่ผู้ใช้ตั้งกว้างเอง (พิมพ์/ลาก) ใช้ค่าผู้ใช้ · แล้วค่อยย่อให้พอดีกระดาษ (ไม่ต่ำกว่าที่ตัวเลขต้องใช้)
+  const userW = new Set(s.columns.filter((c) => c.widthMm != null).map((c) => c.key));
+  const resolved = resolveListColumns(s, cbPrintColumnsFor(o));
+  const rowCells = sorted.map(cellsOf);
+  const widthHints: Record<string, { auto?: number; min?: number }> = {};
+  for (const c of resolved) {
+    if (c.key === "shop") continue;
+    if (!AUTO_WIDTH_KEYS.has(c.key)) continue;
+    const money = c.align === "right";
+    const px = money ? pxOf("money") : s.fontPx;
+    const body = Math.max(0, ...rowCells.map((cells) => cellMm(cells[c.key] ?? "", px)), foot.cells[c.key] ? cellMm(foot.cells[c.key], px * 1.06) : 0);
+    // หัวช่องเงินสั้น ("ค่าโอน ¥") → กว้างพอทั้งหัวในบรรทัดเดียว · หัวอื่นตัดบรรทัดที่ช่องว่างได้
+    const head = (money ? textMm(c.label, pxOf("head"), 0.6) : wordMm(c.label, pxOf("head"))) + CELL_PAD_MM;
+    const need = Math.ceil(Math.max(body, head, 7));
+    widthHints[c.key] = { auto: need, min: need };
+    c.minMm = need;
+    if (!userW.has(c.key)) c.widthMm = need;
+  }
+  // ช่องร้าน = กว้างตามที่เหลือ · เปิดบัญชีร้าน = อย่างน้อยพอให้เลขบัญชีอยู่บรรทัดเดียว
+  const shop = resolved.find((c) => c.key === "shop");
+  const bankPx = pxOf("bank");
+  const shopMin = Math.ceil(Math.max(22, ...(o.bank ? live(sorted).filter((r) => !r.thb).map((r) => {
+    const acc = bankOf(r)?.account || "ยังไม่มีเลขบัญชี";
+    // เลขบัญชี = ตัวพิมพ์ดีดหนา วัดจริง ~0.57em + letter-spacing 0.02em
+    return textMm("เลขที่", bankPx) + textMm(acc, bankPx, 0.6) + BANK_BOX_MM + CELL_PAD_MM;
+  }) : [])));
+  widthHints.shop = { min: shopMin };
+  const shopFlex = !!shop && !userW.has("shop");
+  if (shop) { shop.minMm = shopMin; if (shopFlex) shop.widthMm = shopMin; }
+  const roomMm = listPaperWidthMm(s) - 32;
+  const overWide = resolved.reduce((a, c) => a + (c.minMm ?? c.widthMm ?? 0), 0) > roomMm + 0.5;
+  const cols = fitListColumns(resolved, s).map((c) => (c.key === "shop" && shopFlex ? { ...c, widthMm: undefined } : c));
   for (const k of Object.keys(foot.cells)) if (!cols.some((c) => c.key === k)) delete foot.cells[k];
 
-  // 7) กล่องคำนวณเงินบาท (เปิดเรท)
+  // 7) กล่องคำนวณเงินบาท (สีเหลือง · เปิดเรท + เปิดกล่อง)
   let rateBox = "";
-  if (o.rate && all.length) {
+  if (o.rate && o.calc && all.length) {
     const L = live(all);
     const known = L.filter((r) => !r.thb && !r.est), est = L.filter((r) => !r.thb && r.est), thb = L.filter((r) => r.thb);
     const lines: string[] = [];
@@ -265,13 +327,46 @@ export function buildChinaBillsPrint(input: {
   body += rateBox;
   if (s.signature) body += signatureHtml(CB_PRINT_SIGN);
 
+  // ขนาดแยกส่วน + ตัวเลขไม่ตัดบรรทัด — ต่อท้าย listPrintCss (ชนะค่าตัวอักษรหลัก)
+  const partCss = `
+.wb-t.fixed td.r { white-space: nowrap; overflow-wrap: normal; }
+.shop-n { font-size: ${pxOf("shop")}px; }
+.bk { font-size: ${bankPx}px; }
+.cb-rate { font-size: ${pxOf("calc")}px; }
+${o.sz.head ? `.wb-t th { font-size: ${o.sz.head}px; }` : ""}
+${o.sz.money ? `.wb-t td.r { font-size: ${o.sz.money}px; }` : ""}`;
   const tpl: ReportTemplate = {
     paper_size: s.paper, orientation: s.orientation,
     header_html: "{{{header}}}", body_html: "{{{body}}}", footer_html: "",
-    custom_css: CB_PRINT_CSS + listPrintCss(s),
+    custom_css: CB_PRINT_CSS + listPrintCss(s) + partCss,
   };
-  return { html: buildReportHtml(tpl, { header, body }, `${title} ${input.printedAt.replace(/\//g, "-")}`), title, groupCounts: counts.length ? counts : [0], count: all.length };
+  return {
+    html: buildReportHtml(tpl, { header, body }, `${title} ${input.printedAt.replace(/\//g, "-")}`), title, groupCounts: counts.length ? counts : [0], count: all.length,
+    widthHints, overWide,
+  };
 }
+
+// ---------- ความกว้างอัตโนมัติ (มม.) — ประมาณจากจำนวนตัวอักษร × ขนาดตัวอักษร ----------
+const PX_MM = 0.2646;
+/** padding ซ้ายขวา 2+2 มม. + เส้นขอบ */
+const CELL_PAD_MM = 4.5;
+/** กล่องบัญชี: padding 1.8+1.8 + ช่องห่างป้าย-ค่า 2 + เส้นขอบ */
+const BANK_BOX_MM = 6.4;
+const AUTO_WIDTH_KEYS = new Set(["no", "date", "status", "amount", "fee", "total", "paid", "remain", "rate", "thb"]);
+const THAI_MARKS = /[ัิ-ฺ็-๎]/g;
+const CJK = /[⺀-鿿豈-﫿＀-￯]/g;
+const plain = (html: string) => html.replace(/<[^>]+>/g, "").replace(/&[a-z0-9#]+;/gi, "x");
+/** กว้างของข้อความ 1 บรรทัด (มม.) — จีน 1em · สระบน-ล่างไม่กินที่
+ *  ไทย/ตัวเลข 0.53em (วัดจริงในเบราว์เซอร์ 2026-11-03: ตัวเลข ~0.50 · ตัวหนา ~0.53 · วันที่ไทย ~0.49 — เผื่อตัวหนาไว้) */
+export const textMm = (text: string, px: number, em = 0.53) => {
+  const t = plain(text).replace(THAI_MARKS, "");
+  const cjk = (t.match(CJK) ?? []).length;
+  return ((t.length - cjk) * em + cjk) * px * PX_MM;
+};
+/** กว้างของช่อง (มม.) — ข้อความหลายบรรทัด (<div>/<br>) วัดบรรทัดที่ยาวสุด */
+const cellMm = (html: string, px: number) => Math.max(0, ...html.split(/<div[^>]*>|<br\s*\/?>/).map((x) => textMm(x, px))) + CELL_PAD_MM;
+/** หัวคอลัมน์ตัดบรรทัดได้ที่ช่องว่าง → วัดคำที่ยาวสุด */
+const wordMm = (label: string, px: number) => Math.max(0, ...label.split(/\s+/).map((w) => textMm(w, px, 0.6)));
 
 const CB_PRINT_CSS = `
 .doc { color: #111827; }
@@ -286,12 +381,18 @@ const CB_PRINT_CSS = `
 .wb-t tfoot td { font-weight: 700; background: #fff7ed; color: #9a3412; }
 .wb-t tfoot td.r { color: #9a3412; }
 .sub { font-size: 0.85em; color: #64748b; font-weight: 400; }
-.bank { font-size: 0.85em; color: #475569; margin-top: 0.5mm; }
+.shop-n { font-weight: 600; }
+.bk { margin-top: 1mm; display: grid; grid-template-columns: auto 1fr; gap: 0.2mm 2mm; width: max-content; max-width: 100%; box-sizing: border-box;
+  padding: 0.8mm 1.8mm; border: 1px solid #e2e8f0; border-radius: 1mm; background: #f8fafc; color: #334155; line-height: 1.35;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.bk .k { color: #94a3b8; white-space: nowrap; }
+.bk .no { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 700; color: #0f172a; white-space: nowrap; letter-spacing: 0.02em; }
+.bk .none { color: #b45309; }
 .tag { font-size: 0.75em; padding: 0 1.2mm; border: 1px solid #c4b5fd; color: #6d28d9; border-radius: 1mm; }
 .est { color: #b45309; }
 .wait { color: #b45309; font-size: 0.85em; font-weight: 400; }
 .g-sum { float: right; font-weight: 400; color: #475569; margin-left: 3mm; }
-.cb-rate { margin-top: 3mm; padding: 2mm 3mm; border: 1px solid #fcd34d; background: #fffbeb; border-radius: 1mm; color: #78350f; line-height: 1.6; break-inside: avoid; }
+.cb-rate { margin-top: 3mm; padding: 2mm 3mm; border: 1px solid #fcd34d; background: #fffbeb; border-radius: 1mm; color: #78350f; line-height: 1.6; break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 .cb-rate .tot { display: block; border-top: 1px dashed #fcd34d; margin-top: 1mm; padding-top: 1mm; }
 .cb-rate .sub { color: #92400e; }
 .wb-empty { padding: 10mm 0; text-align: center; color: #94a3b8; }

@@ -24,7 +24,7 @@ describe("list print settings", () => {
     }, AVAIL, D);
     expect(s.paper).toBe("A4");
     expect(s.orientation).toBe("landscape");
-    expect(s.fontPx).toBe(14);
+    expect(s.fontPx).toBe(22);
     expect(s.image).toBe("m");
     expect(s.density).toBe("airy");
     expect(s.columns).toEqual([

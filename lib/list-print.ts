@@ -72,7 +72,8 @@ export interface ListPrintPreset {
 export const PRINT_TEAM_PRESETS_KEY = "admin_print_presets";
 
 export const FONT_MIN = 9;
-export const FONT_MAX = 14;
+/** ตัวอักษรใหญ่สุด — เจ้าของขอถึง 22px (2026-11-03 ใบสรุปบิลจีน) · เดิม 14 */
+export const FONT_MAX = 22;
 /** ขนาดรูปในกระดาษ (มม.) */
 export const IMAGE_MM: Record<ListPrintImage, number> = { none: 0, s: 8, m: 13, l: 20 };
 /** ระยะบน-ล่างในช่อง (มม.) */
@@ -214,6 +215,8 @@ export function resolveListColumns(s: ListPrintSettings, available: ListPrintCol
 
 /** กว้างกระดาษ (มม.) */
 const PAPER_W: Record<ListPrintPaper, Record<ListPrintOrientation, number>> = { A4: { portrait: 210, landscape: 297 }, A5: { portrait: 148, landscape: 210 } };
+/** กว้างกระดาษ (มม.) ตามขนาด/แนว — พื้นที่ตารางบนจอ = ค่านี้ − 32 (เหมือน fitListColumns) */
+export const listPaperWidthMm = (s: Pick<ListPrintSettings, "paper" | "orientation">) => PAPER_W[s.paper][s.orientation];
 /** ย่อได้ต่ำสุด (มม.) — ตั้งเองต่อคอลัมน์ (minMm) · รหัส (MO/ใบขาย ~14 ตัว) ยังอยู่บรรทัดเดียว · อื่น ๆ (ช่องติ๊ก/เขียน) 12 */
 const fitMin = (c: ListPrintColumn) => Math.min(c.widthMm ?? Infinity, c.minMm ?? (c.mono ? 28 : 12));
 /**

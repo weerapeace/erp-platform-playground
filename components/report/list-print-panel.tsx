@@ -7,7 +7,7 @@
  *   คอลัมน์ล็อก (locked) = ไอคอนกุญแจ ปิดไม่ได้ · textNotes = ช่องเขียนมือเลือก "พิมพ์เอง" ได้ · extra = ตัวเลือกเฉพาะใบ (วางต่อจากแบบที่บันทึกไว้)
  * ใช้คู่กับ useListPrintSettings · ใช้ที่: /print/work-board · เอกสาร docs/list-print.md
  */
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { askConfirm, askText } from "@/components/modal/ask-dialog";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
@@ -41,8 +41,31 @@ export function Check({ checked, onChange, children }: { checked: boolean; onCha
 
 const BLANK_LABEL: Record<ListPrintBlank, string> = { line: "ช่องเขียน", box: "ช่องติ๊ก ☐", text: "พิมพ์เอง" };
 
+/** ช่องกว้างคอลัมน์ (มม.) — พิมพ์แล้วจำเมื่อออกจากช่อง/กด Enter (กันพิมพ์ "15" แล้วโดนบีบเป็น 6 ตอนพิมพ์ "1") · ว่าง = กลับค่าเดิม */
+function WidthInput({ value, auto, min, label, onCommit }: { value?: number; auto?: number; min?: number; label: string; onCommit: (mm: number | null) => void }) {
+  const [text, setText] = useState(value != null ? String(value) : "");
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { if (!editing) setText(value != null ? String(value) : ""); }, [value, editing]);
+  const commit = () => {
+    setEditing(false);
+    const n = Number(text);
+    if (!text.trim() || !Number.isFinite(n) || n <= 0) { if (value != null) onCommit(null); return; }
+    if (Math.round(n) !== value) onCommit(n);
+  };
+  const tight = value != null && min != null && value < min;
+  return (
+    <label className="flex shrink-0 items-center gap-0.5" title={tight ? `แคบกว่าตัวเลข (ต้องการ ${min} มม.) — ตัวเลขจะล้นช่อง` : auto ? `ว่าง = อัตโนมัติ ${auto} มม.` : "ว่าง = กว้างตามที่เหลือ"}>
+      <input type="number" inputMode="numeric" min={6} max={150} value={text} placeholder={auto ? String(Math.round(auto)) : "อัตโนมัติ"} aria-label={`ความกว้างคอลัมน์ ${label} (มม.)`}
+        onFocus={() => setEditing(true)} onChange={(e) => setText(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+        className={`h-7 w-12 rounded-md border px-1 text-right text-[11px] placeholder:text-slate-300 ${tight ? "border-red-300 bg-red-50 text-red-700" : "border-slate-200 text-slate-700"}`} />
+      <span className={`text-[10px] ${tight ? "text-red-600" : "text-slate-400"}`}>{tight ? "แคบ" : "มม."}</span>
+    </label>
+  );
+}
+
 export function ListPrintPanel({
-  state, available, sorts, groups, builtinPresets, companies, estimatedPages, defaultTitle, canSaveTeam, signatureHint, textNotes, extra,
+  state, available, sorts, groups, builtinPresets, companies, estimatedPages, defaultTitle, canSaveTeam, signatureHint, textNotes, extra, widthHints,
 }: {
   state: ListPrintSettingsState;
   available: ListPrintColumn[];
@@ -60,6 +83,8 @@ export function ListPrintPanel({
   textNotes?: boolean;
   /** ตัวเลือกเฉพาะใบ (วางต่อจาก "แบบที่บันทึกไว้") */
   extra?: ReactNode;
+  /** ความกว้างที่ใบคำนวณให้เอง (มม.) ต่อคอลัมน์ — auto = โชว์เป็นค่าจาง ๆ ในช่องกว้าง · min = แคบกว่านี้ตัวเลขล้น (เตือน "แคบไป") */
+  widthHints?: Record<string, { auto?: number; min?: number }>;
 }) {
   const toast = useToast();
   const s = state.settings;
@@ -174,7 +199,7 @@ export function ListPrintPanel({
       <Section title="คอลัมน์" hint="ติ๊ก · เลื่อนลำดับ · แก้ชื่อหัว">
         <div className="mb-2 flex items-start gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-slate-500">
           <Icon value="i:arrows-exchange" className="mt-0.5 shrink-0 text-slate-400" />
-          <span className="flex-1">ปรับความกว้าง: ลากขอบหัวคอลัมน์ในใบพรีวิว · ดับเบิลคลิกขอบ = กลับค่าเดิม</span>
+          <span className="flex-1">ปรับความกว้าง: พิมพ์ตัวเลข (มม.) ในช่องขวา หรือลากขอบหัวคอลัมน์ในใบพรีวิว · ว่าง / ดับเบิลคลิกขอบ = กลับค่าเดิม</span>
           {s.columns.some((c) => c.widthMm != null && !isExtraColumn(c.key)) && (
             <button type="button" onClick={state.resetColumnWidths} className="shrink-0 text-blue-600 hover:underline">คืนเดิมทั้งหมด</button>
           )}
@@ -191,9 +216,9 @@ export function ListPrintPanel({
                 onChange={(e) => patchCol(c.key, { label: e.target.value || undefined })}
                 onBlur={(e) => { if (isCustomColumn(c.key) && !e.target.value.trim()) patchCol(c.key, { label: "ช่องใหม่" }); }}
                 className={`h-7 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-xs ${c.on ? "text-slate-800" : "text-slate-400"} placeholder:text-slate-500`} />
-              {c.widthMm != null && !isExtraColumn(c.key) && (
-                <button type="button" onClick={() => state.setColumnWidth(c.key, null)} title="ความกว้างที่ลากปรับไว้ — กดเพื่อกลับค่าเดิม"
-                  className="h-7 shrink-0 rounded px-1 text-[10px] text-slate-400 hover:bg-slate-100 hover:text-slate-700">{c.widthMm}มม.</button>
+              {c.key !== "img" && !isExtraColumn(c.key) && !defOf(c.key)?.blank && (
+                <WidthInput value={c.widthMm} auto={widthHints?.[c.key]?.auto ?? defOf(c.key)?.widthMm} min={widthHints?.[c.key]?.min}
+                  label={labelOf(c.key)} onCommit={(mm) => state.setColumnWidth(c.key, mm)} />
               )}
               <button type="button" disabled={i === 0} onClick={() => move(c.key, -1)} aria-label="เลื่อนขึ้น" className="h-7 w-6 shrink-0 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"><Icon value="i:chevron-up" /></button>
               <button type="button" disabled={i === visibleCols.length - 1} onClick={() => move(c.key, 1)} aria-label="เลื่อนลง" className="h-7 w-6 shrink-0 rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 disabled:opacity-25"><Icon value="i:chevron-down" /></button>
