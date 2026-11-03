@@ -165,26 +165,29 @@ export function WorkPopupFloatToggle() {
         <span aria-hidden className="relative w-9 h-5 rounded-full bg-slate-300 peer-checked:bg-blue-600 transition-colors after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:rounded-full after:bg-white after:transition-transform peer-checked:after:translate-x-4" />
       </label>
       {pref.enabled ? (<>
-        <div className="mt-1.5 flex items-center gap-1">
-          <span className="text-[11px] text-slate-400 mr-1">แบบ</span>
-          {([["card", "▢ การ์ดลอย"], ["drawer", "▕ แถบข้าง"]] as const).map(([k, l]) => (
-            <button key={k} type="button" onClick={() => setPref({ ...pref, mode: k, minimized: false })}
-              title={k === "drawer" ? "แถบข้างขวา เปิดค้างจนกด ✕" : "การ์ดลอย ลากย้ายได้ กดข้างนอก = ซ่อน"}
-              className={`h-6 px-2 rounded-md border text-[11px] ${(pref.mode ?? "card") === k ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
-          ))}
-        </div>
-        <div className="mt-1.5 flex items-center gap-1">
-          <span className="text-[11px] text-slate-400 mr-1">ลอยที่</span>
-          {([["br", "↘ ขวาล่าง"], ["tr", "↗ ขวาบน"]] as const).map(([k, l]) => (
-            <button key={k} type="button" onClick={() => setPref({ ...pref, position: k, anchor: null })}
-              className={`h-6 px-2 rounded-md border text-[11px] ${!pref.anchor && pref.position === k ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
-          ))}
-          {pref.anchor && <span title="ลากป๊อปไปวางเองไว้ · กดมุมด้านซ้ายเพื่อกลับไปมุมสำเร็จรูป" className="h-6 px-2 leading-6 rounded-md border border-blue-300 bg-blue-50 text-blue-700 font-medium text-[11px]">📍 ที่ลากไว้</span>}
-        </div>
-        <div className="mt-1.5 flex items-center gap-1.5">
-          <span className="text-[11px] text-slate-400 mr-1">ตัว Pet</span>
-          <PetArt source={petPref.source} size={24} />
-          <button type="button" onClick={() => setPickOpen(true)} className="h-6 px-2 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">เปลี่ยน</button>
+        {/* หัวข้อซ้ายกว้างเท่ากันทุกแถว · ปุ่มไม่หักบรรทัดในตัว (เมนูแคบ/ตัวอักษรใหญ่ = ปุ่มขึ้นบรรทัดใหม่ทั้งปุ่ม ไม่ทับกัน) */}
+        <div className="mt-1.5 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2 gap-y-1.5">
+          <span className="whitespace-nowrap text-[11px] text-slate-400">แบบ</span>
+          <div className="flex flex-wrap gap-1">
+            {([["card", "▢ การ์ดลอย"], ["drawer", "▕ แถบข้าง"]] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setPref({ ...pref, mode: k, minimized: false })}
+                title={k === "drawer" ? "แถบข้างขวา เปิดค้างจนกด ✕" : "การ์ดลอย ลากย้ายได้ กดข้างนอก = ซ่อน"}
+                className={`min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border text-[11px] ${(pref.mode ?? "card") === k ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+            ))}
+          </div>
+          <span className="whitespace-nowrap text-[11px] text-slate-400">ลอยที่</span>
+          <div className="flex flex-wrap gap-1">
+            {([["br", "↘ ขวาล่าง"], ["tr", "↗ ขวาบน"]] as const).map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setPref({ ...pref, position: k, anchor: null })}
+                className={`min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border text-[11px] ${!pref.anchor && pref.position === k ? "border-blue-300 bg-blue-50 text-blue-700 font-medium" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+            ))}
+            {pref.anchor && <span title="ลากป๊อปไปวางเองไว้ · กดมุมสำเร็จรูปเพื่อกลับไปมุมนั้น" className="inline-flex min-h-6 items-center whitespace-nowrap px-2 py-0.5 rounded-md border border-blue-300 bg-blue-50 text-blue-700 font-medium text-[11px]">📍 ที่ลากไว้</span>}
+          </div>
+          <span className="whitespace-nowrap text-[11px] text-slate-400">ตัว Pet</span>
+          <div className="flex items-center gap-1.5">
+            <PetArt source={petPref.source} size={24} />
+            <button type="button" onClick={() => setPickOpen(true)} className="min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">เปลี่ยน</button>
+          </div>
         </div>
         {pickOpen && <PetPickerModal open onClose={() => setPickOpen(false)} />}
       </>) : (
