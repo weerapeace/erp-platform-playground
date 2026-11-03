@@ -454,8 +454,9 @@ function CopyCostButton({ tabs, current, onCopy, lineCountOf }: { tabs: { key: s
 // hideSendToBoard = ซ่อนปุ่ม "ส่งขึ้นกระดาน" (ส่งมาจากหน้ากระดานแคมเปญเอง — การ์ดอยู่บนกระดานแล้ว ปุ่มนี้ซ้ำซ้อน)
 // prefill = ค่าตั้งต้นของฟอร์มสร้าง (createMode) เช่น เปิดใบงานจาก "กล่องงานจากไลน์" — lineInboxId ส่งไปกับการบันทึก
 //           ให้ server แนบรูปจากไลน์เข้าใบงาน + ผูกร่าง (รูปจากไลน์ไม่อัปซ้ำ แค่ผูกไฟล์เดิม)
+//           note = ข้อความดิบ (เช่น แชตลูกค้าที่ส่งต่อมาในไลน์) → ช่อง Note · มีค่า = กาง "ใส่ข้อมูลอื่น" ให้เห็นเลย
 export type DesignSheetPrefill = {
-  name?: string | null; brand_id?: string | null; deadline?: string | null; detail?: string | null;
+  name?: string | null; brand_id?: string | null; deadline?: string | null; detail?: string | null; note?: string | null;
   lineInboxId?: string | null; images?: string[]; sourceLabel?: string | null;
 };
 export function DesignSheetsDetail({ detailOnly = false, openId = null, createMode = false, defaultBrandId = null, hideSendToBoard = false, prefill = null, onDetailClose, onCreated, onOpenPresentation }:
@@ -1311,7 +1312,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         ...(prefill.brand_id ? { brand_id: prefill.brand_id } : {}),
         ...(prefill.deadline ? { deadline: prefill.deadline } : {}),
         ...(prefill.detail ? { detail: prefill.detail } : {}),
+        ...(prefill.note ? { note: prefill.note } : {}),
       });
+      if (prefill.note) setCreateMore(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detailOnly, createMode]);
@@ -1878,7 +1881,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     note: (
       <label className="block">
         <span className="text-[11px] text-slate-500">Note</span>
-        <textarea rows={2} value={form.note} onChange={(e) => patch({ note: e.target.value })} disabled={!canEdit}
+        {/* สูงตามจำนวนบรรทัด (2–10) — แชตลูกค้าจากไลน์ยาวหลายบรรทัด อ่านได้โดยไม่ต้องเลื่อนในช่องเล็ก */}
+        <textarea rows={Math.min(10, Math.max(2, form.note.split("\n").length))} value={form.note} onChange={(e) => patch({ note: e.target.value })} disabled={!canEdit}
           className="w-full mt-0.5 px-2 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
       </label>
     ),

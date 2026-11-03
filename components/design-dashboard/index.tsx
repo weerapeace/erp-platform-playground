@@ -33,7 +33,7 @@ import { StatusBoard } from "./status-board";
 import { AuditFeed } from "./audit-feed";
 import { PickActionBar } from "./pick-action-bar";
 import { LineInboxButton, LineInboxDrawer, useLineInboxCount } from "./line-inbox";
-import { lineTextToDetailHtml, type LineInboxItem, type MergeSheetOption } from "@/lib/design-line-inbox-shared";
+import type { LineInboxItem, MergeSheetOption } from "@/lib/design-line-inbox-shared";
 import type { DesignSheetPrefill } from "@/components/design-sheet-detail";
 
 const WorkflowStatusManager = dynamic(
@@ -80,9 +80,10 @@ export function DesignDashboard() {
   const convertFromInbox = (it: LineInboxItem) => {
     const from = [it.sender_name, it.last_message_at ? new Date(it.last_message_at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : ""].filter(Boolean).join(" · ");
     setCreatePrefill({
-      name: it.name, brand_id: it.brand_id, deadline: it.deadline, detail: lineTextToDetailHtml(it.text),
+      // ข้อความจากไลน์ (มักเป็นแชตลูกค้าที่ส่งต่อมา) → ช่อง Note ตามเดิมทุกบรรทัด · "รายละเอียดงาน" เว้นว่างให้ทีมสรุปเอง (เจ้าของเลือก 2026-11-03)
+      name: it.name, brand_id: it.brand_id, deadline: it.deadline, note: it.text,
       lineInboxId: it.id, images: it.images,
-      sourceLabel: t(`มาจากไลน์${from ? ` · ${from}` : ""} · ชื่อ/แบรนด์/วันส่ง AI กรอกให้ — ตรวจก่อนบันทึก`, `From LINE${from ? ` · ${from}` : ""} · name/brand/due date filled by AI — check before saving`),
+      sourceLabel: t(`มาจากไลน์${from ? ` · ${from}` : ""} · ชื่อ/แบรนด์/วันส่ง AI กรอกให้ · ข้อความไลน์อยู่ในช่อง Note — ตรวจก่อนบันทึก`, `From LINE${from ? ` · ${from}` : ""} · name/brand/due date filled by AI · LINE text is in Note — check before saving`),
     });
     setInboxOpen(false);
     setCreateOpen(true);

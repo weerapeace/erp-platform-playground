@@ -95,12 +95,3 @@ export function decideDesignReply(s: {
 
 /** ใบงานที่ให้เลือกตอนกด "รวมกับงาน…" (หน้าแม่ส่งมาจากรายการบนบอร์ด) */
 export type MergeSheetOption = { id: string; code: string; name: string; brand_name: string | null; cover_url: string | null; updated_at: string };
-
-const escapeHtml = (s: string) =>
-  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-
-/** ข้อความจากไลน์ → HTML สำหรับช่อง "รายละเอียดงาน" (ตัวแก้ข้อความกลาง เก็บเป็น HTML) — 1 บรรทัด = 1 ย่อหน้า */
-export function lineTextToDetailHtml(text: string | null | undefined): string {
-  const lines = String(text ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  return lines.map((l) => `<p>${escapeHtml(l)}</p>`).join("");
-}

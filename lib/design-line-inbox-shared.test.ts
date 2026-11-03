@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeDesignAi, lineTextToDetailHtml, splitNewJobKeyword, decideDesignReply } from "./design-line-inbox-shared";
+import { sanitizeDesignAi, splitNewJobKeyword, decideDesignReply } from "./design-line-inbox-shared";
 
 const brands = [
   { id: "b1", name: "Pixie Dustie" },
@@ -53,10 +53,5 @@ describe("design-line-inbox · ตรวจคำตอบ AI งานออก
     expect(decideDesignReply(after).reply).toBe(false);                                          // "ขอบคุณ" ตามมา
     expect(decideDesignReply({ ...after, image_count: 6 })).toEqual({ reply: true, first: false, added: 2 });
     expect(decideDesignReply({ ...after, replied_text: false }).reply).toBe(true);               // ส่งรูปก่อน ข้อความตามมา
-  });
-
-  it("ข้อความไลน์ → HTML รายละเอียดงาน (กันแท็กแปลกปลอม)", () => {
-    expect(lineTextToDetailHtml("งานใหม่\n\nขอ 2 สี <b>ครีม</b>")).toBe("<p>งานใหม่</p><p>ขอ 2 สี &lt;b&gt;ครีม&lt;/b&gt;</p>");
-    expect(lineTextToDetailHtml(null)).toBe("");
   });
 });

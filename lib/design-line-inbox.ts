@@ -11,7 +11,8 @@
  *   - ผล AI เป็นแค่ "ร่าง" — ใบงานจริง (เลข DS) เกิดเมื่อคนกดบันทึกเท่านั้น
  *   - ยืนยันว่ารูปมาจากไลน์จริงด้วยการดึงรูปจากไลน์ด้วยโทเคนบอท (ของกลาง lib/line-intake)
  *   - ข้อความคุยเล่นล้วน (ไม่มีรูป) ที่ AI ว่าไม่ใช่งาน → บอทเงียบ + ย้ายไป "ไม่ใช่งาน" ให้เอง (กู้คืนได้)
- *   - หลายรูป: บอทตอบ 1 ครั้งต่อชุดที่ส่งติดกัน (รอเงียบ 6 วิ) บอกจำนวนรูปรวม · ขึ้นต้น "งานใหม่" = เปิดร่างใหม่ทันที
+ *   - หลายรูป: บอทตอบ 1 ครั้งต่อชุดที่ส่งติดกัน (รอเงียบ 6 วิ) บอกจำนวนรูปรวม · AI อ่านครั้งเดียวต่อชุด · ขึ้นต้น "งานใหม่" = เปิดร่างใหม่ทันที
+ *   - ข้อความ (มักเป็นแชตลูกค้าที่ส่งต่อมา) ไปลงช่อง Note ของใบงานตอนเปิดใบงาน (หน้าแม่ทำ prefill.note)
  *     · รูปมาช้าเกิน 5 นาที / คนอื่นส่งช่วย → ในกล่องกด "รวมกับงาน…" (ร่างอื่น = mergeInboxInto · ใบงานที่มีแล้ว = attachInboxToSheet)
  *   - ไม่ push แจ้งเตือน (ประหยัดโควตาไลน์ — เจ้าของเลือก 2026-11-03) ตอบกลับแบบ reply เท่านั้น
  */
@@ -57,10 +58,11 @@ function aiSystem(today: string): string {
   return [
     "คุณช่วยทีมออกแบบสินค้า อ่านข้อความที่คนส่งงานในกลุ่มไลน์ แล้วสรุปเป็นใบงานออกแบบ ตอบเป็น JSON เท่านั้น:",
     '{"is_job": boolean, "name": string|null, "brand": string|null, "deadline": "YYYY-MM-DD"|null}',
-    "- is_job: เป็นการสั่ง/ขอให้ออกแบบ/แก้แบบ/ทำตัวอย่างงานไหม (คุยเล่น ขอบคุณ รับทราบ ถามเรื่องอื่น = false)",
-    "- name: ชื่องานสั้น ๆ ไม่เกิน 60 ตัวอักษร บอกว่าเป็นสินค้าอะไร เช่น \"กระเป๋าผ้าลายแมว\" — ไม่ใส่ชื่อแบรนด์ ไม่ใส่วันที่ · ไม่รู้ = null",
+    "- ข้อความอาจเป็นพนักงานพิมพ์สั่งงานเอง หรือเป็นแชตลูกค้าที่ส่งต่อมาทั้งก้อน (ลูกค้าขอสินค้า/ขอแบบ/ถามราคางานสั่งทำ ปนกับคำทักทาย)",
+    "- is_job: เป็นการสั่ง/ขอให้ออกแบบ/แก้แบบ/ทำตัวอย่างงาน หรือลูกค้าขอสินค้าสั่งทำไหม (คุยเล่น ขอบคุณ รับทราบ ถามเรื่องอื่นล้วน ๆ = false)",
+    "- name: ชื่องานสั้น ๆ ไม่เกิน 60 ตัวอักษร บอกว่าเป็นสินค้าอะไร เช่น \"กระเป๋าผ้าลายแมว\" — ไม่ใส่ชื่อแบรนด์ ไม่ใส่วันที่ ไม่ใส่คำทักทาย · ไม่รู้ = null",
     "- brand: ชื่อแบรนด์ที่ตรงกับรายชื่อแบรนด์ที่ให้ (คัดลอกตัวสะกดจากรายชื่อ) · ไม่ได้พูดถึงหรือไม่ตรงรายชื่อ = null",
-    `- deadline: วันที่ต้องส่ง/นัดส่ง/ส่งลูกค้าดู เป็นปีคริสต์ศักราช · วันนี้คือ ${today} · ไม่บอกปี = วันที่ข้างหน้าที่ใกล้ที่สุด · "พรุ่งนี้"/"ศุกร์นี้" ให้คำนวณจากวันนี้ · ไม่มี = null`,
+    `- deadline: วันที่ต้องส่ง/นัดส่ง/ส่งลูกค้าดู/วันที่ลูกค้าต้องการ เป็นปีคริสต์ศักราช · วันนี้คือ ${today} · ไม่บอกปี = วันที่ข้างหน้าที่ใกล้ที่สุด · "พรุ่งนี้"/"ศุกร์นี้" ให้คำนวณจากวันนี้ · ไม่มี = null`,
   ].join("\n");
 }
 
@@ -84,8 +86,10 @@ export async function readDraftWithAi(admin: Admin, id: string, imageDataUrl: st
     if (!text && imageDataUrl) content.push({ type: "image_url", image_url: { url: imageDataUrl, detail: "low" } });
     const raw = await chatJson(aiSystem(todayBangkok()), content, 300, DESIGN_AI_MODEL);
     const r = sanitizeDesignAi(raw, brands);
+    // อ่านใหม่แล้วไม่เจอ (เช่น ข้อความ "ขอบคุณ" ตามหลังรูป) = เก็บค่าที่เคยอ่านได้ไว้ ไม่ล้างทิ้ง
     const { data } = await admin.from(INBOX_TABLE).update({
-      ai_name: r.name, ai_brand_id: r.brand_id, ai_deadline: r.deadline,
+      ai_name: r.name ?? (str(row.ai_name) || null), ai_brand_id: r.brand_id ?? (str(row.ai_brand_id) || null),
+      ai_deadline: r.deadline ?? (str(row.ai_deadline) || null),
       ai_is_job: text ? r.is_job : true,   // มีแต่รูป = งานเสมอ
       ai_raw: raw, ai_error: null, ai_read_at: now, updated_at: now,
     }).eq("id", id).select("*").maybeSingle();
@@ -152,8 +156,9 @@ type ReplyCandidate = { id: string; msgId: string; replyToken: string | undefine
 
 /**
  * รับข้อความ/รูปจากไลน์ทีละเหตุการณ์ (เรียกจาก webhook ใน after() — ตอบ 200 ให้ไลน์ไปก่อนแล้ว)
- * ตอบกลับ 1 ครั้งต่อ 1 ชุดที่ส่งติดกัน: รอเงียบ REPLY_QUIET_MS แล้วเช็กว่าข้อความของเรายังเป็นชิ้นล่าสุดของร่างไหม
- *   ใช่ = จบชุด → ตอบ (ตามกติกา decideDesignReply) · ไม่ใช่ = มีชิ้นใหม่ตามมา ให้ตัวนั้นตอบแทน
+ * ทีละชิ้น: เก็บรูป/ข้อความเข้าร่างเท่านั้น · จบชุด (รอเงียบ REPLY_QUIET_MS แล้วชิ้นของเรายังเป็นชิ้นล่าสุดของร่าง)
+ *   → AI อ่านครั้งเดียว → ตีตกคุยเล่น / คืนร่างที่ AI เคยตีตก → ตอบ (decideDesignReply)
+ *   ส่งต่อแชตลูกค้า 10 ข้อความ = AI อ่านรอบเดียว ตอบครั้งเดียว · ไม่ใช่ชิ้นล่าสุด = มีชิ้นใหม่ตามมา ให้ตัวนั้นทำแทน
  */
 export async function handleDesignEvents(admin: Admin, cfg: LineCfg, events: LineEvent[]): Promise<void> {
   const token = str(cfg.token);
@@ -168,18 +173,39 @@ export async function handleDesignEvents(admin: Admin, cfg: LineCfg, events: Lin
   if (candidates.size === 0) return;
   await sleep(REPLY_QUIET_MS);
   for (const c of candidates.values()) {
-    try { await replyIfBatchDone(admin, token, c); }
-    catch (e) { console.error("[design-line-inbox] reply", e); }
+    try { await finishBatchIfDone(admin, token, c); }
+    catch (e) { console.error("[design-line-inbox] finish batch", e); }
   }
 }
 
-async function replyIfBatchDone(admin: Admin, token: string, c: ReplyCandidate): Promise<void> {
-  const row = await loadRaw(admin, c.id);
-  if (!row || row.status !== "pending") return;
+async function finishBatchIfDone(admin: Admin, token: string, c: ReplyCandidate): Promise<void> {
+  let row = await loadRaw(admin, c.id);
+  if (!row) return;
+  const aiRejected = row.status === "rejected" && row.rejected_by === "AI";
+  if (row.status !== "pending" && !aiRejected) return;   // เปิดใบงาน/รวม/คนตีตกไปแล้ว
   const ids = arr(row.line_message_ids);
-  if (ids[ids.length - 1] !== c.msgId) return;   // มีข้อความ/รูปใหม่ตามมา → ตัวนั้นตอบแทน
-  const n = arr(row.image_keys).length;
+  if (ids[ids.length - 1] !== c.msgId) return;   // มีข้อความ/รูปใหม่ตามมา → ตัวนั้นทำแทน
+
+  // AI อ่านครั้งเดียวต่อชุด: มีข้อความใหม่หลัง AI อ่านครั้งล่าสุด · หรือร่างที่มีแต่รูปและยังไม่เคยอ่าน (ตั้งชื่อจากรูปแรก)
   const hasText = !!str(row.text_body);
+  const readAt = Date.parse(str(row.ai_read_at)) || 0;
+  const lastMsgAt = Date.parse(str(row.last_message_at)) || 0;
+  if (hasText ? lastMsgAt > readAt : (!readAt && arr(row.image_keys).length > 0)) {
+    row = (await readDraftWithAi(admin, c.id, null)) ?? row;
+  }
+  const n = arr(row.image_keys).length;
+  if (n === 0 && row.ai_is_job === false) {
+    if (row.status === "pending") await autoReject(admin, c.id);
+    return;   // คุยเล่น → บอทเงียบ
+  }
+  if (aiRejected) {
+    // ร่างที่ AI เคยตีตก กลับมาเป็นงาน (มีรูป/ข้อความสั่งงานตามมา) → คืนเข้ากล่อง + ตอบใหม่เหมือนงานใหม่
+    const now = new Date().toISOString();
+    await admin.from(INBOX_TABLE).update({
+      status: "pending", rejected_by: null, rejected_at: null, reject_reason: null, replied_at: null, replied_images: null, updated_at: now,
+    }).eq("id", c.id).eq("status", "rejected");
+    row = { ...row, status: "pending", replied_at: null, replied_images: null };
+  }
   const d = decideDesignReply({
     replied_at: str(row.replied_at) || null, replied_images: row.replied_images == null ? null : Number(row.replied_images),
     replied_text: row.replied_text === true, image_count: n, has_text: hasText,
@@ -207,13 +233,12 @@ async function handleOne(admin: Admin, token: string, ev: LineEvent, names: Map<
   const { data: seen } = await admin.from(INBOX_TABLE).select("id").filter("line_message_ids", "cs", JSON.stringify([msgId])).limit(1);
   if ((seen ?? []).length > 0) return null;
 
-  let key: string | null = null, hash: string | null = null, dataUrl: string | null = null;
+  let key: string | null = null, hash: string | null = null;
   if (!isText) {
     const img = await fetchLineImage(token, msgId);
     if (!img) return null;   // ดึงไม่ได้ = ข้อความปลอม/หมดอายุ → ไม่บันทึก
     key = await putLineImage(IMAGE_FOLDER, img.bytes, img.type);
     hash = await sha256Hex(img.bytes);
-    dataUrl = `data:${img.type};base64,${Buffer.from(img.bytes).toString("base64")}`;
   }
   const nameKey = userId ?? "";
   if (!names.has(nameKey)) names.set(nameKey, await lineMemberName(token, groupId, userId ?? undefined));
@@ -229,29 +254,8 @@ async function handleOne(admin: Admin, token: string, ev: LineEvent, names: Map<
   if (error) { console.error("[design-line-inbox] ingest", error.message); return null; }
   const r = ((data ?? []) as Rec[])[0];
   if (!r || r.duplicate) return null;
-  const id = String(r.inbox_id);
-
-  // AI: ข้อความใหม่ = อ่านทั้งร่างใหม่ · รูปของร่างที่ยังไม่มีข้อความและ AI ยังไม่เคยอ่าน = ตั้งชื่อจากรูป
-  //     (ร่างใหม่ที่มีแต่รูป / พิมพ์แค่ "งานใหม่" แล้วส่งรูป) · รูปที่ต่อท้ายร่างที่อ่านแล้ว = ไม่ต้องอ่าน
-  let row = await loadRaw(admin, id);
-  if (!row) return null;
-  if (isText && text) row = await readDraftWithAi(admin, id, null);
-  else if (!isText && !str(row.text_body) && !row.ai_read_at) row = await readDraftWithAi(admin, id, dataUrl);
-  if (!row) return null;
-
-  const hasImages = arr(row.image_keys).length > 0;
-  if (!hasImages && row.ai_is_job === false) {
-    if (row.status === "pending") await autoReject(admin, id);
-    return null;   // คุยเล่น → บอทเงียบ
-  }
-  if (row.status === "rejected" && row.rejected_by === "AI") {
-    // ร่างที่ AI เคยตีตก กลับมาเป็นงาน (มีรูป/ข้อความสั่งงานตามมา) → ตอบใหม่เหมือนงานใหม่
-    const now = new Date().toISOString();
-    await admin.from(INBOX_TABLE).update({
-      status: "pending", rejected_by: null, rejected_at: null, reject_reason: null, replied_at: null, replied_images: null, updated_at: now,
-    }).eq("id", id).eq("status", "rejected");
-  }
-  return { id, msgId, replyToken: ev.replyToken };
+  // AI / ตีตก / ตอบ ทำทีเดียวตอนจบชุด (finishBatchIfDone)
+  return { id: String(r.inbox_id), msgId, replyToken: ev.replyToken };
 }
 
 // ---------------------------------------------------------------- อัปเอง (สำรอง/ทดสอบ จากหน้าเว็บ)
