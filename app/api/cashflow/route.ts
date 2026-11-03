@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { computeDueDate, formatCreditTerm } from "@/lib/credit-term";
+import { dueLeft } from "@/lib/receipts";
 import { openLink } from "@/lib/open-link";
 import { SO_ACTIVE_STATUSES } from "@/lib/so-status";
 import {
@@ -155,7 +156,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
 
     for (const b of bnRes.data ?? []) {
-      const amount = num(b.amount_due) || num(b.grand_total);
+      const amount = dueLeft(b.amount_due, b.grand_total);   // เก็บครบ = 0 (ห้ามใช้ || — ใบที่จ่ายแล้วจะโผล่เต็มยอด)
       if (amount <= 0) continue;
       const hasDue = !!b.due_date;
       const date = String(b.due_date || b.bill_date || today).slice(0, 10);
@@ -194,7 +195,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     let guessed = 0;
     for (const s of soRes.data ?? []) {
       if (incomeBasis === "both" && soCoveredByBilling.has(String(s.id))) continue;   // วางบิลแล้ว — นับที่ใบวางบิลแทน กันนับซ้ำ
-      const amount = num(s.amount_due) || num(s.grand_total);
+      const amount = dueLeft(s.amount_due, s.grand_total);
       if (amount <= 0) continue;
 
       const partner = partners.get(String(s.customer_id ?? ""));

@@ -66,6 +66,15 @@ export function outstanding(grandTotal: number, paid: number): number {
   return left > 0 ? left : 0;
 }
 
+/**
+ * ยอดที่ยังค้างรับของใบขาย/ใบวางบิล จากช่อง amount_due (ใบรับชำระคำนวณให้) — ว่าง (null) = ยังไม่เคยคำนวณ → ใช้ยอดเต็ม
+ * ⚠️ ห้ามเขียน `amount_due || grand_total` — เก็บเงินครบแล้ว amount_due = 0 จะกลายเป็นยอดเต็มอีกรอบ (ใบที่จ่ายแล้วโผล่เป็นค้างรับ)
+ */
+export function dueLeft(amountDue: unknown, grandTotal: unknown): number {
+  const v = amountDue == null || amountDue === "" ? Number(grandTotal ?? 0) : Number(amountDue);
+  return Number.isFinite(v) ? Math.round(v * 100) / 100 : 0;
+}
+
 /** ใบนี้ถือว่าปิดยอดแล้วหรือยัง (เผื่อเศษสตางค์ 1 สตางค์) */
 export const isFullyPaid = (grandTotal: number, paid: number): boolean =>
   Number(paid ?? 0) >= Number(grandTotal ?? 0) - 0.005;

@@ -23,6 +23,42 @@ type RecordFile = {
   created_at: string; url: string | null;
 };
 
+/**
+ * อัปไฟล์ 1 ไฟล์ผูก record (ของกลาง — ช่องไฟล์แนบใช้ตัวนี้ · หน้าอื่นเรียกได้ เช่น สลิปตอนติ๊กจ่าย PO)
+ * 3 ขั้น: ขอสิทธิ์อัปตรงเข้า Supabase Storage (ไม่วิ่งผ่านเซิร์ฟเวอร์ → ไม่ติดลิมิต ~4.5MB ของ Vercel) → อัป → บันทึกทะเบียน
+ * คืน id ในทะเบียน erp_record_files · พลาด = throw Error ข้อความภาษาคน
+ */
+export async function uploadRecordFile({ entityType, entityId, file, actor }: { entityType: string; entityId: string; file: File; actor?: string }): Promise<{ id: string }> {
+  const signRes = await apiFetch("/api/record-files/sign-upload", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entity_type: entityType, entity_id: entityId, file_name: file.name }),
+  });
+  const sj = await readJson(signRes);
+  if (!signRes.ok || sj.error || !sj.path || !sj.token) throw new Error((sj.error as string) || "ขอสิทธิ์อัปโหลดไม่สำเร็จ");
+  const { error: upErr } = await supabaseBrowser.storage.from(RECORD_FILES_BUCKET)
+    .uploadToSignedUrl(sj.path as string, sj.token as string, file, { contentType: file.type || undefined });
+  if (upErr) throw new Error(upErr.message || "อัปโหลดเข้าที่เก็บไฟล์ไม่สำเร็จ");
+  const regRes = await apiFetch("/api/record-files", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ entity_type: entityType, entity_id: entityId, storage_path: sj.path, file_name: file.name, content_type: file.type, size_bytes: file.size, actor }),
+  });
+  const rj = await readJson(regRes);
+  if (!regRes.ok || rj.error) throw new Error((rj.error as string) || "บันทึกไม่สำเร็จ");
+  return { id: String((rj.data as { id?: string } | undefined)?.id ?? "") };
+}
+
+/** แนบไฟล์ที่อัปแล้ว (id) ให้ record อื่นอีกหลายตัว — ก๊อปฝั่งเซิร์ฟเวอร์ ไม่ต้องอัปซ้ำ (POST /api/record-files/copy) */
+export async function copyRecordFile(fromId: string, targets: { entityType: string; entityId: string }[], actor?: string): Promise<{ copied: number; failed: string[] }> {
+  if (!targets.length) return { copied: 0, failed: [] };
+  const res = await apiFetch("/api/record-files/copy", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from_id: fromId, targets: targets.map((t) => ({ entity_type: t.entityType, entity_id: t.entityId })), actor }),
+  });
+  const j = await readJson(res);
+  if (!res.ok || j.error) throw new Error((j.error as string) || "แนบไฟล์ให้เอกสารอื่นไม่สำเร็จ");
+  return j.data as { copied: number; failed: string[] };
+}
+
 const fmtBytes = (n: number | null) => {
   if (!n && n !== 0) return "";
   if (n < 1024) return `${n} B`;
@@ -79,26 +115,7 @@ export function RecordFilesField({ entityType, entityId, actor, readonly, title,
       setProg({ done: i, total: arr.length });
       if (f.size > maxBytes) { fail++; toast.error(`"${f.name}" ใหญ่เกิน ${Math.round(maxBytes / 1024 / 1024)}MB`); continue; }
       try {
-        // 1) ขอสิทธิ์อัปตรงเข้า Supabase Storage (ไฟล์ไม่วิ่งผ่านเซิร์ฟเวอร์ → ไม่ติดลิมิต ~4.5MB ของ Vercel)
-        const signRes = await apiFetch("/api/record-files/sign-upload", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entity_type: entityType, entity_id: entityId, file_name: f.name }),
-        });
-        const sj = await readJson(signRes);
-        if (!signRes.ok || sj.error || !sj.path || !sj.token) throw new Error((sj.error as string) || "ขอสิทธิ์อัปโหลดไม่สำเร็จ");
-
-        // 2) อัปไฟล์ตรงเข้า Storage
-        const { error: upErr } = await supabaseBrowser.storage.from(RECORD_FILES_BUCKET)
-          .uploadToSignedUrl(sj.path as string, sj.token as string, f, { contentType: f.type || undefined });
-        if (upErr) throw new Error(upErr.message || "อัปโหลดเข้าที่เก็บไฟล์ไม่สำเร็จ");
-
-        // 3) บันทึกทะเบียนไฟล์ (JSON เล็ก ๆ)
-        const regRes = await apiFetch("/api/record-files", {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ entity_type: entityType, entity_id: entityId, storage_path: sj.path, file_name: f.name, content_type: f.type, size_bytes: f.size, actor }),
-        });
-        const rj = await readJson(regRes);
-        if (!regRes.ok || rj.error) throw new Error((rj.error as string) || "บันทึกไม่สำเร็จ");
+        await uploadRecordFile({ entityType, entityId, file: f, actor });
         ok++;
       } catch (e) { fail++; toast.error(`"${f.name}": ${e instanceof Error ? e.message : "อัปโหลดไม่สำเร็จ"}`); }
     }

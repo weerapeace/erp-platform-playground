@@ -2616,6 +2616,8 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
             className={`${common} bg-white`}>
             <option value="">{tr("— เลือก —", "— select —")}</option>
             {f.options?.map(opt => <option key={opt} value={opt}>{f.optionLabels?.[opt] || opt}</option>)}
+            {/* ค่าที่อยู่ในฟอร์มแต่ไม่มีในตัวเลือก (ค่าเก่า / ค่าตั้งต้นที่ส่งมา) — โชว์ตามจริง ไม่ให้จอขึ้น "เลือก" ทั้งที่มีค่า */}
+            {!!v && !(f.options ?? []).includes(String(v)) && <option value={String(v)}>{f.optionLabels?.[String(v)] || String(v)}</option>}
           </select>
         ) : f.type === "textarea" ? (
           <textarea value={(v as string) || ""} disabled={disabled}

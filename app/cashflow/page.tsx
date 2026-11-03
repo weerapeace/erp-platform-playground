@@ -28,7 +28,7 @@ import { UnassignedNotice } from "@/components/cashflow/unassigned-notice";
 import { CashflowPeriodChart } from "@/components/cashflow/period-chart";
 import { CashflowTodo, type CashflowTab } from "@/components/cashflow/todo-list";
 import { CashflowPartyTab } from "@/components/cashflow/party-tab";
-import { CashflowDebtTab, summarizeDebts } from "@/components/cashflow/debt-tab";
+import { CashflowDebtTab, NEW_DEBT, summarizeDebts, type NewDebtKey } from "@/components/cashflow/debt-tab";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import {
@@ -75,6 +75,7 @@ export default function CashflowPage() {
   const canPayPo = usePermission("products.edit");             // /api/purchasing/mark-paid
   const canDebtView = usePermission("loan_contracts.view");     // /api/bank-debts
   const canDebtCreate = usePermission("loan_contracts.create");
+  const canReceipt = usePermission("receipts.create");         // /api/receipts — รับเงินแล้วจากแท็บต้องรับ
   const { permsReady } = useAuth();
 
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
@@ -85,7 +86,7 @@ export default function CashflowPage() {
   const [tab, setTabState] = useState<CashflowTab>("pay");
   const [picked, setPicked] = useState<CashflowBucket | null>(null);
   const [addMenu, setAddMenu] = useState(false);
-  const [debtCreate, setDebtCreate] = useState<DebtItem["module"] | null>(null);
+  const [debtCreate, setDebtCreate] = useState<NewDebtKey | null>(null);
   const tabsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -317,11 +318,7 @@ export default function CashflowPage() {
     { key: "settings", label: "ตั้งค่า", show: true },
   ];
   const addItems: { label: string; hint: string; onClick?: () => void; href?: string; show: boolean }[] = [
-    ...(["loan-contracts", "od-facilities", "debt-cards"] as const).map((m) => ({
-      label: m === "loan-contracts" ? "ลงหนี้: เงินกู้ธนาคาร" : m === "od-facilities" ? "ลงหนี้: วงเงิน OD" : "ลงหนี้: บัตรเครดิต / Cash plus",
-      hint: m === "loan-contracts" ? "ผ่อนเป็นงวด — สร้างตารางผ่อนให้" : m === "od-facilities" ? "เบิกเกินบัญชี" : "ยอดตามใบแจ้งยอด",
-      onClick: () => { setDebtCreate(m); goTab("debt"); }, show: canDebtCreate,
-    })),
+    ...NEW_DEBT.map((n) => ({ label: `ลงหนี้: ${n.label}`, hint: n.hint, onClick: () => { setDebtCreate(n.key); goTab("debt"); }, show: canDebtCreate })),
     { label: "บันทึกรับเงินจากลูกค้า", hint: "ออกใบรับชำระ — ยอดค้างรับลดเอง", href: "/receipts", show: true },
     { label: "ยอดเงินในบัญชีวันนี้", hint: "จุดเริ่มของเส้นเงินคงเหลือ", onClick: () => goTab("settings"), show: true },
     { label: "รายจ่าย / รายรับประจำ", hint: "ค่าเช่า น้ำไฟ ประกันสังคม ภาษี", onClick: () => goTab("settings"), show: true },
@@ -489,7 +486,7 @@ export default function CashflowPage() {
             </div>
 
             {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} onChanged={load} />}
-            {tab === "recv" && <CashflowPartyTab side="in" events={inEvents} today={from} canManage={canManage} canPayPo={false} onChanged={load} />}
+            {tab === "recv" && <CashflowPartyTab side="in" events={inEvents} today={from} canManage={canManage} canPayPo={false} canReceipt={canReceipt} onChanged={load} />}
             {tab === "debt" && (canDebtView ? (
               <CashflowDebtTab items={myDebts} loading={debtsLoading} error={debtsErr} canCreate={canDebtCreate} onChanged={reloadAll}
                 startCreate={debtCreate} onStartCreateHandled={() => setDebtCreate(null)}>

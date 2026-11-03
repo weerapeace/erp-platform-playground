@@ -6,7 +6,8 @@
  * ทุกปุ่มเรียก API เดิม (ไม่มีตาราง/กติกาใหม่):
  *   เลื่อนวัน   → POST  /api/cashflow/plan            (cashflow.manage · เฉพาะชนิดใน MOVABLE_SOURCES · audit ในตัว)
  *   ตั้งเครดิต  → PATCH /api/cashflow/credit-terms    (cashflow.manage · audit ในตัว)
- *   จ่ายแล้ว   → POST  /api/purchasing/mark-paid     (เฉพาะ PO · products.edit · audit ในตัว)
+ *   จ่ายแล้ว   → POST  /api/purchasing/mark-paid     (เฉพาะ PO · products.edit · audit ในตัว) + สลิป = ไฟล์แนบกลาง (uploadRecordFile → copyRecordFile)
+ *   รับเงินแล้ว → POST  /api/receipts                 (ใบรับชำระ 1 ใบต่อลูกค้า · receipts.create · ยอดค้างคิดใหม่จากใบรับชำระ · audit ในตัว)
  */
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -16,6 +17,10 @@ import { DataTable, type BulkAction, type RowAction } from "@/components/data-ta
 import { ERPModal } from "@/components/modal";
 import { DateInput } from "@/components/date-input";
 import { useToast } from "@/components/toast";
+import { useAuth } from "@/components/auth";
+import { UploadProgress } from "@/components/upload-progress";
+import { uploadRecordFile, copyRecordFile } from "@/components/record-files";
+import { RECORD_FILES_MAX } from "@/lib/record-files";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { CREDIT_TERM_OPTIONS } from "@/lib/credit-term";
@@ -29,7 +34,7 @@ const CAT: Record<Cat, { label: string; color: string; page: string }> = {
   china:    { label: "บิลจีน",       color: "#DB2777", page: "/app/china-pay" },
   loan:     { label: "งวดเงินกู้",    color: "#DC2626", page: "/loan-installments" },
   od:       { label: "ดอกเบี้ย OD",   color: "#B45309", page: "/od-facilities" },
-  card:     { label: "บัตรเครดิต",    color: "#9333EA", page: "/debt-cards" },
+  card:     { label: "บัตร / หนี้อื่น", color: "#9333EA", page: "/debt-cards" },
   payroll:  { label: "เงินเดือน",     color: "#7C5CD6", page: "/payroll/payments" },
   manual:   { label: "รายการประจำ",   color: "#0F766E", page: "/cashflow" },
   customer: { label: "ลูกค้า",        color: "#1D9E75", page: "/sales-orders" },
@@ -58,10 +63,10 @@ const AGING = [
   { key: "d", label: "เกิน 90 วัน", color: "#b91c1c", test: (d: number) => d > 90 },
 ];
 
-type Modal = { kind: "date" | "credit" | "pay"; events: CashflowEvent[]; groups: Group[] } | null;
+type Modal = { kind: "date" | "credit" | "pay" | "recv"; events: CashflowEvent[]; groups: Group[] } | null;
 
 export function CashflowPartyTab({
-  side, events, today, canManage, canPayPo, onChanged,
+  side, events, today, canManage, canPayPo, canReceipt = false, onChanged,
 }: {
   side: Side;
   /** รายการฝั่งนี้ทั้งหมด (รวมของค้างจากก่อนวันนี้) — กรองบริษัท/แหล่งมาแล้ว */
@@ -69,6 +74,8 @@ export function CashflowPartyTab({
   today: string;
   canManage: boolean;
   canPayPo: boolean;
+  /** ออกใบรับชำระได้ (receipts.create) — ใช้ฝั่งต้องรับ */
+  canReceipt?: boolean;
   onChanged: () => void;
 }) {
   const router = useRouter();
@@ -150,20 +157,23 @@ export function CashflowPartyTab({
   const rowActions = useMemo<RowAction<Group>[]>(() => [
     { id: "pay", label: "จ่ายแล้วทั้งร้าน", defaultPlacement: "inline", show: (g) => side === "out" && canPayPo && payable(g.events).length > 0,
       onClick: (g) => setModal({ kind: "pay", events: payable(g.events), groups: [g] }) },
+    { id: "recv", label: "รับเงินแล้ว", defaultPlacement: "inline", show: (g) => side === "in" && canReceipt && receivable(g.events).length > 0,
+      onClick: (g) => setModal({ kind: "recv", events: receivable(g.events), groups: [g] }) },
     { id: "move", label: "เลื่อนวัน", defaultPlacement: "inline", show: (g) => canManage && movable(g.events).length > 0,
       onClick: (g) => setModal({ kind: "date", events: movable(g.events), groups: [g] }) },
     { id: "credit", label: `ตั้งเครดิต${partyWord}`, defaultPlacement: "menu", show: (g) => canManage && !!g.partyId && CREDIT_CATS.has(g.cat),
       onClick: (g) => setModal({ kind: "credit", events: [], groups: [g] }) },
     { id: "page", label: "ไปหน้าเอกสาร", defaultPlacement: "menu", onClick: (g) => router.push(g.events.length === 1 && g.events[0].href ? g.events[0].href : CAT[g.cat].page) },
-  ], [side, canManage, canPayPo, partyWord, router]);
+  ], [side, canManage, canPayPo, canReceipt, partyWord, router]);
 
   const bulkActions = useMemo<BulkAction<Group>[]>(() => [
-    ...(side === "out" && canPayPo ? [{ label: "จ่ายแล้ว (เฉพาะ PO)", keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "pay", events: payable(rows.flatMap((g) => g.events)), groups: rows }) }] : []),
+    ...(side === "out" && canPayPo ? [{ label: "จ่ายแล้ว + แนบสลิป (เฉพาะ PO)", keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "pay", events: payable(rows.flatMap((g) => g.events)), groups: rows }) }] : []),
+    ...(side === "in" && canReceipt ? [{ label: "รับเงินแล้ว (ออกใบรับชำระ)", keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "recv", events: receivable(rows.flatMap((g) => g.events)), groups: rows }) }] : []),
     ...(canManage ? [
       { label: "เลื่อนวัน", keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "date", events: movable(rows.flatMap((g) => g.events)), groups: rows }) },
       { label: `ตั้งเครดิต${partyWord}`, keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "credit", events: [], groups: rows.filter((g) => g.partyId && CREDIT_CATS.has(g.cat)) }) },
     ] : []),
-  ], [side, canManage, canPayPo, partyWord]);
+  ], [side, canManage, canPayPo, canReceipt, partyWord]);
 
   const agingTotal = aging.reduce((s, a) => s + a.amount, 0);
 
@@ -218,30 +228,33 @@ export function CashflowPartyTab({
         onRowClick={toggle}
         isRowExpanded={(g) => open.has(g.id)}
         renderExpandedRow={(g) => (
-          <DocList group={g} side={side} canManage={canManage} canPayPo={canPayPo}
+          <DocList group={g} side={side} canManage={canManage} canPayPo={canPayPo} canReceipt={canReceipt}
             onMove={(e) => setModal({ kind: "date", events: [e], groups: [g] })}
-            onPay={(e) => setModal({ kind: "pay", events: [e], groups: [g] })} />
+            onPay={(e) => setModal({ kind: "pay", events: [e], groups: [g] })}
+            onReceive={(e) => setModal({ kind: "recv", events: [e], groups: [g] })} />
         )}
         pageSize={25}
         exportFilename={side === "out" ? "cashflow-payables" : "cashflow-receivables"}
       />
       {side === "in" && (
         <p className="text-xs text-slate-500">
-          ใบขายเก่าที่จริงเก็บเงินแล้ว แต่ยังค้างอยู่ในนี้ = ยังไม่ได้ออกใบรับชำระ → <Link href="/receipts" className="text-blue-600 underline">บันทึกรับเงิน</Link> แล้วยอดค้างจะลดเอง
+          ใบขายเก่าที่จริงเก็บเงินแล้ว แต่ยังค้างอยู่ในนี้ = ยังไม่ได้ออกใบรับชำระ → ติ๊กหลายลูกค้าแล้วกด “รับเงินแล้ว” ระบบออกใบรับชำระให้ทีเดียว
+          (รับบางส่วน / มีค่าธรรมเนียม → ทำที่ <Link href="/receipts" className="text-blue-600 underline">หน้ารับชำระ</Link>)
         </p>
       )}
 
       <DateModal modal={modal?.kind === "date" ? modal : null} today={today} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
       <CreditModal modal={modal?.kind === "credit" ? modal : null} side={side} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
       <PayModal modal={modal?.kind === "pay" ? modal : null} today={today} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
+      <ReceiveModal modal={modal?.kind === "recv" ? modal : null} today={today} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
     </div>
   );
 }
 
 /** เอกสารข้างในแถวคู่ค้า (แถวที่กางออก) */
-function DocList({ group, side, canManage, canPayPo, onMove, onPay }: {
-  group: Group; side: Side; canManage: boolean; canPayPo: boolean;
-  onMove: (e: CashflowEvent) => void; onPay: (e: CashflowEvent) => void;
+function DocList({ group, side, canManage, canPayPo, canReceipt, onMove, onPay, onReceive }: {
+  group: Group; side: Side; canManage: boolean; canPayPo: boolean; canReceipt: boolean;
+  onMove: (e: CashflowEvent) => void; onPay: (e: CashflowEvent) => void; onReceive: (e: CashflowEvent) => void;
 }) {
   return (
     <div className="bg-slate-50/70 rounded-lg border border-slate-100 divide-y divide-slate-100 text-[13px]">
@@ -261,6 +274,9 @@ function DocList({ group, side, canManage, canPayPo, onMove, onPay }: {
             <span className="flex gap-1">
               {canPayPo && e.source === "purchase_order" && e.docId && (
                 <button type="button" onClick={() => onPay(e)} className="h-7 px-2.5 text-xs rounded-md border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50">จ่ายแล้ว</button>
+              )}
+              {canReceipt && (e.source === "sales_order" || e.source === "billing_note") && e.docId && (
+                <button type="button" onClick={() => onReceive(e)} className="h-7 px-2.5 text-xs rounded-md border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50">รับเงินแล้ว</button>
               )}
               {canManage && e.movable && e.docId && (
                 <button type="button" onClick={() => onMove(e)} className="h-7 px-2.5 text-xs rounded-md border border-slate-200 text-slate-600 bg-white hover:bg-slate-50">เลื่อนวัน</button>
@@ -359,40 +375,88 @@ function CreditModal({ modal, side, onClose, onDone }: { modal: Modal; side: Sid
   );
 }
 
-/** ติ๊ก "จ่ายแล้ว" ให้ PO (ทีละใบหรือทั้งร้าน) — เกิน 20 ใบต้องพิมพ์ยืนยัน */
+/** ช่องเลือกสลิป / หลักฐาน (ไม่บังคับ) — รูปหรือ PDF ไฟล์เดียว */
+function SlipPicker({ file, onChange, busyLabel }: { file: File | null; onChange: (f: File | null) => void; busyLabel: string | null }) {
+  return (
+    <div>
+      <label className="block text-xs text-slate-500 mb-1">แนบสลิป / หลักฐาน (ไม่บังคับ · รูปหรือ PDF)</label>
+      {busyLabel && file ? (
+        <UploadProgress name={file.name} size={file.size} pct={null} label={busyLabel} />
+      ) : file ? (
+        <div className="flex items-center gap-2 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+          <span className="flex-1 min-w-0 truncate">{file.name}</span>
+          <span className="text-xs text-slate-400">{Math.round(file.size / 1024)} KB</span>
+          <button type="button" onClick={() => onChange(null)} className="text-xs text-slate-500 underline">เอาออก</button>
+        </div>
+      ) : (
+        <input type="file" accept="image/*,application/pdf" onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+          className="block w-full text-sm text-slate-600 file:mr-3 file:h-8 file:px-3 file:rounded-lg file:border file:border-slate-200 file:bg-white file:text-slate-700" />
+      )}
+    </div>
+  );
+}
+
+/**
+ * ติ๊ก "จ่ายแล้ว" ให้ PO (ทีละใบหรือทั้งร้าน) + แนบสลิปได้ — เกิน 20 ใบต้องพิมพ์ยืนยัน
+ * สลิป: อัปครั้งเดียวเข้า PO ใบแรก (ไฟล์แนบกลาง) → ก๊อปให้ใบอื่นฝั่งเซิร์ฟเวอร์ · อัปพลาด = ยังไม่ติ๊กจ่ายสักใบ
+ */
 function PayModal({ modal, today, onClose, onDone }: { modal: Modal; today: string; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
+  const { user } = useAuth();
   const [date, setDate] = useState(today);
   const [typed, setTyped] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [slip, setSlip] = useState<File | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState("");
   if (!modal) return null;
   const list = modal.events;
   const needTyped = list.length > 20;
+  const close = () => { setSlip(null); setTyped(""); setErr(""); onClose(); };
   const submit = async () => {
     if (!list.length) { setErr("ไม่มี PO ในรายการที่เลือก (ติ๊กจ่ายได้เฉพาะ PO — อย่างอื่นจ่ายที่หน้าของมัน)"); return; }
     if (!date) { setErr("เลือกวันที่จ่ายก่อน"); return; }
     if (needTyped && typed.trim() !== "CONFIRM") { setErr("พิมพ์ CONFIRM เพื่อยืนยัน"); return; }
-    setBusy(true); setErr("");
-    let ok = 0; const failed: string[] = [];
+    if (slip && slip.size > RECORD_FILES_MAX) { setErr(`สลิปใหญ่เกิน ${Math.round(RECORD_FILES_MAX / 1024 / 1024)}MB`); return; }
+    setErr("");
+    const actor = user?.email ?? undefined;
+    // 1) แนบสลิปเข้า PO ใบแรกก่อน — พลาดตรงนี้ยังไม่ติ๊กจ่ายอะไรเลย
+    let slipId: string | null = null;
+    if (slip) {
+      setBusy("กำลังแนบสลิป…");
+      try { slipId = (await uploadRecordFile({ entityType: "purchase_orders_v2", entityId: String(list[0].docId), file: slip, actor })).id || null; }
+      catch (e) { setBusy(null); setErr(`แนบสลิปไม่สำเร็จ — ยังไม่ได้ติ๊กจ่าย: ${e instanceof Error ? e.message : ""}`); return; }
+    }
+    // 2) ติ๊กจ่ายทีละใบ
+    setBusy("กำลังบันทึกว่าจ่ายแล้ว…");
+    const okIds: string[] = []; const failed: string[] = [];
     for (const e of list) {
       try {
         const res = await apiFetch("/api/purchasing/mark-paid", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: e.docId, paid: true, paid_date: date }) });
         const j = await res.json();
-        if (j?.error) failed.push(`${e.ref}: ${j.error}`); else ok += 1;
+        if (j?.error) failed.push(`${e.ref}: ${j.error}`); else okIds.push(String(e.docId));
       } catch { failed.push(`${e.ref}: เชื่อมต่อไม่สำเร็จ`); }
     }
-    setBusy(false);
-    if (failed.length) { toast.warning(`ติ๊กจ่ายแล้ว ${ok} ใบ · ไม่สำเร็จ ${failed.length} ใบ — ${failed[0]}`); }
-    else toast.success(`ติ๊กจ่ายแล้ว ${ok} ใบ · ${THB(sum(list))}`);
-    setTyped("");
+    // 3) ก๊อปสลิปให้ใบอื่นที่ติ๊กสำเร็จ
+    let slipNote = "";
+    if (slipId) {
+      setBusy("กำลังแนบสลิปให้ใบอื่น…");
+      const rest = okIds.filter((id) => id !== String(list[0].docId));
+      try {
+        const r = await copyRecordFile(slipId, rest.map((id) => ({ entityType: "purchase_orders_v2", entityId: id })), actor);
+        slipNote = r.failed.length ? ` · แนบสลิปไม่ครบ ${r.failed.length} ใบ` : " · แนบสลิปแล้ว";
+      } catch { slipNote = " · แนบสลิปให้ใบอื่นไม่สำเร็จ (ใบแรกมีแล้ว)"; }
+    }
+    setBusy(null);
+    if (failed.length) toast.warning(`ติ๊กจ่ายแล้ว ${okIds.length} ใบ · ไม่สำเร็จ ${failed.length} ใบ — ${failed[0]}${slipNote}`);
+    else toast.success(`ติ๊กจ่ายแล้ว ${okIds.length} ใบ · ${THB(sum(list))}${slipNote}`);
+    setSlip(null); setTyped("");
     onDone();
   };
   return (
-    <ERPModal open onClose={onClose} title="บันทึกว่าจ่ายแล้ว" size="sm" loading={busy}
-      footer={<><button type="button" onClick={onClose} className={`${btn} border border-slate-200 text-slate-600`}>ยกเลิก</button>
-        <button type="button" onClick={submit} disabled={busy} className={`${btn} bg-emerald-600 text-white disabled:opacity-50`}>{busy ? "กำลังบันทึก…" : `จ่ายแล้ว ${list.length} ใบ`}</button></>}>
+    <ERPModal open onClose={close} title="บันทึกว่าจ่ายแล้ว" size="sm" loading={!!busy} hasUnsavedChanges={!!slip && !busy}
+      footer={<><button type="button" onClick={close} disabled={!!busy} className={`${btn} border border-slate-200 text-slate-600`}>ยกเลิก</button>
+        <button type="button" onClick={submit} disabled={!!busy} className={`${btn} bg-emerald-600 text-white disabled:opacity-50`}>{busy ?? `จ่ายแล้ว ${list.length} ใบ`}</button></>}>
       <div className="space-y-3 text-sm">
         <p className="text-slate-600">PO {list.length} ใบ · รวม <b className="tabular-nums">{THB(sum(list))}</b>{modal.groups.length === 1 ? ` · ${modal.groups[0].party}` : ` · ${modal.groups.length} ร้าน`}</p>
         <div className="max-h-28 overflow-y-auto text-xs text-slate-500 space-y-0.5">
@@ -400,13 +464,120 @@ function PayModal({ modal, today, onClose, onDone }: { modal: Modal; today: stri
           {list.length > 50 && <div>…อีก {list.length - 50} ใบ</div>}
         </div>
         <div><label className="block text-xs text-slate-500 mb-1">วันที่จ่าย</label><DateInput value={date} onChange={(v) => { setDate(v); setErr(""); }} /></div>
+        <SlipPicker file={slip} onChange={(f) => { setSlip(f); setErr(""); }} busyLabel={busy} />
         {needTyped && (
           <div>
             <label className="block text-xs text-slate-500 mb-1">เกิน 20 ใบ — พิมพ์ <b>CONFIRM</b> เพื่อยืนยัน</label>
             <input value={typed} onChange={(e) => { setTyped(e.target.value); setErr(""); }} className="w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg" />
           </div>
         )}
-        <p className="text-xs text-slate-400">PO ที่ติ๊กแล้วหลุดจากเงินที่ต้องจ่าย · ยังไม่หักยอดเงินในบัญชี (รอสมุดบัญชีธนาคาร) · ยกเลิกได้ที่หน้า PO · มีประวัติว่าใครกด</p>
+        <p className="text-xs text-slate-400">PO ที่ติ๊กแล้วหลุดจากเงินที่ต้องจ่าย · สลิปดูได้ที่หน้ารายละเอียด PO · ยังไม่หักยอดเงินในบัญชี (รอสมุดบัญชีธนาคาร) · ยกเลิกได้ที่หน้า PO · มีประวัติว่าใครกด</p>
+        {err && <p className="text-sm text-red-600">{err}</p>}
+      </div>
+    </ERPModal>
+  );
+}
+
+const METHODS: { value: string; label: string }[] = [
+  { value: "transfer", label: "โอนเข้าบัญชี" }, { value: "cash", label: "เงินสด" }, { value: "cheque", label: "เช็ค" }, { value: "card", label: "บัตร" }, { value: "other", label: "อื่น ๆ" },
+];
+/** เอกสารที่ออกใบรับชำระได้ (ใบขาย / ใบวางบิล) */
+const receivable = (list: CashflowEvent[]) => list.filter((e) => (e.source === "sales_order" || e.source === "billing_note") && e.docId);
+
+/**
+ * "รับเงินแล้ว" — ออกใบรับชำระ 1 ใบต่อลูกค้า (ทางเดียวกับหน้า /receipts: POST /api/receipts · ยอดค้างคิดใหม่จากใบรับชำระเสมอ)
+ * ใช้บันทึกย้อนหลังใบเก่าที่เก็บเงินแล้วทีละหลายใบ · เกิน 20 ใบต้องพิมพ์ยืนยัน · หัก ณ ที่จ่ายเป็น % ต่อใบรับชำระ
+ */
+function ReceiveModal({ modal, today, onClose, onDone }: { modal: Modal; today: string; onClose: () => void; onDone: () => void }) {
+  const toast = useToast();
+  const [date, setDate] = useState(today);
+  const [method, setMethod] = useState("transfer");
+  const [account, setAccount] = useState("");
+  const [whtPct, setWhtPct] = useState(0);
+  const [note, setNote] = useState("บันทึกจากหน้ากระแสเงินสด");
+  const [typed, setTyped] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState("");
+  if (!modal) return null;
+  const docs = receivable(modal.events);
+  // 1 ใบรับชำระต่อลูกค้า
+  const byCustomer = new Map<string, { party: string; partyId: string | null; events: CashflowEvent[] }>();
+  for (const e of docs) {
+    const k = e.partyId ?? e.party;
+    const g = byCustomer.get(k) ?? { party: e.party, partyId: e.partyId ?? null, events: [] };
+    g.events.push(e); byCustomer.set(k, g);
+  }
+  const customers = [...byCustomer.values()];
+  const needTyped = docs.length > 20;
+  const close = () => { setTyped(""); setErr(""); onClose(); };
+  const submit = async () => {
+    if (!docs.length) { setErr("รายการที่เลือกไม่มีใบขาย / ใบวางบิล (รายการประจำออกใบรับชำระไม่ได้)"); return; }
+    if (!date) { setErr("เลือกวันที่รับเงินก่อน"); return; }
+    if (needTyped && typed.trim() !== "CONFIRM") { setErr("พิมพ์ CONFIRM เพื่อยืนยัน"); return; }
+    setErr("");
+    let ok = 0; const okNos: string[] = []; const failed: string[] = [];
+    for (let i = 0; i < customers.length; i++) {
+      const c = customers[i];
+      setBusy(`กำลังออกใบรับชำระ ${i + 1}/${customers.length}…`);
+      const total = Math.round(sum(c.events) * 100) / 100;
+      const wht = Math.round(total * whtPct) / 100;
+      const companies = [...new Set(c.events.map((e) => e.companyId ?? null))];
+      try {
+        const res = await apiFetch("/api/receipts", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            customer_id: c.partyId, customer_name: c.party, receipt_date: date, method, bank_account: account.trim() || null,
+            amount: Math.round((total - wht) * 100) / 100, wht_amount: wht, fee_amount: 0, status: "confirmed", note: note.trim() || null,
+            company_id: companies.length === 1 ? companies[0] : null,
+            lines: c.events.map((e) => e.source === "billing_note"
+              ? { billing_note_id: e.docId, bill_number: e.ref, amount: e.amount }
+              : { so_id: e.docId, so_number: e.ref, amount: e.amount }),
+          }) });
+        const j = await res.json();
+        if (j?.error) failed.push(`${c.party}: ${j.error}`); else { ok += 1; okNos.push(String(j.data?.receipt_no ?? "")); }
+      } catch { failed.push(`${c.party}: เชื่อมต่อไม่สำเร็จ`); }
+    }
+    setBusy(null);
+    if (failed.length) toast.warning(`ออกใบรับชำระแล้ว ${ok} ใบ · ไม่สำเร็จ ${failed.length} — ${failed[0]}`);
+    else toast.success(`ออกใบรับชำระแล้ว ${ok} ใบ (${okNos.slice(0, 3).join(", ")}${okNos.length > 3 ? "…" : ""}) · ${THB(sum(docs))}`);
+    setTyped("");
+    onDone();
+  };
+  return (
+    <ERPModal open onClose={close} title="บันทึกว่ารับเงินแล้ว" size="md" loading={!!busy}
+      footer={<><button type="button" onClick={close} disabled={!!busy} className={`${btn} border border-slate-200 text-slate-600`}>ยกเลิก</button>
+        <button type="button" onClick={submit} disabled={!!busy} className={`${btn} bg-emerald-600 text-white disabled:opacity-50`}>{busy ?? `ออกใบรับชำระ ${customers.length} ใบ`}</button></>}>
+      <div className="space-y-3 text-sm">
+        <p className="text-slate-600">{docs.length} ใบ · รวม <b className="tabular-nums">{THB(sum(docs))}</b> · ออกใบรับชำระ 1 ใบต่อลูกค้า ({customers.length} ราย)</p>
+        <div className="max-h-28 overflow-y-auto text-xs text-slate-500 space-y-0.5">
+          {customers.map((c) => <div key={c.partyId ?? c.party}>• {c.party} — {c.events.length} ใบ · {THB(sum(c.events))}</div>)}
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div><label className="block text-xs text-slate-500 mb-1">วันที่รับเงิน</label><DateInput value={date} onChange={(v) => { setDate(v); setErr(""); }} /></div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">รับทาง</label>
+            <select value={method} onChange={(e) => setMethod(e.target.value)} className="w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg bg-white">
+              {METHODS.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">เข้าบัญชี (ไม่บังคับ)</label>
+            <input value={account} onChange={(e) => setAccount(e.target.value)} placeholder="กสิกร 123-4-56789" className="w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg" />
+          </div>
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">ลูกค้าหัก ณ ที่จ่าย</label>
+            <select value={whtPct} onChange={(e) => setWhtPct(Number(e.target.value))} className="w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg bg-white">
+              {[0, 1, 2, 3, 5].map((p) => <option key={p} value={p}>{p === 0 ? "ไม่หัก" : `${p}%`}</option>)}
+            </select>
+          </div>
+        </div>
+        <div><label className="block text-xs text-slate-500 mb-1">หมายเหตุ</label><input value={note} onChange={(e) => setNote(e.target.value)} className="w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg" /></div>
+        {needTyped && (
+          <div>
+            <label className="block text-xs text-slate-500 mb-1">เกิน 20 ใบ — พิมพ์ <b>CONFIRM</b> เพื่อยืนยัน</label>
+            <input value={typed} onChange={(e) => { setTyped(e.target.value); setErr(""); }} className="w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg" />
+          </div>
+        )}
+        <p className="text-xs text-slate-400">รับเต็มยอดค้างของทุกใบที่เลือก (รับบางส่วน / ใส่ค่าธรรมเนียม → ทำที่หน้ารับชำระ) · ยอดค้างของใบขาย/ใบวางบิลลดเอง · ยกเลิกได้ที่หน้ารับชำระ · มีประวัติว่าใครกด</p>
         {err && <p className="text-sm text-red-600">{err}</p>}
       </div>
     </ERPModal>

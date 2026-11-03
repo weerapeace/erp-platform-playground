@@ -18,6 +18,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { parseCreditTerm } from "@/lib/credit-term";
+import { dueLeft } from "@/lib/receipts";
 import { SO_ACTIVE_STATUSES } from "@/lib/so-status";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .select("customer_id, amount_due, grand_total")
       .in("status", SO_ACTIVE_STATUSES).limit(5000);
     for (const s of sos ?? []) {
-      const left = num(s.amount_due) || num(s.grand_total);
+      const left = dueLeft(s.amount_due, s.grand_total);
       if (left > 0) bump(s.customer_id as string | null, left);
     }
   } else {

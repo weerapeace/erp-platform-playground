@@ -94,7 +94,7 @@ export const CASHFLOW_SOURCE: Record<CashflowSource, { label: string; icon: stri
   payroll:        { label: "เงินเดือน",   icon: "👥", color: "#7C5CD6", href: "/payroll/payments" },
   loan:           { label: "เงินกู้",     icon: "🏦", color: "#DC2626", href: "/loan-installments" },
   od_interest:    { label: "ดอกเบี้ย OD", icon: "📈", color: "#B45309", href: "/od-facilities" },
-  card:           { label: "บัตรเครดิต", icon: "💳", color: "#9333EA", href: "/debt-cards" },
+  card:           { label: "บัตร / หนี้อื่น", icon: "💳", color: "#9333EA", href: "/debt-cards" },
   china:          { label: "เงินจีน",     icon: "🇨🇳", color: "#DB2777", href: "/app/china-pay" },
   manual:         { label: "รายการประจำ", icon: "📌", color: "#0F766E", href: "/cashflow" },
 };

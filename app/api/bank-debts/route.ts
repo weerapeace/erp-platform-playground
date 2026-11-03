@@ -58,7 +58,7 @@ const LOAN_TYPE: Record<string, string> = {
   term: "เงินกู้มีกำหนดระยะเวลา", revolving: "วงเงินหมุนเวียน", leasing: "ลีสซิ่ง / เช่าซื้อ", director: "เงินกู้กรรมการ",
   vehicle: "สินเชื่อรถ / จำนำทะเบียน", machine: "สินเชื่อเครื่องจักร", short_term: "เงินกู้ระยะสั้น",
 };
-const CARD_KIND: Record<string, string> = { credit_card: "บัตรเครดิต", cash_plus: "บัตรกดเงินสด / Cash Plus", revolving: "วงเงินหมุนเวียน" };
+const CARD_KIND: Record<string, string> = { credit_card: "บัตรเครดิต", cash_plus: "บัตรกดเงินสด / Cash Plus", revolving: "วงเงินหมุนเวียน", other: "หนี้อื่น (ยืมบุคคล / ค้างจ่ายอื่น)" };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "loan_contracts.view");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   cashReceived,
+  dueLeft,
   isFullyPaid,
   isReceiptPaid,
   outstanding,
@@ -10,6 +11,16 @@ import {
   sumAllocations,
   validateAllocation,
 } from "@/lib/receipts";
+
+describe("receipts — ยอดค้างรับจากช่อง amount_due (dueLeft)", () => {
+  it("เก็บเงินครบ (0) = 0 ไม่ใช่ยอดเต็ม · ว่าง (null) = ยอดเต็ม · บางส่วน = ตามจริง", () => {
+    expect(dueLeft(0, 5000)).toBe(0);
+    expect(dueLeft("0", 5000)).toBe(0);
+    expect(dueLeft(null, 5000)).toBe(5000);
+    expect(dueLeft(undefined, "5000")).toBe(5000);
+    expect(dueLeft(1234.567, 5000)).toBe(1234.57);
+  });
+});
 
 describe("receipts — ยอดเงิน", () => {
   it("ยอดตัดหนี้ = เงินเข้าบัญชี + หัก ณ ที่จ่าย (ค่าธรรมเนียมไม่เกี่ยว)", () => {
