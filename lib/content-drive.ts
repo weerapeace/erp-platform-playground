@@ -31,6 +31,21 @@ async function driveParentOf(fileId: string): Promise<string | null> {
   } catch { return null; }
 }
 
+/** โฟลเดอร์ <แบรนด์>/Content (ใช้ร่วม: ต้นฉบับโพสต์ + อัลบั้ม Contents) · create=false = ดูอย่างเดียว (folderId null = ยังไม่มี) */
+export async function resolveBrandContentFolder(admin: Admin, brandId: string, create: boolean): Promise<{ ok: true; folderId: string | null; label: string } | { ok: false; reason: string }> {
+  // โฟลเดอร์แบรนด์ = ตั้งค่าแอปจัดการงาน "โฟลเดอร์ต่อแบรนด์" ก่อน · ไม่มีใช้ของคลัง Artwork
+  let brandFolder = (await getBrandParentFolder(admin, brandId))?.folder_id ?? null;
+  if (!brandFolder) {
+    const { data: bf } = await admin.from("erp_brand_drive_folders").select("folder_id").eq("brand_id", brandId).maybeSingle();
+    brandFolder = ((bf as { folder_id?: string | null } | null)?.folder_id ?? "").trim() || null;
+  }
+  if (!brandFolder) return { ok: false, reason: "แบรนด์นี้ยังไม่ได้ตั้งโฟลเดอร์ Drive (ตั้งที่ แอปจัดการงาน › ตั้งค่า › โฟลเดอร์ต่อแบรนด์)" };
+  const { data: b } = await admin.from("brands").select("name").eq("id", brandId).maybeSingle();
+  const label = `${(b as { name?: string } | null)?.name ?? "แบรนด์"} › Content`;
+  const folderId = create ? await driveEnsureFolder("Content", brandFolder) : await driveFindFolder("Content", brandFolder);
+  return { ok: true, folderId, label };
+}
+
 /** หาโฟลเดอร์ปลายทางของโพสต์ · create=false = ดูอย่างเดียว (folderId อาจเป็น null = จะสร้างตอนอัปไฟล์แรก) */
 export async function resolveContentDriveTarget(admin: Admin, contentId: string, create: boolean): Promise<ContentDriveTarget> {
   if (!driveConfigured()) return { ok: false, reason: "ระบบยังไม่ได้เชื่อม Google Drive" };
@@ -58,15 +73,10 @@ export async function resolveContentDriveTarget(admin: Admin, contentId: string,
   // 3) โฟลเดอร์แบรนด์ › Content
   if (!baseId) {
     if (!row.brand_id) return { ok: false, reason: "ยังไม่ได้เลือกแบรนด์ของโพสต์ — เลือกแบรนด์ก่อน ระบบถึงรู้ว่าจะเก็บต้นฉบับไว้โฟลเดอร์ไหน" };
-    let brandFolder = (await getBrandParentFolder(admin, row.brand_id))?.folder_id ?? null;
-    if (!brandFolder) {
-      const { data: bf } = await admin.from("erp_brand_drive_folders").select("folder_id").eq("brand_id", row.brand_id).maybeSingle();
-      brandFolder = ((bf as { folder_id?: string | null } | null)?.folder_id ?? "").trim() || null;
-    }
-    if (!brandFolder) return { ok: false, reason: "แบรนด์นี้ยังไม่ได้ตั้งโฟลเดอร์ Drive (ตั้งที่ แอปจัดการงาน › ตั้งค่า › โฟลเดอร์ต่อแบรนด์)" };
-    const { data: b } = await admin.from("brands").select("name").eq("id", row.brand_id).maybeSingle();
-    baseLabel = `${(b as { name?: string } | null)?.name ?? "แบรนด์"} › Content`;
-    baseId = create ? await driveEnsureFolder("Content", brandFolder) : await driveFindFolder("Content", brandFolder);
+    const base = await resolveBrandContentFolder(admin, row.brand_id, create);
+    if (!base.ok) return base;
+    baseLabel = base.label;
+    baseId = base.folderId;
     if (!baseId) return { ok: true, folderId: null, folderUrl: null, label: `${baseLabel} › ${folderName}` };
   }
 

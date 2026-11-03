@@ -14,6 +14,7 @@ import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 import { nextContentNo } from "@/lib/creative-tasks-server";
 import { normalizeTaskLinks } from "@/lib/record-tasks";
+import { attachAlbumFilesToContent } from "@/lib/content-albums-server";
 import { SELECT, flattenContent, attachAssignees, validateContentFields, attachProducts, attachReadiness, normalizeProducts, replaceContentProducts } from "./shared";
 
 export const dynamic = "force-dynamic";
@@ -64,7 +65,10 @@ type CreateBody = {
   pillar_id?: string | null; goal?: string | null; brief?: string | null; ref_image_keys?: string[];   // ฝั่งวางแผน (หน้า /marketing/content-plan)
   ref_links?: unknown;     // ลิงก์ Ref ของบรีฟ [{url,label?}]
   placements?: string[];   // ลงที่ไหน แบบแบ่งประเภท "ประเภท:ช่องทาง"
+  album_id?: string | null;        // สร้างจากอัลบั้ม Contents (คลังไฟล์) — สถานะอัลบั้มคิดจากโพสต์พวกนี้
+  album_asset_ids?: string[];      // ไฟล์ในอัลบั้มที่จะแนบเข้าโพสต์ (ชี้ไฟล์เดิม ไม่ก๊อป · lib/content-albums-server)
 };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.create"); if (denied) return denied;
@@ -77,6 +81,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (vErr) return NextResponse.json({ error: vErr }, { status: 400 });
 
   const admin = supabaseAdmin();
+  const albumId = body.album_id && UUID_RE.test(body.album_id) ? body.album_id : null;
+  if (albumId) {
+    const { data: al } = await admin.from("content_albums").select("id").eq("id", albumId).is("trashed_at", null).maybeSingle();
+    if (!al) return NextResponse.json({ error: "ไม่พบอัลบั้มที่จะผูก (อาจถูกลบไปแล้ว)" }, { status: 400 });
+  }
   // สินค้าหลายตัว: แถวแรก = ตัวหลัก → ลงคอลัมน์เดิมด้วย (ของเดิมทุกจุดอ่านคอลัมน์นี้)
   const prods = normalizeProducts(body.products);
   const prim = prods?.[0] ?? null;
@@ -95,6 +104,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ref_image_keys: Array.isArray(body.ref_image_keys) ? body.ref_image_keys : [],
     ref_links: normalizeTaskLinks(body.ref_links),   // เฉพาะ http/https ตัดซ้ำ (ตัวทำความสะอาดลิงก์กลาง)
     placements: Array.isArray(body.placements) ? body.placements : [],
+    ...(albumId ? { album_id: albumId } : {}),
   });
 
   let no = await nextContentNo(admin);
@@ -115,6 +125,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (caps.length) await admin.from("erp_creative_content_captions").insert(caps);
   }
 
-  await writeAudit(admin, { action: "create", entityType: "creative_content", entityId: created.id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { content_no: no, title } });
-  return NextResponse.json({ id: created.id, content_no: no, error: null });
+  // ไฟล์จากอัลบั้ม → ไฟล์แนบของโพสต์ (ชี้ไฟล์เดิม) · แนบไม่สำเร็จ = โพสต์ยังอยู่ บอกให้แนบเองในป๊อปโพสต์
+  let albumFiles = 0; let albumFileError: string | null = null;
+  if (albumId && Array.isArray(body.album_asset_ids) && body.album_asset_ids.length) {
+    try {
+      albumFiles = await attachAlbumFilesToContent(admin, { contentId: created.id, contentNo: no, albumId, assetIds: body.album_asset_ids.filter((x) => UUID_RE.test(String(x))).slice(0, 50), userId: user?.id ?? null });
+    } catch (e) { albumFileError = `สร้างโพสต์แล้ว แต่แนบไฟล์จากอัลบั้มไม่สำเร็จ: ${(e as Error).message}`; }
+  }
+
+  await writeAudit(admin, { action: "create", entityType: "creative_content", entityId: created.id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { content_no: no, title, ...(albumId ? { album_id: albumId, album_files: albumFiles } : {}) } });
+  if (albumId) await writeAudit(admin, { action: "post_create", entityType: "content_album", entityId: albumId, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { content_id: created.id, content_no: no, title, files: albumFiles } });
+  return NextResponse.json({ id: created.id, content_no: no, album_files: albumFiles, warning: albumFileError, error: null });
 }

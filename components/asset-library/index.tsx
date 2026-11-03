@@ -38,6 +38,10 @@ import { DriveScanModal } from "./drive-scan-modal";
 import { UploadModal } from "./upload-modal";
 import { DetailModal } from "./detail-modal";
 import { AssetCard } from "./asset-card";
+import { Icon } from "@/components/icon";
+
+// 🗂 Contents — อัลบั้มรูป/วิดีโอจากการถ่าย (ไฟล์ตัวจริงอยู่ Drive) → แตกเป็นโพสต์ในปฏิทิน · โหลดเมื่อเปิดแถบนี้
+const ContentAlbumsBoard = nextDynamic(() => import("./contents").then((m) => m.ContentAlbumsBoard), { ssr: false });
 
 // 📂 จัดรูปสินค้าหลายโฟลเดอร์ (ของกลาง — ตัวเดียวกับหน้า Parent SKU) · โหลดเมื่อกดปุ่ม
 const ProductImageRouter = nextDynamic(() => import("@/components/product-image-router").then((m) => m.ProductImageRouter), { ssr: false });
@@ -113,6 +117,13 @@ export function AssetLibrary() {
   const searching = search.trim().length > 0 && !folderFilter;
   const byBrand = source === "by-brand";
   const showBrandView = byBrand && !searching && !folderFilter;   // ค้นหา/ดูโฟลเดอร์ = ใช้กริดปกติ
+  const contentsView = source === "contents";   // แถบ Contents = หน้าอัลบั้มของมันเอง (ไม่ใช้กริด/ค้นหา/ตัวกรองของคลัง)
+  const [openAlbumId, setOpenAlbumId] = useState<string | null>(null);
+  // ลิงก์ตรง ?source=contents&album=<id> (เช่น ป้าย "จากอัลบั้ม" ในป๊อปโพสต์)
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("source") === "contents" || sp.get("album")) { setSource("contents"); setOpenAlbumId(sp.get("album")); }
+  }, []);
 
   useEffect(() => {
     supabaseBrowser.auth.getUser().then(({ data }) => setActor(data.user?.email ?? null)).catch(() => {});
@@ -135,6 +146,7 @@ export function AssetLibrary() {
     const isSearch = search.trim().length > 0;
     // มุมมองแบรนด์: ถ้าไม่ได้ค้นหา ปล่อยให้ BrandAlbumBrowser จัดการ (API แยก)
     if (source === "by-brand" && !isSearch) { setRows([]); setTotal(0); setLoading(false); return; }
+    if (source === "contents") { setRows([]); setTotal(0); setLoading(false); return; }   // อัลบั้ม Contents โหลดเอง (/api/content-albums)
     setLoading(true);
     try {
       const p = new URLSearchParams();
@@ -339,7 +351,7 @@ export function AssetLibrary() {
             {t("อัปไฟล์ครั้งเดียว เก็บที่เดียว ค้น/แท็ก/จัดอัลบั้ม แล้วหยิบไปใช้ซ้ำได้ทุกที่", "Upload once, store once, search/tag/organize into albums, then reuse anywhere")} · {total} {t("ไฟล์", "files")}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className={`flex items-center gap-2 ${contentsView ? "hidden" : ""}`}>
           <div className="relative">
             <input
               value={search}
@@ -377,10 +389,20 @@ export function AssetLibrary() {
       </div>
 
       {/* พื้นที่ที่ใช้จริงใน R2 (นับจากบัคเก็ต · แยกรายโฟลเดอร์) */}
-      {!byBrand && <div className="mb-3"><StorageCard canManage={can("assets.manage")} pushToast={(type, m) => toast[type](m)} /></div>}
+      {/* มือถือ: แถบซ้ายซ่อนอยู่ → เลือกที่มาจากแถบนี้แทน */}
+      <div className="md:hidden flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-1 mb-3">
+        {([["contents", "Contents", "📚"], ["by-brand", t("ดูตามแบรนด์", "By brand"), "🏷️"], ["upload", t("รูปที่อัปเอง", "My uploads"), "📤"], ["artwork", "Artwork", "🎨"], ["print", t("งานพิมพ์", "Print jobs"), "🖨"], ["odoo_product", t("รูปสินค้า", "Product images"), "🛍️"]] as const).map(([k, label, ic]) => (
+          <button key={k} onClick={() => setSource(k)}
+            className={`shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full border text-[13px] ${source === k ? "bg-indigo-50 border-indigo-300 text-indigo-700 font-medium" : "bg-white border-slate-200 text-slate-600"}`}>
+            <Icon value={ic} />{label}
+          </button>
+        ))}
+      </div>
+
+      {!byBrand && !contentsView && <div className="mb-3"><StorageCard canManage={can("assets.manage")} pushToast={(type, m) => toast[type](m)} /></div>}
 
       {/* type filter + trash toggle */}
-      {!byBrand && (
+      {!byBrand && !contentsView && (
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         {source === "artwork"
           ? <>
@@ -431,6 +453,7 @@ export function AssetLibrary() {
           </div>
           <p className="text-[11px] font-medium text-slate-400 mb-1.5">{t("ที่มา", "Source")}</p>
           <div className="flex flex-col gap-0.5 mb-4">
+            <SideItem active={source === "contents"} onClick={() => setSource("contents")} label="Contents" icon="📚" />
             <SideItem active={source === "upload"} onClick={() => setSource("upload")} label={t("รูปที่อัปเอง", "My uploads")} icon="📤" />
             <SideItem active={source === "artwork"} onClick={() => setSource("artwork")} label="Artwork" icon="🎨" />
             <SideItem active={source === "print"} onClick={() => setSource("print")} label={t("งานพิมพ์", "Print jobs")} icon="🖨" />
@@ -472,6 +495,7 @@ export function AssetLibrary() {
 
         {/* grid */}
         <main className="flex-1 min-w-0">
+          {contentsView ? <ContentAlbumsBoard openAlbumId={openAlbumId} /> : (<>
           {folderFilter && (
             <div className="flex items-center justify-between gap-2 mb-2 flex-wrap rounded-lg bg-indigo-50 border border-indigo-200 px-3 py-2">
               <p className="text-[12px] text-indigo-700">{t("📁 รูปในโฟลเดอร์เดียวกับ", "📁 Images in the same folder as")} “<b>{folderFilter.label}</b>” · {total.toLocaleString("th-TH")} {t("รูป", "images")}</p>
@@ -552,6 +576,7 @@ export function AssetLibrary() {
           {!showBrandView && !loading && total > 0 && rows.length > 0 && (
             <div className="mt-4"><Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={goPage} unitLabel={t("ไฟล์", "files")} /></div>
           )}
+          </>)}
         </main>
       </div>
 
@@ -679,7 +704,7 @@ function SideItem({ active, onClick, label, count, icon }: {
     <button onClick={onClick}
       className={`flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-[13px] text-left ${active
         ? "bg-indigo-50 text-indigo-700 font-medium" : "text-slate-600 hover:bg-slate-50"}`}>
-      {icon && <span className="text-[13px]">{icon}</span>}
+      {icon && <span className="text-[13px]"><Icon value={icon} /></span>}
       <span className="truncate flex-1">{label}</span>
       {count != null && count > 0 && <span className="text-[11px] text-slate-400">{count}</span>}
     </button>

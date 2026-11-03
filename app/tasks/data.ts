@@ -427,6 +427,7 @@ export type ContentItem = {
   pillar_id?: string | null; goal?: string | null; brief?: string | null; ref_image_keys?: string[]; ref_image_urls?: string[];
   ref_links?: { url: string; label?: string }[];   // ลิงก์อ้างอิงของบรีฟ (คู่กับรูปอ้างอิง) — ป๊อปโพสต์ "รายการงานที่ต้องการ"
   placements?: string[];   // ลงที่ไหน แบบแบ่งประเภท "ประเภท:ช่องทาง" (platforms ยังเก็บช่องทางรวมเหมือนเดิม)
+  album_id?: string | null;   // สร้างจากอัลบั้ม Contents (คลังไฟล์ › Contents)
 };
 
 // หาแบรนด์จากสินค้าที่เลือก (Parent SKU หรือ SKU เดี่ยว) — ให้ฟอร์มคอนเทนต์เติมแบรนด์อัตโนมัติ
@@ -491,9 +492,9 @@ export async function getContent(id: string): Promise<ContentDetail> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${id}`));
   return j.data as ContentDetail;
 }
-export async function createContent(body: Record<string, unknown>): Promise<{ id: string; content_no: string }> {
+export async function createContent(body: Record<string, unknown>): Promise<{ id: string; content_no: string; warning?: string | null }> {
   const j = await jsonOrThrow(await apiFetch("/api/creative-content", { method: "POST", body: JSON.stringify(body) }));
-  return { id: j.id as string, content_no: j.content_no as string };
+  return { id: j.id as string, content_no: j.content_no as string, warning: (j.warning as string | null) ?? null };
 }
 export async function updateContent(id: string, patch: Record<string, unknown>): Promise<ContentDetail> {
   const j = await jsonOrThrow(await apiFetch(`/api/creative-content/${id}`, { method: "PATCH", body: JSON.stringify(patch) }));

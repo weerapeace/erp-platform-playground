@@ -1,0 +1,184 @@
+"use client";
+
+/**
+ * หน้า Contents ในคลังไฟล์ — อัลบั้มรูป/วิดีโอจากการถ่าย 1 ครั้ง (ไฟล์ตัวจริงอยู่ Google Drive) → แตกเป็นโพสต์ในปฏิทินคอนเทนต์
+ * (เจ้าของเลือกแบบ ข 2026-11-03)
+ *
+ * การ์ดอัลบั้ม + แท็บสถานะ (คิดจากโพสต์ที่ผูก · lib/content-album-status) + ชิปแบรนด์ + ค้นหา + ถังขยะ
+ * ใช้ของกลาง: ERPModal (ผ่าน AlbumFormModal/AlbumDetailModal) · state-views · PlatformIcon · Icon · listBrands/useCreativeOptions
+ * สิทธิ์: ดู assets.view · สร้าง assets.upload
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useT } from "@/components/i18n";
+import { useAuth } from "@/components/auth";
+import { useToast } from "@/components/toast";
+import { Icon } from "@/components/icon";
+import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
+import { useCreativeOptions } from "@/app/tasks/use-options";
+import { listBrands, type BrandOption } from "@/app/tasks/data";
+import { ALBUM_STAGES, ALBUM_STAGE_META, type AlbumStage } from "@/lib/content-album-status";
+import { listContentAlbums, updateContentAlbum, type ContentAlbum } from "./data";
+import { StageBadge, PlatChip, FileThumb } from "./album-bits";
+import { AlbumFormModal } from "./album-form-modal";
+import { AlbumDetailModal } from "./album-detail";
+
+const DAY = 86400000;
+const STALE_DAYS = 3;   // "รอจัดการ" นานเกินนี้ = ขึ้นป้ายค้าง
+
+export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: string | null }) {
+  const t = useT();
+  const toast = useToast();
+  const { can } = useAuth();
+  const { platforms } = useCreativeOptions();
+  const [albums, setAlbums] = useState<ContentAlbum[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [brands, setBrands] = useState<BrandOption[]>([]);
+  const [stage, setStage] = useState<AlbumStage | "all">("all");
+  const [brandId, setBrandId] = useState<string>("");
+  const [search, setSearch] = useState("");
+  const [trash, setTrash] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [detailId, setDetailId] = useState<string | null>(openAlbumId);
+  useEffect(() => { if (openAlbumId) setDetailId(openAlbumId); }, [openAlbumId]);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try { setAlbums(await listContentAlbums({ trash })); }
+    catch (e) { setError((e as Error).message); }
+    finally { setLoading(false); }
+  }, [trash]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { listBrands().then(setBrands).catch(() => {}); }, []);
+
+  const platMeta = useMemo(() => new Map(platforms.map((p) => [p.value, p])), [platforms]);
+  const q = search.trim().toLowerCase();
+  const filtered = albums.filter((a) =>
+    (!brandId || a.brand_id === brandId) &&
+    (!q || a.name.toLowerCase().includes(q) || (a.description ?? "").toLowerCase().includes(q) || a.assignees.some((p) => p.name.toLowerCase().includes(q))));
+  const counts = useMemo(() => {
+    const m = new Map<string, number>([["all", filtered.length]]);
+    for (const a of filtered) m.set(a.status.stage, (m.get(a.status.stage) ?? 0) + 1);
+    return m;
+  }, [filtered]);
+  const shown = stage === "all" ? filtered.filter((a) => a.status.stage !== "closed") : filtered.filter((a) => a.status.stage === stage);
+  const brandsInUse = brands.filter((b) => albums.some((a) => a.brand_id === b.id));
+
+  const restore = async (a: ContentAlbum) => {
+    try { await updateContentAlbum(a.id, { restore: true }); toast.success(t("กู้อัลบั้มคืนแล้ว", "Album restored")); void load(); }
+    catch (e) { toast.error((e as Error).message); }
+  };
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2"><Icon name="library" />Contents</h2>
+          <p className="text-sm text-slate-500">{t("อัลบั้มรูป/วิดีโอจากการถ่าย 1 ครั้ง ไฟล์ตัวจริงอยู่ Google Drive · แตกเป็นโพสต์ในปฏิทินได้หลายโพสต์ สถานะขยับเองตามโพสต์", "Shoot albums — originals stay in Google Drive · turn into calendar posts; status follows the posts")}</p>
+        </div>
+        {can("assets.upload") && !trash && (
+          <button onClick={() => setFormOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700">
+            <Icon name="add" />{t("สร้างอัลบั้ม", "New album")}
+          </button>
+        )}
+      </div>
+
+      {/* แท็บสถานะ */}
+      {!trash && (
+        <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1" role="tablist">
+          {(["all", ...ALBUM_STAGES] as const).map((s) => {
+            const on = stage === s;
+            const label = s === "all" ? t("ทั้งหมด (ยังไม่ปิด)", "All open") : t(ALBUM_STAGE_META[s].th, ALBUM_STAGE_META[s].en);
+            const n = s === "all" ? filtered.filter((a) => a.status.stage !== "closed").length : counts.get(s) ?? 0;
+            return (
+              <button key={s} role="tab" aria-selected={on} onClick={() => setStage(s)}
+                className={`shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-sm border ${on ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>
+                {label}<span className={`text-xs ${on ? "text-white/70" : "text-slate-400"}`}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative w-full sm:w-64">
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"><Icon name="search" /></span>
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t("ค้นชื่ออัลบั้ม / คน", "Search album / person")}
+            className="w-full h-9 pl-8 pr-3 rounded-lg border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300" />
+        </div>
+        {brandsInUse.length > 1 && (
+          <div className="flex gap-1 overflow-x-auto">
+            <button onClick={() => setBrandId("")} className={`shrink-0 h-8 px-3 rounded-full text-sm border ${!brandId ? "border-violet-400 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-600"}`}>{t("ทุกแบรนด์", "All brands")}</button>
+            {brandsInUse.map((b) => (
+              <button key={b.id} onClick={() => setBrandId(b.id === brandId ? "" : b.id)}
+                className={`shrink-0 inline-flex items-center gap-1.5 h-8 px-3 rounded-full text-sm border ${brandId === b.id ? "border-violet-400 bg-violet-50 text-violet-800" : "border-slate-200 text-slate-600"}`}>
+                <span className="w-2.5 h-2.5 rounded-full" style={{ background: b.color || "#94a3b8" }} />{b.name}
+              </button>
+            ))}
+          </div>
+        )}
+        <button onClick={() => { setTrash((v) => !v); setStage("all"); }} className={`ml-auto inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-sm border ${trash ? "border-red-200 bg-red-50 text-red-700" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}>
+          <Icon name={trash ? "back" : "delete"} />{trash ? t("กลับไปอัลบั้ม", "Back to albums") : t("ถังขยะ", "Trash")}
+        </button>
+      </div>
+
+      {loading ? <LoadingState /> : error ? <ErrorState hint={error} onRetry={() => void load()} /> : shown.length === 0 ? (
+        <EmptyState icon={<Icon name="library" size={36} />}
+          title={trash ? t("ถังขยะว่าง", "Trash is empty") : albums.length === 0 ? t("ยังไม่มีอัลบั้ม", "No albums yet") : t("ไม่มีอัลบั้มในแท็บนี้", "No albums here")}
+          hint={!trash && albums.length === 0 ? t("กด “สร้างอัลบั้ม” แล้วลากรูป/วิดีโอจากการถ่ายมาวาง ไฟล์จะขึ้น Google Drive ของแบรนด์ให้", "Create an album, then drop the shoot's photos/videos — they go to the brand's Google Drive") : undefined}
+          action={!trash && albums.length === 0 && can("assets.upload") ? { label: t("สร้างอัลบั้ม", "New album"), onClick: () => setFormOpen(true) } : undefined} />
+      ) : (
+        <div className="grid grid-cols-1 min-[420px]:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+          {shown.map((a) => {
+            const due = a.due_date ? new Date(`${a.due_date}T00:00:00`) : null;
+            const overdue = !!due && due < today && a.status.stage !== "posted" && a.status.stage !== "closed";
+            const staleDays = a.status.stage === "manage" ? Math.floor((Date.now() - new Date(a.created_at).getTime()) / DAY) : 0;
+            return (
+              <div key={a.id} className="group bg-white rounded-xl border border-slate-200 overflow-hidden hover:shadow-md hover:border-slate-300 transition">
+                <button onClick={() => (trash ? undefined : setDetailId(a.id))} className="block w-full text-left" disabled={trash}>
+                  <div className="grid grid-cols-3 grid-rows-2 gap-0.5 aspect-[4/3] bg-slate-100">
+                    <FileThumb r2Key={a.cover_key} type="image" width={480} className="col-span-2 row-span-2" />
+                    {[0, 1].map((i) => <FileThumb key={i} r2Key={a.preview_keys[i] ?? null} type="image" width={200} />)}
+                  </div>
+                  <div className="p-3 space-y-2">
+                    <div className="flex items-start gap-2">
+                      <p className="flex-1 min-w-0 font-medium text-slate-800 line-clamp-2">{a.name || t("(ไม่มีชื่อ)", "(untitled)")}</p>
+                      <StageBadge stage={a.status.stage} />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+                      {a.brand_name && <span className="inline-flex items-center gap-1"><span className="w-2 h-2 rounded-full" style={{ background: a.brand_color || "#94a3b8" }} />{a.brand_name}</span>}
+                      <span className="inline-flex items-center gap-1"><Icon name="image" />{a.file_count - a.video_count}</span>
+                      {a.video_count > 0 && <span className="inline-flex items-center gap-1"><Icon name="video" />{a.video_count}</span>}
+                      {a.assignees.length > 0 && <span className="inline-flex items-center gap-1 truncate"><Icon name="user" />{a.assignees.map((p) => p.name).filter(Boolean).join(", ")}</span>}
+                    </div>
+                    {a.status.platforms.length > 0 && (
+                      <div className="flex flex-wrap gap-1">
+                        {a.status.platforms.map((p) => <PlatChip key={p.code} code={p.code} state={p.state} label={platMeta.get(p.code)?.label} iconKey={platMeta.get(p.code)?.icon_key} compact />)}
+                      </div>
+                    )}
+                    {(due || staleDays >= STALE_DAYS) && (
+                      <div className="flex flex-wrap gap-1.5 text-xs">
+                        {due && <span className={`inline-flex items-center gap-1 ${overdue ? "text-red-600 font-medium" : "text-slate-500"}`}><Icon name="calendar" />{t("ลงภายใน", "Post by")} {due.toLocaleDateString("th-TH", { day: "numeric", month: "short" })}{overdue ? ` · ${t("เลยกำหนด", "overdue")}` : ""}</span>}
+                        {staleDays >= STALE_DAYS && <span className="inline-flex items-center gap-1 text-amber-700"><Icon name="waiting" />{t(`ค้าง ${staleDays} วัน`, `${staleDays} days waiting`)}</span>}
+                      </div>
+                    )}
+                  </div>
+                </button>
+                {trash && can("assets.manage") && (
+                  <div className="px-3 pb-3"><button onClick={() => void restore(a)} className="w-full h-8 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50">{t("กู้คืน", "Restore")}</button></div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <AlbumFormModal open={formOpen} album={null} brands={brands} defaultBrandId={brandId || null} onClose={() => setFormOpen(false)}
+        onSaved={(a) => { setFormOpen(false); toast.success(t("สร้างอัลบั้มแล้ว — ลากไฟล์มาวางได้เลย", "Album created — drop files in")); void load(); setDetailId(a.id); }} />
+      {detailId && (
+        <AlbumDetailModal albumId={detailId} brands={brands} onClose={() => setDetailId(null)} onChanged={() => void load()} />
+      )}
+    </div>
+  );
+}

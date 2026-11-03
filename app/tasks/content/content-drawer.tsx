@@ -761,6 +761,11 @@ export function ContentDrawer({ contentId, brands, onClose, onChanged, onDelete,
                 <a href={`/tasks?task=${d.task_id}`} target="_blank" rel="noreferrer" title={t("เปิดงานที่ผูกกับคอนเทนต์นี้ (แท็บใหม่)", "Open the linked task (new tab)")}
                   className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-700 hover:underline whitespace-nowrap">👁 {t("ดูงาน", "View task")} ↗</a>
               )}
+              {/* สร้างจากอัลบั้ม Contents (คลังไฟล์) → กดกลับไปดูไฟล์ทั้งชุดในอัลบั้ม */}
+              {d.album_id && (
+                <a href={`/master/assets?source=contents&album=${d.album_id}`} target="_blank" rel="noreferrer" title={t("เปิดอัลบั้มที่โพสต์นี้มาจาก (แท็บใหม่)", "Open the album this post came from (new tab)")}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-violet-700 hover:underline whitespace-nowrap"><Icon name="library" />{t("จากอัลบั้ม", "From album")} ↗</a>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-3 shrink-0">

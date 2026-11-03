@@ -15,6 +15,7 @@ import { useCreativeOptions } from "../use-options";
 import { BrandPlatformsModal, getBrandPlatforms, type BrandPlatformMap, type BrandFormatMap } from "./brand-platforms-modal";
 import { ExtraProductsEditor, extraToPayload, childToSkuValue, skuValueToChild, toggleChildSelection, type ExtraProduct } from "./content-products-editor";
 import { BrandSelect } from "@/components/brand-select";
+import { Icon } from "@/components/icon";
 import {
   createContent, getRecommendedTimes, POST_TYPES, postTypeLabel, joinPostTypes,
   getParentSkuChildren, resolveBrandFromProduct, type ParentSkuChild,
@@ -27,7 +28,11 @@ type CampaignOpt = { id: string; name: string };
 type Form = { title: string; post_types: string[]; status: ContentStatus; brand_id: string; campaign_id: string; scheduled_at: string; product: SkuPickerValue | null; parent: ParentSkuPickerValue | null; platforms: string[]; note: string };
 const emptyForm = (): Form => ({ title: "", post_types: ["image"], status: "draft", brand_id: "", campaign_id: "", scheduled_at: "", product: null, parent: null, platforms: [], note: "" });
 
-export type ContentCreatePreset = { title?: string; platforms?: string[]; platform_formats?: Record<string, string>; post_types?: string[] };
+export type ContentCreatePreset = {
+  title?: string; platforms?: string[]; platform_formats?: Record<string, string>; post_types?: string[];
+  /** สร้างจากอัลบั้ม Contents (คลังไฟล์) — โพสต์ผูกอัลบั้ม + แนบไฟล์ที่เลือก (ชี้ไฟล์เดิมใน Drive) + แคปชั่นร่างลงทุกแพลตฟอร์ม */
+  album?: { id: string; name: string; asset_ids: string[]; caption?: string | null };
+};
 export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns, defaultBrandId, defaultDate, preset = null, pushToast }: {
   preset?: ContentCreatePreset | null;   // เติมค่าตั้งต้น (เช่น ปฏิทินโหมด Story: ชื่อ + IG/FB + รูปแบบ story)
   open: boolean;
@@ -145,8 +150,13 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         // รูปแบบโพสต์เริ่มต้นของแบรนด์ (เอาเฉพาะแพลตฟอร์มที่เลือกไว้จริง)
         // รูปแบบโพสต์: ของแบรนด์ + ที่ preset บังคับ (เช่น story) — เฉพาะแพลตฟอร์มที่เลือกไว้จริง
         platform_formats: Object.fromEntries(Object.entries({ ...(bpFmt[form.brand_id] ?? {}), ...(preset?.platform_formats ?? {}) }).filter(([p]) => form.platforms.includes(p))),
+        ...(preset?.album ? {
+          album_id: preset.album.id, album_asset_ids: preset.album.asset_ids,
+          ...(preset.album.caption?.trim() ? { captions: form.platforms.map((p) => ({ platform: p, caption: preset.album!.caption!.trim() })) } : {}),
+        } : {}),
       });
       setDirty(false);
+      if (r.warning) pushToast("error", r.warning);
       pushToast("success", t(`สร้างคอนเทนต์ ${r.content_no} แล้ว`, `Content ${r.content_no} created`));
       onCreated(r);
     } catch (e) { setFormErr((e as Error).message); }
@@ -160,6 +170,13 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         <button onClick={save} disabled={saving} className="h-9 px-4 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("สร้าง", "Create")}</button>
       </>}>
       {formErr && <div className="mb-4 px-3 py-2 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">⚠️ {formErr}</div>}
+      {preset?.album && (
+        <div className="mb-4 flex items-start gap-2 px-3 py-2 bg-violet-50 border border-violet-200 rounded-lg text-sm text-violet-800">
+          <Icon name="library" className="mt-0.5" />
+          <span>{t(`จากอัลบั้ม “${preset.album.name}” · แนบ ${preset.album.asset_ids.length} ไฟล์ให้ (ใช้ไฟล์เดิมใน Drive ไม่ก๊อปซ้ำ)${preset.album.caption?.trim() ? " · ใส่แคปชั่นร่างให้ทุกแพลตฟอร์ม" : ""}`,
+            `From album “${preset.album.name}” · ${preset.album.asset_ids.length} file(s) attached (same Drive files, no copies)${preset.album.caption?.trim() ? " · draft caption added to every platform" : ""}`)}</span>
+        </div>
+      )}
       <ERPFormSection title={t("ข้อมูลคอนเทนต์", "Content Details")} columns={2}>
         {/* ชื่อคอนเทนต์ — ช่องใหญ่/เด่น ให้เห็นชัดว่าต้องกรอกอะไรก่อน */}
         <ERPFormField label={t("ชื่อคอนเทนต์", "Content Title")} required span={2}>

@@ -79,6 +79,7 @@ type CalEntry = {
   isStory: boolean;                           // โพสต์แบบ Story (platform_formats มี "story") — โหมด Story ของปฏิทิน
   fileCount: number;                          // ไฟล์แนบทุกชนิด (รูป/วิดีโอ/ลิงก์) — 0 = ยังไม่มีไฟล์
   formats: Record<string, string>;            // รูปแบบโพสต์ต่อแพลตฟอร์ม (story/reels/…) — Story ไม่ต้องมีแคปชั่น
+  albumId?: string | null;                    // สร้างจากอัลบั้ม Contents (คลังไฟล์) — การ์ดขึ้นไอคอนอัลบั้ม
 };
 
 /** Story ที่ลงแผนไว้ก่อน ยังไม่ได้ใส่ไฟล์ (รูป/วิดีโอ/ลิงก์) → ขึ้นป้าย "ยังไม่มีไฟล์" ให้รู้ว่าต้องกลับมาใส่ */
@@ -338,6 +339,7 @@ export function ContentCalendarView() {
           captionPlatforms: c.caption_platforms ?? [], platformImages: c.platform_images ?? {}, imageKeys: c.image_keys ?? [], imageCount: c.image_count ?? 0, postStatus: c.post_status ?? {},
           isStory: Object.values(c.platform_formats ?? {}).includes("story"),
           fileCount: c.file_count ?? c.image_count ?? 0, formats: c.platform_formats ?? {},
+          albumId: c.album_id ?? null,
         };
       });
     }
@@ -600,6 +602,7 @@ export function ContentCalendarView() {
             <>
               <Thumb e={e} size="xs" />
               <span className="truncate flex-1 min-w-0">{e.time ? `${e.time} ` : ""}{e.title}</span>
+              {e.albumId && <span className="shrink-0 opacity-60" title={t("สร้างจากอัลบั้ม Contents", "Made from a Contents album")}><Icon name="library" size={10} /></span>}
               {/* ไอคอนแพลตฟอร์ม วงสี = พร้อม/ขาด/โพสต์แล้ว */}
               <PlatIcons list={plats} />
             </>

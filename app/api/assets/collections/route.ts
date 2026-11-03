@@ -20,9 +20,14 @@ export async function GET(request: NextRequest) {
   if (denied) return denied;
 
   const admin = supabaseAdmin();
-  const { data: cols, error } = await admin.from("asset_collections")
-    .select("id, name, description").order("sort_order").order("name");
+  const [{ data: allCols, error }, { data: contentAlbums }] = await Promise.all([
+    admin.from("asset_collections").select("id, name, description").order("sort_order").order("name"),
+    admin.from("content_albums").select("id"),
+  ]);
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
+  // อัลบั้มของหน้า Contents อยู่แถบ Contents ของมันเอง (/api/content-albums) — ไม่ปนในรายการอัลบั้มปกติ
+  const contentIds = new Set(((contentAlbums ?? []) as { id: string }[]).map((a) => a.id));
+  const cols = (allCols ?? []).filter((c) => !contentIds.has((c as { id: string }).id));
 
   // จำนวนไฟล์ active ต่ออัลบั้ม (asset อยู่ได้หลายอัลบั้ม → นับผ่าน map) — นับที่ฐานข้อมูล (ของกลาง countActiveByGroup)
   const counts = await countActiveByGroup(admin, "asset_collection_map", "collection_id", (cols ?? []).map((c) => (c as { id: string }).id));

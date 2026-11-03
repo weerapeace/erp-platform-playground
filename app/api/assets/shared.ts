@@ -112,7 +112,10 @@ export type AssetDbRow = {
   sizes?: unknown; parent_sku_codes?: unknown; artwork_types?: unknown;
 };
 
-export const urlFor = (key: string) => `/api/r2-image?key=${encodeURIComponent(key)}`;
+// drive:<fileId> = ไฟล์อยู่ Google Drive ไม่มีสำเนาใน R2 (เช่นวิดีโอในอัลบั้ม Contents ที่ทำภาพปกไม่ได้) → ย่อผ่าน /api/drive/thumb
+export const urlFor = (key: string) => key.startsWith("drive:")
+  ? `/api/drive/thumb?id=${encodeURIComponent(key.slice(6))}&w=1200`
+  : `/api/r2-image?key=${encodeURIComponent(key)}`;
 
 /** ตัด char พิเศษที่ทำ .or() ของ PostgREST พัง */
 export const sanitizeToken = (t: string) => t.replace(/[,()%*]/g, " ").trim();

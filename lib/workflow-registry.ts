@@ -166,6 +166,15 @@ export const WORKFLOWS: WorkflowDef[] = [
     gaps: ["หน้าโอนเข้าจีน (TransferPage ใน app/app/china-pay/page.tsx) ยังคิดยอดค้างต่อบิลเองจาก paid_rmb และเขียน status เอง — ยังไม่เรียก lib/china-pay", "Dashboard ของแอปนับบิลรอโอนจาก status ดิบผ่าน API (ผลตรงกับสูตรกลางตอนนี้ แต่ไม่ได้เรียกสูตรกลาง)"],
   },
   {
+    key: "content-album",
+    label: "อัลบั้ม Contents (คลังไฟล์ › Contents) — สถานะคิดจากโพสต์ที่ผูก",
+    flow: "รอจัดการ → รอหา Caption → รอลง Social → ลงแล้ว (ไม่เก็บสถานะ คิดสดจากโพสต์ที่ album_id ชี้มา + แพลตฟอร์มที่ตั้งใจลง · ใช้ความพร้อมโพสต์ของปฏิทิน) · ปิดอัลบั้มเอง = ปิดแล้ว",
+    ruleFiles: ["lib/content-album-status.ts", "lib/content-readiness.ts"],
+    gates: [],
+    tables: ["content_albums", "erp_creative_content"],
+    signals: [],
+  },
+  {
     key: "status-labels",
     label: "ป้ายสถานะกลาง (ตาราง / การ์ดสรุป)",
     flow: "ชื่อ + สีป้ายสถานะที่ตารางกลางและการ์ดสรุปใช้ร่วมกัน (ตั้งทับรายโมดูลได้)",
