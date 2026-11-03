@@ -3,7 +3,6 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { checkSameCompanySOs } from "@/lib/company-check";
 import { creditNotesForSoIds, sumCredit, type LinkedCreditNote } from "@/lib/credit-note-link";
-import type { MixLevel } from "@/lib/billing-mix";
 
 // ---- Types ----
 
@@ -17,7 +16,6 @@ export type BillingNoteLine = {
   vat_amount:    number;
   wht_amount:    number;
   total_amount:  number;
-  /** ใบรวมหลายลูกค้า: ระบบใส่ป้ายสาขา/ลูกค้าของบิลนี้ให้อัตโนมัติ (พิมพ์ในช่องหมายเหตุ) */
   note:          string | null;
   /** ลูกค้าของ SO ในบรรทัดนี้ (เติมตอนดึงรายละเอียด) */
   customer_id?:   string | null;
@@ -43,10 +41,6 @@ export type BillingNoteListItem = {
   credit_total?:   number;
   /** ยอดที่ต้องเก็บจริงหลังหักใบลดหนี้ */
   net_amount_due?: number;
-  /** รวมใบกำกับของลูกค้าอื่น: 'branch' = คนละสาขาบริษัทเดียวกัน · 'company' = คนละบริษัท · null = ลูกค้าเดียว */
-  mix_level?:  MixLevel | null;
-  /** เหตุผลที่รวม (เก็บในระบบ ไม่พิมพ์) */
-  mix_reason?: string | null;
 };
 
 export type BillingNoteDetail = Omit<BillingNoteListItem, "line_count" | "total_count"> & {
@@ -100,21 +94,10 @@ export async function GET(request: NextRequest) {
     }
   }
   const creditBySo = await creditNotesForSoIds(client, [...soByBill.values()].flat());
-
-  // ป้าย "รวมหลายสาขา / รวมคนละบริษัท" ในตาราง (RPC list คืนคอลัมน์ตายตัว จึงอ่านเพิ่มตรงนี้)
-  const mixById = new Map<string, { mix_level: MixLevel | null; mix_reason: string | null }>();
-  for (let i = 0; i < billIds.length; i += 200) {
-    const { data: mx } = await client.from("erp_playground_billing_notes")
-      .select("id, mix_level, mix_reason").in("id", billIds.slice(i, i + 200)).not("mix_level", "is", null);
-    for (const m of (mx ?? []) as { id: string; mix_level: MixLevel | null; mix_reason: string | null }[]) mixById.set(String(m.id), m);
-  }
-
   const withCredit = rows.map(r => {
     const credit = (soByBill.get(r.id) ?? []).flatMap(so => creditBySo.get(so) ?? []);
     const total = sumCredit(credit);
-    const mix = mixById.get(r.id);
-    return { ...r, credit_total: total, net_amount_due: Math.round((r.amount_due - total) * 100) / 100,
-      mix_level: mix?.mix_level ?? null, mix_reason: mix?.mix_reason ?? null };
+    return { ...r, credit_total: total, net_amount_due: Math.round((r.amount_due - total) * 100) / 100 };
   });
 
   return NextResponse.json({ data: withCredit, total: Number(rows[0]?.total_count ?? 0), error: null } satisfies BillingNoteListResponse);
