@@ -2,7 +2,7 @@
 
 import React, { useEffect, useLayoutEffect, useCallback, useState, useRef } from "react";
 import { createPortal, flushSync } from "react-dom";
-import { refreshIfDirty } from "@/lib/refresh-bus";
+import { refreshIfDirty, triggerRefresh } from "@/lib/refresh-bus";
 import { tr } from "@/lib/lang";   // ข้อความระบบ 2 ภาษา (ภาษาเปลี่ยน = รีโหลดหน้า → อ่านตอน render พอ)
 import { autoLayoutKey, getLayoutPref, prefetchLayoutPrefs, setLayoutPref, syncLayoutPrefs } from "@/lib/modal-layout-pref";
 
@@ -10,19 +10,24 @@ import { autoLayoutKey, getLayoutPref, prefetchLayoutPrefs, setLayoutPref, syncL
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 /**
- * useRefreshOnClose (ของกลาง) — เมื่อ overlay ปิด (open: true → false) หลังมีการบันทึก/ลบจริง
- * สั่ง "กริ่งกลาง" ให้หน้า/ตารางที่อยู่เบื้องหลังโหลดข้อมูลใหม่เอง (แก้บั๊กหน้าไม่ refresh)
- * แค่เปิดดูเฉย ๆ / กดยกเลิก → ไม่มีการแก้ → ไม่รีเฟรช (ประหยัด)
+ * useRefreshOnClose (ของกลาง) — เมื่อ overlay ปิด (open: true → false) สั่ง "กริ่งกลาง"
+ * ให้หน้า/ตารางที่อยู่เบื้องหลังโหลดข้อมูลใหม่เอง (แก้บั๊กหน้าไม่ refresh)
+ *   ป๊อป (ERPModal / ConfirmDialog / ApprovalDialog) = รีเฟรชเฉพาะเมื่อมีการบันทึก/ลบจริง (แค่เปิดดู/ยกเลิก/เลือก Picker → ไม่รีเฟรช)
+ *   Drawer / DrawerShell (always) = รีเฟรช "ทุกครั้งที่ปิด" — เจ้าของขอ 2026-11-03: ใน drawer มีหลายอย่างที่บันทึกเองทันที
+ *     (รูป · SKU ลูก · แท็บแพลตฟอร์ม · ปุ่ม AI/แปล) บางทางไม่ผ่าน apiFetch → ระบบไม่รู้ว่ามีการแก้ → หน้าข้างล่างค้างของเก่า
+ *     โหลดใหม่แบบเงียบ (โชว์ของเดิมไว้ก่อน ไม่กระพริบ)
  */
-function useRefreshOnClose(open: boolean) {
+function useRefreshOnClose(open: boolean, always = false) {
   const wasOpen = useRef(false);
+  const ring = always ? triggerRefresh : refreshIfDirty;
+  const ringRef = useRef(ring); ringRef.current = ring;
   useEffect(() => {
     if (open) wasOpen.current = true;
-    else if (wasOpen.current) { wasOpen.current = false; refreshIfDirty(); }
+    else if (wasOpen.current) { wasOpen.current = false; ringRef.current(); }
   }, [open]);
   // เผื่อ overlay ถูกถอดออก (unmount) ทั้งที่ยังเปิดอยู่ — เช่น peek drawer ที่ parent set peek=null
   // (open ไม่เคยเปลี่ยนเป็น false ในตัวเดียวกัน) → cleanup ยังต้องสั่งกริ่ง
-  useEffect(() => () => { if (wasOpen.current) { wasOpen.current = false; refreshIfDirty(); } }, []);
+  useEffect(() => () => { if (wasOpen.current) { wasOpen.current = false; ringRef.current(); } }, []);
 }
 
 /**
@@ -857,7 +862,7 @@ export function Drawer({
   const resizing = useRef(false);
 
   useEffect(() => { setMounted(true); prefetchLayoutPrefs(); }, []);
-  useRefreshOnClose(open);
+  useRefreshOnClose(open, true);   // ปิด drawer = หน้าข้างล่างโหลดใหม่ทุกครั้ง
 
   useIsoLayoutEffect(() => {
     if (!open) return;
@@ -1009,7 +1014,7 @@ export interface DrawerShellProps {
 export function DrawerShell({ open = true, onClose, width, className = "", style, closeOnBackdrop = true, closeOnEsc = true, children }: DrawerShellProps) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
-  useRefreshOnClose(open);
+  useRefreshOnClose(open, true);   // ปิด drawer = หน้าข้างล่างโหลดใหม่ทุกครั้ง
   const isTopEsc = useEscTop(open);
   useEffect(() => {
     if (!open || !closeOnEsc) return;

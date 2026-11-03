@@ -21,6 +21,7 @@ import { apiFetch } from "@/lib/api";
 import { useNewParam, useOpenParam } from "@/lib/open-param";
 import { CopyFromRecordButton } from "./copy-from-record";
 import { pushDrawerHistory, type DrawerHistoryHandle } from "@/lib/drawer-history";
+import { useRefresh } from "@/lib/refresh-bus";
 import { cachedJson, primeCache } from "@/lib/client-cache";
 import { resolveRelationLabels } from "@/lib/relation";
 import { loadValidationRules, validateValue, type ValidationRule } from "@/lib/validation";
@@ -1337,6 +1338,9 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
   }, [config.apiPath, apiBase, config.pageLimit, config.serverMode, config.baseFilter, extraQueryString, modeFilterQs, urlFilter, enrichRelated, ensureRelatedMaps]);
 
   useEffect(() => { if (canView) fetchList(); }, [canView, fetchList]);
+  // ปิด drawer (หรือป๊อปที่บันทึกแล้ว) → กริ่งกลางดัง → ตาราง client mode โหลดใหม่เงียบ ๆ (โชว์ของเดิมจาก cache ไว้ก่อน)
+  // server mode ไม่ต้อง — DataTable ฟังกริ่งเองอยู่แล้ว · โหมด embedded ไม่มีตาราง
+  useRefresh(() => { if (!embedded && canView && !config.serverMode) void fetchList(); });
 
   // F19: refresh ที่ทำงานทั้ง 2 mode — client โหลดใหม่ / server bump key
   const refreshData = useCallback(async () => {
@@ -3917,15 +3921,19 @@ export function MasterRecordDrawer({
   // ผูก drawer กับปุ่มย้อนกลับเบราว์เซอร์ (ของกลาง): กด Back ปิด drawer ทีละชั้น ไม่หลุดออกจากหน้า
   // ปุ่มปิด/Esc/แตะนอก → requestClose() (วิ่งผ่านประวัติ) → ปิดชั้นบนสุด
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
+  // ปิดแล้ว "ให้หน้าที่เปิด drawer โหลดใหม่ทุกครั้ง" (ของกลาง · เจ้าของขอ 2026-11-03) — onChanged เดิมดังแค่ตอนกดบันทึกฟอร์ม
+  // แต่ใน drawer มีหลายอย่างที่บันทึกเองทันที (รูป · SKU ลูก · แท็บแพลตฟอร์ม/เว็บ · AI/แปล) → หน้าข้างล่างเคยค้างของเก่า
+  const onChangedRef = useRef(onChanged); onChangedRef.current = onChanged;
+  const closeAndRefresh = () => { onCloseRef.current(); onChangedRef.current?.(); };
   const histRef = useRef<DrawerHistoryHandle | null>(null);
   useEffect(() => {
-    const h = pushDrawerHistory(() => onCloseRef.current());
+    const h = pushDrawerHistory(() => closeAndRefresh());
     histRef.current = h;
     return () => h.dispose();
   }, []);
   const handleClose = useCallback(() => {
     if (histRef.current) histRef.current.requestClose();
-    else onCloseRef.current();
+    else closeAndRefresh();
   }, []);
 
   return <MasterCRUDPage config={config} embedded={{ recordId, navIds, onClose: handleClose, onChanged, startInEdit, entryMode }} />;
