@@ -65,6 +65,8 @@ export type QuoteDetail = QuoteListItem & {
   reject_reason:           string | null;
   note:                    string | null;
   lines:                   QuoteLine[];
+  /** ใบสั่งขาย (so_orders) ที่ดึงใบนี้ไป — ผ่าน so_order_lines.quote_id (กติกา lib/quote-convert) */
+  so_orders?:              { id: string; order_no: string | null; status: string }[];
 };
 
 export type QuoteListResponse = { data: QuoteListItem[]; total: number; error: string | null };

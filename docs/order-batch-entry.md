@@ -12,7 +12,7 @@
 | วางจาก Excel | `LineImportModal` |
 | เลือกสินค้าหลายตัว | `SkuMultiPickerModal` |
 | เลือกทั้งรุ่น (กางทุกสี) | `ParentSkuMultiPickerModal` → `/api/pickers/skus?parent_sku_id=` |
-| ดึงจากใบเสนอราคา | `SourceDocPickerModal` mode `so_quote` |
+| ดึงจากใบเสนอราคา | `SourceDocPickerModal` mode `so_quote` — ดึงได้เฉพาะส่งแล้ว/ตอบรับ · หลายใบต้องลูกค้าเดียวกัน · กติกา [quote-to-so-order](quote-to-so-order.md) |
 | ดึงจากใบสั่งผลิต | `MoMultiPickerModal` → ราคาจาก `/api/so-orders/sources?type=mo&mo_nos=` |
 
 ตารางรายการ = `SOLineEditor` (ตัวเดียวกับใบขาย) + prop `extraColumns` (ติ๊ก / ชุด) · ลูกค้า = `CustomerPicker` · วันที่ = `DateInput`

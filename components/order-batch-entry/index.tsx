@@ -27,6 +27,7 @@ import { ParentSkuMultiPickerModal, type ParentSkuPick } from "@/components/pare
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
 import { MoMultiPickerModal, type MoPickRow } from "@/components/mo-picker";
 import { MoGroupPicker, rememberMoGroup, type MoGroupPick } from "@/components/mo-group-picker";
+import { pickQuoteDocs } from "@/lib/quote-pull";
 import type { SourceDoc, SourceLine } from "@/app/api/so-orders/sources/route";
 
 /** รายการตั้งต้นที่หน้าอื่นส่งเข้ามา (เช่น Design Dashboard) */
@@ -34,12 +35,15 @@ export type BatchSeedLine = {
   sku: string | null; product_name: string; qty?: number; unit?: string | null; unit_price?: number;
   note?: string | null; image_key?: string | null; mo_id?: string | null; mo_no?: string | null;
   source?: "manual" | "quote" | "mo" | "design";
+  /** ใบเสนอราคาต้นทาง (ดึงจากใบเสนอราคา) */
+  quote_id?: string | null; quote_no?: string | null;
+  discount_type?: "percent" | "amount"; discount_value?: number;
   /** ใบงานยังไม่มี SKU — ลงชื่อไว้ก่อน เปิดใบสั่งผลิตไม่ได้จนกว่าจะสร้าง SKU */
   no_sku_hint?: string | null;
 };
 
 type Company = { id: string; company_code: string; name: string; is_default: boolean; vat_registered?: boolean };
-type LineMeta = { group: MoGroupPick | null; groupManual: boolean; mo_id: string | null; mo_no: string | null; source: string; hint: string | null };
+type LineMeta = { group: MoGroupPick | null; groupManual: boolean; mo_id: string | null; mo_no: string | null; quote_id?: string | null; quote_no?: string | null; source: string; hint: string | null };
 type Picker = null | "excel" | "sku" | "parent" | "quote" | "mo";
 
 const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
@@ -128,15 +132,16 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
       const l: EditorLine = {
         ...emptyLine(), sku: s.sku, product_name: s.product_name || s.sku || "",
         qty: Number(s.qty) || 0, unit: s.unit || "ชิ้น", unit_price: Number(s.unit_price) || 0,
-        discount_type: "amount", note: s.note ?? undefined, image_key: s.image_key ?? null,
+        discount_type: s.discount_type ?? "amount", discount_value: Number(s.discount_value) || 0,
+        note: s.note ?? undefined, image_key: s.image_key ?? null,
       };
       add.push(l);
-      addMeta[l.tempId] = { group, groupManual: false, mo_id: s.mo_id ?? null, mo_no: s.mo_no ?? null, source: s.source ?? "manual", hint: s.no_sku_hint ?? null };
+      addMeta[l.tempId] = { group, groupManual: false, mo_id: s.mo_id ?? null, mo_no: s.mo_no ?? null, quote_id: s.quote_id ?? null, quote_no: s.quote_no ?? null, source: s.source ?? "manual", hint: s.no_sku_hint ?? null };
     }
     const kept = base.filter((l) => l.product_name.trim() || l.sku);
-    // SKU เดิมที่ไม่ได้ผูกใบสั่งผลิต ไม่เพิ่มซ้ำ (ไปแก้จำนวนที่แถวเดิม)
+    // SKU เดิมที่ไม่ได้ผูกใบสั่งผลิต/ใบเสนอราคา ไม่เพิ่มซ้ำ (ไปแก้จำนวนที่แถวเดิม) — บรรทัดจากใบเสนอราคาเพิ่มเสมอ (ไม่งั้นการผูกใบหาย)
     const have = new Set(kept.filter((l) => l.sku).map((l) => l.sku as string));
-    const fresh = add.filter((l) => !(l.sku && have.has(l.sku) && !addMeta[l.tempId].mo_id));
+    const fresh = add.filter((l) => !(l.sku && have.has(l.sku) && !addMeta[l.tempId].mo_id && !addMeta[l.tempId].quote_id));
     if (add.length > fresh.length) toast.info(`ข้าม ${add.length - fresh.length} รายการที่มีอยู่แล้ว`);
     setLines([...kept, ...fresh]);
     setMeta((m) => ({ ...m, ...addMeta }));
@@ -170,12 +175,19 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
   };
   const fromSourceLines = (ls: SourceLine[], source: "quote" | "mo"): BatchSeedLine[] => ls.map((l) => ({
     sku: l.sku, product_name: l.product_name, qty: l.qty, unit: l.unit, unit_price: l.unit_price,
-    mo_id: l.mo_id, mo_no: l.mo_no, source, note: l.mo_no ? `จากใบสั่งผลิต ${l.mo_no}` : null,
+    discount_type: l.discount_type, discount_value: l.discount_value,
+    mo_id: l.mo_id, mo_no: l.mo_no, quote_id: l.quote_id, quote_no: l.quote_no,
+    source, note: l.mo_no ? `จากใบสั่งผลิต ${l.mo_no}` : l.quote_no ? `จากใบเสนอราคา ${l.quote_no}` : null,
   }));
+  // ใบเสนอราคาหลายใบเข้าใบเดียวได้ — ต้องเป็นลูกค้าเดียวกัน · ใบที่ดึงมาแล้วไม่ดึงซ้ำ (กติกา lib/quote-pull)
   const onQuotes = (rows: SourceDocRow[]) => {
-    const docs = rows as unknown as SourceDoc[];
-    addWithDefault(docs.flatMap((d) => fromSourceLines(d.lines, "quote")));
-    if (!customer && docs[0]?.customer_name) setCustomer({ id: "", code: null, name: docs[0].customer_name } as CustomerPickerValue);
+    const have = lines.map((l) => meta[l.tempId]?.quote_id).filter((x): x is string => !!x);
+    const { keep, skipped } = pickQuoteDocs(rows as unknown as SourceDoc[], { customerId: customer?.id || null, customerName: customer?.name ?? null, have });
+    if (skipped.length) toast.error(`ข้าม ${skipped.join(" · ")}`);
+    if (!keep.length) return;
+    addWithDefault(keep.flatMap((d) => fromSourceLines(d.lines, "quote")));
+    const d0 = keep[0];
+    if (!customer && d0.customer_name) setCustomer({ id: d0.customer_id ?? "", code: d0.customer_code ?? null, name: d0.customer_name } as CustomerPickerValue);
   };
   const onMos = async (rows: MoPickRow[]) => {
     setPicker(null);
@@ -258,7 +270,8 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
         return {
           sku: l.sku, product_name: l.product_name, qty: l.qty, unit: l.unit, unit_price: l.unit_price,
           discount_type: l.discount_type, discount_value: l.discount_value, note: l.note ?? null,
-          mo_id: m?.mo_id ?? null, mo_no: m?.mo_no ?? null, source: m?.mo_id ? "mo" : (m?.source ?? "manual"),
+          mo_id: m?.mo_id ?? null, mo_no: m?.mo_no ?? null, quote_id: m?.quote_id ?? null, quote_no: m?.quote_no ?? null,
+          source: m?.mo_id ? "mo" : m?.quote_id ? "quote" : (m?.source ?? "manual"),
           mo_group_id: g?.id ?? null, mo_group_key: g && !g.id ? newKey(g.name) : null,
         };
       }),

@@ -1,6 +1,6 @@
 /**
  * "ดึงรายการเข้าใบสั่งขาย" — /api/so-orders/sources
- *   GET ?type=quote&search=  → ใบเสนอราคา (พร้อมบรรทัด) ที่ยังไม่ถูกแปลง
+ *   GET ?type=quote&search=  → ใบเสนอราคา (พร้อมบรรทัด) ที่ดึงได้ — ส่งแล้ว/ตอบรับแล้ว · ยังไม่แปลง · ไม่อยู่ในใบสั่งขายอื่น (กติกา lib/quote-convert)
  *   GET ?type=mo&search=     → ใบสั่งผลิตที่ยังไม่ผูกใบสั่งขาย (เอาไปตั้งเป็นบรรทัดได้เลย)
  *   GET ?type=mo&mo_nos=a,b  → เฉพาะเลขใบที่ระบุ (ใบที่ผูกใบสั่งขายอื่นแล้วจะไม่ถูกคืน)
  * สิทธิ์: so.view (เป็นการอ่านเพื่อมาตั้งใบสั่งขาย)
@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
+import { QUOTE_PULLABLE_STATUSES, quotesInOpenOrders } from "@/lib/quote-convert";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -15,11 +16,16 @@ export const revalidate = 0;
 export type SourceLine = {
   sku: string | null; product_name: string; qty: number; unit: string;
   unit_price: number; due_date: string | null; mo_id: string | null; mo_no: string | null;
+  /** มาจากใบเสนอราคาไหน (บรรทัดจากใบสั่งผลิต = null) */
+  quote_id: string | null; quote_no: string | null;
+  discount_type?: "percent" | "amount"; discount_value?: number;
 };
 export type SourceDoc = {
   kind: "quote" | "mo";
   id: string; no: string | null; date: string | null;
   customer_name: string | null; title: string; amount: number;
+  /** ใบเสนอราคา: ลูกค้าที่ผูกไว้ + สถานะ */
+  customer_id?: string | null; customer_code?: string | null; status?: string | null;
   lines: SourceLine[];
 };
 
@@ -33,36 +39,42 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ── ใบเสนอราคา ────────────────────────────────────────
   if (type === "quote") {
     let q = admin.from("erp_playground_quotations")
-      .select("id, quote_number, quote_date, customer_name, grand_total, status, converted_so_id")
-      .neq("status", "cancelled").order("quote_date", { ascending: false }).limit(100);
+      .select("id, quote_number, quote_date, customer_id, customer_name, customer_code, grand_total, status, converted_so_id")
+      .in("status", [...QUOTE_PULLABLE_STATUSES]).is("converted_so_id", null)
+      .order("quote_date", { ascending: false }).limit(100);
     if (search) q = q.or(`quote_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
     const { data, error } = await q;
     if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 
-    const ids = (data ?? []).map((r) => (r as { id: string }).id);
+    // อยู่ในใบสั่งขายอื่นที่ยังไม่ยกเลิกแล้ว → ไม่ให้ดึงซ้ำ
+    const taken = await quotesInOpenOrders(admin, (data ?? []).map((r) => (r as { id: string }).id));
+    const rows = (data ?? []).filter((r) => !taken.has((r as { id: string }).id)) as Record<string, unknown>[];
+    const ids = rows.map((r) => String(r.id));
+    const noOf = new Map(rows.map((r) => [String(r.id), (r.quote_number as string) ?? null]));
     const linesByQuote = new Map<string, SourceLine[]>();
     if (ids.length) {
       const { data: lines } = await admin.from("erp_playground_quote_lines")
-        .select("quote_id, sku, product_name, qty, unit, unit_price").in("quote_id", ids);
+        .select("quote_id, sku, product_name, qty, unit, unit_price, discount_type, discount_value, sort_order").in("quote_id", ids).order("sort_order");
       for (const l of (lines ?? []) as Record<string, unknown>[]) {
         const k = String(l.quote_id);
         (linesByQuote.get(k) ?? linesByQuote.set(k, []).get(k)!).push({
           sku: (l.sku as string) ?? null, product_name: (l.product_name as string) ?? "",
           qty: Number(l.qty) || 0, unit: (l.unit as string) || "ชิ้น",
           unit_price: Number(l.unit_price) || 0, due_date: null, mo_id: null, mo_no: null,
+          quote_id: k, quote_no: noOf.get(k) ?? null,
+          discount_type: l.discount_type === "percent" ? "percent" : "amount", discount_value: Number(l.discount_value) || 0,
         });
       }
     }
-    const docs: SourceDoc[] = (data ?? []).map((r) => {
-      const q2 = r as Record<string, unknown>;
-      return {
-        kind: "quote", id: String(q2.id), no: (q2.quote_number as string) ?? null,
-        date: (q2.quote_date as string) ?? null, customer_name: (q2.customer_name as string) ?? null,
-        title: `${q2.quote_number ?? "—"} · ${q2.customer_name ?? "—"}`,
-        amount: Number(q2.grand_total) || 0,
-        lines: linesByQuote.get(String(q2.id)) ?? [],
-      };
-    });
+    const docs: SourceDoc[] = rows.map((q2) => ({
+      kind: "quote", id: String(q2.id), no: (q2.quote_number as string) ?? null,
+      date: (q2.quote_date as string) ?? null, customer_name: (q2.customer_name as string) ?? null,
+      customer_id: (q2.customer_id as string) ?? null, customer_code: (q2.customer_code as string) ?? null,
+      status: (q2.status as string) ?? null,
+      title: `${q2.quote_number ?? "—"} · ${q2.customer_name ?? "—"}`,
+      amount: Number(q2.grand_total) || 0,
+      lines: linesByQuote.get(String(q2.id)) ?? [],
+    }));
     return NextResponse.json({ data: docs, error: null });
   }
 
@@ -101,7 +113,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         sku, product_name: (m.product_name as string) || sku || "",
         qty, unit: "ชิ้น", unit_price: price,
         due_date: (m.due_date as string) ?? null,
-        mo_id: String(m.id), mo_no: (m.mo_no as string) ?? null,
+        mo_id: String(m.id), mo_no: (m.mo_no as string) ?? null, quote_id: null, quote_no: null,
       }],
     };
   });

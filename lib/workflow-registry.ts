@@ -102,6 +102,19 @@ export const WORKFLOWS: WorkflowDef[] = [
     gaps: ["สถานะใบขอซื้อ / ใบสั่งซื้อยังไม่มีไฟล์กติกากลาง — แต่ละ API เปลี่ยนสถานะเอง (pr-approve, create-po, receive, lib/order-capture)"],
   },
   {
+    key: "quotation",
+    label: "ใบเสนอราคา",
+    flow: "ร่าง → ส่งแล้ว → ตอบรับ → แปลงแล้ว (ดึงเข้าใบสั่งขาย หรือ แปลงเป็นใบขายตรง) · ปฏิเสธ / หมดอายุ / ยกเลิก · ยกเลิกใบสั่งขาย = กลับ \"ตอบรับแล้ว\"",
+    ruleFiles: ["lib/quote-convert.ts", "lib/quote-pull.ts"],
+    gates: ["app/api/quotations/[id]/transition/route.ts", "app/api/quotations/[id]/convert/route.ts", "app/api/so-orders/route.ts", "app/api/so-orders/[id]/route.ts"],
+    tables: ["erp_playground_quotations", "erp_playground_quote_lines"],
+    signals: ["converted_so_id", "quote_id"],
+    feeds: ["so-order", "sales-order"],
+    gaps: [
+      "สถานะปกติ (ส่ง/ตอบรับ/ปฏิเสธ/ยกเลิก) อยู่ในตาราง erp_workflow_transitions + RPC erp_playground_quote_transition (ฐานข้อมูล) — \"แปลงแล้ว\" ทั้ง 2 ทางไม่อยู่ในตารางนั้น (RPC erp_playground_quote_to_so · lib/quote-convert)",
+    ],
+  },
+  {
     key: "sales-order",
     label: "ใบขาย (SO)",
     flow: "ร่าง → ยืนยัน → กำลังผลิต → พร้อมส่ง → ส่งแล้ว → สำเร็จ / ยกเลิก",

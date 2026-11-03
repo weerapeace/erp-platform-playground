@@ -68,7 +68,19 @@ export async function GET(
   const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_quote_get", { p_id: id });
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
   const enriched = await enrichQuoteCustomer(request, data);
-  return NextResponse.json({ data: enriched, error: null });
+  const so_orders = data ? await quoteSoOrders(id) : [];
+  return NextResponse.json({ data: enriched && typeof enriched === "object" ? { ...enriched, so_orders } : enriched, error: null });
+}
+
+/** ใบสั่งขายที่ดึงใบเสนอราคานี้ไป (บรรทัดอ้าง quote_id) — ใบที่ยังไม่ยกเลิกขึ้นก่อน */
+async function quoteSoOrders(quoteId: string): Promise<{ id: string; order_no: string | null; status: string }[]> {
+  const admin = supabaseAdmin();
+  const { data: ls } = await admin.from("so_order_lines").select("order_id").eq("quote_id", quoteId).limit(200);
+  const ids = [...new Set(((ls ?? []) as { order_id: string }[]).map((l) => l.order_id))];
+  if (!ids.length) return [];
+  const { data: os } = await admin.from("so_orders").select("id, order_no, status").in("id", ids);
+  return ((os ?? []) as { id: string; order_no: string | null; status: string }[])
+    .sort((a, b) => Number(a.status === "cancelled") - Number(b.status === "cancelled"));
 }
 
 type PatchBody = { header?: Record<string, unknown>; lines?: QuoteLine[]; actor?: string };

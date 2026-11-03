@@ -36,7 +36,8 @@ import { MoGroupPicker, useMoGroups, rememberMoGroup, type MoGroupPick } from "@
 import { OrderBatchEntryModal } from "@/components/order-batch-entry";
 import { SoBatchView } from "./batch-view";
 import { useViewPref } from "@/lib/use-view-pref";
-import { openLink } from "@/lib/open-param";
+import { openLink, useOpenParam } from "@/lib/open-param";
+import { pickQuoteDocs } from "@/lib/quote-pull";
 import type { SourceDoc, SourceLine } from "@/app/api/so-orders/sources/route";
 
 type Row = {
@@ -47,8 +48,8 @@ type Row = {
   mo_opened_at: string | null; invoice_so_id: string | null; shipped_at: string | null;
   groups: { id: string; name: string }[];
 };
-/** ข้อมูลประจำบรรทัดที่ SOLineEditor ไม่มีช่อง (ผูกใบสั่งผลิต · ชุด) — key = tempId */
-type LineMeta = { mo_id: string | null; mo_no: string | null; group: MoGroupPick | null };
+/** ข้อมูลประจำบรรทัดที่ SOLineEditor ไม่มีช่อง (ผูกใบสั่งผลิต · ใบเสนอราคาต้นทาง · ชุด) — key = tempId */
+type LineMeta = { mo_id: string | null; mo_no: string | null; quote_id?: string | null; quote_no?: string | null; group: MoGroupPick | null };
 type Company = { id: string; company_code: string; name: string; is_default: boolean; vat_registered: boolean };
 
 const ST: Record<string, { label: string; color: string }> = {
@@ -162,12 +163,13 @@ export default function SoOrdersPage() {
     try {
       const j = await apiFetch(`/api/so-orders/${r.id}`).then((x) => x.json());
       const d = j.data as Record<string, unknown> & { lines: Record<string, unknown>[] };
-      // ข้อมูลประจำบรรทัด (ผูกใบสั่งผลิต · ชุด) — ต้องส่งกลับตอนบันทึก ไม่งั้นการผูกหาย
+      // ข้อมูลประจำบรรทัด (ผูกใบสั่งผลิต · ใบเสนอราคาต้นทาง · ชุด) — ต้องส่งกลับตอนบันทึก ไม่งั้นการผูกหาย
       const nameOfGroup = new Map((moGroups ?? []).map((g) => [g.id, g.name]));
       const m: Record<string, LineMeta> = {};
       for (const l of d.lines ?? []) {
         const gid = (l.mo_group_id as string) ?? null;
         m[String(l.id)] = { mo_id: (l.mo_id as string) ?? null, mo_no: (l.mo_no as string) ?? null,
+          quote_id: (l.quote_id as string) ?? null, quote_no: (l.quote_no as string) ?? null,
           group: gid ? { id: gid, name: nameOfGroup.get(gid) ?? (r.groups ?? []).find((g) => g.id === gid)?.name ?? "ชุด" } : null };
       }
       setMeta(m);
@@ -192,28 +194,38 @@ export default function SoOrdersPage() {
       });
     } catch { toast.error("เปิดใบไม่สำเร็จ"); }
   };
+  // ลิงก์ตรงถึงใบ `?open=<id>` (เช่น จากหน้าใบเสนอราคา "ไปที่ใบสั่งขาย")
+  useOpenParam(canView, (id) => void openRow({ id }));
 
   // ---- ดึงรายการจากใบเสนอราคา / ใบสั่งผลิต (ตัวเลือกกลาง) ----
-  const addSourceLines = (src: SourceLine[], customerName: string | null, label: string) => {
+  const addSourceLines = (src: SourceLine[], customer: CustomerPickerValue | null, label: string) => {
     if (!form) return;
     const add: EditorLine[] = src.map((l) => ({
       ...emptyLine(), sku: l.sku, product_name: l.product_name,
-      qty: l.qty, unit: l.unit, unit_price: l.unit_price, discount_type: "amount", discount_value: 0,
+      qty: l.qty, unit: l.unit, unit_price: l.unit_price,
+      discount_type: l.discount_type ?? "amount", discount_value: l.discount_value ?? 0,
       note: l.mo_no ? `จากใบสั่งผลิต ${l.mo_no}` : undefined,
     }));
     const keep = form.lines.filter((l) => l.product_name.trim() || l.sku);
     setForm({
       ...form,
-      customer: form.customer ?? (customerName ? ({ id: "", code: null, name: customerName } as CustomerPickerValue) : form.customer),
+      customer: form.customer ?? customer ?? form.customer,
       due_date: form.due_date || (src.find((l) => l.due_date)?.due_date ?? ""),
       lines: [...keep, ...add],
     });
-    setMeta((m) => { const n = { ...m }; add.forEach((l, i) => { n[l.tempId] = { mo_id: src[i].mo_id, mo_no: src[i].mo_no, group: null }; }); return n; });
+    setMeta((m) => { const n = { ...m }; add.forEach((l, i) => { n[l.tempId] = { mo_id: src[i].mo_id, mo_no: src[i].mo_no, quote_id: src[i].quote_id, quote_no: src[i].quote_no, group: null }; }); return n; });
     toast.success(`ดึง ${add.length} รายการจาก ${label} แล้ว`);
   };
+  // ใบเสนอราคาหลายใบเข้าใบเดียวได้ — ต้องเป็นลูกค้าเดียวกัน · ใบที่ดึงมาแล้วไม่ดึงซ้ำ (กติกา lib/quote-pull)
   const onQuotesPicked = (rows: SourceDocRow[]) => {
-    const docs = rows as unknown as SourceDoc[];
-    addSourceLines(docs.flatMap((d) => d.lines), docs[0]?.customer_name ?? null, docs.length === 1 ? (docs[0].no ?? "ใบเสนอราคา") : `ใบเสนอราคา ${docs.length} ใบ`);
+    if (!form) return;
+    const have = Object.entries(meta).filter(([tid, m]) => m.quote_id && form.lines.some((l) => l.tempId === tid)).map(([, m]) => m.quote_id as string);
+    const { keep, skipped } = pickQuoteDocs(rows as unknown as SourceDoc[], { customerId: form.customer?.id || null, customerName: form.customer?.name ?? null, have });
+    if (skipped.length) toast.error(`ข้าม ${skipped.join(" · ")}`);
+    if (!keep.length) return;
+    const d0 = keep[0];
+    const cust = d0.customer_name ? ({ id: d0.customer_id ?? "", code: d0.customer_code ?? null, name: d0.customer_name } as CustomerPickerValue) : null;
+    addSourceLines(keep.flatMap((d) => d.lines), cust, keep.length === 1 ? (d0.no ?? "ใบเสนอราคา") : `ใบเสนอราคา ${keep.length} ใบ`);
   };
   const onMosPicked = async (picked: MoPickRow[]) => {
     setSrcOpen(null);
@@ -236,6 +248,7 @@ export default function SoOrdersPage() {
         <MoGroupPicker size="sm" value={meta[l.tempId]?.group ?? null} onChange={(g) => setLineGroup([l.tempId], g)}
           placeholder="ไม่จัดชุด" disabled={form?.status === "cancelled"} />
         {meta[l.tempId]?.mo_no && <div className="text-[10px] text-emerald-700">ผูก {meta[l.tempId]?.mo_no}</div>}
+        {meta[l.tempId]?.quote_no && <div className="text-[10px] text-sky-700">จากใบเสนอราคา {meta[l.tempId]?.quote_no}</div>}
       </div>
     ),
   }];
@@ -261,7 +274,8 @@ export default function SoOrdersPage() {
           sku: l.sku, product_name: l.product_name, qty: l.qty, unit: l.unit, unit_price: l.unit_price,
           discount_type: l.discount_type, discount_value: l.discount_value, note: l.note ?? null,
           mo_id: m?.mo_id ?? null, mo_no: m?.mo_no ?? null,
-          source: m?.mo_id ? "mo" : "manual",
+          quote_id: m?.quote_id ?? null, quote_no: m?.quote_no ?? null,
+          source: m?.mo_id ? "mo" : m?.quote_id ? "quote" : "manual",
           mo_group_id: g?.id ?? null, mo_group_key: g && !g.id ? `new:${g.name}` : null,
         };
       }),

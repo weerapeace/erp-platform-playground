@@ -3,6 +3,7 @@
  *   GET  ?search=&status=&limit=   → รายการใบสั่งขาย (+จำนวนบรรทัด)
  *   POST { header, lines, open_mo, new_groups } → สร้างใบใหม่ (เลขที่ออกให้ตามบริษัท) · open_mo=true → เปิดใบสั่งผลิตให้เลย
  *        lines[].mo_group_id = ชุดเดิม · lines[].mo_group_key + new_groups{key: ชื่อ} = ชุดใหม่ (สร้างให้ตอนบันทึก)
+ *        lines[].quote_id = ดึงมาจากใบเสนอราคา → ตรวจว่าดึงได้ + ใบเสนอราคาเป็น "แปลงแล้ว" (lib/quote-convert)
  * สิทธิ์: ดู so.view · สร้าง so.create · ทุก action เขียน audit
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -10,7 +11,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { computeTotals, lineRow, nextOrderNo, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput, type SoOrderRow } from "./shared";
+import { checkQuotePull, syncQuoteConversions } from "@/lib/quote-convert";
+import { computeTotals, lineQuoteIds, lineRow, nextOrderNo, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput, type SoOrderRow } from "./shared";
 import { openMoForOrder } from "./open-mo";
 
 export const dynamic = "force-dynamic";
@@ -73,6 +75,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (lines.length === 0) return NextResponse.json({ error: "ต้องมีรายการสินค้าอย่างน้อย 1 บรรทัด" }, { status: 400 });
 
   const admin = supabaseAdmin();
+  const quoteIds = lineQuoteIds(lines);
+  const quoteErr = await checkQuotePull(admin, quoteIds, { customerId: header.customer_id ?? null });
+  if (quoteErr) return NextResponse.json({ error: quoteErr }, { status: 400 });
   const orderNo = await nextOrderNo(admin, header.company_code ?? null);
   const totals = computeTotals(header, lines);
 
@@ -110,13 +115,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: lineErr.message }, { status: 400 });
   }
 
+  // ใบเสนอราคาที่ดึงมา → "แปลงแล้ว"
+  const quotes = await syncQuoteConversions(admin, quoteIds, { actorId: user?.id ?? null, actorName: user?.email ?? null });
+
   // ผูกใบสั่งผลิตที่ "ดึงมา" เข้ากับใบนี้ทันที (เจ้าของสั่ง: ยืนยันแล้ว = เปลี่ยนสถานะใบสั่งงานด้วย)
   let opened: { created: number; linked: number } | null = null;
   if (b.open_mo !== false) opened = await openMoForOrder(admin, orderId, user?.id ?? null);
 
   await writeAudit(admin, { action: "create", entityType: "so_order", entityId: orderId,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { order_no: orderNo, lines: rows.length, grand_total: totals.grand_total, opened, new_groups: groups.created } });
+    metadata: { order_no: orderNo, lines: rows.length, grand_total: totals.grand_total, opened, new_groups: groups.created, ...(quotes.converted.length ? { quotes: quotes.converted } : {}) } });
 
   return NextResponse.json({ id: orderId, order_no: orderNo, opened, new_groups: groups.created, error: null });
 }

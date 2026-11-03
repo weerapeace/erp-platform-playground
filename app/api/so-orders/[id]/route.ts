@@ -8,6 +8,7 @@
  *      cancel   { reason }         → ยกเลิกใบ
  *      reopen   → กลับเป็น "ยืนยันแล้ว"
  *   DELETE → ลบใบ (เฉพาะใบที่ยังไม่เปิดใบสั่งผลิต/ยังไม่ออกใบขาย)
+ *   ใบเสนอราคาที่บรรทัดอ้าง (quote_id): บันทึก = ตรวจว่าดึงได้ + "แปลงแล้ว" · ยกเลิก/ลบ/ลบบรรทัดออกหมด = กลับ "ตอบรับแล้ว" (lib/quote-convert)
  * สิทธิ์: ดู so.view · แก้ so.create · ยืนยันส่ง so.ship · ยกเลิก so.cancel
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -15,7 +16,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { computeTotals, lineRow, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput } from "../shared";
+import { checkQuotePull, orderQuoteIds, quotePullProblems, syncQuoteConversions } from "@/lib/quote-convert";
+import { computeTotals, lineQuoteIds, lineRow, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput } from "../shared";
 import { openMoForOrder } from "../open-mo";
 
 export const dynamic = "force-dynamic";
@@ -67,6 +69,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const header = b.header ?? {};
     const lines = (b.lines ?? []).filter((l) => (l.product_name ?? "").trim() || l.sku);
     if (lines.length === 0) return NextResponse.json({ error: "ต้องมีรายการสินค้าอย่างน้อย 1 บรรทัด" }, { status: 400 });
+    const quoteIds = lineQuoteIds(lines);
+    const quoteErr = await checkQuotePull(admin, quoteIds, { orderId: id, customerId: header.customer_id ?? null });
+    if (quoteErr) return NextResponse.json({ error: quoteErr }, { status: 400 });
+    const oldQuoteIds = await orderQuoteIds(admin, id);   // ใบที่ถูกเอาออกจากใบนี้ → กลับ "ตอบรับแล้ว"
     const totals = computeTotals(header, lines);
     let groups: Awaited<ReturnType<typeof resolveLineGroups>>;
     try { groups = await resolveLineGroups(admin, lines, b.new_groups, { id: user?.id ?? null, email: user?.email ?? null }); }
@@ -91,7 +97,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     await admin.from("so_order_lines").delete().eq("order_id", id);
     const { error: lineErr } = await admin.from("so_order_lines").insert(lines.map((l, i) => lineRow(id, l, i, groups.groupOf(l))));
     if (lineErr) return NextResponse.json({ error: lineErr.message }, { status: 400 });
-    await writeAudit(admin, { action: "update", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, grand_total: totals.grand_total } });
+    const quotes = await syncQuoteConversions(admin, [...oldQuoteIds, ...quoteIds], actor);
+    await writeAudit(admin, { action: "update", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, grand_total: totals.grand_total, ...(quotes.converted.length || quotes.released.length ? { quotes } : {}) } });
     return NextResponse.json({ ok: true, error: null });
   }
 
@@ -166,15 +173,24 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const { error } = await admin.from("so_orders")
       .update({ status: "cancelled", cancelled_at: now, cancel_reason: b.reason ?? null, updated_at: now }).eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    await writeAudit(admin, { action: "so_order.cancel", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, reason: b.reason ?? null } });
+    const quotes = await syncQuoteConversions(admin, await orderQuoteIds(admin, id), actor);   // ใบเสนอราคากลับ "ตอบรับแล้ว"
+    await writeAudit(admin, { action: "so_order.cancel", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, reason: b.reason ?? null, ...(quotes.released.length ? { quotes_released: quotes.released } : {}) } });
     return NextResponse.json({ ok: true, error: null });
   }
   if (action === "reopen") {
+    // ใบเสนอราคาที่ระหว่างนี้ถูกใช้ที่อื่น/ถูกปฏิเสธ → ปลดออกจากบรรทัด (รายการยังอยู่ ไม่ผูกใบเสนอราคาแล้ว)
+    const quoteIds = await orderQuoteIds(admin, id);
+    const problems = await quotePullProblems(admin, quoteIds, { orderId: id });
+    if (problems.size) {
+      await admin.from("so_order_lines").update({ quote_id: null, quote_no: null, source: "manual" }).eq("order_id", id).in("quote_id", [...problems.keys()]);
+    }
     const { error } = await admin.from("so_orders")
       .update({ status: "confirmed", cancelled_at: null, cancel_reason: null, shipped_at: null, updated_at: now }).eq("id", id);
     if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-    await writeAudit(admin, { action: "so_order.reopen", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no } });
-    return NextResponse.json({ ok: true, error: null });
+    const quotes = await syncQuoteConversions(admin, quoteIds.filter((q) => !problems.has(q)), actor);
+    const warning = problems.size ? `ไม่ได้ผูกใบเสนอราคาเดิมกลับ: ${[...problems.values()].join(" · ")}` : null;
+    await writeAudit(admin, { action: "so_order.reopen", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, ...(quotes.converted.length ? { quotes: quotes.converted } : {}), ...(warning ? { warning } : {}) } });
+    return NextResponse.json({ ok: true, warning, error: null });
   }
 
   return NextResponse.json({ error: "ไม่รู้จัก action" }, { status: 400 });
@@ -191,8 +207,11 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (o.mo_opened_at || o.invoice_so_id) {
     return NextResponse.json({ error: "ใบนี้เปิดใบสั่งผลิต/ออกใบขายไปแล้ว — ใช้ 'ยกเลิก' แทนการลบ" }, { status: 400 });
   }
+  const quoteIds = await orderQuoteIds(admin, id);
   const { error } = await admin.from("so_orders").delete().eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  await writeAudit(admin, { action: "delete", entityType: "so_order", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { order_no: o.order_no } });
+  const actor = { actorId: user?.id ?? null, actorName: user?.email ?? null };
+  const quotes = await syncQuoteConversions(admin, quoteIds, actor);   // บรรทัดถูกลบตาม → ใบเสนอราคากลับ "ตอบรับแล้ว"
+  await writeAudit(admin, { action: "delete", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: o.order_no, ...(quotes.released.length ? { quotes_released: quotes.released } : {}) } });
   return NextResponse.json({ ok: true, error: null });
 }

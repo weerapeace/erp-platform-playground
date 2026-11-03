@@ -29,6 +29,8 @@ type ModeConfig = {
   /** ข้อความค้นหาเทียบกับแถว */
   searchText: (row: SourceDocRow) => string;
   columns: { key: string; label: string; align?: "right"; render: (row: SourceDocRow) => React.ReactNode }[];
+  /** ข้อความเมื่อไม่มีเอกสารที่ดึงได้เลย (บอกว่าต้องทำอะไรก่อน) */
+  emptyHint?: string;
 };
 
 const SO_STATUS_LABEL: Record<string, string> = {
@@ -40,14 +42,17 @@ export type SourceDocMode = "quotation" | "mo" | "so" | "so_quote";
 
 const CONFIGS: Record<SourceDocMode, ModeConfig> = {
   // ใบเสนอราคา → ใบสั่งขาย (so_orders): แถวมีบรรทัดสินค้ามาด้วย (rows[].lines) ผู้เรียกเอาไปตั้งรายการได้เลย
+  // เซิร์ฟเวอร์คืนเฉพาะใบที่ดึงได้ (ส่งแล้ว/ตอบรับแล้ว · ยังไม่แปลง · ไม่อยู่ในใบสั่งขายอื่น — lib/quote-convert)
   so_quote: {
     title: "ดึงจากใบเสนอราคา",
     endpoint: "/api/so-orders/sources?type=quote",
     eligible: () => true,
+    emptyHint: "ใบเสนอราคาที่ดึงได้ต้อง “ส่งแล้ว” หรือ “ตอบรับแล้ว” และยังไม่ถูกแปลง — ใบร่างให้กด “ส่ง” ที่หน้าใบเสนอราคาก่อน",
     searchText: (r) => `${r.no ?? ""} ${r.customer_name ?? ""} ${(r.lines as { sku?: string | null; product_name?: string }[] | undefined)?.map((l) => `${l.sku ?? ""} ${l.product_name ?? ""}`).join(" ") ?? ""}`,
     columns: [
       { key: "no", label: "เลขที่", render: (r) => <code className="font-mono text-xs text-slate-700">{String(r.no ?? "—")}</code> },
       { key: "customer_name", label: "ลูกค้า", render: (r) => <span className="text-slate-700">{String(r.customer_name ?? "—")}</span> },
+      { key: "status", label: "สถานะ", render: (r) => <span className="text-xs text-slate-500">{QUOTE_STATUS_LABEL[String(r.status)] ?? String(r.status ?? "—")}</span> },
       { key: "lines", label: "รายการ", align: "right", render: (r) => <span className="tabular-nums text-slate-500">{Array.isArray(r.lines) ? r.lines.length : 0}</span> },
       { key: "amount", label: "ยอดรวม", align: "right", render: (r) => <span className="font-mono tabular-nums text-slate-700">{baht(r.amount)}</span> },
     ],
@@ -174,6 +179,7 @@ export function SourceDocPickerModal({
           ) : filtered.length === 0 ? (
             <div className="px-4 py-10 text-center text-sm text-slate-400">
               {rows.length === 0 ? "ไม่มีเอกสารที่ดึงได้" : "ไม่พบรายการที่ค้นหา"}
+              {rows.length === 0 && cfg.emptyHint && <div className="mt-1 text-xs">{cfg.emptyHint}</div>}
             </div>
           ) : (
             <table className="w-full text-sm">

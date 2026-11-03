@@ -11,7 +11,7 @@ import type { CustomerPickerValue, EmployeePickerValue } from "@/components/pick
 import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { useNewParam } from "@/lib/open-param";
+import { useNewParam, openLink } from "@/lib/open-param";
 import { formatDate } from "@/lib/date";
 import { QUOTATION_ROW_ACTIONS } from "@/components/data-table/row-actions";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -686,10 +686,15 @@ export default function QuotationsPage() {
                 className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">🧾 แปลงเป็นใบสั่งขาย</button>
             )}
 
-            {detail.status === "converted" && (
-              <a href="/sales-orders"
-                className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 inline-flex items-center">→ ไปหน้าใบสั่งขาย</a>
-            )}
+            {detail.status === "converted" && (() => {
+              // แปลงได้ 2 ทาง: ดึงเข้าใบสั่งขาย (so_orders) · แปลงเป็นใบขายตรง ๆ (converted_so_id)
+              const so = detail.so_orders?.find((o) => o.status !== "cancelled");
+              const href = so ? openLink("/sales/orders", so.id) : openLink("/sales-orders", detail.converted_so_id);
+              return (
+                <a href={href}
+                  className="h-9 px-4 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 inline-flex items-center">→ {so ? `ไปที่ใบสั่งขาย ${so.order_no ?? ""}` : "ไปที่ใบขาย"}</a>
+              );
+            })()}
           </>
         ) : null}>
         {detailLoading || !detail ? (
@@ -706,6 +711,15 @@ export default function QuotationsPage() {
             {detail.status === "converted" && detail.converted_so_id && (
               <div className="px-3 py-2 bg-emerald-50 border-l-4 border-emerald-300 text-sm text-emerald-900">
                 ✅ ใบเสนอราคานี้แปลงเป็นใบสั่งขายแล้ว — ดูต่อที่หน้า <strong>ใบขาย (SO)</strong>
+              </div>
+            )}
+            {detail.so_orders?.some((o) => o.status !== "cancelled") && (
+              <div className="px-3 py-2 bg-emerald-50 border-l-4 border-emerald-300 text-sm text-emerald-900">
+                ✅ ดึงเข้าใบสั่งขายแล้ว:{" "}
+                {detail.so_orders.filter((o) => o.status !== "cancelled").map((o, i) => (
+                  <span key={o.id}>{i > 0 && " · "}<a href={openLink("/sales/orders", o.id)} className="font-semibold underline">{o.order_no ?? "ใบสั่งขาย"}</a></span>
+                ))}
+                {" "}— ถ้ายกเลิกใบสั่งขาย ใบเสนอราคานี้จะกลับเป็น “ตอบรับแล้ว”
               </div>
             )}
 

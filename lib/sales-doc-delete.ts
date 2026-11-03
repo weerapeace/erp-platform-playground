@@ -44,8 +44,15 @@ async function referencesOf(admin: Admin, kind: SalesDocKind, id: string, doc: R
   };
 
   if (kind === "quotation") {
-    const { data } = await admin.from("so_orders").select("order_no").eq("quote_id", id).limit(5);
-    if (data?.length) found.push(`ใบสั่งขาย ${list(data.map((r) => (r as Row).order_no))}`);
+    // ใบสั่งขายผูกใบเสนอราคาที่บรรทัด (so_order_lines.quote_id · lib/quote-convert) — หัวใบ so_orders.quote_id เป็นช่องเดิม
+    const { data: ls } = await admin.from("so_order_lines").select("order_id").eq("quote_id", id).limit(200);
+    const lineOrderIds = [...new Set((ls ?? []).map((l) => String((l as Row).order_id)))];
+    const [{ data: byHead }, { data: byLine }] = await Promise.all([
+      admin.from("so_orders").select("order_no").eq("quote_id", id).limit(5),
+      lineOrderIds.length ? admin.from("so_orders").select("order_no").in("id", lineOrderIds).limit(5) : Promise.resolve({ data: [] as Row[] }),
+    ]);
+    const nos = [...new Set([...(byHead ?? []), ...(byLine ?? [])].map((r) => (r as Row).order_no))];
+    if (nos.length) found.push(`ใบสั่งขาย ${list(nos)}`);
   }
 
   if (kind === "sales_order") {

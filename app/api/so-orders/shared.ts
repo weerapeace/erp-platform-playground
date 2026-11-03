@@ -26,6 +26,9 @@ export type SoOrderLineInput = {
   mo_id?: string | null;
   mo_no?: string | null;
   source?: string | null;      // manual | quote | mo
+  /** ใบเสนอราคาต้นทางของบรรทัดนี้ — 1 ใบสั่งขายรวมได้หลายใบ (กติกา lib/quote-convert.ts) */
+  quote_id?: string | null;
+  quote_no?: string | null;
   note?: string | null;
   /** ชุด (= กลุ่มใบสั่งงาน mo_groups) ที่รายการนี้อยู่ */
   mo_group_id?: string | null;
@@ -140,9 +143,13 @@ export function lineRow(orderId: string, l: SoOrderLineInput, i: number, groupId
     qty: Number(l.qty) || 0, unit: l.unit || "ชิ้น", unit_price: Number(l.unit_price) || 0,
     discount_type: l.discount_type ?? "amount", discount_value: Number(l.discount_value) || 0,
     due_date: l.due_date || null, mo_id: l.mo_id ?? null, mo_no: l.mo_no ?? null,
-    source: l.source ?? "manual", note: l.note ?? null, mo_group_id: groupId,
+    source: l.source ?? (l.quote_id ? "quote" : "manual"), note: l.note ?? null, mo_group_id: groupId,
+    quote_id: l.quote_id || null, quote_no: l.quote_id ? (l.quote_no ?? null) : null,
   };
 }
+
+/** ใบเสนอราคาที่บรรทัดอ้าง (ไม่ซ้ำ) */
+export const lineQuoteIds = (lines: SoOrderLineInput[]) => [...new Set(lines.map((l) => l.quote_id).filter((x): x is string => !!x))];
 
 /** แถวใบสั่งขาย 1 ใบ + จำนวนบรรทัด (ใช้ในหน้ารายการ) */
 export type SoOrderRow = {
