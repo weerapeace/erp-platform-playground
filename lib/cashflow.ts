@@ -72,6 +72,8 @@ export type CashflowEvent = {
    * null = ยังไม่ระบุ — ห้ามเดาเป็นบริษัทตั้งต้น ไม่งั้นยอดของบริษัทนั้นจะเกินจริงเงียบ ๆ
    */
   companyId?: string | null;
+  /** id คู่ค้าใน partners_v2 (ลูกค้า / ร้านค้า) — ใช้ตั้งเครดิตจากหน้ากระแสเงินสด · null = ไม่ผูกคู่ค้า (เงินเดือน หนี้ธนาคาร ฯลฯ) */
+  partyId?: string | null;
 };
 
 /** ชนิดเอกสารที่กระดานเลื่อนวันให้ได้ + ช่องที่เก็บวันนั้นในฐานข้อมูล */
@@ -249,6 +251,48 @@ export function summarizeDays(days: CashflowDay[], startBalance: number): Series
     if (d.balance < 0) { red += 1; if (!redFirst) redFirst = d.date; }
   }
   return { in: inAmt, out: outAmt, low, lowDay, red, redFirst };
+}
+
+export type CashflowBucket = {
+  /** วันแรกของช่วง "YYYY-MM-DD" */
+  start: string;
+  /** วันสุดท้ายของช่วง (รวมวันนั้น) */
+  end: string;
+  label: string;
+  in: number;
+  out: number;
+  /** เงินคงเหลือ ณ สิ้นช่วง (ช่วงที่ไม่มีรายการ = ยอดของช่วงก่อน) */
+  balance: number;
+  events: CashflowEvent[];
+};
+
+/**
+ * รวมเส้นรายวันเป็นช่วงสำหรับกราฟ — "week" = ทุก 7 วันนับจาก from · "month" = ตามเดือนปฏิทิน
+ * ของค้างจากอดีต (ก่อน from) อยู่ใน series.startBalance แล้ว ไม่นับซ้ำในช่วงแรก
+ */
+export function bucketSeries(series: CashflowSeries, from: string, to: string, unit: "week" | "month"): CashflowBucket[] {
+  const ranges: { start: string; end: string; label: string }[] = [];
+  if (unit === "week") {
+    for (let s = from; s <= to; s = addDaysISO(s, 7)) {
+      const e = addDaysISO(s, 6);
+      ranges.push({ start: s, end: e > to ? to : e, label: formatDayMonthTH(s) });
+    }
+  } else {
+    for (const m of monthsBetween(from, to)) {
+      const s = m < from ? from : m, e = endOfMonthISO(m);
+      ranges.push({ start: s, end: e > to ? to : e, label: monthLabelTH(m.slice(0, 7)) });
+    }
+  }
+  let balance = series.startBalance, di = 0;
+  return ranges.map((r) => {
+    const b: CashflowBucket = { ...r, in: 0, out: 0, balance, events: [] };
+    while (di < series.days.length && series.days[di].date <= r.end) {
+      const d = series.days[di++];
+      b.in += d.in; b.out += d.out; b.balance = d.balance; b.events.push(...d.events);
+    }
+    balance = b.balance;
+    return b;
+  });
 }
 
 /** วันแรกที่เงินคงเหลือติดลบ (null = ไม่ติดลบเลยในช่วงนี้) */

@@ -130,7 +130,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (incomeBasis === "billing" || incomeBasis === "both") {
     const [bnRes, bnLineRes, soCoRes] = await Promise.all([
       db.from("erp_playground_billing_notes")
-        .select("id, bill_number, status, customer_name, bill_date, due_date, grand_total, amount_due, paid_at, company_id")
+        .select("id, bill_number, status, customer_id, customer_name, bill_date, due_date, grand_total, amount_due, paid_at, company_id")
         .neq("status", "cancelled").is("paid_at", null).lte("bill_date", to).limit(5000),
       db.from("erp_playground_billing_note_lines").select("billing_note_id, so_id").limit(20000),
       db.from("erp_playground_sales_orders").select("id, company_id").not("company_id", "is", null).limit(20000),
@@ -177,6 +177,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         href: openLink("/billing-notes", String(b.id)),
         movable: true, docId: String(b.id),
         companyId: bnCos.length > 1 ? null : co(b.company_id) ?? (bnCos.length === 1 ? co(bnCos[0]) : null),
+        partyId: (b.customer_id as string | null) ?? null,
       });
     }
   }
@@ -225,6 +226,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         href: openLink("/sales-orders", String(s.id)),
         movable: true, docId: String(s.id),
         companyId: co(s.company_id),
+        partyId: (s.customer_id as string | null) ?? null,
       });
     }
     if (guessed > 0) {
@@ -255,7 +257,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const poRes = await db
       .from("purchase_orders_v2")
       .select("id, po_no, seller_name, seller_partner_id, order_date, payment_due_date, currency, grand_total, paid_amount_thb, payment_status, company_id")
-      .eq("is_active", true).neq("payment_status", "paid").limit(5000);
+      // .neq ตัดแถวที่ payment_status ว่าง (null) ทิ้ง → ใช้ or ให้นับ PO ที่ยังไม่เคยติ๊กสถานะจ่ายด้วย
+      .eq("is_active", true).or("payment_status.is.null,payment_status.neq.paid").limit(5000);
 
     let guessed = 0;
     let rmbCount = 0;
@@ -293,6 +296,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         href: openLink("/purchasing/po-list", String(p.id)),
         movable: true, docId: String(p.id),
         companyId: co(p.company_id),
+        partyId: (p.seller_partner_id as string | null) ?? null,
       });
     }
     if (guessed > 0) {
@@ -584,6 +588,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         href: "/app/china-pay",
         movable: true, docId: String(b.id),
         companyId: co(b.company_id),
+        partyId: (b.supplier_id as string | null) ?? null,
       });
     }
     if (noRate > 0) {

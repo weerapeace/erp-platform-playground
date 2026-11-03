@@ -1,35 +1,41 @@
 "use client";
 
 /**
- * 💧 กระแสเงินสด (Cashflow) — เฟส 1 "ดูอย่างเดียว"
+ * 💧 กระแสเงินสด (Cashflow) — ดู + จัดการเงินเข้า-ออกทั้งกลุ่มในหน้าเดียว
  * URL: /cashflow
  *
- * รวมเงินเข้า-เงินออกทั้งบริษัทไว้หน้าเดียว จาก 5 แหล่ง:
- * คำสั่งขาย · จัดซื้อ · เงินเดือน · หนี้ (เงินกู้/OD) · โอนเงินจีน
- *
- * หน้านี้ไม่แก้ข้อมูลต้นทางเลย — ยกเว้น "ยอดเงินในบัญชี" ที่ผู้ใช้กรอกเองเพื่อใช้เป็นจุดเริ่มของกราฟ
+ * รวมจาก: ใบขาย · ใบวางบิล · ใบซื้อ · เงินเดือน · เงินกู้/OD/บัตร · บิลจีน · รายการประจำ (สูตรรวมยอดอยู่ที่ lib/cashflow.ts — ห้ามเขียนซ้ำ)
+ * โครงหน้า (ออกแบบใหม่ 2026-11-03 เฟส 1 — ไม่แตะฐานข้อมูล):
+ *   การ์ดสรุป 5 ใบ (กดแล้วพาไปแท็บ) → ต้องจัดการก่อนเชื่อตัวเลข (components/cashflow/todo-list) → กราฟรายสัปดาห์/เดือน (period-chart)
+ *   → แท็บ: ต้องจ่าย / ต้องรับ (party-tab: 1 แถวต่อคู่ค้า · จ่ายแล้ว · เลื่อนวัน · ตั้งเครดิต) · หนี้ & วงเงิน (debt-tab: /api/bank-debts + ลงหนี้ใหม่)
+ *           · รายการทั้งหมด (ตารางกลาง + ตั้งบริษัทหลายรายการ) · ตั้งค่า (ยอดเงินในบัญชี · ค่าที่ใช้เดา · รายการประจำ · แหล่งที่นับ)
+ * ทุกปุ่มแก้ข้อมูลเรียก API เดิมที่มีสิทธิ์ + ประวัติในตัวอยู่แล้ว (ดู docs/cashflow.md)
  * เลือกดูทีละบริษัทได้ (ปุ่มชุดเดียวกับกระดาน /cashflow/board — เลือกที่หน้าไหน อีกหน้าตามไปด้วย)
- * สูตรรวมยอด/สีแหล่งที่มาอยู่ที่ lib/cashflow.ts (ของกลาง) — ห้ามเขียนซ้ำในไฟล์นี้
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { ColumnDef } from "@tanstack/react-table";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
-import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { ConfirmDialog } from "@/components/modal";
 import { MoneyInput } from "@/components/money-input";
 import { DateInput } from "@/components/date-input";
 import { InfoHint } from "@/components/info-hint";
+import { Icon } from "@/components/icon";
 import { usePermission, AccessDenied, useAuth } from "@/components/auth";
 import { CompanyFilterChips, CompanySelect, CompanyTag, useCompanyFilter } from "@/components/company-filter";
 import { UnassignedNotice } from "@/components/cashflow/unassigned-notice";
+import { CashflowPeriodChart } from "@/components/cashflow/period-chart";
+import { CashflowTodo, type CashflowTab } from "@/components/cashflow/todo-list";
+import { CashflowPartyTab } from "@/components/cashflow/party-tab";
+import { CashflowDebtTab, summarizeDebts } from "@/components/cashflow/debt-tab";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import {
-  CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, MANUAL_CATEGORIES, THB, THBShort, manualScheduleLabel,
-  addDaysISO, buildDailySeries, filterEventsByCompany, firstNegativeDay, monthLabelTH, openingForCompany,
-  todayISO, totalsByMonth, unassignedBySource, isCompanyAssignable, COMPANY_ASSIGNABLE,
-  type CashflowEvent, type CashflowSource,
+  CASHFLOW_CERTAINTY, CASHFLOW_SOURCE, MANUAL_CATEGORIES, THB, manualScheduleLabel,
+  addDaysISO, bucketSeries, buildDailySeries, filterEventsByCompany, firstNegativeDay, openingForCompany,
+  summarizeDays, todayISO, unassignedBySource, isCompanyAssignable, COMPANY_ASSIGNABLE,
+  type CashflowBucket, type CashflowEvent, type CashflowSource,
 } from "@/lib/cashflow";
 import { COMPANY_ALL, COMPANY_NONE, companyLabel, matchCompany, type CompanyRef } from "@/lib/company-filter";
 import type { CashflowApiData } from "@/app/api/cashflow/route";
@@ -37,6 +43,7 @@ import type { OpeningBalance } from "@/app/api/cashflow/opening-balances/route";
 import type { LoanReconcileRow } from "@/app/api/cashflow/loan-reallocate/route";
 import type { ManualItem } from "@/app/api/cashflow/manual-items/route";
 import type { AssignResult } from "@/app/api/cashflow/assign-company/route";
+import type { DebtItem } from "@/app/api/bank-debts/route";
 
 const ALL_SOURCES = Object.keys(CASHFLOW_SOURCE) as CashflowSource[];
 const RANGES = [
@@ -49,6 +56,7 @@ const RANGES = [
 /** ค่าที่ผู้ใช้ปรับเอง — จำไว้ต่อเครื่อง (ไม่กระทบคนอื่น) */
 type Prefs = { rangeDays: number; customerDays: number; supplierDays: number; rmbRate: number | null; off: CashflowSource[] };
 const PREF_KEY = "erp-cashflow-prefs";
+const TAB_KEY = "erp-cashflow-tab";
 const DEFAULT_PREFS: Prefs = { rangeDays: 90, customerDays: 30, supplierDays: 30, rmbRate: null, off: [] };
 
 function loadPrefs(): Prefs {
@@ -64,20 +72,35 @@ type Row = CashflowEvent & { balance: number };
 export default function CashflowPage() {
   const canView = usePermission("cashflow.view");
   const canManage = usePermission("cashflow.manage");
+  const canPayPo = usePermission("products.edit");             // /api/purchasing/mark-paid
+  const canDebtView = usePermission("loan_contracts.view");     // /api/bank-debts
+  const canDebtCreate = usePermission("loan_contracts.create");
   const { permsReady } = useAuth();
 
   const [prefs, setPrefs] = useState<Prefs>(DEFAULT_PREFS);
   const [data, setData] = useState<CashflowApiData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [showWarnings, setShowWarnings] = useState(true);
   const [assignMsg, setAssignMsg] = useState<string | null>(null);
+  const [tab, setTabState] = useState<CashflowTab>("pay");
+  const [picked, setPicked] = useState<CashflowBucket | null>(null);
+  const [addMenu, setAddMenu] = useState(false);
+  const [debtCreate, setDebtCreate] = useState<DebtItem["module"] | null>(null);
+  const tabsRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => { setPrefs(loadPrefs()); }, []);
+  useEffect(() => {
+    setPrefs(loadPrefs());
+    try { const t = localStorage.getItem(TAB_KEY) as CashflowTab | null; if (t && ["pay", "recv", "debt", "all", "settings"].includes(t)) setTabState(t); } catch { /* โหมดส่วนตัว */ }
+  }, []);
   const savePrefs = (next: Prefs) => {
     setPrefs(next);
     try { localStorage.setItem(PREF_KEY, JSON.stringify(next)); } catch { /* โหมดส่วนตัวของเบราว์เซอร์ */ }
+  };
+  /** สลับแท็บ + เลื่อนจอลงมาที่แท็บ (ใช้จากการ์ดสรุป / รายการต้องจัดการ) */
+  const goTab = (t: CashflowTab, scroll = true) => {
+    setTabState(t);
+    try { localStorage.setItem(TAB_KEY, t); } catch { /* โหมดส่วนตัว */ }
+    if (scroll) setTimeout(() => tabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   };
 
   const from = todayISO();
@@ -101,6 +124,21 @@ export default function CashflowPage() {
 
   useEffect(() => { if (canView) load(); }, [canView, load]);
 
+  // ---- หนี้ธนาคาร (ทะเบียนเดียวกับ /bank-debts) — เฉพาะคนที่ดูหนี้ได้ ----
+  const [debts, setDebts] = useState<DebtItem[]>([]);
+  const [debtsLoading, setDebtsLoading] = useState(false);
+  const [debtsErr, setDebtsErr] = useState<string | null>(null);
+  const loadDebts = useCallback(() => {
+    if (!canDebtView) return;
+    setDebtsLoading(true); setDebtsErr(null);
+    apiFetch("/api/bank-debts").then((r) => r.json())
+      .then((j) => { if (j?.error) setDebtsErr(String(j.error)); else setDebts(((j.data?.items ?? []) as DebtItem[])); })
+      .catch(() => setDebtsErr("โหลดข้อมูลหนี้ไม่สำเร็จ"))
+      .finally(() => setDebtsLoading(false));
+  }, [canDebtView]);
+  useEffect(() => { if (canView) loadDebts(); }, [canView, loadDebts]);
+  const reloadAll = () => { load(); loadDebts(); };
+
   // ---- แยกบริษัท (จำที่เลือกไว้ร่วมกับกระดาน) ----
   const companies: CompanyRef[] = useMemo(() => data?.meta.companies ?? [], [data]);
   const [companyFilter, setCompanyFilter] = useCompanyFilter("erp-cashflow-company", companies);
@@ -111,6 +149,8 @@ export default function CashflowPage() {
   const opening = useMemo(() => openingForCompany(accounts, COMPANY_ALL), [accounts]);
   const openingAsOf = accounts.length ? accounts.map((a) => a.as_of_date).sort().slice(-1)[0] : null;
   const filterName = companyFilter === COMPANY_ALL ? "ทั้งกลุ่ม" : companyLabel(companies, companyFilter === COMPANY_NONE ? null : companyFilter, "full");
+  const myDebts = useMemo(() => debts.filter((d) => matchCompany(d.company_id, companyFilter)), [debts, companyFilter]);
+  const debtSum = useMemo(() => summarizeDebts(myDebts), [myDebts]);
 
   // ---- กรองตามแหล่งที่ผู้ใช้เปิดไว้ + บริษัท แล้วคำนวณเส้นเงินคงเหลือ ----
   const offSet = useMemo(() => new Set(prefs.off), [prefs.off]);
@@ -126,6 +166,8 @@ export default function CashflowPage() {
     () => buildDailySeries(events, opening, from, to),
     [events, opening, from, to],
   );
+  const summary = useMemo(() => summarizeDays(series.days, series.startBalance), [series]);
+  const buckets = useMemo(() => bucketSeries(series, from, to, prefs.rangeDays <= 180 ? "week" : "month"), [series, from, to, prefs.rangeDays]);
 
   const rows: Row[] = useMemo(() => {
     let running = series.startBalance;
@@ -138,18 +180,20 @@ export default function CashflowPage() {
     }
     return out;
   }, [series]);
+  const shownRows = useMemo(
+    () => (picked ? rows.filter((r) => r.date >= picked.start && r.date <= picked.end) : rows),
+    [rows, picked],
+  );
 
   const inTotal  = series.days.reduce((s, d) => s + d.in, 0);
   const outTotal = series.days.reduce((s, d) => s + d.out, 0);
   const endBalance = series.days.length ? series.days[series.days.length - 1].balance : series.startBalance;
   const negative = firstNegativeDay(series.days);
-  const months = useMemo(() => totalsByMonth(series.days), [series.days]);
-
-  // แยกเงินเข้า 2 มุม: วางบิลแล้ว (เกือบแน่นอน) กับ ใบขายยืนยันแล้ว (คาดการณ์)
-  // นับเฉพาะที่ตกอยู่ในช่วงที่ดูอยู่ ให้ตรงกับตัวเลขใหญ่บนการ์ด (ของค้างจากอดีตแสดงแยกอีกแถบ)
-  const inWindow = useMemo(() => series.days.flatMap((d) => d.events), [series.days]);
-  const inBilling = inWindow.filter((e) => e.source === "billing_note").reduce((s, e) => s + e.amount, 0);
-  const inSO = inWindow.filter((e) => e.source === "sales_order").reduce((s, e) => s + e.amount, 0);
+  // แท็บต้องจ่าย/ต้องรับ = ทุกอย่างที่ยังค้างจนถึงปลายช่วง (รวมของค้างจากก่อนวันนี้)
+  const outEvents = useMemo(() => events.filter((e) => e.direction === "out" && e.date <= to), [events, to]);
+  const inEvents = useMemo(() => events.filter((e) => e.direction === "in" && e.date <= to), [events, to]);
+  const owedOut = series.carriedOut + outTotal;
+  const owedIn = series.carriedIn + inTotal;
 
   /**
    * ตั้งบริษัทหลายใบพร้อมกัน — ใช้ "แก้หลายรายการ" ของตารางกลาง (มีหน้ายืนยัน + ดูก่อนบันทึกให้แล้ว)
@@ -206,7 +250,7 @@ export default function CashflowPage() {
         return (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full"
                 style={{ color: meta.color, background: `${meta.color}18` }}>
-            {meta.icon} {meta.label}
+            <Icon value={meta.icon} /> {meta.label}
           </span>
         );
       },
@@ -216,7 +260,12 @@ export default function CashflowPage() {
       accessorFn: (r) => companyLabel(companies, r.companyId),
       cell: ({ row }) => <CompanyTag companies={companies} companyId={row.original.companyId} />,
     },
-    { id: "ref", accessorKey: "ref", header: "เอกสาร", size: 170 },
+    {
+      id: "ref", accessorKey: "ref", header: "เอกสาร", size: 170,
+      cell: ({ row }) => row.original.href
+        ? <Link href={row.original.href} className="text-blue-700 hover:underline">{row.original.ref}</Link>
+        : <span>{row.original.ref}</span>,
+    },
     { id: "party", accessorKey: "party", header: "คู่ค้า / เจ้าหนี้", size: 220 },
     {
       id: "in", header: "เงินเข้า", size: 120,
@@ -260,6 +309,24 @@ export default function CashflowPage() {
   }
 
   const warnings = data?.meta.warnings ?? [];
+  const TABS: { key: CashflowTab; label: string; sub?: string; show: boolean }[] = [
+    { key: "pay", label: "ต้องจ่าย", sub: THB(owedOut), show: true },
+    { key: "recv", label: "ต้องรับ", sub: THB(owedIn), show: true },
+    { key: "debt", label: "หนี้ & วงเงิน", sub: canDebtView ? THB(debtSum.loanOutstanding + debtSum.odUsed + debtSum.cardOutstanding) : undefined, show: true },
+    { key: "all", label: "รายการทั้งหมด", sub: `${rows.length} รายการ`, show: true },
+    { key: "settings", label: "ตั้งค่า", show: true },
+  ];
+  const addItems: { label: string; hint: string; onClick?: () => void; href?: string; show: boolean }[] = [
+    ...(["loan-contracts", "od-facilities", "debt-cards"] as const).map((m) => ({
+      label: m === "loan-contracts" ? "ลงหนี้: เงินกู้ธนาคาร" : m === "od-facilities" ? "ลงหนี้: วงเงิน OD" : "ลงหนี้: บัตรเครดิต / Cash plus",
+      hint: m === "loan-contracts" ? "ผ่อนเป็นงวด — สร้างตารางผ่อนให้" : m === "od-facilities" ? "เบิกเกินบัญชี" : "ยอดตามใบแจ้งยอด",
+      onClick: () => { setDebtCreate(m); goTab("debt"); }, show: canDebtCreate,
+    })),
+    { label: "บันทึกรับเงินจากลูกค้า", hint: "ออกใบรับชำระ — ยอดค้างรับลดเอง", href: "/receipts", show: true },
+    { label: "ยอดเงินในบัญชีวันนี้", hint: "จุดเริ่มของเส้นเงินคงเหลือ", onClick: () => goTab("settings"), show: true },
+    { label: "รายจ่าย / รายรับประจำ", hint: "ค่าเช่า น้ำไฟ ประกันสังคม ภาษี", onClick: () => goTab("settings"), show: true },
+    { label: "ตั้งเครดิตหลายรายพร้อมกัน", hint: "ลูกค้า / ร้านค้า", href: "/cashflow/credit-terms", show: true },
+  ];
 
   return (
     <PlaygroundShell>
@@ -267,36 +334,42 @@ export default function CashflowPage() {
       <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-5">
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">💧 กระแสเงินสด</h1>
-            <p className="text-slate-500 mt-1 text-sm">
-              เงินเข้า-เงินออกทั้งบริษัทในหน้าเดียว — รวมจากใบขาย ใบซื้อ เงินเดือน หนี้ และเงินจีน
-            </p>
+            <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2"><Icon value="💧" /> กระแสเงินสด</h1>
+            <p className="text-slate-500 mt-1 text-sm">เงินเข้า-ออกทั้งกลุ่ม · ดูและจัดการได้ในหน้านี้ — จ่ายแล้ว · เลื่อนวัน · ตั้งเครดิต · ลงหนี้</p>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <Link href="/receipts"
-                  className="h-9 px-3.5 inline-flex items-center text-sm font-medium text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-lg hover:bg-emerald-100">
-              💵 รับชำระเงิน
+          <div className="flex items-center gap-2 flex-wrap relative">
+            <Link href="/cashflow/board"
+                  className="h-9 px-3.5 inline-flex items-center gap-1.5 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
+              <Icon value="🧲" /> กระดาน (ลากเลื่อนวัน)
             </Link>
-            <Link href="/cashflow/credit-terms"
-                  className="h-9 px-3.5 inline-flex items-center text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
-              🗓️ ตั้งเครดิต
-            </Link>
-            <button onClick={() => setSettingsOpen(true)}
-                    className="h-9 px-3.5 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
-              ⚙️ ตั้งค่า
+            <button onClick={reloadAll} disabled={loading}
+                    className="h-9 px-3.5 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">
+              {loading ? "กำลังโหลด…" : "โหลดใหม่"}
             </button>
-            <button onClick={load} disabled={loading}
-                    className="h-9 px-3.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
-              {loading ? "กำลังโหลด…" : "🔄 โหลดใหม่"}
+            <button onClick={() => setAddMenu((v) => !v)}
+                    className="h-9 px-3.5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700">
+              ＋ เพิ่มรายการ ▾
             </button>
+            {addMenu && (
+              <div className="absolute right-0 top-11 z-30 w-72 bg-white border border-slate-200 rounded-xl shadow-lg p-1">
+                {addItems.filter((i) => i.show).map((i) => i.href ? (
+                  <Link key={i.label} href={i.href} onClick={() => setAddMenu(false)} className="block px-3 py-2 rounded-lg hover:bg-slate-50">
+                    <span className="block text-sm text-slate-800">{i.label}</span><span className="block text-[11px] text-slate-500">{i.hint}</span>
+                  </Link>
+                ) : (
+                  <button key={i.label} type="button" onClick={() => { setAddMenu(false); i.onClick?.(); }} className="w-full text-left px-3 py-2 rounded-lg hover:bg-slate-50">
+                    <span className="block text-sm text-slate-800">{i.label}</span><span className="block text-[11px] text-slate-500">{i.hint}</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* ช่วงเวลา */}
         <div className="flex items-center gap-2 mt-4 flex-wrap">
           <span className="text-xs text-slate-500">ดูล่วงหน้า</span>
           {RANGES.map((r) => (
-            <button key={r.days} onClick={() => savePrefs({ ...prefs, rangeDays: r.days })}
+            <button key={r.days} onClick={() => { savePrefs({ ...prefs, rangeDays: r.days }); setPicked(null); }}
                     className={`h-8 px-3 text-sm rounded-lg border transition-colors ${
                       prefs.rangeDays === r.days
                         ? "bg-blue-600 border-blue-600 text-white"
@@ -305,24 +378,11 @@ export default function CashflowPage() {
             </button>
           ))}
           <span className="text-xs text-slate-400 ml-1">{formatDate(from)} – {formatDate(to)}</span>
-        </div>
-
-        {/* เปิด/ปิดแหล่งเงิน */}
-        <div className="flex items-center gap-2 mt-3 flex-wrap">
-          <span className="text-xs text-slate-500">นับแหล่งไหนบ้าง</span>
-          {ALL_SOURCES.map((s) => {
-            const meta = CASHFLOW_SOURCE[s];
-            const on = !offSet.has(s);
-            return (
-              <button key={s}
-                      onClick={() => savePrefs({ ...prefs, off: on ? [...prefs.off, s] : prefs.off.filter((x) => x !== s) })}
-                      className={`h-8 px-3 text-xs rounded-full border transition-colors ${
-                        on ? "text-white" : "bg-white text-slate-400 border-slate-200"}`}
-                      style={on ? { background: meta.color, borderColor: meta.color } : undefined}>
-                {meta.icon} {meta.label}
-              </button>
-            );
-          })}
+          {offSet.size > 0 && (
+            <button type="button" onClick={() => goTab("settings")} className="text-xs text-amber-700 underline ml-2">
+              ปิดไว้ {offSet.size} แหล่ง — ดู / เปิดคืน
+            </button>
+          )}
         </div>
 
         {companies.length > 0 && (
@@ -345,139 +405,163 @@ export default function CashflowPage() {
 
         {data && (
           <>
-            {/* ---------- เตือนเรื่องความแม่นของข้อมูล ---------- */}
-            {warnings.length > 0 && (
-              <div className="bg-amber-50 border border-amber-200 rounded-xl overflow-hidden">
-                <button onClick={() => setShowWarnings((v) => !v)}
-                        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-amber-100/50">
-                  <span className="text-sm font-semibold text-amber-800">
-                    ⚠️ ตัวเลขนี้ยังไม่แม่น 100% — มี {warnings.length} เรื่องที่ควรรู้
-                  </span>
-                  <span className="text-amber-500 text-xs">{showWarnings ? "ซ่อน ▲" : "ดู ▼"}</span>
-                </button>
-                {showWarnings && (
-                  <ul className="px-4 pb-3 space-y-1.5">
-                    {warnings.map((w) => (
-                      <li key={w.code} className="text-sm text-amber-900 flex gap-2">
-                        <span className="text-amber-400">•</span>
-                        <span>
-                          {w.message}
-                          {w.href && <Link href={w.href} className="ml-1.5 underline text-amber-700 hover:text-amber-900">ไปแก้</Link>}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            {/* ---------- การ์ดสรุป (กดแล้วพาไปแท็บ) ---------- */}
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+              <Card label={companyFilter === COMPANY_ALL ? "เงินในบัญชีตอนนี้" : `เงินในบัญชี · ${filterName}`}
+                    value={accounts.length ? THB(opening) : "ยังไม่กรอก"}
+                    sub={openingAsOf ? `ยอด ณ ${formatDate(openingAsOf)} · ${accounts.length} บัญชี` : "กดเพื่อกรอกยอดทุกบัญชี →"}
+                    tone={accounts.length ? "text-slate-900" : "text-slate-400"} onClick={() => goTab("settings")} />
+              <Card label="ต้องรับ (ค้างทั้งหมดถึงปลายช่วง)" value={THB(owedIn)}
+                    sub={`ในช่วงนี้ ${THB(inTotal)} · ค้างจากก่อนวันนี้ ${THB(series.carriedIn)}`}
+                    tone="text-emerald-600" onClick={() => goTab("recv")} />
+              <Card label="ต้องจ่าย (ค้างทั้งหมดถึงปลายช่วง)" value={THB(owedOut)}
+                    sub={`ในช่วงนี้ ${THB(outTotal)} · ค้างจากก่อนวันนี้ ${THB(series.carriedOut)}`}
+                    tone="text-rose-600" onClick={() => goTab("pay")} />
+              <Card label="เงินคงเหลือปลายช่วง" value={THB(endBalance)}
+                    sub={summary.lowDay ? `ต่ำสุด ${THB(summary.low)} วันที่ ${formatDate(summary.lowDay)}` : `สุทธิ ${THB(inTotal - outTotal)}`}
+                    tone={endBalance < 0 ? "text-red-600" : "text-slate-900"} onClick={() => goTab("all")} />
+              {canDebtView
+                ? <Card label="หนี้ธนาคาร (เงินต้นคงเหลือ)" value={THB(debtSum.loanOutstanding)}
+                        sub={`OD เหลือเบิก ${THB(debtSum.odHeadroom)} · บัตร ${THB(debtSum.cardOutstanding)}`}
+                        tone="text-slate-900" onClick={() => goTab("debt")} />
+                : <Card label="สุทธิในช่วงนี้" value={THB(inTotal - outTotal)} sub="เงินเข้า − เงินออก" tone={inTotal - outTotal < 0 ? "text-red-600" : "text-slate-900"} />}
+            </div>
+
+            {/* ---------- ต้องจัดการก่อนเชื่อตัวเลข ---------- */}
+            <CashflowTodo warnings={warnings} onTab={(t) => goTab(t)} />
 
             {companyFilter !== COMPANY_ALL && (
               <UnassignedNotice rows={unassigned} viewingNone={companyFilter === COMPANY_NONE}
                                 onShowNone={() => setCompanyFilter(COMPANY_NONE)} />
             )}
 
-            {/* ---------- การ์ดสรุป ---------- */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Card label={companyFilter === COMPANY_ALL ? "เงินในบัญชีตอนนี้" : `เงินในบัญชี · ${filterName}`}
-                    value={THB(opening)}
-                    sub={openingAsOf ? `ยอด ณ ${formatDate(openingAsOf)} · ${accounts.length} บัญชี` : "ยังไม่ได้กรอก — กด ⚙️ ตั้งค่า"}
-                    tone={opening > 0 ? "text-slate-900" : "text-slate-400"} />
-              <Card label="เงินเข้าที่คาดว่าจะได้"
-                    value={THB(inTotal)}
-                    sub={`วางบิลแล้ว ${THB(inBilling)} · ใบขาย ${THB(inSO)}`}
-                    tone="text-emerald-600" />
-              <Card label="เงินที่ต้องจ่าย"
-                    value={THB(outTotal)}
-                    sub={`${series.days.reduce((s, d) => s + d.events.filter((e) => e.direction === "out").length, 0)} รายการ`}
-                    tone="text-rose-600" />
-              <Card label="เงินคงเหลือปลายช่วง"
-                    value={THB(endBalance)}
-                    sub={`สุทธิ ${inTotal - outTotal >= 0 ? "+" : ""}${THB(inTotal - outTotal)}`}
-                    tone={endBalance < 0 ? "text-red-600" : "text-slate-900"} />
-            </div>
-
-            {/* ---------- เตือนวันเงินขาด ---------- */}
+            {/* ---------- เตือนวันเงินขาด + ต้องหาเงินเพิ่มเท่าไร ---------- */}
             {negative ? (
               <div className="bg-red-50 border border-red-200 rounded-xl px-4 py-3.5 flex items-center gap-3 flex-wrap">
-                <span className="text-2xl">🚨</span>
-                <div className="min-w-0">
+                <span className="text-2xl"><Icon value="🚨" /></span>
+                <div className="min-w-0 flex-1">
                   <p className="font-semibold text-red-700">
                     เงินจะไม่พอวันที่ {formatDate(negative.date)} — ติดลบ {THB(Math.abs(negative.balance))}
                   </p>
-                  <p className="text-sm text-red-600/80 mt-0.5">
-                    อีก {Math.max(0, Math.round((new Date(negative.date).getTime() - new Date(from).getTime()) / 86400000))} วันข้างหน้า ·
-                    ควรเร่งเก็บเงินลูกค้า หรือเลื่อนจ่ายบางรายการ
+                  <p className="text-sm text-red-600/90 mt-0.5">
+                    ต้องหาเงินเพิ่มอย่างน้อย <b>{THB(Math.abs(summary.low))}</b> ก่อนวันที่ {formatDate(negative.date)} — เก็บเงินลูกค้า · ขายเพิ่ม · หรือเลื่อนจ่ายบางรายการ
+                    {canDebtView && debtSum.odLimit > 0 && (
+                      <> · วงเงิน OD ยังเบิกได้ {THB(debtSum.odHeadroom)} ({debtSum.odHeadroom >= Math.abs(summary.low) ? "พอรับได้" : "ไม่พอ"})</>
+                    )}
                   </p>
                 </div>
+                <button type="button" onClick={() => goTab("recv")} className="h-9 px-3 text-sm rounded-lg bg-white border border-red-200 text-red-700 hover:bg-red-100">ดูลูกหนี้ที่เก็บได้</button>
               </div>
             ) : (
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-sm text-emerald-700">
-                ✅ ตามตัวเลขที่มีตอนนี้ เงินไม่ติดลบตลอดช่วง {formatDate(from)} – {formatDate(to)}
+                ✓ ตามตัวเลขที่มีตอนนี้ เงินไม่ติดลบตลอดช่วง {formatDate(from)} – {formatDate(to)}
+                {!accounts.length && " (แต่ยังไม่ได้กรอกยอดเงินในบัญชี — เส้นเริ่มจากศูนย์)"}
               </div>
             )}
 
-            {/* ---------- ของค้างจากอดีต ---------- */}
-            {(series.carriedIn > 0 || series.carriedOut > 0) && (
-              <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-600 flex gap-4 flex-wrap items-center">
-                <span className="font-medium text-slate-700">ของค้างจากก่อนวันนี้ (รวมเข้ายอดตั้งต้นแล้ว)</span>
-                <span>ค้างรับ <b className="text-emerald-600 tabular-nums">{THB(series.carriedIn)}</b></span>
-                <span>ค้างจ่าย <b className="text-rose-600 tabular-nums">{THB(series.carriedOut)}</b></span>
-                <span className="text-slate-400">→ เริ่มกราฟที่ <b className="tabular-nums">{THB(series.startBalance)}</b></span>
+            {/* ---------- กราฟ ---------- */}
+            <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+              <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+                <h2 className="text-sm font-semibold text-slate-700">เงินเข้า-ออก{prefs.rangeDays <= 180 ? "รายสัปดาห์" : "รายเดือน"} · เงินคงเหลือ</h2>
+                <div className="flex items-center gap-3 text-[11px] text-slate-500">
+                  <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> เงินเข้า</span>
+                  <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-rose-500 inline-block" /> เงินออก</span>
+                  <span className="flex items-center gap-1"><i className="w-4 h-0.5 bg-blue-600 inline-block" /> เงินคงเหลือ</span>
+                  {canDebtView && debtSum.odLimit > 0 && <span className="flex items-center gap-1"><i className="w-4 border-t border-dashed border-violet-600 inline-block" /> วงเงิน OD</span>}
+                </div>
+              </div>
+              <CashflowPeriodChart buckets={buckets} startBalance={series.startBalance}
+                odHeadroom={canDebtView && debtSum.odLimit > 0 ? debtSum.odHeadroom : null}
+                picked={picked?.start ?? null} onPick={(b) => { setPicked(b); if (b) goTab("all"); }} />
+              <p className="text-[11px] text-slate-400 mt-1">
+                กดแท่งเพื่อดูรายการของช่วงนั้น · จุดแดง = ช่วงที่เงินติดลบ · เส้นเริ่มที่ {THB(series.startBalance)} (ยอดในบัญชี + ค้างรับ − ค้างจ่ายจากก่อนวันนี้)
+              </p>
+            </div>
+
+            {/* ---------- แท็บจัดการ ---------- */}
+            <div ref={tabsRef} className="scroll-mt-4 border-b border-slate-200 flex gap-1 overflow-x-auto">
+              {TABS.filter((t) => t.show).map((t) => (
+                <button key={t.key} type="button" onClick={() => goTab(t.key, false)}
+                        className={`px-4 py-2.5 text-sm whitespace-nowrap border-b-2 -mb-px ${tab === t.key ? "border-blue-600 text-blue-700 font-semibold" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+                  {t.label}{t.sub && <span className="ml-1.5 text-xs font-normal text-slate-400 tabular-nums">{t.sub}</span>}
+                </button>
+              ))}
+            </div>
+
+            {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} onChanged={load} />}
+            {tab === "recv" && <CashflowPartyTab side="in" events={inEvents} today={from} canManage={canManage} canPayPo={false} onChanged={load} />}
+            {tab === "debt" && (canDebtView ? (
+              <CashflowDebtTab items={myDebts} loading={debtsLoading} error={debtsErr} canCreate={canDebtCreate} onChanged={reloadAll}
+                startCreate={debtCreate} onStartCreateHandled={() => setDebtCreate(null)}>
+                <LoanReconcilePanel onDone={reloadAll} />
+              </CashflowDebtTab>
+            ) : (
+              <div className="space-y-3">
+                <LoanReconcilePanel onDone={load} />
+                <p className="text-sm text-slate-500 bg-white border border-slate-200 rounded-xl px-4 py-6 text-center">ดูรายละเอียดหนี้ธนาคารต้องมีสิทธิ์ “ดูสัญญาเงินกู้”</p>
+              </div>
+            ))}
+            {tab === "all" && (
+              <div className="space-y-3">
+                {series.carriedIn > 0 || series.carriedOut > 0 ? (
+                  <div className="bg-white border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-600 flex gap-4 flex-wrap items-center">
+                    <span className="font-medium text-slate-700">ของค้างจากก่อนวันนี้ (รวมเข้ายอดตั้งต้นแล้ว)</span>
+                    <span>ค้างรับ <b className="text-emerald-600 tabular-nums">{THB(series.carriedIn)}</b></span>
+                    <span>ค้างจ่าย <b className="text-rose-600 tabular-nums">{THB(series.carriedOut)}</b></span>
+                    <span className="text-slate-400">→ เริ่มที่ <b className="tabular-nums">{THB(series.startBalance)}</b></span>
+                  </div>
+                ) : null}
+                {picked && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">ช่วง {formatDate(picked.start)} – {formatDate(picked.end)} · {shownRows.length} รายการ</span>
+                    <button type="button" onClick={() => setPicked(null)} className="text-xs text-slate-500 underline">ดูทุกช่วง</button>
+                  </div>
+                )}
+                {assignMsg && (
+                  <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-700 flex items-center justify-between gap-3">
+                    <span>{assignMsg}</span>
+                    <button onClick={() => setAssignMsg(null)} className="text-slate-400 hover:text-slate-600" aria-label="ปิด">✕</button>
+                  </div>
+                )}
+                <DataTable<Row>
+                  data={shownRows}
+                  columns={columns}
+                  tableId="cashflow-events"
+                  title="รายการเงินเข้า-เงินออกทั้งหมด"
+                  description={canManage && companies.length > 0
+                    ? `เรียงตามวันที่ · คอลัมน์เงินคงเหลือคือยอดสะสมหลังรายการนั้น · ติ๊กหลายรายการแล้วกด “แก้หลายรายการ” เพื่อตั้งบริษัท (${Object.values(COMPANY_ASSIGNABLE).map((c) => c!.label).join(" / ")})`
+                    : "เรียงตามวันที่ · คอลัมน์เงินคงเหลือคือยอดสะสมหลังรายการนั้น"}
+                  loading={loading}
+                  emptyMessage="ไม่มีรายการเงินเข้า-ออกในช่วงนี้"
+                  searchPlaceholder="ค้นหาเลขเอกสาร / ชื่อคู่ค้า…"
+                  searchableKeys={["ref", "party", "note"]}
+                  exportFilename={companyFilter === COMPANY_ALL ? "cashflow" : `cashflow-${companyLabel(companies, companyFilter === COMPANY_NONE ? null : companyFilter)}`}
+                  exportEntityType="cashflow"
+                  selectable
+                  bulkEditFields={canManage && companies.length > 0
+                    ? [{ key: "companyId", label: "บริษัท", type: "select", options: companies.map((c) => ({ value: c.id, label: c.name || c.code })) }]
+                    : []}
+                  onBulkEdit={canManage && companies.length > 0 ? bulkAssignCompany : undefined}
+                  bulkRowLabel={(r) => `${r.ref} · ${r.party}`}
+                  pageSize={50}
+                  onRetry={load}
+                />
               </div>
             )}
-
-            {/* ---------- ตัดยอดจ่ายเงินกู้ให้ตรง ---------- */}
-            <LoanReconcilePanel onDone={load} />
-
-            {/* ---------- กราฟรายเดือน ---------- */}
-            <MonthChart months={months} startBalance={series.startBalance} />
-
-            {assignMsg && (
-              <div className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-700 flex items-center justify-between gap-3">
-                <span>{assignMsg}</span>
-                <button onClick={() => setAssignMsg(null)} className="text-slate-400 hover:text-slate-600" aria-label="ปิด">✕</button>
-              </div>
+            {tab === "settings" && (
+              <SettingsPanel
+                canManage={canManage}
+                prefs={prefs}
+                onPrefsChange={savePrefs}
+                rmbRateSource={data.meta.rmbRateSource ?? ""}
+                rmbRateInUse={data.meta.rmbRate ?? 0}
+                companies={companies}
+                onSaved={load}
+              />
             )}
-
-            {/* ---------- ตารางรายการ (ตารางกลาง) ---------- */}
-            <DataTable<Row>
-              data={rows}
-              columns={columns}
-              tableId="cashflow-events"
-              title="รายการเงินเข้า-เงินออกทั้งหมด"
-              description={canManage && companies.length > 0
-                ? `เรียงตามวันที่ · คอลัมน์เงินคงเหลือคือยอดสะสมหลังรายการนั้น · ติ๊กหลายรายการแล้วกด “แก้หลายรายการ” เพื่อตั้งบริษัท (${Object.values(COMPANY_ASSIGNABLE).map((c) => c!.label).join(" / ")})`
-                : "เรียงตามวันที่ · คอลัมน์เงินคงเหลือคือยอดสะสมหลังรายการนั้น"}
-              loading={loading}
-              emptyMessage="ไม่มีรายการเงินเข้า-ออกในช่วงนี้"
-              searchPlaceholder="ค้นหาเลขเอกสาร / ชื่อคู่ค้า…"
-              searchableKeys={["ref", "party", "note"]}
-              exportFilename={companyFilter === COMPANY_ALL ? "cashflow" : `cashflow-${companyLabel(companies, companyFilter === COMPANY_NONE ? null : companyFilter)}`}
-              exportEntityType="cashflow"
-              selectable
-              bulkEditFields={canManage && companies.length > 0
-                ? [{ key: "companyId", label: "บริษัท", type: "select", options: companies.map((c) => ({ value: c.id, label: c.name || c.code })) }]
-                : []}
-              onBulkEdit={canManage && companies.length > 0 ? bulkAssignCompany : undefined}
-              bulkRowLabel={(r) => `${r.ref} · ${r.party}`}
-              pageSize={50}
-              onRetry={load}
-            />
           </>
         )}
       </div>
-
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        canManage={canManage}
-        prefs={prefs}
-        onPrefsChange={savePrefs}
-        rmbRateSource={data?.meta.rmbRateSource ?? ""}
-        rmbRateInUse={data?.meta.rmbRate ?? 0}
-        companies={companies}
-        onSaved={load}
-      />
     </PlaygroundShell>
   );
 }
@@ -486,14 +570,17 @@ export default function CashflowPage() {
 // ชิ้นส่วนย่อยของหน้านี้
 // ============================================================
 
-function Card({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: string }) {
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+function Card({ label, value, sub, tone, onClick }: { label: string; value: string; sub: string; tone: string; onClick?: () => void }) {
+  const body = (
+    <>
       <p className="text-xs text-slate-500">{label}</p>
       <p className={`mt-1.5 text-2xl font-bold tabular-nums ${tone}`}>{value}</p>
       <p className="text-xs text-slate-400 mt-1 truncate" title={sub}>{sub}</p>
-    </div>
+    </>
   );
+  return onClick
+    ? <button type="button" onClick={onClick} className="text-left bg-white rounded-xl border border-slate-200 shadow-sm p-4 hover:border-blue-300 hover:shadow transition-colors">{body}</button>
+    : <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">{body}</div>;
 }
 
 /**
@@ -604,79 +691,10 @@ function LoanReconcilePanel({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** กราฟแท่งเงินเข้า-ออกรายเดือน + เส้นเงินคงเหลือ (วาดเองด้วย SVG ไม่ต้องพึ่งไลบรารีนอก) */
-function MonthChart({
-  months, startBalance,
-}: { months: { month: string; in: number; out: number; net: number; endBalance: number }[]; startBalance: number }) {
-  if (!months.length) return null;
-
-  const W = 900, H = 240, PAD_L = 60, PAD_R = 20, PAD_T = 20, PAD_B = 34;
-  const innerW = W - PAD_L - PAD_R;
-  const innerH = H - PAD_T - PAD_B;
-  const slot = innerW / months.length;
-
-  const balances = [startBalance, ...months.map((m) => m.endBalance)];
-  const maxBar = Math.max(1, ...months.map((m) => Math.max(m.in, m.out)));
-  const maxVal = Math.max(maxBar, ...balances.map((b) => Math.abs(b)));
-  const yZero = PAD_T + innerH / 2;
-  const scale = (innerH / 2) / maxVal;
-  const y = (v: number) => yZero - v * scale;
-
-  const linePts = balances.map((b, i) => `${PAD_L + slot * i},${y(b)}`).join(" ");
-
-  return (
-    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-      <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <h2 className="text-sm font-semibold text-slate-700">ภาพรวมรายเดือน</h2>
-        <div className="flex items-center gap-3 text-[11px] text-slate-500">
-          <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> เงินเข้า</span>
-          <span className="flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm bg-rose-500 inline-block" /> เงินออก</span>
-          <span className="flex items-center gap-1"><i className="w-4 h-0.5 bg-blue-600 inline-block" /> เงินคงเหลือ</span>
-        </div>
-      </div>
-      <div className="overflow-x-auto">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[560px]" style={{ height: H }}>
-          {/* เส้นศูนย์ */}
-          <line x1={PAD_L} y1={yZero} x2={W - PAD_R} y2={yZero} stroke="#cbd5e1" strokeWidth="1" />
-          <text x={PAD_L - 8} y={yZero + 4} textAnchor="end" fontSize="10" fill="#94a3b8">0</text>
-          <text x={PAD_L - 8} y={y(maxVal) + 4} textAnchor="end" fontSize="10" fill="#94a3b8">{THBShort(maxVal)}</text>
-          <text x={PAD_L - 8} y={y(-maxVal) + 4} textAnchor="end" fontSize="10" fill="#94a3b8">{THBShort(-maxVal)}</text>
-
-          {months.map((m, i) => {
-            const cx = PAD_L + slot * i + slot / 2;
-            const bw = Math.min(26, slot / 3);
-            return (
-              <g key={m.month}>
-                <rect x={cx - bw - 2} y={y(m.in)} width={bw} height={Math.max(1, yZero - y(m.in))} fill="#10b981" rx="2">
-                  <title>{`เงินเข้า ${monthLabelTH(m.month)} = ${THB(m.in)}`}</title>
-                </rect>
-                <rect x={cx + 2} y={yZero} width={bw} height={Math.max(1, y(-m.out) - yZero)} fill="#f43f5e" rx="2">
-                  <title>{`เงินออก ${monthLabelTH(m.month)} = ${THB(m.out)}`}</title>
-                </rect>
-                <text x={cx} y={H - 12} textAnchor="middle" fontSize="11" fill="#64748b">{monthLabelTH(m.month)}</text>
-              </g>
-            );
-          })}
-
-          <polyline points={linePts} fill="none" stroke="#2563eb" strokeWidth="2" />
-          {balances.map((b, i) => (
-            <circle key={i} cx={PAD_L + slot * i} cy={y(b)} r="3.5" fill={b < 0 ? "#dc2626" : "#2563eb"}>
-              <title>{`เงินคงเหลือ ${THB(b)}`}</title>
-            </circle>
-          ))}
-        </svg>
-      </div>
-      <p className="text-[11px] text-slate-400 mt-1">ชี้ที่แท่ง/จุดเพื่อดูตัวเลข · จุดสีแดง = เดือนที่เงินติดลบ</p>
-    </div>
-  );
-}
-
-/** ป๊อปอัปตั้งค่า: ยอดเงินในบัญชี + ค่าที่ใช้เดาวันจ่าย/วันรับเงิน */
-function SettingsModal({
-  open, onClose, canManage, prefs, onPrefsChange, rmbRateSource, rmbRateInUse, companies, onSaved,
+/** แท็บตั้งค่า: ยอดเงินในบัญชี · แหล่งที่นับ · ค่าที่ใช้เดาวันจ่าย/วันรับเงิน · รายการประจำ (เดิมเป็นป๊อปอัป — ย้ายมาอยู่ในหน้า 2026-11-03) */
+function SettingsPanel({
+  canManage, prefs, onPrefsChange, rmbRateSource, rmbRateInUse, companies, onSaved,
 }: {
-  open: boolean;
-  onClose: () => void;
   canManage: boolean;
   prefs: Prefs;
   onPrefsChange: (p: Prefs) => void;
@@ -704,7 +722,7 @@ function SettingsModal({
       .finally(() => setLoading(false));
   }, []);
 
-  useEffect(() => { if (open) loadAccounts(); }, [open, loadAccounts]);
+  useEffect(() => { loadAccounts(); }, [loadAccounts]);
 
   const add = async () => {
     if (!newLabel.trim()) { setErr("ต้องใส่ชื่อบัญชี"); return; }
@@ -757,7 +775,7 @@ function SettingsModal({
 
   return (
     <>
-      <ERPModal open={open} onClose={onClose} title="⚙️ ตั้งค่ากระแสเงินสด" size="lg" storageKey="cashflow-settings">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
         <div className="space-y-6">
           {err && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-600">{err}</div>}
 
@@ -897,8 +915,30 @@ function SettingsModal({
 
           {/* ---- รายการที่กรอกเอง ---- */}
           <ManualItemsSection canManage={canManage} companies={companies} onChanged={onSaved} />
+
+          {/* ---- แหล่งที่นับ ---- */}
+          <section>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-semibold text-slate-800">นับแหล่งไหนบ้าง</h3>
+              <InfoHint>ปิดแหล่งที่ไม่อยากนับชั่วคราว (เช่น ดูเฉพาะเงินธุรกิจไม่รวมเงินกู้) · จำไว้เฉพาะเครื่องของคุณ · การ์ดสรุป กราฟ และทุกแท็บเปลี่ยนตาม</InfoHint>
+            </div>
+            <div className="flex items-center gap-2 mt-2 flex-wrap">
+              {ALL_SOURCES.map((s) => {
+                const meta = CASHFLOW_SOURCE[s];
+                const on = !prefs.off.includes(s);
+                return (
+                  <button key={s} type="button"
+                          onClick={() => onPrefsChange({ ...prefs, off: on ? [...prefs.off, s] : prefs.off.filter((x) => x !== s) })}
+                          className={`h-8 px-3 text-xs rounded-full border transition-colors ${on ? "text-white" : "bg-white text-slate-400 border-slate-200"}`}
+                          style={on ? { background: meta.color, borderColor: meta.color } : undefined}>
+                    <Icon value={meta.icon} /> {meta.label}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         </div>
-      </ERPModal>
+      </div>
 
       <ConfirmDialog
         open={!!deleteTarget}

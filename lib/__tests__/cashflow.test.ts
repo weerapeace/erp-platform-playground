@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addDaysISO,
+  bucketSeries,
   buildDailySeries,
   dayOfMonthISO,
   daysBetween,
@@ -128,6 +129,36 @@ describe("cashflow — เส้นเงินคงเหลือ", () => {
   it("ไม่ติดลบเลย → คืน null", () => {
     const s = buildDailySeries([ev("x", "2026-08-25", "out", 100)], 1000, from, to);
     expect(firstNegativeDay(s.days)).toBeNull();
+  });
+});
+
+describe("cashflow — กราฟรายสัปดาห์ / รายเดือน (bucketSeries)", () => {
+  const events = [
+    ev("ค้างเก่า", "2026-10-20", "out", 300),           // ก่อน from → ทบเข้ายอดตั้งต้น ไม่นับซ้ำในสัปดาห์แรก
+    ev("w1-in", "2026-11-03", "in", 100),
+    ev("w1-out", "2026-11-09", "out", 40),
+    ev("w3-out", "2026-11-18", "out", 500),
+    ev("นอกช่วง", "2026-12-31", "in", 999),
+  ];
+  const series = buildDailySeries(events, 1000, "2026-11-03", "2026-11-30");
+
+  it("รายสัปดาห์: นับจาก from ทีละ 7 วัน · ช่วงว่างคงเงินคงเหลือของช่วงก่อน · ช่วงสุดท้ายไม่เกิน to", () => {
+    const b = bucketSeries(series, "2026-11-03", "2026-11-30", "week");
+    expect(b.map((x) => [x.start, x.end])).toEqual([
+      ["2026-11-03", "2026-11-09"], ["2026-11-10", "2026-11-16"], ["2026-11-17", "2026-11-23"], ["2026-11-24", "2026-11-30"],
+    ]);
+    expect(b[0]).toMatchObject({ in: 100, out: 40, balance: 760 });   // 1000 − 300 (ค้างเก่า) + 100 − 40
+    expect(b[1]).toMatchObject({ in: 0, out: 0, balance: 760 });
+    expect(b[2]).toMatchObject({ out: 500, balance: 260 });
+    expect(b[3].balance).toBe(260);
+    expect(b.flatMap((x) => x.events).map((e) => e.id)).toEqual(["w1-in", "w1-out", "w3-out"]);
+  });
+
+  it("รายเดือน: ตัดเดือนตามปฏิทิน · เดือนแรกเริ่มที่ from", () => {
+    const s = buildDailySeries(events, 1000, "2026-11-03", "2026-12-31");
+    const b = bucketSeries(s, "2026-11-03", "2026-12-31", "month");
+    expect(b.map((x) => [x.start, x.end])).toEqual([["2026-11-03", "2026-11-30"], ["2026-12-01", "2026-12-31"]]);
+    expect(b[1]).toMatchObject({ in: 999, balance: 260 + 999 });
   });
 });
 
