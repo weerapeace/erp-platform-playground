@@ -44,6 +44,15 @@ async function withRetry<T extends { error: unknown }>(run: () => PromiseLike<T>
   return r;
 }
 
+/** select ราคาขาย + โหมดราคาแบรนด์ (own = แบรนด์เรา · oem = แบรนด์ลูกค้า/รับจ้างผลิต) */
+const PRICE_BRAND_SELECT = "code, list_price, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( pricing_mode ) )";
+/** แถว skus_v2 (จาก PRICE_BRAND_SELECT) เป็นแบรนด์ลูกค้าไหม — ไม่มีแบรนด์ = ไม่ใช่ */
+function isCustomerBrand(s: Row): boolean {
+  const parent = (Array.isArray(s.parent) ? s.parent[0] : s.parent) as { brand?: unknown } | null;
+  const brand = (parent && (Array.isArray(parent.brand) ? parent.brand[0] : parent.brand)) as { pricing_mode?: string } | null;
+  return brand?.pricing_mode === "oem";
+}
+
 /** ดึงแถวของหลายใบสั่งผลิต "ให้ครบจริง" — ไล่ทีละหน้า (กันโดนตัดที่ 1,000 แถว) */
 async function fetchAllByMo(admin: Admin, table: string, select: string, moNos: string[], fails?: Fails): Promise<Row[]> {
   if (moNos.length === 0) return [];
@@ -84,11 +93,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .eq("is_active", true).not("status", "in", "(cancelled,done)").limit(2000));
     if (error) return NextResponse.json({ prices: {}, partial: true, error: "โหลดราคาขายไม่สำเร็จ (ระบบหนาแน่นชั่วคราว) — ลองใหม่อีกครั้ง" }, { status: 503 });
     const list = (ms ?? []) as Row[];
-    const skus = await fetchSkus(admin, list.map((m) => String(m.product_sku ?? "")), "code, list_price", fails);
+    const skus = await fetchSkus(admin, list.map((m) => String(m.product_sku ?? "")), PRICE_BRAND_SELECT, fails);
     const priceOf = new Map(skus.map((s) => [String(s.code), Number(s.list_price) || 0]));
+    const custSku = new Set(skus.filter(isCustomerBrand).map((s) => String(s.code)));
     const prices: Record<string, number> = {};
-    for (const m of list) { const p = priceOf.get(String(m.product_sku ?? "")) ?? 0; if (p > 0) prices[String(m.mo_no)] = r2(p); }
-    return NextResponse.json({ prices, partial: fails.n > 0, error: null });
+    // customer = ใบของแบรนด์ลูกค้า (OEM) — หน้าโหมดผู้บริหารนับเงินเฉพาะกลุ่มนี้เป็นค่าเริ่มต้น (ติ๊ก "รวมเงินแบรนด์ตัวเอง" ได้)
+    const customer: string[] = [];
+    for (const m of list) {
+      const sku = String(m.product_sku ?? ""), p = priceOf.get(sku) ?? 0;
+      if (p > 0) prices[String(m.mo_no)] = r2(p);
+      if (custSku.has(sku)) customer.push(String(m.mo_no));
+    }
+    return NextResponse.json({ prices, customer, partial: fails.n > 0, error: null });
   }
 
   if (sp.get("dispatched") === "1") {
@@ -109,16 +125,22 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       if (error) fails.n++;
       for (const m of (ms ?? []) as Row[]) skuOf.set(String(m.mo_no), String(m.product_sku ?? ""));
     }
-    const priceOf = new Map<string, number>();
-    for (const p of await fetchSkus(admin, [...skuOf.values()], "code, list_price", fails)) priceOf.set(String(p.code), Number(p.list_price) || 0);
-    let value = 0, labor = 0, qty = 0, laborMissing = 0, noPrice = 0, noDate = 0;
+    const priceOf = new Map<string, number>(), custSku = new Set<string>();
+    for (const p of await fetchSkus(admin, [...skuOf.values()], PRICE_BRAND_SELECT, fails)) {
+      priceOf.set(String(p.code), Number(p.list_price) || 0);
+      if (isCustomerBrand(p)) custSku.add(String(p.code));
+    }
+    // value = ทุกแบรนด์ · value_customer = เฉพาะแบรนด์ลูกค้า (OEM) — หน้าเลือกเองตามติ๊ก "รวมเงินแบรนด์ตัวเอง"
+    let value = 0, valueCustomer = 0, labor = 0, qty = 0, laborMissing = 0, noPrice = 0, noDate = 0;
     for (const w of list) {
       if (!w.dispatch_date) noDate++;
-      const q = Number(w.qty) || 0, p = priceOf.get(skuOf.get(String(w.mo_no)) ?? "") ?? 0;
+      const sku = skuOf.get(String(w.mo_no)) ?? "";
+      const q = Number(w.qty) || 0, p = priceOf.get(sku) ?? 0;
       qty += q; value += q * p; if (!p) noPrice++;
+      if (custSku.has(sku)) valueCustomer += q * p;
       if (w.labor_cost == null) laborMissing++; else labor += Number(w.labor_cost) || 0;
     }
-    return NextResponse.json({ data: { from, to, count: list.length, qty: r2(qty), value: r2(value), labor: r2(labor), labor_missing: laborMissing, no_price: noPrice, no_date: noDate, partial: fails.n > 0 }, error: null });
+    return NextResponse.json({ data: { from, to, count: list.length, qty: r2(qty), value: r2(value), value_customer: r2(valueCustomer), labor: r2(labor), labor_missing: laborMissing, no_price: noPrice, no_date: noDate, partial: fails.n > 0 }, error: null });
   }
 
   const fails: Fails = { n: 0 };

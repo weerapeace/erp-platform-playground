@@ -5,7 +5,8 @@
  *   ข้างบน = งานรอจ่ายเต็มหน้า (การ์ดใหญ่ · ปรับขนาดการ์ด) · เรียงได้ · กรองแบรนด์ · เลือกเองว่าการ์ดโชว์อะไร · ป้ายเดดไลน์มุมการ์ด
  *     ราคาขาย/มูลค่า เฉพาะผู้บริหาร (ดึงจาก /api/mo/exec-plan?prices=1 ที่ล็อกสิทธิ์ไว้ · โหลดพลาด = ป้ายเตือน + ปุ่มโหลดใหม่ ไม่เงียบ) · ค่าแรง/ชิ้น = ราคากลางในสูตร (ไม่มี = ค่าแรงแผนของใบ ÷ จำนวน)
  *   ข้างล่าง = แถบโต๊ะติดขอบจอ (การ์ดแนวตั้ง: ชื่อโต๊ะ · รูปงาน · ใบ/ค้าง · คน · ค่าแรง) · ชี้เมาส์ค้าง (ไม่ต้องคลิก) = รายการงานที่ทำอยู่เลื่อนขึ้น
- *     กด = แผงเต็มเลื่อนขึ้น (การ์ดงาน · ค่าแรงรวมทั้งโต๊ะ แบ่งรายคนครบทุกคน [lib/desk-labor] · จัดการโต๊ะ)
+ *     กด = แผงเต็มเลื่อนขึ้น (ค่าแรงรวมทั้งโต๊ะ ทุกคนรวมกัน · แถบ "งานในมือเทียบเงินเดือนทั้งโต๊ะ" · การ์ดงานแนวตั้ง · จัดการโต๊ะ)
+ *   เงิน (มูลค่า/ยอดเป้า) นับเฉพาะ "แบรนด์ลูกค้า" (brands.pricing_mode = oem) เป็นค่าเริ่มต้น · ติ๊ก "รวมเงินแบรนด์ตัวเอง" (จำต่อคน) = นับทุกแบรนด์
  *   ขวา = แผง "สรุปเป้า" (ผู้บริหาร) เลื่อนเข้า · ล็อกได้ = ติดขวาแล้วดันการ์ดให้แคบลง · เป้าเก็บกลาง ui_config admin_wb_exec_target
  *   จ่าย = ลากการ์ดลงโต๊ะ (ติ๊กหลายใบ ลากใบไหนก็ไปทั้งชุด) หรือกดโต๊ะ → "จ่ายให้โต๊ะนี้" → ป๊อปจ่ายงานเดิมของบอร์ด (ทีละใบ)
  *     เมาส์ = ลาก HTML5 · iPad/มือถือ = กดค้างแล้วลาก (ของกลาง components/touch-drag)
@@ -13,7 +14,6 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
-import { HoverImage } from "@/components/hover-image";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
@@ -21,7 +21,6 @@ import { bkkDate } from "@/lib/mo-sales-match";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useTouchDrag } from "@/components/touch-drag";
 import { MoneyInput } from "@/components/money-input";
-import { splitDeskLabor, type LaborMember } from "@/lib/desk-labor";
 
 export type ExecMo = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
@@ -42,7 +41,7 @@ type SortKey = "urgent" | "value" | "labor" | "qty" | "sku";
 type FieldKey = "price" | "value" | "labor" | "laborTotal" | "brand" | "name" | "due" | "ready";
 type Period = "today" | "week" | "month";
 type Target = Partial<Record<Period, number>>;
-type Done = { count: number; qty: number; value: number; labor: number; labor_missing: number; no_price: number; no_date?: number };
+type Done = { count: number; qty: number; value: number; value_customer?: number; labor: number; labor_missing: number; no_price: number; no_date?: number };
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const SIZE_MIN = 120, SIZE_MAX = 240;
@@ -82,7 +81,7 @@ const rateOfMo = (m: ExecMo) => (m.central_rate && m.central_rate > 0 ? m.centra
 /** ค่าแรง/ชิ้นของใบจ่ายงาน — ค่าแรงที่ใส่ไว้ ÷ จำนวน ไม่มี = ราคากลาง */
 const rateOfWo = (w: ExecWo) => (w.labor_cost != null && w.qty > 0 ? Number(w.labor_cost) / w.qty : w.central_rate && w.central_rate > 0 ? w.central_rate : 0);
 
-export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDispatch, showPrice, onDispatch, onOpenMO, onOpenWO, renderDeskManager }: {
+export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDispatch, showPrice, onDispatch, onOpenMO, onOpenWO, renderDeskManager, deskWages }: {
   pending: ExecMo[];
   workOrders: ExecWo[];
   desks: Desk[];
@@ -96,12 +95,16 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   onOpenWO: (woId: string) => void;
   /** แผงจัดการโต๊ะของกลาง (DeskStaffPanel) — หน้าแม่ส่งมา (สิทธิ์ + โหลดใหม่อยู่ที่หน้าแม่) */
   renderDeskManager?: (desk: Desk) => ReactNode;
+  /** เงินเดือนรวมพนักงานต่อโต๊ะ/เดือน (payroll · /api/mo/assignees dept_wages) — แถบ "งานในมือเทียบเงินเดือนทั้งโต๊ะ" (โชว์เฉพาะผู้บริหาร) */
+  deskWages?: Record<string, number>;
 }) {
   const toast = useToast();
   const [size, setSize] = useUserPref<number>("wb_exec_card_size", 160, parseSize);
   const [sort, setSort] = useUserPref<SortKey>("wb_exec_sort", "urgent", parseSort);
   const [fields, setFields] = useUserPref<FieldKey[]>("wb_exec_fields", FIELDS_DEFAULT, parseFields);
   const [locked, setLocked] = useUserPref<boolean>("wb_exec_target_lock", false, parseBool);
+  // เจ้าของ 2026-11-04: "แบรนด์ที่ไม่ใช่แบรนด์ลูกค้า อยากให้มีติ๊กว่าจะรวมจำนวนเงินด้วยไหม default เป็นไม่รวม"
+  const [includeOwn, setIncludeOwn] = useUserPref<boolean>("wb_exec_include_own", false, parseBool);
   const [q, setQ] = useState("");
   const [readyOnly, setReadyOnly] = useState(false);
   const [brand, setBrand] = useState<string>("");
@@ -111,6 +114,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   const [overDesk, setOverDesk] = useState<string | null>(null);
   const [manageDesk, setManageDesk] = useState<Desk | null>(null);
   const [price, setPrice] = useState<Map<string, number>>(new Map());
+  const [customer, setCustomer] = useState<Set<string>>(new Set());   // mo_no ของแบรนด์ลูกค้า (OEM)
   // แผงสรุปเป้า
   const [sideOpen, setSideOpen] = useState(false);
   const [period, setPeriod] = useState<Period>("month");
@@ -136,6 +140,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
         if (cancel) return;
         if (!r.ok || j.error) throw new Error(j.error || "โหลดราคาไม่สำเร็จ");
         setPrice(new Map(Object.entries((j.prices ?? {}) as Record<string, number>).map(([k, v]) => [k, Number(v) || 0])));
+        setCustomer(new Set((j.customer ?? []) as string[]));
         if (j.partial && attempt < 1) { timer = window.setTimeout(() => void run(attempt + 1), 1500); return; }
         setPriceErr(j.partial ? "partial" : "");
       } catch {
@@ -183,7 +188,9 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     for (const x of pending) if (x.remaining > 0) { const b = x.brand?.trim() || "ไม่มีแบรนด์"; m.set(b, (m.get(b) ?? 0) + 1); }
     return [...m.entries()].sort((a, b) => b[1] - a[1]);
   }, [pending]);
-  const valueOf = (m: ExecMo) => (price.get(m.mo_no) ?? 0) * m.remaining;
+  /** ใบนี้นับเข้ายอดเงินไหม — แบรนด์ลูกค้าเสมอ · แบรนด์ตัวเอง/ไม่มีแบรนด์ เฉพาะตอนติ๊ก "รวมเงินแบรนด์ตัวเอง" */
+  const counted = (moNo: string) => includeOwn || customer.has(moNo);
+  const valueOf = (m: ExecMo) => (counted(m.mo_no) ? (price.get(m.mo_no) ?? 0) * m.remaining : 0);
   const laborOf = (m: ExecMo) => rateOfMo(m) * m.remaining;
   const list = useMemo(() => {
     const s = q.trim().toLowerCase();
@@ -195,7 +202,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
         : sort === "qty" ? b.remaining - a.remaining
         : sort === "sku" ? (a.product_sku ?? a.mo_no).localeCompare(b.product_sku ?? b.mo_no)
         : (b.priority ?? 0) - (a.priority ?? 0) || dueOf(a).localeCompare(dueOf(b)));
-  }, [pending, q, readyOnly, brand, sort, price]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pending, q, readyOnly, brand, sort, price, customer, includeOwn]); // eslint-disable-line react-hooks/exhaustive-deps
   const total = list.reduce((a, m) => a + valueOf(m), 0);
   const chosen = list.filter((m) => sel.has(m.id));
   const chosenValue = chosen.reduce((a, m) => a + valueOf(m), 0);
@@ -217,7 +224,6 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   }, [desks, openWos, craftsmen]);
   const statOf = (id: string) => deskStats.get(id) ?? { ws: [] as ExecWo[], left: 0, labor: 0, ppl: [] as Person[] };
   const nick = (p: Person) => p.nickname?.trim() || p.name;
-  const membersOf = (ppl: Person[]): LaborMember[] => ppl.map((p) => ({ id: p.id, name: nick(p), aliases: [p.name, p.nickname, p.nickname ? `${p.name} (${p.nickname})` : null] }));
 
   // ชี้เมาส์ค้างที่โต๊ะ (ไม่ต้องคลิก) → รายการงานที่ทำอยู่เลื่อนขึ้น · ขยับเข้าแผงได้ (หน่วงตอนออก) · นิ้ว/iPad ไม่ใช้ (กดเปิดแผงเต็มแทน)
   const dockRef = useRef<HTMLDivElement>(null);
@@ -255,7 +261,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   // ลากด้วยนิ้ว (iPad) — กดค้างการ์ดแล้วลากไปวางที่โต๊ะ (โต๊ะมี data-drop-id)
   const td = useTouchDrag<string>({ onDrop: (deskId, id) => { const d = desks.find((x) => x.id === deskId); if (d) give(d, sel.has(id) ? chosen.map((m) => m.id) : [id]); } });
   const deskOpen = desks.find((d) => d.id === openDesk) ?? null;
-  const goal = target[period] ?? 0, got = done?.value ?? 0, pct = goal > 0 ? Math.min(100, (got / goal) * 100) : 0;
+  const goal = target[period] ?? 0, got = (includeOwn ? done?.value : done?.value_customer ?? done?.value) ?? 0, pct = goal > 0 ? Math.min(100, (got / goal) * 100) : 0;
 
   const dueBadge = (m: ExecMo) => {
     const d = daysLeft(m.internal_due_date ?? m.due_date);
@@ -269,8 +275,14 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
       <div className="flex flex-1 flex-col transition-[margin] duration-300 ease-out" style={{ marginRight: locked && sideShown ? 296 : 0 }}>
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <span className="text-base font-semibold text-slate-800">งานรอจ่าย</span>
-          <span className="text-sm text-slate-500">{list.length} ใบ{showPrice && total > 0 ? ` · มูลค่า ฿${fmt(total)}` : ""}</span>
+          <span className="text-sm text-slate-500">{list.length} ใบ{showPrice && total > 0 ? ` · มูลค่า ฿${fmt(total)}${includeOwn ? "" : " (เฉพาะแบรนด์ลูกค้า)"}` : ""}</span>
           {showPrice && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">เห็นราคาขาย (ผู้บริหาร)</span>}
+          {showPrice && (
+            <label title="ค่าเริ่มต้น = นับเงินเฉพาะแบรนด์ลูกค้า (OEM) · ติ๊ก = นับแบรนด์ตัวเอง/ไม่มีแบรนด์ด้วย (มูลค่า · ที่เลือก · งานที่โต๊ะถือ · สรุปเป้า) · ตั้งแบรนด์ลูกค้าที่ ⚙️ ตั้งค่าแบรนด์ ในมุมมองแผนผู้บริหาร"
+              className={`inline-flex h-7 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-[12px] ${includeOwn ? "border-violet-500 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+              <input type="checkbox" checked={includeOwn} onChange={(e) => setIncludeOwn(e.target.checked)} className="accent-violet-600" /> รวมเงินแบรนด์ตัวเอง
+            </label>
+          )}
           {showPrice && priceErr && (
             <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[12px] text-amber-800">
               <Icon name="warning" /> ราคาขาย{priceErr === "partial" ? "บางใบ" : ""}โหลดไม่สำเร็จ (ระบบหนาแน่นชั่วคราว)
@@ -342,7 +354,9 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                   {show("brand") && m.brand && <div className="truncate text-[11px] font-medium text-violet-600">{m.brand}</div>}
                   {show("name") && <div className="truncate text-[11px] text-slate-400">{m.product_name ?? ""}</div>}
                   <div className="mt-0.5 text-[12px] text-slate-600">จ่าย <b className="text-slate-800">{fmt(m.remaining)}</b>{m.remaining !== m.qty ? ` / ${fmt(m.qty)}` : ""} ชิ้น{show("price") && p > 0 ? ` · ฿${fmt(p)}` : ""}</div>
-                  {show("value") && p > 0 && <div className="text-sm font-bold tabular-nums text-violet-700">฿{fmt(p * m.remaining)}</div>}
+                  {show("value") && p > 0 && (counted(m.mo_no)
+                    ? <div className="text-sm font-bold tabular-nums text-violet-700">฿{fmt(p * m.remaining)}</div>
+                    : <div className="text-[12px] tabular-nums text-slate-400" title="แบรนด์ตัวเอง — ไม่นับเข้ายอดเงิน (ติ๊ก &quot;รวมเงินแบรนด์ตัวเอง&quot; เพื่อนับ)">฿{fmt(p * m.remaining)} · ไม่นับ</div>)}
                   {(show("labor") || show("laborTotal")) && (
                     <div className="text-[11px] text-slate-500">{rate > 0 ? <>
                       {show("labor") && <>ค่าแรง ฿{fmt(rate)}/ชิ้น</>}{show("labor") && show("laborTotal") ? " · " : ""}{show("laborTotal") && <b className="text-slate-700">รวม ฿{fmt(rate * m.remaining)}</b>}
@@ -400,12 +414,15 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
             {deskOpen && (() => {
               const { ws, ppl, left, labor: laborPlan } = statOf(deskOpen.id);
               const laborGot = ws.reduce((a, w) => a + rateOfWo(w) * (w.received_qty || 0), 0);
-              const held = ws.reduce((a, w) => a + (price.get(w.mo_no) ?? 0) * Math.max(0, w.qty - (w.received_qty || 0)), 0);
+              const held = ws.reduce((a, w) => a + (counted(w.mo_no) ? (price.get(w.mo_no) ?? 0) : 0) * Math.max(0, w.qty - (w.received_qty || 0)), 0);
               const noRate = ws.filter((w) => rateOfWo(w) <= 0).length;
-              // ค่าแรงรายคน — ครบทุกคนในโต๊ะ (งานทั้งโต๊ะแบ่งเท่ากัน · งานหลายคนแบ่งตามจำนวนคน) · ของกลาง lib/desk-labor
-              const split = splitDeskLabor(ws.map((w) => ({ assignee_type: w.assignee_type, assignee_id: w.assignee_id, assignee_name: w.assignee_name, assignees: w.assignees,
-                plan: rateOfWo(w) * w.qty, got: rateOfWo(w) * (w.received_qty || 0) })), membersOf(ppl));
-              const avg = split.memberCount > 0 ? split.total / split.memberCount : 0;
+              // แถบค่าแรง (เจ้าของ: "มี bar progress ค่าแรงด้วยว่างานที่มีใกล้ค่าแรงรวมทั้งโต๊ะรึยัง")
+              //   งานในมือ (ค่าแรงตามแผนของทุกใบในโต๊ะ) เทียบเงินเดือนรวมคนทั้งโต๊ะ/เดือน — แนวเดียวกับ "คน ฿ / งาน ฿ / ต่าง" ในแผนจ่ายงาน
+              //   เงินเดือน = ข้อมูลอ่อนไหว → โชว์เฉพาะผู้บริหาร · โต๊ะไม่มีเงินเดือน (ช่างเหมา) = แถบรับคืนเทียบงานในมือ
+              const wages = showPrice ? (deskWages?.[deskOpen.id] ?? 0) : 0;
+              const scale = Math.max(wages, laborPlan, 1);
+              const gotPct = Math.min(100, (laborGot / scale) * 100), planPct = Math.min(100, (laborPlan / scale) * 100), wagePct = wages > 0 ? Math.min(100, (wages / scale) * 100) : 0;
+              const cover = wages > 0 ? (laborPlan / wages) * 100 : 0;
               return (
                 <div>
                   <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -419,70 +436,65 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                     <button type="button" onClick={() => setOpenDesk(null)} aria-label="ปิดแผง" className="h-9 w-9 rounded-lg text-slate-400 hover:bg-slate-100"><Icon name="back" /></button>
                   </div>
                   <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {showPrice && <div className="rounded-lg bg-violet-50 px-3 py-2"><div className="text-[11px] text-violet-600">มูลค่างานที่ถือ</div><div className="text-lg font-bold tabular-nums text-violet-800">฿{fmt(held)}</div></div>}
-                    <div className="rounded-lg bg-slate-50 px-3 py-2">
-                      <div className="text-[11px] text-slate-500">ค่าแรงรวมทั้งโต๊ะ (แผน)</div>
+                    {showPrice && (
+                      <div className="rounded-lg bg-violet-50 px-3 py-2">
+                        <div className="text-[11px] text-violet-600">มูลค่างานที่ถือ</div>
+                        <div className="text-lg font-bold tabular-nums text-violet-800">฿{fmt(held)}</div>
+                        <div className="text-[11px] text-violet-500">{includeOwn ? "ทุกแบรนด์" : "เฉพาะแบรนด์ลูกค้า"}</div>
+                      </div>
+                    )}
+                    <div className="rounded-lg bg-slate-50 px-3 py-2 sm:col-span-2">
+                      <div className="text-[11px] text-slate-500">ค่าแรงรวมทั้งโต๊ะ (ทุกคน)</div>
                       <div className="text-lg font-bold tabular-nums text-slate-800">฿{fmt(laborPlan)}</div>
-                      {avg > 0 && <div className="text-[11px] text-slate-500">{split.memberCount} คน · เฉลี่ย ฿{fmt(avg)}/คน</div>}
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {ppl.length ? ppl.map((p) => <span key={p.id} className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700">{nick(p)}</span>)
+                          : <span className="text-[11px] text-slate-400">— ไม่มีคนประจำ (เลือกคนอื่นได้ในป๊อปจ่ายงาน) —</span>}
+                      </div>
                     </div>
-                    <div className="rounded-lg bg-emerald-50 px-3 py-2"><div className="text-[11px] text-emerald-600">ค่าแรงที่ได้แล้ว (รับคืน)</div><div className="text-lg font-bold tabular-nums text-emerald-800">฿{fmt(laborGot)}</div></div>
-                    {noRate > 0 && <div className="rounded-lg bg-amber-50 px-3 py-2"><div className="text-[11px] text-amber-700">ยังไม่ใส่ค่าแรง</div><div className="text-lg font-bold tabular-nums text-amber-800">{noRate} ใบ</div></div>}
+                    <div className="rounded-lg bg-emerald-50 px-3 py-2">
+                      <div className="text-[11px] text-emerald-600">ค่าแรงที่ได้แล้ว (รับคืน)</div>
+                      <div className="text-lg font-bold tabular-nums text-emerald-800">฿{fmt(laborGot)}</div>
+                      {noRate > 0 && <div className="text-[11px] text-amber-600">ยังไม่ใส่ค่าแรง {noRate} ใบ</div>}
+                    </div>
                   </div>
-                  {split.total > 0 ? (
-                    <div className="mb-2">
-                      <div className="mb-1 flex flex-wrap items-baseline gap-x-2 text-[12px]">
-                        <span className="font-semibold text-slate-700">ค่าแรงรายคน (ทั้งโต๊ะ {split.memberCount} คน)</span>
-                        <span className="text-slate-400">งาน &ldquo;ทั้งโต๊ะ&rdquo; แบ่งเท่ากันทุกคนในโต๊ะ · งานหลายคนแบ่งตามจำนวนคน (ประมาณการ)</span>
-                      </div>
-                      <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                        {split.people.map((p) => {
-                          const pg = p.total > 0 ? Math.min(100, (p.got / p.total) * 100) : 0;
-                          return (
-                            <div key={p.key} className={`rounded-xl border px-2.5 py-1.5 ${p.member ? "border-slate-200 bg-white" : "border-dashed border-amber-300 bg-amber-50/40"}`}>
-                              <div className="flex items-baseline gap-1.5">
-                                <span className="truncate text-[13px] font-semibold text-slate-800">{p.name}</span>
-                                {!p.member && <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] text-amber-700">นอกโต๊ะ</span>}
-                                <b className={`ml-auto shrink-0 text-[14px] tabular-nums ${p.total > 0 ? "text-slate-900" : "text-slate-300"}`}>฿{fmt(p.total)}</b>
-                              </div>
-                              <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] text-slate-500">
-                                {p.solo > 0 && <span>เดี่ยว ฿{fmt(p.solo)}</span>}
-                                {p.shared > 0 && <span>งานคู่/กลุ่ม ฿{fmt(p.shared)}</span>}
-                                {p.desk > 0 && <span>งานทั้งโต๊ะ ฿{fmt(p.desk)}</span>}
-                                {p.total <= 0 && <span>ยังไม่มีงาน</span>}
-                              </div>
-                              {p.total > 0 && <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100" title={`รับคืนแล้ว ฿${fmt(p.got)}`}><div className="h-full bg-emerald-500" style={{ width: `${pg}%` }} /></div>}
-                            </div>
-                          );
-                        })}
-                        {split.unassigned > 0 && (
-                          <div className="rounded-xl border border-dashed border-slate-300 px-2.5 py-1.5">
-                            <div className="flex items-baseline gap-1.5"><span className="text-[13px] font-semibold text-slate-600">งานทั้งโต๊ะ (ยังไม่มีคนประจำ)</span><b className="ml-auto tabular-nums text-slate-800">฿{fmt(split.unassigned)}</b></div>
-                            <div className="text-[10px] text-slate-400">เพิ่มคนเข้าโต๊ะที่ &ldquo;จัดการโต๊ะ&rdquo; แล้วระบบจะแบ่งให้</div>
-                          </div>
-                        )}
-                      </div>
+                  <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                    <div className="mb-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px]">
+                      <span className="font-semibold text-slate-700">{wages > 0 ? "งานในมือเทียบเงินเดือนทั้งโต๊ะ" : "ค่าแรงที่ได้แล้วเทียบงานในมือ"}</span>
+                      {wages > 0 ? <>
+                        <span className="text-slate-500">งานในมือ <b className="tabular-nums text-violet-700">฿{fmt(laborPlan)}</b> / เงินเดือนรวม {ppl.length} คน <b className="tabular-nums text-slate-800">฿{fmt(wages)}</b>/เดือน</span>
+                        <b className={`ml-auto tabular-nums ${cover >= 100 ? "text-emerald-600" : cover >= 70 ? "text-amber-600" : "text-rose-600"}`}>
+                          {cover.toFixed(0)}% · {cover >= 100 ? `งานพอแล้ว (เกิน ฿${fmt(laborPlan - wages)})` : `ขาดอีก ฿${fmt(wages - laborPlan)}`}
+                        </b>
+                      </> : <span className="text-slate-500">รับคืนแล้ว ฿{fmt(laborGot)} จาก ฿{fmt(laborPlan)}{showPrice ? " · โต๊ะนี้ยังไม่มีเงินเดือนในระบบ" : ""}</span>}
                     </div>
-                  ) : (
-                    <div className="mb-2 text-[12px] text-slate-500">คนในโต๊ะ: {ppl.length ? ppl.map(nick).join(", ") : "— ไม่มีคนประจำ (เลือกคนอื่นได้ในป๊อปจ่ายงาน) —"}</div>
-                  )}
-                  <div className="grid max-h-[34vh] gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    <div className="relative h-3.5 overflow-hidden rounded-full bg-slate-100">
+                      <div className="absolute inset-y-0 left-0 rounded-full bg-violet-300 transition-[width] duration-500" style={{ width: `${planPct}%` }} />
+                      <div className="absolute inset-y-0 left-0 rounded-full bg-emerald-500 transition-[width] duration-500" style={{ width: `${gotPct}%` }} />
+                      {wages > 0 && <div className="absolute inset-y-0 w-0.5 bg-slate-800" style={{ left: `calc(${wagePct}% - 2px)` }} title={`เงินเดือนรวม ฿${fmt(wages)}/เดือน`} />}
+                    </div>
+                    <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-slate-500">
+                      <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500 align-middle" />รับคืนแล้ว ฿{fmt(laborGot)}</span>
+                      <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-violet-300 align-middle" />งานในมือ ฿{fmt(laborPlan)}</span>
+                      {wages > 0 && <span><span className="mr-1 inline-block h-2.5 w-0.5 bg-slate-800 align-middle" />เงินเดือนรวม/เดือน</span>}
+                      {noRate > 0 && <span className="text-amber-600">มี {noRate} ใบยังไม่ใส่ค่าแรง — งานในมือจริงสูงกว่านี้</span>}
+                    </div>
+                  </div>
+                  <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(132px, 1fr))" }}>
                     {ws.map((w) => {
                       const r = rateOfWo(w), pp = price.get(w.mo_no) ?? 0, pr = w.qty > 0 ? Math.min(100, ((w.received_qty || 0) / w.qty) * 100) : 0;
                       return (
-                        <button key={w.id} type="button" onClick={() => onOpenWO(w.id)} className="rounded-xl border border-slate-200 bg-white p-2 text-left hover:border-violet-300 hover:shadow-sm">
-                          <div className="flex items-center gap-2">
-                            <HoverImage url={w.image_url ?? null} size={34} />
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate font-mono text-[12px] font-semibold text-slate-800">{w.product_sku ?? w.mo_no}</div>
-                              <div className="truncate text-[11px] text-slate-400">{w.assignee_type === "department" || !w.assignee_name ? "ทั้งโต๊ะ" : w.assignee_name} · {w.wo_no}</div>
-                            </div>
+                        <button key={w.id} type="button" onClick={() => onOpenWO(w.id)} className="flex flex-col rounded-xl border border-slate-200 bg-white p-2 text-left hover:border-violet-300 hover:shadow-sm">
+                          <div className="mb-1.5 flex h-20 items-center justify-center overflow-hidden rounded-lg bg-slate-50 text-xl text-slate-300">
+                            {w.image_url ? <img src={w.image_url} alt="" draggable={false} className="h-full w-full object-contain" /> : <Icon name="image" />}
                           </div>
-                          <div className="my-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${pr >= 100 ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${pr}%` }} /></div>
-                          <div className="flex justify-between text-[11px]"><span className="text-slate-600">รับคืน {fmt(w.received_qty || 0)}/{fmt(w.qty)}</span>{r > 0 ? <span className="text-slate-500">฿{fmt(r)}/ชิ้น</span> : <span className="text-amber-600">ยังไม่ใส่ค่าแรง</span>}</div>
-                          <div className="flex justify-between text-[11px]">
-                            <span className="text-slate-400">{showPrice && pp > 0 ? `฿${fmt(pp)} · ฿${fmt(pp * w.qty)}` : ""}</span>
-                            {r > 0 && <b className="tabular-nums text-slate-800">ค่าแรง ฿{fmt(r * w.qty)}</b>}
-                          </div>
+                          <div className="truncate font-mono text-[12px] font-semibold text-slate-800">{w.product_sku ?? w.mo_no}</div>
+                          <div className="truncate text-[11px] text-slate-400">{w.assignee_type === "department" || !w.assignee_name ? "ทั้งโต๊ะ" : w.assignee_name}</div>
+                          <div className="my-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${pr >= 100 ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${pr}%` }} /></div>
+                          <div className="text-[11px] text-slate-600">รับคืน {fmt(w.received_qty || 0)}/{fmt(w.qty)}</div>
+                          <div className="text-[11px]">{r > 0 ? <span className="text-slate-500">฿{fmt(r)}/ชิ้น</span> : <span className="text-amber-600">ยังไม่ใส่ค่าแรง</span>}</div>
+                          {r > 0 && <div className="text-[12px] font-bold tabular-nums text-slate-800">ค่าแรง ฿{fmt(r * w.qty)}</div>}
+                          {showPrice && pp > 0 && <div className={`text-[11px] tabular-nums ${counted(w.mo_no) ? "text-violet-700" : "text-slate-400"}`}>฿{fmt(pp * w.qty)}{counted(w.mo_no) ? "" : " · ไม่นับ"}</div>}
+                          <div className="mt-auto truncate pt-0.5 text-[10px] text-slate-300">{w.wo_no}</div>
                         </button>
                       );
                     })}
@@ -547,7 +559,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                   <Icon name={dirty ? "save" : "done"} /> {savingTarget ? "กำลังบันทึก…" : dirty ? "บันทึก" : "บันทึกแล้ว"}</button>;
               })()}
             </div>
-            <div className="mt-4 text-[12px] text-slate-500">จ่ายงานแล้ว{PERIODS.find((p) => p.k === period)?.label}</div>
+            <div className="mt-4 text-[12px] text-slate-500">จ่ายงานแล้ว{PERIODS.find((p) => p.k === period)?.label} <span className="text-slate-400">· {includeOwn ? "ทุกแบรนด์" : "เฉพาะแบรนด์ลูกค้า"}</span></div>
             <div className="bg-gradient-to-r from-violet-600 to-fuchsia-500 bg-clip-text text-3xl font-extrabold tabular-nums text-transparent">฿{fmt(got)}</div>
             <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-[width] duration-500" style={{ width: `${pct}%` }} /></div>
             <div className="mt-1 text-[12px] text-slate-500">{goal > 0 ? `${pct.toFixed(0)}% ของเป้า ฿${fmt(goal)}` : "ยังไม่ได้ตั้งเป้า"}</div>

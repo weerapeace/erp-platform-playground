@@ -1663,7 +1663,7 @@ function WorkBoardPageInner() {
         />
       ) : viewMode === "deskdock" ? (
         <ExecDispatchView pending={board.pending} workOrders={board.workOrders} desks={boardDesks} craftsmen={craftsmen}
-          canDispatch={canDispatch} showPrice={isAdmin}
+          canDispatch={canDispatch} showPrice={isAdmin} deskWages={deptWages}
           onDispatch={(mos, d) => {
             const dept = boardDesks.find((x) => x.id === d.id) ?? null;
             const list = mos.map((m) => board.pending.find((p) => p.id === m.id)).filter((m): m is PendingMO => !!m);
