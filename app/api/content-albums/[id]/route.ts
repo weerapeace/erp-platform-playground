@@ -1,7 +1,7 @@
 /**
  * อัลบั้ม Contents 1 อัลบั้ม
  * GET    /api/content-albums/[id]          → { data: ContentAlbum & { files: AlbumFile[] } }
- * PATCH  /api/content-albums/[id]          body = ช่องที่จะเปลี่ยน (ชื่อ/แบรนด์/ผู้รับผิดชอบ/วันที่ต้องลง/แพลตฟอร์ม/แคปชั่นร่าง/รูปที่เลือก/ปก/closed) · { restore: true } = กู้จากถังขยะ
+ * PATCH  /api/content-albums/[id]          body = ช่องที่จะเปลี่ยน (ชื่อ/แบรนด์/ผู้รับผิดชอบ/วันที่ต้องลง/แพลตฟอร์ม/แคปชั่นร่าง/รูปที่เลือก/ลำดับไฟล์ file_order/ปก/closed) · { restore: true } = กู้จากถังขยะ
  * DELETE /api/content-albums/[id]          → ย้ายไปถังขยะ (ไฟล์ใน Drive ไม่ถูกแตะ · กู้คืนได้)
  *
  * สิทธิ์: ดู = assets.view · แก้ = assets.upload · ลบ = assets.manage · ทุกการเปลี่ยนลง audit_logs (content_album)
@@ -28,7 +28,7 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
     const [album] = await loadContentAlbums(admin, { ids: [id] });
     if (!album) return NextResponse.json({ error: "ไม่พบอัลบั้ม" }, { status: 404 });
     // ?lite=1 = แค่ชื่อ/สถานะ (ป้าย "จากอัลบั้ม" ในป๊อปโพสต์) ไม่ต้องโหลดไฟล์
-    const files = new URL(request.url).searchParams.get("lite") === "1" ? [] : await loadAlbumFiles(admin, id, album.picked_asset_ids);
+    const files = new URL(request.url).searchParams.get("lite") === "1" ? [] : await loadAlbumFiles(admin, id, album.picked_asset_ids, album.file_order);
     return NextResponse.json({ data: { ...album, files }, error: null });
   } catch (e) {
     return NextResponse.json({ error: `โหลดอัลบั้มไม่สำเร็จ: ${(e as Error).message}` }, { status: 500 });
@@ -71,7 +71,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const changes = Object.fromEntries(Object.entries(after)
     .filter(([k, v]) => k !== "closed_at" || !!v !== !!before[k])
     .filter(([k, v]) => JSON.stringify(before[k] ?? null) !== JSON.stringify(v ?? null))
-    .map(([k, v]) => [k, { old: before[k] ?? null, new: v ?? null }]));
+    .map(([k, v]) => [k, k === "file_order" ? { old: `${((before[k] as string[] | null) ?? []).length} ไฟล์`, new: `จัดลำดับใหม่ ${(v as string[]).length} ไฟล์` } : { old: before[k] ?? null, new: v ?? null }]));
   if (Object.keys(changes).length) {
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
     await writeAudit(admin, { action: restore ? "restore" : "update", entityType: "content_album", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { name: (curCol as { name: string }).name, changes } });

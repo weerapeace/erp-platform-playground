@@ -48,7 +48,7 @@ audit_logs entity `content_album`: create · update (เก่า→ใหม่
 `components/asset-library/contents/` — `ContentAlbumsBoard` (การ์ด + แท็บสถานะ + ชิปแบรนด์ + ถังขยะ) · `AlbumDetailModal` (ERPModal · ลากวาง · UploadProgress · runBackgroundTask · ConfirmDialog) · `AlbumFormModal` (ERPForm · BrandSelect · UserPicker · PlatformIcon) · ส่งเข้าปฏิทินใช้ `ContentCreateModal` กลาง (preset.album)
   - **ส่งเข้าปฏิทิน = เลือกวันก่อน (2026-11-04):** ปฏิทินกลาง `DocCalendar` (`onPickDay` · `selectedDay` = วันที่ต้องลงภายใน · `disablePast`) โชว์โพสต์เดิมของแบรนด์ (สีม่วง = จากอัลบั้มนี้) → กดวัน = เปิดฟอร์มที่ใส่วัน (+เวลาแนะนำ) แบรนด์ ชื่อ แพลตฟอร์ม ประเภท ไฟล์ แคปชั่น สินค้า · ไม่ได้แท็กสินค้า = เดาจากรหัสในชื่ออัลบั้ม (`codeLike` + `findParentSkuByCode` ตรงรหัสเป๊ะ) · ปุ่ม "ยังไม่กำหนดวัน" = เปิดฟอร์มไม่มีวัน
   - กริดไฟล์อยู่บนสุด (ต่อจากแถบ Drive) · โชว์เต็มรูปไม่ครอป (`FileThumb fit="contain"`) · ช่องลากไฟล์อยู่ใต้กริด
-  - ยังเรียงลำดับไฟล์เองไม่ได้ — ต้องมีช่องเก็บลำดับใน DB (ขออนุญาตเจ้าของก่อน)
+  - **ลากเรียงลำดับไฟล์** (กดค้างที่รูปแล้วลาก หรือ ‹ ›) → `content_albums.file_order uuid[]` (migration `202611130100` · เจ้าของอนุญาต 2026-11-04) · ว่าง = เวลาที่เพิ่ม ใหม่ก่อน · ไฟล์ที่ไม่อยู่ในรายการ (อัปทีหลัง) ต่อท้าย · ของกลาง pure `lib/content-album-order` (applyFileOrder + test) · ใช้ทั้งกริด · การ์ด (ปกสำรอง/รูปย่อ) · ส่งเข้าปฏิทิน · zip · AI ร่างแคปชั่น · audit บอกแค่ "จัดลำดับใหม่ N ไฟล์"
 อัปไฟล์ `uploadFilesToAlbum` (./data): รูปย่อ (`prepareResizedImage`) / ภาพปกวิดีโอ (`lib/video-poster`) → `/api/admin/upload` no_library → ตรวจรูปซ้ำ `askDuplicateUploads` → Drive ทีละชิ้น `uploadFileToDrive` → ลงทะเบียน
 ลิงก์ตรง `/master/assets?source=contents&album=<id>` (ป้าย "จากอัลบั้ม" ในป๊อปโพสต์) · การ์ดปฏิทินมีไอคอนอัลบั้ม
 

@@ -28,7 +28,7 @@ export async function getContentAlbum(id: string, lite = false): Promise<AlbumDe
 }
 export type AlbumFields = Partial<{
   name: string; description: string | null; brand_id: string | null; assignee_ids: string[]; due_date: string | null;
-  planned_platforms: string[]; caption_draft: string | null; picked_asset_ids: string[]; parent_sku_codes: string[];
+  planned_platforms: string[]; caption_draft: string | null; picked_asset_ids: string[]; file_order: string[]; parent_sku_codes: string[];
   cover_asset_id: string | null; closed: boolean; restore: boolean;
 }>;
 export async function createContentAlbum(fields: AlbumFields & { name: string }): Promise<ContentAlbum> {

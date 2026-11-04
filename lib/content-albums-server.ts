@@ -9,6 +9,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { albumStatus, type AlbumPostInput, type AlbumStatus } from "@/lib/content-album-status";
+import { applyFileOrder } from "@/lib/content-album-order";
 import type { CaptionSettings } from "@/lib/content-readiness";
 import { resolveBrandContentFolder, safeDriveName, driveFolderUrl } from "@/lib/content-drive";
 import { driveConfigured, driveCreateFolder, driveEnsureFolder, driveListChildFolders, driveFileState } from "@/lib/google-drive";
@@ -58,6 +59,8 @@ export type ContentAlbum = {
   drive_folder_id: string | null;
   drive_folder_url: string | null;
   picked_asset_ids: string[];
+  /** ลำดับไฟล์ที่ลากจัดเอง (ว่าง = เรียงตามเวลาที่เพิ่ม · ไฟล์ที่ไม่อยู่ในรายการต่อท้าย) */
+  file_order: string[];
   parent_sku_codes: string[];
   products: { id: string; code: string; name: string; image_key: string | null }[];   // Parent SKU ที่แท็ก (หาจากรหัส)
   cover_asset_id: string | null;
@@ -76,10 +79,10 @@ export type ContentAlbum = {
 
 type AlbumDbRow = {
   id: string; brand_id: string | null; assignee_ids: string[] | null; due_date: string | null; planned_platforms: string[] | null;
-  caption_draft: string | null; drive_folder_id: string | null; picked_asset_ids: string[] | null; parent_sku_codes: unknown;
+  caption_draft: string | null; drive_folder_id: string | null; picked_asset_ids: string[] | null; file_order: string[] | null; parent_sku_codes: unknown;
   closed_at: string | null; trashed_at: string | null; created_by: string | null; created_at: string; updated_at: string;
 };
-const ALBUM_COLS = "id, brand_id, assignee_ids, due_date, planned_platforms, caption_draft, drive_folder_id, picked_asset_ids, parent_sku_codes, closed_at, trashed_at, created_by, created_at, updated_at";
+const ALBUM_COLS = "id, brand_id, assignee_ids, due_date, planned_platforms, caption_draft, drive_folder_id, picked_asset_ids, file_order, parent_sku_codes, closed_at, trashed_at, created_by, created_at, updated_at";
 const POST_COLS = "id, content_no, title, status, is_active, scheduled_at, platforms, post_status, platform_images, platform_formats, album_id";
 const FILE_COLS = "id, title, file_name, r2_key, asset_type, content_type, size_bytes, width, height, duration_sec, drive_file_id, drive_missing_at, phash, status";
 
@@ -139,7 +142,8 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
 
   return rows.map((r) => {
     const c = colMap.get(r.id);
-    const files = filesBy.get(r.id) ?? [];
+    // ลำดับที่จัดเอง → ปกสำรอง/รูปย่อบนการ์ดตามลำดับนี้ด้วย
+    const files = applyFileOrder(filesBy.get(r.id) ?? [], r.file_order);
     const coverId = c?.cover_asset_id ?? null;
     const cover = (coverId ? files.find((f) => f.id === coverId) : null) ?? files[0] ?? null;
     const ps = postsBy.get(r.id) ?? [];
@@ -161,6 +165,7 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
       due_date: r.due_date, planned_platforms: r.planned_platforms ?? [], caption_draft: r.caption_draft,
       drive_folder_id: r.drive_folder_id, drive_folder_url: r.drive_folder_id ? driveFolderUrl(r.drive_folder_id) : null,
       picked_asset_ids: (r.picked_asset_ids ?? []).filter((id) => files.some((f) => f.id === id)),
+      file_order: (r.file_order ?? []).filter((id) => files.some((f) => f.id === id)),
       parent_sku_codes: codes(r.parent_sku_codes),
       products: codes(r.parent_sku_codes).map((c) => parentByCode.get(c)).filter((p): p is { id: string; code: string; name: string; image_key: string | null } => !!p),
       cover_asset_id: coverId, cover_key: cover?.r2_key ?? null,
@@ -177,8 +182,8 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
   });
 }
 
-/** ไฟล์ทั้งหมดในอัลบั้ม (ใหม่สุดก่อน) + โพสต์ที่ใช้แต่ละไฟล์ */
-export async function loadAlbumFiles(admin: Admin, albumId: string, pickedIds: string[]): Promise<AlbumFile[]> {
+/** ไฟล์ทั้งหมดในอัลบั้ม (ตามลำดับที่จัดเอง → ที่เหลือใหม่สุดก่อน) + โพสต์ที่ใช้แต่ละไฟล์ */
+export async function loadAlbumFiles(admin: Admin, albumId: string, pickedIds: string[], order: string[] = []): Promise<AlbumFile[]> {
   const { data, error } = await admin.from("asset_collection_map").select(`added_at, asset:assets!asset_id(${FILE_COLS})`)
     .eq("collection_id", albumId).order("added_at", { ascending: false }).limit(2000);
   if (error) throw new Error(error.message);
@@ -194,11 +199,11 @@ export async function loadAlbumFiles(admin: Admin, albumId: string, pickedIds: s
   for (const u of (uses ?? []) as { asset_id: string; record_id: string; record_label: string | null }[])
     (useMap.get(u.asset_id) ?? useMap.set(u.asset_id, []).get(u.asset_id)!).push({ content_id: u.record_id, label: u.record_label });
   const picked = new Set(pickedIds);
-  return rows.map(({ added_at, a }) => ({
+  return applyFileOrder(rows.map(({ added_at, a }) => ({
     id: a.id, title: a.title || a.file_name, file_name: a.file_name, r2_key: a.r2_key, asset_type: a.asset_type, content_type: a.content_type,
     size_bytes: a.size_bytes, width: a.width, height: a.height, duration_sec: a.duration_sec == null ? null : Number(a.duration_sec),
     drive_file_id: a.drive_file_id, drive_missing: !!a.drive_missing_at, phash: a.phash, picked: picked.has(a.id), used_in: useMap.get(a.id) ?? [], added_at,
-  }));
+  })), order);
 }
 
 /** ชื่อโฟลเดอร์ Drive ของอัลบั้ม: "YYYY-MM ชื่ออัลบั้ม" (เรียงตามเดือนในโฟลเดอร์ "อัลบั้ม") */

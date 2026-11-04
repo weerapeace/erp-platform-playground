@@ -35,7 +35,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const admin = supabaseAdmin();
   const [album] = await loadContentAlbums(admin, { ids: [id] });
   if (!album) return NextResponse.json({ error: "ไม่พบอัลบั้ม" }, { status: 404 });
-  const files = await loadAlbumFiles(admin, id, album.picked_asset_ids);
+  const files = await loadAlbumFiles(admin, id, album.picked_asset_ids, album.file_order);
   // อ่านได้เฉพาะรูปย่อ/ภาพปกใน R2 (ไฟล์ที่ไม่มีรูปย่อ = drive:<id> ข้าม)
   const pool = (album.picked_asset_ids.length ? files.filter((f) => f.picked) : files).filter((f) => !f.r2_key.startsWith("drive:"));
   const images = await imagesToDataUrls(pool.slice(0, ALBUM_AI_IMAGES).map((f) => f.r2_key));

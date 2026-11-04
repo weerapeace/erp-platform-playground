@@ -33,6 +33,7 @@ export function cleanAlbumFields(body: Record<string, unknown>): { album: Record
   if (body.planned_platforms !== undefined) album.planned_platforms = codeList(body.planned_platforms);
   if (body.caption_draft !== undefined) album.caption_draft = String(body.caption_draft ?? "").trim() || null;
   if (body.picked_asset_ids !== undefined) album.picked_asset_ids = uuidList(body.picked_asset_ids);
+  if (body.file_order !== undefined) album.file_order = uuidList(body.file_order).slice(0, 2000);
   if (body.parent_sku_codes !== undefined) {
     album.parent_sku_codes = Array.isArray(body.parent_sku_codes) ? [...new Set(body.parent_sku_codes.map((x) => String(x ?? "").trim()).filter(Boolean))].slice(0, 50) : [];
   }

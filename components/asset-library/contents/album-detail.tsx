@@ -2,12 +2,12 @@
 
 /**
  * หน้าในอัลบั้ม Contents (ป๊อปเต็มจอ)
- *   ที่อยู่ใน Drive · กริดไฟล์อยู่บนสุด (โชว์เต็มรูป ไม่ครอป) + ลากไฟล์มาวาง (ตัวจริงขึ้น Drive ทีละชิ้น วิ่งเบื้องหลัง ปิดป๊อปได้) · กริดไฟล์ (เลือกใช้ / ตั้งปก / ใช้แล้วที่โพสต์ไหน / หายจาก Drive)
+ *   ที่อยู่ใน Drive · กริดไฟล์อยู่บนสุด (โชว์เต็มรูป ไม่ครอป · ลากเรียงลำดับ/‹ › → content_albums.file_order) + ลากไฟล์มาวาง (ตัวจริงขึ้น Drive ทีละชิ้น วิ่งเบื้องหลัง ปิดป๊อปได้) · กริดไฟล์ (เลือกใช้ / ตั้งปก / ใช้แล้วที่โพสต์ไหน / หายจาก Drive)
  *   สถานะต่อแพลตฟอร์ม + โพสต์ที่สร้างจากอัลบั้ม · แคปชั่นร่าง (+ AI ร่าง)
  *   ส่งเข้าปฏิทิน: เลือกวันก่อน (ปฏิทินกลาง DocCalendar · เห็นโพสต์เดิมของแบรนด์แต่ละวัน) → ป๊อปสร้างโพสต์กลาง ContentCreateModal ที่ใส่วัน + ข้อมูลจากอัลบั้มให้แล้ว
  *     (แบรนด์ · ชื่อ · แพลตฟอร์ม · ประเภท · ไฟล์ที่เลือก · แคปชั่นร่าง · สินค้าที่แท็ก — ไม่ได้แท็ก = เดาจากรหัสในชื่ออัลบั้ม)
  *   ช่วยคัดรูป (เบลอ/คล้าย · ./cull) · ดาวน์โหลดทั้งอัลบั้มเป็น zip (lib/zip)
- * ใช้ของกลาง: ERPModal · ConfirmDialog · UploadProgress · runBackgroundTask · ContentCreateModal · DocCalendar · findParentSkuByCode · askDuplicateUploads (ผ่าน ./data)
+ * ใช้ของกลาง: ERPModal · ConfirmDialog · UploadProgress · runBackgroundTask · ContentCreateModal · DocCalendar · useDragReorder · findParentSkuByCode · askDuplicateUploads (ผ่าน ./data)
  * สิทธิ์: แก้/อัป assets.upload · ลบไฟล์ assets.delete · ลบอัลบั้ม assets.manage · สร้างโพสต์ tasks.create
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -31,6 +31,7 @@ import { findParentSkuByCode } from "@/components/pickers";
 import { codeLike } from "@/lib/website-image-match";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
 import { useFileDrop } from "@/components/file-drop";
+import { useDragReorder, moveItem } from "@/components/sortable-list";
 import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, startAlbumUploadTask, onAlbumUpload, syncAlbumDrive, aiAlbumCaption,
   albumPostPreset, pendingUploadsFor, clearPendingUploads,
   type AlbumDetail, type AlbumDriveInfo, type AlbumFile, type AlbumUploadStep, type PendingUpload } from "./data";
@@ -121,6 +122,15 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
     if (e.step !== undefined) { setStep(e.step); refreshPending(); }
     if (e.fileDone) { void load(true); onChangedRef.current(); loadDrive(); refreshPending(); }
   }), [albumId, load, loadDrive, refreshPending]);
+
+  // ↕ ลากเรียงลำดับไฟล์ (ลำดับนี้ใช้ตอนโชว์ · ส่งเข้าปฏิทิน · ดาวน์โหลด zip) — บันทึกทันที
+  const moveFile = (from: number, to: number) => {
+    if (!album || from === to) return;
+    const next = moveItem(album.files, from, to);
+    setAlbum({ ...album, files: next });
+    void patch({ file_order: next.map((x) => x.id) });
+  };
+  const reorder = useDragReorder(moveFile, { group: `album-files:${albumId}` });
 
   const togglePick = (f: AlbumFile) => {
     if (!album) return;
@@ -321,7 +331,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-semibold text-slate-700">{t(`ไฟล์ในอัลบั้ม (${files.length})`, `Files (${files.length})`)}</h3>
               {pickedCount > 0 && <span className="text-xs text-violet-700">{t(`เลือกใช้ ${pickedCount} ไฟล์`, `${pickedCount} picked`)}</span>}
-              {canEdit && files.length > 0 && <span className="text-xs text-slate-400">{t("ติ๊กมุมซ้าย = เลือกใช้ (ส่งเข้าโพสต์เฉพาะที่เลือก) · ดาว = ปกอัลบั้ม", "Tick = pick for posts · star = cover")}</span>}
+              {canEdit && files.length > 0 && <span className="text-xs text-slate-400">{t("ติ๊กมุมซ้าย = เลือกใช้ (ส่งเข้าโพสต์เฉพาะที่เลือก) · ดาว = ปกอัลบั้ม · กดค้างที่รูปแล้วลาก (หรือ ‹ ›) = เรียงลำดับ", "Tick = pick for posts · star = cover · hold and drag (or ‹ ›) = reorder")}</span>}
               {files.length > 0 && (
                 <span className="ml-auto flex flex-wrap gap-2">
                   {canEdit && files.some((f) => f.asset_type !== "video") && (
@@ -345,11 +355,11 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
               <p className="text-sm text-slate-500 py-6 text-center">{t("ยังไม่มีไฟล์ — ลากรูป/วิดีโอมาวางที่ช่องด้านล่าง", "No files yet — drop photos/videos below")}</p>
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-                {files.map((f) => {
+                {files.map((f, i) => {
                   const cover = album.cover_asset_id === f.id;
                   return (
-                    <div key={f.id} className={`group relative rounded-lg overflow-hidden border ${f.picked ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"}`}>
-                      <button onClick={() => setViewFile(f)} className="block w-full" title={f.file_name}>
+                    <div key={f.id} {...(canEdit ? reorder.rowProps(i) : {})} className={`group relative rounded-lg overflow-hidden border ${f.picked ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"} ${canEdit ? reorder.rowCls(i) : ""}`}>
+                      <button onClick={() => setViewFile(f)} {...(canEdit ? reorder.handleProps(i) : {})} className={`block w-full ${canEdit ? "cursor-grab active:cursor-grabbing" : ""}`} title={canEdit ? t(`${f.file_name} · กดค้างแล้วลาก = เรียงลำดับ`, `${f.file_name} · hold and drag to reorder`) : f.file_name}>
                         <FileThumb r2Key={f.r2_key} type={f.asset_type} duration={f.duration_sec} className="aspect-square" fit="contain" />
                       </button>
                       {canEdit && (
@@ -358,6 +368,14 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
                             className={`absolute top-1 left-1 w-6 h-6 grid place-items-center rounded-md border ${f.picked ? "bg-violet-600 border-violet-600 text-white" : "bg-white/90 border-slate-300 text-transparent hover:text-slate-400"}`}><Icon name="done" size={14} /></button>
                           <button onClick={() => setCover(f)} title={cover ? t("ปกอัลบั้ม (กดเพื่อเอาออก)", "Cover (click to unset)") : t("ตั้งเป็นปก", "Set as cover")}
                             className={`absolute top-1 right-1 w-6 h-6 grid place-items-center rounded-md ${cover ? "bg-amber-400 text-white" : "bg-white/90 text-slate-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`}><Icon name="star" size={14} /></button>
+                        </>
+                      )}
+                      {canEdit && files.length > 1 && (
+                        <>
+                          {i > 0 && <button onPointerDown={(e) => e.stopPropagation()} onClick={() => moveFile(i, i - 1)} aria-label={t("เลื่อนไปก่อนหน้า", "Move earlier")}
+                            className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">‹</button>}
+                          {i < files.length - 1 && <button onPointerDown={(e) => e.stopPropagation()} onClick={() => moveFile(i, i + 1)} aria-label={t("เลื่อนไปถัดไป", "Move later")}
+                            className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">›</button>}
                         </>
                       )}
                       {can("assets.delete") && (
