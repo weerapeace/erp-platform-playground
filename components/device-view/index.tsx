@@ -10,6 +10,7 @@
  * - <DeviceModeToggle>       : ปุ่มสลับ 🖥️ / 📟 / 📱 (กดตัวที่เลือกอยู่ซ้ำ = กลับเป็นอัตโนมัติ)
  * - <DevicePreviewFrame>     : กรอบจำลองขนาดเครื่อง (ตอนเลือกดูแบบมือถือ/แท็บเล็ตบนจอที่กว้างกว่า)
  *                              + แผง QR "สแกนเพื่อเปิดหน้านี้บนเครื่องจริง"
+ * - useIpadPreview / <IpadPreviewSwitch> / <IpadPreview> : สวิตช์ "ดูแบบ iPad" ของหน้า (คอม / iPad แนวนอน / แนวตั้ง) + กรอบ iPad ของจริง
  * - <DeviceIframePreview>    : พรีวิว "ของจริง" — โหลดหน้าใน iframe ขนาดเครื่องจริง (เช่น IPAD_SIZE) แล้วย่อให้พอดีจอ
  *                              (useCanPreviewDevice / isInIframe กันครอบซ้ำ และไม่จำลองบนเครื่องจอสัมผัสจริง)
  *
@@ -23,6 +24,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { QrCode } from "@/components/qr-code";
 import { useAuth } from "@/components/auth";
 import { cachedGetJson } from "@/lib/shell-cache";
+import { Icon } from "@/components/icon";
 
 export type DeviceLayout = "desktop" | "tablet" | "phone";
 export type DeviceMode = "auto" | DeviceLayout;
@@ -413,4 +415,44 @@ export function DeviceIframePreview({ src, width, height, label, qr }: { src: st
       </div>
     </div>
   );
+}
+
+// ============================================================
+// "ดูแบบ iPad" ของหน้า (ของกลาง) — สวิตช์ คอม / iPad แนวนอน / iPad แนวตั้ง + กรอบ iPad ของจริง
+//   ใช้ที่: /cashflow (บอร์ดจ่ายงานมีสวิตช์ของตัวเองแบบจำต่อเครื่อง — ยังไม่ย้ายมา)
+//   วิธีใช้:
+//     const ipad = useIpadPreview();                     // จอสัมผัส/อยู่ในกรอบ = ไม่โชว์สวิตช์ (iPad จริงไม่ต้องจำลอง)
+//     {ipad.canPreview && <IpadPreviewSwitch view={ipad.view} onChange={ipad.setView} />}
+//     {ipad.view !== "pc" ? <IpadPreview view={ipad.view} src="/app/<key>" qr={...} /> : <เนื้อหาปกติ />}
+//   ไม่จำโหมด — โหลดหน้าใหม่ = กลับจอคอม (กันเปิดมาแล้วงงว่าทำไมหน้าเล็ก)
+// ============================================================
+
+export type IpadView = "pc" | "ipadL" | "ipadP";
+export const IPAD_VIEW_LABEL: Record<IpadView, string> = { pc: "คอม", ipadL: "iPad แนวนอน", ipadP: "iPad แนวตั้ง" };
+
+export function useIpadPreview(): { canPreview: boolean; view: IpadView; setView: (v: IpadView) => void } {
+  const canPreview = useCanPreviewDevice();
+  const [view, setView] = useState<IpadView>("pc");
+  return { canPreview, view: canPreview ? view : "pc", setView };
+}
+
+export function IpadPreviewSwitch({ view, onChange, className = "" }: { view: IpadView; onChange: (v: IpadView) => void; className?: string }) {
+  return (
+    <div role="group" aria-label="ดูหน้านี้แบบ" className={`inline-flex h-9 overflow-hidden rounded-lg border border-slate-200 divide-x divide-slate-200 ${className}`}>
+      {(["pc", "ipadL", "ipadP"] as IpadView[]).map((v) => (
+        <button key={v} type="button" onClick={() => onChange(v)} aria-pressed={view === v}
+          title={v === "pc" ? "กลับมุมมองจอคอม" : `ดูหน้านี้ขนาดเท่า ${IPAD_VIEW_LABEL[v]} ของจริง (กดใช้งานในกรอบได้)`}
+          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 text-sm ${view === v ? "bg-slate-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>
+          <Icon value={v === "pc" ? "i:device-laptop" : "i:device-mobile"} size={15} className={v === "ipadL" ? "rotate-90" : ""} />
+          {IPAD_VIEW_LABEL[v]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** กรอบ iPad ของจริง (โหลด src ใน iframe ขนาดเครื่อง) + QR เปิดบน iPad จริง */
+export function IpadPreview({ view, src, qr }: { view: Exclude<IpadView, "pc">; src: string; qr?: DeviceQrOpts }) {
+  const sz = view === "ipadP" ? IPAD_SIZE.portrait : IPAD_SIZE.landscape;
+  return <DeviceIframePreview src={src} width={sz.w} height={sz.h} label={IPAD_VIEW_LABEL[view]} qr={qr} />;
 }

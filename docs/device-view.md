@@ -97,6 +97,14 @@ const [installOpen, setInstallOpen] = useState(false);
 
 ไม่ส่ง `layout` = ทำงานแบบเดิม (ดูความกว้างจอจริง · ลากวางได้) — ปฏิทินจัดซื้อยังใช้แบบนี้อยู่
 
+## สวิตช์ "ดูแบบ iPad" ของหน้า (2026-11-04)
+
+`useIpadPreview()` + `<IpadPreviewSwitch>` + `<IpadPreview>` — ปุ่ม คอม / iPad แนวนอน / iPad แนวตั้ง ที่หัวหน้า → แทนเนื้อหาด้วยกรอบ iPad ของจริง (`DeviceIframePreview` ขนาด `IPAD_SIZE`) + QR เปิด/ติดตั้งบน iPad จริง
+
+- โชว์เฉพาะคอม (`useCanPreviewDevice`: ไม่ใช่จอสัมผัส และไม่ได้อยู่ในกรอบ) · ไม่จำโหมด — โหลดหน้าใหม่ = กลับจอคอม
+- ใช้ที่ `/cashflow` (กรอบโหลด `/app/cashflow` = หน้าตาตอนติดตั้งเป็นแอปบน iPad) · บอร์ดจ่ายงานยังใช้สวิตช์ของตัวเอง (จำต่อเครื่อง)
+- คู่กับปุ่ม "ดาวน์โหลดแอป" → `InstallAppModal` (components/install-app) ส่ง `qr={{ appKey, appLabel, installGo }}` บังคับแอปที่จะติดตั้ง · ซ่อนปุ่มเมื่อเปิดอยู่ในแอป/ในกรอบแล้ว (`usePwaInstall().installed` / `isInIframe()`)
+
 ## ข้อจำกัด
 
 - ป๊อปอัปเต็ม (design-sheet-detail) ที่เปิดจากปุ่ม "แก้ไขเต็ม" ยังเป็นหน้าตาจอคอม — ใช้เฉพาะงานหนัก (ตีราคา/เสนอราคา/Parent SKU)

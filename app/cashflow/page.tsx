@@ -22,6 +22,9 @@ import { MoneyInput } from "@/components/money-input";
 import { DateInput } from "@/components/date-input";
 import { InfoHint } from "@/components/info-hint";
 import { Icon } from "@/components/icon";
+import { IpadPreview, IpadPreviewSwitch, isInIframe, useIpadPreview } from "@/components/device-view";
+import { InstallAppModal } from "@/components/install-app";
+import { usePwaInstall } from "@/components/pwa-install-button";
 import { usePermission, AccessDenied, useAuth } from "@/components/auth";
 import { CompanyFilterChips, CompanySelect, CompanyTag, useCompanyFilter } from "@/components/company-filter";
 import { UnassignedNotice } from "@/components/cashflow/unassigned-notice";
@@ -94,6 +97,13 @@ export default function CashflowPage() {
   const [picked, setPicked] = useState<CashflowBucket | null>(null);
   const [addMenu, setAddMenu] = useState(false);
   const [debtCreate, setDebtCreate] = useState<NewDebtKey | null>(null);
+  // ดูแบบ iPad (กรอบเครื่องจริง · เฉพาะคอม) + ดาวน์โหลดแอป "กระแสเงินสด" (ซ่อนเมื่อเปิดอยู่ในแอป/ในกรอบแล้ว — เชลล์แอปมีปุ่มติดตั้งของตัวเอง)
+  const ipad = useIpadPreview();
+  const pwa = usePwaInstall();
+  const [inFrame, setInFrame] = useState(false);
+  useEffect(() => { setInFrame(isInIframe()); }, []);
+  const [installOpen, setInstallOpen] = useState(false);
+  const showInstall = !inFrame && !pwa.installed;
   const tabsRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -353,6 +363,13 @@ export default function CashflowPage() {
             <p className="text-slate-500 mt-1 text-sm">เงินเข้า-ออกทั้งกลุ่ม · ดูและจัดการได้ในหน้านี้ — จ่ายแล้ว · เลื่อนวัน · ตั้งเครดิต · ลงหนี้</p>
           </div>
           <div className="flex items-center gap-2 flex-wrap relative">
+            {ipad.canPreview && <IpadPreviewSwitch view={ipad.view} onChange={ipad.setView} />}
+            {showInstall && (
+              <button type="button" onClick={() => setInstallOpen(true)} title="ติดตั้งแอป “กระแสเงินสด” บน iPad / มือถือ / คอม — ได้ไอคอนบนหน้าจอ เปิดเหมือนแอป"
+                      className="h-9 px-3.5 inline-flex items-center gap-1.5 text-sm font-medium text-indigo-700 border border-indigo-200 bg-indigo-50 rounded-lg hover:bg-indigo-100">
+                <Icon name="download" size={15} /> ดาวน์โหลดแอป
+              </button>
+            )}
             <Link href="/cashflow/board"
                   className="h-9 px-3.5 inline-flex items-center gap-1.5 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">
               <Icon value="🧲" /> กระดาน (ลากเลื่อนวัน)
@@ -381,6 +398,7 @@ export default function CashflowPage() {
           </div>
         </div>
 
+        {ipad.view === "pc" && (<>
         <div className="flex items-center gap-2 mt-4 flex-wrap">
           <span className="text-xs text-slate-500">ดูล่วงหน้า</span>
           {RANGES.map((r) => (
@@ -406,7 +424,18 @@ export default function CashflowPage() {
                                 unassignedCount={unassignedCount} />
           </div>
         )}
+        </>)}
       </div>
+
+      {ipad.view !== "pc" ? (
+        <div className="px-4 md:px-8 py-5 space-y-3">
+          <p className="text-sm text-slate-600">
+            หน้าตาตอนติดตั้งเป็นแอป “กระแสเงินสด” บน iPad — ขนาดเท่าเครื่องจริง กดใช้งานในกรอบได้เลย · สแกน QR ด้านขวาเพื่อเปิด/ติดตั้งบน iPad จริง
+          </p>
+          <IpadPreview view={ipad.view} src="/app/cashflow"
+            qr={{ openUrl: typeof window !== "undefined" ? `${window.location.origin}/app/cashflow` : undefined, appKey: "cashflow", appLabel: "กระแสเงินสด", installGo: "/cashflow" }} />
+        </div>
+      ) : (
 
       <div className="px-4 md:px-8 py-6 space-y-5">
         {error && (
@@ -595,6 +624,10 @@ export default function CashflowPage() {
           </>
         )}
       </div>
+      )}
+
+      <InstallAppModal open={installOpen} onClose={() => setInstallOpen(false)}
+        qr={{ appKey: "cashflow", appLabel: "กระแสเงินสด", installGo: "/cashflow" }} />
     </PlaygroundShell>
   );
 }
