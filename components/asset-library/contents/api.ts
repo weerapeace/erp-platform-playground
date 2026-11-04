@@ -7,9 +7,10 @@ import type { AlbumCaptionDrafts } from "@/lib/content-album-captions";
 import { tr } from "@/lib/lang";
 import type { ContentAlbum, AlbumFile, AlbumRef } from "@/lib/content-albums-server";
 import { cleanRefUrl, refProvider } from "@/lib/content-album-refs";
+import type { LibraryRef } from "@/lib/content-ref-library";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
 
-export type { ContentAlbum, AlbumFile, AlbumRef };
+export type { ContentAlbum, AlbumFile, AlbumRef, LibraryRef };
 export type AlbumDetail = ContentAlbum & { files: AlbumFile[]; refs: AlbumRef[] };
 export type AlbumDriveInfo = { ok: true; label: string; folder_url: string | null; pending: boolean } | { ok: false; reason: string };
 
@@ -81,7 +82,9 @@ export function albumPostPreset(album: AlbumDetail): ContentCreatePreset {
 export async function listAlbumRefs(id: string): Promise<AlbumRef[]> {
   return (await json<{ data: AlbumRef[] }>(await apiFetch(`/api/content-albums/${id}/refs`))).data ?? [];
 }
-export async function addAlbumRef(id: string, ref: { kind: "image"; r2_key: string } | { kind: "link"; url: string; title?: string | null; thumb_url?: string | null } | { kind: "text"; body: string }): Promise<void> {
+/** Reference ใหม่ 1 ชิ้น (ใช้ร่วม: รายการ + คลังกลาง) */
+export type NewRef = { kind: "image"; r2_key: string } | { kind: "link"; url: string; title?: string | null; thumb_url?: string | null } | { kind: "text"; body: string };
+export async function addAlbumRef(id: string, ref: NewRef): Promise<void> {
   await json(await send(`/api/content-albums/${id}/refs`, "POST", ref));
 }
 export async function setAlbumRefNote(id: string, refId: string, note: string): Promise<void> {
@@ -108,4 +111,26 @@ export async function resolveRefLink(raw: string): Promise<{ url: string; title:
     const d = j?.data as { title?: string | null; image?: string | null } | null;
     return { url, title: d?.title ?? null, thumb_url: d?.image ?? null };
   } catch { return { url, title: null, thumb_url: null }; }
+}
+
+// ── คลัง Reference กลาง (lib/content-ref-library · /api/content-refs) ──
+export async function listRefLibrary(): Promise<LibraryRef[]> {
+  return (await json<{ data: LibraryRef[] }>(await apiFetch("/api/content-refs"))).data ?? [];
+}
+/** ดาว: เก็บ Reference ของรายการเข้าคลัง · existed = มีในคลังแล้ว (ผูกกับชิ้นเดิม ไม่สร้างซ้ำ) */
+export async function saveRefToLibrary(albumId: string, refId: string): Promise<{ id: string; existed: boolean }> {
+  return (await json<{ data: { id: string; existed: boolean } }>(await send("/api/content-refs", "POST", { from_ref_id: refId, album_id: albumId }))).data;
+}
+export async function addLibraryRef(ref: NewRef & { tags?: string[]; brand_id?: string | null; note?: string | null }): Promise<{ id: string; existed: boolean }> {
+  return (await json<{ data: { id: string; existed: boolean } }>(await send("/api/content-refs", "POST", ref))).data;
+}
+export async function updateLibraryRef(id: string, patch: Partial<{ note: string | null; tags: string[]; brand_id: string | null; title: string | null }>): Promise<void> {
+  await json(await send("/api/content-refs", "PATCH", { id, ...patch }));
+}
+export async function removeLibraryRef(id: string): Promise<void> {
+  await json(await send(`/api/content-refs?id=${id}`, "DELETE"));
+}
+/** หยิบจากคลังใส่รายการ (ชิ้นที่มีในรายการแล้วข้าม) */
+export async function addRefsFromLibrary(albumId: string, libraryIds: string[]): Promise<{ added: number; skipped: number }> {
+  return (await json<{ data: { added: number; skipped: number } }>(await send(`/api/content-albums/${albumId}/refs`, "POST", { library_ids: libraryIds }))).data;
 }

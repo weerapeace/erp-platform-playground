@@ -608,7 +608,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
           {album.refs.length > 0 || showRefs ? (
             <section className="space-y-2">
               <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Icon name="pin" />{t("Reference ที่ขอไว้", "References")} <span className="text-slate-400 font-normal">{album.refs.length}</span></h3>
-              <RefBoard albumId={albumId} refs={album.refs} canEdit={canEdit} onChanged={() => { void load(true); onChanged(); }} compact />
+              <RefBoard albumId={albumId} brandId={album.brand_id} refs={album.refs} canEdit={canEdit} onChanged={() => { void load(true); onChanged(); }} compact />
             </section>
           ) : canEdit && (
             <button onClick={() => setShowRefs(true)} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-dashed border-slate-300 text-sm text-slate-600 hover:bg-slate-50"><Icon name="pin" />{t("+ เพิ่ม Reference", "+ Add references")}</button>

@@ -103,7 +103,7 @@ export function WishDetailModal({ albumId, brands, onClose, onChanged, onConvert
 
           <section className="space-y-2">
             <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Icon name="pin" />Reference <span className="text-slate-400 font-normal">{wish.refs.length}</span></h3>
-            <RefBoard albumId={albumId} refs={wish.refs} canEdit={canEdit} onChanged={() => { void load(true); onChanged(); }} />
+            <RefBoard albumId={albumId} brandId={wish.brand_id} refs={wish.refs} canEdit={canEdit} onChanged={() => { void load(true); onChanged(); }} />
           </section>
         </div>
       )}

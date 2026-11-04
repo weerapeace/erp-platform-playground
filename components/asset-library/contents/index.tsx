@@ -7,6 +7,7 @@
  * การ์ดอัลบั้ม + แท็บสถานะ (คิดจากโพสต์ที่ผูก · lib/content-album-status) + ชิปแบรนด์ + ค้นหา + ถังขยะ
  * ลากไฟล์/ทั้งโฟลเดอร์มาวางที่ไหนก็ได้ในหน้า (หรือกดเลือก) → ป๊อป "ลงอัลบั้มไหน?" (อัลบั้มเดิม / สร้างใหม่ · แยกตามโฟลเดอร์ได้)
  * แท็บ "อยากได้" = รายการที่อยากได้ (phase wish) — บรีฟก่อนถ่าย การ์ดโชว์ Reference แทนรูป · ถ่ายแล้วแปลงเป็นอัลบั้ม (WishDetailModal)
+ * แท็บ "คลัง Ref" = คลัง Reference กลาง (RefLibraryBoard) — ทุกรายการหยิบไปใช้ได้
  * ใช้ของกลาง: ERPModal (ผ่าน AlbumFormModal/AlbumDetailModal) · state-views · PlatformIcon · Icon · listBrands/useCreativeOptions
  * สิทธิ์: ดู assets.view · สร้าง assets.upload
  */
@@ -30,6 +31,7 @@ import { AlbumFormModal } from "./album-form-modal";
 import { AlbumDetailModal } from "./album-detail";
 import { WishDetailModal } from "./wish-detail";
 import { RefTile } from "./ref-board";
+import { RefLibraryBoard } from "./ref-library-board";
 
 const VIEW_KEY = "erp.contents.view";
 
@@ -49,9 +51,11 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
   const [search, setSearch] = useState("");
   const [trash, setTrash] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
-  // อัลบั้ม | อยากได้ — จำแท็บที่ดูล่าสุดในเครื่อง
-  const [view, setViewState] = useState<"album" | "wish">(() => { try { return localStorage.getItem(VIEW_KEY) === "wish" ? "wish" : "album"; } catch { return "album"; } });
-  const setView = (v: "album" | "wish") => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ไม่จำก็ได้ */ } };
+  // อัลบั้ม | อยากได้ | คลัง Ref — จำแท็บที่ดูล่าสุดในเครื่อง
+  type View = "album" | "wish" | "library";
+  const [view, setViewState] = useState<View>(() => { try { const v = localStorage.getItem(VIEW_KEY); return v === "wish" || v === "library" ? v : "album"; } catch { return "album"; } });
+  const setView = (v: View) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ไม่จำก็ได้ */ } };
+  const [libCount, setLibCount] = useState<number | null>(null);
   const [wishFilter, setWishFilter] = useState<WishStage | "all">("all");
   const [wishFormOpen, setWishFormOpen] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(openAlbumId);
@@ -79,7 +83,7 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
   const [incoming, setIncoming] = useState<File[] | null>(null);
   const drop = useFileDrop((files) => setIncoming(files), {
     // เปิดป๊อปอัลบั้ม/ฟอร์มอยู่ = ไม่รับที่หน้ารวม (ในอัลบั้มมีช่องลากวางของมันเอง)
-    accept: ALBUM_ACCEPT, folders: true, disabled: !canUpload || !!detailId || formOpen || wishFormOpen,
+    accept: ALBUM_ACCEPT, folders: true, disabled: !canUpload || !!detailId || formOpen || wishFormOpen || view === "library",
     onReject: () => toast.error(t("ลากได้เฉพาะรูปหรือวิดีโอ", "Only photos or videos")),
     onBusy: () => canUpload ? undefined : toast.error(trash ? t("ออกจากถังขยะก่อน แล้วค่อยลากไฟล์มาวาง", "Leave the trash view first") : t("คุณยังไม่มีสิทธิ์อัปไฟล์ (assets.upload)", "You can't upload files (assets.upload)")),
   });
@@ -139,6 +143,7 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
   const shown = trash ? filtered : stage === "all" ? realAlbums.filter((a) => a.status.stage !== "closed") : realAlbums.filter((a) => a.status.stage === stage);
   const shownWishes = wishFilter === "all" ? wishes : wishes.filter((a) => wishStage(a) === wishFilter);
   const wishMode = view === "wish" && !trash;
+  const libraryMode = view === "library" && !trash;
   const detailAlbum = albums.find((a) => a.id === detailId) ?? null;
   const typeLabel = (k: string) => { const pt = POST_TYPES.find((x) => x.value === k); return pt ? t(pt.label, pt.label_en) : k; };
   const brandsInUse = brands.filter((b) => albums.some((a) => a.brand_id === b.id));
@@ -161,8 +166,8 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
           <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2"><Icon name="library" />Contents</h2>
           <p className="text-sm text-slate-500">{t("อัลบั้มรูป/วิดีโอจากการถ่าย 1 ครั้ง ไฟล์ตัวจริงอยู่ Google Drive · แตกเป็นโพสต์ในปฏิทินได้หลายโพสต์ สถานะขยับเองตามโพสต์", "Shoot albums — originals stay in Google Drive · turn into calendar posts; status follows the posts")}</p>
         </div>
-        {canUpload && !wishMode && <PickMediaButtons onFiles={setIncoming} />}
-        {can("assets.upload") && !trash && (wishMode ? (
+        {canUpload && !wishMode && !libraryMode && <PickMediaButtons onFiles={setIncoming} />}
+        {can("assets.upload") && !trash && !libraryMode && (wishMode ? (
           <button onClick={() => setWishFormOpen(true)} className="inline-flex items-center gap-1.5 h-9 px-4 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700">
             <Icon name="tip" />{t("เพิ่มรายการที่อยากได้", "New wish")}
           </button>
@@ -176,10 +181,10 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
       {/* อัลบั้ม | อยากได้ */}
       {!trash && (
         <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 gap-1" role="tablist">
-          {([["album", "image", "อัลบั้ม", "Albums", albums.filter((a) => a.phase === "album").length], ["wish", "tip", "อยากได้", "Wishes", albums.filter((a) => a.phase === "wish").length]] as const).map(([k, ic, th, en, n]) => (
+          {([["album", "image", "อัลบั้ม", "Albums", albums.filter((a) => a.phase === "album").length], ["wish", "tip", "อยากได้", "Wishes", albums.filter((a) => a.phase === "wish").length], ["library", "bookmark", "คลัง Ref", "Ref library", libCount]] as const).map(([k, ic, th, en, n]) => (
             <button key={k} role="tab" aria-selected={view === k} onClick={() => setView(k)}
               className={`inline-flex items-center gap-1.5 h-8 px-3.5 rounded-lg text-sm ${view === k ? "bg-violet-600 text-white" : "text-slate-600 hover:bg-slate-50"}`}>
-              <Icon name={ic} />{t(th, en)}<span className={`text-xs ${view === k ? "text-white/75" : "text-slate-400"}`}>{n}</span>
+              <Icon name={ic} />{t(th, en)}{n != null && <span className={`text-xs ${view === k ? "text-white/75" : "text-slate-400"}`}>{n}</span>}
             </button>
           ))}
         </div>
@@ -197,6 +202,9 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
           ))}
         </div>
       )}
+      {libraryMode && <RefLibraryBoard brands={brands} onCount={setLibCount} />}
+
+      {!libraryMode && (<>
       {!trash && !wishMode && (
         <div className="flex gap-1 overflow-x-auto pb-1 -mx-1 px-1" role="tablist">
           {(["all", ...ALBUM_STAGES] as const).map((s) => {
@@ -335,6 +343,7 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
           })}
         </div>
       )}
+      </>)}
 
       <AlbumFormModal open={formOpen} album={null} brands={brands} defaultBrandId={brandId || null} onClose={() => setFormOpen(false)}
         onSaved={(a) => { setFormOpen(false); toast.success(t("สร้างอัลบั้มแล้ว — ลากไฟล์มาวางได้เลย", "Album created — drop files in")); void load(); setDetailId(a.id); }} />

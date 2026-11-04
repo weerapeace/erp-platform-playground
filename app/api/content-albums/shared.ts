@@ -1,6 +1,7 @@
 /** ของใช้ร่วมของ /api/content-albums/* (แยกจาก route.ts — route ต้อง export แค่ handler) */
 import { normalizeCaptionDrafts } from "@/lib/content-album-captions";
 import { POST_TYPES } from "@/lib/creative-tasks";
+import { cleanRefUrl, refProvider } from "@/lib/content-album-refs";
 
 // ประเภท Content ที่อยากได้ = ชุดเดียวกับประเภทโพสต์ (lib/creative-tasks POST_TYPES)
 const CONTENT_TYPE_KEYS = new Set(POST_TYPES.map((t) => t.value));
@@ -10,6 +11,35 @@ export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID
 export const uuidList = (v: unknown): string[] => (Array.isArray(v) ? [...new Set(v.filter(isUuid))] : []);
 export const codeList = (v: unknown): string[] =>
   Array.isArray(v) ? [...new Set(v.map((x) => String(x ?? "").trim()).filter((s) => /^[a-z0-9_-]{1,40}$/i.test(s)))] : [];
+
+const clipText = (v: unknown, n: number) => String(v ?? "").trim().slice(0, n) || null;
+
+/**
+ * ตรวจเนื้อ Reference 1 ชิ้น (ใช้ร่วม: Reference ของรายการ /[id]/refs + คลัง Reference กลาง /api/content-refs)
+ *   { kind: "image", r2_key } (ต้องเป็นรูปที่อัปผ่านตัวอัปกลาง โฟลเดอร์ content-refs — กันชี้ไฟล์คนอื่น)
+ *   { kind: "link", url, title?, thumb_url? } · { kind: "text", body } · + note? ("ชอบตรงไหน")
+ */
+export function cleanRefInput(body: Record<string, unknown>): { row: Record<string, unknown> } | { error: string } {
+  const kind = String(body.kind ?? "");
+  const row: Record<string, unknown> = { kind, note: clipText(body.note, 500) };
+  if (kind === "image") {
+    const key = typeof body.r2_key === "string" && /^content-refs\/[\w./-]+$/.test(body.r2_key) && !body.r2_key.includes("..") ? body.r2_key : null;
+    if (!key) return { error: "รูปไม่ถูกต้อง" };
+    row.r2_key = key;
+  } else if (kind === "link") {
+    const url = cleanRefUrl(String(body.url ?? ""));
+    if (!url) return { error: "ลิงก์ต้องขึ้นต้นด้วย http:// หรือ https://" };
+    row.url = url; row.provider = refProvider(url); row.title = clipText(body.title, 300);
+    row.thumb_url = cleanRefUrl(String(body.thumb_url ?? ""));
+  } else if (kind === "text") {
+    const text = clipText(body.body, 2000);
+    if (!text) return { error: "พิมพ์ข้อความก่อน" };
+    row.body = text;
+  } else {
+    return { error: "ชนิด Reference ไม่ถูกต้อง" };
+  }
+  return { row };
+}
 
 /**
  * ตรวจ + ทำความสะอาดช่องของอัลบั้ม (ใช้ทั้งสร้างและแก้) — คืน { patch } หรือ { error } เป็นภาษาคน

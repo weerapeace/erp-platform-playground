@@ -44,8 +44,9 @@ export type AlbumRef = {
   id: string; kind: "image" | "link" | "text";
   r2_key: string | null; url: string | null; provider: string | null; title: string | null; thumb_url: string | null;
   body: string | null; note: string | null; sort_order: number; created_by: string | null; created_at: string;
+  library_id: string | null;   // หยิบมาจาก/เก็บเข้าคลัง Reference กลาง (lib/content-ref-library) · ว่าง = ของรายการนี้อย่างเดียว
 };
-const REF_COLS = "id, album_id, kind, r2_key, url, provider, title, thumb_url, body, note, sort_order, created_by, created_at";
+const REF_COLS = "id, album_id, kind, r2_key, url, provider, title, thumb_url, body, note, sort_order, created_by, created_at, library_id";
 
 /** Reference ทั้งหมดของอัลบั้ม (ลำดับที่จัด → เก่าก่อน) */
 export async function loadAlbumRefs(admin: Admin, albumId: string): Promise<AlbumRef[]> {

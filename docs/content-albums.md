@@ -88,6 +88,19 @@ audit_logs entity `content_album`: create · update (เก่า→ใหม่
 - ลิงก์: `lib/content-album-refs` (refProvider · refEmbedUrl: YouTube/TikTok เต็ม/Pinterest เล่นในหน้า · ลิงก์สั้น/IG = เปิดลิงก์) · พรีวิวก่อนบันทึก: TikTok/Pinterest ผ่าน `/api/social-embed` · อื่น ๆ `/api/link-preview`
 - หน้าจอ: แท็บ "อัลบั้ม | อยากได้" ที่หน้า Contents (จำแท็บในเครื่อง) · ฟอร์ม = `AlbumFormModal phase="wish"` · `WishDetailModal` · กระดาน `RefBoard` (ใช้ซ้ำในอัลบั้ม ส่วน "Reference ที่ขอไว้") · การ์ดปะ Reference 4 ชิ้น (`RefTile`)
 
+## คลัง Reference กลาง (2026-11-04)
+
+ใช้ทำอะไร: เก็บ Reference ดี ๆ ไว้ที่เดียว (รูป / ลิงก์วิดีโอ-โพสต์ / ข้อความ) แล้ว**หยิบใส่รายการที่อยากได้หรืออัลบั้มไหนก็ได้** ไม่ต้องหาหรืออัปใหม่ทุกครั้ง
+
+- ตาราง `content_ref_library` (migration `202611130510_content_ref_library` · RLS ปิด) — ช่องเหมือน Reference ของรายการ + `tags[]` + `brand_id` (ว่าง = ทุกแบรนด์)
+- **หยิบใส่** = ก๊อปแถวไป `content_album_refs` + `library_id` (ไฟล์รูปตัวเดิม ไม่อัปซ้ำ · "ชอบตรงไหน" เขียนแยกต่อรายการ · ชิ้นที่มีในรายการแล้วข้าม) · ลบออกจากคลังทีหลัง = รายการที่หยิบไปแล้ว**ไม่หายตาม** (library_id กลายเป็นว่าง)
+- **ดาว** ที่การ์ด Reference ในรายการ = เก็บเข้าคลัง (แบรนด์ = แบรนด์ของรายการ) · ดาวสีเหลือง = อยู่ในคลังแล้ว · กันเก็บซ้ำ: รูป/ลิงก์ (ตัด www, #, / ท้าย)/ข้อความเดียวกัน = ผูกกับชิ้นเดิม (`refDedupeKey`)
+- "ใช้กี่ครั้ง" = จำนวน Reference ในรายการที่ library_id ชี้มา
+- API `/api/content-refs` (GET assets.view · POST/PATCH assets.upload · DELETE assets.delete · audit entity `content_ref_library` create/update/delete) · หยิบใส่ = `POST /api/content-albums/[id]/refs { library_ids }` (audit ref_add from_library)
+- โค้ด: pure `lib/content-ref-library` (normalizeTags · refDedupeKey · libraryTags · filterLibrary · rankForPicker + test) · เซิร์ฟเวอร์ `lib/content-ref-library-server` · ตรวจเนื้อ Reference ใช้ร่วม `cleanRefInput` (app/api/content-albums/shared)
+- หน้าจอ: แท็บที่ 3 "คลัง Ref" ในหน้า Contents (`RefLibraryBoard` — ค้น/แท็ก/แบรนด์/ติดแท็ก/ตั้งแบรนด์/ลบ) · ปุ่ม "หยิบจากคลัง Ref" ใน `RefBoard` → `RefLibraryPicker` (เลือกหลายชิ้น แตะทั้งการ์ด · เรียงแบรนด์เดียวกัน → ทุกแบรนด์ → แบรนด์อื่น · ใช้บ่อยก่อน) · `RefBoard` ใช้กับคลังได้ด้วย (prop `source` + `tileExtra`) · `RefTile` แยกไฟล์ `ref-tile.tsx`
+- ห้ามทำ: สร้างคลัง Reference แยกในหน้าอื่น — ใช้ตารางนี้ + API นี้
+
 ## ข้อจำกัด
 
 - HEIC ไม่มีรูปย่อ (ขึ้นไอคอน) · วิดีโอที่ดึงจาก Drive ไม่มีภาพปก · ช่วยคัดรูป/AI ไม่นับรูปที่ไม่มีรูปย่อ

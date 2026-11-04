@@ -4,9 +4,11 @@
  * กระดาน Reference (ของกลางของหน้า Contents) — ใช้ทั้งหน้า "รายการที่อยากได้" และในอัลบั้ม (ไว้เทียบตอนคัดรูป)
  *   เพิ่ม: รูป (ลากวาง / วางจากคลิปบอร์ด / เลือกไฟล์) · ลิงก์วิดีโอ/โพสต์ (TikTok/YouTube/IG/Pinterest/เว็บ → พรีวิว + เล่นในหน้าเท่าที่ฝังได้) · ข้อความ
  *   แต่ละชิ้นจด "ชอบตรงไหน" ได้ · กรองตามชนิด · ลบ (ถามก่อน)
+ *   คลัง Reference กลาง: ปุ่ม "หยิบจากคลัง Ref" (RefLibraryPicker) · ดาวที่การ์ด = เก็บเข้าคลัง (ดาวเต็ม = อยู่ในคลังแล้ว)
+ *   ใช้กับคลังเองก็ได้ (แท็บ "คลัง Ref"): ส่ง source แทน albumId + tileExtra (แท็ก/แบรนด์/ใช้กี่ครั้ง)
  * ใช้ของกลาง: useFileDrop · askConfirm · FileThumb · Icon · lib/content-album-refs (ตัวแยกลิงก์/ตัวฝัง)
  */
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
@@ -15,21 +17,59 @@ import { useCreativeOptions } from "@/app/tasks/use-options";
 import { useFileDrop } from "@/components/file-drop";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { REF_PROVIDER_META, cleanRefUrl, refEmbedUrl, type RefProvider } from "@/lib/content-album-refs";
-import { addAlbumRef, removeAlbumRef, setAlbumRefNote, resolveRefLink, uploadRefImage, type AlbumRef } from "./data";
+import { addAlbumRef, removeAlbumRef, setAlbumRefNote, resolveRefLink, uploadRefImage, saveRefToLibrary, type AlbumRef, type NewRef } from "./data";
 import { FileThumb } from "./album-bits";
+import { RefLibraryPicker } from "./ref-library-picker";
 
 type Filter = "all" | "image" | "link" | "text";
 
-export function RefBoard({ albumId, refs, canEdit, onChanged, compact = false }: {
-  albumId: string;
-  refs: AlbumRef[];
+/** ช่องที่กระดานใช้ (Reference ของรายการ และชิ้นในคลังกลาง ใช้ร่วมกัน) */
+export type RefLike = Pick<AlbumRef, "id" | "kind" | "r2_key" | "url" | "provider" | "title" | "thumb_url" | "body" | "note"> & { library_id?: string | null };
+/** ที่เก็บของกระดาน — ค่าเริ่ม = Reference ของรายการ (albumId) · คลังกลางส่งของตัวเอง */
+export type RefSource = {
+  add: (ref: NewRef) => Promise<void>;
+  remove: (r: RefLike) => Promise<void>;
+  setNote: (r: RefLike, note: string) => Promise<void>;
+  removeText?: { title: string; message?: string };
+};
+
+export function RefBoard({ albumId, source, refs, canEdit, canRemove = canEdit, onChanged, compact = false, brandId = null, tileExtra, emptyText }: {
+  /** Reference ของรายการนี้ (มีปุ่มหยิบจากคลัง + ดาวเก็บเข้าคลัง) */
+  albumId?: string;
+  /** แทน albumId — กระดานของคลังกลาง */
+  source?: RefSource;
+  refs: RefLike[];
   canEdit: boolean;
+  canRemove?: boolean;
   onChanged: () => void;
   /** ในอัลบั้ม: กริดเล็กลง ไม่มีช่องเพิ่มใหญ่ */
   compact?: boolean;
+  /** แบรนด์ของรายการ — ป๊อปหยิบจากคลังเรียงแบรนด์นี้ขึ้นก่อน */
+  brandId?: string | null;
+  /** ช่องเพิ่มใต้การ์ด (คลังกลาง: แท็ก/แบรนด์/ใช้กี่ครั้ง) */
+  tileExtra?: (r: RefLike) => ReactNode;
+  /** ข้อความตอนยังไม่มีอะไรเลย (แทนค่าเริ่ม) */
+  emptyText?: string;
 }) {
   const t = useT();
   const toast = useToast();
+  const src: RefSource = useMemo(() => source ?? {
+    add: (ref) => addAlbumRef(albumId!, ref),
+    remove: (r) => removeAlbumRef(albumId!, r.id),
+    setNote: (r, note) => setAlbumRefNote(albumId!, r.id, note),
+  }, [source, albumId]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [saving, setSaving] = useState<string | null>(null);
+  const haveLibraryIds = useMemo(() => new Set(refs.map((r) => r.library_id).filter((x): x is string => !!x)), [refs]);
+  const saveToLibrary = async (r: RefLike) => {
+    if (!albumId || saving) return;
+    setSaving(r.id);
+    try {
+      const res = await saveRefToLibrary(albumId, r.id);
+      toast.success(res.existed ? t("มีในคลัง Ref อยู่แล้ว — ผูกกับชิ้นเดิมให้", "Already in the library — linked to it") : t("เก็บเข้าคลัง Ref แล้ว · ติดแท็กได้ที่แท็บคลัง Ref", "Saved to the library · add tags in the Library tab"));
+      onChanged();
+    } catch (e) { toast.error((e as Error).message); } finally { setSaving(null); }
+  };
   const { platforms } = useCreativeOptions();
   const platMeta = useMemo(() => new Map(platforms.map((p) => [p.value, p])), [platforms]);
   const [filter, setFilter] = useState<Filter>("all");
@@ -49,7 +89,7 @@ export function RefBoard({ albumId, refs, canEdit, onChanged, compact = false }:
     const imgs = files.filter((f) => f.type.startsWith("image/"));
     if (!imgs.length) return;
     void run(t(`กำลังเพิ่มรูป ${imgs.length} รูป…`, `Adding ${imgs.length} image(s)…`), async () => {
-      for (const f of imgs) await addAlbumRef(albumId, { kind: "image", r2_key: await uploadRefImage(f) });
+      for (const f of imgs) await src.add({ kind: "image", r2_key: await uploadRefImage(f) });
     });
   };
   const addLink = (raw = link) => {
@@ -58,23 +98,26 @@ export function RefBoard({ albumId, refs, canEdit, onChanged, compact = false }:
     void run(t("กำลังอ่านลิงก์…", "Reading the link…"), async () => {
       const info = await resolveRefLink(raw);
       if (!info) throw new Error(t("ลิงก์ไม่ถูกต้อง", "Invalid link"));
-      await addAlbumRef(albumId, { kind: "link", ...info });
+      await src.add({ kind: "link", ...info });
       setLink("");
     });
   };
   const addText = () => {
     if (!text.trim()) { setTextErr(t("พิมพ์ข้อความก่อน", "Type something first")); return; }
     setTextErr(null);
-    void run(t("กำลังบันทึก…", "Saving…"), async () => { await addAlbumRef(albumId, { kind: "text", body: text.trim() }); setText(""); });
+    void run(t("กำลังบันทึก…", "Saving…"), async () => { await src.add({ kind: "text", body: text.trim() }); setText(""); });
   };
-  const remove = async (r: AlbumRef) => {
-    if (!(await askConfirm({ title: t("ลบ Reference นี้?", "Delete this reference?"), message: r.title || r.body || r.url || "", confirmText: t("ลบ", "Delete"), variant: "danger" }))) return;
-    void run(t("กำลังลบ…", "Deleting…"), () => removeAlbumRef(albumId, r.id));
+  const remove = async (r: RefLike) => {
+    const label = r.title || r.body || r.url || "";
+    if (!(await askConfirm({ title: src.removeText?.title ?? t("ลบ Reference นี้?", "Delete this reference?"), message: src.removeText?.message ? <><p>{label}</p><p className="mt-2 text-slate-500">{src.removeText.message}</p></> : label, confirmText: t("ลบ", "Delete"), variant: "danger" }))) return;
+    void run(t("กำลังลบ…", "Deleting…"), () => src.remove(r));
   };
   const saveNote = () => {
     if (!editNote) return;
     const n = editNote; setEditNote(null);
-    void run(t("กำลังบันทึก…", "Saving…"), () => setAlbumRefNote(albumId, n.id, n.value));
+    const r = refs.find((x) => x.id === n.id);
+    if (!r || (r.note ?? "") === n.value.trim()) return;
+    void run(t("กำลังบันทึก…", "Saving…"), () => src.setNote(r, n.value));
   };
 
   // วางรูปจากคลิปบอร์ด / วางลิงก์ทั้งก้อน (ตอนไม่ได้พิมพ์อยู่ในช่องไหน)
@@ -102,7 +145,17 @@ export function RefBoard({ albumId, refs, canEdit, onChanged, compact = false }:
           </button>
         ))}
         {busy && <span className="ml-auto text-xs text-violet-700">{busy}</span>}
+        {albumId && canEdit && (
+          <button type="button" onClick={() => setPickerOpen(true)} className={`${busy ? "" : "ml-auto"} inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700`}
+            title={t("เลือก Reference ที่เก็บไว้ในคลังกลาง มาใส่รายการนี้ได้เลย (ไม่ต้องอัปใหม่)", "Pick saved references from the central library")}>
+            <Icon name="bookmark" />{t("หยิบจากคลัง Ref", "Pick from library")}
+          </button>
+        )}
       </div>
+      {albumId && pickerOpen && (
+        <RefLibraryPicker albumId={albumId} brandId={brandId} haveIds={haveLibraryIds} onClose={() => setPickerOpen(false)}
+          onAdded={() => { setPickerOpen(false); onChanged(); }} />
+      )}
 
       {canEdit && (
         <div className={`grid gap-2 ${compact ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-1 md:grid-cols-3"}`}>
@@ -132,7 +185,7 @@ export function RefBoard({ albumId, refs, canEdit, onChanged, compact = false }:
       )}
 
       {shown.length === 0 ? (
-        <p className="text-sm text-slate-400 text-center py-6">{refs.length ? t("ไม่มี Reference ชนิดนี้", "No references of this kind") : t("ยังไม่มี Reference — เพิ่มรูป ลิงก์วิดีโอ หรือข้อความ ให้ทีมถ่ายเห็นภาพเดียวกัน", "No references yet — add images, video links, or notes so the shoot team sees the same picture")}</p>
+        <p className="text-sm text-slate-400 text-center py-6">{refs.length ? t("ไม่มี Reference ชนิดนี้", "No references of this kind") : emptyText ? emptyText : albumId ? t("ยังไม่มี Reference — เพิ่มรูป ลิงก์วิดีโอ หรือข้อความ หรือกด \"หยิบจากคลัง Ref\" ให้ทีมถ่ายเห็นภาพเดียวกัน", "No references yet — add images, video links, notes, or pick from the library") : t("ไม่มี Reference ในคลังที่ตรงกับตัวกรอง", "No library references match")}</p>
       ) : (
         <div className={`grid gap-2 ${compact ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4" : "grid-cols-2 sm:grid-cols-3 lg:grid-cols-4"}`}>
           {shown.map((r) => {
@@ -179,8 +232,15 @@ export function RefBoard({ albumId, refs, canEdit, onChanged, compact = false }:
                       </button>
                     )}
                   </div>
-                  {canEdit && <button type="button" onClick={() => void remove(r)} aria-label={t("ลบ", "Delete")} className="w-6 h-6 grid place-items-center rounded text-slate-400 hover:text-red-600 hover:bg-red-50 shrink-0"><Icon name="delete" size={13} /></button>}
+                  {albumId && (r.library_id ? (
+                    <span title={t("อยู่ในคลัง Ref แล้ว", "In the library")} aria-label={t("อยู่ในคลัง Ref แล้ว", "In the library")} className="w-6 h-6 grid place-items-center rounded text-amber-500 shrink-0"><Icon name="star" size={13} /></span>
+                  ) : canEdit && (
+                    <button type="button" onClick={() => void saveToLibrary(r)} disabled={saving === r.id} aria-label={t("เก็บเข้าคลัง Ref", "Save to library")} title={t("เก็บเข้าคลัง Ref (รายการอื่นหยิบไปใช้ได้)", "Save to the library for reuse")}
+                      className="w-6 h-6 grid place-items-center rounded text-slate-300 hover:text-amber-500 hover:bg-amber-50 shrink-0 disabled:opacity-50"><Icon name="star" size={13} /></button>
+                  ))}
+                  {canRemove && <button type="button" onClick={() => void remove(r)} aria-label={t("ลบ", "Delete")} className="w-6 h-6 grid place-items-center rounded text-slate-400 hover:text-red-600 hover:bg-red-50 shrink-0"><Icon name="delete" size={13} /></button>}
                 </div>
+                {tileExtra?.(r)}
               </div>
             );
           })}
@@ -190,20 +250,4 @@ export function RefBoard({ albumId, refs, canEdit, onChanged, compact = false }:
   );
 }
 
-/** Reference 1 ชิ้นแบบย่อ (ภาพปะหน้าการ์ดรายการที่อยากได้) */
-export function RefTile({ r, className = "" }: { r: AlbumRef; className?: string }) {
-  const { platforms } = useCreativeOptions();
-  if (r.kind === "image" && r.r2_key) return <FileThumb r2Key={r.r2_key} type="image" width={240} className={className} />;
-  if (r.kind === "text") return <div className={`bg-slate-50 p-1.5 text-[11px] leading-snug text-slate-600 overflow-hidden ${className}`}><Icon name="note" className="text-slate-400 mr-0.5" />{r.body}</div>;
-  const prov = (r.provider ?? "web") as RefProvider;
-  return (
-    <div className={`relative bg-slate-800 text-white grid place-items-center overflow-hidden ${className}`}>
-      {r.thumb_url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={r.thumb_url} alt="" referrerPolicy="no-referrer" className="absolute inset-0 w-full h-full object-cover opacity-75" />
-      )}
-      <span className="relative">{prov === "web" ? <Icon name="web" size={18} /> : <PlatformIcon code={prov} iconKey={platforms.find((p) => p.value === prov)?.icon_key} size={18} />}</span>
-      <span className="absolute bottom-1 left-1 inline-flex items-center px-1 rounded bg-black/55 text-[10px]"><Icon name="play" size={10} /></span>
-    </div>
-  );
-}
+export { RefTile } from "./ref-tile";
