@@ -37,7 +37,9 @@ export type VoucherHeader = {
   /** สถานะจ่ายค่าสินค้าของแต่ละใบ PO ในใบสำคัญนี้ — ยอดค้างจ่ายอ้างจากราคาในใบสำคัญ (goods_thb) */
   po_payments: PoPayment[];
 };
-export type PoPayment = { po_id: string; po_no: string; currency: string; payment_status: string; paid_date: string | null; paid_amount_thb: number | null; goods_thb: number; goods_foreign: number; grand_total: number };
+export type PoPayment = { po_id: string; po_no: string; currency: string; payment_status: string; paid_date: string | null; paid_amount_thb: number | null; goods_thb: number; goods_foreign: number; grand_total: number;
+  /** บิลจีนที่ยังรอโอนของใบนี้ (DB trigger จาก china_bill_po_links) → "ลงบิลแล้ว รอโอน" · paid_via = china_bill เมื่อจ่ายครบด้วยบิลจีน */
+  china_bill_id?: string | null; paid_via?: string | null };
 export type VoucherLine = {
   id: string; gr_id: string | null; gr_line_id: string | null; po_id: string | null; po_line_id: string | null;
   po_no: string | null; gr_no: string | null; item_sku_id: string | null; item_name: string; uom: string | null;
@@ -270,12 +272,13 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
   const poIds = [...new Set(lines.map((l) => l.po_id ?? "").filter(Boolean))];
   const poPayments: PoPayment[] = [];
   if (poIds.length) {
-    const { data: pos } = await admin.from("purchase_orders_v2").select("id, po_no, currency, payment_status, paid_date, paid_amount_thb, grand_total").in("id", poIds);
+    const { data: pos } = await admin.from("purchase_orders_v2").select("id, po_no, currency, payment_status, paid_date, paid_amount_thb, grand_total, china_bill_id, paid_via").in("id", poIds);
     for (const p of (pos ?? []) as Row[]) {
       const mine = lines.filter((l) => l.po_id === String(p.id));
       poPayments.push({
         po_id: String(p.id), po_no: String(p.po_no ?? ""), currency: String(p.currency ?? "THB").toUpperCase(),
         payment_status: String(p.payment_status ?? "unpaid"), paid_date: (p.paid_date as string) ?? null,
+        china_bill_id: (p.china_bill_id as string) ?? null, paid_via: (p.paid_via as string) ?? null,
         paid_amount_thb: p.paid_amount_thb == null ? null : num(p.paid_amount_thb), grand_total: num(p.grand_total),
         goods_thb: Math.round(mine.reduce((a, l) => a + num(l.line_total_thb), 0) * 100) / 100,
         goods_foreign: Math.round(mine.reduce((a, l) => a + num(l.unit_price) * num(l.qty), 0) * 100) / 100,

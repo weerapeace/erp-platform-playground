@@ -23,6 +23,8 @@ import { SendToChinaPayButton } from "@/components/china-pay-send-button";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { computeVoucher, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
+import { voucherChecklist } from "@/lib/purchase-voucher-checklist";
+import { CollapseCard, VoucherChecklistCard, VoucherConfirmModal, VoucherNextSteps, type ConfirmResult } from "./voucher-side";
 
 type Detail = { header: VoucherHeader; lines: VoucherLine[] };
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
@@ -82,6 +84,8 @@ export default function PurchaseVoucherFormPage() {
   const [voidReason, setVoidReason] = useState("");
   const [voiding, setVoiding] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [lastConfirm, setLastConfirm] = useState<ConfirmResult | null>(null);   // ผลยืนยันล่าสุด (อัปเดตราคาไปกี่ที่) → โชว์ในการ์ดงานถัดไป
+  const [addOpen, setAddOpen] = useState(false);   // แถบ ＋ เพิ่มรายการเอง (พับไว้)
 
   const applyData = useCallback((d: Detail) => {
     setData(d);
@@ -155,8 +159,10 @@ export default function PurchaseVoucherFormPage() {
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       toast.success(`ยืนยันแล้ว — เลขที่ ${j.pv_no}${j.failed ? ` (เขียนราคากลับไม่สำเร็จ ${j.failed} รายการ ดูในประวัติ)` : ""}`);
+      setLastConfirm({ pv_no: String(j.pv_no ?? ""), write_back: Array.isArray(j.write_back) ? j.write_back : [], failed: Number(j.failed) || 0 });
       setConfirmOpen(false);
       await load();
+      if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });   // ให้เห็นการ์ด "งานถัดไป"
     } catch (e) { toast.error("ยืนยันไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setConfirming(false); }
   };
@@ -263,6 +269,16 @@ export default function PurchaseVoucherFormPage() {
   const t = calc?.totals;
   // มีค่าส่งให้คิดไหม = ค่าเริ่มต้นของใบไม่ใช่ "ไม่คิด" หรือมีบรรทัดที่ระบุวิธีคิดเอง
   const anyShip = h.ship_method !== "none" || (data?.lines ?? []).some((l) => !!ln[l.id]?.ship_method);
+  // ค่าส่งมีปัญหา (ขาดคิว/กก. หรือเรท) → กล่องค่าส่งเปิดเอง + ขอบเหลือง
+  const shipIssue = anyShip && ((t?.missing_basis_count ?? 0) > 0 || (t?.missing_rate_count ?? 0) > 0);
+  // เช็กลิสต์ก่อนยืนยัน (กติกากลาง lib/purchase-voucher-checklist — ตรงกับที่ API ยืนยันจะปฏิเสธ)
+  const checklist = voucherChecklist({
+    line_count: data?.lines.length ?? 0, foreign, currency_label: sym.trim() || currency, fx_rate: num(h.fx_rate),
+    missing_price_count: t?.missing_price_count ?? 0, any_ship: anyShip, ship_total_thb: t?.ship_total_thb ?? 0,
+    missing_basis_count: t?.missing_basis_count ?? 0, missing_rate_count: t?.missing_rate_count ?? 0, dirty: dirty && !readonly,
+  });
+  const totals = { subtotal_foreign: t?.subtotal_foreign ?? 0, subtotal_thb: t?.subtotal_thb ?? 0, ship_total_thb: t?.ship_total_thb ?? 0, grand_total_thb: t?.grand_total_thb ?? 0 };
+  const skuCount = new Set((data?.lines ?? []).map((l) => l.item_sku_id).filter(Boolean)).size;
   const inputCls = "h-9 px-2 text-sm border border-slate-200 rounded-md bg-white disabled:bg-slate-50 disabled:text-slate-500";
 
   return (
@@ -290,8 +306,8 @@ export default function PurchaseVoucherFormPage() {
                 <a href={`/print/purchase-voucher/${id}`} target="_blank" rel="noreferrer" className={`h-9 px-3 text-xs rounded-md border inline-flex items-center ${hd.status === "confirmed" ? "border-slate-800 bg-slate-800 text-white hover:bg-slate-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>🖨 ใบซื้อ (ใบสำคัญรับ)</a>
                 {!readonly && <button onClick={() => setCancelOpen(true)} className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบร่าง</button>}
                 {canEdit && hd.status === "confirmed" && <button onClick={() => setVoidOpen(true)} title="ใส่ราคา/ค่าส่งผิด → ยกเลิกใบนี้ แล้วออกใบใหม่" className="h-9 px-3 text-xs rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกใบนี้</button>}
-                {!readonly && <button onClick={() => void save()} disabled={saving || !dirty} className="h-9 px-4 text-sm rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40">{saving ? "กำลังบันทึก…" : "💾 บันทึกร่าง"}</button>}
-                {!readonly && <button onClick={() => setConfirmOpen(true)} disabled={saving} className="h-9 px-4 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">✓ ยืนยัน + ออกเลข</button>}
+                {/* บันทึกร่าง / ยืนยัน ย้ายไปการ์ด "ก่อนยืนยัน" ด้านขวา (แบบ B) — จอแคบการ์ดอยู่ล่างสุด จึงมีปุ่มสำรองบนหัว */}
+                {!readonly && <button onClick={() => setConfirmOpen(true)} disabled={saving} className="xl:hidden h-9 px-4 text-sm font-medium rounded-md bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-40">✓ ยืนยัน + ออกเลข</button>}
               </div>
             </div>
 
@@ -315,61 +331,8 @@ export default function PurchaseVoucherFormPage() {
                   </label>
                 </div>
 
-                {/* บิลจากร้าน (ภาษาจีน) — AI อ่าน + จับคู่กับใบสั่งซื้อของร้านนี้ → คนเช็ก → ใส่ลงใบ (ราคา ¥ จากบิล) */}
-                <SellerBillPanel voucherId={id} readonly={readonly} onApplied={load} />
-
-                {/* ค่าส่ง */}
-                <div className="bg-white border border-slate-200 rounded-xl p-4">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-sm font-semibold text-slate-700">🚚 ค่าส่ง</span>
-                    {/* ร้านขนส่งจากตั้งค่ากลาง — เลือกแล้วตั้งวิธีคิด + เรทให้ · เพิ่ม/แก้เรทที่เมนู ร้านขนส่ง */}
-                    <select value={h.carrier_id} disabled={readonly}
-                      onChange={(e) => { const c = carriers.find((x) => x.id === e.target.value); if (!c) { setHeader({ carrier_id: "", carrier_name: "" }); return; } setHeader({ carrier_id: c.id, carrier_name: c.name, ship_method: c.method, ship_rate_cube: c.rate_cube == null ? "" : String(c.rate_cube), ship_rate_kg: c.rate_kg == null ? "" : String(c.rate_kg) }); }}
-                      className={`${inputCls} max-w-[18rem]`} title="ร้านขนส่ง / เรทค่าส่ง">
-                      <option value="">— ร้านขนส่ง (ไม่ระบุ) —</option>
-                      {carriers.map((c) => <option key={c.id} value={c.id}>{c.name} · {[c.rate_cube != null ? `฿${fmtMoney(c.rate_cube, 0)}/คิว` : null, c.rate_kg != null ? `฿${fmtMoney(c.rate_kg, 0)}/กก.` : null].filter(Boolean).join(" · ") || "ยังไม่ตั้งเรท"}</option>)}
-                      {h.carrier_id && !carriers.some((c) => c.id === h.carrier_id) && <option value={h.carrier_id}>{h.carrier_name || "ร้านขนส่ง (ปิดใช้แล้ว)"}</option>}
-                    </select>
-                    {!readonly && <a href="/m/freight-carriers" target="_blank" rel="noreferrer" className="text-[11px] text-slate-400 hover:text-blue-600">⚙ ตั้งค่าร้านขนส่ง</a>}
-                    <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs">
-                      {(["none", "cube", "weight"] as ShipMethod[]).map((m, i) => (
-                        <button key={m} type="button" disabled={readonly} onClick={() => setHeader({ ship_method: m })} title="วิธีคิดเริ่มต้น — บรรทัดที่ไม่ได้ระบุเอง (จากใบส่งของ) จะใช้แบบนี้"
-                          className={`h-8 px-3 ${i > 0 ? "border-l border-slate-200" : ""} ${h.ship_method === m ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:opacity-70`}>{SHIP_LABEL[m]}</button>
-                      ))}
-                    </div>
-                    {anyShip && (
-                      <>
-                        <label className="text-xs text-slate-500 flex items-center gap-1.5">฿/คิว
-                          <MoneyInput value={h.ship_rate_cube} disabled={readonly} onChange={(v) => setHeader({ ship_rate_cube: v })} className={`${inputCls} w-20 text-right ${(t?.charged_cbm ?? 0) > 0 && !num(h.ship_rate_cube) ? "border-amber-300" : ""}`} />
-                        </label>
-                        <label className="text-xs text-slate-500 flex items-center gap-1.5">฿/กก.
-                          <MoneyInput value={h.ship_rate_kg} disabled={readonly} onChange={(v) => setHeader({ ship_rate_kg: v })} className={`${inputCls} w-20 text-right ${(t?.charged_kg ?? 0) > 0 && !num(h.ship_rate_kg) ? "border-amber-300" : ""}`} />
-                        </label>
-                        <span className="text-xs text-slate-500">
-                          {(t?.charged_cbm ?? 0) > 0 && <>{(t?.charged_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว × {fmtMoney(num(h.ship_rate_cube), 0)}</>}
-                          {(t?.charged_cbm ?? 0) > 0 && (t?.charged_kg ?? 0) > 0 && " + "}
-                          {(t?.charged_kg ?? 0) > 0 && <>{(t?.charged_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. × {fmtMoney(num(h.ship_rate_kg), 0)}</>}
-                          {" = "}<b className="text-slate-700">฿{fmtMoney(t?.ship_from_rate_thb)}</b>
-                        </span>
-                        <label className="text-xs text-slate-500 flex items-center gap-1.5 ml-2">ยอดจริงจากบิลขนส่ง (ทับ)
-                          <MoneyInput value={h.ship_manual_total} disabled={readonly} onChange={(v) => setHeader({ ship_manual_total: v })} className={`${inputCls} w-28 text-right`} placeholder="ว่าง = ใช้เรท" />
-                        </label>
-                      </>
-                    )}
-                  </div>
-                  <div className="mt-1.5 text-[11px] text-slate-400">แต่ละบรรทัดเลือกคิดจาก คิว หรือ น้ำหนัก ได้เอง (คอลัมน์ "คิดจาก") · อ่านใบส่งของแล้วระบบเลือกให้ตามกฎ Description (BOX = คิว, CLOTH BLOCK = น้ำหนัก) <a href="/m/freight-description-rules" target="_blank" rel="noreferrer" className="hover:text-blue-600 underline decoration-dotted">⚙ แก้กฎ</a></div>
-                  {anyShip && (t?.missing_basis_count ?? 0) > 0 && (
-                    <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_basis_count} รายการยังไม่มีคิว/กก. ตามวิธีที่เลือก (ไม่ได้ตั้งขนาด/น้ำหนักที่ Parent SKU และยังไม่ได้อ่านจากใบส่งของ) → รายการนั้นจะไม่ได้รับค่าส่ง ใส่เองในตารางได้</div>
-                  )}
-                  {anyShip && (t?.missing_rate_count ?? 0) > 0 && (
-                    <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_rate_count} รายการมีปริมาณแต่ยังไม่มีเรทของวิธีนั้น (ใส่ ฿/คิว หรือ ฿/กก. ให้ครบ)</div>
-                  )}
-                </div>
-
-                {/* ใบส่งของจากขนส่ง — AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → จับคู่สินค้า → ใช้ค่าจริง */}
-                <DeliveryBillPanel voucherId={id} readonly={readonly}
-                  lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no }))}
-                  onApplied={load} />
+                {/* บิลจากร้าน (ภาษาจีน) — ใบหยวน = ทางหลักเติมราคา จึงเปิดไว้บนสุด · ใบบาทพับไว้ล่างสุด (แบบ B) */}
+                {foreign && <SellerBillPanel voucherId={id} readonly={readonly} onApplied={load} />}
 
                 {/* รายการ */}
                 <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
@@ -462,8 +425,11 @@ export default function PurchaseVoucherFormPage() {
                       </tbody>
                     </table>
                   </div>
-                  {/* ＋ เพิ่มรายการเอง (ของที่ไม่ได้อยู่ในใบรับ / ใบที่สร้างเปล่า) · รายการจากใบรับ แก้จำนวน/ลบที่ใบรับ */}
-                  {!readonly && (
+                  {/* ＋ เพิ่มรายการเอง (ของที่ไม่ได้อยู่ในใบรับ / ใบที่สร้างเปล่า) · รายการจากใบรับ แก้จำนวน/ลบที่ใบรับ — พับไว้ (แบบ B) · ใบว่างเปิดให้เลย */}
+                  {!readonly && !addOpen && data.lines.length > 0 && (
+                    <button type="button" onClick={() => setAddOpen(true)} className="w-full border-t border-slate-100 px-3 py-2 text-left text-xs text-slate-500 hover:bg-slate-50 hover:text-blue-600">＋ เพิ่มรายการเอง (ค่ากล่อง · ของแถม · สินค้าที่ไม่อยู่ในใบรับ)</button>
+                  )}
+                  {!readonly && (addOpen || data.lines.length === 0) && (
                     <div className="border-t border-slate-100 bg-slate-50/60 px-3 py-2 flex items-end gap-2 flex-wrap">
                       <div className="w-64"><label className="block text-[11px] text-slate-500 mb-0.5">＋ เพิ่มรายการ — เลือกจากคลังสินค้า</label><SkuPicker value={addSku} onChange={(p) => { setAddSku(p); if (p) setAddName(""); }} placeholder="ค้นหารหัส / ชื่อสินค้า…" /></div>
                       <div className="flex-1 min-w-[10rem]"><label className="block text-[11px] text-slate-500 mb-0.5">หรือพิมพ์ชื่อเอง (เช่น ค่ากล่อง, ของแถม)</label><input value={addName} onChange={(e) => setAddName(e.target.value)} className={`${inputCls} w-full`} placeholder={addSku ? `[${addSku.code}] ${addSku.name}` : "ชื่อรายการ"} /></div>
@@ -473,102 +439,136 @@ export default function PurchaseVoucherFormPage() {
                     </div>
                   )}
                 </div>
+
+                {/* ค่าส่ง + ใบส่งของจากขนส่ง — พับไว้ (เปิดเองเมื่อมีปัญหา) · แบบ B */}
+                <CollapseCard title="🚚 ค่าส่ง" defaultOpen={shipIssue} tone={shipIssue ? "warn" : undefined}
+                  summary={!anyShip ? "ไม่คิดค่าส่ง · กดเพื่อเลือกร้านขนส่ง" : `${h.carrier_name || SHIP_LABEL[h.ship_method]} · ฿${fmtMoney(t?.ship_total_thb)}${shipIssue ? ` · ขาดข้อมูล ${(t?.missing_basis_count ?? 0) + (t?.missing_rate_count ?? 0)} รายการ` : ""}`}>
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* ร้านขนส่งจากตั้งค่ากลาง — เลือกแล้วตั้งวิธีคิด + เรทให้ · เพิ่ม/แก้เรทที่เมนู ร้านขนส่ง */}
+                        <select value={h.carrier_id} disabled={readonly}
+                          onChange={(e) => { const c = carriers.find((x) => x.id === e.target.value); if (!c) { setHeader({ carrier_id: "", carrier_name: "" }); return; } setHeader({ carrier_id: c.id, carrier_name: c.name, ship_method: c.method, ship_rate_cube: c.rate_cube == null ? "" : String(c.rate_cube), ship_rate_kg: c.rate_kg == null ? "" : String(c.rate_kg) }); }}
+                          className={`${inputCls} max-w-[18rem]`} title="ร้านขนส่ง / เรทค่าส่ง">
+                          <option value="">— ร้านขนส่ง (ไม่ระบุ) —</option>
+                          {carriers.map((c) => <option key={c.id} value={c.id}>{c.name} · {[c.rate_cube != null ? `฿${fmtMoney(c.rate_cube, 0)}/คิว` : null, c.rate_kg != null ? `฿${fmtMoney(c.rate_kg, 0)}/กก.` : null].filter(Boolean).join(" · ") || "ยังไม่ตั้งเรท"}</option>)}
+                          {h.carrier_id && !carriers.some((c) => c.id === h.carrier_id) && <option value={h.carrier_id}>{h.carrier_name || "ร้านขนส่ง (ปิดใช้แล้ว)"}</option>}
+                        </select>
+                        {!readonly && <a href="/m/freight-carriers" target="_blank" rel="noreferrer" className="text-[11px] text-slate-400 hover:text-blue-600">⚙ ตั้งค่าร้านขนส่ง</a>}
+                        <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs">
+                          {(["none", "cube", "weight"] as ShipMethod[]).map((m, i) => (
+                            <button key={m} type="button" disabled={readonly} onClick={() => setHeader({ ship_method: m })} title="วิธีคิดเริ่มต้น — บรรทัดที่ไม่ได้ระบุเอง (จากใบส่งของ) จะใช้แบบนี้"
+                              className={`h-8 px-3 ${i > 0 ? "border-l border-slate-200" : ""} ${h.ship_method === m ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:opacity-70`}>{SHIP_LABEL[m]}</button>
+                          ))}
+                        </div>
+                        {anyShip && (
+                          <>
+                            <label className="text-xs text-slate-500 flex items-center gap-1.5">฿/คิว
+                              <MoneyInput value={h.ship_rate_cube} disabled={readonly} onChange={(v) => setHeader({ ship_rate_cube: v })} className={`${inputCls} w-20 text-right ${(t?.charged_cbm ?? 0) > 0 && !num(h.ship_rate_cube) ? "border-amber-300" : ""}`} />
+                            </label>
+                            <label className="text-xs text-slate-500 flex items-center gap-1.5">฿/กก.
+                              <MoneyInput value={h.ship_rate_kg} disabled={readonly} onChange={(v) => setHeader({ ship_rate_kg: v })} className={`${inputCls} w-20 text-right ${(t?.charged_kg ?? 0) > 0 && !num(h.ship_rate_kg) ? "border-amber-300" : ""}`} />
+                            </label>
+                            <span className="text-xs text-slate-500">
+                              {(t?.charged_cbm ?? 0) > 0 && <>{(t?.charged_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว × {fmtMoney(num(h.ship_rate_cube), 0)}</>}
+                              {(t?.charged_cbm ?? 0) > 0 && (t?.charged_kg ?? 0) > 0 && " + "}
+                              {(t?.charged_kg ?? 0) > 0 && <>{(t?.charged_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. × {fmtMoney(num(h.ship_rate_kg), 0)}</>}
+                              {" = "}<b className="text-slate-700">฿{fmtMoney(t?.ship_from_rate_thb)}</b>
+                            </span>
+                            <label className="text-xs text-slate-500 flex items-center gap-1.5 ml-2">ยอดจริงจากบิลขนส่ง (ทับ)
+                              <MoneyInput value={h.ship_manual_total} disabled={readonly} onChange={(v) => setHeader({ ship_manual_total: v })} className={`${inputCls} w-28 text-right`} placeholder="ว่าง = ใช้เรท" />
+                            </label>
+                          </>
+                        )}
+                      </div>
+                      <div className="mt-1.5 text-[11px] text-slate-400">แต่ละบรรทัดเลือกคิดจาก คิว หรือ น้ำหนัก ได้เอง (คอลัมน์ "คิดจาก") · อ่านใบส่งของแล้วระบบเลือกให้ตามกฎ Description (BOX = คิว, CLOTH BLOCK = น้ำหนัก) <a href="/m/freight-description-rules" target="_blank" rel="noreferrer" className="hover:text-blue-600 underline decoration-dotted">⚙ แก้กฎ</a></div>
+                      {anyShip && (t?.missing_basis_count ?? 0) > 0 && (
+                        <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_basis_count} รายการยังไม่มีคิว/กก. ตามวิธีที่เลือก (ไม่ได้ตั้งขนาด/น้ำหนักที่ Parent SKU และยังไม่ได้อ่านจากใบส่งของ) → รายการนั้นจะไม่ได้รับค่าส่ง ใส่เองในตารางได้</div>
+                      )}
+                      {anyShip && (t?.missing_rate_count ?? 0) > 0 && (
+                        <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {t?.missing_rate_count} รายการมีปริมาณแต่ยังไม่มีเรทของวิธีนั้น (ใส่ ฿/คิว หรือ ฿/กก. ให้ครบ)</div>
+                      )}
+                    </div>
+    
+                    {/* ใบส่งของจากขนส่ง — AI อ่านรหัสขนส่ง + น้ำหนัก/คิวรายกล่อง → จับคู่สินค้า → ใช้ค่าจริง */}
+                    <DeliveryBillPanel voucherId={id} readonly={readonly}
+                      lines={data.lines.map((l) => ({ id: l.id, code: l.code, item_name: l.item_name, qty: l.qty, uom: l.uom, gr_no: l.gr_no }))}
+                      onApplied={load} />
+                  </div>
+                </CollapseCard>
+
+                {!foreign && (
+                  <CollapseCard title="✨ มีบิลจีน? ให้ AI อ่าน + เติมราคา" summary="ใช้กับบิลร้านภาษาจีน">
+                    <SellerBillPanel voucherId={id} readonly={readonly} onApplied={load} />
+                  </CollapseCard>
+                )}
               </div>
 
               {/* ขวา: สรุปยอด (ค่าส่งแยกบรรทัด ไม่รวมในราคาสินค้า) + การจ่ายเงิน (หลังยืนยัน) */}
-              <aside className="space-y-3">
-                <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} />
+              <aside className={`space-y-3 ${hd.status === "draft" ? "xl:sticky xl:top-4 xl:self-start" : ""}`}>
+                {/* ร่าง: เช็กลิสต์ก่อนยืนยัน + สรุปยอด + ปุ่มยืนยัน (แบบ B) */}
+                {hd.status === "draft" && canEdit && (
+                  <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} dirty={dirty} saving={saving}
+                    onSave={() => void save()} onConfirm={() => setConfirmOpen(true)} />
+                )}
+                {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} />}
+                {/* ยืนยันแล้ว: งานถัดไป (พิมพ์ · จ่ายค่าสินค้า · ค่าส่ง) */}
                 {hd.status === "confirmed" && (
-                  <div className="bg-white border border-slate-200 rounded-xl p-4">
-                    <div className="text-sm font-semibold text-slate-700 mb-2">💳 การจ่ายเงิน</div>
-                    <div className="text-[11px] text-slate-400 mb-2">ยอดค่าสินค้าอ้างจากราคาในใบสำคัญนี้ · มาร์คแล้วไปขึ้นที่ใบ PO / แดชบอร์ด / กระแสเงินสด</div>
-                    <div className="space-y-2">
-                      {hd.po_payments.map((p) => (
-                        <div key={p.po_id} className="border border-slate-200 rounded-lg px-3 py-2 text-sm">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-mono text-xs text-slate-600">{p.po_no}</span>
-                            <span className="tabular-nums font-medium text-slate-800">฿{fmtMoney(p.goods_thb)}{foreign ? <span className="text-[11px] text-slate-400 font-normal"> ({sym}{fmtMoney(p.goods_foreign)})</span> : null}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 mt-1">
-                            {p.payment_status === "paid"
-                              ? <span className="text-xs text-emerald-700">🟢 จ่ายแล้ว {p.paid_date ? formatDate(p.paid_date) : ""}{p.paid_amount_thb ? ` · ฿${fmtMoney(p.paid_amount_thb)}` : ""}</span>
-                              : <span className="text-xs text-amber-700">🟡 ค่าสินค้า รอจ่าย</span>}
-                            {canEdit && (p.payment_status === "paid"
-                              ? <button onClick={() => void markPoPaid(p, false)} disabled={payBusy} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">↩ ยกเลิกจ่าย</button>
-                              : <button onClick={() => void markPoPaid(p, true)} disabled={payBusy} className="h-7 px-2.5 text-[11px] font-medium rounded-md border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50">💰 จ่ายค่าสินค้าแล้ว</button>)}
-                          </div>
-                        </div>
-                      ))}
-                      {hd.ship_total_thb > 0 && (
-                        <div className="border border-orange-200 bg-orange-50/40 rounded-lg px-3 py-2 text-sm">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs text-slate-600">🚚 ค่าส่ง {hd.carrier_name ? `· ${hd.carrier_name}` : ""}</span>
-                            <span className="tabular-nums font-medium text-orange-700">฿{fmtMoney(hd.ship_total_thb)}</span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 mt-1">
-                            {hd.shipping_payment_status === "paid"
-                              ? <span className="text-xs text-emerald-700">🟢 จ่ายแล้ว {hd.shipping_paid_date ? formatDate(hd.shipping_paid_date) : ""}</span>
-                              : <span className="text-xs text-amber-700">🟡 ค่าส่ง รอจ่าย</span>}
-                            {canEdit && (hd.shipping_payment_status === "paid"
-                              ? <button onClick={() => void setShippingPaid(false)} disabled={payBusy} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">↩ ยกเลิกจ่าย</button>
-                              : <button onClick={() => void setShippingPaid(true)} disabled={payBusy} className="h-7 px-2.5 text-[11px] font-medium rounded-md border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50">💰 จ่ายค่าส่งแล้ว</button>)}
-                          </div>
-                          {canEdit && (
-                            <div className="mt-1.5 flex items-center gap-1.5">
-                              <select value={hd.shipping_bill_id ?? ""} onFocus={() => { if (shipBills.length === 0) void loadShipBills(); }} disabled={payBusy}
-                                onChange={(e) => void setShippingPaid(hd.shipping_payment_status === "paid", e.target.value || null)}
-                                className={`${inputCls} h-7 text-[11px] flex-1 min-w-0`} title="ผูกบิลค่าส่งจากแอปโอนเงินจีน (บิลที่ติ๊ก ค่าส่ง)">
-                                <option value="">— ผูกบิลค่าส่ง (แอปโอนเงินจีน) —</option>
-                                {hd.shipping_bill_id && !shipBills.some((b) => b.id === hd.shipping_bill_id) && <option value={hd.shipping_bill_id}>บิลที่ผูกไว้</option>}
-                                {shipBills.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
-                              </select>
+                  <VoucherNextSteps voucherId={id} header={hd} foreign={foreign} sym={sym} canEdit={canEdit} payBusy={payBusy} lastConfirm={lastConfirm}
+                    onMarkPoPaid={(po, paid) => void markPoPaid(po, paid)}
+                    shippingSlot={(
+                          <div className="border border-orange-200 bg-orange-50/40 rounded-lg px-3 py-2 text-sm">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs text-slate-600">🚚 ค่าส่ง {hd.carrier_name ? `· ${hd.carrier_name}` : ""}</span>
+                              <span className="tabular-nums font-medium text-orange-700">฿{fmtMoney(hd.ship_total_thb)}</span>
                             </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                            <div className="flex items-center justify-between gap-2 mt-1">
+                              {hd.shipping_payment_status === "paid"
+                                ? <span className="text-xs text-emerald-700">🟢 จ่ายแล้ว {hd.shipping_paid_date ? formatDate(hd.shipping_paid_date) : ""}</span>
+                                : <span className="text-xs text-amber-700">🟡 ค่าส่ง รอจ่าย</span>}
+                              {canEdit && (hd.shipping_payment_status === "paid"
+                                ? <button onClick={() => void setShippingPaid(false)} disabled={payBusy} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">↩ ยกเลิกจ่าย</button>
+                                : <button onClick={() => void setShippingPaid(true)} disabled={payBusy} className="h-7 px-2.5 text-[11px] font-medium rounded-md border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 disabled:opacity-50">💰 จ่ายค่าส่งแล้ว</button>)}
+                            </div>
+                            {canEdit && (
+                              <div className="mt-1.5 flex items-center gap-1.5">
+                                <select value={hd.shipping_bill_id ?? ""} onFocus={() => { if (shipBills.length === 0) void loadShipBills(); }} disabled={payBusy}
+                                  onChange={(e) => void setShippingPaid(hd.shipping_payment_status === "paid", e.target.value || null)}
+                                  className={`${inputCls} h-7 text-[11px] flex-1 min-w-0`} title="ผูกบิลค่าส่งจากแอปโอนเงินจีน (บิลที่ติ๊ก ค่าส่ง)">
+                                  <option value="">— ผูกบิลค่าส่ง (แอปโอนเงินจีน) —</option>
+                                  {hd.shipping_bill_id && !shipBills.some((b) => b.id === hd.shipping_bill_id) && <option value={hd.shipping_bill_id}>บิลที่ผูกไว้</option>}
+                                  {shipBills.map((b) => <option key={b.id} value={b.id}>{b.label}</option>)}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+                    )} />
+                )}
+                {/* สรุปยอด — ใบที่ยืนยัน/ยกเลิกแล้ว หรือคนที่ไม่มีสิทธิ์แก้ (การ์ดเช็กลิสต์มีสรุปยอดในตัวแล้ว) */}
+                {(hd.status !== "draft" || !canEdit) && (
+                  <div className="bg-white border border-slate-200 rounded-xl p-4">
+                    <div className="text-sm font-semibold text-slate-700 mb-2">สรุปยอด</div>
+                    <dl className="text-sm space-y-1.5">
+                      {foreign && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า ({sym.trim()})</dt><dd className="tabular-nums">{sym}{fmtMoney(t?.subtotal_foreign)}</dd></div>}
+                      {foreign && <div className="flex justify-between text-xs"><dt className="text-slate-400">เรท</dt><dd className="tabular-nums text-slate-500">× {h.fx_rate || "—"}</dd></div>}
+                      <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า (฿)</dt><dd className="tabular-nums font-medium">฿{fmtMoney(t?.subtotal_thb)}</dd></div>
+                      <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง (฿) <span className="text-[10px] text-slate-400">แยก ไม่รวมในราคาสินค้า</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t?.ship_total_thb)}</dd></div>
+                      {anyShip && (t?.charged_cbm ?? 0) > 0 && <div className="flex justify-between text-xs"><dt className="text-slate-400">คิดตามคิว</dt><dd className="tabular-nums text-slate-500">{(t?.charged_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว × ฿{fmtMoney(num(h.ship_rate_cube), 0)}</dd></div>}
+                      {anyShip && (t?.charged_kg ?? 0) > 0 && <div className="flex justify-between text-xs"><dt className="text-slate-400">คิดตามน้ำหนัก</dt><dd className="tabular-nums text-slate-500">{(t?.charged_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. × ฿{fmtMoney(num(h.ship_rate_kg), 0)}</dd></div>}
+                      <div className="flex justify-between border-t border-slate-200 pt-2 mt-2"><dt className="text-slate-700 font-semibold">รวมทั้งสิ้น (฿)</dt><dd className="tabular-nums font-bold text-slate-900 text-base">฿{fmtMoney(t?.grand_total_thb)}</dd></div>
+                    </dl>
                   </div>
                 )}
-                <div className="bg-white border border-slate-200 rounded-xl p-4 xl:sticky xl:top-4">
-                  <div className="text-sm font-semibold text-slate-700 mb-2">สรุปยอด</div>
-                  <dl className="text-sm space-y-1.5">
-                    {foreign && <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า ({sym.trim()})</dt><dd className="tabular-nums">{sym}{fmtMoney(t?.subtotal_foreign)}</dd></div>}
-                    {foreign && <div className="flex justify-between text-xs"><dt className="text-slate-400">เรท</dt><dd className="tabular-nums text-slate-500">× {h.fx_rate || "—"}</dd></div>}
-                    <div className="flex justify-between"><dt className="text-slate-500">ค่าสินค้า (฿)</dt><dd className="tabular-nums font-medium">฿{fmtMoney(t?.subtotal_thb)}</dd></div>
-                    <div className="flex justify-between"><dt className="text-slate-500">ค่าส่ง (฿) <span className="text-[10px] text-slate-400">แยก ไม่รวมในราคาสินค้า</span></dt><dd className="tabular-nums text-orange-700">฿{fmtMoney(t?.ship_total_thb)}</dd></div>
-                    {anyShip && (t?.charged_cbm ?? 0) > 0 && <div className="flex justify-between text-xs"><dt className="text-slate-400">คิดตามคิว</dt><dd className="tabular-nums text-slate-500">{(t?.charged_cbm ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 4 })} คิว × ฿{fmtMoney(num(h.ship_rate_cube), 0)}</dd></div>}
-                    {anyShip && (t?.charged_kg ?? 0) > 0 && <div className="flex justify-between text-xs"><dt className="text-slate-400">คิดตามน้ำหนัก</dt><dd className="tabular-nums text-slate-500">{(t?.charged_kg ?? 0).toLocaleString("th-TH", { maximumFractionDigits: 3 })} กก. × ฿{fmtMoney(num(h.ship_rate_kg), 0)}</dd></div>}
-                    <div className="flex justify-between border-t border-slate-200 pt-2 mt-2"><dt className="text-slate-700 font-semibold">รวมทั้งสิ้น (฿)</dt><dd className="tabular-nums font-bold text-slate-900 text-base">฿{fmtMoney(t?.grand_total_thb)}</dd></div>
-                  </dl>
-                  {(t?.missing_price_count ?? 0) > 0 && <div className="mt-3 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ ยังไม่มีราคา {t?.missing_price_count} รายการ — ต้องใส่ให้ครบก่อนยืนยัน</div>}
-                  {foreign && !(num(h.fx_rate) > 0) && <div className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ ยังไม่มีเรท — ราคาบาทจะเป็น 0</div>}
-                  {dirty && !readonly && <div className="mt-3 text-[11px] text-blue-700">● มีการแก้ไขที่ยังไม่บันทึก</div>}
-                  <div className="mt-3 text-[11px] text-slate-400 leading-relaxed">
-                    เมื่อกดยืนยัน: ออกเลขที่ · ราคาสินค้า (ไม่รวมค่าส่ง) เขียนกลับ ใบสั่งซื้อ + ราคาต่อร้านของ SKU + ราคาบน SKU ({foreign ? "rmb_cost + standard_price" : "standard_price"}) · ลงประวัติทุกรายการ
-                  </div>
-                </div>
               </aside>
             </div>
           </>
         )}
       </div>
 
-      {/* ยืนยัน */}
-      {confirmOpen && data && calc && (
-        <ERPModal open onClose={() => !confirming && setConfirmOpen(false)} size="sm" storageKey="pv-confirm"
-          title="✓ ยืนยันใบสำคัญรับ" description={`${hd?.seller_name ?? ""} · ${data.lines.length} รายการ`}
-          footer={<>
-            <button onClick={() => setConfirmOpen(false)} disabled={confirming} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยังก่อน</button>
-            <button onClick={() => void confirm()} disabled={confirming || (calc.totals.missing_price_count > 0)} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{confirming ? "กำลังยืนยัน…" : "ยืนยัน + ออกเลข"}</button>
-          </>}>
-          <div className="text-sm text-slate-700 space-y-1">
-            <div className="flex justify-between"><span>ค่าสินค้า</span><b>฿{fmtMoney(calc.totals.subtotal_thb)}</b></div>
-            <div className="flex justify-between"><span>ค่าส่ง (แยก)</span><b className="text-orange-700">฿{fmtMoney(calc.totals.ship_total_thb)}</b></div>
-            <div className="flex justify-between border-t border-slate-100 pt-1"><span>รวม</span><b>฿{fmtMoney(calc.totals.grand_total_thb)}</b></div>
-          </div>
-          {calc.totals.missing_price_count > 0 && <p className="text-xs text-red-600 mt-2">ยังไม่มีราคา {calc.totals.missing_price_count} รายการ ยืนยันไม่ได้</p>}
-          <p className="text-[11px] text-slate-400 mt-3">หลังยืนยัน แก้ราคาในใบนี้ไม่ได้อีก (ราคาถูกเขียนกลับระบบแล้ว) · ถ้าผิดให้ออกใบใหม่จากใบรับเดิมไม่ได้ ต้องแก้ราคาที่ใบสั่งซื้อ/สินค้าโดยตรง</p>
-        </ERPModal>
+      {/* ยืนยัน — ป๊อปบอก 4 อย่างที่จะเกิด (ออกเลข · อัปเดตราคา 3 ที่ · ใบล็อก · ต่อไปจ่ายเงิน) · แบบ B */}
+      {confirmOpen && data && hd && calc && (
+        <VoucherConfirmModal header={hd} items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} skuCount={skuCount}
+          confirming={confirming} onClose={() => setConfirmOpen(false)} onConfirm={() => void confirm()} />
       )}
       {/* ยืนยันลบรายการที่เพิ่มเอง */}
       {delLine && (
