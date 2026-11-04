@@ -60,6 +60,7 @@ export type Permission =
   | "od_interest.view" | "od_interest.reconcile"
   | "cashflow.view" | "cashflow.manage"
   | "flow_map.finance.view"   // แท็บผังการเงินในแผนผังการทำงาน (/master/flow-map) — lib/flow-map FLOW_FINANCE_PERM
+  | "ai_office.view" | "ai_office.edit"   // ออฟฟิศทีม AI (/master/ai-office) ดู / ตกแต่งฉาก — lib/ai-office
   | "receipts.view" | "receipts.create" | "receipts.edit" | "receipts.cancel"
   | "belt_builder.view" | "belt_builder.edit"
   | "configurator.view" | "configurator.edit"

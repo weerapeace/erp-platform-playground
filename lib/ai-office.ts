@@ -11,6 +11,8 @@
 
 /** สิทธิ์ดูหน้า — ยังไม่มีแถวใน erp_permissions (แอดมินผ่านเพราะ erp_can/can() ของแอดมิน = true) */
 export const AI_OFFICE_PERM = "ai_office.view";
+/** สิทธิ์ตกแต่งฉากออฟฟิศ (ตัวละคร/โต๊ะ/ธีม) — ยังไม่มีแถวใน erp_permissions = แอดมินเท่านั้น */
+export const AI_OFFICE_EDIT_PERM = "ai_office.edit";
 
 export type OfficeZoneId = "control" | "sales" | "purchase" | "production" | "marketing" | "finance";
 /** ai = เรียก AI (มีค่าใช้จ่ายต่อครั้ง) · auto = กติกาอัตโนมัติ ไม่ใช้ AI */

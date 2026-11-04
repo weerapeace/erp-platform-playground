@@ -13,13 +13,21 @@ import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { Drawer } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { useAuth } from "@/components/auth";
+import { PixelOffice } from "./pixel";
 import {
-  OFFICE_ZONES, OFFICE_WORKERS, WORKER_BY_ID, STATUS_LABEL, STATUS_RANK, countStatuses, workersNeedingHelp, CRON_SECRET_FIX,
+  OFFICE_ZONES, OFFICE_WORKERS, WORKER_BY_ID, STATUS_LABEL, STATUS_RANK, countStatuses, workersNeedingHelp, CRON_SECRET_FIX, AI_OFFICE_EDIT_PERM,
   type OfficeLive, type OfficeWorker, type OfficeZoneId, type WorkerLive, type WorkerStatus, type OfficeEvent,
 } from "@/lib/ai-office";
 
 const REFRESH_MS = 60_000;
 const VIEW_KEY = "erp.aiOffice.view";
+type View = "office" | "rooms" | "table";
+const VIEWS: { id: View; icon: string; th: string; en: string }[] = [
+  { id: "office", icon: "🏢", th: "ออฟฟิศ", en: "Office" },
+  { id: "rooms", icon: "🗂️", th: "การ์ด", en: "Cards" },
+  { id: "table", icon: "📋", th: "ตาราง", en: "Table" },
+];
 
 const ST: Record<WorkerStatus, { pill: string; dot: string; card: string }> = {
   ok: { pill: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", card: "border-slate-200" },
@@ -203,7 +211,9 @@ export function AiOffice() {
   const [live, setLive] = useState<OfficeLive | null>(null);
   const [err, setErr] = useState<"noperm" | "fail" | null>(null);
   const [loading, setLoading] = useState(false);
-  const [view, setView] = useState<"rooms" | "table">("rooms");
+  const { can } = useAuth();
+  const canEdit = can(AI_OFFICE_EDIT_PERM);
+  const [view, setView] = useState<View>("office");
   const [filter, setFilter] = useState<WorkerStatus | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
@@ -220,13 +230,13 @@ export function AiOffice() {
   }, []);
 
   useEffect(() => {
-    try { const v = localStorage.getItem(VIEW_KEY); if (v === "table" || v === "rooms") setView(v); } catch { /* ไม่มี storage ก็ใช้ค่าเริ่ม */ }
+    try { const v = localStorage.getItem(VIEW_KEY); if (v === "table" || v === "rooms" || v === "office") setView(v); } catch { /* ไม่มี storage ก็ใช้ค่าเริ่ม */ }
     load();
     const timer = window.setInterval(() => { if (document.visibilityState === "visible") load(); }, REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [load]);
 
-  const pickView = (v: "rooms" | "table") => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ไม่เป็นไร */ } };
+  const pickView = (v: View) => { setView(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* ไม่เป็นไร */ } };
   const counts = useMemo(() => countStatuses(live?.workers), [live]);
   const help = useMemo(() => workersNeedingHelp(live?.workers), [live]);
   const events = live?.events ?? [];
@@ -273,10 +283,10 @@ export function AiOffice() {
             <Icon value="🔄" />{loading ? t("กำลังโหลด…", "Loading…") : t("รีเฟรช", "Refresh")}
           </button>
           <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5" role="group" aria-label={t("รูปแบบการดู", "View")}>
-            {(["rooms", "table"] as const).map((v) => (
-              <button key={v} type="button" onClick={() => pickView(v)} aria-pressed={view === v}
-                className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium ${view === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
-                <Icon value={v === "rooms" ? "🏢" : "📋"} />{v === "rooms" ? t("ห้องทำงาน", "Rooms") : t("ตาราง", "Table")}
+            {VIEWS.map((v) => (
+              <button key={v.id} type="button" onClick={() => pickView(v.id)} aria-pressed={view === v.id}
+                className={`inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-[12.5px] font-medium ${view === v.id ? "bg-white text-slate-800 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}>
+                <Icon value={v.icon} />{t(v.th, v.en)}
               </button>
             ))}
           </div>
@@ -324,9 +334,11 @@ export function AiOffice() {
       )}
 
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
-        {/* ห้องทำงาน / ตาราง */}
+        {/* ออฟฟิศพิกเซล / ห้องทำงาน / ตาราง */}
         <section className="order-2 min-w-0 xl:order-1" aria-label={t("ทีมผู้ช่วย", "Workers")}>
-          {view === "rooms" ? (
+          {view === "office" ? (
+            <PixelOffice live={live} canEdit={canEdit} onOpen={setOpenId} />
+          ) : view === "rooms" ? (
             <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr))]">
               {OFFICE_ZONES.map((z) => {
                 const list = OFFICE_WORKERS.filter((w) => w.zone === z.id);
