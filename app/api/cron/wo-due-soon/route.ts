@@ -18,6 +18,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { isTrustedCron } from "@/lib/cron-auth";
 import { notifyEvent, pushLineTpl, pushLineText, boardLink } from "@/lib/board-notify";
+import { recordWorkerRun } from "@/lib/ai-office-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -130,12 +131,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const items = await collect();
     const sent = dry ? { line: 0, bell: false } : await send(items);
+    if (!dry) {
+      const late = items.filter((i) => i.days < 0).length;
+      await recordWorkerRun(supabaseAdmin(), "wo-due-soon", {
+        ok: true,
+        summary: items.length ? `เตือนใกล้/เลยกำหนด ${items.length} ใบ (เลยแล้ว ${late})` : "ไม่มีใบไหนใกล้กำหนด",
+      });
+    }
     return NextResponse.json({
       ok: true, dry, today: todayTH(), ahead_days: AHEAD_DAYS,
       found: items.length, overdue: items.filter((i) => i.days < 0).length,
       items: items.slice(0, 50), sent, error: null,
     });
   } catch (e) {
+    if (!dry) await recordWorkerRun(supabaseAdmin(), "wo-due-soon", { ok: false, error: e instanceof Error ? e.message : "cron failed" });
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "cron failed" }, { status: 500 });
   }
 }

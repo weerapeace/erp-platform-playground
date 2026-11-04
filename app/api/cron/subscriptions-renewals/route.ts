@@ -16,6 +16,7 @@ import { isTrustedCron } from "@/lib/cron-auth";
 import {
   nextRenewal, daysUntil, fmtCost, RENEWAL_THRESHOLDS, type Subscription,
 } from "@/lib/subscriptions";
+import { recordWorkerRun } from "@/lib/ai-office-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -100,8 +101,13 @@ export async function GET(request: NextRequest) {
 
   try {
     const result = await runCheck();
+    await recordWorkerRun(supabaseAdmin(), "subscriptions", {
+      ok: true,
+      summary: result.due.length ? `ใกล้ต่ออายุ ${result.due.length} รายการ · เตือนแล้ว` : `ตรวจ ${result.checked} บริการ ยังไม่มีอันไหนใกล้ต่ออายุ`,
+    });
     return NextResponse.json({ ok: true, ...result, error: null });
   } catch (e) {
+    await recordWorkerRun(supabaseAdmin(), "subscriptions", { ok: false, error: e instanceof Error ? e.message : "cron failed" });
     return NextResponse.json({ ok: false, error: e instanceof Error ? e.message : "cron failed" }, { status: 500 });
   }
 }

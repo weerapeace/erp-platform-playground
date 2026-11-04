@@ -10,6 +10,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { isTrustedCron } from "@/lib/cron-auth";
 import { purgePrintUploads } from "@/lib/website-print-design-server";
+import { recordWorkerRun } from "@/lib/ai-office-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -20,6 +21,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const denied = await guardApi(request, "products.edit");
     if (denied) return denied;
   }
-  const r = await purgePrintUploads(supabaseAdmin());
-  return NextResponse.json({ ok: true, ...r });
+  const admin = supabaseAdmin();
+  try {
+    const r = await purgePrintUploads(admin);
+    await recordWorkerRun(admin, "print-purge", { ok: true, summary: `ลบรูปลูกค้า ${r.files} ไฟล์ จาก ${r.designs} งาน` });
+    return NextResponse.json({ ok: true, ...r });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "purge failed";
+    await recordWorkerRun(admin, "print-purge", { ok: false, error: msg });
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+  }
 }

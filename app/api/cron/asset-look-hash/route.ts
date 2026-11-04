@@ -12,6 +12,7 @@ import { guardApi } from "@/lib/api-auth";
 import { isTrustedCron } from "@/lib/cron-auth";
 import { r2GetObject } from "@/lib/r2";
 import { analyzeImageBuffer } from "@/lib/image-hash-server";
+import { recordWorkerRun } from "@/lib/ai-office-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -30,7 +31,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data, error } = await admin.from("assets").select("id, r2_key, width, height")
     .eq("status", "active").eq("asset_type", "image").is("phash", null).not("r2_key", "is", null)
     .gte("created_at", since).order("created_at", { ascending: false }).limit(BATCH);
-  if (error) return NextResponse.json({ error: "อ่านคลังไม่สำเร็จ" }, { status: 500 });
+  if (error) {
+    await recordWorkerRun(admin, "look-hash", { ok: false, error: `อ่านคลังไม่สำเร็จ: ${error.message}` });
+    return NextResponse.json({ error: "อ่านคลังไม่สำเร็จ" }, { status: 500 });
+  }
 
   const rows = (data ?? []) as { id: string; r2_key: string; width: number | null; height: number | null }[];
   let filled = 0, skipped = 0;
@@ -52,5 +56,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       } catch { skipped++; }
     }
   }));
+  await recordWorkerRun(admin, "look-hash", { ok: true, summary: `ทำลายนิ้วมือรูป ${filled} รูป · ข้าม ${skipped}` });
   return NextResponse.json({ ok: true, checked: rows.length, filled, skipped });
 }

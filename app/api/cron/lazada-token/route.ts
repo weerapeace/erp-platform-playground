@@ -21,6 +21,7 @@ import { isTrustedCron } from "@/lib/cron-auth";
 import { writeAudit } from "@/lib/audit";
 import { lazConfigured, lazConnHealth } from "@/lib/lazada";
 import { getPlatformId, loadLazConn, refreshLazConn } from "../../lazada/shared";
+import { recordWorkerRun } from "@/lib/ai-office-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -57,6 +58,13 @@ async function run(request: NextRequest): Promise<NextResponse> {
 
   if (!dry && results.length) {
     await writeAudit(admin, { action: "update", entityType: "platform_credentials", entityId: null, actorId: null, actorName: cron ? "cron: lazada-token" : "manual: lazada-token", metadata: { platform: "lazada", results } });
+  }
+  if (!dry) {
+    const n = (k: Result["result"]) => results.filter((x) => x.result === k).length;
+    const failed = n("failed"), expired = n("expired");
+    await recordWorkerRun(admin, "lazada-token", failed
+      ? { ok: false, error: `ต่ออายุไม่สำเร็จ ${failed} ร้าน` }
+      : { ok: true, warn: expired > 0, summary: `ต่ออายุแล้ว ${n("refreshed")} ร้าน${expired ? ` · หมดอายุ ต้องเชื่อมใหม่ ${expired} ร้าน` : ""}` });
   }
   return NextResponse.json({
     ok: true, dry,

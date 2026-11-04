@@ -17,6 +17,7 @@ import { isTrustedCron } from "@/lib/cron-auth";
 import { loadCashflow } from "@/lib/cashflow-server";
 import { THB, addDaysISO, buildDailySeries, findLowCash, formatDayMonthTH, todayISO } from "@/lib/cashflow";
 import { CASHFLOW_SETTINGS_KEY, cleanCashflowSettings } from "@/lib/cashflow-settings";
+import { recordWorkerRun } from "@/lib/ai-office-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,11 +35,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const admin = supabaseAdmin();
     const { data: st } = await admin.from("china_app_settings").select("sval").eq("skey", CASHFLOW_SETTINGS_KEY).maybeSingle();
     const settings = cleanCashflowSettings((st as { sval?: unknown } | null)?.sval);
-    if (!settings.alertEnabled) return NextResponse.json({ ok: true, dry, skipped: "ปิดการแจ้งเตือนไว้", ...(cron ? {} : { settings }), error: null });
+    // จดผลรอบให้หน้าออฟฟิศทีม AI เฉพาะรอบจริงของตัวตั้งเวลา (ปุ่มทดสอบ = ดูผลอย่างเดียว ไม่นับ) — ไม่จดตัวเลขเงิน
+    const note = (r: { ok: boolean; summary?: string; error?: string; warn?: boolean }) => (cron && !dry ? recordWorkerRun(admin, "cashflow-alert", r) : Promise.resolve());
+    if (!settings.alertEnabled) {
+      await note({ ok: true, summary: "ข้าม: ปิดการแจ้งเตือนไว้ (เปิดได้ที่หน้ากระแสเงินสด)" });
+      return NextResponse.json({ ok: true, dry, skipped: "ปิดการแจ้งเตือนไว้", ...(cron ? {} : { settings }), error: null });
+    }
 
     const from = todayISO(), to = addDaysISO(from, settings.alertDays);
     const cf = await loadCashflow(admin, { from, to, incomeBasis: "both", customerDefaultDays: GUESS_DAYS, supplierDefaultDays: GUESS_DAYS, rmbRateParam: 0 });
     if (!cf.meta.openingAccounts.length) {
+      await note({ ok: true, warn: true, summary: "ข้าม: ยังไม่ได้กรอกยอดเงินในบัญชี จึงเตือนไม่ได้" });
       return NextResponse.json({ ok: true, dry, skipped: "ยังไม่ได้กรอกยอดเงินในบัญชี — เตือนไม่ได้ (เส้นเริ่มจากศูนย์)", ...(cron ? {} : { settings }), error: null });
     }
     const series = buildDailySeries(cf.events, cf.meta.openingBalance, from, to);
@@ -73,6 +80,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         else console.error("[cron/cashflow-alert] erp_notify:", error.message);
       }
     }
+    await note({ ok: true, summary: !check.first ? "เงินสดพอ ไม่ต้องเตือน" : already ? "เงินจะต่ำ (เตือนไปแล้ววันนี้)" : `เงินจะต่ำ เตือนแอดมิน ${sent} คน` });
     // ตัวเลขเงินส่งกลับเฉพาะคนที่ล็อกอิน + มีสิทธิ์ (ปุ่มทดสอบ) — ทาง cron ตอบแค่ส่งแล้วกี่คน (กันเลขหลุดถ้า header cron ถูกปลอม)
     if (cron) return NextResponse.json({ ok: true, sent, already, error: null });
     return NextResponse.json({
@@ -81,6 +89,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
   } catch (e) {
     console.error("[cron/cashflow-alert]", e instanceof Error ? e.message : e);
+    if (cron && !dry) await recordWorkerRun(supabaseAdmin(), "cashflow-alert", { ok: false, error: e instanceof Error ? e.message : "cron failed" });
     return NextResponse.json({ ok: false, error: cron ? "cron failed" : e instanceof Error ? e.message : "cron failed" }, { status: 500 });
   }
 }

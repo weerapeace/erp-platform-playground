@@ -13,6 +13,7 @@ import { guardApi } from "@/lib/api-auth";
 import { isTrustedCron } from "@/lib/cron-auth";
 import { loadContentAlbums } from "@/lib/content-albums-server";
 import { albumReminder, bangkokToday, ALBUM_REMINDER_META, type AlbumReminder } from "@/lib/content-album-status";
+import { recordWorkerRun } from "@/lib/ai-office-runs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -34,7 +35,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .map((a) => ({ a, why: albumReminder({ stage: a.status.stage, created_at: a.created_at, due_date: a.due_date, phase: a.phase }, today) }))
     .filter((h): h is { a: typeof h.a; why: AlbumReminder } => !!h.why)
     .sort((x, y) => ORDER.indexOf(x.why) - ORDER.indexOf(y.why));
-  if (!hits.length) return NextResponse.json({ data: { today, albums: 0, users: 0, sent: 0 }, error: null });
+  if (!hits.length) {
+    if (!dry) await recordWorkerRun(admin, "album-reminders", { ok: true, summary: "ไม่มีอัลบั้มค้าง ไม่ต้องเตือน" });
+    return NextResponse.json({ data: { today, albums: 0, users: 0, sent: 0 }, error: null });
+  }
 
   // อัลบั้มไม่มีผู้รับผิดชอบ → ผู้จัดการ + แอดมินที่ยังใช้งานอยู่
   let leads: string[] = [];
@@ -64,5 +68,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     });
     if (!error) sent++; else console.error("[content-album-reminders] notify", error.message);
   }
+  await recordWorkerRun(admin, "album-reminders", sent < plan.length
+    ? { ok: false, error: `ส่งเตือนได้ ${sent}/${plan.length} คน` }
+    : { ok: true, summary: `เตือน ${sent} คน เรื่องอัลบั้มค้าง ${hits.length} อัลบั้ม` });
   return NextResponse.json({ data: { today, albums: hits.length, users: plan.length, sent }, error: null });
 }
