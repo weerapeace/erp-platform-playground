@@ -12,6 +12,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { ERPInput, ERPTextarea, ERPTime24 } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
+import { ExternalEmailAdder } from "@/components/saved-emails";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { WorkPopupBody } from "@/components/work-popup";
 import { DiscordChatPreview, type DiscordPreviewData } from "./discord-preview";
@@ -20,7 +21,7 @@ import { apiFetch } from "@/lib/api";
 import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import type { WorkPopupPayload } from "@/lib/email-report/popup";
 import {
-  COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
+  COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
   POPUP_FIELDS, POPUP_MAX_CHOICES, TOP_PHOTO_CHOICES, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportLine, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceChannels, sourceDef,
   type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportLine, type EmailReportPopup,
   type ReportChannelKey, type ReportChannels,
@@ -97,8 +98,6 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const [form, setForm] = useState<EmailReportInput>(initial);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [extEmail, setExtEmail] = useState("");
-  const [extErr, setExtErr] = useState<string | null>(null);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
   const [preview, setPreview] = useState<{ subject: string; html: string; total: number; shown: number; fill?: Record<string, number>; attachment?: string | null } | null>(null);
@@ -115,7 +114,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
 
   useEffect(() => {
     if (!open) return;
-    setForm(initial); setError(null); setExtEmail(""); setExtErr(null);
+    setForm(initial); setError(null);
     setSec(editing ? null : "what"); setPrevTab("email"); setMore(false);   // เพิ่มใหม่ = กางเรื่องแรกให้เลย
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial]);
@@ -287,12 +286,10 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
     if (form.recipients.some((r) => r.type === "user" && r.id === u.id)) return;
     set({ recipients: [...form.recipients, { type: "user", id: u.id, name: u.name, email: u.email ?? null }] });
   };
-  const addEmail = () => {
-    const email = extEmail.trim().toLowerCase();
-    if (!EMAIL_RE.test(email)) { setExtErr("อีเมลไม่ถูกต้อง เช่น name@gmail.com"); return; }
-    if (form.recipients.some((r) => (r.type === "email" ? r.email : r.email?.toLowerCase()) === email)) { setExtErr("มีอีเมลนี้ในรายชื่อแล้ว"); return; }
-    set({ recipients: [...form.recipients, { type: "email", email }] });
-    setExtEmail(""); setExtErr(null);
+  // อีเมลนอกระบบ (ตรวจรูปแบบ/ซ้ำ + บันทึกลงสมุดอีเมล ทำใน ExternalEmailAdder ของกลาง)
+  const addEmail = (email: string, name: string | null) => {
+    if (form.recipients.some((r) => (r.email ?? "").toLowerCase() === email)) return;
+    set({ recipients: [...form.recipients, { type: "email", email, ...(name ? { name } : {}) }] });
   };
   const removeRecipient = (i: number) => set({ recipients: form.recipients.filter((_, idx) => idx !== i) });
 
@@ -319,7 +316,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
 
   const label = "block text-xs font-medium text-slate-600 mb-1";
   const chip = (on: boolean) => `h-8 rounded-lg border px-2.5 text-xs font-medium transition ${on ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
-  const recipientLabel = (r: EmailRecipient) => (r.type === "user" ? r.name || r.email || "ผู้ใช้" : r.email);
+  const recipientLabel = (r: EmailRecipient) => (r.type === "user" ? r.name || r.email || "ผู้ใช้" : r.name ? `${r.name} (${r.email})` : r.email);
 
   // ── สรุปของแต่ละเรื่อง (โชว์ตอนพับ) ──
   const brandNames = brands.filter((b) => brandIds.includes(b.id)).map((b) => b.name);
@@ -564,17 +561,9 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                 ) : (
                   <p className="mb-2 text-xs text-slate-400">ยังไม่มีผู้รับ — เลือกผู้ใช้ในระบบ หรือพิมพ์อีเมลนอกระบบ</p>
                 )}
-                <div className="grid gap-2 sm:grid-cols-2">
-                  <UserPicker value={null} onChange={(u) => addUser(u)} placeholder="＋ เลือกผู้ใช้ในระบบ..." />
-                  <div>
-                    <div className="flex gap-1.5">
-                      <input value={extEmail} onChange={(e) => { setExtEmail(e.target.value); setExtErr(null); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addEmail(); } }}
-                        placeholder="อีเมลนอกระบบ เช่น partner@gmail.com" inputMode="email"
-                        className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                      <button type="button" onClick={addEmail} className="h-9 shrink-0 rounded-lg border border-slate-300 bg-white px-3 text-xs font-medium text-slate-700 hover:bg-slate-50">เพิ่ม</button>
-                    </div>
-                    {extErr && <p className="mt-1 text-xs text-rose-600">{extErr}</p>}
-                  </div>
+                <div className="space-y-2">
+                  <div className="sm:w-1/2"><UserPicker value={null} onChange={(u) => addUser(u)} placeholder="＋ เลือกผู้ใช้ในระบบ..." /></div>
+                  <ExternalEmailAdder existing={form.recipients.map((r) => (r.email ?? "").toLowerCase()).filter(Boolean)} onAdd={addEmail} />
                 </div>
               </div>
             )}

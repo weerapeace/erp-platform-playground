@@ -6,7 +6,7 @@
 
 export type EmailRecipient =
   | { type: "user"; id: string; name: string; email: string | null }
-  | { type: "email"; email: string };
+  | { type: "email"; email: string; /** ชื่อเรียก (จากสมุดอีเมลที่บันทึกไว้ · ไม่บังคับ) */ name?: string | null };
 
 export type BrandGroupFilter = "all" | "customer" | "own";
 
@@ -438,7 +438,8 @@ export function normalizeReportInput(raw: unknown): { value: EmailReportInput } 
       const email = String(o.email ?? "").trim().toLowerCase();
       if (!EMAIL_RE.test(email)) return { error: `อีเมลไม่ถูกต้อง: ${email || "(ว่าง)"}` };
       const key = `e:${email}`; if (seen.has(key)) continue; seen.add(key);
-      recipients.push({ type: "email", email });
+      const nm = typeof o.name === "string" ? o.name.replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, 80) : "";
+      recipients.push({ type: "email", email, ...(nm ? { name: nm } : {}) });
     }
   }
   if (recipients.length > 50) return { error: "ผู้รับมากเกินไป (ไม่เกิน 50 คน)" };
