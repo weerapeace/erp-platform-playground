@@ -456,6 +456,19 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
                   </a>
                 ))}
             </div>
+            {/* บิลจีนที่จ่ายใบนี้ (แอปโอนเงินจีน) — ลงบิลแล้ว รอโอน / โอนแล้ว · กดเปิดบิลในแอป */}
+            {(d.china_links ?? []).length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap w-full">
+                <span className="text-slate-400">บิลจีน </span>
+                {(d.china_links ?? []).map((b) => (
+                  <a key={b.bill_id} href={`/app/china-pay?bill=${b.bill_id}`} target="_blank" rel="noopener noreferrer"
+                    title={`บิล ${b.supplier_name ?? ""} ยอดบิล ¥${fmt(b.bill_total_rmb)}`}
+                    className={`text-[11px] px-1.5 py-0.5 rounded border ${b.bill_status === "โอนแล้ว" ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-amber-50 text-amber-800 border-amber-300"}`}>
+                    💴 {b.bill_date ? thDate(b.bill_date) : "บิล"} · จ่ายใบนี้ ¥{fmt(b.amount_rmb)}{b.settles_po ? "" : " (บางส่วน)"} · {b.bill_status === "โอนแล้ว" ? "โอนแล้ว" : "รอโอน"}
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
           {d.note && <div className="text-xs text-slate-500 px-1 whitespace-pre-line">📝 {d.note}</div>}
           {/* รูปหน้าคำสั่งซื้อ Shopee/Taobao ที่ยืนยันผูกกับใบนี้ (จาก "คำสั่งซื้อจากไลน์") */}

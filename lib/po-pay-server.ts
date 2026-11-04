@@ -2,6 +2,7 @@
  * ฝั่ง server: เติม "สถานะจ่ายเงิน" (lib/po-pay-state) ให้ใบสั่งซื้อหลายใบ — ดึงเครดิตร้าน/ส่งก่อนจ่าย ครั้งเดียว
  * ร้านหาจาก seller_partner_id ก่อน · ไม่มี → ชื่อร้าน (name_th / display_name / code) ตรงตัว
  * ใช้ที่: /api/purchasing/receivable · /api/purchasing/po-list · /api/purchasing/po-detail
+ * "ลงบิลแล้ว รอโอน" = china_bill_id ซึ่ง DB trigger ตั้งให้จากตาราง china_bill_po_links (ดู lib/china-bill-po-server) — ไม่ต้อง join ตารางผูกที่นี่
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { poPayState, todayBkk, type PoPayState } from "@/lib/po-pay-state";

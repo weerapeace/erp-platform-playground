@@ -20,6 +20,7 @@ import {
   buyRmbWithThb, isThbBill, rateForRmb, slipSumRmb, tierIdxForRmb, type Slip,
 } from "@/lib/china-pay";
 import { CHINA_BILLS_PRINT_PICK_KEY } from "@/lib/china-bills-print";
+import { BillPoPicker, BillLinkedPos, type BillPoSummary } from "./bill-po-picker";
 
 const SUPPLIER_CFG: RelationConfig = {
   target_table: "partners_v2", target_module_key: "partners-v2",
@@ -302,6 +303,7 @@ export default function ChinaPayApp() {
   const [preselect, setPreselect] = useState<string[]>([]);   // บิลจีนที่เลือกจากหน้า "ทั้งหมด" → ส่งไปหน้าโอน
   const [deepBill, setDeepBill] = useState<Record<string, unknown> | null>(null);   // เปิดบิลจากลิงก์ ?bill=id
   const [deepTransfer, setDeepTransfer] = useState<Record<string, unknown> | null>(null);   // เปิดใบสรุปการโอนจากลิงก์ ?transfer=id
+  const [fromVoucher, setFromVoucher] = useState<string | null>(null);   // ?from_voucher=id → หน้าลงบิลเติมจากใบสำคัญรับ
   const [rateMissing, setRateMissing] = useState(false);   // วันนี้ยังไม่มีเรท → โชว์ badge เตือน
   const [inApp, setInApp] = useState(false);   // true = เปิดจากไอคอนแอปที่ติดตั้ง (PWA) → ไม่ต้องมีทางออกไป ERP
 
@@ -334,7 +336,8 @@ export default function ChinaPayApp() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     const p = new URLSearchParams(window.location.search);
-    const billId = p.get("bill"), txId = p.get("transfer");
+    const billId = p.get("bill"), txId = p.get("transfer"), pvId = p.get("from_voucher");
+    if (pvId) { setFromVoucher(pvId); setTab("bill"); }
     if (billId) {
       apiFetch(`/api/master-v2/china-bills/${billId}`).then(r => r.json()).then(j => { if (j.data) setDeepBill(j.data); }).catch(() => {});
     }
@@ -355,7 +358,7 @@ export default function ChinaPayApp() {
         setDeepTransfer({ transfer_id: String(row.id ?? ""), transfer_no: row.transfer_no, date: row.transfer_date, ref_no: row.ref_no, rate: row.rate, transferred: row.amount_transferred_thb, chinaInRmb: Math.max(0, lo), lines, attachments: Array.isArray(row.attachments) ? row.attachments.map(String) : [] });
       }).catch(() => {});
     }
-    if (billId || txId) window.history.replaceState({}, "", "/app/china-pay");
+    if (billId || txId || pvId) window.history.replaceState({}, "", "/app/china-pay");
   }, []);
 
   if (!ready) return <Center>กำลังโหลด…</Center>;
@@ -449,7 +452,7 @@ export default function ChinaPayApp() {
             </button>
           )}
           {renderTab === "dashboard" && <Dashboard onGo={go} />}
-          {renderTab === "bill" && <BillForm />}
+          {renderTab === "bill" && <BillForm prefillVoucherId={fromVoucher} onPrefillUsed={() => setFromVoucher(null)} />}
           {renderTab === "all" && <AllList canDelete={canManage} />}
           {renderTab === "rate" && <RateTab />}
           {renderTab === "ctw" && <CtwList canDelete={canManage} />}
@@ -1032,10 +1035,17 @@ function StatCard({ label, main, sub, onClick, wide }: { label: string; main: st
 }
 
 // ---------------- ลงบิล (ไม่ใส่เรท — เรทมาตอนโอน) ----------------
-function BillForm() {
+// + เลือกใบสั่งซื้อที่จ่ายในบิลนี้ (BillPoPicker) → ยอดรวมเติมให้ (แก้ได้) · บันทึกบิลแล้วผูกใบ (/api/china-pay/bill-pos)
+// prefillVoucherId = มาจากปุ่ม "ส่งไปโอนเงินจีน" ในใบสำคัญรับ → เติมร้าน/ยอด/ใบสั่งซื้อ/รูปบิลร้านให้
+function BillForm({ prefillVoucherId, onPrefillUsed }: { prefillVoucherId?: string | null; onPrefillUsed?: () => void } = {}) {
   const toast = useToast();
   const celebrate = useCelebrate();
   const [supplierId, setSupplierId] = useState<string | null>(null);
+  const [poSum, setPoSum] = useState<BillPoSummary | null>(null);
+  const [amountEdited, setAmountEdited] = useState(false);       // พิมพ์ยอดรวมเอง → ไม่เติมทับจากใบสั่งซื้อ
+  const [pickerKey, setPickerKey] = useState(0);
+  const [prefillPos, setPrefillPos] = useState<{ po_id: string; amount_rmb: number }[] | undefined>(undefined);
+  const [prefillFrom, setPrefillFrom] = useState<string | null>(null);   // เลขใบสำคัญรับที่เติมมา
   const [sup, setSup] = useState<Record<string, unknown> | null>(null);
   const [isShipping, setIsShipping] = useState(false);              // บิลค่าส่ง (บาท)
   const [vatType, setVatType] = useState<"" | "ISG" | "IG">("");    // บิล VAT (บาท)
@@ -1063,11 +1073,42 @@ function BillForm() {
     apiFetch(`/api/master-v2/partners/${supplierId}`).then(r => r.json()).then(j => setSup(j.data ?? null)).catch(() => setSup(null));
   }, [supplierId]);
 
+  // ติ๊กใบสั่งซื้อ → เติมยอดรวมให้ (ถ้ายังไม่ได้พิมพ์ทับเอง)
+  useEffect(() => {
+    if (amountEdited || !poSum) return;
+    setAmount(poSum.count > 0 && poSum.sum > 0 ? String(poSum.sum) : "");
+  }, [poSum, amountEdited]);
+
+  // มาจากใบสำคัญรับ → เติมร้าน / ยอด ¥ / ใบสั่งซื้อ / รูปบิลร้าน
+  useEffect(() => {
+    if (!prefillVoucherId) return;
+    apiFetch(`/api/china-pay/voucher-prefill?id=${encodeURIComponent(prefillVoucherId)}`).then(r => r.json()).then(j => {
+      if (j.error || !j.data) { toast.error(j.error || "ดึงข้อมูลใบสำคัญรับไม่ได้"); return; }
+      const d = j.data as { supplier_id: string | null; amount_rmb: number; pos: { po_id: string; amount_rmb: number }[]; attachments: string[]; skipped_files: number; pv_no: string };
+      setIsShipping(false); setVatType("");
+      setSupplierId(d.supplier_id);
+      setPrefillPos(d.pos);
+      setPickerKey((k) => k + 1);
+      if (d.amount_rmb > 0) { setAmount(String(d.amount_rmb)); setAmountEdited(true); }
+      if (d.attachments?.length) setFiles(d.attachments);
+      setNote(`จากใบสำคัญรับ ${d.pv_no}${d.skipped_files > 0 ? " (รูปบิลร้านดูได้ในใบสำคัญรับ)" : ""}`);
+      setPrefillFrom(d.pv_no);
+      if (!d.supplier_id) toast.error("ใบสำคัญรับนี้ไม่ได้ผูกร้านในทะเบียน — เลือกร้านเอง");
+    }).catch((e) => toast.error(String((e as Error).message ?? e))).finally(() => onPrefillUsed?.());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillVoucherId]);
+
   const totalRmb = num(amount) + num(fee);
   const thbMode = isShipping || !!vatType;                      // โหมดบาท (ค่าส่ง/VAT) — กรอกบาทตรง ไม่ใช้เรท
   const thbLabel = isShipping ? "ค่าส่ง" : vatType ? `VAT ${vatType}` : "";
+  const poCount = !thbMode && poSum ? poSum.count : 0;
+  const poDiff = poCount ? Math.round((num(amount) - (poSum?.sum ?? 0)) * 100) / 100 : 0;
 
   const save = async () => {
+    if (!thbMode && poSum && poSum.count > 0) {
+      if (poSum.errors.length) { toast.error(poSum.errors[0]); return; }
+      if (num(amount) < poSum.sum - 0.01) { toast.error(`ยอดบิล ¥${fmt(num(amount))} น้อยกว่ายอดใบสั่งซื้อที่เลือก ¥${fmt(poSum.sum)} — ลดยอดในใบใดใบหนึ่งก่อน`); return; }
+    }
     setSaving(true);
     try {
       let payload: Record<string, unknown>;
@@ -1095,13 +1136,25 @@ function BillForm() {
       });
       const j = await res.json();
       if (j.error) { toast.error(j.error); return; }
-      celebrate("บันทึกบิลแล้ว 🎉", { confetti: true });
+      // ผูกใบสั่งซื้อ (ถ้าเลือก) — ล้มเหลว = บิลยังอยู่ ผูกใหม่ได้จากหน้ารายละเอียดบิล
+      let linked = 0;
+      const newId = (j.data as Record<string, unknown> | undefined)?.id;
+      if (!thbMode && poSum && poSum.count > 0 && newId) {
+        const lr = await apiFetch("/api/china-pay/bill-pos", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bill_id: String(newId), links: poSum.links }),
+        }).then(r => r.json()).catch((e) => ({ ok: false, errors: [String((e as Error).message ?? e)] }));
+        if (lr.ok) linked = poSum.count;
+        else toast.error(`บันทึกบิลแล้ว แต่ผูกใบสั่งซื้อไม่สำเร็จ: ${(lr.errors ?? [])[0] ?? "ไม่ทราบสาเหตุ"} — เปิดบิลแล้วผูกใหม่ได้`);
+      }
+      celebrate(linked ? `บันทึกบิลแล้ว · ผูกใบสั่งซื้อ ${linked} ใบ 🎉` : "บันทึกบิลแล้ว 🎉", { confetti: true });
       // เก็บบิลที่เพิ่งบันทึก ไว้ทำ popup พิมพ์ (label = ร้าน หรือ ค่าส่ง/VAT)
-      setSavedBill({ ...(j.data ?? {}), _sup: thbMode ? null : sup, supplier_label: thbMode ? thbLabel : (sup?.name_th ?? sup?.name_en) });
+      setSavedBill({ ...(j.data ?? {}), _sup: thbMode ? null : sup, supplier_label: thbMode ? thbLabel : (sup?.name_th ?? sup?.name_en), _linked: linked });
       // reset ฟอร์ม
       setSupplierId(null); setSup(null); setIsShipping(false); setVatType(""); setAmountThb("");
       setAmount(""); setFee(""); setTransferDate(today()); setBillDate(today());
       setFiles([]); setNote("");
+      setPoSum(null); setAmountEdited(false); setPrefillPos(undefined); setPrefillFrom(null); setPickerKey((k) => k + 1);
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
   };
@@ -1136,7 +1189,15 @@ function BillForm() {
             <Row label="โทร" v={sup.phone} />
           </div>
         )}
+        {prefillFrom && <div className="mt-2 text-[12px] text-emerald-700">✓ เติมข้อมูลจากใบสำคัญรับ {prefillFrom} แล้ว — ตรวจแล้วกดบันทึก</div>}
       </Card>
+
+      {/* ใบสั่งซื้อที่จ่ายในบิลนี้ (เฉพาะบิลร้าน — บิลค่าส่ง/VAT ไม่ผูก) */}
+      {!thbMode && supplierId && (
+        <Card>
+          <BillPoPicker key={pickerKey} supplierId={supplierId} initial={prefillPos} onChange={setPoSum} />
+        </Card>
+      )}
 
       <Card>
         {thbMode ? (
@@ -1147,7 +1208,7 @@ function BillForm() {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>ยอดรวม (¥)</Label><Num value={amount} onChange={setAmount} /></div>
+            <div><Label>ยอดรวม (¥)</Label><Num value={amount} onChange={(v) => { setAmount(v); setAmountEdited(true); }} /></div>
             <div>
               <div className="flex items-center justify-between mb-1">
                 <span className="text-xs font-medium text-slate-500">ค่าโอน (¥)</span>
@@ -1161,6 +1222,19 @@ function BillForm() {
           <div className="mt-2 rounded-lg bg-pink-50 border border-pink-200 p-3 text-xs">
             <div className="font-semibold text-slate-700 mb-1">ค่าธรรมเนียมการโอน</div>
             {FEE_TABLE.map(t => <div key={t.label} className="flex justify-between"><span className="text-slate-500">{t.label}</span><span className="text-slate-700">{t.fee} หยวน</span></div>)}
+          </div>
+        )}
+        {/* ยอดบิลเทียบยอดใบสั่งซื้อที่ติ๊ก (มากกว่าได้ เช่น ค่าส่งในจีน · น้อยกว่าบันทึกไม่ได้) */}
+        {poCount > 0 && (
+          <div className="mt-1.5 text-[11px]">
+            {!amountEdited || Math.abs(poDiff) <= 0.01
+              ? <span className="text-emerald-700">✓ ตรงกับยอดใบสั่งซื้อ {poCount} ใบ</span>
+              : poDiff < 0
+                ? <span className="text-rose-600">ยอดบิลน้อยกว่ายอดใบที่เลือก ¥{fmt(-poDiff)} — ลดยอดในใบใดใบหนึ่งก่อน</span>
+                : <span className="text-amber-700">มากกว่ายอดใบที่เลือก ¥{fmt(poDiff)} (เช่น ค่าส่งในจีน) — บันทึกได้</span>}
+            {amountEdited && Math.abs(poDiff) > 0.01 && (
+              <button type="button" onClick={() => setAmountEdited(false)} className="ml-2 text-orange-600 underline">ใช้ยอดจากใบสั่งซื้อ</button>
+            )}
           </div>
         )}
         <div className="mt-3 grid grid-cols-2 gap-3">
@@ -1205,6 +1279,7 @@ function BillForm() {
             </div>
             <div className="text-lg font-semibold text-slate-800">บันทึกบิลแล้ว</div>
             <div className="mt-1 text-sm text-slate-500">{String(savedBill.supplier_label ?? "")} · {isThbBill(savedBill) ? `฿${fmt(num(savedBill.amount_thb))}` : `¥${fmt(num(savedBill.amount_rmb) + num(savedBill.fee_rmb))}`}</div>
+            {num(savedBill._linked) > 0 && <div className="mt-1 text-[12px] text-amber-700">ผูกใบสั่งซื้อ {num(savedBill._linked)} ใบ — ใบขึ้นสถานะ “ลงบิลแล้ว รอโอน” จนกว่าจะโอนเข้าจีน</div>}
             <div className="mt-4 space-y-2">
               <button onClick={() => setReport(savedBill)} className="w-full h-11 bg-slate-700 text-white rounded-lg font-medium">🖨️ พิมพ์ / ใบสรุป</button>
               <button onClick={() => setSavedBill(null)} className="w-full h-10 text-slate-500 text-sm">ปิด</button>
@@ -1828,10 +1903,13 @@ function EditBillPopup({ bill, sup, onClose, onSaved }: { bill: Record<string, u
   const [billDate, setBillDate] = useState(bill.bill_date ? String(bill.bill_date) : "");
   const [note, setNote] = useState(bill.note ? String(bill.note) : "");
   const [saving, setSaving] = useState(false);
+  const [poSum, setPoSum] = useState<BillPoSummary | null>(null);   // ใบสั่งซื้อที่ผูก (แก้ได้)
 
   const save = async () => {
     if (!supplierId) { toast.error("เลือกร้านค้าก่อน"); return; }
     if (num(amount) <= 0) { toast.error("กรอกยอดรวม (¥)"); return; }
+    if (poSum?.loaded && poSum.errors.length) { toast.error(poSum.errors[0]); return; }
+    if (poSum?.loaded && num(amount) < poSum.sum - 0.01) { toast.error(`ยอดบิล ¥${fmt(num(amount))} น้อยกว่ายอดใบสั่งซื้อที่ผูก ¥${fmt(poSum.sum)}`); return; }
     setSaving(true);
     try {
       const res = await apiFetch(`/api/master-v2/china-bills/${String(bill.id)}`, {
@@ -1840,6 +1918,14 @@ function EditBillPopup({ bill, sup, onClose, onSaved }: { bill: Record<string, u
       });
       const j = await res.json().catch(() => ({}));
       if (j.error) { toast.error(j.error); return; }
+      // บันทึกชุดใบสั่งซื้อ — เฉพาะตอนโหลดรายการได้จริง (โหลดพัง = ไม่แตะของเดิม กันลบการผูกทิ้ง)
+      if (poSum?.loaded) {
+        const lr = await apiFetch("/api/china-pay/bill-pos", {
+          method: "PUT", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bill_id: String(bill.id), links: poSum.links }),
+        }).then(r => r.json()).catch((e) => ({ ok: false, errors: [String((e as Error).message ?? e)] }));
+        if (!lr.ok) { toast.error(`แก้บิลแล้ว แต่ผูกใบสั่งซื้อไม่สำเร็จ: ${(lr.errors ?? [])[0] ?? ""}`); return; }
+      }
       toast.success("แก้ไขบิลแล้ว"); onSaved();
     } catch (e) { toast.error(String((e as Error).message ?? e)); }
     finally { setSaving(false); }
@@ -1857,10 +1943,21 @@ function EditBillPopup({ bill, sup, onClose, onSaved }: { bill: Record<string, u
             <RelationPicker value={supplierId} onChange={(id) => setSupplierId(id)} config={SUPPLIER_CFG} />
             {!!sup?.name_en && <div className="mt-1 text-xs text-slate-400">{String(sup.name_en)}</div>}
           </div>
+          {!isThbBill(bill) && supplierId && (
+            <div className="rounded-xl border border-slate-100 p-3">
+              <BillPoPicker supplierId={supplierId} billId={String(bill.id)} onChange={setPoSum} />
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div><Label>ยอดรวม (¥)</Label><Num value={amount} onChange={setAmount} /></div>
             <div><Label>ค่าโอน (¥)</Label><Num value={fee} onChange={setFee} /></div>
           </div>
+          {poSum?.loaded && poSum.count > 0 && Math.abs(num(amount) - poSum.sum) > 0.01 && (
+            <div className={`-mt-1 text-[11px] ${num(amount) < poSum.sum ? "text-rose-600" : "text-amber-700"}`}>
+              ยอดใบสั่งซื้อที่ผูก ¥{fmt(poSum.sum)} · {num(amount) < poSum.sum ? "ยอดบิลน้อยกว่า — บันทึกไม่ได้" : "ยอดบิลมากกว่า (เช่น ค่าส่งในจีน)"}
+              <button type="button" onClick={() => setAmount(String(poSum.sum))} className="ml-2 text-orange-600 underline">ใช้ยอดนี้</button>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div><Label>วันที่วางบิล</Label>
               <input type="date" value={transferDate} onChange={e => setTransferDate(e.target.value)} className="w-full h-11 px-3 text-base border border-slate-200 rounded-lg" /></div>
@@ -1888,6 +1985,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
   const [busy, setBusy] = useState(false);
   const [sendingLine, setSendingLine] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);   // รูปที่กดดูเต็มจอ
+  const [poOpen, setPoOpen] = useState(false);   // เปิดป๊อปใบสั่งซื้อ (ERP) อยู่ → ซ่อนป๊อปบิลชั่วคราว (ไม่ให้บังกัน)
   const supplierId = bill.supplier_id ? String(bill.supplier_id) : null;
   useEffect(() => {
     if (!supplierId) return;
@@ -1957,7 +2055,7 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
 
   return (
     <Portal>
-    <div className="fixed inset-x-0 top-0 h-[100svh] z-[200] bg-black/40 flex items-end sm:items-center justify-center" onClick={onClose}>
+    <div className={`fixed inset-x-0 top-0 h-[100svh] z-[200] bg-black/40 flex items-end sm:items-center justify-center ${poOpen ? "invisible" : ""}`} onClick={onClose}>
       <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-md max-h-[92svh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         {/* header */}
         <div className="sticky top-0 bg-white border-b border-slate-100 px-4 py-3 flex items-center justify-between">
@@ -2006,6 +2104,9 @@ function BillDetail({ bill, onClose, onPrinted, onChanged, canDelete }: { bill: 
                     : <span className="font-medium text-amber-600">รอเรทเงิน</span>}
                 </div>
               </div>
+
+              {/* ใบสั่งซื้อที่บิลนี้จ่าย (กดดูใบ) — แก้รายการได้ที่ ✎ แก้ไขบิล */}
+              <BillLinkedPos billId={String(bill.id)} onModal={setPoOpen} />
             </>
           )}
 

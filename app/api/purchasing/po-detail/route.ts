@@ -11,6 +11,7 @@ import { formatCreditTerm } from "@/lib/credit-term";
 import { computePoTotals, sumActiveLines } from "@/lib/po-total";
 import { formatThaiAddress, formatTaxId } from "@/lib/thai-address";
 import { loadPoPay } from "@/lib/po-pay-server";
+import { loadPoChinaLinks, type PoChinaLink } from "@/lib/china-bill-po-server";
 import type { PoPayState } from "@/lib/po-pay-state";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +65,8 @@ export type PoDetail = {
   lines: PoDetailLine[];
   /** สถานะจ่ายเงิน (สีป้าย) ตามเครดิตร้าน — ของกลาง lib/po-pay-state */
   pay: PoPayState;
+  /** บิลจีน (แอปโอนเงินจีน) ที่จ่ายใบนี้ — ตาราง china_bill_po_links (lib/china-bill-po-server) */
+  china_links: PoChinaLink[];
 };
 export type PoVoucherRef = { id: string; pv_no: string | null; status: string; grand_total_thb: number; ship_total_thb: number };
 
@@ -168,6 +171,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     vouchers,
     lines,
     pay: (await loadPoPay(admin))(p),
+    china_links: await loadPoChinaLinks(admin, String(p.id)).catch(() => []),
   };
   return NextResponse.json({ data: detail, error: null });
 }
