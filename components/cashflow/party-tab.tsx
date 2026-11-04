@@ -31,7 +31,7 @@ import { RECORD_FILES_MAX } from "@/lib/record-files";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { formatAmount, normalizeCurrency } from "@/lib/money";
-import { CREDIT_TERM_OPTIONS } from "@/lib/credit-term";
+import { PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
 import { CASHFLOW_CERTAINTY, THB, addDaysISO, daysBetween, planPayRun, staleReason, type CashflowDetail, type CashflowEvent } from "@/lib/cashflow";
 import type { PoDetailLine } from "@/lib/po-lines-server";
 import type { CashflowPoLines } from "@/app/api/cashflow/po-lines/route";
@@ -627,13 +627,15 @@ function DateModal({ modal, today, onClose, onDone }: { modal: Modal; today: str
 /** ตั้งเครดิตหลายรายพร้อมกัน (ทางเดียวกับหน้า /cashflow/credit-terms) */
 function CreditModal({ modal, side, onClose, onDone }: { modal: Modal; side: Side; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
-  const [value, setValue] = useState("days:30");
+  const [value, setValue] = useState<string | null>("days:30");
+  const [incomplete, setIncomplete] = useState(false);   // เลือกแบบที่ต้องใส่ตัวเลข แต่ยังไม่ครบ
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   if (!modal) return null;
   const parties = modal.groups.filter((g) => g.partyId);
   const submit = async () => {
     if (!parties.length) { setErr("รายการที่เลือกไม่ผูกกับคู่ค้า ตั้งเครดิตไม่ได้"); return; }
+    if (incomplete) { setErr("ใส่ตัวเลขเครดิตให้ครบก่อน"); return; }
     setBusy(true); setErr("");
     try {
       const res = await apiFetch("/api/cashflow/credit-terms", { method: "PATCH", headers: { "Content-Type": "application/json" },
@@ -658,9 +660,7 @@ function CreditModal({ modal, side, onClose, onDone }: { modal: Modal; side: Sid
         </div>
         <div>
           <label className="block text-xs text-slate-500 mb-1">เครดิต</label>
-          <select value={value} onChange={(e) => { setValue(e.target.value); setErr(""); }} className="w-full h-9 px-2.5 text-sm border border-slate-200 rounded-lg bg-white">
-            {CREDIT_TERM_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          <PurchaseCreditTermInput value={value} onChange={(v, info) => { setValue(v); setIncomplete(!!info?.incomplete); setErr(""); }} />
         </div>
         <p className="text-xs text-slate-400">ใช้กับเอกสารที่ยังไม่ได้ระบุวันครบกำหนดเอง · เก็บที่ทะเบียนคู่ค้า (ฟอร์มคู่ค้าเห็นค่าเดียวกัน)</p>
         {err && <p className="text-sm text-red-600">{err}</p>}

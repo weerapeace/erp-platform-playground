@@ -8,7 +8,8 @@
  * แต่ข้อมูลจริงตั้งเครดิตไว้แค่ลูกค้า 1/125 ราย · ร้านค้า 2/80 ราย → ระบบต้องเดาเกือบทั้งหมด
  * หน้านี้เรียงจาก "ยอดค้างมากสุด" ให้ตั้งไล่จากบนลงล่างรวดเดียว แล้วกดบันทึกครั้งเดียว
  *
- * ทั้งสองฝั่งใช้ดรอปดาวน์ตัวเลือกเดียวกัน (CREDIT_TERM_OPTIONS ของกลาง) — เลือก "สิ้นเดือน" / "ทุกวันที่ 25" ได้ทั้งคู่
+ * ทั้งสองฝั่งใช้ช่องกรอกเครดิตของกลาง (components/purchase-credit-term-input) — เลือกแบบ + ใส่ตัวเลข X เอง
+ *   (X วัน · ทุกวันที่ X เดือนที่สั่ง · วันที่ X เดือนถัดไป) · รายที่ตั้งแล้ว = อ่านอย่างเดียว กด "แก้ไข" ก่อนถึงเปลี่ยนได้
  * ลูกค้าเก็บที่ partners_v2.sales_credit_term · ร้านค้าเก็บที่ purchase_credit_term
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -18,7 +19,8 @@ import { InfoHint } from "@/components/info-hint";
 import { usePermission, AccessDenied, useAuth } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { THB } from "@/lib/cashflow";
-import { CREDIT_TERM_OPTIONS, CREDIT_TERM_QUICK, formatCreditTerm } from "@/lib/credit-term";
+import { CREDIT_TERM_QUICK, formatCreditTerm } from "@/lib/credit-term";
+import { CreditTermView, PurchaseCreditTermInput } from "@/components/purchase-credit-term-input";
 import type { CreditTermRow } from "@/app/api/cashflow/credit-terms/route";
 
 type Side = "customer" | "supplier";
@@ -31,7 +33,10 @@ export default function CreditTermsPage() {
 
   const [side, setSide] = useState<Side>("customer");
   const [rows, setRows] = useState<CreditTermRow[]>([]);
-  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [edits, setEdits] = useState<Record<string, string | null>>({});   // id → ค่าใหม่ (null = ยังไม่ตั้ง)
+  const [editing, setEditing] = useState<Set<string>>(new Set());           // รายที่ตั้งแล้ว แต่กด "แก้ไข" อยู่
+  const [incomplete, setIncomplete] = useState<Set<string>>(new Set());     // เลือกแบบแล้ว แต่ตัวเลขยังไม่ครบ/ผิด
+  const [customFill, setCustomFill] = useState<string | null>(null);        // ค่า "กำหนดเอง" ของตัวช่วยเติมทีเดียว
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -39,7 +44,7 @@ export default function CreditTermsPage() {
   const [onlyMissing, setOnlyMissing] = useState(false);
 
   const load = useCallback((s: Side) => {
-    setLoading(true); setErr(null); setMsg(null); setEdits({});
+    setLoading(true); setErr(null); setMsg(null); setEdits({}); setEditing(new Set()); setIncomplete(new Set());
     apiFetch(`/api/cashflow/credit-terms?side=${s}`)
       .then((r) => r.json())
       .then((j) => { if (j?.error) setErr(j.error); else setRows((j.data ?? []) as CreditTermRow[]); })
@@ -54,27 +59,40 @@ export default function CreditTermsPage() {
     [rows, onlyMissing],
   );
 
-  const valueOf = (r: CreditTermRow) => (r.id in edits ? edits[r.id] : (r.current ?? ""));
+  const valueOf = (r: CreditTermRow): string | null => (r.id in edits ? edits[r.id] : (r.current ?? null));
   const changed = Object.entries(edits).filter(([id, v]) => {
     const row = rows.find((r) => r.id === id);
-    return row && v !== (row.current ?? "");
+    return row && !incomplete.has(id) && (v ?? null) !== (row.current ?? null);
   });
+  const setRowValue = (id: string, v: string | null, isIncomplete = false) => {
+    setEdits((e) => ({ ...e, [id]: v }));
+    setIncomplete((s0) => { const n = new Set(s0); if (isIncomplete) n.add(id); else n.delete(id); return n; });
+  };
+  const startEdit = (id: string) => setEditing((s0) => new Set(s0).add(id));
+  const cancelEdit = (id: string) => {
+    setEditing((s0) => { const n = new Set(s0); n.delete(id); return n; });
+    setEdits((e) => { const n = { ...e }; delete n[id]; return n; });
+    setIncomplete((s0) => { const n = new Set(s0); n.delete(id); return n; });
+  };
 
   /** เติมค่าเดียวกันให้ทุกรายที่ "ยังไม่ได้ตั้ง" — ตัวช่วยหลักของหน้านี้ */
   const fillMissing = (value: string) => {
     const next = { ...edits };
-    for (const r of shown) if (!r.current) next[r.id] = value;
+    const ids = shown.filter((r) => !r.current).map((r) => r.id);
+    for (const id of ids) next[id] = value;
     setEdits(next);
+    setIncomplete((s0) => { const n = new Set(s0); ids.forEach((id) => n.delete(id)); return n; });
   };
 
   const save = async () => {
+    if (incomplete.size) { setErr(`ใส่ตัวเลขเครดิตไม่ครบ ${incomplete.size} ราย — แก้ช่องที่เป็นสีแดงก่อน`); return; }
     if (!changed.length) return;
     setSaving(true); setErr(null); setMsg(null);
     try {
       const res = await apiFetch("/api/cashflow/credit-terms", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ side, items: changed.map(([id, value]) => ({ id, value: value === "" ? null : value })) }),
+        body: JSON.stringify({ side, items: changed.map(([id, value]) => ({ id, value: value || null })) }),
       });
       const j = await res.json();
       if (j?.error) { setErr(j.error); return; }
@@ -137,6 +155,12 @@ export default function CreditTermsPage() {
                 {formatCreditTerm(t)}
               </button>
             ))}
+            <span className="text-xs text-blue-700/70">หรือกำหนดเอง</span>
+            <PurchaseCreditTermInput size="sm" value={customFill} onChange={(v) => setCustomFill(v)} />
+            <button type="button" onClick={() => customFill && fillMissing(customFill)} disabled={!customFill}
+                    className="h-8 px-3 text-xs font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-40">
+              เติม
+            </button>
             <InfoHint>เติมลงช่องให้ก่อนเฉย ๆ ยังไม่บันทึก — ปรับรายที่ไม่ตรงได้ แล้วค่อยกดปุ่มบันทึกด้านล่าง</InfoHint>
           </div>
         )}
@@ -159,16 +183,17 @@ export default function CreditTermsPage() {
                   <th className="text-right font-medium px-4 py-2.5">
                     {side === "customer" ? "ยอดค้างรับ" : "ยอดค้างจ่าย"}
                   </th>
-                  <th className="text-left font-medium px-4 py-2.5">ตั้งไว้ตอนนี้</th>
-                  <th className="text-left font-medium px-4 py-2.5 w-64">ตั้งใหม่</th>
+                  <th className="text-left font-medium px-4 py-2.5 min-w-[340px]">เครดิต</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {shown.map((r) => {
                   const v = valueOf(r);
-                  const isChanged = v !== (r.current ?? "");
+                  const bad = incomplete.has(r.id);
+                  const isChanged = bad || (v ?? null) !== (r.current ?? null);
+                  const isEditing = canManage && (!r.current || editing.has(r.id));
                   return (
-                    <tr key={r.id} className={isChanged ? "bg-amber-50/50" : ""}>
+                    <tr key={r.id} className={bad ? "bg-red-50/40" : isChanged ? "bg-amber-50/50" : ""}>
                       <td className="px-4 py-2">
                         <span className="font-medium text-slate-700">{r.name}</span>
                         {r.code && <span className="ml-1.5 text-[11px] text-slate-400 font-mono">{r.code}</span>}
@@ -178,16 +203,24 @@ export default function CreditTermsPage() {
                         {side === "supplier" ? THB(r.openAmount) + " *" : THB(r.openAmount)}
                       </td>
                       <td className="px-4 py-2">
-                        {r.current
-                          ? <span className="text-slate-600">{formatCreditTerm(r.current)}</span>
-                          : <span className="text-amber-600 text-xs">ยังไม่ตั้ง (ระบบเดาให้)</span>}
-                      </td>
-                      <td className="px-4 py-2">
-                        <select value={v} disabled={!canManage}
-                                onChange={(e) => setEdits({ ...edits, [r.id]: e.target.value })}
-                                className="w-full h-8 px-2 text-sm border border-slate-200 rounded bg-white outline-none focus:border-blue-400">
-                          {CREDIT_TERM_OPTIONS.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-                        </select>
+                        {isEditing ? (
+                          <div className="space-y-1">
+                            <PurchaseCreditTermInput size="sm" value={v}
+                              onChange={(nv, info) => setRowValue(r.id, nv, info?.incomplete ?? false)} />
+                            <div className="flex items-center gap-2 text-[11px]">
+                              {r.current ? (
+                                <>
+                                  <span className="text-slate-400">เดิม: {formatCreditTerm(r.current)}</span>
+                                  <button type="button" onClick={() => cancelEdit(r.id)} className="text-slate-500 underline hover:text-slate-700">ยกเลิก</button>
+                                </>
+                              ) : <span className="text-amber-600">ยังไม่ตั้ง (ระบบเดาให้)</span>}
+                            </div>
+                          </div>
+                        ) : r.current ? (
+                          <CreditTermView value={r.current} onEdit={canManage ? () => startEdit(r.id) : undefined} />
+                        ) : (
+                          <span className="text-amber-600 text-xs">ยังไม่ตั้ง (ระบบเดาให้)</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -207,13 +240,14 @@ export default function CreditTermsPage() {
           <div className="sticky bottom-0 bg-white border border-slate-200 rounded-xl px-4 py-3 flex items-center justify-between gap-3 flex-wrap shadow-lg">
             <span className="text-sm text-slate-600">
               {changed.length ? `แก้ไว้ ${changed.length} ราย ยังไม่ได้บันทึก` : "ยังไม่มีการแก้"}
+              {incomplete.size > 0 && <span className="ml-2 text-red-600">· ใส่ตัวเลขไม่ครบ {incomplete.size} ราย</span>}
             </span>
             <div className="flex gap-2">
-              <button onClick={() => setEdits({})} disabled={!changed.length}
+              <button onClick={() => { setEdits({}); setEditing(new Set()); setIncomplete(new Set()); }} disabled={!changed.length && !incomplete.size && !editing.size}
                       className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-40">
                 ล้างที่แก้
               </button>
-              <button onClick={save} disabled={saving || !changed.length}
+              <button onClick={save} disabled={saving || !changed.length || incomplete.size > 0}
                       className="h-9 px-5 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50">
                 {saving ? "กำลังบันทึก…" : `บันทึก ${changed.length || ""} ราย`}
               </button>

@@ -31,17 +31,17 @@ export function parseCreditTerm(s: string | null | undefined): CreditTerm | null
   }
 }
 
-/** ข้อความไทยอ่านง่าย เช่น "15 วัน", "ทุกวันที่ 5", "สิ้นเดือน" */
+/** ข้อความไทยอ่านง่าย เช่น "15 วัน", "ทุกวันที่ 5 (เดือนที่สั่ง)", "วันที่ 5 เดือนถัดไป" — ชื่อเดียวกับตัวเลือกในช่องกรอก (components/purchase-credit-term-input) */
 export function formatCreditTerm(s: string | null | undefined): string {
   const t = parseCreditTerm(s);
   if (!t) return "—";
   switch (t.type) {
     case "immediate": return "ต้องชำระเลย";
-    case "eom":       return "สิ้นเดือน";
+    case "eom":       return "สิ้นเดือน (เดือนที่สั่ง)";
     case "days":      return `${t.value} วัน`;
     case "months":    return `${t.value} เดือน`;
-    case "monthday":  return `ทุกวันที่ ${t.value}`;
-    case "monthday_next": return `ทุกวันที่ ${t.value} (เดือนถัดไป)`;
+    case "monthday":  return `ทุกวันที่ ${t.value} (เดือนที่สั่ง)`;
+    case "monthday_next": return `วันที่ ${t.value} เดือนถัดไป`;
   }
 }
 
@@ -117,28 +117,9 @@ export function computeArrivalDate(baseDate: string | null | undefined, leadStr:
 }
 
 // ============================================================
-// ตัวเลือกเครดิตมาตรฐาน — ของกลาง ใช้ทั้งฝั่งลูกค้า (เงินเข้า) และฝั่งร้านค้า (เงินออก)
-// เพิ่ม/แก้ตัวเลือกที่นี่ที่เดียว ทุกหน้าที่มีดรอปดาวน์เครดิตจะเปลี่ยนตาม
+// ช่องกรอกเครดิต = ของกลาง components/purchase-credit-term-input (เลือกแบบ + ใส่ตัวเลข X เอง + แบบอ่านอย่างเดียว)
+// — ห้ามทำดรอปดาวน์รายการตายตัวเองในหน้า (เคยมี CREDIT_TERM_OPTIONS เลือกได้แค่ 5/10/15/25 → ยกเลิกแล้ว 2026-11-04)
 // ============================================================
-
-export type CreditTermOption = { value: string; label: string };
-
-export const CREDIT_TERM_OPTIONS: CreditTermOption[] = [
-  { value: "",                 label: "— ยังไม่ตั้ง —" },
-  { value: "immediate",        label: "ต้องชำระเลย" },
-  { value: "days:7",           label: "7 วัน" },
-  { value: "days:15",          label: "15 วัน" },
-  { value: "days:30",          label: "30 วัน" },
-  { value: "days:45",          label: "45 วัน" },
-  { value: "days:60",          label: "60 วัน" },
-  { value: "eom",              label: "สิ้นเดือน (เดือนที่ซื้อ)" },
-  { value: "monthday:5",       label: "ทุกวันที่ 5" },
-  { value: "monthday:10",      label: "ทุกวันที่ 10" },
-  { value: "monthday:15",      label: "ทุกวันที่ 15" },
-  { value: "monthday:25",      label: "ทุกวันที่ 25" },
-  { value: "monthday_next:5",  label: "ทุกวันที่ 5 (เดือนถัดไป)" },
-  { value: "monthday_next:15", label: "ทุกวันที่ 15 (เดือนถัดไป)" },
-];
 
 /** ตัวเลือกที่เอาไว้ทำปุ่มลัด "เติมให้ทุกรายที่ยังไม่ได้ตั้ง" */
 export const CREDIT_TERM_QUICK: string[] = ["days:15", "days:30", "eom", "monthday:25"];
