@@ -8,6 +8,7 @@ import { computeDueDate, formatCreditTerm } from "@/lib/credit-term";
 import { dueLeft } from "@/lib/receipts";
 import { openLink } from "@/lib/open-link";
 import { SO_ACTIVE_STATUSES } from "@/lib/so-status";
+import { MANUAL_DONE_KEY, cleanManualDone, manualDoneMark } from "@/lib/cashflow-manual-done";
 import {
   addDaysISO, dayOfMonthISO, endOfMonthISO, manualDateInMonth, manualScheduleLabel, monthsBetween, todayISO,
   type CashflowEvent,
@@ -640,10 +641,14 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
   //    (ไม่มีเอกสารในระบบ ถ้าไม่ใส่ตรงนี้ ยอดเงินออกจะต่ำกว่าความจริงทุกเดือน)
   // ------------------------------------------------------------
   {
-    const miRes = await db
-      .from("cashflow_manual_items")
-      .select("id, label, direction, amount, category, repeat_kind, day_of_month, once_date, start_date, end_date, note, company_id")
-      .eq("is_active", true).limit(1000);
+    const [miRes, doneRes] = await Promise.all([
+      db.from("cashflow_manual_items")
+        .select("id, label, direction, amount, category, repeat_kind, day_of_month, once_date, start_date, end_date, note, company_id, updated_at")
+        .eq("is_active", true).limit(1000),
+      // งวดที่ติ๊ก "จ่ายแล้ว / รับแล้ว / ข้ามเดือนนี้" จากแท็บต้องจ่าย-ต้องรับ (lib/cashflow-manual-done) → ข้าม
+      db.from("china_app_settings").select("sval").eq("skey", MANUAL_DONE_KEY).maybeSingle(),
+    ]);
+    const done = cleanManualDone((doneRes.data as { sval?: unknown } | null)?.sval);
 
     const items = miRes.data ?? [];
     for (const m of items) {
@@ -658,6 +663,8 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
         if (date > to) return;
         if (startAt && date < startAt) return;
         if (endAt && date > endAt) return;
+        if (manualDoneMark(done, String(m.id), key)) return;   // ติ๊กจ่ายแล้ว/ข้ามงวดนี้แล้ว
+        const schedule = manualScheduleLabel(String(m.repeat_kind), m.day_of_month as number | null, m.once_date as string | null);
         events.push({
           id: `manual:${m.id}:${key}`,
           date, direction: dir, source: "manual", certainty: "expected",
@@ -665,12 +672,20 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
           party: String(m.label ?? "รายการที่กรอกเอง"),
           amount,
           dateConfident: true,
-          dateNote: manualScheduleLabel(String(m.repeat_kind), m.day_of_month as number | null, m.once_date as string | null),
+          dateNote: schedule,
           note: (m.note as string | null) ?? undefined,
           href: "/cashflow",
           // แก้ที่ตั้งค่าเท่านั้น — ถ้าให้ลากบนกระดานจะกลายเป็นแก้ "รอบ" ทั้งชุดโดยไม่ตั้งใจ
           movable: false,
           companyId: co(m.company_id),
+          updatedAt: (m.updated_at as string | null) ?? null,
+          details: [
+            { label: "รอบ", value: schedule, kind: "text" },
+            ...(startAt ? [{ label: "เริ่ม", value: startAt, kind: "date" as const }] : []),
+            ...(endAt ? [{ label: "ถึง", value: endAt, kind: "date" as const }] : []),
+          ],
+          // ปุ่ม "จ่ายแล้ว/รับแล้ว · ข้ามเดือนนี้" ต้องรู้ว่าเป็นรายการไหน งวดไหน (POST /api/cashflow/manual-done)
+          raw: { itemId: String(m.id), period: key },
         });
       };
 

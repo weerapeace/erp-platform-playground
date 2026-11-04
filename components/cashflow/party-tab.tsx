@@ -81,7 +81,7 @@ const AGING = [
 type Modal = { kind: "date" | "credit" | "pay" | "recv"; events: CashflowEvent[]; groups: Group[] } | null;
 
 export function CashflowPartyTab({
-  side, events, today, canManage, canPayPo, canReceipt = false, canDebtEdit = false, canPayrollPay = false, canLoanReconcile = false, cashNow = null, buffer = 0, rmbRate = 0, onChanged,
+  side, events, today, canManage, canPayPo, canReceipt = false, canDebtEdit = false, canPayrollPay = false, canLoanReconcile = false, cashNow = null, buffer = 0, rmbRate = 0, onOpenSettings, onChanged,
 }: {
   side: Side;
   /** รายการฝั่งนี้ทั้งหมด (รวมของค้างจากก่อนวันนี้) — กรองบริษัท/แหล่งมาแล้ว */
@@ -97,6 +97,8 @@ export function CashflowPartyTab({
   canPayrollPay?: boolean;
   /** ตัดยอดจ่ายเงินกู้เข้างวดได้ (loan_payments.create — ด่านเดียวกับ /api/cashflow/loan-reallocate) */
   canLoanReconcile?: boolean;
+  /** ไปแท็บตั้งค่า (แก้ยอด/วันของรายการประจำ) */
+  onOpenSettings?: () => void;
   /** เงินในบัญชีตอนนี้ (null = ยังไม่กรอก) + เงินกันขั้นต่ำ — ใช้คิดงบแนะนำของ "จัดรอบจ่าย" */
   cashNow?: number | null;
   buffer?: number;
@@ -113,7 +115,26 @@ export function CashflowPartyTab({
   const [drawer, setDrawer] = useState<DrawerTarget>(null);
   const [payrollModal, setPayrollModal] = useState<CashflowEvent[] | null>(null);
   const [reconciling, setReconciling] = useState<string | null>(null);   // id สัญญาที่กำลังตัดยอด
+  const [marking, setMarking] = useState<string | null>(null);           // id รายการประจำที่กำลังติ๊ก
   const toast = useToast();
+  /** รายการประจำ: จ่ายแล้ว/รับแล้ว/ข้ามงวดนี้ (หรือย้อนกลับ) — POST /api/cashflow/manual-done (เก็บใน china_app_settings ไม่มีตารางใหม่) */
+  const markManual = async (e: CashflowEvent, action: "paid" | "skipped" | "undo"): Promise<boolean> => {
+    const itemId = String(e.raw?.itemId ?? ""); const period = String(e.raw?.period ?? "");
+    setMarking(e.id);
+    try {
+      const res = await apiFetch("/api/cashflow/manual-done", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemId, period, action }) });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.error) { toast.error(j?.error || "บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง"); return false; }
+      return true;
+    } catch { toast.error("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง"); return false; }
+    finally { setMarking(null); }
+  };
+  const doneManual = async (e: CashflowEvent, action: "paid" | "skipped") => {
+    if (!(await markManual(e, action))) return;
+    const what = action === "skipped" ? "ข้ามงวดนี้แล้ว" : e.direction === "in" ? "บันทึกรับแล้ว" : "บันทึกจ่ายแล้ว";
+    toast.action(`${e.party} ${formatDate(e.date)} — ${what}`, "ย้อนกลับ", async () => { if (await markManual(e, "undo")) onChanged(); });
+    onChanged();
+  };
   /** ตัดยอดจ่ายเงินกู้เข้างวดของสัญญานี้ (RPC loan_contract_reallocate — ล้างแล้วสร้างใหม่ กดซ้ำได้ ผลเท่าเดิม) */
   const reconcileLoan = async (contractId: string, code: string) => {
     setReconciling(contractId);
@@ -300,6 +321,7 @@ export function CashflowPartyTab({
             onCard={(kind, e) => setCardModal({ kind, e })} onDrawer={setDrawer}
             canPayrollPay={canPayrollPay} onPayroll={(list) => setPayrollModal(list)}
             canLoanReconcile={canLoanReconcile} reconciling={reconciling} onReconcile={reconcileLoan}
+            marking={marking} onManual={doneManual} onOpenSettings={onOpenSettings}
             onMove={(e) => setModal({ kind: "date", events: [e], groups: [g] })}
             onPay={(e) => setModal({ kind: "pay", events: [e], groups: [g] })}
             onReceive={(e) => setModal({ kind: "recv", events: [e], groups: [g] })} />
@@ -369,12 +391,13 @@ function usePoLines() {
 }
 
 /** เอกสารข้างในแถวคู่ค้า (แถวที่กางออก) — PO มีรายการสินค้า (รูป · จำนวน · ราคา) ใต้แต่ละใบ */
-function DocList({ group, side, today, canManage, canPayPo, canReceipt, canDebtEdit, canPayrollPay, canLoanReconcile, reconciling, poLines, ensurePoLines, rmbRate, onCard, onDrawer, onPayroll, onReconcile, onMove, onPay, onReceive }: {
+function DocList({ group, side, today, canManage, canPayPo, canReceipt, canDebtEdit, canPayrollPay, canLoanReconcile, reconciling, marking, poLines, ensurePoLines, rmbRate, onCard, onDrawer, onPayroll, onReconcile, onManual, onOpenSettings, onMove, onPay, onReceive }: {
   group: Group; side: Side; today: string; canManage: boolean; canPayPo: boolean; canReceipt: boolean; canDebtEdit: boolean; canPayrollPay: boolean;
   canLoanReconcile: boolean; reconciling: string | null;
   poLines: PoLinesState; ensurePoLines: (ids: string[]) => void; rmbRate: number;
   onCard: (kind: "pay" | "stmt", e: CashflowEvent) => void; onDrawer: (t: DrawerTarget) => void; onPayroll: (list: CashflowEvent[]) => void;
   onReconcile: (contractId: string, code: string) => void;
+  marking: string | null; onManual: (e: CashflowEvent, action: "paid" | "skipped") => void; onOpenSettings?: () => void;
   onMove: (e: CashflowEvent) => void; onPay: (e: CashflowEvent) => void; onReceive: (e: CashflowEvent) => void;
 }) {
   const poIds = useMemo(() => group.events.filter((e) => e.source === "purchase_order" && e.docId).map((e) => String(e.docId)), [group.events]);
@@ -437,6 +460,15 @@ function DocList({ group, side, today, canManage, canPayPo, canReceipt, canDebtE
                     {canDebtEdit && (
                       <button type="button" onClick={() => onDrawer({ module: "loan-contracts", id: String(e.raw?.contractId) })}
                         className={`${iconBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}><Icon value="i:table" size={14} />บันทึกจ่าย / ตารางผ่อน</button>
+                    )}
+                  </>)}
+                  {canManage && e.source === "manual" && e.raw?.itemId && (<>
+                    <button type="button" disabled={marking === e.id} onClick={() => onManual(e, "paid")}
+                      className={`${iconBtn} border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50`}><Icon value="i:circle-check" size={14} />{e.direction === "in" ? "รับแล้ว" : "จ่ายแล้ว"}</button>
+                    <button type="button" disabled={marking === e.id} onClick={() => onManual(e, "skipped")}
+                      className={`${iconBtn} border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50`}>{e.raw.period === "once" ? "ไม่มีแล้ว" : "ข้ามเดือนนี้"}</button>
+                    {onOpenSettings && (
+                      <button type="button" onClick={onOpenSettings} className={`${iconBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}><Icon value="i:settings" size={14} />แก้ยอด/วัน</button>
                     )}
                   </>)}
                   {canDebtEdit && e.source === "od_interest" && e.docId && (
