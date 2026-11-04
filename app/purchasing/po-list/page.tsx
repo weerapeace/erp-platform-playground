@@ -19,6 +19,7 @@ import { useOpenParam, useNewParam } from "@/lib/open-param";
 import type { ColumnDef } from "@tanstack/react-table";
 import type { PoListRow } from "@/app/api/purchasing/po-list/route";
 import { PoCreateModal } from "./create-modal";
+import { PoPayChip } from "@/components/po-pay-chip";
 
 const isCNY = (c: unknown) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").toUpperCase());
 const curSym = (c: unknown) => (isCNY(c) ? "¥" : "฿");
@@ -125,10 +126,9 @@ export default function PoListPage() {
       },
     },
     {
-      accessorKey: "payment_status", header: "จ่ายเงิน", size: 110, meta: { filterType: "select" },
-      cell: ({ getValue, row }) => (getValue() === "paid"
-        ? <span className="text-xs font-medium text-emerald-700">✓ จ่ายแล้ว {row.original.paid_date ? thDate(row.original.paid_date) : ""}</span>
-        : <span className="text-xs font-medium text-rose-600">● ยังไม่จ่าย</span>),
+      accessorKey: "payment_status", header: "จ่ายเงิน", size: 170, meta: { filterType: "select" },
+      // ป้ายกลาง (lib/po-pay-state): แดง ยังไม่จ่าย · เหลือง ลงบิลรอโอน · ส้ม ค้างจ่าย (เครดิต) · เขียว จ่ายแล้ว
+      cell: ({ row }) => <PoPayChip pay={row.original.pay} />,
     },
     {
       id: "vouchers", header: "ใบสำคัญรับ", size: 130,

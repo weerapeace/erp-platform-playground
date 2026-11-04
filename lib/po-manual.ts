@@ -12,6 +12,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { checkCompanyId } from "@/lib/company-check";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
+import { PO_NEW_STATUS } from "@/lib/po-status";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -74,7 +75,7 @@ export async function createManualPo(
     currency,
     order_date: orderDate,
     expected_date: str(input.expected_date) || null,
-    status: "draft",
+    status: PO_NEW_STATUS,   // เปิดใบ = สั่งกับร้านแล้ว (lib/po-status)
     grand_total: grandTotal,
     requester: actor.name,
     note: str(input.note) || null,

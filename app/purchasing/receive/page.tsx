@@ -24,6 +24,8 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
 import { GrDetailModal } from "@/components/gr-detail-modal";
+import { poPayState, type PoPayState } from "@/lib/po-pay-state";
+import { PO_PAY_CLS } from "@/components/po-pay-chip";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string; expected_date?: string | null; order_date?: string | null };
 type PoCard = PO & { pendCount: number };
@@ -44,11 +46,10 @@ function doneBadge(it: { line_status: string; qty_received: number }): { text: s
   if (it.line_status === "short_closed" && it.qty_received <= 0) return CANCELLED_BADGE;
   return DONE_BADGE[it.line_status] ?? { text: it.line_status, cls: "bg-slate-100 text-slate-500 border-slate-200" };
 }
-// ป้ายสถานะจ่ายเงิน (การ์ดติดตาม)
-function payBadge(it: { payment_status: string; ship_before_pay: boolean; paid_date: string | null }): { text: string; cls: string } {
-  if (it.payment_status === "paid") return { text: `🟢 จ่ายแล้ว${it.paid_date ? ` ${formatDate(it.paid_date)}` : ""}`, cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
-  if (it.ship_before_pay) return { text: "🚚 ส่งก่อนจ่าย", cls: "bg-blue-50 text-blue-700 border-blue-200" };
-  return { text: "🟡 รอจ่าย", cls: "bg-amber-50 text-amber-700 border-amber-200" };
+// ป้ายสถานะจ่ายเงิน (การ์ดติดตาม) — ของกลาง lib/po-pay-state (API คิดตามเครดิตร้านมาให้แล้ว) + สี components/po-pay-chip
+function payBadge(it: { pay?: PoPayState | null; payment_status: string; ship_before_pay: boolean; paid_date: string | null }): { text: string; cls: string } {
+  const p = it.pay ?? poPayState({ payment_status: it.payment_status, paid_date: it.paid_date, ship_before_pay: it.ship_before_pay });
+  return { text: p.label, cls: PO_PAY_CLS[p.state] };
 }
 
 // ป้ายสถานะใบ PO (การ์ดแท็บตามใบสั่งซื้อ)
@@ -71,6 +72,7 @@ type PendItem = {
   source_mo_no: string | null; used_for_label: string | null;   // ใบสั่งผลิตต้นทาง
   receive_count: number;                                          // รับมาแล้วกี่ครั้ง (ใบรับ GR)
   payment_status: string; paid_date: string | null; ship_before_pay: boolean; duration_days: number | null;  // สถานะจ่ายเงิน + ค้างมากี่วัน
+  pay?: PoPayState | null;   // สถานะจ่ายเงินตามเครดิตร้าน (สีป้าย)
 };
 type PendSort = "eta" | "order" | "name" | "seller" | "remaining" | "recv" | "def" | "status" | "ordered" | "received" | "defective";
 type PendGroup = "none" | "shop" | "eta" | "po" | "mo";

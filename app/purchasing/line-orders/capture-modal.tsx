@@ -476,7 +476,7 @@ export function CaptureModal({ id, canEdit, onClose, onOpen, onChanged }: {
                         <label className={lbl}>ชื่อร้านในใบสั่งซื้อ</label>
                         <input value={sellerName} onChange={(e) => { setSellerName(e.target.value); setFormErr(null); }} className={inp} placeholder="เช่น Taobao" />
                         <div className="text-[11px] text-slate-500">
-                          จะสร้างใบสั่งซื้อสถานะ &quot;ร่าง&quot; {draft.items.length} รายการ ยอด {sym}{fmt(sums?.items ?? 0)} · ชื่อร้านตรงกับทะเบียนคู่ค้า ระบบผูกให้เอง
+                          จะสร้างใบสั่งซื้อสถานะ &quot;สั่งแล้ว&quot; {draft.items.length} รายการ ยอด {sym}{fmt(sums?.items ?? 0)} · ชื่อร้านตรงกับทะเบียนคู่ค้า ระบบผูกให้เอง
                         </div>
                       </div>
                     )}

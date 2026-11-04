@@ -89,17 +89,20 @@ export const WORKFLOWS: WorkflowDef[] = [
   {
     key: "purchasing",
     label: "จัดซื้อ (ขอซื้อ → สั่งซื้อ → รับของ)",
-    flow: "ขอซื้อ → อนุมัติ / ไม่อนุมัติ → ออก PO (ร่าง = สั่งแล้ว) → รับของ (ครบ / บางส่วน / ปิดยอด) → ใบสำคัญรับ",
-    ruleFiles: ["lib/po-total.ts", "lib/po-line-price.ts", "lib/po-manual.ts", "lib/pr-cart.ts", "lib/purchase-voucher-server.ts", "lib/seller-bill.ts", "lib/seller-bill-match.ts", "components/receive-line-modal/index.tsx"],
+    flow: "ขอซื้อ → อนุมัติ / ไม่อนุมัติ → ออก PO = สั่งแล้ว (ใบร่างเก่ากด \"สั่งกับร้านแล้ว\") → รับของ (ครบ / บางส่วน / ปิดยอด) → ใบสำคัญรับ · จ่ายเงิน: ยังไม่จ่าย / ลงบิลรอโอน / ค้างจ่าย (เครดิต) / จ่ายแล้ว",
+    ruleFiles: ["lib/po-status.ts", "lib/po-pay-state.ts", "lib/po-total.ts", "lib/po-line-price.ts", "lib/po-manual.ts", "lib/pr-cart.ts", "lib/purchase-voucher-server.ts", "lib/seller-bill.ts", "lib/seller-bill-match.ts", "components/receive-line-modal/index.tsx"],
     gates: [
       "app/api/purchasing/pr-approve/route.ts", "app/api/purchasing/pr-delete/route.ts", "app/api/purchasing/create-po/route.ts",
-      "app/api/purchasing/receive/route.ts", "app/api/purchasing/cancel-line/route.ts",
+      "app/api/purchasing/receive/route.ts", "app/api/purchasing/cancel-line/route.ts", "app/api/purchasing/po-edit/route.ts",
     ],
     tables: ["purchase_requests_v2", "purchase_orders_v2", "purchase_order_lines_v2", "goods_receipts_v2", "goods_receipt_lines_v2"],
     signals: ["line_closed"],
     feeds: ["mo-materials"],
     logicIds: ["LOG-PUR-0001", "LOG-REC-0001", "LOG-PR-0001"],
-    gaps: ["สถานะใบขอซื้อ / ใบสั่งซื้อยังไม่มีไฟล์กติกากลาง — แต่ละ API เปลี่ยนสถานะเอง (pr-approve, create-po, receive, lib/order-capture)"],
+    gaps: [
+      "สถานะใบขอซื้อยังไม่มีไฟล์กติกากลาง — pr-approve / create-po / lib/order-capture เปลี่ยนสถานะเอง",
+      "สถานะใบสั่งซื้อ: ค่าคงที่อยู่ lib/po-status แล้ว แต่หน้ารับของ (receive) ยังตั้ง partial/received/confirmed เอง · แดชบอร์ด/รายงานรายเดือนยังเช็ก \"draft\" ตรง ๆ",
+    ],
   },
   {
     key: "quotation",

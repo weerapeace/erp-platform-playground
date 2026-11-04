@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { computeDueDate } from "@/lib/credit-term";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
+import { poPayState, todayBkk, type PoPayState } from "@/lib/po-pay-state";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,6 +43,8 @@ export type PoListRow = {
   received_lines: number;
   /** ใบสำคัญรับ (ใบซื้อ) ที่ครอบใบนี้ — เลข PV หรือ "ร่าง" */
   vouchers: { id: string; pv_no: string | null; status: string }[];
+  /** สถานะจ่ายเงิน (สีป้าย) ตามเครดิตร้าน — ของกลาง lib/po-pay-state */
+  pay: PoPayState;
   note: string | null;
 };
 
@@ -66,12 +69,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const [poRes, lineRes, partnerRes, rateRes] = await Promise.all([
     admin.from("purchase_orders_v2")
-      .select("id, po_no, seller_name, seller_partner_id, order_date, currency, fx_rate, grand_total, status, payment_status, paid_date, payment_due_date, expected_date, note")
+      .select("id, po_no, seller_name, seller_partner_id, order_date, currency, fx_rate, grand_total, status, payment_status, paid_date, payment_due_date, expected_date, note, china_bill_id")
       .order("order_date", { ascending: false, nullsFirst: false })
       .order("created_at", { ascending: false })
       .limit(limit),
     admin.from("purchase_order_lines_v2").select("po_id, qty, qty_received, line_status, is_active"),
-    admin.from("partners_v2").select("id, display_name, name_th, is_supplier, is_active, purchase_credit_term"),
+    admin.from("partners_v2").select("id, display_name, name_th, is_supplier, is_active, purchase_credit_term, ship_before_pay"),
     admin.from("daily_rates").select("rate").order("rate_date", { ascending: false }).limit(1).maybeSingle(),
   ]);
 
@@ -117,7 +120,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const partners = (partnerRes.data ?? []) as Record<string, unknown>[];
   const matcher = buildPartnerMatcher(partners as unknown as PartnerLike[]);
   const termById = new Map<string, string | null>();
-  for (const p of partners) termById.set(String(p.id), (p.purchase_credit_term as string) ?? null);
+  const shipBeforeById = new Set<string>();
+  for (const p of partners) {
+    termById.set(String(p.id), (p.purchase_credit_term as string) ?? null);
+    if (p.ship_before_pay === true) shipBeforeById.add(String(p.id));
+  }
+  const today = todayBkk();
 
   const rows: PoListRow[] = ((poRes.data ?? []) as Record<string, unknown>[]).map((p) => {
     const id = String(p.id);
@@ -153,6 +161,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       received_lines: dc,
       vouchers: voucherByPo.get(id) ?? [],
       note: (p.note as string) ?? null,
+      pay: poPayState({
+        payment_status: p.payment_status as string | null, paid_date: p.paid_date as string | null,
+        china_bill_id: p.china_bill_id as string | null, payment_due_date: ownDue, order_date: p.order_date as string | null,
+        credit_term: term, ship_before_pay: !!partnerId && shipBeforeById.has(partnerId),
+      }, today),
     };
   });
 

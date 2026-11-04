@@ -13,6 +13,7 @@ import { SKU_COVER_SELECT, resolveSkuCover } from "@/lib/sku-cover";
 import { writeAudit } from "@/lib/audit";
 import { computeDueDate, computeArrivalDate, parseLeadTime } from "@/lib/credit-term";
 import { buildPartnerMatcher } from "@/lib/partner-match";
+import { PO_INCOMING_STATUSES } from "@/lib/po-status";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .select("id, po_no, seller_name, seller_partner_id, grand_total, currency, expected_date, payment_due_date, follow_up, payment_status, status, order_date")
     .eq("is_active", true).neq("status", "cancelled").limit(2000);
   q = mode === "pay" ? q.eq("payment_status", "unpaid").neq("status", "draft")
-                     : q.in("status", ["purchase", "partial"]);
+                     : q.in("status", [...PO_INCOMING_STATUSES]);   // รอของเข้า: สั่งแล้ว + รับบางส่วน (lib/po-status)
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
 

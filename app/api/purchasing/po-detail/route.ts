@@ -10,6 +10,8 @@ import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 import { formatCreditTerm } from "@/lib/credit-term";
 import { computePoTotals, sumActiveLines } from "@/lib/po-total";
 import { formatThaiAddress, formatTaxId } from "@/lib/thai-address";
+import { loadPoPay } from "@/lib/po-pay-server";
+import type { PoPayState } from "@/lib/po-pay-state";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -60,6 +62,8 @@ export type PoDetail = {
   seller_info: PoSellerInfo | null;
   note: string | null;
   lines: PoDetailLine[];
+  /** สถานะจ่ายเงิน (สีป้าย) ตามเครดิตร้าน — ของกลาง lib/po-pay-state */
+  pay: PoPayState;
 };
 export type PoVoucherRef = { id: string; pv_no: string | null; status: string; grand_total_thb: number; ship_total_thb: number };
 
@@ -74,7 +78,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const dailyRateDate = ((rateRes.data as { rate_date?: string } | null)?.rate_date) ?? null;
 
   const { data: po, error } = await admin.from("purchase_orders_v2")
-    .select("id, po_no, seller_name, seller_partner_id, order_date, grand_total, currency, fx_rate, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status, note, vat_rate, vat_included, company_id")
+    .select("id, po_no, seller_name, seller_partner_id, order_date, grand_total, currency, fx_rate, payment_status, paid_date, paid_amount_thb, payment_due_date, expected_date, status, note, vat_rate, vat_included, company_id, china_bill_id")
     .eq("id", id).single();
   if (error || !po) return NextResponse.json({ error: "ไม่พบใบสั่งซื้อ" }, { status: 404 });
 
@@ -163,6 +167,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       : null,
     vouchers,
     lines,
+    pay: (await loadPoPay(admin))(p),
   };
   return NextResponse.json({ data: detail, error: null });
 }

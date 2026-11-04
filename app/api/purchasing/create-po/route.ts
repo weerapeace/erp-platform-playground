@@ -17,6 +17,7 @@ import { writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { pushLineText } from "@/lib/board-notify";
 import { buildPartnerMatcher } from "@/lib/partner-match";
+import { PO_NEW_STATUS } from "@/lib/po-status";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // header
     const { data: po, error: poErr } = await admin
       .from("purchase_orders_v2")
-      .insert({ po_no: poNo, seller_name: seller, seller_partner_id: partnerMatcher.match(seller)?.id ?? null, currency, order_date: orderDate, status: "draft", grand_total: grandTotal, requester })
+      .insert({ po_no: poNo, seller_name: seller, seller_partner_id: partnerMatcher.match(seller)?.id ?? null, currency, order_date: orderDate, status: PO_NEW_STATUS, grand_total: grandTotal, requester })   // ออก PO = สั่งกับร้านแล้ว (lib/po-status)
       .select("id")
       .single();
     if (poErr || !po) return NextResponse.json({ error: "สร้าง PO ไม่สำเร็จ: " + (poErr?.message ?? "") }, { status: 500 });

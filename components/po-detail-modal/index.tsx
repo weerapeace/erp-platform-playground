@@ -28,6 +28,8 @@ import { HoverImage } from "@/components/hover-image";
 import { SkuPicker } from "@/components/pickers";
 import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picker";
 import { SupplierWizard } from "@/components/supplier-wizard";
+import { PoPayChip } from "@/components/po-pay-chip";
+import { PO_NEW_STATUS, PO_STATUS_LABEL, canMarkOrdered } from "@/lib/po-status";
 import { apiFetch } from "@/lib/api";
 import { useAuth, usePermission } from "@/components/auth";
 import { computePoTotals } from "@/lib/po-total";
@@ -216,6 +218,21 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
     finally { setSaving(false); }
   }, [d, seller, sellerId, orderDate, expectedDate, note, vatRate, vatIncluded, currency, fxRate, companyId, lines, load, onSaved]);
 
+  /** ใบร่าง → สั่งแล้ว (API กลาง po-edit เช็กว่าเป็นใบร่างจริง + บันทึกประวัติ) */
+  const markOrdered = useCallback(async () => {
+    if (!d) return;
+    setSaving(true); setErr(null);
+    try {
+      const res = await apiFetch("/api/purchasing/po-edit", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ po_id: d.id, header: { status: PO_NEW_STATUS } }) });
+      const j = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) { setErr(j.error ?? "บันทึกไม่สำเร็จ"); return; }
+      await load();
+      onSaved?.();
+    } catch { setErr("บันทึกไม่สำเร็จ — ลองใหม่อีกครั้ง"); }
+    finally { setSaving(false); }
+  }, [d, load, onSaved]);
+
   const inp = "h-8 px-2 text-sm border border-slate-200 rounded-md";
   const lbl = "block text-[11px] font-medium text-slate-500 mb-0.5";
 
@@ -253,6 +270,13 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
                     title={receivedAny ? "ปิดรายการที่ยังค้างรับ (ของที่รับแล้วคงเดิม)" : "ยกเลิกใบสั่งซื้อทั้งใบ"}
                     className="h-9 px-4 rounded-lg border border-red-200 bg-white text-red-600 text-sm hover:bg-red-50">
                     ❌ {receivedAny ? "ปิดยอดที่ค้าง" : "ยกเลิกใบสั่งซื้อ"}
+                  </button>
+                )}
+                {/* ใบร่าง (ใบเก่า / ยังไม่ยืนยันกับร้าน) → กด "สั่งกับร้านแล้ว" = สถานะสั่งแล้ว (lib/po-status) แดชบอร์ด/ปฏิทินเริ่มนับ */}
+                {d && canCancel && canMarkOrdered(d.status) && (
+                  <button onClick={() => void markOrdered()} disabled={saving} title="ใบนี้ยังเป็นร่าง — กดเมื่อสั่งกับร้านแล้ว"
+                    className="h-9 px-4 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm font-medium hover:bg-emerald-100 disabled:opacity-50">
+                    {saving ? "กำลังบันทึก…" : "✓ สั่งกับร้านแล้ว"}
                   </button>
                 )}
                 {d && (
@@ -391,6 +415,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
       ) : (
         // ---------------- โหมดดู ----------------
         <div className="space-y-3">
+          {err && <div className="text-xs text-red-600 bg-red-50 border border-red-100 rounded px-2 py-1.5">⚠️ {err}</div>}
           <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm bg-slate-50 rounded-lg px-3 py-2">
             {isCNY(d.currency) ? (
               // ใบหยวน: โชว์ทั้งยอดหยวน ยอดแปลงบาท และเรทที่ใช้ (เรทใบ / เรทรายวัน) — แก้เรทได้ที่ ✎ แก้ไข
@@ -411,9 +436,12 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
             )}
             {companies.length > 1 && <div><span className="text-slate-400">บริษัท </span><CompanyTag companies={companies} companyId={d.company_id} mode="full" className="text-[11px] align-middle" /></div>}
             {d.order_date && <div><span className="text-slate-400">วันที่สั่ง </span>{thDate(d.order_date)}</div>}
-            {d.payment_status === "paid"
-              ? <div className="text-emerald-700 font-medium">✓ จ่ายแล้ว {d.paid_date ? thDate(d.paid_date) : ""}{d.paid_amount_thb ? ` · ${baht(d.paid_amount_thb)}` : ""}</div>
-              : <div className="text-rose-600 font-medium">● ยังไม่จ่าย{d.payment_due_date ? ` · ครบกำหนด ${thDate(d.payment_due_date)}` : ""}</div>}
+            {/* สถานะใบ + สถานะจ่ายเงิน (ป้ายกลาง lib/po-pay-state — สีตามเครดิตร้าน) */}
+            <div className="flex items-center gap-1.5">
+              <span className={`text-[11px] font-medium px-1.5 py-0.5 rounded border ${d.status === "draft" ? "bg-slate-100 text-slate-600 border-slate-200" : "bg-white text-slate-600 border-slate-200"}`}>{PO_STATUS_LABEL[String(d.status ?? "")] ?? d.status ?? "—"}</span>
+              <PoPayChip pay={d.pay} />
+              {d.payment_status === "paid" && d.paid_amount_thb ? <span className="text-xs text-emerald-700">{baht(d.paid_amount_thb)}</span> : null}
+            </div>
             {d.expected_date && <div><span className="text-slate-400">ของเข้า </span>{thDate(d.expected_date)}</div>}
             <div><span className="text-slate-400">รายการ </span>{d.lines.length}</div>
             {/* ใบสำคัญรับ (ใบซื้อ) ที่ครอบใบนี้ — จัดซื้อใส่ราคา+ค่าส่งหลังรับของ · ไม่มี = ยังไม่ออก */}

@@ -21,6 +21,7 @@ import { writeAudit } from "@/lib/audit";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 import { computePoTotals } from "@/lib/po-total";
 import { checkCompanyId } from "@/lib/company-check";
+import { PO_NEW_STATUS, canMarkOrdered } from "@/lib/po-status";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,6 +38,8 @@ type InHeader = {
   fx_rate?: number | null;
   /** ใบซื้อของบริษัทไหน (ใช้แยกกระแสเงินสดรายบริษัท) */
   company_id?: string | null;
+  /** "purchase" = กด "สั่งกับร้านแล้ว" (ได้เฉพาะใบร่าง — กติกา lib/po-status) */
+  status?: string;
 };
 type Body = { po_id?: string; header?: InHeader; lines?: InLine[]; line_qty?: { id?: string; qty?: number }[] };
 // สถานะบรรทัดที่ถือว่า "ปิดแล้ว" (สะกดเดียวกับ cancel-line / receivable)
@@ -56,7 +59,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   const admin = supabaseAdmin();
   const { data: po, error: poErr } = await admin.from("purchase_orders_v2")
-    .select("id, po_no, seller_name, currency, vat_rate, vat_included").eq("id", poId).maybeSingle();
+    .select("id, po_no, seller_name, currency, vat_rate, vat_included, status").eq("id", poId).maybeSingle();
   if (poErr || !po) return NextResponse.json({ error: "ไม่พบใบสั่งซื้อ" }, { status: 404 });
   const cur = po as Record<string, unknown>;
 
@@ -81,6 +84,12 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
   } else if (h.seller_partner_id !== undefined) {
     patch.seller_partner_id = str(h.seller_partner_id) || null;
+  }
+  if (h.status !== undefined) {
+    // เปลี่ยนสถานะใบผ่าน API นี้ได้อย่างเดียว: ร่าง → สั่งแล้ว (รับของ/ยกเลิก มีประตูของตัวเอง)
+    if (str(h.status) !== PO_NEW_STATUS) return NextResponse.json({ error: "เปลี่ยนสถานะได้แค่ \"สั่งกับร้านแล้ว\"" }, { status: 400 });
+    if (!canMarkOrdered(cur.status as string | null)) return NextResponse.json({ error: "ใบนี้ไม่ใช่ใบร่างแล้ว" }, { status: 409 });
+    patch.status = PO_NEW_STATUS;
   }
   if (h.order_date !== undefined) patch.order_date = str(h.order_date) || null;
   if (h.expected_date !== undefined) patch.expected_date = str(h.expected_date) || null;

@@ -11,6 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
 import { SKU_COVER_SELECT, resolveSkuCover, coverUrl } from "@/lib/sku-cover";
+import { loadPoPay, PO_PAY_COLUMNS } from "@/lib/po-pay-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // 1) ใบสั่งซื้อ — pending: ตัด received/cancelled · done: เห็นทุกใบที่ปิดแล้ว รวมใบที่ยกเลิกทั้งใบ (จะได้กดเปิดกลับได้)
   let poQuery = admin
     .from("purchase_orders_v2")
-    .select("id, po_no, seller_name, currency, status, order_date, expected_date, payment_status, paid_date")
+    .select(`id, po_no, currency, status, expected_date, ${PO_PAY_COLUMNS}`)
     .limit(1000);
   if (mode !== "done") poQuery = poQuery.not("status", "in", "(received,cancelled)");
   const { data: pos, error: poErr } = await poQuery;
@@ -120,6 +121,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     for (const nm of [s.name_th, s.display_name, s.code]) { const v = String(nm ?? "").trim(); if (v) shipBeforePay.add(v); }
   }
 
+  // สถานะจ่ายเงิน (สีป้าย) ของกลาง lib/po-pay-state — ตามเครดิตร้าน
+  const payOf = await loadPoPay(admin);
+  const payByPo = new Map([...poMap.entries()].map(([id, po]) => [id, payOf(po)]));
+
   const t = today();
   const rows = lines.map((l) => {
     const po = poMap.get(String(l.po_id)); if (!po) return null;
@@ -179,6 +184,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       paid_date: paidDate,
       ship_before_pay: shipBefore,
       duration_days: shipStart ? dayDiff(shipStart, t) : null,   // ค้างมากี่วัน (ตั้งแต่เริ่มนับ)
+      pay: payByPo.get(String(l.po_id)) ?? null,  // สถานะจ่ายเงิน { state, label, due } (ของกลาง lib/po-pay-state)
     };
   }).filter(Boolean) as Record<string, unknown>[];
 

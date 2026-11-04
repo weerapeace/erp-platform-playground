@@ -18,11 +18,14 @@ import { PoDetailModal } from "@/components/po-detail-modal";
 import { GrDetailModal } from "@/components/gr-detail-modal";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
+import { PO_PAY_FILTERS, type PoPayState } from "@/lib/po-pay-state";
+import { PoPayChip } from "@/components/po-pay-chip";
 
 type RecvItem = ReceiveCartItem & {
   seller_name: string; code: string; image_url: string | null; image_from_parent?: boolean;
   po_status: string; currency: string; order_date: string | null; expected_date: string | null;
   source_mo_no: string | null; used_for_label: string | null;
+  pay?: PoPayState | null;   // สถานะจ่ายเงินตามเครดิตร้าน (ของกลาง lib/po-pay-state)
 };
 type RecvSort = "age" | "name" | "po" | "remaining";
 
@@ -57,6 +60,9 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
   const [shopQ, setShopQ] = useState("");
   const [prodQ, setProdQ] = useState("");
   const [sort, setSort] = useState<RecvSort>("age");
+  // ชิปกรองสถานะจ่ายเงิน (ของกลาง PO_PAY_FILTERS) — "" = ทั้งหมด
+  const [payF, setPayF] = useState<string>("");
+  const payOk = (it: RecvItem) => { const f = PO_PAY_FILTERS.find((x) => x.key === payF); return !f || (!!it.pay && f.states.includes(it.pay.state)); };
   const [cart, setCart] = useState<Record<string, ReceiveInput>>({});   // po_line_id → จำนวนรับ/เสีย (อยู่ในตะกร้า = มี key)
   const [detail, setDetail] = useState<{ it: RecvItem; inp: ReceiveInput } | null>(null);   // ป๊อปกรอกละเอียด (ของกลาง ReceiveLineFields)
   const [poView, setPoView] = useState<string | null>(null);
@@ -208,6 +214,21 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
               {canBackfill && <button onClick={() => setBackfillOpen(true)} title="ของค้างรับเก่า: รับย้อนหลัง (ไม่ต้องแนบเอกสาร ใส่เหตุผล) / ยกเลิก" className="h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 shrink-0 whitespace-nowrap">🧹 เคลียร์ของค้างเก่า</button>}
             </div>
 
+            {items.some((i) => i.pay) && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-xs text-slate-400 mr-0.5">จ่ายเงิน</span>
+                {[{ key: "", label: "ทั้งหมด" }, ...PO_PAY_FILTERS].map((f) => {
+                  const n = f.key ? items.filter((i) => i.pay && PO_PAY_FILTERS.find((x) => x.key === f.key)!.states.includes(i.pay.state)).length : items.length;
+                  return (
+                    <button key={f.key || "all"} type="button" onClick={() => setPayF(f.key)}
+                      className={`h-7 px-2.5 text-xs rounded-full border ${payF === f.key ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-medium" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                      {f.label} <b>{n}</b>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
             {doneGrs.length > 0 && (
               <div className="px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 flex items-center gap-2 flex-wrap">
                 <span>✅ รับสินค้าแล้ว {doneGrs.length} ใบรับ{doneBatch ? ` · ชุด ${doneBatch}` : ""}</span>
@@ -230,7 +251,7 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
 
             {sections.map((sec) => {
               const pq = prodQ.trim().toLowerCase();
-              const list = sortList(sec.items.filter((it) => !pq || it.item_name.toLowerCase().includes(pq) || it.code.toLowerCase().includes(pq) || it.po_no.toLowerCase().includes(pq)));
+              const list = sortList(sec.items.filter((it) => (!pq || it.item_name.toLowerCase().includes(pq) || it.code.toLowerCase().includes(pq) || it.po_no.toLowerCase().includes(pq)) && payOk(it)));
               if (list.length === 0) return null;
               const allIn = list.every((it) => cart[it.id]);
               return (
@@ -263,6 +284,7 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
                             <div className="text-lg font-bold text-emerald-600 mt-1 leading-tight">รอรับ {it.remaining.toLocaleString()} <span className="text-sm font-medium">{it.uom}</span></div>
                             <div className="text-[11px] text-slate-500">สั่ง {it.qty.toLocaleString()}{it.qty_received > 0 && <span className="text-emerald-600"> · รับแล้ว {it.qty_received.toLocaleString()}</span>}</div>
                             <div className="text-[11px] text-slate-400 truncate">{it.po_no} · {it.order_date ? formatDate(it.order_date) : "—"}</div>
+                            {it.pay && <div className="mt-1"><PoPayChip pay={it.pay} /></div>}
                             {(age || it.expected_date) && (
                               <div className="mt-1 flex flex-wrap gap-1">
                                 {age && <span className={`text-[10px] px-1.5 py-0.5 rounded border ${age.cls}`}>{age.text}</span>}
