@@ -180,12 +180,11 @@ export const daysBetween = (a: string, b: string): number =>
 /**
  * รายการนี้ "ข้อมูลน่าจะเก่า" ไหม — คืนเหตุผลภาษาคน (null = ปกติ)
  * เลยกำหนดเกิน STALE_DUE_DAYS วัน (จ่าย/รับไปแล้วแต่ยังไม่ได้อัปเดต?) หรือ ต้นทางไม่ได้แก้เกิน STALE_UPDATE_DAYS วัน
- * ประมาณการ (ระบบเดา) ไม่นับ — ไม่มีเอกสารให้อัปเดต
+ * ประมาณการ: ไม่ดูวันเลยกำหนด (วันเป็นค่าเดา) — ดูแค่ต้นทางไม่ได้แก้นานไหม (เช่น ยอดใช้ OD) · ไม่มี updatedAt = ไม่ขึ้นป้าย
  */
 export function staleReason(e: Pick<CashflowEvent, "date" | "updatedAt" | "certainty">, today: string): string | null {
-  if (e.certainty === "estimate") return null;
   const late = daysBetween(e.date, today);
-  if (late > STALE_DUE_DAYS) return `เลยกำหนดมา ${late} วันแล้ว — ถ้าจ่าย/รับไปแล้ว กดอัปเดตให้ตรง`;
+  if (e.certainty !== "estimate" && late > STALE_DUE_DAYS) return `เลยกำหนดมา ${late} วันแล้ว — ถ้าจ่าย/รับไปแล้ว กดอัปเดตให้ตรง`;
   const upd = e.updatedAt ? String(e.updatedAt).slice(0, 10) : "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(upd)) {
     const age = daysBetween(upd, today);

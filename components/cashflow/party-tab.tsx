@@ -439,6 +439,10 @@ function DocList({ group, side, today, canManage, canPayPo, canReceipt, canDebtE
                         className={`${iconBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}><Icon value="i:table" size={14} />บันทึกจ่าย / ตารางผ่อน</button>
                     )}
                   </>)}
+                  {canDebtEdit && e.source === "od_interest" && e.docId && (
+                    <button type="button" onClick={() => onDrawer({ module: "od-facilities", id: String(e.docId) })}
+                      className={`${iconBtn} border-blue-200 text-blue-700 hover:bg-blue-50`}><Icon value="i:edit" size={14} />อัปเดตยอดใช้</button>
+                  )}
                   {canPayrollPay && e.source === "payroll" && e.docId && e.certainty !== "estimate" && (
                     <button type="button" onClick={() => onPayroll([e])} className={`${iconBtn} border-emerald-200 text-emerald-700 hover:bg-emerald-50`}><Icon value="i:circle-check" size={14} />จ่ายแล้ว</button>
                   )}

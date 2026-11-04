@@ -64,7 +64,11 @@ describe("ป้ายข้อมูลเก่า (staleReason)", () => {
   it("ยังไม่ถึงกำหนด แต่ไม่ได้แก้เกิน 45 วัน = เก่า", () => {
     expect(staleReason({ date: "2026-11-20", updatedAt: "2026-09-07 07:22:22+00", certainty: "actual" }, today)).toMatch(/ไม่ได้อัปเดตมา 58 วัน/);
   });
-  it("ประมาณการ (ระบบเดา) ไม่ขึ้นป้าย", () => {
+  it("ประมาณการ (ระบบเดา) ไม่ดูวันเลยกำหนด", () => {
     expect(staleReason({ date: "2026-01-01", updatedAt: null, certainty: "estimate" }, today)).toBeNull();
+    expect(staleReason({ date: "2026-01-01", updatedAt: "2026-10-21T13:27:51Z", certainty: "estimate" }, today)).toBeNull();
+  });
+  it("ประมาณการที่ต้นทางไม่ได้แก้นาน (ยอดใช้ OD) = เก่า", () => {
+    expect(staleReason({ date: "2026-11-30", updatedAt: "2026-08-01T00:00:00Z", certainty: "estimate" }, today)).toMatch(/ไม่ได้อัปเดตมา 95 วัน/);
   });
 });

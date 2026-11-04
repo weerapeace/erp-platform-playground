@@ -552,7 +552,7 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
   {
     const odRes = await db
       .from("od_facilities")
-      .select("id, od_code, lender_name, estimated_interest_this_month, current_used_amount, company_id")
+      .select("id, od_code, lender_name, limit_amount, available_limit, interest_rate, estimated_interest_this_month, current_used_amount, company_id, updated_at")
       .eq("is_active", true).limit(500);
 
     for (const od of odRes.data ?? []) {
@@ -572,10 +572,18 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
           amount: monthly,
           dateConfident: false,
           dateNote: "ธนาคารมักตัดดอกเบี้ยสิ้นเดือน",
-          note: "ประมาณการจากยอดที่ใช้อยู่ปัจจุบัน",
+          note: "ประมาณการจากยอดที่ใช้อยู่ปัจจุบัน — ยอดใช้เปลี่ยนให้กด \"อัปเดตยอดใช้\"",
           href: openLink("/od-facilities", String(od.id)),
           docId: String(od.id),
           companyId: co(od.company_id),
+          updatedAt: (od.updated_at as string | null) ?? null,
+          details: [
+            { label: "วงเงิน", value: num(od.limit_amount), kind: "money" },
+            { label: "ใช้อยู่", value: num(od.current_used_amount), kind: "money" },
+            { label: "เหลือ", value: num(od.available_limit), kind: "money" },
+            ...(num(od.interest_rate) > 0 ? [{ label: "ดอกเบี้ย", value: `${num(od.interest_rate)}% ต่อปี`, kind: "text" as const }] : []),
+            { label: "ดอกประมาณ/เดือน", value: monthly, kind: "money" },
+          ],
         });
       }
     }
