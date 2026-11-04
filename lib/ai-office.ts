@@ -285,6 +285,8 @@ export type OfficeLive = {
   events: OfficeEvent[];
   /** ตั้ง CRON_SECRET ไว้หรือยัง (ส่งแค่ true/false ไม่ส่งค่า) */
   cronSecret: boolean;
+  /** กดใช้ปุ่ม AI ทั้งหมดกี่ครั้งใน 30 วัน (นับจาก audit_logs) */
+  aiUses30: number;
   /** ตัวอ่านข้อมูลที่ล้ม (ชื่อผู้ช่วย) — หน้าจอขึ้นป้ายเหลือง */
   failed: string[];
   at: string;
@@ -363,10 +365,17 @@ export function countStatuses(live: Record<string, WorkerLive> | null | undefine
   return c;
 }
 
-/** ผู้ช่วยที่ต้องให้คนช่วย (ติดปัญหา/ต้องดู) เรียงตามความหนัก */
+/**
+ * เรื่องที่ต้องให้คนช่วย (ติดปัญหา/ต้องดู) เรียงตามความหนัก — 1 แถว = 1 เรื่องที่ต้องทำ
+ * งานตั้งเวลาที่ติดแค่ "ยังไม่ตั้ง CRON_SECRET" รวมไว้ที่ผู้ปลุกงานตามเวลาแถวเดียว (แก้ครั้งเดียวหายทั้งหมด)
+ */
 export function workersNeedingHelp(live: Record<string, WorkerLive> | null | undefined): OfficeWorker[] {
   if (!live) return [];
   return OFFICE_WORKERS
-    .filter((w) => { const s = live[w.id]?.status; return s === "error" || s === "warn"; })
+    .filter((w) => {
+      const x = live[w.id];
+      if (!x || (x.status !== "error" && x.status !== "warn")) return false;
+      return !(w.cron && x.fix === CRON_SECRET_FIX && live.scheduler?.status === "error");
+    })
     .sort((a, b) => STATUS_RANK[live[a.id].status] - STATUS_RANK[live[b.id].status]);
 }

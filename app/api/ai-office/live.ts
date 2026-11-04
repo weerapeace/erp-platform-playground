@@ -74,6 +74,7 @@ export async function buildOfficeLive(admin: Admin, now = Date.now()): Promise<O
   const workers: Record<string, WorkerLive> = {};
   const events: OfficeEvent[] = [];
   const failed: string[] = [];
+  let aiUses30 = 0;
   /** อ่านทีละส่วน — ล้มแล้วจดชื่อไว้ ไม่ทำให้ส่วนอื่นล้ม */
   const part = async (ids: string[], fn: () => Promise<void>) => { try { await fn(); } catch (e) { console.error("[ai-office/live]", ids.join(","), e instanceof Error ? e.message : e); failed.push(...ids); } };
 
@@ -182,6 +183,7 @@ export async function buildOfficeLive(admin: Admin, now = Date.now()): Promise<O
         admin.from("design_sheet_line_inbox").select("status, created_at, ai_read_at, ai_error").order("created_at", { ascending: false }).limit(300),
       ]);
       events.push(...ai.events);
+      aiUses30 = Object.values(ai.per).reduce((sum, x) => sum + x.n30, 0);
       for (const id of ["seller-bill-ai", "ai-caption", "ai-planner"]) workers[id] = aiUsageLive(ai.per[id], now);
 
       const caps = rows(capRes);
@@ -273,5 +275,5 @@ export async function buildOfficeLive(admin: Admin, now = Date.now()): Promise<O
   ]);
 
   events.sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
-  return { workers, events: events.slice(0, 40), cronSecret, failed, at: new Date(now).toISOString() };
+  return { workers, events: events.slice(0, 40), cronSecret, aiUses30, failed, at: new Date(now).toISOString() };
 }
