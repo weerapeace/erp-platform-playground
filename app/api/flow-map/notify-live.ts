@@ -86,19 +86,19 @@ async function stats(admin: Admin): Promise<NotifyLive["stats"]> {
 
 async function reports(admin: Admin): Promise<{ channels: NotifyLive["channels"]; reports: NotifyLive["reports"] }> {
   const [ch, rep] = await Promise.all([
-    admin.from("erp_report_channels").select("email, popup, discord").eq("id", 1).maybeSingle(),
-    admin.from("email_reports").select("id, name, days, send_time, is_active, is_enabled, email_enabled, popup, discord").order("created_at"),
+    admin.from("erp_report_channels").select("email, line, popup, discord").eq("id", 1).maybeSingle(),
+    admin.from("email_reports").select("id, name, days, send_time, is_active, is_enabled, email_enabled, popup, discord, line").order("created_at"),
   ]);
   if (rep.error) throw new Error(rep.error.message);
   const c = (ch.data ?? {}) as Row;
   const on = (v: unknown) => !!(v && typeof v === "object" && (v as { enabled?: unknown }).enabled === true);
   return {
-    channels: { email: c.email !== false, popup: c.popup !== false, discord: c.discord !== false },
+    channels: { email: c.email !== false, popup: c.popup !== false, discord: c.discord !== false, line: c.line !== false },
     reports: ((rep.data ?? []) as Row[]).map((r) => ({
       id: String(r.id), name: String(r.name ?? "รายงาน"), time: r.send_time ? String(r.send_time) : null,
       days: Array.isArray(r.days) ? (r.days as unknown[]).map(Number).filter((n) => Number.isFinite(n)) : [],
       on: r.is_active !== false && r.is_enabled !== false,
-      email: r.email_enabled === true, popup: on(r.popup), discord: on(r.discord),
+      email: r.email_enabled === true, popup: on(r.popup), discord: on(r.discord), line: on(r.line),
     })),
   };
 }
@@ -116,7 +116,7 @@ export async function buildNotifyLive(admin: Admin): Promise<{ data: NotifyLive;
     safe("push", () => pushDevices(admin), 0),
     safe("shops", () => shops(admin), { total: 0, line: 0, email: 0, oa: 0 }),
     safe("stats", () => stats(admin), {}),
-    safe("reports", () => reports(admin), { channels: { email: true, popup: true, discord: true }, reports: [] }),
+    safe("reports", () => reports(admin), { channels: { email: true, popup: true, discord: true, line: true }, reports: [] }),
   ]);
   return { data: { line, rules: ruleList, staff: st, push, email: emailConfigured(), shops: sh, stats: stat, ...rep }, failed };
 }

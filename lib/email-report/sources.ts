@@ -15,6 +15,7 @@ import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { linkLabel, taskTitleWithLinks, taskWithWho } from "@/lib/record-tasks";
 import { describeDays, normalizeReportOptions, type EmailReportFilters, type EmailReportInput, type ResolvedReportOptions } from "@/lib/email-report/shared";
 import { teamPlanWeekly } from "@/lib/email-report/source-team-plan";
+import { platformSalesDaily } from "@/lib/email-report/source-platform-sales";
 import { renderReportEmail, type BuiltReport, type ReportPart, type ReportRow, type ReportSection, type ReportStat, type ReportTone } from "@/lib/email-report/render";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -263,6 +264,7 @@ export const SOURCE_CHECKLIST_MODULE: Record<string, string> = { design_sheets_p
 const SOURCES: Record<string, SourceFn> = {
   design_sheets_pending: designSheetsPending,
   team_plan_weekly: teamPlanWeekly,   // 📋 สรุปแผนงานทีมรายสัปดาห์ (lib/email-report/source-team-plan)
+  platform_sales_daily: platformSalesDaily,   // 📈 ยอดขายแพลตฟอร์มรายวัน แบบตาราง (lib/email-report/source-platform-sales)
 };
 
 /** ประกอบรายงาน (ข้อมูลล้วน ไม่ทำอีเมล) — ป๊อปตอนเข้า ERP ใช้ตัวนี้ */

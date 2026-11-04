@@ -25,7 +25,25 @@ export type ReportRow = {
 };
 /** label ว่าง = ไม่มีหัวกลุ่ม (ไม่จัดกลุ่ม) */
 export type ReportSection = { key: string; label: string; color: string | null; total: number; rows: ReportRow[] };
-export type ReportStat = { label: string; value: number; tone?: ReportTone };
+/** ตัวเลขสรุป · display = ข้อความที่โชว์แทนตัวเลขล้วน (เช่น "฿29,865") · hint = บรรทัดเล็กใต้ (เช่น "+1% จากวันก่อน") */
+export type ReportStat = { label: string; value: number; tone?: ReportTone; display?: string; hint?: string };
+export const statText = (s: ReportStat) => s.display ?? s.value.toLocaleString("th-TH");
+
+/**
+ * 🧮 รายงานแบบตาราง (ของกลาง) — แหล่งข้อมูลที่ประกาศ layout "table" ใน EMAIL_REPORT_SOURCES ส่งตัวนี้แทน sections
+ * คอลัมน์ = ช่องที่ผู้ตั้งค่าติ๊ก (options.row_fields) ตามลำดับที่เลือก · key "img" = รูปปก (ใช้ row.imageUrl)
+ * อีเมล (renderReportEmail) · รูป Discord (image.ts) · LINE (line.ts) วาดจากตัวนี้ชุดเดียวกัน
+ */
+export type ReportTableColumn = { key: string; label: string; align?: "left" | "right" };
+export type ReportTableRow = { id: string; imageUrl?: string | null; link?: string | null; cells: Record<string, string> };
+export type ReportTable = {
+  columns: ReportTableColumn[];
+  /** label ว่าง = ไม่มีหัวกลุ่ม */
+  sections: { key: string; label: string; rows: ReportTableRow[] }[];
+  /** แถวรวมท้ายตาราง (null = ไม่โชว์) — ค่าของคอลัมน์ชิดขวา · ช่องซ้ายช่องแรกใส่ totalLabel */
+  total: Record<string, string> | null;
+  totalLabel: string;
+};
 export type BuiltReport = {
   heading: string;               // หัวในอีเมล เช่น "งานออกแบบที่ค้างอยู่"
   subjectCore: string;           // ใช้ในหัวเรื่องแบบเดิม เช่น "งานออกแบบที่ค้าง 48 งาน"
@@ -37,6 +55,10 @@ export type BuiltReport = {
   /** โชว์ช่องรูปหน้าแถวไหม */
   showImages: boolean;
   sections: ReportSection[];
+  /** 🧮 แบบตาราง — มีแล้วอีเมล/รูป/LINE วาดเป็นตารางแทนรายการงาน (sections ใช้ว่างได้) */
+  table?: ReportTable;
+  /** หน่วยของแถว (ค่าเริ่มต้น "งาน") เช่น "รายการ" */
+  unit?: string;
   viewAllLink: string | null;
   viewAllLabel: string;
   emptyText: string;             // ข้อความตอนไม่มีงาน
@@ -104,6 +126,51 @@ function partsHtml(parts: ReportPart[]): string {
   return out.join("");
 }
 
+/** 🧮 ตารางในอีเมล (อยู่ในแถวเดียวของกรอบอีเมล colspan=3) — หัวคอลัมน์ · หัวกลุ่ม · แถวรวม */
+function tableHtml(t: ReportTable): string {
+  const cols = t.columns;
+  const cellStyle = (c: ReportTableColumn) => `padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a;${c.align === "right" ? "white-space:nowrap;" : ""}`;
+  const head = cols.map((c) => `<th align="${c.align ?? "left"}" style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:normal;color:#64748b;${c.key === "img" ? "width:44px;" : ""}">${c.key === "img" ? "" : esc(c.label)}</th>`).join("");
+  const body = t.sections.map((s) => `${s.label ? `<tr><td colspan="${cols.length}" style="padding:6px 8px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:bold;color:#334155;">${esc(s.label)}</td></tr>` : ""}${s.rows.map((row) => {
+    const link = safeUrl(row.link);
+    return `<tr>${cols.map((c) => {
+      if (c.key === "img") {
+        const img = safeUrl(row.imageUrl);
+        return `<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;width:44px;">${img
+          ? `<img src="${esc(img)}" width="36" height="36" alt="" style="display:block;width:36px;height:36px;border-radius:4px;border:1px solid #e2e8f0;object-fit:cover;background:#f1f5f9;">`
+          : `<div style="width:36px;height:36px;border-radius:4px;background:#f1f5f9;border:1px solid #e2e8f0;"></div>`}</td>`;
+      }
+      const v = esc(row.cells[c.key] ?? "");
+      return `<td align="${c.align ?? "left"}" style="${cellStyle(c)}">${c.key === "name" && link ? `<a href="${esc(link)}" style="color:#0f172a;text-decoration:none;">${v}</a>` : v}</td>`;
+    }).join("")}</tr>`;
+  }).join("")}`).join("");
+  let total = "";
+  if (t.total) {
+    let labelled = false;
+    total = `<tr>${cols.map((c) => {
+      const style = "padding:8px;border-top:2px solid #e2e8f0;font-size:13px;font-weight:bold;color:#0f172a;";
+      if (c.align === "right") return `<td align="right" style="${style}white-space:nowrap;">${esc(t.total?.[c.key] ?? "")}</td>`;
+      if (!labelled && c.key !== "img") { labelled = true; return `<td style="${style}">${esc(t.totalLabel)}</td>`; }
+      return `<td style="${style}"></td>`;
+    }).join("")}</tr>`;
+  }
+  return `<tr><td colspan="3" style="padding:0 12px 4px 12px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>${head}</tr>${body}${total}</table>
+  </td></tr>`;
+}
+
+/** 🧮 ตารางแบบข้อความล้วน (อีเมลข้อความ / LINE สำรอง) — 1 แถว = 1 บรรทัด คั่นด้วย " · " */
+export function tableText(t: ReportTable): string[] {
+  const cols = t.columns.filter((c) => c.key !== "img");
+  const out: string[] = [];
+  for (const s of t.sections) {
+    if (s.label) out.push(`■ ${s.label}`);
+    for (const row of s.rows) out.push(`- ${cols.map((c) => row.cells[c.key]).filter(Boolean).join(" · ")}`);
+  }
+  if (t.total) out.push(`${t.totalLabel}: ${cols.filter((c) => c.align === "right").map((c) => t.total?.[c.key]).filter(Boolean).join(" · ")}`);
+  return out;
+}
+
 export function renderReportEmail(r: BuiltReport, ctx: {
   reportName: string;
   scheduleLabel: string;         // เช่น "จ–ส · 08:00 น."
@@ -124,11 +191,13 @@ export function renderReportEmail(r: BuiltReport, ctx: {
   const font = "font-family:'Sarabun','Leelawadee UI','Segoe UI',Tahoma,Arial,sans-serif;";
   const hasRight = r.sections.some((s) => s.rows.some((x) => x.flag || x.linkLabel));
 
+  const unit = r.unit ?? "งาน";
   const statCells = r.stats.map((s) => `
     <td width="${Math.floor(100 / Math.max(1, r.stats.length))}%" style="padding:4px;">
       <div style="background:#f8fafc;border-radius:8px;padding:10px 12px;">
-        <div style="font-size:22px;font-weight:bold;line-height:1.2;color:${s.tone ? TONE_COLOR[s.tone] : "#0f172a"};">${s.value.toLocaleString("th-TH")}</div>
-        <div style="font-size:12px;color:#64748b;">${esc(s.label)}</div>
+        <div style="font-size:22px;font-weight:bold;line-height:1.2;color:${s.tone ? TONE_COLOR[s.tone] : "#0f172a"};">${esc(statText(s))}</div>
+        <div style="font-size:12px;color:#64748b;">${esc(s.label)}</div>${s.hint ? `
+        <div style="font-size:11px;color:#94a3b8;">${esc(s.hint)}</div>` : ""}
       </div>
     </td>`).join("");
 
@@ -160,7 +229,7 @@ export function renderReportEmail(r: BuiltReport, ctx: {
 
   const sectionsHtml = r.sections.filter((s) => s.rows.length > 0).map((s) => `
     ${s.label ? `<tr><td colspan="3" style="padding:8px 16px;background:#f8fafc;border-top:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:bold;color:#334155;">
-      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeColor(s.color ?? "")};margin-right:6px;"></span>${esc(s.label)} · ${s.total.toLocaleString("th-TH")} งาน${s.total > s.rows.length ? ` <span style="font-weight:normal;color:#94a3b8;">(โชว์ ${s.rows.length})</span>` : ""}
+      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeColor(s.color ?? "")};margin-right:6px;"></span>${esc(s.label)} · ${s.total.toLocaleString("th-TH")} ${unit}${s.total > s.rows.length ? ` <span style="font-weight:normal;color:#94a3b8;">(โชว์ ${s.rows.length})</span>` : ""}
     </td></tr>` : `<tr><td colspan="3" style="border-top:1px solid #e2e8f0;font-size:0;line-height:0;">&nbsp;</td></tr>`}
     ${s.rows.map(rowHtml).join("")}`).join("");
 
@@ -174,7 +243,8 @@ export function renderReportEmail(r: BuiltReport, ctx: {
 
   const viewAll = safeUrl(r.viewAllLink);
   const manage = safeUrl(ctx.manageUrl);
-  const moreNote = r.total > r.shown ? `แสดง ${r.shown.toLocaleString("th-TH")} จาก ${r.total.toLocaleString("th-TH")} งาน · ` : "";
+  const moreNote = r.total > r.shown ? `แสดง ${r.shown.toLocaleString("th-TH")} จาก ${r.total.toLocaleString("th-TH")} ${unit} · ` : "";
+  const bodyHtml = r.table ? tableHtml(r.table) : sectionsHtml;
 
   const html = `<!doctype html>
 <html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(subject)}</title></head>
@@ -189,7 +259,7 @@ export function renderReportEmail(r: BuiltReport, ctx: {
   ${r.stats.length ? `<tr><td colspan="3" style="padding:6px 12px 14px 12px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${statCells}</tr></table></td></tr>` : `<tr><td colspan="3" style="padding:0 0 8px 0;font-size:0;line-height:0;">&nbsp;</td></tr>`}${breakdownHtml}
   ${r.total === 0
     ? `<tr><td colspan="3" style="padding:24px 16px;text-align:center;font-size:14px;color:#059669;border-top:1px solid #e2e8f0;">${esc(r.emptyText)}</td></tr>`
-    : sectionsHtml}
+    : bodyHtml}
   <tr><td colspan="3" style="padding:12px 16px;text-align:center;font-size:12px;color:#64748b;">
     ${moreNote}${viewAll ? `<a href="${esc(viewAll)}" style="color:#2563eb;text-decoration:none;">${esc(r.viewAllLabel)} →</a>` : ""}
   </td></tr>
@@ -202,11 +272,12 @@ export function renderReportEmail(r: BuiltReport, ctx: {
 
   const lines: string[] = [r.heading, `${ctx.reportName} · ${thaiDateLabel(now)}`, ""];
   if (intro) lines.push(intro, "");
-  if (r.stats.length) lines.push(r.stats.map((s) => `${s.label}: ${s.value}`).join(" · "));
+  if (r.stats.length) lines.push(r.stats.map((s) => `${s.label}: ${statText(s)}${s.hint ? ` (${s.hint})` : ""}`).join(" · "));
   if (breakdown.length) lines.push(breakdown.map((b) => `${b.label} ${b.count}`).join(" · "));
   lines.push("");
   if (r.total === 0) lines.push(r.emptyText);
-  for (const s of r.sections) {
+  else if (r.table) lines.push(...tableText(r.table), "");
+  for (const s of r.table ? [] : r.sections) {
     if (s.rows.length === 0) continue;
     if (s.label) lines.push(`■ ${s.label} (${s.total} งาน)`);
     for (const row of s.rows) {
@@ -216,7 +287,7 @@ export function renderReportEmail(r: BuiltReport, ctx: {
     }
     lines.push("");
   }
-  if (r.total > r.shown) lines.push(`แสดง ${r.shown} จาก ${r.total} งาน`);
+  if (r.total > r.shown) lines.push(`แสดง ${r.shown} จาก ${r.total} ${unit}`);
   if (viewAll) lines.push(`${r.viewAllLabel}: ${viewAll}`);
   lines.push("", `ส่งอัตโนมัติจากระบบ ERP (${ctx.scheduleLabel})`);
   return { subject, html, text: lines.join("\n") };

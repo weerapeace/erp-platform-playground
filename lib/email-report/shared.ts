@@ -17,6 +17,8 @@ export type EmailReportFilters = {
   brand_ids?: string[];
   /** เฉพาะสถานะที่เลือก (ว่าง = ทุกสถานะที่ยังไม่ปิด) */
   statuses?: string[];
+  /** รายงานรายวัน: สรุปของวันไหน (เมื่อวาน = ค่าเริ่มต้น · วันนี้ถึงเวลาที่ส่ง) */
+  day?: "yesterday" | "today";
 };
 
 export type EmailReportOptions = {
@@ -40,6 +42,8 @@ export type EmailReportOptions = {
   subject_template?: string;
   /** ข้อความเกริ่นบนสุดของอีเมล (ไม่บังคับ) */
   intro?: string;
+  /** 🧮 แบบตาราง: แถวรวมท้ายตาราง */
+  show_total?: boolean;
 };
 /** ตัวเลือกที่เติมค่าเริ่มต้นครบแล้ว (ใช้ตอนประกอบอีเมล) */
 export type ResolvedReportOptions = Required<EmailReportOptions>;
@@ -59,6 +63,8 @@ export type EmailReport = {
   discord: EmailReportDiscord;
   /** 🔔 เด้งป๊อปตอนเข้า ERP (normalizeReportPopup) */
   popup: EmailReportPopup;
+  /** 🟢 ส่งเข้ากลุ่ม LINE (normalizeReportLine) */
+  line: EmailReportLine;
   skip_if_empty: boolean;
   is_enabled: boolean;
   last_sent_on: string | null;
@@ -67,20 +73,46 @@ export type EmailReport = {
 };
 
 /** 🔌 สวิตช์ช่องทางทั้งระบบ (ตาราง erp_report_channels แถวเดียว) — ปิดช่องไหน ทุกรายงานหยุดใช้ช่องนั้น · lib/email-report/channels */
-export type ReportChannelKey = "email" | "discord" | "popup";
+export type ReportChannelKey = "email" | "line" | "discord" | "popup";
 export type ReportChannels = Record<ReportChannelKey, boolean>;
 export const REPORT_CHANNELS: { key: ReportChannelKey; icon: string; label: string; hint: string }[] = [
   { key: "email", icon: "✉️", label: "Gmail", hint: "ผู้รับ · หัวเรื่อง · ข้อความเกริ่น" },
+  { key: "line", icon: "🟢", label: "LINE", hint: "กลุ่ม · โชว์กี่อันดับ (1 ข้อความ/ครั้ง)" },
   { key: "discord", icon: "💬", label: "Discord", hint: "ห้อง · แท็ก · การ์ดติ๊ก" },
   { key: "popup", icon: "🔔", label: "ERP ป๊อป", hint: "ใครเห็น · ช่วงเวลา · รับทราบ" },
 ];
 export function normalizeReportChannels(raw: unknown): ReportChannels {
   const o = (raw ?? {}) as Record<string, unknown>;
-  return { email: o.email !== false, discord: o.discord !== false, popup: o.popup !== false };
+  return { email: o.email !== false, line: o.line !== false, discord: o.discord !== false, popup: o.popup !== false };
 }
 /** รายงานนี้เปิดช่องไหนไว้บ้าง (สวิตช์รายรายงาน — ยังไม่รวมสวิตช์ทั้งระบบ) */
-export const reportChannelOn = (r: Pick<EmailReport, "email_enabled" | "discord" | "popup">, k: ReportChannelKey) =>
-  k === "email" ? r.email_enabled !== false : k === "discord" ? !!r.discord?.enabled : !!r.popup?.enabled;
+export const reportChannelOn = (r: Pick<EmailReport, "email_enabled" | "discord" | "popup"> & { line?: EmailReportLine | null }, k: ReportChannelKey) =>
+  k === "email" ? r.email_enabled !== false : k === "line" ? !!r.line?.enabled : k === "discord" ? !!r.discord?.enabled : !!r.popup?.enabled;
+
+/**
+ * 🟢 ส่งเข้ากลุ่ม LINE (บอทตัวเดียวกับระบบแจ้งเตือน LINE อื่น ๆ ของ ERP) — lib/email-report/line
+ * ส่งเป็น "กล่องเดียว" (Flex 1 ข้อความ) ต่อครั้ง เพราะ LINE ฟรีนับโควตาต่อข้อความ (300/เดือน ใช้ร่วมทั้ง ERP)
+ */
+export type EmailReportLine = {
+  enabled: boolean;
+  /** id กลุ่ม LINE (ขึ้นต้น C) */
+  group_id: string | null;
+  group_name: string | null;
+  /** โชว์ในกล่องกี่อันดับ/งาน (ที่เหลือ = ปุ่ม "ดูทั้งหมดใน ERP") */
+  max_rows: number;
+};
+export const LINE_MAX_ROW_CHOICES = [3, 5, 8, 10];
+const LINE_GROUP_ID = /^C[0-9a-f]{32}$/;
+export function normalizeReportLine(raw: unknown): EmailReportLine {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  const group_id = typeof o.group_id === "string" && LINE_GROUP_ID.test(o.group_id) ? o.group_id : null;
+  const n = Math.round(Number(o.max_rows));
+  return {
+    enabled: o.enabled === true && !!group_id,
+    group_id, group_name: group_id && typeof o.group_name === "string" && o.group_name.trim() ? o.group_name.trim().slice(0, 100) : null,
+    max_rows: Number.isFinite(n) && n >= 1 ? Math.min(10, n) : 5,
+  };
+}
 
 /** ส่งเข้าห้อง Discord: ข้อความภาพรวม + รูปรายงาน + การ์ดเฉพาะใบที่มีเช็กลิสต์ค้าง (ปุ่มติ๊ก) — docs/discord-setup.md */
 export type EmailReportDiscord = {
@@ -192,7 +224,7 @@ export type EmailReportRun = {
 };
 
 /** ค่าที่ฟอร์มส่งมา (ยังไม่มี id/เวลา) */
-export type EmailReportInput = Pick<EmailReport, "name" | "source_key" | "filters" | "options" | "days" | "send_time" | "recipients" | "email_enabled" | "discord" | "popup" | "skip_if_empty" | "is_enabled">;
+export type EmailReportInput = Pick<EmailReport, "name" | "source_key" | "filters" | "options" | "days" | "send_time" | "recipients" | "email_enabled" | "discord" | "popup" | "line" | "skip_if_empty" | "is_enabled">;
 
 // ---- แหล่งข้อมูล (เพิ่มรายงานแบบใหม่ = เพิ่มที่นี่ + ตัวดึงข้อมูลใน lib/email-report/sources.ts) ----
 // แต่ละแหล่งประกาศเองว่า "เลือกโชว์อะไรได้บ้าง" — หน้าตั้งค่าอ่านจากที่นี่ ส่วนที่ติ๊ก/ลำดับเก็บใน email_reports.options
@@ -214,8 +246,12 @@ export type EmailReportSourceDef = {
   subjectTokens: ReportChoice[];
   /** หัวเรื่องแบบเดิม (โชว์เป็นตัวอย่างในช่อง · ว่าง = ใช้แบบนี้) */
   defaultSubject: string;
-  /** ตัวกรองที่หน้าตั้งค่าโชว์ (brand = กลุ่มแบรนด์/แบรนด์ · status = สถานะใบงาน) · ว่าง = ไม่มีตัวกรอง */
-  filterUi: ("brand" | "status")[];
+  /** ตัวกรองที่หน้าตั้งค่าโชว์ (brand = กลุ่มแบรนด์/แบรนด์ · status = สถานะใบงาน · day = ยอดของเมื่อวาน/วันนี้) · ว่าง = ไม่มีตัวกรอง */
+  filterUi: ("brand" | "status" | "day")[];
+  /** หน้าตา: list = รายการงาน (ค่าเริ่มต้น) · table = ตาราง (rowFields = คอลัมน์ · มีแถวรวม) — lib/email-report/render ReportTable */
+  layout?: "list" | "table";
+  /** ช่องทางที่แหล่งนี้รองรับ (ไม่ใส่ = ทุกช่อง) เช่น รายงานยอดขายยังไม่ทำป๊อป */
+  channels?: ReportChannelKey[];
   /** รายงานใหม่ที่เลือกแหล่งนี้ → ตั้งวัน/เวลาส่งให้ก่อน (แก้ได้) */
   defaultDays?: number[];
   defaultTime?: string;
@@ -273,7 +309,37 @@ export const EMAIL_REPORT_SOURCES: EmailReportSourceDef[] = [
     filterUi: [],
     defaultDays: [5], defaultTime: "17:00",
   },
+  {
+    key: "platform_sales_daily", label: "ยอดขายแพลตฟอร์มรายวัน (Shopee / Lazada)",
+    description: "สินค้าที่ขายได้ + ยอดของวัน เทียบวันก่อนหน้า (ออเดอร์จากเมลแพลตฟอร์ม/ไฟล์) — เหมาะส่งทุกเช้าสรุปของเมื่อวาน · docs/platform-email-orders.md",
+    rowFields: [
+      { key: "img", label: "รูป" }, { key: "code", label: "รหัส" }, { key: "name", label: "สินค้า" }, { key: "color", label: "สี" },
+      { key: "shop", label: "ร้าน" }, { key: "qty", label: "จำนวน" }, { key: "amt", label: "ยอด" }, { key: "pct", label: "% ของยอด" },
+    ],
+    defaultRowFields: ["img", "code", "name", "color", "qty", "amt"],
+    stats: [
+      { key: "orders", label: "ออเดอร์" }, { key: "qty", label: "ชิ้น" }, { key: "amount", label: "ยอดขาย" }, { key: "cancelled", label: "ยกเลิก" },
+      { key: "lazada", label: "Lazada (ไม่มีราคา)" }, { key: "pending", label: "สินค้ารอยืนยัน SKU" },
+    ],
+    defaultStats: ["orders", "qty", "amount", "cancelled"],
+    groupBy: [{ key: "none", label: "รวม" }, { key: "shop", label: "แยกตามร้าน" }],
+    sortBy: [{ key: "amount", label: "ยอดเงินมากสุดก่อน" }, { key: "qty", label: "จำนวนมากสุดก่อน" }],
+    subjectTokens: [
+      { key: "วันของยอด", label: "วันที่ของยอด" }, { key: "ยอด", label: "ยอดขาย (บาท)" },
+      { key: "ออเดอร์", label: "จำนวนออเดอร์" }, { key: "ชิ้น", label: "จำนวนชิ้น" },
+    ],
+    defaultSubject: "ยอดขายแพลตฟอร์ม {วันของยอด} · ฿{ยอด}",
+    filterUi: ["day"],
+    layout: "table",
+    channels: ["email", "line", "discord"],
+    defaultDays: [1, 2, 3, 4, 5, 6, 7], defaultTime: "09:00",
+  },
 ];
+/** ช่องทางที่แหล่งข้อมูลนี้รองรับ (เรียงตาม REPORT_CHANNELS) */
+export const sourceChannels = (key: string) => {
+  const allowed = sourceDef(key).channels;
+  return REPORT_CHANNELS.filter((c) => !allowed || allowed.includes(c.key));
+};
 export const sourceLabel = (key: string) => EMAIL_REPORT_SOURCES.find((s) => s.key === key)?.label ?? key;
 export const sourceDef = (key: string): EmailReportSourceDef => EMAIL_REPORT_SOURCES.find((s) => s.key === key) ?? EMAIL_REPORT_SOURCES[0];
 /** คำในหัวเรื่องที่ใช้ได้ทุกแหล่ง */
@@ -302,6 +368,7 @@ export function normalizeReportOptions(sourceKey: string, raw: unknown): Resolve
     // หัวเรื่องห้ามมีขึ้นบรรทัด (กันแทรกหัวอีเมล) · ข้อความเกริ่นขึ้นบรรทัดได้
     subject_template: String(o.subject_template ?? "").replace(/[\u0000-\u001F\u007F]+/g, " ").replace(/\s+/g, " ").trim().slice(0, SUBJECT_MAX),
     intro: String(o.intro ?? "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, "").replace(/\n{3,}/g, "\n\n").trim().slice(0, INTRO_MAX),
+    show_total: o.show_total !== false,
   };
 }
 
@@ -358,24 +425,29 @@ export function normalizeReportInput(raw: unknown): { value: EmailReportInput } 
   if (recipients.length > 50) return { error: "ผู้รับมากเกินไป (ไม่เกิน 50 คน)" };
   const rd = (r.discord ?? {}) as Record<string, unknown>;
   if (rd.enabled === true && !SNOWFLAKE.test(String(rd.channel_id ?? ""))) return { error: "เลือกห้อง Discord ก่อน (หรือปิด Discord)" };
-  const discord = normalizeReportDiscord(rd);
-  const email_enabled = r.email_enabled !== false;
-  const popup = normalizeReportPopup(r.popup);
+  // ช่องที่แหล่งข้อมูลนี้ไม่รองรับ = ปิดเสมอ (เช่น รายงานยอดขายยังไม่ทำป๊อป)
+  const allowed = new Set(sourceChannels(source_key).map((c) => c.key));
+  const discord = allowed.has("discord") ? normalizeReportDiscord(rd) : normalizeReportDiscord({});
+  const email_enabled = allowed.has("email") && r.email_enabled !== false;
+  const popup = allowed.has("popup") ? normalizeReportPopup(r.popup) : normalizeReportPopup({});
   if (popup.enabled && !popup.roles.length && !popup.users.length && !popup.assignees) return { error: "เปิดป๊อปแล้ว เลือกด้วยว่าจะเด้งให้ใคร (ตำแหน่ง / รายคน / ผู้รับผิดชอบ)" };
+  const rl = (r.line ?? {}) as Record<string, unknown>;
+  if (allowed.has("line") && rl.enabled === true && !LINE_GROUP_ID.test(String(rl.group_id ?? ""))) return { error: "เลือกกลุ่ม LINE ก่อน (หรือปิด LINE)" };
+  const line = allowed.has("line") ? normalizeReportLine(rl) : normalizeReportLine({});
   // เปิดใช้รายงาน = ต้องมีอย่างน้อย 1 ช่องทางที่ใช้ได้จริง
   const is_enabled = r.is_enabled === true;
-  if (is_enabled && !(email_enabled && recipients.length > 0) && !discord.enabled && !popup.enabled) {
-    return { error: email_enabled ? "เปิดใช้รายงานไม่ได้ ยังไม่มีผู้รับอีเมล (ใส่ผู้รับ หรือเปิด Discord / ป๊อป)" : "เปิดใช้รายงานไม่ได้ ยังไม่ได้เลือกช่องทาง (Gmail / Discord / ERP ป๊อป)" };
+  if (is_enabled && !(email_enabled && recipients.length > 0) && !discord.enabled && !popup.enabled && !line.enabled) {
+    return { error: email_enabled ? "เปิดใช้รายงานไม่ได้ ยังไม่มีผู้รับอีเมล (ใส่ผู้รับ หรือเปิด LINE / Discord / ป๊อป)" : "เปิดใช้รายงานไม่ได้ ยังไม่ได้เลือกช่องทาง (Gmail / LINE / Discord / ERP ป๊อป)" };
   }
 
   const f = (r.filters ?? {}) as Record<string, unknown>;
   const brand_group: BrandGroupFilter = f.brand_group === "customer" || f.brand_group === "own" ? f.brand_group : "all";
   const strList = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((s): s is string => typeof s === "string" && !!s))].slice(0, 100) : []);
-  const filters: EmailReportFilters = { brand_group, brand_ids: strList(f.brand_ids), statuses: strList(f.statuses) };
+  const filters: EmailReportFilters = { brand_group, brand_ids: strList(f.brand_ids), statuses: strList(f.statuses), ...(f.day === "today" ? { day: "today" as const } : {}) };
 
   const options: EmailReportOptions = normalizeReportOptions(source_key, r.options);
 
-  return { value: { name, source_key, filters, options, days, send_time, recipients, email_enabled, discord, popup, skip_if_empty: r.skip_if_empty !== false, is_enabled } };
+  return { value: { name, source_key, filters, options, days, send_time, recipients, email_enabled, discord, popup, line, skip_if_empty: r.skip_if_empty !== false, is_enabled } };
 }
 
 export const RUN_STATUS_LABEL: Record<EmailReportRun["status"], { label: string; cls: string }> = {

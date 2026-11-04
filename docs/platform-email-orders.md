@@ -18,7 +18,10 @@ POST /api/platform-email/inbound   (Authorization: Bearer <กุญแจ>)
 platform_orders + platform_order_items (source = 'email')   ← ตารางเดิม ใช้ร่วมกับไฟล์/API
 platform_email_inbox (1 แถว/เมล = ประวัติว่าระบบทำอะไร)
                         ▼
-GET /api/platform-sales/report  →  /master/platform-sales (ตารางกลาง SoldProductsTable)
+GET /api/platform-sales/report?month= | ?date=  →  /master/platform-sales (รายเดือน / รายวัน · ตารางกลาง SoldProductsTable)
+                        │  ตัวนับกลาง lib/platform-sales/server.ts (loadPlatformSales)
+                        ▼
+รายงานอัตโนมัติ "ยอดขายแพลตฟอร์มรายวัน" → Gmail / LINE / Discord (docs/email-reports.md แหล่งข้อมูลที่ 3)
 ```
 
 ## ทำไมไม่ใช้ปุ่ม "เชื่อม Gmail" (OAuth)

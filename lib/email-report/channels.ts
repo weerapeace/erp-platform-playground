@@ -9,7 +9,7 @@ import { normalizeReportChannels, type ReportChannels } from "@/lib/email-report
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 export async function loadReportChannels(admin: Admin): Promise<ReportChannels & { updated_at: string | null; updated_by: string | null }> {
-  const { data } = await admin.from("erp_report_channels").select("email, discord, popup, updated_at, updated_by").eq("id", 1).maybeSingle();
+  const { data } = await admin.from("erp_report_channels").select("email, line, discord, popup, updated_at, updated_by").eq("id", 1).maybeSingle();
   const d = (data ?? {}) as { updated_at?: string | null; updated_by?: string | null };
   return { ...normalizeReportChannels(data), updated_at: d.updated_at ?? null, updated_by: d.updated_by ?? null };
 }

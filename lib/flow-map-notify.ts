@@ -53,7 +53,7 @@ export type NotifyTopic = {
 
 /** สถานะสดจาก /api/flow-map/notify — boolean / ตัวนับเท่านั้น (ไม่มี token / group id) */
 export type NotifyStat = { n: number; read: number; users: number; last: string | null };
-export type NotifyReport = { id: string; name: string; time: string | null; days: number[]; on: boolean; email: boolean; popup: boolean; discord: boolean };
+export type NotifyReport = { id: string; name: string; time: string | null; days: number[]; on: boolean; email: boolean; popup: boolean; discord: boolean; line: boolean };
 export type NotifyLive = {
   line: { token: boolean; main: boolean; groups: Partial<Record<string, boolean>>; off: Record<string, boolean> };
   /** กฎกระดิ่ง event_type → เปิดอยู่ไหม */
@@ -68,7 +68,7 @@ export type NotifyLive = {
   /** สถิติกระดิ่ง 90 วัน ต่อ event_type */
   stats: Record<string, NotifyStat>;
   /** สวิตช์ทั้งระบบของรายงานตามเวลา (erp_report_channels) */
-  channels: { email: boolean; popup: boolean; discord: boolean };
+  channels: { email: boolean; popup: boolean; discord: boolean; line: boolean };
   reports: NotifyReport[];
 };
 

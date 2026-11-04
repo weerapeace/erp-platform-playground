@@ -1,7 +1,7 @@
 /**
  * ของใช้ร่วมของ /api/admin/email-reports (แยกจาก route.ts — route ต้อง export แค่ handler)
  */
-import { normalizeReportDiscord, normalizeReportPopup, type EmailRecipient, type EmailReport } from "@/lib/email-report/shared";
+import { normalizeReportDiscord, normalizeReportLine, normalizeReportPopup, type EmailRecipient, type EmailReport } from "@/lib/email-report/shared";
 
 /** แถวในฐานข้อมูล → EmailReport (เวลา "08:00:00" → "08:00") */
 export function toEmailReport(r: Record<string, unknown>): EmailReport {
@@ -17,6 +17,7 @@ export function toEmailReport(r: Record<string, unknown>): EmailReport {
     email_enabled: r.email_enabled !== false,
     discord: normalizeReportDiscord(r.discord),
     popup: normalizeReportPopup(r.popup),
+    line: normalizeReportLine(r.line),
     skip_if_empty: r.skip_if_empty !== false,
     is_enabled: r.is_enabled === true,
     last_sent_on: (r.last_sent_on as string) ?? null,

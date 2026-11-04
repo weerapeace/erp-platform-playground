@@ -1,6 +1,7 @@
 /**
  * 📧 ส่งอีเมลรายงาน (ของกลาง · ฝั่งเซิร์ฟเวอร์) — ใช้ทั้ง ส่งทดสอบ / ส่งเดี๋ยวนี้ / ส่งตามเวลา (cron)
  * + 💬 Discord (ถ้าเปิดไว้ในรายงาน) — ส่งในรอบเดียวกัน ลงประวัติแถวเดียว (detail.discord) · lib/email-report/discord
+ * + 🟢 LINE (ถ้าเปิดไว้) — กล่องเดียว 1 ข้อความ ลงประวัติแถวเดียวกัน (detail.line) · lib/email-report/line
  * ขั้นตอน: หาอีเมลผู้รับ (ผู้ใช้ในระบบ = อีเมลล่าสุดจาก user_profiles · คนปิดบัญชี/ไม่มีอีเมล = ข้าม+จดไว้)
  *        → ประกอบรายงาน → ส่งทีละคน (ผู้รับไม่เห็นกัน) → ลงประวัติ email_report_runs + audit
  * ส่งตามเวลา: "จอง" วันนี้ก่อนส่ง (last_sent_on) → cron ซ้อนกันก็ไม่ส่งซ้ำ · ส่งไม่สำเร็จ = ไม่ลองซ้ำวันนั้น (ดูในประวัติ)
@@ -11,8 +12,9 @@ import { emailConfigured, emailDevEcho, emailErrorText, sendEmail } from "@/lib/
 import { writeAudit } from "@/lib/audit";
 import { buildReportEmail } from "@/lib/email-report/sources";
 import { sendReportToDiscord, type DiscordResult } from "@/lib/email-report/discord";
+import { sendReportToLine, type LineResult } from "@/lib/email-report/line";
 import { loadReportChannels } from "@/lib/email-report/channels";
-import { normalizeReportDiscord, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
+import { normalizeReportDiscord, normalizeReportLine, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Actor = { id: string | null; name: string | null };
@@ -54,6 +56,8 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
   const noRecipients = reportEmail && report.recipients.length === 0;
   const wantEmail = reportEmail && (test || (global.email && !noRecipients));
   const wantDiscord = reportDiscord && (test || global.discord);
+  const reportLine = normalizeReportLine(report.line).enabled;
+  const wantLine = reportLine && (test || global.line);
 
   // ── ผู้รับ ──
   const skipped: string[] = [];
@@ -95,16 +99,16 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
   };
 
   // ไม่มีช่องไหนให้ส่ง: รายงานป๊อปอย่างเดียว (ตามเวลา) = เงียบ ๆ · ถูกปิดทั้งระบบ = ลงประวัติให้เห็น
-  if (!wantEmail && !wantDiscord) {
-    const offGlobal = (reportEmail && !global.email) || (reportDiscord && !global.discord);
-    const message = offGlobal ? `ปิดช่องทาง${[reportEmail && !global.email ? "อีเมล" : "", reportDiscord && !global.discord ? "Discord" : ""].filter(Boolean).join(" / ")}ทั้งระบบอยู่ — ไม่ได้ส่ง`
-      : noRecipients ? "ยังไม่มีผู้รับอีเมล และไม่ได้เปิด Discord (ใช้แค่ป๊อป)" : "รายงานนี้ไม่ได้เปิดอีเมลหรือ Discord (ใช้แค่ป๊อป)";
+  if (!wantEmail && !wantDiscord && !wantLine) {
+    const offGlobal = (reportEmail && !global.email) || (reportDiscord && !global.discord) || (reportLine && !global.line);
+    const message = offGlobal ? `ปิดช่องทาง${[reportEmail && !global.email ? "อีเมล" : "", reportLine && !global.line ? "LINE" : "", reportDiscord && !global.discord ? "Discord" : ""].filter(Boolean).join(" / ")}ทั้งระบบอยู่ — ไม่ได้ส่ง`
+      : noRecipients ? "ยังไม่มีผู้รับอีเมล และไม่ได้เปิด LINE / Discord (ใช้แค่ป๊อป)" : "รายงานนี้ไม่ได้เปิดอีเมล LINE หรือ Discord (ใช้แค่ป๊อป)";
     if (offGlobal || opts.trigger === "manual") await log("channel_off", { error: message });
     return { status: "channel_off", sent: 0, recipients: 0, items: 0, message, skipped };
   }
 
   const emailReady = emailConfigured() || emailDevEcho();
-  if (!emailReady && !wantDiscord) {
+  if (!emailReady && !wantDiscord && !wantLine) {
     const message = emailErrorText("email-not-configured");
     await log("not_configured", { error: message });
     return { status: "not_configured", sent: 0, recipients: emails.length, items: 0, message, skipped };
@@ -124,7 +128,7 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
     await log("skipped_empty", { items: 0 });
     return { status: "skipped_empty", sent: 0, recipients: emails.length, items: 0, message: "วันนี้ไม่มีงานค้าง เลยไม่ส่ง", skipped };
   }
-  if (emails.length === 0 && !wantDiscord) {
+  if (emails.length === 0 && !wantDiscord && !wantLine) {
     const message = skipped.length ? `ไม่มีผู้รับที่ส่งได้ (${skipped.join(", ")})` : "ยังไม่มีผู้รับ";
     await log("failed", { items, error: message });
     return { status: "failed", sent: 0, recipients: 0, items, message, skipped };
@@ -153,15 +157,25 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
     catch (e) { console.error("[email-report] discord", e); discord = { ok: false, posted: 0, cards: 0, image: false, target: "", error: "ส่งเข้า Discord ไม่สำเร็จ" }; }
   }
 
+  // ── LINE (1 ข้อความต่อครั้ง · ทดสอบ = ส่งเข้ากลุ่มเดียวกัน มีคำว่า "ทดสอบ" นำหน้า) ──
+  let line: LineResult | null = null;
+  if (wantLine) {
+    try { line = await sendReportToLine(admin, report, built.built, { trigger: opts.trigger, subject: built.email.subject }); }
+    catch (e) { console.error("[email-report] line", e); line = { ok: false, target: "", fallback: false, error: "ส่งเข้า LINE ไม่สำเร็จ" }; }
+  }
+
   // ── สรุปผลรวมทุกช่องทาง ──
   const emailOk = emails.length === 0 || !emailError;
   const discordOk = !discord || discord.ok;
-  const anyOk = sent > 0 || (!!discord && discord.posted > 0);
-  const status: EmailReportRun["status"] = emailOk && discordOk ? "sent" : anyOk ? "partial" : "failed";
-  const error = [emailError && (wantDiscord ? `อีเมล: ${emailError}` : emailError), discord?.error && `Discord: ${discord.error}`].filter(Boolean).join(" · ") || null;
-  await log(status, { items, sent, error, detail: { subject, failed, ...(discord ? { discord } : {}) } });
+  const lineOk = !line || line.ok;
+  const anyOk = sent > 0 || (!!discord && discord.posted > 0) || !!line?.ok;
+  const status: EmailReportRun["status"] = emailOk && discordOk && lineOk ? "sent" : anyOk ? "partial" : "failed";
+  const multi = [wantDiscord, wantLine].some(Boolean);
+  const error = [emailError && (multi ? `อีเมล: ${emailError}` : emailError), line?.error && `LINE: ${line.error}`, discord?.error && `Discord: ${discord.error}`].filter(Boolean).join(" · ") || null;
+  await log(status, { items, sent, error, detail: { subject, failed, ...(discord ? { discord } : {}), ...(line ? { line } : {}) } });
   const said = [
     emails.length ? (sent ? `อีเมล ${sent}${sent < emails.length ? `/${emails.length}` : ""} คน` : "อีเมลไม่สำเร็จ") : "",
+    line ? (line.ok ? `LINE ${line.target}${line.fallback ? " (แบบข้อความ)" : ""}` : "LINE ไม่สำเร็จ") : "",
     discord ? (discord.posted ? `Discord ${discord.target} ${discord.posted} ข้อความ${discord.cards ? ` (การ์ดติ๊ก ${discord.cards} ใบ)` : ""}` : "Discord ไม่สำเร็จ") : "",
   ].filter(Boolean).join(" · ");
   const message = status === "sent" ? `ส่งแล้ว — ${said}` : status === "partial" ? `ส่งได้บางส่วน — ${said} — ${error}` : error ?? "ส่งไม่สำเร็จ";

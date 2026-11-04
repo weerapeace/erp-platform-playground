@@ -12,7 +12,7 @@ import { renderReportPng } from "@/lib/email-report/image";
 import { loadChecklistPresets, userNames } from "@/lib/record-tasks-server";
 import { linksOf } from "@/lib/record-tasks";
 import { normalizeReportDiscord, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
-import type { BuiltReport } from "@/lib/email-report/render";
+import { statText, type BuiltReport } from "@/lib/email-report/render";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 export type DiscordResult = { ok: boolean; posted: number; cards: number; image: boolean; target: string; error: string | null };
@@ -50,7 +50,7 @@ export async function sendReportToDiscord(admin: Admin, report: Pick<EmailReport
   }
   const fallbackEmbed = !image && built.stats.length ? [{
     title: built.heading, color: 0x5865f2,
-    fields: built.stats.map((s) => ({ name: s.label, value: `**${s.value.toLocaleString("th-TH")}**`, inline: true })),
+    fields: built.stats.map((s) => ({ name: s.label, value: `**${statText(s)}**${s.hint ? `\n${s.hint}` : ""}`, inline: true })),
     ...(built.total === 0 ? { description: built.emptyText } : {}),
   }] : [];
   let posted = 0;

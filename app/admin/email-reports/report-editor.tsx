@@ -15,35 +15,37 @@ import { UserPicker } from "@/components/pickers";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
 import { WorkPopupBody } from "@/components/work-popup";
 import { DiscordChatPreview, type DiscordPreviewData } from "./discord-preview";
+import { LineChannelCard, LinePreview, type LinePreviewData } from "./line-channel";
 import { apiFetch } from "@/lib/api";
 import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import type { WorkPopupPayload } from "@/lib/email-report/popup";
 import {
   COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
-  POPUP_FIELDS, POPUP_MAX_CHOICES, REPORT_CHANNELS, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceDef,
-  type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportPopup,
+  POPUP_FIELDS, POPUP_MAX_CHOICES, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportLine, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceChannels, sourceDef,
+  type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportLine, type EmailReportPopup,
   type ReportChannelKey, type ReportChannels,
 } from "@/lib/email-report/shared";
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
 type DiscordMeta = { ready: { bot: boolean; buttons: boolean; link: boolean }; channels: { id: string; name: string; guild: string }[]; roles: { id: string; name: string; guild: string }[]; error: string | null };
 type SectionKey = "what" | "how" | "when" | "look";
-type PreviewTab = "email" | "discord" | "popup";
+type PreviewTab = "email" | "line" | "discord" | "popup";
+const TAB_LABEL: Record<PreviewTab, string> = { email: "✉️ อีเมล", line: "🟢 LINE", discord: "💬 Discord", popup: "🔔 ERP ป๊อป" };
 
 export const emptyReportInput = (): EmailReportInput => ({
   name: "", source_key: EMAIL_REPORT_SOURCES[0].key,
   filters: { brand_group: "all", brand_ids: [], statuses: [] },
   options: normalizeReportOptions(EMAIL_REPORT_SOURCES[0].key, {}),
-  days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], email_enabled: true, discord: normalizeReportDiscord({}), popup: normalizeReportPopup({}), skip_if_empty: true, is_enabled: false,
+  days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], email_enabled: true, discord: normalizeReportDiscord({}), popup: normalizeReportPopup({}), line: normalizeReportLine({}), skip_if_empty: true, is_enabled: false,
 });
 
 export function toInput(r: EmailReport): EmailReportInput {
   return {
     name: r.name, source_key: r.source_key,
-    filters: { brand_group: r.filters.brand_group ?? "all", brand_ids: r.filters.brand_ids ?? [], statuses: r.filters.statuses ?? [] },
+    filters: { brand_group: r.filters.brand_group ?? "all", brand_ids: r.filters.brand_ids ?? [], statuses: r.filters.statuses ?? [], ...(r.filters.day === "today" ? { day: "today" as const } : {}) },
     options: normalizeReportOptions(r.source_key, r.options),   // รายงานเก่า = เติมค่าเริ่มต้น (หน้าตาเดิม)
     days: r.days, send_time: r.send_time, recipients: r.recipients, email_enabled: r.email_enabled !== false,
-    discord: normalizeReportDiscord(r.discord), popup: normalizeReportPopup(r.popup),
+    discord: normalizeReportDiscord(r.discord), popup: normalizeReportPopup(r.popup), line: normalizeReportLine(r.line),
     skip_if_empty: r.skip_if_empty, is_enabled: r.is_enabled,
   };
 }
@@ -55,7 +57,7 @@ const GROUP_TEXT: Record<BrandGroupFilter, string> = { all: "ทุกแบร�
 
 /** ข้อความ error จากกฎตรวจค่า → เรื่องที่ต้องกางให้ดู */
 function sectionOfError(msg: string): SectionKey | null {
-  if (/ผู้รับ|อีเมล|Discord|ห้อง|ป๊อป|ช่องทาง|ตำแหน่ง/.test(msg)) return "how";
+  if (/ผู้รับ|อีเมล|Discord|LINE|กลุ่ม|ห้อง|ป๊อป|ช่องทาง|ตำแหน่ง/.test(msg)) return "how";
   if (/วัน|เวลา/.test(msg)) return "when";
   if (/ข้อมูลที่จะส่ง/.test(msg)) return "what";
   return null;
@@ -107,7 +109,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const [sec, setSec] = useState<SectionKey | null>(null);
   const [prevTab, setPrevTab] = useState<PreviewTab>("email");
   const previewRef = useRef<HTMLDivElement>(null);
-  const seqRef = useRef({ d: 0, i: 0, p: 0 });   // กันผลตัวอย่างเก่าทับของใหม่ (แก้เร็ว ๆ)
+  const seqRef = useRef({ d: 0, i: 0, p: 0, l: 0 });   // กันผลตัวอย่างเก่าทับของใหม่ (แก้เร็ว ๆ)
   const [more, setMore] = useState(false);
   const toggleSec = (k: SectionKey) => setSec((s) => (s === k ? null : k));
 
@@ -178,8 +180,13 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const setOptions = (p: Partial<EmailReportInput["options"]>) => { setForm((f) => ({ ...f, options: { ...f.options, ...p } })); setError(null); };
   const setDiscord = (p: Partial<EmailReportDiscord>) => { setForm((f) => ({ ...f, discord: { ...f.discord, ...p } })); setError(null); };
   const setPopup = (p: Partial<EmailReportPopup>) => { setForm((f) => ({ ...f, popup: { ...f.popup, ...p } })); setError(null); };
-  const toggleChannel = (k: ReportChannelKey, on: boolean) => (k === "email" ? set({ email_enabled: on }) : k === "discord" ? setDiscord({ enabled: on }) : setPopup({ enabled: on }));
+  const setLine = (p: Partial<EmailReportLine>) => { setForm((f) => ({ ...f, line: { ...f.line, ...p } })); setError(null); };
+  const toggleChannel = (k: ReportChannelKey, on: boolean) => (k === "email" ? set({ email_enabled: on }) : k === "line" ? setLine({ enabled: on }) : k === "discord" ? setDiscord({ enabled: on }) : setPopup({ enabled: on }));
   const src = sourceDef(form.source_key);
+  const isTable = src.layout === "table";
+  const lineOn = form.line.enabled;
+  // ช่องทางที่แหล่งข้อมูลนี้รองรับ (เช่น ยอดขายรายวันยังไม่ทำป๊อป)
+  const chans = sourceChannels(form.source_key);
   const opt = form.options;
   // ใส่ {คำ} ต่อท้ายหัวเรื่อง
   const addToken = (key: string) => {
@@ -233,16 +240,32 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
     } catch (e) { if (seq === seqRef.current.d) setDprev({ data: null, busy: false, err: e instanceof Error ? e.message : "โหลดตัวอย่าง Discord ไม่สำเร็จ" }); }
   };
 
-  // แท็บตัวอย่าง 3 ช่องทางเสมอ (ช่องที่ยังไม่เปิด = ดูก่อนตัดสินใจเปิดได้)
-  // แท็บที่เปิดอยู่อัปเดตเองหลังหยุดแก้ 0.7 วิ (Discord = ข้อความ + รูป · ป๊อป = เนื้อป๊อป)
-  const previewTabs: { key: PreviewTab; label: string; on: boolean }[] = [
-    { key: "email", label: "✉️ อีเมล", on: form.email_enabled },
-    { key: "discord", label: "💬 Discord", on: discordOn },
-    { key: "popup", label: "🔔 ERP ป๊อป", on: popupOn },
-  ];
-  const curTab: PreviewTab = prevTab;
+  // 🟢 ตัวอย่างกล่อง LINE (ตัวประกอบเดียวกับตอนส่งจริง)
+  const [lprev, setLprev] = useState<{ data: LinePreviewData | null; busy: boolean; err: string | null }>({ data: null, busy: false, err: null });
+  const showLine = async () => {
+    const seq = ++seqRef.current.l;
+    setLprev((s) => ({ ...s, busy: true, err: null }));
+    try {
+      const r = await apiFetch("/api/admin/email-reports/preview?format=line", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) });
+      const j = await r.json();
+      if (!r.ok || j.error) throw new Error(j.error || "โหลดตัวอย่าง LINE ไม่สำเร็จ");
+      if (seq === seqRef.current.l) setLprev({ data: j as LinePreviewData, busy: false, err: null });
+    } catch (e) { if (seq === seqRef.current.l) setLprev({ data: null, busy: false, err: e instanceof Error ? e.message : "โหลดตัวอย่าง LINE ไม่สำเร็จ" }); }
+  };
+
+  // แท็บตัวอย่างทุกช่องทางที่แหล่งข้อมูลรองรับ (ช่องที่ยังไม่เปิด = ดูก่อนตัดสินใจเปิดได้)
+  // แท็บที่เปิดอยู่อัปเดตเองหลังหยุดแก้ 0.7 วิ (LINE = กล่อง · Discord = ข้อความ + รูป · ป๊อป = เนื้อป๊อป)
+  const previewTabs: { key: PreviewTab; label: string; on: boolean }[] = chans.map((c) => ({ key: c.key, label: TAB_LABEL[c.key], on: reportChannelOn(form, c.key) }));
+  const curTab: PreviewTab = previewTabs.some((t) => t.key === prevTab) ? prevTab : "email";
   const discordKey = JSON.stringify([previewKey, form.discord]);
   const popupKey = JSON.stringify([previewKey, form.popup]);
+  const lineKey = JSON.stringify([previewKey, form.line.max_rows, form.line.group_name]);
+  useEffect(() => {
+    if (!open || curTab !== "line") return;
+    const t = setTimeout(() => void showLine(), 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, curTab, lineKey]);
   useEffect(() => {
     if (!open || curTab !== "discord") return;
     const t = setTimeout(() => { void showDiscord(); void showImage(); }, 700);
@@ -304,12 +327,14 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
     src.label,
     !src.filterUi.includes("brand") ? "" : brandNames.length ? `แบรนด์ ${brandNames.slice(0, 3).join(", ")}${brandNames.length > 3 ? ` +${brandNames.length - 3}` : ""}` : GROUP_TEXT[form.filters.brand_group ?? "all"],
     !src.filterUi.includes("status") ? "" : statuses.length ? `${statuses.length} สถานะ` : "ทุกสถานะที่ยังไม่ปิด",
+    !src.filterUi.includes("day") ? "" : form.filters.day === "today" ? "ยอดของวันนี้ (ถึงเวลาส่ง)" : "ยอดของเมื่อวาน",
   ].filter(Boolean).join(" · ");
   const howSummary = (
     <span className="flex flex-wrap gap-1">
-      {REPORT_CHANNELS.map((c) => {
+      {chans.map((c) => {
         const on = reportChannelOn(form, c.key);
         const detail = c.key === "email" ? `${form.recipients.length} คน`
+          : c.key === "line" ? (form.line.group_name ? `กลุ่ม ${form.line.group_name}` : "ยังไม่เลือกกลุ่ม")
           : c.key === "discord" ? (form.discord.channel_name ? `#${form.discord.channel_name}` : "ยังไม่เลือกห้อง")
           : `${form.popup.from}–${form.popup.to} น.`;
         return (
@@ -321,12 +346,17 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
       })}
     </span>
   );
-  const howWarn = !form.email_enabled && !discordOn && !popupOn ? "ยังไม่ได้เลือกช่องทาง"
+  const anyOn = chans.some((c) => reportChannelOn(form, c.key));
+  const howWarn = !anyOn ? "ยังไม่ได้เลือกช่องทาง"
     : form.email_enabled && form.recipients.length === 0 ? "Gmail ยังไม่มีผู้รับ"
+    : lineOn && !form.line.group_id ? "LINE ยังไม่เลือกกลุ่ม"
     : discordOn && !form.discord.channel_id ? "Discord ยังไม่เลือกห้อง" : null;
-  const whenSummary = `${form.days.length ? describeDays(form.days) : "ยังไม่เลือกวัน"} · ${form.send_time} น.${form.skip_if_empty ? " · ไม่มีงานค้างไม่ส่ง" : ""} · ${form.is_enabled ? "✅ เปิดใช้อยู่" : "⏸ ยังปิดอยู่"}`;
+  const emptyWord = isTable ? "ไม่มีข้อมูล" : "ไม่มีงานค้าง";
+  const whenSummary = `${form.days.length ? describeDays(form.days) : "ยังไม่เลือกวัน"} · ${form.send_time} น.${form.skip_if_empty ? ` · ${emptyWord}ไม่ส่ง` : ""} · ${form.is_enabled ? "✅ เปิดใช้อยู่" : "⏸ ยังปิดอยู่"}`;
   const fieldLabels = (opt.row_fields ?? []).map((k) => src.rowFields.find((f) => f.key === k)?.label).filter(Boolean) as string[];
-  const lookSummary = `ตัวเลขสรุป ${(opt.stats ?? []).length} อย่าง · ${fieldLabels.length ? `${fieldLabels.slice(0, 4).join(" ")}${fieldLabels.length > 4 ? ` +${fieldLabels.length - 4}` : ""}` : "โชว์แค่ชื่องาน"}${opt.only_flagged ? " · เฉพาะงานมีป้ายเตือน" : ""}`;
+  const lookSummary = isTable
+    ? `ตาราง ${fieldLabels.length ? fieldLabels.join(" · ") : "ชื่อ · จำนวน · ยอด"} · ${src.groupBy.find((g) => g.key === opt.group_by)?.label ?? ""} · ${(opt.max_rows ?? 50) >= 100 ? "ทั้งหมด" : `${opt.max_rows} อันดับ`}${opt.show_total !== false ? " · มีแถวรวม" : ""}`
+    : `ตัวเลขสรุป ${(opt.stats ?? []).length} อย่าง · ${fieldLabels.length ? `${fieldLabels.slice(0, 4).join(" ")}${fieldLabels.length > 4 ? ` +${fieldLabels.length - 4}` : ""}` : "โชว์แค่ชื่องาน"}${opt.only_flagged ? " · เฉพาะงานมีป้ายเตือน" : ""}`;
 
   return (
     <ERPModal open={open} onClose={onClose} size="xl" storageKey="email-report-editor" hasUnsavedChanges={dirty}
@@ -348,7 +378,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
         <div ref={previewRef} className="order-2 min-w-0 rounded-xl border border-slate-200 bg-slate-50/60 p-3 lg:sticky lg:top-0 lg:self-start">
           <div className="mb-1 flex items-center justify-between gap-2">
             <span className="text-sm font-semibold text-slate-800">👁 ตัวอย่าง <span className="font-normal text-slate-400">(ข้อมูลจริงตอนนี้ · ยังไม่ส่ง)</span></span>
-            {(previewLoading || dprev.busy || img.busy || popPrev.busy) && <span className="text-[11px] text-slate-400">กำลังอัปเดต…</span>}
+            {(previewLoading || dprev.busy || img.busy || popPrev.busy || lprev.busy) && <span className="text-[11px] text-slate-400">กำลังอัปเดต…</span>}
           </div>
           <div className="mb-3 flex flex-wrap gap-1 border-b border-slate-200">
             {previewTabs.map((t) => (
@@ -374,6 +404,15 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                 <div className="flex h-[420px] items-center justify-center rounded-lg border border-dashed border-slate-200 text-sm text-slate-400">กำลังเตรียมตัวอย่าง...</div>
               )}
               <p className="mt-1.5 text-[11px] text-slate-400">รูปในอีเมลจริงจะโหลดจากระบบ · Gmail โชว์ทันที · Outlook บางเครื่องถามก่อนโหลดรูป</p>
+            </div>
+          )}
+          {curTab === "line" && (
+            <div className="mx-auto max-w-md">
+              {offNote(lineOn, "LINE")}
+              {lprev.busy && !lprev.data && <p className="text-sm text-slate-400">กำลังประกอบกล่อง LINE…</p>}
+              {lprev.err && <p className="text-sm text-rose-600">⚠ {lprev.err}</p>}
+              {lprev.data && <LinePreview data={lprev.data} />}
+              <p className="mt-2 text-[11px] text-slate-400">หน้าตาในกลุ่ม LINE จากข้อมูลจริงตอนนี้ · ส่งเป็นกล่องเดียว (1 ข้อความ) · กดปุ่มท้ายกล่องเปิดรายงานเต็มใน ERP</p>
             </div>
           )}
           {curTab === "discord" && (
@@ -461,6 +500,16 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                 </div>
               </div>
             )}
+            {src.filterUi.includes("day") && (
+              <div>
+                <label className={label}>สรุปยอดของวันไหน</label>
+                <div className="flex flex-wrap gap-1">
+                  <button type="button" onClick={() => setFilters({ day: undefined })} className={chip(form.filters.day !== "today")}>เมื่อวาน (ทั้งวัน)</button>
+                  <button type="button" onClick={() => setFilters({ day: "today" })} className={chip(form.filters.day === "today")}>วันนี้ (ถึงเวลาที่ส่ง)</button>
+                </div>
+                <p className="mt-1 text-[11px] text-slate-400">แนะนำ "เมื่อวาน" + ส่งตอนเช้า → ได้ยอดเต็มวัน · ออเดอร์นับตามวันที่สั่งซื้อ (เวลาไทย) ไม่นับที่ยกเลิก</p>
+              </div>
+            )}
             {src.filterUi.includes("status") && pendingStatuses.length > 0 && (
               <div>
                 <label className={label}>สถานะ <span className="font-normal text-slate-400">(ส่งเฉพาะงานที่ยังไม่ปิด)</span></label>
@@ -478,8 +527,8 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
 
           {/* 2 ส่งทางไหน — ติ๊กช่องไหน ค่อยโชว์การตั้งค่าช่องนั้น · ปิดทั้งระบบ = ตั้งไว้ได้แต่ยังไม่ส่ง */}
           <Section n={2} title="ส่งทางไหน" summary={howSummary} warn={howWarn} open={sec === "how"} onToggle={() => toggleSec("how")}>
-            <div className="grid gap-2 sm:grid-cols-3">
-              {REPORT_CHANNELS.map((c) => {
+            <div className="grid gap-2 sm:grid-cols-2">
+              {chans.map((c) => {
                 const on = reportChannelOn(form, c.key);
                 return (
                   <button key={c.key} type="button" aria-pressed={on} onClick={() => toggleChannel(c.key, !on)}
@@ -529,6 +578,9 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                 </div>
               </div>
             )}
+
+            {/* 🟢 LINE: กล่องเดียวต่อครั้ง เข้ากลุ่มที่บอทอยู่ — lib/email-report/line */}
+            {lineOn && <LineChannelCard value={form.line} onChange={setLine} chip={chip} />}
 
             {/* 💬 Discord: รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ (ปุ่มติ๊ก) — lib/email-report/discord */}
             {discordOn && (
@@ -699,7 +751,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
             <div className="space-y-1.5">
               <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
                 <input type="checkbox" checked={form.skip_if_empty} onChange={(e) => set({ skip_if_empty: e.target.checked })} className="h-4 w-4" />
-                วันที่ไม่มีงานค้าง ไม่ต้องส่ง
+                {isTable ? "วันที่ไม่มีข้อมูล (เช่น ไม่มีออเดอร์) ไม่ต้องส่ง" : "วันที่ไม่มีงานค้าง ไม่ต้องส่ง"}
               </label>
               <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
                 <input type="checkbox" checked={form.is_enabled} onChange={(e) => set({ is_enabled: e.target.checked })} className="h-4 w-4" />
@@ -725,21 +777,52 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
               </div>
             </div>
             <div>
-              <label className={label}>ข้อมูลของแต่ละงาน <span className="font-normal text-slate-400">(เรียงตามลำดับที่เลือก · ชื่องานโชว์เสมอ)</span></label>
+              <label className={label}>{isTable
+                ? <>คอลัมน์ในตาราง <span className="font-normal text-slate-400">(เรียงซ้าย→ขวาตามลำดับที่เลือก · ใช้ทั้งอีเมล / LINE / Discord)</span></>
+                : <>ข้อมูลของแต่ละงาน <span className="font-normal text-slate-400">(เรียงตามลำดับที่เลือก · ชื่องานโชว์เสมอ)</span></>}</label>
               <FieldChipsPicker compact showKeys={false}
                 value={opt.row_fields ?? []} onChange={(v) => setOptions({ row_fields: v })}
                 fields={src.rowFields.map((c) => ({
                   key: c.key, label: c.label,
                   hint: preview?.fill && preview.fill[c.key] !== undefined ? `มีข้อมูล ${preview.fill[c.key]}/${preview.total}` : undefined,
                 }))}
-                title="เลือกข้อมูลที่จะโชว์ในแต่ละงาน"
-                description="ติ๊กตามลำดับที่อยากให้โชว์ (อยากสลับ ให้เอาออกแล้วติ๊กใหม่) · ตัวเลขด้านขวา = งานในรายงานนี้ที่มีข้อมูลช่องนั้นจริงตอนนี้"
-                addLabel="＋ เลือกข้อมูล…" searchPlaceholder="ค้นหาชื่อข้อมูล…" unit="อย่าง" emptyText="โชว์แค่ชื่องาน" />
+                title={isTable ? "เลือกคอลัมน์ในตาราง" : "เลือกข้อมูลที่จะโชว์ในแต่ละงาน"}
+                description={isTable ? "ติ๊กตามลำดับที่อยากให้เรียงจากซ้ายไปขวา (อยากสลับ ให้เอาออกแล้วติ๊กใหม่) · ตัวเลขด้านขวา = รายการที่มีข้อมูลช่องนั้นจริงตอนนี้"
+                  : "ติ๊กตามลำดับที่อยากให้โชว์ (อยากสลับ ให้เอาออกแล้วติ๊กใหม่) · ตัวเลขด้านขวา = งานในรายงานนี้ที่มีข้อมูลช่องนั้นจริงตอนนี้"}
+                addLabel={isTable ? "＋ เลือกคอลัมน์…" : "＋ เลือกข้อมูล…"} searchPlaceholder="ค้นหาชื่อข้อมูล…" unit={isTable ? "คอลัมน์" : "อย่าง"} emptyText={isTable ? "ยังไม่เลือกคอลัมน์ (โชว์ชื่อ จำนวน ยอด)" : "โชว์แค่ชื่องาน"} />
             </div>
+            {isTable && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <label className={label}>จัดกลุ่ม</label>
+                  <div className="flex flex-wrap gap-1">
+                    {src.groupBy.map((c) => <button key={c.key} type="button" onClick={() => setOptions({ group_by: c.key })} className={chip((opt.group_by ?? src.groupBy[0]?.key) === c.key)}>{c.label}</button>)}
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>เรียงตาม</label>
+                  <div className="flex flex-wrap gap-1">
+                    {src.sortBy.map((c) => <button key={c.key} type="button" onClick={() => setOptions({ sort_by: c.key })} className={chip((opt.sort_by ?? src.sortBy[0]?.key) === c.key)}>{c.label}</button>)}
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>แสดง</label>
+                  <div className="flex flex-wrap gap-1">
+                    {[5, 8, 10, 20].map((n) => <button key={n} type="button" onClick={() => setOptions({ max_rows: n })} className={chip(opt.max_rows === n)}>{n} อันดับ</button>)}
+                    <button type="button" onClick={() => setOptions({ max_rows: 100 })} className={chip(opt.max_rows === 100)}>ทั้งหมด</button>
+                  </div>
+                </div>
+                <label className="flex cursor-pointer items-center gap-2 self-end text-xs text-slate-700">
+                  <input type="checkbox" checked={opt.show_total !== false} onChange={(e) => setOptions({ show_total: e.target.checked })} className="h-4 w-4" />
+                  แถวรวมท้ายตาราง
+                </label>
+              </div>
+            )}
             <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more}
-              className="text-xs font-medium text-blue-600 hover:underline">{more ? "▾ ซ่อนตั้งค่าเพิ่มเติม" : "▸ ตั้งค่าเพิ่มเติม"} <span className="font-normal text-slate-400">(ส่งงานไหน · จัดกลุ่ม · เรียง · หัวเรื่อง · ข้อความเกริ่น)</span></button>
+              className="text-xs font-medium text-blue-600 hover:underline">{more ? "▾ ซ่อนตั้งค่าเพิ่มเติม" : "▸ ตั้งค่าเพิ่มเติม"} <span className="font-normal text-slate-400">({isTable ? "หัวเรื่อง · ข้อความเกริ่น" : "ส่งงานไหน · จัดกลุ่ม · เรียง · หัวเรื่อง · ข้อความเกริ่น"})</span></button>
             {more && (
               <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/50 p-3">
+                {!isTable && <>
                 <div>
                   <label className={label}>ส่งงานไหนบ้าง</label>
                   <div className="flex flex-wrap gap-1">
@@ -773,6 +856,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                     <input type="number" min={0} max={30} value={opt.due_soon_days ?? 3} onChange={(e) => setOptions({ due_soon_days: Number(e.target.value) })}
                       className="h-8 w-14 rounded-lg border border-slate-200 bg-white px-2 text-center text-sm" /> วัน</label>
                 </div>
+                </>}
                 <div>
                   <label className={label}>หัวเรื่องอีเมล <span className="font-normal text-slate-400">(เว้นว่าง = แบบเดิม)</span></label>
                   <ERPInput value={opt.subject_template ?? ""} maxLength={SUBJECT_MAX} placeholder={src.defaultSubject}

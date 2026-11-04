@@ -5,6 +5,7 @@
  * ?format=png → รูปรายงานที่จะส่งเข้า Discord (image/png · จำนวนงานตาม discord.image_rows) — ดูได้แม้ยังไม่ตั้งบอท
  * ?format=popup → { data: WorkPopupPayload } ตัวอย่างป๊อปตอนเข้า ERP (lib/email-report/popup)
  * ?format=discord → { content, cards, has_image, role_name, channel_name, ready } ข้อความ Discord ที่จะส่ง (composeDiscordReport) — หน้าตั้งค่าวาดเป็นหน้าแชทจำลอง
+ * ?format=line → { header, sub, rows, more, link } กล่อง LINE ที่จะส่ง (composeLineReport) — หน้าตั้งค่าวาดเป็นกล่องจำลอง
  * ไม่ตรวจผู้รับ/สวิตช์เปิด — ดูหน้าตาได้แม้ยังไม่ใส่ผู้รับ · สิทธิ์: admin.email_reports
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -12,7 +13,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { requestActor } from "@/lib/request-actor";
-import { normalizeReportDiscord, normalizeReportInput, normalizeReportPopup } from "@/lib/email-report/shared";
+import { normalizeReportDiscord, normalizeReportInput, normalizeReportLine, normalizeReportPopup } from "@/lib/email-report/shared";
+import { composeLineReport } from "@/lib/email-report/line";
 import { buildReportEmail } from "@/lib/email-report/sources";
 import { renderReportPng } from "@/lib/email-report/image";
 import { buildPopupPayload } from "@/lib/email-report/popup";
@@ -26,7 +28,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "admin.email_reports"); if (denied) return denied;
   const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
   // ตัวอย่าง: ไม่บังคับผู้รับ/สวิตช์/ห้อง Discord — ปิดก่อนตรวจ จะได้ไม่โดน "ยังไม่มีผู้รับ"
-  const parsed = normalizeReportInput({ ...(body ?? {}), discord: {}, popup: {}, is_enabled: false, name: String(body?.name ?? "").trim() || "ตัวอย่างรายงาน" });
+  const parsed = normalizeReportInput({ ...(body ?? {}), discord: {}, popup: {}, line: {}, is_enabled: false, name: String(body?.name ?? "").trim() || "ตัวอย่างรายงาน" });
   if ("error" in parsed) return NextResponse.json({ subject: "", html: "", total: 0, shown: 0, error: parsed.error }, { status: 400 });
   try {
     // 🔔 ตัวอย่างป๊อปตอนเข้า ERP (มุมมองคนที่เห็นทั้งป๊อป · "งานของคุณ" = ของคนที่กดดู) — ไม่สนวัน/เวลา/รับทราบ
@@ -36,6 +38,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ data, error: null });
     }
     const { built, email } = await buildReportEmail(supabaseAdmin(), parsed.value);
+    // 🟢 ตัวอย่างกล่อง LINE (ตัวประกอบเดียวกับตอนส่งจริง)
+    if (request.nextUrl.searchParams.get("format") === "line") {
+      const cfg = normalizeReportLine(body?.line);
+      const m = composeLineReport(built, cfg, { subject: email.subject });
+      return NextResponse.json({ header: m.header, sub: m.sub, rows: m.rows, more: m.more, link: m.link, link_label: m.linkLabel, alt: m.altText, group_name: cfg.group_name, empty: built.total === 0 ? built.emptyText : null, error: null });
+    }
     // 💬 ตัวอย่างข้อความ Discord (ข้อความ 1 + การ์ดติ๊ก) — ตัวประกอบเดียวกับตอนส่งจริง · รูปดึงแยกที่ ?format=png
     if (request.nextUrl.searchParams.get("format") === "discord") {
       const cfg = normalizeReportDiscord(body?.discord);

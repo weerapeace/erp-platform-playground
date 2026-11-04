@@ -1,6 +1,6 @@
 /**
  * 📧 ส่งอีเมลรายงาน — รายการ + สร้างใหม่
- * GET  /api/admin/email-reports → { data: EmailReport[], runs: EmailReportRun[] (ล่าสุด 30), popup_acks (วันนี้), channels (สวิตช์ทั้งระบบ), discord_ready, email_ready, error }
+ * GET  /api/admin/email-reports → { data: EmailReport[], runs: EmailReportRun[] (ล่าสุด 30), popup_acks (วันนี้), channels (สวิตช์ทั้งระบบ), discord_ready, line_ready, email_ready, error }
  * POST /api/admin/email-reports  body: EmailReportInput → สร้าง (audit "create")
  * สิทธิ์: admin.email_reports · ตาราง email_reports / email_report_runs (เปิด RLS ไม่มี policy → ผ่าน supabaseAdmin เท่านั้น)
  * doc: docs/email-reports.md
@@ -47,13 +47,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
   // ช่องทางส่ง + ผู้ส่ง (โชว์ในกล่องสถานะ) · ตัวตั้งเวลา pg_cron ทำงานไหม · ?check=1 = ลองเชื่อมต่อจริง (ไม่ส่งอีเมล)
   const { data: cronOk } = await admin.rpc("erp_email_reports_cron_active");
+  // 🟢 บอท LINE ตั้งแล้วไหม (โทเคนเดียวกับศูนย์ LINE · ไม่ส่งค่าจริงออกไป)
+  const { data: lineCfg } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
+  const line_ready = !!(lineCfg as { sval?: { token?: string } } | null)?.sval?.token;
   const check = new URL(request.url).searchParams.get("check") === "1" ? await verifyEmailTransport() : null;
   const popup_acks = ((acksRes.data ?? []) as Record<string, unknown>[]).map((a) => {
     const u = (Array.isArray(a.user) ? a.user[0] : a.user) as { display_name?: string | null; username?: string | null } | null;
     return { report_id: String(a.report_id), action: a.action === "later" ? "later" : "ack", acked_at: String(a.acked_at), name: u?.display_name || u?.username || "ผู้ใช้" };
   });
   return NextResponse.json({
-    data: reports, runs, popup_acks, channels, discord_ready: discordReady().bot,
+    data: reports, runs, popup_acks, channels, discord_ready: discordReady().bot, line_ready,
     email_ready: emailConfigured(), email_provider: emailProvider(), email_sender: emailSenderAddress(),
     scheduler_active: cronOk === true,
     email_check: check ? { ok: check.ok, error: check.error ? emailErrorText(check.error) : null } : null,

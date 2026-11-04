@@ -8,8 +8,8 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { BuiltReport, ReportRow, ReportTone } from "@/lib/email-report/render";
-import { thaiDateLabel } from "@/lib/email-report/render";
+import type { BuiltReport, ReportRow, ReportTable, ReportTone } from "@/lib/email-report/render";
+import { statText, thaiDateLabel } from "@/lib/email-report/render";
 
 type SharpFn = typeof import("sharp");
 const getSharp = async (): Promise<SharpFn> => { const m = (await import("sharp")) as unknown as { default?: SharpFn }; return m.default ?? (m as unknown as SharpFn); };
@@ -86,8 +86,9 @@ export async function renderReportPng(r: BuiltReport, ctx: { reportName: string;
     for (let i = 0; i < n; i++) {
       const s = r.stats[i]; const x = PAD + i * (tw + gap);
       shapes.push(`<rect x="${x}" y="${y}" width="${tw}" height="78" rx="10" fill="#f1f5f9"/>`);
-      await text(s.value.toLocaleString("th-TH"), { x: x + 14, y: y + 8, size: 30, bold: true, color: s.tone ? TONE[s.tone] : "#0f172a" });
-      await text(esc(clipCols(s.label, Math.max(8, Math.floor(tw / 9.5)))), { x: x + 14, y: y + 48, size: 17, color: "#64748b" });
+      await text(esc(statText(s)), { x: x + 14, y: y + 8, size: 30, bold: true, color: s.tone ? TONE[s.tone] : "#0f172a" });
+      const lbl = s.hint ? `${s.label} · ${s.hint}` : s.label;
+      await text(esc(clipCols(lbl, Math.max(8, Math.floor(tw / 9.5)))), { x: x + 14, y: y + 48, size: 17, color: "#64748b" });
     }
     y += 78 + 12;
   }
@@ -137,6 +138,12 @@ export async function renderReportPng(r: BuiltReport, ctx: { reportName: string;
   }
 
   shapes.push(`<line x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}" stroke="#e2e8f0" stroke-width="1"/>`);
+  // 🧮 แบบตาราง (layout "table") — หัวคอลัมน์ · หัวกลุ่ม · แถว (สูงสุด maxRows) · แถวรวม
+  let tableShown = 0;
+  if (r.table && r.total > 0) {
+    const res = await drawTable(r.table, { y, maxRows: ctx.maxRows, W, PAD, text, shapes, layers, sharp });
+    y = res.y; tableShown = res.shown;
+  }
   for (const it of items) {
     const row = it.row; const rowH = 70;
     let x = PAD + 6;
@@ -171,10 +178,86 @@ export async function renderReportPng(r: BuiltReport, ctx: { reportName: string;
 
   // ท้าย
   y += 12;
-  const foot = await text(esc(`${r.total > shown ? `แสดง ${shown.toLocaleString("th-TH")} จาก ${r.total.toLocaleString("th-TH")} งาน · ` : ""}กดลิงก์ในข้อความเพื่อดูทั้งหมดในระบบ`), { x: PAD, y, size: 16, color: "#94a3b8" });
+  const shownAll = r.table ? tableShown : shown;
+  const foot = await text(esc(`${r.total > shownAll ? `แสดง ${shownAll.toLocaleString("th-TH")} จาก ${r.total.toLocaleString("th-TH")} ${r.unit ?? "งาน"} · ` : ""}กดลิงก์ในข้อความเพื่อดูทั้งหมดในระบบ`), { x: PAD, y, size: 16, color: "#94a3b8" });
   y += foot.h + 22;
 
   const H = Math.ceil(y);
   const bg = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><rect width="${W}" height="${H}" fill="#ffffff"/>${shapes.join("")}</svg>`);
   return sharp(bg).composite(layers).png({ compressionLevel: 9 }).toBuffer();
+}
+
+type TextFn = (markup: string, o: { x: number; y: number; size: number; bold?: boolean; color?: string; alignRight?: boolean }) => Promise<{ w: number; h: number }>;
+
+/** 🧮 วาดตาราง (layout "table") ลงรูป — คอลัมน์ชิดขวากว้างคงที่ · คอลัมน์ข้อความแบ่งที่เหลือตามน้ำหนัก (ชื่อกว้างสุด) */
+async function drawTable(t: ReportTable, c: { y: number; maxRows: number; W: number; PAD: number; text: TextFn; shapes: string[]; layers: Layer[]; sharp: SharpFn }): Promise<{ y: number; shown: number }> {
+  const { W, PAD, text, shapes, layers, sharp } = c;
+  const showImg = t.columns.some((k) => k.key === "img");
+  const cols = t.columns.filter((k) => k.key !== "img");
+  const right = cols.filter((k) => k.align === "right");
+  const left = cols.filter((k) => k.align !== "right");
+  const RIGHT_W = 130, IMG_W = showImg ? 52 : 0, ROW_H = 50, TH = 38;
+  const WEIGHT: Record<string, number> = { name: 3, color: 1.5, code: 1.4, shop: 1.4 };
+  const leftW = W - PAD * 2 - IMG_W - right.length * RIGHT_W;
+  const weightSum = left.reduce((a, k) => a + (WEIGHT[k.key] ?? 1.2), 0) || 1;
+  const pos = new Map<string, { x: number; w: number }>();
+  let x = PAD + IMG_W;
+  for (const k of left) { const w = Math.floor((leftW * (WEIGHT[k.key] ?? 1.2)) / weightSum); pos.set(k.key, { x, w }); x += w; }
+  for (const k of right) { pos.set(k.key, { x, w: RIGHT_W }); x += RIGHT_W; }
+  const put = async (key: string, align: "left" | "right" | undefined, s: string, yy: number, o: { bold?: boolean; color?: string; size?: number } = {}) => {
+    const p = pos.get(key); if (!p || !s) return;
+    if (align === "right") await text(esc(s), { x: p.x + p.w - 6, y: yy, size: o.size ?? 18, bold: o.bold, color: o.color, alignRight: true });
+    else await text(esc(clipCols(s, Math.max(4, Math.floor((p.w - 12) / 10.5)))), { x: p.x + 6, y: yy, size: o.size ?? 18, bold: o.bold, color: o.color });
+  };
+
+  let y = c.y + 8;
+  for (const k of cols) await put(k.key, k.align, k.label, y, { size: 15, color: "#64748b" });
+  y += 30;
+  shapes.push(`<line x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}" stroke="#e2e8f0" stroke-width="1"/>`);
+
+  // แถวที่จะวาด (สูงสุด maxRows ข้ามกลุ่ม ตามลำดับของรายงาน)
+  const plan: { label?: string; row?: ReportTable["sections"][number]["rows"][number] }[] = [];
+  let shown = 0;
+  for (const s of t.sections) {
+    if (shown >= c.maxRows) break;
+    if (s.label) plan.push({ label: s.label });
+    for (const row of s.rows) { if (shown >= c.maxRows) break; plan.push({ row }); shown++; }
+  }
+  const mask = Buffer.from(`<svg width="${TH}" height="${TH}"><rect width="${TH}" height="${TH}" rx="6" fill="#fff"/></svg>`);
+  const thumbs = new Map<string, Buffer>();
+  if (showImg) {
+    await Promise.all(plan.map(async (p) => {
+      if (!p.row?.imageUrl) return;
+      try {
+        const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 4000);
+        const res = await fetch(p.row.imageUrl, { signal: ac.signal }).finally(() => clearTimeout(timer));
+        if (!res.ok) return;
+        thumbs.set(p.row.id, await sharp(Buffer.from(await res.arrayBuffer())).resize(TH, TH, { fit: "cover" }).composite([{ input: mask, blend: "dest-in" }]).png().toBuffer());
+      } catch { /* ไม่มีรูปก็ได้ */ }
+    }));
+  }
+  for (const p of plan) {
+    if (p.label) {
+      shapes.push(`<rect x="${PAD}" y="${y}" width="${W - PAD * 2}" height="34" fill="#f8fafc"/>`);
+      await text(esc(p.label), { x: PAD + 8, y: y + 5, size: 17, bold: true, color: "#334155" });
+      y += 34; continue;
+    }
+    const row = p.row!;
+    if (showImg) {
+      const th = thumbs.get(row.id);
+      if (th) layers.push({ input: th, left: PAD + 4, top: y + 6 });
+      else shapes.push(`<rect x="${PAD + 4}" y="${y + 6}" width="${TH}" height="${TH}" rx="6" fill="#f1f5f9" stroke="#e2e8f0"/>`);
+    }
+    for (const k of cols) await put(k.key, k.align, row.cells[k.key] ?? "", y + 12, { color: k.key === "code" || k.key === "color" ? "#475569" : "#0f172a" });
+    shapes.push(`<line x1="${PAD}" y1="${y + ROW_H}" x2="${W - PAD}" y2="${y + ROW_H}" stroke="#eef2f6" stroke-width="1"/>`);
+    y += ROW_H;
+  }
+  if (t.total) {
+    shapes.push(`<line x1="${PAD}" y1="${y}" x2="${W - PAD}" y2="${y}" stroke="#cbd5e1" stroke-width="2"/>`);
+    const firstLeft = left[0];
+    if (firstLeft) await put(firstLeft.key, "left", t.totalLabel, y + 12, { bold: true });
+    for (const k of right) await put(k.key, "right", t.total[k.key] ?? "", y + 12, { bold: true });
+    y += ROW_H;
+  }
+  return { y, shown };
 }

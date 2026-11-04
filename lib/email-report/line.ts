@@ -1,0 +1,120 @@
+/**
+ * 🟢 ส่งรายงานเข้ากลุ่ม LINE (ช่องทางที่ 4 ของรายงานอัตโนมัติ · ฝั่งเซิร์ฟเวอร์)
+ *
+ * ใช้บอทตัวเดียวกับระบบแจ้งเตือน LINE อื่น ๆ (china_app_settings.line_config.token) → เลือกกลุ่มที่บอทอยู่
+ * ⚠️ LINE ฟรีนับโควตา "ต่อข้อความ" (300/เดือน ใช้ร่วมทั้ง ERP) → 1 รายงาน = 1 ข้อความเสมอ:
+ *    Flex กล่องเดียว (หัว + ตัวเลขสรุป + N อันดับ + ปุ่ม "ดูทั้งหมดใน ERP") · ส่ง Flex ไม่ผ่าน → ข้อความล้วนแทน (ยัง 1 ข้อความ)
+ * ส่งทดสอบ = ส่งเข้ากลุ่มเดียวกัน (มีคำว่า "ทดสอบ" นำหน้า) เพราะ LINE ไม่มีห้องส่วนตัวให้บอททักทุกคน
+ * composeLineReport เป็น pure — หน้าตั้งค่าใช้ทำตัวอย่าง (preview?format=line) · ทดสอบที่ lib/__tests__/email-report-platform-sales.test.ts
+ */
+import type { supabaseAdmin } from "@/lib/supabase-admin";
+import { normalizeReportLine, type EmailReport, type EmailReportLine, type EmailReportRun } from "@/lib/email-report/shared";
+import { statText, type BuiltReport } from "@/lib/email-report/render";
+
+type Admin = ReturnType<typeof supabaseAdmin>;
+type Json = Record<string, unknown>;
+export type LineResult = { ok: boolean; target: string; fallback: boolean; error: string | null };
+
+/** แถวในกล่อง LINE: ซ้าย = รหัส/ชื่อ/สี · ขวา = จำนวน/ยอด (จากตาราง) หรือป้ายเตือน (จากรายการงาน) */
+export type LineRow = { left: string; right: string };
+export type LineComposed = { altText: string; header: string; sub: string[]; rows: LineRow[]; more: number; link: string | null; linkLabel: string; text: string; flex: Json };
+
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/** ประกอบข้อความ LINE จากรายงานที่ประกอบแล้ว (ชุดเดียวกับอีเมล) */
+export function composeLineReport(built: BuiltReport, cfg: Pick<EmailReportLine, "max_rows">, opts: { subject: string; test?: boolean }): LineComposed {
+  const header = `${opts.test ? "🧪 ทดสอบ · " : ""}${built.heading}`;
+  const sub: string[] = [];
+  if (built.stats.length) sub.push(built.stats.map((s) => `${s.label} ${statText(s)}${s.hint ? ` (${s.hint})` : ""}`).join(" · "));
+
+  const rows: LineRow[] = [];
+  let available = 0;
+  if (built.table) {
+    const t = built.table;
+    const cols = t.columns.filter((c) => c.key !== "img");
+    const leftCols = cols.filter((c) => c.align !== "right");
+    const rightCols = cols.filter((c) => c.align === "right");
+    for (const s of t.sections) for (const row of s.rows) {
+      available++;
+      if (rows.length >= cfg.max_rows) continue;
+      rows.push({
+        left: leftCols.map((c) => row.cells[c.key]).filter(Boolean).join(" "),
+        right: rightCols.map((c) => row.cells[c.key]).filter(Boolean).join(" · "),
+      });
+    }
+    available = Math.max(available, built.total);
+  } else {
+    for (const s of built.sections) for (const row of s.rows) {
+      if (rows.length >= cfg.max_rows) break;
+      rows.push({ left: `${row.code ? `${row.code} ` : ""}${row.title}`, right: row.flag?.text ?? "" });
+    }
+    available = built.total;
+  }
+  const more = Math.max(0, available - rows.length);
+  const link = built.viewAllLink && /^https:\/\//.test(built.viewAllLink) ? built.viewAllLink : null;
+  const linkLabel = "ดูทั้งหมดใน ERP";
+
+  const text = [
+    header, ...sub, "",
+    ...(built.total === 0 ? [built.emptyText] : rows.map((r, i) => `${i + 1}. ${r.left}${r.right ? ` — ${r.right}` : ""}`)),
+    ...(more ? [`…และอีก ${more.toLocaleString("th-TH")} ${built.unit ?? "งาน"}`] : []),
+    ...(link ? ["", `${linkLabel}: ${link}`] : []),
+  ].join("\n").slice(0, 4900);
+
+  const txt = (t: string, o: Json = {}): Json => ({ type: "text", text: t || " ", wrap: true, size: "sm", color: "#0f172a", ...o });
+  const body: Json[] = [txt(clip(header, 120), { weight: "bold", size: "md" })];
+  for (const s of sub) body.push(txt(clip(s, 300), { size: "xs", color: "#64748b", margin: "sm" }));
+  body.push({ type: "separator", margin: "md" });
+  if (built.total === 0) body.push(txt(built.emptyText, { margin: "md", color: "#059669" }));
+  rows.forEach((r, i) => body.push({
+    type: "box", layout: "horizontal", margin: "sm", spacing: "sm",
+    contents: [txt(clip(`${i + 1}. ${r.left}`, 80), { flex: 5 }), ...(r.right ? [txt(clip(r.right, 40), { flex: 3, align: "end", color: "#334155" })] : [])],
+  }));
+  if (more) body.push(txt(`…และอีก ${more.toLocaleString("th-TH")} ${built.unit ?? "งาน"}`, { size: "xs", color: "#94a3b8", margin: "md" }));
+  const flex: Json = {
+    type: "bubble", size: "giga",
+    body: { type: "box", layout: "vertical", contents: body },
+    ...(link ? { footer: { type: "box", layout: "vertical", contents: [{ type: "button", style: "link", height: "sm", action: { type: "uri", label: linkLabel, uri: link } }] } } : {}),
+  };
+  return { altText: clip(opts.subject || built.subjectCore, 380), header, sub, rows, more, link, linkLabel, text, flex };
+}
+
+async function linePush(token: string, to: string, message: Json): Promise<{ ok: boolean; status: number; body: string }> {
+  const res = await fetch("https://api.line.me/v2/bot/message/push", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ to, messages: [message] }),
+  });
+  return { ok: res.ok, status: res.status, body: res.ok ? "" : (await res.text().catch(() => "")).slice(0, 300) };
+}
+
+const lineErrorText = (status: number) =>
+  status === 429 ? "โควตาข้อความ LINE เดือนนี้หมดแล้ว (ฟรี 300/เดือน ใช้ร่วมทั้ง ERP) — รอรีเซ็ตวันที่ 1 หรืออัปเกรดแพ็กเกจ LINE OA"
+    : status === 400 || status === 404 ? "ส่งเข้ากลุ่ม LINE ไม่ได้ — บอทอาจออกจากกลุ่มแล้ว (เลือกกลุ่มใหม่ในหน้าแก้ไข)"
+    : status === 401 || status === 403 ? "โทเคนบอท LINE ใช้ไม่ได้ (ตรวจที่ศูนย์ LINE)"
+    : `ส่ง LINE ไม่สำเร็จ (HTTP ${status})`;
+
+export async function sendReportToLine(admin: Admin, report: Pick<EmailReport, "line">, built: BuiltReport,
+  opts: { trigger: EmailReportRun["trigger"]; subject: string }): Promise<LineResult> {
+  const cfg = normalizeReportLine(report.line);
+  const target = cfg.group_name ? `กลุ่ม ${cfg.group_name}` : "กลุ่ม LINE";
+  const fail = (error: string): LineResult => ({ ok: false, target, fallback: false, error });
+  if (!cfg.group_id) return fail("ยังไม่ได้เลือกกลุ่ม LINE");
+  const { data } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
+  const token = String(((data as { sval?: { token?: string } } | null)?.sval?.token) ?? "");
+  if (!token) return fail("ยังไม่ได้ตั้งบอท LINE (ศูนย์ LINE ในตั้งค่า)");
+
+  const m = composeLineReport(built, cfg, { subject: opts.subject, test: opts.trigger === "test" });
+  try {
+    const flex = await linePush(token, cfg.group_id, { type: "flex", altText: m.altText, contents: m.flex });
+    if (flex.ok) return { ok: true, target, fallback: false, error: null };
+    if (flex.status === 429 || flex.status === 401 || flex.status === 403) return fail(lineErrorText(flex.status));
+    console.error("[email-report/line] flex", flex.status, flex.body);
+    // Flex ไม่ผ่าน (เช่น ข้อความยาว/รูปแบบผิด) → ข้อความล้วน ยังเป็น 1 ข้อความ
+    const plain = await linePush(token, cfg.group_id, { type: "text", text: m.text });
+    return plain.ok ? { ok: true, target, fallback: true, error: null } : fail(lineErrorText(plain.status));
+  } catch (e) {
+    console.error("[email-report/line]", e);
+    return fail("ติดต่อ LINE ไม่ได้ กรุณาลองใหม่");
+  }
+}

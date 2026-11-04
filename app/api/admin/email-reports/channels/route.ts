@@ -1,5 +1,5 @@
 /**
- * 🔌 สวิตช์ช่องทางรายงานทั้งระบบ — PATCH /api/admin/email-reports/channels  body: { email?, discord?, popup? } (boolean)
+ * 🔌 สวิตช์ช่องทางรายงานทั้งระบบ — PATCH /api/admin/email-reports/channels  body: { email?, line?, discord?, popup? } (boolean)
  * ปิดช่องไหน = ทุกรายงานหยุดใช้ช่องนั้นทันที (ส่งตามเวลา / ส่งเดี๋ยวนี้ / ป๊อปตอนเข้า ERP) · ส่งทดสอบยังได้
  * ตาราง erp_report_channels แถวเดียว (RLS ไม่มี policy) · สิทธิ์ admin.email_reports · audit "update" entity report_channels (ก่อน/หลัง)
  */
@@ -26,12 +26,13 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const actor = await requestActor(supabaseFromRequest(request));
   const before = await loadReportChannels(admin);
   const { error } = await admin.from("erp_report_channels")
-    .upsert({ id: 1, email: before.email, discord: before.discord, popup: before.popup, ...patch, updated_at: new Date().toISOString(), updated_by: actor.name }, { onConflict: "id" });
+    .upsert({ id: 1, email: before.email, line: before.line, discord: before.discord, popup: before.popup, ...patch, updated_at: new Date().toISOString(), updated_by: actor.name }, { onConflict: "id" });
   if (error) return NextResponse.json({ data: null, error: "บันทึกไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
   const after = await loadReportChannels(admin);
+  const pick = (c: typeof before) => ({ email: c.email, line: c.line, discord: c.discord, popup: c.popup });
   await writeAudit(admin, {
     action: "update", entityType: "report_channels", entityId: null, actorId: actor.id, actorName: actor.name,
-    metadata: { before: { email: before.email, discord: before.discord, popup: before.popup }, after: { email: after.email, discord: after.discord, popup: after.popup } },
+    metadata: { before: pick(before), after: pick(after) },
   });
   return NextResponse.json({ data: after, error: null });
 }
