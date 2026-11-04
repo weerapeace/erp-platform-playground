@@ -485,12 +485,14 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
   {
     const cardRes = await db
       .from("debt_cards")
-      .select("id, card_name, lender_name, statement_balance, paid_amount, minimum_due, due_date, status, company_id")
-      .eq("is_active", true).neq("status", "paid").not("due_date", "is", null).lte("due_date", to).limit(500);
+      .select("id, card_name, lender_name, card_kind, credit_limit, statement_date, statement_balance, paid_amount, paid_date, minimum_due, due_date, status, company_id, updated_at")
+      // .neq ตัดแถวที่ status ว่าง (null) ทิ้ง → ใช้ or ให้นับบัตรที่ยังไม่เคยตั้งสถานะด้วย
+      .eq("is_active", true).or("status.is.null,status.neq.paid").not("due_date", "is", null).lte("due_date", to).limit(500);
     for (const k of cardRes.data ?? []) {
       const amount = Math.max(0, num(k.statement_balance) - num(k.paid_amount));
       if (amount <= 0) continue;
       const date = String(k.due_date).slice(0, 10);
+      const minDue = num(k.minimum_due);
       events.push({
         id: `card:${k.id}`,
         date,
@@ -501,10 +503,21 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
         party: String(k.lender_name ?? "ธนาคาร"),
         amount,
         dateConfident: true,
-        note: date < today ? "เลยกำหนดชำระแล้ว — ถ้าจ่ายแล้วให้กรอก 'จ่ายแล้ว' ที่บัตร" : (num(k.minimum_due) > 0 && num(k.minimum_due) < amount ? `ขั้นต่ำ ${num(k.minimum_due).toLocaleString("th-TH")}` : undefined),
+        note: date < today ? "เลยกำหนดชำระแล้ว — ถ้าจ่ายแล้วกด \"จ่ายแล้ว\" · ถ้ามีใบแจ้งยอดใหม่กด \"ใบแจ้งยอดใหม่\"" : (minDue > 0 && minDue < amount ? `ขั้นต่ำ ${minDue.toLocaleString("th-TH")}` : undefined),
         href: openLink("/debt-cards", String(k.id)),
         docId: String(k.id),
         companyId: co(k.company_id),
+        updatedAt: (k.updated_at as string | null) ?? null,
+        details: [
+          ...(num(k.credit_limit) > 0 ? [{ label: "วงเงิน", value: num(k.credit_limit), kind: "money" as const }] : []),
+          { label: "ยอดตามใบแจ้งยอด", value: num(k.statement_balance), kind: "money" },
+          ...(minDue > 0 ? [{ label: "ขั้นต่ำ", value: minDue, kind: "money" as const }] : []),
+          { label: "ใบแจ้งยอดวันที่", value: (k.statement_date as string | null) ?? null, kind: "date" },
+          { label: "ครบกำหนด", value: date, kind: "date" },
+          { label: "จ่ายแล้ว", value: num(k.paid_amount), kind: "money" },
+          ...(k.paid_date ? [{ label: "จ่ายล่าสุด", value: String(k.paid_date), kind: "date" as const }] : []),
+        ],
+        raw: { minimumDue: minDue, statementBalance: num(k.statement_balance), paidAmount: num(k.paid_amount), cardKind: (k.card_kind as string | null) ?? null },
       });
     }
   }

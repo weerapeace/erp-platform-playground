@@ -77,6 +77,7 @@ export default function CashflowPage() {
   const canPayPo = usePermission("products.edit");             // /api/purchasing/mark-paid
   const canDebtView = usePermission("loan_contracts.view");     // /api/bank-debts
   const canDebtCreate = usePermission("loan_contracts.create");
+  const canDebtEdit = usePermission("loan_contracts.edit");     // แท็บต้องจ่าย: บัตรจ่ายแล้ว / ใบแจ้งยอดใหม่ / แก้ทะเบียนหนี้
   const canReceipt = usePermission("receipts.create");         // /api/receipts — รับเงินแล้วจากแท็บต้องรับ
   const { permsReady } = useAuth();
 
@@ -511,7 +512,7 @@ export default function CashflowPage() {
               ))}
             </div>
 
-            {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} cashNow={accounts.length ? opening : null} buffer={buffer} rmbRate={data?.meta.rmbRate ?? 0} onChanged={load} />}
+            {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} cashNow={accounts.length ? opening : null} buffer={buffer} rmbRate={data?.meta.rmbRate ?? 0} canDebtEdit={canDebtEdit} onChanged={load} />}
             {tab === "recv" && <CashflowPartyTab side="in" events={inEvents} today={from} canManage={canManage} canPayPo={false} canReceipt={canReceipt} onChanged={load} />}
             {tab === "debt" && (canDebtView ? (
               <CashflowDebtTab items={myDebts} loading={debtsLoading} error={debtsErr} canCreate={canDebtCreate} onChanged={reloadAll}

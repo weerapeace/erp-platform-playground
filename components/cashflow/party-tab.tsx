@@ -12,6 +12,7 @@
  * กางแถวร้าน → เห็นของใน PO แต่ละใบ (รูป · จำนวน · ราคา) — โหลดทีเดียวทั้งร้านตอนกาง: GET /api/cashflow/po-lines (ของกลาง lib/po-lines-server)
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -20,18 +21,24 @@ import { ERPModal } from "@/components/modal";
 import { DateInput } from "@/components/date-input";
 import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
-import { UploadProgress } from "@/components/upload-progress";
 import { uploadRecordFile, copyRecordFile } from "@/components/record-files";
 import { Icon } from "@/components/icon";
 import { HoverImage } from "@/components/hover-image";
+import { SlipPicker } from "@/components/cashflow/slip-picker";
+import { CardPayModal, CardStatementModal } from "@/components/cashflow/card-actions";
 import { RECORD_FILES_MAX } from "@/lib/record-files";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { formatAmount, normalizeCurrency } from "@/lib/money";
 import { CREDIT_TERM_OPTIONS } from "@/lib/credit-term";
-import { CASHFLOW_CERTAINTY, THB, addDaysISO, daysBetween, planPayRun, type CashflowEvent } from "@/lib/cashflow";
+import { CASHFLOW_CERTAINTY, THB, addDaysISO, daysBetween, planPayRun, staleReason, type CashflowDetail, type CashflowEvent } from "@/lib/cashflow";
 import type { PoDetailLine } from "@/lib/po-lines-server";
 import type { CashflowPoLines } from "@/app/api/cashflow/po-lines/route";
+
+const MasterRecordDrawer = dynamic(() => import("@/components/master-crud").then((m) => m.MasterRecordDrawer), { ssr: false });
+/** ทะเบียนหนี้ (บัตร · เงินกู้ · OD) ใช้สิทธิ์ชุด loan_contracts — ตัวเดียวกับแท็บหนี้ & วงเงิน */
+const DEBT_PERMS = { view: "loan_contracts.view", create: "loan_contracts.create", edit: "loan_contracts.edit" } as const;
+type DrawerTarget = { module: string; id: string } | null;
 
 type Side = "out" | "in";
 type Cat = "shop" | "china" | "loan" | "od" | "card" | "payroll" | "manual" | "customer";
@@ -73,7 +80,7 @@ const AGING = [
 type Modal = { kind: "date" | "credit" | "pay" | "recv"; events: CashflowEvent[]; groups: Group[] } | null;
 
 export function CashflowPartyTab({
-  side, events, today, canManage, canPayPo, canReceipt = false, cashNow = null, buffer = 0, rmbRate = 0, onChanged,
+  side, events, today, canManage, canPayPo, canReceipt = false, canDebtEdit = false, cashNow = null, buffer = 0, rmbRate = 0, onChanged,
 }: {
   side: Side;
   /** รายการฝั่งนี้ทั้งหมด (รวมของค้างจากก่อนวันนี้) — กรองบริษัท/แหล่งมาแล้ว */
@@ -83,6 +90,8 @@ export function CashflowPartyTab({
   canPayPo: boolean;
   /** ออกใบรับชำระได้ (receipts.create) — ใช้ฝั่งต้องรับ */
   canReceipt?: boolean;
+  /** แก้ทะเบียนหนี้ได้ (loan_contracts.edit) — บัตร: จ่ายแล้ว / ใบแจ้งยอดใหม่ / แก้ข้อมูล */
+  canDebtEdit?: boolean;
   /** เงินในบัญชีตอนนี้ (null = ยังไม่กรอก) + เงินกันขั้นต่ำ — ใช้คิดงบแนะนำของ "จัดรอบจ่าย" */
   cashNow?: number | null;
   buffer?: number;
@@ -95,6 +104,8 @@ export function CashflowPartyTab({
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<Modal>(null);
   const [runOpen, setRunOpen] = useState(false);
+  const [cardModal, setCardModal] = useState<{ kind: "pay" | "stmt"; e: CashflowEvent } | null>(null);
+  const [drawer, setDrawer] = useState<DrawerTarget>(null);
   const { poLines, ensurePoLines } = usePoLines();
 
   const groups = useMemo<Group[]>(() => {
@@ -257,8 +268,9 @@ export function CashflowPartyTab({
         onRowClick={toggle}
         isRowExpanded={(g) => open.has(g.id)}
         renderExpandedRow={(g) => (
-          <DocList group={g} side={side} canManage={canManage} canPayPo={canPayPo} canReceipt={canReceipt}
+          <DocList group={g} side={side} today={today} canManage={canManage} canPayPo={canPayPo} canReceipt={canReceipt} canDebtEdit={canDebtEdit}
             poLines={poLines} ensurePoLines={ensurePoLines} rmbRate={rmbRate}
+            onCard={(kind, e) => setCardModal({ kind, e })} onDrawer={setDrawer}
             onMove={(e) => setModal({ kind: "date", events: [e], groups: [g] })}
             onPay={(e) => setModal({ kind: "pay", events: [e], groups: [g] })}
             onReceive={(e) => setModal({ kind: "recv", events: [e], groups: [g] })} />
@@ -280,6 +292,11 @@ export function CashflowPartyTab({
         onClose={() => setRunOpen(false)} onDone={() => { setRunOpen(false); onChanged(); }}
         onPayNow={(picked) => { setRunOpen(false); setModal({ kind: "pay", events: picked, groups: groups.filter((g) => g.events.some((e) => picked.includes(e))) }); }} />
       <ReceiveModal modal={modal?.kind === "recv" ? modal : null} today={today} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
+      <CardPayModal event={cardModal?.kind === "pay" ? cardModal.e : null} today={today} onClose={() => setCardModal(null)} onDone={() => { setCardModal(null); onChanged(); }} />
+      <CardStatementModal event={cardModal?.kind === "stmt" ? cardModal.e : null} today={today} onClose={() => setCardModal(null)} onDone={() => { setCardModal(null); onChanged(); }} />
+      {drawer && (
+        <MasterRecordDrawer moduleKey={drawer.module} recordId={drawer.id} onClose={() => setDrawer(null)} onChanged={onChanged} permissions={DEBT_PERMS} />
+      )}
     </div>
   );
 }
@@ -322,9 +339,10 @@ function usePoLines() {
 }
 
 /** เอกสารข้างในแถวคู่ค้า (แถวที่กางออก) — PO มีรายการสินค้า (รูป · จำนวน · ราคา) ใต้แต่ละใบ */
-function DocList({ group, side, canManage, canPayPo, canReceipt, poLines, ensurePoLines, rmbRate, onMove, onPay, onReceive }: {
-  group: Group; side: Side; canManage: boolean; canPayPo: boolean; canReceipt: boolean;
+function DocList({ group, side, today, canManage, canPayPo, canReceipt, canDebtEdit, poLines, ensurePoLines, rmbRate, onCard, onDrawer, onMove, onPay, onReceive }: {
+  group: Group; side: Side; today: string; canManage: boolean; canPayPo: boolean; canReceipt: boolean; canDebtEdit: boolean;
   poLines: PoLinesState; ensurePoLines: (ids: string[]) => void; rmbRate: number;
+  onCard: (kind: "pay" | "stmt", e: CashflowEvent) => void; onDrawer: (t: DrawerTarget) => void;
   onMove: (e: CashflowEvent) => void; onPay: (e: CashflowEvent) => void; onReceive: (e: CashflowEvent) => void;
 }) {
   const poIds = useMemo(() => group.events.filter((e) => e.source === "purchase_order" && e.docId).map((e) => String(e.docId)), [group.events]);
@@ -374,8 +392,14 @@ function DocList({ group, side, canManage, canPayPo, canReceipt, poLines, ensure
                   {canManage && e.movable && e.docId && (
                     <button type="button" onClick={() => onMove(e)} className={`${iconBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}><Icon value="i:calendar-event" size={14} />เลื่อนวัน</button>
                   )}
+                  {canDebtEdit && e.source === "card" && e.docId && (<>
+                    <button type="button" onClick={() => onCard("pay", e)} className={`${iconBtn} border-emerald-200 text-emerald-700 hover:bg-emerald-50`}><Icon value="i:circle-check" size={14} />จ่ายแล้ว</button>
+                    <button type="button" onClick={() => onCard("stmt", e)} className={`${iconBtn} border-blue-200 text-blue-700 hover:bg-blue-50`}><Icon value="i:file-invoice" size={14} />ใบแจ้งยอดใหม่</button>
+                    <button type="button" onClick={() => onDrawer({ module: "debt-cards", id: String(e.docId) })} className={`${iconBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}><Icon value="i:edit" size={14} />แก้ข้อมูลบัตร</button>
+                  </>)}
                 </span>
               </div>
+              <EventInfo e={e} today={today} />
               {poId && (
                 <PoItems state={poLines[poId]} rmbRate={rmbRate} open={!folded.has(poId)} showAll={full.has(poId)}
                   onToggle={() => setFolded((s) => flip(s, poId))} onShowAll={() => setFull((s) => flip(s, poId))}
@@ -385,6 +409,28 @@ function DocList({ group, side, canManage, canPayPo, canReceipt, poLines, ensure
           );
         })}
       </div>
+    </div>
+  );
+}
+
+const fmtDetail = (d: CashflowDetail) =>
+  d.value == null || d.value === "" ? "—" : d.kind === "money" ? THB(Number(d.value)) : d.kind === "date" ? formatDate(d.value) : String(d.value);
+
+/** รายละเอียดใต้แถว (วงเงิน · ขั้นต่ำ · งวดที่ ฯลฯ จากเซิร์ฟเวอร์) + อัปเดตล่าสุด + ป้าย "ข้อมูลเก่า" (กติกา staleReason ใน lib/cashflow) */
+function EventInfo({ e, today }: { e: CashflowEvent; today: string }) {
+  const stale = staleReason(e, today);
+  if (!e.details?.length && !e.updatedAt && !stale) return null;
+  return (
+    <div className="mt-1 sm:ml-[108px] flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+      {e.details?.map((d) => (
+        <span key={d.label} className="text-slate-500">{d.label} <span className="font-medium text-slate-700 tabular-nums">{fmtDetail(d)}</span></span>
+      ))}
+      {e.updatedAt && <span className="text-slate-400">อัปเดตล่าสุด {formatDate(e.updatedAt)}</span>}
+      {stale && (
+        <span className="inline-flex items-center gap-1 text-amber-800">
+          <span className="px-1.5 py-0.5 rounded bg-amber-100 font-medium">ข้อมูลเก่า</span>{stale}
+        </span>
+      )}
     </div>
   );
 }
@@ -537,26 +583,6 @@ function CreditModal({ modal, side, onClose, onDone }: { modal: Modal; side: Sid
   );
 }
 
-/** ช่องเลือกสลิป / หลักฐาน (ไม่บังคับ) — รูปหรือ PDF ไฟล์เดียว */
-function SlipPicker({ file, onChange, busyLabel }: { file: File | null; onChange: (f: File | null) => void; busyLabel: string | null }) {
-  return (
-    <div>
-      <label className="block text-xs text-slate-500 mb-1">แนบสลิป / หลักฐาน (ไม่บังคับ · รูปหรือ PDF)</label>
-      {busyLabel && file ? (
-        <UploadProgress name={file.name} size={file.size} pct={null} label={busyLabel} />
-      ) : file ? (
-        <div className="flex items-center gap-2 text-sm bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-          <span className="flex-1 min-w-0 truncate">{file.name}</span>
-          <span className="text-xs text-slate-400">{Math.round(file.size / 1024)} KB</span>
-          <button type="button" onClick={() => onChange(null)} className="text-xs text-slate-500 underline">เอาออก</button>
-        </div>
-      ) : (
-        <input type="file" accept="image/*,application/pdf" onChange={(e) => onChange(e.target.files?.[0] ?? null)}
-          className="block w-full text-sm text-slate-600 file:mr-3 file:h-8 file:px-3 file:rounded-lg file:border file:border-slate-200 file:bg-white file:text-slate-700" />
-      )}
-    </div>
-  );
-}
 
 /**
  * ติ๊ก "จ่ายแล้ว" ให้ PO (ทีละใบหรือทั้งร้าน) + แนบสลิปได้ — เกิน 20 ใบต้องพิมพ์ยืนยัน

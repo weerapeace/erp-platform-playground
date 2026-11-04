@@ -74,7 +74,20 @@ export type CashflowEvent = {
   companyId?: string | null;
   /** id คู่ค้าใน partners_v2 (ลูกค้า / ร้านค้า) — ใช้ตั้งเครดิตจากหน้ากระแสเงินสด · null = ไม่ผูกคู่ค้า (เงินเดือน หนี้ธนาคาร ฯลฯ) */
   partyId?: string | null;
+  /** รายละเอียดที่โชว์ตอนกางแถว (แท็บต้องจ่าย/ต้องรับ) เช่น วงเงิน · ขั้นต่ำ · งวดที่ — คิดที่เซิร์ฟเวอร์ หน้าจอจัดรูปแบบตาม kind */
+  details?: CashflowDetail[];
+  /** ข้อมูลต้นทางแก้ล่าสุดเมื่อไร (ISO) — ใช้บอก "อัปเดตล่าสุด" + ป้ายข้อมูลเก่า (staleReason) */
+  updatedAt?: string | null;
+  /** ตัวเลข/รหัสดิบที่ปุ่มในแถวต้องใช้ เช่น ขั้นต่ำบัตร · id สัญญาเงินกู้ (ไม่ใช่ข้อมูลโชว์) */
+  raw?: Record<string, string | number | null>;
 };
+
+/** รายละเอียด 1 ช่อง: money = บาท · date = วันที่ · text = ข้อความ */
+export type CashflowDetail = { label: string; value: string | number | null; kind?: "money" | "date" | "text" };
+
+/** ป้าย "ข้อมูลเก่า": เลยกำหนดเกินกี่วัน / ไม่ได้แก้เกินกี่วัน */
+export const STALE_DUE_DAYS = 30;
+export const STALE_UPDATE_DAYS = 45;
 
 /** ชนิดเอกสารที่กระดานเลื่อนวันให้ได้ + ช่องที่เก็บวันนั้นในฐานข้อมูล */
 export const MOVABLE_SOURCES: Partial<Record<CashflowSource, { table: string; dateField: string; label: string }>> = {
@@ -163,6 +176,23 @@ export function monthsBetween(from: string, to: string): string[] {
 /** จำนวนวันจาก a ถึง b (b - a) */
 export const daysBetween = (a: string, b: string): number =>
   Math.round((parseISO(b).getTime() - parseISO(a).getTime()) / 86400000);
+
+/**
+ * รายการนี้ "ข้อมูลน่าจะเก่า" ไหม — คืนเหตุผลภาษาคน (null = ปกติ)
+ * เลยกำหนดเกิน STALE_DUE_DAYS วัน (จ่าย/รับไปแล้วแต่ยังไม่ได้อัปเดต?) หรือ ต้นทางไม่ได้แก้เกิน STALE_UPDATE_DAYS วัน
+ * ประมาณการ (ระบบเดา) ไม่นับ — ไม่มีเอกสารให้อัปเดต
+ */
+export function staleReason(e: Pick<CashflowEvent, "date" | "updatedAt" | "certainty">, today: string): string | null {
+  if (e.certainty === "estimate") return null;
+  const late = daysBetween(e.date, today);
+  if (late > STALE_DUE_DAYS) return `เลยกำหนดมา ${late} วันแล้ว — ถ้าจ่าย/รับไปแล้ว กดอัปเดตให้ตรง`;
+  const upd = e.updatedAt ? String(e.updatedAt).slice(0, 10) : "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(upd)) {
+    const age = daysBetween(upd, today);
+    if (age > STALE_UPDATE_DAYS) return `ไม่ได้อัปเดตมา ${age} วัน — ตัวเลขอาจไม่ตรงแล้ว`;
+  }
+  return null;
+}
 
 // ============================================================
 // รวมยอด
