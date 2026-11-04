@@ -110,8 +110,40 @@ const mb = (n: number) => Math.round((n / 1048576) * 10) / 10;
  * เริ่มอัปไฟล์เข้าอัลบั้มเป็นงานเบื้องหลัง (กล่องความคืบหน้ามุมขวาล่าง · ปิดป๊อปได้) — ใช้ร่วม: ลากวางในอัลบั้ม + ลากวาง/เลือกโฟลเดอร์ที่หน้ารวม
  * ความคืบหน้ารายไฟล์ออกทาง onAlbumUpload · onEnd = จบงาน (สำเร็จ/ยกเลิก/พัง)
  */
+// ── เปิดอัลบั้มจากที่อื่น (ปุ่ม "เปิดอัลบั้ม" บนกล่องงานเบื้องหลัง / แจ้งเตือนของเครื่อง) ──
+export const ALBUM_OPEN_EVENT = "erp:content-album-open";
+export const albumUrl = (id: string) => `/master/assets?source=contents&album=${id}`;
+/** หน้า Contents เปิดอยู่ = เปิดอัลบั้มในหน้านั้นเลย (ฟัง ALBUM_OPEN_EVENT แล้ว preventDefault) · ไม่งั้นไปหน้า Contents */
+export function requestOpenAlbum(id: string): void {
+  const ev = new CustomEvent(ALBUM_OPEN_EVENT, { detail: { id }, cancelable: true });
+  window.dispatchEvent(ev);
+  if (!ev.defaultPrevented) window.location.href = albumUrl(id);
+}
+
+// ── แจ้งเตือนของเครื่อง (ตอนสลับไปแท็บ/โปรแกรมอื่น) — ถามอนุญาตครั้งแรกตอนเริ่มอัป (ต้องอยู่ในจังหวะที่ผู้ใช้กด) ──
+export function askUploadNotifyPermission(): void {
+  try { if ("Notification" in window && Notification.permission === "default") void Notification.requestPermission(); } catch { /* เครื่องไม่รองรับ */ }
+}
+function deviceNotify(title: string, body: string, albumId: string) {
+  try {
+    if (!("Notification" in window) || Notification.permission !== "granted" || !document.hidden) return;
+    const n = new Notification(title, { body, tag: `album-upload-${albumId}` });
+    n.onclick = () => { window.focus(); requestOpenAlbum(albumId); n.close(); };
+  } catch { /* บางเครื่องต้องผ่าน service worker — ข้ามได้ ยังมีกระดิ่ง + กล่องมุมจอ */ }
+}
+
+// ── ชื่อแท็บโชว์ % ระหว่างอัป (เห็นจากแถบแท็บตอนไปทำอย่างอื่น) ──
+let baseTitle: string | null = null;
+function setTitleProgress(pct: number | null) {
+  if (typeof document === "undefined") return;
+  if (pct == null) { if (baseTitle != null) document.title = baseTitle; baseTitle = null; return; }
+  if (baseTitle == null) baseTitle = document.title.replace(/^\(\d+%\) /, "");
+  document.title = `(${pct}%) ${baseTitle}`;
+}
+
 let uploadQueue: Promise<void> = Promise.resolve();
 export function startAlbumUploadTask(p: { albumId: string; albumName: string; files: File[]; existingKeys: string[]; onEnd?: () => void }): void {
+  askUploadNotifyPermission();
   const total = p.files.reduce((n, f) => n + f.size, 0);
   // หลายอัลบั้มพร้อมกัน (ลากหลายโฟลเดอร์) = ต่อคิวทีละอัลบั้ม
   const prev = uploadQueue;
@@ -119,18 +151,27 @@ export function startAlbumUploadTask(p: { albumId: string; albumName: string; fi
   uploadQueue = new Promise<void>((r) => { release = r; });
   runBackgroundTask({
     label: tr(`อัปเข้าอัลบั้ม ${p.albumName} (${p.files.length} ไฟล์)`, `Upload to ${p.albumName} (${p.files.length} files)`), total: mb(total), unit: "MB",
+    // งานยาว คนมักสลับไปทำอย่างอื่น → กล่องค้างไว้จนกดปิด + ปุ่มเปิดอัลบั้ม
+    keepOnDone: true,
+    action: { label: tr("เปิดอัลบั้ม", "Open album"), run: () => requestOpenAlbum(p.albumId) },
     run: async (report) => {
       await prev;
       try {
-        const r = await uploadFilesToAlbum({ albumId: p.albumId, albumName: p.albumName, files: p.files, existingKeys: p.existingKeys, onBytes: (sent, tot) => report(mb(sent), mb(tot)) });
+        const r = await uploadFilesToAlbum({ albumId: p.albumId, albumName: p.albumName, files: p.files, existingKeys: p.existingKeys, onBytes: (sent, tot) => { report(mb(sent), mb(tot)); setTitleProgress(tot ? Math.round((sent / tot) * 100) : null); } });
         if (!r) return { ok: 0, message: tr("ยกเลิกแล้ว", "Cancelled") };
+        // เสร็จ → กระดิ่ง (เห็นแม้อยู่หน้าอื่น) + แจ้งเตือนของเครื่องถ้าสลับไปแท็บอื่นอยู่
+        void send(`/api/content-albums/${p.albumId}/upload-done`, "POST", { ok: r.ok, reused: r.reused, failed: r.failed.length }).catch(() => {});
+        deviceNotify(
+          r.failed.length ? tr(`อัปเข้าอัลบั้ม ${p.albumName} เสร็จ แต่มีไฟล์ไม่สำเร็จ`, `Upload to ${p.albumName} finished with errors`) : tr(`อัปเข้าอัลบั้ม ${p.albumName} เสร็จแล้ว`, `Upload to ${p.albumName} finished`),
+          tr(`ลงอัลบั้ม ${r.ok + r.reused} ไฟล์${r.failed.length ? ` · ไม่สำเร็จ ${r.failed.length}` : ""}`, `${r.ok + r.reused} file(s) added${r.failed.length ? ` · ${r.failed.length} failed` : ""}`),
+          p.albumId);
         const done = r.ok + r.reused;
         const parts = [tr(`ลงอัลบั้มแล้ว ${done} ไฟล์`, `${done} file(s) added`)];
         if (r.reused) parts.push(tr(`ใช้ไฟล์เดิม ${r.reused}`, `${r.reused} reused`));
         if (r.skipped) parts.push(tr(`ข้าม ${r.skipped}`, `${r.skipped} skipped`));
         if (r.failed.length) parts.push(tr(`ไม่สำเร็จ: ${r.failed.map((f) => `${f.name} (${f.error})`).join(", ")}`, `Failed: ${r.failed.map((f) => `${f.name} (${f.error})`).join(", ")}`));
         return { ok: done, fail: r.failed.length, message: parts.join(" · ") };
-      } finally { release(); p.onEnd?.(); }
+      } finally { setTitleProgress(null); release(); p.onEnd?.(); }
     },
   });
 }

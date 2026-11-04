@@ -259,12 +259,39 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   };
   const reorder = useDragReorder(moveFile, { group: `album-files:${albumId}` });
 
-  const togglePick = (f: AlbumFile) => {
-    if (!album) return;
-    const ids = f.picked ? album.picked_asset_ids.filter((x) => x !== f.id) : [...album.picked_asset_ids, f.id];
-    setAlbum({ ...album, picked_asset_ids: ids, files: album.files.map((x) => (x.id === f.id ? { ...x, picked: !x.picked } : x)) });
-    void patch({ picked_asset_ids: ids });
+  // ── เลือกรูปที่จะใช้ · โหมดเลือกรูป = แตะตรงไหนของรูปก็ติ๊ก (ปิดการเปิดรูปใหญ่/ลากเรียงชั่วคราว) ──
+  // กดรัว ๆ ได้: อัปเดตบนจอทันที แล้วบันทึกรวดเดียวหลังหยุดแตะ (ไม่โหลดอัลบั้มใหม่ทับระหว่างแตะ)
+  const [pickMode, setPickMode] = useState(false);
+  const pickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pickIds = useRef<string[] | null>(null);
+  const flushPicks = useCallback(() => {
+    if (pickTimer.current) { clearTimeout(pickTimer.current); pickTimer.current = null; }
+    const ids = pickIds.current; pickIds.current = null;
+    if (!ids) return;
+    updateContentAlbum(albumId, { picked_asset_ids: ids }).then(() => onChangedRef.current()).catch((e) => toast.error((e as Error).message));
+  }, [albumId, toast]);
+  const setPicks = (fn: (cur: Set<string>) => Set<string>) => {
+    setAlbum((a) => {
+      if (!a) return a;
+      const next = fn(new Set(a.picked_asset_ids));
+      const ids = a.files.filter((x) => next.has(x.id)).map((x) => x.id);
+      pickIds.current = ids;
+      return { ...a, picked_asset_ids: ids, files: a.files.map((x) => ({ ...x, picked: next.has(x.id) })) };
+    });
+    if (pickTimer.current) clearTimeout(pickTimer.current);
+    pickTimer.current = setTimeout(flushPicks, 700);
   };
+  const togglePick = (f: AlbumFile) => setPicks((cur) => { if (cur.has(f.id)) cur.delete(f.id); else cur.add(f.id); return cur; });
+  const pickAll = (on: boolean) => setPicks(() => new Set(on ? (album?.files ?? []).map((x) => x.id) : []));
+  const exitPickMode = useCallback(() => { setPickMode(false); flushPicks(); }, [flushPicks]);
+  // Esc = ออกจากโหมดเลือก (ไม่ปิดหน้าอัลบั้ม) · ปิดหน้าไปก่อนบันทึก = บันทึกให้
+  useEffect(() => {
+    if (!pickMode) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); e.preventDefault(); exitPickMode(); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [pickMode, exitPickMode]);
+  useEffect(() => () => flushPicks(), [flushPicks]);
   const setCover = (f: AlbumFile) => void patch({ cover_asset_id: album?.cover_asset_id === f.id ? null : f.id }, t("ตั้งปกอัลบั้มแล้ว", "Cover set"));
 
   const doDeleteFile = async () => {
@@ -443,9 +470,13 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-semibold text-slate-700">{t(`ไฟล์ในอัลบั้ม (${files.length})`, `Files (${files.length})`)}</h3>
               {pickedCount > 0 && <span className="text-xs text-violet-700">{t(`เลือกใช้ ${pickedCount} ไฟล์`, `${pickedCount} picked`)}</span>}
-              {canEdit && files.length > 0 && <span className="text-xs text-slate-400">{t("ติ๊กมุมซ้าย = เลือกใช้ (ส่งเข้าโพสต์เฉพาะที่เลือก) · ดาว = ปกอัลบั้ม · กดค้างที่รูปแล้วลาก (หรือ ‹ ›) = เรียงลำดับ", "Tick = pick for posts · star = cover · hold and drag (or ‹ ›) = reorder")}</span>}
+              {canEdit && files.length > 0 && !pickMode && <span className="text-xs text-slate-400">{t("แตะรูป = ดูรูปใหญ่ · ดาว = ปกอัลบั้ม · กดค้างที่รูปแล้วลาก (หรือ ‹ ›) = เรียงลำดับ", "Tap = view · star = cover · hold and drag (or ‹ ›) = reorder")}</span>}
               {files.length > 0 && (
                 <span className="ml-auto flex flex-wrap gap-2">
+                  {canEdit && !pickMode && (
+                    <button onClick={() => setPickMode(true)} title={t("เข้าโหมดเลือกรูป: แตะตรงไหนของรูปก็ติ๊กได้ (รูปที่เลือก = ส่งเข้าโพสต์/ดาวน์โหลด/AI เฉพาะที่เลือก)", "Pick mode: tap anywhere on a photo to tick it")}
+                      className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-violet-200 text-xs text-violet-700 hover:bg-violet-50"><Icon name="done" />{t("เลือกรูป", "Pick photos")}</button>
+                  )}
                   {canEdit && files.some((f) => f.asset_type !== "video") && (
                     <button onClick={() => void runCull()} disabled={!!cullMsg} title={t("หารูปที่อาจเบลอ + รูปคล้ายกันที่ถ่ายรัว แล้วแนะนำรูปที่ควรเก็บ (ไม่มีค่าใช้จ่าย)", "Find blurry and burst look-alike photos, suggest which to keep (free)")}
                       className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 disabled:opacity-60"><Icon name="inspect" />{cullMsg ?? t("ช่วยคัดรูป", "Help me cull")}</button>
@@ -455,6 +486,15 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
                 </span>
               )}
             </div>
+            {pickMode && (
+              <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border border-violet-200 bg-violet-50 text-sm text-violet-800">
+                <Icon name="done" />
+                <span className="min-w-0 flex-1">{t(`โหมดเลือกรูป — แตะตรงไหนของรูปก็ติ๊ก/เลิกติ๊ก · เลือกแล้ว ${pickedCount} จาก ${files.length} · บันทึกให้เอง`, `Pick mode — tap a photo to tick/untick · ${pickedCount} of ${files.length} picked · saves automatically`)}</span>
+                <button onClick={() => pickAll(true)} className="h-7 px-2.5 rounded-lg border border-violet-200 bg-white text-xs hover:bg-violet-100">{t("เลือกทั้งหมด", "Select all")}</button>
+                <button onClick={() => pickAll(false)} className="h-7 px-2.5 rounded-lg border border-violet-200 bg-white text-xs hover:bg-violet-100">{t("ล้าง", "Clear")}</button>
+                <button onClick={exitPickMode} className="h-7 px-3 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700">{t("เสร็จ", "Done")}</button>
+              </div>
+            )}
             {cull && (cull.blurry.size > 0 || cull.groups > 0) && (
               <div className="flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border border-sky-200 bg-sky-50 text-sm text-sky-800">
                 <Icon name="inspect" />
@@ -470,19 +510,27 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
                 {files.map((f, i) => {
                   const cover = album.cover_asset_id === f.id;
                   return (
-                    <div key={f.id} {...(canEdit ? reorder.rowProps(i) : {})} className={`group relative rounded-lg overflow-hidden border ${f.picked ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"} ${canEdit ? reorder.rowCls(i) : ""}`}>
+                    <div key={f.id} {...(canEdit && !pickMode ? reorder.rowProps(i) : {})} className={`group relative rounded-lg overflow-hidden border ${f.picked ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"} ${canEdit && !pickMode ? reorder.rowCls(i) : ""}`}>
+                      {pickMode ? (
+                        <button onClick={() => togglePick(f)} aria-pressed={f.picked} className="relative block w-full cursor-pointer select-none" title={f.file_name}>
+                          <FileThumb r2Key={f.r2_key} type={f.asset_type} duration={f.duration_sec} className="aspect-square" fit="contain" />
+                          {!f.picked && <span className="absolute inset-0 bg-white/45" />}
+                          <span className={`absolute top-2 left-2 w-8 h-8 grid place-items-center rounded-full border-2 ${f.picked ? "bg-violet-600 border-violet-600 text-white" : "bg-black/25 border-white text-transparent"}`}><Icon name="done" size={18} /></span>
+                        </button>
+                      ) : (
                       <button onClick={() => setViewFile(f)} {...(canEdit ? reorder.handleProps(i) : {})} className={`block w-full ${canEdit ? "cursor-grab active:cursor-grabbing" : ""}`} title={canEdit ? t(`${f.file_name} · กดค้างแล้วลาก = เรียงลำดับ`, `${f.file_name} · hold and drag to reorder`) : f.file_name}>
                         <FileThumb r2Key={f.r2_key} type={f.asset_type} duration={f.duration_sec} className="aspect-square" fit="contain" />
                       </button>
-                      {canEdit && (
+                      )}
+                      {canEdit && !pickMode && (
                         <>
-                          <button onClick={() => togglePick(f)} aria-pressed={f.picked} title={f.picked ? t("เลิกเลือก", "Unpick") : t("เลือกใช้", "Pick")}
+                          <button onClick={() => { setPickMode(true); togglePick(f); }} aria-pressed={f.picked} title={f.picked ? t("เลิกเลือก (เข้าโหมดเลือกรูป)", "Unpick (enters pick mode)") : t("เลือกใช้ (เข้าโหมดเลือกรูป)", "Pick (enters pick mode)")}
                             className={`absolute top-1 left-1 w-6 h-6 grid place-items-center rounded-md border ${f.picked ? "bg-violet-600 border-violet-600 text-white" : "bg-white/90 border-slate-300 text-transparent hover:text-slate-400"}`}><Icon name="done" size={14} /></button>
                           <button onClick={() => setCover(f)} title={cover ? t("ปกอัลบั้ม (กดเพื่อเอาออก)", "Cover (click to unset)") : t("ตั้งเป็นปก", "Set as cover")}
                             className={`absolute top-1 right-1 w-6 h-6 grid place-items-center rounded-md ${cover ? "bg-amber-400 text-white" : "bg-white/90 text-slate-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`}><Icon name="star" size={14} /></button>
                         </>
                       )}
-                      {canEdit && files.length > 1 && (
+                      {canEdit && !pickMode && files.length > 1 && (
                         <>
                           {i > 0 && <button onPointerDown={(e) => e.stopPropagation()} onClick={() => moveFile(i, i - 1)} aria-label={t("เลื่อนไปก่อนหน้า", "Move earlier")}
                             className="absolute left-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">‹</button>}
@@ -490,7 +538,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
                             className="absolute right-1 top-1/2 -translate-y-1/2 w-6 h-7 grid place-items-center rounded-md bg-white/90 text-slate-700 shadow opacity-100 sm:opacity-0 sm:group-hover:opacity-100">›</button>}
                         </>
                       )}
-                      {can("assets.delete") && (
+                      {can("assets.delete") && !pickMode && (
                         <button onClick={() => { setDelFile(f); setDelDrive(false); }} title={t("เอาออก", "Remove")}
                           className="absolute bottom-1 right-1 w-6 h-6 grid place-items-center rounded-md bg-white/90 text-red-600 opacity-100 sm:opacity-0 sm:group-hover:opacity-100"><Icon name="delete" size={14} /></button>
                       )}

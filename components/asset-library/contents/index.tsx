@@ -22,7 +22,7 @@ import { listBrands, type BrandOption } from "@/app/tasks/data";
 import { ALBUM_STAGES, ALBUM_STAGE_META, WISH_STAGES, WISH_STAGE_META, albumReminder, bangkokToday, wishStage, type AlbumStage, type WishStage } from "@/lib/content-album-status";
 import { POST_TYPES } from "@/lib/creative-tasks";
 import { listContentAlbums, updateContentAlbum, createContentAlbum, getContentAlbum, getAlbumDriveInfo, type ContentAlbum } from "./api";
-import { startAlbumUploadTask, onAlbumUpload } from "./data";
+import { startAlbumUploadTask, onAlbumUpload, askUploadNotifyPermission, ALBUM_OPEN_EVENT } from "./data";
 import { StageBadge, PlatChip, FileThumb, PickMediaButtons, ALBUM_ACCEPT } from "./album-bits";
 import { PlatformIcon } from "@/components/platform-icon";
 import { UploadTargetModal, type UploadPlan } from "./upload-target-modal";
@@ -84,6 +84,7 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
     onBusy: () => canUpload ? undefined : toast.error(trash ? t("ออกจากถังขยะก่อน แล้วค่อยลากไฟล์มาวาง", "Leave the trash view first") : t("คุณยังไม่มีสิทธิ์อัปไฟล์ (assets.upload)", "You can't upload files (assets.upload)")),
   });
   const runPlan = async (plan: UploadPlan) => {
+    askUploadNotifyPermission();   // ถามอนุญาตแจ้งเตือนของเครื่องตอนยังอยู่ในจังหวะที่ผู้ใช้กด (ก่อน await)
     setIncoming(null);
     try {
       if (plan.mode === "existing") {
@@ -110,6 +111,17 @@ export function ContentAlbumsBoard({ openAlbumId = null }: { openAlbumId?: strin
     } catch (e) { toast.error((e as Error).message); }
   };
   useEffect(() => { listBrands().then(setBrands).catch(() => {}); }, []);
+  // ปุ่ม "เปิดอัลบั้ม" บนกล่องอัปเสร็จ / แจ้งเตือนของเครื่อง → เปิดในหน้านี้เลย (ไม่ต้องโหลดหน้าใหม่)
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const id = (e as CustomEvent<{ id: string }>).detail?.id;
+      if (!id) return;
+      e.preventDefault();
+      setTrash(false); setView("album"); setDetailId(id); void load(true);
+    };
+    window.addEventListener(ALBUM_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(ALBUM_OPEN_EVENT, onOpen);
+  });
 
   const platMeta = useMemo(() => new Map(platforms.map((p) => [p.value, p])), [platforms]);
   const q = search.trim().toLowerCase();

@@ -5,7 +5,9 @@
  *   store แบบ module-level (ไม่ผูก React) → โค้ดที่ไหนก็ import ไปเรียกได้
  */
 export type BgTaskStatus = "running" | "success" | "error";
-export type BgTask = { id: string; label: string; done: number; total: number; status: BgTaskStatus; message?: string; unit?: string };
+/** ปุ่มบนกล่องตอนงานจบ (เช่น "เปิดอัลบั้ม") */
+export type BgAction = { label: string; run: () => void };
+export type BgTask = { id: string; label: string; done: number; total: number; status: BgTaskStatus; message?: string; unit?: string; action?: BgAction };
 
 let _tasks: BgTask[] = [];
 const _listeners = new Set<() => void>();
@@ -26,6 +28,10 @@ export function runBackgroundTask(opts: {
   total?: number;
   /** หน่วยต่อท้ายตัวเลขความคืบหน้า เช่น "MB" (ไม่ใส่ = นับเป็นรายการ) */
   unit?: string;
+  /** จบแล้วค้างกล่องไว้จนผู้ใช้กดปิด (ค่าเริ่ม = หายเองใน 6 วิ / ผิดพลาด 15 วิ) — งานยาวที่คนมักสลับไปทำอย่างอื่น */
+  keepOnDone?: boolean;
+  /** ปุ่มบนกล่องตอนงานจบ */
+  action?: BgAction;
   run: (report: (done: number, total?: number) => void) => Promise<{ ok?: number; fail?: number; message?: string } | void>;
 }): void {
   const id = `bg-${++_seq}-${Date.now()}`;
@@ -34,7 +40,7 @@ export function runBackgroundTask(opts: {
 
   const patch = (p: Partial<BgTask>) => { _tasks = _tasks.map((t) => (t.id === id ? { ...t, ...p } : t)); emit(); };
   const report = (done: number, total?: number) => patch({ done, ...(total != null ? { total } : {}) });
-  const autoDismiss = (ms: number) => setTimeout(() => dismissBgTask(id), ms);
+  const autoDismiss = (ms: number) => { if (!opts.keepOnDone) setTimeout(() => dismissBgTask(id), ms); };
 
   Promise.resolve()
     .then(() => opts.run(report))
@@ -46,11 +52,12 @@ export function runBackgroundTask(opts: {
         status: fail ? "error" : "success",
         done: doneCount, total: doneCount + fail || doneCount,
         message: r.message ?? (fail ? `สำเร็จ ${r.ok ?? 0} · ล้มเหลว ${fail}` : `เสร็จแล้ว${r.ok != null ? ` ${r.ok} รายการ` : ""}`),
+        action: opts.action,
       });
       autoDismiss(fail ? 15000 : 6000);
     })
     .catch((e) => {
-      patch({ status: "error", message: e instanceof Error ? e.message : "เกิดข้อผิดพลาด" });
+      patch({ status: "error", message: e instanceof Error ? e.message : "เกิดข้อผิดพลาด", action: opts.action });
       autoDismiss(15000);
     });
 }

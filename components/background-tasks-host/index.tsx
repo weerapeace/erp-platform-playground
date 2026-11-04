@@ -32,7 +32,7 @@ function BgCard({ t }: { t: BgTask }) {
         <span className={`text-sm shrink-0 ${t.status === "running" ? "animate-pulse" : ""}`}>{icon}</span>
         <div className="flex-1 min-w-0">
           <p className="text-[12px] font-medium text-slate-700 truncate">{t.label}</p>
-          <p className={`text-[11px] ${textTone} truncate`}>
+          <p className={`text-[11px] ${textTone} ${t.status === "running" ? "truncate" : "line-clamp-3"}`}>
             {t.status === "running"
               ? (t.total > 0 ? `กำลังทำ ${t.done}/${t.total}${t.unit ? ` ${t.unit}` : ""}…` : "กำลังทำ…")
               : (t.message ?? (t.status === "success" ? "เสร็จแล้ว" : "ผิดพลาด"))}
@@ -42,6 +42,9 @@ function BgCard({ t }: { t: BgTask }) {
           <button onClick={() => dismissBgTask(t.id)} className="text-slate-400 hover:text-slate-600 shrink-0 text-xs" title="ปิด">✕</button>
         )}
       </div>
+      {t.status !== "running" && t.action && (
+        <button onClick={() => { t.action!.run(); dismissBgTask(t.id); }} className="mt-2 h-7 px-2.5 rounded-lg border border-slate-200 text-[12px] font-medium text-indigo-700 hover:bg-indigo-50">{t.action.label}</button>
+      )}
       <div className="mt-2 h-1.5 rounded-full bg-slate-100 overflow-hidden">
         <div className={`h-full ${bar} transition-all duration-300`} style={{ width: `${pct}%` }} />
       </div>
