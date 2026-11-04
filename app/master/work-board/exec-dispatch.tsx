@@ -35,7 +35,7 @@ type SortKey = "urgent" | "value" | "labor" | "qty" | "sku";
 type FieldKey = "price" | "value" | "labor" | "laborTotal" | "brand" | "name" | "due" | "ready";
 type Period = "today" | "week" | "month";
 type Target = Partial<Record<Period, number>>;
-type Done = { count: number; qty: number; value: number; labor: number; labor_missing: number; no_price: number };
+type Done = { count: number; qty: number; value: number; labor: number; labor_missing: number; no_price: number; no_date?: number };
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const SIZE_MIN = 120, SIZE_MAX = 240;
@@ -386,6 +386,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
               {chosen.length > 0 && <div className="flex justify-between"><span className="text-slate-500">ถ้าจ่ายที่ติ๊กเพิ่ม</span><b className="tabular-nums text-emerald-600">+฿{fmt(chosenValue)}{goal > 0 ? ` → ${Math.min(100, ((got + chosenValue) / goal) * 100).toFixed(0)}%` : ""}</b></div>}
               {(done?.labor_missing ?? 0) > 0 && <div className="text-[11px] text-amber-600">มี {done?.labor_missing} ใบที่ยังไม่ใส่ค่าแรง — ยอดค่าแรงยังต่ำกว่าจริง</div>}
               {(done?.no_price ?? 0) > 0 && <div className="text-[11px] text-amber-600">มี {done?.no_price} ใบที่สินค้ายังไม่ตั้งราคาขาย — ไม่ถูกนับในยอด</div>}
+              {(done?.no_date ?? 0) > 0 && <div className="text-[11px] text-slate-400">{done?.no_date} ใบไม่ได้ระบุวันจ่าย — นับตามวันที่บันทึกใบ</div>}
             </div>
           </div>
         </aside>

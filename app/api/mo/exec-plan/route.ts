@@ -57,13 +57,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   // ?dispatched=1&from=&to= → ยอดที่จ่ายงานไปแล้วในช่วง (แผง "สรุปเป้า" โหมดผู้บริหาร) · วันที่ = dispatch_date (วันไทย)
+  //   ใบที่ไม่ระบุวันจ่าย ("จำไม่ได้" / อัปเดตย้อนหลัง — ข้อมูลจริง ต.ค.–พ.ย. 69 ว่างทั้งหมด 141 ใบ) = นับตามวันที่บันทึกใบ (created_at เวลาไทย)
   const sp = new URL(request.url).searchParams;
   if (sp.get("dispatched") === "1") {
     const ok = (d: string | null) => !!d && /^d{4}-d{2}-d{2}$/.test(d);
     const from = sp.get("from"), to = sp.get("to");
     if (!ok(from) || !ok(to)) return NextResponse.json({ error: "ระบุช่วงวันที่ from / to (YYYY-MM-DD)" }, { status: 400 });
-    const { data: ws } = await admin.from("mo_work_orders").select("mo_no, qty, labor_cost, status")
-      .eq("is_active", true).neq("status", "cancelled").gte("dispatch_date", from!).lte("dispatch_date", to!).limit(10000);
+    const t0 = new Date(Date.parse(`${from}T00:00:00+07:00`)).toISOString(), t1 = new Date(Date.parse(`${to}T23:59:59.999+07:00`)).toISOString();
+    const { data: ws } = await admin.from("mo_work_orders").select("mo_no, qty, labor_cost, status, dispatch_date")
+      .eq("is_active", true).neq("status", "cancelled")
+      .or(`and(dispatch_date.gte.${from},dispatch_date.lte.${to}),and(dispatch_date.is.null,created_at.gte."${t0}",created_at.lte."${t1}")`).limit(10000);
     const list = (ws ?? []) as Row[];
     const moNos = [...new Set(list.map((w) => String(w.mo_no)))];
     const skuOf = new Map<string, string>();
@@ -77,13 +80,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const { data: ps } = await admin.from("skus_v2").select("code, list_price").in("code", skus.slice(i, i + 300));
       for (const p of (ps ?? []) as Row[]) priceOf.set(String(p.code), Number(p.list_price) || 0);
     }
-    let value = 0, labor = 0, qty = 0, laborMissing = 0, noPrice = 0;
+    let value = 0, labor = 0, qty = 0, laborMissing = 0, noPrice = 0, noDate = 0;
     for (const w of list) {
+      if (!w.dispatch_date) noDate++;
       const q = Number(w.qty) || 0, p = priceOf.get(skuOf.get(String(w.mo_no)) ?? "") ?? 0;
       qty += q; value += q * p; if (!p) noPrice++;
       if (w.labor_cost == null) laborMissing++; else labor += Number(w.labor_cost) || 0;
     }
-    return NextResponse.json({ data: { from, to, count: list.length, qty: r2(qty), value: r2(value), labor: r2(labor), labor_missing: laborMissing, no_price: noPrice }, error: null });
+    return NextResponse.json({ data: { from, to, count: list.length, qty: r2(qty), value: r2(value), labor: r2(labor), labor_missing: laborMissing, no_price: noPrice, no_date: noDate }, error: null });
   }
 
   const [{ data: mosRaw }, { data: wosRaw }] = await Promise.all([
