@@ -3,6 +3,7 @@
  * ใช้ได้ทุกหน้า (เช่นปฏิทินคอนเทนต์) · ตัวอัปไฟล์อยู่ ./data (export ทุกอย่างจากไฟล์นี้ต่อด้วย)
  */
 import { apiFetch } from "@/lib/api";
+import type { AlbumCaptionDrafts } from "@/lib/content-album-captions";
 import { tr } from "@/lib/lang";
 import type { ContentAlbum, AlbumFile } from "@/lib/content-albums-server";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
@@ -28,7 +29,7 @@ export async function getContentAlbum(id: string, lite = false): Promise<AlbumDe
 }
 export type AlbumFields = Partial<{
   name: string; description: string | null; brand_id: string | null; assignee_ids: string[]; due_date: string | null;
-  planned_platforms: string[]; caption_draft: string | null; picked_asset_ids: string[]; file_order: string[]; parent_sku_codes: string[];
+  planned_platforms: string[]; caption_draft: string | null; caption_drafts: AlbumCaptionDrafts; picked_asset_ids: string[]; file_order: string[]; parent_sku_codes: string[];
   cover_asset_id: string | null; closed: boolean; restore: boolean;
 }>;
 export async function createContentAlbum(fields: AlbumFields & { name: string }): Promise<ContentAlbum> {
@@ -53,8 +54,9 @@ export async function syncAlbumDrive(id: string): Promise<{ added: number; remai
 }
 
 /** ให้ AI ร่างแคปชั่นของอัลบั้ม (ไม่บันทึกเอง · สิทธิ์ ai.caption · มีค่าใช้จ่าย) */
-export async function aiAlbumCaption(id: string, extra?: string): Promise<{ caption: string; hashtags: string[]; images_used: number }> {
-  return await json<{ caption: string; hashtags: string[]; images_used: number }>(await send(`/api/content-albums/${id}/ai-caption`, "POST", { extra: extra ?? "" }));
+/** AI ร่างแคปชั่นจากรูปในอัลบั้ม · platform = เขียนให้แพลตฟอร์มนั้น (prompt + ลิมิตของแพลตฟอร์ม) */
+export async function aiAlbumCaption(id: string, extra?: string, platform?: string): Promise<{ caption: string; hashtags: string[]; images_used: number }> {
+  return await json<{ caption: string; hashtags: string[]; images_used: number }>(await send(`/api/content-albums/${id}/ai-caption`, "POST", { extra: extra ?? "", ...(platform ? { platform } : {}) }));
 }
 
 /** ค่าตั้งต้นป๊อปสร้างโพสต์จากอัลบั้ม (ใช้ร่วม: ปุ่มในอัลบั้ม + ลากอัลบั้มลงวันในปฏิทิน) — ไฟล์ที่เลือกไว้ก่อน ไม่เลือก = ทั้งอัลบั้ม (≤50) · สินค้าแรกที่แท็ก = สินค้าหลักของโพสต์ */
@@ -69,6 +71,6 @@ export function albumPostPreset(album: AlbumDetail): ContentCreatePreset {
     title: album.name, platforms: album.planned_platforms,
     post_types: hasVideo && hasImage ? ["image", "video"] : hasVideo ? ["video"] : ids.length > 1 ? ["album"] : ["image"],
     ...(p ? { parent: { id: p.id, code: p.code, name: p.name, image_key: p.image_key } } : {}),
-    album: { id: album.id, name: album.name, asset_ids: ids, caption: album.caption_draft },
+    album: { id: album.id, name: album.name, asset_ids: ids, caption: album.caption_draft, captions: album.caption_drafts },
   };
 }

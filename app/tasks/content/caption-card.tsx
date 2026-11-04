@@ -178,10 +178,12 @@ export function postFormatLabel(platform: string, key: string | undefined, t: (t
 
 // caption ต่อ 1 แพลตฟอร์ม: แม่แบบ + แคปชั่น + hashtag typeahead + พรีวิว + ปุ่มไปโพสต์/คัดลอก
 // เคารพตั้งค่าแพลตฟอร์ม: แม่แบบเริ่มต้น / ปิดแคปชั่น-แฮชแท็ก / ลิงก์ไปโพสต์
-export function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPullFrom, open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, format, onSetFormat, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, connInfo, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast, pageName, avatarUrl }: { open?: boolean; pageName?: string | null; avatarUrl?: string | null; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; format?: string; onSetFormat?: (v: string) => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; connInfo?: { connected: boolean; label: string; href: string }; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: ToastVariant, m: string) => void;
+// draft = แคปชั่นร่างก่อนมีโพสต์ (หน้าอัลบั้ม Contents) → ซ่อนสถานะโพสต์ · path · รูปแบบโพสต์ · รูป · ปุ่มไปโพสต์ · ลิงก์ที่ลง (AI เขียนได้โดยไม่ต้องมี contentId)
+export function CaptionCard({ draft = false, paths = [], onAddPath, fallbackImages = [], onPullFrom, open = true, onToggle, contentId, canAi = false, aiBusy = false, onAiWrite, format, onSetFormat, cap, templates, sharedVars, brandId, setting, onChange, onOpenSettings, onApplyAll, postStatus = "todo", postedUrl = "", onSetStatus, onSetPostedUrl, onCommitPostedUrl, onRequestPost, canAuto = false, autoLabel, connInfo, postImages = [], selectedImages = [], onToggleImage, onSetMain, pushToast, pageName, avatarUrl }: { open?: boolean; pageName?: string | null; avatarUrl?: string | null; onToggle?: () => void; contentId?: string; canAi?: boolean; aiBusy?: boolean; onAiWrite?: () => void; format?: string; onSetFormat?: (v: string) => void; cap: ContentCaption; templates: CaptionTemplate[]; sharedVars: SharedVars; brandId: string | null; setting?: PlatformSetting; onChange: (p: Partial<ContentCaption>) => void; onOpenSettings?: () => void; onApplyAll?: (platform: string) => void; postStatus?: string; postedUrl?: string; onSetStatus?: (s: string) => void; onSetPostedUrl?: (url: string) => void; onCommitPostedUrl?: () => void; onRequestPost?: (captionText: string) => void; canAuto?: boolean; autoLabel?: string; connInfo?: { connected: boolean; label: string; href: string }; postImages?: PostImage[]; selectedImages?: string[]; onToggleImage?: (key: string) => void; onSetMain?: (key: string) => void; pushToast: (type: ToastVariant, m: string) => void;
   paths?: PathItem[]; onAddPath?: (path: string) => Promise<void>;   // 📂 path ไฟล์ของโพสต์ (คัดลอกจากหัวการ์ด)
   fallbackImages?: string[];                                          // รูปที่จะลงเมื่อยังไม่ได้เลือกรูปให้แพลตฟอร์มนี้ (= รูปแนบของโพสต์ เหมือนตอนกดโพสต์จริง)
   onPullFrom?: () => void;                                            // ⇈ ดึงแคปชั่นจากแพลตฟอร์มอื่น
+  draft?: boolean;                                                    // แคปชั่นร่าง (ยังไม่มีโพสต์) — ซ่อนส่วนที่ใช้ตอนโพสต์จริง
 }) {
   const t = useT();
   const [imgEdit, setImgEdit] = useState(false);   // โหมดเลือกรูป (ปกติโชว์เฉพาะรูปที่เลือก · กดแล้วกางเลือก)
@@ -218,7 +220,7 @@ export function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPull
   if (onApplyAll) menuItems.push({ label: `⇊ ${t("ใช้แคปชั่นนี้กับแพลตฟอร์มอื่น", "Apply to other platforms")}`, onClick: () => onApplyAll(cap.platform) });
   if (onPullFrom && (useCaption || useHashtags)) menuItems.push({ label: `⇈ ${t("ดึงแคปชั่นจากแพลตฟอร์มอื่น…", "Pull caption from another platform…")}`, onClick: onPullFrom });
   if (onOpenSettings) menuItems.push({ label: `⚙️ ${t("ตั้งค่าแพลตฟอร์มนี้", "Platform settings")}`, onClick: onOpenSettings });
-  if (onSetStatus) {
+  if (onSetStatus && !draft) {
     if (postStatus === "skip") menuItems.push({ label: `↺ ${t("เลิกข้าม (กลับเป็นยังไม่โพสต์)", "Un-skip")}`, onClick: () => onSetStatus("todo") });
     else menuItems.push({ label: `⊘ ${t("ข้ามแพลตฟอร์มนี้", "Skip this platform")}`, onClick: () => onSetStatus("skip") });
     if (postStatus === "posted") menuItems.push({ label: `↺ ${t("ยกเลิก “โพสต์แล้ว”", "Mark as not posted")}`, onClick: () => onSetStatus("todo") });
@@ -268,9 +270,9 @@ export function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPull
             )}
           </>
         )}
-        <CopyPathButton paths={paths} onAdd={onAddPath} notify={(type, m) => pushToast(type, m)}
-          emptyHint={t("ยังไม่มี path — ผูกงานที่ส่ง path มาแล้ว หรือกดใส่ path เอง", "No path yet — link a task that has one, or add it")} />
-        {onSetStatus && (postStatus === "todo" || postStatus === "posted") ? (
+        {!draft && <CopyPathButton paths={paths} onAdd={onAddPath} notify={(type, m) => pushToast(type, m)}
+          emptyHint={t("ยังไม่มี path — ผูกงานที่ส่ง path มาแล้ว หรือกดใส่ path เอง", "No path yet — link a task that has one, or add it")} />}
+        {draft ? null : onSetStatus && (postStatus === "todo" || postStatus === "posted") ? (
           // ป้ายสถานะ = ปุ่มติ๊ก "โพสต์แล้ว" (บันทึกทันที · กดซ้ำ = ยกเลิก) — ข้าม/ตั้งเวลาแล้ว ยังเป็นป้ายเหมือนเดิม
           <button type="button" onClick={() => onSetStatus(postStatus === "posted" ? "todo" : "posted")}
             title={postStatus === "posted" ? t("โพสต์แล้ว — กดอีกครั้งเพื่อยกเลิก", "Posted — click again to undo") : t("โพสต์เสร็จแล้ว → ติ๊กที่นี่ (บันทึกทันที)", "Posted? Tick here (saves instantly)")}
@@ -327,7 +329,7 @@ export function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPull
             </div>
           )}
           {/* แม่แบบ — เปลี่ยนเป็นช่องเลือกเล็ก ๆ (เดิมเป็นชิปกางเต็มแถว) */}
-          {(POST_FORMATS[cap.platform] ?? []).length > 0 && (
+          {!draft && (POST_FORMATS[cap.platform] ?? []).length > 0 && (
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] text-slate-400 shrink-0">🎬 {t("ลงเป็น", "Post as")}</span>
               <select value={format ?? ""} onChange={(e) => onSetFormat?.(e.target.value)} className="h-7 text-xs border border-slate-200 rounded-md px-1.5 bg-white">
@@ -363,7 +365,7 @@ export function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPull
 
           {/* ── รูป + สถานะโพสต์ รวมอยู่ท้ายเดียว (เดิมแยก 2 บล็อกมีเส้นคั่น 2 เส้น) ── */}
           <div className="pt-2 border-t border-slate-100 space-y-2">
-            <div className="flex items-start gap-2 flex-wrap">
+            {!draft && <div className="flex items-start gap-2 flex-wrap">
               <span className="text-[11px] text-slate-400 mt-1 shrink-0">🖼 {t("รูป", "Images")}</span>
               {postImages.length === 0
                 ? <span className="text-[11px] text-slate-300 italic mt-1">{t("ยังไม่มีรูป — แนบที่ส่วน “แนบเพิ่มเอง” หรือผูกงานก่อน", "No media yet — attach in “Attach” section or link a task first")}</span>
@@ -401,19 +403,19 @@ export function CaptionCard({ paths = [], onAddPath, fallbackImages = [], onPull
                   {imgEdit ? `✓ ${t("เสร็จ", "Done")}` : `✏️ ${t("เลือก/แก้รูป", "Choose")}`}
                 </button>
               )}
-            </div>
+            </div>}
             <div className="flex items-center gap-1.5 flex-wrap">
-              {canAi && useCaption && contentId && (
+              {canAi && useCaption && (contentId || draft) && (
                 <button onClick={onAiWrite} disabled={aiBusy} title={t("ให้ AI อ่านรูปที่แนบ + แฮชแท็ก แล้วเขียนแคปชั่นให้", "Let AI read the attached images + hashtags and write the caption")}
                   className="h-7 px-2.5 text-xs font-medium text-fuchsia-700 border border-fuchsia-200 rounded-md hover:bg-fuchsia-50 disabled:opacity-50">{aiBusy ? t("✨ กำลังเขียน...", "✨ Writing...") : t("✨ AI เขียน", "✨ AI write")}</button>
               )}
               <button onClick={copy} className="h-7 px-2.5 text-xs font-medium text-slate-600 border border-slate-200 rounded-md hover:bg-slate-50">📋 {t("คัดลอกทั้งหมด", "Copy all")}</button>
               <span className="flex-1" />
-              {postStatus !== "skip" && (
+              {!draft && postStatus !== "skip" && (
                 <button onClick={() => onRequestPost?.(preview)} title={canAuto ? t(`โพสต์ขึ้น ${autoLabel} จริง`, `Publish to ${autoLabel}`) : t("คัดลอกแคปชั่น + เปิดหน้าโพสต์ของแพลตฟอร์มนี้", "Copy caption + open this platform's post page")} className={`h-7 inline-flex items-center gap-1 text-xs font-medium text-white rounded-md px-2.5 ${canAuto ? "bg-blue-600 hover:bg-blue-700" : "bg-violet-600 hover:bg-violet-700"}`}>{canAuto ? `🚀 ${t("โพสต์ขึ้น", "Post to")} ${autoLabel}` : `📤 ${t("ไปโพสต์ที่", "Post on")} ${platformLabel(cap.platform)}`}</button>
               )}
             </div>
-            {(postStatus === "posted" || postStatus === "scheduled") && (
+            {!draft && (postStatus === "posted" || postStatus === "scheduled") && (
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] text-slate-400 shrink-0">{t("ลิงก์ที่ลง", "Posted link")}</span>
                 <input value={postedUrl} onChange={(e) => onSetPostedUrl?.(e.target.value)} onBlur={() => onCommitPostedUrl?.()} placeholder="https://..." className="flex-1 min-w-0 h-7 border border-slate-200 rounded-md px-2 text-xs" />

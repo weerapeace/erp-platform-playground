@@ -1,4 +1,5 @@
 /** ของใช้ร่วมของ /api/content-albums/* (แยกจาก route.ts — route ต้อง export แค่ handler) */
+import { normalizeCaptionDrafts } from "@/lib/content-album-captions";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
@@ -32,6 +33,7 @@ export function cleanAlbumFields(body: Record<string, unknown>): { album: Record
   }
   if (body.planned_platforms !== undefined) album.planned_platforms = codeList(body.planned_platforms);
   if (body.caption_draft !== undefined) album.caption_draft = String(body.caption_draft ?? "").trim() || null;
+  if (body.caption_drafts !== undefined) album.caption_drafts = normalizeCaptionDrafts(body.caption_drafts);
   if (body.picked_asset_ids !== undefined) album.picked_asset_ids = uuidList(body.picked_asset_ids);
   if (body.file_order !== undefined) album.file_order = uuidList(body.file_order).slice(0, 2000);
   if (body.parent_sku_codes !== undefined) {

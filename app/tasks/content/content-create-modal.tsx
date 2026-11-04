@@ -7,6 +7,7 @@
 // ============================================================
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { captionForPlatform, type AlbumCaptionDrafts } from "@/lib/content-album-captions";
 import { ERPModal } from "@/components/modal";
 import { ERPFormSection, ERPFormField, ERPInput, ERPSelect, ERPTextarea, ERPDateTime24 } from "@/components/form";
 import { SkuPicker, ParentSkuPicker, type SkuPickerValue, type ParentSkuPickerValue } from "@/components/pickers";
@@ -31,7 +32,7 @@ const emptyForm = (): Form => ({ title: "", post_types: ["image"], status: "draf
 export type ContentCreatePreset = {
   title?: string; platforms?: string[]; platform_formats?: Record<string, string>; post_types?: string[];
   /** สร้างจากอัลบั้ม Contents (คลังไฟล์) — โพสต์ผูกอัลบั้ม + แนบไฟล์ที่เลือก (ชี้ไฟล์เดิมใน Drive) + แคปชั่นร่างลงทุกแพลตฟอร์ม */
-  album?: { id: string; name: string; asset_ids: string[]; caption?: string | null };
+  album?: { id: string; name: string; asset_ids: string[]; caption?: string | null; captions?: AlbumCaptionDrafts };
   /** สินค้าหลัก (Parent SKU) ตั้งต้น — เช่น สินค้าที่แท็กไว้ในอัลบั้ม */
   parent?: ParentSkuPickerValue;
 };
@@ -154,7 +155,13 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
         platform_formats: Object.fromEntries(Object.entries({ ...(bpFmt[form.brand_id] ?? {}), ...(preset?.platform_formats ?? {}) }).filter(([p]) => form.platforms.includes(p))),
         ...(preset?.album ? {
           album_id: preset.album.id, album_asset_ids: preset.album.asset_ids,
-          ...(preset.album.caption?.trim() ? { captions: form.platforms.map((p) => ({ platform: p, caption: preset.album!.caption!.trim() })) } : {}),
+          // แคปชั่นจากอัลบั้ม: ของแต่ละแพลตฟอร์ม → ไม่มีใช้แคปชั่นกลาง (lib/content-album-captions)
+          ...(() => {
+            const caps = form.platforms.map((p) => ({ p, d: captionForPlatform(preset.album!.captions ?? {}, preset.album!.caption, p) }))
+              .filter((x) => x.d && (x.d.caption || x.d.hashtags))
+              .map(({ p, d }) => ({ platform: p, caption: d!.caption, hashtags: d!.hashtags, ...(d!.caption_type ? { caption_type: d!.caption_type } : {}) }));
+            return caps.length ? { captions: caps } : {};
+          })(),
         } : {}),
       });
       setDirty(false);
@@ -175,8 +182,8 @@ export function ContentCreateModal({ open, onClose, onCreated, brands, campaigns
       {preset?.album && (
         <div className="mb-4 flex items-start gap-2 px-3 py-2 bg-violet-50 border border-violet-200 rounded-lg text-sm text-violet-800">
           <Icon name="library" className="mt-0.5" />
-          <span>{t(`จากอัลบั้ม “${preset.album.name}” · แนบ ${preset.album.asset_ids.length} ไฟล์ให้ (ใช้ไฟล์เดิมใน Drive ไม่ก๊อปซ้ำ)${preset.album.caption?.trim() ? " · ใส่แคปชั่นร่างให้ทุกแพลตฟอร์ม" : ""}`,
-            `From album “${preset.album.name}” · ${preset.album.asset_ids.length} file(s) attached (same Drive files, no copies)${preset.album.caption?.trim() ? " · draft caption added to every platform" : ""}`)}</span>
+          <span>{t(`จากอัลบั้ม “${preset.album.name}” · แนบ ${preset.album.asset_ids.length} ไฟล์ให้ (ใช้ไฟล์เดิมใน Drive ไม่ก๊อปซ้ำ)${Object.keys(preset.album.captions ?? {}).length ? " · ใส่แคปชั่นตามแพลตฟอร์มให้" : preset.album.caption?.trim() ? " · ใส่แคปชั่นร่างให้ทุกแพลตฟอร์ม" : ""}`,
+            `From album “${preset.album.name}” · ${preset.album.asset_ids.length} file(s) attached (same Drive files, no copies)${Object.keys(preset.album.captions ?? {}).length ? " · per-platform captions added" : preset.album.caption?.trim() ? " · draft caption added to every platform" : ""}`)}</span>
         </div>
       )}
       <ERPFormSection title={t("ข้อมูลคอนเทนต์", "Content Details")} columns={2}>

@@ -3,7 +3,9 @@
 /**
  * หน้าในอัลบั้ม Contents (ป๊อปเต็มจอ)
  *   ที่อยู่ใน Drive · กริดไฟล์อยู่บนสุด (โชว์เต็มรูป ไม่ครอป · ลากเรียงลำดับ/‹ › → content_albums.file_order) + ลากไฟล์มาวาง (ตัวจริงขึ้น Drive ทีละชิ้น วิ่งเบื้องหลัง ปิดป๊อปได้) · กริดไฟล์ (เลือกใช้ / ตั้งปก / ใช้แล้วที่โพสต์ไหน / หายจาก Drive)
- *   สถานะต่อแพลตฟอร์ม + โพสต์ที่สร้างจากอัลบั้ม · แคปชั่นร่าง (+ AI ร่าง)
+ *   ข้อมูลอัลบั้มแก้ในหน้าเลย (ชุดช่องกลาง AlbumInfoFields · บันทึกเอง: ตัวเลือกบันทึกทันที · ข้อความบันทึกตอนออกจากช่อง)
+ *   แคปชั่นแยกแพลตฟอร์ม = การ์ดเดียวกับหน้าลงโพสต์ (CaptionCard โหมด draft) → content_albums.caption_drafts (บันทึกเองหลังพิมพ์ 0.8 วิ) · AI เขียนรายแพลตฟอร์ม/ทุกแพลตฟอร์ม
+ *   สถานะต่อแพลตฟอร์ม + โพสต์ที่สร้างจากอัลบั้ม
  *   ส่งเข้าปฏิทิน: เลือกวันก่อน (ปฏิทินกลาง DocCalendar · เห็นโพสต์เดิมของแบรนด์แต่ละวัน) → ป๊อปสร้างโพสต์กลาง ContentCreateModal ที่ใส่วัน + ข้อมูลจากอัลบั้มให้แล้ว
  *     (แบรนด์ · ชื่อ · แพลตฟอร์ม · ประเภท · ไฟล์ที่เลือก · แคปชั่นร่าง · สินค้าที่แท็ก — ไม่ได้แท็ก = เดาจากรหัสในชื่ออัลบั้ม)
  *   ช่วยคัดรูป (เบลอ/คล้าย · ./cull) · ดาวน์โหลดทั้งอัลบั้มเป็น zip (lib/zip)
@@ -25,7 +27,9 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { analyzeAlbumPhotos } from "./cull";
 import { formatBytes } from "@/lib/assets";
 import { useCreativeOptions } from "@/app/tasks/use-options";
-import { listCampaigns, listContent, type BrandOption } from "@/app/tasks/data";
+import { listCampaigns, listContent, getCaptionTemplates, getPlatformSettings, type BrandOption, type CaptionTemplate, type ContentCaption, type PlatformSettings, type ShopChannel } from "@/app/tasks/data";
+import { CaptionCard, PullCaptionModal } from "@/app/tasks/content/caption-card";
+import { captionForPlatform, type AlbumCaptionDrafts } from "@/lib/content-album-captions";
 import { DocCalendar, type CalDoc } from "@/components/doc-calendar";
 import { findParentSkuByCode } from "@/components/pickers";
 import { codeLike } from "@/lib/website-image-match";
@@ -36,7 +40,7 @@ import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlb
   albumPostPreset, pendingUploadsFor, clearPendingUploads,
   type AlbumDetail, type AlbumDriveInfo, type AlbumFile, type AlbumUploadStep, type PendingUpload } from "./data";
 import { StageBadge, PlatChip, FileThumb, PickMediaButtons, isAlbumMedia, ALBUM_ACCEPT } from "./album-bits";
-import { AlbumFormModal } from "./album-form-modal";
+import { AlbumInfoFields, albumInfoFrom, albumInfoPayload, type AlbumInfoForm } from "./album-info-fields";
 
 const ContentCreateModal = nextDynamic(() => import("@/app/tasks/content/content-create-modal").then((m) => m.ContentCreateModal), { ssr: false });
 const SYNC_ROUNDS = 15;   // ดึงไฟล์จาก Drive ครั้งละไม่กี่ไฟล์ → วนซ้ำจนครบ (กันค้างนานเกินในคำขอเดียว)
@@ -58,9 +62,6 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const [error, setError] = useState<string | null>(null);
   const [drive, setDrive] = useState<AlbumDriveInfo | null>(null);
   const [step, setStep] = useState<AlbumUploadStep | null>(null);
-  const [caption, setCaption] = useState("");
-  const [captionSaving, setCaptionSaving] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
   const [viewFile, setViewFile] = useState<AlbumFile | null>(null);
   const [delFile, setDelFile] = useState<AlbumFile | null>(null);
   const [delDrive, setDelDrive] = useState(false);
@@ -75,7 +76,6 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [syncing, setSyncing] = useState<string | null>(null);
-  const [aiBusy, setAiBusy] = useState(false);
   const [zipMsg, setZipMsg] = useState<string | null>(null);
   const [cullMsg, setCullMsg] = useState<string | null>(null);
   const [cull, setCull] = useState<{ blurry: Set<string>; groupOf: Map<string, number>; groups: number; keep: string[]; checked: number } | null>(null);
@@ -89,14 +89,12 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
     try {
       const a = await getContentAlbum(albumId);
       setAlbum(a);
-      setCaption((cur) => (quiet ? cur : a.caption_draft ?? ""));
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }, [albumId]);
   const loadDrive = useCallback(() => { getAlbumDriveInfo(albumId).then(setDrive).catch((e) => setDrive({ ok: false, reason: (e as Error).message })); }, [albumId]);
   useEffect(() => { void load(); loadDrive(); }, [load, loadDrive]);
 
-  const captionDirty = !!album && caption.trim() !== (album.caption_draft ?? "").trim();
   const patch = async (fields: Parameters<typeof updateContentAlbum>[1], okMsg?: string) => {
     try {
       await updateContentAlbum(albumId, fields);
@@ -104,7 +102,134 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
       await load(true); onChanged();
     } catch (e) { toast.error((e as Error).message); }
   };
-  const saveCaption = async () => { setCaptionSaving(true); await patch({ caption_draft: caption.trim() || null }, t("บันทึกแคปชั่นร่างแล้ว", "Draft caption saved")); setCaptionSaving(false); };
+
+  // ── ข้อมูลอัลบั้ม (แก้ในหน้า · บันทึกเอง) + แคปชั่นแยกแพลตฟอร์ม ──
+  const [info, setInfo] = useState<AlbumInfoForm | null>(null);
+  const infoRef = useRef(info);
+  infoRef.current = info;
+  const [drafts, setDrafts] = useState<AlbumCaptionDrafts>({});
+  const draftsRef = useRef(drafts);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [capTpl, setCapTpl] = useState<{ templates: CaptionTemplate[]; shop: ShopChannel[] }>({ templates: [], shop: [] });
+  const [pset, setPset] = useState<PlatformSettings>({});
+  const [openPlats, setOpenPlats] = useState<Set<string>>(new Set());
+  const [pullTo, setPullTo] = useState<string | null>(null);
+  const [aiPlat, setAiPlat] = useState<string | null>(null);   // แพลตฟอร์มที่ AI กำลังเขียน · "*" = ทุกแพลตฟอร์ม
+  const capTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initFor = useRef<string | null>(null);
+  // ตั้งค่าเริ่มจากอัลบั้มครั้งเดียวต่ออัลบั้ม (โหลดซ้ำหลังบันทึก ไม่ทับที่กำลังพิมพ์)
+  useEffect(() => {
+    if (!album || initFor.current === album.id) return;
+    initFor.current = album.id;
+    setInfo(albumInfoFrom(album));
+    setDrafts(album.caption_drafts ?? {});
+    draftsRef.current = album.caption_drafts ?? {};
+    setOpenPlats(new Set(album.planned_platforms.slice(0, 1)));
+  }, [album]);
+  const capBrand = album?.brand_id ?? null;
+  useEffect(() => { getCaptionTemplates(capBrand).then((r) => setCapTpl({ templates: r.templates, shop: r.shop_channels })).catch(() => {}); }, [capBrand]);
+  useEffect(() => { getPlatformSettings().then(setPset).catch(() => {}); }, []);
+  const platLabel = (code: string) => platMeta.get(code)?.label ?? code;
+
+  const saveFields = async (fields: Parameters<typeof updateContentAlbum>[1]) => {
+    if (!Object.keys(fields).length) return;
+    setSaveState("saving");
+    try {
+      await updateContentAlbum(albumId, fields);
+      setSaveState("saved");
+      await load(true); onChanged();
+      if ("brand_id" in fields) loadDrive();
+    } catch (e) { setSaveState("error"); toast.error((e as Error).message); }
+  };
+  // ตัวเลือก (แบรนด์/วัน/คน/แพลตฟอร์ม/สินค้า) บันทึกทันที · ข้อความ (ชื่อ/หมายเหตุ) บันทึกตอนออกจากช่อง
+  const TEXT_KEYS: readonly string[] = ["name", "description", "caption_draft"];
+  const changeInfo = (p: Partial<AlbumInfoForm>) => {
+    setInfo((cur) => (cur ? { ...cur, ...p } : cur));
+    const discrete = Object.fromEntries(Object.entries(p).filter(([k]) => !TEXT_KEYS.includes(k))) as Partial<AlbumInfoForm>;
+    if (Object.keys(discrete).length) void saveFields(albumInfoPayload(discrete));
+  };
+  const commitText = () => {
+    const f = infoRef.current;
+    if (!f || !album) return;
+    const p: Partial<AlbumInfoForm> = {};
+    if (!f.name.trim()) setInfo((cur) => (cur ? { ...cur, name: album.name } : cur));
+    else if (f.name.trim() !== album.name) p.name = f.name;
+    if (f.description.trim() !== (album.description ?? "").trim()) p.description = f.description;
+    if (Object.keys(p).length) void saveFields(albumInfoPayload(p));
+  };
+
+  // แคปชั่นแยกแพลตฟอร์ม — ตามแพลตฟอร์มที่เลือกไว้ (เรียงตามหน้าแพลตฟอร์มกลาง)
+  const capPlatforms = useMemo(() => {
+    const order = platforms.map((p) => p.value);
+    return [...(info?.planned_platforms ?? [])].sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  }, [info?.planned_platforms, platforms]);
+  const capOf = (p: string): ContentCaption => {
+    const d = captionForPlatform(drafts, album?.caption_draft, p);
+    return { platform: p, caption: d?.caption ?? null, hashtags: d?.hashtags ?? null, ...(d?.caption_type ? { caption_type: d.caption_type } : {}) };
+  };
+  const saveDrafts = async () => {
+    try {
+      await updateContentAlbum(albumId, { caption_drafts: draftsRef.current });
+      setSaveState("saved");
+      await load(true); onChanged();
+    } catch (e) { setSaveState("error"); toast.error((e as Error).message); }
+  };
+  const flushDrafts = () => { if (capTimer.current) { clearTimeout(capTimer.current); capTimer.current = null; void saveDrafts(); } };
+  const setCap = (p: string, change: Partial<ContentCaption>) => {
+    const cur = draftsRef.current;
+    const base = captionForPlatform(cur, album?.caption_draft, p) ?? { caption: null, hashtags: null, caption_type: null };
+    const next = { ...cur, [p]: {
+      caption: change.caption !== undefined ? change.caption : base.caption,
+      hashtags: change.hashtags !== undefined ? change.hashtags : base.hashtags,
+      caption_type: change.caption_type !== undefined ? (change.caption_type ?? null) : base.caption_type,
+    } };
+    draftsRef.current = next;
+    setDrafts(next);
+    setSaveState("saving");
+    if (capTimer.current) clearTimeout(capTimer.current);
+    capTimer.current = setTimeout(() => { capTimer.current = null; void saveDrafts(); }, 800);
+  };
+  const togglePlat = (p: string) => setOpenPlats((cur) => { const n = new Set(cur); if (n.has(p)) n.delete(p); else n.add(p); return n; });
+  const applyAll = async (from: string) => {
+    const others = capPlatforms.filter((p) => p !== from);
+    if (!others.length) return;
+    if (!(await askConfirm({ title: t("ใช้แคปชั่นนี้กับแพลตฟอร์มอื่น?", "Use this caption on other platforms?"), message: t(`คัดลอกแคปชั่น + แฮชแท็กของ ${platLabel(from)} ไปทับ ${others.map(platLabel).join(", ")}`, `Copy ${platLabel(from)} caption + hashtags over ${others.map(platLabel).join(", ")}`), confirmText: t("ใช้กับทุกแพลตฟอร์ม", "Apply to all") }))) return;
+    const src = capOf(from);
+    for (const p of others) setCap(p, { caption: src.caption, hashtags: src.hashtags, caption_type: src.caption_type });
+  };
+  // ✨ AI เขียนให้แพลตฟอร์มเดียว (prompt + ลิมิตของแพลตฟอร์มนั้น) — บันทึกเหมือนพิมพ์เอง
+  const aiWrite = async (p: string) => {
+    const r = await aiAlbumCaption(albumId, "", p);
+    setCap(p, { caption: r.caption, hashtags: r.hashtags.join(" ") || null });
+    return r;
+  };
+  const aiFor = async (p: string) => {
+    if ((capOf(p).caption ?? "").trim() && !(await askConfirm({ title: t(`ให้ AI เขียนทับแคปชั่น ${platLabel(p)}?`, `Rewrite the ${platLabel(p)} caption?`), message: t("ข้อความเดิมของแพลตฟอร์มนี้จะถูกแทนที่ · มีค่าใช้จ่ายเล็กน้อยต่อครั้ง", "The current text is replaced · small cost per use"), confirmText: t("เขียนใหม่", "Rewrite") }))) return;
+    setAiPlat(p);
+    try {
+      const r = await aiWrite(p);
+      toast.success(r.images_used ? t(`AI เขียน ${platLabel(p)} จาก ${r.images_used} รูปแล้ว — ตรวจทานได้เลย`, `AI wrote ${platLabel(p)} from ${r.images_used} photo(s)`) : t(`AI เขียน ${platLabel(p)} แล้ว (ไม่มีรูปให้ดู)`, `AI wrote ${platLabel(p)} (no photos)`));
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setAiPlat(null); }
+  };
+  const aiAll = async () => {
+    const usable = capPlatforms.filter((p) => pset[p]?.use_caption !== false);
+    const empty = usable.filter((p) => !(capOf(p).caption ?? "").trim());
+    const targets = empty.length ? empty : usable;
+    if (!targets.length) return;
+    if (!(await askConfirm({ title: t("ให้ AI เขียนแคปชั่น", "AI write captions"),
+      message: t(`${empty.length ? "เขียนให้แพลตฟอร์มที่ยังว่าง" : "เขียนทับทุกแพลตฟอร์ม"}: ${targets.map(platLabel).join(", ")} · เรียก AI ${targets.length} ครั้ง (มีค่าใช้จ่ายเล็กน้อยต่อครั้ง)`, `${empty.length ? "Fill empty" : "Rewrite all"}: ${targets.map(platLabel).join(", ")} · ${targets.length} AI call(s)`),
+      confirmText: t("เขียนเลย", "Write") }))) return;
+    setAiPlat("*");
+    let ok = 0;
+    for (const p of targets) {
+      try { await aiWrite(p); ok++; } catch (e) { toast.error(`${platLabel(p)}: ${(e as Error).message}`); }
+    }
+    setAiPlat(null);
+    setOpenPlats((cur) => new Set([...cur, ...targets]));
+    if (ok) toast.success(t(`AI เขียนแล้ว ${ok} แพลตฟอร์ม — ตรวจทานได้เลย (บันทึกให้แล้ว)`, `AI wrote ${ok} platform(s) — saved`));
+  };
+  const closeAll = () => { flushDrafts(); commitText(); onClose(); };
 
   // ── อัปไฟล์ (วิ่งเบื้องหลัง — ปิดป๊อปได้ ดูความคืบหน้ามุมขวาล่าง) · ลากทั้งโฟลเดอร์ได้ ──
   const startUpload = (list: File[]) => {
@@ -160,7 +285,8 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const openPost = () => {
     if (!album) return;
     if (!campaigns.length) listCampaigns().then((cs) => setCampaigns(cs.map((c) => ({ id: c.id, name: c.name })))).catch(() => {});
-    const base = albumPostPreset(album);
+    flushDrafts();
+    const base = albumPostPreset({ ...album, caption_drafts: draftsRef.current, planned_platforms: infoRef.current?.planned_platforms ?? album.planned_platforms });
     setDatePick(base);
     const due = album.due_date;
     const d0 = due ? new Date(`${due}T00:00:00`) : new Date();
@@ -200,18 +326,6 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
       await load(true); onChanged();
     } catch (e) { toast.error((e as Error).message); }
     finally { setSyncing(null); }
-  };
-
-  // ✨ AI ร่างแคปชั่นจากรูปที่เลือก + การ์ดแบรนด์ (ไม่บันทึกเอง ให้ตรวจแล้วกดบันทึก)
-  const aiCaption = async () => {
-    if (caption.trim() && !(await askConfirm({ title: t("ให้ AI เขียนทับแคปชั่นเดิม?", "Replace the current caption?"), message: t("แคปชั่นที่เขียนไว้จะถูกแทนที่ (ยังไม่บันทึกจนกว่าจะกดบันทึก)", "The current text will be replaced (not saved until you press save)"), confirmText: t("เขียนใหม่", "Rewrite") }))) return;
-    setAiBusy(true);
-    try {
-      const r = await aiAlbumCaption(albumId);
-      setCaption([r.caption, r.hashtags.join(" ")].filter(Boolean).join("\n\n"));
-      toast.success(r.images_used ? t(`AI ร่างจาก ${r.images_used} รูปแล้ว — ตรวจแล้วกดบันทึก`, `Drafted from ${r.images_used} photo(s) — review and save`) : t("AI ร่างแล้ว (ไม่มีรูปให้ดู) — ตรวจแล้วกดบันทึก", "Drafted without photos — review and save"));
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setAiBusy(false); }
   };
 
   // ⬇ ดาวน์โหลดรูปทั้งอัลบั้ม (ต้นฉบับจาก Drive · ไฟล์ใหญ่เกิน 30MB ใช้รูปย่อ) — วิดีโอไม่รวม (เปิดจาก Drive)
@@ -260,7 +374,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const files = album?.files ?? [];
   const pickedCount = album?.picked_asset_ids.length ?? 0;
   return (
-    <ERPModal open onClose={onClose} title={album?.name || t("อัลบั้ม", "Album")} size="xl" storageKey="content-album-detail" hasUnsavedChanges={captionDirty}
+    <ERPModal open onClose={closeAll} title={album?.name || t("อัลบั้ม", "Album")} size="xl" storageKey="content-album-detail"
       footer={album ? (
         <div className="flex flex-wrap items-center gap-2 w-full">
           {can("assets.manage") && <button onClick={() => setTrashOpen(true)} className="h-9 px-3 inline-flex items-center gap-1.5 text-sm text-red-600 rounded-lg hover:bg-red-50"><Icon name="delete" />{t("ลบอัลบั้ม", "Delete album")}</button>}
@@ -269,7 +383,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
               className="h-9 px-3 text-sm text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50">{album.closed_at ? t("เปิดอัลบั้มอีกครั้ง", "Reopen") : t("ปิดอัลบั้ม (จบแล้ว)", "Close album")}</button>
           )}
           <span className="flex-1" />
-          <button onClick={onClose} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
+          <button onClick={closeAll} className="h-9 px-4 text-sm font-medium text-slate-700 border border-slate-200 rounded-lg hover:bg-slate-50">{t("ปิด", "Close")}</button>
           {can("tasks.create") && (
             <button onClick={openPost} disabled={!files.length}
               title={!files.length ? t("ยังไม่มีไฟล์ในอัลบั้ม", "No files yet") : undefined}
@@ -281,21 +395,17 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
       ) : undefined}>
       {loading && !album ? <LoadingState /> : error && !album ? <ErrorState hint={error} onRetry={() => void load()} /> : album && (
         <div className="space-y-5" {...drop.guard}>
-          {/* หัว: สถานะ + ข้อมูลอัลบั้ม */}
+          {/* หัว: สถานะ · ข้อมูลอื่นแก้ที่ "ข้อมูลอัลบั้ม" ด้านล่าง */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
             <StageBadge stage={album.status.stage} />
             {album.brand_name && <span className="inline-flex items-center gap-1.5 text-slate-600"><span className="w-2.5 h-2.5 rounded-full" style={{ background: album.brand_color || "#94a3b8" }} />{album.brand_name}</span>}
-            {album.due_date && <span className="inline-flex items-center gap-1 text-slate-600"><Icon name="calendar" />{t("ลงภายใน", "Post by")} {new Date(`${album.due_date}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}</span>}
-            {album.assignees.length > 0 && <span className="inline-flex items-center gap-1 text-slate-600"><Icon name="user" />{album.assignees.map((p) => p.name).filter(Boolean).join(", ")}</span>}
-            {canEdit && <button onClick={() => setEditOpen(true)} className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50"><Icon name="edit" />{t("แก้ข้อมูล", "Edit")}</button>}
+            {saveState !== "idle" && (
+              <span className={`ml-auto inline-flex items-center gap-1 text-xs ${saveState === "error" ? "text-red-600" : saveState === "saving" ? "text-slate-500" : "text-emerald-600"}`}>
+                <Icon name={saveState === "error" ? "warning" : saveState === "saving" ? "waiting" : "done"} />
+                {saveState === "error" ? t("บันทึกไม่สำเร็จ", "Save failed") : saveState === "saving" ? t("กำลังบันทึก…", "Saving…") : t("บันทึกแล้ว", "Saved")}
+              </span>
+            )}
           </div>
-          {album.products.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <Icon name="tag" />
-              {album.products.map((p) => <span key={p.id} className="inline-flex items-center gap-1 h-6 px-2 rounded-full bg-slate-100 text-slate-700"><span className="font-mono">{p.code}</span>{p.name ? <span className="text-slate-500 truncate max-w-[180px]">{p.name}</span> : null}</span>)}
-            </div>
-          )}
-          {album.description && <p className="text-sm text-slate-600 whitespace-pre-line">{album.description}</p>}
 
           {/* ที่อยู่ใน Drive */}
           <div className={`flex flex-wrap items-center gap-2 px-3 py-2 rounded-lg border text-sm ${drive && !drive.ok ? "bg-amber-50 border-amber-200 text-amber-800" : "bg-slate-50 border-slate-200 text-slate-600"}`}>
@@ -406,11 +516,49 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
             </div>
           )}
 
+          {/* ข้อมูลอัลบั้ม — แก้ตรงนี้ได้เลย ไม่ต้องกดปุ่ม (ชุดช่องเดียวกับป๊อปสร้างอัลบั้ม) */}
+          {info && (
+            <section className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-sm font-semibold text-slate-700">{t("ข้อมูลอัลบั้ม", "Album info")}</h3>
+                {canEdit && <span className="text-xs text-slate-400">{t("แก้ตรงนี้ได้เลย · ตัวเลือกบันทึกทันที · ข้อความบันทึกตอนออกจากช่อง", "Edit here · choices save instantly · text saves when you leave the box")}</span>}
+              </div>
+              <AlbumInfoFields form={info} onChange={changeInfo} onBlurText={commitText} brands={brands} brandLocked={!!album.drive_folder_id} disabled={!canEdit} showCaption={false} />
+            </section>
+          )}
+
+          {/* แคปชั่นตามแพลตฟอร์ม — การ์ดเดียวกับหน้าลงโพสต์ (CaptionCard โหมด draft) */}
+          <section className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-slate-700">{t("แคปชั่นตามแพลตฟอร์ม", "Captions by platform")}</h3>
+              <span className="text-xs text-slate-400">{t("พิมพ์แล้วบันทึกให้เอง · ตอนส่งเข้าปฏิทิน แคปชั่นแต่ละแพลตฟอร์มไปกับโพสต์เลย", "Saves as you type · each platform's caption goes into the post")}</span>
+              {canEdit && can("ai.caption") && capPlatforms.length > 0 && (
+                <button onClick={() => void aiAll()} disabled={!!aiPlat || !files.length} title={t("AI ดูรูปที่เลือกใช้ (สูงสุด 4 รูป) + การ์ดรู้จักแบรนด์ แล้วเขียนให้ทีละแพลตฟอร์ม · มีค่าใช้จ่ายเล็กน้อยต่อครั้ง", "AI looks at up to 4 picked photos + the brand card, one call per platform")}
+                  className="ml-auto inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-violet-200 text-xs text-violet-700 hover:bg-violet-50 disabled:opacity-50"><Icon name="ai" />{aiPlat === "*" ? t("AI กำลังเขียน…", "AI writing…") : t("AI เขียนทุกแพลตฟอร์ม", "AI write all")}</button>
+              )}
+            </div>
+            {capPlatforms.length === 0 ? (
+              <p className="text-sm text-slate-500">{t("เลือก “ตั้งใจลงที่ไหน” ด้านบนก่อน แล้วจะมีช่องแคปชั่นของแต่ละแพลตฟอร์ม", "Pick “Planned platforms” above to get a caption box per platform")}</p>
+            ) : (
+              <div className="space-y-2">
+                {capPlatforms.map((p) => (
+                  <CaptionCard key={p} draft open={openPlats.has(p)} onToggle={() => togglePlat(p)} cap={capOf(p)} templates={capTpl.templates}
+                    sharedVars={{ shop: capTpl.shop, fake_price: null, real_price: null, price: null, color: null, sku: null, product: album.products[0]?.name ?? null, link: null }}
+                    brandId={album.brand_id} setting={pset[p]} onChange={canEdit ? (change) => setCap(p, change) : () => {}}
+                    canAi={canEdit && can("ai.caption")} aiBusy={aiPlat === p || aiPlat === "*"} onAiWrite={() => void aiFor(p)}
+                    onApplyAll={canEdit && capPlatforms.length > 1 ? (from) => void applyAll(from) : undefined}
+                    onPullFrom={canEdit && capPlatforms.length > 1 ? () => setPullTo(p) : undefined}
+                    pushToast={(type, m) => toast.show(m, type)} />
+                ))}
+              </div>
+            )}
+          </section>
+
           {/* สถานะต่อแพลตฟอร์ม + โพสต์ */}
           <section className="space-y-2">
             <h3 className="text-sm font-semibold text-slate-700">{t("ลงที่ไหนแล้วบ้าง", "Where it's posted")}</h3>
             {album.status.platforms.length === 0 ? (
-              <p className="text-sm text-slate-500">{t("ยังไม่ได้เลือกแพลตฟอร์ม — กด “แก้ข้อมูล” เลือกที่จะลง หรือกด “ส่งเข้าปฏิทิน”", "No platforms yet — Edit to pick, or Send to calendar")}</p>
+              <p className="text-sm text-slate-500">{t("ยังไม่มีโพสต์ — เลือก “ตั้งใจลงที่ไหน” ด้านบน แล้วกด “ส่งเข้าปฏิทิน”", "No posts yet — pick platforms above, then Send to calendar")}</p>
             ) : (
               <div className="flex flex-wrap gap-1.5">
                 {album.status.platforms.map((p) => <PlatChip key={p.code} code={p.code} state={p.state} label={platMeta.get(p.code)?.label} iconKey={platMeta.get(p.code)?.icon_key} />)}
@@ -431,26 +579,6 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
                   </li>
                 ))}
               </ul>
-            )}
-          </section>
-
-          {/* แคปชั่นร่าง */}
-          <section className="space-y-2">
-            <div className="flex items-center gap-2">
-              <h3 className="text-sm font-semibold text-slate-700">{t("แคปชั่นร่าง", "Draft caption")}</h3>
-              {canEdit && can("ai.caption") && (
-                <button onClick={() => void aiCaption()} disabled={aiBusy || !files.length} title={t("AI ดูรูปที่เลือกใช้ (สูงสุด 4 รูป) + การ์ดรู้จักแบรนด์ แล้วร่างแคปชั่น · มีค่าใช้จ่ายเล็กน้อยต่อครั้ง", "AI looks at up to 4 picked photos + the brand card · small cost per use")}
-                  className="ml-auto inline-flex items-center gap-1 h-7 px-2.5 rounded-lg border border-violet-200 text-xs text-violet-700 hover:bg-violet-50 disabled:opacity-50"><Icon name="ai" />{aiBusy ? t("AI กำลังเขียน…", "AI writing…") : t("AI ร่างแคปชั่น", "AI draft")}</button>
-              )}
-            </div>
-            <textarea value={caption} onChange={(e) => setCaption(e.target.value)} rows={3} disabled={!canEdit}
-              placeholder={t("เขียนแคปชั่นไว้ก่อน ตอนส่งเข้าปฏิทินจะใส่ให้ทุกแพลตฟอร์ม", "Write a caption — it's copied into every platform of new posts")}
-              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300 disabled:bg-slate-50" />
-            {captionDirty && canEdit && (
-              <div className="flex justify-end gap-2">
-                <button onClick={() => setCaption(album.caption_draft ?? "")} className="h-8 px-3 text-sm text-slate-600 rounded-lg hover:bg-slate-50">{t("ยกเลิก", "Discard")}</button>
-                <button onClick={() => void saveCaption()} disabled={captionSaving} className="h-8 px-3 text-sm font-medium text-white bg-violet-600 rounded-lg hover:bg-violet-700 disabled:opacity-50">{captionSaving ? t("กำลังบันทึก...", "Saving...") : t("บันทึกแคปชั่น", "Save caption")}</button>
-              </div>
             )}
           </section>
 
@@ -494,8 +622,10 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
       <ConfirmDialog open={trashOpen} onClose={() => setTrashOpen(false)} onConfirm={() => void doTrashAlbum()} loading={busy} variant="danger"
         title={t("ลบอัลบั้ม", "Delete album")} confirmText={t("ย้ายไปถังขยะ", "Move to trash")}
         message={t("อัลบั้มไปอยู่ในถังขยะ (กู้คืนได้) · ไฟล์ใน Google Drive และโพสต์ที่สร้างไปแล้วไม่ถูกลบ", "The album goes to trash (restorable) · Drive files and existing posts are kept")} />
-      {album && <AlbumFormModal open={editOpen} album={album} brands={brands} onClose={() => setEditOpen(false)}
-        onSaved={() => { setEditOpen(false); toast.success(t("บันทึกแล้ว", "Saved")); void load(true); loadDrive(); onChanged(); }} />}
+      {pullTo && (
+        <PullCaptionModal target={pullTo} caps={capPlatforms.map(capOf)} settings={pset} onClose={() => setPullTo(null)}
+          onApply={(from, opts) => { const src = capOf(from); setCap(pullTo, { ...(opts.caption ? { caption: src.caption } : {}), ...(opts.hashtags ? { hashtags: src.hashtags } : {}) }); setPullTo(null); }} />
+      )}
       {/* ส่งเข้าปฏิทิน ขั้นที่ 1: เลือกวัน */}
       {datePick && album && (
         <ERPModal open onClose={() => setDatePick(null)} title={t("เลือกวันลงโพสต์", "Pick a post date")} size="xl" storageKey="content-album-date" zIndex={60}

@@ -10,6 +10,7 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { albumStatus, type AlbumPostInput, type AlbumStatus } from "@/lib/content-album-status";
 import { applyFileOrder } from "@/lib/content-album-order";
+import { hasAnyCaption, normalizeCaptionDrafts, type AlbumCaptionDrafts } from "@/lib/content-album-captions";
 import type { CaptionSettings } from "@/lib/content-readiness";
 import { resolveBrandContentFolder, safeDriveName, driveFolderUrl } from "@/lib/content-drive";
 import { driveConfigured, driveCreateFolder, driveEnsureFolder, driveListChildFolders, driveFileState } from "@/lib/google-drive";
@@ -56,6 +57,8 @@ export type ContentAlbum = {
   due_date: string | null;
   planned_platforms: string[];
   caption_draft: string | null;
+  /** แคปชั่นร่างแยกแพลตฟอร์ม (ไม่มี = ใช้ caption_draft) */
+  caption_drafts: AlbumCaptionDrafts;
   drive_folder_id: string | null;
   drive_folder_url: string | null;
   picked_asset_ids: string[];
@@ -79,10 +82,10 @@ export type ContentAlbum = {
 
 type AlbumDbRow = {
   id: string; brand_id: string | null; assignee_ids: string[] | null; due_date: string | null; planned_platforms: string[] | null;
-  caption_draft: string | null; drive_folder_id: string | null; picked_asset_ids: string[] | null; file_order: string[] | null; parent_sku_codes: unknown;
+  caption_draft: string | null; caption_drafts: unknown; drive_folder_id: string | null; picked_asset_ids: string[] | null; file_order: string[] | null; parent_sku_codes: unknown;
   closed_at: string | null; trashed_at: string | null; created_by: string | null; created_at: string; updated_at: string;
 };
-const ALBUM_COLS = "id, brand_id, assignee_ids, due_date, planned_platforms, caption_draft, drive_folder_id, picked_asset_ids, file_order, parent_sku_codes, closed_at, trashed_at, created_by, created_at, updated_at";
+const ALBUM_COLS = "id, brand_id, assignee_ids, due_date, planned_platforms, caption_draft, caption_drafts, drive_folder_id, picked_asset_ids, file_order, parent_sku_codes, closed_at, trashed_at, created_by, created_at, updated_at";
 const POST_COLS = "id, content_no, title, status, is_active, scheduled_at, platforms, post_status, platform_images, platform_formats, album_id";
 const FILE_COLS = "id, title, file_name, r2_key, asset_type, content_type, size_bytes, width, height, duration_sec, drive_file_id, drive_missing_at, phash, status";
 
@@ -157,12 +160,13 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
       status: String(p.status ?? "draft"), isActive: p.is_active !== false,
     }));
     const b = r.brand_id ? brandMap.get(r.brand_id) : null;
+    const capDrafts = normalizeCaptionDrafts(r.caption_drafts);
     const assigneeIds = (r.assignee_ids ?? []).filter(Boolean);
     return {
       id: r.id, name: c?.name ?? "", description: c?.description ?? null,
       brand_id: r.brand_id, brand_name: b?.name ?? null, brand_color: b?.color ?? null,
       assignee_ids: assigneeIds, assignees: assigneeIds.map((id) => ({ id, name: people.get(id) ?? "" })),
-      due_date: r.due_date, planned_platforms: r.planned_platforms ?? [], caption_draft: r.caption_draft,
+      due_date: r.due_date, planned_platforms: r.planned_platforms ?? [], caption_draft: r.caption_draft, caption_drafts: capDrafts,
       drive_folder_id: r.drive_folder_id, drive_folder_url: r.drive_folder_id ? driveFolderUrl(r.drive_folder_id) : null,
       picked_asset_ids: (r.picked_asset_ids ?? []).filter((id) => files.some((f) => f.id === id)),
       file_order: (r.file_order ?? []).filter((id) => files.some((f) => f.id === id)),
@@ -172,7 +176,7 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
       preview_keys: files.filter((f) => f.id !== cover?.id).slice(0, 3).map((f) => f.r2_key),
       file_count: files.length, video_count: files.filter((f) => f.asset_type === "video").length,
       closed_at: r.closed_at, trashed_at: r.trashed_at, created_by: r.created_by, created_at: r.created_at, updated_at: r.updated_at,
-      status: albumStatus({ plannedPlatforms: r.planned_platforms ?? [], captionDraft: r.caption_draft, fileCount: files.length, closed: !!r.closed_at, posts: inputs }, settings),
+      status: albumStatus({ plannedPlatforms: r.planned_platforms ?? [], captionDraft: hasAnyCaption(capDrafts, r.caption_draft), fileCount: files.length, closed: !!r.closed_at, posts: inputs }, settings),
       posts: ps.map((p) => ({
         id: String(p.id), content_no: (p.content_no as string | null) ?? null, title: String(p.title ?? ""), status: String(p.status ?? "draft"),
         is_active: p.is_active !== false, scheduled_at: (p.scheduled_at as string | null) ?? null,
