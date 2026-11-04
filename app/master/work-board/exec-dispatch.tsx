@@ -3,14 +3,15 @@
 /**
  * บอร์ดจ่ายงาน — มุมมอง "จ่ายงาน (โหมดผู้บริหาร)" (เจ้าของขอ 2026-11-04 · แทนมุมมองแคนวาสที่เอาออก)
  *   ข้างบน = งานรอจ่ายเต็มหน้า (การ์ดใหญ่ · ปรับขนาดการ์ด) · เรียงได้ · กรองแบรนด์ · เลือกเองว่าการ์ดโชว์อะไร · ป้ายเดดไลน์มุมการ์ด
- *     ราคาขาย/มูลค่า เฉพาะผู้บริหาร (ดึงจาก /api/mo/exec-plan ที่ล็อกสิทธิ์ไว้) · ค่าแรง/ชิ้น = ราคากลางในสูตร (ไม่มี = ค่าแรงแผนของใบ ÷ จำนวน)
- *   ข้างล่าง = แถบโต๊ะติดขอบจอ (ชื่อโต๊ะ + 2 ใบแรก) · ชี้ = เด้งขึ้น · กด = แผงเลื่อนขึ้น (การ์ดงาน · ค่าแรงรวม/ต่อช่าง · จัดการโต๊ะ)
+ *     ราคาขาย/มูลค่า เฉพาะผู้บริหาร (ดึงจาก /api/mo/exec-plan?prices=1 ที่ล็อกสิทธิ์ไว้ · โหลดพลาด = ป้ายเตือน + ปุ่มโหลดใหม่ ไม่เงียบ) · ค่าแรง/ชิ้น = ราคากลางในสูตร (ไม่มี = ค่าแรงแผนของใบ ÷ จำนวน)
+ *   ข้างล่าง = แถบโต๊ะติดขอบจอ (การ์ดแนวตั้ง: ชื่อโต๊ะ · รูปงาน · ใบ/ค้าง · คน · ค่าแรง) · ชี้เมาส์ค้าง (ไม่ต้องคลิก) = รายการงานที่ทำอยู่เลื่อนขึ้น
+ *     กด = แผงเต็มเลื่อนขึ้น (การ์ดงาน · ค่าแรงรวมทั้งโต๊ะ แบ่งรายคนครบทุกคน [lib/desk-labor] · จัดการโต๊ะ)
  *   ขวา = แผง "สรุปเป้า" (ผู้บริหาร) เลื่อนเข้า · ล็อกได้ = ติดขวาแล้วดันการ์ดให้แคบลง · เป้าเก็บกลาง ui_config admin_wb_exec_target
  *   จ่าย = ลากการ์ดลงโต๊ะ (ติ๊กหลายใบ ลากใบไหนก็ไปทั้งชุด) หรือกดโต๊ะ → "จ่ายให้โต๊ะนี้" → ป๊อปจ่ายงานเดิมของบอร์ด (ทีละใบ)
  *     เมาส์ = ลาก HTML5 · iPad/มือถือ = กดค้างแล้วลาก (ของกลาง components/touch-drag)
  * ค่าที่จำต่อคน (useUserPref): ขนาดการ์ด · การเรียง · ช่องที่โชว์ · ล็อกแผงสรุป
  */
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
 import { Icon } from "@/components/icon";
@@ -20,6 +21,7 @@ import { bkkDate } from "@/lib/mo-sales-match";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useTouchDrag } from "@/components/touch-drag";
 import { MoneyInput } from "@/components/money-input";
+import { splitDeskLabor, type LaborMember } from "@/lib/desk-labor";
 
 export type ExecMo = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
@@ -31,6 +33,8 @@ export type ExecWo = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; department_id: string | null;
   assignee_name: string | null; qty: number; received_qty: number; status: string; image_url?: string | null;
   labor_cost?: number | null; central_rate?: number;
+  /** department = จ่ายให้ทั้งโต๊ะ · craftsman = ระบุคน (assignees[] = หลายคน) */
+  assignee_type?: string | null; assignee_id?: string | null; assignees?: { id: string | null; name: string }[] | null;
 };
 type Desk = { id: string; name: string };
 type Person = { id: string; name: string; nickname?: string | null; department_id?: string | null };
@@ -117,14 +121,36 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   const show = (k: FieldKey) => fields.includes(k) && (showPrice || !FIELDS.find((f) => f.k === k)?.money);
   const sideShown = showPrice && (sideOpen || locked);
 
-  // ราคาขาย/ชิ้น (skus_v2.list_price) + เป้า — API แผนผู้บริหารล็อกสิทธิ์ admin.users ไว้แล้ว
+  // ราคาขาย/ชิ้น (skus_v2.list_price) — API ผู้บริหารล็อกสิทธิ์ admin.users · ใช้โหมดเบา ?prices=1
+  //   เคยเงียบเป็น "ไม่มีราคา" ตอน DB หนาแน่น (2026-11-04) → ตอนนี้: เซิร์ฟเวอร์ยิงซ้ำเอง + ที่นี่ลองอีกรอบ + ยังพลาด = ป้ายเตือน/ปุ่มโหลดใหม่
+  const [priceErr, setPriceErr] = useState<"" | "partial" | "error">("");
+  const [priceTick, setPriceTick] = useState(0);
+  const pendingSig = pending.length;
+  useEffect(() => {
+    if (!showPrice) return;
+    let cancel = false, timer: number | null = null;
+    const run = async (attempt: number) => {
+      try {
+        const r = await apiFetch("/api/mo/exec-plan?prices=1");
+        const j = await r.json();
+        if (cancel) return;
+        if (!r.ok || j.error) throw new Error(j.error || "โหลดราคาไม่สำเร็จ");
+        setPrice(new Map(Object.entries((j.prices ?? {}) as Record<string, number>).map(([k, v]) => [k, Number(v) || 0])));
+        if (j.partial && attempt < 1) { timer = window.setTimeout(() => void run(attempt + 1), 1500); return; }
+        setPriceErr(j.partial ? "partial" : "");
+      } catch {
+        if (cancel) return;
+        if (attempt < 1) timer = window.setTimeout(() => void run(attempt + 1), 1500);
+        else setPriceErr("error");
+      }
+    };
+    void run(0);
+    return () => { cancel = true; if (timer != null) window.clearTimeout(timer); };
+  }, [showPrice, priceTick, pendingSig]);
+  // เป้ากลาง (ใช้ร่วมทั้งทีม)
   useEffect(() => {
     if (!showPrice) return;
     let cancel = false;
-    apiFetch("/api/mo/exec-plan").then((r) => r.json()).then((j) => {
-      if (cancel) return;
-      setPrice(new Map(((j.rows ?? []) as { mo_no: string; list_price: number }[]).map((r) => [r.mo_no, Number(r.list_price) || 0])));
-    }).catch(() => { /* ไม่มีราคา = ไม่โชว์ */ });
     apiFetch(`/api/ui-config?key=${TARGET_KEY}`).then((r) => r.json()).then((j) => { if (!cancel) setTarget(((j.value ?? {}) as Target)); }).catch(() => {});
     return () => { cancel = true; };
   }, [showPrice]);
@@ -176,7 +202,50 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   const toggle = (id: string) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const openWos = useMemo(() => workOrders.filter((w) => w.status !== "done" && w.status !== "cancelled"), [workOrders]);
-  const wosOf = (deskId: string) => openWos.filter((w) => w.department_id === deskId);
+  // สรุปต่อโต๊ะ (ใช้ทั้งการ์ดโต๊ะ · รายการตอนชี้ · แผงเต็ม)
+  const deskStats = useMemo(() => {
+    const m = new Map<string, { ws: ExecWo[]; left: number; labor: number; ppl: Person[] }>();
+    for (const d of desks) {
+      const ws = openWos.filter((w) => w.department_id === d.id);
+      m.set(d.id, {
+        ws, left: ws.reduce((a, w) => a + Math.max(0, w.qty - (w.received_qty || 0)), 0),
+        labor: ws.reduce((a, w) => a + rateOfWo(w) * w.qty, 0),
+        ppl: craftsmen.filter((c) => c.department_id === d.id),
+      });
+    }
+    return m;
+  }, [desks, openWos, craftsmen]);
+  const statOf = (id: string) => deskStats.get(id) ?? { ws: [] as ExecWo[], left: 0, labor: 0, ppl: [] as Person[] };
+  const nick = (p: Person) => p.nickname?.trim() || p.name;
+  const membersOf = (ppl: Person[]): LaborMember[] => ppl.map((p) => ({ id: p.id, name: nick(p), aliases: [p.name, p.nickname, p.nickname ? `${p.name} (${p.nickname})` : null] }));
+
+  // ชี้เมาส์ค้างที่โต๊ะ (ไม่ต้องคลิก) → รายการงานที่ทำอยู่เลื่อนขึ้น · ขยับเข้าแผงได้ (หน่วงตอนออก) · นิ้ว/iPad ไม่ใช้ (กดเปิดแผงเต็มแทน)
+  const dockRef = useRef<HTMLDivElement>(null);
+  const peekTimer = useRef<number | null>(null);
+  const [peek, setPeek] = useState<{ id: string; left: number; maxH: number } | null>(null);
+  const [peekOn, setPeekOn] = useState(false);
+  const clearPeekTimer = () => { if (peekTimer.current != null) { window.clearTimeout(peekTimer.current); peekTimer.current = null; } };
+  const peekIn = (id: string, el: HTMLElement) => {
+    clearPeekTimer();
+    peekTimer.current = window.setTimeout(() => {
+      const r = el.getBoundingClientRect(), b = dockRef.current?.getBoundingClientRect();
+      if (!b) return;
+      const W = 300;
+      setPeek({ id, left: Math.max(8, Math.min(b.width - W - 8, r.left + r.width / 2 - b.left - W / 2)), maxH: Math.max(200, Math.round(b.top - 16)) });
+      requestAnimationFrame(() => setPeekOn(true));
+    }, 220);
+  };
+  const peekOut = () => { clearPeekTimer(); peekTimer.current = window.setTimeout(() => setPeekOn(false), 180); };
+  useEffect(() => () => clearPeekTimer(), []);
+  // แผงเต็มสูงได้เท่าที่เหลือเหนือแถบโต๊ะ (แถบอาจไม่ได้ติดขอบล่างตอนงานน้อย) → เกินก็เลื่อนในแผง ไม่ล้นหัวจอ
+  const [sheetMax, setSheetMax] = useState<number | null>(null);
+  useEffect(() => {
+    if (!openDesk) return;
+    const fit = () => { const t = dockRef.current?.getBoundingClientRect().top; if (t != null) setSheetMax(Math.max(240, Math.round(t - 12))); };
+    fit();
+    window.addEventListener("resize", fit); window.addEventListener("scroll", fit, true);
+    return () => { window.removeEventListener("resize", fit); window.removeEventListener("scroll", fit, true); };
+  }, [openDesk]);
   const give = (desk: Desk, ids: string[]) => {
     const mos = list.filter((m) => ids.includes(m.id));
     if (!mos.length || !canDispatch) return;
@@ -202,6 +271,12 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           <span className="text-base font-semibold text-slate-800">งานรอจ่าย</span>
           <span className="text-sm text-slate-500">{list.length} ใบ{showPrice && total > 0 ? ` · มูลค่า ฿${fmt(total)}` : ""}</span>
           {showPrice && <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">เห็นราคาขาย (ผู้บริหาร)</span>}
+          {showPrice && priceErr && (
+            <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[12px] text-amber-800">
+              <Icon name="warning" /> ราคาขาย{priceErr === "partial" ? "บางใบ" : ""}โหลดไม่สำเร็จ (ระบบหนาแน่นชั่วคราว)
+              <button type="button" onClick={() => { setPriceErr(""); setPriceTick((t) => t + 1); }} className="inline-flex items-center gap-1 font-semibold text-amber-900 underline"><Icon name="refresh" /> โหลดใหม่</button>
+            </span>
+          )}
           <div className="flex-1" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นรหัสสินค้า / ชื่อ / เลขใบ" className="h-8 w-52 rounded-lg border border-slate-200 px-2 text-sm" />
           <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[12px]" title="เรียงการ์ด">
@@ -282,18 +357,55 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           </div>
         )}
 
-        {/* แถบโต๊ะ (ติดขอบล่าง) + แผงรายละเอียดเลื่อนขึ้น */}
-        <div className="sticky bottom-0 z-20 -mx-1 mt-auto">
-          <div className={`absolute inset-x-2 bottom-full origin-bottom rounded-t-2xl border border-b-0 border-slate-200 bg-white/95 p-4 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur transition-all duration-300 ease-out ${deskOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-6 opacity-0"}`}>
+        {/* แถบโต๊ะ (ติดขอบล่าง · การ์ดแนวตั้ง) + รายการตอนชี้ค้าง + แผงเต็มเลื่อนขึ้น */}
+        <div ref={dockRef} className="sticky bottom-0 z-20 -mx-1 mt-auto">
+          {/* ชี้เมาส์ค้างที่โต๊ะ (ไม่ต้องคลิก) = รายการงานที่ทำอยู่เลื่อนขึ้น */}
+          {peek && (() => {
+            const d = desks.find((x) => x.id === peek.id);
+            if (!d) return null;
+            const st = statOf(d.id), vis = peekOn && openDesk == null;
+            return (
+              <div onPointerEnter={(e) => { if (e.pointerType === "mouse") clearPeekTimer(); }} onPointerLeave={(e) => { if (e.pointerType === "mouse") peekOut(); }}
+                style={{ left: peek.left, width: 300, maxHeight: peek.maxH }}
+                className={`absolute bottom-full z-30 mb-2 flex flex-col rounded-2xl border border-slate-200 bg-white/95 p-3 shadow-[0_-10px_30px_rgba(15,23,42,0.14)] backdrop-blur transition-all duration-200 ease-out ${vis ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-3 opacity-0"}`}>
+                <div className="mb-1 flex items-baseline gap-2">
+                  <span className="truncate text-sm font-bold text-slate-800">{d.name}</span>
+                  <span className="ml-auto shrink-0 text-[11px] text-slate-500">{st.ws.length} ใบ · ค้าง {fmt(st.left)} ชิ้น</span>
+                </div>
+                {st.labor > 0 && <div className="mb-1.5 text-[11px] text-slate-500">ค่าแรงรวมทั้งโต๊ะ <b className="tabular-nums text-slate-800">฿{fmt(st.labor)}</b>{st.ppl.length ? ` · ${st.ppl.length} คน` : ""}</div>}
+                <div className="max-h-[46vh] min-h-0 flex-1 space-y-0.5 overflow-y-auto pr-0.5">
+                  {st.ws.map((w) => {
+                    const pr = w.qty > 0 ? Math.min(100, ((w.received_qty || 0) / w.qty) * 100) : 0;
+                    return (
+                      <button key={w.id} type="button" onClick={() => onOpenWO(w.id)} className="flex w-full items-center gap-2 rounded-lg px-1.5 py-1 text-left hover:bg-violet-50">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-slate-100 text-slate-300">{w.image_url ? <img src={w.image_url} alt="" draggable={false} className="h-full w-full object-cover" /> : <Icon name="image" />}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-mono text-[12px] font-semibold text-slate-800">{w.product_sku ?? w.mo_no}</span>
+                          <span className="block truncate text-[10px] text-slate-400">{w.assignee_type === "department" || !w.assignee_name ? "ทั้งโต๊ะ" : w.assignee_name}</span>
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className="block text-[11px] tabular-nums text-slate-600">{fmt(w.received_qty || 0)}/{fmt(w.qty)}</span>
+                          <span className="mt-0.5 block h-1 w-12 overflow-hidden rounded-full bg-slate-100"><span className={`block h-full ${pr >= 100 ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${pr}%` }} /></span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                  {!st.ws.length && <div className="py-3 text-center text-[12px] text-slate-400">ยังไม่มีงานในโต๊ะนี้</div>}
+                </div>
+                <div className="mt-1.5 border-t border-slate-100 pt-1.5 text-center text-[10px] text-slate-400">กดที่โต๊ะ = เปิดแผงเต็ม (ค่าแรงรายคน · จ่ายงาน · จัดการโต๊ะ)</div>
+              </div>
+            );
+          })()}
+          <div style={{ maxHeight: sheetMax ?? undefined }} className={`absolute inset-x-2 bottom-full origin-bottom overflow-y-auto rounded-t-2xl border border-b-0 border-slate-200 bg-white/95 p-4 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur transition-all duration-300 ease-out ${deskOpen ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-6 opacity-0"}`}>
             {deskOpen && (() => {
-              const ws = wosOf(deskOpen.id), ppl = craftsmen.filter((c) => c.department_id === deskOpen.id);
-              const left = ws.reduce((a, w) => a + Math.max(0, w.qty - (w.received_qty || 0)), 0);
-              const laborPlan = ws.reduce((a, w) => a + rateOfWo(w) * w.qty, 0);
+              const { ws, ppl, left, labor: laborPlan } = statOf(deskOpen.id);
               const laborGot = ws.reduce((a, w) => a + rateOfWo(w) * (w.received_qty || 0), 0);
               const held = ws.reduce((a, w) => a + (price.get(w.mo_no) ?? 0) * Math.max(0, w.qty - (w.received_qty || 0)), 0);
               const noRate = ws.filter((w) => rateOfWo(w) <= 0).length;
-              const byPerson = new Map<string, number>();
-              for (const w of ws) { const k = w.assignee_name?.trim() || "ทั้งโต๊ะ"; byPerson.set(k, (byPerson.get(k) ?? 0) + rateOfWo(w) * w.qty); }
+              // ค่าแรงรายคน — ครบทุกคนในโต๊ะ (งานทั้งโต๊ะแบ่งเท่ากัน · งานหลายคนแบ่งตามจำนวนคน) · ของกลาง lib/desk-labor
+              const split = splitDeskLabor(ws.map((w) => ({ assignee_type: w.assignee_type, assignee_id: w.assignee_id, assignee_name: w.assignee_name, assignees: w.assignees,
+                plan: rateOfWo(w) * w.qty, got: rateOfWo(w) * (w.received_qty || 0) })), membersOf(ppl));
+              const avg = split.memberCount > 0 ? split.total / split.memberCount : 0;
               return (
                 <div>
                   <div className="mb-2 flex flex-wrap items-center gap-2">
@@ -308,18 +420,52 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                   </div>
                   <div className="mb-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {showPrice && <div className="rounded-lg bg-violet-50 px-3 py-2"><div className="text-[11px] text-violet-600">มูลค่างานที่ถือ</div><div className="text-lg font-bold tabular-nums text-violet-800">฿{fmt(held)}</div></div>}
-                    <div className="rounded-lg bg-slate-50 px-3 py-2"><div className="text-[11px] text-slate-500">ค่าแรงรวม (แผน)</div><div className="text-lg font-bold tabular-nums text-slate-800">฿{fmt(laborPlan)}</div></div>
+                    <div className="rounded-lg bg-slate-50 px-3 py-2">
+                      <div className="text-[11px] text-slate-500">ค่าแรงรวมทั้งโต๊ะ (แผน)</div>
+                      <div className="text-lg font-bold tabular-nums text-slate-800">฿{fmt(laborPlan)}</div>
+                      {avg > 0 && <div className="text-[11px] text-slate-500">{split.memberCount} คน · เฉลี่ย ฿{fmt(avg)}/คน</div>}
+                    </div>
                     <div className="rounded-lg bg-emerald-50 px-3 py-2"><div className="text-[11px] text-emerald-600">ค่าแรงที่ได้แล้ว (รับคืน)</div><div className="text-lg font-bold tabular-nums text-emerald-800">฿{fmt(laborGot)}</div></div>
                     {noRate > 0 && <div className="rounded-lg bg-amber-50 px-3 py-2"><div className="text-[11px] text-amber-700">ยังไม่ใส่ค่าแรง</div><div className="text-lg font-bold tabular-nums text-amber-800">{noRate} ใบ</div></div>}
                   </div>
-                  {[...byPerson.values()].some((v) => v > 0) && (
-                    <div className="mb-2 flex flex-wrap items-center gap-1.5 text-[12px]">
-                      <span className="text-slate-400">ค่าแรงต่อช่าง:</span>
-                      {[...byPerson.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([n, v]) => <span key={n} className="rounded-full bg-slate-100 px-2.5 py-0.5 text-slate-700">{n} <b className="tabular-nums">฿{fmt(v)}</b></span>)}
+                  {split.total > 0 ? (
+                    <div className="mb-2">
+                      <div className="mb-1 flex flex-wrap items-baseline gap-x-2 text-[12px]">
+                        <span className="font-semibold text-slate-700">ค่าแรงรายคน (ทั้งโต๊ะ {split.memberCount} คน)</span>
+                        <span className="text-slate-400">งาน &ldquo;ทั้งโต๊ะ&rdquo; แบ่งเท่ากันทุกคนในโต๊ะ · งานหลายคนแบ่งตามจำนวนคน (ประมาณการ)</span>
+                      </div>
+                      <div className="grid gap-1.5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                        {split.people.map((p) => {
+                          const pg = p.total > 0 ? Math.min(100, (p.got / p.total) * 100) : 0;
+                          return (
+                            <div key={p.key} className={`rounded-xl border px-2.5 py-1.5 ${p.member ? "border-slate-200 bg-white" : "border-dashed border-amber-300 bg-amber-50/40"}`}>
+                              <div className="flex items-baseline gap-1.5">
+                                <span className="truncate text-[13px] font-semibold text-slate-800">{p.name}</span>
+                                {!p.member && <span className="shrink-0 rounded bg-amber-100 px-1 text-[10px] text-amber-700">นอกโต๊ะ</span>}
+                                <b className={`ml-auto shrink-0 text-[14px] tabular-nums ${p.total > 0 ? "text-slate-900" : "text-slate-300"}`}>฿{fmt(p.total)}</b>
+                              </div>
+                              <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] text-slate-500">
+                                {p.solo > 0 && <span>เดี่ยว ฿{fmt(p.solo)}</span>}
+                                {p.shared > 0 && <span>งานคู่/กลุ่ม ฿{fmt(p.shared)}</span>}
+                                {p.desk > 0 && <span>งานทั้งโต๊ะ ฿{fmt(p.desk)}</span>}
+                                {p.total <= 0 && <span>ยังไม่มีงาน</span>}
+                              </div>
+                              {p.total > 0 && <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100" title={`รับคืนแล้ว ฿${fmt(p.got)}`}><div className="h-full bg-emerald-500" style={{ width: `${pg}%` }} /></div>}
+                            </div>
+                          );
+                        })}
+                        {split.unassigned > 0 && (
+                          <div className="rounded-xl border border-dashed border-slate-300 px-2.5 py-1.5">
+                            <div className="flex items-baseline gap-1.5"><span className="text-[13px] font-semibold text-slate-600">งานทั้งโต๊ะ (ยังไม่มีคนประจำ)</span><b className="ml-auto tabular-nums text-slate-800">฿{fmt(split.unassigned)}</b></div>
+                            <div className="text-[10px] text-slate-400">เพิ่มคนเข้าโต๊ะที่ &ldquo;จัดการโต๊ะ&rdquo; แล้วระบบจะแบ่งให้</div>
+                          </div>
+                        )}
+                      </div>
                     </div>
+                  ) : (
+                    <div className="mb-2 text-[12px] text-slate-500">คนในโต๊ะ: {ppl.length ? ppl.map(nick).join(", ") : "— ไม่มีคนประจำ (เลือกคนอื่นได้ในป๊อปจ่ายงาน) —"}</div>
                   )}
-                  <div className="mb-2 text-[12px] text-slate-500">คนในโต๊ะ: {ppl.length ? ppl.map((p) => p.nickname?.trim() || p.name).join(", ") : "— ไม่มีคนประจำ (เลือกคนอื่นได้ในป๊อปจ่ายงาน) —"}</div>
-                  <div className="grid max-h-[38vh] gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                  <div className="grid max-h-[34vh] gap-2 overflow-y-auto sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                     {ws.map((w) => {
                       const r = rateOfWo(w), pp = price.get(w.mo_no) ?? 0, pr = w.qty > 0 ? Math.min(100, ((w.received_qty || 0) / w.qty) * 100) : 0;
                       return (
@@ -328,7 +474,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                             <HoverImage url={w.image_url ?? null} size={34} />
                             <div className="min-w-0 flex-1">
                               <div className="truncate font-mono text-[12px] font-semibold text-slate-800">{w.product_sku ?? w.mo_no}</div>
-                              <div className="truncate text-[11px] text-slate-400">{w.assignee_name || "ทั้งโต๊ะ"} · {w.wo_no}</div>
+                              <div className="truncate text-[11px] text-slate-400">{w.assignee_type === "department" || !w.assignee_name ? "ทั้งโต๊ะ" : w.assignee_name} · {w.wo_no}</div>
                             </div>
                           </div>
                           <div className="my-1.5 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${pr >= 100 ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${pr}%` }} /></div>
@@ -346,20 +492,30 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
               );
             })()}
           </div>
-          <div className="flex items-end justify-center gap-2 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-3 pb-2.5 pt-4 backdrop-blur">
+          <div className="flex items-end justify-center gap-2.5 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-3 pb-2.5 pt-4 backdrop-blur">
             {desks.map((d) => {
-              const ws = wosOf(d.id), lifted = overDesk === d.id || td.overId === d.id, on = openDesk === d.id;
+              const st = statOf(d.id), lifted = overDesk === d.id || td.overId === d.id, on = openDesk === d.id;
+              const imgs = st.ws.filter((w) => w.image_url).slice(0, 3);
               return (
-                <button key={d.id} type="button" data-drop-id={d.id} onClick={() => setOpenDesk(on ? null : d.id)}
+                <button key={d.id} type="button" data-drop-id={d.id} onClick={() => { clearPeekTimer(); setPeekOn(false); setOpenDesk(on ? null : d.id); }}
+                  onPointerEnter={(e) => { if (e.pointerType === "mouse") peekIn(d.id, e.currentTarget); }}
+                  onPointerLeave={(e) => { if (e.pointerType === "mouse") peekOut(); }}
                   onDragOver={(e) => { if (!canDispatch) return; e.preventDefault(); setOverDesk(d.id); }}
                   onDragLeave={() => setOverDesk((x) => (x === d.id ? null : x))}
                   onDrop={(e) => { e.preventDefault(); setOverDesk(null); const id = e.dataTransfer.getData("text/plain"); give(d, sel.has(id) ? chosen.map((m) => m.id) : [id]); }}
-                  className={`w-[132px] shrink-0 rounded-xl border px-2.5 py-1.5 text-left transition-all duration-200 ease-out hover:-translate-y-2 hover:scale-[1.04] hover:border-violet-300 hover:shadow-md ${lifted ? "-translate-y-2 scale-[1.06] border-violet-500 bg-violet-50 shadow-md" : on ? "border-violet-500 bg-violet-50/60" : "border-slate-200 bg-slate-50"}`}>
-                  <div className="truncate text-[13px] font-semibold text-slate-800">{d.name}</div>
-                  {ws.length ? <>
-                    {ws.slice(0, 2).map((w) => <div key={w.id} className="truncate font-mono text-[10px] text-slate-500">{w.product_sku ?? w.mo_no} · {fmt(w.qty)}</div>)}
-                    {ws.length > 2 && <div className="text-[10px] text-slate-400">+{ws.length - 2} ใบ</div>}
-                  </> : <div className="text-[10px] text-slate-400">ว่าง</div>}
+                  className={`flex h-[150px] w-[112px] shrink-0 flex-col rounded-2xl border p-2 text-left transition-all duration-200 ease-out hover:-translate-y-2 hover:scale-[1.04] hover:border-violet-300 hover:shadow-md ${lifted ? "-translate-y-2 scale-[1.06] border-violet-500 bg-violet-50 shadow-md" : on ? "border-violet-500 bg-violet-50/60" : "border-slate-200 bg-slate-50"}`}>
+                  <div className="line-clamp-2 text-[13px] font-bold leading-tight text-slate-800">{d.name}</div>
+                  <div className="mt-1.5 flex h-9 items-center">
+                    {imgs.length ? (
+                      <div className="flex -space-x-3">{imgs.map((w) => <img key={w.id} src={w.image_url ?? ""} alt="" draggable={false} className="h-8 w-8 rounded-lg bg-white object-cover ring-2 ring-white" />)}</div>
+                    ) : <span className="text-lg text-slate-300"><Icon name="image" /></span>}
+                    {imgs.length > 0 && st.ws.length > imgs.length && <span className="ml-1 text-[10px] text-slate-400">+{st.ws.length - imgs.length}</span>}
+                  </div>
+                  <div className="mt-auto space-y-0.5 text-[11px] leading-tight">
+                    {st.ws.length ? <div className="text-slate-600"><b className="text-slate-800">{st.ws.length}</b> ใบ · ค้าง {fmt(st.left)}</div> : <div className="text-slate-400">ว่าง</div>}
+                    <div className="flex items-center gap-1 text-slate-500"><Icon name="users" /> {st.ppl.length} คน</div>
+                    {st.labor > 0 && <div className="truncate font-bold tabular-nums text-violet-700">฿{fmt(st.labor)}</div>}
+                  </div>
                 </button>
               );
             })}

@@ -28,14 +28,30 @@ const PAGE = 1000;
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Row = Record<string, unknown>;
 
+/** นับ query ที่พลาดแม้ยิงซ้ำแล้ว → ตอบ partial: true ให้หน้าเว็บเตือน (ไม่เงียบเป็น "ไม่มีราคา") */
+type Fails = { n: number };
+
+/**
+ * ยิงซ้ำเมื่อพลาด — DB หนาแน่นชั่วคราว (statement timeout 57014) เคยทำให้ราคาขายหายทั้งชุด 300 รหัส
+ * (เจอจริง 2026-11-04 13:02 — query อื่นหลายตัวโดน timeout พร้อมกัน) · สูงสุด 3 ครั้ง เว้น 0.4 / 1.2 วิ
+ */
+async function withRetry<T extends { error: unknown }>(run: () => PromiseLike<T>, tries = 3): Promise<T> {
+  let r = await run();
+  for (let i = 1; i < tries && r.error; i++) {
+    await new Promise((ok) => setTimeout(ok, 400 * 3 ** (i - 1)));
+    r = await run();
+  }
+  return r;
+}
+
 /** ดึงแถวของหลายใบสั่งผลิต "ให้ครบจริง" — ไล่ทีละหน้า (กันโดนตัดที่ 1,000 แถว) */
-async function fetchAllByMo(admin: Admin, table: string, select: string, moNos: string[]): Promise<Row[]> {
+async function fetchAllByMo(admin: Admin, table: string, select: string, moNos: string[], fails?: Fails): Promise<Row[]> {
   if (moNos.length === 0) return [];
   const out: Row[] = [];
   for (let from = 0; from < 50_000; from += PAGE) {
-    const { data, error } = await admin.from(table).select(select).in("mo_no", moNos).eq("is_active", true)
-      .order("mo_no", { ascending: true }).range(from, from + PAGE - 1);
-    if (error) break;
+    const { data, error } = await withRetry(() => admin.from(table).select(select).in("mo_no", moNos).eq("is_active", true)
+      .order("mo_no", { ascending: true }).range(from, from + PAGE - 1));
+    if (error) { if (fails) fails.n++; break; }
     const rows = (data ?? []) as unknown as Row[];
     out.push(...rows);
     if (rows.length < PAGE) break;
@@ -43,12 +59,13 @@ async function fetchAllByMo(admin: Admin, table: string, select: string, moNos: 
   return out;
 }
 
-/** ดึง skus_v2 เป็นชุด ๆ (ยิงขนานกัน) — ใช้ทั้งสินค้าที่ผลิตและวัตถุดิบในสูตร */
-async function fetchSkus(admin: Admin, codes: string[], select: string): Promise<Row[]> {
+/** ดึง skus_v2 เป็นชุด ๆ (ชุดละ 150 · ยิงขนานกัน · พลาดยิงซ้ำ) — ใช้ทั้งสินค้าที่ผลิตและวัตถุดิบในสูตร */
+async function fetchSkus(admin: Admin, codes: string[], select: string, fails?: Fails): Promise<Row[]> {
   const list = [...new Set(codes.filter(Boolean))];
   const chunks: string[][] = [];
-  for (let i = 0; i < list.length; i += 300) chunks.push(list.slice(i, i + 300));
-  const results = await Promise.all(chunks.map((c) => admin.from("skus_v2").select(select).in("code", c).eq("is_active", true)));
+  for (let i = 0; i < list.length; i += 150) chunks.push(list.slice(i, i + 150));
+  const results = await Promise.all(chunks.map((c) => withRetry(() => admin.from("skus_v2").select(select).in("code", c).eq("is_active", true))));
+  if (fails) fails.n += results.filter((r) => r.error).length;
   return results.flatMap((r) => (r.data ?? []) as unknown as Row[]);
 }
 
@@ -59,27 +76,41 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ?dispatched=1&from=&to= → ยอดที่จ่ายงานไปแล้วในช่วง (แผง "สรุปเป้า" โหมดผู้บริหาร) · วันที่ = dispatch_date (วันไทย)
   //   ใบที่ไม่ระบุวันจ่าย ("จำไม่ได้" / อัปเดตย้อนหลัง — ข้อมูลจริง ต.ค.–พ.ย. 69 ว่างทั้งหมด 141 ใบ) = นับตามวันที่บันทึกใบ (created_at เวลาไทย)
   const sp = new URL(request.url).searchParams;
+
+  // ?prices=1 → ราคาขาย/ชิ้น ต่อใบสั่งผลิตที่ยังเปิด (เบา: 2 query) — การ์ดโหมดผู้บริหารใช้แค่นี้ ไม่ต้องดึงทั้งแผน (~25 query)
+  if (sp.get("prices") === "1") {
+    const fails: Fails = { n: 0 };
+    const { data: ms, error } = await withRetry(() => admin.from("manufacturing_orders").select("mo_no, product_sku")
+      .eq("is_active", true).not("status", "in", "(cancelled,done)").limit(2000));
+    if (error) return NextResponse.json({ prices: {}, partial: true, error: "โหลดราคาขายไม่สำเร็จ (ระบบหนาแน่นชั่วคราว) — ลองใหม่อีกครั้ง" }, { status: 503 });
+    const list = (ms ?? []) as Row[];
+    const skus = await fetchSkus(admin, list.map((m) => String(m.product_sku ?? "")), "code, list_price", fails);
+    const priceOf = new Map(skus.map((s) => [String(s.code), Number(s.list_price) || 0]));
+    const prices: Record<string, number> = {};
+    for (const m of list) { const p = priceOf.get(String(m.product_sku ?? "")) ?? 0; if (p > 0) prices[String(m.mo_no)] = r2(p); }
+    return NextResponse.json({ prices, partial: fails.n > 0, error: null });
+  }
+
   if (sp.get("dispatched") === "1") {
-    const ok = (d: string | null) => !!d && /^d{4}-d{2}-d{2}$/.test(d);
+    const ok = (d: string | null) => !!d && /^\d{4}-\d{2}-\d{2}$/.test(d);
     const from = sp.get("from"), to = sp.get("to");
     if (!ok(from) || !ok(to)) return NextResponse.json({ error: "ระบุช่วงวันที่ from / to (YYYY-MM-DD)" }, { status: 400 });
     const t0 = new Date(Date.parse(`${from}T00:00:00+07:00`)).toISOString(), t1 = new Date(Date.parse(`${to}T23:59:59.999+07:00`)).toISOString();
-    const { data: ws } = await admin.from("mo_work_orders").select("mo_no, qty, labor_cost, status, dispatch_date")
+    const fails: Fails = { n: 0 };
+    const { data: ws, error: wErr } = await withRetry(() => admin.from("mo_work_orders").select("mo_no, qty, labor_cost, status, dispatch_date")
       .eq("is_active", true).neq("status", "cancelled")
-      .or(`and(dispatch_date.gte.${from},dispatch_date.lte.${to}),and(dispatch_date.is.null,created_at.gte."${t0}",created_at.lte."${t1}")`).limit(10000);
+      .or(`and(dispatch_date.gte.${from},dispatch_date.lte.${to}),and(dispatch_date.is.null,created_at.gte."${t0}",created_at.lte."${t1}")`).limit(10000));
+    if (wErr) return NextResponse.json({ error: "โหลดยอดที่จ่ายไม่สำเร็จ (ระบบหนาแน่นชั่วคราว) — ลองใหม่อีกครั้ง" }, { status: 503 });
     const list = (ws ?? []) as Row[];
     const moNos = [...new Set(list.map((w) => String(w.mo_no)))];
     const skuOf = new Map<string, string>();
     for (let i = 0; i < moNos.length; i += 300) {
-      const { data: ms } = await admin.from("manufacturing_orders").select("mo_no, product_sku").in("mo_no", moNos.slice(i, i + 300));
+      const { data: ms, error } = await withRetry(() => admin.from("manufacturing_orders").select("mo_no, product_sku").in("mo_no", moNos.slice(i, i + 300)));
+      if (error) fails.n++;
       for (const m of (ms ?? []) as Row[]) skuOf.set(String(m.mo_no), String(m.product_sku ?? ""));
     }
-    const skus = [...new Set([...skuOf.values()].filter(Boolean))];
     const priceOf = new Map<string, number>();
-    for (let i = 0; i < skus.length; i += 300) {
-      const { data: ps } = await admin.from("skus_v2").select("code, list_price").in("code", skus.slice(i, i + 300));
-      for (const p of (ps ?? []) as Row[]) priceOf.set(String(p.code), Number(p.list_price) || 0);
-    }
+    for (const p of await fetchSkus(admin, [...skuOf.values()], "code, list_price", fails)) priceOf.set(String(p.code), Number(p.list_price) || 0);
     let value = 0, labor = 0, qty = 0, laborMissing = 0, noPrice = 0, noDate = 0;
     for (const w of list) {
       if (!w.dispatch_date) noDate++;
@@ -87,15 +118,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       qty += q; value += q * p; if (!p) noPrice++;
       if (w.labor_cost == null) laborMissing++; else labor += Number(w.labor_cost) || 0;
     }
-    return NextResponse.json({ data: { from, to, count: list.length, qty: r2(qty), value: r2(value), labor: r2(labor), labor_missing: laborMissing, no_price: noPrice, no_date: noDate }, error: null });
+    return NextResponse.json({ data: { from, to, count: list.length, qty: r2(qty), value: r2(value), labor: r2(labor), labor_missing: laborMissing, no_price: noPrice, no_date: noDate, partial: fails.n > 0 }, error: null });
   }
 
-  const [{ data: mosRaw }, { data: wosRaw }] = await Promise.all([
-    admin.from("manufacturing_orders")
+  const fails: Fails = { n: 0 };
+  const [{ data: mosRaw, error: mErr }, { data: wosRaw, error: wErr }] = await Promise.all([
+    withRetry(() => admin.from("manufacturing_orders")
       .select("id, mo_no, product_sku, product_name, qty, status, due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, priority_at, priority_by, created_at, size_breakdown")
-      .eq("is_active", true).not("status", "in", "(cancelled,done)").limit(2000),
-    admin.from("mo_work_orders").select("mo_no, qty, status, labor_cost").eq("is_active", true).limit(5000),
+      .eq("is_active", true).not("status", "in", "(cancelled,done)").limit(2000)),
+    withRetry(() => admin.from("mo_work_orders").select("mo_no, qty, status, labor_cost").eq("is_active", true).limit(5000)),
   ]);
+  if (mErr) return NextResponse.json({ rows: [], error: "โหลดแผนไม่สำเร็จ (ระบบหนาแน่นชั่วคราว) — ลองใหม่อีกครั้ง" }, { status: 503 });
+  if (wErr) fails.n++;
 
   const mos = (mosRaw ?? []) as Row[];
   const wos = (wosRaw ?? []) as Row[];
@@ -115,19 +149,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const [prodSkus, sums, mats, { data: ratesRaw }, { data: pcsRaw }] = await Promise.all([
     fetchSkus(admin, mos.map((m) => String(m.product_sku ?? "")),
-      "code, list_price, cover_image_r2_key, color_th, color, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( id, name, color, pricing_mode ) )"),
-    fetchAllByMo(admin, "mo_material_summary", "mo_no, component_sku, qty_per, is_ready", moNos),
-    fetchAllByMo(admin, "mo_materials", "mo_no, cut_done, material_type, cut_block_code, cut_length, pieces", moNos),
+      "code, list_price, cover_image_r2_key, color_th, color, parent:parent_skus_v2!parent_sku_id ( brand:brands!brand_id ( id, name, color, pricing_mode ) )", fails),
+    fetchAllByMo(admin, "mo_material_summary", "mo_no, component_sku, qty_per, is_ready", moNos, fails),
+    fetchAllByMo(admin, "mo_materials", "mo_no, cut_done, material_type, cut_block_code, cut_length, pieces", moNos, fails),
     bomCodes.length
-      ? admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes).is("craftsman_id", null).eq("is_current", true).eq("is_active", true)
+      ? withRetry(() => admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes).is("craftsman_id", null).eq("is_current", true).eq("is_active", true))
       : Promise.resolve({ data: [] as Row[] }),
     moNos.length
-      ? admin.from("mo_piecework").select("mo_no, rate, qty_per, total_qty, status").in("mo_no", moNos).eq("is_active", true)
+      ? withRetry(() => admin.from("mo_piecework").select("mo_no, rate, qty_per, total_qty, status").in("mo_no", moNos).eq("is_active", true))
       : Promise.resolve({ data: [] as Row[] }),
   ]);
 
   // ราคาซื้อวัตถุดิบ (standard_price) ของชิ้นส่วนในสูตร
-  const compSkus = await fetchSkus(admin, sums.map((s) => String(s.component_sku ?? "")), "code, standard_price");
+  const compSkus = await fetchSkus(admin, sums.map((s) => String(s.component_sku ?? "")), "code, standard_price", fails);
   const costOf = new Map<string, number>();
   for (const c of compSkus) costOf.set(String(c.code), Number(c.standard_price) || 0);
 
@@ -222,7 +256,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     };
   });
 
-  return NextResponse.json({ rows, error: null });
+  // partial = บาง query พลาดแม้ยิงซ้ำ (ตัวเลขบางช่องอาจเป็น 0) → หน้าเว็บเตือน + ปุ่มโหลดใหม่
+  return NextResponse.json({ rows, partial: fails.n > 0, error: null });
 }
 
 /** ติด/ปลดธงลำดับความสำคัญ (0=ปกติ 1=สำคัญ 2=เร่งด่วน) */

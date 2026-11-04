@@ -100,10 +100,12 @@ export function ExecPlan({ onOpenMO }: {
       const j = await res.json();
       if (j.error) throw new Error(j.error);
       setRows((j.rows ?? []) as ExecRow[]);
+      // บาง query พลาดแม้ยิงซ้ำ (DB หนาแน่นชั่วคราว) → ตัวเลขบางช่องอาจเป็น 0 — เตือน ไม่ปล่อยเงียบ
+      if (j.partial) toast.warning("ข้อมูลบางส่วนโหลดไม่ครบ (ระบบหนาแน่นชั่วคราว) — ราคา/ต้นทุนบางใบอาจเป็น 0 ลองโหลดหน้าใหม่");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "โหลดข้อมูลไม่สำเร็จ");
     } finally { setLoading(false); }
-  }, []);
+  }, [toast]);
   useEffect(() => { void load(); }, [load]);
 
   // โหลดรายชื่อแบรนด์ตอน "กดเปิดป๊อป" เท่านั้น (ไม่ถ่วงหน้าตอนเปิดแท็บ)
