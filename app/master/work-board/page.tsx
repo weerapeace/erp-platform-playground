@@ -49,6 +49,7 @@ import { CatchUpQueue } from "./catch-up-queue";
 import { CatchUpBatch } from "./catch-up-batch";
 import { SalesUpdate } from "./sales-update";
 import { PieceworkDispatch } from "./piecework-dispatch";
+import { ExecDispatchView } from "./exec-dispatch";
 import { CatchUpEdit } from "./catch-up-edit";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
 import type { CuAllRow } from "@/app/api/mo/catch-up/all/route";
@@ -70,7 +71,6 @@ const BoardCalendar = dynamicImport(() => import("./board-calendar").then((m) =>
 // สรุปค่าแรงรายเดือนแยกตามช่าง — โหลดตอนเปิดแท็บเท่านั้น
 const LaborSummary = dynamicImport(() => import("./labor-summary").then((m) => m.LaborSummary), { ssr: false });
 // มุมมองแคนวาส (section = โต๊ะ) — โหลดตอนเปิดแท็บเท่านั้น
-const CanvasView = dynamicImport(() => import("./canvas-view").then((m) => m.CanvasView), { ssr: false });
 import { DeskShop } from "./desk-shop";
 import { BoardLineSettings } from "@/components/board-line-settings";
 import { RequestInboxButton } from "@/components/request-inbox";
@@ -306,7 +306,7 @@ function WorkBoardPageInner() {
   const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], dispatchedMos: [], deliveryPlans: [], pendingPiece: [] });
   const [loading, setLoading] = useState(true);
   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
-  const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "canvas", "table", "shop", "purchase", "calendar", "labor", "exec"] as const, "board");
+  const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "deskdock", "table", "shop", "purchase", "calendar", "labor", "exec"] as const, "board");   // แคนวาส (โซนตามโต๊ะ) เอาออกแล้ว 2026-11-04 — ใครตั้งไว้ = กลับไปบอร์ด · deskdock = จ่ายงาน (โหมดผู้บริหาร)
   // ถ้าเคยตั้ง "แผนผู้บริหาร" เป็นค่าเริ่มต้นไว้ แล้วสิทธิ์ถูกถอดทีหลัง → ถอยกลับบอร์ดปกติ (ไม่ค้างหน้าว่าง)
   const viewMode = viewRaw === "exec" && !isAdmin ? "board" : viewRaw;
   const [shopMode, setShopMode] = useState<"dispatch" | "desk">("dispatch");   // มุมมองช้อป: รอจ่าย / งานในโต๊ะ
@@ -400,6 +400,8 @@ function WorkBoardPageInner() {
   }, []);
   const [dispMO, setDispMO] = useState<PendingMO | null>(null);
   const [dispDept, setDispDept] = useState<Dept | null>(null);
+  // คิวจ่ายงานหลายใบให้โต๊ะเดียว (โหมดผู้บริหาร) — ป๊อปเดิมเปิดทีละใบ · บันทึกแล้วไปใบถัดไป · ยกเลิก = หยุดคิว
+  const [dispQueue, setDispQueue] = useState<{ list: PendingMO[]; dept: Dept; i: number } | null>(null);
   const [deskPanel, setDeskPanel] = useState(false);   // 👥 แผงจัดคนในโต๊ะ (ในป๊อปจ่ายงาน)
   const [dispQty, setDispQty] = useState(0);
   const [dispCrew, setDispCrew] = useState<string[]>([]);   // 👥 คนรับงาน (หลายคนได้ · ว่าง = ทั้งโต๊ะ/จำไม่ได้ว่าใคร)
@@ -783,7 +785,11 @@ function WorkBoardPageInner() {
           labor_cost: dispLaborRate.trim() !== "" ? (Number(dispLaborRate) || 0) * dispQty : null }) });
       const j = await res.json(); if (j.error) throw new Error(j.error);
       toast.success(`จ่ายงานเข้า ${dispDept.name}${crew.length ? ` · ${crew.map((c) => c.name).join(", ")}` : ""} แล้ว: ${j.wo_no ?? ""}`);
-      setDispMO(null); setDispDept(null); await load(true);
+      setDispMO(null); setDispDept(null);
+      if (dispQueue && dispQueue.i + 1 < dispQueue.list.length) {   // คิวโหมดผู้บริหาร → ใบถัดไป
+        const n = dispQueue.i + 1; setDispQueue({ ...dispQueue, i: n }); openDispatch(dispQueue.list[n], dispQueue.dept);
+      } else setDispQueue(null);
+      await load(true);
     } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
     finally { setDispSaving(false); }
   };
@@ -1400,7 +1406,7 @@ function WorkBoardPageInner() {
   // ?view=table — เปิดมุมมองที่ระบุตรง ๆ (กรอบพรีวิว iPad / ลิงก์ QR) · เปลี่ยนชั่วคราว ไม่ทับมุมมองเริ่มต้นที่ผู้ใช้ตั้ง ⭐
   useEffect(() => {
     const v = searchParams.get("view");
-    if (v === "board" || v === "canvas" || v === "table" || v === "shop" || v === "purchase" || v === "calendar" || v === "labor" || v === "exec") setViewMode(v);
+    if (v === "board" || v === "deskdock" || v === "table" || v === "shop" || v === "purchase" || v === "calendar" || v === "labor" || v === "exec") setViewMode(v);
   }, [searchParams, setViewMode]);
   // ?group=<ชื่อกลุ่ม> — ลิงก์ "จ่ายงานชุดนี้" จากหน้าใบสั่งขาย (มุมมองตามชุด) → กรองกลุ่มนี้ไว้ให้ (รอจ่าย · ช้อปจ่ายงาน · ปฏิทิน · พิมพ์)
   const urlGroup = searchParams.get("group") || undefined;
@@ -1655,36 +1661,19 @@ function WorkBoardPageInner() {
           onOpenWO={(woId) => { const wo = board.workOrders.find((x) => x.id === woId); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
           onReload={() => load(true)}
         />
+      ) : viewMode === "deskdock" ? (
+        <ExecDispatchView pending={board.pending} workOrders={board.workOrders} desks={boardDesks} craftsmen={craftsmen}
+          canDispatch={canDispatch} showPrice={isAdmin}
+          onDispatch={(mos, d) => {
+            const dept = boardDesks.find((x) => x.id === d.id) ?? null;
+            const list = mos.map((m) => board.pending.find((p) => p.id === m.id)).filter((m): m is PendingMO => !!m);
+            if (!dept || !list.length) return;
+            setDispQueue({ list, dept, i: 0 }); openDispatch(list[0], dept);
+          }}
+          onOpenMO={(m) => { const mo = board.pending.find((p) => p.id === m.id); if (mo) { setClWO(null); setChecklistMO(mo); } }}
+          onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }} />
       ) : viewMode === "labor" ? (
         <LaborSummary />
-      ) : viewMode === "canvas" ? (
-        (() => {
-          // แคนวาส — กระดาน Excalidraw: 1 กรอบ = 1 โต๊ะ · การ์ดแผน (ลากย้ายโต๊ะได้) + ของจริง (สีเทา ล็อก)
-          // ค่าแรง/ชิ้น + รูป ส่งเข้าไปให้การ์ดคิดค่าแรงและหัวกรอบรวมยอด (สูตรเดียวกับหน้าแผน)
-          const laborPerUnit: Record<string, number> = {};
-          const imageByMo: Record<string, string | null> = {};
-          for (const m of board.pending) { laborPerUnit[m.mo_no] = (m.central_rate && m.central_rate > 0) ? m.central_rate : (m.qty > 0 && m.labor ? m.labor.prod_plan / m.qty : 0); if (m.image_url) imageByMo[m.mo_no] = m.image_url; }
-          for (const w of board.workOrders) { const k = String(w.mo_no); if (!laborPerUnit[k]) laborPerUnit[k] = (w.central_rate && w.central_rate > 0) ? w.central_rate : ((w.qty || 0) > 0 && w.labor ? w.labor.prod_plan / (w.qty || 1) : 0); if (imageByMo[k] == null && w.image_url) imageByMo[k] = w.image_url; }
-          return <CanvasView
-            departments={boardDesks}
-            realWOs={board.workOrders} plans={plans} canEdit={canDispatch}
-            imageByMo={imageByMo} laborPerUnit={laborPerUnit}
-            onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
-            onOpenWork={(info) => {
-              // ดับเบิลคลิกการ์ดแผน → เปิดป๊อปรายละเอียดงาน · หาใบจาก "รอจ่าย" ก่อน ไม่เจอค่อยหาจากใบที่จ่ายครบแล้ว
-              const all = [...board.pending, ...board.dispatchedMos];
-              const mo = info.moId ? all.find((x) => x.id === info.moId) : (info.moNo ? all.find((x) => x.mo_no === info.moNo) : null);
-              setClWO(null);
-              if (mo) { setChecklistMO(mo); return; }
-              setChecklistMO({
-                id: info.moId ?? "", mo_no: info.moNo ?? "", product_sku: info.productSku, product_name: info.productName,
-                qty: info.qty || 0, dispatched: 0, remaining: 0, due_date: null, status: "",
-                image_url: null, brand: null, brand_color: null,
-                prep_done: false, cut_done: false, has_bom: false, prep_total: 0, prep_ready: 0, cut_total: 0, cut_ready: 0, ready: false,
-              });
-            }}
-          />;
-        })()
       ) : viewMode === "exec" ? (
         <ExecPlan onOpenMO={(row: ExecRow) => {
           setClWO(null);
@@ -1928,9 +1917,9 @@ function WorkBoardPageInner() {
       </ERPModal>
 
       {/* popup จ่ายงาน */}
-      <ERPModal open={dispMO !== null} onClose={() => { if (dispSaving) return; setDispMO(null); void load(true); }} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}`}
+      <ERPModal open={dispMO !== null} onClose={() => { if (dispSaving) return; setDispMO(null); setDispQueue(null); void load(true); }} size="md" title={`🧰 จ่ายงาน → ${dispDept?.name ?? ""}${dispQueue && dispQueue.list.length > 1 ? ` · ใบที่ ${dispQueue.i + 1} จาก ${dispQueue.list.length}` : ""}`}
         footer={<>
-          <button onClick={() => setDispMO(null)} disabled={dispSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
+          <button onClick={() => { setDispMO(null); setDispQueue(null); }} disabled={dispSaving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">ยกเลิก</button>
           <button onClick={submitDispatch} disabled={dispSaving || !dispDept || (dispIsHire && dispCrew.length === 0)} title={!dispDept ? "เลือกโต๊ะก่อน" : (dispIsHire && dispCrew.length === 0) ? "งานเหมา ต้องเลือกช่างก่อน" : !(Number(dispLaborRate) > 0) ? "จ่ายได้เลย — ค่าแรงค่อยมาใส่ทีหลัง" : ""} className="h-9 px-4 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">{dispSaving ? "กำลังจ่าย..." : "ยืนยันจ่ายงาน"}</button>
         </>}>
         {dispMO && (
@@ -5762,9 +5751,9 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
 }
 
 // ---- แถบบนแบบแอป: สลับมุมมองบอร์ด (ปุ่มชื่อหน้า ▾) ----
-type BoardView = "board" | "canvas" | "table" | "shop" | "purchase" | "calendar" | "labor" | "exec";
+type BoardView = "board" | "deskdock" | "table" | "shop" | "purchase" | "calendar" | "labor" | "exec";
 const BOARD_VIEWS: [BoardView, string, string][] = [
-  ["board", "📋", "บอร์ด"], ["canvas", "🗂", "แคนวาส (โซนตามโต๊ะ)"], ["table", "▦", "ตาราง"], ["shop", "🛒", "ช้อปจ่ายงาน"],
+  ["board", "📋", "บอร์ด"], ["deskdock", "🚚", "จ่ายงาน (โหมดผู้บริหาร)"], ["table", "▦", "ตาราง"], ["shop", "🛒", "ช้อปจ่ายงาน"],
   ["purchase", "📦", "ขอซื้อ/เตรียม"], ["calendar", "📅", "ปฏิทิน"], ["labor", "💰", "ค่าแรงรายเดือน"], ["exec", "👔", "แผนผู้บริหาร"],
 ];
 function BoardViewPicker({ view, isAdmin, defView, onPick, onSaveDefault }: {
