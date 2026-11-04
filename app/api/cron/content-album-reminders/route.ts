@@ -31,7 +31,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const today = bangkokToday();
   const albums = await loadContentAlbums(admin);
   const hits = albums
-    .map((a) => ({ a, why: albumReminder({ stage: a.status.stage, created_at: a.created_at, due_date: a.due_date }, today) }))
+    .map((a) => ({ a, why: albumReminder({ stage: a.status.stage, created_at: a.created_at, due_date: a.due_date, phase: a.phase }, today) }))
     .filter((h): h is { a: typeof h.a; why: AlbumReminder } => !!h.why)
     .sort((x, y) => ORDER.indexOf(x.why) - ORDER.indexOf(y.why));
   if (!hits.length) return NextResponse.json({ data: { today, albums: 0, users: 0, sent: 0 }, error: null });

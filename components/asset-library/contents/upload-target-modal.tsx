@@ -126,7 +126,9 @@ export function UploadTargetModal({ files, albums, brands, defaultBrandId, onClo
                     <span className="block text-sm font-medium text-slate-800 truncate">{a.name}</span>
                     <span className="block text-xs text-slate-500 truncate">{[a.brand_name, t(`${a.file_count} ไฟล์`, `${a.file_count} files`)].filter(Boolean).join(" · ")}</span>
                   </span>
-                  <StageBadge stage={a.status.stage} />
+                  {a.phase === "wish"
+                    ? <span className="inline-flex items-center h-6 px-2 rounded-full border border-amber-200 bg-amber-50 text-amber-800 text-xs whitespace-nowrap" title={t("เลือกอันนี้ = ถ่ายแล้ว ระบบแปลงเป็นอัลบั้มให้", "Picking this turns the wish into an album")}>{t("อยากได้ → อัลบั้ม", "Wish → album")}</span>
+                    : <StageBadge stage={a.status.stage} />}
                 </button>
               ))}
             </div>

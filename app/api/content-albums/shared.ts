@@ -1,5 +1,9 @@
 /** ของใช้ร่วมของ /api/content-albums/* (แยกจาก route.ts — route ต้อง export แค่ handler) */
 import { normalizeCaptionDrafts } from "@/lib/content-album-captions";
+import { POST_TYPES } from "@/lib/creative-tasks";
+
+// ประเภท Content ที่อยากได้ = ชุดเดียวกับประเภทโพสต์ (lib/creative-tasks POST_TYPES)
+const CONTENT_TYPE_KEYS = new Set(POST_TYPES.map((t) => t.value));
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
@@ -44,5 +48,11 @@ export function cleanAlbumFields(body: Record<string, unknown>): { album: Record
     collection.cover_asset_id = body.cover_asset_id || null;
   }
   if (body.closed !== undefined) album.closed_at = body.closed ? new Date().toISOString() : null;
+  // รายการที่อยากได้ → อัลบั้ม (ถ่ายแล้ว) · ย้อนกลับเป็นรายการที่อยากได้ได้ถ้ายังไม่มีไฟล์ (ตรวจที่ route)
+  if (body.phase !== undefined) {
+    if (body.phase !== "wish" && body.phase !== "album") return { error: "ขั้นไม่ถูกต้อง" };
+    album.phase = body.phase;
+  }
+  if (body.content_types !== undefined) album.content_types = codeList(body.content_types).filter((k) => CONTENT_TYPE_KEYS.has(k));
   return { album, collection };
 }

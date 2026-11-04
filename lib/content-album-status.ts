@@ -65,15 +65,30 @@ export const ALBUM_REMINDER_META: Record<AlbumReminder, { th: string; en: string
   due_soon: { th: "ต้องลงพรุ่งนี้", en: "Due tomorrow" },
   stale: { th: `รอจัดการเกิน ${STALE_DAYS} วัน`, en: `Waiting over ${STALE_DAYS} days` },
 };
-export function albumReminder(a: { stage: AlbumStage; created_at: string; due_date: string | null }, today: string): AlbumReminder | null {
+export function albumReminder(a: { stage: AlbumStage; created_at: string; due_date: string | null; phase?: AlbumPhase }, today: string): AlbumReminder | null {
   if (a.stage === "posted" || a.stage === "closed") return null;
+  const wish = a.phase === "wish";
   if (a.due_date && a.due_date < today) return "overdue";
   const tomorrow = new Date(Date.parse(`${today}T00:00:00Z`) + 86400000).toISOString().slice(0, 10);
   if (a.due_date === tomorrow) return "due_soon";
   const days = Math.floor((Date.parse(`${today}T00:00:00Z`) - Date.parse(`${a.created_at.slice(0, 10)}T00:00:00Z`)) / 86400000);
-  if (a.stage === "manage" && days >= STALE_DAYS) return "stale";
+  // รายการที่อยากได้ ยังไม่มีไฟล์เป็นเรื่องปกติ → เตือนแค่วันที่ (ไม่นับ "รอจัดการนาน")
+  if (!wish && a.stage === "manage" && days >= STALE_DAYS) return "stale";
   return null;
 }
+
+/**
+ * รายการที่อยากได้ (phase wish = อัลบั้มที่ยังไม่ได้ถ่าย) — สถานะคิดเอง ไม่ต้องกด
+ *   ยังไม่ระบุคนถ่าย = รอหาคนถ่าย · ระบุแล้ว = นัดถ่ายแล้ว · ถ่ายแล้ว = กด "แปลงเป็นอัลบั้ม" (phase → album)
+ */
+export type AlbumPhase = "wish" | "album";
+export type WishStage = "need_shooter" | "scheduled";
+export const WISH_STAGES: WishStage[] = ["need_shooter", "scheduled"];
+export const WISH_STAGE_META: Record<WishStage, { th: string; en: string }> = {
+  need_shooter: { th: "รอหาคนถ่าย", en: "Needs a shooter" },
+  scheduled: { th: "นัดถ่ายแล้ว", en: "Shooter assigned" },
+};
+export const wishStage = (a: { assignee_ids: string[] }): WishStage => (a.assignee_ids.length ? "scheduled" : "need_shooter");
 /** วันนี้ (YYYY-MM-DD) ตามเวลาไทย — เซิร์ฟเวอร์อยู่ UTC */
 export const bangkokToday = (now = Date.now()) => new Date(now + 7 * 3600000).toISOString().slice(0, 10);
 

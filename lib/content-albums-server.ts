@@ -8,7 +8,7 @@
  *   โพสต์ที่สร้างจากอัลบั้ม = erp_creative_content.album_id · สถานะอัลบั้มคิดสด (lib/content-album-status)
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { albumStatus, type AlbumPostInput, type AlbumStatus } from "@/lib/content-album-status";
+import { albumStatus, type AlbumPhase, type AlbumPostInput, type AlbumStatus } from "@/lib/content-album-status";
 import { applyFileOrder } from "@/lib/content-album-order";
 import { hasAnyCaption, normalizeCaptionDrafts, type AlbumCaptionDrafts } from "@/lib/content-album-captions";
 import type { CaptionSettings } from "@/lib/content-readiness";
@@ -39,6 +39,22 @@ export type AlbumFile = {
   added_at: string | null;
 };
 
+/** Reference 1 ชิ้น (รายการที่อยากได้ / อัลบั้ม) — รูป · ลิงก์วิดีโอ/โพสต์ · ข้อความ (lib/content-album-refs) */
+export type AlbumRef = {
+  id: string; kind: "image" | "link" | "text";
+  r2_key: string | null; url: string | null; provider: string | null; title: string | null; thumb_url: string | null;
+  body: string | null; note: string | null; sort_order: number; created_by: string | null; created_at: string;
+};
+const REF_COLS = "id, album_id, kind, r2_key, url, provider, title, thumb_url, body, note, sort_order, created_by, created_at";
+
+/** Reference ทั้งหมดของอัลบั้ม (ลำดับที่จัด → เก่าก่อน) */
+export async function loadAlbumRefs(admin: Admin, albumId: string): Promise<AlbumRef[]> {
+  const { data, error } = await admin.from("content_album_refs").select(REF_COLS).eq("album_id", albumId)
+    .order("sort_order", { ascending: true }).order("created_at", { ascending: true }).limit(500);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as (AlbumRef & { album_id: string })[]).map(({ album_id: _a, ...r }) => r);
+}
+
 /** โพสต์ที่ผูกกับอัลบั้ม (ย่อ) */
 export type AlbumPost = {
   id: string; content_no: string | null; title: string; status: string; is_active: boolean;
@@ -47,6 +63,11 @@ export type AlbumPost = {
 
 export type ContentAlbum = {
   id: string;
+  /** wish = รายการที่อยากได้ (ยังไม่ถ่าย · โชว์ Reference แทนรูป) · album = อัลบั้มที่มีไฟล์จากการถ่าย */
+  phase: AlbumPhase;
+  content_types: string[];        // ประเภท Content ที่อยากได้ (POST_TYPES)
+  ref_count: number;
+  ref_previews: AlbumRef[];       // Reference ≤4 ชิ้นแรก (การ์ด)
   name: string;
   description: string | null;
   brand_id: string | null;
@@ -83,9 +104,10 @@ export type ContentAlbum = {
 type AlbumDbRow = {
   id: string; brand_id: string | null; assignee_ids: string[] | null; due_date: string | null; planned_platforms: string[] | null;
   caption_draft: string | null; caption_drafts: unknown; drive_folder_id: string | null; picked_asset_ids: string[] | null; file_order: string[] | null; parent_sku_codes: unknown;
+  phase: string | null; content_types: string[] | null;
   closed_at: string | null; trashed_at: string | null; created_by: string | null; created_at: string; updated_at: string;
 };
-const ALBUM_COLS = "id, brand_id, assignee_ids, due_date, planned_platforms, caption_draft, caption_drafts, drive_folder_id, picked_asset_ids, file_order, parent_sku_codes, closed_at, trashed_at, created_by, created_at, updated_at";
+const ALBUM_COLS = "id, phase, content_types, brand_id, assignee_ids, due_date, planned_platforms, caption_draft, caption_drafts, drive_folder_id, picked_asset_ids, file_order, parent_sku_codes, closed_at, trashed_at, created_by, created_at, updated_at";
 const POST_COLS = "id, content_no, title, status, is_active, scheduled_at, platforms, post_status, platform_images, platform_formats, album_id";
 const FILE_COLS = "id, title, file_name, r2_key, asset_type, content_type, size_bytes, width, height, duration_sec, drive_file_id, drive_missing_at, phash, status";
 
@@ -114,7 +136,7 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
   const brandIds = [...new Set(rows.map((r) => r.brand_id).filter(Boolean))] as string[];
 
   const skuCodes = [...new Set(rows.flatMap((r) => codes(r.parent_sku_codes)))];
-  const [{ data: cols }, { data: maps }, { data: posts }, { data: brands }, settings, people, { data: parents }] = await Promise.all([
+  const [{ data: cols }, { data: maps }, { data: posts }, { data: brands }, settings, people, { data: parents }, { data: refRows }] = await Promise.all([
     admin.from("asset_collections").select("id, name, description, cover_asset_id").in("id", ids),
     admin.from("asset_collection_map").select("collection_id, added_at, asset:assets!asset_id(id, r2_key, asset_type, status)")
       .in("collection_id", ids).order("added_at", { ascending: false }).limit(20000),
@@ -123,7 +145,11 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
     loadCaptionSettings(admin),
     userLabelMap(admin, rows.flatMap((r) => r.assignee_ids ?? [])),
     skuCodes.length ? admin.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key").in("code", skuCodes) : Promise.resolve({ data: [] as unknown[] }),
+    admin.from("content_album_refs").select(REF_COLS).in("album_id", ids).order("sort_order", { ascending: true }).order("created_at", { ascending: true }).limit(20000),
   ]);
+  const refsBy = new Map<string, AlbumRef[]>();
+  for (const { album_id, ...r } of (refRows ?? []) as (AlbumRef & { album_id: string })[])
+    (refsBy.get(album_id) ?? refsBy.set(album_id, []).get(album_id)!).push(r);
   const parentByCode = new Map(((parents ?? []) as { id: string; code: string; name_th: string | null; cover_image_r2_key: string | null }[])
     .map((p) => [p.code, { id: p.id, code: p.code, name: p.name_th ?? "", image_key: p.cover_image_r2_key }]));
   const colMap = new Map(((cols ?? []) as { id: string; name: string; description: string | null; cover_asset_id: string | null }[]).map((c) => [c.id, c]));
@@ -162,8 +188,11 @@ export async function loadContentAlbums(admin: Admin, opts: { ids?: string[]; tr
     const b = r.brand_id ? brandMap.get(r.brand_id) : null;
     const capDrafts = normalizeCaptionDrafts(r.caption_drafts);
     const assigneeIds = (r.assignee_ids ?? []).filter(Boolean);
+    const refs = refsBy.get(r.id) ?? [];
     return {
-      id: r.id, name: c?.name ?? "", description: c?.description ?? null,
+      id: r.id, phase: r.phase === "wish" ? "wish" : "album", content_types: r.content_types ?? [],
+      ref_count: refs.length, ref_previews: refs.slice(0, 4),
+      name: c?.name ?? "", description: c?.description ?? null,
       brand_id: r.brand_id, brand_name: b?.name ?? null, brand_color: b?.color ?? null,
       assignee_ids: assigneeIds, assignees: assigneeIds.map((id) => ({ id, name: people.get(id) ?? "" })),
       due_date: r.due_date, planned_platforms: r.planned_platforms ?? [], caption_draft: r.caption_draft, caption_drafts: capDrafts,

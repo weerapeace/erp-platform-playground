@@ -5,11 +5,12 @@
 import { apiFetch } from "@/lib/api";
 import type { AlbumCaptionDrafts } from "@/lib/content-album-captions";
 import { tr } from "@/lib/lang";
-import type { ContentAlbum, AlbumFile } from "@/lib/content-albums-server";
+import type { ContentAlbum, AlbumFile, AlbumRef } from "@/lib/content-albums-server";
+import { cleanRefUrl, refProvider } from "@/lib/content-album-refs";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
 
-export type { ContentAlbum, AlbumFile };
-export type AlbumDetail = ContentAlbum & { files: AlbumFile[] };
+export type { ContentAlbum, AlbumFile, AlbumRef };
+export type AlbumDetail = ContentAlbum & { files: AlbumFile[]; refs: AlbumRef[] };
 export type AlbumDriveInfo = { ok: true; label: string; folder_url: string | null; pending: boolean } | { ok: false; reason: string };
 
 export async function json<T>(res: Response): Promise<T> {
@@ -31,6 +32,7 @@ export type AlbumFields = Partial<{
   name: string; description: string | null; brand_id: string | null; assignee_ids: string[]; due_date: string | null;
   planned_platforms: string[]; caption_draft: string | null; caption_drafts: AlbumCaptionDrafts; picked_asset_ids: string[]; file_order: string[]; parent_sku_codes: string[];
   cover_asset_id: string | null; closed: boolean; restore: boolean;
+  phase: "wish" | "album"; content_types: string[];
 }>;
 export async function createContentAlbum(fields: AlbumFields & { name: string }): Promise<ContentAlbum> {
   return (await json<{ data: ContentAlbum }>(await send("/api/content-albums", "POST", fields))).data;
@@ -73,4 +75,37 @@ export function albumPostPreset(album: AlbumDetail): ContentCreatePreset {
     ...(p ? { parent: { id: p.id, code: p.code, name: p.name, image_key: p.image_key } } : {}),
     album: { id: album.id, name: album.name, asset_ids: ids, caption: album.caption_draft, captions: album.caption_drafts },
   };
+}
+
+// ── Reference (รายการที่อยากได้ / อัลบั้ม) ──
+export async function listAlbumRefs(id: string): Promise<AlbumRef[]> {
+  return (await json<{ data: AlbumRef[] }>(await apiFetch(`/api/content-albums/${id}/refs`))).data ?? [];
+}
+export async function addAlbumRef(id: string, ref: { kind: "image"; r2_key: string } | { kind: "link"; url: string; title?: string | null; thumb_url?: string | null } | { kind: "text"; body: string }): Promise<void> {
+  await json(await send(`/api/content-albums/${id}/refs`, "POST", ref));
+}
+export async function setAlbumRefNote(id: string, refId: string, note: string): Promise<void> {
+  await json(await send(`/api/content-albums/${id}/refs`, "PATCH", { ref_id: refId, note }));
+}
+export async function removeAlbumRef(id: string, refId: string): Promise<void> {
+  await json(await send(`/api/content-albums/${id}/refs?ref_id=${refId}`, "DELETE"));
+}
+/**
+ * ลิงก์ → ข้อมูลพรีวิว (ชื่อ/รูป) ก่อนบันทึก — TikTok/Pinterest ใช้ตัวฝังกลาง (ลิงก์สั้นเปิดเป็นลิงก์เต็มให้) · อื่น ๆ ใช้พรีวิวลิงก์กลาง
+ * อ่านไม่ได้ = บันทึกลิงก์เปล่า (ไม่ขวาง)
+ */
+export async function resolveRefLink(raw: string): Promise<{ url: string; title: string | null; thumb_url: string | null } | null> {
+  const url = cleanRefUrl(raw);
+  if (!url) return null;
+  const p = refProvider(url);
+  try {
+    if (p === "tiktok" || p === "pinterest") {
+      const j = await apiFetch(`/api/social-embed?url=${encodeURIComponent(url)}`).then((r) => r.json()).catch(() => null);
+      const d = j?.data as { url?: string; image?: string | null } | null;
+      if (d?.url) return { url: d.url, title: null, thumb_url: d.image ?? null };
+    }
+    const j = await apiFetch(`/api/link-preview?url=${encodeURIComponent(url)}`).then((r) => r.json()).catch(() => null);
+    const d = j?.data as { title?: string | null; image?: string | null } | null;
+    return { url, title: d?.title ?? null, thumb_url: d?.image ?? null };
+  } catch { return { url, title: null, thumb_url: null }; }
 }

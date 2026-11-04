@@ -19,6 +19,14 @@ import { json, send } from "./api";
 
 export * from "./api";
 
+/** รูป Reference → ย่อ ≤1600 แล้วอัป R2 (โฟลเดอร์ content-refs · ไม่ลงคลังกลาง — เป็นภาพตัวอย่าง ไม่ใช่งานของเรา) */
+export async function uploadRefImage(file: File): Promise<string> {
+  const prepared = await prepareResizedImage(file, 1600);
+  const fd = new FormData();
+  fd.append("file", prepared); fd.append("folder", "content-refs"); fd.append("no_library", "1");
+  return (await json<{ r2_key: string }>(await apiFetch("/api/admin/upload", { method: "POST", body: fd }))).r2_key;
+}
+
 // ── อัปต่อจากที่ค้าง (จำในเครื่องนี้ · ลิงก์อัปของ Google ใช้ได้ราว 1 สัปดาห์) ──
 type PendingMeta = { preview_key: string | null; width: number | null; height: number | null; duration_sec: number | null; checksum: string | null; phash: string | null; phash_color: string | null; mime: string | null };
 export type PendingUpload = { albumId: string; name: string; size: number; lastModified: number; uploadUrl: string; savedAt: number; meta: PendingMeta };

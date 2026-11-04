@@ -25,6 +25,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { downloadImagesAsZip } from "@/lib/zip";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { analyzeAlbumPhotos } from "./cull";
+import { RefBoard } from "./ref-board";
 import { formatBytes } from "@/lib/assets";
 import { useCreativeOptions } from "@/app/tasks/use-options";
 import { listCampaigns, listContent, getCaptionTemplates, getPlatformSettings, type BrandOption, type CaptionTemplate, type ContentCaption, type PlatformSettings, type ShopChannel } from "@/app/tasks/data";
@@ -76,6 +77,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const [campaigns, setCampaigns] = useState<{ id: string; name: string }[]>([]);
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [syncing, setSyncing] = useState<string | null>(null);
+  const [showRefs, setShowRefs] = useState(false);
   const [zipMsg, setZipMsg] = useState<string | null>(null);
   const [cullMsg, setCullMsg] = useState<string | null>(null);
   const [cull, setCull] = useState<{ blurry: Set<string>; groupOf: Map<string, number>; groups: number; keep: string[]; checked: number } | null>(null);
@@ -553,6 +555,16 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
               </div>
             )}
           </section>
+
+          {/* Reference ที่ขอไว้ (ติดมาจากรายการที่อยากได้) — เทียบตอนคัดรูป */}
+          {album.refs.length > 0 || showRefs ? (
+            <section className="space-y-2">
+              <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-1.5"><Icon name="pin" />{t("Reference ที่ขอไว้", "References")} <span className="text-slate-400 font-normal">{album.refs.length}</span></h3>
+              <RefBoard albumId={albumId} refs={album.refs} canEdit={canEdit} onChanged={() => { void load(true); onChanged(); }} compact />
+            </section>
+          ) : canEdit && (
+            <button onClick={() => setShowRefs(true)} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border border-dashed border-slate-300 text-sm text-slate-600 hover:bg-slate-50"><Icon name="pin" />{t("+ เพิ่ม Reference", "+ Add references")}</button>
+          )}
 
           {/* สถานะต่อแพลตฟอร์ม + โพสต์ */}
           <section className="space-y-2">

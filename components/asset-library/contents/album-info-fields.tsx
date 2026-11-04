@@ -6,6 +6,7 @@
  * ใช้ของกลาง: ERPForm* · BrandSelect · UserPicker · ParentSkuPicker · PlatformIcon · useCreativeOptions
  * แท็กสินค้าแล้วยังไม่เลือกแบรนด์ → เดาแบรนด์จากสินค้าให้ (resolveBrandFromProduct ตัวเดียวกับป๊อปโพสต์)
  * ช่องข้อความ (ชื่อ/แคปชั่น/หมายเหตุ) แจ้ง onBlurText ตอนออกจากช่อง → หน้าอัลบั้มใช้บันทึกตอนนั้น (ไม่ยิงทุกตัวอักษร)
+ * wish = ชุดช่องของ "รายการที่อยากได้" (ประเภท Content · อยากได้ภายใน · ใครถ่าย · รายละเอียด · ไม่มีแคปชั่น)
  */
 import { ERPFormSection, ERPFormField, ERPInput, ERPTextarea } from "@/components/form";
 import { BrandSelect } from "@/components/brand-select";
@@ -15,15 +16,17 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions } from "@/app/tasks/use-options";
 import { resolveBrandFromProduct, type BrandOption } from "@/app/tasks/data";
+import { POST_TYPES } from "@/lib/creative-tasks";
 import type { AlbumFields, ContentAlbum } from "./api";
 
 type Product = { id: string; code: string; name: string };
-export type AlbumInfoForm = { name: string; description: string; brand_id: string; due_date: string; assignees: { id: string; name: string }[]; planned_platforms: string[]; caption_draft: string; products: Product[] };
+export type AlbumInfoForm = { name: string; description: string; brand_id: string; due_date: string; assignees: { id: string; name: string }[]; planned_platforms: string[]; caption_draft: string; products: Product[]; content_types: string[] };
 
 export const albumInfoFrom = (a: ContentAlbum | null, brandId?: string | null): AlbumInfoForm => ({
   name: a?.name ?? "", description: a?.description ?? "", brand_id: a?.brand_id ?? brandId ?? "", due_date: a?.due_date ?? "",
   assignees: a?.assignees ?? [], planned_platforms: a?.planned_platforms ?? [], caption_draft: a?.caption_draft ?? "",
   products: (a?.products ?? []).map((p) => ({ id: p.id, code: p.code, name: p.name })),
+  content_types: a?.content_types ?? [],
 });
 
 /** แปลงช่องที่เปลี่ยน → ค่าที่ส่ง API (ส่งแค่ช่องที่อยู่ใน patch) */
@@ -37,10 +40,11 @@ export function albumInfoPayload(p: Partial<AlbumInfoForm>): AlbumFields {
   if (p.planned_platforms !== undefined) out.planned_platforms = p.planned_platforms;
   if (p.caption_draft !== undefined) out.caption_draft = p.caption_draft.trim() || null;
   if (p.products !== undefined) out.parent_sku_codes = p.products.map((x) => x.code).filter(Boolean);
+  if (p.content_types !== undefined) out.content_types = p.content_types;
   return out;
 }
 
-export function AlbumInfoFields({ form, onChange, onBlurText, brands, brandLocked = false, disabled = false, showName = true, showCaption = true, autoFocusName = false }: {
+export function AlbumInfoFields({ form, onChange, onBlurText, brands, brandLocked = false, disabled = false, showName = true, showCaption = true, autoFocusName = false, wish = false }: {
   form: AlbumInfoForm;
   onChange: (p: Partial<AlbumInfoForm>) => void;
   /** ออกจากช่องข้อความ (ชื่อ/แคปชั่น/หมายเหตุ) */
@@ -52,9 +56,12 @@ export function AlbumInfoFields({ form, onChange, onBlurText, brands, brandLocke
   showName?: boolean;
   showCaption?: boolean;
   autoFocusName?: boolean;
+  /** รายการที่อยากได้ (ก่อนถ่าย) — ชื่อช่องเปลี่ยน + เลือกประเภท Content · ไม่มีแคปชั่น */
+  wish?: boolean;
 }) {
   const t = useT();
   const { platforms } = useCreativeOptions();
+  const toggleType = (k: string) => onChange({ content_types: form.content_types.includes(k) ? form.content_types.filter((x) => x !== k) : [...form.content_types, k] });
   const togglePlatform = (code: string) => onChange({ planned_platforms: form.planned_platforms.includes(code) ? form.planned_platforms.filter((x) => x !== code) : [...form.planned_platforms, code] });
   const addPerson = (v: UserPickerValue | null) => { if (v && !form.assignees.some((a) => a.id === v.id)) onChange({ assignees: [...form.assignees, { id: v.id, name: v.name }] }); };
   const addProduct = (v: ParentSkuPickerValue | null) => {
@@ -66,18 +73,33 @@ export function AlbumInfoFields({ form, onChange, onBlurText, brands, brandLocke
   return (
     <ERPFormSection columns={2}>
       {showName && (
-        <ERPFormField label={t("ชื่ออัลบั้ม", "Album name")} required span={2}>
-          <ERPInput autoFocus={autoFocusName} disabled={disabled} value={form.name} onChange={(e) => onChange({ name: e.target.value })} onBlur={onBlurText} placeholder={t("เช่น ถ่ายกระเป๋า Heart Bag คอลใหม่", "e.g. Heart Bag new collection shoot")} />
+        <ERPFormField label={wish ? t("ชื่อ", "Name") : t("ชื่ออัลบั้ม", "Album name")} required span={2}>
+          <ERPInput autoFocus={autoFocusName} disabled={disabled} value={form.name} onChange={(e) => onChange({ name: e.target.value })} onBlur={onBlurText} placeholder={wish ? t("เช่น ROAR06 ลุคสตรีท", "e.g. ROAR06 street look") : t("เช่น ถ่ายกระเป๋า Heart Bag คอลใหม่", "e.g. Heart Bag new collection shoot")} />
+        </ERPFormField>
+      )}
+      {wish && (
+        <ERPFormField label={t("ประเภท Content (เลือกได้หลายอย่าง)", "Content types (pick any)")} span={2}>
+          <div className="flex flex-wrap gap-1.5">
+            {POST_TYPES.map((pt) => {
+              const on = form.content_types.includes(pt.value);
+              return (
+                <button key={pt.value} type="button" disabled={disabled} onClick={() => toggleType(pt.value)} aria-pressed={on}
+                  className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-full border text-sm disabled:cursor-default ${on ? "border-violet-400 bg-violet-50 text-violet-800 font-medium" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+                  <Icon value={pt.icon} />{t(pt.label, pt.label_en)}
+                </button>
+              );
+            })}
+          </div>
         </ERPFormField>
       )}
       <ERPFormField label={t("แบรนด์", "Brand")} hint={t("ใช้เลือกโฟลเดอร์ Drive ที่เก็บไฟล์", "Decides which Drive folder holds the files")}>
         <BrandSelect brands={brands} value={form.brand_id} onChange={(id) => onChange({ brand_id: id })} emptyLabel={t("— เลือกแบรนด์ —", "— Pick a brand —")}
           disabled={disabled || brandLocked} title={brandLocked ? t("อัปไฟล์ไปแล้ว เปลี่ยนแบรนด์ไม่ได้ (ไฟล์อยู่ในโฟลเดอร์แบรนด์เดิม)", "Files already uploaded — brand is locked to keep them together") : undefined} />
       </ERPFormField>
-      <ERPFormField label={t("วันที่ต้องลง", "Post by")}>
+      <ERPFormField label={wish ? t("อยากได้ภายใน", "Wanted by") : t("วันที่ต้องลง", "Post by")}>
         <ERPInput type="date" disabled={disabled} value={form.due_date} onChange={(e) => onChange({ due_date: e.target.value })} />
       </ERPFormField>
-      <ERPFormField label={t("ผู้รับผิดชอบ", "Owners")} span={2}>
+      <ERPFormField label={wish ? t("ใครถ่าย (ยังไม่รู้ = ว่างไว้)", "Who shoots (leave empty if unknown)") : t("ผู้รับผิดชอบ", "Owners")} span={2}>
         <div className="space-y-2">
           {form.assignees.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -92,7 +114,7 @@ export function AlbumInfoFields({ form, onChange, onBlurText, brands, brandLocke
           {!disabled && <UserPicker value={null} onChange={addPerson} placeholder={t("+ เพิ่มคน", "+ Add person")} />}
         </div>
       </ERPFormField>
-      <ERPFormField label={t("ตั้งใจลงที่ไหน", "Planned platforms")} span={2} hint={t("ยังไม่เลือก = อัลบั้มอยู่สถานะ “รอจัดการ”", "None picked = album stays “To organise”")}>
+      <ERPFormField label={wish ? t("จะลงที่ไหน", "Where it'll go") : t("ตั้งใจลงที่ไหน", "Planned platforms")} span={2} hint={wish ? undefined : t("ยังไม่เลือก = อัลบั้มอยู่สถานะ “รอจัดการ”", "None picked = album stays “To organise”")}>
         <div className="flex flex-wrap gap-1.5">
           {platforms.map((p) => {
             const on = form.planned_platforms.includes(p.value);
@@ -105,7 +127,7 @@ export function AlbumInfoFields({ form, onChange, onBlurText, brands, brandLocke
           })}
         </div>
       </ERPFormField>
-      <ERPFormField label={t("สินค้าในรูป", "Products in the shoot")} span={2} hint={t("ตัวแรก = สินค้าหลักของโพสต์ที่สร้างจากอัลบั้ม · ยังไม่เลือกแบรนด์ ระบบเดาแบรนด์จากสินค้าให้", "First one becomes the post's main product · picks the brand if empty")}>
+      <ERPFormField label={wish ? t("รุ่นสินค้า", "Products") : t("สินค้าในรูป", "Products in the shoot")} span={2} hint={t("ตัวแรก = สินค้าหลักของโพสต์ที่สร้างจากอัลบั้ม · ยังไม่เลือกแบรนด์ ระบบเดาแบรนด์จากสินค้าให้", "First one becomes the post's main product · picks the brand if empty")}>
         <div className="space-y-2">
           {form.products.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
@@ -120,13 +142,14 @@ export function AlbumInfoFields({ form, onChange, onBlurText, brands, brandLocke
           {!disabled && <ParentSkuPicker value={null} onChange={addProduct} placeholder={t("+ แท็กสินค้า (Parent SKU)", "+ Tag a product (Parent SKU)")} disableCreate />}
         </div>
       </ERPFormField>
-      {showCaption && (
+      {showCaption && !wish && (
         <ERPFormField label={t("แคปชั่นร่าง", "Draft caption")} span={2} hint={t("ส่งเข้าโพสต์ให้อัตโนมัติตอนกด “ส่งเข้าปฏิทิน” · ว่าง = อัลบั้มอยู่ “รอหา Caption”", "Copied into posts made from this album · empty = “Needs caption”")}>
           <ERPTextarea rows={4} disabled={disabled} value={form.caption_draft} onChange={(e) => onChange({ caption_draft: e.target.value })} onBlur={onBlurText} />
         </ERPFormField>
       )}
-      <ERPFormField label={t("หมายเหตุ", "Notes")} span={2}>
-        <ERPTextarea rows={2} disabled={disabled} value={form.description} onChange={(e) => onChange({ description: e.target.value })} onBlur={onBlurText} placeholder={t("เช่น ถ่ายที่สตูดิโอ ใช้นางแบบ…", "e.g. studio shoot, model…")} />
+      <ERPFormField label={wish ? t("รายละเอียด / สิ่งที่ต้องมีในคลิป", "Details / must-have shots") : t("หมายเหตุ", "Notes")} span={2}>
+        <ERPTextarea rows={wish ? 4 : 2} disabled={disabled} value={form.description} onChange={(e) => onChange({ description: e.target.value })} onBlur={onBlurText}
+          placeholder={wish ? t("เช่น นางแบบเดินเข้ากล้อง โชว์หัวเข็มขัดชัด ๆ 2 วิแรก · ต้องมีช็อตใส่คู่กับกระโปรงหนัง", "e.g. model walks in, show the buckle clearly in the first 2s") : t("เช่น ถ่ายที่สตูดิโอ ใช้นางแบบ…", "e.g. studio shoot, model…")} />
       </ERPFormField>
     </ERPFormSection>
   );

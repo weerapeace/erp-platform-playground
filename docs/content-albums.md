@@ -79,6 +79,15 @@ audit_logs entity `content_album`: create · update (เก่า→ใหม่
 - อัปผ่าน `startAlbumUploadTask` (data.ts · ใช้ร่วมกับช่องลากวางในอัลบั้ม) — หลายอัลบั้ม = ต่อคิวทีละอัลบั้ม · ความคืบหน้าออกช่องกลาง `onAlbumUpload` (หน้าในอัลบั้มที่เปิดอยู่เห็นแถบอัป/ไฟล์ใหม่ ไม่ว่าเริ่มจากไหน) · แบรนด์ยังไม่ตั้งโฟลเดอร์ Drive = สร้างอัลบั้มแต่ไม่อัป + บอกเหตุผล
 - ช่องลากวางในอัลบั้มรับทั้งโฟลเดอร์ด้วย · หน้าคลังไฟล์ปิดตัวรับลากวางเดิมตอนอยู่แถบ Contents (ไม่เด้งป๊อปอัปโหลดของคลัง)
 
+## รายการที่อยากได้ + Reference (2026-11-04)
+
+- **รายการที่อยากได้ = อัลบั้มที่ยังไม่ถ่าย** (`content_albums.phase = wish` · migration `202611130300_content_album_wishlist`) — ใช้ช่องเดิม (ชื่อ/แบรนด์/รุ่น/วันที่อยากได้/คนถ่าย/แพลตฟอร์ม/รายละเอียด = description) + `content_types` (POST_TYPES)
+- สถานะคิดเอง `wishStage` (lib/content-album-status): ไม่มีคนถ่าย = รอหาคนถ่าย · มี = นัดถ่ายแล้ว · เตือนรายวันเฉพาะวันที่ (ไม่เตือน "รอจัดการนาน")
+- **แปลงเป็นอัลบั้ม** = PATCH `{phase: "album"}` (id เดิม · Reference ติดไป · ย้อนกลับได้เฉพาะตอนยังไม่มีไฟล์) · ลากไฟล์จากการถ่ายแล้วเลือกรายการที่อยากได้ในป๊อป "ลงอัลบั้มไหน?" = แปลงให้เอง
+- **Reference** ตาราง `content_album_refs` (1 แถว = รูป `r2_key` content-refs/ · ลิงก์ `url`+provider+title+thumb_url · ข้อความ `body` · โน้ต "ชอบตรงไหน") · API `/api/content-albums/[id]/refs` (GET assets.view · POST/PATCH/DELETE assets.upload · audit ref_add/ref_update/ref_remove)
+- ลิงก์: `lib/content-album-refs` (refProvider · refEmbedUrl: YouTube/TikTok เต็ม/Pinterest เล่นในหน้า · ลิงก์สั้น/IG = เปิดลิงก์) · พรีวิวก่อนบันทึก: TikTok/Pinterest ผ่าน `/api/social-embed` · อื่น ๆ `/api/link-preview`
+- หน้าจอ: แท็บ "อัลบั้ม | อยากได้" ที่หน้า Contents (จำแท็บในเครื่อง) · ฟอร์ม = `AlbumFormModal phase="wish"` · `WishDetailModal` · กระดาน `RefBoard` (ใช้ซ้ำในอัลบั้ม ส่วน "Reference ที่ขอไว้") · การ์ดปะ Reference 4 ชิ้น (`RefTile`)
+
 ## ข้อจำกัด
 
 - HEIC ไม่มีรูปย่อ (ขึ้นไอคอน) · วิดีโอที่ดึงจาก Drive ไม่มีภาพปก · ช่วยคัดรูป/AI ไม่นับรูปที่ไม่มีรูปย่อ

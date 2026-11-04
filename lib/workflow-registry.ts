@@ -171,7 +171,7 @@ export const WORKFLOWS: WorkflowDef[] = [
   {
     key: "content-album",
     label: "อัลบั้ม Contents (คลังไฟล์ › Contents) — สถานะคิดจากโพสต์ที่ผูก",
-    flow: "รอจัดการ → รอหา Caption → รอลง Social → ลงแล้ว (ไม่เก็บสถานะ คิดสดจากโพสต์ที่ album_id ชี้มา + แพลตฟอร์มที่ตั้งใจลง · ใช้ความพร้อมโพสต์ของปฏิทิน) · ปิดอัลบั้มเอง = ปิดแล้ว",
+    flow: "รอจัดการ → รอหา Caption → รอลง Social → ลงแล้ว (ไม่เก็บสถานะ คิดสดจากโพสต์ที่ album_id ชี้มา + แพลตฟอร์มที่ตั้งใจลง · ใช้ความพร้อมโพสต์ของปฏิทิน) · ปิดอัลบั้มเอง = ปิดแล้ว · ก่อนถ่าย = รายการที่อยากได้ (phase wish: รอหาคนถ่าย → นัดถ่ายแล้ว คิดจากคนถ่าย) → กด \"แปลงเป็นอัลบั้ม\" (phase album)",
     ruleFiles: ["lib/content-album-status.ts", "lib/content-readiness.ts"],
     gates: [],
     tables: ["content_albums", "erp_creative_content"],

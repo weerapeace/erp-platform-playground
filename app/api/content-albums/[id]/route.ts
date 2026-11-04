@@ -11,7 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { loadContentAlbums, loadAlbumFiles } from "@/lib/content-albums-server";
+import { loadContentAlbums, loadAlbumFiles, loadAlbumRefs } from "@/lib/content-albums-server";
 import { cleanAlbumFields, isUuid } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -28,8 +28,9 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
     const [album] = await loadContentAlbums(admin, { ids: [id] });
     if (!album) return NextResponse.json({ error: "ไม่พบอัลบั้ม" }, { status: 404 });
     // ?lite=1 = แค่ชื่อ/สถานะ (ป้าย "จากอัลบั้ม" ในป๊อปโพสต์) ไม่ต้องโหลดไฟล์
-    const files = new URL(request.url).searchParams.get("lite") === "1" ? [] : await loadAlbumFiles(admin, id, album.picked_asset_ids, album.file_order);
-    return NextResponse.json({ data: { ...album, files }, error: null });
+    const lite = new URL(request.url).searchParams.get("lite") === "1";
+    const [files, refs] = lite ? [[], []] : await Promise.all([loadAlbumFiles(admin, id, album.picked_asset_ids, album.file_order), loadAlbumRefs(admin, id)]);
+    return NextResponse.json({ data: { ...album, files, refs }, error: null });
   } catch (e) {
     return NextResponse.json({ error: `โหลดอัลบั้มไม่สำเร็จ: ${(e as Error).message}` }, { status: 500 });
   }
@@ -52,6 +53,11 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const clean = cleanAlbumFields(body);
   if ("error" in clean) return NextResponse.json({ error: clean.error }, { status: 400 });
   const albumPatch: Record<string, unknown> = { ...clean.album, ...(restore ? { trashed_at: null } : {}) };
+  // ย้อนอัลบั้มกลับเป็น "รายการที่อยากได้" ได้เฉพาะตอนยังไม่มีไฟล์ (ไฟล์จากการถ่ายต้องอยู่ในอัลบั้ม)
+  if (albumPatch.phase === "wish" && (curAlbum as { phase?: string }).phase !== "wish") {
+    const { count } = await admin.from("asset_collection_map").select("asset_id", { count: "exact", head: true }).eq("collection_id", id);
+    if (count) return NextResponse.json({ error: "อัลบั้มนี้มีไฟล์แล้ว ย้อนกลับเป็นรายการที่อยากได้ไม่ได้" }, { status: 400 });
+  }
   // เปลี่ยนแบรนด์หลังมีโฟลเดอร์ Drive แล้ว = ไฟล์เดิมยังอยู่โฟลเดอร์เดิม (ไม่ย้ายให้) · ไฟล์ใหม่ก็ไปที่เดิม เพื่อให้อยู่ด้วยกัน
   if (!Object.keys(albumPatch).length && !Object.keys(clean.collection).length) {
     const [same] = await loadContentAlbums(admin, { ids: [id] });
