@@ -68,6 +68,8 @@ export type PendingGroup = {
   /** รหัสรุ่นที่ "นับเป็นรุ่น (ไม่แยกสี)" ได้ · null = ชื่อไม่มีรหัสรุ่น */
   model_level: string | null;
   candidates: { id: string; code: string; color: string | null; name: string | null }[];
+  /** ＋ เพิ่มสี: ร่าง SKU ใหม่ใต้รุ่นเดิม (รหัส/สีจากเมล) · null = หารุ่นแม่ไม่เจอ / เมลไม่บอกสี */
+  add_color: { parent_id: string; model: string; code: string; color: string; from_email_no: boolean; list_price: number | null; uom_id: string | null } | null;
 };
 
 /** การ์ดในคิว 💡/🎨 ทั้งหมดตามตัวกรอง (ทุกหน้า) — ใช้ "เลือกทั้งหมด" แล้วทำทีเดียว

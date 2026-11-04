@@ -9,7 +9,7 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages, type PageResult } from "@/lib/fetch-all";
 import { SKU_MATCH_SELECT } from "./server";
-import { modelFromItemKey, modelsForItem, pendingQueueOf, type PendingQueue, type SkuCandidate } from "./match";
+import { modelFromItemKey, modelsForItem, newColorDraft, pendingQueueOf, type PendingQueue, type SkuCandidate } from "./match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -39,7 +39,17 @@ type Group = {
   /** รหัสรุ่นที่ใช้ "นับเป็นรุ่น (ไม่แยกสี)" ได้ (จากกุญแจจำคู่) · null = ชื่อไม่มีรหัสรุ่น */
   model_level: string | null;
   candidates: { id: string; code: string; color: string | null; name: string | null }[];
+  /** ＋ เพิ่มสี: ร่าง SKU ใหม่ใต้รุ่นเดิม (รหัส/สีจากเมล + ราคา/หน่วยที่รุ่นนี้ใช้บ่อย) · null = หารุ่นแม่ไม่เจอ / เมลไม่บอกสี */
+  add_color: AddColorDraft | null;
 };
+export type AddColorDraft = { parent_id: string; model: string; code: string; color: string; from_email_no: boolean; list_price: number | null; uom_id: string | null };
+
+/** ค่าที่เจอบ่อยสุด (ไม่นับว่าง) */
+function mostCommon<T>(xs: (T | null | undefined)[]): T | null {
+  const n = new Map<T, number>();
+  for (const x of xs) if (x != null && x !== "") n.set(x, (n.get(x) ?? 0) + 1);
+  return [...n].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+}
 
 /**
  * สินค้ารอยืนยัน ทีละหน้า — รวมกลุ่มทุกรายการที่ค้าง (เบา: ~1–2 พันแถว) แล้วกรอง/นับ/ตัดหน้าในเซิร์ฟเวอร์
@@ -66,7 +76,7 @@ export async function pendingPage(admin: Admin, sp: URLSearchParams) {
       model_code: (raw.model_code as string | null) ?? null, items: 0, qty: 0, live_items: 0, order_count: 0, orders: [], orderSet: new Set<string>(),
       queue: pendingQueueOf({ ...raw, skipped_at: null }), skipped_n: 0, model_level: modelFromItemKey(key),
       suggest: raw.suggest_sku_id ? { id: String(raw.suggest_sku_id), code: String(raw.suggest_code ?? "") } : null,
-      reason: (raw.reason as string | null) ?? null, candidates: [],
+      reason: (raw.reason as string | null) ?? null, candidates: [], add_color: null,
     };
     g.items++; g.qty += Number(it.qty ?? 0);
     if (it.skipped) g.skipped_n++;
@@ -112,8 +122,9 @@ export async function pendingPage(admin: Admin, sp: URLSearchParams) {
   const [skuChunks, { data: pf }] = await Promise.all([
     Promise.all(modelChunks.map(async (chunk) => {
       const or = chunk.flatMap((m) => [`code.eq.${m}`, `code.ilike.${m}-*`]).join(",");
-      const { data } = await admin.from("skus_v2").select(SKU_MATCH_SELECT).or(or).eq("is_active", true).order("code").limit(5000);
-      return (data ?? []) as SkuCandidate[];
+      // รวม SKU ที่ปิดใช้ด้วย (กันเสนอรหัสซ้ำตอน "＋ เพิ่มสี") — ปุ่มเลือกสีโชว์เฉพาะที่ใช้งานอยู่
+      const { data } = await admin.from("skus_v2").select(`${SKU_MATCH_SELECT}, parent_sku_id, list_price, uom_id`).or(or).order("code").limit(5000);
+      return (data ?? []) as (SkuCandidate & { parent_sku_id: string | null; list_price: number | string | null; uom_id: string | null })[];
     })),
     pcs.length ? admin.from("erp_platforms").select("code, name_th, color, icon_key").in("code", pcs) : Promise.resolve({ data: [] }),
   ]);
@@ -121,9 +132,20 @@ export async function pendingPage(admin: Admin, sp: URLSearchParams) {
   pageGroups.forEach((g, i) => {
     const ms = groupModels[i];
     g.candidates = skus
-      .filter((s) => { const c = s.code.toUpperCase(); return ms.some((m) => c === m || c.startsWith(`${m}-`)); })
+      .filter((s) => { const c = s.code.toUpperCase(); return s.is_active !== false && ms.some((m) => c === m || c.startsWith(`${m}-`)); })
       .slice(0, 30)
       .map((s) => ({ id: s.id, code: s.code, color: s.color_platform_th ?? s.color ?? null, name: s.name_th ?? null }));
+    // ＋ เพิ่มสี: รุ่นนี้มีรุ่นแม่ตัวเดียว + เมลบอกสี/เลข → ร่างรหัส/สี + ราคา/หน่วยที่พี่น้องใช้บ่อย
+    const model = (g.model_level ?? g.model_code ?? "").toUpperCase();
+    if (model && /^[A-Z0-9-]{2,30}$/.test(model)) {
+      const sib = skus.filter((s) => s.code.toUpperCase().startsWith(`${model}-`));
+      const parents = new Set(sib.map((s) => s.parent_sku_id).filter((x): x is string => !!x));
+      const draft = parents.size === 1 ? newColorDraft(model, g.variant, sib.map((s) => s.code)) : null;
+      if (draft) {
+        const price = mostCommon(sib.filter((s) => s.is_active !== false).map((s) => (s.list_price == null ? null : Number(s.list_price))));
+        g.add_color = { parent_id: [...parents][0], model, ...draft, list_price: price != null && Number.isFinite(price) && price > 0 ? price : null, uom_id: mostCommon(sib.map((s) => s.uom_id)) };
+      }
+    }
   });
 
   const platforms = ((pf ?? []) as { code: string; name_th: string | null; color: string | null; icon_key: string | null }[])

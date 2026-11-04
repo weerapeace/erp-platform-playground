@@ -125,7 +125,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
     const updated = done.reduce((a, d) => a + d.items, 0);
     await writeAudit(admin, { action: "match", entityType: "platform_order_item", entityId: null, actorId: actor.id, actorName: actor.name, metadata: { bulk: true, groups: done, items: updated, failed, skipped: list.length - ok.length } });
-    return NextResponse.json({ ok: true, confirmed: done.length, updated, failed, skipped: list.length - ok.length, error: null });
+    return NextResponse.json({ ok: true, confirmed: done.length, updated, failed, skipped: list.length - ok.length, done: done.map((d) => ({ platform_code: d.platform_code, item_key: d.item_key })), error: null });
   }
 
   if (body.action === "skip" || body.action === "unskip") {

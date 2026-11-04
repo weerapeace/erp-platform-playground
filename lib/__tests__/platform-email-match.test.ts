@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { itemKey, matchEmailItem, modelCodeFromTitle, modelsForItem, modelFromItemKey, parseVariant, pendingQueueOf, type SkuCandidate } from "@/lib/platform-email/match";
+import { itemKey, matchEmailItem, modelCodeFromTitle, modelsForItem, modelFromItemKey, newColorDraft, parseVariant, pendingQueueOf, type SkuCandidate } from "@/lib/platform-email/match";
 
 // ข้อมูลจริงใน skus_v2 (ตรวจ 2026-10-27 / 2026-11-01)
 const sku = (code: string, color?: string): SkuCandidate => ({ id: code, code, color_platform_th: color ?? null });
@@ -105,5 +105,30 @@ describe("นับเป็นรุ่น (ไม่แยกสี)", () => {
   it("รหัสรุ่นจากกุญแจจำคู่", () => {
     expect(modelFromItemKey(itemKey("Louis Montini กระเป๋า BSD07", null))).toBe("BSD07");
     expect(modelFromItemKey(itemKey("ชุดกิฟเซ็ท", null))).toBeNull();
+  });
+});
+
+// ＋ เพิ่มสี (แท็บรอยืนยันสินค้า) — เคสจริงจากหน้าจอเจ้าของ 2026-11-04
+describe("newColorDraft", () => {
+  const codes = (m: string, nums: number[]) => nums.map((n) => `${m}-${String(n).padStart(2, "0")}`);
+  it("เลขในเมลยังไม่มีในรุ่น → ใช้เลขนั้น + ชื่อสีจากเมล", () => {
+    expect(newColorDraft("WL46", "Rose Pink | 13", codes("WL46", [1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12])))
+      .toEqual({ code: "WL46-13", color: "Rose Pink", from_email_no: true });
+  });
+  it("เลขในเมลมีอยู่แล้ว (ชื่อสีต่างกัน) → เลขถัดไป", () => {
+    expect(newColorDraft("BPU04", "ชมพูบลัช | 19", codes("BPU04", Array.from({ length: 22 }, (_, i) => i + 1))))
+      .toEqual({ code: "BPU04-23", color: "ชมพูบลัช", from_email_no: false });
+  });
+  it("เลขหลักเดียวเติม 0 · ข้ามรหัสที่มีแล้ว (รวมที่ปิดใช้)", () => {
+    expect(newColorDraft("MCT15", "กากี (3)", ["MCT15-01", "MCT15-18"])?.code).toBe("MCT15-03");
+    expect(newColorDraft("MGW137", "ดำ,L (33 – 37 นิ้ว)", ["MGW137-01L", "MGW137-01M", "MGW137-01S"]))
+      .toEqual({ code: "MGW137-02", color: "ดำ", from_email_no: false });
+  });
+  it("ตัด \"สี\" นำหน้า และรหัสรุ่นในตัวเลือก", () => {
+    expect(newColorDraft("MGN116", "สีดำ | MGN116", ["MGN116-01"])).toEqual({ code: "MGN116-02", color: "ดำ", from_email_no: false });
+  });
+  it("เมลไม่บอกสี (Lazada) → เพิ่มสีไม่ได้", () => {
+    expect(newColorDraft("WL46", null, ["WL46-01"])).toBeNull();
+    expect(newColorDraft("WL46", "  ", ["WL46-01"])).toBeNull();
   });
 });

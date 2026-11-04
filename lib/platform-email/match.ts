@@ -116,6 +116,33 @@ export function parseVariant(variant: string | null | undefined): VariantInfo {
   return { colorPart, num, strength, fullCode: full ? `${full[1]}-${full[2]}` : null, models, words: uniq(words) };
 }
 
+/**
+ * ＋ เพิ่มสี — เสนอรหัส/ชื่อสีของ SKU ใหม่ใต้รุ่นเดิม จากตัวเลือกในเมล (แท็บรอยืนยันสินค้า)
+ *   รหัส = เลขในเมลที่ชัด ("| 13" / "(13)") ถ้ารุ่นยังไม่มีเลขนี้ · ไม่งั้นเลขถัดจากเลขสูงสุดของรุ่น (เติม 0 ให้ครบ 2 หลัก)
+ *   ชื่อสี = ข้อความในตัวเลือกที่ไม่ใช่เลข/รหัส (เช่น "Rose Pink | 13" → "Rose Pink") · existing = รหัส SKU ทั้งหมดของรุ่น (รวมที่ปิดใช้ กันรหัสซ้ำ)
+ *   null = เมลไม่บอกทั้งชื่อสีและเลข (เช่น Lazada) — เพิ่มสีไม่ได้ เพราะไม่รู้ว่าสีอะไร
+ */
+export function newColorDraft(model: string, variant: string | null | undefined, existing: string[]): { code: string; color: string; from_email_no: boolean } | null {
+  const v = parseVariant(variant);
+  const color = v.colorPart
+    .replace(/\([^)]*\)/g, " ").replace(/\|.*$/, " ").replace(/#\s*\d+/g, " ")
+    .replace(/[A-Za-z]{2,}\d[A-Za-z0-9\-/]*/g, " ").replace(/^\s*สี(?=\S)/, "")
+    .replace(/\s+/g, " ").trim();
+  if (!color && !v.num) return null;
+  const taken = new Set(existing.map((c) => c.toUpperCase()));
+  const pad = (n: string) => (/^\d$/.test(n) ? `0${n}` : n);
+  if (v.num && v.strength === "strong") {
+    const code = `${model}-${pad(v.num)}`;
+    if (!taken.has(code.toUpperCase())) return { code, color, from_email_no: true };
+  }
+  const prefix = `${model.toUpperCase()}-`;
+  const nums = existing.map((c) => c.toUpperCase()).filter((c) => c.startsWith(prefix))
+    .map((c) => /^(\d{1,3})/.exec(c.slice(prefix.length))?.[1]).filter((n): n is string => !!n).map(Number);
+  let next = (nums.length ? Math.max(...nums) : 0) + 1;
+  while (taken.has(`${prefix}${String(next).padStart(2, "0")}`)) next++;
+  return { code: `${model}-${String(next).padStart(2, "0")}`, color, from_email_no: false };
+}
+
 /** รหัสรุ่นที่ต้องดึง SKU มาเทียบ (ตัวเลือกก่อน แล้วชื่อสินค้า) — ฝั่ง server ใช้เลือกว่าจะโหลด SKU ของรุ่นไหน */
 export function modelsForItem(item: { title: string; variant: string | null }): string[] {
   const v = parseVariant(item.variant);
