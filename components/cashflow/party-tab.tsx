@@ -26,6 +26,7 @@ import { Icon } from "@/components/icon";
 import { HoverImage } from "@/components/hover-image";
 import { SlipPicker } from "@/components/cashflow/slip-picker";
 import { CardPayModal, CardStatementModal } from "@/components/cashflow/card-actions";
+import { PayrollPaidModal, payrollPayable } from "@/components/cashflow/payroll-actions";
 import { RECORD_FILES_MAX } from "@/lib/record-files";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
@@ -80,7 +81,7 @@ const AGING = [
 type Modal = { kind: "date" | "credit" | "pay" | "recv"; events: CashflowEvent[]; groups: Group[] } | null;
 
 export function CashflowPartyTab({
-  side, events, today, canManage, canPayPo, canReceipt = false, canDebtEdit = false, cashNow = null, buffer = 0, rmbRate = 0, onChanged,
+  side, events, today, canManage, canPayPo, canReceipt = false, canDebtEdit = false, canPayrollPay = false, cashNow = null, buffer = 0, rmbRate = 0, onChanged,
 }: {
   side: Side;
   /** รายการฝั่งนี้ทั้งหมด (รวมของค้างจากก่อนวันนี้) — กรองบริษัท/แหล่งมาแล้ว */
@@ -92,6 +93,8 @@ export function CashflowPartyTab({
   canReceipt?: boolean;
   /** แก้ทะเบียนหนี้ได้ (loan_contracts.edit) — บัตร: จ่ายแล้ว / ใบแจ้งยอดใหม่ / แก้ข้อมูล */
   canDebtEdit?: boolean;
+  /** บันทึกเงินเดือนจ่ายแล้วได้ (app.payroll + employees.edit — ด่านเดียวกับ API เงินเดือน) */
+  canPayrollPay?: boolean;
   /** เงินในบัญชีตอนนี้ (null = ยังไม่กรอก) + เงินกันขั้นต่ำ — ใช้คิดงบแนะนำของ "จัดรอบจ่าย" */
   cashNow?: number | null;
   buffer?: number;
@@ -106,6 +109,7 @@ export function CashflowPartyTab({
   const [runOpen, setRunOpen] = useState(false);
   const [cardModal, setCardModal] = useState<{ kind: "pay" | "stmt"; e: CashflowEvent } | null>(null);
   const [drawer, setDrawer] = useState<DrawerTarget>(null);
+  const [payrollModal, setPayrollModal] = useState<CashflowEvent[] | null>(null);
   const { poLines, ensurePoLines } = usePoLines();
 
   const groups = useMemo<Group[]>(() => {
@@ -196,19 +200,24 @@ export function CashflowPartyTab({
     { id: "credit", label: `ตั้งเครดิต${partyWord}`, icon: <Icon value="i:credit-card" size={14} />, defaultPlacement: "menu",
       show: (g) => canManage && !!g.partyId && CREDIT_CATS.has(g.cat),
       onClick: (g) => setModal({ kind: "credit", events: [], groups: [g] }) },
+    // อยู่ในเมนู (ไม่วางในแถว) — ปุ่มในแถวที่มีชื่อทำให้คอลัมน์กว้างทุกแถว · ปุ่ม "จ่ายแล้ว" รายรอบอยู่ในแถวที่กางแล้ว
+    { id: "payroll-paid", label: "บันทึกเงินเดือนจ่ายแล้ว", icon: <Icon value="i:circle-check" size={14} />, variant: "success", defaultPlacement: "menu",
+      show: (g) => side === "out" && canPayrollPay && payrollPayable(g.events).length > 0,
+      onClick: (g) => setPayrollModal(payrollPayable(g.events)) },
     { id: "page", label: "ไปหน้าเอกสาร", icon: <Icon value="i:external-link" size={14} />, defaultPlacement: "menu",
       onClick: (g) => router.push(g.events.length === 1 && g.events[0].href ? g.events[0].href : CAT[g.cat].page) },
   // ตัดปุ่มของอีกฝั่งทิ้ง (จ่ายแล้ว = ต้องจ่าย · รับเงินแล้ว = ต้องรับ) — ไม่งั้นคอลัมน์ปุ่มกว้างเผื่อปุ่มที่ไม่มีวันโผล่
-  ] as RowAction<Group>[]).filter((a) => (side === "out" ? a.id !== "recv" : a.id !== "pay")), [side, canManage, canPayPo, canReceipt, partyWord, router]);
+  ] as RowAction<Group>[]).filter((a) => (side === "out" ? a.id !== "recv" : a.id !== "pay")), [side, canManage, canPayPo, canReceipt, canPayrollPay, partyWord, router]);
 
   const bulkActions = useMemo<BulkAction<Group>[]>(() => [
     ...(side === "out" && canPayPo ? [{ label: "จ่ายแล้ว + แนบสลิป (เฉพาะ PO)", keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "pay", events: payable(rows.flatMap((g) => g.events)), groups: rows }) }] : []),
+    ...(side === "out" && canPayrollPay ? [{ label: "เงินเดือนจ่ายแล้ว (เลือกรอบได้)", keepSelection: true, onClick: (rows: Group[]) => setPayrollModal(payrollPayable(rows.flatMap((g) => g.events))) }] : []),
     ...(side === "in" && canReceipt ? [{ label: "รับเงินแล้ว (ออกใบรับชำระ)", keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "recv", events: receivable(rows.flatMap((g) => g.events)), groups: rows }) }] : []),
     ...(canManage ? [
       { label: "เลื่อนวัน", keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "date", events: movable(rows.flatMap((g) => g.events)), groups: rows }) },
       { label: `ตั้งเครดิต${partyWord}`, keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "credit", events: [], groups: rows.filter((g) => g.partyId && CREDIT_CATS.has(g.cat)) }) },
     ] : []),
-  ], [side, canManage, canPayPo, canReceipt, partyWord]);
+  ], [side, canManage, canPayPo, canReceipt, canPayrollPay, partyWord]);
 
   const agingTotal = aging.reduce((s, a) => s + a.amount, 0);
 
@@ -271,6 +280,7 @@ export function CashflowPartyTab({
           <DocList group={g} side={side} today={today} canManage={canManage} canPayPo={canPayPo} canReceipt={canReceipt} canDebtEdit={canDebtEdit}
             poLines={poLines} ensurePoLines={ensurePoLines} rmbRate={rmbRate}
             onCard={(kind, e) => setCardModal({ kind, e })} onDrawer={setDrawer}
+            canPayrollPay={canPayrollPay} onPayroll={(list) => setPayrollModal(list)}
             onMove={(e) => setModal({ kind: "date", events: [e], groups: [g] })}
             onPay={(e) => setModal({ kind: "pay", events: [e], groups: [g] })}
             onReceive={(e) => setModal({ kind: "recv", events: [e], groups: [g] })} />
@@ -292,6 +302,7 @@ export function CashflowPartyTab({
         onClose={() => setRunOpen(false)} onDone={() => { setRunOpen(false); onChanged(); }}
         onPayNow={(picked) => { setRunOpen(false); setModal({ kind: "pay", events: picked, groups: groups.filter((g) => g.events.some((e) => picked.includes(e))) }); }} />
       <ReceiveModal modal={modal?.kind === "recv" ? modal : null} today={today} onClose={() => setModal(null)} onDone={() => { setModal(null); onChanged(); }} />
+      <PayrollPaidModal events={payrollModal} onClose={() => setPayrollModal(null)} onDone={() => { setPayrollModal(null); onChanged(); }} />
       <CardPayModal event={cardModal?.kind === "pay" ? cardModal.e : null} today={today} onClose={() => setCardModal(null)} onDone={() => { setCardModal(null); onChanged(); }} />
       <CardStatementModal event={cardModal?.kind === "stmt" ? cardModal.e : null} today={today} onClose={() => setCardModal(null)} onDone={() => { setCardModal(null); onChanged(); }} />
       {drawer && (
@@ -339,10 +350,10 @@ function usePoLines() {
 }
 
 /** เอกสารข้างในแถวคู่ค้า (แถวที่กางออก) — PO มีรายการสินค้า (รูป · จำนวน · ราคา) ใต้แต่ละใบ */
-function DocList({ group, side, today, canManage, canPayPo, canReceipt, canDebtEdit, poLines, ensurePoLines, rmbRate, onCard, onDrawer, onMove, onPay, onReceive }: {
-  group: Group; side: Side; today: string; canManage: boolean; canPayPo: boolean; canReceipt: boolean; canDebtEdit: boolean;
+function DocList({ group, side, today, canManage, canPayPo, canReceipt, canDebtEdit, canPayrollPay, poLines, ensurePoLines, rmbRate, onCard, onDrawer, onPayroll, onMove, onPay, onReceive }: {
+  group: Group; side: Side; today: string; canManage: boolean; canPayPo: boolean; canReceipt: boolean; canDebtEdit: boolean; canPayrollPay: boolean;
   poLines: PoLinesState; ensurePoLines: (ids: string[]) => void; rmbRate: number;
-  onCard: (kind: "pay" | "stmt", e: CashflowEvent) => void; onDrawer: (t: DrawerTarget) => void;
+  onCard: (kind: "pay" | "stmt", e: CashflowEvent) => void; onDrawer: (t: DrawerTarget) => void; onPayroll: (list: CashflowEvent[]) => void;
   onMove: (e: CashflowEvent) => void; onPay: (e: CashflowEvent) => void; onReceive: (e: CashflowEvent) => void;
 }) {
   const poIds = useMemo(() => group.events.filter((e) => e.source === "purchase_order" && e.docId).map((e) => String(e.docId)), [group.events]);
@@ -397,6 +408,14 @@ function DocList({ group, side, today, canManage, canPayPo, canReceipt, canDebtE
                     <button type="button" onClick={() => onCard("stmt", e)} className={`${iconBtn} border-blue-200 text-blue-700 hover:bg-blue-50`}><Icon value="i:file-invoice" size={14} />ใบแจ้งยอดใหม่</button>
                     <button type="button" onClick={() => onDrawer({ module: "debt-cards", id: String(e.docId) })} className={`${iconBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}><Icon value="i:edit" size={14} />แก้ข้อมูลบัตร</button>
                   </>)}
+                  {canPayrollPay && e.source === "payroll" && e.docId && e.certainty !== "estimate" && (
+                    <button type="button" onClick={() => onPayroll([e])} className={`${iconBtn} border-emerald-200 text-emerald-700 hover:bg-emerald-50`}><Icon value="i:circle-check" size={14} />จ่ายแล้ว</button>
+                  )}
+                  {e.certainty === "estimate" && e.source === "payroll" && (
+                    <span className="text-[11px] text-slate-500">
+                      ประมาณการ — แก้ไม่ได้ตรงนี้ · <Link href="/payroll/payments" className="text-blue-700 underline">ไปทำรอบจ่าย</Link>
+                    </span>
+                  )}
                 </span>
               </div>
               <EventInfo e={e} today={today} />

@@ -310,7 +310,7 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
   // ------------------------------------------------------------
   {
     const [batchRes, lineRes, periodRes] = await Promise.all([
-      db.from("payment_batches").select("id, batch_no, batch_type, payment_date, status, payroll_period_id").limit(2000),
+      db.from("payment_batches").select("id, batch_no, batch_type, payment_date, status, payroll_period_id, updated_at").limit(2000),
       db.from("payment_batch_lines").select("payment_batch_id, paid_amount, gross_amount").limit(50000),
       db.from("payroll_periods").select("id, company_id").limit(5000),
     ]);
@@ -320,14 +320,16 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
     for (const r of periodRes.data ?? []) periodCompany.set(String(r.id), co(r.company_id));
 
     const sumByBatch = new Map<string, number>();
+    const linesByBatch = new Map<string, number>();   // 1 บรรทัดจ่าย = 1 คน
     for (const l of lineRes.data ?? []) {
       const k = String(l.payment_batch_id);
       sumByBatch.set(k, (sumByBatch.get(k) ?? 0) + (num(l.paid_amount) || num(l.gross_amount)));
+      linesByBatch.set(k, (linesByBatch.get(k) ?? 0) + 1);
     }
 
     type Batch = {
       id: string; batch_no: string | null; batch_type: string | null; payment_date: string | null;
-      status: string | null; payroll_period_id: string | null;
+      status: string | null; payroll_period_id: string | null; updated_at: string | null;
     };
     const batches = ((batchRes.data ?? []) as Batch[]).filter((b) => b.status !== "cancelled");
     const batchCompany = (b: Batch) => periodCompany.get(String(b.payroll_period_id ?? "")) ?? null;
@@ -358,6 +360,16 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
         note: b.status === "draft" ? "รอบนี้ยังเป็นร่าง ยังไม่อนุมัติ" : undefined,
         href: "/payroll/payments",
         companyId: batchCompany(b),
+        // ปุ่ม "จ่ายแล้ว" ในแท็บต้องจ่าย = อนุมัติ (ถ้ายังร่าง) แล้วบันทึกจ่ายของรอบนี้ (API เงินเดือนเดิม)
+        docId: String(b.id),
+        updatedAt: b.updated_at ?? null,
+        details: [
+          { label: "รอบจ่าย", value: b.batch_type === "mid_month" ? "กลางเดือน" : b.batch_type === "month_end" ? "สิ้นเดือน" : String(b.batch_type ?? "อื่น ๆ"), kind: "text" },
+          { label: "วันจ่าย", value: date, kind: "date" },
+          { label: "จำนวน", value: `${linesByBatch.get(String(b.id)) ?? 0} คน`, kind: "text" },
+          { label: "สถานะ", value: b.status === "approved" ? "อนุมัติแล้ว รอจ่าย" : b.status === "draft" ? "ร่าง (ยังไม่อนุมัติ)" : String(b.status ?? "—"), kind: "text" },
+        ],
+        raw: { status: b.status ?? null, batchType: b.batch_type ?? null, people: linesByBatch.get(String(b.id)) ?? 0 },
       });
     }
 
