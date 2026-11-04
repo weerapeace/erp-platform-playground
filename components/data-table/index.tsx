@@ -225,12 +225,18 @@ export type RowAction<T> = {
   label: string;
   icon?: React.ReactNode;
   onClick: (row: T) => void;
-  variant?: "default" | "danger";
+  /** success = ปุ่มเขียว (ปิดงาน/จ่ายแล้ว/รับแล้ว) · danger = ปุ่มแดง */
+  variant?: "default" | "danger" | "success";
   group?: string;
   description?: string;
   defaultVisible?: boolean;
   defaultPlacement?: "inline" | "menu" | "hidden";
   iconKey?: StandardRowActionIconKey;
+  /**
+   * true = ปุ่มในแถวโชว์ "ไอคอน + ชื่อ" (ใช้กับปุ่มหลักที่คนต้องรู้ทันทีว่าคืออะไร เช่น จ่ายแล้ว / เลื่อนวัน)
+   * ค่าเริ่ม = ไอคอนสี่เหลี่ยมเล็กอย่างเดียว ชี้ค้างถึงเห็นชื่อ · ใช้เฉพาะปุ่มที่วางในแถว (เมนูมีชื่ออยู่แล้ว)
+   */
+  showLabel?: boolean;
   /** แสดงปุ่มนี้เฉพาะแถวที่เงื่อนไขเป็นจริง (ไม่ระบุ = แสดงทุกแถว) */
   show?: (row: T) => boolean;
 };
@@ -294,6 +300,8 @@ export interface DataTableProps<T extends Record<string, unknown>> {
   searchableKeys?: (keyof T)[];
   views?: DataTableView[];
   rowActions?: RowAction<T>[];
+  /** ชื่อบนปุ่มเมนูท้ายแถว เช่น "อื่น ๆ" (ไม่ใส่ = ไอคอน ⋮ อย่างเดียวเหมือนเดิม) — ใช้คู่กับปุ่ม showLabel ให้ทั้งแถวอ่านออก */
+  rowMenuLabel?: string;
   bulkActions?: BulkAction<T>[];
   /**
    * ตำแหน่งแถบคำสั่งหลายรายการ — "top" (ค่าเดิม: แถบฟ้าเหนือตาราง) · "bottom" = ของกลาง BulkActionBar ลอยติดขอบล่างจอ
@@ -484,6 +492,7 @@ export function DataTable<T extends Record<string, unknown>>({
   searchableKeys = [],
   views = [],
   rowActions = [],
+  rowMenuLabel,
   bulkActions = [],
   bulkBarPosition = "top",
   bulkUnit,
@@ -1230,13 +1239,20 @@ export function DataTable<T extends Record<string, unknown>>({
     };
     const base = injectSummary(withSelectCol);
     if (activeRowActions.length === 0) return base;
-    const inlineWidth = inlineRowActions.length * 34;
-    const menuWidth = menuRowActions.length > 0 ? 40 : 0;
+    // ปุ่มมีชื่อ (showLabel) กว้างตามตัวหนังสือ · ไอคอนอย่างเดียว 34px
+    const labelWidth = (label: string) => 30 + Math.ceil(label.length * 6.5);
+    const inlineWidth = inlineRowActions.reduce((w, a) => w + (a.showLabel ? labelWidth(a.label) : 34), 0);
+    const menuWidth = menuRowActions.length > 0 ? (rowMenuLabel ? labelWidth(rowMenuLabel) + 12 : 40) : 0;
+    const anyLabel = !!rowMenuLabel || inlineRowActions.some((a) => a.showLabel);
+    const variantCls = (v: RowAction<T>["variant"]) =>
+      v === "danger" ? "border-red-200 text-red-600 bg-white hover:bg-red-50"
+        : v === "success" ? "border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50"
+          : "border-slate-200 text-slate-700 bg-white hover:bg-slate-50";
     return [
       ...base,
       {
         id: "__actions__",
-        size: Math.min(320, Math.max(56, inlineWidth + menuWidth + 16)),
+        size: Math.min(anyLabel ? 400 : 320, Math.max(56, inlineWidth + menuWidth + 16)),
         header: () => <span className="text-xs font-medium text-slate-500">จัดการ</span>,
         cell: ({ row }) => (
           <div className="flex items-center justify-end gap-1.5">
@@ -1247,15 +1263,14 @@ export function DataTable<T extends Record<string, unknown>>({
                   e.stopPropagation();
                   action.onClick(row.original);
                 }}
-                className={`h-7 w-7 rounded-md border text-xs font-medium transition-colors inline-flex items-center justify-center ${
-                  action.variant === "danger"
-                    ? "border-red-200 text-red-600 bg-white hover:bg-red-50"
-                    : "border-slate-200 text-slate-700 bg-white hover:bg-slate-50"
-                }`}
+                className={`h-7 rounded-md border text-xs font-medium transition-colors inline-flex items-center justify-center ${
+                  action.showLabel ? "px-2.5 gap-1 whitespace-nowrap" : "w-7"
+                } ${variantCls(action.variant)}`}
                 title={action.description || action.label}
                 aria-label={action.label}
               >
                 {action.icon ?? renderStandardRowActionIcon(actionSettings[action.id]?.iconKey ?? action.iconKey)}
+                {action.showLabel && <span>{action.label}</span>}
               </button>
             ))}
             {menuRowActions.some((action) => !action.show || action.show(row.original)) && (
@@ -1267,8 +1282,13 @@ export function DataTable<T extends Record<string, unknown>>({
                     prev && prev.row === row.original ? null : { row: row.original, x: r.right, y: r.bottom }
                   );
                 }}
-                className="h-7 w-7 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
-                <IconMoreVertical />
+                aria-label={rowMenuLabel || "คำสั่งอื่น"}
+                className={rowMenuLabel
+                  ? "h-7 px-2.5 gap-1 inline-flex items-center rounded-md border border-slate-200 bg-white text-xs font-medium text-slate-600 hover:bg-slate-50 whitespace-nowrap transition-colors"
+                  : "h-7 w-7 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors"}>
+                {rowMenuLabel
+                  ? <>{rowMenuLabel}<svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 9l6 6l6 -6" /></svg></>
+                  : <IconMoreVertical />}
               </button>
             )}
           </div>
@@ -1276,7 +1296,7 @@ export function DataTable<T extends Record<string, unknown>>({
         enableSorting: false, enableHiding: false,
       },
     ];
-  }, [withSelectCol, activeRowActions, inlineRowActions, menuRowActions, layoutSettings]);
+  }, [withSelectCol, activeRowActions, inlineRowActions, menuRowActions, layoutSettings, rowMenuLabel]);
 
   // ของกลาง: บังคับ checkbox (__select__) ซ้ายสุด และปุ่ม ⋮ (__actions__) ขวาสุดเสมอ
   // กัน columnOrder ที่ถูกบันทึก/จัดเรียงไว้ (ซึ่งมักไม่รวมคอลัมน์พิเศษ 2 ตัวนี้)
@@ -2336,7 +2356,8 @@ export function DataTable<T extends Record<string, unknown>>({
                 key={action.id}
                 onClick={() => { action.onClick(rowMenu.row); setRowMenu(null); }}
                 className={`w-full flex items-center gap-2 px-3 py-2 text-sm text-left transition-colors ${
-                  action.variant === "danger" ? "text-red-600 hover:bg-red-50" : "text-slate-700 hover:bg-slate-50"
+                  action.variant === "danger" ? "text-red-600 hover:bg-red-50"
+                    : action.variant === "success" ? "text-emerald-700 hover:bg-emerald-50" : "text-slate-700 hover:bg-slate-50"
                 }`}>
                 {action.icon ?? renderStandardRowActionIcon(actionSettings[action.id]?.iconKey ?? action.iconKey)}
                 {action.label}

@@ -511,7 +511,7 @@ export default function CashflowPage() {
               ))}
             </div>
 
-            {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} cashNow={accounts.length ? opening : null} buffer={buffer} onChanged={load} />}
+            {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} cashNow={accounts.length ? opening : null} buffer={buffer} rmbRate={data?.meta.rmbRate ?? 0} onChanged={load} />}
             {tab === "recv" && <CashflowPartyTab side="in" events={inEvents} today={from} canManage={canManage} canPayPo={false} canReceipt={canReceipt} onChanged={load} />}
             {tab === "debt" && (canDebtView ? (
               <CashflowDebtTab items={myDebts} loading={debtsLoading} error={debtsErr} canCreate={canDebtCreate} onChanged={reloadAll}

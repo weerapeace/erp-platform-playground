@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { SKU_COVER_SELECT, resolveSkuCover } from "@/lib/sku-cover";
+import { loadPoLines, type PoDetailLine } from "@/lib/po-lines-server";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 import { formatCreditTerm } from "@/lib/credit-term";
 import { computePoTotals, sumActiveLines } from "@/lib/po-total";
@@ -17,17 +17,8 @@ export const revalidate = 0;
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const isCNY = (c: unknown) => ["RMB", "YUAN", "CNY"].includes(String(c ?? "").toUpperCase());
 
-export type PoDetailLine = {
-  name: string; qty: number; received: number; uom: string | null;
-  price: number; total: number; img: string | null; done: boolean;
-  /** รหัสสินค้า — ใช้บนใบพิมพ์ที่แขวนไว้ที่โต๊ะรับของ */
-  sku: string | null;
-  /** id สินค้าจริงที่ผูกไว้ (null = พิมพ์ชื่อเอง) — ใช้ตอนแก้ใบให้ตัวเลือกสินค้าจำค่าเดิม */
-  sku_id: string | null;
-  /** id ของบรรทัด PO — ต้องมีเพื่อยืนยันรับของจากหน้าสแกน */
-  id: string;
-  defective: number;
-};
+/** บรรทัดสินค้า — ของกลาง lib/po-lines-server (อ่านทีละหลายใบได้ · แท็บต้องจ่ายหน้ากระแสเงินสดใช้ตัวเดียวกัน) */
+export type { PoDetailLine };
 
 /** ใบรับล่าสุดของ PO นี้ — ใช้เตือน "ใบนี้รับไปแล้ว" กันสแกนซ้ำ */
 export type PoLastReceipt = { gr_no: string; receiver: string | null; receive_date: string | null };
@@ -85,29 +76,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     .eq("id", id).single();
   if (error || !po) return NextResponse.json({ error: "ไม่พบใบสั่งซื้อ" }, { status: 404 });
 
-  const { data: ls } = await admin.from("purchase_order_lines_v2")
-    .select("id, item_sku_id, item_name, qty, qty_received, qty_defective, uom, price_est, line_total, sort_order, line_status, is_active")
-    .eq("po_id", id).order("sort_order", { ascending: true });
-  const rows = ((ls ?? []) as Record<string, unknown>[]).filter((l) => l.is_active !== false);
-
-  const skuIds = [...new Set(rows.map((l) => l.item_sku_id).filter(Boolean) as string[])];
-  const coverMap = new Map<string, string | null>();
-  const uomBySku = new Map<string, string | null>();
-  const codeBySku = new Map<string, string | null>();
-  if (skuIds.length) {
-    const { data: sk } = await admin.from("skus_v2").select("id, code, " + SKU_COVER_SELECT + ", uom_id").in("id", skuIds);
-    const uomIds = [...new Set(((sk ?? []) as unknown as Record<string, unknown>[]).map((s) => s.uom_id).filter(Boolean) as string[])];
-    const uomName = new Map<string, string>();
-    if (uomIds.length) {
-      const { data: us } = await admin.from("uoms").select("id, name").in("id", uomIds);
-      for (const u of (us ?? []) as Record<string, unknown>[]) uomName.set(String(u.id), String(u.name ?? ""));
-    }
-    for (const s of (sk ?? []) as unknown as Record<string, unknown>[]) {
-      coverMap.set(String(s.id), resolveSkuCover(s).key);
-      uomBySku.set(String(s.id), s.uom_id ? (uomName.get(String(s.uom_id)) ?? null) : null);
-      codeBySku.set(String(s.id), (s.code as string) ?? null);
-    }
-  }
+  // บรรทัดสินค้า + รูป + หน่วย — ของกลาง (อ่านพลาด = ใบไม่มีรายการ เหมือนเดิม ไม่ทำทั้งป๊อปพัง)
+  const lines: PoDetailLine[] = (await loadPoLines(admin, [id]).catch(() => new Map<string, PoDetailLine[]>())).get(id) ?? [];
 
   // ใบรับล่าสุด — หน้าสแกนเอาไปเตือน "ใบนี้รับไปแล้วเมื่อ..." กันกดซ้ำจนของเข้าเบิ้ล
   const { data: grs } = await admin.from("goods_receipts_v2")
@@ -158,7 +128,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const p = po as Record<string, unknown>;
   // ยอดก่อนภาษี/ภาษี — คิดจากบรรทัดจริงด้วยสูตรกลาง (grand_total ใน DB = ยอดจ่ายรวม VAT แล้ว)
   const poTotals = computePoTotals(
-    sumActiveLines(rows as { line_total?: number | null; is_active?: boolean | null }[]),
+    sumActiveLines(lines.map((l) => ({ line_total: l.total }))),
     num(p.vat_rate), !!p.vat_included,
   );
   // เรทแปลงบาท: เรทที่ล็อกไว้ที่ใบ → ไม่มี = เรทรายวันล่าสุด (บอกที่มาให้หน้าจอโชว์ว่า "แปลงจากเรทอะไร")
@@ -189,23 +159,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       ? { gr_no: String(lastGr.gr_no ?? ""), receiver: (lastGr.receiver as string) ?? null, receive_date: (lastGr.receive_date as string) ?? null }
       : null,
     vouchers,
-    lines: rows.map((l) => {
-      const sid = l.item_sku_id ? String(l.item_sku_id) : null;
-      const key = sid ? coverMap.get(sid) : null;
-      const st = String(l.line_status ?? "");
-      const remain = Math.max(0, num(l.qty) - num(l.qty_received));
-      return {
-        name: String(l.item_name ?? ""), qty: num(l.qty), received: num(l.qty_received),
-        uom: (l.uom as string) || (sid ? (uomBySku.get(sid) ?? null) : null),
-        price: num(l.price_est), total: num(l.line_total),
-        img: key ? `/api/r2-image?key=${encodeURIComponent(key)}` : null,
-        done: st === "received" || st === "short_closed" || st === "closed_short" || remain === 0,
-        sku: sid ? (codeBySku.get(sid) ?? null) : null,
-        sku_id: sid,
-        id: String(l.id),
-        defective: num(l.qty_defective),
-      };
-    }),
+    lines,
   };
   return NextResponse.json({ data: detail, error: null });
 }

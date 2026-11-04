@@ -99,10 +99,14 @@ export const CASHFLOW_SOURCE: Record<CashflowSource, { label: string; icon: stri
   manual:         { label: "รายการประจำ", icon: "📌", color: "#0F766E", href: "/cashflow" },
 };
 
-export const CASHFLOW_CERTAINTY: Record<CashflowCertainty, { label: string; hint: string; badge: string }> = {
-  actual:   { label: "แน่นอน",    hint: "ยืนยันวันและยอดแล้ว",                              badge: "bg-emerald-100 text-emerald-700" },
-  expected: { label: "คาดว่าจะ",  hint: "มีเอกสารจริงรออยู่ แต่วันอาจเลื่อนได้",             badge: "bg-blue-100 text-blue-700" },
-  estimate: { label: "ประมาณการ", hint: "ระบบเดาให้จากค่าเฉลี่ย/ค่าตั้งต้น ยังไม่มีเอกสารจริง", badge: "bg-slate-100 text-slate-600" },
+/**
+ * ความแน่นอนของรายการเงิน — ป้ายสีในทุกแท็บ/กระดานของกระแสเงินสด
+ * ชื่อป้ายต้องอ่านแล้วรู้เลย (เดิม "คาดว่าจะ" ผู้ใช้งง 2026-11-04) · `short` = คำอธิบายสั้นบนแถบอธิบายป้าย
+ */
+export const CASHFLOW_CERTAINTY: Record<CashflowCertainty, { label: string; short: string; hint: string; badge: string }> = {
+  actual:   { label: "ยืนยันแล้ว",   short: "วันและยอดชัวร์",                 hint: "ยืนยันวันและยอดแล้ว",                              badge: "bg-emerald-100 text-emerald-700" },
+  expected: { label: "วันอาจเลื่อน", short: "มีเอกสารจริง แต่วันยังไม่ชัวร์", hint: "มีเอกสารจริงรออยู่ แต่วันอาจเลื่อนได้",             badge: "bg-blue-100 text-blue-700" },
+  estimate: { label: "ประมาณการ",   short: "ระบบเดา ยังไม่มีเอกสาร",         hint: "ระบบเดาให้จากค่าเฉลี่ย/ค่าตั้งต้น ยังไม่มีเอกสารจริง", badge: "bg-slate-100 text-slate-600" },
 };
 
 export const sourceLabel = (s: string) => CASHFLOW_SOURCE[s as CashflowSource]?.label ?? s;

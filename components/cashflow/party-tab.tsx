@@ -9,8 +9,9 @@
  *   จ่ายแล้ว   → POST  /api/purchasing/mark-paid     (เฉพาะ PO · products.edit · audit ในตัว) + สลิป = ไฟล์แนบกลาง (uploadRecordFile → copyRecordFile)
  *   จัดรอบจ่าย → planPayRun (lib/cashflow) → นัดจ่าย (/api/cashflow/plan) หรือ จ่ายแล้วตอนนี้ (ป๊อปจ่ายแล้ว)
  *   รับเงินแล้ว → POST  /api/receipts                 (ใบรับชำระ 1 ใบต่อลูกค้า · receipts.create · ยอดค้างคิดใหม่จากใบรับชำระ · audit ในตัว)
+ * กางแถวร้าน → เห็นของใน PO แต่ละใบ (รูป · จำนวน · ราคา) — โหลดทีเดียวทั้งร้านตอนกาง: GET /api/cashflow/po-lines (ของกลาง lib/po-lines-server)
  */
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -21,11 +22,16 @@ import { useToast } from "@/components/toast";
 import { useAuth } from "@/components/auth";
 import { UploadProgress } from "@/components/upload-progress";
 import { uploadRecordFile, copyRecordFile } from "@/components/record-files";
+import { Icon } from "@/components/icon";
+import { HoverImage } from "@/components/hover-image";
 import { RECORD_FILES_MAX } from "@/lib/record-files";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
+import { formatAmount, normalizeCurrency } from "@/lib/money";
 import { CREDIT_TERM_OPTIONS } from "@/lib/credit-term";
 import { CASHFLOW_CERTAINTY, THB, addDaysISO, daysBetween, planPayRun, type CashflowEvent } from "@/lib/cashflow";
+import type { PoDetailLine } from "@/lib/po-lines-server";
+import type { CashflowPoLines } from "@/app/api/cashflow/po-lines/route";
 
 type Side = "out" | "in";
 type Cat = "shop" | "china" | "loan" | "od" | "card" | "payroll" | "manual" | "customer";
@@ -67,7 +73,7 @@ const AGING = [
 type Modal = { kind: "date" | "credit" | "pay" | "recv"; events: CashflowEvent[]; groups: Group[] } | null;
 
 export function CashflowPartyTab({
-  side, events, today, canManage, canPayPo, canReceipt = false, cashNow = null, buffer = 0, onChanged,
+  side, events, today, canManage, canPayPo, canReceipt = false, cashNow = null, buffer = 0, rmbRate = 0, onChanged,
 }: {
   side: Side;
   /** รายการฝั่งนี้ทั้งหมด (รวมของค้างจากก่อนวันนี้) — กรองบริษัท/แหล่งมาแล้ว */
@@ -80,6 +86,8 @@ export function CashflowPartyTab({
   /** เงินในบัญชีตอนนี้ (null = ยังไม่กรอก) + เงินกันขั้นต่ำ — ใช้คิดงบแนะนำของ "จัดรอบจ่าย" */
   cashNow?: number | null;
   buffer?: number;
+  /** เรทหยวน→บาทที่หน้านี้ใช้อยู่ (ตัวเดียวกับ "ยอดจริง ¥… × เรต …" ของ PO) — ใช้โชว์ ≈฿ ของแต่ละบรรทัดสินค้า */
+  rmbRate?: number;
   onChanged: () => void;
 }) {
   const router = useRouter();
@@ -87,6 +95,7 @@ export function CashflowPartyTab({
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [modal, setModal] = useState<Modal>(null);
   const [runOpen, setRunOpen] = useState(false);
+  const { poLines, ensurePoLines } = usePoLines();
 
   const groups = useMemo<Group[]>(() => {
     const map = new Map<string, Group>();
@@ -159,17 +168,27 @@ export function CashflowPartyTab({
     },
   ], [side, open]);
 
-  const rowActions = useMemo<RowAction<Group>[]>(() => [
-    { id: "pay", label: "จ่ายแล้วทั้งร้าน", defaultPlacement: "inline", show: (g) => side === "out" && canPayPo && payable(g.events).length > 0,
+  // ปุ่มหลักโชว์ "ไอคอน + ชื่อ" (เจ้าของขอ 2026-11-04: ปุ่ม ⋮ หน้าตาเหมือนกันหมด ไม่รู้ว่าอันไหนคืออะไร) · ที่เหลืออยู่ในเมนู "อื่น ๆ"
+  const rowActions = useMemo<RowAction<Group>[]>(() => ([
+    { id: "pay", label: "จ่ายแล้วทั้งร้าน", description: "บันทึกว่าจ่าย PO ทุกใบของร้านนี้แล้ว (แนบสลิปได้)",
+      icon: <Icon value="i:circle-check" size={14} />, variant: "success", showLabel: true, defaultPlacement: "inline",
+      show: (g) => side === "out" && canPayPo && payable(g.events).length > 0,
       onClick: (g) => setModal({ kind: "pay", events: payable(g.events), groups: [g] }) },
-    { id: "recv", label: "รับเงินแล้ว", defaultPlacement: "inline", show: (g) => side === "in" && canReceipt && receivable(g.events).length > 0,
+    { id: "recv", label: "รับเงินแล้ว", description: "ออกใบรับชำระให้ทุกใบของลูกค้ารายนี้",
+      icon: <Icon value="i:cash" size={14} />, variant: "success", showLabel: true, defaultPlacement: "inline",
+      show: (g) => side === "in" && canReceipt && receivable(g.events).length > 0,
       onClick: (g) => setModal({ kind: "recv", events: receivable(g.events), groups: [g] }) },
-    { id: "move", label: "เลื่อนวัน", defaultPlacement: "inline", show: (g) => canManage && movable(g.events).length > 0,
+    { id: "move", label: "เลื่อนวัน", description: "เลื่อนวันครบกำหนดของทุกใบในแถวนี้",
+      icon: <Icon value="i:calendar-event" size={14} />, showLabel: true, defaultPlacement: "inline",
+      show: (g) => canManage && movable(g.events).length > 0,
       onClick: (g) => setModal({ kind: "date", events: movable(g.events), groups: [g] }) },
-    { id: "credit", label: `ตั้งเครดิต${partyWord}`, defaultPlacement: "menu", show: (g) => canManage && !!g.partyId && CREDIT_CATS.has(g.cat),
+    { id: "credit", label: `ตั้งเครดิต${partyWord}`, icon: <Icon value="i:credit-card" size={14} />, defaultPlacement: "menu",
+      show: (g) => canManage && !!g.partyId && CREDIT_CATS.has(g.cat),
       onClick: (g) => setModal({ kind: "credit", events: [], groups: [g] }) },
-    { id: "page", label: "ไปหน้าเอกสาร", defaultPlacement: "menu", onClick: (g) => router.push(g.events.length === 1 && g.events[0].href ? g.events[0].href : CAT[g.cat].page) },
-  ], [side, canManage, canPayPo, canReceipt, partyWord, router]);
+    { id: "page", label: "ไปหน้าเอกสาร", icon: <Icon value="i:external-link" size={14} />, defaultPlacement: "menu",
+      onClick: (g) => router.push(g.events.length === 1 && g.events[0].href ? g.events[0].href : CAT[g.cat].page) },
+  // ตัดปุ่มของอีกฝั่งทิ้ง (จ่ายแล้ว = ต้องจ่าย · รับเงินแล้ว = ต้องรับ) — ไม่งั้นคอลัมน์ปุ่มกว้างเผื่อปุ่มที่ไม่มีวันโผล่
+  ] as RowAction<Group>[]).filter((a) => (side === "out" ? a.id !== "recv" : a.id !== "pay")), [side, canManage, canPayPo, canReceipt, partyWord, router]);
 
   const bulkActions = useMemo<BulkAction<Group>[]>(() => [
     ...(side === "out" && canPayPo ? [{ label: "จ่ายแล้ว + แนบสลิป (เฉพาะ PO)", keepSelection: true, onClick: (rows: Group[]) => setModal({ kind: "pay", events: payable(rows.flatMap((g) => g.events)), groups: rows }) }] : []),
@@ -234,10 +253,12 @@ export function CashflowPartyTab({
         bulkActions={bulkActions}
         bulkUnit={partyWord}
         rowActions={rowActions}
+        rowMenuLabel="อื่น ๆ"
         onRowClick={toggle}
         isRowExpanded={(g) => open.has(g.id)}
         renderExpandedRow={(g) => (
           <DocList group={g} side={side} canManage={canManage} canPayPo={canPayPo} canReceipt={canReceipt}
+            poLines={poLines} ensurePoLines={ensurePoLines} rmbRate={rmbRate}
             onMove={(e) => setModal({ kind: "date", events: [e], groups: [g] })}
             onPay={(e) => setModal({ kind: "pay", events: [e], groups: [g] })}
             onReceive={(e) => setModal({ kind: "recv", events: [e], groups: [g] })} />
@@ -263,40 +284,169 @@ export function CashflowPartyTab({
   );
 }
 
-/** เอกสารข้างในแถวคู่ค้า (แถวที่กางออก) */
-function DocList({ group, side, canManage, canPayPo, canReceipt, onMove, onPay, onReceive }: {
+/** ของใน PO: undefined = กำลังโหลด · "error" = โหลดพลาด (กดลองใหม่ได้) */
+type PoLinesState = Record<string, CashflowPoLines[string] | "error">;
+const PO_LINES_BATCH = 100;
+
+/**
+ * โหลดของใน PO "ตอนกางแถวร้าน" ทีเดียวทั้งร้าน แล้วจำไว้ (กางซ้ำไม่โหลดใหม่) — ไม่ดึงของทุก PO ตั้งแต่เปิดหน้า
+ * เรียกซ้ำด้วย id ที่โหลดพลาด = ลองใหม่
+ */
+function usePoLines() {
+  const [poLines, setPoLines] = useState<PoLinesState>({});
+  const asked = useRef(new Set<string>());
+  const ensurePoLines = useCallback((ids: string[]) => {
+    const need = [...new Set(ids)].filter((id) => !asked.current.has(id));
+    if (!need.length) return;
+    need.forEach((id) => asked.current.add(id));
+    setPoLines((s) => {
+      if (!need.some((id) => s[id] === "error")) return s;
+      const n = { ...s }; need.forEach((id) => { delete n[id]; }); return n;
+    });
+    for (let i = 0; i < need.length; i += PO_LINES_BATCH) {
+      const chunk = need.slice(i, i + PO_LINES_BATCH);
+      apiFetch(`/api/cashflow/po-lines?ids=${chunk.join(",")}`)
+        .then((r) => r.json())
+        .then((j) => {
+          if (j?.error || !j?.data) throw new Error(j?.error || "load failed");
+          const data = j.data as CashflowPoLines;
+          setPoLines((s) => { const n = { ...s }; for (const id of chunk) n[id] = data[id] ?? { currency: null, lines: [] }; return n; });
+        })
+        .catch(() => {
+          chunk.forEach((id) => asked.current.delete(id));
+          setPoLines((s) => { const n = { ...s }; for (const id of chunk) n[id] = "error"; return n; });
+        });
+    }
+  }, []);
+  return { poLines, ensurePoLines };
+}
+
+/** เอกสารข้างในแถวคู่ค้า (แถวที่กางออก) — PO มีรายการสินค้า (รูป · จำนวน · ราคา) ใต้แต่ละใบ */
+function DocList({ group, side, canManage, canPayPo, canReceipt, poLines, ensurePoLines, rmbRate, onMove, onPay, onReceive }: {
   group: Group; side: Side; canManage: boolean; canPayPo: boolean; canReceipt: boolean;
+  poLines: PoLinesState; ensurePoLines: (ids: string[]) => void; rmbRate: number;
   onMove: (e: CashflowEvent) => void; onPay: (e: CashflowEvent) => void; onReceive: (e: CashflowEvent) => void;
 }) {
+  const poIds = useMemo(() => group.events.filter((e) => e.source === "purchase_order" && e.docId).map((e) => String(e.docId)), [group.events]);
+  const poKey = poIds.join(",");
+  useEffect(() => { if (poIds.length) ensurePoLines(poIds); }, [poKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [folded, setFolded] = useState<Set<string>>(new Set());   // PO ที่พับรายการสินค้าไว้
+  const [full, setFull] = useState<Set<string>>(new Set());       // PO ที่กดดูครบทุกรายการ
+  const flip = (set: Set<string>, id: string) => { const n = new Set(set); if (n.has(id)) n.delete(id); else n.add(id); return n; };
+  const kinds = (["actual", "expected", "estimate"] as const).filter((k) => group.events.some((e) => e.certainty === k));
+  const iconBtn = "h-7 px-2.5 text-xs rounded-md border bg-white inline-flex items-center gap-1";
+
   return (
-    <div className="bg-slate-50/70 rounded-lg border border-slate-100 divide-y divide-slate-100 text-[13px]">
-      {group.events.map((e) => {
-        const c = CASHFLOW_CERTAINTY[e.certainty];
-        return (
-          <div key={e.id} className="flex items-center gap-3 px-3 py-2 flex-wrap">
-            <span className={`w-24 shrink-0 ${e.dateConfident ? "text-slate-700" : "text-slate-400 italic"}`} title={e.dateNote}>
-              {formatDate(e.date)}{!e.dateConfident && " ~"}
-            </span>
-            <span className="flex-1 min-w-[160px]">
-              {e.href ? <Link href={e.href} className="text-blue-700 hover:underline">{e.ref}</Link> : <span className="text-slate-700">{e.ref}</span>}
-              {(e.note || e.dateNote) && <span className="block text-[11px] text-slate-400">{e.note || e.dateNote}</span>}
-            </span>
-            <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.badge}`} title={c.hint}>{c.label}</span>
-            <span className={`w-28 text-right tabular-nums font-medium ${side === "out" ? "text-rose-600" : "text-emerald-600"}`}>{THB(e.amount)}</span>
-            <span className="flex gap-1">
-              {canPayPo && e.source === "purchase_order" && e.docId && (
-                <button type="button" onClick={() => onPay(e)} className="h-7 px-2.5 text-xs rounded-md border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50">จ่ายแล้ว</button>
+    <div className="bg-slate-50/70 rounded-lg border border-slate-100 text-[13px]">
+      {/* อธิบายป้ายสี (เจ้าของถาม "คาดว่าจะ" คืออะไร) */}
+      <div className="flex items-center gap-x-3 gap-y-1 flex-wrap px-3 py-1.5 border-b border-slate-100 text-[11px] text-slate-500">
+        <span>ป้ายสี = {side === "out" ? "วันจ่าย" : "วันรับเงิน"}แน่นอนแค่ไหน:</span>
+        {kinds.map((k) => (
+          <span key={k} className="inline-flex items-center gap-1">
+            <span className={`px-2 py-0.5 rounded-full ${CASHFLOW_CERTAINTY[k].badge}`}>{CASHFLOW_CERTAINTY[k].label}</span>{CASHFLOW_CERTAINTY[k].short}
+          </span>
+        ))}
+        {group.guessed > 0 && <span><span className="italic text-slate-400">วันที่ ~</span> = ระบบเดาวันให้ (ยังไม่ได้ตั้งเครดิต)</span>}
+      </div>
+      <div className="divide-y divide-slate-100">
+        {group.events.map((e) => {
+          const c = CASHFLOW_CERTAINTY[e.certainty];
+          const poId = e.source === "purchase_order" && e.docId ? String(e.docId) : null;
+          return (
+            <div key={e.id} className="px-3 py-2">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className={`w-24 shrink-0 ${e.dateConfident ? "text-slate-700" : "text-slate-400 italic"}`} title={e.dateNote}>
+                  {formatDate(e.date)}{!e.dateConfident && " ~"}
+                </span>
+                <span className="flex-1 min-w-[160px]">
+                  {e.href ? <Link href={e.href} className="text-blue-700 hover:underline">{e.ref}</Link> : <span className="text-slate-700">{e.ref}</span>}
+                  {(e.note || e.dateNote) && <span className="block text-[11px] text-slate-400">{e.note || e.dateNote}</span>}
+                </span>
+                <span className={`text-[11px] px-2 py-0.5 rounded-full ${c.badge}`} title={c.hint}>{c.label}</span>
+                <span className={`w-28 text-right tabular-nums font-medium ${side === "out" ? "text-rose-600" : "text-emerald-600"}`}>{THB(e.amount)}</span>
+                <span className="flex gap-1">
+                  {canPayPo && e.source === "purchase_order" && e.docId && (
+                    <button type="button" onClick={() => onPay(e)} className={`${iconBtn} border-emerald-200 text-emerald-700 hover:bg-emerald-50`}><Icon value="i:circle-check" size={14} />จ่ายแล้ว</button>
+                  )}
+                  {canReceipt && (e.source === "sales_order" || e.source === "billing_note") && e.docId && (
+                    <button type="button" onClick={() => onReceive(e)} className={`${iconBtn} border-emerald-200 text-emerald-700 hover:bg-emerald-50`}><Icon value="i:cash" size={14} />รับเงินแล้ว</button>
+                  )}
+                  {canManage && e.movable && e.docId && (
+                    <button type="button" onClick={() => onMove(e)} className={`${iconBtn} border-slate-200 text-slate-600 hover:bg-slate-50`}><Icon value="i:calendar-event" size={14} />เลื่อนวัน</button>
+                  )}
+                </span>
+              </div>
+              {poId && (
+                <PoItems state={poLines[poId]} rmbRate={rmbRate} open={!folded.has(poId)} showAll={full.has(poId)}
+                  onToggle={() => setFolded((s) => flip(s, poId))} onShowAll={() => setFull((s) => flip(s, poId))}
+                  onRetry={() => ensurePoLines([poId])} />
               )}
-              {canReceipt && (e.source === "sales_order" || e.source === "billing_note") && e.docId && (
-                <button type="button" onClick={() => onReceive(e)} className="h-7 px-2.5 text-xs rounded-md border border-emerald-200 text-emerald-700 bg-white hover:bg-emerald-50">รับเงินแล้ว</button>
-              )}
-              {canManage && e.movable && e.docId && (
-                <button type="button" onClick={() => onMove(e)} className="h-7 px-2.5 text-xs rounded-md border border-slate-200 text-slate-600 bg-white hover:bg-slate-50">เลื่อนวัน</button>
-              )}
-            </span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const ITEM_PREVIEW = 3;
+/** ชื่อสินค้าที่ย้ายมาจาก Odoo มีรหัสนำหน้า "[SKU] ชื่อ" — ตัดออกเมื่อโชว์รหัสแยกแล้ว */
+const itemName = (l: PoDetailLine) => (l.sku ? l.name.replace(/^\s*\[[^\]]*\]\s*/, "") : l.name) || l.name;
+const qtyText = (l: PoDetailLine) => `${l.qty.toLocaleString("th-TH", { maximumFractionDigits: 2 })}${l.uom ? ` ${l.uom}` : ""}`;
+
+/** รายการสินค้าใต้ PO 1 ใบ: รูป · รหัส+ชื่อ · จำนวน · ราคา/หน่วย · รวม (PO หยวนมี ≈฿ ตามเรตของหน้านี้) */
+function PoItems({ state, rmbRate, open, showAll, onToggle, onShowAll, onRetry }: {
+  state: PoLinesState[string] | undefined; rmbRate: number; open: boolean; showAll: boolean;
+  onToggle: () => void; onShowAll: () => void; onRetry: () => void;
+}) {
+  const wrap = "mt-1.5 sm:ml-[108px]";
+  if (state === undefined) return <div className={`${wrap} text-[11px] text-slate-400`}>กำลังโหลดรายการสินค้า…</div>;
+  if (state === "error") return (
+    <div className={`${wrap} text-[11px] text-red-600`}>
+      โหลดรายการสินค้าไม่สำเร็จ <button type="button" onClick={onRetry} className="underline">ลองใหม่</button>
+    </div>
+  );
+  const { currency, lines } = state;
+  if (!lines.length) return <div className={`${wrap} text-[11px] text-slate-400`}>ใบนี้ยังไม่มีรายการสินค้า</div>;
+  const isCny = normalizeCurrency(currency) === "CNY";
+  const shown = showAll ? lines : lines.slice(0, ITEM_PREVIEW);
+  const adjusted = lines.some((l) => Math.abs(l.total - l.qty * l.price) > 0.01);
+  const grid = "grid grid-cols-[28px_minmax(0,1fr)_auto] sm:grid-cols-[28px_minmax(0,1fr)_88px_92px_128px] gap-2 items-center";
+  return (
+    <div className={wrap}>
+      <button type="button" onClick={onToggle} className="inline-flex items-center gap-1 text-xs text-blue-700 hover:underline">
+        <Icon value="i:chevron-down" size={14} className={open ? "" : "-rotate-90"} />สินค้า {lines.length} รายการ
+      </button>
+      {open && (
+        <div className="mt-1 border-l-2 border-slate-200 pl-2.5 space-y-1">
+          <div className={`hidden sm:grid ${grid} text-[11px] text-slate-400`}>
+            <span /><span>สินค้า</span><span className="text-right">จำนวน</span><span className="text-right">ราคา/หน่วย</span><span className="text-right">รวม</span>
           </div>
-        );
-      })}
+          {shown.map((l) => (
+            <div key={l.id} className={`${grid} text-xs`}>
+              <HoverImage url={l.img} size={28} previewSize={224} alt={l.name} />
+              <span className="min-w-0">
+                <span className="block truncate text-slate-700" title={l.name}>
+                  {l.sku && <span className="text-slate-400 mr-1">{l.sku}</span>}{itemName(l)}
+                </span>
+                <span className="sm:hidden block text-[11px] text-slate-500 tabular-nums">{qtyText(l)} × {formatAmount(l.price, currency)}</span>
+              </span>
+              <span className="hidden sm:block text-right tabular-nums text-slate-600">{qtyText(l)}</span>
+              <span className="hidden sm:block text-right tabular-nums text-slate-600">{formatAmount(l.price, currency)}</span>
+              <span className="text-right tabular-nums text-slate-800">
+                {formatAmount(l.total, currency)}
+                {isCny && rmbRate > 0 && <span className="block text-[11px] text-slate-400">≈{THB(l.total * rmbRate)}</span>}
+              </span>
+            </div>
+          ))}
+          {lines.length > ITEM_PREVIEW && (
+            <button type="button" onClick={onShowAll} className="text-[11px] text-blue-700 hover:underline">
+              {showAll ? `ย่อเหลือ ${ITEM_PREVIEW} รายการ` : `+ ดูอีก ${lines.length - ITEM_PREVIEW} รายการ`}
+            </button>
+          )}
+          {adjusted && <div className="text-[11px] text-slate-400">ยอดรวมบางบรรทัดไม่เท่า จำนวน × ราคา เพราะรวม VAT / ส่วนลดไว้แล้ว</div>}
+        </div>
+      )}
     </div>
   );
 }
