@@ -17,17 +17,20 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { isPdfRef } from "@/lib/file-ref";
-import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
+import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
 
-/** งานแก้ใบสั่งซื้อที่จะทำหลังใส่ลงใบ (ผ่าน API กลาง po-edit / cancel-line) */
+/** งานแก้ใบสั่งซื้อจากหน้านี้ (ผ่าน API กลาง po-edit / cancel-line) — ย้าย PO ทำ "ก่อน" ใส่ลงใบ · ลด/ปิดยอด ทำ "หลัง" */
 type PoPlan = {
   billId: string;
+  moves: { po_id: string; po_no: string; from_name: string | null }[];
   edits: { po_id: string; po_no: string; line_qty: { id: string; qty: number }[] }[];
   close: string[];
   reduceLabels: string[];
   closeLabels: string[];
   reason: string;
 };
+type PickTab = "this" | "other" | "sku";
 
 type Bill = {
   id: string; r2_key: string; gr_id: string | null; bill_no: string | null; bill_date: string | null; seller_text: string | null;
@@ -45,7 +48,9 @@ const CHIP_NEU = `${chip} bg-slate-50 text-slate-600 border-slate-200`;
 
 function LevelBadge({ l }: { l: SellerBillLine }) {
   if (l.level === "fee") return <span className={CHIP_NEU}>ไม่ใช่สินค้า</span>;
+  if (!l.match_key && l.sku_pick) return <span className={CHIP_WARN}>เลือกเอง · นอกใบสั่งซื้อ</span>;
   if (!l.match_key) return <span className={`${chip} bg-red-50 text-red-700 border-red-200`}>ไม่เจอใน PO ร้านนี้</span>;
+  if (l.move_po) return <span className={`${chip} bg-blue-50 text-blue-700 border-blue-200`}>เลือกเอง · PO ร้านอื่น</span>;
   if (l.manual) return <span className={`${chip} bg-blue-50 text-blue-700 border-blue-200`}>เลือกเอง</span>;
   const pct = Math.round((l.score || 0) * 100);
   return l.level === "ok" ? <span className={CHIP_OK}>มั่นใจ {pct}%</span> : <span className={CHIP_WARN}>ให้เช็ก {pct}%</span>;
@@ -75,18 +80,37 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
   const [missAct, setMissAct] = useState<Record<string, Record<string, "wait" | "close">>>({});
   const [missScope, setMissScope] = useState<Record<string, "bill" | "shop">>({});
   const [poPlan, setPoPlan] = useState<PoPlan | null>(null);
+  // ป๊อปเลือกจับคู่เอง 3 แท็บ: PO ร้านนี้ / PO ร้านอื่น / สินค้าทั้งหมด
+  const [pickTab, setPickTab] = useState<PickTab>("this");
+  const [pickAsk, setPickAsk] = useState<PoGroup | null>(null);       // PO ร้านอื่นที่กดเลือก → ถาม ย้าย PO / ใช้แค่รหัส
+  const [pickSku, setPickSku] = useState<SkuPickerValue | null>(null);
+  const [backfill, setBackfill] = useState(true);                       // เปิด PO ย้อนหลังให้รายการนอกใบสั่งซื้อ
+  const [voucher, setVoucher] = useState<{ seller_name: string | null; seller_partner_id: string | null; currency: string } | null>(null);
+  const [otherGroups, setOtherGroups] = useState<PoGroup[] | null>(null);
   const fileUrls = useFileRefUrls([...cands.map((c) => c.r2_key), ...bills.flatMap((b) => [b.r2_key, ...(b.raw?.files ?? [])])]);
   const gByKey = useMemo(() => new Map(groups.map((g) => [g.key, g])), [groups]);
+  const otherByKey = useMemo(() => new Map((otherGroups ?? []).map((g) => [g.key, g])), [otherGroups]);
+  const gAny = (key: string | null | undefined) => (key ? gByKey.get(key) ?? otherByKey.get(key) : undefined);
 
   const load = useCallback(async () => {
     try {
       const j = await apiFetch(`/api/purchasing/vouchers/${voucherId}/seller-bills`).then((r) => r.json());
       const rows = (j.data ?? []) as Bill[];
       setBills(rows); setGroups((j.groups ?? []) as PoGroup[]); setCands((j.candidates ?? []) as Candidate[]); setHasPartner(j.has_partner !== false);
+      if (j.voucher) setVoucher(j.voucher);
       setDraft((p) => { const nx = { ...p }; for (const b of rows) if (!nx[b.id]) nx[b.id] = b.lines ?? []; return nx; });
     } catch { /* แผงเสริม — เงียบ */ }
   }, [voucherId]);
   useEffect(() => { void load(); }, [load]);
+  // PO ร้านอื่น: โหลดเมื่อมีแถวที่ไม่เจอ (ไว้ใบ้) หรือเมื่อเปิดแท็บ ②
+  const loadOther = useCallback(async () => {
+    try {
+      const j = await apiFetch(`/api/purchasing/vouchers/${voucherId}/seller-bills?other=1`).then((r) => r.json());
+      setOtherGroups((j.other_groups ?? []) as PoGroup[]);
+    } catch { setOtherGroups([]); }
+  }, [voucherId]);
+  const hasUnmatched = Object.values(draft).some((ls) => ls.some((l) => !l.is_fee && !l.match_key && !l.sku_pick && !l.decision));
+  useEffect(() => { if (otherGroups == null && (hasUnmatched || (pickFor && pickTab === "other"))) void loadOther(); }, [hasUnmatched, pickFor, pickTab, otherGroups, loadOther]);
 
   const setLines = (billId: string, fn: (ls: SellerBillLine[]) => SellerBillLine[]) => { setDraft((p) => ({ ...p, [billId]: fn(p[billId] ?? []) })); setMsg((m) => ({ ...m, [billId]: "" })); };
   const setLine = (billId: string, idx: number, patch: Partial<SellerBillLine>) => setLines(billId, (ls) => ls.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -114,6 +138,8 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
     const edits = new Map<string, PoPlan["edits"][number]>();
     const close = new Set<string>();
     const reduceLabels: string[] = [], closeLabels: string[] = [];
+    const moves = new Map<string, PoPlan["moves"][number]>();
+    for (const l of lines) if (l.decision === "confirmed" && l.move_po && !gByKey.has(l.match_key ?? "")) moves.set(l.move_po.po_id, l.move_po);
     for (const l of lines) {
       const g = l.match_key ? gByKey.get(l.match_key) : undefined;
       if (l.decision !== "confirmed" || l.short_action !== "reduce" || !g || shortfallOf(l, g) <= 0) continue;
@@ -128,9 +154,23 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
       g.lines.forEach((x) => close.add(x.id));
       closeLabels.push(`${g.code || g.item_name} (${g.po_no}) ค้างรับ ${n2(pendingReceiveOf(g))}`);
     }
-    return { billId, edits: [...edits.values()], close: [...close], reduceLabels, closeLabels, reason: `ร้านไม่มีของ — ไม่อยู่ในบิลร้าน${bill?.bill_no ? ` No. ${bill.bill_no}` : ""}` };
+    return { billId, moves: [...moves.values()], edits: [...edits.values()], close: [...close], reduceLabels, closeLabels, reason: `ร้านไม่มีของ — ไม่อยู่ในบิลร้าน${bill?.bill_no ? ` No. ${bill.bill_no}` : ""}` };
   };
-  const planCount = (p: PoPlan) => p.reduceLabels.length + p.closeLabels.length;
+  const planCount = (p: PoPlan) => p.moves.length + p.reduceLabels.length + p.closeLabels.length;
+
+  /** ย้าย PO ร้านอื่นมาเป็นร้านของใบนี้ (API กลาง po-edit) — ทำก่อนใส่ลงใบ · ล้ม = หยุด ไม่ใส่ลงใบ */
+  const runMoves = async (p: PoPlan): Promise<string | null> => {
+    if (!p.moves.length) return null;
+    if (!voucher?.seller_name) return "ใบนี้ยังไม่ระบุร้าน — ย้าย PO มาไม่ได้";
+    for (const m of p.moves) {
+      const res = await apiFetch("/api/purchasing/po-edit", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ po_id: m.po_id, header: { seller_name: voucher.seller_name, seller_partner_id: voucher.seller_partner_id } }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) return `ย้าย ${m.po_no} ไม่สำเร็จ: ${j.error ?? `HTTP ${res.status}`}`;
+    }
+    toast.success(`ย้าย ${p.moves.map((m) => m.po_no).join(", ")} มาเป็นร้านนี้แล้ว`);
+    return null;
+  };
 
   /** แก้ใบสั่งซื้อผ่าน API กลาง (สิทธิ์/ประวัติ/สถานะใบ PO ตามกติกาเดิม) — คืนข้อความสรุป */
   const runPoPlan = async (p: PoPlan): Promise<{ ok: string[]; fail: string[] }> => {
@@ -158,16 +198,17 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
     }
     setBusy(billId);
     try {
+      if (mode === "apply" && plan) { const err = await runMoves(plan); if (err) throw new Error(err); }
       const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/seller-bills`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bill_id: billId, lines, rematch: mode === "rematch", apply: mode === "apply", remember, fill_cn: fillCn }) });
+        body: JSON.stringify({ bill_id: billId, lines, rematch: mode === "rematch", apply: mode === "apply", remember, fill_cn: fillCn, backfill_po: backfill }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       const b = j.data as Bill;
       setDraft((p) => ({ ...p, [billId]: b.lines }));
       if (mode === "apply" && j.applied) {
-        const a = j.applied as { inserted: number; updated: number; expenses: number; remembered: number; filled_cn?: number };
-        toast.success(`ใส่ลงใบสำคัญแล้ว — เพิ่ม ${a.inserted} · ใส่ราคา ${a.updated}${a.expenses ? ` · ค่าใช้จ่าย ${a.expenses}` : ""}${a.remembered ? ` · จำคู่ไว้ ${a.remembered}` : ""}${a.filled_cn ? ` · เติมชื่อจีน ${a.filled_cn} สินค้า` : ""}`);
-        if (plan && planCount(plan) > 0) {
+        const a = j.applied as { inserted: number; updated: number; expenses: number; remembered: number; filled_cn?: number; backfilled?: { po_no: string } | null };
+        toast.success(`ใส่ลงใบสำคัญแล้ว — เพิ่ม ${a.inserted} · ใส่ราคา ${a.updated}${a.expenses ? ` · ค่าใช้จ่าย ${a.expenses}` : ""}${a.remembered ? ` · จำคู่ไว้ ${a.remembered}` : ""}${a.filled_cn ? ` · เติมชื่อจีน ${a.filled_cn} สินค้า` : ""}${a.backfilled ? ` · เปิด ${a.backfilled.po_no} ย้อนหลังให้รายการนอกใบสั่งซื้อ` : ""}`);
+        if (plan && plan.edits.length + plan.close.length > 0) {
           const r = await runPoPlan(plan);
           if (r.ok.length) toast.success(`แก้ใบสั่งซื้อแล้ว — ${r.ok.join(" · ")}`);
           if (r.fail.length) toast.error(`แก้ใบสั่งซื้อไม่สำเร็จบางส่วน — ${r.fail.join(" · ")} (ลองกดใส่ลงใบอีกครั้ง)`);
@@ -195,13 +236,19 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
   const pickLine = pickFor ? draft[pickFor.billId]?.[pickFor.idx] : null;
   const pickList = useMemo(() => {
     const q = pickQ.trim().toLowerCase();
-    return groups.filter((g) => !q || `${g.code} ${g.item_name} ${g.name_cn ?? ""} ${g.po_no}`.toLowerCase().includes(q)).slice(0, 200);
-  }, [groups, pickQ]);
-  const choose = (g: PoGroup) => {
-    if (!pickFor) return;
-    setLines(pickFor.billId, (ls) => ls.map((l, i) => (i === pickFor.idx ? { ...applyGroupToLine({ ...l, is_fee: false }, g, groups, [], true), decision: "confirmed" } : l)));
-    setPickFor(null); setPickQ("");
-  };
+    const src = pickTab === "other" ? otherGroups ?? [] : groups;
+    return src.filter((g) => !q || `${g.code} ${g.item_name} ${g.name_cn ?? ""} ${g.po_no} ${g.partner_name ?? ""}`.toLowerCase().includes(q)).slice(0, 200);
+  }, [groups, otherGroups, pickQ, pickTab]);
+  const openPick = (billId: string, idx: number, tab: PickTab = "this", q = "") => { setPickFor({ billId, idx }); setPickTab(tab); setPickQ(q); setPickAsk(null); setPickSku(null); };
+  const closePick = () => { setPickFor(null); setPickQ(""); setPickAsk(null); setPickSku(null); };
+  const setPicked = (fn: (l: SellerBillLine) => SellerBillLine) => { if (!pickFor) return; setLines(pickFor.billId, (ls) => ls.map((l, i) => (i === pickFor.idx ? fn(l) : l))); closePick(); };
+  /** ① PO ร้านนี้ */
+  const choose = (g: PoGroup) => setPicked((l) => ({ ...applyGroupToLine({ ...l, is_fee: false, sku_pick: null, move_po: null }, g, groups, [], true), decision: "confirmed" }));
+  /** ② PO ร้านอื่น → ย้าย PO มาร้านนี้ (ทำตอนกดใส่ลงใบ) */
+  const chooseMove = (g: PoGroup) => setPicked((l) => ({ ...applyGroupToLine({ ...l, is_fee: false, sku_pick: null }, g, [...groups, g], [], true), move_po: { po_id: g.po_id, po_no: g.po_no, from_name: g.partner_name ?? null }, decision: "confirmed" }));
+  /** ② ใช้แค่รหัสสินค้า · ③ สินค้าทั้งหมด → นอกใบสั่งซื้อ */
+  const chooseSku = (sku: { id: string; code: string; name: string; uom: string | null }) =>
+    setPicked((l) => ({ ...l, is_fee: false, match_key: null, move_po: null, sku_pick: sku, level: "mid", score: 1, reasons: [], warns: [], manual: true, decision: "confirmed" }));
 
   return (
     <div className={bare ? "" : "bg-white border border-slate-200 rounded-xl p-4"}>
@@ -268,8 +315,10 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                 </div>
                 <div className="divide-y divide-slate-100">
                   {lines.map((l, i) => {
-                    const g = l.match_key ? gByKey.get(l.match_key) : undefined;
+                    const g = gAny(l.match_key);
                     const openLines = g ? g.lines.filter((x) => !x.from_gr).length : 0;
+                    const hint = !g && otherGroups ? otherShopHint(l, otherGroups) : null;
+                    const picked = !g && l.sku_pick ? l.sku_pick : null;
                     const done = l.decision === "confirmed" || l.decision === "skip" || l.decision === "expense";
                     const bad = math.rowsBad.includes(i);
                     return (
@@ -299,6 +348,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                                 </div>
                               </div>
                               <div className="flex gap-1 flex-wrap mt-1">
+                                {l.move_po && <span className={`${chip} bg-blue-50 text-blue-700 border-blue-200`}>จะย้าย {l.move_po.po_no} มาร้านนี้{l.move_po.from_name ? ` (จาก ${l.move_po.from_name})` : ""} ตอนใส่ลงใบ</span>}
                                 {l.reasons.map((r) => <span key={r} className={CHIP_OK}>{r}</span>)}
                                 {l.warns.map((w) => <span key={w} className={CHIP_WARN}>{w}</span>)}
                               </div>
@@ -315,8 +365,22 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                                 </div>
                               )}
                             </div>
+                          ) : picked ? (
+                            <div className="mt-1">
+                              <div className="text-xs text-slate-800 truncate"><span className="font-mono text-[11px] text-slate-500 mr-1">{picked.code || "—"}</span>{picked.name}</div>
+                              <div className="text-[11px] text-slate-500">ไม่ผูกใบสั่งซื้อ · ราคา ¥ จากบิล → ราคาต่อร้าน + ราคาบนสินค้า{backfill ? " · จะเปิด PO ย้อนหลังให้ตอนใส่ลงใบ" : ""}</div>
+                            </div>
                           ) : (
-                            <div className="text-[11px] text-red-600 mt-1">ไม่พบในใบสั่งซื้อของร้านนี้ — เลือกจับคู่เองจากรายการ PO หรือข้าม</div>
+                            <div className="mt-1">
+                              <div className="text-[11px] text-red-600">ไม่พบในใบสั่งซื้อของร้านนี้ — เลือกจับคู่เอง (PO ร้านนี้ / PO ร้านอื่น / สินค้าทั้งหมด) หรือข้าม</div>
+                              {hint && !ro && (
+                                <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[11px]">
+                                  <span className={CHIP_WARN}>ใบ้: เจอใน PO ร้านอื่น</span>
+                                  <span className="text-slate-600 truncate">{hint.po_no} · {hint.partner_name ?? "—"} · <span className="font-mono">{hint.code || "—"}</span> {hint.item_name}</span>
+                                  <button type="button" onClick={() => openPick(b.id, i, "other", hint.code || hint.item_name)} className="text-blue-600 hover:underline">ดู</button>
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
                         <div className="flex md:flex-col items-end gap-1">
@@ -324,8 +388,8 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                             <button disabled={ro} onClick={() => setLine(b.id, i, { decision: l.decision === "expense" ? null : "expense" })} className={`h-7 px-2 text-[11px] rounded-md border ${l.decision === "expense" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"} disabled:opacity-50`}>{l.decision === "expense" ? "✓ เป็นค่าใช้จ่าย" : "เพิ่มเป็นค่าใช้จ่าย"}</button>
                             <button disabled={ro} onClick={() => setLine(b.id, i, { decision: l.decision === "skip" ? null : "skip" })} className="h-7 px-2 text-[11px] rounded-md border border-slate-200 text-slate-500 hover:bg-slate-50 disabled:opacity-50">{l.decision === "skip" ? "ยกเลิกข้าม" : "ข้าม"}</button>
                           </>) : (<>
-                            {g && <button disabled={ro} onClick={() => setLine(b.id, i, { decision: l.decision === "confirmed" ? null : "confirmed" })} className={`h-7 px-2.5 text-[11px] font-medium rounded-md border ${l.decision === "confirmed" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 text-slate-700 hover:bg-slate-50"} disabled:opacity-50`}>{l.decision === "confirmed" ? "✓ ยืนยันแล้ว" : "✓ ใช่"}</button>}
-                            <button disabled={ro} onClick={() => { setPickFor({ billId: b.id, idx: i }); setPickQ(""); }} className={`h-7 px-2 text-[11px] rounded-md border ${g ? "border-slate-200 text-slate-600" : "border-blue-300 bg-blue-50 text-blue-700"} hover:bg-slate-50 disabled:opacity-50`}>{g ? "เปลี่ยน" : "เลือกจับคู่เอง"}</button>
+                            {(g || picked) && <button disabled={ro} onClick={() => setLine(b.id, i, { decision: l.decision === "confirmed" ? null : "confirmed" })} className={`h-7 px-2.5 text-[11px] font-medium rounded-md border ${l.decision === "confirmed" ? "border-emerald-300 bg-emerald-50 text-emerald-700" : "border-slate-300 text-slate-700 hover:bg-slate-50"} disabled:opacity-50`}>{l.decision === "confirmed" ? "✓ ยืนยันแล้ว" : "✓ ใช่"}</button>}
+                            <button disabled={ro} onClick={() => openPick(b.id, i)} className={`h-7 px-2 text-[11px] rounded-md border ${g || picked ? "border-slate-200 text-slate-600" : "border-blue-300 bg-blue-50 text-blue-700"} hover:bg-slate-50 disabled:opacity-50`}>{g || picked ? "เปลี่ยน" : "เลือกจับคู่เอง"}</button>
                             <button disabled={ro} onClick={() => setLine(b.id, i, { decision: l.decision === "skip" ? null : "skip" })} className="h-6 px-1.5 text-[10px] text-slate-400 hover:text-slate-600 disabled:opacity-50">{l.decision === "skip" ? "ยกเลิกข้าม" : "ข้าม"}</button>
                           </>)}
                         </div>
@@ -379,6 +443,13 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                   <div className="flex items-center gap-2 flex-wrap px-3 py-2 border-t border-slate-100 bg-slate-50/60">
                     <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="rounded border-slate-300" /> จำคู่ที่ยืนยันไว้ ครั้งหน้าจับให้เอง</label>
                     <label className="flex items-center gap-1.5 text-xs text-slate-600" title="ใช้ชื่อ + สเปกตามบิลร้าน (เช่น 狗扣 9mm 银色) เป็นชื่อจีนของสินค้า — ไม่ทับชื่อจีนที่มีอยู่แล้ว · ใช้ต่อที่ใบ PO ร้านจีน และช่วยจับคู่บิลครั้งหน้า"><input type="checkbox" checked={fillCn} onChange={(e) => setFillCn(e.target.checked)} className="rounded border-slate-300" /> เติมชื่อจีนให้สินค้าที่ยังไม่มี</label>
+                    {outsidePoLines(lines).length > 0 && (
+                      <label className="flex items-center gap-1.5 text-xs text-slate-600 basis-full" title="ติ๊ก = เปิดใบสั่งซื้อของร้านนี้ (วันที่บิล) ใส่รายการนอกใบสั่งซื้อ แล้วผูกให้ → รับของได้ · ใบสั่งผลิตรู้ว่าซื้อแล้ว · มีใบให้มาร์คจ่ายเงิน · ไม่ติ๊ก = เก็บแค่ราคาต่อร้าน + ราคาสินค้า">
+                        <input type="checkbox" checked={backfill} onChange={(e) => setBackfill(e.target.checked)} className="rounded border-slate-300" />
+                        เปิดใบสั่งซื้อย้อนหลังให้ร้านนี้ สำหรับรายการนอกใบสั่งซื้อ ({outsidePoLines(lines).length} รายการ) — แนะนำ
+                        {!backfill && <span className="text-amber-700">· ไม่เปิด = รับของ/จ่ายเงินตาม PO ไม่ได้ ใบสั่งผลิตยังขึ้น &quot;ต้องซื้อ&quot;</span>}
+                      </label>
+                    )}
                     <button onClick={() => void patch(b.id, "rematch")} disabled={busy === b.id} title="จับคู่ใหม่เฉพาะแถวที่ยังไม่ได้ตัดสิน (หลังแก้ตัวเลข/เพิ่ม PO)" className="h-8 px-2.5 text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">จับคู่ใหม่</button>
                     <span className="flex-1" />
                     <button onClick={() => setLines(b.id, (ls) => ls.map((l) => (l.level === "ok" && l.match_key && !l.decision ? { ...l, decision: "confirmed" } : l)))} disabled={busy === b.id} className="h-8 px-2.5 text-xs rounded-md border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-40">ยืนยันทุกแถวที่มั่นใจสูง</button>
@@ -396,29 +467,67 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
         </div>
       )}
 
-      {/* ป๊อปเลือกจับคู่เอง — เฉพาะบรรทัดใบสั่งซื้อที่ยังค้างของร้านนี้ */}
+      {/* ป๊อปเลือกจับคู่เอง 3 แท็บ: ① PO ร้านนี้ · ② PO ร้านอื่น (ย้าย PO มา / ใช้แค่รหัส) · ③ สินค้าทั้งหมด (นอกใบสั่งซื้อ) */}
       {pickFor && pickLine && (
-        <ERPModal open onClose={() => setPickFor(null)} size="lg" storageKey="pv-seller-bill-pick"
+        <ERPModal open onClose={closePick} size="lg" storageKey="pv-seller-bill-pick"
           title={`เลือกจับคู่: ${pickLine.name_cn ?? ""} ${pickLine.spec_cn ?? ""}`.trim()}
           description={`${[pickLine.name_th, pickLine.spec_th].filter(Boolean).join(" ")} · ${n2(pickLine.qty)} × ¥${n2(pickLine.unit_price, 4)}`}
-          footer={<button onClick={() => setPickFor(null)} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>}>
-          <p className="text-[11px] text-slate-500 mb-2">แสดงเฉพาะบรรทัดใบสั่งซื้อที่ยังค้างของร้านนี้ — สร้างสินค้าใหม่หรือเลือกของนอกใบสั่งซื้อไม่ได้</p>
-          <input autoFocus value={pickQ} onChange={(e) => setPickQ(e.target.value)} placeholder="ค้นรหัส ชื่อไทย/จีน หรือเลข PO" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg mb-2" />
-          <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[55vh] overflow-y-auto">
-            {pickList.map((g) => {
-              const on = pickLine.match_key === g.key;
-              return (
-                <button key={g.key} onClick={() => choose(g)} className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm ${on ? "bg-blue-50" : "hover:bg-slate-50"}`}>
-                  <span className="w-9 h-9 rounded bg-slate-50 border border-slate-100 overflow-hidden shrink-0 flex items-center justify-center">{g.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-xs">—</span>}</span>
-                  <span className="font-mono text-xs text-slate-500 w-28 shrink-0 truncate">{g.code || "—"}</span>
-                  <span className="flex-1 min-w-0"><span className="block truncate text-slate-800">{g.item_name}{g.name_cn && <span className="ml-1 text-slate-400">· {g.name_cn}</span>}</span><span className="block text-[11px] text-slate-400">{g.po_no}{g.order_date ? ` · ${formatDate(g.order_date)}` : ""}{g.lines.length > 1 ? ` · ${g.lines.length} บรรทัด` : ""}{g.in_voucher ? " · อยู่ในใบนี้แล้ว" : ""}</span></span>
-                  <span className="text-xs text-slate-500 tabular-nums shrink-0 w-20 text-right">ค้าง {n2(g.remaining)}</span>
-                  <span className="text-xs text-slate-700 tabular-nums shrink-0 w-16 text-right">{g.unit_price != null ? `¥${n2(g.unit_price, 4)}` : "—"}</span>
-                </button>
-              );
-            })}
-            {pickList.length === 0 && <div className="px-3 py-6 text-center text-xs text-slate-400">ไม่พบ ลองค้นคำอื่น (ค้นได้เฉพาะใบสั่งซื้อของร้านนี้)</div>}
+          footer={<button onClick={closePick} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>}>
+          <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs mb-2">
+            {([["this", `① PO ร้านนี้ (${groups.length})`], ["other", `② PO ร้านอื่น${otherGroups ? ` (${otherGroups.length})` : ""}`], ["sku", "③ สินค้าทั้งหมด"]] as [PickTab, string][]).map(([k, label], n) => (
+              <button key={k} type="button" onClick={() => { setPickTab(k); setPickAsk(null); }} className={`h-8 px-3 ${n > 0 ? "border-l border-slate-200" : ""} ${pickTab === k ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
+            ))}
           </div>
+          <p className="text-[11px] text-slate-500 mb-2">
+            {pickTab === "this" ? "ใบสั่งซื้อที่ยังค้างของร้านนี้ (แบบเดิม)"
+              : pickTab === "other" ? "ใบสั่งซื้อที่ยังค้างของร้านอื่น (สกุลเดียวกับใบนี้) — เลือกแล้วระบบถามว่าจะย้าย PO มาร้านนี้ หรือใช้แค่รหัสสินค้า"
+              : "สินค้าทุกตัวในคลัง — ผูกรหัสสินค้าอย่างเดียว ไม่มีใบสั่งซื้อ (เปิด PO ย้อนหลังให้ได้ตอนใส่ลงใบ)"}
+          </p>
+          {pickTab === "sku" ? (
+            <div className="space-y-2">
+              <SkuPicker value={pickSku} onChange={(v) => setPickSku(v)} placeholder="ค้นรหัส / ชื่อสินค้า…" />
+              {pickSku && (
+                <div className="flex items-center gap-2 flex-wrap border border-slate-200 rounded-lg px-3 py-2">
+                  <span className="font-mono text-xs text-slate-500">{pickSku.code}</span><span className="text-sm text-slate-800">{pickSku.name}</span>
+                  <span className={CHIP_WARN}>นอกใบสั่งซื้อ</span>
+                  <button type="button" onClick={() => chooseSku({ id: pickSku.id, code: pickSku.code, name: pickSku.name, uom: pickSku.uom_name ?? null })} className="ml-auto h-8 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">ใช้สินค้านี้</button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <>
+              <input autoFocus value={pickQ} onChange={(e) => setPickQ(e.target.value)} placeholder={pickTab === "other" ? "ค้นรหัส ชื่อ เลข PO หรือชื่อร้าน" : "ค้นรหัส ชื่อไทย/จีน หรือเลข PO"} className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg mb-2" />
+              {pickTab === "other" && otherGroups == null && <div className="text-xs text-slate-400 py-3 text-center">กำลังโหลดใบสั่งซื้อร้านอื่น…</div>}
+              <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[50vh] overflow-y-auto">
+                {pickList.map((g) => {
+                  const on = pickLine.match_key === g.key || pickAsk?.key === g.key;
+                  return (
+                    <button key={g.key} onClick={() => (pickTab === "other" ? setPickAsk(g) : choose(g))} className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm ${on ? "bg-blue-50" : "hover:bg-slate-50"}`}>
+                      <span className="w-9 h-9 rounded bg-slate-50 border border-slate-100 overflow-hidden shrink-0 flex items-center justify-center">{g.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-xs">—</span>}</span>
+                      <span className="font-mono text-xs text-slate-500 w-28 shrink-0 truncate">{g.code || "—"}</span>
+                      <span className="flex-1 min-w-0"><span className="block truncate text-slate-800">{g.item_name}{g.name_cn && <span className="ml-1 text-slate-400">· {g.name_cn}</span>}</span><span className="block text-[11px] text-slate-400">{g.po_no}{pickTab === "other" && g.partner_name ? ` · ${g.partner_name}` : ""}{g.order_date ? ` · ${formatDate(g.order_date)}` : ""}{g.lines.length > 1 ? ` · ${g.lines.length} บรรทัด` : ""}{g.in_voucher ? " · อยู่ในใบนี้แล้ว" : ""}</span></span>
+                      <span className="text-xs text-slate-500 tabular-nums shrink-0 w-20 text-right">ค้าง {n2(g.remaining)}</span>
+                      <span className="text-xs text-slate-700 tabular-nums shrink-0 w-16 text-right">{g.unit_price != null ? `¥${n2(g.unit_price, 4)}` : "—"}</span>
+                    </button>
+                  );
+                })}
+                {pickList.length === 0 && (pickTab !== "other" || otherGroups != null) && <div className="px-3 py-6 text-center text-xs text-slate-400">ไม่พบ ลองค้นคำอื่น หรือดูแท็บอื่น</div>}
+              </div>
+              {/* ② เลือก PO ร้านอื่นแล้ว → ถามวิธี (ผูกเฉย ๆ ราคา/การจ่ายเงินจะไปลงร้านนั้น) */}
+              {pickTab === "other" && pickAsk && (
+                <div className="mt-3 border border-amber-200 bg-amber-50/50 rounded-lg p-3 space-y-2">
+                  <div className="text-xs text-slate-700"><span className={CHIP_WARN}>ใบสั่งซื้อนี้เป็นของ {pickAsk.partner_name ?? "ร้านอื่น"}</span> <span className="ml-1">ถ้าผูกเฉย ๆ ราคาและการจ่ายเงินจะไปลงร้านนั้น ไม่ใช่ร้านในบิล — เลือกวิธี:</span></div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button type="button" disabled={!!pickAsk.po_locked || !voucher?.seller_name} onClick={() => chooseMove(pickAsk)} title={pickAsk.po_locked ? `ย้ายไม่ได้ — ${pickAsk.po_locked}` : `ทั้งใบ ${pickAsk.po_no} เปลี่ยนร้านเป็น ${voucher?.seller_name ?? "ร้านนี้"} (ตัวแก้ใบสั่งซื้อกลาง · ลงประวัติ) ตอนกดใส่ลงใบ`}
+                      className="h-8 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">ย้าย {pickAsk.po_no} มาเป็นร้านนี้ (แนะนำ)</button>
+                    <button type="button" disabled={!pickAsk.item_sku_id} onClick={() => pickAsk.item_sku_id && chooseSku({ id: pickAsk.item_sku_id, code: pickAsk.code, name: pickAsk.item_name, uom: pickAsk.uom })} title={pickAsk.item_sku_id ? "ผูกรหัสสินค้าอย่างเดียว ไม่แตะใบสั่งซื้อของร้านนั้น" : "บรรทัดนี้ไม่มีรหัสสินค้า — ใช้แท็บ สินค้าทั้งหมด แทน"}
+                      className="h-8 px-3 text-xs rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-40">ใช้แค่รหัสสินค้า ไม่ผูก PO</button>
+                  </div>
+                  {pickAsk.po_locked && <div className="text-[11px] text-red-600">ย้าย PO ไม่ได้ — {pickAsk.po_locked} (กันข้อมูลการเงิน/สต๊อกผิดร้าน)</div>}
+                </div>
+              )}
+            </>
+          )}
         </ERPModal>
       )}
 
@@ -428,9 +537,11 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
         title="ใส่ลงใบสำคัญ + แก้ใบสั่งซื้อ?" confirmText="ยืนยัน"
         message={poPlan && (
           <div className="space-y-2 text-[13px]">
+            {poPlan.moves.length > 0 && <div><b className="font-medium text-blue-700">ย้ายใบสั่งซื้อมาเป็นร้านนี้ ({poPlan.moves.length})</b><ul className="list-disc pl-5 text-slate-600">{poPlan.moves.map((m) => <li key={m.po_id}>{m.po_no}{m.from_name ? ` (จาก ${m.from_name})` : ""} → {voucher?.seller_name ?? "ร้านนี้"}</li>)}</ul></div>}
             {poPlan.reduceLabels.length > 0 && <div><b className="font-medium text-slate-700">ลดจำนวนใน PO ตามบิล ({poPlan.reduceLabels.length})</b><ul className="list-disc pl-5 text-slate-600">{poPlan.reduceLabels.map((t) => <li key={t}>{t}</li>)}</ul></div>}
             {poPlan.closeLabels.length > 0 && <div><b className="font-medium text-red-700">ปิดยอด — ของไม่มาแล้ว ({poPlan.closeLabels.length})</b><ul className="list-disc pl-5 text-slate-600">{poPlan.closeLabels.map((t) => <li key={t}>{t}</li>)}</ul></div>}
-            <p className="text-[11px] text-slate-500">ของที่ปิดยอด หน้าขอซื้อ / ใบสั่งผลิตจะกลับเป็น &quot;ต้องซื้อ&quot; เอง · ของที่รับเข้าแล้วไม่ถูกแตะ · ลงประวัติทุกบรรทัด</p>
+            {poPlan.reduceLabels.length + poPlan.closeLabels.length > 0 && <p className="text-[11px] text-slate-500">ของที่ปิดยอด หน้าขอซื้อ / ใบสั่งผลิตจะกลับเป็น &quot;ต้องซื้อ&quot; เอง · ของที่รับเข้าแล้วไม่ถูกแตะ · ลงประวัติทุกบรรทัด</p>}
+            {poPlan.moves.length > 0 && <p className="text-[11px] text-slate-500">ย้ายร้านทั้งใบ (ราคา/การจ่ายเงินของใบนั้นจะไปอยู่ที่ร้านนี้) · ย้ายก่อน แล้วค่อยใส่ลงใบ · ลงประวัติใบสั่งซื้อ</p>}
           </div>
         )} />
 

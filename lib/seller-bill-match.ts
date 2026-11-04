@@ -35,7 +35,12 @@ export type SellerBillLine = {
   voucher_line_ids: string[];     // บรรทัดในใบสำคัญที่สร้าง/อัปเดตจากแถวนี้ (หลังกดใส่ลงใบ)
   /** บิลลงน้อยกว่าที่ค้าง: keep = คงไว้รอส่วนที่เหลือ (ค่าเริ่ม) · reduce = ลดจำนวนในใบสั่งซื้อตามบิล */
   short_action: "keep" | "reduce" | null;
+  /** เลือกเองแบบ "นอกใบสั่งซื้อ" = ผูกรหัสสินค้าอย่างเดียว (แท็บ สินค้าทั้งหมด / PO ร้านอื่นแบบใช้แค่รหัส) — match_key = null */
+  sku_pick: SkuPick | null;
+  /** เลือก PO ของร้านอื่น + ย้าย PO ใบนั้นมาเป็นร้านนี้ (ทำผ่าน API กลาง po-edit ก่อนใส่ลงใบ) — match_key = กลุ่มใน PO นั้น */
+  move_po: { po_id: string; po_no: string; from_name: string | null } | null;
 };
+export type SkuPick = { id: string; code: string; name: string; uom: string | null };
 
 /** บรรทัด PO ย่อย (1 สินค้าในใบ PO อาจแตกหลายบรรทัดตามใบสั่งผลิต) */
 export type PoGroupLine = { id: string; qty: number; remaining: number; qty_received?: number; sort_order: number; note: string | null; voucher_line_id: string | null; from_gr: boolean };
@@ -57,6 +62,11 @@ export type PoGroup = {
   lines: PoGroupLine[];
   in_voucher: boolean;            // มีบรรทัดอยู่ในใบสำคัญนี้แล้ว (มาจากใบรับ/ใส่ไว้แล้ว)
   image_url: string | null;
+  /** เฉพาะกลุ่มของ "PO ร้านอื่น" (แท็บ ② ในป๊อปเลือกเอง) */
+  partner_id?: string | null;
+  partner_name?: string | null;
+  /** เหตุผลที่ย้าย PO ใบนี้มาร้านอื่นไม่ได้ (จ่ายเงิน/รับของ/ผูกบิลโอนเงินแล้ว) · null = ย้ายได้ */
+  po_locked?: string | null;
 };
 
 export type AliasRow = { alias_key: string; item_sku_id: string | null; item_name: string | null };
@@ -289,7 +299,17 @@ export function cnNameForSku(line: Pick<SellerBillLine, "name_cn" | "spec_cn">):
 
 /** แถวที่ยังไม่ได้ตัดสิน (ต้องเป็น 0 ก่อนใส่ลงใบ) */
 export const undecidedCount = (lines: SellerBillLine[]) =>
-  lines.filter((l) => !(l.decision === "skip" || l.decision === "expense" || (l.decision === "confirmed" && (l.match_key || l.is_fee)))).length;
+  lines.filter((l) => !(l.decision === "skip" || l.decision === "expense" || (l.decision === "confirmed" && (l.match_key || l.is_fee || l.sku_pick)))).length;
+
+/** แถวนอกใบสั่งซื้อ (ผูกรหัสสินค้าอย่างเดียว) ที่ยืนยันแล้ว — ไว้ถาม "เปิดใบสั่งซื้อย้อนหลังให้ร้านนี้ไหม" */
+export const outsidePoLines = (lines: SellerBillLine[]) => lines.filter((l) => l.decision === "confirmed" && !l.is_fee && !l.match_key && !!l.sku_pick);
+
+/** ใบ้ให้แถวที่ไม่เจอใน PO ร้านนี้: ของที่น่าจะใช่ใน PO ร้านอื่น (คนต้องกดเลือกเอง — ไม่ผูกให้อัตโนมัติ) */
+export function otherShopHint(line: SellerBillLine, others: PoGroup[]): PoGroup | null {
+  if (line.is_fee || line.match_key || line.sku_pick || line.decision || others.length === 0) return null;
+  const [m] = matchBillLines([{ ...line, ai_pick: null, manual: false }], others, []);
+  return m?.match_key ? others.find((g) => g.key === m.match_key) ?? null : null;
+}
 
 /** แปลงแถวจาก AI/DB ให้ครบช่อง (กันข้อมูลเก่าหรือ AI ตอบไม่ครบ) */
 export function normalizeBillLine(r: Record<string, unknown>): SellerBillLine {
@@ -305,7 +325,19 @@ export function normalizeBillLine(r: Record<string, unknown>): SellerBillLine {
     alias_hit: r.alias_hit === true, decision: dec, manual: r.manual === true,
     voucher_line_ids: Array.isArray(r.voucher_line_ids) ? (r.voucher_line_ids as unknown[]).map(String).filter(Boolean) : [],
     short_action: r.short_action === "reduce" ? "reduce" : r.short_action === "keep" ? "keep" : null,
+    sku_pick: skuPickOf(r.sku_pick),
+    move_po: movePoOf(r.move_po),
   };
+}
+function skuPickOf(v: unknown): SkuPick | null {
+  const o = v as Record<string, unknown> | null;
+  if (!o || typeof o !== "object" || !s(o.id)) return null;
+  return { id: s(o.id), code: s(o.code), name: s(o.name), uom: s(o.uom) || null };
+}
+function movePoOf(v: unknown): SellerBillLine["move_po"] {
+  const o = v as Record<string, unknown> | null;
+  if (!o || typeof o !== "object" || !s(o.po_id)) return null;
+  return { po_id: s(o.po_id), po_no: s(o.po_no), from_name: s(o.from_name) || null };
 }
 
 // ── ของที่ร้านส่งไม่ครบ ──

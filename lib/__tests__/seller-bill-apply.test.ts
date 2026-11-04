@@ -4,6 +4,17 @@ import { fakeDb, type Row } from "./fake-db";
 // AI/ไฟล์ไม่เกี่ยวกับ test นี้ (ทดสอบแค่ส่วนจับกลุ่ม PO + ใส่ลงใบ)
 vi.mock("@/lib/ai-caption", () => ({ chatJson: vi.fn() }));
 vi.mock("@/lib/file-ref-server", () => ({ readFileRef: vi.fn() }));
+// เปิด PO ย้อนหลัง (ของกลาง lib/po-manual) → จำลองให้เขียนลงตาราง PO ปลอม
+const poCreated: Row[] = [];
+vi.mock("@/lib/po-manual", () => ({
+  createManualPo: vi.fn(async (_a: unknown, input: { seller_partner_id: string; currency: string; order_date?: string; lines: { item_sku_id: string; item_name: string; qty: number; uom: string | null; price: number }[] }) => {
+    const id = `po-new-${poCreated.length + 1}`;
+    poCreated.push({ id, ...input });
+    tables.purchase_orders_v2.push({ id, po_no: "PO-2026-09999", order_date: input.order_date ?? "2026-11-04", currency: input.currency, seller_partner_id: input.seller_partner_id, status: "purchase", is_active: true });
+    input.lines.forEach((l, i) => tables.purchase_order_lines_v2.push({ id: `${id}-l${i}`, po_id: id, item_sku_id: l.item_sku_id, item_name: l.item_name, qty: l.qty, uom: l.uom, price_est: l.price, sort_order: i, line_status: "draft" }));
+    return { ok: true, id, po_no: "PO-2026-09999", line_count: input.lines.length, grand_total: 0 };
+  }),
+}));
 
 import { loadShopGroups, applySellerBill, loadVoucherLite } from "@/lib/seller-bill";
 import { aliasKey, normalizeBillLine, type SellerBillLine } from "@/lib/seller-bill-match";
@@ -118,6 +129,35 @@ describe("บิลร้านจีน — ใส่ลงใบสำคั�
     const r = await applySellerBill(db(), v, [L({ name_cn: "狗扣", spec_cn: "9mm", qty: 10, unit_price: 4.5, match_key: g1.key, decision: "confirmed" })], { remember: false, actorName: null, previousIds: [], fillCnName: false });
     expect(r.filledCn).toBe(0);
     expect(tables.skus_v2.find((s) => s.id === "s1")?.name_cn).toBeUndefined();
+  });
+
+  it("นอกใบสั่งซื้อ (ไม่เปิด PO ย้อนหลัง) = รายการผูกรหัสสินค้าอย่างเดียว ราคาจากบิล", async () => {
+    tables.skus_v2.push({ id: "s9", code: "H8-25#BK", name_th: "ห่วงเลขแปด 2.5 cm. สีดำ", parent_skus_v2: { weight_g: 2 } });
+    const v = (await loadVoucherLite(db(), "V"))!;
+    const r = await applySellerBill(db(), v, [L({ name_cn: "日字扣", qty: 200, unit_price: 0.8, decision: "confirmed", manual: true, sku_pick: { id: "s9", code: "H8-25#BK", name: "ห่วงเลขแปด", uom: "Units" } })],
+      { remember: false, actorName: null, previousIds: [], backfillPo: false });
+    expect(r.backfilled).toBeNull();
+    expect(r.inserted).toBe(1);
+    const row = tables.purchase_voucher_lines_v2.find((l) => l.voucher_id === "V" && l.item_sku_id === "s9")!;
+    expect(row).toMatchObject({ qty: 200, unit_price: 0.8, price_source: "bill", item_name: "[H8-25#BK] ห่วงเลขแปด 2.5 cm. สีดำ", kg_per_unit: 0.002 });
+    expect(row.po_line_id ?? null).toBeNull();   // ไม่ผูกใบสั่งซื้อ
+  });
+
+  it("นอกใบสั่งซื้อ + เปิด PO ย้อนหลัง = เปิด PO ร้านนี้ (วันที่บิล) แล้วผูกเหมือนแถว PO · กดใส่ซ้ำไม่เปิดใบใหม่", async () => {
+    poCreated.length = 0;
+    tables.skus_v2.push({ id: "s9", code: "H8-25#BK", name_th: "ห่วงเลขแปด 2.5 cm. สีดำ", parent_skus_v2: null });
+    const v = (await loadVoucherLite(db(), "V"))!;
+    const r = await applySellerBill(db(), v, [L({ name_cn: "日字扣", qty: 200, unit_price: 0.8, decision: "confirmed", manual: true, sku_pick: { id: "s9", code: "H8-25#BK", name: "ห่วงเลขแปด", uom: "Units" } })],
+      { remember: false, actorName: "test", previousIds: [], backfillPo: true, billNo: "B-1", billDate: "2026-11-02" });
+    expect(r.backfilled).toEqual({ po_id: "po-new-1", po_no: "PO-2026-09999" });
+    expect(poCreated[0]).toMatchObject({ seller_partner_id: P1, order_date: "2026-11-02" });
+    const row = tables.purchase_voucher_lines_v2.find((l) => l.voucher_id === "V" && l.item_sku_id === "s9")!;
+    expect(row).toMatchObject({ po_id: "po-new-1", po_line_id: "po-new-1-l0", po_no: "PO-2026-09999", qty: 200, unit_price: 0.8 });
+    // แถวกลายเป็นแถว PO แล้ว → กดใส่ซ้ำ = ไม่เปิด PO ใหม่
+    expect(r.lines[0].sku_pick).toBeNull();
+    expect(r.lines[0].match_key).toBe("po-new-1|s:s9");
+    await applySellerBill(db(), v, r.lines, { remember: false, actorName: "test", previousIds: r.lines.flatMap((l) => l.voucher_line_ids), backfillPo: true });
+    expect(poCreated).toHaveLength(1);
   });
 
   it("จับกับของนอก PO ร้านนี้ = ไม่ยอม (ไม่เขียนอะไรเลย)", async () => {

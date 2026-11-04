@@ -1,6 +1,6 @@
 /**
  * บิลจากร้าน (ภาษาจีน) ของใบสำคัญรับ — AI อ่าน + จับคู่กับบรรทัดใบสั่งซื้อของร้านเดียวกันเท่านั้น
- *   GET    /api/purchasing/vouchers/<id>/seller-bills       → บิลที่อ่านไว้ + บรรทัด PO ที่เลือกจับคู่ได้ (groups) + ไฟล์บิลที่แนบตอนรับของ
+ *   GET    /api/purchasing/vouchers/<id>/seller-bills       → บิลที่อ่านไว้ + บรรทัด PO ที่เลือกจับคู่ได้ (groups) + ไฟล์บิลที่แนบตอนรับของ · ?other=1 + PO ร้านอื่น (other_groups)
  *   POST   { r2_key, gr_id? }                                → AI อ่านบิล + จับคู่อัตโนมัติ → บันทึก (ยังไม่ใส่ลงใบ)
  *   PATCH  { bill_id, lines, bill_no?, bill_date?, rematch?, apply?, remember?, fill_cn? }
  *            rematch = จับคู่ใหม่ (เฉพาะแถวที่ยังไม่ได้ตัดสิน) · apply = ใส่แถวที่ยืนยันลงใบสำคัญ (+ จำคู่ถ้า remember · เติมชื่อจีนให้สินค้าที่ยังไม่มีถ้า fill_cn)
@@ -15,6 +15,7 @@ import { writeAudit } from "@/lib/audit";
 import { isRefForCategory } from "@/lib/file-ref";
 import { normDate } from "@/lib/delivery-bill";
 import { loadVoucherLite, loadShopGroups, loadAliases, parseSellerBill, rematchLines, applySellerBill } from "@/lib/seller-bill";
+import { loadOtherShopGroups } from "@/lib/seller-bill-intake";
 import { matchBillLines, normalizeBillLine, undecidedCount, applyGroupToLine, type SellerBillLine } from "@/lib/seller-bill-match";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +52,10 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
       if (g.receipt_doc_r2_key) candidates.push({ gr_id: String(g.id), gr_no: str(g.gr_no), kind: "receipt", r2_key: str(g.receipt_doc_r2_key) });
     }
   }
-  return NextResponse.json({ data: ((bills ?? []) as Row[]).map(toBill), groups, candidates, has_partner: !!v.seller_partner_id, error: null });
+  // ?other=1 = ใบสั่งซื้อที่ค้างของร้านอื่น (แท็บ ② ป๊อปเลือกจับคู่เอง + คำใบ้ "เจอใน PO ร้านอื่น")
+  const other = request.nextUrl.searchParams.get("other") === "1" ? await loadOtherShopGroups(admin, v) : undefined;
+  return NextResponse.json({ data: ((bills ?? []) as Row[]).map(toBill), groups, candidates, has_partner: !!v.seller_partner_id,
+    voucher: { seller_name: v.seller_name, seller_partner_id: v.seller_partner_id, currency: v.currency }, ...(other ? { other_groups: other } : {}), error: null });
 }
 
 export async function POST(request: NextRequest, { params }: Params): Promise<NextResponse> {
@@ -95,7 +99,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const actor = await actorOf(request);
   const { id } = await params;
-  let body: { bill_id?: string; lines?: unknown; bill_no?: string | null; bill_date?: string | null; rematch?: boolean; apply?: boolean; remember?: boolean; fill_cn?: boolean };
+  let body: { bill_id?: string; lines?: unknown; bill_no?: string | null; bill_date?: string | null; rematch?: boolean; apply?: boolean; remember?: boolean; fill_cn?: boolean; backfill_po?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const billId = str(body.bill_id);
   if (!billId) return NextResponse.json({ error: "ไม่ระบุบิล" }, { status: 400 });
@@ -120,14 +124,17 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       // คิดเหตุผล/ป้ายใหม่ของแถวที่คนเลือกเองฝั่งเว็บ (ตัวเลขอาจถูกแก้)
       const groups = await loadShopGroups(admin, v);
       const aliases = await loadAliases(admin, v.seller_partner_id);
-      lines = lines.map((l) => (l.match_key ? applyGroupToLine(l, groups.find((g) => g.key === l.match_key) ?? null, groups, aliases, l.manual) : l)).map((l, i) => ({ ...l, decision: lines[i].decision, voucher_line_ids: lines[i].voucher_line_ids }));
+      // แถวที่เลือก PO ร้านอื่น (move_po) ยังไม่ได้ย้าย = ยังไม่อยู่ในกลุ่มร้านนี้ → คงไว้ตามที่เลือก (ย้ายตอนกดใส่ลงใบ)
+      lines = lines.map((l) => { if (!l.match_key) return l; const g = groups.find((x) => x.key === l.match_key) ?? null; return !g && l.move_po ? l : applyGroupToLine(l, g, groups, aliases, l.manual); })
+        .map((l, i) => ({ ...l, decision: lines[i].decision, voucher_line_ids: lines[i].voucher_line_ids, move_po: lines[i].move_po, sku_pick: lines[i].sku_pick }));
     }
     let result: Awaited<ReturnType<typeof applySellerBill>> | null = null;
     if (body.apply) {
       const left = undecidedCount(lines);
       if (left > 0) return NextResponse.json({ error: `ยังเหลือ ${left} แถวที่ยังไม่ได้เช็ก — กดใช่ / เลือกจับคู่เอง / ข้าม ให้ครบก่อน` }, { status: 400 });
       const previousIds = prev.flatMap((l) => l.voucher_line_ids);
-      result = await applySellerBill(admin, v, lines, { remember: body.remember !== false, actorName: actor.name, previousIds, fillCnName: body.fill_cn !== false, actorId: actor.id, billId });
+      result = await applySellerBill(admin, v, lines, { remember: body.remember !== false, actorName: actor.name, previousIds, fillCnName: body.fill_cn !== false, actorId: actor.id, billId,
+        backfillPo: body.backfill_po !== false, billNo: str((bill as Row).bill_no) || null, billDate: str((bill as Row).bill_date) || null });
       lines = result.lines;
       patch.status = "applied"; patch.applied_at = new Date().toISOString();
     }
@@ -135,8 +142,8 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
     const { data: upd, error } = await admin.from("purchase_delivery_bills").update(patch).eq("id", billId).select("*").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (result) await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: actor.id, actorName: actor.email,
-      metadata: { seller_bill_applied: billId, inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered, filled_cn: result.filledCn } });
-    return NextResponse.json({ ok: true, data: toBill(upd as Row), applied: result ? { inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered, filled_cn: result.filledCn } : null, error: null });
+      metadata: { seller_bill_applied: billId, inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered, filled_cn: result.filledCn, backfilled_po: result.backfilled?.po_no ?? null } });
+    return NextResponse.json({ ok: true, data: toBill(upd as Row), applied: result ? { inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered, filled_cn: result.filledCn, backfilled: result.backfilled } : null, error: null });
   } catch (e) {
     return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 400 });
   }

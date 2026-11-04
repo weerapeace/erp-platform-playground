@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   aliasKey, groupKey, sizesMm, colorsOf, codeTokens, distributeQty, checkBillMath, matchBillLines, undecidedCount, normalizeBillLine, applyGroupToLine, cnNameForSku,
-  shortfallOf, reducePlan, missingGroups,
+  shortfallOf, reducePlan, missingGroups, outsidePoLines, otherShopHint,
   type PoGroup, type SellerBillLine,
 } from "@/lib/seller-bill-match";
 
@@ -138,6 +138,20 @@ describe("บิลร้านจีน — แบ่งจำนวน / ต�
     expect(missingGroups(ls, gs).map((g) => g.key)).toEqual(["k2", "k4"]);      // k3 รับครบแล้ว · k4 คนละ PO แต่สั่งวันเดียวกัน · k5 คนละรอบ
     expect(missingGroups(ls, gs, "shop").map((g) => g.key)).toEqual(["k2", "k4", "k5"]);
     expect(missingGroups([L({ match_key: "k1", decision: "skip" })], gs)).toEqual([]);   // ข้ามแถว = ไม่นับว่า PO นี้อยู่ในบิล
+  });
+  it("เลือกสินค้านอกใบสั่งซื้อ = นับว่าตัดสินแล้ว + อยู่ในรายการที่ถามเปิด PO ย้อนหลัง", () => {
+    const pick = L({ name_cn: "日字扣", qty: 200, unit_price: 0.8, decision: "confirmed", manual: true, sku_pick: { id: "s9", code: "H8-25#BK", name: "ห่วงเลขแปด 2.5 cm. สีดำ", uom: "Units" } });
+    expect(pick.sku_pick?.code).toBe("H8-25#BK");
+    expect(undecidedCount([pick])).toBe(0);
+    expect(outsidePoLines([pick, L({ match_key: "k", decision: "confirmed" })])).toHaveLength(1);
+    expect(normalizeBillLine({ sku_pick: { code: "x" } }).sku_pick).toBeNull();   // ไม่มี id = ไม่นับ
+  });
+  it("ใบ้ PO ร้านอื่นให้แถวที่ไม่เจอ (ไม่ผูกให้เอง) · แถวที่เลือกแล้ว/ค่าใช้จ่าย ไม่ใบ้", () => {
+    const other = [{ ...groups[2], key: "po9|s:x", po_id: "po9", po_no: "PO-2026-00249", partner_name: "ร้านอี้หลงตงก่วน" }];
+    const row = L({ name_cn: "方底狗扣", spec_cn: "2cm 镍色", name_th: "คอหมาก้นสี่เหลี่ยม 2 ซม.", spec_th: "สีนิเกิ้ล", qty: 280, unit_price: 2.5 });
+    expect(otherShopHint(row, other)?.po_no).toBe("PO-2026-00249");
+    expect(otherShopHint({ ...row, decision: "skip" }, other)).toBeNull();
+    expect(otherShopHint({ ...row, is_fee: true }, other)).toBeNull();
   });
   it("ต้องตัดสินครบทุกแถวก่อนใส่ลงใบ", () => {
     const ls = [L({ match_key: "k", decision: "confirmed" }), L({ is_fee: true, decision: "expense" }), L({ decision: "skip" }), L({ match_key: "k" })];

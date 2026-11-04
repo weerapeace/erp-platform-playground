@@ -55,40 +55,68 @@ export async function loadCnShops(admin: Admin): Promise<ShopLite[]> {
       company_name: (p.company_name as string) ?? null, phone: (p.phone as string) ?? null, mobile: (p.mobile as string) ?? null, account_number: (p.account_number as string) ?? null }));
 }
 
+const PO_SELECT = "id, po_no, order_date, currency, seller_partner_id, seller_name, payment_status, paid_amount_thb, china_bill_id";
+
 /** ใบสั่งซื้อสกุลหยวนที่ยังค้างของหลายร้าน (โหลดรอบเดียว) — ใช้ดูว่าของในบิลตรงกับร้านไหน (ค้าง = สั่ง − รับแล้ว) */
 async function loadOpenCnGroupsByShop(admin: Admin, partnerIds: string[]): Promise<Map<string, PoGroup[]>> {
   const out = new Map<string, PoGroup[]>();
   if (partnerIds.length === 0) return out;
   const poRows: Row[] = [];
   for (const ids of chunk(partnerIds, 100)) {
-    const { data } = await admin.from("purchase_orders_v2").select("id, po_no, order_date, currency, seller_partner_id")
+    const { data } = await admin.from("purchase_orders_v2").select(PO_SELECT)
       .not("is_active", "is", false).in("status", OPEN_PO_STATUS).in("seller_partner_id", ids).limit(3000);
     poRows.push(...((data ?? []) as Row[]).filter((p) => isCNY(str(p.currency))));
   }
+  for (const g of await buildOpenGroups(admin, poRows)) {
+    const pid = str(g.partner_id);
+    out.set(pid, [...(out.get(pid) ?? []), g]);
+  }
+  return out;
+}
+
+/**
+ * "PO ร้านอื่น" (แท็บ ② ป๊อปเลือกจับคู่เอง) — ใบสั่งซื้อที่ยังค้างของทุกร้าน ยกเว้นร้านของใบนี้ · สกุลเดียวกับใบ
+ *   แต่ละกลุ่มบอกร้าน + เหตุผลที่ "ย้าย PO มาร้านนี้" ไม่ได้ (จ่ายเงิน / รับของ / ผูกบิลโอนเงินแล้ว)
+ */
+export async function loadOtherShopGroups(admin: Admin, v: { seller_partner_id: string | null; seller_name: string | null; currency: string }): Promise<PoGroup[]> {
+  const { data } = await admin.from("purchase_orders_v2").select(PO_SELECT)
+    .not("is_active", "is", false).in("status", OPEN_PO_STATUS).order("order_date", { ascending: false }).limit(1500);
+  const rows = ((data ?? []) as Row[]).filter((p) => isCNY(str(p.currency) || "THB") === isCNY(v.currency)
+    && (v.seller_partner_id ? str(p.seller_partner_id) !== v.seller_partner_id : str(p.seller_name) !== str(v.seller_name)));
+  return (await buildOpenGroups(admin, rows)).sort((a, b) => str(b.order_date).localeCompare(str(a.order_date)) || a.po_no.localeCompare(b.po_no));
+}
+
+/** แถว PO (ยังเปิด) → กลุ่มสินค้า×PO พร้อมร้าน + เหตุผลที่ย้ายร้านไม่ได้ */
+async function buildOpenGroups(admin: Admin, poRows: Row[]): Promise<PoGroup[]> {
   const poMap = new Map(poRows.map((p) => [String(p.id), p]));
+  const received = new Set<string>();
   const lines: Row[] = [];
   for (const ids of chunk([...poMap.keys()], 100)) {
     const { data } = await admin.from("purchase_order_lines_v2").select("id, po_id, item_sku_id, item_name, qty, qty_received, uom, price_est, sort_order, line_status, is_active, note").in("po_id", ids).limit(5000);
-    lines.push(...((data ?? []) as Row[]).filter((l) => l.is_active !== false && !CLOSED_LINE.includes(str(l.line_status))));
+    for (const l of (data ?? []) as Row[]) {
+      if (l.is_active === false) continue;
+      if (num(l.qty_received) > 0) received.add(String(l.po_id));
+      if (!CLOSED_LINE.includes(str(l.line_status))) lines.push(l);
+    }
   }
   const cn = await loadSkuCnNames(admin, lines.map((l) => str(l.item_sku_id)).filter(Boolean));
+  const lockOf = (po: Row): string | null =>
+    po.china_bill_id ? "ผูกบิลโอนเงินจีนแล้ว" : str(po.payment_status) === "paid" || num(po.paid_amount_thb) > 0 ? "จ่ายเงินแล้ว" : received.has(String(po.id)) ? "รับของไปแล้วบางส่วน" : null;
   const groups = new Map<string, PoGroup>();
   for (const l of lines) {
     const po = poMap.get(String(l.po_id)); if (!po) continue;
     const skuId = str(l.item_sku_id) || null;
     const key = groupKey(String(l.po_id), skuId, str(l.item_name));
     const rem = Math.max(0, num(l.qty) - num(l.qty_received));
-    const gl = { id: String(l.id), qty: num(l.qty), remaining: num(l.qty), qty_received: num(l.qty_received), sort_order: num(l.sort_order), note: (l.note as string) ?? null, voucher_line_id: null, from_gr: false };
+    const gl = { id: String(l.id), qty: num(l.qty), remaining: rem, qty_received: num(l.qty_received), sort_order: num(l.sort_order), note: (l.note as string) ?? null, voucher_line_id: null, from_gr: false };
     const g = groups.get(key);
     if (g) { g.lines.push(gl); g.qty_total += gl.qty; g.remaining += rem; if (!(num(g.unit_price) > 0) && num(l.price_est) > 0) g.unit_price = num(l.price_est); continue; }
-    const g2: PoGroup = { key, po_id: String(l.po_id), po_no: str(po.po_no), order_date: (po.order_date as string) ?? null, item_sku_id: skuId,
+    groups.set(key, { key, po_id: String(l.po_id), po_no: str(po.po_no), order_date: (po.order_date as string) ?? null, item_sku_id: skuId,
       code: /^\s*\[([^\]]+)\]/.exec(str(l.item_name))?.[1] ?? "", item_name: stripCode(str(l.item_name)), name_cn: skuId ? cn.get(skuId) ?? null : null, uom: (l.uom as string) ?? null,
-      unit_price: num(l.price_est) > 0 ? num(l.price_est) : null, qty_total: gl.qty, remaining: rem, lines: [gl], in_voucher: false, image_url: null };
-    groups.set(key, g2);
-    const pid = String(po.seller_partner_id);
-    out.set(pid, [...(out.get(pid) ?? []), g2]);
+      unit_price: num(l.price_est) > 0 ? num(l.price_est) : null, qty_total: gl.qty, remaining: rem, lines: [gl], in_voucher: false, image_url: null,
+      partner_id: (po.seller_partner_id as string) ?? null, partner_name: str(po.seller_name) || null, po_locked: lockOf(po) });
   }
-  return out;
+  return [...groups.values()];
 }
 
 const SYSTEM_INTAKE = `คุณเป็นผู้ช่วยฝ่ายจัดซื้อ อ่าน "บิล / ใบส่งของจากร้านค้าในจีน" (送货单 / 发货单 / 销售单 / 出货单 / 收据) จากรูปหรือ PDF ที่แนบมา (อาจมีหลายไฟล์)

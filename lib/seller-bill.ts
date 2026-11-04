@@ -13,6 +13,7 @@ import { resolveSkuCover, coverUrl } from "@/lib/sku-cover";
 import { recomputeVoucher, loadSkus, parentBasis } from "@/lib/purchase-voucher-server";
 import { normDate } from "@/lib/delivery-bill";
 import { loadSkuCnNames, fillSkuCnNames } from "@/lib/sku-cn-name";
+import { createManualPo } from "@/lib/po-manual";
 import {
   groupKey, stripCode, matchBillLines, normalizeBillLine, distributeQty, aliasKey, cnNameForSku,
   type PoGroup, type PoGroupLine, type SellerBillLine, type AliasRow,
@@ -262,31 +263,63 @@ export async function rematchLines(admin: Admin, v: VoucherLite, lines: SellerBi
   return { lines: matchBillLines(lines, groups, aliases), groups };
 }
 
-export type ApplyResult = { inserted: number; updated: number; expenses: number; remembered: number; filledCn: number; lines: SellerBillLine[] };
+export type ApplyResult = { inserted: number; updated: number; expenses: number; remembered: number; filledCn: number; backfilled: { po_id: string; po_no: string } | null; lines: SellerBillLine[] };
 
 /**
  * ใส่แถวที่ยืนยันแล้วลงใบสำคัญ — ตรวจทุกแถวก่อนเขียน (กันเขียนครึ่ง ๆ กลาง ๆ)
  *   • บรรทัด PO ที่มาจากใบรับในใบนี้แล้ว → ใส่ราคาจากบิลอย่างเดียว (จำนวนยึดใบรับ)
  *   • บรรทัด PO ที่ยังไม่อยู่ในใบ → เพิ่มรายการผูก PO (แบ่งจำนวนลงใบสั่งผลิตเก่าก่อน)
+ *   • นอกใบสั่งซื้อ (เลือกสินค้าเอง sku_pick) → backfillPo = เปิด PO ย้อนหลังให้ร้านนี้ (lib/po-manual) แล้วผูกเหมือนแถว PO
+ *                                            → ไม่เปิด = รายการผูกรหัสสินค้าอย่างเดียว (ตอนยืนยันใบ ราคาไปที่ราคาต่อร้าน + สินค้า)
  *   • กดใส่ซ้ำ = รายการที่บิลนี้เคยเพิ่มไว้ถูกแทนด้วยชุดใหม่
  *   • ค่าใช้จ่าย (ค่าส่งในจีน ฯลฯ) ที่เลือก "เพิ่มเป็นค่าใช้จ่าย" → รายการเพิ่มเองไม่ผูก PO
+ *   • แถว "ย้าย PO มาร้านนี้" (move_po) — หน้าเว็บย้ายผ่าน API กลาง po-edit ก่อนเรียกฟังก์ชันนี้ (ที่นี่ถือเป็นแถว PO ร้านนี้ธรรมดา)
  */
-export async function applySellerBill(admin: Admin, v: VoucherLite, billLines: SellerBillLine[], opts: { remember: boolean; actorName: string | null; previousIds: string[]; fillCnName?: boolean; actorId?: string | null; billId?: string | null }): Promise<ApplyResult> {
-  // 1) ตรวจทุกแถวก่อนเขียน — ต้องจับกับบรรทัดใบสั่งซื้อของร้านนี้เท่านั้น
+export async function applySellerBill(admin: Admin, v: VoucherLite, billLinesIn: SellerBillLine[], opts: { remember: boolean; actorName: string | null; previousIds: string[]; fillCnName?: boolean; actorId?: string | null; billId?: string | null; backfillPo?: boolean; billNo?: string | null; billDate?: string | null }): Promise<ApplyResult> {
+  let billLines = billLinesIn.map((l) => ({ ...l }));
+  // 1) ตรวจทุกแถวก่อนเขียน — แถว PO ต้องเป็นบรรทัดใบสั่งซื้อของร้านนี้ · แถวนอก PO ต้องเป็นสินค้าที่มีจริง
   const check = new Map((await loadShopGroups(admin, v)).map((g) => [g.key, g]));
+  const outside = billLines.filter((l) => l.decision === "confirmed" && !l.is_fee && !l.match_key && l.sku_pick);
+  const skuRows = new Map<string, Row>();
+  if (outside.length) {
+    const { data } = await admin.from("skus_v2").select("id, code, name_th, is_active").in("id", [...new Set(outside.map((l) => l.sku_pick!.id))]);
+    for (const r of (data ?? []) as Row[]) if (r.is_active !== false) skuRows.set(String(r.id), r);
+  }
   billLines.forEach((l, i) => {
     if (l.decision !== "confirmed" || l.is_fee) return;
-    if (!l.match_key || !check.has(l.match_key)) throw new Error(`แถวที่ ${i + 1} (${l.name_th || l.name_cn || "—"}) — บรรทัดใบสั่งซื้อที่เลือกไม่อยู่ในใบสั่งซื้อของร้านนี้แล้ว ให้เลือกจับคู่ใหม่`);
+    const label = l.name_th || l.name_cn || "—";
+    if (!l.match_key && l.sku_pick) {
+      if (!skuRows.has(l.sku_pick.id)) throw new Error(`แถวที่ ${i + 1} (${label}) — สินค้าที่เลือกไม่พบในคลังแล้ว ให้เลือกใหม่`);
+      if (!(num(l.qty) > 0)) throw new Error(`แถวที่ ${i + 1} ยังไม่มีจำนวน — ใส่จำนวนก่อน`);
+      return;
+    }
+    if (!l.match_key || !check.has(l.match_key)) throw new Error(`แถวที่ ${i + 1} (${label}) — บรรทัดใบสั่งซื้อที่เลือกไม่อยู่ในใบสั่งซื้อของร้านนี้แล้ว ให้เลือกจับคู่ใหม่`);
     const g = check.get(l.match_key)!;
     if (!g.lines.every((x) => x.from_gr) && !(num(l.qty) > 0)) throw new Error(`แถวที่ ${i + 1} ยังไม่มีจำนวน — ใส่จำนวนก่อน`);
   });
+  const skuLabel = (l: SellerBillLine) => { const r = skuRows.get(l.sku_pick!.id); const code = str(r?.code) || l.sku_pick!.code; const nm = str(r?.name_th) || l.sku_pick!.name; return code ? `[${code}] ${nm}` : nm; };
+
+  // 1.5) นอกใบสั่งซื้อ + ติ๊ก "เปิด PO ย้อนหลัง" → เปิด PO ร้านนี้ผ่านของกลาง แล้วแปลงเป็นแถวผูก PO (กดใส่ซ้ำไม่เปิดใบใหม่อีก)
+  let backfilled: ApplyResult["backfilled"] = null;
+  if (opts.backfillPo && outside.length) {
+    if (!v.seller_name) throw new Error("ใบนี้ยังไม่ระบุร้าน — เปิดใบสั่งซื้อย้อนหลังไม่ได้");
+    const r = await createManualPo(admin, {
+      seller_name: v.seller_name, seller_partner_id: v.seller_partner_id, currency: v.currency,
+      order_date: opts.billDate || undefined,
+      note: `เปิดย้อนหลังจากบิลร้าน${opts.billNo ? ` No. ${opts.billNo}` : ""} (ใบสำคัญรับ)`,
+      lines: outside.map((l) => ({ item_sku_id: l.sku_pick!.id, item_name: skuLabel(l), qty: num(l.qty), uom: l.sku_pick!.uom, price: num(l.unit_price) })),
+    }, { id: opts.actorId ?? "", name: opts.actorName ?? "system" }, { source: "seller_bill", voucher_id: v.id });
+    if (!r.ok) throw new Error("เปิดใบสั่งซื้อย้อนหลังไม่สำเร็จ: " + r.error);
+    backfilled = { po_id: r.id, po_no: r.po_no };
+    billLines = billLines.map((l) => (outside.includes(l) ? { ...l, match_key: groupKey(r.id, l.sku_pick!.id, skuLabel(l)), sku_pick: null } : l));
+  }
 
   // 2) ถอดรายการที่บิลนี้เคยเพิ่มไว้ (กดใส่ซ้ำ) — เฉพาะรายการที่ไม่ได้มาจากใบรับ แล้วโหลดใหม่
   if (opts.previousIds.length) {
     await admin.from("purchase_voucher_lines_v2").update({ is_active: false, updated_at: new Date().toISOString() })
       .in("id", opts.previousIds).eq("voucher_id", v.id).is("gr_line_id", null);
   }
-  const groups = opts.previousIds.length ? await loadShopGroups(admin, v) : [...check.values()];
+  const groups = opts.previousIds.length || backfilled ? await loadShopGroups(admin, v) : [...check.values()];
   const gMap = new Map(groups.map((g) => [g.key, g]));
   if (billLines.some((l) => l.decision === "confirmed" && !l.is_fee && l.match_key && !gMap.has(l.match_key))) {
     // บรรทัด PO ปิดไปแล้ว (เช่น รับครบ) — คืนรายการเดิมแล้วให้ผู้ใช้เลือกใหม่
@@ -295,7 +328,7 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLines: S
   }
 
   // 3) เขียน
-  const skuIds = [...new Set(groups.map((g) => g.item_sku_id ?? "").filter(Boolean))];
+  const skuIds = [...new Set([...groups.map((g) => g.item_sku_id ?? ""), ...billLines.map((l) => l.sku_pick?.id ?? "")].filter(Boolean))];
   const skuMap = await loadSkus(admin, skuIds);
   const { data: mx } = await admin.from("purchase_voucher_lines_v2").select("sort_order").eq("voucher_id", v.id).order("sort_order", { ascending: false }).limit(1);
   let sort = num(((mx ?? [])[0] as Row | undefined)?.sort_order) + 1;
@@ -349,8 +382,17 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLines: S
           ids.push(String((ins as Row).id)); inserted++;
         }
       }
+    } else if (l.decision === "confirmed" && !l.is_fee && l.sku_pick) {
+      // นอกใบสั่งซื้อ (ไม่เปิด PO ย้อนหลัง) → รายการผูกรหัสสินค้าอย่างเดียว · ขนาด/น้ำหนักจากตัวแม่
+      const basis = parentBasis(skuMap.get(l.sku_pick.id));
+      const { data: ins, error } = await admin.from("purchase_voucher_lines_v2").insert({
+        voucher_id: v.id, item_sku_id: l.sku_pick.id, item_name: skuLabel(l), uom: l.sku_pick.uom, qty: num(l.qty),
+        unit_price: price, price_source: price != null ? "bill" : "none", cbm_per_unit: basis.cbm, kg_per_unit: basis.kg, sort_order: sort++,
+      }).select("id").single();
+      if (error || !ins) throw new Error("เพิ่มรายการไม่สำเร็จ: " + (error?.message ?? ""));
+      ids.push(String((ins as Row).id)); inserted++;
     }
-    out.push({ ...l, voucher_line_ids: ids });
+    out.push({ ...l, voucher_line_ids: ids, move_po: null });   // ย้าย PO ทำไปแล้ว (หน้าเว็บ) — ไม่ถามซ้ำตอนกดใส่ใหม่
   }
 
   // 4) จำคู่ (ชื่อจีน ↔ สินค้า ของร้านนี้)
@@ -358,11 +400,13 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLines: S
   const partnerId = v.seller_partner_id;
   if (opts.remember && partnerId) {
     for (const l of billLines) {
-      if (l.decision !== "confirmed" || l.is_fee || !l.match_key || !l.name_cn) continue;
-      const g = gMap.get(l.match_key); if (!g) continue;
+      if (l.decision !== "confirmed" || l.is_fee || !l.name_cn) continue;
+      const g = l.match_key ? gMap.get(l.match_key) : undefined;
+      const target = g ? { item_sku_id: g.item_sku_id, item_name: g.item_sku_id ? null : g.item_name } : l.sku_pick ? { item_sku_id: l.sku_pick.id, item_name: null } : null;
+      if (!target) continue;
       const key = aliasKey(l.name_cn, l.spec_cn); if (!key || key === "|") continue;
       const { data: ex } = await admin.from("supplier_item_aliases").select("id, times_used").eq("supplier_partner_id", partnerId).eq("alias_key", key).maybeSingle();
-      const patch = { name_cn: l.name_cn, spec_cn: l.spec_cn, name_th: [l.name_th, l.spec_th].filter(Boolean).join(" ") || null, item_sku_id: g.item_sku_id, item_name: g.item_sku_id ? null : g.item_name, last_unit_price: num(l.unit_price) > 0 ? num(l.unit_price) : null, currency: v.currency, last_used_at: now, updated_at: now, is_active: true };
+      const patch = { name_cn: l.name_cn, spec_cn: l.spec_cn, name_th: [l.name_th, l.spec_th].filter(Boolean).join(" ") || null, ...target, last_unit_price: num(l.unit_price) > 0 ? num(l.unit_price) : null, currency: v.currency, last_used_at: now, updated_at: now, is_active: true };
       const { error } = ex
         ? await admin.from("supplier_item_aliases").update({ ...patch, times_used: num((ex as Row).times_used) + 1 }).eq("id", String((ex as Row).id))
         : await admin.from("supplier_item_aliases").insert({ ...patch, supplier_partner_id: partnerId, alias_key: key, created_by: opts.actorName, times_used: 1 });
@@ -373,12 +417,13 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLines: S
   let filledCn = 0;
   if (opts.fillCnName !== false) {
     const items = billLines.flatMap((l) => {
-      if (l.decision !== "confirmed" || l.is_fee || !l.match_key) return [];
-      const g = gMap.get(l.match_key); const name = cnNameForSku(l);
-      return g?.item_sku_id && name ? [{ sku_id: g.item_sku_id, name_cn: name }] : [];
+      if (l.decision !== "confirmed" || l.is_fee) return [];
+      const skuId = l.match_key ? gMap.get(l.match_key)?.item_sku_id : l.sku_pick?.id;
+      const name = cnNameForSku(l);
+      return skuId && name ? [{ sku_id: skuId, name_cn: name }] : [];
     });
     filledCn = await fillSkuCnNames(admin, items, { id: opts.actorId ?? null, name: opts.actorName }, "seller_bill", opts.billId ?? null);
   }
   await recomputeVoucher(admin, v.id);
-  return { inserted, updated, expenses, remembered, filledCn, lines: out };
+  return { inserted, updated, expenses, remembered, filledCn, backfilled, lines: out };
 }
