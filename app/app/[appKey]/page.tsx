@@ -60,10 +60,25 @@ export default function StandaloneApp() {
   const [searchOpen, setSearchOpen] = useState(false);
   useSearchHotkey(useCallback((open?: boolean) => setSearchOpen((v) => (open === undefined ? !v : open)), []));
   const searchScope = getSearchScope(appKey)?.key;
-  const { user, ready, can } = useAuth();
+  const { user, ready, can, permsReady } = useAuth();
   const [app, setApp] = useState<AppGroup | null>(null);
   const [items, setItems] = useState<MenuItem[]>([]);
   const [active, setActive] = useState(0);
+  // คงหน้าที่เปิดอยู่ไว้ตาม id ตอนรายการเมนูคำนวณใหม่ (สิทธิ์จริงมาทีหลัง / บันทึกตั้งค่า)
+  const itemsRef = useRef<MenuItem[]>([]);
+  itemsRef.current = items;
+  const activeRef = useRef(0);
+  activeRef.current = active;
+  // 🔐 รอสิทธิ์จริงจาก DB ก่อนคัดเมนู — เดิมคัดตอน "พร้อม" ซึ่งมาก่อนสิทธิ์ → พนักงานได้สิทธิ์สำรองของตำแหน่ง
+  //    (ไม่มีสิทธิ์ที่ให้รายคน/ตำแหน่งตั้งเพิ่ม เช่น เว็บไซต์) เมนูหายจนรีเฟรชถูกจังหวะ (เจอกับ Thandar 2026-11-04)
+  //    รอนานเกิน 4 วิ (โหลดสิทธิ์พลาด) = ใช้สิทธิ์สำรองไปก่อน แล้วคำนวณใหม่เมื่อสิทธิ์จริงมา
+  const [permsWaitOver, setPermsWaitOver] = useState(false);
+  useEffect(() => {
+    if (!ready || permsReady) return;
+    const t = setTimeout(() => setPermsWaitOver(true), 4000);
+    return () => clearTimeout(t);
+  }, [ready, permsReady]);
+  const permsKnown = !user || user.role === "admin" || permsReady || permsWaitOver;
   const [allItems, setAllItems] = useState<MenuItem[]>([]);   // เมนูทั้งหมดของแอป (ไม่กรองตามคนดู) — ใช้ในหน้าตั้งค่า
   const [settingsOn, setSettingsOn] = useState(false);          // ⚙️ เปิดหน้าตั้งค่าอยู่
   const [menuRev, setMenuRev] = useState(0);                    // บันทึกตั้งค่าแล้ว → โหลดเมนูใหม่ (ข้ามแคช)
@@ -89,6 +104,7 @@ export default function StandaloneApp() {
   const devPreview = devRank[devLayout] < devRank[viewport];
 
   useEffect(() => {
+    if (!ready || !permsKnown) return;
     let alive = true;
     Promise.all([
       apiFetch(menuRev ? `/api/menu/apps?_=${menuRev}` : "/api/menu/apps").then((r) => r.json()),
@@ -106,6 +122,11 @@ export default function StandaloneApp() {
         .filter((m) => !hiddenIds.has(m.id) && !(m.parent_id && hiddenIds.has(m.parent_id))
           && (!m.permission_key || can(m.permission_key as Parameters<typeof can>[0]))
           && menuVisibleTo(m.audience, user));   // 👁 ใครเห็นเมนูไหน (ตั้งที่ ⚙️ ตั้งค่า)
+      if (initedRef.current) {
+        const prevId = itemsRef.current[activeRef.current]?.id;
+        const ni = prevId ? its.findIndex((m) => m.id === prevId) : -1;
+        if (ni >= 0 && ni !== activeRef.current) setActive(ni);
+      }
       setItems(its);
       // ครั้งแรกครั้งเดียว: คืนหน้าลึกที่จำไว้ (กัน refresh เด้งหน้าแรก) ไม่งั้นใช้ default landing
       if (!initedRef.current) {
@@ -129,9 +150,9 @@ export default function StandaloneApp() {
       setLoaded(true);
     }).catch(() => { if (alive) setLoaded(true); });
     return () => { alive = false; };
-    // ใช้ ready (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ
+    // ใช้ ready / permsKnown / permsReady (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [appKey, ready, menuRev]);
+  }, [appKey, ready, permsKnown, permsReady, menuRev]);
 
   // จำหน้าลึกในกรอบ (iframe) ทุก 1.5วิ → refresh แล้วกลับมาหน้าเดิม (ฝั่ง browser ล้วน ไม่กิน CPU worker)
   useEffect(() => {
