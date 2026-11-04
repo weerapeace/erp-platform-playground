@@ -1,0 +1,153 @@
+"use client";
+
+/**
+ * ChinaBillIntake (ของกลาง) — ออกใบสำคัญรับจาก "บิลโอนเงินจีน" (แอป China Pay) · เลือกได้หลายบิล (Mass)
+ *   รายการบิลโอน (ยังไม่ออกใบ / ทั้งหมด · รอโอน / โอนแล้ว) → ติ๊กหลายบิล → สร้างทีละบิล + แถบความคืบหน้า + ปุ่มเปิดแต่ละใบ
+ *   แต่ละใบ: ร้าน/สกุล ¥/วันที่/เรท จากบิลโอน · รายการจากรูปบิล (AI) หรือ PO ที่ผูก · ไม่มีทั้งคู่ = ใบเปล่า (ถ้าติ๊ก)
+ * ใช้: <ChinaBillIntake onDone={() => …} onCount={(n) => …} />  · API /api/purchasing/seller-bills/china-bills · logic lib/china-bill-voucher.ts
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useToast } from "@/components/toast";
+import { apiFetch } from "@/lib/api";
+import { formatDate } from "@/lib/date";
+
+type Bill = {
+  id: string; bill_date: string | null; supplier_id: string | null; shop: string | null; amount_rmb: number; rate: number | null;
+  status: string; is_shipping: boolean; files: number; po_links: { po_id: string; po_no: string }[];
+  voucher: { id: string; pv_no: string | null; status: string } | null;
+};
+type Prog = { bill: Bill; state: "wait" | "run" | "ok" | "warn" | "skip" | "err"; text: string; voucher_id?: string };
+
+const n2 = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 2 });
+const chip = "inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border whitespace-nowrap";
+const C_OK = `${chip} bg-emerald-50 text-emerald-700 border-emerald-200`;
+const C_WARN = `${chip} bg-amber-50 text-amber-700 border-amber-200`;
+const C_NEU = `${chip} bg-slate-50 text-slate-600 border-slate-200`;
+const C_ACC = `${chip} bg-blue-50 text-blue-700 border-blue-200`;
+const isDupShop = (s: string | null) => /ซ้ำ/.test(s ?? "");
+
+export function ChinaBillIntake({ onDone, onCount }: { onDone: () => void | Promise<void>; onCount?: (n: number) => void }) {
+  const toast = useToast();
+  const [bills, setBills] = useState<Bill[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [st, setSt] = useState<"all" | "รอโอน" | "โอนแล้ว">("all");
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [blank, setBlank] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [prog, setProg] = useState<Prog[] | null>(null);
+  const running = !!prog && prog.some((p) => p.state === "wait" || p.state === "run");
+
+  const load = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/purchasing/seller-bills/china-bills").then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      const rows = (j.data ?? []) as Bill[];
+      setBills(rows); setErr(null);
+      onCount?.(rows.filter((b) => !b.voucher && !b.is_shipping && b.supplier_id).length);
+    } catch (e) { setErr(String((e as Error).message ?? e)); setBills([]); }
+  }, [onCount]);
+  useEffect(() => { void load(); }, [load]);
+
+  const usable = (b: Bill) => !b.voucher && !b.is_shipping && !!b.supplier_id;
+  const list = useMemo(() => (bills ?? []).filter((b) => (showAll || !b.voucher) && (st === "all" || b.status === st)), [bills, showAll, st]);
+  const toggle = (id: string) => { setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; }); setMsg(null); };
+  const chosen = (bills ?? []).filter((b) => sel.has(b.id));
+  const total = chosen.reduce((a, b) => a + b.amount_rmb, 0);
+  const willGet = (b: Bill) => b.voucher ? <span className={C_OK}>ออกแล้ว {b.voucher.pv_no ?? "(ร่าง)"}</span>
+    : b.is_shipping ? <span className={C_NEU}>ผูกที่การ์ดค่าส่งในใบ</span>
+    : !b.supplier_id ? <span className={C_WARN}>ยังไม่ผูกร้าน</span>
+    : b.files ? <span className={C_ACC}>AI อ่านรูป</span>
+    : b.po_links.length ? <span className={C_ACC}>ใส่ {b.po_links.length} PO ที่ผูก</span>
+    : blank ? <span className={C_NEU}>ใบเปล่า</span> : <span className={C_WARN}>ไม่มีรูป/PO</span>;
+
+  // สร้างทีละบิล (AI อ่านรูปใช้เวลา) — โชว์ความคืบหน้ารายบิล · ล้มบางใบไม่หยุดใบอื่น
+  const run = async () => {
+    if (chosen.length === 0) { setMsg("ติ๊กเลือกบิลอย่างน้อย 1 ใบ"); return; }
+    const items: Prog[] = chosen.map((b) => ({ bill: b, state: "wait", text: "รอคิว" }));
+    setProg(items);
+    const upd = (i: number, p: Partial<Prog>) => setProg((cur) => cur && cur.map((x, k) => (k === i ? { ...x, ...p } : x)));
+    let made = 0;
+    for (const [i, it] of items.entries()) {
+      upd(i, { state: "run", text: it.bill.files ? "กำลังอ่านรูปบิล + จับคู่…" : "กำลังสร้าง…" });
+      try {
+        const res = await apiFetch("/api/purchasing/seller-bills/china-bills", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bill_id: it.bill.id, blank_if_none: blank }) });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+        const r = j.data as { status: string; reason?: string; voucher_id?: string; mode?: string; ok?: number; mid?: number; no?: number; po_lines?: number; total_warn?: string | null; warn?: string | null };
+        if (r.status === "skipped") { upd(i, { state: "skip", text: `ข้าม — ${r.reason ?? ""}` }); continue; }
+        made++;
+        const base = r.mode === "ai" ? `ใบร่าง · มั่นใจ ${r.ok} · ให้เช็ก ${r.mid} · ไม่เจอ ${r.no}` : r.mode === "po" ? `ใบร่าง · ใส่ ${r.po_lines} บรรทัดจาก PO ที่ผูก` : "ใบเปล่า (อัปบิลทีหลังในหน้าใบ)";
+        const w = [r.total_warn, r.warn].filter(Boolean).join(" · ");
+        upd(i, { state: w ? "warn" : "ok", text: w ? `${base} · ${w}` : base, voucher_id: r.voucher_id });
+      } catch (e) { upd(i, { state: "err", text: String((e as Error).message ?? e) }); }
+    }
+    setSel(new Set());
+    if (made) toast.success(`สร้างใบสำคัญรับ ${made} ใบจากบิลโอนเงินจีน — กด "เปิด" เพื่อเช็กรายการทีละใบ`);
+    await load();
+    await onDone();
+  };
+
+  if (bills == null) return <div className="py-8 text-center text-xs text-slate-400">กำลังโหลดบิลโอนเงินจีน…</div>;
+  return (
+    <div className="space-y-2">
+      {err && <div className="text-xs text-red-600">โหลดบิลไม่สำเร็จ: {err}</div>}
+      <div className="flex items-center gap-1.5 flex-wrap text-xs">
+        <span className="text-slate-500">แสดง:</span>
+        {[[false, "ยังไม่ออกใบ"], [true, "ทั้งหมด"]].map(([v, l]) => (
+          <button key={String(v)} type="button" onClick={() => setShowAll(v as boolean)} className={`h-7 px-2 rounded-md border ${showAll === v ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{l as string}</button>
+        ))}
+        <span className="text-slate-400 ml-1">· สถานะโอน</span>
+        {(["all", "รอโอน", "โอนแล้ว"] as const).map((v) => (
+          <button key={v} type="button" onClick={() => setSt(v)} className={`h-7 px-2 rounded-md border ${st === v ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{v === "all" ? "ทั้งหมด" : v}</button>
+        ))}
+        <span className="flex-1" />
+        <button type="button" disabled={running} onClick={() => setSel(new Set(list.filter((b) => usable(b) && (b.files || b.po_links.length)).map((b) => b.id)))} className="h-7 px-2 rounded-md border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-40">เลือกทั้งหมดที่มีรูปบิล / PO</button>
+      </div>
+
+      <div className="border border-slate-200 rounded-lg overflow-hidden">
+        <div className="hidden sm:grid grid-cols-[24px_74px_minmax(0,1fr)_84px_72px_110px_130px] gap-2 px-3 py-1.5 text-[11px] text-slate-400 bg-slate-50">
+          <span /><span>วันที่บิล</span><span>ร้าน (จากบิลโอน)</span><span className="text-right">ยอด ¥</span><span>โอน</span><span>รูปบิล / PO</span><span>จะได้อะไร</span>
+        </div>
+        <div className="divide-y divide-slate-100 max-h-[45vh] overflow-y-auto">
+          {list.map((b) => (
+            <label key={b.id} className={`grid grid-cols-[24px_74px_minmax(0,1fr)_84px] sm:grid-cols-[24px_74px_minmax(0,1fr)_84px_72px_110px_130px] gap-2 px-3 py-2 text-xs items-center ${usable(b) ? "cursor-pointer hover:bg-slate-50" : "opacity-60"} ${sel.has(b.id) ? "bg-blue-50" : ""}`}>
+              <input type="checkbox" checked={sel.has(b.id)} disabled={!usable(b) || running} onChange={() => toggle(b.id)} className="rounded border-slate-300" />
+              <span className="text-slate-600">{b.bill_date ? formatDate(b.bill_date) : "—"}</span>
+              <span className="min-w-0 truncate text-slate-800" title={b.shop ?? ""}>{b.is_shipping ? "ค่าส่ง (บิลค่าส่ง)" : b.shop ?? "— (ยังไม่ผูกร้าน)"}{isDupShop(b.shop) && <span className={`${C_WARN} ml-1`}>ร้านซ้ำ</span>}</span>
+              <span className="text-right tabular-nums text-slate-800">{n2(b.amount_rmb)}</span>
+              <span className="hidden sm:inline"><span className={b.status === "โอนแล้ว" ? C_OK : C_WARN}>{b.status || "—"}</span></span>
+              <span className="hidden sm:inline text-[11px] text-slate-500">{b.files ? `${b.files} รูป` : "ไม่มีรูป"}{b.po_links.length ? ` · ${b.po_links.length} PO` : ""}</span>
+              <span className="hidden sm:inline">{willGet(b)}</span>
+            </label>
+          ))}
+          {list.length === 0 && <div className="px-3 py-6 text-center text-xs text-slate-400">ไม่มีบิลโอนที่ยังไม่ออกใบ{!showAll ? " — กด \"ทั้งหมด\" เพื่อดูบิลที่ออกแล้ว" : ""}</div>}
+        </div>
+      </div>
+
+      <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={blank} disabled={running} onChange={(e) => setBlank(e.target.checked)} className="rounded border-slate-300" /> บิลที่ไม่มีรูปและไม่มี PO ผูก: สร้างใบเปล่าของร้านนั้นไว้ก่อน (อัปบิลทีหลังในหน้าใบ)</label>
+      {msg && <div className="text-[11px] text-red-600">{msg}</div>}
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] text-slate-500 mr-auto">{chosen.length ? `เลือก ${chosen.length} บิล · รวม ¥${n2(total)}` : "ติ๊กบิลที่จะออกใบ (เลือกหลายใบได้) · ร้าน/สกุล/วันที่/เรท ใช้ตามบิลโอน"}</span>
+        <button type="button" onClick={() => void run()} disabled={running} className="h-9 px-4 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+          {running ? "กำลังสร้าง…" : `สร้างใบสำคัญ ${chosen.length} ใบ →`}
+        </button>
+      </div>
+
+      {prog && (
+        <div className="border border-slate-200 bg-slate-50 rounded-lg p-3 space-y-1">
+          <div className="text-xs font-medium text-slate-700">{running ? "กำลังสร้าง" : "เสร็จแล้ว"} {prog.filter((p) => p.state !== "wait" && p.state !== "run").length}/{prog.length}</div>
+          {prog.map((p) => (
+            <div key={p.bill.id} className="flex items-center gap-2 flex-wrap text-[11px]">
+              <span className="w-4 text-center">{p.state === "run" ? "⏳" : p.state === "wait" ? "·" : p.state === "ok" ? "✓" : p.state === "warn" ? "!" : p.state === "skip" ? "–" : "✕"}</span>
+              <span className="text-slate-800">{p.bill.shop ?? "—"}</span>
+              <span className="text-slate-400">¥{n2(p.bill.amount_rmb)}</span>
+              <span className={p.state === "ok" ? C_OK : p.state === "warn" || p.state === "skip" ? C_WARN : p.state === "err" ? `${chip} bg-red-50 text-red-700 border-red-200` : C_NEU}>{p.text}</span>
+              {p.voucher_id && <a href={`/purchasing/vouchers/${p.voucher_id}`} className="text-blue-600 hover:underline">เปิด</a>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}

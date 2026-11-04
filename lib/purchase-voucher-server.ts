@@ -34,6 +34,8 @@ export type VoucherHeader = {
   carrier_id: string | null; carrier_name: string | null;
   tracking_no: string | null;    // รหัสขนส่ง (EK-########) จากใบส่งของ
   shipping_bill_id: string | null; shipping_payment_status: "unpaid" | "paid"; shipping_paid_date: string | null;
+  /** ใบนี้ออกจากบิลโอนเงินจีน (ค่าสินค้า) ใบไหน — ป๊อป ＋ ออกใบสำคัญรับ แท็บ จากบิลโอนเงินจีน (lib/china-bill-voucher) */
+  china_bill_id: string | null;
   /** สถานะจ่ายค่าสินค้าของแต่ละใบ PO ในใบสำคัญนี้ — ยอดค้างจ่ายอ้างจากราคาในใบสำคัญ (goods_thb) */
   po_payments: PoPayment[];
 };
@@ -55,6 +57,7 @@ const toHeader = (v: Row, grNos: string[], poNos: string[], poPayments: PoPaymen
   carrier_id: (v.carrier_id as string) ?? null, carrier_name: (v.carrier_name as string) ?? null,
   tracking_no: (v.tracking_no as string) ?? null,
   shipping_bill_id: (v.shipping_bill_id as string) ?? null,
+  china_bill_id: (v.china_bill_id as string) ?? null,
   shipping_payment_status: v.shipping_payment_status === "paid" ? "paid" : "unpaid",
   shipping_paid_date: (v.shipping_paid_date as string) ?? null,
   po_payments: poPayments,

@@ -211,11 +211,11 @@ export function sanitizeAiBillLines(rawLines: unknown, idOf?: Map<string, string
 export const billTotalOf = (v: unknown) => numOrNull(v);
 
 /** ส่งรูป/PDF + รายการ PO ของร้านนี้ให้ AI อ่าน → หัวบิล + แถว (มีคู่ที่ AI เลือก) */
-export async function parseSellerBill(admin: Admin, ref: string, groups: PoGroup[]): Promise<{
+export async function parseSellerBill(admin: Admin, ref: string | string[], groups: PoGroup[]): Promise<{
   header: { is_bill: boolean; seller_text: string | null; bill_no: string | null; bill_date: string | null; currency: string | null; total_amount: number | null };
   lines: SellerBillLine[]; raw: Row; model: string;
 }> {
-  const fileParts = await billFileParts(admin, [ref]);
+  const fileParts = await billFileParts(admin, Array.isArray(ref) ? ref : [ref]);   // หลายไฟล์ = หลายหน้าของบิลเดียวกัน
   const { text, idOf } = poCandidatePrompt(groups);
   const raw = await chatJson(SYSTEM_FULL, [{ type: "text", text: `${text}\n\nอ่านบิลในไฟล์ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...fileParts], 4000, SELLER_BILL_MODEL);
   const header = {
