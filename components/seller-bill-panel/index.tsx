@@ -50,6 +50,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
   const [uploadKey, setUploadKey] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);   // "parse" | bill id
   const [remember, setRemember] = useState(true);
+  const [fillCn, setFillCn] = useState(true);
   const [open, setOpen] = useState(true);
   const [pickFor, setPickFor] = useState<{ billId: string; idx: number } | null>(null);
   const [pickQ, setPickQ] = useState("");
@@ -96,14 +97,14 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
     setBusy(billId);
     try {
       const res = await apiFetch(`/api/purchasing/vouchers/${voucherId}/seller-bills`, { method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ bill_id: billId, lines, rematch: mode === "rematch", apply: mode === "apply", remember }) });
+        body: JSON.stringify({ bill_id: billId, lines, rematch: mode === "rematch", apply: mode === "apply", remember, fill_cn: fillCn }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
       const b = j.data as Bill;
       setDraft((p) => ({ ...p, [billId]: b.lines }));
       if (mode === "apply" && j.applied) {
-        const a = j.applied as { inserted: number; updated: number; expenses: number; remembered: number };
-        toast.success(`ใส่ลงใบสำคัญแล้ว — เพิ่ม ${a.inserted} · ใส่ราคา ${a.updated}${a.expenses ? ` · ค่าใช้จ่าย ${a.expenses}` : ""}${a.remembered ? ` · จำคู่ไว้ ${a.remembered}` : ""}`);
+        const a = j.applied as { inserted: number; updated: number; expenses: number; remembered: number; filled_cn?: number };
+        toast.success(`ใส่ลงใบสำคัญแล้ว — เพิ่ม ${a.inserted} · ใส่ราคา ${a.updated}${a.expenses ? ` · ค่าใช้จ่าย ${a.expenses}` : ""}${a.remembered ? ` · จำคู่ไว้ ${a.remembered}` : ""}${a.filled_cn ? ` · เติมชื่อจีน ${a.filled_cn} สินค้า` : ""}`);
         await onApplied();
       } else toast.success(mode === "rematch" ? "จับคู่ใหม่แล้ว" : "บันทึกแล้ว");
       await load();
@@ -126,7 +127,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
   const pickLine = pickFor ? draft[pickFor.billId]?.[pickFor.idx] : null;
   const pickList = useMemo(() => {
     const q = pickQ.trim().toLowerCase();
-    return groups.filter((g) => !q || `${g.code} ${g.item_name} ${g.po_no}`.toLowerCase().includes(q)).slice(0, 200);
+    return groups.filter((g) => !q || `${g.code} ${g.item_name} ${g.name_cn ?? ""} ${g.po_no}`.toLowerCase().includes(q)).slice(0, 200);
   }, [groups, pickQ]);
   const choose = (g: PoGroup) => {
     if (!pickFor) return;
@@ -223,7 +224,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
                               <div className="flex items-center gap-2 min-w-0">
                                 {g.image_url && /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.image_url} alt="" className="w-7 h-7 rounded object-cover border border-slate-100 shrink-0" />}
                                 <div className="min-w-0">
-                                  <div className="text-xs text-slate-800 truncate"><span className="font-mono text-[11px] text-slate-500 mr-1">{g.code || "—"}</span>{g.item_name}</div>
+                                  <div className="text-xs text-slate-800 truncate"><span className="font-mono text-[11px] text-slate-500 mr-1">{g.code || "—"}</span>{g.item_name}{g.name_cn && <span className="ml-1 text-slate-400" title="ชื่อจีนบนสินค้า">· {g.name_cn}</span>}</div>
                                   <div className="text-[11px] text-slate-500 truncate">{g.po_no} · ค้าง {n2(g.remaining)} {g.uom ?? ""} · {g.unit_price != null ? `¥${n2(g.unit_price, 4)}` : "PO ไม่มีราคา"}{openLines > 1 && !g.lines.some((x) => x.from_gr) ? ` · แบ่งลง ${openLines} บรรทัด (ใบสั่งผลิตเก่าก่อน)` : ""}{g.lines.some((x) => x.from_gr) ? " · มาจากใบรับในใบนี้ (ใส่ราคาอย่างเดียว)" : ""}</div>
                                 </div>
                               </div>
@@ -254,6 +255,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
                 {!readonly && (
                   <div className="flex items-center gap-2 flex-wrap px-3 py-2 border-t border-slate-100 bg-slate-50/60">
                     <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="rounded border-slate-300" /> จำคู่ที่ยืนยันไว้ ครั้งหน้าจับให้เอง</label>
+                    <label className="flex items-center gap-1.5 text-xs text-slate-600" title="ใช้ชื่อ + สเปกตามบิลร้าน (เช่น 狗扣 9mm 银色) เป็นชื่อจีนของสินค้า — ไม่ทับชื่อจีนที่มีอยู่แล้ว · ใช้ต่อที่ใบ PO ร้านจีน และช่วยจับคู่บิลครั้งหน้า"><input type="checkbox" checked={fillCn} onChange={(e) => setFillCn(e.target.checked)} className="rounded border-slate-300" /> เติมชื่อจีนให้สินค้าที่ยังไม่มี</label>
                     <button onClick={() => void patch(b.id, "rematch")} disabled={busy === b.id} title="จับคู่ใหม่เฉพาะแถวที่ยังไม่ได้ตัดสิน (หลังแก้ตัวเลข/เพิ่ม PO)" className="h-8 px-2.5 text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">จับคู่ใหม่</button>
                     <span className="flex-1" />
                     <button onClick={() => setLines(b.id, (ls) => ls.map((l) => (l.level === "ok" && l.match_key && !l.decision ? { ...l, decision: "confirmed" } : l)))} disabled={busy === b.id} className="h-8 px-2.5 text-xs rounded-md border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-40">ยืนยันทุกแถวที่มั่นใจสูง</button>
@@ -278,7 +280,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
           description={`${[pickLine.name_th, pickLine.spec_th].filter(Boolean).join(" ")} · ${n2(pickLine.qty)} × ¥${n2(pickLine.unit_price, 4)}`}
           footer={<button onClick={() => setPickFor(null)} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ปิด</button>}>
           <p className="text-[11px] text-slate-500 mb-2">แสดงเฉพาะบรรทัดใบสั่งซื้อที่ยังค้างของร้านนี้ — สร้างสินค้าใหม่หรือเลือกของนอกใบสั่งซื้อไม่ได้</p>
-          <input autoFocus value={pickQ} onChange={(e) => setPickQ(e.target.value)} placeholder="ค้นรหัส ชื่อ หรือเลข PO" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg mb-2" />
+          <input autoFocus value={pickQ} onChange={(e) => setPickQ(e.target.value)} placeholder="ค้นรหัส ชื่อไทย/จีน หรือเลข PO" className="w-full h-9 px-3 text-sm border border-slate-200 rounded-lg mb-2" />
           <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[55vh] overflow-y-auto">
             {pickList.map((g) => {
               const on = pickLine.match_key === g.key;
@@ -286,7 +288,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
                 <button key={g.key} onClick={() => choose(g)} className={`w-full text-left flex items-center gap-2 px-3 py-2 text-sm ${on ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                   <span className="w-9 h-9 rounded bg-slate-50 border border-slate-100 overflow-hidden shrink-0 flex items-center justify-center">{g.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.image_url} alt="" className="w-full h-full object-cover" /> : <span className="text-slate-300 text-xs">—</span>}</span>
                   <span className="font-mono text-xs text-slate-500 w-28 shrink-0 truncate">{g.code || "—"}</span>
-                  <span className="flex-1 min-w-0"><span className="block truncate text-slate-800">{g.item_name}</span><span className="block text-[11px] text-slate-400">{g.po_no}{g.order_date ? ` · ${formatDate(g.order_date)}` : ""}{g.lines.length > 1 ? ` · ${g.lines.length} บรรทัด` : ""}{g.in_voucher ? " · อยู่ในใบนี้แล้ว" : ""}</span></span>
+                  <span className="flex-1 min-w-0"><span className="block truncate text-slate-800">{g.item_name}{g.name_cn && <span className="ml-1 text-slate-400">· {g.name_cn}</span>}</span><span className="block text-[11px] text-slate-400">{g.po_no}{g.order_date ? ` · ${formatDate(g.order_date)}` : ""}{g.lines.length > 1 ? ` · ${g.lines.length} บรรทัด` : ""}{g.in_voucher ? " · อยู่ในใบนี้แล้ว" : ""}</span></span>
                   <span className="text-xs text-slate-500 tabular-nums shrink-0 w-20 text-right">ค้าง {n2(g.remaining)}</span>
                   <span className="text-xs text-slate-700 tabular-nums shrink-0 w-16 text-right">{g.unit_price != null ? `¥${n2(g.unit_price, 4)}` : "—"}</span>
                 </button>

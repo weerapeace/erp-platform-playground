@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
-  aliasKey, groupKey, sizesMm, colorsOf, codeTokens, distributeQty, checkBillMath, matchBillLines, undecidedCount, normalizeBillLine, applyGroupToLine,
+  aliasKey, groupKey, sizesMm, colorsOf, codeTokens, distributeQty, checkBillMath, matchBillLines, undecidedCount, normalizeBillLine, applyGroupToLine, cnNameForSku,
   type PoGroup, type SellerBillLine,
 } from "@/lib/seller-bill-match";
 
 // ข้อมูลจำลองจากของจริงร้าน B242 (4 พ.ย. 2026)
 const G = (o: Partial<PoGroup> & { po_no: string; code: string; item_name: string; unit_price: number | null; remaining: number; lines?: PoGroup["lines"] }): PoGroup => ({
-  key: groupKey(o.po_no, o.code, o.item_name), po_id: o.po_no, order_date: "2026-11-03", item_sku_id: o.code, uom: "Units", qty_total: o.remaining, in_voucher: false, image_url: null,
+  key: groupKey(o.po_no, o.code, o.item_name), po_id: o.po_no, order_date: "2026-11-03", item_sku_id: o.code, name_cn: null, uom: "Units", qty_total: o.remaining, in_voucher: false, image_url: null,
   lines: o.lines ?? [{ id: `${o.po_no}-1`, qty: o.remaining, remaining: o.remaining, sort_order: 0, note: null, voucher_line_id: null, from_gr: false }], ...o,
 });
 const groups: PoGroup[] = [
@@ -102,6 +102,18 @@ describe("บิลร้านจีน — แบ่งจำนวน / ต�
     expect(r.sum).toBe(1750);
     expect(r.totalOk).toBe(false);
     expect(checkBillMath([ls[0]], 1350).totalOk).toBe(true);
+  });
+  it("ชื่อจีนบนสินค้า (เติมจากบิลก่อน ๆ) ช่วยจับคู่ได้แม้ AI ไม่ได้เลือก และร้านอื่นตั้งชื่อคล้ายกัน", () => {
+    const withCn = groups.map((g, i) => (i === 4 ? { ...g, name_cn: "D扣 0.9cm 银色" } : g));
+    const [m] = matchBillLines([L({ name_cn: "D扣", spec_cn: "0.9cm 银色", qty: 110, unit_price: 0.38 })], withCn, []);
+    expect(m.match_key).toBe(withCn[4].key);
+    expect(m.reasons).toContain("ชื่อจีนตรง");
+    expect(m.level).toBe("ok");
+  });
+  it("ชื่อจีนที่จะเติม = ชื่อ + สเปกตามบิล · ไม่มีตัวจีน = ไม่เติม", () => {
+    expect(cnNameForSku({ name_cn: "狗扣", spec_cn: " 9mm  银色 " })).toBe("狗扣 9mm 银色");
+    expect(cnNameForSku({ name_cn: "BOX", spec_cn: null })).toBeNull();
+    expect(cnNameForSku({ name_cn: null, spec_cn: null })).toBeNull();
   });
   it("ต้องตัดสินครบทุกแถวก่อนใส่ลงใบ", () => {
     const ls = [L({ match_key: "k", decision: "confirmed" }), L({ is_fee: true, decision: "expense" }), L({ decision: "skip" }), L({ match_key: "k" })];

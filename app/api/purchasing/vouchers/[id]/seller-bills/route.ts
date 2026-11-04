@@ -2,8 +2,8 @@
  * บิลจากร้าน (ภาษาจีน) ของใบสำคัญรับ — AI อ่าน + จับคู่กับบรรทัดใบสั่งซื้อของร้านเดียวกันเท่านั้น
  *   GET    /api/purchasing/vouchers/<id>/seller-bills       → บิลที่อ่านไว้ + บรรทัด PO ที่เลือกจับคู่ได้ (groups) + ไฟล์บิลที่แนบตอนรับของ
  *   POST   { r2_key, gr_id? }                                → AI อ่านบิล + จับคู่อัตโนมัติ → บันทึก (ยังไม่ใส่ลงใบ)
- *   PATCH  { bill_id, lines, bill_no?, bill_date?, rematch?, apply?, remember? }
- *            rematch = จับคู่ใหม่ (เฉพาะแถวที่ยังไม่ได้ตัดสิน) · apply = ใส่แถวที่ยืนยันลงใบสำคัญ (+ จำคู่ถ้า remember)
+ *   PATCH  { bill_id, lines, bill_no?, bill_date?, rematch?, apply?, remember?, fill_cn? }
+ *            rematch = จับคู่ใหม่ (เฉพาะแถวที่ยังไม่ได้ตัดสิน) · apply = ใส่แถวที่ยืนยันลงใบสำคัญ (+ จำคู่ถ้า remember · เติมชื่อจีนให้สินค้าที่ยังไม่มีถ้า fill_cn)
  *   DELETE ?bill_id=                                         → ถอดบิล (รายการที่ใส่ลงใบแล้วยังอยู่)
  * logic อยู่ lib/seller-bill.ts + lib/seller-bill-match.ts
  */
@@ -95,7 +95,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const actor = await actorOf(request);
   const { id } = await params;
-  let body: { bill_id?: string; lines?: unknown; bill_no?: string | null; bill_date?: string | null; rematch?: boolean; apply?: boolean; remember?: boolean };
+  let body: { bill_id?: string; lines?: unknown; bill_no?: string | null; bill_date?: string | null; rematch?: boolean; apply?: boolean; remember?: boolean; fill_cn?: boolean };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const billId = str(body.bill_id);
   if (!billId) return NextResponse.json({ error: "ไม่ระบุบิล" }, { status: 400 });
@@ -127,7 +127,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       const left = undecidedCount(lines);
       if (left > 0) return NextResponse.json({ error: `ยังเหลือ ${left} แถวที่ยังไม่ได้เช็ก — กดใช่ / เลือกจับคู่เอง / ข้าม ให้ครบก่อน` }, { status: 400 });
       const previousIds = prev.flatMap((l) => l.voucher_line_ids);
-      result = await applySellerBill(admin, v, lines, { remember: body.remember !== false, actorName: actor.name, previousIds });
+      result = await applySellerBill(admin, v, lines, { remember: body.remember !== false, actorName: actor.name, previousIds, fillCnName: body.fill_cn !== false, actorId: actor.id, billId });
       lines = result.lines;
       patch.status = "applied"; patch.applied_at = new Date().toISOString();
     }
@@ -135,8 +135,8 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
     const { data: upd, error } = await admin.from("purchase_delivery_bills").update(patch).eq("id", billId).select("*").single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (result) await writeAudit(admin, { action: "update", entityType: "purchase_vouchers_v2", entityId: id, actorId: actor.id, actorName: actor.email,
-      metadata: { seller_bill_applied: billId, inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered } });
-    return NextResponse.json({ ok: true, data: toBill(upd as Row), applied: result ? { inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered } : null, error: null });
+      metadata: { seller_bill_applied: billId, inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered, filled_cn: result.filledCn } });
+    return NextResponse.json({ ok: true, data: toBill(upd as Row), applied: result ? { inserted: result.inserted, updated: result.updated, expenses: result.expenses, remembered: result.remembered, filled_cn: result.filledCn } : null, error: null });
   } catch (e) {
     return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 400 });
   }

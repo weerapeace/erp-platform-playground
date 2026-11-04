@@ -47,6 +47,7 @@ export type PoGroup = {
   item_sku_id: string | null;
   code: string;
   item_name: string;              // ชื่อไม่มี [รหัส]
+  name_cn: string | null;         // ชื่อจีนบนสินค้า (skus_v2.name_cn) — เติมจากบิลที่ยืนยันแล้ว
   uom: string | null;
   unit_price: number | null;      // ราคา/หน่วยใน PO (สกุลของ PO)
   qty_total: number;
@@ -150,6 +151,13 @@ export function scoreCandidate(line: SellerBillLine, g: PoGroup, ctx: { aliases:
   if (line.ai_pick && line.ai_pick === g.key) { score += 3 * conf; reasons.push("AI ว่าใช่"); }
   else if (ctx.aiGroup && ctx.aiGroup.key !== g.key && sameItem(ctx.aiGroup, g)) { score += 2.6 * conf; reasons.push("AI ว่าใช่"); }   // ของเดียวกันคนละ PO
 
+  // ชื่อจีนบนสินค้า (เติมจากบิลที่เคยยืนยัน — ร้านอื่นก็ได้) เทียบกับชื่อจีนในบิลตรง ๆ
+  const cn = `${s(line.name_cn)} ${s(line.spec_cn)}`.trim();
+  if (cn && g.name_cn) {
+    const cnSim = nameSimilarity(cn, g.name_cn);
+    if (cnSim >= 0.5) { score += 2.5 * cnSim; reasons.push("ชื่อจีนตรง"); }
+  }
+
   const th = `${s(line.name_th)} ${s(line.spec_th)}`.trim();
   const sim = th ? nameSimilarity(th, g.item_name) : 0;
   if (sim >= 0.35) { score += 1.5 * sim; if (sim >= 0.6 && !reasons.includes("AI ว่าใช่")) reasons.push("ชื่อคล้าย"); }
@@ -201,7 +209,7 @@ export function applyGroupToLine(line: SellerBillLine, g: PoGroup | null, groups
   const sc = scoreCandidate(line, g, { aliases, aiGroup });
   const others = groups.filter((x) => x.key !== g.key && sameItem(x, g) && x.remaining > 0).length;
   const notes = others > 0 ? [`มีใน ${others + 1} PO`] : [];
-  const okish = sc.reasons.includes("ราคาตรง") || sc.alias;
+  const okish = sc.reasons.includes("ราคาตรง") || sc.alias || sc.reasons.includes("ชื่อจีนตรง");
   const level: MatchLevel = manual ? "mid" : sc.score >= MATCH_OK_SCORE && okish && !sc.warns.some((w) => /ขนาด|สี/.test(w)) ? "ok" : "mid";
   // % ต้องสอดคล้องกับป้าย: มั่นใจ ≥ 80% · ให้เช็ก ≤ 79%
   const conf = confidenceOf(sc.score);
@@ -269,6 +277,12 @@ export function checkBillMath(lines: SellerBillLine[], total: number | null): { 
   });
   sum = Math.round(sum * 100) / 100;
   return { rowsBad, sum, totalOk: total == null || !(total > 0) ? null : Math.abs(sum - total) <= Math.max(0.5, total * 0.005) };
+}
+
+/** ชื่อจีนที่จะเติมให้สินค้า = ชื่อ + สเปกตามบิล (เช่น "狗扣 9mm 银色") · ว่าง = ไม่เติม */
+export function cnNameForSku(line: Pick<SellerBillLine, "name_cn" | "spec_cn">): string | null {
+  const v = `${s(line.name_cn)} ${s(line.spec_cn)}`.replace(/\s+/g, " ").trim();
+  return v && /[一-鿿]/.test(v) ? v.slice(0, 200) : null;
 }
 
 /** แถวที่ยังไม่ได้ตัดสิน (ต้องเป็น 0 ก่อนใส่ลงใบ) */

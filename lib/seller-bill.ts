@@ -12,8 +12,9 @@ import { isCNY } from "@/lib/landed-cost";
 import { resolveSkuCover, coverUrl } from "@/lib/sku-cover";
 import { recomputeVoucher, loadSkus, parentBasis } from "@/lib/purchase-voucher-server";
 import { normDate } from "@/lib/delivery-bill";
+import { loadSkuCnNames, fillSkuCnNames } from "@/lib/sku-cn-name";
 import {
-  groupKey, stripCode, matchBillLines, normalizeBillLine, distributeQty, aliasKey,
+  groupKey, stripCode, matchBillLines, normalizeBillLine, distributeQty, aliasKey, cnNameForSku,
   type PoGroup, type PoGroupLine, type SellerBillLine, type AliasRow,
 } from "@/lib/seller-bill-match";
 
@@ -92,7 +93,9 @@ export async function loadShopGroups(admin: Admin, v: VoucherLite): Promise<PoGr
   }
   for (const r of vlRows) if (!cancelled.has(String(r.voucher_id))) billed.set(String(r.po_line_id), (billed.get(String(r.po_line_id)) ?? 0) + num(r.qty));
 
-  const skuMap = await loadSkus(admin, [...new Set(poLines.map((l) => str(l.item_sku_id)).filter(Boolean))]);
+  const skuIds = [...new Set(poLines.map((l) => str(l.item_sku_id)).filter(Boolean))];
+  const skuMap = await loadSkus(admin, skuIds);
+  const cnName = await loadSkuCnNames(admin, skuIds);
   const groups = new Map<string, PoGroup>();
   for (const l of poLines) {
     const po = poMap.get(String(l.po_id)); if (!po) continue;
@@ -109,7 +112,7 @@ export async function loadShopGroups(admin: Admin, v: VoucherLite): Promise<PoGr
     } else {
       groups.set(key, {
         key, po_id: String(l.po_id), po_no: str(po.po_no), order_date: (po.order_date as string) ?? null,
-        item_sku_id: skuId, code: sku ? str(sku.code) : (/^\s*\[([^\]]+)\]/.exec(str(l.item_name))?.[1] ?? ""), item_name: stripCode(str(l.item_name)), uom: (l.uom as string) ?? null,
+        item_sku_id: skuId, code: sku ? str(sku.code) : (/^\s*\[([^\]]+)\]/.exec(str(l.item_name))?.[1] ?? ""), item_name: stripCode(str(l.item_name)), name_cn: skuId ? cnName.get(skuId) ?? null : null, uom: (l.uom as string) ?? null,
         unit_price: num(l.price_est) > 0 ? num(l.price_est) : null, qty_total: gl.qty, remaining, lines: [gl], in_voucher: !!my,
         image_url: sku ? coverUrl(resolveSkuCover(sku).key) : null,
       });
@@ -118,6 +121,7 @@ export async function loadShopGroups(admin: Admin, v: VoucherLite): Promise<PoGr
   return [...groups.values()].map((g) => ({ ...g, qty_total: Math.round(g.qty_total * 10000) / 10000, remaining: Math.round(g.remaining * 10000) / 10000 }))
     .sort((a, b) => Number(b.in_voucher) - Number(a.in_voucher) || Number(b.remaining > 0) - Number(a.remaining > 0) || str(b.order_date).localeCompare(str(a.order_date)) || a.po_no.localeCompare(b.po_no));
 }
+
 
 export async function loadAliases(admin: Admin, partnerId: string | null): Promise<AliasRow[]> {
   if (!partnerId) return [];
@@ -175,9 +179,9 @@ export async function parseSellerBill(admin: Admin, ref: string, groups: PoGroup
   const idOf = new Map<string, string>();
   const lines = list.map((g, i) => {
     const pid = `P${i + 1}`; idOf.set(pid, g.key);
-    return `${pid} | ${g.code || "-"} | ${g.item_name} | ${g.unit_price != null ? `¥${g.unit_price}` : "ไม่มีราคา"} | ค้าง ${g.remaining} ${g.uom ?? ""}`.trim();
+    return `${pid} | ${g.code || "-"} | ${g.item_name}${g.name_cn ? ` (จีน: ${g.name_cn})` : ""} | ${g.unit_price != null ? `¥${g.unit_price}` : "ไม่มีราคา"} | ค้าง ${g.remaining} ${g.uom ?? ""}`.trim();
   });
-  const text = `รายการในใบสั่งซื้อของเรากับร้านนี้ (${list.length} รายการ · รหัส | ชื่อไทย | ราคาต่อหน่วยใน PO | จำนวนที่ค้าง):\n${lines.join("\n") || "(ไม่มี)"}\n\nอ่านบิลในไฟล์ แล้วตอบ JSON ตามโครงที่กำหนด`;
+  const text = `รายการในใบสั่งซื้อของเรากับร้านนี้ (${list.length} รายการ · รหัส | ชื่อไทย (ชื่อจีนที่เคยใช้ ถ้ามี) | ราคาต่อหน่วยใน PO | จำนวนที่ค้าง):\n${lines.join("\n") || "(ไม่มี)"}\n\nอ่านบิลในไฟล์ แล้วตอบ JSON ตามโครงที่กำหนด`;
   const raw = await chatJson(SYSTEM, [{ type: "text", text }, filePart], 4000, SELLER_BILL_MODEL);
 
   const rawLines = Array.isArray(raw.lines) ? (raw.lines as Row[]) : [];
@@ -203,7 +207,7 @@ export async function rematchLines(admin: Admin, v: VoucherLite, lines: SellerBi
   return { lines: matchBillLines(lines, groups, aliases), groups };
 }
 
-export type ApplyResult = { inserted: number; updated: number; expenses: number; remembered: number; lines: SellerBillLine[] };
+export type ApplyResult = { inserted: number; updated: number; expenses: number; remembered: number; filledCn: number; lines: SellerBillLine[] };
 
 /**
  * ใส่แถวที่ยืนยันแล้วลงใบสำคัญ — ตรวจทุกแถวก่อนเขียน (กันเขียนครึ่ง ๆ กลาง ๆ)
@@ -212,7 +216,7 @@ export type ApplyResult = { inserted: number; updated: number; expenses: number;
  *   • กดใส่ซ้ำ = รายการที่บิลนี้เคยเพิ่มไว้ถูกแทนด้วยชุดใหม่
  *   • ค่าใช้จ่าย (ค่าส่งในจีน ฯลฯ) ที่เลือก "เพิ่มเป็นค่าใช้จ่าย" → รายการเพิ่มเองไม่ผูก PO
  */
-export async function applySellerBill(admin: Admin, v: VoucherLite, billLines: SellerBillLine[], opts: { remember: boolean; actorName: string | null; previousIds: string[] }): Promise<ApplyResult> {
+export async function applySellerBill(admin: Admin, v: VoucherLite, billLines: SellerBillLine[], opts: { remember: boolean; actorName: string | null; previousIds: string[]; fillCnName?: boolean; actorId?: string | null; billId?: string | null }): Promise<ApplyResult> {
   // 1) ตรวจทุกแถวก่อนเขียน — ต้องจับกับบรรทัดใบสั่งซื้อของร้านนี้เท่านั้น
   const check = new Map((await loadShopGroups(admin, v)).map((g) => [g.key, g]));
   billLines.forEach((l, i) => {
@@ -310,6 +314,16 @@ export async function applySellerBill(admin: Admin, v: VoucherLite, billLines: S
       if (!error) remembered++;
     }
   }
+  // 5) เติมชื่อจีนให้สินค้าที่ยังไม่มี (ชื่อ + สเปกตามบิลร้าน) — ไม่ทับชื่อที่มีอยู่แล้ว
+  let filledCn = 0;
+  if (opts.fillCnName !== false) {
+    const items = billLines.flatMap((l) => {
+      if (l.decision !== "confirmed" || l.is_fee || !l.match_key) return [];
+      const g = gMap.get(l.match_key); const name = cnNameForSku(l);
+      return g?.item_sku_id && name ? [{ sku_id: g.item_sku_id, name_cn: name }] : [];
+    });
+    filledCn = await fillSkuCnNames(admin, items, { id: opts.actorId ?? null, name: opts.actorName }, "seller_bill", opts.billId ?? null);
+  }
   await recomputeVoucher(admin, v.id);
-  return { inserted, updated, expenses, remembered, lines: out };
+  return { inserted, updated, expenses, remembered, filledCn, lines: out };
 }

@@ -567,6 +567,7 @@ function MatchModal({ row, rate, onClose, onDone }: { row: Card; rate: number; o
       const extra = [
         j2.synced?.cover ? "ใส่รูปให้สินค้าแล้ว" : "",
         j2.synced?.link ? "ใส่ลิงก์ซื้อแล้ว" : "",
+        j2.synced?.name_cn ? "ใส่ชื่อจีนแล้ว" : "",
       ].filter(Boolean).join(" · ");
       const base = supplier ? `จับคู่กับ ${sku.code} + บันทึกราคาร้านแล้ว` : `จับคู่กับ ${sku.code} แล้ว`;
       toast.success(extra ? `${base} (${extra})` : base);

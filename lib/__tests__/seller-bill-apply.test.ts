@@ -42,9 +42,10 @@ beforeEach(() => {
     ],
     skus_v2: [
       { id: "s1", code: "A069-2/9MM#N", parent_skus_v2: { weight_g: 5 } },
-      { id: "s2", code: "A006-6/20MM#N", parent_skus_v2: null },
+      { id: "s2", code: "A006-6/20MM#N", name_cn: "方底狗扣 镍", parent_skus_v2: null },
     ],
     supplier_item_aliases: [],
+    audit_logs: [],
   };
 });
 
@@ -81,6 +82,11 @@ describe("บิลร้านจีน — ใส่ลงใบสำคั�
     expect(mine().find((l) => !l.po_line_id)?.unit_price).toBe(25);
     expect(mine().find((l) => l.po_line_id === "l1b")?.kg_per_unit).toBe(0.005);
     expect(tables.supplier_item_aliases[0]).toMatchObject({ supplier_partner_id: P1, alias_key: aliasKey("狗扣", "9mm 银色"), item_sku_id: "s1", times_used: 1 });
+    // เติมชื่อจีนให้สินค้าที่ยังไม่มี + ลงประวัติ
+    expect(r.filledCn).toBe(1);
+    expect(tables.skus_v2.find((s) => s.id === "s1")?.name_cn).toBe("狗扣 9mm 银色");
+    // (id ทดสอบไม่ใช่ uuid → entity_id เก็บ null ตามกติกา writeAudit · ดูจาก metadata แทน)
+    expect(tables.audit_logs.some((a) => a.entity_type === "skus_v2" && (a.metadata as Row)?.field === "name_cn" && (a.metadata as Row)?.new_value === "狗扣 9mm 银色")).toBe(true);
 
     // กดใส่ซ้ำ (แก้จำนวนเป็น 30) → รายการเดิมของบิลนี้ถูกแทน ไม่บวกซ้ำ
     const again = r.lines.map((l, i) => (i === 0 ? { ...l, qty: 30 } : l));
@@ -101,6 +107,17 @@ describe("บิลร้านจีน — ใส่ลงใบสำคั�
     expect(r.inserted).toBe(0);
     expect(r.updated).toBe(1);
     expect(tables.purchase_voucher_lines_v2.find((l) => l.id === "gr1")).toMatchObject({ qty: 270, unit_price: 2.6, price_source: "bill" });
+    // ชื่อจีนเดิมของสินค้าไม่ถูกทับ
+    expect(r.filledCn).toBe(0);
+    expect(tables.skus_v2.find((s) => s.id === "s2")?.name_cn).toBe("方底狗扣 镍");
+  });
+
+  it("ปิดตัวเลือก เติมชื่อจีน = ไม่แตะสินค้า", async () => {
+    const v = (await loadVoucherLite(db(), "V"))!;
+    const g1 = (await loadShopGroups(db(), v)).find((g) => g.po_no === "PO-2026-00284")!;
+    const r = await applySellerBill(db(), v, [L({ name_cn: "狗扣", spec_cn: "9mm", qty: 10, unit_price: 4.5, match_key: g1.key, decision: "confirmed" })], { remember: false, actorName: null, previousIds: [], fillCnName: false });
+    expect(r.filledCn).toBe(0);
+    expect(tables.skus_v2.find((s) => s.id === "s1")?.name_cn).toBeUndefined();
   });
 
   it("จับกับของนอก PO ร้านนี้ = ไม่ยอม (ไม่เขียนอะไรเลย)", async () => {

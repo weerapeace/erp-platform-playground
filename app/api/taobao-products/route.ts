@@ -17,6 +17,7 @@ import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
+import { fillSkuCnNames, taobaoCnName } from "@/lib/sku-cn-name";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -252,12 +253,15 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   // จับคู่แล้ว → ยกรูป/ลิงก์ไปให้ SKU (อัตโนมัติ) · use_image_for_sku = ผู้ใช้สั่งใช้รูปนี้เป็นปกเอง
   const force  = b.use_image_for_sku === true;
-  const synced = { cover: 0, link: 0 };
+  const synced = { cover: 0, link: 0, name_cn: 0 };
   if (force || patch.status === "matched" || "matched_sku_id" in b) {
     for (const r of ((data ?? []) as unknown as Record<string, unknown>[])) {
       const res = await syncCardToSku(admin, r, force);
       if (res.cover) synced.cover++;
       if (res.link) synced.link++;
+      // ชื่อจีนจากการ์ด → สินค้าที่ยังไม่มีชื่อจีน (ของกลาง lib/sku-cn-name · ไม่ทับของเดิม)
+      if (r.matched_sku_id) synced.name_cn += await fillSkuCnNames(admin, [{ sku_id: String(r.matched_sku_id), name_cn: taobaoCnName(r) }],
+        { id: user?.id ?? null, name: (user?.user_metadata?.name as string) || user?.email || null }, "taobao_products", String(r.id ?? ""));
     }
   }
 
