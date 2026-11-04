@@ -2,14 +2,16 @@
  * 🟢 ส่งรายงานเข้ากลุ่ม LINE (ช่องทางที่ 4 ของรายงานอัตโนมัติ · ฝั่งเซิร์ฟเวอร์)
  *
  * ใช้บอทตัวเดียวกับระบบแจ้งเตือน LINE อื่น ๆ (china_app_settings.line_config.token) → เลือกกลุ่มที่บอทอยู่
- * ⚠️ LINE ฟรีนับโควตา "ต่อข้อความ" (300/เดือน ใช้ร่วมทั้ง ERP) → 1 รายงาน = 1 ข้อความเสมอ:
- *    Flex กล่องเดียว (หัว + ตัวเลขสรุป + N อันดับ + ปุ่ม "ดูทั้งหมดใน ERP") · ส่ง Flex ไม่ผ่าน → ข้อความล้วนแทน (ยัง 1 ข้อความ)
+ * ⚠️ LINE นับโควตา "ต่อคนที่ได้รับ" (ส่งเข้ากลุ่ม 8 คน = 8 · ฟรี 300/เดือน ใช้ร่วมทั้ง ERP) → 1 รายงาน = 1 ข้อความเสมอ
+ *    แบบ cards (ค่าเริ่ม · แหล่งที่มี spotlight): การ์ดสรุป + การ์ดสินค้ารูปใหญ่ปัดดู (carousel = ยัง 1 ข้อความ)
+ *    แบบ list: Flex กล่องเดียว (หัว + ตัวเลขสรุป + N อันดับ + ปุ่ม "ดูทั้งหมดใน ERP")
+ *    ส่ง Flex ไม่ผ่าน → ข้อความล้วนแทน (ยัง 1 ข้อความ) · รูปต้อง JPEG/PNG https → sizedImage (sq=1 = JPEG)
  * ส่งทดสอบ = ส่งเข้ากลุ่มเดียวกัน (มีคำว่า "ทดสอบ" นำหน้า) เพราะ LINE ไม่มีห้องส่วนตัวให้บอททักทุกคน
  * composeLineReport เป็น pure — หน้าตั้งค่าใช้ทำตัวอย่าง (preview?format=line) · ทดสอบที่ lib/__tests__/email-report-platform-sales.test.ts
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeReportLine, type EmailReport, type EmailReportLine, type EmailReportRun } from "@/lib/email-report/shared";
-import { statText, type BuiltReport } from "@/lib/email-report/render";
+import { sizedImage, statText, type BuiltReport } from "@/lib/email-report/render";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Json = Record<string, unknown>;
@@ -17,12 +19,14 @@ export type LineResult = { ok: boolean; target: string; fallback: boolean; error
 
 /** แถวในกล่อง LINE: ซ้าย = รหัส/ชื่อ/สี · ขวา = จำนวน/ยอด (จากตาราง) หรือป้ายเตือน (จากรายการงาน) */
 export type LineRow = { left: string; right: string };
-export type LineComposed = { altText: string; header: string; sub: string[]; rows: LineRow[]; more: number; link: string | null; linkLabel: string; text: string; flex: Json };
+/** การ์ดสินค้า (แบบ cards) — image = ลิงก์ JPEG ที่ LINE โหลด */
+export type LineCard = { rank: number; title: string; sub: string; value: string; image: string | null };
+export type LineComposed = { altText: string; header: string; sub: string[]; rows: LineRow[]; more: number; link: string | null; linkLabel: string; text: string; flex: Json; style: "cards" | "list"; cards: LineCard[] };
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** ประกอบข้อความ LINE จากรายงานที่ประกอบแล้ว (ชุดเดียวกับอีเมล) */
-export function composeLineReport(built: BuiltReport, cfg: Pick<EmailReportLine, "max_rows">, opts: { subject: string; test?: boolean }): LineComposed {
+export function composeLineReport(built: BuiltReport, cfg: Pick<EmailReportLine, "max_rows"> & { style?: EmailReportLine["style"] }, opts: { subject: string; test?: boolean }): LineComposed {
   const header = `${opts.test ? "🧪 ทดสอบ · " : ""}${built.heading}`;
   const sub: string[] = [];
   if (built.stats.length) sub.push(built.stats.map((s) => `${s.label} ${statText(s)}${s.hint ? ` (${s.hint})` : ""}`).join(" · "));
@@ -71,12 +75,51 @@ export function composeLineReport(built: BuiltReport, cfg: Pick<EmailReportLine,
     contents: [txt(clip(`${i + 1}. ${r.left}`, 80), { flex: 5 }), ...(r.right ? [txt(clip(r.right, 40), { flex: 3, align: "end", color: "#334155" })] : [])],
   }));
   if (more) body.push(txt(`…และอีก ${more.toLocaleString("th-TH")} ${built.unit ?? "งาน"}`, { size: "xs", color: "#94a3b8", margin: "md" }));
+  const footer = link ? { footer: { type: "box", layout: "vertical", contents: [{ type: "button", style: "link", height: "sm", action: { type: "uri", label: linkLabel, uri: link } }] } } : {};
+  const altText = clip(opts.subject || built.subjectCore, 380);
+
+  // 🖼 แบบการ์ด: การ์ดสรุป + การ์ดสินค้ารูปใหญ่ (สูงสุด 9 · LINE ให้ 12 การ์ด/ข้อความ) — ยังนับ 1 ข้อความ
+  const spot = built.spotlight ?? [];
+  if ((cfg.style ?? "cards") === "cards" && spot.length && built.total > 0) {
+    const cards: LineCard[] = spot.slice(0, Math.min(9, Math.max(1, cfg.max_rows))).map((it) => ({
+      rank: it.rank, title: it.title, sub: it.sub, value: it.value, image: sizedImage(it.imageUrl, 600),
+    }));
+    const restN = Math.max(0, built.total - cards.length);
+    const summary: Json = {
+      type: "bubble", size: "kilo",
+      body: { type: "box", layout: "vertical", spacing: "sm", contents: [
+        txt(clip(header, 120), { weight: "bold", size: "md" }),
+        ...built.stats.map((s) => ({ type: "box", layout: "baseline", spacing: "sm", contents: [
+          txt(s.label, { size: "xs", color: "#64748b", flex: 3 }),
+          txt(`${statText(s)}${s.hint ? ` · ${s.hint}` : ""}`, { size: "xs", flex: 5, weight: s.tone === "good" ? "bold" : "regular", color: s.tone === "good" ? "#059669" : "#0f172a" }),
+        ] })),
+        { type: "separator", margin: "md" },
+        txt(`ปัดซ้ายดูขายดี ${cards.length} อันดับ →`, { size: "xs", color: "#64748b", margin: "md" }),
+        ...(restN ? [txt(`ทั้งหมด ${built.total.toLocaleString("th-TH")} ${built.unit ?? "งาน"} ดูใน ERP`, { size: "xs", color: "#94a3b8" })] : []),
+      ] },
+      ...footer,
+    };
+    const productBubble = (c: LineCard): Json => ({
+      type: "bubble", size: "kilo",
+      hero: c.image
+        ? { type: "image", url: c.image, size: "full", aspectRatio: "1:1", aspectMode: "cover" }
+        : { type: "box", layout: "vertical", height: "160px", backgroundColor: "#f1f5f9", justifyContent: "center", contents: [txt("ไม่มีรูป", { size: "xs", color: "#94a3b8", align: "center" })] },
+      body: { type: "box", layout: "vertical", spacing: "xs", contents: [
+        txt(clip(`#${c.rank} ${c.title}`, 60), { weight: "bold" }),
+        ...(c.sub ? [txt(clip(c.sub, 80), { size: "xs", color: "#64748b", maxLines: 2 })] : []),
+        txt(c.value, { size: "sm", weight: "bold", color: "#059669", margin: "sm" }),
+      ] },
+    });
+    const flex: Json = { type: "carousel", contents: [summary, ...cards.map(productBubble)] };
+    return { altText, header, sub, rows, more, link, linkLabel, text, flex, style: "cards", cards };
+  }
+
   const flex: Json = {
     type: "bubble", size: "giga",
     body: { type: "box", layout: "vertical", contents: body },
-    ...(link ? { footer: { type: "box", layout: "vertical", contents: [{ type: "button", style: "link", height: "sm", action: { type: "uri", label: linkLabel, uri: link } }] } } : {}),
+    ...footer,
   };
-  return { altText: clip(opts.subject || built.subjectCore, 380), header, sub, rows, more, link, linkLabel, text, flex };
+  return { altText, header, sub, rows, more, link, linkLabel, text, flex, style: "list", cards: [] };
 }
 
 async function linePush(token: string, to: string, message: Json): Promise<{ ok: boolean; status: number; body: string }> {

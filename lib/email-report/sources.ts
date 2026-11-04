@@ -285,6 +285,7 @@ export async function buildReportEmail(admin: Admin, report: Pick<EmailReportInp
     subjectTemplate: options.subject_template,
     intro: options.intro,
     now,
+    topPhotos: options.top_photos,
   });
   return { built, email };
 }

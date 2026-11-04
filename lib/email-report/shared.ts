@@ -44,7 +44,12 @@ export type EmailReportOptions = {
   intro?: string;
   /** 🧮 แบบตาราง: แถวรวมท้ายตาราง */
   show_total?: boolean;
+  /** 🖼 อีเมล: แถบ "ขายดี" รูปใหญ่เหนือตาราง กี่อันดับ (0 = ไม่มี) — ใช้กับแหล่งที่มี spotlight */
+  top_photos?: number;
+  /** 📎 อีเมล: แนบไฟล์ Excel รายการทั้งหมด — ใช้กับแหล่งที่มี export */
+  attach_excel?: boolean;
 };
+export const TOP_PHOTO_CHOICES = [0, 3];
 /** ตัวเลือกที่เติมค่าเริ่มต้นครบแล้ว (ใช้ตอนประกอบอีเมล) */
 export type ResolvedReportOptions = Required<EmailReportOptions>;
 
@@ -77,7 +82,7 @@ export type ReportChannelKey = "email" | "line" | "discord" | "popup";
 export type ReportChannels = Record<ReportChannelKey, boolean>;
 export const REPORT_CHANNELS: { key: ReportChannelKey; icon: string; label: string; hint: string }[] = [
   { key: "email", icon: "✉️", label: "Gmail", hint: "ผู้รับ · หัวเรื่อง · ข้อความเกริ่น" },
-  { key: "line", icon: "🟢", label: "LINE", hint: "กลุ่ม · โชว์กี่อันดับ (1 ข้อความ/ครั้ง)" },
+  { key: "line", icon: "🟢", label: "LINE", hint: "กลุ่ม · หน้าตา · นับโควตาตามจำนวนคนในกลุ่ม" },
   { key: "discord", icon: "💬", label: "Discord", hint: "ห้อง · แท็ก · การ์ดติ๊ก" },
   { key: "popup", icon: "🔔", label: "ERP ป๊อป", hint: "ใครเห็น · ช่วงเวลา · รับทราบ" },
 ];
@@ -98,10 +103,14 @@ export type EmailReportLine = {
   /** id กลุ่ม LINE (ขึ้นต้น C) */
   group_id: string | null;
   group_name: string | null;
-  /** โชว์ในกล่องกี่อันดับ/งาน (ที่เหลือ = ปุ่ม "ดูทั้งหมดใน ERP") */
+  /** โชว์ในกล่องกี่อันดับ/งาน (ที่เหลือ = ปุ่ม "ดูทั้งหมดใน ERP") · แบบการ์ด = จำนวนการ์ดสินค้า */
   max_rows: number;
+  /** cards = การ์ดสรุป + การ์ดสินค้ารูปใหญ่ปัดดู (แหล่งที่มี spotlight) · list = กล่องเดียวรายการสั้น */
+  style: "cards" | "list";
 };
 export const LINE_MAX_ROW_CHOICES = [3, 5, 8, 10];
+/** แบบการ์ด: การ์ดสินค้าสูงสุด (LINE ให้ 12 การ์ดต่อข้อความ — เผื่อการ์ดสรุป 1) */
+export const LINE_CARD_CHOICES = [3, 5, 9];
 const LINE_GROUP_ID = /^C[0-9a-f]{32}$/;
 export function normalizeReportLine(raw: unknown): EmailReportLine {
   const o = (raw ?? {}) as Record<string, unknown>;
@@ -111,6 +120,7 @@ export function normalizeReportLine(raw: unknown): EmailReportLine {
     enabled: o.enabled === true && !!group_id,
     group_id, group_name: group_id && typeof o.group_name === "string" && o.group_name.trim() ? o.group_name.trim().slice(0, 100) : null,
     max_rows: Number.isFinite(n) && n >= 1 ? Math.min(10, n) : 5,
+    style: o.style === "list" ? "list" : "cards",
   };
 }
 
@@ -128,6 +138,10 @@ export type EmailReportDiscord = {
   image_rows: number;
   /** การ์ด "ต้องติ๊ก" สูงสุดกี่ใบ (0 = ไม่ส่งการ์ด) */
   max_cards: number;
+  /** รูปที่ส่ง (แหล่งที่มี spotlight): grid = กริดรูปสินค้าขายดี 3×3 · table = รูปตาราง */
+  look: "grid" | "table";
+  /** 📎 แนบไฟล์ Excel รายการทั้งหมด (แหล่งที่มี export) */
+  attach_excel: boolean;
 };
 export const DISCORD_MENTION_LABEL: Record<EmailReportDiscord["mention"], string> = { overdue: "เมื่อมีงานเกินกำหนด", always: "ทุกครั้ง", never: "ไม่แท็ก" };
 const SNOWFLAKE = /^\d{15,25}$/;
@@ -206,6 +220,8 @@ export function normalizeReportDiscord(raw: unknown): EmailReportDiscord {
     mention: o.mention === "always" || o.mention === "never" ? o.mention : "overdue",
     image_rows: clamp(o.image_rows, 5, 25, 10),
     max_cards: clamp(o.max_cards, 0, 15, 10),
+    look: o.look === "table" ? "table" : "grid",
+    attach_excel: o.attach_excel !== false,
   };
 }
 
@@ -357,7 +373,8 @@ export function normalizeReportOptions(sourceKey: string, raw: unknown): Resolve
   const known = (v: unknown, list: ReportChoice[]) => [...new Set((v as unknown[]).filter((k): k is string => typeof k === "string" && list.some((c) => c.key === k)))];
   const statsPicked = Array.isArray(o.stats) ? known(o.stats, src.stats) : src.defaultStats;
   return {
-    max_rows: clamp(o.max_rows, 5, 100, 50),
+    // แบบตาราง ส่งครบทุกรายการได้ (ถึง 500) · แบบรายการงาน ≤100
+    max_rows: clamp(o.max_rows, 5, src.layout === "table" ? 500 : 100, src.layout === "table" ? 500 : 50),
     stale_days: clamp(o.stale_days, 1, 60, 7),
     due_soon_days: clamp(o.due_soon_days, 0, 30, 3),
     group_by: one(o.group_by, src.groupBy),
@@ -369,6 +386,8 @@ export function normalizeReportOptions(sourceKey: string, raw: unknown): Resolve
     subject_template: String(o.subject_template ?? "").replace(/[\u0000-\u001F\u007F]+/g, " ").replace(/\s+/g, " ").trim().slice(0, SUBJECT_MAX),
     intro: String(o.intro ?? "").replace(/\r\n?/g, "\n").replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, "").replace(/\n{3,}/g, "\n\n").trim().slice(0, INTRO_MAX),
     show_total: o.show_total !== false,
+    top_photos: src.layout === "table" ? (TOP_PHOTO_CHOICES.includes(Number(o.top_photos)) ? Number(o.top_photos) : 3) : 0,
+    attach_excel: src.layout === "table" ? o.attach_excel !== false : false,
   };
 }
 

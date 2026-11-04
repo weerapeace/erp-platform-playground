@@ -9,7 +9,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { absoluteUrl } from "@/lib/app-url";
 import { dayBoundsTh, loadPlatformSales, thaiDate, type PlatformSales, type SalesLine } from "@/lib/platform-sales/server";
 import { sourceDef, type EmailReportFilters, type ResolvedReportOptions } from "@/lib/email-report/shared";
-import type { BuiltReport, ReportStat, ReportTable, ReportTableColumn } from "@/lib/email-report/render";
+import type { BuiltReport, ReportExport, ReportSpotlight, ReportStat, ReportTable, ReportTableColumn } from "@/lib/email-report/render";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 export const PLATFORM_SALES_SOURCE = "platform_sales_daily";
@@ -77,6 +77,29 @@ export function shapeDailySales(input: { date: string; day: "yesterday" | "today
   };
   const stats = opts.stats.map((k) => STAT[k]).filter(Boolean);
 
+  // 🖼 ขายดี (ตามที่ตั้งเรียง · ข้ามร้าน) ≤9 ชิ้น — อีเมลแถบรูป · LINE การ์ดปัดดู · Discord กริดรูป
+  const spotlight: ReportSpotlight[] = lines.slice(0, 9).map((l, i) => ({
+    rank: i + 1,
+    title: l.code ?? clip(l.title, 28),
+    sub: [l.match === "none" ? "ยังไม่จับคู่ SKU" : l.match === "model" ? "ไม่แยกสี" : l.color, l.code ? clip(l.title, 40) : null].filter(Boolean).join(" · "),
+    value: `${num(l.qty)} ชิ้น${l.amt > 0 ? ` · ${baht(l.amt)}` : ""}`,
+    imageUrl: l.image ? absoluteUrl(l.image) : null,
+    link: null,
+  }));
+  // 📎 Excel: ทุกรายการ (ไม่ตัดตาม max_rows) เรียงตามที่ตั้ง · ตัวเลขเป็น number
+  const exportData: ReportExport = {
+    filename: `ยอดขายแพลตฟอร์ม-${date}.xlsx`, sheet: date,
+    columns: [
+      { key: "shop", header: "ร้าน" }, { key: "code", header: "รหัส" }, { key: "name", header: "สินค้า" }, { key: "color", header: "สี" },
+      { key: "match", header: "จับคู่" }, { key: "qty", header: "จำนวน (ชิ้น)" }, { key: "amt", header: "ยอด (บาท)" },
+    ],
+    rows: lines.map((l) => ({
+      shop: l.shop, code: l.code, name: l.title, color: l.color,
+      match: l.match === "sku" ? "SKU" : l.match === "model" ? "รุ่น (ไม่แยกสี)" : "ยังไม่จับคู่",
+      qty: l.qty, amt: Math.round(l.amt * 100) / 100,
+    })),
+  };
+
   const dayWord = input.day === "today" ? "วันนี้" : "เมื่อวาน";
   const fill = (k: string) => sales.lines.filter((l) => (k === "img" ? !!l.image : k === "code" ? !!l.code : k === "color" ? !!l.color : true)).length;
   return {
@@ -88,6 +111,8 @@ export function shapeDailySales(input: { date: string; day: "yesterday" | "today
     showImages: fields.includes("img"),
     sections: [],
     table,
+    spotlight,
+    export: exportData,
     unit: "รายการ",
     viewAllLink: absoluteUrl(`/master/platform-sales?date=${date}`),
     viewAllLabel: "ดูรายงานเต็มใน ERP",

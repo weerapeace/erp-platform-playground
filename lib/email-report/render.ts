@@ -73,9 +73,25 @@ export type BuiltReport = {
     moduleKey: string;
     records: { id: string; title: string; description: string; imageUrl: string | null; link: string | null }[];
   };
+  /** 🖼 ขายดี/ไฮไลต์พร้อมรูป (เรียงตามลำดับรายงาน · ≤9) — อีเมลแถบรูปใหญ่ · LINE การ์ดปัดดู · Discord กริดรูป */
+  spotlight?: ReportSpotlight[];
+  /** 📎 รายการทั้งหมดสำหรับไฟล์ Excel แนบ (ไม่ตัดตาม max_rows) — lib/email-report/excel */
+  export?: ReportExport;
   /** 🔔 ป๊อปตอนเข้า ERP (lib/email-report/popup): ทุกงานในรายงาน เรียงตามความด่วน · path = ลิงก์ในระบบ (ไม่ใช่ลิงก์เต็ม) */
   popup?: { viewAllPath: string; items: PopupSourceItem[] };
 };
+/** ไฮไลต์ 1 ชิ้น: title = รหัส/ชื่อสั้น · sub = สี/รายละเอียด · value = "3 ชิ้น · ฿3,870" · imageUrl = ลิงก์เต็ม (ไม่ย่อ — ช่องทางย่อเองด้วย sizedImage) */
+export type ReportSpotlight = { rank: number; title: string; sub: string; value: string; imageUrl: string | null; link: string | null };
+/** ข้อมูลไฟล์ Excel: หัวคอลัมน์ + ทุกแถว (ตัวเลขเป็น number ให้ Excel คำนวณได้) */
+export type ReportExport = { filename: string; sheet: string; columns: { key: string; header: string }[]; rows: Record<string, string | number | null>[] };
+
+/** ลิงก์รูปจาก proxy รูปของระบบ (/api/r2-image?key=…) → ย่อเป็น JPEG สี่เหลี่ยม (sq=1 · LINE/Outlook ไม่รับ webp) · ลิงก์อื่นคืนเดิม */
+export function sizedImage(url: string | null | undefined, w: number): string | null {
+  if (!url) return null;
+  if (!url.includes("/api/r2-image?") || /[?&]w=/.test(url)) return url;
+  return `${url}&w=${Math.round(w)}&sq=1`;
+}
+
 /** urgent = เกินกำหนด/ใกล้กำหนด · waiting = ข้อเช็กลิสต์ที่ค้าง (มีชื่อผู้รับผิดชอบต่อท้าย) · brand/status/due/note = ข้อมูลที่เลือกโชว์ได้ในป๊อป */
 export type PopupSourceItem = {
   id: string; title: string; code: string | null; path: string; imageUrl: string | null;
@@ -135,7 +151,7 @@ function tableHtml(t: ReportTable): string {
     const link = safeUrl(row.link);
     return `<tr>${cols.map((c) => {
       if (c.key === "img") {
-        const img = safeUrl(row.imageUrl);
+        const img = safeUrl(sizedImage(row.imageUrl, 96));
         return `<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;width:44px;">${img
           ? `<img src="${esc(img)}" width="36" height="36" alt="" style="display:block;width:36px;height:36px;border-radius:4px;border:1px solid #e2e8f0;object-fit:cover;background:#f1f5f9;">`
           : `<div style="width:36px;height:36px;border-radius:4px;background:#f1f5f9;border:1px solid #e2e8f0;"></div>`}</td>`;
@@ -156,6 +172,29 @@ function tableHtml(t: ReportTable): string {
   }
   return `<tr><td colspan="3" style="padding:0 12px 4px 12px;">
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;"><tr>${head}</tr>${body}${total}</table>
+  </td></tr>`;
+}
+
+/** 🖼 แถบ "ขายดี" รูปใหญ่เหนือตาราง (อีเมล) — การ์ดละ 1 ชิ้น เรียง 3 ช่อง */
+function spotlightHtml(items: ReportSpotlight[], label: string): string {
+  if (!items.length) return "";
+  const w = Math.floor(100 / items.length);
+  const cards = items.map((it) => {
+    const img = safeUrl(sizedImage(it.imageUrl, 300));
+    const link = safeUrl(it.link);
+    const pic = img
+      ? `<img src="${esc(img)}" width="170" alt="" style="display:block;width:100%;max-width:170px;height:auto;border-radius:8px;border:1px solid #e2e8f0;background:#f8fafc;">`
+      : `<div style="width:100%;max-width:170px;height:120px;border-radius:8px;background:#f1f5f9;border:1px solid #e2e8f0;font-size:11px;color:#94a3b8;text-align:center;line-height:120px;">ไม่มีรูป</div>`;
+    return `<td width="${w}%" valign="top" align="center" style="padding:4px;">
+      ${link ? `<a href="${esc(link)}" style="text-decoration:none;">${pic}</a>` : pic}
+      <div style="font-size:13px;font-weight:bold;color:#0f172a;margin-top:6px;">#${it.rank} ${esc(it.title)}</div>
+      ${it.sub ? `<div style="font-size:12px;color:#64748b;">${esc(it.sub)}</div>` : ""}
+      <div style="font-size:13px;color:#059669;margin-top:2px;">${esc(it.value)}</div>
+    </td>`;
+  }).join("");
+  return `<tr><td colspan="3" style="padding:4px 12px 12px 12px;">
+    <div style="font-size:13px;font-weight:bold;color:#334155;padding:0 4px 6px 4px;">${esc(label)}</div>
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>${cards}</tr></table>
   </td></tr>`;
 }
 
@@ -180,6 +219,8 @@ export function renderReportEmail(r: BuiltReport, ctx: {
   /** ข้อความเกริ่นบนสุด */
   intro?: string;
   now?: Date;
+  /** แถบ "ขายดี" รูปใหญ่กี่อันดับ (0/ไม่ใส่ = ไม่มี · ต้องมี r.spotlight) */
+  topPhotos?: number;
 }): { subject: string; html: string; text: string } {
   const now = ctx.now ?? new Date();
   const defaultSubject = `${r.subjectCore} · ${thaiDateLabel(now, "short")}`;
@@ -244,7 +285,8 @@ export function renderReportEmail(r: BuiltReport, ctx: {
   const viewAll = safeUrl(r.viewAllLink);
   const manage = safeUrl(ctx.manageUrl);
   const moreNote = r.total > r.shown ? `แสดง ${r.shown.toLocaleString("th-TH")} จาก ${r.total.toLocaleString("th-TH")} ${unit} · ` : "";
-  const bodyHtml = r.table ? tableHtml(r.table) : sectionsHtml;
+  const top = (ctx.topPhotos ?? 0) > 0 ? (r.spotlight ?? []).slice(0, ctx.topPhotos) : [];
+  const bodyHtml = r.table ? `${spotlightHtml(top, "ขายดี")}${tableHtml(r.table)}` : sectionsHtml;
 
   const html = `<!doctype html>
 <html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(subject)}</title></head>

@@ -1,7 +1,8 @@
 /**
  * 📧 ส่งอีเมลรายงาน (ของกลาง · ฝั่งเซิร์ฟเวอร์) — ใช้ทั้ง ส่งทดสอบ / ส่งเดี๋ยวนี้ / ส่งตามเวลา (cron)
  * + 💬 Discord (ถ้าเปิดไว้ในรายงาน) — ส่งในรอบเดียวกัน ลงประวัติแถวเดียว (detail.discord) · lib/email-report/discord
- * + 🟢 LINE (ถ้าเปิดไว้) — กล่องเดียว 1 ข้อความ ลงประวัติแถวเดียวกัน (detail.line) · lib/email-report/line
+ * + 🟢 LINE (ถ้าเปิดไว้) — 1 ข้อความ/ครั้ง (นับโควตาตามจำนวนคนในกลุ่ม) ลงประวัติแถวเดียวกัน (detail.line) · lib/email-report/line
+ * + 📎 แนบ Excel รายการทั้งหมด (options.attach_excel + แหล่งที่มี export) — สร้างไฟล์ครั้งเดียวแนบทุกฉบับ · lib/email-report/excel
  * ขั้นตอน: หาอีเมลผู้รับ (ผู้ใช้ในระบบ = อีเมลล่าสุดจาก user_profiles · คนปิดบัญชี/ไม่มีอีเมล = ข้าม+จดไว้)
  *        → ประกอบรายงาน → ส่งทีละคน (ผู้รับไม่เห็นกัน) → ลงประวัติ email_report_runs + audit
  * ส่งตามเวลา: "จอง" วันนี้ก่อนส่ง (last_sent_on) → cron ซ้อนกันก็ไม่ส่งซ้ำ · ส่งไม่สำเร็จ = ไม่ลองซ้ำวันนั้น (ดูในประวัติ)
@@ -14,7 +15,8 @@ import { buildReportEmail } from "@/lib/email-report/sources";
 import { sendReportToDiscord, type DiscordResult } from "@/lib/email-report/discord";
 import { sendReportToLine, type LineResult } from "@/lib/email-report/line";
 import { loadReportChannels } from "@/lib/email-report/channels";
-import { normalizeReportDiscord, normalizeReportLine, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
+import { reportExcel, XLSX_TYPE } from "@/lib/email-report/excel";
+import { normalizeReportDiscord, normalizeReportLine, normalizeReportOptions, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Actor = { id: string | null; name: string | null };
@@ -142,8 +144,14 @@ export async function runEmailReport(admin: Admin, report: EmailReport, opts: { 
   if (emails.length) {
     if (!emailReady) emailError = emailErrorText("email-not-configured");
     else {
+      // 📎 Excel รายการทั้งหมด (สร้างครั้งเดียว · สร้างไม่ได้ = ส่งเมลโดยไม่แนบ)
+      let attachments: { filename: string; content: Buffer; contentType: string }[] = [];
+      if (normalizeReportOptions(report.source_key, report.options).attach_excel && built.built.export && built.built.total > 0) {
+        try { attachments = [{ filename: built.built.export.filename, content: await reportExcel(built.built.export), contentType: XLSX_TYPE }]; }
+        catch (e) { console.error("[email-report] excel", e); }
+      }
       for (const to of emails) {
-        const r = await sendEmail({ to, subject, html: built.email.html, text: built.email.text, fromName: "ERP รายงาน" });
+        const r = await sendEmail({ to, subject, html: built.email.html, text: built.email.text, fromName: "ERP รายงาน", attachments });
         if (r.ok) sent += 1; else failed.push({ email: to, code: r.error });
       }
       if (failed.length) emailError = `${emailErrorText(failed[0].code)}${failed.length > 1 ? ` (${failed.length} คน)` : ""}`;

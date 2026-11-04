@@ -9,7 +9,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { BuiltReport, ReportRow, ReportTable, ReportTone } from "@/lib/email-report/render";
-import { statText, thaiDateLabel } from "@/lib/email-report/render";
+import { sizedImage, statText, thaiDateLabel } from "@/lib/email-report/render";
 
 type SharpFn = typeof import("sharp");
 const getSharp = async (): Promise<SharpFn> => { const m = (await import("sharp")) as unknown as { default?: SharpFn }; return m.default ?? (m as unknown as SharpFn); };
@@ -72,26 +72,7 @@ export async function renderReportPng(r: BuiltReport, ctx: { reportName: string;
     return { w: info.width, h: info.height };
   };
 
-  // หัว
-  let y = 24;
-  const t1 = await text(esc(r.heading), { x: PAD, y, size: 32, bold: true });
-  y += t1.h + 2;
-  const t2 = await text(esc(`${ctx.reportName} · ${thaiDateLabel(now)}`), { x: PAD, y, size: 19, color: "#64748b" });
-  y += t2.h + 16;
-
-  // ตัวเลขสรุป
-  if (r.stats.length) {
-    const gap = 10; const n = r.stats.length;
-    const tw = Math.floor((W - PAD * 2 - gap * (n - 1)) / n);
-    for (let i = 0; i < n; i++) {
-      const s = r.stats[i]; const x = PAD + i * (tw + gap);
-      shapes.push(`<rect x="${x}" y="${y}" width="${tw}" height="78" rx="10" fill="#f1f5f9"/>`);
-      await text(esc(statText(s)), { x: x + 14, y: y + 8, size: 30, bold: true, color: s.tone ? TONE[s.tone] : "#0f172a" });
-      const lbl = s.hint ? `${s.label} · ${s.hint}` : s.label;
-      await text(esc(clipCols(lbl, Math.max(8, Math.floor(tw / 9.5)))), { x: x + 14, y: y + 48, size: 17, color: "#64748b" });
-    }
-    y += 78 + 12;
-  }
+  let y = await drawHead(r, { reportName: ctx.reportName, now, W, PAD, text, shapes });
   // แถบนับแยกกลุ่ม — จุดสีวาดเป็นรูปทรง (ฟอนต์บนเซิร์ฟเวอร์อาจไม่มีอักขระ ● / อีโมจิ)
   const breakdown = (r.breakdown ?? []).filter((b) => b.count > 0);
   if (breakdown.length) {
@@ -188,6 +169,100 @@ export async function renderReportPng(r: BuiltReport, ctx: { reportName: string;
 }
 
 type TextFn = (markup: string, o: { x: number; y: number; size: number; bold?: boolean; color?: string; alignRight?: boolean }) => Promise<{ w: number; h: number }>;
+
+/** หัวรูป (ชื่อรายงาน · วันที่) + กล่องตัวเลขสรุป — ใช้ทั้งรูปตาราง/รายการ และรูปกริด → คืน y ถัดไป */
+async function drawHead(r: BuiltReport, c: { reportName: string; now: Date; W: number; PAD: number; text: TextFn; shapes: string[] }): Promise<number> {
+  const { W, PAD, text, shapes } = c;
+  let y = 24;
+  const t1 = await text(esc(r.heading), { x: PAD, y, size: 32, bold: true });
+  y += t1.h + 2;
+  const t2 = await text(esc(`${c.reportName} · ${thaiDateLabel(c.now)}`), { x: PAD, y, size: 19, color: "#64748b" });
+  y += t2.h + 16;
+  if (r.stats.length) {
+    const gap = 10; const n = r.stats.length;
+    const tw = Math.floor((W - PAD * 2 - gap * (n - 1)) / n);
+    for (let i = 0; i < n; i++) {
+      const s = r.stats[i]; const x = PAD + i * (tw + gap);
+      shapes.push(`<rect x="${x}" y="${y}" width="${tw}" height="78" rx="10" fill="#f1f5f9"/>`);
+      await text(esc(statText(s)), { x: x + 14, y: y + 8, size: 30, bold: true, color: s.tone ? TONE[s.tone] : "#0f172a" });
+      const lbl = s.hint ? `${s.label} · ${s.hint}` : s.label;
+      await text(esc(clipCols(lbl, Math.max(8, Math.floor(tw / 9.5)))), { x: x + 14, y: y + 48, size: 17, color: "#64748b" });
+    }
+    y += 78 + 12;
+  }
+  return y;
+}
+
+/**
+ * 🖼 รูปกริด "ขายดี" 3 คอลัมน์ (Discord แบบ grid) — หัว + ตัวเลขสรุป + รูปสินค้าใหญ่พร้อม อันดับ/รหัส · สี · จำนวน/ยอด ใต้รูป
+ * ใช้ BuiltReport.spotlight (≤9) · รูปโหลดไม่ได้ = กรอบเทา "ไม่มีรูป" · ฝั่งเซิร์ฟเวอร์เท่านั้น
+ */
+export async function renderGridPng(r: BuiltReport, ctx: { reportName: string; count?: number; now?: Date }): Promise<Buffer> {
+  const sharp = await getSharp();
+  const [reg, semi] = await Promise.all([fontFile(400), fontFile(600)]);
+  const now = ctx.now ?? new Date();
+  const W = 900, PAD = 28, GAP = 16, COLS = 3;
+  const layers: Layer[] = [];
+  const shapes: string[] = [];
+  const text: TextFn = async (markup, o) => {
+    const { data, info } = await sharp({ text: {
+      text: `<span foreground="${o.color ?? "#0f172a"}">${markup}</span>`, font: `Sarabun${o.bold ? " SemiBold" : ""} ${o.size}`,
+      fontfile: o.bold ? semi : reg, rgba: true, dpi: 72,
+    } }).png().toBuffer({ resolveWithObject: true });
+    layers.push({ input: data, left: Math.round(o.alignRight ? o.x - info.width : o.x), top: Math.round(o.y) });
+    return { w: info.width, h: info.height };
+  };
+  let y = await drawHead(r, { reportName: ctx.reportName, now, W, PAD, text, shapes });
+  const items = (r.spotlight ?? []).slice(0, Math.min(9, Math.max(1, ctx.count ?? 9)));
+  const CELL = Math.floor((W - PAD * 2 - GAP * (COLS - 1)) / COLS);
+  const CAP = 92;
+
+  if (items.length) {
+    await text("ขายดี", { x: PAD, y: y + 2, size: 20, bold: true, color: "#334155" });
+    y += 36;
+    const mask = Buffer.from(`<svg width="${CELL}" height="${CELL}"><rect width="${CELL}" height="${CELL}" rx="12" fill="#fff"/></svg>`);
+    // ป้ายอันดับเป็นชั้นภาพ (วางทับรูปสินค้า — ถ้าวาดในพื้นหลังจะโดนรูปบัง)
+    const badge = await sharp(Buffer.from(`<svg width="46" height="30" xmlns="http://www.w3.org/2000/svg"><rect width="46" height="30" rx="8" fill="#0f172a" fill-opacity="0.8"/></svg>`)).png().toBuffer();
+    const pics = await Promise.all(items.map(async (it) => {
+      const url = sizedImage(it.imageUrl, 540);
+      if (!url) return null;
+      try {
+        const ac = new AbortController(); const timer = setTimeout(() => ac.abort(), 5000);
+        const res = await fetch(url, { signal: ac.signal }).finally(() => clearTimeout(timer));
+        if (!res.ok) return null;
+        return await sharp(Buffer.from(await res.arrayBuffer())).resize(CELL, CELL, { fit: "cover" }).composite([{ input: mask, blend: "dest-in" }]).png().toBuffer();
+      } catch { return null; }
+    }));
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const x = PAD + (i % COLS) * (CELL + GAP);
+      const top = y + Math.floor(i / COLS) * (CELL + CAP + GAP);
+      const pic = pics[i];
+      if (pic) layers.push({ input: pic, left: x, top });
+      else {
+        shapes.push(`<rect x="${x}" y="${top}" width="${CELL}" height="${CELL}" rx="12" fill="#f1f5f9" stroke="#e2e8f0"/>`);
+        await text("ไม่มีรูป", { x: x + CELL / 2 - 28, y: top + CELL / 2 - 12, size: 18, color: "#94a3b8" });
+      }
+      // ป้ายอันดับมุมซ้ายบน (ทับรูป)
+      layers.push({ input: badge, left: x + 8, top: top + 8 });
+      await text(`#${it.rank}`, { x: x + 15, y: top + 11, size: 18, bold: true, color: "#ffffff" });
+      const cols = Math.floor((CELL - 4) / 10.5);
+      await text(esc(clipCols(it.title, cols)), { x, y: top + CELL + 6, size: 20, bold: true });
+      if (it.sub) await text(esc(clipCols(it.sub, Math.floor(cols * 1.15))), { x, y: top + CELL + 34, size: 16, color: "#64748b" });
+      await text(esc(it.value), { x, y: top + CELL + 58, size: 19, bold: true, color: "#059669" });
+    }
+    y += Math.ceil(items.length / COLS) * (CELL + CAP + GAP);
+  } else if (r.total === 0) {
+    const t = await text(esc(r.emptyText), { x: PAD, y: y + 18, size: 21, color: "#059669" });
+    y += t.h + 36;
+  }
+  y += 6;
+  const foot = await text(esc(`${r.total > items.length ? `ขายดี ${items.length} อันดับจากทั้งหมด ${r.total.toLocaleString("th-TH")} ${r.unit ?? "งาน"} · ` : ""}รายการเต็มอยู่ในไฟล์แนบ / ลิงก์ในข้อความ`), { x: PAD, y, size: 16, color: "#94a3b8" });
+  y += foot.h + 22;
+  const H = Math.ceil(y);
+  const bg = Buffer.from(`<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg"><rect width="${W}" height="${H}" fill="#ffffff"/>${shapes.join("")}</svg>`);
+  return sharp(bg).composite(layers).png({ compressionLevel: 9 }).toBuffer();
+}
 
 /** 🧮 วาดตาราง (layout "table") ลงรูป — คอลัมน์ชิดขวากว้างคงที่ · คอลัมน์ข้อความแบ่งที่เหลือตามน้ำหนัก (ชื่อกว้างสุด) */
 async function drawTable(t: ReportTable, c: { y: number; maxRows: number; W: number; PAD: number; text: TextFn; shapes: string[]; layers: Layer[]; sharp: SharpFn }): Promise<{ y: number; shown: number }> {

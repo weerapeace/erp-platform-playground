@@ -23,6 +23,8 @@ export interface EmailMessage {
   fromName?: string;
   /** ผู้รับกด "ตอบกลับ" แล้วไปหาอีเมลนี้ (เช่น พนักงานที่กดส่ง) */
   replyTo?: string;
+  /** ไฟล์แนบ (เช่น Excel ของรายงานอัตโนมัติ) — รองรับทั้ง Gmail และ Resend */
+  attachments?: { filename: string; content: Buffer; contentType?: string }[];
 }
 
 export type EmailResult = { ok: true; id?: string; devEcho?: EmailMessage } | { ok: false; error: string };
@@ -82,6 +84,7 @@ export async function sendEmail(m: EmailMessage): Promise<EmailResult> {
       const info = await t.sendMail({
         from: m.fromName ? { name: safeName(m.fromName), address: gmailUser() } : gmailUser(),
         to: m.to, subject: m.subject, html: m.html, text: m.text, ...(replyTo ? { replyTo } : {}),
+        ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ filename: a.filename, content: a.content, ...(a.contentType ? { contentType: a.contentType } : {}) })) } : {}),
       });
       return { ok: true, id: info.messageId };
     } catch (e) {
@@ -99,6 +102,7 @@ export async function sendEmail(m: EmailMessage): Promise<EmailResult> {
       body: JSON.stringify({
         from: m.fromName ? `${safeName(m.fromName)} <${from}>` : from, to: [m.to], subject: m.subject, html: m.html, text: m.text,
         ...(replyTo ? { reply_to: replyTo } : {}),
+        ...(m.attachments?.length ? { attachments: m.attachments.map((a) => ({ filename: a.filename, content: a.content.toString("base64") })) } : {}),
       }),
     });
     const j = (await res.json().catch(() => ({}))) as { id?: string; message?: string };

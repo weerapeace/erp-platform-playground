@@ -12,7 +12,7 @@ type Embed = { title?: string; url?: string; description?: string; color?: numbe
 /** ปุ่ม (type 2) หรือเมนูเลือก (type 3 · placeholder) */
 type Button = { type: number; style?: number; label?: string; url?: string; custom_id?: string; placeholder?: string };
 export type DiscordCardMsg = { embeds?: Embed[]; components?: { type: number; components: Button[] }[] };
-export type DiscordPreviewData = { content: string; cards: DiscordCardMsg[]; has_image: boolean; role_name: string | null; channel_name: string | null; ready: { bot: boolean; buttons: boolean } };
+export type DiscordPreviewData = { content: string; cards: DiscordCardMsg[]; has_image: boolean; role_name: string | null; channel_name: string | null; ready: { bot: boolean; buttons: boolean }; files?: string[] };
 
 const hex = (n?: number) => `#${(n ?? 0x5865f2).toString(16).padStart(6, "0")}`;
 
@@ -110,6 +110,12 @@ export function DiscordChatPreview({ data, imageUrl, imageBusy, imageErr }: {
                   : <div className="flex h-40 items-center justify-center rounded-md bg-[#2b2d31] text-xs text-[#949ba4]">{imageBusy ? "กำลังวาดรูปรายงาน…" : imageErr ? `⚠ ${imageErr}` : "รูปรายงาน"}</div>}
               </div>
             )}
+            {(data.files ?? []).map((f) => (
+              <div key={f} className="mt-2 flex max-w-[420px] items-center gap-3 rounded-md border border-[#3f4147] bg-[#2b2d31] px-3 py-2">
+                <span className="text-2xl" aria-hidden>📊</span>
+                <div className="min-w-0"><div className="truncate text-sm text-[#00a8fc]">{f}</div><div className="text-[11px] text-[#949ba4]">ไฟล์ Excel รายการทั้งหมด</div></div>
+              </div>
+            ))}
           </div>
         </div>
         {/* การ์ดติ๊ก (ข้อความละใบ) */}

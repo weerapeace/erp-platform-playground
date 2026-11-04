@@ -2,13 +2,16 @@
  * 💬 ส่งรายงานเข้า Discord (ฝั่งเซิร์ฟเวอร์) — เรียกจาก runEmailReport
  *   ส่งทดสอบ = DM หาคนกด (ต้องผูกบัญชี Discord) · ส่งเดี๋ยวนี้/ตามเวลา = ห้องที่ตั้งไว้
  * ข้อความ 1: (แท็กทีมตามที่ตั้ง) หัวเรื่อง + รูปรายงาน + ลิงก์ดูทั้งหมด + บอกว่ามีของรอกี่ใบ
+ *   แหล่งที่มี spotlight + look "grid" (ค่าเริ่ม) = รูปกริดขายดี 3×3 (renderGridPng) · ไม่งั้นรูปตาราง/รายการ (renderReportPng)
+ *   แหล่งที่มี export + attach_excel = แนบไฟล์ Excel รายการทั้งหมดในข้อความเดียวกัน
  * ข้อความถัดไป: การ์ดเฉพาะใบที่มีเช็กลิสต์ค้าง พร้อมปุ่มติ๊ก (lib/discord-checklist) — สูงสุด max_cards ใบ
  * วาดรูปไม่ได้ → ส่งตัวเลขสรุปเป็นการ์ดแทน (ทีมยังได้ข้อความ)
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { DiscordError, discordDmChannel, discordReady, discordSend, type DiscordFile } from "@/lib/discord";
 import { checklistCardMessage, type ChecklistTask } from "@/lib/discord-checklist";
-import { renderReportPng } from "@/lib/email-report/image";
+import { renderGridPng, renderReportPng } from "@/lib/email-report/image";
+import { reportExcel, XLSX_TYPE } from "@/lib/email-report/excel";
 import { loadChecklistPresets, userNames } from "@/lib/record-tasks-server";
 import { linksOf } from "@/lib/record-tasks";
 import { normalizeReportDiscord, type EmailReport, type EmailReportRun } from "@/lib/email-report/shared";
@@ -44,9 +47,16 @@ export async function sendReportToDiscord(admin: Admin, report: Pick<EmailReport
   let image = false;
   if (built.total > 0) {
     try {
-      files.push({ name: "report.png", type: "image/png", data: await renderReportPng(built, { reportName: report.name, maxRows: cfg.image_rows }) });
+      const grid = cfg.look === "grid" && (built.spotlight?.length ?? 0) > 0;
+      files.push({ name: "report.png", type: "image/png", data: grid
+        ? await renderGridPng(built, { reportName: report.name, count: 9 })
+        : await renderReportPng(built, { reportName: report.name, maxRows: cfg.image_rows }) });
       image = true;
     } catch (e) { console.error("[discord] render image", e); }
+    if (cfg.attach_excel && built.export) {
+      try { files.push({ name: built.export.filename, type: XLSX_TYPE, data: await reportExcel(built.export) }); }
+      catch (e) { console.error("[discord] excel", e); }
+    }
   }
   const fallbackEmbed = !image && built.stats.length ? [{
     title: built.heading, color: 0x5865f2,

@@ -21,7 +21,7 @@ import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-s
 import type { WorkPopupPayload } from "@/lib/email-report/popup";
 import {
   COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_RE, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
-  POPUP_FIELDS, POPUP_MAX_CHOICES, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportLine, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceChannels, sourceDef,
+  POPUP_FIELDS, POPUP_MAX_CHOICES, TOP_PHOTO_CHOICES, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportLine, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceChannels, sourceDef,
   type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportLine, type EmailReportPopup,
   type ReportChannelKey, type ReportChannels,
 } from "@/lib/email-report/shared";
@@ -101,7 +101,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const [extErr, setExtErr] = useState<string | null>(null);
   const [brands, setBrands] = useState<Brand[]>([]);
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
-  const [preview, setPreview] = useState<{ subject: string; html: string; total: number; shown: number; fill?: Record<string, number> } | null>(null);
+  const [preview, setPreview] = useState<{ subject: string; html: string; total: number; shown: number; fill?: Record<string, number>; attachment?: string | null } | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const previewSeq = useRef(0);
@@ -259,7 +259,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const curTab: PreviewTab = previewTabs.some((t) => t.key === prevTab) ? prevTab : "email";
   const discordKey = JSON.stringify([previewKey, form.discord]);
   const popupKey = JSON.stringify([previewKey, form.popup]);
-  const lineKey = JSON.stringify([previewKey, form.line.max_rows, form.line.group_name]);
+  const lineKey = JSON.stringify([previewKey, form.line.max_rows, form.line.group_name, form.line.style]);
   useEffect(() => {
     if (!open || curTab !== "line") return;
     const t = setTimeout(() => void showLine(), 700);
@@ -355,7 +355,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const whenSummary = `${form.days.length ? describeDays(form.days) : "ยังไม่เลือกวัน"} · ${form.send_time} น.${form.skip_if_empty ? ` · ${emptyWord}ไม่ส่ง` : ""} · ${form.is_enabled ? "✅ เปิดใช้อยู่" : "⏸ ยังปิดอยู่"}`;
   const fieldLabels = (opt.row_fields ?? []).map((k) => src.rowFields.find((f) => f.key === k)?.label).filter(Boolean) as string[];
   const lookSummary = isTable
-    ? `ตาราง ${fieldLabels.length ? fieldLabels.join(" · ") : "ชื่อ · จำนวน · ยอด"} · ${src.groupBy.find((g) => g.key === opt.group_by)?.label ?? ""} · ${(opt.max_rows ?? 50) >= 100 ? "ทั้งหมด" : `${opt.max_rows} อันดับ`}${opt.show_total !== false ? " · มีแถวรวม" : ""}`
+    ? `อีเมล: ${(opt.top_photos ?? 3) > 0 ? "รูปขายดี 3 อันดับ · " : ""}ตาราง ${fieldLabels.length ? fieldLabels.join(" · ") : "ชื่อ · จำนวน · ยอด"} · ${src.groupBy.find((g) => g.key === opt.group_by)?.label ?? ""} · ${(opt.max_rows ?? 500) >= 100 ? "ทั้งหมด" : `${opt.max_rows} อันดับ`}${opt.show_total !== false ? " · มีแถวรวม" : ""}${opt.attach_excel !== false ? " · แนบ Excel" : ""}`
     : `ตัวเลขสรุป ${(opt.stats ?? []).length} อย่าง · ${fieldLabels.length ? `${fieldLabels.slice(0, 4).join(" ")}${fieldLabels.length > 4 ? ` +${fieldLabels.length - 4}` : ""}` : "โชว์แค่ชื่องาน"}${opt.only_flagged ? " · เฉพาะงานมีป้ายเตือน" : ""}`;
 
   return (
@@ -392,7 +392,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
             <div>
               {offNote(form.email_enabled, "Gmail")}
               <div className="mb-1.5 flex items-center justify-between gap-2">
-                {preview ? <div className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600" title={preview.subject}>หัวเรื่อง: <b>{preview.subject}</b></div> : <span />}
+                {preview ? <div className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600" title={preview.subject}>หัวเรื่อง: <b>{preview.subject}</b>{preview.attachment ? <span className="ml-2 text-emerald-700">📎 {preview.attachment}</span> : null}</div> : <span />}
                 <span className="shrink-0 text-[11px] text-slate-400">{previewLoading ? "กำลังโหลด..." : preview ? `พบ ${preview.total} งาน · โชว์ ${preview.shown}` : ""}</span>
               </div>
               {previewErr ? (
@@ -580,7 +580,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
             )}
 
             {/* 🟢 LINE: กล่องเดียวต่อครั้ง เข้ากลุ่มที่บอทอยู่ — lib/email-report/line */}
-            {lineOn && <LineChannelCard value={form.line} onChange={setLine} chip={chip} />}
+            {lineOn && <LineChannelCard value={form.line} onChange={setLine} chip={chip} sendsPerMonth={Math.round(form.days.length * 4.33)} cardsAvailable={isTable} />}
 
             {/* 💬 Discord: รูปรายงาน + การ์ดเฉพาะใบที่มีของรอ (ปุ่มติ๊ก) — lib/email-report/discord */}
             {discordOn && (
@@ -616,14 +616,30 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                           {(["overdue", "always"] as const).map((m) => <button key={m} type="button" onClick={() => setDiscord({ mention: m })} className={chip(form.discord.mention === m)}>{DISCORD_MENTION_LABEL[m]}</button>)}
                         </div>
                       )}
-                      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-700">
-                        <span className="inline-flex items-center gap-1">งานในรูป
-                          {[10, 15, 20].map((n) => <button key={n} type="button" onClick={() => setDiscord({ image_rows: n })} className={chip(form.discord.image_rows === n)}>{n}</button>)}
-                        </span>
-                        <label className="inline-flex items-center gap-1.5">การ์ด "ต้องติ๊ก" สูงสุด
-                          <input type="number" min={0} max={15} value={form.discord.max_cards} onChange={(e) => setDiscord({ max_cards: Number(e.target.value) })}
-                            className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> ใบ</label>
-                      </div>
+                      {isTable ? (
+                        /* แบบตาราง (เช่น ยอดขาย): หน้าตารูปของ Discord ตั้งแยกจากอีเมล */
+                        <div className="space-y-2 text-xs text-slate-700">
+                          <div className="flex flex-wrap items-center gap-1">รูปที่ส่ง
+                            <button type="button" onClick={() => setDiscord({ look: "grid" })} className={chip(form.discord.look === "grid")}>🖼 กริดรูปขายดี 3×3</button>
+                            <button type="button" onClick={() => setDiscord({ look: "table" })} className={chip(form.discord.look === "table")}>🧮 รูปตาราง</button>
+                            {form.discord.look === "table" && <span className="ml-2 inline-flex items-center gap-1">แถวในรูป
+                              {[10, 15, 20].map((n) => <button key={n} type="button" onClick={() => setDiscord({ image_rows: n })} className={chip(form.discord.image_rows === n)}>{n}</button>)}</span>}
+                          </div>
+                          <label className="inline-flex cursor-pointer items-center gap-1.5">
+                            <input type="checkbox" checked={form.discord.attach_excel} onChange={(e) => setDiscord({ attach_excel: e.target.checked })} className="h-4 w-4" />
+                            📎 แนบไฟล์ Excel รายการทั้งหมด
+                          </label>
+                        </div>
+                      ) : (
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-700">
+                          <span className="inline-flex items-center gap-1">งานในรูป
+                            {[10, 15, 20].map((n) => <button key={n} type="button" onClick={() => setDiscord({ image_rows: n })} className={chip(form.discord.image_rows === n)}>{n}</button>)}
+                          </span>
+                          <label className="inline-flex items-center gap-1.5">การ์ด "ต้องติ๊ก" สูงสุด
+                            <input type="number" min={0} max={15} value={form.discord.max_cards} onChange={(e) => setDiscord({ max_cards: Number(e.target.value) })}
+                              className="h-8 w-14 rounded-lg border border-slate-200 px-2 text-center text-sm" /> ใบ</label>
+                        </div>
+                      )}
                       <p className="text-[11px] text-slate-400">ส่งทดสอบ = ส่งเข้า DM ของคุณ (ต้องผูกบัญชี Discord ที่เมนูบัญชีก่อน) · ส่งเดี๋ยวนี้/ตามเวลา = ส่งเข้าห้องที่เลือก</p>
                     </div>
                   )}
@@ -778,7 +794,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
             </div>
             <div>
               <label className={label}>{isTable
-                ? <>คอลัมน์ในตาราง <span className="font-normal text-slate-400">(เรียงซ้าย→ขวาตามลำดับที่เลือก · ใช้ทั้งอีเมล / LINE / Discord)</span></>
+                ? <>คอลัมน์ในตาราง <span className="font-normal text-slate-400">(เรียงซ้าย→ขวาตามลำดับที่เลือก · อีเมล + รูปตาราง Discord + LINE แบบรายการสั้น)</span></>
                 : <>ข้อมูลของแต่ละงาน <span className="font-normal text-slate-400">(เรียงตามลำดับที่เลือก · ชื่องานโชว์เสมอ)</span></>}</label>
               <FieldChipsPicker compact showKeys={false}
                 value={opt.row_fields ?? []} onChange={(v) => setOptions({ row_fields: v })}
@@ -806,16 +822,27 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                   </div>
                 </div>
                 <div>
-                  <label className={label}>แสดง</label>
+                  <label className={label}>แสดงในอีเมล</label>
                   <div className="flex flex-wrap gap-1">
                     {[5, 8, 10, 20].map((n) => <button key={n} type="button" onClick={() => setOptions({ max_rows: n })} className={chip(opt.max_rows === n)}>{n} อันดับ</button>)}
-                    <button type="button" onClick={() => setOptions({ max_rows: 100 })} className={chip(opt.max_rows === 100)}>ทั้งหมด</button>
+                    <button type="button" onClick={() => setOptions({ max_rows: 500 })} className={chip((opt.max_rows ?? 500) >= 100)}>ทั้งหมด</button>
                   </div>
                 </div>
-                <label className="flex cursor-pointer items-center gap-2 self-end text-xs text-slate-700">
+                <div>
+                  <label className={label}>รูปขายดีด้านบน (อีเมล)</label>
+                  <div className="flex flex-wrap gap-1">
+                    {TOP_PHOTO_CHOICES.map((n) => <button key={n} type="button" onClick={() => setOptions({ top_photos: n })} className={chip((opt.top_photos ?? 3) === n)}>{n ? `🖼 ${n} อันดับรูปใหญ่` : "ไม่มี"}</button>)}
+                  </div>
+                </div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
                   <input type="checkbox" checked={opt.show_total !== false} onChange={(e) => setOptions({ show_total: e.target.checked })} className="h-4 w-4" />
                   แถวรวมท้ายตาราง
                 </label>
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                  <input type="checkbox" checked={opt.attach_excel !== false} onChange={(e) => setOptions({ attach_excel: e.target.checked })} className="h-4 w-4" />
+                  📎 แนบไฟล์ Excel รายการทั้งหมด (อีเมล)
+                </label>
+                <p className="text-[11px] text-slate-400 sm:col-span-2">หน้าตา LINE / Discord ตั้งแยกได้ที่การ์ดของช่องนั้นในเรื่อง 2 &quot;ส่งทางไหน&quot;</p>
               </div>
             )}
             <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more}
