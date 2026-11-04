@@ -26,6 +26,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { HoverImage } from "@/components/hover-image";
 import { SkuPicker } from "@/components/pickers";
+import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picker";
+import { SupplierWizard } from "@/components/supplier-wizard";
 import { apiFetch } from "@/lib/api";
 import { useAuth, usePermission } from "@/components/auth";
 import { computePoTotals } from "@/lib/po-total";
@@ -76,6 +78,10 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
 
   // ---- ฟอร์มแก้ไข ----
   const [seller, setSeller] = useState("");
+  // ร้านจากทะเบียน (ของกลาง SupplierPicker + usePartnerSuppliers ตัวเดียวกับป๊อปสร้างใบ) — "" = พิมพ์ชื่อเอง
+  const [sellerId, setSellerId] = useState("");
+  const [suppliers, setSuppliers] = usePartnerSuppliers(editing);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [orderDate, setOrderDate] = useState("");
   const [expectedDate, setExpectedDate] = useState("");
   const [note, setNote] = useState("");
@@ -124,6 +130,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
   const startEdit = useCallback(() => {
     if (!d) return;
     setSeller(d.seller ?? "");
+    setSellerId(d.seller_partner_id ?? "");
     setOrderDate(d.order_date ?? "");
     setExpectedDate(d.expected_date ?? "");
     setNote(d.note ?? "");
@@ -181,6 +188,8 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
           po_id: d.id,
           header: {
             seller_name: seller.trim(),
+            // เลือกจากทะเบียน → ผูก id ตรง ๆ · พิมพ์เอง → ไม่ส่ง id ให้ API จับคู่จากชื่อ (lib/partner-match)
+            ...(sellerId ? { seller_partner_id: sellerId } : {}),
             order_date: orderDate || null,
             expected_date: expectedDate || null,
             note: note.trim() || null,
@@ -205,7 +214,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
       onSaved?.();
     } catch { setErr("บันทึกไม่สำเร็จ — ลองใหม่อีกครั้ง"); }
     finally { setSaving(false); }
-  }, [d, seller, orderDate, expectedDate, note, vatRate, vatIncluded, currency, fxRate, companyId, lines, load, onSaved]);
+  }, [d, seller, sellerId, orderDate, expectedDate, note, vatRate, vatIncluded, currency, fxRate, companyId, lines, load, onSaved]);
 
   const inp = "h-8 px-2 text-sm border border-slate-200 rounded-md";
   const lbl = "block text-[11px] font-medium text-slate-500 mb-0.5";
@@ -266,7 +275,10 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
         <div className="space-y-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div className="col-span-2"><label className={lbl}>ร้าน / ผู้จำหน่าย</label>
-              <input value={seller} onChange={(e) => setSeller(e.target.value)} className={inp + " w-full"} /></div>
+              <SupplierPicker value={sellerId} suppliers={suppliers} placeholder={seller && !sellerId ? `${seller} (พิมพ์เอง · ยังไม่ผูกทะเบียน)` : undefined}
+                onChange={(id, name) => { setSellerId(id); setSeller(name); }} onAddNew={() => setWizardOpen(true)} />
+              <input value={seller} onChange={(e) => { setSeller(e.target.value); setSellerId(""); }}
+                placeholder="หรือพิมพ์ชื่อร้านเอง (กรณียังไม่มีในทะเบียน)" className={inp + " w-full mt-1.5"} /></div>
             <div><label className={lbl}>วันที่สั่ง</label>
               <input type="date" value={orderDate ? orderDate.slice(0, 10) : ""} onChange={(e) => setOrderDate(e.target.value)} className={inp + " w-full"} /></div>
             <div><label className={lbl}>กำหนดของเข้า</label>
@@ -471,6 +483,15 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
           </label>
           {cancelErr && <div className="mt-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">⚠ {cancelErr}</div>}
         </ERPModal>
+      )}
+      {/* + เพิ่มร้านใหม่ จากตัวเลือกร้านตอนแก้ไข (ของกลาง SupplierWizard ตัวเดียวกับป๊อปสร้างใบ) */}
+      {wizardOpen && (
+        <SupplierWizard initialName={sellerId ? "" : seller}
+          onClose={() => setWizardOpen(false)}
+          onCreated={(s) => {
+            setSuppliers((arr) => [...arr, { id: s.id, name: s.name }].sort((a, b) => a.name.localeCompare(b.name, "th")));
+            setSellerId(s.id); setSeller(s.name); setWizardOpen(false);
+          }} />
       )}
     </ERPModal>
   );

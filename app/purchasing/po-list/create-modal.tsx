@@ -9,7 +9,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
-import { SupplierPicker } from "@/components/supplier-picker";
+import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picker";
 import { SupplierWizard } from "@/components/supplier-wizard";
 import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import { useToast } from "@/components/toast";
@@ -26,15 +26,13 @@ type Line = {
   price: string;
 };
 
-type Supplier = { id: string; name: string; cn?: boolean };
-
 const newKey = () => `l${Math.random().toString(36).slice(2, 9)}`;
 const emptyLine = (): Line => ({ key: newKey(), item_sku_id: null, item_name: "", qty: "1", uom: "", price: "" });
 const n = (s: string) => { const v = Number(s); return isFinite(v) ? v : 0; };
 
 export function PoCreateModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const toast = useToast();
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [suppliers, setSuppliers] = usePartnerSuppliers();
   const [sellerId, setSellerId] = useState("");
   const [seller, setSeller] = useState("");
   const [currency, setCurrency] = useState<"THB" | "RMB">("THB");
@@ -51,22 +49,6 @@ export function PoCreateModal({ onClose, onCreated }: { onClose: () => void; onC
   const [saving, setSaving] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
-
-  // โหลดร้าน — ไม่กรอง is_supplier เพราะข้อมูลจริงหลายร้านไม่ได้ติ๊กไว้ (เคยทำให้หาร้านไม่เจอ)
-  useEffect(() => {
-    void apiFetch("/api/master-v2/partners?limit=2000").then((r) => r.json()).then((j) => {
-      const data = (j.data ?? []) as Record<string, unknown>[];
-      const nm = (p: Record<string, unknown>) => String(p.name_th ?? p.display_name ?? p.code ?? "");
-      const isCn = (p: Record<string, unknown>) =>
-        p.is_taobao === true || /จีน|china/i.test(String(p.shop_country ?? "")) || String(p.default_currency ?? "") === "RMB";
-      setSuppliers(
-        data.filter((p) => p.is_active !== false)
-          .map((p) => ({ id: String(p.id), name: nm(p), cn: isCn(p) }))
-          .filter((s) => s.name)
-          .sort((a, b) => a.name.localeCompare(b.name, "th")),
-      );
-    }).catch(() => {});
-  }, []);
 
   // เลือกร้านจีน → เดาสกุลเป็น RMB ให้ (แก้เองได้)
   const pickSeller = useCallback((id: string, name: string) => {

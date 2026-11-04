@@ -37,6 +37,8 @@ export type PoSellerInfo = {
 };
 export type PoDetail = {
   id: string; po_no: string; seller: string | null; order_date: string | null;
+  /** id ร้านในทะเบียน partners_v2 ที่ผูกไว้ (null = พิมพ์ชื่อเอง ยังไม่ผูก) — ป๊อปแก้ใบใช้ตั้งค่าตัวเลือกร้าน */
+  seller_partner_id: string | null;
   currency: string | null; amount_thb: number;
   /** เรทที่ใช้แปลงเป็นบาท (บาท ต่อ 1 หยวน) · po = ล็อกไว้ที่ใบ · daily = เรทรายวันล่าสุด · none = ใบบาท */
   fx_rate: number | null; fx_source: "po" | "daily" | "none"; fx_rate_date: string | null;
@@ -137,6 +139,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const rmb = foreign ? (poRate > 0 ? poRate : dailyRate) : 1;
   const detail: PoDetail = {
     id: String(p.id), po_no: String(p.po_no ?? "—"), seller: (p.seller_name as string) ?? null,
+    seller_partner_id: (p.seller_partner_id as string) ?? null,
     order_date: (p.order_date as string) ?? null, currency: (p.currency as string) ?? null,
     amount_thb: Math.round(num(p.grand_total) * rmb),
     fx_rate: foreign ? rmb : null,

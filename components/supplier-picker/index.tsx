@@ -7,12 +7,40 @@
  * - onAddNew (ถ้ามี) → โชว์ "+ เพิ่มร้านใหม่" ท้ายรายการ
  * - dropdown เรนเดอร์ผ่าน portal + fixed position → ไม่โดนกรอบ popup ตัด
  * - "⏱ เคยใช้ล่าสุด" อยู่บนสุด (ของกลาง lib/recent-picks — แชร์ประวัติกับ SupplierPicker ตัวอื่น)
+ * - รายชื่อร้าน: usePartnerSuppliers() — โหลดจาก partners_v2 แบบเดียวกันทุกที่ (ใช้ที่ ป๊อปสร้างใบสั่งซื้อ · ป๊อปแก้ใบสั่งซื้อ)
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { RECENT_KEYS, useRecentPicks } from "@/lib/recent-picks";
+import { apiFetch } from "@/lib/api";
 
-type Supplier = { id: string; name: string; cn?: boolean };   // cn = ร้านจีน
+export type Supplier = { id: string; name: string; cn?: boolean };   // cn = ร้านจีน
+
+/**
+ * รายชื่อร้านสำหรับ SupplierPicker — partners_v2 ทั้งหมดที่ยังใช้งาน (ไม่กรอง is_supplier เพราะข้อมูลจริงหลายร้านไม่ได้ติ๊ก)
+ * enabled = false → ยังไม่โหลด (เช่น ป๊อปที่ยังไม่เข้าโหมดแก้ไข) · คืน [รายชื่อ, setter ไว้เติมร้านที่เพิ่งเพิ่มจาก SupplierWizard]
+ */
+export function usePartnerSuppliers(enabled = true): [Supplier[], React.Dispatch<React.SetStateAction<Supplier[]>>] {
+  const [list, setList] = useState<Supplier[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => {
+    if (!enabled || loaded) return;
+    setLoaded(true);
+    void apiFetch("/api/master-v2/partners?limit=2000").then((r) => r.json()).then((j) => {
+      const data = (j.data ?? []) as Record<string, unknown>[];
+      const nm = (p: Record<string, unknown>) => String(p.name_th ?? p.display_name ?? p.code ?? "");
+      const isCn = (p: Record<string, unknown>) =>
+        p.is_taobao === true || /จีน|china/i.test(String(p.shop_country ?? "")) || String(p.default_currency ?? "") === "RMB";
+      setList(
+        data.filter((p) => p.is_active !== false)
+          .map((p) => ({ id: String(p.id), name: nm(p), cn: isCn(p) }))
+          .filter((s) => s.name)
+          .sort((a, b) => a.name.localeCompare(b.name, "th")),
+      );
+    }).catch(() => setLoaded(false));
+  }, [enabled, loaded]);
+  return [list, setList];
+}
 
 export function SupplierPicker({ value, onChange, suppliers, onAddNew, placeholder = "— เลือกผู้จำหน่าย —", disabled }: {
   value: string;
