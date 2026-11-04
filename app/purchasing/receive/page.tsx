@@ -24,8 +24,9 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
 import { GrDetailModal } from "@/components/gr-detail-modal";
-import { poPayState, type PoPayState } from "@/lib/po-pay-state";
-import { PO_PAY_CLS } from "@/components/po-pay-chip";
+import { PO_PAY_FILTERS, isPoPayFilterKey, matchPayFilter, payFilterOf, poPayState, type PoPayFilterKey, type PoPayState } from "@/lib/po-pay-state";
+import { PO_PAY_CLS, PoPayFilterBar } from "@/components/po-pay-chip";
+import { Icon } from "@/components/icon";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string; expected_date?: string | null; order_date?: string | null };
 type PoCard = PO & { pendCount: number };
@@ -75,7 +76,7 @@ type PendItem = {
   pay?: PoPayState | null;   // สถานะจ่ายเงินตามเครดิตร้าน (สีป้าย)
 };
 type PendSort = "eta" | "order" | "name" | "seller" | "remaining" | "recv" | "def" | "status" | "ordered" | "received" | "defective";
-type PendGroup = "none" | "shop" | "eta" | "po" | "mo";
+type PendGroup = "none" | "shop" | "eta" | "po" | "mo" | "pay";
 type SortDir = "asc" | "desc";
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -91,7 +92,7 @@ function etaBadge(days: number | null): { text: string; cls: string } {
   return { text: `เหลือ ${days} วัน`, cls: "bg-emerald-50 text-emerald-700 border-emerald-200" };
 }
 
-const PEND_VIEW_KEY = "recv_pend_view", PEND_COLS_KEY = "recv_pend_cols", PEND_SORT_KEY = "recv_pend_sort", PEND_GROUP_KEY = "recv_pend_group";
+const PEND_VIEW_KEY = "recv_pend_view", PEND_COLS_KEY = "recv_pend_cols", PEND_SORT_KEY = "recv_pend_sort", PEND_GROUP_KEY = "recv_pend_group", PEND_PAY_KEY = "recv_pend_pay";
 const PEND_DIR_KEY = "recv_pend_dir", PEND_PSIZE_KEY = "recv_pend_psize", PO_VIEW_KEY = "recv_po_view", PEND_COPY_KEY = "recv_pend_copy";
 const COL_OPTIONS = [3, 4, 5, 6, 8, 10];
 const PAGE_SIZES = [50, 100, 200];
@@ -130,6 +131,7 @@ export default function ReceiveGoodsPage() {
   const [pend, setPend] = useState<PendItem[]>([]);
   const [pendInputs, setPendInputs] = useState<Record<string, Input>>({});
   const [pendQ, setPendQ] = useState("");
+  const [payF, setPayF] = useState<PoPayFilterKey | "">("");   // ชิปกรองสถานะจ่ายเงิน (ของกลาง) — "" = ทั้งหมด · จำในเครื่อง
   const [pendLoading, setPendLoading] = useState(false);
   const [pendView, setPendView] = useState<"card" | "table">("table");
   const [activeShop, setActiveShop] = useState<string | null>(null);   // list ร้านด้านซ้าย (แท็บรอเข้า/รับครบ)
@@ -194,7 +196,8 @@ export default function ReceiveGoodsPage() {
     const d = localStorage.getItem(PEND_DIR_KEY); if (d === "asc" || d === "desc") setPendDir(d);
     const ps = Number(localStorage.getItem(PEND_PSIZE_KEY)); if (PAGE_SIZES.includes(ps)) setPendPageSize(ps);
     const pv = localStorage.getItem(PO_VIEW_KEY); if (pv === "card" || pv === "table") setPoView(pv);
-    const g = localStorage.getItem(PEND_GROUP_KEY); if (["none","shop","eta","po","mo"].includes(g ?? "")) setPendGroup(g as PendGroup);
+    const g = localStorage.getItem(PEND_GROUP_KEY); if (["none","shop","eta","po","mo","pay"].includes(g ?? "")) setPendGroup(g as PendGroup);
+    const pf = localStorage.getItem(PEND_PAY_KEY); if (isPoPayFilterKey(pf)) setPayF(pf);
     if (localStorage.getItem(PEND_COPY_KEY) === "1") setShowCopy(true);
   }, []);
   const changeShowCopy = (v: boolean) => { setShowCopy(v); localStorage.setItem(PEND_COPY_KEY, v ? "1" : "0"); };
@@ -202,6 +205,7 @@ export default function ReceiveGoodsPage() {
   const changePendCols = (n: number) => { setPendCols(n); localStorage.setItem(PEND_COLS_KEY, String(n)); };
   const changePendSort = (s: PendSort) => { setPendSort(s); setPendDir("asc"); localStorage.setItem(PEND_SORT_KEY, s); localStorage.setItem(PEND_DIR_KEY, "asc"); };
   const changePendGroup = (g: PendGroup) => { setPendGroup(g); localStorage.setItem(PEND_GROUP_KEY, g); };
+  const changePayF = (k: PoPayFilterKey | "") => { setPayF(k); localStorage.setItem(PEND_PAY_KEY, k); };
   const changePendPageSize = (n: number) => { setPendPageSize(n); setPendPage(0); localStorage.setItem(PEND_PSIZE_KEY, String(n)); };
   const changePoView = (v: "card" | "table") => { setPoView(v); localStorage.setItem(PO_VIEW_KEY, v); };
   // กดหัวคอลัมน์ในตาราง → สลับ key/ทิศทาง (ของกลาง pattern เดียวกับ DataTable)
@@ -264,21 +268,59 @@ export default function ReceiveGoodsPage() {
   // มาร์ค/ยกเลิก "จ่ายแล้ว" ที่ใบ PO — ผ่าน API กลาง (audit) → วันคาดเข้าเริ่มนับจากวันจ่าย
   const [marking, setMarking] = useState(false);
   const [payEdit, setPayEdit] = useState<{ po_id: string; po_no: string; value: string } | null>(null);   // popup ใส่วันที่จ่าย
+  // แก้หัวใบ PO ผ่าน API กลาง (ต้อง products.edit · เขียน audit ทุกครั้ง)
+  const patchPoHeader = useCallback(async (poId: string, body: Record<string, unknown>) => {
+    const res = await apiFetch(`/api/master-v2/purchase-orders-v2/${poId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, actor: user?.name }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+  }, [user?.name]);
   const patchPayment = useCallback(async (poId: string, body: Record<string, unknown>, okMsg: string) => {
     setMarking(true);
     try {
-      const res = await apiFetch(`/api/master-v2/purchase-orders-v2/${poId}`, {
-        method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, actor: user?.name }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+      await patchPoHeader(poId, body);
       toast.success(okMsg);
       setPayEdit(null); setQtyEdit(null);
       await loadPending(doneMode ? "done" : "pending");
     } catch (e) { toast.error("บันทึกไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setMarking(false); }
-  }, [user?.name, toast, loadPending, doneMode]);
+  }, [patchPoHeader, toast, loadPending, doneMode]);
   const savePaid = (poId: string, poNo: string, date: string) => patchPayment(poId, { payment_status: "paid", paid_date: date || null }, `มาร์คจ่ายแล้ว — ${poNo}`);
+
+  // 💰 ตั้งว่าจ่ายแล้ว หลายใบพร้อมกัน (จากแถบเลือกหลายรายการ) — ทีละใบสั่งซื้อ · ข้ามใบที่จ่ายแล้ว/ลงบิลรอโอน (บิลโอนครบ = ตั้งจ่ายให้เอง)
+  //   เกิน PAY_MANY_TYPED ใบ = ต้องพิมพ์ "ยืนยัน" · ใบที่ล้มเหลวค้างไว้ในป๊อปให้กดซ้ำ
+  const PAY_MANY_TYPED = 20;
+  const [payMany, setPayMany] = useState<{ pos: { po_id: string; po_no: string; seller: string }[]; skipped: number; date: string; typed: string } | null>(null);
+  const openPayMany = (sel: PendItem[]) => {
+    const m = new Map<string, { po_id: string; po_no: string; seller: string }>();
+    for (const it of sel) {
+      if (m.has(it.po_id)) continue;
+      const st = it.pay?.state ?? (it.payment_status === "paid" ? "paid" : "unpaid");
+      if (st === "paid" || st === "billed") continue;
+      m.set(it.po_id, { po_id: it.po_id, po_no: it.po_no, seller: it.seller_name });
+    }
+    const today = new Date();
+    setPayMany({ pos: [...m.values()].sort((a, b) => a.po_no.localeCompare(b.po_no)), skipped: new Set(sel.filter((x) => !m.has(x.po_id)).map((x) => x.po_id)).size, typed: "",
+      date: `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}` });
+  };
+  const saveManyPaid = async () => {
+    if (!payMany || !payMany.pos.length) return;
+    setMarking(true);
+    const failed: typeof payMany.pos = [];
+    let ok = 0;
+    for (const p of payMany.pos) {
+      try { await patchPoHeader(p.po_id, { payment_status: "paid", paid_date: payMany.date || null }); ok += 1; }
+      catch { failed.push(p); }
+    }
+    setMarking(false);
+    if (ok) toast.success(`บันทึกจ่ายแล้ว ${ok} ใบสั่งซื้อ`);
+    if (failed.length) {
+      toast.error(`บันทึกไม่สำเร็จ ${failed.length} ใบ (${failed.slice(0, 3).map((p) => p.po_no).join(", ")}${failed.length > 3 ? " …" : ""}) — ลองกดอีกครั้ง`);
+      setPayMany((cur) => (cur ? { ...cur, pos: failed, typed: "" } : cur));
+    } else { setPayMany(null); setSelectedIds(new Set()); }
+    await loadPending(doneMode ? "done" : "pending");
+  };
   // ยกเลิกจ่าย = ล้างข้อมูลการจ่ายทั้งชุด (ยอดจริง + บิลโอนเงินจีนที่ผูกไว้) ไม่งั้นค้างเป็นข้อมูลผี
   const unmarkPaid = (it: PendItem) => patchPayment(it.po_id,
     { payment_status: "unpaid", paid_date: null, paid_amount_thb: null, china_bill_id: null }, `ยกเลิกจ่าย — ${it.po_no}`);
@@ -341,8 +383,8 @@ export default function ReceiveGoodsPage() {
 
   const setPendInput = (id: string, patch: Partial<Input>) => setPendInputs((p) => ({ ...p, [id]: { ...p[id], ...patch } }));
 
-  // ค้นหา + ร้านที่เลือก + เรียงลำดับ (วันคาด / วันสั่ง / ชื่อ) — ค่าว่างไปท้ายสุดเสมอ
-  const shownPend = useMemo(() => {
+  // ค้นหา + ร้าน/ใบสั่งผลิตที่เลือก (ยังไม่กรองสถานะจ่าย — ชิปจ่ายเงินนับจากชุดนี้ ตัวเลขจะตรงกับที่เห็น)
+  const scopedPend = useMemo(() => {
     const ql = pendQ.trim().toLowerCase();
     let filtered = !ql ? pend : pend.filter((it) =>
       it.item_name.toLowerCase().includes(ql) || it.code.toLowerCase().includes(ql) ||
@@ -350,6 +392,11 @@ export default function ReceiveGoodsPage() {
     if (activeShop) filtered = filtered.filter((it) => it.seller_name === activeShop);
     if (activeMo) filtered = filtered.filter((it) => it.source_mo_no === activeMo);
     if (tab === "mo") filtered = filtered.filter((it) => !!it.source_mo_no);   // แท็บตามใบสั่งงาน = เฉพาะของที่มาจาก MO
+    return filtered;
+  }, [pend, pendQ, activeShop, activeMo, tab]);
+  // + สถานะจ่ายเงิน + เรียงลำดับ (วันคาด / วันสั่ง / ชื่อ) — ค่าว่างไปท้ายสุดเสมอ
+  const shownPend = useMemo(() => {
+    const filtered = payF ? scopedPend.filter((it) => matchPayFilter(it.pay, payF)) : scopedPend;
     const byName = (a: PendItem, b: PendItem) => a.item_name.localeCompare(b.item_name, "th");
     const byDate = (ka: keyof PendItem) => (a: PendItem, b: PendItem) => {
       const va = (a[ka] as string) || "9999-12-31", vb = (b[ka] as string) || "9999-12-31";
@@ -373,13 +420,17 @@ export default function ReceiveGoodsPage() {
       : byDate("expected_date");
     const sorted = [...filtered].sort(cmp);
     return pendDir === "desc" ? sorted.reverse() : sorted;
-  }, [pend, pendQ, pendSort, pendDir, activeShop, activeMo, tab, pendInputs]);
+  }, [scopedPend, payF, pendSort, pendDir, pendInputs]);
 
   // รายชื่อร้าน (list ซ้ายมือ) — นับจากข้อมูลแท็บปัจจุบัน
   const pendShops = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const it of pend) m.set(it.seller_name, (m.get(it.seller_name) ?? 0) + 1);
-    return [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => a.name.localeCompare(b.name, "th"));
+    const m = new Map<string, { count: number; unpaid: number }>();
+    for (const it of pend) {
+      const g = m.get(it.seller_name) ?? { count: 0, unpaid: 0 };
+      g.count += 1; if (payFilterOf(it.pay) === "unpaid") g.unpaid += 1;
+      m.set(it.seller_name, g);
+    }
+    return [...m.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => a.name.localeCompare(b.name, "th"));
   }, [pend]);
 
   // รายการใบสั่งผลิต (MO) ที่มีของรอรับ (list ซ้ายมือ — section "จากใบสั่งผลิต")
@@ -429,19 +480,22 @@ export default function ReceiveGoodsPage() {
     return shownPend.slice(start, start + pendPageSize);
   }, [shownPend, isGrouped, pendPage, pendPageSize]);
   // เปลี่ยนตัวกรอง/เรียง/แท็บ → กลับหน้าแรก
-  useEffect(() => { setPendPage(0); }, [pendQ, activeShop, activeMo, pendSort, pendDir, pendGroup, tab]);
+  useEffect(() => { setPendPage(0); }, [pendQ, activeShop, activeMo, pendSort, pendDir, pendGroup, tab, payF]);
 
   // จัดกลุ่ม (ร้าน / วันคาดเข้า / PO) — คงลำดับ sort ภายในกลุ่ม
   const groupedPend = useMemo<{ key: string; label: string; items: PendItem[] }[]>(() => {
     const grp: PendGroup = tab === "mo" ? "mo" : pendGroup;   // แท็บตามใบสั่งงาน = บังคับจัดกลุ่มตาม MO
     if (grp === "none") return [{ key: "_all", label: "", items: pagedPend }];
+    const PAY_ORDER = [...PO_PAY_FILTERS.map((f) => f.key), "none"];
     const keyOf = (it: PendItem) =>
-      grp === "shop" ? (it.seller_name || "—")
+      grp === "pay" ? (payFilterOf(it.pay) ?? "none")
+      : grp === "shop" ? (it.seller_name || "—")
       : grp === "po" ? (it.po_no || "—")
       : grp === "mo" ? (it.source_mo_no || "—")
       : (it.expected_date || "");   // eta
     const labelOf = (it: PendItem) =>
-      grp === "shop" ? `🏪 ${it.seller_name || "—"}`
+      grp === "pay" ? `จ่ายเงิน: ${PO_PAY_FILTERS.find((f) => f.key === payFilterOf(it.pay))?.label ?? "ไม่มีข้อมูล"}`
+      : grp === "shop" ? `🏪 ${it.seller_name || "—"}`
       : grp === "po" ? `📋 ${it.po_no || "—"} · ${it.seller_name || "—"}`
       : grp === "mo" ? (it.source_mo_no ? `🏭 ${it.source_mo_no}${it.used_for_label ? ` · ${it.used_for_label}` : ""}` : "🏭 ไม่ได้มาจากใบสั่งผลิต")
       : (it.expected_date ? `🚚 คาดเข้า ${formatDate(it.expected_date)}` : "🚚 ยังไม่ระบุวันคาด");
@@ -455,6 +509,7 @@ export default function ReceiveGoodsPage() {
     // เรียงหัวกลุ่ม: eta ตามวันที่ (ว่าง=ท้าย), อื่นๆ ตามชื่อ
     groups.sort((a, b) => grp === "eta"
       ? ((a.key || "9999-12-31") < (b.key || "9999-12-31") ? -1 : 1)
+      : grp === "pay" ? PAY_ORDER.indexOf(a.key) - PAY_ORDER.indexOf(b.key)
       : a.label.localeCompare(b.label, "th"));
     return groups;
   }, [shownPend, pagedPend, pendGroup, tab]);
@@ -695,7 +750,7 @@ export default function ReceiveGoodsPage() {
                 {pendShops.filter((s) => !shopQ.trim() || s.name.toLowerCase().includes(shopQ.trim().toLowerCase())).map((s) => (
                   <button key={s.name} onClick={() => { setActiveShop(s.name); setActiveMo(null); setShopDrawerOpen(false); }} className={`w-full text-left px-3 py-2 border-b border-slate-100 last:border-0 ${activeShop === s.name ? "bg-blue-50" : "hover:bg-slate-50"}`}>
                     <div className={`text-sm ${activeShop === s.name ? "text-blue-700 font-medium" : "text-slate-700"}`}>🏪 {s.name}</div>
-                    <div className="text-[11px] text-slate-400">{s.count} รายการ</div>
+                    <div className="text-[11px] text-slate-400">{s.count} รายการ{s.unpaid > 0 && <span className="text-rose-600"> · ยังไม่จ่าย {s.unpaid}</span>}</div>
                   </button>
                 ))}
               </div>
@@ -742,6 +797,7 @@ export default function ReceiveGoodsPage() {
                     <option value="eta">วันคาดการณ์ของเข้า</option>
                     <option value="po">ใบสั่งซื้อ (PO)</option>
                     <option value="mo">ใบสั่งผลิต (MO)</option>
+                    <option value="pay">สถานะจ่ายเงิน</option>
                   </select>
                 </label>
               )}
@@ -762,7 +818,10 @@ export default function ReceiveGoodsPage() {
               </div>
             </div>
 
-            {/* แถบจัดการหลายรายการ (Mass) — โผล่เมื่อติ๊กเลือก: รับของ / ตั้งวันสั่ง / ตั้งวันคาดเข้า / ยกเลิก */}
+            {/* ชิปกรองสถานะจ่ายเงิน — ของกลาง (ใช้ร่วมกับหน้าสั่งซื้อโหมดรับของ) · นับตามร้าน/ค้นหาที่เลือกอยู่ */}
+            <PoPayFilterBar items={scopedPend} value={payF} onChange={changePayF} className="mb-3" />
+
+            {/* แถบจัดการหลายรายการ (Mass) — โผล่เมื่อติ๊กเลือก: รับของ / ตั้งวันสั่ง / ตั้งวันคาดเข้า / ตั้งว่าจ่ายแล้ว / ยกเลิก */}
             {!doneMode && selectedIds.size > 0 && (() => {
               const sel = pend.filter((p) => selectedIds.has(p.id));
               if (sel.length === 0) return null;
@@ -772,6 +831,10 @@ export default function ReceiveGoodsPage() {
                   <button onClick={() => setMassRecv(sel)} className="h-8 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">📥 รับของ ({sel.length})</button>
                   <button onClick={() => openDateEdit(sel, "order_date")} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">📅 ตั้งวันที่สั่ง</button>
                   <button onClick={() => openDateEdit(sel, "expected_date")} className="h-8 px-3 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">🚚 ตั้งวันคาดเข้า</button>
+                  {canEditPo && (() => {
+                    const n = new Set(sel.filter((x) => { const st = x.pay?.state ?? (x.payment_status === "paid" ? "paid" : "unpaid"); return st !== "paid" && st !== "billed"; }).map((x) => x.po_id)).size;
+                    return n > 0 ? <button onClick={() => openPayMany(sel)} className="h-8 px-3 inline-flex items-center gap-1 text-xs font-medium rounded-md border border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50"><Icon value="i:cash" />ตั้งว่าจ่ายแล้ว ({n} ใบสั่งซื้อ)</button> : null;
+                  })()}
                   <button onClick={() => openCancelMany(sel)} className="h-8 px-3 text-xs font-medium rounded-md border border-red-200 bg-white text-red-600 hover:bg-red-50">❌ ยกเลิกรายการ</button>
                   <button onClick={() => setSelectedIds(new Set())} className="ml-auto h-8 px-3 text-xs font-medium rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">ล้างเลือก</button>
                 </div>
@@ -1328,6 +1391,40 @@ export default function ReceiveGoodsPage() {
           <p className="text-[11px] text-slate-400 mt-2">วันคาดการณ์ของเข้าจะเริ่มนับจากวันนี้ + ลีดไทม์ร้าน</p>
         </ERPModal>
       )}
+
+      {/* ตั้งว่าจ่ายแล้ว หลายใบสั่งซื้อพร้อมกัน — บอกจำนวน/รายการที่จะเปลี่ยนก่อนบันทึก · เกิน PAY_MANY_TYPED ใบต้องพิมพ์ยืนยัน */}
+      {payMany && (() => {
+        const needTyped = payMany.pos.length > PAY_MANY_TYPED;
+        const ready = payMany.pos.length > 0 && !!payMany.date && (!needTyped || payMany.typed.trim() === "ยืนยัน");
+        return (
+          <ERPModal open onClose={() => !marking && setPayMany(null)} size="md" storageKey="recv-pay-many" closeOnBackdrop={false} defaultExpanded={false}
+            title="ตั้งว่าจ่ายแล้ว"
+            description={`${payMany.pos.length} ใบสั่งซื้อ — มีผลกับทุกบรรทัดในใบ (เปลี่ยนสถานะจ่ายเงินเป็น "จ่ายแล้ว" + วันที่จ่าย)`}
+            footer={<>
+              <button onClick={() => setPayMany(null)} disabled={marking} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
+              <button onClick={() => void saveManyPaid()} disabled={marking || !ready} className="px-5 h-9 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50">{marking ? "กำลังบันทึก…" : `บันทึกว่าจ่ายแล้ว ${payMany.pos.length} ใบ`}</button>
+            </>}>
+            <label className="block text-xs font-medium text-slate-600 mb-1">วันที่จ่ายเงิน</label>
+            <input type="date" value={payMany.date} onChange={(e) => setPayMany((p) => (p ? { ...p, date: e.target.value } : p))}
+              className="w-full h-10 px-3 text-sm border border-slate-200 rounded-md" />
+            <div className="mt-3 text-xs font-medium text-slate-600">ใบสั่งซื้อที่จะเปลี่ยน</div>
+            <div className="mt-1 max-h-48 overflow-auto rounded-md border border-slate-200 divide-y divide-slate-100 text-sm">
+              {payMany.pos.map((p) => (
+                <div key={p.po_id} className="px-3 py-1.5 flex items-center gap-2"><span className="font-mono text-slate-700">{p.po_no}</span><span className="truncate text-slate-500">{p.seller}</span></div>
+              ))}
+            </div>
+            {payMany.skipped > 0 && <p className="text-[11px] text-slate-500 mt-2">ข้าม {payMany.skipped} ใบที่จ่ายแล้วหรือลงบิลโอนเงินจีนไว้แล้ว (บิลโอนครบ ระบบตั้งจ่ายให้เอง)</p>}
+            {needTyped && (
+              <div className="mt-3">
+                <label className="block text-xs font-medium text-rose-700 mb-1">เปลี่ยนพร้อมกันหลายใบ — พิมพ์คำว่า “ยืนยัน” เพื่อบันทึก</label>
+                <input value={payMany.typed} onChange={(e) => setPayMany((p) => (p ? { ...p, typed: e.target.value } : p))} placeholder="ยืนยัน"
+                  className="w-full h-10 px-3 text-sm border border-rose-200 rounded-md" />
+              </div>
+            )}
+            <p className="text-[11px] text-slate-400 mt-2">ระบบบันทึกประวัติว่าใครกดทุกใบ · ยกเลิกได้ทีละใบจากปุ่ม "ยกเลิกจ่าย" ในป๊อปรายการ</p>
+          </ERPModal>
+        );
+      })()}
 
       {/* popup แก้วันคาดการณ์ของเข้า / วันที่สั่ง (อยู่ที่หัวใบ PO → มีผลทุกบรรทัดในใบ · หลายใบพร้อมกันได้จากแถบ Mass) */}
       {etaEdit && (

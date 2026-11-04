@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { poPayState, hasCredit } from "@/lib/po-pay-state";
+import { poPayState, hasCredit, countPayFilters, isPoPayFilterKey, matchPayFilter, payFilterOf } from "@/lib/po-pay-state";
 
 const T = "2026-11-04";
 
@@ -31,5 +31,21 @@ describe("สถานะจ่ายเงินใบสั่งซื้อ 
   });
   it("ร้านส่งก่อนจ่าย ไม่ได้ตั้งเครดิต = ค้างจ่าย (ส้ม)", () => {
     expect(poPayState({ ship_before_pay: true, order_date: "2026-11-01" }, T)).toMatchObject({ state: "credit_due", label: "ส่งก่อนจ่าย (ค้างจ่าย)" });
+  });
+});
+
+describe("ชิปกรองสถานะจ่ายเงิน (PoPayFilterBar)", () => {
+  const L = [{ pay: { state: "unpaid" as const } }, { pay: { state: "overdue" as const } }, { pay: { state: "paid" as const } }, { pay: { state: "credit_due" as const } }, { pay: null }];
+  it("เลยกำหนดนับรวมใน ยังไม่จ่าย · ไม่มีข้อมูลจ่าย ไม่เข้าชิปไหน", () => {
+    expect(countPayFilters(L)).toEqual({ all: 5, unpaid: 2, billed: 0, credit: 1, paid: 1 });
+    expect(payFilterOf(null)).toBeNull();
+    expect(payFilterOf({ state: "overdue" })).toBe("unpaid");
+  });
+  it("ทั้งหมด (ค่าว่าง) ผ่านทุกแถว · ชิปอื่นกรองตามสถานะ", () => {
+    expect(L.filter((x) => matchPayFilter(x.pay, "")).length).toBe(5);
+    expect(L.filter((x) => matchPayFilter(x.pay, "unpaid")).length).toBe(2);
+    expect(L.filter((x) => matchPayFilter(x.pay, "paid")).length).toBe(1);
+    expect(isPoPayFilterKey("credit")).toBe(true);
+    expect(isPoPayFilterKey("oops")).toBe(false);
   });
 });

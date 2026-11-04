@@ -73,3 +73,16 @@ export const PO_PAY_FILTERS: { key: "unpaid" | "billed" | "credit" | "paid"; lab
   { key: "credit", label: "ค้างจ่าย (เครดิต)", states: ["credit_due"] },
   { key: "paid", label: "จ่ายแล้ว", states: ["paid"] },
 ];
+export type PoPayFilterKey = (typeof PO_PAY_FILTERS)[number]["key"];
+export const isPoPayFilterKey = (v: unknown): v is PoPayFilterKey => PO_PAY_FILTERS.some((f) => f.key === v);
+/** สถานะจ่ายนี้อยู่ชิปไหน (ไม่มีข้อมูลจ่าย = null) */
+export const payFilterOf = (pay: Pick<PoPayState, "state"> | null | undefined): PoPayFilterKey | null =>
+  pay ? PO_PAY_FILTERS.find((f) => f.states.includes(pay.state))?.key ?? null : null;
+/** ตรงชิปที่เลือกไหม ("" = ทั้งหมด) */
+export const matchPayFilter = (pay: Pick<PoPayState, "state"> | null | undefined, key: string): boolean => !key || payFilterOf(pay) === key;
+/** นับจำนวนต่อชิป (all = ทั้งหมดที่ส่งมา) */
+export function countPayFilters(list: { pay?: Pick<PoPayState, "state"> | null }[]): Record<PoPayFilterKey | "all", number> {
+  const out: Record<PoPayFilterKey | "all", number> = { all: list.length, unpaid: 0, billed: 0, credit: 0, paid: 0 };
+  for (const it of list) { const k = payFilterOf(it.pay); if (k) out[k] += 1; }
+  return out;
+}

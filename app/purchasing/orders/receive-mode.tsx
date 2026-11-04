@@ -18,8 +18,8 @@ import { PoDetailModal } from "@/components/po-detail-modal";
 import { GrDetailModal } from "@/components/gr-detail-modal";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
-import { PO_PAY_FILTERS, type PoPayState } from "@/lib/po-pay-state";
-import { PoPayChip } from "@/components/po-pay-chip";
+import { matchPayFilter, type PoPayState } from "@/lib/po-pay-state";
+import { PoPayChip, PoPayFilterBar } from "@/components/po-pay-chip";
 
 type RecvItem = ReceiveCartItem & {
   seller_name: string; code: string; image_url: string | null; image_from_parent?: boolean;
@@ -62,7 +62,7 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
   const [sort, setSort] = useState<RecvSort>("age");
   // ชิปกรองสถานะจ่ายเงิน (ของกลาง PO_PAY_FILTERS) — "" = ทั้งหมด
   const [payF, setPayF] = useState<string>("");
-  const payOk = (it: RecvItem) => { const f = PO_PAY_FILTERS.find((x) => x.key === payF); return !f || (!!it.pay && f.states.includes(it.pay.state)); };
+  const payOk = (it: RecvItem) => matchPayFilter(it.pay, payF);
   const [cart, setCart] = useState<Record<string, ReceiveInput>>({});   // po_line_id → จำนวนรับ/เสีย (อยู่ในตะกร้า = มี key)
   const [detail, setDetail] = useState<{ it: RecvItem; inp: ReceiveInput } | null>(null);   // ป๊อปกรอกละเอียด (ของกลาง ReceiveLineFields)
   const [poView, setPoView] = useState<string | null>(null);
@@ -214,20 +214,8 @@ export function ReceiveMode({ cols, isChineseShop }: { cols: number; isChineseSh
               {canBackfill && <button onClick={() => setBackfillOpen(true)} title="ของค้างรับเก่า: รับย้อนหลัง (ไม่ต้องแนบเอกสาร ใส่เหตุผล) / ยกเลิก" className="h-9 px-3 text-sm border border-slate-200 rounded-md text-slate-600 hover:bg-slate-50 shrink-0 whitespace-nowrap">🧹 เคลียร์ของค้างเก่า</button>}
             </div>
 
-            {items.some((i) => i.pay) && (
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <span className="text-xs text-slate-400 mr-0.5">จ่ายเงิน</span>
-                {[{ key: "", label: "ทั้งหมด" }, ...PO_PAY_FILTERS].map((f) => {
-                  const n = f.key ? items.filter((i) => i.pay && PO_PAY_FILTERS.find((x) => x.key === f.key)!.states.includes(i.pay.state)).length : items.length;
-                  return (
-                    <button key={f.key || "all"} type="button" onClick={() => setPayF(f.key)}
-                      className={`h-7 px-2.5 text-xs rounded-full border ${payF === f.key ? "bg-emerald-50 border-emerald-300 text-emerald-700 font-medium" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
-                      {f.label} <b>{n}</b>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            {/* ชิปกรองสถานะจ่ายเงิน — ของกลาง (ใช้ร่วมกับหน้ารับสินค้าเข้า) */}
+            <PoPayFilterBar items={items} value={payF} onChange={setPayF} />
 
             {doneGrs.length > 0 && (
               <div className="px-4 py-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-700 flex items-center gap-2 flex-wrap">
