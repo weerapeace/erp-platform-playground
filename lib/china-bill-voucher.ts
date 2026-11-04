@@ -14,6 +14,7 @@ import { writeAudit } from "@/lib/audit";
 import { createManualVoucher, recomputeVoucher, loadSkus, parentBasis } from "@/lib/purchase-voucher-server";
 import { loadVoucherLite, loadShopGroups, loadAliases, parseSellerBill } from "@/lib/seller-bill";
 import { matchBillLines, checkBillMath, type PoGroup } from "@/lib/seller-bill-match";
+import { shopNameSimilarity } from "@/lib/partner-match";
 
 type Admin = SupabaseClient;
 type Row = Record<string, unknown>;
@@ -30,7 +31,47 @@ export type ChinaBillRow = {
   id: string; bill_date: string | null; supplier_id: string | null; shop: string | null; amount_rmb: number; rate: number | null;
   status: string; is_shipping: boolean; files: number; po_links: { po_id: string; po_no: string }[];
   voucher: { id: string; pv_no: string | null; status: string } | null;
+  /** ใบสั่งซื้อที่ยังค้างของร้านนี้ (ร่าง/สั่งแล้ว/รับบางส่วน = ที่ AI ใช้จับคู่) — 0 = จับคู่อัตโนมัติไม่ได้ (หน้า "ตรวจก่อนสร้าง") */
+  open_pos: number;
+  /** ร้านชื่อคล้ายที่มีใบค้าง (เฉพาะร้านนี้ไม่มีใบค้าง — เคสร้านเดียวกันลง 2 ชื่อ) */
+  similar: { id: string; name: string; open_pos: number } | null;
 };
+
+const OPEN_FOR_MATCH = ["draft", "purchase", "partial"];   // ตรงกับ OPEN_PO_STATUS ใน lib/seller-bill (loadShopGroups)
+
+/** คำภาษาอังกฤษ ≥3 ตัวในชื่อร้าน ("ร้านผ้า LONG TAI HANG" → long,tai,hang) */
+const latinWords = (s: string) => (s.toLowerCase().match(/[a-z]{3,}/g) ?? []);
+/** ชื่ออังกฤษชุดเดียวกัน (≥2 คำ · คำทุกคำของฝั่งที่สั้นกว่าอยู่ในอีกฝั่ง) — shopNameSimilarity จับเคสนี้ไม่ได้
+ *  ข้อมูลจริง: "ร้านผ้า LONG TAI HANG" กับ "LONG TAI HANG (ร้าน PU ใหม่)" ได้แค่ 0.19 */
+export function latinNameOverlap(a: string, b: string): boolean {
+  const wa = [...new Set(latinWords(a))], wb = [...new Set(latinWords(b))];
+  const [s, l] = wa.length <= wb.length ? [wa, new Set(wb)] : [wb, new Set(wa)];
+  return s.length >= 2 && s.every((w) => l.has(w));
+}
+
+/** นับใบค้างต่อร้าน + หาร้านชื่อคล้ายที่มีใบค้าง ให้ร้านที่ไม่มีใบ (เสนอเท่านั้น ไม่ผูกอัตโนมัติ) */
+async function openPoInfo(admin: Admin, supIds: string[], nameOf: Map<string, string>): Promise<{ count: Map<string, number>; similar: Map<string, ChinaBillRow["similar"]> }> {
+  const count = new Map<string, number>();
+  const similar = new Map<string, ChinaBillRow["similar"]>();
+  if (!supIds.length) return { count, similar };
+  const { data } = await admin.from("purchase_orders_v2").select("seller_partner_id")
+    .not("is_active", "is", false).in("status", OPEN_FOR_MATCH).not("seller_partner_id", "is", null).limit(5000);
+  for (const r of (data ?? []) as Row[]) { const k = str(r.seller_partner_id); count.set(k, (count.get(k) ?? 0) + 1); }
+  const lonely = supIds.filter((id) => !count.get(id));
+  if (!lonely.length || !count.size) return { count, similar };
+  const { data: ps } = await admin.from("partners_v2").select("id, display_name, name_th, name_en").in("id", [...count.keys()]);
+  const others = ((ps ?? []) as Row[]).map((p) => ({ id: str(p.id), name: str(p.name_th) || str(p.display_name), names: [p.name_th, p.display_name, p.name_en].map(str).filter(Boolean) }));
+  for (const id of lonely) {
+    const mine = nameOf.get(id) ?? "";
+    let best: { id: string; name: string; score: number } | null = null;
+    for (const o of others) {
+      const score = Math.max(0, ...o.names.map((n) => (latinNameOverlap(mine, n) ? 0.8 : shopNameSimilarity(mine, n))));
+      if (score >= 0.7 && (!best || score > best.score)) best = { id: o.id, name: o.name, score };
+    }
+    if (best) similar.set(id, { id: best.id, name: best.name, open_pos: count.get(best.id) ?? 0 });
+  }
+  return { count, similar };
+}
 
 export async function listChinaBillsForVoucher(admin: Admin): Promise<ChinaBillRow[]> {
   const { data } = await admin.from("china_bills").select("id, supplier_id, amount_rmb, rate, bill_date, status, is_shipping, attachments, is_active")
@@ -50,7 +91,10 @@ export async function listChinaBillsForVoucher(admin: Admin): Promise<ChinaBillR
   const poNo = new Map(((pos ?? []) as Row[]).map((p) => [String(p.id), str(p.po_no)]));
   const vOf = new Map<string, ChinaBillRow["voucher"]>();
   for (const v of (vs ?? []) as Row[]) if (str(v.status) !== "cancelled") vOf.set(str(v.china_bill_id), { id: String(v.id), pv_no: (v.pv_no as string) ?? null, status: str(v.status) });
+  const open = await openPoInfo(admin, supIds, shopOf);
   return bills.map((b) => ({
+    open_pos: b.supplier_id ? open.count.get(String(b.supplier_id)) ?? 0 : 0,
+    similar: b.supplier_id ? open.similar.get(String(b.supplier_id)) ?? null : null,
     id: String(b.id), bill_date: (b.bill_date as string) ?? null, supplier_id: (b.supplier_id as string) ?? null, shop: b.supplier_id ? shopOf.get(String(b.supplier_id)) ?? null : null,
     amount_rmb: num(b.amount_rmb), rate: num(b.rate) > 0 ? num(b.rate) : null, status: str(b.status), is_shipping: b.is_shipping === true,
     files: chinaBillFiles(b).length,
