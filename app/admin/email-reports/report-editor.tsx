@@ -390,7 +390,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
               {offNote(form.email_enabled, "Gmail")}
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 {preview ? <div className="min-w-0 truncate rounded-md bg-slate-50 px-2 py-1 text-xs text-slate-600" title={preview.subject}>หัวเรื่อง: <b>{preview.subject}</b>{preview.attachment ? <span className="ml-2 text-emerald-700">📎 {preview.attachment}</span> : null}</div> : <span />}
-                <span className="shrink-0 text-[11px] text-slate-400">{previewLoading ? "กำลังโหลด..." : preview ? `พบ ${preview.total} งาน · โชว์ ${preview.shown}` : ""}</span>
+                <span className="shrink-0 text-[11px] text-slate-400">{previewLoading ? "กำลังโหลด..." : preview ? `พบ ${preview.total} ${isTable ? "รายการ" : "งาน"} · โชว์ ${preview.shown}` : ""}</span>
               </div>
               {previewErr ? (
                 <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">⚠ {previewErr}</div>
@@ -469,7 +469,8 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
               <select value={form.source_key} onChange={(e) => {
                 const next = sourceDef(e.target.value);
                 // รายงานใหม่: ใช้วัน/เวลาส่งที่เหมาะกับแหล่งนี้ (เช่น สรุปแผนงานทีม = ศุกร์ 17:00) · แก้ต่อได้
-                set({ source_key: e.target.value, options: normalizeReportOptions(e.target.value, form.options),
+                // เปลี่ยนแหล่งข้อมูล = หน้าตาเริ่มจากค่าเริ่มต้นของแหล่งใหม่ (คอลัมน์/จำนวน/รูปต่างกัน — ไม่พกค่าของแหล่งเดิมมา) · คงหัวเรื่อง/ข้อความเกริ่นไว้
+                set({ source_key: e.target.value, options: normalizeReportOptions(e.target.value, { subject_template: form.options.subject_template, intro: form.options.intro }),
                   ...(!editing && next.defaultDays ? { days: [...next.defaultDays] } : {}), ...(!editing && next.defaultTime ? { send_time: next.defaultTime } : {}) });
               }}
                 className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
