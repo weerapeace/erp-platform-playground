@@ -46,6 +46,9 @@ audit_logs entity `content_album`: create · update (เก่า→ใหม่
 ## หน้าจอ (ของกลางที่ใช้)
 
 `components/asset-library/contents/` — `ContentAlbumsBoard` (การ์ด + แท็บสถานะ + ชิปแบรนด์ + ถังขยะ) · `AlbumDetailModal` (ERPModal · ลากวาง · UploadProgress · runBackgroundTask · ConfirmDialog) · `AlbumFormModal` (ERPForm · BrandSelect · UserPicker · PlatformIcon) · ส่งเข้าปฏิทินใช้ `ContentCreateModal` กลาง (preset.album)
+  - **ส่งเข้าปฏิทิน = เลือกวันก่อน (2026-11-04):** ปฏิทินกลาง `DocCalendar` (`onPickDay` · `selectedDay` = วันที่ต้องลงภายใน · `disablePast`) โชว์โพสต์เดิมของแบรนด์ (สีม่วง = จากอัลบั้มนี้) → กดวัน = เปิดฟอร์มที่ใส่วัน (+เวลาแนะนำ) แบรนด์ ชื่อ แพลตฟอร์ม ประเภท ไฟล์ แคปชั่น สินค้า · ไม่ได้แท็กสินค้า = เดาจากรหัสในชื่ออัลบั้ม (`codeLike` + `findParentSkuByCode` ตรงรหัสเป๊ะ) · ปุ่ม "ยังไม่กำหนดวัน" = เปิดฟอร์มไม่มีวัน
+  - กริดไฟล์อยู่บนสุด (ต่อจากแถบ Drive) · โชว์เต็มรูปไม่ครอป (`FileThumb fit="contain"`) · ช่องลากไฟล์อยู่ใต้กริด
+  - ยังเรียงลำดับไฟล์เองไม่ได้ — ต้องมีช่องเก็บลำดับใน DB (ขออนุญาตเจ้าของก่อน)
 อัปไฟล์ `uploadFilesToAlbum` (./data): รูปย่อ (`prepareResizedImage`) / ภาพปกวิดีโอ (`lib/video-poster`) → `/api/admin/upload` no_library → ตรวจรูปซ้ำ `askDuplicateUploads` → Drive ทีละชิ้น `uploadFileToDrive` → ลงทะเบียน
 ลิงก์ตรง `/master/assets?source=contents&album=<id>` (ป้าย "จากอัลบั้ม" ในป๊อปโพสต์) · การ์ดปฏิทินมีไอคอนอัลบั้ม
 

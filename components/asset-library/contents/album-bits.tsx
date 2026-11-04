@@ -74,7 +74,8 @@ export function PlatChip({ code, state, label, iconKey, compact = false }: { cod
 const fmtDuration = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
 
 /** ภาพย่อไฟล์ในอัลบั้ม — รูปย่อ/ภาพปกจาก R2 · ไม่มีภาพปก (drive:) วิดีโอ = ไอคอน · รูป = ย่อจาก Drive */
-export function FileThumb({ r2Key, type, duration, width = 360, className = "" }: { r2Key: string | null; type: string; duration?: number | null; width?: number; className?: string }) {
+/** fit "contain" = โชว์เต็มรูป ไม่ครอป (กริดไฟล์ในอัลบั้ม) · ค่าเริ่ม "cover" = เต็มช่อง (การ์ด/ปก) */
+export function FileThumb({ r2Key, type, duration, width = 360, className = "", fit = "cover" }: { r2Key: string | null; type: string; duration?: number | null; width?: number; className?: string; fit?: "cover" | "contain" }) {
   const video = type === "video";
   const noPreview = !r2Key || (video && r2Key.startsWith("drive:"));
   return (
@@ -83,7 +84,7 @@ export function FileThumb({ r2Key, type, duration, width = 360, className = "" }
         <div className="absolute inset-0 grid place-items-center text-slate-400"><Icon name={video ? "video" : "image"} size={28} /></div>
       ) : (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={r2ImageUrl(r2Key!, width) ?? ""} alt="" loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+        <img src={r2ImageUrl(r2Key!, width) ?? ""} alt="" loading="lazy" className={`absolute inset-0 w-full h-full ${fit === "contain" ? "object-contain" : "object-cover"}`} />
       )}
       {video && (
         <span className="absolute bottom-1 left-1 inline-flex items-center gap-0.5 h-5 px-1.5 rounded bg-black/60 text-white text-[10px]">

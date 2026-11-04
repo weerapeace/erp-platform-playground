@@ -11,10 +11,12 @@
  *   • doc.href  → กดแล้วลิงก์ไปหน้าอื่น (ใช้ openLink ของกลางได้)
  *   • onPick    → กดแล้วเปิดป๊อปในหน้าเดียวกัน
  *   • doc.approx = true → ติด "~" บอกว่าเป็นวันโดยประมาณ (เช่น ยังไม่ใส่กำหนดส่ง เลยวางตามวันที่สั่ง)
+ *   • onPickDay → ใช้เป็น "ตัวเลือกวัน" (กดช่องวัน = เลือกวันนั้น · เห็นงานเดิมของแต่ละวันประกอบ) — selectedDay ไฮไลต์ · disablePast กดวันที่ผ่านไปแล้วไม่ได้
+ *     เช่น ส่งอัลบั้มเข้าปฏิทิน: เลือกวันก่อน แล้วค่อยเปิดฟอร์ม (components/asset-library/contents/album-detail)
  *
  * ห้ามเขียนตารางปฏิทินเองในหน้าโมดูล — ใช้ตัวนี้
  */
-import { useMemo } from "react";
+import { useMemo, type KeyboardEvent } from "react";
 
 export type CalDoc = {
   id: string;
@@ -39,7 +41,7 @@ const money = (n: number) => "฿" + (Math.round(n) || 0).toLocaleString("th-TH"
 const ymd = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
 export function DocCalendar({
-  docs, cursor, onCursor, onPick, hint, unit = "ใบ",
+  docs, cursor, onCursor, onPick, hint, unit = "ใบ", onPickDay, selectedDay, disablePast = false,
 }: {
   docs: CalDoc[];
   cursor: Date;
@@ -47,6 +49,12 @@ export function DocCalendar({
   onPick?: (id: string) => void;
   hint?: string;
   unit?: string;
+  /** กดช่องวัน = เลือกวันนั้น (YYYY-MM-DD) — กดเอกสารในช่องก็นับเป็นเลือกวัน ถ้าไม่ได้ส่ง onPick */
+  onPickDay?: (day: string) => void;
+  /** วันที่เลือกไว้ (ไฮไลต์) */
+  selectedDay?: string | null;
+  /** กดวันที่ผ่านไปแล้วไม่ได้ (ใช้คู่ onPickDay) */
+  disablePast?: boolean;
 }) {
   const byDay = useMemo(() => {
     const m = new Map<string, CalDoc[]>();
@@ -84,8 +92,13 @@ export function DocCalendar({
           const list = byDay.get(k) ?? [];
           const inMonth = d.getMonth() === cursor.getMonth();
           const sum = list.reduce((n, o) => n + (Number(o.amount) || 0), 0);
+          const past = disablePast && k < today;
+          const pickable = !!onPickDay && !past;
+          const picked = !!selectedDay && k === selectedDay;
           return (
-            <div key={k} className={`min-h-[104px] border-b border-r border-slate-100 p-1 ${inMonth ? "bg-white" : "bg-slate-50/60"} ${k === today ? "ring-2 ring-inset ring-indigo-400" : ""}`}>
+            <div key={k}
+              {...(pickable ? { role: "button", tabIndex: 0, title: "เลือกวันนี้", onClick: () => onPickDay?.(k), onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onPickDay?.(k); } } } : {})}
+              className={`min-h-[104px] border-b border-r border-slate-100 p-1 ${inMonth ? "bg-white" : "bg-slate-50/60"} ${k === today ? "ring-2 ring-inset ring-indigo-400" : ""} ${picked ? "!bg-indigo-50 ring-2 ring-inset ring-indigo-600" : ""} ${pickable ? "cursor-pointer hover:bg-indigo-50/60" : ""} ${past && onPickDay ? "opacity-45 cursor-not-allowed" : ""}`}>
               <div className="flex items-center justify-between">
                 <span className={`text-[11px] font-semibold ${k === today ? "text-indigo-700" : inMonth ? "text-slate-600" : "text-slate-300"}`}>{d.getDate()}</span>
                 {list.length > 0 && <span className="text-[9px] px-1 rounded bg-indigo-50 text-indigo-700">{list.length}{sum ? ` · ${money(sum)}` : ""}</span>}
@@ -106,7 +119,7 @@ export function DocCalendar({
                   const tip = o.title ?? `${o.no ?? ""}${o.sub ? ` · ${o.sub}` : ""}${o.amount ? `\n${money(o.amount)}` : ""}`;
                   return o.href
                     ? <a key={o.id} href={o.href} title={tip} className={cls}>{inner}</a>
-                    : <button key={o.id} type="button" onClick={() => onPick?.(o.id)} title={tip} className={cls}>{inner}</button>;
+                    : <button key={o.id} type="button" onClick={(e) => { if (onPick) { e.stopPropagation(); onPick(o.id); } }} title={tip} className={cls}>{inner}</button>;
                 })}
               </div>
             </div>

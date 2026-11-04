@@ -553,6 +553,21 @@ function mapParentRow(row: Record<string, unknown>): ParentSkuPickerValue {
   return { id: String(row.id), code: String(row.code ?? ""), name: String(row.name ?? row.code ?? ""), image_key: imageKey, image_url: skuImageUrl(imageKey) };
 }
 
+/** หา Parent SKU ที่รหัสตรงตัว (ไม่สนตัวพิมพ์) — ไม่เจอ/เรียกไม่ได้ = null · ใช้เดาสินค้าจากชื่อ (เช่น อัลบั้ม "ROAR06") */
+export async function findParentSkuByCode(code: string): Promise<ParentSkuPickerValue | null> {
+  const want = code.trim().toUpperCase();
+  if (!want) return null;
+  try {
+    const res = await apiFetch(`/api/pickers/parent-skus?${new URLSearchParams({ search: want, limit: "10" })}`);
+    if (!res.ok) return null;
+    const json = await res.json();
+    const rows = ((json.data ?? []) as Record<string, unknown>[]).map(mapParentRow);
+    return rows.find((r) => r.code.toUpperCase() === want) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function ParentSkuPicker({ value, onChange, placeholder = "เลือก Parent SKU...", disabled, error, disableCreate }: {
   value: ParentSkuPickerValue | null;
   onChange: (v: ParentSkuPickerValue | null) => void;
