@@ -4,7 +4,7 @@
  * SellerBillPanel (ของกลาง) — "บิลจากร้าน (ภาษาจีน)" ในใบสำคัญรับ
  *   อัปโหลดรูป/PDF บิลร้าน → AI อ่านชื่อจีน + แปลไทย + จำนวน + ราคา ¥ → จับคู่กับบรรทัดใบสั่งซื้อ "ของร้านนี้เท่านั้น"
  *   → คนเช็กทีละแถว (ใช่ / เปลี่ยน / เลือกจับคู่เอง / ข้าม) → ใส่ลงใบสำคัญ (ผูก PO + ราคาจากบิล) + จำคู่ไว้ครั้งหน้า
- * ใช้: <SellerBillPanel voucherId readonly onApplied />  · API /api/purchasing/vouchers/<id>/seller-bills
+ * ใช้: <SellerBillPanel voucherId readonly onApplied bare? />  (bare = ไม่มีกรอบ/หัวพับในตัว ใช้ในกล่องพับของหน้า) · API /api/purchasing/vouchers/<id>/seller-bills
  * กติกาจับคู่: lib/seller-bill-match.ts · เอกสาร docs/seller-bill-match.md
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -51,7 +51,11 @@ function LevelBadge({ l }: { l: SellerBillLine }) {
   return l.level === "ok" ? <span className={CHIP_OK}>มั่นใจ {pct}%</span> : <span className={CHIP_WARN}>ให้เช็ก {pct}%</span>;
 }
 
-export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId: string; readonly: boolean; onApplied: () => void | Promise<void> }) {
+export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }: {
+  voucherId: string; readonly: boolean; onApplied: () => void | Promise<void>;
+  /** bare = ไม่มีกรอบการ์ด + หัวพับในตัว (หน้าที่ห่อด้วยกล่องพับของตัวเองอยู่แล้ว) — แสดงเนื้อเลย */
+  bare?: boolean;
+}) {
   const toast = useToast();
   const [bills, setBills] = useState<Bill[]>([]);
   const [groups, setGroups] = useState<PoGroup[]>([]);
@@ -200,15 +204,17 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
   };
 
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4">
-      <div className="flex items-center gap-2 flex-wrap">
-        <button onClick={() => setOpen((v) => !v)} className="text-sm font-semibold text-slate-700 inline-flex items-center gap-1.5">
-          {open ? "▾" : "▸"} <Icon value="🧾" /> บิลจากร้าน (ภาษาจีน) {bills.length > 0 && <span className="font-normal text-slate-400">· {bills.length} ใบ</span>}
-        </button>
-        <span className="text-[11px] text-slate-400">อัปโหลดบิล → AI อ่านจีน + แปลไทย → จับคู่กับใบสั่งซื้อของร้านนี้เท่านั้น → เช็กทีละแถว → ใส่ลงใบ (ราคา ¥ จากบิล)</span>
-      </div>
-      {open && (
-        <div className="mt-3 space-y-4">
+    <div className={bare ? "" : "bg-white border border-slate-200 rounded-xl p-4"}>
+      {!bare && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={() => setOpen((v) => !v)} className="text-sm font-semibold text-slate-700 inline-flex items-center gap-1.5">
+            {open ? "▾" : "▸"} <Icon value="🧾" /> บิลจากร้าน (ภาษาจีน) {bills.length > 0 && <span className="font-normal text-slate-400">· {bills.length} ใบ</span>}
+          </button>
+          <span className="text-[11px] text-slate-400">อัปโหลดบิล → AI อ่านจีน + แปลไทย → จับคู่กับใบสั่งซื้อของร้านนี้เท่านั้น → เช็กทีละแถว → ใส่ลงใบ (ราคา ¥ จากบิล)</span>
+        </div>
+      )}
+      {(bare || open) && (
+        <div className={`${bare ? "" : "mt-3 "}space-y-4`}>
           {!hasPartner && <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">ใบนี้ยังไม่ได้ผูกร้าน (คู่ค้า) — จับคู่ได้จากชื่อร้านในใบ และระบบจะยังไม่จำคู่ไว้ใช้ครั้งหน้า</div>}
           {groups.length === 0 && <div className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">ร้านนี้ไม่มีใบสั่งซื้อที่ยังค้าง (สกุลเดียวกับใบนี้) — บิลร้านจับคู่ได้เฉพาะของที่อยู่ในใบสั่งซื้อ</div>}
           {!readonly && (
