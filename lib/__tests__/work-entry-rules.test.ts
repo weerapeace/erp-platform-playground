@@ -32,3 +32,14 @@ describe("กฎกลางการลงงานผลิต", () => {
     expect(dateIssues(null, "d", { today: "2026-10-28" })).toEqual([]);
   });
 });
+
+describe("deskKindOf — ชนิดโต๊ะของป๊อปจ่ายด่วน (โหมดผู้บริหาร)", () => {
+  it("ชื่อมี เหมา = hire · มี กลุ่ม = group · อื่น = normal", async () => {
+    const { deskKindOf, isGroupDesk } = await import("@/lib/work-entry-rules");
+    expect(deskKindOf("ช่างเหมา")).toBe("hire");
+    expect(deskKindOf("จับกลุ่ม")).toBe("group");
+    expect(deskKindOf("โต๊ะเสถียร")).toBe("normal");
+    expect(deskKindOf(null)).toBe("normal");
+    expect(isGroupDesk("โต๊ะขาล")).toBe(false);
+  });
+});

@@ -19,6 +19,13 @@ export const parentKeyOf = (sku: string | null | undefined) => (sku ?? "").trim(
 /** โต๊ะเหมา (ชื่อมีคำว่า เหมา) = เลือกช่างได้ทุกคน แต่ต้องระบุคนรับ */
 export const isHireDesk = (name: string | null | undefined) => !!name && /เหมา/.test(name);
 
+/** โต๊ะจับกลุ่ม (ชื่อมีคำว่า กลุ่ม) = เลือกพนักงานหลายคนเป็นกลุ่มต่องาน · ค่าแรงดูรวมต่อกลุ่ม (โหมดผู้บริหาร บอร์ดจ่ายงาน) */
+export const isGroupDesk = (name: string | null | undefined) => !!name && /กลุ่ม/.test(name);
+
+/** ชนิดโต๊ะสำหรับป๊อปจ่ายด่วน: ปกติ (ทั้งโต๊ะ) · เหมา (เลือกช่าง 1 คน) · กลุ่ม (เลือกหลายคน) */
+export type DeskKind = "normal" | "hire" | "group";
+export const deskKindOf = (name: string | null | undefined): DeskKind => (isHireDesk(name) ? "hire" : isGroupDesk(name) ? "group" : "normal");
+
 /** จ่ายงาน 1 แถว: เลือกโต๊ะ · จำนวน > 0 และไม่เกินที่เหลือ · โต๊ะเหมาต้องเลือกช่าง */
 export function dispatchRowIssues(r: { qty: number; remaining: number; deskName: string | null; crewCount: number }, field = "disp"): EntryIssue[] {
   const out: EntryIssue[] = [];

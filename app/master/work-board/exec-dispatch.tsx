@@ -10,6 +10,8 @@
  *   ขวา = แผง "สรุปเป้า" (ผู้บริหาร) เลื่อนเข้า · ล็อกได้ = ติดขวาแล้วดันการ์ดให้แคบลง · เป้าเก็บกลาง ui_config admin_wb_exec_target
  *   จ่าย = ลากการ์ดลงโต๊ะ (ติ๊กหลายใบ ลากใบไหนก็ไปทั้งชุด) หรือกดโต๊ะ → "จ่ายให้โต๊ะนี้" → ป๊อปจ่ายงานเดิมของบอร์ด (ทีละใบ)
  *     เมาส์ = ลาก HTML5 · iPad/มือถือ = กดค้างแล้วลาก (ของกลาง components/touch-drag)
+ *   ลากลงโต๊ะ = ป๊อปจ่ายด่วนตามชนิดโต๊ะ (exec-quick-dispatch): ปกติ = จำนวน · ช่างเหมา = เลือกช่าง 1 คน + จำนวน · จับกลุ่ม = เลือกหลายคน + จำนวน + ค่าแรงรวมกลุ่ม
+ *   แผงโต๊ะช่างเหมา = สรุปรายช่าง "ใครมีงานอะไร" (ไม่มีแถบ) · แผงโต๊ะจับกลุ่ม = แยกตามกลุ่ม + ค่าแรงรวมแต่ละกลุ่ม · โต๊ะปกติ = แถบงานในมือเทียบเงินเดือน
  * ค่าที่จำต่อคน (useUserPref): ขนาดการ์ด · การเรียง · ช่องที่โชว์ · ล็อกแผงสรุป
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -21,6 +23,8 @@ import { bkkDate } from "@/lib/mo-sales-match";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useTouchDrag } from "@/components/touch-drag";
 import { MoneyInput } from "@/components/money-input";
+import { deskKindOf } from "@/lib/work-entry-rules";
+import { ExecQuickDispatch, type QuickRow } from "./exec-quick-dispatch";
 
 export type ExecMo = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
@@ -31,7 +35,7 @@ export type ExecMo = {
 export type ExecWo = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; department_id: string | null;
   assignee_name: string | null; qty: number; received_qty: number; status: string; image_url?: string | null;
-  labor_cost?: number | null; central_rate?: number;
+  labor_cost?: number | null; central_rate?: number; created_at?: string | null;
   /** department = จ่ายให้ทั้งโต๊ะ · craftsman = ระบุคน (assignees[] = หลายคน) */
   assignee_type?: string | null; assignee_id?: string | null; assignees?: { id: string | null; name: string }[] | null;
 };
@@ -81,7 +85,7 @@ const rateOfMo = (m: ExecMo) => (m.central_rate && m.central_rate > 0 ? m.centra
 /** ค่าแรง/ชิ้นของใบจ่ายงาน — ค่าแรงที่ใส่ไว้ ÷ จำนวน ไม่มี = ราคากลาง */
 const rateOfWo = (w: ExecWo) => (w.labor_cost != null && w.qty > 0 ? Number(w.labor_cost) / w.qty : w.central_rate && w.central_rate > 0 ? w.central_rate : 0);
 
-export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDispatch, showPrice, onDispatch, onOpenMO, onOpenWO, renderDeskManager, deskWages }: {
+export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDispatch, showPrice, onDispatch, onQuickDispatch, onOpenMO, onOpenWO, renderDeskManager, deskWages }: {
   pending: ExecMo[];
   workOrders: ExecWo[];
   desks: Desk[];
@@ -91,6 +95,8 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   showPrice: boolean;
   /** เปิดป๊อปจ่ายงานเดิมของบอร์ด (ทีละใบตามลำดับ) */
   onDispatch: (mos: ExecMo[], desk: Desk) => void;
+  /** ป๊อปจ่ายด่วน → บันทึกจริง (หน้าแม่ POST ใบจ่ายงานทีละใบ) · คืน id ใบสั่งผลิตที่จ่ายสำเร็จ (ใบที่พลาดค้างในป๊อปให้แก้แล้วกดใหม่ — ไม่จ่ายซ้ำใบที่สำเร็จแล้ว) */
+  onQuickDispatch: (rows: QuickRow<ExecMo>[], desk: Desk, crewIds: string[]) => Promise<string[]>;
   onOpenMO: (mo: ExecMo) => void;
   onOpenWO: (woId: string) => void;
   /** แผงจัดการโต๊ะของกลาง (DeskStaffPanel) — หน้าแม่ส่งมา (สิทธิ์ + โหลดใหม่อยู่ที่หน้าแม่) */
@@ -252,15 +258,63 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     window.addEventListener("resize", fit); window.addEventListener("scroll", fit, true);
     return () => { window.removeEventListener("resize", fit); window.removeEventListener("scroll", fit, true); };
   }, [openDesk]);
+  // ลากลงโต๊ะ / "จ่ายให้โต๊ะนี้" → ป๊อปจ่ายด่วนตามชนิดโต๊ะ · จ่ายสำเร็จ → ใบที่จ่ายหลุดจากที่ติ๊ก (ลากใบที่ไม่ได้ติ๊ก = ที่ติ๊กไว้ยังอยู่)
+  const [quick, setQuick] = useState<{ desk: Desk; mos: ExecMo[] } | null>(null);
+  const [quickSaving, setQuickSaving] = useState(false);
   const give = (desk: Desk, ids: string[]) => {
     const mos = list.filter((m) => ids.includes(m.id));
     if (!mos.length || !canDispatch) return;
-    onDispatch(mos, desk);
-    setSel((p) => { const n = new Set(p); for (const m of mos) n.delete(m.id); return n; });   // หลุดเฉพาะใบที่ส่งไปจ่าย (ลากใบที่ไม่ได้ติ๊ก = ที่ติ๊กไว้ยังอยู่)
+    setQuick({ desk, mos });
+  };
+  const submitQuick = async (rows: QuickRow<ExecMo>[], crewIds: string[]) => {
+    if (!quick) return;
+    setQuickSaving(true);
+    try {
+      const okIds = new Set(await onQuickDispatch(rows, quick.desk, crewIds));
+      if (okIds.size) setSel((p) => { const n = new Set(p); for (const id of okIds) n.delete(id); return n; });
+      const rest = quick.mos.filter((m) => !okIds.has(m.id));
+      setQuick(rest.length ? { desk: quick.desk, mos: rest } : null);
+    } finally { setQuickSaving(false); }
   };
   // ลากด้วยนิ้ว (iPad) — กดค้างการ์ดแล้วลากไปวางที่โต๊ะ (โต๊ะมี data-drop-id)
   const td = useTouchDrag<string>({ onDrop: (deskId, id) => { const d = desks.find((x) => x.id === deskId); if (d) give(d, sel.has(id) ? chosen.map((m) => m.id) : [id]); } });
   const deskOpen = desks.find((d) => d.id === openDesk) ?? null;
+  // การ์ดใบจ่ายงานแนวตั้ง (แผงโต๊ะ)
+  const woCard = (w: ExecWo) => {
+    const r = rateOfWo(w), pp = price.get(w.mo_no) ?? 0, pr = w.qty > 0 ? Math.min(100, ((w.received_qty || 0) / w.qty) * 100) : 0;
+    return (
+      <button key={w.id} type="button" onClick={() => onOpenWO(w.id)} className="flex flex-col rounded-xl border border-slate-200 bg-white p-2 text-left hover:border-violet-300 hover:shadow-sm">
+        <div className="mb-1.5 flex h-20 items-center justify-center overflow-hidden rounded-lg bg-slate-50 text-xl text-slate-300">
+          {w.image_url ? <img src={w.image_url} alt="" draggable={false} className="h-full w-full object-contain" /> : <Icon name="image" />}
+        </div>
+        <div className="truncate font-mono text-[12px] font-semibold text-slate-800">{w.product_sku ?? w.mo_no}</div>
+        <div className="truncate text-[11px] text-slate-400">{w.assignee_type === "department" || !w.assignee_name ? "ทั้งโต๊ะ" : w.assignee_name}</div>
+        <div className="my-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${pr >= 100 ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${pr}%` }} /></div>
+        <div className="text-[11px] text-slate-600">รับคืน {fmt(w.received_qty || 0)}/{fmt(w.qty)}</div>
+        <div className="text-[11px]">{r > 0 ? <span className="text-slate-500">฿{fmt(r)}/ชิ้น</span> : <span className="text-amber-600">ยังไม่ใส่ค่าแรง</span>}</div>
+        {r > 0 && <div className="text-[12px] font-bold tabular-nums text-slate-800">ค่าแรง ฿{fmt(r * w.qty)}</div>}
+        {showPrice && pp > 0 && <div className={`text-[11px] tabular-nums ${counted(w.mo_no) ? "text-violet-700" : "text-slate-400"}`}>฿{fmt(pp * w.qty)}{counted(w.mo_no) ? "" : " · ไม่นับ"}</div>}
+        <div className="mt-auto truncate pt-0.5 text-[10px] text-slate-300">{w.wo_no}</div>
+      </button>
+    );
+  };
+  // จัดกลุ่มใบจ่ายงานตามชุดคนรับ (ช่างเหมา = รายช่าง · จับกลุ่ม = รายกลุ่ม) · ชื่อ = ชื่อเล่นจากรายชื่อพนักงาน
+  const nickById = useMemo(() => new Map(craftsmen.map((c) => [c.id, c.nickname?.trim() || c.name])), [craftsmen]);
+  const shortName = (id: string | null | undefined, name: string) => (id && nickById.get(id)) || name.match(/\(([^)]+)\)\s*$/)?.[1]?.trim() || name.trim();
+  const crewGroups = (ws: ExecWo[]) => {
+    const m = new Map<string, { key: string; names: string[]; desk: boolean; ws: ExecWo[]; qty: number; left: number; labor: number; noRate: number }>();
+    for (const w of ws) {
+      const list = (w.assignees ?? []).filter((a) => a && (a.id || a.name?.trim()));
+      const ppl = list.length ? list.map((a) => ({ id: a.id, name: a.name }))
+        : w.assignee_type !== "department" && (w.assignee_id || w.assignee_name?.trim()) ? [{ id: w.assignee_id ?? null, name: w.assignee_name ?? "" }] : [];
+      const key = ppl.length ? ppl.map((p) => p.id ?? p.name.trim()).sort().join("|") : "__desk__";
+      let g = m.get(key);
+      if (!g) { g = { key, names: ppl.map((p) => shortName(p.id, p.name)), desk: !ppl.length, ws: [], qty: 0, left: 0, labor: 0, noRate: 0 }; m.set(key, g); }
+      const r = rateOfWo(w);
+      g.ws.push(w); g.qty += w.qty; g.left += Math.max(0, w.qty - (w.received_qty || 0)); g.labor += r * w.qty; if (r <= 0) g.noRate++;
+    }
+    return [...m.values()].sort((a, b) => Number(a.desk) - Number(b.desk) || b.labor - a.labor || b.ws.length - a.ws.length);
+  };
   const goal = target[period] ?? 0, got = (includeOwn ? done?.value : done?.value_customer ?? done?.value) ?? 0, pct = goal > 0 ? Math.min(100, (got / goal) * 100) : 0;
 
   const dueBadge = (m: ExecMo) => {
@@ -423,11 +477,15 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
               const scale = Math.max(wages, laborPlan, 1);
               const gotPct = Math.min(100, (laborGot / scale) * 100), planPct = Math.min(100, (laborPlan / scale) * 100), wagePct = wages > 0 ? Math.min(100, (wages / scale) * 100) : 0;
               const cover = wages > 0 ? (laborPlan / wages) * 100 : 0;
+              // ช่างเหมา = สรุปรายช่าง · จับกลุ่ม = แยกตามกลุ่ม (ชุดคนเดียวกัน = กลุ่มเดียวกัน) · ปกติ = การ์ดรวม
+              const kind = deskKindOf(deskOpen.name);
+              const crews = kind === "normal" ? [] : crewGroups(ws);
+              const chipNames = kind === "normal" ? ppl.map(nick) : [...new Set(crews.flatMap((g) => g.names))];
               return (
                 <div>
                   <div className="mb-2 flex flex-wrap items-center gap-2">
                     <span className="text-lg font-bold text-slate-800">{deskOpen.name}</span>
-                    <span className="text-sm text-slate-500">{ppl.length} คน · {ws.length} ใบ · ค้าง {fmt(left)} ชิ้น</span>
+                    <span className="text-sm text-slate-500">{kind === "normal" ? `${ppl.length} คน` : `${chipNames.length} คนมีงาน`} · {ws.length} ใบ · ค้าง {fmt(left)} ชิ้น</span>
                     <div className="flex-1" />
                     {renderDeskManager && <button type="button" onClick={() => setManageDesk(deskOpen)} className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 hover:bg-slate-50"><Icon name="settings" /> จัดการโต๊ะ</button>}
                     {canDispatch && <button type="button" disabled={!chosen.length} onClick={() => give(deskOpen, chosen.map((m) => m.id))}
@@ -444,11 +502,11 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                       </div>
                     )}
                     <div className="rounded-lg bg-slate-50 px-3 py-2 sm:col-span-2">
-                      <div className="text-[11px] text-slate-500">ค่าแรงรวมทั้งโต๊ะ (ทุกคน)</div>
+                      <div className="text-[11px] text-slate-500">ค่าแรงรวมทั้งโต๊ะ ({kind === "hire" ? "ทุกช่าง" : kind === "group" ? "ทุกกลุ่ม" : "ทุกคน"})</div>
                       <div className="text-lg font-bold tabular-nums text-slate-800">฿{fmt(laborPlan)}</div>
                       <div className="mt-1 flex flex-wrap gap-1">
-                        {ppl.length ? ppl.map((p) => <span key={p.id} className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700">{nick(p)}</span>)
-                          : <span className="text-[11px] text-slate-400">— ไม่มีคนประจำ (เลือกคนอื่นได้ในป๊อปจ่ายงาน) —</span>}
+                        {chipNames.length ? chipNames.map((n) => <span key={n} className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700">{n}</span>)
+                          : <span className="text-[11px] text-slate-400">{kind === "normal" ? "— ไม่มีคนประจำ (เลือกคนอื่นได้ในป๊อปจ่ายงาน) —" : "— ยังไม่มีใครมีงาน —"}</span>}
                       </div>
                     </div>
                     <div className="rounded-lg bg-emerald-50 px-3 py-2">
@@ -457,7 +515,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                       {noRate > 0 && <div className="text-[11px] text-amber-600">ยังไม่ใส่ค่าแรง {noRate} ใบ</div>}
                     </div>
                   </div>
-                  <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                  {kind === "normal" && <div className="mb-3 rounded-xl border border-slate-200 bg-white px-3 py-2">
                     <div className="mb-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px]">
                       <span className="font-semibold text-slate-700">{wages > 0 ? "งานในมือเทียบเงินเดือนทั้งโต๊ะ" : "ค่าแรงที่ได้แล้วเทียบงานในมือ"}</span>
                       {wages > 0 ? <>
@@ -478,31 +536,30 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                       {wages > 0 && <span><span className="mr-1 inline-block h-2.5 w-0.5 bg-slate-800 align-middle" />เงินเดือนรวม/เดือน</span>}
                       {noRate > 0 && <span className="text-amber-600">มี {noRate} ใบยังไม่ใส่ค่าแรง — งานในมือจริงสูงกว่านี้</span>}
                     </div>
-                  </div>
-                  <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(132px, 1fr))" }}>
-                    {ws.map((w) => {
-                      const r = rateOfWo(w), pp = price.get(w.mo_no) ?? 0, pr = w.qty > 0 ? Math.min(100, ((w.received_qty || 0) / w.qty) * 100) : 0;
-                      return (
-                        <button key={w.id} type="button" onClick={() => onOpenWO(w.id)} className="flex flex-col rounded-xl border border-slate-200 bg-white p-2 text-left hover:border-violet-300 hover:shadow-sm">
-                          <div className="mb-1.5 flex h-20 items-center justify-center overflow-hidden rounded-lg bg-slate-50 text-xl text-slate-300">
-                            {w.image_url ? <img src={w.image_url} alt="" draggable={false} className="h-full w-full object-contain" /> : <Icon name="image" />}
-                          </div>
-                          <div className="truncate font-mono text-[12px] font-semibold text-slate-800">{w.product_sku ?? w.mo_no}</div>
-                          <div className="truncate text-[11px] text-slate-400">{w.assignee_type === "department" || !w.assignee_name ? "ทั้งโต๊ะ" : w.assignee_name}</div>
-                          <div className="my-1 h-1.5 overflow-hidden rounded-full bg-slate-100"><div className={`h-full ${pr >= 100 ? "bg-emerald-500" : "bg-violet-500"}`} style={{ width: `${pr}%` }} /></div>
-                          <div className="text-[11px] text-slate-600">รับคืน {fmt(w.received_qty || 0)}/{fmt(w.qty)}</div>
-                          <div className="text-[11px]">{r > 0 ? <span className="text-slate-500">฿{fmt(r)}/ชิ้น</span> : <span className="text-amber-600">ยังไม่ใส่ค่าแรง</span>}</div>
-                          {r > 0 && <div className="text-[12px] font-bold tabular-nums text-slate-800">ค่าแรง ฿{fmt(r * w.qty)}</div>}
-                          {showPrice && pp > 0 && <div className={`text-[11px] tabular-nums ${counted(w.mo_no) ? "text-violet-700" : "text-slate-400"}`}>฿{fmt(pp * w.qty)}{counted(w.mo_no) ? "" : " · ไม่นับ"}</div>}
-                          <div className="mt-auto truncate pt-0.5 text-[10px] text-slate-300">{w.wo_no}</div>
-                        </button>
-                      );
-                    })}
+                  </div>}
+                  {kind !== "normal" && crews.map((g) => (
+                    <div key={g.key} className="mb-3">
+                      <div className={`mb-1.5 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-lg px-2.5 py-1.5 text-[13px] ${kind === "group" ? "bg-violet-50 text-violet-900" : "bg-slate-50 text-slate-800"}`}>
+                        <b>{g.desk ? "ทั้งโต๊ะ (ไม่ระบุคน)" : kind === "group" ? `กลุ่ม ${g.names.join(" + ")}` : g.names.join(", ")}</b>
+                        {kind === "group" && !g.desk && <span className="text-[11px] opacity-70">{g.names.length} คน</span>}
+                        <span className="text-[12px] opacity-75">{g.ws.length} ใบ · {fmt(g.qty)} ชิ้น · ค้าง {fmt(g.left)}</span>
+                        <span className="ml-auto tabular-nums">
+                          {g.labor > 0 ? <>{kind === "group" ? "ค่าแรงรวมกลุ่ม " : "ค่าแรง "}<b>฿{fmt(g.labor)}</b>{kind === "group" && !g.desk && g.names.length > 1 ? <span className="text-[11px] opacity-75"> · ตกคนละ ≈ ฿{fmt(g.labor / g.names.length)}</span> : null}</> : null}
+                          {g.noRate > 0 && <span className="ml-1.5 text-[11px] text-amber-600">ยังไม่ใส่ค่าแรง {g.noRate} ใบ</span>}
+                        </span>
+                      </div>
+                      <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(132px, 1fr))" }}>{g.ws.map(woCard)}</div>
+                    </div>
+                  ))}
+                  {kind === "normal" && <div className="grid gap-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(132px, 1fr))" }}>
+                    {ws.map(woCard)}
                     {!ws.length && <div className="text-sm text-slate-400">ยังไม่มีงานในโต๊ะนี้</div>}
-                  </div>
+                  </div>}
+                  {kind !== "normal" && !ws.length && <div className="text-sm text-slate-400">ยังไม่มีงานในโต๊ะนี้</div>}
                 </div>
               );
             })()}
+
           </div>
           <div className="flex items-end justify-center gap-2.5 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-3 pb-2.5 pt-4 backdrop-blur">
             {desks.map((d) => {
@@ -577,6 +634,11 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
       )}
 
       {td.ghost}
+
+      {/* ป๊อปจ่ายด่วนตามชนิดโต๊ะ (ปกติ / ช่างเหมา / จับกลุ่ม) */}
+      <ExecQuickDispatch desk={quick?.desk ?? null} mos={quick?.mos ?? []} people={craftsmen} desks={desks} workOrders={workOrders} rateOf={rateOfMo}
+        saving={quickSaving} onClose={() => setQuick(null)} onSubmit={(rows, crewIds) => void submitQuick(rows, crewIds)}
+        onFull={(mos) => { const d = quick?.desk; setQuick(null); if (d) onDispatch(mos, d); }} />
 
       {/* จัดการโต๊ะ (แผงกลางเดิม) */}
       <ERPModal open={manageDesk !== null} onClose={() => setManageDesk(null)} size="md" title={`จัดการโต๊ะ: ${manageDesk?.name ?? ""}`} description="ย้ายคนเข้า/ออก · สร้างโต๊ะใหม่ · เปลี่ยนชื่อ · ปิดโต๊ะ (ต้องมีสิทธิ์บุคคล)">

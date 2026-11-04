@@ -834,6 +834,36 @@ function WorkBoardPageInner() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
+  // ⚡ ป๊อปจ่ายด่วน (โหมดผู้บริหาร · exec-quick-dispatch) — หลายใบ → โต๊ะเดียว · คนรับชุดเดียว (ว่าง = ทั้งโต๊ะ)
+  //   ค่าแรง = ค่าแรง/ชิ้นที่ป๊อปส่งมา × จำนวน (ไม่มี = ว่าง ใส่ทีหลัง) · วันที่จ่าย = วันนี้ (เวลาไทย) · กำหนดเสร็จ = ของใบสั่งผลิต
+  //   กฎกลาง dispatchRowIssues ตรวจซ้ำก่อนบันทึก · คืน id ใบที่สำเร็จ (ใบที่พลาดค้างในป๊อป ไม่จ่ายซ้ำใบที่สำเร็จ)
+  //   ไม่ใช้ useCallback (deps ห้ามอ้างตัวแปรที่ประกาศทีหลัง — กับดัก TDZ ตอน render)
+  const execQuickDispatch = async (rows: { mo: { id: string }; qty: number; rate: number }[], desk: { id: string; name: string }, crewIds: string[]): Promise<string[]> => {
+    if (!canDispatch) { toast.error("คุณไม่มีสิทธิ์จ่ายงาน — ให้ผู้ดูแลเปิดสิทธิ์ที่หน้าจัดการสิทธิ์ (การผลิต › จ่ายงานเข้าแผนก)"); return []; }
+    const crew = crewList(crewIds, craftsmen);
+    const okIds: string[] = [], fails: string[] = [];
+    for (const r of rows) {
+      const mo = board.pending.find((p) => p.id === r.mo.id);
+      if (!mo) { fails.push("ไม่พบใบในรายการรอจ่าย (อาจถูกจ่ายไปแล้ว)"); continue; }
+      const label = mo.product_sku ?? mo.mo_no;
+      const bad = dispatchRowIssues({ qty: r.qty, remaining: mo.remaining, deskName: desk.name, crewCount: crew.length }).find((x) => x.level === "error");
+      if (bad) { fails.push(`${label}: ${bad.msg}`); continue; }
+      try {
+        const res = await apiFetch("/api/mo/work-orders", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mo_no: mo.mo_no, product_sku: mo.product_sku, product_name: mo.product_name,
+            stage: stageOfDept(desk.name), department_id: desk.id, department_name: desk.name,
+            ...crewFields(crew, desk.name),
+            qty: r.qty, uom: "ชิ้น", dispatch_date: todayLocal(), due_date: mo.internal_due_date ?? mo.due_date ?? null, note: `จากใบสั่งผลิต ${mo.mo_no}`,
+            labor_cost: r.rate > 0 ? Math.round(r.rate * r.qty * 100) / 100 : null }) });
+        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "จ่ายงานไม่สำเร็จ");
+        okIds.push(mo.id);
+      } catch (e) { fails.push(`${label}: ${e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"}`); }
+    }
+    if (okIds.length) toast.success(`จ่ายเข้า ${desk.name}${crew.length ? ` · ${crew.map((c) => c.name).join(", ")}` : ""} แล้ว ${okIds.length} ใบ`);
+    if (fails.length) toast.error(fails.slice(0, 3).join(" · ") + (fails.length > 3 ? ` (+อีก ${fails.length - 3} ใบ)` : ""));
+    if (okIds.length) await load(true);
+    return okIds;
+  };
   // ช่างในแผนก — ยกเว้นแผนก "ช่างเหมา" (ชื่อมีคำว่า เหมา) ให้เลือกพนักงานได้ทุกคน
   const dispIsHire = useMemo(() => isHireDesk(dispDept?.name), [dispDept]);
   const deptCraftsmen = useMemo(() => {
@@ -1663,7 +1693,7 @@ function WorkBoardPageInner() {
         />
       ) : viewMode === "deskdock" ? (
         <ExecDispatchView pending={board.pending} workOrders={board.workOrders} desks={boardDesks} craftsmen={craftsmen}
-          canDispatch={canDispatch} showPrice={isAdmin} deskWages={deptWages}
+          canDispatch={canDispatch} showPrice={isAdmin} deskWages={deptWages} onQuickDispatch={execQuickDispatch}
           onDispatch={(mos, d) => {
             const dept = boardDesks.find((x) => x.id === d.id) ?? null;
             const list = mos.map((m) => board.pending.find((p) => p.id === m.id)).filter((m): m is PendingMO => !!m);

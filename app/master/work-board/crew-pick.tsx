@@ -47,7 +47,7 @@ export function lastCrewIds(wos: CrewWO[], deptId: string | null | undefined, pe
 const chipCls = (on: boolean) => `inline-flex items-center gap-1 h-8 px-2.5 rounded-full border text-[12px] transition-colors ${
   on ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-200 text-slate-700 hover:border-violet-300 hover:bg-violet-50"}`;
 
-export function CrewPick({ people, value, onChange, required = false, recent = [], flag, everyone, desks }: {
+export function CrewPick({ people, value, onChange, required = false, requiredMsg = "งานเหมา — ต้องเลือกอย่างน้อย 1 คน", recent = [], flag, everyone, desks }: {
   people: CrewPerson[];
   /** ทุกคนที่เลือกได้ (ส่งมา = มีปุ่ม "+ เลือกคนอื่น" เลือกคนนอกโต๊ะเอง) — ปกติ = ช่างทุกคน */
   everyone?: CrewPerson[];
@@ -57,6 +57,8 @@ export function CrewPick({ people, value, onChange, required = false, recent = [
   onChange: (ids: string[]) => void;
   /** งานเหมา = ต้องเลือกอย่างน้อย 1 คน (ไม่มีปุ่ม "ทั้งโต๊ะ") */
   required?: boolean;
+  /** ข้อความเตือนตอน required แต่ยังไม่เลือกใคร (ค่าเริ่มต้น = ข้อความงานเหมา · โต๊ะจับกลุ่มส่งข้อความของตัวเอง) */
+  requiredMsg?: string;
   /** ชุดคนล่าสุดของโต๊ะนี้ (lastCrewIds) */
   recent?: string[];
   /** คำเตือนรายคน เช่น "เคยทำรุ่นนี้เสีย 2 ครั้ง" → ขึ้น ⚠️ ที่ชื่อ */
@@ -151,7 +153,7 @@ export function CrewPick({ people, value, onChange, required = false, recent = [
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
         <span className="text-slate-500">
           {picked.length ? <>เลือก <b className="text-violet-700">{picked.length}</b> คน{outsiders.length ? ` (นอกโต๊ะ ${outsiders.length})` : ""} — ชื่อทุกคนขึ้นบนการ์ดงาน</>
-            : required ? <span className="text-rose-500">งานเหมา — ต้องเลือกอย่างน้อย 1 คน</span> : "ไม่เลือกใคร = ทั้งโต๊ะรับงาน · กดชื่อได้หลายคน"}
+            : required ? <span className="text-rose-500">{requiredMsg}</span> : "ไม่เลือกใคร = ทั้งโต๊ะรับงาน · กดชื่อได้หลายคน"}
         </span>
         {recentOk.length > 0 && !sameAsRecent && (
           <button type="button" onClick={() => onChange(recentOk)} className="text-violet-700 hover:underline truncate max-w-full">
