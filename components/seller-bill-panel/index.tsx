@@ -17,7 +17,17 @@ import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { isPdfRef } from "@/lib/file-ref";
-import { applyGroupToLine, checkBillMath, undecidedCount, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
+import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
+
+/** งานแก้ใบสั่งซื้อที่จะทำหลังใส่ลงใบ (ผ่าน API กลาง po-edit / cancel-line) */
+type PoPlan = {
+  billId: string;
+  edits: { po_id: string; po_no: string; line_qty: { id: string; qty: number }[] }[];
+  close: string[];
+  reduceLabels: string[];
+  closeLabels: string[];
+  reason: string;
+};
 
 type Bill = {
   id: string; r2_key: string; gr_id: string | null; bill_no: string | null; bill_date: string | null; seller_text: string | null;
@@ -56,6 +66,10 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
   const [pickQ, setPickQ] = useState("");
   const [delBill, setDelBill] = useState<Bill | null>(null);
   const [msg, setMsg] = useState<Record<string, string>>({});
+  // "ไม่อยู่ในบิล": ต่อบิล → กลุ่ม PO → รอรอบหน้า (ค่าเริ่ม) / ปิดยอด · ขอบเขต PO เดียวกับบิล / ทั้งร้าน
+  const [missAct, setMissAct] = useState<Record<string, Record<string, "wait" | "close">>>({});
+  const [missScope, setMissScope] = useState<Record<string, "bill" | "shop">>({});
+  const [poPlan, setPoPlan] = useState<PoPlan | null>(null);
   const fileUrls = useFileRefUrls([...cands.map((c) => c.r2_key), ...bills.map((b) => b.r2_key)]);
   const gByKey = useMemo(() => new Map(groups.map((g) => [g.key, g])), [groups]);
 
@@ -88,11 +102,54 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
     finally { setBusy(null); }
   };
 
-  const patch = async (billId: string, mode: "save" | "rematch" | "apply") => {
+  /** แผนแก้ใบสั่งซื้อจากที่ผู้ใช้เลือก: ลด PO ตามบิล (แถวที่บิลลงน้อยกว่า) + ปิดยอดของที่ไม่อยู่ในบิล */
+  const buildPlan = (billId: string): PoPlan => {
+    const lines = draft[billId] ?? [];
+    const bill = bills.find((b) => b.id === billId);
+    const edits = new Map<string, PoPlan["edits"][number]>();
+    const close = new Set<string>();
+    const reduceLabels: string[] = [], closeLabels: string[] = [];
+    for (const l of lines) {
+      const g = l.match_key ? gByKey.get(l.match_key) : undefined;
+      if (l.decision !== "confirmed" || l.short_action !== "reduce" || !g || shortfallOf(l, g) <= 0) continue;
+      const p = reducePlan(Number(l.qty ?? 0), g);
+      if (p.line_qty.length) { const e = edits.get(g.po_id) ?? { po_id: g.po_id, po_no: g.po_no, line_qty: [] }; e.line_qty.push(...p.line_qty.map((x) => ({ id: x.id, qty: x.qty }))); edits.set(g.po_id, e); }
+      p.close.forEach((id) => close.add(id));
+      reduceLabels.push(`${g.code || g.item_name} (${g.po_no}) ค้าง ${n2(g.remaining)} → ตามบิล ${n2(l.qty)}`);
+    }
+    for (const [key, act] of Object.entries(missAct[billId] ?? {})) {
+      const g = gByKey.get(key);
+      if (act !== "close" || !g) continue;
+      g.lines.forEach((x) => close.add(x.id));
+      closeLabels.push(`${g.code || g.item_name} (${g.po_no}) ค้างรับ ${n2(pendingReceiveOf(g))}`);
+    }
+    return { billId, edits: [...edits.values()], close: [...close], reduceLabels, closeLabels, reason: `ร้านไม่มีของ — ไม่อยู่ในบิลร้าน${bill?.bill_no ? ` No. ${bill.bill_no}` : ""}` };
+  };
+  const planCount = (p: PoPlan) => p.reduceLabels.length + p.closeLabels.length;
+
+  /** แก้ใบสั่งซื้อผ่าน API กลาง (สิทธิ์/ประวัติ/สถานะใบ PO ตามกติกาเดิม) — คืนข้อความสรุป */
+  const runPoPlan = async (p: PoPlan): Promise<{ ok: string[]; fail: string[] }> => {
+    const ok: string[] = [], fail: string[] = [];
+    for (const e of p.edits) {
+      const res = await apiFetch("/api/purchasing/po-edit", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ po_id: e.po_id, line_qty: e.line_qty }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) fail.push(`ลดจำนวน ${e.po_no}: ${j.error ?? `HTTP ${res.status}`}`); else ok.push(`ลดจำนวน ${e.line_qty.length} บรรทัด (${e.po_no})`);
+    }
+    if (p.close.length) {
+      const res = await apiFetch("/api/purchasing/cancel-line", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ po_line_ids: p.close, reason: p.reason }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j.error) fail.push(`ปิดยอด: ${j.error ?? `HTTP ${res.status}`}`); else ok.push(`ปิดยอด ${j.cancelled ?? p.close.length} บรรทัด`);
+    }
+    return { ok, fail };
+  };
+
+  const patch = async (billId: string, mode: "save" | "rematch" | "apply", plan?: PoPlan) => {
     const lines = draft[billId] ?? [];
     if (mode === "apply") {
       const left = undecidedCount(lines);
       if (left > 0) { setMsg((m) => ({ ...m, [billId]: `ยังเหลือ ${left} แถวที่ยังไม่ได้เช็ก — กด ใช่ / เลือกจับคู่เอง / ข้าม ให้ครบก่อน` })); return; }
+      // มีงานแก้ใบสั่งซื้อ → ถามยืนยันก่อน (แตะใบสั่งซื้อจริง)
+      if (!plan) { const p = buildPlan(billId); if (planCount(p) > 0) { setPoPlan(p); return; } }
     }
     setBusy(billId);
     try {
@@ -105,6 +162,12 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
       if (mode === "apply" && j.applied) {
         const a = j.applied as { inserted: number; updated: number; expenses: number; remembered: number; filled_cn?: number };
         toast.success(`ใส่ลงใบสำคัญแล้ว — เพิ่ม ${a.inserted} · ใส่ราคา ${a.updated}${a.expenses ? ` · ค่าใช้จ่าย ${a.expenses}` : ""}${a.remembered ? ` · จำคู่ไว้ ${a.remembered}` : ""}${a.filled_cn ? ` · เติมชื่อจีน ${a.filled_cn} สินค้า` : ""}`);
+        if (plan && planCount(plan) > 0) {
+          const r = await runPoPlan(plan);
+          if (r.ok.length) toast.success(`แก้ใบสั่งซื้อแล้ว — ${r.ok.join(" · ")}`);
+          if (r.fail.length) toast.error(`แก้ใบสั่งซื้อไม่สำเร็จบางส่วน — ${r.fail.join(" · ")} (ลองกดใส่ลงใบอีกครั้ง)`);
+          setMissAct((m) => ({ ...m, [billId]: {} }));
+        }
         await onApplied();
       } else toast.success(mode === "rematch" ? "จับคู่ใหม่แล้ว" : "บันทึกแล้ว");
       await load();
@@ -232,6 +295,18 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
                                 {l.reasons.map((r) => <span key={r} className={CHIP_OK}>{r}</span>)}
                                 {l.warns.map((w) => <span key={w} className={CHIP_WARN}>{w}</span>)}
                               </div>
+                              {/* บิลลงน้อยกว่าที่ค้าง → ลดจำนวนใน PO ตามบิล หรือคงไว้รอส่วนที่เหลือ (ค่าเริ่ม) */}
+                              {shortfallOf(l, g) > 0 && l.decision !== "skip" && (
+                                <div className="flex items-center gap-1.5 flex-wrap mt-1.5 text-[11px]">
+                                  <span className="text-amber-700">ขาด {n2(shortfallOf(l, g))} {g.uom ?? ""}:</span>
+                                  <div className="inline-flex rounded-md border border-slate-200 overflow-hidden">
+                                    <button type="button" disabled={ro} onClick={() => setLine(b.id, i, { short_action: "keep" })} title="ใบสั่งซื้อคงจำนวนเดิม — ส่วนที่เหลือยังค้างรับ รอร้านส่งรอบหน้า"
+                                      className={`h-6 px-2 ${l.short_action !== "reduce" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:opacity-60`}>คงไว้รอส่วนที่เหลือ</button>
+                                    <button type="button" disabled={ro} onClick={() => setLine(b.id, i, { short_action: "reduce" })} title="แก้จำนวนในใบสั่งซื้อเท่าที่บิลลงมา (บรรทัดที่ไม่ได้ของเลย = ปิดยอด) — ทำตอนกดใส่ลงใบ"
+                                      className={`h-6 px-2 border-l border-slate-200 ${l.short_action === "reduce" ? "bg-amber-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:opacity-60`}>ลด PO ตามบิล</button>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <div className="text-[11px] text-red-600 mt-1">ไม่พบในใบสั่งซื้อของร้านนี้ — เลือกจับคู่เองจากรายการ PO หรือข้าม</div>
@@ -252,6 +327,47 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
                   })}
                 </div>
 
+                {/* ไม่อยู่ในบิล — ของใน PO ที่ร้านยังไม่ส่ง: รอรอบหน้า (คงค้างรับ) / ปิดยอด (ของไม่มาแล้ว → หน้าขอซื้อ/ใบสั่งผลิตกลับเป็น "ต้องซื้อ") */}
+                {(() => {
+                  const scope = missScope[b.id] ?? "bill";
+                  const miss = missingGroups(lines, groups, scope);
+                  const shopCount = missingGroups(lines, groups, "shop").length;
+                  if (miss.length === 0 && shopCount === 0) return null;
+                  const acts = missAct[b.id] ?? {};
+                  const setAct = (key: string, a: "wait" | "close") => setMissAct((m) => ({ ...m, [b.id]: { ...(m[b.id] ?? {}), [key]: a } }));
+                  return (
+                    <div className="border-t border-slate-200">
+                      <div className="flex items-center gap-2 flex-wrap px-3 py-2 bg-amber-50/40">
+                        <span className="text-xs font-semibold text-slate-700">ไม่อยู่ในบิล</span>
+                        <span className="text-[11px] text-slate-500">{scope === "bill" ? "ของในใบสั่งซื้อเดียวกับบิลนี้ ที่ร้านยังไม่ส่ง" : "ของค้างรับทั้งร้าน ที่บิลนี้ไม่มี"} ({miss.length})</span>
+                        <button type="button" onClick={() => setMissScope((m) => ({ ...m, [b.id]: scope === "bill" ? "shop" : "bill" }))} className="text-[11px] text-blue-600 hover:underline">{scope === "bill" ? `แสดงทั้งร้าน (${shopCount})` : "เฉพาะ PO เดียวกับบิล"}</button>
+                        {!readonly && miss.length > 0 && <button type="button" onClick={() => setMissAct((m) => ({ ...m, [b.id]: {} }))} className="ml-auto text-[11px] text-slate-500 hover:text-slate-700">ทั้งหมด = รอรอบหน้า</button>}
+                      </div>
+                      {miss.length === 0 ? <div className="px-3 py-2 text-[11px] text-slate-400">— บิลนี้มีครบทุกรายการใน PO เดียวกัน —</div> : (
+                        <div className="divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                          {miss.map((g) => {
+                            const a = acts[g.key] ?? "wait";
+                            return (
+                              <div key={g.key} className={`flex items-center gap-2 px-3 py-1.5 text-xs ${a === "close" ? "bg-red-50/40" : ""}`}>
+                                {g.image_url ? /* eslint-disable-next-line @next/next/no-img-element */ <img src={g.image_url} alt="" className="w-7 h-7 rounded object-cover border border-slate-100 shrink-0" /> : <span className="w-7 h-7 rounded bg-slate-50 border border-slate-100 shrink-0" />}
+                                <span className="font-mono text-[11px] text-slate-500 w-28 shrink-0 truncate">{g.code || "—"}</span>
+                                <span className="flex-1 min-w-0 truncate text-slate-800" title={g.item_name}>{g.item_name}</span>
+                                <span className="text-[11px] text-slate-500 shrink-0">{g.po_no} · ค้างรับ {n2(pendingReceiveOf(g))} {g.uom ?? ""}</span>
+                                <div className="inline-flex rounded-md border border-slate-200 overflow-hidden shrink-0">
+                                  <button type="button" disabled={ro} onClick={() => setAct(g.key, "wait")} title="คงค้างรับเหมือนเดิม รอร้านส่งรอบหน้า"
+                                    className={`h-6 px-2 text-[11px] ${a === "wait" ? "bg-slate-700 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:opacity-60`}>รอรอบหน้า</button>
+                                  <button type="button" disabled={ro} onClick={() => setAct(g.key, "close")} title="ของไม่มาแล้ว — ปิดยอดบรรทัดนี้ในใบสั่งซื้อ (หน้าขอซื้อ/ใบสั่งผลิตจะกลับเป็น ต้องซื้อ) · ทำตอนกดใส่ลงใบ"
+                                    className={`h-6 px-2 text-[11px] border-l border-slate-200 ${a === "close" ? "bg-red-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"} disabled:opacity-60`}>ปิดยอด</button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
                 {!readonly && (
                   <div className="flex items-center gap-2 flex-wrap px-3 py-2 border-t border-slate-100 bg-slate-50/60">
                     <label className="flex items-center gap-1.5 text-xs text-slate-600"><input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="rounded border-slate-300" /> จำคู่ที่ยืนยันไว้ ครั้งหน้าจับให้เอง</label>
@@ -261,7 +377,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
                     <button onClick={() => setLines(b.id, (ls) => ls.map((l) => (l.level === "ok" && l.match_key && !l.decision ? { ...l, decision: "confirmed" } : l)))} disabled={busy === b.id} className="h-8 px-2.5 text-xs rounded-md border border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50 disabled:opacity-40">ยืนยันทุกแถวที่มั่นใจสูง</button>
                     <button onClick={() => void patch(b.id, "save")} disabled={busy === b.id} className="h-8 px-2.5 text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40">บันทึก</button>
                     <button onClick={() => void patch(b.id, "apply")} disabled={busy === b.id} className="h-8 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
-                      {busy === b.id ? "กำลังบันทึก…" : `${b.status === "applied" ? "ใส่ลงใบอีกครั้ง" : "ใส่ลงใบสำคัญรับ"} (${decided}/${lines.length})`}
+                      {busy === b.id ? "กำลังบันทึก…" : `${b.status === "applied" ? "ใส่ลงใบอีกครั้ง" : "ใส่ลงใบสำคัญรับ"} (${decided}/${lines.length})${(() => { const c = planCount(buildPlan(b.id)); return c ? ` + แก้ PO ${c}` : ""; })()}`}
                     </button>
                     {msg[b.id] && <div className="basis-full text-[11px] text-red-600">{msg[b.id]}</div>}
                     <div className="basis-full text-[11px] text-slate-400">ใส่ลงใบ = ราคา ¥ จากบิล + ผูกบรรทัดใบสั่งซื้อ · ตอนกดยืนยันใบ ราคาจะเขียนกลับ PO / ราคาต่อร้าน ตามเดิม · รายการที่ไม่ได้มาจากใบรับของ จะยังไม่เข้าสต๊อกจนกว่าจะรับของ</div>
@@ -298,6 +414,18 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
           </div>
         </ERPModal>
       )}
+
+      {/* ยืนยันก่อนแก้ใบสั่งซื้อ (ลดจำนวนตามบิล / ปิดยอดของที่ไม่มา) */}
+      <ConfirmDialog open={!!poPlan} onClose={() => setPoPlan(null)} variant={poPlan?.closeLabels.length ? "danger" : "default"} loading={!!poPlan && busy === poPlan.billId}
+        onConfirm={() => { const p = poPlan; setPoPlan(null); if (p) void patch(p.billId, "apply", p); }}
+        title="ใส่ลงใบสำคัญ + แก้ใบสั่งซื้อ?" confirmText="ยืนยัน"
+        message={poPlan && (
+          <div className="space-y-2 text-[13px]">
+            {poPlan.reduceLabels.length > 0 && <div><b className="font-medium text-slate-700">ลดจำนวนใน PO ตามบิล ({poPlan.reduceLabels.length})</b><ul className="list-disc pl-5 text-slate-600">{poPlan.reduceLabels.map((t) => <li key={t}>{t}</li>)}</ul></div>}
+            {poPlan.closeLabels.length > 0 && <div><b className="font-medium text-red-700">ปิดยอด — ของไม่มาแล้ว ({poPlan.closeLabels.length})</b><ul className="list-disc pl-5 text-slate-600">{poPlan.closeLabels.map((t) => <li key={t}>{t}</li>)}</ul></div>}
+            <p className="text-[11px] text-slate-500">ของที่ปิดยอด หน้าขอซื้อ / ใบสั่งผลิตจะกลับเป็น &quot;ต้องซื้อ&quot; เอง · ของที่รับเข้าแล้วไม่ถูกแตะ · ลงประวัติทุกบรรทัด</p>
+          </div>
+        )} />
 
       <ConfirmDialog open={!!delBill} onClose={() => setDelBill(null)} onConfirm={() => void removeBill()} variant="danger" loading={!!delBill && busy === delBill.id}
         title="ถอดบิลร้านนี้?" message="ผลที่ AI อ่านและการจับคู่ของบิลนี้จะหายไป · รายการที่ใส่ลงใบสำคัญแล้วยังอยู่ (ลบได้ที่ตารางรายการ)" confirmText="ถอดบิล" />

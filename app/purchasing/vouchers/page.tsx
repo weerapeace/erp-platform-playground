@@ -281,7 +281,7 @@ export default function PurchaseVouchersPage() {
       {/* ＋ ออกใบสำคัญรับ — เลือกจากใบรับที่รอ หรือสร้างเปล่า */}
       {addOpen && (
         <ERPModal open onClose={() => !creating && setAddOpen(false)} size="md" storageKey="pv-add"
-          title="＋ ออกใบสำคัญรับ" description="เลือกใบรับที่รับของแล้ว หรือสร้างใบเปล่าสำหรับของที่ซื้อโดยไม่มีใบรับ"
+          title="＋ ออกใบสำคัญรับ" description="เลือกใบรับที่รับของแล้ว หรือออกจากบิลร้านก่อนของมาถึง (ยังไม่มีใบรับ)"
           footer={<>
             <button onClick={() => setAddOpen(false)} disabled={creating} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
             {addMode === "gr"
@@ -290,7 +290,7 @@ export default function PurchaseVouchersPage() {
           </>}>
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs mb-3">
             <button onClick={() => setAddMode("gr")} className={`h-8 px-3 ${addMode === "gr" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📥 จากใบรับ ({pending.length})</button>
-            <button onClick={() => setAddMode("manual")} className={`h-8 px-3 border-l border-slate-200 ${addMode === "manual" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>✍️ สร้างเปล่า (ไม่มีใบรับ)</button>
+            <button onClick={() => setAddMode("manual")} className={`h-8 px-3 border-l border-slate-200 ${addMode === "manual" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🧾 จากบิลร้าน / สร้างเปล่า (ยังไม่มีใบรับ)</button>
           </div>
           {addMode === "gr" ? (
             pending.length === 0 ? <div className="py-8 text-center text-xs text-slate-300 border border-dashed border-slate-200 rounded-lg">— ไม่มีใบรับค้างออกใบสำคัญ — ไปรับของที่หน้า &quot;รับสินค้าเข้า&quot; ก่อน หรือเลือก &quot;สร้างเปล่า&quot;</div> : (
@@ -324,7 +324,7 @@ export default function PurchaseVouchersPage() {
                   <button onClick={() => setMCur("RMB")} className={`h-9 px-4 border-l border-slate-200 ${mCur === "RMB" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>¥ หยวน</button>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-400">ใบเปล่าไม่ผูกกับใบสั่งซื้อและไม่บวกสต๊อก — ใช้บันทึกราคาซื้อ + ค่าส่ง แล้วเขียนราคากลับสินค้า/ราคาต่อร้าน · รายการสินค้าเพิ่มเองในหน้าถัดไป</p>
+              <p className="text-[11px] text-slate-400">ของยังไม่มาก็ออกได้ — หน้าถัดไปอัปโหลด &quot;บิลจากร้าน&quot; ระบบอ่านแล้วจับคู่กับใบสั่งซื้อของร้านนี้ให้ (เลือกร้านจากทะเบียนเพื่อให้จับคู่และจำคู่ได้) · ของที่ไม่อยู่ในบิลเลือกได้ว่า รอรอบหน้า หรือ ปิดยอด · หรือเพิ่มรายการเอง · ใบนี้ไม่บวกสต๊อก (รับของที่หน้ารับของตามปกติ)</p>
             </div>
           )}
         </ERPModal>

@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   aliasKey, groupKey, sizesMm, colorsOf, codeTokens, distributeQty, checkBillMath, matchBillLines, undecidedCount, normalizeBillLine, applyGroupToLine, cnNameForSku,
+  shortfallOf, reducePlan, missingGroups,
   type PoGroup, type SellerBillLine,
 } from "@/lib/seller-bill-match";
 
@@ -114,6 +115,29 @@ describe("บิลร้านจีน — แบ่งจำนวน / ต�
     expect(cnNameForSku({ name_cn: "狗扣", spec_cn: " 9mm  银色 " })).toBe("狗扣 9mm 银色");
     expect(cnNameForSku({ name_cn: "BOX", spec_cn: null })).toBeNull();
     expect(cnNameForSku({ name_cn: null, spec_cn: null })).toBeNull();
+  });
+  it("ส่งไม่ครบ: จำนวนที่ขาด + แผนลด PO ตามบิล (ใบสั่งผลิตเก่าก่อน · ได้ 0 = ปิดยอด · ไม่ต่ำกว่าที่รับแล้ว)", () => {
+    const g = { ...groups[0], remaining: 70, qty_total: 70, lines: [
+      { id: "a", qty: 20, remaining: 20, qty_received: 0, sort_order: 0, note: null, voucher_line_id: null, from_gr: false },
+      { id: "b", qty: 20, remaining: 20, qty_received: 5, sort_order: 1, note: null, voucher_line_id: null, from_gr: false },
+      { id: "c", qty: 30, remaining: 30, qty_received: 0, sort_order: 2, note: null, voucher_line_id: null, from_gr: false },
+    ] };
+    const line = L({ qty: 25, match_key: g.key });
+    expect(shortfallOf(line, g)).toBe(45);
+    expect(shortfallOf(L({ qty: 70, match_key: g.key }), g)).toBe(0);
+    expect(shortfallOf(L({ qty: 25, match_key: g.key, is_fee: true }), g)).toBe(0);
+    expect(reducePlan(25, g)).toEqual({ line_qty: [{ id: "b", from: 20, qty: 5 }], close: ["c"] });   // a=20 (เต็ม ไม่แตะ) · b ได้ 5 · c ได้ 0 → ปิดยอด
+    // บรรทัดที่ออกใบสำคัญใบอื่นไปแล้วบางส่วน: จำนวนใหม่ = ที่ออกไปแล้ว + ที่ได้จากบิลนี้
+    const g2 = { ...g, lines: [{ id: "x", qty: 20, remaining: 12, qty_received: 0, sort_order: 0, note: null, voucher_line_id: null, from_gr: false }], remaining: 12 };
+    expect(reducePlan(10, g2)).toEqual({ line_qty: [{ id: "x", from: 20, qty: 18 }], close: [] });
+  });
+  it("ไม่อยู่ในบิล: เฉพาะ PO เดียวกับบิล (ค่าเริ่ม) หรือทั้งร้าน · ไม่นับที่รับครบ/แถวที่ข้าม", () => {
+    const po = (no: string, key: string, recv = 0): PoGroup => ({ ...groups[0], key, po_id: no, po_no: no, lines: [{ id: key, qty: 10, remaining: 10, qty_received: recv, sort_order: 0, note: null, voucher_line_id: null, from_gr: false }] });
+    const gs = [po("PO-1", "k1"), po("PO-1", "k2"), po("PO-1", "k3", 10), po("PO-2", "k4")];
+    const ls = [L({ match_key: "k1", decision: "confirmed" })];
+    expect(missingGroups(ls, gs).map((g) => g.key)).toEqual(["k2"]);            // k3 รับครบแล้ว · k4 คนละ PO
+    expect(missingGroups(ls, gs, "shop").map((g) => g.key)).toEqual(["k2", "k4"]);
+    expect(missingGroups([L({ match_key: "k1", decision: "skip" })], gs)).toEqual([]);   // ข้ามแถว = ไม่นับว่า PO นี้อยู่ในบิล
   });
   it("ต้องตัดสินครบทุกแถวก่อนใส่ลงใบ", () => {
     const ls = [L({ match_key: "k", decision: "confirmed" }), L({ is_fee: true, decision: "expense" }), L({ decision: "skip" }), L({ match_key: "k" })];

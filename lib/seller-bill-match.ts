@@ -33,10 +33,12 @@ export type SellerBillLine = {
   decision: LineDecision;         // confirmed = ใช่ · skip = ข้าม · expense = เพิ่มเป็นค่าใช้จ่าย (เฉพาะบรรทัดค่าใช้จ่าย)
   manual: boolean;                // คนเลือกจับคู่เอง
   voucher_line_ids: string[];     // บรรทัดในใบสำคัญที่สร้าง/อัปเดตจากแถวนี้ (หลังกดใส่ลงใบ)
+  /** บิลลงน้อยกว่าที่ค้าง: keep = คงไว้รอส่วนที่เหลือ (ค่าเริ่ม) · reduce = ลดจำนวนในใบสั่งซื้อตามบิล */
+  short_action: "keep" | "reduce" | null;
 };
 
 /** บรรทัด PO ย่อย (1 สินค้าในใบ PO อาจแตกหลายบรรทัดตามใบสั่งผลิต) */
-export type PoGroupLine = { id: string; qty: number; remaining: number; sort_order: number; note: string | null; voucher_line_id: string | null; from_gr: boolean };
+export type PoGroupLine = { id: string; qty: number; remaining: number; qty_received?: number; sort_order: number; note: string | null; voucher_line_id: string | null; from_gr: boolean };
 
 /** กลุ่มเป้าหมายการจับคู่ = สินค้า 1 ตัวใน PO 1 ใบ (รวมทุกบรรทัดของสินค้านั้นในใบ) */
 export type PoGroup = {
@@ -302,5 +304,47 @@ export function normalizeBillLine(r: Record<string, unknown>): SellerBillLine {
     score: n(r.score) ?? 0, reasons: Array.isArray(r.reasons) ? (r.reasons as unknown[]).map(String) : [], warns: Array.isArray(r.warns) ? (r.warns as unknown[]).map(String) : [],
     alias_hit: r.alias_hit === true, decision: dec, manual: r.manual === true,
     voucher_line_ids: Array.isArray(r.voucher_line_ids) ? (r.voucher_line_ids as unknown[]).map(String).filter(Boolean) : [],
+    short_action: r.short_action === "reduce" ? "reduce" : r.short_action === "keep" ? "keep" : null,
   };
+}
+
+// ── ของที่ร้านส่งไม่ครบ ──
+
+/** บิลลงน้อยกว่าที่ค้างในใบสั่งซื้อไหม → จำนวนที่ขาด (0 = ไม่ขาด) */
+export function shortfallOf(line: Pick<SellerBillLine, "qty" | "is_fee" | "match_key">, g: PoGroup | null | undefined): number {
+  if (!g || line.is_fee || !line.match_key) return 0;
+  const q = Number(line.qty ?? 0);
+  return q > 0 && g.remaining - q > 0.0001 ? round(g.remaining - q, 4) : 0;
+}
+
+/** จำนวนที่ยังค้างรับ (สั่ง − รับแล้ว) ของกลุ่ม */
+export const pendingReceiveOf = (g: PoGroup) => round(g.lines.reduce((a, l) => a + Math.max(0, l.qty - Number(l.qty_received ?? 0)), 0), 4);
+
+/**
+ * "ไม่อยู่ในบิล" — ของในใบสั่งซื้อของร้านนี้ที่ยังค้างรับ แต่บิลนี้ไม่มี (ร้านยังไม่มีของ)
+ *   scope "bill" = เฉพาะ PO เดียวกับรายการที่จับคู่ในบิล (ค่าเริ่ม) · "shop" = ของค้างรับทั้งร้าน
+ */
+export function missingGroups(lines: SellerBillLine[], groups: PoGroup[], scope: "bill" | "shop" = "bill"): PoGroup[] {
+  const used = new Set(lines.filter((l) => l.match_key && l.decision !== "skip").map((l) => l.match_key as string));
+  const gMap = new Map(groups.map((g) => [g.key, g]));
+  const pos = new Set([...used].map((k) => gMap.get(k)?.po_id).filter((x): x is string => !!x));
+  return groups.filter((g) => !used.has(g.key) && (scope === "shop" || pos.has(g.po_id)) && pendingReceiveOf(g) > 0 && g.lines.some((l) => !l.from_gr));
+}
+
+/**
+ * แผน "ลดจำนวนในใบสั่งซื้อตามบิล" ของ 1 กลุ่ม — แบ่งจำนวนบิลลงบรรทัดเหมือนตอนใส่ลงใบ (ใบสั่งผลิตเก่าก่อน)
+ *   จำนวนใหม่ต่อบรรทัด = ที่ออกใบสำคัญใบอื่นไปแล้ว + ที่ได้จากบิลนี้ (ไม่ต่ำกว่าที่รับแล้ว)
+ *   ได้ 0 = ปิดยอดบรรทัดนั้น (ใบสั่งซื้อตั้งจำนวน 0 ไม่ได้) · เท่าเดิม = ไม่แตะ
+ */
+export function reducePlan(billQty: number, g: PoGroup): { line_qty: { id: string; from: number; qty: number }[]; close: string[] } {
+  const alloc = new Map(distributeQty(billQty, g.lines).map((a) => [a.id, a.qty]));
+  const out = { line_qty: [] as { id: string; from: number; qty: number }[], close: [] as string[] };
+  for (const l of g.lines) {
+    const billedElsewhere = Math.max(0, l.qty - l.remaining);
+    const next = round(Math.max(billedElsewhere + (alloc.get(l.id) ?? 0), Number(l.qty_received ?? 0)), 4);
+    if (next >= l.qty - 0.0001) continue;
+    if (next <= 0) out.close.push(l.id);
+    else out.line_qty.push({ id: l.id, from: l.qty, qty: next });
+  }
+  return out;
 }

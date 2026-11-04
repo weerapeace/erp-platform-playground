@@ -67,7 +67,7 @@ export async function loadShopGroups(admin: Admin, v: VoucherLite): Promise<PoGr
 
   const poLines: Row[] = [];
   const res = await Promise.all(chunk([...poMap.keys()], 100).map((ids) => admin.from("purchase_order_lines_v2")
-    .select("id, po_id, item_sku_id, item_name, qty, uom, price_est, note, sort_order, line_status, is_active")
+    .select("id, po_id, item_sku_id, item_name, qty, uom, price_est, note, sort_order, line_status, is_active, qty_received")
     .in("po_id", ids).order("sort_order", { ascending: true }).limit(5000)));
   for (const r of res) for (const l of (r.data ?? []) as Row[]) {
     if (l.is_active === false) continue;
@@ -104,7 +104,7 @@ export async function loadShopGroups(admin: Admin, v: VoucherLite): Promise<PoGr
     const key = groupKey(String(l.po_id), skuId, str(l.item_name));
     const my = myByPoLine.get(String(l.id));
     const remaining = Math.max(0, num(l.qty) - (billed.get(String(l.id)) ?? 0));
-    const gl: PoGroupLine = { id: String(l.id), qty: num(l.qty), remaining, sort_order: num(l.sort_order), note: (l.note as string) ?? null, voucher_line_id: my ? String(my.id) : null, from_gr: !!my?.gr_line_id };
+    const gl: PoGroupLine = { id: String(l.id), qty: num(l.qty), remaining, qty_received: num(l.qty_received), sort_order: num(l.sort_order), note: (l.note as string) ?? null, voucher_line_id: my ? String(my.id) : null, from_gr: !!my?.gr_line_id };
     const g = groups.get(key);
     if (g) {
       g.lines.push(gl); g.qty_total += gl.qty; g.remaining += remaining; g.in_voucher ||= !!my;
