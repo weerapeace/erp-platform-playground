@@ -19,6 +19,7 @@ import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
 import { DeliveryBillPanel } from "@/components/delivery-bill-panel";
 import { SellerBillPanel } from "@/components/seller-bill-panel";
+import { SendToChinaPayButton } from "@/components/china-pay-send-button";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { computeVoucher, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
@@ -476,6 +477,7 @@ export default function PurchaseVoucherFormPage() {
 
               {/* ขวา: สรุปยอด (ค่าส่งแยกบรรทัด ไม่รวมในราคาสินค้า) + การจ่ายเงิน (หลังยืนยัน) */}
               <aside className="space-y-3">
+                <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} />
                 {hd.status === "confirmed" && (
                   <div className="bg-white border border-slate-200 rounded-xl p-4">
                     <div className="text-sm font-semibold text-slate-700 mb-2">💳 การจ่ายเงิน</div>
