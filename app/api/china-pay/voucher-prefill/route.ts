@@ -28,9 +28,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
 
   const { data: v } = await admin.from("purchase_vouchers_v2")
-    .select("id, pv_no, status, seller_name, seller_partner_id, currency, subtotal_foreign, is_active").eq("id", id).maybeSingle();
+    .select("id, pv_no, status, seller_name, seller_partner_id, currency, subtotal_foreign, is_active, china_bill_id").eq("id", id).maybeSingle();
   if (!v || (v as Row).is_active === false) return NextResponse.json({ data: null, error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
   const pv = v as Row;
+  // ใบที่ "ออกจากบิลโอนเงินจีน" แล้ว (purchase_vouchers_v2.china_bill_id) → ห้ามเติมหน้าลงบิลซ้ำ = กันลงบิลซ้ำ/จ่ายซ้ำ
+  if (pv.china_bill_id) {
+    const { data: b } = await admin.from("china_bills").select("id, status, is_active").eq("id", str(pv.china_bill_id)).maybeSingle();
+    const alive = b && (b as Row).is_active !== false && str((b as Row).status) !== "ยกเลิก";
+    if (alive) return NextResponse.json({ data: null, existing_bill_id: str(pv.china_bill_id), error: `ใบสำคัญ ${str(pv.pv_no) || "นี้"} ออกจากบิลโอนเงินจีนอยู่แล้ว — ไม่ต้องลงบิลซ้ำ (เปิดบิลเดิมได้จากหน้าใบสำคัญ)` }, { status: 409 });
+  }
   const vRmb = isRmbCurrency(pv.currency as string);
 
   const [{ data: lines }, { data: bills }] = await Promise.all([

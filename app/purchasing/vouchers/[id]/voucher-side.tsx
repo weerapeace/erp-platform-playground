@@ -207,7 +207,7 @@ export function VoucherNextSteps({ voucherId, header, foreign, sym, canEdit, pay
             })}
             {header.po_payments.length === 0 && <div className="text-xs text-slate-400">ใบนี้ไม่มีใบสั่งซื้อ (รายการเพิ่มเอง)</div>}
           </div>
-          {foreign && st.goods === "todo" && <div className="mt-2"><SendToChinaPayButton voucherId={voucherId} currency={header.currency} status={header.status} variant="inline" /></div>}
+          {foreign && (st.goods === "todo" || !!header.china_bill_id) && <div className="mt-2"><SendToChinaPayButton voucherId={voucherId} currency={header.currency} status={header.status} chinaBillId={header.china_bill_id} variant="inline" /></div>}
         </div>
         <div>
           <Head n={3} title="ค่าส่ง" s={st.shipping} />

@@ -511,7 +511,7 @@ export default function PurchaseVoucherFormPage() {
                   <VoucherChecklistCard items={checklist} totals={totals} foreign={foreign} sym={sym} fxRate={h.fx_rate} dirty={dirty} saving={saving}
                     onSave={() => void save()} onConfirm={() => setConfirmOpen(true)} />
                 )}
-                {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} />}
+                {hd.status === "draft" && <SendToChinaPayButton voucherId={id} currency={currency} status={hd.status} chinaBillId={hd.china_bill_id} />}
                 {/* ยืนยันแล้ว: งานถัดไป (พิมพ์ · จ่ายค่าสินค้า · ค่าส่ง) */}
                 {hd.status === "confirmed" && (
                   <VoucherNextSteps voucherId={id} header={hd} foreign={foreign} sym={sym} canEdit={canEdit} payBusy={payBusy} lastConfirm={lastConfirm}
