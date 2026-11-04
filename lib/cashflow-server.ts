@@ -447,8 +447,9 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
     if (activeVersions.length) {
       const [instRes, contractRes] = await Promise.all([
         db.from("loan_installments")
-          .select("id, loan_contract_id, installment_no, due_date, total_due, total_paid, payment_status")
-          .in("schedule_version_id", activeVersions).eq("is_active", true).neq("payment_status", "paid")
+          .select("id, loan_contract_id, installment_no, due_date, principal_due, interest_due, fee_due, penalty_due, total_due, total_paid, payment_status, updated_at")
+          // .neq ตัดแถวที่สถานะว่าง (null) ทิ้ง → ใช้ or ให้นับงวดที่ยังไม่เคยตั้งสถานะด้วย
+          .in("schedule_version_id", activeVersions).eq("is_active", true).or("payment_status.is.null,payment_status.neq.paid")
           .lte("due_date", to).limit(5000),
         db.from("loan_contracts").select("id, loan_code, loan_name, company_id").limit(2000),
       ]);
@@ -474,10 +475,21 @@ export async function loadCashflow(db: Admin, q: CashflowQuery): Promise<Cashflo
           party: String(c?.loan_name ?? "สัญญาเงินกู้"),
           amount,
           dateConfident: true,
-          note: date < today ? "เลยกำหนดชำระแล้ว" : undefined,
+          note: date < today ? "เลยกำหนดชำระแล้ว — ถ้าจ่ายแล้ว กด \"ตัดยอดให้ตรง\" หรือบันทึกจ่ายที่สัญญา" : undefined,
           href: openLink("/loan-installments", String(i.id)),
           docId: String(i.id),
           companyId: co(c?.company_id),
+          updatedAt: (i.updated_at as string | null) ?? null,
+          details: [
+            { label: "สัญญา", value: String(c?.loan_code ?? "—"), kind: "text" },
+            { label: "งวดที่", value: String(i.installment_no ?? "—"), kind: "text" },
+            { label: "เงินต้น", value: num(i.principal_due), kind: "money" },
+            { label: "ดอกเบี้ย", value: num(i.interest_due), kind: "money" },
+            ...(num(i.fee_due) + num(i.penalty_due) > 0 ? [{ label: "ค่าธรรมเนียม/ปรับ", value: num(i.fee_due) + num(i.penalty_due), kind: "money" as const }] : []),
+            ...(num(i.total_paid) > 0 ? [{ label: "จ่ายแล้ว", value: num(i.total_paid), kind: "money" as const }] : []),
+          ],
+          // id สัญญา — ปุ่ม "ตัดยอดให้ตรง" (ทั้งสัญญา) + เปิด drawer สัญญา (บันทึกจ่าย · ตารางผ่อน)
+          raw: { contractId: String(i.loan_contract_id) },
         });
       }
       if (overdue > 0) {

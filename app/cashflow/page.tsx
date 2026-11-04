@@ -81,6 +81,7 @@ export default function CashflowPage() {
   // แท็บต้องจ่าย: เงินเดือนจ่ายแล้ว — ด่านเดียวกับ API เงินเดือน (guardPayroll: app.payroll + employees.edit)
   const canPayrollApp = usePermission("app.payroll");
   const canPayrollEdit = usePermission("employees.edit");
+  const canLoanReconcile = usePermission("loan_payments.create");  // แท็บต้องจ่าย: ปุ่ม "ตัดยอดให้ตรง" ของงวดเงินกู้
   const canReceipt = usePermission("receipts.create");         // /api/receipts — รับเงินแล้วจากแท็บต้องรับ
   const { permsReady } = useAuth();
 
@@ -515,7 +516,7 @@ export default function CashflowPage() {
               ))}
             </div>
 
-            {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} cashNow={accounts.length ? opening : null} buffer={buffer} rmbRate={data?.meta.rmbRate ?? 0} canDebtEdit={canDebtEdit} canPayrollPay={canPayrollApp && canPayrollEdit} onChanged={load} />}
+            {tab === "pay" && <CashflowPartyTab side="out" events={outEvents} today={from} canManage={canManage} canPayPo={canPayPo} cashNow={accounts.length ? opening : null} buffer={buffer} rmbRate={data?.meta.rmbRate ?? 0} canDebtEdit={canDebtEdit} canPayrollPay={canPayrollApp && canPayrollEdit} canLoanReconcile={canLoanReconcile} onChanged={load} />}
             {tab === "recv" && <CashflowPartyTab side="in" events={inEvents} today={from} canManage={canManage} canPayPo={false} canReceipt={canReceipt} onChanged={load} />}
             {tab === "debt" && (canDebtView ? (
               <CashflowDebtTab items={myDebts} loading={debtsLoading} error={debtsErr} canCreate={canDebtCreate} onChanged={reloadAll}
