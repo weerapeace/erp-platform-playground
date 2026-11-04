@@ -7,6 +7,7 @@
  *   ข้างล่าง = แถบโต๊ะติดขอบจอ (ชื่อโต๊ะ + 2 ใบแรก) · ชี้ = เด้งขึ้น · กด = แผงเลื่อนขึ้น (การ์ดงาน · ค่าแรงรวม/ต่อช่าง · จัดการโต๊ะ)
  *   ขวา = แผง "สรุปเป้า" (ผู้บริหาร) เลื่อนเข้า · ล็อกได้ = ติดขวาแล้วดันการ์ดให้แคบลง · เป้าเก็บกลาง ui_config admin_wb_exec_target
  *   จ่าย = ลากการ์ดลงโต๊ะ (ติ๊กหลายใบ ลากใบไหนก็ไปทั้งชุด) หรือกดโต๊ะ → "จ่ายให้โต๊ะนี้" → ป๊อปจ่ายงานเดิมของบอร์ด (ทีละใบ)
+ *     เมาส์ = ลาก HTML5 · iPad/มือถือ = กดค้างแล้วลาก (ของกลาง components/touch-drag)
  * ค่าที่จำต่อคน (useUserPref): ขนาดการ์ด · การเรียง · ช่องที่โชว์ · ล็อกแผงสรุป
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react";
@@ -17,6 +18,8 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { bkkDate } from "@/lib/mo-sales-match";
 import { useUserPref } from "@/lib/use-user-pref";
+import { useTouchDrag } from "@/components/touch-drag";
+import { MoneyInput } from "@/components/money-input";
 
 export type ExecMo = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
@@ -110,6 +113,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   const [target, setTarget] = useState<Target>({});
   const [targetDraft, setTargetDraft] = useState("");
   const [done, setDone] = useState<Done | null>(null);
+  const [savingTarget, setSavingTarget] = useState(false);
   const show = (k: FieldKey) => fields.includes(k) && (showPrice || !FIELDS.find((f) => f.k === k)?.money);
   const sideShown = showPrice && (sideOpen || locked);
 
@@ -138,12 +142,14 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     const v = Math.max(0, Number(targetDraft) || 0);
     if (v === (target[period] ?? 0)) return;
     const next = { ...target, [period]: v };
-    setTarget(next);
+    setSavingTarget(true);
     try {
       const r = await apiFetch("/api/ui-config", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: TARGET_KEY, value: next }) });
-      const j = await r.json(); if (!r.ok || j.error) throw new Error(j.error || "บันทึกเป้าไม่สำเร็จ");
+      const j = await r.json(); if (!r.ok || j.error) throw new Error(r.status === 401 || r.status === 403 ? "ตั้งเป้าได้เฉพาะแอดมิน" : (j.error || "บันทึกเป้าไม่สำเร็จ"));
+      setTarget(next);
       toast.success(`ตั้งเป้า${PERIODS.find((p) => p.k === period)?.label} ฿${fmt(v)} แล้ว`);
     } catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกเป้าไม่สำเร็จ"); }
+    finally { setSavingTarget(false); }
   };
 
   const brands = useMemo(() => {
@@ -177,6 +183,8 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     onDispatch(mos, desk);
     setSel((p) => { const n = new Set(p); for (const m of mos) n.delete(m.id); return n; });   // หลุดเฉพาะใบที่ส่งไปจ่าย (ลากใบที่ไม่ได้ติ๊ก = ที่ติ๊กไว้ยังอยู่)
   };
+  // ลากด้วยนิ้ว (iPad) — กดค้างการ์ดแล้วลากไปวางที่โต๊ะ (โต๊ะมี data-drop-id)
+  const td = useTouchDrag<string>({ onDrop: (deskId, id) => { const d = desks.find((x) => x.id === deskId); if (d) give(d, sel.has(id) ? chosen.map((m) => m.id) : [id]); } });
   const deskOpen = desks.find((d) => d.id === openDesk) ?? null;
   const goal = target[period] ?? 0, got = done?.value ?? 0, pct = goal > 0 ? Math.min(100, (got / goal) * 100) : 0;
 
@@ -244,7 +252,8 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
               return (
                 <div key={m.id} draggable={canDispatch}
                   onDragStart={(e) => { e.dataTransfer.setData("text/plain", m.id); e.dataTransfer.effectAllowed = "move"; }}
-                  onClick={() => toggle(m.id)}
+                  {...(canDispatch ? td.bind(m.id, <span className="flex items-center gap-2 text-sm"><Icon name="truck" /><b className="font-mono">{m.product_sku ?? m.mo_no}</b>{sel.has(m.id) && chosen.length > 1 ? <span className="text-violet-700">+{chosen.length - 1} ใบ</span> : null}</span>) : {})}
+                  onClick={() => { if (td.justDragged()) return; toggle(m.id); }}
                   className={`group relative cursor-pointer select-none rounded-xl border bg-white p-2 transition-shadow hover:shadow-md ${on ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"}`}>
                   <input type="checkbox" checked={on} readOnly className="absolute left-2 top-2 z-10 h-4 w-4 accent-violet-600" aria-label={`เลือก ${m.product_sku ?? m.mo_no}`} />
                   <div className="absolute right-2 top-2 z-10 flex flex-col items-end gap-1">
@@ -339,9 +348,9 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           </div>
           <div className="flex items-end justify-center gap-2 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-3 pb-2.5 pt-4 backdrop-blur">
             {desks.map((d) => {
-              const ws = wosOf(d.id), lifted = overDesk === d.id, on = openDesk === d.id;
+              const ws = wosOf(d.id), lifted = overDesk === d.id || td.overId === d.id, on = openDesk === d.id;
               return (
-                <button key={d.id} type="button" onClick={() => setOpenDesk(on ? null : d.id)}
+                <button key={d.id} type="button" data-drop-id={d.id} onClick={() => setOpenDesk(on ? null : d.id)}
                   onDragOver={(e) => { if (!canDispatch) return; e.preventDefault(); setOverDesk(d.id); }}
                   onDragLeave={() => setOverDesk((x) => (x === d.id ? null : x))}
                   onDrop={(e) => { e.preventDefault(); setOverDesk(null); const id = e.dataTransfer.getData("text/plain"); give(d, sel.has(id) ? chosen.map((m) => m.id) : [id]); }}
@@ -371,10 +380,17 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
             <div className="mb-3 flex gap-1">
               {PERIODS.map((p) => <button key={p.k} type="button" onClick={() => setPeriod(p.k)} className={`h-7 flex-1 rounded-full border text-[12px] ${period === p.k ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{p.label}</button>)}
             </div>
-            <label className="block text-[12px] text-slate-500">ยอดที่ต้องการ (มูลค่าขาย · ใช้ร่วมกันทั้งทีม)
-              <input type="number" min={0} step={1000} value={targetDraft} onChange={(e) => setTargetDraft(e.target.value)} onBlur={() => void saveTarget()} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-                placeholder="เช่น 3000000" className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums" />
-            </label>
+            <div className="text-[12px] text-slate-500">ยอดที่ต้องการ (มูลค่าขาย · ใช้ร่วมกันทั้งทีม)</div>
+            <div className="mt-1 flex gap-1.5">
+              <MoneyInput value={targetDraft} onChange={setTargetDraft} onKeyDown={(e) => { if (e.key === "Enter") void saveTarget(); }}
+                placeholder="เช่น 3,000,000" className="h-9 min-w-0 flex-1 rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums" />
+              {(() => {
+                const dirty = (Number(targetDraft) || 0) !== (target[period] ?? 0);
+                return <button type="button" onClick={() => void saveTarget()} disabled={!dirty || savingTarget}
+                  className={`inline-flex h-9 shrink-0 items-center gap-1 rounded-lg px-3 text-sm font-medium ${dirty ? "bg-violet-600 text-white hover:bg-violet-700" : "bg-emerald-50 text-emerald-700"}`}>
+                  <Icon name={dirty ? "save" : "done"} /> {savingTarget ? "กำลังบันทึก…" : dirty ? "บันทึก" : "บันทึกแล้ว"}</button>;
+              })()}
+            </div>
             <div className="mt-4 text-[12px] text-slate-500">จ่ายงานแล้ว{PERIODS.find((p) => p.k === period)?.label}</div>
             <div className="bg-gradient-to-r from-violet-600 to-fuchsia-500 bg-clip-text text-3xl font-extrabold tabular-nums text-transparent">฿{fmt(got)}</div>
             <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-[width] duration-500" style={{ width: `${pct}%` }} /></div>
@@ -391,6 +407,8 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           </div>
         </aside>
       )}
+
+      {td.ghost}
 
       {/* จัดการโต๊ะ (แผงกลางเดิม) */}
       <ERPModal open={manageDesk !== null} onClose={() => setManageDesk(null)} size="md" title={`จัดการโต๊ะ: ${manageDesk?.name ?? ""}`} description="ย้ายคนเข้า/ออก · สร้างโต๊ะใหม่ · เปลี่ยนชื่อ · ปิดโต๊ะ (ต้องมีสิทธิ์บุคคล)">
