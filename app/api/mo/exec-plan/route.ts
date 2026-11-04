@@ -56,6 +56,36 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "admin.users"); if (denied) return denied;
   const admin = supabaseAdmin();
 
+  // ?dispatched=1&from=&to= → ยอดที่จ่ายงานไปแล้วในช่วง (แผง "สรุปเป้า" โหมดผู้บริหาร) · วันที่ = dispatch_date (วันไทย)
+  const sp = new URL(request.url).searchParams;
+  if (sp.get("dispatched") === "1") {
+    const ok = (d: string | null) => !!d && /^d{4}-d{2}-d{2}$/.test(d);
+    const from = sp.get("from"), to = sp.get("to");
+    if (!ok(from) || !ok(to)) return NextResponse.json({ error: "ระบุช่วงวันที่ from / to (YYYY-MM-DD)" }, { status: 400 });
+    const { data: ws } = await admin.from("mo_work_orders").select("mo_no, qty, labor_cost, status")
+      .eq("is_active", true).neq("status", "cancelled").gte("dispatch_date", from!).lte("dispatch_date", to!).limit(10000);
+    const list = (ws ?? []) as Row[];
+    const moNos = [...new Set(list.map((w) => String(w.mo_no)))];
+    const skuOf = new Map<string, string>();
+    for (let i = 0; i < moNos.length; i += 300) {
+      const { data: ms } = await admin.from("manufacturing_orders").select("mo_no, product_sku").in("mo_no", moNos.slice(i, i + 300));
+      for (const m of (ms ?? []) as Row[]) skuOf.set(String(m.mo_no), String(m.product_sku ?? ""));
+    }
+    const skus = [...new Set([...skuOf.values()].filter(Boolean))];
+    const priceOf = new Map<string, number>();
+    for (let i = 0; i < skus.length; i += 300) {
+      const { data: ps } = await admin.from("skus_v2").select("code, list_price").in("code", skus.slice(i, i + 300));
+      for (const p of (ps ?? []) as Row[]) priceOf.set(String(p.code), Number(p.list_price) || 0);
+    }
+    let value = 0, labor = 0, qty = 0, laborMissing = 0, noPrice = 0;
+    for (const w of list) {
+      const q = Number(w.qty) || 0, p = priceOf.get(skuOf.get(String(w.mo_no)) ?? "") ?? 0;
+      qty += q; value += q * p; if (!p) noPrice++;
+      if (w.labor_cost == null) laborMissing++; else labor += Number(w.labor_cost) || 0;
+    }
+    return NextResponse.json({ data: { from, to, count: list.length, qty: r2(qty), value: r2(value), labor: r2(labor), labor_missing: laborMissing, no_price: noPrice }, error: null });
+  }
+
   const [{ data: mosRaw }, { data: wosRaw }] = await Promise.all([
     admin.from("manufacturing_orders")
       .select("id, mo_no, product_sku, product_name, qty, status, due_date, prep_done, cut_done, est_labor_cost, bom_code, priority, priority_note, priority_at, priority_by, created_at, size_breakdown")

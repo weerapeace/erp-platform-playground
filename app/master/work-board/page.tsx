@@ -1671,7 +1671,8 @@ function WorkBoardPageInner() {
             setDispQueue({ list, dept, i: 0 }); openDispatch(list[0], dept);
           }}
           onOpenMO={(m) => { const mo = board.pending.find((p) => p.id === m.id); if (mo) { setClWO(null); setChecklistMO(mo); } }}
-          onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }} />
+          onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
+          renderDeskManager={(d) => { const dept = board.departments.find((x) => x.id === d.id); return dept ? <DeskStaffPanel dept={dept} desks={board.departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canDispatch} onChanged={reloadAssignees} wos={board.workOrders} onDesksChanged={deskChanged} /> : null; }} />
       ) : viewMode === "labor" ? (
         <LaborSummary />
       ) : viewMode === "exec" ? (
