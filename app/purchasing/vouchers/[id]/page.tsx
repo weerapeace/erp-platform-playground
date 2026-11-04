@@ -499,7 +499,7 @@ export default function PurchaseVoucherFormPage() {
 
                 {!foreign && (
                   <CollapseCard title="✨ มีบิลจีน? ให้ AI อ่าน + เติมราคา" summary="ใช้กับบิลร้านภาษาจีน">
-                    <SellerBillPanel voucherId={id} readonly={readonly} onApplied={load} />
+                    <SellerBillPanel voucherId={id} readonly={readonly} onApplied={load} bare />
                   </CollapseCard>
                 )}
               </div>
