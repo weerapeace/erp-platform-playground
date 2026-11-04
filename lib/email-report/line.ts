@@ -62,6 +62,7 @@ export function composeLineReport(built: BuiltReport, cfg: Pick<EmailReportLine,
     header, ...sub, "",
     ...(built.total === 0 ? [built.emptyText] : rows.map((r, i) => `${i + 1}. ${r.left}${r.right ? ` — ${r.right}` : ""}`)),
     ...(more ? [`…และอีก ${more.toLocaleString("th-TH")} ${built.unit ?? "งาน"}`] : []),
+    ...(built.alerts ?? []).map((a) => `⚠️ ${a.text}`),
     ...(link ? ["", `${linkLabel}: ${link}`] : []),
   ].join("\n").slice(0, 4900);
 
@@ -75,6 +76,7 @@ export function composeLineReport(built: BuiltReport, cfg: Pick<EmailReportLine,
     contents: [txt(clip(`${i + 1}. ${r.left}`, 80), { flex: 5 }), ...(r.right ? [txt(clip(r.right, 40), { flex: 3, align: "end", color: "#334155" })] : [])],
   }));
   if (more) body.push(txt(`…และอีก ${more.toLocaleString("th-TH")} ${built.unit ?? "งาน"}`, { size: "xs", color: "#94a3b8", margin: "md" }));
+  for (const a of built.alerts ?? []) body.push(txt(clip(`⚠️ ${a.text}`, 200), { size: "xs", color: "#b45309", margin: "sm" }));
   const footer = link ? { footer: { type: "box", layout: "vertical", contents: [{ type: "button", style: "link", height: "sm", action: { type: "uri", label: linkLabel, uri: link } }] } } : {};
   const altText = clip(opts.subject || built.subjectCore, 380);
 
@@ -94,6 +96,7 @@ export function composeLineReport(built: BuiltReport, cfg: Pick<EmailReportLine,
           txt(`${statText(s)}${s.hint ? ` · ${s.hint}` : ""}`, { size: "xs", flex: 5, weight: s.tone === "good" ? "bold" : "regular", color: s.tone === "good" ? "#059669" : "#0f172a" }),
         ] })),
         { type: "separator", margin: "md" },
+        ...(built.alerts ?? []).map((a) => txt(clip(`⚠️ ${a.text}`, 200), { size: "xs", color: "#b45309", margin: "sm" })),
         txt(`ปัดซ้ายดูขายดี ${cards.length} อันดับ →`, { size: "xs", color: "#64748b", margin: "md" }),
         ...(restN ? [txt(`ทั้งหมด ${built.total.toLocaleString("th-TH")} ${built.unit ?? "งาน"} ดูใน ERP`, { size: "xs", color: "#94a3b8" })] : []),
       ] },

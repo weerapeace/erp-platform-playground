@@ -323,7 +323,7 @@ async function drawTable(t: ReportTable, c: { y: number; maxRows: number; W: num
       if (th) layers.push({ input: th, left: PAD + 4, top: y + 6 });
       else shapes.push(`<rect x="${PAD + 4}" y="${y + 6}" width="${TH}" height="${TH}" rx="6" fill="#f1f5f9" stroke="#e2e8f0"/>`);
     }
-    for (const k of cols) await put(k.key, k.align, row.cells[k.key] ?? "", y + 12, { color: k.key === "code" || k.key === "color" ? "#475569" : "#0f172a" });
+    for (const k of cols) await put(k.key, k.align, row.cells[k.key] ?? "", y + 12, { color: row.tones?.[k.key] ? TONE[row.tones[k.key]] : k.key === "code" || k.key === "color" ? "#475569" : "#0f172a" });
     shapes.push(`<line x1="${PAD}" y1="${y + ROW_H}" x2="${W - PAD}" y2="${y + ROW_H}" stroke="#eef2f6" stroke-width="1"/>`);
     y += ROW_H;
   }

@@ -77,10 +77,12 @@ export default function PlatformSalesPage() {
   const [error, setError] = useState<string | null>(null);
   const { opts, set } = useReportOptions("platform_sales_products", { ...DEFAULT_PRODUCT_OPTIONS, grouped: false });
 
-  // ลิงก์จากรายงานอัตโนมัติ: ?date=YYYY-MM-DD → เปิดดูรายวัน (อ่านจาก URL เอง — เลี่ยง useSearchParams ที่ทำ prerender พัง)
+  // ลิงก์จากรายงานอัตโนมัติ: ?date=YYYY-MM-DD → เปิดดูรายวัน · ?month=YYYY-MM → รายเดือน (อ่านจาก URL เอง — เลี่ยง useSearchParams ที่ทำ prerender พัง)
   useEffect(() => {
-    const d = new URLSearchParams(window.location.search).get("date");
+    const sp = new URLSearchParams(window.location.search);
+    const d = sp.get("date"); const m = sp.get("month");
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) { setDate(d); setMode("day"); }
+    else if (m && /^\d{4}-(0[1-9]|1[0-2])$/.test(m)) { setMonth(m); setMode("month"); }
   }, []);
 
   const load = useCallback(async () => {

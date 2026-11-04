@@ -29,10 +29,13 @@ export function nowTH(d = new Date()) {
 }
 
 const toMin = (hm: string) => { const [h, m] = hm.split(":").map(Number); return h * 60 + m; };
-/** ถึงเวลาส่งไหม: วันตรง · ตั้งแต่เวลาที่ตั้ง ถึง +2 ชม. (cron พลาดรอบยังตามส่งได้ แต่ไม่ส่งเย็นถ้าตั้งไว้เช้า) · วันนี้ยังไม่ส่ง */
-export function isDue(r: Pick<EmailReport, "is_enabled" | "days" | "send_time" | "last_sent_on">, d = new Date()): boolean {
+/** ถึงเวลาส่งไหม: วันตรง · ตั้งแต่เวลาที่ตั้ง ถึง +2 ชม. (cron พลาดรอบยังตามส่งได้ แต่ไม่ส่งเย็นถ้าตั้งไว้เช้า) · วันนี้ยังไม่ส่ง
+ *  รายงาน "เดือนที่แล้ว" (filters.day = last_month) = ส่งวันที่ 1 ของเดือนเท่านั้น (ไม่ดูวันในสัปดาห์) */
+export function isDue(r: Pick<EmailReport, "is_enabled" | "days" | "send_time" | "last_sent_on"> & { filters?: { day?: string } | null }, d = new Date()): boolean {
   const n = nowTH(d);
-  if (!r.is_enabled || !r.days.includes(n.dow) || r.last_sent_on === n.date) return false;
+  const monthly = r.filters?.day === "last_month";
+  if (!r.is_enabled || r.last_sent_on === n.date) return false;
+  if (monthly ? n.date.slice(8) !== "01" : !r.days.includes(n.dow)) return false;
   const diff = toMin(n.hm) - toMin(r.send_time);
   return diff >= 0 && diff < 120;
 }

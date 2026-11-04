@@ -14,6 +14,8 @@ import { ERPInput, ERPTextarea, ERPTime24 } from "@/components/form";
 import { UserPicker } from "@/components/pickers";
 import { ExternalEmailAdder } from "@/components/saved-emails";
 import { FieldChipsPicker } from "@/components/field-chips-picker";
+import { DragHandle, moveItem, useDragReorder } from "@/components/sortable-list";
+import { MoneyInput } from "@/components/money-input";
 import { WorkPopupBody } from "@/components/work-popup";
 import { DiscordChatPreview, type DiscordPreviewData } from "./discord-preview";
 import { LineChannelCard, LinePreview, type LinePreviewData } from "./line-channel";
@@ -22,7 +24,7 @@ import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-s
 import type { WorkPopupPayload } from "@/lib/email-report/popup";
 import {
   COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
-  POPUP_FIELDS, POPUP_MAX_CHOICES, TOP_PHOTO_CHOICES, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportLine, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceChannels, sourceDef,
+  POPUP_FIELDS, POPUP_MAX_CHOICES, TOP_PHOTO_CHOICES, LOW_STOCK_CHOICES, REPORT_PERIODS, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportLine, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceChannels, sourceDef,
   type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportLine, type EmailReportPopup,
   type ReportChannelKey, type ReportChannels,
 } from "@/lib/email-report/shared";
@@ -183,6 +185,10 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
   const toggleChannel = (k: ReportChannelKey, on: boolean) => (k === "email" ? set({ email_enabled: on }) : k === "line" ? setLine({ enabled: on }) : k === "discord" ? setDiscord({ enabled: on }) : setPopup({ enabled: on }));
   const src = sourceDef(form.source_key);
   const isTable = src.layout === "table";
+  // รายงาน "เดือนที่แล้ว" ส่งวันที่ 1 ของเดือน (ไม่ใช้วันในสัปดาห์ — lib/email-report/send isDue)
+  const monthly = src.filterUi.includes("day") && form.filters.day === "last_month";
+  // ลากเรียง/เปลี่ยนชื่อคอลัมน์ (ของกลาง components/sortable-list)
+  const colDrag = useDragReorder((from, to) => setOptions({ row_fields: moveItem(form.options.row_fields ?? [], from, to) }));
   const lineOn = form.line.enabled;
   // ช่องทางที่แหล่งข้อมูลนี้รองรับ (เช่น ยอดขายรายวันยังไม่ทำป๊อป)
   const chans = sourceChannels(form.source_key);
@@ -324,7 +330,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
     src.label,
     !src.filterUi.includes("brand") ? "" : brandNames.length ? `แบรนด์ ${brandNames.slice(0, 3).join(", ")}${brandNames.length > 3 ? ` +${brandNames.length - 3}` : ""}` : GROUP_TEXT[form.filters.brand_group ?? "all"],
     !src.filterUi.includes("status") ? "" : statuses.length ? `${statuses.length} สถานะ` : "ทุกสถานะที่ยังไม่ปิด",
-    !src.filterUi.includes("day") ? "" : form.filters.day === "today" ? "ยอดของวันนี้ (ถึงเวลาส่ง)" : "ยอดของเมื่อวาน",
+    !src.filterUi.includes("day") ? "" : `ยอด${REPORT_PERIODS.find((p) => p.key === (form.filters.day ?? "yesterday"))?.label ?? "เมื่อวาน"}`,
   ].filter(Boolean).join(" · ");
   const howSummary = (
     <span className="flex flex-wrap gap-1">
@@ -349,7 +355,7 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
     : lineOn && !form.line.group_id ? "LINE ยังไม่เลือกกลุ่ม"
     : discordOn && !form.discord.channel_id ? "Discord ยังไม่เลือกห้อง" : null;
   const emptyWord = isTable ? "ไม่มีข้อมูล" : "ไม่มีงานค้าง";
-  const whenSummary = `${form.days.length ? describeDays(form.days) : "ยังไม่เลือกวัน"} · ${form.send_time} น.${form.skip_if_empty ? ` · ${emptyWord}ไม่ส่ง` : ""} · ${form.is_enabled ? "✅ เปิดใช้อยู่" : "⏸ ยังปิดอยู่"}`;
+  const whenSummary = `${monthly ? "วันที่ 1 ของทุกเดือน" : form.days.length ? describeDays(form.days) : "ยังไม่เลือกวัน"} · ${form.send_time} น.${form.skip_if_empty ? ` · ${emptyWord}ไม่ส่ง` : ""} · ${form.is_enabled ? "✅ เปิดใช้อยู่" : "⏸ ยังปิดอยู่"}`;
   const fieldLabels = (opt.row_fields ?? []).map((k) => src.rowFields.find((f) => f.key === k)?.label).filter(Boolean) as string[];
   const lookSummary = isTable
     ? `อีเมล: ${(opt.top_photos ?? 3) > 0 ? "รูปขายดี 3 อันดับ · " : ""}ตาราง ${fieldLabels.length ? fieldLabels.join(" · ") : "ชื่อ · จำนวน · ยอด"} · ${src.groupBy.find((g) => g.key === opt.group_by)?.label ?? ""} · ${(opt.max_rows ?? 500) >= 100 ? "ทั้งหมด" : `${opt.max_rows} อันดับ`}${opt.show_total !== false ? " · มีแถวรวม" : ""}${opt.attach_excel !== false ? " · แนบ Excel" : ""}`
@@ -500,12 +506,18 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
             )}
             {src.filterUi.includes("day") && (
               <div>
-                <label className={label}>สรุปยอดของวันไหน</label>
+                <label className={label}>สรุปยอดช่วงไหน</label>
                 <div className="flex flex-wrap gap-1">
-                  <button type="button" onClick={() => setFilters({ day: undefined })} className={chip(form.filters.day !== "today")}>เมื่อวาน (ทั้งวัน)</button>
-                  <button type="button" onClick={() => setFilters({ day: "today" })} className={chip(form.filters.day === "today")}>วันนี้ (ถึงเวลาที่ส่ง)</button>
+                  {REPORT_PERIODS.map((p) => (
+                    <button key={p.key} type="button" className={chip((form.filters.day ?? "yesterday") === p.key)}
+                      onClick={() => set({
+                        filters: { ...form.filters, day: p.key === "yesterday" ? undefined : p.key },
+                        // วันส่งที่เหมาะกับช่วง (แก้ต่อได้ในเรื่อง 3): 7 วัน = ทุกจันทร์ · รายวัน = ทุกวัน · เดือนที่แล้ว = วันที่ 1 (ไม่ใช้วันในสัปดาห์)
+                        ...(p.key === "last7" ? { days: [1] } : p.key === "yesterday" || p.key === "today" ? { days: [1, 2, 3, 4, 5, 6, 7] } : {}),
+                      })}>{p.label}</button>
+                  ))}
                 </div>
-                <p className="mt-1 text-[11px] text-slate-400">แนะนำ "เมื่อวาน" + ส่งตอนเช้า → ได้ยอดเต็มวัน · ออเดอร์นับตามวันที่สั่งซื้อ (เวลาไทย) ไม่นับที่ยกเลิก</p>
+                <p className="mt-1 text-[11px] text-slate-400">{REPORT_PERIODS.find((p) => p.key === (form.filters.day ?? "yesterday"))?.hint} · ออเดอร์นับตามวันที่สั่งซื้อ (เวลาไทย) ไม่นับที่ยกเลิก</p>
               </div>
             )}
             {src.filterUi.includes("status") && pendingStatuses.length > 0 && (
@@ -739,7 +751,8 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
               <div>
                 <label className={label}>วันส่ง</label>
-                <div className="flex flex-wrap gap-1">
+                {monthly && <p className="mb-1.5 rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-800">รายงาน &quot;เดือนที่แล้ว&quot; ส่ง <b>วันที่ 1 ของทุกเดือน</b> ตามเวลาที่ตั้ง — วันในสัปดาห์ด้านล่างไม่ใช้</p>}
+                <div className={`flex flex-wrap gap-1 ${monthly ? "pointer-events-none opacity-40" : ""}`}>
                   {DAY_LABELS.map((d) => {
                     const on = form.days.includes(d.n);
                     return (
@@ -832,7 +845,61 @@ export function ReportEditor({ open, editing, channels = null, onClose, onSaved 
                   <input type="checkbox" checked={opt.attach_excel !== false} onChange={(e) => setOptions({ attach_excel: e.target.checked })} className="h-4 w-4" />
                   📎 แนบไฟล์ Excel รายการทั้งหมด (อีเมล)
                 </label>
-                <p className="text-[11px] text-slate-400 sm:col-span-2">หน้าตา LINE / Discord ตั้งแยกได้ที่การ์ดของช่องนั้นในเรื่อง 2 &quot;ส่งทางไหน&quot;</p>
+                <div>
+                  <label className={label}>ชื่อสินค้า</label>
+                  <div className="flex flex-wrap gap-1">
+                    <button type="button" onClick={() => setOptions({ short_names: true })} className={chip(opt.short_names !== false)}>สั้น (บรรทัดเดียว)</button>
+                    <button type="button" onClick={() => setOptions({ short_names: false })} className={chip(opt.short_names === false)}>เต็ม</button>
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>ขนาดรูปในตาราง (อีเมล)</label>
+                  <div className="flex flex-wrap gap-1">
+                    {(["s", "m", "l"] as const).map((k) => <button key={k} type="button" onClick={() => setOptions({ img_size: k })} className={chip((opt.img_size ?? "m") === k)}>{k === "s" ? "เล็ก" : k === "m" ? "กลาง" : "ใหญ่"}</button>)}
+                  </div>
+                </div>
+                <div>
+                  <label className={label}>🎯 เป้ายอดขายต่อเดือน (บาท) <span className="font-normal text-slate-400">— กล่อง &quot;ยอดสะสมเดือนนี้&quot; บอก % ของเป้า</span></label>
+                  <MoneyInput value={opt.monthly_target ? String(opt.monthly_target) : ""} onChange={(v) => setOptions({ monthly_target: Number(v) || 0 })} placeholder="เช่น 900,000 (เว้นว่าง = ไม่ตั้ง)"
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm" />
+                </div>
+                <div>
+                  <label className={label}>⚠️ เตือนของขายดีใกล้หมด</label>
+                  <div className="flex flex-wrap gap-1">
+                    {LOW_STOCK_CHOICES.map((n) => <button key={n} type="button" onClick={() => setOptions({ low_stock: n })} className={chip((opt.low_stock ?? 3) === n)}>{n ? `เหลือ ≤ ${n}` : "ปิด"}</button>)}
+                  </div>
+                  {preview?.fill?.stock !== undefined && (
+                    <p className={`mt-1 text-[11px] ${preview.fill.stock ? "text-slate-400" : "text-amber-700"}`}>
+                      มีข้อมูลสต๊อก {preview.fill.stock}/{preview.total} รายการ{preview.fill.stock ? "" : " — ต้องบันทึกสต๊อกใน ERP ก่อน คอลัมน์สต๊อก/การเตือนถึงจะมีข้อมูล"}
+                    </p>
+                  )}
+                </div>
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700 sm:col-span-2">
+                  <input type="checkbox" checked={opt.hide_unmatched === true} onChange={(e) => setOptions({ hide_unmatched: e.target.checked })} className="h-4 w-4" />
+                  ซ่อนแถวที่ยังไม่จับคู่ SKU <span className="text-slate-400">(ยังนับในยอดรวม)</span>
+                </label>
+                {(opt.row_fields ?? []).length > 0 && (
+                  <div className="sm:col-span-2">
+                    <label className={label}>เรียง + เปลี่ยนชื่อหัวคอลัมน์ <span className="font-normal text-slate-400">(ลาก ⠿ เพื่อย้าย · พิมพ์ชื่อใหม่ / เว้นว่าง = ชื่อเดิม)</span></label>
+                    <div className="space-y-1">
+                      {(opt.row_fields ?? []).map((k, i) => {
+                        const def = src.rowFields.find((f) => f.key === k)?.label ?? k;
+                        return (
+                          <div key={k} {...colDrag.rowProps(i)} className={`flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2 py-1 ${colDrag.rowCls(i)}`}>
+                            <DragHandle {...colDrag.handleProps(i)} title="ลากเพื่อย้ายตำแหน่ง" />
+                            <span className="w-28 shrink-0 truncate text-xs text-slate-500" title={def}>{def}</span>
+                            {k === "img" ? <span className="text-xs text-slate-400">(รูป — ไม่มีหัวคอลัมน์)</span> : (
+                              <input value={opt.col_labels?.[k] ?? ""} onChange={(e) => setOptions({ col_labels: { ...(opt.col_labels ?? {}), [k]: e.target.value } })}
+                                placeholder={def} maxLength={30} aria-label={`ชื่อหัวคอลัมน์ ${def}`}
+                                className="h-8 min-w-0 flex-1 rounded-md border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-400 sm:col-span-2">หน้าตา LINE / Discord ตั้งแยกได้ที่การ์ดของช่องนั้นในเรื่อง 2 &quot;ส่งทางไหน&quot; · คอลัมน์ &quot;เทียบช่วงก่อน&quot; / &quot;สต๊อกเหลือ&quot; เพิ่มได้ที่ช่องเลือกคอลัมน์ด้านบน · ตัวเลข &quot;ยอดสะสมเดือนนี้&quot; / &quot;เฉลี่ยต่อออเดอร์&quot; เลือกได้ที่ตัวเลขสรุป</p>
               </div>
             )}
             <button type="button" onClick={() => setMore((v) => !v)} aria-expanded={more}

@@ -35,7 +35,7 @@ export const statText = (s: ReportStat) => s.display ?? s.value.toLocaleString("
  * อีเมล (renderReportEmail) · รูป Discord (image.ts) · LINE (line.ts) วาดจากตัวนี้ชุดเดียวกัน
  */
 export type ReportTableColumn = { key: string; label: string; align?: "left" | "right" };
-export type ReportTableRow = { id: string; imageUrl?: string | null; link?: string | null; cells: Record<string, string> };
+export type ReportTableRow = { id: string; imageUrl?: string | null; link?: string | null; cells: Record<string, string>; /** สีของช่อง (เช่น ▲ เขียว · ▼/ใกล้หมด แดง) */ tones?: Record<string, ReportTone> };
 export type ReportTable = {
   columns: ReportTableColumn[];
   /** label ว่าง = ไม่มีหัวกลุ่ม */
@@ -43,6 +43,8 @@ export type ReportTable = {
   /** แถวรวมท้ายตาราง (null = ไม่โชว์) — ค่าของคอลัมน์ชิดขวา · ช่องซ้ายช่องแรกใส่ totalLabel */
   total: Record<string, string> | null;
   totalLabel: string;
+  /** ขนาดรูปในอีเมล (px · ไม่ใส่ = 36) */
+  imgSize?: number;
 };
 export type BuiltReport = {
   heading: string;               // หัวในอีเมล เช่น "งานออกแบบที่ค้างอยู่"
@@ -77,6 +79,8 @@ export type BuiltReport = {
   spotlight?: ReportSpotlight[];
   /** 📎 รายการทั้งหมดสำหรับไฟล์ Excel แนบ (ไม่ตัดตาม max_rows) — lib/email-report/excel */
   export?: ReportExport;
+  /** ⚠️ ข้อความเตือนท้ายรายงาน (เช่น ของขายดีใกล้หมด) — อีเมลกล่องเหลือง · LINE/Discord ต่อท้ายข้อความ */
+  alerts?: { text: string; tone: ReportTone }[];
   /** 🔔 ป๊อปตอนเข้า ERP (lib/email-report/popup): ทุกงานในรายงาน เรียงตามความด่วน · path = ลิงก์ในระบบ (ไม่ใช่ลิงก์เต็ม) */
   popup?: { viewAllPath: string; items: PopupSourceItem[] };
 };
@@ -145,19 +149,20 @@ function partsHtml(parts: ReportPart[]): string {
 /** 🧮 ตารางในอีเมล (อยู่ในแถวเดียวของกรอบอีเมล colspan=3) — หัวคอลัมน์ · หัวกลุ่ม · แถวรวม */
 function tableHtml(t: ReportTable): string {
   const cols = t.columns;
-  const cellStyle = (c: ReportTableColumn) => `padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:13px;color:#0f172a;${c.align === "right" ? "white-space:nowrap;" : ""}`;
-  const head = cols.map((c) => `<th align="${c.align ?? "left"}" style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:normal;color:#64748b;${c.key === "img" ? "width:44px;" : ""}">${c.key === "img" ? "" : esc(c.label)}</th>`).join("");
+  const cellStyle = (c: ReportTableColumn, tone?: ReportTone) => `padding:6px 8px;border-bottom:1px solid #f1f5f9;font-size:13px;color:${tone ? TONE_COLOR[tone] : "#0f172a"};${c.align === "right" || c.key === "code" ? "white-space:nowrap;" : ""}`;
+  const px = Math.max(20, Math.min(80, t.imgSize ?? 36));
+  const head = cols.map((c) => `<th align="${c.align ?? "left"}" style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-size:12px;font-weight:normal;color:#64748b;${c.key === "img" ? `width:${px + 8}px;` : ""}">${c.key === "img" ? "" : esc(c.label)}</th>`).join("");
   const body = t.sections.map((s) => `${s.label ? `<tr><td colspan="${cols.length}" style="padding:6px 8px;background:#f8fafc;border-bottom:1px solid #e2e8f0;font-size:13px;font-weight:bold;color:#334155;">${esc(s.label)}</td></tr>` : ""}${s.rows.map((row) => {
     const link = safeUrl(row.link);
     return `<tr>${cols.map((c) => {
       if (c.key === "img") {
-        const img = safeUrl(sizedImage(row.imageUrl, 96));
-        return `<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;width:44px;">${img
-          ? `<img src="${esc(img)}" width="36" height="36" alt="" style="display:block;width:36px;height:36px;border-radius:4px;border:1px solid #e2e8f0;object-fit:cover;background:#f1f5f9;">`
-          : `<div style="width:36px;height:36px;border-radius:4px;background:#f1f5f9;border:1px solid #e2e8f0;"></div>`}</td>`;
+        const img = safeUrl(sizedImage(row.imageUrl, px >= 48 ? 160 : 96));
+        return `<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;width:${px + 8}px;">${img
+          ? `<img src="${esc(img)}" width="${px}" height="${px}" alt="" style="display:block;width:${px}px;height:${px}px;border-radius:4px;border:1px solid #e2e8f0;object-fit:cover;background:#f1f5f9;">`
+          : `<div style="width:${px}px;height:${px}px;border-radius:4px;background:#f1f5f9;border:1px solid #e2e8f0;"></div>`}</td>`;
       }
       const v = esc(row.cells[c.key] ?? "");
-      return `<td align="${c.align ?? "left"}" style="${cellStyle(c)}">${c.key === "name" && link ? `<a href="${esc(link)}" style="color:#0f172a;text-decoration:none;">${v}</a>` : v}</td>`;
+      return `<td align="${c.align ?? "left"}" style="${cellStyle(c, row.tones?.[c.key])}">${c.key === "name" && link ? `<a href="${esc(link)}" style="color:#0f172a;text-decoration:none;">${v}</a>` : v}</td>`;
     }).join("")}</tr>`;
   }).join("")}`).join("");
   let total = "";
@@ -286,7 +291,8 @@ export function renderReportEmail(r: BuiltReport, ctx: {
   const manage = safeUrl(ctx.manageUrl);
   const moreNote = r.total > r.shown ? `แสดง ${r.shown.toLocaleString("th-TH")} จาก ${r.total.toLocaleString("th-TH")} ${unit} · ` : "";
   const top = (ctx.topPhotos ?? 0) > 0 ? (r.spotlight ?? []).slice(0, ctx.topPhotos) : [];
-  const bodyHtml = r.table ? `${spotlightHtml(top, "ขายดี")}${tableHtml(r.table)}` : sectionsHtml;
+  const alertsHtml = (r.alerts ?? []).length ? `<tr><td colspan="3" style="padding:4px 12px 4px 12px;">${(r.alerts ?? []).map((a) => `<div style="font-size:13px;color:${TONE_COLOR[a.tone]};background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:8px 10px;margin-top:6px;">⚠️ ${esc(a.text)}</div>`).join("")}</td></tr>` : "";
+  const bodyHtml = r.table ? `${spotlightHtml(top, "ขายดี")}${tableHtml(r.table)}${alertsHtml}` : sectionsHtml;
 
   const html = `<!doctype html>
 <html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(subject)}</title></head>
@@ -319,6 +325,7 @@ export function renderReportEmail(r: BuiltReport, ctx: {
   lines.push("");
   if (r.total === 0) lines.push(r.emptyText);
   else if (r.table) lines.push(...tableText(r.table), "");
+  for (const a of r.alerts ?? []) lines.push(`⚠️ ${a.text}`);
   for (const s of r.table ? [] : r.sections) {
     if (s.rows.length === 0) continue;
     if (s.label) lines.push(`■ ${s.label} (${s.total} งาน)`);

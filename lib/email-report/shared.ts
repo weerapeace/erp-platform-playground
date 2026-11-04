@@ -17,9 +17,18 @@ export type EmailReportFilters = {
   brand_ids?: string[];
   /** เฉพาะสถานะที่เลือก (ว่าง = ทุกสถานะที่ยังไม่ปิด) */
   statuses?: string[];
-  /** รายงานรายวัน: สรุปของวันไหน (เมื่อวาน = ค่าเริ่มต้น · วันนี้ถึงเวลาที่ส่ง) */
-  day?: "yesterday" | "today";
+  /** ช่วงของยอด: เมื่อวาน (ค่าเริ่มต้น) · วันนี้ถึงเวลาที่ส่ง · 7 วันล่าสุด (ถึงเมื่อวาน) · เดือนที่แล้วทั้งเดือน (ส่งวันที่ 1 ของเดือน) */
+  day?: ReportPeriod;
 };
+
+export type ReportPeriod = "yesterday" | "today" | "last7" | "last_month";
+export const REPORT_PERIODS: { key: ReportPeriod; label: string; hint: string }[] = [
+  { key: "yesterday", label: "เมื่อวาน (ทั้งวัน)", hint: "ส่งทุกเช้า เทียบกับวันก่อนหน้า" },
+  { key: "today", label: "วันนี้ (ถึงเวลาที่ส่ง)", hint: "ส่งตอนเย็น ดูยอดระหว่างวัน" },
+  { key: "last7", label: "7 วันล่าสุด", hint: "เหมาะส่งทุกวันจันทร์ · เทียบกับ 7 วันก่อนหน้า" },
+  { key: "last_month", label: "เดือนที่แล้ว (ทั้งเดือน)", hint: "ส่งวันที่ 1 ของทุกเดือน · เทียบกับเดือนก่อนหน้า" },
+];
+export const isReportPeriod = (v: unknown): v is ReportPeriod => REPORT_PERIODS.some((p) => p.key === v);
 
 export type EmailReportOptions = {
   /** โชว์ในอีเมลสูงสุดกี่แถว (ที่เหลือ = ลิงก์ "ดูทั้งหมด") */
@@ -48,7 +57,21 @@ export type EmailReportOptions = {
   top_photos?: number;
   /** 📎 อีเมล: แนบไฟล์ Excel รายการทั้งหมด — ใช้กับแหล่งที่มี export */
   attach_excel?: boolean;
+  /** 🧮 ชื่อสินค้าแบบสั้น (ตัดชื่อแบรนด์/รหัสท้าย เหลือบรรทัดเดียว) */
+  short_names?: boolean;
+  /** 🧮 ขนาดรูปในตารางอีเมล */
+  img_size?: "s" | "m" | "l";
+  /** 🧮 ซ่อนแถวที่ยังไม่จับคู่ SKU (ยังนับในยอดรวม) */
+  hide_unmatched?: boolean;
+  /** 🧮 ชื่อหัวคอลัมน์ที่ตั้งเอง (key คอลัมน์ → ชื่อ · ว่าง = ชื่อเดิม) */
+  col_labels?: Record<string, string>;
+  /** 🎯 เป้ายอดขายต่อเดือน (บาท · 0 = ไม่ตั้ง) — ตัวเลข "ยอดสะสมเดือนนี้" บอก % ของเป้า */
+  monthly_target?: number;
+  /** ⚠️ เตือนของขายดีใกล้หมด: สต๊อกเหลือไม่เกินกี่ชิ้น (0 = ปิด) */
+  low_stock?: number;
 };
+export const IMG_SIZE_PX: Record<"s" | "m" | "l", number> = { s: 28, m: 40, l: 56 };
+export const LOW_STOCK_CHOICES = [0, 3, 5, 10];
 export const TOP_PHOTO_CHOICES = [0, 3];
 /** ตัวเลือกที่เติมค่าเริ่มต้นครบแล้ว (ใช้ตอนประกอบอีเมล) */
 export type ResolvedReportOptions = Required<EmailReportOptions>;
@@ -326,20 +349,25 @@ export const EMAIL_REPORT_SOURCES: EmailReportSourceDef[] = [
     defaultDays: [5], defaultTime: "17:00",
   },
   {
-    key: "platform_sales_daily", label: "ยอดขายแพลตฟอร์มรายวัน (Shopee / Lazada)",
-    description: "สินค้าที่ขายได้ + ยอดของวัน เทียบวันก่อนหน้า (ออเดอร์จากเมลแพลตฟอร์ม/ไฟล์) — เหมาะส่งทุกเช้าสรุปของเมื่อวาน · docs/platform-email-orders.md",
+    key: "platform_sales_daily", label: "ยอดขายแพลตฟอร์ม (Shopee / Lazada) — รายวัน / 7 วัน / รายเดือน",
+    description: "สินค้าที่ขายได้ + ยอด เทียบช่วงก่อนหน้า (ออเดอร์จากเมลแพลตฟอร์ม/ไฟล์) — เลือกช่วงได้: เมื่อวาน / วันนี้ / 7 วัน / เดือนที่แล้ว · จัดกลุ่มตาม Parent SKU ได้ · docs/platform-email-orders.md",
     rowFields: [
       { key: "img", label: "รูป" }, { key: "code", label: "รหัส" }, { key: "name", label: "สินค้า" }, { key: "color", label: "สี" },
       { key: "shop", label: "ร้าน" }, { key: "qty", label: "จำนวน" }, { key: "amt", label: "ยอด" }, { key: "pct", label: "% ของยอด" },
+      { key: "diff", label: "เทียบช่วงก่อน" }, { key: "stock", label: "สต๊อกเหลือ" },
     ],
-    defaultRowFields: ["img", "code", "name", "color", "qty", "amt"],
+    defaultRowFields: ["img", "code", "name", "color", "qty", "amt", "diff"],
     stats: [
-      { key: "orders", label: "ออเดอร์" }, { key: "qty", label: "ชิ้น" }, { key: "amount", label: "ยอดขาย" }, { key: "cancelled", label: "ยกเลิก" },
+      { key: "orders", label: "ออเดอร์" }, { key: "qty", label: "ชิ้น" }, { key: "amount", label: "ยอดขาย" }, { key: "mtd", label: "ยอดสะสมเดือนนี้ (+ เป้า)" },
+      { key: "aov", label: "เฉลี่ยต่อออเดอร์" }, { key: "cancelled", label: "ยกเลิก" },
       { key: "lazada", label: "Lazada (ไม่มีราคา)" }, { key: "pending", label: "สินค้ารอยืนยัน SKU" },
     ],
-    defaultStats: ["orders", "qty", "amount", "cancelled"],
-    groupBy: [{ key: "none", label: "รวม" }, { key: "shop", label: "แยกตามร้าน" }],
-    sortBy: [{ key: "amount", label: "ยอดเงินมากสุดก่อน" }, { key: "qty", label: "จำนวนมากสุดก่อน" }],
+    defaultStats: ["orders", "qty", "amount", "mtd"],
+    groupBy: [
+      { key: "none", label: "รวม" }, { key: "parent", label: "ตาม Parent SKU (โชว์ SKU ในกลุ่ม)" }, { key: "model", label: "รวมทุกสีเป็นรุ่น (แถวเดียว)" },
+      { key: "platform", label: "แยกตามแพลตฟอร์ม" }, { key: "shop", label: "แยกตามร้าน" },
+    ],
+    sortBy: [{ key: "amount", label: "ยอดเงินมากสุดก่อน" }, { key: "qty", label: "จำนวนมากสุดก่อน" }, { key: "code", label: "รหัส ก→ฮ" }],
     subjectTokens: [
       { key: "วันของยอด", label: "วันที่ของยอด" }, { key: "ยอด", label: "ยอดขาย (บาท)" },
       { key: "ออเดอร์", label: "จำนวนออเดอร์" }, { key: "ชิ้น", label: "จำนวนชิ้น" },
@@ -388,7 +416,24 @@ export function normalizeReportOptions(sourceKey: string, raw: unknown): Resolve
     show_total: o.show_total !== false,
     top_photos: src.layout === "table" ? (TOP_PHOTO_CHOICES.includes(Number(o.top_photos)) ? Number(o.top_photos) : 3) : 0,
     attach_excel: src.layout === "table" ? o.attach_excel !== false : false,
+    short_names: src.layout === "table" ? o.short_names !== false : false,
+    img_size: o.img_size === "s" || o.img_size === "l" ? o.img_size : "m",
+    hide_unmatched: o.hide_unmatched === true,
+    col_labels: cleanColLabels(o.col_labels, src.rowFields),
+    monthly_target: clamp(o.monthly_target, 0, 1_000_000_000, 0),
+    low_stock: LOW_STOCK_CHOICES.includes(Number(o.low_stock)) ? Number(o.low_stock) : 3,
   };
+}
+
+/** ชื่อหัวคอลัมน์ที่ตั้งเอง — เฉพาะคอลัมน์ที่มีจริง · ตัดอักขระควบคุม · ≤30 ตัวอักษร */
+function cleanColLabels(raw: unknown, fields: ReportChoice[]): Record<string, string> {
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const out: Record<string, string> = {};
+  for (const f of fields) {
+    const v = typeof o[f.key] === "string" ? (o[f.key] as string).replace(/[\u0000-\u001F\u007F]/g, "").trim().slice(0, 30) : "";
+    if (v && v !== f.label) out[f.key] = v;
+  }
+  return out;
 }
 
 // ---- วัน / เวลา ----
@@ -463,7 +508,7 @@ export function normalizeReportInput(raw: unknown): { value: EmailReportInput } 
   const f = (r.filters ?? {}) as Record<string, unknown>;
   const brand_group: BrandGroupFilter = f.brand_group === "customer" || f.brand_group === "own" ? f.brand_group : "all";
   const strList = (v: unknown) => (Array.isArray(v) ? [...new Set(v.filter((s): s is string => typeof s === "string" && !!s))].slice(0, 100) : []);
-  const filters: EmailReportFilters = { brand_group, brand_ids: strList(f.brand_ids), statuses: strList(f.statuses), ...(f.day === "today" ? { day: "today" as const } : {}) };
+  const filters: EmailReportFilters = { brand_group, brand_ids: strList(f.brand_ids), statuses: strList(f.statuses), ...(isReportPeriod(f.day) && f.day !== "yesterday" ? { day: f.day } : {}) };
 
   const options: EmailReportOptions = normalizeReportOptions(source_key, r.options);
 

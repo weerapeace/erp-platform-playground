@@ -110,6 +110,7 @@ export async function composeDiscordReport(admin: Admin, cfg: ReturnType<typeof 
   const content = [
     `${opts.test ? "🧪 ทดสอบ (เห็นคนเดียว) — " : ""}${mention ? `<@&${cfg.role_id}> ` : ""}**${opts.subject}**${overdue > 0 ? ` — เกินกำหนด ${overdue} งาน` : ""}`,
     cardRecords.length ? `⏳ มีของรอ ${cardRecords.length} ใบ — ${opts.buttons ? "ติ๊กที่การ์ดด้านล่างได้เลย" : "เปิดใบงานเพื่อติ๊กในระบบ"}` : "",
+    ...(built.alerts ?? []).map((a) => `⚠️ ${a.text}`),
     built.viewAllLink ? `[${built.viewAllLabel} →](${built.viewAllLink})` : "",
   ].filter(Boolean).join("\n").slice(0, 2000);
   const cards = cardRecords.map((r) => checklistCardMessage({ title: r.title, url: r.link, description: r.description, thumbnail: r.imageUrl }, tasksBy.get(r.id) ?? [], opts.buttons,

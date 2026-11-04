@@ -32,6 +32,30 @@ export function thaiDate(iso: string | Date = new Date(), shift = 0): string {
   return new Date(t + 7 * 3600_000 + shift * 86400_000).toISOString().slice(0, 10);
 }
 export const isDateKey = (v: unknown): v is string => typeof v === "string" && /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(v);
+/** ช่วงหลายวันตามเวลาไทย: n วันที่จบที่ end (รวม end) · end = "YYYY-MM-DD" */
+export function daysBoundsTh(end: string, n: number): SalesRange {
+  const [y, m, d] = end.split("-").map(Number);
+  return { from: new Date(Date.UTC(y, m - 1, d - (n - 1), -7)).toISOString(), to: new Date(Date.UTC(y, m - 1, d + 1, -7)).toISOString() };
+}
+/** เลื่อนวันที่ "YYYY-MM-DD" ไป n วัน */
+export const shiftDateKey = (date: string, n: number) => { const [y, m, d] = date.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+/** เดือนก่อนหน้าของ "YYYY-MM-DD" หรือ "YYYY-MM" → "YYYY-MM" */
+export const prevMonthKey = (dateOrYm: string) => { const [y, m] = dateOrYm.split("-").map(Number); return new Date(Date.UTC(y, m - 2, 1)).toISOString().slice(0, 7); };
+
+/**
+ * ชื่อสินค้าสั้น (แถวเดียว) จากชื่อยาวบนแพลตฟอร์ม/ERP — "Louis Montini (Shiisaa) กระเป๋าสตางค์ผู้ชาย… TTM121" → "Shiisaa กระเป๋าสตางค์ผู้ชาย…"
+ * ตัดชื่อแบรนด์หน้าวงเล็บ (เหลือชื่อรุ่นในวงเล็บ) · ตัดรหัสรุ่นท้ายชื่อ · ยาวเกิน max ตัดแล้วใส่ …
+ */
+export function shortProductName(title: string, max = 40): string {
+  let s = title.replace(/\s+/g, " ").trim();
+  const m = /^[^()]{2,40}\(([^)]{1,40})\)\s*(.*)$/.exec(s);
+  if (m) s = `${m[1].trim()} ${m[2]}`.trim();
+  s = s.replace(/\s+[A-Z]{2,}\d{1,4}[A-Z]?(-[\w/]+)?$/, "").trim();
+  return s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s;
+}
+/** กุญแจแถว (ร้าน × สินค้า) — ใช้จับคู่แถวข้ามช่วงเวลา (เทียบวันก่อนรายสินค้า) */
+export const salesLineKey = (l: Pick<SalesLine, "shop" | "code" | "title" | "color" | "match">) =>
+  `${l.shop}|${l.match === "sku" ? l.code : l.match === "model" ? `รุ่น:${l.code}` : `${l.title}|${l.color ?? ""}`}`;
 
 /** สินค้า 1 แถว ต่อ ร้าน × SKU (หรือ × รุ่น / × ชื่อจากร้าน เมื่อยังไม่จับคู่) */
 export type SalesLine = {
@@ -46,6 +70,12 @@ export type SalesLine = {
   qty: number;
   amt: number;
   image: string | null;
+  /** id SKU (match sku) — ใช้ดึงสต๊อกคงเหลือ */
+  sku_id: string | null;
+  /** รุ่นแม่ (Parent SKU) — จัดกลุ่มตามรุ่น · null = ยังไม่จับคู่ / SKU ไม่มีรุ่น */
+  parent: { code: string; name: string | null } | null;
+  /** ชื่อแพลตฟอร์ม (Shopee / Lazada …) — จัดกลุ่มตามแพลตฟอร์ม */
+  platform: string;
 };
 export type DailyTotal = { date: string; orders: number; cancelled: number; qty: number; amount: number };
 export type PlatformSales = {
@@ -96,20 +126,24 @@ export async function loadPlatformSales(admin: Admin, opts: { range: SalesRange;
   }
 
   const skuIds = [...new Set(items.map((i) => i.matched_sku_id).filter(Boolean) as string[])];
-  const skuInfo = new Map<string, { code: string; color: string | null; image: string | null }>();
+  const skuInfo = new Map<string, { code: string; color: string | null; image: string | null; parent_id: string | null }>();
   for (let i = 0; i < skuIds.length; i += 300) {
-    const { data } = await admin.from("skus_v2").select(`id, code, color_platform_th, color, ${SKU_COVER_SELECT}`).in("id", skuIds.slice(i, i + 300));
+    const { data } = await admin.from("skus_v2").select(`id, code, color_platform_th, color, parent_sku_id, ${SKU_COVER_SELECT}`).in("id", skuIds.slice(i, i + 300));
     for (const s of (data ?? []) as Record<string, unknown>[]) {
-      skuInfo.set(String(s.id), { code: String(s.code), color: (s.color_platform_th as string | null) ?? (s.color as string | null) ?? null, image: coverUrl(resolveSkuCover(s).key) });
+      skuInfo.set(String(s.id), { code: String(s.code), color: (s.color_platform_th as string | null) ?? (s.color as string | null) ?? null, image: coverUrl(resolveSkuCover(s).key), parent_id: (s.parent_sku_id as string | null) ?? null });
     }
   }
-  // ผูกระดับรุ่น (ไม่แยกสี) เช่น Lazada ที่เมลไม่บอกสี → รวมเป็นแถว "รุ่น X (ไม่แยกสี)"
-  const parentIds = [...new Set(items.filter((i) => !i.matched_sku_id && i.matched_parent_sku_id).map((i) => i.matched_parent_sku_id as string))];
-  const parentCode = new Map<string, string>();
+  // รุ่นแม่: ของ SKU (จัดกลุ่มตาม Parent SKU) + ผูกระดับรุ่น (ไม่แยกสี เช่น Lazada ที่เมลไม่บอกสี → แถว "รุ่น X (ไม่แยกสี)")
+  const parentIds = [...new Set([
+    ...items.filter((i) => !i.matched_sku_id && i.matched_parent_sku_id).map((i) => i.matched_parent_sku_id as string),
+    ...[...skuInfo.values()].map((s) => s.parent_id).filter((x): x is string => !!x),
+  ])];
+  const parentOf = new Map<string, { code: string; name: string | null }>();
   for (let i = 0; i < parentIds.length; i += 300) {
-    const { data } = await admin.from("parent_skus_v2").select("id, code").in("id", parentIds.slice(i, i + 300));
-    for (const p of (data ?? []) as { id: string; code: string }[]) parentCode.set(p.id, p.code);
+    const { data } = await admin.from("parent_skus_v2").select("id, code, name_th").in("id", parentIds.slice(i, i + 300));
+    for (const p of (data ?? []) as { id: string; code: string; name_th: string | null }[]) parentOf.set(p.id, { code: p.code, name: p.name_th ?? null });
   }
+  const parentCode = new Map([...parentOf].map(([id, p]) => [id, p.code]));
 
   // รวมเป็นแถวละ ร้าน × สินค้า
   const shopLabel = (o: OrderRow) => [pfName.get(o.platform_id) ?? "แพลตฟอร์มอื่น", o.brand_id ? brandName.get(o.brand_id) : null].filter(Boolean).join(" · ");
@@ -137,9 +171,12 @@ export async function loadPlatformSales(admin: Admin, opts: { range: SalesRange;
     const shop = shopLabel(o);
     const title = it.name ?? sku?.code ?? model ?? "(ไม่มีชื่อ)";
     const key = `${shop}|${sku?.code ?? (model ? `รุ่น:${model}` : `${title}|${variant ?? ""}`)}`;
+    const parentId = sku ? sku.parent_id : model ? it.matched_parent_sku_id : null;
     const r = rows.get(key) ?? {
       shop, code: sku?.code ?? model ?? null, title, color: sku ? sku.color : model ? null : variant,
       match: sku ? "sku" : model ? "model" : "none", qty: 0, amt: 0, image: sku?.image ?? null,
+      sku_id: sku ? it.matched_sku_id : null, parent: parentId ? parentOf.get(parentId) ?? null : null,
+      platform: pfName.get(o.platform_id) ?? "แพลตฟอร์มอื่น",
     } satisfies SalesLine;
     r.qty += q; r.amt += amt;
     rows.set(key, r);
