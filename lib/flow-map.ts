@@ -276,9 +276,9 @@ export const FLOW_EDGES: Record<string, FlowEdge> = {
     files: ["components/receive-line-modal/index.tsx", "app/api/mo/material-allocations/route.ts"] },
   P9: { from: "gr", to: "pv", type: "manual", title: "รวมใบรับของ → ใบสำคัญรับ", workflow: "purchasing",
     detail: "เลือกใบรับของ (สกุลเงินเดียวกัน) → ใบสำคัญร่าง + ผูกใบรับของไว้", files: ["lib/purchase-voucher-server.ts"] },
-  P10: { from: "pv", to: "po", type: "auto", title: "ยืนยันใบสำคัญ → ราคาจริงกลับไปที่ PO", workflow: "purchasing",
-    detail: "ออกเลขใบสำคัญ · แก้ราคาบรรทัด PO, ยอด PO, ราคาซัพ, ราคาสินค้า · ยกเลิกใบสำคัญ = คืนราคาเดิม", warn: "ไม่แก้ต้นทุนของที่รับเข้าคลังไปแล้ว",
-    files: ["app/api/purchasing/vouchers/[id]/confirm/route.ts"] },
+  P10: { changed: { date: "2026-11-04", note: "อ่านบิลร้านจีนด้วย AI → จับคู่บรรทัด PO ของร้านนั้น (คนเช็ก) → ราคา ¥ จากบิลลงใบสำคัญ" }, from: "pv", to: "po", type: "auto", title: "ยืนยันใบสำคัญ → ราคาจริงกลับไปที่ PO", workflow: "purchasing",
+    detail: "ออกเลขใบสำคัญ · แก้ราคาบรรทัด PO, ยอด PO, ราคาซัพ, ราคาสินค้า · ยกเลิกใบสำคัญ = คืนราคาเดิม · ราคาในใบมาจาก PO / ราคาต่อร้าน / บิลร้านจีน (AI อ่าน + จับคู่ PO ร้านนั้นเท่านั้น)", warn: "ไม่แก้ต้นทุนของที่รับเข้าคลังไปแล้ว",
+    files: ["app/api/purchasing/vouchers/[id]/confirm/route.ts", "lib/seller-bill.ts"] },
   P11: { from: "pv", to: "paypo", type: "missing", title: "จ่ายเงินไม่ผูกใบสำคัญ",
     detail: "ติ๊ก “จ่ายแล้ว” แยกใน PO (มี 2 ทาง) · China pay ผูกมือ ไม่มีลิงก์กลับ", files: ["app/api/purchasing/mark-paid/route.ts"], metrics: ["po_unpaid"] },
   // ── ผลิต ──

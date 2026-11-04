@@ -27,7 +27,8 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
   const { id } = await params;
   const admin = supabaseAdmin();
   const [{ data: bills }, { data: vls }] = await Promise.all([
-    admin.from("purchase_delivery_bills").select("*").eq("voucher_id", id).not("is_active", "is", false).order("created_at"),
+    // เฉพาะใบส่งของบริษัทขนส่ง — บิลจากร้าน (kind=seller) อยู่ที่ /seller-bills
+    admin.from("purchase_delivery_bills").select("*").eq("voucher_id", id).neq("kind", "seller").not("is_active", "is", false).order("created_at"),
     admin.from("purchase_voucher_lines_v2").select("gr_id").eq("voucher_id", id).not("is_active", "is", false),
   ]);
   // ไฟล์แนบตอนรับของ (ใบรับของ/บิล) ของ GR ที่อยู่ในใบสำคัญนี้ — เอามาให้ AI อ่านได้เลย ไม่ต้องอัปโหลดซ้ำ

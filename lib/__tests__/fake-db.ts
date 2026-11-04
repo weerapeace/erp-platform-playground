@@ -72,6 +72,14 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: Record<string, (args:
       gte: (c: string, v: string) => (filters.push((r) => String(r[c]) >= v), q),
       lte: (c: string, v: string) => (filters.push((r) => String(r[c]) <= v), q),
       is: (c: string, v: null) => (filters.push((r) => (r[c] ?? null) === v), q),
+      // .not(col, "is", false) = ไม่ใช่ false (null ผ่าน) · .not(col, "in", "(a,b)")
+      not: (c: string, op: string, v: unknown) => {
+        if (op === "is") filters.push((r) => (r[c] ?? null) !== v);
+        else if (op === "in") { const list = String(v).replace(/^\(|\)$/g, "").split(",").map((x) => x.trim().replace(/^"|"$/g, "")); filters.push((r) => !list.includes(String(r[c]))); }
+        else throw new Error("fake-db not: " + op);
+        return q;
+      },
+      single: async () => { run(); const r = rows()[0]; return { data: r ?? null, error: r ? null : { message: "no rows" } }; },
       or: (expr: string) => (filters.push(orFilter(expr)), q),
       order: () => q,
       limit: () => q,

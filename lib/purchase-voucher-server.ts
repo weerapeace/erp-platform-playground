@@ -69,7 +69,7 @@ const toHeader = (v: Row, grNos: string[], poNos: string[], poPayments: PoPaymen
 });
 
 /** ขนาด/น้ำหนักจาก Parent SKU (embed) → คิว/ชิ้น + กก./ชิ้น */
-function parentBasis(sku: Row | undefined): { cbm: number | null; kg: number | null } {
+export function parentBasis(sku: Row | undefined): { cbm: number | null; kg: number | null } {
   if (!sku) return { cbm: null, kg: null };
   const raw = sku.parent_skus_v2;
   const p = (Array.isArray(raw) ? raw[0] : raw) as Row | null | undefined;
@@ -81,7 +81,7 @@ function parentBasis(sku: Row | undefined): { cbm: number | null; kg: number | n
 
 const SKU_SELECT = "id, code, cover_image_r2_key, parent_skus_v2 ( cover_image_r2_key, size_length_cm, size_height_cm, size_thickness_cm, weight_g )";
 
-async function loadSkus(admin: Admin, ids: string[]): Promise<Map<string, Row>> {
+export async function loadSkus(admin: Admin, ids: string[]): Promise<Map<string, Row>> {
   const m = new Map<string, Row>();
   for (const c of chunk(ids)) {
     const { data } = await admin.from("skus_v2").select(SKU_SELECT).in("id", c);

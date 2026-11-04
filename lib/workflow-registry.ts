@@ -90,7 +90,7 @@ export const WORKFLOWS: WorkflowDef[] = [
     key: "purchasing",
     label: "จัดซื้อ (ขอซื้อ → สั่งซื้อ → รับของ)",
     flow: "ขอซื้อ → อนุมัติ / ไม่อนุมัติ → ออก PO (ร่าง = สั่งแล้ว) → รับของ (ครบ / บางส่วน / ปิดยอด) → ใบสำคัญรับ",
-    ruleFiles: ["lib/po-total.ts", "lib/po-line-price.ts", "lib/po-manual.ts", "lib/pr-cart.ts", "lib/purchase-voucher-server.ts", "components/receive-line-modal/index.tsx"],
+    ruleFiles: ["lib/po-total.ts", "lib/po-line-price.ts", "lib/po-manual.ts", "lib/pr-cart.ts", "lib/purchase-voucher-server.ts", "lib/seller-bill.ts", "lib/seller-bill-match.ts", "components/receive-line-modal/index.tsx"],
     gates: [
       "app/api/purchasing/pr-approve/route.ts", "app/api/purchasing/pr-delete/route.ts", "app/api/purchasing/create-po/route.ts",
       "app/api/purchasing/receive/route.ts", "app/api/purchasing/cancel-line/route.ts",

@@ -91,7 +91,11 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
         const p = optNum(l.unit_price);
         if (p != null && p < 0) return NextResponse.json({ error: "ราคาติดลบไม่ได้" }, { status: 400 });
         patch.unit_price = p != null && p > 0 ? p : null;
-        patch.price_source = p != null && p > 0 ? "manual" : "none";
+        // ราคาไม่เปลี่ยน (แค่กดบันทึกร่าง) = คงที่มาของราคาเดิม (จาก PO / ราคาต่อร้าน / บิลร้าน) ไม่ให้กลายเป็น "กรอกเอง"
+        const { data: cur } = await admin.from("purchase_voucher_lines_v2").select("unit_price, price_source").eq("id", String(l.id)).eq("voucher_id", id).maybeSingle();
+        const before = cur as { unit_price?: number | string | null; price_source?: string | null } | null;
+        const same = before != null && (before.unit_price == null ? patch.unit_price == null : patch.unit_price != null && Math.abs(Number(before.unit_price) - Number(patch.unit_price)) < 1e-9);
+        patch.price_source = same && before?.price_source ? before.price_source : p != null && p > 0 ? "manual" : "none";
       }
       if (l.cbm_per_unit !== undefined) patch.cbm_per_unit = optNum(l.cbm_per_unit);
       if (l.kg_per_unit !== undefined) patch.kg_per_unit = optNum(l.kg_per_unit);

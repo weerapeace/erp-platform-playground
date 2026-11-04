@@ -18,6 +18,7 @@ import { MoneyInput } from "@/components/money-input";
 import { HoverPreview } from "@/components/hover-image";
 import { CopyButton } from "@/components/copy-button";
 import { DeliveryBillPanel } from "@/components/delivery-bill-panel";
+import { SellerBillPanel } from "@/components/seller-bill-panel";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
 import { computeVoucher, fmtMoney, curSymbol, isForeignCurrency, type ShipMethod } from "@/lib/landed-cost";
 import type { VoucherHeader, VoucherLine } from "@/lib/purchase-voucher-server";
@@ -29,6 +30,7 @@ const SOURCE_BADGE: Record<string, { text: string; cls: string }> = {
   po: { text: "จากใบ PO", cls: "bg-blue-50 text-blue-700 border-blue-200" },
   price_list: { text: "ราคาต่อร้าน", cls: "bg-indigo-50 text-indigo-700 border-indigo-200" },
   manual: { text: "กรอกเอง", cls: "bg-slate-100 text-slate-600 border-slate-200" },
+  bill: { text: "จากบิลร้าน", cls: "bg-violet-50 text-violet-700 border-violet-200" },
   none: { text: "ยังไม่มีราคา", cls: "bg-amber-50 text-amber-700 border-amber-200" },
 };
 
@@ -312,6 +314,9 @@ export default function PurchaseVoucherFormPage() {
                   </label>
                 </div>
 
+                {/* บิลจากร้าน (ภาษาจีน) — AI อ่าน + จับคู่กับใบสั่งซื้อของร้านนี้ → คนเช็ก → ใส่ลงใบ (ราคา ¥ จากบิล) */}
+                <SellerBillPanel voucherId={id} readonly={readonly} onApplied={load} />
+
                 {/* ค่าส่ง */}
                 <div className="bg-white border border-slate-200 rounded-xl p-4">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -406,7 +411,9 @@ export default function PurchaseVoucherFormPage() {
                                 <div className="text-slate-800 flex items-center gap-1">{l.item_name.replace(/^\s*\[[^\]]*\]\s*/, "")}<CopyButton value={l.item_name.replace(/^\s*\[[^\]]*\]\s*/, "")} title="คัดลอกชื่อ" /></div>
                                 <div className="text-[11px] font-mono text-slate-400 flex items-center gap-1">{l.code || "—"}{l.code && <CopyButton value={l.code} title="คัดลอกรหัส" />}<span className={`ml-1 text-[10px] px-1 py-0.5 rounded border font-sans ${src.cls}`}>{src.text}</span></div>
                               </td>
-                              <td className="px-2 py-2 text-[11px] text-slate-500 whitespace-nowrap">{manual ? <span className="text-[10px] px-1 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200" title="รายการที่เพิ่มเอง ไม่ได้มาจากใบรับ (ไม่ผูกสต๊อก/ใบสั่งซื้อ)">เพิ่มเอง</span> : <><div>{l.gr_no}</div><div>{l.po_no}</div></>}</td>
+                              <td className="px-2 py-2 text-[11px] text-slate-500 whitespace-nowrap">{manual ? (l.po_no
+                                ? <><span className="text-[10px] px-1 py-0.5 rounded border bg-violet-50 text-violet-700 border-violet-200" title="ผูกบรรทัดใบสั่งซื้อแล้ว (จากบิลร้าน) แต่ยังไม่ได้มาจากใบรับของ — ยังไม่เข้าสต๊อก">ยังไม่รับของ</span><div>{l.po_no}</div></>
+                                : <span className="text-[10px] px-1 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200" title="รายการที่เพิ่มเอง ไม่ได้มาจากใบรับ (ไม่ผูกสต๊อก/ใบสั่งซื้อ)">เพิ่มเอง</span>) : <><div>{l.gr_no}</div><div>{l.po_no}</div></>}</td>
                               <td className="px-2 py-2 text-right tabular-nums whitespace-nowrap font-medium text-slate-800">
                                 {manual && !readonly
                                   ? <input type="number" inputMode="decimal" step="any" min={0} value={e.qty} onChange={(ev) => setLine(l.id, { qty: ev.target.value })} onFocus={(ev) => ev.target.select()} className={`${inputCls} w-20 text-right tabular-nums`} />
