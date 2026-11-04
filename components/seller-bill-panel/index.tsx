@@ -327,7 +327,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
                   })}
                 </div>
 
-                {/* ไม่อยู่ในบิล — ของใน PO ที่ร้านยังไม่ส่ง: รอรอบหน้า (คงค้างรับ) / ปิดยอด (ของไม่มาแล้ว → หน้าขอซื้อ/ใบสั่งผลิตกลับเป็น "ต้องซื้อ") */}
+                {/* ไม่อยู่ในบิล — ของที่สั่งรอบเดียวกัน (PO เดียวกัน + วันเดียวกัน) ที่ร้านยังไม่ส่ง: รอรอบหน้า (คงค้างรับ) / ปิดยอด (ของไม่มาแล้ว → หน้าขอซื้อ/ใบสั่งผลิตกลับเป็น "ต้องซื้อ") */}
                 {(() => {
                   const scope = missScope[b.id] ?? "bill";
                   const miss = missingGroups(lines, groups, scope);
@@ -339,8 +339,8 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
                     <div className="border-t border-slate-200">
                       <div className="flex items-center gap-2 flex-wrap px-3 py-2 bg-amber-50/40">
                         <span className="text-xs font-semibold text-slate-700">ไม่อยู่ในบิล</span>
-                        <span className="text-[11px] text-slate-500">{scope === "bill" ? "ของในใบสั่งซื้อเดียวกับบิลนี้ ที่ร้านยังไม่ส่ง" : "ของค้างรับทั้งร้าน ที่บิลนี้ไม่มี"} ({miss.length})</span>
-                        <button type="button" onClick={() => setMissScope((m) => ({ ...m, [b.id]: scope === "bill" ? "shop" : "bill" }))} className="text-[11px] text-blue-600 hover:underline">{scope === "bill" ? `แสดงทั้งร้าน (${shopCount})` : "เฉพาะ PO เดียวกับบิล"}</button>
+                        <span className="text-[11px] text-slate-500">{scope === "bill" ? "ของที่สั่งรอบเดียวกับบิลนี้ (PO เดียวกัน + PO ที่สั่งวันเดียวกัน) ที่ร้านยังไม่ส่ง" : "ของค้างรับทั้งร้าน ที่บิลนี้ไม่มี"} ({miss.length})</span>
+                        <button type="button" onClick={() => setMissScope((m) => ({ ...m, [b.id]: scope === "bill" ? "shop" : "bill" }))} className="text-[11px] text-blue-600 hover:underline">{scope === "bill" ? `แสดงทั้งร้าน (${shopCount})` : "เฉพาะรอบเดียวกับบิล"}</button>
                         {!readonly && miss.length > 0 && <button type="button" onClick={() => setMissAct((m) => ({ ...m, [b.id]: {} }))} className="ml-auto text-[11px] text-slate-500 hover:text-slate-700">ทั้งหมด = รอรอบหน้า</button>}
                       </div>
                       {miss.length === 0 ? <div className="px-3 py-2 text-[11px] text-slate-400">— บิลนี้มีครบทุกรายการใน PO เดียวกัน —</div> : (

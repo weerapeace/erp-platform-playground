@@ -322,13 +322,17 @@ export const pendingReceiveOf = (g: PoGroup) => round(g.lines.reduce((a, l) => a
 
 /**
  * "ไม่อยู่ในบิล" — ของในใบสั่งซื้อของร้านนี้ที่ยังค้างรับ แต่บิลนี้ไม่มี (ร้านยังไม่มีของ)
- *   scope "bill" = เฉพาะ PO เดียวกับรายการที่จับคู่ในบิล (ค่าเริ่ม) · "shop" = ของค้างรับทั้งร้าน
+ *   scope "bill" (ค่าเริ่ม) = รอบสั่งเดียวกับบิล: PO ที่จับคู่ในบิล + PO ของร้านนี้ที่ "สั่งวันเดียวกัน"
+ *     (ของจริง PO จีน 68% มีสินค้าตัวเดียว — เปิดแยกใบตามใบสั่งผลิต · สั่งร้านครั้งเดียว = หลาย PO วันเดียวกัน)
+ *   scope "shop" = ของค้างรับทั้งร้าน
  */
 export function missingGroups(lines: SellerBillLine[], groups: PoGroup[], scope: "bill" | "shop" = "bill"): PoGroup[] {
   const used = new Set(lines.filter((l) => l.match_key && l.decision !== "skip").map((l) => l.match_key as string));
-  const gMap = new Map(groups.map((g) => [g.key, g]));
-  const pos = new Set([...used].map((k) => gMap.get(k)?.po_id).filter((x): x is string => !!x));
-  return groups.filter((g) => !used.has(g.key) && (scope === "shop" || pos.has(g.po_id)) && pendingReceiveOf(g) > 0 && g.lines.some((l) => !l.from_gr));
+  const hit = groups.filter((g) => used.has(g.key));
+  const pos = new Set(hit.map((g) => g.po_id));
+  const dates = new Set(hit.map((g) => s(g.order_date)).filter(Boolean));
+  const sameRound = (g: PoGroup) => pos.has(g.po_id) || (!!g.order_date && dates.has(s(g.order_date)));
+  return groups.filter((g) => !used.has(g.key) && (scope === "shop" || sameRound(g)) && pendingReceiveOf(g) > 0 && g.lines.some((l) => !l.from_gr));
 }
 
 /**

@@ -27,7 +27,8 @@ const chunk = <T,>(arr: T[], size: number): T[][] => { const out: T[][] = []; fo
 /** โมเดลอ่านบิลจีน — ต้องอ่านลายมือ/ตัวจีนได้ดี (ค่าเริ่ม gpt-4.1-mini · เปลี่ยนด้วย env OPENAI_BILL_MODEL) */
 export const SELLER_BILL_MODEL = (process.env.OPENAI_BILL_MODEL || "gpt-4.1-mini").trim();
 const OPEN_PO_STATUS = ["draft", "purchase", "partial"];
-const CLOSED_LINE_STATUS = ["received", "short_closed"];
+// สะกดเดียวกับ API กลาง cancel-line / po-edit (CLOSED_LINE)
+const CLOSED_LINE_STATUS = ["received", "short_closed", "closed_short", "cancelled"];
 const MAX_PROMPT_GROUPS = 220;
 
 export type VoucherLite = { id: string; status: string; seller_name: string | null; seller_partner_id: string | null; currency: string };

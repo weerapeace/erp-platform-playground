@@ -131,12 +131,12 @@ describe("บิลร้านจีน — แบ่งจำนวน / ต�
     const g2 = { ...g, lines: [{ id: "x", qty: 20, remaining: 12, qty_received: 0, sort_order: 0, note: null, voucher_line_id: null, from_gr: false }], remaining: 12 };
     expect(reducePlan(10, g2)).toEqual({ line_qty: [{ id: "x", from: 20, qty: 18 }], close: [] });
   });
-  it("ไม่อยู่ในบิล: เฉพาะ PO เดียวกับบิล (ค่าเริ่ม) หรือทั้งร้าน · ไม่นับที่รับครบ/แถวที่ข้าม", () => {
-    const po = (no: string, key: string, recv = 0): PoGroup => ({ ...groups[0], key, po_id: no, po_no: no, lines: [{ id: key, qty: 10, remaining: 10, qty_received: recv, sort_order: 0, note: null, voucher_line_id: null, from_gr: false }] });
-    const gs = [po("PO-1", "k1"), po("PO-1", "k2"), po("PO-1", "k3", 10), po("PO-2", "k4")];
+  it("ไม่อยู่ในบิล: รอบสั่งเดียวกับบิล (PO เดียวกัน + PO ที่สั่งวันเดียวกัน) หรือทั้งร้าน · ไม่นับที่รับครบ/แถวที่ข้าม", () => {
+    const po = (no: string, key: string, recv = 0, date = "2026-11-03"): PoGroup => ({ ...groups[0], key, po_id: no, po_no: no, order_date: date, lines: [{ id: key, qty: 10, remaining: 10, qty_received: recv, sort_order: 0, note: null, voucher_line_id: null, from_gr: false }] });
+    const gs = [po("PO-1", "k1"), po("PO-1", "k2"), po("PO-1", "k3", 10), po("PO-2", "k4"), po("PO-3", "k5", 0, "2026-10-01")];
     const ls = [L({ match_key: "k1", decision: "confirmed" })];
-    expect(missingGroups(ls, gs).map((g) => g.key)).toEqual(["k2"]);            // k3 รับครบแล้ว · k4 คนละ PO
-    expect(missingGroups(ls, gs, "shop").map((g) => g.key)).toEqual(["k2", "k4"]);
+    expect(missingGroups(ls, gs).map((g) => g.key)).toEqual(["k2", "k4"]);      // k3 รับครบแล้ว · k4 คนละ PO แต่สั่งวันเดียวกัน · k5 คนละรอบ
+    expect(missingGroups(ls, gs, "shop").map((g) => g.key)).toEqual(["k2", "k4", "k5"]);
     expect(missingGroups([L({ match_key: "k1", decision: "skip" })], gs)).toEqual([]);   // ข้ามแถว = ไม่นับว่า PO นี้อยู่ในบิล
   });
   it("ต้องตัดสินครบทุกแถวก่อนใส่ลงใบ", () => {
