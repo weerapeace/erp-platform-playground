@@ -20,6 +20,7 @@ import { MiniTable, type MiniColumn } from "@/components/mini-table";
 // ⚠️ ต้องใช้ตัวนี้ (อ่านร้านจริงจาก partners_v2) — SupplierPicker ใน components/pickers อ่านตารางระบบจัดซื้อชุดเก่า (แทบว่าง)
 import { SupplierPicker } from "@/components/supplier-picker";
 import { SupplierWizard } from "@/components/supplier-wizard";
+import { SellerBillIntake } from "@/components/seller-bill-intake";
 import { fmtMoney, curSymbol } from "@/lib/landed-cost";
 import { GrDetailModal } from "@/components/gr-detail-modal";
 
@@ -50,7 +51,7 @@ export default function PurchaseVouchersPage() {
   const [detailGr, setDetailGr] = useState<PendingGr | null>(null);   // ป๊อปรายละเอียดใบรับ (ของกลาง GrDetailModal)
   // ป๊อป "＋ ออกใบสำคัญรับ": จากใบรับที่รอ หรือสร้างเปล่า
   const [addOpen, setAddOpen] = useState(false);
-  const [addMode, setAddMode] = useState<"gr" | "manual">("gr");
+  const [addMode, setAddMode] = useState<"gr" | "bill" | "manual">("gr");
   const [mSeller, setMSeller] = useState<{ id: string; name: string } | null>(null);
   const [mSellerText, setMSellerText] = useState("");
   const [mCur, setMCur] = useState<"THB" | "RMB">("THB");
@@ -211,7 +212,7 @@ export default function PurchaseVouchersPage() {
               <button onClick={() => changeTab("vouchers")} className={`h-9 px-3 border-l border-slate-200 ${tab === "vouchers" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🧾 ใบสำคัญรับ ({vouchers.length})</button>
             </div>
             {canEdit && (
-              <button onClick={() => { setAddMode(pending.length > 0 ? "gr" : "manual"); setAddOpen(true); }}
+              <button onClick={() => { setAddMode(pending.length > 0 ? "gr" : "bill"); setAddOpen(true); }}
                 className="h-9 px-4 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700">＋ ออกใบสำคัญรับ</button>
             )}
           </div>
@@ -280,19 +281,22 @@ export default function PurchaseVouchersPage() {
 
       {/* ＋ ออกใบสำคัญรับ — เลือกจากใบรับที่รอ หรือสร้างเปล่า */}
       {addOpen && (
-        <ERPModal open onClose={() => !creating && setAddOpen(false)} size="md" storageKey="pv-add"
-          title="＋ ออกใบสำคัญรับ" description="เลือกใบรับที่รับของแล้ว หรือออกจากบิลร้านก่อนของมาถึง (ยังไม่มีใบรับ)"
+        <ERPModal open onClose={() => !creating && setAddOpen(false)} size={addMode === "bill" ? "lg" : "md"} storageKey="pv-add"
+          title="＋ ออกใบสำคัญรับ" description="เลือกใบรับที่รับของแล้ว · หรือโยนรูปบิลร้านให้ AI อ่าน (ของยังไม่มาก็ออกได้) · หรือสร้างเปล่า"
           footer={<>
-            <button onClick={() => setAddOpen(false)} disabled={creating} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">ยกเลิก</button>
-            {addMode === "gr"
-              ? <button onClick={() => void createVoucher()} disabled={creating || selRows.length === 0 || selCurrencies.length > 1} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{creating ? "กำลังสร้าง…" : `ออกใบสำคัญรับ (${selRows.length} ใบรับ)`}</button>
-              : <button onClick={() => void createManual()} disabled={creating || !(mSeller?.name ?? mSellerText).trim()} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{creating ? "กำลังสร้าง…" : "สร้างใบเปล่า →"}</button>}
+            <button onClick={() => setAddOpen(false)} disabled={creating} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">{addMode === "bill" ? "ปิด" : "ยกเลิก"}</button>
+            {addMode === "gr" && <button onClick={() => void createVoucher()} disabled={creating || selRows.length === 0 || selCurrencies.length > 1} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{creating ? "กำลังสร้าง…" : `ออกใบสำคัญรับ (${selRows.length} ใบรับ)`}</button>}
+            {addMode === "manual" && <button onClick={() => void createManual()} disabled={creating || !(mSeller?.name ?? mSellerText).trim()} className="px-5 h-9 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{creating ? "กำลังสร้าง…" : "สร้างใบเปล่า →"}</button>}
           </>}>
           <div className="inline-flex rounded-lg border border-slate-200 overflow-hidden text-xs mb-3">
             <button onClick={() => setAddMode("gr")} className={`h-8 px-3 ${addMode === "gr" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>📥 จากใบรับ ({pending.length})</button>
-            <button onClick={() => setAddMode("manual")} className={`h-8 px-3 border-l border-slate-200 ${addMode === "manual" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🧾 จากบิลร้าน / สร้างเปล่า (ยังไม่มีใบรับ)</button>
+            <button onClick={() => setAddMode("bill")} className={`h-8 px-3 border-l border-slate-200 ${addMode === "bill" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>🧾 จากบิลร้าน (AI อ่านให้)</button>
+            <button onClick={() => setAddMode("manual")} className={`h-8 px-3 border-l border-slate-200 ${addMode === "manual" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>✍️ สร้างเปล่า</button>
           </div>
-          {addMode === "gr" ? (
+          {addMode === "bill" ? (
+            <SellerBillIntake onManual={() => setAddMode("manual")}
+              onCreated={async (ids) => { if (ids.length === 1) { router.push(`/purchasing/vouchers/${ids[0]}`); return; } setAddOpen(false); await load(); }} />
+          ) : addMode === "gr" ? (
             pending.length === 0 ? <div className="py-8 text-center text-xs text-slate-300 border border-dashed border-slate-200 rounded-lg">— ไม่มีใบรับค้างออกใบสำคัญ — ไปรับของที่หน้า &quot;รับสินค้าเข้า&quot; ก่อน หรือเลือก &quot;สร้างเปล่า&quot;</div> : (
               <>
                 <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-[50vh] overflow-y-auto">
@@ -324,7 +328,7 @@ export default function PurchaseVouchersPage() {
                   <button onClick={() => setMCur("RMB")} className={`h-9 px-4 border-l border-slate-200 ${mCur === "RMB" ? "bg-blue-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}>¥ หยวน</button>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-400">ของยังไม่มาก็ออกได้ — หน้าถัดไปอัปโหลด &quot;บิลจากร้าน&quot; ระบบอ่านแล้วจับคู่กับใบสั่งซื้อของร้านนี้ให้ (เลือกร้านจากทะเบียนเพื่อให้จับคู่และจำคู่ได้) · ของที่ไม่อยู่ในบิลเลือกได้ว่า รอรอบหน้า หรือ ปิดยอด · หรือเพิ่มรายการเอง · ใบนี้ไม่บวกสต๊อก (รับของที่หน้ารับของตามปกติ)</p>
+              <p className="text-[11px] text-slate-400">ใบเปล่า = เลือกร้านเองแล้วเพิ่มรายการเองในหน้าถัดไป (อัปบิลร้านในหน้าใบภายหลังก็ได้) · มีรูปบิลอยู่แล้วใช้แท็บ &quot;จากบิลร้าน&quot; เร็วกว่า · ใบนี้ไม่บวกสต๊อก (รับของที่หน้ารับของตามปกติ)</p>
             </div>
           )}
         </ERPModal>

@@ -153,52 +153,106 @@ const SYSTEM = `คุณเป็นผู้ช่วยฝ่ายจัด�
 }
 
 กฎ:
-- ตัวเลขอ่านตามบิลจริง ห้ามเดา อ่านไม่ออก = null · 1,000 → 1000 · ลายมือ: ตรวจด้วย จำนวน × ราคา = ยอด
-- แถวรวม (合计 / 总计 / 小计 / 大写) ไม่ใช่รายการ → ใส่ใน total_amount
-- ค่าส่ง ค่าขนส่ง ค่ากล่อง ค่าแพ็ก ภาษี (运费 / 快递费 / 物流费 / 包装费 / 纸箱 / 税) → is_fee = true, candidate = null
 - candidate: เลือกได้เฉพาะรหัส P… ในรายการที่ให้ ถ้าไม่มีตัวที่เป็นของชิ้นเดียวกันจริง = null (ห้ามเลือกเพื่อให้ครบ)
   ดูชนิดของ + ขนาด (มม./ซม./เบอร์) + สี + เบอร์สี/รหัส (เช่น #402, G322) + ราคา ประกอบกัน · ชนิดเดียวกันแต่ขนาดหรือสีต่างกัน = ไม่ใช่
+`;
+
+/** กฎอ่านบิล + คำแปลศัพท์อะไหล่/สีที่ร้านเราใช้ — ใช้ร่วมทุก prompt ของบิลร้าน (แก้ที่นี่ที่เดียว) */
+export const BILL_READ_RULES = `- ตัวเลขอ่านตามบิลจริง ห้ามเดา อ่านไม่ออก = null · 1,000 → 1000 · ลายมือ: ตรวจด้วย จำนวน × ราคา = ยอด
+- แถวรวม (合计 / 总计 / 小计 / 大写) ไม่ใช่รายการ → ใส่ใน total_amount
+- ค่าส่ง ค่าขนส่ง ค่ากล่อง ค่าแพ็ก ภาษี (运费 / 快递费 / 物流费 / 包装费 / 纸箱 / 税) → is_fee = true
 - คำแปล (ใช้คำแบบนี้): 狗扣/钩子=คอหมา · D扣/D字扣=ตัวดี · 日字扣=ห่วงเลขแปด · 方扣=ห่วงสี่เหลี่ยม · 圆环/O环=ห่วงกลม · 拉头/拉片=หางซิป · 拉链=ซิป · 尼龙拉链=ซิปไนล่อน · 金属拉链=ซิปฟันเหล็ก · 树脂拉链=ซิปฟันกระดูก · 链条=โซ่ · 气眼/鸡眼=ตาไก่ · 铆钉=นมหนู · 磁扣=กระดุมแม่เหล็ก · 线=ด้าย · 布=ผ้า · 织带=สายผ้า · 绳=เชือก
 - สี: 镍色/白镍=สีนิเกิ้ล · 银色=สีเงิน · 枪色/枪黑/黑镍=สีรมดำ · 金色=สีทอง · 浅金=สีทองอ่อน · 黑色=สีดำ · 白色=สีขาว · 米白/米色=สีครีม · 古铜=สีทองแดงรมดำ · 玫瑰金=สีโรสโกลด์
 - ถ้ารูปไม่ใช่บิลซื้อของ ให้ "is_bill": false และ lines = []`;
+const SYSTEM_FULL = SYSTEM + BILL_READ_RULES;
+
+/** ไฟล์บิล (รูป/PDF หลายไฟล์) → ชิ้นส่วนข้อความที่ส่งให้ AI · อ่านไฟล์ไม่ได้ = โยน Error ภาษาคน */
+export async function billFileParts(admin: Admin, refs: string[]): Promise<unknown[]> {
+  const parts: unknown[] = [];
+  for (const [i, ref] of refs.entries()) {
+    const f = await readFileRef(admin, ref);
+    if (!f) throw new Error(`อ่านไฟล์บิลที่ ${i + 1} ไม่ได้ (ไฟล์อาจยังอัปโหลดไม่เสร็จ) — ลองแนบใหม่อีกครั้ง`);
+    const isPdf = /pdf/i.test(f.contentType) || /\.pdf$/i.test(ref);
+    const b64 = Buffer.from(f.bytes).toString("base64");
+    parts.push(isPdf
+      ? { type: "file", file: { filename: `bill-${i + 1}.pdf`, file_data: `data:application/pdf;base64,${b64}` } }
+      : { type: "image_url", image_url: { url: `data:${f.contentType.startsWith("image/") ? f.contentType : "image/jpeg"};base64,${b64}`, detail: "high" } });
+  }
+  return parts;
+}
+
+/** รายการ PO ที่ส่งให้ AI เลือก (รหัส P1…) + ตารางแปลงรหัสกลับเป็นกลุ่ม */
+export function poCandidatePrompt(groups: PoGroup[]): { text: string; idOf: Map<string, string> } {
+  const list = groups.slice(0, MAX_PROMPT_GROUPS);
+  const idOf = new Map<string, string>();
+  const rows = list.map((g, i) => {
+    const pid = `P${i + 1}`; idOf.set(pid, g.key);
+    return `${pid} | ${g.code || "-"} | ${g.item_name}${g.name_cn ? ` (จีน: ${g.name_cn})` : ""} | ${g.unit_price != null ? `¥${g.unit_price}` : "ไม่มีราคา"} | ค้าง ${g.remaining} ${g.uom ?? ""}`.trim();
+  });
+  return { text: `รายการในใบสั่งซื้อของเรากับร้านนี้ (${list.length} รายการ · รหัส | ชื่อไทย (ชื่อจีนที่เคยใช้ ถ้ามี) | ราคาต่อหน่วยใน PO | จำนวนที่ค้าง):\n${rows.join("\n") || "(ไม่มี)"}`, idOf };
+}
+
+const numOrNull = (v: unknown): number | null => {
+  if (v == null || v === "") return null;
+  const n = Number(String(v).replace(/[,，¥￥\s]/g, ""));
+  return Number.isFinite(n) ? n : null;
+};
+/** แถวจาก AI → SellerBillLine (ตัดแถวรวม/แถวว่าง · ค่าส่ง/ค่ากล่อง = is_fee) */
+export function sanitizeAiBillLines(rawLines: unknown, idOf?: Map<string, string>): SellerBillLine[] {
+  const rows = Array.isArray(rawLines) ? (rawLines as Row[]) : [];
+  return rows.map((r) => {
+    const key = idOf ? idOf.get(str(r.candidate).toUpperCase()) ?? null : null;
+    const fee = r.is_fee === true || /运费|快递|物流|包装|纸箱|税/.test(`${str(r.name_cn)}${str(r.spec_cn)}`);
+    return normalizeBillLine({ ...r, is_fee: fee, ai_pick: fee ? null : key, ai_conf: r.confidence, decision: null, manual: false, voucher_line_ids: [] });
+  }).filter((l) => l.name_cn || l.name_th || l.qty != null || l.amount != null)
+    .filter((l) => !/^(合计|总计|小计|大写|total)/i.test(str(l.name_cn)));
+}
+export const billTotalOf = (v: unknown) => numOrNull(v);
 
 /** ส่งรูป/PDF + รายการ PO ของร้านนี้ให้ AI อ่าน → หัวบิล + แถว (มีคู่ที่ AI เลือก) */
 export async function parseSellerBill(admin: Admin, ref: string, groups: PoGroup[]): Promise<{
   header: { is_bill: boolean; seller_text: string | null; bill_no: string | null; bill_date: string | null; currency: string | null; total_amount: number | null };
   lines: SellerBillLine[]; raw: Row; model: string;
 }> {
-  const f = await readFileRef(admin, ref);
-  if (!f) throw new Error("อ่านไฟล์บิลไม่ได้ (ไฟล์อาจยังอัปโหลดไม่เสร็จ) — ลองแนบใหม่อีกครั้ง");
-  const isPdf = /pdf/i.test(f.contentType) || /\.pdf$/i.test(ref);
-  const b64 = Buffer.from(f.bytes).toString("base64");
-  const filePart = isPdf
-    ? { type: "file", file: { filename: "bill.pdf", file_data: `data:application/pdf;base64,${b64}` } }
-    : { type: "image_url", image_url: { url: `data:${f.contentType.startsWith("image/") ? f.contentType : "image/jpeg"};base64,${b64}`, detail: "high" } };
-
-  // รายการ PO ที่ให้ AI เลือก (ของค้างก่อน) — ส่งเป็นข้อความสั้น ๆ ประหยัด token
-  const list = groups.slice(0, MAX_PROMPT_GROUPS);
-  const idOf = new Map<string, string>();
-  const lines = list.map((g, i) => {
-    const pid = `P${i + 1}`; idOf.set(pid, g.key);
-    return `${pid} | ${g.code || "-"} | ${g.item_name}${g.name_cn ? ` (จีน: ${g.name_cn})` : ""} | ${g.unit_price != null ? `¥${g.unit_price}` : "ไม่มีราคา"} | ค้าง ${g.remaining} ${g.uom ?? ""}`.trim();
-  });
-  const text = `รายการในใบสั่งซื้อของเรากับร้านนี้ (${list.length} รายการ · รหัส | ชื่อไทย (ชื่อจีนที่เคยใช้ ถ้ามี) | ราคาต่อหน่วยใน PO | จำนวนที่ค้าง):\n${lines.join("\n") || "(ไม่มี)"}\n\nอ่านบิลในไฟล์ แล้วตอบ JSON ตามโครงที่กำหนด`;
-  const raw = await chatJson(SYSTEM, [{ type: "text", text }, filePart], 4000, SELLER_BILL_MODEL);
-
-  const rawLines = Array.isArray(raw.lines) ? (raw.lines as Row[]) : [];
-  const parsed = rawLines.map((r) => {
-    const pid = str(r.candidate).toUpperCase();
-    const key = idOf.get(pid) ?? null;
-    const fee = r.is_fee === true || /运费|快递|物流|包装|纸箱|税/.test(`${str(r.name_cn)}${str(r.spec_cn)}`);
-    return normalizeBillLine({ ...r, is_fee: fee, ai_pick: fee ? null : key, ai_conf: r.confidence, decision: null, manual: false, voucher_line_ids: [] });
-  }).filter((l) => l.name_cn || l.name_th || l.qty != null || l.amount != null)
-    .filter((l) => !/^(合计|总计|小计|大写|total)/i.test(str(l.name_cn)));
+  const fileParts = await billFileParts(admin, [ref]);
+  const { text, idOf } = poCandidatePrompt(groups);
+  const raw = await chatJson(SYSTEM_FULL, [{ type: "text", text: `${text}\n\nอ่านบิลในไฟล์ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...fileParts], 4000, SELLER_BILL_MODEL);
   const header = {
     is_bill: raw.is_bill !== false,
     seller_text: str(raw.seller_name) || null, bill_no: str(raw.bill_no) || null, bill_date: normDate(raw.bill_date),
-    currency: str(raw.currency) || null, total_amount: raw.total_amount == null || raw.total_amount === "" ? null : (Number.isFinite(Number(String(raw.total_amount).replace(/[,，¥￥\s]/g, ""))) ? Number(String(raw.total_amount).replace(/[,，¥￥\s]/g, "")) : null),
+    currency: str(raw.currency) || null, total_amount: numOrNull(raw.total_amount),
   };
-  return { header, lines: parsed, raw, model: SELLER_BILL_MODEL };
+  return { header, lines: sanitizeAiBillLines(raw.lines, idOf), raw, model: SELLER_BILL_MODEL };
+}
+
+const SYSTEM_PICK = `คุณเป็นผู้ช่วยฝ่ายจัดซื้อ จับคู่ "รายการในบิลร้านจีน" (ข้อความที่อ่านแล้ว) กับ "รายการในใบสั่งซื้อของเรา" (รหัส P1, P2, …)
+ตอบ JSON เท่านั้น: { "picks": [ { "i": เลขแถวในบิล, "candidate": "P12 หรือ null", "confidence": 0.0-1.0 } ] }
+กฎ: เลือกได้เฉพาะรหัสในรายการที่ให้ · ไม่มีตัวที่เป็นของชิ้นเดียวกันจริง = null (ห้ามเลือกเพื่อให้ครบ)
+ดูชนิดของ + ขนาด (มม./ซม./เบอร์) + สี + เบอร์สี/รหัส + ราคา ประกอบกัน · ชนิดเดียวกันแต่ขนาดหรือสีต่างกัน = ไม่ใช่
+${BILL_READ_RULES}`;
+
+/**
+ * ให้ AI เลือกบรรทัด PO ให้แต่ละแถว "จากข้อความ" (ไม่ส่งรูปซ้ำ — ถูก ~0.01 บาท) — ใช้หลังรู้ร้านแล้ว (ป๊อปโยนรูปบิล)
+ * ล้มเหลว = คืนแถวเดิม (ยังจับคู่ด้วยราคา/ชื่อแปล/จำคู่ได้) ไม่ทำให้การสร้างใบล้ม
+ */
+export async function aiPickCandidates(lines: SellerBillLine[], groups: PoGroup[]): Promise<SellerBillLine[]> {
+  const items = lines.map((l, i) => ({ l, i })).filter(({ l }) => !l.is_fee);
+  if (items.length === 0 || groups.length === 0) return lines;
+  const { text, idOf } = poCandidatePrompt(groups);
+  const billText = items.map(({ l, i }) => `${i} | ${str(l.name_cn)} ${str(l.spec_cn)} | ${str(l.name_th)} ${str(l.spec_th)} | ${l.qty ?? "?"} ${str(l.unit)} × ¥${l.unit_price ?? "?"}`).join("\n");
+  try {
+    const raw = await chatJson(SYSTEM_PICK, [{ type: "text", text: `${text}\n\nรายการในบิล (เลขแถว | ชื่อจีน | คำแปล | จำนวน × ราคา):\n${billText}` }], 1500, SELLER_BILL_MODEL);
+    const picks = Array.isArray(raw.picks) ? (raw.picks as Row[]) : [];
+    const byI = new Map(picks.map((p) => [Number(p.i), p]));
+    return lines.map((l, i) => {
+      const p = byI.get(i); if (!p || l.is_fee) return l;
+      const key = idOf.get(str(p.candidate).toUpperCase()) ?? null;
+      return { ...l, ai_pick: key, ai_conf: numOrNull(p.confidence) };
+    });
+  } catch (e) {
+    console.error("[seller-bill] aiPickCandidates", (e as Error).message);
+    return lines;
+  }
 }
 
 /** จับคู่ใหม่ทั้งบิล (แถวที่คนตัดสินแล้วไม่แตะ) */

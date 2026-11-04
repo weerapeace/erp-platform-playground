@@ -286,6 +286,26 @@ export async function fetchVoucher(admin: Admin, voucherId: string): Promise<{ h
   return { header: toHeader(v as Row, grNos, poNos, poPayments), lines };
 }
 
+/**
+ * สร้างใบสำคัญร่าง "ไม่มีใบรับ" (ใบเปล่า / จากบิลร้าน) → คืน id
+ *   วิธีคิดค่าส่ง + เรทค่าส่ง = ร้านขนส่งหลัก · เรทเงิน = เรทของวันที่ใบ (สกุลต่างประเทศ)
+ *   ใช้: POST /api/purchasing/vouchers { manual } และ ป๊อปโยนรูปบิลร้าน (lib/seller-bill-intake)
+ */
+export async function createManualVoucher(admin: Admin, o: { seller_name: string; seller_partner_id: string | null; currency: string; voucher_date?: string | null; note?: string | null; actor: string | null }): Promise<string> {
+  const seller = str(o.seller_name);
+  if (!seller) throw new Error("ต้องระบุร้าน / ผู้ขาย");
+  const cur = String(o.currency ?? "THB").toUpperCase() || "THB";
+  const date = o.voucher_date || new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const [carrier, fx] = await Promise.all([defaultCarrier(admin), isForeignCurrency(cur) ? fxRateForDate(admin, date) : Promise.resolve(null)]);
+  const { data: ins, error } = await admin.from("purchase_vouchers_v2").insert({
+    status: "draft", voucher_date: date, seller_name: seller, seller_partner_id: o.seller_partner_id || null, currency: cur, fx_rate: fx,
+    ship_method: carrier?.method ?? "none", ship_rate: carrier?.rate ?? null, ship_rate_cube: carrier?.rate_cube ?? null, ship_rate_kg: carrier?.rate_kg ?? null,
+    carrier_id: carrier?.id ?? null, carrier_name: carrier?.name ?? null, note: o.note ?? null, created_by: o.actor,
+  }).select("id").single();
+  if (error || !ins) throw new Error("สร้างใบสำคัญไม่สำเร็จ: " + (error?.message ?? ""));
+  return String((ins as Row).id);
+}
+
 /** ร้านขนส่งหลัก (is_default) — ใบสำคัญใหม่ใช้เป็นค่าเริ่มต้นของวิธีคิด + เรท */
 export async function defaultCarrier(admin: Admin): Promise<{ id: string; name: string; method: ShipMethod; rate: number; rate_cube: number | null; rate_kg: number | null } | null> {
   const { data } = await admin.from("freight_carriers").select("id, name, method, rate_thb, rate_cube_thb, rate_kg_thb, is_default, sort_order").not("is_active", "is", false).order("is_default", { ascending: false }).order("sort_order").limit(1);

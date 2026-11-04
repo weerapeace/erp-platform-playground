@@ -24,13 +24,15 @@ const COUNTRIES = ["ไทย", "จีน", "ฮ่องกง", "อื่น
 const STEPS = ["ข้อมูลร้าน", "ติดต่อ", "ที่อยู่ + ภาษี", "การค้า / การเงิน"] as const;
 type Step = 1 | 2 | 3 | 4;
 
-export function SupplierWizard({ onClose, onCreated, role = "supplier", initialName = "" }: {
+export function SupplierWizard({ onClose, onCreated, role = "supplier", initialName = "", prefill }: {
   onClose: () => void;
   onCreated: (p: { id: string; name: string }) => void;
   /** เปิดจากที่ไหน — กำหนดว่าติ๊ก "ผู้จำหน่าย" หรือ "ลูกค้า" ให้ตั้งแต่แรก */
   role?: "supplier" | "customer" | "both";
   /** ชื่อที่พิมพ์ค้างไว้ในช่องค้นหา — เติมให้เลย ไม่ต้องพิมพ์ซ้ำ */
   initialName?: string;
+  /** ค่าเริ่มต้นช่องอื่น (เช่น อ่านจากบิลร้านจีน: ชื่อจีน/เบอร์/บัญชี/ประเทศ) — ผู้ใช้แก้ได้ก่อนบันทึก */
+  prefill?: { name_en?: string; company_name?: string; phone?: string; account_number?: string; shop_country?: string; currency?: string; notes?: string };
 }) {
   const [step, setStep] = useState<Step>(1);
   const [saving, setSaving] = useState(false);
@@ -40,26 +42,26 @@ export function SupplierWizard({ onClose, onCreated, role = "supplier", initialN
   // ---- หน้า 1: ข้อมูลร้าน ----
   const [displayName, setDisplayName] = useState(initialName);
   const [nameTh, setNameTh] = useState("");
-  const [nameEn, setNameEn] = useState("");
+  const [nameEn, setNameEn] = useState(prefill?.name_en ?? "");
   const [code, setCode] = useState("");
   const [isSupplier, setIsSupplier] = useState(role !== "customer");
   const [isCustomer, setIsCustomer] = useState(role !== "supplier");
   const [isCompany, setIsCompany] = useState(true);
   const [isTaobao, setIsTaobao] = useState(false);
-  const [shopCountry, setShopCountry] = useState("");
-  const [currency, setCurrency] = useState(role === "customer" ? "THB" : "RMB");
+  const [shopCountry, setShopCountry] = useState(prefill?.shop_country ?? "");
+  const [currency, setCurrency] = useState(prefill?.currency ?? (role === "customer" ? "THB" : "RMB"));
   const [nameCard, setNameCard] = useState<string[]>([]);
 
   // ---- หน้า 2: ติดต่อ ----
-  const [phone, setPhone] = useState("");
+  const [phone, setPhone] = useState(prefill?.phone ?? "");
   const [mobile, setMobile] = useState("");
   const [email, setEmail] = useState("");
   const [lineId, setLineId] = useState("");
   const [website, setWebsite] = useState("");
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(prefill?.notes ?? "");
 
   // ---- หน้า 3: ที่อยู่ + ภาษี ----
-  const [companyName, setCompanyName] = useState("");
+  const [companyName, setCompanyName] = useState(prefill?.company_name ?? "");
   const [address, setAddress] = useState("");
   const [subDistrict, setSubDistrict] = useState("");
   const [district, setDistrict] = useState("");
@@ -80,7 +82,7 @@ export function SupplierWizard({ onClose, onCreated, role = "supplier", initialN
   const [bankName, setBankName] = useState("");
   const [bankBrief, setBankBrief] = useState("");
   const [bankAccountName, setBankAccountName] = useState("");
-  const [accountNumber, setAccountNumber] = useState("");
+  const [accountNumber, setAccountNumber] = useState(prefill?.account_number ?? "");
   const [tags, setTags] = useState("");
 
   const toggleTaobao = (v: boolean) => {

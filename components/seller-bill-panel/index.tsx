@@ -32,6 +32,7 @@ type PoPlan = {
 type Bill = {
   id: string; r2_key: string; gr_id: string | null; bill_no: string | null; bill_date: string | null; seller_text: string | null;
   total_amount: number | null; currency: string | null; lines: SellerBillLine[]; status: string; applied_at: string | null; created_at: string;
+  raw?: { files?: string[] } | null;   // บิลหลายหน้า (โยนรูปจากป๊อปออกใบสำคัญ) — r2_key = หน้าแรก
 };
 type Candidate = { gr_id: string; gr_no: string; kind: "receipt" | "bill"; r2_key: string };
 
@@ -70,7 +71,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
   const [missAct, setMissAct] = useState<Record<string, Record<string, "wait" | "close">>>({});
   const [missScope, setMissScope] = useState<Record<string, "bill" | "shop">>({});
   const [poPlan, setPoPlan] = useState<PoPlan | null>(null);
-  const fileUrls = useFileRefUrls([...cands.map((c) => c.r2_key), ...bills.map((b) => b.r2_key)]);
+  const fileUrls = useFileRefUrls([...cands.map((c) => c.r2_key), ...bills.flatMap((b) => [b.r2_key, ...(b.raw?.files ?? [])])]);
   const gByKey = useMemo(() => new Map(groups.map((g) => [g.key, g])), [groups]);
 
   const load = useCallback(async () => {
@@ -243,7 +244,7 @@ export function SellerBillPanel({ voucherId, readonly, onApplied }: { voucherId:
                     <div className="text-sm text-slate-800 font-medium">บิลร้าน {b.bill_no ? <span className="font-mono text-xs">No. {b.bill_no}</span> : null} <span className="text-xs font-normal text-slate-400">{b.bill_date ? `· ${formatDate(b.bill_date)}` : ""}</span>
                       <span className={`ml-2 ${b.status === "applied" ? CHIP_OK : CHIP_WARN}`}>{b.status === "applied" ? `ใส่ลงใบแล้ว ${b.applied_at ? formatDate(b.applied_at) : ""}` : "ยังไม่ได้ใส่ลงใบ"}</span>
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-0.5">ร้านในบิล: {b.seller_text ?? "—"}</div>
+                    <div className="text-[11px] text-slate-500 mt-0.5">ร้านในบิล: {b.seller_text ?? "—"}{(b.raw?.files ?? []).length > 1 && <span className="ml-2">· ไฟล์บิล {(b.raw?.files ?? []).map((ref, k) => <a key={ref} href={fileUrls[ref] ?? undefined} target="_blank" rel="noreferrer" className="ml-1 text-blue-600 hover:underline">หน้า {k + 1}</a>)}</span>}</div>
                     <div className="flex gap-1.5 flex-wrap mt-1.5">
                       <span className={CHIP_NEU}>อ่านได้ {lines.length} แถว</span>
                       {math.totalOk === true && <span className={CHIP_OK}>จำนวน × ราคา = ยอดรวมบิล ¥{n2(b.total_amount)} ตรง</span>}

@@ -3,7 +3,8 @@
  *   GET  /api/purchasing/vouchers?pending=1        → ใบรับ GR ที่ยังไม่ออกใบสำคัญ (คิวงานของจัดซื้อ)
  *        &include_backfill=1 → รวมใบรับย้อนหลัง (เคลียร์ของค้างเก่า) ด้วย — ปกติซ่อนกันคิวรก · ทุกแถวมี receipt_batch_no (เลือกทั้งชุด)
  *   GET  /api/purchasing/vouchers?status=draft|confirmed|cancelled|all → รายการใบสำคัญ
- *   POST /api/purchasing/vouchers { gr_ids: [] }   → สร้างใบร่างจาก GR (ดึงราคา/คิว/กก./เรทให้)
+ *   POST /api/purchasing/vouchers { gr_ids: [] }   → สร้างใบร่างจาก GR (ดึงราคา/คิว/กก./เรทให้) · { manual } = ใบเปล่า (lib createManualVoucher)
+ *   ใบจากรูปบิลร้าน → POST /api/purchasing/seller-bills/intake + /create
  * สิทธิ์: อ่าน = products.cost.view (มีราคาซื้อ) · เขียน = products.edit
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -11,8 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { prefillFromGrs, defaultCarrier, fxRateForDate } from "@/lib/purchase-voucher-server";
-import { isForeignCurrency } from "@/lib/landed-cost";
+import { prefillFromGrs, createManualVoucher } from "@/lib/purchase-voucher-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -99,15 +99,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const seller = String(body.manual.seller_name ?? "").trim();
     if (!seller) return NextResponse.json({ error: "ต้องระบุร้าน / ผู้ขาย" }, { status: 400 });
     const cur = String(body.manual.currency ?? "THB").toUpperCase() || "THB";
-    const today = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
-    const [carrier, fx] = await Promise.all([defaultCarrier(admin), isForeignCurrency(cur) ? fxRateForDate(admin, today) : Promise.resolve(null)]);
-    const { data: ins, error } = await admin.from("purchase_vouchers_v2").insert({
-      status: "draft", voucher_date: today, seller_name: seller, seller_partner_id: body.manual.seller_partner_id || null, currency: cur, fx_rate: fx,
-      ship_method: carrier?.method ?? "none", ship_rate: carrier?.rate ?? null, ship_rate_cube: carrier?.rate_cube ?? null, ship_rate_kg: carrier?.rate_kg ?? null,
-      carrier_id: carrier?.id ?? null, carrier_name: carrier?.name ?? null, note: body.manual.note ?? null, created_by: actor,
-    }).select("id").single();
-    if (error || !ins) return NextResponse.json({ error: "สร้างใบสำคัญไม่สำเร็จ: " + (error?.message ?? "") }, { status: 500 });
-    const id = String((ins as Row).id);
+    let id: string;
+    try { id = await createManualVoucher(admin, { seller_name: seller, seller_partner_id: body.manual.seller_partner_id || null, currency: cur, note: body.manual.note ?? null, actor }); }
+    catch (e) { return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 500 }); }
     await writeAudit(admin, { action: "create", entityType: "purchase_vouchers_v2", entityId: id, actorId: user?.id ?? null, actorName: actor, metadata: { manual: true, seller_name: seller, currency: cur } });
     return NextResponse.json({ ok: true, id, error: null });
   }
