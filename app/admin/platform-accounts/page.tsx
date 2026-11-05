@@ -15,6 +15,7 @@ import { PlatformIcon } from "@/components/platform-icon";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { Icon } from "@/components/icon";
 import { capsOf } from "@/lib/social-publish/capabilities";
+import { BackButton } from "@/components/back-button";
 import { formatDateTime } from "@/lib/date";
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
@@ -667,6 +668,7 @@ export default function PlatformAccountsPage() {
       {/* ── หัวหน้า: ชื่อ + สรุป · ขวา = เลือกแบรนด์ ── */}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
+          <BackButton fallback="/" className="mb-2" />
           <p className="text-[11px] font-medium uppercase tracking-[0.1em] text-slate-400">ตั้งค่าร้านค้า</p>
           <h1 className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">บัญชีแพลตฟอร์ม</h1>
           <p className="mt-1 text-sm text-slate-500">
