@@ -31,6 +31,7 @@ import { menuVisibleTo } from "@/lib/menu-audience";
 import { menuPlace, type AppMenuOverride } from "@/lib/app-menu-layout";
 import { appHomeHref, visibleAppMenus } from "@/lib/app-orbit";
 import { Icon } from "@/components/icon";
+import { AnimatedIcon, isLottieKey } from "@/components/animated-icon";
 
 // โมดูลที่เปิดเป็น "แอปแยก" (แท็บใหม่ + หน้าโฟกัสเต็ม ใช้ StandaloneShell)
 // เพิ่ม href ที่นี่เพื่อให้เมนูเปิดแท็บใหม่ + มีไอคอน ↗
@@ -799,8 +800,10 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
               {navExpanded
                 ? <div className="px-2 mb-1 flex items-center gap-1.5">
                     {group.iconUrl
-                      // eslint-disable-next-line @next/next/no-img-element
-                      ? <img src={`/api/r2-image?key=${encodeURIComponent(group.iconUrl)}`} alt="" className="w-3.5 h-3.5 rounded object-contain shrink-0" />
+                      ? (isLottieKey(group.iconUrl)
+                        ? <AnimatedIcon src={group.iconUrl} size={14} play="hover" className="shrink-0" />
+                        // eslint-disable-next-line @next/next/no-img-element
+                        : <img src={`/api/r2-image?key=${encodeURIComponent(group.iconUrl)}`} alt="" className="w-3.5 h-3.5 rounded object-contain shrink-0" />)
                       : group.icon ? <span className="text-xs leading-none shrink-0"><Icon value={group.icon} /></span> : null}
                     <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{group.label}</span>
                   </div>

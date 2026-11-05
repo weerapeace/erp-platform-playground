@@ -15,6 +15,7 @@ import { DEFAULT_MENU_ITEMS, type MenuRow, type AppGroup as BaseAppGroup } from 
 import { AppAccessModal } from "./app-access-modal";
 import { appHeaderStyle } from "@/lib/app-header-theme";
 import type { MenuSection } from "@/app/api/menu/sections/route";
+import { AnimatedIcon, isLottieKey } from "@/components/animated-icon";
 
 type AppGroup = BaseAppGroup & { icon_url?: string | null; theme_color?: string | null; theme_color2?: string | null; header_image?: string | null; header_style?: string | null; default_href?: string | null };
 const ALL = "__all__";
@@ -22,6 +23,8 @@ const ALL = "__all__";
 // ไอคอน (รูปอัปโหลด icon_url > emoji)
 function Ico({ icon, iconUrl, size = 18 }: { icon?: string | null; iconUrl?: string | null; size?: number }) {
   if (iconUrl) {
+    // ไฟล์ Lottie (.json) = ไอคอนเคลื่อนไหวกลาง (ตัวอย่างในหน้าตั้งค่า = ขยับตลอด)
+    if (isLottieKey(iconUrl)) return <AnimatedIcon src={iconUrl} size={size} play="loop" className="shrink-0" />;
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={`/api/r2-image?key=${encodeURIComponent(iconUrl)}`} alt="" className="rounded object-contain shrink-0" style={{ width: size, height: size }} />;
   }
@@ -695,10 +698,10 @@ export default function MenuManagerPage() {
                         <input defaultValue={secByName.get(g.section)?.icon ?? ""} onBlur={(e) => setSecMeta(g.section, { icon: e.target.value.trim() || null })} placeholder="🏭" className="w-14 h-7 px-1 text-center text-base border border-slate-200 rounded" /></label>
                       <label className={`h-7 px-2.5 leading-7 text-xs font-medium rounded cursor-pointer ${uploadingSec ? "bg-slate-200 text-slate-400" : "bg-blue-600 text-white hover:bg-blue-700"}`}>
                         {uploadingSec ? "กำลังอัป…" : "⬆ อัปรูป"}
-                        <input type="file" accept="image/png,image/jpeg,image/webp" className="hidden" disabled={uploadingSec}
+                        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/json,.json" className="hidden" disabled={uploadingSec}
                           onChange={(e) => { const f = e.target.files?.[0]; if (f) void uploadSecIcon(g.section, f); e.target.value = ""; }} /></label>
                       {secByName.get(g.section)?.icon_url && <button onClick={() => setSecMeta(g.section, { icon_url: null })} className="text-[11px] text-rose-500 hover:text-rose-700">ลบรูป</button>}
-                      <span className="text-[11px] text-slate-400">รูปจะชนะ emoji · แนะนำ ≥128px</span>
+                      <span className="text-[11px] text-slate-400">รูปจะชนะ emoji · แนะนำ ≥128px · ไอคอนขยับ: Lottie (.json) / GIF</span>
                       <button onClick={() => setEditingSecIcon(null)} className="ml-auto text-xs text-slate-500 hover:text-slate-800">เสร็จ</button>
                     </div>
                   )}

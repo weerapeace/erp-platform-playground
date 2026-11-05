@@ -173,6 +173,14 @@ export async function GET(request: NextRequest): Promise<Response> {
       try {
         const sharp = (await import("sharp")).default;
         const input = Buffer.from(await new Response(obj.body as ReadableStream).arrayBuffer());
+        // WebP ขยับ (หลายเฟรม) — ย่อแล้วเหลือเฟรมเดียว = ภาพนิ่ง → ส่งตัวเต็มแทน (เหมือน GIF) · ไอคอนเคลื่อนไหวกลาง components/animated-icon
+        if (ct0 === "image/webp" && !sq) {
+          const pages = await sharp(input).metadata().then((m) => m.pages ?? 1).catch(() => 1);
+          if (pages > 1) {
+            const raw = new Uint8Array(input);
+            return new Response(raw, { status: 200, headers: { "Content-Type": ct0, "Content-Length": String(raw.byteLength), ...CACHE_HEADERS } });
+          }
+        }
         const pipeline = sharp(input).rotate();
         // sq (รูปตัวเลือก LINE): 1:1 + LINE ไม่รับ webp ("Unsupported media type") → ออกเป็น JPEG · โหมดย่อทั่วไป → webp (เบากว่า)
         const out = sq

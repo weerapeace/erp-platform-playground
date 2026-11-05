@@ -13,6 +13,7 @@
 import { useSyncExternalStore, type CSSProperties } from "react";
 import { apiFetch } from "@/lib/api";
 import { DEFAULT_ICON_SETTINGS, cleanIconSettings, resolveIcon, type IconMode, type IconSettings } from "@/lib/icon-registry";
+import { AnimatedIcon, isLottieKey, type AnimPlay } from "@/components/animated-icon";
 
 export const ICON_SETTINGS_API = "/api/admin/icon-settings";
 const LS_KEY = "erp.iconSettings.v1";
@@ -87,7 +88,10 @@ export function Icon({
   strokeWidth = 1.75,
   mode,
   settings,
+  animate,
 }: {
+  /** ไอคอนเคลื่อนไหว (รูปอัปโหลดเป็น Lottie .json): "hover" ชี้แล้วขยับ (ค่าเริ่ม) · "loop" ขยับตลอด · "once" ขยับรอบเดียว — ดู components/animated-icon */
+  animate?: AnimPlay;
   /** ชื่อความหมายในทะเบียน (เช่น "save") */
   name?: string;
   /** ค่าเดิมที่เก็บไว้ (อีโมจิ / "i:" / "c:" / "img:") */
@@ -119,6 +123,8 @@ export function Icon({
         {r.d.map((d, i) => <path key={i} d={d} />)}
       </svg>
     );
+  // รูปอัปโหลดเป็น Lottie (.json) → ไอคอนเคลื่อนไหวกลาง (GIF/WebP ขยับ เล่นผ่าน <img> ด้านล่างได้เอง)
+  if (isLottieKey(r.src)) return <AnimatedIcon src={r.src} size={size} play={animate ?? "hover"} className={cls} title={title} style={r.color ? { color: r.color } : undefined} />;
   const url = iconImageUrl(r.src);
   if (r.tint) {
     const mask = `url("${url}") center / contain no-repeat`;

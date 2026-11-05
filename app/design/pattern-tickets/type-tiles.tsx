@@ -78,6 +78,8 @@ export function TypeTiles({ types, counts, me, activeType, onPick, onTypeSaved }
 }
 
 const ICON_TYPES = /^image\/(png|jpeg|webp|gif)$/;
+/** ไฟล์ Lottie (.json) — ไอคอนเคลื่อนไหว (components/animated-icon) · บางเครื่องไม่บอกชนิดไฟล์ → ดูนามสกุล */
+const isLottieFile = (f: File) => f.type === "application/json" || /\.json$/i.test(f.name);
 
 /** ป๊อปเปลี่ยนไอคอนของประเภทงาน — อัปรูป (มีแถบความคืบหน้า) → ดูตัวอย่าง → บันทึก · หรือกลับเป็นไอคอนเดิม */
 function TypeIconModal({ type, onClose, onSaved }: { type: TicketType; onClose: () => void; onSaved: (t: TicketType) => void }) {
@@ -92,7 +94,7 @@ function TypeIconModal({ type, onClose, onSaved }: { type: TicketType; onClose: 
   const busy = saving || !!up;
 
   const upload = async (file: File) => {
-    if (!ICON_TYPES.test(file.type)) { toast.warning(t("ใช้รูป PNG / JPG / WEBP / GIF", "Use a PNG / JPG / WEBP / GIF image")); return; }
+    if (!ICON_TYPES.test(file.type) && !isLottieFile(file)) { toast.warning(t("ใช้รูป PNG / JPG / WEBP / GIF หรือไฟล์ Lottie (.json)", "Use a PNG / JPG / WEBP / GIF image or a Lottie (.json) file")); return; }
     setUp({ name: file.name, size: file.size, pct: null });
     try {
       const key = await uploadMediaFile(file, {
@@ -156,7 +158,8 @@ function TypeIconModal({ type, onClose, onSaved }: { type: TicketType; onClose: 
           </div>
         )}
         <p className="text-center text-xs text-slate-400">{t("แนะนำรูปสี่เหลี่ยมจัตุรัส พื้นใส (PNG) — ขนาดเล็กก็พอ", "A square image with a transparent background (PNG) works best")}</p>
-        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden"
+        <p className="text-center text-xs text-slate-400">{t("ไอคอนขยับ: ไฟล์ Lottie (.json) จาก Lordicon / LottieFiles — ขยับเมื่อเอาเมาส์ชี้ · หรือ GIF ขยับตลอด", "Animated: a Lottie (.json) file from Lordicon / LottieFiles plays on hover · GIF loops")}</p>
+        <input ref={fileRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif,application/json,.json" className="hidden"
           onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); }} />
       </div>
     </ERPModal>
