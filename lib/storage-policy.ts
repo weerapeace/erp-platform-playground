@@ -93,6 +93,7 @@ export const STORAGE_WIRING: Record<string, StorageProvider | "rule"> = {
   finance_private: "supabase",   // bucket invoices + payment-slips
   customer_print_uploads: "supabase", // bucket print-uploads
   customer_review_return: "r2",  // lib/website-reviews-server + website-returns-server
+  work_logs: "rule",             // รูปใบจดผลงาน /master/work-logs → ตัวอัปกลาง lib/file-upload
 };
 
 /**
@@ -102,6 +103,7 @@ export const STORAGE_WIRING: Record<string, StorageProvider | "rule"> = {
  */
 export const STORAGE_CATEGORY_PERMISSIONS: Record<string, { upload: string; view: string }> = {
   supplier_bills: { upload: "products.edit", view: "products.view" },
+  work_logs: { upload: "products.edit", view: "products.view" },   // เหมือนบอร์ดจ่ายงาน
 };
 
 /** ไฟล์นี้เข้าหมวดได้ไหม (ชนิด + ขนาด) — ได้ = null · ไม่ได้ = ข้อความภาษาคน */

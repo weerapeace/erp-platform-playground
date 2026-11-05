@@ -29,6 +29,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   // ผลิต → จ่ายงานเหมา: ดู/จ่าย/รับคืน ใช้สิทธิ์สินค้า (เหมือน /api/mo/piecework) · ตั้งรายชื่องานเหมากลาง = production.piecework
   { href: "/master/piecework-dispatch", keys: ["products.view", "products.edit", "production.piecework"] },
   { href: "/master/piecework-jobs", sameAs: "/master/piecework-dispatch" },
+  { href: "/master/work-logs", sameAs: "/master/piecework-dispatch" },
   // ออฟฟิศทีม AI — ดูสถานะผู้ช่วยอัตโนมัติ (lib/ai-office.ts AI_OFFICE_PERM · ตอนนี้ = แอดมิน)
   { href: "/master/ai-office", keys: ["ai_office.view", "ai_office.edit"] },
   // ตั๋วงานช่าง Pattern — ดู / เปิดตั๋ว (ฝ่ายออกแบบ) / รับทำ (ช่าง) / จัดการทั้งหมด

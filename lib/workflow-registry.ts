@@ -73,6 +73,16 @@ export const WORKFLOWS: WorkflowDef[] = [
     logicIds: ["LOG-LABOR-0001"],
   },
   {
+    key: "work-log",
+    label: "ใบจดผลงาน (วัดผลพนักงานผลิต)",
+    flow: "พิมพ์ใบจดตามใบงาน → หัวหน้าจด → ถ่ายรูป → AI อ่าน → ตรวจ/แก้ → ยืนยัน = บันทึกผลงานรายบรรทัด",
+    ruleFiles: ["lib/work-log-read.ts", "lib/work-log-sheet.ts"],
+    gates: ["app/api/work-logs/[id]/route.ts"],
+    tables: ["work_log_sheets", "work_log_entries"],
+    signals: ["status", "line_key"],
+    logicIds: [],
+  },
+  {
     key: "qc-warehouse",
     label: "โกดัง QC + สต็อกสินค้าสำเร็จ",
     flow: "ช่างส่งงาน → รับเข้า QC (ดี +คลังสินค้าสำเร็จ / เสีย +คลังของเสีย) → ส่งออกจากชั้น (ไม่แตะสต็อก) → ใบขายกดจัดส่งแล้ว = ตัดของออกจากคลัง · ย้อนส่งออก / ดึงกลับ / คืนงานให้ช่าง",
