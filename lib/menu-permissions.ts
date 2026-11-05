@@ -31,6 +31,8 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/piecework-jobs", sameAs: "/master/piecework-dispatch" },
   // ออฟฟิศทีม AI — ดูสถานะผู้ช่วยอัตโนมัติ (lib/ai-office.ts AI_OFFICE_PERM · ตอนนี้ = แอดมิน)
   { href: "/master/ai-office", keys: ["ai_office.view", "ai_office.edit"] },
+  // ตั๋วงานช่าง Pattern — ดู / เปิดตั๋ว (ฝ่ายออกแบบ) / รับทำ (ช่าง) / จัดการทั้งหมด
+  { href: "/design/pattern-tickets", prefixes: ["pattern."] },
 ];
 
 /** หมวดสิทธิ์ของแอปที่ไม่ผูกกับเมนูไหน (โชว์เป็นกลุ่ม "อื่น ๆ ของแอปนี้" กันตกหล่น) */

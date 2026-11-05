@@ -178,6 +178,16 @@ export const WORKFLOWS: WorkflowDef[] = [
     signals: [],
   },
   {
+    key: "pattern-ticket",
+    label: "ตั๋วงานช่าง Pattern",
+    flow: "รอรับงาน → กำลังทำ → รอตรวจ → เสร็จแล้ว · รอตรวจ → ต้องแก้ → (กำลังทำ / รอตรวจ) · ยกเลิกได้ก่อนเสร็จ · ผู้จัดการเปิดงานใหม่ได้",
+    ruleFiles: ["lib/pattern-tickets.ts"],
+    gates: ["app/api/pattern-tickets/[id]/route.ts", "app/api/pattern-tickets/route.ts"],
+    tables: ["pattern_tickets", "pattern_ticket_types"],
+    signals: ["pattern_tickets"],
+    gaps: ["ยังไม่มีหน้าตั้งค่าประเภทงาน/เช็กลิสต์ในเว็บ (แก้ในตาราง pattern_ticket_types)", "ยังไม่แจ้งเตือนช่างเมื่อมีตั๋วใหม่"],
+  },
+  {
     key: "status-labels",
     label: "ป้ายสถานะกลาง (ตาราง / การ์ดสรุป)",
     flow: "ชื่อ + สีป้ายสถานะที่ตารางกลางและการ์ดสรุปใช้ร่วมกัน (ตั้งทับรายโมดูลได้)",

@@ -72,6 +72,7 @@ export type Permission =
   | "qc.defect" | "qc.repair" | "app.tasks" | "app.master" | "app.purchasing" | "app.inventory"
   | "app.production" | "app.sales" | "app.china_pay" | "app.payroll" | "app.settings" | "app.design"
   | "app.misc" | "offers.view" | "offers.edit" | "report.create" | "report.manage" | "task_template.view"
+  | "pattern.view" | "pattern.create" | "pattern.work" | "pattern.manage"
   | "task_template.create" | "task_template.edit" | "task_template.delete" | "task_subtask.approve" | "task_subtask.revise" | "task_subtask.cancel"
   | "product_media.sync" | "sku_description.sync"
   | "admin.users" | "admin.audit_log"
