@@ -11,6 +11,7 @@ import { formatCreditTerm } from "@/lib/credit-term";
 import { computePoTotals, sumActiveLines } from "@/lib/po-total";
 import { formatThaiAddress, formatTaxId } from "@/lib/thai-address";
 import { loadPoPay } from "@/lib/po-pay-server";
+import { isChinaShop } from "@/lib/po-currency";
 import { loadPoChinaLinks, type PoChinaLink } from "@/lib/china-bill-po-server";
 import type { PoPayState } from "@/lib/po-pay-state";
 
@@ -65,6 +66,8 @@ export type PoDetail = {
   lines: PoDetailLine[];
   /** สถานะจ่ายเงิน (สีป้าย) ตามเครดิตร้าน — ของกลาง lib/po-pay-state */
   pay: PoPayState;
+  /** ร้านอยู่จีน (lib/po-currency) — ใบบาทของร้านจีน = ป้ายเตือน + ปุ่มแก้สกุลเงิน */
+  shop_china: boolean;
   /** บิลจีน (แอปโอนเงินจีน) ที่จ่ายใบนี้ — ตาราง china_bill_po_links (lib/china-bill-po-server) */
   china_links: PoChinaLink[];
 };
@@ -107,6 +110,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ข้อมูลผู้จำหน่ายสำหรับหัวเอกสาร — ผูกจาก id ก่อน ถ้าไม่มีค่อยจับจากชื่อ (ของกลาง lib/partner-match)
   let sellerInfo: PoSellerInfo | null = null;
+  let shopChina = false;
   {
     const p0 = po as Record<string, unknown>;
     let partnerId: string | null = (p0.seller_partner_id as string) ?? null;
@@ -116,9 +120,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
     if (partnerId) {
       const { data: pt } = await admin.from("partners_v2")
-        .select("company_name, address_line, sub_district, district, province, postal_code, phone, tax_id, tax_branch, purchase_credit_term")
+        .select("company_name, address_line, sub_district, district, province, postal_code, phone, tax_id, tax_branch, purchase_credit_term, shop_country, default_currency, is_taobao")
         .eq("id", partnerId).maybeSingle();
       const r = (pt ?? null) as Record<string, unknown> | null;
+      shopChina = isChinaShop(r);
       if (r) {
         sellerInfo = {
           company_name: (r.company_name as string) ?? null,
@@ -171,6 +176,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     vouchers,
     lines,
     pay: (await loadPoPay(admin))(p),
+    shop_china: shopChina,
     china_links: await loadPoChinaLinks(admin, String(p.id)).catch(() => []),
   };
   return NextResponse.json({ data: detail, error: null });

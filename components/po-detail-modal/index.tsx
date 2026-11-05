@@ -30,6 +30,7 @@ import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picke
 import { SupplierWizard } from "@/components/supplier-wizard";
 import { PoPayChip } from "@/components/po-pay-chip";
 import { PO_NEW_STATUS, PO_STATUS_LABEL, canMarkOrdered } from "@/lib/po-status";
+import { PoCurrencyFixModal } from "@/components/po-currency-fix";
 import { apiFetch } from "@/lib/api";
 import { useAuth, usePermission } from "@/components/auth";
 import { computePoTotals } from "@/lib/po-total";
@@ -74,6 +75,7 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
   const { user } = useAuth();
   const canCancel = usePermission("products.edit");
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [curFix, setCurFix] = useState(false);   // ป๊อปแก้สกุลเงินทั้งใบ (ของกลาง po-currency-fix)
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const [cancelErr, setCancelErr] = useState<string | null>(null);
@@ -442,6 +444,13 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
               <PoPayChip pay={d.pay} />
               {d.payment_status === "paid" && d.paid_amount_thb ? <span className="text-xs text-emerald-700">{baht(d.paid_amount_thb)}</span> : null}
             </div>
+            {/* ร้านจีน แต่ใบเป็นบาท (กติกา lib/po-currency) → เตือน + แก้สกุลทั้งใบ (ป๊อปกลาง PoCurrencyFixModal) */}
+            {((d.shop_china && !isCNY(d.currency)) || canCancel) && (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {d.shop_china && !isCNY(d.currency) && <span className="text-[11px] px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">ร้านอยู่จีน แต่ใบเป็นบาท</span>}
+                {canCancel && <button type="button" onClick={() => setCurFix(true)} className="text-[11px] text-sky-700 hover:underline">แก้สกุลเงิน</button>}
+              </div>
+            )}
             {d.expected_date && <div><span className="text-slate-400">ของเข้า </span>{thDate(d.expected_date)}</div>}
             <div><span className="text-slate-400">รายการ </span>{d.lines.length}</div>
             {/* ใบสำคัญรับ (ใบซื้อ) ที่ครอบใบนี้ — จัดซื้อใส่ราคา+ค่าส่งหลังรับของ · ไม่มี = ยังไม่ออก */}
@@ -533,6 +542,9 @@ export function PoDetailModal({ poId, onClose, footer, onSaved }: {
             setSuppliers((arr) => [...arr, { id: s.id, name: s.name }].sort((a, b) => a.name.localeCompare(b.name, "th")));
             setSellerId(s.id); setSeller(s.name); setWizardOpen(false);
           }} />
+      )}
+      {curFix && (
+        <PoCurrencyFixModal poId={poId} onClose={() => setCurFix(false)} onDone={async () => { await load(); onSaved?.(); }} />
       )}
     </ERPModal>
   );
