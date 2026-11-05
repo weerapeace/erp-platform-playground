@@ -3,6 +3,7 @@
 /**
  * จัดการแบรนด์ & ช่างเหมา (สำหรับโกดัง QC / บอร์ดจ่ายงาน)
  * - แบรนด์: ตั้งสีประจำแบรนด์ (สีการ์ด) + ธง "งานลูกค้า" (→ badge งานลูกค้า)
+ *   งานลูกค้า → ตั้ง "ลูกค้าประจำแบรนด์" ได้ (ป๊อปสร้างใบสั่งผลิต/ลงออเดอร์ เติมลูกค้านี้ให้ตอนสร้างใบสั่งขาย — กติกา lib/mo-so-rule.ts)
  * - ช่างเหมา: ติดธงพนักงานที่เป็นช่างเหมา (→ badge งานเหมา บนงานรอ QC)
  */
 import { useState, useEffect, useCallback } from "react";
@@ -10,6 +11,7 @@ import { useToast } from "@/components/toast";
 import { usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { ImageInput } from "@/components/image-input";
+import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
 import type { Brand } from "@/app/api/brands/route";
 import type { Subcontractor } from "@/app/api/qc-warehouse/subcontractors/route";
 
@@ -35,7 +37,8 @@ export default function BrandsPage() {
 
   const patchBrand = async (id: string, p: Partial<Brand>) => {
     setBrands((bs) => bs.map((b) => b.id === id ? { ...b, ...p } : b));
-    try { const r = await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...p }) }); const j = await r.json(); if (j.error) throw new Error(j.error); }
+    const { default_customer: _dc, ...send } = p; void _dc;   // ชื่อลูกค้าไว้โชว์อย่างเดียว ไม่ส่งไปบันทึก
+    try { const r = await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...send }) }); const j = await r.json(); if (j.error) throw new Error(j.error); }
     catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); void loadBrands(); }
   };
   const addBrand = async () => {
@@ -106,6 +109,14 @@ export default function BrandsPage() {
                   <input type="checkbox" checked={!!b.is_customer_job} onChange={(e) => patchBrand(b.id, { is_customer_job: e.target.checked })} />
                   <span className="px-1.5 py-0.5 rounded bg-violet-100 text-violet-700">👤 งานลูกค้า</span>
                 </label>
+                {/* ลูกค้าประจำแบรนด์ — เฉพาะงานลูกค้า (เปิดใบสั่งผลิตต้องผูกใบสั่งขาย → สร้างใหม่ เติมลูกค้านี้ให้) */}
+                {b.is_customer_job && (
+                  <div className="w-60 shrink-0" title="ลูกค้าประจำแบรนด์ — สร้างใบสั่งขายจากป๊อปสร้างใบสั่งผลิต ระบบเติมลูกค้านี้ให้">
+                    <CustomerPicker placeholder="ลูกค้าประจำแบรนด์…"
+                      value={b.default_customer ? ({ id: b.default_customer.id, code: b.default_customer.code, name: b.default_customer.name } as CustomerPickerValue) : null}
+                      onChange={(c) => void patchBrand(b.id, { default_customer_id: c?.id ?? null, default_customer: c ? { id: c.id, code: c.code, name: c.name } : null })} />
+                  </div>
+                )}
                 {/* มีราคาขายในระบบไหม — ใช้ในหน้าแผนผู้บริหาร (OEM = รับจ้างผลิต ราคาต่อออเดอร์ ไม่เตือนเรื่องราคา) */}
                 <label className="flex items-center gap-1.5 text-[12px] text-slate-600 cursor-pointer shrink-0" title="รับจ้างผลิตให้ลูกค้า — ราคาคิดต่อออเดอร์ หน้าแผนผู้บริหารจะไม่เตือนว่า “ยังไม่ตั้งราคาขาย”">
                   <input type="checkbox" checked={b.pricing_mode === "oem"} onChange={(e) => patchBrand(b.id, { pricing_mode: e.target.checked ? "oem" : "own" })} />

@@ -30,6 +30,7 @@ import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
 import { SOLineEditor, SalesTotalsPreview, VatModeToggle, calculateEditorTotals, emptyLine, vatRateForCompany, type EditorLine, type LineExtraColumn } from "@/components/sales-line-items";
 import { DateInput } from "@/components/date-input";
 import { Icon } from "@/components/icon";
+import type { SoLineMo, SoLineProgress } from "@/lib/mo-so-rule";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
 import { MoMultiPickerModal, type MoPickRow } from "@/components/mo-picker";
 import { MoGroupPicker, useMoGroups, rememberMoGroup, type MoGroupPick } from "@/components/mo-group-picker";
@@ -50,7 +51,9 @@ type Row = {
   groups: { id: string; name: string }[];
 };
 /** ข้อมูลประจำบรรทัดที่ SOLineEditor ไม่มีช่อง (ผูกใบสั่งผลิต · ใบเสนอราคาต้นทาง · ชุด) — key = tempId */
-type LineMeta = { mo_id: string | null; mo_no: string | null; quote_id?: string | null; quote_no?: string | null; group: MoGroupPick | null };
+type LineMeta = { mo_id: string | null; mo_no: string | null; quote_id?: string | null; quote_no?: string | null; group: MoGroupPick | null;
+  /** ยอดต่อรายการ สั่ง/เปิดผลิต/ส่ง (อ่านอย่างเดียว — มาจาก GET ใบ · lib/mo-so-rule) */
+  progress?: SoLineProgress | null };
 type Company = { id: string; company_code: string; name: string; is_default: boolean; vat_registered: boolean };
 
 const ST: Record<string, { label: string; color: string }> = {
@@ -100,6 +103,7 @@ export default function SoOrdersPage() {
   // ใบที่บันทึกแล้วเปิดมาเป็น "หน้าอ่าน" (สรุป + จัดกลุ่มตามรุ่น) · กด "แก้ไขรายการ" ถึงเป็นช่องกรอก (เจ้าของเลือกแบบ D+C)
   const [editing, setEditing] = useState(false);
   const [meta, setMeta] = useState<Record<string, LineMeta>>({});
+  const [orphanMos, setOrphanMos] = useState<SoLineMo[]>([]);
   const [saving, setSaving] = useState(false);
   const [srcOpen, setSrcOpen] = useState<null | "quote" | "mo">(null);
   const [batchOpen, setBatchOpen] = useState(false);
@@ -159,7 +163,7 @@ export default function SoOrdersPage() {
   // ---- เปิดใบ ----
   const openNew = () => {
     const def = companies.find((c) => c.is_default) ?? companies[0];
-    setMeta({});
+    setMeta({}); setOrphanMos([]);
     setEditing(true);
     setForm({ ...emptyForm(), company_code: def?.company_code ?? "", company_id: def?.id ?? null, vat_rate: vatRateForCompany(def) });
   };
@@ -174,9 +178,11 @@ export default function SoOrdersPage() {
         const gid = (l.mo_group_id as string) ?? null;
         m[String(l.id)] = { mo_id: (l.mo_id as string) ?? null, mo_no: (l.mo_no as string) ?? null,
           quote_id: (l.quote_id as string) ?? null, quote_no: (l.quote_no as string) ?? null,
+          progress: (l.progress as SoLineProgress | null) ?? null,
           group: gid ? { id: gid, name: nameOfGroup.get(gid) ?? (r.groups ?? []).find((g) => g.id === gid)?.name ?? "ชุด" } : null };
       }
       setMeta(m);
+      setOrphanMos(((d as { orphan_mos?: SoLineMo[] }).orphan_mos) ?? []);
       setEditing(false);
       setForm({
         id: String(d.id), company_code: (d.company_code as string) ?? "", company_id: (d.company_id as string) ?? null,
@@ -448,7 +454,8 @@ export default function SoOrdersPage() {
             }}
             lines={form.lines} meta={meta} totals={totals}
             canOpenMo={canEdit && form.status !== "cancelled"}
-            onOpenMo={() => void act(form.id!, { action: "open_mo" }, "เปิด/ผูกใบสั่งผลิตให้แล้ว")} />
+            onOpenMo={() => void act(form.id!, { action: "open_mo" }, "เปิด/ผูกใบสั่งผลิตให้แล้ว")}
+            orphanMos={orphanMos} />
         )}
         {form && (!form.id || editing) && (
           <div className="space-y-3">

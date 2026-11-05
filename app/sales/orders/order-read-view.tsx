@@ -6,6 +6,8 @@
  *   C = รายการจัดกลุ่มตามรุ่น (ส่วนหน้า SKU) พับ/กางได้ · หัวรุ่นบอกจำนวน/ยอด/ผูก MO ครบไหม
  *   ชุดบอกครั้งเดียวด้านบน (ชุดหลัก) — บรรทัดที่อยู่คนละชุดค่อยมีป้าย
  * ตรรกะจัดกลุ่ม: lib/so-order-view · ยอดเงิน: SalesTotalsPreview (ของกลางตัวเดียวกับใบขาย)
+ * ยอดต่อรายการ สั่ง/เปิดผลิต/ส่ง (2026-11-05): progress จาก GET /api/so-orders/[id] · กติกา lib/mo-so-rule.ts
+ *   1 รายการมีใบผลิตได้หลายใบ (แตกใบ/เปิดเพิ่ม) · เตือนเปิดผลิตขาด/เกินจากที่ลูกค้าสั่ง
  */
 import { useMemo, useState } from "react";
 import { Icon } from "@/components/icon";
@@ -13,9 +15,10 @@ import { SalesTotalsPreview, type EditorLine } from "@/components/sales-line-ite
 import type { DocumentResult } from "@/lib/tax";
 import { format as formatMoney } from "@/lib/money";
 import { groupByModel, majorityGroup } from "@/lib/so-order-view";
+import { soLineQtyState, soLineQtyText, type SoLineMo, type SoLineProgress } from "@/lib/mo-so-rule";
 
 /** group.id ว่าง = ชุดใหม่ที่ยังไม่บันทึก */
-type ReadMeta = { mo_id: string | null; mo_no: string | null; quote_no?: string | null; group: { id: string | null; name: string } | null };
+type ReadMeta = { mo_id: string | null; mo_no: string | null; quote_no?: string | null; group: { id: string | null; name: string } | null; progress?: SoLineProgress | null };
 
 const num = (n: number) => (Number(n) || 0).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const baht = (n: number) => (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -26,7 +29,7 @@ const lineAmount = (l: EditorLine) => {
   return Math.max(0, sub - disc);
 };
 
-export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo }: {
+export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo, orphanMos = [] }: {
   header: {
     companyName: string; customerName: string; orderDate: string; dueDate: string;
     poNo: string; salePerson: string; note: string; status: string;
@@ -36,11 +39,16 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
   totals: DocumentResult;
   canOpenMo: boolean;
   onOpenMo: () => void;
+  /** ใบผลิตที่ผูกใบนี้แต่รหัสไม่ตรงรายการไหน */
+  orphanMos?: SoLineMo[];
 }) {
   const items = useMemo(() => lines.filter((l) => l.product_name.trim() || l.sku), [lines]);
   const groups = useMemo(() => groupByModel(items, lineAmount), [items]);
   const main = useMemo(() => majorityGroup(items.map((l) => meta[l.tempId]?.group ?? null)), [items, meta]);
-  const noMo = items.filter((l) => !meta[l.tempId]?.mo_no);
+  const hasMo = (l: EditorLine) => !!meta[l.tempId]?.mo_no || (meta[l.tempId]?.progress?.mos.length ?? 0) > 0;
+  const noMo = items.filter((l) => !hasMo(l));
+  // เปิดผลิตขาด/เกินจากที่สั่ง (เฉพาะรายการที่มีใบผลิตแล้ว)
+  const qtyOff = items.filter((l) => { const p = meta[l.tempId]?.progress; const st = p ? soLineQtyState(p) : "none"; return st === "under" || st === "over"; });
   const qtyTotal = items.reduce((s, l) => s + (Number(l.qty) || 0), 0);
   const units = [...new Set(items.map((l) => l.unit || "ชิ้น"))];
   const indexOf = new Map(lines.map((l, i) => [l.tempId, i + 1]));
@@ -49,14 +57,14 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
   const [open, setOpen] = useState<Record<string, boolean>>({});
   // เปิดค้างไว้ตั้งแต่แรก: รุ่นน้อย (≤3) หรือรุ่นที่มีรายการยังไม่ผูกใบสั่งผลิต (ให้เห็นของที่ค้างทันที)
   const isOpen = (key: string, its: EditorLine[]) =>
-    open[key] ?? (groups.length <= 3 || its.some((l) => !meta[l.tempId]?.mo_no));
+    open[key] ?? (groups.length <= 3 || its.some((l) => !hasMo(l)));
   const cancelled = header.status === "cancelled";
 
   const row = (l: EditorLine, indent = false) => {
     const m = meta[l.tempId];
     const otherGroup = m?.group && main && m.group.id !== main.group.id;
     return (
-      <tr key={l.tempId} className={!m?.mo_no && !cancelled ? "bg-rose-50/50" : ""}>
+      <tr key={l.tempId} className={!hasMo(l) && !cancelled ? "bg-rose-50/50" : ""}>
         <td className={`py-1.5 pr-2 text-center font-mono text-[11px] text-slate-400 ${indent ? "pl-8" : "pl-3"}`}>{indexOf.get(l.tempId)}</td>
         <td className="min-w-0 px-2 py-1.5">
           <div className="truncate text-sm text-slate-800">{l.product_name}</div>
@@ -74,9 +82,7 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
         </td>
         <td className="whitespace-nowrap px-2 py-1.5 text-right text-sm font-medium tabular-nums text-slate-800">{baht(lineAmount(l))}</td>
         <td className="whitespace-nowrap px-3 py-1.5 text-right">
-          {m?.mo_no
-            ? <span className="font-mono text-[11px] text-emerald-700">{m.mo_no}</span>
-            : <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] text-rose-700">ยังไม่ผูก</span>}
+          {hasMo(l) ? <MoCell no={m?.mo_no ?? null} p={m?.progress ?? null} /> : <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] text-rose-700">ยังไม่ผูก</span>}
         </td>
       </tr>
     );
@@ -121,6 +127,18 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
         </div>
       )}
 
+      {qtyOff.length > 0 && !cancelled && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <Icon name="warning" />
+          <span>{qtyOff.length} รายการเปิดผลิตไม่ตรงกับที่ลูกค้าสั่ง: <span className="text-xs">{qtyOff.slice(0, 4).map((l) => `${l.sku || l.product_name} (${soLineQtyText(meta[l.tempId]!.progress!)})`).join(" · ")}{qtyOff.length > 4 ? ` +${qtyOff.length - 4}` : ""}</span></span>
+        </div>
+      )}
+      {orphanMos.length > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          ใบผลิตที่ผูกใบนี้แต่ไม่ตรงรายการไหน: <span className="font-mono">{orphanMos.map((m) => `${m.mo_no} (${num(m.qty)})`).join(", ")}</span> — เพิ่มรายการสินค้านี้ในใบ หรือย้ายใบผลิตไปใบสั่งขายที่ถูก
+        </div>
+      )}
+
       {/* รายการ */}
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2">
@@ -143,13 +161,13 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
         {items.length === 0 ? (
           <div className="px-4 py-8 text-center text-sm text-slate-400">ยังไม่มีรายการ — กด “แก้ไขรายการ” เพื่อเพิ่ม</div>
         ) : !grouped ? (
-          <table className="w-full table-fixed"><colgroup><col className="w-10" /><col /><col className="w-28" /><col className="w-24" /><col className="w-28" /><col className="w-32" /></colgroup>
+          <table className="w-full table-fixed"><colgroup><col className="w-10" /><col /><col className="w-28" /><col className="w-24" /><col className="w-28" /><col className="w-40" /></colgroup>
             <tbody className="divide-y divide-slate-100">{items.map((l) => row(l))}</tbody></table>
         ) : (
           <div className="divide-y divide-slate-100">
             {groups.map((g) => {
               const opened = isOpen(g.key, g.items);
-              const mo = g.items.filter((l) => meta[l.tempId]?.mo_no).length;
+              const mo = g.items.filter((l) => hasMo(l)).length;
               return (
                 <div key={g.key || "_none"}>
                   <button type="button" onClick={() => setOpen((o) => ({ ...o, [g.key]: !opened }))}
@@ -165,7 +183,7 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
                     </span>
                   </button>
                   {opened && (
-                    <table className="w-full table-fixed border-t border-slate-100"><colgroup><col className="w-14" /><col /><col className="w-28" /><col className="w-24" /><col className="w-28" /><col className="w-32" /></colgroup>
+                    <table className="w-full table-fixed border-t border-slate-100"><colgroup><col className="w-14" /><col /><col className="w-28" /><col className="w-24" /><col className="w-28" /><col className="w-40" /></colgroup>
                       <tbody className="divide-y divide-slate-100">{g.items.map((l) => row(l, true))}</tbody></table>
                   )}
                 </div>
@@ -182,6 +200,25 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
         </div>
         <SalesTotalsPreview result={totals} />
       </div>
+    </div>
+  );
+}
+
+/** ช่องใบผลิตของรายการ: เลขใบ (+ใบที่แตก/เปิดเพิ่ม) · เปิดผลิตกี่ชิ้นจากที่สั่ง · ส่งแล้ว */
+function MoCell({ no, p }: { no: string | null; p: SoLineProgress | null }) {
+  const nos = p?.mos.map((m) => m.mo_no) ?? (no ? [no] : []);
+  const first = no && nos.includes(no) ? no : nos[0];
+  const st = p ? soLineQtyState(p) : "ok";
+  const tone = st === "under" ? "text-amber-700" : st === "over" ? "text-rose-700" : "text-slate-400";
+  return (
+    <div className="leading-tight" title={nos.join(", ")}>
+      <span className="font-mono text-[11px] text-emerald-700">{first}</span>
+      {nos.length > 1 && <span className="ml-1 rounded bg-emerald-50 px-1 text-[10px] text-emerald-700">+{nos.length - 1} ใบ</span>}
+      {p && (
+        <div className={`text-[10px] ${tone}`}>
+          {soLineQtyText(p)}{p.shipped > 0 ? ` · ส่ง ${(Math.round(p.shipped * 100) / 100).toLocaleString("th-TH")}` : ""}
+        </div>
+      )}
     </div>
   );
 }

@@ -105,10 +105,16 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
     setAutoCustomer(false);
     if (brand?.id) void (async () => {
       try {
-        const j = await apiFetch(`/api/user-prefs?key=${BRAND_CUSTOMER_PREF}`).then((r) => r.json());
+        // ลูกค้าประจำแบรนด์ (ตั้งที่หน้าแบรนด์ — ใช้ทั้งทีม) มาก่อน · ไม่มี = ค่าที่ผู้ใช้คนนี้เคยเลือก
+        const [bj, j] = await Promise.all([
+          apiFetch("/api/brands").then((r) => r.json()).catch(() => ({ data: [] })),
+          apiFetch(`/api/user-prefs?key=${BRAND_CUSTOMER_PREF}`).then((r) => r.json()),
+        ]);
         const map = (j.value ?? {}) as BrandCustomerMap;
         setBrandMap(map);
-        const c = map[brand.id];
+        const team = ((bj.data ?? []) as { id: string; default_customer?: { id: string; code: string | null; name: string } | null }[])
+          .find((b) => b.id === brand.id)?.default_customer ?? null;
+        const c = team ?? map[brand.id];
         if (c && !seedCustomer) { setCustomer({ id: c.id, code: c.code, name: c.name } as CustomerPickerValue); setAutoCustomer(true); }
       } catch { /* ไม่มีค่าจำ = เลือกเอง */ }
     })();

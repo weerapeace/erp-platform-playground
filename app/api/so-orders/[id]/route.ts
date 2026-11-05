@@ -1,6 +1,6 @@
 /**
  * ใบสั่งขาย รายใบ — /api/so-orders/[id]
- *   GET    → หัวใบ + บรรทัด
+ *   GET    → หัวใบ + บรรทัด (+ progress ต่อรายการ: สั่ง/เปิดผลิต/ส่ง · orphan_mos = ใบผลิตที่ผูกใบนี้แต่ไม่ตรงรายการไหน)
  *   PATCH  { action }
  *      save     → แก้ไขใบ (หัว + บรรทัด · คิดเงินใหม่ด้วยเครื่องคิดเงินกลาง)
  *      open_mo  { group_id? } → เปิด/ผูกใบสั่งผลิตให้ทุกบรรทัด (หรือเฉพาะชุด) · กดซ้ำได้ ไม่สร้างซ้ำ · ใบที่เปิดเข้าชุดของรายการให้เอง
@@ -19,6 +19,7 @@ import { writeAudit } from "@/lib/audit";
 import { checkQuotePull, orderQuoteIds, quotePullProblems, syncQuoteConversions } from "@/lib/quote-convert";
 import { computeTotals, lineQuoteIds, lineRow, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput } from "../shared";
 import { openMoForOrder } from "../open-mo";
+import { soLineProgress } from "@/lib/mo-so-rule";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,12 +28,26 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const denied = await guardApi(request, "so.view"); if (denied) return denied;
   const { id } = await params;
   const admin = supabaseAdmin();
-  const [{ data: order }, { data: lines }] = await Promise.all([
+  const [{ data: order }, { data: lines }, { data: mos }] = await Promise.all([
     admin.from("so_orders").select("*").eq("id", id).maybeSingle(),
     admin.from("so_order_lines").select("*").eq("order_id", id).order("line_no"),
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, status").eq("so_order_id", id).eq("is_active", true).order("mo_no"),
   ]);
   if (!order) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งขาย" }, { status: 404 });
-  return NextResponse.json({ data: { ...order, lines: lines ?? [] }, error: null });
+
+  // ยอดต่อรายการ: สั่ง / เปิดผลิตแล้ว (รวมใบที่แตก/เปิดเพิ่ม) / ส่งแล้ว (ใบขายที่ผูกใบผลิต) — กติกา lib/mo-so-rule.ts
+  const moRows = (mos ?? []) as { id: string; mo_no: string; product_sku: string | null; qty: number; status: string | null }[];
+  const shipped = new Map<string, number>();
+  if (moRows.length) {
+    const { data: links } = await admin.from("mo_sales_links").select("mo_id, qty").in("mo_id", moRows.map((m) => m.id)).not("is_active", "is", false);
+    for (const l of (links ?? []) as { mo_id: string; qty: number }[]) shipped.set(l.mo_id, (shipped.get(l.mo_id) ?? 0) + (Number(l.qty) || 0));
+  }
+  const ls = (lines ?? []) as Record<string, unknown>[];
+  const prog = soLineProgress(
+    ls.map((l) => ({ id: String(l.id), sku: (l.sku as string) ?? null, qty: Number(l.qty) || 0, mo_id: (l.mo_id as string) ?? null })),
+    moRows.map((m) => ({ ...m, shipped: shipped.get(m.id) ?? 0 })),
+  );
+  return NextResponse.json({ data: { ...order, lines: ls.map((l) => ({ ...l, progress: prog.byLine[String(l.id)] ?? null })), orphan_mos: prog.orphans }, error: null });
 }
 
 type PatchBody = {
