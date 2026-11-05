@@ -1,7 +1,9 @@
 /**
  * /api/pattern-tickets — ตั๋วงานช่าง Pattern
  *
- * GET  ?view=open|done|all&type=<key>&q=  → { data: ticket[], types, me, error }   (pattern.view)
+ * GET  ?view=open|done|all&type=<key>&q=  → { data: ticket[], types, open_counts, me, error }   (pattern.view)
+ *      open_counts = { <type_key>: จำนวนตั๋วที่ยังไม่ปิด } — ป้าย "ค้าง X" บนแผ่นประเภทงาน (นับทุกตั๋ว ไม่ขึ้นกับ view/q)
+ * PATCH /api/pattern-tickets/types = เปลี่ยนไอคอนประเภทงาน (ดู types/route.ts)
  *      open (ค่าเริ่ม) = ยังไม่ปิด · done = เสร็จ/ยกเลิก (ล่าสุด 300) · all = ทั้งหมด
  * POST { type_key, title, sku_code?, parent_sku_id?, description_th, description_en?, priority?, due_date?, assignee_id?, assignee_name?, links? }
  *      → สร้างตั๋ว (pattern.create) · เลขตั๋วจาก erp_next_number('pattern_ticket') · เช็กลิสต์ตั้งต้นตามประเภทงาน
@@ -11,7 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { checklistFromTemplate, cleanLinks } from "@/lib/pattern-tickets";
+import { checklistFromTemplate, cleanLinks, OPEN_STATUSES, openCountsByType } from "@/lib/pattern-tickets";
 import { loadActor, PATTERN_TABLE, PATTERN_TYPES_TABLE } from "@/lib/pattern-tickets-server";
 
 export const dynamic = "force-dynamic";
@@ -37,15 +39,17 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     if (s) query = query.or(`title.ilike.%${s}%,ticket_no.ilike.%${s}%,sku_code.ilike.%${s}%,assignee_name.ilike.%${s}%,requester_name.ilike.%${s}%`);
   }
 
-  const [list, types, actor] = await Promise.all([
+  const [list, types, openRows, actor] = await Promise.all([
     query,
     admin.from(PATTERN_TYPES_TABLE).select("*").order("sort_order"),
+    admin.from(PATTERN_TABLE).select("type_key,status").in("status", OPEN_STATUSES).limit(5000),
     loadActor(request, admin),
   ]);
   if (list.error) return NextResponse.json({ data: [], types: [], me: null, error: "โหลดตั๋วงานไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
   return NextResponse.json({
     data: list.data ?? [],
     types: types.data ?? [],
+    open_counts: openCountsByType((openRows.data ?? []) as { type_key: string; status: string }[]),
     me: { id: actor.userId, name: actor.name, role_label: actor.roleLabel, can_work: actor.canWork, can_manage: actor.canManage, can_create: actor.canCreate },
     error: null,
   });

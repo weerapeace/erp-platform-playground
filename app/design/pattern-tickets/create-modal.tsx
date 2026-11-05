@@ -20,15 +20,18 @@ import { typeColorCls } from "@/lib/pattern-tickets";
 import { fmtBytes, uploadTicketFile } from "./upload";
 import type { TicketType } from "./types";
 
-export function CreateTicketModal({ types, onClose, onCreated }: {
+export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
   types: TicketType[];
+  /** ประเภทที่เลือกไว้ให้ก่อน (กดจากแผ่นประเภทงานบนหน้า) — เปลี่ยนในป๊อปได้ */
+  initialType?: string;
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
   const t = useT();
   const toast = useToast();
   const active = useMemo(() => types.filter((x) => x.is_active), [types]);
-  const [typeKey, setTypeKey] = useState("");
+  const startType = initialType && active.some((x) => x.key === initialType) ? initialType : "";
+  const [typeKey, setTypeKey] = useState(startType);
   const [title, setTitle] = useState("");
   const [sku, setSku] = useState<ParentSkuPickerValue | null>(null);
   const [descTh, setDescTh] = useState("");
@@ -44,7 +47,7 @@ export function CreateTicketModal({ types, onClose, onCreated }: {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const dirty = !!(typeKey || title || sku || descTh || files.length);
+  const dirty = !!(typeKey !== startType || title || sku || descTh || files.length);
   const ty = active.find((x) => x.key === typeKey);
 
   const addFiles = (list: File[]) => setFiles((cur) => [...cur, ...list.filter((f) => f.size > 0 && !cur.some((c) => c.name === f.name && c.size === f.size))]);

@@ -2,7 +2,8 @@
 
 /**
  * ตั๋วงานช่าง Pattern — หน้ารวมงาน
- *   บน: ตัวเลขสรุป · กรองประเภทงาน · มุมมอง (งานของฉัน / ทั้งหมด / เสร็จแล้ว) · ค้นหา · ปุ่มเปิดตั๋ว
+ *   บนสุด: แผ่นประเภทงาน (TypeTiles) — กด = เปิดตั๋วประเภทนั้น (คนเปิดตั๋วได้) / กรองรายการ (คนอื่น) · ผู้จัดการเปลี่ยนไอคอนได้
+ *   ล่าง: ตัวเลขสรุป · กรองประเภทงาน · มุมมอง (งานของฉัน / ทั้งหมด / เสร็จแล้ว) · ค้นหา · รายการตั๋ว
  *   รายการตั๋ว → กด = ลิ้นชักรายละเอียด (TicketDrawer)
  * ข้อมูลผ่าน /api/pattern-tickets เท่านั้น · กติกาสถานะ lib/pattern-tickets.ts
  */
@@ -15,6 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { fmtDate, isOverdue, patternStatus, todayBangkok, typeColorCls } from "@/lib/pattern-tickets";
 import { TicketDrawer } from "./ticket-drawer";
 import { CreateTicketModal } from "./create-modal";
+import { TypeTiles } from "./type-tiles";
 import type { Me, TicketRow, TicketType } from "./types";
 
 type View = "mine" | "open" | "done";
@@ -31,7 +33,9 @@ export function PatternTicketsView() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
+  /** null = ป๊อปปิด · "" = เปิดโดยยังไม่เลือกประเภท · key = เปิดโดยเลือกประเภทนั้นไว้ */
+  const [creating, setCreating] = useState<string | null>(null);
+  const [openCounts, setOpenCounts] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
@@ -39,7 +43,7 @@ export function PatternTicketsView() {
       const res = await apiFetch(`/api/pattern-tickets?view=${view === "done" ? "done" : "open"}`);
       const j = await res.json();
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-      setRows(j.data ?? []); setTypes(j.types ?? []); setMe(j.me ?? null);
+      setRows(j.data ?? []); setTypes(j.types ?? []); setMe(j.me ?? null); setOpenCounts(j.open_counts ?? {});
     } catch (e) { setErr((e as Error).message); }
     finally { setLoading(false); }
   }, [view]);
@@ -97,14 +101,15 @@ export function PatternTicketsView() {
           <h1 className="text-xl font-semibold text-slate-800">{t("ตั๋วงานช่าง Pattern", "Pattern job tickets")}</h1>
           <p className="text-sm text-slate-500">{t("งานแบบตัด บล็อก แบบเย็บ สกรีน เลเซอร์ ฯลฯ — ฝ่ายออกแบบเปิดตั๋ว ช่างกดรับแล้วส่งตรวจ", "Cutting, block, sewing, screen, laser jobs and more — design opens a ticket, the pattern maker takes it and submits for review")}</p>
         </div>
-        {me?.can_create && (
-          <button type="button" onClick={() => setCreating(true)} className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700">
-            <Icon name="add" /> {t("เปิดตั๋วงาน", "New ticket")}
-          </button>
-        )}
       </div>
 
+      {/* แผ่นประเภทงาน — กดเปิดตั๋ว (หรือกรอง ถ้าเปิดตั๋วไม่ได้) */}
+      <TypeTiles types={types} counts={openCounts} me={me} activeType={type}
+        onPick={(key) => { if (me?.can_create) setCreating(key); else setType(type === key ? "" : key); }}
+        onTypeSaved={(nt) => setTypes((cur) => cur.map((x) => (x.key === nt.key ? { ...x, ...nt } : x)))} />
+
       {/* ตัวเลขสรุป */}
+      <h2 className="mb-2 text-sm font-medium text-slate-700">{t("ตั๋วงาน", "Tickets")}</h2>
       <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
         {[
           { label: t("รอรับงาน", "New"), v: stats.fresh, cls: "text-slate-800" },
@@ -147,7 +152,7 @@ export function PatternTicketsView() {
           <EmptyState icon={<Icon name="list" />}
             title={view === "mine" ? t("ยังไม่มีงานของคุณ", "Nothing assigned to you") : t("ไม่มีตั๋วในมุมนี้", "No tickets here")}
             hint={t("ลองเปลี่ยนประเภท/มุมมอง หรือกด \"งานค้างทั้งหมด\"", "Try another type or view, or open \"All open\"")}
-            action={me?.can_create ? { label: t("เปิดตั๋วงาน", "New ticket"), onClick: () => setCreating(true) } : undefined} />
+            action={me?.can_create ? { label: t("เปิดตั๋วงาน", "New ticket"), onClick: () => setCreating(type) } : undefined} />
         ) : (
           <div className="flex flex-col gap-1.5">
             {shown.map((r) => {
@@ -189,9 +194,9 @@ export function PatternTicketsView() {
       {openId && (
         <TicketDrawer id={openId} types={types} onClose={() => openTicket(null)} onChanged={() => void load()} />
       )}
-      {creating && (
-        <CreateTicketModal types={types} onClose={() => setCreating(false)}
-          onCreated={(id) => { setCreating(false); void load(); openTicket(id); }} />
+      {creating !== null && (
+        <CreateTicketModal key={creating || "_"} types={types} initialType={creating || undefined} onClose={() => setCreating(null)}
+          onCreated={(id) => { setCreating(null); void load(); openTicket(id); }} />
       )}
     </div>
   );

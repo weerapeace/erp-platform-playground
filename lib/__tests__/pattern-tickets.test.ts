@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, cleanLinks, isOverdue, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
+import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, cleanLinks, cleanTypeIcon, defaultTypeIcon, isOverdue, isUploadedTypeIcon, openCountsByType, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
 
 const REQ = "11111111-1111-1111-1111-111111111111";
 const MAKER = "22222222-2222-2222-2222-222222222222";
@@ -55,5 +55,29 @@ describe("ตัวช่วย", () => {
     expect(isOverdue("2026-11-05", "doing", "2026-11-05")).toBe(false);
     expect(isOverdue("2026-11-01", "done", "2026-11-05")).toBe(false);
     expect(todayBangkok(new Date("2026-11-04T18:30:00Z"))).toBe("2026-11-05");
+  });
+});
+
+describe("ไอคอนประเภทงาน", () => {
+  it("ว่าง = กลับเป็นไอคอนเดิมของประเภท · ประเภทใหม่ = i:file", () => {
+    expect(cleanTypeIcon("", "cut")).toBe("i:scissors");
+    expect(cleanTypeIcon(null, "other")).toBe("i:dots-vertical");
+    expect(cleanTypeIcon(undefined, "zzz")).toBe("i:file");
+    expect(defaultTypeIcon("emb")).toBe("i:flower");
+  });
+  it("รับเฉพาะไอคอนระบบ หรือรูปในโฟลเดอร์ pattern-icons", () => {
+    expect(cleanTypeIcon("i:bolt", "laser")).toBe("i:bolt");
+    expect(cleanTypeIcon("img:pattern-icons/u1/123-4.png", "cut")).toBe("img:pattern-icons/u1/123-4.png");
+    expect(cleanTypeIcon("img:payment-slips/x.png", "cut")).toBeNull();
+    expect(cleanTypeIcon("img:pattern-icons/../secret.png", "cut")).toBeNull();
+    expect(cleanTypeIcon("<script>", "cut")).toBeNull();
+    expect(isUploadedTypeIcon("img:pattern-icons/a.png")).toBe(true);
+    expect(isUploadedTypeIcon("i:bolt")).toBe(false);
+  });
+  it("นับตั๋วค้างต่อประเภท ไม่นับที่เสร็จ/ยกเลิก", () => {
+    expect(openCountsByType([
+      { type_key: "cut", status: "new" }, { type_key: "cut", status: "fix" },
+      { type_key: "sew", status: "done" }, { type_key: "sew", status: "cancelled" }, { type_key: "laser", status: "doing" },
+    ])).toEqual({ cut: 2, laser: 1 });
   });
 });

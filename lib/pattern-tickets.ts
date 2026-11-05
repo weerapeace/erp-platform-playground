@@ -149,3 +149,31 @@ export function cleanLinks(v: unknown): TicketLink[] {
     .filter((x) => /^https?:\/\//i.test(x.url))
     .slice(0, 30);
 }
+
+/* ── ไอคอนประเภทงาน (แผ่นกดเปิดตั๋วบนหน้า /design/pattern-tickets) ──
+ * เก็บใน pattern_ticket_types.icon · "i:<ไอคอนเส้น>" = ไอคอนระบบ · "img:pattern-icons/…" = รูปที่ผู้จัดการอัปเอง
+ * กลับเป็นไอคอนเดิม = ค่าตั้งต้นตามตารางนี้ (ตรงกับ migration 202611150100) · ประเภทใหม่ที่ไม่อยู่ในตาราง = i:file
+ */
+export const PATTERN_ICON_FOLDER = "pattern-icons";
+export const DEFAULT_TYPE_ICONS: Record<string, string> = {
+  cut: "i:scissors", block: "i:layout-grid", sew: "i:needle-thread", screen: "i:brush",
+  laser: "i:bolt", grade: "i:ruler-measure", emb: "i:flower", other: "i:dots-vertical",
+};
+export const defaultTypeIcon = (key: string) => DEFAULT_TYPE_ICONS[key] ?? "i:file";
+export const isUploadedTypeIcon = (v: string | null | undefined) => !!v && v.startsWith("img:");
+
+/** ตรวจค่าไอคอนที่จะบันทึก — ถูก = ค่าที่ใช้ได้ · ว่าง = ค่าตั้งต้นของประเภท · รูปแบบผิด = null (ไม่บันทึก) */
+export function cleanTypeIcon(v: unknown, typeKey: string): string | null {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (!s) return defaultTypeIcon(typeKey);
+  if (/^i:[a-z0-9-]{1,40}$/.test(s)) return s;
+  if (s.startsWith(`img:${PATTERN_ICON_FOLDER}/`) && /^img:[\w\-./]{1,200}$/.test(s) && !s.includes("..")) return s;
+  return null;
+}
+
+/** นับตั๋วที่ยังไม่ปิดของแต่ละประเภท (ป้าย "ค้าง X" บนแผ่น) */
+export function openCountsByType(rows: { type_key: string; status: string }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) if ((OPEN_STATUSES as string[]).includes(r.status)) out[r.type_key] = (out[r.type_key] ?? 0) + 1;
+  return out;
+}
