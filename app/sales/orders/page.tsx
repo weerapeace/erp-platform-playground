@@ -38,6 +38,7 @@ import { MoGroupPicker, useMoGroups, rememberMoGroup, type MoGroupPick } from "@
 import { OrderBatchEntryModal } from "@/components/order-batch-entry";
 import { SoBatchView } from "./batch-view";
 import { SoOrderReadView } from "./order-read-view";
+import { SoBillMatchModal } from "./bill-match-modal";
 import { useViewPref } from "@/lib/use-view-pref";
 import { openLink, useOpenParam } from "@/lib/open-param";
 import { pickQuoteDocs } from "@/lib/quote-pull";
@@ -91,6 +92,8 @@ export default function SoOrdersPage() {
   const canEdit = usePermission("so.create");
   const canShip = usePermission("so.ship");
   const canCancel = usePermission("so.cancel");
+  // ผูกใบขาย (บิล) เข้าใบสั่งผลิต = สิทธิ์เดียวกับผูกที่บอร์ดจ่ายงาน (/api/mo/sales-match)
+  const canLinkBills = usePermission("products.edit");
   const toast = useToast();
 
   const [rows, setRows] = useState<Row[]>([]);
@@ -111,6 +114,8 @@ export default function SoOrdersPage() {
   const [srcOpen, setSrcOpen] = useState<null | "quote" | "mo">(null);
   // ผูกใบสั่งผลิตให้รายการเดียว (ปุ่มต่อรายการ) — read = ผูกทันที · edit = จำไว้ ผูกตอนบันทึก
   const [linkFor, setLinkFor] = useState<null | { tempId: string; sku: string | null; name: string; mode: "read" | "edit" }>(null);
+  // 🔄 "อัปเดตสถานะ" — ผูกใบขาย (บิล) เข้ารายการ อัปเดตใบสั่งขาย + ใบสั่งผลิตพร้อมกัน (./bill-match-modal)
+  const [billMatch, setBillMatch] = useState<{ id: string; no: string | null } | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [groupFilter, setGroupFilter] = useState("");
@@ -457,6 +462,9 @@ export default function SoOrdersPage() {
           hint="วางใบตามกำหนดส่ง · ใบที่ยังไม่ใส่กำหนดส่ง (~) วางตามวันที่สั่ง" />
       )}
 
+      <SoBillMatchModal orderId={billMatch?.id ?? null} orderNo={billMatch?.no} canApply={canLinkBills}
+        onClose={() => setBillMatch(null)}
+        onApplied={() => { const id = billMatch?.id; if (id && form?.id === id) void openRow({ id }); void load(); }} />
       {/* ── ฟอร์มใบสั่งขาย ─────────────────────────────── */}
       <ERPModal open={!!form} onClose={() => !saving && setForm(null)} size="xl"
         title={form?.id ? `🧾 ใบสั่งขาย ${form.order_no ?? ""}` : "🧾 สร้างใบสั่งขาย"}
@@ -472,6 +480,10 @@ export default function SoOrdersPage() {
           )}
           {form.id && canEdit && form.status !== "cancelled" && (
             <button onClick={() => void act(form.id!, { action: "open_mo" }, "เปิด/ผูกใบสั่งผลิตให้แล้ว")} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🏭 เปิดใบสั่งผลิต</button>
+          )}
+          {form.id && !editing && form.status !== "cancelled" && (
+            <button onClick={() => setBillMatch({ id: form.id!, no: form.order_no ?? null })} title="ผูกใบขาย (บิล) เข้ารายการ — อัปเดตใบสั่งขายและใบสั่งผลิตพร้อมกัน"
+              className="h-9 px-3 inline-flex items-center gap-1.5 text-sm border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50"><Icon name="refresh" /> อัปเดตสถานะ</button>
           )}
           {form.id && editing && (
             /* ทิ้งที่แก้ไว้ → โหลดใบเดิมกลับมาเป็นหน้าอ่าน */

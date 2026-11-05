@@ -1451,11 +1451,19 @@ function WorkBoardPageInner() {
   const [cuQueueAsk, setCuQueueAsk] = useState(false);
   // 🧾 เมนู ⋯ "อัปเดตงานจากใบขาย" → เข้าโหมดอัปเดตงาน (มุมมองตาราง) + เปิดหน้าต่างใบขายที่ยังไม่ผูก (./sales-update)
   const [cuSalesAsk, setCuSalesAsk] = useState(false);
+  // 🔄 เปิด "อัปเดตเป็นชุด" พร้อมใบที่ส่งมา (ระบุโต๊ะ/ช่าง) — จากป้าย "ขายครบแล้ว แต่ยังไม่บันทึกผลิต" · ?cu=batch&mos= (ใบสั่งขาย › อัปเดตสถานะ)
+  const [cuBatchAsk, setCuBatchAsk] = useState<string[] | null>(null);
   // 🧵 หน้าต่าง "จ่ายงานเหมา" (./piecework-dispatch) — null = ปิด · mos [] = เปิดเปล่า · [mo_no…] = เปิดพร้อมใบที่ติ๊ก
   const [pwOpen, setPwOpen] = useState<{ mos: string[]; tab: "send" | "recv" } | null>(null);
   useEffect(() => {
     if (searchParams.get("cu") !== "requests" || !canCatchUp) return;
     setCatchUpMode(true); setViewMode("table"); setCuQueueAsk(true);
+  }, [searchParams, canCatchUp, setViewMode]);
+  useEffect(() => {
+    if (searchParams.get("cu") !== "batch" || !canCatchUp) return;
+    const mos = [...new Set((searchParams.get("mos") ?? "").split(",").map((x) => x.trim()).filter(Boolean))].slice(0, 100);
+    if (!mos.length) return;
+    setCatchUpMode(true); setViewMode("table"); setCuBatchAsk(mos);
   }, [searchParams, canCatchUp, setViewMode]);
   const [urlOpened, setUrlOpened] = useState(false);   // เปิดเช็กลิสต์จาก URL ไปแล้ว (ใช้เลือกข้อความบนฉากบังบอร์ด)
 
@@ -1707,7 +1715,7 @@ function WorkBoardPageInner() {
           onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
           renderDeskManager={(d) => { const dept = board.departments.find((x) => x.id === d.id); return dept ? <DeskStaffPanel dept={dept} desks={board.departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canDispatch} onChanged={reloadAssignees} wos={board.workOrders} onDesksChanged={deskChanged} /> : null; }}
           soldUnmade={board.soldUnmade}
-          onSalesCatchUp={canCatchUp ? () => { setCatchUpMode(true); setViewMode("table"); setCuSalesAsk(true); } : undefined}
+          onSalesCatchUp={canCatchUp ? () => { setCatchUpMode(true); setViewMode("table"); setCuBatchAsk(board.soldUnmade.map((m) => m.mo_no)); } : undefined}
           canSetLabor={canEdit} onLaborSaved={() => void load(true)} />
       ) : viewMode === "labor" ? (
         <LaborSummary />
@@ -1737,6 +1745,7 @@ function WorkBoardPageInner() {
           catchUp={catchUpMode && canCatchUp} onExitCatchUp={() => setCatchUpMode(false)}
           cuMode={cuDirect ? "direct" : "request"} cuApprove={cuApprove} cuQueueAsk={cuQueueAsk} onCuQueueSeen={() => setCuQueueAsk(false)}
           cuSalesAsk={cuSalesAsk} onCuSalesSeen={() => setCuSalesAsk(false)}
+          cuBatchAsk={cuBatchAsk} onCuBatchSeen={() => setCuBatchAsk(null)}
           onPiecework={(mos) => setPwOpen({ mos, tab: "send" })}
           onReload={() => void load(true)} onOpenMO={(mo) => { setClWO(null); setChecklistMO(mo); }} onOpenWO={(wo) => { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); }} />
       ) : viewMode === "shop" ? (
@@ -3514,7 +3523,7 @@ function MoStepDots({ m, p, received }: { m: PendingMO; p: MoProgress | undefine
 }
 
 
-function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged, catchUp = false, onExitCatchUp, cuMode = "direct", cuApprove = false, cuQueueAsk = false, onCuQueueSeen, cuSalesAsk = false, onCuSalesSeen, onPiecework }: {
+function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canSeeMoney, deliveryPlans, onOpenMO, onOpenWO, onReload, canMoveStaff = false, onStaffChanged, catchUp = false, onExitCatchUp, cuMode = "direct", cuApprove = false, cuQueueAsk = false, onCuQueueSeen, cuSalesAsk = false, onCuSalesSeen, cuBatchAsk = null, onCuBatchSeen, onPiecework }: {
   pending: PendingMO[]; workOrders: WorkOrder[]; deliveryPlans: DeliveryPlan[];
   /** 🔄 โหมดอัปเดตงาน — ทุกแถวมีปุ่ม "อัปเดต" เปิดป๊อป CatchUpModal */
   catchUp?: boolean; onExitCatchUp?: () => void;
@@ -3522,6 +3531,8 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   cuMode?: "direct" | "request"; cuApprove?: boolean; cuQueueAsk?: boolean; onCuQueueSeen?: () => void;
   /** 🧾 เปิดหน้าต่าง "อัปเดตงานจากใบขาย" (เมนู ⋯) */
   cuSalesAsk?: boolean; onCuSalesSeen?: () => void;
+  /** 🔄 เปิด "อัปเดตเป็นชุด" พร้อมใบเหล่านี้ทันที (ป้ายขายครบแต่ยังไม่บันทึกผลิต · ?cu=batch&mos=) */
+  cuBatchAsk?: string[] | null; onCuBatchSeen?: () => void;
   /** 🧵 เปิดหน้าต่าง "จ่ายงานเหมา" พร้อมใบที่ติ๊ก */
   onPiecework?: (moNos: string[]) => void;
   departments: Dept[]; craftsmen: Assignee[]; canEdit: boolean;
@@ -3573,6 +3584,7 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
   // 🔄 อัปเดตเป็นชุด: ใบที่ติ๊กมา (null = ปิด) · เลือกในแท็บ "ทั้งหมด" · ป๊อปทีละใบ (เปิดแบบละเอียด) ปิดแล้ว = ให้ตารางโหลดใบนั้นใหม่
   const [cuBatch, setCuBatch] = useState<string[] | null>(null);
   const [cuBatchPick, setCuBatchPick] = useState<string | null>(null);   // มาจากหน้าต่างใบขาย: เปิด "เลือกใบขาย" ของใบนี้ให้เลย
+  useEffect(() => { if (catchUp && cuBatchAsk?.length) { setCuBatch(cuBatchAsk); setCuBatchPick(null); onCuBatchSeen?.(); } }, [catchUp, cuBatchAsk, onCuBatchSeen]);
   const [cuAllSel, setCuAllSel] = useState<Set<string>>(new Set());
   const [cuBatchRefresh, setCuBatchRefresh] = useState<{ mo: string; n: number } | null>(null);   // ใบที่เพิ่งอัปเดตรอบนี้ (ล่าสุดก่อน)
   const loadCuAll = useCallback(async () => {
