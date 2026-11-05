@@ -9,10 +9,23 @@
  * ค่าแรงรายเดือนไม่ได้คิดจากช่องนี้ — เลือกหลายคนไม่กระทบเงินเดือน (ใช้จำว่าใครรับงาน + แจ้งเตือนรายคน)
  * "+ เลือกคนอื่น" (ส่ง everyone) = เลือกคนนอกโต๊ะได้เอง (เจ้าของขอ 2026-10-31 · เช่นโต๊ะ "จับกลุ่ม" / "อื่นๆ" ที่ไม่มีคนประจำ)
  *   ⚠️ ตอนบันทึกให้ crewList(ids, everyone) — ถ้าใช้แค่คนในโต๊ะ ชื่อคนนอกโต๊ะจะหาย
+ * จัดกลุ่มชื่อ ช่างเหมา / ไทย / พม่า (เจ้าของขอ 2026-11-05 "จะได้ดูง่าย") — เปิดเองเมื่อรายชื่อเยอะ (>12 คน) และคนมี group
+ *   (มาจาก /api/mo/assignees → lib/staff-group) · หัวกลุ่มกดพับ/กางได้ · พิมพ์ค้นหา = กางทุกกลุ่มที่เจอ · grouped={false} = ปิด
  */
 import { useMemo, useState } from "react";
+import { STAFF_GROUPS, type StaffGroup } from "@/lib/staff-group";
 
-export type CrewPerson = { id: string; name: string; code?: string | null; nickname?: string | null; department_id?: string | null };
+export type CrewPerson = { id: string; name: string; code?: string | null; nickname?: string | null; department_id?: string | null;
+  /** กลุ่มพนักงาน (ช่างเหมา/ไทย/พม่า…) — ไม่มี = ยังไม่ระบุ */
+  group?: StaffGroup | null };
+
+/** กลุ่มของคน (ค่าแปลก/ไม่มี = ยังไม่ระบุ) */
+export const crewGroupOf = (p: CrewPerson): StaffGroup => (STAFF_GROUPS.some((g) => g.key === p.group) ? (p.group as StaffGroup) : "unk");
+/** จุดสีประจำกลุ่ม (ใช้ทั้งหัวกลุ่มและแถวรายคน) */
+export const CREW_GROUP_DOT: Record<StaffGroup, string> = {
+  hire: "bg-violet-500", th: "bg-emerald-500", mm: "bg-orange-500", other: "bg-sky-500", unk: "bg-slate-300",
+};
+export const crewGroupLabel = (g: StaffGroup) => STAFF_GROUPS.find((x) => x.key === g)?.label ?? "";
 export type CrewMember = { id: string | null; name: string };
 type CrewWO = { department_id?: string | null; created_at?: string | null; assignees?: CrewMember[] | null; assignee_type?: string | null; assignee_id?: string | null };
 
@@ -47,8 +60,10 @@ export function lastCrewIds(wos: CrewWO[], deptId: string | null | undefined, pe
 const chipCls = (on: boolean) => `inline-flex items-center gap-1 h-8 px-2.5 rounded-full border text-[12px] transition-colors ${
   on ? "bg-violet-600 border-violet-600 text-white" : "bg-white border-slate-200 text-slate-700 hover:border-violet-300 hover:bg-violet-50"}`;
 
-export function CrewPick({ people, value, onChange, required = false, requiredMsg = "งานเหมา — ต้องเลือกอย่างน้อย 1 คน", recent = [], flag, everyone, desks }: {
+export function CrewPick({ people, value, onChange, required = false, requiredMsg = "งานเหมา — ต้องเลือกอย่างน้อย 1 คน", recent = [], flag, everyone, desks, grouped }: {
   people: CrewPerson[];
+  /** จัดกลุ่มชื่อ ช่างเหมา/ไทย/พม่า — ไม่ส่ง = เปิดเองเมื่อรายชื่อเยอะ (>12) และคนมี group · false = ปิด */
+  grouped?: boolean;
   /** ทุกคนที่เลือกได้ (ส่งมา = มีปุ่ม "+ เลือกคนอื่น" เลือกคนนอกโต๊ะเอง) — ปกติ = ช่างทุกคน */
   everyone?: CrewPerson[];
   /** ชื่อโต๊ะ (ไว้บอกว่าคนนอกโต๊ะอยู่โต๊ะไหน) */
@@ -100,27 +115,62 @@ export function CrewPick({ people, value, onChange, required = false, requiredMs
   }, [all]);
   const nameOf = (id: string) => { const p = all.find((x) => x.id === id); return p ? label(p) : ""; };
 
+  // จัดกลุ่ม ช่างเหมา/ไทย/พม่า — หัวกลุ่มพับ/กางได้ · กำลังค้นหา = กางทุกกลุ่มที่เจอ
+  const groupedOn = grouped ?? (many && people.some((p) => !!p.group));
+  const [closed, setClosed] = useState<Set<StaffGroup>>(() => new Set());
+  const searching = q.trim() !== "";
+  const groups = useMemo(() => !groupedOn ? [] : STAFF_GROUPS.map((g) => ({
+    ...g,
+    list: shown.filter((p) => crewGroupOf(p) === g.key),
+    total: people.filter((p) => crewGroupOf(p) === g.key).length,
+    nSel: people.filter((p) => crewGroupOf(p) === g.key && sel.has(p.id)).length,
+  })).filter((g) => g.list.length > 0), [groupedOn, shown, people, sel]);
+  const toggleGroup = (k: StaffGroup) => setClosed((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+
+  const chip = (p: CrewPerson) => {
+    const on = sel.has(p.id); const f = flag?.(p) ?? null;
+    return (
+      <button key={p.id} type="button" onClick={() => toggle(p.id)} aria-pressed={on}
+        title={[p.code ? `[${p.code}] ${p.name}` : p.name, f].filter(Boolean).join(" · ")} className={chipCls(on)}>
+        {on && <span>✓</span>}{f && <span>⚠️</span>}
+        <span className="truncate max-w-[14rem]">{label(p)}</span>
+        {(nickCount.get(label(p)) ?? 0) > 1 && p.code && <span className="opacity-60">{p.code}</span>}
+      </button>
+    );
+  };
+
   return (
     <div className="space-y-1.5">
       {many && (
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="🔍 พิมพ์ชื่อ/รหัสค้นหา"
           className="w-full h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
       )}
-      <div className="flex flex-wrap gap-1.5 max-h-44 overflow-y-auto">
+      {groupedOn && groups.length > 0 && (
+        <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-100 divide-y divide-slate-100">
+          {groups.map((g) => {
+            const open = searching || !closed.has(g.key);
+            return (
+              <div key={g.key}>
+                <button type="button" onClick={() => toggleGroup(g.key)} aria-expanded={open}
+                  className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[12px] hover:bg-slate-50">
+                  <span className="w-3 text-slate-400">{open ? "▾" : "▸"}</span>
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${CREW_GROUP_DOT[g.key]}`} />
+                  <span className="font-semibold text-slate-700">{g.label}</span>
+                  <span className="text-slate-400">{g.total} คน</span>
+                  {g.nSel > 0 && <span className="rounded-full bg-violet-100 px-2 text-[11px] text-violet-700">เลือก {g.nSel}</span>}
+                  {g.hint && <span className="ml-auto truncate text-[11px] text-slate-400">{g.hint}</span>}
+                </button>
+                {open && <div className="flex flex-wrap gap-1.5 px-2 pb-2 pl-7">{g.list.map(chip)}</div>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <div className={`flex flex-wrap gap-1.5 ${groupedOn ? "" : "max-h-44 overflow-y-auto"}`}>
         {!required && (
           <button type="button" onClick={() => onChange([])} aria-pressed={picked.length === 0} className={chipCls(picked.length === 0)}>🏢 ทั้งโต๊ะ (ไม่ระบุคน)</button>
         )}
-        {shown.map((p) => {
-          const on = sel.has(p.id); const f = flag?.(p) ?? null;
-          return (
-            <button key={p.id} type="button" onClick={() => toggle(p.id)} aria-pressed={on}
-              title={[p.code ? `[${p.code}] ${p.name}` : p.name, f].filter(Boolean).join(" · ")} className={chipCls(on)}>
-              {on && <span>✓</span>}{f && <span>⚠️</span>}
-              <span className="truncate max-w-[14rem]">{label(p)}</span>
-              {(nickCount.get(label(p)) ?? 0) > 1 && p.code && <span className="opacity-60">{p.code}</span>}
-            </button>
-          );
-        })}
+        {!groupedOn && shown.map(chip)}
         {/* คนนอกโต๊ะที่เลือกเอง — กดอีกครั้ง = เอาออก */}
         {outsiders.map((p) => (
           <button key={p.id} type="button" onClick={() => toggle(p.id)} aria-pressed title={`${p.code ? `[${p.code}] ` : ""}${p.name}${deskOf(p) ? ` · ${deskOf(p)}` : ""} (นอกโต๊ะ) — กดเพื่อเอาออก`}

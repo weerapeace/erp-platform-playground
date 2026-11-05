@@ -14,13 +14,16 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { nextEmployeeCode, bumpCode } from "@/lib/employee-code";
+import { staffGroupOf, type StaffGroup } from "@/lib/staff-group";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export type Assignee = { id: string; name: string; nickname?: string | null; code: string | null; department_id?: string | null; photo?: string | null;
   /** เพิ่มจากหน้าบอร์ด → แก้ชื่อ/ปิดใช้งานจากบอร์ดได้ */
-  from_board?: boolean };
+  from_board?: boolean;
+  /** กลุ่มพนักงาน ช่างเหมา/ไทย/พม่า (lib/staff-group) — ใช้จัดกลุ่มชื่อในตัวเลือกคน · ส่งแค่กลุ่ม ไม่ส่งสัญชาติ/สัญญาดิบ */
+  group?: StaffGroup };
 
 /** id พนักงานที่ถูกเพิ่มจากหน้าบอร์ด (ดูจากประวัติการสร้าง) */
 async function boardCreatedIds(admin: ReturnType<typeof supabaseAdmin>, onlyId?: string): Promise<Set<string>> {
@@ -34,12 +37,18 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const admin = supabaseAdmin();
   const fromBoard = await boardCreatedIds(admin);
-  const [{ data: emps }, { data: deps }] = await Promise.all([
+  const [{ data: emps }, { data: deps }, { data: contracts }] = await Promise.all([
     admin.from("employees")
-      .select("id, employee_code, nickname, first_name_th, last_name_th, first_name, last_name, resign_date, department_id, payroll_register_base_salary, profile_photo_key")
+      .select("id, employee_code, nickname, first_name_th, last_name_th, first_name, last_name, resign_date, department_id, payroll_register_base_salary, profile_photo_key, nationality, is_subcontract")
       .is("resign_date", null).limit(2000),
     admin.from("departments").select("id, code, name, status").limit(500),
+    // สัญญาจ้างปัจจุบัน → แยก "ช่างเหมา" (contract_type = contractor)
+    admin.from("employee_contracts").select("employee_id, contract_type").eq("is_current", true).limit(5000),
   ]);
+  const contractOf = new Map<string, string>();
+  for (const c of (contracts ?? []) as { employee_id: string | null; contract_type: string | null }[]) {
+    if (c.employee_id && c.contract_type && contractOf.get(c.employee_id) !== "contractor") contractOf.set(c.employee_id, c.contract_type);
+  }
 
   const craftsmen: Assignee[] = (emps ?? []).map((e: Record<string, unknown>) => {
     const th = [e.first_name_th, e.last_name_th].filter(Boolean).join(" ").trim();
@@ -50,6 +59,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     return {
       id: String(e.id), name, nickname: nick || null, code: (e.employee_code as string) ?? null, department_id: (e.department_id as string) ?? null,
       photo: photoKey ? `/api/r2-image?key=${encodeURIComponent(photoKey)}` : null,
+      group: staffGroupOf({ contractType: contractOf.get(String(e.id)) ?? null, isSubcontract: e.is_subcontract as boolean | null, nationality: e.nationality as string | null }),
       ...(fromBoard.has(String(e.id)) ? { from_board: true } : {}),
     };
   }).sort((a, b) => a.name.localeCompare(b.name, "th"));

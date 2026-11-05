@@ -55,7 +55,7 @@ import { CatchUpEdit } from "./catch-up-edit";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
 import type { CuAllRow } from "@/app/api/mo/catch-up/all/route";
 import { CU_WHERE_ORDER, CU_LATE_DAYS, cuDaysSince, type CuWhereKey, type CuTargetKey } from "./catch-up";
-import { dispatchRowIssues, isHireDesk, parentKeyOf } from "@/lib/work-entry-rules";
+import { dispatchRowIssues, isHireDesk, parentKeyOf, splitIssues } from "@/lib/work-entry-rules";
 import { CopyPieceworkModal } from "./copy-piecework-modal";
 import { WorkInstructionPanel } from "@/components/work-instruction";
 import { MoMaterialsTable, type MoMatSummary, type MoMatPreview } from "@/components/mo-materials";
@@ -843,28 +843,46 @@ function WorkBoardPageInner() {
   //   ค่าแรง = ค่าแรง/ชิ้นที่ป๊อปส่งมา × จำนวน (ไม่มี = ว่าง ใส่ทีหลัง) · วันที่จ่าย = วันนี้ (เวลาไทย) · กำหนดเสร็จ = ของใบสั่งผลิต
   //   กฎกลาง dispatchRowIssues ตรวจซ้ำก่อนบันทึก · คืน id ใบที่สำเร็จ (ใบที่พลาดค้างในป๊อป ไม่จ่ายซ้ำใบที่สำเร็จ)
   //   ไม่ใช้ useCallback (deps ห้ามอ้างตัวแปรที่ประกาศทีหลัง — กับดัก TDZ ตอน render)
-  const execQuickDispatch = async (rows: { mo: { id: string }; qty: number; rate: number }[], desk: { id: string; name: string }, crewIds: string[]): Promise<string[]> => {
+  //   โต๊ะเหมา (r.parts) = จ่ายหลายคน จำนวนรายคน → 1 ใบจ่ายงานต่อคน (คนรับ = คนนั้นคนเดียว · ค่าแรง = ต่อชิ้น × จำนวนของคนนั้น)
+  //     รวมทุกคนต้องไม่เกินที่เหลือ (splitIssues) · บางคนพลาด = ใบนั้นออกจากป๊อปถ้ามีคนสำเร็จแล้ว (กันจ่ายซ้ำ) แล้วแจ้งชื่อคนที่พลาด
+  const execQuickDispatch = async (rows: { mo: { id: string }; qty: number; rate: number; parts?: { id: string; qty: number }[] }[], desk: { id: string; name: string }, crewIds: string[]): Promise<string[]> => {
     if (!canDispatch) { toast.error("คุณไม่มีสิทธิ์จ่ายงาน — ให้ผู้ดูแลเปิดสิทธิ์ที่หน้าจัดการสิทธิ์ (การผลิต › จ่ายงานเข้าแผนก)"); return []; }
     const crew = crewList(crewIds, craftsmen);
     const okIds: string[] = [], fails: string[] = [];
+    let woOk = 0;
     for (const r of rows) {
       const mo = board.pending.find((p) => p.id === r.mo.id);
       if (!mo) { fails.push("ไม่พบใบในรายการรอจ่าย (อาจถูกจ่ายไปแล้ว)"); continue; }
       const label = mo.product_sku ?? mo.mo_no;
-      const bad = dispatchRowIssues({ qty: r.qty, remaining: mo.remaining, deskName: desk.name, crewCount: crew.length }).find((x) => x.level === "error");
+      const split = r.parts?.length ? r.parts.filter((x) => x.qty > 0) : null;
+      const total = split ? split.reduce((a, x) => a + x.qty, 0) : r.qty;
+      const bad = [
+        ...dispatchRowIssues({ qty: total, remaining: mo.remaining, deskName: desk.name, crewCount: split ? split.length : crew.length }),
+        ...(split ? splitIssues({ parts: split.map((x) => x.qty), remaining: mo.remaining }) : []),
+      ].find((x) => x.level === "error");
       if (bad) { fails.push(`${label}: ${bad.msg}`); continue; }
-      try {
-        const res = await apiFetch("/api/mo/work-orders", { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mo_no: mo.mo_no, product_sku: mo.product_sku, product_name: mo.product_name,
-            stage: stageOfDept(desk.name), department_id: desk.id, department_name: desk.name,
-            ...crewFields(crew, desk.name),
-            qty: r.qty, uom: "ชิ้น", dispatch_date: todayLocal(), due_date: mo.internal_due_date ?? mo.due_date ?? null, note: `จากใบสั่งผลิต ${mo.mo_no}`,
-            labor_cost: r.rate > 0 ? Math.round(r.rate * r.qty * 100) / 100 : null }) });
-        const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "จ่ายงานไม่สำเร็จ");
-        okIds.push(mo.id);
-      } catch (e) { fails.push(`${label}: ${e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"}`); }
+      const jobs = split
+        ? split.map((x) => ({ crew: crewList([x.id], craftsmen), qty: x.qty }))
+        : [{ crew, qty: r.qty }];
+      let anyOk = false;
+      for (const job of jobs) {
+        if (split && !job.crew.length) { fails.push(`${label}: ไม่พบช่างในรายชื่อ (อาจลาออกแล้ว)`); continue; }
+        const who = split ? ` · ${job.crew[0].name}` : "";
+        try {
+          const res = await apiFetch("/api/mo/work-orders", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mo_no: mo.mo_no, product_sku: mo.product_sku, product_name: mo.product_name,
+              stage: stageOfDept(desk.name), department_id: desk.id, department_name: desk.name,
+              ...crewFields(job.crew, desk.name),
+              qty: job.qty, uom: "ชิ้น", dispatch_date: todayLocal(), due_date: mo.internal_due_date ?? mo.due_date ?? null, note: `จากใบสั่งผลิต ${mo.mo_no}`,
+              labor_cost: r.rate > 0 ? Math.round(r.rate * job.qty * 100) / 100 : null }) });
+          const j = await res.json(); if (!res.ok || j.error) throw new Error(j.error || "จ่ายงานไม่สำเร็จ");
+          anyOk = true; woOk++;
+        } catch (e) { fails.push(`${label}${who}: ${e instanceof Error ? e.message : "จ่ายงานไม่สำเร็จ"}`); }
+      }
+      if (anyOk) okIds.push(mo.id);
     }
-    if (okIds.length) toast.success(`จ่ายเข้า ${desk.name}${crew.length ? ` · ${crew.map((c) => c.name).join(", ")}` : ""} แล้ว ${okIds.length} ใบ`);
+    const splitMode = rows.some((r) => r.parts?.length);
+    if (okIds.length) toast.success(`จ่ายเข้า ${desk.name}${crew.length ? ` · ${crew.map((c) => c.name).join(", ")}` : ""} แล้ว ${okIds.length} ใบ${splitMode ? ` (${woOk} ใบจ่ายงาน แยกรายคน)` : ""}`);
     if (fails.length) toast.error(fails.slice(0, 3).join(" · ") + (fails.length > 3 ? ` (+อีก ${fails.length - 3} ใบ)` : ""));
     if (okIds.length) await load(true);
     return okIds;

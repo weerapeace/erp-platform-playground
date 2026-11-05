@@ -33,6 +33,27 @@ describe("กฎกลางการลงงานผลิต", () => {
   });
 });
 
+describe("จ่ายช่างเหมาหลายคน — แบ่งเท่ากัน + เตือนเหลือ/เกิน", () => {
+  it("splitEven: เศษให้คนที่เลือกก่อน · รวมเท่าเดิมเสมอ", async () => {
+    const { splitEven } = await import("@/lib/work-entry-rules");
+    expect(splitEven(1500, 3)).toEqual([500, 500, 500]);
+    expect(splitEven(800, 3)).toEqual([267, 267, 266]);
+    expect(splitEven(10, 1)).toEqual([10]);
+    expect(splitEven(2, 3)).toEqual([1, 1, 0]);
+    expect(splitEven(12.5, 2)).toEqual([6.5, 6]);
+    expect(splitEven(0, 2)).toEqual([0, 0]);
+    expect(splitEven(10, 0)).toEqual([]);
+  });
+  it("splitIssues: เกิน = ห้ามบันทึก · เหลือ = เตือนแต่จ่ายได้ · ครบ = ผ่าน", async () => {
+    const { splitIssues } = await import("@/lib/work-entry-rules");
+    expect(splitIssues({ parts: [500, 500, 500], remaining: 1500 })).toEqual([]);
+    expect(splitIssues({ parts: [500, 500, 300], remaining: 1500 })[0]).toMatchObject({ level: "warn", msg: expect.stringContaining("เหลือ 200 ชิ้น") });
+    expect(splitIssues({ parts: [800, 900], remaining: 1500 })[0]).toMatchObject({ level: "error", msg: expect.stringContaining("เกิน 200 ชิ้น") });
+    expect(splitIssues({ parts: [0, 0], remaining: 1500 })[0].level).toBe("error");
+    expect(splitIssues({ parts: [-1, 5], remaining: 10 })[0].level).toBe("error");
+  });
+});
+
 describe("deskKindOf — ชนิดโต๊ะของป๊อปจ่ายด่วน (โหมดผู้บริหาร)", () => {
   it("ชื่อมี เหมา = hire · มี กลุ่ม = group · อื่น = normal", async () => {
     const { deskKindOf, isGroupDesk } = await import("@/lib/work-entry-rules");

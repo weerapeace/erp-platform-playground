@@ -22,7 +22,7 @@ export const isHireDesk = (name: string | null | undefined) => !!name && /เห
 /** โต๊ะจับกลุ่ม (ชื่อมีคำว่า กลุ่ม) = เลือกพนักงานหลายคนเป็นกลุ่มต่องาน · ค่าแรงดูรวมต่อกลุ่ม (โหมดผู้บริหาร บอร์ดจ่ายงาน) */
 export const isGroupDesk = (name: string | null | undefined) => !!name && /กลุ่ม/.test(name);
 
-/** ชนิดโต๊ะสำหรับป๊อปจ่ายด่วน: ปกติ (ทั้งโต๊ะ) · เหมา (เลือกช่าง 1 คน) · กลุ่ม (เลือกหลายคน) */
+/** ชนิดโต๊ะสำหรับป๊อปจ่ายด่วน: ปกติ (ทั้งโต๊ะ) · เหมา (เลือกช่างได้หลายคน จำนวนรายคน — 1 ใบจ่ายงานต่อคน) · กลุ่ม (หลายคนรับงานเดียวกัน) */
 export type DeskKind = "normal" | "hire" | "group";
 export const deskKindOf = (name: string | null | undefined): DeskKind => (isHireDesk(name) ? "hire" : isGroupDesk(name) ? "group" : "normal");
 
@@ -34,6 +34,34 @@ export function dispatchRowIssues(r: { qty: number; remaining: number; deskName:
   else if (r.qty > r.remaining + EPS) out.push({ level: "error", field: `${field}:qty`, msg: `เกินที่เหลือให้จ่าย ${fmt(r.remaining)} ชิ้น` });
   if (isHireDesk(r.deskName) && r.crewCount === 0) out.push({ level: "error", field: `${field}:crew`, msg: "งานเหมา ต้องเลือกช่างอย่างน้อย 1 คน" });
   return out;
+}
+
+/**
+ * แบ่งจำนวนให้ n คนเท่า ๆ กัน (เป็นจำนวนเต็ม) — เศษให้คนที่เลือกก่อนทีละ 1 ชิ้น · ทศนิยมที่เหลือ (ใบที่ค้างเป็นเศษ) ไปอยู่กับคนแรก
+ * เช่น 800 ÷ 3 = [267, 267, 266] · ใช้ตอนจ่ายช่างเหมาหลายคน (ป๊อปจ่ายด่วน) — เจ้าของขอ 2026-11-05 "แบ่งเท่าๆกันก่อนตอนเลือก"
+ */
+export function splitEven(total: number, n: number): number[] {
+  const count = Math.max(0, Math.floor(n) || 0);
+  if (!count || !(total > 0)) return Array.from({ length: count }, () => 0);
+  const whole = Math.floor(total + EPS);
+  const base = Math.floor(whole / count), rest = whole - base * count;
+  const out = Array.from({ length: count }, (_, i) => base + (i < rest ? 1 : 0));
+  out[0] = r2(out[0] + Math.max(0, total - whole));
+  return out;
+}
+
+/**
+ * จ่ายใบเดียวให้หลายคน (จำนวนรายคน) — รวมแล้วเทียบที่เหลือให้จ่าย
+ *   เกิน = error (บันทึกไม่ได้) · เหลือ = warn (จ่ายได้ ที่เหลือค้างไว้จ่ายรอบหน้า) · ครบพอดี = ไม่มีข้อความ
+ *   เจ้าของ 2026-11-05: "เตือนเหลือ, เกินด้วย เหลือได้แค่ห้ามเกิน"
+ */
+export function splitIssues(r: { parts: number[]; remaining: number }, field = "split"): EntryIssue[] {
+  if (r.parts.some((q) => q < 0)) return [{ level: "error", field, msg: "จำนวนติดลบไม่ได้" }];
+  const sum = r2(r.parts.reduce((a, q) => a + (q || 0), 0));
+  if (!(sum > 0)) return [{ level: "error", field, msg: "ใส่จำนวนให้อย่างน้อย 1 คน" }];
+  if (sum > r.remaining + EPS) return [{ level: "error", field, msg: `เกิน ${fmt(sum - r.remaining)} ชิ้น — รวม ${fmt(sum)} / ${fmt(r.remaining)} · ลดจำนวนก่อนถึงจะจ่ายได้` }];
+  if (sum < r.remaining - EPS) return [{ level: "warn", field, msg: `เหลือ ${fmt(r.remaining - sum)} ชิ้น — รวม ${fmt(sum)} / ${fmt(r.remaining)} · จ่ายได้ ที่เหลือค้างไว้จ่ายรอบหน้า` }];
+  return [];
 }
 
 /** เตรียม/ตัดยังไม่ครบ = "ยังไม่พร้อมจ่าย" — เตือนแต่จ่ายต่อได้ (กติกาเดียวกับลากการ์ดไปโต๊ะ) */
