@@ -8,6 +8,8 @@
  * - ขวา: แก้สีที่เลือก — สีเดียว / หลายสีแบ่งช่อง (2–4) / รูปลาย (อัปโหลด · คลังรูป · ✂️ ครอปจากรูป SKU ที่ใช้สีนี้ = ImageCropPicker)
  * - 💧 ดูดสี: รูป SKU ที่ใช้สีนี้ทั้งหมด (รวมตัวที่ยังไม่ขึ้นเว็บ + รูปของรุ่น · โหลดตอนกด ใช้ร่วมกับ ✂️) หรือ "เลือกรูปอื่น" จากคลัง/รูปสินค้าบนเว็บ (ImageEyedropper)
  * - ชื่อสีผสม ("กรมท่า-ครีม-ขาว") ประกอบจากสีย่อยให้เอง → ตั้งสีย่อยครบก็ขึ้นเอง หรือกด "ตั้งเองเฉพาะชื่อนี้"
+ * - 💾 ตั้งหลายสีแล้วบันทึกทีเดียว (2026-11-05): ที่แก้ค้างอยู่ใน drafts (ต่อแถว) · สลับสีได้ไม่ถาม · ในตาราง = จุดสีใหม่ + "รอบันทึก"/"ยังไม่ครบ"
+ *   แถบล่าง SaveBar "บันทึกทั้งหมด (N สี)" → POST { items } ครั้งเดียว · ตัวที่ยังไม่ครบ/บันทึกพลาด ค้างไว้ให้แก้ต่อ · "ล้างจุดสี" ยังทำทันทีทีละสี
  *
  * ใช้: <ColorSwatchButton /> (ปุ่ม + ป๊อปอัป) หรือ <ColorSwatchManager /> ฝังในหน้า
  * focusNames = เปิดมาโชว์ "เฉพาะสีเหล่านี้" (เช่น สีของสินค้าที่กำลังแก้ · ชื่อผสมพ่วงสีย่อยให้) — สลับแท็บ ทั้งหมด ได้
@@ -17,6 +19,7 @@ import { apiFetch } from "@/lib/api";
 import { useToast } from "@/components/toast";
 import { MiniTable } from "@/components/mini-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
+import { SaveBar } from "@/components/save-bar";
 import { ColorInput } from "@/components/color-picker";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ImageEyedropper } from "@/components/image-eyedropper";
@@ -51,6 +54,19 @@ const STATUS_UI: Record<Status, { label: string; cls: string }> = {
 };
 const thumb = (k: string) => keyUrl(k, 96) ?? "";
 const isAscii = (s: string) => /^[\x20-\x7E]+$/.test(s);
+/** หน้าตาจุดสีของค่าที่กำลังแก้ (ยังไม่มีสีที่ใช้ได้ = null) */
+const draftCssOf = (d: Draft) =>
+  d.kind === "image"
+    ? d.imageKey ? swatchCss({ colors: [], imageKey: d.imageKey }, thumb) : null
+    : d.colors.filter(isHex).length ? swatchCss({ colors: d.colors.filter(isHex), imageKey: null }, thumb) : null;
+// ทุกช่องสีต้องกรอกถูก (ช่องว่างที่กด "+ เพิ่มสี" ค้างไว้ = ยังไม่ครบ ไม่ปล่อยให้หายเงียบตอนบันทึก) · คำใหม่ต้องมีชื่ออังกฤษ
+const draftReady = (d: Draft) => (!d.isNew || d.en.trim().length > 0) && (
+  d.kind === "image" ? !!d.imageKey
+    : d.kind === "split" ? d.colors.length >= 2 && d.colors.every(isHex)
+    : isHex(d.colors[0])
+);
+const draftMissing = (d: Draft) => (d.isNew && !d.en.trim() ? "ใส่ชื่ออังกฤษ" : d.kind === "image" ? "เลือกรูปลาย" : "เลือกสีให้ครบ");
+const sameDraft = (a: Draft, b: Draft) => a.en.trim() === b.en.trim() && a.kind === b.kind && a.imageKey === b.imageKey && a.colors.join("|") === b.colors.join("|");
 
 function Dot({ css, size = 22 }: { css: string | null; size?: number }) {
   return (
@@ -136,10 +152,12 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
   const [filter, setFilter] = useState<"focus" | "todo" | "done" | "all">(hasFocus ? "focus" : "todo");
   const [shop, setShop] = useState("");
   const [selKey, setSelKey] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Draft | null>(null);
-  const [dirty, setDirty] = useState(false);
+  // ✏️ สีที่แก้ค้างไว้ (key ของแถว → ค่าที่แก้) — สลับไปตั้งสีอื่นได้เลย ของที่แก้ไม่หาย · กด "บันทึกทั้งหมด" ทีเดียว
+  const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [saving, setSaving] = useState(false);
-  const [pendingKey, setPendingKey] = useState<string | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const pendingKeys = Object.keys(drafts);
+  const dirty = pendingKeys.length > 0;
   // 💧 กำลังดูดสีให้ช่องไหน (index ใน draft.colors)
   const [dropSlot, setDropSlot] = useState<number | null>(null);
   // ✂️ ครอปรูปลายจากรูป SKU ที่ใช้สีนี้ (โหลดรูปตอนกดเปิด)
@@ -192,13 +210,23 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
     };
   };
 
-  const select = (r: Row) => {
-    if (dirty && r.key !== selKey) { setPendingKey(r.key); return; }
-    setSelKey(r.key);
-    setDraft(r.compound && !r.entry ? null : draftFor(r));
-    setDirty(false);
+  // ค่าที่โชว์ทางขวา = ที่แก้ค้างไว้ หรือค่าที่บันทึกอยู่ (ชื่อผสมที่ยังไม่กด "ตั้งเอง" = null โชว์ว่าประกอบจากอะไร)
+  const savedDraft = sel && !(sel.compound && !sel.entry) ? draftFor(sel) : null;
+  const draft = (selKey ? drafts[selKey] : undefined) ?? savedDraft;
+  const selPending = !!selKey && !!drafts[selKey];
+  const select = (r: Row) => setSelKey(r.key);
+  const edit = (patch: Partial<Draft>) => {
+    if (!selKey || !draft) return;
+    const next = { ...draft, ...patch };
+    setDrafts((m) => {
+      const n = { ...m };
+      // แก้กลับเป็นค่าเดิม = ไม่นับว่าค้าง (ชื่อผสมที่กด "ตั้งเอง" ค้างไว้จนกว่าจะบันทึก/ยกเลิก)
+      if (savedDraft && sameDraft(next, savedDraft)) delete n[selKey];
+      else n[selKey] = next;
+      return n;
+    });
   };
-  const edit = (patch: Partial<Draft>) => { setDraft((d) => (d ? { ...d, ...patch } : d)); setDirty(true); };
+  const discard = (key: string) => setDrafts((m) => { const n = { ...m }; delete n[key]; return n; });
   const loadSources = async () => {
     if (!sel || (src?.key === sel.key && !src.error)) return;
     const key = sel.key;
@@ -240,19 +268,31 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasFocus, autoPicked, loading, selKey, rows, focusKeys]);
 
-  const save = async (clear = false) => {
-    if (!draft) return;
-    const body = clear ? { th: draft.th, en: draft.en, kind: null } : { th: draft.th, en: draft.en, kind: draft.kind, colors: draft.colors, imageKey: draft.imageKey };
+  const names = (list: string[], max = 4) => `${list.slice(0, max).join(", ")}${list.length > max ? ` +${list.length - max}` : ""}`;
+  const notReady = Object.values(drafts).filter((d) => !draftReady(d)).map((d) => d.th);
+
+  /** 💾 บันทึกทั้งหมดทีเดียว — ส่งเฉพาะสีที่ตั้งครบ · ตัวที่ยังไม่ครบค้างไว้ให้แก้ต่อ · สีไหนพลาดค้างไว้เหมือนกัน */
+  const saveAll = async () => {
+    const ready = Object.entries(drafts).filter(([, d]) => draftReady(d));
+    if (!dirty) return;
+    if (!ready.length) {
+      toast.warning(`ยังไม่ครบทุกสี (${names(notReady)}) — ${draftMissing(Object.values(drafts)[0])}ก่อนบันทึก`);
+      return;
+    }
     setSaving(true);
     try {
-      const j = await apiFetch("/api/color-swatches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
+      const items = ready.map(([, d]) => ({ th: d.th, en: d.en, kind: d.kind, colors: d.colors, imageKey: d.imageKey }));
+      const j = await apiFetch("/api/color-swatches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) }).then((r) => r.json());
       if (j.error) { toast.error(j.error); return; }
-      toast.success(clear ? `ล้างจุดสี "${draft.th}" แล้ว` : `บันทึกจุดสี "${draft.th}" แล้ว — เว็บร้านอัปเดตแล้ว`);
-      setDirty(false);
-      setSelKey(normColorName(draft.th));
+      const results = (j.data?.results ?? []) as { ok: boolean; error?: string }[];
+      const done = ready.filter((_, i) => results[i]?.ok);
+      const failed = ready.flatMap(([, d], i) => (results[i]?.ok ? [] : [`${d.th} (${results[i]?.error ?? "ไม่สำเร็จ"})`]));
+      // เอาออกจากรายการค้าง เฉพาะตัวที่ไม่ได้แก้ต่อระหว่างกำลังบันทึก
+      setDrafts((m) => { const n = { ...m }; for (const [k, d] of done) if (n[k] === d) delete n[k]; return n; });
+      if (done.length) toast.success(`บันทึกจุดสี ${done.length} สีแล้ว — เว็บร้านอัปเดตแล้ว`);
+      if (failed.length) toast.error(`บันทึกไม่สำเร็จ ${failed.length} สี: ${failed.join(" · ")}`);
+      if (notReady.length) toast.warning(`ยังไม่ครบ ${notReady.length} สี ค้างไว้ให้แก้ต่อ: ${names(notReady)}`);
       await load();
-      if (clear) setDraft((d) => (d ? { ...d, kind: "solid", colors: [], imageKey: null, isNew: false } : d));
-      else setDraft((d) => (d ? { ...d, isNew: false } : d));
     } catch {
       toast.error("บันทึกไม่สำเร็จ กรุณาลองใหม่");
     } finally {
@@ -260,17 +300,26 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
     }
   };
 
-  const draftCss = draft
-    ? draft.kind === "image"
-      ? draft.imageKey ? swatchCss({ colors: [], imageKey: draft.imageKey }, thumb) : null
-      : draft.colors.filter(isHex).length ? swatchCss({ colors: draft.colors.filter(isHex), imageKey: null }, thumb) : null
-    : null;
-  // ทุกช่องสีต้องกรอกถูก (ช่องว่างที่กด "+ เพิ่มสี" ค้างไว้ = ยังไม่ครบ ไม่ปล่อยให้หายเงียบตอนบันทึก)
-  const draftValid = !!draft && (!draft.isNew || draft.en.trim().length > 0) && (
-    draft.kind === "image" ? !!draft.imageKey
-      : draft.kind === "split" ? draft.colors.length >= 2 && draft.colors.every(isHex)
-      : isHex(draft.colors[0])
-  );
+  /** ล้างจุดสี (ทันที ทีละสี) */
+  const clearSwatch = async () => {
+    if (!sel?.entry) return;
+    const { th, en } = sel.entry;
+    setSaving(true);
+    try {
+      const j = await apiFetch("/api/color-swatches", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ th, en, kind: null }) }).then((r) => r.json());
+      if (j.error) { toast.error(j.error); return; }
+      toast.success(`ล้างจุดสี "${th}" แล้ว`);
+      discard(sel.key);
+      await load();
+    } catch {
+      toast.error("ล้างจุดสีไม่สำเร็จ กรุณาลองใหม่");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const draftCss = draft ? draftCssOf(draft) : null;
+  const draftValid = !!draft && draftReady(draft);
 
   if (loadError) {
     return (
@@ -281,6 +330,7 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
   }
 
   return (
+    <div>
     <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_300px]">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -313,7 +363,7 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
           onRowClick={select}
           emptyText={loading ? "กำลังโหลด…" : filter === "todo" ? "🎉 สีที่ใช้บนเว็บตั้งครบแล้ว" : filter === "focus" ? "ไม่พบชื่อสีของสินค้านี้ในทะเบียน — ลองค้นในแท็บ ทั้งหมด" : "ไม่มีรายการ"}
           columns={[
-            { key: "dot", header: "", width: "2.25rem", cell: (r) => <Dot css={r.css} /> },
+            { key: "dot", header: "", width: "2.25rem", cell: (r) => <Dot css={drafts[r.key] ? draftCssOf(drafts[r.key]) : r.css} /> },
             {
               key: "name", header: "ชื่อสี", width: "minmax(0,1.6fr)", sortValue: (r) => r.name, sortLabel: "ชื่อสี",
               cell: (r) => (
@@ -329,7 +379,17 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
               cell: (r) => <span className="text-xs text-slate-500">{r.compound && !r.entry ? "ผสม" : r.entry?.kind ? SWATCH_KIND_LABEL[r.entry.kind].replace(" (แบ่งช่อง)", "") : "—"}</span>,
             },
             { key: "skus", header: "บนเว็บ", align: "right", width: "4.5rem", sortValue: (r) => r.skus, sortLabel: "จำนวน SKU", cell: (r) => <span className="text-xs text-slate-500">{r.skus ? `${r.skus} SKU` : "—"}</span> },
-            { key: "status", header: "สถานะ", width: "6.5rem", sortValue: (r) => r.status, cell: (r) => <span className={`text-[11px] px-2 py-0.5 rounded-full ${STATUS_UI[r.status].cls}`}>{STATUS_UI[r.status].label}</span> },
+            {
+              key: "status", header: "สถานะ", width: "6.5rem", sortValue: (r) => r.status,
+              // แก้ค้างไว้ = รอบันทึก (ครบแล้ว) / ยังไม่ครบ — แทนสถานะเดิมจนกว่าจะกดบันทึกทั้งหมด
+              cell: (r) => {
+                const d = drafts[r.key];
+                if (d) return draftReady(d)
+                  ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-blue-600 text-white" title="แก้แล้ว — รอกดบันทึกทั้งหมดด้านล่าง">รอบันทึก</span>
+                  : <span className="text-[11px] px-2 py-0.5 rounded-full bg-rose-50 text-rose-700" title={`ยังไม่ครบ — ${draftMissing(d)}`}>ยังไม่ครบ</span>;
+                return <span className={`text-[11px] px-2 py-0.5 rounded-full ${STATUS_UI[r.status].cls}`}>{STATUS_UI[r.status].label}</span>;
+              },
+            },
           ]}
         />
       </div>
@@ -352,7 +412,7 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
                 );
               })}
             </div>
-            <button type="button" onClick={() => { setDraft(draftFor(sel)); setDirty(true); }} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">✏️ ตั้งเองเฉพาะชื่อนี้</button>
+            <button type="button" onClick={() => setDrafts((m) => ({ ...m, [sel.key]: draftFor(sel) }))} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-50">✏️ ตั้งเองเฉพาะชื่อนี้</button>
           </div>
         ) : (
           <div className="space-y-3">
@@ -416,15 +476,21 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
               </div>
             )}
 
-            <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
-              <button type="button" disabled={!dirty || !draftValid || saving} onClick={() => save(false)}
-                className="px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-600 text-white disabled:opacity-40">
-                {saving ? "กำลังบันทึก…" : "บันทึก"}
-              </button>
-              {hasSwatch(sel.entry) && (
-                <button type="button" disabled={saving} onClick={() => save(true)} className="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">ล้างจุดสี</button>
+            {/* ไม่มีปุ่มบันทึกทีละสีแล้ว — ตั้งหลายสีแล้วกด "บันทึกทั้งหมด" ที่แถบล่างทีเดียว */}
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-2 border-t border-slate-200 text-[11px]">
+              {selPending ? (
+                <>
+                  <span className={draftValid ? "text-blue-700 font-medium" : "text-rose-600 font-medium"}>
+                    {draftValid ? "แก้แล้ว — รอกดบันทึกทั้งหมดด้านล่าง" : `ยังไม่ครบ — ${draftMissing(draft)}`}
+                  </span>
+                  <button type="button" onClick={() => discard(sel.key)} className="text-slate-500 underline hover:text-slate-800">ยกเลิกที่แก้สีนี้</button>
+                </>
+              ) : (
+                <span className="text-slate-400">ตั้งเสร็จกดสีถัดไปทางซ้ายได้เลย — ที่แก้ไว้ไม่หาย บันทึกทีเดียวตอนท้าย</span>
               )}
-              {dirty && <span className="text-[11px] text-amber-600 ml-auto">ยังไม่บันทึก</span>}
+              {hasSwatch(sel.entry) && (
+                <button type="button" disabled={saving} onClick={() => void clearSwatch()} className="ml-auto px-2 py-1 rounded-lg text-xs text-slate-600 hover:bg-slate-100 disabled:opacity-40">ล้างจุดสี</button>
+              )}
             </div>
           </div>
         )}
@@ -460,18 +526,25 @@ export function ColorSwatchManager({ onDirtyChange, focusNames }: { onDirtyChang
       />
 
       <ConfirmDialog
-        open={!!pendingKey}
-        onClose={() => setPendingKey(null)}
-        onConfirm={() => {
-          const r = rows.find((x) => x.key === pendingKey);
-          setPendingKey(null);
-          setDirty(false);
-          if (r) { setSelKey(r.key); setDraft(r.compound && !r.entry ? null : draftFor(r)); }
-        }}
-        title="ยังไม่ได้บันทึก"
-        message="คุณมีข้อมูลที่ยังไม่ได้บันทึก ต้องการออกโดยไม่บันทึกหรือไม่?"
-        confirmText="ออกโดยไม่บันทึก"
+        open={confirmDiscard}
+        onClose={() => setConfirmDiscard(false)}
+        onConfirm={() => { setConfirmDiscard(false); setDrafts({}); }}
+        title="ละทิ้งที่แก้ไว้ทั้งหมด?"
+        message={`สีที่แก้ไว้ ${pendingKeys.length} สี (${names(Object.values(drafts).map((d) => d.th))}) จะกลับเป็นค่าเดิม ไม่บันทึก`}
+        confirmText="ละทิ้งทั้งหมด"
         cancelText="อยู่ต่อ"
+        variant="danger"
+      />
+    </div>
+
+      {/* 💾 แถบบันทึกกลาง — ตั้งหลายสีแล้วกดบันทึกทีเดียว */}
+      <SaveBar
+        dirty={dirty}
+        saving={saving}
+        onSave={saveAll}
+        onDiscard={() => setConfirmDiscard(true)}
+        saveLabel={`บันทึกทั้งหมด (${pendingKeys.length} สี)`}
+        note={dirty ? `แก้ไว้: ${names(Object.values(drafts).map((d) => d.th))}${notReady.length ? ` · ยังไม่ครบ ${notReady.length} สี (ข้ามไว้ก่อน)` : ""}` : "ตั้งได้หลายสีแล้วกดบันทึกทีเดียว"}
       />
     </div>
   );
