@@ -37,6 +37,7 @@ const SHOP_URL: Record<string, (h: string) => string> = {
   twitter: (h) => `https://x.com/${h}`,
   shopee: (h) => `https://shopee.co.th/${h}`,
   lazada: (h) => `https://www.lazada.co.th/shop/${h}`,
+  line_oa: (h) => `https://line.me/R/ti/p/@${h}`,
 };
 function shopUrlOf(code: string, raw: string | null | undefined): string | null {
   const v = (raw ?? "").trim();
@@ -46,6 +47,164 @@ function shopUrlOf(code: string, raw: string | null | undefined): string | null 
   if (!handle) return null;
   const make = SHOP_URL[(code || "").toLowerCase()];
   return make ? make(handle) : null;
+}
+
+// ── วิธีตั้งต่อแพลตฟอร์ม (โชว์ในกล่องตอนยังไม่ตั้ง + ปุ่ม "วิธีตั้ง" บนหัวรายละเอียด) ──
+// เพิ่มแพลตฟอร์มใหม่ → เพิ่มที่นี่ (ไม่มี = ใช้ GUIDE_DEFAULT)
+type Guide = { intro?: ReactNode; steps: ReactNode[]; notes?: ReactNode[]; link?: { href: string; label: string }; shopPh?: string };
+const C = ({ children }: { children: ReactNode }) => <span className="font-mono text-[12px] bg-slate-100 px-1 rounded">{children}</span>;
+const EDIT_FIRST = <>กด <b>แก้ไขข้อมูลร้าน</b> → ช่อง “ชื่อร้าน” ตั้งชื่อที่ทีมเรียก (ไม่ต้องตรงกับบนแอป)</>;
+const SAVE_ON = <>กด <b>บันทึก</b> แล้วเปิดสวิตช์ <b>เปิดใช้งาน</b> → กด “เปิดหน้าร้าน” ด้านบนเช็กว่าไปถูกร้าน</>;
+const GUIDE_DEFAULT: Guide = {
+  steps: [EDIT_FIRST, <>ช่อง “Shop ID / ลิงก์ร้าน” วาง<b>ลิงก์หน้าร้านเต็ม</b> (ขึ้นต้น https://) หรือ <C>@ชื่อผู้ใช้</C></>, SAVE_ON],
+};
+const GUIDE: Record<string, Guide> = {
+  facebook: {
+    intro: "เชื่อมครั้งเดียว — ระบบเติมชื่อร้านและลิงก์เพจให้เอง",
+    steps: [
+      <>กด <b>เชื่อมต่อ Facebook</b> ในส่วน “การเชื่อมต่อ” ด้านล่าง</>,
+      <>เข้าสู่ระบบด้วยบัญชี Facebook ที่เป็น<b>แอดมินเพจ</b>ของแบรนด์นี้</>,
+      <>กดอนุญาตทุกข้อ (มี Instagram ให้ติ๊กด้วย) แล้วเลือก<b>เพจของแบรนด์นี้</b></>,
+      <>กลับมาหน้านี้ — ชื่อร้าน + ลิงก์เพจขึ้นเอง และโพสต์จากหน้าคอนเทนต์ได้เลย</>,
+    ],
+    notes: [
+      <>บัญชีที่ใช้กดต้องไม่ติด<b>ด่านตรวจสอบ</b>ของ Facebook — ถ้าติด ให้เข้า facebook.com เคลียร์ก่อนแล้วกดเชื่อมใหม่</>,
+      <>โพสต์ขึ้นแต่คนอื่นไม่เห็น = แอป Meta ยังอยู่<b>โหมด Development</b> ต้องสลับเป็น Live ที่ developers.facebook.com</>,
+    ],
+  },
+  instagram: {
+    intro: "Instagram โพสต์ผ่านเพจ Facebook — ใช้การเชื่อมต่อเดียวกัน",
+    steps: [
+      <>บัญชี IG ของแบรนด์ต้องเป็น<b>บัญชีมืออาชีพ</b> (ธุรกิจหรือครีเอเตอร์) — ในแอป IG: ตั้งค่า › ประเภทบัญชีและเครื่องมือ</>,
+      <>ผูก IG กับ<b>เพจ Facebook ของแบรนด์</b> ใน Meta Business Suite › ตั้งค่า › บัญชี Instagram</>,
+      <>ไปที่ <b>Facebook</b> ในหน้านี้แล้วกดเชื่อมต่อ (ตอนอนุญาตให้ติ๊ก Instagram ด้วย)</>,
+      <>ระบบเติมชื่อร้าน + ลิงก์ <C>instagram.com/ชื่อผู้ใช้</C> ให้เอง</>,
+    ],
+  },
+  lazada: {
+    steps: [
+      <>กด <b>เชื่อมต่อ Lazada</b> ในส่วน “การเชื่อมต่อ” ด้านล่าง</>,
+      <>เข้าสู่ระบบ <b>Lazada Seller Center</b> ด้วยบัญชีร้านของแบรนด์นี้ แล้วกดอนุญาต</>,
+      <>กลับมาหน้านี้ — ระบบเติมชื่อร้านให้เอง</>,
+      <>ลิงก์ร้าน: เปิดร้านบนแอป Lazada › แชร์ › คัดลอกลิงก์ → กด <b>แก้ไขข้อมูลร้าน</b> วางในช่อง “Shop ID / ลิงก์ร้าน”</>,
+    ],
+    notes: [<>Lazada ให้สิทธิ์ทีละ ~30 วัน ระบบต่ออายุให้ทุกวัน — ถ้าขึ้น “หมดอายุ” ให้กดเชื่อมใหม่</>],
+    shopPh: "วางลิงก์ร้านจากแอป Lazada",
+  },
+  line_shopping: {
+    steps: [
+      EDIT_FIRST,
+      <>ช่อง “Shop ID / ลิงก์ร้าน”: เปิดร้านบน LINE SHOPPING แล้วคัดลอกลิงก์ <C>https://shop.line.me/@ไอดีร้าน</C> (ระบบใช้ทำลิงก์สินค้า)</>,
+      <>ขอ API Key จาก oaplus.line.biz แล้ววางในส่วน “API Key” ด้านล่าง (กด “วิธีขอ API Key” ดูทีละขั้น)</>,
+      <>กด <b>ทดสอบการเชื่อมต่อ</b> ให้ขึ้น “เชื่อมต่อสำเร็จ”</>,
+    ],
+    shopPh: "https://shop.line.me/@ไอดีร้าน",
+  },
+  shopee: {
+    steps: [
+      EDIT_FIRST,
+      <>เปิดหน้าร้านของแบรนด์บนแอป Shopee › กด <b>แชร์</b> › <b>คัดลอกลิงก์</b> (หรือเปิดร้านบนเว็บ shopee.co.th แล้วก๊อปลิงก์จากช่องที่อยู่)</>,
+      <>วางในช่อง “Shop ID / ลิงก์ร้าน” — ใส่แค่ชื่อผู้ใช้ร้านก็ได้ เช่น <C>louismontini</C></>,
+      SAVE_ON,
+    ],
+    notes: [<>Shopee ยังเชื่อมอัตโนมัติไม่ได้ (Shopee เปิด API ให้เฉพาะร้าน Mall / Managed Seller) — ตอนนี้ใช้ระบุร้านของแบรนด์และทำลิงก์</>],
+    shopPh: "ลิงก์ร้าน หรือ ชื่อผู้ใช้ร้าน",
+  },
+  tiktok: {
+    steps: [
+      EDIT_FIRST,
+      <>เปิดโปรไฟล์ TikTok ของแบรนด์ › ดู <b>@ชื่อผู้ใช้</b> ใต้รูปโปรไฟล์ (หรือแชร์โปรไฟล์ › คัดลอกลิงก์)</>,
+      <>วาง <C>@ชื่อผู้ใช้</C> หรือลิงก์โปรไฟล์ในช่อง “Shop ID / ลิงก์ร้าน”</>,
+      SAVE_ON,
+    ],
+    notes: [<>โพสต์ TikTok อัตโนมัติยังไม่เปิด — อยู่ในแผนคิวโพสต์ก้อนถัดไป</>],
+    shopPh: "@ชื่อผู้ใช้ TikTok",
+  },
+  website: {
+    steps: [
+      EDIT_FIRST,
+      <>ช่อง “Shop ID / ลิงก์ร้าน” ใส่<b>ลิงก์เต็ม</b>ของเว็บ ขึ้นต้นด้วย <C>https://</C></>,
+      SAVE_ON,
+    ],
+    shopPh: "https://www.ชื่อเว็บ.com",
+  },
+  line_oa: {
+    steps: [
+      EDIT_FIRST,
+      <>เปิด LINE Official Account Manager (manager.line.biz) › เลือกบัญชีของแบรนด์ › ดู<b>ไอดีบัญชี</b>ที่ขึ้นต้นด้วย @</>,
+      <>วาง <C>@ไอดีบัญชี</C> ในช่อง “Shop ID / ลิงก์ร้าน”</>,
+      SAVE_ON,
+    ],
+    link: { href: "https://manager.line.biz", label: "เปิด manager.line.biz" },
+    shopPh: "@ไอดีบัญชี LINE OA",
+  },
+  youtube: {
+    steps: [
+      EDIT_FIRST,
+      <>เปิดช่อง YouTube ของแบรนด์ › ดู <b>@แฮนเดิล</b> ใต้ชื่อช่อง</>,
+      <>วาง <C>@แฮนเดิล</C> ในช่อง “Shop ID / ลิงก์ร้าน”</>,
+      SAVE_ON,
+    ],
+    notes: [<>โพสต์ YouTube Shorts อัตโนมัติอยู่ในแผนคิวโพสต์ก้อนถัดไป</>],
+    shopPh: "@แฮนเดิลช่อง",
+  },
+  pinterest: {
+    steps: [
+      EDIT_FIRST,
+      <>เปิดโปรไฟล์ Pinterest ของแบรนด์ — ชื่อผู้ใช้คือคำท้ายลิงก์ <C>pinterest.com/ชื่อผู้ใช้</C></>,
+      <>วางชื่อผู้ใช้หรือลิงก์โปรไฟล์ในช่อง “Shop ID / ลิงก์ร้าน”</>,
+      SAVE_ON,
+    ],
+    shopPh: "ชื่อผู้ใช้ Pinterest",
+  },
+  x: {
+    steps: [
+      EDIT_FIRST,
+      <>เปิดโปรไฟล์ X ของแบรนด์ › ดู <b>@ชื่อผู้ใช้</b> ใต้ชื่อ</>,
+      <>วาง <C>@ชื่อผู้ใช้</C> ในช่อง “Shop ID / ลิงก์ร้าน”</>,
+      SAVE_ON,
+    ],
+    notes: [<>X ใช้โพสต์แบบกดเอง — ระบบเตรียมแคปชั่นให้คัดลอก</>],
+    shopPh: "@ชื่อผู้ใช้ X",
+  },
+};
+const guideOf = (code: string): Guide => GUIDE[code] ?? GUIDE_DEFAULT;
+// คู่มือขอ API Key ของ LINE SHOPPING (เปิดจากส่วน API Key)
+const LINE_KEY_GUIDE: Guide = {
+  intro: "ทำครั้งเดียวต่อร้าน — คัดลอกคีย์มาวางในช่อง “API Key” แล้วกดบันทึก + ทดสอบการเชื่อมต่อ",
+  steps: [
+    <>เข้า oaplus.line.biz แล้ว<b>ล็อกอิน</b>ด้วยบัญชี LINE ที่เป็นเจ้าของร้าน (ต้องเป็น<b>แอดมินร้าน</b>)</>,
+    <>เลือก<b>ร้าน/บัญชี (Channel)</b> ที่ต้องการ › เมนู <b>“อีคอมเมิร์ซ” (E-Commerce)</b></>,
+    <>ไปที่ <b>“ตั้งค่าร้านค้า” (Shop settings)</b> › หัวข้อ <b>“Open API”</b></>,
+    <>เข้าเมนู <b>“จัดการ API Keys” (Manage API Keys)</b></>,
+    <>กด <b>+ Generate</b> › ตั้งชื่อกำกับ (เช่น <C>ERP</C>) › กด <b>Generate</b></>,
+    <><b>คัดลอกคีย์</b>ที่ได้ › กลับมาวางในช่อง “API Key” ที่นี่ › <b>บันทึกคีย์</b> › <b>ทดสอบการเชื่อมต่อ</b></>,
+  ],
+  notes: [
+    <>คีย์จะโชว์ให้<b>คัดลอกทันทีที่สร้าง</b> — ถ้าไม่ได้ก๊อป ต้องสร้างใหม่</>,
+    <>สร้างได้สูงสุด <b>10 คีย์</b>ต่อร้าน · ถ้าไม่เจอเมนู Open API อาจต้องเปิดใช้ MyShop/แพ็กเกจร้านก่อน</>,
+    <>ระบบเก็บคีย์แบบ<b>เข้ารหัส</b> — ไม่มีใครเห็นค่าคีย์อีก</>,
+  ],
+  link: { href: "https://oaplus.line.biz", label: "เปิด oaplus.line.biz" },
+};
+
+/** ขั้นตอนแบบมีเลขกำกับ + ข้อควรรู้ (ใช้ทั้งกล่องในหน้าและป๊อป) */
+function GuideSteps({ g, compact }: { g: Guide; compact?: boolean }) {
+  return (
+    <div className={`space-y-3 ${compact ? "text-[13px]" : "text-sm"} text-slate-700`}>
+      {g.intro && <p className="text-slate-500">{g.intro}</p>}
+      <ol className="space-y-2">
+        {g.steps.map((li, i) => (
+          <li key={i} className="flex gap-3"><span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] flex items-center justify-center">{i + 1}</span><span>{li}</span></li>
+        ))}
+      </ol>
+      {!!g.notes?.length && (
+        <div className="border-t border-slate-100 pt-3 space-y-1.5 text-[12.5px] text-slate-500">
+          {g.notes.map((n, i) => <p key={i}>• {n}</p>)}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── ชิ้นส่วนหน้าตา (ประกาศนอก component หลัก กัน remount ทุก render) ──
@@ -96,8 +255,10 @@ export default function PlatformAccountsPage() {
   const [keyDraft, setKeyDraft] = useState<Record<string, string>>({});
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<Msg>(null);
-  const [showGuide, setShowGuide] = useState(false);   // คู่มือขอ API Key ของ LINE SHOPPING
+  const [guideFor, setGuideFor] = useState<string | null>(null);   // ป๊อปวิธีตั้ง: code แพลตฟอร์ม · "line_key" = วิธีขอ API Key ของ LINE SHOPPING
   const [loading, setLoading] = useState(true);
+  const [loadedFor, setLoadedFor] = useState("");   // ข้อมูลบนจอเป็นของแบรนด์ไหน (กันใช้ข้อมูลแบรนด์เก่าตอนสลับ)
+  const autoTried = useRef<Set<string>>(new Set());   // แบรนด์ที่ลองเติมชื่อร้านจากการเชื่อมต่อแล้ว (ครั้งเดียวต่อการเปิดหน้า)
   const [msg, setMsg] = useState<Msg>(null);
   const [editPlat, setEditPlat] = useState<string | null>(null);   // แพลตฟอร์มที่กำลังแก้ (ชื่อร้าน/Shop ID) — กันเผลอพิมพ์
   const [editKey, setEditKey] = useState<string | null>(null);      // แพลตฟอร์มที่กำลังแก้ API Key (มีคีย์แล้ว = อ่านอย่างเดียวจนกดแก้)
@@ -137,6 +298,7 @@ export default function PlatformAccountsPage() {
       if (mj) { setFb((mj.facebook ?? { connected: false, stage: "none", page_name: null, pages: [] }) as FbStatus); setFbHasIg(!!mj.instagram?.connected); setMetaCfg(mj.configured !== false); setPickPage(""); }
       if (lj) setLaz(lj as LazStatus);
       setTestMsg(null);
+      setLoadedFor(bid);
       if (!bid && !brandChosen.current && j.brands?.[0]) setBrandId(j.brands[0].id);
     } catch (e) { say((e as Error).message, true); } finally { setLoading(false); }
   }, []);
@@ -175,6 +337,27 @@ export default function PlatformAccountsPage() {
     if (want) { setSel(want.id); setMobileDetail(true); wantCode.current = null; return; }
     if (!sel || !platforms.some((p) => p.id === sel)) setSel((platforms.find((p) => p.code === AUTO_CODES[0]) ?? platforms[0]).id);
   }, [platforms, sel]);
+
+  // เชื่อมแล้วแต่ชื่อร้าน/ลิงก์ยังว่าง → ให้ระบบเติมจากการเชื่อมต่อ (ชื่อเพจ, @IG, ชื่อร้าน Lazada) · เติมเฉพาะช่องว่าง ไม่ทับที่พิมพ์เอง
+  useEffect(() => {
+    if (!canManage || !brandId || loading || loadedFor !== brandId || autoTried.current.has(brandId)) return;
+    const empty = (code: string, shopToo = true) => {
+      const p = platforms.find((x) => x.code === code); if (!p) return false;
+      const a = accounts[p.id]; return !a?.label || (shopToo && !a?.external_shop_id);
+    };
+    const need = (fb.connected && !fb.problem && (empty("facebook") || (fbHasIg && empty("instagram")))) || (laz.connected && empty("lazada", false));
+    if (!need) return;
+    autoTried.current.add(brandId);
+    const bid = brandId;
+    apiFetch("/api/platform-accounts/autofill", { method: "POST", body: JSON.stringify({ brand_id: bid }) })
+      .then((r) => r.json())
+      .then((j: { filled?: { code: string }[] }) => {
+        if (!j.filled?.length) return;
+        flash("เติมชื่อร้าน/ลิงก์จากการเชื่อมต่อให้แล้ว");
+        void load(bid);
+      })
+      .catch(() => { /* เติมไม่ได้ก็ไม่เป็นไร — กรอกเองได้ */ });
+  }, [canManage, brandId, loading, loadedFor, platforms, accounts, fb, fbHasIg, laz, load]);
 
   const connectFb = async () => {
     if (!brandId) return;
@@ -383,7 +566,7 @@ export default function PlatformAccountsPage() {
               <div className="flex flex-wrap items-center gap-4">
                 <button onClick={testConn} disabled={testing || !has} title={has ? "" : "ใส่ API Key ก่อน"} className={BTN_LINE}><Icon name="plugin" />ทดสอบการเชื่อมต่อ</button>
                 {has && <button onClick={() => setClearKeyFor(p.id)} className={LINK_DANGER}>ล้างคีย์</button>}
-                <button onClick={() => setShowGuide(true)} className="text-xs text-slate-600 hover:underline inline-flex items-center gap-1"><Icon name="guide" />วิธีขอ API Key</button>
+                <button onClick={() => setGuideFor("line_key")} className="text-xs text-slate-600 hover:underline inline-flex items-center gap-1"><Icon name="guide" />วิธีขอ API Key</button>
               </div>
               {testMsg && <p className={`text-xs ${testMsg.bad ? "text-rose-600" : "text-slate-600"}`}>{testMsg.text}</p>}
             </>
@@ -467,7 +650,8 @@ export default function PlatformAccountsPage() {
         <section className={`${mobileDetail ? "" : "hidden md:block"} rounded-2xl border border-slate-200 bg-white min-w-0`}>
           {!cur ? <p className="text-slate-400 text-sm py-16 text-center">เลือกแพลตฟอร์มทางซ้าย</p> : (() => {
             const acc = accOf(cur); const st = statusOf(cur); const url = shopUrlOf(cur.code, acc.external_shop_id);
-            const editing = editPlat === cur.id; const conn = connectionOf(cur);
+            const editing = editPlat === cur.id; const conn = connectionOf(cur); const g = guideOf(cur.code);
+            const notSetUp = st.tone === "off" && !acc.label && !acc.external_shop_id;   // ยังไม่ได้ตั้งอะไรเลย → โชว์วิธีตั้งในหน้าเลย
             return (
               <>
                 <div className="flex items-center gap-3 sm:gap-4 px-4 sm:px-6 py-5 border-b border-slate-100">
@@ -478,21 +662,31 @@ export default function PlatformAccountsPage() {
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                       <span className="inline-flex items-center gap-1.5"><Dot tone={st.tone} />{st.label}</span>
                       {url && !editing && <a href={url} target="_blank" rel="noopener noreferrer" title={url} className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 hover:underline"><Icon name="open" />เปิดหน้าร้าน</a>}
+                      {!notSetUp && <button type="button" onClick={() => setGuideFor(cur.code)} className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 hover:underline"><Icon name="guide" />วิธีตั้ง</button>}
                     </p>
                   </div>
                   <ToggleSwitch on={acc.is_active} onChange={(v) => void save(cur.id, { is_active: v })} disabled={!canManage} label={<span className="hidden sm:inline text-xs text-slate-500">เปิดใช้งาน</span>} title="เปิดใช้ร้านนี้" />
                 </div>
 
                 <div className="px-4 sm:px-6 py-6 space-y-8">
+                  {notSetUp && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                        <p className="text-sm font-medium text-slate-900 inline-flex items-center gap-1.5"><Icon name="guide" />วิธีตั้ง {cur.name_th}</p>
+                        {g.link && <a href={g.link.href} target="_blank" rel="noopener noreferrer" className="text-xs text-slate-600 hover:underline inline-flex items-center gap-1">{g.link.label}<Icon name="open" /></a>}
+                      </div>
+                      <GuideSteps g={g} compact />
+                    </div>
+                  )}
                   <Section title="ร้าน" desc="ใช้ตอนลงขายและทำลิงก์สินค้าตามแบรนด์ของสินค้า">
                     <div className="grid gap-3 sm:grid-cols-2">
                       <label className="block">
                         <span className="block text-xs text-slate-500 mb-1">ชื่อร้าน</span>
-                        <ERPInput value={acc.label ?? ""} disabled={!canManage || !editing} placeholder="เช่น Shopee – แบรนด์ A" onChange={(e) => setAccounts((a) => ({ ...a, [cur.id]: { ...acc, label: e.target.value } }))} />
+                        <ERPInput value={acc.label ?? ""} disabled={!canManage || !editing} placeholder={`เช่น ${cur.name_th} – ${brand?.name ?? "แบรนด์"}`} onChange={(e) => setAccounts((a) => ({ ...a, [cur.id]: { ...acc, label: e.target.value } }))} />
                       </label>
                       <label className="block">
                         <span className="block text-xs text-slate-500 mb-1">Shop ID / ลิงก์ร้าน</span>
-                        <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage || !editing} placeholder="เช่น @louismontini" title="ใช้สร้างลิงก์สินค้าบนร้าน เช่น LINE: https://shop.line.me/@Shop ID/product/..." onChange={(e) => setAccounts((a) => ({ ...a, [cur.id]: { ...acc, external_shop_id: e.target.value } }))} />
+                        <ERPInput value={acc.external_shop_id ?? ""} disabled={!canManage || !editing} placeholder={g.shopPh ?? "ลิงก์ร้าน หรือ @ชื่อผู้ใช้"} title="ใช้สร้างลิงก์สินค้าบนร้าน เช่น LINE: https://shop.line.me/@Shop ID/product/..." onChange={(e) => setAccounts((a) => ({ ...a, [cur.id]: { ...acc, external_shop_id: e.target.value } }))} />
                       </label>
                     </div>
                     {canManage && (
@@ -522,31 +716,18 @@ export default function PlatformAccountsPage() {
         </section>
       </div>
 
-      {/* คู่มือขอ API Key LINE SHOPPING */}
-      <ERPModal open={showGuide} onClose={() => setShowGuide(false)} size="md" title="วิธีขอ API Key จาก LINE SHOPPING"
-        footer={<a href="https://oaplus.line.biz" target="_blank" rel="noopener noreferrer" className={BTN_DARK}>เปิด oaplus.line.biz<Icon name="open" /></a>}>
-        <div className="space-y-4 text-sm text-slate-700">
-          <p className="text-slate-500">ทำครั้งเดียวต่อร้าน — คัดลอกคีย์มาวางในช่อง “API Key” แล้วกดบันทึก + ทดสอบการเชื่อมต่อ</p>
-          <ol className="space-y-2.5">
-            {[
-              <>เข้า <a href="https://oaplus.line.biz" target="_blank" rel="noopener noreferrer" className="underline">oaplus.line.biz</a> แล้ว <b>ล็อกอิน</b> ด้วยบัญชี LINE ที่เป็นเจ้าของร้าน (ต้องเป็น<b>แอดมินร้าน</b>)</>,
-              <>เลือก <b>ร้าน/บัญชี (Channel)</b> ที่ต้องการ → เข้าเมนู <b>“อีคอมเมิร์ซ” (E-Commerce)</b></>,
-              <>ไปที่ <b>“ตั้งค่าร้านค้า” (Shop settings)</b> → เลือกหัวข้อ <b>“Open API”</b></>,
-              <>เข้าเมนู <b>“จัดการ API Keys” (Manage API Keys)</b></>,
-              <>กด <b>+ Generate</b> → ตั้งชื่อกำกับ (เช่น <span className="font-mono text-xs bg-slate-100 px-1 rounded">ERP</span>) → กด <b>Generate</b></>,
-              <><b>คัดลอกคีย์</b>ที่ได้ → กลับมาวางในช่อง “API Key” ที่นี่ → <b>บันทึกคีย์</b> → <b>ทดสอบการเชื่อมต่อ</b></>,
-            ].map((li, i) => (
-              <li key={i} className="flex gap-3"><span className="shrink-0 w-5 h-5 rounded-full bg-slate-900 text-white text-[11px] flex items-center justify-center">{i + 1}</span><span>{li}</span></li>
-            ))}
-          </ol>
-          <div className="border-t border-slate-100 pt-3 space-y-1.5 text-[13px] text-slate-500">
-            <p className="font-medium text-slate-600">ข้อควรระวัง</p>
-            <p>• คีย์จะโชว์ให้ <b>คัดลอกทันทีที่สร้าง</b> — ถ้าไม่ได้ก๊อป ต้องสร้างใหม่</p>
-            <p>• สร้างได้สูงสุด <b>10 คีย์</b> ต่อร้าน · ถ้าไม่เจอเมนู Open API อาจต้องเปิดใช้ MyShop/แพ็กเกจร้านก่อน</p>
-            <p>• ระบบเก็บคีย์แบบ<b>เข้ารหัส</b> — ไม่มีใครเห็นค่าคีย์อีก</p>
-          </div>
-        </div>
-      </ERPModal>
+      {/* ป๊อปวิธีตั้ง — ต่อแพลตฟอร์ม (GUIDE) หรือวิธีขอ API Key ของ LINE SHOPPING */}
+      {(() => {
+        const gp = guideFor && guideFor !== "line_key" ? platforms.find((x) => x.code === guideFor) : null;
+        const gg = guideFor === "line_key" ? LINE_KEY_GUIDE : guideFor ? guideOf(guideFor) : null;
+        return (
+          <ERPModal open={!!gg} onClose={() => setGuideFor(null)} size="md"
+            title={guideFor === "line_key" ? "วิธีขอ API Key จาก LINE SHOPPING" : `วิธีตั้ง ${gp?.name_th ?? ""}`}
+            footer={gg?.link ? <a href={gg.link.href} target="_blank" rel="noopener noreferrer" className={BTN_DARK}>{gg.link.label}<Icon name="open" /></a> : undefined}>
+            {gg && <GuideSteps g={gg} />}
+          </ERPModal>
+        );
+      })()}
 
       {/* ยืนยันก่อนล้าง API Key (ลบแล้วต้องไปขอ/คัดลอกมาใหม่) */}
       <ConfirmDialog open={!!clearKeyFor} onClose={() => setClearKeyFor(null)} variant="danger" title="ล้าง API Key?" confirmText="ล้างคีย์"

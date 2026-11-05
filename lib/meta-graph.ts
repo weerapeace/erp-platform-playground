@@ -49,6 +49,11 @@ export async function metaCheckToken(token: string): Promise<MetaApiError | null
   catch (e) { return e instanceof MetaApiError ? e : new MetaApiError((e as Error).message); }
 }
 
+/** อ่านข้อมูลพื้นฐานของเพจ/บัญชี IG (เช่น "link" ของเพจ · "username,name" ของ IG) — ใช้เติมชื่อร้าน/ลิงก์ให้อัตโนมัติ */
+export async function metaGetFields(objectId: string, fields: string, token: string): Promise<Record<string, unknown>> {
+  return graph(`${META_API}/${encodeURIComponent(objectId)}?fields=${encodeURIComponent(fields)}&access_token=${encodeURIComponent(token)}`);
+}
+
 // code → access token ระยะสั้น
 export async function metaExchangeCode(code: string, redirectUri: string): Promise<string> {
   const q = new URLSearchParams({ client_id: APP_ID(), client_secret: APP_SECRET(), redirect_uri: redirectUri, code });
