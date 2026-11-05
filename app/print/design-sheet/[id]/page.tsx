@@ -5,6 +5,7 @@
  * ใช้ระบบ template กลาง (erp_report_templates entity_type='design_sheet') — แก้หน้าตาใบได้ที่ /admin/report-templates
  * 2 รูปแบบ (สลับก่อนพิมพ์ · จำต่อคนใน user_ui_prefs):
  *   • แบบปกติ = เทมเพลตใน DB ตรง ๆ (รูปหลักใหญ่ · ตาราง comment รูปจิ๋ว)
+ *   • 📐 รายละเอียดงาน = รูป+สิ่งที่วาด+หมุดวัตถุดิบ · ตารางหมุด · สรุปวัตถุดิบ · ตารางสี (เปิดตรงได้ด้วย ?mode=spec)
  *   • เน้น Comment ลูกค้า = รูปหลักย่อเล็ก · comment เป็นการ์ด + ติ๊กเลือกรูปแนบที่จะพิมพ์ใหญ่ (lib/design-sheet-print)
  */
 import { useState, useEffect, useMemo } from "react";
@@ -13,7 +14,10 @@ import { PrintToolbar, PrintFrame } from "@/components/report";
 import { docFileName } from "@/lib/print-filename";
 import { apiFetch } from "@/lib/api";
 import { buildReportHtml, buildReportImageGridHtml } from "@/lib/template";
-import { withImageWidth } from "@/lib/r2-image";
+import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
+import { buildSpecPrintHtml, DS_SPEC_BODY, type SpecPrintData } from "@/lib/design-sheet-spec";
+import { cleanSpecColors } from "@/lib/design-sheet-spec-colors";
+import type { SpecPage, SpecPin } from "@/app/api/design-sheets/[id]/spec/route";
 import { useViewPref } from "@/lib/use-view-pref";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import {
@@ -194,6 +198,7 @@ function Seg<T extends string>({ value, options, onChange }: {
 const MODE_OPTIONS = [
   { v: "standard", label: "📄 แบบปกติ" },
   { v: "comments", label: "💬 เน้น Comment ลูกค้า" },
+  { v: "spec", label: "📐 รายละเอียดงาน" },
 ] as const;
 const COLS_OPTIONS = [
   { v: "1", label: "ใหญ่ (1 รูป/แถว)" },
@@ -280,6 +285,7 @@ export default function PrintDesignSheetPage() {
   const [comments, setComments] = useState<DesignSheetComment[]>([]);
   const [images, setImages]     = useState<Attachment[]>([]);
   const [template, setTemplate] = useState<ReportTemplateRow | null>(null);
+  const [spec, setSpec] = useState<SpecPrintData | null>(null);   // 📐 รายละเอียดงาน (รูป+หมุด+ตารางสี)
   const [focusTemplate, setFocusTemplate] = useState<ReportTemplateRow | null>(null);   // เทมเพลตโหมดเน้น comment ใน DB (ถ้ามี)
   const [statusMeta, setStatusMeta] = useState<StatusMeta>(() => buildStatusMeta(null));
   const [canvasUrl, setCanvasUrl]   = useState<string | null>(null);
@@ -351,8 +357,22 @@ export default function PrintDesignSheetPage() {
       apiFetch("/api/admin/report-templates?entity_type=design_sheet").then((r) => r.json()),
       apiFetch("/api/design-sheets/statuses").then((r) => r.json()),
       apiFetch(`/api/canvas-sketch?entity_type=design_sheet&entity_id=${encodeURIComponent(id)}`).then((r) => r.json()),
+      apiFetch(`/api/design-sheets/${id}/spec`).then((r) => r.json()).catch(() => ({ error: "spec" })),
     ])
-      .then(([sRes, cRes, aRes, tRes, stRes, cvRes]) => {
+      .then(([sRes, cRes, aRes, tRes, stRes, cvRes, spRes]) => {
+        if (!spRes.error) {
+          const pins = (spRes.pins ?? []) as SpecPin[];
+          setSpec({
+            pages: ((spRes.pages ?? []) as SpecPage[]).map((p) => ({
+              title: p.title, image_url: p.image_url, image_w: p.image_w, image_h: p.image_h, shapes: Array.isArray(p.shapes) ? p.shapes : [],
+              pins: pins.filter((x) => x.page_id === p.id).map((x) => ({
+                no: Number(x.no ?? 0), x: Number(x.x), y: Number(x.y), part_name: x.part_name, sku_id: x.sku_id, sku_code: x.sku_code, sku_name: x.sku_name,
+                qty: x.qty == null ? null : Number(x.qty), uom: x.uom, note: x.note,
+              })),
+            })),
+            colors: cleanSpecColors(spRes.colors),
+          });
+        }
         if (sRes.error) throw new Error(sRes.error);
         setSheet(sRes.data as Sheet);
         if (!cRes.error) setComments((cRes.data ?? []) as DesignSheetComment[]);
@@ -373,9 +393,24 @@ export default function PrintDesignSheetPage() {
     [mode, comments, skipComments, skipCommentImages, cols],
   );
 
+  // เปิดจากแท็บรายละเอียดงาน (?mode=spec) → สลับเป็นโหมดนั้นครั้งนี้ (ไม่เปลี่ยนค่าที่จำไว้)
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("mode") === "spec") modePref.setView("spec");
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
   const html = useMemo(() => {
     if (!sheet || !template) return "";
     const origin = typeof window !== "undefined" ? window.location.origin : "";
+    if (mode === "spec") {
+      const abs = (u: string) => absUrl(u, origin);
+      const specHtml = spec ? buildSpecPrintHtml(spec, abs, (key, w) => abs(r2ImageUrl(key, w) ?? "")) : "";
+      return buildReportHtml(
+        { paper_size: template.paper_size, orientation: template.orientation,
+          header_html: template.header_html, body_html: DS_SPEC_BODY,
+          footer_html: template.footer_html, custom_css: template.custom_css },
+        { ...buildData(sheet, comments, [], origin, statusMeta, null, null), spec_html: specHtml },
+      );
+    }
     // โหมดเน้น comment: ใช้เทมเพลต comment_focus ใน DB ถ้ามี ไม่งั้นยืมหัว/ท้ายใบ + CSS ของตัวหลัก แล้วเปลี่ยนแค่เนื้อกลาง
     const tpl = focus ? (focusTemplate ?? { ...template, body_html: DS_COMMENT_FOCUS_BODY }) : template;
     return buildReportHtml(
@@ -384,7 +419,7 @@ export default function PrintDesignSheetPage() {
         footer_html: tpl.footer_html, custom_css: tpl.custom_css },
       buildData(sheet, comments, selectedImages, origin, statusMeta, canvasUrl, focus),
     );
-  }, [sheet, comments, selectedImages, template, focusTemplate, statusMeta, canvasUrl, focus]);
+  }, [sheet, comments, selectedImages, template, focusTemplate, statusMeta, canvasUrl, focus, mode, spec]);
 
   const fileName = docFileName("ใบสั่งตัวอย่าง", sheet ? String(sheet.code ?? "") : null);
 
@@ -414,7 +449,7 @@ export default function PrintDesignSheetPage() {
                 </div>
               )}
             </div>
-            {imageAtts.length > 0 && (
+            {imageAtts.length > 0 && mode !== "spec" && (
               <ImagePicker images={imageAtts} selected={selImageIds ?? new Set()} onToggle={toggleImage} max={MAX_PRINT_IMAGES} small={mode === "comments"} />
             )}
             {mode === "comments" && (

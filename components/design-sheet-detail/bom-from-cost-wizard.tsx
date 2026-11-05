@@ -9,6 +9,7 @@
  *
  * ใช้ของกลาง: ERPModal · SkuPicker(/api/pickers/skus) · useToast · POST /api/bom
  * ดึงเฉพาะ "แท็บที่กำลังดู" (curLines) ตามที่เจ้าของเลือก
+ * ใช้ซ้ำจากแท็บรายละเอียดงาน (หมุดวัตถุดิบ): บรรทัดมี component_sku = ได้วัตถุดิบตัวจริงเลย (ส่ง source/title/notePrefix ตามที่มา)
  */
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
@@ -29,6 +30,7 @@ export type CostSourceLine = {
   waste_percent: number | null;
   qty: number | null;
   uom: string | null;
+  component_sku?: string | null;   // รหัสวัตถุดิบตัวจริง (มาจากหมุดในรายละเอียดงาน) · ไม่มี = เติมทีหลังในหน้าสูตร
 };
 
 const verCode = (sku: string, n: number) => (n <= 1 ? `BOM-${sku}` : `BOM-${sku}_v.${n}`);
@@ -36,12 +38,14 @@ const verNum = (v: string | null) => { const m = (v ?? "").match(/(\d+)/); retur
 const fmt = (n: number | null) => (n == null ? "—" : n.toLocaleString("th-TH", { maximumFractionDigits: 4 }));
 
 export function BomFromCostWizard({
-  open, onClose, lines, tabLabel,
+  open, onClose, lines, tabLabel, title, notePrefix = "ดึงจากตีราคา",   // หมายเหตุ = ข้อมูลในสูตร → คงภาษาไทยเสมอ (เหมือนเดิม)
 }: {
   open: boolean;
   onClose: () => void;
   lines: CostSourceLine[];     // บรรทัดของแท็บที่กำลังดู
   tabLabel: string;            // ชื่อแท็บ (เช่น "ทั่วไป" หรือ "CTL110")
+  title?: string;              // หัวป๊อป (ค่าเริ่ม = สร้างจากตีราคา)
+  notePrefix?: string;         // หมายเหตุในสูตรที่สร้าง เช่น "ดึงจากรายละเอียดงาน"
 }) {
   const t = useT();
   const toast = useToast();
@@ -72,7 +76,7 @@ export function BomFromCostWizard({
 
       const bomLines = chosen.map((r, i) => ({
         slot_code: null,
-        component_sku: null,                       // วัตถุดิบตัวจริงเติมทีหลัง
+        component_sku: r.component_sku ?? null,    // มีรหัส (จากหมุด) = ใส่เลย · ไม่มี = เติมทีหลัง
         component_name: r.item_name ?? null,       // ชื่อวัสดุจากตีราคา = ตัวช่วยจำ
         qty: r.qty ?? r.pieces ?? 1,
         uom: r.uom ?? null,
@@ -95,7 +99,7 @@ export function BomFromCostWizard({
           product_sku: sku.code, product_name: sku.name,
           bom_code: verCode(sku.code, ver), version: `v${ver}`,
           bom_type: "normal", status: "draft",
-          note: `ดึงจากตีราคา (${tabLabel})`, lines: bomLines,
+          note: `${notePrefix} (${tabLabel})`, lines: bomLines,
         }),
       }).then((r) => r.json());
 
@@ -114,7 +118,7 @@ export function BomFromCostWizard({
   };
 
   return (
-    <ERPModal open={open} onClose={onClose} size="lg" title={t("🧬 สร้างสูตร BOM จากตีราคา", "🧬 Create BOM from costing")}>
+    <ERPModal open={open} onClose={onClose} size="lg" title={title ?? t("🧬 สร้างสูตร BOM จากตีราคา", "🧬 Create BOM from costing")}>
       {/* ==== สำเร็จ ==== */}
       {step === 3 && createdSku ? (
         <div className="p-2 flex flex-col items-center text-center gap-3 py-6">
@@ -144,9 +148,15 @@ export function BomFromCostWizard({
                 <span className="text-[11px] text-slate-400">{chosen.length}/{lines.length} {t("บรรทัด", "lines")}</span>
               </div>
 
+              {lines.some((r) => r.component_sku) ? (
+              <div className="px-3 py-2 mb-2 text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">
+                {t("ดึง", "Copies")} <b>{t("วัตถุดิบ (SKU) + จำนวน", "materials (SKU) + quantity")}</b> {t("จากหมุด — ขนาดตัด / เผื่อเสีย ค่อยไปเติมในหน้าสูตร", "from the pins — cut sizes / waste are filled in on the BOM page")}
+              </div>
+              ) : (
               <div className="px-3 py-2 mb-2 text-[12px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">
                 {t("ดึงมาแค่", "Only copies")} <b>{t("ขนาด (กว้าง/ยาว)", "size (width/length)")}</b>, <b>{t("จำนวน", "quantity")}</b>, <b>{t("ชนิด", "type")}</b> — {t("ส่วน", "the")} <b>{t("วัตถุดิบตัวจริง", "actual materials")}</b> {t("ค่อยไปเลือกในหน้าสูตรทีหลัง", "are chosen later on the BOM page")}
               </div>
+              )}
 
               {lines.length === 0 ? (
                 <div className="px-3 py-6 text-center text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg">
@@ -175,7 +185,7 @@ export function BomFromCostWizard({
                             </td>
                             <td className="px-2 py-1.5">
                               <div className="text-slate-700 truncate">{r.item_name || "—"}</div>
-                              <div className="text-[11px] text-slate-400 truncate">{r.group_name || t("ไม่ระบุชนิด", "No type")}</div>
+                              <div className="text-[11px] text-slate-400 truncate">{r.component_sku ? <span className="font-mono">{r.component_sku}</span> : (r.group_name || t("ไม่ระบุชนิด", "No type"))}</div>
                             </td>
                             <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{fmt(r.width_cm)}</td>
                             <td className="px-2 py-1.5 text-right tabular-nums text-slate-600">{fmt(r.length_cm)}</td>

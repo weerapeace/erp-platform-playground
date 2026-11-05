@@ -7,7 +7,7 @@
  * pure (ไม่แตะ DOM/เน็ต) → เทสได้ที่ lib/__tests__/design-sheet-print.test.ts
  */
 
-export const DS_PRINT_MODES = ["standard", "comments"] as const;
+export const DS_PRINT_MODES = ["standard", "comments", "spec"] as const;   // spec = 📐 รายละเอียดงาน (lib/design-sheet-spec buildSpecPrintHtml)
 export type DsPrintMode = (typeof DS_PRINT_MODES)[number];
 
 export const DS_COMMENT_COLS = ["1", "2", "3"] as const;   // จำนวนรูปต่อแถวในการ์ด comment

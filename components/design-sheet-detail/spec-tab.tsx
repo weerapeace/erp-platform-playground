@@ -5,7 +5,8 @@
  *
  * รูปหลายหน้า (เลือกจากรูปในใบงาน / อัปโหลดเพิ่ม) → วาดบนรูป (สี่เหลี่ยม · วงกลม · ข้อความ · เส้น)
  * + หมุดวัตถุดิบ (ผูก SKU ผ่าน ComponentPicker) + สรุปวัตถุดิบรวมทุกหน้า
- * + ตารางสี (รอบ 2 · spec-colors.tsx) · บันทึกทั้งชุดผ่าน PUT /api/design-sheets/[id]/spec · ส่งไปตีราคา / ใบพิมพ์ = รอบ 3
+ * + ตารางสี (รอบ 2 · spec-colors.tsx) · บันทึกทั้งชุดผ่าน PUT /api/design-sheets/[id]/spec
+ * + รอบ 3: สรุปวัตถุดิบ → ส่งไปตีราคา (onSendToCost ของหน้าแม่) / สร้างสูตร BOM (BomFromCostWizard) · พิมพ์ (/print/design-sheet/[id]?mode=spec)
  *
  * ของกลางที่ใช้: ImageMarkup (+Toolbar) · ComponentPicker · ERPModal · ConfirmDialog · ImageManager · useToast
  */
@@ -23,20 +24,25 @@ import { MARKUP_COLORS, newMarkupId, type MarkupSelection, type MarkupShape, typ
 import type { SpecPage, SpecPin, SpecPutPage } from "@/app/api/design-sheets/[id]/spec/route";
 import { cleanSpecColors, EMPTY_SPEC_COLORS, type SpecColorTable } from "@/lib/design-sheet-spec-colors";
 import { SpecColorTableEditor } from "./spec-colors";
+import { BomFromCostWizard } from "./bom-from-cost-wizard";
+import { summarizeSpecPins, specMaterialItems, fmtSpecQty, type SpecMaterialItem } from "@/lib/design-sheet-spec";
 import type { DesignSheetImage } from "@/app/api/design-sheets/[id]/images/route";
 
 type Pin = Omit<SpecPin, "id" | "page_id" | "no"> & { key: string };
 type Page = Omit<SpecPage, "id" | "sort_order"> & { key: string; pins: Pin[] };
-type SumRow = { code: string | null; name: string | null; imageKey: string | null; nos: number[]; qty: Map<string, number>; noQty: boolean };
 
 const fmtQty = (n: number) => (Math.round(n * 1000) / 1000).toLocaleString("th-TH");
 
-export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }: {
+export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, onSendToCost, costSkuIds = [] }: {
   sheetId: string;
   canEdit: boolean;
   onDirtyChange?: (dirty: boolean) => void;
   /** ปุ่ม "บันทึกแล้วปิด" ของป๊อปใบงาน เรียกบันทึกแท็บนี้ได้ */
   saveRef?: MutableRefObject<(() => Promise<boolean>) | null>;
+  /** รอบ 3: ส่งวัตถุดิบจากสรุปไปเป็นบรรทัดในแท็บตีราคา (หน้าแม่สร้างบรรทัด + สลับไปแท็บตีราคา) */
+  onSendToCost?: (items: SpecMaterialItem[]) => Promise<void> | void;
+  /** SKU ที่มีในแท็บตีราคาอยู่แล้ว (ตั้งต้นไม่ติ๊ก กันซ้ำ) */
+  costSkuIds?: string[];
 }) {
   const t = useT();
   const toast = useToast();
@@ -156,18 +162,29 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
   const imageKeys = useMemo(() => pages.map((p) => p.image_key).filter((k): k is string => !!k), [pages]);
 
   // สรุปวัตถุดิบ: รวมหมุดที่ใช้ SKU เดียวกัน (ทุกหน้า) · จำนวนรวมแยกตามหน่วย
-  const summary = useMemo(() => {
-    const m = new Map<string, SumRow>();
-    let missing = 0;
-    for (const p of pages) for (const x of p.pins) {
-      if (!x.sku_id) { missing++; continue; }
-      const e: SumRow = m.get(x.sku_id) ?? { code: x.sku_code, name: x.sku_name, imageKey: x.sku_image_key ?? null, nos: [], qty: new Map(), noQty: false };
-      e.nos.push(pinNo.get(x.key) ?? 0);
-      if (x.qty != null) { const u = x.uom ?? ""; e.qty.set(u, (e.qty.get(u) ?? 0) + x.qty); } else e.noQty = true;
-      m.set(x.sku_id, e);
-    }
-    return { rows: Array.from(m.values()), missing };
-  }, [pages, pinNo]);
+  const summary = useMemo(() => summarizeSpecPins(pages.flatMap((p) => p.pins.map((x) => ({ ...x, no: pinNo.get(x.key) ?? 0 })))), [pages, pinNo]);
+  const materialItems = useMemo(() => specMaterialItems(summary.rows), [summary]);
+
+  // รอบ 3: ส่งไปตีราคา (เลือกรายการ) · สร้างสูตร BOM · พิมพ์
+  const [sendOpen, setSendOpen] = useState(false);
+  const [sendSel, setSendSel] = useState<Set<number>>(new Set());
+  const [sending, setSending] = useState(false);
+  const [bomOpen, setBomOpen] = useState(false);
+  const openSend = () => {
+    const have = new Set(costSkuIds);
+    setSendSel(new Set(materialItems.map((it, i) => (have.has(it.sku_id) ? -1 : i)).filter((i) => i >= 0)));
+    setSendOpen(true);
+  };
+  const doSend = async () => {
+    if (!onSendToCost) return;
+    setSending(true);
+    try { await onSendToCost(materialItems.filter((_, i) => sendSel.has(i))); setSendOpen(false); }
+    finally { setSending(false); }
+  };
+  const openPrint = () => {
+    if (dirty) { toast.error(t("มีแก้ไขที่ยังไม่บันทึก — กด 💾 บันทึกรายละเอียดงาน ก่อนพิมพ์", "Unsaved changes — save job details before printing")); return; }
+    window.open(`/print/design-sheet/${sheetId}?mode=spec`, "_blank", "noopener");
+  };
 
   if (loading) return <div className="py-10 text-center text-sm text-slate-400">{t("กำลังโหลดรายละเอียดงาน…", "Loading job details…")}</div>;
   if (loadErr) return (
@@ -323,17 +340,17 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
                 </tr></thead>
                 <tbody>
                   {summary.rows.map((r) => (
-                    <tr key={`${r.code}-${r.nos.join("-")}`} className="border-b border-slate-100 last:border-0">
+                    <tr key={r.sku_id} className="border-b border-slate-100 last:border-0">
                       <td className="py-1.5 pr-2">
                         <div className="flex items-center gap-1.5 min-w-0">
                           {r.imageKey && /* eslint-disable-next-line @next/next/no-img-element */ <img src={r2ImageUrl(r.imageKey, 64) ?? ""} alt="" className="h-7 w-7 rounded object-cover bg-slate-100 shrink-0" />}
                           <div className="min-w-0"><div className="text-slate-700 truncate">{r.name}</div><div className="font-mono text-[10px] text-slate-400">{r.code}</div></div>
                         </div>
                       </td>
-                      <td className="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{r.nos.sort((a, b) => a - b).map((n) => `#${n}`).join(" ")}</td>
+                      <td className="py-1.5 pr-2 text-slate-500 whitespace-nowrap">{r.nos.map((n) => `#${n}`).join(" ")}</td>
                       <td className="py-1.5 text-right tabular-nums text-slate-700 whitespace-nowrap">
-                        {Array.from(r.qty.entries()).map(([u, q]) => `${fmtQty(q)} ${u}`.trim()).join(" + ") || "—"}
-                        {r.noQty && r.qty.size > 0 && <span className="text-amber-600" title={t("บางหมุดยังไม่ใส่จำนวน", "Some pins have no quantity")}> *</span>}
+                        {r.qty.map((q) => `${fmtSpecQty(q.qty)} ${q.uom}`.trim()).join(" + ") || "—"}
+                        {r.noQty && r.qty.length > 0 && <span className="text-amber-600" title={t("บางหมุดยังไม่ใส่จำนวน", "Some pins have no quantity")}> *</span>}
                       </td>
                     </tr>
                   ))}
@@ -341,6 +358,20 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
               </table>
             )}
             {summary.missing > 0 && <p className="mt-1.5 text-[11px] text-amber-600">{t(`อีก ${summary.missing} หมุดยังไม่เลือก SKU (หมุดสีส้ม)`, `${summary.missing} more pins have no SKU (orange pins)`)}</p>}
+            {canEdit && summary.rows.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-slate-100 flex items-center gap-1.5 flex-wrap">
+                {onSendToCost && (
+                  <button type="button" onClick={openSend} title={t("เพิ่มวัตถุดิบเหล่านี้เป็นบรรทัดในแท็บตีราคา", "Add these materials as costing lines")}
+                    className="h-8 px-2.5 text-xs font-medium border border-amber-300 text-amber-700 bg-amber-50 rounded-lg hover:bg-amber-100 inline-flex items-center gap-1">
+                    <Icon name="calc" /> {t("ส่งไปตีราคา", "Send to costing")}
+                  </button>
+                )}
+                <button type="button" onClick={() => setBomOpen(true)} title={t("สร้างสูตรการผลิต (BOM) จากวัตถุดิบในสรุป", "Create a production BOM from these materials")}
+                  className="h-8 px-2.5 text-xs font-medium border border-indigo-300 text-indigo-700 bg-indigo-50 rounded-lg hover:bg-indigo-100 inline-flex items-center gap-1">
+                  <Icon name="dna" /> {t("สร้างสูตร BOM", "Create BOM")}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -349,15 +380,57 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
       {/* 🎨 ตารางสี (รอบ 2) — บันทึกพร้อมปุ่มด้านล่าง */}
       <SpecColorTableEditor value={colors} onChange={(c) => { setColors(c); setDirty(true); }} canEdit={canEdit} pinParts={pinParts} imageKeys={imageKeys} />
 
+      <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+        <button type="button" onClick={openPrint} title={t("ใบพิมพ์รายละเอียดงาน (รูป+หมุด · สรุปวัตถุดิบ · ตารางสี)", "Print job details (images+pins · materials · colours)")}
+          className="mr-auto h-9 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 inline-flex items-center gap-1.5">
+          <Icon name="print" /> {t("พิมพ์รายละเอียดงาน", "Print job details")}
+        </button>
       {canEdit && (
-        <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
+        <>
           {dirty && <span className="text-xs text-amber-600">{t("● มีแก้ไขที่ยังไม่บันทึก", "● Unsaved changes")}</span>}
           <button type="button" onClick={() => void save()} disabled={saving || !dirty}
             className="h-9 px-4 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 inline-flex items-center gap-1.5">
             <Icon name="save" /> {saving ? t("กำลังบันทึก…", "Saving…") : t("บันทึกรายละเอียดงาน", "Save job details")}
           </button>
-        </div>
+        </>
       )}
+      </div>
+
+      {/* ส่งไปตีราคา — เลือกรายการ (SKU ที่มีในตีราคาแล้ว ตั้งต้นไม่ติ๊ก) */}
+      <ERPModal open={sendOpen} onClose={() => !sending && setSendOpen(false)} size="md" title={t("ส่งวัตถุดิบไปแท็บตีราคา", "Send materials to costing")}
+        description={t("เพิ่มเป็นบรรทัดใหม่ในแท็บตีราคา (ชนิด/ราคา/หน้ากว้าง ดึงจาก SKU · จำนวนจากหมุด) — ตรวจแล้วกด 💾 บันทึกตีราคา", "Adds new costing lines (type/price/width from the SKU · quantity from the pins) — review, then save costing")}
+        footer={<>
+          <button type="button" onClick={() => setSendOpen(false)} disabled={sending} className="h-9 px-4 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 disabled:opacity-50">{t("ยกเลิก", "Cancel")}</button>
+          <button type="button" onClick={() => void doSend()} disabled={sending || sendSel.size === 0}
+            className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50">
+            {sending ? t("กำลังส่ง…", "Sending…") : t(`ส่ง ${sendSel.size} รายการ`, `Send ${sendSel.size} items`)}
+          </button>
+        </>}>
+        <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg">
+          {materialItems.map((it, i) => {
+            const inCost = costSkuIds.includes(it.sku_id);
+            return (
+              <label key={`${it.sku_id}-${it.uom ?? ""}`} className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50">
+                <input type="checkbox" checked={sendSel.has(i)} className="h-4 w-4 accent-amber-500"
+                  onChange={(e) => setSendSel((s) => { const n = new Set(s); if (e.target.checked) n.add(i); else n.delete(i); return n; })} />
+                <span className="flex-1 min-w-0">
+                  <span className="block text-sm text-slate-700 truncate">{it.sku_name || it.sku_code}</span>
+                  <span className="block text-[11px] text-slate-400"><span className="font-mono">{it.sku_code}</span>{inCost && <span className="ml-1.5 text-amber-600">{t("· มีในตีราคาแล้ว", "· already in costing")}</span>}</span>
+                </span>
+                <span className="text-sm tabular-nums text-slate-600 whitespace-nowrap">{it.qty != null ? `${fmtSpecQty(it.qty)} ${it.uom ?? ""}` : t("ไม่ระบุจำนวน", "No qty")}</span>
+              </label>
+            );
+          })}
+        </div>
+      </ERPModal>
+
+      <BomFromCostWizard open={bomOpen} onClose={() => setBomOpen(false)}
+        title={t("🧬 สร้างสูตร BOM จากรายละเอียดงาน", "🧬 Create BOM from job details")}
+        tabLabel={t("รายละเอียดงาน", "Job details")} notePrefix="ดึงจากใบงานออกแบบ"
+        lines={materialItems.map((it) => ({
+          item_name: it.sku_name || it.sku_code, group_name: null, width_cm: null, length_cm: null, pieces: null,
+          face_width_cm: null, waste_percent: null, qty: it.qty, uom: it.uom, component_sku: it.sku_code,
+        }))} />
 
       {pickModal}
       <ConfirmDialog open={delPage != null} onClose={() => setDelPage(null)} variant="danger"

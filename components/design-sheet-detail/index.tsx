@@ -56,6 +56,7 @@ import type { CostLine, PrevItem } from "@/app/api/design-sheets/[id]/cost-lines
 import { CostVersionsModal } from "./cost-versions";
 import { QuoteRounds } from "./quote-rounds";
 import { normalizeSnapLine, cleanExtra, extraAmountAt, type SnapExtra, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
+import type { SpecMaterialItem } from "@/lib/design-sheet-spec";
 import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
@@ -1022,6 +1023,31 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     if (to === from) { setVerRename(null); return; }
     if (costParentTabs.some((tb) => tb.key === to)) { toast.error(t(`มีแท็บชื่อ "${to}" อยู่แล้ว — ตั้งชื่ออื่น`, `A tab named "${to}" already exists — choose another name`)); return; }
     if (await versionOp("rename", from, to)) setVerRename(null);
+  };
+
+  // 📐 รายละเอียดงาน → "ส่งไปตีราคา": วัตถุดิบจากหมุด = บรรทัดใหม่ในแท็บตีราคาที่ดูอยู่
+  // ข้อมูลวัตถุดิบ (กลุ่ม/ราคา/หน้ากว้าง) ดึงจากคลังเหมือนเลือก SKU ในตาราง (costSkuPatch) · จำนวนจากหมุด = กรอกตรง (พิมพ์เอง)
+  const sendSpecToCost = async (items: SpecMaterialItem[]) => {
+    if (!items.length) return;
+    const comps = await Promise.all(items.map((it) => it.sku_code
+      ? apiFetch(`/api/bom/components?search=${encodeURIComponent(it.sku_code)}&limit=10`).then((r) => r.json())
+          .then((j) => ((j.data ?? []) as BomComponent[]).find((c) => c.id === it.sku_id || c.code === it.sku_code) ?? null).catch(() => null)
+      : Promise.resolve(null)));
+    const ts = Date.now();
+    const rows = items.map((it, i) => {
+      const base: CostRow = { ...newCostRow(), key: `sp${ts}_${i}`, sort_order: costLines.length + i + 1 };
+      const c = comps[i];
+      let r: CostRow = c ? { ...base, ...costSkuPatch(c, priceGroups, base) }
+        : { ...base, item_sku_id: it.sku_id, item_sku_code: it.sku_code, item_name: it.sku_name || it.sku_code };
+      if (it.qty != null) r = { ...r, calc_method: "manual", qty: it.qty, uom: it.uom ?? r.uom };
+      r = { ...r, note: "จากรายละเอียดงาน" };
+      return recomputeRow(r);
+    });
+    setCostLines((prev) => [...prev, ...rows]);
+    setCostDirty(true); setEditing(true); setModalTab("cost");
+    const noInfo = comps.filter((c) => !c).length;
+    toast.success(t(`เพิ่ม ${rows.length} บรรทัดในตีราคาแล้ว${noInfo ? ` (${noInfo} รายการหาข้อมูลวัตถุดิบไม่เจอ ใส่ราคาเอง)` : ""} — ตรวจแล้วกด 💾 บันทึกตีราคา`,
+      `Added ${rows.length} costing lines${noInfo ? ` (${noInfo} without material info — enter prices)` : ""} — review, then save costing`));
   };
 
   // ส่งยอดต้นทุนสินค้ารวม (วัสดุ + ค่าใช้จ่ายเพิ่ม) ไปเป็นรอบเสนอราคาใหม่
@@ -2171,7 +2197,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {/* 📐 รายละเอียดงาน — คงไว้หลังเปิดครั้งแรก (ซ่อนตอนอยู่แท็บอื่น) */}
             {form.id && specMounted && (
               <div className={modalTab === "spec" ? "" : "hidden"}>
-                <DesignSheetSpecTab key={form.id} sheetId={form.id} canEdit={canEdit} onDirtyChange={setSpecDirty} saveRef={specSaveRef} />
+                <DesignSheetSpecTab key={form.id} sheetId={form.id} canEdit={canEdit} onDirtyChange={setSpecDirty} saveRef={specSaveRef}
+                  onSendToCost={sendSpecToCost} costSkuIds={curLines.map((r) => r.item_sku_id).filter((v): v is string => !!v)} />
               </div>
             )}
 
