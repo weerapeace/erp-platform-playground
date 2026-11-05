@@ -5,7 +5,7 @@
  *
  * รูปหลายหน้า (เลือกจากรูปในใบงาน / อัปโหลดเพิ่ม) → วาดบนรูป (สี่เหลี่ยม · วงกลม · ข้อความ · เส้น)
  * + หมุดวัตถุดิบ (ผูก SKU ผ่าน ComponentPicker) + สรุปวัตถุดิบรวมทุกหน้า
- * บันทึกทั้งชุดผ่าน PUT /api/design-sheets/[id]/spec · ตารางสี / ส่งไปตีราคา / ใบพิมพ์ = รอบ 2-3
+ * + ตารางสี (รอบ 2 · spec-colors.tsx) · บันทึกทั้งชุดผ่าน PUT /api/design-sheets/[id]/spec · ส่งไปตีราคา / ใบพิมพ์ = รอบ 3
  *
  * ของกลางที่ใช้: ImageMarkup (+Toolbar) · ComponentPicker · ERPModal · ConfirmDialog · ImageManager · useToast
  */
@@ -21,6 +21,8 @@ import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
 import { MARKUP_COLORS, newMarkupId, type MarkupSelection, type MarkupShape, type MarkupTool } from "@/lib/image-markup";
 import type { SpecPage, SpecPin, SpecPutPage } from "@/app/api/design-sheets/[id]/spec/route";
+import { cleanSpecColors, EMPTY_SPEC_COLORS, type SpecColorTable } from "@/lib/design-sheet-spec-colors";
+import { SpecColorTableEditor } from "./spec-colors";
 import type { DesignSheetImage } from "@/app/api/design-sheets/[id]/images/route";
 
 type Pin = Omit<SpecPin, "id" | "page_id" | "no"> & { key: string };
@@ -50,6 +52,7 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
   const [hist, setHist] = useState<Page[][]>([]);
   const [pickOpen, setPickOpen] = useState(false);
   const [delPage, setDelPage] = useState<number | null>(null);
+  const [colors, setColors] = useState<SpecColorTable>(EMPTY_SPEC_COLORS);   // ตารางสี (รอบ 2)
   const pinRowRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   const load = useCallback(async () => {
@@ -67,6 +70,7 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
           qty: x.qty == null ? null : Number(x.qty), uom: x.uom, note: x.note,
         })),
       })));
+      setColors(cleanSpecColors(j.colors));
       setCur(0); setHist([]); setDirty(false); setSel(null);
     } catch (e) { setLoadErr(e instanceof Error ? e.message : t("โหลดไม่ได้", "Could not load")); }
     finally { setLoading(false); }
@@ -128,7 +132,8 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
   const save = useCallback(async (): Promise<boolean> => {
     setSaving(true);
     try {
-      const body: { pages: SpecPutPage[] } = {
+      const body: { pages: SpecPutPage[]; colors: SpecColorTable } = {
+        colors,
         pages: pages.map((p) => ({
           title: p.title, image_key: p.image_key, image_url: p.image_url, image_w: p.image_w, image_h: p.image_h, shapes: p.shapes,
           pins: p.pins.map((x) => ({ x: x.x, y: x.y, part_name: x.part_name, sku_id: x.sku_id, sku_code: x.sku_code, sku_name: x.sku_name, qty: x.qty, uom: x.uom, note: x.note })),
@@ -143,8 +148,12 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
       toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed"));
       return false;
     } finally { setSaving(false); }
-  }, [pages, sheetId, toast, t]);
+  }, [pages, colors, sheetId, toast, t]);
   useEffect(() => { if (saveRef) saveRef.current = save; }, [save, saveRef]);
+
+  // ตารางสี: ชื่อส่วนประกอบจากหมุด (ไว้ดึงเป็นแถว) + รูปที่ใช้ดูดสี
+  const pinParts = useMemo(() => pages.flatMap((p) => p.pins.map((x) => x.part_name ?? "")).filter(Boolean), [pages]);
+  const imageKeys = useMemo(() => pages.map((p) => p.image_key).filter((k): k is string => !!k), [pages]);
 
   // สรุปวัตถุดิบ: รวมหมุดที่ใช้ SKU เดียวกัน (ทุกหน้า) · จำนวนรวมแยกตามหน่วย
   const summary = useMemo(() => {
@@ -175,7 +184,7 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
     </ERPModal>
   );
 
-  if (pages.length === 0) return (
+  const emptyBox = pages.length === 0 ? (
     <div className="py-10 text-center border-2 border-dashed border-slate-200 rounded-xl space-y-2">
       <p className="text-sm font-medium text-slate-600">{t("ยังไม่มีรูปในรายละเอียดงาน", "No images in job details yet")}</p>
       <p className="text-xs text-slate-400">{t("เลือกรูปจากใบงาน แล้ววาดชี้จุด + ปักหมุดวัตถุดิบ (ผูก SKU) ได้เลย", "Pick an image from this sheet, then mark it up and pin materials (linked to SKUs)")}</p>
@@ -184,14 +193,14 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
           <Icon name="image" /> {t("เลือกรูป / อัปโหลด", "Pick / upload image")}
         </button>
       )}
-      {pickModal}
     </div>
-  );
+  ) : null;
 
   const markupPins = (page?.pins ?? []).map((x) => ({ id: x.key, x: x.x, y: x.y, label: String(pinNo.get(x.key) ?? ""), muted: !x.sku_id }));
 
   return (
     <div className="space-y-3">
+      {emptyBox ?? (
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
         {/* ── ซ้าย: หน้ารูป + เครื่องมือ + รูปที่วาด ── */}
         <div className="space-y-2 min-w-0">
@@ -335,6 +344,10 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef }:
           </div>
         </div>
       </div>
+      )}
+
+      {/* 🎨 ตารางสี (รอบ 2) — บันทึกพร้อมปุ่มด้านล่าง */}
+      <SpecColorTableEditor value={colors} onChange={(c) => { setColors(c); setDirty(true); }} canEdit={canEdit} pinParts={pinParts} imageKeys={imageKeys} />
 
       {canEdit && (
         <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">

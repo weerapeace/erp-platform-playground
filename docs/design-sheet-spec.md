@@ -19,6 +19,13 @@
 - PUT = บันทึกทั้งชุด (ลบหน้าเดิม → หมุดหายตาม cascade → insert ใหม่) แบบเดียวกับบรรทัดตีราคา
 - หา "SKU นี้ใช้ในใบงานไหน" ได้จาก `design_sheet_spec_pins.sku_id` (มี index)
 
+## รอบ 2 — ตารางสี (ทำแล้ว)
+
+- `components/design-sheet-detail/spec-colors.tsx`: แถว = ส่วนประกอบ (เพิ่มเอง / ปุ่ม "ดึงส่วนประกอบจากหมุด") · คอลัมน์ = สีของรุ่น (ตั้งชื่อ/ลบ/เพิ่ม) · ตารางใช้ `LineItemsGrid variant="lines"`
+- กดช่อง → ป๊อปเลือกสี 4 ทาง: **แผงผ้า** (`sku_swatches` → กดชิ้นบนรูปผ่าน `ImageRegions` · จุดสี = ชิ้นที่ตัดจากรูปแผ่น `cropBackground` · ชื่อสีเติมจากสีของ SKU) · **SKU** (`ComponentPicker` · จุดสี = รูปปก) · **ทะเบียนสี** (`/api/color-swatches` · `swatchCss`) · **ดูดสี/เลือกเอง** (`ImageEyedropper` จากรูปในแท็บ + `ColorInput`)
+- เก็บ `design_sheet_spec_colors` (sheet_id PK, data jsonb) ผ่าน PUT เดิม (`body.colors` · ว่างทั้งหมด = ลบแถว) · โครงสร้าง+ตัวทำความสะอาด `lib/design-sheet-spec-colors.ts`
+- ตารางสีไม่อยู่ในปุ่มย้อนกลับ (ลบสีของรุ่นมีป๊อปยืนยัน)
+
 ## รอบถัดไป
 
 - รอบ 2: ตารางสี (ส่วนประกอบ × สีของรุ่น) เลือกสีจากแผงผ้า (`sku_swatches`) / SKU / ดูดสีจากรูป (`ImageEyedropper`)

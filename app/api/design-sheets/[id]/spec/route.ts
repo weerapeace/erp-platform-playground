@@ -1,8 +1,9 @@
 /**
  * Design Sheets — แท็บ "รายละเอียดงาน" (รอบ 1 · 2026-11-05)
  *
- * GET /api/design-sheets/[id]/spec → { pages, pins } เรียงตามลำดับ (pins.no เรียงทั้งใบ)
+ * GET /api/design-sheets/[id]/spec → { pages, pins, colors } เรียงตามลำดับ (pins.no เรียงทั้งใบ)
  * PUT /api/design-sheets/[id]/spec → บันทึกทั้งชุด (ลบหน้าเดิม → หมุดหายตาม cascade → insert ใหม่ตามที่ส่งมา)
+ *     + colors (รอบ 2 ตารางสี) → design_sheet_spec_colors 1 แถว/ใบ (ไม่ส่ง colors = ไม่แตะ)
  *
  * หน้า = รูป 1 รูป + สิ่งที่วาด (shapes ผ่าน lib/image-markup cleanMarkupShapes)
  * หมุด = จุดวัตถุดิบบนรูป ผูก SKU (skus_v2) — เก็บ sku_code/sku_name ไว้โชว์แม้ SKU ถูกลบ
@@ -15,6 +16,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import { cleanMarkupShapes, type MarkupShape } from "@/lib/image-markup";
+import { cleanSpecColors, specColorsEmpty, EMPTY_SPEC_COLORS, type SpecColorTable } from "@/lib/design-sheet-spec-colors";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -41,14 +43,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { id } = await params;
   const admin = supabaseAdmin();
-  const [pg, pn] = await Promise.all([
+  const [pg, pn, co] = await Promise.all([
     admin.from("design_sheet_spec_pages").select("id, title, image_key, image_url, image_w, image_h, shapes, sort_order")
       .eq("sheet_id", id).order("sort_order", { ascending: true }),
     admin.from("design_sheet_spec_pins").select("id, page_id, no, x, y, part_name, sku_id, sku_code, sku_name, qty, uom, note")
       .eq("sheet_id", id).order("no", { ascending: true }),
+    admin.from("design_sheet_spec_colors").select("data").eq("sheet_id", id).maybeSingle(),
   ]);
-  const err = pg.error ?? pn.error;
-  if (err) return NextResponse.json({ pages: [], pins: [], error: friendlyDbError(err.message) }, { status: 500 });
+  const err = pg.error ?? pn.error ?? co.error;
+  if (err) return NextResponse.json({ pages: [], pins: [], colors: EMPTY_SPEC_COLORS, error: friendlyDbError(err.message) }, { status: 500 });
+  const colors: SpecColorTable = cleanSpecColors(co.data?.data);
   const pins = (pn.data ?? []) as SpecPin[];
   // เติมรหัส/ชื่อ/รูป SKU ล่าสุด (เผื่อแก้ชื่อ SKU ทีหลัง) — SKU ที่ถูกลบใช้ค่าที่เก็บไว้
   const skuIds = Array.from(new Set(pins.map((p) => p.sku_id).filter((v): v is string => !!v)));
@@ -60,14 +64,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       if (s) { p.sku_code = (s.code as string) ?? p.sku_code; p.sku_name = (s.name_th as string) ?? p.sku_name; p.sku_image_key = (s.cover_image_r2_key as string | null) ?? null; }
     }
   }
-  return NextResponse.json({ pages: (pg.data ?? []) as SpecPage[], pins, error: null });
+  return NextResponse.json({ pages: (pg.data ?? []) as SpecPage[], pins, colors, error: null });
 }
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
-  let body: { pages?: SpecPutPage[] };
+  let body: { pages?: SpecPutPage[]; colors?: unknown };
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const pages = (Array.isArray(body.pages) ? body.pages : []).slice(0, 30).filter((p) => txt(p?.image_url, 2000));
@@ -109,10 +113,21 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
   }
 
+  // ตารางสี (รอบ 2) — ส่งมาเมื่อไหร่ก็แทนทั้งก้อน · ว่างทั้งหมด = ลบแถวทิ้ง
+  let colorCounts: { rows: number; colorways: number } | null = null;
+  if (body.colors !== undefined) {
+    const colors = cleanSpecColors(body.colors);
+    const { error: cErr } = specColorsEmpty(colors)
+      ? await admin.from("design_sheet_spec_colors").delete().eq("sheet_id", id)
+      : await admin.from("design_sheet_spec_colors").upsert({ sheet_id: id, data: colors, updated_by: user?.id ?? null, updated_at: new Date().toISOString() }, { onConflict: "sheet_id" });
+    if (cErr) return NextResponse.json({ error: friendlyDbError(cErr.message) }, { status: 400 });
+    colorCounts = { rows: colors.rows.length, colorways: colors.colorways.length };
+  }
+
   await writeAudit(admin, {
     action: "spec_update", entityType: "design_sheet", entityId: id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { pages: pages.length, pins: pinRows.length, shapes: shapeCount },
+    metadata: { pages: pages.length, pins: pinRows.length, shapes: shapeCount, ...(colorCounts ? { color_rows: colorCounts.rows, colorways: colorCounts.colorways } : {}) },
   });
-  return NextResponse.json({ pages: pages.length, pins: pinRows.length, shapes: shapeCount, error: null });
+  return NextResponse.json({ pages: pages.length, pins: pinRows.length, shapes: shapeCount, colors: colorCounts, error: null });
 }
