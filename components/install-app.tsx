@@ -20,6 +20,9 @@ import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, installAppUrl, useViewportLayout, type AppLite, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
 import { IOS_INSTALL_HINT, SAMSUNG_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, openInChrome, usePwaInstall } from "@/components/pwa-install-button";
+import { QrCode } from "@/components/qr-code";
+import { apiFetch } from "@/lib/api";
+import { cleanPagePath, labelFromPath, matchMenuForPath, soloUrl } from "@/lib/solo-page";
 
 /** ข้อความที่ส่งจากหน้าใน iframe → เชลล์แอปเดี่ยว ให้เด้งติดตั้ง (เชลล์ฟังใน InstallHereBanner) */
 export const PWA_INSTALL_MSG = "erp-pwa-install";
@@ -99,6 +102,7 @@ export function InstallAppModal({ open, onClose, qr }: { open: boolean; onClose:
   return (
     <ERPModal open={open} onClose={onClose} title="ติดตั้งแอป" size="sm" storageKey="install-app">
       <div className="flex flex-col items-center gap-3">
+        <SoloInstallSection open={open} />
         <div className="flex w-full items-center gap-1 text-[12px] text-slate-500">
           <span className="shrink-0">เครื่องที่จะติดตั้ง:</span>
           <div className="flex flex-1 items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5">
@@ -113,6 +117,60 @@ export function InstallAppModal({ open, onClose, qr }: { open: boolean; onClose:
         <p className="text-center text-[11px] leading-snug text-slate-400">ติดตั้งบนเครื่องอื่น: สแกน QR หรือส่งลิงก์ไปเปิด (ต้องล็อกอินบนเครื่องนั้นครั้งแรก)</p>
       </div>
     </ERPModal>
+  );
+}
+
+/**
+ * 📲 ติดตั้ง "เฉพาะหน้านี้" เป็นแอปหน้าเดียว (lib/solo-page) — เปิดมาเจอหน้านี้หน้าเดียว ไปหน้าอื่นไม่ได้
+ *   หน้าที่ใช้อยู่ = หน้าของเอกสารนี้เอง (ในเชลล์ /app/<key> คือหน้าใน iframe) · หน้าระบบ (/app /login …) = ไม่โชว์
+ *   ติดตั้งบนเครื่องนี้ = พาไป /solo<path>?install=1 แล้วการ์ดติดตั้งเด้ง · เครื่องอื่น = QR
+ */
+function SoloInstallSection({ open }: { open: boolean }) {
+  const [page, setPage] = useState<{ path: string; search: string; label: string } | null>(null);
+  const [showQr, setShowQr] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    const path = cleanPagePath(window.location.pathname);
+    if (!path) { setPage(null); return; }
+    const search = window.location.search;
+    setPage({ path, search, label: labelFromPath(path) });
+    let alive = true;
+    apiFetch("/api/menu").then((r) => r.json()).then((j) => {
+      const m = matchMenuForPath(((j.data ?? []) as { href: string; label: string; is_active?: boolean }[]).filter((x) => x.is_active !== false), path);
+      if (alive && m?.label) setPage((p) => (p ? { ...p, label: m.label } : p));
+    }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [open]);
+  if (!page) return null;
+
+  const url = soloUrl(page.path, { search: page.search, install: true });
+  const go = () => { try { (window.top ?? window).location.href = url; } catch { window.location.href = url; } };
+  return (
+    <div className="w-full rounded-xl border border-indigo-200 bg-indigo-50/50 p-3">
+      <div className="mb-1 flex items-center gap-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={`/api/page-icon${page.path}?s=192`} alt="" className="h-9 w-9 shrink-0 rounded-lg" />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-semibold text-slate-800">ติดตั้งเฉพาะหน้านี้</div>
+          <div className="truncate text-[11px] text-slate-500">แอป &ldquo;{page.label}&rdquo; — เปิดมาเจอหน้านี้หน้าเดียว ไปหน้าอื่นไม่ได้</div>
+        </div>
+      </div>
+      <button type="button" onClick={go}
+        className="mt-1 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 text-sm font-semibold text-white hover:bg-indigo-700">
+        <Icon name="download" /> ติดตั้ง &ldquo;{page.label}&rdquo; บนเครื่องนี้
+      </button>
+      <p className="mt-1 text-center text-[11px] leading-snug text-slate-500">จะเปิดหน้าแอปให้ แล้วกด &ldquo;ติดตั้ง&rdquo; ที่การ์ดด้านล่างจอ (iPhone/iPad: แชร์ → เพิ่มไปยังหน้าจอโฮม)</p>
+      <button type="button" onClick={() => setShowQr((v) => !v)} className="mt-1 w-full text-center text-[11px] font-medium text-indigo-600 hover:underline">
+        {showQr ? "ซ่อน QR" : "ติดตั้งบนมือถือ/แท็บเล็ตเครื่องอื่น (QR)"}
+      </button>
+      {showQr && (
+        <div className="mt-2 flex flex-col items-center gap-1">
+          <QrCode text={`${window.location.origin}${url}`} size={160} className="border border-slate-100" alt={`QR ติดตั้งแอป ${page.label}`} />
+          <span className="text-[11px] text-slate-500">สแกนด้วยกล้องมือถือ แล้วล็อกอินครั้งแรก</span>
+        </div>
+      )}
+      <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400"><span className="h-px flex-1 bg-slate-200" />หรือติดตั้งทั้งแอป (มีหลายเมนู)<span className="h-px flex-1 bg-slate-200" /></div>
+    </div>
   );
 }
 
