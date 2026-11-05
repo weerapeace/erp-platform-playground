@@ -127,17 +127,21 @@ export function TypeSettingsModal({ onClose, onChanged }: { onClose: () => void;
     } finally { setSaving(false); }
   };
 
-  const setActive = async (on: boolean) => {
-    if (!sel) return;
-    setSaving(true);
+  // 👁 เปิด/ปิดใช้ (ปุ่มตาท้ายแถว + ปุ่มล่าง) — เปลี่ยนในรายการทันที ไม่ทับที่กำลังแก้ค้างในช่องขวา · พลาด = คืนค่า
+  const [toggling, setToggling] = useState<string | null>(null);
+  const toggleActive = async (r: Row, on: boolean) => {
+    setToggling(r.key);
+    setRows((cur) => cur.map((x) => (x.key === r.key ? { ...x, is_active: on } : x)));
     try {
-      const res = await apiFetch("/api/pattern-tickets/types", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: sel.key, is_active: on }) });
+      const res = await apiFetch("/api/pattern-tickets/types", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: r.key, is_active: on }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-      toast.success(on ? t("เปิดใช้แล้ว", "Enabled") : t("ปิดใช้แล้ว — แผ่นนี้ไม่โชว์ตอนเปิดตั๋ว", "Disabled — hidden when opening tickets"));
-      setChanged(true); await load(sel.key);
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setSaving(false); }
+      toast.success(on ? t(`เปิดใช้ "${r.label_th}" แล้ว`, `"${r.label_en}" enabled`) : t(`ซ่อน "${r.label_th}" แล้ว — ไม่โชว์ตอนเปิดตั๋ว`, `"${r.label_en}" hidden — not shown when opening tickets`));
+      setChanged(true);
+    } catch (e) {
+      setRows((cur) => cur.map((x) => (x.key === r.key ? { ...x, is_active: !on } : x)));
+      toast.error((e as Error).message);
+    } finally { setToggling(null); }
   };
 
   const remove = async () => {
@@ -162,7 +166,7 @@ export function TypeSettingsModal({ onClose, onChanged }: { onClose: () => void;
       footer={draft ? (
         <div className="flex w-full flex-wrap items-center gap-2">
           {sel && draft.key && (sel.ticket_count > 0 ? (
-            <button type="button" disabled={saving} onClick={() => void setActive(!sel.is_active)}
+            <button type="button" disabled={saving} onClick={() => void toggleActive(sel, !sel.is_active)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
               <Icon name={sel.is_active ? "hide" : "view"} />
               {sel.is_active ? t(`ปิดใช้ (มีตั๋ว ${sel.ticket_count} ใบ ลบไม่ได้)`, `Disable (${sel.ticket_count} tickets — can't delete)`) : t("เปิดใช้อีกครั้ง", "Enable again")}
@@ -173,7 +177,7 @@ export function TypeSettingsModal({ onClose, onChanged }: { onClose: () => void;
                 <Icon name="delete" /> {t("ลบประเภทนี้", "Delete type")}
               </button>
               {sel.is_active ? null : (
-                <button type="button" disabled={saving} onClick={() => void setActive(true)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">{t("เปิดใช้อีกครั้ง", "Enable again")}</button>
+                <button type="button" disabled={saving} onClick={() => void toggleActive(sel, true)} className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">{t("เปิดใช้อีกครั้ง", "Enable again")}</button>
               )}
             </>
           ))}
@@ -196,13 +200,20 @@ export function TypeSettingsModal({ onClose, onChanged }: { onClose: () => void;
                 const [main, sub] = typeLabelPair(r, isEn);
                 return (
                   <div key={r.key} {...drag.rowProps(i)} onClick={() => pick(r)}
-                    className={`flex cursor-pointer items-center gap-2 rounded-lg border bg-white px-2 py-1.5 ${selKey === r.key && draft?.key ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"} ${r.is_active ? "" : "opacity-60"} ${drag.rowCls(i)}`}>
+                    className={`flex cursor-pointer items-center gap-2 rounded-lg border px-2 py-1.5 ${r.is_active ? "bg-white" : "bg-slate-50"} ${selKey === r.key && draft?.key ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"} ${drag.rowCls(i)}`}>
                     <DragHandle {...drag.handleProps(i)} title={t("ลากเพื่อเรียงลำดับ", "Drag to reorder")} />
-                    <TypeIconBox value={typeIconOf(r)} color={r.color} box={36} />
-                    <div className="min-w-0 flex-1">
+                    <span className={r.is_active ? "" : "opacity-40 grayscale"}><TypeIconBox value={typeIconOf(r)} color={r.color} box={36} /></span>
+                    <div className={`min-w-0 flex-1 ${r.is_active ? "" : "opacity-60"}`}>
                       <div className="truncate text-sm font-medium text-slate-800">{main}{!r.is_active && <span className="ml-1 text-xs font-normal text-slate-400">({t("ปิดใช้", "disabled")})</span>}</div>
                       <div className="truncate text-xs text-slate-400">{sub} · {t("เช็กลิสต์", "checklist")} {(r.checklist ?? []).length} · {t("ตั๋ว", "tickets")} {r.ticket_count}</div>
                     </div>
+                    <button type="button" disabled={toggling === r.key}
+                      onClick={(e) => { e.stopPropagation(); void toggleActive(r, !r.is_active); }}
+                      aria-label={r.is_active ? t("ซ่อน (ปิดใช้)", "Hide (disable)") : t("แสดง (เปิดใช้)", "Show (enable)")}
+                      title={r.is_active ? t("กดเพื่อซ่อน — ไม่โชว์ตอนเปิดตั๋ว", "Click to hide — not shown when opening tickets") : t("ซ่อนอยู่ — กดเพื่อแสดง", "Hidden — click to show")}
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-lg transition disabled:opacity-50 ${r.is_active ? "text-slate-500 hover:bg-slate-100 hover:text-slate-800" : "bg-slate-200/60 text-slate-400 hover:bg-slate-200 hover:text-slate-700"}`}>
+                      <Icon name={r.is_active ? "view" : "hide"} />
+                    </button>
                   </div>
                 );
               })}
