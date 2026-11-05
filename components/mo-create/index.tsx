@@ -11,6 +11,8 @@
  * โหมด "เพิ่มหลายรายการ": กรอก/วางจาก Excel ได้ทีละหลายบรรทัด — ทุกบรรทัดใช้ค่าตั้งต้นจากฟอร์มด้านบน
  *    (วันที่สั่งงาน / กำหนดส่ง / สถานะ / หมายเหตุ) แล้วแก้รายบรรทัดทับได้
  * ของกลางที่ใช้: ERPModal · useToast · apiFetch · ComponentPicker · WorkInstructionPanel · lib/paste-table · /api/skus/lookup
+ * ใบสั่งขาย (2026-11-05): สินค้าแบรนด์ลูกค้าต้องผูกใบสั่งขาย — ส่วน MoSoLinkSection (components/mo-so-link)
+ *    กติกา lib/mo-so-rule.ts · โหมดหลายรายการ: งานลูกค้าทุกบรรทัดผูกใบเดียวกัน (สร้างใหม่ = ใบแรกสร้าง ที่เหลือผูกตาม)
  */
 import { useCallback, useEffect, useState } from "react";
 import dynamicImport from "next/dynamic";
@@ -19,6 +21,8 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import { ComponentPicker } from "@/components/material-picker";
 import { parsePastedTable, parseNumberCell, parseDateCell, looksLikeHeaderRow } from "@/lib/paste-table";
+import { MoSoLinkSection, emptySoLink, persistSoLinkExtras, soLinkInputOf, type MoSoLinkValue, type SoLinkState } from "@/components/mo-so-link";
+import { soLinkError, type BrandInfo, type MoSoLinkInput, type SoNeed } from "@/lib/mo-so-rule";
 
 // วิธีทำ/รูปสินค้า — โหลดตอนเลือกสินค้าแล้วเท่านั้น (หนัก ไม่ควรถ่วงหน้าที่เรียกใช้)
 const WorkInstructionPanel = dynamicImport(
@@ -37,6 +41,15 @@ const todayLocal = () => { const d = new Date(); return [d.getFullYear(), String
 type MultiRow = { code: string; qty: string; due: string; note: string; name?: string | null; image?: string | null; bad?: boolean };
 const emptyRow = (): MultiRow => ({ code: "", qty: "", due: "", note: "" });
 const lblCls = "text-[11px] text-slate-500";
+type MultiNeeds = Record<string, { need: SoNeed; brand: BrandInfo | null }>;
+/** โหมดหลายรายการ: รหัสไหนต้องผูก / ยังไม่มีแบรนด์ / งานลูกค้ากี่แบรนด์ (strict = รหัสที่ยังเช็กไม่ได้นับเป็น "ไม่มีแบรนด์") */
+function multiPlan(codes: string[], needs: MultiNeeds, strict: boolean) {
+  const uniq = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
+  const required = uniq.filter((c) => needs[c]?.need === "required");
+  const unknown = uniq.filter((c) => (needs[c] ? needs[c].need === "unknown_brand" : strict));
+  const brands = [...new Set(required.map((c) => needs[c]?.brand?.brand_name ?? "").filter(Boolean))];
+  return { required, unknown, brands };
+}
 const inCls = "w-full h-8 mt-0.5 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500";
 
 export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, defaultProductName, defaultProductImage }: {
@@ -74,10 +87,15 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
   const [progress, setProgress] = useState("");
   const [pasteOpen, setPasteOpen] = useState(false);   // กล่อง "วางจาก Excel"
   const [pasteText, setPasteText] = useState("");
+  // ใบสั่งขาย (บังคับสำหรับแบรนด์ลูกค้า)
+  const [soLink, setSoLink] = useState<MoSoLinkValue>(emptySoLink);
+  const [soSt, setSoSt] = useState<SoLinkState | null>(null);
+  const [multiNeeds, setMultiNeeds] = useState<Record<string, { need: SoNeed; brand: BrandInfo | null }>>({});
 
   // เปิดใหม่ = ล้างฟอร์ม (เผื่อสร้างต่อหลายใบ)
   useEffect(() => {
     if (!open) return;
+    setSoLink(emptySoLink()); setSoSt(null); setMultiNeeds({});
     setSku(defaultProductSku ?? ""); setName(defaultProductName ?? ""); setImage(defaultProductImage ?? null);
     setQty(1); setDue(""); setStatus("draft"); setNote("");
     setVersions([]); setVerId(""); setBomCode(null); setBomVersion(null); setSizes([]); setSizeQty({}); setErr(null);
@@ -95,6 +113,7 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
   /** เลือกสินค้า → หาสูตรของสินค้านั้น แล้วเลือกสูตรหลักให้อัตโนมัติ */
   const pickProduct = async (code: string, label: string, img: string | null) => {
     setSku(code); setName(label); setImage(img);
+    if (code !== sku) { setSoLink(emptySoLink()); setSoSt(null); }
     setVersions([]); setVerId(""); setBomCode(null); setBomVersion(null); setSizes([]); setSizeQty({});
     setLoadingBom(true);
     try {
@@ -126,14 +145,23 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
     setQty(sizes.reduce((a, s) => a + (next[s.label] || 0), 0));
   };
 
+  // ใบสั่งขายที่เลือกมีวันส่งลูกค้า → เติมกำหนดส่งให้ (ถ้ายังว่าง)
+  useEffect(() => {
+    if (soSt?.dueHint && !due) setDue(soSt.dueHint.slice(0, 10));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [soSt?.dueHint]);
+
   const save = async () => {
     if (!sku) { setErr("กรุณาเลือกสินค้าที่จะผลิต"); return; }
     if (!(qty > 0)) { setErr(sizes.length > 0 ? "ใส่จำนวนอย่างน้อย 1 ไซส์" : "จำนวนต้องมากกว่า 0"); return; }
+    if (!soSt || soSt.sku !== sku || soSt.loading || !soSt.need) { setErr("กำลังเช็กใบสั่งขายของสินค้านี้ — รอสักครู่แล้วกดใหม่"); return; }
+    const linkErr = soLinkError(soSt.need, soLinkInputOf(soLink), soSt.brandName);
+    if (linkErr) { setErr(linkErr); return; }
     setSaving(true); setErr(null);
     const payload: Record<string, unknown> = {
       product_sku: sku, product_name: name || null, qty,
       due_date: due || null, order_date: orderDate || null, bom_code: bomCode, bom_version: bomVersion,
-      status, note: note || null, fabric_calc_mode: fabricMode,
+      status, note: note || null, fabric_calc_mode: fabricMode, so_link: soLinkInputOf(soLink),
     };
     // สูตรมีไซส์ → ส่งจำนวนต่อไซส์ (เซิร์ฟเวอร์คิดจำนวนรวม + แตกวัตถุดิบตามไซส์เอง)
     if (sizes.length > 0) payload.size_breakdown = sizes.map((s) => ({ label: s.label, qty: sizeQty[s.label] || 0 }));
@@ -141,7 +169,8 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
       const res = await apiFetch("/api/mo", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       const j = await res.json();
       if (!res.ok || j?.error) throw new Error(j?.error || "สร้างไม่สำเร็จ");
-      toast.success(`สร้างใบสั่งผลิตแล้ว: ${j.mo_no ?? ""}`);
+      toast.success(`สร้างใบสั่งผลิตแล้ว: ${j.mo_no ?? ""}${j.so_order_no ? (j.so_created ? ` + ใบสั่งขายใหม่ ${j.so_order_no}` : ` · ผูก ${j.so_order_no}`) : ""}`);
+      await persistSoLinkExtras(soLink, soSt);
       onCreated?.(String(j.id), String(j.mo_no ?? ""));
       onClose();
     } catch (e) { setErr(e instanceof Error ? e.message : "สร้างไม่สำเร็จ"); }
@@ -201,6 +230,25 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
     } catch { return list; }
   }, []);
 
+  /** โหมดหลายรายการ: ต้องผูกใบสั่งขายไหมของแต่ละรหัส (โยน error ถ้าเช็กไม่ได้) */
+  const loadMultiNeeds = useCallback(async (codes: string[]): Promise<MultiNeeds> => {
+    const uniq = [...new Set(codes.map((c) => c.trim()).filter(Boolean))];
+    if (!uniq.length) return {};
+    const r = await apiFetch("/api/mo/so-options?skus=" + encodeURIComponent(uniq.join(",")));
+    const j = await r.json();
+    if (!r.ok || j?.error) throw new Error(j?.error || "เช็กแบรนด์ไม่สำเร็จ");
+    const n = (j.needs ?? {}) as MultiNeeds;
+    setMultiNeeds(n);
+    return n;
+  }, []);
+  const multiCodesKey = multi ? [...new Set(rows.map((r) => r.code.trim()).filter(Boolean))].sort().join(",") : "";
+  useEffect(() => {
+    if (!multiCodesKey) { setMultiNeeds({}); return; }
+    const t = setTimeout(() => { void loadMultiNeeds(multiCodesKey.split(",")).catch(() => {}); }, 400);
+    return () => clearTimeout(t);
+  }, [multiCodesKey, loadMultiNeeds]);
+  const multiInfo = multiPlan(multiCodesKey ? multiCodesKey.split(",") : [], multiNeeds, false);
+
   const verifyRows = async () => {
     setMultiBusy(true);
     const checked = await checkCodes(rows);
@@ -224,6 +272,26 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
     }
     if (!use.length) { setMultiBusy(false); setErr("ยังไม่มีบรรทัดที่กรอกครบ (ต้องมีรหัสสินค้า + จำนวน)"); return; }
 
+    // ใบสั่งขาย: งานลูกค้าทุกบรรทัดผูกใบเดียวกัน · ยังไม่มีแบรนด์ = ให้ใส่ก่อน
+    let needs: MultiNeeds;
+    try { needs = await loadMultiNeeds(use.map((r) => r.code)); }
+    catch { setMultiBusy(false); setErr("เช็กแบรนด์/ใบสั่งขายของสินค้าไม่สำเร็จ — ลองกดใหม่"); return; }
+    const plan = multiPlan(use.map((r) => r.code), needs, true);
+    const planErr = plan.unknown.length
+      ? "สินค้ายังไม่มีแบรนด์: " + plan.unknown.slice(0, 5).join(", ") + (plan.unknown.length > 5 ? "…" : "") + " — สลับไป “สร้างใบเดียว” เพื่อใส่แบรนด์ หรือใส่ที่หน้า Parent SKU"
+      : plan.brands.length > 1 ? "มีงานลูกค้าหลายแบรนด์ (" + plan.brands.join(", ") + ") — แยกสร้างทีละแบรนด์ (คนละใบสั่งขาย)"
+      : plan.required.length ? soLinkError("required", soLinkInputOf(soLink), plan.brands[0] ?? null) : null;
+    if (planErr) { setMultiBusy(false); setErr(planErr); return; }
+    const requiredSet = new Set(plan.required);
+    let createdSo: string | null = null;     // "สร้างใหม่" → ใบแรกสร้าง ที่เหลือผูกใบนั้น
+    const linkFor = (code: string): MoSoLinkInput | null => {
+      if (!requiredSet.has(code)) return null;
+      if (createdSo) return { so_order_id: createdSo };
+      const base = soLinkInputOf(soLink);
+      // รายการที่เลือกในใบ เป็นของสินค้าตัวที่แสดงในส่วนใบสั่งขาย — ตัวอื่นให้เซิร์ฟเวอร์หารายการรหัสเดียวกันเอง
+      return base?.so_order_id && code !== plan.required[0] ? { so_order_id: base.so_order_id } : base;
+    };
+
     const bomCache = new Map<string, { code: string | null; version: string | null }>();
     let ok = 0; const fails: string[] = []; let lastId = ""; let lastNo = "";
     for (let i = 0; i < use.length; i++) {
@@ -242,10 +310,16 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
             product_sku: r.code, product_name: r.name ?? null, qty: Number(r.qty) || 0,
             due_date: r.due || due || null, order_date: orderDate || null,
             bom_code: b.code, bom_version: b.version, status, note: r.note || note || null, fabric_calc_mode: fabricMode,
+            so_link: linkFor(r.code),
           }) });
         const j = await res.json();
         if (!res.ok || j?.error) throw new Error(j?.error || "สร้างไม่สำเร็จ");
         ok += 1; lastId = String(j.id); lastNo = String(j.mo_no ?? "");
+        if (j.so_created && j.so_order_id) {
+          createdSo = String(j.so_order_id);
+          toast.success("สร้างใบสั่งขายใหม่ " + (j.so_order_no ?? "") + " — รายการงานลูกค้าที่เหลือผูกใบนี้");
+          if (soSt) await persistSoLinkExtras(soLink, soSt);
+        }
       } catch (e) { fails.push(r.code + ": " + (e instanceof Error ? e.message : "ไม่สำเร็จ")); }
     }
     setMultiBusy(false); setProgress("");
@@ -301,6 +375,21 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
             <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className={inCls} />
           </label>
         </div>
+
+        {multi && multiInfo.required.length > 0 && multiInfo.brands.length <= 1 && (
+          <MoSoLinkSection sku={multiInfo.required[0]} value={soLink} onChange={setSoLink} onState={setSoSt}
+            note={"ใช้กับงานลูกค้า " + multiInfo.required.length + " รหัส: " + multiInfo.required.slice(0, 6).join(", ") + (multiInfo.required.length > 6 ? "…" : "") + " (รายการอื่นไม่ผูก)"} />
+        )}
+        {multi && multiInfo.brands.length > 1 && (
+          <div className="px-3 py-1.5 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-700">
+            มีงานลูกค้าหลายแบรนด์ ({multiInfo.brands.join(", ")}) — แยกสร้างทีละแบรนด์ เพราะแต่ละแบรนด์ต้องผูกใบสั่งขายคนละใบ
+          </div>
+        )}
+        {multi && multiInfo.unknown.length > 0 && (
+          <div className="px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-lg text-xs text-amber-800">
+            สินค้ายังไม่มีแบรนด์: <span className="font-mono">{multiInfo.unknown.slice(0, 6).join(", ")}{multiInfo.unknown.length > 6 ? "…" : ""}</span> — ระบบไม่รู้ว่าต้องผูกใบสั่งขายไหม สลับไป “สร้างใบเดียว” เพื่อใส่แบรนด์ก่อน
+          </div>
+        )}
 
         {multi ? (
           <div className="rounded-lg border border-slate-200 overflow-hidden">
@@ -370,6 +459,8 @@ export function MoCreateModal({ open, onClose, onCreated, defaultProductSku, def
               onPick={(c) => void pickProduct(c.code, c.name, c.image_key ?? null)} />
           </div>
         </div>
+
+        {sku && <MoSoLinkSection sku={sku} productName={name} value={soLink} onChange={setSoLink} onState={setSoSt} />}
 
         <div className="grid grid-cols-3 gap-2">
           <label className="block">

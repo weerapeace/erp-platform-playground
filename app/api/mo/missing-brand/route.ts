@@ -10,6 +10,7 @@
  * POST { key, brand_id } → แก้ที่ต้นทางให้ครบในครั้งเดียว:
  *        สร้าง Parent (ถ้ายังไม่มี) → ใส่แบรนด์ให้ Parent → ผูก SKU เข้า Parent → ลงทะเบียน SKU ที่ยังไม่มี
  *        (server คำนวณรายการใหม่เองจาก key ไม่เชื่อข้อมูลที่ client ส่งมา)
+ * POST { code, name?, brand_id } → แบบเดียวกัน แต่ระบุรหัสสินค้าตรง ๆ (ป๊อปสร้างใบสั่งผลิต — สินค้าที่ยังไม่มีใบผลิตเลย)
  *
  * ของกลาง: guardApi (ดู = products.view · แก้ = products.edit) + supabaseAdmin + writeAudit
  */
@@ -54,18 +55,23 @@ async function inChunks<T>(list: string[], run: (chunk: string[]) => PromiseLike
 
 type ParentRow = { id: string; code: string; name_th: string | null; brand_id: string | null; cover_image_r2_key: string | null; brand: { name?: string } | { name?: string }[] | null };
 
-async function buildItems(admin: Admin): Promise<MissingBrandItem[]> {
-  const { data: mos } = await admin.from("manufacturing_orders")
-    .select("product_sku, product_name").eq("is_active", true).neq("status", "cancelled").limit(1000);
-
+/** only = คิดเฉพาะรหัสนี้ (ป๊อปสร้างใบสั่งผลิต) · ไม่ส่ง = ทุกสินค้าที่อยู่ในใบสั่งผลิต */
+async function buildItems(admin: Admin, only?: { code: string; name?: string | null }): Promise<MissingBrandItem[]> {
   // รหัสสินค้า → จำนวนใบสั่งผลิต + ชื่อ (จากใบสั่งผลิต)
   const moCount = new Map<string, number>();
   const moName = new Map<string, string>();
-  for (const m of (mos ?? []) as { product_sku: string | null; product_name: string | null }[]) {
-    const code = String(m.product_sku ?? "").trim();
-    if (!code) continue;
-    moCount.set(code, (moCount.get(code) ?? 0) + 1);
-    if (m.product_name && !moName.has(code)) moName.set(code, m.product_name);
+  if (only) {
+    moCount.set(only.code, 0);
+    if (only.name) moName.set(only.code, only.name);
+  } else {
+    const { data: mos } = await admin.from("manufacturing_orders")
+      .select("product_sku, product_name").eq("is_active", true).neq("status", "cancelled").limit(1000);
+    for (const m of (mos ?? []) as { product_sku: string | null; product_name: string | null }[]) {
+      const code = String(m.product_sku ?? "").trim();
+      if (!code) continue;
+      moCount.set(code, (moCount.get(code) ?? 0) + 1);
+      if (m.product_name && !moName.has(code)) moName.set(code, m.product_name);
+    }
   }
   const codes = [...moCount.keys()];
   if (codes.length === 0) return [];
@@ -157,14 +163,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
 
-  let body: { key?: string; brand_id?: string | null };
+  let body: { key?: string; code?: string; name?: string | null; brand_id?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "ข้อมูลที่ส่งมาไม่ถูกต้อง" }, { status: 400 }); }
   const key = String(body.key ?? "");
-  if (!key) return NextResponse.json({ error: "ไม่ระบุสินค้าที่จะใส่แบรนด์" }, { status: 400 });
+  const code = String(body.code ?? "").trim();
+  if (!key && !code) return NextResponse.json({ error: "ไม่ระบุสินค้าที่จะใส่แบรนด์" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const item = (await buildItems(admin)).find((i) => i.key === key);
-  if (!item) return NextResponse.json({ error: "รายการนี้มีแบรนด์แล้ว หรือไม่อยู่ในใบสั่งผลิตแล้ว — ลองปิดแล้วเปิดใหม่" }, { status: 409 });
+  const item = code
+    ? (await buildItems(admin, { code, name: body.name ?? null }))[0]
+    : (await buildItems(admin)).find((i) => i.key === key);
+  if (!item) return NextResponse.json({ error: code ? "สินค้านี้มีแบรนด์แล้ว — ลองเลือกสินค้าใหม่อีกครั้ง" : "รายการนี้มีแบรนด์แล้ว หรือไม่อยู่ในใบสั่งผลิตแล้ว — ลองปิดแล้วเปิดใหม่" }, { status: 409 });
 
   // แบรนด์ที่จะใช้: Parent มีอยู่แล้ว = ใช้ของ Parent · ยังไม่มี = ต้องเลือกมา (และต้องเป็นแบรนด์ที่ใช้งานอยู่)
   let brandId = item.parent_brand_id;
@@ -178,10 +187,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const actor = { actorId: user?.id ?? null, actorName: user?.email ?? null };
   const audits: AuditEntry[] = [];
-  const source = "production-dashboard/missing-brand";
+  const source = code ? "mo-create/missing-brand" : "production-dashboard/missing-brand";
   // ไม่โชว์ error ดิบจากฐานข้อมูล — แปลงเป็นภาษาคน (ตัวเต็มลง log ฝั่ง server)
   const fail = (msg: string) => {
-    console.error(`[missing-brand] POST ${key}:`, msg);
+    console.error(`[missing-brand] POST ${key || code}:`, msg);
     const human = /duplicate key|23505/i.test(msg) ? "มีรหัสนี้อยู่ในระบบแล้ว — ลองปิดแล้วเปิดหน้าต่างนี้ใหม่" : "ระบบบันทึกไม่ได้ กรุณาลองใหม่อีกครั้ง";
     return NextResponse.json({ error: human }, { status: 400 });
   };

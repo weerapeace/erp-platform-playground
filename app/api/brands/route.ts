@@ -2,7 +2,7 @@
  * แบรนด์ (Brands) — สำหรับตั้งสีประจำแบรนด์ (ใช้ทำกรอบการ์ดบนบอร์ดจ่ายงาน)
  * GET   /api/brands         → รายชื่อแบรนด์ + สี
  * POST  /api/brands         → สร้างแบรนด์ใหม่ { name, color? } (ปุ่ม ＋ ในฟอร์ม Design Sheets)
- * PATCH /api/brands         → ตั้งสี { id, color }
+ * PATCH /api/brands         → ตั้งสี { id, color } · ลูกค้าประจำแบรนด์ { id, default_customer_id } (งานลูกค้า — เติมให้ตอนสร้างใบสั่งขาย)
  * อ่าน/เขียนผ่าน supabaseAdmin + ตรวจ login
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -15,14 +15,24 @@ export const revalidate = 0;
 
 // หมายเหตุ: logo_url เก็บ "R2 key" ของรูปโลโก้ (แสดงผ่าน /api/r2-image?key=...) ไม่ใช่ URL เต็ม
 // pricing_mode: own = แบรนด์เราเอง มีราคาขายในระบบ · oem = รับจ้างผลิต ราคาคิดต่อออเดอร์ (ใช้ในหน้าแผนผู้บริหาร)
-export type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; pricing_mode?: "own" | "oem" };
+export type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; pricing_mode?: "own" | "oem";
+  /** ลูกค้าประจำแบรนด์ (งานลูกค้า) — ป๊อปสร้างใบสั่งผลิต/ลงออเดอร์ เติมลูกค้านี้ให้ */
+  default_customer_id?: string | null; default_customer?: { id: string; code: string | null; name: string } | null };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ data: [], error: "ต้อง login" }, { status: 401 });
-  const { data, error } = await supabaseAdmin().from("brands").select("id, name, color, is_customer_job, logo_url, hide_in_artwork, pricing_mode").eq("is_active", true).order("name", { ascending: true });
+  const admin = supabaseAdmin();
+  const { data, error } = await admin.from("brands").select("id, name, color, is_customer_job, logo_url, hide_in_artwork, pricing_mode, default_customer_id").eq("is_active", true).order("name", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-  return NextResponse.json({ data: (data ?? []) as Brand[], error: null });
+  const rows = (data ?? []) as Brand[];
+  const custIds = [...new Set(rows.map((b) => b.default_customer_id).filter((x): x is string => !!x))];
+  const cust = new Map<string, { id: string; code: string | null; name: string }>();
+  if (custIds.length) {
+    const { data: ps } = await admin.from("partners_v2").select("id, code, name_th").in("id", custIds);
+    for (const p of (ps ?? []) as { id: string; code: string | null; name_th: string | null }[]) cust.set(p.id, { id: p.id, code: p.code, name: p.name_th ?? p.code ?? "" });
+  }
+  return NextResponse.json({ data: rows.map((b) => ({ ...b, default_customer: b.default_customer_id ? cust.get(b.default_customer_id) ?? null : null })), error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -53,7 +63,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
-  let body: { id?: string; name?: string; color?: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; pricing_mode?: string };
+  let body: { id?: string; name?: string; color?: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; pricing_mode?: string; default_customer_id?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "ไม่พบแบรนด์" }, { status: 400 });
 
@@ -65,6 +75,14 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   // แบรนด์เราเอง (มีราคาขาย) หรือ OEM (ราคาคิดต่อออเดอร์) — ค่าอื่นถือว่า own
   if ("pricing_mode" in body) patch.pricing_mode = body.pricing_mode === "oem" ? "oem" : "own";
   if ("logo_url" in body) patch.logo_url = body.logo_url || null;   // R2 key ของโลโก้ (หรือ null = เอาออก)
+  if ("default_customer_id" in body) {
+    const cid = body.default_customer_id || null;
+    if (cid) {
+      const { data: c } = await admin.from("partners_v2").select("id").eq("id", cid).maybeSingle();
+      if (!c) return NextResponse.json({ error: "ไม่พบลูกค้าที่เลือก" }, { status: 400 });
+    }
+    patch.default_customer_id = cid;
+  }
   if ("name" in body) {
     const nm = (body.name ?? "").trim();
     if (!nm) return NextResponse.json({ error: "ชื่อแบรนด์ห้ามว่าง" }, { status: 400 });

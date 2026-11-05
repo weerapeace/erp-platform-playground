@@ -3,14 +3,19 @@
  *
  * GET  /api/mo?search=&limit=&offset=&sort_by=  → list (server mode)
  * POST /api/mo                                   → สร้าง MO (เลขรันอัตโนมัติ) + กางสูตรเป็น mo_materials
+ *      so_link { so_order_id, so_line_id? } | { new_so } → ผูกใบสั่งขาย (กติกา lib/mo-so-rule.ts)
+ *      ⚠️ สินค้าแบรนด์ลูกค้า (brands.is_customer_job) ต้องมี so_link · ยังไม่รู้แบรนด์ = ให้ใส่แบรนด์ก่อน
  *
  * อ่านผ่าน auth, เขียนผ่าน supabaseAdmin, audit → audit_logs
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { guardApi } from "@/lib/api-auth";
+import { apiCan, guardApi } from "@/lib/api-auth";
+import { writeAudit } from "@/lib/audit";
+import { soLinkError, soNeedOf, type MoSoLinkInput } from "@/lib/mo-so-rule";
 import { explodeBom, fabricModeOf, nextMoNo, type SizeQty } from "./shared";
+import { attachMoToSo, brandInfoOfSkus, createSoForMo, loadSoTarget, type SoTarget } from "./so-link";
 import { friendlyDbError } from "../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +105,7 @@ type CreateBody = {
   order_date?: string | null;          // วันที่สั่งงาน (ฝั่ง client ส่งวันที่ไทยมา — ห้ามใช้ CURRENT_DATE ของ DB)
   bom_code?: string | null; bom_version?: string | null; status?: string; note?: string;
   size_breakdown?: SizeQty[] | null;   // กลุ่ม C: แบ่งจำนวนตามไซส์
+  so_link?: MoSoLinkInput | null;      // ผูกใบสั่งขาย (ใบเดิม หรือสร้างใหม่) — บังคับสำหรับแบรนด์ลูกค้า
 };
 
 // ทำความสะอาด size_breakdown — เก็บเฉพาะไซส์ที่มีจำนวน > 0
@@ -125,17 +131,59 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (qty <= 0) return NextResponse.json({ error: "จำนวนต้องมากกว่า 0" }, { status: 400 });
 
   const admin = supabaseAdmin();
+
+  // ── ใบสั่งขาย: แบรนด์ลูกค้าต้องผูก (เช็กก่อนสร้าง จะได้ไม่มีใบผลิตค้างครึ่งทาง) ──
+  const link = body.so_link ?? null;
+  const brand = (await brandInfoOfSkus(admin, [body.product_sku])).get(body.product_sku) ?? null;
+  const linkErr = soLinkError(soNeedOf(brand), link, brand?.brand_name);
+  if (linkErr) return NextResponse.json({ error: linkErr, need_so: true }, { status: 400 });
+  let target: SoTarget | null = null;
+  if (link?.new_so) {
+    if (!(await apiCan(request, "so.create"))) return NextResponse.json({ error: "คุณไม่มีสิทธิ์สร้างใบสั่งขาย — ให้คนที่มีสิทธิ์สร้างใบสั่งขายก่อน แล้วเลือกผูกใบนั้น" }, { status: 403 });
+  } else if (link?.so_order_id) {
+    const t = await loadSoTarget(admin, link.so_order_id, link.so_line_id ?? null);
+    if (typeof t === "string") return NextResponse.json({ error: t }, { status: 400 });
+    target = t;
+  }
+  const linked = !!target || !!link?.new_so;
+  // กำหนดส่ง: ไม่ใส่ = ใช้วันส่งลูกค้าของรายการ/ใบสั่งขาย
+  const due = body.due_date || target?.line?.due_date || target?.due_date || link?.new_so?.due_date || null;
+  // ผูกใบสั่งขาย = ยืนยันแล้ว (กติกาเดียวกับ "เปิดใบสั่งผลิตจากใบสั่งขาย")
+  const status = linked && (!body.status || body.status === "draft") ? "confirmed" : (body.status || "draft");
+
   const moNo = await nextMoNo(admin);
   const { data: mo, error } = await admin.from("manufacturing_orders").insert({
     mo_no: moNo, product_sku: body.product_sku, product_name: body.product_name ?? null, qty,
-    status: body.status || "draft", due_date: body.due_date || null,
+    status, due_date: due,
     order_date: body.order_date ? String(body.order_date).slice(0, 10) : null,
     bom_code: body.bom_code ?? null, bom_version: body.bom_version ?? null, note: body.note ?? null, is_active: true,
     size_breakdown: sizeBreakdown, fabric_calc_mode: fabricModeOf(body.fabric_calc_mode),
   }).select("id, mo_no").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
+  // ผูก/สร้างใบสั่งขาย — ไม่สำเร็จ = ลบใบผลิตที่เพิ่งสร้างทิ้ง (ยังไม่ได้กางสูตร) ไม่ให้มีใบที่หลุดกติกา
+  const moRow = { id: String(mo.id), mo_no: moNo, product_sku: body.product_sku, product_name: body.product_name ?? null, qty, due_date: due };
+  let so: { id: string; order_no: string | null; line_id: string | null; created: boolean; added_line: boolean } | null = null;
+  try {
+    if (link?.new_so) {
+      const c = await createSoForMo(admin, moRow, link.new_so, { id: user.id, email: user.email ?? null });
+      so = { id: c.id, order_no: c.order_no, line_id: c.line_id, created: true, added_line: false };
+    } else if (target) {
+      const a = await attachMoToSo(admin, moRow, target);
+      so = { id: target.id, order_no: target.order_no, line_id: a.line_id, created: false, added_line: a.added_line };
+    }
+  } catch (e) {
+    await admin.from("manufacturing_orders").delete().eq("id", mo.id);
+    return NextResponse.json({ error: e instanceof Error ? e.message : "ผูกใบสั่งขายไม่สำเร็จ" }, { status: 400 });
+  }
+
   await explodeBom(admin, body.bom_code ?? null, moNo, qty, sizeBreakdown, false, fabricModeOf(body.fabric_calc_mode));  // กางสูตรตอนบันทึก (เผื่อยังไม่ได้กด)
-  await admin.from("audit_logs").insert({ actor_user_id: user.id, action: "create", entity_type: "mo", entity_id: mo.id, metadata: { mo_no: moNo, qty } }).then(() => {}, () => {});
-  return NextResponse.json({ id: mo.id, mo_no: moNo, error: null });
+  const actor = { actorId: user.id, actorName: user.email ?? null };
+  await writeAudit(admin, { action: "create", entityType: "mo", entityId: String(mo.id), ...actor,
+    metadata: { mo_no: moNo, qty, brand: brand?.brand_name ?? null, ...(so ? { so_order_id: so.id, so_order_no: so.order_no, so_created: so.created } : {}) } });
+  if (so) {
+    await writeAudit(admin, { action: so.created ? "create" : "so_order.link_mo", entityType: "so_order", entityId: so.id, ...actor,
+      metadata: { order_no: so.order_no, mo_no: moNo, line_id: so.line_id, added_line: so.added_line, from: "mo_create" } });
+  }
+  return NextResponse.json({ id: mo.id, mo_no: moNo, so_order_id: so?.id ?? null, so_order_no: so?.order_no ?? null, so_created: !!so?.created, error: null });
 }
