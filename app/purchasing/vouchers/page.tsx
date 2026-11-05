@@ -24,6 +24,7 @@ import { SellerBillIntake } from "@/components/seller-bill-intake";
 import { ChinaBillIntake } from "@/components/china-bill-intake";
 import { fmtMoney, curSymbol } from "@/lib/landed-cost";
 import { GrDetailModal } from "@/components/gr-detail-modal";
+import { mixedCurrencyShops, planVoucherGroups, type VoucherPlanGroup } from "@/lib/voucher-merge-plan";
 
 type PendingGr = { id: string; gr_no: string; po_id: string | null; po_no: string; seller_name: string; receive_date: string | null; receiver: string; line_count: number; currency: string; receipt_batch_no: string | null; is_backfill: boolean };
 type VoucherRow = { id: string; pv_no: string | null; status: string; voucher_date: string; seller_name: string | null; currency: string; subtotal_thb: number; ship_total_thb: number; grand_total_thb: number; line_count: number; gr_nos: string[]; po_nos: string[]; ship_method: string };
@@ -48,6 +49,11 @@ export default function PurchaseVouchersPage() {
   const [showBackfill, setShowBackfill] = useState(false);   // รวมใบรับย้อนหลัง (เคลียร์ของค้างเก่า) — ปกติซ่อนกันคิวรก
   const [backfillHidden, setBackfillHidden] = useState(0);
   const [creating, setCreating] = useState(false);
+  // ★ 2026-11-05 ออกจากหลายใบรับ → ป๊อปเลือก "รวม" (ร้าน+สกุลเดียว = 1 ใบ) / "แยก" (1 ใบรับ = 1 ใบ) · lib/voucher-merge-plan
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [mergeMode, setMergeMode] = useState<"merge" | "split">("merge");
+  const [mergeRes, setMergeRes] = useState<{ g: VoucherPlanGroup; id?: string; error?: string }[] | null>(null);
+  const [mergePlan, setMergePlan] = useState<VoucherPlanGroup[] | null>(null);   // แผนที่กำลังสร้าง (ตรึงไว้ระหว่างสร้าง/หลังสร้าง)
   const [vStatus, setVStatus] = useState<"all" | "draft" | "confirmed" | "cancelled">("all");
   const [detailGr, setDetailGr] = useState<PendingGr | null>(null);   // ป๊อปรายละเอียดใบรับ (ของกลาง GrDetailModal)
   // ป๊อป "＋ ออกใบสำคัญรับ": จากใบรับที่รอ หรือสร้างเปล่า
@@ -123,6 +129,32 @@ export default function PurchaseVouchersPage() {
       router.push(`/purchasing/vouchers/${j.id}`);
     } catch (e) { toast.error("สร้างไม่สำเร็จ: " + String((e as Error).message ?? e)); }
     finally { setCreating(false); }
+  };
+  // ออกใบสำคัญจากใบรับที่ติ๊ก: 1 ใบ = สร้างเลย · หลายใบ = ถามรวม/แยกก่อน
+  const startCreate = () => {
+    if (selRows.length <= 1) { void createVoucher(); return; }
+    setMergeMode("merge"); setMergeRes(null); setMergePlan(null); setMergeOpen(true);
+  };
+  const runMerge = async () => {
+    const plan = planVoucherGroups(selRows, mergeMode);
+    setMergePlan(plan); setMergeRes([]);
+    setCreating(true);
+    const out: { g: VoucherPlanGroup; id?: string; error?: string }[] = [];
+    for (const g of plan) {
+      try {
+        const res = await apiFetch("/api/purchasing/vouchers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ gr_ids: g.grs.map((x) => x.id) }) });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok || j.error) throw new Error(j.error ?? `HTTP ${res.status}`);
+        out.push({ g, id: String(j.id) });
+      } catch (e) { out.push({ g, error: String((e as Error).message ?? e) }); }
+      setMergeRes([...out]);
+    }
+    setCreating(false);
+    setSelected(new Set());
+    const ok = out.filter((r) => r.id);
+    if (ok.length === 1 && out.length === 1) { setMergeOpen(false); router.push(`/purchasing/vouchers/${ok[0].id}`); return; }
+    if (ok.length) toast.success(`สร้างใบสำคัญรับ (ร่าง) ${ok.length} ใบ — กด "เปิด" เพื่อใส่ราคาทีละใบ`);
+    await load();
   };
   // สร้างใบเปล่า (ไม่มีใบรับ) → ไปเพิ่มรายการเองในฟอร์ม
   const createManual = async () => {
@@ -226,9 +258,9 @@ export default function PurchaseVouchersPage() {
               <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-3 flex items-center gap-2 flex-wrap">
                 <span className="text-sm font-medium text-blue-800">☑ เลือก {selRows.length} ใบรับ</span>
                 <span className="text-xs text-slate-500">{selSellers.length === 1 ? `🏪 ${selSellers[0]}` : `⚠ ${selSellers.length} ร้าน`} · {selCurrencies.map(curSymbol).join(" / ")}</span>
-                {selCurrencies.length > 1 && <span className="text-xs text-red-600">สกุลเงินต่างกัน ต้องแยกใบ</span>}
+                {selCurrencies.length > 1 && <span className="text-xs text-amber-700">สกุลเงินต่างกัน — ระบบแยกใบตามสกุลให้</span>}
                 {canEdit && (
-                  <button onClick={() => void createVoucher()} disabled={creating || selCurrencies.length > 1}
+                  <button onClick={startCreate} disabled={creating}
                     className="h-8 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">{creating ? "กำลังสร้าง…" : `🧾 ออกใบสำคัญรับ (${selRows.length})`}</button>
                 )}
                 <button onClick={() => setSelected(new Set())} className="ml-auto h-8 px-3 text-xs rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50">ล้างเลือก</button>
@@ -272,6 +304,59 @@ export default function PurchaseVouchersPage() {
         )}
       </div>
 
+      {/* ออกใบสำคัญจากหลายใบรับ — เลือก รวม / แยก (เจ้าของถาม "แยกจากอะไร" → บอกเหตุผลในป๊อป) */}
+      {mergeOpen && (() => {
+        // ระหว่าง/หลังสร้าง การติ๊กถูกล้างแล้ว → ใช้ใบรับจากแผนที่ตรึงไว้
+        const src = mergePlan ? mergePlan.flatMap((g) => g.grs) : selRows;
+        const merge = planVoucherGroups(src, "merge");
+        const split = planVoucherGroups(src, "split");
+        const mixed = mixedCurrencyShops(src);
+        const plan = mergeMode === "merge" ? merge : split;
+        const done = !!mergeRes && !creating;
+        const opt = (m: "merge" | "split", title: string, n: number, sub: string) => (
+          <button type="button" onClick={() => !mergeRes && setMergeMode(m)} disabled={!!mergeRes}
+            className={`w-full text-left rounded-lg border px-3 py-2.5 ${mergeMode === m ? "border-orange-400 bg-orange-50" : "border-slate-200 hover:bg-slate-50"} disabled:cursor-default`}>
+            <div className="flex items-center justify-between gap-2"><span className="text-sm font-semibold text-slate-800">{mergeMode === m ? "● " : "○ "}{title}</span><span className="text-xs text-slate-500">ได้ {n} ใบ</span></div>
+            <div className="text-[11px] text-slate-500 mt-0.5">{sub}</div>
+          </button>
+        );
+        return (
+          <ERPModal open onClose={() => !creating && setMergeOpen(false)} size="md" storageKey="pv-merge"
+            title="🧾 ออกใบสำคัญรับ — รวม หรือ แยก" description={`เลือก ${src.length} ใบรับ`}
+            footer={<>
+              <button onClick={() => setMergeOpen(false)} disabled={creating} className="px-4 h-9 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 disabled:opacity-50">{done ? "ปิด" : "ยังก่อน"}</button>
+              {!mergeRes && <button onClick={() => void runMerge()} disabled={creating} className="px-5 h-9 text-sm font-semibold bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">สร้างใบสำคัญ {plan.length} ใบ</button>}
+            </>}>
+            <div className="text-[12px] text-slate-600 bg-slate-50 rounded-lg px-3 py-2 mb-3 leading-relaxed">
+              <b className="text-slate-700">ทำไมมีหลายใบรับ:</b> รับของ 1 ครั้ง ระบบออกใบรับ 1 ใบต่อใบสั่งซื้อ 1 ใบ · ใบสำคัญรวมกันได้เฉพาะ <b>ร้านเดียวกัน + สกุลเงินเดียวกัน</b>
+            </div>
+            <div className="space-y-2">
+              {opt("merge", "รวม · ร้านเดียว + สกุลเดียว = 1 ใบ (แนะนำ)", merge.length, "ค่าส่งที่มาเป็นก้อนเดียวเฉลี่ยลงทุกรายการในใบ")}
+              {opt("split", "แยก · 1 ใบรับ = 1 ใบสำคัญ", split.length, "ใช้เมื่อแต่ละใบสั่งซื้อมาคนละชิปเมนต์ / ค่าส่งคนละก้อน")}
+            </div>
+            {mixed.length > 0 && <div className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2.5 py-1.5">⚠ {mixed.join(", ")} มีใบสั่งซื้อทั้งเงินบาทและหยวน จึงรวมเป็นใบเดียวไม่ได้ — ถ้าตั้งสกุลผิด แก้ที่ใบสั่งซื้อก่อน (ป๊อปใบสั่งซื้อ › แก้สกุลเงิน) แล้วค่อยออกใบสำคัญ</div>}
+            <div className="mt-3 border border-slate-200 rounded-lg divide-y divide-slate-100">
+              {(mergePlan ?? plan).map((g) => {
+                const r = mergeRes?.find((x) => x.g.key === g.key);
+                return (
+                  <div key={g.key} className="px-3 py-2 text-sm flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-slate-800 truncate">{g.seller_name} <span className="text-xs text-slate-400">{curSymbol(g.currency)}</span></div>
+                      <div className="text-[11px] text-slate-500 truncate">{g.grs.map((x) => `${x.gr_no} (${x.po_no})`).join(" · ")}</div>
+                    </div>
+                    <div className="shrink-0 text-xs">
+                      {r?.id ? <a href={`/purchasing/vouchers/${r.id}`} className="text-blue-600 hover:underline">✓ เปิด</a>
+                        : r?.error ? <span className="text-red-600" title={r.error}>✕ ไม่สำเร็จ</span>
+                        : creating ? <span className="text-slate-400">…</span> : <span className="text-slate-400">{g.grs.length} ใบรับ</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            {mergeRes?.some((r) => r.error) && <div className="mt-2 text-[11px] text-red-600">{mergeRes.filter((r) => r.error).map((r) => `${r.g.seller_name}: ${r.error}`).join(" · ")}</div>}
+          </ERPModal>
+        );
+      })()}
       {/* ป๊อปรายละเอียดใบรับ (ของกลาง) + ปุ่มออกใบสำคัญจากใบนี้ใบเดียว */}
       {detailGr && (
         <GrDetailModal grId={detailGr.id} onClose={() => setDetailGr(null)} onSaved={load}
