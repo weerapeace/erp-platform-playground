@@ -13,6 +13,8 @@
  * ประตูบันทึกสถานะเดียว = PATCH /api/pattern-tickets/[id] (action: "transition")
  */
 
+import { lottieLibraryKey, lottieLibraryValue } from "@/lib/lottie-library";
+
 export type PatternStatus = "new" | "doing" | "review" | "fix" | "done" | "cancelled";
 export type PatternPriority = "normal" | "urgent";
 
@@ -131,16 +133,51 @@ export function fmtDate(iso: string): string {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("th-TH", { day: "numeric", month: "short", timeZone: "UTC" });
 }
 
-export type ChecklistItem = { label: string; done: boolean };
+/** ข้อเช็กลิสต์ในตั๋ว · en = คำแปลที่ตั้งไว้ในแม่แบบ (ไม่มี = ใช้ตาราง CHECKLIST_EN) */
+export type ChecklistItem = { label: string; done: boolean; en?: string };
+/** ข้อในแม่แบบเช็กลิสต์ของประเภทงาน — แบบเดิม = ข้อความไทยล้วน · แบบใหม่ (หน้าตั้งค่า) = { th, en } */
+export type TemplateItem = string | { th: string; en?: string };
+
+/** แม่แบบ → รายการ {th, en} (en ว่าง = ลองหาในตาราง CHECKLIST_EN) — ใช้ในหน้าตั้งค่า */
+export function templateItems(v: unknown): { th: string; en: string }[] {
+  return (Array.isArray(v) ? v : []).map((x) => {
+    const th = String(typeof x === "string" ? x : (x as { th?: unknown })?.th ?? "").trim();
+    const en = String(typeof x === "string" ? "" : (x as { en?: unknown })?.en ?? "").trim();
+    return { th, en: en || CHECKLIST_EN[th] || "" };
+  }).filter((x) => x.th);
+}
+/** ทำความสะอาดแม่แบบก่อนบันทึก (สูงสุด 30 ข้อ) */
+export function cleanTemplateChecklist(v: unknown): { th: string; en: string }[] {
+  return templateItems(v).map((x) => ({ th: x.th.slice(0, 200), en: x.en.slice(0, 200) })).slice(0, 30);
+}
 export function checklistFromTemplate(labels: unknown): ChecklistItem[] {
-  return (Array.isArray(labels) ? labels : []).map((l) => String(l ?? "").trim()).filter(Boolean).map((label) => ({ label, done: false }));
+  return templateItems(labels).map(({ th, en }) => (en && en !== CHECKLIST_EN[th] ? { label: th, en, done: false } : { label: th, done: false }));
 }
 export function cleanChecklist(v: unknown): ChecklistItem[] {
   return (Array.isArray(v) ? v : [])
-    .map((x) => ({ label: String((x as ChecklistItem)?.label ?? "").trim().slice(0, 200), done: !!(x as ChecklistItem)?.done }))
+    .map((x) => {
+      const label = String((x as ChecklistItem)?.label ?? "").trim().slice(0, 200);
+      const en = String((x as ChecklistItem)?.en ?? "").trim().slice(0, 200);
+      return en ? { label, en, done: !!(x as ChecklistItem)?.done } : { label, done: !!(x as ChecklistItem)?.done };
+    })
     .filter((x) => x.label)
     .slice(0, 50);
 }
+
+/** ไฟล์ที่ช่างต้องส่งกลับ: นามสกุลตัวใหญ่ 2–5 ตัว ไม่ซ้ำ สูงสุด 12 */
+export function cleanDeliverables(v: unknown): string[] {
+  const out: string[] = [];
+  for (const x of Array.isArray(v) ? v : []) {
+    const s = String(x ?? "").trim().replace(/^\./, "").toUpperCase();
+    if (/^[A-Z0-9]{2,5}$/.test(s) && !out.includes(s)) out.push(s);
+  }
+  return out.slice(0, 12);
+}
+/** นามสกุลไฟล์ที่ให้เลือกในหน้าตั้งค่า */
+export const COMMON_DELIVERABLES = ["DXF", "AI", "PDF", "PSD", "PNG", "JPG", "SVG", "DST", "PES", "XLSX"];
+
+/** key ของประเภทงานใหม่ (ไม่ต้องให้คนตั้ง) */
+export const newTypeKey = (now = Date.now()) => `t${now.toString(36)}`;
 
 export type TicketLink = { url: string; label: string };
 export function cleanLinks(v: unknown): TicketLink[] {
@@ -155,18 +192,30 @@ export function cleanLinks(v: unknown): TicketLink[] {
  * กลับเป็นไอคอนเดิม = ค่าตั้งต้นตามตารางนี้ (ตรงกับ migration 202611150100) · ประเภทใหม่ที่ไม่อยู่ในตาราง = i:file
  */
 export const PATTERN_ICON_FOLDER = "pattern-icons";
+/** ไอคอนตั้งต้น = ไอคอนขยับจากคลังกลาง (lib/lottie-library) · ประเภทที่เพิ่มเอง = "อื่นๆ" */
 export const DEFAULT_TYPE_ICONS: Record<string, string> = {
-  cut: "i:scissors", block: "i:layout-grid", sew: "i:needle-thread", screen: "i:brush",
-  laser: "i:bolt", grade: "i:ruler-measure", emb: "i:flower", other: "i:dots-vertical",
+  cut: lottieLibraryValue("cut"), block: lottieLibraryValue("block"), sew: lottieLibraryValue("sew"), screen: lottieLibraryValue("screen"),
+  laser: lottieLibraryValue("laser"), grade: lottieLibraryValue("grade"), emb: lottieLibraryValue("emb"), other: lottieLibraryValue("other"),
 };
-export const defaultTypeIcon = (key: string) => DEFAULT_TYPE_ICONS[key] ?? "i:file";
-export const isUploadedTypeIcon = (v: string | null | undefined) => !!v && v.startsWith("img:");
+export const defaultTypeIcon = (key: string) => DEFAULT_TYPE_ICONS[key] ?? lottieLibraryValue("other");
+/** ไอคอนที่ใช้แสดงจริงของประเภท (ว่าง = ตั้งต้น) */
+export const typeIconOf = (x: { key: string; icon?: string | null }) => x.icon || defaultTypeIcon(x.key);
+/** ชนิดไอคอน: library = Lottie มาตรฐาน (วางบนพื้นสี) · uploaded = รูปที่อัปเอง (พื้นเทาอ่อน ขยายเต็มกรอบ) · line = ไอคอนเส้น */
+export type TypeIconKind = "library" | "uploaded" | "line";
+export const typeIconKind = (v: string | null | undefined): TypeIconKind => (lottieLibraryKey(v) ? "library" : v?.startsWith("img:") ? "uploaded" : "line");
+export const isUploadedTypeIcon = (v: string | null | undefined) => typeIconKind(v) === "uploaded";
+/** ขนาดไอคอนในกรอบ box px ตามชนิด */
+export const typeIconSize = (v: string | null | undefined, box: number): number | string => {
+  const k = typeIconKind(v);
+  return k === "uploaded" ? Math.round(box * 0.86) : k === "library" ? Math.round(box * 0.74) : "1em";
+};
 
 /** ตรวจค่าไอคอนที่จะบันทึก — ถูก = ค่าที่ใช้ได้ · ว่าง = ค่าตั้งต้นของประเภท · รูปแบบผิด = null (ไม่บันทึก) */
 export function cleanTypeIcon(v: unknown, typeKey: string): string | null {
   const s = typeof v === "string" ? v.trim() : "";
   if (!s) return defaultTypeIcon(typeKey);
   if (/^i:[a-z0-9-]{1,40}$/.test(s)) return s;
+  if (lottieLibraryKey(s)) return s;
   if (s.startsWith(`img:${PATTERN_ICON_FOLDER}/`) && /^img:[\w\-./]{1,200}$/.test(s) && !s.includes("..")) return s;
   return null;
 }
@@ -227,7 +276,8 @@ export const CHECKLIST_EN: Record<string, string> = {
   "แปลงไฟล์จักรปัก": "Convert to embroidery machine file",
   "ปักทดสอบ": "Stitch a test sample",
 };
-export const checklistLabel = (label: string, en: boolean) => (en ? CHECKLIST_EN[label.trim()] ?? label : label);
+/** ข้อความเช็กลิสต์ตามภาษา — English: คำแปลที่ตั้งในแม่แบบ (itemEn) > ตาราง CHECKLIST_EN > ไทยเดิม */
+export const checklistLabel = (label: string, en: boolean, itemEn?: string | null) => (en ? itemEn?.trim() || CHECKLIST_EN[label.trim()] || label : label);
 
 /** ชื่องานตามภาษา — โหมด English ใช้ title_en (แปลอัตโนมัติตอนบันทึก) · ว่าง = ชื่อไทย */
 export const ticketTitle = (tk: { title: string; title_en?: string | null }, en: boolean) => (en && tk.title_en?.trim() ? tk.title_en : tk.title);

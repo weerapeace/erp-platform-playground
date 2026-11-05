@@ -22,9 +22,10 @@ import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
 import { apiFetch } from "@/lib/api";
 import { translateContent } from "@/lib/content-translate";
-import { checklistLabel, fmtDate, isOverdue, patternStatus, ticketTitle, todayBangkok, typeColorCls, typeLabelPair, type ChecklistItem, type PatternAction, type TicketLink } from "@/lib/pattern-tickets";
+import { checklistLabel, fmtDate, isOverdue, patternStatus, ticketTitle, todayBangkok, typeIconOf, typeLabelPair, type ChecklistItem, type PatternAction, type TicketLink } from "@/lib/pattern-tickets";
 import { uploadTicketFile } from "./upload";
 import { ExtBadge } from "./create-modal";
+import { TypeIconBox } from "./type-icon-picker";
 import type { TicketDetail, TicketType } from "./types";
 
 type Lang = "th" | "both" | "en";
@@ -145,7 +146,7 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
         <div className="flex flex-col gap-5" {...drop.guard}>
           {/* หัว */}
           <div className="flex items-start gap-3">
-            <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-xl ${typeColorCls(ty?.color)}`}><Icon value={ty?.icon ?? "i:file"} /></span>
+            <TypeIconBox value={ty ? typeIconOf(ty) : "i:file"} color={ty?.color ?? "slate"} box={44} />
             <div className="min-w-0 flex-1 text-sm">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${st.cls}`}>{t(st.th, st.en)}</span>
@@ -198,7 +199,7 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
                 {tk.checklist.map((c, i) => (
                   <label key={i} className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-sm ${d.can_work ? "cursor-pointer hover:bg-slate-50" : ""}`}>
                     <input type="checkbox" checked={c.done} disabled={!d.can_work || busy} onChange={() => toggleCheck(i)} className="h-4 w-4 accent-blue-600" />
-                    <span className={c.done ? "text-slate-400 line-through" : "text-slate-700"}>{checklistLabel(c.label, isEn)}</span>
+                    <span className={c.done ? "text-slate-400 line-through" : "text-slate-700"}>{checklistLabel(c.label, isEn, c.en)}</span>
                   </label>
                 ))}
               </div>

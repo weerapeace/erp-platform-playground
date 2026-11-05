@@ -1,8 +1,8 @@
-import type { ChecklistItem, PatternAction, TicketLink } from "@/lib/pattern-tickets";
+import type { ChecklistItem, PatternAction, TemplateItem, TicketLink } from "@/lib/pattern-tickets";
 
 export type TicketType = {
   key: string; label_th: string; label_en: string; icon: string; color: string;
-  checklist: string[]; deliverables: string[]; sort_order: number; is_active: boolean;
+  checklist: TemplateItem[]; deliverables: string[]; sort_order: number; is_active: boolean;
 };
 
 export type Me = { id: string | null; name: string | null; role_label: string | null; can_work: boolean; can_manage: boolean; can_create: boolean };

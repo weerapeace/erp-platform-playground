@@ -16,8 +16,9 @@ import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers
 import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
 import { apiFetch } from "@/lib/api";
 import { translateContent } from "@/lib/content-translate";
-import { defaultDueDate, defaultTypeIcon, isUploadedTypeIcon, NORMAL_DUE_DAYS, typeColorCls, typeLabelPair } from "@/lib/pattern-tickets";
+import { defaultDueDate, NORMAL_DUE_DAYS, typeIconOf, typeLabelPair } from "@/lib/pattern-tickets";
 import { fmtBytes, uploadTicketFile } from "./upload";
+import { TypeIconBox } from "./type-icon-picker";
 import type { TicketType } from "./types";
 
 export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
@@ -133,9 +134,7 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
         <section>
           {ty && !picking ? (
             <div className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4">
-              <span className={`flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl text-[32px] ${isUploadedTypeIcon(ty.icon) ? "bg-slate-50" : typeColorCls(ty.color)}`}>
-                <Icon value={ty.icon || defaultTypeIcon(ty.key)} size={isUploadedTypeIcon(ty.icon) ? 56 : "1em"} />
-              </span>
+              <TypeIconBox value={typeIconOf(ty)} color={ty.color} box={64} />
               <span className="min-w-0 flex-1">
                 <span className="block text-lg font-semibold leading-tight text-slate-800">{typeLabelPair(ty, isEn)[0]}</span>
                 <span className="block text-sm text-slate-400">{typeLabelPair(ty, isEn)[1]}</span>
@@ -157,7 +156,7 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
             {active.map((x) => (
               <button key={x.key} type="button" onClick={() => { setTypeKey(x.key); setPicking(false); setErrors((e) => ({ ...e, type: "" })); }}
                 className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-sm transition ${typeKey === x.key ? "border-blue-400 bg-blue-50 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"}`}>
-                <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${typeColorCls(x.color)}`}><Icon value={x.icon} /></span>
+                <TypeIconBox value={typeIconOf(x)} color={x.color} box={28} />
                 <span className="min-w-0 leading-tight"><span className="block truncate font-medium text-slate-700">{typeLabelPair(x, isEn)[0]}</span><span className="block truncate text-[11px] text-slate-400">{typeLabelPair(x, isEn)[1]}</span></span>
               </button>
             ))}

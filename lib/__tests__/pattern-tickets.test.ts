@@ -59,11 +59,11 @@ describe("ตัวช่วย", () => {
 });
 
 describe("ไอคอนประเภทงาน", () => {
-  it("ว่าง = กลับเป็นไอคอนเดิมของประเภท · ประเภทใหม่ = i:file", () => {
-    expect(cleanTypeIcon("", "cut")).toBe("i:scissors");
-    expect(cleanTypeIcon(null, "other")).toBe("i:dots-vertical");
-    expect(cleanTypeIcon(undefined, "zzz")).toBe("i:file");
-    expect(defaultTypeIcon("emb")).toBe("i:flower");
+  it("ว่าง = กลับเป็นไอคอนตั้งต้น (Lottie มาตรฐาน) · ประเภทที่เพิ่มเอง = อื่นๆ", () => {
+    expect(cleanTypeIcon("", "cut")).toBe("img:/lottie/library/cut.json");
+    expect(cleanTypeIcon(null, "other")).toBe("img:/lottie/library/other.json");
+    expect(cleanTypeIcon(undefined, "zzz")).toBe("img:/lottie/library/other.json");
+    expect(defaultTypeIcon("emb")).toBe("img:/lottie/library/emb.json");
   });
   it("รับเฉพาะไอคอนระบบ หรือรูปในโฟลเดอร์ pattern-icons", () => {
     expect(cleanTypeIcon("i:bolt", "laser")).toBe("i:bolt");
@@ -103,5 +103,34 @@ describe("โหมด English", () => {
     expect(ticketTitle({ title: "กระเป๋า", title_en: "Bag" }, true)).toBe("Bag");
     expect(ticketTitle({ title: "กระเป๋า", title_en: "" }, true)).toBe("กระเป๋า");
     expect(ticketTitle({ title: "กระเป๋า", title_en: "Bag" }, false)).toBe("กระเป๋า");
+  });
+});
+
+describe("ตั้งค่าประเภทงาน", () => {
+  it("แม่แบบเช็กลิสต์: ข้อความเดิม + {th,en} · ข้อเดิมหาคำแปลจากตาราง", async () => {
+    const { templateItems, checklistFromTemplate, checklistLabel } = await import("@/lib/pattern-tickets");
+    expect(templateItems(["ทดสอบชิ้นแรก", { th: "พับขอบ", en: "Fold edges" }, " "])).toEqual([
+      { th: "ทดสอบชิ้นแรก", en: "Test the first piece" }, { th: "พับขอบ", en: "Fold edges" },
+    ]);
+    const items = checklistFromTemplate([{ th: "พับขอบ", en: "Fold edges" }, "ทดสอบชิ้นแรก"]);
+    expect(items).toEqual([{ label: "พับขอบ", en: "Fold edges", done: false }, { label: "ทดสอบชิ้นแรก", done: false }]);
+    expect(checklistLabel("พับขอบ", true, "Fold edges")).toBe("Fold edges");
+    expect(checklistLabel("ทดสอบชิ้นแรก", true)).toBe("Test the first piece");
+    expect(checklistLabel("พับขอบ", false, "Fold edges")).toBe("พับขอบ");
+  });
+  it("ไฟล์ที่ต้องส่ง: ตัวใหญ่ ไม่ซ้ำ ตัดจุด ตัดของแปลก", async () => {
+    const { cleanDeliverables } = await import("@/lib/pattern-tickets");
+    expect(cleanDeliverables(["dxf", ".ai", "DXF", "x", "toolongext", "PDF"])).toEqual(["DXF", "AI", "PDF"]);
+  });
+  it("ไอคอน: คลัง Lottie / อัปเอง / เส้น · ค่าแปลกไม่รับ", async () => {
+    const { cleanTypeIcon, typeIconKind, typeIconOf, defaultTypeIcon } = await import("@/lib/pattern-tickets");
+    expect(cleanTypeIcon("img:/lottie/library/cut.json", "cut")).toBe("img:/lottie/library/cut.json");
+    expect(cleanTypeIcon("img:/lottie/library/nope.json", "cut")).toBeNull();
+    expect(cleanTypeIcon("img:/etc/passwd", "cut")).toBeNull();
+    expect(cleanTypeIcon("", "laser")).toBe("img:/lottie/library/laser.json");
+    expect(typeIconKind("img:/lottie/library/cut.json")).toBe("library");
+    expect(typeIconKind("img:pattern-icons/u/1.png")).toBe("uploaded");
+    expect(typeIconKind("i:scissors")).toBe("line");
+    expect(typeIconOf({ key: "tnew", icon: "" })).toBe(defaultTypeIcon("tnew"));
   });
 });

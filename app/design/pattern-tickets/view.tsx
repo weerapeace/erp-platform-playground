@@ -13,10 +13,12 @@ import { LangToggle, useLang, useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
-import { fmtDate, isOverdue, patternStatus, ticketTitle, todayBangkok, typeColorCls } from "@/lib/pattern-tickets";
+import { fmtDate, isOverdue, patternStatus, ticketTitle, todayBangkok, typeIconOf } from "@/lib/pattern-tickets";
+import { TypeIconBox } from "./type-icon-picker";
 import { TicketDrawer } from "./ticket-drawer";
 import { CreateTicketModal } from "./create-modal";
 import { TypeTiles } from "./type-tiles";
+import { TypeSettingsModal } from "./type-settings";
 import type { Me, TicketRow, TicketType } from "./types";
 
 type View = "mine" | "open" | "done";
@@ -36,6 +38,7 @@ export function PatternTicketsView() {
   const [openId, setOpenId] = useState<string | null>(null);
   /** null = ป๊อปปิด · "" = เปิดโดยยังไม่เลือกประเภท · key = เปิดโดยเลือกประเภทนั้นไว้ */
   const [creating, setCreating] = useState<string | null>(null);
+  const [typeSettingsOpen, setTypeSettingsOpen] = useState(false);   // ⚙ ตั้งค่าประเภทงาน (ผู้จัดการ)
   const [openCounts, setOpenCounts] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
@@ -109,7 +112,9 @@ export function PatternTicketsView() {
       {/* แผ่นประเภทงาน — เฉพาะคนที่เปิดตั๋วได้ (pattern.create: ผู้จัดการ/แอดมิน/ฝ่ายออกแบบ) · พนักงานเห็นแค่รายการตั๋ว */}
       <TypeTiles types={types} counts={openCounts} me={me}
         onPick={(key) => setCreating(key)}
-        onTypeSaved={(nt) => setTypes((cur) => cur.map((x) => (x.key === nt.key ? { ...x, ...nt } : x)))} />
+        onTypeSaved={(nt) => setTypes((cur) => cur.map((x) => (x.key === nt.key ? { ...x, ...nt } : x)))}
+        onOpenSettings={() => setTypeSettingsOpen(true)} />
+      {typeSettingsOpen && <TypeSettingsModal onClose={() => setTypeSettingsOpen(false)} onChanged={() => void load()} />}
 
       {/* ตัวเลขสรุป */}
       <h2 className="mb-2 text-sm font-medium text-slate-700">{t("ตั๋วงาน", "Tickets")}</h2>
@@ -132,7 +137,7 @@ export function PatternTicketsView() {
         <Chip on={!type} onClick={() => setType("")}>{t("ทุกประเภท", "All types")}</Chip>
         {types.filter((x) => x.is_active).map((x) => (
           <Chip key={x.key} on={type === x.key} onClick={() => setType(type === x.key ? "" : x.key)}>
-            <Icon value={x.icon} /> {t(x.label_th, x.label_en)}
+            <Icon value={typeIconOf(x)} /> {t(x.label_th, x.label_en)}
           </Chip>
         ))}
       </div>
@@ -167,7 +172,7 @@ export function PatternTicketsView() {
               return (
                 <button key={r.id} type="button" onClick={() => openTicket(r.id)}
                   className={`grid grid-cols-[40px_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border bg-white px-3 py-2.5 text-left transition hover:border-slate-300 ${openId === r.id ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200"}`}>
-                  <span className={`flex h-10 w-10 items-center justify-center rounded-lg text-lg ${typeColorCls(ty?.color)}`}><Icon value={ty?.icon ?? "i:file"} /></span>
+                  <TypeIconBox value={ty ? typeIconOf(ty) : "i:file"} color={ty?.color ?? "slate"} box={40} />
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium text-slate-800">
                       {r.priority === "urgent" && <span className="mr-1.5 rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600">{t("ด่วน", "Urgent")}</span>}
