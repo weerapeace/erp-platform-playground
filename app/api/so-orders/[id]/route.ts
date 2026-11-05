@@ -1,6 +1,7 @@
 /**
  * ใบสั่งขาย รายใบ — /api/so-orders/[id]
  *   GET    → หัวใบ + บรรทัด (+ progress ต่อรายการ: สั่ง/เปิดผลิต/ส่ง · orphan_mos = ใบผลิตที่ผูกใบนี้แต่ไม่ตรงรายการไหน)
+ *            + stage ต่อรายการ 0-4 (lib/so-order-stage — ตัวเดียวกับมุมมองตามชุด) + image_url (รูปปก SKU / รุ่น)
  *   PATCH  { action }
  *      save     → แก้ไขใบ (หัว + บรรทัด · คิดเงินใหม่ด้วยเครื่องคิดเงินกลาง)
  *      open_mo  { group_id? } → เปิด/ผูกใบสั่งผลิตให้ทุกบรรทัด (หรือเฉพาะชุด) · กดซ้ำได้ ไม่สร้างซ้ำ · ใบที่เปิดเข้าชุดของรายการให้เอง
@@ -20,6 +21,9 @@ import { checkQuotePull, orderQuoteIds, quotePullProblems, syncQuoteConversions 
 import { computeTotals, lineQuoteIds, lineRow, resolveLineGroups, type SoOrderHeaderInput, type SoOrderLineInput } from "../shared";
 import { openMoForOrder } from "../open-mo";
 import { soLineProgress } from "@/lib/mo-so-rule";
+import { loadMoDispatch } from "@/lib/mo-dispatch";
+import { soLineStageMulti } from "@/lib/so-order-stage";
+import { SKU_COVER_SELECT, coverUrl, resolveSkuCover } from "@/lib/sku-cover";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -31,7 +35,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const [{ data: order }, { data: lines }, { data: mos }] = await Promise.all([
     admin.from("so_orders").select("*").eq("id", id).maybeSingle(),
     admin.from("so_order_lines").select("*").eq("order_id", id).order("line_no"),
-    admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, status").eq("so_order_id", id).eq("is_active", true).order("mo_no"),
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, status, skipped_stages").eq("so_order_id", id).eq("is_active", true).order("mo_no"),
   ]);
   if (!order) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งขาย" }, { status: 404 });
 
@@ -47,7 +51,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     ls.map((l) => ({ id: String(l.id), sku: (l.sku as string) ?? null, qty: Number(l.qty) || 0, mo_id: (l.mo_id as string) ?? null })),
     moRows.map((m) => ({ ...m, shipped: shipped.get(m.id) ?? 0 })),
   );
-  return NextResponse.json({ data: { ...order, lines: ls.map((l) => ({ ...l, progress: prog.byLine[String(l.id)] ?? null })), orphan_mos: prog.orphans }, error: null });
+  // ขั้นงานต่อรายการ (จ่ายงาน/ส่งงานจากบอร์ด — lib/mo-dispatch) + รูปปกสินค้า (ของตัวเอง ไม่มีใช้ของรุ่น)
+  const disp = await loadMoDispatch(admin, moRows as unknown as Record<string, unknown>[]);
+  const codes = [...new Set(ls.map((l) => String(l.sku ?? "").trim()).filter(Boolean))];
+  const imgOf = new Map<string, string>();
+  for (let i = 0; i < codes.length; i += 200) {
+    const { data: skus } = await admin.from("skus_v2").select(`code, is_active, ${SKU_COVER_SELECT}`).in("code", codes.slice(i, i + 200));
+    for (const s of ((skus ?? []) as Record<string, unknown>[]).sort((a, b) => Number(!!a.is_active) - Number(!!b.is_active))) {
+      const url = coverUrl(resolveSkuCover(s).key);
+      if (url) imgOf.set(String(s.code), `${url}&w=160`);   // ตัวที่ใช้งานอยู่ทับตัวที่ปิด (เรียงไว้ท้าย)
+    }
+  }
+  const orderShipped = (order as { status?: string }).status === "shipped";
+  const outLines = ls.map((l) => {
+    const p = prog.byLine[String(l.id)] ?? null;
+    const stage = soLineStageMulti({
+      orderShipped, ordered: Number(l.qty) || 0, shipped: p?.shipped ?? 0,
+      mos: (p?.mos ?? []).map((m) => ({ status: m.status, dispatched: !!disp.get(m.mo_no)?.dispatched, submitted: !!disp.get(m.mo_no)?.submitted })),
+    });
+    return { ...l, progress: p, stage, image_url: imgOf.get(String(l.sku ?? "").trim()) ?? null };
+  });
+  return NextResponse.json({ data: { ...order, lines: outLines, orphan_mos: prog.orphans }, error: null });
 }
 
 type PatchBody = {

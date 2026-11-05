@@ -34,6 +34,23 @@ export function soLineStage(f: {
   return 1;
 }
 
+/**
+ * ขั้นของรายการที่มีใบสั่งผลิตได้หลายใบ (แตกใบ / ลดจำนวน / เปิดเพิ่ม — หน้าสถานะใบสั่งขาย)
+ * กติกาเดียวกับ soLineStage: จ่ายงานใบไหนก็ได้ = กำลังผลิต · ทำเสร็จ = ทุกใบส่งงานครบ/ปิดแล้ว · ส่งครบจำนวนที่สั่ง = ส่งลูกค้าแล้ว
+ */
+export function soLineStageMulti(f: {
+  orderShipped: boolean; ordered: number; shipped: number;
+  mos: { status?: string | null; dispatched?: boolean; submitted?: boolean }[];
+}): SoLineStage {
+  const live = f.mos.filter((m) => m.status !== "cancelled");
+  const done = (m: { status?: string | null; submitted?: boolean }) => !!m.submitted || m.status === "done" || m.status === "closed";
+  return soLineStage({
+    orderShipped: f.orderShipped, hasMo: live.length > 0,
+    dispatched: live.some((m) => m.dispatched), submitted: live.length > 0 && live.every(done),
+    delivered: soShipState(f.ordered, f.shipped) === "full",
+  });
+}
+
 /** ส่งลูกค้าแล้ว: ครบ / บางส่วน / ยังไม่ส่ง — เทียบจำนวนในรายการกับจำนวนในใบขายที่ผูกไว้ */
 export type SoShipState = "full" | "part" | "none";
 export const SO_SHIP_LABEL: Record<SoShipState, string> = { full: "ส่งครบ", part: "ส่งบางส่วน", none: "ยังไม่ส่ง" };

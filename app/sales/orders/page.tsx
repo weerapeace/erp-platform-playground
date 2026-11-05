@@ -31,6 +31,7 @@ import { SOLineEditor, SalesTotalsPreview, VatModeToggle, calculateEditorTotals,
 import { DateInput } from "@/components/date-input";
 import { Icon } from "@/components/icon";
 import type { SoLineMo, SoLineProgress } from "@/lib/mo-so-rule";
+import type { SoLineStage } from "@/lib/so-order-stage";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
 import { MoMultiPickerModal, type MoPickRow } from "@/components/mo-picker";
 import { MoGroupPicker, useMoGroups, rememberMoGroup, type MoGroupPick } from "@/components/mo-group-picker";
@@ -53,7 +54,9 @@ type Row = {
 /** ข้อมูลประจำบรรทัดที่ SOLineEditor ไม่มีช่อง (ผูกใบสั่งผลิต · ใบเสนอราคาต้นทาง · ชุด) — key = tempId */
 type LineMeta = { mo_id: string | null; mo_no: string | null; quote_id?: string | null; quote_no?: string | null; group: MoGroupPick | null;
   /** ยอดต่อรายการ สั่ง/เปิดผลิต/ส่ง (อ่านอย่างเดียว — มาจาก GET ใบ · lib/mo-so-rule) */
-  progress?: SoLineProgress | null };
+  progress?: SoLineProgress | null;
+  /** ขั้นงานของรายการ 0-4 (อ่านอย่างเดียว — หน้าสถานะ · lib/so-order-stage) */
+  stage?: SoLineStage | null };
 type Company = { id: string; company_code: string; name: string; is_default: boolean; vat_registered: boolean };
 
 const ST: Record<string, { label: string; color: string }> = {
@@ -179,6 +182,7 @@ export default function SoOrdersPage() {
         m[String(l.id)] = { mo_id: (l.mo_id as string) ?? null, mo_no: (l.mo_no as string) ?? null,
           quote_id: (l.quote_id as string) ?? null, quote_no: (l.quote_no as string) ?? null,
           progress: (l.progress as SoLineProgress | null) ?? null,
+          stage: (l.stage as SoLineStage | null) ?? null,
           group: gid ? { id: gid, name: nameOfGroup.get(gid) ?? (r.groups ?? []).find((g) => g.id === gid)?.name ?? "ชุด" } : null };
       }
       setMeta(m);
@@ -201,6 +205,8 @@ export default function SoOrdersPage() {
           unit_price: Number(l.unit_price) || 0,
           discount_type: ((l.discount_type as string) === "percent" ? "percent" : "amount") as "percent" | "amount",
           discount_value: Number(l.discount_value) || 0, note: (l.note as string) || undefined,
+          // รูปปกสินค้า (จาก API — ยังไม่มีช่องเก็บรูปต่อรายการ) → หน้าสถานะ + ตารางแก้ไขโชว์รูปเดียวกัน
+          image_url: (l.image_url as string | null) ?? null,
         })),
       });
     } catch { toast.error("เปิดใบไม่สำเร็จ"); }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { soLineStage, soShipState } from "@/lib/so-order-stage";
+import { soLineStage, soLineStageMulti, soShipState } from "@/lib/so-order-stage";
 
 describe("soLineStage — ขั้นของรายการในใบสั่งขาย (มุมมองตามชุด)", () => {
   it("ยังไม่มีใบสั่งผลิต = รอเปิดผลิต", () => {
@@ -30,5 +30,24 @@ describe("soLineStage — ขั้นของรายการในใบส
     expect(soShipState(200, 80)).toBe("part");
     expect(soShipState(60, 0)).toBe("none");
     expect(soShipState(0, 0)).toBe("none");
+  });
+});
+
+describe("soLineStageMulti — รายการที่มีใบผลิตหลายใบ (หน้าสถานะใบสั่งขาย)", () => {
+  const base = { orderShipped: false, ordered: 500, shipped: 0 };
+  it("ไม่มีใบ / ใบยกเลิกหมด = รอเปิดผลิต", () => {
+    expect(soLineStageMulti({ ...base, mos: [] })).toBe(0);
+    expect(soLineStageMulti({ ...base, mos: [{ status: "cancelled", dispatched: true }] })).toBe(0);
+  });
+  it("จ่ายงานใบไหนก็ได้ = กำลังผลิต · ทุกใบส่งงานครบ = ทำเสร็จ", () => {
+    expect(soLineStageMulti({ ...base, mos: [{ status: "draft" }, { status: "draft" }] })).toBe(1);
+    expect(soLineStageMulti({ ...base, mos: [{ status: "draft", dispatched: true }, { status: "draft" }] })).toBe(2);
+    expect(soLineStageMulti({ ...base, mos: [{ dispatched: true, submitted: true }, { dispatched: true }] })).toBe(2);
+    expect(soLineStageMulti({ ...base, mos: [{ dispatched: true, submitted: true }, { status: "done" }] })).toBe(3);
+  });
+  it("ส่งครบจำนวนที่สั่ง หรือใบสั่งขายกดส่งแล้ว = ส่งลูกค้าแล้ว · ส่งบางส่วนยังไม่ใช่", () => {
+    expect(soLineStageMulti({ ...base, shipped: 500, mos: [{ status: "draft" }] })).toBe(4);
+    expect(soLineStageMulti({ ...base, shipped: 300, mos: [{ status: "draft", dispatched: true }] })).toBe(2);
+    expect(soLineStageMulti({ ...base, orderShipped: true, mos: [] })).toBe(4);
   });
 });
