@@ -3,7 +3,8 @@
  * GET /api/purchasing/receivable?mode=done  → รายการที่ปิดแล้ว (รับครบ / ปิดยอดขาด) ไว้ดู/แก้
  * GET /api/purchasing/receivable?insights=1 → + raw_balance / linked_sku / dup_of (เครื่องมือเคลียร์ของค้างเก่า)
  * join skus_v2 (รหัส + รูปปก) + supplier_items (ลีดไทม์ร้านหลัก) เพื่อโชว์การ์ดรับของ
- * คำนวณ "วันคาดการณ์ของเข้า": ① PO.expected_date ถ้ามี → ② order_date + lead_time → ③ null
+ * คำนวณ "วันคาดการณ์ของเข้า" = ของกลาง lib/po-eta: ① PO.expected_date → ② วันสั่ง + ลีดไทม์ร้าน (partners_v2.purchase_lead_time) → ③ วันสั่ง + 10 วัน
+ *   (★ 2026-11-05 เจ้าของสั่ง "คาดเข้าตามร้าน คำนวณง่าย 10 วัน" — เดิมนับจากวันจ่าย + ลีดไทม์ร้านหลักของสินค้า · ยังไม่จ่าย = ไม่มีวันคาด · จีน 14 วัน)
  * ใช้ในหน้า "รับสินค้าเข้า" แท็บ "สินค้าที่รอเข้า" + "รับครบแล้ว"
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -12,21 +13,13 @@ import { guardApi } from "@/lib/api-auth";
 import { skuIdsByBracketCode, resolveSkuId } from "@/lib/sku-code-lookup";
 import { SKU_COVER_SELECT, resolveSkuCover, coverUrl } from "@/lib/sku-cover";
 import { loadPoPay, PO_PAY_COLUMNS } from "@/lib/po-pay-server";
+import { poEta } from "@/lib/po-eta";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const num = (v: unknown) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const today = () => new Date().toISOString().slice(0, 10);
-const CHINA_DEFAULT_LEAD = 14;   // ร้านจีน (สกุล RMB/หยวน) ที่ไม่มีลีดไทม์ → ใช้ค่านี้
-const isCNYCur = (c: unknown) => { const s = String(c ?? "").toUpperCase(); return s === "RMB" || s === "YUAN" || s === "CNY"; };
-// บวกวันจากวันที่ฐาน (YYYY-MM-DD) → คืน YYYY-MM-DD
-const addDays = (date: string, days: number): string => {
-  const d = new Date(date + "T00:00:00Z");
-  if (isNaN(d.getTime())) return date;
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-};
 // จำนวนวันระหว่าง 2 วันที่ (to - from) แบบจำนวนวันเต็ม
 const dayDiff = (from: string, to: string): number => {
   const a = new Date(from + "T00:00:00Z").getTime();
@@ -88,12 +81,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     for (const s of (sk ?? []) as unknown as Record<string, unknown>[]) { const c = resolveSkuCover(s); skuMap.set(String(s.id), { code: (s.code as string) ?? null, cover: c.key, coverFromParent: c.fromParent }); }
   }
 
-  // 4) ลีดไทม์ร้านหลัก (is_default) — ไว้คำนวณวันคาดเมื่อ PO ไม่ได้ระบุ
-  const leadMap = new Map<string, number | null>();
-  for (let i = 0; i < skuIds.length; i += 300) {
-    const chunk = skuIds.slice(i, i + 300);
-    const { data: si } = await admin.from("supplier_items").select("item_sku_id, lead_time_days").eq("is_default", true).in("item_sku_id", chunk);
-    for (const s of (si ?? []) as Record<string, unknown>[]) leadMap.set(String(s.item_sku_id), s.lead_time_days == null ? null : Number(s.lead_time_days));
+  // 4) ระยะเวลาส่งของของร้าน (partners_v2.purchase_lead_time — ตั้งที่หน้าตั้งค่าร้าน / ปฏิทินจัดซื้อ) → วันคาด (lib/po-eta · ไม่ตั้ง = 10 วัน)
+  const shopLead = new Map<string, string>();
+  {
+    const { data: ps } = await admin.from("partners_v2").select("id, purchase_lead_time").not("purchase_lead_time", "is", null).limit(5000);
+    for (const p of (ps ?? []) as Record<string, unknown>[]) { const v = String(p.purchase_lead_time ?? "").trim(); if (v) shopLead.set(String(p.id), v); }
   }
 
   // 5) ใบสั่งผลิต (MO) ต้นทาง — ผ่าน บรรทัด PO → pr_id → ใบขอซื้อ.source_mo_no + used_for_label
@@ -132,7 +124,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const sk = sid ? skuMap.get(sid) : null;
     const cover = sk?.cover ?? null;
     const orderDate = (po.order_date as string) || null;
-    const lead = sid ? (leadMap.get(sid) ?? null) : null;
 
     // สถานะจ่ายเงิน + ร้านส่งก่อนจ่าย → จุดเริ่มนับวันส่ง
     const sellerName = (po.seller_name as string) ?? "";
@@ -140,17 +131,16 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const paymentStatus = (po.payment_status as string) || "unpaid";
     const paidDate = (po.paid_date as string) || null;
     const isPaid = paymentStatus === "paid";
-    // เริ่มนับ: ร้านส่งก่อนจ่าย=วันสั่ง · ร้านปกติ=วันจ่าย (ยังไม่จ่าย=ยังไม่เริ่ม)
+    // เริ่มนับ "ค้างมากี่วัน": ร้านส่งก่อนจ่าย=วันสั่ง · ร้านปกติ=วันจ่าย (ยังไม่จ่าย=ยังไม่เริ่ม)
     const shipStart = shipBefore ? orderDate : (isPaid ? (paidDate || orderDate) : null);
-    // ลีดไทม์ที่ใช้: ลีดไทม์ร้าน (ถ้ามี) → ไม่มี + ร้านจีน = 14 วัน → ไม่มี + ไม่ใช่จีน = null
-    const isChina = isCNYCur(po.currency);
-    const effLead = lead != null ? lead : (isChina ? CHINA_DEFAULT_LEAD : null);
-    const leadFromChina = lead == null && isChina;
 
-    // วันคาดการณ์: ① PO.expected_date → ② ship_start + ลีดไทม์ → ③ null (รอจ่าย/ไม่มีลีดไทม์)
-    let expected: string | null = (po.expected_date as string) || null;
-    let expectedSource: "po" | "lead" | "china" | null = expected ? "po" : null;
-    if (!expected && shipStart && effLead != null) { expected = addDays(shipStart, effLead); expectedSource = leadFromChina ? "china" : "lead"; }
+    // วันคาดการณ์ (ของกลาง lib/po-eta): ① PO.expected_date → ② วันสั่ง + ลีดไทม์ร้าน → ③ วันสั่ง + 10 วัน
+    const eta = poEta({
+      expected_date: (po.expected_date as string) || null, order_date: orderDate,
+      shop_lead: po.seller_partner_id ? shopLead.get(String(po.seller_partner_id)) ?? null : null,
+      paid_date: isPaid ? paidDate : null, payment_due_date: (po.payment_due_date as string) || null,
+    });
+    const expected = eta.date;
     const pr = l.pr_id ? prMap.get(String(l.pr_id)) : null;
 
     return {
@@ -173,8 +163,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       currency: (po.currency as string) ?? "THB",
       order_date: orderDate,
       expected_date: expected,
-      expected_source: expectedSource,           // 'po' | 'lead' | null
-      lead_time_days: lead,
+      expected_source: eta.source,               // 'po' (ตั้งในใบ) | 'shop' (ลีดไทม์ร้าน) | 'default' (10 วัน) | null
+      lead_time_days: eta.lead_days,
       days_remaining: expected ? dayDiff(t, expected) : null,
       source_mo_no: pr?.mo ?? null,               // ใบสั่งผลิตต้นทาง (ถ้าขอซื้อมาจาก MO)
       used_for_label: pr?.usedFor ?? null,        // สินค้าที่ผลิต (ป้ายช่วยจำ)

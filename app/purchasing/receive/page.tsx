@@ -26,6 +26,7 @@ import { CopyButton } from "@/components/copy-button";
 import { GrDetailModal } from "@/components/gr-detail-modal";
 import { PO_PAY_FILTERS, isPoPayFilterKey, matchPayFilter, payFilterOf, poPayState, type PoPayFilterKey, type PoPayState } from "@/lib/po-pay-state";
 import { PO_PAY_CLS, PoPayFilterBar } from "@/components/po-pay-chip";
+import { etaSourceLabel } from "@/lib/po-eta";
 import { Icon } from "@/components/icon";
 
 type PO = { id: string; po_no: string; seller_name: string; status: string; currency: string; expected_date?: string | null; order_date?: string | null };
@@ -68,7 +69,7 @@ type PendItem = {
   uom: string; qty: number; qty_received: number; qty_defective: number; line_status: string;
   remaining: number; currency: string;
   order_date: string | null; expected_date: string | null;
-  expected_source: "po" | "lead" | "china" | null; lead_time_days: number | null;
+  expected_source: "po" | "shop" | "default" | null; lead_time_days: number | null;   // ที่มาวันคาด (lib/po-eta): ตั้งในใบ / ลีดไทม์ร้าน / 10 วัน
   days_remaining: number | null;
   source_mo_no: string | null; used_for_label: string | null;   // ใบสั่งผลิตต้นทาง
   receive_count: number;                                          // รับมาแล้วกี่ครั้ง (ใบรับ GR)
@@ -912,8 +913,7 @@ export default function ReceiveGoodsPage() {
                                     if (k === "expected") return (
                                       <div key={k} className="flex items-center gap-1 flex-wrap">
                                         <span>🚚 คาดเข้า: {it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}</span>
-                                        {it.expected_source === "lead" && <span title="ประเมินจากลีดไทม์ร้าน (แก้ได้)" className="text-[10px] text-indigo-500">~ลีดไทม์</span>}
-                                        {it.expected_source === "china" && <span title="ค่าเริ่มต้นร้านจีน +14 วัน (แก้ได้)" className="text-[10px] text-orange-500">~จีน 14 วัน</span>}
+                                        {etaSourceLabel(it) && <span title="วันสั่ง + ลีดไทม์ของร้าน (ตั้งที่ทะเบียนคู่ค้า · ไม่ตั้ง = 10 วัน) — ✎ ตั้งวันเองในใบได้" className={`text-[10px] ${it.expected_source === "shop" ? "text-indigo-500" : "text-slate-400"}`}>{etaSourceLabel(it)}</span>}
                                         <button onClick={(e) => { e.stopPropagation(); openDateEdit([it], "expected_date"); }}
                                           title="แก้วันคาดการณ์ของเข้า (ใช้กับทั้งใบ PO)" className="text-slate-400 hover:text-blue-600 text-xs">✎</button>
                                       </div>
@@ -970,9 +970,10 @@ export default function ReceiveGoodsPage() {
                           <>
                             <th className="text-left px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("eta")} className="inline-flex items-center hover:text-slate-700">คาดเข้า{sortArrow("eta")}</button></th>
                             <th className="text-right px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("remaining")} className="inline-flex items-center hover:text-slate-700">คงเหลือ{sortArrow("remaining")}</button></th>
-                            <th className="text-center px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("recv")} className="inline-flex items-center hover:text-slate-700">รับครั้งนี้{sortArrow("recv")}</button></th>
                             <th className="text-center px-3 py-2 font-medium"><button type="button" onClick={() => toggleSort("def")} className="inline-flex items-center hover:text-slate-700">เสีย/ผิด{sortArrow("def")}</button></th>
                             <th className="px-2 py-2 font-medium w-10"></th>
+                            {/* ★ 2026-11-05 ปุ่มใส่ตะกร้า = คอลัมน์สุดท้าย ติดขอบขวา (เลื่อนตารางแนวนอนแล้วไม่หาย) */}
+                            <th className="text-center px-3 py-2 font-medium sticky right-0 z-10 bg-slate-50 shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.25)]"><button type="button" onClick={() => toggleSort("recv")} className="inline-flex items-center hover:text-slate-700">ตะกร้า{sortArrow("recv")}</button></th>
                           </>
                         )}
                       </tr>
@@ -1023,7 +1024,7 @@ export default function ReceiveGoodsPage() {
                             ) : (
                               <>
                             <td className="px-3 py-2 whitespace-nowrap">
-                              <div className="text-xs text-slate-500">{it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}{it.expected_source === "lead" && <span className="text-[10px] text-indigo-500 ml-1">~ลีดไทม์</span>}{it.expected_source === "china" && <span className="text-[10px] text-orange-500 ml-1">~จีน 14 วัน</span>}</div>
+                              <div className="text-xs text-slate-500">{it.expected_date ? formatDate(it.expected_date) : <span className="text-slate-300">ยังไม่ระบุ</span>}{etaSourceLabel(it) && <span title="วันสั่ง + ลีดไทม์ของร้าน (ตั้งที่ทะเบียนคู่ค้า · ไม่ตั้ง = 10 วัน)" className={`text-[10px] ml-1 ${it.expected_source === "shop" ? "text-indigo-500" : "text-slate-400"}`}>{etaSourceLabel(it)}</span>}</div>
                               <div className="flex items-center gap-1">
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded border ${b.cls}`}>{b.text}</span>
                                 <button onClick={(e) => { e.stopPropagation(); openDateEdit([it], "expected_date"); }}
@@ -1034,16 +1035,26 @@ export default function ReceiveGoodsPage() {
                               {it.remaining.toLocaleString()} {it.uom}
                               {canEditPo && <button onClick={(e) => { e.stopPropagation(); setQtyOrderEdit({ it, value: String(it.qty) }); }} title={`แก้จำนวนที่สั่ง (สั่งไว้ ${it.qty.toLocaleString()} ${it.uom})`} className="ml-1 text-slate-400 hover:text-blue-600 text-xs font-normal">✎</button>}
                             </td>
-                            <td className="px-3 py-2 text-center">
-                              {num(inp.recv) > 0
-                                ? <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium tabular-nums ${short ? "bg-amber-50 text-amber-700" : "bg-blue-50 text-blue-700"}`}>{num(inp.recv).toLocaleString()}{short ? " · ไม่ครบ" : ""}</span>
-                                : <span className="text-xs text-blue-500">＋ แตะเพื่อรับ</span>}
-                            </td>
                             <td className="px-3 py-2 text-center tabular-nums text-xs">{num(inp.def) > 0 ? <span className="text-red-600">{num(inp.def).toLocaleString()}</span> : <span className="text-slate-300">-</span>}</td>
                             <td className="px-2 py-2 text-center">
                               <button onClick={(e) => { e.stopPropagation(); openCancel(it); }}
                                 title="ยกเลิกรายการนี้ (เช่น ร้านไม่มีของ)"
                                 className="w-7 h-7 rounded-md text-slate-300 hover:text-red-600 hover:bg-red-50 transition-colors">✕</button>
+                            </td>
+                            {/* ตะกร้า (ติดขอบขวา) — ใส่ตะกร้า = รับครบตามคงเหลือ · อยู่ในตะกร้าแล้ว: กดเลขเพื่อแก้จำนวน/เสีย · ✕ เอาออก */}
+                            <td className={`px-2 py-2 text-center sticky right-0 z-[1] shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.25)] ${selectedIds.has(it.id) ? "bg-blue-50" : "bg-white"}`} onClick={(e) => e.stopPropagation()}>
+                              {num(inp.recv) > 0 || num(inp.def) > 0 ? (
+                                <span className="inline-flex items-center gap-1 whitespace-nowrap">
+                                  <button type="button" onClick={() => setQtyEdit(it)} title="แก้จำนวนรับ / เสีย"
+                                    className={`h-7 px-2 rounded-md text-xs font-medium tabular-nums border ${short ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+                                    🧺 {num(inp.recv).toLocaleString()}{short ? " · ไม่ครบ" : ""} · แก้
+                                  </button>
+                                  <button type="button" onClick={() => setPendInput(it.id, { recv: "0", def: "0" })} title="เอาออกจากตะกร้า" className="w-6 h-6 rounded text-slate-400 hover:text-red-600 hover:bg-red-50 text-xs">✕</button>
+                                </span>
+                              ) : (
+                                <button type="button" onClick={() => setPendInput(it.id, { recv: String(it.remaining), def: "0" })} title={`ใส่ตะกร้า = รับครบ ${it.remaining.toLocaleString()} ${it.uom ?? ""} (แก้จำนวนได้ทีหลัง)`}
+                                  className="h-7 px-2.5 rounded-md text-xs font-medium bg-orange-600 text-white hover:bg-orange-700 whitespace-nowrap">🧺 ใส่ตะกร้า</button>
+                              )}
                             </td>
                               </>
                             )}
@@ -1061,13 +1072,13 @@ export default function ReceiveGoodsPage() {
             {/* แถบแบ่งหน้า — ล่างสุด */}
             {pendPagerBar && <div className="mt-3">{pendPagerBar}</div>}
 
-            {/* แถบตะกร้า — แตะรายการเพื่อใส่จำนวน แล้วเปิดตะกร้า (ป๊อปเดียวจบ: จำนวน+วันที่+ผู้รับ+แนบเอกสาร+บันทึก) */}
-            {!doneMode && cartCount > 0 && (
-              <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 mt-4 flex items-center justify-between gap-3 flex-wrap sticky bottom-2 shadow-sm">
-                <span className="text-sm text-blue-800 font-medium">🧺 ในตะกร้า {cartCount} รายการ</span>
-                <button onClick={() => setMassRecv(cartItems)} disabled={saving || rc.saving}
-                  className="h-10 px-5 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">
-                  🧺 เปิดตะกร้า / บันทึกรับของ ({cartCount}) →
+            {/* ★ 2026-11-05 ตะกร้าลอย (ล่างกลางจอ เห็นตลอดในแท็บรอเข้า) — กดเปิดตะกร้าเดิม (ป๊อปเดียวจบ: จำนวน+วันที่+ผู้รับ+แนบเอกสาร+บันทึก) */}
+            {!doneMode && <div className="h-16" aria-hidden />}
+            {!doneMode && (
+              <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+                <button onClick={() => cartCount > 0 && setMassRecv(cartItems)} disabled={saving || rc.saving}
+                  className={`pointer-events-auto h-11 px-5 rounded-full shadow-lg text-sm font-semibold inline-flex items-center gap-2 transition-colors ${cartCount > 0 ? "bg-orange-600 text-white hover:bg-orange-700" : "bg-white text-slate-400 border border-slate-200 cursor-default"} disabled:opacity-60`}>
+                  🧺 {cartCount > 0 ? <>ตะกร้า {cartCount} รายการ · เปิด / บันทึกรับของ →</> : "ตะกร้าว่าง — กด “ใส่ตะกร้า” ที่รายการ"}
                 </button>
               </div>
             )}

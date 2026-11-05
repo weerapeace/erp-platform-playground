@@ -100,7 +100,7 @@ export const WORKFLOWS: WorkflowDef[] = [
     key: "purchasing",
     label: "จัดซื้อ (ขอซื้อ → สั่งซื้อ → รับของ)",
     flow: "ขอซื้อ → อนุมัติ / ไม่อนุมัติ → ออก PO = สั่งแล้ว (ใบร่างเก่ากด \"สั่งกับร้านแล้ว\") → รับของ (ครบ / บางส่วน / ปิดยอด) → ใบสำคัญรับ · จ่ายเงิน: ยังไม่จ่าย / ลงบิลรอโอน / ค้างจ่าย (เครดิต) / จ่ายแล้ว",
-    ruleFiles: ["lib/po-status.ts", "lib/po-pay-state.ts", "lib/po-total.ts", "lib/po-line-price.ts", "lib/po-manual.ts", "lib/pr-cart.ts", "lib/purchase-voucher-server.ts", "lib/seller-bill.ts", "lib/seller-bill-match.ts", "lib/seller-bill-intake.ts", "lib/seller-bill-shop.ts", "lib/china-bill-voucher.ts", "components/receive-line-modal/index.tsx", "lib/pr-progress.ts", "lib/po-currency.ts"],
+    ruleFiles: ["lib/po-status.ts", "lib/po-pay-state.ts", "lib/po-total.ts", "lib/po-line-price.ts", "lib/po-manual.ts", "lib/pr-cart.ts", "lib/purchase-voucher-server.ts", "lib/seller-bill.ts", "lib/seller-bill-match.ts", "lib/seller-bill-intake.ts", "lib/seller-bill-shop.ts", "lib/china-bill-voucher.ts", "components/receive-line-modal/index.tsx", "lib/pr-progress.ts", "lib/po-currency.ts", "lib/po-eta.ts", "lib/china-bill-voucher-plan.ts"],
     gates: [
       "app/api/purchasing/pr-approve/route.ts", "app/api/purchasing/pr-delete/route.ts", "app/api/purchasing/create-po/route.ts",
       "app/api/purchasing/receive/route.ts", "app/api/purchasing/cancel-line/route.ts", "app/api/purchasing/po-edit/route.ts",
