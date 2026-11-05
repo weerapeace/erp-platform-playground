@@ -144,7 +144,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     })();
     return () => { off = true; };
   }, [pendingIds]);
-  const [statusMo, setStatusMo] = useState<string | null>(null);   // ป๊อปรายการสั่งซื้อ (ของกลาง MoStatusModal view="purchases")
+  const [statusMo, setStatusMo] = useState<string | null>(null);   // ป๊อปสถานะวัตถุดิบ (ของกลาง MoStatusModal view="materials")
   const [fieldsOpen, setFieldsOpen] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [openDesk, setOpenDesk] = useState<string | null>(null);
@@ -493,16 +493,16 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                       </span>
                     </div>
                   )}
-                  {/* ปุ่มสั่งซื้อ (ป๊อปกลาง MoStatusModal view="purchases" = รายการสั่งซื้ออย่างเดียว) · ความพร้อมกดดูได้ */}
+                  {/* ปุ่มวัตถุดิบ (ป๊อปกลาง MoStatusModal view="materials" = สถานะวัตถุดิบทุกตัว ที่ยังไม่พร้อมอยู่บน) · ความพร้อมกดดูได้ */}
                   <div className="mt-1 flex items-center justify-between gap-1">
-                    <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูรายการสั่งซื้อวัตถุดิบ ถึงไหนแล้ว"
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูสถานะวัตถุดิบทุกตัว (ที่ยังไม่พร้อมอยู่บนสุด)"
                       className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600 hover:border-violet-300 hover:text-violet-700">
-                      <Icon name="cart" /> สั่งซื้อ
+                      <Icon name="package" /> วัตถุดิบ
                     </button>
                     {soldFull
                       ? <span className="text-right text-[11px] font-medium text-emerald-700">ควรปิดงาน</span>
                       : show("ready") && (
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูรายการสั่งซื้อวัตถุดิบ ถึงไหนแล้ว"
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูสถานะวัตถุดิบทุกตัว (ที่ยังไม่พร้อมอยู่บนสุด)"
                           className={`text-right text-[11px] hover:underline ${m.ready ? "font-medium text-emerald-600" : "text-amber-600"}`}>{m.ready ? "พร้อม" : "ยังไม่พร้อม ›"}</button>
                       )}
                   </div>
@@ -735,7 +735,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
       </ERPModal>
 
       {/* สถานะงาน + ขอซื้อวัตถุดิบถึงไหน (ป๊อปกลาง — ตัวเดียวกับใบค้างผลิต/Dashboard ผลิต) */}
-      {statusMo && <MoStatusModal moId={statusMo} view="purchases" onClose={() => setStatusMo(null)} />}
+      {statusMo && <MoStatusModal moId={statusMo} view="materials" onClose={() => setStatusMo(null)} />}
     </div>
   );
 }

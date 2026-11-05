@@ -103,10 +103,16 @@ const earliest = (it: MoMaterialStatus, key: "pr_date" | "po_date") => it.links.
  * รายการวัตถุดิบที่ "ยังไม่ครบ" ของใบสั่งผลิตใบเดียว (ต้องซื้อ → รออนุมัติ → สั่งแล้วรอของ)
  * โหลดเองตอนแสดง · อ่านอย่างเดียว (จะขอซื้อ/รับของ ไปทำที่หน้าขอซื้อหรือแท็บ "ของซื้อ" ในเช็กลิสต์)
  */
-export function MoShortMaterials({ moNo, allowShowAll = false }: { moNo: string; /** มีติ๊ก "โชว์ที่ครบแล้วด้วย" = ดู BOM ครบทุกรายการ */ allowShowAll?: boolean }) {
+export function MoShortMaterials({ moNo, allowShowAll = false, defaultShowAll = false }: {
+  moNo: string;
+  /** มีติ๊ก "โชว์ที่ครบแล้วด้วย" = ดู BOM ครบทุกรายการ */
+  allowShowAll?: boolean;
+  /** เปิดมาโชว์ครบทุกรายการเลย (ที่ยังไม่พร้อมอยู่บนสุด) — บอร์ดจ่ายงานปุ่ม "วัตถุดิบ" */
+  defaultShowAll?: boolean;
+}) {
   const [items, setItems] = useState<MoMaterialStatus[] | null>(null);
   const [err, setErr] = useState(false);
-  const [showAll, setShowAll] = useState(false);
+  const [showAll, setShowAll] = useState(defaultShowAll);
   const [moDate, setMoDate] = useState<string | null>(null);   // วันเปิดใบสั่งผลิต — นับ "ยังไม่ซื้อมากี่วัน"
   useEffect(() => {
     let cancel = false;

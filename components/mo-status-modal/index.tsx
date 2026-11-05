@@ -16,6 +16,7 @@ import { ERPModal } from "@/components/modal";
 import { useBackClose } from "@/lib/use-back-close";
 import { moChecklistEmbedUrl, readMoChecklistEvent } from "@/lib/mo-checklist-embed";
 import { PR_STAGE_LABEL, PR_STAGE_STEPS } from "@/lib/pr-progress";
+import { MoShortMaterials } from "@/components/mo-material-progress";
 import type { MoStatus } from "@/app/api/mo/[id]/status/route";
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
@@ -64,14 +65,13 @@ function Sec({ title, children }: { title: string; children: React.ReactNode }) 
   );
 }
 
-/** รายการขอซื้อ/สั่งซื้อวัตถุดิบของใบ — นับตามขั้น (กติกากลาง lib/pr-progress ตัวเดียวกับหน้าประวัติขอซื้อ) · full = ไม่จำกัดความสูง + ชิปเฉพาะขั้นที่มี */
-function PurchaseList({ items, full = false }: { items: MoStatus["purchases"]; full?: boolean }) {
+/** รายการขอซื้อ/สั่งซื้อวัตถุดิบของใบ — นับตามขั้น (กติกากลาง lib/pr-progress ตัวเดียวกับหน้าประวัติขอซื้อ) */
+function PurchaseList({ items }: { items: MoStatus["purchases"] }) {
   return (
     <>
       <div className="mb-1.5 flex flex-wrap gap-1">
         {PR_STAGE_STEPS.map((st) => {
           const c = items.filter((p) => p.stage === st).length;
-          if (full && !c) return null;
           return (
             <span key={st} className={`rounded-full px-2 py-0.5 text-[10px] ${c ? (st === "received" ? "bg-emerald-100 text-emerald-700" : st === "ordered" || st === "receiving" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-800") : "bg-slate-50 text-slate-300"}`}>
               {PR_STAGE_LABEL[st]} {c}
@@ -79,7 +79,7 @@ function PurchaseList({ items, full = false }: { items: MoStatus["purchases"]; f
           );
         })}
       </div>
-      <div className={`space-y-1 ${full ? "" : "max-h-48 overflow-y-auto"}`}>
+      <div className="max-h-48 overflow-y-auto space-y-1">
         {items.map((p, i) => (
           <div key={i} className={`text-xs border rounded-lg px-2 py-1.5 ${PU_TONE[p.tone] ?? "border-slate-100"}`}>
             <div className="flex items-center gap-2">
@@ -102,8 +102,8 @@ function PurchaseList({ items, full = false }: { items: MoStatus["purchases"]; f
 
 export function MoStatusModal({ moId, onClose, onChanged, checklist = true, view = "full" }: {
   moId: string; onClose: () => void;
-  /** "purchases" = โชว์แค่รายการสั่งซื้อวัตถุดิบ (บอร์ดจ่ายงาน — เจ้าของ "เอาแค่ โชว์รายการสั่งซื้อ") · "full" = สถานะเต็ม */
-  view?: "full" | "purchases";
+  /** "materials" = สถานะวัตถุดิบทุกรายการ ที่ยังไม่พร้อมอยู่บนสุด (บอร์ดจ่ายงาน — ของกลาง MoShortMaterials) · "full" = สถานะเต็ม */
+  view?: "full" | "materials";
   /** เรียกเมื่อกลับจากเช็กลิสต์ / ใบถูกลบ — ให้หน้าแม่โหลดข้อมูลใหม่ */
   onChanged?: () => void;
   /** false = ซ่อนปุ่มเปิดเช็กลิสต์ (หน้าที่ให้ดูสถานะอย่างเดียว) */
@@ -153,13 +153,13 @@ export function MoStatusModal({ moId, onClose, onChanged, checklist = true, view
   }, [page, backToStatus, onChanged, onClose]);
 
   const name = d ? (d.product_sku ?? d.mo_no) : "";
-  const onlyPu = view === "purchases";
+  const onlyMat = view === "materials";
   const title = page === "checklist" ? `📋 เช็กลิสต์เตรียม/ตัด · ${d?.mo_no ?? name}`
-    : onlyPu ? (d ? `รายการสั่งซื้อ · ${name}` : "รายการสั่งซื้อ")
+    : onlyMat ? (d ? `สถานะวัตถุดิบ · ${name}` : "สถานะวัตถุดิบ")
     : d ? `📊 สถานะ · ${name}` : "📊 สถานะงาน";
 
   return (
-    <ERPModal open onClose={closeAll} size={page === "checklist" ? "xl" : "md"} title={title}>
+    <ERPModal open onClose={closeAll} size={page === "checklist" ? "xl" : onlyMat ? "lg" : "md"} title={title}>
       {page === "checklist" ? (
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -180,15 +180,14 @@ export function MoStatusModal({ moId, onClose, onChanged, checklist = true, view
         <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-12 bg-slate-50 rounded-lg animate-pulse" />)}</div>
       ) : err ? (
         <div className="text-sm text-red-600 py-6 text-center">{err}</div>
-      ) : !d ? null : onlyPu ? (
+      ) : !d ? null : onlyMat ? (
         <div className="space-y-3">
           <div>
             <div className="text-sm font-semibold text-slate-800">{d.product_name || d.product_sku || "—"}</div>
             <div className="font-mono text-[11px] text-slate-400">{d.product_sku} · {d.mo_no} · {fmt(d.qty)} ชิ้น</div>
           </div>
-          {d.purchases.length === 0
-            ? <p className="text-sm text-slate-500 text-center py-6">ใบนี้ยังไม่มีรายการขอซื้อวัตถุดิบ</p>
-            : <PurchaseList items={d.purchases} full />}
+          {/* วัตถุดิบทุกตัวใน BOM + สถานะซื้อ (กติกากลาง lib/mo-material-status) · ต้องซื้อ → รออนุมัติ → รอของ อยู่บน · ครบแล้วอยู่ล่าง */}
+          <MoShortMaterials moNo={d.mo_no} allowShowAll defaultShowAll />
         </div>
       ) : (
         <div className="space-y-3">
