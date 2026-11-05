@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { soLineStage } from "@/lib/so-order-stage";
+import { soLineStage, soShipState } from "@/lib/so-order-stage";
 
 describe("soLineStage — ขั้นของรายการในใบสั่งขาย (มุมมองตามชุด)", () => {
   it("ยังไม่มีใบสั่งผลิต = รอเปิดผลิต", () => {
@@ -20,5 +20,15 @@ describe("soLineStage — ขั้นของรายการในใบส
   });
   it("ใบสั่งขายส่งแล้ว = ส่งลูกค้าแล้ว (ชนะทุกอย่าง)", () => {
     expect(soLineStage({ orderShipped: true, hasMo: false })).toBe(4);
+  });
+  it("ใบขายที่ผูกกับใบสั่งผลิตครบจำนวน = ส่งลูกค้าแล้ว แม้ใบสั่งขายยังไม่กดส่ง", () => {
+    expect(soLineStage({ orderShipped: false, hasMo: true, moStatus: "confirmed", delivered: true })).toBe(4);
+  });
+  it("soShipState — ครบ / บางส่วน / ยังไม่ส่ง", () => {
+    expect(soShipState(300, 300)).toBe("full");
+    expect(soShipState(20, 80)).toBe("full");
+    expect(soShipState(200, 80)).toBe("part");
+    expect(soShipState(60, 0)).toBe("none");
+    expect(soShipState(0, 0)).toBe("none");
   });
 });

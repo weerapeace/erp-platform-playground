@@ -7,6 +7,7 @@
  *   ปุ่มทำทั้งชุด: เปิดใบสั่งผลิต (open_mo + group_id ทีละใบสั่งขาย) · พิมพ์ใบซื้อ-ตัด (familyPrintUrl) · ส่งของ (ship ทีละใบ)
  *   · จ่ายงานชุดนี้ = เปิดบอร์ดจ่ายงาน /master/work-board?view=shop&group=<ชื่อชุด> (บอร์ดกรองกลุ่มให้เอง)
  *   · รายการยังไม่มี SKU → กดเลขใบสั่งขายเปิดใบ (onOpenOrder) ไปเลือก SKU ในแถว
+ *   · ส่งลูกค้าแล้ว x/y ต่อรายการ = ใบขายที่ผูกกับใบสั่งผลิต (API คิดให้ · soShipState) — ผูก/แก้ที่บอร์ดจ่ายงาน › อัปเดตเป็นชุด
  * ของกลาง: MiniTable · ERPModal · ConfirmDialog · Icon · familyPrintUrl
  */
 import { useCallback, useEffect, useState } from "react";
@@ -17,11 +18,14 @@ import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { Icon } from "@/components/icon";
 import { familyPrintUrl } from "@/lib/family-print";
-import { SO_LINE_STAGES } from "@/lib/so-order-stage";
+import { SO_LINE_STAGES, SO_SHIP_LABEL, type SoShipState } from "@/lib/so-order-stage";
 import type { SoBatch, BatchLine } from "@/app/api/so-orders/batches/route";
 
 const STAGE_TONE = ["bg-slate-100 text-slate-600", "bg-blue-50 text-blue-700", "bg-amber-50 text-amber-700", "bg-teal-50 text-teal-700", "bg-emerald-50 text-emerald-700"];
 const STAGE_BAR = ["bg-slate-400", "bg-blue-500", "bg-amber-500", "bg-teal-600", "bg-emerald-600"];
+const SHIP_TONE: Record<SoShipState, string> = { full: "bg-emerald-50 text-emerald-700", part: "bg-amber-50 text-amber-700", none: "bg-slate-100 text-slate-500" };
+const SHIP_BAR: Record<SoShipState, string> = { full: "bg-emerald-600", part: "bg-amber-400", none: "bg-slate-300" };
+const SHIP_ORDER: SoShipState[] = ["full", "part", "none"];
 const dayText = (s: string | null) => (s ? new Date(s + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "—");
 
 export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChanged, onOpenOrder }: {
@@ -103,8 +107,13 @@ export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChange
         <div className="truncate text-[10px] text-slate-400">{l.customer_name ?? ""}</div></div> },
     { key: "sku", header: "สินค้า", width: "minmax(12rem,2fr)", sortValue: (l) => l.sku ?? l.product_name,
       cell: (l) => <div className="min-w-0"><div className="truncate text-sm text-slate-700">{l.product_name}</div>
-        {l.sku ? <code className="font-mono text-[10px] text-orange-600">{l.sku}</code> : <span className="text-[10px] text-amber-700">ยังไม่มี SKU</span>}</div> },
+        {l.sku ? <code className="font-mono text-[10px] text-orange-600">{l.sku}</code> : <span className="text-[10px] text-amber-700">ยังไม่มี SKU</span>}
+        {l.note && <div className="truncate text-[10px] text-slate-400" title={l.note}>{l.note}</div>}</div> },
     { key: "qty", header: "จำนวน", width: "5rem", align: "right", sortValue: (l) => l.qty, cell: (l) => <span className="tabular-nums">{l.qty.toLocaleString("th-TH")}</span> },
+    { key: "ship", header: "ส่งแล้ว", width: "7.5rem", align: "center", sortValue: (l) => SHIP_ORDER.indexOf(l.ship ?? "none") * 1e6 - (l.shipped ?? 0), sortLabel: "ส่งแล้ว",
+      cell: (l) => { const st = l.ship ?? "none"; return <div title={l.mo_no ? "นับจากใบขายที่ผูกกับใบสั่งผลิตนี้" : "ยังไม่มีใบสั่งผลิต — นับไม่ได้"}>
+        <div className="tabular-nums text-[12px] text-slate-700">{(l.shipped ?? 0).toLocaleString("th-TH")}/{l.qty.toLocaleString("th-TH")}</div>
+        <span className={`rounded-full px-2 py-0.5 text-[10px] ${SHIP_TONE[st]}`}>{SO_SHIP_LABEL[st]}</span></div>; } },
     { key: "due", header: "กำหนดส่ง", width: "6rem", align: "center", sortValue: (l) => l.due_date ?? "9999", cell: (l) => <span className="text-[12px] text-slate-500">{dayText(l.due_date)}</span> },
     { key: "mo", header: "ใบสั่งผลิต", width: "8rem", sortValue: (l) => l.mo_no ?? "", cell: (l) => <span className="font-mono text-[11px] text-slate-600">{l.mo_no ?? "—"}</span> },
     { key: "stage", header: "ขั้น", width: "7rem", align: "center", sortValue: (l) => l.stage,
@@ -148,6 +157,26 @@ export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChange
                 );
               })}
             </div>
+
+            {(() => {
+              const sc = b.ship_count ?? { full: 0, part: 0, none: n };
+              const shippedQty = b.shipped_qty ?? 0;
+              return (
+                <div className="mt-3 rounded-lg border border-slate-100 px-3 py-2">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2 text-[12px]">
+                    <span className="font-medium text-slate-700">ส่งลูกค้าแล้ว {shippedQty.toLocaleString("th-TH")} / {b.qty.toLocaleString("th-TH")} ชิ้น</span>
+                    <span className="text-slate-500">ค้างส่ง <b className="text-slate-700">{Math.max(0, b.qty - shippedQty).toLocaleString("th-TH")}</b> ชิ้น</span>
+                  </div>
+                  <div className="mt-1.5 flex h-2 overflow-hidden rounded bg-slate-100">
+                    {SHIP_ORDER.map((k) => sc[k] > 0 && <div key={k} className={SHIP_BAR[k]} style={{ width: `${(sc[k] / Math.max(1, n)) * 100}%` }} />)}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-3 text-[11px] text-slate-500">
+                    {SHIP_ORDER.map((k) => <span key={k}><span className={`mr-1 inline-block h-2 w-2 rounded-sm ${SHIP_BAR[k]}`} />{SO_SHIP_LABEL[k]} {sc[k]}</span>)}
+                    <span className="text-slate-400">รายการ</span>
+                  </div>
+                </div>
+              );
+            })()}
 
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {canEdit && toOpen > 0 && (
@@ -193,7 +222,7 @@ export function SoBatchView({ groupFilter, canEdit, canShip, reloadKey, onChange
           </section>
         );
       })}
-      <p className="text-[11px] text-slate-400">สถานะชุดคิดให้เองจากใบสั่งผลิตในชุด (กติกากลางเดียวกับบอร์ดจ่ายงาน) — ทั้งชุดอยู่ขั้นของรายการที่ช้าที่สุด</p>
+      <p className="text-[11px] text-slate-400">สถานะชุดคิดให้เองจากใบสั่งผลิตในชุด (กติกากลางเดียวกับบอร์ดจ่ายงาน) — ทั้งชุดอยู่ขั้นของรายการที่ช้าที่สุด · "ส่งแล้ว" นับจากใบขายที่ผูกกับใบสั่งผลิต (ผูก/แก้ที่บอร์ดจ่ายงาน › อัปเดตเป็นชุด)</p>
 
       <ConfirmDialog open={!!askOpen} onClose={() => !busy && setAskOpen(null)} onConfirm={() => askOpen && void runOpen(askOpen)} loading={busy}
         title="เปิดใบสั่งผลิตทั้งชุด?" confirmText="เปิดใบสั่งผลิต"

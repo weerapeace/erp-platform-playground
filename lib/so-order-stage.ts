@@ -4,9 +4,10 @@
  *   1 เปิดผลิตแล้ว = มีใบสั่งผลิต ยังไม่จ่ายงาน
  *   2 กำลังผลิต    = จ่ายงานแล้ว (บอร์ดจ่ายงาน)
  *   3 ทำเสร็จ      = ช่างส่งงานครบ / เข้า QC / ปิดใบแล้ว
- *   4 ส่งลูกค้าแล้ว = ใบสั่งขายกด "ส่งแล้ว"
+ *   4 ส่งลูกค้าแล้ว = ใบสั่งขายกด "ส่งแล้ว" หรือ ใบขาย(บิล)ที่ผูกกับใบสั่งผลิตของรายการ ครบจำนวนแล้ว (delivered)
  * "จ่ายงานแล้ว / ส่งครบ" ต้องถามผ่าน lib/mo-dispatch (→ lib/mo-status moProgress) เท่านั้น — ห้ามเทียบ received >= qty เอง
  * ชุดทั้งชุดอยู่ขั้นไหน = ขั้นของรายการที่ช้าที่สุด
+ * "ส่งแล้วกี่ชิ้น" ของรายการ = ผลรวมใบขายที่ผูกกับใบสั่งผลิต (mo_sales_links — ผูกที่บอร์ดจ่ายงาน › อัปเดตเป็นชุด) → soShipState
  */
 export const SO_LINE_STAGES = [
   { key: 0, label: "รอเปิดผลิต",   short: "รอเปิดผลิต" },
@@ -23,10 +24,20 @@ export function soLineStage(f: {
   moStatus?: string | null;
   dispatched?: boolean;
   submitted?: boolean;
+  /** ใบขายที่ผูกกับใบสั่งผลิต ครบจำนวนของรายการแล้ว */
+  delivered?: boolean;
 }): SoLineStage {
-  if (f.orderShipped) return 4;
+  if (f.orderShipped || f.delivered) return 4;
   if (!f.hasMo || f.moStatus === "cancelled") return 0;
   if (f.submitted || f.moStatus === "done" || f.moStatus === "closed") return 3;
   if (f.dispatched) return 2;
   return 1;
+}
+
+/** ส่งลูกค้าแล้ว: ครบ / บางส่วน / ยังไม่ส่ง — เทียบจำนวนในรายการกับจำนวนในใบขายที่ผูกไว้ */
+export type SoShipState = "full" | "part" | "none";
+export const SO_SHIP_LABEL: Record<SoShipState, string> = { full: "ส่งครบ", part: "ส่งบางส่วน", none: "ยังไม่ส่ง" };
+export function soShipState(qty: number, shipped: number): SoShipState {
+  if (qty > 0 && shipped >= qty) return "full";
+  return shipped > 0 ? "part" : "none";
 }
