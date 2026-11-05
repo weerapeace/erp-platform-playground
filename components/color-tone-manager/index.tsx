@@ -33,6 +33,8 @@ export function ColorToneManager() {
   const [newHex, setNewHex] = useState("#B08850");
   const [newErr, setNewErr] = useState("");
   const [del, setDel] = useState<ColorTone | null>(null);
+  // ชื่อที่ตั้งว่า "ไม่ใช่สี" ในหน้าจับคู่สีหลัก — ไม่นับเป็นสีที่ยังไม่อยู่ในโทน
+  const [notColor, setNotColor] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -40,6 +42,7 @@ export function ColorToneManager() {
       const j = await r.json();
       if (j.error) throw new Error(j.error);
       setTones(j.tones ?? []);
+      setNotColor(new Set(j.notColor ?? []));
       setUsed(j.used ?? []);
       setSwatches(j.swatches ?? []);
     } catch {
@@ -85,7 +88,7 @@ export function ColorToneManager() {
     return spec ? swatchCss(spec, (k) => keyUrl(k, 48) ?? "") : fallback;
   };
   const resolved = useMemo(() => new Map(singles.map((s) => [s.key, toneOfColor(s.name, tones)])), [singles, tones]);
-  const orphans = singles.filter((s) => !resolved.get(s.key));
+  const orphans = singles.filter((s) => !resolved.get(s.key) && !notColor.has(s.key));
   const inTone = (t: ColorTone) => {
     const list = singles.filter((s) => resolved.get(s.key)?.tone.id === t.id).map((s) => ({ ...s, how: resolved.get(s.key)!.how }));
     // ย้ายเข้าเองไว้ แต่ยังไม่มีสินค้าบนเว็บใช้ชื่อนี้
@@ -255,7 +258,7 @@ export function ColorToneManager() {
 }
 
 /** ปุ่ม + ป๊อปอัปจัดโทนสี (ใช้ในหน้าดีไซน์เว็บ แท็บหน้ารายการสินค้า) */
-export function ColorToneButton({ label = "🎨 จัดโทนสี (ตัวกรองสี)", className }: { label?: string; className?: string }) {
+export function ColorToneButton({ label = "🎨 จัดโทนสี (ตัวกรองสี)", className, onClosed }: { label?: string; className?: string; onClosed?: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -268,7 +271,7 @@ export function ColorToneButton({ label = "🎨 จัดโทนสี (ตั
       </button>
       <ERPModal
         open={open}
-        onClose={() => setOpen(false)}
+        onClose={() => { setOpen(false); onClosed?.(); }}
         title="🎨 โทนสี — สำหรับตัวกรองสีบนเว็บ"
         description="จัดชื่อสีของสินค้าเป็นโทน (ใช้ทุกร้าน) · ลูกค้ากดโทน “แดง” แล้วเห็นสินค้าที่มี แดง / แดงเลือดหมู / แดงไวน์ · บันทึกทันที"
         size="xl"

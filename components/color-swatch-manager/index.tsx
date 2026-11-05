@@ -11,7 +11,7 @@
  * - 💾 ตั้งหลายสีแล้วบันทึกทีเดียว (2026-11-05): ที่แก้ค้างอยู่ใน drafts (ต่อแถว) · สลับสีได้ไม่ถาม · ในตาราง = จุดสีใหม่ + "รอบันทึก"/"ยังไม่ครบ"
  *   แถบล่าง SaveBar "บันทึกทั้งหมด (N สี)" → POST { items } ครั้งเดียว · ตัวที่ยังไม่ครบ/บันทึกพลาด ค้างไว้ให้แก้ต่อ · "ล้างจุดสี" ยังทำทันทีทีละสี
  *
- * ใช้: <ColorSwatchButton /> (ปุ่ม + ป๊อปอัป) หรือ <ColorSwatchManager /> ฝังในหน้า
+ * ใช้: <ColorSwatchButton /> (ปุ่ม + ป๊อปอัป · 2 แท็บ: หน้าตาจุดสี / สีหลักในตัวกรอง = ColorToneMatcher) หรือ <ColorSwatchManager /> ฝังในหน้า
  * focusNames = เปิดมาโชว์ "เฉพาะสีเหล่านี้" (เช่น สีของสินค้าที่กำลังแก้ · ชื่อผสมพ่วงสีย่อยให้) — สลับแท็บ ทั้งหมด ได้
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -20,6 +20,8 @@ import { useToast } from "@/components/toast";
 import { MiniTable } from "@/components/mini-table";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { SaveBar } from "@/components/save-bar";
+import { ScrollTabs } from "@/components/scroll-tabs";
+import { ColorToneMatcher } from "@/components/color-tone-manager/matcher";
 import { ColorInput } from "@/components/color-picker";
 import { ImageUploadField, keyUrl } from "@/components/website-theme-media";
 import { ImageEyedropper } from "@/components/image-eyedropper";
@@ -567,7 +569,17 @@ export function ColorSwatchButton({
   onClosed?: () => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [dirty, setDirty] = useState(false);
+  // 2 แท็บเปิดค้างคู่กัน (ซ่อนแท็บที่ไม่ได้ดู) → สลับแท็บแล้วของที่แก้ค้างไม่หาย · ปิดป๊อป = ถามถ้าแท็บไหนยังไม่บันทึก
+  const [tab, setTab] = useState<"swatch" | "tone">("swatch");
+  const [swatchDirty, setSwatchDirty] = useState(false);
+  const [toneDirty, setToneDirty] = useState(false);
+  // แท็บสีหลักโหลดตอนกดเปิดครั้งแรก (ข้อมูลหนัก) แล้วค้างไว้
+  const [toneSeen, setToneSeen] = useState(false);
+  useEffect(() => { if (tab === "tone") setToneSeen(true); }, [tab]);
+  const TABS = [
+    { key: "swatch", label: "หน้าตาจุดสี", dirty: swatchDirty },
+    { key: "tone", label: "สีหลักในตัวกรอง", dirty: toneDirty },
+  ] as const;
   return (
     <>
       <button type="button" onClick={() => setOpen(true)} title={title}
@@ -576,13 +588,35 @@ export function ColorSwatchButton({
       </button>
       <ERPModal
         open={open}
-        onClose={() => { setOpen(false); setDirty(false); onClosed?.(); }}
-        title="🎨 ทะเบียนสี — หน้าตาจุดสี"
-        description="ตั้งครั้งเดียว ใช้ทุกร้าน ทุกสินค้าที่มีสีชื่อนี้ (จุดสีบนการ์ด · ปุ่มเลือกสีหน้าสินค้า)"
+        onClose={() => { setOpen(false); setSwatchDirty(false); setToneDirty(false); setTab("swatch"); setToneSeen(false); onClosed?.(); }}
+        title="🎨 ทะเบียนสี"
+        description={tab === "swatch"
+          ? "หน้าตาจุดสี — ตั้งครั้งเดียว ใช้ทุกร้าน ทุกสินค้าที่มีสีชื่อนี้ (จุดสีบนการ์ด · ปุ่มเลือกสีหน้าสินค้า)"
+          : "สีหลักในตัวกรอง — จับคู่ชื่อสีของสินค้ากับสีหลัก ให้ลูกค้ากด \"กรองตามสี\" บนเว็บแล้วเจอ (ใช้ทุกร้าน)"}
         size="xl"
-        hasUnsavedChanges={dirty}
+        hasUnsavedChanges={swatchDirty || toneDirty}
       >
-        {open && <ColorSwatchManager onDirtyChange={setDirty} focusNames={focusNames} />}
+        {open && (
+          <>
+            <ScrollTabs activeKey={tab} className="mb-3 border-b border-slate-200">
+              {TABS.map((t) => (
+                <button key={t.key} type="button" data-tab-key={t.key} onClick={() => setTab(t.key)}
+                  className={`shrink-0 px-3 py-2 -mb-px text-sm border-b-2 ${tab === t.key ? "border-slate-900 text-slate-900 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
+                  {t.label}
+                  {t.dirty && <span className="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-blue-600 align-middle" title="ยังไม่บันทึก" />}
+                </button>
+              ))}
+            </ScrollTabs>
+            <div className={tab === "swatch" ? "" : "hidden"}>
+              <ColorSwatchManager onDirtyChange={setSwatchDirty} focusNames={focusNames} />
+            </div>
+            {(tab === "tone" || toneSeen) && (
+              <div className={tab === "tone" ? "" : "hidden"}>
+                <ColorToneMatcher onDirtyChange={setToneDirty} active={tab === "tone"} />
+              </div>
+            )}
+          </>
+        )}
       </ERPModal>
     </>
   );

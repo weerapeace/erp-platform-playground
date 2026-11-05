@@ -9,6 +9,7 @@
  *      - คำอังกฤษ = มีคำนั้นเป็น "คำ" อยู่ตรงไหนก็ได้ (Hot Pink (02) → "pink") · หลายคำตรง = คำที่อยู่ท้ายสุดชนะ (Denim Bubblegum → ชมพู)
  *   3) ไม่ตรงอะไร = ยังไม่อยู่ในโทนไหน (ลูกค้ากรองไม่เจอ — หน้าต่าง 🎨 โทนสี โชว์ให้จัด)
  * สีผสม "กรมท่า-ส้ม" (แยกด้วย - / , + &) → นับเข้าทุกโทนของสีย่อย · ถ้าย้ายชื่อเต็มเข้าโทนเอง = ใช้โทนนั้นโทนเดียว
+ * หน้าจับคู่ชื่อสี ↔ สีหลัก (ทะเบียนสี แท็บ "สีหลักในตัวกรอง"): applyToneAssignments (บันทึกทีเดียว) · suggestTone (คำแนะนำ) · NOT_COLOR_KEY (ไม่ใช่สี)
  */
 import { normColorName, splitColorName } from "@/lib/color-swatch";
 
@@ -96,6 +97,124 @@ export function tonesOfLabel(label: string, tones: ColorTone[]): ColorTone[] {
     if (r) out.set(r.tone.id, r.tone);
   }
   return [...out.values()].sort((a, b) => a.sortOrder - b.sortOrder);
+}
+
+/**
+ * แถวพิเศษใน erp_color_tones เก็บ "ชื่อที่ไม่ใช่สี" (เช่น 10 รู · ชื่อลาย) ไว้ใน members — is_active=false เสมอ
+ * → เว็บร้าน/รายการโทนปกติไม่เห็น (อ่านเฉพาะ is_active) · หน้าจับคู่สีหลักไม่นับเป็น "ยังไม่มีสีหลัก"
+ */
+export const NOT_COLOR_KEY = "_not_color";
+
+/** จัดชื่อสี 1 ชื่อ: tone = key ของโทน · "" = ไม่อยู่โทนไหน · NOT_COLOR_KEY = ไม่ใช่สี (ไม่โชว์ในตัวกรอง) */
+export interface ToneAssign {
+  color: string;
+  tone: string;
+}
+
+/**
+ * จัดชื่อสีเข้าโทนทีละหลายชื่อ (pure — API ใช้ตอนกดบันทึกทั้งหมด)
+ * - เข้าโทน = ออกจากโทนอื่นที่ย้ายเข้าเองไว้ + ใส่ members โทนนี้ + ล้างข้อยกเว้นของโทนนี้
+ * - ไม่อยู่โทนไหน / ไม่ใช่สี = ออกจาก members ทุกโทน + ใส่ข้อยกเว้นให้โทนที่ยังจับอัตโนมัติจากคำอยู่ (วนจนไม่มีโทนไหนจับ)
+ * คืนโทนชุดใหม่ + รายชื่อ "ไม่ใช่สี" + id โทนที่เปลี่ยน (ไว้บันทึกเฉพาะแถวที่แก้)
+ */
+export function applyToneAssignments(tones: ColorTone[], notColor: string[], items: ToneAssign[]) {
+  const next = tones.map((t) => ({ ...t, members: [...t.members], excludes: [...t.excludes] }));
+  const nc = new Set(notColor.map(normColorName).filter(Boolean));
+  const changed = new Set<string>();
+  for (const it of items) {
+    const c = normColorName(it.color);
+    if (!c) continue;
+    for (const t of next)
+      if (t.members.includes(c)) {
+        t.members = t.members.filter((m) => m !== c);
+        changed.add(t.id);
+      }
+    nc.delete(c);
+    const target = next.find((t) => t.key === it.tone);
+    if (target) {
+      target.members.push(c);
+      target.excludes = target.excludes.filter((x) => x !== c);
+      changed.add(target.id);
+      continue;
+    }
+    for (let guard = 0; guard < next.length; guard++) {
+      const hit = toneOfColor(c, next);
+      if (!hit) break;
+      const t = next.find((x) => x.id === hit.tone.id)!;
+      t.excludes.push(c);
+      changed.add(t.id);
+    }
+    if (it.tone === NOT_COLOR_KEY) nc.add(c);
+  }
+  return { tones: next, notColor: [...nc], changed };
+}
+
+const hexRgb = (hex: string) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+
+/** กลุ่มสีจากจุดสี (hex) — ความสว่าง/ความสด/เฉดสี → key โทนตั้งต้น (black white grey brown red pink orange green blue navy purple) */
+export function hexToneKey(hex: string): string | null {
+  if (!/^#[0-9a-f]{6}$/i.test(hex)) return null;
+  const [r, g, b] = hexRgb(hex);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const chroma = max - min;
+  if (l < 0.13) return "black";
+  if (chroma < 0.08) return l > 0.82 ? "white" : l < 0.2 ? "black" : "grey";
+  let h = max === r ? ((g - b) / chroma) % 6 : max === g ? (b - r) / chroma + 2 : (r - g) / chroma + 4;
+  h = (h * 60 + 360) % 360;
+  if (h >= 15 && h < 65 && l > 0.75 && chroma < 0.3) return "white"; // ครีม / เบจ / งาช้าง
+  if (h >= 15 && h < 50 && (l < 0.45 || chroma < 0.35)) return "brown"; // น้ำตาล / แทน / คาราเมล
+  if (h < 15 || h >= 345) return l > 0.7 ? "pink" : "red";
+  if (h < 65) return "orange";
+  if (h < 170) return "green";
+  if (h < 250) return h >= 200 && l < 0.3 ? "navy" : "blue";
+  if (h < 290) return "purple";
+  return l < 0.35 ? "purple" : "pink";
+}
+
+/** ชื่อที่ไม่น่าใช่สี (ขนาด/จำนวนรู) — แนะนำ "ไม่ใช่สี" */
+const NOT_COLOR_RE = /^\d+\s*(รู|ช่อง|ชิ้น|นิ้ว|cm|ซม\.?|mm|มม\.?)$/i;
+
+/**
+ * แนะนำโทนให้ชื่อสีที่ยังไม่มีโทน (pure) — ลำดับ: ชื่ออีกภาษาในพจนานุกรมสี → จุดสีในทะเบียนสี → ชื่อที่ไม่ใช่สี
+ * entry = แถวพจนานุกรมสีของชื่อนี้ (ไม่มี = ข้ามข้อ 1–2)
+ */
+export function suggestTone(
+  name: string,
+  tones: ColorTone[],
+  entry?: { th: string; en: string; kind: string | null; colors: string[] } | null,
+): { key: string; why: string } | null {
+  const c = normColorName(name);
+  if (entry) {
+    for (const other of [entry.en, entry.th]) {
+      if (!other || normColorName(other) === c) continue;
+      const hit = toneOfColor(other, tones);
+      if (hit) return { key: hit.tone.key, why: `ชื่อ ${other.trim()}` };
+    }
+    const pattern = tones.find((t) => t.key === "pattern");
+    if (entry.kind === "image" && pattern) return { key: pattern.key, why: "จุดสีเป็นรูปลาย" };
+    const k = entry.kind !== "image" && entry.colors[0] ? hexToneKey(entry.colors[0]) : null;
+    if (k) {
+      const t = tones.find((x) => x.key === k) ?? nearestTone(entry.colors[0], tones);
+      if (t) return { key: t.key, why: `จุดสีใกล้ ${t.name}` };
+    }
+  }
+  if (NOT_COLOR_RE.test(c)) return { key: NOT_COLOR_KEY, why: "ดูเป็นขนาด/จำนวน" };
+  return null;
+}
+
+/** โทนที่สีตัวแทนใกล้ hex นี้ที่สุด (ไม่นับโทนลาย) — ใช้ตอนร้านไม่มีโทน key ตั้งต้น */
+function nearestTone(hex: string, tones: ColorTone[]): ColorTone | null {
+  const [r, g, b] = hexRgb(hex);
+  let best: { t: ColorTone; d: number } | null = null;
+  for (const t of tones) {
+    if (t.key === "pattern") continue;
+    const [r2, g2, b2] = hexRgb(t.hex);
+    const d = (r - r2) ** 2 + (g - g2) ** 2 + (b - b2) ** 2;
+    if (!best || d < best.d) best = { t, d };
+  }
+  return best?.t ?? null;
 }
 
 /** ชื่อสีเดี่ยวทั้งหมดที่อยู่ในรายการ (แตกสีผสมเป็นสีย่อย) — ไว้โชว์ในหน้าต่างจัดโทน */

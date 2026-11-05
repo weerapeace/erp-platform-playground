@@ -6,6 +6,9 @@
  *        { action: "assign", color, toneId }                    → ย้ายชื่อสีเข้าโทนนี้ (ออกจากโทนอื่นอัตโนมัติ — 1 สี 1 โทน)
  *        { action: "unassign", color, toneId }                  → เอาออกจากโทน (ย้ายเข้าเอง = ลบ · จับอัตโนมัติ = ใส่ข้อยกเว้น)
  *        { action: "delete", id } · { action: "reorder", ids }
+ *        { action: "batch", items: [{ color, tone }] }          → จับคู่หลายชื่อทีเดียว (หน้าจับคู่สีหลักในทะเบียนสี — กดบันทึกทั้งหมด)
+ *          tone = key โทน · "" = ไม่อยู่โทนไหน · "_not_color" = ไม่ใช่สี (เก็บในแถวพิเศษ is_active=false — เว็บร้านไม่เห็น)
+ *   GET ส่ง notColor = ชื่อที่ตั้งว่าไม่ใช่สี (ไม่นับเป็น "ยังไม่มีสีหลัก")
  * ตรรกะว่าสีไหนอยู่โทนไหน = lib/color-tone.ts (ตัวเดียวกับที่ API สินค้าสาธารณะใช้)
  * สิทธิ์เหมือนทะเบียนสี: อ่าน = products.view · แก้ = products.edit · ทุกการแก้เขียน audit + สั่งเว็บร้านทุกร้านล้างแคช
  */
@@ -16,7 +19,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
 import { rowToSwatchEntry, SWATCH_SELECT, normColorName } from "@/lib/color-swatch";
-import { rowToTone, TONE_SELECT } from "@/lib/color-tone";
+import { rowToTone, TONE_SELECT, NOT_COLOR_KEY, applyToneAssignments, toneOfColor, type ToneAssign } from "@/lib/color-tone";
 import { fetchAllPages } from "@/lib/fetch-all";
 
 export const dynamic = "force-dynamic";
@@ -31,8 +34,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view");
   if (denied) return denied;
   const sb = supabaseAdmin();
-  const [{ data: tones, error }, { data: dict }, { data: listings }, { data: shops }] = await Promise.all([
+  const [{ data: tones, error }, { data: nc }, { data: dict }, { data: listings }, { data: shops }] = await Promise.all([
     sb.from("erp_color_tones").select(TONE_SELECT).eq("is_active", true).order("sort_order"),
+    sb.from("erp_color_tones").select("members").eq("key", NOT_COLOR_KEY).maybeSingle(),
     sb.from("erp_color_dictionary").select(SWATCH_SELECT).eq("is_active", true),
     sb.from("store_listings").select("parent_sku_id, shop_id").eq("is_published", true),
     sb.from("shops").select("id, name"),
@@ -68,6 +72,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   return NextResponse.json({
     tones: ((tones ?? []) as ToneRow[]).map(rowToTone),
+    notColor: ((nc as { members: string[] | null } | null)?.members ?? []).map(normColorName),
     used: [...used.values()].map((u) => ({ name: u.name, skus: u.skus, products: u.products.size, shops: [...u.shops].sort() })),
     swatches: ((dict ?? []) as Parameters<typeof rowToSwatchEntry>[0][]).map(rowToSwatchEntry),
   });
@@ -76,7 +81,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "products.edit")))
     return NextResponse.json({ error: "ต้องมีสิทธิ์แก้สินค้า (products.edit) จึงจัดโทนสีได้" }, { status: 401 });
-  let b: { action?: string; id?: string; ids?: unknown; name?: string; hex?: string; keywords?: unknown; color?: string; toneId?: string };
+  let b: { action?: string; id?: string; ids?: unknown; name?: string; hex?: string; keywords?: unknown; color?: string; toneId?: string; items?: unknown };
   try {
     b = await request.json();
   } catch {
@@ -156,8 +161,43 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         const { error } = await sb.from("erp_color_tones").update({ members: c.members, excludes: c.excludes, updated_at: now, updated_by: user?.id ?? null }).eq("id", c.id);
         if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
       }
+      if (b.action === "assign") {
+        // ย้ายเข้าโทนแล้ว = ไม่ใช่ "ไม่ใช่สี" อีกต่อไป
+        const { data: ncRow } = await sb.from("erp_color_tones").select("id, members").eq("key", NOT_COLOR_KEY).maybeSingle();
+        const nc = ncRow as { id: string; members: string[] | null } | null;
+        if (nc?.members?.some((m) => normColorName(m) === color))
+          await sb.from("erp_color_tones").update({ members: nc.members.filter((m) => normColorName(m) !== color), updated_at: now }).eq("id", nc.id);
+      }
       await audit({ kind: b.action, color, tone: target.name }, target.id);
       return done();
+    }
+    case "batch": {
+      const raw = Array.isArray(b.items) ? (b.items as Partial<ToneAssign>[]) : [];
+      if (!raw.length || raw.length > 300) return NextResponse.json({ error: "จับคู่ได้ครั้งละ 1–300 ชื่อ" }, { status: 400 });
+      const all = await loadAll();
+      const keys = new Set(["", NOT_COLOR_KEY, ...all.map((t) => t.key)]);
+      const items = raw.map((x) => ({ color: normColorName(String(x?.color ?? "")), tone: String(x?.tone ?? "") }));
+      const bad = items.find((x) => !x.color || !keys.has(x.tone));
+      if (bad) return NextResponse.json({ error: bad.color ? `ไม่พบสีหลักของ "${bad.color}" — โหลดหน้าใหม่แล้วลองอีกครั้ง` : "ชื่อสีว่าง" }, { status: 400 });
+
+      const { data: ncRow } = await sb.from("erp_color_tones").select("id, members").eq("key", NOT_COLOR_KEY).maybeSingle();
+      const before = (ncRow as { id: string; members: string[] | null } | null) ?? null;
+      const ncBefore = (before?.members ?? []).map(normColorName);
+      const res = applyToneAssignments(all, ncBefore, items);
+      for (const t of res.tones.filter((x) => res.changed.has(x.id))) {
+        const { error } = await sb.from("erp_color_tones").update({ members: t.members, excludes: t.excludes, updated_at: now, updated_by: user?.id ?? null }).eq("id", t.id);
+        if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
+      }
+      if (res.notColor.join("|") !== ncBefore.join("|")) {
+        // แถวพิเศษ "ไม่ใช่สี" — is_active=false เสมอ (เว็บร้าน/รายการโทนอ่านเฉพาะ is_active)
+        const { error } = before
+          ? await sb.from("erp_color_tones").update({ members: res.notColor, updated_at: now, updated_by: user?.id ?? null }).eq("id", before.id)
+          : await sb.from("erp_color_tones").insert({ key: NOT_COLOR_KEY, name: "ไม่ใช่สี (ไม่โชว์ในตัวกรอง)", hex: "#CCCCCC", members: res.notColor, sort_order: 0, is_active: false, updated_by: user?.id ?? null });
+        if (error) return NextResponse.json({ error: "บันทึกไม่สำเร็จ" }, { status: 500 });
+      }
+      const label = (c: string, tones: typeof all, nc: string[]) => (nc.includes(c) ? "ไม่ใช่สี" : toneOfColor(c, tones)?.tone.name ?? "ไม่มี");
+      await audit({ kind: "batch", items: items.map((x) => ({ color: x.color, from: label(x.color, all, ncBefore), to: label(x.color, res.tones, res.notColor) })) });
+      return done({ count: items.length });
     }
     case "delete": {
       if (!b.id) return NextResponse.json({ error: "ต้องระบุโทน" }, { status: 400 });
