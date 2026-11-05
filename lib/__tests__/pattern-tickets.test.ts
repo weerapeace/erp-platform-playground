@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, cleanLinks, cleanTypeIcon, defaultTypeIcon, isOverdue, isUploadedTypeIcon, openCountsByType, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
+import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, addDaysIso, cleanLinks, cleanTypeIcon, defaultDueDate, defaultTypeIcon, isOverdue, isUploadedTypeIcon, openCountsByType, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
 
 const REQ = "11111111-1111-1111-1111-111111111111";
 const MAKER = "22222222-2222-2222-2222-222222222222";
@@ -79,5 +79,15 @@ describe("ไอคอนประเภทงาน", () => {
       { type_key: "cut", status: "new" }, { type_key: "cut", status: "fix" },
       { type_key: "sew", status: "done" }, { type_key: "sew", status: "cancelled" }, { type_key: "laser", status: "doing" },
     ])).toEqual({ cut: 2, laser: 1 });
+  });
+});
+
+describe("กำหนดส่งตั้งต้น", () => {
+  it("ด่วน = วันนี้ · ปกติ = +3 วัน (ข้ามเดือน/ปีได้)", () => {
+    expect(defaultDueDate(true, "2026-11-05")).toBe("2026-11-05");
+    expect(defaultDueDate(false, "2026-11-05")).toBe("2026-11-08");
+    expect(defaultDueDate(false, "2026-11-29")).toBe("2026-12-02");
+    expect(defaultDueDate(false, "2026-12-30")).toBe("2027-01-02");
+    expect(addDaysIso("2028-02-27", 3)).toBe("2028-03-01");
   });
 });

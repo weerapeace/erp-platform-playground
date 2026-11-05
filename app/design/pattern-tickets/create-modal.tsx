@@ -16,7 +16,7 @@ import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers
 import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
 import { apiFetch } from "@/lib/api";
 import { translateContent } from "@/lib/content-translate";
-import { typeColorCls } from "@/lib/pattern-tickets";
+import { defaultDueDate, defaultTypeIcon, isUploadedTypeIcon, NORMAL_DUE_DAYS, typeColorCls } from "@/lib/pattern-tickets";
 import { fmtBytes, uploadTicketFile } from "./upload";
 import type { TicketType } from "./types";
 
@@ -39,7 +39,12 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
   const [enEdited, setEnEdited] = useState(false);
   const [translating, setTranslating] = useState(false);
   const [urgent, setUrgent] = useState(false);
-  const [due, setDue] = useState("");
+  // กำหนดส่งใส่ให้เอง (ด่วน = วันนี้ · ปกติ = +3 วัน) จนกว่าผู้ใช้จะเลือกวันเอง — lib/pattern-tickets defaultDueDate
+  const [due, setDue] = useState(() => defaultDueDate(false));
+  const [dueTouched, setDueTouched] = useState(false);
+  const pickUrgent = (v: boolean) => { setUrgent(v); if (!dueTouched) setDue(defaultDueDate(v)); };
+  // เลือกประเภทไว้แล้ว = โชว์กล่องใหญ่อันเดียว · กด "เปลี่ยนประเภท" = กาง 8 ช่องให้เลือกใหม่
+  const [picking, setPicking] = useState(!startType);
   const [assignee, setAssignee] = useState<UserPickerValue | null>(null);
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
@@ -70,13 +75,12 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
     const errs: Record<string, string> = {};
     if (!typeKey) errs.type = t("เลือกประเภทงาน", "Pick a job type");
     if (!title.trim()) errs.title = t("ใส่ชื่องาน", "Enter a title");
-    if (!descTh.trim()) errs.desc = t("ใส่รายละเอียดงาน", "Describe the job");
     setErrors(errs);
     if (Object.keys(errs).length) return;
 
     setSaving(true);
     try {
-      const en = descEn.trim() || (await translate());   // ยังไม่ได้แปล → แปลให้ก่อนบันทึก
+      const en = descEn.trim() || (await translate());   // ยังไม่ได้แปล → แปลให้ก่อนบันทึก (ไม่มีรายละเอียด = ไม่แปล)
       const res = await apiFetch("/api/pattern-tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -123,10 +127,31 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
       <div className="flex flex-col gap-4 p-1" {...drop.guard}>
         {/* ประเภทงาน */}
         <section>
+          {ty && !picking ? (
+            <div className="flex items-center gap-4 rounded-xl border border-slate-200 bg-white p-4">
+              <span className={`flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl text-[32px] ${isUploadedTypeIcon(ty.icon) ? "bg-slate-50" : typeColorCls(ty.color)}`}>
+                <Icon value={ty.icon || defaultTypeIcon(ty.key)} size={isUploadedTypeIcon(ty.icon) ? 56 : "1em"} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-lg font-semibold leading-tight text-slate-800">{ty.label_th}</span>
+                <span className="block text-sm text-slate-400">{ty.label_en}</span>
+                {(ty.checklist.length > 0 || ty.deliverables.length > 0) && (
+                  <span className="mt-1 block text-xs text-slate-500">
+                    {t("เช็กลิสต์ตั้งต้น", "Starter checklist")} {ty.checklist.length} {t("ข้อ", "items")}
+                    {ty.deliverables.length ? ` · ${t("ช่างต้องส่งไฟล์", "Maker delivers")} ${ty.deliverables.join(", ")}` : ""}
+                  </span>
+                )}
+              </span>
+              <button type="button" onClick={() => setPicking(true)} disabled={saving}
+                className="shrink-0 self-start text-xs text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline">
+                {t("เปลี่ยนประเภท", "Change type")}
+              </button>
+            </div>
+          ) : (<>
           <Label>{t("ประเภทงาน", "Job type")} *</Label>
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
             {active.map((x) => (
-              <button key={x.key} type="button" onClick={() => { setTypeKey(x.key); setErrors((e) => ({ ...e, type: "" })); }}
+              <button key={x.key} type="button" onClick={() => { setTypeKey(x.key); setPicking(false); setErrors((e) => ({ ...e, type: "" })); }}
                 className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-sm transition ${typeKey === x.key ? "border-blue-400 bg-blue-50 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"}`}>
                 <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${typeColorCls(x.color)}`}><Icon value={x.icon} /></span>
                 <span className="min-w-0 leading-tight"><span className="block truncate font-medium text-slate-700">{x.label_th}</span><span className="block truncate text-[11px] text-slate-400">{x.label_en}</span></span>
@@ -134,12 +159,7 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
             ))}
           </div>
           {errors.type && <Err>{errors.type}</Err>}
-          {ty && (ty.checklist.length > 0 || ty.deliverables.length > 0) && (
-            <p className="mt-1.5 text-xs text-slate-500">
-              {t("เช็กลิสต์ตั้งต้น", "Starter checklist")} {ty.checklist.length} {t("ข้อ", "items")}
-              {ty.deliverables.length ? ` · ${t("ช่างต้องส่งไฟล์", "Maker delivers")} ${ty.deliverables.join(", ")}` : ""}
-            </p>
-          )}
+          </>)}
         </section>
 
         {/* ชื่องาน + รุ่นสินค้า */}
@@ -159,11 +179,10 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
         {/* รายละเอียด 2 ภาษา */}
         <section className="grid gap-3 sm:grid-cols-2">
           <div>
-            <Label>{t("รายละเอียดงาน (ภาษาไทย)", "Details (Thai)")} *</Label>
-            <textarea value={descTh} onChange={(e) => { setDescTh(e.target.value); setErrors((x) => ({ ...x, desc: "" })); }} rows={6}
+            <Label>{t("รายละเอียดงาน (ภาษาไทย · ไม่ใส่ก็ได้)", "Details (Thai · optional)")}</Label>
+            <textarea value={descTh} onChange={(e) => setDescTh(e.target.value)} rows={6}
               placeholder={t("ขนาด วัสดุ ตำแหน่ง จุดที่ต้องระวัง…", "Size, material, position, things to watch…")}
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm outline-none focus:border-blue-400" />
-            {errors.desc && <Err>{errors.desc}</Err>}
           </div>
           <div>
             <div className="mb-1 flex items-center gap-2">
@@ -185,13 +204,15 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
           <div>
             <Label>{t("ความด่วน", "Priority")}</Label>
             <div className="flex gap-1.5">
-              <button type="button" onClick={() => setUrgent(false)} className={`flex-1 rounded-lg border px-3 py-2 text-sm ${!urgent ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>{t("ปกติ", "Normal")}</button>
-              <button type="button" onClick={() => setUrgent(true)} className={`flex-1 rounded-lg border px-3 py-2 text-sm ${urgent ? "border-red-300 bg-red-50 text-red-700" : "border-slate-200 text-slate-600"}`}>{t("ด่วน", "Urgent")}</button>
+              <button type="button" onClick={() => pickUrgent(false)} className={`flex-1 rounded-lg border px-3 py-2 text-sm ${!urgent ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600"}`}>{t("ปกติ", "Normal")}</button>
+              {/* ด่วน = กรอบแดงเสมอ · เลือกแล้ว = กรอบแดงเข้ม + พื้นแดงอ่อน */}
+              <button type="button" onClick={() => pickUrgent(true)} className={`flex-1 rounded-lg border-2 px-3 py-2 text-sm ${urgent ? "border-red-500 bg-red-50 font-semibold text-red-700" : "border-red-300 text-red-600 hover:bg-red-50"}`}>{t("ด่วน", "Urgent")}</button>
             </div>
           </div>
           <div>
             <Label>{t("กำหนดส่ง", "Due date")}</Label>
-            <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400" />
+            <input type="date" value={due} onChange={(e) => { setDue(e.target.value); setDueTouched(true); }} className={`h-9 w-full rounded-lg border px-3 text-sm outline-none focus:border-blue-400 ${urgent ? "border-red-300" : "border-slate-200"}`} />
+            {!dueTouched && <p className="mt-1 text-[11px] text-slate-400">{urgent ? t("ด่วน = ส่งวันนี้", "Urgent = due today") : t(`ปกติ = อีก ${NORMAL_DUE_DAYS} วัน`, `Normal = in ${NORMAL_DUE_DAYS} days`)}</p>}
           </div>
           <div>
             <Label>{t("มอบหมายช่าง (ไม่ใส่ = ใครก็รับได้)", "Assign maker (optional)")}</Label>

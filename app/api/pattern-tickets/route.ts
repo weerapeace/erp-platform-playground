@@ -5,7 +5,7 @@
  *      open_counts = { <type_key>: จำนวนตั๋วที่ยังไม่ปิด } — ป้าย "ค้าง X" บนแผ่นประเภทงาน (นับทุกตั๋ว ไม่ขึ้นกับ view/q)
  * PATCH /api/pattern-tickets/types = เปลี่ยนไอคอนประเภทงาน (ดู types/route.ts)
  *      open (ค่าเริ่ม) = ยังไม่ปิด · done = เสร็จ/ยกเลิก (ล่าสุด 300) · all = ทั้งหมด
- * POST { type_key, title, sku_code?, parent_sku_id?, description_th, description_en?, priority?, due_date?, assignee_id?, assignee_name?, links? }
+ * POST { type_key, title, sku_code?, parent_sku_id?, description_th? (ไม่ใส่ก็ได้), description_en?, priority?, due_date?, assignee_id?, assignee_name?, links? }
  *      → สร้างตั๋ว (pattern.create) · เลขตั๋วจาก erp_next_number('pattern_ticket') · เช็กลิสต์ตั้งต้นตามประเภทงาน
  * กติกาสถานะดู lib/pattern-tickets.ts
  */
@@ -65,7 +65,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const descTh = String(body.description_th ?? "").trim().slice(0, 8000);
   if (!typeKey) return NextResponse.json({ error: "เลือกประเภทงานก่อน" }, { status: 400 });
   if (!title) return NextResponse.json({ error: "ใส่ชื่องานก่อน" }, { status: 400 });
-  if (!descTh) return NextResponse.json({ error: "ใส่รายละเอียดงาน (ภาษาไทย) ก่อน" }, { status: 400 });
   const due = typeof body.due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.due_date) ? body.due_date : null;
 
   const admin = supabaseAdmin();

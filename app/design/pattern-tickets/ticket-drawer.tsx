@@ -177,11 +177,11 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
                 </button>
               ))}
             </div>
-            {lang !== "en" && <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{tk.description_th || "—"}</p>}
+            {lang !== "en" && <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{tk.description_th || t("ไม่มีรายละเอียด", "No details")}</p>}
             {lang !== "th" && (
               <div className={`${lang === "both" ? "mt-2" : ""} rounded-lg bg-slate-50 px-3 py-2`}>
                 <div className="mb-0.5 text-[11px] text-slate-400"><Icon name="web" /> English · {tk.en_edited ? t("แก้คำแปลแล้ว", "edited") : t("แปลอัตโนมัติ", "auto-translated")}</div>
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{tk.description_en || t("(ยังไม่มีคำแปล)", "(no translation yet)")}</p>
+                <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{tk.description_en || (tk.description_th ? t("(ยังไม่มีคำแปล)", "(no translation yet)") : t("No details", "No details"))}</p>
               </div>
             )}
           </section>

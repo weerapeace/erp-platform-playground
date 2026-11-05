@@ -177,3 +177,13 @@ export function openCountsByType(rows: { type_key: string; status: string }[]): 
   for (const r of rows) if ((OPEN_STATUSES as string[]).includes(r.status)) out[r.type_key] = (out[r.type_key] ?? 0) + 1;
   return out;
 }
+
+/* ── กำหนดส่งตั้งต้นตอนเปิดตั๋ว ── ด่วน = วันนี้ · ปกติ = วันนี้ + 3 วัน (นับวันปฏิทิน รวมเสาร์-อาทิตย์ · เวลาไทย) */
+export const NORMAL_DUE_DAYS = 3;
+export function addDaysIso(iso: string, days: number): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+}
+export function defaultDueDate(urgent: boolean, todayIso: string = todayBangkok()): string {
+  return urgent ? todayIso : addDaysIso(todayIso, NORMAL_DUE_DAYS);
+}
