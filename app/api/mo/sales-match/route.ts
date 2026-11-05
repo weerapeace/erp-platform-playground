@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { bkkDate, matchSales, type MatchMo, type SaleLine, type SalesLinkRow } from "@/lib/mo-sales-match";
+import { syncAutoClose } from "../auto-close";
 
 export type SaleLineOption = SaleLine & { left: number; linked: { mo_no: string; qty: number }[]; suggested: { mo_no: string; qty: number }[]; before: boolean };
 export type SalesDetail = { mo: { mo_no: string; sku: string; qty: number; from: string }; lines: SaleLineOption[]; mine: { sale_line_id: string; qty: number }[]; dupes: { mo_no: string; qty: number; from: string }[];
@@ -102,7 +103,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (error) return bad("ผูกใบขายไม่สำเร็จ", 500);
   await writeAudit(admin, { action: "mo.sales_link", entityType: "mo", entityId: String(m.id), actorId: me?.id ?? null, actorName: me?.name ?? null,
     metadata: { mo_no: m.mo_no, parts: rows.map((r) => ({ so_number: r.so_number, qty: r.qty, sale_date: r.sale_date })) } });
-  return NextResponse.json({ ok: true, n: rows.length });
+  // ขายครบ + ช่างส่งคืนครบแล้ว → ปิดงานให้อัตโนมัติ (กฎกลาง lib/mo-auto-close)
+  const auto = await syncAutoClose(admin, [String(m.mo_no)], { id: me?.id, name: me?.name }, "sales_link");
+  return NextResponse.json({ ok: true, n: rows.length, auto_closed: auto.closed });
 }
 
 export async function DELETE(request: NextRequest): Promise<NextResponse> {
@@ -121,7 +124,9 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const rows = (data ?? []) as Row[];
   if (rows.length) await writeAudit(admin, { action: "mo.sales_unlink", entityType: "mo", entityId: String(rows[0].mo_id), actorId: me?.id ?? null, actorName: me?.name ?? null,
     metadata: { mo_no: moNo, parts: rows.map((r) => ({ so_number: r.so_number, qty: r.qty })) } });
-  return NextResponse.json({ ok: true, n: rows.length });
+  // ถอดผูกแล้วขายไม่ครบ → ใบที่ระบบเคยปิดเองเปิดคืนให้
+  const auto = rows.length ? await syncAutoClose(admin, [moNo], { id: me?.id, name: me?.name }, "sales_unlink") : { reopened: [] as string[] };
+  return NextResponse.json({ ok: true, n: rows.length, auto_reopened: auto.reopened });
 }
 
 /** หน้าต่างเลือกใบขายเอง — ทุกบรรทัดใบขายของ SKU ของใบนี้ · เหลือผูกได้ = จำนวนในบรรทัด − ที่ผูกกับใบอื่น (ของใบนี้เองไม่นับ เพราะเลือกใหม่จะยกเลิกของเดิมก่อน) */

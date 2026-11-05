@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { syncAutoClose } from "../../auto-close";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
@@ -99,6 +100,9 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const c = cur as { wo_no: string; mo_no: string | null };
   await writeAudit(admin, { action: "update", entityType: "mo_work_order", entityId: id, actorId: user.id,
     actorName: user.email ?? null, metadata: { wo_no: c.wo_no, mo_no: c.mo_no, ...patch, ...(body.via ? { via: String(body.via).slice(0, 30), label: String(body.label ?? "").slice(0, 300) } : {}) } });
+  // รับคืน/เปลี่ยนสถานะ/จำนวน → ใบสั่งผลิตที่ขายครบแล้วอาจปิดได้ (หรือเปิดคืนถ้าย้อนรับคืน) · กฎกลาง lib/mo-auto-close
+  if (body.received_qty != null || body.status != null || body.qty != null)
+    await syncAutoClose(admin, [c.mo_no], { id: user.id, name: user.email ?? null }, "work_order");
   return NextResponse.json({ id, error: null });
 }
 
@@ -118,5 +122,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
   await writeAudit(admin, { action: "delete", entityType: "mo_work_order", entityId: id, actorId: user.id, actorName: user.email ?? null,
     metadata: { wo_no: (cur as { wo_no?: string } | null)?.wo_no ?? null, mo_no: (cur as { mo_no?: string } | null)?.mo_no ?? null, ...viaMeta } });
+  // ยกเลิกใบจ่ายที่ค้าง → ใบสั่งผลิตที่ขายครบ + คืนครบอาจปิดได้แล้ว
+  await syncAutoClose(admin, [(cur as { mo_no?: string } | null)?.mo_no], { id: user.id, name: user.email ?? null }, "work_order_cancel");
   return NextResponse.json({ data: { archived: true }, error: null });
 }

@@ -25,6 +25,9 @@ import { useTouchDrag } from "@/components/touch-drag";
 import { MoneyInput } from "@/components/money-input";
 import { deskKindOf } from "@/lib/work-entry-rules";
 import { ExecQuickDispatch, type QuickRow } from "./exec-quick-dispatch";
+import { useMoGroups } from "@/components/mo-group-picker";
+import { MoStatusModal } from "@/components/mo-status-modal";
+import type { SoldQty } from "@/app/api/mo/sold-qty/route";
 
 export type ExecMo = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
@@ -114,6 +117,34 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   const [q, setQ] = useState("");
   const [readyOnly, setReadyOnly] = useState(false);
   const [brand, setBrand] = useState<string>("");
+  // ชุด (กลุ่มใบสั่งงาน mo_groups) — ป้ายบนการ์ด + กรอง · "" = ทุกชุด · "_none" = ไม่มีชุด (เจ้าของสั่ง 2026-11-05)
+  const [grp, setGrp] = useState<string>("");
+  const { groups: moGroups } = useMoGroups(true);
+  const groupOf = useMemo(() => {
+    const m = new Map<string, { id: string; name: string }>();
+    for (const g of moGroups ?? []) for (const no of g.mo_nos ?? []) if (!m.has(no)) m.set(no, { id: g.id, name: g.name });
+    return m;
+  }, [moGroups]);
+  // ขายแล้วกี่ชิ้น (ผูกใบขาย) — การ์ดที่ขายครบไม่ควรจ่ายซ้ำ
+  const [sold, setSold] = useState<SoldQty>({});
+  const pendingIds = useMemo(() => pending.map((m) => m.id).sort().join(","), [pending]);
+  useEffect(() => {
+    const ids = pendingIds ? pendingIds.split(",") : [];
+    if (!ids.length) { setSold({}); return; }
+    let off = false;
+    void (async () => {
+      const out: SoldQty = {};
+      for (let i = 0; i < ids.length; i += 150) {
+        try {
+          const j = await apiFetch(`/api/mo/sold-qty?ids=${ids.slice(i, i + 150).join(",")}`).then((r) => r.json());
+          Object.assign(out, (j.data ?? {}) as SoldQty);
+        } catch { /* ไม่มีป้ายขายแล้วก็ยังจ่ายงานได้ปกติ */ }
+      }
+      if (!off) setSold(out);
+    })();
+    return () => { off = true; };
+  }, [pendingIds]);
+  const [statusMo, setStatusMo] = useState<string | null>(null);   // ป๊อปสถานะงาน (ของกลาง MoStatusModal)
   const [fieldsOpen, setFieldsOpen] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [openDesk, setOpenDesk] = useState<string | null>(null);
@@ -202,13 +233,26 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     const s = q.trim().toLowerCase();
     const dueOf = (m: ExecMo) => m.internal_due_date ?? m.due_date ?? "9999-12-31";
     return pending.filter((m) => m.remaining > 0 && (!readyOnly || m.ready) && (!brand || (m.brand?.trim() || "ไม่มีแบรนด์") === brand)
-      && (!s || `${m.mo_no} ${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.brand ?? ""}`.toLowerCase().includes(s)))
+      && (!grp || (grp === "_none" ? !groupOf.has(m.mo_no) : groupOf.get(m.mo_no)?.id === grp))
+      && (!s || `${m.mo_no} ${m.product_sku ?? ""} ${m.product_name ?? ""} ${m.brand ?? ""} ${groupOf.get(m.mo_no)?.name ?? ""}`.toLowerCase().includes(s)))
       .sort((a, b) => sort === "value" ? valueOf(b) - valueOf(a)
         : sort === "labor" ? laborOf(b) - laborOf(a)
         : sort === "qty" ? b.remaining - a.remaining
         : sort === "sku" ? (a.product_sku ?? a.mo_no).localeCompare(b.product_sku ?? b.mo_no)
         : (b.priority ?? 0) - (a.priority ?? 0) || dueOf(a).localeCompare(dueOf(b)));
-  }, [pending, q, readyOnly, brand, sort, price, customer, includeOwn]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pending, q, readyOnly, brand, grp, groupOf, sort, price, customer, includeOwn]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ปุ่มกรองชุด — นับจากการ์ดที่ยังต้องจ่าย
+  const groupChips = useMemo(() => {
+    const m = new Map<string, { id: string; name: string; n: number }>();
+    let none = 0;
+    for (const mo of pending) {
+      if (!(mo.remaining > 0)) continue;
+      const g = groupOf.get(mo.mo_no);
+      if (!g) { none++; continue; }
+      const x = m.get(g.id) ?? { ...g, n: 0 }; x.n++; m.set(g.id, x);
+    }
+    return { list: [...m.values()].sort((a, b) => b.n - a.n), none };
+  }, [pending, groupOf]);
   const total = list.reduce((a, m) => a + valueOf(m), 0);
   const chosen = list.filter((m) => sel.has(m.id));
   const chosenValue = chosen.reduce((a, m) => a + valueOf(m), 0);
@@ -377,6 +421,21 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           </div>
         )}
 
+        {groupChips.list.length > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-400">ชุด:</span>
+            <button type="button" onClick={() => setGrp("")} className={`h-7 rounded-full border px-2.5 text-[12px] ${!grp ? "border-teal-700 bg-teal-700 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>ทุกชุด</button>
+            {groupChips.list.map((g) => (
+              <button key={g.id} type="button" onClick={() => setGrp(grp === g.id ? "" : g.id)}
+                className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[12px] ${grp === g.id ? "border-teal-700 bg-teal-700 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                <Icon name="folders" /> {g.name} {g.n}</button>
+            ))}
+            {groupChips.none > 0 && (
+              <button type="button" onClick={() => setGrp(grp === "_none" ? "" : "_none")} className={`h-7 rounded-full border px-2.5 text-[12px] ${grp === "_none" ? "border-teal-700 bg-teal-700 text-white" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>ไม่มีชุด {groupChips.none}</button>
+            )}
+          </div>
+        )}
+
         {chosen.length > 0 && (
           <div className="mb-2 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-1.5 text-sm text-violet-800">
             เลือก <b>{chosen.length}</b> ใบ{showPrice ? ` · ฿${fmt(chosenValue)}` : ""} — ลากการ์ดใบไหนก็ได้ลงโต๊ะด้านล่าง หรือกดโต๊ะแล้วกด &ldquo;จ่ายให้โต๊ะนี้&rdquo;
@@ -385,11 +444,13 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
         )}
 
         {!list.length ? (
-          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-200 py-16 text-sm text-slate-400">{q || readyOnly || brand ? "ไม่พบงานตามที่ค้น / กรอง" : "ไม่มีงานรอจ่าย"}</div>
+          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-200 py-16 text-sm text-slate-400">{q || readyOnly || brand || grp ? "ไม่พบงานตามที่ค้น / กรอง" : "ไม่มีงานรอจ่าย"}</div>
         ) : (
           <div className="grid flex-1 content-start gap-2.5 pb-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size}px, 1fr))` }}>
             {list.map((m) => {
               const on = sel.has(m.id), p = price.get(m.mo_no) ?? 0, rate = rateOfMo(m);
+              const g = groupOf.get(m.mo_no), sq = sold[m.id];
+              const soldFull = !!sq && m.qty > 0 && sq.qty >= m.qty - 0.0001;
               return (
                 <div key={m.id} draggable={canDispatch}
                   onDragStart={(e) => { e.dataTransfer.setData("text/plain", m.id); e.dataTransfer.effectAllowed = "move"; }}
@@ -405,6 +466,14 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                     {m.image_url ? <img src={m.image_url} alt="" className="h-full w-full object-contain" draggable={false} /> : <Icon name="image" />}
                   </div>
                   <div className="truncate font-mono text-[13px] font-semibold text-slate-800">{m.product_sku ?? m.mo_no}</div>
+                  {/* ชุด — แยกการ์ดรหัสเดียวกันคนละรอบ (เช่น ก.ย. / ต.ค.) */}
+                  {g && (
+                    <div className="mt-0.5 min-w-0">
+                      <span title={`ชุด ${g.name} · ${m.mo_no}`} className="inline-flex max-w-full items-center gap-1 rounded-full bg-teal-50 px-1.5 py-0.5 text-[11px] text-teal-800">
+                        <Icon name="folders" /><span className="truncate">{g.name}</span>
+                      </span>
+                    </div>
+                  )}
                   {show("brand") && m.brand && <div className="truncate text-[11px] font-medium text-violet-600">{m.brand}</div>}
                   {show("name") && <div className="truncate text-[11px] text-slate-400">{m.product_name ?? ""}</div>}
                   <div className="mt-0.5 text-[12px] text-slate-600">จ่าย <b className="text-slate-800">{fmt(m.remaining)}</b>{m.remaining !== m.qty ? ` / ${fmt(m.qty)}` : ""} ชิ้น{show("price") && p > 0 ? ` · ฿${fmt(p)}` : ""}</div>
@@ -416,9 +485,29 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                       {show("labor") && <>ค่าแรง ฿{fmt(rate)}/ชิ้น</>}{show("labor") && show("laborTotal") ? " · " : ""}{show("laborTotal") && <b className="text-slate-700">รวม ฿{fmt(rate * m.remaining)}</b>}
                     </> : <span className="text-amber-600">ยังไม่ตั้งค่าแรง</span>}</div>
                   )}
-                  {show("ready") && <div className={`mt-0.5 text-right text-[11px] ${m.ready ? "font-medium text-emerald-600" : "text-amber-600"}`}>{m.ready ? "พร้อม" : "ยังไม่พร้อม"}</div>}
+                  {/* ขายแล้ว (ผูกใบขาย) — ขายครบ = ไม่ต้องจ่ายงานซ้ำ */}
+                  {sq && sq.qty > 0 && (
+                    <div className="mt-0.5" title={`ผูกใบขาย ${sq.bills.join(", ")}`}>
+                      <span className={`inline-block max-w-full truncate rounded px-1.5 py-0.5 text-[11px] ${soldFull ? "bg-emerald-100 font-medium text-emerald-800" : "bg-emerald-50 text-emerald-700"}`}>
+                        {soldFull ? "ขายครบแล้ว" : "ขายแล้ว"} {fmt(sq.qty)}/{fmt(m.qty)}
+                      </span>
+                    </div>
+                  )}
+                  {/* ปุ่มสถานะ (ป๊อปกลาง: ขั้นงาน + ขอซื้อวัตถุดิบถึงไหน) · ความพร้อมกดดูได้ */}
+                  <div className="mt-1 flex items-center justify-between gap-1">
+                    <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูสถานะงาน + ขอซื้อวัตถุดิบถึงไหนแล้ว"
+                      className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600 hover:border-violet-300 hover:text-violet-700">
+                      <Icon name="list" /> สถานะ
+                    </button>
+                    {soldFull
+                      ? <span className="text-right text-[11px] font-medium text-emerald-700">ควรปิดงาน</span>
+                      : show("ready") && (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูว่าติดอะไร / ขอซื้อถึงไหน"
+                          className={`text-right text-[11px] hover:underline ${m.ready ? "font-medium text-emerald-600" : "text-amber-600"}`}>{m.ready ? "พร้อม" : "ยังไม่พร้อม ›"}</button>
+                      )}
+                  </div>
                   <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }} title="ดูรายละเอียด / เช็กลิสต์"
-                    className="absolute bottom-1.5 left-1.5 hidden h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm hover:text-violet-700 group-hover:flex"><Icon name="open" /></button>
+                    className="absolute left-1.5 top-8 z-10 hidden h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm hover:text-violet-700 group-hover:flex"><Icon name="open" /></button>
                 </div>
               );
             })}
@@ -644,6 +733,9 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
       <ERPModal open={manageDesk !== null} onClose={() => setManageDesk(null)} size="md" title={`จัดการโต๊ะ: ${manageDesk?.name ?? ""}`} description="ย้ายคนเข้า/ออก · สร้างโต๊ะใหม่ · เปลี่ยนชื่อ · ปิดโต๊ะ (ต้องมีสิทธิ์บุคคล)">
         {manageDesk && renderDeskManager?.(manageDesk)}
       </ERPModal>
+
+      {/* สถานะงาน + ขอซื้อวัตถุดิบถึงไหน (ป๊อปกลาง — ตัวเดียวกับใบค้างผลิต/Dashboard ผลิต) */}
+      {statusMo && <MoStatusModal moId={statusMo} onClose={() => setStatusMo(null)} />}
     </div>
   );
 }

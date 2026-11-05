@@ -10,6 +10,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { syncWoLabor } from "@/lib/wo-labor";
 import { notifyEvent, pushLineTpl, boardLink } from "@/lib/board-notify";
+import { syncAutoClose } from "../auto-close";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -98,6 +99,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const quiet = body.quiet === true;   // อัปเดตงานย้อนหลัง (โหมด 🔄 อัปเดตงาน) → ไม่แจ้งกระดิ่ง/LINE เรื่องงานเก่า
   await writeAudit(admin, { action: "wo.submit", entityType: "wo_submissions", entityId: wo_id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { sku: wo.product_sku, qty, wage, worker: effWorker, worker_changed: !!overrideWorker, done: newReceived >= Number(wo.qty ?? 0), ...(quiet ? { catch_up: true } : {}) } });
+  // ส่งคืนครบ + ขายครบแล้ว → ปิดใบสั่งผลิตให้อัตโนมัติ (กฎกลาง lib/mo-auto-close)
+  await syncAutoClose(admin, [wo.mo_no as string | null], { id: user?.id, name: user?.email ?? null }, "submission");
   if (quiet) return NextResponse.json({ id: subId, error: null });
 
   // แจ้งเตือน "มีงานรอ QC" (best-effort): กระดิ่ง (หัวหน้า) + LINE กลุ่ม QC
@@ -168,6 +171,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   await writeAudit(admin, { action: "wo.submit_fill", entityType: "wo_submissions", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { ...patch, mo_no: sub.mo_no ?? null, before: { qty: n(sub.qty), wage: sub.wage ?? null, submitted_at: sub.submitted_at ?? null }, ...(body.via ? { via: String(body.via).slice(0, 30), label: String(body.label ?? "").slice(0, 300) } : {}) } });
+  if (woPatch) await syncAutoClose(admin, [sub.mo_no as string | null], { id: user?.id, name: user?.email ?? null }, "submission_edit");
   return NextResponse.json({ data: { id, ...patch }, error: null });
 }
 
@@ -198,5 +202,7 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   await admin.from("wo_submissions").delete().eq("id", id);
   if (sub.wo_id) await syncWoLabor(admin, String(sub.wo_id));   // เหลือรอบที่ลงค่าแรง → คิดค่าแรงรวมใหม่
   await writeAudit(admin, { action: "wo.submit_undo", entityType: "wo_submissions", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { wo_id: sub.wo_id, qty: sub.qty, mo_no: sub.mo_no ?? null, ...viaMeta } });
+  // ย้อนส่งคืน → ใบที่ระบบเคยปิดเองเปิดคืนให้ (การ์ดกลับมาบนบอร์ด)
+  await syncAutoClose(admin, [sub.mo_no as string | null], { id: user?.id, name: user?.email ?? null }, "submission_undo");
   return NextResponse.json({ error: null });
 }

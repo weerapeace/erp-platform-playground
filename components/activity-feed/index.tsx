@@ -26,6 +26,8 @@ const ACTION_CONFIG: Record<string, { label: string; icon: string; dot: string; 
   // ใบสั่งผลิต: ปิด/ยกเลิก (lib/mo-workflow) · ข้าม/เอาคืนขั้นตอน (lib/mo-skip)
   close:        { label: "ปิดงาน",    icon: "✓", dot: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-700 border-emerald-200" },
   cancel:       { label: "ยกเลิก",    icon: "✕", dot: "bg-red-500",     chip: "bg-red-50 text-red-700 border-red-200" },
+  // ใบสั่งผลิตที่ระบบปิดเองแล้วเงื่อนไขไม่ครบอีก (lib/mo-auto-close) → เปิดคืน
+  reopen:       { label: "เปิดงานคืน", icon: "↺", dot: "bg-amber-500",   chip: "bg-amber-50 text-amber-700 border-amber-200" },
   skip_stage:   { label: "ข้ามขั้น",   icon: "⏭", dot: "bg-slate-400",   chip: "bg-slate-50 text-slate-600 border-slate-200" },
   unskip_stage: { label: "เอาคืนขั้น", icon: "↩", dot: "bg-slate-400",   chip: "bg-slate-50 text-slate-600 border-slate-200" },
 };

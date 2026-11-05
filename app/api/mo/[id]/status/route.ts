@@ -12,6 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { computeMoStatus } from "@/lib/mo-status";
 import { parseSkipped } from "@/lib/mo-skip";
+import { prProgress, type PrStage } from "@/lib/pr-progress";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,7 +24,9 @@ export type MoStatusDesk = {
 export type MoStatusMissing = { sku: string | null; name: string; required: number; on_hand: number; to_purchase: number; uom: string | null; purchase_status: string | null };
 export type MoStatusCut = { sku: string | null; name: string; block: string | null; pieces: number };
 export type MoStatusPiece = { job: string; assignee: string | null; rate: number; qty: number; total: number; done: boolean };
-export type MoStatusPurchase = { item_name: string; qty: number; uom: string | null; pr_no: string | null; po_no: string | null; label: string; tone: "wait" | "ordered" | "done"; is_urgent: boolean };
+export type MoStatusPurchase = { item_name: string; qty: number; uom: string | null; pr_no: string | null; po_no: string | null; label: string; tone: "wait" | "ordered" | "done"; is_urgent: boolean;
+  /** ขอซื้อถึงไหน (กติกากลาง lib/pr-progress — ตัวเดียวกับหน้าประวัติขอซื้อ) */
+  stage?: PrStage; seller_name?: string | null };
 
 export type MoStatus = {
   mo_no: string; product_sku: string | null; product_name: string | null; qty: number;
@@ -66,7 +69,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     admin.from("mo_piecework")
       .select("job_name, assignee_name, rate, total_qty, status").eq("mo_no", moNo).eq("is_active", true),
     admin.from("purchase_requests_v2")
-      .select("pr_no, item_name, qty, uom, status, is_urgent, po_id")
+      .select("id, pr_no, item_name, qty, uom, status, is_urgent, po_id")
       .contains("source_mo_nos", [moNo]).eq("is_active", true).order("created_at", { ascending: true }),
   ]);
 
@@ -77,27 +80,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // ---- สถานะของซื้อ (PR/PO ที่ผูกใบนี้) + label + จับคู่กับของที่ขาดตามชื่อ ----
   const prs = (prsR.data ?? []) as Record<string, unknown>[];
   const poIds = [...new Set(prs.map((p) => p.po_id).filter(Boolean))] as string[];
-  const poMap = new Map<string, { po_no: string; status: string; expected_date: string | null }>();
-  if (poIds.length) {
-    const { data: pos } = await admin.from("purchase_orders_v2").select("id, po_no, status, expected_date").in("id", poIds);
-    for (const po of (pos ?? []) as Record<string, unknown>[]) poMap.set(String(po.id), { po_no: String(po.po_no ?? ""), status: String(po.status ?? ""), expected_date: (po.expected_date as string) ?? null });
-  }
+  const poMap = new Map<string, { po_no: string; status: string; expected_date: string | null; seller_name: string | null }>();
+  // บรรทัดใบสั่งซื้อที่ผูกใบขอซื้อ (pr_id) → รับของแล้วเท่าไร (ใช้แยก "สั่งแล้ว" / "รับบางส่วน" / "รับครบ")
+  const lineByPr = new Map<string, { qty: number; qty_received: number; line_status: string | null }>();
+  const prIds = prs.map((p) => String(p.id ?? "")).filter(Boolean);
+  await Promise.all([
+    poIds.length ? admin.from("purchase_orders_v2").select("id, po_no, status, expected_date, seller_name").in("id", poIds).then(({ data: pos }) => {
+      for (const po of (pos ?? []) as Record<string, unknown>[]) poMap.set(String(po.id), { po_no: String(po.po_no ?? ""), status: String(po.status ?? ""), expected_date: (po.expected_date as string) ?? null, seller_name: (po.seller_name as string) ?? null });
+    }) : null,
+    prIds.length ? admin.from("purchase_order_lines_v2").select("pr_id, qty, qty_received, line_status").in("pr_id", prIds).not("is_active", "is", false).then(({ data: ls }) => {
+      for (const l of (ls ?? []) as Record<string, unknown>[]) if (!lineByPr.has(String(l.pr_id)))
+        lineByPr.set(String(l.pr_id), { qty: n(l.qty), qty_received: n(l.qty_received), line_status: (l.line_status as string) ?? null });
+    }) : null,
+  ]);
   const fmtD = (dt: string | null) => dt ? new Date(dt + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "";
+  // ขั้นจากกติกากลาง lib/pr-progress (ตัวเดียวกับหน้าประวัติขอซื้อ) · สีป้าย: รอ = เหลือง · สั่งแล้ว/รับบางส่วน = ฟ้า · รับครบ = เขียว
+  const STAGE_TONE: Record<PrStage, MoStatusPurchase["tone"]> = {
+    requested: "wait", po_draft: "wait", ordered: "ordered", receiving: "ordered", received: "done", rejected: "wait", cancelled: "wait",
+  };
   const purchases: MoStatusPurchase[] = prs.map((p) => {
     const po = p.po_id ? poMap.get(String(p.po_id)) : undefined;
-    const prSt = String(p.status ?? "");
-    let label = "ขอซื้อแล้ว"; let tone: MoStatusPurchase["tone"] = "wait";
-    if (!po) {
-      if (prSt === "waiting") label = "🛒 ขอซื้อ — รออนุมัติ";
-      else if (prSt === "approved") label = "✅ อนุมัติแล้ว — รอออก PO";
-      else if (prSt === "rejected") label = "❌ ถูกปฏิเสธ";
-    } else {
-      const eta = po.expected_date ? ` · เข้า ${fmtD(po.expected_date)}` : "";
-      if (po.status === "draft") { label = `🧾 ออก PO แล้ว (ยังไม่สั่ง)${eta}`; tone = "wait"; }
-      else if (po.status === "received") { label = "📦 ของเข้าแล้ว"; tone = "done"; }
-      else { label = `🚚 สั่งซื้อแล้ว${eta}`; tone = "ordered"; }
-    }
-    return { item_name: String(p.item_name ?? ""), qty: n(p.qty), uom: (p.uom as string) ?? null, pr_no: (p.pr_no as string) ?? null, po_no: po?.po_no ?? null, label, tone, is_urgent: !!p.is_urgent };
+    const prog = prProgress({ pr_status: String(p.status ?? ""), line: lineByPr.get(String(p.id)) ?? null, po_status: po?.status ?? null });
+    const eta = po?.expected_date && (prog.stage === "ordered" || prog.stage === "receiving" || prog.stage === "po_draft") ? ` · เข้า ${fmtD(po.expected_date)}` : "";
+    return { item_name: String(p.item_name ?? ""), qty: n(p.qty), uom: (p.uom as string) ?? null, pr_no: (p.pr_no as string) ?? null, po_no: po?.po_no ?? null,
+      label: `${prog.label}${eta}`, tone: STAGE_TONE[prog.stage], is_urgent: !!p.is_urgent, stage: prog.stage, seller_name: po?.seller_name ?? null };
   });
   const norm = (s: string) => s.toLowerCase().replace(/\s+/g, "");
   const purchaseFor = (name: string): string | null => {

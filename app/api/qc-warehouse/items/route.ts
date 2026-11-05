@@ -29,6 +29,7 @@ import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { writeAudit, writeAuditId, writeAuditMany } from "@/lib/audit";
 import { notifyEvent, pushLineTpl, dmEmployeeByName, boardLink } from "@/lib/board-notify";
 import { syncWoLabor } from "@/lib/wo-labor";
+import { syncAutoClose } from "../../mo/auto-close";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -400,6 +401,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (up.error) return NextResponse.json({ error: friendlyDbError(up.error.message) }, { status: 400 });
       await syncWoLabor(admin, wo_id);
       await writeAudit(admin, { action: "qc.return_worker", entityType: "mo_work_orders", entityId: wo_id, ...actor, metadata: { sku: wo.product_sku, mo_no: wo.mo_no, qty: remaining, removed_submissions: delIds.length } });
+      // ตีกลับให้ช่าง = ยอดคืนลด → ใบที่ระบบเคยปิดเองเปิดคืนให้
+      await syncAutoClose(admin, [wo.mo_no as string | null], { id: actor.actorId, name: actor.actorName }, "qc_return_worker");
       // แจ้งช่างว่างานถูกตีกลับ (best-effort)
       {
         const link = boardLink("/master/qc-warehouse");

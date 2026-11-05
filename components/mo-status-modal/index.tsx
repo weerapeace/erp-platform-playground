@@ -15,6 +15,7 @@ import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useBackClose } from "@/lib/use-back-close";
 import { moChecklistEmbedUrl, readMoChecklistEvent } from "@/lib/mo-checklist-embed";
+import { PR_STAGE_LABEL, PR_STAGE_STEPS } from "@/lib/pr-progress";
 import type { MoStatus } from "@/app/api/mo/[id]/status/route";
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
@@ -200,12 +201,32 @@ export function MoStatusModal({ moId, onClose, onChanged, checklist = true }: {
           )}
 
           {d.purchases.length > 0 && (
-            <Sec title={`สถานะของซื้อ (${d.purchases.length})`}>
-              <div className="max-h-40 overflow-y-auto space-y-1">
+            <Sec title={`ขอซื้อวัตถุดิบ — ถึงไหนแล้ว (${d.purchases.length})`}>
+              {/* นับตามขั้น (กติกากลาง lib/pr-progress — ตัวเดียวกับหน้าประวัติขอซื้อ) */}
+              <div className="mb-1.5 flex flex-wrap gap-1">
+                {PR_STAGE_STEPS.map((st) => {
+                  const c = d.purchases.filter((p) => p.stage === st).length;
+                  return (
+                    <span key={st} className={`rounded-full px-2 py-0.5 text-[10px] ${c ? (st === "received" ? "bg-emerald-100 text-emerald-700" : st === "ordered" || st === "receiving" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-800") : "bg-slate-50 text-slate-300"}`}>
+                      {PR_STAGE_LABEL[st]} {c}
+                    </span>
+                  );
+                })}
+              </div>
+              <div className="max-h-48 overflow-y-auto space-y-1">
                 {d.purchases.map((p, i) => (
-                  <div key={i} className={`flex items-center gap-2 text-xs border rounded-lg px-2 py-1.5 ${PU_TONE[p.tone] ?? "border-slate-100"}`}>
-                    <span className="flex-1 min-w-0 truncate">{p.is_urgent && <span className="text-rose-600">⚡ </span>}{p.item_name}</span>
-                    <span className="shrink-0 font-medium">{p.label}</span>
+                  <div key={i} className={`text-xs border rounded-lg px-2 py-1.5 ${PU_TONE[p.tone] ?? "border-slate-100"}`}>
+                    <div className="flex items-center gap-2">
+                      <span className="flex-1 min-w-0 truncate">{p.is_urgent && <span className="text-rose-600">⚡ </span>}{p.item_name}</span>
+                      <span className="shrink-0 font-medium">{p.label}</span>
+                    </div>
+                    {(p.po_no || p.seller_name || p.pr_no) && (
+                      <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] opacity-75">
+                        <span className="tabular-nums">{fmt(p.qty)}{p.uom ? ` ${p.uom}` : ""}</span>
+                        {p.seller_name && <span>ร้าน {p.seller_name}</span>}
+                        {p.po_no ? <span className="font-mono">{p.po_no}</span> : p.pr_no ? <span className="font-mono">{p.pr_no}</span> : null}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
