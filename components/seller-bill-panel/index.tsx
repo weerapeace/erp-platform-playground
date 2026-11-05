@@ -18,7 +18,7 @@ import { apiFetch } from "@/lib/api";
 import { formatDate } from "@/lib/date";
 import { isPdfRef } from "@/lib/file-ref";
 import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
-import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
+import { applyGroupToLine, checkBillMath, undecidedCount, shortfallOf, missingGroups, pendingReceiveOf, reducePlan, outsidePoLines, otherShopHint, roundsOf, splitAcrossRounds, type PoGroup, type SellerBillLine } from "@/lib/seller-bill-match";
 
 /** งานแก้ใบสั่งซื้อจากหน้านี้ (ผ่าน API กลาง po-edit / cancel-line) — ย้าย PO ทำ "ก่อน" ใส่ลงใบ · ลด/ปิดยอด ทำ "หลัง" */
 type PoPlan = {
@@ -91,6 +91,25 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
   const gByKey = useMemo(() => new Map(groups.map((g) => [g.key, g])), [groups]);
   const otherByKey = useMemo(() => new Map((otherGroups ?? []).map((g) => [g.key, g])), [otherGroups]);
   const gAny = (key: string | null | undefined) => (key ? gByKey.get(key) ?? otherByKey.get(key) : undefined);
+  // ★ 2026-11-05 เลือกรอบ (ใบสั่งซื้อ) ในแถว — สินค้าเดียวกันค้างหลายรอบ (lib/seller-bill-match roundsOf/splitAcrossRounds)
+  const pickRound = (billId: string, idx: number, r: PoGroup) =>
+    setLines(billId, (ls) => ls.map((l, i) => (i === idx ? { ...applyGroupToLine({ ...l, is_fee: false, sku_pick: null, move_po: null }, r, groups, [], true), decision: l.decision } : l)));
+  /** แตกแถวบิลออกเป็นหลายแถว ตามรอบ (เก่าก่อน) — ยอด ¥ แบ่งตามจำนวน แถวสุดท้ายเก็บเศษ ให้รวมเท่าเดิม */
+  const splitRow = (billId: string, idx: number, rounds: PoGroup[]) => setLines(billId, (ls) => {
+    const l = ls[idx]; const q = Number(l.qty) || 0;
+    const parts = splitAcrossRounds(q, rounds);
+    if (parts.length < 2) return ls;
+    const total = l.amount ?? q * (l.unit_price ?? 0);
+    let acc = 0;
+    const rows = parts.map((p, k) => {
+      const r = rounds.find((x) => x.key === p.key)!;
+      const amt = k === parts.length - 1 ? Math.round((total - acc) * 100) / 100 : Math.round(p.qty * (l.unit_price ?? 0) * 100) / 100;
+      acc += amt;
+      const row = applyGroupToLine({ ...l, qty: p.qty, amount: amt, voucher_line_ids: [], sku_pick: null, move_po: null }, r, groups, [], true);
+      return { ...row, decision: l.decision, warns: [...row.warns, `แบ่งจากแถวเดิม ${n2(q)} → รอบ ${r.po_no}`] };
+    });
+    return [...ls.slice(0, idx), ...rows, ...ls.slice(idx + 1)];
+  });
 
   const load = useCallback(async () => {
     try {
@@ -352,6 +371,31 @@ export function SellerBillPanel({ voucherId, readonly, onApplied, bare = false }
                                 {l.reasons.map((r) => <span key={r} className={CHIP_OK}>{r}</span>)}
                                 {l.warns.map((w) => <span key={w} className={CHIP_WARN}>{w}</span>)}
                               </div>
+                              {/* ลงใบสั่งซื้อรอบไหน — สินค้าเดียวกันค้างหลายรอบ (เก่าก่อน) · กดเปลี่ยนรอบได้เลย / บิลมากกว่าที่ค้างรอบนี้ = แบ่งหลายรอบ */}
+                              {!l.move_po && (() => {
+                                const rounds = roundsOf(g, groups);
+                                if (rounds.length < 2) return null;
+                                const q = Number(l.qty) || 0;
+                                const canSplit = !ro && !(l.voucher_line_ids?.length) && q > g.remaining + 1e-9 && rounds.some((r) => r.key !== g.key && r.remaining > 0);
+                                return (
+                                  <div className="mt-1.5">
+                                    <div className="text-[11px] text-slate-500 mb-1">ลงใบสั่งซื้อรอบไหน · {rounds.length} รอบ (เก่าก่อน)</div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {rounds.map((r) => (
+                                        <button key={r.key} type="button" disabled={ro || r.key === g.key} onClick={() => pickRound(b.id, i, r)}
+                                          title={`${r.po_no} · สั่ง ${r.order_date ? formatDate(r.order_date) : "—"} · ค้าง ${n2(r.remaining)} ${r.uom ?? ""}`}
+                                          className={`h-7 px-2 text-[11px] rounded-md border ${r.key === g.key ? "border-orange-400 bg-orange-50 text-orange-800 font-medium" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"} disabled:cursor-default`}>
+                                          {r.key === g.key ? "● " : "○ "}{r.po_no.replace(/^PO-\d{4}-/, "PO-")} · {r.order_date ? formatDate(r.order_date) : "—"} · ค้าง {n2(r.remaining)}
+                                        </button>
+                                      ))}
+                                      {canSplit && (
+                                        <button type="button" onClick={() => splitRow(b.id, i, rounds)} title={`บิล ${n2(q)} มากกว่าที่ค้างรอบนี้ ${n2(g.remaining)} — แตกแถวลงหลายรอบ เก่าก่อน`}
+                                          className="h-7 px-2 text-[11px] rounded-md border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100">แบ่งหลายรอบ (เก่าก่อน)</button>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              })()}
                               {/* บิลลงน้อยกว่าที่ค้าง → ลดจำนวนใน PO ตามบิล หรือคงไว้รอส่วนที่เหลือ (ค่าเริ่ม) */}
                               {shortfallOf(l, g) > 0 && l.decision !== "skip" && (
                                 <div className="flex items-center gap-1.5 flex-wrap mt-1.5 text-[11px]">

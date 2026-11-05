@@ -158,3 +158,38 @@ describe("บิลร้านจีน — แบ่งจำนวน / ต�
     expect(undecidedCount(ls)).toBe(1);
   });
 });
+
+describe("บิลร้านจีน — เลือกรอบใบสั่งซื้อ (สินค้าเดียวกันค้างหลายรอบ) · 2026-11-05", () => {
+  // ของจริงร้านด้าย: ด้ายเบอร์30 #813 ค้าง 2 รอบ (PO-00132 สั่ง 14 ต.ค. ค้าง 5 · PO-00197 สั่ง 3 พ.ย. ค้าง 5)
+  const r1 = G({ po_no: "PO-2026-00132", code: "THREAD-30#813", item_name: "ด้ายเทียนนอก เบอร์ 30 #813", unit_price: 3.5, remaining: 5, order_date: "2026-10-14" });
+  const r2 = G({ po_no: "PO-2026-00197", code: "THREAD-30#813", item_name: "ด้ายเทียนนอก เบอร์ 30 #813", unit_price: 3.5, remaining: 5, order_date: "2026-11-03" });
+  const other = G({ po_no: "PO-2026-00155", code: "THREAD-30#616", item_name: "ด้ายเทียนนอก เบอร์30 #616 สีแดงส้ม", unit_price: 3.5, remaining: 10 });
+  const gs = [r2, other, r1];
+  it("รอบของสินค้าเดียวกัน เรียงเก่าก่อน (ไม่รวมสินค้าอื่น)", async () => {
+    const { roundsOf } = await import("@/lib/seller-bill-match");
+    expect(roundsOf(r2, gs).map((g) => g.po_no)).toEqual(["PO-2026-00132", "PO-2026-00197"]);
+    expect(roundsOf(other, gs).map((g) => g.po_no)).toEqual(["PO-2026-00155"]);
+  });
+  it("แบ่งจำนวนบิลลงหลายรอบ เก่าก่อน · เกินที่ค้างรวม ใส่รอบสุดท้าย", async () => {
+    const { splitAcrossRounds } = await import("@/lib/seller-bill-match");
+    expect(splitAcrossRounds(8, [r1, r2])).toEqual([{ key: r1.key, po_no: "PO-2026-00132", qty: 5 }, { key: r2.key, po_no: "PO-2026-00197", qty: 3 }]);
+    expect(splitAcrossRounds(12, [r1, r2]).map((x) => x.qty)).toEqual([5, 7]);
+    expect(splitAcrossRounds(4, [r1, r2]).map((x) => x.qty)).toEqual([4]);
+  });
+  it("บิลมีสินค้าเดียวกัน 2 แถว → แถวที่ 2 แยกไปอีกรอบ (เดิมลงรอบเดียวกัน + ซ้ำกับแถวที่ 1)", () => {
+    const lines = [
+      L({ name_cn: "线 30 813", qty: 5, unit_price: 3.5, ai_pick: r1.key }),
+      L({ name_cn: "线 30 813", qty: 5, unit_price: 3.5, ai_pick: r1.key }),
+    ];
+    const out = matchBillLines(lines, gs, []);
+    expect(out[0].match_key).toBe(r1.key);
+    expect(out[1].match_key).toBe(r2.key);
+    expect(out[1].warns.join(" ")).toContain("แยกไปรอบ PO-2026-00197");
+  });
+  it("รอบเดิมยังรับไหว / ไม่มีรอบอื่น → คงไว้ + เตือนซ้ำ", () => {
+    const big = { ...r1, remaining: 20 };
+    const out = matchBillLines([L({ name_cn: "a", qty: 5, unit_price: 3.5, ai_pick: big.key }), L({ name_cn: "a", qty: 5, unit_price: 3.5, ai_pick: big.key })], [big], []);
+    expect(out[1].match_key).toBe(big.key);
+    expect(out[1].warns.join(" ")).toContain("ซ้ำกับแถวที่ 1");
+  });
+});

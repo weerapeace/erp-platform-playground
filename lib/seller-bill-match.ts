@@ -247,16 +247,55 @@ export function matchBillLines(lines: SellerBillLine[], groups: PoGroup[], alias
     }
     return applyGroupToLine(line, best?.g ?? null, groups, aliases);
   });
-  // แถวที่จับกลุ่มเดียวกันซ้ำ → เตือน (ยังยอมให้ ถ้าบิลแยกบรรทัดจริง)
+  // แถวที่จับกลุ่มเดียวกันซ้ำ (บิลมีสินค้าเดียวกันหลายแถว) → ★ 2026-11-05 เจ้าของขอ: แจกไปคนละรอบ (PO) เก่าก่อน
+  //   ถ้ารอบเดิมยังรับจำนวนของแถวนี้ได้ หรือไม่มีรอบอื่นที่ยังค้าง → คงไว้ + เตือน "ซ้ำกับแถวที่ N" (บิลแยกบรรทัดจริงก็มี)
   const seen = new Map<string, number>();
+  const used = new Map<string, number>();   // จำนวนที่แถวก่อนหน้าใช้ไปต่อกลุ่ม
+  const byKey = new Map(groups.map((g) => [g.key, g]));
   return out.map((l, i) => {
     if (!l.match_key) return l;
+    const g = byKey.get(l.match_key);
+    const q = Number(l.qty) || 0;
     const first = seen.get(l.match_key);
-    if (first == null) { seen.set(l.match_key, i); return l; }
+    if (first == null || !g) { seen.set(l.match_key, i); used.set(l.match_key, (used.get(l.match_key) ?? 0) + q); return l; }
+    const left = g.remaining - (used.get(g.key) ?? 0);
+    const next = !l.decision && !l.manual && left < q - 1e-9
+      ? roundsOf(g, groups).find((x) => x.key !== g.key && x.remaining - (used.get(x.key) ?? 0) > 1e-9)
+      : undefined;
+    if (next) {
+      seen.set(next.key, seen.get(next.key) ?? i);
+      used.set(next.key, (used.get(next.key) ?? 0) + q);
+      const moved = applyGroupToLine(l, next, groups, aliases);
+      return { ...moved, level: moved.level === "ok" ? "mid" : moved.level, warns: [...moved.warns, `สินค้าซ้ำในบิล → แยกไปรอบ ${next.po_no}`] };
+    }
+    used.set(g.key, (used.get(g.key) ?? 0) + q);
     return { ...l, level: l.level === "ok" ? "mid" : l.level, warns: [...l.warns, `ซ้ำกับแถวที่ ${first + 1}`] };
   });
 }
 const tieBreak = (a: PoGroup, b: PoGroup) => (b.remaining > 0 ? 1 : 0) - (a.remaining > 0 ? 1 : 0) || s(a.order_date).localeCompare(s(b.order_date));
+const byOldest = (a: PoGroup, b: PoGroup) => s(a.order_date).localeCompare(s(b.order_date)) || s(a.po_no).localeCompare(s(b.po_no));
+
+/**
+ * รอบ (ใบสั่งซื้อ) ทั้งหมดของสินค้าเดียวกับกลุ่มนี้ในร้าน — เรียงเก่าก่อน · รวมกลุ่มตัวเอง + รอบอื่นที่ยังค้าง
+ * ★ 2026-11-05 เจ้าของถาม "มันจับคู่ใบสั่งรอบไหน ถ้ามีหลายรอบล่ะ" → แผงบิลร้านโชว์ปุ่มรอบให้เลือกในแถว (ข้อมูลจริง: 121/370 สินค้าค้างหลายรอบ มากสุด 6)
+ */
+export function roundsOf(g: PoGroup, groups: PoGroup[]): PoGroup[] {
+  return groups.filter((x) => x.key === g.key || (sameItem(x, g) && x.remaining > 0 && !x.partner_id)).sort(byOldest);
+}
+
+/** แบ่งจำนวนในบิลลงหลายรอบ — เก่าก่อน ตามที่ค้าง · เกินที่ค้างรวม = ใส่รอบสุดท้าย · รอบที่ไม่ได้อะไร = ไม่คืน */
+export function splitAcrossRounds(qty: number, rounds: PoGroup[]): { key: string; po_no: string; qty: number }[] {
+  const out: { key: string; po_no: string; qty: number }[] = [];
+  let left = round(qty);
+  const open = rounds.filter((r) => r.remaining > 0);
+  for (const [i, r] of open.entries()) {
+    if (left <= 1e-9) break;
+    const take = i === open.length - 1 ? left : Math.min(left, r.remaining);
+    if (take > 1e-9) out.push({ key: r.key, po_no: r.po_no, qty: round(take) });
+    left = round(left - take);
+  }
+  return out;
+}
 
 /** แบ่งจำนวนในบิลลงบรรทัด PO ย่อยของกลุ่ม — ใบสั่งผลิตเก่าก่อน (ตามลำดับบรรทัด) · เกินที่ค้าง = ใส่บรรทัดสุดท้าย */
 export function distributeQty(qty: number, lines: PoGroupLine[]): { id: string; qty: number }[] {
