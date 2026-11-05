@@ -60,7 +60,26 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
   const addFiles = (list: File[]) => setFiles((cur) => [...cur, ...list.filter((f) => f.size > 0 && !cur.some((c) => c.name === f.name && c.size === f.size))]);
   const drop = useFileDrop((fs) => addFiles(fs), { disabled: saving, onBusy: () => toast.info(t("รอให้บันทึกเสร็จก่อน", "Wait for saving to finish")) });
 
+  // ชื่องานภาษาอังกฤษ — แปลเองเมื่อออกจากช่องชื่อไทย / เลือกรุ่นสินค้า · แก้เองแล้ว = ไม่ทับ
+  const [titleEn, setTitleEn] = useState("");
+  const [titleEnEdited, setTitleEnEdited] = useState(false);
+  const [titleTranslating, setTitleTranslating] = useState(false);
+  const lastTitleRef = useRef("");
+  const translateTitle = async (th: string, force = false): Promise<string> => {
+    const s = th.trim();
+    if (!s || (!force && (titleEnEdited || s === lastTitleRef.current))) return titleEn;
+    lastTitleRef.current = s;
+    setTitleTranslating(true);
+    try {
+      const [en] = await translateContent([s], "en");
+      if (en) { setTitleEn(en); setTitleEnEdited(false); }
+      return en || titleEn;
+    } catch { return titleEn; }
+    finally { setTitleTranslating(false); }
+  };
+
   const translate = async (): Promise<string> => {
+    if (title.trim() && !titleEnEdited) void translateTitle(title);
     if (!descTh.trim()) return "";
     setTranslating(true);
     try {
@@ -83,14 +102,13 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
     setSaving(true);
     try {
       const en = descEn.trim() || (await translate());   // ยังไม่ได้แปล → แปลให้ก่อนบันทึก (ไม่มีรายละเอียด = ไม่แปล)
-      // ชื่องานภาษาอังกฤษ (โหมด English) — แปลไม่ได้ = ว่าง (โชว์ชื่อไทยแทน) ไม่ขวางการเปิดตั๋ว
-      let titleEn = "";
-      try { titleEn = (await translateContent([title.trim()], "en"))[0] ?? ""; } catch { /* ใช้ชื่อไทย */ }
+      // ชื่องานภาษาอังกฤษ — ใช้ที่ช่อง English (แก้เองได้) · ว่าง = แปลให้ตอนบันทึก · แปลไม่ได้ = ว่าง (โชว์ชื่อไทยแทน) ไม่ขวางการเปิดตั๋ว
+      const titleEnOut = titleEn.trim() || (await translateTitle(title, true)).trim();
       const res = await apiFetch("/api/pattern-tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type_key: typeKey, title: title.trim(), title_en: titleEn,
+          type_key: typeKey, title: title.trim(), title_en: titleEnOut,
           sku_code: sku?.code ?? null, parent_sku_id: sku?.id ?? null,
           description_th: descTh.trim(), description_en: en, en_edited: enEdited,
           priority: urgent ? "urgent" : "normal", due_date: due || null,
@@ -169,13 +187,26 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
         <section className="grid gap-3 sm:grid-cols-2">
           <div>
             <Label>{t("ชื่องาน", "Title")} *</Label>
-            <input value={title} onChange={(e) => { setTitle(e.target.value); setErrors((x) => ({ ...x, title: "" })); }} placeholder={t("กระเป๋าหนังทรงกล่อง หน้าเลเซอร์โลโก้", "Box bag — laser logo front panel")}
+            <input value={title} onChange={(e) => { setTitle(e.target.value); setErrors((x) => ({ ...x, title: "" })); }} onBlur={() => void translateTitle(title)}
+              placeholder={t("กระเป๋าหนังทรงกล่อง หน้าเลเซอร์โลโก้", "Box bag — laser logo front panel")}
               className="h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400" />
             {errors.title && <Err>{errors.title}</Err>}
+            {/* ชื่องาน English — แปลอัตโนมัติ แก้เองได้ (โหมด English โชว์ชื่อนี้) */}
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-xs font-medium text-slate-600">English</span>
+              <span className="text-[11px] text-slate-400">{titleTranslating ? t("กำลังแปล…", "Translating…") : titleEnEdited ? t("แก้เองแล้ว", "edited") : t("แปลอัตโนมัติ", "auto")}</span>
+              {titleEnEdited && title.trim() && (
+                <button type="button" onClick={() => void translateTitle(title, true)} disabled={titleTranslating}
+                  className="ml-auto inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline disabled:opacity-50"><Icon name="ai" /> {t("แปลใหม่", "Re-translate")}</button>
+              )}
+            </div>
+            <input value={titleEn} onChange={(e) => { setTitleEn(e.target.value); setTitleEnEdited(true); }}
+              placeholder={t("แปลให้เมื่อพิมพ์ชื่อไทยเสร็จ — หรือพิมพ์เอง", "Translated after you type the Thai title — or type your own")}
+              className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm outline-none focus:border-blue-400 focus:bg-white" />
           </div>
           <div>
             <Label>{t("รุ่นสินค้า (ถ้ามี)", "Product model (optional)")}</Label>
-            <ParentSkuPicker value={sku} onChange={(v) => { setSku(v); if (v && !title.trim()) setTitle(v.name); }} disableCreate />
+            <ParentSkuPicker value={sku} onChange={(v) => { setSku(v); if (v && !title.trim()) { setTitle(v.name); void translateTitle(v.name); } }} disableCreate />
           </div>
         </section>
 

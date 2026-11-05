@@ -315,7 +315,19 @@ function EditTicketModal({ tk, onClose, onSave }: { tk: TicketDetail["data"]; on
   const [urgent, setUrgent] = useState(tk.priority === "urgent");
   const [saving, setSaving] = useState(false);
   const [translating, setTranslating] = useState(false);
-  const dirty = title !== tk.title || th !== tk.description_th || en !== tk.description_en || due !== (tk.due_date ?? "") || urgent !== (tk.priority === "urgent");
+  // ชื่องาน English — เห็น/แก้ได้ · แก้ชื่อไทยแล้วยังไม่แตะช่องนี้ = แปลใหม่ให้ตอนออกจากช่องชื่อไทย
+  const [titleEn, setTitleEn] = useState(tk.title_en ?? "");
+  const [titleEnTouched, setTitleEnTouched] = useState(false);
+  const [titleTranslating, setTitleTranslating] = useState(false);
+  const retitle = async (force = false): Promise<string> => {
+    const s = title.trim();
+    if (!s || (!force && (titleEnTouched || (s === tk.title && titleEn.trim())))) return titleEn;
+    setTitleTranslating(true);
+    try { const [x] = await translateContent([s], "en"); if (x) { setTitleEn(x); return x; } return titleEn; }
+    catch { return titleEn; }
+    finally { setTitleTranslating(false); }
+  };
+  const dirty = title !== tk.title || titleEn !== (tk.title_en ?? "") || th !== tk.description_th || en !== tk.description_en || due !== (tk.due_date ?? "") || urgent !== (tk.priority === "urgent");
 
   const translate = async () => {
     setTranslating(true);
@@ -331,12 +343,10 @@ function EditTicketModal({ tk, onClose, onSave }: { tk: TicketDetail["data"]; on
     if (th !== tk.description_th && !enEdited && th.trim()) {
       try { const [x] = await translateContent([th], "en"); if (x) enOut = x; } catch { /* ใช้คำแปลเดิม */ }
     }
-    // แก้ชื่องาน (หรือยังไม่เคยมีชื่ออังกฤษ) → แปลชื่ออังกฤษใหม่ให้ (โหมด English)
-    let titleEn: string | undefined;
-    if (title.trim() !== tk.title || !tk.title_en) {
-      try { titleEn = (await translateContent([title.trim()], "en"))[0] || undefined; } catch { /* ใช้ชื่อเดิม */ }
-    }
-    await onSave({ title: title.trim(), ...(titleEn ? { title_en: titleEn } : {}), description_th: th, description_en: enOut, en_edited: enEdited, due_date: due || null, priority: urgent ? "urgent" : "normal" });
+    // ชื่องาน English: ที่ช่อง English (แก้เองได้) · ช่องว่าง หรือแก้ชื่อไทยแต่ไม่ได้แตะช่องอังกฤษ = แปลใหม่ให้
+    let titleEnOut = titleEn.trim();
+    if (!titleEnOut || (!titleEnTouched && title.trim() !== tk.title && titleEn === (tk.title_en ?? ""))) titleEnOut = (await retitle(true)).trim();
+    await onSave({ title: title.trim(), ...(titleEnOut ? { title_en: titleEnOut } : {}), description_th: th, description_en: enOut, en_edited: enEdited, due_date: due || null, priority: urgent ? "urgent" : "normal" });
     setSaving(false);
   };
 
@@ -349,9 +359,16 @@ function EditTicketModal({ tk, onClose, onSave }: { tk: TicketDetail["data"]; on
         </div>
       }>
       <div className="flex flex-col gap-3 p-1">
-        <label className="text-xs font-medium text-slate-600">{t("ชื่องาน", "Title")}
-          <input value={title} onChange={(e) => setTitle(e.target.value)} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal outline-none focus:border-blue-400" />
-        </label>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <label className="text-xs font-medium text-slate-600">{t("ชื่องาน", "Title")}
+            <input value={title} onChange={(e) => setTitle(e.target.value)} onBlur={() => void retitle()} className="mt-1 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal outline-none focus:border-blue-400" />
+          </label>
+          <label className="text-xs font-medium text-slate-600">{t("ชื่องาน English", "Title (English)")}
+            <span className="ml-1 font-normal text-slate-400">{titleTranslating ? t("กำลังแปล…", "Translating…") : titleEnTouched ? t("แก้เองแล้ว", "edited") : t("แปลอัตโนมัติ", "auto")}</span>
+            <input value={titleEn} onChange={(e) => { setTitleEn(e.target.value); setTitleEnTouched(true); }}
+              className="mt-1 h-9 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm font-normal outline-none focus:border-blue-400 focus:bg-white" />
+          </label>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <label className="text-xs font-medium text-slate-600">{t("รายละเอียด (ไทย)", "Details (Thai)")}
             <textarea value={th} onChange={(e) => setTh(e.target.value)} rows={7} className="mt-1 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-normal outline-none focus:border-blue-400" />
