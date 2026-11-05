@@ -64,8 +64,46 @@ function Sec({ title, children }: { title: string; children: React.ReactNode }) 
   );
 }
 
-export function MoStatusModal({ moId, onClose, onChanged, checklist = true }: {
+/** รายการขอซื้อ/สั่งซื้อวัตถุดิบของใบ — นับตามขั้น (กติกากลาง lib/pr-progress ตัวเดียวกับหน้าประวัติขอซื้อ) · full = ไม่จำกัดความสูง + ชิปเฉพาะขั้นที่มี */
+function PurchaseList({ items, full = false }: { items: MoStatus["purchases"]; full?: boolean }) {
+  return (
+    <>
+      <div className="mb-1.5 flex flex-wrap gap-1">
+        {PR_STAGE_STEPS.map((st) => {
+          const c = items.filter((p) => p.stage === st).length;
+          if (full && !c) return null;
+          return (
+            <span key={st} className={`rounded-full px-2 py-0.5 text-[10px] ${c ? (st === "received" ? "bg-emerald-100 text-emerald-700" : st === "ordered" || st === "receiving" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-800") : "bg-slate-50 text-slate-300"}`}>
+              {PR_STAGE_LABEL[st]} {c}
+            </span>
+          );
+        })}
+      </div>
+      <div className={`space-y-1 ${full ? "" : "max-h-48 overflow-y-auto"}`}>
+        {items.map((p, i) => (
+          <div key={i} className={`text-xs border rounded-lg px-2 py-1.5 ${PU_TONE[p.tone] ?? "border-slate-100"}`}>
+            <div className="flex items-center gap-2">
+              <span className="flex-1 min-w-0 truncate">{p.is_urgent && <span className="text-rose-600">⚡ </span>}{p.item_name}</span>
+              <span className="shrink-0 font-medium">{p.label}</span>
+            </div>
+            {(p.po_no || p.seller_name || p.pr_no) && (
+              <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] opacity-75">
+                <span className="tabular-nums">{fmt(p.qty)}{p.uom ? ` ${p.uom}` : ""}</span>
+                {p.seller_name && <span>ร้าน {p.seller_name}</span>}
+                {p.po_no ? <span className="font-mono">{p.po_no}</span> : p.pr_no ? <span className="font-mono">{p.pr_no}</span> : null}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+export function MoStatusModal({ moId, onClose, onChanged, checklist = true, view = "full" }: {
   moId: string; onClose: () => void;
+  /** "purchases" = โชว์แค่รายการสั่งซื้อวัตถุดิบ (บอร์ดจ่ายงาน — เจ้าของ "เอาแค่ โชว์รายการสั่งซื้อ") · "full" = สถานะเต็ม */
+  view?: "full" | "purchases";
   /** เรียกเมื่อกลับจากเช็กลิสต์ / ใบถูกลบ — ให้หน้าแม่โหลดข้อมูลใหม่ */
   onChanged?: () => void;
   /** false = ซ่อนปุ่มเปิดเช็กลิสต์ (หน้าที่ให้ดูสถานะอย่างเดียว) */
@@ -115,7 +153,9 @@ export function MoStatusModal({ moId, onClose, onChanged, checklist = true }: {
   }, [page, backToStatus, onChanged, onClose]);
 
   const name = d ? (d.product_sku ?? d.mo_no) : "";
+  const onlyPu = view === "purchases";
   const title = page === "checklist" ? `📋 เช็กลิสต์เตรียม/ตัด · ${d?.mo_no ?? name}`
+    : onlyPu ? (d ? `รายการสั่งซื้อ · ${name}` : "รายการสั่งซื้อ")
     : d ? `📊 สถานะ · ${name}` : "📊 สถานะงาน";
 
   return (
@@ -140,7 +180,17 @@ export function MoStatusModal({ moId, onClose, onChanged, checklist = true }: {
         <div className="space-y-2">{Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-12 bg-slate-50 rounded-lg animate-pulse" />)}</div>
       ) : err ? (
         <div className="text-sm text-red-600 py-6 text-center">{err}</div>
-      ) : !d ? null : (
+      ) : !d ? null : onlyPu ? (
+        <div className="space-y-3">
+          <div>
+            <div className="text-sm font-semibold text-slate-800">{d.product_name || d.product_sku || "—"}</div>
+            <div className="font-mono text-[11px] text-slate-400">{d.product_sku} · {d.mo_no} · {fmt(d.qty)} ชิ้น</div>
+          </div>
+          {d.purchases.length === 0
+            ? <p className="text-sm text-slate-500 text-center py-6">ใบนี้ยังไม่มีรายการขอซื้อวัตถุดิบ</p>
+            : <PurchaseList items={d.purchases} full />}
+        </div>
+      ) : (
         <div className="space-y-3">
           {/* หัว: ชื่อสินค้า + ใบสั่งผลิต */}
           <div>
@@ -202,34 +252,7 @@ export function MoStatusModal({ moId, onClose, onChanged, checklist = true }: {
 
           {d.purchases.length > 0 && (
             <Sec title={`ขอซื้อวัตถุดิบ — ถึงไหนแล้ว (${d.purchases.length})`}>
-              {/* นับตามขั้น (กติกากลาง lib/pr-progress — ตัวเดียวกับหน้าประวัติขอซื้อ) */}
-              <div className="mb-1.5 flex flex-wrap gap-1">
-                {PR_STAGE_STEPS.map((st) => {
-                  const c = d.purchases.filter((p) => p.stage === st).length;
-                  return (
-                    <span key={st} className={`rounded-full px-2 py-0.5 text-[10px] ${c ? (st === "received" ? "bg-emerald-100 text-emerald-700" : st === "ordered" || st === "receiving" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-800") : "bg-slate-50 text-slate-300"}`}>
-                      {PR_STAGE_LABEL[st]} {c}
-                    </span>
-                  );
-                })}
-              </div>
-              <div className="max-h-48 overflow-y-auto space-y-1">
-                {d.purchases.map((p, i) => (
-                  <div key={i} className={`text-xs border rounded-lg px-2 py-1.5 ${PU_TONE[p.tone] ?? "border-slate-100"}`}>
-                    <div className="flex items-center gap-2">
-                      <span className="flex-1 min-w-0 truncate">{p.is_urgent && <span className="text-rose-600">⚡ </span>}{p.item_name}</span>
-                      <span className="shrink-0 font-medium">{p.label}</span>
-                    </div>
-                    {(p.po_no || p.seller_name || p.pr_no) && (
-                      <div className="mt-0.5 flex flex-wrap gap-x-2 text-[10px] opacity-75">
-                        <span className="tabular-nums">{fmt(p.qty)}{p.uom ? ` ${p.uom}` : ""}</span>
-                        {p.seller_name && <span>ร้าน {p.seller_name}</span>}
-                        {p.po_no ? <span className="font-mono">{p.po_no}</span> : p.pr_no ? <span className="font-mono">{p.pr_no}</span> : null}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <PurchaseList items={d.purchases} />
             </Sec>
           )}
 
