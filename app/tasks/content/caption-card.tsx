@@ -17,6 +17,7 @@ import { captionLimitCheck, PLATFORM_LIMITS } from "@/lib/caption-template";
 import { useT } from "@/components/i18n";
 import { type ToastVariant } from "@/components/toast";
 import { RowMenu } from "./content-ui";
+import { postFormatOptions } from "@/lib/social-publish/capabilities";
 
 // ช่องกรอก hashtag พร้อม typeahead (กรองจากคลัง + เพิ่มใหม่เข้าคลังได้)
 export function HashtagInput({ value, onChange, brandId, platform, pushToast }: { value: string | null; onChange: (v: string) => void; brandId: string | null; platform: string; pushToast: (type: ToastVariant, m: string) => void }) {
@@ -153,23 +154,8 @@ export function CaptionToolbar({ actions, pinned, onSavePinned }: {
 
 // รูปแบบโพสต์ที่แต่ละแพลตฟอร์มมีให้เลือก (ไม่เลือก = ให้ระบบเดาจากสื่อที่เลือก: วิดีโอ→วิดีโอ, หลายรูป→อัลบั้ม)
 // ใช้ทั้งบอกคนโพสต์มือ และคุมตอนยิงอัตโนมัติ
-export const POST_FORMATS: Record<string, { key: string; th: string; en: string }[]> = {
-  instagram: [
-    { key: "single", th: "โพสต์รูปเดียว", en: "Single post" },
-    { key: "carousel", th: "อัลบั้มหลายรูป", en: "Carousel" },
-    { key: "reels", th: "Reels (วิดีโอ)", en: "Reels" },
-    { key: "story", th: "Story (24 ชม.)", en: "Story" },
-  ],
-  facebook: [
-    { key: "single", th: "โพสต์รูปเดียว", en: "Single post" },
-    { key: "carousel", th: "อัลบั้มหลายรูป", en: "Album" },
-    { key: "video", th: "วิดีโอ", en: "Video" },
-    { key: "reels", th: "Reels (วิดีโอแนวตั้ง)", en: "Reels" },
-    { key: "story", th: "Story (24 ชม.)", en: "Story" },
-  ],
-  tiktok: [{ key: "video", th: "วิดีโอ", en: "Video" }, { key: "carousel", th: "โพสต์รูปภาพ", en: "Photo post" }],
-  youtube: [{ key: "video", th: "วิดีโอปกติ", en: "Video" }, { key: "reels", th: "Shorts", en: "Shorts" }],
-};
+// รายการมาจากทะเบียนกลาง lib/social-publish/capabilities (แก้ที่นั่นที่เดียว — หน้าบัญชีแพลตฟอร์มใช้ตัวเดียวกัน)
+export const POST_FORMATS = postFormatOptions();
 
 export function postFormatLabel(platform: string, key: string | undefined, t: (th: string, en: string) => string): string {
   const f = (POST_FORMATS[platform] ?? []).find((x) => x.key === key);

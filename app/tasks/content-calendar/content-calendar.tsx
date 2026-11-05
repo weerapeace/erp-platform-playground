@@ -267,6 +267,8 @@ export function ContentCalendarView() {
   const [taskCreateOpen, setTaskCreateOpen] = useState(false);
   const [massOpen, setMassOpen] = useState(false);   // ป๊อปวางแผนแบบ Mass
   const [queueOpen, setQueueOpen] = useState(false); // 📤 ป๊อปภาพรวมคิวโพสต์อัตโนมัติ
+  // ?queue=1 = เปิดป๊อปคิวโพสต์ทันที (ลิงก์จากหน้าบัญชีแพลตฟอร์ม › ภาพรวม 30 วัน)
+  useEffect(() => { try { if (new URLSearchParams(window.location.search).get("queue") === "1") setQueueOpen(true); } catch { /* noop */ } }, []);
   const [createDate, setCreateDate] = useState<string | null>(null);   // วันตั้งโพสต์ prefill (จากช่องที่คลิก)
   const [createPreset, setCreatePreset] = useState<ContentCreatePreset | null>(null);   // ค่าตั้งต้นฟอร์ม (โหมด Story)
   // 📖 โหมด Story: แถบเล็กใต้ทุกวันบอกว่า "ทำ Story ของวันนี้รึยัง" (เจ้าของลง Story ทุกวัน) — จำค่าไว้ในเครื่อง

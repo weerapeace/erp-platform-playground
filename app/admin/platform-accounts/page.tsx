@@ -14,11 +14,14 @@ import { AppAccessGate } from "@/components/app-access-gate";
 import { PlatformIcon } from "@/components/platform-icon";
 import { ToggleSwitch } from "@/components/toggle-switch";
 import { Icon } from "@/components/icon";
+import { capsOf } from "@/lib/social-publish/capabilities";
+import { formatDateTime } from "@/lib/date";
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string; color: string | null };
 type Account = { label: string | null; external_shop_id: string | null; is_active: boolean };
 type Msg = { text: string; bad?: boolean } | null;
+type PostStat = { posted30: number; queued: number; failed: number; next_run_at: string | null; last_posted_at: string | null };
 
 // แพลตฟอร์มที่ระบบเชื่อมบัญชีได้จริง (OAuth / API Key) — ขึ้นกลุ่มบนสุด
 const AUTO_CODES = ["facebook", "instagram", "lazada", "line_shopping"];
@@ -257,6 +260,7 @@ export default function PlatformAccountsPage() {
   const [testMsg, setTestMsg] = useState<Msg>(null);
   const [guideFor, setGuideFor] = useState<string | null>(null);   // ป๊อปวิธีตั้ง: code แพลตฟอร์ม · "line_key" = วิธีขอ API Key ของ LINE SHOPPING
   const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<Record<string, PostStat>>({});   // ภาพรวมการโพสต์ 30 วัน ต่อ code แพลตฟอร์ม
   const [loadedFor, setLoadedFor] = useState("");   // ข้อมูลบนจอเป็นของแบรนด์ไหน (กันใช้ข้อมูลแบรนด์เก่าตอนสลับ)
   const autoTried = useRef<Set<string>>(new Set());   // แบรนด์ที่ลองเติมชื่อร้านจากการเชื่อมต่อแล้ว (ครั้งเดียวต่อการเปิดหน้า)
   const [msg, setMsg] = useState<Msg>(null);
@@ -285,12 +289,14 @@ export default function PlatformAccountsPage() {
   const load = useCallback(async (bid: string) => {
     setLoading(true);
     try {
-      const [j, kj, mj, lj] = await Promise.all([
+      const [j, kj, mj, lj, sj] = await Promise.all([
         apiFetch(`/api/platform-accounts${bid ? `?brand_id=${encodeURIComponent(bid)}` : ""}`).then((r) => r.json()),
         bid ? apiFetch(`/api/platform-credentials?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve({ keys: {} }),
         bid ? apiFetch(`/api/meta/status?brand_id=${encodeURIComponent(bid)}&check=1`).then((r) => r.json()) : Promise.resolve(null),   // check=1 = ลองกับ Meta จริงว่ายังใช้ได้
         bid ? apiFetch(`/api/lazada/status?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()) : Promise.resolve(null),
+        bid ? apiFetch(`/api/social-publish/stats?brand_id=${encodeURIComponent(bid)}`).then((r) => r.json()).catch(() => null) : Promise.resolve(null),   // ภาพรวมโหลดไม่ได้ ไม่ให้ทั้งหน้าพัง
       ]);
+      setStats(((sj as { stats?: Record<string, PostStat> } | null)?.stats ?? {}));
       setPlatforms((j.platforms ?? []) as Platform[]);
       setBrands((j.brands ?? []) as Brand[]);
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
@@ -577,6 +583,69 @@ export default function PlatformAccountsPage() {
     return null;
   };
 
+  // ── โพสต์ได้แบบไหน / ระบบทำอะไรได้ + ข้อควรรู้ + ภาพรวม 30 วัน (ข้อมูลจากทะเบียนกลาง lib/social-publish/capabilities) ──
+  const capsSections = (p: Platform, st: { tone: Tone }): ReactNode => {
+    const caps = capsOf(p.code);
+    const ps = stats[p.code];
+    const showStats = caps?.kind === "social" || !!ps;
+    if (!caps && !showStats) return null;
+    const live = st.tone === "ok" || st.tone === "warn";   // เชื่อมต่อแล้ว (ระบบทำงานแทนได้จริง)
+    const allManual = !!caps && caps.formats.length > 0 && caps.formats.every((x) => x.mode === "manual");
+    const capDesc = caps?.kind === "shop" ? "สิ่งที่ระบบทำกับร้านนี้ได้"
+      : allManual ? "ระบบเตรียมแคปชั่นให้ แล้วกดโพสต์ในแอปเอง"
+      : live ? "ระบบโพสต์ให้เองจากหน้าคอนเทนต์ หรือตั้งคิวตามเวลาได้" : "เชื่อมต่อก่อน แล้วระบบจะโพสต์แบบเหล่านี้ให้เอง";
+    const s: PostStat = ps ?? { posted30: 0, queued: 0, failed: 0, next_run_at: null, last_posted_at: null };
+    const metric = (label: string, value: ReactNode, sub?: string, bad?: boolean) => (
+      <div className="rounded-xl bg-slate-50 px-3 py-2.5 min-w-0">
+        <p className="text-[11px] text-slate-500">{label}</p>
+        <p className={`mt-0.5 text-lg font-semibold leading-tight truncate ${bad ? "text-rose-600" : "text-slate-900"}`}>{value}</p>
+        {sub && <p className="text-[11px] text-slate-400 truncate">{sub}</p>}
+      </div>
+    );
+    return (
+      <>
+        {caps && caps.formats.length > 0 && (
+          <Section title={caps.kind === "shop" ? "ระบบทำอะไรได้" : "โพสต์ได้แบบไหน"} desc={capDesc}>
+            <div className="grid gap-2 grid-cols-[repeat(auto-fill,minmax(8.5rem,1fr))]">
+              {caps.formats.map((x) => {
+                const tag = x.mode === "manual" ? { t: "กดเอง", c: "bg-slate-100 text-slate-500" }
+                  : live ? { t: "อัตโนมัติ", c: "bg-emerald-50 text-emerald-700" } : { t: "เมื่อเชื่อมต่อ", c: "bg-slate-100 text-slate-500" };
+                return (
+                  <div key={x.key} className="rounded-xl border border-slate-200 px-3 py-2.5 min-w-0">
+                    <Icon name={x.icon} className="text-slate-500" />
+                    <p className="mt-1 text-sm font-medium text-slate-900 truncate">{x.thShort}</p>
+                    <p className="text-[11px] text-slate-500 truncate" title={x.spec}>{x.spec}</p>
+                    <span className={`mt-1.5 inline-block text-[10.5px] rounded-md px-1.5 py-0.5 ${tag.c}`}>{tag.t}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Section>
+        )}
+
+        {caps && caps.tips.length > 0 && (
+          <Section title="ข้อควรรู้">
+            <ul className="space-y-1.5">
+              {caps.tips.map((tip, i) => <li key={i} className="flex gap-2 text-[13px] text-slate-600"><Icon name="done" className="mt-0.5 shrink-0 text-slate-400" /><span>{tip}</span></li>)}
+            </ul>
+          </Section>
+        )}
+
+        {showStats && (
+          <Section title="ภาพรวม 30 วัน" desc="นับจากคอนเทนต์ของแบรนด์นี้ (ทั้งโพสต์อัตโนมัติและที่ติ๊กว่าโพสต์แล้วเอง)">
+            <div className="grid gap-2 grid-cols-2 sm:grid-cols-4">
+              {metric("โพสต์แล้ว", s.posted30)}
+              {metric("รอในคิว", s.queued, s.next_run_at ? `ถัดไป ${formatDateTime(s.next_run_at)}` : undefined)}
+              {metric("ล้ม รอแก้", s.failed, undefined, s.failed > 0)}
+              {metric("ล่าสุด", s.last_posted_at ? <span className="text-sm">{formatDateTime(s.last_posted_at)}</span> : "—")}
+            </div>
+            <a href="/tasks/content-calendar?queue=1" className="mt-3 inline-flex items-center gap-1 text-xs text-slate-600 hover:text-slate-900 hover:underline">เปิดคิวโพสต์ในปฏิทินคอนเทนต์<Icon name="open" /></a>
+          </Section>
+        )}
+      </>
+    );
+  };
+
   const listItem = (p: Platform) => {
     const st = statusOf(p); const acc = accOf(p); const on = p.id === sel;
     return (
@@ -709,6 +778,8 @@ export default function PlatformAccountsPage() {
                       {conn}
                     </Section>
                   )}
+
+                  {capsSections(cur, st)}
                 </div>
               </>
             );

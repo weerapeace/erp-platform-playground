@@ -9,17 +9,13 @@ import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useT } from "@/components/i18n";
 import { useCreativeOptions, createOption } from "../use-options";
+import { postFormatOptions } from "@/lib/social-publish/capabilities";
 
 export type BrandPlatformMap = Record<string, string[]>;
 export type BrandFormatMap = Record<string, Record<string, string>>;   // brand → platform → รูปแบบโพสต์
 
-// รูปแบบที่แต่ละแพลตฟอร์มมีให้เลือก (ต้องตรงกับ POST_FORMATS ในหน้าคอนเทนต์)
-export const FORMATS: Record<string, { key: string; th: string; en: string }[]> = {
-  instagram: [{ key: "single", th: "รูปเดียว", en: "Single" }, { key: "carousel", th: "อัลบั้ม", en: "Carousel" }, { key: "reels", th: "Reels", en: "Reels" }, { key: "story", th: "Story", en: "Story" }],
-  facebook: [{ key: "single", th: "รูปเดียว", en: "Single" }, { key: "carousel", th: "อัลบั้ม", en: "Album" }, { key: "video", th: "วิดีโอ", en: "Video" }, { key: "reels", th: "Reels", en: "Reels" }, { key: "story", th: "Story", en: "Story" }],
-  tiktok: [{ key: "video", th: "วิดีโอ", en: "Video" }, { key: "carousel", th: "โพสต์รูป", en: "Photo" }],
-  youtube: [{ key: "video", th: "วิดีโอ", en: "Video" }, { key: "reels", th: "Shorts", en: "Shorts" }],
-};
+// รูปแบบที่แต่ละแพลตฟอร์มมีให้เลือก (ชื่อสั้น) — ทะเบียนกลางเดียวกับ POST_FORMATS ในหน้าคอนเทนต์
+export const FORMATS = postFormatOptions(true);
 
 export async function getBrandPlatforms(): Promise<{ map: BrandPlatformMap; formats: BrandFormatMap }> {
   try {
