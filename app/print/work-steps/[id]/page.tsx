@@ -5,16 +5,21 @@
  *   • มีขั้นตอนในสูตร → "📋 รายการขั้นตอน" เรียงลำดับ + ช่องผู้ทำ/วันที่/✓
  *   • ไม่มี (หรือ ?blank=1) → "▦ ตารางติ๊ก" (เจ้าของขอ 2026-09-04): แถว = ชิ้นส่วน · คอลัมน์ = ประเภทงาน (ทับ/เย็บตรง/…)
  *       ให้เอาไปถามช่างแล้วติ๊กได้เลย · แถวเติมจากบล็อกตัดของใบให้ (แก้ได้) · คอลัมน์แก้ได้และจำไว้ทั้งระบบ
+ *   • ?mode=worklog → "📝 ใบจดผลงาน" (2026-11-05) ให้หัวหน้าจด ชื่อ/วันที่/เริ่ม-เลิก/ทำได้/เสีย ต่อขั้นตอน
+ *       ออกแบบให้ถ่ายรูปแล้ว AI อ่านง่าย (กล่องตัวเลข · QR ทุกหน้า · จุดมุม) — ตัวสร้างอยู่ lib/work-log-sheet.ts
  *   ใช้ PrintFrame + printReportFrameOrWindow ของกลาง (เหมือนใบสั่งงาน)
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import QRCode from "qrcode";
 import { PrintFrame, printReportFrameOrWindow } from "@/components/report";
+import { usePrintLog } from "@/components/report/use-print-log";
 import { apiFetch } from "@/lib/api";
 import { docFileName } from "@/lib/print-filename";
 import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 import type { WorkStep } from "@/app/api/bom/work-steps/route";
+import { planWorkLogPages, renderWorkLogHtml, normalizeWorkLogOptions, WORK_LOG_DEFAULTS, type WorkLogOptions } from "@/lib/work-log-sheet";
 
 type MoHead = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; due_date: string | null; note: string | null; image: string | null };
 type Piece = { label: string; sub: string; qty: string };
@@ -227,8 +232,15 @@ export default function PrintWorkStepsPage() {
   const [mo, setMo] = useState<MoHead | null>(null);
   const [steps, setSteps] = useState<WorkStep[]>([]);
   // โหมดพิมพ์: steps = รายการขั้นตอนจากสูตร · grid = ตารางติ๊ก · perpiece = แยกตามชิ้น + ประกอบรวม
-  const [mode, setMode] = useState<"steps" | "grid" | "perpiece">(sp.get("mode") === "perpiece" ? "perpiece" : sp.get("blank") === "1" ? "grid" : "steps");
-  const grid = mode !== "steps";
+  const [mode, setMode] = useState<"steps" | "grid" | "perpiece" | "worklog">(
+    sp.get("mode") === "worklog" ? "worklog" : sp.get("mode") === "perpiece" ? "perpiece" : sp.get("blank") === "1" ? "grid" : "steps");
+  const grid = mode === "grid" || mode === "perpiece";
+  // 📝 ใบจดผลงาน: บรรทัดต่อขั้นตอน + บรรทัดขั้นตอนเพิ่ม (จำไว้ในเครื่องนี้) · QR ทำแบบ async ต่อหน้า
+  const [wlOpts, setWlOpts] = useState<WorkLogOptions>(() => {
+    try { return normalizeWorkLogOptions(JSON.parse(localStorage.getItem("wl-print-opts") ?? "null")); } catch { return WORK_LOG_DEFAULTS; }
+  });
+  useEffect(() => { try { localStorage.setItem("wl-print-opts", JSON.stringify(wlOpts)); } catch { /* ignore */ } }, [wlOpts]);
+  const [wlQr, setWlQr] = useState<{ key: string; svgs: (string | null)[] }>({ key: "", svgs: [] });
   const setGrid = (v: boolean) => setMode(v ? "grid" : "steps");
   const [cols, setCols] = useState<string[]>([]);
   const [colsText, setColsText] = useState("");
@@ -274,7 +286,7 @@ export default function PrintWorkStepsPage() {
         setOps((cj?.ops ?? []) as string[]); setPieceOps((cj?.piece_ops ?? []) as string[]);
         // ชิ้นส่วนที่เคยบันทึกไว้ของสินค้านี้ → เติมให้ · ไม่มี = ว่าง (พิมพ์ช่องว่างให้เขียนเอง)
         setPiecesText(((cj?.pieces ?? []) as string[]).join("\n"));
-        if (st.length === 0 && sp.get("blank") !== "0" && sp.get("mode") !== "perpiece") setMode("grid");
+        if (st.length === 0 && sp.get("blank") !== "0" && sp.get("mode") !== "perpiece" && sp.get("mode") !== "worklog") setMode("grid");
       } catch { if (on) setError("โหลดข้อมูลไม่สำเร็จ"); }
       finally { if (on) setLoading(false); }
     })();
@@ -289,14 +301,29 @@ export default function PrintWorkStepsPage() {
   }), [piecesText]);
   const liveCols = useMemo(() => colsText.split("\n").map((x) => x.trim()).filter(Boolean), [colsText]);
 
+  // 📝 ใบจดผลงาน — แบ่งหน้าก่อน (รู้ข้อความ QR ต่อหน้า) แล้วค่อยวาด QR แบบ async
+  const wlPages = useMemo(() => (mo && mode === "worklog" ? planWorkLogPages(mo, steps, wlOpts) : []), [mo, mode, steps, wlOpts]);
+  const wlKey = wlPages.map((p) => p.qrText).join("\n");
+  useEffect(() => {
+    if (!wlKey) return;
+    let on = true;
+    void Promise.all(wlKey.split("\n").map((t) => QRCode.toString(t, { type: "svg", margin: 0, errorCorrectionLevel: "M" }).catch(() => null)))
+      .then((svgs) => { if (on) setWlQr({ key: wlKey, svgs }); });
+    return () => { on = false; };
+  }, [wlKey]);
+
   const html = useMemo(() => {
     if (!mo) return "";
     const useCols = liveCols.length ? liveCols : cols;
+    if (mode === "worklog") return renderWorkLogHtml(mo, wlPages, wlQr.key === wlKey ? wlQr.svgs : [], { title: docFileName("ใบจดผลงาน", mo.mo_no) });
     if (mode === "perpiece") return buildPerPieceHtml(mo, pieces.map((p) => p.label), useCols, ppRows, asmRows, rowMm);
     if (mode === "grid") return buildGridHtml(mo, pieces, useCols, rowCount, rowMm);
     return buildStepsHtml(mo, steps);
-  }, [mo, mode, pieces, liveCols, cols, steps, rowCount, rowMm, ppRows, asmRows]);
-  const fileName = docFileName(mode === "perpiece" ? "ขั้นตอนการผลิต แยกชิ้น" : mode === "grid" ? "ตารางขั้นตอนการผลิต" : "ขั้นตอนงาน", mo?.mo_no);
+  }, [mo, mode, pieces, liveCols, cols, steps, rowCount, rowMm, ppRows, asmRows, wlPages, wlQr, wlKey]);
+  const fileName = docFileName(mode === "worklog" ? "ใบจดผลงาน" : mode === "perpiece" ? "ขั้นตอนการผลิต แยกชิ้น" : mode === "grid" ? "ตารางขั้นตอนการผลิต" : "ขั้นตอนงาน", mo?.mo_no);
+  // 🖨 ประวัติการพิมพ์ — นับเฉพาะใบจดผลงาน (เฟสถัดไปใช้รู้ว่าใบไหนถูกแจกไปแล้ว)
+  const wlLogItems = useMemo(() => (mo && mode === "worklog" ? [{ doc_id: mo.id, doc_no: mo.mo_no, qty: mo.qty }] : []), [mo, mode]);
+  usePrintLog("work_log", wlLogItems);
 
   const put = async (body: Record<string, unknown>) => {
     const res = await apiFetch("/api/bom/work-steps/columns", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -341,7 +368,26 @@ export default function PrintWorkStepsPage() {
             className={`px-3 h-8 rounded-md text-sm ${mode === "steps" ? "bg-slate-800 text-white" : "text-slate-600"} disabled:opacity-40`}>📋 รายการขั้นตอน ({steps.length})</button>
           <button onClick={() => setMode("grid")} className={`px-3 h-8 rounded-md text-sm ${mode === "grid" ? "bg-slate-800 text-white" : "text-slate-600"}`}>▦ ตารางติ๊ก (ชิ้น × ประเภทงาน)</button>
           <button onClick={() => setMode("perpiece")} className={`px-3 h-8 rounded-md text-sm ${mode === "perpiece" ? "bg-slate-800 text-white" : "text-slate-600"}`}>▤ แยกตามชิ้น + ประกอบรวม</button>
+          <button onClick={() => setMode("worklog")} title="ใบให้หัวหน้าจด ชื่อ/เวลา/ทำได้/เสีย ต่อขั้นตอน — ถ่ายรูปส่งเข้าระบบได้ (เฟสถัดไป)"
+            className={`px-3 h-8 rounded-md text-sm ${mode === "worklog" ? "bg-slate-800 text-white" : "text-slate-600"}`}>📝 ใบจดผลงาน</button>
         </div>
+        {mode === "worklog" && (
+          <div className="flex items-center gap-3 text-sm text-slate-600">
+            <label className="flex items-center gap-1.5">บรรทัดต่อขั้นตอน
+              <select value={wlOpts.linesPerStep} onChange={(e) => setWlOpts((o) => normalizeWorkLogOptions({ ...o, linesPerStep: Number(e.target.value) }))}
+                className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                {[1, 2, 3, 4, 5, 6].map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </label>
+            <label className="flex items-center gap-1.5">บรรทัดขั้นตอนเพิ่ม
+              <select value={wlOpts.extraRows} onChange={(e) => setWlOpts((o) => normalizeWorkLogOptions({ ...o, extraRows: Number(e.target.value) }))}
+                className="h-8 px-2 text-sm border border-slate-200 rounded-lg bg-white">
+                {[0, 2, 4, 6, 8, 10, 15, 20].map((v) => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </label>
+            {wlPages.length > 0 && <span className="text-[12px] text-slate-400">{steps.length} ขั้นตอน · {wlPages.length} หน้า</span>}
+          </div>
+        )}
         {grid && <button onClick={() => setEditOpen((v) => !v)} className={`h-9 rounded-lg border px-4 text-sm ${editOpen ? "bg-slate-800 text-white border-slate-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>✎ แก้รายการ</button>}
         <div className="flex-1" />
         <button onClick={() => printReportFrameOrWindow(fileName)} className="h-9 rounded-lg border border-slate-200 bg-white px-4 text-sm text-slate-600 hover:bg-slate-50">🖨️ พิมพ์</button>

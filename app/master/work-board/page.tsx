@@ -2161,10 +2161,17 @@ function WorkBoardPageInner() {
       <ERPModal open={stepsPrintAsk} onClose={() => setStepsPrintAsk(false)} size="sm" title="🪜 พิมพ์ขั้นตอนงาน"
         footer={<button onClick={() => setStepsPrintAsk(false)} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ยกเลิก</button>}>
         <div className="grid grid-cols-1 gap-2">
+          {(clSteps?.length ?? 0) > 0 && (
           <button type="button" onClick={() => { if (checklistMO) window.open(`/print/work-steps/${checklistMO.id}`, "_blank"); setStepsPrintAsk(false); }}
             className="text-left rounded-lg border border-blue-200 bg-blue-50/40 hover:bg-blue-50 px-4 py-3">
             <div className="text-sm font-semibold text-slate-800">📋 พิมพ์ขั้นตอน ({clSteps?.length ?? 0} ขั้น)</div>
             <div className="text-[11px] text-slate-500 mt-0.5">ขั้นตอนจากสูตรของสินค้า + ช่องผู้ทำ/วันที่/✓ ให้ช่างติ๊ก</div>
+          </button>
+          )}
+          <button type="button" onClick={() => { if (checklistMO) window.open(`/print/work-steps/${checklistMO.id}?mode=worklog`, "_blank"); setStepsPrintAsk(false); }}
+            className="text-left rounded-lg border border-slate-200 hover:bg-slate-50 px-4 py-3">
+            <div className="text-sm font-semibold text-slate-800">📝 ใบจดผลงาน (ให้หัวหน้าจด)</div>
+            <div className="text-[11px] text-slate-500 mt-0.5">แต่ละขั้นตอนมีบรรทัดให้จด ชื่อ · วันที่ · เริ่ม-เลิก · ทำได้ · เสีย — ช่องตัวเลขแยกกล่อง พร้อม QR สำหรับถ่ายรูปส่งเข้าระบบ</div>
           </button>
           <button type="button" onClick={() => { if (checklistMO) window.open(`/print/work-steps/${checklistMO.id}?blank=1`, "_blank"); setStepsPrintAsk(false); }}
             className="text-left rounded-lg border border-slate-200 hover:bg-slate-50 px-4 py-3">
@@ -2193,8 +2200,8 @@ function WorkBoardPageInner() {
             ? <span className="mr-auto flex gap-1"><button onClick={() => deleteMO(checklistMO)} className="h-9 px-3 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700">ยืนยันลบงานนี้</button><button onClick={() => setDelArmed(false)} className="h-9 px-3 text-sm border border-slate-200 rounded-lg">ยกเลิก</button></span>
             : <button onClick={() => setDelArmed(true)} className="h-9 px-4 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 mr-auto">🗑 ลบงาน</button>)}
           {checklistMO && (
-            <button type="button" title="พิมพ์รายการขั้นตอนงานให้ช่าง — ถ้าสินค้ายังไม่มีขั้นตอนในสูตร จะพิมพ์ตารางติ๊ก (ชิ้นส่วน × ประเภทงาน) ให้เอาไปถามช่าง"
-              onClick={() => { if (clSteps && clSteps.length > 0) setStepsPrintAsk(true); else window.open(`/print/work-steps/${checklistMO.id}${clSteps ? "?blank=1" : ""}`, "_blank"); }}
+            <button type="button" title="พิมพ์รายการขั้นตอนงาน / ตารางติ๊ก / ใบจดผลงาน ให้ช่างหรือหัวหน้า"
+              onClick={() => setStepsPrintAsk(true)}
               className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🪜 พิมพ์ขั้นตอนงาน</button>
           )}
           {checklistMO && <a href={`/print/work-order/${checklistMO.id}`} target="_blank" rel="noreferrer" className="h-9 px-4 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">🖨 พิมพ์ใบสั่งงาน</a>}

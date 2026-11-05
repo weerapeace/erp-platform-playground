@@ -8,7 +8,8 @@
 
 /** เอกสารที่บันทึกการพิมพ์ได้ — เพิ่มชนิดใหม่ที่นี่ที่เดียว */
 // piecework = แถวงานเหมา (mo_piecework.id) จากใบจ่ายงานเหมา · sale_line = บรรทัดใบขาย (erp_playground_so_lines.id) จากใบสรุปจับคู่ใบขาย → ใบงาน
-export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line"] as const;
+// work_log = ใบจดผลงานตามใบงาน (doc_id = manufacturing_orders.id) จาก /print/work-steps/<id>?mode=worklog
+export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line", "work_log"] as const;
 export type PrintDocType = (typeof PRINT_DOC_TYPES)[number];
 
 /** พิมพ์แบบไหน: print = กดพิมพ์ / Ctrl+P / บันทึก PDF จากหน้าต่างพิมพ์ · pdf = โหลด/เปิดไฟล์ PDF · link = เปิดไฟล์พิมพ์ในแท็บใหม่ / ส่งลิงก์ */
