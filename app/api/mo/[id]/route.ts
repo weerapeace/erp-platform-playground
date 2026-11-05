@@ -91,9 +91,26 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     rows.map((r) => ({ ...r, image_url: matImages[String(r.component_sku ?? "").trim()] ?? null }));
 
   const issues = await issuesP;
+
+  // ใบสั่งขายที่ผูก → ลูกค้า · เลข PO ลูกค้า · วันส่งลูกค้า (รายการก่อน ไม่มีค่อยใช้หัวใบ) — โชว์บนหัวใบสั่งผลิต
+  let so_order: { id: string; order_no: string | null; status: string; customer_name: string | null; customer_po_no: string | null; due_date: string | null } | null = null;
+  const soId = (header as { so_order_id?: string | null }).so_order_id;
+  if (soId) {
+    const admin = supabaseAdmin();
+    const [{ data: so }, { data: ln }] = await Promise.all([
+      admin.from("so_orders").select("id, order_no, status, customer_name, customer_po_no, due_date").eq("id", soId).maybeSingle(),
+      admin.from("so_order_lines").select("due_date, mo_id, sku").eq("order_id", soId),
+    ]);
+    if (so) {
+      const lines = (ln ?? []) as { due_date: string | null; mo_id: string | null; sku: string | null }[];
+      const line = lines.find((l) => l.mo_id === id) ?? lines.find((l) => l.sku === productSku);
+      const s = so as { id: string; order_no: string | null; status: string; customer_name: string | null; customer_po_no: string | null; due_date: string | null };
+      so_order = { ...s, due_date: line?.due_date || s.due_date || null };
+    }
+  }
   return NextResponse.json({ data: {
     ...header, materials: withImage(materials ?? []), summary: withImage(summary ?? []), requested, product_image,
-    work_orders: woRes.data ?? [], qty_from, qty_change_reason, split_from,
+    work_orders: woRes.data ?? [], qty_from, qty_change_reason, split_from, so_order,
     ...(issues ? { issues } : {}),
   }, error: null });
 }

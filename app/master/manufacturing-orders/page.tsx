@@ -53,6 +53,8 @@ type FormState = {
   requested: Record<string, number>;  // วัตถุดิบ(รหัส) → จำนวนที่ขอซื้อไปแล้ว (จากใบขอซื้อที่ผูก MO นี้)
   sizes: { label: string; sort?: number }[];   // กลุ่ม C: ไซส์ที่สูตรนี้รองรับ (ถ้ามี)
   size_qty: Record<string, number>;            // กลุ่ม C: จำนวนต่อไซส์ของใบนี้
+  /** ใบสั่งขายที่ผูก (อ่านอย่างเดียว) — ลูกค้า · PO ลูกค้า · วันส่งลูกค้า */
+  so?: { id: string; order_no: string | null; customer_name: string | null; customer_po_no: string | null; due_date: string | null } | null;
 };
 const empty = (): FormState => ({ id: null, mo_no: "", product_sku: "", product_name: "", product_image: null, qty: 1, due_date: "", bom_code: null, bom_version: null, bom_id: null, status: "draft", fabric_calc_mode: "lay", note: "", materials: [], summary: [], requested: {}, sizes: [], size_qty: {} });
 
@@ -259,6 +261,7 @@ export default function MoWorkspacePage() {
         fabric_calc_mode: d.fabric_calc_mode === "classic" ? "classic" : "lay",
         requested: (d.requested ?? {}) as Record<string, number>,
         sizes: [], size_qty: {},   // เติมจาก BOM ด้านล่าง (เมื่อเจอ cur)
+        so: (d.so_order as FormState["so"]) ?? null,
       });
       // เวอร์ชั่น BOM (โหลดขนานมาแล้วด้านบน)
       const vers = (vj.data ?? []) as Version[]; setVersions(vers);
@@ -547,6 +550,19 @@ export default function MoWorkspacePage() {
         {loadingForm ? <div className="py-12 text-center text-slate-400">กำลังโหลด...</div> : form && (
           <div className="space-y-2">
             {formErr && <div className="px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700">⚠ {formErr}</div>}
+
+            {/* ใบสั่งขายที่ผูก (กติกา lib/mo-so-rule — แบรนด์ลูกค้าต้องมี) */}
+            {form.so && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-1.5 bg-indigo-50/60 border border-indigo-100 rounded-lg text-xs text-slate-600">
+                <span>ใบสั่งขาย <a href={`/sales/orders?open=${form.so.id}`} target="_blank" rel="noopener" className="font-mono font-medium text-indigo-700 hover:underline">{form.so.order_no ?? "—"}</a></span>
+                {form.so.customer_name && <span className="min-w-0 truncate max-w-[22rem]" title={form.so.customer_name}>ลูกค้า {form.so.customer_name}</span>}
+                {form.so.customer_po_no && <span>PO <b className="font-medium text-slate-800">{form.so.customer_po_no}</b></span>}
+                {form.so.due_date && <span>ส่งลูกค้า <b className="font-medium text-indigo-700">{new Date(form.so.due_date.slice(0, 10) + "T00:00:00").toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "2-digit" })}</b></span>}
+                {form.so.due_date && form.due_date && form.due_date.slice(0, 10) > form.so.due_date.slice(0, 10) && (
+                  <span className="text-rose-700">⚠ กำหนดส่งใบผลิตเลยวันส่งลูกค้า</span>
+                )}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-2">
               <div>

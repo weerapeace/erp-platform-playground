@@ -7,7 +7,9 @@
  *   ตาราง mo_sales_links · API /api/mo/sales-match · ใช้ที่หน้าอัปเดตเป็นชุด (บอร์ดจ่ายงาน)
  */
 
-export type SaleLine = { id: string; sale_id: string; so_number: string; date: string; customer: string | null; sku: string; qty: number };
+export type SaleLine = { id: string; sale_id: string; so_number: string; date: string; customer: string | null; sku: string; qty: number;
+  /** ลูกค้าของใบขาย (partners_v2) — ใช้เตือนเมื่อผูกบิลคนละลูกค้ากับใบสั่งขายของใบผลิต */
+  customer_id?: string | null };
 export type MatchMo = { id: string; mo_no: string; sku: string; qty: number; created_at: string };
 export type SalesLinkRow = { id?: string; mo_id: string; sale_line_id: string; qty: number; so_number?: string | null; sale_date?: string | null };
 export type MatchPart = { line: SaleLine; qty: number };

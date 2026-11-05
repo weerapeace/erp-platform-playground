@@ -14,7 +14,9 @@ import { writeAudit } from "@/lib/audit";
 import { bkkDate, matchSales, type MatchMo, type SaleLine, type SalesLinkRow } from "@/lib/mo-sales-match";
 
 export type SaleLineOption = SaleLine & { left: number; linked: { mo_no: string; qty: number }[]; suggested: { mo_no: string; qty: number }[]; before: boolean };
-export type SalesDetail = { mo: { mo_no: string; sku: string; qty: number; from: string }; lines: SaleLineOption[]; mine: { sale_line_id: string; qty: number }[]; dupes: { mo_no: string; qty: number; from: string }[] };
+export type SalesDetail = { mo: { mo_no: string; sku: string; qty: number; from: string }; lines: SaleLineOption[]; mine: { sale_line_id: string; qty: number }[]; dupes: { mo_no: string; qty: number; from: string }[];
+  /** ใบสั่งขายของใบผลิตนี้ (ถ้าผูก) — หน้าเลือกบิลเตือนเมื่อบิลเป็นคนละลูกค้า */
+  so?: { order_no: string | null; customer_id: string | null; customer_name: string | null } | null };
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +41,7 @@ async function loadFor(admin: Admin, skus: string[]) {
   const variants = [...new Set(list.flatMap((s) => [s, `${s} `]))];   // บางแถวเก็บรหัสติดช่องว่างท้าย
   const [moRes, lineRes, linkRes] = await Promise.all([
     admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, created_at, status").in("product_sku", variants).neq("status", "cancelled").limit(2000),
-    admin.from("erp_playground_so_lines").select("id, so_id, sku, qty, erp_playground_sales_orders!inner(id, so_number, status, order_date, customer_name)").in("sku", variants).limit(5000),
+    admin.from("erp_playground_so_lines").select("id, so_id, sku, qty, erp_playground_sales_orders!inner(id, so_number, status, order_date, customer_name, customer_id)").in("sku", variants).limit(5000),
     admin.from("mo_sales_links").select("id, mo_id, sale_line_id, qty, so_number, sale_date").in("sku", list).eq("is_active", true).limit(5000),
   ]);
   const mos: MatchMo[] = ((moRes.data ?? []) as Row[]).filter((m) => m.status !== "cancel")
@@ -48,7 +50,7 @@ async function loadFor(admin: Admin, skus: string[]) {
   for (const l of (lineRes.data ?? []) as Row[]) {
     const h = (Array.isArray(l.erp_playground_sales_orders) ? l.erp_playground_sales_orders[0] : l.erp_playground_sales_orders) as Row | undefined;
     if (!h || h.status === "cancelled" || h.status === "draft" || !(n(l.qty) > 0)) continue;
-    lines.push({ id: String(l.id), sale_id: String(h.id), so_number: String(h.so_number ?? "—"), date: String(h.order_date ?? "").slice(0, 10), customer: (h.customer_name as string | null) ?? null, sku: String(l.sku ?? "").trim(), qty: n(l.qty) });
+    lines.push({ id: String(l.id), sale_id: String(h.id), so_number: String(h.so_number ?? "—"), date: String(h.order_date ?? "").slice(0, 10), customer: (h.customer_name as string | null) ?? null, customer_id: (h.customer_id as string | null) ?? null, sku: String(l.sku ?? "").trim(), qty: n(l.qty) });
   }
   const links: SalesLinkRow[] = ((linkRes.data ?? []) as Row[]).map((k) => ({ id: String(k.id), mo_id: String(k.mo_id), sale_line_id: String(k.sale_line_id), qty: n(k.qty), so_number: (k.so_number as string | null) ?? null, sale_date: (k.sale_date as string | null) ?? null }));
   return { mos, lines, links };
@@ -126,8 +128,13 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
 async function detail(moNo: string): Promise<NextResponse> {
   if (!moNo.trim()) return bad("ระบุใบสั่งผลิต");
   const admin = supabaseAdmin();
-  const { data: mo } = await admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, created_at").eq("mo_no", moNo.trim()).limit(1).maybeSingle();
+  const { data: mo } = await admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, created_at, so_order_id").eq("mo_no", moNo.trim()).limit(1).maybeSingle();
   if (!mo) return bad("ไม่พบใบสั่งผลิต", 404);
+  let so: SalesDetail["so"] = null;
+  if ((mo as Row).so_order_id) {
+    const { data: s } = await admin.from("so_orders").select("order_no, customer_id, customer_name").eq("id", String((mo as Row).so_order_id)).maybeSingle();
+    if (s) so = { order_no: ((s as Row).order_no as string) ?? null, customer_id: ((s as Row).customer_id as string) ?? null, customer_name: ((s as Row).customer_name as string) ?? null };
+  }
   const m = mo as Row, sku = String(m.product_sku ?? "").trim(), from = bkkDate(String(m.created_at ?? ""));
   const ctx = await loadFor(admin, [sku]);
   const res = matchSales(ctx.mos, ctx.lines, ctx.links);
@@ -145,6 +152,6 @@ async function detail(moNo: string): Promise<NextResponse> {
   const { data: open } = await admin.from("manufacturing_orders").select("id, mo_no, qty, created_at, status").in("product_sku", [sku, sku + " "]).not("status", "in", "(done,cancel,cancelled)").limit(200);
   const dupes = ((open ?? []) as Row[]).filter((x) => x.mo_no !== m.mo_no && n(x.qty) === n(m.qty) && !linkedMo.has(String(x.id)))
     .map((x) => ({ mo_no: String(x.mo_no), qty: n(x.qty), from: bkkDate(String(x.created_at ?? "")) }));
-  const out: SalesDetail = { mo: { mo_no: String(m.mo_no), sku, qty: n(m.qty), from }, lines, mine, dupes };
+  const out: SalesDetail = { mo: { mo_no: String(m.mo_no), sku, qty: n(m.qty), from }, lines, mine, dupes, so };
   return NextResponse.json({ data: out });
 }

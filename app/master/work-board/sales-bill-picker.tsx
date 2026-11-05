@@ -6,7 +6,7 @@
  *   ติ๊ก + พิมพ์จำนวนที่ผูก (ไม่เกินที่เหลือผูกได้ และรวมไม่เกินที่ผลิต)
  *   ผูกน้อยกว่าที่ผลิต → เลือกว่าที่เหลือเป็นอย่างไร: ① เข้าคลังขาย / ② ค้างบนชั้น QC (ทำครบแล้ว)
  *     ทำได้แค่นี้: ③ ที่เหลือแยกเป็นใบใหม่รอผลิต (แนะนำ — 1 ใบ = 1 สถานะ) / ④ ที่เหลือรอผลิตในใบเดิม (ใบเดียว 2 สถานะ) / ⑤ ไม่ทำแล้ว (ลดจำนวน)
- *   ข้อมูล = GET /api/mo/sales-match?mo_no=&detail=1 · ผูกจริง/ตั้งขั้น = หน้าที่เรียก (catch-up-batch onConfirm)
+ *   ข้อมูล = GET /api/mo/sales-match?mo_no=&detail=1 (+ so = ใบสั่งขายของใบผลิต → เตือนบิลคนละลูกค้า) · ผูกจริง/ตั้งขั้น = หน้าที่เรียก (catch-up-batch onConfirm)
  */
 import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
@@ -71,6 +71,14 @@ export function SalesBillPicker({ moNo, onClose, onConfirm, canLink }: {
   const lines = data?.lines ?? [];
   const shown = lines.filter((l) => showBefore || !l.before || on[l.id]);
   const hiddenBefore = lines.filter((l) => l.before && !on[l.id]).length;
+  // บิลคนละลูกค้ากับใบสั่งขายของใบผลิต (เทียบรหัสลูกค้าก่อน ไม่มีค่อยเทียบชื่อ) — เตือน ไม่บล็อก
+  const normName = (x: string | null | undefined) => String(x ?? "").replace(/s+/g, "").toLowerCase();
+  const otherCustomer = (l: { customer: string | null; customer_id?: string | null }) => {
+    const so = data?.so; if (!so) return false;
+    if (so.customer_id && l.customer_id) return so.customer_id !== l.customer_id;
+    return !!so.customer_name && !!l.customer && normName(so.customer_name) !== normName(l.customer);
+  };
+  const pickedOther = lines.filter((l) => on[l.id] && otherCustomer(l));
   const total = r2(lines.reduce((a, l) => a + (on[l.id] ? qty[l.id] || 0 : 0), 0));
   const moQty = data?.mo.qty ?? 0;
   const left = r2(moQty - total);
@@ -124,6 +132,14 @@ export function SalesBillPicker({ moNo, onClose, onConfirm, canLink }: {
               <Icon name="warning" /> SKU เดียวกัน จำนวนเท่ากัน ยังไม่ปิดอีก {data.dupes.length} ใบ: {data.dupes.map((x) => `${x.mo_no} (เปิด ${x.from})`).join(" · ")} — อาจเปิดใบซ้ำ? ระบบเสนอใบขายให้ใบที่เปิดก่อน
             </div>
           )}
+          {data.so && (
+            <div className="text-[12px] text-slate-500">ใบสั่งขาย <b className="font-mono text-slate-700">{data.so.order_no ?? "—"}</b>{data.so.customer_name ? ` · ลูกค้า ${data.so.customer_name}` : ""}</div>
+          )}
+          {pickedOther.length > 0 && (
+            <div className="rounded-lg bg-rose-50 px-3 py-2 text-[12px] text-rose-800">
+              <Icon name="warning" /> บิลที่ติ๊ก {pickedOther.map((l) => l.so_number).join(", ")} เป็นคนละลูกค้ากับใบสั่งขาย {data.so?.order_no} — เช็กให้แน่ใจว่าไม่ได้ผูกผิดใบ (คนละสาขาของลูกค้าเดียวกันก็ขึ้นเตือนนี้)
+            </div>
+          )}
           {!lines.length ? <div className="rounded-lg border border-dashed border-slate-300 py-8 text-center text-[13px] text-slate-500">ยังไม่มีใบขายของ {data.mo.sku} (ไม่นับร่าง/ยกเลิก)</div> : (
             <div className="overflow-x-auto rounded-lg border border-slate-200">
               <table className="w-full border-collapse text-[13px]">
@@ -144,7 +160,8 @@ export function SalesBillPicker({ moNo, onClose, onConfirm, canLink }: {
                           {sug.length > 0 && <div className="text-[11px] text-indigo-600">ระบบเสนอให้ {sug.map((x) => x.mo_no).join(", ")} (ยังไม่ผูก) — เลือกให้ใบนี้ได้</div>}
                           {l.before && <div className="text-[11px] text-amber-700">ใบขายก่อนวันเปิดใบ — ปกติไม่ใช่ของใบนี้</div>}
                         </td>
-                        <td className="px-2 py-2 text-[12px] text-slate-600">{l.date}{l.customer ? ` · ${l.customer}` : ""}</td>
+                        <td className="px-2 py-2 text-[12px] text-slate-600">{l.date}{l.customer ? ` · ${l.customer}` : ""}
+                          {otherCustomer(l) && <div className="text-[11px] text-rose-600">คนละลูกค้ากับใบสั่งขาย {data.so?.order_no}</div>}</td>
                         <td className="px-2 py-2 text-right tabular-nums text-slate-700">{fmt(l.qty)}</td>
                         <td className="px-2 py-2 text-right tabular-nums text-slate-700">{fmt(l.left)}</td>
                         <td className="px-2 py-2 text-right">
