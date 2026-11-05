@@ -49,7 +49,7 @@ import { CatchUpQueue } from "./catch-up-queue";
 import { CatchUpBatch } from "./catch-up-batch";
 import { SalesUpdate } from "./sales-update";
 import { PieceworkDispatch } from "./piecework-dispatch";
-import { ExecDispatchView, type SoldUnmade } from "./exec-dispatch";
+import { ExecDispatchView, type SoldUnmade, type ExecDraft } from "./exec-dispatch";
 import { remainingToDispatch } from "@/lib/mo-status";
 import { CatchUpEdit } from "./catch-up-edit";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
@@ -405,6 +405,8 @@ function WorkBoardPageInner() {
   const [dispDept, setDispDept] = useState<Dept | null>(null);
   // คิวจ่ายงานหลายใบให้โต๊ะเดียว (โหมดผู้บริหาร) — ป๊อปเดิมเปิดทีละใบ · บันทึกแล้วไปใบถัดไป · ยกเลิก = หยุดคิว
   const [dispQueue, setDispQueue] = useState<{ list: PendingMO[]; dept: Dept; i: number } | null>(null);
+  // ร่างที่เลือกในมุมมองจ่ายงาน (ที่ติ๊ก + โหมดโชว์แค่ที่เลือก) — จำไว้ตอนสลับมุมมอง · รีเฟรช/ออกจากหน้า = หาย (ref = ไม่ re-render หน้าใหญ่)
+  const execDraftRef = useRef<ExecDraft | null>(null);
   const [deskPanel, setDeskPanel] = useState(false);   // 👥 แผงจัดคนในโต๊ะ (ในป๊อปจ่ายงาน)
   const [dispQty, setDispQty] = useState(0);
   const [dispCrew, setDispCrew] = useState<string[]>([]);   // 👥 คนรับงาน (หลายคนได้ · ว่าง = ทั้งโต๊ะ/จำไม่ได้ว่าใคร)
@@ -1716,7 +1718,8 @@ function WorkBoardPageInner() {
           renderDeskManager={(d) => { const dept = board.departments.find((x) => x.id === d.id); return dept ? <DeskStaffPanel dept={dept} desks={board.departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canDispatch} onChanged={reloadAssignees} wos={board.workOrders} onDesksChanged={deskChanged} /> : null; }}
           soldUnmade={board.soldUnmade}
           onSalesCatchUp={canCatchUp ? () => { setCatchUpMode(true); setViewMode("table"); setCuBatchAsk(board.soldUnmade.map((m) => m.mo_no)); } : undefined}
-          canSetLabor={canEdit} onLaborSaved={() => void load(true)} />
+          canSetLabor={canEdit} onLaborSaved={() => void load(true)}
+          draft={execDraftRef.current} onDraft={(d) => { execDraftRef.current = d; }} />
       ) : viewMode === "labor" ? (
         <LaborSummary />
       ) : viewMode === "exec" ? (

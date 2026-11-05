@@ -7,7 +7,11 @@
  *   ข้างล่าง = แถบโต๊ะติดขอบจอ (การ์ดแนวตั้ง: ชื่อโต๊ะ · รูปงาน · ใบ/ค้าง · คน · ค่าแรง) · ชี้เมาส์ค้าง (ไม่ต้องคลิก) = รายการงานที่ทำอยู่เลื่อนขึ้น
  *     กด = แผงเต็มเลื่อนขึ้น (ค่าแรงรวมทั้งโต๊ะ ทุกคนรวมกัน · แถบ "งานในมือเทียบเงินเดือนทั้งโต๊ะ" · การ์ดงานแนวตั้ง · จัดการโต๊ะ)
  *   เงิน (มูลค่า/ยอดเป้า) นับเฉพาะ "แบรนด์ลูกค้า" (brands.pricing_mode = oem) เป็นค่าเริ่มต้น · ติ๊ก "รวมเงินแบรนด์ตัวเอง" (จำต่อคน) = นับทุกแบรนด์
- *   ขวา = แผง "สรุปเป้า" (ผู้บริหาร) เลื่อนเข้า · ล็อกได้ = ติดขวาแล้วดันการ์ดให้แคบลง · เป้าเก็บกลาง ui_config admin_wb_exec_target
+ *   ขวา = แผง "สรุปเป้า" (ผู้บริหาร) เลื่อนเข้า · ล็อกได้ = ติดจอตอนเลื่อน (ใต้แถบเมนูของแอป · measureShellTop) + ดันการ์ดให้แคบลง · เป้าเก็บกลาง ui_config admin_wb_exec_target
+ *     ติ๊กการ์ด = "ถ้าจ่ายที่ติ๊กเพิ่ม" + "ขาดอีกหลังจ่ายที่ติ๊ก" + แถบสีอ่อนต่อท้ายแถบเป้า (เจ้าของ 2026-11-05)
+ *   "โชว์แค่ที่เลือก" (เจ้าของ 2026-11-05 · แบบร่าง) = บอร์ดเหลือเฉพาะการ์ดที่ติ๊กไว้ตอนกด (ไม่สนตัวกรอง) ให้ใส่ช่างทีละใบ
+ *     ใส่ช่างแล้ว = จำนวนที่ต้องจ่ายลดลง/หายจากรอจ่าย (นับได้ทุกทาง: ลาก · ป๊อปจ่ายด่วน · ป๊อปเต็ม) → การ์ดจาง + ติ๊กถูก · ครบทุกใบ = กลับหน้าปกติเอง
+ *     ปุ่ม "กลับหน้าปกติ" ได้ทุกเมื่อ (ใบที่ยังไม่จ่ายกลับมาเป็นที่ติ๊ก) · ร่างจำในหน้าแม่ (draft/onDraft · useRef) สลับมุมมองแล้วกลับมายังอยู่ · รีเฟรช/ออกจากหน้า = หาย
  *   จ่าย = ลากการ์ดลงโต๊ะ (ติ๊กหลายใบ ลากใบไหนก็ไปทั้งชุด) หรือกดโต๊ะ → "จ่ายให้โต๊ะนี้" → ป๊อปจ่ายงานเดิมของบอร์ด (ทีละใบ)
  *     เมาส์ = ลาก HTML5 · iPad/มือถือ = กดค้างแล้วลาก (ของกลาง components/touch-drag)
  *   ลากลงโต๊ะ = ป๊อปจ่ายด่วนตามชนิดโต๊ะ (exec-quick-dispatch): ปกติ = จำนวน · ช่างเหมา = เลือกช่าง 1 คน + จำนวน · จับกลุ่ม = เลือกหลายคน + จำนวน + ค่าแรงรวมกลุ่ม
@@ -29,6 +33,7 @@ import { useMoGroups } from "@/components/mo-group-picker";
 import { MoStatusModal } from "@/components/mo-status-modal";
 import type { SoldQty } from "@/app/api/mo/sold-qty/route";
 import { MoLaborRateModal, type LaborRateMo } from "@/components/mo-labor-rate-modal";
+import { measureShellTop } from "@/components/sticky-header";
 
 export type ExecMo = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
@@ -54,6 +59,10 @@ type FieldKey = "price" | "value" | "labor" | "laborTotal" | "brand" | "name" | 
 type Period = "today" | "week" | "month";
 type Target = Partial<Record<Period, number>>;
 type Done = { count: number; qty: number; value: number; value_customer?: number; labor: number; labor_missing: number; no_price: number; no_date?: number };
+/** โหมด "โชว์แค่ที่เลือก" — snap = การ์ดตอนกด (จำนวนที่ต้องจ่ายตอนนั้น ไว้เทียบว่าใส่ช่างแล้วหรือยัง) */
+type ExecFocus = { snap: ExecMo[] };
+/** ร่างที่เลือก (ที่ติ๊ก + โหมดโชว์แค่ที่เลือก) — หน้าแม่เก็บไว้ (useRef) ให้สลับมุมมองแล้วกลับมายังอยู่ · รีเฟรช/ออกจากหน้า = หาย */
+export type ExecDraft = { sel: string[]; focus: ExecFocus | null };
 
 const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 const SIZE_MIN = 120, SIZE_MAX = 240;
@@ -93,7 +102,7 @@ const rateOfMo = (m: ExecMo) => (m.central_rate && m.central_rate > 0 ? m.centra
 /** ค่าแรง/ชิ้นของใบจ่ายงาน — ค่าแรงที่ใส่ไว้ ÷ จำนวน ไม่มี = ราคากลาง */
 const rateOfWo = (w: ExecWo) => (w.labor_cost != null && w.qty > 0 ? Number(w.labor_cost) / w.qty : w.central_rate && w.central_rate > 0 ? w.central_rate : 0);
 
-export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDispatch, showPrice, onDispatch, onQuickDispatch, onOpenMO, onOpenWO, renderDeskManager, deskWages, soldUnmade = [], onSalesCatchUp, canSetLabor = false, onLaborSaved }: {
+export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDispatch, showPrice, onDispatch, onQuickDispatch, onOpenMO, onOpenWO, renderDeskManager, deskWages, soldUnmade = [], onSalesCatchUp, canSetLabor = false, onLaborSaved, draft, onDraft }: {
   pending: ExecMo[];
   workOrders: ExecWo[];
   desks: Desk[];
@@ -117,6 +126,9 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   /** กด "ยังไม่ตั้งค่าแรง" ตั้งได้ (products.edit) · บันทึกแล้วให้หน้าแม่โหลดใหม่ */
   canSetLabor?: boolean;
   onLaborSaved?: () => void;
+  /** ร่างที่เลือกจากครั้งก่อน (หน้าแม่จำไว้) · onDraft = แจ้งหน้าแม่ทุกครั้งที่เปลี่ยน */
+  draft?: ExecDraft | null;
+  onDraft?: (d: ExecDraft) => void;
 }) {
   const toast = useToast();
   const [laborMo, setLaborMo] = useState<LaborRateMo | null>(null);   // ป๊อปตั้งค่าแรง (ของกลาง MoLaborRateModal)
@@ -158,7 +170,9 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   }, [pendingIds]);
   const [statusMo, setStatusMo] = useState<string | null>(null);   // ป๊อปสถานะวัตถุดิบ (ของกลาง MoStatusModal view="materials")
   const [fieldsOpen, setFieldsOpen] = useState(false);
-  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [sel, setSel] = useState<Set<string>>(() => new Set(draft?.sel ?? []));
+  const [focus, setFocus] = useState<ExecFocus | null>(() => draft?.focus ?? null);
+  useEffect(() => { onDraft?.({ sel: [...sel], focus }); }, [sel, focus]); // eslint-disable-line react-hooks/exhaustive-deps
   const [openDesk, setOpenDesk] = useState<string | null>(null);
   const [overDesk, setOverDesk] = useState<string | null>(null);
   const [manageDesk, setManageDesk] = useState<Desk | null>(null);
@@ -266,8 +280,32 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     return { list: [...m.values()].sort((a, b) => b.n - a.n), none };
   }, [pending, groupOf]);
   const total = list.reduce((a, m) => a + valueOf(m), 0);
-  const chosen = list.filter((m) => sel.has(m.id));
+  // โหมด "โชว์แค่ที่เลือก" — การ์ดจาก snap (ไม่สนตัวกรอง) · ใส่ช่างแล้ว = หายจากรอจ่าย หรือจำนวนที่ต้องจ่ายลดลงจากตอนกด
+  const focusCards = useMemo(() => {
+    if (!focus) return null;
+    const byId = new Map(pending.map((p) => [p.id, p]));
+    return focus.snap.map((s) => {
+      const cur = byId.get(s.id), left = cur ? Math.max(0, cur.remaining) : 0;
+      const done = left <= 0 || left < s.remaining;
+      return { m: done || !cur ? s : cur, done, left };
+    });
+  }, [focus, pending]);
+  const live = focusCards ? focusCards.filter((x) => !x.done).map((x) => x.m) : list;   // การ์ดที่ยังจ่ายได้ (ติ๊ก/ลาก/จ่ายโต๊ะนี้)
+  const cards = focusCards ?? list.map((m) => ({ m, done: false, left: m.remaining }));
+  const chosen = live.filter((m) => sel.has(m.id));
   const chosenValue = chosen.reduce((a, m) => a + valueOf(m), 0);
+  // แผงสรุปเป้า: โหมดโชว์แค่ที่เลือก = ที่เหลือในชุด · ปกติ = ที่ติ๊ก
+  const planned = focusCards ? live : chosen;
+  const plannedValue = planned.reduce((a, m) => a + valueOf(m), 0);
+  const focusDone = focusCards ? focusCards.filter((x) => x.done).length : 0;
+  const enterFocus = () => { if (!chosen.length) return; setFocus({ snap: chosen.map((m) => ({ ...m })) }); setSel(new Set()); };
+  const exitFocus = () => { setSel(new Set(live.map((m) => m.id))); setFocus(null); };
+  // ใส่ช่างครบทุกใบ → กลับหน้าปกติเอง
+  useEffect(() => {
+    if (!focusCards?.length || focusCards.some((x) => !x.done)) return;
+    setFocus(null);
+    toast.success(`ใส่ช่างครบ ${focusCards.length} ใบแล้ว — กลับหน้าปกติ`);
+  }, [focusCards]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggle = (id: string) => setSel((p) => { const n = new Set(p); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const openWos = useMemo(() => workOrders.filter((w) => w.status !== "done" && w.status !== "cancelled"), [workOrders]);
@@ -318,7 +356,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   const [quick, setQuick] = useState<{ desk: Desk; mos: ExecMo[] } | null>(null);
   const [quickSaving, setQuickSaving] = useState(false);
   const give = (desk: Desk, ids: string[]) => {
-    const mos = list.filter((m) => ids.includes(m.id));
+    const mos = live.filter((m) => ids.includes(m.id));
     if (!mos.length || !canDispatch) return;
     setQuick({ desk, mos });
   };
@@ -372,6 +410,27 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     return [...m.values()].sort((a, b) => Number(a.desk) - Number(b.desk) || b.labor - a.labor || b.ws.length - a.ws.length);
   };
   const goal = target[period] ?? 0, got = (includeOwn ? done?.value : done?.value_customer ?? done?.value) ?? 0, pct = goal > 0 ? Math.min(100, (got / goal) * 100) : 0;
+  const after = got + plannedValue, pctAfter = goal > 0 ? Math.min(100, (after / goal) * 100) : 0;
+
+  // ล็อกแผง = ติดจอตอนเลื่อน ใต้แถบเมนูของแอป (ของกลาง measureShellTop) · อยู่ในกรอบที่เลื่อนเอง (ขยายเต็มจอ) = ติดขอบกรอบ
+  const rootRef = useRef<HTMLDivElement>(null);
+  const pinned = locked && sideShown;
+  const [stickTop, setStickTop] = useState(8);
+  useEffect(() => {
+    if (!pinned) return;
+    const measure = () => {
+      let inBox = false;
+      for (let p = rootRef.current?.parentElement; p && p !== document.body; p = p.parentElement) {
+        const oy = getComputedStyle(p).overflowY;
+        if (oy === "auto" || oy === "scroll") { inBox = true; break; }
+      }
+      const t = (inBox ? 0 : measureShellTop()) + 8;
+      setStickTop((x) => (x === t ? x : t));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [pinned]);
 
   const dueBadge = (m: ExecMo) => {
     const d = daysLeft(m.internal_due_date ?? m.due_date);
@@ -381,8 +440,8 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   };
 
   return (
-    <div className="relative flex min-h-[calc(100vh-180px)] flex-col overflow-x-clip">
-      <div className="flex flex-1 flex-col transition-[margin] duration-300 ease-out" style={{ marginRight: locked && sideShown ? 296 : 0 }}>
+    <div ref={rootRef} className="relative flex min-h-[calc(100vh-180px)] flex-col overflow-x-clip">
+      <div className="flex flex-1 flex-col transition-[margin] duration-300 ease-out" style={{ marginRight: pinned ? 296 : 0 }}>
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <span className="text-base font-semibold text-slate-800">งานรอจ่าย</span>
           <span className="text-sm text-slate-500">{list.length} ใบ{showPrice && total > 0 ? ` · มูลค่า ฿${fmt(total)}${includeOwn ? "" : " (เฉพาะแบรนด์ลูกค้า)"}` : ""}</span>
@@ -424,7 +483,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           </div>
         )}
 
-        {brands.length > 1 && (
+        {!focusCards && brands.length > 1 && (
           <div className="mb-2 flex flex-wrap gap-1.5">
             <button type="button" onClick={() => setBrand("")} className={`h-7 rounded-full border px-2.5 text-[12px] ${!brand ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>ทุกแบรนด์ {brands.reduce((a, b) => a + b[1], 0)}</button>
             {brands.map(([b, n]) => (
@@ -433,7 +492,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           </div>
         )}
 
-        {groupChips.list.length > 0 && (
+        {!focusCards && groupChips.list.length > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] text-slate-400">ชุด:</span>
             <button type="button" onClick={() => setGrp("")} className={`h-7 rounded-full border px-2.5 text-[12px] ${!grp ? "border-teal-700 bg-teal-700 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>ทุกชุด</button>
@@ -459,27 +518,42 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           </div>
         )}
 
-        {chosen.length > 0 && (
-          <div className="mb-2 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-1.5 text-sm text-violet-800">
-            เลือก <b>{chosen.length}</b> ใบ{showPrice ? ` · ฿${fmt(chosenValue)}` : ""} — กดปุ่ม &ldquo;จ่ายโต๊ะนี้&rdquo; ที่ลอยบนโต๊ะด้านล่าง หรือลากการ์ดใบไหนก็ได้ลงโต๊ะ
-            <button type="button" onClick={() => setSel(new Set())} className="ml-2 text-[12px] text-violet-600 underline">ล้างที่เลือก</button>
+        {/* โหมดโชว์แค่ที่เลือก — แถบบอกความคืบหน้า + กลับหน้าปกติได้ทุกเมื่อ */}
+        {focusCards && (
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-violet-300 bg-violet-50 px-3 py-1.5 text-sm text-violet-900">
+            <Icon name="view" /> <b>โชว์แค่ที่เลือก</b>
+            <span>· ใส่ช่างแล้ว <b className="tabular-nums">{focusDone}/{focusCards.length}</b> ใบ</span>
+            <span className="text-[12px] text-violet-600">— ลากการ์ดลงโต๊ะทีละใบ หรือติ๊กแล้วกด &ldquo;จ่ายโต๊ะนี้&rdquo; · ครบแล้วกลับหน้าปกติเอง</span>
+            <div className="flex-1" />
+            <button type="button" onClick={exitFocus} className="inline-flex h-8 items-center gap-1 rounded-lg border border-violet-300 bg-white px-3 text-[12px] font-medium text-violet-700 hover:bg-violet-100"><Icon name="back" /> กลับหน้าปกติ</button>
           </div>
         )}
 
-        {!list.length ? (
+        {chosen.length > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-1.5 text-sm text-violet-800">
+            <span>เลือก <b>{chosen.length}</b> ใบ{showPrice ? ` · ฿${fmt(chosenValue)}` : ""} — กดปุ่ม &ldquo;จ่ายโต๊ะนี้&rdquo; ที่ลอยบนโต๊ะด้านล่าง หรือลากการ์ดใบไหนก็ได้ลงโต๊ะ</span>
+            {!focusCards && <button type="button" onClick={enterFocus} title="บอร์ดเหลือเฉพาะการ์ดที่เลือกไว้ ใส่ช่างทีละใบได้ง่าย (ใส่ครบแล้วกลับหน้าปกติเอง)"
+              className="inline-flex h-7 items-center gap-1 rounded-lg border border-violet-300 bg-white px-2.5 text-[12px] font-medium text-violet-700 hover:bg-violet-100"><Icon name="view" /> โชว์แค่ที่เลือก</button>}
+            <button type="button" onClick={() => setSel(new Set())} className="text-[12px] text-violet-600 underline">ล้างที่เลือก</button>
+          </div>
+        )}
+
+        {!cards.length ? (
           <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-200 py-16 text-sm text-slate-400">{q || readyOnly || brand || grp ? "ไม่พบงานตามที่ค้น / กรอง" : "ไม่มีงานรอจ่าย"}</div>
         ) : (
           <div className="grid flex-1 content-start gap-2.5 pb-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size}px, 1fr))` }}>
-            {list.map((m) => {
-              const on = sel.has(m.id), p = price.get(m.mo_no) ?? 0, rate = rateOfMo(m);
-              const g = groupOf.get(m.mo_no), sq = sold[m.id], soldN = m.sold ?? 0;
+            {cards.map(({ m, done: paid, left }) => {
+              const on = !paid && sel.has(m.id), p = price.get(m.mo_no) ?? 0, rate = rateOfMo(m);
+              const g = groupOf.get(m.mo_no), sq = sold[m.id], soldN = m.sold ?? 0, drag = canDispatch && !paid;
               return (
-                <div key={m.id} draggable={canDispatch}
+                <div key={m.id} draggable={drag}
                   onDragStart={(e) => { e.dataTransfer.setData("text/plain", m.id); e.dataTransfer.effectAllowed = "move"; }}
-                  {...(canDispatch ? td.bind(m.id, <span className="flex items-center gap-2 text-sm"><Icon name="truck" /><b className="font-mono">{m.product_sku ?? m.mo_no}</b>{sel.has(m.id) && chosen.length > 1 ? <span className="text-violet-700">+{chosen.length - 1} ใบ</span> : null}</span>) : {})}
-                  onClick={() => { if (td.justDragged()) return; toggle(m.id); }}
-                  className={`group relative cursor-pointer select-none rounded-xl border bg-white p-2 transition-shadow hover:shadow-md ${on ? "border-violet-500 ring-2 ring-violet-300" : "border-slate-200"}`}>
-                  <input type="checkbox" checked={on} readOnly className="absolute left-2 top-2 z-10 h-4 w-4 accent-violet-600" aria-label={`เลือก ${m.product_sku ?? m.mo_no}`} />
+                  {...(drag ? td.bind(m.id, <span className="flex items-center gap-2 text-sm"><Icon name="truck" /><b className="font-mono">{m.product_sku ?? m.mo_no}</b>{sel.has(m.id) && chosen.length > 1 ? <span className="text-violet-700">+{chosen.length - 1} ใบ</span> : null}</span>) : {})}
+                  onClick={() => { if (paid || td.justDragged()) return; toggle(m.id); }}
+                  className={`group relative select-none rounded-xl border bg-white p-2 transition-shadow ${paid ? "cursor-default border-emerald-200 opacity-60" : "cursor-pointer hover:shadow-md"} ${on ? "border-violet-500 ring-2 ring-violet-300" : paid ? "" : "border-slate-200"}`}>
+                  {paid
+                    ? <span className="absolute left-2 top-2 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-[12px] text-white" aria-label="ใส่ช่างแล้ว"><Icon name="done" /></span>
+                    : <input type="checkbox" checked={on} readOnly className="absolute left-2 top-2 z-10 h-4 w-4 accent-violet-600" aria-label={`เลือก ${m.product_sku ?? m.mo_no}`} />}
                   <div className="absolute right-2 top-2 z-10 flex flex-col items-end gap-1">
                     {show("due") && dueBadge(m)}
                     {(m.priority ?? 0) > 0 && <span title={m.priority_note ?? undefined} className={`rounded px-1.5 text-[11px] font-semibold ${m.priority === 2 ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{m.priority === 2 ? "เร่งด่วน" : "สำคัญ"}</span>}
@@ -499,6 +573,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                   {show("brand") && m.brand && <div className="truncate text-[11px] font-medium text-violet-600">{m.brand}</div>}
                   {show("name") && <div className="truncate text-[11px] text-slate-400">{m.product_name ?? ""}</div>}
                   <div className="mt-0.5 text-[12px] text-slate-600">จ่าย <b className="text-slate-800">{fmt(m.remaining)}</b>{m.remaining !== m.qty ? ` / ${fmt(m.qty)}` : ""} ชิ้น{show("price") && p > 0 ? ` · ฿${fmt(p)}` : ""}</div>
+                  {paid && <div className="mt-0.5 text-[12px] font-semibold text-emerald-700">ใส่ช่างแล้ว{left > 0 ? ` · เหลืออีก ${fmt(left)} ชิ้น` : ""}</div>}
                   {show("value") && p > 0 && (counted(m.mo_no)
                     ? <div className="text-sm font-bold tabular-nums text-violet-700">฿{fmt(p * m.remaining)}</div>
                     : <div className="text-[12px] tabular-nums text-slate-400" title="แบรนด์ตัวเอง — ไม่นับเข้ายอดเงิน (ติ๊ก &quot;รวมเงินแบรนด์ตัวเอง&quot; เพื่อนับ)">฿{fmt(p * m.remaining)} · ไม่นับ</div>)}
@@ -717,10 +792,11 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
       {/* แผงสรุปเป้า (ผู้บริหาร) — เลื่อนเข้าจากขวา · ล็อก = ติดขวาแล้วดันการ์ด */}
       {showPrice && (
         <aside className={`absolute bottom-0 right-0 top-0 z-30 w-[288px] border-l border-slate-200 bg-white p-4 shadow-[-8px_0_24px_rgba(15,23,42,0.06)] transition-transform duration-300 ease-out ${sideShown ? "translate-x-0" : "pointer-events-none translate-x-[105%]"}`}>
-          <div className="sticky top-2">
+          {/* ล็อก = ติดจอตอนเลื่อน (ใต้แถบเมนู) · เนื้อหายาวกว่าจอ = เลื่อนในแผง · ไม่ล็อก = ลอยทับการ์ด เลื่อนไปกับหน้า */}
+          <div className={pinned ? "sticky overflow-y-auto overscroll-contain" : ""} style={pinned ? { top: stickTop, maxHeight: `calc(100vh - ${stickTop + 8}px)` } : undefined}>
             <div className="mb-3 flex items-center gap-1.5">
               <span className="text-base font-bold text-slate-800">สรุปเป้ายอด</span>
-              <button type="button" onClick={() => { setLocked(!locked); if (locked) setSideOpen(true); }} title={locked ? "ปลดล็อก (แผงกลับมาลอยทับ)" : "ล็อกแผงไว้ (ดันการ์ดให้แคบลง ไม่บัง)"}
+              <button type="button" onClick={() => { setLocked(!locked); if (locked) setSideOpen(true); }} title={locked ? "ปลดล็อก (แผงลอยทับการ์ด · เลื่อนไปกับหน้า)" : "ล็อกแผงไว้ (ติดจอตอนเลื่อน · ดันการ์ดให้แคบลง ไม่บัง)"}
                 className={`ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border ${locked ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}><Icon name={locked ? "lock" : "unlock"} /></button>
               <button type="button" onClick={() => { setSideOpen(false); setLocked(false); }} aria-label="ปิดแผงสรุปเป้า" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"><Icon name="cancel" /></button>
             </div>
@@ -740,13 +816,23 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
             </div>
             <div className="mt-4 text-[12px] text-slate-500">จ่ายงานแล้ว{PERIODS.find((p) => p.k === period)?.label} <span className="text-slate-400">· {includeOwn ? "ทุกแบรนด์" : "เฉพาะแบรนด์ลูกค้า"}</span></div>
             <div className="bg-gradient-to-r from-violet-600 to-fuchsia-500 bg-clip-text text-3xl font-extrabold tabular-nums text-transparent">฿{fmt(got)}</div>
-            <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-100"><div className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-[width] duration-500" style={{ width: `${pct}%` }} /></div>
-            <div className="mt-1 text-[12px] text-slate-500">{goal > 0 ? `${pct.toFixed(0)}% ของเป้า ฿${fmt(goal)}` : "ยังไม่ได้ตั้งเป้า"}</div>
+            {/* แถบเป้า: เข้ม = จ่ายแล้ว · สีอ่อนต่อท้าย = ถ้าจ่ายที่ติ๊ก */}
+            <div className="relative mt-2 h-3 overflow-hidden rounded-full bg-slate-100">
+              {plannedValue > 0 && <div className="absolute inset-y-0 left-0 rounded-full bg-violet-200 transition-[width] duration-500" style={{ width: `${pctAfter}%` }} />}
+              <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-[width] duration-500" style={{ width: `${pct}%` }} />
+            </div>
+            <div className="mt-1 text-[12px] text-slate-500">{goal > 0 ? <>{pct.toFixed(0)}% ของเป้า ฿{fmt(goal)}{plannedValue > 0 && <span className="text-violet-600"> → {pctAfter.toFixed(0)}% ถ้าจ่าย{focusCards ? "ที่เหลือในชุด" : "ที่ติ๊ก"}</span>}</> : "ยังไม่ได้ตั้งเป้า"}</div>
             <div className="mt-4 space-y-1.5 border-t border-slate-100 pt-3 text-[13px]">
               <div className="flex justify-between"><span className="text-slate-500">ขาดอีก</span><b className={`tabular-nums ${goal > got ? "text-rose-600" : "text-emerald-600"}`}>{goal > 0 ? (goal > got ? `฿${fmt(goal - got)}` : "ถึงเป้าแล้ว") : "—"}</b></div>
               <div className="flex justify-between"><span className="text-slate-500">ค่าแรงของงานที่จ่าย</span><b className="tabular-nums text-slate-800">฿{fmt(done?.labor ?? 0)}</b></div>
               <div className="flex justify-between"><span className="text-slate-500">จ่ายไป</span><span className="tabular-nums text-slate-700">{fmt(done?.count ?? 0)} ใบ · {fmt(done?.qty ?? 0)} ชิ้น</span></div>
-              {chosen.length > 0 && <div className="flex justify-between"><span className="text-slate-500">ถ้าจ่ายที่ติ๊กเพิ่ม</span><b className="tabular-nums text-emerald-600">+฿{fmt(chosenValue)}{goal > 0 ? ` → ${Math.min(100, ((got + chosenValue) / goal) * 100).toFixed(0)}%` : ""}</b></div>}
+              {planned.length > 0 && <div className="flex justify-between gap-2"><span className="text-slate-500">{focusCards ? `ถ้าจ่ายที่เหลือในชุด (${planned.length} ใบ)` : "ถ้าจ่ายที่ติ๊กเพิ่ม"}</span><b className="shrink-0 tabular-nums text-emerald-600">+฿{fmt(plannedValue)}{goal > 0 ? ` → ${pctAfter.toFixed(0)}%` : ""}</b></div>}
+              {planned.length > 0 && goal > 0 && (
+                <div className="-mx-1.5 flex justify-between gap-2 rounded-md bg-rose-50 px-1.5 py-1">
+                  <span className="text-rose-700">{focusCards ? "ขาดอีกหลังจ่ายครบชุด" : "ขาดอีกหลังจ่ายที่ติ๊ก"}</span>
+                  <b className={`shrink-0 tabular-nums ${goal > after ? "text-rose-600" : "text-emerald-600"}`}>{goal > after ? `฿${fmt(goal - after)}` : `ถึงเป้าแล้ว${after > goal ? ` (เกิน ฿${fmt(after - goal)})` : ""}`}</b>
+                </div>
+              )}
               {(done?.labor_missing ?? 0) > 0 && <div className="text-[11px] text-amber-600">มี {done?.labor_missing} ใบที่ยังไม่ใส่ค่าแรง — ยอดค่าแรงยังต่ำกว่าจริง</div>}
               {(done?.no_price ?? 0) > 0 && <div className="text-[11px] text-amber-600">มี {done?.no_price} ใบที่สินค้ายังไม่ตั้งราคาขาย — ไม่ถูกนับในยอด</div>}
               {(done?.no_date ?? 0) > 0 && <div className="text-[11px] text-slate-400">{done?.no_date} ใบไม่ได้ระบุวันจ่าย — นับตามวันที่บันทึกใบ</div>}
