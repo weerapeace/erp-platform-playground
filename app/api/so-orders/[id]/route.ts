@@ -4,7 +4,9 @@
  *            + stage ต่อรายการ 0-4 (lib/so-order-stage — ตัวเดียวกับมุมมองตามชุด) + image_url (รูปปก SKU / รุ่น)
  *   PATCH  { action }
  *      save     → แก้ไขใบ (หัว + บรรทัด · คิดเงินใหม่ด้วยเครื่องคิดเงินกลาง)
- *      open_mo  { group_id? } → เปิด/ผูกใบสั่งผลิตให้ทุกบรรทัด (หรือเฉพาะชุด) · กดซ้ำได้ ไม่สร้างซ้ำ · ใบที่เปิดเข้าชุดของรายการให้เอง
+ *      open_mo  { group_id?, line_id? } → เปิด/ผูกใบสั่งผลิตให้ทุกบรรทัด (หรือเฉพาะชุด / เฉพาะรายการ) · กดซ้ำได้ ไม่สร้างซ้ำ · ใบที่เปิดเข้าชุดของรายการให้เอง
+ *      link_mo  { line_id, mo_id } → ผูกใบสั่งผลิตที่มีอยู่เข้ารายการนี้ (รหัสสินค้าต้องตรง · ใบที่ผูกใบสั่งขายอื่นแล้วผูกไม่ได้)
+ *      save     → หลังบันทึก ผูกใบสั่งผลิตที่รายการอ้างไว้ให้ด้วย (ไม่เปิดใบใหม่ — open-mo linkOnly)
  *      ship     { create_invoice } → "ส่งแล้ว" · create_invoice=true = ออกใบขาย/บิลให้เลย
  *      cancel   { reason }         → ยกเลิกใบ
  *      reopen   → กลับเป็น "ยืนยันแล้ว"
@@ -83,6 +85,10 @@ type PatchBody = {
   new_groups?: Record<string, string>;
   /** open_mo: เปิดเฉพาะรายการของชุดนี้ (ปุ่ม "เปิดใบสั่งผลิตทั้งชุด") */
   group_id?: string;
+  /** open_mo / link_mo: เฉพาะรายการนี้ (ปุ่มต่อรายการในหน้าสถานะ) */
+  line_id?: string;
+  /** link_mo: ใบสั่งผลิตที่จะผูก */
+  mo_id?: string;
 };
 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -137,14 +143,42 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const { error: lineErr } = await admin.from("so_order_lines").insert(lines.map((l, i) => lineRow(id, l, i, groups.groupOf(l))));
     if (lineErr) return NextResponse.json({ error: lineErr.message }, { status: 400 });
     const quotes = await syncQuoteConversions(admin, [...oldQuoteIds, ...quoteIds], actor);
-    await writeAudit(admin, { action: "update", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, grand_total: totals.grand_total, ...(quotes.converted.length || quotes.released.length ? { quotes } : {}) } });
-    return NextResponse.json({ ok: true, error: null });
+    // รายการที่อ้างใบสั่งผลิตไว้ (ดึงจากใบสั่งผลิต / กดผูกในตาราง) → ผูกฝั่งใบสั่งผลิตด้วย · ไม่เปิดใบใหม่
+    const linked = await openMoForOrder(admin, id, user?.id ?? null, { linkOnly: true });
+    await writeAudit(admin, { action: "update", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, grand_total: totals.grand_total, ...(linked.linked ? { linked_mo: linked.linked } : {}), ...(quotes.converted.length || quotes.released.length ? { quotes } : {}) } });
+    return NextResponse.json({ ok: true, linked: linked.linked, error: null });
   }
 
   // ── เปิด/ผูกใบสั่งผลิต ───────────────────────────────────
   if (action === "open_mo") {
-    const opened = await openMoForOrder(admin, id, user?.id ?? null, b.group_id ? { onlyGroupId: b.group_id } : undefined);
+    const opened = await openMoForOrder(admin, id, user?.id ?? null, { onlyGroupId: b.group_id || undefined, onlyLineId: b.line_id || undefined });
     return NextResponse.json({ ok: true, opened, error: null });
+  }
+
+  // ── ผูกใบสั่งผลิตที่มีอยู่เข้ารายการ (ปุ่ม "ผูกใบสั่งผลิต" ต่อรายการ) ──
+  if (action === "link_mo") {
+    if (order.status === "cancelled") return NextResponse.json({ error: "ใบที่ยกเลิกแล้ว ผูกใบสั่งผลิตไม่ได้" }, { status: 400 });
+    const lineId = String(b.line_id ?? ""), moId = String(b.mo_id ?? "");
+    if (!lineId || !moId) return NextResponse.json({ error: "ระบุรายการและใบสั่งผลิต" }, { status: 400 });
+    const [{ data: ln }, { data: mo }] = await Promise.all([
+      admin.from("so_order_lines").select("id, order_id, sku, mo_id, mo_no").eq("id", lineId).maybeSingle(),
+      admin.from("manufacturing_orders").select("id, mo_no, product_sku, so_order_id, so_order_no, is_active").eq("id", moId).maybeSingle(),
+    ]);
+    const line = ln as { id: string; order_id: string; sku: string | null; mo_id: string | null; mo_no: string | null } | null;
+    const m = mo as { id: string; mo_no: string; product_sku: string | null; so_order_id: string | null; so_order_no: string | null; is_active: boolean } | null;
+    if (!line || line.order_id !== id) return NextResponse.json({ error: "ไม่พบรายการนี้ในใบ — ปิดแล้วเปิดใบใหม่อีกครั้ง" }, { status: 400 });
+    if (line.mo_id && line.mo_id !== moId) return NextResponse.json({ error: `รายการนี้ผูก ${line.mo_no ?? "ใบสั่งผลิตอื่น"} อยู่แล้ว` }, { status: 400 });
+    if (!m || m.is_active === false) return NextResponse.json({ error: "ไม่พบใบสั่งผลิต (อาจถูกยกเลิกแล้ว)" }, { status: 400 });
+    if (m.so_order_id && m.so_order_id !== id) return NextResponse.json({ error: `ใบสั่งผลิต ${m.mo_no} ผูกใบสั่งขาย ${m.so_order_no ?? "อื่น"} อยู่แล้ว` }, { status: 400 });
+    const norm = (s: string | null) => String(s ?? "").trim().toUpperCase();
+    if (line.sku && m.product_sku && norm(line.sku) !== norm(m.product_sku)) {
+      return NextResponse.json({ error: `รหัสสินค้าไม่ตรง: รายการ ${line.sku} · ใบสั่งผลิต ${m.product_sku}` }, { status: 400 });
+    }
+    await admin.from("so_order_lines").update({ mo_id: m.id, mo_no: m.mo_no }).eq("id", lineId);
+    await openMoForOrder(admin, id, user?.id ?? null, { onlyLineId: lineId, linkOnly: true });   // ผูกฝั่งใบสั่งผลิต + สถานะ/กำหนดส่ง กติกาเดียวกับเปิดใบ
+    await writeAudit(admin, { action: "so_order.link_mo", entityType: "so_order", entityId: id, ...actor, metadata: { order_no: order.order_no, mo_no: m.mo_no, line_id: lineId, from: "line_button" } });
+    await writeAudit(admin, { action: "mo.so_link", entityType: "mo", entityId: m.id, ...actor, metadata: { mo_no: m.mo_no, so_order_no: order.order_no, line_id: lineId } });
+    return NextResponse.json({ ok: true, mo_no: m.mo_no, error: null });
   }
 
   // ── ส่งแล้ว (ออกใบขายให้เลยได้) ─────────────────────────

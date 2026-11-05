@@ -7,6 +7,7 @@
  *     ขั้นต่อรายการคิดที่ GET /api/so-orders/[id] ด้วย lib/so-order-stage (กติกาเดียวกับมุมมอง "ตามชุด")
  *   • ตารางมีรูป (รูปปก SKU ไม่มีใช้ของรุ่น · HoverImage ของกลาง) + คอลัมน์สถานะ: ขั้นงาน · ใบผลิต · เปิดผลิต x/y · ส่ง x/y
  *   • จัดกลุ่มตามรุ่นได้ (สวิตช์ — lib/so-order-view) · เตือนรายการยังไม่ผูก / เปิดผลิตขาด-เกิน / ใบผลิตไม่ตรงรายการ
+ *   • รายการที่ยังไม่มีใบผลิต: ปุ่ม "ผูกใบที่มี" (ตัวเลือกใบงานกลาง โหมดใบเดียว) · "เปิดใบใหม่" (open_mo เฉพาะรายการ)
  * ยอดเงิน: SalesTotalsPreview (ของกลางตัวเดียวกับใบขาย) · ยอดต่อรายการ: lib/mo-so-rule
  */
 import { useMemo, useState } from "react";
@@ -51,7 +52,7 @@ const ORDER_STATUS: Record<string, { label: string; cls: string }> = {
   cancelled: { label: "ยกเลิก", cls: "bg-rose-50 text-rose-700" },
 };
 
-export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo, orphanMos = [] }: {
+export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpenMo, orphanMos = [], onLinkMo, onOpenLineMo }: {
   header: {
     companyName: string; customerName: string; orderDate: string; dueDate: string;
     poNo: string; salePerson: string; note: string; status: string;
@@ -63,6 +64,9 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
   onOpenMo: () => void;
   /** ใบผลิตที่ผูกใบนี้แต่รหัสไม่ตรงรายการไหน */
   orphanMos?: SoLineMo[];
+  /** ปุ่มต่อรายการที่ยังไม่มีใบผลิต: ผูกใบที่มีอยู่ / เปิดใบใหม่เฉพาะรายการนี้ (ไม่ส่ง = ไม่มีสิทธิ์ → ไม่โชว์ปุ่ม) */
+  onLinkMo?: (l: EditorLine) => void;
+  onOpenLineMo?: (l: EditorLine) => void;
 }) {
   const items = useMemo(() => lines.filter((l) => l.product_name.trim() || l.sku), [lines]);
   const main = useMemo(() => majorityGroup(items.map((l) => meta[l.tempId]?.group ?? null)), [items, meta]);
@@ -112,7 +116,15 @@ export function SoOrderReadView({ header, lines, meta, totals, canOpenMo, onOpen
           {!!l.discount_value && <div className="text-[10px] text-rose-600">ลด {l.discount_type === "percent" ? `${l.discount_value}%` : baht(l.discount_value)}</div>}
         </td>
         <td className="whitespace-nowrap px-2 py-1.5 text-right text-sm font-medium tabular-nums text-slate-800">{baht(lineAmount(l))}</td>
-        <td className="px-3 py-1.5"><StatusCell stage={stageOf(l)} moNo={m?.mo_no ?? null} p={m?.progress ?? null} qty={Number(l.qty) || 0} cancelled={cancelled} /></td>
+        <td className="px-3 py-1.5">
+          <StatusCell stage={stageOf(l)} moNo={m?.mo_no ?? null} p={m?.progress ?? null} qty={Number(l.qty) || 0} cancelled={cancelled} />
+          {!hasMo(l) && !cancelled && (onLinkMo || onOpenLineMo) && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {onLinkMo && <button type="button" onClick={() => onLinkMo(l)} className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-white px-1.5 py-0.5 text-[10px] text-rose-700 hover:bg-rose-50"><Icon name="link" /> ผูกใบที่มี</button>}
+              {onOpenLineMo && l.sku && <button type="button" onClick={() => onOpenLineMo(l)} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] text-slate-600 hover:bg-slate-50"><Icon name="add" /> เปิดใบใหม่</button>}
+            </div>
+          )}
+        </td>
       </tr>
     );
   };

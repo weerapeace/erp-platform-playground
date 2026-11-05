@@ -109,6 +109,9 @@ export default function SoOrdersPage() {
   const [orphanMos, setOrphanMos] = useState<SoLineMo[]>([]);
   const [saving, setSaving] = useState(false);
   const [srcOpen, setSrcOpen] = useState<null | "quote" | "mo">(null);
+  // ผูกใบสั่งผลิตให้รายการเดียว (ปุ่มต่อรายการ) — read = ผูกทันที · edit = จำไว้ ผูกตอนบันทึก
+  const [linkFor, setLinkFor] = useState<null | { tempId: string; sku: string | null; name: string; mode: "read" | "edit" }>(null);
+  const [linkBusy, setLinkBusy] = useState(false);
   const [batchOpen, setBatchOpen] = useState(false);
   const [groupFilter, setGroupFilter] = useState("");
   const { groups: moGroups } = useMoGroups(canView);
@@ -255,6 +258,35 @@ export default function SoOrdersPage() {
     } catch { toast.error("ดึงใบสั่งผลิตไม่สำเร็จ"); }
   };
 
+  // ---- ผูกใบสั่งผลิตต่อรายการ ----
+  /** ทำรายการกับใบนี้แล้ว "อยู่หน้าเดิม" (โหลดใบใหม่ ไม่ปิดป๊อปเหมือน act) */
+  const lineAct = async (body: Record<string, unknown>, okMsg: string) => {
+    if (!form?.id) return false;
+    setLinkBusy(true);
+    try {
+      const res = await apiFetch(`/api/so-orders/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const j = await res.json(); if (!res.ok || j?.error) throw new Error(j?.error || "ทำรายการไม่สำเร็จ");
+      toast.success(okMsg);
+      await openRow({ id: form.id }); void load();
+      return true;
+    } catch (e) { toast.error(e instanceof Error ? e.message : "ทำรายการไม่สำเร็จ"); return false; }
+    finally { setLinkBusy(false); }
+  };
+  const onLinkPicked = async (row: MoPickRow | undefined) => {
+    const target = linkFor;
+    if (!row || !target || !form) return;
+    const norm = (s: string | null | undefined) => String(s ?? "").trim().toUpperCase();
+    if (target.sku && row.sku && norm(target.sku) !== norm(row.sku)) { toast.error(`รหัสสินค้าไม่ตรง: รายการ ${target.sku} · ใบสั่งผลิต ${row.sku}`); return; }
+    if (row.so_order_no && row.so_order_no !== form.order_no) { toast.error(`${row.mo_no} ผูกใบสั่งขาย ${row.so_order_no} อยู่แล้ว`); return; }
+    if (target.mode === "edit") {
+      setMeta((m) => ({ ...m, [target.tempId]: { ...(m[target.tempId] ?? { mo_id: null, mo_no: null, group: null }), mo_id: row.mo_id, mo_no: row.mo_no } }));
+      setLinkFor(null);
+      toast.success(`เลือก ${row.mo_no} แล้ว — กดบันทึกเพื่อผูก`);
+      return;
+    }
+    if (await lineAct({ action: "link_mo", line_id: target.tempId, mo_id: row.mo_id }, `ผูก ${row.mo_no} กับ ${target.sku ?? target.name} แล้ว`)) setLinkFor(null);
+  };
+
   // ---- ชุดของบรรทัด ----
   const setLineGroup = (tempIds: string[], g: MoGroupPick | null) =>
     setMeta((m) => { const n = { ...m }; for (const id of tempIds) n[id] = { ...(n[id] ?? { mo_id: null, mo_no: null }), group: g }; return n; });
@@ -264,7 +296,12 @@ export default function SoOrdersPage() {
       <div className="space-y-1">
         <MoGroupPicker size="sm" value={meta[l.tempId]?.group ?? null} onChange={(g) => setLineGroup([l.tempId], g)}
           placeholder="ไม่จัดชุด" disabled={form?.status === "cancelled"} />
-        {meta[l.tempId]?.mo_no && <div className="text-[10px] text-emerald-700">ผูก {meta[l.tempId]?.mo_no}</div>}
+        {meta[l.tempId]?.mo_no
+          ? <div className="text-[10px] text-emerald-700">ผูก {meta[l.tempId]?.mo_no}</div>
+          : form?.status !== "cancelled" && (l.sku || l.product_name.trim()) && (
+            <button type="button" onClick={() => setLinkFor({ tempId: l.tempId, sku: l.sku ?? null, name: l.product_name, mode: "edit" })}
+              className="inline-flex items-center gap-1 text-[11px] text-rose-600 hover:underline"><Icon name="link" /> ผูกใบสั่งผลิต</button>
+          )}
         {meta[l.tempId]?.quote_no && <div className="text-[10px] text-sky-700">จากใบเสนอราคา {meta[l.tempId]?.quote_no}</div>}
       </div>
     ),
@@ -461,7 +498,9 @@ export default function SoOrdersPage() {
             lines={form.lines} meta={meta} totals={totals}
             canOpenMo={canEdit && form.status !== "cancelled"}
             onOpenMo={() => void act(form.id!, { action: "open_mo" }, "เปิด/ผูกใบสั่งผลิตให้แล้ว")}
-            orphanMos={orphanMos} />
+            orphanMos={orphanMos}
+            onLinkMo={canEdit && form.status !== "cancelled" ? (l) => setLinkFor({ tempId: l.tempId, sku: l.sku ?? null, name: l.product_name, mode: "read" }) : undefined}
+            onOpenLineMo={canEdit && form.status !== "cancelled" ? (l) => void lineAct({ action: "open_mo", line_id: l.tempId }, `เปิดใบสั่งผลิตให้ ${l.sku ?? l.product_name} แล้ว`) : undefined} />
         )}
         {form && (!form.id || editing) && (
           <div className="space-y-3">
@@ -532,6 +571,12 @@ export default function SoOrdersPage() {
       {/* ── เลือกเอกสารต้นทาง (ตัวเลือกกลาง) ───────────────── */}
       {srcOpen === "quote" && <SourceDocPickerModal open mode="so_quote" onClose={() => setSrcOpen(null)} onConfirm={onQuotesPicked} />}
       {srcOpen === "mo" && <MoMultiPickerModal open scope="open" title="ดึงจากใบสั่งผลิต" onClose={() => setSrcOpen(null)} onConfirm={(p) => void onMosPicked(p)}
+        exclude={Object.values(meta).map((m) => m.mo_no).filter((x): x is string => !!x)} />}
+      {/* ผูกใบสั่งผลิตให้รายการเดียว — ตัวเลือกใบงานกลาง โหมดใบเดียว · ค้นรหัสสินค้าของรายการให้ก่อน */}
+      {linkFor && <MoMultiPickerModal open single scope="open" initialQuery={linkFor.sku ?? ""}
+        title={`ผูกใบสั่งผลิตให้ ${linkFor.sku ?? linkFor.name}`} confirmLabel={linkBusy ? "กำลังผูก…" : "ผูกใบนี้"}
+        description="เลือกใบสั่งผลิตที่ทำรายการนี้ (รหัสสินค้าต้องตรงกัน) — ใบที่มีป้าย “ผูก SO… แล้ว” เป็นของใบสั่งขายอื่น"
+        onClose={() => !linkBusy && setLinkFor(null)} onConfirm={(rows) => void onLinkPicked(rows[0])}
         exclude={Object.values(meta).map((m) => m.mo_no).filter((x): x is string => !!x)} />}
 
       {/* ── ลงออเดอร์ทีละหลายรายการ + จับชุด (ของกลาง) ───── */}

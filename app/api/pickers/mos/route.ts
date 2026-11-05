@@ -21,6 +21,8 @@ export type MoPickRow = {
   id: string; mo_no: string; mo_id: string; sku: string | null; name: string | null; qty: number; status: string;
   image_url: string | null; where: string; stage: MoPickStage;
   parent_code: string | null; parent_name: string | null; due_date: string | null;
+  /** ใบสั่งขายที่ใบนี้ผูกอยู่ (null = ยังไม่ผูก) */
+  so_order_no?: string | null;
 };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -28,7 +30,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const scope = new URL(request.url).searchParams.get("scope") === "open" ? "open" : "not_in_qc";
   const admin = supabaseAdmin();
 
-  const mos = await fetchAllPages<Row>((from, to) => admin.from("manufacturing_orders").select("id, mo_no, qty, status, product_sku, product_name, due_date, internal_due_date")
+  const mos = await fetchAllPages<Row>((from, to) => admin.from("manufacturing_orders").select("id, mo_no, qty, status, product_sku, product_name, due_date, internal_due_date, so_order_no")
     .eq("is_active", true).not("status", "in", "(done,cancelled,closed)").order("mo_no").range(from, to));
   const moNos = mos.map((m) => String(m.mo_no));
   const wos: Row[] = [];
@@ -65,7 +67,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const sku = (m.product_sku as string) ?? null, inf = sku ? info.get(sku) : undefined;
     out.push({ id: moNo, mo_no: moNo, mo_id: String(m.id), sku, name: (m.product_name as string) ?? null, qty: num(m.qty), status: String(m.status ?? ""),
       image_url: inf?.image_url ?? null, where, stage, parent_code: inf?.parent_code ?? null, parent_name: inf?.parent_name ?? null,
-      due_date: (m.internal_due_date as string) ?? (m.due_date as string) ?? null });
+      due_date: (m.internal_due_date as string) ?? (m.due_date as string) ?? null, so_order_no: (m.so_order_no as string) ?? null });
   }
   return NextResponse.json({ data: out, error: null });
 }

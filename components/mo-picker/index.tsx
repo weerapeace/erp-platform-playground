@@ -6,7 +6,8 @@
  *   จัดกลุ่มตามสินค้าแม่ / ที่อยู่ + ติ๊กทั้งกลุ่ม · "เคยเลือกล่าสุด" · ใบที่อยู่ในตารางแล้ว = ติ๊กค้าง (exclude)
  * ข้อมูล: GET /api/pickers/mos (scope=not_in_qc ค่าตั้งต้น · open = รวมที่เข้า QC ครบแล้ว)
  * ใช้: <MoMultiPickerModal open onClose onConfirm={(rows) => …} exclude={['MO-…']} />
- * ใช้แล้วที่: จ่ายงานเหมา (app/master/work-board/piecework-dispatch.tsx)
+ * ใช้แล้วที่: จ่ายงานเหมา (app/master/work-board/piecework-dispatch.tsx) · ใบสั่งขาย "ดึงจากใบสั่งผลิต" + "ผูกใบสั่งผลิต" ต่อรายการ (single)
+ * โหมดใบเดียว: single + initialQuery (รหัสสินค้า) + confirmLabel · ใบที่ผูกใบสั่งขายอื่นแล้วมีป้าย "ผูก SO… แล้ว"
  */
 import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
@@ -26,7 +27,7 @@ const fmt = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH");
 const dueTh = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString("th-TH", { day: "numeric", month: "short" }) : "");
 const chip = (on: boolean) => `inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[12px] ${on ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
 
-export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], scope = "not_in_qc", title = "เลือกใบงาน" }: {
+export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], scope = "not_in_qc", title = "เลือกใบงาน", single = false, initialQuery = "", confirmLabel, description }: {
   open: boolean;
   onClose: () => void;
   onConfirm: (rows: MoPickRow[]) => void;
@@ -34,6 +35,13 @@ export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], sco
   exclude?: string[];
   scope?: "not_in_qc" | "open";
   title?: string;
+  /** เลือกได้ใบเดียว (เช่น ผูกใบสั่งผลิตให้รายการในใบสั่งขาย) — ติ๊กใบใหม่ = แทนใบเดิม */
+  single?: boolean;
+  /** ค้นตั้งต้นตอนเปิด (เช่น รหัสสินค้าของรายการ) */
+  initialQuery?: string;
+  /** ข้อความปุ่มยืนยัน (ไม่ส่ง = "เพิ่ม N ใบ") */
+  confirmLabel?: string;
+  description?: string;
 }) {
   const [rows, setRows] = useState<MoPickRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -46,7 +54,7 @@ export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], sco
 
   useEffect(() => {
     if (!open) return;
-    setPicked(new Set()); setQ("");
+    setPicked(new Set()); setQ(initialQuery);
     if (rows) return;
     apiFetch(`/api/pickers/mos?scope=${scope}`).then((r) => r.json()).then((j) => { if (j.error) setErr(j.error); setRows((j.data ?? []) as MoPickRow[]); })
       .catch(() => { setErr("โหลดรายการใบงานไม่สำเร็จ"); setRows([]); });
@@ -73,7 +81,10 @@ export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], sco
     return [...m.entries()];
   }, [shown, groupBy]);
 
-  const toggle = (ids: string[], on: boolean) => setPicked((p) => { const n = new Set(p); for (const id of ids) { if (ex.has(id)) continue; if (on) n.add(id); else n.delete(id); } return n; });
+  const toggle = (ids: string[], on: boolean) => setPicked((p) => {
+    if (single) { const id = ids.find((x) => !ex.has(x)); return on && id ? new Set([id]) : new Set(); }
+    const n = new Set(p); for (const id of ids) { if (ex.has(id)) continue; if (on) n.add(id); else n.delete(id); } return n;
+  });
   const recentRows = useMemo(() => recent.map((x) => (rows ?? []).find((r) => r.mo_no === x.id)).filter((r): r is MoPickRow => !!r), [recent, rows]);
   const confirm = () => {
     const chosen = (rows ?? []).filter((r) => picked.has(r.mo_no));
@@ -84,13 +95,13 @@ export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], sco
 
   return (
     <ERPModal open={open} onClose={onClose} size="lg" title={title} storageKey="mo-multi-picker"
-      description={scope === "not_in_qc" ? "เฉพาะใบที่ยังไม่ส่งเข้า QC ครบ — ติ๊กได้หลายใบ แล้วกดเพิ่ม" : "ใบที่ยังไม่ปิด — ติ๊กได้หลายใบ แล้วกดเพิ่ม"}
+      description={description ?? (single ? "เลือก 1 ใบ" : scope === "not_in_qc" ? "เฉพาะใบที่ยังไม่ส่งเข้า QC ครบ — ติ๊กได้หลายใบ แล้วกดเพิ่ม" : "ใบที่ยังไม่ปิด — ติ๊กได้หลายใบ แล้วกดเพิ่ม")}
       footer={
         <>
           <span className="mr-auto text-sm text-slate-600">เลือก <b className="text-violet-700">{picked.size}</b> ใบ</span>
           <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">ยกเลิก</button>
           <button type="button" onClick={confirm} disabled={!picked.size} className="h-9 rounded-lg bg-violet-600 px-5 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">
-            เพิ่ม {picked.size ? `${picked.size} ` : ""}ใบ
+            {confirmLabel ?? <>เพิ่ม {picked.size ? `${picked.size} ` : ""}ใบ</>}
           </button>
         </>
       }>
@@ -126,7 +137,7 @@ export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], sco
                 <div key={label || "_"}>
                   {groupBy && (
                     <label className="sticky top-0 z-10 flex cursor-pointer select-none items-center gap-2 border-b border-slate-200 bg-slate-50/95 px-3 py-1.5 text-[12px] font-medium text-slate-700 backdrop-blur">
-                      <input type="checkbox" checked={all} disabled={!free.length} onChange={() => toggle(free.map((r) => r.mo_no), !all)} />
+                      {!single && <input type="checkbox" checked={all} disabled={!free.length} onChange={() => toggle(free.map((r) => r.mo_no), !all)} />}
                       {label} <span className="font-normal text-slate-400">{items.length} ใบ</span>
                     </label>
                   )}
@@ -143,6 +154,7 @@ export function MoMultiPickerModal({ open, onClose, onConfirm, exclude = [], sco
                                 <span className="font-mono text-[13px] font-semibold text-slate-800">{r.sku ?? "-"}</span>
                                 <span className="text-[12px] text-slate-500">{r.mo_no}</span>
                                 {inTable && <span className="text-[11px] text-slate-400">อยู่ในตารางแล้ว</span>}
+                                {r.so_order_no && <span className="rounded bg-amber-50 px-1 text-[11px] text-amber-700">ผูก {r.so_order_no} แล้ว</span>}
                               </div>
                               {r.name && <div className="truncate text-[11px] text-slate-400">{r.name}</div>}
                             </div>

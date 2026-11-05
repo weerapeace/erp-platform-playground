@@ -31,7 +31,13 @@ async function mainBomOf(admin: Admin, sku: string): Promise<string | null> {
 
 export async function openMoForOrder(
   admin: Admin, orderId: string, actorId: string | null,
-  opts?: { onlyGroupId?: string },
+  opts?: {
+    onlyGroupId?: string;
+    /** เปิด/ผูกเฉพาะรายการนี้ (ปุ่มต่อรายการในหน้าสถานะ) */
+    onlyLineId?: string;
+    /** ผูกเฉพาะรายการที่อ้างใบสั่งผลิตอยู่แล้ว ไม่เปิดใบใหม่ (หลังบันทึกแก้ไขใบ) */
+    linkOnly?: boolean;
+  },
 ): Promise<{ created: number; linked: number; grouped?: number }> {
   const { data: order } = await admin.from("so_orders")
     .select("id, order_no, due_date, order_date, status").eq("id", orderId).maybeSingle();
@@ -42,6 +48,7 @@ export async function openMoForOrder(
   let lq = admin.from("so_order_lines")
     .select("id, sku, product_name, qty, due_date, mo_id, mo_no, mo_group_id").eq("order_id", orderId).order("line_no");
   if (opts?.onlyGroupId) lq = lq.eq("mo_group_id", opts.onlyGroupId);
+  if (opts?.onlyLineId) lq = lq.eq("id", opts.onlyLineId);
   const { data: lines } = await lq;
 
   let created = 0, linked = 0;
@@ -51,20 +58,24 @@ export async function openMoForOrder(
 
     // (1) มีใบสั่งผลิตอยู่แล้ว → ผูก + เปลี่ยนสถานะ (ไม่แย่งใบที่ผูกใบสั่งขายอื่นไว้)
     if (raw.mo_id) {
-      const { data: mo } = await admin.from("manufacturing_orders").select("id, mo_no, so_order_id, due_date").eq("id", raw.mo_id).maybeSingle();
-      const cur = mo as { id: string; mo_no: string; so_order_id: string | null; due_date: string | null } | null;
+      const { data: mo } = await admin.from("manufacturing_orders").select("id, mo_no, so_order_id, due_date, status").eq("id", raw.mo_id).maybeSingle();
+      const cur = mo as { id: string; mo_no: string; so_order_id: string | null; due_date: string | null; status: string | null } | null;
       if (cur && (!cur.so_order_id || cur.so_order_id === orderId)) {
-        await admin.from("manufacturing_orders").update({
-          so_order_id: orderId, so_order_no: o.order_no, status: "confirmed",
-          due_date: cur.due_date || due,        // ใบสั่งผลิตยังไม่มีกำหนดส่ง → ใช้ของใบสั่งขาย
-        }).eq("id", raw.mo_id);
+        // แก้เฉพาะที่ต้องแก้ — ห้ามเขียนทับสถานะที่ไปไกลกว่า "ร่าง" แล้ว (บันทึกใบซ้ำ ๆ ต้องไม่ดึงสถานะใบผลิตถอยหลัง)
+        const fresh = cur.so_order_id !== orderId;
+        const patch: Record<string, unknown> = {};
+        if (fresh) { patch.so_order_id = orderId; patch.so_order_no = o.order_no; }
+        if (!cur.status || cur.status === "draft") patch.status = "confirmed";
+        if (!cur.due_date && due) patch.due_date = due;   // ใบสั่งผลิตยังไม่มีกำหนดส่ง → ใช้ของใบสั่งขาย
+        if (Object.keys(patch).length) await admin.from("manufacturing_orders").update(patch).eq("id", raw.mo_id);
         if (raw.mo_group_id && cur.mo_no) toGroup.push({ groupId: raw.mo_group_id, moNo: cur.mo_no, existing: true });
-        linked++;
+        if (fresh) linked++;
       }
       continue;
     }
 
-    // (2) ยังไม่มี → เปิดใบสั่งผลิตใหม่ให้
+    // (2) ยังไม่มี → เปิดใบสั่งผลิตใหม่ให้ (ยกเว้นโหมดผูกอย่างเดียว)
+    if (opts?.linkOnly) continue;
     if (!raw.sku || !(Number(raw.qty) > 0)) continue;
     const moNo = await nextMoNo(admin);
     const bomCode = await mainBomOf(admin, raw.sku);
@@ -89,7 +100,7 @@ export async function openMoForOrder(
     await admin.from("so_orders").update({ mo_opened_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", orderId);
     await admin.from("audit_logs").insert({
       actor_user_id: actorId, action: "so_order.open_mo", entity_type: "so_order", entity_id: orderId,
-      metadata: { order_no: o.order_no, created, linked, grouped, only_group: opts?.onlyGroupId ?? null },
+      metadata: { order_no: o.order_no, created, linked, grouped, only_group: opts?.onlyGroupId ?? null, only_line: opts?.onlyLineId ?? null, link_only: !!opts?.linkOnly },
     }).then(() => {}, () => {});
   }
   return { created, linked, grouped };
