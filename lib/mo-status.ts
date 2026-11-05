@@ -40,6 +40,18 @@ export function moProgress(f: MoProgressFacts): MoProgressAnswer {
   };
 }
 
+/**
+ * บอร์ดจ่ายงาน: ยังต้องจ่ายช่างอีกกี่ชิ้น — ของที่ "ขายไปแล้ว" (ผูกใบขาย mo_sales_links) = ผลิตเสร็จแล้ว
+ * แม้ในระบบยังไม่ได้บันทึกจ่ายช่าง → หักด้วยตัวที่มากกว่าระหว่าง จ่ายแล้ว / ขายแล้ว (เจ้าของ 2026-11-05 "ขายแล้ว 200 ชิ้น งานควรเหลือ 200")
+ * ขายครบ = 0 → ไม่ขึ้นการ์ดรอจ่าย (ไปบันทึกผลิตที่ "อัปเดตงานจากใบขาย" แล้วระบบปิดงานเอง — lib/mo-auto-close)
+ * ใช้ที่ /api/mo/work-board (ทุกมุมมองของบอร์ด) · ป๊อปอัปเดตงาน (catch-up) ยังคิด จำนวน − จ่ายแล้ว ตามเดิม เพราะใช้บันทึกของที่ทำไปแล้ว
+ */
+export function remainingToDispatch(qty: number, dispatched: number, sold = 0): number {
+  const done = Math.max(Number(dispatched) || 0, Number(sold) || 0);
+  const left = (Number(qty) || 0) - done;
+  return left > MO_QTY_EPS ? Math.round(left * 100) / 100 : 0;
+}
+
 export type MoStatusInput = {
   prepDone: number; prepTotal: number;
   cutDone: number; cutTotal: number;

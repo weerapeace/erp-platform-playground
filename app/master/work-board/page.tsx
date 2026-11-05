@@ -49,7 +49,8 @@ import { CatchUpQueue } from "./catch-up-queue";
 import { CatchUpBatch } from "./catch-up-batch";
 import { SalesUpdate } from "./sales-update";
 import { PieceworkDispatch } from "./piecework-dispatch";
-import { ExecDispatchView } from "./exec-dispatch";
+import { ExecDispatchView, type SoldUnmade } from "./exec-dispatch";
+import { remainingToDispatch } from "@/lib/mo-status";
 import { CatchUpEdit } from "./catch-up-edit";
 import type { CuRequest, CuOpenTag } from "@/app/api/mo/catch-up/requests/route";
 import type { CuAllRow } from "@/app/api/mo/catch-up/all/route";
@@ -111,6 +112,8 @@ type Labor = { prod_plan: number; prod_actual: number; piece_plan: number; piece
 type PendingMO = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; dispatched: number; remaining: number; due_date: string | null; status: string;
+  /** ขายไปแล้ว (ผูกใบขาย) — remaining = จำนวน − max(จ่ายแล้ว, ขายแล้ว) (lib/mo-status remainingToDispatch) */
+  sold?: number;
   internal_due_date?: string | null;   // 🪑 กำหนดส่งงานภายใน (ช่าง/โต๊ะต้องเสร็จ) — คนละอันกับ due_date ที่เป็นนัดส่งลูกค้า
   image_url: string | null; brand: string | null; brand_color: string | null; color?: string | null;
   /** สินค้าแม่ (Parent SKU) — จัดกลุ่ม "ตามสินค้าแม่" */
@@ -195,7 +198,7 @@ async function fetchClMats(moId: string): Promise<ClMats> {
 // dispatchedMos = ใบที่จ่ายงานครบแล้ว (ไม่ใช่การ์ดรอจ่าย) — ยังต้องส่งลูกค้า ปฏิทินเลยต้องเห็น
 type DeliveryPlan = { id: string; mo_id: string; mo_no: string; due_date: string; qty: number; note?: string | null;
   delivery_note_id?: string | null; dn_number?: string | null; shipped?: boolean; shipped_at?: string | null };
-type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[]; dispatchedMos: PendingMO[]; deliveryPlans: DeliveryPlan[]; pendingPiece: PendingPiece[] };
+type Board = { departments: Dept[]; workOrders: WorkOrder[]; pending: PendingMO[]; dispatchedMos: PendingMO[]; deliveryPlans: DeliveryPlan[]; pendingPiece: PendingPiece[]; soldUnmade: SoldUnmade[] };
 type Pos = { x: number; y: number };
 type Size = { w: number; h: number };
 type Viewport = { x: number; y: number; scale: number };
@@ -303,7 +306,7 @@ function WorkBoardPageInner() {
   const isAdmin = user?.role === "admin" || canAdminUsers;
   const toast = useToast();
 
-  const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], dispatchedMos: [], deliveryPlans: [], pendingPiece: [] });
+  const [board, setBoard] = useState<Board>({ departments: [], workOrders: [], pending: [], dispatchedMos: [], deliveryPlans: [], pendingPiece: [], soldUnmade: [] });
   const [loading, setLoading] = useState(true);
   // สลับ บอร์ด/ตาราง/ช้อป/ขอซื้อ + จำมุมมองเริ่มต้นต่อผู้ใช้ (⭐)
   const { view: viewRaw, setView: setViewMode, defaultView: defView, saveDefault: saveDefView } = useViewPref("work_board_view", ["board", "deskdock", "table", "shop", "purchase", "calendar", "labor", "exec"] as const, "board");   // แคนวาส (โซนตามโต๊ะ) เอาออกแล้ว 2026-11-04 — ใครตั้งไว้ = กลับไปบอร์ด · deskdock = จ่ายงาน (โหมดผู้บริหาร)
@@ -494,7 +497,7 @@ function WorkBoardPageInner() {
   const load = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try { const res = await apiFetch("/api/mo/work-board"); const j = await res.json();
-      if (!j.error) { setLoadedAt(Date.now()); setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], dispatchedMos: j.dispatched_mos ?? [], deliveryPlans: j.delivery_plans ?? [], pendingPiece: j.pending_piece ?? [] }); setLoadError(false); }
+      if (!j.error) { setLoadedAt(Date.now()); setBoard({ departments: j.departments ?? [], workOrders: j.workOrders ?? [], pending: j.pending ?? [], dispatchedMos: j.dispatched_mos ?? [], deliveryPlans: j.delivery_plans ?? [], pendingPiece: j.pending_piece ?? [], soldUnmade: j.sold_unmade ?? [] }); setLoadError(false); }
       else if (!silent) setLoadError(true);
     } catch { if (!silent) setLoadError(true); } finally { if (!silent) setLoading(false); }
   }, []);
@@ -1068,7 +1071,7 @@ function WorkBoardPageInner() {
               && (m.created_at ?? null) === d.mo.created_at;
             if (same) return m;
             // created_at: บางทางเปิดป๊อปด้วยข้อมูลที่ประกอบเอง (ไม่มีวันที่สร้าง) → เติมจากใบจริงตรงนี้
-            return { ...m, qty: d.mo.qty, remaining: Math.max(0, d.mo.qty - (m.dispatched || 0)),
+            return { ...m, qty: d.mo.qty, remaining: remainingToDispatch(d.mo.qty, m.dispatched || 0, m.sold || 0),
               due_date: d.mo.due_date, internal_due_date: d.mo.internal_due_date, has_sizes: d.mo.has_sizes, created_at: d.mo.created_at };
           });
           setMoQty(String(d.mo.qty));
@@ -1278,7 +1281,7 @@ function WorkBoardPageInner() {
     setQtySaving(false);
     if (!r.ok) return;
     setQtyEditing(false);   // บันทึกแล้วกลับเป็นอ่านอย่างเดียว
-    setChecklistMO((m) => (m ? { ...m, qty: n, remaining: Math.max(0, n - (m.dispatched || 0)) } : m));
+    setChecklistMO((m) => (m ? { ...m, qty: n, remaining: remainingToDispatch(n, m.dispatched || 0, m.sold || 0) } : m));
     await reloadClMats();   // วัตถุดิบ + ต้นทุน + การ์ดบนบอร์ด (reloadClMats เรียก load(true) ให้แล้ว)
   }, [checklistMO, moQty, reloadClMats, toast]);
 
@@ -1702,7 +1705,10 @@ function WorkBoardPageInner() {
           }}
           onOpenMO={(m) => { const mo = board.pending.find((p) => p.id === m.id); if (mo) { setClWO(null); setChecklistMO(mo); } }}
           onOpenWO={(id) => { const wo = board.workOrders.find((x) => x.id === id); if (wo) { setRecvQty(Math.max(0, (wo.qty || 0) - (wo.received_qty || 0))); openWO(wo); } }}
-          renderDeskManager={(d) => { const dept = board.departments.find((x) => x.id === d.id); return dept ? <DeskStaffPanel dept={dept} desks={board.departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canDispatch} onChanged={reloadAssignees} wos={board.workOrders} onDesksChanged={deskChanged} /> : null; }} />
+          renderDeskManager={(d) => { const dept = board.departments.find((x) => x.id === d.id); return dept ? <DeskStaffPanel dept={dept} desks={board.departments} people={craftsmen} canMove={canMoveStaff} canAddNew={canDispatch} onChanged={reloadAssignees} wos={board.workOrders} onDesksChanged={deskChanged} /> : null; }}
+          soldUnmade={board.soldUnmade}
+          onSalesCatchUp={canCatchUp ? () => { setCatchUpMode(true); setViewMode("table"); setCuSalesAsk(true); } : undefined}
+          canSetLabor={canEdit} onLaborSaved={() => void load(true)} />
       ) : viewMode === "labor" ? (
         <LaborSummary />
       ) : viewMode === "exec" ? (

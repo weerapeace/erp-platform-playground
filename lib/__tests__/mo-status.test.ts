@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { moProgress, computeMoStatus } from "@/lib/mo-status";
+import { moProgress, computeMoStatus, remainingToDispatch } from "@/lib/mo-status";
 import { bucketOf } from "@/lib/mo-backlog";
 import { checkMoTransition } from "@/lib/mo-workflow";
 
@@ -61,5 +61,24 @@ describe("ป้ายสถานะเดิมไม่เปลี่ยน 
   });
   it("ข้ามขั้นจ่ายงาน → ขั้น 6 ป้ายบอกว่าข้าม", () => {
     expect(computeMoStatus({ ...base, qty: 10, dispatched: 0, received: 0, skipped: { dispatch: SKIP } })).toMatchObject({ code: 6, short: "ข้ามจ่าย" });
+  });
+});
+
+describe("บอร์ดจ่ายงาน: ยังต้องจ่ายอีกกี่ชิ้น (remainingToDispatch) — ขายแล้ว = ทำเสร็จแล้ว", () => {
+  it("ยังไม่ขาย = จำนวน − จ่ายแล้ว", () => {
+    expect(remainingToDispatch(400, 0)).toBe(400);
+    expect(remainingToDispatch(400, 150, 0)).toBe(250);
+  });
+  it("ขายไปมากกว่าที่จ่าย → หักตามที่ขาย", () => {
+    expect(remainingToDispatch(400, 0, 200)).toBe(200);       // CTL104-05
+    expect(remainingToDispatch(220, 130, 210)).toBe(10);
+  });
+  it("ขายน้อยกว่าที่จ่าย → หักตามที่จ่าย", () => {
+    expect(remainingToDispatch(300, 200, 50)).toBe(100);
+  });
+  it("ขายครบ / ขายเกิน / เศษทศนิยม = 0", () => {
+    expect(remainingToDispatch(380, 140, 380)).toBe(0);       // CTL008XS-01-1
+    expect(remainingToDispatch(100, 0, 120)).toBe(0);
+    expect(remainingToDispatch(10, 9.99995, 0)).toBe(0);
   });
 });

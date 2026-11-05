@@ -28,13 +28,18 @@ import { ExecQuickDispatch, type QuickRow } from "./exec-quick-dispatch";
 import { useMoGroups } from "@/components/mo-group-picker";
 import { MoStatusModal } from "@/components/mo-status-modal";
 import type { SoldQty } from "@/app/api/mo/sold-qty/route";
+import { MoLaborRateModal, type LaborRateMo } from "@/components/mo-labor-rate-modal";
 
 export type ExecMo = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
   qty: number; remaining: number; due_date: string | null; internal_due_date?: string | null;
   image_url: string | null; ready: boolean; priority?: number; priority_note?: string | null;
   brand?: string | null; central_rate?: number; labor?: { prod_plan: number } | null;
+  /** ขายไปแล้ว (ผูกใบขาย) — remaining หักส่วนนี้แล้ว (lib/mo-status remainingToDispatch) */
+  sold?: number; bom_code?: string | null;
 };
+/** ใบที่ขายครบแล้วแต่ยังจ่ายช่างไม่ครบในระบบ (/api/mo/work-board sold_unmade) — ไม่ขึ้นการ์ด · ป้ายเตือนด้านบน */
+export type SoldUnmade = { id: string; mo_no: string; product_sku: string | null; product_name: string | null; qty: number; dispatched: number; sold: number };
 export type ExecWo = {
   id: string; wo_no: string; mo_no: string; product_sku: string | null; department_id: string | null;
   assignee_name: string | null; qty: number; received_qty: number; status: string; image_url?: string | null;
@@ -88,7 +93,7 @@ const rateOfMo = (m: ExecMo) => (m.central_rate && m.central_rate > 0 ? m.centra
 /** ค่าแรง/ชิ้นของใบจ่ายงาน — ค่าแรงที่ใส่ไว้ ÷ จำนวน ไม่มี = ราคากลาง */
 const rateOfWo = (w: ExecWo) => (w.labor_cost != null && w.qty > 0 ? Number(w.labor_cost) / w.qty : w.central_rate && w.central_rate > 0 ? w.central_rate : 0);
 
-export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDispatch, showPrice, onDispatch, onQuickDispatch, onOpenMO, onOpenWO, renderDeskManager, deskWages }: {
+export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDispatch, showPrice, onDispatch, onQuickDispatch, onOpenMO, onOpenWO, renderDeskManager, deskWages, soldUnmade = [], onSalesCatchUp, canSetLabor = false, onLaborSaved }: {
   pending: ExecMo[];
   workOrders: ExecWo[];
   desks: Desk[];
@@ -106,8 +111,15 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   renderDeskManager?: (desk: Desk) => ReactNode;
   /** เงินเดือนรวมพนักงานต่อโต๊ะ/เดือน (payroll · /api/mo/assignees dept_wages) — แถบ "งานในมือเทียบเงินเดือนทั้งโต๊ะ" (โชว์เฉพาะผู้บริหาร) */
   deskWages?: Record<string, number>;
+  /** ขายครบแล้วแต่ยังไม่บันทึกผลิต → ป้ายเตือน · กดแล้ว onSalesCatchUp เปิด "อัปเดตงานจากใบขาย" (ไม่มี = ไม่มีสิทธิ์ อ่านอย่างเดียว) */
+  soldUnmade?: SoldUnmade[];
+  onSalesCatchUp?: () => void;
+  /** กด "ยังไม่ตั้งค่าแรง" ตั้งได้ (products.edit) · บันทึกแล้วให้หน้าแม่โหลดใหม่ */
+  canSetLabor?: boolean;
+  onLaborSaved?: () => void;
 }) {
   const toast = useToast();
+  const [laborMo, setLaborMo] = useState<LaborRateMo | null>(null);   // ป๊อปตั้งค่าแรง (ของกลาง MoLaborRateModal)
   const [size, setSize] = useUserPref<number>("wb_exec_card_size", 160, parseSize);
   const [sort, setSort] = useUserPref<SortKey>("wb_exec_sort", "urgent", parseSort);
   const [fields, setFields] = useUserPref<FieldKey[]>("wb_exec_fields", FIELDS_DEFAULT, parseFields);
@@ -125,7 +137,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     for (const g of moGroups ?? []) for (const no of g.mo_nos ?? []) if (!m.has(no)) m.set(no, { id: g.id, name: g.name });
     return m;
   }, [moGroups]);
-  // ขายแล้วกี่ชิ้น (ผูกใบขาย) — การ์ดที่ขายครบไม่ควรจ่ายซ้ำ
+  // ใบขายที่ผูก (เลขบิล) ไว้โชว์ตอนชี้ป้าย "ขายไปแล้ว" — ตัวเลขขายแล้ว/เหลือทำ มากับ pending (m.sold · m.remaining)
   const [sold, setSold] = useState<SoldQty>({});
   const pendingIds = useMemo(() => pending.map((m) => m.id).sort().join(","), [pending]);
   useEffect(() => {
@@ -436,9 +448,20 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           </div>
         )}
 
+        {/* ขายครบแล้วแต่ยังไม่บันทึกผลิต — ไม่ขึ้นการ์ด (ไม่ต้องจ่ายแล้ว) · กด → "อัปเดตงานจากใบขาย" บันทึกว่าใครทำ → ระบบปิดงานเอง (lib/mo-auto-close) */}
+        {soldUnmade.length > 0 && (
+          <div className="mb-2">
+            <button type="button" disabled={!onSalesCatchUp} onClick={() => onSalesCatchUp?.()}
+              title={soldUnmade.map((s) => `${s.product_sku ?? ""} · ${s.mo_no} — ขาย ${fmt(s.sold)}/${fmt(s.qty)} · จ่ายช่างในระบบ ${fmt(s.dispatched)}`).join("\n")}
+              className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-[12px] text-amber-800 enabled:hover:bg-amber-100 disabled:cursor-default">
+              <Icon name="warning" /> ขายครบแล้ว แต่ยังไม่บันทึกผลิต <b>{soldUnmade.length}</b> ใบ{onSalesCatchUp ? " ›" : ""}
+            </button>
+          </div>
+        )}
+
         {chosen.length > 0 && (
           <div className="mb-2 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-1.5 text-sm text-violet-800">
-            เลือก <b>{chosen.length}</b> ใบ{showPrice ? ` · ฿${fmt(chosenValue)}` : ""} — ลากการ์ดใบไหนก็ได้ลงโต๊ะด้านล่าง หรือกดโต๊ะแล้วกด &ldquo;จ่ายให้โต๊ะนี้&rdquo;
+            เลือก <b>{chosen.length}</b> ใบ{showPrice ? ` · ฿${fmt(chosenValue)}` : ""} — กดปุ่ม &ldquo;จ่ายโต๊ะนี้&rdquo; ที่ลอยบนโต๊ะด้านล่าง หรือลากการ์ดใบไหนก็ได้ลงโต๊ะ
             <button type="button" onClick={() => setSel(new Set())} className="ml-2 text-[12px] text-violet-600 underline">ล้างที่เลือก</button>
           </div>
         )}
@@ -449,8 +472,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           <div className="grid flex-1 content-start gap-2.5 pb-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size}px, 1fr))` }}>
             {list.map((m) => {
               const on = sel.has(m.id), p = price.get(m.mo_no) ?? 0, rate = rateOfMo(m);
-              const g = groupOf.get(m.mo_no), sq = sold[m.id];
-              const soldFull = !!sq && m.qty > 0 && sq.qty >= m.qty - 0.0001;
+              const g = groupOf.get(m.mo_no), sq = sold[m.id], soldN = m.sold ?? 0;
               return (
                 <div key={m.id} draggable={canDispatch}
                   onDragStart={(e) => { e.dataTransfer.setData("text/plain", m.id); e.dataTransfer.effectAllowed = "move"; }}
@@ -483,13 +505,17 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                   {(show("labor") || show("laborTotal")) && (
                     <div className="text-[11px] text-slate-500">{rate > 0 ? <>
                       {show("labor") && <>ค่าแรง ฿{fmt(rate)}/ชิ้น</>}{show("labor") && show("laborTotal") ? " · " : ""}{show("laborTotal") && <b className="text-slate-700">รวม ฿{fmt(rate * m.remaining)}</b>}
-                    </> : <span className="text-amber-600">ยังไม่ตั้งค่าแรง</span>}</div>
+                    </> : canSetLabor
+                      ? <button type="button" title="กดเพื่อตั้งค่าแรงผลิต/ชิ้น"
+                          onClick={(e) => { e.stopPropagation(); setLaborMo({ id: m.id, mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name, qty: m.qty, bom_code: m.bom_code ?? null }); }}
+                          className="text-amber-600 underline decoration-dotted underline-offset-2 hover:text-amber-700">ยังไม่ตั้งค่าแรง ›</button>
+                      : <span className="text-amber-600">ยังไม่ตั้งค่าแรง</span>}</div>
                   )}
-                  {/* ขายแล้ว (ผูกใบขาย) — ขายครบ = ไม่ต้องจ่ายงานซ้ำ */}
-                  {sq && sq.qty > 0 && (
-                    <div className="mt-0.5" title={`ผูกใบขาย ${sq.bills.join(", ")}`}>
-                      <span className={`inline-block max-w-full truncate rounded px-1.5 py-0.5 text-[11px] ${soldFull ? "bg-emerald-100 font-medium text-emerald-800" : "bg-emerald-50 text-emerald-700"}`}>
-                        {soldFull ? "ขายครบแล้ว" : "ขายแล้ว"} {fmt(sq.qty)}/{fmt(m.qty)}
+                  {/* ขายไปแล้ว (ผูกใบขาย) = ทำเสร็จแล้ว → "จ่าย" ด้านบนหักส่วนนี้แล้ว · ขายครบ = ไม่ขึ้นการ์ด (ป้ายเตือนด้านบน) */}
+                  {soldN > 0 && (
+                    <div className="mt-0.5" title={sq?.bills.length ? `ผูกใบขาย ${sq.bills.join(", ")}` : undefined}>
+                      <span className="inline-block max-w-full truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">
+                        ขายไปแล้ว {fmt(soldN)} · เหลือทำ {fmt(m.remaining)}
                       </span>
                     </div>
                   )}
@@ -499,12 +525,10 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                       className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600 hover:border-violet-300 hover:text-violet-700">
                       <Icon name="package" /> วัตถุดิบ
                     </button>
-                    {soldFull
-                      ? <span className="text-right text-[11px] font-medium text-emerald-700">ควรปิดงาน</span>
-                      : show("ready") && (
-                        <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูสถานะวัตถุดิบทุกตัว (ที่ยังไม่พร้อมอยู่บนสุด)"
-                          className={`text-right text-[11px] hover:underline ${m.ready ? "font-medium text-emerald-600" : "text-amber-600"}`}>{m.ready ? "พร้อม" : "ยังไม่พร้อม ›"}</button>
-                      )}
+                    {show("ready") && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูสถานะวัตถุดิบทุกตัว (ที่ยังไม่พร้อมอยู่บนสุด)"
+                        className={`text-right text-[11px] hover:underline ${m.ready ? "font-medium text-emerald-600" : "text-amber-600"}`}>{m.ready ? "พร้อม" : "ยังไม่พร้อม ›"}</button>
+                    )}
                   </div>
                   <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }} title="ดูรายละเอียด / เช็กลิสต์"
                     className="absolute left-1.5 top-8 z-10 hidden h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm hover:text-violet-700 group-hover:flex"><Icon name="open" /></button>
@@ -654,8 +678,16 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
             {desks.map((d) => {
               const st = statOf(d.id), lifted = overDesk === d.id || td.overId === d.id, on = openDesk === d.id;
               const imgs = st.ws.filter((w) => w.image_url).slice(0, 3);
+              const pick = canDispatch && chosen.length > 0;   // ติ๊กการ์ดไว้ → ปุ่มลอย "จ่ายโต๊ะนี้" บนทุกโต๊ะ (เจ้าของ 2026-11-05)
               return (
-                <button key={d.id} type="button" data-drop-id={d.id} onClick={() => { clearPeekTimer(); setPeekOn(false); setOpenDesk(on ? null : d.id); }}
+                <div key={d.id} className="flex shrink-0 flex-col items-center gap-1.5">
+                {pick && (
+                  <button type="button" onClick={() => give(d, chosen.map((m) => m.id))} title={`จ่าย ${chosen.length} ใบที่เลือกให้ ${d.name}`}
+                    className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-violet-600 px-2.5 py-1 text-[11px] font-medium text-white shadow-sm hover:bg-violet-700">
+                    จ่ายโต๊ะนี้ {chosen.length} ใบ <span aria-hidden className="inline-block animate-bounce">↓</span>
+                  </button>
+                )}
+                <button type="button" data-drop-id={d.id} onClick={() => { clearPeekTimer(); setPeekOn(false); setOpenDesk(on ? null : d.id); }}
                   onPointerEnter={(e) => { if (e.pointerType === "mouse") peekIn(d.id, e.currentTarget); }}
                   onPointerLeave={(e) => { if (e.pointerType === "mouse") peekOut(); }}
                   onDragOver={(e) => { if (!canDispatch) return; e.preventDefault(); setOverDesk(d.id); }}
@@ -675,6 +707,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                     {st.labor > 0 && <div className="truncate font-bold tabular-nums text-violet-700">฿{fmt(st.labor)}</div>}
                   </div>
                 </button>
+                </div>
               );
             })}
           </div>
@@ -736,6 +769,8 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
 
       {/* สถานะงาน + ขอซื้อวัตถุดิบถึงไหน (ป๊อปกลาง — ตัวเดียวกับใบค้างผลิต/Dashboard ผลิต) */}
       {statusMo && <MoStatusModal moId={statusMo} view="materials" onClose={() => setStatusMo(null)} />}
+      <MoLaborRateModal mo={laborMo} onClose={() => setLaborMo(null)} onSaved={() => onLaborSaved?.()} />
+
     </div>
   );
 }

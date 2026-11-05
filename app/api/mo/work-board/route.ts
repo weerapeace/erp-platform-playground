@@ -3,7 +3,9 @@
  * GET /api/mo/work-board
  *   → departments: โซนแผนก
  *   → workOrders: ใบจ่ายงาน active (+ แบรนด์/สี/รูป/แผนก) — ซ่อน done ฝั่ง client
- *   → pending: ใบสั่งผลิตที่ยังจ่ายไม่ครบ (การ์ดโซน "รอจ่าย") + ยอดจ่ายแล้ว/เหลือ
+ *   → pending: ใบสั่งผลิตที่ยังจ่ายไม่ครบ (การ์ดโซน "รอจ่าย") + ยอดจ่ายแล้ว/ขายแล้ว/เหลือ
+ *       เหลือ = จำนวน − max(จ่ายแล้ว, ขายแล้ว) (lib/mo-status remainingToDispatch — ของที่ขายไปแล้ว = ผลิตเสร็จแล้ว)
+ *   → sold_unmade: ใบที่ขายครบแล้วแต่ยังจ่ายช่างไม่ครบในระบบ (ไม่ขึ้นการ์ด · ป้ายเตือนให้ไป "อัปเดตงานจากใบขาย")
  * อ่านผ่าน supabaseAdmin + guardApi (join ข้ามตาราง master)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -12,6 +14,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { needsCut, type CutFields } from "@/lib/cut-rules";
 import { parseSkipped } from "@/lib/mo-skip";
+import { remainingToDispatch, MO_QTY_EPS } from "@/lib/mo-status";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -136,7 +139,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const noData = { data: [] as Record<string, unknown>[] };
 
   // ── ยิง query รอบสองพร้อมกัน (เดิมยิงทีละตัว 5-6 รอบ = waterfall) ──
-  const [info, extraMoRes, lrRes, pcsRes, sumsRes, matsRes, issRes] = await Promise.all([
+  const [info, extraMoRes, lrRes, pcsRes, sumsRes, matsRes, issRes, soldRes] = await Promise.all([
     skuInfoMap(admin, allSkus),
     missingMoNos.length ? admin.from("manufacturing_orders").select("id, mo_no").in("mo_no", missingMoNos) : Promise.resolve(noData),
     bomCodes.length ? admin.from("bom_labor_rates").select("bom_code, rate").in("bom_code", bomCodes).is("craftsman_id", null).eq("is_current", true).eq("is_active", true) : Promise.resolve(noData),
@@ -146,7 +149,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     fetchAllByMo(admin, "mo_materials", "mo_no, material_type, cut_block_code, cut_length, pieces, cut_done", pendingMoNos),
     // ปัญหาที่แจ้งไว้ของใบรอจ่าย (ชุดเดียวกับแท็บ "ปัญหา" ในเช็กลิสต์ = defect_logs.source_job) — นับไปโชว์ในตาราง
     pendingMoNos.length ? admin.from("defect_logs").select("source_job").in("source_job", pendingMoNos).eq("is_active", true).limit(5000) : Promise.resolve(noData),
+    // ยอดที่ผูกใบขายแล้ว (ขายไปแล้ว = ผลิตเสร็จแล้ว) → หักออกจาก "ต้องจ่าย" · ไม่นับที่ถอดผูก
+    fetchAllByMo(admin, "mo_sales_links", "mo_no, qty", pendingMoNos),
   ]);
+  const soldByMo = new Map<string, number>();
+  for (const l of (soldRes.data ?? []) as Record<string, unknown>[]) soldByMo.set(String(l.mo_no), (soldByMo.get(String(l.mo_no)) ?? 0) + (Number(l.qty) || 0));
   const issueCount = new Map<string, number>();
   for (const d of (issRes.data ?? []) as Record<string, unknown>[]) issueCount.set(String(d.source_job), (issueCount.get(String(d.source_job)) ?? 0) + 1);
 
@@ -182,10 +189,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const allMos = (mos ?? []).map((m: Record<string, unknown>) => {
     const qty = Number(m.qty) || 0;
     const dispatched = dispatchedByMo.get(String(m.mo_no)) ?? 0;
-    const remaining = r2(Math.max(0, qty - dispatched));
+    const sold = soldByMo.get(String(m.mo_no)) ?? 0;
+    const remaining = remainingToDispatch(qty, dispatched, sold);
     const inf = info.get(String(m.product_sku ?? "").trim()) ?? NO_INFO;
     return { id: String(m.id), mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name,
-      qty, dispatched: r2(dispatched), remaining, due_date: m.due_date ?? null, status: m.status,
+      qty, dispatched: r2(dispatched), sold: r2(sold), remaining, due_date: m.due_date ?? null, status: m.status,
       // 📦 due_date = นัดส่งลูกค้า · 🪑 internal_due_date = กำหนดส่งงานภายใน (ตั้งได้ตั้งแต่ยังไม่จ่ายงาน)
       internal_due_date: (m.internal_due_date as string) ?? null,
       order_date: (m.order_date as string) ?? null,     // วันที่เปิดใบสั่งผลิต — ใช้เรียงในใบพิมพ์
@@ -199,10 +207,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       skipped_stages: parseSkipped(m.skipped_stages),     // ขั้นที่แอดมินข้าม (ป้าย) — กติกาที่ lib/mo-skip
       ...inf, labor: laborOfMo(String(m.mo_no)), central_rate: centralRateOf(String(m.mo_no)) };
   });
-  const pending = allMos.filter((m) => m.remaining > 0.0001);   // การ์ดโซน "รอจ่าย" = ยังจ่ายไม่ครบ
+  const pending = allMos.filter((m) => m.remaining > MO_QTY_EPS);   // การ์ดโซน "รอจ่าย" = ยังต้องจ่าย (หักที่ขายไปแล้ว)
   // ใบที่จ่ายงานครบแล้วแต่ยังไม่ปิด — ไม่ใช่การ์ดรอจ่าย แต่ "ยังต้องส่งลูกค้า"
   // → ปฏิทินนัดส่งลูกค้าต้องเห็นด้วย ไม่งั้นค้นหาใบพวกนี้ไม่เจอ (บั๊กที่เจอกับ CTL107-01)
-  const dispatchedMos = allMos.filter((m) => m.remaining <= 0.0001);
+  const dispatchedMos = allMos.filter((m) => m.qty - m.dispatched <= MO_QTY_EPS);
+  // ขายครบแล้วแต่ยังจ่ายช่างไม่ครบในระบบ — ไม่ใช่การ์ดรอจ่าย · ไม่ใช่ "ยังต้องส่งลูกค้า" (ส่งไปแล้ว)
+  // → ป้ายเตือนบนบอร์ดให้ไปบันทึกผลิตที่ "อัปเดตงานจากใบขาย" (ช่างได้ค่าแรงครบ แล้วระบบปิดงานเอง)
+  const soldUnmade = allMos.filter((m) => m.remaining <= MO_QTY_EPS && m.qty - m.dispatched > MO_QTY_EPS)
+    .map((m) => ({ id: m.id, mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name, qty: m.qty, dispatched: m.dispatched, sold: m.sold, image_url: m.image_url ?? null }));
 
   // เช็กลิสต์วัตถุดิบจาก BOM ต่อใบ (ดึงมาแล้วในรอบ parallel ข้างบน: sumsRes/matsRes) — เตรียม=is_ready, ตัด=cut_done
   const prog = new Map<string, { prepTotal: number; prepDone: number; cutTotal: number; cutDone: number }>();
@@ -255,5 +267,5 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   ]);
 
   return NextResponse.json({ departments, workOrders: enrichedWO, pending: pendingEnriched.map((p) => ({ ...p, print: printBy.get(p.id) ?? null })),
-    dispatched_mos: dispatchedMos, delivery_plans: plans ?? [], pending_piece: pendingPiece, error: null });
+    dispatched_mos: dispatchedMos, sold_unmade: soldUnmade, delivery_plans: plans ?? [], pending_piece: pendingPiece, error: null });
 }
