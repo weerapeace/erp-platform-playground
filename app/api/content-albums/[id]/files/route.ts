@@ -4,10 +4,11 @@
  *        body = { drive_file_id, preview_key?, file_name, mime, size, width?, height?, duration_sec?, checksum?, phash?, phash_color? }
  *               → ลงทะเบียนไฟล์ที่เพิ่งอัปขึ้น Drive (assets source "content") แล้วใส่อัลบั้ม
  *        body = { asset_id } → ใส่ไฟล์ที่มีในคลังอยู่แล้วเข้าอัลบั้ม (เลือก "ใช้รูปเดิม" ตอนเจอรูปซ้ำ)
+ * PATCH  /api/content-albums/[id]/files  body = { asset_id, preview_key } → เปลี่ยนปกคลิป (รูปย่อใน R2 ที่อัปจาก /api/admin/upload folder content-albums) ของวิดีโอในอัลบั้ม
  * DELETE /api/content-albums/[id]/files?asset_id=&drive=1
  *        → เอาออกจากอัลบั้ม · ไฟล์ของอัลบั้มเอง (source content ไม่อยู่ที่อื่น) ไปถังขยะคลัง · drive=1 = ต้นฉบับใน Drive ไปถังขยะด้วย (กู้คืนได้ใน Drive)
  *
- * สิทธิ์: เพิ่ม = assets.upload · เอาออก/ลบ = assets.delete · audit content_album file_add / file_remove
+ * สิทธิ์: เพิ่ม/ตั้งปกคลิป = assets.upload · เอาออก/ลบ = assets.delete · audit content_album file_add / file_cover / file_remove
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
@@ -75,6 +76,32 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   if (mapErr) return NextResponse.json({ error: `ใส่ไฟล์เข้าอัลบั้มไม่สำเร็จ: ${mapErr.message}` }, { status: 500 });
   await writeAudit(admin, { action: "file_add", entityType: "content_album", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { asset_id: assetId, drive_file_id: fileId, file_name: fileName, size: meta.size ?? null } });
   return NextResponse.json({ data: { asset_id: assetId, reused: false }, error: null });
+}
+
+const COVER_KEY = /^content-albums\/[0-9a-f-]{36}\/[\w.-]+\.(jpe?g|png|webp)$/i;
+
+export async function PATCH(request: NextRequest, { params }: Params): Promise<NextResponse> {
+  const denied = await guardApi(request, "assets.upload"); if (denied) return denied;
+  const { id } = await params;
+  let body: { asset_id?: unknown; preview_key?: unknown };
+  try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  const assetId = body.asset_id;
+  const key = typeof body.preview_key === "string" ? body.preview_key.trim() : "";
+  if (!isUuid(id) || !isUuid(assetId)) return NextResponse.json({ error: "ต้องระบุไฟล์" }, { status: 400 });
+  if (!COVER_KEY.test(key) || key.includes("..")) return NextResponse.json({ error: "รูปปกไม่ถูกต้อง" }, { status: 400 });
+  const admin = supabaseAdmin();
+  const [{ data: inAlbum }, { data: a }] = await Promise.all([
+    admin.from("asset_collection_map").select("asset_id").eq("collection_id", id).eq("asset_id", assetId).maybeSingle(),
+    admin.from("assets").select("id, file_name, r2_key, asset_type, status").eq("id", assetId).maybeSingle(),
+  ]);
+  const asset = a as { id: string; file_name: string; r2_key: string; asset_type: string; status: string } | null;
+  if (!inAlbum || !asset || asset.status !== "active") return NextResponse.json({ error: "ไม่พบไฟล์ในอัลบั้มนี้" }, { status: 404 });
+  if (asset.asset_type !== "video") return NextResponse.json({ error: "ตั้งปกได้เฉพาะคลิปวิดีโอ" }, { status: 400 });
+  const { error } = await admin.from("assets").update({ r2_key: key }).eq("id", assetId);
+  if (error) return NextResponse.json({ error: `ตั้งปกไม่สำเร็จ: ${error.message}` }, { status: 500 });
+  const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
+  await writeAudit(admin, { action: "file_cover", entityType: "content_album", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { asset_id: assetId, file_name: asset.file_name, old_key: asset.r2_key, new_key: key } });
+  return NextResponse.json({ data: { asset_id: assetId, r2_key: key }, error: null });
 }
 
 export async function DELETE(request: NextRequest, { params }: Params): Promise<NextResponse> {

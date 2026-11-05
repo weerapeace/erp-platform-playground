@@ -66,6 +66,13 @@ async function uploadPreview(file: File): Promise<string> {
   return j.r2_key;
 }
 
+/** 🎬 ตั้งปกคลิปในอัลบั้มใหม่ (เฟรมที่เลือก / รูปที่อัปเอง) → รูปย่อใน R2 + assets.r2_key · คืน key ใหม่ */
+export async function setAlbumFileCover(albumId: string, assetId: string, cover: File): Promise<string> {
+  const key = await uploadPreview(cover);
+  await json(await send(`/api/content-albums/${albumId}/files`, "PATCH", { asset_id: assetId, preview_key: key }));
+  return key;
+}
+
 async function imageSize(file: File): Promise<{ width: number; height: number } | null> {
   try { const b = await createImageBitmap(file); const s = { width: b.width, height: b.height }; b.close(); return s; } catch { return null; }
 }

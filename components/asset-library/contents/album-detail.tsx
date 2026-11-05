@@ -22,6 +22,7 @@ import { Icon } from "@/components/icon";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { UploadProgress } from "@/components/upload-progress";
 import { r2ImageUrl } from "@/lib/r2-image";
+import { posterFromImageFile, posterFromVideoElement, type VideoPoster } from "@/lib/video-poster";
 import { downloadImagesAsZip } from "@/lib/zip";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { analyzeAlbumPhotos } from "./cull";
@@ -37,7 +38,7 @@ import { codeLike } from "@/lib/website-image-match";
 import type { ContentCreatePreset } from "@/app/tasks/content/content-create-modal";
 import { useFileDrop } from "@/components/file-drop";
 import { useDragReorder, moveItem } from "@/components/sortable-list";
-import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, startAlbumUploadTask, onAlbumUpload, syncAlbumDrive, aiAlbumCaption,
+import { getContentAlbum, getAlbumDriveInfo, updateContentAlbum, trashContentAlbum, removeAlbumFile, startAlbumUploadTask, onAlbumUpload, syncAlbumDrive, aiAlbumCaption, setAlbumFileCover,
   albumPostPreset, pendingUploadsFor, clearPendingUploads,
   type AlbumDetail, type AlbumDriveInfo, type AlbumFile, type AlbumUploadStep, type PendingUpload } from "./data";
 import { StageBadge, PlatChip, FileThumb, PickMediaButtons, isAlbumMedia, ALBUM_ACCEPT } from "./album-bits";
@@ -64,6 +65,10 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
   const [drive, setDrive] = useState<AlbumDriveInfo | null>(null);
   const [step, setStep] = useState<AlbumUploadStep | null>(null);
   const [viewFile, setViewFile] = useState<AlbumFile | null>(null);
+  // 🎬 ปกคลิป (เลือกเฟรมจากวิดีโอที่เปิดดู / อัปรูปเอง)
+  const viewVideoRef = useRef<HTMLVideoElement>(null);
+  const coverInputRef = useRef<HTMLInputElement>(null);
+  const [coverBusy, setCoverBusy] = useState(false);
   const [delFile, setDelFile] = useState<AlbumFile | null>(null);
   const [delDrive, setDelDrive] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -230,6 +235,25 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
     setAiPlat(null);
     setOpenPlats((cur) => new Set([...cur, ...targets]));
     if (ok) toast.success(t(`AI เขียนแล้ว ${ok} แพลตฟอร์ม — ตรวจทานได้เลย (บันทึกให้แล้ว)`, `AI wrote ${ok} platform(s) — saved`));
+  };
+  const applyCover = async (poster: VideoPoster | null) => {
+    const f = viewFile;
+    if (!f) return;
+    if (!poster) { toast.error(t("ทำรูปปกไม่ได้ — ลองเลื่อนวิดีโอใหม่อีกที หรือกด “อัปรูปเป็นปก”", "Couldn't make the cover — scrub again or upload an image")); return; }
+    setCoverBusy(true);
+    try {
+      const key = await setAlbumFileCover(albumId, f.id, poster.file);
+      setViewFile((v) => (v && v.id === f.id ? { ...v, r2_key: key } : v));
+      toast.success(t("ตั้งปกคลิปแล้ว", "Video cover set"));
+      await load(true); onChanged();
+    } catch (e) { toast.error((e as Error).message); }
+    finally { setCoverBusy(false); }
+  };
+  const coverFromFrame = async () => {
+    const el = viewVideoRef.current;
+    if (!el || !viewFile) return;
+    el.pause();
+    await applyCover(await posterFromVideoElement(el, viewFile.file_name));
   };
   const closeAll = () => { flushDrafts(); commitText(); onClose(); };
 
@@ -470,7 +494,7 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
             <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-sm font-semibold text-slate-700">{t(`ไฟล์ในอัลบั้ม (${files.length})`, `Files (${files.length})`)}</h3>
               {pickedCount > 0 && <span className="text-xs text-violet-700">{t(`เลือกใช้ ${pickedCount} ไฟล์`, `${pickedCount} picked`)}</span>}
-              {canEdit && files.length > 0 && !pickMode && <span className="text-xs text-slate-400">{t("แตะรูป = ดูรูปใหญ่ · ดาว = ปกอัลบั้ม · กดค้างที่รูปแล้วลาก (หรือ ‹ ›) = เรียงลำดับ", "Tap = view · star = cover · hold and drag (or ‹ ›) = reorder")}</span>}
+              {canEdit && files.length > 0 && !pickMode && <span className="text-xs text-slate-400">{t("แตะรูป = ดูรูปใหญ่ (คลิป = เลือกปกคลิปได้) · ดาว = ปกอัลบั้ม · กดค้างที่รูปแล้วลาก (หรือ ‹ ›) = เรียงลำดับ", "Tap = view (videos: pick the cover) · star = cover · hold and drag (or ‹ ›) = reorder")}</span>}
               {files.length > 0 && (
                 <span className="ml-auto flex flex-wrap gap-2">
                   {canEdit && !pickMode && (
@@ -654,9 +678,24 @@ export function AlbumDetailModal({ albumId, brands, onClose, onChanged }: {
             {viewFile.drive_file_id && <a href={driveFileUrl(viewFile.drive_file_id)} target="_blank" rel="noreferrer" className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"><Icon name="open" />{t("เปิดใน Drive", "Open in Drive")}</a>}
             {viewFile.drive_file_id && <a href={`/api/drive-video/${viewFile.drive_file_id}?dl=1`} className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"><Icon name="download" />{t("ดาวน์โหลดต้นฉบับ", "Download original")}</a>}
           </div>}>
+          {viewFile.asset_type === "video" && canEdit && (
+            <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-sm">
+              <Icon name="image" />
+              <span className="min-w-0 flex-1 text-violet-800">{t("ปกคลิป: เลื่อนวิดีโอไปเฟรมที่อยากได้ (หยุดค้างไว้) แล้วกด “ใช้เฟรมนี้เป็นปก” · หรืออัปรูปเอง", "Video cover: scrub to the frame you want, pause, then use this frame · or upload an image")}</span>
+              {viewFile.drive_file_id && (
+                <button onClick={() => void coverFromFrame()} disabled={coverBusy} className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg bg-violet-600 text-sm font-medium text-white hover:bg-violet-700 disabled:opacity-50">
+                  <Icon name="camera" />{coverBusy ? t("กำลังตั้งปก…", "Setting…") : t("ใช้เฟรมนี้เป็นปก", "Use this frame")}
+                </button>
+              )}
+              <button onClick={() => coverInputRef.current?.click()} disabled={coverBusy} className="h-8 px-3 inline-flex items-center gap-1.5 rounded-lg border border-violet-300 bg-white text-sm text-violet-700 hover:bg-violet-100 disabled:opacity-50">
+                <Icon name="upload" />{t("อัปรูปเป็นปก", "Upload cover")}
+              </button>
+              <input ref={coverInputRef} type="file" accept="image/*" hidden onChange={(e) => { const img = e.target.files?.[0]; e.target.value = ""; if (img) void posterFromImageFile(img).then(applyCover); }} />
+            </div>
+          )}
           <div className="grid place-items-center bg-slate-900/5 rounded-lg min-h-[50vh]">
             {viewFile.asset_type === "video" && viewFile.drive_file_id ? (
-              <video controls preload="metadata" className="max-h-[70vh] max-w-full" src={`/api/drive-video/${viewFile.drive_file_id}`}
+              <video ref={viewVideoRef} controls preload="metadata" className="max-h-[70vh] max-w-full" src={`/api/drive-video/${viewFile.drive_file_id}`}
                 poster={viewFile.r2_key.startsWith("drive:") ? undefined : r2ImageUrl(viewFile.r2_key, 1280) ?? undefined} />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element
