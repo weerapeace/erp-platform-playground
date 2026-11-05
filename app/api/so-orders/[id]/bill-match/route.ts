@@ -30,6 +30,18 @@ const CHUNK = 200;
 const chunks = <T,>(a: T[]) => { const o: T[][] = []; for (let i = 0; i < a.length; i += CHUNK) o.push(a.slice(i, i + CHUNK)); return o; };
 const up = (s: unknown) => String(s ?? "").trim().toUpperCase();
 
+/** ใบผลิตที่ถูกลบ/ยกเลิกแล้ว — การผูกบิลกับใบพวกนี้ "ค้าง" (เช่น MO-00038 ใบซ้ำที่ลบไป) → ถือว่าบิลว่าง และปิดการผูกค้างตอนผูกใหม่ */
+async function deadMoIds(admin: Admin, ids: string[]): Promise<Set<string>> {
+  const dead = new Set<string>();
+  for (const part of chunks([...new Set(ids)])) {
+    const { data } = await admin.from("manufacturing_orders").select("id, is_active, status").in("id", part);
+    const seen = new Set<string>();
+    for (const m of (data ?? []) as Row[]) { seen.add(String(m.id)); if (m.is_active === false || m.status === "cancelled") dead.add(String(m.id)); }
+    for (const x of part) if (!seen.has(x)) dead.add(x);   // ไม่มีใบนี้แล้ว
+  }
+  return dead;
+}
+
 export type BillMatchMo = { id: string; mo_no: string; status: string | null; qty: number; received: number };
 export type BillMatchLine = {
   line_id: string; line_no: number; sku: string | null; name: string; ordered: number; shipped: number;
@@ -58,10 +70,13 @@ async function loadBills(admin: Admin, skus: string[], cust: { id: string | null
     }
   }
   const byId = new Map(lines.map((l) => [l.id, l]));
+  const raw: Row[] = [];
   for (const part of chunks([...byId.keys()])) {
     const { data } = await admin.from("mo_sales_links").select("mo_id, mo_no, sale_line_id, qty").in("sale_line_id", part).eq("is_active", true);
-    for (const k of (data ?? []) as Row[]) byId.get(String(k.sale_line_id))?.links.push({ mo_id: String(k.mo_id), mo_no: String(k.mo_no ?? ""), qty: n(k.qty) });
+    raw.push(...((data ?? []) as Row[]));
   }
+  const dead = await deadMoIds(admin, raw.map((k) => String(k.mo_id)));
+  for (const k of raw) if (!dead.has(String(k.mo_id))) byId.get(String(k.sale_line_id))?.links.push({ mo_id: String(k.mo_id), mo_no: String(k.mo_no ?? ""), qty: n(k.qty) });
   return lines;
 }
 
@@ -178,6 +193,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     ]);
     blData.push(...((a ?? []) as Row[])); links.push(...((b ?? []) as Row[]));
   }
+  // ผูกค้างกับใบผลิตที่ลบ/ยกเลิกแล้ว → ไม่นับ + ปิดทิ้งตอนผูกใหม่
+  const dead = await deadMoIds(admin, links.map((k) => String(k.mo_id)));
+  const stale = links.filter((k) => dead.has(String(k.mo_id)));
+  const live = links.filter((k) => !dead.has(String(k.mo_id)));
   const bills = new Map<string, { id: string; sale_id: string; so_number: string; date: string; sku: string; qty: number; status: string }>();
   for (const l of blData) {
     const h = (Array.isArray(l.erp_playground_sales_orders) ? l.erp_playground_sales_orders[0] : l.erp_playground_sales_orders) as Row;
@@ -185,10 +204,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 
   // ── ตรวจทั้งหมดก่อนเขียน (ไม่ให้ผูกครึ่ง ๆ) ──
-  const offRows = new Set<string>();                  // แถวผูกเดิมที่ต้องปิด (ย้ายออก)
+  const offRows = new Set<string>(stale.map((k) => String(k.id)));   // แถวผูกเดิมที่ต้องปิด (ย้ายออก + ผูกค้างกับใบที่ลบแล้ว)
   const remain: Row[] = [];                           // ส่วนที่เหลือของแถวเดิม (ย้ายออกบางส่วน) → ผูกกลับให้ใบเดิม
   const used = new Map<string, number>();
-  for (const k of links) used.set(String(k.sale_line_id), (used.get(String(k.sale_line_id)) ?? 0) + n(k.qty));
+  for (const k of live) used.set(String(k.sale_line_id), (used.get(String(k.sale_line_id)) ?? 0) + n(k.qty));
   for (const it of items) {
     const b = bills.get(it.sale_line_id);
     if (!b) return bad("ไม่พบบรรทัดใบขาย");
@@ -198,7 +217,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!to || to.is_active === false || to.status === "cancelled") return bad("ไม่พบใบสั่งผลิตปลายทาง (หรือยกเลิกแล้ว)");
     if (up(to.product_sku) !== up(b.sku)) return bad(`รหัสสินค้าใน ${b.so_number} ไม่ตรงกับ ${to.mo_no}`);
     if (it.from_mo_id) {
-      const rows = links.filter((k) => String(k.sale_line_id) === it.sale_line_id && String(k.mo_id) === it.from_mo_id && !offRows.has(String(k.id)));
+      const rows = live.filter((k) => String(k.sale_line_id) === it.sale_line_id && String(k.mo_id) === it.from_mo_id && !offRows.has(String(k.id)));
       let need = it.qty;
       for (const k of rows) {
         if (need <= MO_QTY_EPS) break;
@@ -244,6 +263,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (from) byFrom.set(String(from.id), [...(byFrom.get(String(from.id)) ?? []), { so_number: b.so_number, qty: it.qty, to: String(to.mo_no) }]);
   }
   await writeAuditMany(admin, [
+    ...stale.map((k) => ({ action: "mo.sales_unlink", entityType: "mo", entityId: String(k.mo_id), ...actor, metadata: { mo_no: k.mo_no, parts: [{ so_number: k.so_number, qty: n(k.qty) }], via: "so_bill_match", so_order_no: orderNo, reason: "ใบสั่งผลิตถูกลบ/ยกเลิกแล้ว — ปิดการผูกค้าง" } })),
     ...[...byFrom].map(([moId, parts]) => ({ action: "mo.sales_unlink", entityType: "mo", entityId: moId, ...actor, metadata: { mo_no: mos.get(moId)?.mo_no, parts, via: "so_bill_match", so_order_no: orderNo, moved: true } })),
     ...[...byTo].map(([moId, parts]) => ({ action: "mo.sales_link", entityType: "mo", entityId: moId, ...actor, metadata: { mo_no: mos.get(moId)?.mo_no, parts, via: "so_bill_match", so_order_no: orderNo } })),
   ]);
