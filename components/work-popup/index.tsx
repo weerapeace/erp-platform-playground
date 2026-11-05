@@ -24,6 +24,8 @@ import type { WorkPopupFlag, WorkPopupItem, WorkPopupPayload, WorkPopupTask } fr
 import { isChromelessPath } from "@/lib/chromeless-routes";
 import { WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScreen, useWorkPopupFloatPref, type FloatTab } from "./float";
 import { GifInbox, type GifPoke } from "./gif-inbox";
+import { LineInboxTab, linePendingCount } from "./line-inbox-tab";
+import type { LinePendingPayload } from "@/lib/line-pending";
 import { petBadge, petMood } from "@/lib/floating-pet";
 import type { UserPickerValue } from "@/components/pickers";
 import dynamic from "next/dynamic";
@@ -231,7 +233,7 @@ export function WorkPopupHost() {
   // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);   // ค่าคงที่ — การ์ดผูกตัวฟัง "กดข้างนอก" ครั้งเดียว
-  const [tab, setTab] = useState<"work" | "gif">("work");
+  const [tab, setTab] = useState<"work" | "gif" | "line">("work");
 
   // ── แท็บ GIF: กล่องรับ "ส่ง GIF ให้เพื่อน" (จอคอมเท่านั้น — ตัว Pet อยู่บนจอคอม) ──
   const [pokes, setPokes] = useState<GifPoke[]>([]);
@@ -253,6 +255,25 @@ export function WorkPopupHost() {
     const iv = window.setInterval(() => { if (document.visibilityState === "visible") void loadPokes(); }, POKE_POLL_MS);
     return () => { clearTimeout(first); window.clearInterval(iv); };
   }, [uid, skip, enabled, wide, loadPokes]);
+  // ── แท็บ LINE: ของจากกลุ่มไลน์ที่ยังรอคนจัดการ (งานออกแบบ / คำสั่งซื้อ — ตามสิทธิ์) · โหลดพร้อมรอบ GIF ──
+  const [linePending, setLinePending] = useState<LinePendingPayload | null>(null);
+  const loadLine = useCallback(async () => {
+    if (!uid) return;
+    try {
+      const r = await apiFetch("/api/line/pending");
+      if (!r.ok) return;
+      const j = (await r.json()) as { data?: LinePendingPayload };
+      setLinePending(j.data ?? null);
+    } catch { /* เงียบ */ }
+  }, [uid]);
+  useEffect(() => {
+    if (!uid || skip || !enabled || !wide) return;
+    const first = setTimeout(() => void loadLine(), 3500);
+    const iv = window.setInterval(() => { if (document.visibilityState === "visible") void loadLine(); }, POKE_POLL_MS);
+    return () => { clearTimeout(first); window.clearInterval(iv); };
+  }, [uid, skip, enabled, wide, loadLine]);
+  useRefresh(() => { if (wide && enabled && !skip) void loadLine(); });
+  const lineCount = linePendingCount(linePending);
   const dismissPoke = (id: string) => {
     setPokes((ps) => ps.filter((p) => p.id !== id));
     void apiFetch("/api/gif-poke", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {});
@@ -320,11 +341,11 @@ export function WorkPopupHost() {
       const age = Date.now() - lastCheck.current;
       if (age > RECHECK_MS) void check();
       else if (wide && queueLenRef.current > 0 && age > 60_000) void check(undefined, true);
-      if (wide && age > 60_000) void loadPokes();
+      if (wide && age > 60_000) { void loadPokes(); void loadLine(); }
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [uid, skip, check, wide, loadPokes]);
+  }, [uid, skip, check, wide, loadPokes, loadLine]);
 
   // จอคอม: แสดงตัวที่ถึงเวลาก่อน ไม่มีก็ตัวแรก (เป็นปุ่มเล็ก) · จอเล็ก: เฉพาะตัวที่ถึงเวลา (หน้าต่างกลางจอแบบเดิม)
   const cur = (wide ? (queue.find((x) => x.due) ?? queue[0]) : queue.find((x) => x.due !== false)) ?? null;
@@ -345,6 +366,13 @@ export function WorkPopupHost() {
     if (openInStandaloneApp(path)) return;
     if (isStandaloneAppPath(pathname)) { window.open(path, "_blank", "noopener"); return; }
     router.push(path);
+  };
+  // ปุ่มในแท็บ LINE → หน้าที่จัดการรายการนั้น (แอปเดี่ยว = เปิดในแท็บเมนูของแอป · หน้าเดียวกันอยู่แล้ว = โหลดใหม่ให้เปิดรายการ)
+  const go = (href: string) => {
+    if (openInStandaloneApp(href)) return;
+    if (isStandaloneAppPath(pathname)) { window.open(href, "_blank", "noopener"); return; }
+    if (href.split("?")[0] === pathname) { window.location.assign(href); return; }
+    router.push(href);
   };
   const tick = async (taskId: string, isDone: boolean) => {
     setDone((s) => { const n = new Set(s); if (isDone) n.add(taskId); else n.delete(taskId); return n; });
@@ -383,11 +411,15 @@ export function WorkPopupHost() {
 
   // ── ศูนย์แจ้งเตือน (จอคอม): ตัว Pet + แท็บ งาน / GIF ──
   const workCount = cur ? (cur.audience === "mine" ? mineOpen : cur.stats.total) : 0;
-  const floatOn = wide && !skip && (enabled || (!!cur && forced.has(cur.report_id))) && (!!cur || (enabled && pokes.length > 0));
+  const floatOn = wide && !skip && (enabled || (!!cur && forced.has(cur.report_id))) && (!!cur || (enabled && (pokes.length > 0 || lineCount > 0)));
   const tabs: FloatTab[] = [
     ...(cur && visible ? [{
       key: "work", label: "งาน", icon: "list", count: workCount, subtitle: `${title} · ${subtitle}`, footer,
       content: <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />,
+    }] : []),
+    ...(enabled && lineCount > 0 ? [{
+      key: "line", label: "LINE", icon: "chat", count: lineCount, subtitle: "ส่งเข้ากลุ่มไลน์แล้ว รอคนจัดการ",
+      content: <LineInboxTab data={linePending} onGo={go} />,
     }] : []),
     ...(enabled ? [{
       key: "gif", label: "GIF", icon: "gift", count: pokes.length, subtitle: "GIF ที่เพื่อนส่งมา",
@@ -398,8 +430,8 @@ export function WorkPopupHost() {
   const activeTab = tabs.some((x) => x.key === tab) ? tab : (tabs[0]?.key ?? "work");
   const petAlert = pending || newPokes.length > 0;
   const petState = {
-    mood: petMood({ total: workCount + pokes.length, alert: petAlert }),
-    badge: petBadge(workCount + pokes.length),
+    mood: petMood({ total: workCount + pokes.length + lineCount, alert: petAlert }),
+    badge: petBadge(workCount + pokes.length + lineCount),
     bubble: pending ? pill : newPokes.length ? `${newPokes[newPokes.length - 1].from_name ?? "เพื่อน"} ส่ง GIF มา` : null,
   };
 
@@ -407,13 +439,14 @@ export function WorkPopupHost() {
     <>
       <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
       {wide ? (floatOn && tabs.length > 0 && (
-        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" ? "gif" : "work")} pet={petState}
+        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" ? k : "work")} pet={petState}
           onMinimize={collapse}
           onExpand={() => {
             setExpanded(true);
-            setTab(!pending && newPokes.length > 0 ? "gif" : cur ? "work" : "gif");
+            setTab(!pending && newPokes.length > 0 ? "gif" : cur ? "work" : lineCount > 0 ? "line" : "gif");
             if (cur) void check(undefined, true);
             void loadPokes();
+            void loadLine();
           }} />
       )) : visible && cur && (
         <ERPModal open onClose={() => finish(cur, "later")} size="lg" defaultExpanded={false} storageKey="work-popup" zIndex={300}

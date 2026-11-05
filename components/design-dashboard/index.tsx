@@ -182,6 +182,16 @@ export function DesignDashboard() {
     const id = sp.get("open");
     if (id) setOpenSheetId(id);   // เปิดด้วยลิงก์ ?open=ID (refresh/copy link แล้วยังเปิดงานเดิม)
     if (sp.get("inbox") === "1") setInboxOpen(true);   // ลิงก์จากบอทไลน์ "ดูในระบบ" → เปิดกล่องงานจากไลน์
+    // ?convert=ID (แท็บ LINE ในศูนย์แจ้งเตือน "เปิดใบงาน") → เปิดฟอร์มสร้างใบงานจากร่างนั้นเลย · ไม่เจอ/เปิดไปแล้ว = ค้างที่กล่องจากไลน์
+    const convertId = sp.get("convert");
+    if (convertId) {
+      void apiFetch("/api/design-sheets/line-inbox?tab=pending").then((r) => (r.ok ? r.json() : null)).then((j: { items?: LineInboxItem[] } | null) => {
+        const it = j?.items?.find((x) => x.id === convertId);
+        if (it) convertFromInbox(it);
+      }).catch(() => {});
+      const url = new URL(window.location.href); url.searchParams.delete("convert"); window.history.replaceState(null, "", url.toString());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const router = useRouter();
   const openDetail = (id: string | null) => {
