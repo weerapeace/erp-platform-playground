@@ -13,6 +13,8 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAuditMany } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { bracketCode, skuIdsByBracketCode } from "@/lib/pr-line-code";
+import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
+import { shopDefaultCurrency, type ShopCurrencyInfo } from "@/lib/po-currency";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -70,7 +72,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ---- เติม "ร้าน + ราคา" จากร้านหลัก ★ ของ SKU ให้อัตโนมัติ (ของกลาง: ตารางร้านที่จำหน่าย) ----
   // ใบที่มาจาก BOM/ใบสั่งผลิตมักไม่ได้ส่งร้าน/ราคามาด้วย → ดึงจาก SKU ให้เลย จะได้ไม่ต้องมาตั้งร้านทีหลัง
   const needFill = items.filter((it) => it.sku_id && (!it.seller_name || !(num(it.price_est) > 0)));
-  const fillMap = new Map<string, { seller: string | null; price: number | null; currency: string }>();
+  const fillMap = new Map<string, { seller: string | null; price: number | null; currency: string | null }>();
   if (needFill.length) {
     const skuIds = [...new Set(needFill.map((it) => String(it.sku_id)))];
     for (let i = 0; i < skuIds.length; i += 300) {
@@ -86,11 +88,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         fillMap.set(k, {
           seller: p?.display_name || p?.name_th || null,
           price: r.price == null ? null : Number(r.price),
-          currency: String(r.currency ?? "THB"),
+          currency: r.currency ? String(r.currency) : null,   // ว่าง = ไปใช้สกุลตั้งต้นของร้าน (currencyOf)
         });
       }
     }
   }
+
+  // ---- สกุลตั้งต้นตามร้าน (lib/po-currency) — ใช้เมื่อผู้เรียกไม่ได้ส่งสกุลมา และไม่มีราคาร้านใน SKU ให้ดึง ----
+  // เดิมตกเป็น "THB" ทุกกรณี → ร้านจีนได้ใบบาท (เจ้าของเจอ 2026-11-05) · ร้านจีน = หยวน, ร้านอื่น = ตามสกุลที่ตั้งไว้
+  const sellerOf = (it: typeof items[number]) => it.seller_name || (it.sku_id ? fillMap.get(String(it.sku_id))?.seller ?? null : null);
+  const needShopCur = items.some((it) => !it.currency && sellerOf(it) && !(it.sku_id && !(num(it.price_est) > 0) && fillMap.get(String(it.sku_id))?.currency));
+  let shopCurOf: (name: string | null) => string | null = () => null;
+  if (needShopCur) {
+    const { data: ps } = await admin.from("partners_v2").select("id, display_name, name_th, name_en, is_supplier, is_active, shop_country, default_currency, is_taobao");
+    const matcher = buildPartnerMatcher((ps ?? []) as unknown as (PartnerLike & NonNullable<ShopCurrencyInfo>)[]);
+    shopCurOf = (name) => (name ? shopDefaultCurrency(matcher.match(name) ?? null) : null);
+  }
+  const currencyOf = (it: typeof items[number]): string => {
+    if (it.currency) return it.currency;
+    const fill = it.sku_id && !(num(it.price_est) > 0) ? fillMap.get(String(it.sku_id)) : undefined;
+    if (fill?.currency) return fill.currency;                 // ราคามาจากราคาร้านใน SKU → ใช้สกุลของราคานั้น
+    return shopCurOf(sellerOf(it)) ?? "THB";
+  };
 
   // ---- ออกเลขกลางทีละใบ (atomic) แล้ว insert รวดเดียว ----
   const rows: Record<string, unknown>[] = [];
@@ -107,7 +126,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // ร้าน/ราคา: ใช้ที่ส่งมาก่อน · ไม่มี → ดึงจากร้านหลัก ★ ของ SKU
       seller_name: it.seller_name || (it.sku_id ? fillMap.get(String(it.sku_id))?.seller ?? null : null),
       price_est: num(it.price_est) > 0 ? num(it.price_est) : (it.sku_id ? (fillMap.get(String(it.sku_id))?.price ?? 0) : 0),
-      currency: it.currency || (it.sku_id && !(num(it.price_est) > 0) ? fillMap.get(String(it.sku_id))?.currency ?? "THB" : "THB"),
+      currency: currencyOf(it),
       image_key: it.image_key ?? null, note: it.note ?? null,
       reason: it.reason ?? null,
       used_for_sku_id: it.used_for_sku_id ?? null, used_for_label: it.used_for_label ?? null,

@@ -11,12 +11,17 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { createPortal } from "react-dom";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { PrHistoryButton } from "@/components/pr-history";
+import { isChinaShop, type ShopCurrencyInfo } from "@/lib/po-currency";
 import { RejectedPanel } from "./orders/approval";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
 import { SkuFormModal } from "@/components/sku-form-modal";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 import { SkuTagBrowser } from "@/components/sku-tag-browser";
+import nextDynamic from "next/dynamic";
+import type { PrCreateItem } from "@/components/pr-create-modal";
+// แท็บ "แผงผ้า" — ของกลาง SwatchBrowser (โหมดเลือกใส่ตะกร้า) โหลดเมื่อเปิดแท็บเท่านั้น
+const SwatchBrowser = nextDynamic(() => import("@/components/sku-swatch-browser").then((m) => m.SwatchBrowser), { ssr: false });
 import { RecordFormModal } from "@/components/record-form-modal";
 import { ERPModal, useBackdropDismiss } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -49,7 +54,7 @@ type Line = { label: string; qty: number; uom: string; seller: string; price: nu
 // เหตุผลที่ขอซื้อ (บังคับในป๊อป "เพิ่มลงใบขอซื้อ") — 2 โหมด: เลือกเหตุผล (ข้อความ) หรือ อ้างใบสั่งผลิต
 // รองรับผูกหลายใบสั่งผลิต (m2m) — moNo/moLabel = ตัวหลัก (ตัวแรก) คงไว้ให้โค้ดเดิม, moNos/moLabels = ครบทุกใบ
 type ReasonPick = { text: string; moNo: string | null; moLabel: string | null; moNos: string[]; moLabels: string[] };
-type Source = "sku" | "group" | "favorite" | "frequent" | "tags" | "mo";
+type Source = "sku" | "group" | "favorite" | "frequent" | "tags" | "mo" | "swatch";
 
 // แท็บ "ใบสั่งผลิต": วัตถุดิบที่ต้องซื้อ 1 ตัว (ของใบใดใบหนึ่ง)
 type MoMat = { code: string | null; name: string | null; image: string | null; type: string | null; uom: string | null; needed: number };
@@ -317,6 +322,7 @@ export default function PurchasingShopPage() {
 
   // เรตหยวน→บาท ล่าสุด (ใช้โชว์ราคาบาทประมาณ คู่กับ ¥)
   const [cnyRate, setCnyRate] = useState(0);
+  const [cnShops, setCnShops] = useState<Set<string>>(() => new Set());
   useEffect(() => {
     if (!bootDone) return;   // perf: เรตหยวน (ใช้ในป๊อป) โหลดหลัง grid
     apiFetch("/api/master-v2/daily-rates?limit=1&sort_by=rate_date&sort_dir=desc").then(r => r.json())
@@ -482,7 +488,12 @@ export default function PurchasingShopPage() {
     if (!bootDone) return;   // perf: ร้าน + ตัวกรอง โหลดหลัง grid (grid ใช้ค่า cache ไปก่อนแล้ว)
     apiFetch("/api/master-v2/partners?limit=500").then(r => r.json()).then(j => {
       const m: Record<string, string> = {};
-      (j.data ?? []).forEach((p: Record<string, unknown>) => { m[String(p.id)] = String(p.country ?? "TH"); });
+      const cn = new Set<string>();   // ชื่อร้านจีน (กติกา lib/po-currency) — ตะกร้าเตือน "ร้านจีน แต่ราคาเป็นบาท"
+      (j.data ?? []).forEach((p: Record<string, unknown>) => {
+        m[String(p.id)] = String(p.country ?? "TH");
+        if (isChinaShop(p as ShopCurrencyInfo)) for (const k of [p.display_name, p.name_th, p.code]) if (k) cn.add(String(k).trim());
+      });
+      setCnShops(cn);
       setPartnerCountry(m);
       try { localStorage.setItem(PCTRY_KEY, JSON.stringify(m)); } catch { /* ignore */ }   // cache ไว้ใช้รอบหน้า
     }).catch(() => {});
@@ -571,6 +582,23 @@ export default function PurchasingShopPage() {
     } catch { toast.error("โหลดสินค้าไม่สำเร็จ"); }
   }, [fetchSkusByIds, toast]);
 
+  // แท็บ "แผงผ้า": 1 ชิ้น = เปิดป๊อปเพิ่มลงใบขอซื้อ (ถามจำนวน/เหตุผลเหมือนแท็บอื่น)
+  //   หลายชิ้น = ใส่ตะกร้ารวดเดียว จำนวน 1 (แก้ในตะกร้าได้) · เหตุผล = มาจากแผงไหน · ใช้ราคา/ร้านจาก SKU เหมือนการ์ดปกติ
+  const addFromSwatch = useCallback(async (items: PrCreateItem[], note: string) => {
+    if (items.length === 0) return;
+    if (items.length === 1) { void openSkuById(items[0].sku_id); return; }
+    try {
+      const got = (await fetchSkusByIds(items.map((i) => i.sku_id))).filter((c) => c.sku);
+      setCart((p) => [...p, ...got.map((c) => {
+        const s = c.sku!;
+        return { label: c.name, qty: 1, uom: s.uom, seller: s.seller, price: s.price, currency: s.currency, image: c.image_key, variationId: null, skuRef: s.code, skuId: c.id, note: "", reason: note || null };
+      })]);
+      const skipped = items.length - got.length;
+      if (got.length) toast.success(`ใส่ตะกร้าแล้ว ${got.length} รายการ — ตั้งจำนวนในตะกร้าได้`);
+      if (skipped) toast.warning(`${skipped} รายการเพิ่มไม่ได้ (อาจถูกตั้งเป็นห้ามขอซื้อ)`);
+    } catch { toast.error("โหลดสินค้าไม่สำเร็จ"); }
+  }, [fetchSkusByIds, openSkuById, toast]);
+
   // ข้อ 3: กำกับลำดับคำขอ — แสดงเฉพาะผลของคำค้นล่าสุด (กัน race คำขอเก่ามาทับ)
   const reqIdRef = useRef(0);
   const fetchCards = useCallback(async (pg: number) => {
@@ -620,8 +648,8 @@ export default function PurchasingShopPage() {
           image_key: (g.image_key as string) ?? null,
         }));
         nextTotal = nextCards.length;
-      } else if (source === "mo") {
-        // แท็บใบสั่งผลิต — ใช้ข้อมูลจาก /api/mo/purchase-needs (โหลดแยก) ไม่ผ่าน pipeline การ์ดปกติ
+      } else if (source === "mo" || source === "swatch") {
+        // แท็บใบสั่งผลิต (/api/mo/purchase-needs) / แผงผ้า (SwatchBrowser) — โหลดเอง ไม่ผ่าน pipeline การ์ดปกติ
         nextCards = []; nextTotal = 0;
       } else {
         // favorite | frequent — โหลดรายการ id แล้วดึง SKU (กรองด้วยคำค้นฝั่ง client)
@@ -869,7 +897,7 @@ export default function PurchasingShopPage() {
             {([
               ["sku", "SKU จริง"], ["tags", "🏷️ ตาม Tags"],
               ["favorite", "⭐ รายการโปรด"], ["frequent", "🔁 ซื้อบ่อย"],
-              ["mo", "🏭 ใบสั่งผลิต"],
+              ["mo", "🏭 ใบสั่งผลิต"], ["swatch", "🎨 แผงผ้า"],
             ] as [Source, string][]).map(([s, label]) => (
               <button key={s} onClick={() => switchSource(s)}
                 className={`py-1.5 rounded-md border transition-colors ${source === s ? "bg-blue-600 text-white border-blue-600" : "text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{label}</button>
@@ -948,6 +976,14 @@ export default function PurchasingShopPage() {
               <p className="text-slate-400">มีช่องค้นหา/กรองแท็กอยู่ในแถบด้านขวาแล้ว</p>
             </div>
           )}
+          {/* โหมด "แผงผ้า": แผ่นตัวอย่างจริง (Swatch) — กดชิ้นบนรูป หรือเลือกหลายชิ้นแล้วใส่ตะกร้า */}
+          {source === "swatch" && (
+            <div className="text-xs text-slate-500 leading-relaxed space-y-2">
+              <p>👉 เลือก <b>แผงผ้า</b> ทางขวา แล้วกดชิ้นบนรูป → ขอซื้อ (ถามจำนวน/เหตุผล)</p>
+              <p>หรือกด <b>☑ เลือกหลายรายการ</b> ติ๊กหลายชิ้น → ใส่ตะกร้าทีเดียว (จำนวน 1 แก้ในตะกร้าได้)</p>
+              <p className="text-slate-400">เพิ่ม/ตั้งค่าแผงได้ที่หน้า SKU แท็บ Swatch</p>
+            </div>
+          )}
         </aside>
 
         {/* Grid */}
@@ -1009,6 +1045,13 @@ export default function PurchasingShopPage() {
           {source === "tags" && (
             <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
               <SkuTagBrowser mode="pick" onPickSku={openSkuById} />
+            </div>
+          )}
+
+          {/* แท็บ "แผงผ้า": ของกลาง SwatchBrowser โหมดเลือกใส่ตะกร้า (onPickSkus) */}
+          {source === "swatch" && (
+            <div className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
+              <SwatchBrowser onPickSkus={addFromSwatch} />
             </div>
           )}
 
@@ -1320,7 +1363,7 @@ export default function PurchasingShopPage() {
           )}
 
           {/* การ์ดสินค้าทั่วไป (ทุกโหมดยกเว้น "ใบสั่งผลิต" และ "ตาม Tags" ที่ใช้ SkuTagBrowser) */}
-          {source !== "mo" && source !== "tags" && (<>
+          {source !== "mo" && source !== "tags" && source !== "swatch" && (<>
           {/* responsive: iPhone (<sm) 2 คอลัมน์ตายตัว · iPad+ ใช้ค่าที่ตั้ง (--cols, default 4 ปรับได้บนหัว) */}
           <div className={`grid gap-3 sm:gap-4 grid-cols-2 sm:[grid-template-columns:repeat(var(--cols),minmax(0,1fr))] transition-opacity duration-200 ${loading ? "opacity-40" : "opacity-100"}`} style={{ "--cols": cols } as CSSProperties}>
             {cards.map(c => (
@@ -1447,6 +1490,13 @@ export default function PurchasingShopPage() {
                 {l.note && <div className="text-[11px] text-amber-600 mt-0.5">📝 {l.note}</div>}
                 {l.urgent && <div className="text-[11px] text-rose-600 mt-0.5 font-medium">⚡ ส่งด่วน{l.useDate ? ` · ใช้ ${l.useDate}` : ""}</div>}
                 <div className="text-[11px] text-slate-400 mt-0.5">🏪 {l.seller}</div>
+                {/* ร้านจีน แต่ราคาเป็นบาท → ให้คนเลือก (ไม่เปลี่ยนเอง เพราะตัวเลขอาจเป็นบาทจริง) */}
+                {l.currency === "THB" && cnShops.has(String(l.seller ?? "").trim()) && (
+                  <div className="mt-1 flex items-center gap-1.5 flex-wrap text-[11px]">
+                    <span className="px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">ร้านจีน แต่ราคาเป็นบาท</span>
+                    <button type="button" onClick={() => setCart(c => c.map((x, j) => j === i ? { ...x, currency: "YUAN" } : x))} className="text-sky-700 hover:underline">ตัวเลขเป็นหยวน → เปลี่ยนเป็น ¥</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>

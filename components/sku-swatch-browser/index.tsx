@@ -12,6 +12,8 @@
  * ของกลางที่ใช้: ImageRegions (จุดบนรูป) · SkuPicker · TagGroupFilter · uploadImagesWithDupCheck (ถามรูปซ้ำ) · ERPModal · ConfirmDialog
  *               · MasterRecordDrawer · usePermission · useToast · apiFetch · r2ImageUrl
  * API: /api/sku-swatches (GET/POST/PATCH/DELETE) · สิทธิ์ตั้งค่า = products.edit · ดู = products.view
+ * โหมดเลือกใส่ตะกร้า (2026-11-05 หน้าขอซื้อ แท็บ "แผงผ้า"): ส่ง onPickSkus → "ขอซื้อ" / แถบเลือกหลายรายการ
+ *   ส่งรายการให้หน้าแม่ใส่ตะกร้าเอง (ไม่เปิดฟอร์มสร้างใบขอซื้อของตัวเอง)
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -58,9 +60,11 @@ async function uploadSwatchImage(file: File, dup: DuplicateCheckOptions) {
   return { image_key: key, image_w: size.w, image_h: size.h };
 }
 
-export function SwatchBrowser({ openId, focusSpotId }: {
+export function SwatchBrowser({ openId, focusSpotId, onPickSkus }: {
   /** เปิดแผ่นนี้ทันที (มาจากลิงก์ในหน้า SKU) */
   openId?: string | null;
+  /** โหมดเลือกใส่ตะกร้า (หน้าขอซื้อ) — มีค่า = ปุ่มขอซื้อส่งรายการให้หน้าแม่แทนการเปิดฟอร์มเอง */
+  onPickSkus?: (items: PrCreateItem[], sourceNote: string) => void;
   /** ชี้ตำแหน่งจุดนี้บนแผ่นที่เปิด (วงกะพริบชั่วคราว) */
   focusSpotId?: string | null;
 } = {}) {
@@ -170,7 +174,7 @@ export function SwatchBrowser({ openId, focusSpotId }: {
 
       {createOpen && <CreateSwatchModal onClose={() => setCreateOpen(false)} onCreated={(id) => { setCreateOpen(false); void load(false); setOpen({ id, edit: true }); }} />}
       {open && (
-        <SwatchViewer key={open.id} id={open.id} startEdit={open.edit} canEdit={canEdit} focusSpotId={open.spotId ?? null}
+        <SwatchViewer key={open.id} id={open.id} startEdit={open.edit} canEdit={canEdit} focusSpotId={open.spotId ?? null} onPickSkus={onPickSkus}
           onClose={() => setOpen(null)} onChanged={() => void load(false)} onDeleted={() => { setOpen(null); void load(false); }} />
       )}
     </div>
@@ -256,8 +260,9 @@ function CreateSwatchModal({ onClose, onCreated }: { onClose: () => void; onCrea
 type EditSpot = SwatchSpot;
 let tempSeq = 0;
 
-function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged, onDeleted }: {
+function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged, onDeleted, onPickSkus }: {
   id: string; startEdit: boolean; canEdit: boolean; focusSpotId?: string | null; onClose: () => void; onChanged: () => void; onDeleted: () => void;
+  onPickSkus?: (items: PrCreateItem[], sourceNote: string) => void;
 }) {
   const toast = useToast();
   const [data, setData] = useState<SwatchDetail | null>(null);
@@ -375,6 +380,12 @@ function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged,
     return out;
   };
   const checkedItems = toPrItems(viewSpots.filter((s) => checked.has(s.id)));
+  /** ขอซื้อ: โหมดเลือกใส่ตะกร้า = ส่งให้หน้าแม่ · ปกติ = เปิดฟอร์มสร้างใบขอซื้อ */
+  const requestItems = (items: PrCreateItem[]) => {
+    if (!items.length) return;
+    if (onPickSkus) { onPickSkus(items, `จากแผงผ้า: ${data ? titleOf(data) : ""}`.trim()); stopSelecting(); onClose(); return; }   // ปิดแผงกลับหน้าแม่ (ป๊อปยืนยัน/ตะกร้าของหน้าแม่อยู่ใต้แผงเต็มจอ)
+    setPrItems(items);
+  };
   const src = data?.image_key ? r2ImageUrl(data.image_key, zoom > 1.5 ? 2400 : 1600) ?? "" : "";
   const dupOf = (s: EditSpot) => !!s.sku_id && spots.some((o) => o.id !== s.id && o.sku_id === s.sku_id);
 
@@ -441,7 +452,7 @@ function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged,
                         </div>
                         <button type="button" role="menuitem" disabled={!canPr}
                           title={canPr ? "สร้างใบขอซื้อของชิ้นนี้" : "คุณไม่มีสิทธิ์สร้างใบขอซื้อ"}
-                          onClick={() => { close(); setPrItems(toPrItems([r])); }}
+                          onClick={() => { close(); requestItems(toPrItems([r])); }}
                           className="w-full px-3 py-2 flex items-center gap-2 text-sm text-slate-700 hover:bg-blue-50 disabled:opacity-40 disabled:hover:bg-white">
                           <span>🛒</span><span className="flex-1">ขอซื้อ</span>{!canPr && <span className="text-[10px] text-slate-400">ไม่มีสิทธิ์</span>}
                         </button>
@@ -568,9 +579,9 @@ function SwatchViewer({ id, startEdit, canEdit, focusSpotId, onClose, onChanged,
             <span className="text-sm whitespace-nowrap">เลือก <b className="tabular-nums">{checkedItems.length}</b> รายการ</span>
             <button onClick={() => setChecked(checked.size === viewSpots.length ? new Set() : new Set(viewSpots.map((s) => s.id)))}
               className="h-8 px-3 text-[12px] rounded-full bg-white/10 hover:bg-white/20 whitespace-nowrap">{checked.size === viewSpots.length ? "ไม่เลือกเลย" : "เลือกทั้งแผ่น"}</button>
-            <button onClick={() => setPrItems(checkedItems)} disabled={checkedItems.length === 0 || !canPr}
+            <button onClick={() => requestItems(checkedItems)} disabled={checkedItems.length === 0 || !canPr}
               title={!canPr ? "คุณไม่มีสิทธิ์สร้างใบขอซื้อ" : checkedItems.length === 0 ? "กดที่ชิ้นบนรูปเพื่อเลือกก่อน" : undefined}
-              className="h-8 px-4 text-[13px] font-medium rounded-full bg-blue-500 hover:bg-blue-400 disabled:opacity-40 disabled:hover:bg-blue-500 whitespace-nowrap">🛒 สร้างใบขอซื้อ</button>
+              className="h-8 px-4 text-[13px] font-medium rounded-full bg-blue-500 hover:bg-blue-400 disabled:opacity-40 disabled:hover:bg-blue-500 whitespace-nowrap">{onPickSkus ? "🛒 ใส่ตะกร้าขอซื้อ" : "🛒 สร้างใบขอซื้อ"}</button>
             <button onClick={() => setBundleItems(checkedItems.map((i) => ({ sku_id: i.sku_id, code: i.code, name: i.name, image: i.image })))} disabled={checkedItems.length === 0 || !canEdit}
               title={!canEdit ? "คุณไม่มีสิทธิ์แก้ไขสินค้า" : checkedItems.length === 0 ? "กดที่ชิ้นบนรูปเพื่อเลือกก่อน" : "สร้าง Bundle ใหม่ หรือเพิ่มเข้า Bundle ที่มีอยู่"}
               className="h-8 px-4 text-[13px] font-medium rounded-full bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-emerald-500 whitespace-nowrap">📦 เข้า Bundle</button>

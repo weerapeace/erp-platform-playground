@@ -19,6 +19,8 @@ import { formatDate } from "@/lib/date";
 import { FileInput } from "@/components/file-input";
 import { useFileRefUrls } from "@/components/file-ref";
 import type { GrDetail } from "@/app/api/purchasing/goods-receipt/[id]/route";
+import { PoCurrencyFixModal } from "@/components/po-currency-fix";
+import { isCny, currencyMismatch } from "@/lib/po-currency";
 
 const CASE_LABEL: Record<string, string> = { full: "รับครบ", full_defective: "รับครบ (มีเสีย)", partial_wait: "รับบางส่วน รอของ", partial_close: "ปิดยอด (ขาด)" };
 const stripCode = (name: string) => name.replace(/^\s*\[[^\]]*\]\s*/, "").trim() || name;
@@ -44,6 +46,7 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
   const [addOpen, setAddOpen] = useState(false);
   const [delOpen, setDelOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [curFix, setCurFix] = useState(false);   // ป๊อปแก้สกุลเงินใบ PO (ของกลาง po-currency-fix)
 
   // ลบทั้งใบ — คืนใบ PO/สต๊อกให้เหมือนไม่เคยรับ (soft delete เก็บประวัติ)
   const remove = async () => {
@@ -168,7 +171,11 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
               <div><span className="text-slate-400">ผู้รับ </span>{d.receiver || "—"}</div>
               <div><span className="text-slate-400">รายการ </span>{d.lines.length}</div>
               <div><span className="text-slate-400">รับรวม </span><b className="tabular-nums">{totalRecv.toLocaleString()}</b>{totalDef > 0 && <span className="text-red-600"> · เสีย {totalDef.toLocaleString()}</span>}</div>
-              <div><span className="text-slate-400">สกุลใบ PO </span>{["RMB", "YUAN", "CNY"].includes(d.currency) ? "¥ หยวน" : "฿ บาท"}</div>
+              <div className="inline-flex items-center gap-1.5 flex-wrap"><span className="text-slate-400">สกุลใบ PO </span>{isCny(d.currency) ? "¥ หยวน" : "฿ บาท"}
+                {/* ร้านจีนแต่ใบเป็นบาท = เตือน (กติกา lib/po-currency) · กดแก้ได้ทั้งใบ */}
+                {currencyMismatch(d.currency, d.shop_china ? { shop_country: "จีน" } : null) && <span className="text-[11px] px-1.5 py-0.5 rounded border bg-amber-50 text-amber-800 border-amber-300">ร้านอยู่จีน แต่ใบเป็นบาท</span>}
+                {canEdit && d.po_id && <button type="button" onClick={() => setCurFix(true)} className="text-[11px] text-sky-700 hover:underline">แก้สกุลเงิน</button>}
+              </div>
               <div><span className="text-slate-400">ใบสำคัญรับ </span>{d.voucher_id ? <a href={`/purchasing/vouchers/${d.voucher_id}`} target="_blank" rel="noreferrer" className="text-purple-700 hover:underline">🧾 {d.pv_no ?? "ร่าง"}{locked ? " (ยืนยันแล้ว)" : ""}</a> : <span className="text-slate-400">ยังไม่ออก</span>}</div>
               {d.note && <div className="w-full text-xs text-slate-500">📝 {d.note}</div>}
             </div>
@@ -304,6 +311,9 @@ export function GrDetailModal({ grId, onClose, footer, onSaved }: { grId: string
             <li>ใบไม่หายจากประวัติ (เก็บเป็นยกเลิก + บันทึกว่าใครลบ)</li>
           </ul>
         </ERPModal>
+      )}
+      {curFix && d?.po_id && (
+        <PoCurrencyFixModal poId={d.po_id} onClose={() => setCurFix(false)} onDone={async () => { await load(); await onSaved?.(); }} />
       )}
     </ERPModal>
   );
