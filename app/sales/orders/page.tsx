@@ -35,6 +35,7 @@ import { MoMultiPickerModal, type MoPickRow } from "@/components/mo-picker";
 import { MoGroupPicker, useMoGroups, rememberMoGroup, type MoGroupPick } from "@/components/mo-group-picker";
 import { OrderBatchEntryModal } from "@/components/order-batch-entry";
 import { SoBatchView } from "./batch-view";
+import { SoOrderReadView } from "./order-read-view";
 import { useViewPref } from "@/lib/use-view-pref";
 import { openLink, useOpenParam } from "@/lib/open-param";
 import { pickQuoteDocs } from "@/lib/quote-pull";
@@ -96,6 +97,8 @@ export default function SoOrdersPage() {
   const [reloadKey, setReloadKey] = useState(0);              // บอกมุมมองตามชุดให้โหลดใหม่
 
   const [form, setForm] = useState<Form | null>(null);
+  // ใบที่บันทึกแล้วเปิดมาเป็น "หน้าอ่าน" (สรุป + จัดกลุ่มตามรุ่น) · กด "แก้ไขรายการ" ถึงเป็นช่องกรอก (เจ้าของเลือกแบบ D+C)
+  const [editing, setEditing] = useState(false);
   const [meta, setMeta] = useState<Record<string, LineMeta>>({});
   const [saving, setSaving] = useState(false);
   const [srcOpen, setSrcOpen] = useState<null | "quote" | "mo">(null);
@@ -157,6 +160,7 @@ export default function SoOrdersPage() {
   const openNew = () => {
     const def = companies.find((c) => c.is_default) ?? companies[0];
     setMeta({});
+    setEditing(true);
     setForm({ ...emptyForm(), company_code: def?.company_code ?? "", company_id: def?.id ?? null, vat_rate: vatRateForCompany(def) });
   };
   const openRow = async (r: { id: string; groups?: Row["groups"] }) => {
@@ -173,6 +177,7 @@ export default function SoOrdersPage() {
           group: gid ? { id: gid, name: nameOfGroup.get(gid) ?? (r.groups ?? []).find((g) => g.id === gid)?.name ?? "ชุด" } : null };
       }
       setMeta(m);
+      setEditing(false);
       setForm({
         id: String(d.id), company_code: (d.company_code as string) ?? "", company_id: (d.company_id as string) ?? null,
         customer: d.customer_id ? ({ id: String(d.customer_id), code: (d.customer_code as string) ?? null, name: (d.customer_name as string) ?? "" } as CustomerPickerValue) : null,
@@ -419,14 +424,33 @@ export default function SoOrdersPage() {
           {form.id && canEdit && form.status !== "cancelled" && (
             <button onClick={() => void act(form.id!, { action: "open_mo" }, "เปิด/ผูกใบสั่งผลิตให้แล้ว")} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">🏭 เปิดใบสั่งผลิต</button>
           )}
+          {form.id && editing && (
+            /* ทิ้งที่แก้ไว้ → โหลดใบเดิมกลับมาเป็นหน้าอ่าน */
+            <button onClick={() => void openRow({ id: form.id! })} disabled={saving} className="h-9 px-3 text-sm border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">ยกเลิกการแก้</button>
+          )}
           <button onClick={() => setForm(null)} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg">ปิด</button>
-          {canEdit && form.status !== "cancelled" && (
+          {canEdit && form.status !== "cancelled" && (form.id && !editing ? (
+            <button onClick={() => setEditing(true)} className="h-9 px-4 inline-flex items-center gap-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <Icon name="edit" /> แก้ไขรายการ
+            </button>
+          ) : (
             <button onClick={() => void save(!form.id)} disabled={saving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">
               {saving ? "กำลังบันทึก…" : form.id ? "บันทึก" : "บันทึก + เปิดใบสั่งผลิต"}
             </button>
-          )}
+          ))}
         </> : null}>
-        {form && (
+        {form && form.id && !editing && (
+          <SoOrderReadView
+            header={{
+              companyName: companies.find((c) => c.company_code === form.company_code)?.name ?? form.company_code,
+              customerName: form.customer?.name ?? "", orderDate: form.order_date, dueDate: form.due_date,
+              poNo: form.customer_po_no, salePerson: form.sale_person_name, note: form.note, status: form.status,
+            }}
+            lines={form.lines} meta={meta} totals={totals}
+            canOpenMo={canEdit && form.status !== "cancelled"}
+            onOpenMo={() => void act(form.id!, { action: "open_mo" }, "เปิด/ผูกใบสั่งผลิตให้แล้ว")} />
+        )}
+        {form && (!form.id || editing) && (
           <div className="space-y-3">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <label className="block"><span className="text-[11px] text-slate-500">บริษัท (ชุดเลขเอกสาร)</span>
@@ -467,7 +491,8 @@ export default function SoOrdersPage() {
               )}
             </div>
 
-            <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout="table" readonly={form.status === "cancelled"} extraColumns={groupColumn} />
+            {/* ตารางแน่น 1 แถว/รายการ — กดแถวเพื่อเปลี่ยนสินค้า/สี (ของกลาง layout="compact") */}
+            <SOLineEditor lines={form.lines} onChange={(lines) => setForm({ ...form, lines })} layout="compact" readonly={form.status === "cancelled"} extraColumns={groupColumn} />
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-2">

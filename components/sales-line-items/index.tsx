@@ -150,8 +150,9 @@ export function SOLineEditor({
   lines: EditorLine[];
   onChange: (lines: EditorLine[]) => void;
   readonly?: boolean;
-  /** "card" (default) = การ์ดต่อรายการ · "table" = ตารางแก้ไขในแถว */
-  layout?: "card" | "table";
+  /** "card" (default) = การ์ดต่อรายการ · "table" = ตารางแก้ไขในแถว ·
+   *  "compact" = ตารางแน่น 1 แถว/รายการ (ชื่อ/สี/หน่วย/ส่วนลดเป็นตัวหนังสือ · กดแถวเพื่อแก้สินค้า) — ใบสั่งขายใช้ */
+  layout?: "card" | "table" | "compact";
   /** ถ้าส่งมา = เปิดตัวเลือก "บันทึกเป็นชื่อสินค้าตัวจริงด้วย" (อัปเดต name_th ใน master) */
   onSaveMasterName?: (productId: string, name: string) => Promise<void>;
   /** ซ่อนคอลัมน์ราคา/ส่วนลด/รวม (โหมดตาราง) — เช่น ใบส่งสินค้าที่สนใจแค่จำนวน */
@@ -160,11 +161,13 @@ export function SOLineEditor({
   extraColumns?: LineExtraColumn[];
 }) {
   const [importOpen, setImportOpen] = useState(false);   // ป๊อป "ลงจากตาราง / Excel"
+  // โหมด compact: แถวที่กำลังแก้สินค้า/สี (แถวอื่นเป็นตัวหนังสือ 1 บรรทัด)
+  const [activeId, setActiveId] = useState<string | null>(null);
 
   const update = (i: number, patch: Partial<EditorLine>) => {
     onChange(lines.map((l, idx) => idx === i ? { ...l, ...patch } : l));
   };
-  const add = () => onChange([...lines, emptyLine()]);
+  const add = () => { const l = emptyLine(); onChange([...lines, l]); setActiveId(l.tempId); };
   const remove = (i: number) => onChange(lines.filter((_, idx) => idx !== i));
 
   // ---- แก้ชื่อสินค้าในแถว (เฉพาะใบนี้ + ตัวเลือกบันทึกเป็นชื่อตัวจริง) ----
@@ -266,7 +269,13 @@ export function SOLineEditor({
   // ===== โหมดตาราง (แก้ไขในแถว) =====
   const startCols = extraColumns.filter((c) => c.position === "start");
   const endCols = extraColumns.filter((c) => c.position !== "start");
-  if (layout === "table") {
+  if (layout === "table" || layout === "compact") {
+    const compact = layout === "compact";
+    // compact: แถวที่ยังไม่มีสินค้า หรือกำลังแก้ = เต็มรูปแบบ · ที่เหลือ = ตัวหนังสือ (กดเพื่อแก้)
+    const isFull = (l: EditorLine) => !compact || !readonly && (activeId === l.tempId || !l.product_name);
+    const inputH = compact ? "h-8" : "h-9";
+    const discText = (l: EditorLine) => !l.discount_value ? "—"
+      : l.discount_type === "percent" ? `${l.discount_value}%` : `฿${formatMoney(money(l.discount_value))}`;
     return (
       <section className="rounded-xl border border-slate-200 bg-white overflow-hidden">
         <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-3 py-1.5">
@@ -301,10 +310,27 @@ export function SOLineEditor({
             </thead>
             <tbody className="divide-y divide-slate-100">
               {lines.map((l, i) => (
-                <tr key={l.tempId} className="align-top">
-                  {startCols.map((c) => <td key={c.key} className={`px-2 py-2 ${c.className ?? ""}`}>{c.cell(l, i)}</td>)}
-                  <td className="px-2 py-2 text-center font-mono text-xs text-slate-400">{i + 1}</td>
-                  <td className="px-2 py-2">
+                <tr key={l.tempId} className={`align-top ${compact && activeId === l.tempId ? "bg-blue-50/40" : ""}`}>
+                  {startCols.map((c) => <td key={c.key} className={`px-2 ${compact ? "py-1.5" : "py-2"} ${c.className ?? ""}`}>{c.cell(l, i)}</td>)}
+                  <td className={`px-2 ${compact ? "py-1.5" : "py-2"} text-center font-mono text-xs text-slate-400`}>{i + 1}</td>
+                  <td className={`px-2 ${compact ? "py-1.5" : "py-2"}`}>
+                    {!isFull(l) ? (
+                      /* compact: 1 บรรทัด — กดเพื่อเปลี่ยนสินค้า/แก้สี-ตัวเลือก */
+                      <button type="button" onClick={() => !readonly && setActiveId(l.tempId)} disabled={readonly}
+                        title={readonly ? undefined : "กดเพื่อเปลี่ยนสินค้า / แก้สี-ตัวเลือก"}
+                        className={`flex w-full min-w-0 items-center gap-2 rounded-md px-1 py-0.5 text-left ${readonly ? "" : "hover:bg-slate-50"}`}>
+                        {lineImageUrl(l)
+                          ? <img src={lineImageUrl(l) ?? ""} alt="" className="h-7 w-7 shrink-0 rounded border border-slate-200 object-cover" />
+                          : <span className="h-7 w-7 shrink-0 rounded border border-dashed border-slate-200 bg-slate-50" />}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm text-slate-800">{l.product_name}</span>
+                          <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-slate-400">
+                            {l.sku && <code className="shrink-0 font-mono text-orange-700">{l.sku}</code>}
+                            {l.note && <span className="truncate">· {l.note}</span>}
+                          </span>
+                        </span>
+                      </button>
+                    ) : (
                     <div className="flex items-start gap-2">
                       <div className="pt-0.5"><LineImagePick url={lineImageUrl(l)} size={36} readonly={readonly} alt={l.product_name || "สินค้า"}
                         onPick={(k, u) => update(i, { image_key: k, image_url: u })} onClear={() => update(i, { image_key: null, image_url: null })} /></div>
@@ -322,27 +348,39 @@ export function SOLineEditor({
                         )}
                         {renderNameEditor(l, i)}
                         {renderVariantField(l, i, true)}
+                        {compact && l.product_name && (
+                          <button type="button" onClick={() => setActiveId(null)}
+                            className="mt-1 text-[11px] text-blue-600 hover:underline">เสร็จ — ย่อแถวนี้</button>
+                        )}
                       </div>
                     </div>
+                    )}
                   </td>
-                  <td className="px-2 py-2">
+                  <td className={`px-2 ${compact ? "py-1.5" : "py-2"}`}>
                     <input type="number" value={l.qty} disabled={readonly}
                       onChange={(e) => update(i, { qty: parseFloat(e.target.value) || 0 })}
-                      className="h-9 w-full rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50" />
+                      className={`${inputH} w-full rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50`} />
                   </td>
-                  <td className="px-2 py-2">
-                    <UnitPicker
-                      value={l.unit ? ({ id: "", code: null, name: l.unit, symbol: l.unit } satisfies UnitPickerValue) : null}
-                      onChange={(u: UnitPickerValue | null) => update(i, { unit: u?.name ?? "ชิ้น" })}
-                      disabled={readonly} />
+                  <td className={`px-2 ${compact ? "py-1.5" : "py-2"}`}>
+                    {isFull(l) ? (
+                      <UnitPicker
+                        value={l.unit ? ({ id: "", code: null, name: l.unit, symbol: l.unit } satisfies UnitPickerValue) : null}
+                        onChange={(u: UnitPickerValue | null) => update(i, { unit: u?.name ?? "ชิ้น" })}
+                        disabled={readonly} />
+                    ) : <span className="inline-block pt-1.5 text-sm text-slate-600">{l.unit || "—"}</span>}
                   </td>
                   {!hidePrice && <>
-                    <td className="px-2 py-2">
+                    <td className={`px-2 ${compact ? "py-1.5" : "py-2"}`}>
                       <input type="number" value={l.unit_price} disabled={readonly}
                         onChange={(e) => update(i, { unit_price: parseFloat(e.target.value) || 0 })}
-                        className="h-9 w-full rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50" />
+                        className={`${inputH} w-full rounded-lg border border-slate-200 px-2 text-right text-sm tabular-nums disabled:bg-slate-50`} />
                     </td>
-                    <td className="px-2 py-2">
+                    <td className={`px-2 ${compact ? "py-1.5" : "py-2"}`}>
+                      {!isFull(l) ? (
+                        <button type="button" onClick={() => !readonly && setActiveId(l.tempId)} disabled={readonly}
+                          title={readonly ? undefined : "กดเพื่อแก้ส่วนลด"}
+                          className="pt-1.5 text-sm tabular-nums text-slate-600 hover:text-blue-600">{discText(l)}</button>
+                      ) : (
                       <div className="flex gap-1">
                         <input type="number" value={l.discount_value} disabled={readonly}
                           onChange={(e) => update(i, { discount_value: parseFloat(e.target.value) || 0 })}
@@ -354,14 +392,15 @@ export function SOLineEditor({
                           <option value="amount">฿</option>
                         </select>
                       </div>
+                      )}
                     </td>
-                    <td className="px-2 py-2 text-right font-mono text-sm font-semibold tabular-nums text-slate-900">
+                    <td className={`px-2 ${compact ? "pt-2.5 pb-1.5" : "py-2"} text-right font-mono text-sm font-semibold tabular-nums text-slate-900`}>
                       {formatMoney(money(lineTotal(l)))}
                     </td>
                   </>}
-                  {endCols.map((c) => <td key={c.key} className={`px-2 py-2 ${c.className ?? ""}`}>{c.cell(l, i)}</td>)}
+                  {endCols.map((c) => <td key={c.key} className={`px-2 ${compact ? "py-1.5" : "py-2"} ${c.className ?? ""}`}>{c.cell(l, i)}</td>)}
                   {!readonly && (
-                    <td className="px-1 py-2 text-center">
+                    <td className={`px-1 ${compact ? "py-1.5" : "py-2"} text-center`}>
                       <button type="button" onClick={() => remove(i)} aria-label="ลบรายการ"
                         className="h-8 w-8 rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500">x</button>
                     </td>
