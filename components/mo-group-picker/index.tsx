@@ -102,7 +102,8 @@ export function MoGroupPicker({ value, onChange, placeholder = "เลือก�
         <span className="shrink-0 text-[10px] text-slate-400">▾</span>
       </button>
       <FloatingDropdown anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} {...PICKER_PANEL}>
-        <div className="space-y-2 p-2">
+        {/* กล่องทึบ (พื้นขาว+ขอบ+เงา) แบบเดียวกับ picker กลาง — FloatingDropdown ไม่ใส่พื้นให้ ไม่งั้นตารางข้างหลังทะลุมา */}
+        <div className="space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-white p-2 shadow-xl" style={{ maxHeight: "var(--fd-max-h)" }}>
           <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && allowCreate && typed && !exact) { e.preventDefault(); pick({ id: null, name: typed }); } }}
             placeholder={allowCreate ? "ค้นหา หรือพิมพ์ชื่อชุดใหม่…" : "ค้นหาชุด…"}
