@@ -8,7 +8,7 @@
 import { useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
-import { useT } from "@/components/i18n";
+import { useLang, useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
@@ -16,7 +16,7 @@ import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers
 import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
 import { apiFetch } from "@/lib/api";
 import { translateContent } from "@/lib/content-translate";
-import { defaultDueDate, defaultTypeIcon, isUploadedTypeIcon, NORMAL_DUE_DAYS, typeColorCls } from "@/lib/pattern-tickets";
+import { defaultDueDate, defaultTypeIcon, isUploadedTypeIcon, NORMAL_DUE_DAYS, typeColorCls, typeLabelPair } from "@/lib/pattern-tickets";
 import { fmtBytes, uploadTicketFile } from "./upload";
 import type { TicketType } from "./types";
 
@@ -28,6 +28,7 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
   onCreated: (id: string) => void;
 }) {
   const t = useT();
+  const isEn = useLang().lang === "en";
   const toast = useToast();
   const active = useMemo(() => types.filter((x) => x.is_active), [types]);
   const startType = initialType && active.some((x) => x.key === initialType) ? initialType : "";
@@ -81,11 +82,14 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
     setSaving(true);
     try {
       const en = descEn.trim() || (await translate());   // ยังไม่ได้แปล → แปลให้ก่อนบันทึก (ไม่มีรายละเอียด = ไม่แปล)
+      // ชื่องานภาษาอังกฤษ (โหมด English) — แปลไม่ได้ = ว่าง (โชว์ชื่อไทยแทน) ไม่ขวางการเปิดตั๋ว
+      let titleEn = "";
+      try { titleEn = (await translateContent([title.trim()], "en"))[0] ?? ""; } catch { /* ใช้ชื่อไทย */ }
       const res = await apiFetch("/api/pattern-tickets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type_key: typeKey, title: title.trim(),
+          type_key: typeKey, title: title.trim(), title_en: titleEn,
           sku_code: sku?.code ?? null, parent_sku_id: sku?.id ?? null,
           description_th: descTh.trim(), description_en: en, en_edited: enEdited,
           priority: urgent ? "urgent" : "normal", due_date: due || null,
@@ -133,8 +137,8 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
                 <Icon value={ty.icon || defaultTypeIcon(ty.key)} size={isUploadedTypeIcon(ty.icon) ? 56 : "1em"} />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-lg font-semibold leading-tight text-slate-800">{ty.label_th}</span>
-                <span className="block text-sm text-slate-400">{ty.label_en}</span>
+                <span className="block text-lg font-semibold leading-tight text-slate-800">{typeLabelPair(ty, isEn)[0]}</span>
+                <span className="block text-sm text-slate-400">{typeLabelPair(ty, isEn)[1]}</span>
                 {(ty.checklist.length > 0 || ty.deliverables.length > 0) && (
                   <span className="mt-1 block text-xs text-slate-500">
                     {t("เช็กลิสต์ตั้งต้น", "Starter checklist")} {ty.checklist.length} {t("ข้อ", "items")}
@@ -154,7 +158,7 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
               <button key={x.key} type="button" onClick={() => { setTypeKey(x.key); setPicking(false); setErrors((e) => ({ ...e, type: "" })); }}
                 className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-sm transition ${typeKey === x.key ? "border-blue-400 bg-blue-50 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"}`}>
                 <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${typeColorCls(x.color)}`}><Icon value={x.icon} /></span>
-                <span className="min-w-0 leading-tight"><span className="block truncate font-medium text-slate-700">{x.label_th}</span><span className="block truncate text-[11px] text-slate-400">{x.label_en}</span></span>
+                <span className="min-w-0 leading-tight"><span className="block truncate font-medium text-slate-700">{typeLabelPair(x, isEn)[0]}</span><span className="block truncate text-[11px] text-slate-400">{typeLabelPair(x, isEn)[1]}</span></span>
               </button>
             ))}
           </div>

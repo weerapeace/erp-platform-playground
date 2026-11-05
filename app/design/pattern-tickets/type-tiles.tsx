@@ -2,7 +2,8 @@
 
 /**
  * แผ่นประเภทงาน (บนสุดของหน้าตั๋วงาน Pattern)
- *   กดแผ่น: คนเปิดตั๋วได้ (me.can_create) = เปิดป๊อปเปิดตั๋วโดยเลือกประเภทนั้นไว้ · คนอื่น = กรองรายการตามประเภท
+ *   โชว์เฉพาะคนที่เปิดตั๋วได้ (me.can_create = ผู้จัดการ/แอดมิน/ฝ่ายออกแบบ) · พนักงานไม่เห็นส่วนนี้ (เห็นแค่รายการตั๋ว — เจ้าของขอ 2026-11-05)
+ *   กดแผ่น = เปิดป๊อปเปิดตั๋วโดยเลือกประเภทนั้นไว้ · โหมด English = ชื่ออังกฤษนำ
  *   ป้าย "ค้าง X" = ตั๋วที่ยังไม่ปิดของประเภทนั้น (open_counts จาก GET /api/pattern-tickets)
  *   ผู้จัดการ (me.can_manage) = ปุ่มรูปภาพมุมขวาบน → ป๊อปเปลี่ยนไอคอน (อัปรูปเอง / กลับเป็นไอคอนเดิม)
  * อัปรูปด้วยตัวอัปกลาง uploadMediaFile (→ /api/admin/upload · R2 · ลงคลังกลาง) · บันทึกผ่าน PATCH /api/pattern-tickets/types
@@ -10,49 +11,47 @@
 import { useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
-import { useT } from "@/components/i18n";
+import { useLang, useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
 import { UploadProgress, type UploadProgressState } from "@/components/upload-progress";
 import { apiFetch } from "@/lib/api";
 import { MediaUploadError, uploadMediaFile } from "@/lib/media-upload";
-import { defaultTypeIcon, isUploadedTypeIcon, PATTERN_ICON_FOLDER, typeColorCls } from "@/lib/pattern-tickets";
+import { defaultTypeIcon, isUploadedTypeIcon, PATTERN_ICON_FOLDER, typeColorCls, typeLabelPair } from "@/lib/pattern-tickets";
 import type { Me, TicketType } from "./types";
 
-export function TypeTiles({ types, counts, me, activeType, onPick, onTypeSaved }: {
+export function TypeTiles({ types, counts, me, onPick, onTypeSaved }: {
   types: TicketType[];
   counts: Record<string, number>;
   me: Me | null;
-  /** ประเภทที่กำลังกรองอยู่ (โชว์กรอบเน้นให้คนที่กดแล้วเป็นการกรอง) */
-  activeType: string;
   onPick: (key: string) => void;
   onTypeSaved: (t: TicketType) => void;
 }) {
   const t = useT();
+  const isEn = useLang().lang === "en";
   const [editing, setEditing] = useState<TicketType | null>(null);
   const active = types.filter((x) => x.is_active);
-  if (!active.length) return null;
-  const canCreate = !!me?.can_create;
+  if (!active.length || !me?.can_create) return null;
 
   return (
     <section className="mb-6">
       <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-700">
         <Icon name="add" />
-        {canCreate ? t("เปิดตั๋วงานใหม่ — กดเลือกประเภทงาน", "New ticket — pick a job type") : t("ประเภทงาน — กดเพื่อดูตั๋วของประเภทนั้น", "Job types — tap to filter tickets")}
+        {t("เปิดตั๋วงานใหม่ — กดเลือกประเภทงาน", "New ticket — pick a job type")}
       </div>
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
         {active.map((x) => {
           const n = counts[x.key] ?? 0;
-          const on = !canCreate && activeType === x.key;
+          const [main, sub] = typeLabelPair(x, isEn);
           return (
             <div key={x.key} className="relative">
               <button type="button" onClick={() => onPick(x.key)}
-                title={canCreate ? t(`เปิดตั๋ว "${x.label_th}"`, `New "${x.label_en}" ticket`) : t(`ดูตั๋ว "${x.label_th}"`, `Show "${x.label_en}" tickets`)}
-                className={`flex w-full flex-col items-center rounded-xl border bg-white px-2 pb-3 pt-4 text-center transition hover:border-slate-300 hover:shadow-sm ${on ? "border-blue-400 ring-1 ring-blue-200" : "border-slate-200"}`}>
+                title={t(`เปิดตั๋ว "${x.label_th}"`, `New "${x.label_en}" ticket`)}
+                className="flex w-full flex-col items-center rounded-xl border border-slate-200 bg-white px-2 pb-3 pt-4 text-center transition hover:border-slate-300 hover:shadow-sm">
                 <span className={`mb-2 flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl text-[28px] ${isUploadedTypeIcon(x.icon) ? "bg-slate-50" : typeColorCls(x.color)}`}>
                   <Icon value={x.icon || defaultTypeIcon(x.key)} size={isUploadedTypeIcon(x.icon) ? 48 : "1em"} />
                 </span>
-                <span className="text-sm font-medium text-slate-800">{x.label_th}</span>
-                <span className="text-xs text-slate-400">{x.label_en}</span>
+                <span className="text-sm font-medium text-slate-800">{main}</span>
+                <span className="text-xs text-slate-400">{sub}</span>
               </button>
               {n > 0 && (
                 <span className="pointer-events-none absolute left-2 top-2 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium tabular-nums text-amber-700">

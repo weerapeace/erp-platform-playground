@@ -5,7 +5,7 @@
  *      open_counts = { <type_key>: จำนวนตั๋วที่ยังไม่ปิด } — ป้าย "ค้าง X" บนแผ่นประเภทงาน (นับทุกตั๋ว ไม่ขึ้นกับ view/q)
  * PATCH /api/pattern-tickets/types = เปลี่ยนไอคอนประเภทงาน (ดู types/route.ts)
  *      open (ค่าเริ่ม) = ยังไม่ปิด · done = เสร็จ/ยกเลิก (ล่าสุด 300) · all = ทั้งหมด
- * POST { type_key, title, sku_code?, parent_sku_id?, description_th? (ไม่ใส่ก็ได้), description_en?, priority?, due_date?, assignee_id?, assignee_name?, links? }
+ * POST { type_key, title, title_en?, sku_code?, parent_sku_id?, description_th? (ไม่ใส่ก็ได้), description_en?, priority?, due_date?, assignee_id?, assignee_name?, links? }
  *      → สร้างตั๋ว (pattern.create) · เลขตั๋วจาก erp_next_number('pattern_ticket') · เช็กลิสต์ตั้งต้นตามประเภทงาน
  * กติกาสถานะดู lib/pattern-tickets.ts
  */
@@ -19,7 +19,7 @@ import { loadActor, PATTERN_TABLE, PATTERN_TYPES_TABLE } from "@/lib/pattern-tic
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const LIST_COLS = "id,ticket_no,type_key,title,sku_code,status,priority,due_date,requester_id,requester_name,requester_dept,assignee_id,assignee_name,checklist,drive_folder_url,created_at,updated_at,done_at";
+const LIST_COLS = "id,ticket_no,type_key,title,title_en,sku_code,status,priority,due_date,requester_id,requester_name,requester_dept,assignee_id,assignee_name,checklist,drive_folder_url,created_at,updated_at,done_at";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "pattern.view"); if (denied) return denied;
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   if (type) query = query.eq("type_key", type);
   if (q) {
     const s = q.replace(/[,()%]/g, " ").trim();
-    if (s) query = query.or(`title.ilike.%${s}%,ticket_no.ilike.%${s}%,sku_code.ilike.%${s}%,assignee_name.ilike.%${s}%,requester_name.ilike.%${s}%`);
+    if (s) query = query.or(`title.ilike.%${s}%,title_en.ilike.%${s}%,ticket_no.ilike.%${s}%,sku_code.ilike.%${s}%,assignee_name.ilike.%${s}%,requester_name.ilike.%${s}%`);
   }
 
   const [list, types, openRows, actor] = await Promise.all([
@@ -80,6 +80,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     ticket_no: ticketNo,
     type_key: typeKey,
     title,
+    title_en: String(body.title_en ?? "").trim().slice(0, 200),   // แปลอัตโนมัติจากหน้าจอ (โหมด English)
     sku_code: String(body.sku_code ?? "").trim().slice(0, 80) || null,
     parent_sku_id: typeof body.parent_sku_id === "string" && body.parent_sku_id ? body.parent_sku_id : null,
     description_th: descTh,

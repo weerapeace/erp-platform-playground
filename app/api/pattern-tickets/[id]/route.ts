@@ -91,6 +91,7 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       const f = (body.fields ?? {}) as Record<string, unknown>;
       const patch: Record<string, unknown> = {};
       if (typeof f.title === "string") { const v = f.title.trim().slice(0, 200); if (!v) return NextResponse.json({ error: "ชื่องานห้ามว่าง" }, { status: 400 }); patch.title = v; }
+      if (typeof f.title_en === "string") patch.title_en = f.title_en.trim().slice(0, 200);
       if (typeof f.description_th === "string") patch.description_th = f.description_th.trim().slice(0, 8000);
       if (typeof f.description_en === "string") patch.description_en = f.description_en.trim().slice(0, 8000);
       if (typeof f.en_edited === "boolean") patch.en_edited = f.en_edited;

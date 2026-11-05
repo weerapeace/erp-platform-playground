@@ -9,11 +9,11 @@
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/auth";
-import { useT } from "@/components/i18n";
+import { LangToggle, useLang, useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
-import { fmtDate, isOverdue, patternStatus, todayBangkok, typeColorCls } from "@/lib/pattern-tickets";
+import { fmtDate, isOverdue, patternStatus, ticketTitle, todayBangkok, typeColorCls } from "@/lib/pattern-tickets";
 import { TicketDrawer } from "./ticket-drawer";
 import { CreateTicketModal } from "./create-modal";
 import { TypeTiles } from "./type-tiles";
@@ -23,6 +23,7 @@ type View = "mine" | "open" | "done";
 
 export function PatternTicketsView() {
   const t = useT();
+  const isEn = useLang().lang === "en";
   const { can, permsReady } = useAuth();
   const [view, setView] = useState<View>("mine");
   const [type, setType] = useState<string>("");
@@ -74,7 +75,7 @@ export function PatternTicketsView() {
         const mineAsRequester = r.requester_id === me.id;
         if (!mineAsWorker && !mineAsRequester) return false;
       }
-      if (s && ![r.title, r.ticket_no, r.sku_code, r.assignee_name, r.requester_name].some((v) => (v ?? "").toLowerCase().includes(s))) return false;
+      if (s && ![r.title, r.title_en, r.ticket_no, r.sku_code, r.assignee_name, r.requester_name].some((v) => (v ?? "").toLowerCase().includes(s))) return false;
       return true;
     });
   }, [rows, type, view, me, q]);
@@ -101,11 +102,13 @@ export function PatternTicketsView() {
           <h1 className="text-xl font-semibold text-slate-800">{t("ตั๋วงานช่าง Pattern", "Pattern job tickets")}</h1>
           <p className="text-sm text-slate-500">{t("งานแบบตัด บล็อก แบบเย็บ สกรีน เลเซอร์ ฯลฯ — ฝ่ายออกแบบเปิดตั๋ว ช่างกดรับแล้วส่งตรวจ", "Cutting, block, sewing, screen, laser jobs and more — design opens a ticket, the pattern maker takes it and submits for review")}</p>
         </div>
+        {/* โหมด English — ปุ่มกลาง (สลับภาษาทั้งระบบ · จำต่อบัญชีผ่าน LangSync) */}
+        <LangToggle />
       </div>
 
-      {/* แผ่นประเภทงาน — กดเปิดตั๋ว (หรือกรอง ถ้าเปิดตั๋วไม่ได้) */}
-      <TypeTiles types={types} counts={openCounts} me={me} activeType={type}
-        onPick={(key) => { if (me?.can_create) setCreating(key); else setType(type === key ? "" : key); }}
+      {/* แผ่นประเภทงาน — เฉพาะคนที่เปิดตั๋วได้ (pattern.create: ผู้จัดการ/แอดมิน/ฝ่ายออกแบบ) · พนักงานเห็นแค่รายการตั๋ว */}
+      <TypeTiles types={types} counts={openCounts} me={me}
+        onPick={(key) => setCreating(key)}
         onTypeSaved={(nt) => setTypes((cur) => cur.map((x) => (x.key === nt.key ? { ...x, ...nt } : x)))} />
 
       {/* ตัวเลขสรุป */}
@@ -168,7 +171,7 @@ export function PatternTicketsView() {
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-medium text-slate-800">
                       {r.priority === "urgent" && <span className="mr-1.5 rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600">{t("ด่วน", "Urgent")}</span>}
-                      {r.title}
+                      {ticketTitle(r, isEn)}
                     </span>
                     <span className="block truncate text-xs text-slate-500">
                       {r.ticket_no ?? "—"} · {ty ? t(ty.label_th, ty.label_en) : r.type_key}

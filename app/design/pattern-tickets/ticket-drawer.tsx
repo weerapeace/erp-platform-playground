@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Drawer, ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
-import { useT } from "@/components/i18n";
+import { useLang, useT } from "@/components/i18n";
 import { useToast } from "@/components/toast";
 import { LoadingState, ErrorState } from "@/components/state-views";
 import { DriveFolderFiles } from "@/components/drive-folder-files";
@@ -22,7 +22,7 @@ import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
 import { apiFetch } from "@/lib/api";
 import { translateContent } from "@/lib/content-translate";
-import { fmtDate, isOverdue, patternStatus, todayBangkok, typeColorCls, type ChecklistItem, type PatternAction, type TicketLink } from "@/lib/pattern-tickets";
+import { checklistLabel, fmtDate, isOverdue, patternStatus, ticketTitle, todayBangkok, typeColorCls, typeLabelPair, type ChecklistItem, type PatternAction, type TicketLink } from "@/lib/pattern-tickets";
 import { uploadTicketFile } from "./upload";
 import { ExtBadge } from "./create-modal";
 import type { TicketDetail, TicketType } from "./types";
@@ -36,11 +36,13 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
   onChanged: () => void;
 }) {
   const t = useT();
+  const isEn = useLang().lang === "en";
   const toast = useToast();
   const [d, setD] = useState<TicketDetail | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [lang, setLang] = useState<Lang>(() => { try { return (localStorage.getItem("pattern-ticket-lang") as Lang) || "both"; } catch { return "both"; } });
+  // โหมด English (ภาษาทั้งระบบ) = เปิดมาที่รายละเอียดอังกฤษเลย · ไทย = ตามที่เลือกครั้งก่อน (ค่าเริ่ม ไทย + EN)
+  const [lang, setLang] = useState<Lang>(() => { if (isEn) return "en"; try { return (localStorage.getItem("pattern-ticket-lang") as Lang) || "both"; } catch { return "both"; } });
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState<PatternAction | null>(null);   // ปุ่มที่ต้องใส่เหตุผล
   const [note, setNote] = useState("");
@@ -119,8 +121,8 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
 
   return (
     <Drawer open onClose={onClose} size="lg" storageKey="pattern-ticket-drawer"
-      title={tk ? `${tk.ticket_no ?? ""} ${tk.title}`.trim() : t("ตั๋วงาน", "Ticket")}
-      description={ty ? `${ty.label_th} / ${ty.label_en}` : undefined}
+      title={tk ? `${tk.ticket_no ?? ""} ${ticketTitle(tk, isEn)}`.trim() : t("ตั๋วงาน", "Ticket")}
+      description={ty ? typeLabelPair(ty, isEn).join(" / ") : undefined}
       footer={tk && d ? (
         <div className="flex w-full flex-wrap items-center gap-2">
           {tk.drive_folder_url && (
@@ -196,7 +198,7 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
                 {tk.checklist.map((c, i) => (
                   <label key={i} className={`flex items-center gap-2 rounded-md px-1.5 py-1 text-sm ${d.can_work ? "cursor-pointer hover:bg-slate-50" : ""}`}>
                     <input type="checkbox" checked={c.done} disabled={!d.can_work || busy} onChange={() => toggleCheck(i)} className="h-4 w-4 accent-blue-600" />
-                    <span className={c.done ? "text-slate-400 line-through" : "text-slate-700"}>{c.label}</span>
+                    <span className={c.done ? "text-slate-400 line-through" : "text-slate-700"}>{checklistLabel(c.label, isEn)}</span>
                   </label>
                 ))}
               </div>
@@ -328,7 +330,12 @@ function EditTicketModal({ tk, onClose, onSave }: { tk: TicketDetail["data"]; on
     if (th !== tk.description_th && !enEdited && th.trim()) {
       try { const [x] = await translateContent([th], "en"); if (x) enOut = x; } catch { /* ใช้คำแปลเดิม */ }
     }
-    await onSave({ title: title.trim(), description_th: th, description_en: enOut, en_edited: enEdited, due_date: due || null, priority: urgent ? "urgent" : "normal" });
+    // แก้ชื่องาน (หรือยังไม่เคยมีชื่ออังกฤษ) → แปลชื่ออังกฤษใหม่ให้ (โหมด English)
+    let titleEn: string | undefined;
+    if (title.trim() !== tk.title || !tk.title_en) {
+      try { titleEn = (await translateContent([title.trim()], "en"))[0] || undefined; } catch { /* ใช้ชื่อเดิม */ }
+    }
+    await onSave({ title: title.trim(), ...(titleEn ? { title_en: titleEn } : {}), description_th: th, description_en: enOut, en_edited: enEdited, due_date: due || null, priority: urgent ? "urgent" : "normal" });
     setSaving(false);
   };
 

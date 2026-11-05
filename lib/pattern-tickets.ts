@@ -187,3 +187,50 @@ export function addDaysIso(iso: string, days: number): string {
 export function defaultDueDate(urgent: boolean, todayIso: string = todayBangkok()): string {
   return urgent ? todayIso : addDaysIso(todayIso, NORMAL_DUE_DAYS);
 }
+
+/* ── โหมด English ──
+ * เช็กลิสต์ตั้งต้นใน pattern_ticket_types เก็บเป็นภาษาไทย → แปลอังกฤษด้วยตารางนี้ (ใช้ได้ทั้งแม่แบบ + ตั๋วที่เปิดแล้ว)
+ * ข้อที่ไม่อยู่ในตาราง (เพิ่มเอง) = โชว์ภาษาไทยเดิม · แก้แม่แบบในตาราง → เพิ่มคำแปลที่นี่ด้วย
+ */
+export const CHECKLIST_EN: Record<string, string> = {
+  "ขึ้นแบบชิ้นส่วนครบ": "Draft every pattern piece",
+  "ใส่เกรนผ้า + รอยบาก": "Add grain lines + notches",
+  "ใส่ค่าเย็บ (ระยะเผื่อตะเข็บ)": "Add seam allowance",
+  "ระบุจำนวนชิ้นต่อตัว": "State pieces per unit",
+  "ส่งไฟล์ให้ห้องตัด": "Send files to the cutting room",
+  "วัดขนาดจากแบบตัด": "Measure from the cutting pattern",
+  "ระบุวัสดุบล็อก (อะคริลิก/ไม้/เหล็ก)": "Specify block material (acrylic / wood / steel)",
+  "ทำจุดเจาะ / ร่องนำ": "Mark drill points / guide slots",
+  "ส่งไฟล์ให้ร้านทำบล็อก": "Send files to the block maker",
+  "ทดลองใช้กับชิ้นจริง": "Test on a real piece",
+  "ลำดับขั้นตอนเย็บ": "Sewing sequence",
+  "ระบุชนิดตะเข็บ + ระยะฝีเข็ม": "Specify seam type + stitch length",
+  "ระบุด้าย / สีด้าย": "Specify thread / thread colour",
+  "ภาพใกล้จุดที่เย็บยาก": "Close-up photos of tricky sewing spots",
+  "ผูกขั้นตอนงานเหมา": "Link piecework steps",
+  "ไฟล์ vector ขนาดจริง 1:1": "Vector file at actual size 1:1",
+  "แยกสี (color separation)": "Colour separation",
+  "ระบุรหัสสี Pantone": "Specify Pantone colour codes",
+  "ภาพจำลองตำแหน่งบนชิ้นงาน": "Mock-up of the position on the piece",
+  "ส่งโรงสกรีน": "Send to the screen printer",
+  "แยกเลเยอร์เส้นตัด / เส้นแกะ": "Separate cut / engrave layers",
+  "ปิดเส้นทุกรูป (closed path)": "Close every shape (closed paths)",
+  "ชดเชยระยะที่เลเซอร์กินเนื้อ (kerf)": "Compensate for laser kerf",
+  "จัดวางประหยัดวัสดุ": "Nest to save material",
+  "ทดสอบชิ้นแรก": "Test the first piece",
+  "ตารางไซซ์อ้างอิง": "Reference size chart",
+  "ขยาย / ย่อทุกไซซ์": "Grade up / down every size",
+  "ตรวจรอยต่อตรงกัน": "Check that seams match",
+  "ส่งไฟล์แยกไซซ์": "Send one file per size",
+  "ขนาดจริงบนชิ้นงาน": "Actual size on the piece",
+  "ระบุสีด้ายปัก": "Specify embroidery thread colours",
+  "แปลงไฟล์จักรปัก": "Convert to embroidery machine file",
+  "ปักทดสอบ": "Stitch a test sample",
+};
+export const checklistLabel = (label: string, en: boolean) => (en ? CHECKLIST_EN[label.trim()] ?? label : label);
+
+/** ชื่องานตามภาษา — โหมด English ใช้ title_en (แปลอัตโนมัติตอนบันทึก) · ว่าง = ชื่อไทย */
+export const ticketTitle = (tk: { title: string; title_en?: string | null }, en: boolean) => (en && tk.title_en?.trim() ? tk.title_en : tk.title);
+
+/** ชื่อประเภทงาน [ตัวใหญ่, ตัวเล็ก] ตามภาษา — English = อังกฤษนำ ไทยตาม */
+export const typeLabelPair = (x: { label_th: string; label_en: string }, en: boolean): [string, string] => (en ? [x.label_en, x.label_th] : [x.label_th, x.label_en]);

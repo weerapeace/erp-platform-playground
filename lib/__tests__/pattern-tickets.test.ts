@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, addDaysIso, cleanLinks, cleanTypeIcon, defaultDueDate, defaultTypeIcon, isOverdue, isUploadedTypeIcon, openCountsByType, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
+import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, addDaysIso, checklistLabel, CHECKLIST_EN, cleanLinks, cleanTypeIcon, defaultDueDate, defaultTypeIcon, isOverdue, isUploadedTypeIcon, openCountsByType, ticketTitle, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
 
 const REQ = "11111111-1111-1111-1111-111111111111";
 const MAKER = "22222222-2222-2222-2222-222222222222";
@@ -89,5 +89,19 @@ describe("กำหนดส่งตั้งต้น", () => {
     expect(defaultDueDate(false, "2026-11-29")).toBe("2026-12-02");
     expect(defaultDueDate(false, "2026-12-30")).toBe("2027-01-02");
     expect(addDaysIso("2028-02-27", 3)).toBe("2028-03-01");
+  });
+});
+
+describe("โหมด English", () => {
+  it("เช็กลิสต์ตั้งต้นทุกข้อมีคำแปล · ข้อที่เพิ่มเองโชว์ไทยเดิม", () => {
+    expect(checklistLabel("ใส่เกรนผ้า + รอยบาก", true)).toBe("Add grain lines + notches");
+    expect(checklistLabel("ใส่เกรนผ้า + รอยบาก", false)).toBe("ใส่เกรนผ้า + รอยบาก");
+    expect(checklistLabel("งานพิเศษ", true)).toBe("งานพิเศษ");
+    expect(Object.keys(CHECKLIST_EN)).toHaveLength(33);
+  });
+  it("ชื่องาน: EN ใช้ title_en ถ้ามี", () => {
+    expect(ticketTitle({ title: "กระเป๋า", title_en: "Bag" }, true)).toBe("Bag");
+    expect(ticketTitle({ title: "กระเป๋า", title_en: "" }, true)).toBe("กระเป๋า");
+    expect(ticketTitle({ title: "กระเป๋า", title_en: "Bag" }, false)).toBe("กระเป๋า");
   });
 });

@@ -8,7 +8,7 @@ export type TicketType = {
 export type Me = { id: string | null; name: string | null; role_label: string | null; can_work: boolean; can_manage: boolean; can_create: boolean };
 
 export type TicketRow = {
-  id: string; ticket_no: string | null; type_key: string; title: string; sku_code: string | null;
+  id: string; ticket_no: string | null; type_key: string; title: string; title_en: string; sku_code: string | null;
   status: string; priority: string; due_date: string | null;
   requester_id: string | null; requester_name: string | null; requester_dept: string | null;
   assignee_id: string | null; assignee_name: string | null;
