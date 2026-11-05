@@ -80,7 +80,10 @@ export default function WorkLogsPage() {
   return (
     <div className="mx-auto max-w-5xl px-4 py-5 space-y-5">
       <div>
-        <h1 className="text-xl font-semibold text-slate-800">📝 ใบจดผลงาน</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-xl font-semibold text-slate-800">📝 ใบจดผลงาน</h1>
+          <Link href="/master/work-logs/summary" className="ml-auto h-9 rounded-lg border border-slate-200 bg-white px-3 text-sm leading-9 text-slate-700 hover:bg-slate-50">📊 สรุปผลงาน (ชิ้น/ชม.)</Link>
+        </div>
         <p className="mt-1 text-sm text-slate-500">ถ่ายรูปใบจดที่หัวหน้าเขียน แล้ว AI จะอ่านลายมือให้ · ตรวจและแก้ก่อนกดยืนยันทุกครั้ง · พิมพ์ใบจดได้ที่บอร์ดจ่ายงาน → 🪜 พิมพ์ขั้นตอนงาน → 📝 ใบจดผลงาน</p>
       </div>
 
