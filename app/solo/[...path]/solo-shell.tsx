@@ -50,7 +50,13 @@ export function SoloShell() {
     return () => { alive = false; };
   }, [pagePath]);
 
-  const label = menu?.label || (pagePath ? labelFromPath(pagePath) : "ERP");
+  // ชื่อแอปจาก manifest (สาธารณะ — ยังไม่ล็อกอินก็ได้ชื่อไทยจริง) · เมนูโหลดได้ทีหลัง = ใช้ชื่อเมนู
+  const [publicName, setPublicName] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pagePath) return;
+    fetch(`/api/page-manifest${pagePath}`).then((r) => r.json()).then((j) => { if (typeof j?.name === "string") setPublicName(j.name); }).catch(() => undefined);
+  }, [pagePath]);
+  const label = menu?.label || publicName || (pagePath ? labelFromPath(pagePath) : "ERP");
 
   // สะท้อนที่อยู่ในกรอบขึ้นแถบที่อยู่ของแอป (ไม่รวม embed) → รีเฟรช/ติดตั้งแล้วกลับมาหน้าเดิม
   //   (สะท้อนเฉพาะ query ของหน้าหลัก เช่น ?id= · หน้าย่อยไม่สะท้อน กันตัวตนแอปเปลี่ยนเมื่อรีเฟรช)
