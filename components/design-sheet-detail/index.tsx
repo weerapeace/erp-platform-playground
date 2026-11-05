@@ -65,6 +65,8 @@ import dynamic from "next/dynamic";
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 // ลงออเดอร์จากใบงานนี้ (ของกลาง ป๊อปเดียวกับหน้าใบสั่งขาย) — โหลดเฉพาะตอนกด
 const OrderBatchEntryModal = dynamic(() => import("@/components/order-batch-entry").then((m) => m.OrderBatchEntryModal), { ssr: false });
+// แท็บ "รายละเอียดงาน" (วาดบนรูป + หมุดวัตถุดิบ) — โหลดเฉพาะตอนเปิดแท็บ
+const DesignSheetSpecTab = dynamic(() => import("./spec-tab").then((m) => m.DesignSheetSpecTab), { ssr: false });
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
 // ค่าใช้จ่ายเพิ่ม: amount = ต่อชิ้นเสมอ · mode "split" = ค่าครั้งเดียวหารจำนวนสั่ง (ค่าบล็อกสกรีน) — สูตรอยู่ lib/design-sheet-cost-snapshot
@@ -501,7 +503,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [closeSaving, setCloseSaving] = useState(false);
 
   // ---- เฟส 3: แท็บในป๊อปอัพ + comment ลูกค้า + รอบเสนอราคา ----
-  const [modalTab, setModalTab] = useState<"info" | "comments" | "cost" | "quotes">("info");
+  const [modalTab, setModalTab] = useState<"info" | "spec" | "comments" | "cost" | "quotes">("info");
+  // แท็บรายละเอียดงาน: เปิดครั้งแรกแล้วคงไว้ (สลับแท็บไม่ทิ้งที่แก้ค้าง) · มีแก้ค้าง = เตือนก่อนปิด
+  const [specMounted, setSpecMounted] = useState(false);
+  const [specDirty, setSpecDirty] = useState(false);
+  const specSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  useEffect(() => { if (modalTab === "spec") setSpecMounted(true); }, [modalTab]);
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
   const [editing, setEditing] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);   // 🕘 ป๊อปเวอร์ชันตีราคา (ข้อ C)
@@ -852,7 +859,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   }, [clearPend, detailOnly, onDetailClose]);
   const requestClose = () => {
     if (saving) return;
-    if (costDirty || supplierDirty) setCloseConfirm(true);   // ตีราคา หรือ ตีราคาสั่งจากร้าน มีแก้ค้าง
+    if (costDirty || supplierDirty || specDirty) setCloseConfirm(true);   // ตีราคา / ตีราคาสั่งจากร้าน / รายละเอียดงาน มีแก้ค้าง
     else doClose();
   };
   // "บันทึกแล้วปิด" — บันทึกตีราคา + ตีราคาสั่งจากร้าน ที่ค้าง แล้วปิด
@@ -861,6 +868,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     try {
       if (costDirty) await saveCost();
       if (supplierDirty) await supplierSaveRef.current?.();
+      if (specDirty && (await specSaveRef.current?.()) === false) return;   // บันทึกรายละเอียดงานไม่ผ่าน = ไม่ปิด
       doClose();
     } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setCloseSaving(false); }
@@ -1233,8 +1241,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   const openCreate = () => { setEditing(true); setCreateMore(false); setRecentBrandIds(loadRecent<{ id: string }>(RECENT_KEYS.designBrands).map((b) => b.id)); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": defaultCostExtra() }); };
 
-  const openEdit = async (row: DesignSheetListItem, tab: "info" | "comments" | "cost" | "quotes" = "info") => {
+  const openEdit = async (row: DesignSheetListItem, tab: "info" | "spec" | "comments" | "cost" | "quotes" = "info") => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({}); setLinkedSkus([]);
+    setSpecMounted(tab === "spec"); setSpecDirty(false);
     setModalTab(tab); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend();
     try {
       const res = await apiFetch(`/api/design-sheets/${row.id}`); const j = await res.json();
@@ -2138,7 +2147,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {/* แท็บ (โผล่เมื่อบันทึกแล้ว) */}
             {form.id && (
               <div className="flex items-center gap-1 border-b border-slate-200 pb-2">
-                {([["info", t("📋 ข้อมูลงาน", "📋 Job info")], ["comments", t(`💬 Comment ลูกค้า (${comments.length})`, `💬 Customer comments (${comments.length})`)], ["cost", t(`🧮 ตีราคา (${costLines.length})`, `🧮 Costing (${costLines.length})`)], ["quotes", t(`💰 เสนอราคา (${quotes.length})`, `💰 Quotes (${quotes.length})`)]] as const).map(([k, l]) => (
+                {([["info", t("📋 ข้อมูลงาน", "📋 Job info")], ["spec", t("📐 รายละเอียดงาน", "📐 Job details")], ["comments", t(`💬 Comment ลูกค้า (${comments.length})`, `💬 Customer comments (${comments.length})`)], ["cost", t(`🧮 ตีราคา (${costLines.length})`, `🧮 Costing (${costLines.length})`)], ["quotes", t(`💰 เสนอราคา (${quotes.length})`, `💰 Quotes (${quotes.length})`)]] as const).map(([k, l]) => (
                   <button key={k} onClick={() => setModalTab(k)}
                     className={`h-8 px-3 text-sm rounded-lg ${modalTab === k ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{l}</button>
                 ))}
@@ -2159,6 +2168,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             </div>}
 
             {/* แท็บ Comment ลูกค้า (เฟส 3) */}
+            {/* 📐 รายละเอียดงาน — คงไว้หลังเปิดครั้งแรก (ซ่อนตอนอยู่แท็บอื่น) */}
+            {form.id && specMounted && (
+              <div className={modalTab === "spec" ? "" : "hidden"}>
+                <DesignSheetSpecTab key={form.id} sheetId={form.id} canEdit={canEdit} onDirtyChange={setSpecDirty} saveRef={specSaveRef} />
+              </div>
+            )}
+
             {modalTab === "comments" && form.id && <div className="space-y-2">
               {canEdit && (
                 <div className="flex gap-1.5 items-start p-2 bg-slate-50 border border-slate-200 rounded-lg">
@@ -2840,7 +2856,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           <button onClick={() => void saveAndClose()} disabled={closeSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{closeSaving ? t("กำลังบันทึก...", "Saving...") : t("บันทึกแล้วปิด", "Save and close")}</button>
         </>}>
         <p className="text-sm text-slate-600">
-          {t("มีข้อมูลตีราคาที่ยังไม่ได้บันทึก — ต้องการบันทึกก่อนปิดหรือไม่?", "There is unsaved costing data — save before closing?")}
+          {specDirty && !costDirty && !supplierDirty
+            ? t("มีรายละเอียดงาน (รูป/หมุดวัตถุดิบ) ที่ยังไม่ได้บันทึก — ต้องการบันทึกก่อนปิดหรือไม่?", "There are unsaved job details (images/material pins) — save before closing?")
+            : t("มีข้อมูลตีราคาที่ยังไม่ได้บันทึก — ต้องการบันทึกก่อนปิดหรือไม่?", "There is unsaved costing data — save before closing?")}
         </p>
       </ERPModal>
 
