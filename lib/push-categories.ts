@@ -29,6 +29,9 @@ export const PUSH_CATEGORIES: PushCategory[] = [
 
 /** event ที่เด้งเสมอ ปิดไม่ได้ (เช่น ปุ่มส่งทดสอบ) */
 const ALWAYS_ON = new Set(["push.test"]);
+/** ประเภทที่ปิดไม่ได้ + ไม่งดช่วงห้ามรบกวน (ล็อกอินเครื่องใหม่ = ต้องรู้ทันที) — หน้าตั้งค่าโชว์รูปกุญแจ (lib/notify-sources) */
+export const LOCKED_PUSH_CATEGORIES = new Set(["security"]);
+export const isLockedPushEvent = (eventType: string) => ALWAYS_ON.has(eventType) || LOCKED_PUSH_CATEGORIES.has(pushCategoryOf(eventType));
 
 function matches(pattern: string, eventType: string): boolean {
   return pattern.endsWith("*") ? eventType.startsWith(pattern.slice(0, -1)) : pattern === eventType;
@@ -48,7 +51,7 @@ export function normalizePushPrefs(v: unknown): PushPrefs {
 }
 
 export function pushEnabledFor(prefs: PushPrefs, eventType: string): boolean {
-  if (ALWAYS_ON.has(eventType)) return true;
+  if (isLockedPushEvent(eventType)) return true;
   return !prefs.off.includes(pushCategoryOf(eventType));
 }
 

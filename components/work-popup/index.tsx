@@ -26,6 +26,10 @@ import { WORK_POPUP_HIDE_HINT, WorkPopupFloatCard, useFloatScreen, useWorkPopupF
 import { GifInbox, type GifPoke } from "./gif-inbox";
 import { LineInboxTab, linePendingCount } from "./line-inbox-tab";
 import type { LinePendingPayload } from "@/lib/line-pending";
+import { BellTab } from "./bell-tab";
+import { useNotificationFeed } from "@/components/notification-bell/feed";
+import { useNotifyPrefs } from "@/components/notify-settings";
+import { bellSourceOf, inQuietHours, notifyOn } from "@/lib/notify-sources";
 import { petBadge, petMood } from "@/lib/floating-pet";
 import type { UserPickerValue } from "@/components/pickers";
 import dynamic from "next/dynamic";
@@ -36,6 +40,13 @@ const POKE_POLL_MS = 3 * 60_000;
 const pokeSeenKey = (uid: string) => `fpet-pokes-seen:${uid}`;
 function readPokeSeen(uid: string): Set<string> {
   try { const v = JSON.parse(localStorage.getItem(pokeSeenKey(uid)) ?? "[]"); return new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []); } catch { return new Set(); }
+}
+// "เห็นแล้ว" ของแท็บ LINE / กระดิ่ง (ตัว Pet เด้งเฉพาะของใหม่ที่ยังไม่เคยเห็น) — จำในเครื่อง
+function readIds(key: string): Set<string> {
+  try { const v = JSON.parse(localStorage.getItem(key) ?? "[]"); return new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []); } catch { return new Set(); }
+}
+function saveIds(key: string, ids: Set<string>) {
+  try { localStorage.setItem(key, JSON.stringify([...ids].slice(-300))); } catch { /* ignore */ }
 }
 const UUID = /^[0-9a-f-]{36}$/i;
 
@@ -233,7 +244,17 @@ export function WorkPopupHost() {
   // จอคอม = ปุ่มลอยอยู่ทั้งวัน: ขอป๊อปของวันนี้ทั้งหมด (?all=1) · กางเองเฉพาะที่ "ถึงเวลา" (due) และยังไม่ปิดในแท็บนี้
   const [expanded, setExpanded] = useState(false);
   const collapse = useCallback(() => setExpanded(false), []);   // ค่าคงที่ — การ์ดผูกตัวฟัง "กดข้างนอก" ครั้งเดียว
-  const [tab, setTab] = useState<"work" | "gif" | "line">("work");
+  const [tab, setTab] = useState<"work" | "gif" | "line" | "bell">("work");
+  // ตั้งค่าการแจ้งเตือนต่อคน (หน้าต่างตัว Pet → การแจ้งเตือน · lib/notify-sources): โชว์ในศูนย์ / ตัว Pet เด้งบอก / ห้ามรบกวน
+  const [notifyPrefs] = useNotifyPrefs();
+  const showIn = (key: string) => notifyOn(notifyPrefs, key, "center");
+  const bounceOn = (key: string) => notifyOn(notifyPrefs, key, "bounce");
+  const quietNow = inQuietHours(notifyPrefs.quiet);   // ห้ามรบกวน: ตัว Pet ไม่เด้ง (ยังเปิดดูได้)
+  const workShown = showIn("work");
+  const workShownRef = useRef(workShown);
+  workShownRef.current = workShown;
+  const quietRef = useRef(quietNow);   // ห้ามรบกวน = ไม่กางการ์ดเอง (ป๊อปยังอยู่ในตัว Pet)
+  quietRef.current = quietNow;
 
   // ── แท็บ GIF: กล่องรับ "ส่ง GIF ให้เพื่อน" (จอคอมเท่านั้น — ตัว Pet อยู่บนจอคอม) ──
   const [pokes, setPokes] = useState<GifPoke[]>([]);
@@ -273,7 +294,33 @@ export function WorkPopupHost() {
     return () => { clearTimeout(first); window.clearInterval(iv); };
   }, [uid, skip, enabled, wide, loadLine]);
   useRefresh(() => { if (wide && enabled && !skip) void loadLine(); });
-  const lineCount = linePendingCount(linePending);
+  const lineShown: LinePendingPayload | null = linePending && {
+    design: showIn("line_design") ? linePending.design : undefined,
+    order: showIn("line_order") ? linePending.order : undefined,
+  };
+  const lineCount = linePendingCount(lineShown);
+  const lineSeenKey = uid ? `fpet-line-seen:${uid}` : "";
+  const [lineSeen, setLineSeen] = useState<Set<string>>(new Set());
+  useEffect(() => { if (lineSeenKey) setLineSeen(readIds(lineSeenKey)); }, [lineSeenKey]);
+  const newLine = [
+    ...(lineShown?.design && bounceOn("line_design") ? lineShown.design.items : []),
+    ...(lineShown?.order && bounceOn("line_order") ? lineShown.order.items : []),
+  ].filter((it) => !lineSeen.has(it.id));
+
+  // ── แท็บ กระดิ่ง: แจ้งเตือนที่ยังไม่อ่าน (ตัวดึงกลางเดียวกับกระดิ่งบนแถบ) เฉพาะประเภทที่เปิดโชว์ในศูนย์ ──
+  const feed = useNotificationFeed(wide && enabled && !skip ? uid : null);
+  const bellItems = feed.items.filter((n) => !n.read_at && showIn(bellSourceOf(n.event_type)));
+  const bellSeenKey = uid ? `fpet-bell-seen:${uid}` : "";
+  const [bellSeen, setBellSeen] = useState<Set<string>>(new Set());
+  useEffect(() => { if (bellSeenKey) setBellSeen(readIds(bellSeenKey)); }, [bellSeenKey]);
+  const newBell = bellItems.filter((n) => !bellSeen.has(n.id) && bounceOn(bellSourceOf(n.event_type)));
+  // เปิดแท็บ LINE / กระดิ่ง ดูแล้ว = เห็นแล้ว (ตัว Pet เลิกเด้งเพราะเรื่องนั้น)
+  useEffect(() => {
+    if (!expanded || !uid) return;
+    if (tab === "line" && newLine.length) { const n = new Set([...lineSeen, ...newLine.map((x) => x.id)]); setLineSeen(n); saveIds(lineSeenKey, n); }
+    if (tab === "bell" && newBell.length) { const n = new Set([...bellSeen, ...newBell.map((x) => x.id)]); setBellSeen(n); saveIds(bellSeenKey, n); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expanded, tab, uid, newLine.length, newBell.length]);
   const dismissPoke = (id: string) => {
     setPokes((ps) => ps.filter((p) => p.id !== id));
     void apiFetch("/api/gif-poke", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {});
@@ -305,7 +352,7 @@ export function WorkPopupHost() {
       if (allDay) setQueue(list);   // ทั้งวัน = แทนทั้งชุด (ของที่หมดวัน/ปิดรายงานแล้วหายไปด้วย)
       else if (list.length) setQueue((q) => [...q.filter((x) => !list.some((y) => y.report_id === x.report_id)), ...list]);
       setDone(new Set());   // ข้อมูลใหม่จากเซิร์ฟเวอร์ = ความจริงล่าสุด (ข้อที่ติ๊กแล้วหายไปเอง)
-      if (!quiet && list.some((p) => p.due)) { setExpanded(true); setTab("work"); }
+      if (!quiet && workShownRef.current && !quietRef.current && list.some((p) => p.due)) { setExpanded(true); setTab("work"); }
     } catch { /* เงียบ — ป๊อปไม่ขึ้นไม่ทำให้หน้าพัง */ }
   }, [uid, enabled, wide]);
 
@@ -409,46 +456,67 @@ export function WorkPopupHost() {
     </div>
   );
 
-  // ── ศูนย์แจ้งเตือน (จอคอม): ตัว Pet + แท็บ งาน / GIF ──
-  const workCount = cur ? (cur.audience === "mine" ? mineOpen : cur.stats.total) : 0;
-  const floatOn = wide && !skip && (enabled || (!!cur && forced.has(cur.report_id))) && (!!cur || (enabled && (pokes.length > 0 || lineCount > 0)));
+  // ── ศูนย์แจ้งเตือน (จอคอม): ตัว Pet + แท็บ งาน / LINE / กระดิ่ง / GIF — โชว์ตามตั้งค่าการแจ้งเตือน (lib/notify-sources) ──
+  // กดลิงก์ ?popup= เอง = เปิดป๊อปนั้นเสมอ แม้ปิด "โชว์ในศูนย์" ของป๊อปเตือนงานไว้
+  const workTabOn = !!cur && visible && (workShown || forced.has(cur.report_id));
+  const workCount = workTabOn && cur ? (cur.audience === "mine" ? mineOpen : cur.stats.total) : 0;
+  const gifOn = enabled && showIn("gif");
+  const gifCount = gifOn ? pokes.length : 0;
+  const bellCount = enabled ? bellItems.length : 0;
+  const floatOn = wide && !skip && (enabled || workTabOn) && (workTabOn || (enabled && (gifCount > 0 || lineCount > 0 || bellCount > 0)));
   const tabs: FloatTab[] = [
-    ...(cur && visible ? [{
+    ...(workTabOn && cur ? [{
       key: "work", label: "งาน", icon: "list", count: workCount, subtitle: `${title} · ${subtitle}`, footer,
       content: <WorkPopupBody data={cur} done={done} onTick={(id, d) => void tick(id, d)} onOpen={(path) => open(cur, path, "later")} />,
     }] : []),
     ...(enabled && lineCount > 0 ? [{
       key: "line", label: "LINE", icon: "chat", count: lineCount, subtitle: "ส่งเข้ากลุ่มไลน์แล้ว รอคนจัดการ",
-      content: <LineInboxTab data={linePending} onGo={go} />,
+      content: <LineInboxTab data={lineShown} onGo={go} />,
     }] : []),
-    ...(enabled ? [{
-      key: "gif", label: "GIF", icon: "gift", count: pokes.length, subtitle: "GIF ที่เพื่อนส่งมา",
+    ...(bellCount > 0 ? [{
+      key: "bell", label: "กระดิ่ง", icon: "notify", count: bellCount, subtitle: "แจ้งเตือนที่ยังไม่อ่าน",
+      content: <BellTab items={bellItems} onOpen={(n) => { void feed.markRead(n); if (n.link_url) go(n.link_url); }} onReadAll={() => void feed.markAllRead()} />,
+    }] : []),
+    ...(gifOn ? [{
+      key: "gif", label: "GIF", icon: "gift", count: gifCount, subtitle: "GIF ที่เพื่อนส่งมา",
       content: <GifInbox pokes={pokes} newIds={new Set(newPokes.map((p) => p.id))} onDismiss={dismissPoke}
         onReply={(p) => setGifModal({ reply: p })} onSend={() => setGifModal({ reply: null })} />,
     }] : []),
   ];
   const activeTab = tabs.some((x) => x.key === tab) ? tab : (tabs[0]?.key ?? "work");
-  const petAlert = pending || newPokes.length > 0;
+  // ตัว Pet เด้งบอก: เฉพาะเรื่องที่เปิด "Pet เด้งบอก" และไม่อยู่ในช่วงห้ามรบกวน
+  const alertWork = workTabOn && pending && bounceOn("work");
+  const alertGif = gifOn && bounceOn("gif") && newPokes.length > 0;
+  const alertLine = enabled && newLine.length > 0;
+  const alertBell = enabled && newBell.length > 0;
+  const petAlert = !quietNow && (alertWork || alertGif || alertLine || alertBell);
+  const total = workCount + gifCount + lineCount + bellCount;
   const petState = {
-    mood: petMood({ total: workCount + pokes.length + lineCount, alert: petAlert }),
-    badge: petBadge(workCount + pokes.length + lineCount),
-    bubble: pending ? pill : newPokes.length ? `${newPokes[newPokes.length - 1].from_name ?? "เพื่อน"} ส่ง GIF มา` : null,
+    mood: petMood({ total, alert: petAlert }),
+    badge: petBadge(total),
+    bubble: quietNow ? null
+      : alertWork ? pill
+      : alertBell ? newBell[0].title
+      : alertLine ? `ไลน์: ${newLine[0].title}`
+      : alertGif ? `${newPokes[newPokes.length - 1].from_name ?? "เพื่อน"} ส่ง GIF มา` : null,
   };
 
   return (
     <>
       <Suspense fallback={null}>{uid && <PopupParam onParam={(id) => { setForced((s) => new Set(s).add(id)); void check(id); }} />}</Suspense>
       {wide ? (floatOn && tabs.length > 0 && (
-        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" ? k : "work")} pet={petState}
+        <WorkPopupFloatCard pref={floatPref} minimized={!expanded} tabs={tabs} tab={activeTab} onTab={(k) => setTab(k === "gif" || k === "line" || k === "bell" ? k : "work")} pet={petState}
           onMinimize={collapse}
           onExpand={() => {
             setExpanded(true);
-            setTab(!pending && newPokes.length > 0 ? "gif" : cur ? "work" : lineCount > 0 ? "line" : "gif");
+            // เปิดแท็บของเรื่องที่ทำให้ตัว Pet เด้งก่อน
+            setTab(alertWork ? "work" : alertBell ? "bell" : alertLine ? "line" : alertGif ? "gif" : workTabOn ? "work" : lineCount > 0 ? "line" : bellCount > 0 ? "bell" : "gif");
             if (cur) void check(undefined, true);
             void loadPokes();
             void loadLine();
+            void feed.refresh();
           }} />
-      )) : visible && cur && (
+      )) : visible && cur && (workShown || forced.has(cur.report_id)) && (
         <ERPModal open onClose={() => finish(cur, "later")} size="lg" defaultExpanded={false} storageKey="work-popup" zIndex={300}
           closeOnBackdrop={!cur.require_ack}
           title={`🔔 ${title}`}

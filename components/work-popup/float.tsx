@@ -59,7 +59,7 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
   onExpand: () => void;
 }) {
   const [petPref] = useFloatingPetPref();
-  const [pickOpen, setPickOpen] = useState(false);
+  const [pickOpen, setPickOpen] = useState<false | "pet" | "notify">(false);
   const cur = tabs.find((x) => x.key === tab) ?? tabs[0];
   // แบบแถบข้าง: เปิดค้างจนกด ✕ (กดข้างนอก/Esc ไม่ปิด) · ชิดขวาใต้แถบเมนูบน (ไม่บังกระดิ่ง/โปรไฟล์ในหัวแอป)
   const drawer = pref.mode === "drawer";
@@ -99,7 +99,7 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
     return (<>
       <FloatingPet source={petPref.source} size={petPref.size} mood={pet.mood} badge={pet.badge} bubble={pet.bubble}
         anchor={anchor} onDrop={(a) => setPref({ ...pref, anchor: a })} onClick={onExpand} label="ศูนย์แจ้งเตือน" />
-      {pickOpen && <PetPickerModal open onClose={() => setPickOpen(false)} />}
+      {pickOpen && <PetPickerModal open initialTab={pickOpen} onClose={() => setPickOpen(false)} />}
     </>);
   }
   // ปุ่มสลับ การ์ดลอย ⇄ แถบข้าง (จำต่อคน — เลือกได้ที่เมนูโปรไฟล์ด้วย)
@@ -113,13 +113,15 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
       style={drawer ? { top: drawerTop } : { ...(drag.liveStyle ?? cornerStyle(anchor, { w: 400, h: 120 })), maxHeight: `calc(100vh - ${Math.min(anchor.y, 400) + 16}px)` }}>
       <div onPointerDown={drawer ? undefined : drag.onPointerDown} title={drawer ? undefined : "ลากที่หัวเพื่อย้ายที่"} style={drawer ? undefined : { touchAction: "none" }}
         className={`flex items-center gap-2 px-3 py-2 border-b border-slate-100 bg-amber-50/60 select-none ${drawer ? "" : drag.dragging ? "cursor-grabbing" : "cursor-grab"}`}>
-        <button type="button" data-no-drag onClick={() => setPickOpen(true)} title="เปลี่ยนตัว Pet" aria-label="เปลี่ยนตัว Pet" className="shrink-0 rounded-lg hover:bg-white">
+        <button type="button" data-no-drag onClick={() => setPickOpen("pet")} title="เปลี่ยนตัว Pet" aria-label="เปลี่ยนตัว Pet" className="shrink-0 rounded-lg hover:bg-white">
           <PetArt source={petPref.source} size={32} />
         </button>
         <div className="flex-1 min-w-0">
           <div className="text-sm font-semibold text-slate-800 truncate">ศูนย์แจ้งเตือน</div>
           <div className="text-[11px] text-slate-500 truncate">{cur?.subtitle ?? ""}</div>
         </div>
+        <button type="button" data-no-drag onClick={() => setPickOpen("notify")} aria-label="ตั้งค่าการแจ้งเตือน" title="ตั้งค่าว่าจะให้เตือนเรื่องไหน แบบไหน"
+          className="w-8 h-8 rounded-md text-slate-500 hover:bg-white hover:text-slate-800"><Icon name="settings" /></button>
         <button type="button" data-no-drag onClick={switchMode} aria-label={drawer ? "สลับเป็นการ์ดลอย" : "สลับเป็นแถบข้าง"}
           title={drawer ? "สลับเป็นการ์ดลอย (กดข้างนอก = ซ่อน)" : "สลับเป็นแถบข้าง (เปิดค้างจนกด ✕)"}
           className="h-8 px-2 rounded-md text-[11px] text-slate-500 hover:bg-white hover:text-slate-800">{drawer ? "▢ การ์ด" : "▕ แถบข้าง"}</button>
@@ -146,7 +148,7 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
           : <>กด <b>✕</b> = ซ่อนเป็นตัว Pet · ลากที่หัวเพื่อย้ายที่ · กดรูป Pet = เปลี่ยนตัว · {WORK_POPUP_HIDE_HINT}</>}
       </p>
     </div>
-    {pickOpen && <PetPickerModal open onClose={() => setPickOpen(false)} />}
+    {pickOpen && <PetPickerModal open initialTab={pickOpen} onClose={() => setPickOpen(false)} />}
     </>
   );
 }
@@ -155,7 +157,7 @@ export function WorkPopupFloatCard({ pref, minimized, tabs, tab, onTab, pet, onM
 export function WorkPopupFloatToggle() {
   const [pref, setPref] = useWorkPopupFloatPref();
   const [petPref] = useFloatingPetPref();
-  const [pickOpen, setPickOpen] = useState(false);
+  const [pickOpen, setPickOpen] = useState<false | "pet" | "notify">(false);
   return (
     <div className="px-3 py-2 border-t border-slate-100">
       <label className="flex items-center gap-2 cursor-pointer">
@@ -186,10 +188,14 @@ export function WorkPopupFloatToggle() {
           <span className="whitespace-nowrap text-[11px] text-slate-400">ตัว Pet</span>
           <div className="flex items-center gap-1.5">
             <PetArt source={petPref.source} size={24} />
-            <button type="button" onClick={() => setPickOpen(true)} className="min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">เปลี่ยน</button>
+            <button type="button" onClick={() => setPickOpen("pet")} className="min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">เปลี่ยน</button>
+          </div>
+          <span className="whitespace-nowrap text-[11px] text-slate-400">เตือนอะไร</span>
+          <div>
+            <button type="button" onClick={() => setPickOpen("notify")} className="min-h-6 whitespace-nowrap px-2 py-0.5 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">ตั้งค่าการแจ้งเตือน</button>
           </div>
         </div>
-        {pickOpen && <PetPickerModal open onClose={() => setPickOpen(false)} />}
+        {pickOpen && <PetPickerModal open initialTab={pickOpen} onClose={() => setPickOpen(false)} />}
       </>) : (
         <p className="mt-1 text-[11px] text-slate-400">ปิดอยู่ — ป๊อปไม่เด้ง (ทุกเครื่องของคุณ)</p>
       )}

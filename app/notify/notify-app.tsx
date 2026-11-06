@@ -22,7 +22,7 @@ import { useViewportLayout } from "@/components/device-view";
 import { QrCode } from "@/components/qr-code";
 import { AppIconEditButton, useAppBranding } from "@/components/app-icon-editor";
 import { appIconUrl } from "@/lib/app-branding";
-import { PUSH_CATEGORIES, pushCategoryIcon } from "@/lib/push-categories";
+import { LOCKED_PUSH_CATEGORIES, PUSH_CATEGORIES, pushCategoryIcon } from "@/lib/push-categories";
 import type { Notification, NotificationsResponse } from "@/app/api/notifications/route";
 
 const POLL_MS = 30_000;
@@ -447,6 +447,17 @@ function Settings({ push, onBack }: { push: PushApi; onBack: () => void }) {
           <ul>
             {PUSH_CATEGORIES.map((c) => {
               const on = !push.prefs.off.includes(c.key);
+              // ความปลอดภัย = เด้งเสมอ ปิดไม่ได้ (ตั้งค่ากลาง lib/notify-sources)
+              if (LOCKED_PUSH_CATEGORIES.has(c.key)) return (
+                <li key={c.key} className="border-t border-slate-100 flex items-center gap-3 px-4 py-3">
+                  <span className="text-lg w-6 text-center">{c.icon}</span>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm text-slate-800">{c.label}</span>
+                    <span className="block text-xs text-slate-400">{c.hint}</span>
+                  </span>
+                  <span className="text-xs text-slate-400">เด้งเสมอ</span>
+                </li>
+              );
               return (
                 <li key={c.key} className="border-t border-slate-100">
                   <label className="flex items-center gap-3 px-4 py-3 cursor-pointer">

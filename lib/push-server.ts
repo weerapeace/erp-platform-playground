@@ -9,7 +9,8 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { appBaseUrl } from "@/lib/app-url";
 import { generateVapidKeys, sendWebPush, type VapidKeys } from "@/lib/web-push";
-import { normalizePushPrefs, pushEnabledFor, PUSH_PREFS_KEY, type PushPrefs } from "@/lib/push-categories";
+import { isLockedPushEvent, normalizePushPrefs, pushEnabledFor, PUSH_PREFS_KEY, type PushPrefs } from "@/lib/push-categories";
+import { inQuietHours, NOTIFY_PREFS_KEY, parseNotifyPrefs, type QuietHours } from "@/lib/notify-sources";
 import { signPlanAction } from "@/lib/team-plan-server";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -138,11 +139,14 @@ export async function dispatchPush(admin: Admin, ids: string[]): Promise<Dispatc
   const userIds = Array.from(new Set(rows.map((r) => r.user_id)));
   const [{ data: subsData }, { data: prefData }] = await Promise.all([
     admin.from("erp_push_subscriptions").select("id, user_id, endpoint, p256dh, auth, fail_count, event_filter").in("user_id", userIds),
-    admin.from("user_ui_prefs").select("user_id, value").eq("key", PUSH_PREFS_KEY).in("user_id", userIds),
+    admin.from("user_ui_prefs").select("user_id, key, value").in("key", [PUSH_PREFS_KEY, NOTIFY_PREFS_KEY]).in("user_id", userIds),
   ]);
   const subs = (subsData ?? []) as PushSubscriptionRow[];
   if (!subs.length) { stats.skipped = rows.length; return stats; }
-  const prefs = new Map<string, PushPrefs>(((prefData ?? []) as { user_id: string; value: unknown }[]).map((p) => [p.user_id, normalizePushPrefs(p.value)]));
+  const prefRows = (prefData ?? []) as { user_id: string; key: string; value: unknown }[];
+  const prefs = new Map<string, PushPrefs>(prefRows.filter((p) => p.key === PUSH_PREFS_KEY).map((p) => [p.user_id, normalizePushPrefs(p.value)]));
+  // ห้ามรบกวน (ตั้งค่าการแจ้งเตือน · หน้าต่างตัว Pet) — ช่วงนั้นไม่เด้งที่เครื่อง ยกเว้นเรื่องที่ล็อกไว้ (ความปลอดภัย / ทดสอบ)
+  const quiet = new Map<string, QuietHours>(prefRows.filter((p) => p.key === NOTIFY_PREFS_KEY).map((p) => [p.user_id, parseNotifyPrefs(p.value).quiet]));
 
   const vapid = await getVapidKeys(admin);
   const subject = appBaseUrl();
@@ -153,7 +157,9 @@ export async function dispatchPush(admin: Admin, ids: string[]): Promise<Dispatc
     if (!mySubs.length) continue;
     const p = prefs.get(uid) ?? { off: [] };
     const mine = rows.filter((r) => r.user_id === uid);
-    const wanted = mine.filter((r) => pushEnabledFor(p, r.event_type));
+    const q = quiet.get(uid);
+    const hush = !!q && inQuietHours(q);
+    const wanted = mine.filter((r) => pushEnabledFor(p, r.event_type) && (!hush || isLockedPushEvent(r.event_type)));
     stats.skipped += mine.length - wanted.length;
     if (!wanted.length) continue;
     const unread = await unreadCount(admin, uid);
