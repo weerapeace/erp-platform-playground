@@ -4166,9 +4166,25 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
     finally { setBusy(false); }
   };
 
-  // กดปุ่มโหลดรูป → ถามก่อนว่าจะ "รวมบิล" (รูปเดียว) หรือ "แยกบิล" (บิลละรูป); ถ้ามีบิลเดียวไม่ต้องถาม
+  // โหลดรูป "สรุปอย่างเดียว" = แค่ส่วนหัวสรุป (โอนจริง / เรท / เงินจีน / ยอดคงเหลือ) ไม่มีรายการบิลย่อย
+  //   ★ 2026-11-06 เจ้าของขอ "ไม่ต้องโชว์รายการย่อย เอาแค่สรุปอย่างเดียว"
+  const saveImageSummary = async () => {
+    setBusy(true);
+    try {
+      const cv = document.createElement("canvas");
+      drawTransferReceipt(cv, headerSub, summaryRows());
+      const blob = await canvasBlob(cv);
+      if (!blob) { toast.error("สร้างรูปไม่สำเร็จ"); return; }
+      await downloadOrSaveImages([{ blob, name: fileSafe(`china-transfer-${String(t.transfer_no ?? "")}-summary.png`) }]);
+      toast.success("บันทึกรูปแล้ว");
+    } catch (e) { if ((e as Error).name !== "AbortError") toast.error(String((e as Error).message ?? e)); }
+    finally { setBusy(false); }
+  };
+
+  // กดปุ่มโหลดรูป → ถามก่อนว่าจะ "รวมบิล" (รูปเดียว) / "แยกบิล" (บิลละรูป · มี 2 บิลขึ้นไป) / "สรุปอย่างเดียว"
+  //   ไม่มีบิลเลย = รูปรวมก็คือสรุปอยู่แล้ว ไม่ต้องถาม
   const [askSaveMode, setAskSaveMode] = useState(false);
-  const saveImage = () => { if (cn.length + cw.length <= 1) void saveImageAll(); else setAskSaveMode(true); };
+  const saveImage = () => { if (cn.length + cw.length === 0) void saveImageAll(); else setAskSaveMode(true); };
 
   // ส่งใบสรุปการโอน "เป็นรูป" + สลิปที่แนบ เข้า LINE กลุ่ม
   const sendLineImage = async () => {
@@ -4350,10 +4366,11 @@ function TransferReceiptPopup({ t, onClose, autoSendLine, onDelete, onEdit, onLi
         <ChoicePopup title="โหลดรูปแบบไหน?" message={`รายการโอนนี้มี ${cn.length + cw.length} บิล`}
           options={[
             { key: "all", icon: "🧾", label: "รวมบิล", desc: "รูปเดียว มีทุกบิลในใบสรุป" },
-            { key: "each", icon: "🗂️", label: "แยกบิล", desc: `บิลละ 1 รูป (ได้ ${cn.length + cw.length} รูป) เอาไว้ส่งแยกร้าน` },
+            ...(cn.length + cw.length > 1 ? [{ key: "each", icon: "🗂️", label: "แยกบิล", desc: `บิลละ 1 รูป (ได้ ${cn.length + cw.length} รูป) เอาไว้ส่งแยกร้าน` }] : []),
+            { key: "summary", icon: "📋", label: "สรุปอย่างเดียว", desc: "รูปเดียว แค่ยอดสรุป ไม่มีรายการบิลย่อย" },
           ]}
           onCancel={() => setAskSaveMode(false)}
-          onPick={(k) => { setAskSaveMode(false); if (k === "each") void saveImageEach(); else void saveImageAll(); }} />
+          onPick={(k) => { setAskSaveMode(false); if (k === "each") void saveImageEach(); else if (k === "summary") void saveImageSummary(); else void saveImageAll(); }} />
       )}
       {sendState && <SendingOverlay state={sendState} />}
     </div>
