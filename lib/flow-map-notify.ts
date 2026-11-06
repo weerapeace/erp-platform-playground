@@ -70,6 +70,8 @@ export type NotifyLive = {
   /** สวิตช์ทั้งระบบของรายงานตามเวลา (erp_report_channels) */
   channels: { email: boolean; popup: boolean; discord: boolean; line: boolean };
   reports: NotifyReport[];
+  /** หมายเหตุที่แอดมินเขียนเอง ต่อเรื่อง (id → ข้อความ · "" = ซ่อนข้อสังเกตในทะเบียน) — notifyRemark() */
+  remarks?: Record<string, string>;
 };
 
 export const NOTIFY_DAYS = 90;
@@ -341,6 +343,34 @@ export function notifyReportTopics(live: NotifyLive): NotifyTopic[] {
 
 /** ทุกเรื่อง (ทะเบียน + รายงานตามเวลาจาก live) */
 export const notifyAllTopics = (live: NotifyLive | null): NotifyTopic[] => (live ? [...NOTIFY_TOPICS, ...notifyReportTopics(live)] : NOTIFY_TOPICS);
+
+// ── หมายเหตุของเรื่องแจ้งเตือน (2026-11-06) ──
+// แอดมินเขียนในป๊อปแก้แจ้งเตือน → เก็บที่ china_app_settings skey NOTIFY_REMARKS_KEY (ก้อนเดียว id → ข้อความ · ไม่มีตารางใหม่)
+// โชว์เป็นบรรทัด "หมายเหตุ: …" ใต้ป้ายแจ้งเตือนในแผงกล่อง + แผงรายละเอียดแท็บแจ้งเตือน · ไม่ส่งไปกับแจ้งเตือน
+// ⚠️ ทุกคนที่เปิดแผนผังเห็น — ห้ามใส่ตัวเลขเงิน / รหัส / token
+export const NOTIFY_REMARKS_KEY = "flow_notify_remarks";
+export const NOTIFY_REMARK_MAX = 500;
+
+/** id ที่แปะหมายเหตุได้: เรื่องในทะเบียน หรือรายงานตามเวลา (report:<uuid>) */
+export const isNotifyTopicId = (id: string): boolean =>
+  NOTIFY_TOPICS.some((t) => t.id === id) || /^report:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+/** ทำความสะอาดก้อนหมายเหตุที่อ่านจาก DB — เก็บเฉพาะ id ที่รู้จัก + ข้อความ (ตัดยาวเกิน) */
+export function cleanNotifyRemarks(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [id, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v === "string" && isNotifyTopicId(id)) out[id] = v.trim().slice(0, NOTIFY_REMARK_MAX);
+  }
+  return out;
+}
+
+/** หมายเหตุที่ใช้จริง: ที่แอดมินเขียน (ว่าง = ไม่โชว์) · ยังไม่เคยเขียน = ข้อสังเกตในทะเบียน (note) */
+export function notifyRemark(topic: NotifyTopic, live: NotifyLive | null): string {
+  const r = live?.remarks;
+  if (r && Object.prototype.hasOwnProperty.call(r, topic.id)) return r[topic.id];
+  return topic.note ?? "";
+}
 
 /** สถานะรวมของเรื่อง: ok = มีอย่างน้อย 1 ทางถึงคน · warn = เงียบทุกทาง · off = ปิดทุกทาง */
 /** ผลทุกปลายทางของเรื่อง (เรียงตาม topic.send) */

@@ -16,7 +16,7 @@ import { ErrorState, LoadingState } from "@/components/state-views";
 import { FLOW_NODES } from "@/lib/flow-map";
 import {
   NOTIFY_AREAS, NOTIFY_AREA_ORDER, NOTIFY_CHANNELS, NOTIFY_DAYS, NOTIFY_STATES, NOTIFY_TOPICS,
-  notifyAllTopics, notifyChannelOf, notifyGapNodes, notifyGhostRules, notifyGroupLabel, notifyTopicCells, notifyTopicState, notifyTopicStat,
+  notifyAllTopics, notifyChannelOf, notifyGapNodes, notifyGhostRules, notifyGroupLabel, notifyRemark, notifyTopicCells, notifyTopicState, notifyTopicStat,
   type NotifyArea, type NotifyChannel, type NotifyLive, type NotifyState, type NotifyTopic,
 } from "@/lib/flow-map-notify";
 
@@ -337,7 +337,15 @@ export function FlowNotifyPanel({ api, selected, onSelect, onOpenNode, canAdmin,
           <div><div className="text-[15px] font-semibold text-slate-800">{stat.last ? shortDate(stat.last) : "—"}</div><div className="text-[11px] text-slate-500">{t("ล่าสุด", "last")}</div></div>
         </div>
       ) : <div className="text-[12.5px] text-slate-500">{t("เรื่องนี้ไม่ลงกระดิ่ง จึงไม่มีสถิติในระบบ", "Not sent to the bell — no stats")}</div>}
-      {topic.note && <div className="mt-2 flex gap-1.5 text-[12.5px] text-slate-700"><Icon value="💡" className="mt-0.5 shrink-0" />{topic.note}</div>}
+      {(() => {
+        const remark = notifyRemark(topic, live);   // ที่แอดมินเขียนในป๊อปแก้ไข · ยังไม่เคยเขียน = ข้อสังเกตในทะเบียน
+        return remark ? (
+          <div className="mt-2 text-[12.5px] text-slate-700">
+            <div className="text-[11px] text-slate-500">{t("หมายเหตุ", "Remark")}</div>
+            <div className="whitespace-pre-line">{remark}</div>
+          </div>
+        ) : null;
+      })()}
 
       <details className="mt-3 text-[12px] text-slate-500">
         <summary className="cursor-pointer select-none">{t("สำหรับทีมพัฒนา", "For developers")}</summary>
@@ -368,6 +376,7 @@ export function NodeNotifyList({ topics, live, onPick }: { topics: NotifyTopic[]
                 </span>
               ))}
             </span>
+            {(() => { const remark = notifyRemark(x, live); return remark ? <span className="block ml-5 mt-1 text-[11.5px] leading-snug text-slate-500 whitespace-pre-line">{t("หมายเหตุ", "Remark")}: {remark}</span> : null; })()}
           </button>
         );
       })}

@@ -7,7 +7,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { emailConfigured } from "@/lib/email";
 import { shopLineToken } from "@/lib/webshop-line";
 import { readSiteInfo } from "@/lib/website-site-info";
-import { NOTIFY_DAYS, type NotifyLive, type NotifyStat } from "@/lib/flow-map-notify";
+import { NOTIFY_DAYS, NOTIFY_REMARKS_KEY, cleanNotifyRemarks, type NotifyLive, type NotifyStat } from "@/lib/flow-map-notify";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Row = Record<string, unknown>;
@@ -123,13 +123,20 @@ async function reports(admin: Admin): Promise<{ channels: NotifyLive["channels"]
   };
 }
 
+/** หมายเหตุที่แอดมินเขียนเองต่อเรื่อง (china_app_settings ก้อนเดียว) */
+async function remarks(admin: Admin): Promise<Record<string, string>> {
+  const { data, error } = await admin.from("china_app_settings").select("sval").eq("skey", NOTIFY_REMARKS_KEY).maybeSingle();
+  if (error) throw new Error(error.message);
+  return cleanNotifyRemarks((data as { sval?: unknown } | null)?.sval);
+}
+
 /** รวมทุกส่วน — ส่วนไหนล้มใช้ค่าว่าง + จดชื่อใน failed */
 export async function buildNotifyLive(admin: Admin): Promise<{ data: NotifyLive; failed: string[] }> {
   const failed: string[] = [];
   const safe = async <T,>(name: string, fn: () => Promise<T>, empty: T): Promise<T> => {
     try { return await fn(); } catch (e) { failed.push(name); console.error(`[flow-map/notify] ${name}:`, e instanceof Error ? e.message : e); return empty; }
   };
-  const [line, ruleList, st, push, sh, stat, rep] = await Promise.all([
+  const [line, ruleList, st, push, sh, stat, rep, rem] = await Promise.all([
     safe("line", () => lineState(admin), { token: false, main: false, groups: {}, off: {} }),
     safe("rules", () => rules(admin), []),
     safe("staff", () => staff(admin), { active: 0, linked: 0 }),
@@ -137,6 +144,7 @@ export async function buildNotifyLive(admin: Admin): Promise<{ data: NotifyLive;
     safe("shops", () => shops(admin), { total: 0, line: 0, email: 0, oa: 0 }),
     safe("stats", () => stats(admin), {}),
     safe("reports", () => reports(admin), { channels: { email: true, popup: true, discord: true, line: true }, reports: [] }),
+    safe("remarks", () => remarks(admin), {} as Record<string, string>),
   ]);
-  return { data: { line, rules: ruleList, staff: st, push, email: emailConfigured(), shops: sh, stats: stat, ...rep }, failed };
+  return { data: { line, rules: ruleList, staff: st, push, email: emailConfigured(), shops: sh, stats: stat, ...rep, remarks: rem }, failed };
 }

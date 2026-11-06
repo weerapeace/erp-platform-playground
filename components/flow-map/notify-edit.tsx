@@ -9,6 +9,7 @@
  *   💬 LINE กลุ่ม                  → สวิตช์เปิด/ปิด + ตั้งกลุ่มให้ช่องที่ยังไม่ตั้ง (กลุ่มล่าสุดที่บอทเห็น) — /api/admin/line-console (ค่าเดียวกับศูนย์ LINE)
  *   ⏰ รายงานตามเวลา               → เปิด/ปิด · เวลา · วัน · ช่องทาง — /api/admin/email-reports/:id (ส่งทั้งชุด emailReportToInput)
  *   ทางอื่น (LINE ส่วนตัว / LINE OA / อีเมลร้าน …) → โชว์สถานะ + สิ่งที่ต้องทำ (ตั้งที่หน้าของมัน)
+ *   📝 หมายเหตุ (ทุกเรื่อง)        → โชว์ใต้ป้ายแจ้งเตือนในแผงกล่อง + แผงรายละเอียด — /api/flow-map/notify/remarks (ว่าง = ไม่โชว์)
  * สิทธิ์: เปิดได้เฉพาะ canAdmin (admin.users) · API แต่ละตัวตรวจสิทธิ์ของตัวเองซ้ำ
  */
 import { useEffect, useMemo, useState } from "react";
@@ -21,7 +22,7 @@ import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
 import { DAY_LABELS, emailReportToInput, type EmailReport, type EmailReportInput } from "@/lib/email-report/shared";
 import {
-  NOTIFY_CHANNELS, NOTIFY_STATES, notifyChannelOf, notifyGroupLabel, notifyTopicCells,
+  NOTIFY_CHANNELS, NOTIFY_REMARK_MAX, NOTIFY_STATES, notifyChannelOf, notifyGroupLabel, notifyRemark, notifyTopicCells,
   type NotifyGroup, type NotifyLive, type NotifyTarget, type NotifyTopic,
 } from "@/lib/flow-map-notify";
 
@@ -62,6 +63,8 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
   const [assign, setAssign] = useState<Set<string>>(new Set());                 // slot ที่จะตั้งเป็นกลุ่มล่าสุดที่บอทเห็น
   const [report, setReport] = useState<EmailReport | null>(null);
   const [rep, setRep] = useState<ReportDraft | null>(null);
+  const [remark, setRemark] = useState("");   // หมายเหตุ (ร่าง)
+  const remark0 = topic ? notifyRemark(topic, live) : "";
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -69,7 +72,7 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
   useEffect(() => {
     if (!open || !topic) return;
     let alive = true;
-    setLoading(true); setLoadErr(null); setErr(null); setAssign(new Set());
+    setLoading(true); setLoadErr(null); setErr(null); setAssign(new Set()); setRemark(notifyRemark(topic, live));
     const jobs: Promise<void>[] = [];
     if (ruleKeys.length) {
       jobs.push(apiFetch("/api/admin/roles").then((r) => r.json()).then((j) => {
@@ -125,7 +128,8 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
   const dirtyEvents = lineData ? lineEvents.filter((ev) => !!lineOff[ev] !== !!lineData.disabled_events[ev]) : [];
   const repDirty = !!(report && rep && (rep.is_enabled !== report.is_enabled || rep.send_time !== report.send_time || !sameJson([...rep.days].sort(), [...report.days].sort())
     || rep.email !== (report.email_enabled !== false) || rep.popup !== !!report.popup?.enabled || rep.line !== !!report.line?.enabled || rep.discord !== !!report.discord?.enabled));
-  const dirty = dirtyRules.length > 0 || dirtyEvents.length > 0 || assign.size > 0 || repDirty;
+  const remarkDirty = remark.trim() !== remark0.trim();
+  const dirty = dirtyRules.length > 0 || dirtyEvents.length > 0 || assign.size > 0 || repDirty || remarkDirty;
 
   const setRule = (k: string, patch: Partial<RuleDraft>) => setRules((s) => (s[k] ? { ...s, [k]: { ...s[k]!, ...patch } } : s));
 
@@ -133,6 +137,7 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
     // ตรวจก่อน: กฎที่เปิดอยู่ต้องมีคนรับอย่างน้อย 1
     for (const [, d] of dirtyRules) if (d!.active && !d!.recipients.length) { setErr(`“${d!.rule.name}” ยังไม่มีคนรับ — เพิ่มอย่างน้อย 1 หรือปิดกฎ`); return; }
     if (rep && repDirty && rep.is_enabled && !rep.days.length) { setErr("เลือกวันที่ส่งรายงานอย่างน้อย 1 วัน"); return; }
+    if (remark.trim().length > NOTIFY_REMARK_MAX) { setErr(`หมายเหตุยาวเกิน ${NOTIFY_REMARK_MAX} ตัวอักษร`); return; }
     setSaving(true); setErr(null);
     const fails: string[] = [];
     const call = async (label: string, url: string, method: string, body: unknown) => {
@@ -148,6 +153,7 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
     }
     for (const ev of dirtyEvents) await call("สวิตช์ LINE", "/api/admin/line-console", "POST", { event: ev, enabled: !lineOff[ev] });
     for (const slot of assign) await call(`กลุ่ม LINE (${notifyGroupLabel(slot as NotifyGroup)})`, "/api/admin/line-console", "POST", { slot, group_id: lineData?.captured });
+    if (remarkDirty) await call("หมายเหตุ", "/api/flow-map/notify/remarks", "PATCH", { id: topic.id, text: remark.trim() });
     if (report && rep && repDirty) {
       const change: Partial<EmailReportInput> = {
         is_enabled: rep.is_enabled, send_time: rep.send_time, days: [...rep.days].sort((a, b) => a - b), email_enabled: rep.email,
@@ -323,6 +329,16 @@ export function NotifyEditModal({ topic, live, open, onClose, onSaved, onOpenLin
         <div className="text-[12px] text-slate-500">{topic.when}</div>
         {loadErr && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700">{loadErr}</div>}
         {err && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12.5px] text-red-700">{err}</div>}
+        <div className={box}>
+          <div className="flex items-center gap-1.5 text-[13px] font-medium text-slate-800"><Icon value="i:notes" size={14} />หมายเหตุ</div>
+          <textarea value={remark} onChange={(e) => { setRemark(e.target.value); setErr(null); }} maxLength={NOTIFY_REMARK_MAX} rows={2}
+            placeholder="เช่น ผู้ตรวจ = หัวหน้าทีมครีเอทีฟ · ถ้าลาให้เปลี่ยนเป็นคุณบี"
+            className="mt-1.5 w-full rounded-lg border border-slate-200 px-2.5 py-1.5 text-[12.5px] leading-relaxed outline-none focus:border-indigo-300" />
+          <div className="mt-0.5 flex text-[11px] text-slate-400">
+            <span className="flex-1">โชว์ใต้ป้ายแจ้งเตือนในแผนผัง · ว่าง = ไม่โชว์ · ไม่ส่งไปกับแจ้งเตือน · ทุกคนที่เปิดแผนผังเห็น (ห้ามใส่ตัวเลขเงิน/รหัส)</span>
+            <span className="tabular-nums">{remark.trim().length}/{NOTIFY_REMARK_MAX}</span>
+          </div>
+        </div>
         {reportId && reportBlock()}
         {topic.send.map((s, i) => (
           s.kind === "bell" ? bellBlock(s, i)

@@ -84,6 +84,7 @@
   - 💬 LINE กลุ่ม → สวิตช์ (`disabled_events`) + ตั้งช่องที่ยังว่างเป็น "กลุ่มล่าสุดที่บอทเห็น" → `POST /api/admin/line-console` · เปลี่ยนกลุ่ม/ส่งทดสอบ = ปุ่มเปิดศูนย์ LINE
   - ⏰ รายงานตามเวลา → เปิด/ปิด · เวลา · วัน · ช่องทาง → `PATCH /api/admin/email-reports/:id` (ส่งทั้งชุด `emailReportToInput` ของกลางใน lib/email-report/shared)
   - ทางอื่น (LINE ส่วนตัว/OA/อีเมลร้าน) → โชว์สถานะ + สิ่งที่ต้องทำ
+- **หมายเหตุ** (เพิ่ม 2026-11-06): ช่องในป๊อปแก้ไข → บรรทัด "หมายเหตุ: …" ใต้ป้ายแจ้งเตือนในแผงกล่อง + แผงรายละเอียด · เก็บ `china_app_settings` skey `flow_notify_remarks` (id → ข้อความ) ผ่าน `PATCH /api/flow-map/notify/remarks` (admin.users · audit `flow_map.notify_remark`) · ยังไม่เคยเขียน = ข้อสังเกต `note` ในทะเบียน · เขียนว่าง = ไม่โชว์ · ตัวช่วย `notifyRemark()` ใน lib/flow-map-notify · ทุกคนที่เปิดแผนผังเห็น (ห้ามตัวเลขเงิน)
 - ชิปกระดิ่งที่มีกฎ = **คนรับจริงจากกฎ** (`NotifyLive.rules[].to` คิดใน notify-live: ชื่อตำแหน่ง + ชื่อคน) — ไม่ใช่ป้ายในทะเบียน
 - **เรื่องที่โค้ดสร้างข้อความเอง** (ตัวตั้งเวลา) แต่อยากให้แก้คนรับได้ → อ่านคนรับจาก `lib/notify-recipients` `ruleRecipients(admin, event)` + ใส่ `B(to, event)` ในทะเบียน + เพิ่มแถวกฎ (role admin) · ไม่มีกฎ/หาคนไม่เจอ = แอดมินทุกคน · ปิดกฎ = ไม่ส่ง — ใช้แล้ว: `cashflow.low_cash`, `subscription.renewal_soon`
 
