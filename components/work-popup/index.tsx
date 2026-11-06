@@ -309,7 +309,7 @@ export function WorkPopupHost() {
 
   // ── แท็บ กระดิ่ง: แจ้งเตือนที่ยังไม่อ่าน (ตัวดึงกลางเดียวกับกระดิ่งบนแถบ) เฉพาะประเภทที่เปิดโชว์ในศูนย์ ──
   const feed = useNotificationFeed(wide && enabled && !skip ? uid : null);
-  const bellItems = feed.items.filter((n) => !n.read_at && showIn(bellSourceOf(n.event_type)));
+  const bellItems = feed.items.filter((n) => { const k = bellSourceOf(n.event_type); return !n.read_at && k !== "work" && showIn(k); });
   const bellSeenKey = uid ? `fpet-bell-seen:${uid}` : "";
   const [bellSeen, setBellSeen] = useState<Set<string>>(new Set());
   useEffect(() => { if (bellSeenKey) setBellSeen(readIds(bellSeenKey)); }, [bellSeenKey]);

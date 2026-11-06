@@ -10,6 +10,7 @@ describe("ทะเบียนแหล่งแจ้งเตือน", () =
     expect(new Set(NOTIFY_SOURCES.map((s) => s.key)).size).toBe(NOTIFY_SOURCES.length);
     expect(bellSourceOf("po.approved")).toBe("bell.purchasing");
     expect(bellSourceOf("something.unknown")).toBe("bell.other");
+    expect(bellSourceOf("report.popup_later")).toBe("work");
   });
   it("ค่าเริ่มต้น · ตั้งแล้วเก็บเฉพาะที่ต่าง · ความปลอดภัยปิดไม่ได้", () => {
     const p = parseNotifyPrefs(null);

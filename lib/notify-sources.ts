@@ -52,8 +52,11 @@ const BELL_SOURCES: NotifySource[] = PUSH_CATEGORIES.filter((c) => c.key !== "wo
 
 export const NOTIFY_SOURCES: NotifySource[] = [...CENTER_SOURCES, ...BELL_SOURCES];
 export const notifySource = (key: string) => NOTIFY_SOURCES.find((s) => s.key === key);
-/** เรื่องกระดิ่งประเภทไหน → key ในทะเบียน */
-export const bellSourceOf = (eventType: string) => `bell.${pushCategoryOf(eventType)}`;
+/** เรื่องกระดิ่งประเภทไหน → key ในทะเบียน · ป๊อปเตือนงาน (report.*) = "work" (มีแท็บงานแล้ว — แท็บกระดิ่งไม่โชว์ซ้ำ) */
+export const bellSourceOf = (eventType: string) => {
+  const c = pushCategoryOf(eventType);
+  return c === "work_popup" ? "work" : `bell.${c}`;
+};
 
 // ── ค่าตั้งต่อคน ──
 export type QuietHours = { on: boolean; from: string; to: string };
