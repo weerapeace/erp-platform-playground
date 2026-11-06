@@ -13,11 +13,13 @@ import { useToast } from "@/components/toast";
 import { htmlDocToImageBlob, imageFileName } from "@/lib/html-to-png";
 import { downloadBlob } from "@/lib/image-clipboard";
 
-export function SaveImageButton({ html, fileName, pageWidthPx = 794, className, label = "บันทึก JPG" }: {
+export function SaveImageButton({ html, fileName, pageWidthPx = 794, scale, className, label = "บันทึก JPG" }: {
   html: string | null | undefined;
   fileName: string;
   /** ความกว้างกระดาษบนจอ (px) — A4 ตั้ง 794 · A4 แนวนอน 1123 · A5 559 */
   pageWidthPx?: number;
+  /** ความคมชัด (ตั้งต้น 2 เท่า) — 3 = คมชัดสูง (ไฟล์ใหญ่ขึ้น · ใบยาวมากระบบลดให้เอง) */
+  scale?: number;
   className?: string;
   label?: string;
 }) {
@@ -27,7 +29,7 @@ export function SaveImageButton({ html, fileName, pageWidthPx = 794, className, 
     if (!html || busy) return;
     setBusy(true);
     try {
-      const blob = await htmlDocToImageBlob(html, { width: pageWidthPx, type: "image/jpeg", quality: 0.92 });
+      const blob = await htmlDocToImageBlob(html, { width: pageWidthPx, scale, type: "image/jpeg", quality: 0.92 });
       downloadBlob(blob, imageFileName(fileName));
       toast.success("บันทึกรูป JPG แล้ว — ดูในโฟลเดอร์ดาวน์โหลด");
     } catch (e) {

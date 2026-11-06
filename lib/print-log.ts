@@ -10,7 +10,8 @@
 // piecework = แถวงานเหมา (mo_piecework.id) จากใบจ่ายงานเหมา · sale_line = บรรทัดใบขาย (erp_playground_so_lines.id) จากใบสรุปจับคู่ใบขาย → ใบงาน
 // work_log = ใบจดผลงานตามใบงาน (doc_id = manufacturing_orders.id) จาก /print/work-steps/<id>?mode=worklog
 // so_order = ใบเช็กสถานะใบสั่งขาย (doc_id = so_orders.id) จาก /print/so-order-status/<id>
-export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line", "work_log", "so_order"] as const;
+// ds_notice = ใบแจ้งลูกค้าของใบงานออกแบบ (doc_id = design_sheet_notices.id) จาก /print/design-sheet/<id>/notice/<noticeId>
+export const PRINT_DOC_TYPES = ["mo", "piecework", "sale_line", "work_log", "so_order", "ds_notice"] as const;
 export type PrintDocType = (typeof PRINT_DOC_TYPES)[number];
 /** สิทธิ์ดู/บันทึกประวัติพิมพ์ต่อชนิด (ไม่ระบุ = ดูสินค้าได้ products.view) — ฝ่ายขายเปิดใบสั่งขายได้แต่อาจไม่มีสิทธิ์ดูสินค้า */
 export const PRINT_DOC_PERM: Partial<Record<PrintDocType, string>> = { so_order: "so.view" };

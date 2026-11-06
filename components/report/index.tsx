@@ -663,7 +663,7 @@ export function PrintFrame({ html, maxWidth = 840, onPrint, fileName, fit = fals
   // วัดความสูงเนื้อหาจริง — ซ้ำหลายรอบเผื่อฟอนต์/รูปจัดเสร็จช้า
   const measure = () => {
     const d = ref.current?.contentDocument;
-    if (!d) return;
+    if (!d?.documentElement) return;   // iframe กำลังเปลี่ยนเอกสาร (srcdoc ใหม่) — ยังไม่มีเนื้อ ไม่ต้องวัด
     if (fit) {
       const page = d.querySelector<HTMLElement>(".doc");
       d.documentElement.style.zoom = "1";

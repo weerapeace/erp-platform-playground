@@ -69,6 +69,7 @@ const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-
 const OrderBatchEntryModal = dynamic(() => import("@/components/order-batch-entry").then((m) => m.OrderBatchEntryModal), { ssr: false });
 // แท็บ "รายละเอียดงาน" (วาดบนรูป + หมุดวัตถุดิบ) — โหลดเฉพาะตอนเปิดแท็บ
 const DesignSheetSpecTab = dynamic(() => import("./spec-tab").then((m) => m.DesignSheetSpecTab), { ssr: false });
+const DesignSheetNoticeTab = dynamic(() => import("./notice-tab").then((m) => m.DesignSheetNoticeTab), { ssr: false });
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
 // ค่าใช้จ่ายเพิ่ม: amount = ต่อชิ้นเสมอ · mode "split" = ค่าครั้งเดียวหารจำนวนสั่ง (ค่าบล็อกสกรีน) — สูตรอยู่ lib/design-sheet-cost-snapshot
@@ -505,12 +506,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [closeSaving, setCloseSaving] = useState(false);
 
   // ---- เฟส 3: แท็บในป๊อปอัพ + comment ลูกค้า + รอบเสนอราคา ----
-  const [modalTab, setModalTab] = useState<"info" | "spec" | "comments" | "cost" | "quotes">("info");
+  const [modalTab, setModalTab] = useState<"info" | "spec" | "comments" | "cost" | "quotes" | "notice">("info");
   // แท็บรายละเอียดงาน: เปิดครั้งแรกแล้วคงไว้ (สลับแท็บไม่ทิ้งที่แก้ค้าง) · มีแก้ค้าง = เตือนก่อนปิด
   const [specMounted, setSpecMounted] = useState(false);
   const [specDirty, setSpecDirty] = useState(false);
   const specSaveRef = useRef<(() => Promise<boolean>) | null>(null);
   useEffect(() => { if (modalTab === "spec") setSpecMounted(true); }, [modalTab]);
+  // 📣 แจ้งลูกค้า — คงไว้หลังเปิดครั้งแรก (เหมือนรายละเอียดงาน) · แก้ค้าง = เตือนก่อนปิดใบงาน
+  const [noticeMounted, setNoticeMounted] = useState(false);
+  const [noticeDirty, setNoticeDirty] = useState(false);
+  const [noticeCount, setNoticeCount] = useState<number | null>(null);
+  const noticeSaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  useEffect(() => { if (modalTab === "notice") setNoticeMounted(true); }, [modalTab]);
   // โหมดของป๊อปอัป: เปิดดูงานเดิม = readonly (ดูอย่างเดียว) จนกดปุ่ม "แก้ไข" · งานสร้างใหม่ = แก้ได้เลย
   const [editing, setEditing] = useState(false);
   const [versionsOpen, setVersionsOpen] = useState(false);   // 🕘 ป๊อปเวอร์ชันตีราคา (ข้อ C)
@@ -638,6 +645,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     return tabs;
   }, [form?.parent_sku_codes, form?.parent_sku_drafts, costLines, generalLabel]);
   // ป้ายไซส์ของรอบเสนอราคา (null = รอบเก่าไม่ระบุ · "" = ทั่วไป)
+  // 📣 แจ้งลูกค้า: ส่ง "ใช้ต่อใบ" จากแท็บตีราคา + จำนวนสั่งจากรอบเสนอราคาล่าสุด ให้แท็บแจ้งลูกค้า (notice-tab.tsx)
+  const noticeCostTabs = useMemo(() => costParentTabs.map((tb) => ({ key: tb.key, label: tb.label })), [costParentTabs]);
+  const noticeCostLines = useMemo(() => costLines.map((r) => ({
+    parent_code: pkey(r.parent_code), item_id: r.item_id, item_sku_id: r.item_sku_id ?? null, item_name: r.item_name,
+    group_name: r.group_name, qty: r.qty, uom: r.uom, piece: rowIsPiece(r),
+  })), [costLines]);
+  const noticeSheetOf = useCallback((id: string) => priceItemById.get(id), [priceItemById]);
+  const noticeOrderOf = useCallback((key: string) => {
+    const qs = quotes.filter((q) => (q.parent_code ?? "") === key && q.qty != null && q.qty > 0)
+      .sort((a, b) => b.round - a.round || (a.qty ?? 0) - (b.qty ?? 0));
+    return qs[0]?.qty ?? null;
+  }, [quotes]);
   const quoteSizeLabel = (code: string | null) =>
     code == null ? "—" : code === "" ? generalLabel : (costParentTabs.find((tb) => tb.key === code)?.label ?? code);
 
@@ -861,7 +880,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   }, [clearPend, detailOnly, onDetailClose]);
   const requestClose = () => {
     if (saving) return;
-    if (costDirty || supplierDirty || specDirty) setCloseConfirm(true);   // ตีราคา / ตีราคาสั่งจากร้าน / รายละเอียดงาน มีแก้ค้าง
+    if (costDirty || supplierDirty || specDirty || noticeDirty) setCloseConfirm(true);   // ตีราคา / ตีราคาสั่งจากร้าน / รายละเอียดงาน / ใบแจ้งลูกค้า มีแก้ค้าง
     else doClose();
   };
   // "บันทึกแล้วปิด" — บันทึกตีราคา + ตีราคาสั่งจากร้าน ที่ค้าง แล้วปิด
@@ -871,6 +890,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       if (costDirty) await saveCost();
       if (supplierDirty) await supplierSaveRef.current?.();
       if (specDirty && (await specSaveRef.current?.()) === false) return;   // บันทึกรายละเอียดงานไม่ผ่าน = ไม่ปิด
+      if (noticeDirty && (await noticeSaveRef.current?.()) === false) return;   // บันทึกใบแจ้งลูกค้าไม่ผ่าน = ไม่ปิด
       doClose();
     } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed")); }
     finally { setCloseSaving(false); }
@@ -1268,9 +1288,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   const openCreate = () => { setEditing(true); setCreateMore(false); setRecentBrandIds(loadRecent<{ id: string }>(RECENT_KEYS.designBrands).map((b) => b.id)); setParentRefs({}); setLinkedSkus([]); setForm(empty()); setFormErr(null); setModalTab("info"); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend(); setCostParent(""); setCostExtraMap({ "": defaultCostExtra() }); };
 
-  const openEdit = async (row: DesignSheetListItem, tab: "info" | "spec" | "comments" | "cost" | "quotes" = "info") => {
+  const openEdit = async (row: DesignSheetListItem, tab: "info" | "spec" | "comments" | "cost" | "quotes" | "notice" = "info") => {
     setLoadingForm(true); setFormErr(null); setForm(empty()); setEditing(false); setParentRefs({}); setLinkedSkus([]);
     setSpecMounted(tab === "spec"); setSpecDirty(false);
+    setNoticeMounted(tab === "notice"); setNoticeDirty(false); setNoticeCount(null);
     setModalTab(tab); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend();
     try {
       const res = await apiFetch(`/api/design-sheets/${row.id}`); const j = await res.json();
@@ -2174,7 +2195,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {/* แท็บ (โผล่เมื่อบันทึกแล้ว) */}
             {form.id && (
               <div className="flex items-center gap-1 border-b border-slate-200 pb-2">
-                {([["info", t("📋 ข้อมูลงาน", "📋 Job info")], ["spec", t("📐 รายละเอียดงาน", "📐 Job details")], ["comments", t(`💬 Comment ลูกค้า (${comments.length})`, `💬 Customer comments (${comments.length})`)], ["cost", t(`🧮 ตีราคา (${costLines.length})`, `🧮 Costing (${costLines.length})`)], ["quotes", t(`💰 เสนอราคา (${quotes.length})`, `💰 Quotes (${quotes.length})`)]] as const).map(([k, l]) => (
+                {([["info", t("📋 ข้อมูลงาน", "📋 Job info")], ["spec", t("📐 รายละเอียดงาน", "📐 Job details")], ["comments", t(`💬 Comment ลูกค้า (${comments.length})`, `💬 Customer comments (${comments.length})`)], ["cost", t(`🧮 ตีราคา (${costLines.length})`, `🧮 Costing (${costLines.length})`)], ["quotes", t(`💰 เสนอราคา (${quotes.length})`, `💰 Quotes (${quotes.length})`)], ["notice", t(`📣 แจ้งลูกค้า${noticeCount ? ` (${noticeCount})` : ""}`, `📣 Notify customer${noticeCount ? ` (${noticeCount})` : ""}`)]] as const).map(([k, l]) => (
                   <button key={k} onClick={() => setModalTab(k)}
                     className={`h-8 px-3 text-sm rounded-lg ${modalTab === k ? "bg-blue-600 text-white" : "text-slate-500 hover:bg-slate-50"}`}>{l}</button>
                 ))}
@@ -2202,6 +2223,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               <div className={modalTab === "spec" ? "" : "hidden"}>
                 <DesignSheetSpecTab key={form.id} sheetId={form.id} canEdit={canEdit} onDirtyChange={setSpecDirty} saveRef={specSaveRef}
                   onSendToCost={sendSpecToCost} costSkuIds={curLines.map((r) => r.item_sku_id).filter((v): v is string => !!v)} />
+              </div>
+            )}
+
+            {/* 📣 แจ้งลูกค้า — คงไว้หลังเปิดครั้งแรก (ซ่อนตอนอยู่แท็บอื่น) · components/design-sheet-detail/notice-tab.tsx */}
+            {form.id && noticeMounted && (
+              <div className={modalTab === "notice" ? "" : "hidden"}>
+                <DesignSheetNoticeTab key={form.id} sheetId={form.id} canEdit={canEdit}
+                  sheet={{ code: form.code ?? "", name: form.name ?? "", brandName: brands.find((b) => b.id === form.brand_id)?.name ?? "" }}
+                  costTabs={noticeCostTabs} costLines={noticeCostLines} sheetOf={noticeSheetOf} orderOf={noticeOrderOf}
+                  onDirtyChange={setNoticeDirty} saveRef={noticeSaveRef} onCountChange={setNoticeCount} />
               </div>
             )}
 
@@ -2886,7 +2917,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           <button onClick={() => void saveAndClose()} disabled={closeSaving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{closeSaving ? t("กำลังบันทึก...", "Saving...") : t("บันทึกแล้วปิด", "Save and close")}</button>
         </>}>
         <p className="text-sm text-slate-600">
-          {specDirty && !costDirty && !supplierDirty
+          {noticeDirty && !specDirty && !costDirty && !supplierDirty
+            ? t("มีใบแจ้งลูกค้าที่ยังไม่ได้บันทึก — ต้องการบันทึกก่อนปิดหรือไม่?", "There is an unsaved customer notice — save before closing?")
+            : specDirty && !costDirty && !supplierDirty
             ? t("มีรายละเอียดงาน (รูป/หมุดวัตถุดิบ) ที่ยังไม่ได้บันทึก — ต้องการบันทึกก่อนปิดหรือไม่?", "There are unsaved job details (images/material pins) — save before closing?")
             : t("มีข้อมูลตีราคาที่ยังไม่ได้บันทึก — ต้องการบันทึกก่อนปิดหรือไม่?", "There is unsaved costing data — save before closing?")}
         </p>
