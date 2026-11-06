@@ -1,5 +1,11 @@
+/**
+ * กฎกระดิ่งแจ้งเตือน (erp_notification_rules) — หน้า /admin/notification-rules + ป๊อปแก้แจ้งเตือนในแผนผัง (components/flow-map/notify-edit)
+ *   GET ?event_type=  → notification_rules.view · POST/PATCH (upsert) + DELETE → admin.notification_rules
+ * ด่านสิทธิ์ 2 ชั้น: guardApi ที่นี่ (ไม่ล็อกอิน = 401 · ไม่มีสิทธิ์ = ปฏิเสธ แทนที่จะเป็น 500) + RPC ตรวจ erp_can ซ้ำ · upsert/delete ลง audit_logs ใน RPC
+ */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { guardApi } from "@/lib/api-auth";
 
 // ---- Types ----
 
@@ -35,6 +41,7 @@ export type NotificationRulesResponse = {
 
 // ---- GET ?event_type=... (optional) ----
 export async function GET(request: NextRequest) {
+  const denied = await guardApi(request, "notification_rules.view"); if (denied) return denied;
   const et = new URL(request.url).searchParams.get("event_type");
   const { data, error } = await supabaseFromRequest(request).rpc("erp_notification_rules_list", {
     p_event_type: et || null,
@@ -50,6 +57,7 @@ type UpsertBody = Partial<NotificationRule> & {
 };
 
 async function upsert(request: NextRequest) {
+  const denied = await guardApi(request, "admin.notification_rules"); if (denied) return denied;
   let body: UpsertBody;
   try { body = await request.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
@@ -82,6 +90,7 @@ export const PATCH = upsert;
 
 // ---- DELETE ?id=... ----
 export async function DELETE(request: NextRequest) {
+  const denied = await guardApi(request, "admin.notification_rules"); if (denied) return denied;
   const { searchParams } = new URL(request.url);
   const id    = searchParams.get("id");
   const actor = searchParams.get("actor");
