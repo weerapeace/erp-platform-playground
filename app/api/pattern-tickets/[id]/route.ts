@@ -2,7 +2,7 @@
  * /api/pattern-tickets/[id] — ตั๋วงานช่าง Pattern รายใบ
  *
  * GET   → { data: ticket, actions: ปุ่มที่กดได้, can_edit, can_work, design_sheets: การ์ด Design sheet ที่แนบ, can_open_sheets }   (pattern.view)
- *       ดูรายละเอียด Design sheet (ดูอย่างเดียว) = GET ./design-sheets/[sheetId] · พนักงานเห็นแค่การ์ด (can_open_sheets = false)
+ *       ดูรายละเอียด Design sheet (ดูอย่างเดียว) = GET ./design-sheets/[sheetId] · รุ่นสินค้า (parent_sku การ์ด) = GET ./parent-sku · พนักงานเห็นแค่การ์ด (can_open_sheets = false)
  * PATCH { action: "transition", key, note? }     เปลี่ยนสถานะ (ประตูเดียว · กติกา lib/pattern-tickets allowedActions)
  *       { action: "update", fields: {...} }      แก้รายละเอียด (ผู้สั่ง/ผู้จัดการ) · รวม design_sheet_ids (แนบ/เอาออก Design sheet)
  *       { action: "checklist", checklist }       ติ๊กเช็กลิสต์ (ช่างที่รับงาน/ผู้สั่ง/ผู้จัดการ)
@@ -17,6 +17,7 @@ import { writeAudit } from "@/lib/audit";
 import { allowedActions, canEditTicket, canOpenTicketSheet, canWorkOn, cleanChecklist, cleanLinks, cleanSheetIds, patternActionByKey } from "@/lib/pattern-tickets";
 import { loadActor, PATTERN_TABLE } from "@/lib/pattern-tickets-server";
 import { loadSheetCards } from "@/lib/design-sheet-view-server";
+import { loadParentCard } from "@/lib/parent-sku-view-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -33,7 +34,10 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
   ]);
   if (error) return NextResponse.json({ error: "โหลดตั๋วไม่สำเร็จ" }, { status: 500 });
   if (!data) return NextResponse.json({ error: "ไม่พบตั๋วนี้" }, { status: 404 });
-  const design_sheets = await loadSheetCards(admin, cleanSheetIds(data.design_sheet_ids));
+  const [design_sheets, parent_sku] = await Promise.all([
+    loadSheetCards(admin, cleanSheetIds(data.design_sheet_ids)),
+    loadParentCard(admin, data.parent_sku_id as string | null),
+  ]);
   return NextResponse.json({
     data,
     actions: allowedActions(data, actor),
@@ -41,6 +45,7 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
     can_work: canWorkOn(data, actor),
     can_assign: actor.canManage || (!!actor.userId && data.requester_id === actor.userId),
     design_sheets,
+    parent_sku,
     can_open_sheets: canOpenTicketSheet(actor),
     error: null,
   });

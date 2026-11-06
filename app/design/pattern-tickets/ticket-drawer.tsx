@@ -28,6 +28,7 @@ import { uploadTicketFile } from "./upload";
 import { ExtBadge } from "./create-modal";
 import { DesignSheetCards, DesignSheetPicker } from "@/components/pickers/design-sheet-picker";
 import { DesignSheetViewModal } from "@/components/design-sheet-view";
+import { ParentSkuCardView, ParentSkuViewModal } from "@/components/parent-sku-view";
 import type { DesignSheetCard } from "@/lib/design-sheet-view";
 import { TypeIconBox } from "./type-icon-picker";
 import type { TicketDetail, TicketType } from "./types";
@@ -56,6 +57,7 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
   const [filesKey, setFilesKey] = useState(0);
   const [linkUrl, setLinkUrl] = useState("");
   const [viewSheet, setViewSheet] = useState<string | null>(null);   // ป๊อปดู Design sheet (ดูอย่างเดียว)
+  const [viewParent, setViewParent] = useState(false);                // ป๊อปดูรุ่นสินค้า (ดูอย่างเดียว)
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -156,7 +158,7 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className={`rounded-full border px-2 py-0.5 text-xs font-medium ${st.cls}`}>{t(st.th, st.en)}</span>
                 {tk.priority === "urgent" && <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">{t("ด่วน", "Urgent")}</span>}
-                {tk.sku_code && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">SKU {tk.sku_code}</span>}
+                {tk.sku_code && !d.parent_sku && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">SKU {tk.sku_code}</span>}
               </div>
               <div className="mt-1.5 grid grid-cols-1 gap-x-4 gap-y-0.5 text-xs text-slate-500 sm:grid-cols-2">
                 <span><Icon name="user" /> {t("ผู้สั่ง", "Requested by")} <b className="font-medium text-slate-700">{tk.requester_name ?? "—"}</b>{tk.requester_dept ? ` (${tk.requester_dept})` : ""}</span>
@@ -193,6 +195,14 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
               </div>
             )}
           </section>
+
+          {/* รุ่นสินค้า — กดการ์ด = ป๊อปดูอย่างเดียว (รูป · สเปค · BOM · ไม่มีราคา · ไม่มีทางไปหน้า SKU/BOM) · พนักงานกดไม่ได้ */}
+          {d.parent_sku && (
+            <section>
+              <h3 className="mb-1.5 text-sm font-semibold text-slate-700">{t("รุ่นสินค้า", "Product model")}</h3>
+              <ParentSkuCardView card={d.parent_sku} onOpen={d.can_open_sheets ? () => setViewParent(true) : undefined} />
+            </section>
+          )}
 
           {/* Design sheet ที่แนบ — กดการ์ด = ป๊อปดูอย่างเดียว (พนักงานเห็นแค่การ์ด กดไม่ได้ · ด่านซ้ำที่ API) */}
           {(d.design_sheets?.length ?? 0) > 0 && (
@@ -296,6 +306,9 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
       )}
       {viewSheet && (
         <DesignSheetViewModal url={`/api/pattern-tickets/${id}/design-sheets/${viewSheet}`} onClose={() => setViewSheet(null)} />
+      )}
+      {viewParent && (
+        <ParentSkuViewModal url={`/api/pattern-tickets/${id}/parent-sku`} onClose={() => setViewParent(false)} />
       )}
     </Drawer>
   );

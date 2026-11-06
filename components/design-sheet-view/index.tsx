@@ -4,10 +4,10 @@
  * DesignSheetViewModal (ของกลาง) — ป๊อปดู Design sheet แบบอ่านอย่างเดียว
  *   หัว: เลข · แบรนด์ · ชื่อ · สถานะ · ป้าย "ดูอย่างเดียว"
  *   รูปทั้งหมด (กดขยาย = ImageLightbox กลาง) · รายละเอียดงาน (HTML ผ่าน sanitizeRichHtml) · comment ลูกค้า (ใหม่ → เก่า + รูป)
- *   ⚠️ ไม่มีราคา/ตีราคา/เสนอราคา โดยตั้งใจ · ปุ่ม "เปิดในหน้า Design sheets" เฉพาะเมื่อ API บอก can_open_full
+ *   ⚠️ ไม่มีราคา/ตีราคา/เสนอราคา โดยตั้งใจ · ไม่มีปุ่มไปหน้า Design sheets (เจ้าของขอปิดทางออกจากแอปตั๋วงาน 2026-11-06) — มีแค่ "ปิด"
  *
  *   <DesignSheetViewModal url={`/api/pattern-tickets/${ticketId}/design-sheets/${sheetId}`} onClose={…} />
- *   url = endpoint ที่คืน { data: DesignSheetView, can_open_full } — แต่ละโมดูลตั้งด่านสิทธิ์ของตัวเอง (เช่น ตั๋วงาน Pattern)
+ *   url = endpoint ที่คืน { data: DesignSheetView } — แต่ละโมดูลตั้งด่านสิทธิ์ของตัวเอง (เช่น ตั๋วงาน Pattern)
  * ชนิดข้อมูล: lib/design-sheet-view · ฝั่งเซิร์ฟเวอร์: lib/design-sheet-view-server
  */
 import { useEffect, useMemo, useState } from "react";
@@ -17,7 +17,6 @@ import { useT } from "@/components/i18n";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { ImageLightbox, type LightboxImage } from "@/components/image-lightbox";
 import { apiFetch } from "@/lib/api";
-import { openLink } from "@/lib/open-link";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
 import { DS_STATUS } from "@/lib/design-sheets-meta";
 import { fmtDate } from "@/lib/pattern-tickets";
@@ -31,7 +30,6 @@ export function designSheetStatus(s: string) {
 export function DesignSheetViewModal({ url, onClose }: { url: string; onClose: () => void }) {
   const t = useT();
   const [d, setD] = useState<DesignSheetView | null>(null);
-  const [canFull, setCanFull] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
@@ -44,7 +42,7 @@ export function DesignSheetViewModal({ url, onClose }: { url: string; onClose: (
       const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
       if (!alive) return;
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-      setD(j.data as DesignSheetView); setCanFull(!!j.can_open_full);
+      setD(j.data as DesignSheetView);
     }).catch((e) => { if (alive) setErr((e as Error).message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -60,12 +58,6 @@ export function DesignSheetViewModal({ url, onClose }: { url: string; onClose: (
       description={d?.brand_name ? `${t("แบรนด์", "Brand")} ${d.brand_name}` : undefined}
       footer={
         <div className="flex w-full items-center justify-end gap-2">
-          {d && canFull && (
-            <a href={openLink("/master/design-sheets", d.id)} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
-              <Icon name="open" /> {t("เปิดในหน้า Design sheets", "Open in Design sheets")}
-            </a>
-          )}
           <button type="button" onClick={onClose} className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50">{t("ปิด", "Close")}</button>
         </div>
       }>
