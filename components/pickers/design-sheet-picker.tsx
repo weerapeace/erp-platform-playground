@@ -2,7 +2,8 @@
 
 /**
  * DesignSheetPicker (ของกลาง) — แนบ Design sheet หลายใบ
- *   ป้ายใบที่เลือก (รูปปก + เลข + ชื่อ · × เอาออก) + ปุ่ม "+ แนบ Design sheet" → ป๊อปค้นหา (เลข/ชื่อ) เลือกได้หลายใบ
+ *   ป้ายใบที่เลือก (รูปปก + เลข + ชื่อ · × เอาออก) + ปุ่ม "+ แนบ Design sheet" → ป๊อปเลือกหลายใบ
+ *   ป๊อป: โหลดครบทุกใบ · แท็บแยกตามแบรนด์ (จากข้อมูลจริง + จำนวน) · ค้นหาเลข/ชื่อ · ซ่อนใบที่ยกเลิกเป็นค่าเริ่มต้น · ที่ติ๊กไว้ไม่หายตอนสลับแท็บ
  *   ค้นผ่าน GET /api/design-sheets (ของเดิม · สิทธิ์ products.view) — ไม่ query เอง
  *
  *   <DesignSheetPicker value={sheets} onChange={setSheets} />        value = DesignSheetCard[] (lib/design-sheet-view)
@@ -10,7 +11,7 @@
  * DesignSheetCards = การ์ดแสดงผล (ไม่มีปุ่มแก้) · onOpen ไม่ส่ง = กดไม่ได้ (เช่น พนักงานในตั๋วงาน Pattern)
  * ใช้ที่: ตั๋วงาน Pattern (ป๊อปเปิดตั๋ว / แก้ไขตั๋ว / ลิ้นชัก)
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
@@ -66,32 +67,66 @@ export function DesignSheetPicker({ value, onChange, disabled, max = 20 }: {
   );
 }
 
+/** ใบที่ยกเลิกแล้ว — ซ่อนเป็นค่าเริ่มต้นในป๊อปเลือก */
+const CANCELLED = "cancelled";
+const NO_BRAND = "__none__";
+/** โหลดสูงสุด (API จำกัด 500/ครั้ง) — ตอนนี้มี ~90 ใบ · เกินนี้โชว์ข้อความให้ค้นหาแทน */
+const LOAD_LIMIT = 500;
+
 function PickModal({ selected, max, onClose, onDone }: { selected: DesignSheetCard[]; max: number; onClose: () => void; onDone: (v: DesignSheetCard[]) => void }) {
   const t = useT();
   const [q, setQ] = useState("");
   const [rows, setRows] = useState<ListItem[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [picked, setPicked] = useState<DesignSheetCard[]>(selected);
   const [retry, setRetry] = useState(0);
+  const [tab, setTab] = useState<string>("");          // "" = ทั้งหมด · NO_BRAND = ไม่ระบุแบรนด์ · อื่น ๆ = ชื่อแบรนด์
+  const [hideCancelled, setHideCancelled] = useState(true);
 
+  // โหลดครบทุกใบครั้งเดียว (เดิมตัดที่ 30 ใบ → ใบเก่าไม่ขึ้น) แล้วกรอง/ค้นหา/แยกแท็บในหน้าจอ
   useEffect(() => {
     let alive = true;
-    const h = setTimeout(async () => {
-      setLoading(true); setErr(null);
-      try {
-        const res = await apiFetch(`/api/design-sheets?search=${encodeURIComponent(q.trim())}&limit=30&sort_by=updated_at&sort_dir=desc`);
-        const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-        if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
-        if (alive) setRows((j.data ?? []) as ListItem[]);
-      } catch (e) { if (alive) setErr((e as Error).message); }
-      finally { if (alive) setLoading(false); }
-    }, q ? 250 : 0);
-    return () => { alive = false; clearTimeout(h); };
-  }, [q, retry]);
+    setLoading(true); setErr(null);
+    apiFetch(`/api/design-sheets?limit=${LOAD_LIMIT}&sort_by=updated_at&sort_dir=desc`).then(async (res) => {
+      const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      if (alive) { setRows((j.data ?? []) as ListItem[]); setTotal(Number(j.total ?? 0)); }
+    }).catch((e) => { if (alive) setErr((e as Error).message); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [retry]);
+
+  const brandKey = (x: ListItem) => x.brand_name?.trim() || NO_BRAND;
+  const visible = useMemo(() => rows.filter((x) => !hideCancelled || x.status !== CANCELLED), [rows, hideCancelled]);
+  // แท็บแบรนด์ — สร้างจากข้อมูลจริง (แบรนด์ใหม่ขึ้นเอง) เรียงจากใบมากไปน้อย · ไม่ระบุแบรนด์ไว้ท้าย
+  const tabs = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const x of visible) m.set(brandKey(x), (m.get(brandKey(x)) ?? 0) + 1);
+    return [...m.entries()].sort((a, b) => Number(a[0] === NO_BRAND) - Number(b[0] === NO_BRAND) || b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [visible]);
+  const s = q.trim().toLowerCase();
+  const shown = useMemo(() => visible.filter((x) => (!tab || brandKey(x) === tab) && (!s || `${x.code} ${x.name}`.toLowerCase().includes(s))), [visible, tab, s]);
+  // แท็บ "ทั้งหมด" = แบ่งหัวข้อตามแบรนด์ (ลำดับเดียวกับแท็บ)
+  const groups = useMemo(() => {
+    if (tab) return [{ key: tab, items: shown }];
+    return tabs.map(([k]) => ({ key: k, items: shown.filter((x) => brandKey(x) === k) })).filter((g) => g.items.length);
+  }, [tab, tabs, shown]);
+  const brandLabel = (k: string) => (k === NO_BRAND ? t("ไม่ระบุแบรนด์", "No brand") : k);
+  const cancelledCount = rows.length - rows.filter((x) => x.status !== CANCELLED).length;
+
+  useEffect(() => { if (tab && !tabs.some(([k]) => k === tab)) setTab(""); }, [tab, tabs]);   // ซ่อนยกเลิกแล้วแท็บว่าง → กลับทั้งหมด
 
   const toggle = (x: ListItem) => setPicked((cur) => cur.some((c) => c.id === x.id) ? cur.filter((c) => c.id !== x.id) : cur.length >= max ? cur : [...cur, toCard(x)]);
   const dirty = picked.map((x) => x.id).join() !== selected.map((x) => x.id).join();
+
+  const tabBtn = (key: string, label: string, n: number) => (
+    <button key={key || "_all"} type="button" onClick={() => setTab(key)}
+      className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-3 py-1 text-xs transition ${tab === key ? "border-blue-300 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}>
+      {label} <span className="tabular-nums opacity-70">{n}</span>
+    </button>
+  );
 
   return (
     <ERPModal open onClose={onClose} size="md" title={t("แนบ Design sheet", "Attach design sheet")} hasUnsavedChanges={dirty}
@@ -106,32 +141,56 @@ function PickModal({ selected, max, onClose, onDone }: { selected: DesignSheetCa
       <div className="flex flex-col gap-2 p-1">
         <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("ค้นหาเลขใบ (DS-…) หรือชื่องาน", "Search code (DS-…) or name")}
           className="h-9 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-blue-400" />
-        {loading && !rows.length ? <LoadingState label={t("กำลังค้นหา…", "Searching…")} />
-          : err ? <ErrorState title={t("ค้นหา Design sheet ไม่สำเร็จ", "Couldn't search design sheets")} hint={err} onRetry={() => setRetry((n) => n + 1)} />
-          : !rows.length ? <EmptyState icon={<Icon name="design" />} title={t("ไม่พบ Design sheet", "No design sheets found")} hint={t("ลองพิมพ์เลขใบหรือชื่องานอื่น", "Try another code or name")} />
+        {!loading && !err && rows.length > 0 && (
+          <>
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              {tabBtn("", t("ทั้งหมด", "All"), visible.length)}
+              {tabs.map(([k, n]) => tabBtn(k, brandLabel(k), n))}
+            </div>
+            {cancelledCount > 0 && (
+              <label className="flex w-fit cursor-pointer items-center gap-1.5 text-xs text-slate-500">
+                <input type="checkbox" checked={hideCancelled} onChange={(e) => setHideCancelled(e.target.checked)} className="h-3.5 w-3.5 accent-blue-600" />
+                {t(`ซ่อนที่ยกเลิกแล้ว (${cancelledCount})`, `Hide cancelled (${cancelledCount})`)}
+              </label>
+            )}
+          </>
+        )}
+        {loading && !rows.length ? <LoadingState label={t("กำลังโหลด Design sheet…", "Loading design sheets…")} />
+          : err ? <ErrorState title={t("โหลด Design sheet ไม่สำเร็จ", "Couldn't load design sheets")} hint={err} onRetry={() => setRetry((n) => n + 1)} />
+          : !shown.length ? <EmptyState icon={<Icon name="design" />} title={t("ไม่พบ Design sheet", "No design sheets found")} hint={t("ลองพิมพ์คำอื่น เปลี่ยนแท็บแบรนด์ หรือเอาติ๊ก \"ซ่อนที่ยกเลิก\" ออก", "Try another word, another brand tab, or show cancelled")} />
           : (
-            <ul className="flex max-h-[55vh] flex-col gap-1 overflow-y-auto">
-              {rows.map((x) => {
-                const on = picked.some((c) => c.id === x.id);
-                const st = designSheetStatus(x.status);
-                return (
-                  <li key={x.id}>
-                    <button type="button" onClick={() => toggle(x)}
-                      className={`grid w-full grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg border px-2 py-1.5 text-left transition ${on ? "border-blue-400 bg-blue-50/60 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"}`}>
-                      <Cover url={x.cover_url} size="h-11 w-11" />
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-medium text-slate-800">{x.name}</span>
-                        <span className="block truncate text-xs text-slate-500">{x.code}{x.brand_name ? ` · ${x.brand_name}` : ""}</span>
-                      </span>
-                      <span className="flex items-center gap-2">
-                        <span className={`rounded-full px-2 py-0.5 text-[11px] ${st.cls}`}>{st.label}</span>
-                        <input type="checkbox" readOnly checked={on} tabIndex={-1} className="h-4 w-4 accent-blue-600" />
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+            <div className="flex max-h-[55vh] flex-col overflow-y-auto">
+              {groups.map((g) => (
+                <div key={g.key}>
+                  {!tab && <div className="sticky top-0 z-[1] bg-white/95 py-1 text-xs font-medium text-slate-500">{brandLabel(g.key)} <span className="tabular-nums text-slate-400">({g.items.length})</span></div>}
+                  <ul className="flex flex-col gap-1 pb-2">
+                    {g.items.map((x) => {
+                      const on = picked.some((c) => c.id === x.id);
+                      const st = designSheetStatus(x.status);
+                      return (
+                        <li key={x.id}>
+                          <button type="button" onClick={() => toggle(x)}
+                            className={`grid w-full grid-cols-[44px_minmax(0,1fr)_auto] items-center gap-2.5 rounded-lg border px-2 py-1.5 text-left transition ${on ? "border-blue-400 bg-blue-50/60 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"}`}>
+                            <Cover url={x.cover_url} size="h-11 w-11" />
+                            <span className="min-w-0">
+                              <span className="block truncate text-sm font-medium text-slate-800">{x.name}</span>
+                              <span className="block truncate text-xs text-slate-500">{x.code}{x.brand_name ? ` · ${x.brand_name}` : ""}</span>
+                            </span>
+                            <span className="flex items-center gap-2">
+                              <span className={`rounded-full px-2 py-0.5 text-[11px] ${st.cls}`}>{st.label}</span>
+                              <input type="checkbox" readOnly checked={on} tabIndex={-1} className="h-4 w-4 accent-blue-600" />
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ))}
+              {total > rows.length && (
+                <p className="py-2 text-center text-xs text-slate-400">{t(`โชว์ ${rows.length} ใบล่าสุดจาก ${total} ใบ`, `Showing the latest ${rows.length} of ${total}`)}</p>
+              )}
+            </div>
           )}
       </div>
     </ERPModal>
