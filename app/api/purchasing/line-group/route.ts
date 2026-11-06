@@ -13,7 +13,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { linePush, lineText } from "@/lib/line-send";
+import { lineBotFor, linePush, lineText } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,9 +29,10 @@ async function readCfg(admin: Admin): Promise<{ id?: string; cfg: LineCfg }> {
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { cfg } = await readCfg(supabaseAdmin());
+  const bot = lineBotFor(cfg, "purchase_request");   // หลายบอท: กลุ่มล่าสุดของบอทที่ดูแลกลุ่มขอซื้อ
   return NextResponse.json({
-    captured: cfg.group_id ?? "",
-    captured_at: cfg.group_captured_at ?? null,
+    captured: bot.group_id,
+    captured_at: bot.group_captured_at,
     current: cfg.groups?.purchase_request ?? "",
     has_token: !!cfg.token,
     error: null,

@@ -11,6 +11,7 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { r2PutObject } from "@/lib/r2";
 import { LINE_SLOTS } from "@/lib/line-registry";
+import { lineBotFor, loadLineConfig } from "@/lib/line-send";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Rec = Record<string, unknown>;
@@ -102,11 +103,12 @@ export type KnownLineGroup = {
  * busySlots = กลุ่มของ slot เหล่านี้ถือว่า "คุยเรื่องอื่นเยอะ" · "any" = กลุ่มที่ใช้กับระบบอื่นอยู่แล้วทุกกลุ่ม
  */
 export async function loadLineGroupSetup(admin: Admin, slot: string, busySlots: string[] | "any") {
-  const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-  const cfg = ((row as Rec | null)?.sval ?? {}) as Rec;
-  const token = str(cfg.token);
-  const current = str((cfg.groups as Rec | undefined)?.[slot]);
-  const captured = str(cfg.group_id);
+  const cfg = await loadLineConfig(admin);
+  // ใช้บอทที่ดูแล slot นี้ (หลายบอท) — ถามชื่อกลุ่ม/กลุ่มล่าสุดด้วยบอทตัวนั้น · "ถามไม่ได้" = บอทนี้ไม่ได้อยู่ในกลุ่ม
+  const bot = lineBotFor(cfg, slot);
+  const token = bot.token;
+  const current = str(cfg.groups?.[slot]);
+  const captured = bot.group_id;
 
   const slotsOf = new Map<string, string[]>();
   for (const [s, gid] of Object.entries((cfg.groups ?? {}) as Rec)) {
@@ -139,9 +141,10 @@ export async function loadLineGroupSetup(admin: Admin, slot: string, busySlots: 
   groups.sort((x, y) => rank(x) - rank(y));
   return {
     has_token: !!token,
-    has_secret: !!(process.env.LINE_CHANNEL_SECRET || cfg.channel_secret),
+    has_secret: !!((bot.isMain && process.env.LINE_CHANNEL_SECRET) || bot.channel_secret),
     current, current_name: groups.find((g) => g.is_current)?.name ?? null,
-    captured, captured_at: (cfg.group_captured_at as string | undefined) ?? null,
+    captured, captured_at: bot.group_captured_at,
+    bot: { key: bot.key, label: bot.label },
     groups,
   };
 }

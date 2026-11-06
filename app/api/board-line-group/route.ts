@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { linePush, lineText } from "@/lib/line-send";
+import { lineBotFor, linePush, lineText } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -39,9 +39,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "work_board.dispatch"); if (denied) return denied;
   const { cfg } = await readCfg(supabaseAdmin());
   const groups: Record<string, string> = {};
-  for (const s of SLOTS) groups[s] = cfg.groups?.[s] ?? "";
+  // หลายบอท: แต่ละกลุ่มอาจใช้บอทคนละตัว → "กลุ่มล่าสุด" ต้องมาจากบอทของกลุ่มนั้น
+  const captured_by_slot: Record<string, { id: string; at: string | null; bot: string }> = {};
+  for (const s of SLOTS) {
+    groups[s] = cfg.groups?.[s] ?? "";
+    const b = lineBotFor(cfg, s);
+    captured_by_slot[s] = { id: b.group_id, at: b.group_captured_at, bot: b.label };
+  }
   return NextResponse.json({
-    captured: cfg.group_id ?? "", captured_at: cfg.group_captured_at ?? null,
+    captured: cfg.group_id ?? "", captured_at: cfg.group_captured_at ?? null, captured_by_slot,
     groups, has_token: !!cfg.token, templates: cfg.templates ?? {}, events: EVENTS, error: null,
   });
 }

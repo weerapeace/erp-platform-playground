@@ -11,7 +11,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal } from "@/components/modal";
 
 type Ev = { key: string; label: string; slot: string; vars: string[] };
-type Data = { captured: string; captured_at: string | null; groups: Record<string, string>; has_token: boolean; templates: Record<string, string>; events: Ev[] };
+type Data = { captured: string; captured_at: string | null; captured_by_slot?: Record<string, { id: string; at: string | null; bot: string }>; groups: Record<string, string>; has_token: boolean; templates: Record<string, string>; events: Ev[] };
 const SLOTS = ["production", "qc"] as const;
 const SLOT_LABEL: Record<string, string> = { production: "🏭 กลุ่มผลิต (บอร์ดจ่ายงาน)", qc: "🔍 กลุ่ม QC (โกดัง QC)" };
 
@@ -69,6 +69,8 @@ export function BoardLineSettings({ open, onClose }: { open: boolean; onClose: (
 
           {SLOTS.map((slot) => {
             const cur = data.groups[slot] ?? "";
+            // กลุ่มล่าสุดของ "บอทที่ดูแลกลุ่มนี้" (หลายบอท) · API เก่าไม่มี = กลุ่มล่าสุดของบอทหลัก
+            const latest = data.captured_by_slot?.[slot]?.id ?? data.captured;
             return (
               <div key={slot} className="border border-slate-200 rounded-lg p-3">
                 <div className="flex items-center justify-between mb-1.5">
@@ -77,7 +79,7 @@ export function BoardLineSettings({ open, onClose }: { open: boolean; onClose: (
                 </div>
                 {cur && <div className="text-[11px] text-slate-400 mb-1.5 truncate">กลุ่มปัจจุบัน: <code className="text-[10px]">{cur}</code></div>}
                 <div className="flex items-center gap-2 flex-wrap">
-                  {data.captured && data.captured !== cur && <button disabled={busy} onClick={() => post({ slot, group_id: data.captured }, "ตั้งกลุ่มแล้ว")} className="h-8 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">ใช้กลุ่มล่าสุด</button>}
+                  {latest && latest !== cur && <button disabled={busy} onClick={() => post({ slot, group_id: latest }, "ตั้งกลุ่มแล้ว")} className="h-8 px-3 text-xs font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">ใช้กลุ่มล่าสุด</button>}
                   <input value={paste[slot] ?? ""} onChange={(e) => setPaste((p) => ({ ...p, [slot]: e.target.value }))} placeholder="วาง group id เอง (Cxxxx…)" className="h-8 px-2 text-xs border border-slate-200 rounded-lg flex-1 min-w-[140px] focus:outline-none focus:ring-1 focus:ring-indigo-400" />
                   <button disabled={busy || !(paste[slot] ?? "").trim()} onClick={() => post({ slot, group_id: paste[slot] }, "บันทึกกลุ่มแล้ว")} className="h-8 px-3 text-xs border border-slate-200 rounded-lg disabled:opacity-40">บันทึก</button>
                   {cur && <button disabled={busy} onClick={() => post({ slot, test: true }, "ส่งข้อความทดสอบแล้ว")} className="h-8 px-3 text-xs border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-40">ทดสอบ</button>}

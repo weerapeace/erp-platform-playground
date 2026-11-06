@@ -18,19 +18,23 @@
  *   · รูปคำสั่งซื้อ: ดึงไฟล์รูปจาก LINE ด้วยโทเคนบอท — id ปลอมดึงไม่ได้ = ไม่บันทึก
  *   · ข้อความงานออกแบบ: ต้องเป็นสมาชิกกลุ่มจริง (ถามชื่อคนส่งจาก LINE ไม่ได้ = ไม่บันทึก)
  *   · ถ้าตั้ง Channel secret ไว้ (env LINE_CHANNEL_SECRET หรือ line_config.channel_secret) จะตรวจลายเซ็น x-line-signature ก่อนทุกอย่าง
+ *
+ * หลายบอท: บอทเสริมตั้ง Webhook URL = <app>/api/china-pay/line-webhook?bot=<key> (ศูนย์ LINE มีปุ่มคัดลอก)
+ *   · บอทเสริมต้องมี Channel secret เสมอ (ตรวจลายเซ็นทุกครั้ง) · กลุ่มล่าสุดเก็บแยกต่อบอท (bots[key].group_id)
+ *   · งานรับเข้า (คำสั่งซื้อ/งานออกแบบ) ทำเฉพาะบอทที่ถูกเลือกให้ดูแลกลุ่มนั้น (slot_bot)
  */
 import { NextRequest, NextResponse, after } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { handleOrderImageEvents, pickOrderImageEvents, type LineEvent } from "@/lib/order-capture";
 import { handleDesignEvents, pickDesignEvents } from "@/lib/design-line-inbox";
+import { MAIN_BOT, isLineBotKey, lineBot, lineBotKeyFor, lineConfigForBot, type LineBotView, type LineConfig } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 60;   // งานอ่านรูปด้วย AI ใน after() ใช้เวลาหลายวินาที
 
 type Admin = ReturnType<typeof supabaseAdmin>;
-type Cfg = Record<string, unknown>;
 
 export async function GET(): Promise<NextResponse> {
   return NextResponse.json({ ok: true, hint: "LINE webhook endpoint — ใช้ POST จาก LINE" });
@@ -44,21 +48,23 @@ function signatureOk(secret: string, raw: string, sig: string | null): boolean {
   return got.length === expected.length && timingSafeEqual(got, expected);
 }
 
-/** งานเดิม: จำ group/room ล่าสุดที่บอทเห็น (ให้หน้าตั้งค่ากด "ใช้กลุ่มล่าสุด") */
-async function captureGroupId(admin: Admin, rowId: string | undefined, cur: Cfg, events: LineEvent[]): Promise<void> {
+/** งานเดิม: จำ group/room ล่าสุดที่บอทตัวนี้เห็น (ให้หน้าตั้งค่ากด "ใช้กลุ่มล่าสุด") · บอทหลัก = ระดับบนสุดเดิม · บอทเสริม = bots[key] */
+async function captureGroupId(admin: Admin, rowId: string | undefined, cur: LineConfig, bot: LineBotView, events: LineEvent[]): Promise<void> {
   const src = events.map(e => e.source).find(s => s?.groupId || s?.roomId);
   const gid = src?.groupId || src?.roomId;
   if (!gid || !/^[A-Za-z0-9]{10,80}$/.test(gid)) return;   // ไม่มี group/room
-  if (cur.group_id === gid) return;   // กลุ่มเดิม ไม่ต้องบันทึกซ้ำ
-  const token = typeof cur.token === "string" ? cur.token : "";
-  if (!token) return;   // ยังไม่ได้ตั้งโทเคนบอท → ตรวจไม่ได้ ไม่บันทึก
+  if (bot.group_id === gid) return;   // กลุ่มเดิม ไม่ต้องบันทึกซ้ำ
+  if (!bot.token) return;   // ยังไม่ได้ตั้งโทเคนบอท → ตรวจไม่ได้ ไม่บันทึก
   const check = src?.groupId
     ? `https://api.line.me/v2/bot/group/${encodeURIComponent(gid)}/summary`
     : `https://api.line.me/v2/bot/room/${encodeURIComponent(gid)}/members/count`;
-  const verified = await fetch(check, { headers: { Authorization: `Bearer ${token}` } })
+  const verified = await fetch(check, { headers: { Authorization: `Bearer ${bot.token}` } })
     .then(r => r.ok).catch(() => false);
   if (!verified) return;   // บอทไม่ได้อยู่ในกลุ่มนี้ = คำขอปลอม
-  const next = { ...cur, group_id: gid, group_captured_at: new Date().toISOString() };
+  const at = new Date().toISOString();
+  const next: LineConfig = bot.isMain
+    ? { ...cur, group_id: gid, group_captured_at: at }
+    : { ...cur, bots: { ...(cur.bots ?? {}), [bot.key]: { ...(cur.bots?.[bot.key] ?? {}), group_id: gid, group_captured_at: at } } };
   if (rowId) await admin.from("china_app_settings").update({ sval: next }).eq("id", rowId);
   else await admin.from("china_app_settings").insert({ skey: "line_config", sval: next });
 }
@@ -70,24 +76,36 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const events = Array.isArray(body.events) ? body.events : [];
   if (events.length === 0) return NextResponse.json({ ok: true });   // LINE กด "Verify" ส่ง events ว่างมา
 
+  // ?bot=<key> = บอทเสริม (แต่ละบอทตั้ง Webhook URL ของตัวเอง) · ไม่มี = บอทหลักตามเดิม
+  const botKey = new URL(request.url).searchParams.get("bot") || MAIN_BOT;
+  if (botKey !== MAIN_BOT && !isLineBotKey(botKey)) return NextResponse.json({ ok: true });
+
   try {
     const admin = supabaseAdmin();
     const { data: row } = await admin.from("china_app_settings").select("id, sval").eq("skey", "line_config").maybeSingle();
-    const cur = (row?.sval ?? {}) as Cfg;
+    const cur = (row?.sval ?? {}) as LineConfig;
+    const bot = lineBot(cur, botKey);
+    if (!bot) return NextResponse.json({ ok: true });   // ไม่รู้จักบอทนี้ (ลบไปแล้ว/ปลอม)
 
-    const secret = String(process.env.LINE_CHANNEL_SECRET ?? cur.channel_secret ?? "").trim();
+    // บอทหลัก: ตรวจลายเซ็นถ้าตั้งรหัสลับไว้ (ตามเดิม) · บอทเสริม: บังคับต้องมีรหัสลับ + ลายเซ็นถูกเสมอ
+    const secret = bot.isMain ? String(process.env.LINE_CHANNEL_SECRET ?? bot.channel_secret ?? "").trim() : bot.channel_secret;
+    if (!bot.isMain && !secret) return NextResponse.json({ ok: true });
     if (secret && !signatureOk(secret, raw, request.headers.get("x-line-signature"))) return NextResponse.json({ ok: true });
 
-    try { await captureGroupId(admin, row?.id, cur, events); } catch { /* best-effort */ }
+    try { await captureGroupId(admin, row?.id, cur, bot, events); } catch { /* best-effort */ }
 
-    const orderEvents = pickOrderImageEvents(cur, events);
+    // งานรับเข้า: รับเฉพาะเมื่อบอทตัวนี้ "ดูแลกลุ่มนั้น" (กันรับซ้ำถ้าบอท 2 ตัวอยู่กลุ่มเดียวกัน)
+    // แล้วส่งค่าตั้งในมุมของบอทนี้ → ตอบกลับ/ดึงรูปด้วยโทเคนของบอทที่รับข้อความมาจริง
+    const botCfg = lineConfigForBot(cur, bot.key);
+
+    const orderEvents = lineBotKeyFor(cur, "purchase_capture") === bot.key ? pickOrderImageEvents(botCfg, events) : [];
     if (orderEvents.length > 0) {
-      after(() => handleOrderImageEvents(admin, cur, orderEvents).catch((e) => console.error("[line-webhook] order capture", e)));
+      after(() => handleOrderImageEvents(admin, botCfg, orderEvents).catch((e) => console.error("[line-webhook] order capture", e)));
     }
 
-    const designEvents = pickDesignEvents(cur, events);
+    const designEvents = lineBotKeyFor(cur, "design_intake") === bot.key ? pickDesignEvents(botCfg, events) : [];
     if (designEvents.length > 0) {
-      after(() => handleDesignEvents(admin, cur, designEvents).catch((e) => console.error("[line-webhook] design inbox", e)));
+      after(() => handleDesignEvents(admin, botCfg, designEvents).catch((e) => console.error("[line-webhook] design inbox", e)));
     }
   } catch { /* best-effort */ }
 

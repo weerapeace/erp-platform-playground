@@ -13,7 +13,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
-import { linePush, lineText } from "@/lib/line-send";
+import { lineBotFor, linePush, lineText } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -44,9 +44,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const uniq = (arr: string[]) => [...new Set(arr)].filter((k) => !HIDE.has(k));
   const taskCols = (tSample?.[0] ? Object.keys(tSample[0]) : []) as string[];
   const subCols = (sSample?.[0] ? Object.keys(sSample[0]) : []) as string[];
+  const bot = lineBotFor(cfg, "creative");   // หลายบอท: กลุ่มล่าสุดของบอทที่ดูแลกลุ่มครีเอทีฟ
   return NextResponse.json({
-    captured: cfg.group_id ?? "",
-    captured_at: cfg.group_captured_at ?? null,
+    captured: bot.group_id,
+    captured_at: bot.group_captured_at,
     current,
     using_main: !current && !!cfg.group_id,   // ยังไม่ตั้งกลุ่มงาน → ใช้กลุ่มหลัก
     has_token: !!cfg.token,
