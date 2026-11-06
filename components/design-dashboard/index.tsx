@@ -24,7 +24,7 @@ import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provid
 import { BrandThemeBuilder } from "@/components/brand-theme-builder";
 import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
 import { useStickyHeader } from "@/components/sticky-header";
-import { type ListResponse, type StatusResponse, type AuditResponse, type MoveMessage, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, LoadingCard } from "./dashboard-helpers";
+import { type ListResponse, type StatusResponse, type AuditResponse, type MoveMessage, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, LoadingCard } from "./dashboard-helpers";
 import { BoardCard, GalleryCard } from "./dashboard-cards";
 import { BrandBar } from "./brand-bar";
 import { BrandSettingsModal } from "./brand-settings-modal";
@@ -58,7 +58,9 @@ export function DesignDashboard() {
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
   const [auditRows, setAuditRows] = useState<AuditLogEntry[]>([]);
   const [total, setTotal] = useState(0);
-  const [selectedBrandKey, setSelectedBrandKey] = useState(GROUP_KEY.customer);   // แบรนด์เดียว หรือ "ทั้งกลุ่ม" (GROUP_KEY)
+  const [selectedBrandKey, setSelectedBrandKey] = useState(GROUP_KEY.customer);   // แบรนด์เดียว หรือ "ทั้งกลุ่ม" (GROUP_KEY) หรือ ⭐ แบรนด์ของฉัน (MINE_KEY)
+  const brandPicked = useRef(false);   // ผู้ใช้กดเลือกเองแล้ว = ไม่สลับไป "แบรนด์ของฉัน" อัตโนมัติ
+  const pickBrand = (key: string) => { brandPicked.current = true; setSelectedBrandKey(key); };
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -126,15 +128,17 @@ export function DesignDashboard() {
   }, []);
   // (คลิกนอกแล้วปิด — ของกลาง FloatingDropdown จัดการให้แล้ว)
   // ตั้งค่าแบรนด์ (เรียง/ซ่อน) — เก็บรายคนที่ user_ui_prefs
-  const [brandPrefs, setBrandPrefs] = useState<{ order: string[]; hidden: string[] }>({ order: [], hidden: [] });
+  const [brandPrefs, setBrandPrefs] = useState<{ order: string[]; hidden: string[]; fav: string[] }>({ order: [], hidden: [], fav: [] });
   const [brandSettingsOpen, setBrandSettingsOpen] = useState(false);
   useEffect(() => {
     apiFetch("/api/user-prefs?key=design_dashboard_brand_prefs").then((r) => r.json())
-      .then((j) => { const v = (j?.value ?? {}) as { order?: string[]; hidden?: string[] };
-        setBrandPrefs({ order: Array.isArray(v.order) ? v.order : [], hidden: Array.isArray(v.hidden) ? v.hidden : [] }); })
+      .then((j) => { const v = (j?.value ?? {}) as { order?: string[]; hidden?: string[]; fav?: string[] };
+        const fav = Array.isArray(v.fav) ? v.fav : [];
+        setBrandPrefs({ order: Array.isArray(v.order) ? v.order : [], hidden: Array.isArray(v.hidden) ? v.hidden : [], fav });
+        if (fav.length && !brandPicked.current) setSelectedBrandKey(MINE_KEY); })   // มีแบรนด์โปรด = เปิดมาโชว์ของฉันก่อน
       .catch(() => {});
   }, []);
-  const saveBrandPrefs = (next: { order: string[]; hidden: string[] }) => {
+  const saveBrandPrefs = (next: { order: string[]; hidden: string[]; fav: string[] }) => {
     setBrandPrefs(next);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_brand_prefs", value: next }) }).catch(() => {});
   };
@@ -319,18 +323,27 @@ export function DesignDashboard() {
     return Array.from(map.values()).sort((a, b) => b.active - a.active || a.name.localeCompare(b.name, "th"));
   }, [sheets, statusMeta]);
 
+  const mineOn = selectedBrandKey === MINE_KEY;
+  const favSet = useMemo(() => new Set(brandPrefs.fav), [brandPrefs.fav]);
+  const favBrands = useMemo(() => brandSummaries.filter((b) => favSet.has(b.key)), [brandSummaries, favSet]);
   const isGroupKey = selectedBrandKey === GROUP_KEY.customer || selectedBrandKey === GROUP_KEY.own;
   useEffect(() => {
     if (loading) return;   // ยังโหลดไม่เสร็จ (ยังไม่มีแบรนด์) — อย่าเพิ่งรีเซ็ต
-    if (!isGroupKey && !brandSummaries.some((brand) => brand.key === selectedBrandKey)) {
+    if (mineOn ? brandPrefs.fav.length === 0 : !isGroupKey && !brandSummaries.some((brand) => brand.key === selectedBrandKey)) {
       setSelectedBrandKey(GROUP_KEY.customer);
     }
-  }, [brandSummaries, selectedBrandKey, isGroupKey, loading]);
+  }, [brandSummaries, selectedBrandKey, isGroupKey, mineOn, brandPrefs.fav.length, loading]);
+  const toggleFavBrand = (key: string) => {
+    const fav = favSet.has(key) ? brandPrefs.fav.filter((k) => k !== key) : [...brandPrefs.fav, key];
+    saveBrandPrefs({ ...brandPrefs, fav });
+  };
   const selectedBrand = brandSummaries.find((brand) => brand.key === selectedBrandKey) ?? null;
-  // กลุ่มที่กำลังดู: เลือกแบรนด์เดียว = กลุ่มของแบรนด์นั้น · เลือก "ทั้งหมด" ของกลุ่ม = กลุ่มนั้น
-  const selectedGroup: BrandGroup = selectedBrand ? (selectedBrand.own ? "own" : "customer") : selectedBrandKey === GROUP_KEY.own ? "own" : "customer";
+  // กลุ่มที่กำลังดู: เลือกแบรนด์เดียว = กลุ่มของแบรนด์นั้น · ⭐ ของฉัน = มีแบรนด์ลูกค้าปน → มุมมองงานลูกค้า · เลือก "ทั้งหมด" ของกลุ่ม = กลุ่มนั้น
+  const selectedGroup: BrandGroup = selectedBrand ? (selectedBrand.own ? "own" : "customer")
+    : mineOn ? (favBrands.length > 0 && favBrands.every((b) => b.own) ? "own" : "customer")
+    : selectedBrandKey === GROUP_KEY.own ? "own" : "customer";
   const ownView = selectedGroup === "own";
-  const scopeLabel = selectedBrand ? selectedBrand.name : GROUP_LABEL[selectedGroup].all;
+  const scopeLabel = selectedBrand ? selectedBrand.name : mineOn ? t("⭐ แบรนด์ของฉัน", "⭐ My brands") : GROUP_LABEL[selectedGroup].all;
 
   const statusColumns = useMemo<StatusColumn[]>(() => {
     const known = new Set<string>();
@@ -348,7 +361,8 @@ export function DesignDashboard() {
   const filteredSheets = useMemo(() => {
     const q = search.trim().toLowerCase();
     return sheets.filter((sheet) => {
-      if (isGroupKey) { if (sheetIsOwn(sheet) !== (selectedBrandKey === GROUP_KEY.own)) return false; }
+      if (mineOn) { if (!favSet.has(brandKeyOf(sheet))) return false; }
+      else if (isGroupKey) { if (sheetIsOwn(sheet) !== (selectedBrandKey === GROUP_KEY.own)) return false; }
       else if (brandKeyOf(sheet) !== selectedBrandKey) return false;
       if (q && !`${sheet.code} ${sheet.name} ${sheet.brand_name ?? ""}`.toLowerCase().includes(q)) return false;
       if (quickFilter === "active" && statusMeta.finished.has(sheet.status)) return false;
@@ -357,7 +371,7 @@ export function DesignDashboard() {
       if (quickFilter === "closed" && !statusMeta.finished.has(sheet.status)) return false;
       return true;
     });
-  }, [selectedBrandKey, isGroupKey, sheets, search, quickFilter, statusMeta]);
+  }, [selectedBrandKey, isGroupKey, mineOn, favSet, sheets, search, quickFilter, statusMeta]);
 
   // แถวแบรนด์แนวนอน แยก 2 กลุ่ม: แต่ละกลุ่มโชว์ 4 อันดับแรก (ตามงานกำลังเดิน) + ที่เหลือไปอยู่ดรอปดาวน์ "อื่นๆ" ของกลุ่มนั้น
   const orderedAll = useMemo(() => {
@@ -403,7 +417,7 @@ export function DesignDashboard() {
   const activeJobs = filteredSheets.filter((sheet) => !statusMeta.finished.has(sheet.status)).length;
   const urgentJobs = filteredSheets.filter((sheet) => isUrgent(sheet, statusMeta)).length;
   const finishedJobs = filteredSheets.filter((sheet) => statusMeta.finished.has(sheet.status)).length;
-  const visibleTotal = selectedBrand ? selectedBrand.total : groups[selectedGroup].total;
+  const visibleTotal = selectedBrand ? selectedBrand.total : mineOn ? favBrands.reduce((n, b) => n + b.total, 0) : groups[selectedGroup].total;
   const loadedLimitNote = total > sheets.length ? t(`แสดงล่าสุด ${sheets.length.toLocaleString("th-TH")} จาก ${total.toLocaleString("th-TH")} งาน`, `Showing latest ${sheets.length.toLocaleString("th-TH")} of ${total.toLocaleString("th-TH")} jobs`) : t("ข้อมูลจากระบบจริง", "Live data");
 
   const allBoardColumns = statusColumns.map((column) => ({
@@ -624,7 +638,8 @@ export function DesignDashboard() {
         )}
 
         {/* แบรนด์: แถวบนสุด (เต็มกว้าง) */}
-        <BrandBar isPhone={isPhone} isDesktop={isDesktop} loading={loading} groups={groups} selectedBrandKey={selectedBrandKey} setSelectedBrandKey={setSelectedBrandKey} brandMark={brandMark} brandTheme={brandTheme} brandSummaries={brandSummaries} setBrandSettingsOpen={setBrandSettingsOpen} setCreateOpen={setCreateOpen} />
+        <BrandBar isPhone={isPhone} isDesktop={isDesktop} loading={loading} groups={groups} selectedBrandKey={selectedBrandKey} setSelectedBrandKey={pickBrand}
+          favKeys={brandPrefs.fav} favBrands={favBrands} onToggleFav={toggleFavBrand} brandMark={brandMark} brandTheme={brandTheme} brandSummaries={brandSummaries} setBrandSettingsOpen={setBrandSettingsOpen} setCreateOpen={setCreateOpen} />
 
         {/* ป๊อปอัปตั้งค่าแบรนด์ (เรียง/ซ่อน) — บันทึกรายคน */}
         <BrandSettingsModal brandSettingsOpen={brandSettingsOpen} setBrandSettingsOpen={setBrandSettingsOpen} orderedAll={orderedAll} brandPrefs={brandPrefs} topBrands={topBrands} moveBrand={moveBrand} brandMark={brandMark} toggleHiddenBrand={toggleHiddenBrand} />

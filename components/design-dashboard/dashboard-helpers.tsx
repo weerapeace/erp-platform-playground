@@ -48,6 +48,8 @@ export type BrandGroupView = { top: BrandSummary[]; others: BrandSummary[]; othe
 export type BrandGroup = "customer" | "own";
 
 export const GROUP_KEY: Record<BrandGroup, string> = { customer: "GROUP:customer", own: "GROUP:own" };
+/** ⭐ แบรนด์ของฉัน — รวมงานของแบรนด์ที่ติดดาว (จำต่อคนใน design_dashboard_brand_prefs.fav) · เปิดหน้ามาเลือกตัวนี้ก่อนถ้ามีดาว */
+export const MINE_KEY = "GROUP:mine";
 
 export const GROUP_LABEL: Record<BrandGroup, { title: string; all: string; icon: string }> = {
   customer: { get title() { return tr("งานลูกค้า", "Customer jobs"); }, get all() { return tr("ทั้งหมดงานลูกค้า", "All customer jobs"); }, icon: "👤" },

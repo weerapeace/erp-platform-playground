@@ -4,10 +4,10 @@ import { useRef, useState, type ReactNode } from "react";
 import type { BrandTheme } from "@/lib/brand-theme";
 import { BrandSlot } from "@/components/brand-theme/slots";
 import { FloatingDropdown } from "@/components/floating-dropdown";
-import { BRAND_GROUPS, GROUP_KEY, GROUP_LABEL, type BrandGroup, type BrandGroupView, type BrandSummary } from "./dashboard-helpers";
+import { BRAND_GROUPS, GROUP_KEY, GROUP_LABEL, MINE_KEY, type BrandGroup, type BrandGroupView, type BrandSummary } from "./dashboard-helpers";
 import { useT } from "@/components/i18n";
 
-export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey, setSelectedBrandKey, brandMark, brandTheme, brandSummaries, setBrandSettingsOpen, setCreateOpen }: {
+export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey, setSelectedBrandKey, brandMark, brandTheme, brandSummaries, setBrandSettingsOpen, setCreateOpen, favKeys = [], favBrands = [], onToggleFav }: {
   isPhone: boolean;
   isDesktop: boolean;
   loading: boolean;
@@ -19,8 +19,27 @@ export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey
   brandSummaries: BrandSummary[];
   setBrandSettingsOpen: (open: boolean) => void;
   setCreateOpen: (open: boolean) => void;
+  /** ⭐ แบรนด์โปรด (จำต่อคน) — ติดดาวที่การ์ดแบรนด์ · การ์ด "แบรนด์ของฉัน" รวมงานทุกแบรนด์ที่ติดดาว */
+  favKeys?: string[];
+  favBrands?: BrandSummary[];
+  onToggleFav?: (key: string) => void;
 }) {
   const t = useT();
+  const mineOn = selectedBrandKey === MINE_KEY;
+  const mineActive = favBrands.reduce((n, b) => n + b.active, 0);
+  const mineNames = favBrands.map((b) => b.name).join(" + ");
+  // ปุ่มดาวบนการ์ดแบรนด์ (ชี้แล้วโผล่ · ติดดาวแล้วโชว์ตลอด · จอสัมผัสโชว์ตลอด)
+  const star = (key: string, name: string, cls = "", always = false) => {
+    if (!onToggleFav) return null;
+    const on = favKeys.includes(key);
+    return (
+      <button type="button" onClick={(e) => { e.stopPropagation(); onToggleFav(key); }} aria-pressed={on}
+        title={on ? t(`เอา ${name} ออกจากแบรนด์ของฉัน`, `Remove ${name} from my brands`) : t(`ติดดาว ${name} (โชว์ใน ⭐ แบรนด์ของฉัน)`, `Star ${name} (show in ⭐ My brands)`)}
+        className={`flex h-6 w-6 items-center justify-center rounded-full text-sm leading-none transition ${on ? "text-amber-500" : `text-slate-300 hover:text-amber-400 ${always ? "" : "[@media(hover:hover)]:opacity-0 group-hover:opacity-100"}`} ${cls}`}>
+        {on ? "★" : "☆"}
+      </button>
+    );
+  };
   const [othersOpen, setOthersOpen] = useState<BrandGroup | null>(null);      // ดรอปดาวน์ "แบรนด์อื่นๆ" ของกลุ่มไหน
   // จุดยึดของดรอปดาวน์ต่อกลุ่ม (ให้ของกลางลอยทับได้ ไม่โดนการ์ดข้างล่างบัง)
   const othersAnchorRefs = { customer: useRef<HTMLDivElement>(null), own: useRef<HTMLDivElement>(null) };
@@ -28,6 +47,12 @@ export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey
     <>{isPhone ? (
               /* ── มือถือ: แบรนด์เป็นชิป 2 แถว (งานลูกค้า / แบรนด์เรา) แต่ละแถวเลื่อนซ้าย-ขวา (ตั้งค่าแบรนด์อยู่ในเมนู ⋯) ── */
               <div className="mb-3 space-y-1.5">
+                {favBrands.length > 0 && (
+                  <button type="button" onClick={() => setSelectedBrandKey(MINE_KEY)}
+                    className={`inline-flex h-8 max-w-full items-center gap-1.5 rounded-full border px-3 text-xs font-medium ${mineOn ? "border-amber-500 bg-amber-500 text-white" : "border-amber-300 bg-amber-50 text-amber-800"}`}>
+                    ★ {t("แบรนด์ของฉัน", "My brands")} <span className="truncate opacity-70">{mineNames}</span> <span className="opacity-60">{mineActive}</span>
+                  </button>
+                )}
                 {BRAND_GROUPS.map((group) => {
                   const g = groups[group];
                   const allOn = selectedBrandKey === GROUP_KEY[group];
@@ -75,6 +100,22 @@ export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey
                 <button data-gg-action onClick={() => setCreateOpen(true)} title={t("สร้างงานใหม่ (เลือก/เพิ่มแบรนด์ในฟอร์มได้)", "Create a new job (pick or add a brand in the form)")}
                   className="flex shrink-0 flex-col justify-center rounded-lg border border-dashed border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-500 hover:border-blue-300 hover:text-blue-600">＋ {t("เพิ่มงาน", "Add job")}</button>
 
+                {/* ⭐ แบรนด์ของฉัน — รวมงานทุกแบรนด์ที่ติดดาว (จำต่อคน) · ยังไม่ติดดาว = บอกวิธี */}
+                {onToggleFav && (favBrands.length > 0 ? (
+                  <button type="button" onClick={() => setSelectedBrandKey(MINE_KEY)} data-gg-mine
+                    title={t("งานของทุกแบรนด์ที่ติดดาว — เปิดหน้ามาโชว์อันนี้ก่อน", "Jobs of all starred brands — shown first when you open the page")}
+                    className={`flex w-[170px] shrink-0 flex-col justify-center rounded-lg border-2 px-3 py-2 text-left transition ${mineOn ? "border-amber-500 bg-amber-500 text-white" : "border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100"}`}>
+                    <span className="text-sm font-semibold">★ {t("แบรนด์ของฉัน", "My brands")}</span>
+                    <span className="truncate text-[11px] opacity-80">{mineNames}</span>
+                    <span className="text-[11px] opacity-70">{mineActive} {t("งานเดินอยู่", "active")}</span>
+                  </button>
+                ) : (
+                  <div className="flex w-[150px] shrink-0 flex-col justify-center rounded-lg border border-dashed border-amber-300 bg-amber-50/50 px-3 py-2 text-[11px] text-amber-700">
+                    <span className="text-sm font-semibold">☆ {t("แบรนด์ของฉัน", "My brands")}</span>
+                    {t("กดดาวที่การ์ดแบรนด์ เพื่อรวมงานแบรนด์ที่ดูบ่อยไว้ที่นี่", "Star brand cards to collect the ones you watch here")}
+                  </div>
+                ))}
+
                 <div className="min-w-0 flex-1 space-y-2">
                   {BRAND_GROUPS.map((group) => {
                     const g = groups[group];
@@ -93,9 +134,10 @@ export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey
                         {g.top.map((brand) => {
                           const selected = selectedBrandKey === brand.key;
                           return (
-                            <button key={brand.key} data-gg-brand-card data-gg-selected={selected ? "true" : undefined}
+                            <div key={brand.key} className="group relative">
+                            <button data-gg-brand-card data-gg-selected={selected ? "true" : undefined}
                               onClick={() => setSelectedBrandKey(brand.key)}
-                              className={`flex items-center rounded-xl border bg-white text-left transition hover:-translate-y-0.5 ${isPhone ? "gap-2 px-3 py-2" : "gap-3 px-4 py-3"}`}
+                              className={`flex h-full items-center rounded-xl border bg-white text-left transition hover:-translate-y-0.5 ${isPhone ? "gap-2 px-3 py-2" : "gap-3 px-4 py-3 pr-7"}`}
                               style={{ borderColor: selected ? brand.color : "#e2e8f0", boxShadow: selected ? `0 0 0 1px ${brand.color}55` : undefined }}>
                               {brandMark(brand, isPhone ? "h-9 w-9" : "h-12 w-12")}
                               <div className="min-w-0">
@@ -103,6 +145,8 @@ export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey
                                 <div className="text-xs text-slate-400">{brand.active} {t("เดิน", "active")}{brand.urgent > 0 ? <> · <span className="text-rose-500">{brand.urgent} {t("ใกล้ครบ", "due soon")}</span></> : null}</div>
                               </div>
                             </button>
+                            {star(brand.key, brand.name, "absolute right-1 top-1")}
+                            </div>
                           );
                         })}
 
@@ -118,12 +162,15 @@ export function BrandBar({ isPhone, isDesktop, loading, groups, selectedBrandKey
                             <FloatingDropdown anchorRef={anchorRef} open={othersOpen === group} onClose={() => setOthersOpen(null)} minWidth={240} maxWidth={320}>
                               <div className="max-h-72 overflow-auto rounded-lg border border-slate-200 bg-white p-1 shadow-2xl">
                                 {g.others.map((brand) => (
-                                  <button key={brand.key} onClick={() => { setSelectedBrandKey(brand.key); setOthersOpen(null); }}
-                                    className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-slate-50 ${selectedBrandKey === brand.key ? "bg-blue-50" : ""}`}>
-                                    {brandMark(brand, "h-6 w-6")}
-                                    <span className="min-w-0 flex-1 truncate text-slate-700">{brand.name}</span>
-                                    <span className="text-[11px] text-slate-400">{brand.active}</span>
-                                  </button>
+                                  <div key={brand.key} className={`group flex items-center rounded-md hover:bg-slate-50 ${selectedBrandKey === brand.key ? "bg-blue-50" : ""}`}>
+                                    <button onClick={() => { setSelectedBrandKey(brand.key); setOthersOpen(null); }}
+                                      className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left text-sm">
+                                      {brandMark(brand, "h-6 w-6")}
+                                      <span className="min-w-0 flex-1 truncate text-slate-700">{brand.name}</span>
+                                      <span className="text-[11px] text-slate-400">{brand.active}</span>
+                                    </button>
+                                    {star(brand.key, brand.name, "mr-1", true)}
+                                  </div>
                                 ))}
                               </div>
                             </FloatingDropdown>
