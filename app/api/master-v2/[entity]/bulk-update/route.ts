@@ -18,7 +18,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveEntity, applyListFilters, friendlyDbError, type ColFilter } from "../route";
-import { writeAudit } from "@/lib/audit";
+import { auditDiff, auditRecordLabel, writeAudit, writeAuditMany, type AuditEntry } from "@/lib/audit";
+import { hasSecretFields } from "@/lib/settings-secrets";
 import { guardApi } from "@/lib/api-auth";
 import { getFieldAccess } from "@/lib/field-permissions";
 import { isGeneratedColumn, generatedHint } from "@/lib/generated-columns";
@@ -29,6 +30,37 @@ export const revalidate = 0;
 const SAFE = /^[a-z_][a-z0-9_]*$/i;
 const BLOCKED_KEYS = new Set(["id", "created_at", "updated_at"]);
 const MAX_ROWS = 20000;
+/** แก้ไม่เกินเท่านี้ → จดประวัติรายแถว "จาก → เป็น" ด้วย (เกินนี้จดแถวสรุปอย่างเดียว กันประวัติบวม) */
+const PER_ROW_AUDIT_MAX = 200;
+
+type Admin = ReturnType<typeof supabaseAdmin>;
+
+/** ค่าเดิมของแถวที่จะแก้ (อ่านก่อน update) — ใช้ทำประวัติรายแถว */
+async function snapshotRows(admin: Admin, table: string, ids: string[]): Promise<Map<string, Record<string, unknown>>> {
+  const out = new Map<string, Record<string, unknown>>();
+  for (let i = 0; i < ids.length; i += 100) {
+    const { data } = await admin.from(table).select("*").in("id", ids.slice(i, i + 100));
+    for (const r of (data ?? []) as unknown as Record<string, unknown>[]) out.set(String(r.id), r);
+  }
+  return out;
+}
+
+/** ประวัติรายแถว (action update · via bulk) → ไปโผล่ในประวัติของรายการนั้นด้วย */
+function perRowEntries(
+  table: string, entity: string, snap: Map<string, Record<string, unknown>>, ids: string[], changes: Record<string, unknown>,
+  actorId: string, actorName: string | null,
+): AuditEntry[] {
+  const secret = hasSecretFields(table) ? Object.keys(changes) : [];
+  const out: AuditEntry[] = [];
+  for (const id of ids) {
+    const before = snap.get(id);
+    const diff = auditDiff(before, changes, { secret });
+    if (diff.length === 0) continue;
+    out.push({ action: "update", entityType: table, entityId: id, actorId, actorName,
+      metadata: { entity, via: "bulk", changes: diff, ...auditRecordLabel(before) } });
+  }
+  return out;
+}
 
 export async function POST(
   request: NextRequest,
@@ -91,19 +123,30 @@ export async function POST(
       groups.set(key, g);
     }
     if (groups.size === 0 && droppedGenerated.size > 0) return generatedOnlyError();
+    const actorName2 = body.actor ?? user.email ?? null;
+    const allIds = [...groups.values()].flatMap((g) => g.ids);
+    // แก้ไม่เยอะ → อ่านค่าเดิมไว้ทำประวัติรายแถว "จาก → เป็น"
+    const snap = allIds.length <= PER_ROW_AUDIT_MAX ? await snapshotRows(admin2, cfg.table, allIds) : null;
+    const rowAudits: AuditEntry[] = [];
     let affected2 = 0;
     for (const g of groups.values()) {
       for (let i = 0; i < g.ids.length; i += 500) {
         const chunk = g.ids.slice(i, i + 500);
         const { error } = await admin2.from(cfg.table).update(g.changes).in("id", chunk);
-        if (error) return NextResponse.json({ error: friendlyDbError(error.message), affected: affected2 }, { status: 400 });
+        if (error) {
+          if (rowAudits.length) await writeAuditMany(admin2, rowAudits);   // ที่แก้สำเร็จไปแล้วต้องมีประวัติ
+          return NextResponse.json({ error: friendlyDbError(error.message), affected: affected2 }, { status: 400 });
+        }
         affected2 += chunk.length;
+        if (snap) rowAudits.push(...perRowEntries(cfg.table, entity, snap, chunk, g.changes, user.id, actorName2));
       }
     }
+    if (rowAudits.length) await writeAuditMany(admin2, rowAudits);
     await writeAudit(admin2, {
       action: "master.bulk_update", entityType: cfg.table,
-      actorId: user.id, actorName: body.actor ?? user.email ?? null,
-      metadata: { entity, mode: "edits", groups: groups.size, affected: affected2 },
+      actorId: user.id, actorName: actorName2,
+      metadata: { entity, mode: "edits", groups: groups.size, affected: affected2,
+        changed_fields: [...new Set([...groups.values()].flatMap((g) => Object.keys(g.changes)))] },
     });
     return NextResponse.json({ ok: true, affected: affected2, error: null });
   }
@@ -134,20 +177,28 @@ export async function POST(
   }
   if (ids.length === 0) return NextResponse.json({ ok: true, affected: 0, error: null });
 
-  // 2) update ทีละ batch ตาม id
+  // 2) update ทีละ batch ตาม id (แก้ไม่เยอะ → อ่านค่าเดิมไว้ทำประวัติรายแถว)
+  const actorName = body.actor ?? user.email ?? null;
+  const snap = ids.length <= PER_ROW_AUDIT_MAX ? await snapshotRows(admin, cfg.table, ids) : null;
+  const rowAudits: AuditEntry[] = [];
   let affected = 0;
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
     const { error } = await admin.from(cfg.table).update(changes).in("id", chunk);
-    if (error) return NextResponse.json({ error: friendlyDbError(error.message), affected }, { status: 400 });
+    if (error) {
+      if (rowAudits.length) await writeAuditMany(admin, rowAudits);
+      return NextResponse.json({ error: friendlyDbError(error.message), affected }, { status: 400 });
+    }
     affected += chunk.length;
+    if (snap) rowAudits.push(...perRowEntries(cfg.table, entity, snap, chunk, changes, user.id, actorName));
   }
 
-  // 3) audit (ของกลาง — ลง audit_logs, ไม่ throw)
+  // 3) audit (ของกลาง — ลง audit_logs, ไม่ throw) · รายแถว + แถวสรุป
+  if (rowAudits.length) await writeAuditMany(admin, rowAudits);
   await writeAudit(admin, {
     action: "master.bulk_update", entityType: cfg.table,
-    actorId: user.id, actorName: body.actor ?? user.email ?? null,
-    metadata: { entity, mode: "filter", changes, affected },
+    actorId: user.id, actorName,
+    metadata: { entity, mode: "filter", changes: hasSecretFields(cfg.table) ? Object.keys(changes) : changes, affected },
   });
 
   return NextResponse.json({ ok: true, affected, error: null });

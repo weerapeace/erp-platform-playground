@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { resolveEntity, resolveRelationLabels, friendlyDbError, parseDupError, requiredColumnsFor, stripGenerated, generatedColFromError } from "../route";
-import { writeAudit } from "@/lib/audit";
+import { auditDiff, auditRecordLabel, writeAudit } from "@/lib/audit";
 import { guardApi } from "@/lib/api-auth";
 import { timeRoute } from "@/lib/api-timing";
 import { getFieldAccess, stripHidden, stripReadonly } from "@/lib/field-permissions";
@@ -107,13 +107,22 @@ async function _PATCH(
   }
 
   // ของกลาง: อ่านค่าเดิมก่อนบันทึก — (1) รูปปกเก่า → ย้ายเข้าถังขยะ R2 หลังบันทึก (2) 🕘 จดเวอร์ชันเก่า (lib/record-versions)
+  //   (3) ประวัติ "จากอะไรเป็นอะไร" ทุกช่องที่แก้ (lib/audit auditDiff) — อ่านรอบเดียวรวมกัน
   const verCols = versionedColumnsIn(cfg.table, cleanPatch);
   const prevCols = [...new Set([...verCols, ...("cover_image_r2_key" in cleanPatch ? ["cover_image_r2_key"] : [])])];
+  const auditCols = Object.keys(cleanPatch).filter((k) => /^[a-z_][a-z0-9_]*$/i.test(k));
   let before: Record<string, unknown> = {};
-  if (prevCols.length) {
-    const { data: prev } = await admin.from(cfg.table).select(prevCols.join(",")).eq("id", id).maybeSingle();
-    before = (prev as unknown as Record<string, unknown>) ?? {};
+  const readCols = [...new Set([...prevCols, ...auditCols])];
+  if (readCols.length) {
+    const { data: prev, error: prevErr } = await admin.from(cfg.table).select(readCols.join(",")).eq("id", id).maybeSingle();
+    if (!prevErr) before = (prev as unknown as Record<string, unknown>) ?? {};
+    else if (prevCols.length) {
+      // มีช่องที่ไม่ใช่คอลัมน์จริง → อ่านเฉพาะที่จำเป็นต่อรูป/เวอร์ชันเหมือนเดิม (ประวัติจะไม่มีค่าเดิม แต่บันทึกไม่พัง)
+      const { data: prev2 } = await admin.from(cfg.table).select(prevCols.join(",")).eq("id", id).maybeSingle();
+      before = (prev2 as unknown as Record<string, unknown>) ?? {};
+    }
   }
+  const hadBefore = Object.keys(before).length > 0;
   const oldCoverKey: string | null = (before.cover_image_r2_key as string) || null;
 
   let { data, error } = await admin
@@ -151,11 +160,20 @@ async function _PATCH(
     } catch { /* best-effort */ }
   }
 
-  // audit (ของกลาง — ลง audit_logs, ไม่ throw)
+  // audit (ของกลาง — ลง audit_logs, ไม่ throw) · changes = จากอะไรเป็นอะไร (ค่าลับในตารางตั้งค่าไม่จดค่า)
+  const changes = hadBefore
+    ? auditDiff(before, cleanPatch, { secret: hasSecretFields(cfg.table) ? Object.keys(cleanPatch) : [] })
+    : undefined;
+  const label = auditRecordLabel(data as unknown as Record<string, unknown>);
   await writeAudit(admin, {
     action: "update", entityType: cfg.table, entityId: id,
     actorId: user.id, actorName,
-    metadata: { entity, changed_fields: Object.keys(cleanPatch), ...(skipped.length ? { skipped_no_permission: skipped } : {}) },
+    metadata: {
+      entity, changed_fields: Object.keys(cleanPatch),
+      ...(changes ? { changes } : {}),
+      ...label,
+      ...(skipped.length ? { skipped_no_permission: skipped } : {}),
+    },
   });
 
   const processed = cfg.postProcess ? cfg.postProcess(data as unknown as Record<string, unknown>) : (data as unknown as Record<string, unknown>);
