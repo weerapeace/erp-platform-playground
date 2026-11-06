@@ -2,6 +2,7 @@
  * ใบสั่งขาย รายใบ — /api/so-orders/[id]
  *   GET    → หัวใบ + บรรทัด (+ progress ต่อรายการ: สั่ง/เปิดผลิต/ส่ง · orphan_mos = ใบผลิตที่ผูกใบนี้แต่ไม่ตรงรายการไหน)
  *            + stage ต่อรายการ 0-4 (lib/so-order-stage — ตัวเดียวกับมุมมองตามชุด) + image_url (รูปปก SKU / รุ่น)
+ *            ?print=1 → + print { mos: ช่าง/กำหนดเสร็จ/พิมพ์ใบงาน/ใบขายที่ส่ง ต่อใบผลิต, group_names } (ใบเช็กสถานะ)
  *   PATCH  { action }
  *      save     → แก้ไขใบ (หัว + บรรทัด · คิดเงินใหม่ด้วยเครื่องคิดเงินกลาง)
  *      open_mo  { group_id?, line_id? } → เปิด/ผูกใบสั่งผลิตให้ทุกบรรทัด (หรือเฉพาะชุด / เฉพาะรายการ) · กดซ้ำได้ ไม่สร้างซ้ำ · ใบที่เปิดเข้าชุดของรายการให้เอง
@@ -26,6 +27,7 @@ import { soLineProgress } from "@/lib/mo-so-rule";
 import { loadMoDispatch } from "@/lib/mo-dispatch";
 import { soLineStageMulti } from "@/lib/so-order-stage";
 import { SKU_COVER_SELECT, coverUrl, resolveSkuCover } from "@/lib/sku-cover";
+import { printSummaryOf } from "@/lib/print-log-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -37,16 +39,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const [{ data: order }, { data: lines }, { data: mos }] = await Promise.all([
     admin.from("so_orders").select("*").eq("id", id).maybeSingle(),
     admin.from("so_order_lines").select("*").eq("order_id", id).order("line_no"),
-    admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, status, skipped_stages").eq("so_order_id", id).eq("is_active", true).order("mo_no"),
+    admin.from("manufacturing_orders").select("id, mo_no, product_sku, qty, status, skipped_stages, due_date, internal_due_date").eq("so_order_id", id).eq("is_active", true).order("mo_no"),
   ]);
   if (!order) return NextResponse.json({ data: null, error: "ไม่พบใบสั่งขาย" }, { status: 404 });
+  const wantPrint = new URL(request.url).searchParams.get("print") === "1";
 
   // ยอดต่อรายการ: สั่ง / เปิดผลิตแล้ว (รวมใบที่แตก/เปิดเพิ่ม) / ส่งแล้ว (ใบขายที่ผูกใบผลิต) — กติกา lib/mo-so-rule.ts
-  const moRows = (mos ?? []) as { id: string; mo_no: string; product_sku: string | null; qty: number; status: string | null }[];
+  const moRows = (mos ?? []) as { id: string; mo_no: string; product_sku: string | null; qty: number; status: string | null; due_date: string | null; internal_due_date: string | null }[];
   const shipped = new Map<string, number>();
+  const linkRows: { mo_id: string; qty: number; sale_line_id: string | null }[] = [];
   if (moRows.length) {
-    const { data: links } = await admin.from("mo_sales_links").select("mo_id, qty").in("mo_id", moRows.map((m) => m.id)).not("is_active", "is", false);
-    for (const l of (links ?? []) as { mo_id: string; qty: number }[]) shipped.set(l.mo_id, (shipped.get(l.mo_id) ?? 0) + (Number(l.qty) || 0));
+    const { data: links } = await admin.from("mo_sales_links").select("mo_id, qty, sale_line_id").in("mo_id", moRows.map((m) => m.id)).not("is_active", "is", false);
+    for (const l of (links ?? []) as { mo_id: string; qty: number; sale_line_id: string | null }[]) {
+      shipped.set(l.mo_id, (shipped.get(l.mo_id) ?? 0) + (Number(l.qty) || 0));
+      linkRows.push(l);
+    }
   }
   const ls = (lines ?? []) as Record<string, unknown>[];
   const prog = soLineProgress(
@@ -73,7 +80,56 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     });
     return { ...l, progress: p, stage, image_url: imgOf.get(String(l.sku ?? "").trim()) ?? null };
   });
-  return NextResponse.json({ data: { ...order, lines: outLines, orphan_mos: prog.orphans }, error: null });
+  const print = wantPrint ? await printDetail(admin, moRows, linkRows, disp, ls) : undefined;
+  return NextResponse.json({ data: { ...order, lines: outLines, orphan_mos: prog.orphans, ...(print ? { print } : {}) }, error: null });
+}
+
+/**
+ * ?print=1 (ใบเช็กสถานะ /print/so-order-status) — ต่อใบผลิต: ช่าง · จ่ายงานแล้ว · กำหนดเสร็จ · พิมพ์ใบงานแล้วกี่ครั้ง · ใบขายที่ส่ง
+ *   + ชื่อชุดต่อรายการ · อ่านอย่างเดียว · ไม่ส่ง print=1 = ผลเหมือนเดิมทุกอย่าง
+ */
+async function printDetail(
+  admin: ReturnType<typeof supabaseAdmin>,
+  moRows: { id: string; mo_no: string; due_date: string | null; internal_due_date: string | null }[],
+  links: { mo_id: string; qty: number; sale_line_id: string | null }[],
+  disp: Awaited<ReturnType<typeof loadMoDispatch>>,
+  lines: Record<string, unknown>[],
+) {
+  const saleIds = [...new Set(links.map((l) => l.sale_line_id).filter(Boolean) as string[])];
+  const billOf = new Map<string, { no: string; date: string }>();
+  for (let i = 0; i < saleIds.length; i += 200) {
+    const { data } = await admin.from("erp_playground_so_lines").select("id, erp_playground_sales_orders!inner(so_number, order_date)").in("id", saleIds.slice(i, i + 200));
+    for (const r of (data ?? []) as Record<string, unknown>[]) {
+      const h = (Array.isArray(r.erp_playground_sales_orders) ? r.erp_playground_sales_orders[0] : r.erp_playground_sales_orders) as { so_number?: string; order_date?: string } | null;
+      if (h) billOf.set(String(r.id), { no: String(h.so_number ?? "—"), date: String(h.order_date ?? "").slice(0, 10) });
+    }
+  }
+  const printed = await printSummaryOf(admin, "mo", moRows.map((m) => m.id));
+  const groupIds = [...new Set(lines.map((l) => l.mo_group_id as string | null).filter(Boolean) as string[])];
+  const groupName: Record<string, string> = {};
+  if (groupIds.length) {
+    const { data } = await admin.from("mo_groups").select("id, name").in("id", groupIds);
+    for (const g of (data ?? []) as { id: string; name: string }[]) groupName[g.id] = g.name;
+  }
+  const mos: Record<string, { due: string | null; assignees: string[]; dispatched: boolean; printed: number; bills: { no: string; date: string; qty: number }[] }> = {};
+  for (const m of moRows) {
+    const d = disp.get(m.mo_no);
+    const bills = new Map<string, { no: string; date: string; qty: number }>();
+    for (const l of links.filter((x) => x.mo_id === m.id)) {
+      const b = l.sale_line_id ? billOf.get(l.sale_line_id) : undefined;
+      const key = b?.no ?? "—";
+      const cur = bills.get(key) ?? { no: key, date: b?.date ?? "", qty: 0 };
+      cur.qty += Number(l.qty) || 0;
+      bills.set(key, cur);
+    }
+    mos[m.mo_no] = {
+      due: m.internal_due_date || m.due_date || null,
+      assignees: d?.assignees ?? [], dispatched: !!d?.dispatched,
+      printed: printed.get(m.id)?.n ?? 0,
+      bills: [...bills.values()].sort((a, b) => a.date.localeCompare(b.date) || a.no.localeCompare(b.no)),
+    };
+  }
+  return { mos, group_names: groupName };
 }
 
 type PatchBody = {

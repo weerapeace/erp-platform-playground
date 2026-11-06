@@ -30,6 +30,7 @@ import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
 import { SOLineEditor, SalesTotalsPreview, VatModeToggle, calculateEditorTotals, emptyLine, vatRateForCompany, type EditorLine, type LineExtraColumn } from "@/components/sales-line-items";
 import { DateInput } from "@/components/date-input";
 import { Icon } from "@/components/icon";
+import { PrintHistoryBadge } from "@/components/print-history";
 import type { SoLineMo, SoLineProgress } from "@/lib/mo-so-rule";
 import type { SoLineStage } from "@/lib/so-order-stage";
 import { SourceDocPickerModal, type SourceDocRow } from "@/components/source-doc-picker";
@@ -469,8 +470,9 @@ export default function SoOrdersPage() {
       <ERPModal open={!!form} onClose={() => !saving && setForm(null)} size="xl"
         title={form?.id ? `🧾 ใบสั่งขาย ${form.order_no ?? ""}` : "🧾 สร้างใบสั่งขาย"}
         footer={form ? <>
-          <span className="mr-auto text-[11px] text-slate-400">
+          <span className="mr-auto inline-flex flex-wrap items-center gap-2 text-[11px] text-slate-400">
             {form.status === "cancelled" ? "ใบนี้ถูกยกเลิกแล้ว" : form.mo_opened_at ? "เปิดใบสั่งผลิตให้แล้ว" : "ยังไม่เปิดใบสั่งผลิต"}
+            {form.id && !editing && <PrintHistoryBadge docType="so_order" docId={form.id} label="ใบเช็ก" />}
           </span>
           {form.id && canCancel && form.status !== "cancelled" && (
             <button onClick={() => setAskCancel(form)} className="h-9 px-3 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50">⊘ ยกเลิกใบ</button>
@@ -484,6 +486,10 @@ export default function SoOrdersPage() {
           {form.id && !editing && form.status !== "cancelled" && (
             <button onClick={() => setBillMatch({ id: form.id!, no: form.order_no ?? null })} title="ผูกใบขาย (บิล) เข้ารายการ — อัปเดตใบสั่งขายและใบสั่งผลิตพร้อมกัน"
               className="h-9 px-3 inline-flex items-center gap-1.5 text-sm border border-violet-200 text-violet-700 rounded-lg hover:bg-violet-50"><Icon name="refresh" /> อัปเดตสถานะ</button>
+          )}
+          {form.id && !editing && (
+            <a href={`/print/so-order-status/${form.id}`} target="_blank" rel="noopener noreferrer" title="ใบไว้เดินเช็กของจริง — ระบบบอกขั้นไหน · ติ๊กขั้นที่เห็นจริง · นับได้กี่ชิ้น"
+              className="h-9 px-3 inline-flex items-center gap-1.5 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50"><Icon name="print" /> พิมพ์ใบเช็กสถานะ</a>
           )}
           {form.id && editing && (
             /* ทิ้งที่แก้ไว้ → โหลดใบเดิมกลับมาเป็นหน้าอ่าน */
