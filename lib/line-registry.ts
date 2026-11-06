@@ -18,7 +18,8 @@ export type LineSlotKey =
 export type LineSlotDef = { key: LineSlotKey; label: string; icon: string };
 
 /** เหตุการณ์แจ้งเตือนอัตโนมัติ — มีสวิตช์เปิด/ปิด (ผูกกับตัวส่งจริง) · slot "main" = ส่งเข้ากลุ่มหลัก (line_config.group_id) */
-export type LineEventDef = { key: string; label: string; slot: LineSlotKey | "main"; icon: string };
+/** fallbackMain = ยังไม่ตั้งกลุ่มของ slot → ส่งเข้ากลุ่มหลักแทน (ไม่เงียบ) */
+export type LineEventDef = { key: string; label: string; slot: LineSlotKey | "main"; icon: string; fallbackMain?: boolean };
 
 export type LineSystemDef = {
   key: string; label: string; icon: string;
@@ -71,7 +72,12 @@ export const LINE_SYSTEMS: LineSystemDef[] = [
   },
   {
     key: "creative", label: "ครีเอทีฟ", icon: "🎨", slots: ["creative", "design_intake"],
-    events: [],   // ส่งรูปจากกระดานเป็น "กดส่งเอง" ไม่ใช่แจ้งเตือนอัตโนมัติ → จัดการแค่กลุ่ม · design_intake = กลุ่มรับงานออกแบบเข้าระบบ
+    // ส่งรูปจากกระดาน = "กดส่งเอง" (ไม่มีสวิตช์) · design_intake = กลุ่มรับงานออกแบบเข้าระบบ
+    // key = แม่แบบข้อความเดียวกับ pushTasksLineTpl (lib/creative-tasks-server) · ยังไม่ตั้งกลุ่มครีเอทีฟ = ส่งกลุ่มหลัก
+    events: [
+      { key: "new_task",          label: "มีงานครีเอทีฟใหม่ / มอบหมายงาน", slot: "creative", icon: "🆕", fallbackMain: true },
+      { key: "subtask_submitted", label: "ส่งงานย่อยรอตรวจ",              slot: "creative", icon: "📤", fallbackMain: true },
+    ],
   },
   {
     key: "china", label: "จีน (จ่ายเงิน)", icon: "🇨🇳", slots: ["bills", "transfers"],

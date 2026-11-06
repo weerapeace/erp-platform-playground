@@ -159,7 +159,7 @@ export function LineConsole({ open, onClose }: { open: boolean; onClose: () => v
                   <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
                     {sys.events.map((ev) => {
                       const on = data.disabled_events[ev.key] !== true;
-                      const groupSet = ev.slot === "main" ? !!data.captured : !!data.groups[ev.slot];
+                      const groupSet = ev.slot === "main" ? !!data.captured : !!data.groups[ev.slot] || (!!ev.fallbackMain && !!data.captured);
                       const groupLabel = ev.slot === "main" ? "กลุ่มหลัก" : data.slots[ev.slot].label;
                       return (
                         <div key={ev.key} className="flex items-center gap-2.5 px-3 py-2">

@@ -5,6 +5,7 @@
 // ============================================================
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { defaultLineTemplate, renderLineTemplate } from "@/lib/creative-line-templates";
+import { lineEventEnabled } from "@/lib/line-registry";
 import { driveConfigured, driveCreateFolder, driveGetFolder, driveUploadFile, driveEnsureFolder, driveFindFolder, driveListImages, driveListChildFolders, driveMoveFile, driveTrashFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
 import { r2GetObject } from "@/lib/r2";
 
@@ -311,9 +312,10 @@ export async function pushTasksLine(admin: Admin, text: string): Promise<void> {
 export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Record<string, unknown>): Promise<void> {
   try {
     const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-    const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; templates?: Record<string, string> };
+    const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; templates?: Record<string, string>; disabled_events?: Record<string, boolean> };
     const target = cfg.groups?.creative || cfg.group_id || "";
     if (!cfg.token || !target) return;
+    if (!lineEventEnabled(cfg.disabled_events, eventKey)) return;   // ปิดจากศูนย์ LINE / หน้าแก้การแจ้งเตือน → ไม่ส่ง
     const tplRaw = (cfg.templates?.[eventKey] && cfg.templates[eventKey].trim()) || defaultLineTemplate(eventKey);
     let text = renderLineTemplate(tplRaw, vars);
     const link = typeof vars.link === "string" ? vars.link.trim() : "";
