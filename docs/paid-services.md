@@ -47,3 +47,9 @@
 - **รายที่ (places)** — `places` ในทะเบียน · ค่าตั้ง/ยอด key `"<service>@<place>"` · เปิด-ปิด + เลือกโมเดลรายที่ (ที่ → บริการ → ฟีเจอร์ → ค่าเริ่ม) · ทุกจุดเรียกแปลภาษาต้องส่ง `place` (เทสต์บังคับ)
 - **ใครใช้** — ส่ง `{ request }` (หรือ `{ userId }`) เป็นพารามิเตอร์สุดท้ายของ `aiChat` / `getAiFor` · ไม่มีคน = "ระบบ / อัตโนมัติ"
 - **กราฟย้อนหลัง** — `GET /api/admin/paid-services?view=history&mode=day|month&key=` · ของกลาง `components/bar-chart` (SimpleBarChart)
+
+## ผู้ให้บริการที่เลือกได้ (2026-11-06)
+- ทะเบียน `providerChoices` (ตัวแรก = ค่าเริ่ม) · ค่าที่เลือก `paid_service_settings.provider`
+- อ่านรูป (สลิป / ใบเสร็จ): `readImageText(key, …)` — GPT (ค่าเริ่ม) หรือ Cloudflare · ตัวที่เลือกยังไม่ตั้งรหัส = ลองอีกตัวให้เอง
+  (Cloudflare บน Vercel ต้องมี env `CF_ACCOUNT_ID` + `CF_AI_API_TOKEN` — ยังไม่ได้ตั้ง)
+- อีเมล: อัตโนมัติ / Resend / Gmail
