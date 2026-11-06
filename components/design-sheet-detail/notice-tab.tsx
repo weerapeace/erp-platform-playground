@@ -25,8 +25,8 @@ import { useUserPref } from "@/lib/use-user-pref";
 import type { SheetSize } from "@/lib/cost-usage";
 import {
   buildNoticeHtml, cleanNotice, cleanNoticeDisplay, computeNotice, DEFAULT_NOTICE_DISPLAY, newNoticeDoc, noticeCompanyFrom, noticeDateText,
-  noticeHasCalc, noticeKindMeta, noticeMaterialsFromCost, noticeRowsFromMaterial, NOTICE_KINDS,
-  type NoticeCostLine, type NoticeDisplay, type NoticeDoc, type NoticeImage, type NoticeKind, type NoticeRecord, type NoticeRow,
+  noticeHasCalc, noticeKindMeta, noticeMaterialsFromCost, noticeRowsFromMaterial, noticeTabRow, noticeTabsFor, NOTICE_KINDS,
+  type NoticeCostLine, type NoticeCostTab, type NoticeDisplay, type NoticeDoc, type NoticeImage, type NoticeKind, type NoticeRecord, type NoticeRow,
 } from "@/lib/design-sheet-notice";
 import type { DesignSheetImage } from "@/app/api/design-sheets/[id]/images/route";
 import { SheetImagePicker } from "./sheet-image-picker";
@@ -69,8 +69,8 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
   sheetId: string;
   canEdit: boolean;
   sheet: { code: string; name: string; brandName: string };
-  /** แท็บไซส์ของตีราคา (ทั่วไป + Parent) */
-  costTabs: { key: string; label: string }[];
+  /** แท็บไซส์ของตีราคา (ทั่วไป + Parent จริง/ร่าง + แท็บค้าง) */
+  costTabs: NoticeCostTab[];
   /** บรรทัดตีราคาทุกแท็บ (ไม่มีสิทธิ์ดูต้นทุน = ว่าง → พิมพ์ใช้ต่อใบเอง) */
   costLines: NoticeCostLine[];
   sheetOf?: (itemId: string) => SheetSize | null | undefined;
@@ -168,6 +168,16 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
     const arr = [...c.images]; [arr[i], arr[j]] = [arr[j], arr[i]]; return { ...c, images: arr };
   });
   const removeImage = (i: number) => setCur((c) => (c ? { ...c, images: c.images.filter((_, j) => j !== i) } : c));
+
+  // ---- วัตถุดิบที่กำลังแจ้ง (ชื่อตรงกับในตีราคา) → ชิปเลือกไซส์จากแท็บตีราคา ----
+  const curMat = useMemo(() => (cur ? mats.find((m) => m.name === cur.calc.material.trim()) ?? null : null), [mats, cur]);
+  const curMatTabs = useMemo(() => (curMat ? noticeTabsFor(curMat, costTabs).all : []), [curMat, costTabs]);
+  const toggleTab = (tb: NoticeCostTab) => {
+    if (!cur || !curMat) return;
+    const key = tb.key || "general";
+    const on = cur.calc.rows.some((r) => r.key === key);
+    patchCalc({ rows: on ? cur.calc.rows.filter((r) => r.key !== key) : [...cur.calc.rows, noticeTabRow(curMat, tb, orderOf)] });
+  };
 
   // ---- ดึงใช้ต่อใบจากตีราคา (เก็บจำนวนสั่งที่พิมพ์ไว้แล้ว) ----
   const pullMaterial = (key: string) => {
@@ -373,6 +383,21 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                     </div>
                   )}
                 </div>
+                {curMat && canEdit && curMatTabs.length > 1 && (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-[11px] text-slate-400">{t("ไซส์จากแท็บตีราคา (กดเพิ่ม/เอาออก):", "Sizes from costing (click to add/remove):")}</span>
+                    {curMatTabs.map((tb) => {
+                      const on = cur.calc.rows.some((r) => r.key === (tb.key || "general"));
+                      return (
+                        <button key={tb.key || "general"} type="button" onClick={() => toggleTab(tb)}
+                          title={tb.kind === "orphan" ? t("แท็บนี้ไม่อยู่ในรายการ Parent แล้ว (อาจเป็นของเก่า)", "Not in the Parent list any more (may be old)") : undefined}
+                          className={`h-7 px-2 text-xs rounded-lg border ${on ? "border-blue-400 bg-blue-50 text-blue-700" : "border-dashed border-slate-300 text-slate-500 hover:bg-slate-50"}`}>
+                          {on ? "✓ " : "+ "}{tb.label}{tb.kind === "orphan" ? " ·เก่า" : ""}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 {matOptions.length === 0 && canEdit && (
                   <p className="text-[11px] text-slate-400">{t("แท็บตีราคายังไม่มีวัตถุดิบที่คิดปริมาณได้ (หรือคุณไม่มีสิทธิ์ดูต้นทุน) — พิมพ์ใช้ต่อใบเองในตารางด้านล่าง", "No usable costing lines (or no cost permission) — type per-bag usage below")}</p>
                 )}

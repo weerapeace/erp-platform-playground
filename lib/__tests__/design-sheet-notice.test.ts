@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildNoticeHtml, cleanNotice, computeNotice, DEFAULT_NOTICE_DISPLAY, newNoticeDoc, noticeMaterialsFromCost,
-  noticeRowsFromMaterial, presetShow, type NoticeCalc, type NoticeContext,
+  noticeRowsFromMaterial, noticeTabsFor, presetShow, type NoticeCalc, type NoticeContext,
 } from "@/lib/design-sheet-notice";
 
 const calc = (over: Partial<NoticeCalc> = {}): NoticeCalc => ({
@@ -66,7 +66,7 @@ describe("cleanNotice", () => {
 
 describe("noticeMaterialsFromCost", () => {
   it("รวมหลายบรรทัดของผ้าเดียวกันต่อแท็บ · ผ้า (หลา) ขึ้นก่อน", () => {
-    const L = (parent: string, name: string, qty: number, uom = "หลา") => ({ parent_code: parent, item_id: name, item_name: name, group_name: "ผ้า", qty, uom, piece: false });
+    const L = (parent: string, name: string, qty: number, uom = "หลา") => ({ parent_code: parent, item_id: name, item_name: name, group_name: uom === "หลา" ? "ผ้า" : "ซิป", qty, uom, piece: false });
     const ms = noticeMaterialsFromCost([
       L("M", "ผ้าซับใน", 0.208), L("M", "ผ้าซับใน", 0.0988), L("S", "ผ้าซับใน", 0.1145),
       L("M", "ซิป", 2, "เส้น"),
@@ -76,6 +76,22 @@ describe("noticeMaterialsFromCost", () => {
     expect(ms[0].perTab.S).toBeCloseTo(0.1145, 4);
     const rows = noticeRowsFromMaterial(ms[0], [{ key: "", label: "ทั่วไป" }, { key: "S", label: "ไซส์ S" }, { key: "M", label: "ไซส์ M" }], (k) => (k === "M" ? 1000 : null));
     expect(rows).toEqual([{ key: "S", label: "ไซส์ S", use: 0.1145, order: null }, { key: "M", label: "ไซส์ M", use: 0.3068, order: 1000 }]);
+  });
+});
+
+describe("ผ้าหลัก + แท็บตั้งต้น (ข้อมูลจริง DS-2026-0064)", () => {
+  const L = (parent: string, name: string, qty: number, uom: string, group: string, amount: number) => ({ parent_code: parent, item_id: name, item_name: name, group_name: group, qty, uom, piece: false, amount });
+  const ms = noticeMaterialsFromCost([
+    L("V2 S", "ผ้าขาวม้า", 0.27, "ผืน", "ผ้า (ชิ้น)", 30), L("V2 M", "ผ้าขาวม้า", 0.43, "ผืน", "ผ้า (ชิ้น)", 45), L("ไซส์ M", "ผ้าขาวม้า", 0.31, "ผืน", "ผ้า (ชิ้น)", 33),
+    L("V2 S", "กุ้น 7 หุน", 1.22, "หลา", "สาย/เทป", 1), L("V2 M", "ผ้าซับใน", 0.21, "หลา", "ผ้า", 5),
+  ]);
+  it("ผ้าที่แพงสุดขึ้นก่อน (ไม่ใช่กุ้นที่หน่วยเป็นหลา)", () => {
+    expect(ms.map((m) => m.name)).toEqual(["ผ้าขาวม้า", "ผ้าซับใน", "กุ้น 7 หุน"]);
+  });
+  it("ตั้งต้นใช้แท็บ Parent จริง/ร่าง · แท็บค้างเลือกเพิ่มเองได้", () => {
+    const tabs = [{ key: "", label: "ทั่วไป", kind: "general" }, { key: "V2 S", label: "V2 S", kind: "draft" }, { key: "V2 M", label: "V2 M", kind: "draft" }, { key: "ไซส์ M", label: "ไซส์ M", kind: "orphan" }];
+    expect(noticeRowsFromMaterial(ms[0], tabs).map((r) => r.key)).toEqual(["V2 S", "V2 M"]);
+    expect(noticeTabsFor(ms[0], tabs).all.map((t) => t.key)).toEqual(["V2 S", "V2 M", "ไซส์ M"]);
   });
 });
 

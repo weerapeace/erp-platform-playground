@@ -646,10 +646,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   }, [form?.parent_sku_codes, form?.parent_sku_drafts, costLines, generalLabel]);
   // ป้ายไซส์ของรอบเสนอราคา (null = รอบเก่าไม่ระบุ · "" = ทั่วไป)
   // 📣 แจ้งลูกค้า: ส่ง "ใช้ต่อใบ" จากแท็บตีราคา + จำนวนสั่งจากรอบเสนอราคาล่าสุด ให้แท็บแจ้งลูกค้า (notice-tab.tsx)
-  const noticeCostTabs = useMemo(() => costParentTabs.map((tb) => ({ key: tb.key, label: tb.label })), [costParentTabs]);
+  const noticeCostTabs = useMemo(() => costParentTabs.map((tb) => ({ key: tb.key, label: tb.label, kind: tb.kind })), [costParentTabs]);
   const noticeCostLines = useMemo(() => costLines.map((r) => ({
     parent_code: pkey(r.parent_code), item_id: r.item_id, item_sku_id: r.item_sku_id ?? null, item_name: r.item_name,
-    group_name: r.group_name, qty: r.qty, uom: r.uom, piece: rowIsPiece(r),
+    group_name: r.group_name, qty: r.qty, uom: r.uom, piece: rowIsPiece(r), amount: r.amount,
   })), [costLines]);
   const noticeSheetOf = useCallback((id: string) => priceItemById.get(id), [priceItemById]);
   const noticeOrderOf = useCallback((key: string) => {

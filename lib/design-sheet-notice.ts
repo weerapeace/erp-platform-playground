@@ -217,9 +217,13 @@ export function computeNotice(calc: NoticeCalc): NoticeResult {
 export type NoticeCostLine = {
   parent_code: string | null; item_id: string | null; item_sku_id?: string | null; item_name: string | null;
   group_name: string | null; qty: number | null; uom: string | null; piece: boolean;
+  amount?: number | null;   // ต้นทุนต่อใบของบรรทัด (ใช้หา "ผ้าหลัก" = ผ้าที่แพงสุด)
 };
-/** วัตถุดิบ 1 ตัวในแท็บตีราคา + ใช้ต่อใบของแต่ละแท็บ (ไซส์) — หลายบรรทัดของวัสดุเดียวกันรวมให้แล้ว */
-export type NoticeMaterialOption = { key: string; name: string; unit: string; perTab: Record<string, number> };
+/** วัตถุดิบ 1 ตัวในแท็บตีราคา + ใช้ต่อใบของแต่ละแท็บ (ไซส์) — หลายบรรทัดของวัสดุเดียวกันรวมให้แล้ว
+ *  fabric = กลุ่มวัสดุขึ้นต้นด้วย "ผ้า" · cost = ต้นทุนรวมทุกแท็บ (จัดอันดับผ้าหลัก) */
+export type NoticeMaterialOption = { key: string; name: string; unit: string; perTab: Record<string, number>; fabric: boolean; cost: number };
+/** แท็บตีราคา — kind: general (ทั่วไป) / code (Parent จริง) / draft (ร่าง) / orphan (มีบรรทัดค้างแต่ไม่อยู่ในรายการ = มักเป็นของเก่า) */
+export type NoticeCostTab = { key: string; label: string; kind?: string };
 
 const matKey = (l: NoticeCostLine) => l.item_sku_id || l.item_id || `name:${(l.item_name ?? "").trim().toLowerCase()}`;
 export function noticeMaterialsFromCost(lines: NoticeCostLine[], sheetOf: (itemId: string) => SheetSize | null | undefined = () => null): NoticeMaterialOption[] {
@@ -249,19 +253,35 @@ export function noticeMaterialsFromCost(lines: NoticeCostLine[], sheetOf: (itemI
     const unit = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0][0];
     const perTab: Record<string, number> = {};
     for (const f of found) if (f.unit === unit) perTab[f.tab] = Math.round(f.qty * 10000) / 10000;
-    out.push({ key, name: (ls[0].item_name ?? "").trim(), unit, perTab });
+    out.push({
+      key, name: (ls[0].item_name ?? "").trim(), unit, perTab,
+      fabric: ls.some((l) => (l.group_name ?? "").trim().startsWith("ผ้า")),
+      cost: ls.reduce((a, l) => a + (Number(l.amount) || 0), 0),
+    });
   }
-  // ผ้า (หลา) ขึ้นก่อน → ใช้เยอะสุด (ผ้าหลัก) ก่อน → ชื่อ
+  // ผ้าขึ้นก่อน → แพงสุด (= ผ้าหลัก) ก่อน → ใช้เยอะสุด → ชื่อ   (ข้อมูลจริง DS-2026-0064: ผ้าขาวม้า 395 บ. ชนะ กุ้น/ซับใน)
   const total = (m: NoticeMaterialOption) => Object.values(m.perTab).reduce((a, v) => a + v, 0);
-  return out.sort((a, b) => Number(b.unit === "หลา") - Number(a.unit === "หลา") || total(b) - total(a) || a.name.localeCompare(b.name, "th"));
+  return out.sort((a, b) => Number(b.fabric) - Number(a.fabric) || b.cost - a.cost || total(b) - total(a) || a.name.localeCompare(b.name, "th"));
 }
 
-/** แถวไซส์จากวัตถุดิบที่เลือก — แท็บที่ไม่มีวัตถุดิบนี้ไม่ใส่ · orderOf = จำนวนสั่งตั้งต้น (เช่น จากรอบเสนอราคาล่าสุด) */
+/** แถว 1 ไซส์ จากแท็บตีราคา */
+export const noticeTabRow = (m: NoticeMaterialOption, t: NoticeCostTab, orderOf: (tabKey: string) => number | null = () => null): NoticeRow =>
+  ({ key: t.key || "general", label: t.label, use: m.perTab[t.key] ?? null, order: orderOf(t.key) });
+
+/** แท็บที่มีวัตถุดิบนี้ + ตั้งต้นเลือกแท็บไหน: Parent จริง/ร่าง ก่อน → ไม่มีก็แท็บอื่นที่ไม่ใช่ทั่วไป → สุดท้ายทั่วไป
+ *  (ใบงานจริงมีแท็บเก่าค้าง เช่น DS-2026-0064 มี 8 แท็บ — ใส่ทุกแท็บ = แถวรก) */
+export function noticeTabsFor(m: NoticeMaterialOption, tabs: NoticeCostTab[]): { all: NoticeCostTab[]; picked: NoticeCostTab[] } {
+  const all = tabs.filter((t) => m.perTab[t.key] != null);
+  const main = all.filter((t) => t.kind === "code" || t.kind === "draft");
+  const nonGeneral = all.filter((t) => t.key !== "");
+  return { all, picked: main.length ? main : nonGeneral.length ? nonGeneral : all };
+}
+
+/** แถวไซส์จากวัตถุดิบที่เลือก (เฉพาะแท็บตั้งต้น — noticeTabsFor) · orderOf = จำนวนสั่งตั้งต้น (เช่น จากรอบเสนอราคาล่าสุด) */
 export function noticeRowsFromMaterial(
-  m: NoticeMaterialOption, tabs: { key: string; label: string }[], orderOf: (tabKey: string) => number | null = () => null,
+  m: NoticeMaterialOption, tabs: NoticeCostTab[], orderOf: (tabKey: string) => number | null = () => null,
 ): NoticeRow[] {
-  const rows = tabs.filter((t) => m.perTab[t.key] != null).map((t) => ({ key: t.key || "general", label: t.label, use: m.perTab[t.key], order: orderOf(t.key) }));
-  return rows;
+  return noticeTabsFor(m, tabs).picked.map((t) => noticeTabRow(m, t, orderOf));
 }
 
 // ─────────────────────────── ใบพิมพ์ (PDF / JPEG / พรีวิว) ───────────────────────────
