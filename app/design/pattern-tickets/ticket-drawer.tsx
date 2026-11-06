@@ -4,7 +4,7 @@
  * ลิ้นชักรายละเอียดตั๋ว Pattern (ของกลาง Drawer)
  *   หัว: ประเภท · เลขตั๋ว · สถานะ · ผู้สั่ง/ช่าง/กำหนดส่ง
  *   รายละเอียด ไทย / ไทย+EN / EN (แก้ได้เฉพาะผู้สั่ง/ผู้จัดการ)
- *   Design sheets ที่แนบ (การ์ด · กด = ป๊อปดูอย่างเดียว DesignSheetViewModal — พนักงานเห็นแค่การ์ด กดไม่ได้)
+ *   Design sheets ที่แนบ (การ์ด · กด = ป๊อปดูอย่างเดียว DesignSheetViewModal — ทุกคนที่ดูตั๋วได้ รวมพนักงาน)
  *   เช็กลิสต์ตามประเภทงาน · ไฟล์ที่ต้องส่งกลับ
  *   ไฟล์แนบ = โฟลเดอร์ Drive ของตั๋ว (ของกลาง DriveFolderFiles) + อัปไฟล์ใหญ่ + ลิงก์ที่วางเอง
  *   คุยงาน = ของกลาง CommentThread (entity pattern_tickets)
@@ -196,7 +196,7 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
             )}
           </section>
 
-          {/* รุ่นสินค้า — กดการ์ด = ป๊อปดูอย่างเดียว (รูป · สเปค · BOM · ไม่มีราคา · ไม่มีทางไปหน้า SKU/BOM) · พนักงานกดไม่ได้ */}
+          {/* รุ่นสินค้า — กดการ์ด = ป๊อปดูอย่างเดียว (รูป · สเปค · BOM · ไม่มีราคา · ไม่มีทางไปหน้า SKU/BOM) · ทุกคนที่ดูตั๋วได้กดดูได้ */}
           {d.parent_sku && (
             <section>
               <h3 className="mb-1.5 text-sm font-semibold text-slate-700">{t("รุ่นสินค้า", "Product model")}</h3>
@@ -204,7 +204,7 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
             </section>
           )}
 
-          {/* Design sheet ที่แนบ — กดการ์ด = ป๊อปดูอย่างเดียว (พนักงานเห็นแค่การ์ด กดไม่ได้ · ด่านซ้ำที่ API) */}
+          {/* Design sheet ที่แนบ — กดการ์ด = ป๊อปดูอย่างเดียว (ทุกคนที่ดูตั๋วได้ · ไม่มีปุ่มแก้/ลิงก์ออก) */}
           {(d.design_sheets?.length ?? 0) > 0 && (
             <section>
               <h3 className="mb-1.5 text-sm font-semibold text-slate-700">Design sheets <span className="font-normal text-slate-400">({d.design_sheets.length})</span></h3>

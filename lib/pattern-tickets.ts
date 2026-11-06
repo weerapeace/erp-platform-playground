@@ -298,5 +298,7 @@ export function cleanSheetIds(v: unknown): string[] {
   }
   return out;
 }
-/** เปิดป๊อปดู Design sheet จากตั๋วได้ไหม — พนักงานเห็นแค่การ์ด กดเปิดไม่ได้ (เจ้าของขอ 2026-11-06) · ผู้จัดการ/แอดมิน/ฝ่ายออกแบบ = ได้ */
-export const canOpenTicketSheet = (a: { canCreate: boolean; canManage: boolean }) => a.canCreate || a.canManage;
+/** เปิดป๊อปดู Design sheet / รุ่นสินค้า (ดูอย่างเดียว) จากตั๋วได้ไหม — ทุกคนที่ดูตั๋วได้ (pattern.view) รวมพนักงาน = ได้
+ *  (เจ้าของแก้ 2026-11-06: "พนักงานต้องกดดูได้ แค่เอาปุ่มแก้/เข้าหน้าอื่นออก" — ป๊อปไม่มีปุ่มแก้/ลิงก์ออกอยู่แล้ว)
+ *  ด่าน pattern.view อยู่ที่ guardApi ของทุก endpoint · อยากจำกัดอีกในอนาคต = แก้ที่นี่ที่เดียว */
+export const canOpenTicketSheet = (_a: { canCreate: boolean; canManage: boolean }) => true;

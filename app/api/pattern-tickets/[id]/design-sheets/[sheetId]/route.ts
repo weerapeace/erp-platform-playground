@@ -2,7 +2,7 @@
  * /api/pattern-tickets/[id]/design-sheets/[sheetId] — ดู Design sheet ที่แนบกับตั๋ว (ดูอย่างเดียว)
  *
  * GET → { data: DesignSheetView, error }   (pattern.view)
- *   ด่าน: ใบนี้ต้องแนบอยู่ในตั๋วนี้จริง · คนดูต้องเปิดได้ (canOpenTicketSheet — พนักงานเห็นแค่การ์ด กดเปิดไม่ได้)
+ *   ด่าน: ใบนี้ต้องแนบอยู่ในตั๋วนี้จริง · คนดูต้องเปิดได้ (canOpenTicketSheet — ทุกคนที่ดูตั๋วได้ รวมพนักงาน)
  *   ข้อมูล = รูป · ชื่อ · รายละเอียด · comment ลูกค้า (ไม่มีราคา/ตีราคา/เสนอราคา โดยตั้งใจ — lib/design-sheet-view-server)
  */
 import { NextRequest, NextResponse } from "next/server";

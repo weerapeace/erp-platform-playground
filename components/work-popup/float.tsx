@@ -197,7 +197,7 @@ export function WorkPopupFloatToggle() {
         </div>
         {pickOpen && <PetPickerModal open initialTab={pickOpen} onClose={() => setPickOpen(false)} />}
       </>) : (
-        <p className="mt-1 text-[11px] text-slate-400">ปิดอยู่ — ป๊อปไม่เด้ง (ทุกเครื่องของคุณ)</p>
+        <p className="mt-1 text-[11px] text-slate-400">ปิดอยู่ (ค่าเริ่มต้น) — ไม่มีตัว Pet / ป๊อปไม่เด้ง · เปิดสวิตช์เพื่อโชว์ (ทุกเครื่องของคุณ)</p>
       )}
     </div>
   );

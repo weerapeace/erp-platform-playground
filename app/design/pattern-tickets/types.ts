@@ -27,7 +27,7 @@ export type Ticket = TicketRow & {
 
 export type TicketDetail = {
   data: Ticket; actions: PatternAction[]; can_edit: boolean; can_work: boolean; can_assign: boolean;
-  /** Design sheet ที่แนบ (การ์ด) · can_open_sheets = กดเปิดป๊อปดูได้ (พนักงาน = ไม่ได้) */
+  /** Design sheet ที่แนบ (การ์ด) · can_open_sheets = กดเปิดป๊อปดูได้ (ทุกคนที่ดูตั๋วได้) */
   design_sheets: DesignSheetCard[]; can_open_sheets: boolean;
   /** รุ่นสินค้า (การ์ด) · กดเปิดดูได้ตาม can_open_sheets เหมือน Design sheet */
   parent_sku: ParentSkuCard | null;

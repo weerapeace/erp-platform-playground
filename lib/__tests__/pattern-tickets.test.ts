@@ -143,8 +143,8 @@ describe("Design sheet ที่แนบ", () => {
     expect(cleanSheetIds("nope")).toEqual([]);
     expect(cleanSheetIds(Array.from({ length: 30 }, (_, i) => `aaaaaaaa-1111-2222-3333-${String(i).padStart(12, "0")}`))).toHaveLength(20);
   });
-  it("พนักงานกดเปิด Design sheet ไม่ได้ · ผู้สั่ง/ผู้จัดการ ได้", () => {
-    expect(canOpenTicketSheet(maker)).toBe(false);
+  it("ทุกคนที่ดูตั๋วได้ (รวมพนักงาน) กดเปิดป๊อปดูอย่างเดียวได้", () => {
+    expect(canOpenTicketSheet(maker)).toBe(true);
     expect(canOpenTicketSheet(designer)).toBe(true);
     expect(canOpenTicketSheet(manager)).toBe(true);
   });

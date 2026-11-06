@@ -2,7 +2,7 @@
  * /api/pattern-tickets/[id]/parent-sku — ดูรุ่นสินค้า (Parent SKU) ของตั๋ว แบบดูอย่างเดียว
  *
  * GET → { data: ParentSkuView, error }   (pattern.view)
- *   ด่าน: คนดูต้องเปิดได้ (canOpenTicketSheet — พนักงานเห็นแค่การ์ด กดเปิดไม่ได้ · กติกาเดียวกับ Design sheet)
+ *   ด่าน: คนดูต้องเปิดได้ (canOpenTicketSheet — ทุกคนที่ดูตั๋วได้ รวมพนักงาน · กติกาเดียวกับ Design sheet)
  *   ข้อมูล = รูป · สเปค · BOM ต่อ SKU ลูก (ไม่มีราคา/ต้นทุน โดยตั้งใจ — lib/parent-sku-view-server)
  *   ไม่มีลิงก์ไปหน้า SKU / BOM — เจ้าของขอปิดทางออกไปหน้าอื่นจากแอปตั๋วงาน (2026-11-06)
  */

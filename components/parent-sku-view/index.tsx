@@ -88,7 +88,7 @@ export function ParentSkuViewModal({ url, onClose }: { url: string; onClose: () 
             <section>
               <h3 className="mb-1.5 text-xs font-medium text-slate-500">{t("รูป", "Images")} ({d.images.length})</h3>
               {d.images.length ? (
-                <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4">
+                <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5 lg:grid-cols-6">
                   {d.images.map((u, i) => (
                     <button key={u + i} type="button" onClick={() => setLb(i)} className={`overflow-hidden rounded-lg bg-slate-50 ${i === 0 ? "col-span-2 row-span-2" : ""}`}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}

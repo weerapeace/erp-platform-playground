@@ -9,7 +9,8 @@ export type WorkPopupFloatMode = "card" | "drawer";
 export type WorkPopupFloatPref = { enabled: boolean; minimized: boolean; position: WorkPopupFloatPosition; anchor?: CornerAnchor | null; mode?: WorkPopupFloatMode };
 
 export const WORK_POPUP_FLOAT_KEY = "work_popup_float";
-export const WORK_POPUP_FLOAT_DEFAULT: WorkPopupFloatPref = { enabled: true, minimized: false, position: "br", anchor: null, mode: "card" };
+/** ค่าเริ่ม = ซ่อน (เจ้าของขอ 2026-11-06 "default เป็นซ่อนให้หมด ถ้าจะโชว์ให้กดโชว์เอง") · คนที่เคยตั้งเองไว้แล้ว = ตามที่ตั้ง · เปิดที่เมนูโปรไฟล์ → 🔔 ป๊อปเตือนงาน */
+export const WORK_POPUP_FLOAT_DEFAULT: WorkPopupFloatPref = { enabled: false, minimized: false, position: "br", anchor: null, mode: "card" };
 /** มุมสำเร็จรูป (เลือกในเมนูโปรไฟล์) — ขวาบนเว้นแถบเมนูด้านบน */
 export const WORK_POPUP_PRESET_ANCHOR: Record<WorkPopupFloatPosition, CornerAnchor> = {
   br: { h: "r", v: "b", x: 16, y: 16 },

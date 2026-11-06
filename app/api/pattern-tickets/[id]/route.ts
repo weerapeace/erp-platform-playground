@@ -2,7 +2,7 @@
  * /api/pattern-tickets/[id] — ตั๋วงานช่าง Pattern รายใบ
  *
  * GET   → { data: ticket, actions: ปุ่มที่กดได้, can_edit, can_work, design_sheets: การ์ด Design sheet ที่แนบ, can_open_sheets }   (pattern.view)
- *       ดูรายละเอียด Design sheet (ดูอย่างเดียว) = GET ./design-sheets/[sheetId] · รุ่นสินค้า (parent_sku การ์ด) = GET ./parent-sku · พนักงานเห็นแค่การ์ด (can_open_sheets = false)
+ *       ดูรายละเอียด Design sheet (ดูอย่างเดียว) = GET ./design-sheets/[sheetId] · รุ่นสินค้า (parent_sku การ์ด) = GET ./parent-sku · can_open_sheets = ทุกคนที่ดูตั๋วได้ (รวมพนักงาน)
  * PATCH { action: "transition", key, note? }     เปลี่ยนสถานะ (ประตูเดียว · กติกา lib/pattern-tickets allowedActions)
  *       { action: "update", fields: {...} }      แก้รายละเอียด (ผู้สั่ง/ผู้จัดการ) · รวม design_sheet_ids (แนบ/เอาออก Design sheet)
  *       { action: "checklist", checklist }       ติ๊กเช็กลิสต์ (ช่างที่รับงาน/ผู้สั่ง/ผู้จัดการ)
