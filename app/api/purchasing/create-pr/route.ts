@@ -15,6 +15,7 @@ import { guardApi } from "@/lib/api-auth";
 import { bracketCode, skuIdsByBracketCode } from "@/lib/pr-line-code";
 import { buildPartnerMatcher, type PartnerLike } from "@/lib/partner-match";
 import { shopDefaultCurrency, type ShopCurrencyInfo } from "@/lib/po-currency";
+import { loadLineConfig, linePush, lineText } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -202,17 +203,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (notifRows.length) await admin.from("erp_notifications").insert(notifRows);
 
     // ② LINE → กลุ่ม "ขอซื้อ" (groups.purchase_request → fallback กลุ่มหลัก) · ใช้บอท/โทเคนเดิม
-    const { data: lc } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-    const cfg = (lc?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; disabled_events?: Record<string, boolean> };
+    const cfg = await loadLineConfig(admin);
     const target = cfg.groups?.purchase_request || "";   // เฉพาะกลุ่มขอซื้อที่ตั้งไว้ (ไม่ fallback กลุ่มอื่น)
     const evOn = cfg.disabled_events?.pr_created !== true;   // ปิดจากศูนย์ LINE → ไม่ส่ง
     if (cfg.token && target && evOn) {
-      const lineText = `🛒 ใบขอซื้อใหม่ ${n} ใบ\nผู้ขอ: ${actor}\n${itemLines.join("\n")}\nจำนวนรวม: ${totalQty.toLocaleString()} ชิ้น\nยอดรวม: ${totalStr}${urgent ? "\n⚡ มีรายการด่วน" : ""}\n→ เปิดแอปจัดซื้อเพื่ออนุมัติ`;
-      await fetch("https://api.line.me/v2/bot/message/push", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-        body: JSON.stringify({ to: target, messages: [{ type: "text", text: lineText.slice(0, 4900) }] }),
-      });
+      const msg = `🛒 ใบขอซื้อใหม่ ${n} ใบ\nผู้ขอ: ${actor}\n${itemLines.join("\n")}\nจำนวนรวม: ${totalQty.toLocaleString()} ชิ้น\nยอดรวม: ${totalStr}${urgent ? "\n⚡ มีรายการด่วน" : ""}\n→ เปิดแอปจัดซื้อเพื่ออนุมัติ`;
+      await linePush(cfg, { to: target, slot: "purchase_request", messages: [lineText(msg)] });
     }
   } catch (e) { console.warn("[create-pr] notify failed:", e); }
 

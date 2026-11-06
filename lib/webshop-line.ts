@@ -11,6 +11,7 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { boardLink, pushLineTpl } from "@/lib/board-notify";
 import { writeAudit } from "@/lib/audit";
+import { linePushRaw, lineText } from "@/lib/line-send";
 import { readSiteInfo } from "@/lib/website-site-info";
 import { loadShopSiteUrls } from "@/lib/website-site-url";
 import { customerLang, orderMessage, type OrderEvent } from "@/lib/customer-messages";
@@ -83,17 +84,9 @@ export async function memberLineUserId(sb: Admin, customerId: string | null | un
 
 /** ส่งข้อความถึงลูกค้า 1 คน — ok / เหตุผลที่ไม่ได้ส่ง */
 export async function pushLineToCustomer(token: string, userId: string, text: string): Promise<{ ok: boolean; status: number }> {
-  try {
-    const r = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ to: userId, messages: [{ type: "text", text: text.slice(0, 4900) }] }),
-      signal: AbortSignal.timeout(10000),
-    });
-    return { ok: r.ok, status: r.status };
-  } catch {
-    return { ok: false, status: 0 };
-  }
+  // OA ของร้าน = บอทคนละตัวกับบอทพนักงาน (โทเคนจาก env) → ส่งผ่านตัวส่งกลางแบบระบุโทเคนเอง
+  const r = await linePushRaw(token, userId, [lineText(text)], { timeoutMs: 10000 });
+  return { ok: r.ok, status: r.status };
 }
 
 /** เหตุการณ์ออเดอร์ที่ส่ง LINE ให้ลูกค้าอัตโนมัติ */

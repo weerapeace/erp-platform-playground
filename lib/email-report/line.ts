@@ -12,6 +12,7 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { normalizeReportLine, type EmailReport, type EmailReportLine, type EmailReportRun } from "@/lib/email-report/shared";
 import { sizedImage, statText, type BuiltReport } from "@/lib/email-report/render";
+import { loadLineConfig, linePush, lineErrorText } from "@/lib/line-send";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type Json = Record<string, unknown>;
@@ -125,42 +126,24 @@ export function composeLineReport(built: BuiltReport, cfg: Pick<EmailReportLine,
   return { altText, header, sub, rows, more, link, linkLabel, text, flex, style: "list", cards: [] };
 }
 
-async function linePush(token: string, to: string, message: Json): Promise<{ ok: boolean; status: number; body: string }> {
-  const res = await fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ to, messages: [message] }),
-  });
-  return { ok: res.ok, status: res.status, body: res.ok ? "" : (await res.text().catch(() => "")).slice(0, 300) };
-}
-
-const lineErrorText = (status: number) =>
-  status === 429 ? "โควตาข้อความ LINE เดือนนี้หมดแล้ว (ฟรี 300/เดือน ใช้ร่วมทั้ง ERP) — รอรีเซ็ตวันที่ 1 หรืออัปเกรดแพ็กเกจ LINE OA"
-    : status === 400 || status === 404 ? "ส่งเข้ากลุ่ม LINE ไม่ได้ — บอทอาจออกจากกลุ่มแล้ว (เลือกกลุ่มใหม่ในหน้าแก้ไข)"
-    : status === 401 || status === 403 ? "โทเคนบอท LINE ใช้ไม่ได้ (ตรวจที่ศูนย์ LINE)"
-    : `ส่ง LINE ไม่สำเร็จ (HTTP ${status})`;
-
 export async function sendReportToLine(admin: Admin, report: Pick<EmailReport, "line">, built: BuiltReport,
   opts: { trigger: EmailReportRun["trigger"]; subject: string }): Promise<LineResult> {
   const cfg = normalizeReportLine(report.line);
   const target = cfg.group_name ? `กลุ่ม ${cfg.group_name}` : "กลุ่ม LINE";
   const fail = (error: string): LineResult => ({ ok: false, target, fallback: false, error });
-  if (!cfg.group_id) return fail("ยังไม่ได้เลือกกลุ่ม LINE");
-  const { data } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-  const token = String(((data as { sval?: { token?: string } } | null)?.sval?.token) ?? "");
-  if (!token) return fail("ยังไม่ได้ตั้งบอท LINE (ศูนย์ LINE ในตั้งค่า)");
+  const groupId = cfg.group_id;
+  if (!groupId) return fail("ยังไม่ได้เลือกกลุ่ม LINE");
+  const lineCfg = await loadLineConfig(admin);
+  if (!lineCfg.token) return fail("ยังไม่ได้ตั้งบอท LINE (ศูนย์ LINE ในตั้งค่า)");
+  const send = (message: Json) => linePush(lineCfg, { to: groupId, messages: [message] });
 
   const m = composeLineReport(built, cfg, { subject: opts.subject, test: opts.trigger === "test" });
-  try {
-    const flex = await linePush(token, cfg.group_id, { type: "flex", altText: m.altText, contents: m.flex });
-    if (flex.ok) return { ok: true, target, fallback: false, error: null };
-    if (flex.status === 429 || flex.status === 401 || flex.status === 403) return fail(lineErrorText(flex.status));
-    console.error("[email-report/line] flex", flex.status, flex.body);
-    // Flex ไม่ผ่าน (เช่น ข้อความยาว/รูปแบบผิด) → ข้อความล้วน ยังเป็น 1 ข้อความ
-    const plain = await linePush(token, cfg.group_id, { type: "text", text: m.text });
-    return plain.ok ? { ok: true, target, fallback: true, error: null } : fail(lineErrorText(plain.status));
-  } catch (e) {
-    console.error("[email-report/line]", e);
-    return fail("ติดต่อ LINE ไม่ได้ กรุณาลองใหม่");
-  }
+  const flex = await send({ type: "flex", altText: m.altText, contents: m.flex });
+  if (flex.ok) return { ok: true, target, fallback: false, error: null };
+  // โควตาหมด / โทเคนเสีย / ติดต่อ LINE ไม่ได้ → ส่งข้อความล้วนก็ไม่ผ่านเหมือนกัน
+  if (flex.status === 0 || flex.status === 429 || flex.status === 401 || flex.status === 403) return fail(flex.error ?? lineErrorText(flex.status));
+  console.error("[email-report/line] flex", flex.status, flex.detail);
+  // Flex ไม่ผ่าน (เช่น ข้อความยาว/รูปแบบผิด) → ข้อความล้วน ยังเป็น 1 ข้อความ
+  const plain = await send({ type: "text", text: m.text });
+  return plain.ok ? { ok: true, target, fallback: true, error: null } : fail(plain.error ?? lineErrorText(plain.status));
 }

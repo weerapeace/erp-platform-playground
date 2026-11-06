@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadLineConfig, linePush, lineText, type LineMessage } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,8 +28,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!text && allImages.length === 0) return NextResponse.json({ error: "ไม่มีข้อความ" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-  const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; routing?: Record<string, string>; disabled_events?: Record<string, boolean> };
+  const cfg = await loadLineConfig(admin);
 
   // ตารางจับคู่ "เหตุการณ์ → กลุ่ม" (ตั้งเองได้ในหน้าตั้งค่า) — ค่าเริ่มต้นตามที่เคยฟิกซ์ไว้
   const DEFAULT_ROUTING: Record<string, string> = { rate: "transfers", china_bill: "bills", transfer: "transfers", test: "test" };
@@ -48,23 +48,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // ประกอบข้อความ: รูปสรุป (ถ้ามี) + ข้อความธรรมดา (คัดลอกได้) — ไม่ส่งการ์ดปุ่มลิงก์แล้ว
-  const messages: Array<Record<string, unknown>> = [];
+  const messages: LineMessage[] = [];
   for (const u of allImages) messages.push({ type: "image", originalContentUrl: u, previewImageUrl: u });
-  if (text) messages.push({ type: "text", text: text.slice(0, 4900) });
+  if (text) messages.push(lineText(text));
   if (messages.length === 0) return NextResponse.json({ error: "ไม่มีข้อความ/รูป" }, { status: 400 });
 
-  try {
-    const res = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ to: target, messages }),
-    });
-    if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      return NextResponse.json({ error: `LINE ตอบกลับ ${res.status}: ${t.slice(0, 200)}` }, { status: 502 });
-    }
-    return NextResponse.json({ ok: true });
-  } catch (e) {
-    return NextResponse.json({ error: String((e as Error).message ?? e) }, { status: 500 });
-  }
+  // slot ใช้เลือกบอท — ปุ่มทดสอบ (explicitTo) ไม่รู้ slot = บอทหลัก
+  const sendSlot = !explicitTo && slot && cfg.groups?.[slot] ? slot : null;
+  const r = await linePush(cfg, { to: target, slot: sendSlot, messages });
+  if (!r.ok) return NextResponse.json({ error: r.error, detail: r.detail ?? "" }, { status: r.status === 0 ? 500 : 502 });
+  return NextResponse.json({ ok: true });
 }

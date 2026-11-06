@@ -3,6 +3,7 @@
  * ใช้โดย /api/auth/login-event
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
+import { loadLineConfig, linePush, lineText } from "@/lib/line-send";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -57,14 +58,9 @@ export function deviceLabel(deviceType: string, browser: string, os: string): st
  */
 export async function pushSecurityLine(admin: Admin, text: string): Promise<void> {
   try {
-    const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-    const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string> };
+    const cfg = await loadLineConfig(admin);
     const target = cfg.groups?.security || cfg.group_id || "";
     if (!cfg.token || !target) return;
-    await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ to: target, messages: [{ type: "text", text: text.slice(0, 4900) }] }),
-    });
+    await linePush(cfg, { to: target, slot: cfg.groups?.security ? "security" : null, messages: [lineText(text)] });
   } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
 }

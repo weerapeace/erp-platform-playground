@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAuditMany } from "@/lib/audit";
+import { loadLineConfig, linePush, lineText } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -121,17 +122,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }
 
       // ② LINE → กลุ่ม "ขอซื้อ" (groups.purchase_request) · ใช้บอท/โทเคนเดิม
-      const { data: lc } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-      const cfg = (lc?.sval ?? {}) as { token?: string; groups?: Record<string, string>; disabled_events?: Record<string, boolean> };
+      const cfg = await loadLineConfig(admin);
       const target = cfg.groups?.purchase_request || "";
       const evOn = cfg.disabled_events?.pr_rejected !== true;   // ปิดจากศูนย์ LINE → ไม่ส่ง
       if (cfg.token && target && evOn) {
-        const lineText = `❌ ใบขอซื้อไม่อนุมัติ ${n} ใบ\nโดย: ${actor}\nเหตุผล: ${reason}\n${itemLines.join("\n")}\n→ เปิดแอปจัดซื้อเพื่อดูรายละเอียด`;
-        await fetch("https://api.line.me/v2/bot/message/push", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-          body: JSON.stringify({ to: target, messages: [{ type: "text", text: lineText.slice(0, 4900) }] }),
-        });
+        const msg = `❌ ใบขอซื้อไม่อนุมัติ ${n} ใบ\nโดย: ${actor}\nเหตุผล: ${reason}\n${itemLines.join("\n")}\n→ เปิดแอปจัดซื้อเพื่อดูรายละเอียด`;
+        await linePush(cfg, { to: target, slot: "purchase_request", messages: [lineText(msg)] });
       }
     } catch (e) { console.warn("[pr-approve] reject notify failed:", e); }
   }
