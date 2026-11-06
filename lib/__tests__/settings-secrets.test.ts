@@ -51,3 +51,39 @@ describe("settings-secrets — โทเคน LINE ใน china_app_settings", 
     expect("token" in (out.sval as Record<string, unknown>)).toBe(false);
   });
 });
+
+describe("settings-secrets — บอท LINE เสริม (bots.*.token / bots.*.channel_secret)", () => {
+  const B_TOKEN = "bot-two-token-xyz-5678";
+  const B_SEC = "0123456789abcdef0123456789abcdef";
+  type R = Record<string, unknown>;
+  const botOf = (sval: unknown, key: string) => ((sval as R).bots as R)[key] as R;
+
+  it("ปิดโทเคน + รหัสลับของบอทเสริมทุกตัว · ชื่อ/กลุ่มไม่แตะ", () => {
+    const [row] = maskSecretRows("china_app_settings", [
+      { id: "1", skey: "line_config", sval: { token: "MAIN-TOKEN-1111", bots: { b1: { label: "บอทผลิต", token: B_TOKEN, channel_secret: B_SEC, group_id: "Gp" } } } },
+    ]);
+    const b1 = botOf(row.sval, "b1");
+    expect(b1.token).toBe(`${SECRET_MASK}5678`);
+    expect(b1.channel_secret).toBe(`${SECRET_MASK}cdef`);
+    expect(b1.label).toBe("บอทผลิต");
+    expect(b1.group_id).toBe("Gp");
+    expect((row.sval as R).token).toBe(`${SECRET_MASK}1111`);
+  });
+
+  it("บันทึกค่าที่ปิดไว้กลับมา = คงความลับเดิมของบอทเสริม", async () => {
+    const admin = fakeAdmin({ skey: "line_config", sval: { bots: { b1: { label: "x", token: B_TOKEN, channel_secret: B_SEC } } } });
+    const out = await keepSecretsOnWrite(admin, "china_app_settings", "1", {
+      sval: { bots: { b1: { label: "ชื่อใหม่", token: `${SECRET_MASK}5678`, channel_secret: `${SECRET_MASK}cdef` } } },
+    });
+    const b1 = botOf(out.sval, "b1");
+    expect(b1.token).toBe(B_TOKEN);
+    expect(b1.channel_secret).toBe(B_SEC);
+    expect(b1.label).toBe("ชื่อใหม่");
+  });
+
+  it("ส่งก้อนที่ไม่มี bots มาเลย → ไม่สร้างบอทขึ้นมาเอง (ไม่โยน error)", async () => {
+    const admin = fakeAdmin({ skey: "line_config", sval: { bots: { b1: { token: B_TOKEN } } } });
+    const out = await keepSecretsOnWrite(admin, "china_app_settings", "1", { sval: { group_id: "G" } });
+    expect((out.sval as R).bots).toBeUndefined();
+  });
+});

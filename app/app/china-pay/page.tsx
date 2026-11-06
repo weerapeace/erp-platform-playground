@@ -566,6 +566,9 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
   const [saving, setSaving] = useState(false);
   // ตั้งค่า LINE Bot (ส่งเข้ากลุ่มอัตโนมัติ)
   const [lineRowId, setLineRowId] = useState<string | null>(null);
+  // ค่าตั้ง LINE ทั้งก้อนที่โหลดมา (ความลับเป็น •••• แล้ว) — ตอนบันทึกต้องรวมกลับ ไม่งั้นค่าของระบบอื่น
+  // (กลุ่มครีเอทีฟ/ขอซื้อ/บอร์ดผลิต · แม่แบบข้อความ · สวิตช์ · บอทเสริม) จะหายทั้งหมด
+  const lineRawRef = useRef<Record<string, unknown>>({});
   const [lineToken, setLineToken] = useState("");
   const [lineCaptured, setLineCaptured] = useState("");     // Group ID ที่ webhook จับได้ล่าสุด (scratch)
   const [lineGroups, setLineGroups] = useState<{ test: string; bills: string; transfers: string }>({ test: "", bills: "", transfers: "" });
@@ -584,6 +587,7 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
       if (lrow) {
         setLineRowId(String(lrow.id));
         const v = (lrow.sval ?? {}) as Record<string, unknown>;
+        lineRawRef.current = v;
         setLineToken(String(v.token ?? "")); setLineCaptured(String(v.group_id ?? "")); setLineShareBase(String(v.share_base ?? ""));
         const g = (v.groups ?? {}) as Record<string, string>;
         setLineGroups({ test: String(g.test ?? ""), bills: String(g.bills ?? ""), transfers: String(g.transfers ?? "") });
@@ -596,9 +600,12 @@ function MenuSettings({ onSaved }: { onSaved: (c: Record<string, string[]>) => v
   const saveLine = async () => {
     setLineSaving(true);
     try {
+      // รวมกับค่าเดิมทั้งก้อน แก้เฉพาะช่องของแอปจีน (server คืนค่าความลับที่เป็น •••• ให้เอง)
+      const raw = lineRawRef.current;
       const sval = {
+        ...raw,
         token: lineToken.trim(), group_id: lineCaptured.trim(), share_base: lineShareBase.trim().replace(/\/$/, ""),
-        groups: { test: lineGroups.test.trim(), bills: lineGroups.bills.trim(), transfers: lineGroups.transfers.trim() },
+        groups: { ...((raw.groups ?? {}) as Record<string, string>), test: lineGroups.test.trim(), bills: lineGroups.bills.trim(), transfers: lineGroups.transfers.trim() },
         routing: lineRouting,
       };
       const res = lineRowId
