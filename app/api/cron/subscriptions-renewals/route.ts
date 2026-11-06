@@ -6,7 +6,8 @@
  *   2. CRON_SECRET (Authorization: Bearer <CRON_SECRET>) ถ้าตั้ง env ไว้
  *   3. แอดมินกดปุ่ม "ทดสอบแจ้งเตือน" (guardApi subscriptions.edit)
  *
- * ช่องทางแจ้ง: กระดิ่ง (erp_notify → admin) + LINE (กลุ่มหลัก line_config.group_id)
+ * ช่องทางแจ้ง: กระดิ่ง (erp_notify → คนรับตามกฎแจ้งเตือน "subscription.renewal_soon" · ไม่มีกฎ = แอดมินทุกคน · ปิดกฎ = ไม่ส่งกระดิ่ง — lib/notify-recipients)
+ *   + LINE (กลุ่มหลัก line_config.group_id)
  * ไม่ต้อง dedupe — ยึดเกณฑ์วัน RENEWAL_THRESHOLDS (cron วันละครั้ง → แต่ละเกณฑ์เด้งครั้งเดียว)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -17,6 +18,7 @@ import {
   nextRenewal, daysUntil, fmtCost, RENEWAL_THRESHOLDS, type Subscription,
 } from "@/lib/subscriptions";
 import { recordWorkerRun } from "@/lib/ai-office-runs";
+import { ruleRecipients } from "@/lib/notify-recipients";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,9 +58,8 @@ async function runCheck(): Promise<{ checked: number; due: Due[]; lineSent: bool
 
   let bellSent = false, lineSent = false;
   if (due.length > 0) {
-    // กระดิ่ง — ส่งหา admin ทุกคน (1 การ์ด/รายการ)
-    const { data: admins } = await db.from("user_profiles").select("id").eq("role", "admin").eq("active", true);
-    const ids = (admins ?? []).map((a) => a.id as string);
+    // กระดิ่ง — คนรับตามกฎแจ้งเตือน (แก้ได้ในแท็บแจ้งเตือนของแผนผัง) · 1 การ์ด/รายการ
+    const { ids } = await ruleRecipients(db, "subscription.renewal_soon");
     if (ids.length > 0) {
       for (const x of due) {
         const when = x.days < 0 ? `เลยกำหนด ${-x.days} วัน` : x.days === 0 ? "ครบกำหนดวันนี้" : `อีก ${x.days} วัน`;

@@ -17,8 +17,8 @@ const NOTIFY_LIVE: NotifyLive = {
   line: { token: true, main: true, groups: { purchase_request: true, creative: true }, off: { qc_defect: true } },
   rules: [{ event: "pr.submitted", name: "เก่า", active: true }, { event: "qc.pending", name: "รอ QC", active: true }, { event: "wo.due_soon", name: "ใกล้กำหนด", active: false }],
   staff: { active: 60, linked: 0 }, push: 0, email: true,
-  shops: { total: 3, line: 0, email: 0, oa: 0 }, stats: {}, channels: { email: true, popup: true, discord: true },
-  reports: [{ id: "r1", name: "งานค้าง", time: "08:00:00", days: [1, 2, 3, 4, 5, 6], on: true, email: false, popup: true, discord: true }],
+  shops: { total: 3, line: 0, email: 0, oa: 0 }, stats: {}, channels: { email: true, popup: true, discord: true, line: true },
+  reports: [{ id: "r1", name: "งานค้าง", time: "08:00:00", days: [1, 2, 3, 4, 5, 6], on: true, email: false, popup: true, discord: true, line: false }],
 };
 
 describe("แผนผังการทำงาน — แท็บแจ้งเตือน", () => {

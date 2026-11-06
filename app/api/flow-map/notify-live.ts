@@ -24,10 +24,30 @@ async function lineState(admin: Admin): Promise<NotifyLive["line"]> {
   return { token: !!cfg.token?.trim(), main: !!cfg.group_id?.trim(), groups, off };
 }
 
+/** ป้ายคนรับแบบที่ไม่ใช่ role/user (ใช้กับเอกสาร) */
+const RECIPIENT_WORD: Record<string, string> = { approvers: "ผู้อนุมัติ", requester: "ผู้ขอ", mentioned: "คนที่ถูกแท็ก" };
+
 async function rules(admin: Admin): Promise<NotifyLive["rules"]> {
-  const { data, error } = await admin.from("erp_notification_rules").select("event_type, name, active").order("sort_order");
+  const { data, error } = await admin.from("erp_notification_rules").select("event_type, name, active, recipients").order("sort_order");
   if (error) throw new Error(error.message);
-  return ((data ?? []) as Row[]).map((r) => ({ event: String(r.event_type), name: String(r.name ?? r.event_type), active: r.active === true }));
+  const list = (data ?? []) as Row[];
+  // ป้ายคนรับ (ภาษาคน) — ชื่อ role + ชื่อคน · ไม่มีเบอร์/อีเมล
+  const recips = list.flatMap((r) => (Array.isArray(r.recipients) ? (r.recipients as { type?: string; value?: string }[]) : []));
+  const roleKeys = [...new Set(recips.filter((x) => x.type === "role" && x.value).map((x) => String(x.value)))];
+  const userIds = [...new Set(recips.filter((x) => x.type === "user" && x.value).map((x) => String(x.value)))];
+  const [roleRes, userRes] = await Promise.all([
+    roleKeys.length ? admin.from("erp_roles").select("key, label").in("key", roleKeys) : Promise.resolve({ data: [] as Row[] }),
+    userIds.length ? admin.from("user_profiles").select("id, display_name, username").in("id", userIds) : Promise.resolve({ data: [] as Row[] }),
+  ]);
+  const roleLabel = new Map(((roleRes.data ?? []) as Row[]).map((x) => [String(x.key), String(x.label ?? x.key)]));
+  const userLabel = new Map(((userRes.data ?? []) as Row[]).map((x) => [String(x.id), String(x.display_name || x.username || "ผู้ใช้")]));
+  const toText = (raw: unknown) => {
+    const arr = Array.isArray(raw) ? (raw as { type?: string; value?: string }[]) : [];
+    const parts = arr.map((x) => (x.type === "role" ? roleLabel.get(String(x.value)) ?? String(x.value ?? "")
+      : x.type === "user" ? userLabel.get(String(x.value)) ?? "ผู้ใช้ (ลบแล้ว)" : RECIPIENT_WORD[String(x.type)] ?? "")).filter(Boolean);
+    return parts.length ? parts.join(" + ") : "ยังไม่เลือกคนรับ";
+  };
+  return list.map((r) => ({ event: String(r.event_type), name: String(r.name ?? r.event_type), active: r.active === true, to: toText(r.recipients) }));
 }
 
 async function staff(admin: Admin): Promise<NotifyLive["staff"]> {

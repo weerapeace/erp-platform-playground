@@ -524,3 +524,16 @@ export const RUN_STATUS_LABEL: Record<EmailReportRun["status"], { label: string;
   channel_off:    { label: "ปิดช่องทางอยู่ ไม่ส่ง", cls: "bg-slate-100 text-slate-600" },
 };
 export const RUN_TRIGGER_LABEL: Record<EmailReportRun["trigger"], string> = { schedule: "ตามเวลา", test: "ส่งทดสอบ", manual: "กดส่งเอง" };
+
+/** รายงานที่บันทึกแล้ว → ค่าทั้งชุดสำหรับ PATCH /api/admin/email-reports/:id (PATCH ต้องส่งทั้งชุด)
+ *  ใช้: หน้า /admin/email-reports (แก้จากแถว/ฟอร์ม) · ป๊อปแก้แจ้งเตือนในแผนผัง (components/flow-map/notify-edit) — แก้แค่บางช่องแล้วรวมกับค่านี้ */
+export function emailReportToInput(r: EmailReport): EmailReportInput {
+  return {
+    name: r.name, source_key: r.source_key,
+    filters: { brand_group: r.filters.brand_group ?? "all", brand_ids: r.filters.brand_ids ?? [], statuses: r.filters.statuses ?? [], ...(r.filters.day === "today" ? { day: "today" as const } : {}) },
+    options: normalizeReportOptions(r.source_key, r.options),   // รายงานเก่า = เติมค่าเริ่มต้น (หน้าตาเดิม)
+    days: r.days, send_time: r.send_time, recipients: r.recipients, email_enabled: r.email_enabled !== false,
+    discord: normalizeReportDiscord(r.discord), popup: normalizeReportPopup(r.popup), line: normalizeReportLine(r.line),
+    skip_if_empty: r.skip_if_empty, is_enabled: r.is_enabled,
+  };
+}

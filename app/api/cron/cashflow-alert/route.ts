@@ -2,7 +2,8 @@
  * /api/cron/cashflow-alert — เตือน "เงินจะต่ำกว่าเงินกันขั้นต่ำ" ทุกเช้า (vercel.json 01:05 UTC = 08:05 เวลาไทย)
  *
  * คิดกระแสเงินสดชุดเดียวกับหน้า /cashflow (lib/cashflow-server loadCashflow) ล่วงหน้า alertDays วัน แล้วหาวันแรกที่ต่ำกว่า safetyBuffer (lib/cashflow findLowCash)
- * ต่ำกว่า → กระดิ่งถึงแอดมินทุกคน (erp_notify · ถ้าเปิดแอปแจ้งเตือนบนมือถือไว้ เด้งที่มือถือด้วย) · ไม่ต่ำ = ไม่ส่งอะไร
+ * ต่ำกว่า → กระดิ่งถึงคนรับตามกฎแจ้งเตือน "cashflow.low_cash" (ตั้งต้น = แอดมิน · แก้ได้ในแท็บแจ้งเตือนของแผนผัง · ปิดกฎ = ไม่ส่ง
+ *   · ไม่มีกฎ = แอดมินทุกคน — lib/notify-recipients) (erp_notify · ถ้าเปิดแอปแจ้งเตือนบนมือถือไว้ เด้งที่มือถือด้วย) · ไม่ต่ำ = ไม่ส่งอะไร
  * ไม่ส่ง LINE: ข้อมูลเงินห้ามเข้ากลุ่มที่มีพนักงาน + โควตา LINE ฟรีมีแค่ 300/เดือน
  * ยังไม่กรอกยอดเงินในบัญชี = ข้าม (เส้นเริ่มจากศูนย์ จะเตือนมั่วทุกวัน)
  *
@@ -17,6 +18,7 @@ import { isTrustedCron } from "@/lib/cron-auth";
 import { loadCashflow } from "@/lib/cashflow-server";
 import { THB, addDaysISO, buildDailySeries, findLowCash, formatDayMonthTH, todayISO } from "@/lib/cashflow";
 import { CASHFLOW_SETTINGS_KEY, cleanCashflowSettings } from "@/lib/cashflow-settings";
+import { ruleRecipients } from "@/lib/notify-recipients";
 import { recordWorkerRun } from "@/lib/ai-office-runs";
 
 export const dynamic = "force-dynamic";
@@ -64,8 +66,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       already = (count ?? 0) > 0;
     }
     if (check.first && !dry && !already) {
-      const { data: admins } = await admin.from("user_profiles").select("id").eq("role", "admin").eq("active", true);
-      const ids = ((admins ?? []) as { id: string }[]).map((a) => a.id);
+      const { ids } = await ruleRecipients(admin, "cashflow.low_cash");   // ปิดกฎ = ids ว่าง → ไม่ส่ง
       const days = Math.max(0, Math.round((Date.parse(check.first.date) - Date.parse(from)) / 86400000));
       const title = days === 0 ? "เงินต่ำกว่าเงินกันขั้นต่ำแล้ววันนี้" : `อีก ${days} วันเงินจะต่ำกว่าเงินกันขั้นต่ำ`;
       const body = `วันที่ ${formatDayMonthTH(check.first.date)} คงเหลือ ${THB(check.first.balance)} (ขั้นต่ำ ${THB(settings.safetyBuffer)})`

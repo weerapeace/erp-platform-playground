@@ -4,6 +4,7 @@
  * แผนผังการทำงาน — แท็บ "แจ้งเตือน": ระบบแจ้งเรื่องอะไร · ทางไหน (กระดิ่ง ERP / LINE / อีเมล / อื่น ๆ) · ถึงคนจริงไหม
  * เนื้อหาจากทะเบียน lib/flow-map-notify.ts · สถานะสดจาก /api/flow-map/notify · ตารางกลาง MiniTable · ตั้งกลุ่ม LINE ผ่าน LineConsole กลาง
  * ใช้ที่ components/flow-map/index.tsx (แท็บ + กระดิ่งบนกล่อง + หัวข้อในแผงรายละเอียดกล่อง)
+ * แอดมินกด ✎ ท้ายแถว / ปุ่ม "แก้ไข" ในแผงรายละเอียด → ป๊อปแก้การแจ้งเตือน (components/flow-map/notify-edit · onEdit)
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -89,8 +90,10 @@ function Stat({ label, value, sub, warn }: { label: string; value: string; sub?:
 }
 
 /** ฝั่งซ้ายของแท็บ: การ์ดสรุป · ตัวกรองฝ่าย · ตาราง · ขั้นที่ยังไม่มีแจ้งเตือน · กฎที่ไม่มีโค้ดยิง */
-export function FlowNotifyBoard({ api, selected, onSelect, canAdmin, onOpenLine }: {
+export function FlowNotifyBoard({ api, selected, onSelect, canAdmin, onOpenLine, onEdit }: {
   api: FlowNotifyApi; selected: string | null; onSelect: (id: string | null) => void; canAdmin: boolean; onOpenLine: () => void;
+  /** แอดมิน: เปิดป๊อปแก้การแจ้งเตือนของเรื่องนี้ */
+  onEdit?: (id: string) => void;
 }) {
   const t = useT();
   const { live, at, failed, err, reload } = api;
@@ -136,6 +139,15 @@ export function FlowNotifyBoard({ api, selected, onSelect, canAdmin, onOpenLine 
           </span>
         );
       } },
+    ...(canAdmin && onEdit ? [{
+      key: "edit", header: "", label: t("แก้ไข", "Edit"), width: "4.5rem", align: "right" as const,
+      cell: (r: NotifyTopic) => (
+        <button type="button" onClick={(e) => { e.stopPropagation(); onEdit(r.id); }} title={t("แก้คนรับ / เปิด-ปิด / กลุ่ม LINE / เวลา", "Edit recipients / on-off / LINE group / time")}
+          className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11.5px] text-slate-600 hover:border-indigo-300 hover:text-indigo-700">
+          <Icon value="i:edit" size={12} />{t("แก้ไข", "Edit")}
+        </button>
+      ),
+    } satisfies MiniColumn<NotifyTopic>] : []),
   ];
 
   const pill = (k: NotifyArea | "all", label: string, n: number) => (
@@ -222,9 +234,10 @@ export function FlowNotifyBoard({ api, selected, onSelect, canAdmin, onOpenLine 
 }
 
 /** ฝั่งขวา: รายละเอียดเรื่องที่เลือก (ส่งทางไหน · ถึงไหม · ต้องทำอะไร · สถิติ) หรือคำอธิบาย + เรื่องที่ยังเงียบ */
-export function FlowNotifyPanel({ api, selected, onSelect, onOpenNode, canAdmin, onOpenLine }: {
+export function FlowNotifyPanel({ api, selected, onSelect, onOpenNode, canAdmin, onOpenLine, onEdit }: {
   api: FlowNotifyApi; selected: string | null; onSelect: (id: string | null) => void;
   onOpenNode: (node: string) => void; canAdmin: boolean; onOpenLine: () => void;
+  onEdit?: (id: string) => void;
 }) {
   const t = useT();
   const { live } = api;
@@ -272,6 +285,11 @@ export function FlowNotifyPanel({ api, selected, onSelect, onOpenNode, canAdmin,
           <div className="font-semibold text-[15px] text-slate-800">{topic.label}</div>
           <div className="text-[11px] text-slate-500">{NOTIFY_AREAS[topic.area].label}{topic.node && FLOW_NODES[topic.node] ? ` · ${FLOW_NODES[topic.node].label}` : ""}</div>
         </div>
+        {canAdmin && onEdit && (
+          <button type="button" onClick={() => onEdit(topic.id)} className="shrink-0 h-8 px-3 inline-flex items-center gap-1 text-[12px] rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+            <Icon value="i:edit" size={13} />{t("แก้ไข", "Edit")}
+          </button>
+        )}
         {topic.node && FLOW_NODES[topic.node] && (
           <button type="button" onClick={() => onOpenNode(topic.node!)} className="shrink-0 h-8 px-3 inline-flex items-center gap-1 text-[12px] rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
             {t("ดูในแผนผัง", "Show on map")}

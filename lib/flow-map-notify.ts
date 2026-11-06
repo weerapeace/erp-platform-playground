@@ -57,7 +57,7 @@ export type NotifyReport = { id: string; name: string; time: string | null; days
 export type NotifyLive = {
   line: { token: boolean; main: boolean; groups: Partial<Record<string, boolean>>; off: Record<string, boolean> };
   /** กฎกระดิ่ง event_type → เปิดอยู่ไหม */
-  rules: { event: string; name: string; active: boolean }[];
+  rules: { event: string; name: string; active: boolean; to?: string }[];
   /** พนักงานที่ทำงานอยู่ / ผูก LINE แล้ว (employees.line_user_id) */
   staff: { active: number; linked: number };
   /** มือถือที่เปิดรับแจ้งเตือน (erp_push_subscriptions) */
@@ -239,13 +239,13 @@ export const NOTIFY_TOPICS: NotifyTopic[] = [
     files: ["app/api/china-pay/line-push/route.ts"] },
   { id: "subscription_renewal", area: "system", label: "บริการใกล้ต่ออายุ (ทุกเช้า 08:00)", events: ["subscription.renewal_soon"],
     when: "ตั้งเวลาทุกวัน — subscription ที่ใกล้ครบรอบ",
-    send: [B("แอดมิน"), G("กลุ่มหลัก", ["main"])],
-    files: ["app/api/cron/subscriptions-renewals/route.ts"] },
+    send: [B("แอดมิน", "subscription.renewal_soon"), G("กลุ่มหลัก", ["main"])],
+    files: ["app/api/cron/subscriptions-renewals/route.ts", "lib/notify-recipients.ts"] },
   { id: "cashflow_low_cash", area: "system", label: "เงินจะต่ำกว่าเงินกันขั้นต่ำ (ทุกเช้า 08:05)", events: ["cashflow.low_cash"],
     when: "ตั้งเวลาทุกวัน — มองล่วงหน้าตามค่าตั้ง (ตั้งต้น 14 วัน) ถ้าเงินคงเหลือจะต่ำกว่าเงินกันขั้นต่ำ",
-    send: [B("แอดมินทุกคน")],
-    note: "ไม่ส่ง LINE (ข้อมูลเงินห้ามเข้ากลุ่มพนักงาน) · ยังไม่กรอกยอดเงินในบัญชี = ข้ามทุกวัน · ตั้งค่า/ทดสอบที่ /cashflow แท็บตั้งค่า",
-    files: ["app/api/cron/cashflow-alert/route.ts", "vercel.json"] },
+    send: [B("แอดมิน", "cashflow.low_cash")],
+    note: "ไม่ส่ง LINE (ข้อมูลเงินห้ามเข้ากลุ่มพนักงาน — เพิ่มคนรับกระดิ่งเฉพาะคนที่ควรเห็นตัวเลขเงิน) · ยังไม่กรอกยอดเงินในบัญชี = ข้ามทุกวัน · ตั้งค่า/ทดสอบที่ /cashflow แท็บตั้งค่า",
+    files: ["app/api/cron/cashflow-alert/route.ts", "vercel.json", "lib/notify-recipients.ts"] },
   { id: "security_new_device", area: "system", label: "เข้าระบบจากเครื่องใหม่", events: ["security.new_device"],
     when: "มีคนล็อกอินจากเครื่อง/เบราว์เซอร์ที่ไม่เคยใช้",
     send: [B("เจ้าของบัญชี"), G("กลุ่มหลัก", ["main"])],
@@ -280,7 +280,8 @@ export function notifyTargetCell(t: NotifyTarget, live: NotifyLive): NotifyCell 
       if (!t.rule) return { state: "ok", text: t.to };
       const r = live.rules.find((x) => x.event === t.rule);
       if (!r) return { state: "warn", text: `${t.to} — ยังไม่มีกฎกระดิ่ง`, fix: `เพิ่มกฎกระดิ่ง “${t.rule}” ในหน้าตั้งกฎแจ้งเตือน` };
-      return r.active ? { state: "ok", text: t.to } : { state: "off", text: `${t.to} — ปิดกฎไว้`, fix: "เปิดกฎนี้ในหน้าตั้งกฎแจ้งเตือน" };
+      const to = r.to || t.to;   // คนรับจริงตามกฎ (แก้ได้ในป๊อปแก้แจ้งเตือน) — ไม่มี = ป้ายในทะเบียน
+      return r.active ? { state: "ok", text: to, short: to } : { state: "off", text: `${to} — ปิดกฎไว้`, short: to, fix: "เปิดกฎนี้ (กดแก้ไขที่แถว หรือหน้าตั้งกฎแจ้งเตือน)" };
     }
     case "group": {
       const want = notifyGroupLabel(t.groups[0]);

@@ -26,7 +26,8 @@ import { FlowJourney } from "./journey";
 import { useFlowNotes, FlowSticky, FlowNoteList, FLOW_NOTE_W } from "./notes";
 import { useFlowNotify, FlowNotifyBoard, FlowNotifyPanel, NodeNotifyList, notifyNodeColor } from "./notify";
 import { LineConsole } from "@/components/line-console";
-import { notifyTopicsOfNode } from "@/lib/flow-map-notify";
+import { NotifyEditModal } from "@/components/flow-map/notify-edit";
+import { notifyAllTopics, notifyTopicsOfNode } from "@/lib/flow-map-notify";
 import { FLOW_ADVICE, FLOW_ADVICE_VERDICTS } from "@/lib/flow-map-advice";
 import type { FlowNote, FlowNoteAttach } from "@/lib/flow-map-notes";
 
@@ -119,6 +120,7 @@ export function FlowMap() {
   const notify = useFlowNotify();
   const [notifySel, setNotifySel] = useState<string | null>(null);
   const [lineOpen, setLineOpen] = useState(false);
+  const [notifyEditId, setNotifyEditId] = useState<string | null>(null);   // ป๊อปแก้การแจ้งเตือน (แอดมิน)
   const views = useMemo(() => flowViewsFor(canFinance), [canFinance]);   // ผังการเงินเฉพาะผู้มีสิทธิ์ (แอดมินมีเสมอ)
   const basket = useFlowBasket();
   const notesApi = useFlowNotes();
@@ -228,7 +230,7 @@ export function FlowMap() {
 
   let panel: ReactNode;
   if (isNotify && !basketOpen) {
-    panel = <FlowNotifyPanel api={notify} selected={notifySel} onSelect={setNotifySel} onOpenNode={openNodeOnMap} canAdmin={canAdmin} onOpenLine={() => setLineOpen(true)} />;
+    panel = <FlowNotifyPanel api={notify} selected={notifySel} onSelect={setNotifySel} onOpenNode={openNodeOnMap} canAdmin={canAdmin} onOpenLine={() => setLineOpen(true)} onEdit={setNotifyEditId} />;
   } else if (basketOpen) {
     panel = <FlowBasketPanel basket={basket} health={health} notes={promptNotes} onClose={() => setBasketOpen(false)} onPick={(kind, ref) => pick(kind === "n" ? { k: "n", id: ref } : { k: "e", id: ref })} />;
   } else if (sel?.k === "e") {
@@ -391,7 +393,7 @@ export function FlowMap() {
 
       <div className="mt-3 grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] items-start">
         {isNotify ? (
-          <FlowNotifyBoard api={notify} selected={notifySel} onSelect={setNotifySel} canAdmin={canAdmin} onOpenLine={() => setLineOpen(true)} />
+          <FlowNotifyBoard api={notify} selected={notifySel} onSelect={setNotifySel} canAdmin={canAdmin} onOpenLine={() => setLineOpen(true)} onEdit={setNotifyEditId} />
         ) : isJourney ? (
           <FlowJourney onPickNode={(id) => pick({ k: "n", id })} onPickEdge={(id) => pick({ k: "e", id })} />
         ) : (
@@ -491,6 +493,11 @@ export function FlowMap() {
       </p>
       <FlowMetricListModal metric={metric} onClose={() => setMetric(null)} />
       {canAdmin && <LineConsole open={lineOpen} onClose={closeLine} />}
+      {canAdmin && notifyEditId && (
+        <NotifyEditModal open topic={notifyAllTopics(notify.live).find((x) => x.id === notifyEditId) ?? null} live={notify.live}
+          onClose={() => setNotifyEditId(null)} onSaved={() => void notify.reload()}
+          onOpenLine={() => { setNotifyEditId(null); setLineOpen(true); }} />
+      )}
     </div>
   );
 }

@@ -24,7 +24,7 @@ import { isOwnBrandJob, buildStatusMeta, type WfStatusRow } from "@/lib/design-s
 import type { WorkPopupPayload } from "@/lib/email-report/popup";
 import {
   COMMON_SUBJECT_TOKENS, DAY_LABELS, DEFAULT_DAYS, DISCORD_MENTION_LABEL, EMAIL_REPORT_SOURCES, INTRO_MAX, SUBJECT_MAX,
-  POPUP_FIELDS, POPUP_MAX_CHOICES, TOP_PHOTO_CHOICES, LOW_STOCK_CHOICES, REPORT_PERIODS, describeDays, normalizeReportDiscord, normalizeReportInput, normalizeReportLine, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceChannels, sourceDef,
+  POPUP_FIELDS, POPUP_MAX_CHOICES, TOP_PHOTO_CHOICES, LOW_STOCK_CHOICES, REPORT_PERIODS, describeDays, emailReportToInput, normalizeReportDiscord, normalizeReportInput, normalizeReportLine, normalizeReportOptions, normalizeReportPopup, reportChannelOn, sourceChannels, sourceDef,
   type BrandGroupFilter, type EmailRecipient, type EmailReport, type EmailReportDiscord, type EmailReportInput, type EmailReportLine, type EmailReportPopup,
   type ReportChannelKey, type ReportChannels,
 } from "@/lib/email-report/shared";
@@ -42,16 +42,8 @@ export const emptyReportInput = (): EmailReportInput => ({
   days: [...DEFAULT_DAYS], send_time: "08:00", recipients: [], email_enabled: true, discord: normalizeReportDiscord({}), popup: normalizeReportPopup({}), line: normalizeReportLine({}), skip_if_empty: true, is_enabled: false,
 });
 
-export function toInput(r: EmailReport): EmailReportInput {
-  return {
-    name: r.name, source_key: r.source_key,
-    filters: { brand_group: r.filters.brand_group ?? "all", brand_ids: r.filters.brand_ids ?? [], statuses: r.filters.statuses ?? [], ...(r.filters.day === "today" ? { day: "today" as const } : {}) },
-    options: normalizeReportOptions(r.source_key, r.options),   // รายงานเก่า = เติมค่าเริ่มต้น (หน้าตาเดิม)
-    days: r.days, send_time: r.send_time, recipients: r.recipients, email_enabled: r.email_enabled !== false,
-    discord: normalizeReportDiscord(r.discord), popup: normalizeReportPopup(r.popup), line: normalizeReportLine(r.line),
-    skip_if_empty: r.skip_if_empty, is_enabled: r.is_enabled,
-  };
-}
+/** รายงาน → ค่าทั้งชุดที่ PATCH ต้องการ — ย้ายไปของกลาง lib/email-report/shared (ป๊อปแก้แจ้งเตือนในแผนผังใช้ด้วย) */
+export const toInput = emailReportToInput;
 
 const GROUPS: { v: BrandGroupFilter; label: string }[] = [
   { v: "all", label: "ทุกแบรนด์" }, { v: "customer", label: "👤 งานลูกค้า" }, { v: "own", label: "🏷️ แบรนด์เรา" },
