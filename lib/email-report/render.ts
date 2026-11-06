@@ -101,6 +101,8 @@ export type PopupSourceItem = {
   id: string; title: string; code: string | null; path: string; imageUrl: string | null;
   flag: { text: string; tone: ReportTone }; urgent: boolean; overdue: boolean; waiting: string[];
   brand: string | null; status: string | null; due: string | null; note: string | null;
+  /** ไม่ขยับมากี่วัน · แบรนด์ (id) — ให้ "การเตือนของฉัน" กรองต่อเองได้ (lib/my-watches) */
+  stale?: number; brand_id?: string | null;
 };
 
 const TONE_COLOR: Record<ReportTone, string> = { danger: "#dc2626", warn: "#d97706", muted: "#64748b", good: "#059669" };

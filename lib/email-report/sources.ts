@@ -252,6 +252,7 @@ const designSheetsPending: SourceFn = async (admin, filters, opts) => {
           waiting: waitingOf(e.s).map((t, i) => { const x = taskTitleWithLinks(t, lk[i]); return taskWithWho(oneLine(x, 60) ?? x, who[i], " — "); }),
           brand: e.s.brand?.name ?? (e.s.brand_id ? null : "ไม่ระบุแบรนด์"), status: statusLabel.get(e.s.status) ?? e.s.status,
           due: e.s.deadline ? `กำหนดส่ง ${thShort(e.s.deadline)}` : "ไม่มีกำหนดส่ง", note: oneLine(e.s.note, 90),
+          stale: e.stale, brand_id: e.s.brand_id,
         };
       }),
     },

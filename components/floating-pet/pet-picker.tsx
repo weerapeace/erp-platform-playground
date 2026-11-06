@@ -12,15 +12,16 @@ import { avatarSrc } from "@/lib/r2-image";
 import { BUILTIN_PETS, PET_PX, parsePetSource, type PetMood, type PetSize, type PetSource } from "@/lib/floating-pet";
 import { PetArt, useFloatingPetPref } from "./index";
 import { NotifySettings } from "@/components/notify-settings";
+import { MyWatchesSettings } from "@/components/my-watches";
 
 type LibGif = { id: string; gif_url: string | null; gif_key: string | null; title: string | null; category: string | null };
 const MAX_UPLOAD = 4 * 1024 * 1024;   // เส้นทางอัปของระบบรับได้ราว 4.5MB ต่อครั้ง
 const same = (a: PetSource, b: PetSource) => a.kind === b.kind && (a.kind === "builtin" ? a.id === (b as { id?: string }).id : a.src === (b as { src?: string }).src);
 
-export function PetPickerModal({ open, onClose, initialTab = "pet" }: { open: boolean; onClose: () => void; initialTab?: "pet" | "notify" }) {
+export function PetPickerModal({ open, onClose, initialTab = "pet" }: { open: boolean; onClose: () => void; initialTab?: "pet" | "notify" | "watches" }) {
   const [pref, setPref] = useFloatingPetPref();
   // แท็บ: ตัว Pet / การแจ้งเตือน (ตั้งว่าอยากให้เตือนเรื่องไหน แบบไหน — components/notify-settings)
-  const [view, setView] = useState<"pet" | "notify">(initialTab);
+  const [view, setView] = useState<"pet" | "notify" | "watches">(initialTab);
   const [lib, setLib] = useState<LibGif[] | null>(null);
   const [libErr, setLibErr] = useState(false);
   const [link, setLink] = useState("");
@@ -65,14 +66,14 @@ export function PetPickerModal({ open, onClose, initialTab = "pet" }: { open: bo
     <ERPModal open={open} onClose={onClose} size="lg" defaultExpanded={false} title="ตัว Pet และการแจ้งเตือน" description="ตัวการ์ตูนลอยมุมจอ กดที่ตัวเพื่อเปิดศูนย์แจ้งเตือน · เลือกได้ว่าอยากให้เตือนเรื่องไหน แบบไหน (เฉพาะของคุณ)"
       footer={<div className="flex w-full justify-end"><button type="button" onClick={onClose} className="h-9 rounded-lg bg-indigo-600 px-4 text-sm font-medium text-white hover:bg-indigo-700">เสร็จ</button></div>}>
       <div className="mb-3 flex gap-5 border-b border-slate-200 text-sm">
-        {([["pet", "star", "ตัว Pet"], ["notify", "notify", "การแจ้งเตือน"]] as const).map(([k, ic, l]) => (
+        {([["pet", "star", "ตัว Pet"], ["notify", "notify", "การแจ้งเตือน"], ["watches", "add", "การเตือนของฉัน"]] as const).map(([k, ic, l]) => (
           <button key={k} type="button" onClick={() => setView(k)} aria-pressed={view === k}
             className={`-mb-px inline-flex items-center gap-1.5 border-b-2 px-0.5 pb-2 ${view === k ? "border-indigo-600 font-medium text-indigo-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
             <Icon name={ic} /> {l}
           </button>
         ))}
       </div>
-      {view === "notify" ? <NotifySettings /> : (
+      {view === "notify" ? <NotifySettings /> : view === "watches" ? <MyWatchesSettings /> : (
       <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
         {/* ตัวอย่าง */}
         <div className="flex flex-col items-center gap-2 rounded-xl bg-slate-50 p-3">

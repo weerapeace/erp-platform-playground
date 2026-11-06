@@ -39,6 +39,7 @@ const CENTER_SOURCES: NotifySource[] = [
   { key: "line_design", group: "center", label: "LINE: งานออกแบบ", hint: "ส่งเข้ากลุ่มไลน์ รอเปิดใบงาน", icon: "design", permission: "products.view", added: "2026-11-05" },
   { key: "line_order", group: "center", label: "LINE: คำสั่งซื้อ", hint: "แคปคำสั่งซื้อจากไลน์ รอผูก PO", icon: "cart", permission: "po.view", defaults: { bounce: false }, added: "2026-11-05" },
   { key: "gif", group: "center", label: "GIF จากเพื่อน", hint: "เพื่อนส่ง GIF มาสะกิด", icon: "gift" },
+  { key: "watches", group: "center", label: "การเตือนของฉัน", hint: "เงื่อนไขที่คุณตั้งเอง (แท็บ การเตือนของฉัน)", icon: "star", added: "2026-11-06" },
 ];
 
 /** ตัว Pet เด้งบอกเรื่องกระดิ่งแค่บางประเภทโดยเริ่มต้น (ที่เหลือ = แค่นับตัวเลข ไม่รบกวน) */
