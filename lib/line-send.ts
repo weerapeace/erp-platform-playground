@@ -6,7 +6,9 @@
  *
  * มีให้:
  *   loadLineConfig(admin)      อ่าน china_app_settings.line_config (ก้อนเดียวทั้ง ERP)
- *   lineTokenFor(cfg, slot)    เลือกโทเคนบอทสำหรับกลุ่มปลายทาง ← จุดเดียวที่ต้องแก้ตอนรองรับ "หลายบอท"
+ *   lineTokenFor(cfg, slot)    เลือกโทเคนบอทสำหรับกลุ่มปลายทาง (ตาม slot_bot · ไม่ตั้ง = บอทหลัก)
+ *   lineBot / lineBots / lineBotFor / lineConfigForBot   หลายบอท: บอทหลัก (ค่าระดับบนสุดเดิม) + บอทเสริม (cfg.bots)
+ *   lineBotInfo / lineBotQuota / lineGroupMembers         อ่านจาก LINE (ไม่กินโควตา) ให้ศูนย์ LINE โชว์โควตา/จำนวนคน
  *   linePush(cfg, {to, slot, messages})   ส่งเข้ากลุ่ม/คน ด้วยบอทที่ถูกต้อง
  *   linePushRaw(token, to, messages)      ส่งด้วยโทเคนที่รู้อยู่แล้ว (เช่น LINE OA ของร้านเว็บ)
  *   lineText(text)             ข้อความล้วน (ตัดความยาวตามที่ LINE รับ)
@@ -19,17 +21,93 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
-/** โครงสร้าง line_config (ดูคำอธิบายเต็มที่ lib/line-registry) */
+/** บอทเสริม 1 ตัว (บัญชี LINE OA อีกบัญชี = โควตาฟรีแยกของตัวเอง) */
+export type LineBotConfig = {
+  label?: string;                 // ชื่อที่ตั้งเองในระบบ เช่น "บอทผลิต"
+  token?: string;                 // Channel access token (ความลับ — ปิดก่อนส่งหน้าเว็บ ดู lib/settings-secrets)
+  channel_secret?: string;        // ใช้ตรวจลายเซ็น webhook ของบอทนี้ (ความลับ)
+  bot_name?: string;              // ชื่อบอทใน LINE (ถามจาก LINE ตอนเพิ่ม)
+  basic_id?: string;              // @xxxx ของบอท
+  group_id?: string;              // กลุ่มล่าสุดที่บอทตัวนี้เห็น (webhook ของบอทนี้จับให้)
+  group_captured_at?: string;
+  added_at?: string;
+};
+
+/** โครงสร้าง line_config (ดูคำอธิบายเต็มที่ lib/line-registry) — ระดับบนสุด = "บอทหลัก" ตัวเดิม */
 export type LineConfig = {
   token?: string;
   channel_secret?: string;
-  group_id?: string;              // กลุ่มล่าสุดที่ webhook จับได้ (บางระบบใช้เป็นกลุ่มสำรอง)
+  group_id?: string;              // กลุ่มล่าสุดที่บอทหลักเห็น (บางระบบใช้เป็นกลุ่มสำรอง)
   group_captured_at?: string;
   groups?: Record<string, string>;            // slot → groupId
   templates?: Record<string, string>;         // eventKey → แม่แบบข้อความ
   disabled_events?: Record<string, boolean>;  // eventKey → ปิดส่ง
   routing?: Record<string, string>;           // (แอปจีน) เหตุการณ์ → slot
+  bots?: Record<string, LineBotConfig>;       // บอทเสริม: botKey → ค่าตั้ง
+  slot_bot?: Record<string, string>;          // slot → botKey (ไม่ตั้ง = บอทหลัก)
 } & Record<string, unknown>;
+
+/** คีย์ของบอทหลัก (ค่าตั้งอยู่ระดับบนสุดของ line_config ตามเดิม) */
+export const MAIN_BOT = "main";
+
+/** มุมมองบอท 1 ตัวแบบเดียวกันทั้งบอทหลักและบอทเสริม */
+export type LineBotView = {
+  key: string; label: string; isMain: boolean;
+  token: string; channel_secret: string;
+  group_id: string; group_captured_at: string | null;
+  bot_name: string; basic_id: string;
+};
+
+const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+
+/** บอทตาม key — ไม่มีบอทนี้ = null (บอทหลักมีเสมอ แม้ยังไม่ตั้งโทเคน) */
+export function lineBot(cfg: LineConfig, key: string): LineBotView | null {
+  if (key === MAIN_BOT) {
+    return {
+      key: MAIN_BOT, label: s(cfg.main_label) || "บอทหลัก", isMain: true,
+      token: s(cfg.token), channel_secret: s(cfg.channel_secret),
+      group_id: s(cfg.group_id), group_captured_at: s(cfg.group_captured_at) || null,
+      bot_name: s(cfg.main_bot_name), basic_id: s(cfg.main_basic_id),
+    };
+  }
+  const b = cfg.bots?.[key];
+  if (!b || typeof b !== "object") return null;
+  return {
+    key, label: s(b.label) || key, isMain: false,
+    token: s(b.token), channel_secret: s(b.channel_secret),
+    group_id: s(b.group_id), group_captured_at: s(b.group_captured_at) || null,
+    bot_name: s(b.bot_name), basic_id: s(b.basic_id),
+  };
+}
+
+/** บอททุกตัว (บอทหลักก่อน) */
+export function lineBots(cfg: LineConfig): LineBotView[] {
+  return [MAIN_BOT, ...Object.keys(cfg.bots ?? {})].map((k) => lineBot(cfg, k)).filter((b): b is LineBotView => !!b);
+}
+
+/** บอทที่ดูแลกลุ่มของ slot นี้ — ไม่ได้เลือก / บอทถูกลบ / บอทยังไม่มีโทเคน = บอทหลัก (ไม่เงียบ) */
+export function lineBotKeyFor(cfg: LineConfig, slot?: string | null): string {
+  const key = slot ? s(cfg.slot_bot?.[slot]) : "";
+  if (!key || key === MAIN_BOT) return MAIN_BOT;
+  return lineBot(cfg, key)?.token ? key : MAIN_BOT;
+}
+
+export function lineBotFor(cfg: LineConfig, slot?: string | null): LineBotView {
+  return lineBot(cfg, lineBotKeyFor(cfg, slot)) as LineBotView;
+}
+
+/** คีย์บอทเสริมที่ถูกรูปแบบ (ใช้ต่อท้าย URL webhook) */
+export const isLineBotKey = (k: unknown): k is string => typeof k === "string" && /^[a-z0-9_]{2,24}$/.test(k) && k !== MAIN_BOT;
+
+/**
+ * ค่าตั้งในมุมของบอทตัวหนึ่ง — token / channel_secret / group_id เป็นของบอทนั้น (ที่เหลือเหมือนเดิม)
+ * ใช้กับตัวรับ webhook: ระบบรับเข้า (lib/order-capture, lib/design-line-inbox) อ่าน cfg.token → ได้โทเคนบอทที่รับข้อความมาจริง
+ */
+export function lineConfigForBot(cfg: LineConfig, key: string): LineConfig {
+  const b = lineBot(cfg, key);
+  if (!b || b.isMain) return cfg;
+  return { ...cfg, token: b.token, channel_secret: b.channel_secret, group_id: b.group_id, group_captured_at: b.group_captured_at ?? undefined };
+}
 
 export type LineMessage = Record<string, unknown>;
 
@@ -46,11 +124,10 @@ export async function loadLineConfig(admin: Admin): Promise<LineConfig> {
 }
 
 /**
- * โทเคนบอทที่ใช้ส่งเข้ากลุ่มของ slot นี้
- * ตอนนี้มีบอทเดียว → ทุก slot ใช้โทเคนหลัก · เมื่อรองรับหลายบอท จะเลือกบอทตาม slot ที่ฟังก์ชันนี้ที่เดียว
+ * โทเคนบอทที่ใช้ส่งเข้ากลุ่มของ slot นี้ (ตาม slot_bot) · ไม่ระบุ slot (เช่น ส่งหาช่างรายคน) = บอทหลัก
  */
-export function lineTokenFor(cfg: LineConfig, _slot?: string | null): string {
-  return typeof cfg.token === "string" ? cfg.token.trim() : "";
+export function lineTokenFor(cfg: LineConfig, slot?: string | null): string {
+  return lineBotFor(cfg, slot).token;
 }
 
 /** ข้อความล้วน 1 ก้อน (ตัดความยาวให้ LINE รับได้) */
@@ -87,6 +164,37 @@ export async function linePushRaw(token: string, to: string, messages: LineMessa
     console.warn("[line-send] ติดต่อ LINE ไม่ได้", e instanceof Error ? e.message : e);
     return { ok: false, status: 0, error: lineErrorText(0) };
   }
+}
+
+// ---------------------------------------------------------------- อ่านข้อมูลจาก LINE (ไม่ส่งข้อความ · ไม่กินโควตา)
+
+async function lineGet(token: string, path: string): Promise<Record<string, unknown> | null> {
+  if (!token) return null;
+  try {
+    const res = await fetch(`https://api.line.me/v2/bot/${path}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000) });
+    return res.ok ? ((await res.json()) as Record<string, unknown>) : null;
+  } catch { return null; }
+}
+
+/** ข้อมูลบอทจาก LINE — null = โทเคนใช้ไม่ได้ (ใช้ตรวจตอนเพิ่มบอท) */
+export async function lineBotInfo(token: string): Promise<{ name: string; basic_id: string } | null> {
+  const j = await lineGet(token, "info");
+  return j ? { name: s(j.displayName), basic_id: s(j.basicId) } : null;
+}
+
+/** โควตาเดือนนี้ของบอท: limit = null คือไม่จำกัด (แพ็กเกจจ่ายตามจริง) · อ่านไม่ได้ = ok:false */
+export async function lineBotQuota(token: string): Promise<{ ok: boolean; limit: number | null; used: number | null }> {
+  const [q, c] = await Promise.all([lineGet(token, "message/quota"), lineGet(token, "message/quota/consumption")]);
+  if (!q || !c) return { ok: false, limit: null, used: null };
+  const limit = q.type === "limited" ? Number(q.value) || 0 : null;
+  return { ok: true, limit, used: Number(c.totalUsage) || 0 };
+}
+
+/** จำนวนสมาชิกในกลุ่ม (ส่ง 1 ครั้ง = กินโควตาเท่าจำนวนนี้) — null = บอทไม่อยู่ในกลุ่ม/อ่านไม่ได้ */
+export async function lineGroupMembers(token: string, groupId: string): Promise<number | null> {
+  if (!groupId) return null;
+  const j = await lineGet(token, `group/${encodeURIComponent(groupId)}/members/count`);
+  return j ? Number(j.count) || 0 : null;
 }
 
 /**

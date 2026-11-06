@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { linePush, linePushRaw, lineErrorText, lineText, lineTokenFor } from "@/lib/line-send";
+import {
+  isLineBotKey, lineBot, lineBotKeyFor, lineBots, lineConfigForBot, linePush, linePushRaw, lineErrorText, lineText, lineTokenFor,
+  type LineConfig,
+} from "@/lib/line-send";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
@@ -48,9 +51,55 @@ describe("line-send (ตัวส่ง LINE กลาง)", () => {
     expect(String(lineText("ก".repeat(6000)).text).length).toBe(4900);
   });
 
-  it("ตอนนี้ทุก slot ใช้บอทหลักตัวเดียว", () => {
+  it("ไม่ได้เลือกบอท = ทุก slot ใช้บอทหลัก", () => {
     expect(lineTokenFor({ token: "TK" }, "qc")).toBe("TK");
     expect(lineTokenFor({ token: "TK" }, null)).toBe("TK");
     expect(lineTokenFor({}, "qc")).toBe("");
+  });
+});
+
+describe("หลายบอท", () => {
+  const cfg: LineConfig = {
+    token: "MAIN", group_id: "Gmain",
+    bots: { bprod: { label: "บอทผลิต", token: "PROD", channel_secret: "s", group_id: "Gp" }, bnotk: { label: "ไม่มีโทเคน" } },
+    slot_bot: { production: "bprod", qc: "bnotk", creative: "bgone" },
+  };
+
+  it("กลุ่มที่เลือกบอทเสริม → ใช้โทเคนบอทนั้น", () => {
+    expect(lineTokenFor(cfg, "production")).toBe("PROD");
+    expect(lineBotKeyFor(cfg, "production")).toBe("bprod");
+  });
+
+  it("บอทยังไม่มีโทเคน / บอทถูกลบ / ไม่ได้เลือก → กลับไปบอทหลัก (ไม่เงียบ)", () => {
+    expect(lineTokenFor(cfg, "qc")).toBe("MAIN");
+    expect(lineTokenFor(cfg, "creative")).toBe("MAIN");
+    expect(lineTokenFor(cfg, "bills")).toBe("MAIN");
+    expect(lineTokenFor(cfg, null)).toBe("MAIN");   // ส่งหาช่างรายคน = บอทหลัก
+  });
+
+  it("ส่งจริงด้วยโทเคนของบอทที่ดูแลกลุ่ม", async () => {
+    const fn = stubFetch(200);
+    await linePush(cfg, { to: "Gp", slot: "production", messages: [lineText("x")] });
+    const [, init] = fn.mock.calls[0] as unknown as [string, RequestInit];
+    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer PROD");
+  });
+
+  it("รายชื่อบอท: บอทหลักก่อนเสมอ", () => {
+    expect(lineBots(cfg).map((b) => b.key)).toEqual(["main", "bprod", "bnotk"]);
+    expect(lineBot(cfg, "nope")).toBeNull();
+  });
+
+  it("ค่าตั้งในมุมบอทเสริม (ให้ webhook) → token/กลุ่มล่าสุดเป็นของบอทนั้น ที่เหลือเหมือนเดิม", () => {
+    const v = lineConfigForBot(cfg, "bprod");
+    expect(v.token).toBe("PROD");
+    expect(v.group_id).toBe("Gp");
+    expect(v.slot_bot).toEqual(cfg.slot_bot);
+    expect(lineConfigForBot(cfg, "main")).toBe(cfg);
+  });
+
+  it("คีย์บอทใน URL: รับเฉพาะรูปแบบปลอดภัย และไม่ใช่ main", () => {
+    expect(isLineBotKey("bprod")).toBe(true);
+    expect(isLineBotKey("main")).toBe(false);
+    expect(isLineBotKey("../x")).toBe(false);
   });
 });

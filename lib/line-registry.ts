@@ -7,6 +7,8 @@
  *   groups:  { [slotKey]: groupId },      // กลุ่มปลายทางต่อระบบ
  *   templates: { [eventKey]: text },      // แม่แบบข้อความ (บอร์ด/QC)
  *   disabled_events: { [eventKey]: true } // เปิด-ปิดแจ้งเตือนต่อเหตุการณ์ (ของใหม่ Group C)
+ *   bots:     { [botKey]: { label, token, channel_secret, group_id, ... } }  // บอทเสริม (โควตาแยกต่อบอท)
+ *   slot_bot: { [slotKey]: botKey }       // กลุ่มนี้ใช้บอทไหน (ไม่ตั้ง = บอทหลัก) — ตัวเลือกบอทอยู่ที่ lib/line-send
  * }
  */
 
