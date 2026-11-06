@@ -347,6 +347,20 @@ export default function EmployeeProfilePage() {
     finally { setSaving(false); }
   };
 
+  /** ตั้ง/ยกเลิก "ช่างเหมา" (employees.is_subcontract → ป้าย "งานเหมา" ในโกดัง QC) — ย้ายมาจากแท็บในหน้าแบรนด์ */
+  const toggleSubcontract = async () => {
+    setSaving(true); setErr(null);
+    try {
+      const j = await apiFetch(`/api/payroll/core/employees/${id}`, {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_subcontract: !emp.is_subcontract }),
+      }).then((r) => r.json());
+      if (j.error) { setErr(j.error); return; }
+      await load();
+    } catch { setErr("ตั้งช่างเหมาไม่สำเร็จ"); }
+    finally { setSaving(false); }
+  };
+
   if (err && !p) return <div className="p-8"><div className="rounded-lg bg-red-50 text-red-700 px-4 py-3 text-sm">{err}</div></div>;
   if (!p) return <div className="p-10 text-center text-slate-400 text-sm">กำลังโหลด…</div>;
 
@@ -414,6 +428,11 @@ export default function EmployeeProfilePage() {
               title={p.department ? `ตั้งเป็นหัวหน้าแผนก${p.department.name}` : "ยังไม่ได้ระบุแผนก"}
               className={`h-9 px-3 text-sm rounded-lg border whitespace-nowrap disabled:opacity-40 ${isDeptHead ? "border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
               {isDeptHead ? "⭐ เป็นหัวหน้าแผนกอยู่" : "☆ ตั้งเป็นหัวหน้าแผนก"}
+            </button>
+            <button onClick={() => void toggleSubcontract()} disabled={saving}
+              title="ช่างเหมา = งานที่ช่างคนนี้ส่งคืนจะขึ้นป้าย “งานเหมา” ในโกดัง QC · กดอีกครั้งเพื่อยกเลิก"
+              className={`h-9 px-3 text-sm rounded-lg border whitespace-nowrap disabled:opacity-40 ${emp.is_subcontract ? "border-orange-300 bg-orange-50 text-orange-700 hover:bg-orange-100" : "border-slate-300 text-slate-600 hover:bg-slate-50"}`}>
+              {emp.is_subcontract ? "🧵 เป็นช่างเหมา" : "🧵 ตั้งเป็นช่างเหมา"}
             </button>
             <div className="flex gap-2">
               <Link href="/payroll/board" className="h-9 px-3 inline-flex items-center text-sm border border-slate-300 rounded-lg text-slate-600 hover:bg-slate-50">🗂️ ผัง</Link>

@@ -43,6 +43,8 @@ const WRITABLE = new Set([
   "position_id", "cost_center_id", "department_id",
   // รูปโปรไฟล์ (R2 key จาก ImageInput ของกลาง) — ใช้โชว์บนการ์ดในผังพนักงาน
   "profile_photo_key",
+  // ช่างเหมา (ป้าย "งานเหมา" ในโกดัง QC · กลุ่มช่างเหมาบนบอร์ด) — ย้ายมาติ๊กที่หน้าพนักงาน 2026-11-06 (เดิมแท็บในหน้าแบรนด์)
+  "is_subcontract",
 ]);
 
 async function deptMap(): Promise<Record<string, string>> {
@@ -193,6 +195,7 @@ async function toColumns(body: Record<string, unknown>): Promise<Record<string, 
   if ("department_name" in body) {
     out.department_id = await nameToDeptId(String(body.department_name ?? ""));
   }
+  if ("is_subcontract" in out) out.is_subcontract = out.is_subcontract === true || out.is_subcontract === "true";
   // skills เป็น text[] — ฟอร์ม default อาจส่ง "" (string) → บังคับเป็น array กัน error "malformed array literal"
   if ("skills" in out) {
     out.skills = Array.isArray(out.skills) ? (out.skills as unknown[]).filter(Boolean).map(String) : [];
