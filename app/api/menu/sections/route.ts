@@ -5,6 +5,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { authCacheHeaders } from "@/lib/auth-cache-headers";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 
 export const dynamic = "force-dynamic";
@@ -26,7 +27,7 @@ export async function GET(request: NextRequest) {
   const { data, error } = await supabaseFromRequest(request)
     .from("erp_menu_sections").select("*").order("app_key", { ascending: true }).order("sort_order", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
-  return NextResponse.json({ data: data ?? [], error: null }, { headers: { "Cache-Control": "private, max-age=30" } });
+  return NextResponse.json({ data: data ?? [], error: null }, { headers: authCacheHeaders(request) });
 }
 
 type PatchBody =

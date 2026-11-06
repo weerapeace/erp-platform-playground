@@ -12,6 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { authCacheHeaders } from "@/lib/auth-cache-headers";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { cleanAudience } from "@/lib/menu-audience";
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
   const { data, error } = await q;
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
   // cache เมนูสั้น ๆ (30 วิ) — แก้เมนู/กลุ่มแล้วเห็นไว แต่ยังลดดึงซ้ำตอนสลับหน้าเร็ว ๆ
-  return NextResponse.json({ data: data ?? [], error: null }, { headers: { "Cache-Control": "private, max-age=30" } });
+  return NextResponse.json({ data: data ?? [], error: null }, { headers: authCacheHeaders(request) });
 }
 
 export async function POST(request: NextRequest) {

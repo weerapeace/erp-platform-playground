@@ -83,6 +83,7 @@ export default function StandaloneApp() {
   const [settingsOn, setSettingsOn] = useState(false);          // ⚙️ เปิดหน้าตั้งค่าอยู่
   const [menuRev, setMenuRev] = useState(0);                    // บันทึกตั้งค่าแล้ว → โหลดเมนูใหม่ (ข้ามแคช)
   const [loaded, setLoaded] = useState(false);
+  const [loadErr, setLoadErr] = useState(false);   // โหลดเมนูไม่สำเร็จ (ลองเองครบแล้ว) → ปุ่ม "ลองใหม่" แทนข้อความ "ยังไม่มีรายการ"
   const [moreOpen, setMoreOpen] = useState(false);   // เปิด drawer เมนูของแอป (☰ iPad / "เพิ่มเติม" มือถือ)
   const [openMenu, setOpenMenu] = useState<string | null>(null);   // เมนูแม่ที่กำลังกาง dropdown (แถบบน จอกว้าง)
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);          // ปุ่มรวมเมนู "เพิ่มเติม ▾" (แถบบน จอกว้าง)
@@ -104,13 +105,24 @@ export default function StandaloneApp() {
   const devPreview = devRank[devLayout] < devRank[viewport];
 
   useEffect(() => {
-    if (!ready || !permsKnown) return;
-    let alive = true;
-    Promise.all([
-      apiFetch(menuRev ? `/api/menu/apps?_=${menuRev}` : "/api/menu/apps").then((r) => r.json()),
-      apiFetch(menuRev ? `/api/menu?_=${menuRev}` : "/api/menu").then((r) => r.json()),
-    ]).then(([aj, mj]) => {
+    // ยังไม่ login = ไม่ถามเมนู — ถามตอนนี้ได้รายการว่าง (RLS) แล้วเคยค้างต่อหลัง login จนจอว่าง (Nee บน iPad 2026-11-06)
+    //   login แล้ว user?.id เปลี่ยน → ถามใหม่เอง
+    if (!ready || !permsKnown || !user) return;
+    let alive = true, timer: number | null = null;
+    const getJson = async (url: string) => {
+      const r = await apiFetch(url);
+      const j = await r.json();
+      if (!r.ok || j?.error) throw new Error(j?.error || `HTTP ${r.status}`);
+      return j;
+    };
+    // โหลดไม่สำเร็จ (เน็ตสะดุด / โทเคนยังไม่ติด) = ลองใหม่เอง 2 รอบ (ข้ามแคชด้วย ?_=) แล้วค่อยขึ้นปุ่ม "ลองใหม่"
+    const run = (attempt: number) => {
+      const q = menuRev || attempt ? `?_=${menuRev}.${attempt}` : "";
+      Promise.all([getJson(`/api/menu/apps${q}`), getJson(`/api/menu${q}`)]).then(([aj, mj]) => {
       if (!alive) return;
+      // login อยู่แต่ได้รายการแอปว่าง = คำขอไปแบบไม่มีสิทธิ์ (โทเคนหมด/ยังไม่ติด) → ถือว่าโหลดไม่สำเร็จ ไม่ใช่ "แอปไม่มีเมนู"
+      if (!(aj.data ?? []).length) throw new Error("empty");
+      setLoadErr(false);
       const ag = (aj.data ?? []).find((x: AppGroup) => x.key === appKey) ?? null;
       setApp(ag);
       // เมนูของแอปนี้ เรียง/ตั้งชื่อตามที่แอปนี้ตั้งไว้ (↕️ จัดเรียง/ซ่อนเมนู — lib/app-menu-layout)
@@ -148,11 +160,17 @@ export default function StandaloneApp() {
       }
       initedRef.current = true;
       setLoaded(true);
-    }).catch(() => { if (alive) setLoaded(true); });
-    return () => { alive = false; };
-    // ใช้ ready / permsKnown / permsReady (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ
+      }).catch(() => {
+        if (!alive) return;
+        if (attempt < 2) { timer = window.setTimeout(() => run(attempt + 1), 1500 * (attempt + 1)); return; }
+        setLoadErr(true); setLoaded(true);
+      });
+    };
+    run(0);
+    return () => { alive = false; if (timer != null) window.clearTimeout(timer); };
+    // ใช้ ready / permsKnown / permsReady (boolean ที่ flip ครั้งเดียว) ไม่ใช่ can (อาจเปลี่ยน reference) เพื่อกัน fetch วนไม่จบ · user?.id = login/สลับบัญชีแล้วถามใหม่
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [appKey, ready, permsKnown, permsReady, menuRev]);
+  }, [appKey, ready, permsKnown, permsReady, menuRev, user?.id]);
 
   // จำหน้าลึกในกรอบ (iframe) ทุก 1.5วิ → refresh แล้วกลับมาหน้าเดิม (ฝั่ง browser ล้วน ไม่กิน CPU worker)
   useEffect(() => {
@@ -399,6 +417,14 @@ export default function StandaloneApp() {
         ) : cur ? (
           // หน้า custom → แสดงหน้าจริงแบบ embed (ไม่มี sidebar ของ shell) เต็มพื้นที่ที่เหลือ
           <iframe ref={iframeRef} key={`${cur.href}#${goNonce}`} src={embedSrc} title={cur.label} className="flex-1 w-full border-0" />
+        ) : loadErr || !app ? (
+          // โหลดเมนูไม่สำเร็จ / หาแอปไม่เจอ — ไม่ใช่ "แอปไม่มีเมนู" (เดิมขึ้นข้อความนั้นจนคนเข้าใจผิดว่าไม่มีสิทธิ์)
+          <div className="flex-1 flex flex-col items-center justify-center p-10 text-center gap-2">
+            <div className="text-slate-600 font-medium">โหลดเมนูของแอปนี้ไม่สำเร็จ</div>
+            <div className="text-slate-400 text-sm max-w-xs">เน็ตอาจสะดุด หรือเพิ่งเข้าสู่ระบบ — กดลองใหม่ได้เลย</div>
+            <button type="button" onClick={() => { setLoadErr(false); setLoaded(false); setMenuRev((v) => v + 1); }}
+              className="mt-2 h-10 px-5 bg-blue-600 text-white rounded-lg text-sm font-medium">ลองใหม่</button>
+          </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-10 text-center gap-2">
             <div className="text-4xl mb-1">🗂️</div>
