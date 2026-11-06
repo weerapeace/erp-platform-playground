@@ -33,7 +33,21 @@ export type PaidService = {
   files: string[];
   /** ใช้หลายที่ → เปิด-ปิดรายที่ได้ (เจ้าของขอ 2026-11-06) · ไฟล์ของแต่ละที่ต้องส่ง place: "<key>" (เทสต์ตรวจ) */
   places?: PaidPlace[];
+  /** เปลี่ยนผู้ให้บริการได้ (ตัวแรก = ค่าเริ่ม) · ค่าที่เลือกเก็บ paid_service_settings.provider */
+  providerChoices?: ProviderChoice[];
 };
+
+/** ตัวเลือกผู้ให้บริการ — provider = ใช้หาว่าตั้งรหัสแล้วหรือยัง / แท็บ · id = ค่าที่เก็บ */
+export type ProviderChoice = { id: string; th: string; provider: PaidProvider };
+const OCR_CHOICES: ProviderChoice[] = [
+  { id: "openai", th: "GPT (OpenAI) — อ่านภาษาไทยแม่นกว่า · ~0.02 บาท/รูป", provider: "openai" },
+  { id: "cloudflare", th: "Cloudflare AI — ฟรีตามโควตา (ต้องตั้งรหัส Cloudflare)", provider: "cloudflare" },
+];
+/** ผู้ให้บริการที่ใช้อยู่ — ที่เลือกไว้ (ถ้ายังมีในตัวเลือก) → ตัวแรก · ไม่มีตัวเลือก = null */
+export function effectiveChoice(svc: PaidService, picked: string | null | undefined): ProviderChoice | null {
+  if (!svc.providerChoices?.length) return null;
+  return svc.providerChoices.find((c) => c.id === picked) ?? svc.providerChoices[0];
+}
 
 /** "ที่ที่ใช้" ของบริการหนึ่ง — ค่าตั้งเก็บใน paid_service_settings key "<service>@<place>" · บันทึกการใช้ key เดียวกัน */
 export type PaidPlace = { key: string; th: string; files: string[] };
@@ -99,13 +113,14 @@ export const PAID_SERVICES: PaidService[] = [
   { key: "ai.team_split", th: "แบ่งงานทีมด้วย AI", en: "Team plan AI split", group: "ผลิต / งานทีม",
     usedAt: "แผนทีม", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/team-plan/ai-split/route.ts"] },
   // ── การเงิน
-  { key: "cf.slip_ocr", th: "อ่านสลิปโอนเงิน (OCR)", en: "Transfer slip OCR", group: "การเงิน",
-    usedAt: "จ่ายเงินจีน (อ่านยอด/วันที่จากสลิป)", provider: "cloudflare", kind: "ai_ocr",
-    offBehavior: "อัปสลิปได้ตามปกติ แต่ต้องกรอกยอดเอง", costHint: "ฟรีตามโควตา (ทำงานเมื่อตั้งรหัส Cloudflare ไว้)",
-    files: ["app/api/china-pay/ocr-slip/route.ts", "app/api/china-pay/ocr-slip-extract/route.ts"] },
-  { key: "cf.receipt_ocr", th: "อ่านใบเสร็จผ่อน/สินเชื่อ (OCR)", en: "Loan receipt OCR", group: "การเงิน",
-    usedAt: "สินเชื่อ / ผ่อนชำระ", provider: "cloudflare", kind: "ai_ocr",
-    offBehavior: "อัปใบเสร็จได้ตามปกติ แต่ต้องกรอกเอง", costHint: "ฟรีตามโควตา (ทำงานเมื่อตั้งรหัส Cloudflare ไว้)", files: ["app/api/loan-payment/read-receipt/route.ts"] },
+  // key ขึ้นต้น cf. คงไว้ (ประวัติการใช้ผูก key นี้) — ผู้ให้บริการเปลี่ยนได้ที่ providerChoices (ค่าเริ่ม GPT · เจ้าของเลือก 2026-11-06 เพราะ Cloudflare ยังไม่ตั้งรหัสบน Vercel)
+  { key: "cf.slip_ocr", th: "อ่านสลิปโอนเงิน (AI อ่านรูป)", en: "Transfer slip reader", group: "การเงิน",
+    usedAt: "จ่ายเงินจีน (อ่านยอด/บัญชี/วันที่จากสลิป)", provider: "openai", kind: "ai_ocr",
+    offBehavior: "อัปสลิปได้ตามปกติ แต่ต้องกรอกยอดเอง", costHint: "GPT ~0.02 บาท/รูป · Cloudflare ฟรีตามโควตา",
+    files: ["app/api/china-pay/ocr-slip/route.ts", "app/api/china-pay/ocr-slip-extract/route.ts"], providerChoices: OCR_CHOICES },
+  { key: "cf.receipt_ocr", th: "อ่านใบเสร็จผ่อน/สินเชื่อ (AI อ่านรูป)", en: "Loan receipt reader", group: "การเงิน",
+    usedAt: "สินเชื่อ / ผ่อนชำระ", provider: "openai", kind: "ai_ocr",
+    offBehavior: "อัปใบเสร็จได้ตามปกติ แต่ต้องกรอกเอง", costHint: "GPT ~0.02 บาท/รูป · Cloudflare ฟรีตามโควตา", files: ["app/api/loan-payment/read-receipt/route.ts"], providerChoices: OCR_CHOICES },
   // ── อื่น ๆ
   { key: "ai.book_library", th: "หาปก / อ่านอีเมลหนังสือ", en: "Book library helper", group: "อื่น ๆ",
     usedAt: "ห้องสมุดหนังสือ", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST,
@@ -122,7 +137,12 @@ export const PAID_SERVICES: PaidService[] = [
     offBehavior: "หยุดส่ง LINE ทุกระบบ (ตอบกลับในแชทยังใช้ได้) · ปิดรายเรื่องได้ที่ศูนย์ LINE", costHint: "ฟรี 300 ข้อความ/เดือน · เกินต้องอัปเกรดแพ็กเกจ LINE OA", files: ["lib/line-send.ts"] },
   { key: "email.send", th: "ส่งอีเมล", en: "Email sending", group: "แจ้งเตือน",
     usedAt: "อีเมลรายงาน · แจ้งลูกค้าเว็บร้าน", provider: "email", kind: "per_call",
-    offBehavior: "หยุดส่งอีเมลทุกระบบ", costHint: "Resend ฟรี 3,000 ฉบับ/เดือน · Gmail ฟรี ~500 ฉบับ/วัน", files: ["lib/email.ts"] },
+    offBehavior: "หยุดส่งอีเมลทุกระบบ", costHint: "Resend ฟรี 3,000 ฉบับ/เดือน · Gmail ฟรี ~500 ฉบับ/วัน", files: ["lib/email.ts"],
+    providerChoices: [
+      { id: "auto", th: "อัตโนมัติ (Resend ก่อน · ไม่ได้ตั้งใช้ Gmail)", provider: "email" },
+      { id: "resend", th: "Resend (โดเมนบริษัท)", provider: "email" },
+      { id: "gmail", th: "Gmail", provider: "email" },
+    ] },
 ];
 
 export const paidService = (key: string): PaidService | null => PAID_SERVICES.find((s) => s.key === key) ?? null;

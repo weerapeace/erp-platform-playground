@@ -23,8 +23,10 @@ import { PROVIDER_LABEL, type BudgetState, type PaidBudget, type PaidProvider, t
 
 type Stat = { calls: number; failed: number; cost_thb: number; tokens: number };
 type PlaceRow = { key: string; th: string; enabled: boolean; model: string | null; month: Stat; last_used_at: string | null; updated_by_name: string | null };
-type Row = Omit<PaidService, "places"> & {
+type ChoiceRow = { id: string; th: string; provider: PaidProvider; configured: boolean | null };
+type Row = Omit<PaidService, "places" | "providerChoices"> & {
   enabled: boolean; model: string | null; configured: boolean | null; month: Stat;
+  provider_choice: string | null; provider_choices: ChoiceRow[];
   last_used_at: string | null; updated_at: string | null; updated_by_name: string | null; places: PlaceRow[];
 };
 type UserRow = {
@@ -70,7 +72,7 @@ function PaidServicesView() {
   }, []);
   useEffect(() => { if (canManage) void load(); }, [canManage, load]);
 
-  const save = async (r: Row, patch: { enabled?: boolean; model?: string }, place?: PlaceRow) => {
+  const save = async (r: Row, patch: { enabled?: boolean; model?: string; provider?: string }, place?: PlaceRow) => {
     const id = place ? `${r.key}@${place.key}` : r.key;
     setBusy(id);
     try {
@@ -80,10 +82,11 @@ function PaidServicesView() {
       setRows((cur) => cur.map((x) => {
         if (x.key !== r.key) return x;
         if (place) return { ...x, places: x.places.map((p) => (p.key === place.key ? { ...p, enabled: j.data.enabled, model: j.data.model, updated_by_name: j.data.updated_by_name } : p)) };
-        return { ...x, enabled: j.data.enabled, model: j.data.model, updated_at: j.data.updated_at, updated_by_name: j.data.updated_by_name };
+        if ("provider" in patch) { void load(); }   // ผู้ให้บริการเปลี่ยน → ป้าย/สถานะรหัสต้องคำนวณใหม่จากเซิร์ฟเวอร์
+        return { ...x, enabled: j.data.enabled, model: j.data.model, provider_choice: j.data.provider ?? x.provider_choices[0]?.id ?? null, updated_at: j.data.updated_at, updated_by_name: j.data.updated_by_name };
       }));
       const label = place ? `${r.th} · ${place.th}` : r.th;
-      toast.success("enabled" in patch ? (patch.enabled ? `เปิด "${label}" แล้ว` : `ปิด "${label}" แล้ว`) : `เปลี่ยนโมเดลของ "${label}" แล้ว`);
+      toast.success("enabled" in patch ? (patch.enabled ? `เปิด "${label}" แล้ว` : `ปิด "${label}" แล้ว`) : "provider" in patch ? `เปลี่ยนผู้ให้บริการของ "${label}" แล้ว` : `เปลี่ยนโมเดลของ "${label}" แล้ว`);
     } catch (e) { toast.error(`บันทึกไม่สำเร็จ: ${(e as Error).message}`); }
     finally { setBusy(null); }
   };
@@ -180,6 +183,16 @@ function PaidServicesView() {
           {(() => { const m = models.find((x) => x.id === r.model); return m ? <span className="text-[11px] text-slate-400">{m.note} · เข้า ฿{m.inPerM}/ออก ฿{m.outPerM} ต่อ 1 ล้านคำ</span> : null; })()}
           <ServiceBudgetInput cap={budget.per_service[r.key] ?? null} spent={r.month.cost_thb} warnPct={budget.warn_pct}
             disabled={busy === `${r.key}:budget`} onSave={(v) => void saveServiceBudget(r, v)} />
+        </div>
+      ) : r.provider_choices.length ? (
+        <div className="flex flex-col gap-1">
+          <select value={r.provider_choice ?? r.provider_choices[0]?.id ?? ""} disabled={!r.enabled || busy === r.key} onChange={(e) => void save(r, { provider: e.target.value })}
+            title="ผู้ให้บริการ" className="h-8 w-full rounded-md border border-slate-200 bg-white px-1.5 text-xs outline-none focus:border-blue-400 disabled:opacity-50">
+            {r.provider_choices.map((c) => <option key={c.id} value={c.id}>{c.th}{c.configured === false ? " — ยังไม่ตั้งรหัส" : ""}</option>)}
+          </select>
+          {(() => { const c = r.provider_choices.find((x) => x.id === (r.provider_choice ?? r.provider_choices[0]?.id)); return c?.configured === false
+            ? <span className="text-[11px] text-amber-700">ผู้ให้บริการนี้ยังไม่ตั้งรหัส — ระบบจะลองตัวอื่นที่พร้อมให้เอง</span>
+            : <span className="text-[11px] text-slate-400">{r.costHint}</span>; })()}
         </div>
       ) : <span className="text-xs text-slate-500">{r.costHint}</span>,
     },

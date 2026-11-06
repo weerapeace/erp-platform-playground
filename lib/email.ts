@@ -13,7 +13,7 @@
  * คู่มือตั้งค่า: docs/email-setup.md · หน้า ตั้งค่า → ส่งอีเมลรายงาน
  */
 import type { Transporter } from "nodemailer";
-import { logServiceUse, serviceOn } from "@/lib/paid-services-server";
+import { logServiceUse, pickedProvider, serviceOn } from "@/lib/paid-services-server";
 import { serviceOffMessage } from "@/lib/paid-services";
 
 export interface EmailMessage {
@@ -74,17 +74,18 @@ function errorCode(e: unknown): string {
 /** ส่งอีเมล 1 ฉบับ — ผ่านด่านกลาง (ศูนย์ AI/API: ปิดอยู่ = ไม่ส่ง คืน "service-off") + บันทึกการใช้ */
 export async function sendEmail(m: EmailMessage): Promise<EmailResult> {
   if (!emailDevEcho() && !(await serviceOn("email.send"))) return { ok: false, error: "service-off" };
-  const r = await sendEmailRaw(m);
+  const r = await sendEmailRaw(m, (await pickedProvider("email.send")) as EmailProvider | "auto" | null);
   if (!emailDevEcho() && !(r.ok === false && r.error === "email-not-configured")) await logServiceUse("email.send", { ok: r.ok, error: r.ok ? null : r.error });
   return r;
 }
 
-async function sendEmailRaw(m: EmailMessage): Promise<EmailResult> {
+/** forced = ช่องทางที่เลือกในศูนย์ AI/API (resend / gmail) — ช่องทางนั้นยังไม่ได้ตั้งค่า = ใช้แบบอัตโนมัติ */
+async function sendEmailRaw(m: EmailMessage, forced: EmailProvider | "auto" | null = null): Promise<EmailResult> {
   if (emailDevEcho()) {
     console.log(`[email:dev] to=${m.to} subject=${m.subject}${m.replyTo ? ` replyTo=${m.replyTo}` : ""}\n${m.text}`);
     return { ok: true, devEcho: m };
   }
-  const provider = emailProvider();
+  const provider: EmailProvider | null = forced === "resend" && resendReady() ? "resend" : forced === "gmail" && gmailReady() ? "gmail" : emailProvider();
   if (!provider) return { ok: false, error: "email-not-configured" };
   const replyTo = safeAddr(m.replyTo);
 

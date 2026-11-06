@@ -9,7 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { isSafeR2Key, r2GetObject } from "@/lib/r2";
-import { getAiFor } from "@/lib/paid-services-server";
+import { readImageText, visionAvailable } from "@/lib/paid-services-server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 export const dynamic = "force-dynamic";
@@ -44,25 +44,17 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!key || !SAFE_KEY.test(key) || !isSafeR2Key(key)) return NextResponse.json({ error: "key ไม่ถูกต้อง" }, { status: 400 });
   if (key.toLowerCase().endsWith(".pdf")) return NextResponse.json({ error: "ไฟล์ PDF อ่านอัตโนมัติไม่ได้ — เลือกบิลเอง", amount: null, account: "", name: "" }, { status: 200 });
 
-  const ai = await getAiFor("cf.slip_ocr", { request });   // ด่านกลาง: ปิดในศูนย์ AI/API = null (เหมือนยังไม่ตั้งค่า)
-  if (!ai) return NextResponse.json({ error: "ยังไม่ได้เปิดใช้ AI (binding)", amount: null, account: "", name: "" }, { status: 200 });
+  // ด่านกลาง: ปิดในศูนย์ AI/API หรือไม่มีผู้ให้บริการที่ตั้งรหัสแล้ว = กรอกเอง
+  if (!(await visionAvailable("cf.slip_ocr", { request }))) return NextResponse.json({ error: "ยังไม่ได้เปิดใช้ AI (binding)", amount: null, account: "", name: "" }, { status: 200 });
 
   try {
     const obj = await r2GetObject(key);
     if (!obj) return NextResponse.json({ error: "ไม่พบไฟล์สลิป", amount: null, account: "", name: "" }, { status: 200 });
     const buf = await new Response(obj.body).arrayBuffer();
-    const bytes = [...new Uint8Array(buf)];
 
     const prompt = "นี่คือสลิปโอนเงิน อ่านข้อมูลแล้วตอบกลับเป็น JSON อย่างเดียว รูปแบบ {\"amount\": <จำนวนเงินที่โอนเป็นตัวเลข>, \"account\": \"<เลขบัญชีผู้รับ ตัวเลขล้วนเท่าที่เห็น>\", \"name\": \"<ชื่อผู้รับเงิน>\", \"bank\": \"<ชื่อธนาคารผู้โอน เช่น กสิกร/ไทยพาณิชย์/กรุงเทพ>\", \"datetime\": \"<วันที่และเวลาที่โอน>\"} ถ้าหาค่าไหนไม่เจอให้ใส่ค่าว่าง ห้ามมีข้อความอื่นนอก JSON";
-    const runVision = async () => ai.run(MODEL, { image: bytes, prompt, max_tokens: 240 });
-    let out: any;
-    try { out = await runVision(); }
-    catch (e) {
-      const msg = String((e as Error)?.message ?? e);
-      if (/5016|agree/i.test(msg)) { try { await ai.run(MODEL, { prompt: "agree" }); } catch { /* noop */ } out = await runVision(); }
-      else throw e;
-    }
-    const raw = String(out?.response ?? "").trim();
+    // AI อ่านรูป (ของกลาง) — ผู้ให้บริการตามที่เลือกในศูนย์ AI/API (GPT / Cloudflare) · ผลเป็นข้อความเหมือนเดิม
+    const raw = (await readImageText("cf.slip_ocr", { bytes: new Uint8Array(buf), mime: obj.httpMetadata?.contentType, prompt, maxTokens: 240, cfModel: MODEL }, { request })) ?? "";
     const j = extractJson(raw);
     const amount = j && j.amount != null && Number(j.amount) > 0 ? Number(j.amount) : parseAmount(raw);
     const account = j ? String(j.account ?? "").replace(/[^0-9]/g, "") : "";

@@ -9,7 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { r2GetObject } from "@/lib/r2";
-import { getAiFor } from "@/lib/paid-services-server";
+import { readImageText, visionAvailable } from "@/lib/paid-services-server";
 import { guardApi } from "@/lib/api-auth";
 import { parseDateCell, parseNumberCell } from "@/lib/paste-table";
 
@@ -53,26 +53,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "ไฟล์ PDF อ่านอัตโนมัติไม่ได้ — กรอกยอดเองได้เลย" }, { status: 200 });
   }
 
-  const ai = await getAiFor("cf.receipt_ocr", { request });   // ด่านกลาง: ปิดในศูนย์ AI/API = null (เหมือนยังไม่ตั้งค่า)
-  if (!ai) return NextResponse.json({ error: "ยังไม่ได้เปิดใช้ตัวอ่านรูป (AI) — กรอกยอดเองได้เลย" }, { status: 200 });
+  // ด่านกลาง: ปิดในศูนย์ AI/API หรือไม่มีผู้ให้บริการที่ตั้งรหัสแล้ว = กรอกเอง
+  if (!(await visionAvailable("cf.receipt_ocr", { request }))) return NextResponse.json({ error: "ยังไม่ได้เปิดใช้ตัวอ่านรูป (AI) — กรอกยอดเองได้เลย" }, { status: 200 });
 
   try {
     const obj = await r2GetObject(key);
     if (!obj) return NextResponse.json({ error: "ไม่พบไฟล์รูป" }, { status: 200 });
     const buf = await new Response(obj.body).arrayBuffer();
-    const bytes = [...new Uint8Array(buf)];
 
-    const runVision = async () => ai.run(MODEL, { image: bytes, prompt: PROMPT, max_tokens: 300 });
-    let out: any;
-    try { out = await runVision(); }
-    catch (e) {
-      // โมเดลบางตัวต้องกด agree ครั้งแรก (เหมือนที่ ocr-slip-extract เจอ)
-      const msg = String((e as Error)?.message ?? e);
-      if (/5016|agree/i.test(msg)) { try { await ai.run(MODEL, { prompt: "agree" }); } catch { /* noop */ } out = await runVision(); }
-      else throw e;
-    }
-
-    const raw = String(out?.response ?? "").trim();
+    // AI อ่านรูป (ของกลาง) — ผู้ให้บริการตามที่เลือกในศูนย์ AI/API (GPT / Cloudflare) · ผลเป็นข้อความเหมือนเดิม
+    const raw = (await readImageText("cf.receipt_ocr", { bytes: new Uint8Array(buf), mime: obj.httpMetadata?.contentType, prompt: PROMPT, maxTokens: 300, cfModel: MODEL }, { request })) ?? "";
     const j = extractJson(raw) ?? {};
 
     const principal = money(j.principal);

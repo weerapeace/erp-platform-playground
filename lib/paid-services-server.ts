@@ -15,14 +15,14 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
-import { openAiChatRaw } from "@/lib/ai-caption";
+import { openAiChatRaw, openAiKey } from "@/lib/ai-caption";
 import { getAi, type AiRunner } from "@/lib/ai";
 import {
-  budgetOverMessage, budgetState, cleanBudget, estimateCostThb, monthKeyBangkok, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
+  budgetOverMessage, budgetState, cleanBudget, effectiveChoice, estimateCostThb, monthKeyBangkok, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
   placeKey, resolvePlace, serviceBudgetOverMessage, serviceBudgetState, serviceOffMessage, splitPlaceKey, userBudgetOverMessage, userBudgetState, userCap, type PaidBudget,
 } from "@/lib/paid-services";
 
-export type ServiceSetting = { key: string; enabled: boolean; model: string | null };
+export type ServiceSetting = { key: string; enabled: boolean; model: string | null; provider: string | null };
 export type UseCtx = { request?: Request | null; userId?: string | null; place?: string | null };
 
 const TTL_MS = 30_000;
@@ -32,9 +32,9 @@ export async function loadServiceSettings(force = false): Promise<Map<string, Se
   if (!force && cache && Date.now() - cache.at < TTL_MS) return cache.map;
   const map = new Map<string, ServiceSetting>();
   try {
-    const { data, error } = await supabaseAdmin().from("paid_service_settings").select("key, enabled, model");
+    const { data, error } = await supabaseAdmin().from("paid_service_settings").select("key, enabled, model, provider");
     if (error) throw error;
-    for (const r of (data ?? []) as ServiceSetting[]) map.set(r.key, { key: r.key, enabled: r.enabled !== false, model: r.model || null });
+    for (const r of (data ?? []) as ServiceSetting[]) map.set(r.key, { key: r.key, enabled: r.enabled !== false, model: r.model || null, provider: r.provider || null });
     cache = { at: Date.now(), map };
   } catch { /* อ่านไม่ได้ = ค่าเริ่มต้นทั้งหมด (เปิด) · ไม่แคช เพื่อลองใหม่ครั้งหน้า */ }
   return map;
@@ -273,4 +273,59 @@ export async function checkBudgetAlerts(budget?: PaidBudget, serviceKey?: string
       p_priority: n.level === "over" ? "high" : "normal",
     });
   }
+}
+
+// ── ผู้ให้บริการที่เลือกได้ (providerChoices ในทะเบียน) ──────────────────────────────
+
+/** ผู้ให้บริการที่ใช้อยู่ของรายการนี้ (id ตามทะเบียน) · ไม่มีตัวเลือก = null */
+export async function pickedProvider(key: string): Promise<string | null> {
+  const svc = paidService(key);
+  if (!svc) return null;
+  return effectiveChoice(svc, (await loadServiceSettings()).get(key)?.provider)?.id ?? null;
+}
+
+/** AI อ่านรูปได้ไหม (เปิดอยู่ + มีผู้ให้บริการที่ตั้งรหัสแล้วอย่างน้อย 1 ตัว) — ใช้ก่อนอ่านไฟล์ */
+export async function visionAvailable(key: string, ctx?: UseCtx): Promise<boolean> {
+  if (!(await serviceOn(key, ctx?.place))) return false;
+  return !!openAiKey() || (await getAi()) !== null;
+}
+
+/**
+ * AI อ่านรูปแล้วตอบเป็นข้อความ (ของกลาง · อ่านสลิป / ใบเสร็จ) — ผู้ให้บริการตามที่เลือกในศูนย์ (GPT / Cloudflare)
+ * ตัวที่เลือกยังไม่ได้ตั้งรหัส = ลองอีกตัวให้เอง · คืน null = อ่านไม่ได้ (ปิดอยู่ / ไม่มีผู้ให้บริการพร้อม)
+ * prompt เดิมของแต่ละหน้าใช้ได้เลย (ผลคือข้อความเหมือนที่ Cloudflare ตอบ) · บันทึกการใช้/งบผ่านด่านกลางเหมือนกัน
+ */
+export async function readImageText(
+  key: string,
+  img: { bytes: Uint8Array; mime?: string | null; prompt: string; maxTokens: number; cfModel: string },
+  ctx?: UseCtx,
+): Promise<string | null> {
+  if (!(await serviceOn(key, ctx?.place))) return null;
+  const first = (await pickedProvider(key)) === "cloudflare" ? "cloudflare" : "openai";
+  for (const prov of first === "openai" ? ["openai", "cloudflare"] : ["cloudflare", "openai"]) {
+    if (prov === "openai") {
+      if (!openAiKey()) continue;
+      const mime = img.mime && img.mime.startsWith("image/") ? img.mime : "image/jpeg";
+      const url = `data:${mime};base64,${Buffer.from(img.bytes).toString("base64")}`;
+      const out = await aiChat(key,
+        "You read images of Thai bank transfer slips and receipts. Follow the user's instruction exactly. Reply as JSON {\"text\": \"<your answer exactly as the instruction asks>\"}.",
+        [{ type: "text", text: img.prompt }, { type: "image_url", image_url: { url, detail: "high" } }],
+        img.maxTokens + 80, "gpt-4.1-mini", ctx);
+      return String(out.text ?? "").trim();
+    }
+    const ai = await getAiFor(key, ctx);
+    if (!ai) continue;
+    const bytes = [...img.bytes];
+    const run = () => ai.run(img.cfModel, { image: bytes, prompt: img.prompt, max_tokens: img.maxTokens });
+    let out: { response?: unknown } | null;
+    try { out = await run(); }
+    catch (e) {
+      // Llama 3.2 vision ต้องยอมรับ license ครั้งแรก (error 5016 → ส่ง 'agree' แล้วลองใหม่)
+      if (!/5016|agree/i.test(String((e as Error)?.message ?? e))) throw e;
+      try { await ai.run(img.cfModel, { prompt: "agree" }); } catch { /* noop */ }
+      out = await run();
+    }
+    return String(out?.response ?? "").trim();
+  }
+  return null;
 }

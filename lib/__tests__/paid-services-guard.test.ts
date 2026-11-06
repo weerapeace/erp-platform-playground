@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService, serviceBudgetState, usageBuckets, usageRangeStartIso, userBudgetState, userCap } from "@/lib/paid-services";
+import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService, serviceBudgetState, usageBuckets, usageRangeStartIso, userBudgetState, userCap, effectiveChoice } from "@/lib/paid-services";
 
 const ROOT = path.resolve(__dirname, "../..");
 const SCAN_DIRS = ["app", "lib", "components"];
@@ -169,5 +169,17 @@ describe("งบรายคน", () => {
     expect(userBudgetState(40, b, "dddddddd-1111-2222-3333-444444444444")).toBe("warn");
     expect(userBudgetState(50, b, "dddddddd-1111-2222-3333-444444444444")).toBe("over");
     expect(userBudgetState(999, b, B)).toBe("none");
+  });
+});
+
+describe("เลือกผู้ให้บริการ", () => {
+  it("ตัวเลือกไม่ซ้ำ · อ่านสลิป/ใบเสร็จค่าเริ่ม = GPT (Cloudflare ยังไม่ตั้งรหัสบน Vercel)", () => {
+    for (const s of PAID_SERVICES) { const ids = (s.providerChoices ?? []).map((c) => c.id); expect(new Set(ids).size, s.key).toBe(ids.length); }
+    const slip = paidService("cf.slip_ocr")!;
+    expect(effectiveChoice(slip, null)?.id).toBe("openai");
+    expect(effectiveChoice(slip, "cloudflare")?.id).toBe("cloudflare");
+    expect(effectiveChoice(slip, "nope")?.id).toBe("openai");
+    expect(effectiveChoice(paidService("ai.caption")!, "x")).toBeNull();
+    expect(effectiveChoice(paidService("email.send")!, null)?.id).toBe("auto");
   });
 });

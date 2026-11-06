@@ -4,6 +4,7 @@
  * GET   → { services: [{ ...ทะเบียน, enabled, model, configured, month, last_used_at, updated_*, places: [{ key, th, enabled, model, month, last_used_at }] }],
  *           totals, budget, budget_state, by_user: [{ user_id, name, calls, cost_thb, top }], month_start, model_choices, error }
  * GET ?view=history&mode=day|month&key=<service?>  → { buckets: [{ key, label, cost_thb, calls, failed }] } (30 วัน / 12 เดือน · key = กรองบริการเดียว)
+ * PATCH { key, provider }   เปลี่ยนผู้ให้บริการ (เฉพาะรายการที่มี providerChoices · null = ค่าเริ่ม)
  * PATCH { key, place?, enabled?, model? }  เปิด/ปิด · เปลี่ยนโมเดล (ทั้งบริการ หรือรายที่ · "" = ค่าเดิม / ตามบริการ) — locked = 400
  * PATCH { budget_service: { key, monthly_thb } }  งบรายฟีเจอร์ (null/0 = ไม่จำกัด)
  * PATCH { budget_user_default: บาท | null }       งบต่อคน (ค่าเริ่มของทุกคน · null = ไม่จำกัด)
@@ -20,7 +21,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { openAiKey } from "@/lib/ai-caption";
 import { emailProvider } from "@/lib/email";
 import {
-  AUTO_USER_LABEL, budgetState, canPickModel, canToggle, cleanBudget, isValidModel, monthStartBangkokIso, PAID_BUDGET_KEY, PAID_MODEL_CHOICES, PAID_SERVICES,
+  AUTO_USER_LABEL, budgetState, effectiveChoice, type ProviderChoice, canPickModel, canToggle, cleanBudget, isValidModel, monthStartBangkokIso, PAID_BUDGET_KEY, PAID_MODEL_CHOICES, PAID_SERVICES,
   paidService, placeKey, splitPlaceKey, usageBuckets, usageRangeStartIso, userBudgetState, userCap, type PaidBudget, type PaidProvider,
 } from "@/lib/paid-services";
 import { checkBudgetAlerts, invalidateServiceSettings, loadBudget } from "@/lib/paid-services-server";
@@ -34,6 +35,17 @@ type Stat = { calls: number; failed: number; cost_thb: number; tokens: number };
 const emptyStat = (): Stat => ({ calls: 0, failed: 0, cost_thb: 0, tokens: 0 });
 
 /** ตั้งรหัสของผู้ให้บริการไว้ใน Vercel แล้วหรือยัง (ไม่บอกค่า) · null = ตรวจจากตรงนี้ไม่ได้ */
+/** ตัวเลือกผู้ให้บริการนี้ตั้งรหัสแล้วหรือยัง (อีเมลแยก Resend / Gmail) */
+function choiceConfigured(c: ProviderChoice): boolean | null {
+  const has = (k: string) => !!(process.env[k] ?? "").trim();
+  if (c.provider === "email") {
+    if (c.id === "resend") return has("RESEND_API_KEY") && has("EMAIL_FROM");
+    if (c.id === "gmail") return has("GMAIL_USER") && has("GMAIL_APP_PASSWORD");
+    return emailProvider() !== null;
+  }
+  return configured(c.provider);
+}
+
 function configured(p: PaidProvider): boolean | null {
   const has = (k: string) => !!(process.env[k] ?? "").trim();
   switch (p) {
@@ -89,11 +101,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   const services = PAID_SERVICES.map((s) => {
     const st = setBy.get(s.key);
+    const choice = effectiveChoice(s, st?.provider as string | null);
     return {
       ...s,
+      provider: choice?.provider ?? s.provider,
+      provider_choice: choice?.id ?? null,
+      provider_choices: (s.providerChoices ?? []).map((c) => ({ ...c, configured: choiceConfigured(c) })),
       enabled: s.kind === "locked" ? true : st?.enabled !== false,
       model: (st?.model as string | null) ?? null,
-      configured: configured(s.provider),
+      configured: choice ? choiceConfigured(choice) : configured(s.provider),
       month: byKey.get(s.key) ?? emptyStat(),
       last_used_at: last.get(s.key) ?? null,
       updated_at: (st?.updated_at as string | null) ?? null,
@@ -213,6 +229,13 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     if (!canToggle(svc)) return NextResponse.json({ error: `"${svc.th}" ปิดไม่ได้ — ${svc.offBehavior}` }, { status: 400 });
     patch.enabled = body.enabled === true;
   }
+  if ("provider" in body) {
+    if (place) return NextResponse.json({ error: "เปลี่ยนผู้ให้บริการได้ทั้งรายการเท่านั้น" }, { status: 400 });
+    const pv = body.provider === null || body.provider === "" ? null : String(body.provider);
+    if (!svc.providerChoices?.length) return NextResponse.json({ error: "รายการนี้ยังมีผู้ให้บริการเดียว" }, { status: 400 });
+    if (pv && !svc.providerChoices.some((c) => c.id === pv)) return NextResponse.json({ error: "ไม่พบผู้ให้บริการนี้ในตัวเลือก" }, { status: 400 });
+    patch.provider = pv;
+  }
   if ("model" in body) {
     const m = String(body.model ?? "").trim();
     if (!canPickModel(svc)) return NextResponse.json({ error: "รายการนี้เลือกโมเดลไม่ได้" }, { status: 400 });
@@ -226,6 +249,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     key: rowKey,
     enabled: "enabled" in patch ? patch.enabled : (before?.enabled ?? true),
     model: "model" in patch ? patch.model : (before?.model ?? null),
+    provider: "provider" in patch ? patch.provider : (before?.provider ?? null),
     updated_at: new Date().toISOString(),
     updated_by: actor.id, updated_by_name: actor.name,
   };
@@ -236,7 +260,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const changes: Record<string, { from: unknown; to: unknown }> = {};
   for (const k of Object.keys(patch)) {
     const from = before ? before[k] : k === "enabled" ? true : null;
-    if (JSON.stringify(from ?? null) !== JSON.stringify(row[k as "enabled" | "model"] ?? null)) changes[k] = { from, to: row[k as "enabled" | "model"] };
+    if (JSON.stringify(from ?? null) !== JSON.stringify(row[k as "enabled" | "model" | "provider"] ?? null)) changes[k] = { from, to: row[k as "enabled" | "model" | "provider"] };
   }
   if (Object.keys(changes).length) {
     const placeTh = place ? svc.places?.find((p) => p.key === place)?.th : null;
