@@ -5,7 +5,7 @@ import {
 } from "@/lib/design-sheet-notice";
 
 const calc = (over: Partial<NoticeCalc> = {}): NoticeCalc => ({
-  material: "ผ้าสก็อต", unit: "หลา", received: 1500, mode: "ratio", waste_pct: 0,
+  material: "ผ้าสก็อต", unit: "หลา", unit_note: "", received: 1500, mode: "ratio", waste_pct: 0,
   rows: [
     { key: "XS", label: "XS", use: 0.62, order: 1000 },
     { key: "S", label: "S", use: 0.78, order: 1000 },
@@ -92,6 +92,32 @@ describe("ผ้าหลัก + แท็บตั้งต้น (ข้อ�
     const tabs = [{ key: "", label: "ทั่วไป", kind: "general" }, { key: "V2 S", label: "V2 S", kind: "draft" }, { key: "V2 M", label: "V2 M", kind: "draft" }, { key: "ไซส์ M", label: "ไซส์ M", kind: "orphan" }];
     expect(noticeRowsFromMaterial(ms[0], tabs).map((r) => r.key)).toEqual(["V2 S", "V2 M"]);
     expect(noticeTabsFor(ms[0], tabs).all.map((t) => t.key)).toEqual(["V2 S", "V2 M", "ไซส์ M"]);
+  });
+});
+
+describe("ผ้าแบบผืน → แปลงเป็นหลา (เจ้าของขอ 2026-11-06)", () => {
+  // ข้อมูลจริง DS-2026-0064: ผ้าขาวม้า (นาหมื่นศรี) ผืนละ 80×200 ซม. · XS 2,350.6 cm² · M 4,988.7 cm² ต่อใบ
+  const P = (parent: string, qty: number) => ({ parent_code: parent, item_id: "kw", item_name: "ผ้าขาวม้า", group_name: "ผ้า (ชิ้น)", qty, uom: "cm²", piece: true, amount: 40 });
+  const sheetOf = (id: string) => (id === "kw" ? { width_cm: 80, length_cm: 200 } : null);
+  const [m] = noticeMaterialsFromCost([P("XS", 2000), P("XS", 350.6), P("M", 4988.7)], sheetOf);
+  it("ตั้งต้นเป็นหลา = พื้นที่ ÷ หน้ากว้าง ÷ 90 (ตัวหารเดียวกับแท็บตีราคา)", () => {
+    expect(m.unit).toBe("หลา");
+    expect(m.note).toBe("คิดจากหน้ากว้าง 80 ซม.");
+    expect(m.perTab.XS).toBeCloseTo(2350.6 / 7200, 4);
+    expect(m.perTab.M).toBeCloseTo(4988.7 / 7200, 4);
+  });
+  it("ยังสลับเป็นผืนได้", () => {
+    const sh = m.units.find((u) => u.unit === "ผืน")!;
+    expect(sh.note).toBe("ผืนละ 80×200 ซม.");
+    expect(sh.perTab.XS).toBeCloseTo(2350.6 / 16000, 4);
+    expect(m.units.map((u) => u.unit)).toEqual(["หลา", "ผืน"]);
+  });
+  it("ทะเบียนวัสดุไม่มีหน้ากว้าง = แปลงไม่ได้ (ไม่เดาตัวเลข)", () => {
+    expect(noticeMaterialsFromCost([P("XS", 2000)], () => null)).toEqual([]);
+  });
+  it("หมายเหตุหน่วยขึ้นในใบ", () => {
+    const doc = { ...newNoticeDoc("usage"), calc: { ...calc(), unit_note: "คิดจากหน้ากว้าง 80 ซม." } };
+    expect(buildNoticeHtml(doc, ctx)).toContain("คิดจากหน้ากว้าง 80 ซม.");
   });
 });
 

@@ -126,12 +126,12 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
 
   // ---- สร้าง / สลับใบ (มีแก้ค้าง = ถามก่อน) ----
   const guard = (fn: () => void) => { if (dirty) setPendingSwitch(() => fn); else fn(); };
-  const seedRows = useCallback((): { rows: NoticeRow[]; material: string; unit: string } => {
-    const fabric = mats.find((m) => m.unit === "หลา") ?? mats[0];
-    if (fabric) return { rows: noticeRowsFromMaterial(fabric, costTabs, orderOf), material: fabric.name, unit: fabric.unit };
+  const seedRows = useCallback((): { rows: NoticeRow[]; material: string; unit: string; unit_note: string } => {
+    const fabric = mats[0];   // จัดอันดับไว้แล้ว: ผ้า → แพงสุด (= ผ้าหลัก) — lib noticeMaterialsFromCost
+    if (fabric) return { rows: noticeRowsFromMaterial(fabric, costTabs, orderOf), material: fabric.name, unit: fabric.unit, unit_note: fabric.note };
     const tabs = costTabs.filter((tb) => tb.key !== "");
     const rows = (tabs.length ? tabs : costTabs.slice(0, 1)).map((tb) => ({ key: tb.key || "general", label: tb.label, use: null, order: orderOf?.(tb.key) ?? null }));
-    return { rows, material: "", unit: "หลา" };
+    return { rows, material: "", unit: "หลา", unit_note: "" };
   }, [mats, costTabs, orderOf]);
   const startNew = (kind: NoticeKind) => guard(() => {
     const d: Draft = { ...newNoticeDoc(kind, defDisplay), id: null, created_by_name: user?.name ?? null, created_at: null };
@@ -170,7 +170,13 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
   const removeImage = (i: number) => setCur((c) => (c ? { ...c, images: c.images.filter((_, j) => j !== i) } : c));
 
   // ---- วัตถุดิบที่กำลังแจ้ง (ชื่อตรงกับในตีราคา) → ชิปเลือกไซส์จากแท็บตีราคา ----
-  const curMat = useMemo(() => (cur ? mats.find((m) => m.name === cur.calc.material.trim()) ?? null : null), [mats, cur]);
+  const curMatBase = useMemo(() => (cur ? mats.find((m) => m.name === cur.calc.material.trim()) ?? null : null), [mats, cur]);
+  // ใช้ตัวเลขของหน่วยที่เลือกอยู่ (ผ้าแบบผืน: หลา / ผืน)
+  const curMat = useMemo(() => {
+    if (!curMatBase || !cur) return null;
+    const u = curMatBase.units.find((x) => x.unit === cur.calc.unit);
+    return u ? { ...curMatBase, unit: u.unit, perTab: u.perTab, note: u.note } : curMatBase;
+  }, [curMatBase, cur]);
   const curMatTabs = useMemo(() => (curMat ? noticeTabsFor(curMat, costTabs).all : []), [curMat, costTabs]);
   const toggleTab = (tb: NoticeCostTab) => {
     if (!cur || !curMat) return;
@@ -178,13 +184,23 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
     const on = cur.calc.rows.some((r) => r.key === key);
     patchCalc({ rows: on ? cur.calc.rows.filter((r) => r.key !== key) : [...cur.calc.rows, noticeTabRow(curMat, tb, orderOf)] });
   };
+  // สลับหน่วย (หลา ↔ ผืน) → ใช้ต่อใบของแถวที่มาจากแท็บตีราคาเปลี่ยนตาม · แถวที่พิมพ์เองไม่แตะ
+  const switchUnit = (unit: string) => {
+    if (!cur || !curMatBase) return;
+    const u = curMatBase.units.find((x) => x.unit === unit); if (!u) return;
+    const tabOf = new Map(costTabs.map((tb) => [tb.key || "general", tb.key]));
+    patchCalc({
+      unit: u.unit, unit_note: u.note,
+      rows: cur.calc.rows.map((r) => { const k = tabOf.get(r.key); return k != null && u.perTab[k] != null ? { ...r, use: u.perTab[k] } : r; }),
+    });
+  };
 
   // ---- ดึงใช้ต่อใบจากตีราคา (เก็บจำนวนสั่งที่พิมพ์ไว้แล้ว) ----
   const pullMaterial = (key: string) => {
     const m = mats.find((x) => x.key === key); if (!m || !cur) return;
     const prevOrder = new Map(cur.calc.rows.map((r) => [r.key, r.order]));
     const rows = noticeRowsFromMaterial(m, costTabs, orderOf).map((r) => ({ ...r, order: prevOrder.get(r.key) ?? r.order }));
-    patchCalc({ material: m.name, unit: m.unit, rows: rows.length ? rows : cur.calc.rows });
+    patchCalc({ material: m.name, unit: m.unit, unit_note: m.note, rows: rows.length ? rows : cur.calc.rows });
     if (!rows.length) toast.error(t("วัตถุดิบนี้ไม่มีตัวเลขใช้ต่อใบในแท็บตีราคา", "This material has no per-bag usage in costing"));
   };
 
@@ -377,12 +393,19 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                     className="flex-1 min-w-[180px] h-8 px-2 text-sm border border-slate-200 rounded-lg disabled:bg-slate-50" />
                   <input value={cur.calc.unit} disabled={ro} onChange={(e) => patchCalc({ unit: e.target.value })} maxLength={20} title={t("หน่วย", "Unit")}
                     className="w-16 h-8 px-2 text-sm text-center border border-slate-200 rounded-lg disabled:bg-slate-50" />
+                  {curMatBase && curMatBase.units.length > 1 && (
+                    <Seg value={cur.calc.unit} disabled={ro} onChange={switchUnit}
+                      options={curMatBase.units.map((u) => ({ v: u.unit, label: u.note ? `${u.unit} (${u.note})` : u.unit }))} />
+                  )}
                   {canEdit && matOptions.length > 0 && (
                     <div className="w-full sm:w-64">
                       <SearchableSelect value="" options={matOptions} onChange={pullMaterial} placeholder={t("ดึงใช้ต่อใบจากแท็บตีราคา…", "Pull usage from costing…")} />
                     </div>
                   )}
                 </div>
+                <input value={cur.calc.unit_note} disabled={ro} onChange={(e) => patchCalc({ unit_note: e.target.value })} maxLength={120}
+                  placeholder={t("หมายเหตุหน่วย (ขึ้นในใบ) เช่น คิดจากหน้ากว้าง 80 ซม.", "Unit note (printed)")}
+                  className="w-full h-8 px-2 text-xs border border-slate-200 rounded-lg disabled:bg-slate-50" />
                 {curMat && canEdit && curMatTabs.length > 1 && (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[11px] text-slate-400">{t("ไซส์จากแท็บตีราคา (กดเพิ่ม/เอาออก):", "Sizes from costing (click to add/remove):")}</span>

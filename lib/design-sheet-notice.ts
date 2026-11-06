@@ -36,12 +36,13 @@ export type NoticeRow = { key: string; label: string; use: number | null; order:
 export type NoticeCalc = {
   material: string;        // ชื่อวัตถุดิบที่แจ้ง เช่น "ผ้าลายสก็อตแดง (ลูกค้าส่งมา)"
   unit: string;            // หน่วย (ตั้งต้น หลา)
+  unit_note: string;       // หมายเหตุหน่วย (ขึ้นในใบ) เช่น "คิดจากหน้ากว้าง 80 ซม." ตอนแปลงผ้าแบบผืนเป็นหลา
   received: number | null; // ผ้าที่ได้รับ (เฉพาะ yield)
   mode: "ratio" | "single";
   waste_pct: number;       // เผื่อเสีย % (0 = ไม่เผื่อ)
   rows: NoticeRow[];
 };
-export const EMPTY_CALC: NoticeCalc = { material: "", unit: "หลา", received: null, mode: "ratio", waste_pct: 0, rows: [] };
+export const EMPTY_CALC: NoticeCalc = { material: "", unit: "หลา", unit_note: "", received: null, mode: "ratio", waste_pct: 0, rows: [] };
 
 // ─────────────────────────── สิ่งที่เลือกโชว์ตอนส่งออก ───────────────────────────
 export const NOTICE_SHOW_GROUPS = [
@@ -127,6 +128,7 @@ export function cleanNoticeCalc(raw: unknown): NoticeCalc {
   return {
     material: txt(o.material, 200),
     unit: txt(o.unit, 20) || "หลา",
+    unit_note: txt(o.unit_note, 120),
     received: numOrNull(o.received, 0, 1e9),
     mode: o.mode === "single" ? "single" : "ratio",
     waste_pct: numOrNull(o.waste_pct, 0, 100) ?? 0,
@@ -219,9 +221,18 @@ export type NoticeCostLine = {
   group_name: string | null; qty: number | null; uom: string | null; piece: boolean;
   amount?: number | null;   // ต้นทุนต่อใบของบรรทัด (ใช้หา "ผ้าหลัก" = ผ้าที่แพงสุด)
 };
+/** ใช้ต่อใบในหน่วยหนึ่ง (ผ้าแบบผืนมีได้ 2 หน่วย: หลา (แปลงจากหน้ากว้าง) กับ ผืน) */
+export type NoticeUnitOption = { unit: string; perTab: Record<string, number>; note: string };
 /** วัตถุดิบ 1 ตัวในแท็บตีราคา + ใช้ต่อใบของแต่ละแท็บ (ไซส์) — หลายบรรทัดของวัสดุเดียวกันรวมให้แล้ว
+ *  unit/perTab/note = หน่วยตั้งต้น (= units[0]) · units = ทุกหน่วยที่คิดได้ (เลือกสลับได้ในใบแจ้ง)
  *  fabric = กลุ่มวัสดุขึ้นต้นด้วย "ผ้า" · cost = ต้นทุนรวมทุกแท็บ (จัดอันดับผ้าหลัก) */
-export type NoticeMaterialOption = { key: string; name: string; unit: string; perTab: Record<string, number>; fabric: boolean; cost: number };
+export type NoticeMaterialOption = {
+  key: string; name: string; unit: string; perTab: Record<string, number>; note: string;
+  units: NoticeUnitOption[]; fabric: boolean; cost: number;
+};
+/** 1 หลา = 90 ซม. ตามตัวหารตั้งต้นของแท็บตีราคา (ผ้าม้วน area_face: พื้นที่ ÷ หน้ากว้าง ÷ 90)
+ *  ผ้าแบบผืนแปลงเป็นหลาด้วยตัวเดียวกัน → ตัวเลขเทียบกับผ้าม้วน (เช่น ผ้าซับใน) ได้ตรงกัน (เจ้าของขอ 2026-11-06 "แปลงเป็นหลาด้วย") */
+export const NOTICE_YARD_CM = 90;
 /** แท็บตีราคา — kind: general (ทั่วไป) / code (Parent จริง) / draft (ร่าง) / orphan (มีบรรทัดค้างแต่ไม่อยู่ในรายการ = มักเป็นของเก่า) */
 export type NoticeCostTab = { key: string; label: string; kind?: string };
 
@@ -237,26 +248,42 @@ export function noticeMaterialsFromCost(lines: NoticeCostLine[], sheetOf: (itemI
   for (const [key, ls] of groups) {
     const byTab = new Map<string, NoticeCostLine[]>();
     for (const l of ls) { const t = l.parent_code ?? ""; const a = byTab.get(t); if (a) a.push(l); else byTab.set(t, [l]); }
-    const found: { tab: string; unit: string; qty: number }[] = [];
+    const fabric = ls.some((l) => (l.group_name ?? "").trim().startsWith("ผ้า"));
+    // รวมใช้ต่อใบทุกหน่วยที่คิดได้ ต่อแท็บ
+    const byUnit = new Map<string, { perTab: Record<string, number>; widths: Set<number>; sizes: Set<string> }>();
+    const put = (unit: string, tab: string, q: number, meta: { width?: number; size?: string | null } = {}) => {
+      if (!(q > 0) || !unit) return;
+      let v = byUnit.get(unit);
+      if (!v) { v = { perTab: {}, widths: new Set(), sizes: new Set() }; byUnit.set(unit, v); }
+      v.perTab[tab] = (v.perTab[tab] ?? 0) + q;
+      if (meta.width) v.widths.add(meta.width);
+      if (meta.size) v.sizes.add(meta.size);
+    };
     for (const [tab, tl] of byTab) {
       const u = costUsagePerUnit(tl.map((l) => ({ item_id: l.item_id, group_name: l.group_name, qty: l.qty, uom: l.uom, piece: l.piece })), sheetOf);
-      if (u.sheets) found.push({ tab, unit: u.sheets.unit, qty: u.sheets.qty });
-      else if (u.byUom.length) {
-        const top = [...u.byUom].sort((a, b) => b.qty - a.qty)[0];
-        found.push({ tab, unit: top.uom, qty: top.qty });
+      if (u.sheets) put(u.sheets.unit, tab, u.sheets.qty, { size: u.sheets.size });
+      for (const b of u.byUom) put(b.uom, tab, b.qty);
+      // ผ้าแบบผืน (cm²) → หลาด้วย: พื้นที่ ÷ หน้ากว้างผืน ÷ 90 (ต้องรู้หน้ากว้างจากทะเบียนวัสดุตีราคา)
+      if (fabric) for (const l of tl) {
+        const w = l.piece && l.item_id ? Number(sheetOf(l.item_id)?.width_cm) : 0;
+        if (w > 0 && Number(l.qty) > 0) put("หลา", tab, Number(l.qty) / (w * NOTICE_YARD_CM), { width: w });
       }
     }
-    if (!found.length) continue;
-    // หน่วยที่เจอบ่อยสุด = หน่วยของวัตถุดิบนี้ (แท็บที่หน่วยไม่ตรงไม่เอามาปน)
-    const cnt = new Map<string, number>();
-    for (const f of found) cnt.set(f.unit, (cnt.get(f.unit) ?? 0) + 1);
-    const unit = [...cnt.entries()].sort((a, b) => b[1] - a[1])[0][0];
-    const perTab: Record<string, number> = {};
-    for (const f of found) if (f.unit === unit) perTab[f.tab] = Math.round(f.qty * 10000) / 10000;
+    if (!byUnit.size) continue;
+    const r4 = (n: number) => Math.round(n * 10000) / 10000;
+    const units = [...byUnit.entries()].map(([unit, v]) => ({
+      unit,
+      perTab: Object.fromEntries(Object.entries(v.perTab).map(([k, q]) => [k, r4(q)])),
+      note: unit === "หลา" && v.widths.size ? (v.widths.size === 1 ? `คิดจากหน้ากว้าง ${[...v.widths][0]} ซม.` : "คิดจากหน้ากว้างผืน")
+        : v.sizes.size === 1 ? `${unit}ละ ${[...v.sizes][0]} ซม.` : "",
+      tabs: Object.keys(v.perTab).length,
+    }))
+      // ผ้า → หลาก่อน (เจ้าของคิดเป็นหลา) · แล้วหน่วยที่ครอบคลุมแท็บมากสุด · cm² ไว้ท้าย
+      .sort((a, b) => Number(fabric && b.unit === "หลา") - Number(fabric && a.unit === "หลา") || b.tabs - a.tabs || Number(a.unit === "cm²") - Number(b.unit === "cm²"))
+      .map(({ unit, perTab, note }) => ({ unit, perTab, note }));
     out.push({
-      key, name: (ls[0].item_name ?? "").trim(), unit, perTab,
-      fabric: ls.some((l) => (l.group_name ?? "").trim().startsWith("ผ้า")),
-      cost: ls.reduce((a, l) => a + (Number(l.amount) || 0), 0),
+      key, name: (ls[0].item_name ?? "").trim(), unit: units[0].unit, perTab: units[0].perTab, note: units[0].note, units,
+      fabric, cost: ls.reduce((a, l) => a + (Number(l.amount) || 0), 0),
     });
   }
   // ผ้าขึ้นก่อน → แพงสุด (= ผ้าหลัก) ก่อน → ใช้เยอะสุด → ชื่อ   (ข้อมูลจริง DS-2026-0064: ผ้าขาวม้า 395 บ. ชนะ กุ้น/ซับใน)
@@ -344,6 +371,7 @@ export const NOTICE_CSS = `
   .nt-no { position:absolute; top:2mm; left:2mm; min-width:6mm; height:6mm; padding:0 1.5mm; border-radius:3mm; background:#0f172a; color:#fff; font-size:11px; display:flex; align-items:center; justify-content:center; }
   .nt-cap { margin-top:1.5mm; padding:2mm 3mm; border-radius:4px; background:#f1f5f9; border:1px solid #e2e8f0; font-size:12px; line-height:1.5; white-space:pre-wrap; color:#1e293b; }
   .nt-mat { margin-top:5mm; font-size:14px; font-weight:600; color:#0f172a; }
+  .nt-unote { font-size:11.5px; font-weight:400; color:#64748b; }
   .nt-table { width:100%; border-collapse:collapse; margin-top:2mm; font-size:12.5px; }
   .nt-table th { background:#f1f5f9; color:#475569; font-weight:600; text-align:right; padding:2mm 2.5mm; border-bottom:1px solid #cbd5e1; }
   .nt-table td { text-align:right; padding:2mm 2.5mm; border-bottom:1px solid #e2e8f0; font-variant-numeric:tabular-nums; }
@@ -388,7 +416,8 @@ export function buildNoticeHtml(doc: NoticeDoc, ctx: NoticeContext, opts: { forI
   if (noticeHasCalc(doc.kind)) {
     const tbl = tableHtml(doc, res);
     const waste = sh.waste && doc.calc.waste_pct > 0 && tbl ? `<div class="nt-waste">* ตัวเลขผ้ารวมเผื่อเสีย ${esc(doc.calc.waste_pct)}% แล้ว</div>` : "";
-    const mat = sh.matname && doc.calc.material ? `<div class="nt-mat">${esc(doc.calc.material)}</div>` : "";
+    const mat = sh.matname && doc.calc.material
+      ? `<div class="nt-mat">${esc(doc.calc.material)}${doc.calc.unit_note ? ` <span class="nt-unote">· ${esc(doc.calc.unit || "หลา")} ${esc(doc.calc.unit_note)}</span>` : ""}</div>` : "";
     calcHtml = `${mat}${tbl}${summaryHtml(doc, res)}${waste}`;
   }
 
