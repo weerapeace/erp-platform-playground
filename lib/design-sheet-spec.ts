@@ -5,10 +5,11 @@
  */
 import { cropBackground, SPEC_COLOR_SOURCE_LABEL, type SpecColorCell, type SpecColorTable } from "@/lib/design-sheet-spec-colors";
 import { swatchCss } from "@/lib/color-swatch";
-import type { MarkupShape } from "@/lib/image-markup";
+import { arrowHeadPoints, DEFAULT_MARKUP_STYLE, MARKUP_HL_WIDTH, MARKUP_PIN_LABEL_OFFSET, type MarkupShape } from "@/lib/image-markup";
 
 export type SpecPinLike = {
   no: number; x: number; y: number; part_name: string | null;
+  part_code?: string | null; label_dx?: number | null; label_dy?: number | null;
   sku_id: string | null; sku_code: string | null; sku_name: string | null; sku_image_key?: string | null;
   qty: number | null; uom: string | null; note: string | null;
 };
@@ -64,27 +65,47 @@ const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "
 const EXACT = "-webkit-print-color-adjust:exact;print-color-adjust:exact;";
 const MAX_W = 180, MAX_H = 120;   // กล่องรูปบนกระดาษ A4 (มม.)
 
-function shapeSvg(s: MarkupShape): string {
-  const st = `fill="none" stroke="${esc(s.color)}" stroke-width="2" vector-effect="non-scaling-stroke"`;
-  if (s.t === "rect") return `<rect x="${s.x}" y="${s.y}" width="${s.w}" height="${s.h}" ${st}/>`;
-  if (s.t === "circle") return `<ellipse cx="${s.x + s.w / 2}" cy="${s.y + s.h / 2}" rx="${s.w / 2}" ry="${s.h / 2}" ${st}/>`;
-  if (s.t === "draw") return `<polyline points="${s.pts.map((p) => p.join(",")).join(" ")}" stroke-linecap="round" stroke-linejoin="round" ${st}/>`;
-  return "";
+const PX_MM = 0.3;   // ความหนาเส้นบนจอ (px) → มม. บนกระดาษ (ประมาณ)
+
+/** สิ่งที่วาด 1 ชิ้น เป็น SVG หน่วย มม. (กล่องรูป w×h มม.) — หน้าตาเหมือนบนจอ: หนา/ประ/พื้นจาง/ปากกาเน้น/หัวลูกศร */
+function shapeSvg(s: MarkupShape, w: number, h: number): string {
+  if (s.t === "text") return "";
+  const X = (v: number) => ((v / 100) * w).toFixed(2), Y = (v: number) => ((v / 100) * h).toFixed(2);
+  const hl = s.t === "draw" && !!s.hl;
+  const sw = (hl ? MARKUP_HL_WIDTH : s.sw ?? DEFAULT_MARKUP_STYLE.sw) * PX_MM;
+  const dash = !hl && s.dash ? ` stroke-dasharray="${(sw * 3).toFixed(2)} ${(sw * 2).toFixed(2)}"` : "";
+  const st = `stroke="${esc(s.color)}" stroke-width="${sw.toFixed(2)}" stroke-linecap="round" stroke-linejoin="round"${dash}`;
+  const fill = (s.t === "rect" || s.t === "circle") && s.fill ? `fill="${esc(s.color)}" fill-opacity="0.15"` : `fill="none"`;
+  if (s.t === "rect") return `<rect x="${X(s.x)}" y="${Y(s.y)}" width="${X(s.w)}" height="${Y(s.h)}" rx="0.6" ${fill} ${st}/>`;
+  if (s.t === "circle") return `<ellipse cx="${X(s.x + s.w / 2)}" cy="${Y(s.y + s.h / 2)}" rx="${X(s.w / 2)}" ry="${Y(s.h / 2)}" ${fill} ${st}/>`;
+  if (s.t === "draw") return `<polyline points="${s.pts.map((p) => `${X(p[0])},${Y(p[1])}`).join(" ")}" fill="none" ${st}${hl ? ` stroke-opacity="0.35"` : ""}/>`;
+  if (s.t !== "arrow") return "";
+  const x1 = Number(X(s.x1)), y1 = Number(Y(s.y1)), x2 = Number(X(s.x2)), y2 = Number(Y(s.y2));
+  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" fill="none" ${st}/><polygon points="${arrowHeadPoints(x1, y1, x2, y2, (9 + (s.sw ?? DEFAULT_MARKUP_STYLE.sw) * 2.2) * PX_MM)}" fill="${esc(s.color)}"/>`;
 }
 
 /** รูป 1 หน้า + สิ่งที่วาด + หมุด (ขนาดกล่องเป็น มม. ตามสัดส่วนรูป → ตำแหน่งตรงกับบนจอ) */
-function pageFigureHtml(p: SpecPrintData["pages"][number], abs: (u: string) => string): string {
+function pageFigureHtml(p: SpecPrintData["pages"][number], abs: (u: string) => string, keyUrl: (key: string, w: number) => string): string {
   const aspect = p.image_w && p.image_h ? p.image_w / p.image_h : 4 / 3;
   const w = Math.min(MAX_W, MAX_H * aspect), h = w / aspect;
-  const svg = `<svg viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;">${p.shapes.map(shapeSvg).join("")}</svg>`;
+  // เส้นโยงป้ายชื่อหมุด (ใต้สิ่งที่วาด)
+  const off = (x: SpecPinLike) => ({ dx: x.label_dx ?? MARKUP_PIN_LABEL_OFFSET.ldx, dy: x.label_dy ?? MARKUP_PIN_LABEL_OFFSET.ldy });
+  const leaders = p.pins.map((x) => { const o = off(x); return `<line x1="${((x.x / 100) * w).toFixed(2)}" y1="${((x.y / 100) * h).toFixed(2)}" x2="${(((x.x + o.dx) / 100) * w).toFixed(2)}" y2="${(((x.y + o.dy) / 100) * h).toFixed(2)}" stroke="#7c3aed" stroke-width="0.35"/>`; }).join("");
+  const svg = `<svg viewBox="0 0 ${w.toFixed(2)} ${h.toFixed(2)}" preserveAspectRatio="none" style="position:absolute;left:0;top:0;width:100%;height:100%;overflow:visible;">${leaders}${p.shapes.map((s) => shapeSvg(s, w, h)).join("")}</svg>`;
   const texts = p.shapes.filter((s): s is Extract<MarkupShape, { t: "text" }> => s.t === "text").map((s) =>
-    `<div style="position:absolute;left:${s.x}%;top:${s.y}%;font-size:${((s.size / 100) * w).toFixed(2)}mm;font-weight:700;line-height:1.15;white-space:pre;color:${esc(s.color)};text-shadow:0 0 2px #fff,0 0 2px #fff;">${esc(s.text)}</div>`).join("");
+    `<div style="position:absolute;left:${s.x}%;top:${s.y}%;font-size:${((s.size / 100) * w).toFixed(2)}mm;font-weight:700;line-height:1.15;white-space:pre;color:${esc(s.color)};${s.bg ? `background:rgba(255,255,255,.9);padding:0 1mm;border-radius:1mm;${EXACT}` : "text-shadow:0 0 2px #fff,0 0 2px #fff;"}">${esc(s.text)}</div>`).join("");
+  // ป้ายชื่อข้างหมุด: รูปเล็ก + "เลข · ส่วนประกอบ" + ชื่อวัตถุดิบ
+  const labels = p.pins.map((x) => {
+    const o = off(x);
+    const img = x.sku_image_key ? `<img src="${esc(abs(keyUrl(x.sku_image_key, 96)))}" style="width:5mm;height:5mm;object-fit:cover;border-radius:0.8mm;flex:none;" />` : "";
+    return `<div style="position:absolute;left:${x.x + o.dx}%;top:${x.y + o.dy}%;transform:translate(${o.dx < 0 ? "-100%" : "0"},-50%);display:flex;align-items:center;gap:1mm;max-width:48mm;padding:0.6mm 1.5mm 0.6mm 0.8mm;background:#fff;border:0.3mm solid #c4b5fd;border-radius:1.2mm;${EXACT}">${img}<div style="line-height:1.15;min-width:0;"><div style="font-size:7pt;font-weight:700;color:#6d28d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${x.no} · ${esc(x.part_name || "—")}</div><div style="font-size:6.5pt;color:${x.sku_id ? "#334155" : "#b45309"};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(x.sku_name || "ยังไม่เลือก SKU")}</div></div></div>`;
+  }).join("");
   const pins = p.pins.map((x) =>
     `<div style="position:absolute;left:${x.x}%;top:${x.y}%;transform:translate(-50%,-50%);width:5.5mm;height:5.5mm;border-radius:50%;background:${x.sku_id ? "#7c3aed" : "#f59e0b"};border:0.5mm solid #fff;color:#fff;font:700 8pt/5.5mm sans-serif;text-align:center;${EXACT}">${x.no}</div>`).join("");
   return `<div style="margin:2px 0 8px;break-inside:avoid;">
 ${p.title ? `<div style="font-size:11px;font-weight:600;color:#334155;margin-bottom:3px;">${esc(p.title)}</div>` : ""}
 <div style="position:relative;width:${w.toFixed(1)}mm;height:${h.toFixed(1)}mm;border:1px solid #e2e8f0;border-radius:4px;overflow:visible;">
-<img src="${esc(abs(p.image_url))}" style="display:block;width:100%;height:100%;object-fit:fill;border-radius:4px;" />${svg}${texts}${pins}</div></div>`;
+<img src="${esc(abs(p.image_url))}" style="display:block;width:100%;height:100%;object-fit:fill;border-radius:4px;" />${svg}${texts}${labels}${pins}</div></div>`;
 }
 
 function chipHtml(c: SpecColorCell | undefined, keyUrl: (key: string, w: number) => string): string {
@@ -106,7 +127,7 @@ const TD = "padding:4px 6px;border-bottom:1px solid #e2e8f0;vertical-align:middl
 /** เนื้อกลางโหมด "📐 รายละเอียดงาน": รูป+หมุด → ตารางหมุด → สรุปวัตถุดิบ → ตารางสี */
 export function buildSpecPrintHtml(spec: SpecPrintData, abs: (u: string) => string, keyUrl: (key: string, w: number) => string): string {
   const pins = spec.pages.flatMap((p) => p.pins);
-  const figs = spec.pages.map((p) => pageFigureHtml(p, abs)).join("");
+  const figs = spec.pages.map((p) => pageFigureHtml(p, abs, keyUrl)).join("");
 
   const pinRows = pins.map((x) => `<tr>
 <td style="${TD}width:8mm;text-align:center;font-weight:700;color:${x.sku_id ? "#6d28d9" : "#b45309"};">${x.no}</td>

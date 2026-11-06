@@ -15,6 +15,7 @@ import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { ImageRegions } from "@/components/image-regions";
 import { ComponentPicker } from "@/components/material-picker";
 import { ColorInput } from "@/components/color-picker";
+import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
@@ -43,25 +44,40 @@ export function SpecColorChip({ cell, size = 28, className = "" }: { cell: SpecC
   return <span className={`inline-block shrink-0 rounded-md border border-slate-300 ${className}`} style={style} title={cell.name ?? cell.hex ?? ""} />;
 }
 
-export function SpecColorTableEditor({ value, onChange, canEdit, pinParts, imageKeys }: {
+export function SpecColorTableEditor({ value, onChange, canEdit, pinParts, imageKeys, partOptions = [], onCreatePart, onLocatePart }: {
   value: SpecColorTable;
   onChange: (next: SpecColorTable) => void;
   canEdit: boolean;
-  /** ชื่อส่วนประกอบจากหมุดวัตถุดิบ (ไว้ดึงเป็นแถว) */
-  pinParts: string[];
+  /** ส่วนประกอบจากหมุดวัตถุดิบ (ไว้ดึงเป็นแถว) */
+  pinParts: { name: string; code: string | null }[];
   /** รูปในรายละเอียดงาน (R2 key) — ให้ดูดสี */
   imageKeys: string[];
+  /** รายการส่วนประกอบกลาง (material_slots: value = slot_code) */
+  partOptions?: SelectOption[];
+  /** พิมพ์ชื่อที่ไม่มีในรายการ → เพิ่มเข้ารายการกลาง */
+  onCreatePart?: (name: string) => Promise<{ code: string; name: string } | null>;
+  /** ปุ่ม "ชี้บนรูป" ของแถว */
+  onLocatePart?: (row: SpecColorRow) => void;
 }) {
   const t = useT();
   const [picking, setPicking] = useState<{ cw: string; row: string } | null>(null);
   const [delCw, setDelCw] = useState<string | null>(null);
   const { rows, colorways } = value;
 
+  // ส่วนประกอบจากหมุดที่ยังไม่มีแถว (เทียบรหัสในรายการกลางก่อน ไม่มีรหัสเทียบชื่อ)
   const missingParts = useMemo(() => {
-    const have = new Set(rows.map((r) => norm(r.name)));
-    return Array.from(new Set(pinParts.map((p) => p.trim()).filter(Boolean))).filter((p) => !have.has(norm(p)));
+    const codes = new Set(rows.map((r) => r.code).filter(Boolean)), names = new Set(rows.map((r) => norm(r.name)));
+    const out: { name: string; code: string | null }[] = [];
+    for (const p of pinParts) {
+      const nm = p.name.trim(); if (!nm) continue;
+      if ((p.code && codes.has(p.code)) || names.has(norm(nm)) || out.some((o) => (p.code && o.code === p.code) || norm(o.name) === norm(nm))) continue;
+      out.push({ name: nm, code: p.code });
+    }
+    return out;
   }, [rows, pinParts]);
-  const pullParts = () => onChange({ ...value, rows: [...rows, ...missingParts.map((name) => ({ key: newMarkupId(), name }))] });
+  const pullParts = () => onChange({ ...value, rows: [...rows, ...missingParts.map((p) => ({ key: newMarkupId(), name: p.name, ...(p.code ? { code: p.code } : {}) }))] });
+  const rowValue = (r: SpecColorRow) => r.code ?? (r.name ? `name:${r.name}` : "");
+  const rowOptions = (r: SpecColorRow): SelectOption[] => (r.code || !r.name ? partOptions : [{ value: `name:${r.name}`, label: r.name, sub: t("พิมพ์เอง", "Typed") }, ...partOptions]);
   const addColorway = () => onChange({ ...value, colorways: [...colorways, { key: newMarkupId(), name: "", cells: {} }] });
   const setCell = (cwKey: string, rowKey: string, cell: SpecColorCell | null) => onChange({
     ...value,
@@ -76,10 +92,24 @@ export function SpecColorTableEditor({ value, onChange, canEdit, pinParts, image
 
   const columns = useMemo<LineColumn<SpecColorRow>[]>(() => [
     { key: "name", header: t("ส่วนประกอบ", "Part"), minWidth: 150,
-      render: (r, u, ro) => ro
-        ? <span className="block px-1 text-sm text-slate-700 truncate">{r.name || "—"}</span>
-        : <input value={r.name} onChange={(e) => u({ name: e.target.value })} placeholder={t("เช่น ตัวกระเป๋า", "e.g. Bag body")}
-            className="w-full h-8 px-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" /> },
+      render: (r, u, ro) => (
+        <div className="flex items-center gap-1 min-w-0">
+          {ro
+            ? <span className="flex-1 block px-1 text-sm text-slate-700 truncate">{r.name || "—"}</span>
+            : (
+              <div className="flex-1 min-w-0">
+                <SearchableSelect value={rowValue(r)} options={rowOptions(r)} placeholder={t("— เลือกส่วนประกอบ —", "— Select part —")}
+                  onChange={(v) => { if (v.startsWith("name:")) u({ name: v.slice(5), code: null }); else { const o = partOptions.find((x) => x.value === v); u({ name: o?.label ?? "", code: v || null }); } }}
+                  onCreate={onCreatePart ? (q) => { void onCreatePart(q).then((p) => { if (p) u({ name: p.name, code: p.code }); }); } : undefined}
+                  createLabel={t("เพิ่มเข้ารายการ", "Add to list")} />
+              </div>
+            )}
+          {onLocatePart && (r.name || r.code) && (
+            <button type="button" onClick={() => onLocatePart(r)} title={t("ชี้บนรูป (มีหมุดแล้ว = ไปที่หมุด · ยังไม่มี = กดบนรูปเพื่อปักหมุด)", "Point on the image")}
+              className="h-7 w-7 shrink-0 inline-flex items-center justify-center rounded-md text-violet-500 hover:bg-violet-50"><Icon name="pin" /></button>
+          )}
+        </div>
+      ) },
     ...colorways.map((cw, i) => ({
       key: `cw_${cw.key}`, header: cwLabel(i), minWidth: 150,
       render: (r: SpecColorRow, _u: unknown, ro: boolean) => {
@@ -98,7 +128,7 @@ export function SpecColorTableEditor({ value, onChange, canEdit, pinParts, image
         );
       },
     })),
-  ], [colorways, t]);   // eslint-disable-line react-hooks/exhaustive-deps
+  ], [colorways, partOptions, onCreatePart, onLocatePart, t]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const pickCw = picking ? colorways.find((c) => c.key === picking.cw) : null;
   const pickRow = picking ? rows.find((r) => r.key === picking.row) : null;
@@ -108,7 +138,7 @@ export function SpecColorTableEditor({ value, onChange, canEdit, pinParts, image
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm font-medium text-slate-600 inline-flex items-center gap-1.5"><Icon name="design" /> {t("ตารางสี (ส่วนประกอบ × สีของรุ่น)", "Colour table (parts × colourways)")}</span>
         {canEdit && missingParts.length > 0 && (
-          <button type="button" onClick={pullParts} title={missingParts.join(", ")}
+          <button type="button" onClick={pullParts} title={missingParts.map((p) => p.name).join(", ")}
             className="h-7 px-2 text-xs border border-violet-200 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100">
             {t(`ดึงส่วนประกอบจากหมุด (${missingParts.length})`, `Pull parts from pins (${missingParts.length})`)}
           </button>

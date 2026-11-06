@@ -8,10 +8,15 @@
  * + ตารางสี (รอบ 2 · spec-colors.tsx) · บันทึกทั้งชุดผ่าน PUT /api/design-sheets/[id]/spec
  * + รอบ 3: สรุปวัตถุดิบ → ส่งไปตีราคา (onSendToCost ของหน้าแม่) / สร้างสูตร BOM (BomFromCostWizard) · พิมพ์ (/print/design-sheet/[id]?mode=spec)
  *
- * ของกลางที่ใช้: ImageMarkup (+Toolbar) · ComponentPicker · ERPModal · ConfirmDialog · ImageManager · useToast
+ * + v2 (2026-11-06): วาดแบบกระดาน (จุดดึงขยาย · แถบปรับ · ลูกศร · ปากกาเน้น · ซูม) · ป้ายชื่อข้างหมุด (รูปเล็ก+ชื่อ ลากหลบได้)
+ *   · ส่วนประกอบเลือกจากรายการกลาง material_slots (เพิ่มใหม่จากช่องเลือกได้) · ตารางสี "ชี้บนรูป"
+ *
+ * ของกลางที่ใช้: ImageMarkup (+Toolbar +StyleBar) · ComponentPicker · SearchableSelect · ERPModal · ConfirmDialog · ImageManager · useToast · useUserPref
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
-import { ImageMarkup, ImageMarkupToolbar } from "@/components/image-markup";
+import { ImageMarkup, ImageMarkupStyleBar, ImageMarkupToolbar } from "@/components/image-markup";
+import { SearchableSelect, type SelectOption } from "@/components/searchable-select";
+import { useUserPref } from "@/lib/use-user-pref";
 import { ComponentPicker } from "@/components/material-picker";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ImageManager } from "@/components/image-manager";
@@ -20,7 +25,7 @@ import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { apiFetch } from "@/lib/api";
 import { r2ImageUrl } from "@/lib/r2-image";
-import { MARKUP_COLORS, newMarkupId, type MarkupSelection, type MarkupShape, type MarkupTool } from "@/lib/image-markup";
+import { DEFAULT_MARKUP_STYLE, moveMarkupShape, newMarkupId, type MarkupPin, type MarkupSelection, type MarkupShape, type MarkupStyle, type MarkupTool } from "@/lib/image-markup";
 import type { SpecPage, SpecPin, SpecPutPage } from "@/app/api/design-sheets/[id]/spec/route";
 import { cleanSpecColors, EMPTY_SPEC_COLORS, type SpecColorTable } from "@/lib/design-sheet-spec-colors";
 import { SpecColorTableEditor } from "./spec-colors";
@@ -32,6 +37,10 @@ type Pin = Omit<SpecPin, "id" | "page_id" | "no"> & { key: string };
 type Page = Omit<SpecPage, "id" | "sort_order"> & { key: string; pins: Pin[] };
 
 const fmtQty = (n: number) => (Math.round(n * 1000) / 1000).toLocaleString("th-TH");
+const norm = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
+/** ส่วนประกอบ = รายการกลาง material_slots (ใช้ร่วมกับสูตร BOM) */
+type Part = { code: string; name: string; group: string | null };
+const PART_NAME_PREFIX = "name:";   // ค่าในช่องเลือกของส่วนประกอบที่พิมพ์ชื่อเอง (ไม่อยู่ในรายการกลาง)
 
 export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, onSendToCost, costSkuIds = [] }: {
   sheetId: string;
@@ -53,7 +62,12 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [tool, setTool] = useState<MarkupTool>("pin");
-  const [color, setColor] = useState<string>(MARKUP_COLORS[0]);
+  const [drawStyle, setDrawStyle] = useState<MarkupStyle>(DEFAULT_MARKUP_STYLE);   // หน้าตาของที่จะวาดใหม่
+  const [zoom, setZoom] = useState(1);
+  const [showLabels, setShowLabels] = useUserPref<boolean>("design_spec_pin_labels", true, (v) => (typeof v === "boolean" ? v : null));   // โชว์ชื่อบนรูป (จำต่อคน)
+  const [parts, setParts] = useState<Part[]>([]);
+  const [pendingPart, setPendingPart] = useState<{ code: string | null; name: string } | null>(null);   // ตารางสี "ชี้บนรูป" → หมุดถัดไปได้ส่วนนี้
+  const imgBoxRef = useRef<HTMLDivElement>(null);
   const [sel, setSel] = useState<MarkupSelection | null>(null);
   const [hist, setHist] = useState<Page[][]>([]);
   const [pickOpen, setPickOpen] = useState(false);
@@ -71,7 +85,8 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
         key: p.id ?? newMarkupId(), title: p.title, image_key: p.image_key, image_url: p.image_url,
         image_w: p.image_w, image_h: p.image_h, shapes: Array.isArray(p.shapes) ? p.shapes : [],
         pins: pins.filter((x) => x.page_id === p.id).map((x) => ({
-          key: x.id ?? newMarkupId(), x: Number(x.x), y: Number(x.y), part_name: x.part_name,
+          key: x.id ?? newMarkupId(), x: Number(x.x), y: Number(x.y), part_name: x.part_name, part_code: x.part_code ?? null,
+          label_dx: x.label_dx == null ? null : Number(x.label_dx), label_dy: x.label_dy == null ? null : Number(x.label_dy),
           sku_id: x.sku_id, sku_code: x.sku_code, sku_name: x.sku_name, sku_image_key: x.sku_image_key ?? null,
           qty: x.qty == null ? null : Number(x.qty), uom: x.uom, note: x.note,
         })),
@@ -82,6 +97,32 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
     finally { setLoading(false); }
   }, [sheetId, t]);
   useEffect(() => { void load(); }, [load]);
+  // รายการส่วนประกอบกลาง (material_slots — ตัวเดียวกับช่องวัตถุดิบในสูตร BOM)
+  const loadParts = useCallback(async () => {
+    try {
+      const j = await apiFetch("/api/master-v2/material-slots?limit=500").then((r) => r.json());
+      const rows = (j.data ?? []) as { slot_code: string; name_th: string; slot_group: string | null; is_active: boolean; sort_order: number }[];
+      setParts(rows.filter((r) => r.is_active !== false).sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map((r) => ({ code: r.slot_code, name: r.name_th, group: r.slot_group })));
+    } catch { /* โหลดรายการไม่ได้ = ยังพิมพ์ชื่อเองได้ */ }
+  }, []);
+  useEffect(() => { void loadParts(); }, [loadParts]);
+  /** เพิ่มส่วนประกอบใหม่เข้ารายการกลาง (จากช่องเลือก) */
+  const createPart = useCallback(async (name: string): Promise<Part | null> => {
+    const nm = name.trim(); if (!nm) return null;
+    const hit = parts.find((p) => norm(p.name) === norm(nm)); if (hit) return hit;
+    const code = `PART_${Date.now().toString(36).toUpperCase()}`;
+    try {
+      const j = await apiFetch("/api/master-v2/material-slots", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slot_code: code, name_th: nm, slot_group: "Design", sort_order: 900 }) }).then((r) => r.json());
+      if (j.error) throw new Error(j.error);
+      const p: Part = { code: (j.data?.slot_code as string) ?? code, name: nm, group: "Design" };
+      setParts((ps) => [...ps, p]);
+      toast.success(t(`เพิ่ม "${nm}" เข้ารายการส่วนประกอบแล้ว`, `Added "${nm}" to the parts list`));
+      return p;
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("เพิ่มรายการไม่สำเร็จ", "Could not add the part")); return null; }
+  }, [parts, toast, t]);
+  const partOptions = useMemo<SelectOption[]>(() => parts.map((p) => ({ value: p.code, label: p.name, sub: p.group ?? undefined, searchText: p.code })), [parts]);
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
 
   // เปลี่ยนแปลงทุกครั้งผ่านตัวนี้ → เก็บประวัติไว้ย้อนกลับ (สูงสุด 50 ขั้น)
@@ -114,11 +155,41 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
     setSel(null);
   };
 
+  // ทำซ้ำของที่วาดที่เลือก (ขยับออกนิดนึงให้เห็นว่ามี 2 ชิ้น)
+  const duplicateSel = () => {
+    if (!page || sel?.kind !== "shape") return;
+    const s = page.shapes.find((x) => x.id === sel.id); if (!s) return;
+    const copy = { ...moveMarkupShape(s, 2, 2), id: newMarkupId() } as MarkupShape;
+    patchPage({ shapes: [...page.shapes, copy] });
+    setSel({ kind: "shape", id: copy.id });
+  };
+
   const addPin = (pt: { x: number; y: number }) => {
     if (!page) return;
-    const pin: Pin = { key: newMarkupId(), x: pt.x, y: pt.y, part_name: null, sku_id: null, sku_code: null, sku_name: null, sku_image_key: null, qty: null, uom: null, note: null };
+    const pin: Pin = { key: newMarkupId(), x: pt.x, y: pt.y, part_name: pendingPart?.name ?? null, part_code: pendingPart?.code ?? null, sku_id: null, sku_code: null, sku_name: null, sku_image_key: null, qty: null, uom: null, note: null };
     patchPage({ pins: [...page.pins, pin] });
     setSel({ kind: "pin", id: pin.key });
+    if (pendingPart) { setPendingPart(null); setTool("select"); }
+  };
+  // ส่วนประกอบของหมุด: ค่าในช่องเลือก ↔ part_code / part_name
+  const partValue = (x: Pin) => x.part_code ?? (x.part_name ? `${PART_NAME_PREFIX}${x.part_name}` : "");
+  const partOptionsFor = (x: Pin): SelectOption[] => (x.part_code || !x.part_name ? partOptions : [{ value: `${PART_NAME_PREFIX}${x.part_name}`, label: x.part_name, sub: t("พิมพ์เอง", "Typed") }, ...partOptions]);
+  const setPinPart = (pi: number, key: string, v: string) => {
+    if (v.startsWith(PART_NAME_PREFIX)) { patchPin(pi, key, { part_code: null, part_name: v.slice(PART_NAME_PREFIX.length) }); return; }
+    const p = parts.find((x) => x.code === v);
+    patchPin(pi, key, { part_code: v || null, part_name: p?.name ?? null });
+  };
+  // ตารางสี "ชี้บนรูป": มีหมุดของส่วนนั้นแล้ว = เลือกหมุดให้ดู · ยังไม่มี = ให้กดบนรูปเพื่อปักหมุดส่วนนั้น
+  const locatePart = (row: { name: string; code?: string | null }) => {
+    const match = (x: Pin) => (!!row.code && x.part_code === row.code) || (!!row.name && norm(x.part_name ?? "") === norm(row.name));
+    for (let pi = 0; pi < pages.length; pi++) {
+      const hit = pages[pi].pins.find(match);
+      if (hit) { selectPin(pi, hit.key); imgBoxRef.current?.scrollIntoView({ block: "center", behavior: "smooth" }); return; }
+    }
+    if (!pages.length) { toast.error(t("เพิ่มรูปก่อน แล้วค่อยชี้ตำแหน่งบนรูป", "Add an image first, then point on it")); return; }
+    setPendingPart({ code: row.code ?? null, name: row.name }); setTool("pin"); setSel(null);
+    imgBoxRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    toast.info(t(`กดบนรูปตรง "${row.name || "ส่วนนี้"}" เพื่อปักหมุด`, `Click the image where "${row.name || "this part"}" is to drop a pin`));
   };
 
   // เลือกหมุด (จากรูปหรือรายการ) → เลื่อนรายการให้เห็น
@@ -142,7 +213,8 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
         colors,
         pages: pages.map((p) => ({
           title: p.title, image_key: p.image_key, image_url: p.image_url, image_w: p.image_w, image_h: p.image_h, shapes: p.shapes,
-          pins: p.pins.map((x) => ({ x: x.x, y: x.y, part_name: x.part_name, sku_id: x.sku_id, sku_code: x.sku_code, sku_name: x.sku_name, qty: x.qty, uom: x.uom, note: x.note })),
+          pins: p.pins.map((x) => ({ x: x.x, y: x.y, part_name: x.part_name, part_code: x.part_code ?? null, label_dx: x.label_dx ?? null, label_dy: x.label_dy ?? null,
+            sku_id: x.sku_id, sku_code: x.sku_code, sku_name: x.sku_name, qty: x.qty, uom: x.uom, note: x.note })),
         })),
       };
       const j = await apiFetch(`/api/design-sheets/${sheetId}/spec`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json());
@@ -158,7 +230,7 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
   useEffect(() => { if (saveRef) saveRef.current = save; }, [save, saveRef]);
 
   // ตารางสี: ชื่อส่วนประกอบจากหมุด (ไว้ดึงเป็นแถว) + รูปที่ใช้ดูดสี
-  const pinParts = useMemo(() => pages.flatMap((p) => p.pins.map((x) => x.part_name ?? "")).filter(Boolean), [pages]);
+  const pinParts = useMemo(() => pages.flatMap((p) => p.pins.filter((x) => x.part_name).map((x) => ({ name: x.part_name as string, code: x.part_code ?? null }))), [pages]);
   const imageKeys = useMemo(() => pages.map((p) => p.image_key).filter((k): k is string => !!k), [pages]);
 
   // สรุปวัตถุดิบ: รวมหมุดที่ใช้ SKU เดียวกัน (ทุกหน้า) · จำนวนรวมแยกตามหน่วย
@@ -213,7 +285,14 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
     </div>
   ) : null;
 
-  const markupPins = (page?.pins ?? []).map((x) => ({ id: x.key, x: x.x, y: x.y, label: String(pinNo.get(x.key) ?? ""), muted: !x.sku_id }));
+  const markupPins: MarkupPin[] = (page?.pins ?? []).map((x) => {
+    const no = pinNo.get(x.key) ?? "";
+    return {
+      id: x.key, x: x.x, y: x.y, label: String(no), muted: !x.sku_id, ldx: x.label_dx ?? null, ldy: x.label_dy ?? null,
+      tag: { title: `${no} · ${x.part_name || t("ส่วนประกอบ?", "Part?")}`, sub: x.sku_name || t("ยังไม่เลือก SKU", "No SKU yet"), imageUrl: x.sku_image_key ? r2ImageUrl(x.sku_image_key, 96) : null },
+    };
+  });
+  const selShape = sel?.kind === "shape" && page ? page.shapes.find((s) => s.id === sel.id) ?? null : null;
 
   return (
     <div className="space-y-3">
@@ -243,31 +322,45 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
             <div className="flex items-center gap-2 flex-wrap">
               <input value={page.title ?? ""} onChange={(e) => patchPage({ title: e.target.value })} placeholder={t("ชื่อรูป เช่น ด้านหน้า", "Image name, e.g. Front")}
                 className="h-8 w-40 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
-              <ImageMarkupToolbar tool={tool} onTool={(x) => { setTool(x); }} color={color} onColor={setColor}
-                onUndo={undo} canUndo={hist.length > 0} onDelete={deleteSelected} canDelete={!!sel} pinLabel={t("หมุดวัตถุดิบ", "Material pin")} />
+              <ImageMarkupToolbar tool={tool} onTool={(x) => { setTool(x); setPendingPart(null); }}
+                onUndo={undo} canUndo={hist.length > 0} pinLabel={t("หมุดวัตถุดิบ", "Material pin")} zoom={zoom} onZoom={setZoom} />
               <button type="button" onClick={() => setDelPage(cur)} title={t("เอารูปนี้ออกจากรายละเอียดงาน (รูปในใบงานยังอยู่)", "Remove this image from job details (sheet image stays)")}
                 className="ml-auto h-8 px-2 text-xs text-rose-600 border border-rose-200 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1">
                 <Icon name="delete" /> {t("เอารูปออก", "Remove image")}
               </button>
             </div>
           )}
+          {page && canEdit && (
+            <ImageMarkupStyleBar shape={selShape} style={drawStyle} onStyle={(p) => setDrawStyle((s) => ({ ...s, ...p }))}
+              onShapeChange={(n) => patchPage({ shapes: page.shapes.map((s) => (s.id === n.id ? n : s)) })}
+              onDuplicate={duplicateSel} onDelete={deleteSelected} />
+          )}
+          {pendingPart && (
+            <div className="flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs text-violet-700">
+              <Icon name="pin" /> {t(`กดบนรูปตรง "${pendingPart.name}" เพื่อปักหมุด`, `Click the image where "${pendingPart.name}" is`)}
+              <button type="button" onClick={() => { setPendingPart(null); setTool("select"); }} className="ml-auto underline">{t("ยกเลิก", "Cancel")}</button>
+            </div>
+          )}
 
           {page && (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
+            <div ref={imgBoxRef} className="rounded-xl border border-slate-200 bg-slate-50 overflow-hidden">
               <ImageMarkup src={page.image_url} alt={page.title ?? ""} shapes={page.shapes} pins={markupPins}
-                editable={canEdit} tool={tool} color={color} selected={sel}
+                editable={canEdit} tool={tool} drawStyle={drawStyle} zoom={zoom} showPinLabels={showLabels} selected={sel}
                 onSelect={(s) => setSel(s)}
                 onShapesChange={(shapes: MarkupShape[]) => patchPage({ shapes })}
                 onPinAdd={addPin}
                 onPinMove={(id, pt) => patchPin(cur, id, pt)}
-                onDeleteSelected={deleteSelected}
+                onPinLabelMove={(id, off) => patchPin(cur, id, { label_dx: off.ldx, label_dy: off.ldy })}
+                onDeleteSelected={deleteSelected} onUndo={undo} onDuplicate={duplicateSel} onToolDone={() => setTool("select")}
                 onImageLoad={(w, h) => { if (page.image_w !== w || page.image_h !== h) setPages((ps) => ps.map((p, i) => (i === cur ? { ...p, image_w: w, image_h: h } : p))); }} />
             </div>
           )}
           {canEdit && (
             <p className="text-[11px] text-slate-400">
               {tool === "pin" ? t("กดบนรูปเพื่อปักหมุด แล้วเลือก SKU วัตถุดิบด้านขวา · ลากหมุดเพื่อย้าย", "Click the image to drop a pin, then choose the material SKU on the right · drag pins to move")
-                : tool === "select" ? t("ลากของที่วาดเพื่อย้าย · ดับเบิลคลิกข้อความเพื่อแก้ · กด Delete เพื่อลบที่เลือก", "Drag drawings to move · double-click text to edit · press Delete to remove the selection")
+                : tool === "select" ? t("กดของที่วาด → ลากจุดมุมเพื่อขยาย/ย่อ · ลากตัวมันเพื่อย้าย · ดับเบิลคลิกข้อความเพื่อแก้ · Delete = ลบ · Ctrl+Z = ย้อนกลับ · ลากป้ายชื่อหมุดหลบได้", "Click a drawing → drag corners to resize · drag to move · double-click text to edit · Delete removes · Ctrl+Z undoes · drag pin labels aside")
+                : tool === "arrow" ? t("ลากจากต้นไปปลายลูกศร", "Drag from the tail to the tip")
+                : tool === "hl" ? t("ลากทับจุดที่จะเน้น (สีจาง ยังเห็นของข้างใต้)", "Drag over what to highlight (translucent)")
                 : tool === "text" ? t("กดบนรูปแล้วพิมพ์ข้อความ กด Enter", "Click the image, type, then press Enter")
                 : t("ลากบนรูปเพื่อวาด", "Drag on the image to draw")}
             </p>
@@ -277,7 +370,15 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
         {/* ── ขวา: รายการหมุด + สรุปวัตถุดิบ ── */}
         <div className="space-y-3 min-w-0">
           <div>
-            <div className="text-xs font-medium text-slate-500 mb-1">{t("หมุดวัตถุดิบ", "Material pins")} ({pinNo.size})</div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-medium text-slate-500">{t("หมุดวัตถุดิบ", "Material pins")} ({pinNo.size})</span>
+              <label className="ml-auto inline-flex items-center gap-1 text-[11px] text-slate-500 cursor-pointer">
+                <input type="checkbox" checked={showLabels} onChange={(e) => setShowLabels(e.target.checked)} className="h-3.5 w-3.5 accent-violet-600" />
+                {t("โชว์ชื่อบนรูป", "Show labels")}
+              </label>
+              {canEdit && <a href="/master/material-slots" target="_blank" rel="noopener" title={t("เพิ่ม / แก้ / ลบ รายการส่วนประกอบ (ใช้ร่วมกับสูตร BOM)", "Add / edit / remove parts (shared with BOM)")}
+                className="text-[11px] text-violet-600 hover:underline">{t("จัดการรายการส่วนประกอบ", "Manage parts")}</a>}
+            </div>
             {pinNo.size === 0 && <p className="text-xs text-slate-400 py-2">{canEdit ? t("ยังไม่มีหมุด — เลือกเครื่องมือหมุดแล้วกดบนรูป", "No pins yet — choose the pin tool and click the image") : t("ยังไม่มีหมุด", "No pins yet")}</p>}
             <div className="divide-y divide-slate-100">
               {pages.map((p, pi) => p.pins.map((x) => {
@@ -289,9 +390,12 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
                     <div className="flex items-center gap-2">
                       <span className={`shrink-0 w-6 h-6 rounded-full text-white text-xs font-bold inline-flex items-center justify-center ${x.sku_id ? "bg-violet-600" : "bg-amber-500"}`}>{no}</span>
                       {canEdit ? (
-                        <input value={x.part_name ?? ""} onChange={(e) => patchPin(pi, x.key, { part_name: e.target.value || null })} onClick={(e) => e.stopPropagation()}
-                          placeholder={t("ส่วนประกอบ เช่น ตัวกระเป๋า", "Part, e.g. Bag body")}
-                          className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-400" />
+                        <div className="flex-1 min-w-0" onClick={(e) => e.stopPropagation()}>
+                          <SearchableSelect value={partValue(x)} options={partOptionsFor(x)} onChange={(v) => setPinPart(pi, x.key, v)}
+                            placeholder={t("— ส่วนประกอบ (เช่น ซิป, ตัวกระเป๋า) —", "— Part (e.g. zipper, body) —")}
+                            onCreate={(q) => { void createPart(q).then((p) => { if (p) patchPin(pi, x.key, { part_code: p.code, part_name: p.name }); }); }}
+                            createLabel={t("เพิ่มเข้ารายการ", "Add to list")} />
+                        </div>
                       ) : <span className="flex-1 min-w-0 text-sm font-medium text-slate-700 truncate">{x.part_name || "—"}</span>}
                       {pages.length > 1 && <span className="text-[10px] text-slate-400 shrink-0">{p.title || t(`รูปที่ ${pi + 1}`, `Image ${pi + 1}`)}</span>}
                       {canEdit && (
@@ -378,7 +482,8 @@ export function DesignSheetSpecTab({ sheetId, canEdit, onDirtyChange, saveRef, o
       )}
 
       {/* 🎨 ตารางสี (รอบ 2) — บันทึกพร้อมปุ่มด้านล่าง */}
-      <SpecColorTableEditor value={colors} onChange={(c) => { setColors(c); setDirty(true); }} canEdit={canEdit} pinParts={pinParts} imageKeys={imageKeys} />
+      <SpecColorTableEditor value={colors} onChange={(c) => { setColors(c); setDirty(true); }} canEdit={canEdit} pinParts={pinParts} imageKeys={imageKeys}
+        partOptions={partOptions} onCreatePart={createPart} onLocatePart={locatePart} />
 
       <div className="flex items-center justify-end gap-2 pt-1 border-t border-slate-100">
         <button type="button" onClick={openPrint} title={t("ใบพิมพ์รายละเอียดงาน (รูป+หมุด · สรุปวัตถุดิบ · ตารางสี)", "Print job details (images+pins · materials · colours)")}

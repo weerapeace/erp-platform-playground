@@ -366,7 +366,9 @@ export default function PrintDesignSheetPage() {
             pages: ((spRes.pages ?? []) as SpecPage[]).map((p) => ({
               title: p.title, image_url: p.image_url, image_w: p.image_w, image_h: p.image_h, shapes: Array.isArray(p.shapes) ? p.shapes : [],
               pins: pins.filter((x) => x.page_id === p.id).map((x) => ({
-                no: Number(x.no ?? 0), x: Number(x.x), y: Number(x.y), part_name: x.part_name, sku_id: x.sku_id, sku_code: x.sku_code, sku_name: x.sku_name,
+                no: Number(x.no ?? 0), x: Number(x.x), y: Number(x.y), part_name: x.part_name, part_code: x.part_code ?? null,
+                label_dx: x.label_dx == null ? null : Number(x.label_dx), label_dy: x.label_dy == null ? null : Number(x.label_dy),
+                sku_id: x.sku_id, sku_code: x.sku_code, sku_name: x.sku_name, sku_image_key: x.sku_image_key ?? null,
                 qty: x.qty == null ? null : Number(x.qty), uom: x.uom, note: x.note,
               })),
             })),

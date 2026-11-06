@@ -24,6 +24,8 @@ export const revalidate = 0;
 export type SpecPin = {
   id?: string; page_id?: string; no?: number;
   x: number; y: number; part_name: string | null;
+  part_code?: string | null;       // ส่วนประกอบจากรายการกลาง material_slots (v2)
+  label_dx?: number | null; label_dy?: number | null;   // ป้ายชื่อข้างหมุด ห่างจากหมุด (%) · null = ตั้งต้น
   sku_id: string | null; sku_code: string | null; sku_name: string | null;
   sku_image_key?: string | null;   // รูปปก SKU (GET เติมให้ · ไม่ได้เก็บ)
   qty: number | null; uom: string | null; note: string | null;
@@ -46,7 +48,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const [pg, pn, co] = await Promise.all([
     admin.from("design_sheet_spec_pages").select("id, title, image_key, image_url, image_w, image_h, shapes, sort_order")
       .eq("sheet_id", id).order("sort_order", { ascending: true }),
-    admin.from("design_sheet_spec_pins").select("id, page_id, no, x, y, part_name, sku_id, sku_code, sku_name, qty, uom, note")
+    admin.from("design_sheet_spec_pins").select("id, page_id, no, x, y, part_name, part_code, label_dx, label_dy, sku_id, sku_code, sku_name, qty, uom, note")
       .eq("sheet_id", id).order("no", { ascending: true }),
     admin.from("design_sheet_spec_colors").select("data").eq("sheet_id", id).maybeSingle(),
   ]);
@@ -100,8 +102,10 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
         const x = pct(pin?.x), y = pct(pin?.y);
         if (x == null || y == null) continue;
         const skuId = typeof pin.sku_id === "string" && UUID.test(pin.sku_id) ? pin.sku_id : null;
+        const ldx = num(pin.label_dx), ldy = num(pin.label_dy);
         pinRows.push({
-          sheet_id: id, page_id: pageId, no: ++pinNo, x, y, part_name: txt(pin.part_name, 120),
+          sheet_id: id, page_id: pageId, no: ++pinNo, x, y, part_name: txt(pin.part_name, 120), part_code: txt(pin.part_code, 60),
+          label_dx: ldx == null ? null : Math.max(-100, Math.min(100, ldx)), label_dy: ldy == null ? null : Math.max(-100, Math.min(100, ldy)),
           sku_id: skuId, sku_code: skuId ? txt(pin.sku_code, 80) : null, sku_name: skuId ? txt(pin.sku_name, 300) : null,
           qty: num(pin.qty), uom: txt(pin.uom, 30), note: txt(pin.note, 500),
         });

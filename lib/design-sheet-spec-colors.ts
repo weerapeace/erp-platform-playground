@@ -17,7 +17,7 @@ export type SpecColorCell = {
   sku_id: string | null; sku_code: string | null; sku_name: string | null;
   swatch_id: string | null;
 };
-export type SpecColorRow = { key: string; name: string };
+export type SpecColorRow = { key: string; name: string; code?: string | null };   // code = ส่วนประกอบจากรายการกลาง material_slots (v2)
 export type SpecColorway = { key: string; name: string; cells: Record<string, SpecColorCell> };
 export type SpecColorTable = { rows: SpecColorRow[]; colorways: SpecColorway[] };
 
@@ -61,7 +61,8 @@ export function cleanSpecColors(raw: unknown): SpecColorTable {
   for (const r of (Array.isArray(o.rows) ? o.rows : []).slice(0, LIMITS.rows)) {
     const k = key((r as Record<string, unknown>)?.key); if (!k || seen.has(k)) continue;
     seen.add(k);
-    rows.push({ key: k, name: str((r as Record<string, unknown>).name, LIMITS.name) ?? "" });
+    const code = str((r as Record<string, unknown>).code, 60);
+    rows.push({ key: k, name: str((r as Record<string, unknown>).name, LIMITS.name) ?? "", ...(code ? { code } : {}) });
   }
   const colorways: SpecColorway[] = [];
   for (const cw of (Array.isArray(o.colorways) ? o.colorways : []).slice(0, LIMITS.colorways)) {
