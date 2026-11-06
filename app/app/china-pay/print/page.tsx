@@ -11,6 +11,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { printReportHtmlInNewWindow } from "@/components/report";
 import { ListPrintFrame } from "@/components/report/list-print-frame";
+import { SaveImageButton } from "@/components/report/save-image-button";
 import { Check, ListPrintPanel, Section } from "@/components/report/list-print-panel";
 import { useListPrintSettings } from "@/components/report/use-list-print-settings";
 import { useAuth } from "@/components/auth";
@@ -156,6 +157,8 @@ function ChinaBillsPrintView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [doPrint]);
 
+  // ความกว้างกระดาษบนจอ (96 dpi) สำหรับบันทึก JPG — A4 210×297 มม. · A5 148×210 มม.
+  const paperPx = s.paper === "A5" ? (s.orientation === "landscape" ? 794 : 559) : s.orientation === "landscape" ? 1123 : 794;
   const frameWidth = s.orientation === "landscape" ? (s.paper === "A5" ? 840 : 1180) : s.paper === "A5" ? 600 : 840;
   const noRateBills = bills.filter((b) => !b.thb && b.rate <= 0 && b.status !== "ยกเลิก").length;
   const goBack = () => { if (window.opener) window.close(); else router.push("/app/china-pay"); };
@@ -230,6 +233,7 @@ function ChinaBillsPrintView() {
           className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm ${panelOpen ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
           <Icon value="i:layout-sidebar-right" /> ตั้งค่าหน้าพิมพ์
         </button>
+        <SaveImageButton html={html} fileName={`${s.title.trim() || defaultTitle} ${todayLocal()}`} pageWidthPx={paperPx} />
         <button onClick={doPrint} disabled={!html} className="h-9 rounded-lg bg-blue-600 px-5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">พิมพ์ / บันทึก PDF</button>
       </div>
       <div className="flex flex-col items-start gap-4 px-4 py-6 lg:flex-row">
