@@ -6,6 +6,7 @@
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { defaultLineTemplate, renderLineTemplate } from "@/lib/creative-line-templates";
 import { lineEventEnabled } from "@/lib/line-registry";
+import { loadLineConfig, linePush, lineText } from "@/lib/line-send";
 import { driveConfigured, driveCreateFolder, driveGetFolder, driveUploadFile, driveEnsureFolder, driveFindFolder, driveListImages, driveListChildFolders, driveMoveFile, driveTrashFile, DRIVE_ROOT_FOLDER_ID } from "@/lib/google-drive";
 import { r2GetObject } from "@/lib/r2";
 
@@ -293,15 +294,10 @@ async function syncTaskStructured(
  */
 export async function pushTasksLine(admin: Admin, text: string): Promise<void> {
   try {
-    const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-    const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string> };
+    const cfg = await loadLineConfig(admin);
     const target = cfg.groups?.creative || cfg.group_id || "";
     if (!cfg.token || !target) return;
-    await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ to: target, messages: [{ type: "text", text: text.slice(0, 4900) }] }),
-    });
+    await linePush(cfg, { to: target, slot: "creative", messages: [lineText(text)] });
   } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
 }
 
@@ -311,8 +307,7 @@ export async function pushTasksLine(admin: Admin, text: string): Promise<void> {
  */
 export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Record<string, unknown>): Promise<void> {
   try {
-    const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-    const cfg = (row?.sval ?? {}) as { token?: string; group_id?: string; groups?: Record<string, string>; templates?: Record<string, string>; disabled_events?: Record<string, boolean> };
+    const cfg = await loadLineConfig(admin);
     const target = cfg.groups?.creative || cfg.group_id || "";
     if (!cfg.token || !target) return;
     if (!lineEventEnabled(cfg.disabled_events, eventKey)) return;   // ปิดจากศูนย์ LINE / หน้าแก้การแจ้งเตือน → ไม่ส่ง
@@ -325,18 +320,10 @@ export async function pushTasksLineTpl(admin: Admin, eventKey: string, vars: Rec
       text = text.split("\n").filter((ln) => { const s = ln.trim(); return s && !/^(เปิดงาน|เปิดดู|เปิด|ลิงก์|link)\s*[:：]?$/i.test(s); }).join("\n").trim();
     }
     // helper ส่งเข้า LINE — คืน true ถ้าสำเร็จ (LINE ตอบ 200) · false ถ้าถูกตีกลับ/ล้ม
-    const doPush = async (msgs: Record<string, unknown>[]): Promise<boolean> => {
-      try {
-        const res = await fetch("https://api.line.me/v2/bot/message/push", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-          body: JSON.stringify({ to: target, messages: msgs }),
-        });
-        return res.ok;
-      } catch { return false; }
-    };
-    // ⚠️ ประหยัดโควตา LINE: LINE นับโควตา "ต่อ message object" — [ข้อความ + ปุ่ม] = 2 โควตา
-    // จึงรวมทุกอย่างไว้ใน Flex bubble เดียว (ข้อความ + ปุ่มเปิดดู) = 1 ข้อความ = 1 โควตา · ถ้ามีลิงก์
+    const doPush = async (msgs: Record<string, unknown>[]): Promise<boolean> =>
+      (await linePush(cfg, { to: target, slot: "creative", messages: msgs })).ok;
+    // รวมทุกอย่างไว้ใน Flex bubble เดียว (ข้อความ + ปุ่มเปิดดู) — แยกเป็น 2 ก้อนเคยทำให้ทั้งชุดถูกตีกลับ (400)
+    // (โควตา LINE นับ "ต่อคนในกลุ่ม" ไม่ใช่ต่อก้อนข้อความ — ดู lib/line-send)
     const body = (text || "").slice(0, 4900);
     if (link) {
       const flexMsg = {

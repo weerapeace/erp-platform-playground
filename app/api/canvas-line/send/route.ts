@@ -13,12 +13,12 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
+import { loadLineConfig, linePush, type LineMessage } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 const SAFE_KEY = /^[a-zA-Z0-9._/-]+$/;
-type LineCfg = { token?: string; group_id?: string; groups?: Record<string, string> } & Record<string, unknown>;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "tasks.edit"); if (denied) return denied;
@@ -32,8 +32,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const caption = String(body.caption ?? "").trim().slice(0, 500);
 
   const admin = supabaseAdmin();
-  const { data: row } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-  const cfg = ((row as { sval?: LineCfg } | null)?.sval ?? {}) as LineCfg;
+  const cfg = await loadLineConfig(admin);
   const target = cfg.groups?.creative || cfg.group_id || "";
   if (!cfg.token || !target) {
     return NextResponse.json({ error: "ยังไม่ได้ตั้งกลุ่ม LINE งาน Creative (ไปที่หน้างาน → ตั้งค่า LINE)", needConfig: true }, { status: 400 });
@@ -44,18 +43,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const proto = request.headers.get("x-forwarded-proto") || "https";
   const imgUrl = `${proto}://${host}/api/r2-image?key=${encodeURIComponent(key)}`;
 
-  const messages: Record<string, unknown>[] = [];
+  const messages: LineMessage[] = [];
   if (caption) messages.push({ type: "text", text: caption });
   messages.push({ type: "image", originalContentUrl: imgUrl, previewImageUrl: imgUrl });
 
-  const r = await fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-    body: JSON.stringify({ to: target, messages }),
-  });
+  const r = await linePush(cfg, { to: target, slot: "creative", messages });
   if (!r.ok) {
-    const detail = await r.text().catch(() => "");
-    return NextResponse.json({ error: `ส่ง LINE ไม่สำเร็จ (${r.status}) — ตรวจว่าบอทอยู่ในกลุ่ม + รูปเปิดสาธารณะได้`, detail: detail.slice(0, 300) }, { status: 502 });
+    // 400 ของการส่งรูป มักเป็นเพราะ LINE เปิดรูปไม่ได้ — บอกเพิ่มให้ตรวจ
+    const hint = r.status === 400 ? " หรือรูปเปิดแบบสาธารณะไม่ได้" : "";
+    return NextResponse.json({ error: `${r.error}${hint}`, detail: r.detail ?? "" }, { status: 502 });
   }
 
   await writeAudit(admin, {

@@ -7,9 +7,9 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { lineEventEnabled } from "@/lib/line-registry";
+import { loadLineConfig, linePush, lineText } from "@/lib/line-send";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
-type LineCfg = { token?: string; group_id?: string; groups?: Record<string, string>; templates?: Record<string, string>; disabled_events?: Record<string, boolean> };
 
 const appBase = () => (process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "https://erp-platform-playground.vercel.app").replace(/\/$/, "");
 export const boardLink = (path: string): string => `${appBase()}${path}`;
@@ -35,30 +35,18 @@ const DEFAULT_TPL: Record<string, string> = {
   bom_request: "📐 ขอแก้สูตร · {sku}\n{product_name}\n👤 ผู้ขอ: {actor} · {lines} รายการ\n{note}\n🔗 {link}",
 };
 
-async function lineCfg(admin: Admin): Promise<LineCfg> {
-  const { data } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-  return ((data as { sval?: LineCfg } | null)?.sval ?? {}) as LineCfg;
-}
-async function linePush(token: string, to: string, text: string): Promise<void> {
-  await fetch("https://api.line.me/v2/bot/message/push", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ to, messages: [{ type: "text", text: text.slice(0, 4900) }] }),
-  });
-}
-
 /** ส่งเข้ากลุ่ม LINE ตาม slot (production/qc) + แม่แบบต่อเหตุการณ์
  *  ⚠️ ส่งเฉพาะเมื่อ "ตั้งกลุ่มของ slot นั้น" แล้ว (ไม่ fallback ไปกลุ่มหลัก — กันส่งผิดกลุ่ม) */
 export async function pushLineTpl(admin: Admin, slot: string, eventKey: string, vars: Record<string, unknown>): Promise<void> {
   try {
-    const cfg = await lineCfg(admin);
+    const cfg = await loadLineConfig(admin);
     if (!lineEventEnabled(cfg.disabled_events, eventKey)) return;   // ปิดจากศูนย์ LINE → ไม่ส่ง
     const target = cfg.groups?.[slot] || "";
     if (!cfg.token || !target) return;
     const tplRaw = (cfg.templates?.[eventKey] && cfg.templates[eventKey].trim()) || DEFAULT_TPL[eventKey] || "";
     const text = render(tplRaw, vars);
     if (!text) return;
-    await linePush(cfg.token, target, text);
+    await linePush(cfg, { to: target, slot, messages: [lineText(text)] });
   } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
 }
 
@@ -66,13 +54,13 @@ export async function pushLineTpl(admin: Admin, slot: string, eventKey: string, 
  *  ใช้กับเหตุการณ์จัดซื้อ (ออก PO / รับของ) — ถ้ายังไม่ตั้งกลุ่มเฉพาะ จะ fallback ไปกลุ่มขอซื้อที่มีอยู่ */
 export async function pushLineText(admin: Admin, groupKeys: string[], text: string, eventKey?: string): Promise<void> {
   try {
-    const cfg = await lineCfg(admin);
+    const cfg = await loadLineConfig(admin);
     if (eventKey && !lineEventEnabled(cfg.disabled_events, eventKey)) return;   // ปิดจากศูนย์ LINE → ไม่ส่ง
     if (!cfg.token || !text.trim()) return;
-    let target = "";
-    for (const k of groupKeys) { const g = cfg.groups?.[k]; if (g) { target = g; break; } }
+    let target = "", slot = "";
+    for (const k of groupKeys) { const g = cfg.groups?.[k]; if (g) { target = g; slot = k; break; } }
     if (!target) return;
-    await linePush(cfg.token, target, text);
+    await linePush(cfg, { to: target, slot, messages: [lineText(text)] });
   } catch { /* เงียบ — LINE ล้มไม่กระทบการบันทึก */ }
 }
 
@@ -80,10 +68,10 @@ export async function pushLineText(admin: Admin, groupKeys: string[], text: stri
 export async function dmEmployeeById(admin: Admin, employeeId: string | null | undefined, text: string): Promise<void> {
   if (!employeeId) return;
   try {
-    const cfg = await lineCfg(admin); if (!cfg.token) return;
+    const cfg = await loadLineConfig(admin); if (!cfg.token) return;
     const { data: emp } = await admin.from("employees").select("line_user_id").eq("id", employeeId).maybeSingle();
     const uid = (emp as { line_user_id?: string | null } | null)?.line_user_id;
-    if (uid) await linePush(cfg.token, uid, text);
+    if (uid) await linePush(cfg, { to: uid, messages: [lineText(text)] });
   } catch { /* เงียบ */ }
 }
 
@@ -91,14 +79,14 @@ export async function dmEmployeeById(admin: Admin, employeeId: string | null | u
 export async function dmEmployeeByName(admin: Admin, name: string | null | undefined, text: string): Promise<void> {
   const nm = (name ?? "").trim(); if (!nm) return;
   try {
-    const cfg = await lineCfg(admin); if (!cfg.token) return;
+    const cfg = await loadLineConfig(admin); if (!cfg.token) return;
     const { data: emps } = await admin.from("employees").select("line_user_id, nickname, first_name_th, last_name_th").not("line_user_id", "is", null);
     const hit = (emps ?? []).find((e: Record<string, unknown>) => {
       const nick = String(e.nickname ?? "").trim();
       const full = `${e.first_name_th ?? ""} ${e.last_name_th ?? ""}`.trim();
       return (nick && (nick === nm || nm.startsWith(nick))) || (full && (full === nm || full.startsWith(nm)));
     }) as { line_user_id?: string | null } | undefined;
-    if (hit?.line_user_id) await linePush(cfg.token, hit.line_user_id, text);
+    if (hit?.line_user_id) await linePush(cfg, { to: hit.line_user_id, messages: [lineText(text)] });
   } catch { /* เงียบ */ }
 }
 

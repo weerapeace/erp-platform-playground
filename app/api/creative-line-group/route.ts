@@ -13,6 +13,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { TASKS_SETTINGS_PERM } from "@/lib/creative-perms";   // ตั้งค่าแอป = หัวหน้า/แอดมิน
+import { linePush, lineText } from "@/lib/line-send";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -85,12 +86,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (body.test) {
     const target = cfg.groups?.creative || cfg.group_id || "";
     if (!cfg.token || !target) return NextResponse.json({ error: "ยังไม่มีโทเคนบอท หรือยังไม่มีกลุ่มปลายทาง", needConfig: true }, { status: 400 });
-    const r = await fetch("https://api.line.me/v2/bot/message/push", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },
-      body: JSON.stringify({ to: target, messages: [{ type: "text", text: "🎨 ทดสอบแจ้งเตือนงาน — กลุ่มนี้พร้อมรับแจ้งเตือนงาน Creative แล้ว ✅" }] }),
-    });
-    if (!r.ok) return NextResponse.json({ error: `ส่งไม่สำเร็จ (${r.status}) — ตรวจว่าบอทอยู่ในกลุ่มนี้ + group id ถูกต้อง` }, { status: 502 });
+    const r = await linePush(cfg, { to: target, slot: "creative", messages: [lineText("🎨 ทดสอบแจ้งเตือนงาน — กลุ่มนี้พร้อมรับแจ้งเตือนงาน Creative แล้ว ✅")] });
+    if (!r.ok) return NextResponse.json({ error: r.error }, { status: 502 });
     return NextResponse.json({ ok: true, sent: true, error: null });
   }
 
