@@ -23,6 +23,30 @@ import { fmtBytes, uploadTicketFile } from "./upload";
 import { TypeIconBox } from "./type-icon-picker";
 import type { TicketType } from "./types";
 
+/* ── ช่างที่มอบหมายล่าสุด (จำในเครื่องของคนเปิดตั๋ว · ความสะดวกส่วนตัว ไม่ใช่ข้อมูลหลัก) ──
+ * { byType: { <type_key>: {id,name} | null }, last: {id,name} | null } · เลือก "ไม่มอบหมาย" ก็จำ (null) */
+const LAST_ASSIGNEE_KEY = "pattern-ticket-last-assignee";
+type SavedAssignee = { id: string; name: string } | null;
+function readAssignees(): { byType: Record<string, SavedAssignee>; last: SavedAssignee } {
+  try { const j = JSON.parse(localStorage.getItem(LAST_ASSIGNEE_KEY) || "{}"); return { byType: j.byType ?? {}, last: j.last ?? null }; }
+  catch { return { byType: {}, last: null }; }
+}
+function lastAssignee(typeKey: string): UserPickerValue | null {
+  if (typeof window === "undefined") return null;
+  const s = readAssignees();
+  const v = typeKey && typeKey in s.byType ? s.byType[typeKey] : s.last;
+  return v?.id ? { id: v.id, code: null, name: v.name } : null;
+}
+function rememberAssignee(typeKey: string, a: UserPickerValue | null) {
+  try {
+    const s = readAssignees();
+    const v: SavedAssignee = a ? { id: a.id, name: a.name } : null;
+    if (typeKey) s.byType[typeKey] = v;
+    s.last = v;
+    localStorage.setItem(LAST_ASSIGNEE_KEY, JSON.stringify(s));
+  } catch { /* ไม่มีที่เก็บ — ไม่เป็นไร */ }
+}
+
 export function CreateTicketModal({ types, initialType, initialSheetIds, onClose, onCreated }: {
   types: TicketType[];
   /** ประเภทที่เลือกไว้ให้ก่อน (กดจากแผ่นประเภทงานบนหน้า) — เปลี่ยนในป๊อปได้ */
@@ -51,7 +75,10 @@ export function CreateTicketModal({ types, initialType, initialSheetIds, onClose
   const pickUrgent = (v: boolean) => { setUrgent(v); if (!dueTouched) setDue(defaultDueDate(v)); };
   // เลือกประเภทไว้แล้ว = โชว์กล่องใหญ่อันเดียว · กด "เปลี่ยนประเภท" = กาง 8 ช่องให้เลือกใหม่
   const [picking, setPicking] = useState(!startType);
-  const [assignee, setAssignee] = useState<UserPickerValue | null>(null);
+  // มอบหมายช่าง: ใส่ "คนที่มอบหมายล่าสุด" ให้เอง (ของประเภทนี้ก่อน ไม่มี = ล่าสุดทุกประเภท) · เลือกเองแล้ว = ไม่ทับ
+  const [assignee, setAssignee] = useState<UserPickerValue | null>(() => lastAssignee(startType));
+  const [assigneeTouched, setAssigneeTouched] = useState(false);
+  const pickType = (key: string) => { setTypeKey(key); if (!assigneeTouched) setAssignee(lastAssignee(key)); };
   const [files, setFiles] = useState<File[]>([]);
   const [saving, setSaving] = useState(false);
   const [up, setUp] = useState<UploadProgressState | null>(null);
@@ -145,6 +172,7 @@ export function CreateTicketModal({ types, initialType, initialSheetIds, onClose
       setUp(null);
       if (failed.length) toast.warning(t(`สร้างตั๋วแล้ว แต่อัปไฟล์ไม่สำเร็จ ${failed.length} ไฟล์ — แนบใหม่ในตั๋วได้`, `Ticket created, but ${failed.length} file(s) failed — re-attach in the ticket`));
       else toast.success(t(`เปิดตั๋ว ${j.data.ticket_no ?? ""} แล้ว`, `Ticket ${j.data.ticket_no ?? ""} created`));
+      rememberAssignee(typeKey, assignee);
       onCreated(id);
     } catch (e) {
       toast.error(t(`เปิดตั๋วไม่สำเร็จ: ${(e as Error).message}`, `Couldn't create ticket: ${(e as Error).message}`));
@@ -187,7 +215,7 @@ export function CreateTicketModal({ types, initialType, initialSheetIds, onClose
           <Label>{t("ประเภทงาน", "Job type")} *</Label>
           <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
             {active.map((x) => (
-              <button key={x.key} type="button" onClick={() => { setTypeKey(x.key); setPicking(false); setErrors((e) => ({ ...e, type: "" })); }}
+              <button key={x.key} type="button" onClick={() => { pickType(x.key); setPicking(false); setErrors((e) => ({ ...e, type: "" })); }}
                 className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-sm transition ${typeKey === x.key ? "border-blue-400 bg-blue-50 ring-1 ring-blue-200" : "border-slate-200 hover:border-slate-300"}`}>
                 <TypeIconBox value={typeIconOf(x)} color={x.color} box={28} />
                 <span className="min-w-0 leading-tight"><span className="block truncate font-medium text-slate-700">{typeLabelPair(x, isEn)[0]}</span><span className="block truncate text-[11px] text-slate-400">{typeLabelPair(x, isEn)[1]}</span></span>
@@ -271,7 +299,8 @@ export function CreateTicketModal({ types, initialType, initialSheetIds, onClose
           </div>
           <div>
             <Label>{t("มอบหมายช่าง (ไม่ใส่ = ใครก็รับได้)", "Assign maker (optional)")}</Label>
-            <UserPicker value={assignee} onChange={setAssignee} disableCreate />
+            <UserPicker value={assignee} onChange={(v) => { setAssignee(v); setAssigneeTouched(true); }} disableCreate />
+            {assignee && !assigneeTouched && <p className="mt-1 text-[11px] text-slate-400">{t("ใส่ให้จากครั้งล่าสุด — เปลี่ยน/ลบได้", "Filled from last time — change or clear it")}</p>}
           </div>
         </section>
 
