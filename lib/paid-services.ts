@@ -166,8 +166,9 @@ export function monthStartBangkokIso(now = new Date()): string {
 export const PAID_BUDGET_KEY = "paid_services_budget";
 export const PAID_BUDGET_ALERT_KEY = "paid_services_budget_alerts";
 export type BudgetOverAction = "stop" | "warn";
-export type PaidBudget = { monthly_thb: number | null; warn_pct: number; over_action: BudgetOverAction };
-export const DEFAULT_BUDGET: PaidBudget = { monthly_thb: null, warn_pct: 80, over_action: "stop" };
+/** per_service = งบรายฟีเจอร์ (บาท/เดือน · เฉพาะ GPT) เช่น { "ai.caption": 100 } — ใช้ warn_pct / over_action เดียวกับงบรวม · ไม่มี = ไม่จำกัดรายฟีเจอร์ */
+export type PaidBudget = { monthly_thb: number | null; warn_pct: number; over_action: BudgetOverAction; per_service: Record<string, number> };
+export const DEFAULT_BUDGET: PaidBudget = { monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {} };
 
 export function cleanBudget(v: unknown): PaidBudget {
   const r = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
@@ -177,7 +178,61 @@ export function cleanBudget(v: unknown): PaidBudget {
     monthly_thb: r.monthly_thb === null || r.monthly_thb === "" || !Number.isFinite(m) || m <= 0 ? null : Math.round(m * 100) / 100,
     warn_pct: Number.isFinite(w) && w >= 10 && w <= 100 ? w : DEFAULT_BUDGET.warn_pct,
     over_action: r.over_action === "warn" ? "warn" : "stop",
+    per_service: cleanPerService(r.per_service),
   };
+}
+
+/** งบรายฟีเจอร์ — รับเฉพาะ key GPT ในทะเบียน · ค่า > 0 (ปัด 2 ตำแหน่ง) · อื่น ๆ ตัดทิ้ง */
+function cleanPerService(v: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!v || typeof v !== "object") return out;
+  for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
+    const n = Number(raw);
+    if (paidService(k)?.kind === "ai_chat" && Number.isFinite(n) && n > 0) out[k] = Math.round(n * 100) / 100;
+  }
+  return out;
+}
+
+/** สถานะงบของฟีเจอร์เดียว (ไม่ได้ตั้ง = none) */
+export const serviceBudgetState = (spentThb: number, b: PaidBudget, key: string): BudgetState =>
+  b.per_service[key] ? budgetState(spentThb, { ...b, monthly_thb: b.per_service[key] }) : "none";
+export const serviceBudgetOverMessage = (key: string, b: PaidBudget) =>
+  `"${paidService(key)?.th ?? key}" ใช้ครบงบเดือนนี้ ฿${(b.per_service[key] ?? 0).toLocaleString("th-TH")} แล้ว — ผู้ดูแลเพิ่มงบได้ที่ศูนย์ AI / API ที่เสียเงิน`;
+
+/* ── ยอดใช้ย้อนหลัง (กราฟ) ── จัดกลุ่มตามวัน/เดือน เวลาไทย · คืนครบทุกช่วง (ช่วงที่ไม่มีการใช้ = 0) */
+export type UsageBucket = { key: string; label: string; cost_thb: number; calls: number; failed: number };
+const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+const bkk = (d: Date) => new Date(d.getTime() + 7 * 3600_000);
+export function usageBucketKey(atIso: string, mode: "day" | "month"): string {
+  const iso = bkk(new Date(atIso)).toISOString();
+  return mode === "day" ? iso.slice(0, 10) : iso.slice(0, 7);
+}
+export function usageBuckets(rows: { at: string; est_cost_thb: number | null; ok?: boolean }[], mode: "day" | "month", count: number, now = new Date()): UsageBucket[] {
+  const b = bkk(now);
+  const keys: string[] = [];
+  for (let i = count - 1; i >= 0; i--) {
+    const d = mode === "day" ? new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate() - i)) : new Date(Date.UTC(b.getUTCFullYear(), b.getUTCMonth() - i, 1));
+    keys.push(mode === "day" ? d.toISOString().slice(0, 10) : d.toISOString().slice(0, 7));
+  }
+  const map = new Map(keys.map((k) => [k, { key: k, label: "", cost_thb: 0, calls: 0, failed: 0 } as UsageBucket]));
+  for (const r of rows) {
+    const x = map.get(usageBucketKey(r.at, mode));
+    if (!x) continue;
+    x.calls += 1; if (r.ok === false) x.failed += 1; x.cost_thb += Number(r.est_cost_thb ?? 0);
+  }
+  return keys.map((k) => {
+    const x = map.get(k)!;
+    const [y, m, d] = k.split("-").map(Number);
+    x.label = mode === "day" ? `${d} ${TH_MONTHS[m - 1]}` : `${TH_MONTHS[m - 1]} ${String(y + 543).slice(2)}`;
+    x.cost_thb = Math.round(x.cost_thb * 10000) / 10000;
+    return x;
+  });
+}
+/** วันแรกของช่วงที่ต้องดึง (ISO) — day = count วันย้อนหลัง · month = count เดือนย้อนหลัง (เวลาไทย) */
+export function usageRangeStartIso(mode: "day" | "month", count: number, now = new Date()): string {
+  const b = bkk(now);
+  const start = mode === "day" ? Date.UTC(b.getUTCFullYear(), b.getUTCMonth(), b.getUTCDate() - (count - 1)) : Date.UTC(b.getUTCFullYear(), b.getUTCMonth() - (count - 1), 1);
+  return new Date(start - 7 * 3600_000).toISOString();
 }
 
 export type BudgetState = "none" | "ok" | "warn" | "over";

@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService } from "@/lib/paid-services";
+import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService, serviceBudgetState, usageBuckets, usageRangeStartIso } from "@/lib/paid-services";
 
 const ROOT = path.resolve(__dirname, "../..");
 const SCAN_DIRS = ["app", "lib", "components"];
@@ -109,11 +109,11 @@ describe("ศูนย์ AI / API ที่เสียเงิน — กั�
 describe("งบต่อเดือน", () => {
   it("ค่าแปลก = ค่าเริ่ม · ไม่ใส่งบ = ไม่จำกัด", () => {
     expect(cleanBudget(null)).toEqual(DEFAULT_BUDGET);
-    expect(cleanBudget({ monthly_thb: "500", warn_pct: 90, over_action: "warn" })).toEqual({ monthly_thb: 500, warn_pct: 90, over_action: "warn" });
-    expect(cleanBudget({ monthly_thb: -5, warn_pct: 3, over_action: "x" })).toEqual({ monthly_thb: null, warn_pct: 80, over_action: "stop" });
+    expect(cleanBudget({ monthly_thb: "500", warn_pct: 90, over_action: "warn" })).toEqual({ monthly_thb: 500, warn_pct: 90, over_action: "warn", per_service: {} });
+    expect(cleanBudget({ monthly_thb: -5, warn_pct: 3, over_action: "x" })).toEqual({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {} });
   });
   it("สถานะงบ: ไม่ตั้ง / ปกติ / ใกล้เต็ม / เกิน", () => {
-    const b = { monthly_thb: 100, warn_pct: 80, over_action: "stop" as const };
+    const b = { monthly_thb: 100, warn_pct: 80, over_action: "stop" as const, per_service: {} };
     expect(budgetState(50, DEFAULT_BUDGET)).toBe("none");
     expect(budgetState(79.9, b)).toBe("ok");
     expect(budgetState(80, b)).toBe("warn");
@@ -122,5 +122,34 @@ describe("งบต่อเดือน", () => {
   it("เดือนตามเวลาไทย (ข้ามเดือนตอนเที่ยงคืนไทย ไม่ใช่ UTC)", () => {
     expect(monthKeyBangkok(new Date("2026-11-30T17:30:00Z"))).toBe("2026-12");
     expect(monthKeyBangkok(new Date("2026-11-30T16:30:00Z"))).toBe("2026-11");
+  });
+});
+
+describe("งบรายฟีเจอร์ + กราฟย้อนหลัง", () => {
+  it("งบรายฟีเจอร์รับเฉพาะ GPT ในทะเบียน · ค่าบวก", () => {
+    expect(cleanBudget({ per_service: { "ai.caption": "100", "line.push": 50, "ai.nope": 10, "ai.translate": -1 } }).per_service).toEqual({ "ai.caption": 100 });
+  });
+  it("สถานะงบรายฟีเจอร์ใช้ % แจ้งเตือนเดียวกับงบรวม", () => {
+    const b = cleanBudget({ warn_pct: 80, per_service: { "ai.caption": 100 } });
+    expect(serviceBudgetState(50, b, "ai.caption")).toBe("ok");
+    expect(serviceBudgetState(85, b, "ai.caption")).toBe("warn");
+    expect(serviceBudgetState(100, b, "ai.caption")).toBe("over");
+    expect(serviceBudgetState(999, b, "ai.translate")).toBe("none");
+  });
+  it("จัดกลุ่มรายวัน/รายเดือนตามเวลาไทย · ครบทุกช่วง", () => {
+    const now = new Date("2026-11-06T05:00:00Z");
+    const rows = [
+      { at: "2026-11-05T18:30:00Z", est_cost_thb: 1.5 },          // = 6 พ.ย. เวลาไทย
+      { at: "2026-11-05T10:00:00Z", est_cost_thb: 0.5, ok: false }, // = 5 พ.ย.
+      { at: "2026-10-31T17:30:00Z", est_cost_thb: 2 },            // = 1 พ.ย. เวลาไทย
+    ];
+    const d = usageBuckets(rows, "day", 7, now);
+    expect(d).toHaveLength(7);
+    expect(d[6]).toMatchObject({ key: "2026-11-06", label: "6 พ.ย.", cost_thb: 1.5, calls: 1 });
+    expect(d[5]).toMatchObject({ key: "2026-11-05", calls: 1, failed: 1 });
+    const m = usageBuckets(rows, "month", 3, now);
+    expect(m.map((x) => x.key)).toEqual(["2026-09", "2026-10", "2026-11"]);
+    expect(m[2]).toMatchObject({ cost_thb: 4, calls: 3, label: "พ.ย. 69" });
+    expect(usageRangeStartIso("day", 7, now)).toBe("2026-10-30T17:00:00.000Z");
   });
 });

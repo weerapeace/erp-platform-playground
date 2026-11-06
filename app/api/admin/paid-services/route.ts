@@ -1,9 +1,11 @@
 /**
  * /api/admin/paid-services — ศูนย์ AI และ API ที่เสียเงิน (admin.paid_services)
  *
- * GET   → { services: [{ ...ทะเบียน, enabled, model, configured, month, last_used_at, updated_*, places: [{ key, th, enabled, month, last_used_at }] }],
+ * GET   → { services: [{ ...ทะเบียน, enabled, model, configured, month, last_used_at, updated_*, places: [{ key, th, enabled, model, month, last_used_at }] }],
  *           totals, budget, budget_state, by_user: [{ user_id, name, calls, cost_thb, top }], month_start, model_choices, error }
- * PATCH { key, place?, enabled?, model? }  เปิด/ปิด (ทั้งบริการ หรือรายที่) · เปลี่ยนโมเดล ("" = ค่าเดิมของระบบ) — locked = 400
+ * GET ?view=history&mode=day|month&key=<service?>  → { buckets: [{ key, label, cost_thb, calls, failed }] } (30 วัน / 12 เดือน · key = กรองบริการเดียว)
+ * PATCH { key, place?, enabled?, model? }  เปิด/ปิด · เปลี่ยนโมเดล (ทั้งบริการ หรือรายที่ · "" = ค่าเดิม / ตามบริการ) — locked = 400
+ * PATCH { budget_service: { key, monthly_thb } }  งบรายฟีเจอร์ (null/0 = ไม่จำกัด)
  * PATCH { budget: { monthly_thb, warn_pct, over_action } }  ตั้งงบต่อเดือน (ui_config) · ทุกการเปลี่ยนเขียน audit_logs
  * ทะเบียน = lib/paid-services · ด่านกลาง = lib/paid-services-server
  */
@@ -17,7 +19,7 @@ import { openAiKey } from "@/lib/ai-caption";
 import { emailProvider } from "@/lib/email";
 import {
   AUTO_USER_LABEL, budgetState, canPickModel, canToggle, cleanBudget, isValidModel, monthStartBangkokIso, PAID_BUDGET_KEY, PAID_MODEL_CHOICES, PAID_SERVICES,
-  paidService, placeKey, splitPlaceKey, type PaidProvider,
+  paidService, placeKey, splitPlaceKey, usageBuckets, usageRangeStartIso, type PaidBudget, type PaidProvider,
 } from "@/lib/paid-services";
 import { checkBudgetAlerts, invalidateServiceSettings, loadBudget } from "@/lib/paid-services-server";
 
@@ -45,6 +47,8 @@ function configured(p: PaidProvider): boolean | null {
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "admin.paid_services"); if (denied) return denied;
   const admin = supabaseAdmin();
+  const sp = new URL(request.url).searchParams;
+  if (sp.get("view") === "history") return history(sp);
   const monthStart = monthStartBangkokIso();
   const monthRows: Array<{ key: string; ok: boolean; est_cost_thb: number | null; tokens_in: number | null; tokens_out: number | null; user_id: string | null }> = [];
   for (let from = 0; from < 200_000; from += 10_000) {
@@ -94,7 +98,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       updated_by_name: (st?.updated_by_name as string | null) ?? null,
       places: (s.places ?? []).map((p) => {
         const k = placeKey(s.key, p.key); const ps = setBy.get(k);
-        return { key: p.key, th: p.th, enabled: ps?.enabled !== false, month: byPlace.get(k) ?? emptyStat(), last_used_at: last.get(k) ?? null, updated_by_name: (ps?.updated_by_name as string | null) ?? null };
+        return { key: p.key, th: p.th, enabled: ps?.enabled !== false, model: (ps?.model as string | null) ?? null, month: byPlace.get(k) ?? emptyStat(), last_used_at: last.get(k) ?? null, updated_by_name: (ps?.updated_by_name as string | null) ?? null };
       }),
     };
   });
@@ -128,8 +132,10 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   // ── ตั้งงบต่อเดือน
   if (body.budget !== undefined) {
-    const next = cleanBudget(body.budget);
     const before = await loadBudget(true);
+    // งบรายฟีเจอร์แก้ที่ budget_service — ไม่ส่ง per_service มา = คงของเดิม (กันการ์ดงบรวมล้างงบรายฟีเจอร์)
+    const raw = body.budget as Record<string, unknown>;
+    const next = cleanBudget({ ...raw, per_service: raw && typeof raw === "object" && "per_service" in raw ? raw.per_service : before.per_service });
     const { error } = await admin.from("ui_config").upsert({ key: PAID_BUDGET_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
     if (error) return NextResponse.json({ error: "บันทึกงบไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
     invalidateServiceSettings();
@@ -137,6 +143,27 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       await writeAudit(admin, { action: "update", entityType: "paid_service_budget", entityId: null, actorId: actor.id, actorName: actor.name, metadata: { changes: { budget: { from: before, to: next } } } });
     }
     await checkBudgetAlerts(next).catch(() => { /* ตั้งงบต่ำกว่ายอดที่ใช้ไปแล้ว = แจ้งทันที · แจ้งไม่ได้ไม่ขวาง */ });
+    return NextResponse.json({ data: { budget: next }, error: null });
+  }
+
+  // ── งบรายฟีเจอร์ (แก้ทีละตัว — รวมเข้ากับงบที่ตั้งไว้)
+  if (body.budget_service && typeof body.budget_service === "object") {
+    const bs = body.budget_service as { key?: unknown; monthly_thb?: unknown };
+    const k = String(bs.key ?? "");
+    if (paidService(k)?.kind !== "ai_chat") return NextResponse.json({ error: "ตั้งงบได้เฉพาะฟีเจอร์ที่ใช้ GPT" }, { status: 400 });
+    const before = await loadBudget(true);
+    const per = { ...before.per_service };
+    const n = Number(bs.monthly_thb);
+    if (bs.monthly_thb === null || bs.monthly_thb === "" || !Number.isFinite(n) || n <= 0) delete per[k]; else per[k] = n;
+    const next: PaidBudget = cleanBudget({ ...before, per_service: per });
+    const { error } = await admin.from("ui_config").upsert({ key: PAID_BUDGET_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) return NextResponse.json({ error: "บันทึกงบไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
+    invalidateServiceSettings();
+    if ((before.per_service[k] ?? null) !== (next.per_service[k] ?? null)) {
+      await writeAudit(admin, { action: "update", entityType: "paid_service_budget", entityId: null, actorId: actor.id, actorName: actor.name,
+        metadata: { key: k, label: paidService(k)?.th, changes: { monthly_thb: { from: before.per_service[k] ?? null, to: next.per_service[k] ?? null } } } });
+    }
+    await checkBudgetAlerts(next, k).catch(() => { /* แจ้งไม่ได้ไม่ขวาง */ });
     return NextResponse.json({ data: { budget: next }, error: null });
   }
 
@@ -154,7 +181,6 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
   if ("model" in body) {
     const m = String(body.model ?? "").trim();
-    if (place) return NextResponse.json({ error: "เปลี่ยนโมเดลได้ทั้งบริการเท่านั้น" }, { status: 400 });
     if (!canPickModel(svc)) return NextResponse.json({ error: "รายการนี้เลือกโมเดลไม่ได้" }, { status: 400 });
     if (!isValidModel(m)) return NextResponse.json({ error: "โมเดลไม่อยู่ในรายการที่เลือกได้" }, { status: 400 });
     patch.model = m || null;
@@ -187,4 +213,23 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     });
   }
   return NextResponse.json({ data, error: null });
+}
+
+/** ยอดใช้ย้อนหลัง — รายวัน 30 วัน / รายเดือน 12 เดือน (เวลาไทย) · key = เฉพาะบริการนั้น (รวมทุกที่) */
+async function history(sp: URLSearchParams): Promise<NextResponse> {
+  const mode = sp.get("mode") === "month" ? "month" : "day";
+  const count = mode === "day" ? 30 : 12;
+  const key = sp.get("key") ?? "";
+  if (key && !paidService(key)) return NextResponse.json({ buckets: [], error: "ไม่พบรายการนี้ในทะเบียน" }, { status: 404 });
+  const admin = supabaseAdmin();
+  const rows: Array<{ key: string; at: string; est_cost_thb: number | null; ok: boolean }> = [];
+  for (let from = 0; from < 500_000; from += 10_000) {
+    let q = admin.from(USAGE).select("key, at, est_cost_thb, ok").gte("at", usageRangeStartIso(mode, count)).order("at", { ascending: true }).range(from, from + 9_999);
+    if (key) q = q.or(`key.eq.${key},key.like.${key}@%`);
+    const { data, error } = await q;
+    if (error) return NextResponse.json({ buckets: [], error: "โหลดยอดย้อนหลังไม่สำเร็จ" }, { status: 500 });
+    rows.push(...((data ?? []) as typeof rows));
+    if ((data ?? []).length < 10_000) break;
+  }
+  return NextResponse.json({ buckets: usageBuckets(rows, mode, count), mode, key: key || null, error: null });
 }
