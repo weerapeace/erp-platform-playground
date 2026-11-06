@@ -19,7 +19,7 @@
  * ค่าที่จำต่อคน (useUserPref): ขนาดการ์ด · การเรียง · ช่องที่โชว์ · ล็อกแผงสรุป
  * โหมด iPad (เจ้าของ 2026-11-06 · จำต่อเครื่อง `wb_exec_device` ผ่านของกลาง useIpadMode): iPad จริงเปิดเอง · คอมกด "ดูแบบ iPad" = หน้าจริงในกรอบขนาดเครื่อง + QR
  *   แถบบนบรรทัดเดียว (ค้นหา + ปุ่มตัวกรอง → ป๊อปกลาง: เรียง/โชว์อะไร/พร้อมจ่าย/ขนาด/รวมเงินแบรนด์ตัวเอง/หน้าตา) · ชิปแบรนด์+ชุดแถวเดียวปัดได้
- *   แถบเป้าบรรทัดเดียว แตะ = แผงสรุปเต็มลอยทับ (แนวนอนขวา · แนวตั้งจากล่าง · ไม่ดันการ์ด) · ช่องติ๊ก/ปุ่มใหญ่ · ปุ่มเปิดรายละเอียดเห็นตลอด (ไม่ต้องชี้เมาส์)
+ *   เป้ายอดยึดซ้ายสุดของแถบโต๊ะ (ติดล่างจอ = เห็นตลอด · แบบ B 2026-11-06) แตะ = แผงสรุปเต็มลอยทับ (แนวนอนขวา · แนวตั้งจากล่าง · ไม่ดันการ์ด) · ช่องติ๊ก/ปุ่มใหญ่ · ปุ่มเปิดรายละเอียดเห็นตลอด (ไม่ต้องชี้เมาส์)
  *   แถบโต๊ะเตี้ย แถวเดียวปัดได้ · ติ๊กแล้วมีปุ่ม "จ่าย N ใบ" ใต้ทุกโต๊ะ · แตะชื่อโต๊ะ = แผงโต๊ะเต็ม (ตัวเดิม)
  */
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
@@ -236,7 +236,7 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   }, [showPrice]);
   // ยอดที่จ่ายไปแล้วในช่วงที่เลือก (โหลดเมื่อแผงเปิด / เปลี่ยนช่วง / จ่ายงานเพิ่ม)
   const woSig = workOrders.length;
-  const needDone = sideShown || (touch && showPrice);   // iPad มีแถบเป้าบรรทัดเดียวโชว์ตลอด
+  const needDone = sideShown || (touch && showPrice);   // iPad มีเป้ายอดในแถบโต๊ะโชว์ตลอด
   useEffect(() => {
     if (!needDone) return;
     let cancel = false;
@@ -564,24 +564,6 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           )}
         </>)}
 
-        {/* iPad: แถบเป้าบรรทัดเดียว — แตะ = แผงสรุปเต็มลอยทับ (แทนปุ่ม "สรุปเป้า" + การล็อกแผงของจอคอม) */}
-        {touch && showPrice && (
-          <button type="button" onClick={() => setSideOpen(true)} className="mb-2 w-full rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 text-left">
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-slate-700">
-              <Icon name="target" />
-              <span>เป้า{PERIODS.find((p) => p.k === period)?.label} <b className="tabular-nums text-violet-800">฿{fmt(got)}</b>{goal > 0 ? <> / ฿{fmt(goal)} · <b className="tabular-nums">{pct.toFixed(0)}%</b></> : <span className="text-slate-400"> · ยังไม่ได้ตั้งเป้า</span>}</span>
-              {goal > 0 && plannedValue > 0 && <span className="text-violet-700">→ {pctAfter.toFixed(0)}% ถ้าจ่าย{focusCards ? "ที่เหลือในชุด" : "ที่ติ๊ก"}</span>}
-              <span className="ml-auto text-[12px] text-slate-400">แตะดูเต็ม ›</span>
-            </div>
-            {goal > 0 && (
-              <div className="relative mt-1.5 h-2 overflow-hidden rounded-full bg-white">
-                {plannedValue > 0 && <div className="absolute inset-y-0 left-0 rounded-full bg-violet-200 transition-[width] duration-500" style={{ width: `${pctAfter}%` }} />}
-                <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-[width] duration-500" style={{ width: `${pct}%` }} />
-              </div>
-            )}
-          </button>
-        )}
-
         {/* ขายครบแล้วแต่ยังไม่บันทึกผลิต — ไม่ขึ้นการ์ด (ไม่ต้องจ่ายแล้ว) · กด → "อัปเดตงานจากใบขาย" บันทึกว่าใครทำ → ระบบปิดงานเอง (lib/mo-auto-close) */}
         {soldUnmade.length > 0 && (
           <div className="mb-2">
@@ -829,10 +811,8 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
             })()}
 
           </div>
-          <div className={touch
-            ? "flex items-stretch gap-2 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-2 py-2 backdrop-blur [scrollbar-width:none]"
-            : "flex items-end justify-center gap-2.5 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-3 pb-2.5 pt-4 backdrop-blur"}>
-            {desks.map((d) => {
+          {(() => {
+            const deskEls = desks.map((d) => {
               const st = statOf(d.id), lifted = overDesk === d.id || td.overId === d.id, on = openDesk === d.id;
               const imgs = st.ws.filter((w) => w.image_url).slice(0, 3);
               const pick = canDispatch && chosen.length > 0;   // ติ๊กการ์ดไว้ → ปุ่มลอย "จ่ายโต๊ะนี้" บนทุกโต๊ะ (เจ้าของ 2026-11-05)
@@ -884,8 +864,45 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                 </button>
                 </div>
               );
-            })}
-          </div>
+            });
+            if (!touch) return <div className="flex items-end justify-center gap-2.5 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-3 pb-2.5 pt-4 backdrop-blur">{deskEls}</div>;
+            // iPad (เจ้าของเลือกแบบ B 2026-11-06): เป้ายอดยึดซ้ายสุดของแถบโต๊ะ — แถบนี้ติดล่างจอ = เห็นเป้าตลอด ไม่กินที่การ์ด
+            //   วง = % ของเป้า (เข้ม = จ่ายแล้ว · อ่อนต่อท้าย = ถ้าจ่ายที่ติ๊ก) · ติ๊กการ์ด = ยอด/ขาดอีกขยับทันที ข้างปุ่ม "จ่าย N ใบ" · แตะ = แผงสรุปเต็ม
+            return (
+              <div className="flex items-stretch gap-2 rounded-t-xl border border-slate-200 bg-white/95 px-2 py-2 backdrop-blur">
+                {showPrice && (() => {
+                  const R = 21, CIRC = 2 * Math.PI * R;
+                  const shown = plannedValue > 0 ? pctAfter : pct;
+                  const short = goal - after;
+                  return <>
+                    <button type="button" onClick={() => setSideOpen(true)} aria-label="ดูสรุปเป้ายอด"
+                      className="flex w-[188px] shrink-0 items-center gap-2 rounded-xl border border-violet-200 bg-violet-50 px-2 py-1.5 text-left active:bg-violet-100">
+                      {goal > 0 ? (
+                        <span className="relative h-[50px] w-[50px] shrink-0">
+                          <svg viewBox="0 0 50 50" className="h-full w-full -rotate-90" aria-hidden>
+                            <circle cx="25" cy="25" r={R} fill="none" strokeWidth="6" className="stroke-violet-100" />
+                            {plannedValue > 0 && <circle cx="25" cy="25" r={R} fill="none" strokeWidth="6" strokeLinecap="round" className="stroke-violet-300 transition-[stroke-dasharray] duration-500" strokeDasharray={`${(CIRC * pctAfter) / 100} ${CIRC}`} />}
+                            <circle cx="25" cy="25" r={R} fill="none" strokeWidth="6" strokeLinecap="round" className="stroke-violet-600 transition-[stroke-dasharray] duration-500" strokeDasharray={`${(CIRC * pct) / 100} ${CIRC}`} />
+                          </svg>
+                          <span className="absolute inset-0 flex items-center justify-center text-[12px] font-bold tabular-nums text-violet-900">{shown.toFixed(0)}%</span>
+                        </span>
+                      ) : <span className="flex h-[50px] w-[50px] shrink-0 items-center justify-center rounded-full bg-white text-xl text-violet-400"><Icon name="target" /></span>}
+                      <span className="min-w-0 leading-tight">
+                        <span className="block text-[11px] text-violet-700">เป้า{PERIODS.find((p) => p.k === period)?.label}</span>
+                        <span className="block truncate text-[15px] font-bold tabular-nums text-violet-900">฿{fmt(got)}</span>
+                        {plannedValue > 0 && <span className="block truncate text-[11px] tabular-nums text-violet-600">+฿{fmt(plannedValue)} {focusCards ? "ถ้าครบชุด" : "ที่ติ๊ก"}</span>}
+                        <span className={`block truncate text-[11px] tabular-nums ${goal <= 0 ? "text-slate-400" : short > 0 ? "text-rose-600" : "text-emerald-600"}`}>
+                          {goal <= 0 ? "ยังไม่ได้ตั้งเป้า · แตะเพื่อตั้ง" : short > 0 ? `ขาดอีก ฿${fmt(short)}` : "ถึงเป้าแล้ว"}
+                        </span>
+                      </span>
+                    </button>
+                    <span className="w-px shrink-0 bg-slate-200" aria-hidden />
+                  </>;
+                })()}
+                <div className="flex min-w-0 flex-1 items-stretch gap-2 overflow-x-auto [scrollbar-width:none]">{deskEls}</div>
+              </div>
+            );
+          })()}
         </div>
       </div>
 
