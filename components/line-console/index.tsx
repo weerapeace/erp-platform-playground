@@ -159,13 +159,14 @@ export function LineConsole({ open, onClose }: { open: boolean; onClose: () => v
                   <div className="border border-slate-200 rounded-lg divide-y divide-slate-100">
                     {sys.events.map((ev) => {
                       const on = data.disabled_events[ev.key] !== true;
-                      const groupSet = !!data.groups[ev.slot];
+                      const groupSet = ev.slot === "main" ? !!data.captured : !!data.groups[ev.slot];
+                      const groupLabel = ev.slot === "main" ? "กลุ่มหลัก" : data.slots[ev.slot].label;
                       return (
                         <div key={ev.key} className="flex items-center gap-2.5 px-3 py-2">
                           <span className="text-sm shrink-0">{ev.icon}</span>
                           <div className="flex-1 min-w-0">
                             <div className={`text-sm truncate ${on ? "text-slate-700" : "text-slate-400"}`}>{ev.label}</div>
-                            {!groupSet && on && <div className="text-[10px] text-amber-600">⚠️ ยังไม่ได้ตั้งกลุ่ม {data.slots[ev.slot].label} — จะยังไม่ส่งจนกว่าจะตั้ง</div>}
+                            {!groupSet && on && <div className="text-[10px] text-amber-600">⚠️ ยังไม่ได้ตั้งกลุ่ม {groupLabel} — จะยังไม่ส่งจนกว่าจะตั้ง</div>}
                           </div>
                           <button role="switch" aria-checked={on} aria-label={ev.label} onClick={() => toggleEvent(ev.key, !on)}
                             className={`relative w-10 h-6 rounded-full transition-colors shrink-0 ${on ? "bg-emerald-500" : "bg-slate-300"}`}>

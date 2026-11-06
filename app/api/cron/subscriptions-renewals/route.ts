@@ -19,6 +19,7 @@ import {
 } from "@/lib/subscriptions";
 import { recordWorkerRun } from "@/lib/ai-office-runs";
 import { ruleRecipients } from "@/lib/notify-recipients";
+import { lineEventEnabled } from "@/lib/line-registry";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -30,8 +31,9 @@ type Due = { id: string; name: string; days: number; date: string; cost: string 
 async function pushLineGroup(admin: ReturnType<typeof supabaseAdmin>, text: string): Promise<boolean> {
   try {
     const { data } = await admin.from("china_app_settings").select("sval").eq("skey", "line_config").maybeSingle();
-    const cfg = ((data as { sval?: { token?: string; group_id?: string } } | null)?.sval ?? {});
+    const cfg = ((data as { sval?: { token?: string; group_id?: string; disabled_events?: Record<string, boolean> } } | null)?.sval ?? {});
     if (!cfg.token || !cfg.group_id) return false;
+    if (!lineEventEnabled(cfg.disabled_events, "subscription_renewal")) return false;   // ปิดจากศูนย์ LINE / หน้าแก้การแจ้งเตือน → ไม่ส่ง
     const res = await fetch("https://api.line.me/v2/bot/message/push", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.token}` },

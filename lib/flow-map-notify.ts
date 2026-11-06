@@ -239,7 +239,7 @@ export const NOTIFY_TOPICS: NotifyTopic[] = [
     files: ["app/api/china-pay/line-push/route.ts"] },
   { id: "subscription_renewal", area: "system", label: "บริการใกล้ต่ออายุ (ทุกเช้า 08:00)", events: ["subscription.renewal_soon"],
     when: "ตั้งเวลาทุกวัน — subscription ที่ใกล้ครบรอบ",
-    send: [B("แอดมิน", "subscription.renewal_soon"), G("กลุ่มหลัก", ["main"])],
+    send: [B("แอดมิน", "subscription.renewal_soon"), G("กลุ่มหลัก", ["main"], "subscription_renewal")],
     files: ["app/api/cron/subscriptions-renewals/route.ts", "lib/notify-recipients.ts"] },
   { id: "cashflow_low_cash", area: "system", label: "เงินจะต่ำกว่าเงินกันขั้นต่ำ (ทุกเช้า 08:05)", events: ["cashflow.low_cash"],
     when: "ตั้งเวลาทุกวัน — มองล่วงหน้าตามค่าตั้ง (ตั้งต้น 14 วัน) ถ้าเงินคงเหลือจะต่ำกว่าเงินกันขั้นต่ำ",

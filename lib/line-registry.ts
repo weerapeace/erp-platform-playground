@@ -17,8 +17,8 @@ export type LineSlotKey =
 
 export type LineSlotDef = { key: LineSlotKey; label: string; icon: string };
 
-/** เหตุการณ์แจ้งเตือนอัตโนมัติ — auto=true จะมีสวิตช์เปิด/ปิด (ผูกกับตัวส่งจริง) */
-export type LineEventDef = { key: string; label: string; slot: LineSlotKey; icon: string };
+/** เหตุการณ์แจ้งเตือนอัตโนมัติ — มีสวิตช์เปิด/ปิด (ผูกกับตัวส่งจริง) · slot "main" = ส่งเข้ากลุ่มหลัก (line_config.group_id) */
+export type LineEventDef = { key: string; label: string; slot: LineSlotKey | "main"; icon: string };
 
 export type LineSystemDef = {
   key: string; label: string; icon: string;
@@ -87,6 +87,12 @@ export const LINE_SYSTEMS: LineSystemDef[] = [
       { key: "webshop_order",  label: "ออเดอร์เว็บใหม่",          slot: "webshop", icon: "🛒" },
       { key: "webshop_slip",   label: "ลูกค้าแนบสลิป รอตรวจเงิน",  slot: "webshop", icon: "💳" },
       { key: "webshop_return", label: "ลูกค้าขอคืน/เปลี่ยนสินค้า", slot: "webshop", icon: "↩️" },
+    ],
+  },
+  {
+    key: "system", label: "ระบบ / แอดมิน", icon: "⚙️", slots: [],
+    events: [
+      { key: "subscription_renewal", label: "บริการใกล้ต่ออายุ (ทุกเช้า 08:00)", slot: "main", icon: "⏰" },
     ],
   },
 ];
