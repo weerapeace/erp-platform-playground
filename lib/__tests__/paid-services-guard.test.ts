@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService, serviceBudgetState, usageBuckets, usageRangeStartIso } from "@/lib/paid-services";
+import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService, serviceBudgetState, usageBuckets, usageRangeStartIso, userBudgetState, userCap } from "@/lib/paid-services";
 
 const ROOT = path.resolve(__dirname, "../..");
 const SCAN_DIRS = ["app", "lib", "components"];
@@ -109,11 +109,11 @@ describe("ศูนย์ AI / API ที่เสียเงิน — กั�
 describe("งบต่อเดือน", () => {
   it("ค่าแปลก = ค่าเริ่ม · ไม่ใส่งบ = ไม่จำกัด", () => {
     expect(cleanBudget(null)).toEqual(DEFAULT_BUDGET);
-    expect(cleanBudget({ monthly_thb: "500", warn_pct: 90, over_action: "warn" })).toEqual({ monthly_thb: 500, warn_pct: 90, over_action: "warn", per_service: {} });
-    expect(cleanBudget({ monthly_thb: -5, warn_pct: 3, over_action: "x" })).toEqual({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {} });
+    expect(cleanBudget({ monthly_thb: "500", warn_pct: 90, over_action: "warn" })).toEqual({ monthly_thb: 500, warn_pct: 90, over_action: "warn", per_service: {}, per_user_default: null, per_user: {} });
+    expect(cleanBudget({ monthly_thb: -5, warn_pct: 3, over_action: "x" })).toEqual({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {} });
   });
   it("สถานะงบ: ไม่ตั้ง / ปกติ / ใกล้เต็ม / เกิน", () => {
-    const b = { monthly_thb: 100, warn_pct: 80, over_action: "stop" as const, per_service: {} };
+    const b = { ...DEFAULT_BUDGET, monthly_thb: 100, warn_pct: 80, over_action: "stop" as const };
     expect(budgetState(50, DEFAULT_BUDGET)).toBe("none");
     expect(budgetState(79.9, b)).toBe("ok");
     expect(budgetState(80, b)).toBe("warn");
@@ -151,5 +151,23 @@ describe("งบรายฟีเจอร์ + กราฟย้อนหล�
     expect(m.map((x) => x.key)).toEqual(["2026-09", "2026-10", "2026-11"]);
     expect(m[2]).toMatchObject({ cost_thb: 4, calls: 3, label: "พ.ย. 69" });
     expect(usageRangeStartIso("day", 7, now)).toBe("2026-10-30T17:00:00.000Z");
+  });
+});
+
+describe("งบรายคน", () => {
+  const A = "aaaaaaaa-1111-2222-3333-444444444444", B = "bbbbbbbb-1111-2222-3333-444444444444", C = "cccccccc-1111-2222-3333-444444444444";
+  const b = cleanBudget({ warn_pct: 80, per_user_default: 50, per_user: { [A]: 200, [B]: null, "not-a-uuid": 10, [C.toUpperCase()]: "unlimited" } });
+  it("ค่าเริ่มต่อคน + ตั้งรายคน + ไม่จำกัด · key ผิดรูปแบบตัดทิ้ง", () => {
+    expect(b.per_user).toEqual({ [A]: 200, [B]: null, [C]: null });
+    expect(userCap(b, A)).toBe(200);
+    expect(userCap(b, B)).toBeNull();
+    expect(userCap(b, "dddddddd-1111-2222-3333-444444444444")).toBe(50);
+    expect(userCap(b, null)).toBeNull();   // งานอัตโนมัติ ไม่นับงบของใคร
+  });
+  it("สถานะงบรายคน", () => {
+    expect(userBudgetState(39, b, "dddddddd-1111-2222-3333-444444444444")).toBe("ok");
+    expect(userBudgetState(40, b, "dddddddd-1111-2222-3333-444444444444")).toBe("warn");
+    expect(userBudgetState(50, b, "dddddddd-1111-2222-3333-444444444444")).toBe("over");
+    expect(userBudgetState(999, b, B)).toBe("none");
   });
 });

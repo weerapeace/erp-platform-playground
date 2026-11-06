@@ -16,6 +16,7 @@ import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { SimpleBarChart } from "@/components/bar-chart";
+import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
 import { ErrorState, LoadingState } from "@/components/state-views";
 import { apiFetch } from "@/lib/api";
 import { PROVIDER_LABEL, type BudgetState, type PaidBudget, type PaidProvider, type PaidService } from "@/lib/paid-services";
@@ -26,7 +27,10 @@ type Row = Omit<PaidService, "places"> & {
   enabled: boolean; model: string | null; configured: boolean | null; month: Stat;
   last_used_at: string | null; updated_at: string | null; updated_by_name: string | null; places: PlaceRow[];
 };
-type UserRow = { user_id: string | null; name: string; calls: number; failed: number; cost_thb: number; top: { key: string; th: string; calls: number }[] };
+type UserRow = {
+  user_id: string | null; name: string; calls: number; failed: number; cost_thb: number; top: { key: string; th: string; calls: number }[];
+  cap: number | null; cap_source: "auto" | "unlimited" | "custom" | "default" | "none"; budget_state: BudgetState;
+};
 type ModelChoice = { id: string; label: string; note: string; inPerM: number; outPerM: number };
 type OffTarget = { row: Row; place: PlaceRow | null };
 
@@ -44,7 +48,7 @@ function PaidServicesView() {
   const [users, setUsers] = useState<UserRow[]>([]);
   const [models, setModels] = useState<ModelChoice[]>([]);
   const [totals, setTotals] = useState({ calls: 0, failed: 0, cost_thb: 0 });
-  const [budget, setBudget] = useState<PaidBudget>({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {} });
+  const [budget, setBudget] = useState<PaidBudget>({ monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {} });
   const [bState, setBState] = useState<BudgetState>("none");
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -95,6 +99,35 @@ function PaidServicesView() {
       if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
       setBudget(j.data.budget);
       toast.success(j.data.budget.per_service[r.key] ? `ตั้งงบ "${r.th}" ฿${j.data.budget.per_service[r.key].toLocaleString("th-TH")}/เดือน แล้ว` : `ยกเลิกงบของ "${r.th}" แล้ว (ไม่จำกัด)`);
+    } catch (e) { toast.error(`บันทึกงบไม่สำเร็จ: ${(e as Error).message}`); }
+    finally { setBusy(null); }
+  };
+
+  /** งบรายคน — value: บาท · "unlimited" · "default" (กลับใช้ค่าเริ่ม) */
+  const saveUserBudget = async (userId: string, name: string, value: number | "unlimited" | "default") => {
+    setBusy(`user:${userId}`);
+    try {
+      const res = await apiFetch("/api/admin/paid-services", { method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ budget_user: { user_id: userId, monthly_thb: value === "unlimited" ? null : value } }) });
+      const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      setBudget(j.data.budget);
+      toast.success(value === "default" ? `${name}: ใช้งบค่าเริ่มต่อคน` : value === "unlimited" ? `${name}: ไม่จำกัดงบ` : `${name}: งบ ฿${value.toLocaleString("th-TH")}/เดือน`);
+      void load();
+    } catch (e) { toast.error(`บันทึกงบไม่สำเร็จ: ${(e as Error).message}`); }
+    finally { setBusy(null); }
+  };
+  const saveUserDefault = async (value: string) => {
+    const next = value.trim() ? Number(value) : null;
+    if ((next ?? null) === budget.per_user_default || (next !== null && (!Number.isFinite(next) || next < 0))) return;
+    setBusy("user:default");
+    try {
+      const res = await apiFetch("/api/admin/paid-services", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ budget_user_default: next }) });
+      const j = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      if (!res.ok || j.error) throw new Error(j.error || `HTTP ${res.status}`);
+      setBudget(j.data.budget);
+      toast.success(j.data.budget.per_user_default ? `งบต่อคน ฿${j.data.budget.per_user_default.toLocaleString("th-TH")}/เดือน แล้ว` : "ยกเลิกงบต่อคน (ไม่จำกัด)");
+      void load();
     } catch (e) { toast.error(`บันทึกงบไม่สำเร็จ: ${(e as Error).message}`); }
     finally { setBusy(null); }
   };
@@ -176,6 +209,11 @@ function PaidServicesView() {
       cell: (u) => <span className="tabular-nums">{u.calls.toLocaleString("th-TH")}{u.failed ? <span className="block text-[11px] text-red-600">ล้มเหลว {u.failed}</span> : null}</span> },
     { key: "cost", header: "ค่า AI (ประมาณ)", width: "7rem", align: "right", sortValue: (u) => u.cost_thb, sortLabel: "ค่าใช้จ่าย",
       cell: (u) => <span className="font-medium tabular-nums text-slate-800">{baht(u.cost_thb)}</span> },
+    { key: "cap", header: "งบของคนนี้ / เดือน", width: "15rem", sortValue: (u) => (u.cap === null ? 1e12 : u.cap), sortLabel: "งบรายคน",
+      cell: (u) => u.user_id
+        ? <UserBudgetCell u={u} defaultCap={budget.per_user_default} warnPct={budget.warn_pct} busy={busy === `user:${u.user_id}`}
+            onSave={(v) => void saveUserBudget(u.user_id!, u.name, v)} />
+        : <span className="text-xs text-slate-400">ไม่นับงบของใคร</span> },
   ];
 
   if (!canManage) return <AccessDenied message="หน้านี้สำหรับผู้ดูแลระบบ (สิทธิ์ &quot;จัดการ AI / API ที่เสียเงิน&quot;)" />;
@@ -239,7 +277,9 @@ function PaidServicesView() {
                 </div>
               )} />
 
-            <h2 className="mb-2 mt-6 text-sm font-semibold text-slate-700">ใครใช้เท่าไหร่ (เดือนนี้)</h2>
+            <h2 className="mb-2 mt-6 text-sm font-semibold text-slate-700">ใครใช้เท่าไหร่ (เดือนนี้) · งบรายคน</h2>
+            <UserBudgetBar defaultCap={budget.per_user_default} busy={busy === "user:default"} onSaveDefault={(v) => void saveUserDefault(v)}
+              onAdd={(u, amount) => void saveUserBudget(u.id, u.name, amount)} />
             {users.length ? (
               <MiniTable rows={users} rowKey={(u) => u.user_id ?? "_auto"} columns={userColumns}
                 searchText={(u) => `${u.name} ${u.top.map((t) => t.th).join(" ")}`} searchPlaceholder="ค้นหาชื่อ" countUnit="คน" />
@@ -444,5 +484,74 @@ function HistoryCard({ services }: { services: Row[] }) {
           </>
         )}
     </section>
+  );
+}
+
+/** แถบบนตารางรายคน — งบต่อคน (ค่าเริ่มของทุกคน) + ตั้งงบให้คนที่ยังไม่อยู่ในตาราง */
+function UserBudgetBar({ defaultCap, busy, onSaveDefault, onAdd }: {
+  defaultCap: number | null; busy: boolean; onSaveDefault: (v: string) => void; onAdd: (u: UserPickerValue, amount: number | "unlimited") => void;
+}) {
+  const [v, setV] = useState(defaultCap ? String(defaultCap) : "");
+  useEffect(() => { setV(defaultCap ? String(defaultCap) : ""); }, [defaultCap]);
+  const [who, setWho] = useState<UserPickerValue | null>(null);
+  const [amt, setAmt] = useState("");
+  return (
+    <div className="mb-2 flex flex-wrap items-end gap-x-6 gap-y-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3">
+      <label className="text-xs font-medium text-slate-600">งบต่อคน (ค่าเริ่มของทุกคน)
+        <span className="mt-1 flex items-center gap-1.5">
+          <span className="text-slate-500">฿</span>
+          <input type="number" min={0} step={10} value={v} disabled={busy} placeholder="ไม่จำกัด"
+            onChange={(e) => setV(e.target.value)} onBlur={() => onSaveDefault(v)} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+            className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-sm font-normal tabular-nums outline-none focus:border-blue-400 disabled:opacity-50" />
+          <span className="font-normal text-slate-500">/ เดือน</span>
+        </span>
+      </label>
+      <div className="text-xs font-medium text-slate-600">ตั้งงบให้คนอื่น (ที่ยังไม่อยู่ในตาราง)
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <span className="w-52"><UserPicker value={who} onChange={setWho} disableCreate /></span>
+          <span className="text-slate-500">฿</span>
+          <input type="number" min={0} step={10} value={amt} onChange={(e) => setAmt(e.target.value)} placeholder="ไม่จำกัด"
+            className="h-8 w-24 rounded-md border border-slate-200 bg-white px-2 text-sm font-normal tabular-nums outline-none focus:border-blue-400" />
+          <button type="button" disabled={!who} onClick={() => { if (!who) return; const n = Number(amt); onAdd(who, amt.trim() && n > 0 ? n : "unlimited"); setWho(null); setAmt(""); }}
+            className="h-8 rounded-md bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">ตั้งงบ</button>
+        </div>
+      </div>
+      <p className="w-full text-[11px] font-normal text-slate-400">ครบงบรายคน = คนนั้นใช้ GPT ไม่ได้จนถึงวันที่ 1 (แปลภาษาสลับไปตัวฟรี) ถ้าตั้ง "หยุด GPT อัตโนมัติ" ไว้ในการ์ดงบด้านบน · คนนั้นได้แจ้งเตือนตอนใกล้ครบ/ครบ · ผู้ดูแลได้แจ้งเมื่อมีคนครบ · งานอัตโนมัติไม่นับงบของใคร</p>
+    </div>
+  );
+}
+
+/** ช่องงบรายคนในตาราง — ใส่บาท (ออกจากช่อง = บันทึก) · ปุ่มไม่จำกัด / ใช้ค่าเริ่ม · บอก % ที่ใช้ไป */
+function UserBudgetCell({ u, defaultCap, warnPct, busy, onSave }: { u: UserRow; defaultCap: number | null; warnPct: number; busy: boolean; onSave: (v: number | "unlimited" | "default") => void }) {
+  const custom = u.cap_source === "custom" ? String(u.cap ?? "") : "";
+  const [v, setV] = useState(custom);
+  useEffect(() => { setV(custom); }, [custom]);
+  const commit = () => {
+    const t = v.trim();
+    if (t === custom) return;
+    if (!t) { if (u.cap_source === "custom") onSave("default"); return; }
+    const n = Number(t); if (Number.isFinite(n) && n > 0) onSave(n);
+  };
+  const pct = u.cap ? Math.round((u.cost_thb / u.cap) * 100) : 0;
+  const cls = u.budget_state === "over" ? "text-red-600" : u.budget_state === "warn" ? "text-amber-700" : "text-slate-500";
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-1.5 text-xs">
+        <span className="text-slate-500">฿</span>
+        <input type="number" min={0} step={10} value={v} disabled={busy || u.cap_source === "unlimited"}
+          placeholder={u.cap_source === "unlimited" ? "ไม่จำกัด" : defaultCap ? `ค่าเริ่ม ${defaultCap}` : "ไม่จำกัด"}
+          onChange={(e) => setV(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+          className="h-7 w-20 rounded border border-slate-200 px-1.5 text-xs tabular-nums outline-none focus:border-blue-400 disabled:bg-slate-50 disabled:opacity-70" />
+        {u.cap ? <span className={`tabular-nums ${cls}`}>{pct}%</span> : null}
+        {u.budget_state === "over" && <span className="rounded bg-red-50 px-1 text-[10px] text-red-700">ครบงบ</span>}
+      </div>
+      <div className="flex gap-2 text-[11px]">
+        {u.cap_source === "unlimited"
+          ? <button type="button" disabled={busy} onClick={() => onSave("default")} className="text-blue-600 hover:underline">ใช้งบค่าเริ่ม</button>
+          : <button type="button" disabled={busy} onClick={() => onSave("unlimited")} className="text-slate-500 hover:text-slate-700 hover:underline">ไม่จำกัด</button>}
+        {u.cap_source === "custom" && <button type="button" disabled={busy} onClick={() => onSave("default")} className="text-slate-500 hover:text-slate-700 hover:underline">ใช้ค่าเริ่ม</button>}
+        <span className="text-slate-400">{u.cap_source === "custom" ? "ตั้งเฉพาะคนนี้" : u.cap_source === "unlimited" ? "ไม่จำกัด (ตั้งเฉพาะคนนี้)" : u.cap_source === "default" ? "ใช้ค่าเริ่ม" : "ไม่จำกัด"}</span>
+      </div>
+    </div>
   );
 }

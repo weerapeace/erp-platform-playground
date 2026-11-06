@@ -9,7 +9,7 @@
  *   serviceOn(key, place?)  เช็กก่อนเรียกบริการอื่น (สลิป / LINE / อีเมล) · logServiceUse(key, …) บันทึกการใช้
  *
  * ctx = { request?, userId?, place? } — request = หาคนที่กด (บันทึกยอดรายคน) · place = "ที่" ในทะเบียน (เปิด-ปิดรายที่)
- * งบต่อเดือน = ui_config PAID_BUDGET_KEY (นับเฉพาะ GPT · รวม + รายฟีเจอร์ per_service) · ใกล้เต็ม/เกิน = แจ้งเตือนผู้ดูแลครั้งเดียวต่อเดือนต่อระดับ (erp_notify)
+ * งบต่อเดือน = ui_config PAID_BUDGET_KEY (นับเฉพาะ GPT · รวม + รายฟีเจอร์ per_service + รายคน per_user / per_user_default) · ใกล้เต็ม/เกิน = แจ้งเตือนผู้ดูแลครั้งเดียวต่อเดือนต่อระดับ (erp_notify)
  * ค่าตั้ง = paid_service_settings (แคช 30 วิ) · อ่านไม่ได้ = ถือว่าเปิด (ไม่ทำให้ระบบอื่นพังเพราะศูนย์นี้)
  * บันทึกการใช้ = paid_service_usage (key "<service>@<place>" เมื่อมีหลายที่ · บันทึกไม่ได้ = ข้าม ไม่ขวางงาน)
  */
@@ -19,7 +19,7 @@ import { openAiChatRaw } from "@/lib/ai-caption";
 import { getAi, type AiRunner } from "@/lib/ai";
 import {
   budgetOverMessage, budgetState, cleanBudget, estimateCostThb, monthKeyBangkok, monthStartBangkokIso, paidService, PAID_BUDGET_ALERT_KEY, PAID_BUDGET_KEY,
-  placeKey, resolvePlace, serviceBudgetOverMessage, serviceBudgetState, serviceOffMessage, splitPlaceKey, type PaidBudget,
+  placeKey, resolvePlace, serviceBudgetOverMessage, serviceBudgetState, serviceOffMessage, splitPlaceKey, userBudgetOverMessage, userBudgetState, userCap, type PaidBudget,
 } from "@/lib/paid-services";
 
 export type ServiceSetting = { key: string; enabled: boolean; model: string | null };
@@ -100,21 +100,22 @@ export async function loadBudget(force = false): Promise<PaidBudget> {
 }
 
 const SPEND_TTL_MS = 60_000;
-type Spend = { total: number; byKey: Map<string, number> };
+type Spend = { total: number; byKey: Map<string, number>; byUser: Map<string, number> };
 let spendCache: { at: number; month: string; spend: Spend } | null = null;
 /** ยอดใช้ GPT เดือนนี้ (บาท ประมาณ) — รวม + แยกรายบริการ (รวมทุกที่ของบริการนั้น) */
 export async function monthSpend(force = false): Promise<Spend> {
   const month = monthKeyBangkok();
   if (!force && spendCache && spendCache.month === month && Date.now() - spendCache.at < SPEND_TTL_MS) return spendCache.spend;
-  const spend: Spend = { total: 0, byKey: new Map() };
+  const spend: Spend = { total: 0, byKey: new Map(), byUser: new Map() };
   try {
     const start = monthStartBangkokIso();
     for (let from = 0; from < 500_000; from += 10_000) {
-      const { data, error } = await supabaseAdmin().from("paid_service_usage").select("key, est_cost_thb").gte("at", start).not("est_cost_thb", "is", null).range(from, from + 9_999);
+      const { data, error } = await supabaseAdmin().from("paid_service_usage").select("key, est_cost_thb, user_id").gte("at", start).not("est_cost_thb", "is", null).range(from, from + 9_999);
       if (error) throw error;
-      for (const r of (data ?? []) as { key: string; est_cost_thb: number | null }[]) {
+      for (const r of (data ?? []) as { key: string; est_cost_thb: number | null; user_id: string | null }[]) {
         const v = Number(r.est_cost_thb ?? 0); const k = splitPlaceKey(r.key).key;
         spend.total += v; spend.byKey.set(k, (spend.byKey.get(k) ?? 0) + v);
+        if (r.user_id) spend.byUser.set(r.user_id, (spend.byUser.get(r.user_id) ?? 0) + v);
       }
       if ((data ?? []).length < 10_000) break;
     }
@@ -124,38 +125,43 @@ export async function monthSpend(force = false): Promise<Spend> {
 }
 export const monthSpendThb = async (force = false) => (await monthSpend(force)).total;
 
-/** เกินงบแบบ "หยุด" ไหม (งบรวม หรืองบของฟีเจอร์นี้) — คืนข้อความที่จะบอกผู้ใช้ · null = ใช้ได้ */
-async function overBudgetMessage(key: string, b: PaidBudget): Promise<string | null> {
-  if (b.over_action !== "stop" || (!b.monthly_thb && !b.per_service[key])) return null;
+/** เกินงบแบบ "หยุด" ไหม (งบรวม · งบของฟีเจอร์นี้ · งบของคนนี้) — คืนข้อความที่จะบอกผู้ใช้ · null = ใช้ได้ */
+async function overBudgetMessage(key: string, b: PaidBudget, userId: string | null): Promise<string | null> {
+  const cap = userCap(b, userId);
+  if (b.over_action !== "stop" || (!b.monthly_thb && !b.per_service[key] && !cap)) return null;
   const sp = await monthSpend();
   if (b.monthly_thb && budgetState(sp.total, b) === "over") return budgetOverMessage(b);
   if (serviceBudgetState(sp.byKey.get(key) ?? 0, b, key) === "over") return serviceBudgetOverMessage(key, b);
+  if (cap && userBudgetState(sp.byUser.get(userId!) ?? 0, b, userId) === "over") return userBudgetOverMessage(cap);
   return null;
 }
 
 /** GPT ใช้ได้ไหม (เปิด + ไม่เกินงบแบบหยุด) — ใช้ตอนมีทางสำรองฟรี */
 export async function aiAvailable(key: string, ctx?: UseCtx): Promise<boolean> {
   if (!(await serviceOn(key, ctx?.place))) return false;
-  return (await overBudgetMessage(key, await loadBudget())) === null;
+  return (await overBudgetMessage(key, await loadBudget(), await resolveUser(ctx))) === null;
 }
 
 /** GPT ตอบ JSON ผ่านด่านกลาง — แทน chatJson เดิม (ผลลัพธ์/ข้อความ error เหมือนเดิม) */
 export async function aiChat(key: string, system: string, userContent: unknown[], maxTokens: number, model?: string, ctx?: UseCtx): Promise<Record<string, unknown>> {
   if (!(await serviceOn(key, ctx?.place))) throw new ServiceOffError(key);
   const budget = await loadBudget();
-  const over = await overBudgetMessage(key, budget);
+  const userId = await resolveUser(ctx);
+  const over = await overBudgetMessage(key, budget, userId);
   if (over) throw new BudgetExceededError(over);
   // โมเดล: ที่เลือกให้ "ที่" นี้ → ที่เลือกให้ทั้งบริการ → ที่ฟีเจอร์ส่งมา → ค่าเริ่มต้น
   const settings = await loadServiceSettings();
   const place = resolvePlace(key, ctx?.place);
   const useModel = (place ? settings.get(placeKey(key, place))?.model : null) || settings.get(key)?.model || model;
-  const userId = await resolveUser(ctx);
   try {
     const r = await openAiChatRaw(system, userContent, maxTokens, useModel);
     const cost = estimateCostThb(r.model, r.tokensIn, r.tokensOut);
     await logServiceUse(key, { model: r.model, tokensIn: r.tokensIn, tokensOut: r.tokensOut, costThb: cost, userId, place: ctx?.place });
-    if (spendCache && spendCache.month === monthKeyBangkok()) { spendCache.spend.total += cost; spendCache.spend.byKey.set(key, (spendCache.spend.byKey.get(key) ?? 0) + cost); }
-    if (budget.monthly_thb || budget.per_service[key]) await checkBudgetAlerts(budget, key).catch(() => { /* แจ้งไม่ได้ ไม่ขวางงาน */ });
+    if (spendCache && spendCache.month === monthKeyBangkok()) {
+      spendCache.spend.total += cost; spendCache.spend.byKey.set(key, (spendCache.spend.byKey.get(key) ?? 0) + cost);
+      if (userId) spendCache.spend.byUser.set(userId, (spendCache.spend.byUser.get(userId) ?? 0) + cost);
+    }
+    if (budget.monthly_thb || budget.per_service[key] || userCap(budget, userId)) await checkBudgetAlerts(budget, key, userId).catch(() => { /* แจ้งไม่ได้ ไม่ขวางงาน */ });
     return r.data;
   } catch (e) {
     await logServiceUse(key, { model: useModel ?? null, ok: false, error: e instanceof Error ? e.message : String(e), userId, place: ctx?.place });
@@ -185,7 +191,7 @@ export async function getAiFor(key: string, ctx?: UseCtx): Promise<AiRunner | nu
 
 // ── แจ้งเตือนงบ — ใกล้เต็ม (warn_pct) / เกินงบ · ครั้งเดียวต่อระดับต่อเดือน · ส่งหาผู้ดูแลที่มีสิทธิ์ admin.paid_services
 /** กันแจ้งซ้ำ: งบรวม = warn/over · งบรายฟีเจอร์ = svc["<key>"] = { warn, over } */
-type AlertState = { month: string; warn?: boolean; over?: boolean; svc?: Record<string, { warn?: boolean; over?: boolean }> };
+type AlertState = { month: string; warn?: boolean; over?: boolean; svc?: Record<string, { warn?: boolean; over?: boolean }>; usr?: Record<string, { warn?: boolean; over?: boolean }> };
 
 async function budgetAdminIds(): Promise<string[]> {
   const admin = supabaseAdmin();
@@ -200,17 +206,18 @@ async function budgetAdminIds(): Promise<string[]> {
   return [...ids];
 }
 
-export async function checkBudgetAlerts(budget?: PaidBudget, serviceKey?: string): Promise<void> {
+export async function checkBudgetAlerts(budget?: PaidBudget, serviceKey?: string, userId?: string | null): Promise<void> {
   const b = budget ?? (await loadBudget());
-  if (!b.monthly_thb && !Object.keys(b.per_service).length) return;
+  if (!b.monthly_thb && !Object.keys(b.per_service).length && !userCap(b, userId)) return;
   const sp = await monthSpend();
   const admin = supabaseAdmin();
   const month = monthKeyBangkok();
   const { data } = await admin.from("ui_config").select("value").eq("key", PAID_BUDGET_ALERT_KEY).maybeSingle();
   const cur = ((data as { value?: AlertState } | null)?.value ?? { month: "" }) as AlertState;
-  const sent: AlertState = cur.month === month ? { ...cur, svc: { ...(cur.svc ?? {}) } } : { month, svc: {} };
+  const sent: AlertState = cur.month === month ? { ...cur, svc: { ...(cur.svc ?? {}) }, usr: { ...(cur.usr ?? {}) } } : { month, svc: {}, usr: {} };
   const money = (n: number) => `฿${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}`;
-  const todo: { level: "warn" | "over"; title: string; body: string }[] = [];
+  /** to = ส่งหาคนนี้คนเดียว (งบรายคน) · ไม่ใส่ = ผู้ดูแล */
+  const todo: { level: "warn" | "over"; title: string; body: string; to?: string }[] = [];
 
   // งบรวม
   const st = budgetState(sp.total, b);
@@ -234,15 +241,35 @@ export async function checkBudgetAlerts(budget?: PaidBudget, serviceKey?: string
       : { level: "warn", title: `"${name}" ใช้ไป ${Math.round((spent / cap) * 100)}% ของงบ`, body: `ใช้ไป ${money(spent)} จากงบ ${money(cap)} ต่อเดือน` });
     sent.svc![key] = { warn: true, over: s2 === "over" || !!was.over };
   }
+  // งบรายคน — คนนั้นได้แจ้งเตือน (ใกล้ครบ / ครบ) · ผู้ดูแลได้เมื่อมีคนครบงบ
+  const cap = userCap(b, userId);
+  if (userId && cap) {
+    const spentU = sp.byUser.get(userId) ?? 0;
+    const su = userBudgetState(spentU, b, userId);
+    const wasU = sent.usr![userId] ?? {};
+    if ((su === "warn" || su === "over") && !(su === "warn" ? wasU.warn : wasU.over)) {
+      const stop = b.over_action === "stop";
+      todo.push(su === "over"
+        ? { level: "over", to: userId, title: `คุณใช้ AI ครบงบเดือนนี้แล้ว (${money(spentU)} / ${money(cap)})`, body: stop ? "ปุ่ม AI จะใช้ไม่ได้จนถึงวันที่ 1 (แปลภาษาสลับไปตัวฟรี) — ขอผู้ดูแลเพิ่มงบได้" : "ยังใช้ต่อได้ — ผู้ดูแลได้รับแจ้งแล้ว" }
+        : { level: "warn", to: userId, title: `คุณใช้ AI ไป ${Math.round((spentU / cap) * 100)}% ของงบเดือนนี้`, body: `ใช้ไป ${money(spentU)} จากงบ ${money(cap)} ต่อเดือน` });
+      if (su === "over") {
+        const { data: prof } = await admin.from("user_profiles").select("display_name, email").eq("id", userId).maybeSingle();
+        const who = (prof as { display_name?: string | null; email?: string | null } | null)?.display_name || (prof as { email?: string | null } | null)?.email || "ผู้ใช้";
+        todo.push({ level: "over", title: `${who} ใช้ AI ครบงบรายคนแล้ว (${money(spentU)} / ${money(cap)})`, body: stop ? `ระบบหยุด GPT ของ ${who} แล้ว — เพิ่มงบรายคนได้ที่ศูนย์ AI / API` : "ตั้งไว้เป็นแจ้งเตือนอย่างเดียว — ยังใช้ต่อได้" });
+      }
+      sent.usr![userId] = { warn: true, over: su === "over" || !!wasU.over };
+    }
+  }
   if (!todo.length) return;
   // จองก่อนส่ง (กันส่งซ้ำเมื่อหลายคำขอข้ามเส้นพร้อมกัน)
   await admin.from("ui_config").upsert({ key: PAID_BUDGET_ALERT_KEY, value: sent, updated_at: new Date().toISOString() }, { onConflict: "key" });
-  const ids = await budgetAdminIds();
-  if (!ids.length) return;
+  const ids = todo.some((n) => !n.to) ? await budgetAdminIds() : [];
   for (const n of todo) {
+    const to = n.to ? [n.to] : ids;
+    if (!to.length) continue;
     await admin.rpc("erp_notify", {
-      p_user_ids: ids, p_event_type: n.level === "over" ? "ai_budget.over" : "ai_budget.warn",
-      p_title: n.title, p_body: n.body, p_link_url: "/admin/paid-services", p_entity_type: "paid_services", p_entity_id: null,
+      p_user_ids: to, p_event_type: n.level === "over" ? "ai_budget.over" : "ai_budget.warn",
+      p_title: n.title, p_body: n.body, p_link_url: n.to ? null : "/admin/paid-services", p_entity_type: "paid_services", p_entity_id: null,
       p_priority: n.level === "over" ? "high" : "normal",
     });
   }

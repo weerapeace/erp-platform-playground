@@ -167,8 +167,14 @@ export const PAID_BUDGET_KEY = "paid_services_budget";
 export const PAID_BUDGET_ALERT_KEY = "paid_services_budget_alerts";
 export type BudgetOverAction = "stop" | "warn";
 /** per_service = งบรายฟีเจอร์ (บาท/เดือน · เฉพาะ GPT) เช่น { "ai.caption": 100 } — ใช้ warn_pct / over_action เดียวกับงบรวม · ไม่มี = ไม่จำกัดรายฟีเจอร์ */
-export type PaidBudget = { monthly_thb: number | null; warn_pct: number; over_action: BudgetOverAction; per_service: Record<string, number> };
-export const DEFAULT_BUDGET: PaidBudget = { monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {} };
+/** per_user_default = งบต่อคน (บาท/เดือน · ทุกคนที่ไม่ได้ตั้งแยก · null = ไม่จำกัด)
+ *  per_user = ตั้งรายคน { <user_id>: บาท | null } — null = ไม่จำกัด (เช่น ผู้ดูแล) · ไม่มีในนี้ = ใช้ค่าเริ่มต่อคน
+ *  งานที่ไม่มีคนกด (LINE · งานตั้งเวลา) ไม่นับงบของใคร */
+export type PaidBudget = {
+  monthly_thb: number | null; warn_pct: number; over_action: BudgetOverAction; per_service: Record<string, number>;
+  per_user_default: number | null; per_user: Record<string, number | null>;
+};
+export const DEFAULT_BUDGET: PaidBudget = { monthly_thb: null, warn_pct: 80, over_action: "stop", per_service: {}, per_user_default: null, per_user: {} };
 
 export function cleanBudget(v: unknown): PaidBudget {
   const r = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
@@ -179,8 +185,37 @@ export function cleanBudget(v: unknown): PaidBudget {
     warn_pct: Number.isFinite(w) && w >= 10 && w <= 100 ? w : DEFAULT_BUDGET.warn_pct,
     over_action: r.over_action === "warn" ? "warn" : "stop",
     per_service: cleanPerService(r.per_service),
+    per_user_default: positiveOrNull(r.per_user_default),
+    per_user: cleanPerUser(r.per_user),
   };
 }
+
+const positiveOrNull = (v: unknown): number | null => { const n = Number(v); return v === null || v === "" || v === undefined || !Number.isFinite(n) || n <= 0 ? null : Math.round(n * 100) / 100; };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** งบรายคน — key ต้องเป็น user id · ค่า > 0 = บาท/เดือน · null / 0 / "unlimited" = ไม่จำกัด · ค่าอื่นตัดทิ้ง */
+function cleanPerUser(v: unknown): Record<string, number | null> {
+  const out: Record<string, number | null> = {};
+  if (!v || typeof v !== "object") return out;
+  for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
+    if (!UUID_RE.test(k)) continue;
+    if (raw === null || raw === "unlimited" || Number(raw) === 0) { out[k.toLowerCase()] = null; continue; }
+    const n = positiveOrNull(raw);
+    if (n !== null) out[k.toLowerCase()] = n;
+  }
+  return out;
+}
+/** งบของคนนี้ต่อเดือน — null = ไม่จำกัด (ไม่มีคนกด / ตั้งไม่จำกัด / ไม่ได้ตั้งค่าเริ่ม) */
+export function userCap(b: PaidBudget, userId: string | null | undefined): number | null {
+  if (!userId) return null;
+  const k = userId.toLowerCase();
+  return k in b.per_user ? b.per_user[k] : b.per_user_default;
+}
+export const userBudgetState = (spentThb: number, b: PaidBudget, userId: string | null | undefined): BudgetState => {
+  const cap = userCap(b, userId);
+  return cap ? budgetState(spentThb, { ...b, monthly_thb: cap }) : "none";
+};
+export const userBudgetOverMessage = (cap: number) =>
+  `คุณใช้ AI ครบงบของคุณเดือนนี้ (฿${cap.toLocaleString("th-TH")}) แล้ว — ใช้ได้อีกครั้งวันที่ 1 หรือขอผู้ดูแลเพิ่มงบที่ศูนย์ AI / API ที่เสียเงิน`;
 
 /** งบรายฟีเจอร์ — รับเฉพาะ key GPT ในทะเบียน · ค่า > 0 (ปัด 2 ตำแหน่ง) · อื่น ๆ ตัดทิ้ง */
 function cleanPerService(v: unknown): Record<string, number> {

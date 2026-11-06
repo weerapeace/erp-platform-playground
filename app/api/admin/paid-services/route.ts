@@ -6,6 +6,8 @@
  * GET ?view=history&mode=day|month&key=<service?>  → { buckets: [{ key, label, cost_thb, calls, failed }] } (30 วัน / 12 เดือน · key = กรองบริการเดียว)
  * PATCH { key, place?, enabled?, model? }  เปิด/ปิด · เปลี่ยนโมเดล (ทั้งบริการ หรือรายที่ · "" = ค่าเดิม / ตามบริการ) — locked = 400
  * PATCH { budget_service: { key, monthly_thb } }  งบรายฟีเจอร์ (null/0 = ไม่จำกัด)
+ * PATCH { budget_user_default: บาท | null }       งบต่อคน (ค่าเริ่มของทุกคน · null = ไม่จำกัด)
+ * PATCH { budget_user: { user_id, monthly_thb } }  ตั้งรายคน — บาท · null = ไม่จำกัด · "default" = กลับไปใช้ค่าเริ่มต่อคน
  * PATCH { budget: { monthly_thb, warn_pct, over_action } }  ตั้งงบต่อเดือน (ui_config) · ทุกการเปลี่ยนเขียน audit_logs
  * ทะเบียน = lib/paid-services · ด่านกลาง = lib/paid-services-server
  */
@@ -19,7 +21,7 @@ import { openAiKey } from "@/lib/ai-caption";
 import { emailProvider } from "@/lib/email";
 import {
   AUTO_USER_LABEL, budgetState, canPickModel, canToggle, cleanBudget, isValidModel, monthStartBangkokIso, PAID_BUDGET_KEY, PAID_MODEL_CHOICES, PAID_SERVICES,
-  paidService, placeKey, splitPlaceKey, usageBuckets, usageRangeStartIso, type PaidBudget, type PaidProvider,
+  paidService, placeKey, splitPlaceKey, usageBuckets, usageRangeStartIso, userBudgetState, userCap, type PaidBudget, type PaidProvider,
 } from "@/lib/paid-services";
 import { checkBudgetAlerts, invalidateServiceSettings, loadBudget } from "@/lib/paid-services-server";
 
@@ -104,7 +106,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
   const totals = services.reduce((a, s) => ({ calls: a.calls + s.month.calls, failed: a.failed + s.month.failed, cost_thb: a.cost_thb + s.month.cost_thb }), { calls: 0, failed: 0, cost_thb: 0 });
 
-  // ยอดรายคน — ชื่อจาก user_profiles · ไม่มีคนกด = ระบบ/อัตโนมัติ
+  // ยอดรายคน — ชื่อจาก user_profiles · ไม่มีคนกด = ระบบ/อัตโนมัติ · คนที่ตั้งงบรายคนไว้แต่ยังไม่ได้ใช้ = แถวยอด 0
+  for (const uid of Object.keys(budget.per_user)) if (!byUser.has(uid)) byUser.set(uid, { ...emptyStat(), keys: new Map<string, number>() });
   const uids = [...byUser.keys()].filter(Boolean);
   const names = new Map<string, string>();
   if (uids.length) {
@@ -114,6 +117,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const by_user = [...byUser.entries()].map(([uid, u]) => ({
     user_id: uid || null, name: uid ? names.get(uid) ?? "ผู้ใช้ (ลบแล้ว)" : AUTO_USER_LABEL,
     calls: u.calls, failed: u.failed, cost_thb: u.cost_thb,
+    cap: uid ? userCap(budget, uid) : null,
+    cap_source: !uid ? "auto" : uid in budget.per_user ? (budget.per_user[uid] === null ? "unlimited" : "custom") : budget.per_user_default ? "default" : "none",
+    budget_state: uid ? userBudgetState(u.cost_thb, budget, uid) : "none",
     top: [...u.keys.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, n]) => ({ key: k, th: paidService(k)?.th ?? k, calls: n })),
   })).sort((a, b) => b.cost_thb - a.cost_thb || b.calls - a.calls);
 
@@ -135,7 +141,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const before = await loadBudget(true);
     // งบรายฟีเจอร์แก้ที่ budget_service — ไม่ส่ง per_service มา = คงของเดิม (กันการ์ดงบรวมล้างงบรายฟีเจอร์)
     const raw = body.budget as Record<string, unknown>;
-    const next = cleanBudget({ ...raw, per_service: raw && typeof raw === "object" && "per_service" in raw ? raw.per_service : before.per_service });
+    const keep = (k: "per_service" | "per_user" | "per_user_default") => (raw && typeof raw === "object" && k in raw ? raw[k] : before[k]);
+    const next = cleanBudget({ ...raw, per_service: keep("per_service"), per_user: keep("per_user"), per_user_default: keep("per_user_default") });
     const { error } = await admin.from("ui_config").upsert({ key: PAID_BUDGET_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
     if (error) return NextResponse.json({ error: "บันทึกงบไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
     invalidateServiceSettings();
@@ -143,6 +150,33 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       await writeAudit(admin, { action: "update", entityType: "paid_service_budget", entityId: null, actorId: actor.id, actorName: actor.name, metadata: { changes: { budget: { from: before, to: next } } } });
     }
     await checkBudgetAlerts(next).catch(() => { /* ตั้งงบต่ำกว่ายอดที่ใช้ไปแล้ว = แจ้งทันที · แจ้งไม่ได้ไม่ขวาง */ });
+    return NextResponse.json({ data: { budget: next }, error: null });
+  }
+
+  // ── งบรายคน: ค่าเริ่มต่อคน / ตั้งรายคน
+  if ("budget_user_default" in body || (body.budget_user && typeof body.budget_user === "object")) {
+    const before = await loadBudget(true);
+    let next: PaidBudget; let meta: Record<string, unknown>;
+    if ("budget_user_default" in body) {
+      next = cleanBudget({ ...before, per_user_default: body.budget_user_default });
+      meta = { changes: { per_user_default: { from: before.per_user_default, to: next.per_user_default } } };
+    } else {
+      const bu = body.budget_user as { user_id?: unknown; monthly_thb?: unknown };
+      const uid = String(bu.user_id ?? "").toLowerCase();
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(uid)) return NextResponse.json({ error: "ไม่ได้ระบุผู้ใช้" }, { status: 400 });
+      const per = { ...before.per_user };
+      if (bu.monthly_thb === "default") delete per[uid];
+      else if (bu.monthly_thb === null || bu.monthly_thb === "unlimited") per[uid] = null;
+      else { const n = Number(bu.monthly_thb); if (!Number.isFinite(n) || n <= 0) return NextResponse.json({ error: "ใส่งบเป็นจำนวนเงินมากกว่า 0" }, { status: 400 }); per[uid] = n; }
+      next = cleanBudget({ ...before, per_user: per });
+      const { data: prof } = await admin.from("user_profiles").select("display_name, email").eq("id", uid).maybeSingle();
+      meta = { user_id: uid, user_name: (prof as { display_name?: string } | null)?.display_name ?? null,
+        changes: { per_user: { from: uid in before.per_user ? before.per_user[uid] : "default", to: uid in next.per_user ? next.per_user[uid] : "default" } } };
+    }
+    const { error } = await admin.from("ui_config").upsert({ key: PAID_BUDGET_KEY, value: next, updated_at: new Date().toISOString() }, { onConflict: "key" });
+    if (error) return NextResponse.json({ error: "บันทึกงบไม่สำเร็จ กรุณาลองใหม่" }, { status: 500 });
+    invalidateServiceSettings();
+    await writeAudit(admin, { action: "update", entityType: "paid_service_budget", entityId: null, actorId: actor.id, actorName: actor.name, metadata: meta });
     return NextResponse.json({ data: { budget: next }, error: null });
   }
 
