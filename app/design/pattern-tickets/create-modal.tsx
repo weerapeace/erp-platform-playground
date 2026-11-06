@@ -5,7 +5,7 @@
  *   ประเภทงาน → ชื่องาน/รุ่นสินค้า → รายละเอียดไทย (+ แปลอังกฤษอัตโนมัติ แก้ได้) → ด่วน/กำหนดส่ง → มอบหมายช่าง (ไม่ใส่ = ใครก็กดรับได้)
  *   ไฟล์แนบ (AI/PSD/PNG/PDF/DXF ไฟล์ใหญ่ได้) อัปขึ้น Drive หลังสร้างตั๋ว
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useLang, useT } from "@/components/i18n";
@@ -14,6 +14,8 @@ import { UploadProgress, type UploadProgressState } from "@/components/upload-pr
 import { useFileDrop, FileDropHint } from "@/components/file-drop";
 import { ParentSkuPicker, type ParentSkuPickerValue } from "@/components/pickers";
 import { UserPicker, type UserPickerValue } from "@/components/pickers/master";
+import { DesignSheetPicker, fetchDesignSheetCards } from "@/components/pickers/design-sheet-picker";
+import type { DesignSheetCard } from "@/lib/design-sheet-view";
 import { apiFetch } from "@/lib/api";
 import { translateContent } from "@/lib/content-translate";
 import { defaultDueDate, NORMAL_DUE_DAYS, typeIconOf, typeLabelPair } from "@/lib/pattern-tickets";
@@ -21,10 +23,12 @@ import { fmtBytes, uploadTicketFile } from "./upload";
 import { TypeIconBox } from "./type-icon-picker";
 import type { TicketType } from "./types";
 
-export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
+export function CreateTicketModal({ types, initialType, initialSheetIds, onClose, onCreated }: {
   types: TicketType[];
   /** ประเภทที่เลือกไว้ให้ก่อน (กดจากแผ่นประเภทงานบนหน้า) — เปลี่ยนในป๊อปได้ */
   initialType?: string;
+  /** Design sheet ที่แนบไว้ให้ก่อน (เปิดตั๋วจากหน้า Design sheet → ?ds=<id>) */
+  initialSheetIds?: string[];
   onClose: () => void;
   onCreated: (id: string) => void;
 }) {
@@ -54,7 +58,17 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const dirty = !!(typeKey !== startType || title || sku || descTh || files.length);
+  // Design sheet ที่แนบ — เปิดจากหน้า Design sheet ("เปิดตั๋วจากใบนี้") = แนบใบนั้นไว้ให้ก่อน (ไม่นับเป็นข้อมูลค้าง)
+  const [sheets, setSheets] = useState<DesignSheetCard[]>([]);
+  const startSheetsKey = useRef("");
+  useEffect(() => {
+    if (!initialSheetIds?.length) return;
+    let alive = true;
+    void fetchDesignSheetCards(initialSheetIds).then((c) => { if (alive) { startSheetsKey.current = c.map((x) => x.id).join(); setSheets(c); } }).catch(() => { /* โหลดไม่ได้ = แนบเองในป๊อป */ });
+    return () => { alive = false; };
+  }, [initialSheetIds]);
+
+  const dirty = !!(typeKey !== startType || title || sku || descTh || files.length || sheets.map((x) => x.id).join() !== startSheetsKey.current);
   const ty = active.find((x) => x.key === typeKey);
 
   const addFiles = (list: File[]) => setFiles((cur) => [...cur, ...list.filter((f) => f.size > 0 && !cur.some((c) => c.name === f.name && c.size === f.size))]);
@@ -113,6 +127,7 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
           description_th: descTh.trim(), description_en: en, en_edited: enEdited,
           priority: urgent ? "urgent" : "normal", due_date: due || null,
           assignee_id: assignee?.id ?? null, assignee_name: assignee?.name ?? null,
+          design_sheet_ids: sheets.map((s) => s.id),
         }),
       });
       const j = await res.json().catch(() => ({}));
@@ -208,6 +223,12 @@ export function CreateTicketModal({ types, initialType, onClose, onCreated }: {
             <Label>{t("รุ่นสินค้า (ถ้ามี)", "Product model (optional)")}</Label>
             <ParentSkuPicker value={sku} onChange={(v) => { setSku(v); if (v && !title.trim()) { setTitle(v.name); void translateTitle(v.name); } }} disableCreate />
           </div>
+        </section>
+
+        {/* Design sheet ที่เกี่ยวข้อง (ของกลาง DesignSheetPicker) */}
+        <section>
+          <Label>{t("Design sheet ที่เกี่ยวข้อง (ถ้ามี)", "Related design sheets (optional)")}</Label>
+          <DesignSheetPicker value={sheets} onChange={setSheets} disabled={saving} />
         </section>
 
         {/* รายละเอียด 2 ภาษา */}

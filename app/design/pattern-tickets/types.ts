@@ -1,3 +1,4 @@
+import type { DesignSheetCard } from "@/lib/design-sheet-view";
 import type { ChecklistItem, PatternAction, TemplateItem, TicketLink } from "@/lib/pattern-tickets";
 
 export type TicketType = {
@@ -19,7 +20,12 @@ export type TicketRow = {
 export type Ticket = TicketRow & {
   description_th: string; description_en: string; en_edited: boolean;
   links: TicketLink[]; drive_folder_id: string | null; last_note: string | null;
+  design_sheet_ids: string[];
   started_at: string | null; submitted_at: string | null;
 };
 
-export type TicketDetail = { data: Ticket; actions: PatternAction[]; can_edit: boolean; can_work: boolean; can_assign: boolean };
+export type TicketDetail = {
+  data: Ticket; actions: PatternAction[]; can_edit: boolean; can_work: boolean; can_assign: boolean;
+  /** Design sheet ที่แนบ (การ์ด) · can_open_sheets = กดเปิดป๊อปดูได้ (พนักงาน = ไม่ได้) */
+  design_sheets: DesignSheetCard[]; can_open_sheets: boolean;
+};

@@ -4,6 +4,7 @@
  * ลิ้นชักรายละเอียดตั๋ว Pattern (ของกลาง Drawer)
  *   หัว: ประเภท · เลขตั๋ว · สถานะ · ผู้สั่ง/ช่าง/กำหนดส่ง
  *   รายละเอียด ไทย / ไทย+EN / EN (แก้ได้เฉพาะผู้สั่ง/ผู้จัดการ)
+ *   Design sheets ที่แนบ (การ์ด · กด = ป๊อปดูอย่างเดียว DesignSheetViewModal — พนักงานเห็นแค่การ์ด กดไม่ได้)
  *   เช็กลิสต์ตามประเภทงาน · ไฟล์ที่ต้องส่งกลับ
  *   ไฟล์แนบ = โฟลเดอร์ Drive ของตั๋ว (ของกลาง DriveFolderFiles) + อัปไฟล์ใหญ่ + ลิงก์ที่วางเอง
  *   คุยงาน = ของกลาง CommentThread (entity pattern_tickets)
@@ -25,6 +26,9 @@ import { translateContent } from "@/lib/content-translate";
 import { checklistLabel, fmtDate, isOverdue, patternStatus, ticketTitle, todayBangkok, typeIconOf, typeLabelPair, type ChecklistItem, type PatternAction, type TicketLink } from "@/lib/pattern-tickets";
 import { uploadTicketFile } from "./upload";
 import { ExtBadge } from "./create-modal";
+import { DesignSheetCards, DesignSheetPicker } from "@/components/pickers/design-sheet-picker";
+import { DesignSheetViewModal } from "@/components/design-sheet-view";
+import type { DesignSheetCard } from "@/lib/design-sheet-view";
 import { TypeIconBox } from "./type-icon-picker";
 import type { TicketDetail, TicketType } from "./types";
 
@@ -51,6 +55,7 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
   const [up, setUp] = useState<UploadProgressState | null>(null);
   const [filesKey, setFilesKey] = useState(0);
   const [linkUrl, setLinkUrl] = useState("");
+  const [viewSheet, setViewSheet] = useState<string | null>(null);   // ป๊อปดู Design sheet (ดูอย่างเดียว)
   const fileRef = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -189,6 +194,14 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
             )}
           </section>
 
+          {/* Design sheet ที่แนบ — กดการ์ด = ป๊อปดูอย่างเดียว (พนักงานเห็นแค่การ์ด กดไม่ได้ · ด่านซ้ำที่ API) */}
+          {(d.design_sheets?.length ?? 0) > 0 && (
+            <section>
+              <h3 className="mb-1.5 text-sm font-semibold text-slate-700">Design sheets <span className="font-normal text-slate-400">({d.design_sheets.length})</span></h3>
+              <DesignSheetCards sheets={d.design_sheets} onOpen={d.can_open_sheets ? (s) => setViewSheet(s.id) : undefined} />
+            </section>
+          )}
+
           {/* เช็กลิสต์ */}
           {(tk.checklist.length > 0 || (ty?.deliverables.length ?? 0) > 0) && (
             <section>
@@ -278,8 +291,11 @@ export function TicketDrawer({ id, types, onClose, onChanged }: {
       )}
 
       {editing && tk && (
-        <EditTicketModal tk={tk} onClose={() => setEditing(false)}
-          onSave={async (fields) => { const ok = await patch({ action: "update", fields }, t("บันทึกแล้ว", "Saved")); if (ok) setEditing(false); }} />
+        <EditTicketModal tk={tk} sheets={d?.design_sheets ?? []} onClose={() => setEditing(false)}
+          onSave={async (fields) => { const ok = await patch({ action: "update", fields }, t("บันทึกแล้ว", "Saved")); if (ok) { setEditing(false); if ("design_sheet_ids" in fields) void load(); } }} />
+      )}
+      {viewSheet && (
+        <DesignSheetViewModal url={`/api/pattern-tickets/${id}/design-sheets/${viewSheet}`} onClose={() => setViewSheet(null)} />
       )}
     </Drawer>
   );
@@ -304,9 +320,11 @@ function AssigneeLine({ tk, canAssign, busy, onAssign }: { tk: TicketDetail["dat
   );
 }
 
-function EditTicketModal({ tk, onClose, onSave }: { tk: TicketDetail["data"]; onClose: () => void; onSave: (fields: Record<string, unknown>) => Promise<void> }) {
+function EditTicketModal({ tk, sheets: sheetsInit, onClose, onSave }: { tk: TicketDetail["data"]; sheets: DesignSheetCard[]; onClose: () => void; onSave: (fields: Record<string, unknown>) => Promise<void> }) {
   const t = useT();
   const toast = useToast();
+  const [sheets, setSheets] = useState<DesignSheetCard[]>(sheetsInit);
+  const sheetsChanged = sheets.map((s) => s.id).join() !== sheetsInit.map((s) => s.id).join();
   const [title, setTitle] = useState(tk.title);
   const [th, setTh] = useState(tk.description_th);
   const [en, setEn] = useState(tk.description_en);
@@ -327,7 +345,7 @@ function EditTicketModal({ tk, onClose, onSave }: { tk: TicketDetail["data"]; on
     catch { return titleEn; }
     finally { setTitleTranslating(false); }
   };
-  const dirty = title !== tk.title || titleEn !== (tk.title_en ?? "") || th !== tk.description_th || en !== tk.description_en || due !== (tk.due_date ?? "") || urgent !== (tk.priority === "urgent");
+  const dirty = sheetsChanged || title !== tk.title || titleEn !== (tk.title_en ?? "") || th !== tk.description_th || en !== tk.description_en || due !== (tk.due_date ?? "") || urgent !== (tk.priority === "urgent");
 
   const translate = async () => {
     setTranslating(true);
@@ -346,7 +364,7 @@ function EditTicketModal({ tk, onClose, onSave }: { tk: TicketDetail["data"]; on
     // ชื่องาน English: ที่ช่อง English (แก้เองได้) · ช่องว่าง หรือแก้ชื่อไทยแต่ไม่ได้แตะช่องอังกฤษ = แปลใหม่ให้
     let titleEnOut = titleEn.trim();
     if (!titleEnOut || (!titleEnTouched && title.trim() !== tk.title && titleEn === (tk.title_en ?? ""))) titleEnOut = (await retitle(true)).trim();
-    await onSave({ title: title.trim(), ...(titleEnOut ? { title_en: titleEnOut } : {}), description_th: th, description_en: enOut, en_edited: enEdited, due_date: due || null, priority: urgent ? "urgent" : "normal" });
+    await onSave({ title: title.trim(), ...(titleEnOut ? { title_en: titleEnOut } : {}), description_th: th, description_en: enOut, en_edited: enEdited, due_date: due || null, priority: urgent ? "urgent" : "normal", ...(sheetsChanged ? { design_sheet_ids: sheets.map((s) => s.id) } : {}) });
     setSaving(false);
   };
 
@@ -392,6 +410,10 @@ function EditTicketModal({ tk, onClose, onSave }: { tk: TicketDetail["data"]; on
               <button type="button" onClick={() => setUrgent(true)} className={`flex-1 rounded-lg border px-3 py-2 text-sm font-normal ${urgent ? "border-red-300 bg-red-50 text-red-700" : "border-slate-200 text-slate-600"}`}>{t("ด่วน", "Urgent")}</button>
             </div>
           </div>
+        </div>
+        <div className="text-xs font-medium text-slate-600">
+          <div className="mb-1">{t("Design sheet ที่เกี่ยวข้อง", "Related design sheets")}</div>
+          <DesignSheetPicker value={sheets} onChange={setSheets} disabled={saving} />
         </div>
       </div>
     </ERPModal>

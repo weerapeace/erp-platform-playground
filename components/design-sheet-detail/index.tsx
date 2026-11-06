@@ -21,6 +21,7 @@ import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
 import { RecordPeekLink } from "@/components/pickers/record-peek-link";
 import { RecordChecklist, RecordTasksButton } from "@/components/record-tasks";
+import { PatternTicketLinks } from "@/components/pattern-ticket-links";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
@@ -2191,6 +2192,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             <div className="grid grid-cols-2 gap-2">{fld.drive}{fld.parent}</div>
             {fld.detail}
             {fld.note}
+            {/* 🎫 ตั๋วงาน Pattern ที่แนบใบนี้ (ของกลาง · ไม่มีสิทธิ์ดูตั๋ว = ไม่โชว์) */}
+            {form.id && <PatternTicketLinks sheetId={form.id} />}
             </div>}
 
             {/* แท็บ Comment ลูกค้า (เฟส 3) */}

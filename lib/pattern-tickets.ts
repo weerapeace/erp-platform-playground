@@ -284,3 +284,19 @@ export const ticketTitle = (tk: { title: string; title_en?: string | null }, en:
 
 /** ชื่อประเภทงาน [ตัวใหญ่, ตัวเล็ก] ตามภาษา — English = อังกฤษนำ ไทยตาม */
 export const typeLabelPair = (x: { label_th: string; label_en: string }, en: boolean): [string, string] => (en ? [x.label_en, x.label_th] : [x.label_th, x.label_en]);
+
+/* ── Design sheet ที่แนบกับตั๋ว (pattern_tickets.design_sheet_ids) ── */
+export const MAX_TICKET_SHEETS = 20;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+/** รายการ id ที่ใช้ได้ (ตัดซ้ำ/ค่าผิดรูปแบบ · ไม่เกิน 20 ใบ) */
+export function cleanSheetIds(v: unknown): string[] {
+  const out: string[] = [];
+  for (const x of Array.isArray(v) ? v : []) {
+    const s = String(x ?? "").trim().toLowerCase();
+    if (UUID_RE.test(s) && !out.includes(s)) out.push(s);
+    if (out.length >= MAX_TICKET_SHEETS) break;
+  }
+  return out;
+}
+/** เปิดป๊อปดู Design sheet จากตั๋วได้ไหม — พนักงานเห็นแค่การ์ด กดเปิดไม่ได้ (เจ้าของขอ 2026-11-06) · ผู้จัดการ/แอดมิน/ฝ่ายออกแบบ = ได้ */
+export const canOpenTicketSheet = (a: { canCreate: boolean; canManage: boolean }) => a.canCreate || a.canManage;

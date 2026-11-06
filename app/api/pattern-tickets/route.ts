@@ -1,11 +1,12 @@
 /**
  * /api/pattern-tickets — ตั๋วงานช่าง Pattern
  *
- * GET  ?view=open|done|all&type=<key>&q=  → { data: ticket[], types, open_counts, me, error }   (pattern.view)
+ * GET  ?view=open|done|all&type=<key>&q=&design_sheet_id=<uuid>  → { data: ticket[], types, open_counts, me, error }   (pattern.view)
+ *      design_sheet_id = เฉพาะตั๋วที่แนบ Design sheet ใบนั้น (ป๊อป Design sheet ส่วน "ตั๋วงาน Pattern")
  *      open_counts = { <type_key>: จำนวนตั๋วที่ยังไม่ปิด } — ป้าย "ค้าง X" บนแผ่นประเภทงาน (นับทุกตั๋ว ไม่ขึ้นกับ view/q)
  * PATCH /api/pattern-tickets/types = เปลี่ยนไอคอนประเภทงาน (ดู types/route.ts)
  *      open (ค่าเริ่ม) = ยังไม่ปิด · done = เสร็จ/ยกเลิก (ล่าสุด 300) · all = ทั้งหมด
- * POST { type_key, title, title_en?, sku_code?, parent_sku_id?, description_th? (ไม่ใส่ก็ได้), description_en?, priority?, due_date?, assignee_id?, assignee_name?, links? }
+ * POST { type_key, title, title_en?, sku_code?, parent_sku_id?, description_th? (ไม่ใส่ก็ได้), description_en?, priority?, due_date?, assignee_id?, assignee_name?, links?, design_sheet_ids? }
  *      → สร้างตั๋ว (pattern.create) · เลขตั๋วจาก erp_next_number('pattern_ticket') · เช็กลิสต์ตั้งต้นตามประเภทงาน
  * กติกาสถานะดู lib/pattern-tickets.ts
  */
@@ -13,7 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { checklistFromTemplate, cleanLinks, OPEN_STATUSES, openCountsByType } from "@/lib/pattern-tickets";
+import { checklistFromTemplate, cleanLinks, cleanSheetIds, OPEN_STATUSES, openCountsByType } from "@/lib/pattern-tickets";
 import { loadActor, PATTERN_TABLE, PATTERN_TYPES_TABLE } from "@/lib/pattern-tickets-server";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   else if (view === "done") query = query.in("status", ["done", "cancelled"]).order("updated_at", { ascending: false }).limit(300);
   else query = query.order("created_at", { ascending: false }).limit(500);
   if (type) query = query.eq("type_key", type);
+  // ตั๋วที่แนบ Design sheet ใบนี้ (ส่วน "ตั๋วงาน Pattern" ในป๊อป Design sheet · ใช้คู่ view=all)
+  const sheetId = cleanSheetIds([sp.get("design_sheet_id")])[0];
+  if (sheetId) query = query.contains("design_sheet_ids", [sheetId]);
   if (q) {
     const s = q.replace(/[,()%]/g, " ").trim();
     if (s) query = query.or(`title.ilike.%${s}%,title_en.ilike.%${s}%,ticket_no.ilike.%${s}%,sku_code.ilike.%${s}%,assignee_name.ilike.%${s}%,requester_name.ilike.%${s}%`);
@@ -81,6 +85,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     type_key: typeKey,
     title,
     title_en: String(body.title_en ?? "").trim().slice(0, 200),   // แปลอัตโนมัติจากหน้าจอ (โหมด English)
+    design_sheet_ids: cleanSheetIds(body.design_sheet_ids),
     sku_code: String(body.sku_code ?? "").trim().slice(0, 80) || null,
     parent_sku_id: typeof body.parent_sku_id === "string" && body.parent_sku_id ? body.parent_sku_id : null,
     description_th: descTh,

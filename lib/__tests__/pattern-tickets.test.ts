@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, addDaysIso, checklistLabel, CHECKLIST_EN, cleanLinks, cleanTypeIcon, defaultDueDate, defaultTypeIcon, isOverdue, isUploadedTypeIcon, openCountsByType, ticketTitle, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
+import { allowedActions, canEditTicket, canWorkOn, checklistFromTemplate, addDaysIso, canOpenTicketSheet, checklistLabel, CHECKLIST_EN, cleanLinks, cleanSheetIds, cleanTypeIcon, defaultDueDate, defaultTypeIcon, isOverdue, isUploadedTypeIcon, openCountsByType, ticketTitle, todayBangkok, type PatternActor } from "@/lib/pattern-tickets";
 
 const REQ = "11111111-1111-1111-1111-111111111111";
 const MAKER = "22222222-2222-2222-2222-222222222222";
@@ -132,5 +132,20 @@ describe("ตั้งค่าประเภทงาน", () => {
     expect(typeIconKind("img:pattern-icons/u/1.png")).toBe("uploaded");
     expect(typeIconKind("i:scissors")).toBe("line");
     expect(typeIconOf({ key: "tnew", icon: "" })).toBe(defaultTypeIcon("tnew"));
+  });
+});
+
+describe("Design sheet ที่แนบ", () => {
+  const A = "aaaaaaaa-1111-2222-3333-444444444444";
+  const B = "BBBBBBBB-1111-2222-3333-444444444444";
+  it("ตัดค่าผิด/ซ้ำ · ตัวพิมพ์เล็ก · ไม่เกิน 20", () => {
+    expect(cleanSheetIds([A, A, B, "x", null, 5])).toEqual([A, B.toLowerCase()]);
+    expect(cleanSheetIds("nope")).toEqual([]);
+    expect(cleanSheetIds(Array.from({ length: 30 }, (_, i) => `aaaaaaaa-1111-2222-3333-${String(i).padStart(12, "0")}`))).toHaveLength(20);
+  });
+  it("พนักงานกดเปิด Design sheet ไม่ได้ · ผู้สั่ง/ผู้จัดการ ได้", () => {
+    expect(canOpenTicketSheet(maker)).toBe(false);
+    expect(canOpenTicketSheet(designer)).toBe(true);
+    expect(canOpenTicketSheet(manager)).toBe(true);
   });
 });

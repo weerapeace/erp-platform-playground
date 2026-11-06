@@ -7,7 +7,7 @@
  *   รายการตั๋ว → กด = ลิ้นชักรายละเอียด (TicketDrawer)
  * ข้อมูลผ่าน /api/pattern-tickets เท่านั้น · กติกาสถานะ lib/pattern-tickets.ts
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth";
 import { LangToggle, useLang, useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
@@ -53,11 +53,25 @@ export function PatternTicketsView() {
   }, [view]);
   useEffect(() => { void load(); }, [load]);
 
-  // เปิดตั๋วจากลิงก์ ?id=
+  // เปิดตั๋วจากลิงก์ ?id= · เปิดตั๋วใหม่จากหน้า Design sheet ?ds=<id> (แนบใบนั้นไว้ให้)
+  const [presetSheets, setPresetSheets] = useState<string[] | null>(null);
   useEffect(() => {
-    const id = new URLSearchParams(window.location.search).get("id");
+    const sp = new URLSearchParams(window.location.search);
+    const id = sp.get("id");
     if (id) setOpenId(id);
+    const ds = sp.get("ds");
+    if (ds) setPresetSheets([ds]);
   }, []);
+  const presetHandled = useRef(false);   // เปิดป๊อปจาก ?ds= ครั้งเดียว (me โหลดใหม่ไม่เปิดซ้ำ)
+  useEffect(() => {
+    if (!presetSheets || !me || presetHandled.current) return;
+    presetHandled.current = true;
+    if (me.can_create) setCreating("");
+    else setPresetSheets(null);   // ไม่มีสิทธิ์เปิดตั๋ว = เห็นแค่รายการ
+    const u = new URL(window.location.href);
+    u.searchParams.delete("ds");
+    window.history.replaceState(null, "", u.toString());
+  }, [presetSheets, me]);
   const openTicket = (id: string | null) => {
     setOpenId(id);
     const u = new URL(window.location.href);
@@ -203,8 +217,9 @@ export function PatternTicketsView() {
         <TicketDrawer id={openId} types={types} onClose={() => openTicket(null)} onChanged={() => void load()} />
       )}
       {creating !== null && (
-        <CreateTicketModal key={creating || "_"} types={types} initialType={creating || undefined} onClose={() => setCreating(null)}
-          onCreated={(id) => { setCreating(null); void load(); openTicket(id); }} />
+        <CreateTicketModal key={creating || "_"} types={types} initialType={creating || undefined} initialSheetIds={presetSheets ?? undefined}
+          onClose={() => { setCreating(null); setPresetSheets(null); }}
+          onCreated={(id) => { setCreating(null); setPresetSheets(null); void load(); openTicket(id); }} />
       )}
     </div>
   );

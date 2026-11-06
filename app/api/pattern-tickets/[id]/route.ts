@@ -1,9 +1,10 @@
 /**
  * /api/pattern-tickets/[id] — ตั๋วงานช่าง Pattern รายใบ
  *
- * GET   → { data: ticket, actions: ปุ่มที่กดได้, can_edit, can_work }        (pattern.view)
+ * GET   → { data: ticket, actions: ปุ่มที่กดได้, can_edit, can_work, design_sheets: การ์ด Design sheet ที่แนบ, can_open_sheets }   (pattern.view)
+ *       ดูรายละเอียด Design sheet (ดูอย่างเดียว) = GET ./design-sheets/[sheetId] · พนักงานเห็นแค่การ์ด (can_open_sheets = false)
  * PATCH { action: "transition", key, note? }     เปลี่ยนสถานะ (ประตูเดียว · กติกา lib/pattern-tickets allowedActions)
- *       { action: "update", fields: {...} }      แก้รายละเอียด (ผู้สั่ง/ผู้จัดการ)
+ *       { action: "update", fields: {...} }      แก้รายละเอียด (ผู้สั่ง/ผู้จัดการ) · รวม design_sheet_ids (แนบ/เอาออก Design sheet)
  *       { action: "checklist", checklist }       ติ๊กเช็กลิสต์ (ช่างที่รับงาน/ผู้สั่ง/ผู้จัดการ)
  *       { action: "links", links }               ลิงก์ไฟล์ที่วางเอง
  *       { action: "assign", assignee_id, assignee_name }   มอบหมายช่าง (ผู้จัดการ/ผู้สั่ง)
@@ -13,8 +14,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { allowedActions, canEditTicket, canWorkOn, cleanChecklist, cleanLinks, patternActionByKey } from "@/lib/pattern-tickets";
+import { allowedActions, canEditTicket, canOpenTicketSheet, canWorkOn, cleanChecklist, cleanLinks, cleanSheetIds, patternActionByKey } from "@/lib/pattern-tickets";
 import { loadActor, PATTERN_TABLE } from "@/lib/pattern-tickets-server";
+import { loadSheetCards } from "@/lib/design-sheet-view-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -31,12 +33,15 @@ export async function GET(request: NextRequest, { params }: Params): Promise<Nex
   ]);
   if (error) return NextResponse.json({ error: "โหลดตั๋วไม่สำเร็จ" }, { status: 500 });
   if (!data) return NextResponse.json({ error: "ไม่พบตั๋วนี้" }, { status: 404 });
+  const design_sheets = await loadSheetCards(admin, cleanSheetIds(data.design_sheet_ids));
   return NextResponse.json({
     data,
     actions: allowedActions(data, actor),
     can_edit: canEditTicket(data, actor),
     can_work: canWorkOn(data, actor),
     can_assign: actor.canManage || (!!actor.userId && data.requester_id === actor.userId),
+    design_sheets,
+    can_open_sheets: canOpenTicketSheet(actor),
     error: null,
   });
 }
@@ -98,9 +103,10 @@ export async function PATCH(request: NextRequest, { params }: Params): Promise<N
       if (typeof f.sku_code === "string") patch.sku_code = f.sku_code.trim().slice(0, 80) || null;
       if (f.priority === "urgent" || f.priority === "normal") patch.priority = f.priority;
       if (f.due_date === null || (typeof f.due_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(f.due_date))) patch.due_date = f.due_date;
+      if (Array.isArray(f.design_sheet_ids)) patch.design_sheet_ids = cleanSheetIds(f.design_sheet_ids);
       if (!Object.keys(patch).length) return NextResponse.json({ error: "ไม่มีอะไรเปลี่ยน" }, { status: 400 });
       const changes: Record<string, { from: unknown; to: unknown }> = {};
-      for (const k of Object.keys(patch)) if (t[k] !== patch[k]) changes[k] = { from: t[k], to: patch[k] };
+      for (const k of Object.keys(patch)) if (JSON.stringify(t[k] ?? null) !== JSON.stringify(patch[k] ?? null)) changes[k] = { from: t[k], to: patch[k] };
       const res = await save(patch);
       if (res.status === 200 && Object.keys(changes).length) await audit("update", { changes });
       return res;
