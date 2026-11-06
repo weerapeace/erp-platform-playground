@@ -4,11 +4,13 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --port 3001",
+    "prebuild": "node scripts/shared-parts-scan.mjs",
     "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next build",
     "start": "next start --port 3001",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "where-used": "node --no-warnings scripts/where-used.mjs",
+    "parts:scan": "node scripts/shared-parts-scan.mjs",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
