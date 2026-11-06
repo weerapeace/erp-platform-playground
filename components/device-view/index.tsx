@@ -456,3 +456,41 @@ export function IpadPreview({ view, src, qr }: { view: Exclude<IpadView, "pc">; 
   const sz = view === "ipadP" ? IPAD_SIZE.portrait : IPAD_SIZE.landscape;
   return <DeviceIframePreview src={src} width={sz.w} height={sz.h} label={IPAD_VIEW_LABEL[view]} qr={qr} />;
 }
+
+const isIpadView = (v: unknown): v is IpadView => v === "pc" || v === "ipadL" || v === "ipadP";
+
+/**
+ * useIpadMode — หน้าที่มี "หน้าตาแบบ iPad" ของตัวเอง (ปุ่มใหญ่ · แถบเตี้ย · ไม่พึ่งการชี้เมาส์) · จำ "ต่อเครื่อง" (localStorage storageKey)
+ *   - iPad จริง (จอสัมผัส) + ยังไม่เคยเลือก = เปิดแบบ iPad ตามแนวเครื่องให้เอง (ยังไม่จำ จนกว่าจะกดเลือกเอง) · อยู่แบบ iPad แล้วหมุนเครื่อง = สลับแนวเอง
+ *   - คอม: เลือก iPad → framePreview = true → หน้าแม่โชว์ <IpadPreview src=หน้านี้> แทนเนื้อหา · หน้าในกรอบอ่าน key เดียวกัน → เรนเดอร์แบบ iPad
+ *   - หน้าในกรอบกดเปลี่ยน → storage event (โดเมนเดียวกัน) → หน้านอกเปลี่ยนตาม
+ *   ต่างจาก useIpadPreview (แค่ส่องดูหน้าแอป ไม่จำ ไม่เปลี่ยนหน้าตา)
+ *   ตัดสินหน้าตาด้วย `touch` / `portrait` เท่านั้น — ห้ามใช้ sm:/lg: ของ Tailwind (iPad แนวนอนกว้างพอ ๆ จอคอม)
+ */
+export function useIpadMode(storageKey: string): { view: IpadView; setView: (v: IpadView) => void; touch: boolean; portrait: boolean; canPreview: boolean; framePreview: boolean } {
+  const [view, setState] = useState<IpadView>("pc");
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(storageKey);
+      if (isIpadView(v)) setState(v);
+      else if (window.matchMedia("(pointer: coarse)").matches) setState(window.matchMedia("(orientation: portrait)").matches ? "ipadP" : "ipadL");
+    } catch { /* ignore */ }
+  }, [storageKey]);
+  const setView = useCallback((v: IpadView) => { setState(v); try { localStorage.setItem(storageKey, v); } catch { /* ignore */ } }, [storageKey]);
+  const touch = view !== "pc";
+  // หมุนเครื่อง (เฉพาะจอสัมผัสจริง — คอมย่อหน้าต่างให้สูงกว่ากว้างต้องไม่สลับเอง)
+  useEffect(() => {
+    if (!touch || !window.matchMedia("(pointer: coarse)").matches) return;
+    const mq = window.matchMedia("(orientation: portrait)");
+    const onTurn = () => setView(mq.matches ? "ipadP" : "ipadL");
+    mq.addEventListener("change", onTurn);
+    return () => mq.removeEventListener("change", onTurn);
+  }, [touch, setView]);
+  useEffect(() => {
+    const onStore = (e: StorageEvent) => { if (e.key === storageKey && isIpadView(e.newValue)) setState(e.newValue); };
+    window.addEventListener("storage", onStore);
+    return () => window.removeEventListener("storage", onStore);
+  }, [storageKey]);
+  const canPreview = useCanPreviewDevice();
+  return { view, setView, touch, portrait: view === "ipadP", canPreview, framePreview: touch && canPreview };
+}

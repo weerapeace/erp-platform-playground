@@ -105,6 +105,22 @@ const [installOpen, setInstallOpen] = useState(false);
 - ใช้ที่ `/cashflow` (กรอบโหลด `/app/cashflow` = หน้าตาตอนติดตั้งเป็นแอปบน iPad) · บอร์ดจ่ายงานยังใช้สวิตช์ของตัวเอง (จำต่อเครื่อง)
 - คู่กับปุ่ม "ดาวน์โหลดแอป" → `InstallAppModal` (components/install-app) ส่ง `qr={{ appKey, appLabel, installGo }}` บังคับแอปที่จะติดตั้ง · ซ่อนปุ่มเมื่อเปิดอยู่ในแอป/ในกรอบแล้ว (`usePwaInstall().installed` / `isInIframe()`)
 
+## โหมด iPad ของหน้า (หน้าตาเปลี่ยนจริง · จำต่อเครื่อง) — `useIpadMode(key)` (2026-11-06)
+
+ต่างจาก `useIpadPreview` (แค่ส่องดูหน้าแอป): หน้าที่ "จัดหน้าตาใหม่ให้นิ้วกด" ใช้ตัวนี้
+
+```tsx
+const ipad = useIpadMode("wb_exec_device");          // localStorage key ต่อหน้า
+if (ipad.framePreview) return <IpadPreview view={ipad.view === "ipadP" ? "ipadP" : "ipadL"} src="/หน้านี้?view=..." qr={{ openUrl }} />;
+// ที่เหลือตัดสินหน้าตาด้วย ipad.touch / ipad.portrait (ห้ามใช้ sm:/lg:)
+```
+
+- iPad จริง (pointer: coarse) + ยังไม่เคยเลือก = เปิดแบบ iPad ตามแนวเครื่องเอง · หมุนเครื่อง = สลับแนวเอง (เฉพาะจอสัมผัส)
+- คอม: กดเลือก iPad → `framePreview` = true → หน้าแม่โชว์กรอบ iPad ของจริง + QR · หน้าในกรอบอ่าน key เดียวกันจึงเรนเดอร์แบบ iPad · หน้าในกรอบกดกลับ "แบบจอคอม" → storage event → หน้านอกออกจากกรอบเอง
+- จำต่อเครื่อง (ไม่ใช่ต่อคน) — คนเดียวใช้คอมแบบเดิม ใช้ iPad แบบ iPad ได้
+- ใช้แล้ว: บอร์ดจ่ายงาน มุมมอง "จ่ายงาน (โหมดผู้บริหาร)" (`app/master/work-board/exec-dispatch.tsx`, key `wb_exec_device`) — แถบบนบรรทัดเดียว + ป๊อปตัวกรอง (ERPModal sm) · ชิปแบรนด์+ชุดแถวเดียวปัดได้ · แถบเป้าบรรทัดเดียว แตะ = แผงสรุปลอยทับ (แนวนอนขวา/แนวตั้งจากล่าง) · ช่องติ๊ก/ปุ่ม ≥36px · ปุ่มเปิดรายละเอียดเห็นตลอด · แถบโต๊ะเตี้ยปัดได้ + ปุ่ม "จ่าย N ใบ"
+- มุมมองตารางของบอร์ดจ่ายงาน (`wb_table_device`) ยังมีโค้ดสวิตช์ของตัวเอง — ย้ายมาใช้ `useIpadMode` ได้ (พฤติกรรมเดียวกัน)
+
 ## ข้อจำกัด
 
 - ป๊อปอัปเต็ม (design-sheet-detail) ที่เปิดจากปุ่ม "แก้ไขเต็ม" ยังเป็นหน้าตาจอคอม — ใช้เฉพาะงานหนัก (ตีราคา/เสนอราคา/Parent SKU)

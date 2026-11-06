@@ -17,8 +17,12 @@
  *   ลากลงโต๊ะ = ป๊อปจ่ายด่วนตามชนิดโต๊ะ (exec-quick-dispatch): ปกติ = จำนวน · ช่างเหมา = เลือกช่าง 1 คน + จำนวน · จับกลุ่ม = เลือกหลายคน + จำนวน + ค่าแรงรวมกลุ่ม
  *   แผงโต๊ะช่างเหมา = สรุปรายช่าง "ใครมีงานอะไร" (ไม่มีแถบ) · แผงโต๊ะจับกลุ่ม = แยกตามกลุ่ม + ค่าแรงรวมแต่ละกลุ่ม · โต๊ะปกติ = แถบงานในมือเทียบเงินเดือน
  * ค่าที่จำต่อคน (useUserPref): ขนาดการ์ด · การเรียง · ช่องที่โชว์ · ล็อกแผงสรุป
+ * โหมด iPad (เจ้าของ 2026-11-06 · จำต่อเครื่อง `wb_exec_device` ผ่านของกลาง useIpadMode): iPad จริงเปิดเอง · คอมกด "ดูแบบ iPad" = หน้าจริงในกรอบขนาดเครื่อง + QR
+ *   แถบบนบรรทัดเดียว (ค้นหา + ปุ่มตัวกรอง → ป๊อปกลาง: เรียง/โชว์อะไร/พร้อมจ่าย/ขนาด/รวมเงินแบรนด์ตัวเอง/หน้าตา) · ชิปแบรนด์+ชุดแถวเดียวปัดได้
+ *   แถบเป้าบรรทัดเดียว แตะ = แผงสรุปเต็มลอยทับ (แนวนอนขวา · แนวตั้งจากล่าง · ไม่ดันการ์ด) · ช่องติ๊ก/ปุ่มใหญ่ · ปุ่มเปิดรายละเอียดเห็นตลอด (ไม่ต้องชี้เมาส์)
+ *   แถบโต๊ะเตี้ย แถวเดียวปัดได้ · ติ๊กแล้วมีปุ่ม "จ่าย N ใบ" ใต้ทุกโต๊ะ · แตะชื่อโต๊ะ = แผงโต๊ะเต็ม (ตัวเดิม)
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/toast";
@@ -34,6 +38,8 @@ import { MoStatusModal } from "@/components/mo-status-modal";
 import type { SoldQty } from "@/app/api/mo/sold-qty/route";
 import { MoLaborRateModal, type LaborRateMo } from "@/components/mo-labor-rate-modal";
 import { measureShellTop } from "@/components/sticky-header";
+import { IpadPreview, IpadPreviewSwitch, useIpadMode } from "@/components/device-view";
+import { useCanHover } from "@/lib/use-can-hover";
 
 export type ExecMo = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null;
@@ -131,6 +137,11 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   onDraft?: (d: ExecDraft) => void;
 }) {
   const toast = useToast();
+  // โหมด iPad (จำต่อเครื่อง) — touch = หน้าตาแบบ iPad · framePreview = คอมเลือกดูแบบ iPad → โชว์หน้าจริงในกรอบแทน
+  const ipad = useIpadMode("wb_exec_device");
+  const touch = ipad.touch, portrait = ipad.portrait;
+  const canHover = useCanHover();
+  const [filterOpen, setFilterOpen] = useState(false);   // iPad: ป๊อปตัวกรอง (เรียง/โชว์อะไร/ขนาด …)
   const [laborMo, setLaborMo] = useState<LaborRateMo | null>(null);   // ป๊อปตั้งค่าแรง (ของกลาง MoLaborRateModal)
   const [size, setSize] = useUserPref<number>("wb_exec_card_size", 160, parseSize);
   const [sort, setSort] = useUserPref<SortKey>("wb_exec_sort", "urgent", parseSort);
@@ -186,7 +197,8 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   const [done, setDone] = useState<Done | null>(null);
   const [savingTarget, setSavingTarget] = useState(false);
   const show = (k: FieldKey) => fields.includes(k) && (showPrice || !FIELDS.find((f) => f.k === k)?.money);
-  const sideShown = showPrice && (sideOpen || locked);
+  // iPad: ล็อกแผงไม่มีผล (แผงลอยทับเสมอ · เปิดจากแถบเป้า) — ค่าล็อกของจอคอมยังจำไว้เหมือนเดิม
+  const sideShown = showPrice && (sideOpen || (locked && !touch));
 
   // ราคาขาย/ชิ้น (skus_v2.list_price) — API ผู้บริหารล็อกสิทธิ์ admin.users · ใช้โหมดเบา ?prices=1
   //   เคยเงียบเป็น "ไม่มีราคา" ตอน DB หนาแน่น (2026-11-04) → ตอนนี้: เซิร์ฟเวอร์ยิงซ้ำเอง + ที่นี่ลองอีกรอบ + ยังพลาด = ป้ายเตือน/ปุ่มโหลดใหม่
@@ -224,13 +236,14 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
   }, [showPrice]);
   // ยอดที่จ่ายไปแล้วในช่วงที่เลือก (โหลดเมื่อแผงเปิด / เปลี่ยนช่วง / จ่ายงานเพิ่ม)
   const woSig = workOrders.length;
+  const needDone = sideShown || (touch && showPrice);   // iPad มีแถบเป้าบรรทัดเดียวโชว์ตลอด
   useEffect(() => {
-    if (!sideShown) return;
+    if (!needDone) return;
     let cancel = false;
     const { from, to } = periodRange(period);
     apiFetch(`/api/mo/exec-plan?dispatched=1&from=${from}&to=${to}`).then((r) => r.json()).then((j) => { if (!cancel && j.data) setDone(j.data as Done); }).catch(() => {});
     return () => { cancel = true; };
-  }, [sideShown, period, woSig]);
+  }, [needDone, period, woSig]);
   useEffect(() => { setTargetDraft(target[period] ? String(target[period]) : ""); }, [target, period]);
   const saveTarget = async () => {
     const v = Math.max(0, Number(targetDraft) || 0);
@@ -414,8 +427,11 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
 
   // ล็อกแผง = ติดจอตอนเลื่อน ใต้แถบเมนูของแอป (ของกลาง measureShellTop) · อยู่ในกรอบที่เลื่อนเอง (ขยายเต็มจอ) = ติดขอบกรอบ
   const rootRef = useRef<HTMLDivElement>(null);
-  const pinned = locked && sideShown;
+  const pinned = locked && sideShown && !touch;
   const [stickTop, setStickTop] = useState(8);
+  // iPad แนวนอน: แผงสรุปลอยทับชิดขวา ใต้แถบเมนูของแอป
+  const [touchTop, setTouchTop] = useState(0);
+  useEffect(() => { if (touch && sideShown) setTouchTop(measureShellTop()); }, [touch, sideShown]);
   useEffect(() => {
     if (!pinned) return;
     const measure = () => {
@@ -439,9 +455,58 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
     return <span className={`rounded-md px-1.5 py-0.5 text-[11px] font-bold shadow-sm ${cls}`}>{d < 0 ? `เลย ${-d} วัน` : d === 0 ? "วันนี้" : `อีก ${d} วัน`}</span>;
   };
 
+  // คอมเลือก "ดูแบบ iPad" → หน้าจริงในกรอบขนาดเครื่อง (หน้าในกรอบอ่าน wb_exec_device เดียวกัน → เรนเดอร์แบบ iPad) + QR เปิดบน iPad
+  if (ipad.framePreview) {
+    const openUrl = `${window.location.origin}/master/work-board?view=deskdock`;
+    return (
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-slate-600">ดูแบบ iPad ของจริง — หน้าจริงขนาดเท่าเครื่อง กดใช้งานในกรอบได้เลย · สแกน QR เพื่อเปิดบน iPad (จำไว้ที่เครื่องนี้)</p>
+          <IpadPreviewSwitch view={ipad.view} onChange={ipad.setView} />
+        </div>
+        <IpadPreview view={ipad.view === "ipadP" ? "ipadP" : "ipadL"} src="/master/work-board?view=deskdock" qr={{ openUrl }} />
+      </div>
+    );
+  }
+
+  const priceErrEl = showPrice && priceErr ? (
+    <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[12px] text-amber-800">
+      <Icon name="warning" /> ราคาขาย{priceErr === "partial" ? "บางใบ" : ""}โหลดไม่สำเร็จ{touch ? "" : " (ระบบหนาแน่นชั่วคราว)"}
+      <button type="button" onClick={() => { setPriceErr(""); setPriceTick((t) => t + 1); }} className={`inline-flex items-center gap-1 font-semibold text-amber-900 underline ${touch ? "min-h-9" : ""}`}><Icon name="refresh" /> โหลดใหม่</button>
+    </span>
+  ) : null;
+  const sortList = SORTS.filter((s) => showPrice || s.k !== "value");
+  // ชิปแบรนด์ / ชุด — จอคอม = แถวละชุด ขึ้นบรรทัดใหม่ได้ · iPad = รวมแถวเดียว ปัดซ้าย-ขวา (ปุ่มสูง 36px)
+  const chipCls = (on: boolean, tone: "violet" | "teal") =>
+    `${touch ? "h-9 shrink-0 whitespace-nowrap px-3 text-[13px]" : "h-7 px-2.5 text-[12px]"} inline-flex items-center gap-1 rounded-full border ${on
+      ? (tone === "violet" ? "border-violet-600 bg-violet-600 text-white" : "border-teal-700 bg-teal-700 text-white")
+      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
+  const brandChips = brands.length > 1 ? [
+    <button key="b:" type="button" onClick={() => setBrand("")} className={chipCls(!brand, "violet")}>ทุกแบรนด์ {brands.reduce((a, b) => a + b[1], 0)}</button>,
+    ...brands.map(([b, n]) => <button key={`b:${b}`} type="button" onClick={() => setBrand(brand === b ? "" : b)} className={chipCls(brand === b, "violet")}>{b} {n}</button>),
+  ] : [];
+  const groupChipEls = groupChips.list.length > 0 ? [
+    <button key="g:" type="button" onClick={() => setGrp("")} className={chipCls(!grp, "teal")}>ทุกชุด</button>,
+    ...groupChips.list.map((g) => <button key={`g:${g.id}`} type="button" onClick={() => setGrp(grp === g.id ? "" : g.id)} className={chipCls(grp === g.id, "teal")}><Icon name="folders" /> {g.name} {g.n}</button>),
+    ...(groupChips.none > 0 ? [<button key="g:_none" type="button" onClick={() => setGrp(grp === "_none" ? "" : "_none")} className={chipCls(grp === "_none", "teal")}>ไม่มีชุด {groupChips.none}</button>] : []),
+  ] : [];
+  const filterCount = (readyOnly ? 1 : 0) + (sort !== "urgent" ? 1 : 0);
+  const cardMin = touch ? Math.max(size, 160) : size;   // iPad: การ์ดไม่เล็กกว่า 160px (ปุ่มใหญ่ขึ้น ต้องมีที่)
+
   return (
     <div ref={rootRef} className="relative flex min-h-[calc(100vh-180px)] flex-col overflow-x-clip">
       <div className="flex flex-1 flex-col transition-[margin] duration-300 ease-out" style={{ marginRight: pinned ? 296 : 0 }}>
+        {touch ? (
+          // iPad: แถบบนบรรทัดเดียว — ค้นหา + ตัวกรอง (ที่เหลืออยู่ในป๊อป)
+          <div className="mb-2 flex items-center gap-2">
+            <span className="shrink-0 text-base font-semibold text-slate-800">งานรอจ่าย <span className="font-normal text-slate-500">{list.length}</span></span>
+            {priceErrEl}
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นรหัสสินค้า / ชื่อ / เลขใบ" className="h-10 min-w-0 flex-1 rounded-lg border border-slate-200 px-3 text-[15px]" />
+            <button type="button" onClick={() => setFilterOpen(true)} className={`inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm ${filterCount ? "border-violet-500 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-700"}`}>
+              <Icon name="sliders" /> ตัวกรอง{filterCount ? ` (${filterCount})` : ""}
+            </button>
+          </div>
+        ) : (
         <div className="mb-2 flex flex-wrap items-center gap-2">
           <span className="text-base font-semibold text-slate-800">งานรอจ่าย</span>
           <span className="text-sm text-slate-500">{list.length} ใบ{showPrice && total > 0 ? ` · มูลค่า ฿${fmt(total)}${includeOwn ? "" : " (เฉพาะแบรนด์ลูกค้า)"}` : ""}</span>
@@ -452,16 +517,11 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
               <input type="checkbox" checked={includeOwn} onChange={(e) => setIncludeOwn(e.target.checked)} className="accent-violet-600" /> รวมเงินแบรนด์ตัวเอง
             </label>
           )}
-          {showPrice && priceErr && (
-            <span className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[12px] text-amber-800">
-              <Icon name="warning" /> ราคาขาย{priceErr === "partial" ? "บางใบ" : ""}โหลดไม่สำเร็จ (ระบบหนาแน่นชั่วคราว)
-              <button type="button" onClick={() => { setPriceErr(""); setPriceTick((t) => t + 1); }} className="inline-flex items-center gap-1 font-semibold text-amber-900 underline"><Icon name="refresh" /> โหลดใหม่</button>
-            </span>
-          )}
+          {priceErrEl}
           <div className="flex-1" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นรหัสสินค้า / ชื่อ / เลขใบ" className="h-8 w-52 rounded-lg border border-slate-200 px-2 text-sm" />
           <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[12px]" title="เรียงการ์ด">
-            {SORTS.filter((s) => showPrice || s.k !== "value").map((s) => <option key={s.k} value={s.k}>เรียง: {s.label}</option>)}
+            {sortList.map((s) => <option key={s.k} value={s.k}>เรียง: {s.label}</option>)}
           </select>
           <button type="button" onClick={() => setFieldsOpen((v) => !v)} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[12px] ${fieldsOpen ? "border-violet-500 bg-violet-50 text-violet-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}><Icon name="sliders" /> โชว์อะไรบ้าง</button>
           <button type="button" onClick={() => setReadyOnly((v) => !v)} className={`h-8 rounded-full border px-3 text-[12px] ${readyOnly ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>พร้อมจ่ายเท่านั้น</button>
@@ -469,9 +529,12 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
             <input type="range" min={SIZE_MIN} max={SIZE_MAX} step={10} value={size} onChange={(e) => setSize(Number(e.target.value))} className="w-24" />
           </label>
           {showPrice && <button type="button" onClick={() => (locked ? undefined : setSideOpen((v) => !v))} className={`inline-flex h-8 items-center gap-1 rounded-lg border px-2.5 text-[12px] font-medium ${sideShown ? "border-violet-600 bg-violet-600 text-white" : "border-violet-300 bg-white text-violet-700 hover:bg-violet-50"}`}><Icon name="target" /> สรุปเป้า</button>}
+          {ipad.canPreview && <button type="button" onClick={() => ipad.setView("ipadL")} title="ดูหน้านี้แบบ iPad ของจริง (ปุ่มใหญ่ · แถบเตี้ย) + QR เปิดบน iPad"
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[12px] text-slate-600 hover:bg-slate-50"><Icon value="i:device-mobile" size={14} className="rotate-90" /> ดูแบบ iPad</button>}
         </div>
+        )}
 
-        {fieldsOpen && (
+        {fieldsOpen && !touch && (
           <div className="mb-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-[13px]">
             <span className="text-[12px] text-slate-400">การ์ดโชว์:</span>
             {FIELDS.filter((f) => showPrice || !f.money).map((f) => (
@@ -483,28 +546,40 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
           </div>
         )}
 
-        {!focusCards && brands.length > 1 && (
-          <div className="mb-2 flex flex-wrap gap-1.5">
-            <button type="button" onClick={() => setBrand("")} className={`h-7 rounded-full border px-2.5 text-[12px] ${!brand ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>ทุกแบรนด์ {brands.reduce((a, b) => a + b[1], 0)}</button>
-            {brands.map(([b, n]) => (
-              <button key={b} type="button" onClick={() => setBrand(brand === b ? "" : b)} className={`h-7 rounded-full border px-2.5 text-[12px] ${brand === b ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{b} {n}</button>
-            ))}
-          </div>
-        )}
+        {!focusCards && (touch ? (
+          (brandChips.length > 0 || groupChipEls.length > 0) && (
+            <div className="-mx-1 mb-2 flex items-center gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:none]">
+              {brandChips}
+              {brandChips.length > 0 && groupChipEls.length > 0 && <span className="mx-1 h-6 w-px shrink-0 bg-slate-200" aria-hidden />}
+              {groupChipEls}
+            </div>
+          )
+        ) : <>
+          {brandChips.length > 0 && <div className="mb-2 flex flex-wrap gap-1.5">{brandChips}</div>}
+          {groupChipEls.length > 0 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-slate-400">ชุด:</span>
+              {groupChipEls}
+            </div>
+          )}
+        </>)}
 
-        {!focusCards && groupChips.list.length > 0 && (
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-slate-400">ชุด:</span>
-            <button type="button" onClick={() => setGrp("")} className={`h-7 rounded-full border px-2.5 text-[12px] ${!grp ? "border-teal-700 bg-teal-700 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>ทุกชุด</button>
-            {groupChips.list.map((g) => (
-              <button key={g.id} type="button" onClick={() => setGrp(grp === g.id ? "" : g.id)}
-                className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[12px] ${grp === g.id ? "border-teal-700 bg-teal-700 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                <Icon name="folders" /> {g.name} {g.n}</button>
-            ))}
-            {groupChips.none > 0 && (
-              <button type="button" onClick={() => setGrp(grp === "_none" ? "" : "_none")} className={`h-7 rounded-full border px-2.5 text-[12px] ${grp === "_none" ? "border-teal-700 bg-teal-700 text-white" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>ไม่มีชุด {groupChips.none}</button>
+        {/* iPad: แถบเป้าบรรทัดเดียว — แตะ = แผงสรุปเต็มลอยทับ (แทนปุ่ม "สรุปเป้า" + การล็อกแผงของจอคอม) */}
+        {touch && showPrice && (
+          <button type="button" onClick={() => setSideOpen(true)} className="mb-2 w-full rounded-xl border border-violet-200 bg-violet-50/60 px-3 py-2 text-left">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] text-slate-700">
+              <Icon name="target" />
+              <span>เป้า{PERIODS.find((p) => p.k === period)?.label} <b className="tabular-nums text-violet-800">฿{fmt(got)}</b>{goal > 0 ? <> / ฿{fmt(goal)} · <b className="tabular-nums">{pct.toFixed(0)}%</b></> : <span className="text-slate-400"> · ยังไม่ได้ตั้งเป้า</span>}</span>
+              {goal > 0 && plannedValue > 0 && <span className="text-violet-700">→ {pctAfter.toFixed(0)}% ถ้าจ่าย{focusCards ? "ที่เหลือในชุด" : "ที่ติ๊ก"}</span>}
+              <span className="ml-auto text-[12px] text-slate-400">แตะดูเต็ม ›</span>
+            </div>
+            {goal > 0 && (
+              <div className="relative mt-1.5 h-2 overflow-hidden rounded-full bg-white">
+                {plannedValue > 0 && <div className="absolute inset-y-0 left-0 rounded-full bg-violet-200 transition-[width] duration-500" style={{ width: `${pctAfter}%` }} />}
+                <div className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500 transition-[width] duration-500" style={{ width: `${pct}%` }} />
+              </div>
             )}
-          </div>
+          </button>
         )}
 
         {/* ขายครบแล้วแต่ยังไม่บันทึกผลิต — ไม่ขึ้นการ์ด (ไม่ต้องจ่ายแล้ว) · กด → "อัปเดตงานจากใบขาย" บันทึกว่าใครทำ → ระบบปิดงานเอง (lib/mo-auto-close) */}
@@ -531,17 +606,17 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
 
         {chosen.length > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-violet-200 bg-violet-50/70 px-3 py-1.5 text-sm text-violet-800">
-            <span>เลือก <b>{chosen.length}</b> ใบ{showPrice ? ` · ฿${fmt(chosenValue)}` : ""} — กดปุ่ม &ldquo;จ่ายโต๊ะนี้&rdquo; ที่ลอยบนโต๊ะด้านล่าง หรือลากการ์ดใบไหนก็ได้ลงโต๊ะ</span>
+            <span>เลือก <b>{chosen.length}</b> ใบ{showPrice ? ` · ฿${fmt(chosenValue)}` : ""} — {touch ? <>แตะ &ldquo;จ่าย&rdquo; ที่โต๊ะด้านล่าง หรือกดค้างการ์ดแล้วลากลงโต๊ะ</> : <>กดปุ่ม &ldquo;จ่ายโต๊ะนี้&rdquo; ที่ลอยบนโต๊ะด้านล่าง หรือลากการ์ดใบไหนก็ได้ลงโต๊ะ</>}</span>
             {!focusCards && <button type="button" onClick={enterFocus} title="บอร์ดเหลือเฉพาะการ์ดที่เลือกไว้ ใส่ช่างทีละใบได้ง่าย (ใส่ครบแล้วกลับหน้าปกติเอง)"
-              className="inline-flex h-7 items-center gap-1 rounded-lg border border-violet-300 bg-white px-2.5 text-[12px] font-medium text-violet-700 hover:bg-violet-100"><Icon name="view" /> โชว์แค่ที่เลือก</button>}
-            <button type="button" onClick={() => setSel(new Set())} className="text-[12px] text-violet-600 underline">ล้างที่เลือก</button>
+              className={`inline-flex items-center gap-1 rounded-lg border border-violet-300 bg-white font-medium text-violet-700 hover:bg-violet-100 ${touch ? "h-9 px-3 text-[13px]" : "h-7 px-2.5 text-[12px]"}`}><Icon name="view" /> โชว์แค่ที่เลือก</button>}
+            <button type="button" onClick={() => setSel(new Set())} className={`text-violet-600 underline ${touch ? "min-h-9 px-1 text-[13px]" : "text-[12px]"}`}>ล้างที่เลือก</button>
           </div>
         )}
 
         {!cards.length ? (
           <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-slate-200 py-16 text-sm text-slate-400">{q || readyOnly || brand || grp ? "ไม่พบงานตามที่ค้น / กรอง" : "ไม่มีงานรอจ่าย"}</div>
         ) : (
-          <div className="grid flex-1 content-start gap-2.5 pb-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${size}px, 1fr))` }}>
+          <div className="grid flex-1 content-start gap-2.5 pb-4" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${cardMin}px, 1fr))` }}>
             {cards.map(({ m, done: paid, left }) => {
               const on = !paid && sel.has(m.id), p = price.get(m.mo_no) ?? 0, rate = rateOfMo(m);
               const g = groupOf.get(m.mo_no), sq = sold[m.id], soldN = m.sold ?? 0, drag = canDispatch && !paid;
@@ -552,13 +627,13 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                   onClick={() => { if (paid || td.justDragged()) return; toggle(m.id); }}
                   className={`group relative select-none rounded-xl border bg-white p-2 transition-shadow ${paid ? "cursor-default border-emerald-200 opacity-60" : "cursor-pointer hover:shadow-md"} ${on ? "border-violet-500 ring-2 ring-violet-300" : paid ? "" : "border-slate-200"}`}>
                   {paid
-                    ? <span className="absolute left-2 top-2 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-[12px] text-white" aria-label="ใส่ช่างแล้ว"><Icon name="done" /></span>
-                    : <input type="checkbox" checked={on} readOnly className="absolute left-2 top-2 z-10 h-4 w-4 accent-violet-600" aria-label={`เลือก ${m.product_sku ?? m.mo_no}`} />}
+                    ? <span className={`absolute left-2 top-2 z-10 inline-flex items-center justify-center rounded-full bg-emerald-500 text-white ${touch ? "h-6 w-6 text-[14px]" : "h-5 w-5 text-[12px]"}`} aria-label="ใส่ช่างแล้ว"><Icon name="done" /></span>
+                    : <input type="checkbox" checked={on} readOnly className={`absolute left-2 top-2 z-10 accent-violet-600 ${touch ? "h-6 w-6" : "h-4 w-4"}`} aria-label={`เลือก ${m.product_sku ?? m.mo_no}`} />}
                   <div className="absolute right-2 top-2 z-10 flex flex-col items-end gap-1">
                     {show("due") && dueBadge(m)}
                     {(m.priority ?? 0) > 0 && <span title={m.priority_note ?? undefined} className={`rounded px-1.5 text-[11px] font-semibold ${m.priority === 2 ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>{m.priority === 2 ? "เร่งด่วน" : "สำคัญ"}</span>}
                   </div>
-                  <div className="mb-1.5 flex items-center justify-center overflow-hidden rounded-lg bg-slate-50" style={{ height: Math.round(size * 0.55) }}>
+                  <div className="mb-1.5 flex items-center justify-center overflow-hidden rounded-lg bg-slate-50" style={{ height: Math.round(cardMin * 0.55) }}>
                     {m.image_url ? <img src={m.image_url} alt="" className="h-full w-full object-contain" draggable={false} /> : <Icon name="image" />}
                   </div>
                   <div className="truncate font-mono text-[13px] font-semibold text-slate-800">{m.product_sku ?? m.mo_no}</div>
@@ -583,30 +658,35 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                     </> : canSetLabor
                       ? <button type="button" title="กดเพื่อตั้งค่าแรงผลิต/ชิ้น"
                           onClick={(e) => { e.stopPropagation(); setLaborMo({ id: m.id, mo_no: m.mo_no, product_sku: m.product_sku, product_name: m.product_name, qty: m.qty, bom_code: m.bom_code ?? null }); }}
-                          className="text-amber-600 underline decoration-dotted underline-offset-2 hover:text-amber-700">ยังไม่ตั้งค่าแรง ›</button>
+                          className={`text-amber-600 underline decoration-dotted underline-offset-2 hover:text-amber-700 ${touch ? "inline-flex min-h-9 items-center text-[12px]" : ""}`}>ยังไม่ตั้งค่าแรง ›</button>
                       : <span className="text-amber-600">ยังไม่ตั้งค่าแรง</span>}</div>
                   )}
                   {/* ขายไปแล้ว (ผูกใบขาย) = ทำเสร็จแล้ว → "จ่าย" ด้านบนหักส่วนนี้แล้ว · ขายครบ = ไม่ขึ้นการ์ด (ป้ายเตือนด้านบน) */}
                   {soldN > 0 && (
                     <div className="mt-0.5" title={sq?.bills.length ? `ผูกใบขาย ${sq.bills.join(", ")}` : undefined}>
-                      <span className="inline-block max-w-full truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">
-                        ขายไปแล้ว {fmt(soldN)} · เหลือทำ {fmt(m.remaining)}
-                      </span>
+                      {/* iPad ชี้ดูไม่ได้ → แตะป้าย = บอกเลขบิลที่ผูก */}
+                      {touch && sq?.bills.length
+                        ? <button type="button" onClick={(e) => { e.stopPropagation(); toast.info(`${m.product_sku ?? m.mo_no} ผูกใบขาย ${sq.bills.join(", ")}`); }}
+                            className="inline-block max-w-full truncate rounded bg-emerald-50 px-1.5 py-1 text-left text-[12px] text-emerald-700">ขายไปแล้ว {fmt(soldN)} · เหลือทำ {fmt(m.remaining)} ›</button>
+                        : <span className="inline-block max-w-full truncate rounded bg-emerald-50 px-1.5 py-0.5 text-[11px] text-emerald-700">
+                            ขายไปแล้ว {fmt(soldN)} · เหลือทำ {fmt(m.remaining)}
+                          </span>}
                     </div>
                   )}
                   {/* ปุ่มวัตถุดิบ (ป๊อปกลาง MoStatusModal view="materials" = สถานะวัตถุดิบทุกตัว ที่ยังไม่พร้อมอยู่บน) · ความพร้อมกดดูได้ */}
                   <div className="mt-1 flex items-center justify-between gap-1">
                     <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูสถานะวัตถุดิบทุกตัว (ที่ยังไม่พร้อมอยู่บนสุด)"
-                      className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 text-[11px] text-slate-600 hover:border-violet-300 hover:text-violet-700">
+                      className={`inline-flex shrink-0 items-center gap-1 rounded-md border border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:text-violet-700 ${touch ? "h-9 px-2.5 text-[13px]" : "h-6 px-1.5 text-[11px]"}`}>
                       <Icon name="package" /> วัตถุดิบ
                     </button>
                     {show("ready") && (
                       <button type="button" onClick={(e) => { e.stopPropagation(); setStatusMo(m.id); }} title="ดูสถานะวัตถุดิบทุกตัว (ที่ยังไม่พร้อมอยู่บนสุด)"
-                        className={`text-right text-[11px] hover:underline ${m.ready ? "font-medium text-emerald-600" : "text-amber-600"}`}>{m.ready ? "พร้อม" : "ยังไม่พร้อม ›"}</button>
+                        className={`text-right hover:underline ${touch ? "min-h-9 px-1 text-[12px]" : "text-[11px]"} ${m.ready ? "font-medium text-emerald-600" : "text-amber-600"}`}>{m.ready ? "พร้อม" : "ยังไม่พร้อม ›"}</button>
                     )}
                   </div>
-                  <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }} title="ดูรายละเอียด / เช็กลิสต์"
-                    className="absolute left-1.5 top-8 z-10 hidden h-6 w-6 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm hover:text-violet-700 group-hover:flex"><Icon name="open" /></button>
+                  {/* เปิดรายละเอียด/เช็กลิสต์ — จอคอมโผล่ตอนชี้ · iPad/จอสัมผัส = เห็นตลอด (เดิมแตะไม่เจอ) */}
+                  <button type="button" onClick={(e) => { e.stopPropagation(); onOpenMO(m); }} title="ดูรายละเอียด / เช็กลิสต์" aria-label="ดูรายละเอียด / เช็กลิสต์"
+                    className={`absolute z-10 items-center justify-center rounded-md bg-white/90 text-slate-500 shadow-sm hover:text-violet-700 ${touch ? "left-1.5 top-10 flex h-9 w-9 border border-slate-200" : `left-1.5 top-8 h-6 w-6 ${canHover ? "hidden group-hover:flex" : "flex"}`}`}><Icon name="open" /></button>
                 </div>
               );
             })}
@@ -749,11 +829,34 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
             })()}
 
           </div>
-          <div className="flex items-end justify-center gap-2.5 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-3 pb-2.5 pt-4 backdrop-blur">
+          <div className={touch
+            ? "flex items-stretch gap-2 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-2 py-2 backdrop-blur [scrollbar-width:none]"
+            : "flex items-end justify-center gap-2.5 overflow-x-auto rounded-t-xl border border-slate-200 bg-white/95 px-3 pb-2.5 pt-4 backdrop-blur"}>
             {desks.map((d) => {
               const st = statOf(d.id), lifted = overDesk === d.id || td.overId === d.id, on = openDesk === d.id;
               const imgs = st.ws.filter((w) => w.image_url).slice(0, 3);
               const pick = canDispatch && chosen.length > 0;   // ติ๊กการ์ดไว้ → ปุ่มลอย "จ่ายโต๊ะนี้" บนทุกโต๊ะ (เจ้าของ 2026-11-05)
+              // ที่วางการ์ด (ลากเมาส์ HTML5 · iPad กดค้างแล้วลากผ่าน data-drop-id ของ touch-drag)
+              const drop = {
+                "data-drop-id": d.id,
+                onDragOver: (e: DragEvent) => { if (!canDispatch) return; e.preventDefault(); setOverDesk(d.id); },
+                onDragLeave: () => setOverDesk((x) => (x === d.id ? null : x)),
+                onDrop: (e: DragEvent) => { e.preventDefault(); setOverDesk(null); const id = e.dataTransfer.getData("text/plain"); give(d, sel.has(id) ? chosen.map((m) => m.id) : [id]); },
+              };
+              // iPad: โต๊ะเตี้ย แถวเดียวปัดได้ (ชื่อ + ใบ/ค้าง) · ติ๊กแล้วมีปุ่ม "จ่าย N ใบ" ใต้ชื่อ · แตะชื่อ = แผงโต๊ะเต็ม
+              if (touch) return (
+                <div key={d.id} className={`flex w-[132px] shrink-0 flex-col gap-1.5 rounded-xl border p-1.5 transition-colors ${lifted ? "border-violet-500 bg-violet-50" : on ? "border-violet-500 bg-violet-50/60" : "border-slate-200 bg-slate-50"}`}>
+                  <button type="button" {...drop} onClick={() => setOpenDesk(on ? null : d.id)} className="min-h-11 rounded-lg px-1.5 py-1 text-left">
+                    <div className="truncate text-[14px] font-bold leading-tight text-slate-800">{d.name}</div>
+                    <div className="truncate text-[12px] text-slate-500">{st.ws.length ? `${fmt(st.ws.length)} ใบ · ค้าง ${fmt(st.left)}` : "ว่าง"}</div>
+                  </button>
+                  {pick && (
+                    <button type="button" onClick={() => give(d, chosen.map((m) => m.id))} className="h-10 rounded-lg bg-violet-600 text-[14px] font-medium text-white active:bg-violet-700">
+                      จ่าย {chosen.length} ใบ
+                    </button>
+                  )}
+                </div>
+              );
               return (
                 <div key={d.id} className="flex shrink-0 flex-col items-center gap-1.5">
                 {pick && (
@@ -762,12 +865,9 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
                     จ่ายโต๊ะนี้ {chosen.length} ใบ <span aria-hidden className="inline-block animate-bounce">↓</span>
                   </button>
                 )}
-                <button type="button" data-drop-id={d.id} onClick={() => { clearPeekTimer(); setPeekOn(false); setOpenDesk(on ? null : d.id); }}
+                <button type="button" {...drop} onClick={() => { clearPeekTimer(); setPeekOn(false); setOpenDesk(on ? null : d.id); }}
                   onPointerEnter={(e) => { if (e.pointerType === "mouse") peekIn(d.id, e.currentTarget); }}
                   onPointerLeave={(e) => { if (e.pointerType === "mouse") peekOut(); }}
-                  onDragOver={(e) => { if (!canDispatch) return; e.preventDefault(); setOverDesk(d.id); }}
-                  onDragLeave={() => setOverDesk((x) => (x === d.id ? null : x))}
-                  onDrop={(e) => { e.preventDefault(); setOverDesk(null); const id = e.dataTransfer.getData("text/plain"); give(d, sel.has(id) ? chosen.map((m) => m.id) : [id]); }}
                   className={`flex h-[150px] w-[112px] shrink-0 flex-col rounded-2xl border p-2 text-left transition-all duration-200 ease-out hover:-translate-y-2 hover:scale-[1.04] hover:border-violet-300 hover:shadow-md ${lifted ? "-translate-y-2 scale-[1.06] border-violet-500 bg-violet-50 shadow-md" : on ? "border-violet-500 bg-violet-50/60" : "border-slate-200 bg-slate-50"}`}>
                   <div className="line-clamp-2 text-[13px] font-bold leading-tight text-slate-800">{d.name}</div>
                   <div className="mt-1.5 flex h-9 items-center">
@@ -790,18 +890,28 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
       </div>
 
       {/* แผงสรุปเป้า (ผู้บริหาร) — เลื่อนเข้าจากขวา · ล็อก = ติดขวาแล้วดันการ์ด */}
+      {/* iPad: แตะนอกแผงสรุป = ปิด */}
+      {showPrice && touch && sideShown && <div className="fixed inset-0 z-40 bg-slate-900/20" onClick={() => setSideOpen(false)} aria-hidden />}
       {showPrice && (
-        <aside className={`absolute bottom-0 right-0 top-0 z-30 w-[288px] border-l border-slate-200 bg-white p-4 shadow-[-8px_0_24px_rgba(15,23,42,0.06)] transition-transform duration-300 ease-out ${sideShown ? "translate-x-0" : "pointer-events-none translate-x-[105%]"}`}>
+        <aside style={touch && !portrait ? { top: touchTop } : undefined}
+          className={touch
+            // iPad: ลอยทับ ไม่ดันการ์ด — แนวนอนชิดขวา (ใต้แถบเมนูแอป) · แนวตั้งเลื่อนขึ้นจากล่าง
+            ? (portrait
+              ? `fixed inset-x-0 bottom-0 z-40 max-h-[75vh] overflow-y-auto overscroll-contain rounded-t-2xl border-t border-slate-200 bg-white p-4 shadow-[0_-8px_24px_rgba(15,23,42,0.12)] transition-transform duration-300 ease-out ${sideShown ? "translate-y-0" : "pointer-events-none translate-y-[105%]"}`
+              : `fixed bottom-0 right-0 z-40 w-[340px] overflow-y-auto overscroll-contain border-l border-slate-200 bg-white p-4 shadow-[-8px_0_24px_rgba(15,23,42,0.12)] transition-transform duration-300 ease-out ${sideShown ? "translate-x-0" : "pointer-events-none translate-x-[105%]"}`)
+            : `absolute bottom-0 right-0 top-0 z-30 w-[288px] border-l border-slate-200 bg-white p-4 shadow-[-8px_0_24px_rgba(15,23,42,0.06)] transition-transform duration-300 ease-out ${sideShown ? "translate-x-0" : "pointer-events-none translate-x-[105%]"}`}>
           {/* ล็อก = ติดจอตอนเลื่อน (ใต้แถบเมนู) · เนื้อหายาวกว่าจอ = เลื่อนในแผง · ไม่ล็อก = ลอยทับการ์ด เลื่อนไปกับหน้า */}
           <div className={pinned ? "sticky overflow-y-auto overscroll-contain" : ""} style={pinned ? { top: stickTop, maxHeight: `calc(100vh - ${stickTop + 8}px)` } : undefined}>
             <div className="mb-3 flex items-center gap-1.5">
               <span className="text-base font-bold text-slate-800">สรุปเป้ายอด</span>
-              <button type="button" onClick={() => { setLocked(!locked); if (locked) setSideOpen(true); }} title={locked ? "ปลดล็อก (แผงลอยทับการ์ด · เลื่อนไปกับหน้า)" : "ล็อกแผงไว้ (ติดจอตอนเลื่อน · ดันการ์ดให้แคบลง ไม่บัง)"}
-                className={`ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border ${locked ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}><Icon name={locked ? "lock" : "unlock"} /></button>
-              <button type="button" onClick={() => { setSideOpen(false); setLocked(false); }} aria-label="ปิดแผงสรุปเป้า" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100"><Icon name="cancel" /></button>
+              {!touch && <button type="button" onClick={() => { setLocked(!locked); if (locked) setSideOpen(true); }} title={locked ? "ปลดล็อก (แผงลอยทับการ์ด · เลื่อนไปกับหน้า)" : "ล็อกแผงไว้ (ติดจอตอนเลื่อน · ดันการ์ดให้แคบลง ไม่บัง)"}
+                className={`ml-auto inline-flex h-8 w-8 items-center justify-center rounded-lg border ${locked ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 text-slate-500 hover:bg-slate-50"}`}><Icon name={locked ? "lock" : "unlock"} /></button>}
+              {/* iPad ปิดแผงไม่แตะค่าล็อกของจอคอม */}
+              <button type="button" onClick={() => { setSideOpen(false); if (!touch) setLocked(false); }} aria-label="ปิดแผงสรุปเป้า"
+                className={`inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 ${touch ? "ml-auto h-10 w-10" : "h-8 w-8"}`}><Icon name="cancel" /></button>
             </div>
             <div className="mb-3 flex gap-1">
-              {PERIODS.map((p) => <button key={p.k} type="button" onClick={() => setPeriod(p.k)} className={`h-7 flex-1 rounded-full border text-[12px] ${period === p.k ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{p.label}</button>)}
+              {PERIODS.map((p) => <button key={p.k} type="button" onClick={() => setPeriod(p.k)} className={`flex-1 rounded-full border ${touch ? "h-10 text-[14px]" : "h-7 text-[12px]"} ${period === p.k ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>{p.label}</button>)}
             </div>
             <div className="text-[12px] text-slate-500">ยอดที่ต้องการ (มูลค่าขาย · ใช้ร่วมกันทั้งทีม)</div>
             <div className="mt-1 flex gap-1.5">
@@ -856,6 +966,55 @@ export function ExecDispatchView({ pending, workOrders, desks, craftsmen, canDis
       {/* สถานะงาน + ขอซื้อวัตถุดิบถึงไหน (ป๊อปกลาง — ตัวเดียวกับใบค้างผลิต/Dashboard ผลิต) */}
       {statusMo && <MoStatusModal moId={statusMo} view="materials" onClose={() => setStatusMo(null)} />}
       <MoLaborRateModal mo={laborMo} onClose={() => setLaborMo(null)} onSaved={() => onLaborSaved?.()} />
+
+      {/* iPad: ตัวกรอง/การ์ดโชว์อะไร (ป๊อปกลาง) — ของที่จอคอมวางเรียงบนแถบบน · ค่าที่จำต่อคนเป็นตัวเดียวกับจอคอม */}
+      <ERPModal open={touch && filterOpen} onClose={() => setFilterOpen(false)} size="sm" title="ตัวกรอง · การ์ดโชว์อะไร">
+        <div className="space-y-4 text-sm">
+          <div>
+            <div className="mb-1.5 text-[12px] text-slate-500">เรียงการ์ด</div>
+            <div className="flex flex-wrap gap-1.5">
+              {sortList.map((s) => (
+                <button key={s.k} type="button" onClick={() => setSort(s.k)} aria-pressed={sort === s.k}
+                  className={`h-10 rounded-full border px-3 text-[14px] ${sort === s.k ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-700"}`}>{s.label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => setReadyOnly((v) => !v)} aria-pressed={readyOnly}
+              className={`h-10 rounded-full border px-3 text-[14px] ${readyOnly ? "border-emerald-600 bg-emerald-600 text-white" : "border-slate-200 bg-white text-slate-700"}`}>พร้อมจ่ายเท่านั้น</button>
+            {showPrice && (
+              <button type="button" onClick={() => setIncludeOwn(!includeOwn)} aria-pressed={includeOwn}
+                title="ค่าเริ่มต้น = นับเงินเฉพาะแบรนด์ลูกค้า (OEM) · เปิด = นับแบรนด์ตัวเอง/ไม่มีแบรนด์ด้วย"
+                className={`h-10 rounded-full border px-3 text-[14px] ${includeOwn ? "border-violet-600 bg-violet-600 text-white" : "border-slate-200 bg-white text-slate-700"}`}>รวมเงินแบรนด์ตัวเอง</button>
+            )}
+          </div>
+          <div>
+            <div className="mb-1.5 text-[12px] text-slate-500">ขนาดการ์ด</div>
+            <input type="range" min={SIZE_MIN} max={SIZE_MAX} step={10} value={size} onChange={(e) => setSize(Number(e.target.value))} className="h-8 w-full accent-violet-600" aria-label="ขนาดการ์ด" />
+          </div>
+          <div>
+            <div className="mb-1.5 flex items-center text-[12px] text-slate-500">การ์ดโชว์
+              <button type="button" onClick={() => setFields(FIELDS_DEFAULT)} className="ml-auto min-h-9 px-1 text-slate-500 underline">ค่าเริ่มต้น</button>
+            </div>
+            <div className="grid grid-cols-2 gap-1">
+              {FIELDS.filter((f) => showPrice || !f.money).map((f) => (
+                <label key={f.k} className="flex min-h-10 items-center gap-2 rounded-lg px-2 text-slate-700 hover:bg-slate-50">
+                  <input type="checkbox" checked={fields.includes(f.k)} onChange={(e) => setFields(e.target.checked ? [...fields, f.k] : fields.filter((x) => x !== f.k))} className="h-5 w-5 accent-violet-600" /> {f.label}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="mb-1.5 text-[12px] text-slate-500">หน้าตา (จำไว้ที่เครื่องนี้)</div>
+            <div className="flex gap-1.5">
+              <button type="button" aria-pressed={touch} onClick={() => ipad.setView(window.matchMedia("(orientation: portrait)").matches ? "ipadP" : "ipadL")}
+                className={`h-10 flex-1 rounded-lg border text-[14px] ${touch ? "border-slate-800 bg-slate-800 text-white" : "border-slate-200 bg-white text-slate-700"}`}>แบบ iPad</button>
+              <button type="button" onClick={() => { setFilterOpen(false); ipad.setView("pc"); }}
+                className="h-10 flex-1 rounded-lg border border-slate-200 bg-white text-[14px] text-slate-700">แบบจอคอม</button>
+            </div>
+          </div>
+        </div>
+      </ERPModal>
 
     </div>
   );
