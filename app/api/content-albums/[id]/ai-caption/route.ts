@@ -4,7 +4,7 @@
  *
  * ให้ AI ร่าง "แคปชั่นร่าง" ของอัลบั้ม Contents จากรูปที่เลือกใช้ (ไม่เลือก = รูปแรก ๆ ของอัลบั้ม) + การ์ดรู้จักแบรนด์ + สินค้าที่แท็ก
  * ไม่บันทึกเอง — หน้าจอเอาไปใส่ช่องแคปชั่นร่างให้ตรวจแล้วกดบันทึก
- * ของกลาง: lib/ai-caption (prompt 4 ระดับ · อ่านรูป R2 · chatJson) + brandProfileBlock (ปุ่ม AI ใหม่ต้องใส่การ์ดแบรนด์)
+ * ของกลาง: lib/ai-caption (prompt 4 ระดับ · อ่านรูป R2) + ด่านกลาง aiChat (lib/paid-services-server) + brandProfileBlock (ปุ่ม AI ใหม่ต้องใส่การ์ดแบรนด์)
  * สิทธิ์ ai.caption (มีค่าใช้จ่าย) · audit ai_caption (นับเข้าการ์ดค่าใช้จ่าย AI เดิม)
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -12,7 +12,8 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt } from "@/lib/ai-caption";
+import { CAPTION_MODEL, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 import { loadContentAlbums, loadAlbumFiles } from "@/lib/content-albums-server";
 import { isUuid } from "../../shared";
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   ].filter(Boolean).join("\n");
   const ask = `${facts}\n\nตอบเป็น JSON: {"caption": "...", "hashtags": ["#...", "#..."]}\n- caption = แคปชั่นภาษาไทย (ไม่ต้องมีแฮชแท็ก)\n- hashtags = แฮชแท็กที่แนะนำ 5-10 อัน${images.length === 0 ? "\n(หมายเหตุ: ไม่มีรูปที่อ่านได้ — เขียนจากข้อมูลข้อความเท่านั้น)" : ""}`;
   try {
-    const parsed = await chatJson(prompt, [{ type: "text", text: ask }, ...imageParts(images)], 700);
+    const parsed = await aiChat("ai.caption", prompt, [{ type: "text", text: ask }, ...imageParts(images)], 700);
     const caption = String(parsed.caption ?? "").trim();
     if (!caption) return NextResponse.json({ error: "AI ไม่ได้ส่งแคปชั่นกลับมา — ลองกดอีกครั้ง" }, { status: 502 });
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();

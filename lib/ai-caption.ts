@@ -7,16 +7,9 @@ import { r2GetObject } from "@/lib/r2";
 
 export const CAPTION_MODEL = process.env.OPENAI_CAPTION_MODEL || "gpt-4o-mini";
 
-/**
- * โมเดลที่เลือกได้ในหน้าตั้งค่า (ui_config key = "ai_product_model")
- * ราคา = บาทต่อ 1 ล้าน token (อัตรา 36 บาท/USD) — เอาไว้โชว์ให้เจ้าของเห็นก่อนเลือก
- */
-export const AI_MODEL_CHOICES: { id: string; label: string; note: string; inPerM: number; outPerM: number }[] = [
-  { id: "gpt-4o-mini", label: "gpt-4o-mini (ถูกสุด)", note: "เร็ว ประหยัด · งานเขียนไทยพื้น ๆ", inPerM: 5.4, outPerM: 21.6 },
-  { id: "gpt-4.1-mini", label: "gpt-4.1-mini (คุ้มสุด)", note: "เขียนไทยเรียบกว่า ตามคำสั่งดีกว่า", inPerM: 14.4, outPerM: 57.6 },
-  { id: "gpt-4o", label: "gpt-4o (คุณภาพสูง)", note: "งานเขียนดีสุดในสาย OpenAI", inPerM: 90, outPerM: 360 },
-  { id: "gpt-4.1", label: "gpt-4.1 (คุณภาพสูง รุ่นใหม่)", note: "ตามคำสั่งเป๊ะ เขียนยาวได้ดี", inPerM: 72, outPerM: 288 },
-];
+/** โมเดลที่เลือกได้ในหน้าตั้งค่า (ui_config key = "ai_product_model") — ย้ายไป lib/ai-caption-models (ใช้ร่วมหน้าจอ) · export ซ้ำไว้ให้ที่เดิมใช้ได้ */
+import { AI_MODEL_CHOICES } from "@/lib/ai-caption-models";
+export { AI_MODEL_CHOICES };
 
 /** โมเดลที่ใช้เขียนรายละเอียดสินค้า — อ่านจากหน้าตั้งค่าก่อน แล้วค่อย env/ค่าเริ่มต้น */
 export async function productDetailModel(): Promise<string> {
@@ -100,14 +93,19 @@ export async function imagesToDataUrls(keys: string[]): Promise<string[]> {
   return out;
 }
 
-/** เรียก OpenAI แบบบังคับตอบ JSON · error เป็นข้อความไทยพร้อมโชว์ให้ผู้ใช้ */
-export async function chatJson(system: string, userContent: unknown[], maxTokens: number, model?: string): Promise<Record<string, unknown>> {
+/**
+ * เรียก OpenAI แบบบังคับตอบ JSON · error เป็นข้อความไทยพร้อมโชว์ให้ผู้ใช้
+ * ⚠️ ห้ามเรียกตรงจากฟีเจอร์ — ใช้ aiChat("<key>", …) ใน lib/paid-services-server (ด่านกลาง: เปิด/ปิด · โมเดล · บันทึกการใช้)
+ *    เทสต์ paid-services-guard บังคับไว้ · คืน usage (token) ให้ด่านกลางประมาณค่าใช้จ่าย
+ */
+export async function openAiChatRaw(system: string, userContent: unknown[], maxTokens: number, model?: string): Promise<{ data: Record<string, unknown>; model: string; tokensIn: number; tokensOut: number }> {
+  const useModel = model || CAPTION_MODEL;
   const key = openAiKey();
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({
-      model: model || CAPTION_MODEL,
+      model: useModel,
       response_format: { type: "json_object" },
       max_tokens: maxTokens,
       messages: [{ role: "system", content: system }, { role: "user", content: userContent }],
@@ -115,7 +113,8 @@ export async function chatJson(system: string, userContent: unknown[], maxTokens
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(`AI ตอบกลับไม่สำเร็จ: ${(j?.error?.message as string) || `HTTP ${res.status}`}`);
-  try { return JSON.parse(j.choices?.[0]?.message?.content ?? "{}") as Record<string, unknown>; }
+  const tokensIn = Number(j?.usage?.prompt_tokens ?? 0) || 0, tokensOut = Number(j?.usage?.completion_tokens ?? 0) || 0;
+  try { return { data: JSON.parse(j.choices?.[0]?.message?.content ?? "{}") as Record<string, unknown>, model: useModel, tokensIn, tokensOut }; }
   catch { throw new Error("AI ตอบกลับไม่เป็นรูปแบบที่อ่านได้ — ลองกดอีกครั้ง"); }
 }
 

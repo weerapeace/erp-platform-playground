@@ -15,7 +15,8 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { CAPTION_MODEL, productDetailModel, chatJson, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickJobPrompt, PRODUCT_DETAIL_KEY, PRODUCT_FIELD_KEYS, productFieldPromptKey } from "@/lib/ai-caption";
+import { CAPTION_MODEL, productDetailModel, imageParts, imagesToDataUrls, loadPromptRows, openAiKey, pickJobPrompt, PRODUCT_DETAIL_KEY, PRODUCT_FIELD_KEYS, productFieldPromptKey } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 
 export const dynamic = "force-dynamic";
@@ -327,7 +328,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           .map(({ field, en }) => [`▸ ${field} (และ ${en} = ฉบับแปล):`, fieldPrompts[field],
             FIELD_SHAPE[field] ? `[${FIELD_SHAPE[field]}]` : ""].filter(Boolean).join("\n"))].join("\n")
       : "";
-    out = await chatJson(system, [
+    out = await aiChat("ai.product_detail", system, [
       { type: "text", text: facts },
       ...imageParts(images),
       ...(tail ? [{ type: "text", text: tail }] : []),
@@ -404,7 +405,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── Introduction ออกมาเป็น "รายการป้ายกำกับ" → เขียนใหม่เป็นย่อหน้าขาย (ยิงข้อความล้วน ไม่ส่งรูป = ถูกมาก) ──
   if (data.introduction && looksLikeLabelDump(data.introduction)) {
     try {
-      const fix = await chatJson(
+      const fix = await aiChat("ai.product_detail", 
         [
           "คุณคือนักเขียนคำโปรยสินค้าภาษาไทยสำหรับร้านค้าออนไลน์",
           "แปลงข้อมูลที่ได้รับให้เป็นย่อหน้าร้อยแก้วที่อ่านลื่น 80-120 คำ",
@@ -431,7 +432,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   ] as const).filter(([th, en]) => data[th] && !data[en]);
   if (missingEn.length) {
     try {
-      const enOut = await chatJson(
+      const enOut = await aiChat("ai.product_detail", 
         [
           "คุณคือนักแปลไทย→อังกฤษสำหรับหน้าสินค้าอีคอมเมิร์ซ",
           "แปลให้ตรงความหมายและคงโครงสร้างเดิมเป๊ะ ๆ (ลำดับคำ จำนวนบรรทัด หัวข้อ สัญลักษณ์)",

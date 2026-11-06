@@ -13,6 +13,7 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { notifyOrderCustomer } from "@/lib/order-notify";
 import { amountDue, paidNext } from "@/lib/website-orders";
+import { logServiceUse, serviceOn } from "@/lib/paid-services-server";
 import {
   AUTO_RESULT,
   SLIP_BUCKET,
@@ -40,6 +41,8 @@ export const slipVerifierConfigured = (): boolean => !!process.env.EASYSLIP_API_
 async function checkWithEasySlip(bytes: Uint8Array, mime: string, expectedAmount: number, remark: string): Promise<SlipCheck> {
   const key = process.env.EASYSLIP_API_KEY?.trim();
   if (!key) return { ok: false, failure: "off" };
+  // ด่านกลาง: ปิดในศูนย์ AI/API = เหมือนไม่ได้ตั้ง EasySlip (พนักงานตรวจเอง) · ทุกครั้งที่ส่งตรวจ = บันทึกการใช้
+  if (!(await serviceOn("easyslip.verify"))) return { ok: false, failure: "off" };
   const form = new FormData();
   const ext = mime === "image/png" ? "png" : mime === "image/webp" ? "webp" : "jpg";
   form.append("image", new Blob([bytes as BlobPart], { type: mime }), `slip.${ext}`);
@@ -50,8 +53,10 @@ async function checkWithEasySlip(bytes: Uint8Array, mime: string, expectedAmount
   try {
     const res = await fetch(EASYSLIP_URL, { method: "POST", headers: { Authorization: `Bearer ${key}` }, body: form, signal: AbortSignal.timeout(15000) });
     const body = await res.json().catch(() => null);
+    await logServiceUse("easyslip.verify", { ok: res.ok, error: res.ok ? null : `HTTP ${res.status}` });
     return parseEasySlip(res.status, body);
   } catch (e) {
+    await logServiceUse("easyslip.verify", { ok: false, error: String((e as Error)?.message ?? e) });
     return { ok: false, failure: "error", code: "FETCH_FAILED", message: String((e as Error)?.message ?? e).slice(0, 200) };
   }
 }

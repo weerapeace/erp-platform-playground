@@ -18,7 +18,8 @@ import { apiCan, guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { chatJson, loadPromptRows, normalizeHashtags, openAiKey, pickJobPrompt, productDetailModel } from "@/lib/ai-caption";
+import { loadPromptRows, normalizeHashtags, openAiKey, pickJobPrompt, productDetailModel } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { isUuid } from "@/lib/marketing/sku-list";
 import { bangkokDateKey } from "@/lib/marketing/content-plan";
 import { brandHighlights, loadBrandProfile } from "@/lib/marketing/brand-profile-server";
@@ -118,7 +119,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // ── จังหวะ 1: วางตาราง ──
   let plan: PlanPost[] = [];
   try {
-    const out = await chatJson(
+    const out = await aiChat("ai.mass_plan", 
       "คุณคือนักวางแผนคอนเทนต์โซเชียลมีเดียมืออาชีพ ตอบเป็น JSON ตามรูปแบบที่ขอเท่านั้น",
       [{ type: "text", text: [
         context, "",
@@ -154,7 +155,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!mine.length) return;
     calls++;
     try {
-      const out = await chatJson(
+      const out = await aiChat("ai.mass_plan", 
         "คุณคือนักเขียนแคปชั่นโซเชียลมีเดียมืออาชีพ ตอบเป็น JSON ตามรูปแบบที่ขอเท่านั้น",
         [{ type: "text", text: [
           buildMassPlanContext(brief, [p]).join("\n"), "",

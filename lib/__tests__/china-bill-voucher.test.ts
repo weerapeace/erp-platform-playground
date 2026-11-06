@@ -3,7 +3,7 @@ import { fakeDb, type Row } from "./fake-db";
 
 // AI อ่านรูปบิล → 1 แถวตรง PO (P1) · ยอดรวมในบิลที่อ่านได้ ¥900
 const chatJson = vi.fn(async () => ({ is_bill: true, seller_name: "义隆嘉豪五金", total_amount: 900, lines: [{ name_cn: "狗扣", spec_cn: "9mm 银色", name_th: "คอหมามาเวล 9 มม.", spec_th: "สีเงิน", qty: 200, unit_price: 4.5, amount: 900, candidate: "P1", confidence: 0.9 }] }));
-vi.mock("@/lib/ai-caption", () => ({ chatJson: (...a: unknown[]) => chatJson(...(a as [])) }));
+vi.mock("@/lib/paid-services-server", () => ({ aiChat: (_key: string, ...a: unknown[]) => chatJson(...(a as [])) }));   // ด่านกลาง AI (เดิม chatJson ใน ai-caption)
 vi.mock("@/lib/file-ref-server", () => ({ readFileRef: vi.fn(async () => ({ bytes: new Uint8Array([1, 2, 3]), contentType: "image/jpeg" })) }));
 
 import { createVoucherFromChinaBill, listChinaBillsForVoucher } from "@/lib/china-bill-voucher";

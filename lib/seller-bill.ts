@@ -6,7 +6,7 @@
  * กติกาจับคู่ (คะแนน/ระดับความมั่นใจ) อยู่ที่ lib/seller-bill-match.ts (pure) · เอกสาร docs/seller-bill-match.md
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { chatJson } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { readFileRef } from "@/lib/file-ref-server";
 import { isCNY } from "@/lib/landed-cost";
 import { resolveSkuCover, coverUrl } from "@/lib/sku-cover";
@@ -217,7 +217,7 @@ export async function parseSellerBill(admin: Admin, ref: string | string[], grou
 }> {
   const fileParts = await billFileParts(admin, Array.isArray(ref) ? ref : [ref]);   // หลายไฟล์ = หลายหน้าของบิลเดียวกัน
   const { text, idOf } = poCandidatePrompt(groups);
-  const raw = await chatJson(SYSTEM_FULL, [{ type: "text", text: `${text}\n\nอ่านบิลในไฟล์ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...fileParts], 4000, SELLER_BILL_MODEL);
+  const raw = await aiChat("ai.seller_bill", SYSTEM_FULL, [{ type: "text", text: `${text}\n\nอ่านบิลในไฟล์ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...fileParts], 4000, SELLER_BILL_MODEL);
   const header = {
     is_bill: raw.is_bill !== false,
     seller_text: str(raw.seller_name) || null, bill_no: str(raw.bill_no) || null, bill_date: normDate(raw.bill_date),
@@ -242,7 +242,7 @@ export async function aiPickCandidates(lines: SellerBillLine[], groups: PoGroup[
   const { text, idOf } = poCandidatePrompt(groups);
   const billText = items.map(({ l, i }) => `${i} | ${str(l.name_cn)} ${str(l.spec_cn)} | ${str(l.name_th)} ${str(l.spec_th)} | ${l.qty ?? "?"} ${str(l.unit)} × ¥${l.unit_price ?? "?"}`).join("\n");
   try {
-    const raw = await chatJson(SYSTEM_PICK, [{ type: "text", text: `${text}\n\nรายการในบิล (เลขแถว | ชื่อจีน | คำแปล | จำนวน × ราคา):\n${billText}` }], 1500, SELLER_BILL_MODEL);
+    const raw = await aiChat("ai.seller_bill", SYSTEM_PICK, [{ type: "text", text: `${text}\n\nรายการในบิล (เลขแถว | ชื่อจีน | คำแปล | จำนวน × ราคา):\n${billText}` }], 1500, SELLER_BILL_MODEL);
     const picks = Array.isArray(raw.picks) ? (raw.picks as Row[]) : [];
     const byI = new Map(picks.map((p) => [Number(p.i), p]));
     return lines.map((l, i) => {

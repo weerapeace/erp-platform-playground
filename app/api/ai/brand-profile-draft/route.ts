@@ -10,7 +10,8 @@ import { apiCan, guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { chatJson, loadPromptRows, openAiKey, productDetailModel } from "@/lib/ai-caption";
+import { loadPromptRows, openAiKey, productDetailModel } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { isUuid } from "@/lib/marketing/sku-list";
 import { BRAND_PROFILE_FIELDS, BRAND_PROFILE_MAX_EXAMPLES } from "@/lib/marketing/brand-profile";
 import { brandHighlights, recentBrandCaptions } from "@/lib/marketing/brand-profile-server";
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const model = await productDetailModel();
   let out: Record<string, unknown>;
   try {
-    out = await chatJson(
+    out = await aiChat("ai.brand_profile", 
       "คุณคือนักวางกลยุทธ์แบรนด์ ช่วยสรุปข้อมูลแบรนด์จากข้อมูลที่ให้เท่านั้น ตอบเป็น JSON ตามรูปแบบที่ขอ",
       [{ type: "text", text: [
         facts, "",

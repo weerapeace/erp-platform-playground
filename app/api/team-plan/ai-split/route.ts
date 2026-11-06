@@ -9,7 +9,8 @@ import { apiCan, guardApi } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { chatJson, openAiKey } from "@/lib/ai-caption";
+import { openAiKey } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { todayBangkok } from "@/lib/date";
 import { asPriority } from "@/lib/team-plan";
 
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   let out: Record<string, unknown>;
   try {
-    out = await chatJson(
+    out = await aiChat("ai.team_split", 
       "คุณคือผู้ช่วยวางแผนงานของทีมออกแบบ/ผลิตสินค้า แยกข้อความเป็นงานที่ต้องทำทีละข้อ ตอบเป็น JSON ตามรูปแบบที่ขอเท่านั้น",
       [{ type: "text", text: [
         `วันนี้คือวัน${dow}ที่ ${today} (เวลาไทย)`,

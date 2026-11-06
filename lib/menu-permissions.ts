@@ -24,6 +24,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/parent-skus", sameAs: "/master/skus" },
   { href: "/master/assets", prefixes: ["assets."] },
   { href: "/master/storage-rules", sameAs: "/master/assets" },
+  { href: "/admin/paid-services", keys: ["admin.paid_services"] },   // ศูนย์ AI / API ที่เสียเงิน
   { href: "/website", prefixes: ["website."] },
   { href: "/marketing/skus", prefixes: ["marketing.sku."] },
   // ผลิต → จ่ายงานเหมา: ดู/จ่าย/รับคืน ใช้สิทธิ์สินค้า (เหมือน /api/mo/piecework) · ตั้งรายชื่องานเหมากลาง = production.piecework

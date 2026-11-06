@@ -40,6 +40,7 @@ export type Permission =
   | "comments.view" | "comments.create" | "comments.edit"
   | "notification_rules.view" | "admin.notification_rules"
   | "admin.email_reports"
+  | "admin.paid_services"   // ศูนย์ AI / API ที่เสียเงิน (/admin/paid-services · lib/paid-services)
   | "so.view" | "so.create" | "so.edit" | "so.confirm" | "so.ship" | "so.complete" | "so.cancel" | "so.delete"
   | "qt.view" | "qt.create" | "qt.edit" | "qt.send" | "qt.accept" | "qt.reject" | "qt.cancel"
   | "cn.view" | "cn.create" | "cn.cancel"

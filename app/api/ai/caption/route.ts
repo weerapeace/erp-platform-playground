@@ -11,7 +11,8 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt, resolveImageKeys } from "@/lib/ai-caption";
+import { CAPTION_MODEL, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt, resolveImageKeys } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 
 export const dynamic = "force-dynamic";
@@ -63,7 +64,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const ask = `${facts}\n\nตอบเป็น JSON: {"caption": "...", "hashtags": ["#...", "#..."]}\n- caption = แคปชั่นภาษาไทย (ไม่ต้องมีแฮชแท็ก)\n- hashtags = แฮชแท็กที่แนะนำเพิ่ม 5-10 อัน (ภาษาไทย/อังกฤษผสมได้ ไม่ซ้ำกับที่ผู้ใช้ใส่มา)${images.length === 0 ? "\n(หมายเหตุ: ไม่มีรูปแนบ — เขียนจากข้อมูลข้อความเท่านั้น)" : ""}`;
 
   try {
-    const parsed = await chatJson(prompt, [{ type: "text", text: ask }, ...imageParts(images)], 700);
+    const parsed = await aiChat("ai.caption", prompt, [{ type: "text", text: ask }, ...imageParts(images)], 700);
     const caption = String(parsed.caption ?? "").trim();
     if (!caption) return NextResponse.json({ error: "AI ไม่ได้ส่งแคปชั่นกลับมา — ลองกดอีกครั้ง" }, { status: 502 });
 

@@ -6,7 +6,8 @@
  * ใช้ AI ตัวเดียวกับ AI แคปชั่น/รายละเอียดสินค้า (lib/ai-caption: OpenAI vision) — ไม่มี key = แจ้งผู้ใช้เป็นภาษาคน
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { chatJson, imagesToDataUrls, productDetailModel } from "@/lib/ai-caption";
+import { imagesToDataUrls, productDetailModel } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { recomputeVoucher } from "@/lib/purchase-voucher-server";
 import { isSupabaseRef } from "@/lib/file-ref";
 import { fileRefToDataUrl } from "@/lib/file-ref-server";
@@ -77,7 +78,7 @@ export async function parseDeliveryBillImage(r2Key: string, admin?: Admin): Prom
   if (urls.length === 0) throw new Error("อ่านไฟล์รูปไม่ได้ (ไฟล์อาจยังอัปโหลดไม่เสร็จ)");
   const model = await productDetailModel();
   // OCR ต้องการความละเอียดสูง — ไม่ใช้ detail:low ของ imageParts()
-  const raw = await chatJson(SYSTEM, [
+  const raw = await aiChat("ai.delivery_bill", SYSTEM, [
     { type: "text", text: "อ่านใบส่งของนี้ แล้วตอบ JSON ตามโครงที่กำหนด" },
     ...urls.map((url) => ({ type: "image_url", image_url: { url, detail: "high" } })),
   ], 1500, model);

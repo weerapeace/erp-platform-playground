@@ -14,8 +14,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { apiCan, guardApi } from "@/lib/api-auth";
-import { getAi } from "@/lib/ai";
-import { chatJson, loadPromptRows, openAiKey, pickJobPrompt, TRANSLATE_KEY } from "@/lib/ai-caption";
+import { loadPromptRows, openAiKey, pickJobPrompt, TRANSLATE_KEY } from "@/lib/ai-caption";
+import { aiChat, getAiFor, serviceOn } from "@/lib/paid-services-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -47,7 +47,7 @@ function pickTarget(sample: string, to?: string): { tlCode: string; target: stri
 async function translateBatch(list: string[], to?: string, kind: "labels" | "content" = "labels", free = false): Promise<NextResponse> {
   const { tlCode, target } = pickTarget(list.find(Boolean) ?? "", to);
 
-  if (openAiKey() && !free) {
+  if (openAiKey() && !free && (await serviceOn("ai.translate"))) {   // ปิดในศูนย์ AI/API = ข้ามไปตัวแปลฟรี
     try {
       const style = pickJobPrompt(await loadPromptRows(), null, TRANSLATE_KEY);
       // labels  = ชื่อช่องในฟอร์ม (สั้น ตรงตัว) — ส่งทีละบรรทัดมีเลขกำกับ
@@ -70,7 +70,7 @@ async function translateBatch(list: string[], to?: string, kind: "labels" | "con
       const userText = kind === "content"
         ? JSON.stringify(list.map((text, i) => ({ i: i + 1, text })))
         : list.map((t, i) => `${i + 1}. ${t}`).join("\n");
-      const out = await chatJson(sys, [{ type: "text", text: userText }], kind === "content" ? 6000 : 3000);
+      const out = await aiChat("ai.translate", sys, [{ type: "text", text: userText }], kind === "content" ? 6000 : 3000);
       const items = Array.isArray((out as { items?: unknown })?.items) ? (out as { items: unknown[] }).items : [];
       const byIndex = new Map<number, string>();
       for (const raw of items) {
@@ -129,7 +129,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // 0) GPT ก่อน (คุณภาพดีสุด — เรียบเรียงใหม่ให้อ่านลื่น ไม่แปลตรงตัวแบบเครื่องแปล)
   //    ราคา ~0.02 บาท/ช่องข้อความยาว · สไตล์การแปลตั้งเองได้ที่ทะเบียน prompt (platform = "translate")
-  if (openAiKey()) {
+  if (openAiKey() && (await serviceOn("ai.translate"))) {
     try {
       const style = pickJobPrompt(await loadPromptRows(), null, TRANSLATE_KEY);
       const sys = [
@@ -138,14 +138,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         style || "Write naturally for online shoppers — do not translate word-for-word; rephrase so it reads like it was written in the target language. Do not add facts that are not in the source.",
         'Reply as JSON: {"translated":"..."} with no other keys.',
       ].join(" ");
-      const out = await chatJson(sys, [{ type: "text", text }], 1500);
+      const out = await aiChat("ai.translate", sys, [{ type: "text", text }], 1500);
       const translated = String(out?.translated ?? "").trim();
       if (translated) return NextResponse.json({ data: { translated, target, engine: "gpt" }, error: null });
     } catch { /* ตกไปใช้ตัวถัดไป — ห้ามพังเงียบ */ }
   }
 
   // 1) ลอง Cloudflare AI (ถ้าพร้อม — บน CF หรือมี CF_ACCOUNT_ID/CF_AI_API_TOKEN)
-  const ai = await getAi();
+  const ai = await getAiFor("cf.translate");
   if (ai) {
     try {
       const out: any = await ai.run(MODEL, {

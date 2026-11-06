@@ -17,7 +17,8 @@
  *   - ไม่ push แจ้งเตือน (ประหยัดโควตาไลน์ — เจ้าของเลือก 2026-11-03) ตอบกลับแบบ reply เท่านั้น
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
-import { chatJson, imagesToDataUrls } from "@/lib/ai-caption";
+import { imagesToDataUrls } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { appBaseUrl } from "@/lib/app-url";
 import { writeAudit } from "@/lib/audit";
 import { nameSimilarity } from "@/lib/text-similarity";
@@ -84,7 +85,7 @@ export async function readDraftWithAi(admin: Admin, id: string, imageDataUrl: st
         (text ? `ข้อความที่ส่งมา:\n${text.slice(0, 4000)}` : "ไม่มีข้อความ มีแต่รูป — ถือว่าเป็นงาน (is_job=true) ตั้งชื่องานจากสิ่งที่เห็นในรูป"),
     }];
     if (!text && imageDataUrl) content.push({ type: "image_url", image_url: { url: imageDataUrl, detail: "low" } });
-    const raw = await chatJson(aiSystem(todayBangkok()), content, 300, DESIGN_AI_MODEL);
+    const raw = await aiChat("ai.design_line", aiSystem(todayBangkok()), content, 300, DESIGN_AI_MODEL);
     const r = sanitizeDesignAi(raw, brands);
     // อ่านใหม่แล้วไม่เจอ (เช่น ข้อความ "ขอบคุณ" ตามหลังรูป) = เก็บค่าที่เคยอ่านได้ไว้ ไม่ล้างทิ้ง
     const { data } = await admin.from(INBOX_TABLE).update({

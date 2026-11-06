@@ -18,6 +18,8 @@
  * ตัวรับ webhook / ตอบกลับ (reply) / ดึงรูป ยังอยู่ที่ lib/line-intake (ไม่ใช่การส่ง push)
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
+import { logServiceUse, serviceOn } from "@/lib/paid-services-server";
+import { serviceOffMessage } from "@/lib/paid-services";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -147,6 +149,8 @@ export async function linePushRaw(token: string, to: string, messages: LineMessa
   if (!token) return { ok: false, status: 0, error: "ยังไม่ได้ตั้งบอท LINE (ศูนย์ LINE ในหน้าตั้งค่า)" };
   if (!to) return { ok: false, status: 0, error: "ยังไม่ได้เลือกกลุ่มหรือผู้รับ LINE" };
   if (messages.length === 0) return { ok: false, status: 0, error: "ไม่มีข้อความจะส่ง" };
+  // ด่านกลาง: ปิดในศูนย์ AI/API = หยุดส่ง LINE ทุกระบบ (ตอบกลับในแชทไม่ผ่านตรงนี้ ยังใช้ได้)
+  if (!(await serviceOn("line.push"))) return { ok: false, status: 0, error: serviceOffMessage("line.push") };
   try {
     const res = await fetch(PUSH_URL, {
       method: "POST",
@@ -154,6 +158,7 @@ export async function linePushRaw(token: string, to: string, messages: LineMessa
       body: JSON.stringify({ to, messages }),
       signal: AbortSignal.timeout(opts?.timeoutMs ?? 15000),
     });
+    await logServiceUse("line.push", { ok: res.ok, error: res.ok ? null : `HTTP ${res.status}` });
     if (res.ok) return { ok: true, status: res.status, error: null };
     const detail = (await res.text().catch(() => "")).slice(0, 300);
     // โควตาหมด = ทุกระบบจะเงียบ → จดลง log ให้เห็นชัด (ค้นใน Vercel logs ด้วยคำว่า "[line-send]")

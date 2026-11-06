@@ -9,7 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { isSafeR2Key, r2GetObject } from "@/lib/r2";
-import { getAi } from "@/lib/ai";
+import { getAiFor } from "@/lib/paid-services-server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 
 export const dynamic = "force-dynamic";
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!key || !SAFE_KEY.test(key) || !isSafeR2Key(key)) return NextResponse.json({ error: "key ไม่ถูกต้อง" }, { status: 400 });
   if (key.toLowerCase().endsWith(".pdf")) return NextResponse.json({ error: "ไฟล์ PDF อ่านอัตโนมัติไม่ได้ — เลือกบิลเอง", amount: null, account: "", name: "" }, { status: 200 });
 
-  const ai = await getAi();
+  const ai = await getAiFor("cf.slip_ocr");   // ด่านกลาง: ปิดในศูนย์ AI/API = null (เหมือนยังไม่ตั้งค่า)
   if (!ai) return NextResponse.json({ error: "ยังไม่ได้เปิดใช้ AI (binding)", amount: null, account: "", name: "" }, { status: 200 });
 
   try {

@@ -14,7 +14,8 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { writeAudit } from "@/lib/audit";
-import { CAPTION_MODEL, chatJson, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt, resolveImageKeys } from "@/lib/ai-caption";
+import { CAPTION_MODEL, imageParts, imagesToDataUrls, loadPromptRows, normalizeHashtags, openAiKey, pickPrompt, resolveImageKeys } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { brandProfileBlock } from "@/lib/marketing/brand-profile-server";
 
 export const dynamic = "force-dynamic";
@@ -97,7 +98,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       }).join("\n\n");
       const ask = `${facts}\n\n${blocks}\n\nเขียนแคปชั่นให้ครบทุกแพลตฟอร์มข้างต้น โดยแต่ละอันต้องทำตาม "คำสั่งเฉพาะแพลตฟอร์มนี้" ของตัวเอง และเนื้อหาไม่ควรเหมือนกันเป๊ะทุกแพลตฟอร์ม\nตอบเป็น JSON เท่านั้น รูปแบบ: {"platforms": {"<ชื่อแพลตฟอร์ม>": {"caption": "...", "hashtags": ["#...", "#..."]}}}\n- caption = ข้อความโพสต์ (ไม่ต้องมีแฮชแท็กอยู่ในนี้)\n- hashtags = แฮชแท็กที่แนะนำเพิ่ม 5-10 อัน${urls.length === 0 ? "\n(หมายเหตุ: ไม่มีรูปแนบ — เขียนจากข้อมูลข้อความเท่านั้น)" : ""}`;
 
-      const parsed = await chatJson(
+      const parsed = await aiChat("ai.caption", 
         "คุณเป็นนักเขียนแคปชั่นการตลาดมืออาชีพ เขียนตามคำสั่งของแต่ละแพลตฟอร์มอย่างเคร่งครัด ห้ามแต่งข้อมูลที่ไม่เห็นในรูปหรือไม่มีในข้อมูลที่ให้",
         [{ type: "text", text: ask }, ...imageParts(urls)],
         400 + g.platforms.length * 350,

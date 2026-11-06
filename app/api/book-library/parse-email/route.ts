@@ -12,7 +12,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi } from "@/lib/api-auth";
-import { chatJson, openAiKey, productDetailModel } from "@/lib/ai-caption";
+import { openAiKey, productDetailModel } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const model = await productDetailModel();
-    const out = await chatJson(SYSTEM, [{ type: "text", text: text.slice(0, MAX_CHARS) }], 2000, model);
+    const out = await aiChat("ai.book_library", SYSTEM, [{ type: "text", text: text.slice(0, MAX_CHARS) }], 2000, model);
     const raw = Array.isArray((out as { books?: unknown }).books) ? ((out as { books: unknown[] }).books) : [];
 
     const books = raw.slice(0, MAX_BOOKS).map((r) => {

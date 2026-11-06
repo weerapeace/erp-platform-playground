@@ -17,7 +17,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { r2PutObject } from "@/lib/r2";
-import { chatJson, openAiKey } from "@/lib/ai-caption";
+import { openAiKey } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -77,7 +78,7 @@ async function search(key: string, q: string): Promise<Volume[]> {
 async function translateTitle(thai: string): Promise<string[]> {
   if (!openAiKey()) return [];
   try {
-    const out = await chatJson(
+    const out = await aiChat("ai.book_library", 
       "คุณรู้จักชื่อการ์ตูน/นิยาย/หนังสือฉบับแปลไทยกับชื่อต้นฉบับ ตอบ JSON เท่านั้น "
       + '{"en":"<ชื่อภาษาอังกฤษที่ใช้ตีพิมพ์จริง>","ja":"<ชื่อต้นฉบับญี่ปุ่นถ้าเป็นการ์ตูน/นิยายญี่ปุ่น>"} '
       + "ถ้าไม่รู้จักเรื่องนี้จริง ๆ ให้ตอบค่าว่างทั้งคู่ ห้ามเดามั่ว",

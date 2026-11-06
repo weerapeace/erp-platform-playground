@@ -9,7 +9,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { r2GetObject } from "@/lib/r2";
-import { getAi } from "@/lib/ai";
+import { getAiFor } from "@/lib/paid-services-server";
 import { guardApi } from "@/lib/api-auth";
 import { parseDateCell, parseNumberCell } from "@/lib/paste-table";
 
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "ไฟล์ PDF อ่านอัตโนมัติไม่ได้ — กรอกยอดเองได้เลย" }, { status: 200 });
   }
 
-  const ai = await getAi();
+  const ai = await getAiFor("cf.receipt_ocr");   // ด่านกลาง: ปิดในศูนย์ AI/API = null (เหมือนยังไม่ตั้งค่า)
   if (!ai) return NextResponse.json({ error: "ยังไม่ได้เปิดใช้ตัวอ่านรูป (AI) — กรอกยอดเองได้เลย" }, { status: 200 });
 
   try {

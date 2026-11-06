@@ -7,7 +7,7 @@
  * ตัวอ่าน/ตัวจับคู่รายการใช้ของเดิมใน lib/seller-bill.ts · เอกสาร docs/seller-bill-match.md
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { chatJson } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { writeAudit } from "@/lib/audit";
 import { isCNY } from "@/lib/landed-cost";
 import { createManualVoucher, fxRateForDate } from "@/lib/purchase-voucher-server";
@@ -151,7 +151,7 @@ export async function readBillIntake(admin: Admin, refs: string[]): Promise<{ bi
     const cn = [p.company_name, p.name_en].map(str).filter((x) => x && hasCn(x));
     return `${code} | ${p.name}${cn.length ? ` (จีน: ${cn.join(" / ")})` : ""}`;
   }).join("\n");
-  const raw = await chatJson(SYSTEM_INTAKE, [{ type: "text", text: `ร้านจีนในทะเบียนของเรา (${shops.length} ร้าน · รหัส | ชื่อ):\n${shopText || "(ไม่มี)"}\n\nอ่านบิลในไฟล์ที่แนบ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...parts], 6000, SELLER_BILL_MODEL);
+  const raw = await aiChat("ai.seller_bill", SYSTEM_INTAKE, [{ type: "text", text: `ร้านจีนในทะเบียนของเรา (${shops.length} ร้าน · รหัส | ชื่อ):\n${shopText || "(ไม่มี)"}\n\nอ่านบิลในไฟล์ที่แนบ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...parts], 6000, SELLER_BILL_MODEL);
 
   const rawBills = Array.isArray(raw.bills) ? (raw.bills as Row[]) : [];
   const groupsByShop = await loadOpenCnGroupsByShop(admin, shops.map((s) => s.id));

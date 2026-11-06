@@ -3,7 +3,7 @@ import { fakeDb, type Row } from "./fake-db";
 
 // AI จับคู่รายการจากข้อความ → ตอบให้แถว 0 = P1 (กลุ่มแรก)
 const chatJson = vi.fn(async () => ({ picks: [{ i: 0, candidate: "P1", confidence: 0.9 }] }));
-vi.mock("@/lib/ai-caption", () => ({ chatJson: (...a: unknown[]) => chatJson(...(a as [])) }));
+vi.mock("@/lib/paid-services-server", () => ({ aiChat: (_key: string, ...a: unknown[]) => chatJson(...(a as [])) }));   // ด่านกลาง AI (เดิม chatJson ใน ai-caption)
 vi.mock("@/lib/file-ref-server", () => ({ readFileRef: vi.fn() }));
 
 import { createVoucherFromSellerBill } from "@/lib/seller-bill-intake";

@@ -6,7 +6,8 @@
  *   กติกาที่ใช้ร่วมหน้าจอ: lib/work-log-read.ts · ใบที่พิมพ์: lib/work-log-sheet.ts
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { chatJson, openAiKey } from "@/lib/ai-caption";
+import { openAiKey } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { fileRefToDataUrl } from "@/lib/file-ref-server";
 import { stepCode } from "@/lib/work-log-sheet";
 import {
@@ -101,7 +102,7 @@ export async function readWorkLogImage(admin: Admin, fileRef: string, layout: Wo
 
 /** ส่วนที่คุย AI จริง (แยกออกมาให้ทดสอบกับรูปตัวอย่างได้โดยไม่ต้องผ่านที่เก็บไฟล์) */
 export async function readWorkLogDataUrl(url: string, layout: WorkLogLayout, employees: WorkLogEmployee[]): Promise<WorkLogAiResult> {
-  const raw = await chatJson(systemPrompt(layout, employees), [
+  const raw = await aiChat("ai.work_log", systemPrompt(layout, employees), [
     { type: "text", text: "อ่านใบจดผลงานนี้ แล้วตอบ JSON ตามโครงที่กำหนด" },
     { type: "image_url", image_url: { url, detail: "high" } },
   ], 4000, WORK_LOG_AI_MODEL);

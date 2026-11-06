@@ -16,7 +16,8 @@
  *     หน้ารายการไม่มีเลขคำสั่งซื้อ → เตือนซ้ำด้วย ร้าน+วันที่+ยอดจ่าย แทน · ให้ AI รู้ "วันนี้" กันเดาปีผิด
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
-import { chatJson, imagesToDataUrls, openAiKey } from "@/lib/ai-caption";
+import { imagesToDataUrls, openAiKey } from "@/lib/ai-caption";
+import { aiChat } from "@/lib/paid-services-server";
 import { appBaseUrl } from "@/lib/app-url";
 import { writeAudit } from "@/lib/audit";
 import { shopNameSimilarity } from "@/lib/partner-match";
@@ -216,7 +217,7 @@ export async function readOrdersWithAi(dataUrls: string[]): Promise<{ result: Ai
     { type: "text", text: `ภาพหน้าจอคำสั่งซื้อ ${dataUrls.length} ภาพ` },
     ...dataUrls.map((url) => ({ type: "image_url", image_url: { url, detail: "high" } })),
   ];
-  const raw = await chatJson(aiSystem(today), content, 3000, ORDER_AI_MODEL);
+  const raw = await aiChat("ai.order_capture", aiSystem(today), content, 3000, ORDER_AI_MODEL);
   return { result: sanitizeAiResult(raw, today), raw };
 }
 
