@@ -25,11 +25,12 @@ export async function generateViewport({ params }: Params): Promise<Viewport> {
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const i = await info((await params).path);
   if (!i) return { title: "ERP" };
-  const icon = `/api/page-icon${i.pagePath}?s=192`;
+  const v = i.version ? `&v=${encodeURIComponent(i.version)}` : "";   // ไอคอนที่ตั้งเอง: เปลี่ยนแล้วที่อยู่รูปเปลี่ยน
+  const icon = `/api/page-icon${i.pagePath}?s=192${v}`;
   return {
     title: i.label,
     manifest: `/api/page-manifest${i.pagePath}`,
-    icons: { icon, shortcut: icon, apple: `/api/page-icon${i.pagePath}?s=512` },
+    icons: { icon, shortcut: icon, apple: `/api/page-icon${i.pagePath}?s=512${v}` },
     appleWebApp: { capable: true, statusBarStyle: "default", title: i.label },
   };
 }

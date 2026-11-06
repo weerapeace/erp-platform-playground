@@ -21,8 +21,10 @@ import { Icon } from "@/components/icon";
 import { DeviceQrPanel, DEVICE_ICON, DEVICE_LABEL, installAppUrl, useViewportLayout, type AppLite, type DeviceLayout, type DeviceQrOpts } from "@/components/device-view";
 import { IOS_INSTALL_HINT, SAMSUNG_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, openInChrome, usePwaInstall } from "@/components/pwa-install-button";
 import { QrCode } from "@/components/qr-code";
-import { apiFetch } from "@/lib/api";
 import { cleanPagePath, labelFromPath, matchMenuForPath, soloUrl } from "@/lib/solo-page";
+import { brandIconUrl, isAppIconKey, pageBrandKey } from "@/lib/app-branding";
+import { AppIconEditButton, useAppBranding, type IconPreset } from "@/components/app-icon-editor";
+import { cachedGetJson } from "@/lib/shell-cache";
 
 /** ข้อความที่ส่งจากหน้าใน iframe → เชลล์แอปเดี่ยว ให้เด้งติดตั้ง (เชลล์ฟังใน InstallHereBanner) */
 export const PWA_INSTALL_MSG = "erp-pwa-install";
@@ -121,43 +123,66 @@ export function InstallAppModal({ open, onClose, qr }: { open: boolean; onClose:
 }
 
 /**
- * 📲 ติดตั้ง "เฉพาะหน้านี้" เป็นแอปหน้าเดียว (lib/solo-page) — เปิดมาเจอหน้านี้หน้าเดียว ไปหน้าอื่นไม่ได้
- *   หน้าที่ใช้อยู่ = หน้าของเอกสารนี้เอง (ในเชลล์ /app/<key> คือหน้าใน iframe) · หน้าระบบ (/app /login …) = ไม่โชว์
- *   ติดตั้งบนเครื่องนี้ = พาไป /solo<path>?install=1 แล้วการ์ดติดตั้งเด้ง · เครื่องอื่น = QR
+ * 📲 ติดตั้ง "เฉพาะหน้านี้" เป็นแอปหน้าเดียว (lib/solo-page) — เปิดมาเจอหน้านี้หน้าเดียว ไปหน้าอื่นไม่ได้ (ของกลาง)
+ *   หน้าที่ใช้อยู่ = หน้าของเอกสารนี้เอง · ในเชลล์แอป /app/<key> ส่ง `path` = หน้าที่เปิดอยู่ในกรอบ (เมนูผู้ใช้ → 📷 ป๊อปเปิด/ติดตั้ง)
+ *   หน้าระบบ (/app /login …) = ไม่โชว์ · ติดตั้งบนเครื่องนี้ = พาไป /solo<path>?install=1 แล้วการ์ดติดตั้งเด้ง · เครื่องอื่น = QR (กลาง QR = ไอคอน)
+ *   ไอคอน/ชื่อบนหน้าจอ: ของกลางไอคอนแอป key "page:<path>" — แอดมินกด "เปลี่ยนรูปไอคอน / ชื่อ" (อัปโหลดเอง / ใช้รูปแอปที่เมนูสังกัด)
+ *   ไม่แตะไอคอน/ชื่อเมนูในระบบ
  */
-function SoloInstallSection({ open }: { open: boolean }) {
-  const [page, setPage] = useState<{ path: string; search: string; label: string } | null>(null);
-  const [showQr, setShowQr] = useState(false);
+export function SoloInstallSection({ open, path: pathProp }: { open: boolean; path?: string | null }) {
+  const [page, setPage] = useState<{ path: string; search: string } | null>(null);
   useEffect(() => {
     if (!open) return;
-    const path = cleanPagePath(window.location.pathname);
+    const raw = pathProp ?? `${window.location.pathname}${window.location.search}`;
+    const path = cleanPagePath(raw);
     if (!path) { setPage(null); return; }
-    const search = window.location.search;
-    setPage({ path, search, label: labelFromPath(path) });
+    const qi = raw.indexOf("?");
+    setPage({ path, search: qi >= 0 ? raw.slice(qi) : "" });
+  }, [open, pathProp]);
+  if (!page) return null;
+  return <SoloInstallBox key={page.path} path={page.path} search={page.search} />;
+}
+
+function SoloInstallBox({ path, search }: { path: string; search: string }) {
+  const brandKey = pageBrandKey(path);
+  const branding = useAppBranding(brandKey);
+  const [showQr, setShowQr] = useState(false);
+  // รูปที่เลือกได้ทันที = รูปของแอปที่เมนูนี้สังกัด (เช่น "ผลิต") · ชื่อเมนูไว้โชว์ระหว่างรอ branding
+  const [presets, setPresets] = useState<IconPreset[]>([]);
+  const [menuLabel, setMenuLabel] = useState(labelFromPath(path));
+  useEffect(() => {
     let alive = true;
-    apiFetch("/api/menu").then((r) => r.json()).then((j) => {
-      const m = matchMenuForPath(((j.data ?? []) as { href: string; label: string; is_active?: boolean }[]).filter((x) => x.is_active !== false), path);
-      if (alive && m?.label) setPage((p) => (p ? { ...p, label: m.label } : p));
+    Promise.all([
+      cachedGetJson<{ data?: { href: string; label: string; is_active?: boolean; app_keys?: string[] | null }[] }>("/api/menu"),
+      cachedGetJson<{ data?: { key: string; label: string; icon_url?: string | null }[] }>("/api/menu/apps"),
+    ]).then(([mj, aj]) => {
+      if (!alive) return;
+      const m = matchMenuForPath((mj.data ?? []).filter((x) => x.is_active !== false), path);
+      if (m?.label) setMenuLabel(m.label);
+      const keys = m?.app_keys ?? [];
+      setPresets((aj.data ?? []).filter((a) => keys.includes(a.key) && isAppIconKey(a.icon_url)).map((a) => ({ label: `รูปแอป “${a.label}”`, r2Key: a.icon_url as string })));
     }).catch(() => undefined);
     return () => { alive = false; };
-  }, [open]);
-  if (!page) return null;
+  }, [path]);
 
-  const url = soloUrl(page.path, { search: page.search, install: true });
+  const label = branding.loading ? menuLabel : branding.label;
+  const iconSrc = brandIconUrl(brandKey, 192, branding.version);
+  const url = soloUrl(path, { search, install: true });
   const go = () => { try { (window.top ?? window).location.href = url; } catch { window.location.href = url; } };
   return (
     <div className="w-full rounded-xl border border-indigo-200 bg-indigo-50/50 p-3">
       <div className="mb-1 flex items-center gap-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`/api/page-icon${page.path}?s=192`} alt="" className="h-9 w-9 shrink-0 rounded-lg" />
+        <img src={iconSrc} alt="" className="h-10 w-10 shrink-0 rounded-[22%] bg-white object-cover" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold text-slate-800">ติดตั้งเฉพาะหน้านี้</div>
-          <div className="truncate text-[11px] text-slate-500">แอป &ldquo;{page.label}&rdquo; — เปิดมาเจอหน้านี้หน้าเดียว ไปหน้าอื่นไม่ได้</div>
+          <div className="truncate text-[11px] text-slate-500">แอป &ldquo;{label}&rdquo; — เปิดมาเจอหน้านี้หน้าเดียว ไปหน้าอื่นไม่ได้</div>
         </div>
       </div>
+      <AppIconEditButton appKey={brandKey} branding={branding} presets={presets} label="เปลี่ยนรูปไอคอน / ชื่อ" className="mb-1 w-full" />
       <button type="button" onClick={go}
         className="mt-1 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 text-sm font-semibold text-white hover:bg-indigo-700">
-        <Icon name="download" /> ติดตั้ง &ldquo;{page.label}&rdquo; บนเครื่องนี้
+        <Icon name="download" /> ติดตั้ง &ldquo;{label}&rdquo; บนเครื่องนี้
       </button>
       <p className="mt-1 text-center text-[11px] leading-snug text-slate-500">จะเปิดหน้าแอปให้ แล้วกด &ldquo;ติดตั้ง&rdquo; ที่การ์ดด้านล่างจอ (iPhone/iPad: แชร์ → เพิ่มไปยังหน้าจอโฮม)</p>
       <button type="button" onClick={() => setShowQr((v) => !v)} className="mt-1 w-full text-center text-[11px] font-medium text-indigo-600 hover:underline">
@@ -165,7 +190,7 @@ function SoloInstallSection({ open }: { open: boolean }) {
       </button>
       {showQr && (
         <div className="mt-2 flex flex-col items-center gap-1">
-          <QrCode text={`${window.location.origin}${url}`} size={160} className="border border-slate-100" alt={`QR ติดตั้งแอป ${page.label}`} />
+          <QrCode text={`${window.location.origin}${url}`} size={160} logo={iconSrc} className="border border-slate-100" alt={`QR ติดตั้งแอป ${label}`} />
           <span className="text-[11px] text-slate-500">สแกนด้วยกล้องมือถือ แล้วล็อกอินครั้งแรก</span>
         </div>
       )}

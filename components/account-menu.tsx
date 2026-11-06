@@ -18,7 +18,7 @@ import { usePwaInstall, IOS_INSTALL_HINT, UNSUPPORTED_INSTALL_HINT, SAMSUNG_INST
 import { WorkPopupFloatToggle } from "@/components/work-popup/float";
 import { BrowserPushToggle } from "@/components/web-push";
 import { PageViewOptionsSection } from "@/components/page-chrome";
-import { InstallAppMenuItem, InstallAppModal } from "@/components/install-app";
+import { InstallAppMenuItem, InstallAppModal, SoloInstallSection } from "@/components/install-app";
 
 /** มุมมองอุปกรณ์ (ส่งมาจากเชลล์แอปเดี่ยว) — เลือกดูแบบแท็บเล็ต/มือถือบนจอนี้ + QR เปิด/ติดตั้งบนเครื่องจริง */
 export type AccountMenuDevice = { mode: DeviceMode; viewport: DeviceLayout; onChange: (m: DeviceMode) => void; qr?: DeviceQrOpts };
@@ -135,6 +135,8 @@ export function AccountMenu({ onDark = false, device, compact = false }: { onDar
       {device && (
         <ERPModal open={qrOpen} onClose={() => setQrOpen(false)} title="📷 เปิด / ติดตั้งแอปนี้บนแท็บเล็ต · มือถือ · คอม" size="sm">
           <div className="flex flex-col items-center gap-3">
+            {/* ติดตั้งเฉพาะหน้าที่เปิดอยู่ในแอป (เช่น บอร์ดจ่ายงาน) เป็นแอปหน้าเดียว — กล่องกลางตัวเดียวกับป๊อป "ติดตั้งแอป" (เจ้าของ 2026-11-06) */}
+            <SoloInstallSection open={qrOpen} path={device.qr?.installGo ?? null} />
             <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-slate-50 p-0.5">
               {(["tablet", "phone", "desktop"] as DeviceLayout[]).map((d) => (
                 <button key={d} type="button" onClick={() => setQrLayout(d)}

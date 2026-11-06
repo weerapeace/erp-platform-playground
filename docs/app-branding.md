@@ -27,6 +27,16 @@ const brand = useAppBranding("notify");
 2. หน้าแอป (page.tsx — ไม่ใช่ layout) ตั้ง `metadata.manifest = "/api/app-manifest/<key>"`
 3. ใส่ `icon.tsx` + `apple-icon.tsx` ในโฟลเดอร์หน้า เรียก `appIconResponse(supabaseAdmin(), "<key>", ขนาด)` (ดู app/notify)
 
+## แอปหน้าเดียว (/solo<path>) — ไอคอน + ชื่อบนหน้าจอ (2026-11-06)
+- key = `pageBrandKey(path)` → `"page:/master/work-board"` · ตรวจด้วย `isBrandKey` / `pagePathOfBrandKey` (path ต้องผ่าน cleanPagePath ของ lib/solo-page)
+- เก็บที่เดียวกับแอปเดี่ยว: china_app_settings skey=app_branding → `{ "page:<path>": { icon_url, label, updated_at } }` (อ่าน/เขียนผ่าน lib/app-branding-store)
+- **ไม่แตะไอคอน/ชื่อเมนูในระบบ** — ไม่ได้ตั้ง = ใช้รูปเมนู (icon_url) หรือไอคอนเส้นจากอีโมจิเมนู เหมือนเดิม
+- รูป: `brandIconUrl(key, size, version)` → `/api/page-icon<path>?s=&v=` · `d=1` = ไอคอนตั้งต้น (ตัวอย่างในป๊อปก่อนบันทึก)
+- manifest (/api/page-manifest) + หัวหน้า /solo ใช้ชื่อ/รูปที่ตั้งเอง และต่อ `v=` ให้ที่อยู่รูป
+- PATCH /api/app-branding `{ key, icon_url?, label? }` ส่งเฉพาะช่องที่เปลี่ยน · `label` แก้ได้เฉพาะแอปหน้าเดียว · audit แยกต่อช่อง (field icon_url / label)
+- ป๊อป `AppIconEditButton` รับ `presets` (รูปที่เลือกได้ทันที เช่น รูปของแอปที่เมนูสังกัด) · key ของหน้า = มีช่อง "ชื่อบนหน้าจอ"
+- ใช้ที่กล่อง "ติดตั้งเฉพาะหน้านี้" (`SoloInstallSection` ใน components/install-app) — ป๊อป "ติดตั้งแอป" ของหน้าปกติ + ป๊อป "📷 เปิด / ติดตั้งแอปนี้" ในเชลล์ /app/<key> (ส่ง path = หน้าที่เปิดอยู่ในกรอบ)
+
 ## สิทธิ์ / audit
 - ดูรูป: สาธารณะ (มือถือต้องดึงตอนติดตั้ง) · เปลี่ยน: `admin.users` (เหมือนแก้แอปที่ /admin/menu)
 - ทุกครั้งที่เปลี่ยน ลง audit `app_branding.update` (old_value/new_value)

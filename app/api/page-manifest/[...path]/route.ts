@@ -19,6 +19,7 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
 
   const info = await loadSoloPageInfo(supabaseAdmin(), pagePath);
   const iconBase = `/api/page-icon${pagePath}`;
+  const v = info.version ? `&v=${encodeURIComponent(info.version)}` : "";   // เปลี่ยนไอคอนแล้ว ที่อยู่รูปเปลี่ยน → ไม่ติดแคช
   const id = soloAppId(pagePath);
   const manifest = {
     id,
@@ -31,9 +32,9 @@ export async function GET(_request: NextRequest, { params }: { params: Promise<{
     background_color: "#f8fafc",
     theme_color: info.theme,
     icons: [
-      { src: `${iconBase}?s=192`, sizes: "192x192", type: "image/png", purpose: "any" },
-      { src: `${iconBase}?s=512`, sizes: "512x512", type: "image/png", purpose: "any" },
-      { src: `${iconBase}?s=512&m=1`, sizes: "512x512", type: "image/png", purpose: "maskable" },
+      { src: `${iconBase}?s=192${v}`, sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: `${iconBase}?s=512${v}`, sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: `${iconBase}?s=512&m=1${v}`, sizes: "512x512", type: "image/png", purpose: "maskable" },
     ],
   };
   return new NextResponse(JSON.stringify(manifest), {

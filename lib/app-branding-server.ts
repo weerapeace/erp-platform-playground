@@ -4,7 +4,9 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { absoluteUrl } from "@/lib/app-url";
 import { r2GetObject } from "@/lib/r2";
-import { APP_BRANDING_KEY, STANDALONE_APPS, isAppIconKey } from "@/lib/app-branding";
+import { STANDALONE_APPS, isAppIconKey, pagePathOfBrandKey } from "@/lib/app-branding";
+import { patchBrandingEntry, readBrandingStore } from "@/lib/app-branding-store";
+import { loadSoloPageInfo } from "@/lib/solo-page-server";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -15,19 +17,20 @@ export type AppBranding = {
   iconUrl: string | null;
   /** เลขรุ่น (เวลาแก้ล่าสุด) ใช้ต่อท้ายที่อยู่รูปกันแคช */
   version: string | null;
-  /** เก็บที่ไหน: แอปในทะเบียนเมนู / แอปเดี่ยว / ไม่รู้จัก */
-  source: "app_group" | "standalone" | null;
+  /** เก็บที่ไหน: แอปในทะเบียนเมนู / แอปเดี่ยว / แอปหน้าเดียว (page:<path>) / ไม่รู้จัก */
+  source: "app_group" | "standalone" | "page" | null;
+  /** แอปหน้าเดียว: ชื่อบนหน้าจอที่ตั้งเอง (null = ใช้ชื่อเมนู) + ชื่อเมนู */
+  customLabel?: string | null;
+  defaultLabel?: string;
 };
 
-type BrandingStore = Record<string, { icon_url?: string | null; updated_at?: string }>;
-
-async function readStore(admin: Admin): Promise<BrandingStore> {
-  const { data } = await admin.from("china_app_settings").select("sval").eq("skey", APP_BRANDING_KEY).maybeSingle();
-  const v = (data as { sval?: unknown } | null)?.sval;
-  return v && typeof v === "object" && !Array.isArray(v) ? (v as BrandingStore) : {};
-}
-
 export async function getAppBranding(admin: Admin, appKey: string): Promise<AppBranding> {
+  // แอปหน้าเดียว — ชื่อ/ไอคอนที่ตั้งเอง (ไม่ตั้ง = ของเมนู) อ่านผ่าน lib/solo-page-server ตัวเดียวกับ manifest/ไอคอน
+  const pagePath = pagePathOfBrandKey(appKey);
+  if (pagePath) {
+    const i = await loadSoloPageInfo(admin, pagePath);
+    return { key: appKey, label: i.label, iconUrl: i.customIconUrl, version: i.version, source: "page", customLabel: i.customLabel, defaultLabel: i.menuLabel };
+  }
   const { data: g } = await admin.from("erp_app_groups").select("key, label, icon_url, updated_at").eq("key", appKey).maybeSingle();
   const group = g as { key: string; label: string; icon_url: string | null; updated_at: string | null } | null;
   if (group) {
@@ -35,7 +38,7 @@ export async function getAppBranding(admin: Admin, appKey: string): Promise<AppB
   }
   const app = STANDALONE_APPS[appKey];
   if (!app) return { key: appKey, label: appKey, iconUrl: null, version: null, source: null };
-  const entry = (await readStore(admin))[appKey];
+  const entry = (await readBrandingStore(admin))[appKey];
   return { key: appKey, label: app.shortName, iconUrl: entry?.icon_url || null, version: entry?.updated_at ? String(Date.parse(entry.updated_at)) : null, source: "standalone" };
 }
 
@@ -49,12 +52,16 @@ export async function setAppIcon(admin: Admin, appKey: string, iconUrl: string |
     const { error } = await admin.from("erp_app_groups").update({ icon_url: iconUrl, updated_at: now }).eq("key", appKey);
     if (error) throw new Error(error.message);
   } else {
-    const store = await readStore(admin);
-    store[appKey] = { icon_url: iconUrl, updated_at: now };
-    const { error } = await admin.from("china_app_settings").upsert({ skey: APP_BRANDING_KEY, sval: store, updated_at: now }, { onConflict: "skey" });
-    if (error) throw new Error(error.message);
+    await patchBrandingEntry(admin, appKey, { icon_url: iconUrl });   // แอปเดี่ยว / แอปหน้าเดียว (ค่าอื่นใน entry เช่นชื่อ ไม่หาย)
   }
   return { before: cur.iconUrl, after: iconUrl };
+}
+
+/** ตั้ง/ล้างชื่อบนหน้าจอของแอปหน้าเดียว (null = ใช้ชื่อเมนู) — แอปอื่นแก้ชื่อที่ /admin/menu */
+export async function setPageLabel(admin: Admin, key: string, label: string | null): Promise<{ before: string | null; after: string | null }> {
+  if (!pagePathOfBrandKey(key)) throw new Error("แก้ชื่อได้เฉพาะแอปหน้าเดียว");
+  const before = await patchBrandingEntry(admin, key, { label });
+  return { before: before.label ?? null, after: label };
 }
 
 function defaultIconPath(appKey: string, size: number, maskable: boolean): string {

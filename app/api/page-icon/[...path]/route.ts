@@ -2,6 +2,7 @@
  * ไอคอน PNG ของ "แอปหน้าเดียว" — /api/page-icon/<path ของหน้า>?s=192|512&m=1
  *   รูปไอคอนเมนูที่อัปโหลดไว้ (R2) → ครอปจัตุรัส · ไม่มี = วาดไอคอนเส้นของเมนู (เช่น ✂️ → กรรไกร) สีขาวบนพื้นสีของแอป
  *   m=1 = แบบ maskable (Android ตัดขอบเป็นวงกลม → เต็มพื้น เว้นขอบ)
+ *   ไอคอนที่ตั้งเองของแอปหน้าเดียว (ของกลางไอคอนแอป key "page:<path>") มาก่อน · d=1 = ไอคอนตั้งต้น (ไม่สนที่ตั้งเอง — ตัวอย่างในตัวแก้ไอคอน) · v= เลขรุ่น กันแคช
  * สาธารณะ (เครื่องต้องดึงได้ตอนติดตั้งแอป) · กติกา lib/solo-page.ts
  */
 import { NextRequest, NextResponse } from "next/server";
@@ -44,10 +45,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const sp = new URL(request.url).searchParams;
   const size = Number(sp.get("s")) > 256 ? 512 : 192;
   const maskable = sp.get("m") === "1";
+  const forceDefault = sp.get("d") === "1";
   const sharp = (await import("sharp")).default;
 
   try {
-    const info = await loadSoloPageInfo(supabaseAdmin(), pagePath);
+    const info = await loadSoloPageInfo(supabaseAdmin(), pagePath, { ignoreCustom: forceDefault });
     if (info.iconUrl && SAFE_KEY.test(info.iconUrl)) {
       try {
         const obj = await r2GetObject(info.iconUrl);

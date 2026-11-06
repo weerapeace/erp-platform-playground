@@ -7,7 +7,10 @@
  * - ที่อยู่รูป: /api/app-icon/<key>?s=<ขนาด> (ย่อ/ครอปจัตุรัสให้) · ไม่ได้ตั้ง = ไอคอนตั้งต้นของแอป
  * - เปลี่ยนไอคอน: <AppIconEditButton appKey> (components/app-icon-editor) → PATCH /api/app-branding (สิทธิ์ admin.users)
  * เพิ่มแอปเดี่ยวใหม่ = เพิ่มใน STANDALONE_APPS + ใช้ /api/app-manifest/<key> เป็น manifest ของหน้านั้น
+ * - แอปหน้าเดียว (/solo<path> · lib/solo-page) — key = "page:<path>" (pageBrandKey) · ไอคอน + ชื่อบนหน้าจอเก็บในที่เดียวกัน
+ *   (china_app_settings app_branding) ไม่แตะไอคอน/ชื่อของเมนูในระบบ · รูปเสิร์ฟที่ /api/page-icon<path> (ใช้ brandIconUrl)
  */
+import { cleanPagePath } from "@/lib/solo-page";
 
 export type StandaloneApp = {
   key: string;
@@ -55,4 +58,31 @@ export function nearestIconSize(raw: unknown): number {
 export function isAppIconKey(key: unknown): key is string {
   return typeof key === "string" && key.startsWith(`${APP_ICON_FOLDER}/`) && /^[a-zA-Z0-9._/-]+$/.test(key)
     && !key.split("/").some((seg) => seg === "." || seg === "..");
+}
+
+// ── แอปหน้าเดียว (/solo<path>) ── ไอคอน/ชื่อบนหน้าจอของหน้านั้น (เจ้าของ 2026-11-06 · ใส่รูปเองได้ เหมือนไอคอนแอป)
+export const PAGE_BRAND_PREFIX = "page:";
+/** ชื่อบนหน้าจอยาวได้ไม่เกิน (หน้าจอโฮมโชว์ ~12 ตัว ที่เหลือตัด "…") */
+export const PAGE_LABEL_MAX = 30;
+export const pageBrandKey = (pagePath: string) => `${PAGE_BRAND_PREFIX}${pagePath}`;
+/** "page:/master/work-board" → "/master/work-board" · ไม่ใช่ key ของหน้า / path ใช้ไม่ได้ = null */
+export function pagePathOfBrandKey(key: unknown): string | null {
+  if (typeof key !== "string" || !key.startsWith(PAGE_BRAND_PREFIX)) return null;
+  const p = cleanPagePath(key.slice(PAGE_BRAND_PREFIX.length));
+  return p && pageBrandKey(p) === key ? p : null;
+}
+/** key ที่ระบบไอคอนแอปรู้จัก: แอป (ทะเบียนเมนู/แอปเดี่ยว) หรือแอปหน้าเดียว */
+export function isBrandKey(key: unknown): key is string {
+  return typeof key === "string" && (APP_KEY_RE.test(key) || pagePathOfBrandKey(key) !== null);
+}
+/** ที่อยู่รูปไอคอนของ key ใดก็ได้ · def = ไอคอนตั้งต้น (ไม่สนรูปที่ตั้งเอง) ไว้ทำตัวอย่างก่อนบันทึก */
+export function brandIconUrl(key: string, size = 192, v?: string | null, def = false): string {
+  const page = pagePathOfBrandKey(key);
+  const base = page ? `/api/page-icon${page}?s=${size}${v ? `&v=${encodeURIComponent(v)}` : ""}` : appIconUrl(key, size, v);
+  return def ? `${base}&d=1` : base;
+}
+/** ทำชื่อบนหน้าจอให้สะอาด — ว่าง = null (ใช้ชื่อเมนู) */
+export function cleanPageLabel(raw: unknown): string | null {
+  const s = typeof raw === "string" ? raw.replace(/\s+/g, " ").trim().slice(0, PAGE_LABEL_MAX) : "";
+  return s || null;
 }
