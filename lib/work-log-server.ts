@@ -8,6 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { openAiKey } from "@/lib/ai-caption";
 import { aiChat } from "@/lib/paid-services-server";
+import type { UseCtx } from "@/lib/paid-services-server";
 import { fileRefToDataUrl } from "@/lib/file-ref-server";
 import { stepCode } from "@/lib/work-log-sheet";
 import {
@@ -93,19 +94,19 @@ ${employees.map(employeeLabel).join(", ")}
 
 export type WorkLogAiResult = { rows: unknown[]; extra: unknown[] };
 
-export async function readWorkLogImage(admin: Admin, fileRef: string, layout: WorkLogLayout, employees: WorkLogEmployee[]): Promise<WorkLogAiResult> {
+export async function readWorkLogImage(admin: Admin, fileRef: string, layout: WorkLogLayout, employees: WorkLogEmployee[], who?: UseCtx): Promise<WorkLogAiResult> {
   if (!openAiKey()) throw new Error("ยังไม่ได้ตั้งค่า AI (OPENAI_API_KEY) — กรอกเองในหน้าตรวจได้");
   const url = await fileRefToDataUrl(admin, fileRef);
   if (!url) throw new Error("อ่านไฟล์รูปไม่ได้ (ไฟล์อาจยังอัปโหลดไม่เสร็จ)");
-  return readWorkLogDataUrl(url, layout, employees);
+  return readWorkLogDataUrl(url, layout, employees, who);
 }
 
 /** ส่วนที่คุย AI จริง (แยกออกมาให้ทดสอบกับรูปตัวอย่างได้โดยไม่ต้องผ่านที่เก็บไฟล์) */
-export async function readWorkLogDataUrl(url: string, layout: WorkLogLayout, employees: WorkLogEmployee[]): Promise<WorkLogAiResult> {
+export async function readWorkLogDataUrl(url: string, layout: WorkLogLayout, employees: WorkLogEmployee[], who?: UseCtx): Promise<WorkLogAiResult> {
   const raw = await aiChat("ai.work_log", systemPrompt(layout, employees), [
     { type: "text", text: "อ่านใบจดผลงานนี้ แล้วตอบ JSON ตามโครงที่กำหนด" },
     { type: "image_url", image_url: { url, detail: "high" } },
-  ], 4000, WORK_LOG_AI_MODEL);
+  ], 4000, WORK_LOG_AI_MODEL, who);
   return { rows: Array.isArray(raw.rows) ? raw.rows : [], extra: Array.isArray(raw.extra) ? raw.extra : [] };
 }
 

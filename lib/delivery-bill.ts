@@ -8,6 +8,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { imagesToDataUrls, productDetailModel } from "@/lib/ai-caption";
 import { aiChat } from "@/lib/paid-services-server";
+import type { UseCtx } from "@/lib/paid-services-server";
 import { recomputeVoucher } from "@/lib/purchase-voucher-server";
 import { isSupabaseRef } from "@/lib/file-ref";
 import { fileRefToDataUrl } from "@/lib/file-ref-server";
@@ -69,7 +70,7 @@ const SYSTEM = `คุณเป็นผู้ช่วยอ่านเอก�
 กฎ: แถวที่เป็น Total / Sub-Total ไม่ใช่รายการ ห้ามใส่ใน lines · แถว EK- ที่ไม่มีสินค้า = รหัสขนส่ง ไม่ใช่รายการ · ตัวเลขทศนิยมคงค่าตามที่อ่านได้ (เช่น 0.0099) · ห้ามแต่งข้อมูลที่ไม่มีในรูป`;
 
 /** อ่านรูปใบส่งของด้วย AI → โครงสร้าง (โยน Error เป็นภาษาคนเมื่ออ่านไม่ได้) */
-export async function parseDeliveryBillImage(r2Key: string, admin?: Admin): Promise<{ parsed: DeliveryBillParsed; raw: Record<string, unknown> }> {
+export async function parseDeliveryBillImage(r2Key: string, admin?: Admin, who?: UseCtx): Promise<{ parsed: DeliveryBillParsed; raw: Record<string, unknown> }> {
   if (/\.pdf$/i.test(r2Key)) throw new Error("อ่านได้เฉพาะรูปภาพ (jpg/png/webp) — ไฟล์ PDF ให้ถ่ายรูป/แปลงเป็นรูปก่อน");
   // r2Key = ที่อยู่ไฟล์กลาง (lib/file-ref) — บิลใหม่อยู่ Supabase ส่วนตัว (กฎที่เก็บไฟล์ หมวด supplier_bills)
   const urls = isSupabaseRef(r2Key)
@@ -81,7 +82,7 @@ export async function parseDeliveryBillImage(r2Key: string, admin?: Admin): Prom
   const raw = await aiChat("ai.delivery_bill", SYSTEM, [
     { type: "text", text: "อ่านใบส่งของนี้ แล้วตอบ JSON ตามโครงที่กำหนด" },
     ...urls.map((url) => ({ type: "image_url", image_url: { url, detail: "high" } })),
-  ], 1500, model);
+  ], 1500, model, who);
   const linesRaw = Array.isArray(raw.lines) ? (raw.lines as Row[]) : [];
   const lines: DeliveryBillLine[] = linesRaw
     .map((l) => ({

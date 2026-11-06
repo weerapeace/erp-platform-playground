@@ -67,7 +67,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } else {
     try {
       const employees = await loadActiveEmployees(admin);
-      const ai = await readWorkLogImage(admin, fileRef, layout, employees);
+      const ai = await readWorkLogImage(admin, fileRef, layout, employees, { request });
       rows = aiToRows(ai, layout, employees);
       await admin.from("work_log_sheets").update({ ai_result: { rows, raw: ai }, ai_model: WORK_LOG_AI_MODEL, read_at: new Date().toISOString(), status, updated_at: new Date().toISOString() }).eq("id", id);
     } catch (e) {

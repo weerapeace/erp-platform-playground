@@ -60,7 +60,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   ].filter(Boolean).join("\n");
   const ask = `${facts}\n\nตอบเป็น JSON: {"caption": "...", "hashtags": ["#...", "#..."]}\n- caption = แคปชั่นภาษาไทย (ไม่ต้องมีแฮชแท็ก)\n- hashtags = แฮชแท็กที่แนะนำ 5-10 อัน${images.length === 0 ? "\n(หมายเหตุ: ไม่มีรูปที่อ่านได้ — เขียนจากข้อมูลข้อความเท่านั้น)" : ""}`;
   try {
-    const parsed = await aiChat("ai.caption", prompt, [{ type: "text", text: ask }, ...imageParts(images)], 700);
+    const parsed = await aiChat("ai.caption", prompt, [{ type: "text", text: ask }, ...imageParts(images)], 700, undefined, { request, place: "album" });
     const caption = String(parsed.caption ?? "").trim();
     if (!caption) return NextResponse.json({ error: "AI ไม่ได้ส่งแคปชั่นกลับมา — ลองกดอีกครั้ง" }, { status: 502 });
     const { data: { user } } = await supabaseFromRequest(request).auth.getUser();

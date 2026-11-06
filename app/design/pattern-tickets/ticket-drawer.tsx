@@ -354,7 +354,7 @@ function EditTicketModal({ tk, sheets: sheetsInit, onClose, onSave }: { tk: Tick
     const s = title.trim();
     if (!s || (!force && (titleEnTouched || (s === tk.title && titleEn.trim())))) return titleEn;
     setTitleTranslating(true);
-    try { const [x] = await translateContent([s], "en"); if (x) { setTitleEn(x); return x; } return titleEn; }
+    try { const [x] = await translateContent([s], "en", { place: "ticket" }); if (x) { setTitleEn(x); return x; } return titleEn; }
     catch { return titleEn; }
     finally { setTitleTranslating(false); }
   };
@@ -362,7 +362,7 @@ function EditTicketModal({ tk, sheets: sheetsInit, onClose, onSave }: { tk: Tick
 
   const translate = async () => {
     setTranslating(true);
-    try { const [x] = await translateContent([th], "en"); if (x) { setEn(x); setEnEdited(false); } }
+    try { const [x] = await translateContent([th], "en", { place: "ticket" }); if (x) { setEn(x); setEnEdited(false); } }
     catch (e) { toast.warning((e as Error).message); }
     finally { setTranslating(false); }
   };
@@ -372,7 +372,7 @@ function EditTicketModal({ tk, sheets: sheetsInit, onClose, onSave }: { tk: Tick
     // แก้ไทยแต่ไม่ได้แตะคำแปลเอง → แปลใหม่ให้ตรงกัน
     let enOut = en;
     if (th !== tk.description_th && !enEdited && th.trim()) {
-      try { const [x] = await translateContent([th], "en"); if (x) enOut = x; } catch { /* ใช้คำแปลเดิม */ }
+      try { const [x] = await translateContent([th], "en", { place: "ticket" }); if (x) enOut = x; } catch { /* ใช้คำแปลเดิม */ }
     }
     // ชื่องาน English: ที่ช่อง English (แก้เองได้) · ช่องว่าง หรือแก้ชื่อไทยแต่ไม่ได้แตะช่องอังกฤษ = แปลใหม่ให้
     let titleEnOut = titleEn.trim();

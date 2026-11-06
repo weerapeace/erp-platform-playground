@@ -2150,7 +2150,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
         if (cur && !PLACEHOLDER_TEXT.has(cur) && !opts?.overwrite) { skipped++; continue; }
         const res = await apiFetch("/api/ai/translate", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: src.slice(0, 4000), to: "en" }),
+          body: JSON.stringify({ place: "fields", text: src.slice(0, 4000), to: "en" }),
         });
         const j = await res.json().catch(() => ({})) as { data?: { translated?: string }; translated?: string; error?: string };
         const out = String(j?.data?.translated ?? j?.translated ?? "").trim();
@@ -2269,7 +2269,7 @@ export function MasterCRUDPage({ config, embedded }: { config: MasterCRUDConfig;
     try {
       const res = await apiFetch("/api/ai/translate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: src.slice(0, 4000), to: "en" }),
+        body: JSON.stringify({ place: "fields", text: src.slice(0, 4000), to: "en" }),
       });
       const j = await res.json().catch(() => ({})) as { data?: { translated?: string }; translated?: string; error?: string };
       const out = String(j?.data?.translated ?? j?.translated ?? "").trim();

@@ -112,7 +112,7 @@ export function CreateTicketModal({ types, initialType, initialSheetIds, onClose
     lastTitleRef.current = s;
     setTitleTranslating(true);
     try {
-      const [en] = await translateContent([s], "en");
+      const [en] = await translateContent([s], "en", { place: "ticket" });
       if (en) { setTitleEn(en); setTitleEnEdited(false); }
       return en || titleEn;
     } catch { return titleEn; }
@@ -124,7 +124,7 @@ export function CreateTicketModal({ types, initialType, initialSheetIds, onClose
     if (!descTh.trim()) return "";
     setTranslating(true);
     try {
-      const [en] = await translateContent([descTh], "en");
+      const [en] = await translateContent([descTh], "en", { place: "ticket" });
       if (en) { setDescEn(en); setEnEdited(false); }
       return en ?? "";
     } catch (e) {

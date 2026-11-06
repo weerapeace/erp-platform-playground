@@ -157,7 +157,7 @@ export function WebsiteInfoPanel({ shopSlug, shopId }: { shopSlug: string; shopI
     setTxBusy(true);
     setTxError(null);
     try {
-      const out = await translateContent(todo.map((x) => x.th));
+      const out = await translateContent(todo.map((x) => x.th), "en", { place: "website" });
       setInfo((prev) => {
         let next = { ...prev };
         todo.forEach((x, i) => {

@@ -78,7 +78,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   try {
     const model = await productDetailModel();
-    const out = await aiChat("ai.book_library", SYSTEM, [{ type: "text", text: text.slice(0, MAX_CHARS) }], 2000, model);
+    const out = await aiChat("ai.book_library", SYSTEM, [{ type: "text", text: text.slice(0, MAX_CHARS) }], 2000, model, { request });
     const raw = Array.isArray((out as { books?: unknown }).books) ? ((out as { books: unknown[] }).books) : [];
 
     const books = raw.slice(0, MAX_BOOKS).map((r) => {

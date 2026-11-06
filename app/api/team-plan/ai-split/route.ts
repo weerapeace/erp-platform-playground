@@ -59,7 +59,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         "ข้อความ:",
         text,
       ].join("\n") }],
-      1500,
+      1500, undefined, { request },
     );
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "AI ตอบกลับไม่สำเร็จ ลองใหม่อีกครั้ง" }, { status: 502 });

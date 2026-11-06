@@ -12,11 +12,11 @@ import { apiFetch } from "@/lib/api";
 const CHUNK_CHARS = 3000;
 const CHUNK_ITEMS = 60;
 
-async function translateChunk(texts: string[], to: "en" | "th", free: boolean): Promise<string[]> {
+async function translateChunk(texts: string[], to: "en" | "th", free: boolean, place?: string): Promise<string[]> {
   const res = await apiFetch("/api/ai/translate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ texts, to, kind: "content", ...(free ? { engine: "free" } : {}) }),
+    body: JSON.stringify({ texts, to, kind: "content", ...(free ? { engine: "free" } : {}), ...(place ? { place } : {}) }),
   });
   const j = (await res.json().catch(() => ({}))) as { data?: { translated_list?: unknown }; error?: string };
   if (!res.ok || j.error) {
@@ -32,7 +32,7 @@ async function translateChunk(texts: string[], to: "en" | "th", free: boolean): 
  * บล็อกที่ทั้งบรรทัดเป็นตัวหนา/เอียง คงรูปแบบไว้ · ตัวหนาเฉพาะบางคำในบรรทัดจะกลายเป็นตัวธรรมดา (แปลทั้งประโยค)
  * ใช้ในหน้าจอเท่านั้น (DOMParser) · คืน HTML ใหม่ ไม่แตะต้นฉบับ
  */
-export async function translateNoteHtml(html: string, to: "en" | "th", opts: { free?: boolean } = {}): Promise<string> {
+export async function translateNoteHtml(html: string, to: "en" | "th", opts: TranslateOpts = {}): Promise<string> {
   const doc = new DOMParser().parseFromString(`<div>${html}</div>`, "text/html");
   const root = doc.body.firstElementChild as HTMLElement | null;
   if (!root) return "";
@@ -52,15 +52,19 @@ export async function translateNoteHtml(html: string, to: "en" | "th", opts: { f
   return root.innerHTML;
 }
 
-/** แปลหลายข้อความ (ค่าเริ่มต้น ไทย → อังกฤษ) · opts.free = ใช้ตัวแปลฟรีอย่างเดียว (ไม่เรียก GPT) */
-export async function translateContent(texts: string[], to: "en" | "th" = "en", opts: { free?: boolean } = {}): Promise<string[]> {
+/**
+ * แปลหลายข้อความ (ค่าเริ่มต้น ไทย → อังกฤษ) · opts.free = ใช้ตัวแปลฟรีอย่างเดียว (ไม่เรียก GPT)
+ * opts.place = แปลจากที่ไหน (ทะเบียน lib/paid-services · ai.translate places) — แอดมินเปิด-ปิด GPT รายที่ได้ในศูนย์ AI/API · ไม่ใส่ = "อื่น ๆ"
+ */
+export type TranslateOpts = { free?: boolean; place?: string };
+export async function translateContent(texts: string[], to: "en" | "th" = "en", opts: TranslateOpts = {}): Promise<string[]> {
   const out = texts.map(() => "");
   const idx = texts.map((t, i) => (t.trim() ? i : -1)).filter((i) => i >= 0);
   let batch: number[] = [];
   let size = 0;
   const flush = async () => {
     if (!batch.length) return;
-    const got = await translateChunk(batch.map((i) => texts[i].trim().slice(0, 4000)), to, !!opts.free);
+    const got = await translateChunk(batch.map((i) => texts[i].trim().slice(0, 4000)), to, !!opts.free, opts.place);
     batch.forEach((i, k) => (out[i] = got[k] ?? ""));
     batch = [];
     size = 0;

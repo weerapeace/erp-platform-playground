@@ -8,6 +8,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { aiChat } from "@/lib/paid-services-server";
+import type { UseCtx } from "@/lib/paid-services-server";
 import { writeAudit } from "@/lib/audit";
 import { isCNY } from "@/lib/landed-cost";
 import { createManualVoucher, fxRateForDate } from "@/lib/purchase-voucher-server";
@@ -141,7 +142,7 @@ const SYSTEM_INTAKE = `คุณเป็นผู้ช่วยฝ่ายจ
 ${BILL_READ_RULES}`;
 
 /** AI อ่านไฟล์บิล (หลายไฟล์ = รอบเดียว) → บิลแยกตามร้าน + ร้านที่น่าจะใช่ + บิลซ้ำ */
-export async function readBillIntake(admin: Admin, refs: string[]): Promise<{ bills: IntakeBill[]; unreadable_reason: string | null; model: string; raw: Row }> {
+export async function readBillIntake(admin: Admin, refs: string[], who?: UseCtx): Promise<{ bills: IntakeBill[]; unreadable_reason: string | null; model: string; raw: Row }> {
   const files = [...new Set(refs.map(str).filter(Boolean))].slice(0, MAX_INTAKE_FILES);
   if (files.length === 0) throw new Error("ยังไม่ได้แนบรูปบิล");
   const [parts, shops] = await Promise.all([billFileParts(admin, files), loadCnShops(admin)]);
@@ -151,7 +152,7 @@ export async function readBillIntake(admin: Admin, refs: string[]): Promise<{ bi
     const cn = [p.company_name, p.name_en].map(str).filter((x) => x && hasCn(x));
     return `${code} | ${p.name}${cn.length ? ` (จีน: ${cn.join(" / ")})` : ""}`;
   }).join("\n");
-  const raw = await aiChat("ai.seller_bill", SYSTEM_INTAKE, [{ type: "text", text: `ร้านจีนในทะเบียนของเรา (${shops.length} ร้าน · รหัส | ชื่อ):\n${shopText || "(ไม่มี)"}\n\nอ่านบิลในไฟล์ที่แนบ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...parts], 6000, SELLER_BILL_MODEL);
+  const raw = await aiChat("ai.seller_bill", SYSTEM_INTAKE, [{ type: "text", text: `ร้านจีนในทะเบียนของเรา (${shops.length} ร้าน · รหัส | ชื่อ):\n${shopText || "(ไม่มี)"}\n\nอ่านบิลในไฟล์ที่แนบ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...parts], 6000, SELLER_BILL_MODEL, who);
 
   const rawBills = Array.isArray(raw.bills) ? (raw.bills as Row[]) : [];
   const groupsByShop = await loadOpenCnGroupsByShop(admin, shops.map((s) => s.id));
@@ -216,7 +217,7 @@ export async function createVoucherFromSellerBill(admin: Admin, input: CreateFro
   const v = (await loadVoucherLite(admin, voucherId))!;
   const groups = await loadShopGroups(admin, v);
   const aliases = await loadAliases(admin, v.seller_partner_id);
-  const picked = await aiPickCandidates(input.lines ?? [], groups);
+  const picked = await aiPickCandidates(input.lines ?? [], groups, { userId: actor.id });
   const lines = matchBillLines(picked, groups, aliases);
   const { error } = await admin.from("purchase_delivery_bills").insert({
     voucher_id: voucherId, r2_key: refs[0], kind: "seller",

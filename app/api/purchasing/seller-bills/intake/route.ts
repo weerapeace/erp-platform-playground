@@ -28,7 +28,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (refs.some((r) => !isRefForCategory(r, "supplier_bills"))) return NextResponse.json({ error: "ไฟล์แนบไม่ถูกต้อง — แนบไฟล์ใหม่อีกครั้ง" }, { status: 400 });
   const admin = supabaseAdmin();
   try {
-    const r = await readBillIntake(admin, refs);
+    const r = await readBillIntake(admin, refs, { request });
     await writeAudit(admin, { action: "ai_seller_bill_intake", entityType: "purchase_delivery_bills", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null,
       metadata: { files: refs.length, bills: r.bills.length, model: r.model, picked: r.bills.filter((b) => b.picked).length, unreadable: r.unreadable_reason } });
     return NextResponse.json({ ok: true, bills: r.bills, unreadable_reason: r.unreadable_reason, error: null });

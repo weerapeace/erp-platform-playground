@@ -50,7 +50,7 @@ export function TranslationTable<T>({
     setBusy(scope);
     setError(null);
     try {
-      const out = await translateContent(todo.map((s) => s.th));
+      const out = await translateContent(todo.map((s) => s.th), "en", { place: "website" });
       const results = todo.map((slot, i) => ({ slot, en: (out[i] ?? "").trim() })).filter((r) => r.en);
       if (!results.length) throw new Error("แปลไม่สำเร็จ ลองใหม่อีกครั้ง");
       onChange(applyPathTranslations(value, results, true));
@@ -190,7 +190,7 @@ export function PathsLangBar<T>({
     setBusy(true);
     setError(null);
     try {
-      const out = await translateContent(todo.map((s) => s.th));
+      const out = await translateContent(todo.map((s) => s.th), "en", { place: "website" });
       const results = todo.map((slot, i) => ({ slot, en: (out[i] ?? "").trim() })).filter((r) => r.en);
       if (!results.length) throw new Error("แปลไม่สำเร็จ ลองใหม่อีกครั้ง");
       onChange(applyPathTranslations(value, results, true));

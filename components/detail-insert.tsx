@@ -1827,7 +1827,7 @@ function CatalogItemDialog({
     const th = vRows[i]?.th.trim();
     if (!th) { toast.warning("พิมพ์ประโยคไทยก่อน"); return; }
     setVTranslating(i);
-    try { const [en] = await translateContent([th]); if (en) setVRow(i, { en }); else toast.warning("แปลไม่ได้ — พิมพ์เองได้เลย"); }
+    try { const [en] = await translateContent([th], "en", { place: "product" }); if (en) setVRow(i, { en }); else toast.warning("แปลไม่ได้ — พิมพ์เองได้เลย"); }
     catch { toast.error("แปลไม่สำเร็จ — พิมพ์เองได้เลย"); }
     finally { setVTranslating(null); }
   };
@@ -1851,7 +1851,7 @@ function CatalogItemDialog({
     }
     setTranslating(true);
     try {
-      const [en] = await translateContent([name.trim()]);
+      const [en] = await translateContent([name.trim()], "en", { place: "product" });
       if (en) setNameEn(en);
       else toast.warning("แปลไม่ได้ — พิมพ์เองได้เลย");
     } catch {

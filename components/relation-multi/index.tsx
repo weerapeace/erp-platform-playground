@@ -1222,7 +1222,7 @@ export function RelationOne2Many({ config, recordId, title, fieldId, configurabl
         try {
           const res = await apiFetch("/api/ai/translate", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: word.slice(0, 100), to: dir === "th2en" ? "en" : "th" }),
+            body: JSON.stringify({ place: "fields", text: word.slice(0, 100), to: dir === "th2en" ? "en" : "th" }),
           });
           const j = await res.json().catch(() => ({}));
           const got = String((j?.data?.translated ?? j?.translated) ?? "").trim().replace(/[.。]+$/, "");

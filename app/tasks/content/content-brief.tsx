@@ -57,7 +57,7 @@ export function ContentBriefCard({ contentId, brief, refImageKeys, refLinks, bra
   const runTranslate = async () => {
     if (isEmptyNote(html)) return;
     setTrBusy(true); setTrErr(null);
-    try { setTr({ src: html, html: await translateNoteHtml(html, toLang, { free: true }) }); }
+    try { setTr({ src: html, html: await translateNoteHtml(html, toLang, { place: "content", free: true }) }); }
     catch (e) { setTrErr((e as Error).message); }
     finally { setTrBusy(false); }
   };

@@ -798,7 +798,7 @@ export function CanvasSketch({
       const skeletons: Record<string, unknown>[] = [];
       for (const el of texts) {
         try {
-          const res = await apiFetch("/api/ai/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: el.text }) });
+          const res = await apiFetch("/api/ai/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ place: "content", text: el.text }) });
           const j = await res.json(); if (j.error) throw new Error(j.error);
           skeletons.push({ type: "text", x: el.x + (el.width || 200) + 28, y: el.y, text: String(j.data.translated), fontSize: el.fontSize || 20, strokeColor: el.strokeColor || "#1e293b", width: el.width || undefined });
         } catch { /* ข้ามกล่องที่แปลไม่ได้ */ }

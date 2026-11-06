@@ -120,7 +120,7 @@ export function MaterialDetailView({ ctx }: { ctx: DetailViewCtx }) {
     if (!todo.length) { toast.info(tr("ไม่มีช่องที่ต้องแปล", "Nothing to translate")); return; }
     setTranslating(true);
     try {
-      const out = await translateContent(todo.map(([th]) => s(v[th])));
+      const out = await translateContent(todo.map(([th]) => s(v[th])), "en", { place: "product" });
       const patch: Record<string, unknown> = {};
       todo.forEach(([, en], i) => { if (out[i]) patch[en] = out[i]; });
       const n = Object.keys(patch).length;
@@ -136,7 +136,7 @@ export function MaterialDetailView({ ctx }: { ctx: DetailViewCtx }) {
     if (!th) return;
     setTranslating(true);
     try {
-      const [en] = await translateContent([th]);
+      const [en] = await translateContent([th], "en", { place: "product" });
       if (en) setDraft("name_en", en);
       else toast.error(tr("แปลไม่สำเร็จ", "Translation failed"));
     } catch (e) {

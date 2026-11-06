@@ -97,7 +97,7 @@ export function TypeSettingsModal({ onClose, onChanged }: { onClose: () => void;
     if (!jobs.length) return d;
     setTranslating(true);
     try {
-      const out = await translateContent(jobs.map((j) => j.th), "en");
+      const out = await translateContent(jobs.map((j) => j.th), "en", { place: "ticket" });
       const next = { ...d, checklist: d.checklist.map((c) => ({ ...c })) };
       jobs.forEach((j, k) => { const en = out[k] ?? ""; if (!en) return; if (j.i < 0) next.label_en = en; else next.checklist[j.i].en = en; });
       return next;

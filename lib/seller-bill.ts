@@ -7,6 +7,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { aiChat } from "@/lib/paid-services-server";
+import type { UseCtx } from "@/lib/paid-services-server";
 import { readFileRef } from "@/lib/file-ref-server";
 import { isCNY } from "@/lib/landed-cost";
 import { resolveSkuCover, coverUrl } from "@/lib/sku-cover";
@@ -211,13 +212,13 @@ export function sanitizeAiBillLines(rawLines: unknown, idOf?: Map<string, string
 export const billTotalOf = (v: unknown) => numOrNull(v);
 
 /** ส่งรูป/PDF + รายการ PO ของร้านนี้ให้ AI อ่าน → หัวบิล + แถว (มีคู่ที่ AI เลือก) */
-export async function parseSellerBill(admin: Admin, ref: string | string[], groups: PoGroup[]): Promise<{
+export async function parseSellerBill(admin: Admin, ref: string | string[], groups: PoGroup[], who?: UseCtx): Promise<{
   header: { is_bill: boolean; seller_text: string | null; bill_no: string | null; bill_date: string | null; currency: string | null; total_amount: number | null };
   lines: SellerBillLine[]; raw: Row; model: string;
 }> {
   const fileParts = await billFileParts(admin, Array.isArray(ref) ? ref : [ref]);   // หลายไฟล์ = หลายหน้าของบิลเดียวกัน
   const { text, idOf } = poCandidatePrompt(groups);
-  const raw = await aiChat("ai.seller_bill", SYSTEM_FULL, [{ type: "text", text: `${text}\n\nอ่านบิลในไฟล์ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...fileParts], 4000, SELLER_BILL_MODEL);
+  const raw = await aiChat("ai.seller_bill", SYSTEM_FULL, [{ type: "text", text: `${text}\n\nอ่านบิลในไฟล์ แล้วตอบ JSON ตามโครงที่กำหนด` }, ...fileParts], 4000, SELLER_BILL_MODEL, who);
   const header = {
     is_bill: raw.is_bill !== false,
     seller_text: str(raw.seller_name) || null, bill_no: str(raw.bill_no) || null, bill_date: normDate(raw.bill_date),
@@ -236,13 +237,13 @@ ${BILL_READ_RULES}`;
  * ให้ AI เลือกบรรทัด PO ให้แต่ละแถว "จากข้อความ" (ไม่ส่งรูปซ้ำ — ถูก ~0.01 บาท) — ใช้หลังรู้ร้านแล้ว (ป๊อปโยนรูปบิล)
  * ล้มเหลว = คืนแถวเดิม (ยังจับคู่ด้วยราคา/ชื่อแปล/จำคู่ได้) ไม่ทำให้การสร้างใบล้ม
  */
-export async function aiPickCandidates(lines: SellerBillLine[], groups: PoGroup[]): Promise<SellerBillLine[]> {
+export async function aiPickCandidates(lines: SellerBillLine[], groups: PoGroup[], who?: UseCtx): Promise<SellerBillLine[]> {
   const items = lines.map((l, i) => ({ l, i })).filter(({ l }) => !l.is_fee);
   if (items.length === 0 || groups.length === 0) return lines;
   const { text, idOf } = poCandidatePrompt(groups);
   const billText = items.map(({ l, i }) => `${i} | ${str(l.name_cn)} ${str(l.spec_cn)} | ${str(l.name_th)} ${str(l.spec_th)} | ${l.qty ?? "?"} ${str(l.unit)} × ¥${l.unit_price ?? "?"}`).join("\n");
   try {
-    const raw = await aiChat("ai.seller_bill", SYSTEM_PICK, [{ type: "text", text: `${text}\n\nรายการในบิล (เลขแถว | ชื่อจีน | คำแปล | จำนวน × ราคา):\n${billText}` }], 1500, SELLER_BILL_MODEL);
+    const raw = await aiChat("ai.seller_bill", SYSTEM_PICK, [{ type: "text", text: `${text}\n\nรายการในบิล (เลขแถว | ชื่อจีน | คำแปล | จำนวน × ราคา):\n${billText}` }], 1500, SELLER_BILL_MODEL, who);
     const picks = Array.isArray(raw.picks) ? (raw.picks as Row[]) : [];
     const byI = new Map(picks.map((p) => [Number(p.i), p]));
     return lines.map((l, i) => {

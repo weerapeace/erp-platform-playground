@@ -131,7 +131,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           ? "- เรื่องเดียวกันที่ลงหลายแพลตฟอร์มในวัน-เวลาเดียวกัน ให้เป็นรายการเดียว (platforms หลายตัว)"
           : "- 1 รายการ = 1 แพลตฟอร์ม (platforms มีตัวเดียว) และห้ามใช้หัวข้อซ้ำข้ามแพลตฟอร์ม",
       ].join("\n") }],
-      Math.min(12000, 800 + totalRows * 60), model,
+      Math.min(12000, 800 + totalRows * 60), model, { request },
     );
     const valid = new Set(platforms.map((p) => p.code));
     plan = (Array.isArray(out.posts) ? out.posts : []).map((x): PlanPost | null => {
@@ -164,7 +164,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           "", `วิธีเขียน ${p.label}: ${platformRule(p)}`,
           `ตอบ JSON: {"captions":[{"i":0,"caption":"ข้อความ (ขึ้นบรรทัดใหม่ได้)","hashtags":["#tag"]}]} · ไม่ต้องใส่แฮชแท็กในแคปชั่น${p.useHashtags ? "" : " · แพลตฟอร์มนี้ไม่ใช้แฮชแท็ก (hashtags = [])"}`,
         ].join("\n") }],
-        Math.min(8000, 400 + mine.length * 280), model,
+        Math.min(8000, 400 + mine.length * 280), model, { request },
       );
       for (const c of Array.isArray(out.captions) ? out.captions : []) {
         const o = (c ?? {}) as Record<string, unknown>;

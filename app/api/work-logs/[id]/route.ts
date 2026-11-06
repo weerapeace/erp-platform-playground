@@ -86,7 +86,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
     if (!layout.mo) return NextResponse.json({ error: "เลือกใบสั่งผลิตก่อน" }, { status: 400 });
     try {
       const employees = await loadActiveEmployees(admin);
-      const ai = await readWorkLogImage(admin, sheet.file_ref, layout, employees);
+      const ai = await readWorkLogImage(admin, sheet.file_ref, layout, employees, { request });
       const rows = aiToRows(ai, layout, employees);
       await admin.from("work_log_sheets").update({
         mo_id: layout.mo.id, mo_no: layout.mo.mo_no, status: "review", ai_error: null, ai_result: { rows, raw: ai },

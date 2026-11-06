@@ -615,7 +615,7 @@ export function AiProductDetailModal({
     try {
       const r = await apiFetch("/api/ai/translate", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: src.slice(0, 4000), to: pair.to }),
+        body: JSON.stringify({ place: "product", text: src.slice(0, 4000), to: pair.to }),
       });
       const j = await r.json().catch(() => ({}));
       const out = String((j?.data?.translated ?? j?.translated) ?? "").trim();

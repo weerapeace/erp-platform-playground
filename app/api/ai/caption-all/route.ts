@@ -101,7 +101,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const parsed = await aiChat("ai.caption", 
         "คุณเป็นนักเขียนแคปชั่นการตลาดมืออาชีพ เขียนตามคำสั่งของแต่ละแพลตฟอร์มอย่างเคร่งครัด ห้ามแต่งข้อมูลที่ไม่เห็นในรูปหรือไม่มีในข้อมูลที่ให้",
         [{ type: "text", text: ask }, ...imageParts(urls)],
-        400 + g.platforms.length * 350,
+        400 + g.platforms.length * 350, undefined, { request, place: "all" },
       );
       calls++;
       const perPlat = (parsed.platforms ?? parsed) as Record<string, { caption?: string; hashtags?: unknown }>;

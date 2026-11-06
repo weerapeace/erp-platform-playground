@@ -15,7 +15,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { loadPromptRows, openAiKey, pickJobPrompt, TRANSLATE_KEY } from "@/lib/ai-caption";
-import { aiChat, getAiFor, serviceOn } from "@/lib/paid-services-server";
+import { aiAvailable, aiChat, getAiFor, type UseCtx } from "@/lib/paid-services-server";
+import { resolvePlace } from "@/lib/paid-services";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -44,10 +45,10 @@ function pickTarget(sample: string, to?: string): { tlCode: string; target: stri
 // แปลหลายข้อความในคำขอเดียว — GPT ก่อน (ครั้งเดียวจบ) ตกไป Google ทีละข้อความ (ทีละ 5 พร้อมกัน)
 // คืนลำดับตรงกับที่ส่งมาเสมอ · ช่องที่แปลไม่ได้ = "" ให้ฝั่งเรียกข้ามไปเอง
 // free = ข้าม GPT ไปใช้ Google ฟรีเลย (เช่น โหมดแปลโน้ตบรีฟ — เจ้าของเลือก "แปลแบบไม่เสียเงิน")
-async function translateBatch(list: string[], to?: string, kind: "labels" | "content" = "labels", free = false): Promise<NextResponse> {
+async function translateBatch(list: string[], to: string | undefined, kind: "labels" | "content", free: boolean, ctx: UseCtx): Promise<NextResponse> {
   const { tlCode, target } = pickTarget(list.find(Boolean) ?? "", to);
 
-  if (openAiKey() && !free && (await serviceOn("ai.translate"))) {   // ปิดในศูนย์ AI/API = ข้ามไปตัวแปลฟรี
+  if (openAiKey() && !free && (await aiAvailable("ai.translate", ctx))) {   // ปิดในศูนย์ AI/API (ทั้งหมด/รายที่) หรือเกินงบ = ข้ามไปตัวแปลฟรี
     try {
       const style = pickJobPrompt(await loadPromptRows(), null, TRANSLATE_KEY);
       // labels  = ชื่อช่องในฟอร์ม (สั้น ตรงตัว) — ส่งทีละบรรทัดมีเลขกำกับ
@@ -70,7 +71,7 @@ async function translateBatch(list: string[], to?: string, kind: "labels" | "con
       const userText = kind === "content"
         ? JSON.stringify(list.map((text, i) => ({ i: i + 1, text })))
         : list.map((t, i) => `${i + 1}. ${t}`).join("\n");
-      const out = await aiChat("ai.translate", sys, [{ type: "text", text: userText }], kind === "content" ? 6000 : 3000);
+      const out = await aiChat("ai.translate", sys, [{ type: "text", text: userText }], kind === "content" ? 6000 : 3000, undefined, ctx);
       const items = Array.isArray((out as { items?: unknown })?.items) ? (out as { items: unknown[] }).items : [];
       const byIndex = new Map<number, string>();
       for (const raw of items) {
@@ -108,8 +109,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (!(await apiCan(request, "products.edit"))) {
     const denied = await guardApi(request, "tasks.view"); if (denied) return denied;
   }
-  let body: { text?: string; texts?: unknown; to?: string; kind?: string; engine?: string };
+  let body: { text?: string; texts?: unknown; to?: string; kind?: string; engine?: string; place?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  // แปลจากที่ไหน (ทะเบียน ai.translate places) — แอดมินเปิด-ปิด GPT รายที่ได้ · ไม่ระบุ = "อื่น ๆ" · ใครกด = ยอดรายคน
+  const ctx: UseCtx = { request, place: resolvePlace("ai.translate", body.place) };
 
   // ---- โหมดชุด (หลายข้อความในครั้งเดียว) ----
   const listIn = Array.isArray(body.texts) ? body.texts.map((s) => String(s ?? "").trim()) : null;
@@ -117,7 +120,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (!listIn.some(Boolean)) return NextResponse.json({ error: "no text" }, { status: 400 });
     if (listIn.length > 400) return NextResponse.json({ error: "ส่งมาเกิน 400 ข้อความ" }, { status: 400 });
     if (listIn.join("").length > 12000) return NextResponse.json({ error: "ข้อความรวมกันยาวเกินไป (จำกัด 12000 ตัวอักษร)" }, { status: 400 });
-    return translateBatch(listIn, body.to, body.kind === "content" ? "content" : "labels", body.engine === "free");
+    return translateBatch(listIn, body.to, body.kind === "content" ? "content" : "labels", body.engine === "free", ctx);
   }
 
   const text = (body.text ?? "").trim();
@@ -129,7 +132,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   // 0) GPT ก่อน (คุณภาพดีสุด — เรียบเรียงใหม่ให้อ่านลื่น ไม่แปลตรงตัวแบบเครื่องแปล)
   //    ราคา ~0.02 บาท/ช่องข้อความยาว · สไตล์การแปลตั้งเองได้ที่ทะเบียน prompt (platform = "translate")
-  if (openAiKey() && (await serviceOn("ai.translate"))) {
+  if (openAiKey() && (await aiAvailable("ai.translate", ctx))) {
     try {
       const style = pickJobPrompt(await loadPromptRows(), null, TRANSLATE_KEY);
       const sys = [
@@ -138,14 +141,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         style || "Write naturally for online shoppers — do not translate word-for-word; rephrase so it reads like it was written in the target language. Do not add facts that are not in the source.",
         'Reply as JSON: {"translated":"..."} with no other keys.',
       ].join(" ");
-      const out = await aiChat("ai.translate", sys, [{ type: "text", text }], 1500);
+      const out = await aiChat("ai.translate", sys, [{ type: "text", text }], 1500, undefined, ctx);
       const translated = String(out?.translated ?? "").trim();
       if (translated) return NextResponse.json({ data: { translated, target, engine: "gpt" }, error: null });
     } catch { /* ตกไปใช้ตัวถัดไป — ห้ามพังเงียบ */ }
   }
 
   // 1) ลอง Cloudflare AI (ถ้าพร้อม — บน CF หรือมี CF_ACCOUNT_ID/CF_AI_API_TOKEN)
-  const ai = await getAiFor("cf.translate");
+  const ai = await getAiFor("cf.translate", ctx);
   if (ai) {
     try {
       const out: any = await ai.run(MODEL, {

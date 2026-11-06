@@ -981,7 +981,7 @@ export function WebsiteBuilder({
         texts.push(...src);
         return [texts.length - src.length, src.length] as const;
       });
-      const out = await translateContent(texts);
+      const out = await translateContent(texts, "en", { place: "website" });
       const results = todo.map((slot, k) => ({ slot, en: slotValueFrom(slot, out.slice(at[k][0], at[k][0] + at[k][1])) })).filter((r) => hasText(r.en));
       if (!results.length) throw new Error("แปลไม่สำเร็จ ลองใหม่อีกครั้ง");
       onChange(applySlotTranslations(blocksRef.current, results, true));

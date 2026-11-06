@@ -31,7 +31,14 @@ export type PaidService = {
   costHint: string;
   /** ไฟล์ที่เรียกจริง — เทสต์ตรวจว่าไฟล์มีอยู่และอ้าง key นี้ */
   files: string[];
+  /** ใช้หลายที่ → เปิด-ปิดรายที่ได้ (เจ้าของขอ 2026-11-06) · ไฟล์ของแต่ละที่ต้องส่ง place: "<key>" (เทสต์ตรวจ) */
+  places?: PaidPlace[];
 };
+
+/** "ที่ที่ใช้" ของบริการหนึ่ง — ค่าตั้งเก็บใน paid_service_settings key "<service>@<place>" · บันทึกการใช้ key เดียวกัน */
+export type PaidPlace = { key: string; th: string; files: string[] };
+/** ที่ที่ไม่ได้ระบุ (โค้ดเก่า / ยังไม่ติดป้าย) */
+export const OTHER_PLACE = "other";
 
 export const PROVIDER_LABEL: Record<PaidProvider, string> = {
   openai: "OpenAI (GPT)", cloudflare: "Cloudflare AI", easyslip: "EasySlip", line: "LINE", email: "อีเมล", shippop: "Shippop",
@@ -43,15 +50,29 @@ const GPT_OFF = "ปุ่มนี้ขึ้นข้อความ \"ผู
 export const PAID_SERVICES: PaidService[] = [
   // ── ทั่วทั้งระบบ
   { key: "ai.translate", th: "แปลภาษา ไทย ↔ อังกฤษ (GPT)", en: "Translate TH ↔ EN (GPT)", group: "ทั่วทั้งระบบ",
-    usedAt: "ตั๋วงาน Pattern · เว็บร้าน 2 ภาษา · ชื่อฟิลด์ · โน้ตในป๊อปโพสต์", provider: "openai", kind: "ai_chat",
-    offBehavior: "ยังแปลได้ — สลับไปใช้ตัวแปลฟรี (Cloudflare / Google) ซึ่งแปลตรงตัวกว่า", costHint: GPT_COST, files: ["app/api/ai/translate/route.ts"] },
+    usedAt: "ตั๋วงาน · เว็บร้าน · สินค้า · ชื่อฟิลด์/แท็ก · คอนเทนต์ · จัดซื้อ", provider: "openai", kind: "ai_chat",
+    offBehavior: "ยังแปลได้ — สลับไปใช้ตัวแปลฟรี (Cloudflare / Google) ซึ่งแปลตรงตัวกว่า", costHint: GPT_COST, files: ["app/api/ai/translate/route.ts"],
+    places: [
+      { key: "ticket", th: "ตั๋วงาน Pattern", files: ["app/design/pattern-tickets/create-modal.tsx", "app/design/pattern-tickets/ticket-drawer.tsx", "app/design/pattern-tickets/type-settings.tsx"] },
+      { key: "website", th: "เว็บร้าน (ตัวจัดหน้าเว็บ · ศูนย์แปล · ข้อมูลเว็บ)", files: ["components/bilingual-field.tsx", "components/translation-table.tsx", "components/website-builder.tsx", "components/website-info-panel.tsx", "components/website-translation-center.tsx"] },
+      { key: "product", th: "สินค้า (รายละเอียด · วัสดุ · ส่วนแทรก)", files: ["components/ai-product-detail/index.tsx", "components/detail-insert.tsx", "components/product-materials/material-view.tsx"] },
+      { key: "fields", th: "ชื่อฟิลด์ / ตั้งค่าโมดูล / แท็ก", files: ["components/master-crud/index.tsx", "components/master-crud/studio-panel.tsx", "components/relation-multi/index.tsx", "components/tag-organizer/index.tsx"] },
+      { key: "content", th: "คอนเทนต์ (โน้ตบรีฟ · กระดานวาด)", files: ["app/tasks/content/content-brief.tsx", "components/canvas-sketch/index.tsx"] },
+      { key: "purchasing", th: "จัดซื้อ (ใบสั่งซื้อ)", files: ["app/purchasing/orders/page.tsx"] },
+      { key: OTHER_PLACE, th: "อื่น ๆ (ไม่ได้ระบุที่มา)", files: [] },
+    ] },
   { key: "cf.translate", th: "แปลภาษา (ตัวสำรองฟรี)", en: "Translate (free fallback)", group: "ทั่วทั้งระบบ",
     usedAt: "ใช้เมื่อ GPT ปิด/ล่ม", provider: "cloudflare", kind: "ai_ocr",
     offBehavior: "ข้ามไปใช้ Google แปลฟรีแทน", costHint: "ฟรีตามโควตา (ทำงานเมื่อตั้งรหัส Cloudflare ไว้)", files: ["app/api/ai/translate/route.ts"] },
   // ── คอนเทนต์ / การตลาด
   { key: "ai.caption", th: "เขียนแคปชั่น AI", en: "AI captions", group: "คอนเทนต์ / การตลาด",
     usedAt: "คอนเทนต์ (ทีละช่อง / ทั้งใบ) · อัลบั้มคอนเทนต์", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST,
-    files: ["app/api/ai/caption/route.ts", "app/api/ai/caption-all/route.ts", "app/api/content-albums/[id]/ai-caption/route.ts"] },
+    files: ["app/api/ai/caption/route.ts", "app/api/ai/caption-all/route.ts", "app/api/content-albums/[id]/ai-caption/route.ts"],
+    places: [
+      { key: "single", th: "คอนเทนต์ — เขียนทีละช่อง", files: ["app/api/ai/caption/route.ts"] },
+      { key: "all", th: "คอนเทนต์ — เขียนทั้งใบ (ทุกแพลตฟอร์ม)", files: ["app/api/ai/caption-all/route.ts"] },
+      { key: "album", th: "อัลบั้มคอนเทนต์", files: ["app/api/content-albums/[id]/ai-caption/route.ts"] },
+    ] },
   { key: "ai.mass_plan", th: "วางแผนคอนเทนต์ทั้งชุด", en: "Mass content plan", group: "คอนเทนต์ / การตลาด",
     usedAt: "แผนคอนเทนต์ (ร่างทีละหลายโพสต์)", provider: "openai", kind: "ai_chat", offBehavior: GPT_OFF, costHint: GPT_COST, files: ["app/api/ai/mass-plan/route.ts"] },
   { key: "ai.brand_profile", th: "ร่างโปรไฟล์แบรนด์", en: "Brand profile draft", group: "คอนเทนต์ / การตลาด",
@@ -105,6 +126,16 @@ export const PAID_SERVICES: PaidService[] = [
 ];
 
 export const paidService = (key: string): PaidService | null => PAID_SERVICES.find((s) => s.key === key) ?? null;
+/** ที่ที่ใช้ที่ถูกต้องของบริการนี้ · ไม่มีในทะเบียน = "other" (ถ้าบริการนี้มีหลายที่) · บริการไม่มีหลายที่ = null */
+export function resolvePlace(serviceKey: string, place: unknown): string | null {
+  const svc = paidService(serviceKey);
+  if (!svc?.places?.length) return null;
+  const p = typeof place === "string" ? place.trim() : "";
+  return svc.places.some((x) => x.key === p) ? p : OTHER_PLACE;
+}
+/** key ที่ใช้เก็บค่าตั้ง/บันทึกการใช้ของ "ที่" — "ai.translate@ticket" */
+export const placeKey = (serviceKey: string, place: string | null | undefined) => (place ? `${serviceKey}@${place}` : serviceKey);
+export const splitPlaceKey = (k: string): { key: string; place: string | null } => { const i = k.indexOf("@"); return i < 0 ? { key: k, place: null } : { key: k.slice(0, i), place: k.slice(i + 1) }; };
 /** ปิด/เปลี่ยนได้ไหม (locked = โชว์อย่างเดียว) */
 export const canToggle = (s: PaidService) => s.kind !== "locked";
 export const canPickModel = (s: PaidService) => s.kind === "ai_chat";
@@ -127,3 +158,40 @@ export function monthStartBangkokIso(now = new Date()): string {
   const bkk = new Date(now.getTime() + 7 * 3600_000);
   return new Date(Date.UTC(bkk.getUTCFullYear(), bkk.getUTCMonth(), 1) - 7 * 3600_000).toISOString();
 }
+
+/* ── งบต่อเดือน (เฟส 2) ── เก็บใน ui_config key PAID_BUDGET_KEY · นับเฉพาะ GPT (ที่มีค่าใช้จ่ายวัดได้)
+ *   monthly_thb = null → ไม่จำกัด (ค่าเริ่ม) · warn_pct = แจ้งเตือนเมื่อใช้ถึง % นี้ · over_action = เกินงบแล้วทำอะไร
+ *   stop = หยุด GPT ทุกฟีเจอร์ (แปลภาษาสลับตัวฟรีเอง) · warn = แจ้งเตือนอย่างเดียว ใช้ต่อได้
+ */
+export const PAID_BUDGET_KEY = "paid_services_budget";
+export const PAID_BUDGET_ALERT_KEY = "paid_services_budget_alerts";
+export type BudgetOverAction = "stop" | "warn";
+export type PaidBudget = { monthly_thb: number | null; warn_pct: number; over_action: BudgetOverAction };
+export const DEFAULT_BUDGET: PaidBudget = { monthly_thb: null, warn_pct: 80, over_action: "stop" };
+
+export function cleanBudget(v: unknown): PaidBudget {
+  const r = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const m = Number(r.monthly_thb);
+  const w = Math.round(Number(r.warn_pct));
+  return {
+    monthly_thb: r.monthly_thb === null || r.monthly_thb === "" || !Number.isFinite(m) || m <= 0 ? null : Math.round(m * 100) / 100,
+    warn_pct: Number.isFinite(w) && w >= 10 && w <= 100 ? w : DEFAULT_BUDGET.warn_pct,
+    over_action: r.over_action === "warn" ? "warn" : "stop",
+  };
+}
+
+export type BudgetState = "none" | "ok" | "warn" | "over";
+/** สถานะงบตามยอดใช้เดือนนี้ — none = ไม่ได้ตั้งงบ */
+export function budgetState(spentThb: number, b: PaidBudget): BudgetState {
+  if (!b.monthly_thb) return "none";
+  if (spentThb >= b.monthly_thb) return "over";
+  if (spentThb >= (b.monthly_thb * b.warn_pct) / 100) return "warn";
+  return "ok";
+}
+/** เดือนนี้ตามเวลาไทย "YYYY-MM" — ใช้กันแจ้งเตือนซ้ำในเดือนเดียวกัน */
+export function monthKeyBangkok(now = new Date()): string {
+  return new Date(now.getTime() + 7 * 3600_000).toISOString().slice(0, 7);
+}
+export const budgetOverMessage = (b: PaidBudget) => `เดือนนี้ใช้ AI ครบงบ ฿${(b.monthly_thb ?? 0).toLocaleString("th-TH")} แล้ว — ผู้ดูแลเพิ่มงบหรือเปลี่ยนเป็น "แจ้งเตือนอย่างเดียว" ได้ที่ศูนย์ AI / API ที่เสียเงิน`;
+/** ป้ายของการใช้ที่ไม่มีคนกด (ข้อความจาก LINE · งานตั้งเวลา) */
+export const AUTO_USER_LABEL = "ระบบ / อัตโนมัติ (LINE · งานตั้งเวลา)";

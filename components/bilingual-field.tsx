@@ -256,7 +256,7 @@ export function useTranslateOne() {
     setBusy(true);
     setError(null);
     try {
-      const out = await translateContent(texts);
+      const out = await translateContent(texts, "en", { place: "website" });
       if (!out.some((s) => s.trim())) throw new Error("แปลไม่สำเร็จ ลองใหม่อีกครั้ง");
       apply(out);
     } catch (e) {

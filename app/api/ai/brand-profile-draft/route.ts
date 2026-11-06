@@ -75,7 +75,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         "- ส่วนที่ข้อมูลไม่พอ ให้เขียนเป็นช่องให้ทีมเติมในวงเล็บเหลี่ยม เช่น [ใส่ชื่อคู่แข่ง 2–3 ราย] หรือ [ยืนยัน: รับประกันกี่ปี?]",
         "- จุดขาย/ข้อห้าม เขียนเป็นข้อสั้น ๆ คั่นด้วย \" · \"",
       ].join("\n") }],
-      1500, model,
+      1500, model, { request },
     );
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 502 });

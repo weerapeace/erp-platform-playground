@@ -534,7 +534,7 @@ export function StudioPanel({
         const chunk = targets.slice(s, s + 80);
         const res = await apiFetch("/api/ai/translate", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ texts: chunk.map((i) => i.label), to: "en" }),
+          body: JSON.stringify({ place: "fields", texts: chunk.map((i) => i.label), to: "en" }),
         });
         const j = await res.json();
         if (j.error) throw new Error(String(j.error));

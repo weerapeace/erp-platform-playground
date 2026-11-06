@@ -313,7 +313,7 @@ export function TagOrganizerModal({
     const n = newTag.trim(); if (!n) return;
     setTranslating(true); setErr(null);
     try {
-      const [en] = await translateContent([n]);
+      const [en] = await translateContent([n], "en", { place: "fields" });
       if (en) setNewTagEn(en); else setErr("แปลไม่ได้ ลองพิมพ์ชื่ออังกฤษเอง");
     } catch (e) { setErr(errMsg(e)); }
     finally { setTranslating(false); }
@@ -369,7 +369,7 @@ export function TagOrganizerModal({
     if (!edit?.th.trim()) return;
     setTranslating(true); setEditErr(null);
     try {
-      const [en] = await translateContent([edit.th.trim()]);
+      const [en] = await translateContent([edit.th.trim()], "en", { place: "fields" });
       if (en) setEdit((s) => (s ? { ...s, en } : s)); else setEditErr("แปลไม่ได้ ลองพิมพ์ชื่ออังกฤษเอง");
     } catch (e) { setEditErr(errMsg(e)); }
     finally { setTranslating(false); }
@@ -452,7 +452,7 @@ export function TagOrganizerModal({
     const need = rows.filter((r) => !r.en);
     setTranslating(true); setErr(null);
     try {
-      const out = await translateContent(need.map((r) => r.th));
+      const out = await translateContent(need.map((r) => r.th), "en", { place: "fields" });
       need.forEach((r, i) => { r.en = out[i] ?? ""; });
       setBulk(rows);
     } catch (e) { setErr("แปลไม่สำเร็จ: " + errMsg(e)); }

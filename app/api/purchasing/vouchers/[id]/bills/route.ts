@@ -59,7 +59,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   if (!v) return NextResponse.json({ error: "ไม่พบใบสำคัญรับ" }, { status: 404 });
 
   try {
-    const { parsed, raw } = await parseDeliveryBillImage(r2Key, admin);
+    const { parsed, raw } = await parseDeliveryBillImage(r2Key, admin, { request });
     // เลือกวิธีคิดค่าส่งของแต่ละกล่องจากกฎ Description (BOX → คิว, CLOTH BLOCK → น้ำหนัก) — แก้ทีหลังได้
     const rules = await loadDescriptionRules(admin);
     for (const l of parsed.lines) l.method = methodForDescription(l.description, rules);

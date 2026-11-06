@@ -332,7 +332,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       { type: "text", text: facts },
       ...imageParts(images),
       ...(tail ? [{ type: "text", text: tail }] : []),
-    ], 1700, model);
+    ], 1700, model, { request });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "AI ตอบกลับไม่สำเร็จ" }, { status: 502 });
   }
@@ -415,7 +415,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           'ตอบ JSON: {"introduction":"…"}',
         ].join("\n"),
         [{ type: "text", text: data.introduction }],
-        900, model,
+        900, model, { request },
       );
       const v = String(fix.introduction ?? "").trim();
       if (v && !looksLikeLabelDump(v)) {
@@ -443,7 +443,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           `ตอบ JSON: {${missingEn.map(([, en]) => `"${en}":"ฉบับแปลอังกฤษ"`).join(",")}}`,
           ...missingEn.map(([th, en]) => `${en} ← แปลจากข้อความนี้:\n${data[th]}`),
         ].join("\n\n") }],
-        1200, model,
+        1200, model, { request },
       );
       for (const [, en] of missingEn) {
         const v = String(enOut[en] ?? "").trim();

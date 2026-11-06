@@ -75,7 +75,7 @@ export async function POST(request: NextRequest, { params }: Params): Promise<Ne
   try {
     const groups = await loadShopGroups(admin, v);
     const aliases = await loadAliases(admin, v.seller_partner_id);
-    const { header, lines, raw, model } = await parseSellerBill(admin, ref, groups);
+    const { header, lines, raw, model } = await parseSellerBill(admin, ref, groups, { request });
     if (!header.is_bill && lines.length === 0) return NextResponse.json({ error: "ไฟล์นี้ดูไม่ใช่บิลซื้อของ — ตรวจว่าแนบรูปถูกใบ" }, { status: 400 });
     if (lines.length === 0) return NextResponse.json({ error: "AI อ่านรายการในบิลไม่ได้ — ลองถ่ายให้ชัดขึ้น / ตรงขึ้น แล้วอ่านใหม่" }, { status: 400 });
     const matched = matchBillLines(lines, groups, aliases);

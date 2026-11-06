@@ -1073,7 +1073,7 @@ function CnPoBuilder({ shop, items, printPo, onSaved, onClose }: {
   const patch = (id: string, p: Partial<ER>) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...p } : r)));
   const copy = async (t: string) => { try { await navigator.clipboard.writeText(t); toast.success("คัดลอกแล้ว"); } catch { /* ignore */ } };
   const tr = async (text: string): Promise<string> => {
-    const res = await apiFetch("/api/ai/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text, to: "en" }) });
+    const res = await apiFetch("/api/ai/translate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ place: "purchasing", text, to: "en" }) });
     const j = await res.json().catch(() => ({})); return String(j?.data?.translated ?? "").trim();
   };
   const transName = async (r: ER) => { const s = r.name_cn || r.our_name; if (!s) return; setBusy(true); try { const t = await tr(s); if (t) patch(r.id, { name_en: t }); } catch { toast.error("แปลไม่สำเร็จ"); } finally { setBusy(false); } };

@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
-import { estimateCostThb, PAID_SERVICES, paidService } from "@/lib/paid-services";
+import { budgetState, cleanBudget, DEFAULT_BUDGET, estimateCostThb, monthKeyBangkok, PAID_SERVICES, paidService } from "@/lib/paid-services";
 
 const ROOT = path.resolve(__dirname, "../..");
 const SCAN_DIRS = ["app", "lib", "components"];
@@ -66,14 +66,61 @@ describe("ศูนย์ AI / API ที่เสียเงิน — กั�
 
   it("ทุก key ที่โค้ดใช้กับด่านกลาง ต้องอยู่ในทะเบียน", () => {
     const bad: string[] = [];
-    const re = /\b(aiChat|getAiFor|serviceOn|logServiceUse|serviceOffMessage)\(\s*"([^"]+)"/g;
+    const re = /\b(aiChat|aiAvailable|getAiFor|serviceOn|logServiceUse|serviceOffMessage)\(\s*"([^"]+)"/g;
     for (const f of FILES) for (const m of code(f.src).matchAll(re)) if (!paidService(m[2])) bad.push(`${f.file}: ${m[1]}("${m[2]}")`);
     expect(bad, "เพิ่ม key ใน PAID_SERVICES (lib/paid-services.ts)").toEqual([]);
+  });
+
+  it("รายที่ (places): key ไม่ซ้ำ · ไฟล์ของแต่ละที่มีอยู่และส่ง place นั้นจริง", () => {
+    const byFile = new Map(FILES.map((f) => [f.file, f.src]));
+    for (const s of PAID_SERVICES) {
+      const ks = (s.places ?? []).map((p) => p.key);
+      expect(new Set(ks).size, `${s.key}: place ซ้ำ`).toBe(ks.length);
+      for (const p of s.places ?? []) for (const f of p.files) {
+        const src = byFile.get(f);
+        expect(src, `${s.key}@${p.key}: ไม่พบไฟล์ ${f}`).toBeDefined();
+        expect(new RegExp(`place:\\s*"${p.key}"`).test(src!), `${s.key}@${p.key}: ไฟล์ ${f} ไม่ได้ส่ง place: "${p.key}"`).toBe(true);
+      }
+    }
+  });
+
+  it("ทุกจุดที่เรียกแปลภาษา (translateContent / /api/ai/translate) ต้องบอก place ที่ลงทะเบียน", () => {
+    const valid = new Set((paidService("ai.translate")?.places ?? []).map((p) => p.key));
+    const bad: string[] = [];
+    for (const f of FILES) {
+      if (f.file === "lib/content-translate.ts" || f.file.startsWith("app/api/ai/translate/") || f.file === "lib/paid-services.ts") continue;
+      const src = code(f.src);
+      const calls = (src.match(/\btranslate(Content|NoteHtml)\(|"\/api\/ai\/translate"/g) ?? []).length;
+      if (!calls) continue;
+      const places = [...src.matchAll(/place:\s*"([a-z_]+)"/g)].map((m) => m[1]);
+      if (places.length < calls) bad.push(`${f.file}: เรียกแปล ${calls} ครั้ง แต่ระบุ place ${places.length} ครั้ง`);
+      for (const p of places) if (!valid.has(p)) bad.push(`${f.file}: place "${p}" ไม่อยู่ในทะเบียน ai.translate`);
+    }
+    expect(bad, "ส่ง { place: \"…\" } และเพิ่มที่ใน PAID_SERVICES ai.translate.places").toEqual([]);
   });
 
   it("ประมาณค่าใช้จ่ายตามโมเดล", () => {
     expect(estimateCostThb("gpt-4o-mini", 1_000_000, 0)).toBeCloseTo(5.4);
     expect(estimateCostThb("gpt-4.1", 0, 1_000_000)).toBeCloseTo(288);
     expect(estimateCostThb("unknown-model", 1_000_000, 0)).toBeCloseTo(5.4);
+  });
+});
+
+describe("งบต่อเดือน", () => {
+  it("ค่าแปลก = ค่าเริ่ม · ไม่ใส่งบ = ไม่จำกัด", () => {
+    expect(cleanBudget(null)).toEqual(DEFAULT_BUDGET);
+    expect(cleanBudget({ monthly_thb: "500", warn_pct: 90, over_action: "warn" })).toEqual({ monthly_thb: 500, warn_pct: 90, over_action: "warn" });
+    expect(cleanBudget({ monthly_thb: -5, warn_pct: 3, over_action: "x" })).toEqual({ monthly_thb: null, warn_pct: 80, over_action: "stop" });
+  });
+  it("สถานะงบ: ไม่ตั้ง / ปกติ / ใกล้เต็ม / เกิน", () => {
+    const b = { monthly_thb: 100, warn_pct: 80, over_action: "stop" as const };
+    expect(budgetState(50, DEFAULT_BUDGET)).toBe("none");
+    expect(budgetState(79.9, b)).toBe("ok");
+    expect(budgetState(80, b)).toBe("warn");
+    expect(budgetState(100, b)).toBe("over");
+  });
+  it("เดือนตามเวลาไทย (ข้ามเดือนตอนเที่ยงคืนไทย ไม่ใช่ UTC)", () => {
+    expect(monthKeyBangkok(new Date("2026-11-30T17:30:00Z"))).toBe("2026-12");
+    expect(monthKeyBangkok(new Date("2026-11-30T16:30:00Z"))).toBe("2026-11");
   });
 });

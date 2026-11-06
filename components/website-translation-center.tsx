@@ -157,7 +157,7 @@ export function WebsiteTranslationCenter({ shopSlug }: { shopSlug: string }) {
     setBusy(scope);
     setError(null);
     try {
-      const out = await translateContent(todo.map((r) => r.th));
+      const out = await translateContent(todo.map((r) => r.th), "en", { place: "website" });
       setSources((list) =>
         list.map((s) => {
           let v = s.value;
