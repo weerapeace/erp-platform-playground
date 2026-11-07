@@ -38,6 +38,7 @@ import type { Attachment } from "@/app/api/attachments/route";
 import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
+import { CostSummaryCard } from "./cost-summary-card";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { SkuLite } from "@/app/api/design-sheets/price-item-skus/route";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -526,6 +527,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [pmLinkFor, setPmLinkFor] = useState<PmRow | null>(null);          // แถวที่กำลังเลือก SKU
   const [costLines, setCostLines] = useState<CostRow[]>([]);             // ทุก Parent รวมกัน (กรองด้วย parent_code ตอนแสดง)
   const [costDirty, setCostDirty] = useState(false);
+  // แท็บตีราคา: กล่องกว้างพอ = ตารางซ้าย + การ์ดสรุปติดขวา (เจ้าของขอ 2026-11-07) · แคบ = สรุปใต้ตาราง + แถบปุ่มติดล่าง
+  const [costBoxW, setCostBoxW] = useState(0);
+  const costRoRef = useRef<ResizeObserver | null>(null);
+  const costBoxRef = useCallback((el: HTMLDivElement | null) => {
+    costRoRef.current?.disconnect(); costRoRef.current = null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setCostBoxW(el.clientWidth));
+    ro.observe(el); costRoRef.current = ro; setCostBoxW(el.clientWidth);
+  }, []);
+  const costSide = costBoxW >= 1250;
   const [costSaving, setCostSaving] = useState(false);
   const [costParent, setCostParent] = useState<string>("");
   const [verOpen, setVerOpen] = useState(false);          // ป๊อป "เพิ่มเวอร์ชันตีราคา"
@@ -1897,6 +1908,36 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
   if (!canView) return <AccessDenied />;
 
+  // ── แท็บตีราคา: ปุ่มบันทึก/ส่งยอด + การ์ดสรุปต้นทุน (components/design-sheet-detail/cost-summary-card) ──
+  const costZeroCount = curLines.filter(isZeroCostRow).length;
+  // บันทึกแล้ว = กลับเป็นโหมดดูอย่างเดียว (เจ้าของขอ 2026-11-07) · ส่วน "สั่งจากร้าน" ยังแก้ค้าง = คงโหมดแก้ไว้
+  const costActions = (layout: "row" | "stack") => (
+    <>
+      <button onClick={() => void (async () => { if ((await saveCost()) && !supplierDirty) setEditing(false); })()} disabled={costSaving}
+        className={`h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm ${layout === "stack" ? "w-full" : ""}`}>{costSaving ? t("กำลังบันทึก...", "Saving...") : t("บันทึกตีราคา", "Save costing")}</button>
+      <button onClick={() => void sendCostToQuote()} disabled={costSaving || !(grandTotal > 0)}
+        className={`h-9 px-4 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50 bg-white ${layout === "stack" ? "w-full" : ""}`}>{t("ส่งยอดไปเสนอราคา", "Send total to quote")}</button>
+    </>
+  );
+  const costUsageText = (() => {
+    // ใช้ต่อใบ (ผ้า/แผ่นคิดเป็นผืน + หน่วยอื่นรวมตามหน่วย) — ตัวเดียวกับหัวกลุ่มในตาราง (lib/cost-usage)
+    const u = costUsagePerUnit(curLines.map((r) => ({ item_id: r.item_id, group_name: r.group_name, qty: r.qty, uom: r.uom, piece: rowIsPiece(r) })), (id) => priceItemById.get(id));
+    const parts: string[] = [];
+    if (u.sheets) parts.push(`${u.sheets.qty.toFixed(2)} ${u.sheets.unit}`);
+    for (const x of u.byUom) parts.push(`${fmtQty(Math.round(x.qty * 1000) / 1000)} ${x.uom}`);
+    return parts.length ? t(`ใช้ต่อใบ ≈ ${parts.join(" + ")}`, `Per unit ≈ ${parts.join(" + ")}`) : null;
+  })();
+  const costSummaryCard = (
+    <CostSummaryCard grandTotal={grandTotal} materialTotal={costTotal} groups={costByGroup}
+      extras={costExtra.filter((c) => (c.amount || 0) !== 0).map((c) => ({ label: c.label || t("ค่าใช้จ่าย", "Expense"), amount: c.amount || 0,
+        note: c.mode === "split" && c.split_qty ? `(${fmtBaht(c.total ?? 0)} ÷ ${c.split_qty.toLocaleString("th-TH")})` : null }))}
+      usage={costUsageText}
+      tiers={splitFixedTotal > 0 ? SPLIT_TIERS.map((q) => ({ qty: q, total: totalForParent(costParent, q) })) : undefined}
+      zeroCount={costZeroCount} dirty={costDirty}
+      onVersions={form?.id ? () => { setVersionsInit(null); setVersionsOpen(true); } : undefined}
+      actions={costSide && fullEdit ? costActions("stack") : undefined} />
+  );
+
   return (
     <>
       {!detailOnly && (
@@ -2079,6 +2120,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   { key: "cost", icon: "printer", label: t("ใบตีราคา", "Cost sheet"), hint: costParent ? costTabLabel(costParent, generalLabel) : undefined,
                     title: costParent ? t(`พิมพ์เฉพาะไซส์ "${costParent}" (เปลี่ยนได้ในหน้าพิมพ์)`, `Print size "${costParent}" only (changeable on the print page)`) : t("พิมพ์ใบตีราคาต้นทุน", "Print cost sheet"),
                     onSelect: () => openTab(`/print/design-sheet-cost/${form.id}${costParent ? `?parent=${encodeURIComponent(costParent)}` : ""}`) },
+                  // ✂ หน้าแพทเทิร์นจากตีราคา (ชิ้นขนาดจริง พิมพ์ A4 1:1 / DXF / วางบนผ้า) — app/print/design-sheet/[id]/pattern
+                  { key: "pattern", icon: "scissors", label: t("แพทเทิร์นจากตีราคา", "Pattern from costing"), hint: costParent ? costTabLabel(costParent, generalLabel) : undefined,
+                    title: t("ชิ้นแพทเทิร์นตามกว้าง×ยาวในตาราง — พิมพ์ขนาดจริงแบ่งหน้า A4 / ดาวน์โหลด DXF ให้เครื่องตัด / ดูการวางบนผ้า", "Pattern pieces from width×length — print true size on A4 / download DXF / see fabric layout"),
+                    onSelect: () => openTab(`/print/design-sheet/${form.id}/pattern${costParent ? `?parent=${encodeURIComponent(costParent)}` : ""}`) },
                 ];
                 // ลบถาวร = ลบทั้งใบ + comment + ราคา (กู้ไม่ได้) → ต้องมีสิทธิ์ "ลบข้อมูลสินค้า" (server เช็กซ้ำ) · แยกไว้เมนู ⋯ กันกดพลาด
                 const more: MenuItem[] = canEdit && can("products.delete" as Parameters<typeof can>[0]) ? [
@@ -2331,6 +2376,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   const tools: MenuItem[] = [
                     { key: "fabric", icon: "ruler-measure", label: t("คำนวณผ้า", "Fabric calc"),
                       title: t("คำนวณว่าต้องใช้ผ้ากี่หลา/กี่ผืน จากขนาดชิ้นในตาราง × จำนวนที่ผลิต (ใช้ได้ทั้งโหมดดู)", "Calculate how many yards/sheets of fabric are needed from piece sizes × production qty (works in view mode too)"), onSelect: () => setFabricCalc(true) },
+                    ...(form?.id ? [{ key: "pattern", icon: "scissors", label: t("หน้าแพทเทิร์น", "Pattern sheet"),
+                      title: t("ชิ้นแพทเทิร์นจากกว้าง×ยาวในตาราง — พิมพ์ขนาดจริง A4 / ดาวน์โหลด DXF / วางบนผ้า", "Pattern pieces from width×length — true-size A4 print / DXF / fabric layout"),
+                      onSelect: () => { window.open(`/print/design-sheet/${form.id}/pattern${costParent ? `?parent=${encodeURIComponent(costParent)}` : ""}`, "_blank", "noopener"); } }] : []),
                     ...(canEdit ? [{ key: "mkbom", icon: "sitemap", label: t("สร้างสูตร BOM", "Create BOM"),
                       title: t("ดึงกว้าง/ยาว/จำนวนจากตีราคาไปสร้างสูตรการผลิต (วัตถุดิบใส่ทีหลัง)", "Use width/length/qty from costing to create a production BOM (add materials later)"), onSelect: () => setBomWizard(true) }] : []),
                   ];
@@ -2353,6 +2401,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 </div>
               )}
 
+              <div ref={costBoxRef} className={costSide ? "grid items-start gap-3" : "space-y-2"} style={costSide ? { gridTemplateColumns: "minmax(0, 1fr) 240px" } : undefined}>
+              <div className="min-w-0 space-y-2">
               {/* แถบสรุป A+B (กดขยายดูรายบรรทัด): ⚠ ราคาวัสดุปรับ · 🔁 เปลี่ยนวัสดุ — ปุ่ม เปลี่ยน/ไม่เปลี่ยน/กลับของเดิม/รับทราบ กดได้เลยไม่ต้องเข้าโหมดแก้ไข (โหมดดู = บันทึกทันที) */}
               {(() => {
                 const drifted = curLines.flatMap((r) => {
@@ -2566,11 +2616,23 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       {orderQtyFromQuote && <span className="text-[10px] text-slate-400">{t("(จากรอบเสนอราคาล่าสุด)", "(from latest quote)")}</span>}
                     </label>
                   )}
-                  {canEdit && <button onClick={() => { setCurExtra((l) => [...l, { label: "", amount: 0 }]); setCostDirty(true); }}
+                  {canEdit && <button onClick={() => { if (!fullEdit) setEditing(true); setCurExtra((l) => [...l, { label: "", amount: 0 }]); setCostDirty(true); }}
                     className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("＋ เพิ่มรายการ", "＋ Add item")}</button>}
                 </div>
                 {costExtra.length === 0 && <p className="text-xs text-slate-300">{t("— ยังไม่มีรายการ —", "— No items yet —")}</p>}
-                {costExtra.map((c, i) => {
+                {/* โหมดดู (บันทึกแล้ว) = แถวตัวอักษรเรียบ กระชับ · ดับเบิลคลิกเพื่อแก้ (เจ้าของขอ 2026-11-07) */}
+                {!fullEdit && costExtra.length > 0 && (
+                  <div className="divide-y divide-slate-100 rounded-lg border border-slate-100" onDoubleClick={canEdit ? () => setEditing(true) : undefined}
+                    title={canEdit ? t("ดับเบิลคลิกเพื่อแก้", "Double-click to edit") : undefined}>
+                    {costExtra.map((c, i) => (
+                      <div key={i} className="flex items-center justify-between gap-2 px-2 py-1 text-[13px]">
+                        <span className="min-w-0 truncate text-slate-600">{c.label || "—"}{c.mode === "split" ? <span className="text-[11px] text-slate-400">{t(" · หารจำนวนสั่ง", " · ÷ order qty")}{c.split_qty ? ` (${fmtBaht(c.total ?? 0)} ÷ ${c.split_qty.toLocaleString("th-TH")})` : ""}</span> : null}</span>
+                        <span className={`shrink-0 tabular-nums ${c.amount ? "text-slate-800" : "text-slate-300"}`}>{fmtBaht(c.amount || 0)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {fullEdit && costExtra.map((c, i) => {
                   const split = c.mode === "split";
                   return (
                   <div key={i} className="space-y-0.5">
@@ -2605,39 +2667,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 })}
               </div>
 
-              {/* การ์ดสรุปต้นทุน (แยกตามชนิด + รวมวัสดุ + ค่าใช้จ่าย + ต้นทุนสินค้า) */}
-              <div className="rounded-xl bg-slate-800 text-slate-100 p-3 space-y-1 text-sm">
-                <div className="flex items-center justify-between pb-1 mb-1 border-b border-slate-600">
-                  <span className="font-semibold">{t("📊 สรุปต้นทุน", "📊 Cost summary")}</span>
-                  <span className="font-bold text-emerald-300 tabular-nums">{fmtBaht(grandTotal)} ฿</span>
-                </div>
-                {costByGroup.length === 0 && <div className="text-xs text-slate-400">{t("— ยังไม่มีต้นทุนวัสดุ —", "— No material cost yet —")}</div>}
-                {costByGroup.map((g) => (
-                  <div key={g.label} className="flex items-center justify-between text-[13px]">
-                    <span className="text-slate-300">{t(`ต้นทุน (${g.label})`, `Cost (${g.label})`)}</span><span className="tabular-nums">{fmtBaht(g.amount)} ฿</span>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between font-medium pt-1 mt-1 border-t border-slate-600">
-                  <span>{t("ต้นทุนวัสดุดิบรวม", "Total raw material cost")}</span><span className="tabular-nums">{fmtBaht(costTotal)} ฿</span>
-                </div>
-                {costExtra.filter((c) => (c.amount || 0) !== 0).map((c, i) => (
-                  <div key={i} className="flex items-center justify-between text-[13px] text-slate-300">
-                    <span>{c.label || t("ค่าใช้จ่าย", "Expense")}{c.mode === "split" && c.split_qty ? <span className="text-slate-400 tabular-nums"> ({fmtBaht(c.total ?? 0)} ÷ {c.split_qty.toLocaleString("th-TH")})</span> : null}</span><span className="tabular-nums">{fmtBaht(c.amount)} ฿</span>
-                  </div>
-                ))}
-                <div className="flex items-center justify-between font-bold text-emerald-300 pt-1 mt-1 border-t border-slate-600">
-                  <span>{t("ต้นทุนสินค้า (รวมทั้งหมด)", "Product cost (grand total)")}</span><span className="tabular-nums">{fmtBaht(grandTotal)} ฿</span>
-                </div>
-                {/* ค่าบล็อกหารจำนวนสั่ง → ต้นทุนต่อชิ้นเปลี่ยนตามจำนวน — เทียบขั้นที่เสนอราคาบ่อย */}
-                {splitFixedTotal > 0 && (
-                  <div className="pt-1 mt-1 border-t border-slate-600 text-[12px] text-slate-400 leading-relaxed">
-                    {t("ถ้าสั่ง:", "If ordering:")}{" "}
-                    {SPLIT_TIERS.map((q) => (
-                      <span key={q} className="mr-3 whitespace-nowrap">{q.toLocaleString("th-TH")} {t("ชิ้น", "pcs")} = <b className="font-semibold text-slate-100 tabular-nums">{fmtBaht(totalForParent(costParent, q))}</b> ฿</span>
-                    ))}
-                  </div>
-                )}
               </div>
+              {/* การ์ดสรุปต้นทุน — จอกว้าง: ติดขวา (เลื่อนตารางแล้วยังเห็น) · จอแคบ: ใต้ตาราง */}
+              {costSide && <aside className="sticky top-0 self-start">{costSummaryCard}</aside>}
+              </div>
+              {!costSide && costSummaryCard}
 
               {/* 🛒 Section: คำนวณจากซัพพลายเออร์ (สินค้าสั่งจากร้าน — ราคา+ค่าส่งตามคิว → กำไร → แบ่งกำไร) */}
               {form?.id && (
@@ -2653,27 +2687,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   }} />
               )}
 
-              {/* แถบยอดรวม + ปุ่ม — sticky ติดล่าง (เลื่อนตารางยาวแค่ไหนก็เห็นปุ่มเสมอ) */}
+              {/* แถบยอดรวม + ปุ่ม ติดล่าง — เฉพาะจอแคบ (จอกว้างมีการ์ดสรุปติดขวาที่มีปุ่มแล้ว) */}
+              {!costSide && (
               <div className="sticky bottom-0 z-10 -mx-1 px-1 py-2 bg-white/95 backdrop-blur-sm border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm text-slate-600">{t("ต้นทุนสินค้า:", "Product cost:")} <b className="text-base text-emerald-700">{fmtBaht(grandTotal)}</b> {t("บาท", "THB")}
                   {costDirty && <span className="ml-2 text-[11px] text-amber-600">{t("● มีแก้ไขที่ยังไม่บันทึก", "● Unsaved changes")}</span>}
-                  {(() => { const z = curLines.filter(isZeroCostRow).length; return z > 0 ? (
-                    <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-medium text-rose-600"><Icon value="i:alert-triangle" className="text-[12px]" />{t(`${z} บรรทัดยังไม่มียอด (รวม = 0)`, `${z} lines have no amount (total = 0)`)}</span>
-                  ) : null; })()}
-                  {form.id && (
-                    <button type="button" onClick={() => { setVersionsInit(null); setVersionsOpen(true); }} title={t("เปรียบเทียบตีราคาเวอร์ชันก่อน ๆ กับปัจจุบัน", "Compare earlier costing versions with the current one")}
-                      className="ml-2 h-7 rounded-lg border border-slate-200 bg-white px-2 text-[11px] text-slate-600 hover:bg-slate-50">{t("🕘 เวอร์ชัน", "🕘 Versions")}</button>
-                  )}</div>
-                {fullEdit && (
-                  <div className="flex gap-1.5">
-                    {/* บันทึกแล้ว = กลับเป็นโหมดดูอย่างเดียว (เจ้าของขอ 2026-11-07) · ส่วน "สั่งจากร้าน" ยังแก้ค้าง = คงโหมดแก้ไว้ */}
-                    <button onClick={() => void (async () => { if ((await saveCost()) && !supplierDirty) setEditing(false); })()} disabled={costSaving}
-                      className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 shadow-sm">{costSaving ? t("กำลังบันทึก...", "Saving...") : t("💾 บันทึกตีราคา", "💾 Save costing")}</button>
-                    <button onClick={() => void sendCostToQuote()} disabled={costSaving || !(grandTotal > 0)}
-                      className="h-9 px-4 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 disabled:opacity-50 bg-white">{t("→ ส่งยอดไปเสนอราคา", "→ Send total to quote")}</button>
-                  </div>
-                )}
+                  {costZeroCount > 0 && (
+                    <span className="ml-2 inline-flex items-center gap-1 text-[11px] font-medium text-rose-600"><Icon value="i:alert-triangle" className="text-[12px]" />{t(`${costZeroCount} บรรทัดยังไม่มียอด (รวม = 0)`, `${costZeroCount} lines have no amount (total = 0)`)}</span>
+                  )}
+                </div>
+                {fullEdit && <div className="flex gap-1.5">{costActions("row")}</div>}
               </div>
+              )}
               </div>
             </div>}
 

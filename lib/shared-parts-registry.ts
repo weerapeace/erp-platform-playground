@@ -517,6 +517,14 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "กดพิมพ์แล้วเปิดหน้าปรับก่อน ปรับแล้วเห็นผลทันที",
   },
   {
+    key: "pattern-sheet", label: "แพทเทิร์นจากขนาดชิ้น (พิมพ์ 1:1 / DXF)", code: "PatternPiecesSvg · lib/pattern-sheet", category: "print",
+    source: { path: "components/pattern-sheet" },
+    what: "เอากว้าง×ยาว×จำนวนชิ้นจากตาราง มาวาดเป็นชิ้นแพทเทิร์นขนาดจริง พิมพ์แบ่งหน้า A4 แล้วต่อกัน (มีกรอบทดสอบ 5 ซม.) หรือดาวน์โหลด DXF/SVG ส่งเครื่องตัด",
+    when: "งานที่มีขนาดชิ้นตัด เช่น ตีราคาใบงานออกแบบ (เปิดที่ /print/design-sheet/<id>/pattern)",
+    notWhen: "คำนวณผ้าที่ต้องใช้ ให้ใช้เครื่องคิดเลขผ้า (lib/fabric-calc + FabricLayoutPreview) · ชิ้นรูปทรงโค้งจริงยังไม่รองรับ (รอขั้นนำเข้าไฟล์ DXF/SVG)",
+    doc: "pattern-sheet.md",
+  },
+  {
     key: "print-history", label: "ป้ายพิมพ์แล้ว N ครั้ง", code: "PrintHistoryBadge", category: "print",
     source: { path: "components/print-history" },
     what: "บอกว่าเอกสารนี้พิมพ์ไปกี่ครั้ง ล่าสุดเมื่อไหร่ ใครพิมพ์",
