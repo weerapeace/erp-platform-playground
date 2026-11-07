@@ -234,7 +234,17 @@ if (JSON_OUT) {
     if (okList.length) console.log(`✅ ปกติ: ${okList.join(", ")}`);
     if (newList.length) console.log(`🆕 ยังไม่มีค่าฐาน${saved ? " (จดเป็นค่าแรกแล้ว)" : ""}: ${newList.join(", ")}`);
   }
-  if (skipped.length) console.log(`⏭️ ข้าม ${skipped.length}: ${skipped.slice(0, 4).join(" · ")}${skipped.length > 4 ? ` · …อีก ${skipped.length - 4}` : ""}`);
+  if (skipped.length) {
+    // รวมตามเหตุผล กันบรรทัดยาว (ประหยัด token): "ต้องล็อกอิน 9 (/api/a, /api/b, …)"
+    const groups = new Map();
+    for (const x of skipped) {
+      const m = /^(\S+) \((.*)\)$/.exec(x);
+      const why = (m?.[2] ?? "ข้าม").split(" — ")[0];
+      if (!groups.has(why)) groups.set(why, []);
+      groups.get(why).push(m?.[1] ?? x);
+    }
+    console.log(`⏭️ ข้าม ${skipped.length}: ${[...groups].map(([why, ps]) => `${why} ${ps.length} (${ps.slice(0, 2).join(", ")}${ps.length > 2 ? ", …" : ""})`).join(" · ")}`);
+  }
   if (dbFlags) {
     if (!dbFlags.length) console.log(`🗄️ ฐานข้อมูล: ไม่มีคำสั่งที่ช้าขึ้นตั้งแต่ ${dbSince.slice(0, 16).replace("T", " ")} UTC`);
     else for (const f of dbFlags.slice(0, 5)) console.log(`🗄️ ${P.queryLabel(f.query)} — ${f.why}`);
