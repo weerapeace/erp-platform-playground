@@ -229,6 +229,16 @@ export function SheetHoverWrap({ sheet, pref, status, deadline, own, off, classN
   );
 }
 
+/** แผงตั้งค่า Hover อย่างเดียว (ไม่มีปุ่ม) — ใส่ในเมนูย่อย "ตั้งค่า" ของแถบเครื่องมือ (components/menu-bar) */
+export function SheetHoverSettingsPanel({ pref }: { pref: SheetHoverPref }) {
+  return (
+    <div className="p-0.5">
+      <HoverFieldsPicker on={pref.on} onToggle={pref.setOn} fields={SHEET_HOVER_FIELDS}
+        value={pref.custom} defaults={DEFAULT_SHEET_HOVER_FIELDS} onChange={pref.setFields} />
+    </div>
+  );
+}
+
 /** ปุ่ม "⚙️ ตั้งค่า Hover ▾" + ป๊อปตั้งค่า (เปิด/ปิด + เลือกสิ่งที่โชว์) */
 export function SheetHoverSettingsButton({ pref }: { pref: SheetHoverPref }) {
   const t = useT();

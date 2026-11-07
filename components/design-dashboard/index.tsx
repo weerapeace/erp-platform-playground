@@ -10,7 +10,8 @@ import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
 import { buildStatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
-import { SheetHoverSettingsButton, useSheetHoverPref } from "./sheet-hover";
+import { SheetHoverSettingsPanel, useSheetHoverPref } from "./sheet-hover";
+import { MenuBar, type MenuDef, type MenuItem } from "@/components/menu-bar";
 import { FloatingDropdown } from "@/components/floating-dropdown";
 import { usePermission } from "@/components/auth";
 import { Icon } from "@/components/icon";
@@ -150,8 +151,6 @@ export function DesignDashboard() {
   }, []);
   // คอลัมน์สถานะที่ซ่อนบนบอร์ด — จำรายคน (user_ui_prefs) · ยังไม่เคยตั้ง = ค่าเริ่มต้น DEFAULT_HIDDEN_COLS
   const [hiddenCols, setHiddenCols] = useState<string[]>(DEFAULT_HIDDEN_COLS);
-  const [hideColsOpen, setHideColsOpen] = useState(false);
-  const hideColsAnchorRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     apiFetch("/api/user-prefs?key=design_dashboard_hidden_cols").then((r) => r.json())
       .then((j) => { const v = j?.value; if (Array.isArray(v)) setHiddenCols(v.map(String)); })
@@ -162,6 +161,21 @@ export function DesignDashboard() {
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_hidden_cols", value: next }) }).catch(() => {});
   };
   const toggleHiddenCol = (key: string) => saveHiddenCols(hiddenCols.includes(key) ? hiddenCols.filter((k) => k !== key) : [...hiddenCols, key]);
+  // คอลัมน์ที่ "พับ" เป็นแถบแคบ (ยังเห็นชื่อ+จำนวน · ลากการ์ดไปวางได้) — จำรายคน · เจ้าของขอ 2026-11-07
+  const [foldedCols, setFoldedCols] = useState<string[]>([]);
+  const foldedRef = useRef<string[]>([]);   // ค่าล่าสุดเสมอ — กดพับหลายคอลัมน์ติดกันเร็ว ๆ ไม่ทับกัน
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_folded_cols").then((r) => r.json())
+      .then((j) => { const v = j?.value; if (Array.isArray(v)) { foldedRef.current = v.map(String); setFoldedCols(foldedRef.current); } })
+      .catch(() => {});
+  }, []);
+  const saveFoldedCols = (next: string[]) => {
+    foldedRef.current = next;
+    setFoldedCols(next);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_folded_cols", value: next }) }).catch(() => {});
+  };
+  const toggleFoldCol = (key: string) => { const cur = foldedRef.current; saveFoldedCols(cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]); };
+  const foldedSet = useMemo(() => new Set(foldedCols), [foldedCols]);
   // ขนาดการ์ดบนบอร์ด (เจ้าของขอ compact): ▦ การ์ดเล็ก (เรียงหลายใบในคอลัมน์กว้าง) / ☰ แถวย่อ (รูปจิ๋ว+ชื่อ) — จำรายคน
   const [cardSize, setCardSize] = useState<"compact" | "row">("compact");
   useEffect(() => {
@@ -268,7 +282,6 @@ export function DesignDashboard() {
   const [summaryBuilder, setSummaryBuilder] = useState<{ id: string | null; sheetIds: string[] } | null>(null);
   const [summaryMenuOpen, setSummaryMenuOpen] = useState(false);
   const [summaryReload, setSummaryReload] = useState(0);
-  const summaryAnchorRef = useRef<HTMLDivElement>(null);
   const openSummary = (id: string | null, sheetIds: string[] = []) => { setSummaryMenuOpen(false); setMoreOpen(false); setSummaryBuilder({ id, sheetIds }); };
 
   useEffect(() => {
@@ -370,20 +383,33 @@ export function DesignDashboard() {
     ];
   }, [sheets, statusMeta]);
 
-  const filteredSheets = useMemo(() => {
+  // ขอบเขตที่กำลังดู = แบรนด์ที่เลือก + คำค้น (ยังไม่กรองด่วน) — ใช้นับจำนวนในเมนูตัวกรอง
+  const scopedSheets = useMemo(() => {
     const q = search.trim().toLowerCase();
     return sheets.filter((sheet) => {
       if (mineOn) { if (!favSet.has(brandKeyOf(sheet))) return false; }
       else if (isGroupKey) { if (sheetIsOwn(sheet) !== (selectedBrandKey === GROUP_KEY.own)) return false; }
       else if (brandKeyOf(sheet) !== selectedBrandKey) return false;
       if (q && !`${sheet.code} ${sheet.name} ${sheet.brand_name ?? ""}`.toLowerCase().includes(q)) return false;
-      if (quickFilter === "active" && statusMeta.finished.has(sheet.status)) return false;
-      if (quickFilter === "urgent" && !isUrgent(sheet, statusMeta)) return false;
-      if (quickFilter === "soon") { const dd = daysUntil(sheet.deadline); if (statusMeta.finished.has(sheet.status) || dd === null || dd > 7) return false; }
-      if (quickFilter === "closed" && !statusMeta.finished.has(sheet.status)) return false;
       return true;
     });
-  }, [selectedBrandKey, isGroupKey, mineOn, favSet, sheets, search, quickFilter, statusMeta]);
+  }, [selectedBrandKey, isGroupKey, mineOn, favSet, sheets, search]);
+  const passQuick = (sheet: DesignSheetListItem, f: typeof quickFilter) => {
+    if (f === "active") return !statusMeta.finished.has(sheet.status);
+    if (f === "urgent") return isUrgent(sheet, statusMeta);
+    if (f === "soon") { const dd = daysUntil(sheet.deadline); return !statusMeta.finished.has(sheet.status) && dd !== null && dd <= 7; }
+    if (f === "closed") return statusMeta.finished.has(sheet.status);
+    return true;
+  };
+  const filteredSheets = useMemo(() => (quickFilter === "all" ? scopedSheets : scopedSheets.filter((s) => passQuick(s, quickFilter))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [scopedSheets, quickFilter, statusMeta]);
+  const filterCounts = useMemo(() => {
+    const c = { all: scopedSheets.length, active: 0, urgent: 0, soon: 0, closed: 0 };
+    for (const s of scopedSheets) for (const f of ["active", "urgent", "soon", "closed"] as const) if (passQuick(s, f)) c[f]++;
+    return c;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scopedSheets, statusMeta]);
 
   // แถวแบรนด์แนวนอน แยก 2 กลุ่ม: แต่ละกลุ่มโชว์ 4 อันดับแรก (ตามงานกำลังเดิน) + ที่เหลือไปอยู่ดรอปดาวน์ "อื่นๆ" ของกลุ่มนั้น
   const orderedAll = useMemo(() => {
@@ -522,6 +548,87 @@ export function DesignDashboard() {
     setDropTargetStatus(null);
     if (sheetId) void moveSheetToStatus(sheetId, column.key);
   }
+
+  // ── แถบเมนูจอคอม/แท็บเล็ต (ของกลาง components/menu-bar) — แทนปุ่มเรียงยาวเดิม · ไอคอนเส้น ไม่มีอีโมจิสี ──
+  const FILTER_DEFS = [
+    { key: "all", label: t("ทั้งหมด", "All"), icon: "list" },
+    { key: "active", label: t("กำลังทำ", "In progress"), icon: "hourglass" },
+    { key: "urgent", label: t("ด่วน", "Urgent"), icon: "alert-triangle" },
+    { key: "soon", label: t("ใกล้กำหนด (7 วัน)", "Due within 7 days"), icon: "clock" },
+    { key: "closed", label: t("ปิดงานแล้ว", "Closed"), icon: "circle-check" },
+  ] as const;
+  const activeFilter = FILTER_DEFS.find((f) => f.key === quickFilter) ?? FILTER_DEFS[0];
+  const allFolded = boardColumns.length > 0 && boardColumns.every((c) => foldedSet.has(c.key));
+  const toolbarMenus: MenuDef[] = ([
+    {
+      key: "filter", icon: "filter", width: 230,
+      label: quickFilter === "all" ? t("ตัวกรอง", "Filter") : `${t("ตัวกรอง", "Filter")}: ${activeFilter.label}`,
+      active: quickFilter !== "all", onClear: () => setQuickFilter("all"), clearLabel: t("ล้างตัวกรอง", "Clear filter"),
+      items: FILTER_DEFS.map((f): MenuItem => ({ type: "radio", key: f.key, label: f.label, icon: f.icon, checked: quickFilter === f.key, onSelect: () => setQuickFilter(f.key), hint: filterCounts[f.key] })),
+    },
+    {
+      key: "work", icon: "bolt", label: t("ทำงาน", "Actions"), width: 240,
+      items: [
+        ...(canTasks ? [{ key: "board", icon: "presentation", label: t("ส่งขึ้นกระดาน", "Send to board"), title: t("ติ๊กเลือกใบงานแล้วส่งขึ้นกระดานวางแผนของแคมเปญ", "Select sheets and send them to a campaign planning board"), onSelect: () => startPick("board") }] : []),
+        ...(canOrder ? [{ key: "order", icon: "shopping-cart", label: t("ลงออเดอร์", "Add orders"), title: t("ติ๊กเลือกใบงานแล้วลงเป็นออเดอร์ลูกค้า (ใบสั่งขาย) + จับชุด", "Select sheets and add them as customer orders"), onSelect: () => startPick("order") }] : []),
+        ...(canEdit ? [
+          ...(canTasks || canOrder ? [{ type: "divider", key: "d1" }] : []),
+          { type: "submenu", key: "summary", icon: "file-text", label: t("สรุปงาน", "Summary"), width: 320, bare: true,
+            render: (close: () => void) => <SummaryListMenu reloadKey={summaryReload} onNew={() => { close(); startPick("summary"); }} onOpen={(id) => { close(); openSummary(id); }} /> },
+        ] : []),
+      ] as MenuItem[],
+    },
+    {
+      key: "view", icon: "layout-dashboard", label: t("มุมมอง", "View"), width: 240,
+      items: [
+        { type: "radio", key: "v-board", icon: "layout-kanban", label: t("บอร์ดตามสถานะ", "Board by status"), checked: viewMode === "board", onSelect: () => changeViewMode("board") },
+        { type: "radio", key: "v-gallery", icon: "photo", label: t("การ์ดรูปใหญ่", "Large image cards"), checked: viewMode === "gallery", onSelect: () => changeViewMode("gallery") },
+        { type: "divider", key: "d1" },
+        ...(viewMode === "board" ? [
+          { type: "section", key: "s-size", label: t("ขนาดการ์ด", "Card size") },
+          { type: "radio", key: "c-compact", icon: "layout-grid", label: t("การ์ดเล็ก (มีรูป)", "Small cards (with image)"), checked: cardSize === "compact", onSelect: () => changeCardSize("compact") },
+          { type: "radio", key: "c-row", icon: "list", label: t("แถวย่อ", "Compact rows"), checked: cardSize === "row", onSelect: () => changeCardSize("row") },
+          { type: "divider", key: "d2" },
+          { type: "submenu", key: "cols", icon: "columns", label: t("คอลัมน์ที่โชว์", "Columns shown"), width: 260,
+            hint: hiddenBoardColumns.length ? t(`ซ่อน ${hiddenBoardColumns.length}`, `${hiddenBoardColumns.length} hidden`) : undefined,
+            render: () => (
+              <div className="p-0.5">
+                <div className="px-2 py-1 text-[11px] font-medium text-slate-400">{t("ติ๊ก = โชว์บนบอร์ด", "Checked = shown on the board")}</div>
+                {allBoardColumns.map((c) => (
+                  <label key={c.key} className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] text-slate-700 hover:bg-slate-100">
+                    <input type="checkbox" checked={!hiddenSet.has(c.key)} onChange={() => toggleHiddenCol(c.key)} className="h-3.5 w-3.5" />
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
+                    <span className="min-w-0 flex-1 truncate">{c.label}</span>
+                    <span className="text-[11px] tabular-nums text-slate-400">{c.sheets.length}</span>
+                  </label>
+                ))}
+                <div className="mt-1 flex gap-1 border-t border-slate-100 pt-1.5">
+                  <button type="button" onClick={() => saveHiddenCols([])} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">{t("แสดงทั้งหมด", "Show all")}</button>
+                  <button type="button" onClick={() => saveHiddenCols(DEFAULT_HIDDEN_COLS)} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">{t("ค่าเริ่มต้น", "Default")}</button>
+                </div>
+              </div>
+            ) },
+          ...(allFolded ? [] : [{ key: "fold-all", icon: "minus", label: t("พับทุกคอลัมน์", "Fold all columns"), onSelect: () => saveFoldedCols(boardColumns.map((c) => c.key)) }]),
+          ...(foldedCols.length > 0 ? [{ key: "unfold-all", icon: "maximize", label: t("กางทุกคอลัมน์", "Expand all columns"), hint: foldedCols.length, onSelect: () => saveFoldedCols([]) }] : []),
+        ] : [
+          { type: "submenu", key: "gcols", icon: "layout-grid", label: t("การ์ดต่อแถว", "Cards per row"), hint: galleryCols, width: 220,
+            render: () => <div className="p-2"><GalleryColumnsControl cols={galleryCols} onChange={setGalleryCols} /></div> },
+        ]),
+        { type: "divider", key: "d3" },
+        { type: "toggle", key: "strip", icon: "color-swatch", label: t("แถบสีแบรนด์", "Brand strip"), on: brandStrip, onSelect: toggleBrandStrip,
+          title: t("แถบสีแบรนด์ด้านซ้ายการ์ด (จำค่าของคุณ) — เปลี่ยนสีแบรนด์ได้ที่เมนูแบรนด์", "Brand color strip on the left of each card (remembered for you)") },
+      ] as MenuItem[],
+    },
+    {
+      key: "settings", icon: "settings", label: t("ตั้งค่า", "Settings"), width: 230,
+      items: [
+        ...(isDesktop ? [{ type: "submenu", key: "hover", icon: "eye", label: t("ชี้การ์ดแล้วโชว์", "Card hover preview"), hint: hoverPref.on ? t("เปิด", "On") : t("ปิด", "Off"), width: 300,
+          render: () => <SheetHoverSettingsPanel pref={hoverPref} /> }] : []),
+        { key: "status", icon: "arrows-shuffle", label: t("จัดการสถานะ", "Manage statuses"), onSelect: () => setStatusMgr(true) },
+        { key: "brands", icon: "tag", label: t("ตั้งค่าแบรนด์", "Brand settings"), onSelect: () => setBrandSettingsOpen(true) },
+      ] as MenuItem[],
+    },
+  ] as MenuDef[]).filter((m) => m.items.some((i) => i.type !== "divider" && i.type !== "section"));
 
   // การ์ดใบงาน (ของกลางในโมดูล ./dashboard-cards) — แกลเลอรี/บอร์ด ใช้ค่าร่วมชุดเดียวกัน
   // ⏳ ติ๊ก "รออะไรอยู่" บนการ์ด → อัปเดตสรุปของใบนั้นในรายการทันที (ไม่ต้องโหลดทั้งหน้า)
@@ -677,13 +784,6 @@ export function DesignDashboard() {
                     <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-amber-500" /> {t("ใกล้ครบ", "Due soon")}</span>
                     <span className="inline-flex items-center gap-1"><span className="h-2 w-2 rounded-full bg-emerald-500" /> {t("ปิดงาน", "Closed")}</span>
                   </div>
-                  <button
-                    data-gg-action
-                    onClick={() => setStatusMgr(true)}
-                    className="inline-flex h-8 items-center rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-                  >
-                    {t("จัดการสถานะ", "Manage statuses")}
-                  </button>
                 </div>
               </div>
               )}
@@ -710,97 +810,20 @@ export function DesignDashboard() {
                 </div>
               ) : (
               <div className="mb-4 flex flex-wrap items-center gap-2">
-                <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("🔍 ค้นหารหัส / ชื่องาน / แบรนด์...", "🔍 Search code / job name / brand...")}
-                  className="h-9 min-w-[180px] flex-1 rounded-md border border-slate-200 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
-                <div className="flex flex-wrap items-center gap-1">
-                  {([["all", t("ทั้งหมด", "All")], ["active", t("🛠 กำลังทำ", "🛠 In progress")], ["urgent", t("🔴 ด่วน", "🔴 Urgent")], ["soon", t("🟠 ใกล้กำหนด", "🟠 Due soon")], ["closed", t("✅ ปิดงาน", "✅ Closed")]] as const).map(([key, label]) => (
-                    <button key={key} type="button" onClick={() => setQuickFilter(key)}
-                      className={`h-9 rounded-md border px-3 text-xs font-medium transition ${quickFilter === key ? "border-slate-900 bg-slate-900 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>{label}</button>
-                  ))}
+                <div className="relative min-w-[200px] max-w-sm flex-1">
+                  <Icon value="i:search" className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[15px] text-slate-400" />
+                  <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("ค้นหารหัส / ชื่องาน / แบรนด์...", "Search code / job name / brand...")}
+                    className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 text-sm focus:outline-none focus:ring-2 focus:ring-amber-300" />
                 </div>
-                {/* ส่งใบงานขึ้นกระดานวางแผน (Campaign Canvas) — ติ๊กเลือกหลายใบแล้วส่งทีเดียว */}
-                {canTasks && (
-                  <button type="button" onClick={() => (pickMode && pickPurpose === "board" ? exitPickMode() : startPick("board"))}
-                    title={t("ติ๊กเลือกใบงานแล้วส่งขึ้นกระดานวางแผนของแคมเปญ", "Select sheets and send them to a campaign planning board")}
-                    className={`h-9 rounded-md border px-3 text-xs font-medium transition ${pickMode && pickPurpose === "board" ? "border-indigo-600 bg-indigo-600 text-white" : "border-indigo-200 bg-white text-indigo-700 hover:bg-indigo-50"}`}>
-                    {pickMode && pickPurpose === "board" ? t("✕ ออกจากโหมดเลือก", "✕ Exit select mode") : t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}
+                {/* แถบเมนู (ของกลาง components/menu-bar): ชี้แล้วเมนูโผล่ — ตัวกรอง · ทำงาน · มุมมอง · ตั้งค่า (เจ้าของขอ 2026-11-07 ให้แถบไม่รก) */}
+                <MenuBar menus={toolbarMenus} />
+                {pickMode && (
+                  <button type="button" onClick={exitPickMode}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-full bg-slate-900 px-3 text-xs font-medium text-white hover:bg-slate-700">
+                    {pickPurpose === "board" ? t("กำลังเลือก: ส่งขึ้นกระดาน", "Selecting: send to board") : pickPurpose === "order" ? t("กำลังเลือก: ลงออเดอร์", "Selecting: add orders") : t("กำลังเลือก: สรุปงาน", "Selecting: summary")}
+                    <Icon value="i:x" className="text-[13px]" />
                   </button>
                 )}
-                {/* 📦 ลงออเดอร์: ติ๊กใบงานหลายใบ → ป๊อปลงออเดอร์กลาง (ตัวเดียวกับหน้าใบสั่งขาย) */}
-                {canOrder && (
-                  <button type="button" onClick={() => (pickMode && pickPurpose === "order" ? exitPickMode() : startPick("order"))}
-                    title={t("ติ๊กเลือกใบงานแล้วลงเป็นออเดอร์ลูกค้า (ใบสั่งขาย) + จับชุด", "Select sheets and add them as customer orders")}
-                    className={`inline-flex h-9 items-center gap-1 rounded-md border px-3 text-xs font-medium transition ${pickMode && pickPurpose === "order" ? "border-orange-600 bg-orange-600 text-white" : "border-orange-200 bg-white text-orange-700 hover:bg-orange-50"}`}>
-                    {pickMode && pickPurpose === "order" ? t("✕ ออกจากโหมดลงออเดอร์", "✕ Exit order mode") : <><Icon name="cart" /> {t("ลงออเดอร์", "Add orders")}</>}
-                  </button>
-                )}
-                {/* 📋 สรุปงาน: สรุปใหม่ (ติ๊กเลือกใบที่ยังไม่ปิด) / เปิดสรุปที่บันทึกไว้ — ป๊อปของกลาง design-sheet-summary */}
-                {canEdit && (
-                  <div className="relative" ref={summaryAnchorRef}>
-                    {pickMode && pickPurpose === "summary" ? (
-                      <button type="button" onClick={exitPickMode}
-                        className="h-9 rounded-md border border-teal-600 bg-teal-600 px-3 text-xs font-medium text-white">✕ {t("ออกจากโหมดสรุป", "Exit summary mode")}</button>
-                    ) : (
-                      <button type="button" onClick={() => setSummaryMenuOpen((o) => !o)} title={t("สรุปงานที่เลือก → พิมพ์ / PDF / คัดลอกเป็นรูป", "Summarize selected jobs → print / PDF / copy as image")}
-                        className="h-9 rounded-md border border-teal-200 bg-white px-3 text-xs font-medium text-teal-700 hover:bg-teal-50">📋 {t("สรุปงาน", "Summary")} ▾</button>
-                    )}
-                  </div>
-                )}
-                {/* เลือกจำนวนการ์ดต่อแถว (ของกลาง) — เฉพาะมุมมองแกลเลอรี */}
-                {viewMode === "gallery" && !isPhone && (
-                  <GalleryColumnsControl cols={galleryCols} onChange={setGalleryCols} className="ml-auto" />
-                )}
-                {/* ซ่อน/โชว์คอลัมน์สถานะบนบอร์ด (จำรายคน) — ค่าเริ่มต้นซ่อน ยกเลิก + ทำตัวอย่างใบเดียว */}
-                {viewMode === "board" && (
-                  <div className="relative" ref={hideColsAnchorRef}>
-                    <button type="button" onClick={() => setHideColsOpen((o) => !o)}
-                      title={hiddenBoardColumns.length ? `${t("ซ่อนอยู่", "Hidden")}: ${hiddenBoardColumns.map((c) => c.label).join(", ")}` : t("เลือกคอลัมน์สถานะที่จะโชว์บนบอร์ด", "Choose status columns to show on the board")}
-                      className={`h-9 rounded-md border px-3 text-xs font-medium transition ${hiddenBoardColumns.length ? "border-amber-300 bg-amber-50 text-amber-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                      👁 {hiddenBoardColumns.length ? t(`ซ่อน ${hiddenBoardColumns.length} คอลัมน์`, `${hiddenBoardColumns.length} hidden`) : t("คอลัมน์", "Columns")} ▾
-                    </button>
-                    <FloatingDropdown anchorRef={hideColsAnchorRef} open={hideColsOpen} onClose={() => setHideColsOpen(false)} minWidth={260} maxWidth={320}>
-                      <div className="rounded-lg border border-slate-200 bg-white p-1.5 shadow-2xl">
-                        <div className="px-2 py-1 text-[11px] font-medium text-slate-500">{t("คอลัมน์สถานะบนบอร์ด (ติ๊ก = โชว์)", "Status columns on the board (checked = shown)")}</div>
-                        {allBoardColumns.map((c) => (
-                          <label key={c.key} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 hover:bg-slate-50">
-                            <input type="checkbox" checked={!hiddenSet.has(c.key)} onChange={() => toggleHiddenCol(c.key)} className="h-4 w-4" />
-                            <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: c.color }} />
-                            <span className="min-w-0 flex-1 truncate">{c.label}</span>
-                            <span className="text-[11px] text-slate-400">{c.sheets.length}</span>
-                          </label>
-                        ))}
-                        <div className="mt-1 flex gap-1 border-t border-slate-100 pt-1.5">
-                          <button type="button" onClick={() => saveHiddenCols([])} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">{t("แสดงทั้งหมด", "Show all")}</button>
-                          <button type="button" onClick={() => saveHiddenCols(DEFAULT_HIDDEN_COLS)} className="h-7 flex-1 rounded-md border border-slate-200 text-[11px] text-slate-600 hover:bg-slate-50">{t("ค่าเริ่มต้น", "Default")}</button>
-                        </div>
-                      </div>
-                    </FloatingDropdown>
-                  </div>
-                )}
-                {/* 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (ตั้งค่าต่อคน) — จอคอมเท่านั้น (ทัชไม่เด้ง) */}
-                {isDesktop && <SheetHoverSettingsButton pref={hoverPref} />}
-                {/* แถบสีแบรนด์ซ้ายการ์ด — เปิด/ปิดต่อคน (ใช้ทั้งบอร์ดและการ์ดรูปใหญ่) · สีตั้งที่ /master/brands */}
-                <button type="button" onClick={toggleBrandStrip} aria-pressed={brandStrip}
-                  title={t("แถบสีแบรนด์ด้านซ้ายการ์ด (จำค่าของคุณ) — เปลี่ยนสีแบรนด์ได้ที่เมนูแบรนด์", "Brand color strip on the left of each card (remembered for you) — change brand colors in Brands")}
-                  className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition ${brandStrip ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-                  <Icon name="design" /> {t("แถบสีแบรนด์", "Brand strip")}: {brandStrip ? t("เปิด", "On") : t("ปิด", "Off")}
-                </button>
-                {/* ขนาดการ์ดบนบอร์ด: ▦ การ์ดเล็ก / ☰ แถวย่อ — จำรายคน (เฉพาะมุมมองบอร์ด) */}
-                {viewMode === "board" && (
-                  <div className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5" title={t("ขนาดการ์ดบนบอร์ด (จำค่าของคุณ)", "Card size on the board (remembered for you)")}>
-                    {([["compact", t("▦ การ์ดเล็ก", "▦ Small cards")], ["row", t("☰ แถวย่อ", "☰ Compact rows")]] as const).map(([key, label]) => (
-                      <button key={key} type="button" onClick={() => changeCardSize(key)}
-                        className={`h-8 rounded px-2.5 text-xs font-medium transition ${cardSize === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
-                    ))}
-                  </div>
-                )}
-                {/* สลับมุมมอง: บอร์ด Kanban ↔ การ์ดรูปใหญ่ (แกลเลอรี) — จำค่ารายคน */}
-                <div className="flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5">
-                  {([["board", t("🗂️ บอร์ด", "🗂️ Board")], ["gallery", t("🖼️ การ์ดรูปใหญ่", "🖼️ Large cards")]] as const).map(([key, label]) => (
-                    <button key={key} type="button" onClick={() => changeViewMode(key)}
-                      className={`h-8 rounded px-2.5 text-xs font-medium transition ${viewMode === key ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}>{label}</button>
-                  ))}
-                </div>
               </div>
               )}
 
@@ -820,7 +843,7 @@ export function DesignDashboard() {
                 </div>
               ) : (
                 /* ห้ามใส่ overflow-* ที่กรอบนี้ — จะทำให้หัวคอลัมน์ sticky ยึดกับกรอบแทนหน้าจอ (คอลัมน์พอดีจอแล้ว ไม่ต้อง scroll แนวนอน) */
-                <StatusBoard boardColumns={boardColumns} cardSize={cardSize} renderBoardCard={renderBoardCard} renderGalleryCard={renderGalleryCard} isDesktop={isDesktop} isPhone={isPhone} dropTargetStatus={dropTargetStatus} handleColumnDragOver={handleColumnDragOver} handleColumnDragLeave={handleColumnDragLeave} handleColumnDrop={handleColumnDrop} brandTheme={brandTheme} toggleHiddenCol={toggleHiddenCol} expandedCols={expandedCols} setExpandedCols={setExpandedCols} phoneCol={phoneCol} setPhoneStatus={setPhoneStatus} stickyTop={sticky.below} />
+                <StatusBoard boardColumns={boardColumns} cardSize={cardSize} renderBoardCard={renderBoardCard} renderGalleryCard={renderGalleryCard} isDesktop={isDesktop} isPhone={isPhone} dropTargetStatus={dropTargetStatus} handleColumnDragOver={handleColumnDragOver} handleColumnDragLeave={handleColumnDragLeave} handleColumnDrop={handleColumnDrop} brandTheme={brandTheme} foldedCols={foldedSet} onToggleFold={toggleFoldCol} expandedCols={expandedCols} setExpandedCols={setExpandedCols} phoneCol={phoneCol} setPhoneStatus={setPhoneStatus} stickyTop={sticky.below} />
               )}
             </section>
 
@@ -849,8 +872,8 @@ export function DesignDashboard() {
       {/* เลือกแคมเปญปลายทาง (ของกลาง) */}
       <CampaignBoardPicker open={campaignPickOpen} onClose={() => setCampaignPickOpen(false)} sheetIds={Array.from(pickedIds)} />
 
-      {/* 📋 ดรอปดาวน์สรุปงาน (สรุปใหม่ + สรุปที่บันทึกไว้) — จอคอมยึดปุ่มในแถบเครื่องมือ · มือถือยึดปุ่ม ⋯ */}
-      <FloatingDropdown anchorRef={isPhone ? moreAnchorRef : summaryAnchorRef} open={summaryMenuOpen} onClose={() => setSummaryMenuOpen(false)} minWidth={300} maxWidth={380}>
+      {/* 📋 ดรอปดาวน์สรุปงาน (สรุปใหม่ + สรุปที่บันทึกไว้) — มือถือยึดปุ่ม ⋯ · จอคอมอยู่ในเมนู "ทำงาน → สรุปงาน" */}
+      <FloatingDropdown anchorRef={moreAnchorRef} open={summaryMenuOpen} onClose={() => setSummaryMenuOpen(false)} minWidth={300} maxWidth={380}>
         <SummaryListMenu reloadKey={summaryReload} onNew={() => { setSummaryMenuOpen(false); startPick("summary"); }} onOpen={(id) => openSummary(id)} />
       </FloatingDropdown>
       {summaryBuilder && (
