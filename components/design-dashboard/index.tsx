@@ -4,7 +4,6 @@ import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DragEvent } from "react";
-import type { AuditLogEntry } from "@/app/api/audit-logs/route";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { apiFetch } from "@/lib/api";
 import { tr } from "@/lib/lang";
@@ -25,13 +24,11 @@ import { BrandThemedShell, useBrandTheme } from "@/components/brand-theme/provid
 import { BrandThemeBuilder } from "@/components/brand-theme-builder";
 import { useViewportLayout, useDeviceMode, DeviceModeToggle, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
 import { useStickyHeader } from "@/components/sticky-header";
-import { type ListResponse, type StatusResponse, type AuditResponse, type MoveMessage, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, LoadingCard } from "./dashboard-helpers";
+import { type ListResponse, type StatusResponse, type MoveMessage, type BrandSummary, type StatusColumn, type BrandGroup, GROUP_KEY, MINE_KEY, GROUP_LABEL, DEFAULT_HIDDEN_COLS, DASHBOARD_LIMIT, readApi, safeColor, brandKeyOf, brandNameOf, sheetIsOwn, daysUntil, isUrgent, LoadingCard } from "./dashboard-helpers";
 import { BoardCard, GalleryCard } from "./dashboard-cards";
 import { BrandBar } from "./brand-bar";
 import { BrandSettingsModal } from "./brand-settings-modal";
-import { DashboardStats } from "./dashboard-stats";
 import { StatusBoard } from "./status-board";
-import { AuditFeed } from "./audit-feed";
 import { PickActionBar } from "./pick-action-bar";
 import { LineInboxButton, LineInboxDrawer, useLineInboxCount } from "./line-inbox";
 import type { LineInboxItem, MergeSheetOption } from "@/lib/design-line-inbox-shared";
@@ -57,7 +54,6 @@ export function DesignDashboard() {
   const canTasks = useCanSendToBoard();   // มีสิทธิ์เข้าแอปงาน (ที่กระดานแคมเปญอยู่) ไหม — ไม่มี = ไม่โชว์ปุ่ม
   const [sheets, setSheets] = useState<DesignSheetListItem[]>([]);
   const [statusRows, setStatusRows] = useState<WfStatusRow[]>([]);
-  const [auditRows, setAuditRows] = useState<AuditLogEntry[]>([]);
   const [total, setTotal] = useState(0);
   const [selectedBrandKey, setSelectedBrandKey] = useState(GROUP_KEY.customer);   // แบรนด์เดียว หรือ "ทั้งกลุ่ม" (GROUP_KEY) หรือ ⭐ แบรนด์ของฉัน (MINE_KEY)
   const brandPicked = useRef(false);   // ผู้ใช้กดเลือกเองแล้ว = ไม่สลับไป "แบรนด์ของฉัน" อัตโนมัติ
@@ -290,15 +286,7 @@ export function DesignDashboard() {
     setError(null);
 
     async function loadDashboard() {
-      // ฟีดความเคลื่อนไหว (ประวัติ) โหลดแยก ไม่ให้หน้ารอ — ตารางประวัติใหญ่ ช้าได้ 1–3 วิ (เดิมรอพร้อมรายการใบงาน → ทั้งหน้าค้าง "กำลังโหลด")
-      void apiFetch("/api/audit-logs?entity_type=design_sheet&limit=40")
-        .then(async (response) => (response.ok ? (await response.json() as AuditResponse) : { data: [], total: 0, error: null }))
-        .catch(() => ({ data: [], total: 0, error: null } satisfies AuditResponse))
-        .then((auditJson) => {
-          if (!alive) return;
-          // กรอง canvas_update (ออโต้เซฟกระดานวาด) ออก ไม่ให้ถล่มฟีด แล้วเอา 6 เหตุการณ์ล่าสุดที่มีความหมาย
-          setAuditRows(Array.isArray(auditJson.data) ? auditJson.data.filter((r) => r.action !== "canvas_update").slice(0, 6) : []);
-        });
+      // (ฟีดประวัติ Audit Log ท้ายหน้า เอาออกแล้ว — เจ้าของขอ 2026-11-07 · ดูประวัติรายใบได้ในป๊อปใบงาน)
       const [listJson, statusJson] = await Promise.all([
         apiFetch(`/api/design-sheets?limit=${DASHBOARD_LIMIT}&archived=0&sort_by=updated_at&sort_dir=desc`)
           .then((response) => readApi<ListResponse>(response, tr("โหลดใบงานไม่สำเร็จ", "Couldn't load design sheets"))),
@@ -454,9 +442,8 @@ export function DesignDashboard() {
   };
   const activeJobs = filteredSheets.filter((sheet) => !statusMeta.finished.has(sheet.status)).length;
   const urgentJobs = filteredSheets.filter((sheet) => isUrgent(sheet, statusMeta)).length;
-  const finishedJobs = filteredSheets.filter((sheet) => statusMeta.finished.has(sheet.status)).length;
-  const visibleTotal = selectedBrand ? selectedBrand.total : mineOn ? favBrands.reduce((n, b) => n + b.total, 0) : groups[selectedGroup].total;
-  const loadedLimitNote = total > sheets.length ? t(`แสดงล่าสุด ${sheets.length.toLocaleString("th-TH")} จาก ${total.toLocaleString("th-TH")} งาน`, `Showing latest ${sheets.length.toLocaleString("th-TH")} of ${total.toLocaleString("th-TH")} jobs`) : t("ข้อมูลจากระบบจริง", "Live data");
+  // โหลดมาไม่ครบทุกใบ (เกิน DASHBOARD_LIMIT) → บอกไว้ใต้หัวบอร์ด (เดิมอยู่ในการ์ดสถิติที่เอาออกแล้ว)
+  const loadedLimitNote = total > sheets.length ? t(`แสดงล่าสุด ${sheets.length.toLocaleString("th-TH")} จาก ${total.toLocaleString("th-TH")} งาน`, `Showing latest ${sheets.length.toLocaleString("th-TH")} of ${total.toLocaleString("th-TH")} jobs`) : null;
 
   const allBoardColumns = statusColumns.map((column) => ({
     ...column,
@@ -766,9 +753,8 @@ export function DesignDashboard() {
         {/* ป๊อปอัปตั้งค่าแบรนด์ (เรียง/ซ่อน) — บันทึกรายคน */}
         <BrandSettingsModal brandSettingsOpen={brandSettingsOpen} setBrandSettingsOpen={setBrandSettingsOpen} orderedAll={orderedAll} brandPrefs={brandPrefs} topBrands={topBrands} moveBrand={moveBrand} brandMark={brandMark} toggleHiddenBrand={toggleHiddenBrand} />
 
-        {/* สถิติ (แถวป้ายเล็กด้านบน) + บอร์ด (เต็มกว้าง) */}
+        {/* บอร์ด (เต็มกว้าง) — แถวการ์ดสถิติ 4 ใบเอาออกแล้ว (เจ้าของขอ 2026-11-07 · จำนวนต่อแบบดูได้ในเมนูตัวกรอง) */}
         <div className="space-y-4">
-          <DashboardStats isPhone={isPhone} loading={loading} visibleTotal={visibleTotal} total={total} sheets={sheets} loadedLimitNote={loadedLimitNote} scopeLabel={scopeLabel} activeJobs={activeJobs} urgentJobs={urgentJobs} finishedJobs={finishedJobs} brandTheme={brandTheme} />
 
           <main className="min-w-0 space-y-4">
             <section data-gg-panel className={`min-w-0 rounded-lg border border-white/70 bg-white/80 shadow-sm backdrop-blur ${isPhone ? "p-3" : "p-4"}`}>
@@ -776,7 +762,7 @@ export function DesignDashboard() {
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold text-slate-800">{t("เส้นทางสถานะจาก Workflow กลาง", "Status path from the central Workflow")}</h2>
-                  <p className="text-xs text-slate-400">{scopeLabel} • {filteredSheets.length.toLocaleString("th-TH")} {t("งานที่โหลดมา", "jobs loaded")}</p>
+                  <p className="text-xs text-slate-400">{scopeLabel} • {filteredSheets.length.toLocaleString("th-TH")} {t("งานที่โหลดมา", "jobs loaded")}{loadedLimitNote ? <> • <span className="text-amber-600">{loadedLimitNote}</span></> : null}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -847,7 +833,6 @@ export function DesignDashboard() {
               )}
             </section>
 
-            <AuditFeed isPhone={isPhone} isDesktop={isDesktop} brandTheme={brandTheme} auditRows={auditRows} />
           </main>
         </div>
         {/* มือถือ: ปุ่ม ＋ ลอยมุมล่างขวา (ซ่อนตอนอยู่โหมดเลือกส่งขึ้นกระดาน — แถบล่างใช้พื้นที่นั้น) */}

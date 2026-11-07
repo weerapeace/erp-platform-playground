@@ -86,6 +86,8 @@ export type LineItemsGridProps<T> = {
    *  พอ readonly กลายเป็น false ตารางโฟกัสช่องที่ดับเบิลคลิกให้เอง (ช่องนั้นไม่มีที่กรอก → ช่องแรกของแถว)
    *  หรือเพิ่มบรรทัดใหม่ (onAdd) แล้วโฟกัสบรรทัดนั้น */
   onRequestEdit?: (row: T | null) => void;
+  /** สีพื้นรายแถว (แทนพื้นขาวปกติ) — เช่น ใบตีราคา: บรรทัดที่รวม = 0 เป็นพื้นแดงเตือน */
+  rowClassName?: (row: T) => string | undefined;
 };
 
 // ช่องที่โฟกัสได้หลังเข้าโหมดแก้ (ปุ่มเปิด dropdown ต้องมี data-field-trigger)
@@ -101,7 +103,7 @@ const fmtNum = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH"
 export function LineItemsGrid<T>({
   rows, columns, onChange, rowId, readonly = false, enableReorder = true,
   groupByOptions = [], addLabel = "＋ เพิ่มบรรทัด", onAdd, onDuplicate, emptyText = "ยังไม่มีรายการ", emptyAction, footer, addExtra, storageKey,
-  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit,
+  stickyHeader = false, maxHeight, defaultSort = null, dense = false, selectable = false, bulkBar, groupNote, variant = "boxed", onRequestEdit, rowClassName,
 }: LineItemsGridProps<T>) {
   const lines = variant === "lines";
   const [sort, setSort]       = useState<SortState>(defaultSort);
@@ -390,7 +392,7 @@ export function LineItemsGrid<T>({
                     </div>
                   ) : (
                     <GridRow key={rowId(d.row)} id={rowId(d.row)} template={template} canDrag={canDrag} readonly={readonly}
-                      columns={columns} row={d.row} dense={dense} lines={lines}
+                      columns={columns} row={d.row} dense={dense} lines={lines} toneClass={rowClassName?.(d.row)}
                       selectable={selectable} selected={selected.has(rowId(d.row))} onToggleSelect={() => toggleSel(rowId(d.row))}
                       onUpdate={(patch) => update(rowId(d.row), patch)} onRemove={() => remove(rowId(d.row))}
                       onDuplicate={onDuplicate ? () => duplicate(rowId(d.row)) : undefined}
@@ -428,13 +430,14 @@ export function LineItemsGrid<T>({
 // ---- single sortable row ----
 function GridRow<T>({
   id, template, canDrag, readonly, columns, row, onUpdate, onRemove, onDuplicate, dense = false, lines = false,
-  selectable = false, selected = false, onToggleSelect, onRequestEdit,
+  selectable = false, selected = false, onToggleSelect, onRequestEdit, toneClass,
 }: {
   id: string; template: string; canDrag: boolean; readonly: boolean;
   columns: LineColumn<T>[]; row: T;
   onUpdate: (patch: Partial<T>) => void; onRemove: () => void; onDuplicate?: () => void; dense?: boolean; lines?: boolean;
   selectable?: boolean; selected?: boolean; onToggleSelect?: () => void;
   onRequestEdit?: (col: string | null) => void;
+  toneClass?: string;
 }) {
   // โหมดเส้นบรรทัด: ปุ่มลาก/ทำซ้ำ/ลบ ซ่อนไว้จนชี้แถว (จอสัมผัสไม่มี hover → โชว์ตลอด)
   const hoverOnly = lines ? "[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100" : "";
@@ -450,7 +453,7 @@ function GridRow<T>({
       // ดับเบิลคลิกตอนดูอย่างเดียว → ขอแก้แถวนี้ (ช่องที่ล็อกไม่รับเมาส์ — .lig-dbl ใน globals.css — เหตุการณ์เลยตกถึงแถว)
       onDoubleClick={onRequestEdit ? (e) => { window.getSelection()?.removeAllRanges(); onRequestEdit((e.target as HTMLElement).closest<HTMLElement>("[data-col]")?.dataset.col ?? null); } : undefined}
       title={onRequestEdit ? "ดับเบิลคลิกเพื่อแก้แถวนี้" : undefined}
-      className={`${onRequestEdit ? "lig-dbl" : ""} ${lines ? "group" : ""} grid items-center border-b border-slate-100 ${selected ? "bg-indigo-50/60" : lines ? "bg-white hover:bg-slate-50" : "bg-white hover:bg-slate-50/60"}`}>
+      className={`${onRequestEdit ? "lig-dbl" : ""} ${lines ? "group" : ""} grid items-center border-b border-slate-100 ${selected ? "bg-indigo-50/60" : toneClass ? toneClass : lines ? "bg-white hover:bg-slate-50" : "bg-white hover:bg-slate-50/60"}`}>
       {selectable && (
         <span className="flex items-center justify-center">
           <input type="checkbox" aria-label="เลือกแถวนี้" checked={selected} disabled={readonly}

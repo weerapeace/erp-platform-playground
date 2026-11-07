@@ -9,6 +9,7 @@
  *     · submenu (เมนูย่อยซ้อน — รายการ หรือ render แผงเอง เช่น ตัวเลือกช่องที่จะโชว์) — ชิดขอบจอขวาแล้วพลิกไปซ้ายเอง
  *   • เมนูที่ "กำลังใช้งาน" (active เช่น ตัวกรองที่เลือกอยู่) = ปุ่มสีฟ้า + ปุ่ม × ล้าง (onClear)
  *   • ไอคอนเส้นจากชุดไอคอนกลาง (<Icon value="i:filter" />) — ไม่ใช้อีโมจิสี
+ *   • placement="up" = เมนูเด้งขึ้นด้านบน (แถบปุ่มล่างของป๊อปอัป) · align="end" = แผงชิดขวาของหัวเมนู
  *
  * ต่างจาก Popover (components/popover): Popover = กดเปิด มีฉากบังเต็มจอ (ชี้ข้ามเมนูไม่ได้) ไม่มีเมนูย่อยซ้อน
  * ใช้:
@@ -29,7 +30,7 @@ import { useT } from "@/components/i18n";
 
 type Base = { key: string; label: ReactNode; icon?: string; hint?: ReactNode; disabled?: boolean; title?: string };
 export type MenuItem =
-  | (Base & { type?: "item"; onSelect?: () => void; keepOpen?: boolean })
+  | (Base & { type?: "item"; onSelect?: () => void; keepOpen?: boolean; /** ตัวอักษรแดง (คำสั่งลบ) */ danger?: boolean })
   | (Base & { type: "radio"; checked: boolean; onSelect: () => void; keepOpen?: boolean })
   | (Base & { type: "check"; checked: boolean; onSelect: () => void; keepOpen?: boolean })
   | (Base & { type: "toggle"; on: boolean; onSelect: () => void; keepOpen?: boolean })
@@ -49,12 +50,19 @@ export type MenuDef = {
   title?: string;
   /** ความกว้างแผง (px) ตั้งต้น 240 */
   width?: number;
+  /** แผงชิดขวาของหัวเมนู (เมนูท้ายแถบที่ชิดขอบขวา) */
+  align?: "start" | "end";
+  /** ปุ่มหัวเมนูแบบไอคอนอย่างเดียว (เช่น ⋯) — ใส่ label ไว้เป็นคำอธิบายตอนชี้ */
+  iconOnly?: boolean;
+  /** สีแดง (เมนูที่มีแต่คำสั่งอันตราย เช่น ลบ) */
+  danger?: boolean;
   items: MenuItem[];
 };
 
 const HOVER_CLOSE_MS = 200;
 const canHover = () => typeof window !== "undefined" && window.matchMedia?.("(hover: hover)").matches;
 const iconValue = (v?: string) => (v ? (v.includes(":") ? v : `i:${v}`) : undefined);
+const isDanger = (item: MenuItem) => (item.type === undefined || item.type === "item") && !!item.danger;
 
 function Mark({ item }: { item: MenuItem }) {
   if (item.type === "radio") return <span className={`h-3.5 w-3.5 shrink-0 rounded-full border-[1.5px] ${item.checked ? "border-[4px] border-slate-800" : "border-slate-300"}`} aria-hidden />;
@@ -64,7 +72,7 @@ function Mark({ item }: { item: MenuItem }) {
   return null;
 }
 
-function Panel({ items, width, close, nested = false }: { items: MenuItem[]; width?: number; close: () => void; nested?: boolean }) {
+function Panel({ items, width, close, nested = false, up = false }: { items: MenuItem[]; width?: number; close: () => void; nested?: boolean; up?: boolean }) {
   const [sub, setSub] = useState<string | null>(null);
   const subTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (subTimer.current) clearTimeout(subTimer.current); }, []);
@@ -90,9 +98,9 @@ function Panel({ items, width, close, nested = false }: { items: MenuItem[]; wid
               aria-checked={item.type === "radio" || item.type === "check" ? item.checked : item.type === "toggle" ? item.on : undefined}
               aria-haspopup={isSub ? "menu" : undefined} aria-expanded={isSub ? subOpen : undefined}
               disabled={item.disabled} title={item.title} onClick={select}
-              className={`flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-left text-[13px] text-slate-700 disabled:cursor-not-allowed disabled:opacity-40 ${subOpen ? "bg-slate-100" : "hover:bg-slate-100"}`}>
+              className={`flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-left text-[13px] disabled:cursor-not-allowed disabled:opacity-40 ${isDanger(item) ? "text-rose-600 hover:bg-rose-50" : `text-slate-700 ${subOpen ? "bg-slate-100" : "hover:bg-slate-100"}`}`}>
               <Mark item={item} />
-              {item.icon && <Icon value={iconValue(item.icon)} className="shrink-0 text-[15px] text-slate-400" />}
+              {item.icon && <Icon value={iconValue(item.icon)} className={`shrink-0 text-[15px] ${isDanger(item) ? "text-rose-500" : "text-slate-400"}`} />}
               <span className="min-w-0 flex-1 truncate">{item.label}</span>
               {item.hint != null && item.hint !== "" && <span className="shrink-0 text-[11px] tabular-nums text-slate-400">{item.hint}</span>}
               {item.type === "toggle" && (
@@ -102,7 +110,7 @@ function Panel({ items, width, close, nested = false }: { items: MenuItem[]; wid
               )}
               {isSub && <Icon value="i:chevron-down" className="shrink-0 -rotate-90 text-[13px] text-slate-400" />}
             </button>
-            {subOpen && <SubPanel item={item} close={close} />}
+            {subOpen && <SubPanel item={item} close={close} up={up} />}
           </div>
         );
       })}
@@ -111,7 +119,7 @@ function Panel({ items, width, close, nested = false }: { items: MenuItem[]; wid
 }
 
 /** แผงเมนูย่อย — วางขวาของรายการ · ชิดขอบจอแล้วพลิกไปซ้าย */
-function SubPanel({ item, close }: { item: Extract<MenuItem, { type: "submenu" }>; close: () => void }) {
+function SubPanel({ item, close, up }: { item: Extract<MenuItem, { type: "submenu" }>; close: () => void; up?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [left, setLeft] = useState(false);
   useLayoutEffect(() => {
@@ -121,17 +129,18 @@ function SubPanel({ item, close }: { item: Extract<MenuItem, { type: "submenu" }
     if (r.right > window.innerWidth - 8) setLeft(true);
   }, []);
   return (
-    <div ref={ref} className={`absolute top-[-4px] z-[61] ${left ? "right-full mr-1" : "left-full ml-1"}`}>
+    <div ref={ref} className={`absolute z-[61] ${up ? "bottom-[-4px]" : "top-[-4px]"} ${left ? "right-full mr-1" : "left-full ml-1"}`}>
       {item.render && item.bare
         ? <div role="menu" style={{ minWidth: item.width ?? 240 }}>{item.render(close)}</div>
         : item.render
         ? <div role="menu" className="rounded-xl border border-slate-200 bg-white p-1 shadow-xl" style={{ minWidth: item.width ?? 240 }}>{item.render(close)}</div>
-        : <Panel items={item.items ?? []} width={item.width} close={close} nested />}
+        : <Panel items={item.items ?? []} width={item.width} close={close} nested up={up} />}
     </div>
   );
 }
 
-export function MenuBar({ menus, className = "" }: { menus: MenuDef[]; className?: string }) {
+export function MenuBar({ menus, className = "", placement = "down" }: { menus: MenuDef[]; className?: string; /** "up" = เมนูเด้งขึ้น (แถบปุ่มล่าง) */ placement?: "down" | "up" }) {
+  const up = placement === "up";
   const t = useT();
   const [openKey, setOpenKey] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -158,25 +167,27 @@ export function MenuBar({ menus, className = "" }: { menus: MenuDef[]; className
           <div key={m.key} className="relative"
             onMouseEnter={() => { if (!canHover()) return; cancelClose(); setOpenKey(m.key); }}
             onMouseLeave={() => { if (!canHover()) return; cancelClose(); timer.current = setTimeout(() => setOpenKey((k) => (k === m.key ? null : k)), HOVER_CLOSE_MS); }}>
-            <button type="button" aria-haspopup="menu" aria-expanded={open} title={m.title}
+            <button type="button" aria-haspopup="menu" aria-expanded={open} title={m.title ?? (m.iconOnly && typeof m.label === "string" ? m.label : undefined)}
+              aria-label={m.iconOnly && typeof m.label === "string" ? m.label : undefined}
               onClick={() => setOpenKey((k) => (k === m.key ? null : m.key))}
               className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-[13px] transition ${m.active
                 ? "bg-blue-50 font-medium text-blue-700 hover:bg-blue-100"
+                : m.danger ? (open ? "bg-rose-50 text-rose-700" : "text-rose-500 hover:bg-rose-50 hover:text-rose-700")
                 : open ? "bg-slate-100 text-slate-900" : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"}`}>
               {m.icon && <Icon value={iconValue(m.icon)} className="text-[15px]" />}
-              <span className="whitespace-nowrap">{m.label}</span>
-              {m.active && m.onClear ? (
+              {!m.iconOnly && <span className="whitespace-nowrap">{m.label}</span>}
+              {m.iconOnly ? null : m.active && m.onClear ? (
                 <span role="button" tabIndex={0} aria-label={m.clearLabel ?? t("ล้าง", "Clear")} title={m.clearLabel ?? t("ล้าง", "Clear")}
                   onClick={(e) => { e.stopPropagation(); m.onClear?.(); setOpenKey(null); }}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.stopPropagation(); m.onClear?.(); } }}
                   className="-mr-1 ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[11px] leading-none hover:bg-blue-200">✕</span>
               ) : (
-                <Icon value="i:chevron-down" className={`text-[12px] transition ${open ? "rotate-180" : ""}`} />
+                <Icon value="i:chevron-down" className={`text-[12px] transition ${open !== up ? "rotate-180" : ""}`} />
               )}
             </button>
             {open && (
-              <div className="absolute left-0 top-full z-[60] pt-1">
-                <Panel items={m.items} width={m.width} close={close} />
+              <div className={`absolute z-[60] ${m.align === "end" ? "right-0" : "left-0"} ${up ? "bottom-full pb-1" : "top-full pt-1"}`}>
+                <Panel items={m.items} width={m.width} close={close} up={up} />
               </div>
             )}
           </div>
