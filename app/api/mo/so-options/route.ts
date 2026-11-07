@@ -62,8 +62,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ใบที่มีสินค้าแบรนด์เดียวกัน (ใช้กรองเมื่อแบรนด์ยังไม่ตั้งลูกค้าประจำ)
   let sameBrandOrders: Set<string> | null = null;
-  const custId = brand?.default_customer?.id ?? null;
-  if (!all && !custId && brand) {
+  // ลูกค้าประจำแบรนด์ (หลายสาขาได้) → เอาใบของลูกค้าทุกรายในรายการ
+  const custIds = new Set((brand?.default_customers ?? []).map((c) => c.id));
+  if (!all && !custIds.size && brand) {
     const info = await brandInfoOfSkus(admin, lines.map((l) => String(l.sku ?? "")));
     sameBrandOrders = new Set(lines.filter((l) => info.get(String(l.sku ?? ""))?.brand_id === brand.brand_id).map((l) => String(l.order_id)));
   }
@@ -71,7 +72,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const out: SoOption[] = [];
   for (const o of orders) {
     const id = String(o.id);
-    if (!all && custId && o.customer_id !== custId) continue;
+    if (!all && custIds.size && !custIds.has(String(o.customer_id ?? ""))) continue;
     if (!all && sameBrandOrders && !sameBrandOrders.has(id)) continue;
     const ls = linesOf.get(id) ?? [];
     const prog = soLineProgress(
@@ -92,6 +93,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // ใบที่มีสินค้านี้และยังเปิดผลิตไม่ครบขึ้นก่อน → มีสินค้านี้ → ใหม่สุด
   const rank = (o: SoOption) => (o.lines.some((l) => l.opened + 0.0001 < l.qty) ? 0 : o.lines.length ? 1 : 2);
   out.sort((a, b) => rank(a) - rank(b) || b.order_date.localeCompare(a.order_date));
-  const filtered_by = all ? "all" : custId ? "customer" : sameBrandOrders ? "brand" : "all";
+  const filtered_by = all ? "all" : custIds.size ? "customer" : sameBrandOrders ? "brand" : "all";
   return NextResponse.json({ need, brand, orders: out.slice(0, 60), filtered_by, error: null } satisfies SoOptionsResponse);
 }

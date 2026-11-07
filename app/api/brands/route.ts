@@ -2,13 +2,19 @@
  * แบรนด์ (Brands) — สำหรับตั้งสีประจำแบรนด์ (ใช้ทำกรอบการ์ดบนบอร์ดจ่ายงาน)
  * GET   /api/brands         → รายชื่อแบรนด์ + สี
  * POST  /api/brands         → สร้างแบรนด์ใหม่ { name, color? } (ปุ่ม ＋ ในฟอร์ม Design Sheets)
- * PATCH /api/brands         → ตั้งสี { id, color } · ลูกค้าประจำแบรนด์ { id, default_customer_id } (งานลูกค้า — เติมให้ตอนสร้างใบสั่งขาย)
+ * PATCH /api/brands         → ตั้งสี { id, color }
+ *                              ลูกค้าประจำแบรนด์ (งานลูกค้า — หลายสาขาได้):
+ *                                { id, default_customer_ids: [...] }  ตั้งทั้งรายการ (หน้าแบรนด์)
+ *                                { id, add_default_customer_id }      เพิ่ม 1 ราย (ป๊อปสร้างใบสั่งผลิต "จำลูกค้านี้")
+ *                                { id, default_customer_id }          แบบเดิม = ตั้งเหลือรายเดียว (null = ล้าง)
  * อ่าน/เขียนผ่าน supabaseAdmin + ตรวจ login
+ * กติกากลางลูกค้าหลายราย: lib/brand-customers.ts
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit, auditSnapshot, auditChangeMeta } from "@/lib/audit";
+import { addCustomerId, brandCustomerColumns, brandCustomerIds, cleanCustomerIds, orderCustomers, type BrandCustomer } from "@/lib/brand-customers";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -16,23 +22,29 @@ export const revalidate = 0;
 // หมายเหตุ: logo_url เก็บ "R2 key" ของรูปโลโก้ (แสดงผ่าน /api/r2-image?key=...) ไม่ใช่ URL เต็ม
 // pricing_mode: own = แบรนด์เราเอง มีราคาขายในระบบ · oem = รับจ้างผลิต ราคาคิดต่อออเดอร์ (ใช้ในหน้าแผนผู้บริหาร)
 export type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; pricing_mode?: "own" | "oem";
-  /** ลูกค้าประจำแบรนด์ (งานลูกค้า) — ป๊อปสร้างใบสั่งผลิต/ลงออเดอร์ เติมลูกค้านี้ให้ */
-  default_customer_id?: string | null; default_customer?: { id: string; code: string | null; name: string } | null };
+  /** ลูกค้าประจำแบรนด์ (งานลูกค้า · หลายสาขาได้ เรียงตามที่ตั้ง) — ป๊อปสร้างใบสั่งผลิต/ลงออเดอร์ ใช้กรองและให้เลือก */
+  default_customer_ids?: string[]; default_customers?: BrandCustomer[];
+  /** รายแรกของรายการ (ของเดิมที่ใช้ลูกค้ารายเดียว) */
+  default_customer_id?: string | null; default_customer?: BrandCustomer | null };
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ data: [], error: "ต้อง login" }, { status: 401 });
   const admin = supabaseAdmin();
-  const { data, error } = await admin.from("brands").select("id, name, color, is_customer_job, logo_url, hide_in_artwork, pricing_mode, default_customer_id").eq("is_active", true).order("name", { ascending: true });
+  const { data, error } = await admin.from("brands").select("id, name, color, is_customer_job, logo_url, hide_in_artwork, pricing_mode, default_customer_id, default_customer_ids").eq("is_active", true).order("name", { ascending: true });
   if (error) return NextResponse.json({ data: [], error: error.message }, { status: 500 });
   const rows = (data ?? []) as Brand[];
-  const custIds = [...new Set(rows.map((b) => b.default_customer_id).filter((x): x is string => !!x))];
-  const cust = new Map<string, { id: string; code: string | null; name: string }>();
+  const idsOf = new Map(rows.map((b) => [b.id, brandCustomerIds(b)]));
+  const custIds = [...new Set([...idsOf.values()].flat())];
+  const cust = new Map<string, BrandCustomer>();
   if (custIds.length) {
     const { data: ps } = await admin.from("partners_v2").select("id, code, name_th").in("id", custIds);
     for (const p of (ps ?? []) as { id: string; code: string | null; name_th: string | null }[]) cust.set(p.id, { id: p.id, code: p.code, name: p.name_th ?? p.code ?? "" });
   }
-  return NextResponse.json({ data: rows.map((b) => ({ ...b, default_customer: b.default_customer_id ? cust.get(b.default_customer_id) ?? null : null })), error: null });
+  return NextResponse.json({ data: rows.map((b) => {
+    const list = orderCustomers(idsOf.get(b.id) ?? [], cust);
+    return { ...b, default_customer_ids: list.map((c) => c.id), default_customers: list, default_customer: list[0] ?? null };
+  }), error: null });
 }
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -63,7 +75,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 export async function PATCH(request: NextRequest): Promise<NextResponse> {
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   if (!user) return NextResponse.json({ error: "ต้อง login" }, { status: 401 });
-  let body: { id?: string; name?: string; color?: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; pricing_mode?: string; default_customer_id?: string | null };
+  let body: { id?: string; name?: string; color?: string | null; is_customer_job?: boolean; logo_url?: string | null; hide_in_artwork?: boolean; pricing_mode?: string;
+    default_customer_id?: string | null; default_customer_ids?: unknown; add_default_customer_id?: string | null };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (!body.id) return NextResponse.json({ error: "ไม่พบแบรนด์" }, { status: 400 });
 
@@ -75,13 +88,20 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   // แบรนด์เราเอง (มีราคาขาย) หรือ OEM (ราคาคิดต่อออเดอร์) — ค่าอื่นถือว่า own
   if ("pricing_mode" in body) patch.pricing_mode = body.pricing_mode === "oem" ? "oem" : "own";
   if ("logo_url" in body) patch.logo_url = body.logo_url || null;   // R2 key ของโลโก้ (หรือ null = เอาออก)
-  if ("default_customer_id" in body) {
-    const cid = body.default_customer_id || null;
-    if (cid) {
-      const { data: c } = await admin.from("partners_v2").select("id").eq("id", cid).maybeSingle();
-      if (!c) return NextResponse.json({ error: "ไม่พบลูกค้าที่เลือก" }, { status: 400 });
+  // ลูกค้าประจำแบรนด์ — เขียน 2 ช่องให้ตรงกันเสมอ (รายการ + รายแรก)
+  let custIds: string[] | null = null;
+  if ("default_customer_ids" in body) custIds = cleanCustomerIds(body.default_customer_ids);
+  else if (body.add_default_customer_id) {
+    const { data: cur } = await admin.from("brands").select("default_customer_id, default_customer_ids").eq("id", body.id).maybeSingle();
+    custIds = addCustomerId(brandCustomerIds(cur as Record<string, unknown> | null), String(body.add_default_customer_id));
+  } else if ("default_customer_id" in body) custIds = cleanCustomerIds([body.default_customer_id]);
+  if (custIds) {
+    if (custIds.length) {
+      const { data: found } = await admin.from("partners_v2").select("id").in("id", custIds);
+      const ok = new Set(((found ?? []) as { id: string }[]).map((c) => c.id));
+      if (custIds.some((id) => !ok.has(id))) return NextResponse.json({ error: "ไม่พบลูกค้าที่เลือกบางราย — ลองเลือกใหม่" }, { status: 400 });
     }
-    patch.default_customer_id = cid;
+    Object.assign(patch, brandCustomerColumns(custIds));
   }
   if ("name" in body) {
     const nm = (body.name ?? "").trim();

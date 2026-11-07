@@ -175,7 +175,7 @@ const REF_FIELDS: Record<string, RefTarget | "person"> = {
   sku_id: { table: "skus_v2", label: "code" }, parent_sku_id: { table: "parent_skus_v2", label: "code" },
   company_id: { table: "companies", label: "name" }, department_id: { table: "departments", label: "name" },
   position_id: { table: "positions", label: "name" }, cost_center_id: { table: "cost_centers", label: "name" },
-  supplier_id: PARTNER, partner_id: PARTNER, seller_partner_id: PARTNER, customer_id: PARTNER, default_customer_id: PARTNER,
+  supplier_id: PARTNER, partner_id: PARTNER, seller_partner_id: PARTNER, customer_id: PARTNER, default_customer_id: PARTNER, default_customer_ids: PARTNER,
   assignee_id: "person", assignee_ids: "person", reviewer_id: "person", reviewer_ids: "person", approver_id: "person",
   assigned_by_id: "person", assigned_to: "person", owner_id: "person", user_id: "person", employee_id: "person",
   manager_employee_id: "person", created_by: "person", resolved_by: "person",

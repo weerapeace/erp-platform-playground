@@ -18,6 +18,7 @@ import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { Icon } from "@/components/icon";
 import { CustomerPicker, type CustomerPickerValue, type SkuPickerValue } from "@/components/pickers";
+import type { BrandCustomer } from "@/lib/brand-customers";
 import { DateInput } from "@/components/date-input";
 import { SOLineEditor, VatModeToggle, calculateEditorTotals, emptyLine, vatRateForCompany, type EditorLine, type LineExtraColumn } from "@/components/sales-line-items";
 import { toMajor } from "@/lib/money";
@@ -96,13 +97,15 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
   const [err, setErr] = useState("");
   const [brandMap, setBrandMap] = useState<BrandCustomerMap>({});
   const [autoCustomer, setAutoCustomer] = useState(false);
+  /** ลูกค้าประจำแบรนด์ (ตั้งที่หน้าแบรนด์ · หลายสาขาได้) */
+  const [teamCusts, setTeamCusts] = useState<BrandCustomer[]>([]);
 
   // ── เปิดป๊อป = เริ่มใหม่ (+ รายการตั้งต้น) ──
   useEffect(() => {
     if (!open) return;
     setCustomer(seedCustomer ?? null); setDueDate(""); setPoNo(""); setDefaultGroup(null);
     setLines([]); setMeta({}); setPicked(new Set()); setBulkQty(""); setOpenMo(true); setErr("");    if (seedLines?.length) addSeeds(seedLines, null, []);
-    setAutoCustomer(false);
+    setAutoCustomer(false); setTeamCusts([]);
     if (brand?.id) void (async () => {
       try {
         // ลูกค้าประจำแบรนด์ (ตั้งที่หน้าแบรนด์ — ใช้ทั้งทีม) มาก่อน · ไม่มี = ค่าที่ผู้ใช้คนนี้เคยเลือก
@@ -112,9 +115,13 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
         ]);
         const map = (j.value ?? {}) as BrandCustomerMap;
         setBrandMap(map);
-        const team = ((bj.data ?? []) as { id: string; default_customer?: { id: string; code: string | null; name: string } | null }[])
-          .find((b) => b.id === brand.id)?.default_customer ?? null;
-        const c = team ?? map[brand.id];
+        // ลูกค้าประจำแบรนด์หลายสาขาได้ (lib/brand-customers): รายเดียว = เติมให้ · หลายราย = ให้กดเลือกสาขา
+        //   (เติมให้เฉพาะสาขาที่ผู้ใช้คนนี้เลือกครั้งก่อน — ไม่เดาสาขาเอง)
+        const team = ((bj.data ?? []) as { id: string; default_customers?: BrandCustomer[] }[])
+          .find((b) => b.id === brand.id)?.default_customers ?? [];
+        setTeamCusts(team);
+        const mine = map[brand.id];
+        const c = team.length === 1 ? team[0] : team.length > 1 ? team.find((t) => t.id === mine?.id) ?? null : mine ?? null;
         if (c && !seedCustomer) { setCustomer({ id: c.id, code: c.code, name: c.name } as CustomerPickerValue); setAutoCustomer(true); }
       } catch { /* ไม่มีค่าจำ = เลือกเอง */ }
     })();
@@ -321,8 +328,20 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
           <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
             <div><span className="text-[11px] text-slate-500">ลูกค้า *</span>
               <div className="mt-0.5"><CustomerPicker value={customer} onChange={(v) => { setCustomer(v); setAutoCustomer(false); setErr(""); }} /></div>
-              {autoCustomer && brand?.name && <p className="mt-0.5 text-[11px] text-slate-400">เติมให้จากแบรนด์ {brand.name} (เคยใช้ครั้งก่อน · เปลี่ยนได้)</p>}
-              {!autoCustomer && brand?.id && !customer && <p className="mt-0.5 text-[11px] text-slate-400">เลือกครั้งเดียว — ครั้งหน้าระบบจำลูกค้าของแบรนด์ {brand.name ?? ""} ให้</p>}</div>
+              {teamCusts.length > 1 && (
+                <div className="mt-1 flex flex-wrap items-center gap-1">
+                  <span className="text-[11px] text-slate-400">สาขาของ {brand?.name ?? "แบรนด์"}:</span>
+                  {teamCusts.map((c) => (
+                    <button key={c.id} type="button" title={c.code ? `${c.code} · ${c.name}` : c.name}
+                      onClick={() => { setCustomer({ id: c.id, code: c.code, name: c.name } as CustomerPickerValue); setAutoCustomer(false); setErr(""); }}
+                      className={`h-6 max-w-[200px] truncate rounded-full border px-2 text-[11px] ${customer?.id === c.id ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}>
+                      {c.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {autoCustomer && brand?.name && <p className="mt-0.5 text-[11px] text-slate-400">เติมให้จากแบรนด์ {brand.name} ({teamCusts.length === 1 ? "ลูกค้าประจำแบรนด์" : "เคยใช้ครั้งก่อน"} · เปลี่ยนได้)</p>}
+              {!autoCustomer && brand?.id && !customer && teamCusts.length === 0 && <p className="mt-0.5 text-[11px] text-slate-400">เลือกครั้งเดียว — ครั้งหน้าระบบจำลูกค้าของแบรนด์ {brand.name ?? ""} ให้</p>}</div>
             <label className="block"><span className="text-[11px] text-slate-500">กำหนดส่ง</span>
               <div className="mt-0.5"><DateInput value={dueDate} onChange={setDueDate} /></div></label>
             <label className="block"><span className="text-[11px] text-slate-500">เลข PO ลูกค้า</span>

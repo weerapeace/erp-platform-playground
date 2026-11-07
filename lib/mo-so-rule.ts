@@ -17,9 +17,15 @@ export type BrandJob = { brand_id: string; brand_name: string; is_customer_job: 
 /** ต้องผูกใบสั่งขายไหม */
 export type SoNeed = "required" | "optional" | "unknown_brand";
 
-/** ลูกค้าประจำแบรนด์ (brands.default_customer_id → partners_v2) */
-export type BrandCustomer = { id: string; code: string | null; name: string };
-export type BrandInfo = NonNullable<BrandJob> & { default_customer: BrandCustomer | null };
+/** ลูกค้าประจำแบรนด์ (brands.default_customer_ids → partners_v2 · หลายสาขาได้ — กติกา lib/brand-customers.ts) */
+export type { BrandCustomer } from "@/lib/brand-customers";
+import type { BrandCustomer } from "@/lib/brand-customers";
+export type BrandInfo = NonNullable<BrandJob> & {
+  /** ลูกค้าประจำแบรนด์ทั้งหมด (เรียงตามที่ตั้ง) */
+  default_customers: BrandCustomer[];
+  /** รายแรก (= default_customers[0]) */
+  default_customer: BrandCustomer | null;
+};
 
 /** ตัวเลือกใบสั่งขายในป๊อปสร้างใบสั่งผลิต (GET /api/mo/so-options) */
 export type SoOptionLine = { id: string; qty: number; opened: number; mo_no: string | null; due_date: string | null };

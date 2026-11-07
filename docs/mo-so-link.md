@@ -19,7 +19,7 @@
 | ป๊อปสร้างใบสั่งผลิต (ของกลาง) | `components/mo-create` (หน้าใบสั่งผลิต + บอร์ดจ่ายงาน) |
 | ตรวจ + ผูก/สร้างใบสั่งขาย ฝั่งเซิร์ฟเวอร์ | `app/api/mo/so-link.ts` ← `POST /api/mo` (`so_link`) |
 | ตัวเลือกใบสั่งขาย | `GET /api/mo/so-options?sku=` (`&all=1`) · `?skus=A,B` = ต้องผูกไหมต่อรหัส |
-| ลูกค้าประจำแบรนด์ | `brands.default_customer_id` · หน้า `/master/brands` · `PATCH /api/brands` |
+| ลูกค้าประจำแบรนด์ (หลายสาขาได้ 2026-11-07) | `brands.default_customer_ids` (รายแรก = `default_customer_id`) · กติกา `lib/brand-customers.ts` · หน้า `/master/brands` · `PATCH /api/brands` — ป๊อปสร้างใบผลิต/ลงออเดอร์: รายเดียว = เติมให้ · หลายราย = ปุ่มเลือกสาขา (ไม่เดา) · กรองใบสั่งขายของทุกรายในรายการ |
 | ยอดต่อรายการ สั่ง/เปิดผลิต/ส่ง | `GET /api/so-orders/[id]` → `lines[].progress` + `orphan_mos` · หน้าอ่านใบสั่งขาย |
 
 ## กติกาสำคัญ

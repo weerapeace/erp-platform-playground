@@ -11,6 +11,7 @@
  */
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import type { BrandCustomer, BrandInfo, NewSoInput } from "@/lib/mo-so-rule";
+import { brandCustomerIds, orderCustomers } from "@/lib/brand-customers";
 import { computeTotals, lineRow, nextOrderNo, type SoOrderHeaderInput, type SoOrderLineInput } from "../so-orders/shared";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -53,12 +54,15 @@ export async function brandInfoOfSkus(admin: Admin, codes: string[]): Promise<Ma
   const parents = await inChunks<Row>([...new Set(parentOfCode.values())], (c) => admin.from("parent_skus_v2").select("id, brand_id").in("id", c));
   const brandOfParent = new Map(parents.filter((p) => p.brand_id).map((p) => [String(p.id), String(p.brand_id)]));
   const brands = await inChunks<Row>([...new Set(brandOfParent.values())], (c) =>
-    admin.from("brands").select("id, name, is_customer_job, default_customer_id").in("id", c));
-  const custs = await customersByIds(admin, brands.map((b) => String(b.default_customer_id ?? "")));
-  const brandById = new Map(brands.map((b) => [String(b.id), {
-    brand_id: String(b.id), brand_name: String(b.name ?? ""), is_customer_job: !!b.is_customer_job,
-    default_customer: b.default_customer_id ? custs.get(String(b.default_customer_id)) ?? null : null,
-  } satisfies BrandInfo]));
+    admin.from("brands").select("id, name, is_customer_job, default_customer_id, default_customer_ids").in("id", c));
+  const custs = await customersByIds(admin, brands.flatMap((b) => brandCustomerIds(b)));
+  const brandById = new Map(brands.map((b) => {
+    const list = orderCustomers(brandCustomerIds(b), custs);
+    return [String(b.id), {
+      brand_id: String(b.id), brand_name: String(b.name ?? ""), is_customer_job: !!b.is_customer_job,
+      default_customers: list, default_customer: list[0] ?? null,
+    } satisfies BrandInfo];
+  }));
   for (const code of uniq) {
     const pid = parentOfCode.get(code);
     const bid = pid ? brandOfParent.get(pid) : undefined;

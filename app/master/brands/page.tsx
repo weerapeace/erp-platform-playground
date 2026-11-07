@@ -3,7 +3,8 @@
 /**
  * จัดการแบรนด์ (สำหรับโกดัง QC / บอร์ดจ่ายงาน / คลัง Artwork) — แบบตารางคอลัมน์ (เจ้าของเลือกแบบ A 2026-11-06 "ให้ดู minimal")
  * - ต่อแบรนด์: โลโก้ · สีประจำแบรนด์ (สีการ์ด) · ธง "งานลูกค้า" (→ badge งานลูกค้า) · OEM (ไม่มีราคาขาย) · ซ่อนใน Artwork
- *   งานลูกค้า → ตั้ง "ลูกค้าประจำแบรนด์" ใต้ชื่อ (ป๊อปสร้างใบสั่งผลิต/ลงออเดอร์ เติมลูกค้านี้ให้ตอนสร้างใบสั่งขาย — กติกา lib/mo-so-rule.ts)
+ *   งานลูกค้า → ตั้ง "ลูกค้าประจำแบรนด์" ใต้ชื่อ — หลายสาขาได้ (เจ้าของขอ 2026-11-07) · กติกา lib/brand-customers.ts
+ *   ใช้ที่ป๊อปสร้างใบสั่งผลิต/ลงออเดอร์: รายเดียว = เติมให้ · หลายราย = มีปุ่มให้กดเลือกสาขา (lib/mo-so-rule.ts)
  * - ช่างเหมา: ย้ายไปติ๊กที่หน้าพนักงาน (/payroll/employees/<id> ปุ่ม "ช่างเหมา" · employees.is_subcontract) — เดิมเป็นแท็บในหน้านี้
  * ของกลาง: ToggleSwitch · ImageInput · CustomerPicker · FloatingDropdown · askConfirm · useToast · Icon
  */
@@ -19,6 +20,7 @@ import { FloatingDropdown } from "@/components/floating-dropdown";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import type { Brand } from "@/app/api/brands/route";
+import { BRAND_CUSTOMER_MAX, type BrandCustomer } from "@/lib/brand-customers";
 
 // คอลัมน์ตาราง: แบรนด์ | งานลูกค้า | OEM | ซ่อนใน Artwork | ⋯
 const GRID = "grid grid-cols-[minmax(0,1fr)_76px_64px_88px_36px] items-center gap-2";
@@ -40,7 +42,7 @@ export default function BrandsPage() {
 
   const patchBrand = async (id: string, p: Partial<Brand>) => {
     setBrands((bs) => bs.map((b) => b.id === id ? { ...b, ...p } : b));
-    const { default_customer: _dc, ...send } = p; void _dc;   // ชื่อลูกค้าไว้โชว์อย่างเดียว ไม่ส่งไปบันทึก
+    const { default_customer: _dc, default_customers: _dcs, ...send } = p; void _dc; void _dcs;   // ชื่อลูกค้าไว้โชว์อย่างเดียว ไม่ส่งไปบันทึก
     try { const r = await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...send }) }); const j = await r.json(); if (j.error) throw new Error(j.error); }
     catch (e) { toast.error(e instanceof Error ? e.message : "บันทึกไม่สำเร็จ"); void loadBrands(); }
   };
@@ -56,6 +58,9 @@ export default function BrandsPage() {
     if (!name || !cur || name === cur.name) return;   // ไม่เปลี่ยน → ไม่ต้องบันทึก
     await patchBrand(id, { name });
   };
+  /** ตั้งรายการลูกค้าประจำแบรนด์ทั้งรายการ (เพิ่ม/เอาออก) */
+  const setCustomers = (id: string, list: BrandCustomer[]) =>
+    patchBrand(id, { default_customer_ids: list.map((c) => c.id), default_customers: list, default_customer: list[0] ?? null });
   const deleteBrand = async (id: string, name: string) => {
     const ok = await askConfirm({ title: `ลบแบรนด์ “${name}”?`, message: "ซ่อนจากรายการ — ข้อมูลเดิมที่อ้างถึงแบรนด์นี้ยังอยู่", confirmText: "ลบแบรนด์", variant: "danger" });
     if (!ok) return;
@@ -114,13 +119,9 @@ export default function BrandsPage() {
                   ) : (
                     <div className="truncate text-sm text-slate-800" title="ดับเบิลคลิกเพื่อแก้ชื่อ" onDoubleClick={() => { setEditingId(b.id); setEditName(b.name); }}>{b.name}</div>
                   )}
-                  {/* ลูกค้าประจำแบรนด์ — เฉพาะงานลูกค้า · อยู่ใต้ชื่อ (เดิมอยู่ในแถวเดียวกัน ดันจนชื่อหาย) */}
+                  {/* ลูกค้าประจำแบรนด์ — เฉพาะงานลูกค้า · อยู่ใต้ชื่อ · หลายสาขาได้ */}
                   {b.is_customer_job && (
-                    <div className="mt-1 max-w-[260px]" title="ลูกค้าประจำแบรนด์ — สร้างใบสั่งขายจากป๊อปสร้างใบสั่งผลิต ระบบเติมลูกค้านี้ให้">
-                      <CustomerPicker placeholder="ลูกค้าประจำแบรนด์…"
-                        value={b.default_customer ? ({ id: b.default_customer.id, code: b.default_customer.code, name: b.default_customer.name } as CustomerPickerValue) : null}
-                        onChange={(c) => void patchBrand(b.id, { default_customer_id: c?.id ?? null, default_customer: c ? { id: c.id, code: c.code, name: c.name } : null })} />
-                    </div>
+                    <BrandCustomersCell list={b.default_customers ?? []} onChange={(list) => void setCustomers(b.id, list)} />
                   )}
                 </div>
               </div>
@@ -134,6 +135,38 @@ export default function BrandsPage() {
           {!loaded && <div className="text-center text-sm text-slate-400 py-12">กำลังโหลด…</div>}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** ลูกค้าประจำแบรนด์ (หลายสาขา): ชิปชื่อ + × เอาออก · ช่องเลือกลูกค้ากลางไว้เพิ่มทีละราย */
+function BrandCustomersCell({ list, onChange }: { list: BrandCustomer[]; onChange: (list: BrandCustomer[]) => void }) {
+  const full = list.length >= BRAND_CUSTOMER_MAX;
+  return (
+    <div className="mt-1 space-y-1">
+      {list.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {list.map((c) => (
+            <span key={c.id} title={c.code ? `${c.code} · ${c.name}` : c.name}
+              className="inline-flex h-6 max-w-[220px] items-center gap-1 rounded-full bg-slate-100 pl-2 pr-1 text-[11px] text-slate-700">
+              <span className="truncate">{c.name}</span>
+              <button type="button" onClick={() => onChange(list.filter((x) => x.id !== c.id))} aria-label={`เอา ${c.name} ออก`} title="เอาออกจากลูกค้าประจำแบรนด์"
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-xs leading-none text-slate-400 hover:bg-slate-200 hover:text-slate-700">
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      {!full && (
+        <div className="max-w-[240px]" title="ลูกค้าประจำแบรนด์ — มีหลายสาขาเพิ่มได้หลายราย · ตอนสร้างใบสั่งขายจะมีปุ่มให้กดเลือกสาขา">
+          <CustomerPicker placeholder={list.length ? "+ เพิ่มลูกค้า / สาขา…" : "ลูกค้าประจำแบรนด์…"} value={null}
+            onChange={(c: CustomerPickerValue | null) => {
+              if (!c || list.some((x) => x.id === c.id)) return;
+              onChange([...list, { id: c.id, code: c.code, name: c.name }]);
+            }} />
+        </div>
+      )}
     </div>
   );
 }

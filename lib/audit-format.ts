@@ -143,7 +143,7 @@ export const COMMON_FIELD_LABELS: Record<string, string> = {
   base_salary: "เงินเดือน", end_date: "วันสิ้นสุด", nickname: "ชื่อเล่น", first_name: "ชื่อ", last_name: "นามสกุล",
   phone: "เบอร์โทร", parent_brand_id: "แบรนด์แม่",
   // แบรนด์ / อื่น ๆ
-  default_customer_id: "ลูกค้าหลัก", logo_url: "โลโก้", is_customer_job: "งานลูกค้า", hide_in_artwork: "ซ่อนในงานอาร์ตเวิร์ก",
+  default_customer_id: "ลูกค้าหลัก", default_customer_ids: "ลูกค้าประจำแบรนด์", logo_url: "โลโก้", is_customer_job: "งานลูกค้า", hide_in_artwork: "ซ่อนในงานอาร์ตเวิร์ก",
   pricing_mode: "วิธีคิดราคา", reexploded: "คำนวณวัตถุดิบใหม่", links: "ลิงก์", mo_nos: "ใบสั่งผลิต", component: "วัตถุดิบ",
   component_sku: "รหัสวัตถุดิบ",
   // ใบออกแบบ

@@ -22,6 +22,7 @@ import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
 import { MoneyInput } from "@/components/money-input";
 import type { MoSoLinkInput, SoNeed, SoOption, SoOptionsResponse } from "@/lib/mo-so-rule";
+import { customerNamesText } from "@/lib/brand-customers";
 
 export type MoSoLinkValue = {
   /** pick = ใบที่มีอยู่ · new = สร้างใหม่ · skip = ไม่ผูก (เฉพาะแบรนด์เรา) */
@@ -29,14 +30,15 @@ export type MoSoLinkValue = {
   so_order_id: string | null; so_line_id: string | null; order_no: string | null;
   customer: CustomerPickerValue | null; company_id: string | null; company_code: string;
   po_no: string; due: string; unit_price: string;
-  /** ตั้งลูกค้าที่เลือกเป็นลูกค้าประจำแบรนด์ (แบรนด์ที่ยังไม่ได้ตั้ง) */
+  /** เพิ่มลูกค้าที่เลือกเข้ารายการลูกค้าประจำแบรนด์ (ลูกค้าที่ยังไม่อยู่ในรายการ) */
   remember: boolean;
 };
 export type SoLinkState = {
   /** สินค้าที่สถานะนี้คิดให้ (กันใช้สถานะของสินค้าตัวก่อน) */
   sku: string;
   need: SoNeed | null; brandId: string | null; brandName: string | null;
-  hasDefaultCustomer: boolean; loading: boolean;
+  /** ลูกค้าประจำแบรนด์ที่ตั้งไว้แล้ว (หลายสาขาได้) */
+  brandCustomerIds: string[]; loading: boolean;
   /** วันส่งลูกค้าของใบ/รายการที่เลือก — ไว้เติมกำหนดส่งใบผลิต */
   dueHint: string | null;
 };
@@ -60,12 +62,12 @@ export function soLinkInputOf(v: MoSoLinkValue | null | undefined): MoSoLinkInpu
   return v.so_order_id ? { so_order_id: v.so_order_id, so_line_id: v.so_line_id } : null;
 }
 
-/** หลังสร้างใบผลิตสำเร็จ — จำลูกค้าประจำแบรนด์ (ถ้าแบรนด์ยังไม่ได้ตั้ง และผู้ใช้ติ๊กไว้) */
+/** หลังสร้างใบผลิตสำเร็จ — เพิ่มลูกค้าเข้ารายการลูกค้าประจำแบรนด์ (ถ้ายังไม่อยู่ในรายการ และผู้ใช้ติ๊กไว้) */
 export async function persistSoLinkExtras(v: MoSoLinkValue, st: SoLinkState): Promise<void> {
-  if (v.mode !== "new" || !v.remember || !v.customer || !st.brandId || st.hasDefaultCustomer) return;
+  if (v.mode !== "new" || !v.remember || !v.customer || !st.brandId || st.brandCustomerIds.includes(v.customer.id)) return;
   try {
     await apiFetch("/api/brands", { method: "PATCH", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: st.brandId, default_customer_id: v.customer.id }) });
+      body: JSON.stringify({ id: st.brandId, add_default_customer_id: v.customer.id }) });
   } catch { /* จำไม่ได้ก็ไม่เป็นไร — ตั้งเองได้ที่หน้าแบรนด์ */ }
 }
 
@@ -121,6 +123,8 @@ export function MoSoLinkSection({ sku, productName, value, onChange, onState, no
 
   const need = data?.need ?? null;
   const brand = data?.brand ?? null;
+  const brandCusts = brand?.default_customers ?? [];
+  const brandCustIds = brandCusts.map((c) => c.id).join(",");
 
   // แจ้งสถานะให้ป๊อปแม่ (ใช้ตรวจก่อนบันทึก + เติมกำหนดส่ง)
   const picked = data?.orders.find((o) => o.id === value.so_order_id) ?? null;
@@ -128,8 +132,9 @@ export function MoSoLinkSection({ sku, productName, value, onChange, onState, no
   const dueHint = value.mode === "pick" ? (pickedLine?.due_date || picked?.due_date || null) : value.mode === "new" ? (value.due || null) : null;
   useEffect(() => {
     onState?.({ sku, need, brandId: brand?.brand_id ?? null, brandName: brand?.brand_name ?? null,
-      hasDefaultCustomer: !!brand?.default_customer, loading: loading || !data, dueHint });
-  }, [sku, need, brand, loading, dueHint, onState]);
+      brandCustomerIds: brandCustIds ? brandCustIds.split(",") : [], loading: loading || !data, dueHint });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sku, need, brand, brandCustIds, loading, dueHint, onState]);
 
   // ค่าตั้งต้นเมื่อรู้แบรนด์แล้ว: แบรนด์เรา = ไม่ผูก · งานลูกค้า = เลือกใบ (ถ้ามีใบเดียวที่รายการนี้ยังเปิดผลิตไม่ครบ เลือกให้)
   useEffect(() => {
@@ -143,12 +148,13 @@ export function MoSoLinkSection({ sku, productName, value, onChange, onState, no
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  // สลับไป "สร้างใหม่" → เติมลูกค้าประจำแบรนด์ + บริษัทหลัก
+  // สลับไป "สร้างใหม่" → ลูกค้าประจำแบรนด์มีรายเดียว = เติมให้ · หลายสาขา = ให้กดเลือก (ไม่เดาสาขา) + บริษัทหลัก
   const startNew = () => {
     const def = companies.find((c) => c.is_default) ?? companies[0];
-    const dc = brand?.default_customer;
+    const dc = brandCusts.length === 1 ? brandCusts[0] : null;
     onChange({ ...value, mode: "new",
       customer: value.customer ?? (dc ? ({ id: dc.id, code: dc.code, name: dc.name } as CustomerPickerValue) : null),
+      remember: brandCusts.length === 0,   // แบรนด์ที่ยังไม่มีลูกค้าประจำ = ติ๊กจำให้ · มีแล้ว = ไม่เพิ่มเอง
       company_id: value.company_id ?? def?.id ?? null, company_code: value.company_code || def?.company_code || "" });
   };
   useEffect(() => {   // บริษัทโหลดมาทีหลัง → เติมให้ถ้ายังว่าง
@@ -249,7 +255,7 @@ export function MoSoLinkSection({ sku, productName, value, onChange, onState, no
       {value.mode === "pick" && (
         <div className="space-y-1">
           <div className="flex items-center justify-between text-[10px] text-slate-400">
-            <span>{data.filtered_by === "customer" ? `เฉพาะใบของ ${brand?.default_customer?.name ?? "ลูกค้าประจำแบรนด์"}` : data.filtered_by === "brand" ? "เฉพาะใบที่มีสินค้าแบรนด์นี้" : "ทุกใบที่ยังไม่ส่งครบ"} · ใบที่มีสินค้านี้ขึ้นก่อน</span>
+            <span>{data.filtered_by === "customer" ? `เฉพาะใบของ ${customerNamesText(brandCusts) || "ลูกค้าประจำแบรนด์"}` : data.filtered_by === "brand" ? "เฉพาะใบที่มีสินค้าแบรนด์นี้" : "ทุกใบที่ยังไม่ส่งครบ"} · ใบที่มีสินค้านี้ขึ้นก่อน</span>
             <label className="inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> แสดงทุกใบ</label>
           </div>
           {orders.length === 0 ? (
@@ -301,9 +307,24 @@ export function MoSoLinkSection({ sku, productName, value, onChange, onState, no
 
       {value.mode === "new" && (
         <div className="space-y-1.5">
+          {brandCusts.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1">
+              <span className={lblCls}>ลูกค้าประจำแบรนด์ — เลือกสาขา:</span>
+              {brandCusts.map((c) => {
+                const on = value.customer?.id === c.id;
+                return (
+                  <button key={c.id} type="button" onClick={() => set({ customer: { id: c.id, code: c.code, name: c.name } as CustomerPickerValue })}
+                    className={`h-6 max-w-[200px] truncate rounded-full border px-2 text-[11px] ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}
+                    title={c.code ? `${c.code} · ${c.name}` : c.name}>
+                    {c.name}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <span className={lblCls}>ลูกค้า <span className="text-rose-600">*</span>{brand?.default_customer ? <span className="text-slate-400"> (ลูกค้าประจำแบรนด์)</span> : null}</span>
+              <span className={lblCls}>ลูกค้า <span className="text-rose-600">*</span>{value.customer && brandCusts.some((c) => c.id === value.customer?.id) ? <span className="text-slate-400"> (ลูกค้าประจำแบรนด์)</span> : null}</span>
               <div className="mt-0.5"><CustomerPicker value={value.customer} onChange={(c) => set({ customer: c })} /></div>
             </div>
             <label className="block">
@@ -327,10 +348,12 @@ export function MoSoLinkSection({ sku, productName, value, onChange, onState, no
               <MoneyInput value={value.unit_price} onChange={(v) => set({ unit_price: v })} placeholder="ยังไม่ใส่ราคา" className={inCls} />
             </div>
           </div>
-          {brand && !brand.default_customer && value.customer && (
+          {brand && value.customer && !brandCusts.some((c) => c.id === value.customer?.id) && (
             <label className="flex items-center gap-1.5 text-[11px] text-slate-600 cursor-pointer">
               <input type="checkbox" checked={value.remember} onChange={(e) => set({ remember: e.target.checked })} />
-              ตั้ง {value.customer.name} เป็นลูกค้าประจำแบรนด์ {brand.brand_name} (ครั้งหน้าเติมให้เลย)
+              {brandCusts.length
+                ? <>เพิ่ม {value.customer.name} เป็นลูกค้าประจำแบรนด์ {brand.brand_name} อีกราย (ครั้งหน้ามีให้กดเลือก)</>
+                : <>ตั้ง {value.customer.name} เป็นลูกค้าประจำแบรนด์ {brand.brand_name} (ครั้งหน้าเติมให้เลย)</>}
             </label>
           )}
           <p className="text-[10px] text-slate-400">บันทึกแล้วได้ใบสั่งขายใหม่ 1 ใบ โดยใบผลิตนี้เป็นรายการแรก · ไม่ใส่ราคา = ติดหมายเหตุ “ยังไม่ใส่ราคา”</p>
