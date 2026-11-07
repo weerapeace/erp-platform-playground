@@ -115,8 +115,6 @@ export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGal
             const limit = cardSize === "row" ? 12 : 9;   // โชว์กี่ใบก่อนกด "ดูอีก" (การ์ดเล็ก 9 = 3×3 พอดีคอลัมน์กว้าง)
             const shown = expanded ? column.sheets : column.sheets.slice(0, limit);
             const hiddenCount = Math.max(0, column.sheets.length - shown.length);
-            // ☰ แถวย่อ + งานเกิน 4 ใบ = แบ่ง 2 คอลัมน์เมื่อคอลัมน์กว้างพอ (≥ ~440px · แคบกว่านั้นเหลือคอลัมน์เดียวเอง) — เจ้าของขอ 2026-11-07
-            const rowTwoCols = cardSize === "row" && shown.length > 4;
             return (
               <div
                 key={`${column.key}-${index}`}
@@ -147,8 +145,9 @@ export function StatusBoard({ boardColumns, cardSize, renderBoardCard, renderGal
                 <div className="min-h-[128px] space-y-2">
                   {shown.length > 0 && (
                     /* ▦ การ์ดเล็ก = กริดในคอลัมน์ (การ์ด ~130px+ · คอลัมน์กว้างเรียงได้หลายใบ) · ☰ แถวย่อ = ซ้อนแถวละใบ */
-                    <div className={cardSize === "row" && !rowTwoCols ? "space-y-1.5" : "grid gap-2"}
-                      style={cardSize === "row" ? (rowTwoCols ? { gridTemplateColumns: "repeat(auto-fill, minmax(max(216px, calc(50% - 4px)), 1fr))" } : undefined) : { gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }}>
+                    /* (เคยลองแถวย่อแบ่ง 2 คอลัมน์ตอนคอลัมน์กว้าง — เจ้าของดูแล้วว่าดูยาก ให้เอาออก 2026-11-07) */
+                    <div className={cardSize === "row" ? "space-y-1.5" : "grid gap-2"}
+                      style={cardSize === "row" ? undefined : { gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))" }}>
                       {shown.map(renderBoardCard)}
                     </div>
                   )}
