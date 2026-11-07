@@ -19,10 +19,11 @@ import { apiFetch } from "@/lib/api";
 import { formatDate, todayBangkok, addDaysYmd } from "@/lib/date";
 import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
-import { RecordPeekLink } from "@/components/pickers/record-peek-link";
 import { RecordChecklist, RecordTasksButton } from "@/components/record-tasks";
 import { PatternTicketLinks } from "@/components/pattern-ticket-links";
 import { SplitPanes, type SplitSize } from "@/components/split-panes";
+import { DateCards } from "@/components/date-cards";
+import { ParentSkuBox } from "./parent-sku-box";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
@@ -953,6 +954,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     setForm((f) => (f && !f.parent_sku_codes.includes(code) ? { ...f, parent_sku_codes: [...f.parent_sku_codes, code] } : f));
     setSkuInput(""); setSkuCheck(null);
   };
+  // เพิ่มรหัสตรง ๆ (ปุ่มลัด "ใช้รหัสถัดไป" ในกล่องสินค้าของงาน — กล่องเช็กแล้วว่าไม่ซ้ำ)
+  const addParentCodeValue = (raw: string) => {
+    const code = raw.trim().toUpperCase();
+    if (!code) return;
+    setForm((f) => (f && !f.parent_sku_codes.includes(code) ? { ...f, parent_sku_codes: [...f.parent_sku_codes, code] } : f));
+  };
   const removeParentCode = (code: string) =>
     setForm((f) => (f ? { ...f, parent_sku_codes: f.parent_sku_codes.filter((c) => c !== code) } : f));
 
@@ -1833,98 +1840,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     /* เฟส 5: ตั้ง Parent SKU ได้หลายตัว (chips) + เช็ครหัสสด (ซ้ำ=แดง ห้ามเพิ่ม · ข้ามเลข=เตือนแต่เพิ่มได้)
         ช่องนี้ (และร่าง Parent) เป็น "ช่อง quick" = เพิ่ม/เอาออกได้ในโหมดดูเลย ไม่ต้องกด ✏️ แก้ไขก่อน
         (เดิมผูก fullEdit → โหมดดูเห็นแค่หัวข้อเปล่า ๆ ไม่มีช่องให้พิมพ์ เจ้าของแจ้งว่า "ใช้ไม่ได้") · มีผลจริงตอนกดบันทึก */
+    // 📦 สินค้าของงานนี้ (Parent SKU + SKU ที่เชื่อม + ร่าง) — components/design-sheet-detail/parent-sku-box.tsx (เจ้าของขอ 2026-11-07 "ดูง่าย ๆ")
     parent: (
-      <div className="block">
-        <span className="text-[11px] text-slate-500">{t("Parent SKU ที่จะตั้ง (เพิ่มได้หลายตัว)", "Parent SKUs to create (multiple allowed)")}</span>
-        {form.parent_sku_codes.length > 0 && (
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            {form.parent_sku_codes.map((c) => {
-              const pid = parentRefs[c];
-              return (
-                <span key={c} className="inline-flex items-center gap-1">
-                  {pid
-                    ? <RecordPeekLink moduleKey="parent-skus-v2" recordId={pid} label={c} />
-                    : <span className="inline-flex items-center rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-mono text-blue-700">{c}</span>}
-                  {canEdit && <button type="button" onClick={() => removeParentCode(c)} title={t("เอาออก", "Remove")} className="leading-none text-slate-300 hover:text-rose-500">✕</button>}
-                </span>
-              );
-            })}
-          </div>
-        )}
-        {canEdit && (
-          <div className="flex gap-1 mt-1">
-            <input value={skuInput} onChange={(e) => setSkuInput(e.target.value.toUpperCase())}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentCode(); } }}
-              placeholder={t("เช่น CTL085 แล้วกด Enter", "e.g. CTL085 then press Enter")}
-              className={`flex-1 h-8 px-2 text-sm font-mono border rounded-lg focus:outline-none focus:ring-2 ${
-                skuCheck?.exists ? "border-rose-400 bg-rose-50 focus:ring-rose-400"
-                : skuCheck?.skipped ? "border-amber-300 focus:ring-amber-400"
-                : "border-slate-200 focus:ring-blue-500"}`} />
-            <button type="button" onClick={addParentCode} disabled={!skuInput.trim() || skuCheck?.exists}
-              className="h-8 px-3 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40">{t("＋ เพิ่ม", "＋ Add")}</button>
-          </div>
-        )}
-        <div className="mt-0.5 text-[11px] min-h-[14px]">
-          {skuChecking ? <span className="text-slate-300">{t("กำลังเช็ครหัส...", "Checking code...")}</span>
-            : !skuInput.trim() ? null
-            : skuCheck?.exists ? <span className="text-rose-600 font-medium">{t("✕ รหัสนี้มีอยู่แล้ว — เพิ่มไม่ได้", "✕ This code already exists — can't add")}</span>
-            : skuCheck?.skipped ? <span className="text-amber-600">{t(`⚠ ตั้งข้ามเลข — ล่าสุดที่ตั้งคือ ${skuCheck.latest} (เพิ่มได้ แต่เช็คว่าตั้งใจ)`, `⚠ Skips numbers — latest set is ${skuCheck.latest} (allowed, but check it's intended)`)}</span>
-            : skuCheck?.latest ? <span className="text-slate-400">{t("✓ ใช้ได้ · ล่าสุดที่ตั้ง:", "✓ OK · latest set:")} <b>{skuCheck.latest}</b>{skuCheck.suggested ? <> · {t("ถัดไป:", "next:")} <b className="text-emerald-600">{skuCheck.suggested}</b></> : null}{skuCheck.max_code ? <> · {t("เลขสูงสุด:", "highest:")} {skuCheck.max_code}</> : null}</span>
-            : skuCheck ? <span className="text-emerald-600">{t("✓ ยังไม่มีรหัสกลุ่มนี้ ใช้ได้", "✓ No codes in this group yet — OK")}</span> : null}
-        </div>
-        {/* SKU ที่เชื่อมกับใบงานนี้ — ตัวที่สร้างจากใบนี้ (เขียว) + พี่น้องใต้ Parent เดียวกัน (เทา) · คลิกเปิดดู SKU */}
-        {linkedSkus.length > 0 && (
-          <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-2">
-            <div className="mb-1 text-[11px] font-medium text-emerald-800">
-              {t(`🏷️ SKU ที่เชื่อม ${linkedSkus.filter((s) => s.from_sheet).length} ตัว`, `🏷️ Linked SKUs: ${linkedSkus.filter((s) => s.from_sheet).length}`)}
-              {linkedSkus.some((s) => !s.from_sheet) && (
-                <span className="font-normal text-slate-500">{t(` · ใต้ Parent เดียวกันอีก ${linkedSkus.filter((s) => !s.from_sheet).length} ตัว`, ` · ${linkedSkus.filter((s) => !s.from_sheet).length} more under the same Parent`)}</span>
-              )}
-            </div>
-            <div className="max-h-40 space-y-1 overflow-auto">
-              {linkedSkus.map((s) => (
-                <div key={s.id} title={s.from_sheet ? t("สร้างจากใบงานนี้", "Created from this design sheet") : t(`อยู่ใต้ Parent ${s.parent_code ?? ""} (ไม่ได้สร้างจากใบนี้)`, `Under Parent ${s.parent_code ?? ""} (not created from this sheet)`)}
-                  className={`flex items-center gap-1.5 rounded border bg-white px-1.5 py-1 ${s.from_sheet ? "border-emerald-200" : "border-slate-200 opacity-70"}`}>
-                  {s.image_key
-                    ? <ImageThumbnail url={`/api/r2-image?key=${encodeURIComponent(s.image_key)}`} size={22} />
-                    : <span className="inline-block h-[22px] w-[22px] shrink-0 rounded bg-slate-100" />}
-                  <RecordPeekLink moduleKey="skus-v2" recordId={s.id} label={s.code} />
-                  <span className="truncate text-[11px] text-slate-500">{s.color || s.name_th || ""}</span>
-                  <span className="ml-auto shrink-0 text-[11px] tabular-nums text-slate-500">
-                    {s.standard_price != null ? s.standard_price.toLocaleString("th-TH") : ""}
-                  </span>
-                  {!s.is_active && <span className="shrink-0 text-[10px] text-slate-400">{t("ปิดใช้", "Inactive")}</span>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ข้อ 6: ร่าง Parent (ชื่อก่อน ยังไม่ใส่รหัสจริง) — ใช้ตั้งชื่อแบบที่จะทำ แล้วค่อยสร้างรหัสจริงทีหลัง */}
-        <div className="mt-2 pt-2 border-t border-dashed border-slate-200">
-          <span className="text-[11px] text-slate-500">{t('ร่าง Parent (ยังไม่มีรหัส) — เช่น "พวงกุญแจ มะพร้าว"', 'Draft Parent (no code yet) — e.g. "Coconut keychain"')}</span>
-          {form.parent_sku_drafts.length > 0 && (
-            <div className="flex flex-wrap gap-1 mt-1">
-              {form.parent_sku_drafts.map((d) => (
-                <span key={d} className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-amber-50 border border-dashed border-amber-300 text-amber-700 rounded">
-                  ✎ {d}
-                  {canEdit && <button type="button" onClick={() => removeParentDraft(d)} title={t("เอาออก", "Remove")} className="text-amber-300 hover:text-rose-500 leading-none">✕</button>}
-                </span>
-              ))}
-            </div>
-          )}
-          {canEdit && (
-            <div className="flex gap-1 mt-1">
-              <input value={draftInput} onChange={(e) => setDraftInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addParentDraft(); } }}
-                placeholder={t("เช่น พวงกุญแจ มะพร้าว แล้วกด Enter", "e.g. Coconut keychain then press Enter")}
-                className="flex-1 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400" />
-              <button type="button" onClick={addParentDraft} disabled={!draftInput.trim()}
-                className="h-8 px-3 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-40">{t("＋ ร่าง", "＋ Draft")}</button>
-            </div>
-          )}
-        </div>
-      </div>
+      <ParentSkuBox canEdit={canEdit} codes={form.parent_sku_codes} drafts={form.parent_sku_drafts} refs={parentRefs} linkedSkus={linkedSkus}
+        input={skuInput} setInput={setSkuInput} check={skuCheck} checking={skuChecking}
+        onAddTyped={addParentCode} onAddCode={addParentCodeValue} onRemoveCode={removeParentCode}
+        draftInput={draftInput} setDraftInput={setDraftInput} onAddDraft={addParentDraft} onRemoveDraft={removeParentDraft} />
     ),
     detail: (
       <div className="block">
@@ -2209,22 +2130,34 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             {modalTab === "info" && fld && (
               <SplitPanes prefKey="ds_info_split"
                 left={{ title: t("ข้อมูลงาน", "Job info"), icon: "document", content: (size: SplitSize) => {
-                  const cols = size === "narrow" ? 1 : size === "half" ? 2 : 3;
+                  const narrow = size === "narrow";
                   return (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       <div className="grid grid-cols-2 gap-2">{fld.code}{fld.status}</div>
                       {fld.name}
-                      <div className={`grid gap-2 ${cols === 3 ? "grid-cols-3" : cols === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
-                        {fld.brand}{fld.orderDate}{fld.deadline}{fld.appointment}
-                        <div className={cols === 1 ? "" : "col-span-2"}>{fld.waiting}</div>
+                      <div className={`grid gap-2 ${narrow ? "grid-cols-1" : "grid-cols-2"}`}>{fld.brand}{fld.drive}</div>
+                      {/* 📅 วันสำคัญ — การ์ดกลาง DateCards (กดการ์ดเลือกวัน · ป้ายอีก/เลยกี่วัน · เส้นเวลา) · งานปิดแล้วไม่เตือนสี */}
+                      <div>
+                        <div className="mb-1 flex items-center gap-1.5 text-[11px] text-slate-500"><Icon name="calendar" className="text-slate-400" /> {t("วันสำคัญ", "Key dates")}</div>
+                        <DateCards compact={narrow} muted={wfMeta.finished.has(form.status)} timeline={{ from: "order", to: ["due", "appt"] }} items={[
+                          { key: "order", label: t("วันที่สั่ง", "Order date"), icon: "cart", kind: "since", value: form.order_date, onChange: fullEdit ? (v) => patch({ order_date: v }) : undefined },
+                          { key: "appt", label: t("วันนัด / ได้ตัวอย่าง", "Appointment / sample"), icon: "calendar", kind: "due", value: form.appointment_date, onChange: canEdit ? (v) => patch({ appointment_date: v }) : undefined },
+                          { key: "due", label: t("Deadline ส่งงาน", "Deadline"), icon: "flag", kind: "due", value: form.deadline, onChange: canEdit ? (v) => patch({ deadline: v }) : undefined },
+                        ]} />
                       </div>
-                      <div className={`grid gap-2 ${cols === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{fld.drive}{fld.parent}</div>
-                      {/* 🎫 ตั๋วงาน Pattern ที่แนบใบนี้ (ของกลาง · ไม่มีสิทธิ์ดูตั๋ว = ไม่โชว์) */}
-                      {form.id && <PatternTicketLinks sheetId={form.id} />}
+                      {fld.parent}
                     </div>
                   );
                 } }}
-                right={{ title: t("รายละเอียดงาน", "Job details"), icon: "note", content: <div className="space-y-2">{fld.detail}{fld.note}</div> }} />
+                right={{ title: t("รายละเอียดงาน", "Job details"), icon: "note", content: (
+                  <div className="space-y-3">
+                    {fld.waiting}
+                    {fld.detail}
+                    {fld.note}
+                    {/* 🎫 ตั๋วงาน Pattern ที่แนบใบนี้ (ของกลาง · ไม่มีสิทธิ์ดูตั๋ว = ไม่โชว์) */}
+                    {form.id && <PatternTicketLinks sheetId={form.id} />}
+                  </div>
+                ) }} />
             )}
 
             {/* แท็บ Comment ลูกค้า (เฟส 3) */}

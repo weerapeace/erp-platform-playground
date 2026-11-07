@@ -244,6 +244,14 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "ทุกช่องวันที่",
   },
   {
+    key: "date-cards", label: "การ์ดวันสำคัญ + เส้นเวลา", code: "DateCards", category: "input",
+    source: { path: "components/date-cards" },
+    what: "การ์ดวันละใบ เลขวันตัวใหญ่ + ป้าย อีก/เลยกี่วัน (สีตามความใกล้) กดการ์ดเลือกวัน + เส้นเวลาจากวันเริ่มถึงกำหนด ที่แคบเป็นแถวเตี้ย",
+    when: "หัวเอกสารที่มีวันสำคัญ 2-4 วันให้เห็นทันที เช่น วันสั่ง / วันนัด / Deadline (เริ่มที่ใบงานออกแบบ)",
+    notWhen: "ช่องกรอกวันที่ทั่วไปในฟอร์ม ให้ใช้ DateInput · มุมมองปฏิทินทั้งเดือน ให้ใช้ปฏิทินเอกสาร",
+    doc: "date-cards.md",
+  },
+  {
     key: "step-input", label: "ช่องตัวเลข + ปุ่ม −/+", code: "StepInput", category: "input",
     source: { path: "components/step-input" },
     what: "ช่องตัวเลขที่กด −/+ หรือหมุนลูกกลิ้งเมาส์ปรับทีละขั้น",
