@@ -20,34 +20,23 @@ import { formatDate, todayBangkok, addDaysYmd } from "@/lib/date";
 import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";
 import { ImageManager, ImageThumbnail } from "@/components/image-manager";
 import { RecordChecklist, RecordTasksButton } from "@/components/record-tasks";
-import { PatternTicketLinks } from "@/components/pattern-ticket-links";
 import { SplitPanes, type SplitSize } from "@/components/split-panes";
 import { DateCards } from "@/components/date-cards";
 import { ParentSkuBox } from "./parent-sku-box";
 import { takePrefetchedSheet } from "./prefetch";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
-import { WorkflowStatusManager } from "@/components/workflow-status-manager";
-import { SkuWizard } from "@/app/master/design-sheets/sku-wizard";
-import { BomFromCostWizard } from "./bom-from-cost-wizard";
-import { FabricCalcModal } from "./fabric-calc-modal";
-import { BomToCostWizard, type BomPulledLine } from "./bom-to-cost-wizard";
-import { SupplierQuoteSection } from "./supplier-quote";
-import { ToQuotationModal, type PresetQuoteLine } from "@/app/master/design-sheets/to-quotation-modal";
-import { QuotationCartDrawer } from "@/app/master/design-sheets/quotation-cart-drawer";
-import { PullCostFromSheetModal } from "./pull-cost-modal";
+import type { BomPulledLine } from "./bom-to-cost-wizard";
+import type { PresetQuoteLine } from "@/app/master/design-sheets/to-quotation-modal";
 import { costTabLabel, generalLabelOf } from "@/lib/design-sheet-cost-labels";
 import { useT } from "@/components/i18n";
 import { tr } from "@/lib/lang";
 
 const QUOTE_CART_KEY = "erp-design-quote-cart";   // ตัวชี้ใบเสนอราคาร่างที่เป็น "ตะกร้า" ปัจจุบัน (ต่อ browser)
-import { RichTextEditor } from "@/components/rich-text";
 import type { Attachment } from "@/app/api/attachments/route";
 import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
-import { AddToPlanButton } from "@/components/team-plan/add-to-plan";
 import { costUsagePerUnit } from "@/lib/cost-usage";
-import { SkuMultiPickerModal } from "@/components/sku-multi-picker";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { SkuLite } from "@/app/api/design-sheets/price-item-skus/route";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -57,8 +46,6 @@ import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import type { CostLine, PrevItem } from "@/app/api/design-sheets/[id]/cost-lines/route";
-import { CostVersionsModal } from "./cost-versions";
-import { QuoteRounds } from "./quote-rounds";
 import { normalizeSnapLine, cleanExtra, extraAmountAt, type SnapExtra, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
 import type { SpecMaterialItem } from "@/lib/design-sheet-spec";
 import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/route";
@@ -74,6 +61,22 @@ const OrderBatchEntryModal = dynamic(() => import("@/components/order-batch-entr
 // แท็บ "รายละเอียดงาน" (วาดบนรูป + หมุดวัตถุดิบ) — โหลดเฉพาะตอนเปิดแท็บ
 const DesignSheetSpecTab = dynamic(() => import("./spec-tab").then((m) => m.DesignSheetSpecTab), { ssr: false });
 const DesignSheetNoticeTab = dynamic(() => import("./notice-tab").then((m) => m.DesignSheetNoticeTab), { ssr: false });
+// ⚡ ส่วนในป๊อปใบงาน/ป๊อปย่อย (ตัวแก้ข้อความ tiptap ~300KB ฯลฯ) → โหลดโค้ดตอนเปิดใช้ (จุดวางเดิม พฤติกรรมเดิม — npm run perf-check 2026-11-07 หน้า /master/design-sheets 729KB)
+const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) => m.RichTextEditor), { ssr: false });
+const SupplierQuoteSection = dynamic(() => import("./supplier-quote").then((m) => m.SupplierQuoteSection), { ssr: false });
+const AddToPlanButton = dynamic(() => import("@/components/team-plan/add-to-plan").then((m) => m.AddToPlanButton), { ssr: false });
+const CostVersionsModal = dynamic(() => import("./cost-versions").then((m) => m.CostVersionsModal), { ssr: false });
+const SkuWizard = dynamic(() => import("@/app/master/design-sheets/sku-wizard").then((m) => m.SkuWizard), { ssr: false });
+const FabricCalcModal = dynamic(() => import("./fabric-calc-modal").then((m) => m.FabricCalcModal), { ssr: false });
+const QuoteRounds = dynamic(() => import("./quote-rounds").then((m) => m.QuoteRounds), { ssr: false });
+const ToQuotationModal = dynamic(() => import("@/app/master/design-sheets/to-quotation-modal").then((m) => m.ToQuotationModal), { ssr: false });
+const QuotationCartDrawer = dynamic(() => import("@/app/master/design-sheets/quotation-cart-drawer").then((m) => m.QuotationCartDrawer), { ssr: false });
+const PullCostFromSheetModal = dynamic(() => import("./pull-cost-modal").then((m) => m.PullCostFromSheetModal), { ssr: false });
+const BomFromCostWizard = dynamic(() => import("./bom-from-cost-wizard").then((m) => m.BomFromCostWizard), { ssr: false });
+const BomToCostWizard = dynamic(() => import("./bom-to-cost-wizard").then((m) => m.BomToCostWizard), { ssr: false });
+const SkuMultiPickerModal = dynamic(() => import("@/components/sku-multi-picker").then((m) => m.SkuMultiPickerModal), { ssr: false });
+const WorkflowStatusManager = dynamic(() => import("@/components/workflow-status-manager").then((m) => m.WorkflowStatusManager), { ssr: false });
+const PatternTicketLinks = dynamic(() => import("@/components/pattern-ticket-links").then((m) => m.PatternTicketLinks), { ssr: false });
 
 type Brand = { id: string; name: string; color: string | null; is_customer_job?: boolean | null };
 // ค่าใช้จ่ายเพิ่ม: amount = ต่อชิ้นเสมอ · mode "split" = ค่าครั้งเดียวหารจำนวนสั่ง (ค่าบล็อกสกรีน) — สูตรอยู่ lib/design-sheet-cost-snapshot
