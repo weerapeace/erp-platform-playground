@@ -301,4 +301,7 @@ async function main() {
   else console.log(printReport(`${target}  (ไม่อยู่ในทะเบียน workflow)`, null, r, all, WORKFLOWS));
 }
 
+// ใช้ต่อในสคริปต์อื่น (เช่น scripts/perf-check.mjs แปลง "ไฟล์ที่แก้" → หน้าที่ต้องวัด)
+export { urlOf, isPage, isApi, apiCallRe, pageCount };
+
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

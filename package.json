@@ -10,6 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "where-used": "node --no-warnings scripts/where-used.mjs",
+    "perf-check": "node --no-warnings scripts/perf-check.mjs",
     "parts:scan": "node scripts/shared-parts-scan.mjs",
     "test": "vitest",
     "test:run": "vitest run",

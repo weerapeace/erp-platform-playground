@@ -53,7 +53,7 @@ async function readAiUsage(admin: Admin, now: number) {
 
 /** หลักฐานจากแจ้งเตือนที่งานตั้งเวลาส่งออกไป (ครั้งล่าสุด + กี่วันที่มีการส่ง) */
 async function readNotifyEvidence(admin: Admin, now: number) {
-  const types = ["wo.due_soon", "subscription.renewal_soon", "content_album.reminder", "cashflow.low_cash"];
+  const types = ["wo.due_soon", "subscription.renewal_soon", "content_album.reminder", "cashflow.low_cash", "perf.regression"];
   const list = rows(await admin.from("erp_notifications").select("event_type, created_at")
     .in("event_type", types).gte("created_at", sinceDays(now, 90)).order("created_at", { ascending: false }).limit(1500));
   const out: Record<string, { last: string | null; days: number }> = {};
@@ -241,11 +241,12 @@ export async function buildOfficeLive(admin: Admin, now = Date.now()): Promise<O
     }),
 
     // ── งานตั้งเวลาที่ดูหลักฐานจากแจ้งเตือน/คลังรูป ──
-    part(["wo-due-soon", "album-reminders", "cashflow-alert", "subscriptions"], async () => {
+    part(["wo-due-soon", "album-reminders", "cashflow-alert", "subscriptions", "perf-watch"], async () => {
       workers["wo-due-soon"] = cron("wo-due-soon", notifyStat(notif["wo.due_soon"]), notif["wo.due_soon"]?.last ?? null);
       workers["album-reminders"] = cron("album-reminders", notifyStat(notif["content_album.reminder"]), notif["content_album.reminder"]?.last ?? null);
       workers["cashflow-alert"] = cron("cashflow-alert", notifyStat(notif["cashflow.low_cash"]), notif["cashflow.low_cash"]?.last ?? null);
       workers.subscriptions = cron("subscriptions", notifyStat(notif["subscription.renewal_soon"]), notif["subscription.renewal_soon"]?.last ?? null);
+      workers["perf-watch"] = cron("perf-watch", notifyStat(notif["perf.regression"]), notif["perf.regression"]?.last ?? null);
     }),
     part(["drive-check", "look-hash"], async () => {
       const [missRes, noHashRes] = await Promise.all([

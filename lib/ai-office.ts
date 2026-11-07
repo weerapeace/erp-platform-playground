@@ -64,9 +64,9 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
   {
     id: "scheduler", zone: "control", kind: "auto", icon: "⏰",
     title: "ผู้ปลุกงานตามเวลา", titleEn: "Scheduler",
-    does: "ปลุกงานอัตโนมัติ 8 ตัวของระบบให้ทำงานตามเวลาทุกวัน",
+    does: "ปลุกงานอัตโนมัติของระบบ (ตามรายการใน vercel.json) ให้ทำงานตามเวลาทุกวัน",
     trigger: "ตามตารางเวลาใน Vercel (vercel.json)",
-    can: ["เรียกงานตั้งเวลาทั้ง 8 ตัวตามเวลา"], cannot: ["ทำงานแทนตัวที่ปลุก", "ข้ามการตรวจรหัสลับ"],
+    can: ["เรียกงานตั้งเวลาทุกตัวตามเวลา"], cannot: ["ทำงานแทนตัวที่ปลุก", "ข้ามการตรวจรหัสลับ"],
     source: "ดูว่าตั้งรหัสลับ CRON_SECRET ไว้หรือยัง (ถ้ายังไม่ตั้ง Vercel จะถูกปฏิเสธทุกครั้ง)",
     files: ["lib/cron-auth.ts", "vercel.json"],
   },
@@ -87,6 +87,16 @@ export const OFFICE_WORKERS: OfficeWorker[] = [
     can: ["ลบไฟล์รูปลูกค้าที่หมดระยะเก็บ"], cannot: ["ลบงานออกแบบหรือออเดอร์"],
     source: "บันทึกรอบล่าสุด + เวลาลบรูปล่าสุด (store_print_designs.uploads_purged_at)",
     files: ["app/api/cron/print-uploads-purge/route.ts"],
+  },
+  {
+    id: "perf-watch", zone: "control", kind: "auto", icon: "⚡",
+    title: "ผู้ตรวจความเร็ว", titleEn: "Speed watcher",
+    does: "วัดความเร็วหน้าหลักและคำสั่งฐานข้อมูลทุกคืน แล้วเตือนเมื่อช้าลงหรือหนักขึ้นผิดปกติ",
+    trigger: `${DAILY} 04:00`, cron: "/api/cron/perf-watch", everyHours: 24,
+    can: ["เปิดหน้าหลักแบบไม่ล็อกอิน วัดเวลาและขนาดโค้ด", "อ่านสถิติความเร็วฐานข้อมูล", "ส่งแจ้งเตือน"],
+    cannot: ["แก้โค้ดหรือฐานข้อมูล", "เห็นข้อมูลธุรกิจในหน้า"],
+    source: "บันทึกรอบล่าสุด + แจ้งเตือน perf.regression (ส่งเฉพาะตอนช้าลง) · ผลเต็มใน ui_config perf_watch_report",
+    files: ["app/api/cron/perf-watch/route.ts", "lib/perf-check.ts", "scripts/perf-check.mjs"],
   },
 
   // ── ขาย & หน้าร้าน ──
@@ -314,7 +324,7 @@ export const STATUS_LABEL: Record<WorkerStatus, { th: string; en: string }> = {
 export const STATUS_RANK: Record<WorkerStatus, number> = { error: 0, warn: 1, unknown: 2, ok: 3, idle: 4 };
 
 export const CRON_SECRET_FIX =
-  "ให้ผู้ดูแลระบบตั้งค่า CRON_SECRET (ข้อความสุ่มยาว 32 ตัวขึ้นไป) ใน Vercel → Settings → Environment Variables (Production) แล้ว deploy ใหม่ 1 ครั้ง งานตั้งเวลาทั้ง 8 ตัวจะกลับมาทำงานเอง";
+  "ให้ผู้ดูแลระบบตั้งค่า CRON_SECRET (ข้อความสุ่มยาว 32 ตัวขึ้นไป) ใน Vercel → Settings → Environment Variables (Production) แล้ว deploy ใหม่ 1 ครั้ง งานตั้งเวลาทุกตัวจะกลับมาทำงานเอง";
 
 const HOUR = 3_600_000;
 function hoursSince(iso: string | null | undefined, now: number): number | null {
