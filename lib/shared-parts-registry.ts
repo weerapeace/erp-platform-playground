@@ -104,14 +104,14 @@ export const JOB_VERDICT_LABEL: Record<JobVerdict, { label: string; hint: string
 };
 
 export const SAME_JOB_VERDICT: Record<string, { verdict: JobVerdict; why: string }> = {
-  "pager": { verdict: "merge", why: "แบบที่ 2 ใช้จุดเดียว (ตัวเลือกวัตถุดิบ) ย้ายไปแถบแบ่งหน้าหลักได้" },
-  "select": { verdict: "merge", why: "แบบที่ 2 ใช้จุดเดียว ย้ายไปช่องเลือกแบบพิมพ์ค้นหาตัวหลักได้" },
+  "pager": { verdict: "merge", why: "รวมแล้ว 2026-11-07: แถบหลักรองรับกรณีไม่รู้จำนวนทั้งหมดแล้ว ตัวเลือกวัตถุดิบย้ายมาใช้ · แบบที่ 2 ไม่มีใครใช้ รออนุญาตลบ" },
+  "select": { verdict: "keep", why: "ดูโค้ดแล้ว (2026-11-07) ไม่ใช่ตัวซ้ำ: แบบที่ 2 พิมพ์แล้วสั่งทำทันที + ปักดาวโปรด (ใช้ย้ายหมวดในหน้าจัดเว็บร้าน) · ตัวหลักเป็นช่องเลือกที่เก็บค่าในฟอร์ม" },
   "loading": { verdict: "merge", why: "โครงเทากระพริบไม่มีใครใช้ ทั้งระบบใช้ตัวหลักอยู่แล้ว" },
   "permission": { verdict: "merge", why: "ชุดทดลองเก่าไม่มีหน้าจริงใช้ ทั้งระบบใช้ตัวหลักอยู่แล้ว" },
   "sku-pick": { verdict: "merge", why: "ตัวเก่าเหลือ 1 จุดในระบบจัดซื้อชุดเก่า (/purchase-requests) ต้องตัดสินใจเลิกระบบนั้นก่อน · แบบกริดรูปไม่มีใครใช้" },
   "supplier-pick": { verdict: "merge", why: "ย้ายแล้ว 3 จุด (2026-11-07) เหลือ /purchase-orders ระบบจัดซื้อชุดเก่า ต้องตัดสินใจเลิกระบบนั้นก่อน" },
-  "popup": { verdict: "merge", why: "ป๊อปอัปกลางลากขยายได้อยู่แล้ว ป๊อปลากขยายได้ใช้แค่ 2 จุด ย้ายได้" },
-  "import": { verdict: "merge", why: "ป๊อปนำเข้า CSV แบบเก่าใช้จุดเดียว (/products-crud) ย้ายไปตัวช่วยนำเข้าไฟล์ได้" },
+  "popup": { verdict: "keep", why: "ดูโค้ดแล้ว (2026-11-07) ไม่ใช่ตัวซ้ำ: ป๊อปฝังหน้าอื่นต้องใช้พื้นที่เต็มไม่มีขอบ มีปุ่มเปิดเต็มจอ และกันเมาส์หลุดตอนลาก ซึ่งป๊อปอัปกลางยังไม่มี · ใช้ผ่าน EmbedModal เท่านั้น" },
+  "import": { verdict: "merge", why: "ป๊อปนำเข้า CSV แบบเก่าเหลือจุดเดียวในหน้าสินค้าชุดทดลองเก่า (/products-crud) ย้ายไม่คุ้ม (ต้องสร้างระบบนำเข้าให้ตารางเก่า) — รอเลิกหน้านั้นทีเดียว" },
   "file-field": { verdict: "merge", why: "ช่องหลายไฟล์ใช้จุดเดียว และยังไม่ทำตามกฎที่เก็บไฟล์ ควรให้ช่องไฟล์เดี่ยวรับหลายไฟล์ได้แทน" },
   "markup": { verdict: "merge", why: "ทั้งคู่วาดรูปทรง/ข้อความบนรูป ตัวกลางที่เลือกไว้คือกระดานวาดของใบงานออกแบบ · งานใหญ่ ต้องลองกับรูปสินค้าจริงก่อน" },
   "image-box": { verdict: "merge", why: "ทั้งคู่ลากกรอบบนรูปเป็น % ของรูป · ตัวหลักต้องเพิ่มทรงกรอบ (วงรี/หัวใจ) ก่อน กรอบบนรูปถึงย้ายมาได้" },
@@ -165,16 +165,17 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "pager", label: "แถบแบ่งหน้า", code: "Pager", category: "table",
     source: { path: "components/pager" },
-    what: "บอกจำนวนทั้งหมด + ปุ่มหน้าก่อน/ถัดไป + เลือกจำนวนต่อหน้า",
-    when: "รายการยาวที่ต้องแบ่งหน้า (ตารางกลางมีให้ในตัวแล้ว)",
+    what: "บอกจำนวนทั้งหมด + ปุ่มหน้าก่อน/ถัดไป + เลือกจำนวนต่อหน้า · ไม่รู้จำนวนทั้งหมดก็ได้ (ส่ง count + hasMore)",
+    when: "รายการยาวที่ต้องแบ่งหน้า (ตารางกลางมีให้ในตัวแล้ว) รวมถึงรายการในป๊อปค้นหา",
     sameJob: "pager", primary: true,
   },
   {
     key: "pager-bar", label: "แถบแบ่งหน้า แบบที่ 2", code: "PagerBar", category: "table",
     source: { path: "components/pager-bar" },
-    what: "แถบเลื่อนหน้าอีกแบบ ทำงานเหมือน Pager",
-    notWhen: "งานใหม่ให้ใช้ Pager",
-    sameJob: "pager",
+    what: "แถบเลื่อนหน้าแบบย่อ (ก่อนหน้า/ถัดไป) — ความสามารถย้ายไปอยู่ใน Pager แล้ว",
+    notWhen: "ห้ามใช้ ให้ใช้ Pager (ส่ง total = null + count + hasMore ถ้าไม่รู้จำนวนทั้งหมด)",
+    sameJob: "pager", replacedBy: "pager",
+    note: "ย้ายจุดสุดท้าย (ตัวเลือกวัตถุดิบ) ไป Pager แล้ว 2026-11-07 — ไม่มีใครใช้ รออนุญาตลบ",
   },
   {
     key: "bulk-action-bar", label: "แถบคำสั่งหลายรายการ", code: "BulkActionBar", category: "table",
@@ -201,10 +202,11 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "popup-policy.md", sameJob: "popup", primary: true, legacyKey: "erp_modal",
   },
   {
-    key: "resizable-modal", label: "ป๊อปอัปลากขยายได้", code: "ResizableModal", category: "popup",
+    key: "resizable-modal", label: "ป๊อปฝังหน้าอื่น (ลากขยายได้)", code: "ResizableModal", category: "popup",
     source: { path: "components/resizable-modal" },
-    what: "หน้าต่างลากมุมปรับขนาด จำขนาดไว้ ใช้ฝังหน้าอื่นเป็นป๊อป",
-    notWhen: "งานใหม่ให้ใช้ป๊อปอัปกลาง (ERPModal) ซึ่งลากปรับขนาดและจำขนาดได้อยู่แล้ว",
+    what: "ป๊อปที่ฝังทั้งหน้าอื่นไว้ข้างใน (iframe) ใช้พื้นที่เต็มไม่มีขอบ หัวมีปุ่มเปิดเต็มจอ กันเมาส์หลุดตอนลากขอบ",
+    when: "เปิดหน้าอื่นทั้งหน้าเป็นป๊อป — เรียกผ่าน EmbedModal",
+    notWhen: "ป๊อปทั่วไป (ฟอร์ม ยืนยัน รายละเอียด) ให้ใช้ป๊อปอัปกลาง ERPModal",
     sameJob: "popup",
   },
   {
@@ -290,10 +292,11 @@ export const SHARED_PARTS: SharedPart[] = [
     sameJob: "select", primary: true,
   },
   {
-    key: "search-pick", label: "ช่องเลือกแบบพิมพ์ค้นหา แบบที่ 2", code: "SearchPick", category: "input",
+    key: "search-pick", label: "ช่องพิมพ์ค้นแล้วสั่งทำทันที (มีดาวโปรด)", code: "SearchPick", category: "input",
     source: { path: "components/search-pick" },
-    what: "ทำงานเหมือน SearchableSelect",
-    notWhen: "งานใหม่ให้ใช้ SearchableSelect",
+    what: "พิมพ์ค้น กดรายการแล้วสั่งทำทันที (ไม่ได้เก็บค่า) + ปักดาวรายการโปรด เช่น ย้ายสินค้าไปหมวดอื่น",
+    when: "ปุ่มลัดแบบ เลือกแล้วทำเลย ที่รายการยาว",
+    notWhen: "ช่องในฟอร์มที่ต้องเก็บค่าที่เลือก ให้ใช้ SearchableSelect",
     sameJob: "select",
   },
 

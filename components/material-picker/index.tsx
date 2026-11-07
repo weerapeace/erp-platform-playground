@@ -16,7 +16,7 @@ import dynamic from "next/dynamic";
 import { apiFetch, safeSearch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
-import { PagerBar } from "@/components/pager-bar";
+import { Pager } from "@/components/pager";
 import type { BomComponent } from "@/app/api/bom/components/route";
 import { RECENT_KEYS, loadRecent, pushRecent } from "@/lib/recent-picks";   // "ใช้ล่าสุด" ของกลาง
 
@@ -172,7 +172,7 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
   const [search, setSearch] = useState("");
   const [items, setItems] = useState<BomComponent[]>([]);
   const [loading, setLoading] = useState(false);
-  // เลื่อนดูเป็น "หน้า" (ของกลาง PagerBar) — เดิมมีแค่ปุ่มโหลดเพิ่มที่ต้องกดรัวและย้อนกลับไม่ได้
+  // เลื่อนดูเป็น "หน้า" (ของกลาง Pager — รู้ total ตอนค้นหา · ไม่รู้ตอนเลื่อนดูทั้งหมด ใช้ hasMore) — เดิมมีแค่ปุ่มโหลดเพิ่มที่ต้องกดรัวและย้อนกลับไม่ได้
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [total, setTotal] = useState<number | null>(null);
@@ -252,7 +252,7 @@ function MaterialSearchModal({ open, onClose, onPick, allowedGroupCodes, allowed
           {!loading && items.length === 0 && <div className="col-span-2 text-center py-10 text-slate-300 text-sm">ไม่พบวัตถุดิบ</div>}
         </div>
         {loading && <div className="text-center text-xs text-slate-400 py-1">กำลังค้นหา…</div>}
-        <PagerBar page={page} pageSize={PAGE} count={items.length} total={total} hasMore={hasMore} loading={loading} onPage={setPage} />
+        <Pager page={page} pageSize={PAGE} count={items.length} total={total} hasMore={hasMore} loading={loading} onPage={setPage} hideWhenSingle />
       </div>
     </ERPModal>
 

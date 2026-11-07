@@ -249,7 +249,7 @@ export function SharedPartsView() {
                       {r.usage && r.usage.files > 0 ? `ใช้ ${r.usage.placeCount} จุด · ${r.usage.files} ไฟล์` : "ยังไม่มีใครใช้"}
                     </span>
                     <span className="flex gap-1 flex-wrap">
-                      {r.primary && r.siblings.length > 0 && <PrimaryBadge />}
+                      {r.primary && r.verdict === "merge" && <PrimaryBadge />}
                       {r.flags.filter((f) => f !== "nodoc").map((f) => <Flag key={f} f={f} />)}
                     </span>
                   </div>
@@ -300,9 +300,9 @@ function PartDrawer({ row, byKey, onClose, onOpen }: { row: PartRow; byKey: Map<
     <Drawer open onClose={onClose} title={row.label} description={`${CAT[row.category].label} · ${row.code}`} size="lg" storageKey="shared-part-drawer">
       <div className="space-y-4">
         <div className="flex flex-wrap gap-1">
-          {row.primary && row.siblings.length > 0 && <PrimaryBadge />}
+          {row.primary && row.verdict === "merge" && <PrimaryBadge />}
           {row.flags.map((f) => <Flag key={f} f={f} />)}
-          {row.flags.length === 0 && !(row.primary && row.siblings.length) && <span className="text-[11px] px-1.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">ใช้งานปกติ</span>}
+          {row.flags.length === 0 && !(row.primary && row.verdict === "merge") && <span className="text-[11px] px-1.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">ใช้งานปกติ</span>}
         </div>
 
         {row.verdict && (
@@ -352,7 +352,7 @@ function PartDrawer({ row, byKey, onClose, onOpen }: { row: PartRow; byKey: Map<
               {siblings.map((s) => (
                 <button key={s.key} onClick={() => onOpen(s.key)}
                   className="text-xs px-2.5 py-1 rounded-full border border-slate-200 hover:border-violet-300 hover:bg-violet-50">
-                  {s.label} · {s.usage && s.usage.files > 0 ? `${s.usage.files} ไฟล์` : "ไม่มีใครใช้"}{s.primary ? " · ตัวหลัก" : ""}
+                  {s.label} · {s.usage && s.usage.files > 0 ? `${s.usage.files} ไฟล์` : "ไม่มีใครใช้"}{s.primary && s.verdict === "merge" ? " · ตัวหลัก" : ""}
                 </button>
               ))}
             </div>
@@ -410,9 +410,9 @@ function GroupsTab({ groups, onOpen }: { groups: JobGroup[]; onOpen: (key: strin
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {g.members.map((m) => (
                       <button key={m.key} type="button" onClick={() => onOpen(m.key)}
-                        className={`text-xs px-2.5 py-1 rounded-full border hover:border-violet-300 hover:bg-violet-50 ${m.primary ? "border-emerald-300 bg-emerald-50/60" : m.replacedBy ? "border-slate-300 bg-slate-50 text-slate-500" : "border-slate-200"}`}>
+                        className={`text-xs px-2.5 py-1 rounded-full border hover:border-violet-300 hover:bg-violet-50 ${m.primary && g.verdict === "merge" ? "border-emerald-300 bg-emerald-50/60" : m.replacedBy ? "border-slate-300 bg-slate-50 text-slate-500" : "border-slate-200"}`}>
                         {m.label} · {m.usage && m.usage.files > 0 ? `${m.usage.placeCount} จุด` : "ไม่มีใครใช้"}
-                        {m.primary ? " · ตัวหลัก" : m.replacedBy ? " · ตัวเก่า" : ""}
+                        {m.primary && g.verdict === "merge" ? " · ตัวหลัก" : m.replacedBy ? " · ตัวเก่า" : ""}
                       </button>
                     ))}
                   </div>

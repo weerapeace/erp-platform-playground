@@ -69,17 +69,19 @@ describe("ทะเบียนของกลาง (lib/shared-parts-registry)
 
 describe("ป้ายสถานะ (buildPartRows)", () => {
   const u = (files: number, placeCount = files): SourceUsage => ({ files, demo: 0, placeCount, places: [] });
-  const parts = SHARED_PARTS.filter((p) => ["pager", "pager-bar", "supplier-picker", "supplier-picker-old", "attachment-panel", "record-files", "line-items-grid", "sales-line-items", "skeleton", "state-views"].includes(p.key));
+  const parts = SHARED_PARTS.filter((p) => ["pager", "pager-bar", "file-input", "file-multi-input", "supplier-picker", "supplier-picker-old", "attachment-panel", "record-files", "line-items-grid", "sales-line-items", "skeleton", "state-views"].includes(p.key));
   const usage = {
-    sources: Object.fromEntries(parts.map((p) => [sourceId(p.source), p.key === "skeleton" ? u(0) : p.key === "pager-bar" ? u(1) : u(10, 5)])),
+    sources: Object.fromEntries(parts.map((p) => [sourceId(p.source), p.key === "skeleton" ? u(0) : p.key === "pager-bar" || p.key === "file-multi-input" ? u(1) : u(10, 5)])),
   };
   const rows = Object.fromEntries(buildPartRows(parts, usage).map((r) => [r.key, r]));
 
   it("ไม่มีใครใช้ / ใช้ที่เดียว / ซ้ำกับตัวหลัก", () => {
     expect(rows.skeleton.flags).toContain("unused");
-    expect(rows["pager-bar"].flags).toEqual(expect.arrayContaining(["single", "dup"]));
-    expect(rows.pager.flags).not.toContain("dup");
+    expect(rows["file-multi-input"].flags).toEqual(expect.arrayContaining(["single", "dup"]));
+    expect(rows["file-input"].flags).not.toContain("dup");
     expect(rows.pager.siblings).toEqual(["pager-bar"]);
+    expect(rows["pager-bar"].flags).toEqual(expect.arrayContaining(["single", "deprecated"]));   // รวมแล้ว → ตัวเก่า (ไม่ติด dup ซ้ำ)
+    expect(rows["pager-bar"].flags).not.toContain("dup");
   });
 
   it("ตัวเก่า = ควรเลิก (ไม่ซ้ำป้าย dup)", () => {
