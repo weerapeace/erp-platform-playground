@@ -259,7 +259,7 @@ export type AuditFormatCtx = {
 const CODE_KEYS = ["pr_no", "po_no", "pv_no", "so_number", "so_no", "mo_no", "wo_no", "task_no", "content_no", "ticket_no", "doc_no", "number", "run_no",
   "movement_number", "bom_code", "code", "sku", "loan_code", "contract_no", "transfer_no", "invoice_no", "period_name"];
 /** คีย์ชื่อรายการ */
-const NAME_KEYS = ["item_name", "name", "name_th", "title", "subtask_title", "job_name", "label", "loan_name", "file_name", "sku_name", "product"];
+const NAME_KEYS = ["item_name", "name", "name_th", "title", "subtask_title", "job_name", "label", "loan_name", "file_name", "sku_name", "product", "product_name"];
 
 /** คีย์ที่ช่องค้นหาในหน้าประวัติค้น (เลขเอกสาร + ชื่อ) */
 export const AUDIT_SEARCH_KEYS: string[] = [...CODE_KEYS, ...NAME_KEYS.filter((k) => k !== "product")];
