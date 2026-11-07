@@ -780,6 +780,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "page-chrome.md",
   },
   {
+    key: "brand-strip", label: "แถบสีแบรนด์ซ้ายการ์ด", code: "BrandStrip", category: "layout",
+    source: { path: "components/brand-strip", names: ["BrandStrip"] },
+    what: "แถบสีบาง ๆ ด้านซ้ายการ์ด บอกว่าเป็นงานของแบรนด์ไหน สีมาจากเมนูแบรนด์ สีอ่อนเกินจะเข้มให้เอง ไม่มีสี = เทา",
+    when: "การ์ดบนบอร์ดที่ปนหลายแบรนด์ (Design Dashboard, บอร์ดงาน)",
+    notWhen: "อย่าใช้ขอบทั้งใบหรือเงาสีแบรนด์แทน (เจ้าของเลือกแถบซ้าย) · อย่าใช้สีแดงบอกแบรนด์ แดง = เตือนเกินกำหนด",
+    doc: "brand-strip.md",
+  },
+  {
     key: "account-menu", label: "เมนูบัญชีผู้ใช้", code: "AccountMenu", category: "layout",
     source: { path: "components/account-menu" },
     what: "กดชื่อผู้ใช้ แก้โปรไฟล์ เปลี่ยนสีธีม ออกจากระบบ",

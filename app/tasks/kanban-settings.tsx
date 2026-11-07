@@ -131,7 +131,7 @@ export function KanbanSettingsControls({ cfg, onChange, wip }: { cfg: KanbanThem
         )}
         <div className="flex flex-wrap gap-x-3 gap-y-1.5">
           {/* WIP ไม่โชว์บรรทัดสินค้า/SKU บนการ์ด (เจ้าของเลือก) → ซ่อนตัวเลือกนี้ */}
-          {([["cover", t("รูปปก", "Cover")], ["brand", t("แบรนด์", "Brand")], ["assignee", t("ผู้รับผิดชอบ", "Assignee")], ["due", t("กำหนดส่ง", "Due date")], ["priority", t("ความสำคัญ", "Priority")], ["taskType", t("ประเภทงาน", "Task type")], ["progress", t("ความคืบหน้า", "Progress")], ["sku", t("สินค้า/SKU", "Product/SKU")], ["taskNo", t("เลขที่งาน", "Task no.")], ["brandBorder", t("กรอบสีตามแบรนด์", "Brand color border")], ["compact", t("การ์ดกะทัดรัด", "Compact card")]] as const).filter(([k]) => !(wip && k === "sku")).map(([k, label]) => (
+          {([["cover", t("รูปปก", "Cover")], ["brand", t("แบรนด์", "Brand")], ["assignee", t("ผู้รับผิดชอบ", "Assignee")], ["due", t("กำหนดส่ง", "Due date")], ["priority", t("ความสำคัญ", "Priority")], ["taskType", t("ประเภทงาน", "Task type")], ["progress", t("ความคืบหน้า", "Progress")], ["sku", t("สินค้า/SKU", "Product/SKU")], ["taskNo", t("เลขที่งาน", "Task no.")], ["brandBorder", t("แถบสีแบรนด์ (ซ้ายการ์ด)", "Brand color strip")], ["compact", t("การ์ดกะทัดรัด", "Compact card")]] as const).filter(([k]) => !(wip && k === "sku")).map(([k, label]) => (
             <label key={k} className="inline-flex items-center gap-1.5 text-sm text-slate-600 cursor-pointer">
               <input type="checkbox" checked={k === "sku" || k === "taskNo" || k === "taskType" ? cfg[k] !== false : !!cfg[k]} onChange={(e) => set({ [k]: e.target.checked })} className="h-4 w-4 rounded border-slate-300 text-violet-600" />{label}
             </label>

@@ -12,6 +12,7 @@ import { RecordChecklistChip } from "@/components/record-tasks";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { prefetchDesignSheet } from "@/components/design-sheet-detail/prefetch";
 import type { ChecklistSummary } from "@/lib/record-tasks";
+import { BrandStrip } from "@/components/brand-strip";
 
 /** ⏳ แถบรออะไรอยู่บนการ์ด (กดติ๊ก/เพิ่มได้เลย) — ไม่มีรายการ = ไม่โชว์ */
 function WaitingChip({ sheet, canEdit, onWaitingChange }: { sheet: DesignSheetListItem; canEdit: boolean; onWaitingChange?: (id: string, s: ChecklistSummary) => void }) {
@@ -37,6 +38,8 @@ export type SheetCardProps = {
   canEditWaiting: boolean;
   /** ติ๊กบนการ์ดแล้ว → อัปเดตสรุปของใบนั้นในรายการ */
   onWaitingChange?: (id: string, s: ChecklistSummary) => void;
+  /** แถบสีแบรนด์ด้านซ้ายการ์ด (ของกลาง components/brand-strip) — เปิด/ปิดต่อคน */
+  brandStrip: boolean;
 };
 export type BoardCardProps = SheetCardProps & {
   draggingSheetId: string | null;
@@ -49,7 +52,7 @@ export type BoardCardProps = SheetCardProps & {
 };
 
 // การ์ดแบบแกลเลอรี (รูปเต็มใบ) — ใช้ทั้งมุมมองแกลเลอรี และบอร์ดมือถือ (แท็บสถานะ)
-export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting, onWaitingChange }: SheetCardProps) {
+export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting, onWaitingChange, brandStrip }: SheetCardProps) {
   const t = useT();
   const brandColor = safeColor(sheet.brand_color);
   const coverUrl = sheetCoverUrl(sheet);
@@ -71,6 +74,7 @@ export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode
       className={`group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-lg border bg-white shadow-[3px_3px_0_rgba(15,23,42,0.08)] transition hover:-translate-y-0.5 ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"}`}
     >
       {pickMode && (canPick(sheet) ? <PickBadge checked={picked} /> : <NoPickVeil />)}
+      {brandStrip && <BrandStrip color={brandColor} title={sheet.brand_name ?? undefined} />}
       <BrandSlot theme={brandTheme} id="task_corner" />
       {coverUrl ? (
         <CoverPreview off={hoverOn} url={sheet.cover_url}>
@@ -123,7 +127,7 @@ export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode
 // การ์ดบนบอร์ด (ลากเปลี่ยนสถานะได้บนจอคอม) — 2 ขนาดตาม cardSize:
 //   compact = รูปจัตุรัส + ชื่อ + เลขที่/กำหนดส่ง (ไม่มีกล่องโน้ตสูงคงที่แบบเดิม — โน้ตเป็น 📝 ชี้ดูได้)
 //   row     = รูปจิ๋ว 40px ซ้าย + ชื่อ/เลขที่/กำหนดส่ง ขวา (เห็นงานเยอะสุดต่อจอ · ชี้รูปแล้วขยายได้)
-export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting, onWaitingChange, draggingSheetId, movingSheetId, cardSize, isDesktop, handleCardDragStart, setDraggingSheetId, setDropTargetStatus }: BoardCardProps) {
+export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting, onWaitingChange, brandStrip, draggingSheetId, movingSheetId, cardSize, isDesktop, handleCardDragStart, setDraggingSheetId, setDropTargetStatus }: BoardCardProps) {
   const t = useT();
   const brandColor = safeColor(sheet.brand_color);
   const coverUrl = sheetCoverUrl(sheet);
@@ -168,9 +172,10 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
       onDragEnd={() => { setDraggingSheetId(null); setDropTargetStatus(null); }}
       aria-busy={isMoving}
       title={pickMode ? t("กดเพื่อเลือก/ยกเลิกเลือก", "Click to select/deselect") : hoverOn && isDesktop ? undefined : isDesktop ? `${sheet.code} • ${sheet.name} — ${t("ลากเพื่อเปลี่ยนสถานะ หรือกดเพื่อเปิด", "drag to change status or click to open")}` : t("แตะเพื่อเปิด (เปลี่ยนสถานะได้ในป๊อปอัป)", "Tap to open (change status in the popup)")}
-      className={`relative overflow-hidden rounded-lg border bg-white shadow-[2px_2px_0_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 ${row ? "flex items-center gap-2 p-1.5" : "block p-1.5"} ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode || !isDesktop ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
+      className={`relative overflow-hidden rounded-lg border bg-white shadow-[2px_2px_0_rgba(15,23,42,0.06)] transition hover:-translate-y-0.5 ${row ? "flex items-center gap-2 p-1.5" : "block p-1.5"} ${brandStrip ? "pl-2.5" : ""} ${picked ? "border-indigo-500 ring-2 ring-indigo-300" : "border-slate-200 hover:border-amber-300"} ${isDragging ? "opacity-45" : ""} ${isMoving ? "pointer-events-none opacity-60" : pickMode || !isDesktop ? "cursor-pointer" : "cursor-grab active:cursor-grabbing"}`}
     >
       {pickMode && (canPick(sheet) ? <PickBadge checked={picked} /> : <NoPickVeil />)}
+      {brandStrip && <BrandStrip color={brandColor} title={sheet.brand_name ?? undefined} />}
       <BrandSlot theme={brandTheme} id="task_corner" />
       {cover}
       {row ? (

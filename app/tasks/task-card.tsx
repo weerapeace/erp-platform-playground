@@ -16,6 +16,7 @@ import { TaskTypeChip } from "./task-type-chip";
 import { statusMeta, isTerminal } from "./use-statuses";
 import { PRIORITY_META, priorityLabel, isOverdue, type CreativeTask, type CreativePriority } from "./data";
 import type { KanbanTheme, CardLook } from "./overview-customizer";
+import { BrandStrip } from "@/components/brand-strip";
 
 /** ค่าตั้งต้นของการ์ด (เปิดเฉพาะที่ระบุ) — ใช้กับการ์ดนอกบอร์ด เช่น "งานของฉัน" / กระดานลากวาง */
 export function taskCardCfg(p: Partial<KanbanTheme>): KanbanTheme {
@@ -131,9 +132,8 @@ export function TaskCard({ task, cfg: rawCfg, dragging, extra: rawExtra }: { tas
   const side = cfg.coverPos === "side" && (!!coverUrl || showPh);   // รูปเล็กข้างซ้าย (ข้อความอยู่ขวา)
   const fill = !!extra?.fill;
   const scale = CARD_SCALE[cfg.cardScale ?? "md"] ?? 1;
-  // กรอบสีตามแบรนด์ (ถ้าเปิด + แบรนด์มีสี hex)
-  const bc = task.brand_color;
-  const brandBorder = cfg.brandBorder && bc && /^#[0-9a-fA-F]{6}$/.test(String(bc));
+  // แถบสีแบรนด์ซ้ายการ์ด (ถ้าเปิด) — ของกลาง components/brand-strip ตัวเดียวกับ Design Dashboard · แบรนด์ไม่มีสี = ไม่วาด
+  const brandBorder = !!cfg.brandBorder;
   const showSku = cfg.sku !== false, showTaskNo = cfg.taskNo !== false;
   const phIcon = <span className="text-2xl opacity-40 grayscale" aria-hidden>🖼️</span>;
   // 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียด (ตั้งค่าต่อคน) · เปิดอยู่ = ไม่เด้งพรีวิวรูปเดี่ยวซ้ำ
@@ -141,8 +141,9 @@ export function TaskCard({ task, cfg: rawCfg, dragging, extra: rawExtra }: { tas
   const preview = (url: string | null | undefined, w: number, node: ReactNode) => (hoverOn ? node : <HoverPreview url={url} previewW={w}>{node}</HoverPreview>);
   return (
     <TaskHoverWrap task={task} enabled={hoverOn} fields={cfg.hoverFields ?? DEFAULT_HOVER_FIELDS} off={dragging} className={fill ? "h-full" : undefined}>
-    <div className={`bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${fill ? "h-full flex flex-col" : ""} ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
-      style={{ ...(brandBorder ? { borderColor: String(bc), borderLeftWidth: 3 } : {}), ...(extra?.accentLeft ? { borderLeftWidth: 3, borderLeftColor: extra.accentLeft } : {}), ...(scale !== 1 ? { zoom: scale } : {}) }}>
+    <div className={`relative bg-white rounded-lg border border-slate-200 overflow-hidden shadow-sm ${fill ? "h-full flex flex-col" : ""} ${dragging ? "shadow-xl ring-2 ring-violet-300 rotate-1" : "hover:border-violet-300 hover:shadow"}`}
+      style={{ ...(extra?.accentLeft ? { borderLeftWidth: 3, borderLeftColor: extra.accentLeft } : {}), ...(scale !== 1 ? { zoom: scale } : {}) }}>
+      {brandBorder && <BrandStrip color={task.brand_color} fallback={null} title={task.brand_label ?? undefined} />}
       {coverUrl && !side && preview(r2ImageUrl(cover), 640,
         // eslint-disable-next-line @next/next/no-img-element
         <img src={coverUrl} alt="" loading="lazy" decoding="async" className={`${topH} w-full shrink-0 ${fitCls} border-b border-slate-100`} />

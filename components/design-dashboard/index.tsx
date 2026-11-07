@@ -173,6 +173,18 @@ export function DesignDashboard() {
     setCardSize(size);
     void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_card_size", value: size }) }).catch(() => {});
   };
+  // แถบสีแบรนด์ซ้ายการ์ด (ของกลาง components/brand-strip · เจ้าของเลือกแบบแถบซ้าย 2026-11-07) — ค่าเริ่มต้นเปิด · ปิดได้ต่อคน
+  const [brandStrip, setBrandStrip] = useState(true);
+  useEffect(() => {
+    apiFetch("/api/user-prefs?key=design_dashboard_brand_strip").then((r) => r.json())
+      .then((j) => { if (typeof j?.value === "boolean") setBrandStrip(j.value); })
+      .catch(() => {});
+  }, []);
+  const toggleBrandStrip = () => {
+    const next = !brandStrip;
+    setBrandStrip(next);
+    void apiFetch("/api/user-prefs", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ key: "design_dashboard_brand_strip", value: next }) }).catch(() => {});
+  };
   // 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (ของกลาง components/hover-card) — ตั้งค่าต่อคน
   const hoverPref = useSheetHoverPref();
   const hoverOn = hoverPref.on && hoverPref.fields.length > 0;
@@ -514,7 +526,7 @@ export function DesignDashboard() {
   // การ์ดใบงาน (ของกลางในโมดูล ./dashboard-cards) — แกลเลอรี/บอร์ด ใช้ค่าร่วมชุดเดียวกัน
   // ⏳ ติ๊ก "รออะไรอยู่" บนการ์ด → อัปเดตสรุปของใบนั้นในรายการทันที (ไม่ต้องโหลดทั้งหน้า)
   const onWaitingChange = (id: string, s: ChecklistSummary) => setSheets((items) => items.map((it) => (it.id === id ? { ...it, waiting_items: s } : it)));
-  const cardProps = { statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting: canEdit, onWaitingChange };
+  const cardProps = { statusInfo, statusMeta, pickedIds, pickMode, canPick, togglePicked, openDetail, hoverPref, hoverOn, brandTheme, canEditWaiting: canEdit, onWaitingChange, brandStrip };
   const renderGalleryCard = (sheet: DesignSheetListItem) => <GalleryCard key={sheet.id} sheet={sheet} {...cardProps} />;
   const renderBoardCard = (sheet: DesignSheetListItem) => (
     <BoardCard key={sheet.id} sheet={sheet} {...cardProps} draggingSheetId={draggingSheetId} movingSheetId={movingSheetId} cardSize={cardSize} isDesktop={isDesktop}
@@ -562,6 +574,9 @@ export function DesignDashboard() {
                   <button type="button" className={menuItem} onClick={() => { setStatusMgr(true); setMoreOpen(false); }}>🔀 {t("จัดการสถานะ", "Manage statuses")}</button>
                   <button type="button" className={menuItem} onClick={() => { changeCardSize(cardSize === "row" ? "compact" : "row"); setMoreOpen(false); }}>
                     {cardSize === "row" ? t("▦ การ์ดเล็ก (มีรูป)", "▦ Small cards (with image)") : t("☰ การ์ดแถวย่อ", "☰ Compact rows")}
+                  </button>
+                  <button type="button" className={menuItem} onClick={() => { toggleBrandStrip(); setMoreOpen(false); }}>
+                    <Icon name="design" /> {brandStrip ? t("ปิดแถบสีแบรนด์", "Hide brand strip") : t("เปิดแถบสีแบรนด์", "Show brand strip")}
                   </button>
                   {canTasks && <button type="button" className={menuItem} onClick={() => { if (pickMode) exitPickMode(); else startPick("board"); setMoreOpen(false); }}>{pickMode ? t("✕ ออกจากโหมดเลือก", "✕ Exit select mode") : t("🎨 ส่งขึ้นกระดาน", "🎨 Send to board")}</button>}
                   {canEdit && !pickMode && <button type="button" className={menuItem} onClick={() => { startPick("summary"); setMoreOpen(false); }}>📋 {t("สรุปงานใหม่ (เลือกใบงาน)", "New summary (pick sheets)")}</button>}
@@ -764,6 +779,12 @@ export function DesignDashboard() {
                 )}
                 {/* 🪟 ชี้ที่การ์ด = รูปใหญ่ + รายละเอียดงาน (ตั้งค่าต่อคน) — จอคอมเท่านั้น (ทัชไม่เด้ง) */}
                 {isDesktop && <SheetHoverSettingsButton pref={hoverPref} />}
+                {/* แถบสีแบรนด์ซ้ายการ์ด — เปิด/ปิดต่อคน (ใช้ทั้งบอร์ดและการ์ดรูปใหญ่) · สีตั้งที่ /master/brands */}
+                <button type="button" onClick={toggleBrandStrip} aria-pressed={brandStrip}
+                  title={t("แถบสีแบรนด์ด้านซ้ายการ์ด (จำค่าของคุณ) — เปลี่ยนสีแบรนด์ได้ที่เมนูแบรนด์", "Brand color strip on the left of each card (remembered for you) — change brand colors in Brands")}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-xs font-medium transition ${brandStrip ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                  <Icon name="design" /> {t("แถบสีแบรนด์", "Brand strip")}: {brandStrip ? t("เปิด", "On") : t("ปิด", "Off")}
+                </button>
                 {/* ขนาดการ์ดบนบอร์ด: ▦ การ์ดเล็ก / ☰ แถวย่อ — จำรายคน (เฉพาะมุมมองบอร์ด) */}
                 {viewMode === "board" && (
                   <div className="ml-auto flex items-center gap-0.5 rounded-md border border-slate-200 bg-white p-0.5" title={t("ขนาดการ์ดบนบอร์ด (จำค่าของคุณ)", "Card size on the board (remembered for you)")}>
