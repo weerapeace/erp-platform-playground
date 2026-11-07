@@ -6,12 +6,14 @@
  *   3) ซ่อนค่าอ่อนไหวตามสิทธิ์ผู้ดู:
  *        - ช่องที่ทะเบียน field จำกัด view_roles / sensitive_permission (เช่น ราคาทุน = products.cost.view)
  *        - งานบุคคล/เงินเดือน/เงินกู้: ช่องตัวเงิน/บัญชี ต้องมีสิทธิ์แอป Payroll (app.payroll + employees.view)
+ *        - ใบออกแบบ/ราคากลางออกแบบ: ช่องราคา/ต้นทุน/กำไร ต้องมีสิทธิ์ดูต้นทุน (COST_PERM) — กฎเดียวกับหน้าใบออกแบบ
  *      ค่าที่ซ่อนถูกตัดออกจาก metadata ด้วย — ไม่ส่งถึงเบราว์เซอร์เลย (ไม่ใช่แค่ซ่อนบนจอ)
  *   4) รหัสอ้างอิงในค่าเดิม/ใหม่ (แบรนด์/คน/สินค้า/บริษัท) → ชื่อ — ใช้ relation_config ในทะเบียน field ก่อน แล้วค่อยตาราง REF_FIELDS
  *   5) แนบ view = ผลแปลภาษาคน (lib/audit-format describeAudit)
  */
 import { apiCan } from "@/lib/api-auth";
 import { getUserRole } from "@/lib/field-permissions";
+import { COST_PERM } from "@/lib/cost-access";
 import { describeAudit, type AuditView } from "@/lib/audit-format";
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import type { NextRequest } from "next/server";
@@ -77,6 +79,10 @@ async function loadFieldMeta(admin: Admin, tables: string[]): Promise<Record<str
 /** งานบุคคล/เงินเดือน/เงินกู้ — ช่องตัวเงิน/บัญชีต้องมีสิทธิ์ Payroll */
 const PAY_ENTITY = /(payroll|salary|wage|employee|contract|loan|^od_|bank|cash|attendance|overtime|leave)/;
 const PAY_KEY = /(amount|salary|wage|total|price|cost|pay|tax|bank|account|national_id|passport|visa|work_permit|social_security|advance|rate|income|deduct)/i;
+
+/** ใบออกแบบ/ราคากลางออกแบบ — ช่องราคา/ต้นทุน/กำไร ต้องมีสิทธิ์ดูต้นทุน (เช่น ราคาที่ร้านเสนอ ยอดตีราคา) */
+const COST_ENTITY = /^design_(sheet|price_item)/;
+const COST_KEY = /(price|cost|profit|margin|amount|total)/i;
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
 
@@ -173,6 +179,7 @@ const REF_FIELDS: Record<string, RefTarget | "person"> = {
   assignee_id: "person", assignee_ids: "person", reviewer_id: "person", reviewer_ids: "person", approver_id: "person",
   assigned_by_id: "person", assigned_to: "person", owner_id: "person", user_id: "person", employee_id: "person",
   manager_employee_id: "person", created_by: "person", resolved_by: "person",
+  sheet_id: { table: "design_sheets", label: "code" }, sheet_ids: { table: "design_sheets", label: "code" },
 };
 const UUID_V = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_REF_IDS = 300;
@@ -283,16 +290,18 @@ export async function enrichAuditRows(request: NextRequest, admin: Admin, rows: 
   for (const t of tables) for (const f of Object.values(fieldMeta[t] ?? {})) if (f.perm) perms.add(f.perm);
   const needRole = tables.some((t) => Object.values(fieldMeta[t] ?? {}).some((f) => f.viewRoles));
   const needPay = tables.some((t) => PAY_ENTITY.test(t));
+  const needCost = tables.some((t) => COST_ENTITY.test(t));
   // แถวเก่าที่ไม่ได้จดเลขเอกสาร/ชื่อ → หาจากตารางจริง (ยิงพร้อมกับเช็กสิทธิ์)
   const LABEL_HINT_KEYS = ["code", "content_no", "employee_code", "contract_no", "pr_no", "po_no", "pv_no", "so_number", "mo_no", "task_no", "ticket_no", "name", "name_th", "title", "item_name", "sku", "bom_code"];
   const unlabeled = rows
     .filter((r) => r.entity_id && LABEL_SOURCES[r.entity_type] && !(isObj(r.metadata) && LABEL_HINT_KEYS.some((k) => r.metadata![k])))
     .map((r) => ({ entity_type: r.entity_type, entity_id: r.entity_id as string }));
 
-  const [role, permOk, payOk, labels, valueLabels] = await Promise.all([
+  const [role, permOk, payOk, costOk, labels, valueLabels] = await Promise.all([
     needRole || needPay ? getUserRole(request) : Promise.resolve(""),
     Promise.all([...perms].map(async (p) => [p, await apiCan(request, p)] as const)).then((xs) => new Map(xs)),
     needPay ? Promise.all([apiCan(request, "app.payroll"), apiCan(request, "employees.view")]).then(([a, b]) => a && b) : Promise.resolve(true),
+    needCost ? apiCan(request, COST_PERM) : Promise.resolve(true),
     unlabeled.length ? lookupRecordLabels(admin, unlabeled) : Promise.resolve(new Map<string, { code: string | null; name: string | null }>()),
     resolveRefLabels(admin, rows, fieldMeta, nameById),
   ]);
@@ -307,6 +316,7 @@ export async function enrichAuditRows(request: NextRequest, admin: Admin, rows: 
         if ((f.viewRoles && !f.viewRoles.includes(role)) || (f.perm && !permOk.get(f.perm))) hidden.add(col);
       }
       if (!payOk && PAY_ENTITY.test(r.entity_type)) for (const k of fieldNamesIn(m)) if (PAY_KEY.test(k)) hidden.add(k);
+      if (!costOk && COST_ENTITY.test(r.entity_type)) for (const k of fieldNamesIn(m)) if (COST_KEY.test(k)) hidden.add(k);
     }
     const fieldLabels: Record<string, string> = {};
     for (const [col, f] of Object.entries(fm)) fieldLabels[col] = f.label;

@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { friendlyDbError } from "../../../../master-v2/[entity]/route";
 
@@ -32,12 +32,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.comment_date !== undefined) patch.comment_date = body.comment_date || new Date().toISOString().slice(0, 10);
 
   const admin = supabaseAdmin();
+  const { data: before } = await admin.from("design_sheet_comments").select("body, comment_date").eq("id", cid).eq("sheet_id", id).maybeSingle();   // ค่าเดิม ไว้จดประวัติ
   const { error } = await admin.from("design_sheet_comments").update(patch).eq("id", cid).eq("sheet_id", id);
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
   await writeAudit(admin, {
     action: "comment_update", entityType: "design_sheet", entityId: id,
-    actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { comment_id: cid },
+    actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { comment_id: cid, ...auditChangeMeta(before as Record<string, unknown> | null, patch) },
   });
   return NextResponse.json({ id: cid, error: null });
 }

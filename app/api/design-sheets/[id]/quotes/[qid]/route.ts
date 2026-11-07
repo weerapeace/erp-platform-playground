@@ -8,7 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { friendlyDbError } from "../../../../master-v2/[entity]/route";
 import { QUOTE_STATUSES } from "../shared";
 
@@ -56,6 +56,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.parent_code !== undefined) patch.parent_code = body.parent_code == null ? null : String(body.parent_code);
 
   const admin = supabaseAdmin();
+  const { data: before } = await admin.from("design_sheet_quotes").select("*").eq("id", qid).eq("sheet_id", id).maybeSingle();   // ค่าเดิม ไว้จดประวัติ
   const { data: row, error } = await admin.from("design_sheet_quotes").update(patch)
     .eq("id", qid).eq("sheet_id", id).select("round").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
@@ -63,7 +64,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   await writeAudit(admin, {
     action: "quote_update", entityType: "design_sheet", entityId: id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { quote_id: qid, round: row.round, changed: Object.keys(patch).filter((k) => k !== "updated_at") },
+    // ราคา = ค่าอ่อนไหว — จดไว้ได้ หน้าประวัติซ่อนเองถ้าผู้ดูไม่มีสิทธิ์ดูต้นทุน
+    metadata: { quote_id: qid, round: row.round, ...auditChangeMeta(before as Record<string, unknown> | null, patch) },
   });
   return NextResponse.json({ id: qid, error: null });
 }

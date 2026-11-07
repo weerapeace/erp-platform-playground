@@ -156,8 +156,9 @@ export function auditChangeMeta(
 export function auditLinesDiff(
   before: Record<string, unknown>[],
   after: Record<string, unknown>[],
-  opts: { key: string; qty: string; uom?: string; name?: string; noun?: string; max?: number },
+  opts: { key: string; qty: string; uom?: string; name?: string; noun?: string; max?: number; prefix?: string },
 ): AuditChangeRecord[] {
+  const pre = opts.prefix ?? "line";   // ชื่อช่องในประวัติ = "<prefix>:<รหัส>" (เช่น cost_line = ตัวเลขต้นทุน → หน้าประวัติซ่อนตามสิทธิ์)
   type Agg = { qty: number; uom: string; name: string };
   const agg = (rows: Record<string, unknown>[]) => {
     const m = new Map<string, Agg>();
@@ -181,9 +182,9 @@ export function auditLinesDiff(
     if (o && n && show(o) === show(n)) continue;
     if (out.length >= max) { more++; continue; }
     const name = (n?.name || o?.name || "").slice(0, 40);
-    out.push({ field: `line:${k}`, label: `${opts.noun ?? "รายการ"} ${k}${name && name !== k ? ` · ${name}` : ""}`, old: show(o), new: show(n) });
+    out.push({ field: `${pre}:${k}`, label: `${opts.noun ?? "รายการ"} ${k}${name && name !== k ? ` · ${name}` : ""}`, old: show(o), new: show(n) });
   }
-  if (more) out.push({ field: "line:_more", label: "รายการอื่น ๆ", old: null, new: `เปลี่ยนอีก ${more} รายการ` });
+  if (more) out.push({ field: `${pre}:_more`, label: "รายการอื่น ๆ", old: null, new: `เปลี่ยนอีก ${more} รายการ` });
   return out;
 }
 

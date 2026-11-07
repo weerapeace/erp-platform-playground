@@ -13,7 +13,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { COST_PERM } from "@/lib/cost-access";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditSnapshot, auditChangeMeta } from "@/lib/audit";
 import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { isValidDsStatus } from "../shared";
@@ -198,13 +198,18 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 
   if (Object.keys(patch).length === 0) return NextResponse.json({ error: "ไม่มีข้อมูลให้แก้" }, { status: 400 });
   patch.updated_at = new Date().toISOString();
+  const before = await auditSnapshot(admin, "design_sheets", id);   // ค่าเดิม ไว้จดประวัติ "จากอะไรเป็นอะไร"
   const { data: row, error } = await admin.from("design_sheets").update(patch).eq("id", id).select("id, code").single();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
 
   await writeAudit(admin, {
     action: body.is_active === true ? "restore" : "update", entityType: "design_sheet", entityId: id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { code: row.code, changed: Object.keys(patch).filter((k) => k !== "updated_at") },
+    // ค่าใช้จ่ายเพิ่ม/แบ่งกำไร = ตัวเลขต้นทุน → จดแค่ว่า "แก้รายละเอียด" (ไม่เก็บตัวเลขในประวัติ · ดูได้ที่เวอร์ชันตีราคา)
+    metadata: {
+      code: row.code, name: (patch.name as string | undefined) ?? (before?.name as string | undefined) ?? null,
+      ...auditChangeMeta(before, patch, { opaque: ["cost_extra", "profit_splits"] }),
+    },
   });
   return NextResponse.json({ id: row.id, error: null });
 }

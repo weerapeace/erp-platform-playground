@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit, writeAuditFor } from "@/lib/audit";
+import { writeAudit, writeAuditFor, type AuditChangeRecord } from "@/lib/audit";
 import { QUOTE_STATUSES } from "../shared";
 import { friendlyDbError } from "../../../../master-v2/[entity]/route";
 import { todayBangkok } from "@/lib/date";   // วันนี้ตามเวลาไทย (ไม่ใช่เวลาสากล)
@@ -69,9 +69,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (body.quote_date !== undefined) patch.quote_date = body.quote_date || null;
   if (body.note !== undefined) patch.note = body.note?.trim() || null;
   if (body.status !== undefined) { if (!(QUOTE_STATUSES as readonly string[]).includes(body.status ?? "")) return NextResponse.json({ error: "สถานะไม่ถูกต้อง" }, { status: 400 }); patch.status = body.status; }
+  // ค่าเดิมของทุกช่องในครั้งนี้ → ค่าเดียวกันหมด = โชว์ค่านั้น · ต่างกัน = "หลายค่า"
+  const { data: prevRows } = await supabaseAdmin().from("design_sheet_quotes").select("quote_date, note, status").eq("sheet_id", id).eq("batch", batch);
+  const prev = (prevRows ?? []) as Record<string, unknown>[];
   const { data, error } = await supabaseAdmin().from("design_sheet_quotes").update(patch).eq("sheet_id", id).eq("batch", batch).select("id");
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
-  await writeAuditFor(request, supabaseAdmin(), { action: "quote_batch_update", entityType: "design_sheet", entityId: id, metadata: { batch, changes: Object.keys(patch).filter((k) => k !== "updated_at"), status: body.status ?? null, cells: data?.length ?? 0 } });
+  const changes: AuditChangeRecord[] = Object.entries(patch).filter(([k]) => k !== "updated_at").flatMap(([k, v]) => {
+    const olds = [...new Set(prev.map((r) => JSON.stringify(r[k] ?? null)))];
+    if (olds.length === 1 && olds[0] === JSON.stringify(v ?? null)) return [];   // เท่าเดิม ไม่จด
+    return [{ field: k, old: olds.length === 1 ? JSON.parse(olds[0]) : olds.length === 0 ? null : "หลายค่า", new: v }];
+  });
+  await writeAuditFor(request, supabaseAdmin(), { action: "quote_batch_update", entityType: "design_sheet", entityId: id, metadata: { batch, ...(changes.length ? { changes } : { changes: Object.keys(patch).filter((k) => k !== "updated_at") }), cells: data?.length ?? 0 } });
   return NextResponse.json({ updated: data?.length ?? 0, error: null });
 }
 

@@ -146,6 +146,12 @@ export const COMMON_FIELD_LABELS: Record<string, string> = {
   default_customer_id: "ลูกค้าหลัก", logo_url: "โลโก้", is_customer_job: "งานลูกค้า", hide_in_artwork: "ซ่อนในงานอาร์ตเวิร์ก",
   pricing_mode: "วิธีคิดราคา", reexploded: "คำนวณวัตถุดิบใหม่", links: "ลิงก์", mo_nos: "ใบสั่งผลิต", component: "วัตถุดิบ",
   component_sku: "รหัสวัตถุดิบ",
+  // ใบออกแบบ
+  cost_total: "ยอดต้นทุนรวม", cost_extra: "ค่าใช้จ่ายเพิ่ม", profit_splits: "แบ่งกำไร", offered_price: "ราคาเสนอลูกค้า",
+  quote_date: "วันที่เสนอราคา", waiting_for: "รออะไร", cost_general_label: "ชื่อค่าใช้จ่ายทั่วไป", parent_sku_drafts: "ร่าง Parent",
+  parent_sku_code: "Parent SKU", img_cols: "จำนวนคอลัมน์รูป", calc: "ตารางคำนวณ", show: "การแสดงผล", images: "รูป",
+  comment_date: "วันที่คอมเมนต์", body: "ข้อความ", round: "รอบ", batch: "ครั้งที่", parent_code: "Parent", cells: "จำนวนช่อง",
+  lines: "จำนวนบรรทัด", sheet_ids: "ใบออกแบบ", sheet_id: "ใบออกแบบ", columns: "คอลัมน์", audience: "ผู้รับ", items: "จำนวนรายการ",
 };
 
 const STATUS_FIELDS = new Set(["status", "approval_status", "post_status", "status_from", "status_to"]);

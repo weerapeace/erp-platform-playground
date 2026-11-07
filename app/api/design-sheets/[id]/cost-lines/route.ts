@@ -12,7 +12,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { COST_PERM, costRestricted } from "@/lib/cost-access";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditLinesDiff } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import { costFingerprint, costTotals, normalizeSnapLine, type SnapExtraMap } from "@/lib/design-sheet-cost-snapshot";
 
@@ -78,6 +78,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   }));
 
   const admin = supabaseAdmin();
+  const { data: oldLines } = await admin.from("design_sheet_cost_lines").select("item_sku_code, item_name, qty, uom, amount").eq("sheet_id", id);   // ชุดเดิม ไว้จดประวัติ
   const { error: delErr } = await admin.from("design_sheet_cost_lines").delete().eq("sheet_id", id);
   if (delErr) return NextResponse.json({ error: friendlyDbError(delErr.message) }, { status: 400 });
   if (rows.length > 0) {
@@ -114,7 +115,13 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   await writeAudit(admin, {
     action: "cost_update", entityType: "design_sheet", entityId: id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { lines: rows.length, total: Math.round(total * 100) / 100 },
+    metadata: {
+      lines: rows.length, total: Math.round(total * 100) / 100,
+      changes: [
+        ...(() => { const o = Math.round(((oldLines ?? []) as { amount: number | null }[]).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100) / 100; const n = Math.round(total * 100) / 100; return o === n ? [] : [{ field: "cost_total", old: o, new: n }]; })(),
+        ...auditLinesDiff((oldLines ?? []) as Record<string, unknown>[], rows as unknown as Record<string, unknown>[], { key: "item_sku_code", name: "item_name", qty: "qty", uom: "uom", noun: "วัตถุดิบ", prefix: "cost_line" }),
+      ],
+    },
   });
   return NextResponse.json({ saved: rows.length, total, snapshot, error: null });
 }

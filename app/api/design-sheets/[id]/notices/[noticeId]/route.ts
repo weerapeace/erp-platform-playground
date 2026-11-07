@@ -9,7 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { friendlyDbError } from "../../../../master-v2/[entity]/route";
 import { cleanNotice, cleanNoticeDisplay } from "@/lib/design-sheet-notice";
 import { NOTICE_COLS, noticeActor, noticeFromRow } from "../shared";
@@ -54,6 +54,7 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
     if (sent.includes("note")) patch.note = doc.note || null;
     if (sent.includes("display")) patch.show = doc.display;
   }
+  const { data: before } = await admin.from("design_sheet_notices").select(NOTICE_COLS).eq("sheet_id", id).eq("id", noticeId).maybeSingle();   // ค่าเดิม ไว้จดประวัติ
   const { data, error } = await admin.from("design_sheet_notices").update(patch)
     .eq("sheet_id", id).eq("id", noticeId).select(NOTICE_COLS).maybeSingle();
   if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
@@ -61,7 +62,11 @@ export async function PATCH(request: NextRequest, { params }: Ctx): Promise<Next
   if (!(sent.length === 1 && sent[0] === "display")) {
     await writeAudit(admin, {
       action: "notice_update", entityType: "design_sheet", entityId: id, actorId: actor.id, actorName: actor.email,
-      metadata: { notice_id: noticeId, fields: sent, title: (data as { title?: string }).title ?? null },
+      // รูป/ตารางคำนวณ/การแสดงผล = ก้อนข้อมูล → จดแค่ว่า "แก้รายละเอียด" · หัวข้อ/หมายเหตุ/ชนิด จดค่าเดิม → ใหม่
+      metadata: {
+        notice_id: noticeId, title: (data as { title?: string }).title ?? null,
+        ...auditChangeMeta(before as Record<string, unknown> | null, patch, { opaque: ["images", "calc", "show"] }),
+      },
     });
   }
   return NextResponse.json({ data: noticeFromRow(data as Record<string, unknown>), error: null });
