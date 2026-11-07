@@ -186,7 +186,7 @@ export default function PrintDesignSheetPatternPage() {
         <div className="mx-auto my-4 max-w-[860px] space-y-4 bg-white p-6 shadow-sm print:my-0 print:max-w-none print:p-0 print:shadow-none">
           {head}
           {pieceTable}
-          {skipped > 0 && <p className="text-[11px] text-slate-500">ไม่ได้วาด {skipped} บรรทัด (ไม่มีกว้าง × ยาว เช่น อะไหล่ / ชิ้นสำเร็จ)</p>}
+          {skipped > 0 && <p className="text-[11px] text-slate-500">ไม่ได้วาด {skipped} บรรทัด (ไม่ได้คิดแบบกว้าง × ยาว เช่น อะไหล่ / สาย-เทปคิดตามยาว / ชิ้นสำเร็จ)</p>}
           <div>
             <div className="mb-1 text-[11px] text-slate-500">ภาพชิ้นทั้งหมด (ย่อให้พอดีหน้า · วางบนแผ่นกว้าง {overview.width} × {overview.height} ซม. เหมือนในไฟล์ DXF/SVG)</div>
             <div className="rounded-lg border border-slate-200 p-2"><PatternPiecesSvg layout={overview} style={{ maxHeight: 520 }} /></div>

@@ -16,6 +16,15 @@ describe("patternPieces", () => {
     expect(p[1].count).toBe(2);
     expect(p[2].count).toBe(1);
   });
+  it("บรรทัดสาย/เทป (คิดตามยาว) ที่มีค่ากว้างค้าง ไม่นับเป็นชิ้น · แบบพื้นที่นับ", () => {
+    const p = patternPieces([
+      { item_name: "กุ้น 7 หุน", calc_method: "length", width_cm: 167, length_cm: 100, pieces: 1 },
+      { item_name: "ผ้า", calc_method: "area_face", width_cm: 40, length_cm: 30, pieces: 2 },
+      { item_name: "ชิ้น", calc_method: "area_100", width_cm: 10, length_cm: 10 },
+      { item_name: "กรอกเอง", calc_method: null, width_cm: 20, length_cm: 20 },
+    ]);
+    expect(p.map((x) => x.name)).toEqual(["ผ้า", "ชิ้น"]);
+  });
   it("ชื่อว่าง = ไม่ระบุวัสดุ", () => {
     expect(patternPieces([{ width_cm: 10, length_cm: 5 }])[0].name).toBe("ไม่ระบุวัสดุ");
   });

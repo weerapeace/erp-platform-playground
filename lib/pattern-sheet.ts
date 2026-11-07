@@ -13,6 +13,8 @@
 
 export type PatternLineInput = {
   key?: string | null;
+  /** วิธีคิดของบรรทัด (ตีราคา) — ส่งมา = เอาเฉพาะแบบคิดพื้นที่ (area_face / area_100) · ไม่ส่ง = เอาทุกบรรทัดที่มีกว้าง×ยาว */
+  calc_method?: string | null;
   item_name?: string | null;
   group_name?: string | null;
   width_cm?: number | null;
@@ -40,10 +42,15 @@ export type PatternPage = { row: number; col: number; x: number; y: number; w: n
 const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const r1 = (v: number) => Math.round(v * 10) / 10;
 
-/** บรรทัดตีราคา → ชิ้นแพทเทิร์น (เฉพาะบรรทัดที่มีทั้งกว้างและยาว) · ชิ้น = 0/ว่าง ถือเป็น 1 */
+/** วิธีคิดที่ใช้ทั้งกว้างและยาว (ชิ้นตัดจริง) — สาย/เทปคิดตามยาว ("length") อาจมีค่ากว้างค้างจากเดิม ห้ามนับเป็นชิ้น
+ *  (เจอจริง 2026-11-07: กุ้น 7 หุน 167 × 100 ใน DS-2026-0064 → เคยจะกลายเป็นชิ้นยักษ์ พิมพ์ A4 หลายสิบหน้า) */
+export const PATTERN_AREA_METHODS = new Set(["area_face", "area_100"]);
+
+/** บรรทัดตีราคา → ชิ้นแพทเทิร์น (เฉพาะบรรทัดที่มีทั้งกว้างและยาว + คิดแบบพื้นที่) · ชิ้น = 0/ว่าง ถือเป็น 1 */
 export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
   const out: PatternPiece[] = [];
   for (const l of lines) {
+    if (l.calc_method !== undefined && !PATTERN_AREA_METHODS.has(l.calc_method ?? "")) continue;
     const w = num(l.width_cm), h = num(l.length_cm);
     if (!(w > 0) || !(h > 0)) continue;
     out.push({
