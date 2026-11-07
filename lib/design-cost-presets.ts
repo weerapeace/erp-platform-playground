@@ -222,7 +222,7 @@ export type CutLineInput = {
   cut_skip?: boolean | null;    // null = อัตโนมัติ
 };
 export type CutRateSource = "line" | "material" | "central" | "none";
-export type CutRow = { key: string; name: string; group: string; pieces: number; rate: number; source: CutRateSource; on: boolean; auto: boolean; amount: number };
+export type CutRow = { key: string; itemId: string | null; name: string; group: string; pieces: number; rate: number; source: CutRateSource; on: boolean; auto: boolean; amount: number };
 
 /** อะไหล่ (นับเป็นชิ้นสำเร็จ / หัวซิป / กระดุม) — ไม่ต้องตัด → ไม่นับอัตโนมัติ */
 export const isHardwareLine = (l: Pick<CutLineInput, "group_name" | "calc_method">): boolean =>
@@ -238,7 +238,34 @@ export function cutLaborRows(lines: CutLineInput[], central: number | null, mate
     const mat = l.item_id ? num(materialRate(l.item_id)) : null;
     const line = num(l.cut_rate);
     const [rate, source]: [number, CutRateSource] = line != null ? [line, "line"] : mat != null ? [mat, "material"] : central != null ? [central, "central"] : [0, "none"];
-    return { key: l.key, name: (l.item_name ?? "").trim() || "—", group: (l.group_name ?? "").trim() || "—", pieces, rate, source, on, auto: l.cut_skip == null, amount: on ? r2(pieces * rate) : 0 };
+    return { key: l.key, itemId: l.item_id ?? null, name: (l.item_name ?? "").trim() || "—", group: (l.group_name ?? "").trim() || "—", pieces, rate, source, on, auto: l.cut_skip == null, amount: on ? r2(pieces * rate) : 0 };
+  });
+}
+
+/** รวมแถวงานตัดตาม "วัสดุ" (วัสดุเดียวกันหลายบรรทัด = แถวเดียว ใส่ราคาครั้งเดียว · เจ้าของขอ 2026-11-07) */
+export type CutGroup = {
+  key: string; itemId: string | null; name: string; group: string; lineKeys: string[]; lines: number;
+  pieces: number; amount: number; on: "all" | "none" | "some";
+  rate: number | null;            // null = หลายราคาในวัสดุเดียวกัน
+  source: CutRateSource | "mixed";
+  auto: boolean;                  // ทุกบรรทัดยังเป็นอัตโนมัติ
+};
+export function groupCutRows(rows: CutRow[]): CutGroup[] {
+  const map = new Map<string, CutRow[]>();
+  for (const r of rows) { const k = r.itemId ?? `n:${r.name}`; map.set(k, [...(map.get(k) ?? []), r]); }
+  return [...map.entries()].map(([key, rs]) => {
+    const onN = rs.filter((r) => r.on).length;
+    const rates = [...new Set(rs.map((r) => r.rate))];
+    const sources = [...new Set(rs.map((r) => r.source))];
+    return {
+      key, itemId: rs[0].itemId, name: rs[0].name, group: rs[0].group, lineKeys: rs.map((r) => r.key), lines: rs.length,
+      pieces: Math.round(rs.filter((r) => r.on).reduce((s, r) => s + r.pieces, 0) * 100) / 100,
+      amount: r2(rs.reduce((s, r) => s + r.amount, 0)),
+      on: onN === rs.length ? "all" : onN === 0 ? "none" : "some",
+      rate: rates.length === 1 ? rates[0] : null,
+      source: sources.length === 1 ? sources[0] : "mixed",
+      auto: rs.every((r) => r.auto),
+    };
   });
 }
 

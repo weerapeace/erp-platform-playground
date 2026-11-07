@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cleanOverheadCfg, cleanPreset, cutLaborRows, cutLaborSummary, overheadRows, overheadTotal, parcelPrice, parentOfCode, pickBag, pickBox, piecesPerCarton, presetProblem,
+  cleanOverheadCfg, cleanPreset, cutLaborRows, cutLaborSummary, groupCutRows, overheadRows, overheadTotal, parcelPrice, parentOfCode, pickBag, pickBox, piecesPerCarton, presetProblem,
   DEFAULT_OH, type CostPreset, type PresetKind,
 } from "@/lib/design-cost-presets";
 import { cleanExtra, extraKindOf } from "@/lib/design-sheet-cost-snapshot";
@@ -127,5 +127,20 @@ describe("ค่าแรงตัดตามจำนวนชิ้น (cutLa
   it("cleanExtra เก็บ cut_by", () => {
     expect(cleanExtra({ label: "ค่าแรง (ตัด/ปลอก/วาด)", amount: 4, cut_by: "pieces" })).toMatchObject({ cut_by: "pieces" });
     expect(cleanExtra({ label: "x", amount: 1, cut_by: "อื่น" })).toEqual({ label: "x", amount: 1 });
+  });
+});
+
+describe("groupCutRows — วัสดุเดียวกันหลายบรรทัด = แถวเดียว", () => {
+  it("รวมชิ้น/ยอด · สถานะติ๊กบางส่วน · หลายราคา", () => {
+    const rows = cutLaborRows([
+      { key: "1", item_id: "kw", item_name: "ผ้าขาวม้า", group_name: "ผ้า (ชิ้น)", calc_method: "area_face", pieces: 2, cut_rate: 1 },
+      { key: "2", item_id: "kw", item_name: "ผ้าขาวม้า", group_name: "ผ้า (ชิ้น)", calc_method: "area_face", pieces: 1 },
+      { key: "3", item_id: "kw", item_name: "ผ้าขาวม้า", group_name: "ผ้า (ชิ้น)", calc_method: "area_face", pieces: 2, cut_skip: true },
+      { key: "4", item_id: "lin", item_name: "ผ้าซับใน", group_name: "ผ้า", calc_method: "area_face", pieces: 1 },
+    ], 0.5, () => null);
+    const g = groupCutRows(rows);
+    expect(g.map((x) => x.name)).toEqual(["ผ้าขาวม้า", "ผ้าซับใน"]);
+    expect(g[0]).toMatchObject({ lines: 3, lineKeys: ["1", "2", "3"], pieces: 3, amount: 2.5, on: "some", rate: null, source: "mixed", auto: false });
+    expect(g[1]).toMatchObject({ lines: 1, pieces: 1, rate: 0.5, source: "central", on: "all", auto: true });
   });
 });

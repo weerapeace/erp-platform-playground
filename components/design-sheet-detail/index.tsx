@@ -1154,10 +1154,21 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const cutRows = useMemo(() => cutLaborRows(curLines, centralCutRate, (id) => priceItemById.get(id)?.cut_rate ?? null), [curLines, centralCutRate, priceItemById]);
   const cutTotal = cutLaborSummary(cutRows).total;
   const cutExtraIdx = costExtra.findIndex((c) => extraKindOf(c) === "labor_cut" && c.cut_by === "pieces");
-  const setLineCut = (key: string, patch: { cut_skip?: boolean | null; cut_rate?: number | null }) => {
+  const setLineCut = (keys: string[], patch: { cut_skip?: boolean | null; cut_rate?: number | null }) => {
     if (!fullEdit) setEditing(true);
-    setCostLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+    const ks = new Set(keys);
+    setCostLines((prev) => prev.map((l) => (ks.has(l.key) ? { ...l, ...patch } : l)));
     setCostDirty(true);
+  };
+  // ราคาตัดที่ใส่ในใบ → บันทึกเป็นราคาของวัสดุ (ทะเบียนวัสดุตีราคา) แล้วบรรทัดในใบกลับไปใช้ราคาวัสดุ
+  const saveMaterialCutRate = async (itemId: string, rate: number, keys: string[]) => {
+    try {
+      const res = await apiFetch(`/api/master-v2/design-price-items/${itemId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cut_rate: rate }) });
+      const j = await res.json(); if (j.error) throw new Error(j.error);
+      setPriceItems((list) => list.map((p) => (p.id === itemId ? { ...p, cut_rate: rate } : p)));
+      setLineCut(keys, { cut_rate: null });
+      toast.success(t(`บันทึกราคาตัด ${fmtBaht(rate)} ให้วัสดุนี้แล้ว — ใบงานอื่นใช้ราคานี้อัตโนมัติ`, `Saved cut rate ${fmtBaht(rate)} for this material`));
+    } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกราคาวัสดุไม่สำเร็จ", "Failed to save material rate")); }
   };
   const [bomWizard, setBomWizard] = useState(false);   // Wizard ดึงตีราคา → สร้างสูตร BOM
   const [fabricCalc, setFabricCalc] = useState(false); // 🧵 คำนวณจำนวนผ้า (จากขนาดชิ้น × จำนวนผลิต)
@@ -2754,8 +2765,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   {c.note && <p className="pl-1 text-[11px] text-slate-500">{c.note}</p>}
                   {extraKindOf(c) === "labor_cut" && c.cut_by === "pieces" && (
                     <CutLaborBreakdown rows={cutRows} orderQty={orderQty} readOnly={!canEdit}
-                      onToggle={(key, count) => setLineCut(key, { cut_skip: count == null ? null : !count })}
-                      onOverride={(key, rate) => setLineCut(key, { cut_rate: rate })}
+                      onToggle={(keys, count) => setLineCut(keys, { cut_skip: count == null ? null : !count })}
+                      onOverride={(keys, rate) => setLineCut(keys, { cut_rate: rate })}
+                      onSaveMaterial={canEdit ? (itemId, rate, keys) => void saveMaterialCutRate(itemId, rate, keys) : undefined}
                       onManageMaterials={canEdit ? openPm : undefined}
                       onManageCentral={canEditPresets ? () => setPresetsOpen("cut_rate") : undefined} />
                   )}

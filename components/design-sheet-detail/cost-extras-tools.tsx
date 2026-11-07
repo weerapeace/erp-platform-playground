@@ -16,7 +16,7 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import {
-  cutLaborSummary, DEFAULT_OH, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
+  cutLaborSummary, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
   type CostPreset, type CutRateSource, type CutRow, type LaborRef, type OverheadCfg, type PackDims, type PresetKind,
 } from "@/lib/design-cost-presets";
 
@@ -317,23 +317,26 @@ const SRC_CLS: Record<CutRateSource, string> = {
   none: "border-rose-200 bg-rose-50 text-rose-600",
 };
 
-export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverride, onManageMaterials, onManageCentral }: {
+export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverride, onSaveMaterial, onManageMaterials, onManageCentral }: {
   rows: CutRow[];
   orderQty: number | null;
   readOnly: boolean;
-  /** นับ/ไม่นับ — null = กลับเป็นอัตโนมัติ (อะไหล่ไม่นับ) */
-  onToggle: (key: string, count: boolean | null) => void;
-  /** แก้ราคาเฉพาะบรรทัด — null = กลับไปใช้ราคาวัสดุ/กลาง */
-  onOverride: (key: string, rate: number | null) => void;
+  /** นับ/ไม่นับ ทุกบรรทัดของวัสดุนั้น — null = กลับเป็นอัตโนมัติ (อะไหล่ไม่นับ) */
+  onToggle: (lineKeys: string[], count: boolean | null) => void;
+  /** แก้ราคาเฉพาะใบนี้ ทุกบรรทัดของวัสดุนั้น — null = กลับไปใช้ราคาวัสดุ/กลาง */
+  onOverride: (lineKeys: string[], rate: number | null) => void;
+  /** บันทึกเป็นราคาตัดของวัสดุ (ใช้ทุกใบงาน) */
+  onSaveMaterial?: (itemId: string, rate: number, lineKeys: string[]) => void;
   onManageMaterials?: () => void;
   onManageCentral?: () => void;
 }) {
   const s = cutLaborSummary(rows);
+  const groups = groupCutRows(rows);
   const [qty, setQty] = useState<number>(orderQty && orderQty > 0 ? orderQty : 1000);
   useEffect(() => { if (orderQty && orderQty > 0) setQty(orderQty); }, [orderQty]);
   return (
     <div className="space-y-2 rounded-lg border border-slate-100 bg-slate-50/60 p-2">
-      {rows.length === 0 ? <p className="text-[11px] text-slate-400">ยังไม่มีวัตถุดิบในตารางตีราคาของแท็บนี้</p> : (
+      {groups.length === 0 ? <p className="text-[11px] text-slate-400">ยังไม่มีวัตถุดิบในตารางตีราคาของแท็บนี้</p> : (
         <div className="overflow-x-auto rounded-lg bg-white">
           <table className="w-full min-w-[520px] text-[12px]">
             <thead><tr className="border-b border-slate-100 text-left text-[11px] text-slate-400">
@@ -341,32 +344,48 @@ export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverri
               <th className="px-1 py-1 text-right">ชิ้น/ใบ</th><th className="px-1 py-1">ราคาตัด/ชิ้น</th><th className="px-2 py-1 text-right">รวม</th>
             </tr></thead>
             <tbody>
-              {rows.map((r) => (
-                <tr key={r.key} className={`border-b border-slate-50 ${r.on ? "" : "text-slate-400"}`}>
-                  <td className="px-2 py-1">
-                    <input type="checkbox" checked={r.on} disabled={readOnly} title={r.auto ? "นับอัตโนมัติ (อะไหล่ไม่นับ)" : "ตั้งเองแล้ว — กด “อัตโนมัติ” เพื่อกลับ"}
-                      onChange={(e) => onToggle(r.key, e.target.checked)} className="h-3.5 w-3.5" />
-                  </td>
-                  <td className="max-w-[180px] truncate px-1 py-1" title={r.name}>{r.name}</td>
-                  <td className="px-1 py-1 text-slate-500">{r.group}{!r.auto && <button type="button" disabled={readOnly} onClick={() => onToggle(r.key, null)} className="ml-1 text-[10px] text-slate-400 underline" title="กลับเป็นอัตโนมัติ">อัตโนมัติ</button>}</td>
-                  <td className="px-1 py-1 text-right tabular-nums">{r.pieces}</td>
-                  <td className="px-1 py-1">
-                    <span className="inline-flex items-center gap-1">
-                      {r.source === "line" && !readOnly && (
-                        <input type="number" min={0} step="any" value={r.rate} onChange={(e) => onOverride(r.key, e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0))}
-                          className="h-6 w-16 rounded border border-slate-200 px-1 text-right text-[12px] tabular-nums" />
-                      )}
-                      <button type="button" disabled={readOnly}
-                        onClick={() => onOverride(r.key, r.source === "line" ? null : r.rate)}
-                        title={r.source === "line" ? "กดเพื่อกลับไปใช้ราคาวัสดุ/ราคากลาง" : "กดเพื่อแก้ราคาเฉพาะใบนี้"}
-                        className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] ${SRC_CLS[r.source]}`}>
-                        {SRC_LABEL[r.source]}{r.source !== "line" && r.source !== "none" ? ` ${baht(r.rate)}` : ""}
-                      </button>
-                    </span>
-                  </td>
-                  <td className="px-2 py-1 text-right tabular-nums">{r.on ? baht(r.amount) : "—"}</td>
-                </tr>
-              ))}
+              {groups.map((g) => {
+                const label = g.source === "mixed" ? "หลายราคา" : SRC_LABEL[g.source];
+                const cls = g.source === "mixed" ? "border-violet-200 bg-violet-50 text-violet-700" : SRC_CLS[g.source];
+                const isLine = g.source === "line";
+                return (
+                  <tr key={g.key} className={`border-b border-slate-50 ${g.on === "none" ? "text-slate-400" : ""}`}>
+                    <td className="px-2 py-1">
+                      <input type="checkbox" checked={g.on !== "none"} disabled={readOnly}
+                        ref={(el) => { if (el) el.indeterminate = g.on === "some"; }}
+                        title={g.auto ? "นับอัตโนมัติ (อะไหล่ไม่นับ)" : "ตั้งเองแล้ว — กด “อัตโนมัติ” เพื่อกลับ"}
+                        onChange={(e) => onToggle(g.lineKeys, e.target.checked)} className="h-3.5 w-3.5" />
+                    </td>
+                    <td className="max-w-[200px] px-1 py-1">
+                      <span className="block truncate" title={g.name}>{g.name}</span>
+                      {g.lines > 1 && <span className="text-[10px] text-slate-400">{g.lines} บรรทัดในตาราง</span>}
+                    </td>
+                    <td className="px-1 py-1 text-slate-500">{g.group}{!g.auto && <button type="button" disabled={readOnly} onClick={() => onToggle(g.lineKeys, null)} className="ml-1 text-[10px] text-slate-400 underline" title="กลับเป็นอัตโนมัติ">อัตโนมัติ</button>}</td>
+                    <td className="px-1 py-1 text-right tabular-nums">{g.pieces}</td>
+                    <td className="px-1 py-1">
+                      <span className="inline-flex flex-wrap items-center gap-1">
+                        {isLine && !readOnly && (
+                          <input type="number" min={0} step="any" value={g.rate ?? ""} onChange={(e) => onOverride(g.lineKeys, e.target.value === "" ? 0 : Math.max(0, Number(e.target.value) || 0))}
+                            className="h-6 w-16 rounded border border-slate-200 px-1 text-right text-[12px] tabular-nums" />
+                        )}
+                        <button type="button" disabled={readOnly}
+                          onClick={() => onOverride(g.lineKeys, isLine ? null : (g.rate ?? 0))}
+                          title={isLine ? "กดเพื่อกลับไปใช้ราคาวัสดุ/ราคากลาง" : "กดเพื่อใส่ราคาตัดของวัสดุนี้ (ใบนี้)"}
+                          className={`whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] ${cls}`}>
+                          {g.source === "none" ? "ใส่ราคา" : label}{g.source !== "line" && g.source !== "none" && g.rate != null ? ` ${baht(g.rate)}` : ""}
+                        </button>
+                        {/* ราคาที่ใส่ในใบนี้ → บันทึกเป็นราคาวัสดุ ใบงานถัดไปได้เลยไม่ต้องใส่ซ้ำ */}
+                        {isLine && !readOnly && onSaveMaterial && g.itemId && g.rate != null && g.rate > 0 && (
+                          <button type="button" onClick={() => onSaveMaterial(g.itemId as string, g.rate as number, g.lineKeys)}
+                            title="บันทึกเป็นราคาตัดของวัสดุนี้ — ใบงานอื่นใช้ราคานี้อัตโนมัติ"
+                            className="whitespace-nowrap rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-700 hover:bg-emerald-100">ใช้ทุกใบงาน</button>
+                        )}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1 text-right tabular-nums">{g.on !== "none" ? baht(g.amount) : "—"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -380,9 +399,8 @@ export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverri
         </div>
         <div className="rounded-lg bg-white px-2 py-1.5"><div className="text-[11px] text-slate-400">ค่าแรงตัดทั้งล็อต</div><div className="text-base font-semibold tabular-nums text-emerald-700">{Math.round(s.total * qty).toLocaleString("th-TH")} ฿</div></div>
       </div>
-      {s.byMaterial.length > 0 && <p className="text-[11px] text-slate-500">งานตัดต่อใบ: {s.byMaterial.map((m) => `${m.name} ${m.pieces}`).join(" · ")}</p>}
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        {s.missingRate > 0 && <span className="text-rose-600">{s.missingRate} บรรทัดยังไม่มีราคาตัด — ตั้งราคากลางหรือราคาตามวัสดุก่อน</span>}
+        {s.missingRate > 0 && <span className="text-rose-600">{groups.filter((g) => g.on !== "none" && g.source === "none").length} วัสดุยังไม่มีราคาตัด — กด “ใส่ราคา” หรือตั้งราคากลาง</span>}
         <span className="ml-auto text-slate-500">รวมค่าตัด <b className="tabular-nums text-emerald-700">{baht(s.total)}</b> ฿/ใบ</span>
         {onManageMaterials && <button type="button" onClick={onManageMaterials} className="text-slate-500 underline hover:text-blue-700">ราคาตามวัสดุ</button>}
         {onManageCentral && <button type="button" onClick={onManageCentral} className="text-slate-500 underline hover:text-blue-700">ราคากลาง</button>}
