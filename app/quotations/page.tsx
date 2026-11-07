@@ -11,7 +11,7 @@ import type { CustomerPickerValue, UserPickerValue } from "@/components/pickers"
 import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
-import { useNewParam, openLink } from "@/lib/open-param";
+import { useNewParam, useOpenParam, openLink } from "@/lib/open-param";
 import { formatDate } from "@/lib/date";
 import { QUOTATION_ROW_ACTIONS } from "@/components/data-table/row-actions";
 import type { ColumnDef } from "@tanstack/react-table";
@@ -223,6 +223,7 @@ export default function QuotationsPage() {
     setEditingId(null); setForm(makeEmpty(user?.name ?? "")); setFormErr(null); setModalOpen(true);
   };
   useNewParam(canCreate, openCreate);   // ลิงก์ `?new=1` (คำสั่งลัดจาก Global Search) → เปิดฟอร์มสร้างใหม่ให้เลย
+  useOpenParam(true, (id) => { void openDetail(id); });   // ลิงก์ `?open=<id>` (เช่น จากใบงานออกแบบ) → เปิดรายละเอียดใบนั้นให้เลย
 
   const openPrint = useCallback((id: string) => {
     window.open(`/print/quotation/${id}`, "_blank", "noopener,noreferrer");
@@ -405,9 +406,8 @@ export default function QuotationsPage() {
   }, [expandedDetails, fetchDetail]);
 
   const bulkTransition = useCallback(async (selectedRows: QuoteListItem[], action: "send" | "cancel") => {
-    const allowed = selectedRows.filter(row => (
-      action === "send" ? row.status === "draft" : ["draft", "sent"].includes(row.status)
-    ));
+    // ส่ง และ ยกเลิก ทำได้เฉพาะใบร่าง (กติกา workflow qt) — ใบที่ส่งแล้วใช้ "ปฏิเสธ" (ต้องมีเหตุผล)
+    const allowed = selectedRows.filter(row => row.status === "draft");
     if (allowed.length === 0) {
       flash("ไม่มีรายการที่ทำรายการนี้ได้");
       return;
@@ -443,7 +443,7 @@ export default function QuotationsPage() {
     { ...QUOTATION_ROW_ACTIONS[5], iconKey: QUOTATION_ROW_ACTIONS[5].defaultIconKey, show: (row: QuoteListItem) => row.status === "sent" && canAccept, onClick: (row: QuoteListItem) => transition(row.id, "accept") },
     { ...QUOTATION_ROW_ACTIONS[6], iconKey: QUOTATION_ROW_ACTIONS[6].defaultIconKey, show: (row: QuoteListItem) => ["sent", "accepted"].includes(row.status) && canAccept, onClick: (row: QuoteListItem) => convertToSO(row.id) },
     { ...QUOTATION_ROW_ACTIONS[7], iconKey: QUOTATION_ROW_ACTIONS[7].defaultIconKey, show: (row: QuoteListItem) => row.status === "sent" && canReject, onClick: (row: QuoteListItem) => rejectFromRow(row) },
-    { ...QUOTATION_ROW_ACTIONS[8], iconKey: QUOTATION_ROW_ACTIONS[8].defaultIconKey, variant: "danger" as const, show: (row: QuoteListItem) => ["draft", "sent"].includes(row.status) && canCancel, onClick: (row: QuoteListItem) => transition(row.id, "cancel") },
+    { ...QUOTATION_ROW_ACTIONS[8], iconKey: QUOTATION_ROW_ACTIONS[8].defaultIconKey, variant: "danger" as const, show: (row: QuoteListItem) => row.status === "draft" && canCancel, onClick: (row: QuoteListItem) => transition(row.id, "cancel") },
   ], [canAccept, canCancel, canReject, canSend, openEditFromRow, openPrint, rejectFromRow, toggleExpanded]);
 
   const bulkActions = useMemo(() => [
@@ -707,6 +707,19 @@ export default function QuotationsPage() {
               <Info label="วันที่เสนอ" value={formatDate(detail.quote_date)} />
               <Info label="ยืนราคาถึง" value={formatDate(detail.valid_until)} />
             </div>
+
+            {/* มาจากใบงานออกแบบ (ตาราง design_sheet_quotations) — กดกลับไปดูใบงาน / ประวัติใบเสนอราคาทุกเวอร์ชันอยู่ในแท็บเสนอราคาของใบงาน */}
+            {(detail.design_sheets?.length ?? 0) > 0 && (
+              <div className="px-3 py-2 bg-indigo-50 border-l-4 border-indigo-300 text-sm text-indigo-900">
+                🎨 มาจากใบงานออกแบบ:{" "}
+                {detail.design_sheets!.map((s, i) => (
+                  <span key={s.id}>{i > 0 && " · "}<a href={`/master/design-dashboard/sheet/${s.id}`} target="_blank" rel="noopener noreferrer" className="font-semibold underline">{s.code ?? "ใบงาน"}</a>{s.name ? ` ${s.name}` : ""}</span>
+                ))}
+                {detail.design_sheets!.find((s) => s.replaces_quote_number) && (
+                  <span className="text-indigo-700"> — ใบนี้เปิดแทนใบ {detail.design_sheets!.find((s) => s.replaces_quote_number)!.replaces_quote_number}</span>
+                )}
+              </div>
+            )}
 
             {detail.status === "converted" && detail.converted_so_id && (
               <div className="px-3 py-2 bg-emerald-50 border-l-4 border-emerald-300 text-sm text-emerald-900">
@@ -1000,7 +1013,7 @@ function QuoteExpandedPanel({
                 ปฏิเสธ
               </button>
             )}
-            {["draft", "sent"].includes(detail.status) && canCancel && (
+            {detail.status === "draft" && canCancel && (
               <button type="button" onClick={onCancel} disabled={wfLoading}
                 className="h-8 px-3 text-xs border border-red-200 text-red-600 rounded-lg hover:bg-red-50 disabled:opacity-50">
                 ยกเลิก

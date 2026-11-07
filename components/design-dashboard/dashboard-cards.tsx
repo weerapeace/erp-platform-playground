@@ -111,16 +111,33 @@ export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode
           <span className="truncate text-[10px] text-slate-400">{sheet.brand_name ?? t("ไม่ระบุ", "None")}</span>
           <CardDeadline tone={deadlineTone(sheet, statusMeta)} label={deadlineLabel(sheet, statusMeta)} />
         </div>
-        {(sheet.has_cost || sheet.has_quote || sheet.parent_count > 0) && (
+        {(sheet.has_cost || sheet.has_quote || sheet.parent_count > 0 || sheet.qt_open) && (
           <div className="flex flex-wrap gap-1 text-[9px] text-slate-400">
             {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">{t("ตีราคา", "Costed")}</span>}
             {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">{t("มีราคา", "Quoted")}</span>}
             {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">{t("มี SKU", "Has SKU")}</span>}
+            <QtOpenTag sheet={sheet} />
           </div>
         )}
       </div>
     </div>
     </SheetHoverWrap>
+  );
+}
+
+/** 🧾 ป้ายใบเสนอราคา (ระบบขาย) ที่ยังเปิดอยู่ — เปิดซ้ำมากกว่า 1 ใบ = ป้ายส้มเตือน (ดู/ปิดใบเกินที่แท็บเสนอราคาในใบงาน) */
+function QtOpenTag({ sheet }: { sheet: DesignSheetListItem }) {
+  const t = useT();
+  const q = sheet.qt_open;
+  if (!q) return null;
+  if (q.open > 1) return (
+    <span className="rounded bg-amber-100 px-1 py-0.5 font-medium text-amber-700" title={t("ใบเสนอราคาที่ยังเปิดอยู่มากกว่า 1 ใบ — เปิดใบงาน แท็บเสนอราคา แล้วกด \"ไม่ผ่าน\" ใบที่ไม่ใช้", "More than one open quotation — open the job's Quotes tab and close the unused ones")}>
+      ⚠️ {t(`ใบเสนอราคาซ้ำ ${q.open}`, `${q.open} open quotes`)}</span>
+  );
+  return (
+    <span className={`rounded px-1 py-0.5 ${q.draft ? "bg-slate-100 text-slate-600" : "bg-amber-50 text-amber-700"}`}
+      title={q.draft ? t("ใบเสนอราคา (ร่าง)", "Quotation (draft)") : t("ใบเสนอราคา (ส่งแล้ว)", "Quotation (sent)")}>
+      🧾 {q.latest ?? t("ร่าง", "Draft")}</span>
   );
 }
 
@@ -150,11 +167,12 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
     </div>
   );
   const noteIcon = sheet.note ? <span className="shrink-0 cursor-help text-[11px]" title={`📝 ${sheet.note}`}>📝</span> : null;
-  const tags = (sheet.has_cost || sheet.has_quote || sheet.parent_count > 0) && (
+  const tags = (sheet.has_cost || sheet.has_quote || sheet.parent_count > 0 || sheet.qt_open) && (
     <div className="mt-1 flex flex-wrap gap-1 text-[9px]">
       {sheet.has_cost && <span className="rounded bg-violet-50 px-1 py-0.5 text-violet-600">{t("ตีราคา", "Costed")}</span>}
       {sheet.has_quote && <span className="rounded bg-indigo-50 px-1 py-0.5 text-indigo-600">{t("มีราคา", "Quoted")}</span>}
       {sheet.parent_count > 0 && <span className="rounded bg-emerald-50 px-1 py-0.5 text-emerald-600">{t("มี SKU", "Has SKU")}</span>}
+      <QtOpenTag sheet={sheet} />
     </div>
   );
   return (

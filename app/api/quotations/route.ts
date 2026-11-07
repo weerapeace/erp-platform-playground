@@ -67,6 +67,8 @@ export type QuoteDetail = QuoteListItem & {
   lines:                   QuoteLine[];
   /** ใบสั่งขาย (so_orders) ที่ดึงใบนี้ไป — ผ่าน so_order_lines.quote_id (กติกา lib/quote-convert) */
   so_orders?:              { id: string; order_no: string | null; status: string }[];
+  /** ใบงานออกแบบที่ผูกกับใบนี้ (ตาราง design_sheet_quotations) · replaces_quote_number = ใบนี้เปิดมาแทนใบไหน */
+  design_sheets?:          { id: string; code: string | null; name: string | null; replaces_quote_number: string | null }[];
 };
 
 export type QuoteListResponse = { data: QuoteListItem[]; total: number; error: string | null };

@@ -25,6 +25,7 @@ import { useToast } from "@/components/toast";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { useViewportLayout, useDeviceMode, DevicePreviewFrame, DEVICE_PARAM } from "@/components/device-view";
 import { QuoteRounds } from "@/components/design-sheet-detail/quote-rounds";
+import { SheetQuotations } from "@/components/design-sheet-detail/sheet-quotations";
 import { RecordChecklist } from "@/components/record-tasks";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { sanitizeRichHtml } from "@/lib/sanitize-html";
@@ -309,6 +310,8 @@ export function DesignSheetMobileView({ id }: { id: string }) {
     + (costExtraMap[key] ?? []).reduce((n, c) => n + (Number(c.amount) || 0), 0);
   const quoteSection = (
     <div className="border-t border-slate-100 bg-slate-50/60 px-2 py-3">
+      {/* ใบเสนอราคาของงานนี้ (ดูอย่างเดียวบนมือถือ — กดไม่ผ่าน/เปิดใบใหม่ที่หน้าเต็ม) */}
+      {sheet && <SheetQuotations sheetId={sheet.id} canEdit={false} cartId={null} onUseAsCart={() => {}} compact />}
       {sheet && (
         <QuoteRounds sheetId={sheet.id} quotes={quotes} compact
           sizes={costParents.map((k) => ({ key: k, label: costTabLabel(k, generalLabelOf(sheet?.cost_general_label)) }))} sizeLabel={(c) => (c == null ? "—" : costTabLabel(c, generalLabelOf(sheet?.cost_general_label)))}

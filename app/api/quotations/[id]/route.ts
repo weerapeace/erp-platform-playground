@@ -67,9 +67,26 @@ export async function GET(
   const { id } = await params;
   const { data, error } = await supabaseFromRequest(request).rpc("erp_playground_quote_get", { p_id: id });
   if (error) return NextResponse.json({ data: null, error: error.message }, { status: 500 });
-  const enriched = await enrichQuoteCustomer(request, data);
-  const so_orders = data ? await quoteSoOrders(id) : [];
-  return NextResponse.json({ data: enriched && typeof enriched === "object" ? { ...enriched, so_orders } : enriched, error: null });
+  const [enriched, so_orders, design_sheets] = await Promise.all([
+    enrichQuoteCustomer(request, data),
+    data ? quoteSoOrders(id) : Promise.resolve([]),
+    data ? quoteDesignSheets(id) : Promise.resolve([]),
+  ]);
+  return NextResponse.json({ data: enriched && typeof enriched === "object" ? { ...enriched, so_orders, design_sheets } : enriched, error: null });
+}
+
+/** ใบงานออกแบบที่ผูกกับใบเสนอราคานี้ (ตาราง design_sheet_quotations) + ใบนี้เปิดมาแทนใบไหน */
+async function quoteDesignSheets(quoteId: string): Promise<{ id: string; code: string | null; name: string | null; replaces_quote_number: string | null }[]> {
+  const admin = supabaseAdmin();
+  const { data } = await admin.from("design_sheet_quotations")
+    .select("replaces_quotation_id, ds:design_sheets(id, code, name), rq:erp_playground_quotations!design_sheet_quotations_replaces_quotation_id_fkey(quote_number)")
+    .eq("quotation_id", quoteId);
+  type Ref<T> = T | T[] | null;
+  const one = <T,>(v: Ref<T>): T | null => (Array.isArray(v) ? v[0] ?? null : v);
+  return ((data ?? []) as unknown as { ds: Ref<{ id: string; code: string | null; name: string | null }>; rq: Ref<{ quote_number: string | null }> }[])
+    .map((r) => ({ ds: one(r.ds), rq: one(r.rq) }))
+    .filter((r) => r.ds)
+    .map((r) => ({ id: r.ds!.id, code: r.ds!.code, name: r.ds!.name, replaces_quote_number: r.rq?.quote_number ?? null }));
 }
 
 /** ใบสั่งขายที่ดึงใบเสนอราคานี้ไป (บรรทัดอ้าง quote_id) — ใบที่ยังไม่ยกเลิกขึ้นก่อน */

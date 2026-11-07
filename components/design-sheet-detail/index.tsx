@@ -77,6 +77,7 @@ const FabricCalcModal = dynamic(() => import("./fabric-calc-modal").then((m) => 
 const QuoteRounds = dynamic(() => import("./quote-rounds").then((m) => m.QuoteRounds), { ssr: false });
 const ToQuotationModal = dynamic(() => import("@/app/master/design-sheets/to-quotation-modal").then((m) => m.ToQuotationModal), { ssr: false });
 const QuotationCartDrawer = dynamic(() => import("@/app/master/design-sheets/quotation-cart-drawer").then((m) => m.QuotationCartDrawer), { ssr: false });
+const SheetQuotations = dynamic(() => import("./sheet-quotations").then((m) => m.SheetQuotations), { ssr: false });
 const PullCostFromSheetModal = dynamic(() => import("./pull-cost-modal").then((m) => m.PullCostFromSheetModal), { ssr: false });
 const BomFromCostWizard = dynamic(() => import("./bom-from-cost-wizard").then((m) => m.BomFromCostWizard), { ssr: false });
 const BomToCostWizard = dynamic(() => import("./bom-to-cost-wizard").then((m) => m.BomToCostWizard), { ssr: false });
@@ -2816,12 +2817,18 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
             {/* แท็บรอบเสนอราคา (เฟส 3) */}
             {modalTab === "quotes" && form.id && (
-              /* รอบเสนอราคาแบบ 1 ครั้ง = 1 การ์ด (ไซส์ × ขั้นจำนวน) — components/design-sheet-detail/quote-rounds.tsx */
+              <>
+              {/* ใบเสนอราคาของงานนี้ (ระบบขาย) ทุกเวอร์ชัน + ไม่ผ่าน/เปิดใบใหม่แทน — components/design-sheet-detail/sheet-quotations.tsx */}
+              <SheetQuotations sheetId={form.id} canEdit={canEdit} refreshKey={cartRefresh} cartId={cartId}
+                onUseAsCart={(qid) => { setCart(qid); bumpCart(); }} onChanged={bumpCart}
+                onSend={canEdit ? () => setToQuote(true) : undefined} />
+              {/* รอบเสนอราคาแบบ 1 ครั้ง = 1 การ์ด (ไซส์ × ขั้นจำนวน) — components/design-sheet-detail/quote-rounds.tsx */}
               <QuoteRounds sheetId={form.id} quotes={quotes} sizes={costParentTabs.map((tb) => ({ key: tb.key, label: tb.label }))} sizeLabel={quoteSizeLabel}
                 currentCost={totalForParent} canEdit={canEdit} costDirty={costDirty} saveCost={saveCost}
                 onReload={() => loadCq(form.id!)}
                 onOpenVersions={(a, b, parent) => { setVersionsInit({ a, b, parent }); setVersionsOpen(true); }}
                 onSendToQuotation={canEdit ? () => setToQuote(true) : undefined} />
+              </>
             )}
             </div>
           </div>

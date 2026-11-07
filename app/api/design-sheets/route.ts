@@ -21,6 +21,7 @@ import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import type { ChecklistSummary } from "@/lib/record-tasks";
 import { requestActor } from "@/lib/request-actor";
 import { claimInboxForSheet, finishInboxConvert, releaseInboxClaim } from "@/lib/design-line-inbox";
+import { sheetQuoteBadges, type SheetQuoteBadge } from "@/lib/design-sheet-quotations-db";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -40,6 +41,8 @@ export type DesignSheetListItem = {
   waiting_items: ChecklistSummary | null;  // ⏳ เช็กลิสต์รออะไรอยู่ (lib/design-sheet-waiting) · null = ไม่มีรายการ
   quote_latest: QuoteLatest | null;
   comments_latest: { date: string | null; body: string }[];
+  /** 🧾 ใบเสนอราคา (ระบบขาย) ที่ยังเปิดอยู่ของงานนี้ — open > 1 = เปิดซ้ำ (ป้ายเตือนบนการ์ด) · null = ไม่มีใบเปิด */
+  qt_open: SheetQuoteBadge | null;
 };
 /** เสนอราคาครั้งล่าสุด — status = pending/passed/failed หรือ "mixed" (ช่องในครั้งเดียวกันสถานะไม่เท่ากัน)
  *  cells.price = ราคาที่เสนอจริง (offered_price) เท่านั้น — ไม่ส่งต้นทุนจากตีราคา (price) ออกไป */
@@ -141,16 +144,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const quotesBy = new Map<string, Array<Record<string, unknown>>>();
   const commentsBy = new Map<string, { date: string | null; body: string }[]>();
   let waitingBy = new Map<string, ChecklistSummary>();
+  let qtBy = new Map<string, SheetQuoteBadge>();
   if (ids.length) {
-    const [cl, ql, cm, wt] = await Promise.all([
+    const [cl, ql, cm, wt, qb] = await Promise.all([
       admin.from("design_sheet_cost_lines").select("sheet_id").in("sheet_id", ids),
       admin.from("design_sheet_quotes").select("sheet_id, batch, round, quote_date, status, parent_code, qty, offered_price, note").in("sheet_id", ids),
       admin.from("design_sheet_comments").select("sheet_id, comment_date, body, created_at").in("sheet_id", ids)
         .order("comment_date", { ascending: false, nullsFirst: false }).order("created_at", { ascending: false }).limit(3000),
       // เช็กลิสต์พลาดก็ยังโชว์รายการใบงานได้ (แค่ไม่มีแถบ ⏳ บนการ์ด)
       loadChecklistSummaries(admin, DESIGN_WAITING.moduleKey, ids).catch((e) => { console.error("[design-sheets] waiting", e); return new Map<string, ChecklistSummary>(); }),
+      // ใบเสนอราคาที่ยังเปิด (ตารางผูก design_sheet_quotations) — พลาดก็แค่ไม่มีป้าย
+      sheetQuoteBadges(admin, ids),
     ]);
     waitingBy = wt;
+    qtBy = qb;
     for (const r of (cl.data ?? []) as Array<Record<string, unknown>>) withCost.add(String(r.sheet_id));
     for (const r of (ql.data ?? []) as Array<Record<string, unknown>>) {
       const sid = String(r.sheet_id); withQuote.add(sid);
@@ -179,6 +186,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       waiting_items: waitingBy.get(id) ?? null,
       quote_latest: latestQuote(quotesBy.get(id) ?? []),
       comments_latest: commentsBy.get(id) ?? [],
+      qt_open: qtBy.get(id) ?? null,
     };
   });
   return NextResponse.json({ data: items, total: count ?? 0, error: null });

@@ -119,9 +119,9 @@ export const WORKFLOWS: WorkflowDef[] = [
     key: "quotation",
     label: "ใบเสนอราคา",
     flow: "ร่าง → ส่งแล้ว → ตอบรับ → แปลงแล้ว (ดึงเข้าใบสั่งขาย หรือ แปลงเป็นใบขายตรง) · ปฏิเสธ / หมดอายุ / ยกเลิก · ยกเลิกใบสั่งขาย = กลับ \"ตอบรับแล้ว\"",
-    ruleFiles: ["lib/quote-convert.ts", "lib/quote-pull.ts"],
-    gates: ["app/api/quotations/[id]/transition/route.ts", "app/api/quotations/[id]/convert/route.ts", "app/api/so-orders/route.ts", "app/api/so-orders/[id]/route.ts"],
-    tables: ["erp_playground_quotations", "erp_playground_quote_lines"],
+    ruleFiles: ["lib/quote-convert.ts", "lib/quote-pull.ts", "lib/design-sheet-quotations.ts"],
+    gates: ["app/api/quotations/[id]/transition/route.ts", "app/api/quotations/[id]/convert/route.ts", "app/api/so-orders/route.ts", "app/api/so-orders/[id]/route.ts", "app/api/design-sheets/[id]/quotations/route.ts"],
+    tables: ["erp_playground_quotations", "erp_playground_quote_lines", "design_sheet_quotations"],
     signals: ["converted_so_id", "quote_id"],
     feeds: ["so-order", "sales-order"],
     gaps: [

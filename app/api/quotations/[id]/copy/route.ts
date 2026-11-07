@@ -10,13 +10,11 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { quoteCopyPayload } from "@/lib/quote-copy";
 import type { QuoteDetail } from "../../route";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-const DAY = 24 * 60 * 60 * 1000;
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
   const { id } = await params;
@@ -31,36 +29,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const q = src as QuoteDetail | null;
   if (!q) return NextResponse.json({ error: "ไม่พบใบเสนอราคาต้นทาง" }, { status: 404 });
 
-  // ช่วงยืนราคาเดิมกี่วัน → ใช้ช่วงเดียวกันนับจากวันนี้
-  const today = new Date();
-  const days = q.quote_date && q.valid_until
-    ? Math.max(1, Math.round((new Date(q.valid_until).getTime() - new Date(q.quote_date).getTime()) / DAY))
-    : 30;
-
-  const header = {
-    customer_id: q.customer_id ?? null,
-    customer_name: q.customer_name ?? null,
-    customer_code: q.customer_code ?? null,
-    sale_person_name: q.sale_person_name ?? null,
-    currency: q.currency ?? "THB",
-    exchange_rate: q.exchange_rate ?? 1,
-    header_discount_type: q.header_discount_type ?? "percent",
-    header_discount_value: q.header_discount_value ?? 0,
-    shipping_fee: q.shipping_fee ?? 0,
-    vat_rate: q.vat_rate ?? 7,
-    vat_included: q.vat_included ?? false,
-    wht_rate: q.wht_rate ?? 0,
-    quote_date: iso(today),
-    valid_until: iso(new Date(today.getTime() + days * DAY)),
-    note: q.note ?? null,
-  };
-  const lines = (q.lines ?? []).map((l) => ({
-    product_id: l.product_id ?? null, sku: l.sku ?? null, product_name: l.product_name,
-    qty: l.qty, unit: l.unit, unit_price: l.unit_price,
-    discount_type: l.discount_type ?? "percent", discount_value: l.discount_value ?? 0,
-    tax_code: l.tax_code ?? null, note: l.note ?? null,
-    image_key: l.image_key ?? null,      // รูปที่แนบไว้ติดไปด้วย
-  }));
+  // หัวใบ + บรรทัดของใบใหม่ (ช่วงยืนราคาเดิม → นับจากวันนี้) — กติกากลาง lib/quote-copy
+  const { header, lines } = quoteCopyPayload(q);
 
   const actor = body.actor ?? user?.email ?? null;
   const { data: newId, error } = await client.rpc("erp_playground_quote_create", {

@@ -10,12 +10,16 @@
  * - new: สร้างใบเสนอราคาสถานะ draft พร้อมบรรทัดนี้ 1 รายการ
  * - เดิม: ดึงบรรทัดเดิม + ต่อท้ายบรรทัดใหม่ แล้วอัปเดต (รวมหลายสินค้าใน 1 ใบ)
  * - variation เก็บที่ช่อง note ของบรรทัด · sku ใช้รหัสสินค้าจริงเท่านั้น
+ * - ทุกครั้งผูกใบงาน ↔ ใบเสนอราคา ลงตาราง design_sheet_quotations (lib/design-sheet-quotations-db)
+ * - new แต่งานนี้ยังมีใบที่เปิดอยู่ (ร่าง/ส่งแล้ว/ตอบรับ) → 409 { duplicate: true } จนกว่าจะส่ง force_new: true
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { duplicateQuoteWarning } from "@/lib/design-sheet-quotations";
+import { loadSheetQuotations, linkSheetQuotations } from "@/lib/design-sheet-quotations-db";
 import type { QuoteLine, QuoteDetail } from "../../../quotations/route";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +31,7 @@ type Body = {
   customer?: { id?: string; name?: string | null; code?: string | null } | null;
   line?: LineIn;      // ส่งทีละรายการ (เดิม)
   lines?: LineIn[];   // ส่งหลายรายการพร้อมกัน (เช่น ทั้งตารางตีราคาจากร้าน)
+  force_new?: boolean; // ยืนยันเปิดใบใหม่ ทั้งที่งานนี้ยังมีใบเสนอราคาที่เปิดอยู่ (ไม่ส่ง = ตอบ 409 ให้ถามก่อน)
 };
 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -75,11 +80,17 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // ระบบขายบังคับต้องมีลูกค้า (RPC อ้างข้อมูลลูกค้า) — ไม่มี = ไม่ให้สร้าง
     const custId = (body.customer?.id ?? "").trim();
     if (!custId) return NextResponse.json({ error: "ต้องเลือกลูกค้าก่อนสร้างใบเสนอราคาใหม่" }, { status: 400 });
+    // กันเปิดใบซ้ำ: งานนี้ยังมีใบที่เปิดอยู่ → ต้องยืนยัน (force_new) ก่อน · เช็กจากฐานข้อมูล ไม่ใช่ตะกร้าในเครื่อง
+    if (!body.force_new) {
+      const warn = duplicateQuoteWarning(await loadSheetQuotations(supabaseAdmin(), id).catch(() => []));
+      if (warn) return NextResponse.json({ error: warn, duplicate: true }, { status: 409 });
+    }
     const { data, error } = await client.rpc("erp_playground_quote_create", {
       p_header: { status: "draft", customer_id: custId, customer_name: body.customer?.name ?? null, customer_code: body.customer?.code ?? null },
       p_lines: newLines, p_actor: actor,
     });
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    await linkSheetQuotations(supabaseAdmin(), [{ design_sheet_id: id, quotation_id: data as string, source: "send", created_by: user?.id ?? null, created_by_name: actor }]);
     await writeAudit(supabaseAdmin(), {
       action: "to_quotation", entityType: "design_sheet", entityId: id,
       actorId: user?.id ?? null, actorName: actor,
@@ -105,6 +116,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     p_id: target, p_header: null, p_lines: lines, p_actor: actor,   // null = ไม่แก้หัวใบ (ส่ง {} จะไปชนบั๊ก v_cust ในฟังก์ชัน)
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // ผูกใบงานนี้กับใบเดิม (ใบเดียวรวมหลายใบงานได้ — ผูกครบทุกใบงานที่หย่อนเข้ามา)
+  await linkSheetQuotations(supabaseAdmin(), [{ design_sheet_id: id, quotation_id: target, source: "send", created_by: user?.id ?? null, created_by_name: actor }]);
   await writeAudit(supabaseAdmin(), {
     action: "to_quotation", entityType: "design_sheet", entityId: id,
     actorId: user?.id ?? null, actorName: actor,

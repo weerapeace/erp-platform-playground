@@ -18,6 +18,7 @@ import { CustomerPicker } from "@/components/pickers";
 import type { CustomerPickerValue } from "@/components/pickers";
 import type { SheetSku } from "@/app/api/design-sheets/[id]/skus/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
+import { duplicateQuoteWarning, latestOpenDraft, QUOTE_STATUS_CLS, QUOTE_STATUS_TH, type SheetQuotation } from "@/lib/design-sheet-quotations";
 
 /** แถวเลือกรอบเสนอราคา: ติ๊ก + จำนวน/ราคาที่แก้ได้ก่อนส่ง */
 type RoundPick = {
@@ -78,7 +79,34 @@ export function ToQuotationModal({
   const [picks, setPicks] = useState<RoundPick[]>([]);          // รอบเสนอราคาที่เลือกส่งได้
   const [manual, setManual] = useState(false);                   // true = กรอกราคา/จำนวนเอง (ไม่เลือกจากรอบ)
 
-  const hasCart = !!cartId;
+  // ใบเสนอราคาที่ผูกกับงานนี้ (จากฐานข้อมูล ไม่ใช่ตะกร้าในเครื่อง) → กันเปิดใบซ้ำ
+  const [linked, setLinked] = useState<SheetQuotation[] | null>(null);
+  const [target, setTarget] = useState<string>("new");          // "new" | quotation_id ที่จะหย่อนเข้า
+  const [confirmDup, setConfirmDup] = useState(false);           // ติ๊กยืนยันเปิดใบใหม่ ทั้งที่มีใบเปิดอยู่
+  useEffect(() => {
+    if (!open || !sheetId) return;
+    let alive = true;
+    setLinked(null); setConfirmDup(false);
+    setTarget(cartId ?? "new");
+    apiFetch(`/api/design-sheets/${sheetId}/quotations`).then((r) => r.json())
+      .then((j) => {
+        if (!alive) return;
+        const list = (Array.isArray(j.data) ? j.data : []) as SheetQuotation[];
+        setLinked(list);
+        // ค่าเริ่ม: ตะกร้าที่เป็นใบของงานนี้อยู่แล้ว → ใบร่างล่าสุดของงานนี้ → ตะกร้า → ใบใหม่
+        const draft = latestOpenDraft(list);
+        setTarget(cartId && list.some((q) => q.quotation_id === cartId) ? cartId : draft ? draft.quotation_id : (cartId ?? "new"));
+      })
+      .catch(() => { if (alive) setLinked([]); });
+    return () => { alive = false; };
+  }, [open, sheetId, cartId]);
+  const isNew = target === "new";
+  const hasCart = !isNew;                                        // มีใบปลายทางแล้ว (ตะกร้า หรือ ใบร่างของงานนี้)
+  const sheetDrafts = (linked ?? []).filter((q) => q.status === "draft" && q.quotation_id !== cartId);
+  const sheetSent = (linked ?? []).filter((q) => q.status === "sent" || q.status === "accepted");
+  const dupWarn = duplicateQuoteWarning(linked ?? []);
+  const targetLabel = !isNew && target === cartId ? cartLabel
+    : (() => { const q = sheetDrafts.find((x) => x.quotation_id === target); return q ? `${q.quote_number ?? tr("ร่าง", "Draft")}${q.customer_name ? ` · ${q.customer_name}` : ""}` : null; })();
 
   useEffect(() => {
     if (!open) return;
@@ -144,6 +172,7 @@ export function ToQuotationModal({
       toast.error(tr("กรอกจำนวน (มากกว่า 0) และราคา ให้ครบทุกรายการที่ติ๊ก", "Enter a qty (above 0) and a price for every ticked row")); return;
     }
     if (!hasCart && !customer) { toast.error(tr("เลือกลูกค้าก่อน", "Select a customer first")); return; }
+    if (isNew && dupWarn && !confirmDup) { toast.error(tr("งานนี้มีใบเสนอราคาที่ยังเปิดอยู่ — ติ๊กยืนยันก่อนถ้าจะเปิดใบใหม่จริง", "This job already has an open quotation — tick the confirmation to really start a new one")); return; }
     const sel = sheetSkus.find((x) => x.id === selSkuId);
     // โหมดติ๊กรอบ: 1 รอบ = 1 บรรทัด · ตัวเลือกบรรทัด = variation ที่กรอก + ไซส์ (ถ้าไม่ใช่ "ทั่วไป")
     const roundLines = roundMode ? checkedPicks.map((p) => ({
@@ -158,7 +187,8 @@ export function ToQuotationModal({
       const res = await apiFetch(`/api/design-sheets/${sheetId}/to-quotation`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          target: hasCart ? cartId : "new",
+          target: isNew ? "new" : target,
+          ...(isNew && confirmDup ? { force_new: true } : {}),
           customer: !hasCart && customer ? { id: customer.id, name: customer.name, code: customer.code } : null,
           ...(batch
             ? { lines: batch }
@@ -167,8 +197,12 @@ export function ToQuotationModal({
                         sku: sel?.code ?? null, product_id: sel?.id ?? null } }),
         }),
       });
-      const j = await res.json(); if (j.error) throw new Error(j.error);
-      if (!hasCart && j.quotation_id) onCartSet(j.quotation_id as string);
+      const j = await res.json();
+      if (j.duplicate) { setConfirmDup(false); throw new Error(j.error); }   // มีคนเพิ่งเปิดใบให้งานนี้ระหว่างที่ป๊อปเปิดอยู่
+      if (j.error) throw new Error(j.error);
+      // ใบที่หย่อนเข้า (ใบใหม่ / ใบร่างของงานนี้) → ตั้งเป็นตะกร้า ให้แถบขวาโชว์ใบนั้น
+      const usedId = isNew ? (j.quotation_id as string | undefined) : target;
+      if (usedId && usedId !== cartId) onCartSet(usedId);
       onAdded();
       toast.success(sendCount > 1
         ? (hasCart ? tr(`เพิ่มเข้าตะกร้า ${sendCount} รายการแล้ว`, `Added ${sendCount} items to cart`) : tr(`สร้างตะกร้าใบเสนอราคา ${sendCount} รายการแล้ว`, `Quotation cart created with ${sendCount} items`))
@@ -192,9 +226,45 @@ export function ToQuotationModal({
         </div>
       }>
       <div className="space-y-3">
+        {/* เลือกใบปลายทาง: ใบร่างของงานนี้ (กันซ้ำ) · ตะกร้าปัจจุบัน · ใบใหม่ — โชว์เมื่อมีมากกว่า 1 ทาง หรือมีใบเปิดอยู่ */}
+        {linked && (sheetDrafts.length > 0 || sheetSent.length > 0 || (cartId && (linked.length > 0))) && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-2 space-y-1">
+            <div className="px-1 text-xs font-medium text-slate-600">{t("หย่อนเข้าใบไหน", "Add to which quotation")}</div>
+            {sheetDrafts.map((q) => (
+              <label key={q.quotation_id} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-white cursor-pointer">
+                <input type="radio" name="qt-target" checked={target === q.quotation_id} onChange={() => setTarget(q.quotation_id)} />
+                <span className="min-w-0 flex-1 truncate">📄 {t("ใบของงานนี้", "This job's quotation")} <b>{q.quote_number ?? t("ร่าง", "Draft")}</b>
+                  <span className={`ml-1 rounded px-1 py-0.5 text-[11px] ${QUOTE_STATUS_CLS[q.status] ?? ""}`}>{QUOTE_STATUS_TH[q.status] ?? q.status}</span>
+                  {q.customer_name && <span className="text-slate-400"> · {q.customer_name}</span>}</span>
+              </label>
+            ))}
+            {cartId && (
+              <label className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-white cursor-pointer">
+                <input type="radio" name="qt-target" checked={target === cartId} onChange={() => setTarget(cartId)} />
+                <span className="min-w-0 flex-1 truncate">🧺 {t("ตะกร้าปัจจุบัน", "Current cart")} <b>{cartLabel ?? t("ใบร่างปัจจุบัน", "Current draft")}</b></span>
+              </label>
+            )}
+            <label className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-white cursor-pointer">
+              <input type="radio" name="qt-target" checked={isNew} onChange={() => setTarget("new")} />
+              <span>➕ {t("เปิดใบเสนอราคาใหม่", "Start a new quotation")}</span>
+            </label>
+            {sheetSent.map((q) => (
+              <div key={q.quotation_id} className="px-2 text-[12px] text-amber-700">
+                {t(`ℹ️ ${q.quote_number ?? ""} ${QUOTE_STATUS_TH[q.status] ?? q.status} — เพิ่มรายการไม่ได้ ถ้าราคาเปลี่ยนให้กด "ไม่ผ่าน · เปิดใบใหม่แทน" ในแท็บเสนอราคา`,
+                   `ℹ️ ${q.quote_number ?? ""} is ${q.status} — can't add lines. If the price changed, use "Not passed · open a new one" in the Quotes tab`)}
+              </div>
+            ))}
+          </div>
+        )}
+        {isNew && dupWarn && (
+          <label className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-amber-800 cursor-pointer">
+            <input type="checkbox" checked={confirmDup} onChange={(e) => setConfirmDup(e.target.checked)} className="mt-0.5 h-4 w-4" />
+            <span>⚠️ {dupWarn}<br /><b>{t("ยืนยัน เปิดใบใหม่ซ้ำ", "Confirm: start another quotation")}</b></span>
+          </label>
+        )}
         {hasCart ? (
           <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-3 py-2 text-sm text-indigo-800">
-            {t("🧺 เพิ่มเข้าตะกร้า:", "🧺 Adding to cart:")} <b>{cartLabel ?? t("ใบร่างปัจจุบัน", "Current draft")}</b>
+            {target === cartId ? t("🧺 เพิ่มเข้าตะกร้า:", "🧺 Adding to cart:") : t("📄 เพิ่มเข้าใบ:", "📄 Adding to:")} <b>{targetLabel ?? t("ใบร่างปัจจุบัน", "Current draft")}</b>
           </div>
         ) : (
           <label className="block">
