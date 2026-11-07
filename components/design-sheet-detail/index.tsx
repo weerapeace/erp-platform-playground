@@ -24,6 +24,7 @@ import { PatternTicketLinks } from "@/components/pattern-ticket-links";
 import { SplitPanes, type SplitSize } from "@/components/split-panes";
 import { DateCards } from "@/components/date-cards";
 import { ParentSkuBox } from "./parent-sku-box";
+import { takePrefetchedSheet } from "./prefetch";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
@@ -1302,7 +1303,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     setNoticeMounted(tab === "notice"); setNoticeDirty(false); setNoticeCount(null);
     setModalTab(tab); setNewCmDate(todayStr()); setEditCid(null); setOpenImgCid(null); clearPend();
     try {
-      const res = await apiFetch(`/api/design-sheets/${row.id}`); const j = await res.json();
+      // ⚡ ชี้การ์ดใน Design Dashboard แล้ว = เริ่มโหลดไว้ก่อน (prefetch.ts) → ใช้ผลนั้นเลย · ไม่มี/ล้มเหลว = ดึงใหม่
+      let j = await (takePrefetchedSheet(row.id) ?? apiFetch(`/api/design-sheets/${row.id}`).then((r) => r.json()));
+      if (j?.error === "prefetch") j = await apiFetch(`/api/design-sheets/${row.id}`).then((r) => r.json());
       if (j.error) throw new Error(j.error);
       const d = j.data;
       // แสดงรหัส Parent SKU: ถ้า chips ว่างแต่มี parent_sku_code (ใบเก่า) → ใช้ตัวนั้น · เก็บ map code→id ทำลิงก์

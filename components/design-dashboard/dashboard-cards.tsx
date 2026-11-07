@@ -10,6 +10,7 @@ import { SheetHoverWrap, type SheetHoverPref } from "./sheet-hover";
 import { CardDeadline, CoverPreview, NoPickVeil, PickBadge, deadlineLabel, deadlineTone, safeColor, sheetCoverUrl, sheetIsOwn } from "./dashboard-helpers";
 import { RecordChecklistChip } from "@/components/record-tasks";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
+import { prefetchDesignSheet } from "@/components/design-sheet-detail/prefetch";
 import type { ChecklistSummary } from "@/lib/record-tasks";
 
 /** ⏳ แถบรออะไรอยู่บนการ์ด (กดติ๊ก/เพิ่มได้เลย) — ไม่มีรายการ = ไม่โชว์ */
@@ -55,6 +56,7 @@ export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode
   const st = statusInfo.get(sheet.status);
   const picked = pickedIds.has(sheet.id);
   const activate = () => (pickMode ? togglePicked(sheet.id) : openDetail(sheet.id));
+  const warm = () => { if (!pickMode) prefetchDesignSheet(sheet.id); };   // ⚡ ชี้การ์ด = โหลดใบงานไว้ก่อน
   return (
     <SheetHoverWrap key={sheet.id} sheet={sheet} pref={hoverPref} status={st} own={sheetIsOwn(sheet)} className="h-full"
       deadline={{ label: deadlineLabel(sheet, statusMeta), tone: deadlineTone(sheet, statusMeta) }}>
@@ -62,6 +64,7 @@ export function GalleryCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode
       role="button"
       tabIndex={0}
       onClick={activate}
+      onPointerEnter={warm}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
       data-gg-task-card
       title={pickMode ? t("กดเพื่อเลือก/ยกเลิกเลือก", "Click to select/deselect") : hoverOn ? undefined : `${sheet.code} • ${sheet.name}`}
@@ -129,6 +132,7 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
   const picked = pickedIds.has(sheet.id);
   const row = cardSize === "row";
   const activate = () => { if (isMoving) return; if (pickMode) togglePicked(sheet.id); else openDetail(sheet.id); };
+  const warm = () => { if (!pickMode && !isMoving) prefetchDesignSheet(sheet.id); };   // ⚡ ชี้การ์ด = โหลดใบงานไว้ก่อน
   const cover = coverUrl ? (
     <CoverPreview off={hoverOn} url={sheet.cover_url}>
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -156,6 +160,7 @@ export function BoardCard({ sheet, statusInfo, statusMeta, pickedIds, pickMode, 
       role="button"
       tabIndex={0}
       onClick={activate}
+      onPointerEnter={warm}
       onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); activate(); } }}
       data-gg-task-card
       draggable={isDesktop && !movingSheetId && !pickMode}   /* ทัชลากไม่ได้ → เปลี่ยนสถานะผ่านป๊อปอัปรายละเอียดแทน */

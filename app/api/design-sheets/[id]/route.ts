@@ -30,35 +30,41 @@ export type DesignSheetLinkedSku = {
 };
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const { id } = await params;
   const admin = supabaseAdmin();
-  const { data, error } = await admin.from("design_sheets")
-    .select("*, brand:brands!brand_id(name, color, is_customer_job)").eq("id", id).single();
+  // ⚡ เร็วขึ้น (เจ้าของบ่น 2026-11-07 "เปิดใบงานโหลดนาน อยากให้ < 1 วิ"): เดิมถามทีละขั้น 6 รอบ (สิทธิ์ → ใบงาน → Parent → SKU ของใบ → SKU พี่น้อง → สิทธิ์ต้นทุน)
+  //   ตอนนี้ 2 รอบ: [สิทธิ์ + ใบงาน + SKU ของใบ + สิทธิ์ต้นทุน] พร้อมกัน → [Parent พร้อม SKU ลูกในคำขอเดียว]
+  //   ข้อมูลที่ดึงก่อนผ่านด่านสิทธิ์อยู่แค่ฝั่งเซิร์ฟเวอร์ — ไม่ผ่าน = ทิ้ง ไม่ส่งออก
+  const SKU_COLS = "id, code, name_th, color, standard_price, cover_image_r2_key, is_active, parent_sku_id, design_sheet_id";
+  const [denied, sheetRes, ownRes, canCost] = await Promise.all([
+    guardApi(request, "products.view"),
+    admin.from("design_sheets").select("*, brand:brands!brand_id(name, color, is_customer_job)").eq("id", id).single(),
+    admin.from("skus_v2").select(SKU_COLS).eq("design_sheet_id", id).limit(500),
+    apiCan(request, COST_PERM),
+  ]);
+  if (denied) return denied;
+  const { data, error } = sheetRes;
   if (error) return NextResponse.json({ data: null, error: friendlyDbError(error.message) }, { status: 404 });
   // resolve รหัส Parent SKU → id → ทำ chip เป็นลิงก์เปิด Parent SKU ได้
   const row = data as Record<string, unknown>;
   const codesSet = new Set<string>();
   if (Array.isArray(row.parent_sku_codes)) for (const c of row.parent_sku_codes as unknown[]) if (c) codesSet.add(String(c));
   if (row.parent_sku_code) codesSet.add(String(row.parent_sku_code));
-  let parent_sku_refs: { code: string; id: string }[] = [];
+  const parent_sku_refs: { code: string; id: string }[] = [];
   const parentIdToCode = new Map<string, string>();
-  if (codesSet.size) {
-    const { data: prs } = await admin.from("parent_skus_v2").select("id, code").in("code", Array.from(codesSet));
-    parent_sku_refs = (prs ?? []).map((p) => ({ code: String((p as { code: string }).code), id: String((p as { id: string }).id) }));
-    for (const r of parent_sku_refs) parentIdToCode.set(r.id, r.code);
-  }
 
   // "SKU ที่เชื่อมกับใบงานนี้" = SKU ที่สร้างจากใบนี้ (design_sheet_id) + พี่น้องที่อยู่ใต้ Parent เดียวกัน
   // (ตัวที่ไม่ได้สร้างจากใบนี้ ติดธง from_sheet=false → หน้าจอโชว์จาง ๆ ให้รู้ว่าเป็นของเดิม)
-  const SKU_COLS = "id, code, name_th, color, standard_price, cover_image_r2_key, is_active, parent_sku_id, design_sheet_id";
   const byId = new Map<string, Record<string, unknown>>();
-  const { data: own } = await admin.from("skus_v2").select(SKU_COLS).eq("design_sheet_id", id).limit(500);
-  for (const s of (own ?? []) as Record<string, unknown>[]) byId.set(String(s.id), s);
-  if (parent_sku_refs.length) {
-    const { data: sib } = await admin.from("skus_v2").select(SKU_COLS)
-      .in("parent_sku_id", parent_sku_refs.map((p) => p.id)).limit(500);
-    for (const s of (sib ?? []) as Record<string, unknown>[]) if (!byId.has(String(s.id))) byId.set(String(s.id), s);
+  for (const s of (ownRes.data ?? []) as Record<string, unknown>[]) byId.set(String(s.id), s);
+  if (codesSet.size) {
+    // Parent + SKU ลูกทั้งหมด ในคำขอเดียว (FK skus_v2.parent_sku_id → parent_skus_v2 มีตัวเดียว)
+    const { data: prs } = await admin.from("parent_skus_v2").select(`id, code, skus:skus_v2(${SKU_COLS})`).in("code", Array.from(codesSet));
+    for (const p of (prs ?? []) as { id: string; code: string; skus?: Record<string, unknown>[] | null }[]) {
+      parent_sku_refs.push({ code: String(p.code), id: String(p.id) });
+      parentIdToCode.set(String(p.id), String(p.code));
+      for (const s of (p.skus ?? []).slice(0, 500)) if (!byId.has(String(s.id))) byId.set(String(s.id), s);
+    }
   }
   const linked_skus = Array.from(byId.values()).map((s) => ({
     id: String(s.id), code: String(s.code ?? ""), name_th: (s.name_th as string) ?? null,
@@ -71,7 +77,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   })).sort((a, b) => (a.parent_code ?? "").localeCompare(b.parent_code ?? "") || a.code.localeCompare(b.code));
 
   // ค่าใช้จ่ายเพิ่ม/แบ่งกำไร = ข้อมูลต้นทุน → ไม่มีสิทธิ์ดูต้นทุน ตัดออก (เดิมซ่อนแค่หน้าจอ)
-  const costHidden = !(await apiCan(request, COST_PERM));
+  const costHidden = !canCost;
   const safe = costHidden ? { ...data, cost_extra: null, profit_splits: null } : data;
   return NextResponse.json({ data: { ...safe, parent_sku_refs, linked_skus, ...(costHidden ? { cost_restricted: true } : {}) }, error: null });
 }
