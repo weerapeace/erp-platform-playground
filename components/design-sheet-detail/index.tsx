@@ -1383,9 +1383,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       const j = await res.json(); if (j.error) throw new Error(j.error);
       if (form.id) {
         await reconcileDetailImages(form.id, form.detail);   // ลบรูปในรายละเอียดที่ถูกเอาออก (→ R2 trash)
-        toast.success(t("บันทึกแล้ว", "Saved"));
-        setForm(null);
-        if (detailOnly) onDetailClose?.();   // โหมด popup-เดี่ยว (Dashboard): ถอด overlay + refresh บอร์ดหลังบันทึก
+        // บันทึกแล้ว = ค้างป๊อปไว้ + กลับเป็นโหมดดูอย่างเดียว (เหมือนแท็บตีราคา · เจ้าของขอ 2026-11-07 "ล็อกด้วย")
+        //   เดิมปิดป๊อปทันที · ตอนนี้กดปิดเอง (Dashboard รีเฟรชบอร์ดตอนปิดป๊อปอยู่แล้ว) · ตีราคา/สั่งจากร้านแก้ค้าง = คงโหมดแก้
+        toast.success(t("บันทึกแล้ว — ดับเบิลคลิกช่องเพื่อแก้ต่อ", "Saved — double-click a field to edit again"));
+        patch({ parent_sku_codes: parentCodes });
+        if (pending) { setSkuInput(""); setSkuCheck(null); }
+        if (!costDirty && !supplierDirty) setEditing(false);
       } else {
         // อัปโหลดรูปที่พักไว้ (ลาก/วาง/Ctrl+V ตอนยังไม่บันทึก) เข้าใบงานที่เพิ่งสร้าง
         if (pendImgs.length > 0) {
