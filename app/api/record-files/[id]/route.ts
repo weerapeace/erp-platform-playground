@@ -2,7 +2,7 @@
  * DELETE /api/record-files/[id]?actor= — ลบไฟล์แนบ 1 ไฟล์ (Supabase Storage + ทะเบียน)
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { guardRecordFiles } from "@/lib/record-files-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import type { RecordFileRow } from "@/lib/record-files";
@@ -11,13 +11,14 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   const { id } = await params;
   const actor = new URL(request.url).searchParams.get("actor");
 
   const admin = supabaseAdmin();
   const { data } = await admin.from("erp_record_files").select("*").eq("id", id).maybeSingle();
   const row = data as RecordFileRow | null;
+  // สิทธิ์ตามชนิดรายการของไฟล์นั้น (ไม่พบไฟล์ = ใช้สิทธิ์ค่าเริ่มต้น กันเดาว่ามีไฟล์ไหม)
+  const denied = await guardRecordFiles(request, row?.entity_type ?? "", "edit"); if (denied) return denied;
   if (!row) return NextResponse.json({ data: { deleted: true }, error: null });   // ลบไปแล้ว = ถือว่าสำเร็จ
 
   try { await admin.storage.from(row.bucket).remove([row.storage_path]); } catch { /* best-effort ลบไฟล์จริง */ }

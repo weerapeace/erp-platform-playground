@@ -20,9 +20,12 @@ import { EmployeeRecordsPanel, type EmployeeRecords, type RecordKind } from "@/c
 import { EmployeeSkillsField } from "../../employee-skills-field";
 import { BankPicker, bankAccountDigits, useBanks } from "@/components/bank-picker";
 import { BankAccountInput } from "@/components/bank-account-input";
+import { usePermission } from "@/components/auth";
 
 const ImageInput = dynamic(() => import("@/components/image-input").then((m) => m.ImageInput), { ssr: false });
-const AttachmentPanel = dynamic(() => import("@/components/attachment-panel").then((m) => m.AttachmentPanel), { ssr: false });
+// เอกสารพนักงาน = ข้อมูลส่วนตัว → เก็บที่เก็บไฟล์ส่วนตัว (Supabase record-files) สิทธิ์ตามแอปเงินเดือน (RECORD_FILE_PERMS)
+//   เดิม AttachmentPanel เก็บเข้าที่เก็บรูปสินค้า (R2) — ยังไม่เคยมีไฟล์ (เช็ก 2026-11-07) จึงไม่ต้องย้ายข้อมูล
+const RecordFilesField = dynamic(() => import("@/components/record-files").then((m) => m.RecordFilesField), { ssr: false });
 
 type Emp = Record<string, unknown>;
 type Opt = { v: string; th: string };
@@ -199,6 +202,7 @@ export default function EmployeeProfilePage() {
   const params = useParams<{ id: string }>();
   const id = s(params?.id);
   const router = useRouter();
+  const canEditFiles = usePermission("employees.edit");   // แนบ/ลบเอกสารพนักงาน (เซิร์ฟเวอร์เช็กซ้ำ + ต้องมี app.payroll)
 
   const [p, setP] = useState<Profile | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -557,7 +561,7 @@ export default function EmployeeProfilePage() {
 
       {tab === "files" && (
         <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
-          <AttachmentPanel entityType="payroll-employees" entityId={id} title="📎 ไฟล์แนบ / เอกสาร" />
+          <RecordFilesField entityType="payroll-employees" entityId={id} title="ไฟล์แนบ / เอกสาร" readonly={!canEditFiles} />
         </div>
       )}
     </div>

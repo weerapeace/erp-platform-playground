@@ -4,7 +4,7 @@
  *   POST (multipart: file, entity_type, entity_id, actor) → อัปขึ้น Storage + บันทึกทะเบียน
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { guardRecordFiles } from "@/lib/record-files-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { writeAudit } from "@/lib/audit";
 import { RECORD_FILES_BUCKET, RECORD_FILES_SIGNED_TTL, RECORD_FILES_MAX, type RecordFileRow } from "@/lib/record-files";
@@ -16,10 +16,11 @@ export const maxDuration = 60;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.view"); if (denied) return denied;
   const sp = new URL(request.url).searchParams;
   const entityType = (sp.get("entity_type") ?? "").trim();
   const entityId = (sp.get("entity_id") ?? "").trim();
+  // สิทธิ์ตามชนิดรายการ (เอกสารพนักงาน = สิทธิ์เงินเดือน · ใบเสนอราคา = qt.view · อื่น ๆ = products.view)
+  const denied = await guardRecordFiles(request, entityType, "view"); if (denied) return denied;
   if (!entityType || !UUID_RE.test(entityId)) return NextResponse.json({ data: [], error: null });
 
   const admin = supabaseAdmin();
@@ -47,11 +48,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
  *   (ตัวไฟล์ไม่ผ่าน route นี้ → ไม่ติดลิมิต body ~4.5MB ของ Vercel)
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   let body: { entity_type?: string; entity_id?: string; storage_path?: string; file_name?: string; content_type?: string; size_bytes?: number; actor?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "รูปแบบข้อมูลไม่ถูกต้อง" }, { status: 400 }); }
 
   const entityType = String(body.entity_type ?? "").trim();
+  const denied = await guardRecordFiles(request, entityType, "edit"); if (denied) return denied;
   const entityId = String(body.entity_id ?? "").trim();
   const storagePath = String(body.storage_path ?? "").trim();
   const fileName = String(body.file_name ?? "").trim() || "file";

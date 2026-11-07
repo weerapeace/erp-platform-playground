@@ -3,11 +3,11 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import { DataTable } from "@/components/data-table";
-import { AttachmentPanel } from "@/components/attachment-panel";
+import { RecordFilesField } from "@/components/record-files";
 import { ERPModal } from "@/components/modal";
 import { DeleteDraftButton } from "@/components/delete-draft-doc";
-import { CustomerPicker, EmployeePicker, RecordPeekLink } from "@/components/pickers";
-import type { CustomerPickerValue, EmployeePickerValue } from "@/components/pickers";
+import { CustomerPicker, UserPicker, RecordPeekLink } from "@/components/pickers";
+import type { CustomerPickerValue, UserPickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
 import { useAuth, usePermission, AccessDenied } from "@/components/auth";
 import { apiFetch } from "@/lib/api";
@@ -749,9 +749,9 @@ export default function QuotationsPage() {
               </div>
             )}
 
-            {/* Attachments (ของกลาง) */}
+            {/* ไฟล์แนบเอกสาร (ของกลาง RecordFilesField · ที่เก็บส่วนตัว · สิทธิ์ qt.* ตาม RECORD_FILE_PERMS) — เดิม AttachmentPanel เก็บเข้าที่เก็บรูปสินค้า ยังไม่เคยมีไฟล์ */}
             <div className="border-t border-slate-100 pt-4">
-              <AttachmentPanel entityType="erp_playground_quote" entityId={detail.id} />
+              <RecordFilesField entityType="erp_playground_quote" entityId={detail.id} actor={user?.name} readonly={!canCreate} />
             </div>
           </div>
         )}
@@ -788,11 +788,12 @@ export default function QuotationsPage() {
               )}
             </div>
             <div>
-              <span className="text-xs font-medium text-slate-600">เซลส์ <span className="text-slate-400">(พนักงาน — ไม่บังคับ)</span></span>
+              <span className="text-xs font-medium text-slate-600">เซลส์ <span className="text-slate-400">(ผู้ใช้ระบบ — ไม่บังคับ)</span></span>
               <div className="mt-0.5">
-                <EmployeePicker
-                  value={form.sale_person_name ? { id: "", code: null, name: form.sale_person_name } as EmployeePickerValue : null}
-                  onChange={(v: EmployeePickerValue | null) => setForm({ ...form, sale_person_name: v?.name ?? "" })}
+                {/* เซลส์ = ผู้ใช้ระบบ (ของกลาง UserPicker · user_profiles) — เดิม EmployeePicker อ่านตารางทดลอง 6 คนสมมติ · ค่ายังเก็บเป็นชื่อเหมือนเดิม */}
+                <UserPicker
+                  value={form.sale_person_name ? { id: "", code: null, name: form.sale_person_name } as UserPickerValue : null}
+                  onChange={(v: UserPickerValue | null) => setForm({ ...form, sale_person_name: v?.name ?? "" })}
                 />
               </div>
               {user?.name && (

@@ -6,7 +6,7 @@
  *   - เก็บค่าเป็น "ชื่อหน่วย" (text) เพราะที่ใช้งานจริงหลายที่เก็บเป็นข้อความ เช่น pcs / roll / หลา
  *   - พิมพ์ค่าที่ไม่มีในทะเบียนได้ (onCreate) — ใช้ค่าที่พิมพ์เลย ไม่บังคับต้องมีในทะเบียน
  *
- * ใช้ที่: ตารางร้านที่จำหน่าย (หน่วยซื้อรายร้าน) · ที่อื่นที่ต้องเลือกหน่วย
+ * ใช้ที่: ตารางร้านที่จำหน่าย (หน่วยซื้อรายร้าน) · ขอเพิ่มวัตถุดิบ · บรรทัดใบขาย (ใบเสนอราคา/ใบสั่งขาย/ใบส่งของ — sales-line-items) · ที่อื่นที่ต้องเลือกหน่วย
  */
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/lib/api";
@@ -29,7 +29,7 @@ export function UomPicker({ value, onChange, placeholder = "— หน่วย 
       .then((j) => {
         const list = ((j.data ?? []) as Record<string, unknown>[])
           .map((u) => ({ value: String(u.label ?? ""), label: String(u.label ?? "") }))
-          .filter((u) => u.value);
+          .filter((u, i, arr) => u.value && arr.findIndex((x) => x.value === u.value) === i);   // ทะเบียนมีชื่อซ้ำ (เช่น pcs. 2 แถว) → โชว์ครั้งเดียว
         cache = list; setOpts(list);
       }).catch(() => {});
   }, []);

@@ -10,6 +10,23 @@ export const RECORD_FILES_BUCKET = "record-files";
 export const RECORD_FILES_SIGNED_TTL = 60 * 60;   // signed URL อายุ 1 ชม.
 export const RECORD_FILES_MAX = 50 * 1024 * 1024;  // 50MB/ไฟล์ (ตรงกับ file_size_limit ของ bucket) — อัปตรงเข้า Storage ข้ามลิมิต body ของ Vercel
 
+/**
+ * สิทธิ์ของไฟล์แนบ "ตามชนิดรายการ" (entity_type) — ต้องผ่านทุกตัวในลิสต์ (2026-11-07)
+ *   ไม่อยู่ในรายการ = สิทธิ์สินค้า products.view / products.edit (แบบเดิม — สินค้า รุ่น สลิปจ่าย PO ฯลฯ)
+ *   เอกสารพนักงานเป็นข้อมูลอ่อนไหว → ต้องมีสิทธิ์เข้าแอปเงินเดือนด้วย (กติกาเดียวกับ guardPayroll)
+ *   เพิ่มชนิดรายการใหม่ที่ไม่ใช่สินค้า → เพิ่มแถวที่นี่ ไม่งั้นคนที่ทำเอกสารนั้นแต่ไม่มีสิทธิ์สินค้าจะอัปไม่ได้
+ * ตรวจฝั่งเซิร์ฟเวอร์ด้วย guardRecordFiles() ใน lib/record-files-auth.ts
+ */
+export const RECORD_FILE_PERMS: Record<string, { view: string[]; edit: string[] }> = {
+  "payroll-employees": { view: ["app.payroll", "employees.view"], edit: ["app.payroll", "employees.edit"] },
+  erp_playground_quote: { view: ["qt.view"], edit: ["qt.create"] },      // ใบเสนอราคา
+  erp_playground_so: { view: ["so.view"], edit: ["so.create"] },          // ใบสั่งขาย
+};
+
+export function recordFilePerms(entityType: string, mode: "view" | "edit"): string[] {
+  return (RECORD_FILE_PERMS[entityType] ?? { view: ["products.view"], edit: ["products.edit"] })[mode];
+}
+
 export type RecordFileRow = {
   id: string; entity_type: string; entity_id: string; bucket: string;
   storage_path: string; file_name: string; content_type: string | null;

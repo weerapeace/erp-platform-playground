@@ -89,10 +89,18 @@ describe("ป้ายสถานะ (buildPartRows)", () => {
     expect(rows["supplier-picker-old"].flags).not.toContain("dup");
   });
 
-  it("กลุ่ม เช็กข้อมูลก่อน = ป้าย check ทุกตัว", () => {
-    expect(rows["attachment-panel"].flags).toContain("check");
-    expect(rows["record-files"].flags).toContain("check");
-    expect(rows["record-files"].verdict).toBe("check-data");
+  it("กลุ่มที่รวมแล้ว: ตัวเก่า = ควรเลิก · ตัวหลักไม่ติดป้าย", () => {
+    expect(rows["attachment-panel"].flags).toContain("deprecated");
+    expect(rows["attachment-panel"].flags).not.toContain("check");
+    expect(rows["record-files"].flags).not.toContain("dup");
+    expect(rows["record-files"].flags).not.toContain("check");
+    expect(rows["record-files"].verdict).toBe("merge");
+  });
+
+  it("กลุ่มที่ยังไม่ได้ตัดสิน / เช็กข้อมูลก่อน = ป้าย check", () => {
+    const fake = (key: string) => ({ key, label: key, code: key, category: "pick" as const, source: { path: `components/${key}` }, what: "-", sameJob: "zz-undecided" });
+    const r = buildPartRows([fake("zz-a"), fake("zz-b")], { sources: {} });
+    expect(r.every((x) => x.flags.includes("check"))).toBe(true);
   });
 
   it("กลุ่ม ใช้คนละงาน = ไม่ติดป้ายซ้ำ", () => {

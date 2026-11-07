@@ -5,7 +5,7 @@
  *   → { path, token }
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { guardRecordFiles } from "@/lib/record-files-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { RECORD_FILES_BUCKET } from "@/lib/record-files";
 
@@ -15,11 +15,11 @@ export const revalidate = 0;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
-  const denied = await guardApi(request, "products.edit"); if (denied) return denied;
   let body: { entity_type?: string; entity_id?: string; file_name?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const entityType = String(body.entity_type ?? "").trim();
+  const denied = await guardRecordFiles(request, entityType, "edit"); if (denied) return denied;   // สิทธิ์ตามชนิดรายการ
   const entityId = String(body.entity_id ?? "").trim();
   const fileName = String(body.file_name ?? "").trim();
   if (!entityType || !UUID_RE.test(entityId)) return NextResponse.json({ error: "ระบุ record ไม่ถูกต้อง" }, { status: 400 });

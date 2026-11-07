@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { SkuPicker, UnitPicker } from "@/components/pickers";
-import type { SkuPickerValue, UnitPickerValue } from "@/components/pickers";
+import { SkuPicker } from "@/components/pickers";
+import type { SkuPickerValue } from "@/components/pickers";
+// หน่วยนับ = ทะเบียนหน่วยจริง (uoms — ตัวเดียวกับหน่วยของสินค้า) · เดิม UnitPicker อ่านตารางทดลอง 12 หน่วย เลือก หลา/Units/pcs. ไม่ได้ · ค่ายังเก็บเป็นชื่อหน่วยเหมือนเดิม
+import { UomPicker } from "@/components/uom-picker";
 import { ImageThumbnail } from "@/components/image-manager";
 import { AssetPicker } from "@/components/asset-picker";
 import { calculateDocument, type DocumentResult } from "@/lib/tax";
@@ -363,10 +365,7 @@ export function SOLineEditor({
                   </td>
                   <td className={`px-2 ${compact ? "py-1.5" : "py-2"}`}>
                     {isFull(l) ? (
-                      <UnitPicker
-                        value={l.unit ? ({ id: "", code: null, name: l.unit, symbol: l.unit } satisfies UnitPickerValue) : null}
-                        onChange={(u: UnitPickerValue | null) => update(i, { unit: u?.name ?? "ชิ้น" })}
-                        disabled={readonly} />
+                      <UomPicker value={l.unit || null} onChange={(u) => update(i, { unit: u ?? "ชิ้น" })} disabled={readonly} />
                     ) : <span className="inline-block pt-1.5 text-sm text-slate-600">{l.unit || "—"}</span>}
                   </td>
                   {!hidePrice && <>
@@ -539,11 +538,7 @@ export function SOLineEditor({
                 </Field>
 
                 <Field label="หน่วย">
-                  <UnitPicker
-                    value={l.unit ? ({ id: "", code: null, name: l.unit, symbol: l.unit } satisfies UnitPickerValue) : null}
-                    onChange={(u: UnitPickerValue | null) => update(i, { unit: u?.name ?? "ชิ้น" })}
-                    disabled={readonly}
-                  />
+                  <UomPicker value={l.unit || null} onChange={(u) => update(i, { unit: u ?? "ชิ้น" })} disabled={readonly} />
                 </Field>
 
                 <Field label="ราคา/หน่วย">
