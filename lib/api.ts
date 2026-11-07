@@ -3,6 +3,7 @@
 import { supabaseBrowser } from "./supabase-browser";
 import { markDirty } from "./refresh-bus";
 import { editContextHeaders } from "./edit-context";
+import { applyTemplatePreview } from "./report-template-preview";
 
 /**
  * fetch wrapper ที่แนบ access_token ของ user ปัจจุบันอัตโนมัติ
@@ -32,5 +33,7 @@ export async function apiFetch(input: string, init: RequestInit = {}): Promise<R
   // ของกลาง refresh-bus: บันทึก/ลบสำเร็จ → จำไว้ว่า "มีการแก้" แล้วค่อยรีเฟรชหน้าเบื้องหลังตอนปิด Popup/Drawer
   const method = (init.method ?? "GET").toUpperCase();
   if (res.ok && method !== "GET" && method !== "HEAD") markDirty();
+  // 👁️ หน้าพิมพ์ที่ถูกเปิดใน iframe ของหน้าออกแบบแม่แบบ → ใช้แม่แบบที่กำลังแก้ (lib/report-template-preview) · ปกติไม่มีผล
+  if (method === "GET" && input.includes("/api/admin/report-templates")) return applyTemplatePreview(input, method, res);
   return res;
 }

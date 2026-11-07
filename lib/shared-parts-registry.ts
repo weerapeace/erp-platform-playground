@@ -544,6 +544,21 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "components/print-history" },
     what: "บอกว่าเอกสารนี้พิมพ์ไปกี่ครั้ง ล่าสุดเมื่อไหร่ ใครพิมพ์",
   },
+  {
+    key: "pdfme-designer", label: "ตัวออกแบบเอกสารแบบลากวาง", code: "PdfmeDesigner", category: "print",
+    source: { path: "components/pdfme-designer" },
+    what: "ลากช่องข้อความ/ตาราง/รูป วางบนกระดาษ (pdfme) ฟอนต์ไทยพร้อม เก็บเป็นแม่แบบใน erp_report_templates",
+    when: "ออกแบบแม่แบบเอกสารแบบไม่เขียนโค้ด (ตอนนี้หน้าพิมพ์ที่ใช้ได้จริง = ใบสั่งงานผลิต)",
+    notWhen: "แม่แบบ HTML ปกติ — แก้ที่หน้าแม่แบบเอกสาร /admin/report-templates",
+    doc: "report-template-designer.md",
+  },
+  {
+    key: "report-usage", label: "ทะเบียนหน้าพิมพ์ที่ใช้แม่แบบ", code: "REPORT_USAGES · usageMatch", category: "print",
+    source: { path: "lib/report-usage" },
+    what: "บอกว่าเอกสารแต่ละประเภทพิมพ์ที่หน้าไหน และหน้านั้นหยิบแม่แบบใบไหน (หลัก / ที่เลือก / ตามรหัส)",
+    when: "ทำหน้าพิมพ์ใหม่ที่อ่านแม่แบบจาก /api/admin/report-templates → เพิ่มแถวที่นี่",
+    doc: "report-template-designer.md",
+  },
 
   // ───────── แจ้งเตือน ─────────
   {

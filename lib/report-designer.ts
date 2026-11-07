@@ -1,5 +1,6 @@
 import type { ReportTemplateRow } from "@/app/api/admin/report-templates/route";
 import { DS_PRESENT_SAMPLE_DATA } from "@/lib/design-sheet-present";
+import { EXTRA_REPORT_ENTITY_DEFS } from "@/lib/report-entity-samples";
 
 export type ReportFieldDef = {
   key: string;
@@ -78,18 +79,20 @@ export function buildDesignerDescription(meta: ReportDesignerMeta, note = ""): s
   return `${META_PREFIX}${JSON.stringify(meta)}${META_SUFFIX}${note ? `\n${note}` : ""}`;
 }
 
+/**
+ * สถานะจริงดูจาก flag ในฐานข้อมูลก่อน (หน้าพิมพ์ใช้ active/is_default เลือกแม่แบบ)
+ * active = ใช้งานอยู่ (รวมแม่แบบรองอย่าง "ใบส่งสินค้า" ที่หน้าพิมพ์หยิบตาม template_key แม้ไม่ใช่ค่าหลัก)
+ * ไม่ active → "เก็บแล้ว" ถ้าเคยกดเก็บ ไม่งั้น = ร่าง
+ */
 export function inferTemplateStatus(row: ReportTemplateRow): TemplateStatus {
-  const parsed = parseDesignerDescription(row.description);
-  if (parsed.meta.status !== "draft") return parsed.meta.status;
-  if (row.is_default && row.active) return "published";
-  if (!row.active) return "draft";
-  return "draft";
+  if (row.active) return "published";
+  return parseDesignerDescription(row.description).meta.status === "archived" ? "archived" : "draft";
 }
 
 export function statusLabel(status: TemplateStatus): string {
-  if (status === "published") return "Published";
-  if (status === "archived") return "Archived";
-  return "Draft";
+  if (status === "published") return "ใช้งานอยู่";
+  if (status === "archived") return "เก็บแล้ว";
+  return "ร่าง";
 }
 
 export function statusClass(status: TemplateStatus): string {
@@ -350,6 +353,8 @@ export const REPORT_ENTITY_DEFS: Record<string, ReportEntityDef> = {
       ],
     },
   },
+  // เอกสารที่หน้าพิมพ์ใช้แม่แบบจริง (ใบวางบิล/ใบกำกับภาษี/ใบลดหนี้/ใบสั่งซื้อ/ใบงานออกแบบ 4 แบบ) — field + ข้อมูลตัวอย่างไว้พรีวิว
+  ...EXTRA_REPORT_ENTITY_DEFS,
 };
 
 export const REPORT_ENTITY_OPTIONS = Object.values(REPORT_ENTITY_DEFS).map(entity => ({
@@ -359,6 +364,15 @@ export const REPORT_ENTITY_OPTIONS = Object.values(REPORT_ENTITY_DEFS).map(entit
 
 export function getReportEntityDef(entityType: string): ReportEntityDef {
   return REPORT_ENTITY_DEFS[entityType] ?? REPORT_ENTITY_DEFS.qt;
+}
+
+/** มีชุด field + ข้อมูลตัวอย่างให้พรีวิวไหม (ไม่มี = getReportEntityDef คืนของใบเสนอราคาแทน ซึ่งไม่ตรง) */
+export function hasReportEntityDef(entityType: string): boolean {
+  return entityType in REPORT_ENTITY_DEFS;
+}
+
+export function reportEntityLabel(entityType: string): string {
+  return REPORT_ENTITY_DEFS[entityType]?.label ?? entityType;
 }
 
 export function fieldToken(fieldKey: string): string {

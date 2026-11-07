@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
+import { supabaseAdmin } from "@/lib/supabase-admin";
+import { readTemplateSnapshot, saveTemplateVersion } from "@/lib/report-template-history";
 
 // ---- Types ----
 
@@ -65,6 +67,10 @@ async function upsert(request: NextRequest) {
     return NextResponse.json({ error: "entity_type, template_key, label จำเป็น" }, { status: 400 });
   }
 
+  // 🕘 แก้ใบเดิม → เก็บสำเนาของเดิมไว้ย้อนได้ (อ่านก่อนบันทึก จดหลังบันทึกสำเร็จ — RPC ตรวจสิทธิ์ admin.reports เอง)
+  const admin = body.id ? supabaseAdmin() : null;
+  const before = admin && body.id ? await readTemplateSnapshot(admin, body.id) : null;
+
   const { data, error } = await supabaseFromRequest(request).rpc("erp_report_templates_upsert", {
     p_id:           body.id ?? null,
     p_entity_type:  body.entity_type,
@@ -82,6 +88,7 @@ async function upsert(request: NextRequest) {
     p_actor:        body.actor ?? null,
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (admin && body.id && before) await saveTemplateVersion(admin, body.id, before, body as unknown as Record<string, unknown>, body.actor ?? null);
   return NextResponse.json({ data, error: null });
 }
 
