@@ -1,11 +1,12 @@
 "use client";
 
 /**
- * แผนผังการทำงาน — โน้ตแปะ (post-it): แปะบนผัง / ติดกล่องหรือเส้น · 4 สี · ลากย้ายได้ · ส่วนตัว ↔ ทั้งทีม
- *   ส่วนตัว = useUserPref "flow_map_notes" (ต่อคน ตามไปทุกเครื่อง) · ทั้งทีม = /api/flow-map/notes (เห็นทุกคน · แก้/ลบได้เฉพาะเจ้าของ)
- * ชนิด/สี/ตัวตรวจ = lib/flow-map-notes.ts
+ * แผนผังการทำงาน — โน้ตภายใน (2026-11-07 เปลี่ยนจากโพสต์อิทลอยบนผัง — เจ้าของขอ "เอาแปะโน้ตออก เป็น note ภายใน ไม่โชว์ออกมา")
+ *   อยู่ในแผงขวาเท่านั้น: กดกล่อง/เส้น → "โน้ตภายใน" ของส่วนนั้น · ไม่ได้กดอะไร = โน้ตของผังนี้ (ไม่ติดกล่อง) · ไม่วาดอะไรบนผัง
+ *   ส่วนตัว = useUserPref "flow_map_notes" (ต่อคน ตามไปทุกเครื่อง) · ทั้งทีม = /api/flow-map/notes (เห็นทุกคน · แก้/ลบได้เฉพาะเจ้าของ · ลงประวัติ)
+ *   ชนิด/ตัวตรวจ = lib/flow-map-notes.ts (ช่อง x/y/color ยังเก็บไว้ให้ข้อมูลเดิมอ่านได้ แต่ไม่ใช้แล้ว)
  */
-import { useCallback, useEffect, useRef, useState, type PointerEvent as RPointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useUserPref } from "@/lib/use-user-pref";
 import { useAuth } from "@/components/auth";
@@ -13,8 +14,8 @@ import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import {
-  FLOW_NOTE_COLORS, FLOW_NOTE_COLOR_ORDER, FLOW_NOTE_MAX, FLOW_NOTE_W, FLOW_NOTE_H, FLOW_NOTE_LIMIT, cleanFlowNote,
-  type FlowNote, type FlowNoteData,
+  FLOW_NOTE_MAX, FLOW_NOTE_LIMIT, cleanFlowNote,
+  type FlowNote, type FlowNoteAttach, type FlowNoteData,
 } from "@/lib/flow-map-notes";
 
 type Personal = Record<string, FlowNoteData>;
@@ -92,95 +93,108 @@ export function useFlowNotes() {
       }
     } catch (e) { fail(e); }
   };
-  return { notes, add, update, remove, toggleShared };
+  /** เขียนโน้ตภายในใหม่ — shared = ทั้งทีม (บันทึกผ่าน API) · ไม่ = ส่วนตัว · คืน true ถ้าสำเร็จ */
+  const create = async (text: string, attach: FlowNoteAttach, view: string, shared: boolean): Promise<boolean> => {
+    const d: FlowNoteData = { text: text.slice(0, FLOW_NOTE_MAX), color: "yellow", view, x: 0, y: 0, attach, author: user?.name ?? null, at: new Date().toISOString() };
+    if (!shared) { setPersonal((p) => ({ ...p, [newId()]: d })); return true; }
+    try {
+      const j = await json(await apiFetch("/api/flow-map/notes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) }));
+      setTeam((ts) => [...ts, j.data as FlowNote]);
+      return true;
+    } catch (e) { fail(e); return false; }
+  };
+  return { notes, add, create, update, remove, toggleShared };
 }
 export type FlowNotesApi = ReturnType<typeof useFlowNotes>;
 
-/** โน้ต 1 แผ่นบนผัง (วาดใน SVG ด้วย foreignObject → ย่อขยายตามผัง) · ลากที่แถบบนเพื่อย้าย */
-export function FlowSticky({ note, api, editing, onEdit, svgWidth }: {
-  note: FlowNote; api: FlowNotesApi; editing: boolean; onEdit: (id: string | null) => void; svgWidth: () => number;
-}) {
+const fmtDay = (iso: string) => new Date(iso).toLocaleDateString("th-TH", { day: "numeric", month: "short" });
+
+/** โน้ตภายใน 1 รายการ — ของตัวเอง: แก้ / ส่วนตัว↔ทั้งทีม / ลบ */
+function InternalNoteRow({ note, api }: { note: FlowNote; api: FlowNotesApi }) {
   const t = useT();
-  const c = FLOW_NOTE_COLORS[note.color];
-  const [pos, setPos] = useState<[number, number]>([note.x, note.y]);
+  const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(note.text);
-  const drag = useRef<{ sx: number; sy: number; x: number; y: number; moved: boolean } | null>(null);
-  useEffect(() => { setPos([note.x, note.y]); }, [note.x, note.y]);
   useEffect(() => { if (!editing) setDraft(note.text); }, [note.text, editing]);
-  const canEdit = note.mine;
-  const onDown = (e: RPointerEvent<HTMLDivElement>) => {
-    if (!canEdit) return;
-    e.stopPropagation();
-    (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-    drag.current = { sx: e.clientX, sy: e.clientY, x: pos[0], y: pos[1], moved: false };
-  };
-  const onMove = (e: RPointerEvent<HTMLDivElement>) => {
-    const d = drag.current; if (!d) return;
-    const k = 680 / Math.max(1, svgWidth());
-    const nx = Math.round(d.x + (e.clientX - d.sx) * k), ny = Math.round(d.y + (e.clientY - d.sy) * k);
-    if (Math.abs(nx - d.x) + Math.abs(ny - d.y) > 2) d.moved = true;
-    setPos([Math.min(680 - FLOW_NOTE_W, Math.max(0, nx)), Math.max(0, ny)]);
-  };
-  const onUp = () => { const d = drag.current; drag.current = null; if (d?.moved) void api.update(note, { x: pos[0], y: pos[1] }); };
   const save = () => {
-    onEdit(null);
     const text = draft.trim();
-    if (!text) { void api.remove(note); return; }
+    setEditing(false);
+    if (!text) { setDraft(note.text); return; }   // แก้จนว่าง = ไม่บันทึก (ลบให้กดปุ่มลบ)
     if (text !== note.text) void api.update(note, { text: text.slice(0, FLOW_NOTE_MAX) });
   };
   return (
-    <foreignObject x={pos[0]} y={pos[1]} width={FLOW_NOTE_W} height={FLOW_NOTE_H + 18} style={{ overflow: "visible" }}>
-      <div onClick={(e) => e.stopPropagation()} className="h-full flex flex-col rounded-[4px_4px_10px_4px] shadow-sm text-[10px] leading-snug select-none"
-        style={{ background: c.bg, border: `1px solid ${c.border}`, color: c.text, transform: "rotate(-1.5deg)" }}>
-        <div onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}
-          className={`flex items-center gap-1 px-1.5 pt-1 opacity-75 ${canEdit ? "cursor-grab active:cursor-grabbing" : ""}`} style={{ touchAction: "none" }}>
-          <span className="truncate flex-1">{note.author ?? t("ฉัน", "Me")} · {note.shared ? t("ทั้งทีม", "Team") : t("ส่วนตัว", "Private")}</span>
-          {canEdit && <>
-            <button type="button" title={t("เปลี่ยนสี", "Color")} aria-label={t("เปลี่ยนสี", "Color")} onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => void api.update(note, { color: FLOW_NOTE_COLOR_ORDER[(FLOW_NOTE_COLOR_ORDER.indexOf(note.color) + 1) % FLOW_NOTE_COLOR_ORDER.length] })}
-              className="w-3 h-3 rounded-full border" style={{ background: FLOW_NOTE_COLORS[FLOW_NOTE_COLOR_ORDER[(FLOW_NOTE_COLOR_ORDER.indexOf(note.color) + 1) % 4]].bg, borderColor: c.border }} />
-            <button type="button" title={note.shared ? t("เปลี่ยนเป็นส่วนตัว", "Make private") : t("แชร์ให้ทั้งทีม", "Share with team")} onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => void api.toggleShared(note)} className="px-0.5 hover:opacity-100"><Icon value={note.shared ? "👥" : "🔒"} /></button>
-            <button type="button" title={t("ลบโน้ต", "Delete")} aria-label={t("ลบโน้ต", "Delete")} onPointerDown={(e) => e.stopPropagation()}
-              onClick={() => void api.remove(note)} className="px-0.5 hover:opacity-100">✕</button>
-          </>}
-        </div>
-        {editing && canEdit ? (
-          <textarea autoFocus value={draft} maxLength={FLOW_NOTE_MAX} onChange={(e) => setDraft(e.target.value)} onBlur={save}
-            onKeyDown={(e) => { if (e.key === "Escape") { setDraft(note.text); onEdit(null); } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); save(); } }}
-            placeholder={t("เขียนโน้ต… (Enter บันทึก)", "Write a note… (Enter to save)")}
-            className="flex-1 w-full resize-none bg-transparent px-1.5 pb-1 text-[11px] outline-none" style={{ color: c.text }} />
-        ) : (
-          <div onClick={() => canEdit && onEdit(note.id)} className={`flex-1 px-1.5 pb-1 text-[11px] whitespace-pre-wrap break-words overflow-hidden ${canEdit ? "cursor-text" : ""}`}>
-            {note.text || <span className="opacity-50">{t("แตะเพื่อเขียน…", "Tap to write…")}</span>}
+    <div className="mt-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[12.5px]">
+      {editing ? (
+        <div>
+          <textarea autoFocus value={draft} maxLength={FLOW_NOTE_MAX} rows={2} onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") { setDraft(note.text); setEditing(false); } if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); save(); } }}
+            className="w-full resize-y rounded-md border border-indigo-200 px-2 py-1 text-[12.5px] outline-none focus:border-indigo-400" />
+          <div className="mt-1 flex justify-end gap-2 text-[11.5px]">
+            <button type="button" onClick={() => { setDraft(note.text); setEditing(false); }} className="text-slate-500 hover:text-slate-700">{t("ยกเลิก", "Cancel")}</button>
+            <button type="button" onClick={save} className="font-medium text-indigo-700 hover:text-indigo-900">{t("บันทึก", "Save")}</button>
           </div>
+        </div>
+      ) : (
+        <div className="whitespace-pre-wrap break-words text-slate-800">{note.text || <span className="text-slate-400">{t("(ยังไม่ได้เขียน)", "(empty)")}</span>}</div>
+      )}
+      <div className="mt-1 flex items-center gap-1.5 text-[11px] text-slate-400">
+        <span className={`rounded-full px-1.5 py-px ${note.shared ? "bg-indigo-50 text-indigo-700" : "bg-slate-100 text-slate-500"}`}>{note.shared ? t("ทั้งทีม", "Team") : t("ส่วนตัว", "Private")}</span>
+        <span className="truncate">{note.author ?? t("ฉัน", "Me")} · {fmtDay(note.at)}</span>
+        {note.mine && !editing && (
+          <span className="ml-auto flex shrink-0 items-center gap-2">
+            <button type="button" onClick={() => setEditing(true)} className="text-slate-500 hover:text-indigo-700">{t("แก้", "Edit")}</button>
+            <button type="button" onClick={() => void api.toggleShared(note)} title={note.shared ? t("เปลี่ยนเป็นส่วนตัว (เห็นคนเดียว)", "Make private") : t("แชร์ให้ทั้งทีมเห็น", "Share with team")}
+              className="text-slate-500 hover:text-indigo-700">{note.shared ? t("ทำเป็นส่วนตัว", "Make private") : t("แชร์ทีม", "Share")}</button>
+            <button type="button" onClick={() => void api.remove(note)} className="text-red-500 hover:text-red-700">{t("ลบ", "Delete")}</button>
+          </span>
         )}
       </div>
-    </foreignObject>
-  );
-}
-
-/** รายการโน้ตในแผงรายละเอียด (โน้ตที่ติดกล่อง/เส้นนี้) + ปุ่มแปะโน้ตที่ส่วนนี้ */
-export function FlowNoteList({ notes, onAdd, onEdit }: { notes: FlowNote[]; onAdd: () => void; onEdit: (n: FlowNote) => void }) {
-  const t = useT();
-  return (
-    <div className="mt-3 pt-3 border-t border-slate-100">
-      <div className="flex items-center gap-2">
-        <span className="flex-1 text-[13px] font-medium text-slate-800"><Icon value="📝" /> {t(`โน้ตที่แปะส่วนนี้ (${notes.length})`, `Notes here (${notes.length})`)}</span>
-        <button type="button" onClick={onAdd} className="h-7 px-2.5 text-[12px] rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50">{t("＋ แปะโน้ต", "＋ Add note")}</button>
-      </div>
-      {notes.map((n) => {
-        const c = FLOW_NOTE_COLORS[n.color];
-        return (
-          <button key={n.id} type="button" onClick={() => onEdit(n)} className="w-full text-left mt-1.5 px-2.5 py-1.5 rounded-lg text-[12px]"
-            style={{ background: c.bg, color: c.text, border: `1px solid ${c.border}` }}>
-            <span className="whitespace-pre-wrap break-words">{n.text || t("(ยังไม่ได้เขียน)", "(empty)")}</span>
-            <span className="block text-[10px] opacity-70 mt-0.5">{n.author ?? t("ฉัน", "Me")} · {n.shared ? t("ทั้งทีม", "Team") : t("ส่วนตัว", "Private")} · {new Date(n.at).toLocaleDateString("th-TH", { day: "numeric", month: "short" })}</span>
-          </button>
-        );
-      })}
     </div>
   );
 }
 
-export { FLOW_NOTE_W, FLOW_NOTE_H };
+/**
+ * "โน้ตภายใน" ในแผงขวา — โน้ตของกล่อง/เส้นที่เลือก (attach) หรือของผังนี้ (attach = null) · ไม่โชว์บนผัง
+ *   เขียนใหม่ได้ทันที: เลือก ส่วนตัว (เห็นคนเดียว) / ทั้งทีม · Enter = บันทึก (Shift+Enter ขึ้นบรรทัดใหม่)
+ */
+export function FlowInternalNotes({ notes, api, attach, view, title }: {
+  notes: FlowNote[]; api: FlowNotesApi; attach: FlowNoteAttach; view: string; title?: string;
+}) {
+  const t = useT();
+  const [text, setText] = useState("");
+  const [shared, setShared] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const add = async () => {
+    const v = text.trim();
+    if (!v) { setErr(t("เขียนโน้ตก่อนบันทึก", "Write something first")); return; }
+    setBusy(true);
+    const ok = await api.create(v, attach, view, shared);
+    setBusy(false);
+    if (ok) { setText(""); setErr(""); }
+  };
+  const seg = (on: boolean) => `h-7 px-2.5 text-[11.5px] rounded-md border ${on ? "bg-indigo-600 border-indigo-600 text-white" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`;
+  return (
+    <div className="mt-3 pt-3 border-t border-slate-100">
+      <div className="flex items-center gap-1.5 text-[13px] font-medium text-slate-800">
+        <Icon value="i:lock" size={14} />{title ?? t("โน้ตภายใน", "Internal notes")} ({notes.length})
+        <span className="text-[11px] font-normal text-slate-400">{t("ไม่โชว์บนผัง", "not shown on the map")}</span>
+      </div>
+      {notes.map((n) => <InternalNoteRow key={n.id} note={n} api={api} />)}
+      <div className="mt-2">
+        <textarea value={text} maxLength={FLOW_NOTE_MAX} rows={2} disabled={busy}
+          onChange={(e) => { setText(e.target.value); setErr(""); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void add(); } }}
+          placeholder={t("เขียนโน้ตภายใน… (Enter บันทึก)", "Write an internal note… (Enter to save)")}
+          className="w-full resize-y rounded-lg border border-slate-200 px-2.5 py-1.5 text-[12.5px] outline-none focus:border-indigo-300 disabled:bg-slate-50" />
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <button type="button" onClick={() => setShared(false)} aria-pressed={!shared} className={seg(!shared)}>{t("ส่วนตัว (เห็นคนเดียว)", "Private")}</button>
+          <button type="button" onClick={() => setShared(true)} aria-pressed={shared} className={seg(shared)}>{t("ทั้งทีม", "Team")}</button>
+          <button type="button" onClick={() => void add()} disabled={busy}
+            className="ml-auto h-7 px-3 text-[12px] font-medium rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">{busy ? t("กำลังบันทึก…", "Saving…") : t("บันทึก", "Save")}</button>
+        </div>
+        {err && <div className="mt-1 text-[11.5px] text-red-600">{err}</div>}
+      </div>
+    </div>
+  );
+}
+
