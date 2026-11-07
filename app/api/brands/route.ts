@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditSnapshot, auditChangeMeta } from "@/lib/audit";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -92,9 +92,13 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
   }
   if (Object.keys(patch).length === 0) return NextResponse.json({ id: body.id, error: null });
 
+  const before = await auditSnapshot(admin, "brands", body.id);   // ค่าเดิม ไว้จดประวัติ "จากอะไรเป็นอะไร"
   const { error } = await admin.from("brands").update(patch).eq("id", body.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-  await writeAudit(admin, { action: "update", entityType: "brand", entityId: body.id, actorId: user.id, actorName: user.email ?? null, metadata: patch });
+  await writeAudit(admin, {
+    action: "update", entityType: "brand", entityId: body.id, actorId: user.id, actorName: user.email ?? null,
+    metadata: { name: (patch.name as string | undefined) ?? (before?.name as string | undefined) ?? null, ...(before ? auditChangeMeta(before, patch) : patch) },
+  });
   return NextResponse.json({ id: body.id, ...patch, error: null });
 }
 

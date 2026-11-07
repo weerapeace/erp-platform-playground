@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenContent, attachAssignees, validateContentFields, PARENT_LINK_PLATFORMS, loadContentProducts, normalizeProducts, replaceContentProducts, syncPrimaryProduct } from "../shared";
 import { r2ImageUrl } from "@/lib/r2-image";
@@ -60,7 +60,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const admin = supabaseAdmin();
   // ── ล็อกคอนเทนต์ที่ "เผยแพร่แล้ว" — แก้เนื้อหาหลักไม่ได้ (แก้ได้เฉพาะสถานะโพสต์/ลิงก์/โน้ต) จนกว่าจะย้อนสถานะ ──
   const LOCKED_WHEN_PUBLISHED = ["title", "brand_id", "campaign_id", "sku_id", "parent_sku_id", "product_name", "products", "post_type", "platforms", "discount_value", "discount_is_percent", "captions", "color_source"];
-  const { data: curC } = await admin.from("erp_creative_content").select("status, parent_sku_id, platforms").eq("id", id).maybeSingle();
+  const { data: curC } = await admin.from("erp_creative_content").select("*").eq("id", id).maybeSingle();   // แถวเต็ม = ค่าเดิมไว้จดประวัติด้วย
   const curStatus = (curC as { status?: string } | null)?.status ?? "";
   const unlocking = "status" in body && body.status !== "published";   // กำลังย้อนสถานะออกจากเผยแพร่ = ปลดล็อก
   if (curStatus === "published" && !unlocking) {
@@ -127,7 +127,14 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     if (caps.length) { const { error: cErr } = await admin.from("erp_creative_content_captions").insert(caps); if (cErr) return NextResponse.json({ error: friendlyDbError(cErr.message) }, { status: 400 }); }
   }
 
-  await writeAudit(admin, { action: "update", entityType: "creative_content", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { changes: Object.keys(patch).filter((k) => k !== "updated_at") } });
+  // จดค่าเดิม → ใหม่ (curC = แถวก่อนแก้) · ลิงก์/สินค้าหลายตัว/แคปชัน = ชุดข้อมูล จดแค่ว่า "แก้รายละเอียด"
+  const cur = curC as Record<string, unknown> | null;
+  const chMeta = auditChangeMeta(cur, patch, { opaque: ["product_links", "ref_links", "products"], onlyKnown: true });
+  if (Array.isArray(body.captions)) chMeta.changed_detail = [...(chMeta.changed_detail ?? []), "captions"];
+  await writeAudit(admin, {
+    action: "update", entityType: "creative_content", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+    metadata: { content_no: (cur?.content_no as string | undefined) ?? null, title: (cur?.title as string | undefined) ?? null, ...chMeta },
+  });
 
   // รายการสินค้าในโพสต์: ส่ง products มา = แทนที่ทั้งชุด · ส่งแค่ sku_id/parent_sku_id = อัปเดตเฉพาะตัวหลัก (ไม่แตะสินค้าเพิ่มเติม)
   if (prods) await replaceContentProducts(admin, id, prods);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ACTION_GROUPS, actionGroupFilter, auditActionGroup, auditVerb, describeAudit, fmtAuditValue } from "@/lib/audit-format";
 import { AUDIT_MODULES, auditModuleOf, moduleFilterMatches, moduleFilterOr } from "@/lib/audit-entities";
-import { auditDiff, auditRecordLabel } from "@/lib/audit";
+import { auditChangeMeta, auditDiff, auditLinesDiff, auditRecordLabel } from "@/lib/audit";
 import { redactAuditMetadata } from "@/lib/audit-view-server";
 
 /** entity_type ทั้งหมดที่มีใน audit_logs จริง ณ 2026-11-06 */
@@ -148,5 +148,72 @@ describe("audit-view-server — ตัดค่าที่ซ่อนออก
     expect(JSON.stringify(r)).not.toMatch(/"amount":\s*\d/);
     expect(r.note).toBe("ok");
     expect((r.changes as unknown[])[1]).toEqual({ field: "note", old: "a", new: "b" });
+  });
+});
+
+describe("lib/audit — auditChangeMeta / auditLinesDiff (ขยายไปโมดูลอื่น 2026-11-07)", () => {
+  it("ไม่มีค่าเดิม = จดแค่ชื่อช่อง (ไม่ล้ม)", () => {
+    expect(auditChangeMeta(null, { title: "a", updated_at: "x" })).toEqual({ changed_fields: ["title"] });
+    expect(auditChangeMeta(undefined, { updated_at: "x" })).toEqual({});
+  });
+  it("ค่าเดิม → ใหม่ · ก้อนข้อมูลภายใน = แก้รายละเอียด · onlyKnown = ช่องที่ไม่มีในค่าเดิมจดแค่ชื่อ", () => {
+    const before = { title: "เก่า", status: "todo", config: { a: 1 }, image_sync_targets: { x: 1 } };
+    const r = auditChangeMeta(before, { title: "ใหม่", status: "todo", config: { a: 2 }, image_sync_targets: { x: 1 }, captions_x: 1, updated_at: "t" },
+      { opaque: ["config", "image_sync_targets"], onlyKnown: true });
+    expect(r.changes).toEqual([{ field: "title", old: "เก่า", new: "ใหม่" }]);
+    expect(r.changed_detail).toEqual(["config"]);
+    expect(r.changed_fields).toEqual(["captions_x"]);
+  });
+  it("เทียบวัตถุดิบในสูตร: เพิ่ม / เอาออก / เปลี่ยนจำนวน / เท่าเดิมไม่จด (รวมรหัสซ้ำ)", () => {
+    const before = [
+      { component_sku: "A", component_name: "ผ้า", qty: 2, uom: "ม." },
+      { component_sku: "B", component_name: "ซิป", qty: 1, uom: "ชิ้น" },
+      { component_sku: "C", component_name: "ด้าย", qty: 1, uom: "ม้วน" },
+      { component_sku: "C", component_name: "ด้าย", qty: 1, uom: "ม้วน" },
+    ];
+    const after = [
+      { component_sku: "A", component_name: "ผ้า", qty: 3, uom: "ม." },
+      { component_sku: "C", component_name: "ด้าย", qty: 2, uom: "ม้วน" },
+      { component_sku: "D", component_name: "กระดุม", qty: 4, uom: "เม็ด" },
+    ];
+    const r = auditLinesDiff(before, after, { key: "component_sku", name: "component_name", qty: "qty", uom: "uom", noun: "วัตถุดิบ" });
+    expect(r).toEqual([
+      { field: "line:A", label: "วัตถุดิบ A · ผ้า", old: "2 ม.", new: "3 ม." },
+      { field: "line:B", label: "วัตถุดิบ B · ซิป", old: "1 ชิ้น", new: null },
+      { field: "line:D", label: "วัตถุดิบ D · กระดุม", old: null, new: "4 เม็ด" },
+    ]);
+    // แสดงผลได้ (มีป้ายของตัวเอง)
+    const v = describeAudit({ action: "update", entity_type: "bom", entity_id: null, metadata: { bom_code: "BOM-1", changes: r } });
+    expect(v.changes.map((c) => [c.label, c.old, c.new])).toEqual([
+      ["วัตถุดิบ A · ผ้า", "2 ม.", "3 ม."], ["วัตถุดิบ B · ซิป", "1 ชิ้น", "ว่าง"], ["วัตถุดิบ D · กระดุม", "ว่าง", "4 เม็ด"],
+    ]);
+  });
+  it("เกินจำนวนสูงสุด → สรุปเป็นรายการอื่น ๆ", () => {
+    const after = Array.from({ length: 5 }, (_, i) => ({ k: `S${i}`, q: 1 }));
+    const r = auditLinesDiff([], after, { key: "k", qty: "q", max: 3 });
+    expect(r).toHaveLength(4);
+    expect(r[3]).toMatchObject({ field: "line:_more", new: "เปลี่ยนอีก 2 รายการ" });
+  });
+});
+
+describe("audit-format — ชื่อแทนรหัส / แก้รายละเอียด / ก้อนเล็ก", () => {
+  const U1 = "0d4f3a8e-1111-4c4c-9a9a-aaaaaaaaaaaa", U2 = "7b2e9c10-2222-4d4d-8b8b-bbbbbbbbbbbb";
+  it("รหัสอ้างอิงที่ API หาชื่อให้ → โชว์ชื่อ · หาไม่เจอ → รหัสย่อ", () => {
+    const v = describeAudit(
+      { action: "update", entity_type: "creative_task", entity_id: null, metadata: { changes: [{ field: "brand_id", old: U1, new: U2 }, { field: "assignee_ids", old: [U1], new: [U1, U2] }] } },
+      { valueLabels: { [U1]: "Louis Montini" } },
+    );
+    expect(v.changes[0]).toMatchObject({ label: "แบรนด์", old: "Louis Montini", new: "รหัส …bbbb" });
+    expect(v.changes[1]).toMatchObject({ label: "ผู้รับผิดชอบ", old: "Louis Montini", new: "Louis Montini, รหัส …bbbb" });
+  });
+  it("changed_detail → detailFields (ไม่ปนกับ 'ยังไม่ได้จดค่าเดิม')", () => {
+    const v = describeAudit({ action: "subtask:update", entity_type: "creative_task", entity_id: null, metadata: { changed_detail: ["image_sync_targets", "captions"] } });
+    expect(v.detailFields).toEqual(["ปลายทางรูป", "แคปชัน"]);
+    expect(v.fieldsOnly).toEqual([]);
+    expect(v.extras.find((x) => x.label === "changed_detail")).toBeUndefined();
+  });
+  it("ก้อนเล็กค่าเดี่ยว (สถานะโพสต์รายแพลตฟอร์ม) อ่านง่าย", () => {
+    expect(fmtAuditValue({ facebook: "posted", tiktok: "skip" })).toBe("facebook: โพสต์แล้ว, tiktok: ข้าม");
+    expect(fmtAuditValue({})).toBe("ว่าง");
   });
 });

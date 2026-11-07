@@ -9,6 +9,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
+import { auditChangeMeta } from "@/lib/audit";
 import { explodeBom, fabricModeOf } from "../shared";
 import { prLineCodeResolver } from "@/lib/pr-line-code";
 import type { MoIssue, MoIssues } from "@/lib/work-order-print";
@@ -184,7 +185,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
 
   const admin = supabaseAdmin();
-  const { data: existing, error: exErr } = await admin.from("manufacturing_orders").select("mo_no, qty, bom_code, size_breakdown, fabric_calc_mode").eq("id", id).single();
+  const { data: existing, error: exErr } = await admin.from("manufacturing_orders").select("mo_no, qty, bom_code, size_breakdown, fabric_calc_mode, product_sku, product_name, status, due_date, bom_version, note").eq("id", id).single();
   if (exErr) return NextResponse.json({ error: "ไม่พบใบสั่งผลิตนี้" }, { status: 404 });
   const moNo = (existing as { mo_no: string }).mo_no;
   const newBom = body.bom_code !== undefined ? body.bom_code : (existing as { bom_code: string | null }).bom_code;
@@ -237,7 +238,17 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
   }
 
-  await admin.from("audit_logs").insert({ actor_user_id: user.id, action: "update", entity_type: "mo", entity_id: id, metadata: { mo_no: moNo, qty: newQty } }).then(() => {}, () => {});
+  // จดค่าเดิม → ใหม่ · จำนวนตามไซส์แปลงเป็นข้อความอ่านง่าย (S×10, M×20) ก่อนเทียบ
+  const sizesText = (v: unknown) => { const xs = cleanSizes(v); return xs ? xs.map((s) => `${s.label}×${s.qty}`).join(", ") : null; };
+  const ex = existing as Record<string, unknown>;
+  const chMeta = auditChangeMeta(
+    { ...ex, size_breakdown: sizesText(ex.size_breakdown), fabric_calc_mode: oldMode },
+    { ...patch, ...(sizesProvided ? { size_breakdown: sizesText(effSizes) } : {}) },
+  );
+  await admin.from("audit_logs").insert({
+    actor_user_id: user.id, action: "update", entity_type: "mo", entity_id: id,
+    metadata: { mo_no: moNo, product_name: (patch.product_name ?? ex.product_name ?? null), qty: newQty, ...chMeta, ...(reexploded ? { reexploded: true } : {}) },
+  }).then(() => {}, () => {});
   return NextResponse.json({ id, error: null });
 }
 

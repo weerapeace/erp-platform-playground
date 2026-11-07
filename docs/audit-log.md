@@ -11,36 +11,46 @@
 ## ชิ้นส่วน
 | ไฟล์ | หน้าที่ |
 |---|---|
-| `lib/audit.ts` | **เขียน** ประวัติ: `writeAudit` / `writeAuditMany` / `writeAuditFor` · `auditDiff(before, after)` จด "จาก → เป็น" · `auditRecordLabel(row)` จดเลขเอกสาร/ชื่อ |
+| `lib/audit.ts` | **เขียน** ประวัติ: `writeAudit` / `writeAuditMany` / `writeAuditFor` · `auditChangeMeta(before, patch)` ก้อน "จาก → เป็น" พร้อมใส่ metadata · `auditSnapshot(admin, table, id)` อ่านค่าเดิม · `auditLinesDiff` เทียบรายการบรรทัด (วัตถุดิบ/รายการเอกสาร) · `auditDiff` ตัวเทียบพื้นฐาน · `auditRecordLabel(row)` จดเลขเอกสาร/ชื่อ |
 | `lib/audit-format.ts` | **แปล** 1 แถวเป็นภาษาคน (`describeAudit`) — อ่านได้ทุกรูปแบบที่ระบบเคยจด · กลุ่มการกระทำ `ACTION_GROUPS` · บันทึกอัตโนมัติ `isAuditNoise` |
 | `lib/audit-entities.ts` | entity_type → โมดูล + ชื่อหน้า + ลิงก์ (`ENTITY_INFO`) · เดาโมดูลจากชื่อ (`MODULE_RULES`) · ตัวกรองฝั่ง API (`moduleFilterOr`) |
-| `lib/audit-view-server.ts` | ฝั่งเซิร์ฟเวอร์: ชื่อเล่นแทนอีเมล · ชื่อช่องจากทะเบียน field · **ซ่อนค่าตามสิทธิ์** · หาชื่อรายการของประวัติเก่า |
+| `lib/audit-view-server.ts` | ฝั่งเซิร์ฟเวอร์: ชื่อเล่นแทนอีเมล · ชื่อช่องจากทะเบียน field · **ซ่อนค่าตามสิทธิ์** · หาชื่อรายการของประวัติเก่า · **รหัสอ้างอิง → ชื่อ** (relation_config ในทะเบียน field ก่อน แล้ว `REF_FIELDS`) |
 | `app/api/audit-logs/route.ts` | API อ่าน (กรอง + นับจริง + `view`) |
 | `components/activity-feed` | `ActivityFeed` (แสดง) · `RecordHistoryDrawer` (ประวัติรายการเดียว) |
 | `app/admin/audit-log` | หน้า (page = ด่านสิทธิ์ · audit-log-view = เนื้อหา) |
 
 ## จดประวัติแบบใหม่ (API ที่แก้ข้อมูล)
 ```ts
-import { auditDiff, auditRecordLabel, writeAudit } from "@/lib/audit";
+import { auditChangeMeta, auditRecordLabel, auditSnapshot, writeAudit } from "@/lib/audit";
 
-const { data: before } = await admin.from(table).select(Object.keys(patch).join(",")).eq("id", id).maybeSingle();
+const before = await auditSnapshot(admin, table, id);          // อ่านค่าเดิม (อ่านไม่ได้ = null ไม่ล้ม)
 const { data: row } = await admin.from(table).update(patch).eq("id", id).select("*").single();
 await writeAudit(admin, {
   action: "update", entityType: table, entityId: id, actorId: user.id, actorName,
-  metadata: { changes: auditDiff(before, patch), ...auditRecordLabel(row) },
+  metadata: { ...auditRecordLabel(row), ...auditChangeMeta(before, patch) },
 });
 ```
-- `changes` = `[{ field, old, new }]` · ช่องที่ค่าเท่าเดิมไม่จด · ข้อความยาว/JSON ตัด ~300 ตัวอักษร (ฉบับเต็มอยู่ที่ระบบเวอร์ชัน `lib/record-versions`)
+- ผลลัพธ์ `changes` = `[{ field, old, new }]` · ช่องที่ค่าเท่าเดิมไม่จด · ข้อความยาว/JSON ตัด ~300 ตัวอักษร (ฉบับเต็มอยู่ที่ระบบเวอร์ชัน `lib/record-versions`)
+- ไม่มีค่าเดิม → จดแค่ชื่อช่อง (`changed_fields`) เหมือนระบบเดิม
+- `{ opaque: [ช่อง] }` = ก้อนข้อมูลภายใน (config / รูปที่ส่งเข้าสินค้า / ลิงก์ชุด / บรีฟ HTML) → จดแค่ "แก้รายละเอียด" (`changed_detail`) ไม่จดค่า
+- `{ onlyKnown: true }` = ฟอร์มที่ส่งชื่อช่องไม่ตรงคอลัมน์ → เทียบเฉพาะช่องที่มีในค่าเดิม
+- ฟอร์มที่แปลงชื่อช่องก่อนบันทึก (เช่น เงินเดือน) → อ่าน `auditSnapshot` ทั้ง "ก่อน" และ "หลัง" แล้ว `auditChangeMeta(before, after)` (แม่นกว่าเทียบกับ body)
+- บันทึกรายการบรรทัดแบบแทนที่ทั้งชุด (วัตถุดิบในสูตร) → `auditLinesDiff(เดิม, ใหม่, { key, qty, uom, name, noun })` ได้แถว "วัตถุดิบ X: 2 ม. → 3 ม." / เพิ่ม / เอาออก
 - ค่าความลับ (โทเคน) ส่ง `{ secret: [ชื่อช่อง] }` → จดแค่ "(ค่าความลับ)"
+- ค่าที่เป็นรหัสอ้างอิง (แบรนด์/คน/สินค้า/คู่ค้า/แผนก) จดเป็นรหัสได้เลย — หน้าประวัติแปลงเป็นชื่อให้เอง (ช่องใหม่ที่ยังไม่มีในทะเบียน field → เพิ่มใน `REF_FIELDS`)
 - ใส่ชื่อ/เลขเอกสารไว้ใน metadata เสมอ (เช่น `pr_no`, `code`, `name`) ไม่งั้นหน้าประวัติไม่รู้ว่า "รายการไหน"
 
 ### ที่จดค่าเดิม → ใหม่แล้ว (ขั้น 2)
 - `PATCH /api/master-v2/[entity]/[id]` — แก้ข้อมูลหลักทุกตัว (SKU, Parent SKU, คู่ค้า, ราคาซัพพลายเออร์ ฯลฯ)
 - `POST /api/master-v2/[entity]/bulk-update` — แก้หลายรายการ: ≤200 แถว จดรายแถว (`via: "bulk"`) + แถวสรุป · เกินนั้นจดแถวสรุปอย่างเดียว
 - `POST /api/purchasing/pr-quick` — แก้ใบขอซื้อด่วน (จำนวน / วันที่สั่ง / ลิงก์)
+- (2026-11-07) งานครีเอทีฟ: `PATCH /api/creative-tasks/[id]` · งานย่อย `PATCH .../subtasks` · แก้หลายงาน `POST /api/creative-tasks/bulk` (รายงาน) · คอนเทนต์ `PATCH /api/creative-content/[id]`
+- (2026-11-07) ใบสั่งผลิต `PATCH /api/mo/[id]` (จำนวน/กำหนดส่ง/ไซส์ "S×10, M×20") · เช็กลิสต์วัตถุดิบ `PATCH /api/mo/material` (มีอยู่/ต้องซื้อ/เตรียม/ตัด) · สูตร `PATCH /api/bom/[id]` (หัวสูตร + วัตถุดิบเพิ่ม/เอาออก/เปลี่ยนจำนวน)
+- (2026-11-07) บุคคล/เงินเดือน: `PATCH /api/payroll/core/[entity]/[id]` (พนักงาน/สัญญา/ตั้งค่าเงินเดือน) · `PATCH /api/payroll/master/[entity]/[id]` + `bulk-update` (แผนก/บริษัท/งวด/วันหยุด ฯลฯ) — ตอนนี้จด "ใครทำ" จากบัญชีที่ล็อกอินด้วย (เดิมว่าง)
+- (2026-11-07) แบรนด์ `PATCH /api/brands` · งานติดตามในรายการ `PATCH /api/record-tasks/[id]`
 
 ### ยังไม่จดค่าเดิม (ทยอยทำทีละโมดูล)
-งานครีเอทีฟ (`creative-tasks` จดแค่ชื่อช่อง) · BOM · ใบสั่งผลิต · แบรนด์ · เงินเดือน (`employees`/`employee_contracts` จดแค่ชื่อช่อง) · ใบออกแบบ
+ใบออกแบบ · ตั้งค่างานครีเอทีฟ (ตัวเลือก/เทมเพลต/แคมเปญ) · ค่าแรง/เหมาในสูตร (`bom_labor_rate`/`bom_piecework` จดแค่จำนวน) · API อื่นที่ยังจดแค่ชื่อช่อง
 
 ## ซ่อนค่าอ่อนไหว (จดไว้ แต่ซ่อนตอนแสดง)
 - ช่องที่ทะเบียน field (`erp_module_fields`) ตั้ง `view_roles` / `sensitive_permission` — เช่น ราคาทุน (`products.cost.view`), บัญชีธนาคารคู่ค้า (admin/manager)
@@ -61,6 +71,6 @@ await writeAudit(admin, {
 
 ## ข้อจำกัด
 - ประวัติก่อน 2026-11-06 ส่วนใหญ่จดแค่ "แก้ช่องไหน" — ย้อนหลังหาค่าเดิมไม่ได้
-- ค่าที่เป็นรหัส (เช่น brand_id) ยังโชว์เป็น "รหัส …abcd" — ยังไม่แปลงเป็นชื่อ
+- ค่าที่เป็นรหัสแปลงเป็นชื่อได้เฉพาะช่องที่รู้ปลายทาง (ทะเบียน field / `REF_FIELDS`) — ช่องอื่นยังโชว์ "รหัส …abcd"
 - จำนวนบนการ์ด = นับสด 6 คำขอ (หน้าโหลด ~1–2 วินาที) ถ้าช้าค่อยทำฟังก์ชันนับใน DB
 - ยังไม่มี "บันทึกการเข้าใช้หน้า" (ขั้น 3 — ต้องสร้างตารางใหม่ รอเจ้าของอนุมัติ)

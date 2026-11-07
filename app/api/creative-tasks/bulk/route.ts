@@ -2,13 +2,13 @@
  * Creative Tasks — bulk edit
  * POST /api/creative-tasks/bulk  body = { items: [{ id, changes }] }
  *   → แก้หลายงานในคำขอเดียว (ลดยิงทีละงาน) · เฉพาะฟิลด์ปลอดภัย (ไม่รวมสถานะ — ต้องผ่าน workflow)
- *   → per-item try + รายงานผลสำเร็จ/ล้มเหลว + audit รวม 1 รายการ
+ *   → per-item try + รายงานผลสำเร็จ/ล้มเหลว + audit รวม 1 รายการ + รายงาน "จากอะไรเป็นอะไร" แยกทีละงาน
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditMany, auditChangeMeta, type AuditEntry } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { validateTaskFields } from "../shared";
 
@@ -30,6 +30,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const admin = supabaseAdmin();
   let success = 0;
   const failures: { id: string; error: string }[] = [];
+  // ค่าเดิมของทุกงาน (อ่านครั้งเดียว) → จดประวัติรายงานว่าเปลี่ยนจากอะไรเป็นอะไร
+  const cols = ["id", "task_no", "title", ...BULK_EDITABLE].join(", ");
+  const { data: beforeRows } = await admin.from("erp_creative_tasks").select(cols).in("id", items.map((x) => String(x.id)));
+  const beforeById = new Map(((beforeRows ?? []) as unknown as Record<string, unknown>[]).map((r) => [String(r.id), r]));
+  const perRow: AuditEntry[] = [];
   for (const it of items) {
     const id = String(it.id);
     try {
@@ -41,9 +46,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const { error } = await admin.from("erp_creative_tasks").update(patch).eq("id", id);
       if (error) { failures.push({ id, error: friendlyDbError(error.message) }); continue; }
       success++;
+      const before = beforeById.get(id) ?? null;
+      perRow.push({
+        action: "update", entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
+        metadata: { via: "bulk", task_no: before?.task_no ?? null, title: before?.title ?? null, ...auditChangeMeta(before, patch) },
+      });
     } catch (e) { failures.push({ id, error: (e as Error).message }); }
   }
 
+  if (perRow.length) await writeAuditMany(admin, perRow);
   await writeAudit(admin, {
     action: "bulk_edit", entityType: "creative_task", entityId: String(items[0].id), actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: { count: items.length, success, failed: failures.length, ids: items.map((x) => x.id), fields: [...new Set(items.flatMap((x) => Object.keys(x.changes ?? {})))] },

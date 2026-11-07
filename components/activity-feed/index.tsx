@@ -181,7 +181,15 @@ function FeedRow({ entry, isLast, showEntityName, showWhere, compact, hideRecord
         {v.fieldsOnly.length > 0 && (
           <p className="text-xs text-slate-500 mt-1">
             แก้ช่อง: <span className="text-slate-700">{v.fieldsOnly.slice(0, 8).join(", ")}{v.fieldsOnly.length > 8 ? ` และอีก ${v.fieldsOnly.length - 8} ช่อง` : ""}</span>
-            {v.changes.length === 0 && <span className="text-slate-400"> · ตอนนั้นระบบยังไม่ได้จดค่าเดิม</span>}
+            {v.changes.length === 0 && !(v.detailFields?.length) && <span className="text-slate-400"> · ตอนนั้นระบบยังไม่ได้จดค่าเดิม</span>}
+          </p>
+        )}
+
+        {/* ช่องก้อนข้อมูลภายใน (ตั้งค่า/รูปที่ส่งเข้าสินค้า/ลิงก์ชุด) — ตั้งใจจดแค่ว่าแก้ ดูค่าจริงในหน้ารายการ */}
+        {(v.detailFields?.length ?? 0) > 0 && (
+          <p className="text-xs text-slate-500 mt-1">
+            แก้รายละเอียด: <span className="text-slate-700">{v.detailFields.slice(0, 8).join(", ")}</span>
+            <span className="text-slate-400"> · ดูค่าล่าสุดในหน้ารายการ</span>
           </p>
         )}
 

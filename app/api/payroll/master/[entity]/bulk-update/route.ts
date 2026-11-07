@@ -10,7 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getEntityCfg, updateMaster } from "@/lib/payroll-master-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { writeAudit } from "@/lib/audit";
+import { writeAuditFor, writeAuditMany, auditChangeMeta, auditRecordLabel, type AuditEntry } from "@/lib/audit";
+import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
@@ -35,12 +36,30 @@ export async function POST(req: NextRequest, ctx: Ctx): Promise<NextResponse> {
 
   let affected = 0;
   const errors: string[] = [];
+  // ค่าเดิมของทุกแถว (อ่านครั้งเดียว) → จดประวัติรายแถวว่าเปลี่ยนจากอะไรเป็นอะไร (ไม่เกิน 200 แถว)
+  const admin = supabaseAdmin();
+  const ids = edits.filter((e) => e?.id).map((e) => String(e.id)).slice(0, 200);
+  const { data: beforeRows } = ids.length ? await admin.from(cfg.table).select("*").in("id", ids) : { data: [] };
+  const beforeById = new Map(((beforeRows ?? []) as Record<string, unknown>[]).map((r) => [String(r.id), r]));
+  const perRow: Omit<AuditEntry, "actorId" | "actorName">[] = [];
   for (const e of edits) {
     if (!e?.id || !e.changes || typeof e.changes !== "object") continue;
-    try { const row = await updateMaster(cfg, String(e.id), e.changes); if (row) affected++; }
+    try {
+      const row = await updateMaster(cfg, String(e.id), e.changes);
+      if (row) {
+        affected++;
+        const before = beforeById.get(String(e.id)) ?? null;
+        if (before) perRow.push({ action: "update", entityType: cfg.table, entityId: String(e.id), metadata: { via: "bulk", ...auditRecordLabel(before), ...auditChangeMeta(before, e.changes, { onlyKnown: true }) } });
+      }
+    }
     catch (err) { errors.push(err instanceof Error ? err.message : "แก้บางแถวไม่สำเร็จ"); }
   }
-  await writeAudit(supabaseAdmin(), { action: "bulk_update", entityType: cfg.table, actorName: body.actor ?? null, metadata: { count: affected } });
+  if (perRow.length) {
+    let actorId: string | null = null, actorName: string | null = null;
+    try { const { data: { user } } = await supabaseFromRequest(req).auth.getUser(); actorId = user?.id ?? null; actorName = user?.email ?? null; } catch { /* ไม่มีตัวตน */ }
+    await writeAuditMany(admin, perRow.map((x) => ({ ...x, actorId, actorName })));
+  }
+  await writeAuditFor(req, admin, { action: "bulk_update", entityType: cfg.table, metadata: { count: affected } });
   if (affected === 0 && errors.length > 0) return NextResponse.json({ error: errors[0] }, { status: 400 });
   return NextResponse.json({ affected, error: null });
 }

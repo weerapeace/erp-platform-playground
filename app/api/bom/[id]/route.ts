@@ -10,6 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
+import { auditChangeMeta, auditLinesDiff } from "@/lib/audit";
 import { lineToRow, saveBomSizes } from "../shared";
 import type { BomHeader, BomLine, BomSize } from "../route";
 
@@ -125,7 +126,7 @@ export async function PATCH(
 
   // หา bom_code เดิม (lines ผูกด้วย bom_code — ต้องรู้ของเดิมเพื่อลบ/ย้าย)
   const { data: existing, error: exErr } = await admin
-    .from("bom_headers").select("bom_code").eq("id", id).single();
+    .from("bom_headers").select("*").eq("id", id).single();   // แถวเต็ม = ค่าเดิมไว้จดประวัติด้วย
   if (exErr) return NextResponse.json({ error: "ไม่พบสูตรนี้" }, { status: 404 });
   const oldCode = (existing as { bom_code: string }).bom_code;
   const newCode = (body.bom_code ?? oldCode).trim() || oldCode;
@@ -151,6 +152,12 @@ export async function PATCH(
   if (uErr) return NextResponse.json({ error: friendlyDbError(uErr.message) }, { status: 400 });
 
   // แทนที่ lines ทั้งชุด (เจ้าของสูตรเดียว) — ลบของเดิมตาม bom_code เดิม แล้ว insert ใหม่ตามรหัสใหม่
+  // จดประวัติ: อ่านวัตถุดิบชุดเดิมไว้ก่อน → เทียบกับชุดใหม่ (เพิ่ม/เอาออก/เปลี่ยนจำนวน)
+  let lineChanges: ReturnType<typeof auditLinesDiff> = [];
+  if (Array.isArray(body.lines)) {
+    const { data: oldLines } = await admin.from("bom_lines").select("component_sku, component_name, qty, uom").eq("bom_code", oldCode).not("is_active", "is", false);
+    lineChanges = auditLinesDiff((oldLines ?? []) as Record<string, unknown>[], body.lines.map((l, i) => lineToRow(l, newCode, i)), { key: "component_sku", name: "component_name", qty: "qty", uom: "uom", noun: "วัตถุดิบ" });
+  }
   if (Array.isArray(body.lines)) {
     const { error: dErr } = await admin.from("bom_lines").delete().eq("bom_code", oldCode);
     if (dErr) return NextResponse.json({ error: friendlyDbError(dErr.message) }, { status: 400 });
@@ -169,7 +176,12 @@ export async function PATCH(
   if (Array.isArray(body.sizes)) await saveBomSizes(admin, newCode, body.sizes);
   else if (newCode !== oldCode) await admin.from("bom_sizes").update({ bom_code: newCode }).eq("bom_code", oldCode);
 
-  await audit(admin, user.id, "update", id, newCode, { line_count: body.lines?.length ?? null });
+  const headerMeta = auditChangeMeta(existing as Record<string, unknown>, patch);
+  const changes = [...(headerMeta.changes ?? []), ...lineChanges];
+  await audit(admin, user.id, "update", id, newCode, {
+    line_count: body.lines?.length ?? null, product_name: patch.product_name ?? null,
+    ...headerMeta, ...(changes.length ? { changes } : {}),
+  });
   return NextResponse.json({ id, error: null });
 }
 

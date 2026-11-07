@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { friendlyDbError } from "../../../master-v2/[entity]/route";
 import { subtaskAssigneesMap, setSubtaskAssignees, notify, userIdsReviewers, recomputeTaskStatusFromSubtasks, pushTasksLineTpl, employeeLabelMap, taskLink, materializeContentSubtasks, isSubtaskWorker } from "@/lib/creative-tasks-server";
 import { terminalStatusKeys } from "@/lib/creative-statuses-server";
@@ -294,7 +294,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     admin.from("erp_creative_tasks").select("created_by, reviewer_id, task_no, title, status").eq("id", id).maybeSingle(),
     currentRole(request),
     userIdsReviewers(admin, id),
-    admin.from("erp_creative_subtasks").select("status, assignee_id").eq("id", subtaskId).maybeSingle(),
+    admin.from("erp_creative_subtasks").select("*").eq("id", subtaskId).maybeSingle(),   // แถวเต็ม = ค่าเดิมไว้จดประวัติ
   ]);
   const wasApproved = ((curSub as { status?: string } | null)?.status) === "approved";
   const isManager = role === "admin" || role === "manager";
@@ -464,7 +464,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     : toStatus && toStatus !== fromStatus ? "subtask:status" : "subtask:update";
   await writeAudit(admin, {
     action: auditAction, entityType: "creative_task", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { subtask_id: subtaskId, subtask_title: (row?.title as string) ?? null, ...(toStatus ? { status_from: fromStatus, status_to: toStatus } : {}), changes: Object.keys(patch).filter((k) => k !== "updated_at") },
+    metadata: {
+      task_no: parent?.task_no ?? null, title: parent?.title ?? null,
+      subtask_id: subtaskId, subtask_title: (row?.title as string) ?? null,
+      ...(toStatus ? { status_from: fromStatus, status_to: toStatus } : {}),
+      // ค่าเดิม → ใหม่ (curSub = แถวก่อนแก้) · config/รูปที่ส่งเข้าสินค้า = ก้อนข้อมูลภายใน จดแค่ว่าแก้รายละเอียด
+      ...auditChangeMeta(curSub as Record<string, unknown> | null, patch, { opaque: ["config", "image_sync_targets"] }),
+    },
   });
 
   // ⑥ Sync เข้าสินค้า (best-effort) — อนุมัติ → ส่งรูป/ข้อความเข้า Parent SKU/SKU · ขอแก้/ยกเลิก → ถอดกลับ

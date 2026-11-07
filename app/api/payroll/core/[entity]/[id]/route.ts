@@ -7,7 +7,7 @@ import { getEmployee, updateEmployee, softDeleteEmployee } from "@/lib/payroll-e
 import { getContract, updateContract, softDeleteContract } from "@/lib/payroll-contracts-db";
 import { getSettings, updateSettings, softDeleteSettings } from "@/lib/payroll-settings-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditFor, auditSnapshot, auditChangeMeta, auditRecordLabel } from "@/lib/audit";
 import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
@@ -17,21 +17,23 @@ type Ctx = { params: Promise<{ entity: string; id: string }> };
 
 const CORE: Record<string, {
   auditType: string;
+  /** ตารางจริง (ไว้อ่านค่าก่อน/หลังแก้ จดประวัติ) */
+  table: string;
   get: (id: string) => Promise<(Record<string, unknown> & { id: string }) | null>;
   update: (id: string, b: Record<string, unknown>) => Promise<(Record<string, unknown> & { id: string }) | null>;
   del: (id: string) => Promise<boolean>;
   deleteMsg: string;
 }> = {
   employees: {
-    auditType: "employees", get: getEmployee, update: updateEmployee, del: softDeleteEmployee,
+    auditType: "employees", table: "employees", get: getEmployee, update: updateEmployee, del: softDeleteEmployee,
     deleteMsg: "ลบพนักงานถาวรไม่ได้ — ระบบจะเปลี่ยนสถานะเป็น 'ไม่ใช้งาน' แทน",
   },
   contracts: {
-    auditType: "employee_contracts", get: getContract, update: updateContract, del: softDeleteContract,
+    auditType: "employee_contracts", table: "employee_contracts", get: getContract, update: updateContract, del: softDeleteContract,
     deleteMsg: "ลบสัญญาถาวรไม่ได้ — ระบบจะเปลี่ยนสถานะเป็น 'ยกเลิก' แทน",
   },
   settings: {
-    auditType: "employee_payroll_settings", get: getSettings, update: updateSettings, del: softDeleteSettings,
+    auditType: "employee_payroll_settings", table: "employee_payroll_settings", get: getSettings, update: updateSettings, del: softDeleteSettings,
     deleteMsg: "ตั้งค่าเงินเดือนลบไม่ได้ — แก้ค่าแทน",
   },
 };
@@ -59,11 +61,19 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   try {
+    // ค่าเดิม → ใหม่: อ่านแถวจริงก่อน/หลังแก้ แล้วเทียบ (ฟอร์มส่งชื่อช่องไม่ตรงคอลัมน์ได้ — เทียบที่ตารางจริงแม่นกว่า)
+    // ค่าเงินเดือน/บัญชี จดไว้ได้ — หน้าประวัติซ่อนค่าเองถ้าผู้ดูไม่มีสิทธิ์เงินเดือน
+    const admin = supabaseAdmin();
+    const before = await auditSnapshot(admin, cfg.table, id);
     const row = await cfg.update(id, body);
     if (!row) return NextResponse.json({ error: "ไม่พบข้อมูล" }, { status: 404 });
-    await writeAudit(supabaseAdmin(), {
+    const after = before ? await auditSnapshot(admin, cfg.table, id) : null;
+    await writeAuditFor(req, admin, {
       action: "update", entityType: cfg.auditType, entityId: id,
-      actorName: (body.actor as string) ?? null, metadata: { fields: Object.keys(body).filter((k) => k !== "actor") },
+      metadata: {
+        ...auditRecordLabel(after ?? before),
+        ...(before && after ? auditChangeMeta(before, after) : { fields: Object.keys(body).filter((k) => k !== "actor") }),
+      },
     });
     return NextResponse.json({ data: row, error: null });
   } catch (e) {

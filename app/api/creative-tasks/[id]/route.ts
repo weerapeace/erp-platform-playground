@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { apiCan, guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { SELECT, flattenTask, validateTaskFields } from "../shared";
 import { canTransition as canTransitionDB, findTransition, getStatusMeta, REVIEW_KINDS } from "@/lib/creative-statuses-server";
@@ -259,7 +259,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   await writeAudit(admin, {
     action: auditAction, entityType: "creative_task", entityId: id,
     actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { task_no: current.task_no, changes: Object.keys(patch).filter((k) => k !== "updated_at") },
+    // จดค่าเดิม → ใหม่ (current = แถวก่อนแก้) · ก้อน HTML/รูปอ้างอิง จดแค่ว่า "แก้รายละเอียด"
+    metadata: {
+      task_no: current.task_no, title: current.title,
+      ...auditChangeMeta(current as Record<string, unknown>, patch, { opaque: ["reference_html", "reference_images"] }),
+    },
   });
 
   if (notifyTarget?.empId) {

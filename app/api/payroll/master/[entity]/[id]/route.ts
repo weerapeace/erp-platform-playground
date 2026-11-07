@@ -5,7 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getEntityCfg, getMaster, updateMaster, softDeleteMaster } from "@/lib/payroll-master-db";
 import { supabaseAdmin } from "@/lib/supabase-admin";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditFor, auditSnapshot, auditChangeMeta, auditRecordLabel } from "@/lib/audit";
 import { guardPayroll } from "@/lib/payroll-auth";
 
 export const dynamic = "force-dynamic";
@@ -36,11 +36,19 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   try { body = await req.json(); }
   catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   try {
+    // ค่าเดิม → ใหม่: อ่านแถวจริงก่อน/หลังแก้ แล้วเทียบ (ฟอร์มส่งชื่อช่องไม่ตรงคอลัมน์ได้ — เทียบที่ตารางจริงแม่นกว่า)
+    // ค่าเงินเดือน/บัญชี จดไว้ได้ — หน้าประวัติซ่อนค่าเองถ้าผู้ดูไม่มีสิทธิ์เงินเดือน
+    const admin = supabaseAdmin();
+    const before = await auditSnapshot(admin, cfg.table, id);
     const row = await updateMaster(cfg, id, body);
     if (!row) return NextResponse.json({ error: "ไม่พบข้อมูล" }, { status: 404 });
-    await writeAudit(supabaseAdmin(), {
+    const after = before ? await auditSnapshot(admin, cfg.table, id) : null;
+    await writeAuditFor(req, admin, {
       action: "update", entityType: cfg.table, entityId: id,
-      actorName: (body.actor as string) ?? null, metadata: { fields: Object.keys(body).filter((k) => k !== "actor") },
+      metadata: {
+        ...auditRecordLabel(after ?? before),
+        ...(before && after ? auditChangeMeta(before, after) : { fields: Object.keys(body).filter((k) => k !== "actor") }),
+      },
     });
     return NextResponse.json({ data: row, error: null });
   } catch (e) {

@@ -7,7 +7,8 @@
  *        - ช่องที่ทะเบียน field จำกัด view_roles / sensitive_permission (เช่น ราคาทุน = products.cost.view)
  *        - งานบุคคล/เงินเดือน/เงินกู้: ช่องตัวเงิน/บัญชี ต้องมีสิทธิ์แอป Payroll (app.payroll + employees.view)
  *      ค่าที่ซ่อนถูกตัดออกจาก metadata ด้วย — ไม่ส่งถึงเบราว์เซอร์เลย (ไม่ใช่แค่ซ่อนบนจอ)
- *   4) แนบ view = ผลแปลภาษาคน (lib/audit-format describeAudit)
+ *   4) รหัสอ้างอิงในค่าเดิม/ใหม่ (แบรนด์/คน/สินค้า/บริษัท) → ชื่อ — ใช้ relation_config ในทะเบียน field ก่อน แล้วค่อยตาราง REF_FIELDS
+ *   5) แนบ view = ผลแปลภาษาคน (lib/audit-format describeAudit)
  */
 import { apiCan } from "@/lib/api-auth";
 import { getUserRole } from "@/lib/field-permissions";
@@ -33,7 +34,8 @@ export type EnrichedAuditRow = Omit<RawAuditRow, "metadata"> & {
   view: AuditView;
 };
 
-type FieldMeta = { label: string; viewRoles: string[] | null; perm: string | null };
+type RefTarget = { table: string; label: string };
+type FieldMeta = { label: string; viewRoles: string[] | null; perm: string | null; rel: RefTarget | null };
 
 const FIELD_TTL = 5 * 60_000;
 const fieldCache = new Map<string, { at: number; fields: Record<string, FieldMeta> }>();
@@ -52,14 +54,19 @@ async function loadFieldMeta(admin: Admin, tables: string[]): Promise<Record<str
   // ทีละโมดูล — กันชนเพดาน 1,000 แถวต่อคำขอ
   await Promise.all(((mods ?? []) as { id: string; table_name: string }[]).map(async (mod) => {
     const { data: flds } = await admin.from("erp_module_fields")
-      .select("column_name, field_label, view_roles, sensitive_permission")
+      .select("column_name, field_label, view_roles, sensitive_permission, relation_config")
       .eq("module_id", mod.id);
-    for (const f of (flds ?? []) as { column_name: string | null; field_label: string | null; view_roles: string[] | null; sensitive_permission: string | null }[]) {
+    for (const f of (flds ?? []) as { column_name: string | null; field_label: string | null; view_roles: string[] | null; sensitive_permission: string | null; relation_config: Record<string, unknown> | null }[]) {
       if (!f.column_name) continue;
+      // ช่องอ้างอิง (many2one) → รู้ว่ารหัสนี้ไปหาชื่อที่ตารางไหน คอลัมน์ไหน
+      const rc = f.relation_config;
+      const rel = rc && (!rc.kind || rc.kind === "many2one") && typeof rc.target_table === "string" && typeof rc.target_label_field === "string"
+        ? { table: rc.target_table, label: rc.target_label_field } : null;
       fresh[mod.table_name][f.column_name] = {
         label: f.field_label || f.column_name,
         viewRoles: f.view_roles?.length ? f.view_roles : null,
         perm: f.sensitive_permission || null,
+        rel,
       };
     }
   }));
@@ -147,7 +154,94 @@ const LABEL_SOURCES: Record<string, { table: string; code?: string; name?: strin
   supplier_items:              { table: "supplier_items", code: "supplier_sku" },
   product_highlight_items:     { table: "product_highlight_items", name: "name" },
   product_materials:           { table: "product_materials", name: "name" },
+  creative_content:            { table: "erp_creative_content", code: "content_no", name: "title" },
+  record_task:                 { table: "erp_record_tasks", name: "title" },
+  bom:                         { table: "bom_headers", code: "bom_code", name: "product_name" },
 };
+
+// ── รหัสอ้างอิงในค่า "จาก → เป็น" → ชื่อ ──────────────────────────────────────────
+// ทะเบียน field (relation_config) มาก่อน · ช่องที่ไม่อยู่ในทะเบียน (เช่น งานครีเอทีฟ) ใช้ตารางนี้
+// "person" = รหัสผู้ใช้/พนักงาน → ชื่อเล่น (user_profiles ก่อน ไม่เจอค่อยหาใน employees)
+const PARTNER: RefTarget = { table: "partners_v2", label: "name_th" };
+const REF_FIELDS: Record<string, RefTarget | "person"> = {
+  brand_id: { table: "brands", label: "name" }, parent_brand_id: { table: "brands", label: "name" },
+  campaign_id: { table: "erp_creative_campaigns", label: "name" },
+  sku_id: { table: "skus_v2", label: "code" }, parent_sku_id: { table: "parent_skus_v2", label: "code" },
+  company_id: { table: "companies", label: "name" }, department_id: { table: "departments", label: "name" },
+  position_id: { table: "positions", label: "name" }, cost_center_id: { table: "cost_centers", label: "name" },
+  supplier_id: PARTNER, partner_id: PARTNER, seller_partner_id: PARTNER, customer_id: PARTNER, default_customer_id: PARTNER,
+  assignee_id: "person", assignee_ids: "person", reviewer_id: "person", reviewer_ids: "person", approver_id: "person",
+  assigned_by_id: "person", assigned_to: "person", owner_id: "person", user_id: "person", employee_id: "person",
+  manager_employee_id: "person", created_by: "person", resolved_by: "person",
+};
+const UUID_V = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_REF_IDS = 300;
+
+/** ค่าทุกตัวในแถวที่อาจเป็นรหัสอ้างอิง: [ชื่อช่อง, ค่า] (changes ทุกรูปแบบ + before/after + from/to บนสุด) */
+function refValuesIn(m: Record<string, unknown>): [string, unknown][] {
+  const out: [string, unknown][] = [];
+  const ch = m.changes;
+  if (Array.isArray(ch)) {
+    for (const c of ch) if (isObj(c) && typeof c.field === "string") out.push([c.field, c.old], [c.field, c.new], [c.field, c.from], [c.field, c.to]);
+  } else if (isObj(ch)) {
+    for (const [f, v] of Object.entries(ch)) { if (isObj(v)) out.push([f, v.old], [f, v.new], [f, v.from], [f, v.to]); else out.push([f, v]); }
+  }
+  for (const k of ["before", "after"]) if (isObj(m[k])) for (const [f, v] of Object.entries(m[k] as Record<string, unknown>)) out.push([f, v]);
+  if (typeof m.field === "string") out.push([m.field, m.from], [m.field, m.to]);
+  return out;
+}
+
+/** รหัสอ้างอิงในหน้านี้ทั้งหมด → ชื่อ (uuid ตัวเล็ก → ชื่อ) · ยิงขนานทีละตาราง · หาไม่เจอ = ปล่อยเป็นรหัสเหมือนเดิม */
+async function resolveRefLabels(
+  admin: Admin,
+  rows: RawAuditRow[],
+  fieldMeta: Record<string, Record<string, FieldMeta>>,
+  nameById: Map<string, string>,
+): Promise<Record<string, string>> {
+  const byTable = new Map<string, { table: string; label: string; ids: Set<string> }>();
+  const people = new Set<string>();
+  let needPeopleNames = false;
+  for (const r of rows) {
+    if (!isObj(r.metadata)) continue;
+    const fm = fieldMeta[r.entity_type] ?? {};
+    for (const [field, raw] of refValuesIn(r.metadata)) {
+      const vals = (Array.isArray(raw) ? raw : [raw]).filter((v): v is string => typeof v === "string" && UUID_V.test(v));
+      if (!vals.length) continue;
+      const ref = fm[field]?.rel ?? REF_FIELDS[field];
+      if (!ref) continue;
+      for (const v of vals) {
+        const id = v.toLowerCase();
+        if (ref === "person") { needPeopleNames = true; if (!nameById.has(id)) people.add(id); continue; }
+        const key = `${ref.table}|${ref.label}`;
+        const g = byTable.get(key) ?? { table: ref.table, label: ref.label, ids: new Set<string>() };
+        if (g.ids.size < MAX_REF_IDS) g.ids.add(id);
+        byTable.set(key, g);
+      }
+    }
+  }
+  const out: Record<string, string> = {};
+  if (needPeopleNames) for (const [id, n] of nameById) out[id.toLowerCase()] = n;   // คน: ชื่อเล่นจาก user_profiles (แคชอยู่แล้ว)
+  const jobs: Promise<void>[] = [...byTable.values()].map(async (g) => {
+    const { data, error } = await admin.from(g.table).select(`id, ${g.label}`).in("id", [...g.ids]);
+    if (error) return;   // ตาราง/คอลัมน์เปลี่ยน = ข้าม (ยังโชว์ "รหัส …abcd" เหมือนเดิม)
+    for (const x of (data ?? []) as unknown as Record<string, unknown>[]) {
+      const l = x[g.label];
+      if ((typeof l === "string" && l.trim()) || typeof l === "number") out[String(x.id).toLowerCase()] = String(l).trim().slice(0, 80);
+    }
+  });
+  if (people.size) {
+    jobs.push((async () => {
+      const { data, error } = await admin.from("employees").select("id, nickname, first_name").in("id", [...people].slice(0, MAX_REF_IDS));
+      if (error) return;
+      for (const e of (data ?? []) as { id: string; nickname: string | null; first_name: string | null }[]) {
+        const n = e.nickname?.trim() || e.first_name?.trim();
+        if (n) out[e.id.toLowerCase()] = n;
+      }
+    })());
+  }
+  await Promise.all(jobs);
+  return out;
+}
 
 async function lookupRecordLabels(admin: Admin, need: { entity_type: string; entity_id: string }[]): Promise<Map<string, { code: string | null; name: string | null }>> {
   const out = new Map<string, { code: string | null; name: string | null }>();
@@ -190,16 +284,17 @@ export async function enrichAuditRows(request: NextRequest, admin: Admin, rows: 
   const needRole = tables.some((t) => Object.values(fieldMeta[t] ?? {}).some((f) => f.viewRoles));
   const needPay = tables.some((t) => PAY_ENTITY.test(t));
   // แถวเก่าที่ไม่ได้จดเลขเอกสาร/ชื่อ → หาจากตารางจริง (ยิงพร้อมกับเช็กสิทธิ์)
-  const LABEL_HINT_KEYS = ["code", "pr_no", "po_no", "pv_no", "so_number", "mo_no", "task_no", "ticket_no", "name", "name_th", "title", "item_name", "sku", "bom_code"];
+  const LABEL_HINT_KEYS = ["code", "content_no", "employee_code", "contract_no", "pr_no", "po_no", "pv_no", "so_number", "mo_no", "task_no", "ticket_no", "name", "name_th", "title", "item_name", "sku", "bom_code"];
   const unlabeled = rows
     .filter((r) => r.entity_id && LABEL_SOURCES[r.entity_type] && !(isObj(r.metadata) && LABEL_HINT_KEYS.some((k) => r.metadata![k])))
     .map((r) => ({ entity_type: r.entity_type, entity_id: r.entity_id as string }));
 
-  const [role, permOk, payOk, labels] = await Promise.all([
+  const [role, permOk, payOk, labels, valueLabels] = await Promise.all([
     needRole || needPay ? getUserRole(request) : Promise.resolve(""),
     Promise.all([...perms].map(async (p) => [p, await apiCan(request, p)] as const)).then((xs) => new Map(xs)),
     needPay ? Promise.all([apiCan(request, "app.payroll"), apiCan(request, "employees.view")]).then(([a, b]) => a && b) : Promise.resolve(true),
     unlabeled.length ? lookupRecordLabels(admin, unlabeled) : Promise.resolve(new Map<string, { code: string | null; name: string | null }>()),
+    resolveRefLabels(admin, rows, fieldMeta, nameById),
   ]);
   const isAdmin = role === "admin";
 
@@ -225,7 +320,7 @@ export async function enrichAuditRows(request: NextRequest, admin: Admin, rows: 
     // ช่องที่ซ่อน "ที่มีอยู่จริงในแถวนี้" เท่านั้นที่ต้องตัด
     const present = new Set(fieldNamesIn(m));
     const hiddenHere = new Set([...hidden].filter((h) => present.has(h)));
-    const view = describeAudit({ action: r.action, entity_type: r.entity_type, entity_id: r.entity_id, metadata: m }, { fieldLabels: fieldLabels, hiddenFields: hiddenHere });
+    const view = describeAudit({ action: r.action, entity_type: r.entity_type, entity_id: r.entity_id, metadata: m }, { fieldLabels: fieldLabels, hiddenFields: hiddenHere, valueLabels });
     if (!view.recordCode && !view.recordName && r.entity_id) {
       const found = labels.get(`${r.entity_type}:${r.entity_id}`);
       if (found) { view.recordCode = found.code; view.recordName = found.name; }

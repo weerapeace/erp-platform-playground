@@ -125,6 +125,27 @@ export const COMMON_FIELD_LABELS: Record<string, string> = {
   asset_type: "ชนิดไฟล์", size_bytes: "ขนาดไฟล์ (ไบต์)", received: "รับเข้า", orders_created: "สร้างออเดอร์", ignored: "ข้าม",
   done: "เสร็จ", stage: "ขั้น", step: "ขั้นตอน", type: "ประเภท", price_type: "ประเภทราคา", warehouse: "คลัง",
   key: "รหัสตั้งค่า", model: "โมเดล",
+  // งาน / คอนเทนต์
+  reviewer_id: "ผู้ตรวจ", approver_id: "ผู้อนุมัติ", assigned_by_id: "ผู้มอบหมาย", assignee_ids: "ผู้รับผิดชอบ",
+  start_date: "วันเริ่ม", priority: "ความสำคัญ", task_type: "ชนิดงาน", campaign_id: "แคมเปญ", product_name: "ชื่อสินค้า",
+  platforms: "แพลตฟอร์ม", drive_folder_url: "โฟลเดอร์ Drive", final_asset_url: "ลิงก์งานจริง", published_url: "ลิงก์โพสต์",
+  blocker_reason: "เหตุติดขัด", asset_status: "สถานะไฟล์งาน", reference_html: "บรีฟ", captions: "แคปชัน",
+  post_status: "สถานะโพสต์", post_type: "ชนิดโพสต์", scheduled_at: "เวลาโพสต์", product_links: "ลิงก์สินค้า",
+  ref_links: "ลิงก์อ้างอิง", products: "สินค้า", title_en: "หัวข้อ (อังกฤษ)", required_before_next: "ต้องเสร็จก่อนขั้นถัดไป",
+  sort_order: "ลำดับ", published_at: "เผยแพร่เมื่อ", resolved_at: "เสร็จเมื่อ", resolved_by: "ปิดโดย", assigned_to: "มอบให้",
+  due_at: "กำหนด", discount_value: "ส่วนลด", discount_is_percent: "ส่วนลดเป็น %",
+  // ผลิต / สูตร
+  product_sku: "SKU สินค้า", bom_code: "รหัสสูตร", bom_version: "เวอร์ชันสูตร", size_breakdown: "จำนวนตามไซส์",
+  fabric_calc_mode: "วิธีคิดผ้า", on_hand_qty: "มีอยู่", to_purchase_qty: "ต้องซื้อ", is_ready: "เตรียมแล้ว",
+  cut_done: "ตัดแล้ว", cut_done_at: "ตัดเมื่อ", version: "เวอร์ชัน", bom_type: "ชนิดสูตร", effective_from: "ใช้ตั้งแต่",
+  // บุคคล
+  department_id: "แผนก", company_id: "บริษัท", supplier_id: "ผู้ขาย", employment_status: "สถานะพนักงาน",
+  base_salary: "เงินเดือน", end_date: "วันสิ้นสุด", nickname: "ชื่อเล่น", first_name: "ชื่อ", last_name: "นามสกุล",
+  phone: "เบอร์โทร", parent_brand_id: "แบรนด์แม่",
+  // แบรนด์ / อื่น ๆ
+  default_customer_id: "ลูกค้าหลัก", logo_url: "โลโก้", is_customer_job: "งานลูกค้า", hide_in_artwork: "ซ่อนในงานอาร์ตเวิร์ก",
+  pricing_mode: "วิธีคิดราคา", reexploded: "คำนวณวัตถุดิบใหม่", links: "ลิงก์", mo_nos: "ใบสั่งผลิต", component: "วัตถุดิบ",
+  component_sku: "รหัสวัตถุดิบ",
 };
 
 const STATUS_FIELDS = new Set(["status", "approval_status", "post_status", "status_from", "status_to"]);
@@ -132,7 +153,7 @@ const STATUS_FIELDS = new Set(["status", "approval_status", "post_status", "stat
 const STATUS_TH: Record<string, string> = {
   todo: "ยังไม่เริ่ม", in_progress: "กำลังทำ", doing: "กำลังทำ", need_review: "รอตรวจ", submitted: "ส่งตรวจแล้ว",
   revision: "ขอแก้", revision_requested: "ขอแก้", approved: "อนุมัติแล้ว", done: "เสร็จ", cancelled: "ยกเลิก", canceled: "ยกเลิก",
-  backlog: "รอคิว", ready: "พร้อม", published: "เผยแพร่แล้ว", posted: "โพสต์แล้ว", new: "ใหม่", pending: "รอดำเนินการ",
+  backlog: "รอคิว", ready: "พร้อม", published: "เผยแพร่แล้ว", posted: "โพสต์แล้ว", skip: "ข้าม", new: "ใหม่", pending: "รอดำเนินการ",
   rejected: "ไม่อนุมัติ", closed: "ปิดแล้ว", ordered: "สั่งแล้ว", received: "รับแล้ว", paid: "จ่ายแล้ว", open: "เปิดอยู่",
 };
 function statusLabel(code: string): string {
@@ -146,13 +167,13 @@ const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…`
 const stripHtml = (s: string) => (/<[a-z][\s\S]*>/i.test(s) ? s.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim() : s);
 
 /** ค่าที่โชว์ในตาราง "จาก → เป็น" (สั้น อ่านง่าย ไม่ใช่ JSON ดิบ) */
-export function fmtAuditValue(v: unknown, field?: string): string {
+export function fmtAuditValue(v: unknown, field?: string, valueLabels?: Record<string, string>): string {
   if (v === null || v === undefined || v === "") return "ว่าง";
   if (typeof v === "boolean") return v ? "ใช่" : "ไม่ใช่";
   if (typeof v === "number") return v.toLocaleString("th-TH", { maximumFractionDigits: 4 });
   if (Array.isArray(v)) {
     if (v.length === 0) return "ว่าง";
-    const xs = v.slice(0, 5).map((x) => fmtAuditValue(x));
+    const xs = v.slice(0, 5).map((x) => fmtAuditValue(x, undefined, valueLabels));
     return `${xs.join(", ")}${v.length > 5 ? ` …(+${v.length - 5})` : ""}`;
   }
   if (typeof v === "object") {
@@ -162,11 +183,17 @@ export function fmtAuditValue(v: unknown, field?: string): string {
     if (typeof o.preview === "string") return clip(o.preview, 120);   // ค่ายาวที่ auditDiff ตัดไว้
     if (typeof o.name === "string") return o.name;
     if (typeof o.label === "string") return o.label;
+    // ก้อนเล็ก ๆ ค่าเดี่ยว เช่น สถานะโพสต์รายแพลตฟอร์ม {facebook:"posted"} → "facebook: โพสต์แล้ว"
+    const entries = Object.entries(o);
+    if (entries.length === 0) return "ว่าง";
+    if (entries.length <= 6 && entries.every(([, x]) => x === null || ["string", "number", "boolean"].includes(typeof x))) {
+      return clip(entries.map(([k, x]) => `${k}: ${typeof x === "string" ? statusLabel(x) : fmtAuditValue(x)}`).join(", "), 140);
+    }
     return clip(JSON.stringify(o), 80);
   }
   const s = String(v);
   if (field && STATUS_FIELDS.has(field)) return statusLabel(s);
-  if (UUID_RE.test(s)) return `รหัส …${s.slice(-4)}`;
+  if (UUID_RE.test(s)) return valueLabels?.[s.toLowerCase()] ?? `รหัส …${s.slice(-4)}`;
   if (ISO_RE.test(s)) {
     const d = new Date(s.length === 10 ? `${s}T00:00:00+07:00` : s);
     if (!isNaN(d.getTime())) {
@@ -205,6 +232,8 @@ export type AuditView = {
   changes: AuditChange[];
   /** รู้แค่ว่าแก้ช่องไหน (ระบบเดิมไม่ได้จดค่า) */
   fieldsOnly: string[];
+  /** ช่องก้อนข้อมูลภายในที่แก้ (ตั้งค่า/รูป/ลิงก์ชุด) — จดแค่ว่าแก้ ไม่จดค่า (ตั้งใจ) */
+  detailFields: string[];
   /** รายละเอียดอื่นที่จดไว้ เช่น จำนวน 940 · เหตุผล เปิดซ้ำ */
   extras: { label: string; value: string; hidden?: boolean }[];
   noise: boolean;
@@ -222,10 +251,12 @@ export type AuditFormatCtx = {
   fieldLabels?: Record<string, string>;
   /** ช่องที่ผู้ดูไม่มีสิทธิ์เห็นค่า (API คำนวณ) */
   hiddenFields?: Set<string>;
+  /** ชื่อของรหัสอ้างอิง (uuid ตัวเล็ก → ชื่อ) เช่น รหัสแบรนด์ → "Louis Montini" — API หาให้จากทะเบียน field */
+  valueLabels?: Record<string, string>;
 };
 
 /** คีย์เลขเอกสาร/รหัส (ตัวแรกที่มีค่า = ใช้) */
-const CODE_KEYS = ["pr_no", "po_no", "pv_no", "so_number", "so_no", "mo_no", "wo_no", "task_no", "ticket_no", "doc_no", "number", "run_no",
+const CODE_KEYS = ["pr_no", "po_no", "pv_no", "so_number", "so_no", "mo_no", "wo_no", "task_no", "content_no", "ticket_no", "doc_no", "number", "run_no",
   "movement_number", "bom_code", "code", "sku", "loan_code", "contract_no", "transfer_no", "invoice_no", "period_name"];
 /** คีย์ชื่อรายการ */
 const NAME_KEYS = ["item_name", "name", "name_th", "title", "subtask_title", "job_name", "label", "loan_name", "file_name", "sku_name", "product"];
@@ -235,7 +266,7 @@ export const AUDIT_SEARCH_KEYS: string[] = [...CODE_KEYS, ...NAME_KEYS.filter((k
 
 /** คีย์ระบบ/ภายใน ไม่โชว์เป็นรายละเอียด */
 const SKIP_EXTRA = new Set([
-  "actor", "actor_name", "entity", "changes", "changed_fields", "changed", "fields", "before", "after", "from", "to",
+  "actor", "actor_name", "entity", "changes", "changed_fields", "changed_detail", "changed", "fields", "before", "after", "from", "to",
   "status_from", "status_to", "old_status", "new_status", "old", "new", "field", "id", "ids", "item_ids", "r2_key",
   "content_type", "size", "has_preview", "rev", "system", "reference", "created_at", "updated_at", "via",
   "skipped_no_permission", "groups", "parent_sku_ids", "subtask_id", "shopId", "shop_id", "_i18n", "what",
@@ -260,7 +291,7 @@ export function describeAudit(row: AuditRowLike, ctx: AuditFormatCtx = {}): Audi
     const isHidden = hidden.has(field);
     changes.push({
       field, label: label || labelOf(field), hasOld,
-      ...(isHidden ? { hidden: true } : { old: hasOld ? fmtAuditValue(oldV, field) : undefined, new: fmtAuditValue(newV, field) }),
+      ...(isHidden ? { hidden: true } : { old: hasOld ? fmtAuditValue(oldV, field, ctx.valueLabels) : undefined, new: fmtAuditValue(newV, field, ctx.valueLabels) }),
     });
   };
 
@@ -312,6 +343,9 @@ export function describeAudit(row: AuditRowLike, ctx: AuditFormatCtx = {}): Audi
     if (Array.isArray(v)) for (const x of v) if (typeof x === "string" && !seen.has(x) && x !== "updated_at") names.add(x);
   }
   const fieldsOnly = [...names].map(labelOf);
+  const detailFields = Array.isArray(m.changed_detail)
+    ? (m.changed_detail as unknown[]).filter((x): x is string => typeof x === "string" && !seen.has(x)).map(labelOf)
+    : [];
 
   // เลขเอกสาร + ชื่อ
   let recordCode: string | null = null;
@@ -342,6 +376,7 @@ export function describeAudit(row: AuditRowLike, ctx: AuditFormatCtx = {}): Audi
     href: row.entity_id && info.href ? info.href(row.entity_id) : null,
     changes,
     fieldsOnly,
+    detailFields,
     extras,
     noise: isAuditNoise(row.action, row.entity_type),
   };

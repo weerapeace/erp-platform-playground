@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { apiCan, guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditChangeMeta } from "@/lib/audit";
 import { isUuid, notifyAssignee, toRecordTask, userNames } from "@/lib/record-tasks-server";
 import { normalizeTaskLinks } from "@/lib/record-tasks";
 import type { RecordTask } from "@/app/api/record-tasks/route";
@@ -28,7 +28,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const actor = body.actor ?? user.email ?? "system";
 
   const admin = supabaseAdmin();
-  const { data: before } = await admin.from("erp_record_tasks").select("id, module_key, record_id, title, status, assigned_to, metadata").eq("id", id).maybeSingle();
+  const { data: before } = await admin.from("erp_record_tasks").select("id, module_key, record_id, title, status, assigned_to, metadata, resolved_at, resolved_by").eq("id", id).maybeSingle();
   if (!before) return NextResponse.json({ error: "ไม่พบรายการนี้ (อาจถูกลบไปแล้ว)" }, { status: 404 });
   const b = before as { module_key: string; record_id: string; title: string; status: string; assigned_to: string | null; metadata: Record<string, unknown> | null };
   const onlyStatus = body.title === undefined && body.assigned_to === undefined && body.links === undefined;
@@ -61,7 +61,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   // ประวัติ: links เก็บเป็นชุดใหม่ (ไม่เก็บ metadata ทั้งก้อน)
   const { metadata: newMeta, ...rest } = patch;
   await writeAudit(admin, { action: "update", entityType: "record_task", entityId: id, actorId: user.id, actorName: actor,
-    metadata: { ...rest, ...(newMeta ? { links: (newMeta as { links: unknown }).links, links_before: (b.metadata as { links?: unknown } | null)?.links ?? [] } : {}), title: b.title } });
+    metadata: {
+      title: b.title,
+      ...auditChangeMeta(before as Record<string, unknown>, rest),   // ค่าเดิม → ใหม่ (ชื่อ/สถานะ/ผู้รับผิดชอบ)
+      ...(newMeta ? { links: (newMeta as { links: unknown }).links, links_before: (b.metadata as { links?: unknown } | null)?.links ?? [], changed_detail: ["links"] } : {}),
+    } });
   const row = data as RecordTask & { metadata?: unknown };
   if (body.assigned_to !== undefined && row.assigned_to && row.assigned_to !== b.assigned_to) {
     await notifyAssignee(admin, { module_key: b.module_key, record_id: b.record_id, title: (patch.title as string | undefined) ?? b.title, assigned_to: row.assigned_to }, { id: user.id, name: actor });

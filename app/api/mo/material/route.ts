@@ -10,7 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, auditChangeMeta, type AuditChangeRecord } from "@/lib/audit";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 
 export const dynamic = "force-dynamic";
@@ -42,12 +42,23 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   // โหมดหลายรายการ (เช่น "ทำเป็นเตรียมแล้ว" จากหน้าขอซื้อ/เตรียม — เตรียมทุกใบที่ใช้วัตถุดิบนั้น)
   if (batchIds && batchIds.length) {
+    // ค่าเดิม (ไว้จดประวัติ "จากอะไรเป็นอะไร") — ทุกแถวค่าเดียวกัน = โชว์ค่านั้น · ต่างกัน = "หลายค่า"
+    const { data: prevRows } = await admin.from("mo_material_summary").select("mo_no, component_sku, component_name, is_ready, cut_done, on_hand_qty, to_purchase_qty").in("id", batchIds);
+    const prev = (prevRows ?? []) as Record<string, unknown>[];
     const { error } = await admin.from("mo_material_summary").update(patch).in("id", batchIds);
     if (error) return NextResponse.json({ error: friendlyDbError(error.message) }, { status: 400 });
-    await admin.from("audit_logs").insert({ actor_user_id: user?.id ?? null, action: "update", entity_type: "mo_material", entity_id: null, metadata: { count: batchIds.length, ...patch } }).then(() => {}, () => {});
+    const changes: AuditChangeRecord[] = Object.entries(patch).filter(([k]) => k !== "cut_done_at").map(([k, v]) => {
+      const olds = [...new Set(prev.map((r) => JSON.stringify(r[k] ?? null)))];
+      return { field: k, old: olds.length === 1 ? JSON.parse(olds[0]) : "หลายค่า", new: v };
+    });
+    const moNos = [...new Set(prev.map((r) => String(r.mo_no ?? "")).filter(Boolean))];
+    await admin.from("audit_logs").insert({ actor_user_id: user?.id ?? null, action: "update", entity_type: "mo_material", entity_id: null, metadata: {
+      count: batchIds.length, ...patch, component_sku: prev[0]?.component_sku ?? null, component: prev[0]?.component_name ?? null,
+      mo_nos: moNos.slice(0, 10).join(", ") + (moNos.length > 10 ? ` …(+${moNos.length - 10})` : ""), ...(prev.length ? { changes } : {}),
+    } }).then(() => {}, () => {});
     return NextResponse.json({ count: batchIds.length, ...patch, error: null });
   }
-  const { data: row } = await admin.from("mo_material_summary").select("mo_no, component_name").eq("id", body.id).maybeSingle();
+  const { data: row } = await admin.from("mo_material_summary").select("mo_no, component_sku, component_name, is_ready, cut_done, on_hand_qty, to_purchase_qty").eq("id", body.id).maybeSingle();
   if (!row) return NextResponse.json({ error: "ไม่พบวัตถุดิบนี้" }, { status: 404 });
 
   const { error } = await admin.from("mo_material_summary").update(patch).eq("id", body.id);
@@ -55,7 +66,11 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
 
   await admin.from("audit_logs").insert({
     actor_user_id: user?.id ?? null, action: "update", entity_type: "mo_material", entity_id: body.id,
-    metadata: { mo_no: (row as { mo_no?: string }).mo_no, component: (row as { component_name?: string }).component_name, ...patch },
+    metadata: {
+      mo_no: (row as { mo_no?: string }).mo_no, component: (row as { component_name?: string }).component_name,
+      component_sku: (row as { component_sku?: string | null }).component_sku ?? null, ...patch,
+      ...auditChangeMeta(row as Record<string, unknown>, Object.fromEntries(Object.entries(patch).filter(([k]) => k !== "cut_done_at"))),
+    },
   }).then(() => {}, () => {});
 
   return NextResponse.json({ id: body.id, ...patch, error: null });
@@ -68,9 +83,9 @@ async function patchItems(body: Body, user: { id: string; email?: string | null 
   if (items.length > MAX_ITEMS) return NextResponse.json({ error: `บันทึกได้ครั้งละไม่เกิน ${MAX_ITEMS} รายการ` }, { status: 400 });
   const admin = supabaseAdmin();
   const ids = items.map((i) => String(i.id));
-  const { data: rows, error: rErr } = await admin.from("mo_material_summary").select("id, mo_no, component_sku, component_name").in("id", ids).eq("is_active", true);
+  const { data: rows, error: rErr } = await admin.from("mo_material_summary").select("id, mo_no, component_sku, component_name, on_hand_qty, to_purchase_qty").in("id", ids).eq("is_active", true);
   if (rErr) return NextResponse.json({ error: friendlyDbError(rErr.message) }, { status: 400 });
-  const byId = new Map(((rows ?? []) as { id: string; mo_no: string; component_sku: string | null; component_name: string | null }[]).map((r) => [String(r.id), r]));
+  const byId = new Map(((rows ?? []) as { id: string; mo_no: string; component_sku: string | null; component_name: string | null; on_hand_qty: number | null; to_purchase_qty: number | null }[]).map((r) => [String(r.id), r]));
   if (byId.size !== ids.length) return NextResponse.json({ error: "บางรายการไม่พบแล้ว (อาจถูกลบหรือแก้สูตร) — โหลดหน้าใหม่แล้วลองอีกครั้ง" }, { status: 409 });
 
   const done: string[] = [];
@@ -84,10 +99,20 @@ async function patchItems(body: Body, user: { id: string; email?: string | null 
     done.push(String(it.id));
   }
   const first = byId.get(ids[0]);
+  // จดค่าเดิม → ใหม่ รายใบ ("มีอยู่" / "ต้องซื้อ") · 1 ใบ = ใช้ชื่อช่องตรง ๆ · หลายใบ = ต่อท้ายเลขใบสั่งผลิต
+  const many = items.length > 1;
+  const changes: AuditChangeRecord[] = [];
+  for (const it of items.slice(0, 30)) {
+    const r = byId.get(String(it.id));
+    if (!r) continue;
+    const tag = many ? `:${r.mo_no}` : "";
+    if (Number(r.on_hand_qty ?? 0) !== Number(it.on_hand_qty)) changes.push({ field: `on_hand_qty${tag}`, label: many ? `มีอยู่ · ${r.mo_no}` : undefined, old: r.on_hand_qty ?? null, new: it.on_hand_qty });
+    if (it.purchase_override !== undefined && (r.to_purchase_qty ?? null) !== (it.purchase_override ?? null)) changes.push({ field: `to_purchase_qty${tag}`, label: many ? `ต้องซื้อ · ${r.mo_no}` : undefined, old: r.to_purchase_qty ?? null, new: it.purchase_override ?? null });
+  }
   await writeAudit(admin, {
     action: "update", entityType: "mo_material", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null,
     metadata: {
-      mode: "batch_items", label: body.label ?? null, count: done.length,
+      mode: "batch_items", label: body.label ?? null, count: done.length, ...(changes.length ? { changes } : {}),
       component_sku: first?.component_sku ?? null, component: first?.component_name ?? null,
       items: items.slice(0, 50).map((i) => {
         const r = byId.get(String(i.id));
