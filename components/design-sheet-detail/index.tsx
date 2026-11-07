@@ -66,6 +66,7 @@ import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
 import type { ParentSkuCheck } from "@/app/api/design-sheets/parent-sku-check/route";
 import type { DesignSheetLinkedSku } from "@/app/api/design-sheets/[id]/route";
 import dynamic from "next/dynamic";
+import { DblClickToEdit } from "@/components/dbl-click-edit";
 // แผงใบนำเสนอ A4 — โหลดเฉพาะตอนกด (ไม่ถ่วงป๊อปอัป)
 const DesignSheetPresentPanel = dynamic(() => import("@/components/design-sheet-present").then((m) => m.DesignSheetPresentPanel), { ssr: false });
 // ลงออเดอร์จากใบงานนี้ (ของกลาง ป๊อปเดียวกับหน้าใบสั่งขาย) — โหลดเฉพาะตอนกด
@@ -1525,7 +1526,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   // คอลัมน์ตารางตีราคา (ใช้ LineItemsGrid กลาง) — เลือกวัสดุ → เติมชนิด/สูตร/เผื่อเสีย/ราคาอัตโนมัติ แล้วคำนวณสด
   const numInputCls = "w-full h-8 px-1.5 text-sm text-right border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50";
   // โหมดดูอย่างเดียว: ล็อกช่องแก้ให้ตรงกับตาราง (เดิมพิมพ์ได้แต่บันทึกไม่ได้) + บอกเหตุผลเมื่อชี้เมาส์
-  const roTip = !fullEdit ? t("อยู่ในโหมดดูอย่างเดียว — กดปุ่ม ✏️ แก้ไข ด้านล่างก่อนจึงจะแก้ได้ (การจัดกลุ่ม/เรียงลำดับใช้ได้ตลอด)", "View-only mode — press ✏️ Edit below to make changes (grouping/sorting always works)") : undefined;
+  const roTip = !fullEdit ? t("อยู่ในโหมดดูอย่างเดียว — ดับเบิลคลิกที่แถวเพื่อแก้ไข (การจัดกลุ่ม/เรียงลำดับใช้ได้ตลอด)", "View-only mode — double-click a row to edit (grouping/sorting always works)") : undefined;
   const cellEdit = fullEdit;
   const costCols = useMemo<LineColumn<CostRow>[]>(() => [
     { key: "item", header: t("วัสดุ / กลุ่ม", "Material / group"), minWidth: 220, sortable: true, getValue: (r) => r.item_name,
@@ -2101,9 +2102,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
             </div>
           )}
           <button onClick={requestClose} disabled={saving} className="h-9 px-4 text-sm border border-slate-200 rounded-lg disabled:opacity-50">{t("ปิด", "Close")}</button>
-          {canEdit && form?.id && !editing && (modalTab === "info" || modalTab === "cost") && (
-            <button onClick={() => setEditing(true)} className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50">{t("✏️ แก้ไข", "✏️ Edit")}</button>
-          )}
+          {/* ไม่มีปุ่ม ✏️ แก้ไขแล้ว (เจ้าของขอ 2026-11-07) — ดับเบิลคลิกช่อง/แถวที่ล็อกเพื่อแก้ · บอกวิธีไว้ตรงที่ปุ่มเคยอยู่ */}
+          {canEdit && form?.id && (modalTab === "info" || modalTab === "cost") && (editing ? (
+            <span className="inline-flex h-9 items-center gap-1 px-1 text-xs font-medium text-blue-700"><Icon name="edit" /> {t("กำลังแก้ไข", "Editing")}</span>
+          ) : (
+            <span className="inline-flex h-9 items-center gap-1 px-1 text-xs text-slate-400"><Icon name="edit" /> {modalTab === "cost" ? t("ดับเบิลคลิกที่แถวเพื่อแก้ไข", "Double-click a row to edit") : t("ดับเบิลคลิกที่ช่องเพื่อแก้ไข", "Double-click a field to edit")}</span>
+          ))}
           {canEdit && modalTab === "info" && <button onClick={save} disabled={saving} className="h-9 px-4 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50">{saving ? t("กำลังบันทึก...", "Saving...") : t("บันทึก", "Save")}</button>}
         </>}>
         {loadingForm ? <div className="py-12 text-center text-slate-400">{t("กำลังโหลด...", "Loading...")}</div> : form && !form.id ? createLayout : form && (
@@ -2135,7 +2139,8 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 left={{ title: t("ข้อมูลงาน", "Job info"), icon: "document", content: (size: SplitSize) => {
                   const narrow = size === "narrow";
                   return (
-                    <div className="space-y-3">
+                    /* โหมดดู: ดับเบิลคลิกช่องที่ล็อก = เข้าโหมดแก้ไข + เคอร์เซอร์ไปที่ช่องนั้น (แทนปุ่ม ✏️ แก้ไข · ของกลาง DblClickToEdit) */
+                    <DblClickToEdit className="space-y-3" locked={!fullEdit} onEdit={canEdit ? () => setEditing(true) : undefined}>
                       <div className="grid grid-cols-2 gap-2">{fld.code}{fld.status}</div>
                       {fld.name}
                       <div className={`grid gap-2 ${narrow ? "grid-cols-1" : "grid-cols-2"}`}>{fld.brand}{fld.drive}</div>
@@ -2149,7 +2154,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                         ]} />
                       </div>
                       {fld.parent}
-                    </div>
+                    </DblClickToEdit>
                   );
                 } }}
                 right={{ title: t("รายละเอียดงาน", "Job details"), icon: "note", content: (

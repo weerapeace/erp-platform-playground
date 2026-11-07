@@ -940,6 +940,14 @@ export const SHARED_PARTS: SharedPart[] = [
     when: "หน้าที่มีช่องกรอกเรียงกันเยอะ ๆ",
   },
   {
+    key: "dbl-click-edit", label: "ดับเบิลคลิกช่องที่ล็อกเพื่อแก้ทั้งฟอร์ม", code: "DblClickToEdit", category: "input",
+    source: { path: "components/dbl-click-edit", names: ["DblClickToEdit"] },
+    what: "ฟอร์มที่เปิดมาแบบดูอย่างเดียว ดับเบิลคลิก (หรือแตะ 2 ครั้ง) ช่องไหนก็ได้ = เข้าโหมดแก้ไขทั้งฟอร์ม แล้วเคอร์เซอร์ไปรอที่ช่องนั้น ไม่ต้องมีปุ่ม \"แก้ไข\"",
+    when: "ป๊อปอัป/หน้ารายละเอียดที่มีโหมดดู ↔ โหมดแก้ (เช่น ใบงานออกแบบ)",
+    notWhen: "แก้ทีละช่องแล้วบันทึกทันที ใช้ InlineEdit · ตารางรายการใช้ LineItemsGrid readonly + onRequestEdit",
+    doc: "dbl-click-edit.md",
+  },
+  {
     key: "credit-term-input", label: "ช่องเครดิต (วันจ่าย)", code: "PurchaseCreditTermInput", category: "input",
     source: { path: "components/purchase-credit-term-input" },
     what: "ตั้งเครดิตร้าน/ลูกค้า เช่น จ่ายทันที สิ้นเดือน หรือ N วัน (กติกาคิดวันอยู่ที่ศูนย์กลาง)",
