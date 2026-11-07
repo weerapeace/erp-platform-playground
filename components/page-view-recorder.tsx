@@ -30,6 +30,22 @@ function shouldCount(path: string): boolean {
   return topPath.startsWith("/app/");                     // ในกรอบ: นับเฉพาะกรอบของแอปเดี่ยว
 }
 
+/**
+ * กันนับซ้ำข้ามหน้าต่าง: หน้าเดียวกันถูกนับไปแล้วภายใน 3 วินาที (จากแท็บ/กรอบไหนก็ได้) = ไม่นับอีก
+ * เคสจริง: เปลือกแอปเดี่ยว /app โหลดกรอบหน้าซ้ำ 2 รอบติดกันตอนเปิด → เดิมนับ 2 ครั้งห่างกัน 0.1 วิ
+ */
+const DEDUPE_KEY = "erp.pageView.last";
+const DEDUPE_MS = 3000;
+function seenJustNow(path: string): boolean {
+  try {
+    const now = Date.now();
+    const last = JSON.parse(localStorage.getItem(DEDUPE_KEY) || "null") as { p?: string; t?: number } | null;
+    if (last?.p === path && typeof last.t === "number" && now - last.t < DEDUPE_MS) return true;
+    localStorage.setItem(DEDUPE_KEY, JSON.stringify({ p: path, t: now }));
+  } catch { /* ที่เก็บในเครื่องใช้ไม่ได้ — นับตามปกติ */ }
+  return false;
+}
+
 async function refreshToken(): Promise<void> {
   try { token = (await supabaseBrowser.auth.getSession()).data.session?.access_token ?? null; } catch { token = null; }
 }
@@ -74,7 +90,7 @@ export function PageViewRecorder() {
     const path = normalizePagePath(pathname);
     if (!path || pathname === lastPath) return;
     lastPath = pathname;
-    if (shouldCount(pathname ?? "")) addPageView(buf, path);
+    if (shouldCount(pathname ?? "") && !seenJustNow(path)) addPageView(buf, path);
   }, [pathname]);
 
   return null;
