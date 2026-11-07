@@ -74,13 +74,9 @@ export const SAME_JOB_LABEL: Record<string, string> = {
   "line-items": "ตารางบรรทัดเอกสาร",
   "popup": "ป๊อปอัป",
   "select": "ช่องเลือกแบบพิมพ์ค้นหา",
-  "sku-pick": "เลือกสินค้า",
-  "supplier-pick": "เลือกร้าน / ผู้จำหน่าย",
-  "attach": "ไฟล์แนบของรายการ (2 ระบบ)",
   "file-field": "ช่องไฟล์ในฟอร์ม",
   "markup": "วาดรูปทรง / ข้อความบนรูป",
   "image-box": "ลากกรอบ / จุดบนรูป",
-  "import": "นำเข้าไฟล์ Excel / CSV",
 };
 
 /**
@@ -100,14 +96,10 @@ export const JOB_VERDICT_LABEL: Record<JobVerdict, { label: string; hint: string
 
 export const SAME_JOB_VERDICT: Record<string, { verdict: JobVerdict; why: string }> = {
   "select": { verdict: "keep", why: "ดูโค้ดแล้ว (2026-11-07) ไม่ใช่ตัวซ้ำ: แบบที่ 2 พิมพ์แล้วสั่งทำทันที + ปักดาวโปรด (ใช้ย้ายหมวดในหน้าจัดเว็บร้าน) · ตัวหลักเป็นช่องเลือกที่เก็บค่าในฟอร์ม" },
-  "sku-pick": { verdict: "merge", why: "ตัวเก่าเหลือ 1 จุดในระบบจัดซื้อชุดเก่า (/purchase-requests) ต้องตัดสินใจเลิกระบบนั้นก่อน · แบบกริดรูปไม่มีใครใช้" },
-  "supplier-pick": { verdict: "merge", why: "ย้ายแล้ว 3 จุด (2026-11-07) เหลือ /purchase-orders ระบบจัดซื้อชุดเก่า ต้องตัดสินใจเลิกระบบนั้นก่อน" },
   "popup": { verdict: "keep", why: "ดูโค้ดแล้ว (2026-11-07) ไม่ใช่ตัวซ้ำ: ป๊อปฝังหน้าอื่นต้องใช้พื้นที่เต็มไม่มีขอบ มีปุ่มเปิดเต็มจอ และกันเมาส์หลุดตอนลาก ซึ่งป๊อปอัปกลางยังไม่มี · ใช้ผ่าน EmbedModal เท่านั้น" },
-  "import": { verdict: "merge", why: "ป๊อปนำเข้า CSV แบบเก่าเหลือจุดเดียวในหน้าสินค้าชุดทดลองเก่า (/products-crud) ย้ายไม่คุ้ม (ต้องสร้างระบบนำเข้าให้ตารางเก่า) — รอเลิกหน้านั้นทีเดียว" },
   "file-field": { verdict: "merge", why: "ช่องหลายไฟล์ใช้จุดเดียว และยังไม่ทำตามกฎที่เก็บไฟล์ ควรให้ช่องไฟล์เดี่ยวรับหลายไฟล์ได้แทน" },
   "markup": { verdict: "merge", why: "ทั้งคู่วาดรูปทรง/ข้อความบนรูป ตัวกลางที่เลือกไว้คือกระดานวาดของใบงานออกแบบ · งานใหญ่ ต้องลองกับรูปสินค้าจริงก่อน" },
   "image-box": { verdict: "merge", why: "ทั้งคู่ลากกรอบบนรูปเป็น % ของรูป · ตัวหลักต้องเพิ่มทรงกรอบ (วงรี/หัวใจ) ก่อน กรอบบนรูปถึงย้ายมาได้" },
-  "attach": { verdict: "merge", why: "เช็กแล้ว + เจ้าของเลือก (2026-11-07): เอกสารแนบเก็บที่เก็บส่วนตัว (RecordFilesField) · ย้ายใบเสนอราคา/ใบสั่งขาย/เอกสารพนักงานแล้ว (ยังไม่เคยมีไฟล์) · แผงเก่าเหลือหน้าจัดซื้อชุดเก่า · รูปสินค้า 9,470 ไฟล์ยังอยู่ R2 ตามเดิม" },
   "line-items": { verdict: "keep", why: "ตารางขายมีส่วนลด ภาษี สีของสินค้า เฉพาะเอกสารขาย · ถ้าจะเปลี่ยนหน้าตาตารางขายต้องถามเจ้าของก่อน" },
 };
 
@@ -296,15 +288,7 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "ค้นหาสินค้าด้วยรหัสหรือชื่อ มีรูปย่อ จำตัวที่เลือกล่าสุด",
     when: "ทุกช่องที่ต้องเลือกสินค้า 1 ตัว",
     notWhen: "เลือกหลายตัวพร้อมกัน ให้ใช้ SkuMultiPicker",
-    sameJob: "sku-pick", primary: true,
-    note: "ตัวที่ใช้จริงทั้งระบบ — ทะเบียนเดิมชี้ไปตัวเก่า (ProductPicker)",
-  },
-  {
-    key: "product-picker-old", label: "เลือกสินค้า ตัวเก่า", code: "ProductPicker", category: "pick",
-    source: { path: "components/pickers", names: ["ProductPicker"] },
-    what: "อ่านตารางสินค้าชุดทดลองเก่า (playground-products) ไม่ใช่สินค้าจริง",
-    notWhen: "ห้ามใช้ในงานใหม่ ให้ใช้ SkuPicker",
-    sameJob: "sku-pick", replacedBy: "sku-picker", legacyKey: "product_picker",
+    note: "ตัวที่ใช้จริงทั้งระบบ — ProductPicker ตัวเก่า (สินค้าชุดทดลอง) ลบแล้ว 2026-11-07",
   },
   {
     key: "sku-multi-picker", label: "เลือกสินค้าหลายตัว", code: "SkuMultiPickerModal", category: "pick",
@@ -323,16 +307,7 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "components/supplier-picker" },
     what: "ค้นร้านจากทะเบียนคู่ค้าจริง (partners) + ปุ่มเพิ่มร้านใหม่",
     when: "ทุกช่องเลือกร้าน",
-    notWhen: "ห้ามใช้ SupplierPicker ตัวเก่าใน components/pickers (ค้นร้านจริงไม่เจอ)",
-    sameJob: "supplier-pick", primary: true,
-  },
-  {
-    key: "supplier-picker-old", label: "เลือกร้าน ตัวเก่า", code: "SupplierPicker (ชุด pickers)", category: "pick",
-    source: { path: "components/pickers", names: ["SupplierPicker"] },
-    what: "อ่านตารางร้านของระบบจัดซื้อชุดเก่าที่มีแค่ 5 ร้าน ทำให้ค้นร้านจริงไม่เจอ",
-    notWhen: "ห้ามใช้ในงานใหม่ ให้ใช้ SupplierPicker (components/supplier-picker)",
-    sameJob: "supplier-pick", replacedBy: "supplier-picker", legacyKey: "supplier_picker",
-    note: "เหลือที่เดียว: หน้า /purchase-orders (ระบบจัดซื้อชุดเก่า ตารางใบสั่งซื้อผูกกับตารางร้าน 5 ร้านนี้เอง ยังไม่เคยมีใบจริง) ห้ามเปลี่ยนเป็นตัวใหม่เฉย ๆ เพราะบันทึกจะไม่ผ่าน ต้องตัดสินใจเลิกระบบนั้นก่อน",
+    notWhen: "ตัวเก่าใน components/pickers (ร้านทดลอง 5 ร้าน) ลบแล้ว 2026-11-07 — ใช้ตัวนี้ตัวเดียว",
   },
   {
     key: "customer-picker", label: "เลือกลูกค้า", code: "CustomerPicker", category: "pick",
@@ -430,14 +405,6 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "file-drop.md",
   },
   {
-    key: "attachment-panel", label: "แผงไฟล์แนบเอกสาร ตัวเก่า", code: "AttachmentPanel", category: "file",
-    source: { path: "components/attachment-panel" },
-    what: "แนบไฟล์กับเอกสาร แต่เก็บเข้าที่เก็บรูปสินค้า (R2 · ตาราง erp_playground_attachments)",
-    notWhen: "เอกสารแนบใหม่ให้ใช้ RecordFilesField (ที่เก็บส่วนตัว + สิทธิ์ตามชนิดเอกสาร)",
-    sameJob: "attach", replacedBy: "record-files",
-    note: "ย้ายแล้ว 2026-11-07: ใบเสนอราคา · ใบสั่งขาย · เอกสารพนักงาน (ยังไม่เคยมีไฟล์) — เหลือหน้าระบบจัดซื้อชุดเก่า /purchase-orders · /purchase-requests · ตัวที่เก็บรูปสินค้า (/api/attachments) ยังใช้งานปกติ ไม่ได้เลิก",
-  },
-  {
     key: "file-input", label: "ช่องไฟล์แนบเดี่ยว", code: "FileInput", category: "file",
     source: { path: "components/file-input" },
     what: "อัปโหลดไฟล์แนบ 1 ไฟล์ (รูปหรือ PDF) เก็บตามกฎที่เก็บไฟล์",
@@ -455,7 +422,6 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "แนบไฟล์กับรายการใดก็ได้ เก็บในที่เก็บส่วนตัว (Supabase) ลิงก์เปิดไฟล์หมดอายุเอง · สิทธิ์ตามชนิดรายการ (RECORD_FILE_PERMS)",
     when: "ไฟล์แนบเอกสาร (ใบเสนอราคา ใบสั่งขาย เอกสารพนักงาน สลิป) และช่องไฟล์แนบในลิ้นชัก MasterCRUD",
     notWhen: "รูปสินค้า (แกลเลอรี/รูปปก) ใช้ตัวจัดการรูปที่เก็บ R2 · ชนิดรายการใหม่ที่ไม่ใช่สินค้า ต้องเพิ่มสิทธิ์ใน RECORD_FILE_PERMS (lib/record-files.ts)",
-    sameJob: "attach", primary: true,
   },
   {
     key: "image-markup", label: "วาดบนรูปแบบกระดาน", code: "ImageMarkup", category: "file",
@@ -487,13 +453,6 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "import-wizard", label: "ตัวช่วยนำเข้าไฟล์", code: "ImportWizard", category: "data",
     source: { path: "components/import-wizard" },
     what: "อ่านไฟล์ Excel/CSV → จับคู่คอลัมน์ → ตรวจ → นำเข้า",
-    sameJob: "import", primary: true,
-  },
-  {
-    key: "import-dialog", label: "ป๊อปนำเข้า CSV แบบเก่า", code: "ImportDialog", category: "data",
-    source: { path: "components/import-export" },
-    what: "นำเข้า CSV ตาม field config",
-    sameJob: "import", replacedBy: "import-wizard",
   },
   {
     key: "line-import", label: "ลงรายการสินค้าแบบตาราง Excel", code: "LineImport", category: "data",
@@ -799,6 +758,12 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "help-guides", label: "คู่มือวิธีใช้งาน", code: "HelpGuides", category: "layout",
     source: { path: "components/help-guides" },
     what: "คู่มือที่ตั้งและแก้เองในเว็บได้ ไม่ต้องแก้โค้ด",
+  },
+  {
+    key: "legacy-moved", label: "หน้าแจ้ง หน้านี้ย้ายไปแล้ว", code: "LegacyMovedNotice", category: "layout",
+    source: { path: "components/legacy-moved" },
+    what: "แทนหน้าระบบเก่าที่ปิดแล้ว บอกว่าไปใช้หน้าไหนแทน + ปุ่มพาไป (ข้อมูลเก่าไม่ลบ)",
+    when: "ปิดหน้าเก่าที่คนอาจบุ๊กมาร์กไว้ เช่น ระบบจัดซื้อชุดเก่า (2026-11-07)",
   },
 
   // ตาราง / ปฏิทิน

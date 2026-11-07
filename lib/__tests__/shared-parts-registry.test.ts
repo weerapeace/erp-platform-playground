@@ -118,12 +118,12 @@ describe("ตัวนับ ใครใช้บ้าง (scripts/shared-part
     expect(r.sources["components/modal"].places.some((p) => p.kind === "page")).toBe(true);
   });
 
-  it("source แบบระบุชื่อ นับเฉพาะชื่อนั้น (SkuPicker ไม่ปน ProductPicker)", () => {
-    expect(r.sources["components/pickers#SkuPicker"].files).toBeGreaterThan(r.sources["components/pickers#ProductPicker"].files);
+  it("source แบบระบุชื่อ นับเฉพาะชื่อนั้น (SkuPicker ไม่ปน WarehousePicker ในไฟล์เดียวกัน)", () => {
+    expect(r.sources["components/pickers#SkuPicker"].files).toBeGreaterThan(r.sources["components/pickers#WarehousePicker"].files);
   });
 
   it("ไม่นับไฟล์ข้างในตัวเอง", () => {
-    expect(r.sources["components/pickers#SupplierPicker"].places.map((p) => p.label)).not.toContain("pickers");
+    expect(r.sources["components/pickers#SkuPicker"].places.map((p) => p.label)).not.toContain("pickers");
   });
 
   it("แท็บยังไม่ลงทะเบียน ไม่มีตัวที่ลงทะเบียนแล้ว", () => {

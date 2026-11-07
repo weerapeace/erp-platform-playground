@@ -96,20 +96,12 @@ const APPS: AppEntry[] = [
   },
 
   // ============= Operations (การปฏิบัติงาน) =============
+  // สินค้า/ใบขอซื้อ/ใบสั่งซื้อ ชุดเก่า (/products-crud · /purchase-requests · /purchase-orders) ปิดแล้ว 2026-11-07
+  // → ไปทางการ์ด จัดซื้อ (/purchasing) และ สินค้า (/master/skus) แทน
   {
-    key: "products", icon: "📦", name: "สินค้า", subtitle: "Products & Catalog",
-    href: "/products-crud", category: "Operations",
-    color: "from-blue-500 to-blue-600", status: "live",
-  },
-  {
-    key: "purchase-requests", icon: "📋", name: "ใบขอซื้อ", subtitle: "Purchase Requests",
-    href: "/purchase-requests", category: "Operations",
+    key: "purchasing", icon: "🛒", name: "จัดซื้อ", subtitle: "ขอซื้อ · ใบสั่งซื้อ · รับของ",
+    href: "/purchasing", category: "Operations",
     color: "from-indigo-500 to-indigo-600", status: "live",
-  },
-  {
-    key: "purchase-orders", icon: "🛒", name: "ใบสั่งซื้อ", subtitle: "Purchase Orders",
-    href: "/purchase-orders", category: "Operations",
-    color: "from-violet-500 to-violet-600", status: "live",
   },
   {
     key: "sales-orders", icon: "🧾", name: "ใบสั่งขาย", subtitle: "Sales Orders",

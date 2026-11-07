@@ -7,7 +7,8 @@ import {
   ERPInput, ERPTextarea, ERPSelect, LineItems,
   type LineItem,
 } from "@/components/form";
-import { ProductPicker, SupplierPicker, type ProductOption, type SupplierOption } from "@/components/pickers";
+// 2026-11-07: เปลี่ยนจากตัวเลือกร้านชุดเก่า (components/pickers · ตารางทดลอง) เป็นตัวที่ใช้จริง (ทะเบียนคู่ค้า)
+import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picker";
 
 // ---- Purchase Request Form Demo ----
 
@@ -16,7 +17,7 @@ type PRFormData = {
   department: string;
   requiredDate: string;
   priority: string;
-  supplier: SupplierOption | null;
+  supplier: { id: string; name: string } | null;
   note: string;
   items: LineItem[];
 };
@@ -42,6 +43,7 @@ const PRIORITY_OPTIONS = [
 
 export default function FormPlaygroundPage() {
   const [formData, setFormData] = useState<PRFormData>(EMPTY_FORM);
+  const [suppliers] = usePartnerSuppliers();
   const [errors, setErrors] = useState<Partial<Record<keyof PRFormData, string>>>({});
   const [loading, setLoading] = useState(false);
   const [readonly, setReadonly] = useState(false);
@@ -192,8 +194,9 @@ export default function FormPlaygroundPage() {
 
                 <ERPFormField label="ผู้จำหน่ายที่ต้องการ" hint="ถ้าไม่ระบุ จัดซื้อจะเลือกให้">
                   <SupplierPicker
-                    value={formData.supplier}
-                    onChange={(v) => update("supplier", v)}
+                    value={formData.supplier?.id ?? ""}
+                    suppliers={suppliers}
+                    onChange={(id, name) => update("supplier", id ? { id, name } : null)}
                     disabled={readonly}
                   />
                 </ERPFormField>

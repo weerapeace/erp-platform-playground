@@ -15,8 +15,10 @@ export type DashboardLayout = {
 // widget เสริมทั้งหมด (ด้านบน main content)
 export const ALL_WIDGETS = [
   "goals", "focus", "plan", "kpi", "pinned", "recent", "agenda",
-  "saleschart", "lowstock", "production", "finance", "activity", "team", "shortcuts",
+  "saleschart", "production", "finance", "activity", "team", "shortcuts",
 ] as const;
+// "lowstock" (สต๊อกใกล้หมด) เอาออก 2026-11-07 — ตัวเลขมาจากสินค้าชุดทดลอง (erp_playground_products) ไม่ใช่สต๊อกจริง
+//   ไม่มีตำแหน่งไหนเปิดใช้อยู่ · อยากได้คืนต้องทำจากสต๊อก SKU จริง (lib/sku-stock)
 export type WidgetKey = (typeof ALL_WIDGETS)[number];
 
 export const WIDGET_META: Record<WidgetKey, { label: string; icon: string; desc: string }> = {
@@ -28,7 +30,6 @@ export const WIDGET_META: Record<WidgetKey, { label: string; icon: string; desc:
   recent: { label: "แจ้งเตือนล่าสุด", icon: "🔔", desc: "แจ้งเตือนใหม่ล่าสุด" },
   agenda: { label: "ครบกำหนดสัปดาห์นี้", icon: "📅", desc: "งานมีกำหนดส่งใน 7 วัน" },
   saleschart: { label: "กราฟยอดขาย", icon: "📈", desc: "ยอดขายรวม 14 วันล่าสุด" },
-  lowstock: { label: "สต๊อกใกล้หมด", icon: "📦", desc: "สินค้าต่ำกว่าขั้นต่ำ" },
   production: { label: "สถานะผลิต", icon: "🏭", desc: "งานผลิตที่ยังไม่เสร็จ" },
   finance: { label: "การเงินสรุป", icon: "💰", desc: "ต่ออายุ/รายการการเงินใกล้ถึง" },
   activity: { label: "กิจกรรมล่าสุด", icon: "🕐", desc: "ใครทำอะไรล่าสุด (audit)" },

@@ -111,8 +111,6 @@ export const navGroups = [
       { href: "/inventory/sku-stock", icon: "📊", labelTH: "ยอดคงเหลือ SKU ⭐" },
       { href: "/m/product-groups",   icon: "🧺", labelTH: "Product Groups" },
       { href: "/m/product-variations", icon: "🎨", labelTH: "Product Variations" },
-      { href: "/purchase-requests", icon: "📋", labelTH: "ใบขอซื้อ (PR) legacy" },
-      { href: "/purchase-orders",   icon: "🛒", labelTH: "ใบสั่งซื้อ (PO)" },
       { href: "/quotations",        icon: "📄", labelTH: "ใบเสนอราคา (QT)" },
       { href: "/sales-orders",      icon: "🧾", labelTH: "ใบขาย (SO)" },
       { href: "/billing-notes",     icon: "📑", labelTH: "ใบวางบิล" },
