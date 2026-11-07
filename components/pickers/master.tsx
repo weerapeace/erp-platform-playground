@@ -6,6 +6,11 @@
  * สร้าง picker component สำหรับ master data (customer, employee, warehouse, ...)
  * ทุก picker ทำงานเหมือนกัน: search + recently used + create new (ถ้ามี permission)
  *
+ * เลือกหลายรายการ (เจ้าของขอ 2026-11-07 "ขอปุ่มติ๊กหลายรายการ ถ้าเลือกแล้วต้องไม่โชว์"):
+ *   <CustomerPicker value={null} onChange={() => {}} exclude={เลือกแล้ว.map(x => x.id)} onPickMany={(vs) => เพิ่ม(vs)} />
+ *   - onPickMany = โหมดติ๊ก: กดแถว = ติ๊ก/เอาติ๊กออก · ติ๊กข้ามคำค้นได้ · "ติ๊กทั้งหมดที่ค้นเจอ" · ปุ่ม "เพิ่ม N รายการ"
+ *   - exclude    = ซ่อนตัวที่เลือกไปแล้ว (ใช้ได้ทั้งโหมดเดี่ยวและโหมดติ๊ก)
+ *
  * ใช้ Type Generics เพื่อให้ value type ถูกต้องในแต่ละ picker
  */
 
@@ -66,7 +71,7 @@ const IconLoader  = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="
 
 export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfig<V>) {
   return function MasterPicker({
-    value, onChange, placeholder: placeholderProp, disabled, error, disableCreate, onAddNew,
+    value, onChange, placeholder: placeholderProp, disabled, error, disableCreate, onAddNew, exclude, onPickMany,
   }: {
     value: V | null;
     onChange: (v: V | null) => void;
@@ -80,6 +85,10 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
      * ส่งคำค้นที่พิมพ์ค้างไว้ไปให้เติมในฟอร์มได้
      */
     onAddNew?: (query: string) => void;
+    /** ซ่อนรายการเหล่านี้ (เช่น ตัวที่เลือกไปแล้ว) — ไม่โผล่ทั้งผลค้นหา/ล่าสุด/รายการโปรด */
+    exclude?: string[];
+    /** โหมดติ๊กหลายรายการ: กดแถว = ติ๊ก · ปุ่ม "เพิ่ม N รายการ" ส่งทั้งหมดที่ติ๊กมาที่นี่ (value/onChange ไม่ใช้เลือก) */
+    onPickMany?: (vs: V[]) => void;
   }) {
     const { can } = useAuth();
     const t = useT();
@@ -93,6 +102,10 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
     const [loading, setLoading] = useState(false);
     const [creating, setCreating] = useState(false);
     const boxRef = useRef<HTMLDivElement>(null);
+    const multi = !!onPickMany;
+    /** ตัวที่ติ๊กไว้ (โหมดหลายรายการ) — คงอยู่แม้เปลี่ยนคำค้น */
+    const [checked, setChecked] = useState<Map<string, V>>(() => new Map());
+    const excluded = new Set(exclude ?? []);
 
     const canCreate = cfg.allowCreate !== false && !disableCreate && can(cfg.createPermission);
 
@@ -130,7 +143,7 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
       const timer = setTimeout(async () => {
         try {
           const endpoint = cfg.listEndpoint ?? `/api/master/${cfg.apiPath}`;
-          const res = await apiFetch(`${endpoint}?search=${encodeURIComponent(query)}&limit=10`);
+          const res = await apiFetch(`${endpoint}?search=${encodeURIComponent(query)}&limit=${multi ? 50 : 10}`);   // โหมดติ๊ก: โชว์มากขึ้น (เช่น ลูกค้าหลายสาขา)
           const json = await res.json();
           if (active) setResults((json.data ?? []) as V[]);
         } catch { if (active) setResults([]); }
@@ -143,6 +156,16 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
       onChange(v); pushRecent(cfg.storageKey, v); setOpen(false); setQuery("");
     }, [onChange]);
 
+    // ── โหมดติ๊กหลายรายการ ──
+    const toggleCheck = (v: V) => setChecked((m) => { const n = new Map(m); if (n.has(v.id)) n.delete(v.id); else n.set(v.id, v); return n; });
+    const setCheckedMany = (vs: V[], on: boolean) => setChecked((m) => { const n = new Map(m); for (const v of vs) { if (on) n.set(v.id, v); else n.delete(v.id); } return n; });
+    const confirmMany = () => {
+      const vs = [...checked.values()].filter((v) => !excluded.has(v.id));
+      if (!vs.length || !onPickMany) return;
+      for (const v of vs) pushRecent(cfg.storageKey, v);
+      onPickMany(vs); setChecked(new Map()); setOpen(false); setQuery("");
+    };
+
     const createNew = async () => {
       if (!query.trim()) return;
       setCreating(true);
@@ -154,29 +177,39 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
         });
         const json = await res.json();
         if (json.error) { alert(json.error); return; }
-        select(json.data as V);
+        if (multi) { toggleCheck(json.data as V); setQuery(""); } else select(json.data as V);
       } finally { setCreating(false); }
     };
 
     const exactMatch = results.some(r => r.name.toLowerCase() === query.trim().toLowerCase());
     const showCreate = canCreate && query.trim() && !exactMatch && !loading;
+    // ตัวที่ exclude (เลือกไปแล้ว) ไม่โชว์เลย
+    const shown = (vs: V[]) => (excluded.size ? vs.filter(v => !excluded.has(v.id)) : vs);
+    const favsShown = shown(favs);
     const favIds = new Set(favs.map(f => f.id));
     // ไม่มีคำค้น: โชว์ favorites ก่อน แล้วตามด้วย recent (ที่ไม่ซ้ำ favorite)
-    const baseList = recent.length ? recent : results;
+    const baseList = shown(recent.length ? recent : results);
     const list = query.trim()
-      ? results
-      : [...favs, ...baseList.filter(v => !favIds.has(v.id))];
-    const recentItems = recent.filter(v => !favIds.has(v.id));
+      ? shown(results)
+      : [...favsShown, ...baseList.filter(v => !favIds.has(v.id))];
+    const recentItems = shown(recent).filter(v => !favIds.has(v.id));
     const recentIds = new Set(recent.map(r => r.id));
     const defaultItems = query.trim()
       ? []
-      : results.filter(v => !favIds.has(v.id) && !recentIds.has(v.id));
+      : shown(results).filter(v => !favIds.has(v.id) && !recentIds.has(v.id));
+    const checkedCount = [...checked.keys()].filter(id => !excluded.has(id)).length;
+    const searchHits = query.trim() ? shown(results) : [];
+    const allHitsChecked = searchHits.length > 0 && searchHits.every(v => checked.has(v.id));
 
     // row เดียว — ใช้ซ้ำ (มีปุ่มดาวปักหมุด)
     const renderRow = (v: V) => (
       <div key={v.id}
-        className={`w-full px-3 py-2 flex items-center gap-1.5 hover:bg-blue-50 transition-colors ${value?.id === v.id ? "bg-blue-50" : ""}`}>
-        <button type="button" onClick={() => select(v)} className="flex-1 flex flex-col text-left min-w-0">
+        className={`w-full px-3 py-2 flex items-center gap-1.5 hover:bg-blue-50 transition-colors ${(multi ? checked.has(v.id) : value?.id === v.id) ? "bg-blue-50" : ""}`}>
+        {multi && (
+          <input type="checkbox" checked={checked.has(v.id)} onChange={() => toggleCheck(v)} aria-label={v.name}
+            className="h-4 w-4 shrink-0 cursor-pointer accent-blue-600" />
+        )}
+        <button type="button" onClick={() => (multi ? toggleCheck(v) : select(v))} className="flex-1 flex flex-col text-left min-w-0">
           <div className="flex items-start gap-2 flex-wrap">
             {v.code && <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 shrink-0">{v.code}</span>}
             {cfg.badgeRender?.(v)}
@@ -201,10 +234,10 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
             error ? "border-red-300" : "border-slate-200"
           } ${disabled ? "bg-slate-50 text-slate-400 cursor-not-allowed" : "hover:border-blue-300"}`}>
           <span className="flex-1 truncate">
-            {value ? <>{value.code && <span className="font-mono text-xs text-slate-400 mr-1">{value.code}</span>}{value.name}</>
+            {value && !multi ? <>{value.code && <span className="font-mono text-xs text-slate-400 mr-1">{value.code}</span>}{value.name}</>
                    : <span className="text-slate-400">{placeholder}</span>}
           </span>
-          {value && !disabled && (
+          {value && !disabled && !multi && (
             <span onClick={e => { e.stopPropagation(); onChange(null); }} className="text-slate-300 hover:text-red-500"><IconX /></span>
           )}
           <span className="text-slate-400"><IconChev /></span>
@@ -225,11 +258,20 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
               ) : list.length === 0 && !showCreate ? (
                 <div className="px-3 py-4 text-center text-sm text-slate-400">{t(cfg.emptyLabel, cfg.emptyLabel_en ?? "No results")}</div>
               ) : query.trim() ? (
-                list.map(renderRow)
+                <>
+                  {multi && searchHits.length > 1 && (
+                    <button type="button" onClick={() => setCheckedMany(searchHits, !allHitsChecked)}
+                      className="w-full px-3 py-1.5 flex items-center gap-1.5 text-xs text-blue-600 hover:bg-blue-50 border-b border-slate-100">
+                      <input type="checkbox" readOnly checked={allHitsChecked} tabIndex={-1} className="h-3.5 w-3.5 accent-blue-600 pointer-events-none" />
+                      {allHitsChecked ? t("เอาติ๊กออกทั้งหมดที่ค้นเจอ", "Uncheck all results") : t(`ติ๊กทั้งหมดที่ค้นเจอ (${searchHits.length})`, `Check all results (${searchHits.length})`)}
+                    </button>
+                  )}
+                  {list.map(renderRow)}
+                </>
               ) : (
                 <>
-                  {favs.length > 0 && <div className="px-3 py-1 text-xs text-amber-500">★ {t("รายการโปรด", "Favorites")}</div>}
-                  {favs.map(renderRow)}
+                  {favsShown.length > 0 && <div className="px-3 py-1 text-xs text-amber-500">★ {t("รายการโปรด", "Favorites")}</div>}
+                  {favsShown.map(renderRow)}
                   {recentItems.length > 0 && (
                     <div className="px-3 py-1 text-xs text-slate-400">⏱ {t("เคยใช้ล่าสุด", "Recently used")}</div>
                   )}
@@ -259,6 +301,24 @@ export function createMasterPicker<V extends MasterValue>(cfg: MasterPickerConfi
                 </button>
               )}
             </div>
+
+            {/* โหมดติ๊กหลายรายการ: แถบยืนยันท้าย dropdown */}
+            {multi && (
+              <div className="flex items-center gap-2 border-t border-slate-200 bg-slate-50 px-3 py-2">
+                <span className="flex-1 text-xs text-slate-500">
+                  {checkedCount ? t(`ติ๊กแล้ว ${checkedCount} รายการ`, `${checkedCount} checked`) : t("ติ๊กได้หลายรายการ", "Check several")}
+                </span>
+                {checkedCount > 0 && (
+                  <button type="button" onClick={() => setChecked(new Map())} className="h-7 px-2 text-xs text-slate-500 rounded hover:bg-slate-200">
+                    {t("ล้าง", "Clear")}
+                  </button>
+                )}
+                <button type="button" onClick={confirmMany} disabled={!checkedCount}
+                  className="h-7 px-3 text-xs font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40">
+                  {checkedCount ? t(`เพิ่ม ${checkedCount} รายการ`, `Add ${checkedCount}`) : t("เพิ่ม", "Add")}
+                </button>
+              </div>
+            )}
           </div>
         </FloatingDropdown>
       </div>

@@ -314,6 +314,7 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "components/pickers", names: ["CustomerPicker"] },
     what: "ค้นหาลูกค้าด้วยรหัส/ชื่อ จำตัวล่าสุด",
     when: "เอกสารขายทุกใบ",
+    note: "เลือกหลายราย: ใส่ onPickMany (ติ๊กหลายรายการ + ติ๊กทั้งหมดที่ค้นเจอ) + exclude (ซ่อนตัวที่เลือกแล้ว) — มีในทุก Picker ข้อมูลหลักที่สร้างจาก createMasterPicker (ลูกค้า ผู้ใช้ คลัง แผนก หน่วย ภาษี) · ใช้ที่หน้าแบรนด์ (ลูกค้าประจำหลายสาขา)",
   },
   {
     key: "user-picker", label: "เลือกผู้ใช้", code: "UserPicker", category: "pick",

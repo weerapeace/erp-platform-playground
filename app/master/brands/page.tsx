@@ -139,9 +139,16 @@ export default function BrandsPage() {
   );
 }
 
-/** ลูกค้าประจำแบรนด์ (หลายสาขา): ชิปชื่อ + × เอาออก · ช่องเลือกลูกค้ากลางไว้เพิ่มทีละราย */
+/** ลูกค้าประจำแบรนด์ (หลายสาขา): ชิปชื่อ + × เอาออก · ช่องเลือกลูกค้ากลางโหมดติ๊กหลายรายการ (ตัวที่เลือกแล้วไม่โชว์ในรายการ) */
 function BrandCustomersCell({ list, onChange }: { list: BrandCustomer[]; onChange: (list: BrandCustomer[]) => void }) {
+  const toast = useToast();
   const full = list.length >= BRAND_CUSTOMER_MAX;
+  const addMany = (vs: CustomerPickerValue[]) => {
+    const fresh = vs.filter((c) => !list.some((x) => x.id === c.id)).map((c) => ({ id: c.id, code: c.code, name: c.name }));
+    const room = BRAND_CUSTOMER_MAX - list.length;
+    if (fresh.length > room) toast.error(`ตั้งลูกค้าประจำแบรนด์ได้สูงสุด ${BRAND_CUSTOMER_MAX} ราย — เพิ่มให้ ${room} รายแรก`);
+    if (fresh.length && room > 0) onChange([...list, ...fresh.slice(0, room)]);
+  };
   return (
     <div className="mt-1 space-y-1">
       {list.length > 0 && (
@@ -160,12 +167,9 @@ function BrandCustomersCell({ list, onChange }: { list: BrandCustomer[]; onChang
         </div>
       )}
       {!full && (
-        <div className="max-w-[240px]" title="ลูกค้าประจำแบรนด์ — มีหลายสาขาเพิ่มได้หลายราย · ตอนสร้างใบสั่งขายจะมีปุ่มให้กดเลือกสาขา">
-          <CustomerPicker placeholder={list.length ? "+ เพิ่มลูกค้า / สาขา…" : "ลูกค้าประจำแบรนด์…"} value={null}
-            onChange={(c: CustomerPickerValue | null) => {
-              if (!c || list.some((x) => x.id === c.id)) return;
-              onChange([...list, { id: c.id, code: c.code, name: c.name }]);
-            }} />
+        <div className="max-w-[240px]" title="ลูกค้าประจำแบรนด์ — ติ๊กได้หลายสาขาพร้อมกัน · ตอนสร้างใบสั่งขายจะมีปุ่มให้กดเลือกสาขา">
+          <CustomerPicker placeholder={list.length ? "+ เพิ่มลูกค้า / สาขา…" : "ลูกค้าประจำแบรนด์…"} value={null} onChange={() => {}}
+            exclude={list.map((c) => c.id)} onPickMany={addMany} />
         </div>
       )}
     </div>
