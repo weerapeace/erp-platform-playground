@@ -52,9 +52,3 @@ export function orderCustomers(ids: string[], byId: Map<string, BrandCustomer>):
   return ids.map((id) => byId.get(id)).filter((c): c is BrandCustomer => !!c);
 }
 
-/** ข้อความสั้นรายชื่อลูกค้า เช่น "เซ็นทรัล สาขา 1, เซ็นทรัล สาขา 2 +3" */
-export function customerNamesText(cs: BrandCustomer[], show = 2): string {
-  if (!cs.length) return "";
-  const head = cs.slice(0, show).map((c) => c.name).join(", ");
-  return cs.length > show ? `${head} +${cs.length - show}` : head;
-}

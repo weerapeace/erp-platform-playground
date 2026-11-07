@@ -334,7 +334,7 @@ export function OrderBatchEntryModal({ open, onClose, onSaved, seedLines, seedCu
                   {teamCusts.map((c) => (
                     <button key={c.id} type="button" title={c.code ? `${c.code} · ${c.name}` : c.name}
                       onClick={() => { setCustomer({ id: c.id, code: c.code, name: c.name } as CustomerPickerValue); setAutoCustomer(false); setErr(""); }}
-                      className={`h-6 max-w-[200px] truncate rounded-full border px-2 text-[11px] ${customer?.id === c.id ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}>
+                      className={`max-w-full rounded-md border px-2 py-0.5 text-left text-[11px] leading-snug ${customer?.id === c.id ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}>
                       {c.name}
                     </button>
                   ))}

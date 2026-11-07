@@ -22,7 +22,6 @@ import { CustomerPicker, type CustomerPickerValue } from "@/components/pickers";
 import { DateInput } from "@/components/date-input";
 import { MoneyInput } from "@/components/money-input";
 import type { MoSoLinkInput, SoNeed, SoOption, SoOptionsResponse } from "@/lib/mo-so-rule";
-import { customerNamesText } from "@/lib/brand-customers";
 
 export type MoSoLinkValue = {
   /** pick = ใบที่มีอยู่ · new = สร้างใหม่ · skip = ไม่ผูก (เฉพาะแบรนด์เรา) */
@@ -255,7 +254,7 @@ export function MoSoLinkSection({ sku, productName, value, onChange, onState, no
       {value.mode === "pick" && (
         <div className="space-y-1">
           <div className="flex items-center justify-between text-[10px] text-slate-400">
-            <span>{data.filtered_by === "customer" ? `เฉพาะใบของ ${customerNamesText(brandCusts) || "ลูกค้าประจำแบรนด์"}` : data.filtered_by === "brand" ? "เฉพาะใบที่มีสินค้าแบรนด์นี้" : "ทุกใบที่ยังไม่ส่งครบ"} · ใบที่มีสินค้านี้ขึ้นก่อน</span>
+            <span>{data.filtered_by === "customer" ? (brandCusts.length > 1 ? `เฉพาะใบของลูกค้าประจำแบรนด์ (${brandCusts.length} ราย)` : `เฉพาะใบของ ${brandCusts[0]?.name ?? "ลูกค้าประจำแบรนด์"}`) : data.filtered_by === "brand" ? "เฉพาะใบที่มีสินค้าแบรนด์นี้" : "ทุกใบที่ยังไม่ส่งครบ"} · ใบที่มีสินค้านี้ขึ้นก่อน</span>
             <label className="inline-flex items-center gap-1 cursor-pointer"><input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> แสดงทุกใบ</label>
           </div>
           {orders.length === 0 ? (
@@ -314,7 +313,7 @@ export function MoSoLinkSection({ sku, productName, value, onChange, onState, no
                 const on = value.customer?.id === c.id;
                 return (
                   <button key={c.id} type="button" onClick={() => set({ customer: { id: c.id, code: c.code, name: c.name } as CustomerPickerValue })}
-                    className={`h-6 max-w-[200px] truncate rounded-full border px-2 text-[11px] ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}
+                    className={`max-w-full rounded-md border px-2 py-0.5 text-left text-[11px] leading-snug ${on ? "border-blue-500 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:border-blue-300"}`}
                     title={c.code ? `${c.code} · ${c.name}` : c.name}>
                     {c.name}
                   </button>

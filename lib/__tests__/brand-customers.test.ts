@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  addCustomerId, brandCustomerColumns, brandCustomerIds, cleanCustomerIds, customerNamesText, orderCustomers, BRAND_CUSTOMER_MAX,
+  addCustomerId, brandCustomerColumns, brandCustomerIds, cleanCustomerIds, orderCustomers, BRAND_CUSTOMER_MAX,
 } from "@/lib/brand-customers";
 
 const A = "11111111-1111-1111-1111-111111111111";
@@ -47,10 +47,5 @@ describe("แสดงผล", () => {
   const byId = new Map([[A, { id: A, code: "C1", name: "สาขา 1" }], [B, { id: B, code: "C2", name: "สาขา 2" }], [C, { id: C, code: "C3", name: "สาขา 3" }]]);
   it("เรียงตามรายการ ข้ามตัวที่หาไม่เจอ", () => {
     expect(orderCustomers([C, "gone", A], byId).map((c) => c.name)).toEqual(["สาขา 3", "สาขา 1"]);
-  });
-  it("ข้อความสั้น", () => {
-    expect(customerNamesText([])).toBe("");
-    expect(customerNamesText(orderCustomers([A, B], byId))).toBe("สาขา 1, สาขา 2");
-    expect(customerNamesText(orderCustomers([A, B, C], byId))).toBe("สาขา 1, สาขา 2 +1");
   });
 });

@@ -148,8 +148,9 @@ function BrandCustomersCell({ list, onChange }: { list: BrandCustomer[]; onChang
         <div className="flex flex-wrap gap-1">
           {list.map((c) => (
             <span key={c.id} title={c.code ? `${c.code} · ${c.name}` : c.name}
-              className="inline-flex h-6 max-w-[220px] items-center gap-1 rounded-full bg-slate-100 pl-2 pr-1 text-[11px] text-slate-700">
-              <span className="truncate">{c.name}</span>
+              className="inline-flex max-w-full items-center gap-1 rounded-md bg-slate-100 py-0.5 pl-2 pr-1 text-[11px] leading-snug text-slate-700">
+              {/* ชื่อเต็ม (ไม่ตัด) — สาขามักต่างกันแค่ท้ายชื่อ เช่น "…สำนักงานใหญ่" / "…สาขาเซ็นทรัลเวิลด์" */}
+              <span className="min-w-0 break-words">{c.name}</span>
               <button type="button" onClick={() => onChange(list.filter((x) => x.id !== c.id))} aria-label={`เอา ${c.name} ออก`} title="เอาออกจากลูกค้าประจำแบรนด์"
                 className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-xs leading-none text-slate-400 hover:bg-slate-200 hover:text-slate-700">
                 ×
