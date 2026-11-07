@@ -224,6 +224,14 @@ export const SHARED_PARTS: SharedPart[] = [
     doc: "save-bar.md",
   },
   {
+    key: "split-panes", label: "กล่องแบ่งซ้าย-ขวา ดันกันได้", code: "SplitPanes", category: "input",
+    source: { path: "components/split-panes" },
+    what: "แบ่งหน้าเป็น 2 กล่องซ้าย-ขวา กดกล่องไหนกล่องนั้นขยายดันอีกฝั่งให้แคบ (หรือพับเหลือแถบ) จำฝั่งที่ขยายต่อคน ที่แคบเรียงบน-ล่างเอง",
+    when: "ฟอร์มที่มีข้อมูล 2 ก้อนใช้คู่กัน เช่น ช่องข้อมูล + กล่องรายละเอียดยาว (เริ่มที่ใบงานออกแบบ แท็บข้อมูลงาน)",
+    notWhen: "เนื้อหาคนละเรื่องที่ไม่ต้องดูพร้อมกัน ให้ใช้แท็บ · ปรับขนาดหน้าต่างทั้งใบ ให้ใช้ป๊อปอัปกลาง",
+    doc: "split-panes.md",
+  },
+  {
     key: "footer-save", label: "ปุ่มบันทึกที่แถบล่างของป๊อปอัป", code: "FooterSave", category: "input",
     source: { path: "components/footer-save" },
     what: "ย้ายปุ่มบันทึกของแท็บย่อยไปอยู่แถบล่างของหน้าต่าง",

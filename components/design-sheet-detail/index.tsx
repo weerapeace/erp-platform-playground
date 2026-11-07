@@ -22,6 +22,7 @@ import { ImageManager, ImageThumbnail } from "@/components/image-manager";
 import { RecordPeekLink } from "@/components/pickers/record-peek-link";
 import { RecordChecklist, RecordTasksButton } from "@/components/record-tasks";
 import { PatternTicketLinks } from "@/components/pattern-ticket-links";
+import { SplitPanes, type SplitSize } from "@/components/split-panes";
 import { DESIGN_WAITING } from "@/lib/design-sheet-waiting";
 import { CanvasBoard, type CanvasZone } from "@/components/canvas-board";
 import { WorkflowStatusManager } from "@/components/workflow-status-manager";
@@ -2203,19 +2204,28 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
               </div>
             )}
 
-            {modalTab === "info" && fld && <div className="space-y-2">
-            <div className="grid grid-cols-2 gap-2">{fld.code}{fld.status}</div>
-            {fld.name}
-            <div className="grid grid-cols-3 gap-2">
-              {fld.brand}{fld.orderDate}{fld.deadline}{fld.appointment}
-              <div className="col-span-2">{fld.waiting}</div>
-            </div>
-            <div className="grid grid-cols-2 gap-2">{fld.drive}{fld.parent}</div>
-            {fld.detail}
-            {fld.note}
-            {/* 🎫 ตั๋วงาน Pattern ที่แนบใบนี้ (ของกลาง · ไม่มีสิทธิ์ดูตั๋ว = ไม่โชว์) */}
-            {form.id && <PatternTicketLinks sheetId={form.id} />}
-            </div>}
+            {/* ข้อมูลงาน: ข้อมูลซ้าย · กล่องรายละเอียดงานขวา — กดฝั่งไหนฝั่งนั้นขยายดันอีกฝั่ง (ของกลาง SplitPanes · เจ้าของขอ 2026-11-07)
+                ช่องฝั่งซ้ายจัดคอลัมน์ตามความกว้าง (ขยาย 3 · ครึ่ง 2 · แคบ 1) · ที่แคบ (มือถือ/ป๊อปไม่ขยาย) = เรียงบน-ล่างเหมือนเดิม */}
+            {modalTab === "info" && fld && (
+              <SplitPanes prefKey="ds_info_split"
+                left={{ title: t("ข้อมูลงาน", "Job info"), icon: "document", content: (size: SplitSize) => {
+                  const cols = size === "narrow" ? 1 : size === "half" ? 2 : 3;
+                  return (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2">{fld.code}{fld.status}</div>
+                      {fld.name}
+                      <div className={`grid gap-2 ${cols === 3 ? "grid-cols-3" : cols === 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+                        {fld.brand}{fld.orderDate}{fld.deadline}{fld.appointment}
+                        <div className={cols === 1 ? "" : "col-span-2"}>{fld.waiting}</div>
+                      </div>
+                      <div className={`grid gap-2 ${cols === 1 ? "grid-cols-1" : "grid-cols-2"}`}>{fld.drive}{fld.parent}</div>
+                      {/* 🎫 ตั๋วงาน Pattern ที่แนบใบนี้ (ของกลาง · ไม่มีสิทธิ์ดูตั๋ว = ไม่โชว์) */}
+                      {form.id && <PatternTicketLinks sheetId={form.id} />}
+                    </div>
+                  );
+                } }}
+                right={{ title: t("รายละเอียดงาน", "Job details"), icon: "note", content: <div className="space-y-2">{fld.detail}{fld.note}</div> }} />
+            )}
 
             {/* แท็บ Comment ลูกค้า (เฟส 3) */}
             {/* 📐 รายละเอียดงาน — คงไว้หลังเปิดครั้งแรก (ซ่อนตอนอยู่แท็บอื่น) */}
