@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  cleanOverheadCfg, cleanPreset, overheadRows, overheadTotal, parcelPrice, parentOfCode, pickBag, pickBox, piecesPerCarton, presetProblem,
+  cleanOverheadCfg, cleanPreset, cutLaborRows, cutLaborSummary, overheadRows, overheadTotal, parcelPrice, parentOfCode, pickBag, pickBox, piecesPerCarton, presetProblem,
   DEFAULT_OH, type CostPreset, type PresetKind,
 } from "@/lib/design-cost-presets";
 import { cleanExtra, extraKindOf } from "@/lib/design-sheet-cost-snapshot";
@@ -93,5 +93,39 @@ describe("cleanPreset / cleanOverheadCfg / ชนิดค่าใช้จ่�
   it("parentOfCode", () => {
     expect(parentOfCode("BOM-CTL044-01")).toBe("CTL044");
     expect(parentOfCode("CTL112-03")).toBe("CTL112");
+  });
+});
+
+describe("ค่าแรงตัดตามจำนวนชิ้น (cutLaborRows)", () => {
+  const lines = [
+    { key: "a", item_id: "pu", item_name: "PU", group_name: "PU", calc_method: "area_face", pieces: 1 },
+    { key: "b", item_id: "lin", item_name: "ผ้าซับใน", group_name: "ผ้า", calc_method: "area_face", pieces: 2 },
+    { key: "c", item_id: "zip", item_name: "หัวซิป", group_name: "อะไหล่", calc_method: "count", pieces: 1 },
+    { key: "d", item_id: "tape", item_name: "กุ้น", group_name: "สาย/เทป", calc_method: "length", pieces: null },
+    { key: "e", item_id: "lin", item_name: "ผ้าซับใน", group_name: "ผ้า", calc_method: "area_face", pieces: 2, cut_rate: 0.9 },
+    { key: "f", item_id: null, item_name: "", group_name: null, calc_method: null, pieces: 3 },   // บรรทัดว่าง ไม่นับ
+  ];
+  const mat = (id: string) => ({ pu: 1, lin: 0.3 } as Record<string, number>)[id] ?? null;
+  it("อะไหล่ไม่นับอัตโนมัติ · ราคา: บรรทัด → วัสดุ → กลาง · ไม่ใส่ชิ้น = 1", () => {
+    const rows = cutLaborRows(lines, 0.5, mat);
+    expect(rows.map((r) => r.key)).toEqual(["a", "b", "c", "d", "e"]);
+    expect(rows.find((r) => r.key === "c")).toMatchObject({ on: false, auto: true, amount: 0 });
+    expect(rows.find((r) => r.key === "a")).toMatchObject({ rate: 1, source: "material", amount: 1 });
+    expect(rows.find((r) => r.key === "d")).toMatchObject({ pieces: 1, rate: 0.5, source: "central" });
+    expect(rows.find((r) => r.key === "e")).toMatchObject({ rate: 0.9, source: "line", amount: 1.8 });
+    const s = cutLaborSummary(rows);
+    expect(s.pieces).toBe(6);                       // 1 + 2 + 1 + 2
+    expect(s.total).toBeCloseTo(1 + 0.6 + 0.5 + 1.8, 2);
+    expect(s.byMaterial).toEqual([{ name: "PU", pieces: 1 }, { name: "ผ้าซับใน", pieces: 4 }, { name: "กุ้น", pieces: 1 }]);
+  });
+  it("ติ๊กเอง: นับอะไหล่ได้ / ไม่นับผ้าได้ · ไม่มีราคากลาง = เตือน", () => {
+    const rows = cutLaborRows([{ ...lines[2], cut_skip: false }, { ...lines[1], cut_skip: true }, { key: "x", item_id: "none", item_name: "ผ้าใหม่", group_name: "ผ้า", calc_method: "area_face", pieces: 1 }], null, mat);
+    expect(rows[0]).toMatchObject({ on: true, auto: false, source: "none", rate: 0 });
+    expect(rows[1]).toMatchObject({ on: false, auto: false });
+    expect(cutLaborSummary(rows).missingRate).toBe(2);
+  });
+  it("cleanExtra เก็บ cut_by", () => {
+    expect(cleanExtra({ label: "ค่าแรง (ตัด/ปลอก/วาด)", amount: 4, cut_by: "pieces" })).toMatchObject({ cut_by: "pieces" });
+    expect(cleanExtra({ label: "x", amount: 1, cut_by: "อื่น" })).toEqual({ label: "x", amount: 1 });
   });
 });

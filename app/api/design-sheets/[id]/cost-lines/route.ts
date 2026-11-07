@@ -39,6 +39,8 @@ export type CostLine = {
   face_width_cm: number | null; waste_percent: number | null; divisor: number | null;
   qty: number | null; uom: string | null; unit_price: number | null; amount: number | null;
   note: string | null; sort_order: number;
+  cut_rate?: number | null;   // ราคาตัด/ปลอก/วาด ต่อชิ้นเฉพาะบรรทัดนี้ (ว่าง = ตามวัสดุ / ราคากลาง)
+  cut_skip?: boolean | null;  // ไม่นับเป็นงานตัด (true) / นับ (false) / null = อัตโนมัติ (อะไหล่ไม่นับ)
 };
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }): Promise<NextResponse> {
@@ -73,6 +75,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     face_width_cm: num(l.face_width_cm), waste_percent: num(l.waste_percent), divisor: num(l.divisor),
     qty: num(l.qty), uom: l.uom || null, unit_price: num(l.unit_price), amount: num(l.amount),
     note: l.note?.trim() || null, sort_order: i + 1,
+    cut_rate: num(l.cut_rate), cut_skip: typeof l.cut_skip === "boolean" ? l.cut_skip : null,
     prev_item: l.prev_item && typeof l.prev_item === "object" ? l.prev_item : null,
     price_ack: l.price_ack && typeof l.price_ack === "object" && Number.isFinite(Number(l.price_ack.price)) ? { price: Number(l.price_ack.price), at: String(l.price_ack.at || new Date().toISOString()) } : null,
   }));

@@ -17,6 +17,7 @@ export type PriceItem = {
   id: string; code: string | null; name: string;
   price_per_unit: number | null; uom: string | null; face_width_cm: number | null;
   width_cm: number | null; length_cm: number | null;
+  cut_rate: number | null;   // ราคาค่าตัด/ปลอก/วาด ต่อชิ้น (ว่าง = ราคากลาง)
   group_name: string | null; group_code: string | null; calc_method: string | null; loss_percent: number | null; divisor: number | null; uom_default: string | null;
   // ราคาจาก SKU ที่ผูกกับวัสดุนี้ (design_price_item_id) — เฟส 5: วัสดุตีราคาเป็นกลุ่มเอง
   sku_count: number; sku_latest_price: number | null; sku_latest_currency: string | null; sku_avg_price: number | null;
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.view"); if (denied) return denied;
   if (!(await apiCan(request, COST_PERM))) return costRestricted({ groups: [] });   // ไม่มีสิทธิ์ดูต้นทุน → ว่าง
   const { data, error } = await supabaseAdmin().from("design_price_items")
-    .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, updated_at, price_updated_at, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
+    .select("id, code, name, price_per_unit, uom, face_width_cm, width_cm, length_cm, cut_rate, updated_at, price_updated_at, grp:material_groups!material_group_id ( code, name, calc_method, loss_percent, divisor, uom_default )")
     .eq("is_active", true).order("name", { ascending: true }).limit(1000);
   if (error) return NextResponse.json({ data: [], error: friendlyDbError(error.message) }, { status: 500 });
 
@@ -52,6 +53,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       face_width_cm: r.face_width_cm != null ? Number(r.face_width_cm) : null,
       width_cm: r.width_cm != null ? Number(r.width_cm) : null,
       length_cm: r.length_cm != null ? Number(r.length_cm) : null,
+      cut_rate: r.cut_rate != null ? Number(r.cut_rate) : null,
       group_name: (g?.name as string) ?? null,
       group_code: (g?.code as string) ?? null,
       calc_method: (g?.calc_method as string) ?? null,

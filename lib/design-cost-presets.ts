@@ -9,8 +9,8 @@
  * คู่มือ: docs/design-cost-presets.md
  */
 
-export type PresetKind = "labor_cut" | "oh_fixed" | "bag" | "box" | "carton" | "parcel" | "other";
-export const PRESET_KINDS: PresetKind[] = ["labor_cut", "oh_fixed", "bag", "box", "carton", "parcel", "other"];
+export type PresetKind = "labor_cut" | "cut_rate" | "oh_fixed" | "bag" | "box" | "carton" | "parcel" | "other";
+export const PRESET_KINDS: PresetKind[] = ["labor_cut", "cut_rate", "oh_fixed", "bag", "box", "carton", "parcel", "other"];
 
 export type CostPreset = {
   id: string;
@@ -27,7 +27,8 @@ export type CostPreset = {
 
 /** ชื่อหมวด + ช่องที่ต้องกรอก (หน้าตั้งค่าราคากลาง) */
 export const PRESET_KIND_META: Record<PresetKind, { label: string; hint: string; dims: 0 | 2 | 3; weight?: boolean; needLabel?: boolean; amountLabel: string }> = {
-  labor_cut: { label: "ค่าแรง (ตัด/ปลอก/วาด)", hint: "ราคากลางต่อชิ้น — ปุ่ม “ใส่ราคากลาง” ใช้ตัวแรก", dims: 0, amountLabel: "฿ / ชิ้น" },
+  labor_cut: { label: "ค่าแรง (ตัด/ปลอก/วาด)", hint: "ราคากลางต่อใบ — ปุ่ม “ราคากลาง” ใช้ตัวแรก", dims: 0, amountLabel: "฿ / ใบ" },
+  cut_rate: { label: "ค่าตัดต่อชิ้นวัตถุดิบ", hint: "ราคากลางค่าตัด/ปลอก/วาด ต่อ 1 ชิ้นวัตถุดิบ (ใช้ตัวแรก) — วัสดุที่ตั้งราคาเฉพาะไว้ที่ “จัดการวัสดุตีราคา” ใช้ราคานั้นแทน", dims: 0, amountLabel: "฿ / ชิ้น" },
   oh_fixed: { label: "โสหุ้ยต่อชิ้น", hint: "เช่น ค่า QC · ค่าแรงแพ็ก — ใส่ให้ทุกงานอัตโนมัติ (ปิดรายแท็บได้)", dims: 0, needLabel: true, amountLabel: "฿ / ชิ้น" },
   bag: { label: "ถุง", hint: "ขนาดถุง (กว้าง × ยาว) — ระบบเลือกใบเล็กสุดที่ใส่สินค้าได้", dims: 2, amountLabel: "฿ / ใบ" },
   box: { label: "กล่อง", hint: "ขนาดกล่องด้านใน (กว้าง × ยาว × สูง) — ระบบเลือกใบเล็กสุดที่ใส่ได้", dims: 3, amountLabel: "฿ / ใบ" },
@@ -206,3 +207,49 @@ export type LaborRef = { source: "bom" | "wo" | "ds"; code: string; name: string
 
 /** รหัสรุ่น (Parent) จากรหัส SKU/BOM — BOM-CTL044-01 → CTL044 · CTL044-01 → CTL044 */
 export const parentOfCode = (code: string): string => code.replace(/^BOM-/i, "").replace(/-\d+$/, "");
+
+// ── ค่าแรงตัด/ปลอก/วาด ตามจำนวนชิ้นวัตถุดิบ (เจ้าของขอ 2026-11-07) ──
+// ราคาตัดต่อชิ้น 3 ระดับ (ใช้ตัวที่ละเอียดกว่าก่อน): แก้ในใบ (บรรทัด) → ตามวัสดุ (ทะเบียนวัสดุตีราคา) → ราคากลาง (kind cut_rate)
+
+export type CutLineInput = {
+  key: string;
+  item_id?: string | null;
+  item_name?: string | null;
+  group_name?: string | null;
+  calc_method?: string | null;
+  pieces?: number | null;
+  cut_rate?: number | null;     // แก้เฉพาะบรรทัดนี้
+  cut_skip?: boolean | null;    // null = อัตโนมัติ
+};
+export type CutRateSource = "line" | "material" | "central" | "none";
+export type CutRow = { key: string; name: string; group: string; pieces: number; rate: number; source: CutRateSource; on: boolean; auto: boolean; amount: number };
+
+/** อะไหล่ (นับเป็นชิ้นสำเร็จ / หัวซิป / กระดุม) — ไม่ต้องตัด → ไม่นับอัตโนมัติ */
+export const isHardwareLine = (l: Pick<CutLineInput, "group_name" | "calc_method">): boolean =>
+  l.calc_method === "count" || /อะไหล่|ซิป/.test(l.group_name ?? "");
+
+/** รายการงานตัดของแท็บ · materialRate(item_id) = ราคาตัดของวัสดุ (ทะเบียน) · central = ราคากลางต่อชิ้น */
+export function cutLaborRows(lines: CutLineInput[], central: number | null, materialRate: (itemId: string) => number | null | undefined): CutRow[] {
+  return lines.filter((l) => (l.item_name ?? "").trim() || l.item_id).map((l) => {
+    const hw = isHardwareLine(l);
+    const on = l.cut_skip == null ? !hw : !l.cut_skip;
+    const pcs = num(l.pieces);
+    const pieces = pcs != null && pcs > 0 ? Math.round(pcs * 100) / 100 : 1;
+    const mat = l.item_id ? num(materialRate(l.item_id)) : null;
+    const line = num(l.cut_rate);
+    const [rate, source]: [number, CutRateSource] = line != null ? [line, "line"] : mat != null ? [mat, "material"] : central != null ? [central, "central"] : [0, "none"];
+    return { key: l.key, name: (l.item_name ?? "").trim() || "—", group: (l.group_name ?? "").trim() || "—", pieces, rate, source, on, auto: l.cut_skip == null, amount: on ? r2(pieces * rate) : 0 };
+  });
+}
+
+export function cutLaborSummary(rows: CutRow[]): { total: number; pieces: number; byMaterial: { name: string; pieces: number }[]; missingRate: number } {
+  const on = rows.filter((r) => r.on);
+  const by = new Map<string, number>();
+  for (const r of on) by.set(r.name, (by.get(r.name) ?? 0) + r.pieces);
+  return {
+    total: r2(on.reduce((s, r) => s + r.amount, 0)),
+    pieces: Math.round(on.reduce((s, r) => s + r.pieces, 0) * 100) / 100,
+    byMaterial: [...by.entries()].map(([name, pieces]) => ({ name, pieces })),
+    missingRate: on.filter((r) => r.source === "none").length,
+  };
+}

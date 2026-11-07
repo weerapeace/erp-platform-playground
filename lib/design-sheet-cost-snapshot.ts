@@ -26,6 +26,8 @@ export type SnapExtra = {
   note?: string | null;
   /** โสหุ้ยแบบแยกรายการ: ขนาดสินค้าตอนแพ็ก + รายการที่ปิด + วิธีคิดค่าส่ง (lib/design-cost-presets) */
   oh?: OverheadCfg | null;
+  /** ค่าแรงตัด: "pieces" = คิดตามจำนวนชิ้นวัตถุดิบ (cutLaborRows) · ไม่มี = ใส่ยอดเอง/ราคากลางต่อใบ */
+  cut_by?: "pieces" | null;
 };
 export type ExtraKind = "labor" | "labor_cut" | "overhead" | "other";
 export type SnapExtraMap = Record<string, SnapExtra[]>;
@@ -58,12 +60,13 @@ export function cleanExtra(raw: unknown): SnapExtra {
   const c = (raw ?? {}) as Partial<SnapExtra>;
   const label = String(c.label ?? "");
   // ช่องเสริม (ชนิด / หมายเหตุ / ตั้งค่าโสหุ้ย) — ไม่มี = ไม่ใส่ (ใบเก่าหน้าตาเหมือนเดิม)
-  const extra: Pick<SnapExtra, "kind" | "note" | "oh"> = {};
+  const extra: Pick<SnapExtra, "kind" | "note" | "oh" | "cut_by"> = {};
   if (c.kind === "labor" || c.kind === "labor_cut" || c.kind === "overhead" || c.kind === "other") extra.kind = c.kind;
   const note = typeof c.note === "string" ? c.note.trim().slice(0, 200) : "";
   if (note) extra.note = note;
   const oh = c.oh ? cleanOverheadCfg(c.oh) : null;
   if (oh) extra.oh = oh;
+  if (c.cut_by === "pieces") extra.cut_by = "pieces";
   if (c.mode === "split") {
     const total = n(c.total) ?? 0;
     const q = n(c.split_qty);
