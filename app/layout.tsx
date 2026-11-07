@@ -5,6 +5,7 @@ import { ToastProvider } from "@/components/toast";
 import { LanguageProvider } from "@/components/i18n";
 import { NavProgress } from "@/components/nav-progress";
 import { NavTrailRecorder } from "@/components/nav-trail-recorder";
+import { PageViewRecorder } from "@/components/page-view-recorder";
 import { BackgroundTasksHost } from "@/components/background-tasks-host";
 import { DatePickerOnClick } from "@/components/date-input/auto-picker";
 import { WorkPopupHost } from "@/components/work-popup";
@@ -48,6 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="bg-slate-50 text-slate-900 antialiased">
         <NavProgress />
         <NavTrailRecorder />
+        <PageViewRecorder />
         <AuthProvider><LanguageProvider><ToastProvider>{children}<SilentBoundary name="work-popup"><WorkPopupHost /></SilentBoundary></ToastProvider></LanguageProvider></AuthProvider>
         <BackgroundTasksHost />
         <DatePickerOnClick />

@@ -127,17 +127,7 @@ export function AuditLogView() {
 
   return (
     <>
-      {/* Header */}
-      <div className="bg-white border-b border-slate-200 px-4 md:px-8 py-5">
-        <div className="inline-flex items-center gap-1.5 bg-purple-50 text-purple-700 border border-purple-200 px-3 py-1 rounded-full text-xs font-medium mb-2">
-          <Icon name="history" size={14} /> Audit Log — ประวัติการใช้งาน
-        </div>
-        <h1 className="text-2xl font-bold text-slate-900">ประวัติการใช้งาน</h1>
-        <p className="text-slate-500 mt-1 text-sm">
-          ใคร ทำอะไร ที่หน้าไหน รายการไหน และเปลี่ยนจากอะไรเป็นอะไร — กดชื่อรายการเพื่อดูประวัติทั้งหมดของรายการนั้น
-        </p>
-      </div>
-
+      {/* หัวหน้า + แท็บ อยู่ที่ page.tsx (แชร์กับแท็บ "การเข้าใช้หน้า") */}
       <div className="px-4 md:px-8 py-5 space-y-4">
         {/* การ์ดจำนวน = ปุ่มกรองกลุ่มการกระทำ (นับจริงตามตัวกรอง) */}
         <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
