@@ -16,10 +16,11 @@
  * คู่มือ: docs/shared-parts-registry.md
  */
 
-export type PartCategory = "table" | "popup" | "input" | "pick" | "file" | "data" | "state" | "print" | "notify" | "system";
+export type PartCategory = "layout" | "table" | "popup" | "input" | "pick" | "file" | "data" | "state" | "print" | "notify" | "system" | "feature";
 
 export const PART_CATEGORIES: { key: PartCategory; label: string; icon: string }[] = [
-  { key: "table", label: "ตาราง", icon: "i:table" },
+  { key: "layout", label: "โครงหน้า / ส่วนประกอบทั่วไป", icon: "i:layout-dashboard" },
+  { key: "table", label: "ตาราง / ปฏิทิน", icon: "i:table" },
   { key: "popup", label: "ป๊อปอัป", icon: "i:layout-sidebar-right" },
   { key: "input", label: "ช่องกรอก / ฟอร์ม", icon: "i:forms" },
   { key: "pick", label: "เลือกข้อมูล", icon: "i:search" },
@@ -29,6 +30,7 @@ export const PART_CATEGORIES: { key: PartCategory; label: string; icon: string }
   { key: "print", label: "พิมพ์", icon: "i:printer" },
   { key: "notify", label: "แจ้งเตือน", icon: "i:bell" },
   { key: "system", label: "ระบบ / สิทธิ์", icon: "i:settings" },
+  { key: "feature", label: "ชิ้นงานธุรกิจ (ป๊อป/แผงใหญ่ที่หลายหน้าเปิดใช้)", icon: "i:briefcase" },
 ];
 
 export type PartSource = {
@@ -686,6 +688,527 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "studio-launcher", label: "ปุ่มเปิดตัวจัดเลย์เอาต์", code: "StudioLauncher", category: "system",
     source: { path: "components/studio-launcher" },
     what: "เปิดตัวจัดหน้า (StudioPanel) จากที่ไหนก็ได้",
+  },
+
+  // ───────── ลงทะเบียนเพิ่ม 2026-11-07: ทุกตัวที่ใช้ตั้งแต่ 3 จุดขึ้นไป (ตัวที่ใช้ 1-2 จุด = ชิ้นเฉพาะหน้า ยังไม่ลง) ─────────
+
+  // โครงหน้า / ส่วนประกอบทั่วไป
+  {
+    key: "playground-shell", label: "เปลือกหน้าหลัก (เมนูข้าง + แถบบน)", code: "PlaygroundShell", category: "layout",
+    source: { path: "components/playground-shell" },
+    what: "ครอบทุกหน้าในระบบ: เมนูข้าง แถบบน ค้นหารวม เมนูบัญชี ล็อกแอปตามสิทธิ์",
+    when: "หน้าใหม่ทั่วไปในระบบ ERP",
+    notWhen: "แอปที่อยากเปิดแยกเต็มจอไม่มีเมนูข้าง ให้ใช้ StandaloneShell",
+  },
+  {
+    key: "standalone-shell", label: "เปลือกแอปแยกเต็มจอ", code: "StandaloneShell", category: "layout",
+    source: { path: "components/standalone-shell" },
+    what: "หน้าแบบแอปแยก ไม่มีเมนูข้าง ERP มีแถบบนของตัวเอง (เช่น แอปจัดการงาน)",
+    when: "โมดูลหลักที่คนใช้ทั้งวันและอยากเปิดเป็นแท็บแยก",
+    notWhen: "หน้าทั่วไป ให้ใช้ PlaygroundShell",
+  },
+  {
+    key: "app-access-gate", label: "ด่านว่าใครเข้าแอปนี้ได้", code: "AppAccessGate", category: "layout",
+    source: { path: "components/app-access-gate" },
+    what: "กันคนที่ไม่มีสิทธิ์เข้าแอปแยก ใช้กฎเดียวกับเมนูหลัก",
+    when: "หน้าที่ใช้ StandaloneShell หรือเปลือกของตัวเอง (เปลือกหลักกันให้อยู่แล้ว)",
+  },
+  {
+    key: "master-page", label: "ตัวช่วยสร้างหน้าข้อมูลหลัก", code: "MasterPage", category: "layout",
+    source: { path: "components/master-page" },
+    what: "สร้างหน้ารายการ + ฟอร์มจากทะเบียน field ในไม่กี่บรรทัด (ห่อ MasterCRUD ให้)",
+    when: "หน้าข้อมูลหลักธรรมดาที่ไม่ต้องจัดหน้าพิเศษ",
+    notWhen: "หน้าที่ต้องปรับเยอะ ให้ใช้ MasterCRUD ตรง ๆ",
+  },
+  {
+    key: "page-chrome", label: "วางชื่อหน้า / ค้นหา / ปุ่ม บนแถบบน", code: "usePageChrome", category: "layout",
+    source: { path: "components/page-chrome" },
+    what: "ให้หน้าเอาชื่อหน้า ช่องค้นหา ปุ่ม ไปวางบนแถบบนของเปลือก แบบแอป",
+    doc: "page-chrome.md",
+  },
+  {
+    key: "account-menu", label: "เมนูบัญชีผู้ใช้", code: "AccountMenu", category: "layout",
+    source: { path: "components/account-menu" },
+    what: "กดชื่อผู้ใช้ แก้โปรไฟล์ เปลี่ยนสีธีม ออกจากระบบ",
+  },
+  {
+    key: "global-search", label: "ค้นหารวมทั้งระบบ", code: "GlobalSearch", category: "layout",
+    source: { path: "components/global-search" },
+    what: "พิมพ์รหัส/ชื่อ แล้วเจอสินค้า เอกสาร คน หรือคำสั่งลัด โดยไม่ต้องรู้ว่าอยู่โมดูลไหน",
+    doc: "global-search.md",
+  },
+  {
+    key: "brand", label: "โลโก้และชื่อระบบ", code: "Logo / Wordmark", category: "layout",
+    source: { path: "components/brand" },
+    what: "โลโก้ ชื่อระบบ สีหลักของแบรนด์ แก้ที่เดียวเปลี่ยนทั้งระบบ",
+  },
+  {
+    key: "device-view", label: "ดูแบบ จอคอม / แท็บเล็ต / มือถือ", code: "DeviceView", category: "layout",
+    source: { path: "components/device-view" },
+    what: "ให้แดชบอร์ดหรือบอร์ดสลับดูตามขนาดจอได้ + รู้ว่าจอที่เปิดอยู่เป็นแบบไหน",
+    doc: "device-view.md",
+  },
+  {
+    key: "scroll-tabs", label: "แถบแท็บเลื่อนได้", code: "ScrollTabs", category: "layout",
+    source: { path: "components/scroll-tabs" },
+    what: "แถบแท็บที่ยาวเกินจอ เลือกแท็บแล้วเลื่อนให้แท็บนั้นอยู่กลาง",
+    when: "หน้าที่มีแท็บหลายอัน โดยเฉพาะบนมือถือ",
+  },
+  {
+    key: "gallery-columns", label: "เลือกจำนวนการ์ดต่อแถว", code: "GalleryColumns", category: "layout",
+    source: { path: "components/gallery-columns" },
+    what: "ปุ่มเลือกว่ามุมมองกริดจะโชว์กี่การ์ดต่อแถว (จำค่าไว้)",
+  },
+  {
+    key: "info-hint", label: "ปุ่มคำอธิบายสั้น ๆ", code: "InfoHint", category: "layout",
+    source: { path: "components/info-hint" },
+    what: "ปุ่มเล็กข้างปุ่มหรือช่อง กดแล้วเด้งคำอธิบาย ไม่รกหน้าจอ",
+    when: "อยากบอกว่าปุ่ม/ช่องนี้ทำอะไร",
+  },
+  {
+    key: "copy-button", label: "ปุ่มคัดลอก", code: "CopyButton", category: "layout",
+    source: { path: "components/copy-button" },
+    what: "กดแล้วคัดลอกข้อความ โชว์เครื่องหมายถูกชั่วครู่ ไม่ไปโดนการกดแถว",
+  },
+  {
+    key: "qr-code", label: "รูป QR", code: "QrCode", category: "layout",
+    source: { path: "components/qr-code" },
+    what: "สร้างรูป QR จากลิงก์หรือรหัส (โหลดไลบรารีเฉพาะตอนใช้)",
+  },
+  {
+    key: "platform-icon", label: "ไอคอนแพลตฟอร์มขายของ", code: "PlatformIcon", category: "layout",
+    source: { path: "components/platform-icon" },
+    what: "โลโก้ Shopee / Lazada / TikTok ฯลฯ ที่ถูกต้องทุกที่",
+  },
+  {
+    key: "animated-icon", label: "ไอคอนเคลื่อนไหว", code: "AnimatedIcon", category: "layout",
+    source: { path: "components/animated-icon" },
+    what: "ไอคอนขยับจากไฟล์ Lottie / GIF ที่เก็บใน R2",
+    notWhen: "เรียกผ่าน Icon กลาง (ค่า img:*.json) ไม่ต้องเรียกตรง",
+  },
+  {
+    key: "install-app", label: "ป๊อปติดตั้งแอป", code: "InstallApp", category: "layout",
+    source: { path: "components/install-app" },
+    what: "ป๊อปวิธีติดตั้งแอปลงเครื่อง เปิดจากเมนู ⋯ ของหน้าไหนก็ได้ (ข้างในใช้ปุ่มติดตั้งแอป)",
+  },
+  {
+    key: "pwa-install-button", label: "ปุ่มติดตั้งแอป", code: "PwaInstallButton", category: "layout",
+    source: { path: "components/pwa-install-button" },
+    what: "ปุ่ม ติดตั้งแอปนี้ โชว์เมื่อเบราว์เซอร์รองรับ กดแล้วได้ไอคอนแอปบนเครื่อง",
+  },
+  {
+    key: "help-guides", label: "คู่มือวิธีใช้งาน", code: "HelpGuides", category: "layout",
+    source: { path: "components/help-guides" },
+    what: "คู่มือที่ตั้งและแก้เองในเว็บได้ ไม่ต้องแก้โค้ด",
+  },
+
+  // ตาราง / ปฏิทิน
+  {
+    key: "sortable-list", label: "ลากจัดลำดับรายการ", code: "SortableList", category: "table",
+    source: { path: "components/sortable-list" },
+    what: "ลากเรียงลำดับรายการในลิสต์ตั้งค่า (ประเภทงาน สถานะ ฟิลด์ ฯลฯ)",
+    when: "ทุกที่ที่ให้คนเรียงลำดับเอง",
+  },
+  {
+    key: "line-item-columns", label: "จัดคอลัมน์ตารางบรรทัดเอกสาร", code: "LineColumnsManager", category: "table",
+    source: { path: "components/line-item-columns" },
+    what: "เลือกโชว์/ซ่อน ลากเรียง ตั้งชื่อคอลัมน์ ของตารางบรรทัดในใบเสนอ",
+  },
+  {
+    key: "doc-calendar", label: "ปฏิทินเอกสาร", code: "DocCalendar", category: "table",
+    source: { path: "components/doc-calendar" },
+    what: "เอาเอกสารที่มีวันที่มาวางบนปฏิทินรายเดือน (ดูอย่างเดียว)",
+    notWhen: "ถ้าต้องลากวางเพื่อตั้งวัน ให้ใช้ ScheduleBoard",
+  },
+  {
+    key: "schedule-board", label: "ปฏิทินลากวางตั้งวัน", code: "ScheduleBoard", category: "table",
+    source: { path: "components/schedule-board" },
+    what: "ปฏิทินเดือน + กล่องยังไม่ลงวันที่ ลากการ์ดไปวางเพื่อตั้งวัน",
+    notWhen: "ถ้าแค่โชว์เอกสารตามวัน ให้ใช้ DocCalendar",
+  },
+
+  // ช่องกรอก
+  {
+    key: "color-picker", label: "เลือกสี", code: "ColorPicker / ColorInput", category: "input",
+    source: { path: "components/color-picker" },
+    what: "แผงเลือกสีแบบลากได้ + ช่องรหัสสี ใช้ง่ายกว่าช่องสีของเบราว์เซอร์",
+  },
+  {
+    key: "bilingual-field", label: "ช่องกรอก 2 ภาษา", code: "BilingualField", category: "input",
+    source: { path: "components/bilingual-field" },
+    what: "กรอกไทย/อังกฤษ แบบสลับภาษาทั้งแผง (ข้อความที่ลูกค้าเห็นบนเว็บร้าน)",
+    doc: "bilingual-content.md",
+  },
+  {
+    key: "translation-table", label: "ตารางคำแปล ไทย | อังกฤษ", code: "TranslationTable", category: "input",
+    source: { path: "components/translation-table" },
+    what: "แปลข้อมูลซ้อนหลายชั้นทีเดียวเป็นตาราง (เมนู หมวด คอลเลกชันของเว็บร้าน)",
+  },
+  {
+    key: "range-input", label: "แถบเลื่อน + ช่องตัวเลข", code: "RangeInput", category: "input",
+    source: { path: "components/range-input" },
+    what: "ปรับตัวเลขด้วยการลากหรือพิมพ์ก็ได้",
+  },
+  {
+    key: "wheel-select", label: "กล่องเลือกหมุนล้อเมาส์", code: "WheelSelect", category: "input",
+    source: { path: "components/wheel-select" },
+    what: "กล่องเล็ก + ▴▾ หมุนล้อเมาส์เพื่อเปลี่ยนค่า",
+    doc: "wheel-select.md",
+  },
+  {
+    key: "toggle-switch", label: "สวิตช์เปิด/ปิด", code: "ToggleSwitch", category: "input",
+    source: { path: "components/toggle-switch" },
+    what: "สวิตช์เปิด/ปิด (เขียว = เปิด) แทนการเขียนสวิตช์เองแต่ละหน้า",
+    doc: "toggle-switch.md",
+  },
+  {
+    key: "font-select", label: "เลือกฟอนต์", code: "FontSelect", category: "input",
+    source: { path: "components/font-select" },
+    what: "เลือกฟอนต์โดยเห็นหน้าตาตัวอักษรจริง",
+    doc: "font-select.md",
+  },
+  {
+    key: "rich-text", label: "กล่องข้อความจัดรูปแบบ", code: "RichTextEditor", category: "input",
+    source: { path: "components/rich-text" },
+    what: "พิมพ์ข้อความมีหัวข้อ ตัวหนา สี ตาราง รูป (เก็บเป็น HTML)",
+  },
+  {
+    key: "inline-edit", label: "โชว์ค่าก่อน กดถึงแก้", code: "InlineEdit", category: "input",
+    source: { path: "components/inline-edit" },
+    what: "โชว์ค่าเป็นข้อความสะอาด กดแล้วค่อยกลายเป็นช่องกรอก กันพิมพ์ทับเผลอ",
+    when: "หน้าที่มีช่องกรอกเรียงกันเยอะ ๆ",
+  },
+  {
+    key: "credit-term-input", label: "ช่องเครดิต (วันจ่าย)", code: "PurchaseCreditTermInput", category: "input",
+    source: { path: "components/purchase-credit-term-input" },
+    what: "ตั้งเครดิตร้าน/ลูกค้า เช่น จ่ายทันที สิ้นเดือน หรือ N วัน (กติกาคิดวันอยู่ที่ศูนย์กลาง)",
+  },
+  {
+    key: "lead-time-input", label: "ช่องระยะเวลาส่งของ", code: "PurchaseLeadTimeInput", category: "input",
+    source: { path: "components/purchase-lead-time-input" },
+    what: "ตั้งว่าร้านส่งของกี่วัน นับจากวันสั่งหรือหลังจ่ายเงิน",
+  },
+
+  // เลือกข้อมูล
+  {
+    key: "supplier-wizard", label: "เพิ่มร้าน / คู่ค้าใหม่", code: "SupplierWizard", category: "pick",
+    source: { path: "components/supplier-wizard" },
+    what: "ฟอร์มเพิ่มคู่ค้าหลายหน้า (กรอกแค่ชื่อก็บันทึกได้) เข้าทะเบียนคู่ค้าจริง",
+    when: "ปุ่ม + เพิ่มร้านใหม่ ข้างตัวเลือกร้าน",
+  },
+  {
+    key: "brand-select", label: "เลือกแบรนด์", code: "BrandSelect", category: "pick",
+    source: { path: "components/brand-select" },
+    what: "ช่องเลือกแบรนด์จากทะเบียนแบรนด์",
+    doc: "brand-select.md",
+  },
+  {
+    key: "field-chips-picker", label: "เลือกหลายฟิลด์แบบชิป", code: "FieldChipsPicker", category: "pick",
+    source: { path: "components/field-chips-picker" },
+    what: "เลือกหลายฟิลด์ โชว์ที่เลือกเป็นชิป + ป๊อปค้นหา/จัดกลุ่ม",
+  },
+  {
+    key: "table-column-select", label: "เลือกคอลัมน์จากตารางปลายทาง", code: "TableColumnSelect", category: "pick",
+    source: { path: "components/table-column-select" },
+    what: "ตอนสร้างช่องอ้างอิง เลือกว่าจะโชว์คอลัมน์ไหนของตารางปลายทาง (เลือกจากของจริง ไม่ต้องพิมพ์)",
+  },
+  {
+    key: "icon-picker", label: "เลือกไอคอน (อีโมจิ)", code: "IconPicker", category: "pick",
+    source: { path: "components/icon-picker" },
+    what: "เลือกอีโมจิเป็นไอคอนของโมดูล/แท็ก",
+    notWhen: "หน้าจอใหม่ห้ามใช้อีโมจิ ให้ใช้ไอคอนกลาง (Icon + ตัวเลือกไอคอนในชุด icon)",
+  },
+  {
+    key: "site-icon-picker", label: "เลือกไอคอนเว็บร้าน", code: "SiteIconPicker", category: "pick",
+    source: { path: "components/site-icon-picker" },
+    what: "เลือก/อัปโหลดไอคอนในหน้าจัดการเว็บร้าน (ไอคอนเส้นสีตามธีมร้าน)",
+    doc: "site-icons.md",
+  },
+  {
+    key: "central-category-picker", label: "เลือกหมวดกลางสำหรับลงขาย", code: "CentralCategoryPicker", category: "pick",
+    source: { path: "components/central-category-picker" },
+    what: "ค้นหาหมวดลงขาย + ปุ่มเพิ่มหมวดใหม่ในตัว",
+  },
+  {
+    key: "company-filter", label: "เลือกดูทีละบริษัท", code: "CompanyFilter", category: "pick",
+    source: { path: "components/company-filter" },
+    what: "สลับดูข้อมูลทีละบริษัทในกลุ่ม",
+  },
+  {
+    key: "month-nav", label: "เลือกเดือน", code: "MonthNav", category: "pick",
+    source: { path: "components/month-nav" },
+    what: "ตัวเลือก เดือน/ปี + ปุ่มเดือนนี้ ของหน้ารายงานรายเดือน",
+  },
+  {
+    key: "mo-group-picker", label: "เลือกชุดใบสั่งงาน", code: "MoGroupOptions / useMoGroups", category: "pick",
+    source: { path: "components/mo-group-picker" },
+    what: "รายการชุด (กลุ่มใบสั่งงาน) แหล่งเดียวของทุกหน้า",
+  },
+  {
+    key: "bank-picker", label: "เลือกธนาคาร", code: "BankPicker", category: "pick",
+    source: { path: "components/bank-picker" },
+    what: "ค้นหาธนาคาร + เพิ่มธนาคารใหม่ได้",
+    when: "ทุกช่องชื่อธนาคาร (บัญชีพนักงาน บัญชีร้าน บิลโอน)",
+  },
+  {
+    key: "source-doc-picker", label: "ดึงจากเอกสารต้นทาง", code: "SourceDocPickerModal", category: "pick",
+    source: { path: "components/source-doc-picker" },
+    what: "ติ๊กเลือกใบเสนอราคาหรือใบสั่งผลิตหลายใบ เพื่อดึงเข้าเอกสารปลายทาง",
+  },
+  {
+    key: "tag-filter", label: "กรองตามแท็ก", code: "TagGroupFilter", category: "pick",
+    source: { path: "components/tag-filter" },
+    what: "ป๊อปกรองแท็กสินค้า แบ่งตามกลุ่ม ติ๊กได้หลายอัน",
+  },
+  {
+    key: "sku-tag-browser", label: "เลือกดูสินค้าตามกลุ่มแท็ก", code: "SkuTagBrowser", category: "pick",
+    source: { path: "components/sku-tag-browser" },
+    what: "ไล่ดูสินค้าจากกลุ่มหลัก → กลุ่มย่อย → แท็ก (มี Taobao และขอเพิ่มวัตถุดิบในตัว)",
+  },
+  {
+    key: "marketing-sku-picker", label: "ป๊อปเลือกรุ่นแบบการ์ดรูป", code: "MarketingSkuPickerModal", category: "pick",
+    source: { path: "components/marketing-sku-picker-modal" },
+    what: "เลือกหลายรุ่นจากการ์ดรูป แยกแบรนด์ กรองป้าย (แบบหน้า SKU การตลาด)",
+    notWhen: "เลือกรุ่นเดียวในช่องฟอร์ม ให้ใช้ ParentSkuPicker",
+  },
+
+  // รูปและไฟล์
+  {
+    key: "hover-image", label: "ชี้รูปแล้วเห็นรูปใหญ่", code: "HoverImage", category: "file",
+    source: { path: "components/hover-image" },
+    what: "รูปย่อ ชี้เมาส์แล้วรูปใหญ่ลอยทับทุกอย่าง (ไม่โดนกรอบตัด) มือถือแตะได้",
+    when: "รูปในตาราง/การ์ดทุกที่",
+  },
+  {
+    key: "hover-card", label: "ชี้การ์ดแล้วเห็นรายละเอียด", code: "HoverCardWrap", category: "file",
+    source: { path: "components/hover-card" },
+    what: "ชี้ที่การ์ดค้างแล้วเห็นรูปใหญ่ + รายละเอียดข้างการ์ด",
+    notWhen: "ถ้าแค่อยากขยายรูป ให้ใช้ HoverImage",
+    doc: "hover-card.md",
+  },
+  {
+    key: "image-lightbox", label: "ดูรูปเต็มจอ", code: "ImageLightbox", category: "file",
+    source: { path: "components/image-lightbox" },
+    what: "กดรูปแล้วขยายเต็มจอ เลื่อนดูรูปถัดไป ซูม ปัดนิ้วได้",
+    note: "ImageGallery ใน components/image-input ยังมีจอเต็มของตัวเอง ไม่ได้ใช้ตัวนี้",
+  },
+  {
+    key: "image-crop-box", label: "เลือกส่วนที่เห็นของรูป", code: "ImageCropBox", category: "file",
+    source: { path: "components/image-crop-box" },
+    what: "ลากกรอบสัดส่วนคงที่บนรูป เลือกส่วนที่จะโชว์จริง",
+  },
+  {
+    key: "video-thumb", label: "ภาพย่อวิดีโอ", code: "VideoThumb", category: "file",
+    source: { path: "components/video-thumb" },
+    what: "ภาพย่อของวิดีโอในคลังและช่องวิดีโอ",
+  },
+  {
+    key: "file-ref", label: "เปิดดูไฟล์จากที่อยู่กลาง", code: "FileRefLink", category: "file",
+    source: { path: "components/file-ref" },
+    what: "เปิดไฟล์ที่เก็บไว้ไม่ว่าอยู่ R2 หรือ Google Drive ด้วยรูปแบบที่อยู่เดียว",
+  },
+  {
+    key: "upload-permission", label: "เช็กสิทธิ์อัปโหลดไฟล์", code: "useFileUploadAccess", category: "file",
+    source: { path: "components/upload-permission" },
+    what: "บอกว่าคนนี้อัปโหลดได้ไหม (สิทธิ์ files.upload) + ข้อความเมื่อไม่ได้",
+    when: "ช่องอัปโหลดใหม่ทุกช่อง",
+  },
+  {
+    key: "product-image-router", label: "จัดรูปหลายโฟลเดอร์ลงช่องรูปสินค้า", code: "ProductImageRouter", category: "file",
+    source: { path: "components/product-image-router" },
+    what: "ลากหลายโฟลเดอร์ ชื่อโฟลเดอร์ = รหัสสี แล้วระบบจัดรูปลงสินค้าให้",
+    doc: "product-image-router.md",
+  },
+  {
+    key: "parent-description-images", label: "รูป Description ของรุ่น", code: "ParentDescriptionImages", category: "file",
+    source: { path: "components/parent-description-images" },
+    what: "อัปรูปบรรยายสินค้าแบบมีลำดับ เข้าคลังกลางแล้วผูกกับรุ่น",
+  },
+
+  // แจ้งเตือน
+  {
+    key: "line-console", label: "ศูนย์จัดการ LINE", code: "LineConsole", category: "notify",
+    source: { path: "components/line-console" },
+    what: "ตั้งโทเคนบอท กลุ่มปลายทาง เปิด/ปิดการแจ้งต่อเหตุการณ์ ของทุกระบบในที่เดียว",
+    notWhen: "การส่งข้อความจริงให้ผ่าน lib/line-send",
+  },
+
+  // ระบบ
+  {
+    key: "activity-feed", label: "ไทม์ไลน์ประวัติ", code: "ActivityFeed", category: "system",
+    source: { path: "components/activity-feed" },
+    what: "โชว์ประวัติว่าใครทำอะไร เปลี่ยนจากอะไรเป็นอะไร แบบไทม์ไลน์",
+    when: "กล่องประวัติของรายการ หรือหน้าประวัติทั้งระบบ",
+    doc: "audit-log.md",
+  },
+
+  // สถานะหน้าจอ
+  {
+    key: "po-pay-chip", label: "ป้ายสถานะจ่ายเงินใบสั่งซื้อ", code: "PoPayChip", category: "state",
+    source: { path: "components/po-pay-chip" },
+    what: "ป้ายสีบอกว่าใบสั่งซื้อจ่ายแล้วหรือยัง เลยกำหนดไหม (กติกาอยู่ lib/po-pay-state)",
+  },
+
+  // พิมพ์
+  {
+    key: "wo-print-columns", label: "ตั้งค่าตารางใบสั่งงานผลิต", code: "useWoPrintColumns", category: "print",
+    source: { path: "components/wo-print-columns" },
+    what: "เลือกคอลัมน์ ความกว้าง ช่องรูป ของใบสั่งงานผลิตตอนพิมพ์ (ค่ากลางของระบบ)",
+  },
+  {
+    key: "pending-data-report", label: "รายงานรายการค้าง", code: "PendingDataReport", category: "print",
+    source: { path: "components/pending-data-report" },
+    what: "รายงานข้อมูลที่ยังกรอกไม่ครบ ใช้ทั้งแดชบอร์ดจัดซื้อและผลิต (พิมพ์ได้)",
+  },
+
+  // ชิ้นงานธุรกิจ
+  {
+    key: "po-detail-modal", label: "ป๊อปรายละเอียดใบสั่งซื้อ", code: "PoDetailModal", category: "feature",
+    source: { path: "components/po-detail-modal" },
+    what: "ดู/แก้ใบสั่งซื้อ 1 ใบ พร้อมภาษี หลักฐาน สถานะจ่าย",
+    when: "ทุกหน้าที่กดเปิดใบสั่งซื้อ",
+  },
+  {
+    key: "gr-detail-modal", label: "ป๊อปรายละเอียดใบรับสินค้า", code: "GrDetailModal", category: "feature",
+    source: { path: "components/gr-detail-modal" },
+    what: "ดู/แก้ใบรับสินค้า 1 ใบ รายการที่รับ ของเสีย ไฟล์แนบ",
+  },
+  {
+    key: "receive-line-modal", label: "รับของทีละบรรทัด", code: "ReceiveLineModal", category: "feature",
+    source: { path: "components/receive-line-modal" },
+    what: "รับของเข้าทีละบรรทัดของใบสั่งซื้อ",
+  },
+  {
+    key: "sku-supplier-list", label: "ราคาหลายร้านต่อสินค้า", code: "SkuSupplierList", category: "feature",
+    source: { path: "components/sku-supplier-list" },
+    what: "1 สินค้ามีหลายร้าน แต่ละร้านมีราคา ตั้งร้านหลักได้ 1 ร้าน",
+  },
+  {
+    key: "mo-status-modal", label: "ป๊อปสถานะงานผลิต", code: "MoStatusModal", category: "feature",
+    source: { path: "components/mo-status-modal" },
+    what: "สถานะ 9 ขั้นของใบสั่งผลิต 1 ใบ + รายละเอียดแต่ละขั้น",
+  },
+  {
+    key: "mo-material-progress", label: "ความคืบหน้าซื้อวัตถุดิบของใบสั่งผลิต", code: "MoMaterialProgress", category: "feature",
+    source: { path: "components/mo-material-progress" },
+    what: "วัตถุดิบของใบสั่งผลิตซื้อแล้ว/มาถึงแล้วกี่รายการ",
+  },
+  {
+    key: "work-instruction", label: "แผงรายละเอียดสั่งงาน", code: "WorkInstructionPanel", category: "feature",
+    source: { path: "components/work-instruction" },
+    what: "รวมข้อมูลสั่งงานจากสินค้าและรุ่น + วิธีทำ ในแผงเดียว",
+  },
+  {
+    key: "bom-editor-modal", label: "เปิดตัวทำสูตร (BOM) เป็นป๊อป", code: "BomEditorModal", category: "feature",
+    source: { path: "components/bom-editor-modal" },
+    what: "เปิดหน้าทำสูตรตัวจริงเป็นป๊อปจากหน้าไหนก็ได้",
+  },
+  {
+    key: "bom-change-request", label: "ขอเพิ่ม/แก้สูตร", code: "BomChangeRequest", category: "feature",
+    source: { path: "components/bom-change-request" },
+    what: "หน้างานขอแก้สูตร โดยไม่แตะสูตรจริงจนกว่าจะอนุมัติ",
+  },
+  {
+    key: "material-request", label: "ขอเพิ่มวัตถุดิบ", code: "MaterialRequestForm", category: "feature",
+    source: { path: "components/material-request" },
+    what: "พนักงานกรอกเท่าที่รู้ → รออนุมัติ → อนุมัติแล้วกลายเป็นสินค้าจริง",
+  },
+  {
+    key: "order-batch-entry", label: "ลงออเดอร์ทีละหลายรายการ", code: "OrderBatchEntryModal", category: "feature",
+    source: { path: "components/order-batch-entry" },
+    what: "ลงออเดอร์ลูกค้าหลายรายการพร้อมกัน วางจาก Excel ได้ + จับชุด",
+    doc: "order-batch-entry.md",
+  },
+  {
+    key: "delete-draft-doc", label: "ปุ่มลบใบร่างเอกสารขาย", code: "DeleteDraftButton", category: "feature",
+    source: { path: "components/delete-draft-doc" },
+    what: "ลบใบเสนอราคา/ใบขาย/ใบวางบิลที่ยังเป็นร่าง พร้อมหน้าต่างยืนยัน",
+  },
+  {
+    key: "design-sheet-detail", label: "ใบงานออกแบบ (ทั้งชุด)", code: "DesignSheetDetail", category: "feature",
+    source: { path: "components/design-sheet-detail" },
+    what: "ป๊อป/หน้าใบงานออกแบบ: ข้อมูล รูป สเปก ตีราคา ส่งงาน",
+  },
+  {
+    key: "design-sheet-present", label: "ใบนำเสนอ A4 ของใบงานออกแบบ", code: "DesignSheetPresentPanel", category: "feature",
+    source: { path: "components/design-sheet-present" },
+    what: "เลือกรูป + แม่แบบ แล้วได้ใบนำเสนอ A4",
+    doc: "design-sheet-present.md",
+  },
+  {
+    key: "campaign-board-send", label: "ส่งใบงานขึ้นกระดานแคมเปญ", code: "CampaignBoardSend", category: "feature",
+    source: { path: "components/campaign-board-send" },
+    what: "ส่งใบงานออกแบบไปวางบนกระดานวางแผนของแคมเปญ",
+  },
+  {
+    key: "canvas-sketch", label: "กระดานวาด", code: "CanvasSketch", category: "feature",
+    source: { path: "components/canvas-sketch" },
+    what: "กระดานแบบ miro วางรูป กล่อง ลูกศร ข้อความ วาดอิสระ",
+    doc: "canvas-sketch.md",
+  },
+  {
+    key: "team-plan", label: "แผนงานทีม", code: "TeamPlan", category: "feature",
+    source: { path: "components/team-plan" },
+    what: "กระดานงานจัดตามความด่วน/ความสำคัญ เพิ่มงานจากหน้าไหนก็ได้",
+    doc: "team-plan.md",
+  },
+  {
+    key: "record-tasks", label: "เช็กลิสต์งานของรายการ", code: "RecordTasksButton", category: "feature",
+    source: { path: "components/record-tasks" },
+    what: "ปุ่ม + ลิ้นชักเช็กลิสต์งาน/โน้ต ผูกกับรายการไหนก็ได้",
+    doc: "record-tasks.md",
+  },
+  {
+    key: "comment-thread", label: "กล่องคอมเมนต์", code: "CommentThread", category: "feature",
+    source: { path: "components/comment-thread" },
+    what: "คอมเมนต์ใต้รายการ (ใคร พิมพ์อะไร เมื่อไหร่)",
+  },
+  {
+    key: "parent-issues-panel", label: "แผงปัญหาของสินค้า", code: "ParentIssuesPanel", category: "feature",
+    source: { path: "components/parent-issues-panel" },
+    what: "จดปัญหาของรุ่นสินค้า แชร์ทุกสี ใช้ใน QC หน้ารุ่น ใบสั่งผลิต",
+  },
+  {
+    key: "compartments-editor", label: "ช่องใส่ของ (ขนาดด้านใน)", code: "CompartmentsEditor", category: "feature",
+    source: { path: "components/compartments-editor" },
+    what: "กรอกช่องใส่ของของรุ่นสินค้า หน้าตาเดียวกัน 3 ที่",
+  },
+  {
+    key: "parent-web-listings", label: "ตั้งค่าเว็บของสินค้า", code: "ParentWebListings", category: "feature",
+    source: { path: "components/parent-web-listings" },
+    what: "ตั้งค่าการขึ้นเว็บร้านของรุ่นสินค้า ทุกร้านหรือร้านเดียว",
+  },
+  {
+    key: "product-platform-manager", label: "ศูนย์เตรียมลงขายหลายแพลตฟอร์ม", code: "ProductPlatformManager", category: "feature",
+    source: { path: "components/product-platform-manager" },
+    what: "ร่างข้อมูลลงขายต่อแพลตฟอร์มของรุ่นสินค้า",
+  },
+  {
+    key: "color-swatch-manager", label: "ทะเบียนสีกลาง", code: "ColorSwatchManager", category: "feature",
+    source: { path: "components/color-swatch-manager" },
+    what: "ตั้งหน้าตาจุดสีของแต่ละชื่อสี",
+    doc: "color-swatch.md",
+  },
+  {
+    key: "create-module-wizard", label: "ตัวช่วยสร้างโมดูลใหม่", code: "CreateModuleWizard", category: "feature",
+    source: { path: "components/create-module-wizard" },
+    what: "สร้างโมดูล/ตารางใหม่ 3 ขั้น จากแม่แบบ",
+  },
+  {
+    key: "field-creator", label: "เพิ่มช่องใหม่จากเว็บ", code: "FieldCreatorModal", category: "feature",
+    source: { path: "components/field-creator" },
+    what: "เพิ่มช่องข้อมูลใหม่จากหน้าเว็บ แล้วสร้างคอลัมน์จริงในฐานข้อมูล",
+    note: "แตะโครงสร้างฐานข้อมูลจริง เฉพาะแอดมิน",
+  },
+  {
+    key: "asset-library", label: "คลังไฟล์ / อัลบั้มคอนเทนต์", code: "AssetLibrary", category: "feature",
+    source: { path: "components/asset-library" },
+    what: "อัลบั้มรูป/วิดีโอจากการถ่าย แตกเป็นโพสต์ในปฏิทินคอนเทนต์",
+  },
+  {
+    key: "payroll-parts", label: "ชิ้นส่วนแอปเงินเดือน", code: "components/payroll/*", category: "feature",
+    source: { path: "components/payroll" },
+    what: "เปลือกและแผงต่าง ๆ ของแอปเงินเดือน (ใช้เฉพาะหน้าเงินเดือน)",
   },
 ];
 

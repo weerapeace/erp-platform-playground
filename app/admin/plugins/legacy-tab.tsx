@@ -44,7 +44,7 @@ function NewPartLink({ legacyKey, onOpenPart }: { legacyKey: string; onOpenPart?
     <button type="button" onClick={(e) => { e.stopPropagation(); onOpenPart?.(part.key); }}
       title="เปิดรายละเอียดในทะเบียนใหม่"
       className="inline-flex max-w-full items-center gap-1 rounded-md border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] text-blue-700 hover:bg-blue-100">
-      <Icon value="i:arrow-right" size={12} />
+      <Icon value="i:link" size={12} />
       <span className="truncate">ทะเบียนใหม่: {part.label}</span>
       {part.replacedBy && <span className="shrink-0 rounded bg-amber-100 px-1 text-amber-700">ตัวเก่า</span>}
     </button>

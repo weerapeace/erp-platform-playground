@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import {
   SHARED_PARTS, PART_CATEGORIES, SAME_JOB_LABEL, buildPartRows, sourceId, type SourceUsage, type SharedPartsUsage,
@@ -8,7 +8,9 @@ import {
 import { scanSharedParts, readRegistrySources, sourceId as scanSourceId } from "../../scripts/shared-parts-scan.mjs";
 
 const ROOT = path.resolve(__dirname, "../..");
-const exists = (p: string) => [".ts", ".tsx", "/index.ts", "/index.tsx"].some((e) => existsSync(path.join(ROOT, p + e)));
+// ไฟล์ · โฟลเดอร์ที่มี index · หรือโฟลเดอร์ชุดชิ้นส่วนที่ไม่มี index (เช่น components/payroll — ตัวนับนับ import ไฟล์ข้างในให้)
+const isDir = (p: string) => { try { return statSync(path.join(ROOT, p)).isDirectory(); } catch { return false; } };
+const exists = (p: string) => [".ts", ".tsx", "/index.ts", "/index.tsx"].some((e) => existsSync(path.join(ROOT, p + e))) || isDir(p);
 
 describe("ทะเบียนของกลาง (lib/shared-parts-registry)", () => {
   it("key ไม่ซ้ำ", () => {
