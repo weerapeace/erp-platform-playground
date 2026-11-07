@@ -292,25 +292,11 @@ export const CustomerPicker = createMasterPicker<CustomerPickerValue>({
   badgeRender: v => v.category ? <span className="text-[10px] text-slate-400 bg-slate-50 px-1.5 py-0.5 rounded-full">{v.category}</span> : null,
 });
 
+// รูปข้อมูลพนักงาน — ใช้โดย RealEmployeePicker (components/real-employee-picker · ตาราง employees จริง)
+// EmployeePicker ตัวเก่า (อ่านตารางทดลอง erp_playground_employees 6 คนสมมติ) ลบแล้ว 2026-11-07 — เจ้าของอนุญาต
 export type EmployeePickerValue = MasterValue & {
   email?: string | null; department?: string | null; position?: string | null;
 };
-export const EmployeePicker = createMasterPicker<EmployeePickerValue>({
-  apiPath:    "employees",
-  storageKey: "erp-recent-employees",
-  label:      "พนักงาน",
-  emptyLabel: "ไม่พบพนักงาน",
-  searchPlaceholder: "ค้นหา รหัส / ชื่อ / อีเมล / แผนก...",
-  label_en: "employee", emptyLabel_en: "No employees found", searchPlaceholder_en: "Search code / name / email / department...",
-  createPermission: "employees.create",
-  secondaryRender: v => (
-    <>
-      {v.position && <span>{v.position}</span>}
-      {v.department && <span> · {v.department}</span>}
-      {v.email && <span> · {v.email}</span>}
-    </>
-  ),
-});
 
 // UserPicker — เลือก "user จริง" (user_profiles คนที่ login ได้) — ของกลางสำหรับมอบหมายงาน
 export type UserPickerValue = MasterValue & { email?: string | null; role?: string | null };
@@ -373,60 +359,5 @@ export const WarehousePicker = createMasterPicker<WarehousePickerValue>({
   ),
 });
 
-export type DepartmentPickerValue = MasterValue & {
-  manager_name?: string | null;
-};
-export const DepartmentPicker = createMasterPicker<DepartmentPickerValue>({
-  apiPath:    "departments",
-  storageKey: "erp-recent-departments",
-  label:      "แผนก",
-  emptyLabel: "ไม่พบแผนก",
-  searchPlaceholder: "ค้นหา รหัส / ชื่อแผนก...",
-  label_en: "department", emptyLabel_en: "No departments found", searchPlaceholder_en: "Search code / department name...",
-  createPermission: "departments.create",
-  secondaryRender: v => v.manager_name ? <span>👤 {v.manager_name}</span> : null,
-});
-
-export type UnitPickerValue = MasterValue & {
-  symbol?: string | null; category?: string | null;
-};
-const UNIT_CAT_LABEL: Record<string, string> = {
-  count: "นับชิ้น", weight: "น้ำหนัก", volume: "ปริมาตร", length: "ความยาว", area: "พื้นที่",
-};
-export const UnitPicker = createMasterPicker<UnitPickerValue>({
-  apiPath:    "units",
-  storageKey: "erp-recent-units",
-  label:      "หน่วยนับ",
-  emptyLabel: "ไม่พบหน่วยนับ",
-  searchPlaceholder: "ค้นหา ชื่อ / สัญลักษณ์...",
-  label_en: "unit", emptyLabel_en: "No units found", searchPlaceholder_en: "Search name / symbol...",
-  createPermission: "units.create",
-  badgeRender: v => v.symbol ? <span className="text-[10px] font-mono bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{v.symbol}</span> : null,
-  secondaryRender: v => v.category ? <span className="text-slate-400">{UNIT_CAT_LABEL[v.category] ?? v.category}</span> : null,
-});
-
-export type TaxPickerValue = MasterValue & {
-  tax_type?: string | null; rate?: number | null; included?: boolean | null;
-};
-const TAX_COLOR: Record<string, string> = {
-  VAT:    "bg-blue-50 text-blue-700",
-  WHT:    "bg-purple-50 text-purple-700",
-  EXCISE: "bg-amber-50 text-amber-700",
-  OTHER:  "bg-slate-100 text-slate-600",
-};
-export const TaxPicker = createMasterPicker<TaxPickerValue>({
-  apiPath:    "taxes",
-  storageKey: "erp-recent-taxes",
-  label:      "ภาษี",
-  emptyLabel: "ไม่พบภาษี",
-  searchPlaceholder: "ค้นหา ชื่อ / ประเภทภาษี...",
-  label_en: "tax", emptyLabel_en: "No taxes found", searchPlaceholder_en: "Search name / tax type...",
-  createPermission: "taxes.create",
-  badgeRender: v => v.tax_type ? <span className={`text-[10px] px-1.5 py-0.5 rounded ${TAX_COLOR[v.tax_type] ?? "bg-slate-100"}`}>{v.tax_type}</span> : null,
-  secondaryRender: v => (
-    <>
-      {v.rate != null && <span>อัตรา {Number(v.rate).toFixed(v.rate % 1 === 0 ? 0 : 2)}%</span>}
-      {v.included && <span> · 🟢 รวมภาษี</span>}
-    </>
-  ),
-});
+// DepartmentPicker / UnitPicker / TaxPicker ตัวเก่า (อ่านตารางทดลอง erp_playground_departments / units / taxes)
+// ลบแล้ว 2026-11-07 — ไม่มีหน้าจริงใช้ · เจ้าของอนุญาต · หน่วยนับใช้ UomPicker (components/uom-picker)

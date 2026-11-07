@@ -3,28 +3,22 @@
 import { useState } from "react";
 import { PlaygroundShell } from "@/components/playground-shell";
 import {
-  ProductPicker, SupplierPicker, EmployeePicker,
-  CustomerPicker, WarehousePicker, DepartmentPicker, UnitPicker, TaxPicker,
-  type ProductPickerValue, type SupplierPickerValue, type EmployeePickerValue,
+  ProductPicker, SupplierPicker,
+  CustomerPicker, WarehousePicker,
+  type ProductPickerValue, type SupplierPickerValue,
   type CustomerPickerValue, type WarehousePickerValue,
-  type DepartmentPickerValue, type UnitPickerValue, type TaxPickerValue,
 } from "@/components/pickers";
 
 export default function PickerPlaygroundPage() {
   // Individual picker states
   const [product, setProduct] = useState<ProductPickerValue | null>(null);
   const [supplier, setSupplier] = useState<SupplierPickerValue | null>(null);
-  const [employee, setEmployee] = useState<EmployeePickerValue | null>(null);
   const [customer,   setCustomer]   = useState<CustomerPickerValue | null>(null);
   const [warehouse,  setWarehouse]  = useState<WarehousePickerValue | null>(null);
-  const [department, setDepartment] = useState<DepartmentPickerValue | null>(null);
-  const [unit,       setUnit]       = useState<UnitPickerValue | null>(null);
-  const [tax,        setTax]        = useState<TaxPickerValue | null>(null);
 
   // Form simulation states
   const [formProduct, setFormProduct] = useState<ProductPickerValue | null>(null);
   const [formSupplier, setFormSupplier] = useState<SupplierPickerValue | null>(null);
-  const [formEmployee, setFormEmployee] = useState<EmployeePickerValue | null>(null);
   const [formErrors, setFormErrors] = useState<{ product?: string; supplier?: string }>({});
   const [formSubmitted, setFormSubmitted] = useState(false);
 
@@ -131,42 +125,10 @@ export default function PickerPlaygroundPage() {
           </div>
         </div>
 
-        {/* ===== 3. EmployeePicker ===== */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
-          <div className="px-6 py-4 border-b border-slate-100">
-            <h2 className="text-base font-semibold text-slate-900">👤 EmployeePicker</h2>
-            <p className="text-xs text-slate-500 mt-0.5">ค้นหาพนักงานด้วยชื่อ, รหัส หรือแผนก</p>
-          </div>
-          <div className="px-6 py-5">
-            <div className="max-w-sm">
-              <label className="block text-xs font-medium text-slate-700 mb-1.5">เลือกพนักงาน</label>
-              <EmployeePicker value={employee} onChange={setEmployee} disabled={disabledDemo} />
-            </div>
-
-            {employee ? (
-              <div className="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
-                <p className="text-xs font-semibold text-emerald-700 mb-2">✅ พนักงานที่เลือก</p>
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-lg">
-                    {employee.name.charAt(0)}
-                  </div>
-                  <div>
-                    <p className="font-semibold text-slate-800">{employee.name}</p>
-                    <p className="text-sm text-slate-500">{employee.position ?? "—"}</p>
-                    <p className="text-xs text-slate-400">{employee.department ?? "—"} · {employee.code ?? "—"}</p>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <p className="mt-3 text-xs text-slate-400">← ลองค้นหา &quot;สมชาย&quot; หรือ &quot;ไอที&quot;</p>
-            )}
-          </div>
-        </div>
-
         {/* ===== Master Data Pickers (ใหม่) ===== */}
         <div className="bg-gradient-to-br from-emerald-50 to-blue-50 border border-emerald-200 rounded-xl p-5">
           <h2 className="text-sm font-semibold text-slate-800 mb-1">🎯 Master Data Pickers</h2>
-          <p className="text-xs text-slate-600">ครบ 6 ตัวจาก factory pattern — ค้นหา + recently used + สร้างใหม่ (ถ้ามี permission)</p>
+          <p className="text-xs text-slate-600">ตัวเลือกข้อมูลหลักจาก factory pattern — ค้นหา + recently used + สร้างใหม่ (ถ้ามี permission)</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -194,41 +156,6 @@ export default function PickerPlaygroundPage() {
             )}
           </div>
 
-          {/* DepartmentPicker */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <h3 className="text-sm font-semibold text-slate-800 mb-2">🏢 DepartmentPicker</h3>
-            <DepartmentPicker value={department} onChange={setDepartment} disabled={disabledDemo} />
-            {department && (
-              <div className="mt-3 text-xs text-slate-600 bg-slate-50 p-2 rounded">
-                <code>{department.code}</code> · {department.name}
-                {department.manager_name && <> · 👤 {department.manager_name}</>}
-              </div>
-            )}
-          </div>
-
-          {/* UnitPicker */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
-            <h3 className="text-sm font-semibold text-slate-800 mb-2">📏 UnitPicker (UoM)</h3>
-            <UnitPicker value={unit} onChange={setUnit} disabled={disabledDemo} />
-            {unit && (
-              <div className="mt-3 text-xs text-slate-600 bg-slate-50 p-2 rounded">
-                <code>{unit.code}</code> · {unit.name} <span className="text-slate-400">({unit.symbol})</span>
-              </div>
-            )}
-          </div>
-
-          {/* TaxPicker */}
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 md:col-span-2">
-            <h3 className="text-sm font-semibold text-slate-800 mb-2">💰 TaxPicker</h3>
-            <TaxPicker value={tax} onChange={setTax} disabled={disabledDemo} />
-            {tax && (
-              <div className="mt-3 text-xs text-slate-600 bg-slate-50 p-2 rounded">
-                <code>{tax.code}</code> · {tax.tax_type} {tax.name}
-                {tax.rate != null && <> · อัตรา {Number(tax.rate)}%</>}
-                {tax.included && <> · 🟢 รวมภาษี</>}
-              </div>
-            )}
-          </div>
         </div>
 
         {/* ===== 4. Form Integration Demo ===== */}
@@ -277,12 +204,6 @@ export default function PickerPlaygroundPage() {
                 )}
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1.5">
-                  ผู้รับผิดชอบ <span className="text-xs text-slate-400 font-normal">(ไม่บังคับ)</span>
-                </label>
-                <EmployeePicker value={formEmployee} onChange={(v) => { setFormEmployee(v); setFormSubmitted(false); }} disabled={disabledDemo} />
-              </div>
             </div>
 
             <div className="pt-2 flex gap-3">
@@ -296,7 +217,7 @@ export default function PickerPlaygroundPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setFormProduct(null); setFormSupplier(null); setFormEmployee(null);
+                  setFormProduct(null); setFormSupplier(null);
                   setFormErrors({}); setFormSubmitted(false);
                 }}
                 className="h-9 px-5 text-sm font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors"

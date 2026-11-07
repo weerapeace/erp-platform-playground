@@ -848,14 +848,14 @@ export function SupplierPicker({ value, onChange, placeholder = "เลือก
   );
 }
 
-// ---- EmployeePicker / others — ใช้ Master Picker Factory (Supabase) ----
+// ---- ตัวเลือกข้อมูลหลัก — ใช้ Master Picker Factory (Supabase) ----
 // re-export จาก ./master ที่ใช้ factory pattern
+// (EmployeePicker / DepartmentPicker / UnitPicker / TaxPicker ตัวเก่าที่อ่านตารางทดลอง ลบแล้ว 2026-11-07
+//  → พนักงาน: RealEmployeePicker · คนที่ล็อกอินได้: UserPicker · หน่วย: UomPicker)
 export {
-  CustomerPicker, EmployeePicker, UserPicker, WarehousePicker,
-  DepartmentPicker, UnitPicker, TaxPicker, useRecentUsers,
+  CustomerPicker, UserPicker, WarehousePicker, useRecentUsers,
 } from "./master";
 export { RecordPeekLink } from "./record-peek-link";
 export type {
-  CustomerPickerValue, EmployeePickerValue, UserPickerValue, WarehousePickerValue,
-  DepartmentPickerValue, UnitPickerValue, TaxPickerValue, MasterValue,
+  CustomerPickerValue, EmployeePickerValue, UserPickerValue, WarehousePickerValue, MasterValue,
 } from "./master";

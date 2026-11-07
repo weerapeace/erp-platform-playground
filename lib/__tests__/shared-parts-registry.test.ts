@@ -69,37 +69,35 @@ describe("ทะเบียนของกลาง (lib/shared-parts-registry)
 
 describe("ป้ายสถานะ (buildPartRows)", () => {
   const u = (files: number, placeCount = files): SourceUsage => ({ files, demo: 0, placeCount, places: [] });
-  const parts = SHARED_PARTS.filter((p) => ["pager", "pager-bar", "file-input", "file-multi-input", "supplier-picker", "supplier-picker-old", "attachment-panel", "record-files", "line-items-grid", "sales-line-items", "skeleton", "state-views"].includes(p.key));
+  // ใช้ชิ้นที่อยู่ถาวร + ชิ้นจำลอง (ไม่ผูกกับตัวเก่าที่จะถูกลบ)
+  const parts = SHARED_PARTS.filter((p) => ["file-input", "file-multi-input", "line-items-grid", "sales-line-items", "state-views"].includes(p.key));
   const usage = {
-    sources: Object.fromEntries(parts.map((p) => [sourceId(p.source), p.key === "skeleton" ? u(0) : p.key === "pager-bar" || p.key === "file-multi-input" ? u(1) : u(10, 5)])),
+    sources: Object.fromEntries(parts.map((p) => [sourceId(p.source), p.key === "state-views" ? u(0) : p.key === "file-multi-input" ? u(1) : u(10, 5)])),
   };
   const rows = Object.fromEntries(buildPartRows(parts, usage).map((r) => [r.key, r]));
+  const fake = (key: string, extra: Record<string, unknown>) => ({ key, label: key, code: key, category: "pick" as const, source: { path: `components/${key}` }, what: "-", ...extra });
 
-  it("ไม่มีใครใช้ / ใช้ที่เดียว / ซ้ำกับตัวหลัก", () => {
-    expect(rows.skeleton.flags).toContain("unused");
+  it("ไม่มีใครใช้ / ใช้ที่เดียว / ควรย้ายไปตัวหลัก", () => {
+    expect(rows["state-views"].flags).toContain("unused");
     expect(rows["file-multi-input"].flags).toEqual(expect.arrayContaining(["single", "dup"]));
+    expect(rows["file-multi-input"].verdict).toBe("merge");
     expect(rows["file-input"].flags).not.toContain("dup");
-    expect(rows.pager.siblings).toEqual(["pager-bar"]);
-    expect(rows["pager-bar"].flags).toEqual(expect.arrayContaining(["single", "deprecated"]));   // รวมแล้ว → ตัวเก่า (ไม่ติด dup ซ้ำ)
-    expect(rows["pager-bar"].flags).not.toContain("dup");
+    expect(rows["file-input"].siblings).toEqual(["file-multi-input"]);
   });
 
-  it("ตัวเก่า = ควรเลิก (ไม่ซ้ำป้าย dup)", () => {
-    expect(rows["supplier-picker-old"].flags).toContain("deprecated");
-    expect(rows["supplier-picker-old"].flags).not.toContain("dup");
-  });
-
-  it("กลุ่มที่รวมแล้ว: ตัวเก่า = ควรเลิก · ตัวหลักไม่ติดป้าย", () => {
-    expect(rows["attachment-panel"].flags).toContain("deprecated");
-    expect(rows["attachment-panel"].flags).not.toContain("check");
-    expect(rows["record-files"].flags).not.toContain("dup");
-    expect(rows["record-files"].flags).not.toContain("check");
-    expect(rows["record-files"].verdict).toBe("merge");
+  it("ตัวเก่า = ควรเลิก (ไม่ซ้ำป้าย dup/check) · ตัวหลักไม่ติดป้าย", () => {
+    const r = Object.fromEntries(buildPartRows([
+      fake("zz-main", { sameJob: "zz-g", primary: true }),
+      fake("zz-old", { sameJob: "zz-g", replacedBy: "zz-main" }),
+    ], { sources: {} }).map((x) => [x.key, x]));
+    expect(r["zz-old"].flags).toContain("deprecated");
+    expect(r["zz-old"].flags).not.toContain("dup");
+    expect(r["zz-old"].flags).not.toContain("check");
+    expect(r["zz-main"].flags).not.toContain("dup");
   });
 
   it("กลุ่มที่ยังไม่ได้ตัดสิน / เช็กข้อมูลก่อน = ป้าย check", () => {
-    const fake = (key: string) => ({ key, label: key, code: key, category: "pick" as const, source: { path: `components/${key}` }, what: "-", sameJob: "zz-undecided" });
-    const r = buildPartRows([fake("zz-a"), fake("zz-b")], { sources: {} });
+    const r = buildPartRows([fake("zz-a", { sameJob: "zz-undecided" }), fake("zz-b", { sameJob: "zz-undecided" })], { sources: {} });
     expect(r.every((x) => x.flags.includes("check"))).toBe(true);
   });
 
@@ -109,7 +107,6 @@ describe("ป้ายสถานะ (buildPartRows)", () => {
       expect(rows[k].flags).not.toContain("dup");
       expect(rows[k].flags).not.toContain("check");
     }
-    expect(rows["pager-bar"].verdict).toBe("merge");
   });
 });
 

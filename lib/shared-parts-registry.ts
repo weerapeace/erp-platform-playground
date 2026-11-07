@@ -71,21 +71,16 @@ export type SharedPart = {
 
 /** ชื่อกลุ่มงานเดียวกัน (ภาษาคน) */
 export const SAME_JOB_LABEL: Record<string, string> = {
-  "pager": "แถบแบ่งหน้า",
   "line-items": "ตารางบรรทัดเอกสาร",
   "popup": "ป๊อปอัป",
-  "loading": "สถานะกำลังโหลด",
   "select": "ช่องเลือกแบบพิมพ์ค้นหา",
   "sku-pick": "เลือกสินค้า",
   "supplier-pick": "เลือกร้าน / ผู้จำหน่าย",
-  "unit-pick": "เลือกหน่วยนับ",
-  "employee-pick": "เลือกพนักงาน",
   "attach": "ไฟล์แนบของรายการ (2 ระบบ)",
   "file-field": "ช่องไฟล์ในฟอร์ม",
   "markup": "วาดรูปทรง / ข้อความบนรูป",
   "image-box": "ลากกรอบ / จุดบนรูป",
   "import": "นำเข้าไฟล์ Excel / CSV",
-  "permission": "สิทธิ์ผู้ใช้",
 };
 
 /**
@@ -104,10 +99,7 @@ export const JOB_VERDICT_LABEL: Record<JobVerdict, { label: string; hint: string
 };
 
 export const SAME_JOB_VERDICT: Record<string, { verdict: JobVerdict; why: string }> = {
-  "pager": { verdict: "merge", why: "รวมแล้ว 2026-11-07: แถบหลักรองรับกรณีไม่รู้จำนวนทั้งหมดแล้ว ตัวเลือกวัตถุดิบย้ายมาใช้ · แบบที่ 2 ไม่มีใครใช้ รออนุญาตลบ" },
   "select": { verdict: "keep", why: "ดูโค้ดแล้ว (2026-11-07) ไม่ใช่ตัวซ้ำ: แบบที่ 2 พิมพ์แล้วสั่งทำทันที + ปักดาวโปรด (ใช้ย้ายหมวดในหน้าจัดเว็บร้าน) · ตัวหลักเป็นช่องเลือกที่เก็บค่าในฟอร์ม" },
-  "loading": { verdict: "merge", why: "โครงเทากระพริบไม่มีใครใช้ ทั้งระบบใช้ตัวหลักอยู่แล้ว" },
-  "permission": { verdict: "merge", why: "ชุดทดลองเก่าไม่มีหน้าจริงใช้ ทั้งระบบใช้ตัวหลักอยู่แล้ว" },
   "sku-pick": { verdict: "merge", why: "ตัวเก่าเหลือ 1 จุดในระบบจัดซื้อชุดเก่า (/purchase-requests) ต้องตัดสินใจเลิกระบบนั้นก่อน · แบบกริดรูปไม่มีใครใช้" },
   "supplier-pick": { verdict: "merge", why: "ย้ายแล้ว 3 จุด (2026-11-07) เหลือ /purchase-orders ระบบจัดซื้อชุดเก่า ต้องตัดสินใจเลิกระบบนั้นก่อน" },
   "popup": { verdict: "keep", why: "ดูโค้ดแล้ว (2026-11-07) ไม่ใช่ตัวซ้ำ: ป๊อปฝังหน้าอื่นต้องใช้พื้นที่เต็มไม่มีขอบ มีปุ่มเปิดเต็มจอ และกันเมาส์หลุดตอนลาก ซึ่งป๊อปอัปกลางยังไม่มี · ใช้ผ่าน EmbedModal เท่านั้น" },
@@ -116,8 +108,6 @@ export const SAME_JOB_VERDICT: Record<string, { verdict: JobVerdict; why: string
   "markup": { verdict: "merge", why: "ทั้งคู่วาดรูปทรง/ข้อความบนรูป ตัวกลางที่เลือกไว้คือกระดานวาดของใบงานออกแบบ · งานใหญ่ ต้องลองกับรูปสินค้าจริงก่อน" },
   "image-box": { verdict: "merge", why: "ทั้งคู่ลากกรอบบนรูปเป็น % ของรูป · ตัวหลักต้องเพิ่มทรงกรอบ (วงรี/หัวใจ) ก่อน กรอบบนรูปถึงย้ายมาได้" },
   "attach": { verdict: "merge", why: "เช็กแล้ว + เจ้าของเลือก (2026-11-07): เอกสารแนบเก็บที่เก็บส่วนตัว (RecordFilesField) · ย้ายใบเสนอราคา/ใบสั่งขาย/เอกสารพนักงานแล้ว (ยังไม่เคยมีไฟล์) · แผงเก่าเหลือหน้าจัดซื้อชุดเก่า · รูปสินค้า 9,470 ไฟล์ยังอยู่ R2 ตามเดิม" },
-  "unit-pick": { verdict: "merge", why: "เช็กแล้ว + เจ้าของเลือก (2026-11-07): ตัวเก่าอ่านตารางทดลอง 12 หน่วย ขณะที่ใบขายใช้หน่วยจริง (Units 471 · ชิ้น 267 · หลา 17 · pcs. 14 · kg 2 บรรทัด) ซึ่งมีครบในทะเบียนจริง · ย้ายบรรทัดใบขายแล้ว ไม่ต้องย้ายข้อมูล" },
-  "employee-pick": { verdict: "merge", why: "เช็กแล้ว + เจ้าของเลือก (2026-11-07): ตัวเก่าอ่านตารางทดลอง 6 คนสมมติ · ช่องเซลส์ใบเสนอราคา/ใบสั่งขายเก็บชื่อผู้ใช้ (Patty/Gogo) → ย้ายไป UserPicker · งาน HR ใช้ RealEmployeePicker" },
   "line-items": { verdict: "keep", why: "ตารางขายมีส่วนลด ภาษี สีของสินค้า เฉพาะเอกสารขาย · ถ้าจะเปลี่ยนหน้าตาตารางขายต้องถามเจ้าของก่อน" },
 };
 
@@ -167,15 +157,6 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "components/pager" },
     what: "บอกจำนวนทั้งหมด + ปุ่มหน้าก่อน/ถัดไป + เลือกจำนวนต่อหน้า · ไม่รู้จำนวนทั้งหมดก็ได้ (ส่ง count + hasMore)",
     when: "รายการยาวที่ต้องแบ่งหน้า (ตารางกลางมีให้ในตัวแล้ว) รวมถึงรายการในป๊อปค้นหา",
-    sameJob: "pager", primary: true,
-  },
-  {
-    key: "pager-bar", label: "แถบแบ่งหน้า แบบที่ 2", code: "PagerBar", category: "table",
-    source: { path: "components/pager-bar" },
-    what: "แถบเลื่อนหน้าแบบย่อ (ก่อนหน้า/ถัดไป) — ความสามารถย้ายไปอยู่ใน Pager แล้ว",
-    notWhen: "ห้ามใช้ ให้ใช้ Pager (ส่ง total = null + count + hasMore ถ้าไม่รู้จำนวนทั้งหมด)",
-    sameJob: "pager", replacedBy: "pager",
-    note: "ย้ายจุดสุดท้าย (ตัวเลือกวัตถุดิบ) ไป Pager แล้ว 2026-11-07 — ไม่มีใครใช้ รออนุญาตลบ",
   },
   {
     key: "bulk-action-bar", label: "แถบคำสั่งหลายรายการ", code: "BulkActionBar", category: "table",
@@ -326,12 +307,6 @@ export const SHARED_PARTS: SharedPart[] = [
     sameJob: "sku-pick", replacedBy: "sku-picker", legacyKey: "product_picker",
   },
   {
-    key: "sku-image-picker", label: "เลือกสินค้าแบบกริดรูป", code: "SkuImagePicker", category: "pick",
-    source: { path: "components/sku-image-picker" },
-    what: "กริดรูปสินค้าให้กดเลือก",
-    sameJob: "sku-pick",
-  },
-  {
     key: "sku-multi-picker", label: "เลือกสินค้าหลายตัว", code: "SkuMultiPickerModal", category: "pick",
     source: { path: "components/sku-multi-picker" },
     what: "ป๊อปเลือกสินค้าหลายตัวพร้อมกัน กรองตามแท็ก/แบรนด์",
@@ -378,27 +353,10 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "เลือกคลังสินค้า",
   },
   {
-    key: "unit-picker", label: "เลือกหน่วยนับ ตัวเก่า (ตารางทดลอง)", code: "UnitPicker", category: "pick",
-    source: { path: "components/pickers", names: ["UnitPicker"] },
-    what: "อ่านตารางหน่วยชุดทดลอง (erp_playground_units 12 หน่วย) — ไม่ใช่หน่วยจริงของสินค้า",
-    notWhen: "ห้ามใช้ ให้ใช้ UomPicker (ทะเบียนหน่วยจริง)",
-    sameJob: "unit-pick", replacedBy: "uom-picker",
-    note: "ย้ายจุดสุดท้าย (บรรทัดใบขาย) ไป UomPicker แล้ว 2026-11-07 — ไม่มีใครใช้ รออนุญาตลบ",
-  },
-  {
     key: "uom-picker", label: "เลือกหน่วยนับ", code: "UomPicker", category: "pick",
     source: { path: "components/uom-picker" },
     what: "เลือกหน่วยนับจากทะเบียนหน่วยจริง (ตาราง uoms — ตัวเดียวกับหน่วยของสินค้า) เก็บเป็นชื่อหน่วย พิมพ์หน่วยใหม่ได้",
     when: "ทุกช่องหน่วยนับ (บรรทัดใบขาย ร้านที่จำหน่าย ขอเพิ่มวัตถุดิบ)",
-    sameJob: "unit-pick", primary: true,
-  },
-  {
-    key: "employee-picker", label: "เลือกพนักงาน ตัวเก่า (ตารางทดลอง)", code: "EmployeePicker", category: "pick",
-    source: { path: "components/pickers", names: ["EmployeePicker"] },
-    what: "อ่านตารางพนักงานชุดทดลอง (erp_playground_employees 6 คนสมมติ) — ไม่ใช่คนจริง",
-    notWhen: "ห้ามใช้ · พนักงาน HR/เงินเดือน ใช้ RealEmployeePicker · คนที่ล็อกอินได้ (เซลส์ คนรับงาน) ใช้ UserPicker",
-    sameJob: "employee-pick", replacedBy: "real-employee-picker",
-    note: "ย้ายจุดสุดท้ายแล้ว 2026-11-07 (ช่องเซลส์ใบเสนอราคา/ใบสั่งขาย → UserPicker เพราะใบเดิมเก็บชื่อผู้ใช้) — ไม่มีใครใช้ รออนุญาตลบ",
   },
   {
     key: "real-employee-picker", label: "เลือกพนักงานจริง (HR)", code: "RealEmployeePicker", category: "pick",
@@ -406,12 +364,6 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "เลือกพนักงานจากตารางพนักงานจริงของ HR / เงินเดือน",
     when: "งาน HR เงินเดือน บันทึกงาน",
     notWhen: "คนที่ล็อกอินได้ (เซลส์ คนรับงาน ผู้อนุมัติ) ให้ใช้ UserPicker",
-    sameJob: "employee-pick", primary: true,
-  },
-  {
-    key: "dept-tax-picker", label: "เลือกแผนก / เลือกภาษี", code: "DepartmentPicker · TaxPicker", category: "pick",
-    source: { path: "components/pickers", names: ["DepartmentPicker", "TaxPicker"] },
-    what: "มีให้ใช้ แต่ยังไม่มีหน้าจริงเรียกใช้",
   },
   {
     key: "relation-picker", label: "เลือกข้อมูลที่ผูกกัน (ช่องอ้างอิง)", code: "RelationPicker", category: "pick",
@@ -570,14 +522,7 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "กล่องมาตรฐานตอนโหลด ไม่มีข้อมูล หรือโหลดพลาด พร้อมปุ่มลองใหม่",
     when: "ทุกหน้าและทุกแผงที่โหลดข้อมูล",
     notWhen: "ห้ามเขียนข้อความกำลังโหลดเอง",
-    doc: "state-views.md", sameJob: "loading", primary: true,
-  },
-  {
-    key: "skeleton", label: "โครงเทากระพริบตอนโหลด", code: "Skeleton", category: "state",
-    source: { path: "components/skeleton" },
-    what: "แถบเทากระพริบระหว่างโหลด",
-    sameJob: "loading",
-    note: "หัวไฟล์เขียนว่าทุกหน้าต้องใช้ แต่ไม่มีหน้าไหนใช้",
+    doc: "state-views.md",
   },
   {
     key: "spinner", label: "วงหมุนกำลังทำงาน", code: "Spinner · LoadingOverlay", category: "state",
@@ -664,20 +609,13 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "components/auth" },
     what: "เช็กว่าใครเห็นหรือกดอะไรได้ ซ่อนปุ่มที่ไม่มีสิทธิ์ โชว์หน้าไม่มีสิทธิ์",
     when: "ทุกหน้าและทุกปุ่มที่ต้องมีสิทธิ์",
-    doc: "phase-1-1-permissions.md", sameJob: "permission", primary: true,
+    doc: "phase-1-1-permissions.md",
   },
   {
     key: "api-auth", label: "ด่านสิทธิ์ฝั่งเซิร์ฟเวอร์", code: "guardApi · apiCan", category: "system",
     source: { path: "lib/api-auth" },
     what: "เช็กสิทธิ์ก่อนให้ API ทำงาน (ไม่มีสิทธิ์ = ตอบ 401)",
     when: "ทุก API ที่อ่าน/แก้ข้อมูลสำคัญ",
-  },
-  {
-    key: "permission-old", label: "สิทธิ์ ชุดทดลองเก่า", code: "components/permission", category: "system",
-    source: { path: "components/permission" },
-    what: "บทบาทตายตัว 4 แบบ ใช้แค่หน้าทดลองที่ไม่ได้ขึ้นเว็บจริง",
-    notWhen: "ห้ามใช้ ระบบจริงใช้ usePermission",
-    sameJob: "permission", replacedBy: "auth",
   },
   {
     key: "audit", label: "ประวัติว่าใครทำอะไร", code: "lib/audit", category: "system",
@@ -741,23 +679,6 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "lib/flow-map" },
     what: "กดอะไรแล้วไปอัปเดตอะไรต่อ ของ ซื้อ ผลิต จ่ายงาน (หน้า /master/flow-map)",
     doc: "flow-map.md",
-  },
-  {
-    key: "keep-warm", label: "กันเว็บหลับ สมัย Cloudflare", code: "KeepWarm", category: "system",
-    source: { path: "components/keep-warm" },
-    what: "ยิงคำขอเป็นระยะกันเว็บช้าตอนตื่น (ปัญหาของ Cloudflare)",
-    notWhen: "ย้ายเว็บมา Vercel แล้ว ไม่จำเป็น",
-  },
-  {
-    key: "workflow-old", label: "สถานะใบขอซื้อ ชุดทดลองเก่า", code: "components/workflow", category: "system",
-    source: { path: "components/workflow" },
-    what: "ป้ายสถานะ PR แบบตายตัว ใช้แค่หน้าทดลองที่ไม่ได้ขึ้นเว็บจริง",
-    notWhen: "สถานะจริงอยู่ใน lib/status-config และทะเบียน workflow",
-  },
-  {
-    key: "studio-launcher", label: "ปุ่มเปิดตัวจัดเลย์เอาต์", code: "StudioLauncher", category: "system",
-    source: { path: "components/studio-launcher" },
-    what: "เปิดตัวจัดหน้า (StudioPanel) จากที่ไหนก็ได้",
   },
 
   // ───────── ลงทะเบียนเพิ่ม 2026-11-07: ทุกตัวที่ใช้ตั้งแต่ 3 จุดขึ้นไป (ตัวที่ใช้ 1-2 จุด = ชิ้นเฉพาะหน้า ยังไม่ลง) ─────────
