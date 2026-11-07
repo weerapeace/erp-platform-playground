@@ -12,20 +12,21 @@ import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
 import { CopyButton } from "@/components/copy-button";
 import { apiFetch } from "@/lib/api";
 import {
-  PART_CATEGORIES, PART_FLAG_LABEL, SAME_JOB_LABEL,
-  type PartCategory, type PartFlag, type PartRow, type SharedPartsUsage, type UnitUsage, type UsagePlace,
+  PART_CATEGORIES, PART_FLAG_LABEL, SAME_JOB_LABEL, SAME_JOB_VERDICT, JOB_VERDICT_LABEL,
+  type JobVerdict, type PartCategory, type PartFlag, type PartRow, type SharedPartsUsage, type UnitUsage, type UsagePlace,
 } from "@/lib/shared-parts-registry";
 import { LegacyPluginsTab } from "./legacy-tab";
 
 type Data = Pick<SharedPartsUsage, "units" | "totals" | "handMade" | "generatedAt" | "commit"> & { rows: PartRow[] };
-type Tab = "parts" | "unregistered" | "legacy";
-type StatusFilter = "all" | "todo" | "unused" | "dup" | "deprecated" | "single" | "nodoc" | "legacy";
+type Tab = "parts" | "groups" | "unregistered" | "legacy";
+type StatusFilter = "all" | "todo" | "unused" | "dup" | "check" | "deprecated" | "single" | "nodoc" | "legacy";
 
 const STATUS_FILTERS: { key: StatusFilter; label: string; test: (r: PartRow) => boolean }[] = [
   { key: "all", label: "ทั้งหมด", test: () => true },
   { key: "todo", label: "ต้องจัดการ", test: (r) => r.flags.some((f) => f === "unused" || f === "deprecated" || f === "dup" || f === "check") },
   { key: "unused", label: "ไม่มีใครใช้", test: (r) => r.flags.includes("unused") },
-  { key: "dup", label: "ทำงานซ้ำกัน", test: (r) => r.siblings.length > 0 },
+  { key: "dup", label: "ควรย้ายไปตัวหลัก", test: (r) => r.flags.includes("dup") },
+  { key: "check", label: "ต้องเช็กข้อมูลก่อน", test: (r) => r.flags.includes("check") },
   { key: "deprecated", label: "ตัวเก่า ควรเลิก", test: (r) => r.flags.includes("deprecated") },
   { key: "single", label: "ใช้ที่เดียว", test: (r) => r.flags.includes("single") },
   { key: "nodoc", label: "ไม่มีคู่มือ", test: (r) => r.flags.includes("nodoc") },
@@ -50,6 +51,22 @@ function Flag({ f }: { f: PartFlag }) {
 
 function PrimaryBadge() {
   return <span className="text-[11px] px-1.5 py-0.5 rounded-full border whitespace-nowrap bg-emerald-50 text-emerald-700 border-emerald-200">ตัวหลัก</span>;
+}
+
+/** สี/ไอคอนของคำตัดสินกลุ่ม */
+const VERDICT_STYLE: Record<JobVerdict, { cls: string; icon: string }> = {
+  merge: { cls: "bg-amber-50 text-amber-800 border-amber-200", icon: "i:arrows-exchange" },
+  "check-data": { cls: "bg-sky-50 text-sky-800 border-sky-200", icon: "i:database" },
+  keep: { cls: "bg-emerald-50 text-emerald-800 border-emerald-200", icon: "i:check" },
+};
+const VERDICT_ORDER: JobVerdict[] = ["merge", "check-data", "keep"];
+
+function VerdictBadge({ v }: { v: JobVerdict }) {
+  return (
+    <span className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded-full border whitespace-nowrap ${VERDICT_STYLE[v].cls}`}>
+      <Icon value={VERDICT_STYLE[v].icon} size={12} /> {JOB_VERDICT_LABEL[v].label}
+    </span>
+  );
 }
 
 /** แถบความนิยม (สเกล log — ตัวที่ใช้ 400 ที่ ไม่บังตัวที่ใช้ 5 ที่จนมองไม่เห็น) */
@@ -97,14 +114,25 @@ export function SharedPartsView() {
   const rows = useMemo(() => data?.rows ?? [], [data]);
   const byKey = useMemo(() => new Map(rows.map((r) => [r.key, r])), [rows]);
 
-  const stats = useMemo(() => {
-    const jobs = new Set(rows.filter((r) => r.siblings.length > 0).map((r) => r.sameJob));
-    return {
-      unused: rows.filter((r) => r.flags.includes("unused")).length,
-      deprecated: rows.filter((r) => r.flags.includes("deprecated")).length,
-      dupJobs: jobs.size,
-    };
+  // กลุ่มที่คล้ายกัน (มีสมาชิก ≥2 ตัวจริง) + คำตัดสิน
+  const groups = useMemo(() => {
+    const m = new Map<string, PartRow[]>();
+    for (const r of rows) if (r.sameJob && r.siblings.length) m.set(r.sameJob, [...(m.get(r.sameJob) ?? []), r]);
+    return [...m.entries()].map(([key, members]) => ({
+      key, label: SAME_JOB_LABEL[key] ?? key,
+      verdict: (SAME_JOB_VERDICT[key]?.verdict ?? "check-data") as JobVerdict,
+      why: SAME_JOB_VERDICT[key]?.why ?? "ยังไม่ได้ตัดสิน",
+      members: [...members].sort((a, b) => Number(!!b.primary) - Number(!!a.primary) || (b.usage?.files ?? 0) - (a.usage?.files ?? 0)),
+    }));
   }, [rows]);
+
+  const stats = useMemo(() => ({
+    unused: rows.filter((r) => r.flags.includes("unused")).length,
+    deprecated: rows.filter((r) => r.flags.includes("deprecated")).length,
+    merge: groups.filter((g) => g.verdict === "merge").length,
+    checkData: groups.filter((g) => g.verdict === "check-data").length,
+    keep: groups.filter((g) => g.verdict === "keep").length,
+  }), [rows, groups]);
 
   const filtered = useMemo(() => {
     const test = STATUS_FILTERS.find((s) => s.key === status)!.test;
@@ -125,13 +153,14 @@ export function SharedPartsView() {
     { label: "ชิ้นส่วนกลางในโค้ด", value: String(totals.components), hint: `ไม่รวมชิ้นส่วนเว็บร้าน ${totals.website}`, tone: "text-slate-800" },
     { label: "ลงทะเบียนแล้ว", value: String(rows.length), hint: `ยังไม่ลงทะเบียน ${(data.units ?? []).filter((u) => !u.website).length}`, tone: "text-violet-700" },
     { label: "ไม่มีใครใช้", value: String(stats.unused), tone: "text-red-600" },
-    { label: "ทำงานซ้ำกัน", value: `${stats.dupJobs} กลุ่ม`, tone: "text-amber-700" },
+    { label: "กลุ่มที่ควรรวม", value: `${stats.merge} กลุ่ม`, hint: `เช็กข้อมูลก่อน ${stats.checkData} · ใช้คนละงาน ${stats.keep}`, tone: "text-amber-700" },
     { label: "ตัวเก่า ควรเลิก", value: String(stats.deprecated), tone: "text-slate-600" },
     { label: "หน้าที่เขียน \"กำลังโหลด\" เอง", value: `${handMade.loadingPages}/${handMade.loadingPagesTotal}`, hint: "ยังไม่ใช้ของกลาง LoadingState", tone: "text-sky-700" },
   ];
 
   const TABS: { key: Tab; label: string }[] = [
     { key: "parts", label: `ของกลางในระบบ (${rows.length})` },
+    { key: "groups", label: `กลุ่มที่คล้ายกัน (${groups.length})` },
     { key: "unregistered", label: `ยังไม่ลงทะเบียน (${(data.units ?? []).filter((u) => !u.website).length})` },
     { key: "legacy", label: "ทะเบียนเดิม" },
   ];
@@ -231,6 +260,8 @@ export function SharedPartsView() {
         </>
       )}
 
+      {tab === "groups" && <GroupsTab groups={groups} onOpen={setSelKey} />}
+
       {tab === "unregistered" && (
         <UnregisteredTab units={units} withWebsite={withWebsite} setWithWebsite={setWithWebsite} websiteCount={totals.website} />
       )}
@@ -251,9 +282,11 @@ function PartDrawer({ row, byKey, onClose, onOpen }: { row: PartRow; byKey: Map<
   const jobLabel = row.sameJob ? SAME_JOB_LABEL[row.sameJob] ?? row.sameJob : "";
   const siblingsTitle = replaced
     ? `ตัวเก่า — ควรย้ายไปใช้ "${replaced.label}"`
+    : row.verdict === "keep" ? `คล้ายกับตัวเหล่านี้ แต่ใช้คนละงาน — เก็บไว้ทั้งหมด`
+    : row.verdict === "check-data" ? `ตัวอื่นในกลุ่ม "${jobLabel}" — ต้องเช็กว่าข้อมูลจริงอยู่ที่ไหนก่อนรวม`
     : row.primary ? `ตัวหลักของกลุ่ม "${jobLabel}" — ตัวอื่นในกลุ่มควรย้ายมาใช้ตัวนี้`
-    : primary ? `ทำงานซ้ำกับตัวหลัก "${primary.label}" — งานใหม่ให้ใช้ตัวหลัก`
-    : `กลุ่ม "${jobLabel}" มีหลายตัวทำงานคล้ายกัน — ยังไม่ได้เลือกตัวหลัก`;
+    : primary ? `ควรย้ายไปใช้ตัวหลัก "${primary.label}" — งานใหม่ให้ใช้ตัวหลัก`
+    : `ตัวอื่นในกลุ่ม "${jobLabel}"`;
   const sourceText = row.source.names?.length ? `${row.source.path} → ${row.source.names.join(", ")}` : row.source.path;
 
   const Section = ({ label, children }: { label: string; children: ReactNode }) => (
@@ -271,6 +304,15 @@ function PartDrawer({ row, byKey, onClose, onOpen }: { row: PartRow; byKey: Map<
           {row.flags.map((f) => <Flag key={f} f={f} />)}
           {row.flags.length === 0 && !(row.primary && row.siblings.length) && <span className="text-[11px] px-1.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">ใช้งานปกติ</span>}
         </div>
+
+        {row.verdict && (
+          <div className={`px-3 py-2 rounded-lg border text-sm ${VERDICT_STYLE[row.verdict].cls}`}>
+            <div className="flex items-center gap-1.5 font-medium">
+              <Icon value={VERDICT_STYLE[row.verdict].icon} size={15} /> กลุ่ม &quot;{jobLabel}&quot; — {JOB_VERDICT_LABEL[row.verdict].label}
+            </div>
+            <p className="mt-0.5 leading-relaxed">{row.verdictWhy}</p>
+          </div>
+        )}
 
         {row.note && (
           <div className="px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-800 flex gap-2">
@@ -331,6 +373,56 @@ function PartDrawer({ row, byKey, onClose, onOpen }: { row: PartRow; byKey: Map<
         </div>
       </div>
     </Drawer>
+  );
+}
+
+type JobGroup = { key: string; label: string; verdict: JobVerdict; why: string; members: PartRow[] };
+
+/** แท็บ "กลุ่มที่คล้ายกัน" — แต่ละกลุ่มบอกคำตัดสิน (ควรรวม / เช็กข้อมูลก่อน / ใช้คนละงาน) + เหตุผล + สมาชิก */
+function GroupsTab({ groups, onOpen }: { groups: JobGroup[]; onOpen: (key: string) => void }) {
+  return (
+    <div className="space-y-5">
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+        <p className="mb-1.5">ชิ้นส่วนที่หน้าตาหรือหน้าที่คล้ายกัน <b>ไม่ได้แปลว่าต้องรวมทุกตัว</b> — แต่ละกลุ่มมีคำตัดสินแบบใดแบบหนึ่ง:</p>
+        <div className="space-y-1">
+          {VERDICT_ORDER.map((v) => (
+            <div key={v} className="flex flex-wrap items-start gap-2">
+              <VerdictBadge v={v} /> <span className="text-[13px] leading-snug flex-1 min-w-[12rem]">{JOB_VERDICT_LABEL[v].hint}</span>
+            </div>
+          ))}
+        </div>
+        <p className="mt-1.5 text-xs text-slate-500">การลบตัวที่เลิกใช้แล้ว ต้องขออนุญาตเจ้าของทุกครั้ง</p>
+      </div>
+
+      {VERDICT_ORDER.map((v) => {
+        const list = groups.filter((g) => g.verdict === v);
+        if (!list.length) return null;
+        return (
+          <section key={v}>
+            <h2 className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+              <VerdictBadge v={v} /> <span className="text-xs font-normal text-slate-400">{list.length} กลุ่ม</span>
+            </h2>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+              {list.map((g) => (
+                <div key={g.key} className="bg-white border border-slate-200 rounded-xl p-3">
+                  <div className="text-sm font-semibold text-slate-800">{g.label}</div>
+                  <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{g.why}</p>
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {g.members.map((m) => (
+                      <button key={m.key} type="button" onClick={() => onOpen(m.key)}
+                        className={`text-xs px-2.5 py-1 rounded-full border hover:border-violet-300 hover:bg-violet-50 ${m.primary ? "border-emerald-300 bg-emerald-50/60" : m.replacedBy ? "border-slate-300 bg-slate-50 text-slate-500" : "border-slate-200"}`}>
+                        {m.label} · {m.usage && m.usage.files > 0 ? `${m.usage.placeCount} จุด` : "ไม่มีใครใช้"}
+                        {m.primary ? " · ตัวหลัก" : m.replacedBy ? " · ตัวเก่า" : ""}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
   );
 }
 

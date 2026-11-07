@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 import {
-  SHARED_PARTS, PART_CATEGORIES, SAME_JOB_LABEL, buildPartRows, sourceId, type SourceUsage, type SharedPartsUsage,
+  SHARED_PARTS, PART_CATEGORIES, SAME_JOB_LABEL, SAME_JOB_VERDICT, buildPartRows, sourceId, type SourceUsage, type SharedPartsUsage,
 } from "@/lib/shared-parts-registry";
 // ตัวนับจริง (สคริปต์ .mjs ที่รันก่อน build)
 import { scanSharedParts, readRegistrySources, sourceId as scanSourceId } from "../../scripts/shared-parts-scan.mjs";
@@ -50,6 +50,17 @@ describe("ทะเบียนของกลาง (lib/shared-parts-registry)
     expect([...groups].filter(([, g]) => g.primary > 1 || g.n < 2).map(([k]) => k)).toEqual([]);
   });
 
+  it("ทุกกลุ่มมีคำตัดสิน (ควรรวม / เช็กข้อมูลก่อน / ใช้คนละงาน) และกลุ่ม ควรรวม ต้องมีตัวหลัก 1 ตัว", () => {
+    const labelKeys = Object.keys(SAME_JOB_LABEL).sort();
+    expect(Object.keys(SAME_JOB_VERDICT).sort()).toEqual(labelKeys);
+    const used = new Set(SHARED_PARTS.map((p) => p.sameJob).filter(Boolean));
+    expect(labelKeys.filter((k) => !used.has(k))).toEqual([]);   // ไม่มีกลุ่มลอย ๆ ที่ไม่มีสมาชิก
+    const mergeNoPrimary = Object.entries(SAME_JOB_VERDICT)
+      .filter(([k, v]) => v.verdict === "merge" && SHARED_PARTS.filter((p) => p.sameJob === k && p.primary).length !== 1)
+      .map(([k]) => k);
+    expect(mergeNoPrimary).toEqual([]);
+  });
+
   it("ตัวนับตอน build อ่านทะเบียนได้ครบทุกตัว (เขียน source บรรทัดเดียวตามรูปแบบ)", () => {
     const fromScan = readRegistrySources(ROOT).map(scanSourceId).sort();
     expect(fromScan).toEqual(SHARED_PARTS.map((p) => sourceId(p.source)).sort());
@@ -58,7 +69,7 @@ describe("ทะเบียนของกลาง (lib/shared-parts-registry)
 
 describe("ป้ายสถานะ (buildPartRows)", () => {
   const u = (files: number, placeCount = files): SourceUsage => ({ files, demo: 0, placeCount, places: [] });
-  const parts = SHARED_PARTS.filter((p) => ["pager", "pager-bar", "supplier-picker", "supplier-picker-old", "attachment-panel", "file-input", "skeleton", "state-views"].includes(p.key));
+  const parts = SHARED_PARTS.filter((p) => ["pager", "pager-bar", "supplier-picker", "supplier-picker-old", "attachment-panel", "record-files", "line-items-grid", "sales-line-items", "skeleton", "state-views"].includes(p.key));
   const usage = {
     sources: Object.fromEntries(parts.map((p) => [sourceId(p.source), p.key === "skeleton" ? u(0) : p.key === "pager-bar" ? u(1) : u(10, 5)])),
   };
@@ -76,9 +87,19 @@ describe("ป้ายสถานะ (buildPartRows)", () => {
     expect(rows["supplier-picker-old"].flags).not.toContain("dup");
   });
 
-  it("กลุ่มที่ยังไม่มีตัวหลัก = ยังไม่เลือกตัวหลัก", () => {
+  it("กลุ่ม เช็กข้อมูลก่อน = ป้าย check ทุกตัว", () => {
     expect(rows["attachment-panel"].flags).toContain("check");
-    expect(rows["file-input"].flags).toContain("check");
+    expect(rows["record-files"].flags).toContain("check");
+    expect(rows["record-files"].verdict).toBe("check-data");
+  });
+
+  it("กลุ่ม ใช้คนละงาน = ไม่ติดป้ายซ้ำ", () => {
+    for (const k of ["line-items-grid", "sales-line-items"]) {
+      expect(rows[k].verdict).toBe("keep");
+      expect(rows[k].flags).not.toContain("dup");
+      expect(rows[k].flags).not.toContain("check");
+    }
+    expect(rows["pager-bar"].verdict).toBe("merge");
   });
 });
 

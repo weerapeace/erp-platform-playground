@@ -80,10 +80,45 @@ export const SAME_JOB_LABEL: Record<string, string> = {
   "supplier-pick": "เลือกร้าน / ผู้จำหน่าย",
   "unit-pick": "เลือกหน่วยนับ",
   "employee-pick": "เลือกพนักงาน",
-  "attach": "แนบไฟล์",
-  "markup": "วาด / ทำเครื่องหมายบนรูป",
+  "attach": "ไฟล์แนบของรายการ (2 ระบบ)",
+  "file-field": "ช่องไฟล์ในฟอร์ม",
+  "markup": "วาดรูปทรง / ข้อความบนรูป",
+  "image-box": "ลากกรอบ / จุดบนรูป",
   "import": "นำเข้าไฟล์ Excel / CSV",
   "permission": "สิทธิ์ผู้ใช้",
+};
+
+/**
+ * คำตัดสินของแต่ละกลุ่ม "คล้ายกัน" — เจ้าของงงว่า "ซ้ำ = รวมทุกอย่างไหม" (2026-11-07) → บอกชัดต่อกลุ่ม
+ *   merge      = ทำงานเดียวกัน → ย้ายหน้าที่ใช้ตัวรองไปตัวหลัก (ต้องมี primary 1 ตัว) แล้วค่อยขออนุญาตลบตัวรอง
+ *   check-data = หน้าตาคล้ายแต่เก็บ/อ่านข้อมูลคนละตาราง → ต้องตัดสินว่าข้อมูลจริงอยู่ไหนก่อน (ถามเจ้าของ)
+ *   keep       = คล้ายแต่ตั้งใจใช้คนละงาน → ไม่รวม
+ * ทุกกลุ่มใน SAME_JOB_LABEL ต้องมีคำตัดสิน (เทสต์เช็ก)
+ */
+export type JobVerdict = "merge" | "check-data" | "keep";
+
+export const JOB_VERDICT_LABEL: Record<JobVerdict, { label: string; hint: string }> = {
+  merge: { label: "ควรรวม", hint: "ทำงานเดียวกัน — ย้ายหน้าที่ใช้ตัวรองไปใช้ตัวหลัก พอตัวรองไม่มีใครใช้แล้วค่อยขออนุญาตลบ" },
+  "check-data": { label: "ต้องเช็กข้อมูลก่อน", hint: "หน้าตาคล้ายกันแต่เก็บข้อมูลคนละตาราง — ต้องตัดสินใจก่อนว่าข้อมูลจริงอยู่ที่ไหน แล้วค่อยรวม" },
+  keep: { label: "ใช้คนละงาน เก็บทั้งคู่", hint: "คล้ายกันแต่ตั้งใจใช้คนละสถานการณ์ — ไม่ต้องรวม ดูว่าตัวไหนใช้เมื่อไหร่ในรายละเอียด" },
+};
+
+export const SAME_JOB_VERDICT: Record<string, { verdict: JobVerdict; why: string }> = {
+  "pager": { verdict: "merge", why: "แบบที่ 2 ใช้จุดเดียว (ตัวเลือกวัตถุดิบ) ย้ายไปแถบแบ่งหน้าหลักได้" },
+  "select": { verdict: "merge", why: "แบบที่ 2 ใช้จุดเดียว ย้ายไปช่องเลือกแบบพิมพ์ค้นหาตัวหลักได้" },
+  "loading": { verdict: "merge", why: "โครงเทากระพริบไม่มีใครใช้ ทั้งระบบใช้ตัวหลักอยู่แล้ว" },
+  "permission": { verdict: "merge", why: "ชุดทดลองเก่าไม่มีหน้าจริงใช้ ทั้งระบบใช้ตัวหลักอยู่แล้ว" },
+  "sku-pick": { verdict: "merge", why: "ตัวเก่าเหลือ 1 จุดในระบบจัดซื้อชุดเก่า (/purchase-requests) ต้องตัดสินใจเลิกระบบนั้นก่อน · แบบกริดรูปไม่มีใครใช้" },
+  "supplier-pick": { verdict: "merge", why: "ย้ายแล้ว 3 จุด (2026-11-07) เหลือ /purchase-orders ระบบจัดซื้อชุดเก่า ต้องตัดสินใจเลิกระบบนั้นก่อน" },
+  "popup": { verdict: "merge", why: "ป๊อปอัปกลางลากขยายได้อยู่แล้ว ป๊อปลากขยายได้ใช้แค่ 2 จุด ย้ายได้" },
+  "import": { verdict: "merge", why: "ป๊อปนำเข้า CSV แบบเก่าใช้จุดเดียว (/products-crud) ย้ายไปตัวช่วยนำเข้าไฟล์ได้" },
+  "file-field": { verdict: "merge", why: "ช่องหลายไฟล์ใช้จุดเดียว และยังไม่ทำตามกฎที่เก็บไฟล์ ควรให้ช่องไฟล์เดี่ยวรับหลายไฟล์ได้แทน" },
+  "markup": { verdict: "merge", why: "ทั้งคู่วาดรูปทรง/ข้อความบนรูป ตัวกลางที่เลือกไว้คือกระดานวาดของใบงานออกแบบ · งานใหญ่ ต้องลองกับรูปสินค้าจริงก่อน" },
+  "image-box": { verdict: "merge", why: "ทั้งคู่ลากกรอบบนรูปเป็น % ของรูป · ตัวหลักต้องเพิ่มทรงกรอบ (วงรี/หัวใจ) ก่อน กรอบบนรูปถึงย้ายมาได้" },
+  "attach": { verdict: "check-data", why: "ไฟล์แนบของรายการมี 2 ระบบ เก็บคนละที่ (แผงไฟล์แนบ = ตาราง attachments · ช่องในฟอร์ม = Supabase erp_record_files) ต้องเลือกก่อนว่าจะเก็บที่ไหน" },
+  "unit-pick": { verdict: "check-data", why: "หน่วยนับมี 2 ตาราง (units กับ uoms) ต้องเช็กก่อนว่าตารางไหนเป็นของจริง" },
+  "employee-pick": { verdict: "check-data", why: "รายชื่อพนักงานมี 2 ที่ (ทะเบียน master กับ HR) ต้องเช็กก่อนว่าที่ไหนเป็นของจริง" },
+  "line-items": { verdict: "keep", why: "ตารางขายมีส่วนลด ภาษี สีของสินค้า เฉพาะเอกสารขาย · ถ้าจะเปลี่ยนหน้าตาตารางขายต้องถามเจ้าของก่อน" },
 };
 
 export const SHARED_PARTS: SharedPart[] = [
@@ -124,8 +159,8 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "components/sales-line-items" },
     what: "บรรทัดสินค้าในใบเสนอราคา ใบสั่งขาย ใบส่งของ (เลือก SKU หน่วย ราคา ส่วนลด)",
     when: "เอกสารฝั่งขาย",
+    notWhen: "เอกสารที่ไม่ใช่ฝั่งขาย (BOM, PR, PO, ใบรับของ) ให้ใช้ตารางบรรทัดเอกสารกลาง (LineItemsGrid)",
     sameJob: "line-items",
-    note: "ทำงานคล้ายตารางบรรทัดเอกสารกลาง — ควรตรวจว่ารวมกันได้ไหม (ยังไม่ตัดสินใจ)",
   },
   {
     key: "pager", label: "แถบแบ่งหน้า", code: "Pager", category: "table",
@@ -169,8 +204,8 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "resizable-modal", label: "ป๊อปอัปลากขยายได้", code: "ResizableModal", category: "popup",
     source: { path: "components/resizable-modal" },
     what: "หน้าต่างลากมุมปรับขนาด จำขนาดไว้ ใช้ฝังหน้าอื่นเป็นป๊อป",
+    notWhen: "งานใหม่ให้ใช้ป๊อปอัปกลาง (ERPModal) ซึ่งลากปรับขนาดและจำขนาดได้อยู่แล้ว",
     sameJob: "popup",
-    note: "ป๊อปอัปกลางลากปรับขนาดได้แล้ว — ควรตรวจว่ายังต้องมีตัวนี้แยกไหม",
   },
   {
     key: "popover", label: "เมนูลอยเล็ก", code: "Popover", category: "popup",
@@ -328,7 +363,6 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "components/pickers", names: ["UnitPicker"] },
     what: "เลือกหน่วยนับจากตาราง units",
     sameJob: "unit-pick",
-    note: "ทะเบียนหน่วยนับแยกเป็น 2 ตาราง (units กับ uoms) — ต้องเลือกว่าจะใช้ตารางไหนเป็นหลัก",
   },
   {
     key: "uom-picker", label: "เลือกหน่วยนับ (ตาราง uoms)", code: "UomPicker", category: "pick",
@@ -423,19 +457,19 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "components/attachment-panel" },
     what: "แนบไฟล์กับเอกสาร (เก็บแยกตาราง attachments) ดู ดาวน์โหลด ลบ",
     sameJob: "attach",
-    note: "หัวไฟล์เขียนว่าทุกโมดูลต้องใช้ตัวนี้ แต่มีอีก 3 ตัวทำงานคล้ายกัน — ยังไม่ได้เลือกตัวหลัก",
+    note: "หัวไฟล์เขียนว่าทุกโมดูลต้องใช้ตัวนี้ แต่ช่องไฟล์แนบในฟอร์ม (RecordFilesField) ก็ทำงานเดียวกันโดยเก็บไฟล์คนละที่",
   },
   {
     key: "file-input", label: "ช่องไฟล์แนบเดี่ยว", code: "FileInput", category: "file",
     source: { path: "components/file-input" },
-    what: "อัปโหลดไฟล์แนบ 1 ไฟล์ (รูปหรือ PDF)",
-    sameJob: "attach",
+    what: "อัปโหลดไฟล์แนบ 1 ไฟล์ (รูปหรือ PDF) เก็บตามกฎที่เก็บไฟล์",
+    sameJob: "file-field", primary: true,
   },
   {
     key: "file-multi-input", label: "ช่องไฟล์แนบหลายไฟล์", code: "FileMultiInput", category: "file",
     source: { path: "components/file-multi-input" },
-    what: "อัปโหลดไฟล์แนบหลายไฟล์ (รูปและ PDF)",
-    sameJob: "attach",
+    what: "อัปโหลดไฟล์แนบหลายไฟล์ (รูปและ PDF) เก็บ R2 อย่างเดียว",
+    sameJob: "file-field",
   },
   {
     key: "record-files", label: "ช่องไฟล์แนบในฟอร์ม", code: "RecordFilesField", category: "file",
@@ -447,7 +481,7 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "image-markup", label: "วาดบนรูปแบบกระดาน", code: "ImageMarkup", category: "file",
     source: { path: "components/image-markup" },
     what: "วาดสี่เหลี่ยม วงกลม ลูกศร ข้อความ บนรูป",
-    doc: "image-markup.md", sameJob: "markup",
+    doc: "image-markup.md", sameJob: "markup", primary: true,
   },
   {
     key: "image-markup-editor", label: "ตัววาดบนรูป (ในตัวจัดการรูป)", code: "ImageMarkupEditor", category: "file",
@@ -459,13 +493,13 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "image-regions", label: "จุดบนรูป", code: "ImageRegions", category: "file",
     source: { path: "components/image-regions" },
     what: "กรอบสี่เหลี่ยมบนรูปที่ผูกกับข้อมูล",
-    doc: "image-regions.md", sameJob: "markup",
+    doc: "image-regions.md", sameJob: "image-box", primary: true,
   },
   {
     key: "image-area-marker", label: "กรอบบนรูป", code: "ImageAreaMarker", category: "file",
     source: { path: "components/image-area-marker" },
-    what: "วาด/ย้าย/ปรับขนาดกรอบบนรูป (ค่าเป็น % ของรูป)",
-    sameJob: "markup",
+    what: "วาด/ย้าย/ปรับขนาดกรอบบนรูป (ค่าเป็น % ของรูป) มีทรงวงรี/หัวใจ",
+    sameJob: "image-box",
   },
 
   // ───────── นำเข้า-ส่งออก ─────────
@@ -473,19 +507,19 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "import-wizard", label: "ตัวช่วยนำเข้าไฟล์", code: "ImportWizard", category: "data",
     source: { path: "components/import-wizard" },
     what: "อ่านไฟล์ Excel/CSV → จับคู่คอลัมน์ → ตรวจ → นำเข้า",
-    sameJob: "import",
+    sameJob: "import", primary: true,
   },
   {
     key: "import-dialog", label: "ป๊อปนำเข้า CSV แบบเก่า", code: "ImportDialog", category: "data",
     source: { path: "components/import-export" },
     what: "นำเข้า CSV ตาม field config",
-    sameJob: "import",
+    sameJob: "import", replacedBy: "import-wizard",
   },
   {
     key: "line-import", label: "ลงรายการสินค้าแบบตาราง Excel", code: "LineImport", category: "data",
     source: { path: "components/line-import" },
     what: "โหลดแม่แบบ → กรอกใน Excel → โยนกลับมาเป็นบรรทัดเอกสาร",
-    sameJob: "import",
+    notWhen: "นำเข้าข้อมูลหลักทั้งตาราง (สินค้า ลูกค้า) ให้ใช้ตัวช่วยนำเข้าไฟล์ — ตัวนี้สำหรับบรรทัดในเอกสารเท่านั้น",
   },
   {
     key: "export", label: "ส่งออก CSV / Excel", code: "lib/export", category: "data",
@@ -1242,11 +1276,11 @@ export type SharedPartsUsage = {
 export type PartFlag = "unused" | "dup" | "deprecated" | "single" | "nodoc" | "check";
 export const PART_FLAG_LABEL: Record<PartFlag, string> = {
   unused: "ไม่มีใครใช้",
-  dup: "ทำงานซ้ำ",
+  dup: "ควรย้ายไปตัวหลัก",
   deprecated: "ตัวเก่า ควรเลิก",
   single: "ใช้ที่เดียว",
   nodoc: "ไม่มีคู่มือ",
-  check: "ยังไม่เลือกตัวหลัก",
+  check: "ต้องเช็กข้อมูลก่อน",
 };
 
 export type PartRow = SharedPart & {
@@ -1254,6 +1288,9 @@ export type PartRow = SharedPart & {
   flags: PartFlag[];
   /** ตัวอื่นในกลุ่มงานเดียวกัน */
   siblings: string[];
+  /** คำตัดสินของกลุ่ม (ถ้าอยู่ในกลุ่ม) */
+  verdict: JobVerdict | null;
+  verdictWhy: string | null;
 };
 
 /** รวมทะเบียน + ผลนับ → แถวพร้อมป้าย (ไม่มีใครใช้ / ซ้ำ / ตัวเก่า / ใช้ที่เดียว / ไม่มีคู่มือ) */
@@ -1264,13 +1301,19 @@ export function buildPartRows(parts: SharedPart[], usage: Pick<SharedPartsUsage,
     const u = usage.sources[sourceId(p.source)] ?? null;
     const group = p.sameJob ? byJob.get(p.sameJob) ?? [] : [];
     const siblings = group.filter((g) => g.key !== p.key).map((g) => g.key);
+    const v = siblings.length && p.sameJob ? SAME_JOB_VERDICT[p.sameJob] ?? null : null;
     const flags: PartFlag[] = [];
     if (u && u.files === 0) flags.push("unused");
     if (p.replacedBy) flags.push("deprecated");
-    if (siblings.length && !p.primary && !p.replacedBy) flags.push(group.some((g) => g.primary) ? "dup" : "check");
+    // ป้ายตามคำตัดสินของกลุ่ม — "ใช้คนละงาน" ไม่ติดป้าย (ตั้งใจมีหลายตัว)
+    if (siblings.length && !p.primary && !p.replacedBy) {
+      if (v?.verdict === "merge") flags.push("dup");
+      else if (v?.verdict === "check-data") flags.push("check");
+      else if (!v) flags.push("check");   // ยังไม่ได้ตัดสิน (เทสต์กันไว้ ไม่ควรเกิด)
+    }
     if (u && u.files > 0 && u.placeCount === 1) flags.push("single");
     if (!p.doc && !p.replacedBy && u && u.placeCount >= 3) flags.push("nodoc");
-    return { ...p, usage: u, flags, siblings };
+    return { ...p, usage: u, flags, siblings, verdict: v?.verdict ?? null, verdictWhy: v?.why ?? null };
   });
 }
 
