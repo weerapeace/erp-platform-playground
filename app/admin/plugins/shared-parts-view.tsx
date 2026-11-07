@@ -235,7 +235,7 @@ export function SharedPartsView() {
         <UnregisteredTab units={units} withWebsite={withWebsite} setWithWebsite={setWithWebsite} websiteCount={totals.website} />
       )}
 
-      {tab === "legacy" && <LegacyPluginsTab />}
+      {tab === "legacy" && <LegacyPluginsTab onOpenPart={(k) => { if (byKey.has(k)) setSelKey(k); }} />}
 
       {sel && <PartDrawer row={sel} byKey={byKey} onClose={() => setSelKey(null)} onOpen={setSelKey} />}
     </div>
