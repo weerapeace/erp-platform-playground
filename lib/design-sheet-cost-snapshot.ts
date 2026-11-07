@@ -6,6 +6,8 @@
  * - diffCostLines: จับคู่บรรทัดเวอร์ชัน A กับ B (วัสดุเดียวกัน+ชื่อเดียวกัน ตามลำดับที่พบ) → เพิ่ม/ลบ/เปลี่ยน
  */
 
+import { cleanOverheadCfg, type OverheadCfg } from "@/lib/design-cost-presets";
+
 export type SnapLine = {
   item_id?: string | null; item_sku_id?: string | null; item_sku_code?: string | null; group_code?: string | null;
   item_name?: string | null; group_name?: string | null; parent_code?: string | null; calc_method?: string | null;
@@ -16,9 +18,29 @@ export type SnapLine = {
 /** ค่าใช้จ่ายเพิ่ม 1 รายการ — amount = "ต่อชิ้น" เสมอ (ใบพิมพ์/เวอร์ชัน/มือถือ อ่าน amount ได้เลย)
  *  mode "split" = ค่าจ่ายครั้งเดียวต่อการสั่ง เช่น ค่าบล็อกสกรีน/แม่พิมพ์ (เจ้าของขอ 2026-11-03)
  *  → total = ยอดรวม · split_qty = จำนวนที่สั่ง · amount = total ÷ split_qty (คำนวณใหม่ทุกครั้งใน cleanExtra) */
-export type SnapExtra = { label: string; amount: number; mode?: "split"; total?: number; split_qty?: number | null };
+export type SnapExtra = {
+  label: string; amount: number; mode?: "split"; total?: number; split_qty?: number | null;
+  /** ชนิดรายการ (ใบเก่าไม่มี = ดูจากชื่อ — extraKindOf) · labor = ค่าแรงผลิต · labor_cut = ค่าแรงตัด · overhead = โสหุ้ย · other = ต้นทุนอื่นๆ */
+  kind?: ExtraKind;
+  /** หมายเหตุสั้น เช่น "อ้างอิง CTL044 · 70.00" (เลือกจากค่าแรงที่เคยผลิต) */
+  note?: string | null;
+  /** โสหุ้ยแบบแยกรายการ: ขนาดสินค้าตอนแพ็ก + รายการที่ปิด + วิธีคิดค่าส่ง (lib/design-cost-presets) */
+  oh?: OverheadCfg | null;
+};
+export type ExtraKind = "labor" | "labor_cut" | "overhead" | "other";
 export type SnapExtraMap = Record<string, SnapExtra[]>;
 export type SnapTotals = Record<string, { material: number; extra: number; total: number }>;
+
+/** ชนิดของรายการค่าใช้จ่ายเพิ่ม — มี kind ใช้ kind · ใบเก่า = ดูจากชื่อตั้งต้น 4 ตัว */
+export function extraKindOf(e: Pick<SnapExtra, "label" | "kind">): ExtraKind | null {
+  if (e.kind) return e.kind;
+  const l = (e.label ?? "").trim();
+  if (l === "ค่าแรงผลิต") return "labor";
+  if (l.startsWith("ค่าแรง (ตัด")) return "labor_cut";
+  if (l.startsWith("ค่าโสหุ้ย")) return "overhead";
+  if (l === "ต้นทุนอื่นๆ") return "other";
+  return null;
+}
 
 const n = (v: unknown): number | null => (v == null || v === "" ? null : Number.isFinite(Number(v)) ? Number(v) : null);
 const r2 = (v: number) => Math.round(v * 100) / 100;
@@ -35,13 +57,20 @@ export const extraAmountAt = (e: SnapExtra, qty?: number | null): number =>
 export function cleanExtra(raw: unknown): SnapExtra {
   const c = (raw ?? {}) as Partial<SnapExtra>;
   const label = String(c.label ?? "");
+  // ช่องเสริม (ชนิด / หมายเหตุ / ตั้งค่าโสหุ้ย) — ไม่มี = ไม่ใส่ (ใบเก่าหน้าตาเหมือนเดิม)
+  const extra: Pick<SnapExtra, "kind" | "note" | "oh"> = {};
+  if (c.kind === "labor" || c.kind === "labor_cut" || c.kind === "overhead" || c.kind === "other") extra.kind = c.kind;
+  const note = typeof c.note === "string" ? c.note.trim().slice(0, 200) : "";
+  if (note) extra.note = note;
+  const oh = c.oh ? cleanOverheadCfg(c.oh) : null;
+  if (oh) extra.oh = oh;
   if (c.mode === "split") {
     const total = n(c.total) ?? 0;
     const q = n(c.split_qty);
     const split_qty = q != null && q > 0 ? q : null;
-    return { label, amount: splitPerUnit(total, split_qty), mode: "split", total, split_qty };
+    return { label, amount: splitPerUnit(total, split_qty), mode: "split", total, split_qty, ...extra };
   }
-  return { label, amount: n(c.amount) ?? 0 };
+  return { label, amount: n(c.amount) ?? 0, ...extra };
 }
 
 /** ตัดฟิลด์ที่ไม่ใช่ "เนื้อหา" ออก (id/key/prev_item/price_ack/sort_order) ให้เทียบกันได้ตรง ๆ */

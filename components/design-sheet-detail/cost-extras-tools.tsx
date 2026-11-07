@@ -1,0 +1,309 @@
+"use client";
+
+/**
+ * 💼 ตัวช่วยกล่อง "ค่าใช้จ่ายเพิ่ม" แท็บตีราคา (ใบงานออกแบบ) — เจ้าของขอ 2026-11-07
+ *   useCostPresets      — โหลด/แก้ ราคากลาง (/api/design-sheets/cost-presets)
+ *   LaborRefPicker      — ค่าแรงผลิต: ดูว่าสินค้าไหนเคยผลิตค่าแรงเท่าไหร่ (สูตรผลิต / จ่ายจริง / ใบงานก่อนหน้า) กดเลือกได้
+ *   OverheadBreakdown   — ค่าโสหุ้ยแยกรายการ (QC / แพ็ก / ถุง / กล่อง / ค่าส่ง) จากขนาดสินค้าตอนแพ็ก
+ *   OtherCostPicker     — ต้นทุนอื่นๆ: ติ๊กเลือกจากรายการกลาง
+ *   CostPresetsManager  — ป๊อปตั้งค่าราคากลาง (เพิ่ม / แก้ / ลบ)
+ * คิดเลขอยู่ lib/design-cost-presets · ของกลาง: Popover · ERPModal · askConfirm · Icon
+ */
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Popover } from "@/components/popover";
+import { ERPModal } from "@/components/modal";
+import { askConfirm } from "@/components/modal/ask-dialog";
+import { Icon } from "@/components/icon";
+import { apiFetch } from "@/lib/api";
+import {
+  DEFAULT_OH, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
+  type CostPreset, type LaborRef, type OverheadCfg, type PackDims, type PresetKind,
+} from "@/lib/design-cost-presets";
+
+const baht = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const inCls = "h-8 rounded-lg border border-slate-200 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500";
+
+// ── ราคากลาง ──
+export function useCostPresets(enabled: boolean) {
+  const [presets, setPresets] = useState<CostPreset[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const reload = useCallback(async () => {
+    if (!enabled) return;
+    try {
+      const j = await apiFetch("/api/design-sheets/cost-presets").then((r) => r.json());
+      if (Array.isArray(j?.data)) setPresets(j.data as CostPreset[]);
+    } catch { /* เงียบ — กล่องยังใส่เองได้ */ }
+    finally { setLoaded(true); }
+  }, [enabled]);
+  useEffect(() => { void reload(); }, [reload]);
+  const save = useCallback(async (p: Partial<CostPreset> & { kind: PresetKind }): Promise<string | null> => {
+    const res = await apiFetch(p.id ? `/api/design-sheets/cost-presets/${p.id}` : "/api/design-sheets/cost-presets", {
+      method: p.id ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(p),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j?.error) return String(j?.error ?? "บันทึกไม่สำเร็จ");
+    const row = j.data as CostPreset;
+    setPresets((list) => (p.id ? list.map((x) => (x.id === row.id ? row : x)) : [...list, row]));
+    return null;
+  }, []);
+  const remove = useCallback(async (id: string): Promise<string | null> => {
+    const res = await apiFetch(`/api/design-sheets/cost-presets/${id}`, { method: "DELETE" });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok || j?.error) return String(j?.error ?? "ลบไม่สำเร็จ");
+    setPresets((list) => list.filter((x) => x.id !== id));
+    return null;
+  }, []);
+  return { presets, loaded, reload, save, remove };
+}
+export type CostPresetsApi = ReturnType<typeof useCostPresets>;
+export const presetsOf = (presets: CostPreset[], kind: PresetKind) => presets.filter((p) => p.kind === kind).sort((a, b) => a.sort_order - b.sort_order);
+
+// ── ค่าแรงที่เคยผลิต ──
+let refsCache: { at: number; data: Record<"bom" | "wo" | "ds", LaborRef[]> } | null = null;
+const SRC: { key: "bom" | "wo" | "ds"; label: string; icon: string }[] = [
+  { key: "bom", label: "สูตรผลิต", icon: "i:hierarchy-2" },
+  { key: "wo", label: "จ่ายจริง", icon: "i:building-factory" },
+  { key: "ds", label: "ใบงานก่อนหน้า", icon: "i:file-text" },
+];
+
+export function LaborRefPicker({ sheetId, onPick }: { sheetId?: string | null; onPick: (ref: LaborRef) => void }) {
+  const [data, setData] = useState<Record<"bom" | "wo" | "ds", LaborRef[]> | null>(refsCache && Date.now() - refsCache.at < 5 * 60_000 ? refsCache.data : null);
+  const [err, setErr] = useState<string | null>(null);
+  const [src, setSrc] = useState<"bom" | "wo" | "ds">("bom");
+  const [q, setQ] = useState("");
+  const load = useCallback(() => {
+    if (data) return;
+    apiFetch(`/api/design-sheets/labor-refs${sheetId ? `?exclude=${encodeURIComponent(sheetId)}` : ""}`).then((r) => r.json()).then((j) => {
+      const d = j?.data;
+      if (j?.error || !d || !Array.isArray(d.bom) || !Array.isArray(d.wo) || !Array.isArray(d.ds)) { setErr(String(j?.error ?? "โหลดไม่สำเร็จ")); return; }
+      refsCache = { at: Date.now(), data: d }; setData(d);
+    }).catch(() => setErr("โหลดไม่สำเร็จ"));
+  }, [data, sheetId]);
+  const list = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    return (data?.[src] ?? []).filter((r) => !s || `${r.code} ${r.name} ${r.note ?? ""}`.toLowerCase().includes(s)).slice(0, 150);
+  }, [data, src, q]);
+  return (
+    <Popover align="right" panelClassName="w-[380px] max-w-[92vw]"
+      trigger={(toggle, open) => (
+        <button type="button" onClick={() => { load(); toggle(); }} title="ดูว่าสินค้าไหนเคยผลิตค่าแรงเท่าไหร่ แล้วกดเลือก"
+          className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-xs ${open ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+          <Icon value="i:history" className="text-[13px]" /> ดูที่เคยผลิต
+        </button>
+      )}>
+      {(close) => (
+        <div className="space-y-2 p-2">
+          <div className="flex flex-wrap gap-1">
+            {SRC.map((s) => (
+              <button key={s.key} type="button" onClick={() => setSrc(s.key)}
+                className={`inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs ${src === s.key ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                <Icon value={s.icon} className="text-[12px]" /> {s.label} <span className="opacity-70">{data?.[s.key].length ?? "…"}</span>
+              </button>
+            ))}
+          </div>
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นรหัสรุ่น / ชื่อสินค้า" className={`${inCls} w-full`} autoFocus />
+          <div className="max-h-[320px] overflow-y-auto">
+            {err ? <p className="p-3 text-center text-xs text-rose-600">{err}</p>
+              : !data ? <p className="p-3 text-center text-xs text-slate-400">กำลังโหลด…</p>
+              : list.length === 0 ? <p className="p-3 text-center text-xs text-slate-400">ไม่พบ</p>
+              : list.map((r, i) => (
+                <button key={`${r.code}-${i}`} type="button" onClick={() => { onPick(r); close(); }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50">
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] text-slate-800"><b className="font-semibold">{r.code}</b> <span className="text-slate-500">{r.name !== r.code ? r.name : ""}</span></span>
+                    <span className="block truncate text-[11px] text-slate-400">{[r.note, r.at].filter(Boolean).join(" · ")}</span>
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold tabular-nums text-emerald-700">{baht(r.amount)}</span>
+                </button>
+              ))}
+          </div>
+          <p className="px-1 text-[11px] text-slate-400">กดรายการ = ใส่ค่าแรงนั้น + จดไว้ว่าอ้างอิงจากอะไร</p>
+        </div>
+      )}
+    </Popover>
+  );
+}
+
+// ── ค่าโสหุ้ยแยกรายการ ──
+export function OverheadBreakdown({ cfg, presets, tabLabel, readOnly, onChange, onManage }: {
+  cfg: OverheadCfg;
+  presets: CostPreset[];
+  tabLabel: string;
+  readOnly: boolean;
+  onChange: (cfg: OverheadCfg, total: number) => void;
+  onManage?: () => void;
+}) {
+  const rows = overheadRows(cfg, presets);
+  const total = overheadTotal(rows);
+  const set = (next: OverheadCfg) => onChange(next, overheadTotal(overheadRows(next, presets)));
+  const setDim = (k: keyof PackDims, v: string) => {
+    const n = v === "" ? null : Number(v);
+    set({ ...cfg, dims: { ...cfg.dims, [k]: n != null && Number.isFinite(n) && n > 0 ? n : null } });
+  };
+  const toggle = (key: string, on: boolean) => set({ ...cfg, off: on ? cfg.off.filter((k) => k !== key) : [...cfg.off, key] });
+  const dimIn = (k: keyof PackDims, ph: string, w = "w-16") => (
+    <input type="number" min={0} step="any" value={cfg.dims[k] ?? ""} placeholder={ph} disabled={readOnly}
+      onChange={(e) => setDim(k, e.target.value)} className={`${inCls} ${w} text-right tabular-nums disabled:bg-slate-50`} />
+  );
+  const noPresets = !presets.some((p) => p.kind === "oh_fixed" || p.kind === "bag" || p.kind === "box" || p.kind === "carton" || p.kind === "parcel");
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-100 bg-slate-50/60 p-2">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
+        <span className="font-medium text-slate-700">ขนาดสินค้าตอนแพ็ก</span><span className="text-[11px] text-slate-400">({tabLabel})</span>
+        {dimIn("w", "กว้าง")}×{dimIn("l", "ยาว")}×{dimIn("t", "หนา", "w-14")} ซม. · {dimIn("g", "กรัม", "w-16")} ก.
+      </div>
+      {noPresets ? (
+        <p className="text-[11px] text-amber-700">ยังไม่ได้ตั้งราคากลางของโสหุ้ย (QC / ถุง / กล่อง / ลังส่ง){onManage ? <> — <button type="button" onClick={onManage} className="underline">ตั้งค่าราคากลาง</button></> : null}</p>
+      ) : (
+        <div className="divide-y divide-slate-100 rounded-lg bg-white">
+          {rows.map((r) => (
+            <label key={r.key} className={`flex items-center gap-2 px-2 py-1.5 text-[13px] ${r.on ? "" : "opacity-50"}`}>
+              <input type="checkbox" checked={r.on} disabled={readOnly} onChange={(e) => toggle(r.key, e.target.checked)} className="h-3.5 w-3.5" />
+              <span className="min-w-0 flex-1">
+                <span className="text-slate-700">{r.label}</span>
+                <span className={`block truncate text-[11px] ${r.warn ? "text-rose-600" : "text-slate-400"}`} title={r.detail}>{r.detail}</span>
+              </span>
+              <span className="shrink-0 tabular-nums text-slate-800">{baht(r.amount)}</span>
+            </label>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        <span className="text-slate-500">ค่าส่งคิดแบบ</span>
+        {([["carton", "ลังส่ง"], ["parcel", "ขนส่งรายชิ้น"], ["none", "ไม่คิด"]] as const).map(([k, l]) => (
+          <button key={k} type="button" disabled={readOnly} onClick={() => set({ ...cfg, ship: k })}
+            className={`h-7 rounded-md border px-2 ${cfg.ship === k ? "border-blue-300 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"} disabled:cursor-default`}>{l}</button>
+        ))}
+        <span className="ml-auto font-medium text-slate-700">รวมโสหุ้ย <b className="tabular-nums text-emerald-700">{baht(total)}</b> ฿</span>
+        {onManage && <button type="button" onClick={onManage} className="text-[11px] text-slate-500 underline hover:text-blue-700">ราคากลาง</button>}
+      </div>
+    </div>
+  );
+}
+export const ohCfgOf = (raw: OverheadCfg | null | undefined): OverheadCfg => raw ?? DEFAULT_OH;
+
+// ── ต้นทุนอื่นๆ: เลือกจากรายการกลาง ──
+export function OtherCostPicker({ presets, onAdd, onManage }: { presets: CostPreset[]; onAdd: (items: CostPreset[]) => void; onManage?: () => void }) {
+  const others = presetsOf(presets, "other");
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  return (
+    <Popover align="right" panelClassName="w-[320px] max-w-[92vw]"
+      trigger={(toggle, open) => (
+        <button type="button" onClick={() => { setSel(new Set()); toggle(); }}
+          className={`inline-flex h-7 items-center gap-1 rounded-lg border px-2 text-xs ${open ? "border-blue-300 bg-blue-50 text-blue-700" : "border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+          <Icon value="i:list-check" className="text-[13px]" /> เลือกต้นทุนอื่นๆ
+        </button>
+      )}>
+      {(close) => (
+        <div className="space-y-2 p-2">
+          {others.length === 0 ? (
+            <p className="p-2 text-center text-xs text-slate-400">ยังไม่มีรายการ{onManage ? <> — <button type="button" onClick={() => { close(); onManage(); }} className="text-blue-700 underline">เพิ่มรายการ</button></> : null}</p>
+          ) : (
+            <div className="max-h-[280px] divide-y divide-slate-100 overflow-y-auto">
+              {others.map((p) => (
+                <label key={p.id} className="flex items-center gap-2 px-1 py-1.5 text-[13px]">
+                  <input type="checkbox" checked={sel.has(p.id)} onChange={(e) => setSel((s) => { const n = new Set(s); if (e.target.checked) n.add(p.id); else n.delete(p.id); return n; })} className="h-3.5 w-3.5" />
+                  <span className="min-w-0 flex-1 truncate">{p.label}{p.mode === "split" && <span className="text-[11px] text-slate-400"> · หารจำนวนสั่ง</span>}</span>
+                  <span className="shrink-0 tabular-nums text-slate-700">{baht(p.amount)}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            {onManage && <button type="button" onClick={() => { close(); onManage(); }} className="text-[11px] text-slate-500 underline hover:text-blue-700">จัดการรายการ</button>}
+            <button type="button" disabled={sel.size === 0} onClick={() => { onAdd(others.filter((p) => sel.has(p.id))); close(); }}
+              className="ml-auto h-8 rounded-lg bg-blue-600 px-3 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-40">ใส่ {sel.size || ""} รายการ</button>
+          </div>
+        </div>
+      )}
+    </Popover>
+  );
+}
+
+// ── ป๊อปตั้งค่าราคากลาง ──
+type Draft = Partial<CostPreset> & { kind: PresetKind; _key: string };
+const toDraft = (p: CostPreset): Draft => ({ ...p, _key: p.id });
+
+export function CostPresetsManager({ open, api, initialKind, onClose }: { open: boolean; api: CostPresetsApi; initialKind?: PresetKind | null; onClose: () => void }) {
+  const [kind, setKind] = useState<PresetKind>(initialKind ?? "labor_cut");
+  const [drafts, setDrafts] = useState<Draft[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => { if (open) { setKind(initialKind ?? "labor_cut"); setErr(null); } }, [open, initialKind]);
+  useEffect(() => { setDrafts(presetsOf(api.presets, kind).map(toDraft)); }, [api.presets, kind]);
+  const meta = PRESET_KIND_META[kind];
+  const orig = (key: string) => api.presets.find((p) => p.id === key);
+  const dirty = (d: Draft) => {
+    const o = d.id ? orig(d.id) : null;
+    if (!o) return true;
+    return (["label", "amount", "w_cm", "l_cm", "h_cm", "max_kg", "mode"] as const).some((k) => String(o[k] ?? "") !== String(d[k] ?? ""));
+  };
+  const patch = (key: string, p: Partial<Draft>) => setDrafts((l) => l.map((d) => (d._key === key ? { ...d, ...p } : d)));
+  const saveRow = async (d: Draft) => {
+    setBusy(d._key); setErr(null);
+    const { _key, ...p } = d; void _key;
+    const e = await api.save({ ...p, sort_order: p.sort_order ?? drafts.indexOf(d) });
+    setBusy(null);
+    if (e) setErr(e);
+  };
+  const delRow = async (d: Draft) => {
+    if (!d.id) { setDrafts((l) => l.filter((x) => x._key !== d._key)); return; }
+    const ok = await askConfirm({ title: `ลบ "${d.label || meta.label}" ออกจากราคากลาง?`, message: "ใบงานที่ใส่ราคานี้ไปแล้วไม่เปลี่ยน — แค่ไม่มีให้เลือกอีก", confirmText: "ลบ", variant: "danger" });
+    if (!ok) return;
+    setBusy(d._key); setErr(null);
+    const e = await api.remove(d.id);
+    setBusy(null);
+    if (e) setErr(e);
+  };
+  const num = (v: string) => (v === "" ? null : Number(v));
+  const cell = (d: Draft, k: "w_cm" | "l_cm" | "h_cm" | "max_kg" | "amount", ph: string, w = "w-20") => (
+    <input type="number" min={0} step="any" value={d[k] ?? ""} placeholder={ph} onChange={(e) => patch(d._key, { [k]: num(e.target.value) } as Partial<Draft>)}
+      className={`${inCls} ${w} text-right tabular-nums`} />
+  );
+  return (
+    <ERPModal open={open} onClose={onClose} title="ราคากลางค่าใช้จ่ายเพิ่ม" size="lg"
+      description="ใช้ร่วมกันทุกใบงาน · แก้แล้วใบที่ใส่ราคาไปแล้วไม่เปลี่ยน · มีประวัติว่าใครแก้เมื่อไหร่"
+      footer={<button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">ปิด</button>}>
+      <div className="space-y-3">
+        <div className="flex flex-wrap gap-1">
+          {PRESET_KINDS.map((k) => (
+            <button key={k} type="button" onClick={() => setKind(k)}
+              className={`h-8 rounded-md border px-2.5 text-xs ${kind === k ? "border-blue-600 bg-blue-600 text-white" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+              {PRESET_KIND_META[k].label} <span className="opacity-70">{presetsOf(api.presets, k).length}</span>
+            </button>
+          ))}
+        </div>
+        <p className="text-xs text-slate-500">{meta.hint}</p>
+        <div className="space-y-1.5">
+          {drafts.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">ยังไม่มีรายการ — กด “เพิ่ม” ด้านล่าง</p>}
+          {drafts.map((d) => (
+            <div key={d._key} className="flex flex-wrap items-center gap-1.5 rounded-lg border border-slate-100 p-1.5">
+              {(meta.needLabel || kind === "labor_cut") && (
+                <input value={d.label ?? ""} placeholder={kind === "labor_cut" ? "ชื่อ (ไม่บังคับ)" : "ชื่อรายการ"} onChange={(e) => patch(d._key, { label: e.target.value })} className={`${inCls} min-w-0 flex-1`} />
+              )}
+              {meta.dims >= 2 && <>{cell(d, "w_cm", "กว้าง", "w-16")}<span className="text-xs text-slate-400">×</span>{cell(d, "l_cm", "ยาว", "w-16")}</>}
+              {meta.dims >= 3 && <><span className="text-xs text-slate-400">×</span>{cell(d, "h_cm", "สูง", "w-16")}</>}
+              {meta.dims >= 2 && <span className="text-xs text-slate-400">ซม.</span>}
+              {meta.weight && <><span className="text-xs text-slate-500">ไม่เกิน</span>{cell(d, "max_kg", "กก.", "w-16")}<span className="text-xs text-slate-400">กก.</span></>}
+              {kind === "other" && (
+                <select value={d.mode ?? "piece"} onChange={(e) => patch(d._key, { mode: e.target.value as "piece" | "split" })} className={`${inCls} w-32`}>
+                  <option value="piece">ต่อชิ้น</option><option value="split">หารจำนวนสั่ง</option>
+                </select>
+              )}
+              <span className="ml-auto flex items-center gap-1">{cell(d, "amount", "0.00")}<span className="text-xs text-slate-400">{meta.amountLabel}</span></span>
+              {dirty(d) && (
+                <button type="button" disabled={busy === d._key} onClick={() => void saveRow(d)} className="h-8 rounded-lg bg-blue-600 px-2.5 text-xs font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy === d._key ? "…" : "บันทึก"}</button>
+              )}
+              <button type="button" disabled={busy === d._key} onClick={() => void delRow(d)} aria-label="ลบ" className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Icon value="i:trash" className="text-[14px]" /></button>
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={() => setDrafts((l) => [...l, { kind, _key: `n${Date.now()}`, amount: 0, mode: kind === "other" ? "piece" : null }])}
+          className="inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-blue-300 px-3 text-xs font-medium text-blue-700 hover:bg-blue-50">
+          <Icon value="i:plus" className="text-[13px]" /> เพิ่ม{meta.label}
+        </button>
+        {err && <p className="text-sm text-rose-600">{err}</p>}
+      </div>
+    </ERPModal>
+  );
+}

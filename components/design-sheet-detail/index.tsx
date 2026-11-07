@@ -39,6 +39,8 @@ import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STA
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
 import { CostSummaryCard } from "./cost-summary-card";
+import { CostPresetsManager, LaborRefPicker, OtherCostPicker, OverheadBreakdown, presetsOf, useCostPresets } from "./cost-extras-tools";
+import { DEFAULT_OH, overheadRows, overheadTotal, type PresetKind } from "@/lib/design-cost-presets";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { SkuLite } from "@/app/api/design-sheets/price-item-skus/route";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -48,7 +50,7 @@ import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import type { DesignSheetComment } from "@/app/api/design-sheets/[id]/comments/route";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
 import type { CostLine, PrevItem } from "@/app/api/design-sheets/[id]/cost-lines/route";
-import { normalizeSnapLine, cleanExtra, extraAmountAt, type SnapExtra, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
+import { normalizeSnapLine, cleanExtra, extraAmountAt, extraKindOf, type SnapExtra, type SnapLine } from "@/lib/design-sheet-cost-snapshot";
 import type { SpecMaterialItem } from "@/lib/design-sheet-spec";
 import type { PriceItem, PriceGroup } from "@/app/api/design-sheets/price-items/route";
 import type { MaterialGroup } from "@/app/api/bom/material-groups/route";
@@ -597,8 +599,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   // สลับ "ต่อชิ้น" ↔ "หารจำนวนสั่ง" — ตัวเลขในช่องคงเดิม เปลี่ยนแค่ความหมาย (ต่อชิ้น ↔ ยอดรวมจ่ายครั้งเดียว)
   const setExtraMode = (i: number, split: boolean) => {
     setCurExtra((l) => l.map((c, xi) => (xi !== i ? c : split
-      ? cleanExtra({ label: c.label, mode: "split", total: c.amount, split_qty: orderQty })
-      : { label: c.label, amount: c.total ?? 0 })));
+      ? cleanExtra({ label: c.label, kind: c.kind, note: c.note, mode: "split", total: c.amount, split_qty: orderQty })
+      : cleanExtra({ label: c.label, kind: c.kind, note: c.note, amount: c.total ?? 0 }))));
+    setCostDirty(true);
+  };
+  /** แก้รายการค่าใช้จ่ายเพิ่มบางช่อง (ชนิด / ยอด / หมายเหตุ / ตั้งค่าโสหุ้ย) — ผ่าน cleanExtra ทุกครั้ง */
+  const updExtra = (i: number, patch: Partial<SnapExtra>) => {
+    setCurExtra((l) => l.map((c, xi) => (xi === i ? cleanExtra({ ...c, ...patch }) : c)));
     setCostDirty(true);
   };
   const splitFixedTotal = costExtra.reduce((s, c) => s + (c.mode === "split" ? c.total ?? 0 : 0), 0);
@@ -1136,6 +1143,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [statusMgr, setStatusMgr] = useState(false);   // ป๊อปอัปจัดการสถานะงาน
   const [skuWizard, setSkuWizard] = useState(false);   // Wizard สร้าง SKU
   const [planOpen, setPlanOpen] = useState(false);     // ป๊อปใส่แผนงาน (จากเมนู ส่งต่อ)
+  // 💼 ราคากลางค่าใช้จ่ายเพิ่ม (ค่าแรงตัด / โสหุ้ย / ถุง / กล่อง / ลังส่ง / ต้นทุนอื่นๆ) — โหลดเฉพาะคนเห็นต้นทุน ตอนเปิดแท็บตีราคา
+  const presetsApi = useCostPresets(canSeeCost && modalTab === "cost");
+  const [presetsOpen, setPresetsOpen] = useState<PresetKind | null | false>(false);
+  const canEditPresets = canEdit && canSeeCost;
   const [bomWizard, setBomWizard] = useState(false);   // Wizard ดึงตีราคา → สร้างสูตร BOM
   const [fabricCalc, setFabricCalc] = useState(false); // 🧵 คำนวณจำนวนผ้า (จากขนาดชิ้น × จำนวนผลิต)
   const [bomPull, setBomPull] = useState(false);       // Wizard ดึงโครงจาก BOM → ตีราคา (คู่กลับ)
@@ -2616,6 +2627,21 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       {orderQtyFromQuote && <span className="text-[10px] text-slate-400">{t("(จากรอบเสนอราคาล่าสุด)", "(from latest quote)")}</span>}
                     </label>
                   )}
+                  {/* ต้นทุนอื่นๆ: ติ๊กเลือกจากรายการกลาง · ราคากลาง: ตั้งค่า/แก้ (เจ้าของขอ 2026-11-07) */}
+                  {canEdit && canSeeCost && (
+                    <OtherCostPicker presets={presetsApi.presets} onManage={canEditPresets ? () => setPresetsOpen("other") : undefined}
+                      onAdd={(items) => {
+                        if (!fullEdit) setEditing(true);
+                        setCurExtra((l) => [...l, ...items.map((p) => (p.mode === "split"
+                          ? cleanExtra({ label: p.label ?? "", kind: "other", mode: "split", total: p.amount, split_qty: orderQty })
+                          : cleanExtra({ label: p.label ?? "", kind: "other", amount: p.amount })))]);
+                        setCostDirty(true);
+                      }} />
+                  )}
+                  {canEditPresets && (
+                    <button type="button" onClick={() => setPresetsOpen(null)} title={t("ตั้งค่าราคากลาง (ใช้ร่วมทุกใบงาน)", "Central price settings (shared by all sheets)")}
+                      className="inline-flex h-7 items-center gap-1 px-2 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50"><Icon value="i:settings" className="text-[13px]" /> {t("ราคากลาง", "Central prices")}</button>
+                  )}
                   {canEdit && <button onClick={() => { if (!fullEdit) setEditing(true); setCurExtra((l) => [...l, { label: "", amount: 0 }]); setCostDirty(true); }}
                     className="h-7 px-2 text-xs border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50">{t("＋ เพิ่มรายการ", "＋ Add item")}</button>}
                 </div>
@@ -2626,7 +2652,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     title={canEdit ? t("ดับเบิลคลิกเพื่อแก้", "Double-click to edit") : undefined}>
                     {costExtra.map((c, i) => (
                       <div key={i} className="flex items-center justify-between gap-2 px-2 py-1 text-[13px]">
-                        <span className="min-w-0 truncate text-slate-600">{c.label || "—"}{c.mode === "split" ? <span className="text-[11px] text-slate-400">{t(" · หารจำนวนสั่ง", " · ÷ order qty")}{c.split_qty ? ` (${fmtBaht(c.total ?? 0)} ÷ ${c.split_qty.toLocaleString("th-TH")})` : ""}</span> : null}</span>
+                        <span className="min-w-0 truncate text-slate-600">{c.label || "—"}{c.mode === "split" ? <span className="text-[11px] text-slate-400">{t(" · หารจำนวนสั่ง", " · ÷ order qty")}{c.split_qty ? ` (${fmtBaht(c.total ?? 0)} ÷ ${c.split_qty.toLocaleString("th-TH")})` : ""}</span> : null}
+                          {c.note ? <span className="text-[11px] text-slate-400"> · {c.note}</span> : null}
+                          {extraKindOf(c) === "overhead" && c.oh && presetsApi.presets.length > 0 ? (
+                            <span className="block truncate text-[11px] text-slate-400">{overheadRows(c.oh, presetsApi.presets).filter((r) => r.on && r.amount > 0).map((r) => `${r.label} ${fmtBaht(r.amount)}`).join(" · ")}</span>
+                          ) : null}</span>
                         <span className={`shrink-0 tabular-nums ${c.amount ? "text-slate-800" : "text-slate-300"}`}>{fmtBaht(c.amount || 0)}</span>
                       </div>
                     ))}
@@ -2640,8 +2670,35 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     <input value={c.label} disabled={!canEdit} placeholder={split ? t("ชื่อรายการ เช่น ค่าบล็อกสกรีน", "Item name, e.g. screen block") : t("ชื่อรายการ เช่น ค่าแรงผลิต", "Item name, e.g. production labor")}
                       onChange={(e) => { setCurExtra((l) => l.map((x, xi) => (xi === i ? { ...x, label: e.target.value } : x))); setCostDirty(true); }}
                       className="flex-1 min-w-0 h-8 px-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-                    {/* คิดแบบ: ต่อชิ้น (เดิม) / หารจำนวนสั่ง (จ่ายครั้งเดียวต่อการสั่ง เช่น ค่าบล็อก) */}
-                    <div role="group" aria-label={t("คิดแบบ", "Charge as")} className="inline-flex shrink-0 border border-slate-200 rounded-lg overflow-hidden text-xs">
+                    {/* ตัวช่วยตามชนิด: ค่าแรงผลิต = ดูที่เคยผลิต · ค่าแรงตัด = ใส่ราคากลาง · โสหุ้ย = แยกรายการ (lib/design-cost-presets) */}
+                    {canEdit && canSeeCost && (() => {
+                      const k = extraKindOf(c);
+                      if (k === "labor") return (
+                        <LaborRefPicker sheetId={form?.id} onPick={(r) => updExtra(i, { kind: "labor", amount: r.amount,
+                          note: `${t("อ้างอิง", "Ref")} ${r.code}${r.name && r.name !== r.code ? ` ${r.name}` : ""} · ${fmtBaht(r.amount)} (${r.source === "wo" ? t("จ่ายจริง", "actual paid") : r.source === "ds" ? t("ใบงาน", "sheet") : t("สูตรผลิต", "BOM")})` })} />
+                      );
+                      if (k === "labor_cut") {
+                        const cp = presetsOf(presetsApi.presets, "labor_cut")[0];
+                        return cp ? (
+                          <button type="button" onClick={() => updExtra(i, { kind: "labor_cut", amount: cp.amount, note: null })} title={t("ใส่ราคากลางค่าแรงตัด/ปลอก/วาด", "Use the central price")}
+                            className="inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2 text-xs text-blue-700 hover:bg-blue-100"><Icon value="i:arrow-forward-up" className="text-[13px]" /> {t("ราคากลาง", "Central")} {fmtBaht(cp.amount)}</button>
+                        ) : canEditPresets ? (
+                          <button type="button" onClick={() => setPresetsOpen("labor_cut")} className="h-8 shrink-0 rounded-lg border border-dashed border-slate-300 px-2 text-xs text-slate-500 hover:bg-slate-50">{t("ตั้งราคากลาง", "Set central price")}</button>
+                        ) : null;
+                      }
+                      if (k === "overhead") return (
+                        <button type="button" onClick={() => (c.oh
+                          ? updExtra(i, { oh: null })
+                          : updExtra(i, { kind: "overhead", oh: DEFAULT_OH, amount: overheadTotal(overheadRows(DEFAULT_OH, presetsApi.presets)) }))}
+                          title={c.oh ? t("กลับไปใส่ยอดเอง", "Back to manual amount") : t("แยกรายการ QC / แพ็ก / ถุง / กล่อง / ค่าส่ง จากขนาดสินค้า", "Break down QC / packing / bag / box / shipping from product size")}
+                          className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-xs ${c.oh ? "border-slate-200 bg-white text-slate-500 hover:bg-slate-50" : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"}`}>
+                          <Icon value={c.oh ? "i:pencil" : "i:list"} className="text-[13px]" /> {c.oh ? t("ใส่ยอดเอง", "Manual") : t("แยกรายการ", "Break down")}
+                        </button>
+                      );
+                      return null;
+                    })()}
+                    {/* คิดแบบ: ต่อชิ้น (เดิม) / หารจำนวนสั่ง (จ่ายครั้งเดียวต่อการสั่ง เช่น ค่าบล็อก) — โสหุ้ยแบบแยกรายการไม่ใช้ */}
+                    <div role="group" aria-label={t("คิดแบบ", "Charge as")} className={`${extraKindOf(c) === "overhead" && c.oh ? "hidden" : "inline-flex"} shrink-0 border border-slate-200 rounded-lg overflow-hidden text-xs`}>
                       {([false, true] as const).map((sp) => (
                         <button key={String(sp)} type="button" aria-pressed={split === sp} disabled={!canEdit}
                           onClick={() => { if (split !== sp) setExtraMode(i, sp); }}
@@ -2651,7 +2708,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                         </button>
                       ))}
                     </div>
-                    <input type="number" min={0} step="any" value={(split ? c.total : c.amount) || ""} disabled={!canEdit} placeholder="0.00"
+                    <input type="number" min={0} step="any" value={(split ? c.total : c.amount) || ""} disabled={!canEdit || (extraKindOf(c) === "overhead" && !!c.oh)} placeholder="0.00"
                       title={split ? t("ยอดรวม (จ่ายครั้งเดียว)", "Total (paid once)") : t("ยอดต่อชิ้น", "Amount per piece")}
                       onChange={(e) => { const v = Number(e.target.value) || 0; setCurExtra((l) => l.map((x, xi) => (xi !== i ? x : split ? cleanExtra({ ...x, total: v }) : { ...x, amount: v }))); setCostDirty(true); }}
                       className="w-28 h-8 px-2 text-sm text-right tabular-nums border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
@@ -2662,6 +2719,23 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   {split && (c.split_qty
                     ? <p className="pl-1 text-[11px] text-blue-600 tabular-nums">{t(`${fmtBaht(c.total ?? 0)} บาท ÷ ${c.split_qty.toLocaleString("th-TH")} ชิ้น = ${fmtBaht(c.amount)} บาทต่อชิ้น (จ่ายครั้งเดียวต่อการสั่ง)`, `${fmtBaht(c.total ?? 0)} THB ÷ ${c.split_qty.toLocaleString("en-US")} pcs = ${fmtBaht(c.amount)} THB per piece (paid once per order)`)}</p>
                     : <p className="pl-1 text-[11px] text-amber-600">{t("ใส่ “จำนวนที่สั่ง” ด้านบนก่อน — ตอนนี้ยังไม่ได้รวมในต้นทุน", "Enter the “Order qty” above first — not included in the cost yet")}</p>)}
+                  {c.note && <p className="pl-1 text-[11px] text-slate-500">{c.note}</p>}
+                  {extraKindOf(c) === "overhead" && c.oh && (() => {
+                    const live = presetsApi.loaded ? overheadTotal(overheadRows(c.oh, presetsApi.presets)) : c.amount;
+                    return (
+                      <>
+                        <OverheadBreakdown cfg={c.oh} presets={presetsApi.presets} tabLabel={costTabLabel(costParent, generalLabel)} readOnly={!canEdit}
+                          onChange={(cfg, total) => updExtra(i, { kind: "overhead", oh: cfg, amount: total })}
+                          onManage={canEditPresets ? () => setPresetsOpen("oh_fixed") : undefined} />
+                        {/* ราคากลางเปลี่ยนหลังใส่ไปแล้ว — ยอดในใบยังเป็นของเดิม (ไม่เปลี่ยนเอง) จนกว่าจะกดอัปเดต */}
+                        {Math.abs(live - (c.amount || 0)) > 0.005 && (
+                          <button type="button" onClick={() => updExtra(i, { amount: live })} className="ml-1 text-[11px] text-amber-700 underline">
+                            {t(`ราคากลางเปลี่ยน — ยอดในใบ ${fmtBaht(c.amount || 0)} · กดอัปเดตเป็น ${fmtBaht(live)}`, `Central prices changed — update ${fmtBaht(c.amount || 0)} → ${fmtBaht(live)}`)}
+                          </button>
+                        )}
+                      </>
+                    );
+                  })()}
                   </div>
                   );
                 })}
@@ -2743,6 +2817,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
 
       {/* Wizard สร้าง Parent SKU + SKU ลูก จากใบงาน */}
         {presentOpen && form?.id && <DesignSheetPresentPanel sheetId={form.id} open={presentOpen} onClose={() => setPresentOpen(false)} />}
+        {presetsOpen !== false && (
+          <CostPresetsManager open api={presetsApi} initialKind={presetsOpen || null} onClose={() => setPresetsOpen(false)} />
+        )}
         {planOpen && form?.id && (
           <AddToPlanModal open defaultTitle={`${form.code ? `${form.code} ` : ""}${form.name}`.trim()}
             source={{ label: form.code || form.name, href: `/master/design-dashboard?open=${encodeURIComponent(form.id)}` }} onClose={() => setPlanOpen(false)} />
