@@ -27,7 +27,7 @@ import { WorkInstructionPanel } from "@/components/work-instruction";
 import { ParentIssuesPanel } from "@/components/parent-issues-panel";
 import { MoStockActions } from "@/components/mo-stock-actions";
 import { MoCreateModal } from "@/components/mo-create";
-import { familyPrintUrl } from "@/lib/family-print";
+import { familyPrintUrl } from "@/lib/family-print-url";
 
 type Version = { id: string; version: string | null; bom_code: string; is_default: boolean };
 type PreviewMat = {

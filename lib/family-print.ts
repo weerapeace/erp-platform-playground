@@ -635,18 +635,9 @@ export function buildFamilySheet(input: FamilyInput, merge: FamilyMergeMode = "a
   };
 }
 
-/** ใบที่พิมพ์ได้: buy = ซื้อ-ตัด (ของ × สี) · route = ติดตามงานแบบ A · status = ตามสถานะแบบ D · track = A + D */
-export type FamilySheetKind = "buy" | "route" | "status" | "track" | "all";
-
-/** ลิงก์หน้าพิมพ์รวมทั้งรุ่น — ทุกทางเข้าเรียกตัวนี้ (หน้าพิมพ์ใบเดียว · พิมพ์รวม · รายการใบสั่งผลิต · หัวกลุ่มบนบอร์ด) */
-export function familyPrintUrl(by: { mo: string } | { ids: string[] } | { parent: string }, sheet?: FamilySheetKind): string {
-  const p = new URLSearchParams();
-  if ("mo" in by) p.set("mo", by.mo);
-  else if ("ids" in by) p.set("ids", by.ids.join(","));
-  else p.set("parent", by.parent);
-  if (sheet && sheet !== "buy") p.set("sheet", sheet);
-  return `/print/work-order/family?${p.toString().replace(/%2C/g, ",")}`;
-}
+// ลิงก์หน้าพิมพ์ + ชนิดใบ ย้ายไปไฟล์เบา lib/family-print-url.ts (หน้าจอที่ทำแค่ปุ่ม/ลิงก์ ไม่ต้องลากไฟล์นี้ทั้งก้อน) — re-export ให้ import เดิมใช้ได้
+export { familyPrintUrl } from "@/lib/family-print-url";
+export type { FamilySheetKind } from "@/lib/family-print-url";
 
 /* ─────────────── HTML ใบพิมพ์ ─────────────── */
 export type FamilyPrintOptions = {

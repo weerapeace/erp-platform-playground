@@ -9,7 +9,7 @@
 import { useRef, useState } from "react";
 import { Icon } from "@/components/icon";
 import { FloatingDropdown } from "@/components/floating-dropdown";
-import { familyPrintUrl, type FamilySheetKind } from "@/lib/family-print";
+import { familyPrintUrl, type FamilySheetKind } from "@/lib/family-print-url";
 
 export const FAMILY_SHEETS: { k: FamilySheetKind; label: string; sub: string }[] = [
   { k: "buy", label: "ใบสั่งผลิตรวม", sub: "ของที่ต้องซื้อ + บล็อกตัด (ตาราง ของ × สี)" },

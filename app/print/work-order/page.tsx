@@ -15,7 +15,7 @@ import { buildWorkOrderTemplate, woSectionDataList, buildWoHtmlData, woBarcodeHt
 import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 import { Icon } from "@/components/icon";
-import { familyPrintUrl } from "@/lib/family-print";
+import { familyPrintUrl } from "@/lib/family-print-url";
 import { usePrintLog } from "@/components/report/use-print-log";
 
 function BulkPrintInner() {

@@ -21,7 +21,7 @@ import { woRatePerPiece, roundWage, laborBomTarget } from "@/lib/wo-labor";
 import { RecvWageHint } from "./recv-wage-hint";
 import { MoProgressCell } from "@/components/mo-material-progress";
 import { MyNoteCell, useMyNotes } from "@/components/my-note";
-import { PendDetail, CELL_PANE, HistTab, DETAIL_PREFS_DEFAULT, parseDetailPrefs, type PendPane } from "./pend-detail";
+import { CELL_PANE, DETAIL_PREFS_DEFAULT, parseDetailPrefs, type PendPane } from "./pend-detail-prefs";
 import { useUserPref } from "@/lib/use-user-pref";
 import type { MoSkipped } from "@/lib/mo-skip";
 import { moSteps, currentStep } from "./mo-steps";
@@ -108,6 +108,8 @@ const DispatchPlanBoard = dynamicImport(() => import("./dispatch-plan-board").th
 const AssignToGroupModal = dynamicImport(() => import("@/app/master/manufacturing-orders/mo-groups-modal").then((m) => m.AssignToGroupModal), { ssr: false });
 const InstallAppModal = dynamicImport(() => import("@/components/install-app").then((m) => m.InstallAppModal), { ssr: false });
 const ViewSettingsModal = dynamicImport(() => import("./view-settings-modal").then((m) => m.ViewSettingsModal), { ssr: false });
+const PendDetail = dynamicImport(() => import("./pend-detail").then((m) => m.PendDetail), { ssr: false });
+const HistTab = dynamicImport(() => import("./pend-detail").then((m) => m.HistTab), { ssr: false });
 
 type Dept = { id: string; name: string; note?: string | null; show_note?: boolean; show_on_board?: boolean };
 type DeptFull = { id: string; name: string; status: string | null; note: string | null; show_note: boolean; display_order: number | null; show_on_board?: boolean };

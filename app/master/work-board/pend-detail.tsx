@@ -26,16 +26,10 @@ import { BomEditorModal } from "@/components/bom-editor-modal";
 import { MO_SKIP_META, MO_SKIP_STAGES, earlierStagesToSkip, type MoSkipStage, type MoSkipped } from "@/lib/mo-skip";
 import { moSteps, currentStep } from "./mo-steps";
 
-export type PendPane = "job" | "bom" | "prep" | "stage" | "dispatch" | "due" | "group" | "hist";
-export const PEND_PANES: [PendPane, string][] = [
-  ["job", "📋 รายละเอียดงาน"], ["bom", "🛒 BOM / ซื้อของ"], ["prep", "✂️ เตรียม / ตัด"], ["stage", "🚦 ความคืบหน้า"],
-  ["dispatch", "🚚 จ่ายงาน"], ["due", "📅 กำหนดส่ง"], ["group", "🗂 กลุ่ม"], ["hist", "🕘 ประวัติ"],
-];
-/** คอลัมน์ → แท็บที่เปิด (ไม่มีในนี้ = กดแล้วไม่กาง เช่น ช่องค่าแรงที่ไว้ดับเบิลคลิกแก้) */
-export const CELL_PANE: Record<string, PendPane> = {
-  img: "job", prod: "job", brand: "job", prio: "job", issues: "job", price: "job", value: "job",
-  created: "hist", qty: "dispatch", prep: "prep", buy: "bom", eta: "bom", stage: "stage", due: "due", group: "group",
-};
+// แท็บ/ค่าตั้งของป๊อป ย้ายไปไฟล์เบา ./pend-detail-prefs (หน้าบอร์ดใช้ได้โดยไม่ลากป๊อปทั้งก้อน) — re-export ให้ import เดิมใช้ได้
+import { PEND_PANES, type PendPane, type DetailPrefs } from "./pend-detail-prefs";
+export { PEND_PANES, CELL_PANE, DETAIL_PREFS_DEFAULT, parseDetailPrefs } from "./pend-detail-prefs";
+export type { PendPane, DetailPrefs } from "./pend-detail-prefs";
 
 export type PendMoLite = {
   id: string; mo_no: string; product_sku: string | null; product_name: string | null; image_url: string | null;
@@ -421,15 +415,6 @@ function StepsBox({ moId, sku, productName, canEdit, onChanged }: { moId: string
   );
 }
 
-/** ตั้งค่ารายละเอียดงาน "ต่อคน" — ปุ่มไหน / กล่องไหน ซ่อนไว้ */
-export type DetailPrefs = { hideBtns: string[]; hideSecs: string[] };
-export const DETAIL_PREFS_DEFAULT: DetailPrefs = { hideBtns: ["printSteps"], hideSecs: [] };
-export const parseDetailPrefs = (v: unknown): DetailPrefs | null => {
-  if (!v || typeof v !== "object") return null;
-  const o = v as Record<string, unknown>;
-  const strs = (x: unknown) => (Array.isArray(x) ? x.filter((s): s is string => typeof s === "string") : []);
-  return { hideBtns: strs(o.hideBtns), hideSecs: strs(o.hideSecs) };
-};
 const DETAIL_BTNS: [string, string][] = [["check", "📋 เปิดเช็กลิสต์เต็ม"], ["print", "🖨 พิมพ์ใบสั่งงาน"], ["printSteps", "🪜 พิมพ์ขั้นตอนงาน"]];
 const DETAIL_SECS: [string, string][] = [["cost", "💰 ต้นทุน"], ["issue", "⚠️ ปัญหา"], ["steps", "🧵 ขั้นตอนงาน"]];
 

@@ -17,7 +17,7 @@ import { useToast } from "@/components/toast";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { MiniTable, type MiniColumn } from "@/components/mini-table";
 import { Icon } from "@/components/icon";
-import { familyPrintUrl } from "@/lib/family-print";
+import { familyPrintUrl } from "@/lib/family-print-url";
 import { SO_LINE_STAGES, SO_SHIP_LABEL, type SoShipState } from "@/lib/so-order-stage";
 import type { SoBatch, BatchLine } from "@/app/api/so-orders/batches/route";
 

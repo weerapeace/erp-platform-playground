@@ -11,7 +11,7 @@ import { buildWorkOrderTemplate, woSectionDataList, woScalars, woTableRows, buil
 import { scanUrl } from "@/lib/scan-code";
 import { WoColumnSettings, useWoPrintColumns } from "@/components/wo-print-columns";
 import { Icon } from "@/components/icon";
-import { familyPrintUrl } from "@/lib/family-print";
+import { familyPrintUrl } from "@/lib/family-print-url";
 import { usePrintLog } from "@/components/report/use-print-log";
 import type { ReportTemplateRow, ReportTemplatesResponse } from "@/app/api/admin/report-templates/route";
 import type { Font, Plugins, Schema, Template } from "@pdfme/common";
