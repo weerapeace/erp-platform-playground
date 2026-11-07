@@ -17,7 +17,7 @@ import { useAuth, usePermission } from "@/components/auth";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { ImageAttachKeys } from "@/components/image-attach";
 import { UomPicker } from "@/components/uom-picker";
-import { SupplierPicker, type SupplierPickerValue } from "@/components/pickers";
+import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picker";   // ร้านจากทะเบียนคู่ค้า (partners_v2)
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 import type { MaterialRequest } from "@/app/api/master/material-requests/route";
 
@@ -48,7 +48,8 @@ export function MaterialRequestForm({ open, onClose, onSaved, prefill }: {
   const [tags, setTags] = useState<TagOpt[]>([]);
   const [tagId, setTagId] = useState("");
   const [uom, setUom] = useState<string | null>(null);                       // ของกลาง UomPicker (เก็บเป็นชื่อหน่วย)
-  const [seller, setSeller] = useState<SupplierPickerValue | null>(null);    // ของกลาง SupplierPicker (ได้ id จริง)
+  const [seller, setSeller] = useState<{ id: string; name: string } | null>(null);   // ของกลาง SupplierPicker (id = partners_v2 → SkuWizard ใช้ต่อได้)
+  const [suppliers] = usePartnerSuppliers(open);                                     // โหลดรายชื่อร้านเมื่อเปิดฟอร์ม
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -133,7 +134,7 @@ export function MaterialRequestForm({ open, onClose, onSaved, prefill }: {
           </div>
           <div>
             <span className="text-[12px] text-slate-600">ร้าน / ผู้ขาย</span>
-            <div className="mt-0.5"><SupplierPicker value={seller} onChange={setSeller} placeholder="ค้นหาร้าน…" /></div>
+            <div className="mt-0.5"><SupplierPicker value={seller?.id ?? ""} suppliers={suppliers} onChange={(id, name) => setSeller(id ? { id, name } : null)} placeholder="ค้นหาร้าน…" /></div>
             <span className="text-[10px] text-slate-400">ค้นหาจากทะเบียนร้าน · ยังไม่มีร้านนี้ เขียนบอกในหมายเหตุได้</span>
           </div>
         </div>

@@ -6,7 +6,7 @@
 // ใช้กับสินค้าที่ "สั่งจากร้าน" (ไม่ได้ผลิตเอง): ราคาจากร้าน (¥/฿) + ค่าส่งตามปริมาตรกล่อง
 //   → ต้นทุนถึงมือ/ชิ้น → ราคาที่จะเสนอ → กำไร → แบ่งกำไร (ทั้งใบ + รายบรรทัด)
 // สูตรทั้งหมดอยู่ที่ของกลาง lib/supplier-quote (แก้ที่เดียว)
-// ของกลางที่ใช้: LineItemsGrid · SupplierPicker · MoneyInput · useToast · usePermission
+// ของกลางที่ใช้: LineItemsGrid · SupplierPicker (ทะเบียนคู่ค้า partners_v2) · SupplierWizard · MoneyInput · useToast · usePermission
 //
 // 🔒 ตัวเลขต้นทุน/กำไร โชว์เฉพาะคนที่มีสิทธิ์ products.cost.view (ผู้บริหาร/จัดซื้อ)
 //    คนอื่นเห็นแค่ รายการ/ร้าน/จำนวน/ราคาที่เสนอ/ยอดขาย
@@ -14,7 +14,9 @@
 
 import { useCallback, useEffect, useMemo, useState, type MutableRefObject } from "react";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
-import { SupplierPicker, type SupplierPickerValue } from "@/components/pickers";
+// ⚠️ ต้องเป็นตัวนี้ — supplier_id ผูกกับ partners_v2 (ตัวเก่าใน components/pickers อ่านตารางทดลอง 5 ร้าน → บันทึกไม่ผ่าน)
+import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picker";
+import { SupplierWizard } from "@/components/supplier-wizard";
 import { MoneyInput } from "@/components/money-input";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/components/i18n";
@@ -60,6 +62,8 @@ export function SupplierQuoteSection({ sheetId, parentCode, parentTabs, canEdit,
   const [splitOpenFor, setSplitOpenFor] = useState<string | null>(null);    // key บรรทัดที่กางแบ่งกำไรรายบรรทัด
   const [freightOpenFor, setFreightOpenFor] = useState<string | null>(null); // key บรรทัดที่กางแผงคำนวณค่าส่ง
   const [priceLookupFor, setPriceLookupFor] = useState<string | null>(null); // key บรรทัดที่กำลังดึงราคาเดิมของร้าน
+  const [suppliers, setSuppliers] = usePartnerSuppliers();                    // รายชื่อร้านจากทะเบียนคู่ค้า (ของกลาง)
+  const [wizardFor, setWizardFor] = useState<string | null>(null);           // key บรรทัดที่กำลัง "+ เพิ่มร้านใหม่"
 
   const markDirty = useCallback(() => { setDirty(true); onDirtyChange?.(true); }, [onDirtyChange]);
 
@@ -172,10 +176,10 @@ export function SupplierQuoteSection({ sheetId, parentCode, parentTabs, canEdit,
         placeholder={t("ชื่อสินค้า", "Product name")} className="h-8 w-full rounded border border-slate-200 px-2 text-sm disabled:bg-slate-50" /> },
     { key: "supplier", header: t("ร้าน", "Supplier"), width: 190, align: "left",
       render: (r, u, ro) => (
-        <SupplierPicker disabled={ro}
-          value={r.supplier_id ? { id: r.supplier_id, code: null, name: r.supplier_name ?? "" } : null}
-          onChange={(v: SupplierPickerValue | null) => u({ supplier_id: v?.id ?? null, supplier_name: v?.name ?? null })}
-          placeholder={t("เลือกร้าน...", "Select supplier...")} />
+        <SupplierPicker disabled={ro} value={r.supplier_id ?? ""} suppliers={suppliers}
+          onChange={(id, name) => u({ supplier_id: id || null, supplier_name: name || null })}
+          onAddNew={() => setWizardFor(r.key)}
+          placeholder={r.supplier_name || t("เลือกร้าน...", "Select supplier...")} />
       ) },
     { key: "price", header: t("ราคาจากร้าน", "Supplier price"), width: 150, align: "right",
       render: (r, u, ro) => (
@@ -395,6 +399,18 @@ export function SupplierQuoteSection({ sheetId, parentCode, parentTabs, canEdit,
             <b className={`ml-auto text-lg tabular-nums ${netProfit >= 0 ? "text-emerald-700" : "text-rose-600"}`}>{fmtBaht(netProfit)} ฿</b>
           </div>
         </>
+      )}
+
+      {/* + เพิ่มร้านใหม่ (ของกลาง SupplierWizard) → เติมเข้ารายชื่อ + เลือกให้บรรทัดนั้นทันที */}
+      {wizardFor && (
+        <SupplierWizard
+          onClose={() => setWizardFor(null)}
+          onCreated={(s) => {
+            setSuppliers((arr) => [...arr, { id: s.id, name: s.name }].sort((a, b) => a.name.localeCompare(b.name, "th")));
+            patchRow(wizardFor, { supplier_id: s.id, supplier_name: s.name });
+            setWizardFor(null);
+          }}
+        />
       )}
     </div>
   );

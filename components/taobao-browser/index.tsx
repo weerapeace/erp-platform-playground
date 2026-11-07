@@ -11,7 +11,7 @@
  *
  * กดที่การ์ด = เปิด drawer ขวา (ดูรายละเอียด/แก้ชื่อไทย-ราคา-โน้ต/เลื่อนดูตัวถัดไป) · ชี้ที่รูป = พรีวิวใหญ่
  *
- * ของกลางที่ใช้: SkuPicker · SupplierPicker · ERPModal · HoverPreview · useToast · apiFetch · SkuWizard
+ * ของกลางที่ใช้: SkuPicker · SupplierPicker (ทะเบียนคู่ค้า) · SupplierWizard · ERPModal · HoverPreview · useToast · apiFetch · SkuWizard
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -22,7 +22,10 @@ import { TagGroupFilter, type TagFilterValue } from "@/components/tag-filter";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
-import { SkuPicker, SupplierPicker, type SkuPickerValue, type SupplierPickerValue } from "@/components/pickers";
+import { SkuPicker, type SkuPickerValue } from "@/components/pickers";
+// ⚠️ ร้านต้องมาจากตัวนี้ — supplier_items ผูกกับ partners_v2 (ตัวเก่าใน components/pickers อ่านตารางทดลอง → บันทึกราคาร้านไม่ผ่าน)
+import { SupplierPicker, usePartnerSuppliers } from "@/components/supplier-picker";
+import { SupplierWizard } from "@/components/supplier-wizard";
 import { SkuWizard } from "@/app/master/skus/sku-wizard";
 import { r2ImageUrl } from "@/lib/r2-image";
 
@@ -527,7 +530,9 @@ function TaobaoCardView({ card, rate, selected, onToggle, onOpen, onMatch, onCre
 function MatchModal({ row, rate, onClose, onDone }: { row: Card; rate: number; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const [sku, setSku] = useState<SkuPickerValue | null>(null);
-  const [supplier, setSupplier] = useState<SupplierPickerValue | null>(null);
+  const [supplier, setSupplier] = useState<{ id: string; name: string } | null>(null);
+  const [suppliers, setSuppliers] = usePartnerSuppliers();          // รายชื่อร้านจากทะเบียนคู่ค้า (มีปุ่มกรองร้านจีน)
+  const [wizardOpen, setWizardOpen] = useState(false);              // + เพิ่มร้านใหม่
   const [price, setPrice] = useState<string>(row.price_rmb != null ? String(row.price_rmb) : "");
   const [saving, setSaving] = useState(false);
 
@@ -606,7 +611,8 @@ function MatchModal({ row, rate, onClose, onDone }: { row: Card; rate: number; o
 
         <div>
           <label className="block text-[13px] text-slate-600 mb-1">ร้านที่ซื้อ (ไม่บังคับ)</label>
-          <SupplierPicker value={supplier} onChange={setSupplier} placeholder="เลือกร้านจีน…" />
+          <SupplierPicker value={supplier?.id ?? ""} suppliers={suppliers} onChange={(id, name) => setSupplier(id ? { id, name } : null)}
+            onAddNew={() => setWizardOpen(true)} placeholder="เลือกร้านจีน…" />
           <p className="text-[11px] text-slate-400 mt-1">เลือกร้าน = บันทึกราคา ¥ + ลิงก์ Taobao เข้าเป็น “ราคาร้าน” ของ SKU นี้ (ถ้ายังไม่มีร้านหลัก จะตั้งให้เป็นร้านหลัก)</p>
         </div>
 
@@ -621,6 +627,16 @@ function MatchModal({ row, rate, onClose, onDone }: { row: Card; rate: number; o
           </div>
         )}
       </div>
+      {wizardOpen && (
+        <SupplierWizard
+          onClose={() => setWizardOpen(false)}
+          onCreated={(s) => {
+            setSuppliers((arr) => [...arr, { id: s.id, name: s.name }].sort((a, b) => a.name.localeCompare(b.name, "th")));
+            setSupplier({ id: s.id, name: s.name });
+            setWizardOpen(false);
+          }}
+        />
+      )}
     </ERPModal>
   );
 }

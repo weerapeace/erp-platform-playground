@@ -293,7 +293,7 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "อ่านตารางร้านของระบบจัดซื้อชุดเก่าที่มีแค่ 5 ร้าน ทำให้ค้นร้านจริงไม่เจอ",
     notWhen: "ห้ามใช้ในงานใหม่ ให้ใช้ SupplierPicker (components/supplier-picker)",
     sameJob: "supplier-pick", replacedBy: "supplier-picker", legacyKey: "supplier_picker",
-    note: "หน้าที่ยังใช้ตัวนี้ ผู้ใช้จะค้นร้านไม่เจอ",
+    note: "เหลือที่เดียว: หน้า /purchase-orders (ระบบจัดซื้อชุดเก่า ตารางใบสั่งซื้อผูกกับตารางร้าน 5 ร้านนี้เอง ยังไม่เคยมีใบจริง) ห้ามเปลี่ยนเป็นตัวใหม่เฉย ๆ เพราะบันทึกจะไม่ผ่าน ต้องตัดสินใจเลิกระบบนั้นก่อน",
   },
   {
     key: "customer-picker", label: "เลือกลูกค้า", code: "CustomerPicker", category: "pick",
