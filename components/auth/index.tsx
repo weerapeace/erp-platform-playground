@@ -1,7 +1,8 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { supabaseBrowser } from "@/lib/supabase-browser";
+import { clearProfileCache, readProfileCache, shouldReloadProfile, writeProfileCache, writeProfilePerms, type CachedProfile } from "@/lib/auth-profile-cache";
 import { useT } from "@/components/i18n";
 
 // ============================================================
@@ -248,40 +249,79 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [perms, setPerms] = useState<Set<string> | null>(null);   // สิทธิ์จริงจาก DB (null = ยังไม่โหลด)
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  // โหลด profile (role) ผ่าน erp_current_user() — SECURITY DEFINER เลี่ยง RLS
-  const loadProfile = useCallback(async (fallbackEmail: string) => {
-    const { data } = await supabaseBrowser.rpc("erp_current_user");
-    const p = data as { id: string; email: string; display_name: string | null; role: string | null; active: boolean | null; avatar_url: string | null } | null;
-    if (p && p.active !== false) {
-      setUser({ id: p.id, email: p.email ?? fallbackEmail, name: p.display_name ?? p.email ?? fallbackEmail, role: (p.role ?? "viewer") as Role, avatar: p.avatar_url ?? null });
-      // โหลดสิทธิ์จริงจาก DB (รวม app.* + grant/revoke รายคน) → can() ใช้ตัวนี้แทน ROLE_PERMISSIONS ที่ hardcode
-      // โหลดพลาด = perms คงเป็น null → can() ใช้ค่าสำรอง + app-lock ไม่บล็อก (ไม่ค้าง)
-      supabaseBrowser.rpc("erp_my_permissions").then(({ data: pr, error }) => {
-        if (!error && Array.isArray(pr)) setPerms(new Set(pr as string[]));
-      }, () => { /* เงียบ — ใช้ค่าสำรอง (ตัวที่ 2 ของ then = จับ error · rpc() คืน PromiseLike ไม่มี .catch) */ });
-    } else {
-      setUser(null);
-      setPerms(null);
-    }
+  // ⚡ กันถามโปรไฟล์/สิทธิ์ซ้ำ (เจอ 2026-11-07: หลัง deploy เครื่องเดียวถาม erp_current_user 150+ ครั้ง/นาที → DB ช้าทั้งระบบ)
+  //   • เดิมถาม 2 รอบทุกการเปิดหน้า (getSession + INITIAL_SESSION) + ทุกครั้งที่ต่ออายุล็อกอิน · เปิดหลายแท็บ/กรอบ = คูณเพิ่ม
+  //   • ตอนนี้: คนเดิมในหน้านี้โหลดแล้ว = ไม่ถามซ้ำ (เว้นแก้โปรไฟล์ / ค้างเกิน 15 นาที) · คำขอที่กำลังวิ่งใช้ร่วมกัน
+  //     · แท็บ/กรอบอื่นเพิ่งถามไป (≤ 60 วิ) = หยิบจากที่จดไว้ใน localStorage (lib/auth-profile-cache)
+  //   เซิร์ฟเวอร์ยังตรวจสิทธิ์ทุก API เหมือนเดิม — ตรงนี้แค่ข้อมูลโชว์หน้าจอ
+  const loadedRef = useRef<{ uid: string; at: number } | null>(null);
+  const inflightRef = useRef<{ uid: string; p: Promise<void> } | null>(null);
+
+  const applyProfile = useCallback((p: CachedProfile, fallbackEmail: string) => {
+    setUser({ id: p.id, email: p.email ?? fallbackEmail, name: p.display_name ?? p.email ?? fallbackEmail, role: (p.role ?? "viewer") as Role, avatar: p.avatar_url ?? null });
   }, []);
+  // โหลดสิทธิ์จริงจาก DB (รวม app.* + grant/revoke รายคน) → can() ใช้ตัวนี้แทน ROLE_PERMISSIONS ที่ hardcode
+  // โหลดพลาด = perms คงเป็น null → can() ใช้ค่าสำรอง + app-lock ไม่บล็อก (ไม่ค้าง)
+  const loadPerms = useCallback((uid: string) => {
+    supabaseBrowser.rpc("erp_my_permissions").then(({ data: pr, error }) => {
+      if (!error && Array.isArray(pr)) { setPerms(new Set(pr as string[])); writeProfilePerms(uid, pr as string[]); }
+    }, () => { /* เงียบ — ใช้ค่าสำรอง (ตัวที่ 2 ของ then = จับ error · rpc() คืน PromiseLike ไม่มี .catch) */ });
+  }, []);
+
+  // โหลด profile (role) ผ่าน erp_current_user() — SECURITY DEFINER เลี่ยง RLS · force = ข้ามที่จดไว้ (หลังแก้ชื่อ/รูป)
+  const loadProfile = useCallback(async (uid: string, fallbackEmail: string, force = false): Promise<void> => {
+    if (!force) {
+      const c = readProfileCache(uid);
+      if (c) {
+        applyProfile(c.profile, fallbackEmail);
+        if (c.perms) setPerms(new Set(c.perms)); else loadPerms(uid);   // แท็บที่จดยังโหลดสิทธิ์ไม่เสร็จ = ถามสิทธิ์เอง
+        loadedRef.current = { uid, at: Date.now() };
+        return;
+      }
+      if (inflightRef.current?.uid === uid) return inflightRef.current.p;   // กำลังถามอยู่ = รอคำตอบเดียวกัน
+    }
+    const p = (async () => {
+      const { data } = await supabaseBrowser.rpc("erp_current_user");
+      const prof = data as CachedProfile | null;
+      if (prof && prof.active !== false) {
+        applyProfile(prof, fallbackEmail);
+        loadedRef.current = { uid, at: Date.now() };
+        writeProfileCache(prof, null);
+        loadPerms(prof.id);
+      } else {
+        setUser(null);
+        setPerms(null);
+        loadedRef.current = null;
+        clearProfileCache();
+      }
+    })();
+    inflightRef.current = { uid, p };
+    try { await p; } finally { if (inflightRef.current?.p === p) inflightRef.current = null; }
+  }, [applyProfile, loadPerms]);
 
   // โหลดโปรไฟล์ตัวเองใหม่ (หลังแก้ชื่อ/รูป)
   // (ตัวบันทึกการเข้าใช้ประกาศไว้นอก component — ดู recordLoginEvent ด้านบนไฟล์)
   const refreshProfile = useCallback(async () => {
     const { data } = await supabaseBrowser.auth.getSession();
     const s = data.session;
-    if (s?.user) await loadProfile(s.user.email ?? "");
+    if (s?.user) await loadProfile(s.user.id, s.user.email ?? "", true);
   }, [loadProfile]);
 
   useEffect(() => {
     supabaseBrowser.auth.getSession().then(({ data }) => {
       const s = data.session;
-      if (s?.user) loadProfile(s.user.email ?? "").finally(() => setReady(true));
+      if (s?.user) loadProfile(s.user.id, s.user.email ?? "").finally(() => setReady(true));
       else setReady(true);
     });
-    const { data: sub } = supabaseBrowser.auth.onAuthStateChange((_e, session) => {
-      if (session?.user) { loadProfile(session.user.email ?? ""); void recordLoginEvent(); }
-      else { setUser(null); setPerms(null); }
+    const { data: sub } = supabaseBrowser.auth.onAuthStateChange((event, session) => {
+      if (session?.user) {
+        // คนเดิม + ต่ออายุล็อกอิน / แจ้งเริ่มซ้ำ = ไม่ต้องถามโปรไฟล์ใหม่ (lib/auth-profile-cache shouldReloadProfile)
+        if (shouldReloadProfile(event, session.user.id, loadedRef.current)) void loadProfile(session.user.id, session.user.email ?? "", event === "USER_UPDATED");
+        void recordLoginEvent();
+      } else {
+        setUser(null); setPerms(null); loadedRef.current = null;
+        if (event === "SIGNED_OUT") clearProfileCache();
+      }
     });
     return () => sub.subscription.unsubscribe();
   }, [loadProfile]);
@@ -346,6 +386,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = useCallback(async () => {
     await supabaseBrowser.auth.signOut();
+    clearProfileCache();
+    loadedRef.current = null;
     setUser(null);
     setPerms(null);
   }, []);
