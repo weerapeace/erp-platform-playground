@@ -1172,6 +1172,14 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "ร่างข้อมูลลงขายต่อแพลตฟอร์มของรุ่นสินค้า",
   },
   {
+    key: "add-to-platform-wizard", label: "ตัวช่วยลงสินค้าขึ้นร้าน", code: "AddToPlatformWizard", category: "feature",
+    source: { path: "components/platform-listing/add-to-platform-wizard" },
+    what: "ลงสินค้าหลายตัวขึ้นหลายร้านใน 4 ขั้น: เลือกร้าน → ตรวจความครบ → แก้เลย/สร้างงานเติม/ข้าม → ยืนยัน · ข้ามตัวที่มีบนร้านแล้ว · ร้านที่มีตัวเชื่อมจริง (LINE) ลงจริงทีละตัว ร้านอื่นบันทึกร่าง",
+    when: "ทุกปุ่ม \"ลงสินค้าขึ้นร้าน\" — มุมมองหน้าร้าน (แท็บยังไม่ลง) · แท็บแพลตฟอร์มใน Parent SKU · ติ๊กหลายรุ่นในหน้ารายการ Parent SKU",
+    notWhen: "แก้รายละเอียดสินค้า 1 ตัวต่อร้าน (ชื่อ/หมวด/รูป/ราคา) ให้ใช้ ProductPlatformManager · ห้ามเรียกสร้างสินค้าบนร้านตรง ๆ จากหน้าอื่น (จะข้ามด่านกันซ้ำ)",
+    doc: "platform-catalog.md",
+  },
+  {
     key: "color-swatch-manager", label: "ทะเบียนสีกลาง", code: "ColorSwatchManager", category: "feature",
     source: { path: "components/color-swatch-manager" },
     what: "ตั้งหน้าตาจุดสีของแต่ละชื่อสี",

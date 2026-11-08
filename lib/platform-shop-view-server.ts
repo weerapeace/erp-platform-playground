@@ -8,7 +8,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
-import { duplicateCounts, summarizeListing, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
+import { duplicateCounts, summarizeListing, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 const CHUNK = 200;   // .in() ยาวเกินจะโดนตัด/ช้า → ถามเป็นชุด
@@ -83,7 +83,8 @@ async function openTaskCounts(admin: Admin, parentIds: string[]): Promise<Map<st
   return out;
 }
 
-type ParentRow = { id: string; code: string | null; name_th: string | null; cover_image_r2_key: string | null };
+type ParentRow = { id: string; code: string | null; name_th: string | null; cover_image_r2_key: string | null; platform_category_id: string | null };
+const PARENT_COLS = "id, code, name_th, cover_image_r2_key, platform_category_id";
 
 /** Parent SKU ที่ไม่มีรูปปก → ดูว่ามีรูปที่อื่นไหม (แกลเลอรี/รูป SKU) */
 async function imageStates(admin: Admin, noCover: string[]): Promise<Map<string, "sku_only" | "none">> {
@@ -108,6 +109,7 @@ export type ShopViewData = {
   not_listed: ShopParent[] | null;
   no_image: ShopParent[] | null;
   last_imported_at: string | null;
+  categories: ShopCategory[];
 };
 
 /**
@@ -118,7 +120,7 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
   const [rows, brandParents] = await Promise.all([
     loadListings(admin, platformId, brandId),
     brandId
-      ? fetchAllPages<ParentRow>((from, to) => admin.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key")
+      ? fetchAllPages<ParentRow>((from, to) => admin.from("parent_skus_v2").select(PARENT_COLS)
           .eq("brand_id", brandId).eq("is_active", true).order("code", { ascending: true }).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: ParentRow[] | null; error: unknown }>)
       : Promise.resolve(null),
   ]);
@@ -128,7 +130,7 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
   const matchedIds = [...new Set(rows.map((r) => r.matched_parent_sku_id).filter((x): x is string => !!x))];
   const missingIds = matchedIds.filter((id) => !pMap.has(id));
   await Promise.all(chunks(missingIds).map(async (ids) => {
-    const { data } = await admin.from("parent_skus_v2").select("id, code, name_th, cover_image_r2_key").in("id", ids);
+    const { data } = await admin.from("parent_skus_v2").select(PARENT_COLS).in("id", ids);
     for (const p of (data ?? []) as ParentRow[]) pMap.set(p.id, p);
   }));
 
@@ -151,7 +153,7 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
       ...summarizeListing(platformCode, rawSlice(r), r.price != null ? Number(r.price) : null),
       id: r.id, external_product_id: r.external_product_id, title: r.title, sku_code: r.sku_code,
       matched_parent_sku_id: r.matched_parent_sku_id, matched_code: p?.code ?? null, matched_name: p?.name_th ?? null,
-      matched_cover_key: p?.cover_image_r2_key ?? null,
+      matched_cover_key: p?.cover_image_r2_key ?? null, category_id: p?.platform_category_id ?? null,
       match_ignored: !!r.match_ignored, dup_count: dups.get(r.id) ?? 0,
       open_tasks: r.matched_parent_sku_id ? (tasks.get(r.matched_parent_sku_id) ?? 0) : 0,
     };
@@ -160,13 +162,69 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
   const toParent = (p: ParentRow): ShopParent => ({
     id: p.id, code: p.code ?? "", name: p.name_th, cover_key: p.cover_image_r2_key,
     image_state: p.cover_image_r2_key ? "ok" : (imgStates.get(p.id) ?? "none"),
-    open_tasks: tasks.get(p.id) ?? 0,
+    open_tasks: tasks.get(p.id) ?? 0, category_id: p.platform_category_id,
   });
+
+  // หมวดกลางที่สินค้าแบรนด์นี้ใช้ (ชิปกรอง) — เรียงตามลำดับที่ตั้งไว้
+  const catIds = [...new Set((brandParents ?? []).map((p) => p.platform_category_id).filter((x): x is string => !!x))];
+  const categories: ShopCategory[] = [];
+  if (catIds.length) {
+    const { data } = await admin.from("platform_central_categories").select("id, name, sort_order").in("id", catIds);
+    for (const c of (data ?? []) as { id: string; name: string | null; sort_order: number | null }[]) categories.push({ id: c.id, name: c.name ?? "—", sort: c.sort_order ?? 0 });
+    categories.sort((a, b) => a.sort - b.sort || a.name.localeCompare(b.name, "th"));
+  }
 
   return {
     items,
     not_listed: notListedRows ? notListedRows.map(toParent) : null,
     no_image: noCoverRows ? noCoverRows.map(toParent) : null,
     last_imported_at: last,
+    categories,
   };
+}
+
+/**
+ * การ์ดแบรนด์ (หน้าเลือกแบรนด์ก่อนเข้ามุมมองหน้าร้าน) — นับจากแถวจริง ไม่จดมือ
+ * สินค้าในระบบ (Parent SKU เปิดใช้) · ตั้งหมวดกลางแล้ว · รายการบนร้านต่อแพลตฟอร์ม · ร้านที่ตั้งบัญชีไว้
+ * ดึงเฉพาะคอลัมน์ id สั้น ๆ (ไม่กี่พันแถว) แล้วนับใน JS — เร็วกว่ายิงนับแยกทีละแบรนด์×ร้าน
+ */
+export async function loadBrandSummaries(admin: Admin, sellingCodes: readonly string[]): Promise<{ brands: ShopBrandSummary[]; platforms: { code: string; name_th: string }[] }> {
+  const [{ data: brands }, { data: pfs }, parents, listings, { data: accounts }] = await Promise.all([
+    admin.from("brands").select("id, name, logo_url, color").eq("is_active", true).not("is_customer_job", "is", true).order("name", { ascending: true }),   // แบรนด์งานลูกค้าไม่ขายบนร้านเรา (เหมือน /api/platform-accounts)
+    admin.from("erp_platforms").select("id, code, name_th, sort_order").in("code", [...sellingCodes]).order("sort_order", { ascending: true }),
+    fetchAllPages<{ id: string; brand_id: string | null; platform_category_id: string | null }>((from, to) =>
+      admin.from("parent_skus_v2").select("id, brand_id, platform_category_id").eq("is_active", true).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { id: string; brand_id: string | null; platform_category_id: string | null }[] | null; error: unknown }>),
+    fetchAllPages<{ id: string; brand_id: string | null; platform_id: string }>((from, to) =>
+      admin.from("platform_catalog_listings").select("id, brand_id, platform_id").order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { id: string; brand_id: string | null; platform_id: string }[] | null; error: unknown }>),
+    admin.from("platform_accounts").select("brand_id, platform_id").eq("is_active", true),
+  ]);
+  const pfRows = (pfs ?? []) as { id: string; code: string; name_th: string }[];
+  const codeOf = new Map(pfRows.map((p) => [p.id, p.code]));
+  const out = new Map<string, ShopBrandSummary>();
+  for (const b of (brands ?? []) as { id: string; name: string | null; logo_url: string | null; color: string | null }[]) {
+    out.set(b.id, { id: b.id, name: b.name ?? "—", logo_key: b.logo_url, color: b.color, parents: 0, central_set: 0, listings: {}, shops: [] });
+  }
+  for (const p of parents) {
+    const b = p.brand_id ? out.get(p.brand_id) : undefined;
+    if (!b) continue;
+    b.parents++;
+    if (p.platform_category_id) b.central_set++;
+  }
+  for (const l of listings) {
+    const b = l.brand_id ? out.get(l.brand_id) : undefined;
+    const code = codeOf.get(l.platform_id);
+    if (!b || !code) continue;
+    b.listings[code] = (b.listings[code] ?? 0) + 1;
+  }
+  for (const a of (accounts ?? []) as { brand_id: string | null; platform_id: string }[]) {
+    const b = a.brand_id ? out.get(a.brand_id) : undefined;
+    const code = codeOf.get(a.platform_id);
+    if (b && code && !b.shops.includes(code)) b.shops.push(code);
+  }
+  // แบรนด์ที่มีของบนร้าน/สินค้าเยอะขึ้นก่อน
+  const list = [...out.values()].sort((a, b) => {
+    const la = Object.values(a.listings).reduce((s, n) => s + n, 0), lb = Object.values(b.listings).reduce((s, n) => s + n, 0);
+    return (lb > 0 ? 1 : 0) - (la > 0 ? 1 : 0) || b.parents - a.parents || a.name.localeCompare(b.name, "th");
+  });
+  return { brands: list, platforms: pfRows.map((p) => ({ code: p.code, name_th: p.name_th })) };
 }

@@ -18,10 +18,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const brandId = (new URL(request.url).searchParams.get("brand_id") ?? "").trim();
   const admin = supabaseAdmin();
   const [{ data: pf }, { data: br }] = await Promise.all([
-    admin.from("erp_platforms").select("id, code, name_th, icon_key").eq("is_active", true).order("sort_order", { ascending: true }),
+    admin.from("erp_platforms").select("id, code, name_th, icon_key, capabilities").eq("is_active", true).order("sort_order", { ascending: true }),
     admin.from("brands").select("id, name, color").eq("is_active", true).not("is_customer_job", "is", true).order("name", { ascending: true }),
   ]);
-  const platforms = ((pf ?? []) as Record<string, unknown>[]).map((p) => ({ id: String(p.id), code: String(p.code ?? ""), name_th: String(p.name_th ?? p.code ?? ""), icon_key: (p.icon_key as string) ?? null }));
+  // can_publish = มีตัวเชื่อมลงสินค้าจริง (capabilities.api) — ตัวช่วยลงสินค้าใช้บอกว่าร้านไหน "ลงจริงได้" / "เตรียมร่างได้อย่างเดียว"
+  const platforms = ((pf ?? []) as Record<string, unknown>[]).map((p) => ({ id: String(p.id), code: String(p.code ?? ""), name_th: String(p.name_th ?? p.code ?? ""), icon_key: (p.icon_key as string) ?? null,
+    can_publish: (p.capabilities as Record<string, unknown> | null)?.api === true }));
   const brands = ((br ?? []) as Record<string, unknown>[]).map((b) => ({ id: String(b.id), name: String(b.name ?? ""), color: (b.color as string) ?? null }));
   const accounts: Record<string, { label: string | null; external_shop_id: string | null; is_active: boolean }> = {};
   if (brandId) {

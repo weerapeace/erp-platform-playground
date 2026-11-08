@@ -41,6 +41,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const p = parent as Record<string, unknown>;
   const d = (draft ?? {}) as Record<string, unknown>;
   if (d.platform_product_id) return NextResponse.json({ error: "สินค้านี้มีบน LINE แล้ว — ใช้ปุ่มส่ง update แทน" }, { status: 400 });
+  // 🛡️ กันซ้ำชั้น 2 (บทเรียน JEAN08 ถูกสร้างซ้ำ 6 รายการ ก.ค. 2026): มีรายการบน LINE ที่จับคู่สินค้านี้อยู่แล้ว
+  //    (เช่น ดึงสินค้าจากร้านแล้วจับคู่ แต่ร่างยังไม่มีรหัส) → ไม่สร้างซ้ำ
+  {
+    const { data: onShop } = await admin.from("platform_catalog_listings").select("external_product_id").eq("platform_id", platform_id).eq("matched_parent_sku_id", parent_sku_id).limit(1);
+    const ex = ((onShop ?? []) as { external_product_id: string | null }[])[0];
+    if (ex) return NextResponse.json({ error: `สินค้านี้มีบน LINE แล้ว (#${ex.external_product_id ?? "?"}) — ไม่สร้างซ้ำ` }, { status: 409 });
+  }
 
   const brand_id = (p.brand_id as string) ?? null;
   if (!brand_id) return NextResponse.json({ error: "สินค้านี้ยังไม่มีแบรนด์ — ตั้งแบรนด์ก่อน (คีย์ LINE ผูกกับแบรนด์)" }, { status: 400 });
@@ -142,8 +149,25 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     } } : {}),
   };
 
+  // 🛡️ กันซ้ำชั้น 3: ล็อกระหว่างกำลังสร้าง (กดซ้ำ / 2 คนกดพร้อมกัน / ตัวช่วยลงสินค้ากับปุ่มในตัวจัดการ)
+  //    ใช้ช่องเดิมของร่าง (last_sync_status = creating) ไม่ต้องแก้โครงตาราง · ล็อกค้างเกิน 3 นาที = ถือว่าหลุด ลองใหม่ได้
+  await admin.from("platform_listing_drafts").upsert({ parent_sku_id, platform_id }, { onConflict: "parent_sku_id,platform_id", ignoreDuplicates: true });
+  const lockAt = new Date();
+  const staleIso = new Date(lockAt.getTime() - 3 * 60 * 1000).toISOString();
+  const { data: claimed } = await admin.from("platform_listing_drafts")
+    .update({ last_sync_status: "creating", last_synced_at: lockAt.toISOString(), last_error: null })
+    .eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id).is("platform_product_id", null)
+    .or(`last_sync_status.is.null,last_sync_status.neq.creating,last_synced_at.lt.${staleIso}`)
+    .select("id");
+  if (!claimed?.length) return NextResponse.json({ error: "กำลังสร้างสินค้านี้บน LINE อยู่ (มีการกดไปแล้ว) — รอ 1-2 นาที แล้วกดดึงสินค้าจาก LINE เพื่อตรวจก่อนลองใหม่" }, { status: 409 });
+
   const res = await lineCreateProduct(apiKey, payload);
-  if (!res.ok) return NextResponse.json({ ok: false, error: res.error, sent: { fields: Object.keys(payload), variants: variants.length, images: imageUrls.length } }, { status: 400 });
+  if (!res.ok) {
+    // ปลดล็อก + จดเหตุผล (ถ้า LINE สร้างไปแล้วแต่ตอบพลาด ให้ดึงสินค้าจาก LINE ก่อนลองใหม่ — ชั้น 2 จะกันซ้ำให้หลังจับคู่)
+    await admin.from("platform_listing_drafts").update({ last_sync_status: "failed", last_error: String(res.error ?? "").slice(0, 500), last_synced_at: new Date().toISOString() })
+      .eq("parent_sku_id", parent_sku_id).eq("platform_id", platform_id);
+    return NextResponse.json({ ok: false, error: res.error, sent: { fields: Object.keys(payload), variants: variants.length, images: imageUrls.length } }, { status: 400 });
+  }
 
   const productId = res.productId || "";
   const now = new Date().toISOString();

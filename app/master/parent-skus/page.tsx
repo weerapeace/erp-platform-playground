@@ -28,6 +28,8 @@ const ProductPlatformManager = dynamic(
   () => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager),
   { ssr: false },
 );
+// ตัวช่วยลงสินค้า (ของกลาง) — ติ๊กหลายรุ่นแล้ว "ลงบนแพลตฟอร์ม" (ทาง 2 ของ flow ลงสินค้า)
+const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 const CentralCategoryPicker = dynamic(
   () => import("@/components/central-category-picker").then((m) => m.CentralCategoryPicker),
   { ssr: false },
@@ -153,6 +155,8 @@ const CONFIG: MasterCRUDConfig = {
 export default function ParentSKUsV2Page() {
   const { can, user } = useAuth();
   const [mgrId, setMgrId] = useState<string | null>(null);
+  const [addRows, setAddRows] = useState<{ parents: { id: string; code: string; name: string | null }[]; brandId: string | null } | null>(null);
+  const canAddPf = can("products.platforms.edit");
   // null = ยังไม่เคยเปิด · เปิดแล้วคงไว้ (อัปเบื้องหลังต่อได้ + กลับมาดูผล/ย้อนทั้งชุดได้)
   const [routerOpen, setRouterOpen] = useState<boolean | null>(null);
   // 📝 ใส่แผนงาน (ของกลาง) — ปุ่มรายแถว → ป๊อปตั้งงาน + ลิงก์กลับรุ่นนี้
@@ -168,6 +172,14 @@ export default function ParentSKUsV2Page() {
         title="ลากหลายโฟลเดอร์ (ชื่อโฟลเดอร์ = รหัส SKU ลูก / รหัสรุ่น) หลายรุ่นทีเดียว แล้วเลือกว่ารูปไหนลงช่องไหน"
         className="h-9 rounded-lg border border-blue-200 bg-white px-3 text-sm font-medium text-blue-700 hover:bg-blue-50">📂 จัดรูปหลายโฟลเดอร์</button>
     ) : undefined,
+    // ติ๊กหลายรุ่น → ตัวช่วยลงสินค้า (ตรวจความครบ → แก้/ส่งงาน → ลงจริงหรือบันทึกร่าง)
+    extraBulkActions: [
+      ...(CONFIG.extraBulkActions ?? []),
+      ...(canAddPf ? [{ label: "ลงบนแพลตฟอร์ม", onClick: (rows: Record<string, unknown>[]) => {
+        const brands = [...new Set(rows.map((r) => (r.brand_id as string) ?? "").filter(Boolean))];
+        setAddRows({ parents: rows.map((r) => ({ id: String(r.id), code: String(r.code ?? ""), name: (r.name as string) || (r.name_th as string) || null })), brandId: brands.length === 1 ? brands[0] : null });
+      } }] : []),
+    ],
     extraRowActions: [
       ...(CONFIG.extraRowActions ?? []),
       { label: "ลงขายหลายแพลตฟอร์ม", icon: "🏬", onClick: (row) => setMgrId(String(row.id)) },
@@ -206,12 +218,13 @@ export default function ParentSKUsV2Page() {
     extraTabs: parentSkuExtraTabs(),
     // 🖼 ช่องใหญ่ "รูปตัดพื้น (PNG)" ใต้รูปสินค้า (การ์ดบนฉากของเว็บร้านใช้) — ชุดเดียวกับ drawer
     sidePngSlots: parentSkuPngSlots(),
-  }), [actor, canRoute, canPlan]);
+  }), [actor, canRoute, canPlan, canAddPf]);
   return (
     <>
       <MasterCRUDPage config={config} />
       {routerOpen !== null && <ProductImageRouter open={routerOpen} onClose={() => setRouterOpen(false)} />}
       {planFor && <AddToPlanModal open defaultTitle={planFor.title} source={planFor.source} onClose={() => setPlanFor(null)} />}
+      {addRows && <AddToPlatformWizard open parents={addRows.parents} brandId={addRows.brandId} onClose={() => setAddRows(null)} />}
       {mgrId && <ProductPlatformManager parentSkuId={mgrId} onClose={() => setMgrId(null)} canEdit={can("products.platforms.edit")} canPublish={can("products.platforms.publish")} />}
     </>
   );

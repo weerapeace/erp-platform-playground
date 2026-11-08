@@ -28,6 +28,7 @@ import {
   type ShopItem, type ShopParent, type ShopState, type ShopTab, type ShopViewResponse,
 } from "@/lib/platform-listing-health";
 import { ShopQueues, queueLabel, queueWhy, type QueueKey } from "./shop-queues";
+import { AddToPlatformWizard, type AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
 
 // ป๊อปสร้างงาน (หนัก) — โหลดตอนกดเท่านั้น
 const CreateTaskModal = dynamic(() => import("@/app/tasks/create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
@@ -87,6 +88,9 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const [pageSize, setPageSize] = useState(50);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [taskFor, setTaskFor] = useState<ParentSkuPickerValue[] | null>(null);
+  const [addFor, setAddFor] = useState<AddWizardParent[] | null>(null);   // ตัวช่วยลงสินค้า (ของกลาง)
+  const [cat, setCat] = useState("");   // หมวดกลาง ("" = ทุกหมวด · "__none" = ไม่รู้หมวด เช่น ยังไม่จับคู่)
+  const canAdd = can("products.platforms.edit");
 
   // เลขรอบ: สลับร้าน/แบรนด์ระหว่างโหลด → ทิ้งคำตอบของรอบเก่า (บั๊กเดิมของหน้านี้)
   const seq = useRef(0);
@@ -108,17 +112,22 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   }, [platformId, brandId, onCounts]);
   useEffect(() => { void load(); }, [load, reloadKey]);
   // เปลี่ยนร้าน/แบรนด์ → เริ่มที่แท็บแรก
-  useEffect(() => { setTab("all"); setQueue("none"); setPage(1); setQ(""); }, [platformId, brandId]);
+  useEffect(() => { setTab("all"); setQueue("none"); setPage(1); setQ(""); setCat(""); }, [platformId, brandId]);
 
-  const items = useMemo(() => data?.items ?? [], [data]);
-  const noData = items.length > 0 && items.every((it) => it.state === "nodata");
-  const trustNotListed = useMemo(() => notListedTrustworthy(items), [items]);
+  const allItems = useMemo(() => data?.items ?? [], [data]);
+  const noData = allItems.length > 0 && allItems.every((it) => it.state === "nodata");
+  const trustNotListed = useMemo(() => notListedTrustworthy(allItems), [allItems]);
+  // ชิปหมวดกลาง → กรองทั้งการ์ดกองงาน แท็บ และตาราง
+  const inCat = useCallback((id: string | null) => !cat || (cat === "__none" ? !id : id === cat), [cat]);
+  const items = useMemo(() => allItems.filter((it) => inCat(it.category_id)), [allItems, inCat]);
+  const notListed = useMemo(() => data?.not_listed ? data.not_listed.filter((p) => inCat(p.category_id)) : null, [data, inCat]);
+  const noImage = useMemo(() => data?.no_image ? data.no_image.filter((p) => inCat(p.category_id)) : null, [data, inCat]);
 
   // โหมดตาราง: รายการบนร้าน หรือ สินค้าของเรา (แท็บยังไม่ลง / กองไม่มีรูปในระบบ)
   const parentMode = tab === "notlisted" || queue === "noimg_erp";
   const parentRowsAll: ShopParent[] | null = queue === "noimg_erp"
-    ? (data?.no_image ?? null)?.slice().sort((a, b) => (a.image_state === b.image_state ? 0 : a.image_state === "none" ? -1 : 1)) ?? null
-    : tab === "notlisted" ? (data?.not_listed ?? null) : null;
+    ? noImage?.slice().sort((a, b) => (a.image_state === b.image_state ? 0 : a.image_state === "none" ? -1 : 1)) ?? null
+    : tab === "notlisted" ? notListed : null;
 
   const needle = q.trim().toLowerCase();
   const shownItems = useMemo(() => {
@@ -148,7 +157,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const pageParents = shownParents.slice((page - 1) * pageSize, page * pageSize);
 
   const tabCount = (t: ShopTab): number | null => {
-    if (t === "notlisted") return data?.not_listed ? data.not_listed.length : null;
+    if (t === "notlisted") return notListed ? notListed.length : null;
     if (noData && (t === "selling" || t === "out" || t === "hidden" || t === "review")) return null;
     return items.filter((it) => inShopTab(it, t)).length;
   };
@@ -250,13 +259,23 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
       cell: (p) => <span className={`text-xs ${p.image_state === "none" ? "text-rose-600" : p.image_state === "sku_only" ? "text-amber-700" : "text-slate-500"}`}>{IMG_STATE_LABEL[p.image_state]}</span>,
     },
     {
-      key: "act", header: "", width: "6.5rem", align: "right", locked: true,
-      cell: (p) => canCreateTask ? (
-        <button type="button" onClick={() => setTaskFor([pickerOf(p.id, p.code, p.name, p.cover_key)])}
-          className="h-7 px-2 text-xs border border-slate-200 rounded-md hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap">
-          <Icon name="add" />สร้างงาน
-        </button>
-      ) : null,
+      key: "act", header: "", width: tab === "notlisted" ? "11rem" : "6.5rem", align: "right", locked: true,
+      cell: (p) => (
+        <span className="inline-flex gap-1">
+          {canAdd && tab === "notlisted" && (
+            <button type="button" onClick={() => setAddFor([{ id: p.id, code: p.code, name: p.name }])} title="ลงสินค้านี้ขึ้นร้าน (ตัวช่วยลงสินค้า)"
+              className="h-7 px-2 text-xs text-white bg-violet-600 rounded-md hover:bg-violet-700 inline-flex items-center gap-1 whitespace-nowrap">
+              <Icon name="upload" />ลงร้าน
+            </button>
+          )}
+          {canCreateTask && (
+            <button type="button" onClick={() => setTaskFor([pickerOf(p.id, p.code, p.name, p.cover_key)])}
+              className="h-7 px-2 text-xs border border-slate-200 rounded-md hover:bg-slate-50 inline-flex items-center gap-1 whitespace-nowrap">
+              <Icon name="add" />สร้างงาน
+            </button>
+          )}
+        </span>
+      ),
     },
   ];
 
@@ -283,7 +302,20 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         </div>
       )}
 
-      <ShopQueues items={items} noImage={data.no_image} value={queue} onChange={pickQueue} />
+      {data.categories.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-slate-500 mr-0.5">หมวด</span>
+          {[{ id: "", name: "ทุกหมวด", n: allItems.length }, ...data.categories.map((c) => ({ id: c.id, name: c.name, n: allItems.filter((it) => it.category_id === c.id).length })),
+            ...(allItems.some((it) => !it.category_id) ? [{ id: "__none", name: "ไม่รู้หมวด (ยังไม่จับคู่)", n: allItems.filter((it) => !it.category_id).length }] : [])].map((c) => (
+            <button key={c.id || "all"} type="button" onClick={() => { setCat(c.id); setPage(1); setSelected(new Set()); }} aria-pressed={cat === c.id}
+              className={`h-7 px-2.5 rounded-full border text-xs whitespace-nowrap ${cat === c.id ? "bg-violet-50 border-violet-300 text-violet-800" : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"}`}>
+              {c.name} <span className="tabular-nums text-slate-400">{c.n.toLocaleString()}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <ShopQueues items={items} noImage={noImage} value={queue} onChange={pickQueue} />
 
       <div className="border border-slate-200 rounded-xl bg-white overflow-hidden">
         <ScrollTabs activeKey={queueOn ? null : tab} className="border-b border-slate-200 px-1">
@@ -329,7 +361,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
           <EmptyState title="เลือกแบรนด์ก่อน" hint={`ต้องรู้ว่าสินค้าแบรนด์ไหนควรอยู่บน ${where} ถึงจะบอกได้ว่าตัวไหนยังไม่ลง`} />
         ) : parentMode ? (
           <MiniTable rows={pageParents} columns={parentCols} rowKey={(p) => p.id}
-            selectable={canCreateTask} selected={selected} onSelectedChange={setSelected}
+            selectable={canCreateTask || (canAdd && tab === "notlisted")} selected={selected} onSelectedChange={setSelected}
             emptyText={needle ? "ไม่พบสินค้าที่ค้นหา" : tab === "notlisted" ? `สินค้า${brandName ? ` ${brandName}` : ""} ลงร้านนี้ครบแล้ว` : "ทุกสินค้ามีรูปแล้ว"} dense />
         ) : (
           <MiniTable rows={pageItems} columns={itemCols} rowKey={(it) => it.id}
@@ -342,15 +374,25 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         </div>
       </div>
 
-      {canCreateTask && (
+      {(canCreateTask || (canAdd && parentMode)) && (
         <BulkActionBar count={selected.size} unit={parentMode ? "สินค้า" : "รายการ"} onClear={() => setSelected(new Set())}
           extra={selUnmatched > 0 ? `${selUnmatched.toLocaleString()} รายการยังไม่จับคู่ จะไม่ถูกใส่ในงาน` : undefined}>
-          {selTargets.length > 0 && (
+          {canAdd && tab === "notlisted" && selParents.length > 0 && (
+            <button type="button" onClick={() => setAddFor(selParents.map((p) => ({ id: p.id, code: p.code, name: p.name })))} className="h-8 px-3 text-sm rounded-lg bg-violet-500 text-white hover:bg-violet-400 inline-flex items-center gap-1.5">
+              <Icon name="upload" />ลงสินค้า ({selParents.length.toLocaleString()})
+            </button>
+          )}
+          {canCreateTask && selTargets.length > 0 && (
             <button type="button" onClick={() => setTaskFor(selTargets)} className="h-8 px-3 text-sm rounded-lg bg-white text-slate-800 hover:bg-slate-100 inline-flex items-center gap-1.5">
               <Icon name="add" />สร้างงาน ({selTargets.length.toLocaleString()} สินค้า)
             </button>
           )}
         </BulkActionBar>
+      )}
+
+      {addFor && (
+        <AddToPlatformWizard open parents={addFor} brandId={brandId || null} initialPlatformCodes={platformCode ? [platformCode] : []}
+          onClose={() => { setAddFor(null); setSelected(new Set()); }} onDone={() => void load()} />
       )}
 
       {taskFor && (

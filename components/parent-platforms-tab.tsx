@@ -15,14 +15,18 @@ import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { PlatformIcon } from "@/components/platform-icon";
 import { CentralCategoryPicker } from "@/components/central-category-picker";
+import { useAuth } from "@/components/auth";
+import { isSellingPlatform } from "@/lib/selling-platforms";
 
 // dynamic กัน import วน (ProductPlatformManager → master-crud → ParentPlatformsTab)
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
+// ตัวช่วยลงสินค้า (ของกลาง) — ปุ่ม "ลงร้านนี้" (ทาง 2 ของ flow ลงสินค้า · ทาง 1 = หน้าสินค้าบนแพลตฟอร์ม)
+const AddToPlatformWizard = dynamic(() => import("@/components/platform-listing/add-to-platform-wizard").then((m) => m.AddToPlatformWizard), { ssr: false });
 
 type Platform = { id: string; code: string; name_th: string; icon_key: string | null };
 type Draft = { title?: string | null; category_path?: string | null; image_keys?: string[]; status?: string | null; platform_product_id?: string | null; last_sync_status?: string | null };
 type Account = { label: string | null; is_active: boolean };
-type Parent = { name_platform?: string; name_th?: string; platform_category_id?: string | null; platform_category_name?: string | null };
+type Parent = { code?: string; name_platform?: string; name_th?: string; platform_category_id?: string | null; platform_category_name?: string | null };
 
 export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [loading, setLoading] = useState(true);
@@ -33,6 +37,10 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
   const [parent, setParent] = useState<Parent | null>(null);
   const [savingCat, setSavingCat] = useState(false);
   const [manage, setManage] = useState<string | null>(null); // platform id ที่เปิดตัวจัดการอยู่
+  const [matched, setMatched] = useState<Record<string, { external_id: string | null }>>({});   // platform_id → รายการบนร้านที่จับคู่สินค้านี้อยู่
+  const [addOn, setAddOn] = useState<string | null>(null);    // platform code ที่เปิดตัวช่วยลงสินค้า
+  const { can } = useAuth();
+  const canAdd = can("products.platforms.edit");
   const lastLoadRef = useRef(0);                              // เวลาที่โหลดล่าสุด (ใช้หน่วง auto-refresh)
 
   const load = useCallback(async () => {
@@ -45,6 +53,7 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       setAccounts((j.accounts ?? {}) as Record<string, Account>);
       setMappings((j.mappings ?? {}) as Record<string, string>);
       setParent((j.parent ?? null) as Parent | null);
+      setMatched((j.matchedListings ?? {}) as Record<string, { external_id: string | null }>);
       lastLoadRef.current = Date.now();
     } catch { /* ignore */ } finally { setLoading(false); }
   }, [parentId]);
@@ -99,7 +108,9 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
       {platforms.map((p) => {
         const d = drafts[p.id] ?? {};
         const acct = accounts[p.id];
-        const onSale = d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id;
+        const onShop = matched[p.id];   // มีรายการบนร้านจับคู่อยู่ (เช่น นำเข้า/ดึงจากร้าน) แม้ร่างยังไม่มีรหัส
+        const onSale = d.status === "published" || d.last_sync_status === "success" || !!d.platform_product_id || !!onShop;
+        const showAdd = canAdd && !onSale && isSellingPlatform(p.code);
         const hasDraft = !!(d.title || d.category_path || (d.image_keys?.length));
         const status = onSale ? { t: "ลงขายแล้ว", c: "text-emerald-700 bg-emerald-50 border-emerald-200" }
           : hasDraft ? { t: "มีร่าง", c: "text-blue-700 bg-blue-50 border-blue-200" }
@@ -113,8 +124,12 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
             <div className="flex items-center gap-2 bg-slate-50 px-3 py-2 border-b border-slate-200 flex-wrap">
               <span className="text-sm font-medium text-slate-800 inline-flex items-center gap-1.5"><PlatformIcon code={p.code} iconKey={p.icon_key} size={18} /> {p.name_th}</span>
               <span className={`text-[11px] px-2 py-0.5 rounded-full border ${status.c}`}>{status.t}</span>
-              {d.platform_product_id && <span className="text-[11px] text-slate-400 font-mono truncate max-w-[10rem]">#{d.platform_product_id}</span>}
-              <button onClick={() => setManage(p.id)} className="ml-auto text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3 py-1.5">จัดการ →</button>
+              {(d.platform_product_id || onShop?.external_id) && <span className="text-[11px] text-slate-400 font-mono truncate max-w-[10rem]">#{d.platform_product_id || onShop?.external_id}</span>}
+              {showAdd && (
+                <button type="button" onClick={() => setAddOn(p.code)} title="ตรวจความครบ แล้วลงสินค้านี้ขึ้นร้าน (หรือบันทึกร่าง)"
+                  className="ml-auto text-xs border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg px-3 py-1.5">ลงร้านนี้</button>
+              )}
+              <button onClick={() => setManage(p.id)} className={`${showAdd ? "" : "ml-auto "}text-xs bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-3 py-1.5`}>จัดการ →</button>
             </div>
             <div className="p-3 grid sm:grid-cols-2 gap-y-1.5 gap-x-4">
               <Row label="ชื่อ" value={name} />
@@ -125,6 +140,10 @@ export function ParentPlatformsTab({ parentId }: { parentId: string | null }) {
           </div>
         );
       })}
+      {addOn && parentId && (
+        <AddToPlatformWizard open parents={[{ id: parentId, code: parent?.code ?? "", name: parent?.name_th || parent?.name_platform || null }]}
+          initialPlatformCodes={[addOn]} onClose={() => setAddOn(null)} onDone={() => void load()} />
+      )}
       {manage && parentId && (
         <ProductPlatformManager parentSkuId={parentId} initialPlatformId={manage} onClose={() => { setManage(null); void load(); }} />
       )}

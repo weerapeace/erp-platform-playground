@@ -3,6 +3,7 @@
  * GET ?platform_id=&brand_id=&with_counts=1  (products.platforms.view)
  *   → fields (ฟิลด์ของแพลตฟอร์มนั้น), listings (สินค้าบนร้าน), summary {total, matched}
  *     with_counts=1 → platform_counts { [platform_id]: จำนวนสินค้า } เฉพาะร้านขายของ (โชว์บนปุ่มเลือกร้าน)
+ *   view=brands → การ์ดหน้าเลือกแบรนด์ ShopBrandsResponse (ไม่ต้องมี platform_id)
  *   view=shop → มุมมองหน้าร้าน ShopViewResponse (lib/platform-listing-health) — สต๊อก/สถานะ/รูปจากร้าน · ยังไม่ลง · ไม่มีรูป · งานค้าง
  * การนำเข้าจริง (อัปไฟล์ export / ต่อ API) มาเฟสถัดไป — โครงตาราง+หน้าพร้อมแล้ว
  * DELETE ?id=  (products.platforms.edit) → ลบรายการที่นำเข้าผิด (เป็นสำเนาข้อมูลจากร้าน — ของบนร้านจริงไม่ถูกแตะ)
@@ -15,8 +16,8 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { SELLING_PLATFORMS } from "@/lib/selling-platforms";
-import { loadShopView } from "@/lib/platform-shop-view-server";
-import type { ShopViewResponse } from "@/lib/platform-listing-health";
+import { loadBrandSummaries, loadShopView } from "@/lib/platform-shop-view-server";
+import type { ShopBrandsResponse, ShopViewResponse } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,6 +29,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const brandId = (sp.get("brand_id") ?? "").trim();
   const search = (sp.get("search") ?? "").trim();                       // ค้นหา listing (สำหรับ picker จับคู่)
   const limit = Math.min(5000, Math.max(1, parseInt(sp.get("limit") ?? "5000", 10)));
+  // หน้าเลือกแบรนด์ (มุมมองหน้าร้านต้องเลือกแบรนด์ก่อน) — ไม่ต้องระบุร้าน
+  if (sp.get("view") === "brands") {
+    const { brands, platforms } = await loadBrandSummaries(supabaseAdmin(), SELLING_PLATFORMS);
+    const body: ShopBrandsResponse = { brands, platforms, error: null };
+    return NextResponse.json(body);
+  }
   if (!platformId) return NextResponse.json({ fields: [], listings: [], summary: { total: 0, matched: 0 }, error: null });
   const admin = supabaseAdmin();
 

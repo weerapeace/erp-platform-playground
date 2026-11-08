@@ -28,6 +28,8 @@ import { listingMatchStatus, type ListingMatchStatus, type MatchSuggestion } fro
 import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type ImportMatrix, type ImportProfile, type DbProfileRow } from "@/lib/platform-import-profiles";
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 import { PlatformShopView } from "@/components/platform-catalog/shop-view";
+import { BrandGate, BrandAvatar } from "@/components/platform-catalog/brand-gate";
+import type { ShopBrandSummary } from "@/lib/platform-listing-health";
 
 // Drawer รายละเอียดต่อแพลตฟอร์ม (ของกลาง เปิดจาก Parent SKUs ด้วย) — dynamic กัน bundle หนัก
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
@@ -111,6 +113,7 @@ export default function PlatformCatalogPage() {
   const [view, setViewState] = useState<PageView>("match");
   const [viewReady, setViewReady] = useState(false);
   const [shopReload, setShopReload] = useState(0);
+  const [pickedBrand, setPickedBrand] = useState<ShopBrandSummary | null>(null);   // การ์ดที่เลือกจากหน้าเลือกแบรนด์ (ใช้โลโก้บนหัวหน้า)
   useEffect(() => { setViewState(readViewParam()); setViewReady(true); }, []);
   const setView = useCallback((v: PageView) => {
     setViewState(v);
@@ -562,6 +565,18 @@ export default function PlatformCatalogPage() {
   const unmatchedCount = needMatch - counts.ok;
   const matchedParents = new Set(listings.map((l) => l.matched_parent_sku_id).filter(Boolean)).size;
   const where = `${activePf?.name_th ?? "ร้านนี้"}${activeBrand ? ` · ${activeBrand.name}` : ""}`;
+  // มุมมองหน้าร้านต้องเลือกแบรนด์ก่อน (เจ้าของขอ 2026-11-08) — ยังไม่เลือก = หน้าเลือกแบรนด์
+  const gate = viewReady && view === "shop" && !brandId;
+  const pickBrand = (b: ShopBrandSummary) => {
+    setPickedBrand(b);
+    setBrandId(b.id);
+    // ร้านที่เลือกอยู่ไม่มีของของแบรนด์นี้ → ไปร้านที่มีของมากสุด
+    const curCode = platforms.find((p) => p.id === platformId)?.code ?? "";
+    if (!(b.listings[curCode] > 0)) {
+      const best = platforms.filter((p) => (b.listings[p.code] ?? 0) > 0).sort((x, y) => (b.listings[y.code] ?? 0) - (b.listings[x.code] ?? 0))[0];
+      if (best) setPlatformId(best.id);
+    }
+  };
 
   return (
     <div className="max-w-5xl mx-auto p-6">
@@ -589,6 +604,8 @@ export default function PlatformCatalogPage() {
 
       {bootError && <ErrorState className="mb-3" title="โหลดรายชื่อร้านไม่สำเร็จ" hint={bootError} onRetry={() => window.location.reload()} />}
 
+      {/* มุมมองหน้าร้านยังไม่เลือกแบรนด์ → โชว์แค่หน้าเลือกแบรนด์ (ซ่อนปุ่มร้าน/นำเข้า/ดึงสินค้า ที่ต้องรู้แบรนด์) */}
+      {!gate && (<>
       {/* เลือกร้าน + แบรนด์ + ปุ่มนำเข้า */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {platforms.map((p) => {
@@ -603,10 +620,19 @@ export default function PlatformCatalogPage() {
             </button>
           );
         })}
-        <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 border border-slate-200 rounded-lg px-2 text-sm bg-white">
-          <option value="">ทุกแบรนด์/ร้าน</option>
-          {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        {view === "shop" && activeBrand ? (
+          // มุมมองหน้าร้าน = ดูทีละแบรนด์เสมอ (ไม่มี "ทุกแบรนด์") · เปลี่ยน = กลับไปหน้าเลือกแบรนด์
+          <span className="h-9 pl-1.5 pr-1 rounded-lg border border-slate-200 bg-white inline-flex items-center gap-2 text-sm">
+            <BrandAvatar name={activeBrand.name} logoKey={pickedBrand?.id === activeBrand.id ? pickedBrand.logo_key : null} color={pickedBrand?.id === activeBrand.id ? pickedBrand.color : null} size={24} />
+            <span className="font-medium text-slate-800">{activeBrand.name}</span>
+            <button type="button" onClick={() => setBrandId("")} className="h-7 px-2 text-xs text-violet-700 rounded-md hover:bg-violet-50 inline-flex items-center gap-1"><Icon name="shuffle" />เปลี่ยนแบรนด์</button>
+          </span>
+        ) : (
+          <select value={brandId} onChange={(e) => setBrandId(e.target.value)} className="h-9 border border-slate-200 rounded-lg px-2 text-sm bg-white">
+            <option value="">ทุกแบรนด์/ร้าน</option>
+            {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
         <div className="flex-1" />
         <input ref={fileRef} type="file" multiple accept=".csv,.xlsx,.xls" className="hidden" onChange={(e) => { const fs = Array.from(e.target.files ?? []); if (fs.length) importFiles(fs); }} />
         {/* ปุ่มนำเข้า + ⚙️ ติดกันเสมอ (ร้านเยอะแล้วแถวเต็ม ⚙️ เคยตกไปอยู่บรรทัดใหม่คนเดียว) */}
@@ -683,6 +709,7 @@ export default function PlatformCatalogPage() {
           </div>
         </div>
       )}
+      </>)}
 
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {/* สลับมุมมอง: หน้าร้าน (แบบ Seller Center) / จับคู่ + ตั้งค่า (เดิม) */}
@@ -700,6 +727,7 @@ export default function PlatformCatalogPage() {
       </div>
 
       {!viewReady ? null
+        : gate ? <BrandGate onPick={pickBrand} />
         : view === "shop" ? (
           <PlatformShopView platformId={platformId} platformCode={platformCode} brandId={brandId} brandName={activeBrand?.name ?? null}
             where={where} reloadKey={shopReload} onCounts={setPlatformCounts}

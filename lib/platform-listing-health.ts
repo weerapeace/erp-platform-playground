@@ -157,6 +157,8 @@ export type ShopItem = ListingShopSummary & {
   matched_name: string | null;
   /** คีย์รูปปกของสินค้าในระบบที่จับคู่ไว้ (ใช้แทนเมื่อร้านไม่มีรูป) */
   matched_cover_key: string | null;
+  /** หมวดกลางของสินค้าในระบบที่จับคู่ไว้ (platform_central_categories) — ใช้ชิปกรองหมวด */
+  category_id: string | null;
   match_ignored: boolean;
   /** จำนวนรายการบนร้านนี้ที่ชื่อ+รหัสเหมือนกัน (0 = ไม่ซ้ำ) */
   dup_count: number;
@@ -173,7 +175,29 @@ export type ShopParent = {
   /** ok = มีรูปปก · sku_only = ไม่มีรูปปกแต่มีรูปที่ SKU · none = ไม่มีรูปเลย */
   image_state: "ok" | "sku_only" | "none";
   open_tasks: number;
+  /** หมวดกลาง (platform_central_categories) */
+  category_id: string | null;
 };
+
+/** หมวดกลางที่ใช้ในแบรนด์นี้ (ชิปกรอง) */
+export type ShopCategory = { id: string; name: string; sort: number };
+
+/** การ์ดแบรนด์ในหน้าเลือกแบรนด์ (GET /api/platform-catalog?view=brands) */
+export type ShopBrandSummary = {
+  id: string;
+  name: string;
+  logo_key: string | null;
+  color: string | null;
+  /** Parent SKU ที่เปิดใช้ */
+  parents: number;
+  /** ตั้งหมวดกลางแล้วกี่ตัว */
+  central_set: number;
+  /** รายการบนร้าน ต่อ platform code */
+  listings: Record<string, number>;
+  /** ร้านที่ตั้งบัญชีไว้ (platform_accounts เปิดใช้) — platform code */
+  shops: string[];
+};
+export type ShopBrandsResponse = { brands: ShopBrandSummary[]; platforms: { code: string; name_th: string }[]; error: null | string };
 
 export type ShopViewResponse = {
   platform_code: string;
@@ -184,6 +208,8 @@ export type ShopViewResponse = {
   no_image: ShopParent[] | null;
   /** ดึง/นำเข้าข้อมูลจากร้านล่าสุด */
   last_imported_at: string | null;
+  /** หมวดกลางของสินค้าแบรนด์นี้ (ว่าง = ยังไม่ได้เลือกแบรนด์) */
+  categories: ShopCategory[];
   platform_counts?: Record<string, number>;
   error: null | string;
 };

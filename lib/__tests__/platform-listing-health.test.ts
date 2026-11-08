@@ -20,7 +20,7 @@ const lineRaw = (over: Record<string, unknown> = {}) => ({
 
 const item = (over: Partial<ShopItem> = {}): ShopItem => ({
   id: "x", external_product_id: "1", title: "A", sku_code: "A-01", matched_parent_sku_id: "p1", matched_code: "A", matched_name: "A",
-  matched_cover_key: null, match_ignored: false, dup_count: 0, open_tasks: 0,
+  matched_cover_key: null, category_id: null, match_ignored: false, dup_count: 0, open_tasks: 0,
   image: "u", imageKnown: true, stock: 10, display: true, price: 100, salePrice: null, variants: 1, category: null, state: "selling",
   ...over,
 });
