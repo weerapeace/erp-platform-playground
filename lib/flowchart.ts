@@ -1,0 +1,203 @@
+// ============================================================
+// flowchart — ตรรกะล้วนของ "กระดาน flowchart กลาง" (components/flowchart-board)
+//
+// เก็บรูปแบบข้อมูลกระดาน + ชนิดกล่อง + สี + การรวมงานเวลามีคนแก้พร้อมกัน (3-way merge)
+// ไม่มี React / ไม่มี @xyflow — เทสต์ได้ (lib/__tests__/flowchart.test.ts)
+// บันทึกผ่าน /api/canvas-sketch (ตารางกลาง erp_canvas_sketches) โดย scene = FlowScene (kind: "flowchart")
+// ============================================================
+
+export const FLOW_KINDS = ["start", "step", "question", "storage", "folder", "note"] as const;
+export type FlowKind = (typeof FLOW_KINDS)[number];
+
+export const FLOW_COLORS = ["slate", "violet", "emerald", "blue", "amber", "rose", "cyan"] as const;
+export type FlowColor = (typeof FLOW_COLORS)[number];
+
+/** สีของกล่อง (hex — ใช้ทั้งบนจอและตอนบันทึกเป็นรูป ให้หน้าตาเหมือนกัน) */
+export const FLOW_PALETTE: Record<FlowColor, { stroke: string; fill: string; text: string; sub: string; th: string; en: string }> = {
+  slate:   { stroke: "#64748b", fill: "#ffffff", text: "#1e293b", sub: "#64748b", th: "เทา",   en: "Gray" },
+  violet:  { stroke: "#7c3aed", fill: "#f5f3ff", text: "#4c1d95", sub: "#6d28d9", th: "ม่วง",  en: "Violet" },
+  emerald: { stroke: "#059669", fill: "#ecfdf5", text: "#064e3b", sub: "#047857", th: "เขียว", en: "Green" },
+  blue:    { stroke: "#2563eb", fill: "#eff6ff", text: "#1e3a8a", sub: "#1d4ed8", th: "ฟ้า",   en: "Blue" },
+  amber:   { stroke: "#d97706", fill: "#fffbeb", text: "#78350f", sub: "#b45309", th: "เหลือง", en: "Amber" },
+  rose:    { stroke: "#e11d48", fill: "#fff1f2", text: "#881337", sub: "#be123c", th: "แดง",   en: "Red" },
+  cyan:    { stroke: "#0891b2", fill: "#ecfeff", text: "#164e63", sub: "#0e7490", th: "ฟ้าอมเขียว", en: "Cyan" },
+};
+
+/** ค่าเริ่มต้นของกล่องแต่ละชนิด (ขนาด/สี/ข้อความ/ไอคอนปุ่ม) */
+export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: FlowColor; th: string; en: string; hintTh: string; hintEn: string; icon: string }> = {
+  start:    { w: 160, h: 56,  color: "slate",   th: "เริ่ม / จบ",   en: "Start / end", hintTh: "จุดเริ่มหรือจุดจบของขั้นตอน", hintEn: "Where the flow starts or ends", icon: "i:player-play" },
+  step:     { w: 170, h: 64,  color: "slate",   th: "ขั้นตอน",      en: "Step",        hintTh: "สิ่งที่ต้องทำ 1 อย่าง", hintEn: "One thing to do", icon: "i:list" },
+  question: { w: 190, h: 104, color: "amber",   th: "คำถาม ใช่/ไม่ใช่", en: "Yes/no question", hintTh: "แยกทาง — ลากเส้นออก 2 เส้น ระบบใส่ ใช่ / ไม่ใช่ ให้", hintEn: "Branch — draw 2 lines out, labelled yes / no", icon: "i:help-circle" },
+  storage:  { w: 180, h: 96,  color: "violet",  th: "ที่เก็บ",      en: "Storage",     hintTh: "ที่เก็บไฟล์/ข้อมูล เช่น R2 · Supabase · Drive", hintEn: "Where files/data live, e.g. R2 · Supabase · Drive", icon: "i:database" },
+  folder:   { w: 220, h: 64,  color: "cyan",    th: "โฟลเดอร์",     en: "Folder",      hintTh: "ทางลัด ดับเบิลคลิกเปิดโฟลเดอร์ในเครื่อง", hintEn: "Shortcut — double-click opens a local folder", icon: "i:folder" },
+  note:     { w: 220, h: 110, color: "amber",   th: "โน้ต",         en: "Note",        hintTh: "จดอธิบายเพิ่ม", hintEn: "Extra notes", icon: "i:notes" },
+};
+
+export type FlowNodeData = { label: string; color?: FlowColor; path?: string };
+export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
+export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string };
+export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[] };
+
+export const EMPTY_FLOW_SCENE: FlowScene = { kind: "flowchart", v: 1, nodes: [], edges: [] };
+
+/** จุดต่อเส้น 4 ด้านของกล่อง (id ของ handle) */
+export const FLOW_HANDLES = ["t", "r", "b", "l"] as const;
+export type FlowHandle = (typeof FLOW_HANDLES)[number];
+
+export const GRID = 20;
+export const snap = (v: number): number => Math.round(v / GRID) * GRID;
+
+const isKind = (v: unknown): v is FlowKind => typeof v === "string" && (FLOW_KINDS as readonly string[]).includes(v);
+const isColor = (v: unknown): v is FlowColor => typeof v === "string" && (FLOW_COLORS as readonly string[]).includes(v);
+const num = (v: unknown, d: number): number => (typeof v === "number" && Number.isFinite(v) ? v : d);
+const str = (v: unknown): string => (typeof v === "string" ? v : "");
+const handleOrNull = (v: unknown): string | null => (typeof v === "string" && (FLOW_HANDLES as readonly string[]).includes(v) ? v : null);
+
+/** สีที่ใช้จริงของกล่อง (ไม่ได้เลือก = สีตั้งต้นของชนิด) */
+export const nodeColor = (kind: FlowKind, data: Partial<FlowNodeData> | undefined): FlowColor =>
+  isColor(data?.color) ? data!.color! : FLOW_KIND_META[kind].color;
+
+/** รับข้อมูลดิบจากฐานข้อมูล → FlowScene ที่ปลอดภัย · ไม่ใช่กระดาน flowchart (เช่น กระดาน Excalidraw) = null */
+export function parseFlowScene(raw: unknown): FlowScene | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (r.kind !== "flowchart") return null;
+  const nodes: FlowSceneNode[] = [];
+  const ids = new Set<string>();
+  for (const n of Array.isArray(r.nodes) ? r.nodes : []) {
+    const o = (n ?? {}) as Record<string, unknown>;
+    const id = str(o.id); if (!id || ids.has(id) || !isKind(o.type)) continue;
+    const meta = FLOW_KIND_META[o.type];
+    const pos = (o.position ?? {}) as Record<string, unknown>;
+    const d = (o.data ?? {}) as Record<string, unknown>;
+    const data: FlowNodeData = { label: str(d.label) };
+    if (isColor(d.color)) data.color = d.color;
+    if (typeof d.path === "string" && d.path) data.path = d.path;
+    nodes.push({ id, type: o.type, position: { x: num(pos.x, 0), y: num(pos.y, 0) }, width: Math.max(40, num(o.width, meta.w)), height: Math.max(30, num(o.height, meta.h)), data });
+    ids.add(id);
+  }
+  const edges: FlowSceneEdge[] = [];
+  const eids = new Set<string>();
+  for (const e of Array.isArray(r.edges) ? r.edges : []) {
+    const o = (e ?? {}) as Record<string, unknown>;
+    const id = str(o.id); const source = str(o.source); const target = str(o.target);
+    if (!id || eids.has(id) || !ids.has(source) || !ids.has(target)) continue;
+    edges.push({ id, source, target, sourceHandle: handleOrNull(o.sourceHandle), targetHandle: handleOrNull(o.targetHandle), label: str(o.label) });
+    eids.add(id);
+  }
+  return { kind: "flowchart", v: 1, nodes, edges };
+}
+
+/** โหนด/เส้นของ React Flow (มีค่าระหว่างใช้งาน เช่น selected/dragging/measured) → FlowScene สำหรับบันทึก */
+type NodeLike = { id: string; type?: string; position: { x: number; y: number }; width?: number | null; height?: number | null; measured?: { width?: number; height?: number }; data?: unknown };
+type EdgeLike = { id: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null; label?: unknown };
+export function toFlowScene(nodes: NodeLike[], edges: EdgeLike[]): FlowScene {
+  return parseFlowScene({
+    kind: "flowchart",
+    nodes: nodes.map((n) => ({
+      id: n.id, type: n.type, position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
+      width: Math.round(n.width ?? n.measured?.width ?? 0) || undefined,
+      height: Math.round(n.height ?? n.measured?.height ?? 0) || undefined,
+      data: n.data,
+    })),
+    edges: edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null, label: typeof e.label === "string" ? e.label : "" })),
+  }) ?? EMPTY_FLOW_SCENE;
+}
+
+/** ลายเซ็นของกระดาน — เทียบว่า "เนื้อหาเปลี่ยนจริง" ไหม (ไม่นับการเลือก/ซูม) */
+export const flowSceneSig = (s: FlowScene): string => JSON.stringify(s);
+
+/** ป้ายเส้นอัตโนมัติ: ลากเส้นออกจากกล่องคำถาม เส้นแรก = ใช่ · เส้นที่สอง = ไม่ใช่ · กล่องอื่นไม่ใส่ */
+export function autoEdgeLabel(sourceKind: FlowKind | undefined, existingLabels: string[], t: (th: string, en: string) => string): string {
+  if (sourceKind !== "question") return "";
+  const yes = t("ใช่", "Yes"), no = t("ไม่ใช่", "No");
+  if (!existingLabels.includes(yes)) return yes;
+  if (!existingLabels.includes(no)) return no;
+  return "";
+}
+
+export const newFlowId = (prefix: "n" | "e"): string => `${prefix}-${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-3)}`;
+
+/** สร้างกล่องใหม่ตามชนิด (ตำแหน่งชิดตาราง) */
+export function makeFlowNode(kind: FlowKind, at: { x: number; y: number }, t: (th: string, en: string) => string, data?: Partial<FlowNodeData>): FlowSceneNode {
+  const meta = FLOW_KIND_META[kind];
+  return {
+    id: newFlowId("n"), type: kind,
+    position: { x: snap(at.x - meta.w / 2), y: snap(at.y - meta.h / 2) },
+    width: meta.w, height: meta.h,
+    data: { label: data?.label ?? t(meta.th, meta.en), ...(data?.color ? { color: data.color } : {}), ...(data?.path ? { path: data.path } : {}) },
+  };
+}
+
+/** ย้ายแม่แบบไปวางเพิ่มบนกระดาน: ตั้ง id ใหม่ทั้งหมด (กันชนของเดิม) + เลื่อนไปทางขวาของของเดิม */
+export function cloneFlowSceneAt(tpl: FlowScene, existing: FlowScene): FlowScene {
+  const idMap = new Map<string, string>();
+  for (const n of tpl.nodes) idMap.set(n.id, newFlowId("n"));
+  const maxX = existing.nodes.reduce((m, n) => Math.max(m, n.position.x + n.width), Number.NEGATIVE_INFINITY);
+  const minX = tpl.nodes.reduce((m, n) => Math.min(m, n.position.x), Number.POSITIVE_INFINITY);
+  const dx = Number.isFinite(maxX) && Number.isFinite(minX) ? snap(maxX + 120 - minX) : 0;
+  return {
+    kind: "flowchart", v: 1,
+    nodes: tpl.nodes.map((n) => ({ ...n, id: idMap.get(n.id)!, position: { x: n.position.x + dx, y: n.position.y } })),
+    edges: tpl.edges.filter((e) => idMap.has(e.source) && idMap.has(e.target))
+      .map((e) => ({ ...e, id: newFlowId("e"), source: idMap.get(e.source)!, target: idMap.get(e.target)! })),
+  };
+}
+
+/**
+ * รวมงานเมื่อมีคนบันทึกแทรก (3 ทาง): base = ที่เราโหลดมา · mine = ของเราตอนนี้ · theirs = ล่าสุดในฐานข้อมูล
+ *   - ทั้งสองฝั่งมี: เรายังไม่แตะ (mine == base) → เอาของเขา · เราแก้ → เอาของเรา
+ *   - มีแต่ฝั่งเรา: เคยมีใน base แต่เขาลบ และเราไม่ได้แก้ → ลบตาม · นอกนั้น (เราเพิ่มใหม่ / เราแก้หลังเขาลบ) → เก็บของเรา
+ *   - มีแต่ฝั่งเขา: เคยมีใน base = เราลบ → ลบ · ไม่เคยมี = เขาเพิ่มใหม่ → เก็บ
+ *   - เส้นที่ปลายหายไป → ตัดทิ้ง
+ */
+export function mergeFlowScenes(base: FlowScene, mine: FlowScene, theirs: FlowScene): FlowScene {
+  const mergeList = <T extends { id: string }>(b: T[], m: T[], th: T[]): T[] => {
+    const bm = new Map(b.map((x) => [x.id, JSON.stringify(x)]));
+    const tm = new Map(th.map((x) => [x.id, x]));
+    const out: T[] = [];
+    const seen = new Set<string>();
+    for (const x of m) {
+      seen.add(x.id);
+      const baseSig = bm.get(x.id);
+      const untouched = baseSig !== undefined && baseSig === JSON.stringify(x);
+      const other = tm.get(x.id);
+      if (other) out.push(untouched ? other : x);
+      else if (!(baseSig !== undefined && untouched)) out.push(x);
+    }
+    for (const x of th) if (!seen.has(x.id) && !bm.has(x.id)) out.push(x);
+    return out;
+  };
+  const nodes = mergeList(base.nodes, mine.nodes, theirs.nodes);
+  const ids = new Set(nodes.map((n) => n.id));
+  const edges = mergeList(base.edges, mine.edges, theirs.edges).filter((e) => ids.has(e.source) && ids.has(e.target));
+  return { kind: "flowchart", v: 1, nodes, edges };
+}
+
+/** จุดต่อเส้นของกล่อง (พิกัดบนกระดาน) — ใช้ตอนวาดเส้นในรูปที่บันทึก */
+export function handlePoint(n: Pick<FlowSceneNode, "position" | "width" | "height">, h: string | null | undefined): { x: number; y: number; side: FlowHandle } {
+  const { x, y } = n.position; const w = n.width; const hh = n.height;
+  switch (h) {
+    case "t": return { x: x + w / 2, y, side: "t" };
+    case "b": return { x: x + w / 2, y: y + hh, side: "b" };
+    case "l": return { x, y: y + hh / 2, side: "l" };
+    default:  return { x: x + w, y: y + hh / 2, side: "r" };
+  }
+}
+
+/** กรอบที่ครอบทุกกล่อง (ใช้ตอนบันทึกเป็นรูป) */
+export function flowSceneBounds(s: FlowScene, pad = 40): { x: number; y: number; w: number; h: number } {
+  if (!s.nodes.length) return { x: 0, y: 0, w: 2 * pad, h: 2 * pad };
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const n of s.nodes) {
+    x0 = Math.min(x0, n.position.x); y0 = Math.min(y0, n.position.y);
+    x1 = Math.max(x1, n.position.x + n.width); y1 = Math.max(y1, n.position.y + n.height);
+  }
+  return { x: x0 - pad, y: y0 - pad, w: x1 - x0 + 2 * pad, h: y1 - y0 + 2 * pad };
+}
+
+/** แยกข้อความในกล่อง: บรรทัดแรก = หัว (ตัวหนา) · ที่เหลือ = คำอธิบาย (ตัวเล็ก) */
+export function splitFlowLabel(label: string): { title: string; sub: string } {
+  const [title = "", ...rest] = (label ?? "").split("\n");
+  return { title, sub: rest.join("\n") };
+}

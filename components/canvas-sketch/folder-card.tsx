@@ -3,7 +3,7 @@
 // ============================================================
 // การ์ดโฟลเดอร์บนกระดานวาด (ของกลาง) — ดับเบิลคลิกการ์ด = เปิดโฟลเดอร์ใน File Explorer
 //
-// ใช้ที่: กระดานแคมเปญ (/tasks/campaigns/[id]) · แผนผังการเก็บไฟล์ (/master/storage-plan)
+// ใช้ที่: กระดานแคมเปญ (/tasks/campaigns/[id]) · กระดาน flowchart กลาง (components/flowchart-board → แผนผังการเก็บไฟล์)
 // ประกอบด้วย 3 ชิ้น:
 //   folderCardSkeleton(f)  → โครงการ์ด Excalidraw (ส่งเข้า CanvasSketchControls.insert)
 //   openCanvasFolder(path) → เปิดโฟลเดอร์ผ่าน erpfolder: (ลง .reg ครั้งเดียวต่อเครื่อง) + คัดลอก path สำรอง

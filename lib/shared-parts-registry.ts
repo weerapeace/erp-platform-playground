@@ -77,6 +77,7 @@ export const SAME_JOB_LABEL: Record<string, string> = {
   "file-field": "ช่องไฟล์ในฟอร์ม",
   "markup": "วาดรูปทรง / ข้อความบนรูป",
   "image-box": "ลากกรอบ / จุดบนรูป",
+  "drawing-board": "กระดานวาด / แผนผัง",
 };
 
 /**
@@ -101,6 +102,7 @@ export const SAME_JOB_VERDICT: Record<string, { verdict: JobVerdict; why: string
   "markup": { verdict: "merge", why: "ทั้งคู่วาดรูปทรง/ข้อความบนรูป ตัวกลางที่เลือกไว้คือกระดานวาดของใบงานออกแบบ · งานใหญ่ ต้องลองกับรูปสินค้าจริงก่อน" },
   "image-box": { verdict: "merge", why: "ทั้งคู่ลากกรอบบนรูปเป็น % ของรูป · ตัวหลักต้องเพิ่มทรงกรอบ (วงรี/หัวใจ) ก่อน กรอบบนรูปถึงย้ายมาได้" },
   "line-items": { verdict: "keep", why: "ตารางขายมีส่วนลด ภาษี สีของสินค้า เฉพาะเอกสารขาย · ถ้าจะเปลี่ยนหน้าตาตารางขายต้องถามเจ้าของก่อน" },
+  "drawing-board": { verdict: "keep", why: "เจ้าของเลือกเอง (2026-11-08): กระดานวาดอิสระ (Excalidraw) ไว้วางรูป/การ์ด/วาดมือ · กระดาน flowchart (React Flow) ไว้ผังกล่องต่อเส้นที่เส้นติดกล่องเสมอ · เก็บตารางเดียวกันแต่รูปแบบข้อมูลคนละแบบ ย้ายข้ามกันไม่ได้" },
 };
 
 export const SHARED_PARTS: SharedPart[] = [
@@ -1132,7 +1134,17 @@ export const SHARED_PARTS: SharedPart[] = [
     key: "canvas-sketch", label: "กระดานวาด", code: "CanvasSketch", category: "feature",
     source: { path: "components/canvas-sketch" },
     what: "กระดานแบบ miro วางรูป กล่อง ลูกศร ข้อความ วาดอิสระ · มีการ์ดโฟลเดอร์ (folder-card) ดับเบิลคลิกเปิดโฟลเดอร์ในเครื่อง",
-    doc: "canvas-sketch.md",
+    when: "งานที่ต้องวาดมือ แปะรูป วางการ์ดสินค้า/งาน/คอนเทนต์ หรือจัดโซนอิสระ (กระดานแคมเปญ · ใบงานออกแบบ · บอร์ดจ่ายงาน)",
+    notWhen: "ผังขั้นตอน/ผังตัดสินใจแบบกล่องต่อเส้น → ใช้กระดาน flowchart (FlowchartBoard)",
+    doc: "canvas-sketch.md", sameJob: "drawing-board", primary: true,
+  },
+  {
+    key: "flowchart-board", label: "กระดาน flowchart", code: "FlowchartBoard", category: "feature",
+    source: { path: "components/flowchart-board" },
+    what: "ผังกล่องต่อเส้นแบบ flowchart: เริ่ม/จบ ขั้นตอน คำถาม ใช่/ไม่ใช่ ที่เก็บ โฟลเดอร์ โน้ต · เส้นติดกล่องเสมอ หักมุมเอง · บันทึกอัตโนมัติ · บันทึกเป็นรูป",
+    when: "ผังขั้นตอนงาน ผังตัดสินใจ ผังว่าอะไรไปเก็บที่ไหน (แผนผังการเก็บไฟล์)",
+    notWhen: "วาดมือ แปะรูป วางการ์ดสินค้า → ใช้กระดานวาด (CanvasSketch) · ผังที่ระบบสร้างจากโค้ดเอง → ใช้แผนผังการทำงาน (flow-map)",
+    doc: "flowchart-board.md", sameJob: "drawing-board",
   },
   {
     key: "team-plan", label: "แผนงานทีม", code: "TeamPlan", category: "feature",

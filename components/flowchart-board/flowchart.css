@@ -1,0 +1,17 @@
+/* กระดาน flowchart กลาง — จุดต่อเส้น / กรอบย่อขยาย (ใช้คู่กับ @xyflow/react/dist/style.css) */
+.fc-board .react-flow__handle.fc-h {
+  width: 11px; height: 11px; background: #fff; border: 1.5px solid #64748b; border-radius: 999px;
+  opacity: 0; transition: opacity .12s ease;
+}
+.fc-board .react-flow__node:hover .fc-h,
+.fc-board .react-flow__node.selected .fc-h,
+.fc-board .react-flow__handle.connectingto,
+.fc-board .react-flow__handle.connectingfrom { opacity: 1; }
+.fc-board .react-flow__handle.fc-h:hover,
+.fc-board .react-flow__handle.connectingto { background: #7c3aed; border-color: #7c3aed; }
+.fc-board.fc-readonly .react-flow__handle.fc-h { opacity: 0 !important; pointer-events: none; }
+.fc-board .react-flow__node.selected .fc-node { outline: 2px solid rgba(124, 58, 237, .35); outline-offset: 3px; }
+.fc-board .react-flow__node { cursor: grab; }
+.fc-board.fc-readonly .react-flow__node { cursor: default; }
+.fc-board .fc-resize-line { border-color: rgba(124, 58, 237, .5) !important; }
+.fc-board .fc-resize-handle { width: 8px !important; height: 8px !important; background: #7c3aed !important; border: 1px solid #fff !important; border-radius: 2px; }

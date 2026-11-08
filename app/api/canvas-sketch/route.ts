@@ -5,6 +5,7 @@
  * PUT /api/canvas-sketch { entity_type, entity_id, scene, preview_png_base64? }
  *     → upsert กระดาน + อัปโหลดภาพถ่าย PNG ลง R2 (key ตายตัวต่อเอกสาร — ทับของเก่า ไม่มีไฟล์ขยะ)
  *
+ * ใช้โดย: กระดานวาด CanvasSketch (scene Excalidraw) + กระดาน flowchart FlowchartBoard (scene kind="flowchart") — API ไม่สนรูปแบบ scene
  * สิทธิ์: อ่าน products.view / เขียน products.edit (โมดูลอื่นมาใช้แล้วต้องการสิทธิ์ละเอียดกว่านี้ ค่อยเพิ่ม param)
  * audit → audit_logs action=canvas_update
  */
@@ -27,8 +28,10 @@ const PERM: Record<string, { view: string; edit: string }> = {
   // กระดานแคนวาสของบอร์ดจ่ายงาน (1 กระดาน = 1 แผนจ่ายงาน) — ใครดู/แก้สินค้าได้ ก็วาดบนกระดานได้
   // (การย้ายงานเข้าโต๊ะจริง ๆ ยังต้องผ่าน API แผนจ่ายงานที่ขอสิทธิ์ work_board.dispatch อีกชั้น)
   work_board:       { view: "products.view", edit: "products.edit" },
-  // แผนผังการเก็บไฟล์ (วาดเอง · หน้า /master/storage-plan · กระดานเดียว entity_id="main")
-  // ดูได้ตามสิทธิ์คลังไฟล์ · แก้ได้เฉพาะคนจัดการคลัง (ชุดเดียวกับหน้ากฎที่เก็บไฟล์)
+  // แผนผังการเก็บไฟล์ (หน้า /master/storage-plan · entity_id="main") — ดูได้ตามสิทธิ์คลังไฟล์ · แก้ได้เฉพาะคนจัดการคลัง
+  // storage_plan_flow = ตัวปัจจุบัน (กระดาน flowchart กลาง FlowchartBoard · scene.kind="flowchart")
+  // storage_plan = รุ่นแรก (Excalidraw) ใช้ได้ครึ่งวัน มีแค่แม่แบบที่วางอัตโนมัติ — เก็บสิทธิ์ไว้ให้ข้อมูลเดิมยังเปิดอ่านได้
+  storage_plan_flow:{ view: "assets.view",   edit: "assets.manage" },
   storage_plan:     { view: "assets.view",   edit: "assets.manage" },
 };
 const permFor = (entityType: string) => PERM[entityType] ?? { view: "products.view", edit: "products.edit" };

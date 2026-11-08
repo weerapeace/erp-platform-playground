@@ -57,7 +57,7 @@ ref.current?.insert([
 - `<FolderCardModal open onClose onPlace={(skeletons) => controls.insert(skeletons)} />` — ป๊อปกรอกชื่อ + path แล้วคืนโครงการ์ดให้ผู้เรียกวางเอง
 - `folderCardSkeleton({ path, label })` — โครงการ์ด (customData `kind: "folder"`)
 - `openCanvasFolder(path)` — เรียกใน `onCardOpen` เมื่อ `data.kind === "folder"` → เปิด File Explorer ผ่าน `erpfolder:` (ลง `/erp-open-folder.reg` ครั้งเดียวต่อเครื่อง) + คัดลอก path สำรอง · กันเตือน "Leave site?" ให้เอง (suppressUnload)
-- ใช้ที่: กระดานแคมเปญ (`/tasks/campaigns/[id]`) · แผนผังการเก็บไฟล์ (`/master/storage-plan`)
+- ใช้ที่: กระดานแคมเปญ (`/tasks/campaigns/[id]`) · กระดาน flowchart กลาง (`components/flowchart-board` — กล่องโฟลเดอร์ใช้ป๊อป + openCanvasFolder ตัวเดียวกัน)
 
 ## ฝังลิงก์ YouTube / Pinterest / TikTok
 
@@ -74,5 +74,5 @@ ref.current?.insert([
 - ขนาดกระดานจำกัด 8MB (รูปที่วางฝังใน scene) — วางรูปใหญ่หลายรูปมากๆ จะเตือน
 - ไม่มีตารางสำเร็จรูป (วาดกล่องเรียงแทน)
 - ตัวเสริม: `@excalidraw/excalidraw` v0.18 — โหลดเฉพาะหน้าที่ใช้ (dynamic import) ไม่ถ่วงหน้าอื่น
-- สิทธิ์ API เลือกตาม entity_type ฝั่ง server (map `PERM` ใน route): `design_sheet`→products.* · `creative_board`→tasks.* · `work_board`→products.* · `storage_plan`→ดู assets.view / แก้ assets.manage · อื่นๆ default products.* (เพิ่ม entity ใหม่ก็เติม map — client ระบุสิทธิ์เองไม่ได้ กันสวมสิทธิ์ข้ามโมดูล)
+- สิทธิ์ API เลือกตาม entity_type ฝั่ง server (map `PERM` ใน route): `design_sheet`→products.* · `creative_board`→tasks.* · `work_board`→products.* · `storage_plan_flow` (กระดาน flowchart แผนผังการเก็บไฟล์) / `storage_plan` (รุ่นแรก Excalidraw)→ดู assets.view / แก้ assets.manage · อื่นๆ default products.* (เพิ่ม entity ใหม่ก็เติม map — client ระบุสิทธิ์เองไม่ได้ กันสวมสิทธิ์ข้ามโมดูล)
 - ลบเอกสารแม่ ไม่ได้ลบกระดานอัตโนมัติ (entity_id เป็น text ไม่มี FK) — ยอมรับได้: กระดานเก่าไม่โผล่ที่ไหน
