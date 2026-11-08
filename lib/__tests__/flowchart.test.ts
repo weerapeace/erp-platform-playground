@@ -184,3 +184,25 @@ describe("คัดลอก / วาง", () => {
     expect(textToFlowNode("   \n  ", { x: 0, y: 0 }, th)).toBeNull();
   });
 });
+
+describe("กล่องไฟล์ (ประเภทไฟล์)", () => {
+  it("โหลด: เก็บนามสกุลที่ทำความสะอาดแล้ว · กล่องชนิด file ใช้ได้", () => {
+    const s = parseFlowScene({ kind: "flowchart", nodes: [{ id: "f", type: "file", position: { x: 0, y: 0 }, data: { label: "รูปกล้อง", exts: ["CR2", "jpeg", "cr2", 9] } }], edges: [] })!;
+    expect(s.nodes[0].type).toBe("file");
+    expect(s.nodes[0].data.exts).toEqual(["cr2", "jpg"]);
+    const plain = parseFlowScene({ kind: "flowchart", nodes: [{ id: "a", type: "step", position: { x: 0, y: 0 }, data: { label: "A", exts: [] } }], edges: [] })!;
+    expect(plain.nodes[0].data).toEqual({ label: "A" });
+  });
+  it("สร้างกล่องไฟล์: ขนาดโตตามจำนวนไอคอน", () => {
+    const one = makeFlowNode("file", { x: 0, y: 0 }, th, { label: "PDF", exts: ["pdf"] });
+    const many = makeFlowNode("file", { x: 0, y: 0 }, th, { label: "งานออกแบบ", exts: ["psd", "ai", "eps", "svg", "indd", "pdf"] });
+    expect(one.data.exts).toEqual(["pdf"]);
+    expect(many.width).toBeGreaterThanOrEqual(one.width);
+    expect(many.height).toBeGreaterThan(one.height);
+    expect(many.height % 20).toBe(0);
+  });
+  it("คัดลอกเป็นข้อความ: ใส่นามสกุลในวงเล็บ", () => {
+    const f = makeFlowNode("file", { x: 0, y: 0 }, th, { label: "รูปจากกล้อง", exts: ["cr2", "jpg"] });
+    expect(flowClipText(copyFlowSelection(S([f]), [f.id])!)).toBe("รูปจากกล้อง (CR2, JPG)");
+  });
+});

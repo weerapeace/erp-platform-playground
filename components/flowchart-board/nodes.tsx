@@ -6,6 +6,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position, getSmoothStepPath, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import { Icon } from "@/components/icon";
+import { FileTypeIcon } from "@/components/file-type-icon";
 import { FLOW_COLORS, FLOW_KIND_META, FLOW_PALETTE, nodeColor, splitFlowLabel, type FlowColor, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
 
 export type FlowRFNode = Node<FlowNodeData, FlowKind>;
@@ -15,6 +16,8 @@ export type FlowBoardActions = {
   readOnly: boolean;
   t: (th: string, en: string) => string;
   updateData: (id: string, patch: Partial<FlowNodeData>) => void;
+  /** กล่อง "ไฟล์": เปิดป๊อปเลือกประเภทไฟล์ (แทนช่องพิมพ์ข้อความ) */
+  editFileTypes: (id: string) => void;
   /** กล่องที่เลือกอยู่ (ไว้ซ่อนแถบเครื่องมือรายกล่องตอนเลือกหลายกล่อง — ใช้แถบกลุ่มแทน) */
   selectedIds: string[];
   setColor: (ids: string[], color: FlowColor) => void;
@@ -90,7 +93,7 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
           style={{ background: FLOW_PALETTE[c].fill, borderColor: FLOW_PALETTE[c].stroke }} />
       ))}
       <span className="mx-1 h-5 w-px bg-slate-200" />
-      {single && <button type="button" className={btn} onClick={single.onEdit} title={t("แก้ข้อความ (หรือดับเบิลคลิกกล่อง)", "Edit text (or double-click)")}><Icon value="i:pencil" />{t("แก้", "Edit")}</button>}
+      {single && <button type="button" className={btn} onClick={single.onEdit} title={single.kind === "file" ? t("เลือกประเภทไฟล์ / แก้ชื่อ (หรือดับเบิลคลิกกล่อง)", "Choose file types / rename (or double-click)") : t("แก้ข้อความ (หรือดับเบิลคลิกกล่อง)", "Edit text (or double-click)")}><Icon value="i:pencil" />{t("แก้", "Edit")}</button>}
       <button type="button" className={btn} onClick={() => copyNodes(ids)} title={t("คัดลอก (Ctrl+C) แล้วไปวางที่อื่นด้วย Ctrl+V — วางในกระดานหน้าอื่นได้", "Copy (Ctrl+C), then paste elsewhere with Ctrl+V")}><Icon value="i:copy" />{t("คัดลอก", "Copy")}</button>
       <button type="button" className={btn} onClick={() => duplicateNodes(ids)} title={t("ทำซ้ำข้าง ๆ ทันที (Ctrl+D)", "Duplicate right here (Ctrl+D)")}><Icon value="i:stack-2" />{t("ทำซ้ำ", "Duplicate")}</button>
       {single?.kind === "folder" && single.data.path && <button type="button" className={btn} onClick={() => openFolder(single.data.path!)}><Icon value="i:folder-open" />{t("เปิด", "Open")}</button>}
@@ -119,19 +122,20 @@ function ShapeBg({ kind, color }: { kind: FlowKind; color: FlowColor }) {
 
 /** กล่องทุกชนิด (ชนิดดูจาก type ของโหนด) */
 export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>) {
-  const { readOnly, t, updateData, openFolder, selectedIds } = useBoard();
+  const { readOnly, t, updateData, openFolder, selectedIds, editFileTypes } = useBoard();
   const kind = type as FlowKind;
   const onlyMe = selected && selectedIds.length === 1;   // เลือกหลายกล่อง → ใช้แถบกลุ่มแทน
   const color = nodeColor(kind, data);
   const pal = FLOW_PALETTE[color];
   const [editing, setEditing] = useState(false);
   const meta = FLOW_KIND_META[kind];
+  const startEdit = () => (kind === "file" ? editFileTypes(id) : setEditing(true));   // กล่องไฟล์ = ป๊อปเลือกประเภท
 
   const boxStyle: React.CSSProperties =
     kind === "question" || kind === "storage" ? {}
-    : { background: pal.fill, border: `2px solid ${pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : 10 };
+    : { background: pal.fill, border: `2px solid ${pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : kind === "file" ? 12 : 10 };
   // ระยะขอบข้อความ (ข้าวหลามตัด/ทรงกระบอก ต้องเว้นมากกว่า)
-  const pad = kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
+  const pad = kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : kind === "file" ? "8px 10px" : "6px 12px";
 
   let content: ReactNode;
   if (kind === "folder") {
@@ -144,6 +148,15 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
         </div>
       </div>
     );
+  } else if (kind === "file") {
+    const exts = data.exts?.length ? data.exts : [""];
+    const size = exts.length > 4 ? 30 : 36;
+    content = (
+      <div className="pointer-events-none flex w-full flex-col items-center gap-1.5">
+        <div className="flex flex-wrap justify-center gap-1">{exts.map((e, i) => <FileTypeIcon key={e || i} ext={e} size={size} title="" />)}</div>
+        <LabelText label={data.label} color={color} />
+      </div>
+    );
   } else {
     content = <LabelText label={data.label} color={color} align={kind === "note" ? "left" : "center"} />;
   }
@@ -154,7 +167,7 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
         lineClassName="fc-resize-line" handleClassName="fc-resize-handle" />}
       {!readOnly && (
         <NodeToolbar isVisible={onlyMe && !editing} position={Position.Top} offset={10}>
-          <FlowTools ids={[id]} single={{ kind, data, onEdit: () => setEditing(true) }} />
+          <FlowTools ids={[id]} single={{ kind, data, onEdit: startEdit }} />
         </NodeToolbar>
       )}
       <div
@@ -164,7 +177,7 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
         onDoubleClick={(e) => {
           if (kind === "folder") { if (data.path) openFolder(data.path); return; }   // โฟลเดอร์: ดับเบิลคลิก = เปิด (แก้ผ่านปุ่ม "แก้")
           if (readOnly) return;
-          e.stopPropagation(); setEditing(true);
+          e.stopPropagation(); startEdit();
         }}
       >
         <ShapeBg kind={kind} color={color} />

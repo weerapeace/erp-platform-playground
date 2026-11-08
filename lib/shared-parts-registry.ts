@@ -606,8 +606,16 @@ export const SHARED_PARTS: SharedPart[] = [
     source: { path: "components/icon" },
     what: "วาดไอคอนจากทะเบียนไอคอน แอดมินเปลี่ยนชุด/สีได้ที่ /admin/icons",
     when: "ทุกไอคอนในหน้าจอ",
-    notWhen: "ห้ามใช้อีโมจิในหน้าใหม่",
+    notWhen: "ห้ามใช้อีโมจิในหน้าใหม่ · บอกชนิดไฟล์ (JPG/PSD/PDF) → ใช้ไอคอนประเภทไฟล์ (FileTypeIcon)",
     doc: "icon-system.md",
+  },
+  {
+    key: "file-type-icon", label: "ไอคอนประเภทไฟล์", code: "FileTypeIcon", category: "file",
+    source: { path: "components/file-type-icon" },
+    what: "ไอคอนกระดาษพับมุม + แถบสีบอกนามสกุล (JPG · CR2 · PSD · AI · PDF · DXF · SEW ... 65 ชนิด 13 กลุ่ม) + ป๊อปเลือกประเภทไฟล์ (FileTypePickerModal) · ทะเบียนนามสกุล/สีอยู่ lib/file-types",
+    when: "บอกว่าไฟล์ชนิดไหนด้วยภาพ: กล่องไฟล์ในกระดาน flowchart · รายการไฟล์แนบ · คลังไฟล์ · รายการไฟล์ใน Drive",
+    notWhen: "ไอคอนเมนู/ปุ่มทั่วไป → ใช้ไอคอนกลาง (Icon) · รูปตัวอย่างของไฟล์จริง → ใช้ภาพ thumbnail",
+    doc: "file-type-icon.md",
   },
   {
     key: "i18n", label: "สลับภาษา ไทย / อังกฤษ", code: "useT", category: "system",

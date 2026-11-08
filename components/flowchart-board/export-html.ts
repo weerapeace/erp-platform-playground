@@ -3,6 +3,7 @@
 // สี/รูปทรงอ่านจาก lib/flowchart ชุดเดียวกับบนจอ · เส้นใช้สูตรหักมุมเดียวกับ React Flow (getSmoothStepPath)
 
 import { Position, getSmoothStepPath } from "@xyflow/react";
+import { fileTypeSvg } from "@/lib/file-types";
 import { FLOW_PALETTE, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -14,12 +15,19 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
   const p = FLOW_PALETTE[color];
   const x = n.position.x - ox, y = n.position.y - oy, w = n.width, h = n.height;
   const { title, sub } = splitFlowLabel(n.data.label);
-  const text = n.type === "folder"
+  const labelHtml = `<div style="width:100%;text-align:${n.type === "note" ? "left" : "center"};white-space:pre-wrap;word-break:break-word;line-height:1.35"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(title) || "&nbsp;"}</div>${sub ? `<div style="font-size:11px;margin-top:2px;color:${p.sub}">${esc(sub)}</div>` : ""}</div>`;
+  const exts = n.data.exts?.length ? n.data.exts : [""];
+  const icons = n.type === "file"
+    ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px;line-height:0">${exts.map((e) => fileTypeSvg(e, exts.length > 4 ? 30 : 36)).join("")}</div>`
+    : "";
+  const text = n.type === "file"
+    ? `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;width:100%">${icons}${labelHtml}</div>`
+    : n.type === "folder"
     ? `<div style="text-align:left;min-width:0"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(n.data.label || "—")}</div>${n.data.path ? `<div style="font-size:10px;color:${p.sub};word-break:break-all">${esc(n.data.path)}</div>` : ""}</div>`
-    : `<div style="width:100%;text-align:${n.type === "note" ? "left" : "center"};white-space:pre-wrap;word-break:break-word;line-height:1.35"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(title) || "&nbsp;"}</div>${sub ? `<div style="font-size:11px;margin-top:2px;color:${p.sub}">${esc(sub)}</div>` : ""}</div>`;
+    : labelHtml;
   let shape = "";
-  let box = `background:${p.fill};border:2px solid ${p.stroke};border-radius:${n.type === "start" ? 999 : n.type === "note" ? 4 : 10}px;`;
-  let pad = n.type === "note" ? "10px 12px" : "6px 12px";
+  let box = `background:${p.fill};border:2px solid ${p.stroke};border-radius:${n.type === "start" ? 999 : n.type === "note" ? 4 : n.type === "file" ? 12 : 10}px;`;
+  let pad = n.type === "note" ? "10px 12px" : n.type === "file" ? "8px 10px" : "6px 12px";
   if (n.type === "question") {
     box = ""; pad = `${Math.round(h * 0.18)}px ${Math.round(w * 0.22)}px`;
     shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><polygon points="50,1 99,50 50,99 1,50" fill="${p.fill}" stroke="${p.stroke}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;

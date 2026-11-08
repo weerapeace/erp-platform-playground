@@ -3,7 +3,7 @@
 // ============================================================
 // FlowchartBoard — กระดาน flowchart กลาง (ของกลาง · ใช้ React Flow / @xyflow/react)
 //
-// กล่อง 6 ชนิด (เริ่ม/จบ · ขั้นตอน · คำถาม ใช่/ไม่ใช่ · ที่เก็บ · โฟลเดอร์ · โน้ต) + เส้นต่อหักมุมอัตโนมัติ
+// กล่อง 7 ชนิด (เริ่ม/จบ · ขั้นตอน · คำถาม ใช่/ไม่ใช่ · ที่เก็บ · ไฟล์ (ไอคอนประเภทไฟล์กลาง) · โฟลเดอร์ · โน้ต) + เส้นต่อหักมุมอัตโนมัติ
 // เส้นติดกล่องเสมอ · กล่องเข้าแถวตามตาราง · ย่อขยายกล่องได้ · เปลี่ยนสีได้ · ย้อนกลับ/ทำซ้ำ (Ctrl+Z / Ctrl+Y)
 // คัดลอก/ตัด/วาง (Ctrl+C / X / V · วางข้ามหน้า/ข้ามแท็บได้ · วางข้อความจากที่อื่น = กล่องใหม่) · ทำซ้ำ Ctrl+D · เลือกทั้งหมด Ctrl+A
 // เลือกหลายกล่อง: Shift/Ctrl+คลิก หรือ Shift+ลากคลุม → แถบเครื่องมือกลุ่ม (สี · คัดลอก · ทำซ้ำ · ลบ)
@@ -29,13 +29,14 @@ import { usePushToast } from "@/components/toast";
 import { LoadingState, ErrorState, EmptyState } from "@/components/state-views";
 import { askText } from "@/components/modal/ask-dialog";
 import { FolderCardModal, openCanvasFolder } from "@/components/canvas-sketch/folder-card";
+import { FileTypePickerModal } from "@/components/file-type-icon";
 import { apiFetch } from "@/lib/api";
 import { htmlToPngBlob, fitImageScale, imageFileName } from "@/lib/html-to-png";
 import { downloadBlob } from "@/lib/image-clipboard";
 import {
   EMPTY_FLOW_SCENE, FLOW_CLIP_MIME, FLOW_KINDS, FLOW_KIND_META, GRID, autoEdgeLabel, cloneFlowSceneAt, copyFlowSelection, flowClipText,
   flowSceneSig, makeFlowNode, mergeFlowScenes, newFlowId, parseFlowClip, parseFlowScene, placeFlowClip, serializeFlowClip, textToFlowNode,
-  toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
+  fileNodeSize, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
 } from "@/lib/flowchart";
 import { FlowBoardCtx, FlowEdgeView, FlowNodeView, FlowTools, type FlowBoardActions, type FlowRFNode } from "./nodes";
 import { flowSceneToHtml } from "./export-html";
@@ -109,6 +110,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [folderOpen, setFolderOpen] = useState(false);
+  const [filePick, setFilePick] = useState<{ id: string | null } | null>(null);   // ป๊อปเลือกประเภทไฟล์ (id = แก้กล่องเดิม · null = เพิ่มใหม่)
   const [exporting, setExporting] = useState(false);
   const [, setHistTick] = useState(0);
   const [clipReady, setClipReady] = useState(false);          // มีกล่องที่คัดลอกไว้ (โชว์ปุ่ม "วาง")
@@ -430,6 +432,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const selectedIds = useMemo(() => (selKey ? selKey.split("|") : []), [selKey]);
   const actions = useMemo<FlowBoardActions>(() => ({
     readOnly, t, openFolder, selectedIds,
+    editFileTypes: (id) => setFilePick({ id }),
     copyNodes: (ids) => opsRef.current.copyNodes(ids),
     duplicateNodes: (ids) => opsRef.current.duplicateNodes(ids),
     removeNodes: (ids) => opsRef.current.removeNodes(ids),
@@ -476,7 +479,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             const m = FLOW_KIND_META[k];
             return (
               <button key={k} type="button" className={tb} title={t(m.hintTh, m.hintEn)}
-                onClick={() => (k === "folder" ? setFolderOpen(true) : addNode(k))}>
+                onClick={() => (k === "folder" ? setFolderOpen(true) : k === "file" ? setFilePick({ id: null }) : addNode(k))}>
                 <Icon value={m.icon} />{t(m.th, m.en)}
               </button>
             );
@@ -541,6 +544,21 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
 
       <FolderCardModal open={folderOpen} onClose={() => setFolderOpen(false)}
         onPlace={(_skeletons, info) => { addNode("folder", { label: info.label, path: info.path }); setFolderOpen(false); }} />
+
+      {/* กล่อง "ไฟล์": เลือกประเภทไฟล์ (ไอคอนกลาง lib/file-types) — แก้กล่องเดิม = ขยายกล่องให้พอดีไอคอน (ไม่ย่อ) */}
+      <FileTypePickerModal open={!!filePick} onClose={() => setFilePick(null)}
+        initial={filePick?.id ? (() => { const n = nodes.find((x) => x.id === filePick.id); return n ? { exts: n.data.exts, label: n.data.label } : undefined; })() : undefined}
+        confirmText={filePick?.id ? t("ใช้ประเภทนี้", "Apply") : undefined}
+        onDone={(exts, label) => {
+          const id = filePick?.id;
+          setFilePick(null);
+          if (!id) { addNode("file", { label, exts }); return; }
+          const need = fileNodeSize(exts.length);
+          setNodes((ns) => ns.map((n) => (n.id !== id ? n : {
+            ...n, data: { ...n.data, label, exts },
+            width: Math.max(n.width ?? n.measured?.width ?? 0, need.w), height: Math.max(n.height ?? n.measured?.height ?? 0, need.h),
+          })));
+        }} />
     </FlowBoardCtx.Provider>
   );
 }

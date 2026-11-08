@@ -6,7 +6,9 @@
 // บันทึกผ่าน /api/canvas-sketch (ตารางกลาง erp_canvas_sketches) โดย scene = FlowScene (kind: "flowchart")
 // ============================================================
 
-export const FLOW_KINDS = ["start", "step", "question", "storage", "folder", "note"] as const;
+import { cleanExtList } from "./file-types";
+
+export const FLOW_KINDS = ["start", "step", "question", "storage", "file", "folder", "note"] as const;
 export type FlowKind = (typeof FLOW_KINDS)[number];
 
 export const FLOW_COLORS = ["slate", "violet", "emerald", "blue", "amber", "rose", "cyan"] as const;
@@ -29,11 +31,13 @@ export const FLOW_KIND_META: Record<FlowKind, { w: number; h: number; color: Flo
   step:     { w: 170, h: 64,  color: "slate",   th: "ขั้นตอน",      en: "Step",        hintTh: "สิ่งที่ต้องทำ 1 อย่าง", hintEn: "One thing to do", icon: "i:list" },
   question: { w: 190, h: 104, color: "amber",   th: "คำถาม ใช่/ไม่ใช่", en: "Yes/no question", hintTh: "แยกทาง — ลากเส้นออก 2 เส้น ระบบใส่ ใช่ / ไม่ใช่ ให้", hintEn: "Branch — draw 2 lines out, labelled yes / no", icon: "i:help-circle" },
   storage:  { w: 180, h: 96,  color: "violet",  th: "ที่เก็บ",      en: "Storage",     hintTh: "ที่เก็บไฟล์/ข้อมูล เช่น R2 · Supabase · Drive", hintEn: "Where files/data live, e.g. R2 · Supabase · Drive", icon: "i:database" },
+  file:     { w: 200, h: 120, color: "slate",   th: "ไฟล์",         en: "File",        hintTh: "ประเภทไฟล์ เช่น JPG · CR2 · PSD · AI · PDF (เลือกได้หลายชนิด)", hintEn: "File types, e.g. JPG · CR2 · PSD · AI · PDF (pick several)", icon: "i:files" },
   folder:   { w: 220, h: 64,  color: "cyan",    th: "โฟลเดอร์",     en: "Folder",      hintTh: "ทางลัด ดับเบิลคลิกเปิดโฟลเดอร์ในเครื่อง", hintEn: "Shortcut — double-click opens a local folder", icon: "i:folder" },
   note:     { w: 220, h: 110, color: "amber",   th: "โน้ต",         en: "Note",        hintTh: "จดอธิบายเพิ่ม", hintEn: "Extra notes", icon: "i:notes" },
 };
 
-export type FlowNodeData = { label: string; color?: FlowColor; path?: string };
+/** exts = นามสกุลไฟล์ของกล่อง "ไฟล์" (เช่น ["cr2","jpg"]) — ไอคอน/สีจาก lib/file-types */
+export type FlowNodeData = { label: string; color?: FlowColor; path?: string; exts?: string[] };
 export type FlowSceneNode = { id: string; type: FlowKind; position: { x: number; y: number }; width: number; height: number; data: FlowNodeData };
 export type FlowSceneEdge = { id: string; source: string; target: string; sourceHandle: string | null; targetHandle: string | null; label: string };
 export type FlowScene = { kind: "flowchart"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[] };
@@ -73,6 +77,8 @@ export function parseFlowScene(raw: unknown): FlowScene | null {
     const data: FlowNodeData = { label: str(d.label) };
     if (isColor(d.color)) data.color = d.color;
     if (typeof d.path === "string" && d.path) data.path = d.path;
+    const exts = cleanExtList(d.exts);
+    if (exts.length) data.exts = exts;
     nodes.push({ id, type: o.type, position: { x: num(pos.x, 0), y: num(pos.y, 0) }, width: Math.max(40, num(o.width, meta.w)), height: Math.max(30, num(o.height, meta.h)), data });
     ids.add(id);
   }
@@ -118,14 +124,24 @@ export function autoEdgeLabel(sourceKind: FlowKind | undefined, existingLabels: 
 
 export const newFlowId = (prefix: "n" | "e"): string => `${prefix}-${Math.random().toString(36).slice(2, 9)}${Date.now().toString(36).slice(-3)}`;
 
+/** ขนาดกล่อง "ไฟล์" ที่พอดีกับจำนวนไอคอน (แถวละ 4 ไอคอน) */
+export function fileNodeSize(count: number): { w: number; h: number } {
+  const n = Math.max(1, count);
+  const perRow = Math.min(4, n);
+  const rows = Math.ceil(n / 4);
+  return { w: Math.max(FLOW_KIND_META.file.w, snap(perRow * 44 + 40)), h: Math.max(FLOW_KIND_META.file.h, snap(64 + rows * 46)) };
+}
+
 /** สร้างกล่องใหม่ตามชนิด (ตำแหน่งชิดตาราง) */
 export function makeFlowNode(kind: FlowKind, at: { x: number; y: number }, t: (th: string, en: string) => string, data?: Partial<FlowNodeData>): FlowSceneNode {
   const meta = FLOW_KIND_META[kind];
+  const exts = kind === "file" ? cleanExtList(data?.exts) : [];
+  const { w, h } = kind === "file" ? fileNodeSize(exts.length) : { w: meta.w, h: meta.h };
   return {
     id: newFlowId("n"), type: kind,
-    position: { x: snap(at.x - meta.w / 2), y: snap(at.y - meta.h / 2) },
-    width: meta.w, height: meta.h,
-    data: { label: data?.label ?? t(meta.th, meta.en), ...(data?.color ? { color: data.color } : {}), ...(data?.path ? { path: data.path } : {}) },
+    position: { x: snap(at.x - w / 2), y: snap(at.y - h / 2) },
+    width: w, height: h,
+    data: { label: data?.label ?? t(meta.th, meta.en), ...(data?.color ? { color: data.color } : {}), ...(data?.path ? { path: data.path } : {}), ...(exts.length ? { exts } : {}) },
   };
 }
 
@@ -223,7 +239,10 @@ export function copyFlowSelection(scene: FlowScene, nodeIds: Iterable<string>): 
 export function flowClipText(clip: FlowClip): string {
   return [...clip.nodes]
     .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
-    .map((n) => [n.data.label.split("\n").map((s) => s.trim()).filter(Boolean).join(" · "), n.data.path].filter(Boolean).join(" — "))
+    .map((n) => [
+      n.data.label.split("\n").map((s) => s.trim()).filter(Boolean).join(" · ") + (n.data.exts?.length ? ` (${n.data.exts.map((e) => e.toUpperCase()).join(", ")})` : ""),
+      n.data.path,
+    ].filter(Boolean).join(" — "))
     .filter(Boolean)
     .join("\n");
 }
