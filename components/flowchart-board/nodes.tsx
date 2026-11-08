@@ -8,6 +8,19 @@ import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position
 import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
 import { FLOW_COLORS, FLOW_KIND_META, FLOW_PALETTE, nodeColor, splitFlowLabel, type FlowColor, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
+import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
+
+/** ไอคอนที่เก็บ (Google Drive · R2 · NAS ...) — SVG จาก lib/storage-places (ตัวเดียวกับตอนบันทึกเป็นรูป) */
+function PlaceIcon({ place, size }: { place: string; size: number }) {
+  // key ผ่าน isPlaceKey แล้วตอนโหลด (lib/flowchart parseFlowScene) · SVG สร้างจากค่าคงที่ของเราเอง
+  return <span className="inline-block shrink-0 leading-[0]" style={{ width: size, height: size }} dangerouslySetInnerHTML={{ __html: storagePlaceSvg(place, size) }} />;
+}
+
+/** แถวไอคอนไฟล์เล็ก ๆ ใต้ชื่อกล่องที่เก็บ */
+function ExtRow({ exts, size }: { exts?: string[]; size: number }) {
+  if (!exts?.length) return null;
+  return <div className="flex flex-wrap justify-center gap-0.5">{exts.map((e) => <FileTypeIcon key={e} ext={e} size={size} title="" />)}</div>;
+}
 
 export type FlowRFNode = Node<FlowNodeData, FlowKind>;
 
@@ -16,8 +29,10 @@ export type FlowBoardActions = {
   readOnly: boolean;
   t: (th: string, en: string) => string;
   updateData: (id: string, patch: Partial<FlowNodeData>) => void;
-  /** กล่อง "ไฟล์": เปิดป๊อปเลือกประเภทไฟล์ (แทนช่องพิมพ์ข้อความ) */
+  /** กล่อง "ไฟล์" (และไฟล์ที่เก็บในกล่อง "ที่เก็บ"): เปิดป๊อปเลือกประเภทไฟล์ */
   editFileTypes: (id: string) => void;
+  /** กล่อง "ที่เก็บ": เปิดป๊อปเลือกไอคอนที่เก็บ (Google Drive · R2 · NAS ...) */
+  editPlace: (id: string) => void;
   /** กล่องที่เลือกอยู่ (ไว้ซ่อนแถบเครื่องมือรายกล่องตอนเลือกหลายกล่อง — ใช้แถบกลุ่มแทน) */
   selectedIds: string[];
   setColor: (ids: string[], color: FlowColor) => void;
@@ -51,7 +66,7 @@ function LabelText({ label, color, align = "center" }: { label: string; color: F
 }
 
 /** แก้ข้อความในกล่อง (ดับเบิลคลิก) — Enter = ขึ้นบรรทัด · Ctrl+Enter หรือคลิกข้างนอก = เสร็จ · Esc = ยกเลิก */
-function InlineEditor({ initial, onDone, folder }: { initial: FlowNodeData; onDone: (patch: Partial<FlowNodeData> | null) => void; folder?: boolean }) {
+function InlineEditor({ initial, onDone, folder, zone }: { initial: FlowNodeData; onDone: (patch: Partial<FlowNodeData> | null) => void; folder?: boolean; zone?: boolean }) {
   const { t } = useBoard();
   const [label, setLabel] = useState(initial.label);
   const [path, setPath] = useState(initial.path ?? "");
@@ -63,9 +78,9 @@ function InlineEditor({ initial, onDone, folder }: { initial: FlowNodeData; onDo
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); commit(); }
   };
   return (
-    <div className="nodrag nowheel nopan absolute inset-1 z-10 flex flex-col gap-1"
+    <div className={`nodrag nowheel nopan absolute z-10 flex flex-col gap-1 ${zone ? "left-2 top-1.5 h-9 w-[min(320px,90%)] pointer-events-auto" : "inset-1"}`}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as globalThis.Node | null)) commit(); }}>
-      <textarea ref={ref} value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={key} rows={folder ? 1 : 3}
+      <textarea ref={ref} value={label} onChange={(e) => setLabel(e.target.value)} onKeyDown={(e) => { key(e); if (zone && e.key === "Enter") { e.preventDefault(); commit(); } }} rows={folder || zone ? 1 : 3}
         placeholder={t("บรรทัดแรก = หัวข้อ · บรรทัดถัดไป = คำอธิบาย", "First line = title · next lines = details")}
         className="min-h-0 w-full flex-1 resize-none rounded-md border border-violet-300 bg-white px-1.5 py-1 text-[12px] text-slate-800 outline-none focus:ring-2 focus:ring-violet-200" />
       {folder && (
@@ -81,7 +96,7 @@ function InlineEditor({ initial, onDone, folder }: { initial: FlowNodeData; onDo
  *   เลือก 1 กล่อง = แถบของกล่องนั้น (ส่ง single) · เลือกหลายกล่อง = แถบกลุ่มอันเดียว (กระดานวางไว้เหนือกลุ่ม)
  */
 export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
-  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder } = useBoard();
+  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes } = useBoard();
   const cur = single ? nodeColor(single.kind, single.data) : null;
   const btn = "inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] text-slate-600 hover:bg-slate-100";
   return (
@@ -94,6 +109,12 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
       ))}
       <span className="mx-1 h-5 w-px bg-slate-200" />
       {single && <button type="button" className={btn} onClick={single.onEdit} title={single.kind === "file" ? t("เลือกประเภทไฟล์ / แก้ชื่อ (หรือดับเบิลคลิกกล่อง)", "Choose file types / rename (or double-click)") : t("แก้ข้อความ (หรือดับเบิลคลิกกล่อง)", "Edit text (or double-click)")}><Icon value="i:pencil" />{t("แก้", "Edit")}</button>}
+      {single?.kind === "storage" && (
+        <>
+          <button type="button" className={btn} onClick={() => editPlace(ids[0])} title={t("เลือกไอคอนที่เก็บ เช่น Google Drive · R2 · NAS", "Choose a storage icon, e.g. Google Drive · R2 · NAS")}><Icon value="i:database" />{t("ไอคอน", "Icon")}</button>
+          <button type="button" className={btn} onClick={() => editFileTypes(ids[0])} title={t("ใส่ไอคอนประเภทไฟล์ที่เก็บที่นี่", "Show which file types live here")}><Icon value="i:files" />{t("ไฟล์", "Files")}</button>
+        </>
+      )}
       <button type="button" className={btn} onClick={() => copyNodes(ids)} title={t("คัดลอก (Ctrl+C) แล้วไปวางที่อื่นด้วย Ctrl+V — วางในกระดานหน้าอื่นได้", "Copy (Ctrl+C), then paste elsewhere with Ctrl+V")}><Icon value="i:copy" />{t("คัดลอก", "Copy")}</button>
       <button type="button" className={btn} onClick={() => duplicateNodes(ids)} title={t("ทำซ้ำข้าง ๆ ทันที (Ctrl+D)", "Duplicate right here (Ctrl+D)")}><Icon value="i:stack-2" />{t("ทำซ้ำ", "Duplicate")}</button>
       {single?.kind === "folder" && single.data.path && <button type="button" className={btn} onClick={() => openFolder(single.data.path!)}><Icon value="i:folder-open" />{t("เปิด", "Open")}</button>}
@@ -131,14 +152,59 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
   const meta = FLOW_KIND_META[kind];
   const startEdit = () => (kind === "file" ? editFileTypes(id) : setEditing(true));   // กล่องไฟล์ = ป๊อปเลือกประเภท
 
+  const place = kind === "storage" ? storagePlaceOf(data.place) : null;
+
+  // กรอบโซน: กรอบใหญ่โปร่ง อยู่หลังกล่องอื่น · จับ/ลาก/ดับเบิลคลิกได้เฉพาะหัวกรอบ (ตัวกรอบกดทะลุไปที่กระดาน)
+  if (kind === "zone") {
+    return (
+      <>
+        {!readOnly && <NodeResizer isVisible={selected && !editing} minWidth={160} minHeight={100} lineClassName="fc-resize-line" handleClassName="fc-resize-handle" />}
+        {!readOnly && (
+          <NodeToolbar isVisible={onlyMe && !editing} position={Position.Top} align="start" offset={8}>
+            <FlowTools ids={[id]} single={{ kind, data, onEdit: startEdit }} />
+          </NodeToolbar>
+        )}
+        <div className="fc-zone relative h-full w-full">
+          <div className="absolute inset-0 rounded-2xl" style={{ background: pal.fill, opacity: 0.55 }} />
+          <div className="absolute inset-0 rounded-2xl" style={{ border: `2px dashed ${pal.stroke}`, opacity: selected ? 1 : 0.7 }} />
+          <div className={`fc-zone-handle absolute left-2 top-1.5 inline-flex max-w-[90%] items-center gap-1.5 rounded-lg px-2 py-1 ${readOnly ? "" : "cursor-grab"}`}
+            style={{ color: pal.text, background: "rgba(255,255,255,.75)" }}
+            title={readOnly ? undefined : t("ลากตรงนี้ = ย้ายทั้งกรอบพร้อมกล่องข้างใน · ดับเบิลคลิก = แก้ชื่อ", "Drag here to move the zone with its boxes · double-click to rename")}
+            onDoubleClick={(e) => { if (readOnly) return; e.stopPropagation(); setEditing(true); }}>
+            <span style={{ color: pal.stroke }}><Icon value="i:circle-dashed" /></span>
+            <span className="truncate text-[14px] font-bold">{splitFlowLabel(data.label).title || t("โซน", "Zone")}</span>
+          </div>
+          {editing && <InlineEditor initial={data} zone onDone={(patch) => { setEditing(false); if (patch) updateData(id, patch); }} />}
+        </div>
+      </>
+    );
+  }
+
+  // กล่องไฟล์ + ที่เก็บแบบมีไอคอน = ไม่มีกรอบ (ไอคอน + ชื่อ) · ที่เก็บไม่มีไอคอน = ทรงกระบอกเดิม
+  const frameless = kind === "file" || !!place;
   const boxStyle: React.CSSProperties =
-    kind === "question" || kind === "storage" ? {}
-    : { background: pal.fill, border: `2px solid ${pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : kind === "file" ? 12 : 10 };
+    kind === "question" || kind === "storage" || frameless ? {}
+    : { background: pal.fill, border: `2px solid ${pal.stroke}`, borderRadius: kind === "start" ? 999 : kind === "note" ? 4 : 10 };
   // ระยะขอบข้อความ (ข้าวหลามตัด/ทรงกระบอก ต้องเว้นมากกว่า)
-  const pad = kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : kind === "file" ? "8px 10px" : "6px 12px";
+  const pad = frameless ? "4px 6px" : kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
 
   let content: ReactNode;
-  if (kind === "folder") {
+  if (place) {
+    content = (
+      <div className="pointer-events-none flex w-full flex-col items-center gap-1">
+        <PlaceIcon place={place.key} size={46} />
+        <LabelText label={data.label} color={data.color ? color : "slate"} />
+        <ExtRow exts={data.exts} size={20} />
+      </div>
+    );
+  } else if (kind === "storage" && data.exts?.length) {
+    content = (
+      <div className="pointer-events-none flex w-full flex-col items-center gap-1">
+        <LabelText label={data.label} color={color} />
+        <ExtRow exts={data.exts} size={18} />
+      </div>
+    );
+  } else if (kind === "folder") {
     content = (
       <div className="pointer-events-none flex w-full items-center gap-2 text-left">
         <span className="text-lg" style={{ color: pal.stroke }}><Icon value="i:folder" /></span>
@@ -171,7 +237,7 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
         </NodeToolbar>
       )}
       <div
-        className={`fc-node relative flex h-full w-full justify-center ${kind === "note" ? "items-start" : "items-center"}`}
+        className={`fc-node relative flex h-full w-full justify-center ${kind === "note" ? "items-start" : "items-center"} ${frameless ? "fc-frameless" : ""}`}
         style={{ ...boxStyle, padding: pad }}
         title={kind === "folder" ? t(meta.hintTh, meta.hintEn) : undefined}
         onDoubleClick={(e) => {
@@ -180,7 +246,7 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
           e.stopPropagation(); startEdit();
         }}
       >
-        <ShapeBg kind={kind} color={color} />
+        {!frameless && <ShapeBg kind={kind} color={color} />}
         <div className="relative z-[1] flex w-full justify-center">{content}</div>
         {editing && (
           <InlineEditor initial={data} folder={kind === "folder"}

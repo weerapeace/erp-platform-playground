@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   parseFlowScene, toFlowScene, autoEdgeLabel, mergeFlowScenes, cloneFlowSceneAt, handlePoint, flowSceneBounds,
   splitFlowLabel, makeFlowNode, nodeColor, snap, copyFlowSelection, flowClipText, serializeFlowClip, parseFlowClip,
-  placeFlowClip, textToFlowNode, type FlowScene, type FlowSceneNode, type FlowSceneEdge,
+  placeFlowClip, textToFlowNode, nodesInsideZone, storageNodeSize, STORAGE_ICON_SIZE, type FlowScene, type FlowSceneNode, type FlowSceneEdge,
 } from "../flowchart";
 
 const th = (a: string) => a;
@@ -204,5 +204,38 @@ describe("กล่องไฟล์ (ประเภทไฟล์)", () => {
   it("คัดลอกเป็นข้อความ: ใส่นามสกุลในวงเล็บ", () => {
     const f = makeFlowNode("file", { x: 0, y: 0 }, th, { label: "รูปจากกล้อง", exts: ["cr2", "jpg"] });
     expect(flowClipText(copyFlowSelection(S([f]), [f.id])!)).toBe("รูปจากกล้อง (CR2, JPG)");
+  });
+});
+
+describe("กรอบโซน + ที่เก็บแบบมีไอคอน", () => {
+  it("โหลดกล่องโซนได้ · ที่เก็บเก็บ place เฉพาะค่าที่รู้จัก", () => {
+    const s = parseFlowScene({ kind: "flowchart", nodes: [
+      { id: "z", type: "zone", position: { x: 0, y: 0 }, width: 500, height: 300, data: { label: "บนคลาวด์" } },
+      { id: "a", type: "storage", position: { x: 0, y: 0 }, data: { label: "Drive", place: "drive" } },
+      { id: "b", type: "storage", position: { x: 0, y: 0 }, data: { label: "X", place: "hack<" } },
+    ], edges: [] })!;
+    expect(s.nodes.map((n) => n.type)).toEqual(["zone", "storage", "storage"]);
+    expect(s.nodes[1].data.place).toBe("drive");
+    expect(s.nodes[2].data.place).toBeUndefined();
+  });
+  it("กล่องที่อยู่ในโซนทั้งกล่องเท่านั้นที่ย้ายตาม", () => {
+    const zone = { id: "z", position: { x: 0, y: 0 }, width: 400, height: 300 };
+    const nodes = [
+      zone,
+      { id: "in", position: { x: 20, y: 60 }, width: 160, height: 60 },
+      { id: "edge", position: { x: 300, y: 60 }, width: 160, height: 60 },   // ล้นขอบขวา
+      { id: "out", position: { x: 500, y: 0 }, width: 100, height: 50 },
+    ];
+    expect(nodesInsideZone(zone, nodes)).toEqual(["in"]);
+  });
+  it("สร้างที่เก็บแบบมีไอคอน: ชื่อ = ชื่อที่เก็บ · ขนาดพอดีไอคอน · มีไฟล์ = สูงขึ้น", () => {
+    const n = makeFlowNode("storage", { x: 0, y: 0 }, th, { place: "r2" });
+    expect(n.data).toEqual({ label: "Cloudflare R2", place: "r2" });
+    expect([n.width, n.height]).toEqual([STORAGE_ICON_SIZE.w, STORAGE_ICON_SIZE.h]);
+    expect(storageNodeSize(true, 0)).toEqual({ w: 180, h: 120 });
+    expect(storageNodeSize(true, 3).h).toBeGreaterThan(120);
+    expect(storageNodeSize(false, 8).h).toBeGreaterThan(storageNodeSize(false, 3).h);
+    const plain = makeFlowNode("zone", { x: 0, y: 0 }, th);
+    expect([plain.width, plain.height, plain.data.label]).toEqual([480, 320, "กรอบโซน"]);
   });
 });

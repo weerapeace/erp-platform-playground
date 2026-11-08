@@ -1,37 +1,61 @@
 // แปลงกระดาน flowchart → HTML ที่ใส่ style ในบรรทัดล้วน (ไม่พึ่ง class/Tailwind)
 // เพื่อส่งเข้าตัวแปลงรูปกลาง lib/html-to-png (htmlToPngBlob) → ปุ่ม "บันทึกเป็นรูป"
 // สี/รูปทรงอ่านจาก lib/flowchart ชุดเดียวกับบนจอ · เส้นใช้สูตรหักมุมเดียวกับ React Flow (getSmoothStepPath)
+// ลำดับวาด: กรอบโซน (หลังสุด) → เส้น → กล่อง → ป้ายบนเส้น · ไอคอนไฟล์/ที่เก็บ = SVG ตัวเดียวกับบนจอ
 
 import { Position, getSmoothStepPath } from "@xyflow/react";
 import { fileTypeSvg } from "@/lib/file-types";
+import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 import { FLOW_PALETTE, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const SIDE: Record<string, Position> = { t: Position.Top, r: Position.Right, b: Position.Bottom, l: Position.Left };
 const FONT = "'Sarabun','Leelawadee UI','Tahoma',sans-serif";
 
+const extRow = (exts: string[] | undefined, size: number) => exts?.length
+  ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:2px;line-height:0">${exts.map((e) => fileTypeSvg(e, size)).join("")}</div>`
+  : "";
+
+function zoneHtml(n: FlowSceneNode, ox: number, oy: number): string {
+  const p = FLOW_PALETTE[nodeColor(n.type, n.data)];
+  const x = n.position.x - ox, y = n.position.y - oy;
+  const title = esc(splitFlowLabel(n.data.label).title || "โซน");
+  return `<div style="position:absolute;left:${x}px;top:${y}px;width:${n.width}px;height:${n.height}px;box-sizing:border-box">`
+    + `<div style="position:absolute;inset:0;border-radius:16px;background:${p.fill};opacity:.55"></div>`
+    + `<div style="position:absolute;inset:0;border-radius:16px;border:2px dashed ${p.stroke};opacity:.7"></div>`
+    + `<div style="position:absolute;left:8px;top:6px;padding:4px 8px;border-radius:8px;background:rgba(255,255,255,.75);font-size:14px;font-weight:700;color:${p.text};white-space:nowrap">${title}</div>`
+    + `</div>`;
+}
+
 function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
-  const color = nodeColor(n.type, n.data);
+  const place = n.type === "storage" ? storagePlaceOf(n.data.place) : null;
+  const color = place && !n.data.color ? "slate" : nodeColor(n.type, n.data);   // ที่เก็บแบบไอคอน: ชื่อสีเทาเข้มเหมือนกล่องอื่น
   const p = FLOW_PALETTE[color];
   const x = n.position.x - ox, y = n.position.y - oy, w = n.width, h = n.height;
   const { title, sub } = splitFlowLabel(n.data.label);
+  const frameless = n.type === "file" || !!place;
   const labelHtml = `<div style="width:100%;text-align:${n.type === "note" ? "left" : "center"};white-space:pre-wrap;word-break:break-word;line-height:1.35"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(title) || "&nbsp;"}</div>${sub ? `<div style="font-size:11px;margin-top:2px;color:${p.sub}">${esc(sub)}</div>` : ""}</div>`;
-  const exts = n.data.exts?.length ? n.data.exts : [""];
-  const icons = n.type === "file"
-    ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px;line-height:0">${exts.map((e) => fileTypeSvg(e, exts.length > 4 ? 30 : 36)).join("")}</div>`
-    : "";
-  const text = n.type === "file"
-    ? `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;width:100%">${icons}${labelHtml}</div>`
-    : n.type === "folder"
-    ? `<div style="text-align:left;min-width:0"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(n.data.label || "—")}</div>${n.data.path ? `<div style="font-size:10px;color:${p.sub};word-break:break-all">${esc(n.data.path)}</div>` : ""}</div>`
-    : labelHtml;
+  const col = (inner: string, gap = 4) => `<div style="display:flex;flex-direction:column;align-items:center;gap:${gap}px;width:100%">${inner}</div>`;
+  let text: string;
+  if (n.type === "file") {
+    const exts = n.data.exts?.length ? n.data.exts : [""];
+    text = col(`<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px;line-height:0">${exts.map((e) => fileTypeSvg(e, exts.length > 4 ? 30 : 36)).join("")}</div>${labelHtml}`, 6);
+  } else if (place) {
+    text = col(`<div style="line-height:0">${storagePlaceSvg(place.key, 46)}</div>${labelHtml}${extRow(n.data.exts, 20)}`);
+  } else if (n.type === "storage" && n.data.exts?.length) {
+    text = col(`${labelHtml}${extRow(n.data.exts, 18)}`);
+  } else if (n.type === "folder") {
+    text = `<div style="text-align:left;min-width:0"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(n.data.label || "—")}</div>${n.data.path ? `<div style="font-size:10px;color:${p.sub};word-break:break-all">${esc(n.data.path)}</div>` : ""}</div>`;
+  } else {
+    text = labelHtml;
+  }
   let shape = "";
-  let box = `background:${p.fill};border:2px solid ${p.stroke};border-radius:${n.type === "start" ? 999 : n.type === "note" ? 4 : n.type === "file" ? 12 : 10}px;`;
-  let pad = n.type === "note" ? "10px 12px" : n.type === "file" ? "8px 10px" : "6px 12px";
+  let box = frameless ? "" : `background:${p.fill};border:2px solid ${p.stroke};border-radius:${n.type === "start" ? 999 : n.type === "note" ? 4 : 10}px;`;
+  let pad = frameless ? "4px 6px" : n.type === "note" ? "10px 12px" : "6px 12px";
   if (n.type === "question") {
     box = ""; pad = `${Math.round(h * 0.18)}px ${Math.round(w * 0.22)}px`;
     shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><polygon points="50,1 99,50 50,99 1,50" fill="${p.fill}" stroke="${p.stroke}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
-  } else if (n.type === "storage") {
+  } else if (n.type === "storage" && !place) {
     box = ""; pad = `${Math.round(h * 0.22)}px ${Math.round(w * 0.1)}px ${Math.round(h * 0.1)}px`;
     shape = `<svg width="${w}" height="${h}" viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute;left:0;top:0;overflow:visible"><path d="M1,12 A49,11 0 0,1 99,12 L99,88 A49,11 0 0,1 1,88 Z" fill="${p.fill}" stroke="${p.stroke}" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="M1,12 A49,11 0 0,0 99,12" fill="none" stroke="${p.stroke}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
   }
@@ -57,7 +81,8 @@ export function flowSceneToHtml(s: FlowScene): { html: string; width: number; he
     if (e.label) labels.push(`<div style="position:absolute;left:${lx}px;top:${ly}px;transform:translate(-50%,-50%);background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:1px 6px;font-size:11px;font-weight:600;color:#475569;white-space:nowrap">${esc(e.label)}</div>`);
   }
   const svg = `<svg width="${b.w}" height="${b.h}" style="position:absolute;left:0;top:0;overflow:visible"><defs><marker id="fc-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"/></marker></defs>${paths.join("")}</svg>`;
-  const nodes = s.nodes.map((n) => nodeHtml(n, b.x, b.y)).join("");
-  const html = `<div style="position:relative;width:${b.w}px;height:${b.h}px;background:#ffffff;font-family:${FONT}">${svg}${nodes}${labels.join("")}</div>`;
+  const zones = s.nodes.filter((n) => n.type === "zone").map((n) => zoneHtml(n, b.x, b.y)).join("");
+  const nodes = s.nodes.filter((n) => n.type !== "zone").map((n) => nodeHtml(n, b.x, b.y)).join("");
+  const html = `<div style="position:relative;width:${b.w}px;height:${b.h}px;background:#ffffff;font-family:${FONT}">${zones}${svg}${nodes}${labels.join("")}</div>`;
   return { html, width: Math.ceil(b.w), height: Math.ceil(b.h) };
 }

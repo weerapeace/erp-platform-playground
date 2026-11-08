@@ -15,3 +15,12 @@
 .fc-board.fc-readonly .react-flow__node { cursor: default; }
 .fc-board .fc-resize-line { border-color: rgba(124, 58, 237, .5) !important; }
 .fc-board .fc-resize-handle { width: 8px !important; height: 8px !important; background: #7c3aed !important; border: 1px solid #fff !important; border-radius: 2px; }
+/* กล่องไม่มีกรอบ (ไฟล์ · ที่เก็บแบบมีไอคอน): ชี้แล้วเห็นเส้นประจาง ๆ ว่าเป็นกล่อง */
+.fc-board .react-flow__node:hover .fc-node.fc-frameless { outline: 1px dashed #cbd5e1; outline-offset: 2px; border-radius: 10px; }
+.fc-board .react-flow__node.selected .fc-node.fc-frameless { border-radius: 10px; }
+/* กรอบโซน: ตัวกรอบกดทะลุไปที่กระดาน (เลือก/ลากคลุมกล่องข้างในได้) · จับได้เฉพาะหัวกรอบ + มุมย่อขยาย */
+.fc-board .react-flow__node.react-flow__node-zone { pointer-events: none !important; cursor: default; }   /* React Flow ใส่ pointer-events ในบรรทัด → ต้อง !important */
+.fc-board .react-flow__node-zone .fc-zone-handle,
+.fc-board .react-flow__node-zone .react-flow__resize-control,
+.fc-board .react-flow__node-zone textarea { pointer-events: all !important; }
+.fc-board.fc-readonly .react-flow__node-zone .fc-zone-handle { cursor: default; }

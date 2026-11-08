@@ -30,13 +30,16 @@ import { LoadingState, ErrorState, EmptyState } from "@/components/state-views";
 import { askText } from "@/components/modal/ask-dialog";
 import { FolderCardModal, openCanvasFolder } from "@/components/canvas-sketch/folder-card";
 import { FileTypePickerModal } from "@/components/file-type-icon";
+import { guessPlace, storagePlaceOf } from "@/lib/storage-places";
+import { shortcutKey } from "@/lib/shortcut-key";
+import { StoragePlaceModal } from "./place-modal";
 import { apiFetch } from "@/lib/api";
 import { htmlToPngBlob, fitImageScale, imageFileName } from "@/lib/html-to-png";
 import { downloadBlob } from "@/lib/image-clipboard";
 import {
   EMPTY_FLOW_SCENE, FLOW_CLIP_MIME, FLOW_KINDS, FLOW_KIND_META, GRID, autoEdgeLabel, cloneFlowSceneAt, copyFlowSelection, flowClipText,
   flowSceneSig, makeFlowNode, mergeFlowScenes, newFlowId, parseFlowClip, parseFlowScene, placeFlowClip, serializeFlowClip, textToFlowNode,
-  fileNodeSize, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
+  fileNodeSize, nodesInsideZone, storageNodeSize, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
 } from "@/lib/flowchart";
 import { FlowBoardCtx, FlowEdgeView, FlowNodeView, FlowTools, type FlowBoardActions, type FlowRFNode } from "./nodes";
 import { flowSceneToHtml } from "./export-html";
@@ -69,8 +72,12 @@ const isTyping = (el: EventTarget | null) => {
   return !!h && (h.tagName === "INPUT" || h.tagName === "TEXTAREA" || h.isContentEditable);
 };
 
+// กรอบโซน: อยู่หลังกล่องอื่น (zIndex -1) · ลากได้เฉพาะหัวกรอบ (.fc-zone-handle)
 const toRFNodes = (s: FlowScene, selected?: Set<string>): FlowRFNode[] =>
-  s.nodes.map((n) => ({ id: n.id, type: n.type, position: n.position, width: n.width, height: n.height, data: n.data, selected: selected?.has(n.id) ?? false }));
+  s.nodes.map((n) => ({
+    id: n.id, type: n.type, position: n.position, width: n.width, height: n.height, data: n.data, selected: selected?.has(n.id) ?? false,
+    ...(n.type === "zone" ? { zIndex: -1, dragHandle: ".fc-zone-handle" } : {}),
+  }));
 const toRFEdges = (s: FlowScene): Edge[] =>
   s.edges.map((e) => ({ id: e.id, source: e.source, target: e.target, sourceHandle: e.sourceHandle, targetHandle: e.targetHandle, label: e.label, type: "flow", markerEnd: MARKER }));
 
@@ -110,7 +117,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [folderOpen, setFolderOpen] = useState(false);
-  const [filePick, setFilePick] = useState<{ id: string | null } | null>(null);   // ป๊อปเลือกประเภทไฟล์ (id = แก้กล่องเดิม · null = เพิ่มใหม่)
+  const [filePick, setFilePick] = useState<{ id: string | null } | null>(null);
+  const [placePick, setPlacePick] = useState<{ id: string | null } | null>(null);   // ป๊อปเลือกที่เก็บ (id = เปลี่ยนกล่องเดิม · null = เพิ่มใหม่)   // ป๊อปเลือกประเภทไฟล์ (id = แก้กล่องเดิม · null = เพิ่มใหม่)
   const [exporting, setExporting] = useState(false);
   const [, setHistTick] = useState(0);
   const [clipReady, setClipReady] = useState(false);          // มีกล่องที่คัดลอกไว้ (โชว์ปุ่ม "วาง")
@@ -328,7 +336,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     const onKey = (e: KeyboardEvent) => {
       if (isTyping(e.target) || !boardActive() || !(e.ctrlKey || e.metaKey) || e.altKey) return;
       const op = opsRef.current;
-      const k = e.key.toLowerCase();
+      const k = shortcutKey(e);   // ดูปุ่มจริงบนแป้น — แป้นพิมพ์ไทย Ctrl+Z ได้ "ผ" ถ้าดู e.key
       if (k === "a") {   // เลือกทุกกล่อง (ไม่ใช่ทุกตัวหนังสือในหน้า)
         e.preventDefault();
         window.getSelection()?.removeAllRanges();
@@ -396,6 +404,26 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   // ── แก้กระดาน ──
   const onNodesChange = useCallback((ch: NodeChange<FlowRFNode>[]) => setNodes((ns) => applyNodeChanges(ch, ns)), []);
   const onEdgesChange = useCallback((ch: EdgeChange[]) => setEdges((es) => applyEdgeChanges(ch, es)), []);
+  // ลากหัวกรอบโซน → กล่องที่อยู่ในกรอบทั้งกล่องย้ายตาม (กล่องที่ React Flow ลากไปด้วยอยู่แล้ว = ข้าม ไม่ย้ายซ้ำ)
+  const zoneDragRef = useRef<{ id: string; x: number; y: number; items: Map<string, { x: number; y: number }> } | null>(null);
+  const onNodeDragStart = useCallback((_: unknown, node: FlowRFNode, dragging: FlowRFNode[]) => {
+    zoneDragRef.current = null;
+    if (node.type !== "zone") return;
+    const box = (n: FlowRFNode) => ({ id: n.id, position: n.position, width: n.width ?? n.measured?.width ?? 0, height: n.height ?? n.measured?.height ?? 0 });
+    const all = nodesRef.current;
+    const inside = new Set(nodesInsideZone(box(node), all.map(box)));
+    const movedByRF = new Set((dragging ?? []).map((n) => n.id));
+    const items = new Map(all.filter((n) => inside.has(n.id) && !movedByRF.has(n.id)).map((n) => [n.id, { x: n.position.x, y: n.position.y }]));
+    if (items.size) zoneDragRef.current = { id: node.id, x: node.position.x, y: node.position.y, items };
+  }, []);
+  const onNodeDrag = useCallback((_: unknown, node: FlowRFNode) => {
+    const z = zoneDragRef.current;
+    if (!z || z.id !== node.id) return;
+    const dx = node.position.x - z.x, dy = node.position.y - z.y;
+    setNodes((ns) => ns.map((n) => { const p = z.items.get(n.id); return p ? { ...n, position: { x: p.x + dx, y: p.y + dy } } : n; }));
+  }, []);
+  const onNodeDragStop = useCallback(() => { zoneDragRef.current = null; }, []);
+
   const onConnect = useCallback((c: Connection) => {
     if (!c.source || !c.target || c.source === c.target) return;
     setEdges((es) => {
@@ -433,6 +461,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   const actions = useMemo<FlowBoardActions>(() => ({
     readOnly, t, openFolder, selectedIds,
     editFileTypes: (id) => setFilePick({ id }),
+    editPlace: (id) => setPlacePick({ id }),
     copyNodes: (ids) => opsRef.current.copyNodes(ids),
     duplicateNodes: (ids) => opsRef.current.duplicateNodes(ids),
     removeNodes: (ids) => opsRef.current.removeNodes(ids),
@@ -467,6 +496,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
   if (status === "loading") return <div className="rounded-xl border border-slate-200 bg-white" style={{ height }}><LoadingState className="text-sm" /></div>;
   if (status === "error") return <div className="rounded-xl border border-slate-200 bg-white" style={{ height }}><ErrorState title={t("โหลดกระดานไม่สำเร็จ", "Could not load the board")} hint={loadError ?? undefined} onRetry={() => setReloadKey((k) => k + 1)} /></div>;
 
+  const filePickNode = filePick?.id ? nodes.find((n) => n.id === filePick.id) ?? null : null;
+  const placePickNode = placePick?.id ? nodes.find((n) => n.id === placePick.id) ?? null : null;
   const tb = "inline-flex h-8 items-center gap-1 rounded-lg px-2 text-[12px] text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent";
   const dirty = canEdit && sig !== savedSigRef.current;
 
@@ -479,7 +510,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             const m = FLOW_KIND_META[k];
             return (
               <button key={k} type="button" className={tb} title={t(m.hintTh, m.hintEn)}
-                onClick={() => (k === "folder" ? setFolderOpen(true) : k === "file" ? setFilePick({ id: null }) : addNode(k))}>
+                onClick={() => (k === "folder" ? setFolderOpen(true) : k === "file" ? setFilePick({ id: null }) : k === "storage" ? setPlacePick({ id: null }) : addNode(k))}>
                 <Icon value={m.icon} />{t(m.th, m.en)}
               </button>
             );
@@ -513,6 +544,8 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
           <ReactFlow<FlowRFNode, Edge>
             nodes={nodes} edges={edges} nodeTypes={NODE_TYPES} edgeTypes={EDGE_TYPES}
             onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+            onNodeDragStart={onNodeDragStart} onNodeDrag={onNodeDrag} onNodeDragStop={onNodeDragStop}
+            elevateNodesOnSelect={false}
             onEdgeDoubleClick={(_, e) => { if (!readOnly) actions.editEdgeLabel(e.id); }}
             connectionMode={ConnectionMode.Loose}
             defaultEdgeOptions={{ type: "flow", markerEnd: MARKER }}
@@ -545,19 +578,43 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
       <FolderCardModal open={folderOpen} onClose={() => setFolderOpen(false)}
         onPlace={(_skeletons, info) => { addNode("folder", { label: info.label, path: info.path }); setFolderOpen(false); }} />
 
-      {/* กล่อง "ไฟล์": เลือกประเภทไฟล์ (ไอคอนกลาง lib/file-types) — แก้กล่องเดิม = ขยายกล่องให้พอดีไอคอน (ไม่ย่อ) */}
+      {/* กล่อง "ไฟล์" / ไฟล์ในกล่อง "ที่เก็บ": เลือกประเภทไฟล์ (ไอคอนกลาง lib/file-types) — แก้กล่องเดิม = ขยายกล่องให้พอดี (ไม่ย่อ) */}
       <FileTypePickerModal open={!!filePick} onClose={() => setFilePick(null)}
-        initial={filePick?.id ? (() => { const n = nodes.find((x) => x.id === filePick.id); return n ? { exts: n.data.exts, label: n.data.label } : undefined; })() : undefined}
+        initial={filePickNode ? { exts: filePickNode.data.exts, label: filePickNode.data.label } : undefined}
+        hideLabel={filePickNode?.type === "storage"}
         confirmText={filePick?.id ? t("ใช้ประเภทนี้", "Apply") : undefined}
         onDone={(exts, label) => {
           const id = filePick?.id;
           setFilePick(null);
           if (!id) { addNode("file", { label, exts }); return; }
-          const need = fileNodeSize(exts.length);
-          setNodes((ns) => ns.map((n) => (n.id !== id ? n : {
-            ...n, data: { ...n.data, label, exts },
-            width: Math.max(n.width ?? n.measured?.width ?? 0, need.w), height: Math.max(n.height ?? n.measured?.height ?? 0, need.h),
-          })));
+          setNodes((ns) => ns.map((n) => {
+            if (n.id !== id) return n;
+            const storage = n.type === "storage";
+            const need = storage ? storageNodeSize(!!n.data.place, exts.length) : fileNodeSize(exts.length);
+            const data: FlowNodeData = storage ? { ...n.data, exts } : { ...n.data, label, exts };
+            if (!exts.length) delete data.exts;
+            return { ...n, data, width: Math.max(n.width ?? n.measured?.width ?? 0, need.w), height: Math.max(n.height ?? n.measured?.height ?? 0, need.h) };
+          }));
+        }} />
+
+      {/* กล่อง "ที่เก็บ": เลือกไอคอนที่เก็บ (lib/storage-places) — กดปุ่ม "ที่เก็บ" = สร้างใหม่ · ปุ่ม "ไอคอน" บนกล่อง = เปลี่ยน */}
+      <StoragePlaceModal open={!!placePick} current={placePickNode?.data.place ?? null} onClose={() => setPlacePick(null)}
+        suggest={placePickNode && !placePickNode.data.place ? guessPlace(placePickNode.data.label) : null}
+        onPick={(place) => {
+          const id = placePick?.id;
+          setPlacePick(null);
+          if (!id) { addNode("storage", place ? { place } : undefined); return; }
+          setNodes((ns) => ns.map((n) => {
+            if (n.id !== id) return n;
+            const old = storagePlaceOf(n.data.place);
+            const defaults = [t(FLOW_KIND_META.storage.th, FLOW_KIND_META.storage.en), old ? t(old.th, old.en) : null].filter(Boolean);
+            const next = storagePlaceOf(place);
+            const data: FlowNodeData = { ...n.data };
+            if (next) data.place = next.key; else delete data.place;
+            if (next && (!n.data.label.trim() || defaults.includes(n.data.label))) data.label = t(next.th, next.en);   // ชื่อเดิมเป็นค่าตั้งต้น → ใช้ชื่อที่เก็บใหม่
+            const need = storageNodeSize(!!next, data.exts?.length ?? 0);
+            return { ...n, data, width: Math.max(n.width ?? n.measured?.width ?? 0, need.w), height: Math.max(n.height ?? n.measured?.height ?? 0, need.h) };
+          }));
         }} />
     </FlowBoardCtx.Provider>
   );

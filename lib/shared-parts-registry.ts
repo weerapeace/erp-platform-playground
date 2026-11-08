@@ -471,6 +471,13 @@ export const SHARED_PARTS: SharedPart[] = [
     notWhen: "นำเข้าข้อมูลหลักทั้งตาราง (สินค้า ลูกค้า) ให้ใช้ตัวช่วยนำเข้าไฟล์ — ตัวนี้สำหรับบรรทัดในเอกสารเท่านั้น",
   },
   {
+    key: "shortcut-key", label: "อ่านปุ่มคีย์ลัด (ทุกภาษาแป้นพิมพ์)", code: "lib/shortcut-key", category: "system",
+    source: { path: "lib/shortcut-key" },
+    what: "shortcutKey(e) บอกปุ่มที่กดจากตำแหน่งปุ่มจริง (e.code) → Ctrl+Z / Ctrl+D ใช้ได้แม้เปิดแป้นพิมพ์ไทย (e.key จะได้ ผ / ก)",
+    when: "ทุกคีย์ลัด Ctrl/⌘ + ตัวอักษร",
+    notWhen: "รับข้อความที่พิมพ์ (ต้องการตัวอักษรตามภาษา) → ใช้ e.key ตามเดิม",
+  },
+  {
     key: "export", label: "ส่งออก CSV / Excel", code: "lib/export", category: "data",
     source: { path: "lib/export" },
     what: "ส่งออกแถวที่เห็น / ที่เลือก / ทั้งหมดที่กรองไว้ เป็น CSV หรือ Excel",
@@ -1149,7 +1156,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "flowchart-board", label: "กระดาน flowchart", code: "FlowchartBoard", category: "feature",
     source: { path: "components/flowchart-board" },
-    what: "ผังกล่องต่อเส้นแบบ flowchart: เริ่ม/จบ ขั้นตอน คำถาม ใช่/ไม่ใช่ ที่เก็บ โฟลเดอร์ โน้ต · เส้นติดกล่องเสมอ หักมุมเอง · คัดลอก/วาง (วางข้ามหน้าได้ · วางข้อความจากที่อื่น = กล่องใหม่) · บันทึกอัตโนมัติ · บันทึกเป็นรูป",
+    what: "ผังกล่องต่อเส้นแบบ flowchart: เริ่ม/จบ ขั้นตอน คำถาม ใช่/ไม่ใช่ ที่เก็บ (ไอคอน Google Drive/R2/NAS ... จาก lib/storage-places) ไฟล์ โฟลเดอร์ โน้ต กรอบโซน (ลากหัวกรอบ = ย้ายทั้งกลุ่ม) · เส้นติดกล่องเสมอ หักมุมเอง · คัดลอก/วาง (วางข้ามหน้าได้ · วางข้อความจากที่อื่น = กล่องใหม่) · บันทึกอัตโนมัติ · บันทึกเป็นรูป",
     when: "ผังขั้นตอนงาน ผังตัดสินใจ ผังว่าอะไรไปเก็บที่ไหน (แผนผังการเก็บไฟล์)",
     notWhen: "วาดมือ แปะรูป วางการ์ดสินค้า → ใช้กระดานวาด (CanvasSketch) · ผังที่ระบบสร้างจากโค้ดเอง → ใช้แผนผังการทำงาน (flow-map)",
     doc: "flowchart-board.md", sameJob: "drawing-board",

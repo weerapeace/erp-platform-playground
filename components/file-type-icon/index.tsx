@@ -35,12 +35,14 @@ export function FileTypeIcon({ ext, size = 32, title, className = "" }: { ext: s
 const MAX_PICK = 12;
 
 /** ป๊อปเลือกประเภทไฟล์ (เลือกได้หลายชนิด · ค้นหาได้ · พิมพ์นามสกุลที่ไม่มีในรายการเองได้) */
-export function FileTypePickerModal({ open, onClose, onDone, initial, confirmText }: {
+export function FileTypePickerModal({ open, onClose, onDone, initial, confirmText, hideLabel }: {
   open: boolean;
   onClose: () => void;
   onDone: (exts: string[], label: string) => void;
   initial?: { exts?: string[]; label?: string };
   confirmText?: string;
+  /** ซ่อนช่อง "ชื่อกล่อง" (เช่น ใส่ไฟล์ให้กล่องที่เก็บ — ชื่อกล่องแก้ที่อื่น) · onDone ได้ label = "" */
+  hideLabel?: boolean;
 }) {
   const t = useT();
   const [sel, setSel] = useState<string[]>([]);
@@ -79,7 +81,7 @@ export function FileTypePickerModal({ open, onClose, onDone, initial, confirmTex
           <span className="text-[12px] text-slate-500">{t(`เลือกแล้ว ${sel.length} ชนิด (สูงสุด ${MAX_PICK})`, `${sel.length} selected (max ${MAX_PICK})`)}</span>
           <div className="flex gap-2">
             <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm text-slate-700">{t("ยกเลิก", "Cancel")}</button>
-            <button type="button" disabled={!sel.length} onClick={() => onDone(sel, finalLabel.trim() || autoLabel)}
+            <button type="button" disabled={!sel.length} onClick={() => onDone(sel, hideLabel ? "" : finalLabel.trim() || autoLabel)}
               className="h-9 rounded-lg bg-violet-600 px-4 text-sm text-white hover:bg-violet-700 disabled:opacity-50">
               {confirmText ?? t("วางลงกระดาน", "Place on board")}
             </button>
@@ -100,12 +102,12 @@ export function FileTypePickerModal({ open, onClose, onDone, initial, confirmTex
           ))}
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <label className="block">
+        <div className={`grid gap-2 ${hideLabel ? "" : "sm:grid-cols-2"}`}>
+          {!hideLabel && <label className="block">
             <span className="mb-1 block text-[12px] text-slate-500">{t("ชื่อกล่อง", "Box name")}</span>
             <ERPInput value={finalLabel} onChange={(e) => { setLabel(e.target.value); setLabelTouched(true); }}
               placeholder={t("เช่น รูปจากกล้อง · ไฟล์งานออกแบบ", "e.g. Camera photos · Design files")} />
-          </label>
+          </label>}
           <label className="block">
             <span className="mb-1 block text-[12px] text-slate-500">{t("นามสกุลที่ไม่มีในรายการ", "Other extension")}</span>
             <div className="flex gap-1.5">
