@@ -5,7 +5,7 @@
 
 -- 1) เมนูใหม่ในแอปจัดการงาน → เปิดมุมมองหน้าร้าน
 insert into public.erp_menu_items (section, section_order, sort_order, icon, label, href, show_in_sidebar, show_in_launcher, permission_key, is_active, app_keys, app_overrides)
-select '📋 จัดการงาน', 10, 14, '🛒', 'สินค้าบนแพลตฟอร์ม', '/master/platform-catalog?view=shop', true, true, 'products.platforms.view', true, array['tasks'],
+select '📋 จัดการงาน', 15, 14, '🛒', 'สินค้าบนแพลตฟอร์ม', '/master/platform-catalog?view=shop', true, true, 'products.platforms.view', true, array['tasks'],
        '{"tasks":{"sort":27}}'::jsonb
 where not exists (select 1 from public.erp_menu_items where href = '/master/platform-catalog?view=shop');
 
