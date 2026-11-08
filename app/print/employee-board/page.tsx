@@ -10,6 +10,7 @@
  * ข้อมูลชุดเดียวกับหน้า "ผังพนักงาน (บอร์ด)" (/api/payroll/board) — เห็นเฉพาะที่บันทึกแล้ว (การย้ายที่ยังไม่กดบันทึกจะไม่ติดมา)
  * ของกลาง: ระบบพิมพ์ (buildReportHtmlMulti + PrintFrame) · apiFetch · r2ImageUrl
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
@@ -171,7 +172,7 @@ function Inner() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); if (html) printReportHtmlInNewWindow(html); }
+      if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "p") { e.preventDefault(); if (html) printReportHtmlInNewWindow(html); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

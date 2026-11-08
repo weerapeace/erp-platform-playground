@@ -5,6 +5,7 @@
  * ข้อมูลชุดเดียวกับมุมมอง "💰 ค่าแรงรายเดือน" ในบอร์ดจ่ายงาน (/api/mo/labor-summary)
  * ของกลาง: ระบบพิมพ์ (buildReportHtml + PrintFrame)
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
@@ -90,7 +91,7 @@ function Inner() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); if (html) printReportHtmlInNewWindow(html); }
+      if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "p") { e.preventDefault(); if (html) printReportHtmlInNewWindow(html); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

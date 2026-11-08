@@ -6,6 +6,7 @@
  * ผังการเงินพิมพ์ได้เฉพาะผู้มีสิทธิ์ FLOW_FINANCE_PERM (flowViewsFor)
  * ของกลาง: ระบบพิมพ์ (buildReportHtmlMulti + PrintFrame) — สั่งพิมพ์แล้วเลือก "บันทึกเป็น PDF" ได้
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { PrintFrame, printReportHtmlInNewWindow } from "@/components/report";
@@ -86,7 +87,7 @@ function FlowMapPrint() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); printReportHtmlInNewWindow(html); }
+      if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "p") { e.preventDefault(); printReportHtmlInNewWindow(html); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

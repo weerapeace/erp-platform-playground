@@ -7,6 +7,7 @@
  *   ช่องใบสั่งผลิต = /api/mo/brief (รูป/ชื่อ/จำนวน/กำหนดส่ง) · หมายเหตุพิมพ์เอง = usePrintNotes (ทั้งทีมเห็น)
  *   "เฉพาะที่ติ๊กไว้" = สั่งซื้อ: ที่ติ๊กเลือกหลายชิ้น (erp.poPrint.pick.order) หรือในตะกร้าสั่งซื้อ · รอรับ: ในตะกร้ารับของ
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { printReportHtmlInNewWindow } from "@/components/report";
@@ -139,7 +140,7 @@ function PurchasingOrdersPrintView({ mode }: { mode: PoPrintMode }) {
 
   // Ctrl/Cmd+P → หน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่างเกินจาก iframe)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); doPrint(); } };
+    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "p") { e.preventDefault(); doPrint(); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [doPrint]);

@@ -6,6 +6,7 @@
  * - Ctrl+K / ⌘K  → เปิด/ปิด (บางเบราว์เซอร์แย่งไป เช่น Chrome บน Windows = ค้น Google)
  * - "/"          → เปิด เฉพาะตอนไม่ได้พิมพ์อยู่ในช่องไหน (สำรองให้เครื่องที่ Ctrl+K ใช้ไม่ได้)
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { useEffect } from "react";
 
 const isTyping = (el: Element | null) => {
@@ -17,8 +18,8 @@ const isTyping = (el: Element | null) => {
 export function useSearchHotkey(toggle: (open?: boolean) => void): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); toggle(); return; }
-      if (e.key === "/" && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(document.activeElement)) { e.preventDefault(); toggle(true); }
+      if ((e.metaKey || e.ctrlKey) && shortcutKey(e) === "k") { e.preventDefault(); toggle(); return; }
+      if (shortcutKey(e) === "/" && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && !isTyping(document.activeElement)) { e.preventDefault(); toggle(true); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

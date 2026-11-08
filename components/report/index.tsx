@@ -1,5 +1,6 @@
 "use client";
 
+import { shortcutKey } from "@/lib/shortcut-key";
 import { PRINT_EVENT, type PrintHow } from "@/lib/print-log";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -692,7 +693,7 @@ export function PrintFrame({ html, maxWidth = 840, onPrint, fileName, fit = fals
     if (doc && onDocLoad) onDocLoad(doc);
     if (doc) {
       doc.addEventListener("keydown", (e: KeyboardEvent) => {
-        if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) {
+        if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "p") {
           e.preventDefault();
           if (onPrint) onPrint(); else printReportFrameOrWindow(fileName);
         }

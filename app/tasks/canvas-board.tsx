@@ -8,6 +8,7 @@
 // รอบ 2 (ถัดไป): ลูกศรเชื่อมกล่อง + paste รูปขึ้น R2 (+ลบใน R2)
 // ============================================================
 
+import { shortcutKey } from "@/lib/shortcut-key";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as RPE } from "react";
 import { useT } from "@/components/i18n";
 import { FontSelect } from "@/components/font-select";
@@ -188,9 +189,9 @@ export function CanvasBoard({
     const h = (e: KeyboardEvent) => {
       const typing = ["TEXTAREA", "INPUT"].includes(document.activeElement?.tagName ?? "");
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
-      else if (mod && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) { e.preventDefault(); redo(); }
-      else if (mod && e.key.toLowerCase() === "d" && selId) { e.preventDefault(); duplicateSelected(); }
+      if (mod && shortcutKey(e) === "z" && !e.shiftKey) { e.preventDefault(); undo(); }
+      else if (mod && (shortcutKey(e) === "y" || (e.shiftKey && shortcutKey(e) === "z"))) { e.preventDefault(); redo(); }
+      else if (mod && shortcutKey(e) === "d" && selId) { e.preventDefault(); duplicateSelected(); }
       else if ((e.key === "Delete" || e.key === "Backspace") && selId && !typing) { e.preventDefault(); deleteSelected(); }
       else if (e.key === "Escape") { setIsMax(false); setSelId(null); }
     };

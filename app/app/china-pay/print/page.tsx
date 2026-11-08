@@ -7,6 +7,7 @@
  *   ตัวสร้างใบ = lib/china-bills-print (เทสต์ได้) · ตั้งค่า = ของกลาง lib/list-print + ListPrintPanel (+สวิตช์ เรท / ค่าโอน / บัญชีร้าน ใน extra)
  *   เรทฐานสำหรับบิลที่ยังไม่มีเรท = เรทล่าสุดในเมนู "เรท" (แก้ได้เฉพาะครั้งนี้ ไม่บันทึกลงระบบ)
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { printReportHtmlInNewWindow } from "@/components/report";
@@ -152,7 +153,7 @@ function ChinaBillsPrintView() {
 
   // Ctrl/Cmd+P → หน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่างเกินจาก iframe)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); doPrint(); } };
+    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "p") { e.preventDefault(); doPrint(); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [doPrint]);

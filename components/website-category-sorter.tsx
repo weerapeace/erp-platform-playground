@@ -10,6 +10,7 @@
  *      → POST listings action "setCategories" (บันทึกทันที + audit · null = กลับเป็นยังไม่ได้จัด) · "addCategory" (เพิ่มหมวด)
  * กติกาการย้าย = lib/website-category-sort (pure + เทสต์) · ต้นไม้หมวด = lib/website-category-tree · ป๊อปเพิ่มหมวด = ตัวเดียวกับแท็บ 📂 หมวดหมู่
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import {
   useEffect,
   useMemo,
@@ -519,7 +520,7 @@ export function WebsiteCategorySorter({
       if (
         (e.ctrlKey || e.metaKey) &&
         !e.shiftKey &&
-        e.key.toLowerCase() === "z"
+        shortcutKey(e) === "z"
       ) {
         if (!undo.length) return;
         e.preventDefault();
@@ -531,7 +532,7 @@ export function WebsiteCategorySorter({
         setSel(new Set());
         return;
       }
-      const n = Number(e.key);
+      const n = Number(shortcutKey(e));
       if (
         Number.isInteger(n) &&
         n >= 1 &&
@@ -551,7 +552,7 @@ export function WebsiteCategorySorter({
   useEffect(() => {
     if (!askFor) return;
     const onKey = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
+      const k = shortcutKey(e);
       if (k === "m" || k === "a") {
         e.preventDefault();
         answer(k === "m" ? "move" : "add");

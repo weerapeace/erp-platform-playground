@@ -5,6 +5,7 @@
  *   เปิดจากหน้าต่าง "อัปเดตงานจากใบขาย" (บอร์ดจ่ายงาน) · ข้อมูล = แถวที่หน้าต่างส่งมาทาง localStorage (ตามที่ติ๊ก/เลือกอยู่ตอนกด)
  *   ตัวสร้างใบ = lib/mo-sales-print (เทสต์ได้) · ตั้งค่าหน้าพิมพ์ = ของกลาง lib/list-print + ListPrintPanel · ประวัติพิมพ์ usePrintLog("sale_line")
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { printReportHtmlInNewWindow } from "@/components/report";
@@ -82,7 +83,7 @@ function SalesMatchPrintView({ payload }: { payload: SalesPrintPayload }) {
   // กด Ctrl/Cmd+P → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่างเกินจาก iframe)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); if (html) printReportHtmlInNewWindow(html); }
+      if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "p") { e.preventDefault(); if (html) printReportHtmlInNewWindow(html); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

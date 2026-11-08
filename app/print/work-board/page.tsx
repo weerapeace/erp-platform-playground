@@ -5,6 +5,7 @@
  *   ตัวสร้างใบ = lib/work-board-print (เทสต์ได้) · ตั้งค่าหน้าพิมพ์ = ของกลาง lib/list-print + ListPrintPanel (แผงขวา)
  *   ค่าที่ตั้งจำต่อคน ต่อใบ (ตามไปทุกเครื่อง) · แบบของฉัน/ของทีม · ดึงข้อมูลจาก /api/mo/work-board ตัวเดียวกับบอร์ด
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { printReportHtmlInNewWindow } from "@/components/report";
@@ -113,7 +114,7 @@ function WorkBoardPrintInner() {
   // กด Ctrl/Cmd+P → เด้งหน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่างเกินจาก iframe)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); if (html) printReportHtmlInNewWindow(html); }
+      if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "p") { e.preventDefault(); if (html) printReportHtmlInNewWindow(html); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

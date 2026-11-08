@@ -5,6 +5,7 @@
  *   ตัวสร้างใบ = lib/so-status-print (เทสต์ได้) · ตั้งค่าหน้าพิมพ์ = ของกลาง lib/list-print + ListPrintPanel (จำต่อคน · แบบของฉัน/ทีม)
  *   ข้อมูล = GET /api/so-orders/<id>?print=1 · ประวัติพิมพ์ usePrintLog("so_order")
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { printReportHtmlInNewWindow } from "@/components/report";
@@ -83,7 +84,7 @@ export default function SoOrderStatusPrintPage() {
 
   // Ctrl/Cmd+P → หน้าต่างพิมพ์สะอาด (กันพิมพ์ทั้งหน้าเพจแล้วได้หน้าว่างเกินจาก iframe)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && (e.key === "p" || e.key === "P")) { e.preventDefault(); doPrint(); } };
+    const onKey = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "p") { e.preventDefault(); doPrint(); } };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [doPrint]);

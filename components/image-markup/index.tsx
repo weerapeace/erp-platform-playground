@@ -12,6 +12,7 @@
  * พิกัด = % ของรูป (lib/image-markup) · วาดจริงเป็นพิกเซลตามขนาดกล่อง (เส้น/หัวลูกศรไม่เพี้ยนตามสัดส่วนรูป)
  * ตัวนี้ไม่บันทึกเอง — หน้าที่เรียกใช้เก็บ state + ยิง API · doc: docs/image-markup.md
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { useEffect, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode, type SVGAttributes } from "react";
 import { Icon } from "@/components/icon";
 import {
@@ -231,8 +232,8 @@ export function ImageMarkup({
         if (textEdit) return;
         const mod = e.ctrlKey || e.metaKey;
         if ((e.key === "Delete" || e.key === "Backspace") && selected && editable) { e.preventDefault(); onDeleteSelected?.(); }
-        else if (mod && e.key.toLowerCase() === "z" && onUndo) { e.preventDefault(); onUndo(); }
-        else if (mod && e.key.toLowerCase() === "d" && onDuplicate && selected?.kind === "shape") { e.preventDefault(); onDuplicate(); }
+        else if (mod && shortcutKey(e) === "z" && onUndo) { e.preventDefault(); onUndo(); }
+        else if (mod && shortcutKey(e) === "d" && onDuplicate && selected?.kind === "shape") { e.preventDefault(); onDuplicate(); }
         else if (e.key === "Escape") onSelect?.(null);
       }}>
       <div ref={wrapRef} className="relative select-none" style={{ width: `${zoom * 100}%` }}

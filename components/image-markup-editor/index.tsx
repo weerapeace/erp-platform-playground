@@ -1,5 +1,6 @@
 "use client";
 
+import { shortcutKey } from "@/lib/shortcut-key";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { Attachment } from "@/app/api/attachments/route";
 import { ERPModal } from "@/components/modal";
@@ -271,8 +272,8 @@ function ImageMarkupEditorModal({ sourceUrl, fileName, entityType, entityId, act
     const onKey = (e: KeyboardEvent) => {
       if (textEdit) return;   // กำลังพิมพ์ข้อความ → ไม่ดักคีย์
       const meta = e.ctrlKey || e.metaKey;
-      if (meta && e.key.toLowerCase() === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
-      else if (meta && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
+      if (meta && shortcutKey(e) === "z") { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+      else if (meta && shortcutKey(e) === "y") { e.preventDefault(); redo(); }
       else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) { e.preventDefault(); deleteSelected(); }
     };
     window.addEventListener("keydown", onKey, true);   // capture phase — กัน modal กิน event ก่อน

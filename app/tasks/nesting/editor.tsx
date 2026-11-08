@@ -7,6 +7,7 @@
  *        → ลากแก้ตำแหน่งได้ (ตรวจชน/เลยขอบทุกครั้ง) → ดาวน์โหลด PDF/EPS → บันทึกงานลง ERP
  * ย้ายหน้าจอมาจากหน้าเว็บของตัวช่วย (tools/nesting-app/web/static/app.js) ให้ใช้ของกลาง ERP
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -667,7 +668,7 @@ export function NestingEditor({ id }: { id: string }) {
         e.preventDefault();
         const pl = r.edit[idx]?.[selected];
         if (pl) movePiece(selected, Math.round((pl.x + mv[e.key][0]) * 100) / 100, Math.round((pl.y + mv[e.key][1]) * 100) / 100);
-      } else if (e.key === "r" || e.key === "R") rotateSelected();
+      } else if (shortcutKey(e) === "r") rotateSelected();
       else if (e.key === "Escape") setSelected(null);
     };
     document.addEventListener("keydown", onKey);

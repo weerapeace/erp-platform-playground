@@ -13,6 +13,7 @@
  *       อะไหล่                             : = ชิ้น
  *   - ไม่มีกลุ่ม → พิมพ์ปริมาณเองได้ + มีปุ่มติด tag กลุ่มให้ SKU
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback, type RefObject, type ReactNode, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch } from "@/lib/api";
@@ -455,7 +456,7 @@ export function BomLineEditor({
     const h = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
       if (t && /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName)) return; // ไม่แย่ง undo ของช่องพิมพ์
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") { e.preventDefault(); if (e.shiftKey) redoRef.current(); else undoRef.current(); }
+      if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "z") { e.preventDefault(); if (e.shiftKey) redoRef.current(); else undoRef.current(); }
     };
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);

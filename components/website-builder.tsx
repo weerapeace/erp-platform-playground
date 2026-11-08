@@ -23,6 +23,7 @@
  *                storefront-drag-at {x,y} · storefront-drag-leave · storefront-drag-drop {data}   (ลากด้วย pointer)
  *   ผืนผ้าใบอิสระ (canvas) คุยสดอีกชุด — ดู components/website-canvas-tools.tsx
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { SECTION_SCHEMAS, SECTION_GROUP_ORDER, SECTION_PRESETS, childPlacePatch, matchShowIf, newChildId, newChildValues, sectionHasHeading, type ChildAddOption, type ChildSpec, type SectionPreset } from "@/lib/website-schema";
 import { blockDisplayName, blockSummary, cleanBlockName, normalizeBlocks, BLOCK_NAME_MAX, DEFAULT_BLOCK_STYLE, DEFAULT_MOTION, patchDecorPlace, type BlockStyle, type BlockType, type DecorScreen, type ValidationIssue } from "@/lib/website-blocks";
@@ -689,7 +690,7 @@ export function WebsiteBuilder({
       if (canvasEditorRef.current && e.key.startsWith("Arrow")) return;
       const sel = selectionRef.current;
       const cur = blocksRef.current;
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d" && sel) {
+      if ((e.ctrlKey || e.metaKey) && shortcutKey(e) === "d" && sel) {
         e.preventDefault();
         if (sel.childId) duplicateChild(sel.blockId, sel.childId);
         else duplicateSection(sel.blockId);

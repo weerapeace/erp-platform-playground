@@ -7,6 +7,7 @@
  * ลากการ์ด MO ปล่อยในโซนแผนก = popup จ่ายงาน · ลากใบจ่ายงานข้ามแผนก = ย้ายแผนก
  * ซ่อน MO เมื่อจ่ายครบ · ซ่อนใบจ่ายงานเมื่อรับครบ · กรอบสีแบรนด์ + ปุ่มตั้งสี
  */
+import { shortcutKey } from "@/lib/shortcut-key";
 import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef, useDeferredValue, Suspense, type PointerEvent as RPE } from "react";
 import { useSearchParams } from "next/navigation";
 import { postMoChecklistEvent } from "@/lib/mo-checklist-embed";
@@ -4370,13 +4371,13 @@ function BoardTable({ pending, workOrders, departments, craftsmen, canEdit, canS
       const t = e.target as HTMLElement | null;
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       if (document.querySelector("[data-erp-modal]")) return;
-      if (e.key === "/") {
+      if (shortcutKey(e) === "/" && !e.shiftKey) {
         const box = Array.from(document.querySelectorAll<HTMLInputElement>("[data-page-search]")).find((x) => x.offsetParent !== null);
         if (box) { e.preventDefault(); box.focus(); box.select(); }
         return;
       }
-      if (tab !== "pend" || !dc.show.chips || !/^[1-9]$/.test(e.key)) return;
-      const v = views[Number(e.key) - 1];
+      if (tab !== "pend" || !dc.show.chips || !/^[1-9]$/.test(shortcutKey(e))) return;
+      const v = views[Number(shortcutKey(e)) - 1];
       if (v) { e.preventDefault(); pickView(v.id); }
     };
     window.addEventListener("keydown", h);

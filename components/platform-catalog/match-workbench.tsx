@@ -7,6 +7,7 @@
  * ไม่บันทึกเอง — เรียก onMatch / onIgnore ของหน้า (บันทึกผ่าน /api/platform-catalog/match · /ignore + audit)
  */
 
+import { shortcutKey } from "@/lib/shortcut-key";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ERPModal } from "@/components/modal";
 import type { MatchSuggestion } from "@/lib/platform-match-suggest";
@@ -98,11 +99,11 @@ export function MatchWorkbench({ open, onClose, title, items, suggestions, sugge
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
       if (e.ctrlKey || e.metaKey || e.altKey || !item || finished) return;
-      const n = Number(e.key);
+      const n = Number(shortcutKey(e));
       const sugs = suggestions[item.id] ?? [];
       if (n >= 1 && n <= Math.min(3, sugs.length)) { e.preventDefault(); const s = sugs[n - 1]; void pick({ id: s.parent_sku_id, code: s.code, name: s.name }); }
-      else if (e.key === "s" || e.key === "S") { e.preventDefault(); skip(); }
-      else if ((e.key === "x" || e.key === "X") && canEdit && !done[item.id]) { e.preventDefault(); setIgnoreAsk(true); }
+      else if (shortcutKey(e) === "s") { e.preventDefault(); skip(); }
+      else if (shortcutKey(e) === "x" && canEdit && !done[item.id]) { e.preventDefault(); setIgnoreAsk(true); }
       else if (e.key === "ArrowRight") { e.preventDefault(); setCur((c) => Math.min(queue.length - 1, c + 1)); }
       else if (e.key === "ArrowLeft") { e.preventDefault(); setCur((c) => Math.max(0, c - 1)); }
     };

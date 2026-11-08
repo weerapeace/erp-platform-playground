@@ -1,5 +1,6 @@
 "use client";
 
+import { shortcutKey } from "@/lib/shortcut-key";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useEffect, useRef, createContext, useContext } from "react";
@@ -662,15 +663,15 @@ function PlaygroundShellFrame({ children }: { children: React.ReactNode }) {
       const isInput = document.activeElement?.tagName === "INPUT"
         || document.activeElement?.tagName === "TEXTAREA"
         || (document.activeElement as HTMLElement)?.isContentEditable;
-      const isCmdK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k";
+      const isCmdK = (e.metaKey || e.ctrlKey) && shortcutKey(e) === "k";
 
       if (isCmdK) {
         e.preventDefault();
         setSearchOpen(o => !o);
-      } else if (e.key === "/" && !isInput) {
+      } else if (shortcutKey(e) === "/" && !e.shiftKey && !isInput) {
         e.preventDefault();
         setSearchOpen(true);
-      } else if (e.key === "?" && !isInput) {
+      } else if ((shortcutKey(e) === "?" || (shortcutKey(e) === "/" && e.shiftKey)) && !isInput) {
         e.preventDefault();
         setHelpOpen(o => !o);
       } else if (e.key === "Escape") {

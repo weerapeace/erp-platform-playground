@@ -473,8 +473,8 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "shortcut-key", label: "อ่านปุ่มคีย์ลัด (ทุกภาษาแป้นพิมพ์)", code: "lib/shortcut-key", category: "system",
     source: { path: "lib/shortcut-key" },
-    what: "shortcutKey(e) บอกปุ่มที่กดจากตำแหน่งปุ่มจริง (e.code) → Ctrl+Z / Ctrl+D ใช้ได้แม้เปิดแป้นพิมพ์ไทย (e.key จะได้ ผ / ก)",
-    when: "ทุกคีย์ลัด Ctrl/⌘ + ตัวอักษร",
+    what: "shortcutKey(e) บอกปุ่มที่กด ไม่ขึ้นกับภาษาแป้นพิมพ์ (ตัวอังกฤษ = เชื่อ e.key · ตัวไทย = ดูตำแหน่งปุ่ม e.code) → Ctrl+Z / Ctrl+P / ปุ่ม 1-9 / \"/\" ใช้ได้แม้เปิดแป้นพิมพ์ไทย (e.key จะได้ ผ / ย / ๅ / ฝ)",
+    when: "ทุกคีย์ลัดตัวอักษร/ตัวเลข/เครื่องหมาย (มี Ctrl/⌘ หรือไม่มีก็ได้)",
     notWhen: "รับข้อความที่พิมพ์ (ต้องการตัวอักษรตามภาษา) → ใช้ e.key ตามเดิม",
   },
   {
