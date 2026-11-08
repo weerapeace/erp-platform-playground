@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  prepareDraft, platformPrice, normalizePriceRule, duplicateVariantLabels, oddSkuCodes, variantLabel, sellableVariants,
+  prepareDraft, platformPrice, normalizePriceRule, duplicateVariantLabels, oddSkuCodes, variantLabel, sellableVariants, linePrice,
   type ListingVariantLite, type ListingParentLite,
 } from "@/lib/platform-listing-builder";
 import { requiredChecks } from "@/lib/platform-required-fields";
@@ -82,12 +82,34 @@ describe("prepareDraft — Lazada", () => {
   });
 });
 
-describe("กฎของ LINE ไม่เปลี่ยน", () => {
-  it("LINE ยังเช็ก 7 ข้อเดิม และราคาใช้ has_price (ราคาเต็ม)", () => {
+describe("กฎของ LINE", () => {
+  it("LINE ยังเช็ก 7 ข้อเดิม", () => {
     const base = { title: "a", description: "b", category: "60 · x", imagesToSend: 1, variantCount: 1, allHavePrice: true, allHaveImage: true };
     expect(requiredChecks("line_shopping", base).map((c) => c.label)).toEqual(["ชื่อสินค้า", "หมวดหมู่ปลายทาง", "รูปสินค้า ≥ 1 (ภาพปก)", "มีตัวเลือก/SKU ≥ 1", "ทุก SKU มีราคา", "รายละเอียดสินค้า", "ทุก SKU มีรูป"]);
+  });
+  it("ไม่มีราคาเต็ม แต่มีราคาขาย = มีราคา (เจ้าของตัดสิน 2026-11-08: ใช้ราคาขายแทน)", () => {
     const r = prepareDraft({ platformCode: "line_shopping", parent: PI338, variants: [v("P", "a", 10)], imageKeys: imgs(1), platformCategory: "60 · x" });
-    expect(r.blockers).toEqual(["ทุก SKU มีราคา"]);
+    expect(r.blockers).toEqual([]);
     expect(r.fields.image_keys).toHaveLength(1);
+  });
+  it("ไม่มีทั้งราคาเต็มและราคาขาย = ลงไม่ได้", () => {
+    expect(prepareDraft({ platformCode: "line_shopping", parent: PI338, variants: [v("P", "a", null)], imageKeys: imgs(1), platformCategory: "60 · x" }).blockers).toEqual(["ทุก SKU มีราคา"]);
+  });
+});
+
+describe("linePrice — ราคาที่ส่งขึ้น LINE", () => {
+  it("มีราคาเต็ม = ราคาหลัก + ส่วนลด = เต็ม − ขาย", () => expect(linePrice(690, 430)).toEqual({ price: 690, discount: 260 }));
+  it("ราคาขายไม่ต่ำกว่าเต็ม = ไม่มีส่วนลด", () => {
+    expect(linePrice(500, 500)).toEqual({ price: 500, discount: 0 });
+    expect(linePrice(500, 600)).toEqual({ price: 500, discount: 0 });
+  });
+  it("ไม่มีราคาเต็ม = ใช้ราคาขาย ไม่มีส่วนลด", () => {
+    expect(linePrice(null, 150)).toEqual({ price: 150, discount: 0 });
+    expect(linePrice(0, 150)).toEqual({ price: 150, discount: 0 });
+  });
+  it("ไม่มีทั้งสอง / ติดลบ = null (ห้ามส่งราคา 0)", () => {
+    expect(linePrice(null, null)).toBeNull();
+    expect(linePrice(0, 0)).toBeNull();
+    expect(linePrice(-5, undefined)).toBeNull();
   });
 });

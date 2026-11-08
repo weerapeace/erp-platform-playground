@@ -12,6 +12,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { lineCreateProduct } from "@/lib/line-shopping";
 import { decryptSecret } from "@/lib/secret-box";
+import { linePrice } from "@/lib/platform-listing-builder";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   // น้ำหนัก(kg): ที่กรอก · ว่าง = weight_g÷1000 · (บาร์โค้ดไม่ส่งตอน create — เลี่ยงชนกันข้าม variant · ตั้งทีหลังได้)
   const weightRaw = extra.weight ? Number(extra.weight) : (p.weight_g != null ? Number(p.weight_g) / 1000 : 0);
   const weightKg = Number.isFinite(weightRaw) ? Math.round(weightRaw * 100) / 100 : 0;   // LINE: น้ำหนัก ≤ 2 ตำแหน่งทศนิยม
-  // ราคา LINE: price=fake_price (เต็ม) · instantDiscount=fake−sale · ตัวขายไม่มี → ดึงจากตัวสี
+  // ราคา LINE: price=fake_price (เต็ม) · instantDiscount=fake−sale · ตัวขายไม่มี → ดึงจากตัวสี · ไม่มีราคาเต็ม → ราคาขาย (linePrice)
   const num = (v: unknown) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : 0; };
   const fakeOf = (s: typeof skuRows[number]) => num(s.fake_price) || num(masterOf(s.code)?.fake_price);
   const saleOf = (s: typeof skuRows[number]) => num(s.list_price) || num(masterOf(s.code)?.list_price);
@@ -110,10 +111,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   const isVariant = dims.length > 0;   // สินค้ามีตัวเลือกเสมอ (LINE variant product) — ส่ง variantOptions + variant.options (index)
   const opt1 = dims[0]; const opt2 = dims[1];
   // ส่วนลด: create รับ instantDiscount "ระดับบนสุด" เท่านั้น → ใช้ค่าร่วมถ้าทุกตัวเท่ากัน ไม่งั้น 0 (ส่งส่วนลดต่อ SKU ทีหลังด้วยปุ่ม "ส่งราคา/ส่วนลด")
-  const discs = sellable.map((s) => { const f = fakeOf(s), sl = saleOf(s); return (f > 0 && sl > 0 && sl < f) ? f - sl : 0; });
+  // ราคา/ส่วนลดต่อตัวขาย = กฎกลาง linePrice (ไม่มีราคาเต็ม → ใช้ราคาขาย ไม่มีส่วนลด · เจ้าของตัดสิน 2026-11-08)
+  const lpOf = (s: typeof skuRows[number]) => linePrice(fakeOf(s), saleOf(s));
+  const discs = sellable.map((s) => lpOf(s)?.discount ?? 0);
   const topDiscount = discs.length && discs.every((d) => d === discs[0]) ? discs[0] : 0;
   const variants = sellable.map((s) => {
-    const base: Record<string, unknown> = { sku: s.code, price: fakeOf(s), onHandNumber: stockOf.get(s.id) ?? 0 };
+    const base: Record<string, unknown> = { sku: s.code, price: lpOf(s)?.price ?? 0, onHandNumber: stockOf.get(s.id) ?? 0 };
     if (weightKg > 0) base.weight = weightKg;
     // variant.options = array ของ index ชี้ค่าใน variantOptions (option1 ก่อน option2) เช่น [0] หรือ [0,1]
     if (opt1) { const i1 = Math.max(0, opt1.vals.indexOf(opt1.valOf(s))); base.options = opt2 ? [i1, Math.max(0, opt2.vals.indexOf(opt2.valOf(s)))] : [i1]; }

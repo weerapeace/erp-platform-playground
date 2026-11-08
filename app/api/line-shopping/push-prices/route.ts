@@ -10,6 +10,7 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
+import { linePrice } from "@/lib/platform-listing-builder";
 import { lineUpdatePrices } from "@/lib/line-shopping";
 import { decryptSecret } from "@/lib/secret-box";
 
@@ -77,10 +78,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const items = variantsOf(r)
       .map((v) => ({ variantId: asStr(v.id ?? v.variantId), sku: asStr(v.sku) }))
       .filter((v): v is { variantId: string; sku: string } => !!(v.variantId && v.sku))
-      .map((v) => ({ variantId: v.variantId, fake: resolve(fakeOf, v.sku), sale: resolve(saleOf, v.sku) }))
-      .filter((v) => v.fake != null && v.fake > 0)   // ต้องมีราคาเต็ม (Fake) ถึงส่ง (กันส่งราคา 0)
-      .map((v) => ({ variantId: v.variantId, price: v.fake as number, instantDiscount: (v.sale != null && v.sale < (v.fake as number)) ? (v.fake as number) - v.sale : 0 }));
-    if (items.length === 0) { results.push({ product: r.title ?? r.external_product_id, ok: false, variants: 0, error: "ไม่พบ variant id หรือราคาเต็ม (Fake) ของ SKU ใน ERP" }); continue; }
+      // กฎกลาง linePrice: ราคาเต็มเป็นราคาหลัก + ส่วนลด · ไม่มีราคาเต็ม → ใช้ราคาขาย (เจ้าของตัดสิน 2026-11-08) · ไม่มีทั้งคู่ = ไม่ส่ง (กันส่งราคา 0)
+      .map((v) => ({ variantId: v.variantId, lp: linePrice(resolve(fakeOf, v.sku), resolve(saleOf, v.sku)) }))
+      .filter((v): v is { variantId: string; lp: { price: number; discount: number } } => v.lp != null)
+      .map((v) => ({ variantId: v.variantId, price: v.lp.price, instantDiscount: v.lp.discount }));
+    if (items.length === 0) { results.push({ product: r.title ?? r.external_product_id, ok: false, variants: 0, error: "ไม่พบ variant id หรือราคา (ราคาเต็ม/ราคาขาย) ของ SKU ใน ERP" }); continue; }
     const res = await lineUpdatePrices(apiKey, r.external_product_id, items);
     if (res.ok) okCount++;
     results.push({ product: r.title ?? r.external_product_id, ok: res.ok, variants: items.length, error: res.ok ? undefined : res.error });

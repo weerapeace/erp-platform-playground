@@ -57,11 +57,26 @@ const str = (v: unknown) => (v == null ? "" : String(v)).trim();
 const boxComplete = (p: ListingParentLite) => [p.box_width, p.box_length, p.box_height].every((n) => n != null && Number(n) > 0);
 
 /**
- * มีราคาไหม — LINE ส่ง "ราคาเต็ม" (fake_price) เป็นราคาหลัก จึงต้องมีราคาเต็ม (has_price เดิม)
- * ร้านอื่นใช้ราคาขาย (list_price) เป็นหลัก ราคาเต็มมีหรือไม่มีก็ได้
+ * ราคาที่ส่งขึ้น LINE (ของกลาง — ตัวตรวจความครบ / สร้างสินค้า / ส่งราคา ใช้ตัวเดียวกัน)
+ * LINE ใช้ "ราคาเต็ม" (fake_price) เป็นราคาหลัก + ส่วนลดทันที = เต็ม − ขาย
+ * เจ้าของตัดสิน (2026-11-08): ไม่มีราคาเต็ม → ใช้ราคาขาย (list_price) เป็นราคาหลัก ไม่มีส่วนลด
+ *   (เดิมไม่มีราคาเต็ม = ลงไม่ได้ → IG ลงได้แค่ 5/192 รุ่น · LM 17/925)
+ * ไม่มีทั้งสองราคา = null (ห้ามส่งราคา 0)
+ */
+export function linePrice(fake: number | null | undefined, sale: number | null | undefined): { price: number; discount: number } | null {
+  const f = Number(fake) > 0 ? Number(fake) : 0;
+  const s = Number(sale) > 0 ? Number(sale) : 0;
+  if (f > 0) return { price: f, discount: s > 0 && s < f ? f - s : 0 };
+  if (s > 0) return { price: s, discount: 0 };
+  return null;
+}
+
+/**
+ * มีราคาไหม — ทุกร้านถือว่ามีราคาเมื่อมีราคาขายหรือราคาเต็มอย่างใดอย่างหนึ่ง
+ * (LINE: ไม่มีราคาเต็มใช้ราคาขายแทน — linePrice)
  */
 const hasPriceFor = (platformCode: string, v: ListingVariantLite) =>
-  platformCode === "line_shopping" ? v.has_price : ((v.sale_price ?? 0) > 0 || (v.fake_price ?? 0) > 0);
+  platformCode === "line_shopping" ? linePrice(v.fake_price, v.sale_price) != null : ((v.sale_price ?? 0) > 0 || (v.fake_price ?? 0) > 0);
 
 /** ค่าที่ตัวตรวจต้องใช้ — ตัวจัดการรายสินค้ากับหน้ารวมเรียกตัวเดียวกัน */
 export function listingCtx(input: {
