@@ -10,7 +10,7 @@
  *   ไฟล์ชื่อ = รหัส SKU → ปกของ SKU นั้น · .png ชื่อ = รหัส → รูปตัด PNG
  *   Images / Rawfiles / ไฟล์ที่ไม่ใช่รูป (PSD, RAW …) / จับคู่รหัสไม่ได้ / เกินเพดาน → ไม่ลงระบบ (อยู่บน Z:)
  *   ทุกไฟล์ (ยกเว้นไฟล์ระบบ) อยู่บน Z: เสมอ: โฟลเดอร์อยู่บน Z: แล้ว = ไม่ทำอะไร · ไม่อยู่ = โปรแกรมก๊อปไปที่ nasRoot\<รุ่น>
- *   สูตรนี้ไม่ลบ/ไม่ย้ายต้นฉบับเด็ดขาด (เป็นโฟลเดอร์ทำงานของทีม)
+ *   สูตรนี้ไม่ลบต้นฉบับ · ย้ายเฉพาะโฟลเดอร์ Rawfiles / Images ตามค่าตั้ง cfg.moves หลังลงรูปเสร็จ (planProductMoves · โปรแกรมเลือกปิดได้ทีละงาน)
  */
 import {
   DEFAULT_TEMPLATE,
@@ -28,7 +28,8 @@ import {
   type SlotKind,
 } from "@/lib/product-image-routing";
 import type { CatalogParent } from "@/lib/product-image-catalog-server";
-import { fillNasPattern, isJunkFile, nasDateValues, relPathOf, type ProductSortConfig, type ProductVariant } from "@/lib/file-sort";
+import { MOVE_ROLES, fillNasPattern, isJunkFile, nasDateValues, relPathOf, safeFolderName, type MoveRole, type ProductSortConfig, type ProductVariant } from "@/lib/file-sort";
+import { folderLabelKey } from "@/lib/role-folders";
 
 export const ERP_IMAGE_EXTS = ["jpg", "jpeg", "png", "webp"] as const;
 export const PRODUCT_MAX_FILES = 3000;
@@ -224,6 +225,48 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
 }
 
 /** โฟลเดอร์รุ่นบน Z: ตามแม่แบบของชนิดงานย่อย (ใช้เมื่อโฟลเดอร์ต้นทางยังไม่อยู่บน Z:) · ไม่ได้ตั้งแม่แบบ = null */
+/**
+ * ย้ายโฟลเดอร์ Rawfiles / Images หลังลงรูปเสร็จ (ค่าตั้ง cfg.moves) — แค่คิดปลายทาง ตัวย้ายจริงคือโปรแกรมบนเครื่อง
+ *   โฟลเดอร์ชั้นบนของงานที่ชื่อ (ไม่สนเลขนำหน้า) ตรงกับ cfg.moveFolders → 1 รายการ
+ *   target = แม่แบบ {แบรนด์} (โฟลเดอร์แบรนด์ของสินค้า) {รุ่น} {โฟลเดอร์} {ปี} {เดือน} · null = ยังย้ายไม่ได้ (ดู reason)
+ *   โปรแกรมหาโฟลเดอร์แบรนด์ที่สะกดต่างกันบน Z: เอง + ตั้งชื่อ _v.2 เมื่อปลายทางมีแล้ว (ไม่ทับ)
+ */
+export type ProductMove = { role: MoveRole; folder: string; files: number; bytes: number; mode: "stay" | "move"; target: string | null; reason: string | null };
+
+export function matchesFolderWord(name: string, words: string[]): boolean {
+  const k = folderLabelKey(name);
+  return words.some((w) => !!w && (k === w || (k.startsWith(w) && /^[\s_\-.\d]*$/.test(k.slice(w.length)))));
+}
+
+export function planProductMoves(files: ProductFileIn[], cfg: ProductSortConfig, opts: { jobFolder: string; brandFolder: string | null; now?: Date }): { moves: ProductMove[]; warnings: string[] } {
+  const job = safeFolderName((opts.jobFolder ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "");
+  const tops = new Map<string, { files: number; bytes: number }>();
+  for (const f of files) {
+    const rel = relPathOf(f.path);
+    const i = rel.indexOf("/");
+    if (i <= 0) continue;
+    const top = rel.slice(0, i);
+    if (isJunkFile(rel.slice(rel.lastIndexOf("/") + 1))) continue;
+    const t = tops.get(top) ?? { files: 0, bytes: 0 };
+    t.files++; t.bytes += Math.max(0, Number(f.size) || 0);
+    tops.set(top, t);
+  }
+  const moves: ProductMove[] = [];
+  const warnings: string[] = [];
+  for (const [folder, t] of tops) {
+    const role = MOVE_ROLES.find((r) => matchesFolderWord(folder, cfg.moveFolders[r]));
+    if (!role) continue;
+    const m = cfg.moves[role];
+    const needsBrand = m.pattern.includes("{แบรนด์}");
+    const target = m.pattern ? fillNasPattern(m.pattern, { แบรนด์: opts.brandFolder ?? "", รุ่น: job, โฟลเดอร์: job, ...nasDateValues(opts.now) }, needsBrand ? ["แบรนด์"] : []) : null;
+    const reason = target ? null : !m.pattern ? "ยังไม่ได้ตั้งที่ย้าย" : needsBrand && !opts.brandFolder ? "สินค้านี้ยังไม่ได้ตั้งแบรนด์ในระบบ" : "แม่แบบที่ย้ายใช้ไม่ได้";
+    moves.push({ role, folder, files: t.files, bytes: t.bytes, mode: m.mode, target, reason });
+    if (m.mode === "move" && !target) warnings.push(`ย้าย ${folder} ไม่ได้: ${reason} — ${reason === "สินค้านี้ยังไม่ได้ตั้งแบรนด์ในระบบ" ? "ตั้งแบรนด์ที่หน้า Parent SKU หรือ" : ""}กด "เปลี่ยนที่…" ในโปรแกรมเพื่อเลือกที่เอง`);
+  }
+  moves.sort((a, b) => MOVE_ROLES.indexOf(a.role) - MOVE_ROLES.indexOf(b.role) || a.folder.localeCompare(b.folder));
+  return { moves, warnings };
+}
+
 export function productNasFolder(cfg: ProductSortConfig, jobFolder: string, variant: ProductVariant = "new", now?: Date): string | null {
   const job = (jobFolder ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
   if (!job.trim()) return null;

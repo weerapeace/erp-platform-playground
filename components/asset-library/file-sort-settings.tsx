@@ -16,11 +16,11 @@ import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import {
-  DEFAULT_ARTWORK_PROFILE, DEFAULT_CONTENT_CONFIG, DEFAULT_PRODUCT_CONFIG, NAS_TOKENS, NAS_TOKEN_HINT, PREVIEWABLE_EXTS, PRODUCT_VARIANTS, PRODUCT_VARIANT_LABEL,
+  DEFAULT_ARTWORK_PROFILE, DEFAULT_CONTENT_CONFIG, DEFAULT_PRODUCT_CONFIG, MOVE_ROLES, MOVE_ROLE_LABEL, NAS_TOKENS, NAS_TOKEN_HINT, PREVIEWABLE_EXTS, PRODUCT_VARIANTS, PRODUCT_VARIANT_LABEL, type MoveRole,
   cleanContentConfig, cleanFileSortConfig, findProfile, nasFolderFor, nasPrefixOf, normalizeExt, planFileSort,
   type ContentSortConfig, type FileSortConfig, type FileSortProfile, type FileSortRule, type NasToken, type ProductSortConfig, type ProductVariant,
 } from "@/lib/file-sort";
-import { planProductSort, productNasFolder } from "@/lib/file-sort-product";
+import { planProductMoves, planProductSort, productNasFolder } from "@/lib/file-sort-product";
 import { contentNasFolder, planContentSort } from "@/lib/file-sort-content";
 import { DEST_LABEL } from "@/lib/product-image-routing";
 import { cleanRoleFolders } from "@/lib/role-folders";
@@ -36,7 +36,7 @@ const canPreview = (ext: string) => (PREVIEWABLE_EXTS as readonly string[]).incl
 // โฟลเดอร์ตัวอย่างของแท็บงานสินค้า (หน้าตาเดียวกับโฟลเดอร์จริงบน Z:) + สินค้าสมมติ BSD15 / BSD15-01
 const SAMPLE_PRODUCT_FILES = [
   "[01] Description/1.New Arrival.jpeg", "[01] Description/1.New Arrival.psd", "[01] Description/Ver.2/1.New Arrival.jpeg", "[01] Description/Ver.2/2.Color.jpeg",
-  "[03] Rawfiles/IMG_0001.CR2", "[03] Rawfiles/IMG_0001.jpg", "BSD15/1.jpeg", "BSD15/2.jpeg", "BSD15/1.psd",
+  "[02] Images/lifestyle-1.jpg", "[03] Rawfiles/IMG_0001.CR2", "[03] Rawfiles/IMG_0001.jpg", "BSD15/1.jpeg", "BSD15/2.jpeg", "BSD15/1.psd",
   "BSD15-01/1.jpeg", "BSD15-01/2.jpeg", "BSD15-01/2.psd", "BSD15-01/BSD15-01.png", "BSD15-01.jpeg", "BSD15-02/1.jpeg", "BSD15-02/2.jpeg", "Thumbs.db",
 ].map((path) => ({ path, size: 1000 }));
 // สินค้าสมมติ: BSD15-01 มีรูปในระบบแล้ว (สีเดิม) · BSD15-02 ยังไม่มีรูป (สีใหม่)
@@ -68,6 +68,7 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   const [product, setProduct] = useState<ProductSortConfig>(DEFAULT_PRODUCT_CONFIG);
   const [descText, setDescText] = useState(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.desc));
   const [archText, setArchText] = useState(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.archive));
+  const [moveText, setMoveText] = useState<Record<MoveRole, string>>({ raw: listText(DEFAULT_PRODUCT_CONFIG.moveFolders.raw), images: listText(DEFAULT_PRODUCT_CONFIG.moveFolders.images) });
   const [content, setContent] = useState<ContentSortConfig>(DEFAULT_CONTENT_CONFIG);
   const [rawText, setRawText] = useState(listText(DEFAULT_CONTENT_CONFIG.rawFolders));
   const [extText, setExtText] = useState(listText(DEFAULT_CONTENT_CONFIG.albumExts));
@@ -84,6 +85,7 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   const applyConfig = (cfg: FileSortConfig) => {
     setSaved(cfg); setDraft(findProfile(cfg, "artwork")); setProduct(cfg.product);
     setDescText(listText(cfg.product.roleFolders.desc)); setArchText(listText(cfg.product.roleFolders.archive));
+    setMoveText({ raw: listText(cfg.product.moveFolders.raw), images: listText(cfg.product.moveFolders.images) });
     setContent(cfg.content); setRawText(listText(cfg.content.rawFolders)); setExtText(listText(cfg.content.albumExts));
   };
 
@@ -102,7 +104,11 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   useEffect(() => { void load(); }, []);
 
   // ช่องรายชื่อโฟลเดอร์: พิมพ์เป็นข้อความ (คั่นด้วย ,) → แปลงเป็นค่าตั้งทุกครั้งที่พิมพ์
-  const productNow: ProductSortConfig = useMemo(() => ({ ...product, roleFolders: cleanRoleFolders({ desc: parseList(descText), archive: parseList(archText) }) }), [product, descText, archText]);
+  const productNow: ProductSortConfig = useMemo(() => ({
+    ...product, roleFolders: cleanRoleFolders({ desc: parseList(descText), archive: parseList(archText) }),
+    moveFolders: { raw: [...new Set(parseList(moveText.raw).map((s) => s.toLowerCase()))], images: [...new Set(parseList(moveText.images).map((s) => s.toLowerCase()))] },
+  }), [product, descText, archText, moveText]);
+  const sampleMoves = useMemo(() => planProductMoves(SAMPLE_PRODUCT_FILES, productNow, { jobFolder: "BSD15", brandFolder: "[01] Louis Montini" }).moves, [productNow]);
   const savedProfile = saved ? findProfile(saved, "artwork") : null;
   const contentNow: ContentSortConfig = useMemo(() => cleanContentConfig({ ...content, rawFolders: rawText, albumExts: extText }), [content, rawText, extText]);
   const dirty = !!saved && (JSON.stringify(savedProfile) !== JSON.stringify(draft) || JSON.stringify(saved.product) !== JSON.stringify(productNow) || JSON.stringify(saved.content) !== JSON.stringify(contentNow));
@@ -114,10 +120,11 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
 
   // แม่แบบที่เก็บบน Z:: art = ค่าตั้งต้นของ Artwork · type:<ชื่อชนิด> = แยกตามชนิด · prod:<variant> = สูตรสินค้า · content = สูตร Content
   const patternOf = (key: string): string =>
-    key === "art" ? draft.nasPattern : key === "content" ? content.nasPattern : key.startsWith("type:") ? (draft.nasByType[key.slice(5)] ?? "") : product.nasPatterns[key.slice(5) as ProductVariant] ?? "";
+    key === "art" ? draft.nasPattern : key === "content" ? content.nasPattern : key.startsWith("move:") ? (product.moves[key.slice(5) as MoveRole]?.pattern ?? "") : key.startsWith("type:") ? (draft.nasByType[key.slice(5)] ?? "") : product.nasPatterns[key.slice(5) as ProductVariant] ?? "";
   const setPattern = (key: string, v: string) => {
     if (key === "art") setDraft((d) => ({ ...d, nasPattern: v, nasRoot: nasPrefixOf(v) }));
     else if (key === "content") setContent((c) => ({ ...c, nasPattern: v, nasRoot: nasPrefixOf(v) }));
+    else if (key.startsWith("move:")) { const r = key.slice(5) as MoveRole; setProduct((p) => ({ ...p, moves: { ...p.moves, [r]: { ...p.moves[r], pattern: v } } })); }
     else if (key.startsWith("type:")) {
       const name = key.slice(5);
       setDraft((d) => { const by = { ...d.nasByType }; if (v.trim()) by[name] = v; else delete by[name]; return { ...d, nasByType: by }; });
@@ -160,7 +167,8 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   const resetTab = () => {
     if (tab === "artwork") setDraft({ ...DEFAULT_ARTWORK_PROFILE, nasPattern: draft.nasPattern, nasByType: draft.nasByType, nasRoot: draft.nasRoot });
     else if (tab === "content") { setContent({ ...DEFAULT_CONTENT_CONFIG, nasPattern: content.nasPattern, nasRoot: content.nasRoot }); setRawText(listText(DEFAULT_CONTENT_CONFIG.rawFolders)); setExtText(listText(DEFAULT_CONTENT_CONFIG.albumExts)); }
-    else { setProduct({ ...DEFAULT_PRODUCT_CONFIG, nasPatterns: product.nasPatterns, nasRoot: product.nasRoot }); setDescText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.desc)); setArchText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.archive)); }
+    else { setProduct({ ...DEFAULT_PRODUCT_CONFIG, nasPatterns: product.nasPatterns, nasRoot: product.nasRoot }); setDescText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.desc)); setArchText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.archive));
+      setMoveText({ raw: listText(DEFAULT_PRODUCT_CONFIG.moveFolders.raw), images: listText(DEFAULT_PRODUCT_CONFIG.moveFolders.images) }); }
   };
 
   const save = async () => {
@@ -371,6 +379,34 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
                     <label className="inline-flex items-center gap-2"><input type="radio" name="fs-mode" className={chk} checked={product.mode === "append"} disabled={!canEdit} onChange={() => setProduct((p) => ({ ...p, mode: "append" }))} />{t("ต่อท้ายรูปเดิม", "Append")}</label>
                   </div>
                   <p className="text-[12px] text-slate-500 mt-1">{t("ค่าตั้งต้นในโปรแกรม (เปลี่ยนเป็นรายครั้งได้) · รูปเดิมที่ถูกแทนย้อนคืนได้", "Default in the app (changeable per run) · replaced images can be restored")}</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <p className="text-[13px] font-medium text-slate-700 mb-1">{t("หลังลงรูปเสร็จ: ย้ายโฟลเดอร์ไปเก็บที่อื่นบน Z:", "After uploading: move folders elsewhere on Z:")}</p>
+                  <div className="space-y-3">
+                    {MOVE_ROLES.map((r) => {
+                      const m = sampleMoves.find((x) => x.role === r);
+                      return (
+                        <div key={r} className="grid grid-cols-[150px_minmax(0,1fr)] gap-2 items-start">
+                          <span className="text-[13px] text-slate-700 pt-1">{MOVE_ROLE_LABEL[r]}</span>
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap gap-4 text-[13px]" role="radiogroup" aria-label={MOVE_ROLE_LABEL[r]}>
+                              <label className="inline-flex items-center gap-2"><input type="radio" name={`fs-move-${r}`} className={chk} checked={product.moves[r].mode === "stay"} disabled={!canEdit} onChange={() => setProduct((p) => ({ ...p, moves: { ...p.moves, [r]: { ...p.moves[r], mode: "stay" } } }))} />{t("อยู่ที่เดิม", "Stay")}</label>
+                              <label className="inline-flex items-center gap-2"><input type="radio" name={`fs-move-${r}`} className={chk} checked={product.moves[r].mode === "move"} disabled={!canEdit} onChange={() => setProduct((p) => ({ ...p, moves: { ...p.moves, [r]: { ...p.moves[r], mode: "move" } } }))} />{t("ย้ายไป", "Move to")}</label>
+                            </div>
+                            {patternInput(`move:${r}`, r === "raw" ? "Z:\\Raw Files\\{แบรนด์}\\{รุ่น}_rawfiles" : t("ที่ย้ายไป (ใช้ตอนติ๊กในโปรแกรม)", "Destination (used when ticked in the app)"))}
+                            <p className="text-[11px] text-slate-500 font-mono break-all">
+                              {m ? `${m.folder} → ${product.moves[r].mode === "stay" ? t("อยู่ที่เดิม", "stays") : m.target ?? `— ${m.reason}`}` : "—"}
+                            </p>
+                            <input value={moveText[r]} disabled={!canEdit} onChange={(e) => setMoveText((x) => ({ ...x, [r]: e.target.value }))} aria-label={t(`ชื่อโฟลเดอร์ ${MOVE_ROLE_LABEL[r]}`, `${MOVE_ROLE_LABEL[r]} folder names`)}
+                              className="w-full h-8 px-3 text-[12px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[12px] text-slate-500 mt-1">{t("ตัวอย่างใช้แบรนด์ [01] Louis Montini · ช่องล่าง = ชื่อโฟลเดอร์ (คั่นด้วย , · ไม่สนเลขนำหน้า) · ย้ายบน Z: ด้วยกัน = เสร็จทันที · ปลายทางมีแล้ว = ตั้งชื่อ _v.2 ไม่ทับ · โปรแกรมหาโฟลเดอร์แบรนด์ที่สะกดต่างกันให้ · ปิดได้ทีละงานในโปรแกรม",
+                    "Sample uses brand [01] Louis Montini · lower box = folder names · moves on Z: are instant · existing destination gets _v.2 · the app finds brand folders spelled differently · can be turned off per job")}</p>
+                  {tokenChips}
                 </div>
               </section>
 

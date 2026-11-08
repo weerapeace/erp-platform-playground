@@ -4,7 +4,8 @@
  * body { name, profile?: "artwork"|"product"|"content", variant?: "new"|"color"|"edit" (product), brand_id?, artwork_type?, asset_id?, batch_id?, album_id? (content),
  *        nas_folder?, nas_custom? (เลือกที่เก็บ Z: เอง), drive_link?,
  *        mode: "move"|"copy" (artwork) | "replace"|"append" (product) · content ไม่แตะต้นฉบับเสมอ,
- *        counts?: { nas?, drive?, erp?, album?, removed?, skipped?, already?, failed? }, errors?: string[], source_folder?, app_version? }
+ *        counts?: { nas?, drive?, erp?, album?, moved?, removed?, skipped?, already?, failed? }, moves?: [{ from, to, how, files }] (ย้าย Rawfiles/Images),
+ *        errors?: string[], source_folder?, app_version? }
  * → เขียน audit_logs action = file_sort.upload (ใครทำ · เมื่อไหร่ · งานไหน · ไปที่ไหนกี่ไฟล์ · พลาดอะไร)
  * โปรแกรมเรียกหลังจบงานทุกครั้ง (สำเร็จ/พลาดบางส่วนก็เรียก) — ไม่แก้ข้อมูลอื่น
  */
@@ -47,7 +48,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       nas_custom: b.nas_custom === true,
       drive_link: str(b.drive_link, 400),
       source_folder: str(b.source_folder, 400),
-      counts: { nas: num(c.nas), drive: num(c.drive), erp: num(c.erp), album: num(c.album), removed: num(c.removed), skipped: num(c.skipped), already: num(c.already), failed: num(c.failed) },
+      counts: { nas: num(c.nas), drive: num(c.drive), erp: num(c.erp), album: num(c.album), moved: num(c.moved), removed: num(c.removed), skipped: num(c.skipped), already: num(c.already), failed: num(c.failed) },
+      // ย้ายโฟลเดอร์ Rawfiles / Images (งานสินค้า) — จากไหนไปไหน · rename = ย้ายบน Z: · copy+trash = ก๊อปจากเครื่องแล้วต้นฉบับลงถังขยะ
+      moves: (Array.isArray(b.moves) ? b.moves : []).slice(0, 10).map((m) => {
+        const x = (m && typeof m === "object" ? m : {}) as Record<string, unknown>;
+        return { from: str(x.from, 400), to: str(x.to, 400), how: str(x.how, 20), files: num(x.files) };
+      }),
       errors,
       app_version: str(b.app_version, 40),
     },

@@ -10,7 +10,8 @@
  * ไม่สร้าง/ไม่แก้อะไร — แค่คิดให้ (กฎอยู่ที่เดียว โปรแกรมบนเครื่องไม่ต้องคิดเอง)
  *
  * สูตรงานสินค้า: body { profile:"product", variant?: "new"|"color"|"edit" (สินค้าใหม่/เพิ่มสี/แก้สี), job_folder:"BSD15", mode?: "replace"|"append", files:[{ path, size? }] }  (สิทธิ์ products.view เพิ่ม)
- * →   { profile:"product", job_name, nas_folder, mode, files, slots, groups, counts, warnings, parents }   (lib/file-sort-product)
+ * →   { profile:"product", job_name, nas_folder, mode, files, slots, groups, counts, warnings, parents, moves, brand_folder }   (lib/file-sort-product)
+ *     moves[] = ย้ายโฟลเดอร์ Rawfiles / Images หลังลงรูปเสร็จ { role, folder, files, bytes, mode: stay|move, target, reason } (planProductMoves)
  *     files[]  = ไฟล์ละ { rel, erp, dest, slotKey, width, nas, why, note }
  *     slots[]  = ช่องรูปของสินค้า { kind, parentId, skuId, rels (ปกหน้าสุด), coverRel, replaces, remove{attachments,desc}, entity }
  *
@@ -25,7 +26,7 @@ import { driveConfigured } from "@/lib/google-drive";
 import { findArtworkDriveFolder } from "@/lib/artwork-drive";
 import { findProfile, nasFolderFor, nasPatternFor, planFileSort, safeFolderName, type FileSortInput, type ProductVariant } from "@/lib/file-sort";
 import { artworkTypeFolderName, brandFolderName, loadFileSortConfig } from "@/lib/file-sort-server";
-import { PRODUCT_MAX_FILES, planProductSort, productNasFolder } from "@/lib/file-sort-product";
+import { PRODUCT_MAX_FILES, planProductMoves, planProductSort, productNasFolder } from "@/lib/file-sort-product";
 import { CONTENT_MAX_FILES, contentNasFolder, planContentSort } from "@/lib/file-sort-content";
 import { loadAlbumFiles } from "@/lib/content-albums-server";
 import { resolveBrandContentFolder } from "@/lib/content-drive";
@@ -116,7 +117,17 @@ async function planProduct(request: NextRequest, b: { job_folder?: string; mode?
   const variant: ProductVariant = b.variant === "color" || b.variant === "edit" ? b.variant : "new";
   const plan = planProductSort(files, catalog.parents, cfg, { jobFolder: jobName, variant, mode: b.mode === "append" ? "append" : b.mode === "replace" ? "replace" : undefined });
   if (catalog.truncated) plan.warnings.push("รหัสในโฟลเดอร์นี้ตรงกับสินค้าเกิน 60 รุ่น — แสดงแค่ 60 รุ่นแรก (แบ่งโฟลเดอร์ให้เล็กลง)");
-  return NextResponse.json({ profile: "product", job_name: safeFolderName(jobName), nas_folder: productNasFolder(cfg, jobName, variant), ...plan, error: null });
+  // ย้าย Rawfiles / Images: โฟลเดอร์แบรนด์ = แบรนด์ของรุ่นที่ชื่อตรงกับโฟลเดอร์ (ไม่มี = รุ่นแรกที่จับคู่ได้) · ไม่มีแบรนด์ = ไม่เดา
+  const main = plan.parents.find((p) => p.code.toLowerCase() === jobName.toLowerCase()) ?? plan.parents[0];
+  let brandFolder: string | null = null;
+  if (main) {
+    const { data: pr } = await admin.from("parent_skus_v2").select("brand_id").eq("id", main.id).maybeSingle();
+    const brandId = (pr as { brand_id?: string | null } | null)?.brand_id ?? null;
+    if (brandId) brandFolder = (await brandFolderName(admin, brandId)).folder;
+  }
+  const mv = planProductMoves(files, cfg, { jobFolder: jobName, brandFolder });
+  return NextResponse.json({ profile: "product", job_name: safeFolderName(jobName), nas_folder: productNasFolder(cfg, jobName, variant), ...plan,
+    moves: mv.moves, brand_folder: brandFolder, warnings: [...plan.warnings, ...mv.warnings], error: null });
 }
 
 /** สูตร Content: อัลบั้มชื่อเดียวกันของแบรนด์เดียวกันที่มีแล้ว = เติมไฟล์ใส่ (ไฟล์ที่มีแล้วข้าม) · ไม่มี = โปรแกรมสร้างใหม่ตอนส่ง */

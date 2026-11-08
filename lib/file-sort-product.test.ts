@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { planProductSort, productNasFolder, type ProductFileIn } from "./file-sort-product";
-import { DEFAULT_PRODUCT_CONFIG } from "./file-sort";
+import { matchesFolderWord, planProductMoves, planProductSort, productNasFolder, type ProductFileIn } from "./file-sort-product";
+import { DEFAULT_PRODUCT_CONFIG, cleanProductConfig } from "./file-sort";
 import type { CatalogParent } from "./product-image-catalog-server";
 
 const P = "11111111-0000-0000-0000-000000000001";
@@ -162,5 +162,41 @@ describe("เพิ่มสี / แก้สี", () => {
     const cfg = { ...DEFAULT_PRODUCT_CONFIG, nasPatterns: { new: "Z:\\NP\\{รุ่น}", color: "Z:\\NC\\{ปี}-{เดือน}\\{รุ่น}", edit: "" } };
     expect(productNasFolder(cfg, "BSD15", "color", new Date("2026-11-08T00:00:00Z"))).toBe("Z:\\NC\\2026-11\\BSD15");
     expect(productNasFolder(cfg, "BSD15", "edit")).toBeNull();
+  });
+});
+
+describe("ย้ายโฟลเดอร์ Rawfiles / Images หลังลงรูปเสร็จ", () => {
+  const files: ProductFileIn[] = ["[01] Description/1.jpg", "[02] Images/a.jpg", "[02] Images/b.jpg", "[03] Rawfiles/IMG_1.CR2", "[03] Rawfiles/IMG_1.jpg", "[03] Rawfiles/Thumbs.db", "00_rawfiles_1/x.jpg", "BSD15-01/1.jpg", "BSD15-01.jpg"]
+    .map((path) => ({ path, size: 100 }));
+  it("ค่าตั้งต้น: Rawfiles ย้ายไป Raw Files ตามแบรนด์ · Images อยู่ที่เดิม · ไม่นับไฟล์ระบบ", () => {
+    const { moves, warnings } = planProductMoves(files, DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15", brandFolder: "[01] Louis Montini" });
+    expect(moves.map((m) => `${m.role}:${m.folder}:${m.mode}:${m.files}`)).toEqual(["raw:00_rawfiles_1:move:1", "raw:[03] Rawfiles:move:2", "images:[02] Images:stay:2"]);
+    expect(moves[1].target).toBe("Z:\\Raw Files\\[01] Louis Montini\\BSD15_rawfiles");
+    expect(moves[1].bytes).toBe(200);
+    expect(moves[2].target).toBeNull();
+    expect(warnings).toEqual([]);
+  });
+  it("สินค้ายังไม่ได้ตั้งแบรนด์ → ไม่เดา · เตือนให้ตั้งแบรนด์หรือเลือกที่เอง", () => {
+    const { moves, warnings } = planProductMoves(files, DEFAULT_PRODUCT_CONFIG, { jobFolder: "JEAN10", brandFolder: null });
+    const raw = moves.find((m) => m.folder === "[03] Rawfiles")!;
+    expect(raw.target).toBeNull();
+    expect(raw.reason).toBe("สินค้านี้ยังไม่ได้ตั้งแบรนด์ในระบบ");
+    expect(warnings.some((w) => w.includes("[03] Rawfiles") && w.includes("ตั้งแบรนด์"))).toBe(true);
+  });
+  it("ตั้งให้ Images ย้ายด้วย + แม่แบบไม่ใช้แบรนด์ + ชื่อโฟลเดอร์ตั้งเอง", () => {
+    const cfg = cleanProductConfig({ moves: { raw: { mode: "stay", pattern: "" }, images: { mode: "move", pattern: "Z:\\Lifestyle\\{ปี}\\{รุ่น}" } }, moveFolders: { raw: "rawfiles", images: " Images , Lifestyle " } });
+    expect(cfg.moveFolders.images).toEqual(["images", "lifestyle"]);
+    const { moves, warnings } = planProductMoves([...files, { path: "[04] Lifestyle/c.jpg", size: 5 }], cfg, { jobFolder: "BSD15", brandFolder: null, now: new Date("2026-11-08T00:00:00Z") });
+    expect(moves.filter((m) => m.role === "images").map((m) => `${m.folder}→${m.target}`)).toEqual(["[02] Images→Z:\\Lifestyle\\2026\\BSD15", "[04] Lifestyle→Z:\\Lifestyle\\2026\\BSD15"]);
+    expect(moves.find((m) => m.folder === "[03] Rawfiles")).toMatchObject({ mode: "stay", target: null, reason: "ยังไม่ได้ตั้งที่ย้าย" });
+    expect(warnings).toEqual([]);
+  });
+  it("ชื่อโฟลเดอร์: ไม่สนเลขนำหน้า · มีเลขต่อท้ายก็นับ · คำที่ขึ้นต้นเหมือนแต่ไม่ใช่ไม่นับ", () => {
+    const w = DEFAULT_PRODUCT_CONFIG.moveFolders.raw;
+    expect(matchesFolderWord("[03] Rawfile", w)).toBe(true);
+    expect(matchesFolderWord("Raw Files 2", w)).toBe(true);
+    expect(matchesFolderWord("00_rawfiles_1", w)).toBe(true);
+    expect(matchesFolderWord("Rawhide", w)).toBe(false);
+    expect(cleanProductConfig({}).moves).toEqual(DEFAULT_PRODUCT_CONFIG.moves);
   });
 });

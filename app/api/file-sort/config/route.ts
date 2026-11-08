@@ -75,7 +75,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   // สูตรงานสินค้า: ชื่อโฟลเดอร์หน้าที่ · ที่เก็บบน Z: · โหมดรูปเดิม
   const pp = prev.product, np = next.product;
   const diff = <T,>(a: T, b: T) => (JSON.stringify(a) === JSON.stringify(b) ? undefined : { old: a, new: b });
-  const product = { nas_patterns: diff(pp.nasPatterns, np.nasPatterns), desc_folders: diff(pp.roleFolders.desc, np.roleFolders.desc), archive_folders: diff(pp.roleFolders.archive, np.roleFolders.archive), mode: diff(pp.mode, np.mode) };
+  const product = { nas_patterns: diff(pp.nasPatterns, np.nasPatterns), desc_folders: diff(pp.roleFolders.desc, np.roleFolders.desc), archive_folders: diff(pp.roleFolders.archive, np.roleFolders.archive), mode: diff(pp.mode, np.mode),
+    moves: diff(pp.moves, np.moves), move_folders: diff(pp.moveFolders, np.moveFolders) };
   // สูตร Content: ที่เก็บบน Z: · ชื่อโฟลเดอร์ไฟล์ดิบ · นามสกุลที่ลงอัลบั้ม
   const pc = prev.content, nc = next.content;
   const content = { nas_pattern: diff(pc.nasPattern, nc.nasPattern), raw_folders: diff(pc.rawFolders, nc.rawFolders), album_exts: diff(pc.albumExts, nc.albumExts) };

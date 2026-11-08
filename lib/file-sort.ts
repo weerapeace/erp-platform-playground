@@ -53,14 +53,41 @@ export type ProductSortConfig = {
   roleFolders: RoleFolderConfig;
   /** รูปเดิมของสินค้า: แทนที่ทั้งชุด / ต่อท้าย */
   mode: "replace" | "append";
+  /** หลังลงรูปเสร็จ: ย้ายโฟลเดอร์ Rawfiles / Images ไปที่อื่นบน Z: (stay = อยู่ที่เดิม) · ตัวคิด lib/file-sort-product planProductMoves */
+  moves: Record<MoveRole, FolderMove>;
+  /** ชื่อโฟลเดอร์ชั้นบนของแต่ละชนิด (ไม่สนเลขนำหน้า · มีเลขต่อท้ายก็นับ เช่น 00_rawfiles_1) */
+  moveFolders: Record<MoveRole, string[]>;
 };
+export const MOVE_ROLES = ["raw", "images"] as const;
+export type MoveRole = (typeof MOVE_ROLES)[number];
+export const MOVE_ROLE_LABEL: Record<MoveRole, string> = { raw: "Rawfiles", images: "Images" };
+export type FolderMove = { mode: "stay" | "move"; pattern: string };
 const PRODUCT_NAS_DEFAULT = "Z:\\Work In Process\\[01] New Product\\{รุ่น}";
 export const DEFAULT_PRODUCT_CONFIG: ProductSortConfig = {
   label: "งานสินค้า", nasPatterns: { new: PRODUCT_NAS_DEFAULT, color: PRODUCT_NAS_DEFAULT, edit: PRODUCT_NAS_DEFAULT },
   nasRoot: "Z:\\Work In Process\\[01] New Product", roleFolders: DEFAULT_ROLE_FOLDERS, mode: "replace",
+  // ที่เดียวกับปุ่ม Arrange ของ Create Folder Tool: Z:\Raw Files\<แบรนด์>\<รุ่น>_rawfiles · Images อยู่กับรุ่น
+  moves: { raw: { mode: "move", pattern: "Z:\\Raw Files\\{แบรนด์}\\{รุ่น}_rawfiles" }, images: { mode: "stay", pattern: "" } },
+  moveFolders: { raw: ["rawfile", "rawfiles", "raw files", "raw file", "raw"], images: ["images", "image"] },
 };
 
 const cleanPattern = (v: unknown): string => String(v ?? "").trim().replace(/[\\/]+$/, "").slice(0, 300);
+
+function cleanMoves(raw: unknown): { moves: Record<MoveRole, FolderMove>; moveFolders: Record<MoveRole, string[]> } {
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const mv = (o.moves && typeof o.moves === "object" ? o.moves : {}) as Record<string, unknown>;
+  const mf = (o.moveFolders && typeof o.moveFolders === "object" ? o.moveFolders : {}) as Record<string, unknown>;
+  const moves = {} as Record<MoveRole, FolderMove>;
+  const moveFolders = {} as Record<MoveRole, string[]>;
+  for (const r of MOVE_ROLES) {
+    const d = DEFAULT_PRODUCT_CONFIG.moves[r];
+    const x = (mv[r] && typeof mv[r] === "object" ? mv[r] : {}) as Record<string, unknown>;
+    moves[r] = { mode: x.mode === "move" || x.mode === "stay" ? x.mode : d.mode, pattern: typeof x.pattern === "string" ? cleanPattern(x.pattern) : d.pattern };
+    const list = Array.isArray(mf[r]) ? mf[r] as unknown[] : typeof mf[r] === "string" ? String(mf[r]).split(/[,\n]/) : null;
+    moveFolders[r] = list ? [...new Set(list.map((s) => String(s ?? "").trim().toLowerCase().slice(0, 40)).filter(Boolean))].slice(0, 20) : [...DEFAULT_PRODUCT_CONFIG.moveFolders[r]];
+  }
+  return { moves, moveFolders };
+}
 
 export function cleanProductConfig(raw: unknown): ProductSortConfig {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -76,6 +103,7 @@ export function cleanProductConfig(raw: unknown): ProductSortConfig {
     nasRoot: nasPrefixOf(nasPatterns.new),
     roleFolders: cleanRoleFolders(o.roleFolders),
     mode: o.mode === "append" ? "append" : "replace",
+    ...cleanMoves(o),
   };
 }
 
