@@ -72,6 +72,8 @@ export type ProductPlanSlot = {
   remove: { attachments: { id: string; key: string }[]; desc: { assetId: string; sort: number | null }[] };
   /** เจ้าของแกลเลอรี (ช่อง desc/png = Parent) */
   entity: { type: "skus_v2" | "parent_skus_v2"; id: string };
+  /** ของเดิมไว้ "ย้อนทั้งชุด": ปกเดิมของแกลเลอรี (โหมดต่อท้าย) · รูปตัด PNG เดิม */
+  prev: { primaryId: string | null; pngKey: string | null };
 };
 export type ProductPlanGroup = { label: string; role: GroupRole | null; code: string | null; count: number; note?: string };
 export type ProductPlan = {
@@ -169,6 +171,10 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
       rels: s.ids.map(relOf), coverRel: s.coverId ? relOf(s.coverId) : undefined,
       existing: s.existing, total: s.total, limit: s.limit, replaces: s.replaces && mode === "replace", remove,
       entity: s.kind === "skuGallery" && s.skuId ? { type: "skus_v2", id: s.skuId } : { type: "parent_skus_v2", id: s.parentId },
+      prev: {
+        primaryId: (s.kind === "skuGallery" ? sku?.items : s.kind === "parentGallery" ? p.galleryItems : undefined)?.find((x) => x.primary)?.id ?? null,
+        pngKey: s.kind === "png" ? p.pngKey : null,
+      },
     };
   });
   // ปกจากแม่แบบที่ยอมให้ไฟล์ชื่อรหัส (planRoute) → ป้ายรายไฟล์ต้องตรงกับผลจริง

@@ -87,6 +87,8 @@ describe("planProductSort — รูปเดิม / โหมด", () => {
     const d = p.slots.find((s) => s.kind === "desc")!;
     expect(d.replaces).toBe(true);
     expect(d.remove.desc).toEqual([{ assetId: "d1", sort: 0 }, { assetId: "d2", sort: 1 }]);
+    expect(g.prev).toEqual({ primaryId: "a1", pngKey: null });
+    expect(p.slots.find((s) => s.kind === "png")!.prev).toEqual({ primaryId: null, pngKey: null });
   });
 
   it("ต่อท้าย: ไม่เอาอะไรออก · เกินเพดาน 9 = ไม่ลง + เตือน", () => {
