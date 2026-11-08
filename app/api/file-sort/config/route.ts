@@ -76,6 +76,9 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   const pp = prev.product, np = next.product;
   const diff = <T,>(a: T, b: T) => (JSON.stringify(a) === JSON.stringify(b) ? undefined : { old: a, new: b });
   const product = { nas_patterns: diff(pp.nasPatterns, np.nasPatterns), desc_folders: diff(pp.roleFolders.desc, np.roleFolders.desc), archive_folders: diff(pp.roleFolders.archive, np.roleFolders.archive), mode: diff(pp.mode, np.mode) };
-  await writeAuditFor(request, admin, { action: "file_sort_config.update", entityType: "ui_config", metadata: { key: FILE_SORT_CONFIG_KEY, changes, product } });
+  // สูตร Content: ที่เก็บบน Z: · ชื่อโฟลเดอร์ไฟล์ดิบ · นามสกุลที่ลงอัลบั้ม
+  const pc = prev.content, nc = next.content;
+  const content = { nas_pattern: diff(pc.nasPattern, nc.nasPattern), raw_folders: diff(pc.rawFolders, nc.rawFolders), album_exts: diff(pc.albumExts, nc.albumExts) };
+  await writeAuditFor(request, admin, { action: "file_sort_config.update", entityType: "ui_config", metadata: { key: FILE_SORT_CONFIG_KEY, changes, product, content } });
   return NextResponse.json({ ok: true, data: next, error: null });
 }

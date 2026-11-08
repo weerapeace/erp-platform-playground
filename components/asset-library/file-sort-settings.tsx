@@ -4,6 +4,7 @@
  *   แท็บ "โลโก้ / Artwork": ตาราง นามสกุล → รูปตัวอย่างในคลัง / Google Drive / Z: (ลากเรียง = ลำดับเลือกรูปตัวอย่าง)
  *     + รากบน Z: + นามสกุลอื่น + ทดลองดูผล (planFileSort ตัวเดียวกับเซิร์ฟเวอร์) + path Z: ของแต่ละแบรนด์
  *   แท็บ "งานสินค้า": ชื่อโฟลเดอร์ Description / เก็บไฟล์ · ที่เก็บบน Z: · โหมดรูปเดิม + ทดลองกับโฟลเดอร์ตัวอย่าง (planProductSort ตัวเดียวกับเซิร์ฟเวอร์)
+ *   แท็บ "Content": ที่เก็บบน Z: · ชื่อโฟลเดอร์ไฟล์ดิบ · นามสกุลที่ลงอัลบั้ม + ทดลอง (planContentSort ตัวเดียวกับเซิร์ฟเวอร์)
  * ข้อมูล: /api/file-sort/config · กฎ: lib/file-sort + lib/file-sort-product · คู่มือ docs/file-sorter.md
  * ของกลาง: ERPModal · useDragReorder/DragHandle · Icon · useToast · useT
  */
@@ -15,18 +16,19 @@ import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import {
-  DEFAULT_ARTWORK_PROFILE, DEFAULT_PRODUCT_CONFIG, NAS_TOKENS, NAS_TOKEN_HINT, PREVIEWABLE_EXTS, PRODUCT_VARIANTS, PRODUCT_VARIANT_LABEL,
-  cleanFileSortConfig, findProfile, nasFolderFor, nasPrefixOf, normalizeExt, planFileSort,
-  type FileSortConfig, type FileSortProfile, type FileSortRule, type NasToken, type ProductSortConfig, type ProductVariant,
+  DEFAULT_ARTWORK_PROFILE, DEFAULT_CONTENT_CONFIG, DEFAULT_PRODUCT_CONFIG, NAS_TOKENS, NAS_TOKEN_HINT, PREVIEWABLE_EXTS, PRODUCT_VARIANTS, PRODUCT_VARIANT_LABEL,
+  cleanContentConfig, cleanFileSortConfig, findProfile, nasFolderFor, nasPrefixOf, normalizeExt, planFileSort,
+  type ContentSortConfig, type FileSortConfig, type FileSortProfile, type FileSortRule, type NasToken, type ProductSortConfig, type ProductVariant,
 } from "@/lib/file-sort";
 import { planProductSort, productNasFolder } from "@/lib/file-sort-product";
+import { contentNasFolder, planContentSort } from "@/lib/file-sort-content";
 import { DEST_LABEL } from "@/lib/product-image-routing";
 import { cleanRoleFolders } from "@/lib/role-folders";
 import type { CatalogParent } from "@/lib/product-image-catalog-server";
 
 type BrandRow = { id: string; name: string; folder: string | null };
 type TypeRow = { name: string; folder: string };
-type Tab = "artwork" | "product";
+type Tab = "artwork" | "product" | "content";
 
 const SAMPLE_FILES = ["logo.jpg", "logo.png", "logo.psd", "logo.ai", "logo.pdf", "notes.txt", "Thumbs.db"].map((path) => ({ path }));
 const canPreview = (ext: string) => (PREVIEWABLE_EXTS as readonly string[]).includes(ext);
@@ -46,6 +48,12 @@ const SAMPLE_PARENTS: CatalogParent[] = [{
   ],
 }];
 const SAMPLE_ART_TYPE = { name: "โลโก้", folder: "01_Logo" };
+// โฟลเดอร์ตัวอย่างของแท็บ Content (โครงเดียวกับ Create Folder Tool แท็บ Contents)
+const SAMPLE_CONTENT_FOLDER = "2026_11_08-1_MPU15";
+const SAMPLE_CONTENT_FILES = [
+  "01_Instagram/1.jpg", "01_Instagram/2.jpg", "01_Instagram/reel.mp4", "02_Facebook/1.jpg", "04_Shop Decoration/banner.png",
+  "01_Images_1/cover.jpg", "01_Images_1/cover.psd", "00_rawfiles/IMG_0001.CR2", "00_rawfiles/IMG_0001.jpg", "Thumbs.db",
+].map((path) => ({ path, size: 1000 }));
 const listText = (xs: string[]) => xs.join(", ");
 const parseList = (s: string) => s.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
 
@@ -60,6 +68,9 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   const [product, setProduct] = useState<ProductSortConfig>(DEFAULT_PRODUCT_CONFIG);
   const [descText, setDescText] = useState(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.desc));
   const [archText, setArchText] = useState(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.archive));
+  const [content, setContent] = useState<ContentSortConfig>(DEFAULT_CONTENT_CONFIG);
+  const [rawText, setRawText] = useState(listText(DEFAULT_CONTENT_CONFIG.rawFolders));
+  const [extText, setExtText] = useState(listText(DEFAULT_CONTENT_CONFIG.albumExts));
   const [brands, setBrands] = useState<BrandRow[]>([]);
   const [types, setTypes] = useState<TypeRow[]>([]);
   const [newExt, setNewExt] = useState("");
@@ -73,6 +84,7 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   const applyConfig = (cfg: FileSortConfig) => {
     setSaved(cfg); setDraft(findProfile(cfg, "artwork")); setProduct(cfg.product);
     setDescText(listText(cfg.product.roleFolders.desc)); setArchText(listText(cfg.product.roleFolders.archive));
+    setContent(cfg.content); setRawText(listText(cfg.content.rawFolders)); setExtText(listText(cfg.content.albumExts));
   };
 
   const load = async () => {
@@ -92,17 +104,20 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   // ช่องรายชื่อโฟลเดอร์: พิมพ์เป็นข้อความ (คั่นด้วย ,) → แปลงเป็นค่าตั้งทุกครั้งที่พิมพ์
   const productNow: ProductSortConfig = useMemo(() => ({ ...product, roleFolders: cleanRoleFolders({ desc: parseList(descText), archive: parseList(archText) }) }), [product, descText, archText]);
   const savedProfile = saved ? findProfile(saved, "artwork") : null;
-  const dirty = !!saved && (JSON.stringify(savedProfile) !== JSON.stringify(draft) || JSON.stringify(saved.product) !== JSON.stringify(productNow));
+  const contentNow: ContentSortConfig = useMemo(() => cleanContentConfig({ ...content, rawFolders: rawText, albumExts: extText }), [content, rawText, extText]);
+  const dirty = !!saved && (JSON.stringify(savedProfile) !== JSON.stringify(draft) || JSON.stringify(saved.product) !== JSON.stringify(productNow) || JSON.stringify(saved.content) !== JSON.stringify(contentNow));
+  const contentPlan = useMemo(() => planContentSort(SAMPLE_CONTENT_FILES, contentNow), [contentNow]);
   const plan = useMemo(() => planFileSort(draft, SAMPLE_FILES), [draft]);
   const productPlan = useMemo(() => planProductSort(SAMPLE_PRODUCT_FILES, SAMPLE_PARENTS, productNow, { jobFolder: "BSD15", variant: sampleVariant }), [productNow, sampleVariant]);
   const sampleBrand = brands.find((b) => b.folder) ?? null;
   const sampleType = types.find((x) => x.name === SAMPLE_ART_TYPE.name) ?? types[0] ?? SAMPLE_ART_TYPE;
 
-  // แม่แบบที่เก็บบน Z:: art = ค่าตั้งต้นของ Artwork · type:<ชื่อชนิด> = แยกตามชนิด · prod:<variant> = สูตรสินค้า
+  // แม่แบบที่เก็บบน Z:: art = ค่าตั้งต้นของ Artwork · type:<ชื่อชนิด> = แยกตามชนิด · prod:<variant> = สูตรสินค้า · content = สูตร Content
   const patternOf = (key: string): string =>
-    key === "art" ? draft.nasPattern : key.startsWith("type:") ? (draft.nasByType[key.slice(5)] ?? "") : product.nasPatterns[key.slice(5) as ProductVariant] ?? "";
+    key === "art" ? draft.nasPattern : key === "content" ? content.nasPattern : key.startsWith("type:") ? (draft.nasByType[key.slice(5)] ?? "") : product.nasPatterns[key.slice(5) as ProductVariant] ?? "";
   const setPattern = (key: string, v: string) => {
     if (key === "art") setDraft((d) => ({ ...d, nasPattern: v, nasRoot: nasPrefixOf(v) }));
+    else if (key === "content") setContent((c) => ({ ...c, nasPattern: v, nasRoot: nasPrefixOf(v) }));
     else if (key.startsWith("type:")) {
       const name = key.slice(5);
       setDraft((d) => { const by = { ...d.nasByType }; if (v.trim()) by[name] = v; else delete by[name]; return { ...d, nasByType: by }; });
@@ -144,6 +159,7 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
 
   const resetTab = () => {
     if (tab === "artwork") setDraft({ ...DEFAULT_ARTWORK_PROFILE, nasPattern: draft.nasPattern, nasByType: draft.nasByType, nasRoot: draft.nasRoot });
+    else if (tab === "content") { setContent({ ...DEFAULT_CONTENT_CONFIG, nasPattern: content.nasPattern, nasRoot: content.nasRoot }); setRawText(listText(DEFAULT_CONTENT_CONFIG.rawFolders)); setExtText(listText(DEFAULT_CONTENT_CONFIG.albumExts)); }
     else { setProduct({ ...DEFAULT_PRODUCT_CONFIG, nasPatterns: product.nasPatterns, nasRoot: product.nasRoot }); setDescText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.desc)); setArchText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.archive)); }
   };
 
@@ -151,7 +167,7 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
     if (!saved || saving) return;
     setSaving(true);
     try {
-      const config: FileSortConfig = { profiles: saved.profiles.map((p) => (p.key === draft.key ? draft : p)), product: productNow };
+      const config: FileSortConfig = { profiles: saved.profiles.map((p) => (p.key === draft.key ? draft : p)), product: productNow, content: contentNow };
       const res = await apiFetch("/api/file-sort/config", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ config }) });
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Save failed"));
@@ -195,6 +211,7 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
           <div className="flex gap-1 border-b border-slate-200 mb-4" role="tablist">
             {tabBtn("artwork", t("โลโก้ / Artwork", "Logo / Artwork"))}
             {tabBtn("product", t("งานสินค้า", "Product work"))}
+            {tabBtn("content", t("Content", "Content"))}
           </div>
 
           {tab === "artwork" ? (
@@ -307,7 +324,7 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
                 </div>
               </section>
             </div>
-          ) : (
+          ) : tab === "product" ? (
             <div className="space-y-5">
               <section className="text-[13px] text-slate-600 leading-6">
                 <p className="font-medium text-slate-700 mb-1">{t("โยนโฟลเดอร์รุ่น 1 โฟลเดอร์ (เช่น BSD15) แล้วระบบดูชื่อโฟลเดอร์ย่อย", "Drop one model folder (e.g. BSD15); the sub-folder names decide")}</p>
@@ -380,6 +397,55 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
                   ))}
                 </div>
                 {productPlan.warnings.map((w) => <p key={w} className="text-[12px] text-amber-700 mt-1">{w}</p>)}
+              </section>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <section className="text-[13px] text-slate-600 leading-6">
+                <p className="font-medium text-slate-700 mb-1">{t("โยนโฟลเดอร์ชุดคอนเทนต์ 1 โฟลเดอร์ → อัลบั้มในหน้า Contents", "Drop one content folder → an album on the Contents page")}</p>
+                <ul className="list-disc pl-5 space-y-0.5">
+                  <li>{t("รูป/วิดีโอ → ลงอัลบั้ม (ตัวจริงขึ้น Google Drive ของแบรนด์ › Content › อัลบั้ม · ในระบบเก็บรูปย่อ)", "Images/videos → the album (originals on the brand's Google Drive › Content › albums · previews in the ERP)")}</li>
+                  <li>{t("โฟลเดอร์ชื่อแพลตฟอร์ม (01_Instagram, 02_Facebook, 03_X …) → ติ๊กแพลตฟอร์มที่จะลงให้อัลบั้ม", "Platform-named folders (01_Instagram, 02_Facebook, 03_X …) → the album's planned platforms")}</li>
+                  <li>{t("ไฟล์ในโฟลเดอร์ไฟล์ดิบ / PSD → ไม่ลงอัลบั้ม (อยู่บน Z:) · อัลบั้มชื่อเดิมของแบรนด์เดิม = เติมไฟล์ใส่ ไฟล์ที่มีแล้วข้าม · ไม่ลบ/ไม่ย้ายต้นฉบับ", "Raw-folder files / PSD → not in the album (stay on Z:) · same album name + brand = files added, duplicates skipped · never deletes or moves the source")}</li>
+                </ul>
+              </section>
+
+              <section className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1" htmlFor="fs-content-nas">{t("ที่เก็บบน Z: (ใช้เฉพาะโฟลเดอร์ที่ยังไม่อยู่บน Z: · อยู่แล้ว = อยู่ที่เดิม)", "Z: location (only for folders not on Z: yet)")}</label>
+                  {patternInput("content", "Z:\\Work In Process\\[01] New Product\\[02] Contents\\{โฟลเดอร์}", "fs-content-nas")}
+                  <p className="text-[11px] text-slate-500 font-mono break-all mt-0.5">{contentNasFolder(contentNow, SAMPLE_CONTENT_FOLDER, SAMPLE_CONTENT_FOLDER, "[01] Louis Montini") ?? t("— ไม่ก๊อปลง Z:", "— not copied")}</p>
+                  {tokenChips}
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1" htmlFor="fs-content-raw">{t("ชื่อโฟลเดอร์ไฟล์ดิบ (ไม่ลงอัลบั้ม)", "Raw folder names (not in the album)")}</label>
+                  <input id="fs-content-raw" value={rawText} disabled={!canEdit} onChange={(e) => setRawText(e.target.value)} placeholder="rawfiles, raw"
+                    className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                  <p className="text-[12px] text-slate-500 mt-1">{t("คั่นด้วย , · ไม่สนเลขนำหน้า · มีเลขต่อท้ายก็นับ (00_rawfiles_1)", "Comma separated · numbering ignored · trailing numbers count (00_rawfiles_1)")}</p>
+                </div>
+                <div>
+                  <label className="block text-[13px] font-medium text-slate-700 mb-1" htmlFor="fs-content-exts">{t("นามสกุลที่ลงอัลบั้ม", "Extensions added to the album")}</label>
+                  <input id="fs-content-exts" value={extText} disabled={!canEdit} onChange={(e) => setExtText(e.target.value)} placeholder="jpg, png, mp4"
+                    className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                  <p className="text-[12px] text-slate-500 mt-1">{t("นามสกุลอื่นอยู่บน Z: อย่างเดียว", "Other files stay on Z: only")}</p>
+                </div>
+              </section>
+
+              <section className="rounded-lg bg-slate-50 p-3">
+                <p className="text-[13px] font-medium text-slate-700 mb-2">{t(`ทดลอง: ถ้าโยนโฟลเดอร์ ${SAMPLE_CONTENT_FOLDER} แบบนี้`, `Try it: a ${SAMPLE_CONTENT_FOLDER} folder like this`)}</p>
+                <div className="border border-slate-200 rounded-lg bg-white divide-y divide-slate-100 text-[12px]">
+                  {contentPlan.files.map((f) => (
+                    <div key={f.rel} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2 px-2 py-1">
+                      <span className="font-mono text-slate-700 truncate" title={f.rel}>{f.rel}</span>
+                      <span className={f.album ? "text-indigo-700" : "text-slate-500"}>
+                        {f.album ? t("ลงอัลบั้ม", "Album") : f.why === "junk" ? t("ข้าม (ไฟล์ระบบ)", "Skipped (system file)") : f.why === "raw" ? t("ไฟล์ดิบ — อยู่บน Z:", "Raw — stays on Z:") : t("ไม่ใช่รูป/วิดีโอ — อยู่บน Z:", "Not media — stays on Z:")}
+                        {f.album && f.platform ? <span className="text-slate-400"> · {f.platform}</span> : null}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[12px] text-slate-600 mt-2">{t("แพลตฟอร์มที่จะติ๊กให้อัลบั้ม:", "Planned platforms:")} {contentPlan.platforms.join(", ") || "—"}</p>
+                {contentPlan.warnings.map((w) => <p key={w} className="text-[12px] text-amber-700 mt-1">{w}</p>)}
               </section>
             </div>
           )}

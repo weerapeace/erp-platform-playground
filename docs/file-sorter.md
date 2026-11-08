@@ -70,6 +70,20 @@
   - `color` เพิ่มสี = เฉพาะแกลเลอรีของสีที่ **ยังไม่มีรูปในระบบ** · Parent / Description / สีเดิม / PNG = `why: "scope"` ไม่แตะ · สีใหม่ที่ยังไม่มี SKU ในระบบ → เตือน "สร้าง SKU ก่อน"
   - `edit` แก้สี = เฉพาะแกลเลอรีของสีที่อยู่ในโฟลเดอร์ (แทนที่/ต่อท้ายตามโหมด) · Parent / Description / PNG ไม่แตะ
   - `POST /api/file-sort/plan` `{ profile:"product", variant, … }` → `nas_folder` ตามแม่แบบของ variant
+- โปรแกรมกันเลือกโฟลเดอร์งานเอง (หรือข้างใน) เป็นที่เก็บ · โหมดย้าย + ที่เก็บ = โฟลเดอร์ต้นฉบับ → ไม่ลบต้นฉบับ · ประวัติจด `nas_custom` / `variant`
+
+## สูตร Content → อัลบั้มในหน้า Contents (ขั้น 5 · 2026-11-08)
+- ค่าตั้ง `content` = `{ nasPattern, rawFolders, albumExts }` (แท็บ Content ในหน้าตั้งค่า · ค่าตั้งต้น `Z:\Work In Process\[01] New Product\[02] Contents\{โฟลเดอร์}` = ที่เดียวกับ Create Folder Tool แท็บ Contents)
+- ตัวคิด `lib/file-sort-content` `planContentSort`:
+  - รูป/วิดีโอ (`albumExts`) → ลงอัลบั้ม · ในโฟลเดอร์ไฟล์ดิบ (`rawFolders` เช่น `00_rawfiles`, `00_rawfiles_1`) → `why:"raw"` · นามสกุลอื่น (PSD …) → `why:"not_media"` · ทั้งหมดอยู่บน Z:
+  - โฟลเดอร์ชั้นบนชื่อแพลตฟอร์ม (`01_Instagram` `02_Facebook` `03_X` …) → `platforms` (รหัสชุดเดียวกับ `lib/creative-tasks` PLATFORMS) → `planned_platforms` ของอัลบั้มใหม่ · `04_Shop Decoration` ไม่ผูกแพลตฟอร์ม
+  - ชื่อไฟล์ชนกันคนละโฟลเดอร์ย่อย → `albumName` นำหน้าด้วยโฟลเดอร์ (`01_Images_2_1.jpg`)
+  - อัลบั้มชื่อเดียวกัน + แบรนด์เดียวกัน (ไม่อยู่ถังขยะ) มีแล้ว → `album` = เติมไฟล์ใส่ · ไฟล์ที่ชื่อ + ขนาดตรงกับในอัลบั้ม → `why:"already"` (กดซ้ำได้)
+- `POST /api/file-sort/plan` `{ profile:"content", brand_id, name, job_folder, files }` → `{ album, album_name, drive_ok, nas_folder, files, platforms, counts, warnings }` · `drive_ok:false` = แบรนด์ยังไม่ตั้งโฟลเดอร์ Drive / ระบบยังไม่ต่อ Drive (ลงอัลบั้มไม่ได้ ก๊อป Z: ได้)
+- โปรแกรมลงอัลบั้มผ่าน API อัลบั้มตัวจริงชุดเดียวกับหน้า Contents: `POST /api/content-albums` (ไม่มีอัลบั้ม) → รูปย่อ `/api/admin/upload` (folder `content-albums`, `no_library=1`) → `POST /api/content-albums/[id]/drive` (ลิงก์อัป) → ส่งตรงขึ้น Google Drive ทีละชิ้น → `POST /api/content-albums/[id]/files` → `POST …/upload-done` (กระดิ่งแจ้งเตือน)
+  - วิดีโอจากโปรแกรมยังไม่มีภาพปก (r2_key = `drive:<id>`) — ตั้งปกคลิปได้ที่หน้าอัลบั้มในเว็บ · รูปไม่มี phash (ตัวช่วยหารูปหน้าตาเหมือนไม่เห็นรูปชุดนี้)
+  - ไม่ลบ/ไม่ย้ายต้นฉบับ · โฟลเดอร์อยู่บน Z: แล้ว = อยู่ที่เดิม (เลือกที่เก็บเอง = ก๊อปไปที่เลือก)
+- ประวัติ `file_sort.upload` profile `content` entity `content_album`
 
 ## ข้อจำกัดที่รู้
 - Drive ดูไฟล์เดิมในโฟลเดอร์ได้ 100 ไฟล์แรก (โฟลเดอร์งานเดียวไม่ควรเกินนี้)

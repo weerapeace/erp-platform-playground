@@ -13,6 +13,10 @@
  * →   { profile:"product", job_name, nas_folder, mode, files, slots, groups, counts, warnings, parents }   (lib/file-sort-product)
  *     files[]  = ไฟล์ละ { rel, erp, dest, slotKey, width, nas, why, note }
  *     slots[]  = ช่องรูปของสินค้า { kind, parentId, skuId, rels (ปกหน้าสุด), coverRel, replaces, remove{attachments,desc}, entity }
+ *
+ * สูตร Content: body { profile:"content", brand_id, name (ชื่ออัลบั้ม), job_folder, files:[{ path, size? }] }
+ * →   { profile:"content", job_name, album_name, brand, album (อัลบั้มชื่อนี้ของแบรนด์นี้ที่มีแล้ว = เติมไฟล์ใส่ ไม่สร้างใหม่), drive_ok,
+ *       nas_folder, files, platforms, counts, warnings }   (lib/file-sort-content · ตัวสร้าง/อัปจริงคือ /api/content-albums/*)
  */
 import { NextRequest, NextResponse } from "next/server";
 import { guardApi, apiCan } from "@/lib/api-auth";
@@ -22,6 +26,9 @@ import { findArtworkDriveFolder } from "@/lib/artwork-drive";
 import { findProfile, nasFolderFor, nasPatternFor, planFileSort, safeFolderName, type FileSortInput, type ProductVariant } from "@/lib/file-sort";
 import { artworkTypeFolderName, brandFolderName, loadFileSortConfig } from "@/lib/file-sort-server";
 import { PRODUCT_MAX_FILES, planProductSort, productNasFolder } from "@/lib/file-sort-product";
+import { CONTENT_MAX_FILES, contentNasFolder, planContentSort } from "@/lib/file-sort-content";
+import { loadAlbumFiles } from "@/lib/content-albums-server";
+import { resolveBrandContentFolder } from "@/lib/content-drive";
 import { loadImageCatalog, cleanCatalogRequest } from "@/lib/product-image-catalog-server";
 import { candidateCodes } from "@/lib/product-image-routing";
 
@@ -36,6 +43,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let b: { profile?: string; variant?: string; brand_id?: string; artwork_type?: string; name?: string; job_folder?: string; mode?: string; files?: FileSortInput[] };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   if (b.profile === "product") return planProduct(request, b);
+  if (b.profile === "content") return planContent(b);
 
   const brandId = String(b.brand_id ?? "").trim();
   const rawName = String(b.name ?? "").trim();
@@ -109,4 +117,49 @@ async function planProduct(request: NextRequest, b: { job_folder?: string; mode?
   const plan = planProductSort(files, catalog.parents, cfg, { jobFolder: jobName, variant, mode: b.mode === "append" ? "append" : b.mode === "replace" ? "replace" : undefined });
   if (catalog.truncated) plan.warnings.push("รหัสในโฟลเดอร์นี้ตรงกับสินค้าเกิน 60 รุ่น — แสดงแค่ 60 รุ่นแรก (แบ่งโฟลเดอร์ให้เล็กลง)");
   return NextResponse.json({ profile: "product", job_name: safeFolderName(jobName), nas_folder: productNasFolder(cfg, jobName, variant), ...plan, error: null });
+}
+
+/** สูตร Content: อัลบั้มชื่อเดียวกันของแบรนด์เดียวกันที่มีแล้ว = เติมไฟล์ใส่ (ไฟล์ที่มีแล้วข้าม) · ไม่มี = โปรแกรมสร้างใหม่ตอนส่ง */
+async function planContent(b: { brand_id?: string; name?: string; job_folder?: string; files?: FileSortInput[] }): Promise<NextResponse> {
+  const brandId = String(b.brand_id ?? "").trim();
+  const job = String(b.job_folder ?? "").trim().replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
+  const albumName = (String(b.name ?? "").trim() || job).slice(0, 120);
+  const files = Array.isArray(b.files) ? b.files.filter((f) => f && typeof f.path === "string") : [];
+  if (!albumName) return NextResponse.json({ error: "ใส่ชื่ออัลบั้มก่อน" }, { status: 400 });
+  if (!brandId) return NextResponse.json({ error: "เลือกแบรนด์ก่อน — อัลบั้มเก็บไฟล์ในโฟลเดอร์ Drive ของแบรนด์" }, { status: 400 });
+  if (!files.length) return NextResponse.json({ error: "โฟลเดอร์นี้ไม่มีไฟล์" }, { status: 400 });
+  if (files.length > CONTENT_MAX_FILES) return NextResponse.json({ error: `โฟลเดอร์ใหญ่เกินไป (เกิน ${CONTENT_MAX_FILES} ไฟล์) — แบ่งเป็นหลายงาน` }, { status: 400 });
+  const admin = supabaseAdmin();
+  const [cfgAll, brand, cols] = await Promise.all([
+    loadFileSortConfig(admin), brandFolderName(admin, brandId),
+    admin.from("asset_collections").select("id, name").eq("name", albumName).limit(20),
+  ]);
+  if (!brand.name) return NextResponse.json({ error: "ไม่พบแบรนด์นี้ในระบบ" }, { status: 400 });
+  const cfg = cfgAll.content;
+  const ids = ((cols.data ?? []) as { id: string }[]).map((c) => c.id);
+  let album: { id: string; name: string; file_count: number } | null = null;
+  let existing: { file_name: string; size_bytes: number | null }[] = [];
+  if (ids.length) {
+    const { data: al } = await admin.from("content_albums").select("id, created_at").in("id", ids).eq("brand_id", brandId).is("trashed_at", null).order("created_at").limit(1);
+    const hit = ((al ?? []) as { id: string }[])[0];
+    if (hit) {
+      const af = await loadAlbumFiles(admin, hit.id, []);
+      existing = af.map((f) => ({ file_name: f.file_name, size_bytes: f.size_bytes }));
+      album = { id: hit.id, name: albumName, file_count: af.length };
+    }
+  }
+  const plan = planContentSort(files, cfg, { existing });
+  const warnings = [...plan.warnings];
+  let driveOk = driveConfigured();
+  if (!driveOk) warnings.push("ระบบยังไม่ได้เชื่อม Google Drive — ลงอัลบั้มไม่ได้ (ก๊อปลง Z: ได้อย่างเดียว)");
+  else if (plan.counts.album) {
+    const t = await resolveBrandContentFolder(admin, brandId, false).catch((e: Error) => ({ ok: false as const, reason: `ติดต่อ Google Drive ไม่ได้: ${e.message}` }));
+    if (!t.ok) { driveOk = false; warnings.push(`ลงอัลบั้มไม่ได้: ${t.reason}`); }
+  }
+  return NextResponse.json({
+    profile: "content", job_name: safeFolderName(job || albumName), album_name: albumName,
+    brand: { id: brandId, name: brand.name, folder: brand.folder }, album, drive_ok: driveOk,
+    nas_folder: plan.counts.nas ? contentNasFolder(cfg, job || albumName, albumName, brand.folder) : null,
+    ...plan, warnings, error: null,
+  });
 }

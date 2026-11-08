@@ -79,7 +79,48 @@ export function cleanProductConfig(raw: unknown): ProductSortConfig {
   };
 }
 
-export type FileSortConfig = { profiles: FileSortProfile[]; product: ProductSortConfig };
+/**
+ * สูตร "Content": โยนโฟลเดอร์ชุดคอนเทนต์ (เช่น 2026_07_13-1_MPU15 จาก Create Folder Tool) → อัลบั้มในหน้า Contents
+ *   รูป/วิดีโอ → อัลบั้ม (ตัวจริงขึ้น Drive <แบรนด์>/Content/อัลบั้ม · รูปย่อ R2) · โฟลเดอร์ rawfiles / PSD → อยู่บน Z: อย่างเดียว
+ *   โฟลเดอร์ชื่อแพลตฟอร์ม (01_Instagram …) → ติ๊กแพลตฟอร์มที่จะลงให้อัลบั้ม · ตัวคิด: lib/file-sort-content
+ */
+export type ContentSortConfig = {
+  label: string;
+  /** แม่แบบที่เก็บบน Z: — ใช้เมื่อโฟลเดอร์ยังไม่อยู่บน Z: (อยู่แล้ว = อยู่ที่เดิม) · ว่าง = ไม่ก๊อป */
+  nasPattern: string;
+  /** ส่วนต้นของแม่แบบ (คำนวณเอง · ไว้โชว์) */
+  nasRoot: string;
+  /** ชื่อโฟลเดอร์ไฟล์ดิบ (ไม่สนเลขนำหน้า/ตัวพิมพ์ · ขึ้นต้นด้วยคำนี้ก็นับ เช่น 00_rawfiles_1) → ไม่ลงอัลบั้ม */
+  rawFolders: string[];
+  /** นามสกุลที่ลงอัลบั้ม (ที่เหลืออยู่บน Z: อย่างเดียว) */
+  albumExts: string[];
+};
+export const DEFAULT_CONTENT_CONFIG: ContentSortConfig = {
+  label: "Content",
+  nasPattern: "Z:\\Work In Process\\[01] New Product\\[02] Contents\\{โฟลเดอร์}",
+  nasRoot: "Z:\\Work In Process\\[01] New Product\\[02] Contents",
+  rawFolders: ["rawfiles", "raw files", "raw"],
+  albumExts: ["jpg", "jpeg", "png", "webp", "gif", "mp4", "mov", "m4v", "webm"],
+};
+export function cleanContentConfig(raw: unknown): ContentSortConfig {
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const nasPattern = typeof o.nasPattern === "string" ? cleanPattern(o.nasPattern) : DEFAULT_CONTENT_CONFIG.nasPattern;
+  const words = (v: unknown, dflt: string[], clean: (s: string) => string) => {
+    const list = Array.isArray(v) ? v : typeof v === "string" ? v.split(/[,\n]/) : null;
+    if (!list) return dflt;
+    const out = [...new Set(list.map((x) => clean(String(x ?? ""))).filter(Boolean))].slice(0, 30);
+    return out;
+  };
+  return {
+    label: String(o.label ?? DEFAULT_CONTENT_CONFIG.label).trim().slice(0, 60) || DEFAULT_CONTENT_CONFIG.label,
+    nasPattern,
+    nasRoot: nasPrefixOf(nasPattern),
+    rawFolders: words(o.rawFolders, DEFAULT_CONTENT_CONFIG.rawFolders, (s) => s.trim().toLowerCase().slice(0, 40)),
+    albumExts: words(o.albumExts, DEFAULT_CONTENT_CONFIG.albumExts, (s) => normalizeExt(s)),
+  };
+}
+
+export type FileSortConfig = { profiles: FileSortProfile[]; product: ProductSortConfig; content: ContentSortConfig };
 
 const r = (ext: string, library: boolean, drive: boolean, nas: boolean): FileSortRule => ({ ext, library, drive, nas });
 
@@ -97,7 +138,7 @@ export const DEFAULT_ARTWORK_PROFILE: FileSortProfile = {
   other: { drive: false, nas: true },
 };
 
-export const DEFAULT_FILE_SORT_CONFIG: FileSortConfig = { profiles: [DEFAULT_ARTWORK_PROFILE], product: DEFAULT_PRODUCT_CONFIG };
+export const DEFAULT_FILE_SORT_CONFIG: FileSortConfig = { profiles: [DEFAULT_ARTWORK_PROFILE], product: DEFAULT_PRODUCT_CONFIG, content: DEFAULT_CONTENT_CONFIG };
 
 // ── ทำความสะอาดค่าตั้ง (ค่าจาก DB / จากหน้าจอ) ──
 
@@ -152,7 +193,7 @@ export function cleanFileSortConfig(raw: unknown): FileSortConfig {
     keys.add(key);
   }
   if (!keys.has(DEFAULT_ARTWORK_PROFILE.key)) profiles.unshift(cleanProfile(null, DEFAULT_ARTWORK_PROFILE));
-  return { profiles, product: cleanProductConfig(o.product) };
+  return { profiles, product: cleanProductConfig(o.product), content: cleanContentConfig(o.content) };
 }
 
 export const findProfile = (cfg: FileSortConfig, key?: string | null): FileSortProfile =>
