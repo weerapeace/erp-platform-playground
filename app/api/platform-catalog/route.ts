@@ -5,6 +5,7 @@
  *     with_counts=1 → platform_counts { [platform_id]: จำนวนสินค้า } เฉพาะร้านขายของ (โชว์บนปุ่มเลือกร้าน)
  *   view=brands → การ์ดหน้าเลือกแบรนด์ ShopBrandsResponse (ไม่ต้องมี platform_id)
  *   view=shop → มุมมองหน้าร้าน ShopViewResponse (lib/platform-listing-health) — สต๊อก/สถานะ/รูปจากร้าน · ยังไม่ลง · ไม่มีรูป · งานค้าง
+ *   view=variants&listing_id= → ตัวเลือกบนร้าน ↔ SKU ในระบบ ListingVariantsResponse (lib/platform-variant-match) · อ่านอย่างเดียว
  * การนำเข้าจริง (อัปไฟล์ export / ต่อ API) มาเฟสถัดไป — โครงตาราง+หน้าพร้อมแล้ว
  * DELETE ?id=  (products.platforms.edit) → ลบรายการที่นำเข้าผิด (เป็นสำเนาข้อมูลจากร้าน — ของบนร้านจริงไม่ถูกแตะ)
  *   ถ้าสินค้านั้นยังอยู่ในไฟล์ export รอบหน้า จะกลับมาเอง (ต้องจับคู่ใหม่)
@@ -16,7 +17,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { SELLING_PLATFORMS } from "@/lib/selling-platforms";
-import { loadBrandSummaries, loadShopView } from "@/lib/platform-shop-view-server";
+import { loadBrandSummaries, loadListingVariants, loadShopView } from "@/lib/platform-shop-view-server";
 import type { ShopBrandsResponse, ShopViewResponse } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +35,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { brands, platforms } = await loadBrandSummaries(supabaseAdmin(), SELLING_PLATFORMS);
     const body: ShopBrandsResponse = { brands, platforms, error: null };
     return NextResponse.json(body);
+  }
+  // ตัวเลือกบนร้าน ↔ SKU ในระบบ (ป๊อปรายละเอียดสินค้าบนร้าน) — ไม่ต้องระบุร้าน (รู้จากรายการเอง)
+  if (sp.get("view") === "variants") {
+    const listingId = (sp.get("listing_id") ?? "").trim();
+    if (!listingId) return NextResponse.json({ error: "ต้องระบุสินค้าบนร้าน (listing_id)" }, { status: 400 });
+    return NextResponse.json(await loadListingVariants(supabaseAdmin(), listingId));
   }
   if (!platformId) return NextResponse.json({ fields: [], listings: [], summary: { total: 0, matched: 0 }, error: null });
   const admin = supabaseAdmin();

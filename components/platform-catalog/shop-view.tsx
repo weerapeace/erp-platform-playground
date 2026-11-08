@@ -362,11 +362,13 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         ) : parentMode ? (
           <MiniTable rows={pageParents} columns={parentCols} rowKey={(p) => p.id}
             selectable={canCreateTask || (canAdd && tab === "notlisted")} selected={selected} onSelectedChange={setSelected}
-            emptyText={needle ? "ไม่พบสินค้าที่ค้นหา" : tab === "notlisted" ? `สินค้า${brandName ? ` ${brandName}` : ""} ลงร้านนี้ครบแล้ว` : "ทุกสินค้ามีรูปแล้ว"} dense />
+            emptyText={needle ? "ไม่พบสินค้าที่ค้นหา" : tab === "notlisted" ? `สินค้า${brandName ? ` ${brandName}` : ""} ลงร้านนี้ครบแล้ว` : "ทุกสินค้ามีรูปแล้ว"} dense
+            resizable storageKey="platform-shop-parents" />
         ) : (
           <MiniTable rows={pageItems} columns={itemCols} rowKey={(it) => it.id}
             selectable={canCreateTask} selected={selected} onSelectedChange={setSelected}
-            emptyText={needle ? "ไม่พบสินค้าที่ค้นหา" : "ไม่มีสินค้าในกลุ่มนี้"} dense />
+            emptyText={needle ? "ไม่พบสินค้าที่ค้นหา" : "ไม่มีสินค้าในกลุ่มนี้"} dense
+            resizable storageKey="platform-shop-items" />
         )}
         <div className="px-3 py-2 border-t border-slate-100">
           <Pager page={page} pageSize={pageSize} total={total} onPage={setPage} unitLabel={parentMode ? "สินค้า" : "รายการ"}

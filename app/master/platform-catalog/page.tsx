@@ -20,7 +20,8 @@ import { PlatformIcon } from "@/components/platform-icon";
 import { Icon } from "@/components/icon";
 import { MatchCandidates, type PickedParent } from "@/components/platform-catalog/match-candidates";
 import { MatchWorkbench } from "@/components/platform-catalog/match-workbench";
-import { IgnoreDialog } from "@/components/platform-catalog/ignore-dialog";
+import { IgnoreDialog, IGNORE_REASON_DUP } from "@/components/platform-catalog/ignore-dialog";
+import { ListingVariantMap } from "@/components/platform-catalog/listing-variants";
 import { BulkActionBar } from "@/components/bulk-action-bar";
 import { PLATFORM_SOURCE_FIELDS } from "@/lib/platform-source-fields";
 import { isSellingPlatform } from "@/lib/selling-platforms";
@@ -29,7 +30,7 @@ import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type Im
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 import { PlatformShopView } from "@/components/platform-catalog/shop-view";
 import { BrandGate, BrandAvatar } from "@/components/platform-catalog/brand-gate";
-import type { ShopBrandSummary } from "@/lib/platform-listing-health";
+import { duplicateCounts, duplicateKey, type ShopBrandSummary } from "@/lib/platform-listing-health";
 
 // Drawer รายละเอียดต่อแพลตฟอร์ม (ของกลาง เปิดจาก Parent SKUs ด้วย) — dynamic กัน bundle หนัก
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
@@ -42,7 +43,7 @@ type Listing = {
   matched_parent_sku_id: string | null; matched_code?: string | null; matched_name?: string | null; price: number | null; status: string | null;
   match_ignored?: boolean | null; match_ignore_reason?: string | null; match_ignored_at?: string | null;
 };
-type Filter = "all" | ListingMatchStatus;
+type Filter = "all" | ListingMatchStatus | "dup";
 type IgnorePatch = { match_ignored: boolean; match_ignore_reason: string | null; match_ignored_at: string | null };
 
 // มุมมอง: จับคู่ (เดิม · ค่าเริ่มต้นในแอปช่องทางขาย) / หน้าร้าน (แบบ Seller Center · เมนูในแอปจัดการงานเปิดด้วย ?view=shop)
@@ -109,6 +110,7 @@ export default function PlatformCatalogPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [ignoreTarget, setIgnoreTarget] = useState<string[] | null>(null);
   const [ignoreBusy, setIgnoreBusy] = useState(false);
+  const [dupKeepAsk, setDupKeepAsk] = useState(false);   // ป๊อปยืนยัน "เก็บตัวนี้ · ที่เหลือไม่ต้องจับคู่ (ซ้ำบนร้าน)"
   // มุมมองหน้าร้าน — อ่านจาก URL ตอนเปิด · สลับแล้วเขียนกลับ URL (รีเฟรชแล้วอยู่มุมมองเดิม)
   const [view, setViewState] = useState<PageView>("match");
   const [viewReady, setViewReady] = useState(false);
@@ -213,8 +215,15 @@ export default function PlatformCatalogPage() {
     for (const l of listings) c[statusOf(l)]++;
     return c;
   }, [listings, statusOf]);
-  const highRows = useMemo(() => listings.filter((l) => statusOf(l) === "guess" && high.has(l.id) && suggestions[l.id]?.[0]), [listings, high, suggestions, statusOf]);
-  const shownRows = useMemo(() => filter === "all" ? listings : listings.filter((l) => statusOf(l) === filter), [listings, filter, statusOf]);
+  // ชื่อ+รหัสซ้ำบนร้าน = ร้านมีหลายหน้าขายของชิ้นเดียวกัน (เช่น JEAN08 ถูกสร้างบน LINE 6 ครั้งตอนทดสอบ)
+  //   กฎเดียวกับมุมมองหน้าร้าน (lib/platform-listing-health) · ไม่นับตัวที่ตั้งไม่ต้องจับคู่แล้ว → เก็บไว้ตัวเดียวแล้วป้ายหายเอง
+  const activeListings = useMemo(() => listings.filter((l) => !l.match_ignored), [listings]);
+  const dupCounts = useMemo(() => duplicateCounts(activeListings), [activeListings]);
+  // ยืนยันทั้งหมด: ไม่รวมตัวที่ซ้ำบนร้าน (ไม่งั้นทุกชิ้นซ้ำถูกจับกับรุ่นเดียวกันหมด) — ให้คนเลือกเก็บตัวเดียวเอง
+  const highAll = useMemo(() => listings.filter((l) => statusOf(l) === "guess" && high.has(l.id) && suggestions[l.id]?.[0]), [listings, high, suggestions, statusOf]);
+  const highRows = useMemo(() => highAll.filter((l) => !dupCounts.has(l.id)), [highAll, dupCounts]);
+  const highDupSkipped = highAll.length - highRows.length;
+  const shownRows = useMemo(() => filter === "all" ? listings : filter === "dup" ? listings.filter((l) => dupCounts.has(l.id)) : listings.filter((l) => statusOf(l) === filter), [listings, filter, statusOf, dupCounts]);
 
   const applyMatch = (listingId: string, r: { matched_parent_sku_id: string | null; matched_code: string | null; matched_name: string | null }) => {
     setListings((ls) => ls.map((x) => x.id === listingId ? { ...x, ...r } : x));
@@ -541,7 +550,13 @@ export default function PlatformCatalogPage() {
       key: "title", header: "สินค้าบนร้าน", width: "2.4fr", locked: true, sortValue: (l) => l.title ?? "",
       cell: (l) => (
         <div className="min-w-0">
-          <div className="truncate" title={l.title ?? ""}>{l.title || "—"}</div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate" title={l.title ?? ""}>{l.title || "—"}</span>
+            {dupCounts.has(l.id) && (
+              <span className="shrink-0 rounded border border-amber-200 bg-amber-50 px-1 text-[10px] font-medium text-amber-700"
+                title={`บนร้านมีสินค้าชื่อและรหัสเหมือนกัน ${dupCounts.get(l.id)} ชิ้น — กดแถวเพื่อดู แล้วเลือกเก็บไว้ตัวเดียว`}>ซ้ำ ×{dupCounts.get(l.id)}</span>
+            )}
+          </div>
           <div className="text-[11px] text-slate-400 font-mono truncate">{l.sku_code || "ไม่มี SKU"} · #{l.external_product_id || "—"}</div>
         </div>
       ),
@@ -567,6 +582,13 @@ export default function PlatformCatalogPage() {
   const where = `${activePf?.name_th ?? "ร้านนี้"}${activeBrand ? ` · ${activeBrand.name}` : ""}`;
   // มุมมองหน้าร้านต้องเลือกแบรนด์ก่อน (เจ้าของขอ 2026-11-08) — ยังไม่เลือก = หน้าเลือกแบรนด์
   const gate = viewReady && view === "shop" && !brandId;
+  // ป๊อปรายละเอียด: ชิ้นที่ชื่อ+รหัสเหมือนตัวที่เปิดอยู่ (รวมตัวเอง) → เก็บไว้ตัวเดียว ที่เหลือตั้งไม่ต้องจับคู่
+  const openDupKey = openListing && !openListing.match_ignored ? duplicateKey(openListing.title, openListing.sku_code) : null;
+  const openSiblings = openDupKey ? activeListings.filter((l) => duplicateKey(l.title, l.sku_code) === openDupKey) : [];
+  const dupOthers = openListing ? openSiblings.filter((l) => l.id !== openListing.id && !l.matched_parent_sku_id) : [];
+  const dupMatchedOther = openListing ? openSiblings.find((l) => l.id !== openListing.id && l.matched_parent_sku_id) ?? null : null;
+  // ตัวอื่นจับคู่อยู่ แต่ตัวที่เปิดยังไม่จับคู่ → ให้ไปเก็บตัวที่จับคู่แทน (ไม่ทิ้งคู่ที่ทำไว้แล้ว)
+  const dupCanKeep = dupOthers.length > 0 && (!dupMatchedOther || !!openListing?.matched_parent_sku_id);
   const pickBrand = (b: ShopBrandSummary) => {
     setPickedBrand(b);
     setBrandId(b.id);
@@ -751,6 +773,7 @@ export default function PlatformCatalogPage() {
                 { key: "guess", label: "รอยืนยัน", value: suggestLoading ? null : counts.guess, tone: "info", hint: suggestError ? "เดาคู่ไม่สำเร็จ — กดโหลดใหม่" : highRows.length ? `ระบบเดาให้ · รหัสตรงกัน ${highRows.length.toLocaleString()}` : "ระบบเดาให้แล้ว" },
                 { key: "none", label: "ต้องหาคู่เอง", value: suggestLoading ? null : counts.none, tone: "warning", hint: "ระบบเดาไม่ได้/ไม่มั่นใจ" },
                 { key: "ignored", label: "ไม่ต้องจับคู่", value: counts.ignored, tone: "neutral", hint: "งานบริการ/เลิกขาย ฯลฯ" },
+                ...(dupCounts.size > 0 || filter === "dup" ? [{ key: "dup", label: "ซ้ำบนร้าน", value: dupCounts.size, tone: "danger" as const, hint: "ชื่อ+รหัสเหมือนกัน · เก็บไว้ตัวเดียว" }] : []),
               ]} />
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} /></div>
@@ -859,6 +882,7 @@ export default function PlatformCatalogPage() {
               {highRows.slice(0, 6).map((l) => <li key={l.id} className="truncate">{l.sku_code || (l.title ?? "").slice(0, 32)} → {suggestions[l.id]?.[0]?.code}</li>)}
               {highRows.length > 6 && <li className="text-slate-400">… และอีก {(highRows.length - 6).toLocaleString()} รายการ</li>}
             </ul>
+            {highDupSkipped > 0 && <p className="text-xs text-amber-700">ไม่รวม {highDupSkipped.toLocaleString()} รายการที่ซ้ำบนร้าน (ชื่อ+รหัสเหมือนกันหลายชิ้น) — กดการ์ด “ซ้ำบนร้าน” แล้วเปิดดูทีละตัวเพื่อเก็บไว้ตัวเดียว</p>}
             <p className="text-xs text-slate-500">จับคู่ผิดตัวไหนแก้ทีหลังได้ทีละตัว · มีประวัติเก็บว่าใครจับคู่อะไร</p>
           </div>
         )}
@@ -898,6 +922,40 @@ export default function PlatformCatalogPage() {
                 onIgnore={!openListing.matched_parent_sku_id && !openListing.match_ignored ? () => setIgnoreTarget([openListing.id]) : undefined} />
             </div>
 
+            {/* ชื่อ+รหัสซ้ำบนร้าน → เก็บไว้ตัวเดียว */}
+            {openSiblings.length > 1 && (
+              <div className="border border-amber-200 bg-amber-50/50 rounded-xl p-3 space-y-2">
+                <div className="text-xs font-semibold text-amber-800">บนร้านมีสินค้าชื่อและรหัสเหมือนตัวนี้ {openSiblings.length} ชิ้น</div>
+                <p className="text-[11px] text-slate-600">ร้านมีหลายหน้าขายของชิ้นเดียวกัน (เช่น กดสร้างซ้ำตอนทดสอบ) — ควรลบตัวเกินใน Seller Center ของร้าน แล้วในระบบเก็บไว้ตัวเดียว</p>
+                <ul className="divide-y divide-amber-100 rounded-lg border border-amber-100 bg-white text-xs">
+                  {openSiblings.map((s) => (
+                    <li key={s.id} className="flex items-center gap-2 px-2 py-1.5">
+                      <span className="font-mono text-slate-700">#{s.external_product_id || "—"}</span>
+                      {s.id === openListing.id && <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-500">ตัวนี้</span>}
+                      <span className="flex-1" />
+                      {s.matched_parent_sku_id ? <span className="text-emerald-700">✓ จับคู่ {s.matched_code}</span> : <span className="text-slate-400">ยังไม่จับคู่</span>}
+                      {s.id !== openListing.id && <button type="button" onClick={() => openRow(s)} className="text-violet-700 hover:underline">เปิด</button>}
+                    </li>
+                  ))}
+                </ul>
+                {canEdit && (dupCanKeep ? (
+                  <button type="button" disabled={ignoreBusy} onClick={() => setDupKeepAsk(true)} className="w-full h-9 px-3 text-sm text-amber-800 border border-amber-300 bg-white rounded-lg hover:bg-amber-50 disabled:opacity-50">
+                    เก็บตัวนี้ · อีก {dupOthers.length} ตัวตั้ง “ไม่ต้องจับคู่ (ซ้ำบนร้าน)”
+                  </button>
+                ) : dupMatchedOther && !openListing.matched_parent_sku_id ? (
+                  <p className="text-[11px] text-slate-600">ตัวที่จับคู่อยู่คือ <span className="font-mono">#{dupMatchedOther.external_product_id}</span> — กด “เปิด” ที่ตัวนั้น แล้วกด “เก็บตัวนี้”</p>
+                ) : null)}
+              </div>
+            )}
+
+            {/* ตัวเลือกบนร้าน ↔ SKU (ระบบจับเองด้วยรหัสตอนส่งราคา/สต๊อก) — LINE/Lazada มีข้อมูลตัวเลือก */}
+            {(platformCode === "line_shopping" || platformCode === "lazada") && (
+              <div className="border border-slate-200 rounded-xl p-3 space-y-2">
+                <div className="text-xs font-semibold text-slate-600">ตัวเลือกบนร้าน ↔ SKU ในระบบ</div>
+                <ListingVariantMap listingId={openListing.id} />
+              </div>
+            )}
+
             {/* ส่งราคาขึ้น LINE เฉพาะสินค้านี้ (เฉพาะ LINE + จับคู่แล้ว) */}
             {canEdit && platformCode === "line_shopping" && openListing.matched_parent_sku_id && (
               <div className="border border-emerald-200 bg-emerald-50/40 rounded-xl p-3 space-y-1.5">
@@ -917,6 +975,23 @@ export default function PlatformCatalogPage() {
           </div>
         )}
       </ERPModal>
+
+      <ConfirmDialog
+        open={dupKeepAsk && dupOthers.length > 0} onClose={() => { if (!ignoreBusy) setDupKeepAsk(false); }} loading={ignoreBusy}
+        onConfirm={() => void saveIgnore(dupOthers.map((l) => l.id), true, IGNORE_REASON_DUP).then((ok) => { if (ok) setDupKeepAsk(false); })}
+        title={`ตั้ง ${dupOthers.length} รายการที่ซ้ำเป็น “ไม่ต้องจับคู่”?`}
+        confirmText={`ตั้ง ${dupOthers.length} รายการ`}
+        message={(
+          <div className="space-y-2 text-sm">
+            <p>เก็บ <span className="font-mono">#{openListing?.external_product_id ?? "—"}</span> ไว้ตัวเดียว · อีก {dupOthers.length} ตัวจะไม่นับใน “ยังไม่จับคู่” และไม่ถูกจับคู่ตอนกดยืนยันทั้งหมด</p>
+            <ul className="text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg p-2 space-y-0.5">
+              {dupOthers.slice(0, 8).map((l) => <li key={l.id}>#{l.external_product_id || "—"}</li>)}
+              {dupOthers.length > 8 && <li className="text-slate-400">… และอีก {dupOthers.length - 8} รายการ</li>}
+            </ul>
+            <p className="text-xs text-slate-500">ของบนร้านจริงไม่ถูกลบ — ต้องไปลบใน Seller Center เอง · กด “เลิกข้าม” ได้ทุกเมื่อ · มีประวัติว่าใครตั้ง</p>
+          </div>
+        )}
+      />
     </div>
   );
 }

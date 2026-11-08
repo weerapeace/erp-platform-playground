@@ -9,7 +9,9 @@
 import { useEffect, useState } from "react";
 import { ERPModal } from "@/components/modal";
 
-export const IGNORE_REASONS = ["งานบริการ/รับผลิต", "เลิกขายแล้ว", "สินค้าซ้ำบนร้าน", "ชุด/โปรโมชัน (ไม่มีสินค้าเดี่ยว)"];
+/** เหตุผล "ซ้ำบนร้าน" — ปุ่ม "เก็บตัวนี้" ในป๊อปรายละเอียดใช้คำเดียวกัน */
+export const IGNORE_REASON_DUP = "สินค้าซ้ำบนร้าน";
+export const IGNORE_REASONS = ["งานบริการ/รับผลิต", "เลิกขายแล้ว", IGNORE_REASON_DUP, "ชุด/โปรโมชัน (ไม่มีสินค้าเดี่ยว)"];
 const OTHER = "__other";
 const LAST_KEY = "platform-catalog:ignore-reason";
 const TYPED_OVER = 100;

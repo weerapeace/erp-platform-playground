@@ -9,6 +9,7 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { duplicateCounts, summarizeListing, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
+import { matchShopVariants, shopVariantsOf, variantLookupCodes, type ListingVariantsResponse, type SkuLite } from "@/lib/platform-variant-match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 const CHUNK = 200;   // .in() ยาวเกินจะโดนตัด/ช้า → ถามเป็นชุด
@@ -227,4 +228,47 @@ export async function loadBrandSummaries(admin: Admin, sellingCodes: readonly st
     return (lb > 0 ? 1 : 0) - (la > 0 ? 1 : 0) || b.parents - a.parents || a.name.localeCompare(b.name, "th");
   });
   return { brands: list, platforms: pfRows.map((p) => ({ code: p.code, name_th: p.name_th })) };
+}
+
+/**
+ * ตัวเลือกบนร้าน ↔ SKU ในระบบ ของสินค้า 1 รายการบนร้าน (ป๊อปรายละเอียดหน้าจับคู่)
+ * อ่านอย่างเดียว — ไม่บันทึกคู่ (ระบบจับด้วยรหัสทุกครั้งที่ส่งราคา/สต๊อก) · กฎจับ = lib/platform-variant-match
+ */
+export async function loadListingVariants(admin: Admin, listingId: string): Promise<ListingVariantsResponse> {
+  const counts = { total: 0, exact: 0, base: 0, none: 0, nosku: 0, other_parent: 0 };
+  const fail = (error: string): ListingVariantsResponse => ({ platform_code: "", matched_parent_code: null, supported: false, fetched: false, rows: [], counts, error });
+  const { data: l, error } = await admin.from("platform_catalog_listings")
+    .select("id, platform_id, matched_parent_sku_id, line_variants:raw->line->variants, lazada_skus:raw->lazada->skus")
+    .eq("id", listingId).maybeSingle();
+  if (error) return fail("โหลดสินค้าบนร้านไม่สำเร็จ ลองใหม่อีกครั้ง");
+  if (!l) return fail("ไม่พบสินค้านี้ (อาจถูกลบไปแล้ว)");
+  const row = l as { platform_id: string; matched_parent_sku_id: string | null; line_variants: unknown; lazada_skus: unknown };
+  const { data: pf } = await admin.from("erp_platforms").select("code").eq("id", row.platform_id).maybeSingle();
+  const platformCode = String((pf as { code?: string } | null)?.code ?? "");
+  const supported = platformCode === "line_shopping" || platformCode === "lazada";
+  const fetched = platformCode === "line_shopping" ? row.line_variants != null : platformCode === "lazada" ? row.lazada_skus != null : false;
+  const raw = { line: row.line_variants != null ? { variants: row.line_variants } : undefined, lazada: row.lazada_skus != null ? { skus: row.lazada_skus } : undefined };
+  const variants = shopVariantsOf(platformCode, raw);
+
+  // SKU ในระบบ (รหัสเอง + รหัสสี) → รุ่นของแต่ละ SKU
+  const codes = variantLookupCodes(variants.map((v) => v.sku));
+  const byCode = new Map<string, SkuLite>();
+  for (let i = 0; i < codes.length; i += CHUNK) {
+    const { data: ss } = await admin.from("skus_v2").select("code, parent_sku_id, name_th, color, color_th").in("code", codes.slice(i, i + CHUNK));
+    for (const s of ((ss ?? []) as { code: string; parent_sku_id: string | null; name_th: string | null; color: string | null; color_th: string | null }[])) {
+      byCode.set(s.code, { code: s.code, parent_sku_id: s.parent_sku_id, name: s.color_th || s.color || s.name_th || null });
+    }
+  }
+  const parentIds = [...new Set([...[...byCode.values()].map((s) => s.parent_sku_id), row.matched_parent_sku_id].filter(Boolean) as string[])];
+  const parentCode = new Map<string, string>();
+  for (let i = 0; i < parentIds.length; i += CHUNK) {
+    const { data: ps } = await admin.from("parent_skus_v2").select("id, code").in("id", parentIds.slice(i, i + CHUNK));
+    for (const p of ((ps ?? []) as { id: string; code: string | null }[])) if (p.code) parentCode.set(p.id, p.code);
+  }
+  const { rows, counts: c } = matchShopVariants(variants, byCode, row.matched_parent_sku_id, (id) => parentCode.get(id) ?? null);
+  return {
+    platform_code: platformCode,
+    matched_parent_code: row.matched_parent_sku_id ? parentCode.get(row.matched_parent_sku_id) ?? null : null,
+    supported, fetched, rows, counts: c, error: null,
+  };
 }

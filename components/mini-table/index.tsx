@@ -221,27 +221,40 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
     try { localStorage.setItem(lsKey, JSON.stringify(widthsBase)); } catch { /* ignore */ }
   }, [widthsBase, resizable, lsKey]);
 
-  // ลากขอบหัวคอลัมน์เพื่อปรับความกว้าง
+  // ลากเส้นแบ่งหัวคอลัมน์เพื่อปรับความกว้าง — pointer = เมาส์ + นิ้ว (iPad) + ปากกา
+  //   แตะ/คลิกเส้นแบ่ง 2 ครั้งติดกัน (ไม่ได้ลาก) = พอดีเนื้อหา
   const dragRef = useRef<{ key: string; startX: number; startW: number } | null>(null);
-  const startResize = (key: string) => (e: React.MouseEvent) => {
+  const lastTapRef = useRef<{ key: string; t: number } | null>(null);
+  const startResize = (key: string) => (e: React.PointerEvent) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
     const headerCell = (e.currentTarget as HTMLElement).parentElement as HTMLElement;
     // เผื่อหน้าใช้ CSS zoom (ขนาดตัวอักษรของบอร์ด): ความกว้างจริง = offsetWidth · ระยะเมาส์ต้องหารด้วยอัตรา zoom
     const zoom = headerCell.offsetWidth ? headerCell.getBoundingClientRect().width / headerCell.offsetWidth || 1 : 1;
     dragRef.current = { key, startX: e.clientX, startW: headerCell.offsetWidth || headerCell.getBoundingClientRect().width };
+    const pid = e.pointerId;
     let last: number | null = null;
-    const onMove = (ev: MouseEvent) => {
-      const d = dragRef.current; if (!d) return;
+    const onMove = (ev: PointerEvent) => {
+      const d = dragRef.current; if (!d || ev.pointerId !== pid) return;
+      if (last == null && Math.abs(ev.clientX - d.startX) < 3) return;   // ขยับนิดเดียว (มือสั่นตอนดับเบิลคลิก) ยังไม่นับว่าลาก
       last = Math.max(48, Math.round(d.startW + (ev.clientX - d.startX) / zoom));
       setDragW({ key: d.key, w: last });
     };
-    const onUp = () => {
+    const onUp = (ev: PointerEvent) => {
+      if (ev.pointerId !== pid) return;
       const d = dragRef.current; dragRef.current = null;
-      document.removeEventListener("mousemove", onMove); document.removeEventListener("mouseup", onUp); document.body.style.cursor = "";
-      if (d && last != null) { const w = last; setWidths((prev) => ({ ...prev, [d.key]: w })); }
+      document.removeEventListener("pointermove", onMove); document.removeEventListener("pointerup", onUp); document.removeEventListener("pointercancel", onUp);
+      document.body.style.cursor = ""; document.body.style.userSelect = "";
+      if (d && last != null) { const w = last; setWidths((prev) => ({ ...prev, [d.key]: w })); lastTapRef.current = null; }
+      else if (ev.type === "pointerup") {
+        const now = Date.now(); const lt = lastTapRef.current;
+        if (lt && lt.key === key && now - lt.t < 450) { lastTapRef.current = null; fitColumn(key); }
+        else lastTapRef.current = { key, t: now };
+      }
       setDragW(null);
     };
-    document.addEventListener("mousemove", onMove); document.addEventListener("mouseup", onUp); document.body.style.cursor = "col-resize";
+    document.addEventListener("pointermove", onMove); document.addEventListener("pointerup", onUp); document.addEventListener("pointercancel", onUp);
+    document.body.style.cursor = "col-resize"; document.body.style.userSelect = "none";
   };
   const resetWidths = () => setWidths({});
 
@@ -411,8 +424,15 @@ export function MiniTable<T>(props: MiniTableProps<T>) {
         const ls = lockStyle(ci + (selectable ? 1 : 0), HEAD_BG);
         const canSort = !!c.sortValue;
         const active = sortKey === c.key;
-        const handle = resizable ? <span onMouseDown={startResize(c.key)} title={t("ลากเพื่อปรับความกว้าง", "Drag to resize")} className="absolute right-0 top-0 h-full w-2 cursor-col-resize hover:bg-rose-300/70" /> : null;
-        const wrapCls = `group/h flex items-center gap-1 ${resizable ? "relative overflow-hidden pr-2" : ""} ${alignCls(c.align)}`;
+        // เส้นแบ่งที่มองเห็นตลอด (เดิมเป็นแถบล่องหน เห็นเฉพาะตอนชี้) · ชี้/ลาก = เส้นเข้ม · iPad พื้นที่จับกว้างขึ้น
+        const dragging = dragW?.key === c.key;
+        const handle = resizable ? (
+          <span onPointerDown={startResize(c.key)} title={t("ลากเพื่อปรับความกว้าง · ดับเบิลคลิก = พอดีเนื้อหา", "Drag to resize · double-click to fit")}
+            className={`group/rs absolute right-0 top-0 flex h-full ${touch ? "w-5" : "w-3"} cursor-col-resize touch-none justify-end`}>
+            <span className={`h-full rounded-full transition-colors ${dragging ? "w-0.5 bg-rose-500" : "w-px bg-slate-300 group-hover/rs:w-0.5 group-hover/rs:bg-rose-400"}`} />
+          </span>
+        ) : null;
+        const wrapCls = `group/h flex items-center gap-1 ${resizable ? `relative overflow-hidden ${touch ? "pr-5" : "pr-3"}` : ""} ${alignCls(c.align)}`;
         const head = resizable ? <span className="truncate">{c.header}</span> : c.header;   // truncate เฉพาะตอน resizable (กันกระทบตารางเดิม)
         const menuBtn = columnMenu ? (
           <button type="button" onClick={(e) => { e.stopPropagation(); colMenuAnchor.current = e.currentTarget; setColMenu((o) => (o === c.key ? null : c.key)); }}

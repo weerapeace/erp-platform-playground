@@ -11,6 +11,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { linePrice } from "@/lib/platform-listing-builder";
+import { baseOfCode } from "@/lib/product-listing-context";
 import { lineUpdatePrices } from "@/lib/line-shopping";
 import { decryptSecret } from "@/lib/secret-box";
 
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const line = (r.raw?.line && typeof r.raw.line === "object") ? r.raw.line as Record<string, unknown> : {};
     return Array.isArray(line.variants) ? line.variants as Record<string, unknown>[] : [];
   };
-  const baseOf = (code: string): string | null => { const m = code.match(/^(.*\d)[A-Za-z]+$/); return m ? m[1] : null; };
+  const baseOf = baseOfCode;   // กฎเดียวกับป๊อป "ตัวเลือกบนร้าน ↔ SKU" (lib/platform-variant-match)
   const allSkus = [...new Set(rows.flatMap((r) => variantsOf(r).map((v) => asStr(v.sku)).filter(Boolean) as string[]))];
   // โหลดราคาของตัวขาย + ตัวสี (base) เผื่อสืบทอด · ส่ง LINE: price=fake, instantDiscount=fake−sale
   const lookupCodes = [...new Set([...allSkus, ...(allSkus.map(baseOf).filter(Boolean) as string[])])];
