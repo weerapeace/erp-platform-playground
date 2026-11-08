@@ -34,7 +34,12 @@
 | `POST /api/assets` / `PATCH /api/assets/[id]` | assets.upload / edit | สร้าง/แก้การ์ด Artwork (`source=artwork`, `master_path` = โฟลเดอร์ Z:, `master_url` = ลิงก์โฟลเดอร์ Drive) — รูปตัวอย่างต้องย่อให้ ≤ 4MB ก่อนส่ง |
 | `POST /api/file-sort/log` | assets.upload | จดประวัติ `file_sort.upload` หลังจบงาน (ใคร · งานไหน · ก๊อป/ย้าย · ไปที่ไหนกี่ไฟล์ · พลาดอะไร) |
 
-## ลำดับที่โปรแกรมทำ (ขั้น 2)
+## ตัวโปรแกรม (ขั้น 2)
+- ซอร์ส + ทดสอบ: `tools/file-sorter/` ในโฟลเดอร์โปรเจกต์บน Google Drive (ไม่อยู่ใน git เหมือนเครื่องมืออื่นใน tools/) · ไฟล์ใช้งาน `dist/ERP File Sorter.bat`
+- ล็อกอิน: Supabase password grant ด้วยคีย์สาธารณะ (อีเมล+รหัสผ่าน หรือ ชื่อผู้ใช้→`@pin.local`+PIN) · เก็บแค่ refresh token เข้ารหัส DPAPI ใน `%APPDATA%ERP File Sorter`
+- ปุ่ม "เปิดการ์ดในคลัง" = `/master/assets?source=artwork&asset=<id>` (หน้าคลังเปิดการ์ดให้เอง)
+
+## ลำดับที่โปรแกรมทำ
 1. `GET config` → ให้เลือกแบรนด์/ชนิด/กรอกชื่องาน
 2. `POST plan` → โชว์ว่าไฟล์ไหนไปไหน + คำเตือน
 3. ก๊อปลง Z: แล้วตรวจขนาดไฟล์ → `POST /api/drive` แล้ว PUT ไฟล์เข้า Google → ย่อรูปตัวอย่างแล้วสร้าง/แก้การ์ด

@@ -125,6 +125,9 @@ export function AssetLibrary() {
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search);
     if (sp.get("source") === "contents" || sp.get("album")) { setSource("contents"); setOpenAlbumId(sp.get("album")); }
+    // ลิงก์ตรงเปิดการ์ด ?source=artwork&asset=<id> (เช่น ปุ่ม "เปิดการ์ดในคลัง" ของตัวแยกไฟล์ ERP)
+    const assetId = sp.get("asset");
+    if (assetId) { if (sp.get("source") === "artwork") setSource("artwork"); setDetailId(assetId); }
   }, []);
 
   useEffect(() => {
