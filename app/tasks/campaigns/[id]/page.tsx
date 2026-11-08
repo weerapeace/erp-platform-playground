@@ -13,9 +13,9 @@ import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
 import { StandaloneShell } from "@/components/standalone-shell";
 import { apiFetch } from "@/lib/api";
-import { suppressUnload } from "@/lib/canvas-unload-guard";
+import { FolderCardModal, openCanvasFolder } from "@/components/canvas-sketch/folder-card";
 import { ERPModal } from "@/components/modal";
-import { ERPInput, ERPDateTime24 } from "@/components/form";
+import { ERPDateTime24 } from "@/components/form";
 import { useAuth, usePermission } from "@/components/auth";
 import type { DesignSheetListItem } from "@/app/api/design-sheets/route";
 import { buildStatusMeta, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
@@ -33,7 +33,7 @@ import type { AssetRow } from "@/app/api/assets/shared";
 import { withImageWidth, r2ImageUrl } from "@/lib/r2-image";
 import { TableDrawer } from "../../table-drawer";
 import { usePushToast } from "@/components/toast";
-import { skuCardSkeleton, parentSkuCardSkeleton, marketingSkuCardSkeleton, designSheetCardSkeleton, trendCardSkeleton, assetCardSkeleton, contentCardSkeleton, perPlatformCardSkeleton, folderCardSkeleton, tableCardSkeleton, taskCardSkeleton, type ParentSkuVal, type MktSkuVal, type MktFieldKey, MKT_FIELDS_ALL, tt, type DsCardInfo, dsCardText, DS_CARD_STROKE, type TrendCardInfo, trendCardText, type AssetFieldKey, contentCardText, perPlatformCardText, MKT_FIELD_OPTS, postStatusStyle } from "./card-skeletons";
+import { skuCardSkeleton, parentSkuCardSkeleton, marketingSkuCardSkeleton, designSheetCardSkeleton, trendCardSkeleton, assetCardSkeleton, contentCardSkeleton, perPlatformCardSkeleton, tableCardSkeleton, taskCardSkeleton, type ParentSkuVal, type MktSkuVal, type MktFieldKey, MKT_FIELDS_ALL, tt, type DsCardInfo, dsCardText, DS_CARD_STROKE, type TrendCardInfo, trendCardText, type AssetFieldKey, contentCardText, perPlatformCardText, MKT_FIELD_OPTS, postStatusStyle } from "./card-skeletons";
 import { ParentSkuMultiPick, MarketingSkuMultiPick, SkuMultiPick, DesignSheetMultiPick, BigTagPick } from "./multi-picks";
 import { AssetCardDrawer, SkuDrawer, CardsSummary, ToolMenu } from "./card-drawers";
 
@@ -118,8 +118,7 @@ export default function CampaignCanvasPage() {
   const [cForm, setCForm] = useState({ title: "", post_type: "image", platforms: [] as string[], scheduled_at: "", cardMode: "combined" as "combined" | "per_platform" });
   const [contentView, setContentView] = useState<Record<string, unknown> | null>(null); // การ์ดคอนเทนต์ที่กดดู
   const [tableView, setTableView] = useState<Record<string, unknown> | null>(null); // การ์ดตารางที่กดดู (เปิดสเปรดชีต)
-  const [folderOpen, setFolderOpen] = useState(false); // modal การ์ดโฟลเดอร์
-  const [fForm, setFForm] = useState({ label: "", path: "" });
+  const [folderOpen, setFolderOpen] = useState(false); // modal การ์ดโฟลเดอร์ (ของกลาง FolderCardModal)
   const [parentOpen, setParentOpen] = useState(false);  // modal การ์ด Parent SKU
   const [parentSel, setParentSel] = useState<ParentSkuVal[]>([]);
   const [mktOpen, setMktOpen] = useState(false);        // modal การ์ด SKU การตลาด
@@ -278,23 +277,16 @@ export default function CampaignCanvasPage() {
       pushToast("success", t(`สร้างคอนเทนต์ ${content_no} + วางการ์ดแล้ว`, `Created content ${content_no} and placed card`));
     } catch (e) { pushToast("error", (e as Error).message); }
   };
-  // วางการ์ดโฟลเดอร์ (เก็บ path) บนกระดาน
-  const addFolderCard = () => {
-    const path = fForm.path.trim();
-    if (!path) { pushToast("error", t("กรุณาใส่ path โฟลเดอร์", "Please enter a folder path")); return; }
-    const label = fForm.label.trim() || path.split(/[\\/]/).filter(Boolean).pop() || "โฟลเดอร์";
-    sketchRef.current?.insert(folderCardSkeleton({ path, label }));
-    setFolderOpen(false); setFForm({ label: "", path: "" });
+  // วางการ์ดโฟลเดอร์ (เก็บ path) บนกระดาน — ป๊อป + โครงการ์ด = ของกลาง components/canvas-sketch/folder-card
+  const addFolderCard = (skeletons: Record<string, unknown>[]) => {
+    sketchRef.current?.insert(skeletons);
+    setFolderOpen(false);
     pushToast("success", t("วางการ์ดโฟลเดอร์แล้ว", "Folder card placed"));
   };
   // เปิดโฟลเดอร์: ลองผ่าน custom protocol (ลง .reg แล้วเปิด File Explorer ทันที) + คัดลอก path เป็น fallback
   const openFolder = useCallback((path: string) => {
     if (!path) return;
-    navigator.clipboard?.writeText(path).catch(() => {});
-    // กันกระดานเด้ง "Leave site?" (beforeunload) ชั่วคราว — การยิง protocol ทำให้ Chrome เรียก
-    // beforeunload ทั้งที่หน้าไม่ได้ออกจริง · ใช้ erpfolder: (ไม่มี //) แบบ mailto: กัน host เพี้ยน
-    suppressUnload();
-    try { window.location.href = "erpfolder:" + encodeURIComponent(path); } catch { /* ไม่มี handler ก็ข้าม */ }
+    openCanvasFolder(path);
     pushToast("info", t("กำลังเปิดโฟลเดอร์... ถ้าไม่เปิด: ลง .reg แล้ว 'ปิด-เปิดเบราว์เซอร์ใหม่' 1 ครั้ง (ระหว่างนี้ path คัดลอกให้แล้ว วางใน File Explorer ได้)", "Opening folder... if nothing happens: install .reg then restart the browser once (path copied as fallback)"));
   }, [pushToast, t]);
   // คลิกการ์ดบนกระดาน → เปิด drawer ตามชนิด · การ์ดโฟลเดอร์ = เปิดโฟลเดอร์
@@ -743,28 +735,8 @@ export default function CampaignCanvasPage() {
         </div>
       </ERPModal>
 
-      {/* ป๊อปอัปการ์ดโฟลเดอร์ — เก็บ path · ดับเบิลคลิกการ์ด = คัดลอก path */}
-      <ERPModal open={folderOpen} onClose={() => setFolderOpen(false)} title={t("เพิ่มการ์ดโฟลเดอร์", "Add Folder card")} size="md"
-        footer={<div className="flex justify-end gap-2"><button onClick={() => setFolderOpen(false)} className="h-9 px-4 text-sm text-slate-700 border border-slate-200 rounded-lg">{t("ยกเลิก", "Cancel")}</button><button onClick={addFolderCard} disabled={!fForm.path.trim()} className="h-9 px-4 text-sm text-white bg-cyan-600 rounded-lg hover:bg-cyan-700 disabled:opacity-50">📁 {t("วางการ์ด", "Place card")}</button></div>}>
-        <div className="space-y-3">
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">{t("ชื่อ (ไม่ใส่ = ใช้ชื่อโฟลเดอร์สุดท้าย)", "Label (empty = last folder name)")}</p>
-            <ERPInput value={fForm.label} onChange={(e) => setFForm((f) => ({ ...f, label: e.target.value }))} placeholder={t("เช่น วิดีโอ Pasio", "e.g. Pasio videos")} />
-          </div>
-          <div>
-            <p className="text-[11px] text-slate-400 mb-1">{t("ที่อยู่โฟลเดอร์ (path)", "Folder path")}</p>
-            <ERPInput value={fForm.path} onChange={(e) => setFForm((f) => ({ ...f, path: e.target.value }))} onKeyDown={(e) => { if (e.key === "Enter" && fForm.path.trim()) addFolderCard(); }} placeholder="Z:\Work In Process\[02]\Video\Pasio" />
-          </div>
-          <div className="text-[11px] text-cyan-800 bg-cyan-50 border border-cyan-100 rounded-lg px-3 py-2 space-y-1">
-            <p className="font-medium">📌 {t("ดับเบิลคลิกการ์ด = เปิดโฟลเดอร์ใน File Explorer ทันที", "Double-click card = open folder in File Explorer instantly")}</p>
-            <p className="text-cyan-700">{t("ลงครั้งเดียวต่อเครื่อง (Windows):", "Install once per PC (Windows):")}</p>
-            <p>{t("1) ดาวน์โหลดไฟล์ตั้งค่า  2) ดับเบิลคลิก → กด Yes  3) ", "1) Download  2) double-click → Yes  3) ")}<b>{t("ปิด-เปิดเบราว์เซอร์ใหม่ 1 ครั้ง", "restart the browser once")}</b></p>
-            <p>{t("ครั้งแรกที่กดการ์ด Chrome จะถาม → กด ", "First click, Chrome asks → click ")}<b>Open</b>{t(" (ติ๊ก Always allow)", " (tick Always allow)")}</p>
-            <a href="/erp-open-folder.reg" download className="inline-flex items-center gap-1 font-medium underline text-cyan-700 hover:text-cyan-900">⬇️ {t("ดาวน์โหลดไฟล์ตั้งค่า (.reg)", "Download setup file (.reg)")}</a>
-            <p className="text-cyan-600">{t("ยังไม่ลง/ยังไม่ restart = กดแล้วจะคัดลอก path ให้วางเองใน File Explorer (Ctrl+V → Enter)", "Not installed/not restarted = clicking copies the path to paste manually (Ctrl+V → Enter)")}</p>
-          </div>
-        </div>
-      </ERPModal>
+      {/* ป๊อปอัปการ์ดโฟลเดอร์ (ของกลาง) — เก็บ path · ดับเบิลคลิกการ์ด = เปิดโฟลเดอร์ */}
+      <FolderCardModal open={folderOpen} onClose={() => setFolderOpen(false)} onPlace={addFolderCard} />
 
       {/* ป๊อปอัปสรุปการ์ดบนกระดาน */}
       <ERPModal open={cardsOpen} onClose={() => setCardsOpen(false)} title={t("การ์ดบนกระดาน", "Cards on board")} size="md"

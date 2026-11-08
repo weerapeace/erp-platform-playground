@@ -112,6 +112,8 @@ export function StorageCard({ canManage, pushToast }: { canManage: boolean; push
             </span>
           )}
           <Link href="/master/storage-rules" className="ml-auto inline-flex items-center gap-1 text-violet-600 hover:underline"><Icon value="i:database" />{t("กฎที่เก็บไฟล์", "Storage rules")} →</Link>
+          {/* กระดานวาดเอง ไว้วางแผนการเก็บไฟล์ (ระบบไม่อ่านไปใช้) — หน้า /master/storage-plan */}
+          <Link href="/master/storage-plan" className="inline-flex items-center gap-1 rounded border border-violet-200 bg-violet-50 px-2 py-0.5 font-medium text-violet-700 hover:bg-violet-100"><Icon name="edit" />{t("แผนผังการเก็บไฟล์ (วาดเอง)", "Storage plan (draw)")} →</Link>
         </div>
       )}
       {usage?.truncated && <p className="mt-1 text-[10px] text-amber-600">⚠ {t("ไฟล์เยอะมาก — ตัวเลขนี้ยังนับไม่ครบทั้งหมด", "Very many files — this total is not complete")}</p>}

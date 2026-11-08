@@ -27,6 +27,9 @@ const PERM: Record<string, { view: string; edit: string }> = {
   // กระดานแคนวาสของบอร์ดจ่ายงาน (1 กระดาน = 1 แผนจ่ายงาน) — ใครดู/แก้สินค้าได้ ก็วาดบนกระดานได้
   // (การย้ายงานเข้าโต๊ะจริง ๆ ยังต้องผ่าน API แผนจ่ายงานที่ขอสิทธิ์ work_board.dispatch อีกชั้น)
   work_board:       { view: "products.view", edit: "products.edit" },
+  // แผนผังการเก็บไฟล์ (วาดเอง · หน้า /master/storage-plan · กระดานเดียว entity_id="main")
+  // ดูได้ตามสิทธิ์คลังไฟล์ · แก้ได้เฉพาะคนจัดการคลัง (ชุดเดียวกับหน้ากฎที่เก็บไฟล์)
+  storage_plan:     { view: "assets.view",   edit: "assets.manage" },
 };
 const permFor = (entityType: string) => PERM[entityType] ?? { view: "products.view", edit: "products.edit" };
 

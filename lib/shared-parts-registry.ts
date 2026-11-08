@@ -1131,7 +1131,7 @@ export const SHARED_PARTS: SharedPart[] = [
   {
     key: "canvas-sketch", label: "กระดานวาด", code: "CanvasSketch", category: "feature",
     source: { path: "components/canvas-sketch" },
-    what: "กระดานแบบ miro วางรูป กล่อง ลูกศร ข้อความ วาดอิสระ",
+    what: "กระดานแบบ miro วางรูป กล่อง ลูกศร ข้อความ วาดอิสระ · มีการ์ดโฟลเดอร์ (folder-card) ดับเบิลคลิกเปิดโฟลเดอร์ในเครื่อง",
     doc: "canvas-sketch.md",
   },
   {

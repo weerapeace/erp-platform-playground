@@ -2,6 +2,7 @@
 
 > ไฟล์แต่ละหมวดเก็บที่ไหน: **R2 / Supabase Storage / Google Drive** — ตั้งที่เดียว ทุกช่องอัปทำตาม
 > หน้าตั้งค่า: `/master/storage-rules` (เมนู Master Data → กฎที่เก็บไฟล์) · โค้ดกลาง: `lib/storage-policy.ts`
+> **แผนผังการเก็บไฟล์ (วาดเอง)**: `/master/storage-plan` — กระดานวาดอิสระ (CanvasSketch · entity `storage_plan/main`) ไว้วางแผน/จดกันเอง **ระบบไม่อ่านไปใช้** · ทางเข้า = ปุ่มบนแถบพื้นที่คลังไฟล์ + หัวหน้านี้ · ดู assets.view / แก้ assets.manage
 
 ## ใช้ทำอะไร
 

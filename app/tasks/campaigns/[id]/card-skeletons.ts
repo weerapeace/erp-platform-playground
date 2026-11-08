@@ -233,18 +233,8 @@ export function perPlatformCardSkeleton(c: { id: string; content_no: string; tit
   ];
 }
 
-// การ์ดโฟลเดอร์บน Excalidraw (กล่องเล็ก): 📁 ชื่อ (บน) + path เล็กสีเทา (ล่าง) · คำใบ้เป็น tooltip ตอนชี้
-export function folderCardSkeleton(f: { path: string; label: string }): Record<string, unknown>[] {
-  const fid = Math.random().toString(36).slice(2, 9);
-  const gid = `folder-${fid}`;
-  const data = { kind: "folder", id: fid, path: f.path, label: f.label, tooltip: "ดับเบิลคลิก = เปิดโฟลเดอร์" };
-  const W = 250, H = 60;
-  return [
-    { type: "rectangle", x: 0, y: 0, width: W, height: H, backgroundColor: "#ecfeff", strokeColor: "#0891b2", fillStyle: "solid", roundness: { type: 3 }, groupIds: [gid], customData: data },
-    { type: "text", x: 12, y: 9, width: W - 24, text: `📁 ${f.label || "โฟลเดอร์"}`, fontSize: 15, strokeColor: "#155e75", groupIds: [gid], customData: data },
-    { type: "text", x: 12, y: 32, width: W - 24, text: f.path, fontSize: 10, strokeColor: "#64748b", groupIds: [gid], customData: data },
-  ];
-}
+// การ์ดโฟลเดอร์ → ย้ายไปเป็นของกลาง components/canvas-sketch/folder-card.tsx (folderCardSkeleton / FolderCardModal / openCanvasFolder)
+// ใช้ร่วมกับกระดานแผนผังการเก็บไฟล์ (/master/storage-plan)
 
 // การ์ดตารางคำนวณบน Excalidraw: วาด grid (หัวคอลัมน์ A B C / หัวแถว 1 2 3 / ช่องค่าที่คำนวณแล้ว) -- ดับเบิลคลิกเปิดสเปรดชีต
 export type CanvasTable = { id: string; title: string; data: string[][] };

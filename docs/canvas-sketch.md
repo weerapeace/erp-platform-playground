@@ -52,6 +52,13 @@ ref.current?.insert([
 - ภาพถ่ายกระดาน: key ตายตัว `canvas-sketch/<type>/<id>.png` — บันทึกใหม่ทับของเก่า **ไม่มีไฟล์ขยะใน R2**
 - ดึงภาพไปใช้: GET `/api/canvas-sketch?entity_type=..&entity_id=..` → `preview_url`
 
+## การ์ดโฟลเดอร์ (ของกลาง `components/canvas-sketch/folder-card.tsx`)
+
+- `<FolderCardModal open onClose onPlace={(skeletons) => controls.insert(skeletons)} />` — ป๊อปกรอกชื่อ + path แล้วคืนโครงการ์ดให้ผู้เรียกวางเอง
+- `folderCardSkeleton({ path, label })` — โครงการ์ด (customData `kind: "folder"`)
+- `openCanvasFolder(path)` — เรียกใน `onCardOpen` เมื่อ `data.kind === "folder"` → เปิด File Explorer ผ่าน `erpfolder:` (ลง `/erp-open-folder.reg` ครั้งเดียวต่อเครื่อง) + คัดลอก path สำรอง · กันเตือน "Leave site?" ให้เอง (suppressUnload)
+- ใช้ที่: กระดานแคมเปญ (`/tasks/campaigns/[id]`) · แผนผังการเก็บไฟล์ (`/master/storage-plan`)
+
 ## ฝังลิงก์ YouTube / Pinterest / TikTok
 
 - copy ลิงก์แล้วกด Ctrl+V บนกระดาน → ได้กล่องโชว์รูป/วิดีโอ (วางหลายลิงก์ทีเดียว = เรียงเป็นแถว) · คลิกกล่อง 1 ครั้งเพื่อกดเล่น/เลื่อนในกล่อง
@@ -67,5 +74,5 @@ ref.current?.insert([
 - ขนาดกระดานจำกัด 8MB (รูปที่วางฝังใน scene) — วางรูปใหญ่หลายรูปมากๆ จะเตือน
 - ไม่มีตารางสำเร็จรูป (วาดกล่องเรียงแทน)
 - ตัวเสริม: `@excalidraw/excalidraw` v0.18 — โหลดเฉพาะหน้าที่ใช้ (dynamic import) ไม่ถ่วงหน้าอื่น
-- สิทธิ์ API เลือกตาม entity_type ฝั่ง server (map `PERM` ใน route): `design_sheet`→products.* · `creative_board`→tasks.* · `work_board`→products.* · อื่นๆ default products.* (เพิ่ม entity ใหม่ก็เติม map — client ระบุสิทธิ์เองไม่ได้ กันสวมสิทธิ์ข้ามโมดูล)
+- สิทธิ์ API เลือกตาม entity_type ฝั่ง server (map `PERM` ใน route): `design_sheet`→products.* · `creative_board`→tasks.* · `work_board`→products.* · `storage_plan`→ดู assets.view / แก้ assets.manage · อื่นๆ default products.* (เพิ่ม entity ใหม่ก็เติม map — client ระบุสิทธิ์เองไม่ได้ กันสวมสิทธิ์ข้ามโมดูล)
 - ลบเอกสารแม่ ไม่ได้ลบกระดานอัตโนมัติ (entity_id เป็น text ไม่มี FK) — ยอมรับได้: กระดานเก่าไม่โผล่ที่ไหน

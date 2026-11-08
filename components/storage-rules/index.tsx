@@ -122,7 +122,10 @@ export function StorageRulesManager() {
           <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2"><Icon value="i:database" />{t("กฎที่เก็บไฟล์", "File storage rules")}</h1>
           <p className="text-[13px] text-slate-500 mt-0.5">{t("ไฟล์แต่ละหมวดเก็บที่ไหน — R2 / Supabase / Google Drive · ตั้งที่เดียว ทุกช่องอัปทำตาม", "Where each kind of file is stored — R2 / Supabase / Google Drive · set once, every upload slot follows")}</p>
         </div>
-        <Link href="/master/assets" className="inline-flex items-center gap-1 h-9 px-3 text-[13px] border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600"><Icon name="library" />{t("ไปคลังไฟล์กลาง", "Go to file library")}</Link>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Link href="/master/storage-plan" className="inline-flex items-center gap-1 h-9 px-3 text-[13px] border border-violet-200 bg-violet-50 rounded-lg hover:bg-violet-100 text-violet-700"><Icon name="edit" />{t("แผนผังการเก็บไฟล์ (วาดเอง)", "Storage plan (draw)")}</Link>
+          <Link href="/master/assets" className="inline-flex items-center gap-1 h-9 px-3 text-[13px] border border-slate-200 rounded-lg hover:bg-slate-50 text-slate-600"><Icon name="library" />{t("ไปคลังไฟล์กลาง", "Go to file library")}</Link>
+        </div>
       </div>
 
       <div className="rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-[13px] text-amber-900 flex gap-2.5">
