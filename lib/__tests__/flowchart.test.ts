@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
   parseFlowScene, toFlowScene, autoEdgeLabel, mergeFlowScenes, cloneFlowSceneAt, handlePoint, flowSceneBounds,
-  splitFlowLabel, makeFlowNode, nodeColor, snap, type FlowScene, type FlowSceneNode, type FlowSceneEdge,
+  splitFlowLabel, makeFlowNode, nodeColor, snap, copyFlowSelection, flowClipText, serializeFlowClip, parseFlowClip,
+  placeFlowClip, textToFlowNode, type FlowScene, type FlowSceneNode, type FlowSceneEdge,
 } from "../flowchart";
 
 const th = (a: string) => a;
@@ -125,5 +126,61 @@ describe("เรขาคณิต / ตัวช่วย", () => {
     expect(n.position.y % 20).toBe(0);
     expect(nodeColor(n.type, n.data)).toBe("amber");
     expect(snap(29)).toBe(20);
+  });
+});
+
+describe("คัดลอก / วาง", () => {
+  const scene = S([N("a", 0, "ไฟล์ใหม่\nเข้าระบบ"), N("b", 200, "ลับ?"), N("c", 400, "R2")], [E("e1", "a", "b"), E("e2", "b", "c", "ไม่ใช่")]);
+
+  it("คัดลอกเฉพาะกล่องที่เลือก + เส้นที่ต่อระหว่างกล่องที่เลือก", () => {
+    const clip = copyFlowSelection(scene, ["b", "c"])!;
+    expect(clip.nodes.map((n) => n.id)).toEqual(["b", "c"]);
+    expect(clip.edges.map((e) => e.id)).toEqual(["e2"]);   // e1 ปลายอีกข้าง (a) ไม่ได้เลือก → ไม่เอา
+    expect(copyFlowSelection(scene, [])).toBeNull();
+    expect(copyFlowSelection(scene, ["zz"])).toBeNull();
+  });
+
+  it("ข้อความอ่านง่าย: 1 กล่อง 1 บรรทัด · หลายบรรทัดในกล่องต่อด้วย ·", () => {
+    expect(flowClipText(copyFlowSelection(scene, ["c", "a"])!)).toBe("ไฟล์ใหม่ · เข้าระบบ\nR2");
+  });
+
+  it("เก็บลงคลิปบอร์ดแล้วอ่านกลับได้ · ของแปลก/ข้อความธรรมดา = null", () => {
+    const clip = copyFlowSelection(scene, ["a", "b", "c"])!;
+    expect(parseFlowClip(serializeFlowClip(clip))).toEqual(clip);
+    expect(parseFlowClip("สวัสดี")).toBeNull();
+    expect(parseFlowClip('{"kind":"flowchart","nodes":[]}')).toBeNull();
+    expect(parseFlowClip({ kind: "flowchart-clip", nodes: [{ id: "x", type: "hacker" }] })).toBeNull();
+  });
+
+  it("วาง: id ใหม่ทั้งหมด · เส้นตามไปด้วย · กลางก้อนไปอยู่ที่จุดวาง (ชิดตาราง)", () => {
+    const clip = copyFlowSelection(scene, ["a", "b"])!;   // กรอบ x 0..360 · y 0..60 → กลาง (180, 30)
+    const out = placeFlowClip(clip, { x: 1000, y: 500 });
+    expect(out.nodes).toHaveLength(2);
+    expect(out.nodes.some((n) => n.id === "a" || n.id === "b")).toBe(false);
+    expect(out.edges).toHaveLength(1);
+    expect(out.edges[0].source).toBe(out.nodes[0].id);
+    expect(out.edges[0].target).toBe(out.nodes[1].id);
+    expect(out.nodes[0].position).toEqual({ x: 820, y: 480 });   // 500-30=470 → ชิดตาราง 480
+    expect(out.nodes[0].data).toEqual({ label: "ไฟล์ใหม่\nเข้าระบบ" });
+    // วางสองครั้ง id ไม่ชนกัน
+    const again = placeFlowClip(clip, { x: 1000, y: 500 });
+    expect(again.nodes[0].id).not.toBe(out.nodes[0].id);
+  });
+
+  it("ทำซ้ำ (ไม่ระบุจุด) = ที่เดิม + เลื่อนเฉียง", () => {
+    const out = placeFlowClip(copyFlowSelection(scene, ["c"])!, null, 40);
+    expect(out.nodes[0].position).toEqual({ x: 440, y: 40 });
+  });
+
+  it("ข้อความจากที่อื่น: สั้น = กล่องขั้นตอน · ยาว = โน้ต (สูงตามเนื้อหา) · ว่าง = ไม่สร้าง", () => {
+    const s = textToFlowNode("  เช็กไฟล์ก่อนอัป  ", { x: 0, y: 0 }, th)!;
+    expect(s.type).toBe("step");
+    expect(s.data.label).toBe("เช็กไฟล์ก่อนอัป");
+    const long = textToFlowNode("บรรทัด 1\r\nบรรทัด 2\nบรรทัด 3\nบรรทัด 4\nบรรทัด 5\nบรรทัด 6\nบรรทัด 7", { x: 0, y: 0 }, th)!;
+    expect(long.type).toBe("note");
+    expect(long.data.label).not.toContain("\r");
+    expect(long.height).toBeGreaterThan(110);
+    expect(long.height % 20).toBe(0);
+    expect(textToFlowNode("   \n  ", { x: 0, y: 0 }, th)).toBeNull();
   });
 });

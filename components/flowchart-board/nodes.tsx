@@ -15,7 +15,12 @@ export type FlowBoardActions = {
   readOnly: boolean;
   t: (th: string, en: string) => string;
   updateData: (id: string, patch: Partial<FlowNodeData>) => void;
-  removeNode: (id: string) => void;
+  /** กล่องที่เลือกอยู่ (ไว้ซ่อนแถบเครื่องมือรายกล่องตอนเลือกหลายกล่อง — ใช้แถบกลุ่มแทน) */
+  selectedIds: string[];
+  setColor: (ids: string[], color: FlowColor) => void;
+  copyNodes: (ids: string[]) => void;
+  duplicateNodes: (ids: string[]) => void;
+  removeNodes: (ids: string[]) => void;
   openFolder: (path: string) => void;
   setEdgeLabel: (id: string, label: string) => void;
   editEdgeLabel: (id: string) => void;
@@ -68,22 +73,28 @@ function InlineEditor({ initial, onDone, folder }: { initial: FlowNodeData; onDo
   );
 }
 
-/** ปุ่มลอยเหนือกล่องที่เลือก: สี · แก้ข้อความ · เปิดโฟลเดอร์ · ลบ */
-function NodeTools({ id, kind, data, onEdit }: { id: string; kind: FlowKind; data: FlowNodeData; onEdit: () => void }) {
-  const { t, updateData, removeNode, openFolder } = useBoard();
-  const cur = nodeColor(kind, data);
+/**
+ * แถบปุ่มลอยเหนือกล่องที่เลือก: สี · แก้ข้อความ · คัดลอก · ทำซ้ำ · เปิดโฟลเดอร์ · ลบ
+ *   เลือก 1 กล่อง = แถบของกล่องนั้น (ส่ง single) · เลือกหลายกล่อง = แถบกลุ่มอันเดียว (กระดานวางไว้เหนือกลุ่ม)
+ */
+export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
+  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder } = useBoard();
+  const cur = single ? nodeColor(single.kind, single.data) : null;
   const btn = "inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] text-slate-600 hover:bg-slate-100";
   return (
     <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-md">
+      {!single && <span className="px-1.5 text-[11px] font-medium text-violet-700">{t(`เลือก ${ids.length} กล่อง`, `${ids.length} selected`)}</span>}
       {FLOW_COLORS.map((c) => (
-        <button key={c} type="button" title={t(FLOW_PALETTE[c].th, FLOW_PALETTE[c].en)} onClick={() => updateData(id, { color: c })}
+        <button key={c} type="button" title={t(FLOW_PALETTE[c].th, FLOW_PALETTE[c].en)} onClick={() => setColor(ids, c)}
           className={`mx-0.5 h-4 w-4 rounded-full border-2 ${cur === c ? "ring-2 ring-violet-300 ring-offset-1" : ""}`}
           style={{ background: FLOW_PALETTE[c].fill, borderColor: FLOW_PALETTE[c].stroke }} />
       ))}
       <span className="mx-1 h-5 w-px bg-slate-200" />
-      <button type="button" className={btn} onClick={onEdit} title={t("แก้ข้อความ (หรือดับเบิลคลิกกล่อง)", "Edit text (or double-click)")}><Icon value="i:pencil" />{t("แก้", "Edit")}</button>
-      {kind === "folder" && data.path && <button type="button" className={btn} onClick={() => openFolder(data.path!)}><Icon value="i:folder-open" />{t("เปิด", "Open")}</button>}
-      <button type="button" className={`${btn} hover:bg-rose-50 hover:text-rose-600`} onClick={() => removeNode(id)} title={t("ลบกล่อง (หรือกด Delete)", "Delete box (or press Delete)")}><Icon value="i:trash" /></button>
+      {single && <button type="button" className={btn} onClick={single.onEdit} title={t("แก้ข้อความ (หรือดับเบิลคลิกกล่อง)", "Edit text (or double-click)")}><Icon value="i:pencil" />{t("แก้", "Edit")}</button>}
+      <button type="button" className={btn} onClick={() => copyNodes(ids)} title={t("คัดลอก (Ctrl+C) แล้วไปวางที่อื่นด้วย Ctrl+V — วางในกระดานหน้าอื่นได้", "Copy (Ctrl+C), then paste elsewhere with Ctrl+V")}><Icon value="i:copy" />{t("คัดลอก", "Copy")}</button>
+      <button type="button" className={btn} onClick={() => duplicateNodes(ids)} title={t("ทำซ้ำข้าง ๆ ทันที (Ctrl+D)", "Duplicate right here (Ctrl+D)")}><Icon value="i:stack-2" />{t("ทำซ้ำ", "Duplicate")}</button>
+      {single?.kind === "folder" && single.data.path && <button type="button" className={btn} onClick={() => openFolder(single.data.path!)}><Icon value="i:folder-open" />{t("เปิด", "Open")}</button>}
+      <button type="button" className={`${btn} hover:bg-rose-50 hover:text-rose-600`} onClick={() => removeNodes(ids)} title={t("ลบ (หรือกด Delete)", "Delete (or press Delete)")}><Icon value="i:trash" /></button>
     </div>
   );
 }
@@ -108,8 +119,9 @@ function ShapeBg({ kind, color }: { kind: FlowKind; color: FlowColor }) {
 
 /** กล่องทุกชนิด (ชนิดดูจาก type ของโหนด) */
 export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>) {
-  const { readOnly, t, updateData, openFolder } = useBoard();
+  const { readOnly, t, updateData, openFolder, selectedIds } = useBoard();
   const kind = type as FlowKind;
+  const onlyMe = selected && selectedIds.length === 1;   // เลือกหลายกล่อง → ใช้แถบกลุ่มแทน
   const color = nodeColor(kind, data);
   const pal = FLOW_PALETTE[color];
   const [editing, setEditing] = useState(false);
@@ -141,8 +153,8 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
       {!readOnly && <NodeResizer isVisible={selected && !editing} minWidth={kind === "question" ? 120 : 80} minHeight={kind === "question" ? 70 : 40}
         lineClassName="fc-resize-line" handleClassName="fc-resize-handle" />}
       {!readOnly && (
-        <NodeToolbar isVisible={selected && !editing} position={Position.Top} offset={10}>
-          <NodeTools id={id} kind={kind} data={data} onEdit={() => setEditing(true)} />
+        <NodeToolbar isVisible={onlyMe && !editing} position={Position.Top} offset={10}>
+          <FlowTools ids={[id]} single={{ kind, data, onEdit: () => setEditing(true) }} />
         </NodeToolbar>
       )}
       <div

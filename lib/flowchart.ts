@@ -201,3 +201,75 @@ export function splitFlowLabel(label: string): { title: string; sub: string } {
   const [title = "", ...rest] = (label ?? "").split("\n");
   return { title, sub: rest.join("\n") };
 }
+
+// ── คัดลอก / วาง ──────────────────────────────────────────────
+// ก้อนคัดลอก = กล่องที่เลือก + เส้นที่ต่อ "ระหว่างกล่องที่เลือก" เท่านั้น (เส้นที่ปลายอีกข้างไม่ได้เลือก ไม่เอาไปด้วย)
+// เก็บลงคลิปบอร์ด 2 แบบ: แบบกระดาน (JSON ชนิดพิเศษ — วางในกระดาน flowchart ได้ทุกหน้า/ทุกแท็บ) + ข้อความอ่านง่าย (วางใน LINE/Word ได้)
+
+export const FLOW_CLIP_MIME = "application/x-erp-flowchart+json";
+export type FlowClip = { kind: "flowchart-clip"; v: 1; nodes: FlowSceneNode[]; edges: FlowSceneEdge[] };
+
+/** กล่องที่เลือก → ก้อนคัดลอก · ไม่ได้เลือกกล่องเลย = null */
+export function copyFlowSelection(scene: FlowScene, nodeIds: Iterable<string>): FlowClip | null {
+  const want = new Set(nodeIds);
+  const nodes = scene.nodes.filter((n) => want.has(n.id));
+  if (!nodes.length) return null;
+  const ids = new Set(nodes.map((n) => n.id));
+  const edges = scene.edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+  return { kind: "flowchart-clip", v: 1, nodes, edges };
+}
+
+/** ก้อนคัดลอก → ข้อความอ่านง่าย (เรียงบนลงล่าง ซ้ายไปขวา · 1 กล่อง 1 บรรทัด) */
+export function flowClipText(clip: FlowClip): string {
+  return [...clip.nodes]
+    .sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)
+    .map((n) => [n.data.label.split("\n").map((s) => s.trim()).filter(Boolean).join(" · "), n.data.path].filter(Boolean).join(" — "))
+    .filter(Boolean)
+    .join("\n");
+}
+
+export const serializeFlowClip = (clip: FlowClip): string => JSON.stringify(clip);
+
+/** อ่านก้อนคัดลอกจากคลิปบอร์ด (ตรวจ/ทำความสะอาดเหมือนตอนโหลดกระดาน) · ไม่ใช่ของกระดาน = null */
+export function parseFlowClip(raw: unknown): FlowClip | null {
+  let o: unknown = raw;
+  if (typeof raw === "string") { try { o = JSON.parse(raw); } catch { return null; } }
+  if (!o || typeof o !== "object" || (o as Record<string, unknown>).kind !== "flowchart-clip") return null;
+  const r = o as Record<string, unknown>;
+  const s = parseFlowScene({ kind: "flowchart", nodes: r.nodes, edges: r.edges });
+  if (!s || !s.nodes.length) return null;
+  return { kind: "flowchart-clip", v: 1, nodes: s.nodes, edges: s.edges };
+}
+
+/**
+ * วางก้อนคัดลอกลงกระดาน: ตั้ง id ใหม่ทั้งหมด (วางซ้ำกี่ครั้งก็ไม่ชนกัน)
+ *   center = จุดที่จะวาง (กลางก้อนไปอยู่ตรงนั้น เช่น ตำแหน่งเมาส์) · ไม่ส่ง = ที่เดิม
+ *   nudge  = เลื่อนเพิ่มเฉียงลงขวา (ทำซ้ำ/วางซ้ำที่เดิม จะได้ไม่ทับกันสนิท)
+ */
+export function placeFlowClip(clip: FlowClip, center?: { x: number; y: number } | null, nudge = 0): FlowScene {
+  const b = flowSceneBounds({ ...EMPTY_FLOW_SCENE, nodes: clip.nodes }, 0);
+  const dx = (center ? snap(center.x - (b.x + b.w / 2)) : 0) + nudge;
+  const dy = (center ? snap(center.y - (b.y + b.h / 2)) : 0) + nudge;
+  const idMap = new Map<string, string>();
+  for (const n of clip.nodes) idMap.set(n.id, newFlowId("n"));
+  return {
+    kind: "flowchart", v: 1,
+    nodes: clip.nodes.map((n) => ({ ...n, id: idMap.get(n.id)!, position: { x: n.position.x + dx, y: n.position.y + dy }, data: { ...n.data } })),
+    edges: clip.edges.filter((e) => idMap.has(e.source) && idMap.has(e.target))
+      .map((e) => ({ ...e, id: newFlowId("e"), source: idMap.get(e.source)!, target: idMap.get(e.target)! })),
+  };
+}
+
+/** ข้อความธรรมดาที่วางมาจากที่อื่น (LINE/Word/เว็บ) → กล่องใหม่ 1 กล่อง: สั้น = กล่องขั้นตอน · ยาว/หลายบรรทัด = โน้ต */
+export function textToFlowNode(text: string, at: { x: number; y: number }, t: (th: string, en: string) => string): FlowSceneNode | null {
+  const s = (text ?? "").replace(/\r\n?/g, "\n").replace(/\n{3,}/g, "\n\n").trim().slice(0, 2000);
+  if (!s) return null;
+  const lines = s.split("\n");
+  const short = lines.length <= 2 && s.length <= 60;
+  const node = makeFlowNode(short ? "step" : "note", at, t, { label: s });
+  if (!short) {
+    const rows = lines.reduce((sum, l) => sum + Math.max(1, Math.ceil(l.length / 30)), 0);   // ~30 ตัวอักษรต่อบรรทัดที่กว้าง 220
+    node.height = Math.min(480, Math.max(FLOW_KIND_META.note.h, snap(30 + rows * 17)));
+  }
+  return node;
+}
