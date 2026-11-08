@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   DEFAULT_ARTWORK_PROFILE, cleanFileSortConfig, findProfile, planFileSort, nasFolderFor, safeFolderName,
-  relPathOf, normalizeExt, winJoin, type FileSortProfile,
+  relPathOf, normalizeExt, winJoin, fillNasPattern, nasPrefixOf, nasDateValues, cleanProductConfig, type FileSortProfile,
 } from "./file-sort";
 
 const logoFolder = [
@@ -111,7 +111,7 @@ describe("path บน Z:", () => {
   it("ไม่มีชนิด = ข้ามชั้น · ไม่มีโฟลเดอร์แบรนด์หรือราก = null", () => {
     expect(nasFolderFor(DEFAULT_ARTWORK_PROFILE, "[04] Pixie Dustie", "", "งาน A")).toBe("Z:\\Assets\\[04] Pixie Dustie\\งาน A");
     expect(nasFolderFor(DEFAULT_ARTWORK_PROFILE, "", "01_Logo", "x")).toBeNull();
-    expect(nasFolderFor({ ...DEFAULT_ARTWORK_PROFILE, nasRoot: "" }, "[01] Louis Montini", "01_Logo", "x")).toBeNull();
+    expect(nasFolderFor({ ...DEFAULT_ARTWORK_PROFILE, nasPattern: "" }, "[01] Louis Montini", "01_Logo", "x")).toBeNull();
   });
   it("ชื่อที่ Windows ไม่รับ ถูกแก้ให้ปลอดภัย", () => {
     expect(safeFolderName('Logo: A/B? "new".')).toBe("Logo- A-B- -new-");
@@ -122,5 +122,32 @@ describe("path บน Z:", () => {
     expect(relPathOf("C:/x/Job/a/b.png", "C:/x/Job")).toBe("a/b.png");
     expect(normalizeExt(" *.TiFF ")).toBe("tiff");
     expect(winJoin("\\\\nas\\share\\", "a", "", "\\b\\")).toBe("\\\\nas\\share\\a\\b");
+  });
+});
+
+describe("แม่แบบที่เก็บบน Z:", () => {
+  it("เติมช่อง · ช่องว่างข้ามชั้น · ช่องบังคับว่าง = null · ไม่มีไดรฟ์ = null", () => {
+    expect(fillNasPattern("Z:\\Work In Process\\[03] Banner\\{ปี}-{เดือน}", { ปี: "2026", เดือน: "11" })).toBe("Z:\\Work In Process\\[03] Banner\\2026-11");
+    expect(fillNasPattern("Z:\\A\\{แบรนด์}\\{ชนิด}\\{ชื่องาน}", { แบรนด์: "B", ชื่องาน: "Job: 1" })).toBe("Z:\\A\\B\\Job- 1");
+    expect(fillNasPattern("Z:\\A\\{แบรนด์}\\{ชื่องาน}", { ชื่องาน: "x" }, ["แบรนด์"])).toBeNull();
+    expect(fillNasPattern("Assets\\{ชื่องาน}", { ชื่องาน: "x" })).toBeNull();
+    expect(fillNasPattern("", {})).toBeNull();
+    expect(fillNasPattern("\\\\nas\\share\\{รุ่น}", { รุ่น: "BSD15" })).toBe("\\\\nas\\share\\BSD15");
+  });
+  it("ส่วนต้นของแม่แบบ · ปี/เดือนตามเวลาไทย", () => {
+    expect(nasPrefixOf("Z:\\Assets\\{แบรนด์}\\{ชนิด}")).toBe("Z:\\Assets");
+    expect(nasPrefixOf("Z:\\A\\B")).toBe("Z:\\A\\B");
+    expect(nasDateValues(new Date("2026-10-31T18:30:00Z"))).toEqual({ ปี: "2026", เดือน: "11" });
+  });
+  it("แยกตามชนิดงาน + ค่าเดิม (nasRoot) แปลงเป็นแม่แบบผลเหมือนเดิม", () => {
+    const p = { ...DEFAULT_ARTWORK_PROFILE, nasByType: { ลายพิมพ์: "Z:\\Print\\{ปี}\\{ชื่องาน}" } };
+    expect(nasFolderFor(p, "[01] LM", "02_Artwork", "Tiger", "ลายพิมพ์", new Date("2026-11-08T00:00:00Z"))).toBe("Z:\\Print\\2026\\Tiger");
+    expect(nasFolderFor(p, "[01] LM", "01_Logo", "Calypso", "โลโก้")).toBe("Z:\\Assets\\[01] LM\\01_Logo\\Calypso");
+    const legacy = findProfile(cleanFileSortConfig({ profiles: [{ key: "artwork", nasRoot: "Y:\\Old", rules: [] }] }), "artwork");
+    expect(legacy.nasPattern).toBe("Y:\\Old\\{แบรนด์}\\{ชนิด}\\{ชื่องาน}");
+    expect(legacy.nasRoot).toBe("Y:\\Old");
+    expect(findProfile(cleanFileSortConfig({ profiles: [{ key: "artwork", nasRoot: "" }] }), "artwork").nasPattern).toBe("");
+    expect(cleanProductConfig({ nasRoot: "Y:\\NP" }).nasPatterns).toEqual({ new: "Y:\\NP\\{รุ่น}", color: "Y:\\NP\\{รุ่น}", edit: "Y:\\NP\\{รุ่น}" });
+    expect(cleanProductConfig({ nasPatterns: { new: "Z:\\A\\{รุ่น}", color: "" } }).nasPatterns).toEqual({ new: "Z:\\A\\{รุ่น}", color: "", edit: "Z:\\Work In Process\\[01] New Product\\{รุ่น}" });
   });
 });

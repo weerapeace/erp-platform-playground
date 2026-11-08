@@ -62,7 +62,8 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
     const newRules = new Map(p.rules.map((x) => [x.ext, x]));
     return {
       profile: p.key,
-      nas_root: old?.nasRoot === p.nasRoot ? undefined : { old: old?.nasRoot ?? null, new: p.nasRoot },
+      nas_pattern: old?.nasPattern === p.nasPattern ? undefined : { old: old?.nasPattern ?? null, new: p.nasPattern },
+      nas_by_type: JSON.stringify(old?.nasByType ?? {}) === JSON.stringify(p.nasByType) ? undefined : { old: old?.nasByType ?? {}, new: p.nasByType },
       added: p.rules.filter((x) => !oldRules.has(x.ext)).map((x) => `${x.ext}=${ruleText(x)}`),
       removed: (old?.rules ?? []).filter((x) => !newRules.has(x.ext)).map((x) => x.ext),
       changed: p.rules.filter((x) => oldRules.has(x.ext) && ruleText(oldRules.get(x.ext)!) !== ruleText(x))
@@ -74,7 +75,7 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
   // สูตรงานสินค้า: ชื่อโฟลเดอร์หน้าที่ · ที่เก็บบน Z: · โหมดรูปเดิม
   const pp = prev.product, np = next.product;
   const diff = <T,>(a: T, b: T) => (JSON.stringify(a) === JSON.stringify(b) ? undefined : { old: a, new: b });
-  const product = { nas_root: diff(pp.nasRoot, np.nasRoot), desc_folders: diff(pp.roleFolders.desc, np.roleFolders.desc), archive_folders: diff(pp.roleFolders.archive, np.roleFolders.archive), mode: diff(pp.mode, np.mode) };
+  const product = { nas_patterns: diff(pp.nasPatterns, np.nasPatterns), desc_folders: diff(pp.roleFolders.desc, np.roleFolders.desc), archive_folders: diff(pp.roleFolders.archive, np.roleFolders.archive), mode: diff(pp.mode, np.mode) };
   await writeAuditFor(request, admin, { action: "file_sort_config.update", entityType: "ui_config", metadata: { key: FILE_SORT_CONFIG_KEY, changes, product } });
   return NextResponse.json({ ok: true, data: next, error: null });
 }

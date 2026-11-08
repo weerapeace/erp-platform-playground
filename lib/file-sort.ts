@@ -22,7 +22,11 @@ export type FileSortRule = { ext: string; library: boolean; drive: boolean; nas:
 export type FileSortProfile = {
   key: string;
   label: string;
-  /** รากบน Z: เช่น Z:\Assets — ว่าง = ไม่ส่งลง Z: */
+  /** แม่แบบที่เก็บบน Z: (ค่าตั้งต้น) เช่น Z:\Assets\{แบรนด์}\{ชนิด}\{ชื่องาน} — ว่าง = ไม่ส่งลง Z: */
+  nasPattern: string;
+  /** แม่แบบแยกตามชนิดงาน (ชื่อชนิด artwork → แม่แบบ) · ไม่มี/ว่าง = ใช้ค่าตั้งต้น */
+  nasByType: Record<string, string>;
+  /** ส่วนต้นของแม่แบบก่อนช่องเติมคำ (เช่น Z:\Assets) — คำนวณเอง ไว้โชว์/โปรแกรมรุ่นเก่า */
   nasRoot: string;
   /** ลำดับแถว = ลำดับเลือกรูปตัวอย่าง (แถวบนก่อน) */
   rules: FileSortRule[];
@@ -35,21 +39,41 @@ export type FileSortProfile = {
  *   ไฟล์ชื่อ = รหัส SKU → ปก · .png ชื่อ = รหัส → รูปตัด PNG · Images/Rawfiles/PSD/RAW → ไม่ลงระบบ (อยู่บน Z:)
  *   ตัวคิด: lib/file-sort-product (ใช้ตัวจับคู่กลาง lib/product-image-routing เดียวกับปุ่ม 📂 ในเว็บ)
  */
+/** ชนิดงานย่อยของสูตรสินค้า: สินค้าใหม่ (ทุกช่อง) · เพิ่มสี (เฉพาะแกลเลอรีสีใหม่) · แก้สี (เฉพาะแกลเลอรีสีที่อยู่ในโฟลเดอร์) */
+export const PRODUCT_VARIANTS = ["new", "color", "edit"] as const;
+export type ProductVariant = (typeof PRODUCT_VARIANTS)[number];
+export const PRODUCT_VARIANT_LABEL: Record<ProductVariant, string> = { new: "สินค้าใหม่ (Parent + SKU)", color: "เพิ่มสี", edit: "แก้สี" };
+
 export type ProductSortConfig = {
   label: string;
-  /** โฟลเดอร์รุ่นที่ไม่ได้อยู่บน Z: → ก๊อปทั้งชุดไปไว้ใต้ที่นี่ (อยู่บน Z: แล้ว = ไม่ทำอะไร) */
+  /** แม่แบบที่เก็บบน Z: ต่อชนิดงานย่อย — ใช้เมื่อโฟลเดอร์รุ่นยังไม่อยู่บน Z: (อยู่แล้ว = ไม่ทำอะไร) · ว่าง = ไม่ก๊อป */
+  nasPatterns: Record<ProductVariant, string>;
+  /** ส่วนต้นของแม่แบบสินค้าใหม่ (คำนวณเอง · ไว้โชว์/โปรแกรมรุ่นเก่า) */
   nasRoot: string;
   roleFolders: RoleFolderConfig;
   /** รูปเดิมของสินค้า: แทนที่ทั้งชุด / ต่อท้าย */
   mode: "replace" | "append";
 };
-export const DEFAULT_PRODUCT_CONFIG: ProductSortConfig = { label: "งานสินค้า", nasRoot: "Z:\\Work In Process\\[01] New Product", roleFolders: DEFAULT_ROLE_FOLDERS, mode: "replace" };
+const PRODUCT_NAS_DEFAULT = "Z:\\Work In Process\\[01] New Product\\{รุ่น}";
+export const DEFAULT_PRODUCT_CONFIG: ProductSortConfig = {
+  label: "งานสินค้า", nasPatterns: { new: PRODUCT_NAS_DEFAULT, color: PRODUCT_NAS_DEFAULT, edit: PRODUCT_NAS_DEFAULT },
+  nasRoot: "Z:\\Work In Process\\[01] New Product", roleFolders: DEFAULT_ROLE_FOLDERS, mode: "replace",
+};
+
+const cleanPattern = (v: unknown): string => String(v ?? "").trim().replace(/[\\/]+$/, "").slice(0, 300);
 
 export function cleanProductConfig(raw: unknown): ProductSortConfig {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  // ค่าเดิม (ก่อนมีแม่แบบ): nasRoot = ราก → แม่แบบ = ราก\{รุ่น}
+  const legacy = typeof o.nasRoot === "string" && !(o.nasPatterns && typeof o.nasPatterns === "object")
+    ? (o.nasRoot.trim() ? `${cleanPattern(o.nasRoot)}\\{รุ่น}` : "") : null;
+  const raws = (o.nasPatterns && typeof o.nasPatterns === "object" ? o.nasPatterns : {}) as Record<string, unknown>;
+  const nasPatterns = Object.fromEntries(PRODUCT_VARIANTS.map((v) => [v,
+    typeof raws[v] === "string" ? cleanPattern(raws[v]) : legacy ?? DEFAULT_PRODUCT_CONFIG.nasPatterns[v]])) as Record<ProductVariant, string>;
   return {
     label: String(o.label ?? DEFAULT_PRODUCT_CONFIG.label).trim().slice(0, 60) || DEFAULT_PRODUCT_CONFIG.label,
-    nasRoot: typeof o.nasRoot === "string" ? o.nasRoot.trim().replace(/[\\/]+$/, "").slice(0, 260) : DEFAULT_PRODUCT_CONFIG.nasRoot,
+    nasPatterns,
+    nasRoot: nasPrefixOf(nasPatterns.new),
     roleFolders: cleanRoleFolders(o.roleFolders),
     mode: o.mode === "append" ? "append" : "replace",
   };
@@ -62,6 +86,8 @@ const r = (ext: string, library: boolean, drive: boolean, nas: boolean): FileSor
 export const DEFAULT_ARTWORK_PROFILE: FileSortProfile = {
   key: "artwork",
   label: "โลโก้ / Artwork",
+  nasPattern: "Z:\\Assets\\{แบรนด์}\\{ชนิด}\\{ชื่องาน}",
+  nasByType: {},
   nasRoot: "Z:\\Assets",
   rules: [
     r("jpg", true, false, true), r("jpeg", true, false, true), r("png", true, true, true), r("webp", true, false, true),
@@ -95,10 +121,18 @@ function cleanProfile(raw: unknown, fallback: FileSortProfile): FileSortProfile 
     if (rules.length >= 60) break;
   }
   const other = (o.other && typeof o.other === "object" ? o.other : {}) as Record<string, unknown>;
+  // ค่าเดิม (ก่อนมีแม่แบบ): nasRoot = ราก → แม่แบบ = ราก\{แบรนด์}\{ชนิด}\{ชื่องาน} (ผลเหมือนเดิมทุกอย่าง)
+  const nasPattern = typeof o.nasPattern === "string" ? cleanPattern(o.nasPattern)
+    : typeof o.nasRoot === "string" ? (o.nasRoot.trim() ? `${cleanPattern(o.nasRoot)}\\{แบรนด์}\\{ชนิด}\\{ชื่องาน}` : "") : fallback.nasPattern;
+  const byRaw = (o.nasByType && typeof o.nasByType === "object" ? o.nasByType : {}) as Record<string, unknown>;
+  const nasByType: Record<string, string> = {};
+  for (const [k, v] of Object.entries(byRaw).slice(0, 50)) { const p = cleanPattern(v); if (k.trim() && p) nasByType[k.trim().slice(0, 60)] = p; }
   return {
     key: String(o.key ?? fallback.key).trim() || fallback.key,
     label: String(o.label ?? fallback.label).trim().slice(0, 60) || fallback.label,
-    nasRoot: typeof o.nasRoot === "string" ? o.nasRoot.trim().replace(/[\\/]+$/, "").slice(0, 260) : fallback.nasRoot,
+    nasPattern,
+    nasByType,
+    nasRoot: nasPrefixOf(nasPattern),
     rules,
     other: { drive: bool(other.drive, fallback.other.drive), nas: bool(other.nas, fallback.other.nas) },
   };
@@ -143,13 +177,62 @@ export function winJoin(base: string, ...rest: string[]): string {
   return [b, ...tail].filter(Boolean).join("\\");
 }
 
-/** โฟลเดอร์งานบน Z: — null = ส่งลง Z: ไม่ได้ (ไม่ได้ตั้งราก หรือแบรนด์ยังไม่มีชื่อโฟลเดอร์) */
-export function nasFolderFor(profile: FileSortProfile, brandFolder: string | null | undefined, typeFolder: string | null | undefined, jobName: string): string | null {
-  const root = profile.nasRoot.trim();
-  const brand = (brandFolder ?? "").trim();
-  if (!root || !brand) return null;
-  const type = (typeFolder ?? "").trim();
-  return winJoin(root, safeFolderName(brand), type ? safeFolderName(type) : "", safeFolderName(jobName));
+// ── แม่แบบที่เก็บบน Z: (ตั้งตามชนิดงานในหน้าตั้งค่า · โปรแกรมเลือกที่เก็บเองรายงานได้อีกชั้น) ──
+
+/** ช่องเติมคำในแม่แบบ */
+export const NAS_TOKENS = ["แบรนด์", "ชนิด", "ชื่องาน", "รุ่น", "ปี", "เดือน", "โฟลเดอร์"] as const;
+export type NasToken = (typeof NAS_TOKENS)[number];
+export type NasValues = Partial<Record<NasToken, string | null | undefined>>;
+export const NAS_TOKEN_HINT: Record<NasToken, string> = {
+  แบรนด์: "โฟลเดอร์แบรนด์ เช่น [01] Louis Montini", ชนิด: "ซับตามชนิด เช่น 01_Logo", ชื่องาน: "ชื่องานที่กรอก", รุ่น: "ชื่อโฟลเดอร์รุ่น เช่น BSD15",
+  ปี: "ปี ค.ศ. เช่น 2026", เดือน: "เดือน 2 หลัก เช่น 11", โฟลเดอร์: "ชื่อโฟลเดอร์ที่ลากเข้ามา",
+};
+
+const ROOT_RE = /^([A-Za-z]:|\\\\[^\\/]+[\\/][^\\/]+)/;
+
+/** ส่วนต้นของแม่แบบก่อนชั้นแรกที่มีช่องเติมคำ ("Z:\Assets\{แบรนด์}\…" → "Z:\Assets") */
+export function nasPrefixOf(pattern: string): string {
+  const p = pattern.trim();
+  const m = p.match(ROOT_RE);
+  if (!m) return "";
+  const segs = p.slice(m[1].length).split(/[\\/]+/).filter(Boolean);
+  const lit: string[] = [];
+  for (const s of segs) { if (/\{[^}]*\}/.test(s)) break; lit.push(s); }
+  return winJoin(m[1], ...lit);
+}
+
+/** ปี/เดือนตามเวลาไทย */
+export function nasDateValues(now: Date = new Date()): { ปี: string; เดือน: string } {
+  const th = new Date(now.getTime() + 7 * 3600_000);
+  return { ปี: String(th.getUTCFullYear()), เดือน: String(th.getUTCMonth() + 1).padStart(2, "0") };
+}
+
+/** แม่แบบ → path จริง · ชั้นที่มีแต่ช่องเติมคำว่าง = ตัดชั้นนั้นทิ้ง · ช่องบังคับ (required) ว่าง / แม่แบบว่าง / ไม่ขึ้นต้นด้วยไดรฟ์ = null */
+export function fillNasPattern(pattern: string, values: NasValues, required: NasToken[] = []): string | null {
+  const p = (pattern ?? "").trim();
+  const m = p.match(ROOT_RE);
+  if (!p || !m) return null;
+  for (const r of required) if (p.includes(`{${r}}`) && !String(values[r] ?? "").trim()) return null;
+  const segs: string[] = [];
+  for (const seg of p.slice(m[1].length).split(/[\\/]+/).filter(Boolean)) {
+    const hasTok = /\{[^}]*\}/.test(seg);
+    const filled = seg.replace(/\{([^}]*)\}/g, (_, k: string) => {
+      const v = String(values[k as NasToken] ?? "").trim();
+      return v ? safeFolderName(v) : "";
+    }).replace(/[<>:"|?*\u0000-\u001f]/g, "-").replace(/\s+/g, " ").trim();
+    if (hasTok && !filled.replace(/[\s._\-()[\]]/g, "")) continue;
+    segs.push(filled.replace(/[. ]+$/g, ""));
+  }
+  return winJoin(m[1], ...segs);
+}
+
+/** แม่แบบของชนิดงานนี้ (ตั้งแยกตามชนิด artwork ได้ · ไม่ตั้ง = ค่าตั้งต้น) */
+export const nasPatternFor = (profile: FileSortProfile, artworkType?: string | null): string =>
+  (artworkType && profile.nasByType[artworkType]) || profile.nasPattern;
+
+/** โฟลเดอร์งานบน Z: — null = ส่งลง Z: ไม่ได้ (ไม่ได้ตั้งแม่แบบ หรือแบรนด์ยังไม่มีชื่อโฟลเดอร์) */
+export function nasFolderFor(profile: FileSortProfile, brandFolder: string | null | undefined, typeFolder: string | null | undefined, jobName: string, artworkType?: string | null, now?: Date): string | null {
+  return fillNasPattern(nasPatternFor(profile, artworkType), { แบรนด์: brandFolder, ชนิด: typeFolder, ชื่องาน: jobName, โฟลเดอร์: jobName, ...nasDateValues(now) }, ["แบรนด์"]);
 }
 
 // ── วางแผนแยกไฟล์ 1 งาน ──
@@ -227,7 +310,7 @@ export function planFileSort(profile: FileSortProfile, files: FileSortInput[], o
   if (extraLost) warnings.push(`มีรูปตัวอย่างหลายรูป ใช้ "${chosen?.name}" — อีก ${extraLost} รูปไม่ได้ส่งไปที่ไหน (ติ๊ก Drive หรือ Z: ในสูตรถ้าอยากเก็บ)`);
   const noDest = items.filter((it) => it.skip === "no_destination");
   if (noDest.length) warnings.push(`${noDest.length} ไฟล์ไม่ได้ส่งไปที่ไหนตามสูตร (${[...new Set(noDest.map((x) => x.ext || "ไม่มีนามสกุล"))].join(", ")}) — จะถูกข้าม`);
-  if (!profile.nasRoot.trim() && items.some((it) => it.nas)) warnings.push("ยังไม่ได้ตั้งที่เก็บบน Z: ในสูตร — ไฟล์จะไม่ถูกก๊อปลง Z:");
+  if (!profile.nasPattern.trim() && items.some((it) => it.nas)) warnings.push("ยังไม่ได้ตั้งที่เก็บบน Z: ในสูตร — ไฟล์จะไม่ถูกก๊อปลง Z:");
 
   return {
     preview: chosen?.rel ?? null,

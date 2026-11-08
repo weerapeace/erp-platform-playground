@@ -124,6 +124,43 @@ describe("planProductSort — จับคู่ไม่ได้", () => {
 describe("productNasFolder", () => {
   it("ราก + ชื่อโฟลเดอร์รุ่น · ไม่ตั้งราก = null", () => {
     expect(productNasFolder(DEFAULT_PRODUCT_CONFIG, "C:\\Users\\x\\Desktop\\BSD15")).toBe("Z:\\Work In Process\\[01] New Product\\BSD15");
-    expect(productNasFolder({ ...DEFAULT_PRODUCT_CONFIG, nasRoot: "" }, "BSD15")).toBeNull();
+    expect(productNasFolder({ ...DEFAULT_PRODUCT_CONFIG, nasPatterns: { ...DEFAULT_PRODUCT_CONFIG.nasPatterns, new: "" } }, "BSD15")).toBeNull();
+  });
+});
+
+describe("เพิ่มสี / แก้สี", () => {
+  // BSD15-01 มีรูปในระบบแล้ว · BSD15-02 ยังไม่มีรูป (สีใหม่) · BSD15-09 ไม่มีในระบบ
+  const ps = (): CatalogParent[] => parents({ skus: [
+    { id: S1, code: "BSD15-01", label: "เข้ม", gallery: 2, items: [{ id: "o1", key: "k1", primary: true }, { id: "o2", key: "k2", primary: false }] },
+    { id: S2, code: "BSD15-02", label: "อ่อน", gallery: 0, items: [] },
+  ] });
+  const files = ["[01] Description/1.jpg", "BSD15/1.jpg", "BSD15-01/1.jpg", "BSD15-01/BSD15-01.png", "BSD15-02/1.jpg", "BSD15-02/2.jpg", "BSD15-09/1.jpg", "BSD15-02.jpg"].map((path) => ({ path, size: 10 }));
+  it("เพิ่มสี: ลงเฉพาะสีที่ยังไม่มีรูป · ไม่แตะ Parent / Description / สีเดิม / PNG · เตือนสีที่ยังไม่มีในระบบ", () => {
+    const p = planProductSort(files, ps(), DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15", variant: "color" });
+    expect(p.variant).toBe("color");
+    expect(p.slots.map((s) => `${s.kind}:${s.code}`)).toEqual(["skuGallery:BSD15-02"]);
+    expect(p.slots[0].rels).toEqual(["BSD15-02.jpg", "BSD15-02/1.jpg", "BSD15-02/2.jpg"]);
+    expect(p.slots[0].coverRel).toBe("BSD15-02.jpg");
+    for (const r of ["[01] Description/1.jpg", "BSD15/1.jpg", "BSD15-01/1.jpg", "BSD15-01/BSD15-01.png"]) expect(p.files.find((f) => f.rel === r)).toMatchObject({ erp: false, nas: true, why: "scope" });
+    expect(p.warnings.some((w) => w.includes("BSD15-09") && w.includes("สร้าง SKU"))).toBe(true);
+  });
+  it("แก้สี: แทนที่เฉพาะแกลเลอรีสีที่อยู่ในโฟลเดอร์ · Parent / Description / PNG ไม่แตะ", () => {
+    const p = planProductSort(files, ps(), DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15", variant: "edit", mode: "replace" });
+    expect(p.slots.map((s) => `${s.kind}:${s.code}`).sort()).toEqual(["skuGallery:BSD15-01", "skuGallery:BSD15-02"]);
+    const s1 = p.slots.find((s) => s.code === "BSD15-01")!;
+    expect(s1.replaces).toBe(true);
+    expect(s1.remove.attachments.map((a) => a.id)).toEqual(["o1", "o2"]);
+    expect(p.files.find((f) => f.rel === "BSD15-01/BSD15-01.png")).toMatchObject({ erp: false, why: "scope" });
+    expect(p.files.find((f) => f.rel === "BSD15/1.jpg")?.why).toBe("scope");
+  });
+  it("เพิ่มสีแต่ทุกสีมีรูปแล้ว → เตือน", () => {
+    const p = planProductSort([{ path: "BSD15-01/1.jpg" }], ps(), DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15", variant: "color" });
+    expect(p.slots).toEqual([]);
+    expect(p.warnings.some((w) => w.includes("ไม่พบสีใหม่"))).toBe(true);
+  });
+  it("ที่เก็บบน Z: แยกตามชนิดงานย่อย", () => {
+    const cfg = { ...DEFAULT_PRODUCT_CONFIG, nasPatterns: { new: "Z:\\NP\\{รุ่น}", color: "Z:\\NC\\{ปี}-{เดือน}\\{รุ่น}", edit: "" } };
+    expect(productNasFolder(cfg, "BSD15", "color", new Date("2026-11-08T00:00:00Z"))).toBe("Z:\\NC\\2026-11\\BSD15");
+    expect(productNasFolder(cfg, "BSD15", "edit")).toBeNull();
   });
 });

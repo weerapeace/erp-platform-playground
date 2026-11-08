@@ -28,7 +28,7 @@ import {
   type SlotKind,
 } from "@/lib/product-image-routing";
 import type { CatalogParent } from "@/lib/product-image-catalog-server";
-import { isJunkFile, relPathOf, safeFolderName, winJoin, type ProductSortConfig } from "@/lib/file-sort";
+import { fillNasPattern, isJunkFile, nasDateValues, relPathOf, type ProductSortConfig, type ProductVariant } from "@/lib/file-sort";
 
 export const ERP_IMAGE_EXTS = ["jpg", "jpeg", "png", "webp"] as const;
 export const PRODUCT_MAX_FILES = 3000;
@@ -52,7 +52,7 @@ export type ProductFileAction = {
   group: string;
   /** ทำไมไม่ลงระบบ / หมายเหตุ */
   note?: string;
-  why?: "junk" | "not_image" | "archive" | "old_version" | "unmatched" | "over" | "error";
+  why?: "junk" | "not_image" | "archive" | "old_version" | "unmatched" | "over" | "error" | "scope";
 };
 export type ProductPlanSlot = {
   key: string;
@@ -84,13 +84,21 @@ export type ProductPlan = {
   warnings: string[];
   parents: { id: string; code: string; name: string }[];
   mode: MassMode;
+  variant: ProductVariant;
 };
 
 const extOf = (name: string) => (name.match(/\.([^.]+)$/)?.[1] ?? "").toLowerCase();
 const isErpImage = (ext: string) => (ERP_IMAGE_EXTS as readonly string[]).includes(ext);
 
-export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode }): ProductPlan {
+/**
+ * variant (ชนิดงานย่อย · ตรงกับแท็บ Create Folder Tool):
+ *   new   = สินค้าใหม่ — ทุกช่อง (Description · Parent · SKU · PNG)
+ *   color = เพิ่มสี — เฉพาะแกลเลอรีของสีที่ยังไม่มีรูปในระบบ (Parent/Description/สีเดิมที่ก๊อปมาจาก Collection ไม่แตะ)
+ *   edit  = แก้สี — เฉพาะแกลเลอรีของสีที่อยู่ในโฟลเดอร์ (Parent/Description/PNG ไม่แตะ)
+ */
+export function planProductSort(files: ProductFileIn[], parents: CatalogParent[], cfg: ProductSortConfig, opts: { jobFolder: string; mode?: MassMode; variant?: ProductVariant }): ProductPlan {
   const mode: MassMode = opts.mode ?? cfg.mode;
+  const variant: ProductVariant = opts.variant === "color" || opts.variant === "edit" ? opts.variant : "new";
   const job = (opts.jobFolder ?? "").replace(/[\\/]+/g, "/").replace(/^\/+|\/+$/g, "").split("/").pop() ?? "";
   const out: ProductFileAction[] = [];
   const seen = new Set<string>();
@@ -129,11 +137,30 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     }
     if (!t) {
       for (const id of g.fileIds) Object.assign(byId.get(id)!, { why: "unmatched", note: g.match.note ?? "จับคู่รหัสไม่ได้" });
-      warnings.push(`"${g.label}" จับคู่กับสินค้าในระบบไม่ได้${g.match.note ? ` (${g.match.note})` : ""} — รูปในโฟลเดอร์นี้ไม่ลงระบบ`);
+      warnings.push(variant === "color" && g.match.guessParentId
+        ? `สีใหม่ "${g.label}" ยังไม่มีในระบบ — สร้าง SKU สีนี้ในระบบก่อน แล้วกดตรวจใหม่`
+        : `"${g.label}" จับคู่กับสินค้าในระบบไม่ได้${g.match.note ? ` (${g.match.note})` : ""} — รูปในโฟลเดอร์นี้ไม่ลงระบบ`);
       continue;
     }
+    // เพิ่มสี / แก้สี: แตะเฉพาะแกลเลอรีสี (เพิ่มสี = เฉพาะสีที่ยังไม่มีรูป) · ที่เหลือเป็นของที่ก๊อปมาจาก Collection
+    if (variant !== "new") {
+      const sku = t.skuId ? parents.find((p) => p.parentId === t.parentId)?.skus.find((s) => s.id === t.skuId) : undefined;
+      const note = !t.skuId || g.role === "desc"
+        ? (variant === "color" ? "ไม่แตะ — ก๊อปมาจาก Collection (เพิ่มสีลงเฉพาะสีใหม่)" : "ไม่แตะ — แก้สีลงเฉพาะแกลเลอรีสี")
+        : variant === "color" && (sku?.gallery ?? 0) > 0 ? "ไม่แตะ — สีนี้มีรูปในระบบแล้ว (จะเปลี่ยนใช้ \"แก้สี\")" : "";
+      if (note) {
+        for (const id of g.fileIds) Object.assign(byId.get(id)!, { why: "scope", note });
+        continue;
+      }
+    }
     const rows = g.fileIds.map((id) => ({ id, base: (byId.get(id)!.name).replace(/\.[^.]+$/, "") }));
-    const images = applyRowMode(rows, defaultRowModeOf(g), { parentLevel: !t.skuId, template: DEFAULT_TEMPLATE, loose: g.key.startsWith("f:"), hints: g.hints });
+    let images = applyRowMode(rows, defaultRowModeOf(g), { parentLevel: !t.skuId, template: DEFAULT_TEMPLATE, loose: g.key.startsWith("f:"), hints: g.hints });
+    if (variant !== "new") {
+      // รูปตัด PNG เป็นของทั้งรุ่น → เพิ่มสี/แก้สีไม่แตะ
+      for (const im of images) if (im.dest === "png") Object.assign(byId.get(im.id)!, { why: "scope", note: "ไม่แตะ — รูปตัด PNG เป็นของทั้งรุ่น" });
+      images = images.filter((im) => im.dest !== "png");
+    }
+    if (!images.length) continue;
     planGroups.push({ key: g.key, label: g.label, target: t, images });
     for (const im of images) byId.get(im.id)!.dest = im.dest;
   }
@@ -181,6 +208,8 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
   const byRel = new Map(out.map((a) => [a.rel, a]));
   for (const s of slots) for (const r of s.rels) { const a = byRel.get(r); if (a?.dest === "skuMain" && r !== s.coverRel) a.dest = "sku"; }
   if (!parents.length && imgs.length) warnings.unshift(`ไม่พบสินค้าที่ตรงกับชื่อโฟลเดอร์ "${job}" ในระบบ — ตรวจรหัสรุ่น/สีให้ตรงกับ ERP`);
+  else if (variant === "color" && parents.length && !slots.length) warnings.push("ไม่พบสีใหม่ที่ต้องลงรูป — ทุกสีในโฟลเดอร์มีรูปในระบบแล้ว (จะเปลี่ยนรูปใช้ \"แก้สี\")");
+  else if (variant === "edit" && parents.length && !slots.length) warnings.push("ไม่พบโฟลเดอร์สีที่ตรงกับ SKU ในระบบ — ไม่มีอะไรให้แก้");
 
   return {
     files: out,
@@ -190,13 +219,13 @@ export function planProductSort(files: ProductFileIn[], parents: CatalogParent[]
     warnings,
     parents: parents.map((p) => ({ id: p.parentId, code: p.code, name: p.name })),
     mode,
+    variant,
   };
 }
 
-/** โฟลเดอร์รุ่นบน Z: (ใช้เมื่อโฟลเดอร์ต้นทางไม่ได้อยู่บน Z:) · ไม่ได้ตั้งราก = null */
-export function productNasFolder(cfg: ProductSortConfig, jobFolder: string): string | null {
-  const root = cfg.nasRoot.trim();
+/** โฟลเดอร์รุ่นบน Z: ตามแม่แบบของชนิดงานย่อย (ใช้เมื่อโฟลเดอร์ต้นทางยังไม่อยู่บน Z:) · ไม่ได้ตั้งแม่แบบ = null */
+export function productNasFolder(cfg: ProductSortConfig, jobFolder: string, variant: ProductVariant = "new", now?: Date): string | null {
   const job = (jobFolder ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "";
-  if (!root || !job.trim()) return null;
-  return winJoin(root, safeFolderName(job));
+  if (!job.trim()) return null;
+  return fillNasPattern(cfg.nasPatterns[variant] ?? cfg.nasPatterns.new, { รุ่น: job, โฟลเดอร์: job, ชื่องาน: job, ...nasDateValues(now) });
 }

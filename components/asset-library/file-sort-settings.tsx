@@ -7,7 +7,7 @@
  * ข้อมูล: /api/file-sort/config · กฎ: lib/file-sort + lib/file-sort-product · คู่มือ docs/file-sorter.md
  * ของกลาง: ERPModal · useDragReorder/DragHandle · Icon · useToast · useT
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { ERPModal } from "@/components/modal";
 import { useToast } from "@/components/toast";
@@ -15,8 +15,9 @@ import { useT } from "@/components/i18n";
 import { Icon } from "@/components/icon";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import {
-  DEFAULT_ARTWORK_PROFILE, DEFAULT_PRODUCT_CONFIG, PREVIEWABLE_EXTS, cleanFileSortConfig, findProfile, nasFolderFor, normalizeExt, planFileSort,
-  type FileSortConfig, type FileSortProfile, type FileSortRule, type ProductSortConfig,
+  DEFAULT_ARTWORK_PROFILE, DEFAULT_PRODUCT_CONFIG, NAS_TOKENS, NAS_TOKEN_HINT, PREVIEWABLE_EXTS, PRODUCT_VARIANTS, PRODUCT_VARIANT_LABEL,
+  cleanFileSortConfig, findProfile, nasFolderFor, nasPrefixOf, normalizeExt, planFileSort,
+  type FileSortConfig, type FileSortProfile, type FileSortRule, type NasToken, type ProductSortConfig, type ProductVariant,
 } from "@/lib/file-sort";
 import { planProductSort, productNasFolder } from "@/lib/file-sort-product";
 import { DEST_LABEL } from "@/lib/product-image-routing";
@@ -34,12 +35,17 @@ const canPreview = (ext: string) => (PREVIEWABLE_EXTS as readonly string[]).incl
 const SAMPLE_PRODUCT_FILES = [
   "[01] Description/1.New Arrival.jpeg", "[01] Description/1.New Arrival.psd", "[01] Description/Ver.2/1.New Arrival.jpeg", "[01] Description/Ver.2/2.Color.jpeg",
   "[03] Rawfiles/IMG_0001.CR2", "[03] Rawfiles/IMG_0001.jpg", "BSD15/1.jpeg", "BSD15/2.jpeg", "BSD15/1.psd",
-  "BSD15-01/1.jpeg", "BSD15-01/2.jpeg", "BSD15-01/2.psd", "BSD15-01/BSD15-01.png", "BSD15-01.jpeg", "Thumbs.db",
+  "BSD15-01/1.jpeg", "BSD15-01/2.jpeg", "BSD15-01/2.psd", "BSD15-01/BSD15-01.png", "BSD15-01.jpeg", "BSD15-02/1.jpeg", "BSD15-02/2.jpeg", "Thumbs.db",
 ].map((path) => ({ path, size: 1000 }));
+// สินค้าสมมติ: BSD15-01 มีรูปในระบบแล้ว (สีเดิม) · BSD15-02 ยังไม่มีรูป (สีใหม่)
 const SAMPLE_PARENTS: CatalogParent[] = [{
   parentId: "sample-p", code: "BSD15", name: "ตัวอย่าง", gallery: 0, galleryItems: [], desc: 0, descItems: [], png: false, pngKey: null, shopIds: [],
-  skus: [{ id: "sample-s", code: "BSD15-01", label: "ยีนส์", gallery: 0, items: [] }],
+  skus: [
+    { id: "sample-s1", code: "BSD15-01", label: "ยีนส์เข้ม", gallery: 3, items: [{ id: "x1", key: "x1", primary: true }, { id: "x2", key: "x2", primary: false }, { id: "x3", key: "x3", primary: false }] },
+    { id: "sample-s2", code: "BSD15-02", label: "ยีนส์อ่อน", gallery: 0, items: [] },
+  ],
 }];
+const SAMPLE_ART_TYPE = { name: "โลโก้", folder: "01_Logo" };
 const listText = (xs: string[]) => xs.join(", ");
 const parseList = (s: string) => s.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
 
@@ -59,6 +65,10 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   const [newExt, setNewExt] = useState("");
   const [extErr, setExtErr] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [sampleVariant, setSampleVariant] = useState<ProductVariant>("new");
+  // ช่องแม่แบบที่กำลังแก้ (กดช่องเติมคำ → แทรกตรงเคอร์เซอร์ของช่องนี้)
+  const patternInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const [focusKey, setFocusKey] = useState("art");
 
   const applyConfig = (cfg: FileSortConfig) => {
     setSaved(cfg); setDraft(findProfile(cfg, "artwork")); setProduct(cfg.product);
@@ -84,9 +94,41 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   const savedProfile = saved ? findProfile(saved, "artwork") : null;
   const dirty = !!saved && (JSON.stringify(savedProfile) !== JSON.stringify(draft) || JSON.stringify(saved.product) !== JSON.stringify(productNow));
   const plan = useMemo(() => planFileSort(draft, SAMPLE_FILES), [draft]);
-  const productPlan = useMemo(() => planProductSort(SAMPLE_PRODUCT_FILES, SAMPLE_PARENTS, productNow, { jobFolder: "BSD15" }), [productNow]);
+  const productPlan = useMemo(() => planProductSort(SAMPLE_PRODUCT_FILES, SAMPLE_PARENTS, productNow, { jobFolder: "BSD15", variant: sampleVariant }), [productNow, sampleVariant]);
   const sampleBrand = brands.find((b) => b.folder) ?? null;
-  const sampleType = types[0] ?? null;
+  const sampleType = types.find((x) => x.name === SAMPLE_ART_TYPE.name) ?? types[0] ?? SAMPLE_ART_TYPE;
+
+  // แม่แบบที่เก็บบน Z:: art = ค่าตั้งต้นของ Artwork · type:<ชื่อชนิด> = แยกตามชนิด · prod:<variant> = สูตรสินค้า
+  const patternOf = (key: string): string =>
+    key === "art" ? draft.nasPattern : key.startsWith("type:") ? (draft.nasByType[key.slice(5)] ?? "") : product.nasPatterns[key.slice(5) as ProductVariant] ?? "";
+  const setPattern = (key: string, v: string) => {
+    if (key === "art") setDraft((d) => ({ ...d, nasPattern: v, nasRoot: nasPrefixOf(v) }));
+    else if (key.startsWith("type:")) {
+      const name = key.slice(5);
+      setDraft((d) => { const by = { ...d.nasByType }; if (v.trim()) by[name] = v; else delete by[name]; return { ...d, nasByType: by }; });
+    } else setProduct((p) => ({ ...p, nasPatterns: { ...p.nasPatterns, [key.slice(5)]: v } }));
+  };
+  const insertToken = (tok: NasToken) => {
+    const el = patternInputs.current[focusKey];
+    const cur = patternOf(focusKey);
+    const at = el?.selectionStart ?? cur.length;
+    setPattern(focusKey, `${cur.slice(0, at)}{${tok}}${cur.slice(at)}`);
+    setTimeout(() => el?.focus(), 0);
+  };
+  const patternInput = (key: string, placeholder: string, id?: string) => (
+    <input id={id} ref={(el) => { patternInputs.current[key] = el; }} value={patternOf(key)} disabled={!canEdit} spellCheck={false}
+      onFocus={() => setFocusKey(key)} onChange={(e) => setPattern(key, e.target.value)} placeholder={placeholder}
+      className={`w-full h-9 px-3 text-[12px] font-mono border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50 ${focusKey === key ? "border-indigo-300" : "border-slate-200"}`} />
+  );
+  const tokenChips = (
+    <div className="flex flex-wrap items-center gap-1 mt-1.5">
+      <span className="text-[11px] text-slate-500 mr-1">{t("กดเพื่อแทรกในช่องที่เลือก:", "Click to insert:")}</span>
+      {NAS_TOKENS.map((k) => (
+        <button key={k} type="button" disabled={!canEdit} onClick={() => insertToken(k)} title={NAS_TOKEN_HINT[k]}
+          className="h-6 px-2 text-[11px] font-mono rounded border border-slate-200 bg-white hover:bg-indigo-50 hover:border-indigo-300 disabled:opacity-40">{`{${k}}`}</button>
+      ))}
+    </div>
+  );
 
   const setRule = (i: number, patch: Partial<FileSortRule>) => setDraft((d) => ({ ...d, rules: d.rules.map((r, k) => (k === i ? { ...r, ...patch } : r)) }));
   const removeRule = (i: number) => setDraft((d) => ({ ...d, rules: d.rules.filter((_, k) => k !== i) }));
@@ -101,8 +143,8 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   };
 
   const resetTab = () => {
-    if (tab === "artwork") setDraft({ ...DEFAULT_ARTWORK_PROFILE, nasRoot: draft.nasRoot });
-    else { setProduct({ ...DEFAULT_PRODUCT_CONFIG, nasRoot: product.nasRoot }); setDescText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.desc)); setArchText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.archive)); }
+    if (tab === "artwork") setDraft({ ...DEFAULT_ARTWORK_PROFILE, nasPattern: draft.nasPattern, nasByType: draft.nasByType, nasRoot: draft.nasRoot });
+    else { setProduct({ ...DEFAULT_PRODUCT_CONFIG, nasPatterns: product.nasPatterns, nasRoot: product.nasRoot }); setDescText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.desc)); setArchText(listText(DEFAULT_PRODUCT_CONFIG.roleFolders.archive)); }
   };
 
   const save = async () => {
@@ -157,18 +199,33 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
 
           {tab === "artwork" ? (
             <div className="space-y-5">
-              {/* 1) รากบน Z: */}
+              {/* 1) ที่เก็บบน Z: (แม่แบบ · แยกตามชนิดได้) */}
               <section>
-                <label className="block text-[13px] font-medium text-slate-700 mb-1" htmlFor="fs-nas-root">{t("ที่เก็บบน Synology (Z:)", "Synology (Z:) location")}</label>
-                <input id="fs-nas-root" value={draft.nasRoot} disabled={!canEdit} spellCheck={false}
-                  onChange={(e) => setDraft((d) => ({ ...d, nasRoot: e.target.value }))} placeholder="Z:\Assets"
-                  className="w-full h-9 px-3 text-[13px] font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
+                <label className="block text-[13px] font-medium text-slate-700 mb-1" htmlFor="fs-nas-pattern">{t("ที่เก็บบน Synology (Z:) — ค่าตั้งต้น", "Synology (Z:) location — default")}</label>
+                {patternInput("art", "Z:\\Assets\\{แบรนด์}\\{ชนิด}\\{ชื่องาน}", "fs-nas-pattern")}
+                {tokenChips}
                 <p className="text-[12px] text-slate-500 mt-1">
-                  {t("โฟลเดอร์งานบน Z: = ที่เก็บนี้ › โฟลเดอร์แบรนด์ › ซับตามชนิด › ชื่องาน (ชื่อเดียวกับบน Drive) · เว้นว่าง = ไม่ส่งลง Z:", "Job folder on Z: = this location › brand folder › type subfolder › job name (same names as Drive). Leave empty to skip Z:.")}
+                  {t("ช่อง {แบรนด์} {ชนิด} ใช้ชื่อโฟลเดอร์ชุดเดียวกับ Drive · ช่องที่ว่างจะข้ามชั้นนั้น · เว้นว่างทั้งช่อง = ไม่ส่งลง Z: · ในโปรแกรมกด \"เลือกที่เก็บเอง\" รายงานได้อีก", "{แบรนด์} {ชนิด} use the same folder names as Drive · empty fields skip that level · leave blank to skip Z: · the app can still pick a folder per job")}
                 </p>
-                {sampleBrand && <p className="text-[12px] text-slate-600 mt-1 font-mono break-all">
-                  {t("ตัวอย่าง: ", "Example: ")}{nasFolderFor(draft, sampleBrand.folder, sampleType?.folder, "Logo Calypso") ?? t("— (ไม่ส่งลง Z:)", "— (Z: off)")}
-                </p>}
+                <p className="text-[12px] text-slate-600 mt-1 font-mono break-all">
+                  {t("ตัวอย่าง: ", "Example: ")}{nasFolderFor(draft, sampleBrand?.folder ?? "[01] Louis Montini", sampleType.folder, "Logo Calypso") ?? t("— (ไม่ส่งลง Z:)", "— (Z: off)")}
+                </p>
+                {types.length > 0 && <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden">
+                  <p className="px-3 py-1.5 bg-slate-50 text-[12px] font-medium text-slate-600">{t("แยกตามชนิดงาน (เว้นว่าง = ใช้ค่าตั้งต้น)", "Per job type (blank = default)")}</p>
+                  {types.map((ty) => {
+                    const key = `type:${ty.name}`;
+                    const ex = nasFolderFor(draft, sampleBrand?.folder ?? "[01] Louis Montini", ty.folder, "ชื่องาน", ty.name);
+                    return (
+                      <div key={ty.name} className="grid grid-cols-[110px_minmax(0,1fr)] gap-2 items-start px-3 py-1.5 border-t border-slate-100">
+                        <span className="text-[13px] text-slate-700 pt-2 truncate">{ty.name}</span>
+                        <div className="min-w-0">
+                          {patternInput(key, t("ใช้ค่าตั้งต้น", "Use default"))}
+                          <p className="text-[11px] text-slate-500 font-mono break-all mt-0.5">{ex ?? t("— ไม่ส่งลง Z:", "— Z: off")}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>}
               </section>
 
               {/* 2) ตารางสูตร */}
@@ -243,7 +300,7 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
                     <div key={b.id} className="px-3 py-1.5 grid grid-cols-[140px_minmax(0,1fr)] gap-2 items-center">
                       <span className="text-[13px] text-slate-700 truncate">{b.name}</span>
                       {b.folder
-                        ? <span className="text-[12px] font-mono text-slate-600 break-all">{draft.nasRoot.trim() ? `${draft.nasRoot.trim().replace(/[\\/]+$/, "")}\\${b.folder}\\…` : t("— ไม่ส่งลง Z:", "— Z: off")}</span>
+                        ? <span className="text-[12px] font-mono text-slate-600 break-all">{nasFolderFor(draft, b.folder, "…", "…") ?? t("— ไม่ส่งลง Z:", "— Z: off")}</span>
                         : <span className="text-[12px] text-amber-700">{t("ยังไม่ได้ตั้งโฟลเดอร์แบรนด์", "Brand folder not set")}</span>}
                     </div>
                   ))}
@@ -275,11 +332,20 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
                     className="w-full h-9 px-3 text-[13px] border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
                   <p className="text-[12px] text-slate-500 mt-1">{t("ไฟล์ข้างในอยู่บน Z: ตามเดิม", "Files inside stay on Z:")}</p>
                 </div>
-                <div>
-                  <label className="block text-[13px] font-medium text-slate-700 mb-1" htmlFor="fs-prod-nas">{t("ที่เก็บบน Z: (เฉพาะโฟลเดอร์ที่ยังไม่อยู่บน Z:)", "Z: location (only for folders not on Z: yet)")}</label>
-                  <input id="fs-prod-nas" value={product.nasRoot} disabled={!canEdit} spellCheck={false} onChange={(e) => setProduct((p) => ({ ...p, nasRoot: e.target.value }))} placeholder="Z:\Work In Process\[01] New Product"
-                    className="w-full h-9 px-3 text-[13px] font-mono border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-slate-50" />
-                  <p className="text-[12px] text-slate-500 mt-1 font-mono break-all">{t("ตัวอย่าง: ", "Example: ")}{productNasFolder(productNow, "BSD15") ?? t("— ไม่ก๊อปลง Z:", "— not copied")}</p>
+                <div className="sm:col-span-2">
+                  <p className="text-[13px] font-medium text-slate-700 mb-1">{t("ที่เก็บบน Z: ตามชนิดงาน (ใช้เฉพาะโฟลเดอร์ที่ยังไม่อยู่บน Z: · อยู่แล้ว = ไม่ก๊อป)", "Z: location per job type (only for folders not on Z: yet)")}</p>
+                  <div className="space-y-2">
+                    {PRODUCT_VARIANTS.map((v) => (
+                      <div key={v} className="grid grid-cols-[150px_minmax(0,1fr)] gap-2 items-start">
+                        <span className="text-[13px] text-slate-700 pt-2">{PRODUCT_VARIANT_LABEL[v]}</span>
+                        <div className="min-w-0">
+                          {patternInput(`prod:${v}`, "Z:\\Work In Process\\[01] New Product\\{รุ่น}")}
+                          <p className="text-[11px] text-slate-500 font-mono break-all mt-0.5">{productNasFolder(productNow, "BSD15", v) ?? t("— ไม่ก๊อปลง Z:", "— not copied")}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  {tokenChips}
                 </div>
                 <div>
                   <p className="text-[13px] font-medium text-slate-700 mb-1">{t("รูปเดิมของสินค้าในระบบ", "Existing product images")}</p>
@@ -292,7 +358,16 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
               </section>
 
               <section className="rounded-lg bg-slate-50 p-3">
-                <p className="text-[13px] font-medium text-slate-700 mb-2">{t("ทดลอง: ถ้าโยนโฟลเดอร์ BSD15 แบบนี้", "Try it: a BSD15 folder like this")}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                  <p className="text-[13px] font-medium text-slate-700">{t("ทดลอง: ถ้าโยนโฟลเดอร์ BSD15 แบบนี้", "Try it: a BSD15 folder like this")}</p>
+                  <div className="flex gap-1" role="radiogroup" aria-label={t("ชนิดงาน", "Job type")}>
+                    {PRODUCT_VARIANTS.map((v) => (
+                      <button key={v} type="button" role="radio" aria-checked={sampleVariant === v} onClick={() => setSampleVariant(v)}
+                        className={`h-7 px-2.5 text-[12px] rounded-lg border ${sampleVariant === v ? "bg-indigo-600 text-white border-indigo-600" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}>{PRODUCT_VARIANT_LABEL[v]}</button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-[12px] text-slate-500 mb-2">{t("สินค้าสมมติ: BSD15-01 มีรูปในระบบแล้ว · BSD15-02 ยังไม่มีรูป (สีใหม่)", "Sample: BSD15-01 already has images · BSD15-02 has none (new colour)")}</p>
                 <div className="border border-slate-200 rounded-lg bg-white divide-y divide-slate-100 text-[12px]">
                   {productPlan.files.map((f) => (
                     <div key={f.rel} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] gap-2 px-2 py-1">
