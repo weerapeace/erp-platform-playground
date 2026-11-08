@@ -2,6 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_TEMPLATE,
   applyRowMode,
+  cleanRoleFolders,
+  defaultRowModeOf,
+  fileRoles,
+  folderLabelKey,
+  versionOfFolder,
   buildWebItems,
   candidateCodes,
   codePrefixes,
@@ -232,5 +237,79 @@ describe("เคยอัปแล้ว (ประวัติชุดอั�
     const r = applyRowMode(imgs, "tpl", { parentLevel: false, template: DEFAULT_TEMPLATE, seen: new Set(["s0"]) });
     expect(r.map((x) => `${x.dest}:${x.by}`)).toEqual(["skip:seen", "sku:tpl", "sku:tpl"]);
     expect(applyRowMode(imgs, "skuAll", { parentLevel: false, template: DEFAULT_TEMPLATE, seen: new Set(["s1"]) })[1].dest).toBe("skip");
+  });
+});
+
+describe("โฟลเดอร์หน้าที่ (Description / Images / Rawfiles) + ชื่อไฟล์ = รหัส", () => {
+  const files = [
+    { id: "d1", path: "BCG11/[01] Description/1.New Arrival.jpg" },
+    { id: "d2", path: "BCG11/[01] Description/Ver.2/1.New Arrival.jpg" },
+    { id: "d3", path: "BCG11/[01] Description/Ver.2/2.Color.jpg" },
+    { id: "r1", path: "BCG11/[03] Rawfiles/IMG_1.jpg" },
+    { id: "p1", path: "BCG11/BCG11/1.jpg" },
+    { id: "c1", path: "BCG11/BCG11-01/1.jpg" },
+    { id: "c2", path: "BCG11/BCG11-01/2.jpg" },
+    { id: "cv", path: "BCG11/BCG11-01.jpg" },
+    { id: "png", path: "BCG11/BCG11-01/BCG11-01.png" },
+    { id: "x7", path: "BCG11/BCG11-07/1.jpg" },
+  ];
+  const g = groupRouteFiles(files, parents, idx);
+  const find = (id: string) => g.find((x) => x.fileIds.includes(id))!;
+
+  it("Description: เวอร์ชันล่าสุดเป็นรูป Description ของรุ่น · เวอร์ชันเก่าข้าม", () => {
+    expect(find("d2")).toMatchObject({ role: "desc", match: { target: { parentId: "p11", skuId: null } } });
+    expect(find("d2").fileIds).toEqual(["d2", "d3"]);
+    expect(find("d1").role).toBe("old");
+    expect(defaultRowModeOf(find("d2"))).toBe("desc");
+    expect(defaultRowModeOf(find("d1"))).toBe("skip");
+  });
+  it("Rawfiles = เก็บไฟล์ ไม่ลงระบบ (ข้ามตั้งต้น)", () => {
+    expect(find("r1")).toMatchObject({ role: "archive", match: { target: null } });
+    expect(defaultRowModeOf(find("r1"))).toBe("skip");
+  });
+  it("ไฟล์ชั้นบนชื่อ = รหัส SKU → ย้ายไปกลุ่ม SKU เป็นปก · .png ชื่อรหัส → PNG", () => {
+    expect(find("cv")).toMatchObject({ key: `f:p11|${BR}`, hints: { cv: "skuMain" } });
+    expect(find("png").hints).toEqual({ png: "png" });
+    expect(find("c1").match.target).toEqual({ parentId: "p11", skuId: BR });
+  });
+  it("โฟลเดอร์รหัสสีที่ไม่มีในรุ่น (อยู่ในโฟลเดอร์รุ่น) → ให้เลือกเอง ไม่ตกไปเป็นของทั้งรุ่น", () => {
+    expect(find("x7").match).toMatchObject({ target: null, guessParentId: "p11" });
+  });
+  it("hints มาก่อนแม่แบบ · ปกจากแม่แบบยอมให้ปกจากชื่อไฟล์", () => {
+    const cover = applyRowMode([{ id: "cv", base: "BCG11-01" }], "tpl", { parentLevel: false, template: DEFAULT_TEMPLATE, loose: true, hints: { cv: "skuMain" } });
+    expect(cover[0]).toMatchObject({ dest: "skuMain", by: "name" });
+    const folder = applyRowMode([{ id: "c1", base: "1" }, { id: "c2", base: "2" }], "tpl", { parentLevel: false, template: DEFAULT_TEMPLATE });
+    const t = { parentId: "p11", skuId: BR };
+    const plan = planRoute([{ key: "a", label: "a", target: t, images: folder }, { key: "b", label: "b", target: t, images: cover }], parents, { shopIds: [], mode: "append" });
+    const slot = plan.slots.find((s) => s.kind === "skuGallery")!;
+    expect(slot.coverId).toBe("cv");
+    expect(slot.ids).toEqual(["cv", "c1", "c2"]);
+    expect([...plan.images.values()].every((x) => x.state === "upload")).toBe(true);
+  });
+  it("ปกที่ตั้งชัดทั้ง 2 รูป → ยังให้เลือกใหม่เหมือนเดิม", () => {
+    const t = { parentId: "p11", skuId: BR };
+    const plan = planRoute([{ key: "a", label: "a", target: t, images: [{ id: "u1", base: "x", dest: "skuMain", by: "user" }, { id: "u2", base: "y", dest: "skuMain", by: "name" }] }], parents, { shopIds: [], mode: "append" });
+    expect(plan.images.get("u2")).toMatchObject({ state: "error", note: "ปกได้รูปเดียว — เลือกช่องอื่น" });
+  });
+  it("โหมดแทนที่ครอบรูป Description ด้วย (รุ่นที่มี Description เดิม)", () => {
+    const im = [{ id: "n1", base: "1", dest: "desc" as const, by: "row" as const }];
+    const rep = planRoute([{ key: "d", label: "d", target: { parentId: "p12", skuId: null }, images: im }], parents, { shopIds: [], mode: "replace" });
+    expect(rep.slots[0]).toMatchObject({ kind: "desc", existing: 0, replaces: true });
+    const app = planRoute([{ key: "d", label: "d", target: { parentId: "p12", skuId: null }, images: im }], parents, { shopIds: [], mode: "append" });
+    expect(app.slots[0]).toMatchObject({ kind: "desc", existing: 1, replaces: false });
+  });
+});
+
+describe("ชื่อโฟลเดอร์หน้าที่", () => {
+  it("ตัดเลขนำหน้า · อ่านเวอร์ชัน · ค่าตั้งสะอาด", () => {
+    expect(folderLabelKey("[01] Description")).toBe("description");
+    expect(folderLabelKey("03_Rawfiles")).toBe("rawfiles");
+    expect(folderLabelKey("2. Images")).toBe("images");
+    expect(versionOfFolder("Ver.2")).toBe(2);
+    expect(versionOfFolder("v10")).toBe(10);
+    expect(versionOfFolder("Version 3")).toBe(3);
+    expect(versionOfFolder("Select")).toBeNull();
+    expect(cleanRoleFolders({ desc: ["[01] Description", "description", " "], archive: "x" })).toEqual({ desc: ["description"], archive: ["images", "rawfiles", "raw files", "raw"] });
+    expect(fileRoles(["A/[02] Images/x.jpg", "A/x.jpg"])).toMatchObject([{ role: "archive" }, { role: null }]);
   });
 });

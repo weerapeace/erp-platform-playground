@@ -8,14 +8,22 @@
  *     files[]    = ไฟล์ละ { rel, dir, preview, drive, nas, skip } ตามสูตร (lib/file-sort planFileSort)
  *     existing   = การ์ด Artwork ของงานนี้ที่มีอยู่แล้ว (โฟลเดอร์ Drive เดียวกัน หรือ path Z: เดียวกัน) → โปรแกรมแก้การ์ดเดิม ไม่สร้างซ้ำ
  * ไม่สร้าง/ไม่แก้อะไร — แค่คิดให้ (กฎอยู่ที่เดียว โปรแกรมบนเครื่องไม่ต้องคิดเอง)
+ *
+ * สูตรงานสินค้า: body { profile:"product", job_folder:"BSD15", mode?: "replace"|"append", files:[{ path, size? }] }  (สิทธิ์ products.view เพิ่ม)
+ * →   { profile:"product", job_name, nas_folder, mode, files, slots, groups, counts, warnings, parents }   (lib/file-sort-product)
+ *     files[]  = ไฟล์ละ { rel, erp, dest, slotKey, width, nas, why, note }
+ *     slots[]  = ช่องรูปของสินค้า { kind, parentId, skuId, rels (ปกหน้าสุด), coverRel, replaces, remove{attachments,desc}, entity }
  */
 import { NextRequest, NextResponse } from "next/server";
-import { guardApi } from "@/lib/api-auth";
+import { guardApi, apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { driveConfigured } from "@/lib/google-drive";
 import { findArtworkDriveFolder } from "@/lib/artwork-drive";
 import { findProfile, nasFolderFor, planFileSort, safeFolderName, type FileSortInput } from "@/lib/file-sort";
 import { artworkTypeFolderName, brandFolderName, loadFileSortConfig } from "@/lib/file-sort-server";
+import { PRODUCT_MAX_FILES, planProductSort, productNasFolder } from "@/lib/file-sort-product";
+import { loadImageCatalog, cleanCatalogRequest } from "@/lib/product-image-catalog-server";
+import { candidateCodes } from "@/lib/product-image-routing";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -25,8 +33,9 @@ const normPath = (s: string | null | undefined) => String(s ?? "").replace(/\//g
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "assets.upload"); if (denied) return denied;
-  let b: { profile?: string; brand_id?: string; artwork_type?: string; name?: string; job_folder?: string; files?: FileSortInput[] };
+  let b: { profile?: string; brand_id?: string; artwork_type?: string; name?: string; job_folder?: string; mode?: string; files?: FileSortInput[] };
   try { b = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
+  if (b.profile === "product") return planProduct(request, b);
 
   const brandId = String(b.brand_id ?? "").trim();
   const rawName = String(b.name ?? "").trim();
@@ -80,4 +89,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     existing,
     error: null,
   });
+}
+
+/** สูตรงานสินค้า: โหลดสินค้าตามรหัสในชื่อโฟลเดอร์/ไฟล์ (ตัวโหลดกลางชุดเดียวกับปุ่ม 📂 ในเว็บ) → แผนรายไฟล์/รายช่อง */
+async function planProduct(request: NextRequest, b: { job_folder?: string; mode?: string; files?: FileSortInput[] }): Promise<NextResponse> {
+  if (!(await apiCan(request, "products.view"))) return NextResponse.json({ error: "บัญชีนี้ไม่มีสิทธิ์ดูสินค้า (products.view)" }, { status: 403 });
+  const job = String(b.job_folder ?? "").trim();
+  const files = Array.isArray(b.files) ? b.files.filter((f) => f && typeof f.path === "string") : [];
+  if (!job) return NextResponse.json({ error: "ไม่รู้ชื่อโฟลเดอร์รุ่น" }, { status: 400 });
+  if (!files.length) return NextResponse.json({ error: "โฟลเดอร์นี้ไม่มีไฟล์" }, { status: 400 });
+  if (files.length > PRODUCT_MAX_FILES) return NextResponse.json({ error: `โฟลเดอร์ใหญ่เกินไป (เกิน ${PRODUCT_MAX_FILES} ไฟล์)` }, { status: 400 });
+  const admin = supabaseAdmin();
+  const cfg = (await loadFileSortConfig(admin)).product;
+  const jobName = job.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? job;
+  const codes = candidateCodes(files.map((f) => `${jobName}/${String(f.path).replace(/\\/g, "/")}`));
+  const catalog = await loadImageCatalog(admin, cleanCatalogRequest({ codes }));
+  const plan = planProductSort(files, catalog.parents, cfg, { jobFolder: jobName, mode: b.mode === "append" ? "append" : b.mode === "replace" ? "replace" : undefined });
+  if (catalog.truncated) plan.warnings.push("รหัสในโฟลเดอร์นี้ตรงกับสินค้าเกิน 60 รุ่น — แสดงแค่ 60 รุ่นแรก (แบ่งโฟลเดอร์ให้เล็กลง)");
+  return NextResponse.json({ profile: "product", job_name: safeFolderName(jobName), nas_folder: productNasFolder(cfg, jobName), ...plan, error: null });
 }

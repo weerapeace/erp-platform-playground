@@ -12,7 +12,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { captureImageAdd, editContextFromRequest } from "@/lib/record-versions";
 import { buildRow, loadTags, loadUsageCounts, type AssetRow } from "../shared";
-import { removeDescriptionImage } from "@/lib/description-images";
+import { removeDescriptionImage, linkDescriptionImage } from "@/lib/description-images";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -52,21 +52,11 @@ export async function POST(request: NextRequest) {
   if (!parentId || !assetId) return NextResponse.json({ error: "ต้องมี parent_id + asset_id" }, { status: 400 });
 
   const admin = supabaseAdmin();
-  // มีอยู่แล้ว? (กันผูกซ้ำ — field null เลยเช็คเองแทน onConflict)
-  const { data: ex } = await admin.from("asset_usages").select("id")
-    .eq("module", MODULE).eq("record_id", parentId).eq("asset_id", assetId).is("field", null).maybeSingle();
-  if (ex?.id) return NextResponse.json({ ok: true, error: null });
-
-  // ต่อท้ายลำดับ
-  const { data: mx } = await admin.from("asset_usages").select("sort_order")
-    .eq("module", MODULE).eq("record_id", parentId)
-    .order("sort_order", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
-  const next = ((mx?.sort_order as number | null) ?? -1) + 1;
-
-  const { error } = await admin.from("asset_usages").insert({
-    asset_id: assetId, module: MODULE, record_id: parentId, record_label: null, field: null, sort_order: next,
-  });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // ผูกต่อท้ายลำดับ (มีอยู่แล้ว = ไม่ผูกซ้ำ) — ของกลาง lib/description-images
+  const linked = await linkDescriptionImage(admin, { parentId, assetId });
+  if (!linked.ok) return NextResponse.json({ error: linked.error }, { status: 500 });
+  if (linked.already) return NextResponse.json({ ok: true, error: null });
+  const next = linked.sortOrder;
   // 🔁 เพิ่มรูป Description "จากในงาน" (โหมดใหม่) → จดไว้ให้การ์ดงานสรุปสิ่งที่แก้
   const ctx = editContextFromRequest(request);
   if (ctx.taskId) {

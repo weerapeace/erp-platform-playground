@@ -11,6 +11,8 @@
  * คู่มือ: docs/file-sorter.md
  */
 
+import { cleanRoleFolders, DEFAULT_ROLE_FOLDERS, type RoleFolderConfig } from "./role-folders";
+
 export const FILE_SORT_CONFIG_KEY = "admin_file_sort_config";
 
 /** นามสกุลที่ทำเป็นรูปตัวอย่างได้ (ย่อรูปได้ทั้งในโปรแกรมและเบราว์เซอร์) */
@@ -27,7 +29,33 @@ export type FileSortProfile = {
   /** นามสกุลที่ไม่อยู่ในตาราง */
   other: { drive: boolean; nas: boolean };
 };
-export type FileSortConfig = { profiles: FileSortProfile[] };
+/**
+ * สูตร "งานสินค้า": โยนโฟลเดอร์รุ่น (เช่น BSD15) → ดูชื่อโฟลเดอร์ย่อย
+ *   [01] Description → รูป Description ของรุ่น · <รหัสรุ่น> → แกลเลอรี Parent · <รหัสสี> → แกลเลอรี SKU
+ *   ไฟล์ชื่อ = รหัส SKU → ปก · .png ชื่อ = รหัส → รูปตัด PNG · Images/Rawfiles/PSD/RAW → ไม่ลงระบบ (อยู่บน Z:)
+ *   ตัวคิด: lib/file-sort-product (ใช้ตัวจับคู่กลาง lib/product-image-routing เดียวกับปุ่ม 📂 ในเว็บ)
+ */
+export type ProductSortConfig = {
+  label: string;
+  /** โฟลเดอร์รุ่นที่ไม่ได้อยู่บน Z: → ก๊อปทั้งชุดไปไว้ใต้ที่นี่ (อยู่บน Z: แล้ว = ไม่ทำอะไร) */
+  nasRoot: string;
+  roleFolders: RoleFolderConfig;
+  /** รูปเดิมของสินค้า: แทนที่ทั้งชุด / ต่อท้าย */
+  mode: "replace" | "append";
+};
+export const DEFAULT_PRODUCT_CONFIG: ProductSortConfig = { label: "งานสินค้า", nasRoot: "Z:\\Work In Process\\[01] New Product", roleFolders: DEFAULT_ROLE_FOLDERS, mode: "replace" };
+
+export function cleanProductConfig(raw: unknown): ProductSortConfig {
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  return {
+    label: String(o.label ?? DEFAULT_PRODUCT_CONFIG.label).trim().slice(0, 60) || DEFAULT_PRODUCT_CONFIG.label,
+    nasRoot: typeof o.nasRoot === "string" ? o.nasRoot.trim().replace(/[\\/]+$/, "").slice(0, 260) : DEFAULT_PRODUCT_CONFIG.nasRoot,
+    roleFolders: cleanRoleFolders(o.roleFolders),
+    mode: o.mode === "append" ? "append" : "replace",
+  };
+}
+
+export type FileSortConfig = { profiles: FileSortProfile[]; product: ProductSortConfig };
 
 const r = (ext: string, library: boolean, drive: boolean, nas: boolean): FileSortRule => ({ ext, library, drive, nas });
 
@@ -43,7 +71,7 @@ export const DEFAULT_ARTWORK_PROFILE: FileSortProfile = {
   other: { drive: false, nas: true },
 };
 
-export const DEFAULT_FILE_SORT_CONFIG: FileSortConfig = { profiles: [DEFAULT_ARTWORK_PROFILE] };
+export const DEFAULT_FILE_SORT_CONFIG: FileSortConfig = { profiles: [DEFAULT_ARTWORK_PROFILE], product: DEFAULT_PRODUCT_CONFIG };
 
 // ── ทำความสะอาดค่าตั้ง (ค่าจาก DB / จากหน้าจอ) ──
 
@@ -90,7 +118,7 @@ export function cleanFileSortConfig(raw: unknown): FileSortConfig {
     keys.add(key);
   }
   if (!keys.has(DEFAULT_ARTWORK_PROFILE.key)) profiles.unshift(cleanProfile(null, DEFAULT_ARTWORK_PROFILE));
-  return { profiles };
+  return { profiles, product: cleanProductConfig(o.product) };
 }
 
 export const findProfile = (cfg: FileSortConfig, key?: string | null): FileSortProfile =>

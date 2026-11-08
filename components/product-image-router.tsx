@@ -38,6 +38,8 @@ import {
   baseNameOf,
   buildWebItems,
   candidateCodes,
+  cleanRoleFolders,
+  defaultRowModeOf,
   estimateBytes,
   groupRouteFiles,
   imageWarning,
@@ -53,6 +55,7 @@ import {
   type PlanGroupIn,
   type PlanSlot,
   type ResizeMode,
+  type RoleFolderConfig,
   type RouteDest,
   type RouteImage,
   type RouteTemplate,
@@ -76,6 +79,8 @@ type GroupState = {
   mode: RowMode | "mixed";
   dests: Record<string, { dest: RouteDest; by: RouteImage["by"] }>;
   resize: "" | "auto" | "none";
+  /** ชื่อไฟล์ = รหัสตรงตัว → ปก / รูปตัด PNG (groupRouteFiles) */
+  hints?: Record<string, RouteDest>;
 };
 type Phase = "pick" | "loading" | "sort" | "review" | "run" | "done";
 type ResizePref = { mode: ResizeMode; px: number };
@@ -85,6 +90,8 @@ type UndoInfo = {
   png: { parentId: string; before: string | null; after: string }[];
   web: unknown[];
   replaced: { table: "skus_v2" | "parent_skus_v2"; entityId: string; key: string }[];
+  /** โหมดแทนที่: รูป Description เดิมที่เอาออก (ย้อนชุด = ผูกคืนตามลำดับเดิม) */
+  descReplaced: { parentId: string; assetId: string; sort: number | null }[];
 };
 /** รูปในชุดที่อัปสำเร็จ (แถวของ erp_image_batch_items) */
 type BatchItem = { source_sig: string; source_name: string; source_bytes: number; parent_id: string; sku_id: string | null; dest: RouteDest; attachment_id: string | null; asset_id: string | null; r2_key: string | null };
@@ -190,6 +197,12 @@ export function ProductImageRouter({
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
   const seenIdsRef = useRef<Set<string>>(new Set());
+  // ชื่อโฟลเดอร์หน้าที่ (Description / Images / Rawfiles) จากสูตร "งานสินค้า" ของตัวแยกไฟล์ · อ่านไม่ได้ = ค่าเริ่มต้น
+  const roleFoldersRef = useRef<RoleFolderConfig>(cleanRoleFolders(null));
+  useEffect(() => {
+    if (!open) return;
+    apiFetch("/api/file-sort/config").then((r) => (r.ok ? r.json() : null)).then((j) => { if (j?.data?.product) roleFoldersRef.current = cleanRoleFolders(j.data.product.roleFolders); }).catch(() => {});
+  }, [open]);
 
   const parents = useMemo(() => catalog?.parents ?? [], [catalog]);
   const byParent = useMemo(() => new Map(parents.map((p) => [p.parentId, p])), [parents]);
@@ -221,17 +234,20 @@ export function ProductImageRouter({
       const next = groupRouteFiles(
         all.map((it) => ({ id: it.id, path: it.path })),
         cat.parents,
-        index
+        index,
+        roleFoldersRef.current
       ).map((g): GroupState => {
         const old = prev.get(g.key);
         if (old) {
           const added = g.fileIds.filter((id) => !old.order.includes(id));
           // รหัสที่เพิ่งรู้จัก (ลากเพิ่มแล้วโหลดสินค้าใหม่) → ใช้ผลจับคู่ใหม่ ถ้ายังไม่ได้เลือกเอง
-          const st = { ...old, match: g.match, target: old.picked ? old.target : g.match.target, order: [...old.order.filter((id) => g.fileIds.includes(id)), ...added] };
+          const st = { ...old, match: g.match, hints: g.hints, target: old.picked ? old.target : g.match.target, order: [...old.order.filter((id) => g.fileIds.includes(id)), ...added] };
           return old.mode === "mixed" ? { ...st, dests: { ...st.dests, ...destsFor(st, "tpl", tpl, all, added, seenIdsRef.current) } } : { ...st, dests: destsFor(st, old.mode, tpl, all, undefined, seenIdsRef.current) };
         }
-        const st: GroupState = { key: g.key, label: g.label, match: g.match, target: g.match.target, picked: false, order: g.fileIds, mode: "tpl", dests: {}, resize: "" };
-        return { ...st, dests: destsFor(st, "tpl", tpl, all, undefined, seenIdsRef.current) };
+        // โฟลเดอร์หน้าที่: Description → ทุกรูปเป็น Description · Images/Rawfiles/เวอร์ชันเก่า → ข้าม (เลือกเองทีหลังได้)
+        const mode = defaultRowModeOf(g);
+        const st: GroupState = { key: g.key, label: g.label, match: g.match, target: g.match.target, picked: false, order: g.fileIds, mode, dests: {}, resize: "", hints: g.hints };
+        return { ...st, dests: destsFor(st, mode, tpl, all, undefined, seenIdsRef.current) };
       });
       setGroups(next);
     },
@@ -494,7 +510,7 @@ export function ProductImageRouter({
     }
     return { o, n };
   }, [uploadIds, itemById, groups, resizePref]); // eslint-disable-line react-hooks/exhaustive-deps
-  const replacing = mode === "replace" && plan.slots.some((s) => s.replaces && (s.kind === "skuGallery" || s.kind === "parentGallery"));
+  const replacing = mode === "replace" && plan.slots.some((s) => s.replaces && (s.kind === "skuGallery" || s.kind === "parentGallery" || s.kind === "desc"));
   const needConfirm = mode === "replace" && touchedParents.length > CONFIRM_OVER;
 
   // ── แก้ค่าของกลุ่ม ──
@@ -612,7 +628,7 @@ export function ProductImageRouter({
         return setErr(`${(e as Error).message} — ลองกดยืนยันอีกครั้ง`);
       }
     }
-    const undo: UndoInfo = { prevPrimary: {}, png: [], web: [], replaced: [] };
+    const undo: UndoInfo = { prevPrimary: {}, png: [], web: [], replaced: [], descReplaced: [] };
     const batch = prevRun?.batch ?? new Date().toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
     const state: RunState = { done: 0, total, ok: prevRun?.ok ?? 0, failed: [], batch, batchId };
     setRun({ ...state });
@@ -650,6 +666,13 @@ export function ProductImageRouter({
               for (const o of olds) {
                 const r = await apiFetch(`/api/attachments/${o.id}`, { method: "DELETE" }).catch(() => null);
                 if (r?.ok) undo.replaced.push({ table, entityId, key: o.key });
+              }
+            }
+            // โหมดแทนที่: เอารูป Description เดิมของรุ่นนี้ออก (ไฟล์ยังอยู่ในคลัง · ย้อนทั้งชุดแล้วผูกคืนตามลำดับเดิม)
+            if (!onlyIds && mode === "replace" && s.replaces && s.kind === "desc") {
+              for (const d of byParent.get(s.parentId)?.descItems ?? []) {
+                const r = await apiFetch(`/api/assets/description?parent_id=${encodeURIComponent(s.parentId)}&asset_id=${encodeURIComponent(d.assetId)}`, { method: "DELETE" }).catch(() => null);
+                if (r?.ok) undo.descReplaced.push({ parentId: s.parentId, assetId: d.assetId, sort: d.sort });
               }
             }
             for (const id of s.ids) {
@@ -1037,7 +1060,7 @@ function destsFor(g: GroupState, m: RowMode | "mixed", tpl: RouteTemplate, all: 
   const imgs = g.order.map((id) => ({ id, base: base.get(id) ?? "" }));
   const out: GroupState["dests"] = {};
   // ไฟล์เดี่ยว (กลุ่ม f:…) ไม่ตั้งปกตามตำแหน่ง — กันเพิ่มรูปเดียวแล้วปกเปลี่ยน
-  for (const r of applyRowMode(imgs, mode, { parentLevel: !!g.target && !g.target.skuId, template: tpl, loose: g.key.startsWith("f:"), seen })) if (!ids || ids.includes(r.id)) out[r.id] = { dest: r.dest, by: r.by };
+  for (const r of applyRowMode(imgs, mode, { parentLevel: !!g.target && !g.target.skuId, template: tpl, loose: g.key.startsWith("f:"), seen, hints: g.hints })) if (!ids || ids.includes(r.id)) out[r.id] = { dest: r.dest, by: r.by };
   return out;
 }
 
@@ -1240,7 +1263,7 @@ function ReviewPanel({ counts, plan, parents, shops, nameOf, warnOf, sizeTotals,
         </div>
         <p className={`mt-2 text-[11px] ${mode === "replace" ? "text-rose-600" : "text-slate-500"}`}>
           {mode === "replace"
-            ? `โหมดแทนที่: รูปเดิมของแกลเลอรี/รูปบนเว็บที่มีรูปใหม่จะถูกเอาออก (เก็บเป็นเวอร์ชัน ย้อนคืนได้ที่ 🕘) · รูป Description ต่อท้ายเสมอ${replacing ? "" : " · ชุดนี้ไม่มีแกลเลอรีที่จะถูกแทน"}${needConfirm ? ` · แตะ ${touched} รุ่น ต้องพิมพ์ CONFIRM` : ""}`
+            ? `โหมดแทนที่: รูปเดิมของแกลเลอรี/รูป Description/รูปบนเว็บที่มีรูปใหม่จะถูกเอาออก (เก็บเป็นเวอร์ชัน ย้อนคืนได้ที่ 🕘 · Description เดิมยังอยู่ในคลัง)${replacing ? "" : " · ชุดนี้ไม่มีรูปเดิมที่จะถูกแทน"}${needConfirm ? ` · แตะ ${touched} รุ่น ต้องพิมพ์ CONFIRM` : ""}`
             : "ของเดิมอยู่ครบ รูปใหม่ต่อท้าย · ตั้งปกใหม่ = ย้ายดาว รูปปกเดิมยังอยู่ · Hero / รูปตัด PNG มีช่องละ 1 (รูปใหม่แทนของเดิม) · บันทึกว่าใครอัปอะไรเมื่อไร · ย้อนทั้งชุดได้หลังอัป"}
         </p>
       </div>
@@ -1250,11 +1273,11 @@ function ReviewPanel({ counts, plan, parents, shops, nameOf, warnOf, sizeTotals,
 
 // ───────────── 🕘 ประวัติการอัปรูป ─────────────
 
-type UndoResultView = { removed: number; alreadyGone: number; restoredOld: number; restoreFailed: number; covers: number; desc: number; png: number; pngChanged: number; web: number; webChanged: number; errors: string[] };
+type UndoResultView = { removed: number; alreadyGone: number; restoredOld: number; restoreFailed: number; covers: number; desc: number; descRestored?: number; png: number; pngChanged: number; web: number; webChanged: number; errors: string[] };
 /** สรุปผลย้อนเป็นภาษาคน (warn = มีส่วนที่ข้าม/ไม่สำเร็จ) */
 function undoMessage(r: UndoResultView | null | undefined): { text: string; warn: boolean } {
   if (!r) return { text: "ย้อนทั้งชุดแล้ว", warn: false };
-  const done = [r.removed && `เอารูปออก ${r.removed}`, r.restoredOld && `คืนรูปเดิม ${r.restoredOld}`, r.covers && `คืนปกเดิม ${r.covers}`, r.desc && `Description ${r.desc}`, r.png && `PNG ${r.png}`, r.web && `รูปบนเว็บ ${r.web} รายการ`].filter(Boolean).join(" · ");
+  const done = [r.removed && `เอารูปออก ${r.removed}`, r.restoredOld && `คืนรูปเดิม ${r.restoredOld}`, r.covers && `คืนปกเดิม ${r.covers}`, r.desc && `Description ${r.desc}`, r.descRestored && `คืน Description เดิม ${r.descRestored}`, r.png && `PNG ${r.png}`, r.web && `รูปบนเว็บ ${r.web} รายการ`].filter(Boolean).join(" · ");
   const skipped = [r.alreadyGone && `${r.alreadyGone} รูปถูกลบไปก่อนแล้ว`, r.pngChanged && `PNG ${r.pngChanged} รุ่นมีคนเปลี่ยนต่อแล้ว`, r.webChanged && `รูปบนเว็บ ${r.webChanged} รายการมีคนแก้ต่อแล้ว`, r.restoreFailed && `คืนรูปเดิมไม่ได้ ${r.restoreFailed}`, r.errors.length && `ผิดพลาด ${r.errors.length}`].filter(Boolean).join(" · ");
   return { text: `ย้อนแล้ว — ${done || "ไม่มีอะไรต้องย้อน"}${skipped ? ` · ข้าม: ${skipped} (ไม่ทับ)` : ""}`, warn: !!skipped };
 }

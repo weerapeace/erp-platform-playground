@@ -42,3 +42,13 @@ describe("parseUndoInfo / mergeUndoInfo", () => {
     expect(parseUndoInfo(null)).toEqual(emptyUndoInfo());
   });
 });
+
+describe("descReplaced (Description ที่ถูกแทน)", () => {
+  it("กรองค่า + รวมรอบ", () => {
+    const D = "55555555-5555-5555-5555-555555555555";
+    const a = parseUndoInfo({ descReplaced: [{ parentId: P, assetId: D, sort: 2 }, { parentId: "x", assetId: D }, { parentId: P, assetId: A, sort: "1" }] });
+    expect(a.descReplaced).toEqual([{ parentId: P, assetId: D, sort: 2 }, { parentId: P, assetId: A, sort: null }]);
+    expect(emptyUndoInfo().descReplaced).toEqual([]);
+    expect(mergeUndoInfo(a, parseUndoInfo({ descReplaced: [{ parentId: P, assetId: S, sort: 0 }] })).descReplaced).toHaveLength(3);
+  });
+});

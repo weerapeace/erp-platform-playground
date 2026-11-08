@@ -71,6 +71,10 @@ export async function PUT(request: NextRequest): Promise<NextResponse> {
       other: JSON.stringify(old?.other) === JSON.stringify(p.other) ? undefined : { old: old?.other ?? null, new: p.other },
     };
   });
-  await writeAuditFor(request, admin, { action: "file_sort_config.update", entityType: "ui_config", metadata: { key: FILE_SORT_CONFIG_KEY, changes } });
+  // สูตรงานสินค้า: ชื่อโฟลเดอร์หน้าที่ · ที่เก็บบน Z: · โหมดรูปเดิม
+  const pp = prev.product, np = next.product;
+  const diff = <T,>(a: T, b: T) => (JSON.stringify(a) === JSON.stringify(b) ? undefined : { old: a, new: b });
+  const product = { nas_root: diff(pp.nasRoot, np.nasRoot), desc_folders: diff(pp.roleFolders.desc, np.roleFolders.desc), archive_folders: diff(pp.roleFolders.archive, np.roleFolders.archive), mode: diff(pp.mode, np.mode) };
+  await writeAuditFor(request, admin, { action: "file_sort_config.update", entityType: "ui_config", metadata: { key: FILE_SORT_CONFIG_KEY, changes, product } });
   return NextResponse.json({ ok: true, data: next, error: null });
 }

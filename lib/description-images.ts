@@ -10,6 +10,34 @@ import type { supabaseAdmin } from "@/lib/supabase-admin";
 type Admin = ReturnType<typeof supabaseAdmin>;
 export const DESCRIPTION_MODULE = "parent_sku_description";
 
+/**
+ * ผูก asset เข้า Description ของ Parent (มีอยู่แล้ว = ไม่ผูกซ้ำ) — ของกลาง
+ * sortOrder = ลำดับที่ต้องการ (ใช้ตอนคืนรูปเดิมจากย้อนชุดอัป) · ไม่ส่ง = ต่อท้าย
+ * ใช้ร่วม: POST /api/assets/description · ย้อนชุดอัป (lib/image-batches descReplaced)
+ */
+export async function linkDescriptionImage(
+  admin: Admin,
+  args: { parentId: string; assetId: string; sortOrder?: number | null },
+): Promise<{ ok: boolean; already: boolean; sortOrder: number | null; error?: string }> {
+  const { parentId, assetId } = args;
+  // มีอยู่แล้ว? (กันผูกซ้ำ — field null เลยเช็คเองแทน onConflict)
+  const { data: ex } = await admin.from("asset_usages").select("id, sort_order")
+    .eq("module", DESCRIPTION_MODULE).eq("record_id", parentId).eq("asset_id", assetId).is("field", null).maybeSingle();
+  if (ex?.id) return { ok: true, already: true, sortOrder: (ex.sort_order as number | null) ?? null };
+  let next = args.sortOrder ?? null;
+  if (next == null) {
+    const { data: mx } = await admin.from("asset_usages").select("sort_order")
+      .eq("module", DESCRIPTION_MODULE).eq("record_id", parentId)
+      .order("sort_order", { ascending: false, nullsFirst: false }).limit(1).maybeSingle();
+    next = ((mx?.sort_order as number | null) ?? -1) + 1;
+  }
+  const { error } = await admin.from("asset_usages").insert({
+    asset_id: assetId, module: DESCRIPTION_MODULE, record_id: parentId, record_label: null, field: null, sort_order: next,
+  });
+  if (error) return { ok: false, already: false, sortOrder: null, error: error.message };
+  return { ok: true, already: false, sortOrder: next };
+}
+
 export async function removeDescriptionImage(
   admin: Admin,
   args: { parentId: string; assetId: string; source?: "description_image_remove"; auditMeta?: Record<string, unknown> } & VersionActor,

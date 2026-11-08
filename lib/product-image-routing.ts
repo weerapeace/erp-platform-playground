@@ -21,6 +21,8 @@ import {
   type MassImageItem,
 } from "@/lib/website-image-match";
 import { BIG_IMAGE_MAX_BYTES } from "@/lib/media-upload-limits";
+import { DEFAULT_ROLE_FOLDERS, folderLabelKey, versionOfFolder, type RoleFolderConfig } from "@/lib/role-folders";
+export { DEFAULT_ROLE_FOLDERS, cleanRoleFolders, folderLabelKey, versionOfFolder, type RoleFolderConfig } from "@/lib/role-folders";
 
 export type RouteDest = "skuMain" | "sku" | "parent" | "desc" | "webColor" | "heroD" | "heroM" | "png" | "skip";
 type RealDest = Exclude<RouteDest, "skip">;
@@ -116,6 +118,8 @@ export interface RouteFileIn {
   /** "โฟลเดอร์/…/ชื่อไฟล์" (filePathOf) หรือชื่อไฟล์ */
   path: string;
 }
+/** กลุ่มจากโฟลเดอร์หน้าที่: desc = รูป Description ของรุ่น · archive = โฟลเดอร์เก็บไฟล์ (Images/Rawfiles · ไม่ลงระบบ) · old = Description เวอร์ชันเก่า */
+export type GroupRole = "desc" | "archive" | "old";
 export interface RouteGroup {
   key: string;
   /** ชื่อที่โชว์ (ชื่อโฟลเดอร์ลึกสุด / รหัสของไฟล์เดี่ยว) */
@@ -123,20 +127,74 @@ export interface RouteGroup {
   match: FolderMatch;
   /** เรียงตามชื่อไฟล์แบบตัวเลข (1, 2, 10 · IMG_4519 < IMG_4521) */
   fileIds: string[];
+  /** มาจากโฟลเดอร์หน้าที่ (ไม่มี = โฟลเดอร์รหัสตามเดิม) → ตั้งทั้งกลุ่มตั้งต้น: desc = รูป Description · archive/old = ข้าม */
+  role?: GroupRole;
+  /** ชื่อไฟล์บอกช่องเองตามรหัส: ไฟล์ชื่อ = รหัส SKU ในโฟลเดอร์รุ่น → ปก · .png ชื่อ = รหัส → รูปตัด PNG */
+  hints?: Record<string, RouteDest>;
 }
 
 const natural = new Intl.Collator("en", { numeric: true, sensitivity: "base" });
 export const baseNameOf = (path: string) => splitPath(path).base;
 
-/** จัดไฟล์เป็นกลุ่มตามโฟลเดอร์ + จับคู่แต่ละกลุ่มกับรุ่น/สี */
-export function groupRouteFiles(files: RouteFileIn[], parents: RouteParent[], index: CodeRef[] = routeCodeIndex(parents)): RouteGroup[] {
-  const groups = new Map<string, { label: string; folders: string[]; files: { id: string; base: string }[]; match?: FolderMatch }>();
-  for (const f of files) {
+// ───────────── โฟลเดอร์หน้าที่ (Description / Images / Rawfiles) + เวอร์ชัน ─────────────
+// ชื่อโฟลเดอร์ + การอ่านค่าตั้ง อยู่ที่ lib/role-folders (ของกลาง ไม่ import อะไร)
+
+export interface FileRoleInfo {
+  role: GroupRole | null;
+  /** โฟลเดอร์ตั้งแต่รากถึงโฟลเดอร์หน้าที่ (เช่น "BSD15/[01] Description") */
+  roleChain?: string;
+  /** ชื่อโฟลเดอร์หน้าที่ */
+  roleFolder?: string;
+  /** โฟลเดอร์เหนือโฟลเดอร์หน้าที่ (ลึกสุดก่อน) — ใช้หารุ่น */
+  above?: string[];
+  /** เวอร์ชันของไฟล์ใน Description (ไฟล์ชั้นบน = 1) */
+  version?: number;
+}
+
+/** ไฟล์แต่ละไฟล์อยู่ในโฟลเดอร์หน้าที่ไหม · Description มีหลายเวอร์ชัน → ใช้เวอร์ชันสูงสุด ที่เหลือ = old */
+export function fileRoles(paths: string[], cfg: RoleFolderConfig = DEFAULT_ROLE_FOLDERS): FileRoleInfo[] {
+  const desc = new Set(cfg.desc), archive = new Set(cfg.archive);
+  const out: FileRoleInfo[] = paths.map((p) => {
+    const folders = [...splitPath(p).folders].reverse();   // รากก่อน
+    for (let i = 0; i < folders.length; i++) {
+      const k = folderLabelKey(folders[i]);
+      const isDesc = desc.has(k), isArch = archive.has(k);
+      if (!isDesc && !isArch) continue;
+      const base = { roleChain: folders.slice(0, i + 1).join("/"), roleFolder: folders[i], above: folders.slice(0, i).reverse() };
+      if (isArch) return { role: "archive" as const, ...base };
+      return { role: "desc" as const, ...base, version: (folders[i + 1] != null ? versionOfFolder(folders[i + 1]) : null) ?? 1 };
+    }
+    return { role: null };
+  });
+  const maxVer = new Map<string, number>();
+  for (const r of out) if (r.role === "desc") maxVer.set(r.roleChain!, Math.max(maxVer.get(r.roleChain!) ?? 1, r.version ?? 1));
+  for (const r of out) if (r.role === "desc" && (r.version ?? 1) < (maxVer.get(r.roleChain!) ?? 1)) r.role = "old";
+  return out;
+}
+
+const extOfPath = (p: string) => (p.match(/\.([^./\\]+)$/)?.[1] ?? "").toLowerCase();
+
+/** จัดไฟล์เป็นกลุ่มตามโฟลเดอร์ + จับคู่แต่ละกลุ่มกับรุ่น/สี (roles = รู้จักโฟลเดอร์หน้าที่ · ไม่ส่ง = ค่าเริ่มต้น) */
+export function groupRouteFiles(files: RouteFileIn[], parents: RouteParent[], index: CodeRef[] = routeCodeIndex(parents), roles: RoleFolderConfig = DEFAULT_ROLE_FOLDERS): RouteGroup[] {
+  type G = { label: string; folders: string[]; files: { id: string; base: string; path: string }[]; match?: FolderMatch; role?: GroupRole };
+  const groups = new Map<string, G>();
+  const roleInfo = fileRoles(files.map((f) => f.path), roles);
+  files.forEach((f, i) => {
     const { base, folders } = splitPath(f.path);
+    const ri = roleInfo[i];
     let key: string;
     let label: string;
     let match: FolderMatch | undefined;
-    if (folders.length) {
+    let role: GroupRole | undefined;
+    let gFolders = folders;
+    if (ri.role) {
+      // โฟลเดอร์หน้าที่: หารุ่นจากโฟลเดอร์ที่อยู่เหนือมัน (ไม่ผูกสี)
+      role = ri.role;
+      gFolders = ri.above ?? [];
+      const ver = ri.role === "old" ? ` · Ver.${ri.version}` : "";
+      key = `r:${ri.role}:${ri.roleChain}${ver}`;
+      label = `${ri.roleFolder}${ver}`;
+    } else if (folders.length) {
       key = `d:${[...folders].reverse().join("/")}`;
       label = folders[0];
     } else {
@@ -146,27 +204,74 @@ export function groupRouteFiles(files: RouteFileIn[], parents: RouteParent[], in
       key = t ? `f:${t.parentId}|${t.skuId ?? "P"}` : match.guessParentId ? `f:?${match.guessParentId}` : "f:none";
       label = t ? `${codeOfTarget(t, parents) ?? base} · ไฟล์เดี่ยว` : "ไฟล์ที่ไม่มีโฟลเดอร์";
     }
-    const g = groups.get(key) ?? { label, folders, files: [], match };
-    g.files.push({ id: f.id, base });
+    const g = groups.get(key) ?? { label, folders: gFolders, files: [], match, role };
+    g.files.push({ id: f.id, base, path: f.path });
     groups.set(key, g);
-  }
-  const out: RouteGroup[] = [];
+  });
+
+  const resolved: (G & { key: string; match: FolderMatch; hints: Record<string, RouteDest> })[] = [];
   for (const [key, g] of groups) {
     let match = g.match;
     if (!match) {
-      // ชื่อโฟลเดอร์ (ลึกสุดก่อน) → ไม่มีรหัส = ดูชื่อไฟล์ข้างใน
+      // ชื่อโฟลเดอร์ (ลึกสุดก่อน) → โฟลเดอร์แรกที่ "เป็นรหัส" ชนะ (รหัสสีที่ไม่มีในรุ่น = ให้เลือกเอง ไม่ตกไปเป็นของทั้งรุ่นจากโฟลเดอร์ชั้นนอก)
+      // → ไม่มีรหัสเลย = ดูชื่อไฟล์ข้างใน
       const tries = g.folders.map((n) => matchName(n, parents, index));
-      match = tries.find((m) => m.target) ?? tries.find((m) => m.guessParentId);
-      if (!match) {
+      match = tries.find((m) => m.target || m.guessParentId);
+      if (!match && g.role !== "archive") {
         const byFile = g.files.map((x) => matchName(x.base, parents, index)).find((m) => m.target);
         match = byFile ? { ...byFile, how: "file", note: "จับคู่จากชื่อไฟล์ข้างใน" } : tries[0];
       }
     }
+    match = match ?? { target: null, how: "none" };
+    if (g.role === "desc" || g.role === "old") {
+      // Description เป็นของทั้งรุ่น (ไม่ผูกสี)
+      const t = match.target ? { parentId: match.target.parentId, skuId: null } : null;
+      const code = t ? codeOfTarget(t, parents) : null;
+      match = { ...match, target: t, note: g.role === "old" ? "Description เวอร์ชันเก่า — ข้าม (ใช้เวอร์ชันล่าสุด)" : code ? `โฟลเดอร์ Description → รูป Description ของรุ่น ${code}` : match.note };
+    }
+    if (g.role === "archive") match = { target: null, how: "none", note: "โฟลเดอร์เก็บไฟล์ — ไม่ลงระบบ" };
+    resolved.push({ ...g, key, match, hints: {} });
+  }
+
+  // ชื่อไฟล์ = รหัสตรงตัว: ในโฟลเดอร์ระดับรุ่น ไฟล์ชื่อ = รหัส SKU → ย้ายไปกลุ่ม SKU นั้นเป็น "ปก" · .png ชื่อ = รหัส → รูปตัด PNG
+  const extra = new Map<string, G & { key: string; match: FolderMatch; hints: Record<string, RouteDest> }>();
+  for (const g of resolved) {
+    if (g.role) continue;
+    const t = g.match.target;
+    const keep: G["files"] = [];
+    for (const f of g.files) {
+      const hit = findCodePrefix(f.base.trim(), index);
+      const exact = !!hit && hit.rest === "" && (!t || hit.ref.parentId === t.parentId);
+      const isPng = extOfPath(f.path) === "png";
+      if (exact && isPng) { g.hints[f.id] = "png"; keep.push(f); continue; }
+      if (exact && hit!.ref.skuId && t?.skuId === hit!.ref.skuId) { g.hints[f.id] = "skuMain"; keep.push(f); continue; }
+      if (exact && hit!.ref.skuId && t && !t.skuId && !g.key.startsWith("f:")) {
+        const key = `f:${hit!.ref.parentId}|${hit!.ref.skuId}`;
+        const target = { parentId: hit!.ref.parentId, skuId: hit!.ref.skuId };
+        const x = extra.get(key) ?? resolved.find((r) => r.key === key) ?? { key, label: `${codeOfTarget(target, parents) ?? f.base} · ไฟล์ชื่อรหัส`, folders: [], files: [], match: { target, how: "file" as const, note: "ไฟล์ชื่อตรงรหัส SKU → ปก" }, hints: {} };
+        x.files.push(f);
+        x.hints[f.id] = "skuMain";
+        if (!resolved.includes(x)) extra.set(key, x);
+        continue;
+      }
+      keep.push(f);
+    }
+    g.files = keep;
+  }
+  const out: RouteGroup[] = [];
+  for (const g of [...resolved, ...extra.values()]) {
+    if (!g.files.length) continue;
     const sorted = [...g.files].sort((a, b) => natural.compare(a.base, b.base));
-    out.push({ key, label: g.label, match: match ?? { target: null, how: "none" }, fileIds: sorted.map((x) => x.id) });
+    const r: RouteGroup = { key: g.key, label: g.label, match: g.match, fileIds: sorted.map((x) => x.id) };
+    if (g.role) r.role = g.role;
+    if (Object.keys(g.hints).length) r.hints = g.hints;
+    out.push(r);
   }
   return out.sort((a, b) => natural.compare(a.label, b.label));
 }
+
+/** ตั้งต้นของกลุ่มตามหน้าที่: Description → ทุกรูปเป็น Description · เก็บไฟล์/เวอร์ชันเก่า → ข้าม · ปกติ → ตามแม่แบบ */
+export const defaultRowModeOf = (g: { role?: GroupRole }): RowMode => (g.role === "desc" ? "desc" : g.role ? "skip" : "tpl");
 
 export function codeOfTarget(t: FolderTarget, parents: RouteParent[]): string | null {
   const p = parents.find((x) => x.parentId === t.parentId);
@@ -260,10 +365,13 @@ export interface RouteImage {
  * loose = ไฟล์เดี่ยวไม่มีโฟลเดอร์ (BCG11-01_3.jpg) → แม่แบบ "รูป 1 = ปก" ไม่ใช้ (กันเพิ่มรูปเดียวแล้วปกเปลี่ยนโดยไม่ตั้งใจ · ชื่อไฟล์มีคำว่า ปก ยังได้)
  * seen = รูปที่เคยอัปให้รุ่นนี้แล้ว (ประวัติชุดอัป) → ข้ามให้เสมอ (เลือกช่องเองทีหลังได้ = อัปซ้ำจริง)
  */
-export function applyRowMode(imgs: { id: string; base: string }[], mode: RowMode, ctx: { parentLevel: boolean; template: RouteTemplate; loose?: boolean; seen?: Set<string> }): RouteImage[] {
+export function applyRowMode(imgs: { id: string; base: string }[], mode: RowMode, ctx: { parentLevel: boolean; template: RouteTemplate; loose?: boolean; seen?: Set<string>; hints?: Record<string, RouteDest> }): RouteImage[] {
   return imgs.map((im, ix) => {
     if (ctx.seen?.has(im.id) && mode !== "skip") return { id: im.id, base: im.base, dest: "skip", by: "seen" };
     if (mode === "tpl") {
+      // ชื่อไฟล์ = รหัสตรงตัว (groupRouteFiles hints) ก่อนคำในชื่อไฟล์/แม่แบบ
+      const hd = ctx.hints?.[im.id];
+      if (hd) return { id: im.id, base: im.base, dest: hd, by: "name" };
       const nd = destFromName(im.base, ctx.parentLevel);
       if (nd) return { id: im.id, base: im.base, dest: nd, by: "name" };
       let dest = ctx.parentLevel ? ctx.template.parentFolder : (ctx.template.pos[String(ix + 1)] ?? ctx.template.rest);
@@ -316,7 +424,7 @@ const slotKind = (d: RealDest): SlotKind =>
 export function planRoute(groups: PlanGroupIn[], parents: RouteParent[], opts: { shopIds: string[]; mode: MassMode }): { images: Map<string, PlanImage>; slots: PlanSlot[] } {
   const byId = new Map(parents.map((p) => [p.parentId, p]));
   const images = new Map<string, PlanImage>();
-  const slots = new Map<string, PlanSlot & { queue: { id: string; cover: boolean }[] }>();
+  const slots = new Map<string, PlanSlot & { queue: { id: string; cover: boolean; by: RouteImage["by"] }[] }>();
   for (const g of groups) {
     for (const im of g.images) {
       const d = im.dest;
@@ -343,11 +451,18 @@ export function planRoute(groups: PlanGroupIn[], parents: RouteParent[], opts: {
       const skuId = kind === "skuGallery" || kind === "webColor" ? t.skuId : null;
       const key = `${p.parentId}|${kind}|${skuId ?? "-"}`;
       const slot = slots.get(key) ?? { key, kind, parentId: p.parentId, skuId, ids: [], shopIds: shops, existing: 0, total: 0, limit: null, replaces: false, queue: [] };
-      if (d === "skuMain" && slot.queue.some((q) => q.cover)) {
-        images.set(im.id, { id: im.id, state: "error", note: "ปกได้รูปเดียว — เลือกช่องอื่น" });
-        continue;
+      let cover = d === "skuMain";
+      const prevCover = cover ? slot.queue.find((q) => q.cover) : undefined;
+      if (prevCover) {
+        // ปกชนกัน: ปกจากแม่แบบ (รูป 1) ยอมให้ปกที่ตั้งชัด ๆ (ชื่อไฟล์/เลือกเอง) แล้วเป็นรูปธรรมดาแทน · ตั้งชัดทั้งคู่ = ให้เลือกใหม่
+        if (prevCover.by === "tpl" && im.by !== "tpl") prevCover.cover = false;
+        else if (im.by === "tpl") cover = false;
+        else {
+          images.set(im.id, { id: im.id, state: "error", note: "ปกได้รูปเดียว — เลือกช่องอื่น" });
+          continue;
+        }
       }
-      slot.queue.push({ id: im.id, cover: d === "skuMain" });
+      slot.queue.push({ id: im.id, cover, by: im.by });
       slots.set(key, slot);
     }
   }
@@ -372,8 +487,8 @@ export function planRoute(groups: PlanGroupIn[], parents: RouteParent[], opts: {
       limit = 1;
     }
     const single = s.kind === "heroD" || s.kind === "heroM" || s.kind === "png";
-    // รูป Description ต่อท้ายเสมอ (โหมดแทนที่ใช้กับแกลเลอรี + รูปบนเว็บ)
-    const replaceAll = single || (opts.mode === "replace" && s.kind !== "desc");
+    // โหมดแทนที่: แกลเลอรี + รูป Description + รูปบนเว็บ (Description เดิมเอาออกแล้วคืนได้ตอนย้อนชุด — lib/image-batches descReplaced)
+    const replaceAll = single || opts.mode === "replace";
     const existing = replaceAll ? 0 : current;
     const ordered = [...s.queue.filter((q) => q.cover), ...s.queue.filter((q) => !q.cover)];
     const room = limit == null ? ordered.length : Math.max(0, limit - existing);

@@ -48,6 +48,17 @@
 
 กดซ้ำได้เสมอ: Z: ไฟล์ที่มีแล้ว (ขนาดเท่ากัน) ข้าม · Drive ไฟล์เนื้อเดียวกันข้าม · การ์ดเดิมถูกแก้แทนการสร้างใหม่
 
+## สูตร "งานสินค้า" (ขั้น 3A เว็บ · 2026-11-08)
+โยนโฟลเดอร์รุ่น 1 โฟลเดอร์ (เช่น `Z:\Work In Process\[01] New Product\BSD15`) → รูปลงช่องรูปของสินค้าใน ERP · ที่เหลืออยู่บน Z:
+- ตัวคิด: `lib/file-sort-product` `planProductSort` — ใช้ตัวจับคู่/ตรวจกลางของปุ่ม 📂 จัดรูปหลายโฟลเดอร์ (`lib/product-image-routing` groupRouteFiles + applyRowMode + planRoute) และตัวโหลดสินค้ากลาง `lib/product-image-catalog-server` (ย้ายมาจาก /api/product-images/catalog)
+- กติกา: โฟลเดอร์รหัสรุ่น → แกลเลอรี Parent · รหัสสี → แกลเลอรี SKU (รูป 1 = ปก) · `[01] Description` → รูป Description (Ver.N ล่าสุด) · ไฟล์ชื่อ = รหัส SKU → ปก · `.png` ชื่อรหัส → รูปตัด PNG · Images/Rawfiles/PSD/RAW/จับคู่ไม่ได้/เกินเพดาน → ไม่ลงระบบ
+- ขนาดย่อตามช่อง `RESIZE_AUTO` (Description 1200 · รูปสินค้า 1500 · PNG 2000) เหมือนปุ่มในเว็บ
+- ทุกไฟล์ (ยกเว้นไฟล์ระบบ) `nas: true` = ต้องอยู่บน Z: · โฟลเดอร์อยู่บน Z: แล้ว = โปรแกรมไม่ทำอะไร · ไม่อยู่ = ก๊อปไป `nas_folder` (= `product.nasRoot\<รุ่น>`) · **สูตรนี้ไม่ลบ/ไม่ย้ายต้นฉบับ**
+- `POST /api/file-sort/plan` `{ profile:"product", job_folder, mode?, files }` (assets.upload + products.view) → `files[]` (rel · erp · dest · slotKey · width · nas · why · note) + `slots[]` (kind · parentId · skuId · rels ปกหน้าสุด · coverRel · replaces · remove{attachments,desc} · entity) + groups + warnings
+- โหมดแทนที่: `slots[].remove` = รูปเดิมที่ต้องเอาออกก่อน (แกลเลอรี: DELETE /api/attachments/[id] · Description: DELETE /api/assets/description) แล้วจดใน undo_info (`replaced` / `descReplaced`) ของชุดอัป → ย้อนทั้งชุดได้จากปุ่ม 📂 ในเว็บ
+- ค่าตั้ง `FileSortConfig.product` = { nasRoot, roleFolders{desc,archive}, mode } · หน้าตั้ง: แท็บ "งานสินค้า"
+- ขั้น 3B (โปรแกรม): ลงรูปตาม slots ผ่าน API กลางชุดเดียวกับปุ่มในเว็บ + บันทึกชุดอัป (/api/product-images/batches)
+
 ## ข้อจำกัดที่รู้
 - Drive ดูไฟล์เดิมในโฟลเดอร์ได้ 100 ไฟล์แรก (โฟลเดอร์งานเดียวไม่ควรเกินนี้)
 - `/api/drive` POST ไม่ได้มีไว้ให้เบราว์เซอร์ (Google บล็อก CORS) — เว็บใช้ `/api/drive/upload-chunk` แทน

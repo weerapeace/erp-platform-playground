@@ -8,7 +8,7 @@
  */
 import { writeAudit } from "@/lib/audit";
 import { afterAttachmentRemoved, type RemovedAttachment } from "@/lib/attachment-remove";
-import { removeDescriptionImage, DESCRIPTION_MODULE } from "@/lib/description-images";
+import { removeDescriptionImage, linkDescriptionImage, DESCRIPTION_MODULE } from "@/lib/description-images";
 import { restoreVersion } from "@/lib/record-versions";
 import { parseListingChanges, undoListingChanges, type ListingChange } from "@/lib/website-listing-undo";
 import { purgeStorefrontCache } from "@/lib/storefront-revalidate";
@@ -61,8 +61,10 @@ export interface UndoInfo {
   web: ListingChange[];
   /** โหมดแทนที่: รูปเดิมที่ถูกเอาออก (คืนจาก 🕘 เวอร์ชัน) */
   replaced: { table: "skus_v2" | "parent_skus_v2"; entityId: string; key: string }[];
+  /** โหมดแทนที่: รูป Description เดิมที่ถูกเอาออก (ไฟล์ยังอยู่ในคลัง · ย้อนชุด = ผูกคืนตามลำดับเดิม) */
+  descReplaced: { parentId: string; assetId: string; sort: number | null }[];
 }
-export const emptyUndoInfo = (): UndoInfo => ({ prevPrimary: {}, png: [], web: [], replaced: [] });
+export const emptyUndoInfo = (): UndoInfo => ({ prevPrimary: {}, png: [], web: [], replaced: [], descReplaced: [] });
 
 export function parseUndoInfo(raw: unknown): UndoInfo {
   const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
@@ -84,12 +86,19 @@ export function parseUndoInfo(raw: unknown): UndoInfo {
     const key = typeof r.key === "string" && KEY_RE.test(r.key) ? r.key : null;
     return table && entityId && key ? [{ table, entityId, key }] : [];
   });
-  return { prevPrimary, png, web: parseListingChanges(o.web), replaced };
+  const descReplaced = (Array.isArray(o.descReplaced) ? o.descReplaced : []).slice(0, 600).flatMap((x) => {
+    const r = (x ?? {}) as Record<string, unknown>;
+    const parentId = uuidOrNull(r.parentId);
+    const assetId = uuidOrNull(r.assetId);
+    const sort = typeof r.sort === "number" && Number.isFinite(r.sort) ? Math.round(r.sort) : null;
+    return parentId && assetId ? [{ parentId, assetId, sort }] : [];
+  });
+  return { prevPrimary, png, web: parseListingChanges(o.web), replaced, descReplaced };
 }
 
 /** รวมข้อมูลย้อนของรอบแรก + รอบอัปซ้ำ (ปกเดิม = ของรอบแรก · ที่เหลือต่อท้าย) */
 export function mergeUndoInfo(a: UndoInfo, b: UndoInfo): UndoInfo {
-  return { prevPrimary: { ...b.prevPrimary, ...a.prevPrimary }, png: [...a.png, ...b.png], web: [...a.web, ...b.web], replaced: [...a.replaced, ...b.replaced] };
+  return { prevPrimary: { ...b.prevPrimary, ...a.prevPrimary }, png: [...a.png, ...b.png], web: [...a.web, ...b.web], replaced: [...a.replaced, ...b.replaced], descReplaced: [...a.descReplaced, ...b.descReplaced] };
 }
 
 // ───────────── เคยอัปแล้ว ─────────────
@@ -169,6 +178,8 @@ export interface UndoResult {
   restoreFailed: number;
   covers: number;
   desc: number;
+  /** รูป Description เดิม (โหมดแทนที่) ที่ผูกคืน */
+  descRestored: number;
   png: number;
   pngChanged: number;
   web: number;
@@ -184,7 +195,7 @@ export async function undoImageBatch(admin: Admin, userDb: UserDb, batchId: stri
   const info = parseUndoInfo(b.undo_info);
   const { data: itemRows } = await admin.from("erp_image_batch_items").select("dest, parent_id, attachment_id, asset_id, r2_key, created_at").eq("batch_id", batchId).order("created_at", { ascending: false });
   const items = (itemRows ?? []) as { dest: BatchDest; parent_id: string; attachment_id: string | null; asset_id: string | null; r2_key: string | null }[];
-  const res: UndoResult = { removed: 0, alreadyGone: 0, restoredOld: 0, restoreFailed: 0, covers: 0, desc: 0, png: 0, pngChanged: 0, web: 0, webChanged: 0, errors: [] };
+  const res: UndoResult = { removed: 0, alreadyGone: 0, restoredOld: 0, restoreFailed: 0, covers: 0, desc: 0, descRestored: 0, png: 0, pngChanged: 0, web: 0, webChanged: 0, errors: [] };
   const meta = { via: "image_batch_undo", batch_id: batchId };
 
   // 1) รูปใหม่ในแกลเลอรี (ใหม่สุดก่อน) — ลบแบบเดียวกับลบทีละรูป: audit "detach" + เก็บเป็นเวอร์ชัน
@@ -243,6 +254,15 @@ export async function undoImageBatch(admin: Admin, userDb: UserDb, batchId: stri
     const r = await removeDescriptionImage(admin, { parentId: it.parent_id, assetId: it.asset_id as string, actorId: actor.id, actorName: actor.name, auditMeta: meta });
     if (!r.ok) res.errors.push(`เอารูป Description ออกไม่สำเร็จ: ${r.error}`);
     else if (r.removed) res.desc++;
+  }
+  // 4b) โหมดแทนที่: ผูกรูป Description เดิมคืนตามลำดับเดิม (ไฟล์ยังอยู่ในคลัง)
+  for (const d of info.descReplaced) {
+    const r = await linkDescriptionImage(admin, { parentId: d.parentId, assetId: d.assetId, sortOrder: d.sort });
+    if (!r.ok) res.errors.push(`คืนรูป Description เดิมไม่สำเร็จ: ${r.error}`);
+    else if (!r.already) {
+      res.descRestored++;
+      await writeAudit(admin, { action: "description_image_add", entityType: "parent_skus_v2", entityId: d.parentId, actorId: actor.id, actorName: actor.name, metadata: { asset_id: d.assetId, ...meta } });
+    }
   }
 
   // 5) รูปตัด PNG (ใหม่สุดก่อน) — คืนเฉพาะเมื่อยังเป็นรูปที่ชุดนี้ใส่
