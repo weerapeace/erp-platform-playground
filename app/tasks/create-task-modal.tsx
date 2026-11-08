@@ -77,7 +77,7 @@ export type CreatedTask = { id: string; task_no: string; title: string; subtasks
 // Step labels are rendered via t() inside the component
 const STEPS_TH = ["แบรนด์", "ข้อมูลงาน", "งานย่อย", "สินค้า"];
 
-export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCampaignId, lockedCampaignLabel, presetCampaign }: {
+export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCampaignId, lockedCampaignLabel, presetCampaign, presetProducts }: {
   open: boolean;
   onClose: () => void;
   onCreated: (res: CreatedTask) => void;
@@ -86,6 +86,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
   lockedCampaignLabel?: string;
   /** เลือกแคมเปญ (+ แบรนด์ของแคมเปญ) ไว้ให้ก่อน แต่ยังเปลี่ยนได้ — ต่างจาก lockedCampaignId ที่ล็อกตาย (ใช้กับปุ่ม "＋ เพิ่มงาน" บนการ์ดแคมเปญหน้าภาพรวม) */
   presetCampaign?: { id: string; name: string; brand_id: string | null } | null;
+  /** เลือกแบรนด์ / สินค้า (Parent SKU) / ร้าน ไว้ให้ก่อน แต่ยังเปลี่ยนได้ — ใช้กับปุ่ม "สร้างงาน" ในหน้าสินค้าบนแพลตฟอร์ม (มุมมองหน้าร้าน) */
+  presetProducts?: { brandId?: string | null; parents?: ParentSkuPickerValue[]; platforms?: string[] } | null;
 }) {
   const t = useT();
   const { taskTypes, platforms } = useCreativeOptions();
@@ -141,7 +143,7 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
       if (rv.length) setDefaultReviewers(rv.map((x) => ({ id: x.id, name: x.name } as UserPickerValue)));
     }).catch(() => {});
   }, []);
-  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? presetCampaign?.id ?? "", brand_id: presetCampaign?.brand_id ?? "", order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setArrangeBases([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setNewCampOpen(false); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId, presetCampaign?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open) { setForm({ ...EMPTY_FORM, campaign_id: lockedCampaignId ?? presetCampaign?.id ?? "", brand_id: presetCampaign?.brand_id ?? presetProducts?.brandId ?? "", parents: presetProducts?.parents ?? [], platforms: presetProducts?.platforms ?? [], order_date: todayStr(), due_date: addDaysStr(todayStr(), 3), reviewers: defaultReviewers }); setSubs([]); setContentItems([]); setArrangeItems([]); setArrangeBases([]); setPrintedName(""); setTplDueOffset(null); setTplId(""); setStep(1); setNewCampOpen(false); setFormErr(null); setDirty(false); setTouched(new Set()); } }, [open, lockedCampaignId, presetCampaign?.id]);   // eslint-disable-line react-hooks/exhaustive-deps
   // เผื่อ default reviewers โหลดเสร็จหลังเปิด Wizard → เติมให้ถ้ายังว่าง (ไม่ทับที่แก้เอง/แม่แบบ)
   useEffect(() => { if (open && !tplId && defaultReviewers.length && form.reviewers.length === 0 && !touched.has("reviewers")) updateForm({ reviewers: defaultReviewers }); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [open, defaultReviewers]);
 
@@ -209,7 +211,8 @@ export function CreateTaskModal({ open, onClose, onCreated, pushToast, lockedCam
     setForm((p) => ({
       ...p,
       task_type: tpl.task_type ?? p.task_type, priority: (tpl.default_priority as CreativePriority) ?? p.priority,
-      platforms: tpl.platforms ?? [], brand_id: tpl.brand_id ?? p.brand_id,
+      // แม่แบบไม่ได้กำหนดร้าน → คงร้านที่เลือกไว้ให้ก่อน (presetProducts) · หน้าอื่นไม่มี preset = เหมือนเดิม
+      platforms: tpl.platforms?.length ? tpl.platforms : (presetProducts?.platforms?.length ? presetProducts.platforms : (tpl.platforms ?? [])), brand_id: tpl.brand_id ?? p.brand_id,
       description: tpl.description ?? p.description,
       reviewers: (tpl.default_reviewers && tpl.default_reviewers.length) ? tpl.default_reviewers.map((r) => ({ id: r.id, name: r.label } as UserPickerValue)) : (tpl.default_reviewer_id ? [{ id: tpl.default_reviewer_id, name: tpl.default_reviewer_label ?? "" } as UserPickerValue] : p.reviewers),
       due_date: (offset != null && p.order_date) ? addDaysStr(p.order_date, offset) : p.due_date,

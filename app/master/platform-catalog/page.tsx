@@ -27,6 +27,7 @@ import { isSellingPlatform } from "@/lib/selling-platforms";
 import { listingMatchStatus, type ListingMatchStatus, type MatchSuggestion } from "@/lib/platform-match-suggest";
 import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type ImportMatrix, type ImportProfile, type DbProfileRow } from "@/lib/platform-import-profiles";
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
+import { PlatformShopView } from "@/components/platform-catalog/shop-view";
 
 // Drawer รายละเอียดต่อแพลตฟอร์ม (ของกลาง เปิดจาก Parent SKUs ด้วย) — dynamic กัน bundle หนัก
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
@@ -41,6 +42,13 @@ type Listing = {
 };
 type Filter = "all" | ListingMatchStatus;
 type IgnorePatch = { match_ignored: boolean; match_ignore_reason: string | null; match_ignored_at: string | null };
+
+// มุมมอง: จับคู่ (เดิม · ค่าเริ่มต้นในแอปช่องทางขาย) / หน้าร้าน (แบบ Seller Center · เมนูในแอปจัดการงานเปิดด้วย ?view=shop)
+type PageView = "match" | "shop";
+function readViewParam(): PageView {
+  if (typeof window === "undefined") return "match";
+  return new URLSearchParams(window.location.search).get("view") === "shop" ? "shop" : "match";
+}
 
 // ยืนยันทีเดียวเกินนี้ต้องพิมพ์คำยืนยัน (กฎ bulk ของระบบ)
 const TYPED_CONFIRM_OVER = 100;
@@ -99,6 +107,19 @@ export default function PlatformCatalogPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [ignoreTarget, setIgnoreTarget] = useState<string[] | null>(null);
   const [ignoreBusy, setIgnoreBusy] = useState(false);
+  // มุมมองหน้าร้าน — อ่านจาก URL ตอนเปิด · สลับแล้วเขียนกลับ URL (รีเฟรชแล้วอยู่มุมมองเดิม)
+  const [view, setViewState] = useState<PageView>("match");
+  const [viewReady, setViewReady] = useState(false);
+  const [shopReload, setShopReload] = useState(0);
+  useEffect(() => { setViewState(readViewParam()); setViewReady(true); }, []);
+  const setView = useCallback((v: PageView) => {
+    setViewState(v);
+    try {
+      const u = new URL(window.location.href);
+      if (v === "shop") u.searchParams.set("view", "shop"); else u.searchParams.delete("view");
+      window.history.replaceState(window.history.state, "", u.toString());
+    } catch { /* เขียน URL ไม่ได้ก็ไม่เป็นไร */ }
+  }, []);
 
   // รายชื่อร้าน (เฉพาะร้านขายของ) + แบรนด์ → เปิดร้าน/แบรนด์ที่ดูล่าสุด
   useEffect(() => { (async () => {
@@ -175,7 +196,12 @@ export default function PlatformCatalogPage() {
     } catch { if (my === reqSeq.current) setSuggestError(true); }
     finally { if (my === reqSeq.current) setSuggestLoading(false); }
   }, [platformId, brandId]);
-  useEffect(() => { load(); }, [load]);
+  // มุมมองหน้าร้านโหลดข้อมูลของตัวเอง (สรุปสต๊อก/สถานะ) → ไม่ต้องโหลดตารางจับคู่ + เดาคู่ (หนัก) ซ้ำ
+  useEffect(() => { if (viewReady && view === "match") load(); }, [load, view, viewReady]);
+  /** หลังดึงสินค้าจากร้าน → โหลดมุมมองที่เปิดอยู่ใหม่ */
+  const reloadCurrent = useCallback(async () => {
+    if (view === "shop") setShopReload((n) => n + 1); else await load();
+  }, [view, load]);
 
   // ---------- จับคู่ ----------
   const statusOf = useCallback((l: Listing): ListingMatchStatus => listingMatchStatus(l, suggestions[l.id]?.[0]?.score), [suggestions]);
@@ -313,7 +339,7 @@ export default function PlatformCatalogPage() {
     if (skipped) msg += ` · ข้ามไฟล์ออเดอร์ ${skipped} (ให้ไปนำเข้าที่หน้ารับออเดอร์)`;
     if (errors.length) msg += ` · ผิดพลาด ${errors.length} ไฟล์: ${errors.join(" | ")}`;
     setNote(msg);
-    await load();
+    await reloadCurrent();
   };
   const setQueueProfile = (id: number, profileId: string) => setQueue((q) => q.map((it) => it.id === id ? { ...it, profileId } : it));
   const removeFromQueue = (id: number) => setQueue((q) => q.filter((it) => it.id !== id));
@@ -403,7 +429,7 @@ export default function PlatformCatalogPage() {
       const j = await r.json(); if (j.error) throw new Error(j.error);
       const part = j.partial ? " · ⚠️ ยังดึงไม่ครบ (หมดเวลา) กดดึงอีกครั้งเพื่อเติมส่วนที่เหลือ" : "";
       setNote(`ดึงจาก Lazada แล้ว: ${j.fetched} สินค้า${j.api_total ? ` (Lazada รายงาน ${j.api_total})` : ""} · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่รหัสตรงอัตโนมัติ ${j.newly_matched} — ที่เหลือดูการ์ด "รอยืนยัน"${part}`);
-      await load();
+      await reloadCurrent();
     } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
     finally { setImporting(false); }
   };
@@ -417,7 +443,7 @@ export default function PlatformCatalogPage() {
       const j = await r.json(); if (j.error) throw new Error(j.error);
       const totalNote = j.api_total > 0 && j.api_total !== j.fetched ? ` (LINE รายงานทั้งหมด ${j.api_total})` : "";
       setNote(`ดึงจาก LINE แล้ว: ${j.fetched} สินค้า${totalNote} · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่ ERP อัตโนมัติ ${j.matched}`);
-      await load();
+      await reloadCurrent();
     } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
     finally { setImporting(false); }
   };
@@ -658,13 +684,28 @@ export default function PlatformCatalogPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 w-fit text-sm mb-3">
-        <button onClick={() => setTab("catalog")} className={`px-3 py-1 rounded ${tab === "catalog" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>รายการสินค้า ({listings.length.toLocaleString()})</button>
-        <button onClick={() => setTab("fields")} className={`px-3 py-1 rounded ${tab === "fields" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ช่องข้อมูลของ {activePf?.name_th ?? "ร้าน"} ({fields.length})</button>
-        <button onClick={() => setTab("mapping")} className={`px-3 py-1 rounded ${tab === "mapping" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ตั้งค่าส่งข้อมูล ({mappedCount}/{fields.length})</button>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        {/* สลับมุมมอง: หน้าร้าน (แบบ Seller Center) / จับคู่ + ตั้งค่า (เดิม) */}
+        <div role="group" aria-label="มุมมอง" className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 text-sm">
+          <button type="button" onClick={() => setView("shop")} aria-pressed={view === "shop"} className={`px-3 py-1 rounded inline-flex items-center gap-1.5 ${view === "shop" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon name="store" />หน้าร้าน</button>
+          <button type="button" onClick={() => setView("match")} aria-pressed={view === "match"} className={`px-3 py-1 rounded inline-flex items-center gap-1.5 ${view === "match" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}><Icon name="link" />จับคู่ + ตั้งค่า</button>
+        </div>
+        {view === "match" && (
+          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 w-fit text-sm">
+            <button onClick={() => setTab("catalog")} className={`px-3 py-1 rounded ${tab === "catalog" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>รายการสินค้า ({listings.length.toLocaleString()})</button>
+            <button onClick={() => setTab("fields")} className={`px-3 py-1 rounded ${tab === "fields" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ช่องข้อมูลของ {activePf?.name_th ?? "ร้าน"} ({fields.length})</button>
+            <button onClick={() => setTab("mapping")} className={`px-3 py-1 rounded ${tab === "mapping" ? "bg-white text-violet-700 shadow-sm" : "text-slate-500"}`}>ตั้งค่าส่งข้อมูล ({mappedCount}/{fields.length})</button>
+          </div>
+        )}
       </div>
 
-      {loading ? <LoadingState label={`กำลังโหลดสินค้าของ ${where}...`} />
+      {!viewReady ? null
+        : view === "shop" ? (
+          <PlatformShopView platformId={platformId} platformCode={platformCode} brandId={brandId} brandName={activeBrand?.name ?? null}
+            where={where} reloadKey={shopReload} onCounts={setPlatformCounts}
+            onGoMatch={() => { setView("match"); setTab("catalog"); setFilter("all"); }} />
+        )
+        : loading ? <LoadingState label={`กำลังโหลดสินค้าของ ${where}...`} />
         : loadError ? <ErrorState hint={loadError} onRetry={load} />
         : tab === "catalog" ? (
           listings.length === 0 ? (
@@ -766,7 +807,7 @@ export default function PlatformCatalogPage() {
         onConfirm={(reason) => { void saveIgnore(ignoreTargetRows.map((l) => l.id), true, reason).then((ok) => { if (ok) setIgnoreTarget(null); }); }}
       />
 
-      {canEdit && tab === "catalog" && (
+      {canEdit && view === "match" && tab === "catalog" && (
         <BulkActionBar count={selected.size} unit="รายการ" onClear={() => setSelected(new Set())}
           extra={selected.size !== selIgnorable.length + selIgnored.length ? "ตัวที่จับคู่อยู่แล้วจะไม่ถูกข้าม" : undefined}>
           {selIgnorable.length > 0 && (
