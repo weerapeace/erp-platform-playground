@@ -6,7 +6,7 @@
 import { Position, getSmoothStepPath } from "@xyflow/react";
 import { fileTypeSvg } from "@/lib/file-types";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
-import { FLOW_PALETTE, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
+import { FLOW_PALETTE, flowIconSizes, flowSceneBounds, handlePoint, nodeColor, splitFlowLabel, type FlowScene, type FlowSceneNode } from "@/lib/flowchart";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const SIDE: Record<string, Position> = { t: Position.Top, r: Position.Right, b: Position.Bottom, l: Position.Left };
@@ -36,14 +36,15 @@ function nodeHtml(n: FlowSceneNode, ox: number, oy: number): string {
   const frameless = n.type === "file" || !!place;
   const labelHtml = `<div style="width:100%;text-align:${n.type === "note" ? "left" : "center"};white-space:pre-wrap;word-break:break-word;line-height:1.35"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(title) || "&nbsp;"}</div>${sub ? `<div style="font-size:11px;margin-top:2px;color:${p.sub}">${esc(sub)}</div>` : ""}</div>`;
   const col = (inner: string, gap = 4) => `<div style="display:flex;flex-direction:column;align-items:center;gap:${gap}px;width:100%">${inner}</div>`;
+  const icons = flowIconSizes(n);   // ไอคอนโตตามกล่อง — สูตรเดียวกับบนจอ
   let text: string;
   if (n.type === "file") {
     const exts = n.data.exts?.length ? n.data.exts : [""];
-    text = col(`<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px;line-height:0">${exts.map((e) => fileTypeSvg(e, exts.length > 4 ? 30 : 36)).join("")}</div>${labelHtml}`, 6);
+    text = col(`<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:4px;line-height:0">${exts.map((e) => fileTypeSvg(e, icons.file)).join("")}</div>${labelHtml}`, 6);
   } else if (place) {
-    text = col(`<div style="line-height:0">${storagePlaceSvg(place.key, 46)}</div>${labelHtml}${extRow(n.data.exts, 20)}`);
+    text = col(`<div style="line-height:0">${storagePlaceSvg(place.key, icons.place)}</div>${labelHtml}${extRow(n.data.exts, icons.ext)}`);
   } else if (n.type === "storage" && n.data.exts?.length) {
-    text = col(`${labelHtml}${extRow(n.data.exts, 18)}`);
+    text = col(`${labelHtml}${extRow(n.data.exts, icons.ext)}`);
   } else if (n.type === "folder") {
     text = `<div style="text-align:left;min-width:0"><div style="font-size:13px;font-weight:700;color:${p.text}">${esc(n.data.label || "—")}</div>${n.data.path ? `<div style="font-size:10px;color:${p.sub};word-break:break-all">${esc(n.data.path)}</div>` : ""}</div>`;
   } else {

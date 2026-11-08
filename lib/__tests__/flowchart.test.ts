@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   parseFlowScene, toFlowScene, autoEdgeLabel, mergeFlowScenes, cloneFlowSceneAt, handlePoint, flowSceneBounds,
   splitFlowLabel, makeFlowNode, nodeColor, snap, copyFlowSelection, flowClipText, serializeFlowClip, parseFlowClip,
-  placeFlowClip, textToFlowNode, nodesInsideZone, storageNodeSize, STORAGE_ICON_SIZE, type FlowScene, type FlowSceneNode, type FlowSceneEdge,
+  placeFlowClip, textToFlowNode, nodesInsideZone, storageNodeSize, STORAGE_ICON_SIZE, fileNodeSize, iconBoxBaseSize, flowIconScale, flowIconSizes,
+  nextIconScale, resizeIconBox, refitIconBox, type FlowScene, type FlowSceneNode, type FlowSceneEdge,
 } from "../flowchart";
 
 const th = (a: string) => a;
@@ -237,5 +238,56 @@ describe("กรอบโซน + ที่เก็บแบบมีไอค�
     expect(storageNodeSize(false, 8).h).toBeGreaterThan(storageNodeSize(false, 3).h);
     const plain = makeFlowNode("zone", { x: 0, y: 0 }, th);
     expect([plain.width, plain.height, plain.data.label]).toEqual([480, 320, "กรอบโซน"]);
+  });
+});
+
+describe("ขนาดไอคอนโตตามกล่อง", () => {
+  const file = (w: number, h: number, exts = ["jpg"]) => ({ type: "file" as const, data: { label: "รูป", exts }, position: { x: 100, y: 100 }, width: w, height: h });
+  const store = (w: number, h: number, extra: Partial<FlowSceneNode["data"]> = {}) => ({ type: "storage" as const, data: { label: "R2", place: "r2", ...extra }, position: { x: 0, y: 0 }, width: w, height: h });
+
+  it("กล่องขนาดตั้งต้น = 100% · ไอคอนขนาดเดิม (หน้าตาไม่เปลี่ยน)", () => {
+    expect(flowIconScale(file(200, 120))).toBe(1);
+    expect(flowIconSizes(file(200, 120))).toEqual({ file: 36, place: 46, ext: 18 });
+    expect(flowIconSizes(store(180, 120))).toMatchObject({ place: 46, ext: 20 });
+    expect(flowIconSizes(file(fileNodeSize(6).w, fileNodeSize(6).h, ["a", "b", "c", "d", "e", "f"])).file).toBe(30);
+  });
+  it("ลากกล่องใหญ่ขึ้น = ไอคอนใหญ่ตาม · ดูด้านที่แคบกว่า (ไอคอนไม่ล้นกล่อง) · จำกัด 50%–400%", () => {
+    expect(flowIconScale(file(400, 240))).toBe(2);
+    expect(flowIconSizes(file(400, 240)).file).toBe(72);
+    expect(flowIconScale(file(600, 120))).toBe(1);       // ขยายแค่ความกว้าง → ไอคอนเท่าเดิม
+    expect(flowIconScale(file(50, 30))).toBe(0.5);
+    expect(flowIconScale(file(5000, 5000))).toBe(4);
+    expect(flowIconScale(store(270, 180))).toBe(1.5);
+    expect(flowIconSizes(store(270, 180)).place).toBe(69);
+  });
+  it("กล่องที่ไม่มีไอคอน = ไม่มีปุ่มขนาด", () => {
+    expect(iconBoxBaseSize({ type: "step", data: { label: "x" } })).toBeNull();
+    expect(iconBoxBaseSize({ type: "storage", data: { label: "x" } })).toBeNull();          // ทรงกระบอกเปล่า
+    expect(iconBoxBaseSize({ type: "storage", data: { label: "x", exts: ["pdf"] } })).not.toBeNull();   // ทรงกระบอก + ไอคอนไฟล์
+    expect(flowIconScale({ type: "step", data: { label: "x" }, width: 999, height: 999 })).toBe(1);
+  });
+  it("ปุ่ม − / + ไปทีละขั้น และไม่เกินขอบ", () => {
+    expect(nextIconScale(1, 1)).toBe(1.25);
+    expect(nextIconScale(1, -1)).toBe(0.75);
+    expect(nextIconScale(1.1, 1)).toBe(1.25);
+    expect(nextIconScale(1.1, -1)).toBe(1);
+    expect(nextIconScale(4, 1)).toBe(4);
+    expect(nextIconScale(0.5, -1)).toBe(0.5);
+  });
+  it("ตั้งขนาดไอคอน: กล่อง = ตั้งต้น × เท่า · จุดกลางอยู่ที่เดิม", () => {
+    const r = resizeIconBox(file(200, 120), 2)!;
+    expect([r.width, r.height]).toEqual([400, 240]);
+    expect([r.position.x + r.width / 2, r.position.y + r.height / 2]).toEqual([200, 160]);
+    expect(resizeIconBox(file(200, 120), 9)!.width).toBe(800);
+    expect(resizeIconBox({ type: "note", data: { label: "" }, position: { x: 0, y: 0 }, width: 10, height: 10 }, 2)).toBeNull();
+  });
+  it("เพิ่มประเภทไฟล์ในกล่องที่ขยายไว้ → ไอคอนคงขนาดเดิม (ไม่หดกลับ 100%)", () => {
+    const big = file(400, 240);
+    const next = { label: "รูป", exts: ["jpg", "cr2", "psd", "ai", "pdf"] };
+    const r = refitIconBox(big, next);
+    expect(flowIconScale({ ...big, data: next, ...r })).toBe(2);
+    expect(refitIconBox(file(200, 120), { label: "รูป", exts: ["jpg"] })).toEqual({ width: 200, height: 120 });
+    // ทรงกระบอกเปล่า → ใส่ไอคอนที่เก็บ = ขยายเป็นขนาดไอคอน 100%
+    expect(refitIconBox({ type: "storage", data: { label: "x" }, width: 160, height: 90 }, { label: "x", place: "nas" })).toEqual({ width: 180, height: 120 });
   });
 });

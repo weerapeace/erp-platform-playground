@@ -39,10 +39,13 @@ import { downloadBlob } from "@/lib/image-clipboard";
 import {
   EMPTY_FLOW_SCENE, FLOW_CLIP_MIME, FLOW_KINDS, FLOW_KIND_META, GRID, autoEdgeLabel, cloneFlowSceneAt, copyFlowSelection, flowClipText,
   flowSceneSig, makeFlowNode, mergeFlowScenes, newFlowId, parseFlowClip, parseFlowScene, placeFlowClip, serializeFlowClip, textToFlowNode,
-  fileNodeSize, nodesInsideZone, storageNodeSize, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
+  flowIconScale, iconBoxBaseSize, nextIconScale, nodesInsideZone, refitIconBox, resizeIconBox, toFlowScene, type FlowClip, type FlowKind, type FlowNodeData, type FlowScene,
 } from "@/lib/flowchart";
 import { FlowBoardCtx, FlowEdgeView, FlowNodeView, FlowTools, type FlowBoardActions, type FlowRFNode } from "./nodes";
 import { flowSceneToHtml } from "./export-html";
+
+/** กล่องบนกระดาน → ชนิด/ข้อมูล/ตำแหน่ง/ขนาด (ไว้คิดขนาดไอคอน) */
+const boxOf = (n: FlowRFNode) => ({ type: n.type as FlowKind, data: n.data, position: n.position, width: n.width ?? n.measured?.width ?? 0, height: n.height ?? n.measured?.height ?? 0 });
 
 const NODE_TYPES = Object.fromEntries(FLOW_KINDS.map((k) => [k, FlowNodeView]));
 const EDGE_TYPES = { flow: FlowEdgeView };
@@ -466,6 +469,22 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
     duplicateNodes: (ids) => opsRef.current.duplicateNodes(ids),
     removeNodes: (ids) => opsRef.current.removeNodes(ids),
     setColor: (ids, color) => { const set = new Set(ids); setNodes((ns) => ns.map((n) => (set.has(n.id) ? { ...n, data: { ...n.data, color } } : n))); },
+    iconScaleOf: (ids) => {
+      const set = new Set(ids);
+      const first = nodesRef.current.find((n) => set.has(n.id) && iconBoxBaseSize(boxOf(n)));
+      return first ? flowIconScale(boxOf(first)) : null;
+    },
+    stepIconScale: (ids, dir) => {
+      const set = new Set(ids);
+      const first = nodesRef.current.find((n) => set.has(n.id) && iconBoxBaseSize(boxOf(n)));
+      if (!first) return;
+      const next = dir === 0 ? 1 : nextIconScale(flowIconScale(boxOf(first)), dir);   // หลายกล่อง = ทุกกล่องได้ขนาดเดียวกัน
+      setNodes((ns) => ns.map((n) => {
+        if (!set.has(n.id)) return n;
+        const r = resizeIconBox(boxOf(n), next);
+        return r ? { ...n, ...r } : n;
+      }));
+    },
     updateData: (id, patch) => setNodes((ns) => ns.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))),
     setEdgeLabel: (id, label) => setEdges((es) => es.map((e) => (e.id === id ? { ...e, label } : e))),
     editEdgeLabel: (id) => {
@@ -589,11 +608,9 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
           if (!id) { addNode("file", { label, exts }); return; }
           setNodes((ns) => ns.map((n) => {
             if (n.id !== id) return n;
-            const storage = n.type === "storage";
-            const need = storage ? storageNodeSize(!!n.data.place, exts.length) : fileNodeSize(exts.length);
-            const data: FlowNodeData = storage ? { ...n.data, exts } : { ...n.data, label, exts };
+            const data: FlowNodeData = n.type === "storage" ? { ...n.data, exts } : { ...n.data, label, exts };
             if (!exts.length) delete data.exts;
-            return { ...n, data, width: Math.max(n.width ?? n.measured?.width ?? 0, need.w), height: Math.max(n.height ?? n.measured?.height ?? 0, need.h) };
+            return { ...n, data, ...refitIconBox(boxOf(n), data) };   // ขยายให้พอดี · ไอคอนคงขนาดเดิม
           }));
         }} />
 
@@ -612,8 +629,7 @@ function Board({ entityType, entityId, editable = true, height = "70vh", starter
             const data: FlowNodeData = { ...n.data };
             if (next) data.place = next.key; else delete data.place;
             if (next && (!n.data.label.trim() || defaults.includes(n.data.label))) data.label = t(next.th, next.en);   // ชื่อเดิมเป็นค่าตั้งต้น → ใช้ชื่อที่เก็บใหม่
-            const need = storageNodeSize(!!next, data.exts?.length ?? 0);
-            return { ...n, data, width: Math.max(n.width ?? n.measured?.width ?? 0, need.w), height: Math.max(n.height ?? n.measured?.height ?? 0, need.h) };
+            return { ...n, data, ...refitIconBox(boxOf(n), data) };
           }));
         }} />
     </FlowBoardCtx.Provider>

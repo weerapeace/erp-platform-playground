@@ -154,6 +154,65 @@ export function fileNodeSize(count: number): { w: number; h: number } {
   return { w: Math.max(FLOW_KIND_META.file.w, snap(perRow * 44 + 40)), h: Math.max(FLOW_KIND_META.file.h, snap(64 + rows * 46)) };
 }
 
+// ── ขนาดไอคอนในกล่อง: โตตามกล่อง (ลากมุมกล่อง หรือปุ่ม − / + บนแถบเครื่องมือ) ──
+//   กล่องที่มีไอคอน = "ไฟล์" + "ที่เก็บ" ที่มีไอคอนที่เก็บหรือไอคอนไฟล์ · ขนาดตั้งต้นของกล่อง = 100% (หน้าตาเหมือนเดิม)
+//   ไม่เก็บค่าเพิ่ม — คิดจากความกว้าง/สูงของกล่องเอง (บนกระดานกับตอนบันทึกเป็นรูปใช้สูตรเดียวกัน)
+export const ICON_SCALE_MIN = 0.5;
+export const ICON_SCALE_MAX = 4;
+export const ICON_SCALE_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4] as const;
+type IconBoxLike = Pick<FlowSceneNode, "type" | "data">;
+type IconBoxSized = IconBoxLike & Pick<FlowSceneNode, "width" | "height">;
+const clampIconScale = (s: number) => Math.min(ICON_SCALE_MAX, Math.max(ICON_SCALE_MIN, s));
+
+/** ขนาดกล่องตอนไอคอน 100% · null = กล่องนี้ไม่มีไอคอนให้ปรับ */
+export function iconBoxBaseSize(n: IconBoxLike): { w: number; h: number } | null {
+  const exts = n.data.exts?.length ?? 0;
+  if (n.type === "file") return fileNodeSize(exts);
+  if (n.type === "storage") {
+    const place = isPlaceKey(n.data.place);
+    return place || exts ? storageNodeSize(place, exts) : null;
+  }
+  return null;
+}
+
+/** ไอคอนตอนนี้กี่เท่าของขนาดตั้งต้น (ดูด้านที่แคบกว่า ไอคอนจะไม่ล้นกล่อง) · 0.5–4 */
+export function flowIconScale(n: IconBoxSized): number {
+  const base = iconBoxBaseSize(n);
+  if (!base || !(n.width > 0) || !(n.height > 0)) return 1;
+  return Math.round(clampIconScale(Math.min(n.width / base.w, n.height / base.h)) * 100) / 100;
+}
+
+/** ขนาดไอคอนจริง (px): file = ไอคอนกล่องไฟล์ · place = ไอคอนที่เก็บ · ext = แถวไอคอนไฟล์ใต้ชื่อที่เก็บ */
+export function flowIconSizes(n: IconBoxSized): { file: number; place: number; ext: number } {
+  const s = flowIconScale(n);
+  const exts = n.data.exts?.length ?? 0;
+  return { file: Math.round((exts > 4 ? 30 : 36) * s), place: Math.round(46 * s), ext: Math.round((isPlaceKey(n.data.place) ? 20 : 18) * s) };
+}
+
+/** ขั้นถัดไปของปุ่ม − / + (50% · 75% · 100% · 125% · 150% · 200% ... 400%) */
+export function nextIconScale(cur: number, dir: 1 | -1): number {
+  if (dir > 0) return ICON_SCALE_STEPS.find((v) => v > cur + 0.01) ?? ICON_SCALE_MAX;
+  return [...ICON_SCALE_STEPS].reverse().find((v) => v < cur - 0.01) ?? ICON_SCALE_MIN;
+}
+
+/** ตั้งไอคอนเป็น scale เท่า: กล่อง = ขนาดตั้งต้น × scale · จุดกลางกล่องอยู่ที่เดิม · null = กล่องไม่มีไอคอน */
+export function resizeIconBox(n: IconBoxSized & Pick<FlowSceneNode, "position">, scale: number): { position: { x: number; y: number }; width: number; height: number } | null {
+  const base = iconBoxBaseSize(n);
+  if (!base) return null;
+  const s = clampIconScale(scale);
+  const width = Math.round(base.w * s), height = Math.round(base.h * s);
+  const cx = n.position.x + n.width / 2, cy = n.position.y + n.height / 2;
+  return { position: { x: Math.round(cx - width / 2), y: Math.round(cy - height / 2) }, width, height };
+}
+
+/** เปลี่ยนไอคอน/ประเภทไฟล์ของกล่องเดิม → ขยายกล่องให้พอดี โดยไอคอนคงขนาดเดิม (ไม่ย่อกล่อง) */
+export function refitIconBox(prev: IconBoxSized, nextData: FlowNodeData): { width: number; height: number } {
+  const s = iconBoxBaseSize(prev) ? flowIconScale(prev) : 1;
+  const base = iconBoxBaseSize({ type: prev.type, data: nextData });
+  if (!base) return { width: prev.width, height: prev.height };
+  return { width: Math.max(prev.width, Math.round(base.w * s)), height: Math.max(prev.height, Math.round(base.h * s)) };
+}
+
 /** สร้างกล่องใหม่ตามชนิด (ตำแหน่งชิดตาราง) */
 export function makeFlowNode(kind: FlowKind, at: { x: number; y: number }, t: (th: string, en: string) => string, data?: Partial<FlowNodeData>): FlowSceneNode {
   const meta = FLOW_KIND_META[kind];

@@ -7,7 +7,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { BaseEdge, EdgeLabelRenderer, Handle, NodeResizer, NodeToolbar, Position, getSmoothStepPath, type EdgeProps, type Node, type NodeProps } from "@xyflow/react";
 import { Icon } from "@/components/icon";
 import { FileTypeIcon } from "@/components/file-type-icon";
-import { FLOW_COLORS, FLOW_KIND_META, FLOW_PALETTE, nodeColor, splitFlowLabel, type FlowColor, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
+import { FLOW_COLORS, FLOW_KIND_META, FLOW_PALETTE, ICON_SCALE_MAX, ICON_SCALE_MIN, flowIconSizes, iconBoxBaseSize, nodeColor, splitFlowLabel, type FlowColor, type FlowKind, type FlowNodeData } from "@/lib/flowchart";
 import { storagePlaceOf, storagePlaceSvg } from "@/lib/storage-places";
 
 /** ไอคอนที่เก็บ (Google Drive · R2 · NAS ...) — SVG จาก lib/storage-places (ตัวเดียวกับตอนบันทึกเป็นรูป) */
@@ -36,6 +36,10 @@ export type FlowBoardActions = {
   /** กล่องที่เลือกอยู่ (ไว้ซ่อนแถบเครื่องมือรายกล่องตอนเลือกหลายกล่อง — ใช้แถบกลุ่มแทน) */
   selectedIds: string[];
   setColor: (ids: string[], color: FlowColor) => void;
+  /** ขนาดไอคอนตอนนี้ของกล่องที่เลือก (null = ในกลุ่มไม่มีกล่องที่มีไอคอน) */
+  iconScaleOf: (ids: string[]) => number | null;
+  /** ปุ่ม − / + ขนาดไอคอน (dir) · 0 = กลับ 100% — เลือกหลายกล่อง = ทุกกล่องที่มีไอคอนขนาดเท่ากัน */
+  stepIconScale: (ids: string[], dir: 1 | -1 | 0) => void;
   copyNodes: (ids: string[]) => void;
   duplicateNodes: (ids: string[]) => void;
   removeNodes: (ids: string[]) => void;
@@ -96,8 +100,9 @@ function InlineEditor({ initial, onDone, folder, zone }: { initial: FlowNodeData
  *   เลือก 1 กล่อง = แถบของกล่องนั้น (ส่ง single) · เลือกหลายกล่อง = แถบกลุ่มอันเดียว (กระดานวางไว้เหนือกลุ่ม)
  */
 export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: FlowKind; data: FlowNodeData; onEdit: () => void } }) {
-  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes } = useBoard();
+  const { t, setColor, copyNodes, duplicateNodes, removeNodes, openFolder, editPlace, editFileTypes, iconScaleOf, stepIconScale } = useBoard();
   const cur = single ? nodeColor(single.kind, single.data) : null;
+  const iconScale = iconScaleOf(ids);
   const btn = "inline-flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] text-slate-600 hover:bg-slate-100";
   return (
     <div className="flex items-center gap-0.5 rounded-lg border border-slate-200 bg-white p-1 shadow-md">
@@ -113,6 +118,18 @@ export function FlowTools({ ids, single }: { ids: string[]; single?: { kind: Flo
         <>
           <button type="button" className={btn} onClick={() => editPlace(ids[0])} title={t("เลือกไอคอนที่เก็บ เช่น Google Drive · R2 · NAS", "Choose a storage icon, e.g. Google Drive · R2 · NAS")}><Icon value="i:database" />{t("ไอคอน", "Icon")}</button>
           <button type="button" className={btn} onClick={() => editFileTypes(ids[0])} title={t("ใส่ไอคอนประเภทไฟล์ที่เก็บที่นี่", "Show which file types live here")}><Icon value="i:files" />{t("ไฟล์", "Files")}</button>
+        </>
+      )}
+      {iconScale !== null && (
+        <>
+          <span className="mx-1 h-5 w-px bg-slate-200" />
+          <button type="button" className={`${btn} disabled:opacity-40`} disabled={iconScale <= ICON_SCALE_MIN} onClick={() => stepIconScale(ids, -1)} title={t("ไอคอนเล็กลง", "Smaller icon")}><Icon value="i:minus" /></button>
+          <button type="button" className={`${btn} min-w-[42px] justify-center tabular-nums`} onClick={() => stepIconScale(ids, 0)}
+            title={t(`ขนาดไอคอน — กดเพื่อกลับ 100%${single ? "" : " (ทุกกล่องที่เลือกจะเท่ากัน)"} · ลากมุมกล่องก็ได้`, `Icon size — click to reset to 100%${single ? "" : " (all selected boxes match)"} · or drag a corner`)}>
+            {Math.round(iconScale * 100)}%
+          </button>
+          <button type="button" className={`${btn} disabled:opacity-40`} disabled={iconScale >= ICON_SCALE_MAX} onClick={() => stepIconScale(ids, 1)} title={t("ไอคอนใหญ่ขึ้น", "Bigger icon")}><Icon value="i:plus" /></button>
+          <span className="mx-1 h-5 w-px bg-slate-200" />
         </>
       )}
       <button type="button" className={btn} onClick={() => copyNodes(ids)} title={t("คัดลอก (Ctrl+C) แล้วไปวางที่อื่นด้วย Ctrl+V — วางในกระดานหน้าอื่นได้", "Copy (Ctrl+C), then paste elsewhere with Ctrl+V")}><Icon value="i:copy" />{t("คัดลอก", "Copy")}</button>
@@ -142,7 +159,7 @@ function ShapeBg({ kind, color }: { kind: FlowKind; color: FlowColor }) {
 }
 
 /** กล่องทุกชนิด (ชนิดดูจาก type ของโหนด) */
-export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>) {
+export function FlowNodeView({ id, type, data, selected, width, height }: NodeProps<FlowRFNode>) {
   const { readOnly, t, updateData, openFolder, selectedIds, editFileTypes } = useBoard();
   const kind = type as FlowKind;
   const onlyMe = selected && selectedIds.length === 1;   // เลือกหลายกล่อง → ใช้แถบกลุ่มแทน
@@ -188,20 +205,24 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
   // ระยะขอบข้อความ (ข้าวหลามตัด/ทรงกระบอก ต้องเว้นมากกว่า)
   const pad = frameless ? "4px 6px" : kind === "question" ? "18% 22%" : kind === "storage" ? "22% 10% 10%" : kind === "note" ? "10px 12px" : "6px 12px";
 
+  // ไอคอนโตตามกล่อง (lib/flowchart flowIconSizes — สูตรเดียวกับตอนบันทึกเป็นรูป)
+  const iconBase = iconBoxBaseSize({ type: kind, data });
+  const icons = flowIconSizes({ type: kind, data, width: width ?? 0, height: height ?? 0 });
+
   let content: ReactNode;
   if (place) {
     content = (
       <div className="pointer-events-none flex w-full flex-col items-center gap-1">
-        <PlaceIcon place={place.key} size={46} />
+        <PlaceIcon place={place.key} size={icons.place} />
         <LabelText label={data.label} color={data.color ? color : "slate"} />
-        <ExtRow exts={data.exts} size={20} />
+        <ExtRow exts={data.exts} size={icons.ext} />
       </div>
     );
   } else if (kind === "storage" && data.exts?.length) {
     content = (
       <div className="pointer-events-none flex w-full flex-col items-center gap-1">
         <LabelText label={data.label} color={color} />
-        <ExtRow exts={data.exts} size={18} />
+        <ExtRow exts={data.exts} size={icons.ext} />
       </div>
     );
   } else if (kind === "folder") {
@@ -216,7 +237,7 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
     );
   } else if (kind === "file") {
     const exts = data.exts?.length ? data.exts : [""];
-    const size = exts.length > 4 ? 30 : 36;
+    const size = icons.file;
     content = (
       <div className="pointer-events-none flex w-full flex-col items-center gap-1.5">
         <div className="flex flex-wrap justify-center gap-1">{exts.map((e, i) => <FileTypeIcon key={e || i} ext={e} size={size} title="" />)}</div>
@@ -229,7 +250,9 @@ export function FlowNodeView({ id, type, data, selected }: NodeProps<FlowRFNode>
 
   return (
     <>
-      {!readOnly && <NodeResizer isVisible={selected && !editing} minWidth={kind === "question" ? 120 : 80} minHeight={kind === "question" ? 70 : 40}
+      {!readOnly && <NodeResizer isVisible={selected && !editing}
+        minWidth={iconBase ? Math.round(iconBase.w * ICON_SCALE_MIN) : kind === "question" ? 120 : 80}
+        minHeight={iconBase ? Math.round(iconBase.h * ICON_SCALE_MIN) : kind === "question" ? 70 : 40}
         lineClassName="fc-resize-line" handleClassName="fc-resize-handle" />}
       {!readOnly && (
         <NodeToolbar isVisible={onlyMe && !editing} position={Position.Top} offset={10}>
