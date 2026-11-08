@@ -186,12 +186,9 @@ export function pathMatchesRule(path: string, basePaths: string[]): boolean {
   return basePaths.some((b) => b.trim() && p.startsWith(norm(b)));
 }
 
-// ต่อ path แบบ Windows: base คงรูป (drive letter / UNC) + ต่อชั้นถัด ๆ ด้วย "\" ข้ามชั้นที่ว่าง
-export function winJoin(base: string, ...rest: string[]): string {
-  const b = base.trim().replace(/[\\/]+$/, "");
-  const tail = rest.map((p) => p.trim().replace(/^[\\/]+|[\\/]+$/g, "")).filter(Boolean);
-  return [b, ...tail].filter(Boolean).join("\\");
-}
+// ต่อ path แบบ Windows — ตัวจริงอยู่ lib/file-sort (ใช้ร่วมกับตัวแยกไฟล์ฝั่งเซิร์ฟเวอร์)
+import { winJoin } from "@/lib/file-sort";
+export { winJoin };
 
 // แม็ป แบรนด์ → path ในเครื่อง (ฐาน) + ชนิด → ชื่อซับโฟลเดอร์ (ใช้ auto-fill master_path ให้ตรงโครง Drive)
 export function useDriveFolderMaps(): { brandBase: Record<string, string>; typeSub: Record<string, string> } {

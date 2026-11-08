@@ -83,7 +83,7 @@ export const STORAGE_WIRING: Record<string, StorageProvider | "rule"> = {
   storefront_media: "r2",        // /api/admin/upload + /api/website/video-upload
   library_uploads: "r2",         // /api/assets + /api/admin/upload (ลงคลังอัตโนมัติ)
   design_previews: "r2",         // รูปการ์ด Artwork/งานพิมพ์ (/api/assets)
-  artwork_source: "drive",       // /api/drive/upload (uploadArtworkToDrive)
+  artwork_source: "drive",       // /api/drive/upload (uploadArtworkToDrive) + ตัวแยกไฟล์ ERP ส่งตรงจากเครื่อง (/api/drive prepare · docs/file-sorter.md)
   print_files: "drive",          // lib/print-file-policy.ts กันไม่ให้ลง R2
   nesting_source_png: "r2",      // /api/nesting-jobs/print-files
   task_attachments: "r2",        // /api/admin/upload → /api/creative-tasks/[id]/attachments (+ ก๊อปขึ้น Drive ถ้าเปิดโฟลเดอร์)

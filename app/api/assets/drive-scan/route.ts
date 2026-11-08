@@ -11,6 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAuditFor } from "@/lib/audit";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { driveConfigured, driveListChildFolders, driveListImages, parseDriveFolderId } from "@/lib/google-drive";
+import { winJoin } from "@/lib/file-sort";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -19,11 +20,6 @@ export const maxDuration = 60;
 const IMG_RE = /^image\/(png|jpe?g|webp|gif)$/i;
 const stripExt = (s: string) => s.trim().replace(/\.[^.]+$/, "").toLowerCase();
 
-const winJoin = (base: string, ...rest: string[]) => {
-  const b = base.trim().replace(/[\\/]+$/, "");
-  const tail = rest.map((p) => p.trim().replace(/^[\\/]+|[\\/]+$/g, "")).filter(Boolean);
-  return [b, ...tail].filter(Boolean).join("\\");
-};
 
 // รันงาน async หลายอันแบบจำกัดจำนวนพร้อมกัน (กันยิง Drive ถล่ม/ช้าเกิน)
 async function mapLimit<T, R>(arr: T[], limit: number, fn: (x: T, i: number) => Promise<R>): Promise<R[]> {

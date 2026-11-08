@@ -35,6 +35,7 @@ import { BulkTagModal, BulkMoveModal, BulkEditModal, BulkFolderModal } from "./b
 import { ArtworkAddModal, MassArtworkModal } from "./artwork-modals";
 import { PrintJobAddModal, MassPrintModal } from "./print-modals";
 import { DriveScanModal } from "./drive-scan-modal";
+import { FileSortSettingsModal } from "./file-sort-settings";
 import { UploadModal } from "./upload-modal";
 import { DetailModal } from "./detail-modal";
 import { AssetCard } from "./asset-card";
@@ -88,6 +89,7 @@ export function AssetLibrary() {
   // null = ยังไม่เคยเปิด · เปิดแล้วคงไว้ (อัปเบื้องหลังต่อได้ · กลับมาดูผล/ย้อนทั้งชุดได้)
   const [routerOpen, setRouterOpen] = useState<boolean | null>(null);
   const canRoute = can("products.edit") && can("files.upload");
+  const [fileSortOpen, setFileSortOpen] = useState(false);   // ตั้งค่าตัวแยกไฟล์ ERP (สูตรแยกไฟล์ · โปรแกรมบนเครื่อง)
   const [detailId, setDetailId] = useState<string | null>(null);
   const [newColOpen, setNewColOpen] = useState(false);
   const [metaMgr, setMetaMgr] = useState<"albums" | "tags" | null>(null);   // หน้าต่างจัดการ อัลบั้ม / แท็ก (เปลี่ยนชื่อ + ลบ)
@@ -261,7 +263,7 @@ export function AssetLibrary() {
 
   const selCount = selected.size;
 
-  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || !!folderScan || printAddOpen || massPrintOpen || managePrintOpen;
+  const anyModalOpen = artworkAddOpen || massOpen || uploadOpen || bulkTrashOpen || bulkTagOpen || bulkMoveOpen || bulkEditOpen || bulkLinkOpen || bulkFolderOpen || manageTypesOpen || driveScanOpen || !!folderScan || printAddOpen || massPrintOpen || managePrintOpen || fileSortOpen;
 
   // ── ผูกหลายรูปที่เลือกเข้าโฟลเดอร์ Drive เดียวกับรูปต้นทาง (bulk) ──
   const bulkLinkFolder = async (source: AssetRow) => {
@@ -361,6 +363,12 @@ export function AssetLibrary() {
               className="w-56 h-9 px-3 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
+          {source === "artwork" && can("assets.manage") && (
+            <button onClick={() => setFileSortOpen(true)}
+              title={t("ตั้งว่าโปรแกรมตัวแยกไฟล์ส่งไฟล์แต่ละนามสกุลไปคลัง / Google Drive / Z:", "Set where the File Sorter app sends each file type: library / Google Drive / Z:")}
+              className="h-9 px-3 text-sm font-medium border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 whitespace-nowrap inline-flex items-center gap-1.5"
+            ><Icon name="settings" /> {t("ตัวแยกไฟล์", "File sorter")}</button>
+          )}
           {source === "artwork" && (
             <button onClick={() => setMassOpen(true)}
               className="h-9 px-3 text-sm font-medium border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap"
@@ -595,6 +603,7 @@ export function AssetLibrary() {
       )}
 
       {/* modals */}
+      {fileSortOpen && <FileSortSettingsModal canEdit={can("assets.manage")} onClose={() => setFileSortOpen(false)} />}
       {routerOpen !== null && <ProductImageRouter open={routerOpen} onClose={() => setRouterOpen(false)} onDone={() => void load()} />}
       {uploadOpen && (
         <UploadModal

@@ -9,7 +9,7 @@ import { r2GetObject } from "./r2";
 type Admin = ReturnType<typeof supabaseAdmin>;
 
 /** สร้างชั้นโฟลเดอร์ตาม path ซ้อนชั้น (เช่น "Printed/DTF") ใต้ parent → คืน folderId ชั้นล่างสุด */
-async function ensureSubPath(parent: string, subpath: string): Promise<string> {
+export async function ensureSubPath(parent: string, subpath: string): Promise<string> {
   let cur = parent;
   for (const seg of subpath.split(/[\\/]+/).map((s) => s.trim()).filter(Boolean)) cur = await driveEnsureFolder(seg, cur);
   return cur;
@@ -56,6 +56,24 @@ export async function resolveArtworkDriveFolder(admin: Admin, opts: { brandId?: 
   }
   if (opts.flat) return parent;   // ไม่สร้างโฟลเดอร์ชื่องาน → ไฟล์ลงในโฟลเดอร์ซับตรง ๆ
   return driveEnsureFolder(opts.name.trim() || "artwork", parent);
+}
+
+/** เหมือน resolveArtworkDriveFolder (แบรนด์ › ชนิด › ชื่องาน) แต่ "หาอย่างเดียว ไม่สร้าง" → folderId หรือ null
+ *  ใช้ตอนวางแผน (ตัวแยกไฟล์) เพื่อดูว่างานนี้เคยมีโฟลเดอร์/การ์ดแล้วหรือยัง */
+export async function findArtworkDriveFolder(admin: Admin, opts: { brandId?: string | null; artworkType?: string | null; name: string }): Promise<string | null> {
+  let parent = DRIVE_ROOT_FOLDER_ID;
+  if (opts.brandId) {
+    const { data } = await admin.from("erp_brand_drive_folders").select("folder_id").eq("brand_id", opts.brandId).maybeSingle();
+    if (data?.folder_id) parent = String(data.folder_id);
+  }
+  const at = (opts.artworkType ?? "").trim();
+  if (at) {
+    const { data } = await admin.from("erp_artwork_drive_folders").select("subfolder_name").eq("artwork_type", at).maybeSingle();
+    const sub = await driveFindFolder((data?.subfolder_name || at).trim(), parent);
+    if (!sub) return null;
+    parent = sub;
+  }
+  return driveFindFolder(opts.name.trim() || "artwork", parent);
 }
 
 const previewExtFromType = (ct?: string | null) => ct === "image/jpeg" ? ".jpg" : ct === "image/webp" ? ".webp" : ".png";
