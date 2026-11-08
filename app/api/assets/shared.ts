@@ -184,10 +184,18 @@ export async function loadUsageCounts(admin: Db, ids: string[]): Promise<Map<str
 
 /**
  * จำนวนไฟล์ที่ยังใช้งาน (status=active) ต่อกลุ่ม — อัลบั้ม / แท็ก
- * นับที่ฐานข้อมูลทีละกลุ่ม (count exact) ไม่ดึงแถวมานับเอง → ไม่โดนเพดาน 1,000 แถวของ PostgREST
+ * นับที่ฐานข้อมูลคำถามเดียว (RPC erp_asset_group_counts · migration 202611250100) ไม่ดึงแถวมานับเอง → ไม่โดนเพดาน 1,000 แถวของ PostgREST
  * (เดิมดึงไฟล์ active ทั้งคลัง ~9.7k มาเทียบ → ได้แค่ 1,000 → อัลบั้มขึ้น (0) / แท็กนับขาด)
+ * (เดิมอีกรอบ: นับทีละกลุ่ม = แท็ก 35 + อัลบั้ม 11 = 46 คำขอพร้อมกันต่อการเปิดหน้า → ช่วงฐานข้อมูลหนักหน้าค้าง "กำลังโหลด..." หลายวินาที)
  */
 export async function countActiveByGroup(admin: Db, mapTable: "asset_collection_map" | "asset_tag_map", groupCol: "collection_id" | "tag_id", groupIds: string[]): Promise<Map<string, number>> {
+  if (groupIds.length === 0) return new Map();
+  const { data, error } = await admin.rpc("erp_asset_group_counts", { p_kind: mapTable === "asset_tag_map" ? "tag" : "collection" });
+  if (!error && Array.isArray(data)) {
+    const all = new Map((data as { group_id: string; n: number | string }[]).map((r) => [r.group_id, Number(r.n) || 0]));
+    return new Map(groupIds.map((id) => [id, all.get(id) ?? 0]));
+  }
+  // สำรอง (ฟังก์ชันในฐานข้อมูลยังไม่พร้อม/ล้ม): นับทีละกลุ่มแบบเดิม
   const entries = await Promise.all(groupIds.map(async (id) => {
     const { count } = await admin.from(mapTable).select("asset_id, assets!inner(status)", { count: "exact", head: true })
       .eq(groupCol, id).eq("assets.status", "active");
