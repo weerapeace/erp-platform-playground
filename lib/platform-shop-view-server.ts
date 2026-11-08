@@ -253,10 +253,15 @@ export async function loadListingVariants(admin: Admin, listingId: string): Prom
   // SKU ในระบบ (รหัสเอง + รหัสสี) → รุ่นของแต่ละ SKU
   const codes = variantLookupCodes(variants.map((v) => v.sku));
   const byCode = new Map<string, SkuLite>();
+  const activeCodes = new Set<string>();
   for (let i = 0; i < codes.length; i += CHUNK) {
-    const { data: ss } = await admin.from("skus_v2").select("code, parent_sku_id, name_th, color, color_th").in("code", codes.slice(i, i + CHUNK));
-    for (const s of ((ss ?? []) as { code: string; parent_sku_id: string | null; name_th: string | null; color: string | null; color_th: string | null }[])) {
+    const { data: ss } = await admin.from("skus_v2").select("code, parent_sku_id, name_th, color, color_th, is_active").in("code", codes.slice(i, i + CHUNK));
+    // รหัสเดียวกันมีทั้งตัวใช้งาน + ตัวที่ปิดแล้ว (เช่น JEAN08-01 ใต้ Parent ซ้ำที่ปิดไป) → ใช้ตัวที่ใช้งานอยู่ ไม่งั้นเตือน "อยู่คนละรุ่น" ผิด
+    for (const s of ((ss ?? []) as { code: string; parent_sku_id: string | null; name_th: string | null; color: string | null; color_th: string | null; is_active: boolean | null }[])) {
+      const active = s.is_active !== false;
+      if (byCode.has(s.code) && (activeCodes.has(s.code) || !active)) continue;
       byCode.set(s.code, { code: s.code, parent_sku_id: s.parent_sku_id, name: s.color_th || s.color || s.name_th || null });
+      if (active) activeCodes.add(s.code);
     }
   }
   const parentIds = [...new Set([...[...byCode.values()].map((s) => s.parent_sku_id), row.matched_parent_sku_id].filter(Boolean) as string[])];
