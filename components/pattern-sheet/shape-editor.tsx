@@ -24,7 +24,7 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
-  SNAP_STEPS, cleanAllow, defaultGrain, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, outlineDistance, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
+  SNAP_STEPS, cleanAllow, defaultGrain, outlineLength, outlineStep, outlineWalk, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
   shapeBox, shapeInside, shapePathD, snapTo, splitSegment, toPathShape, toggleSmooth,
   type Box, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
@@ -40,7 +40,7 @@ type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: n
 type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure";
 type MeasureMode = "line" | "curve" | "edge";
 type Measure = { id: string; kind: MeasureMode; nodes: PNode[]; len: number; alt?: number; path?: Pt[] };
-type MDraft = { kind: "line"; a: XY; b: XY } | { kind: "curve"; nodes: PNode[]; hover: XY | null } | { kind: "edge"; pieceId: string; a: Pt; hover: XY | null };
+type MDraft = { kind: "line"; a: XY; b: XY } | { kind: "curve"; nodes: PNode[]; hover: XY | null } | { kind: "edge"; pieceId: string; a: Pt; hover: XY | null; pos: number; travel: number; last: number };
 type Ref = RefImage & { id: string; lock: boolean; show: boolean };
 type DrawTool = "rect" | "ellipse" | "pen";
 type View = { x: number; y: number; w: number };
@@ -60,6 +60,7 @@ type Drag =
   | { k: "resize"; id: string; dir: string; start: Box; orig: Piece; before: Piece[]; moved: boolean }
   | { k: "rotate"; id: string; c: XY; a0: number; orig: Piece; before: Piece[]; moved: boolean; deg: number }
   | { k: "mline" }
+  | { k: "medge"; sx: number; sy: number; moved: boolean }
   | { k: "mHandle"; idx: number; origin: XY };
 
 const SNAP_KEY = "pattern-shape-snap";
@@ -401,7 +402,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (!d) {
       if (pen) { const last = pen.nodes[pen.nodes.length - 1]; setPen({ ...pen, hover: e.shiftKey && last ? constrain45(last, p) : p }); }
       else if (mDraft?.kind === "curve") { const last = mDraft.nodes[mDraft.nodes.length - 1]; setMDraft({ ...mDraft, hover: e.shiftKey && last ? constrain45(last, p) : p }); }
-      else if (mDraft?.kind === "edge") setMDraft({ ...mDraft, hover: raw });
+      else if (mDraft?.kind === "edge") setMDraft(edgeStep(mDraft, raw));
       return;
     }
     if (d.k === "resize") {
@@ -432,6 +433,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (d.k === "ref") { setRefs((rs) => rs.map((r) => (r.id === d.id ? { ...r, x: d.ox + raw.x - d.start.x, y: d.oy + raw.y - d.start.y } : r))); return; }
     if (d.k === "refSize") { setRefs((rs) => rs.map((r) => (r.id === d.id ? { ...r, w: Math.max(1, d.w + raw.x - d.start.x) } : r))); return; }
     if (d.k === "mline" && mDraft?.kind === "line") { setMDraft({ ...mDraft, b: e.shiftKey ? constrain45(mDraft.a, p) : p }); return; }
+    if (d.k === "medge") { if (Math.hypot(e.clientX - d.sx, e.clientY - d.sy) > 4) d.moved = true; if (mDraft?.kind === "edge") setMDraft(edgeStep(mDraft, raw)); return; }
     if (d.k === "mHandle" && mDraft?.kind === "curve") {
       const vx = p.x - d.origin.x, vy = p.y - d.origin.y;
       if (Math.hypot(vx, vy) * ppc < 3) return;
@@ -504,6 +506,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       // หมุนเอียง (ไม่ใช่ทีละ 90°) → กรอบสี่เหลี่ยมใหญ่ขึ้น · คิดผ้าแบบกรอบ ต้นทุนจะเพิ่ม — บอกให้รู้
       if (d.moved && d.deg % 90 !== 0 && basisRef.current === "box") setMsg({ tone: "err", text: t(`หมุนเอียง ${d.deg}° แล้วกรอบสี่เหลี่ยมใหญ่ขึ้น — ถ้าคิดผ้าจาก "กรอบสี่เหลี่ยม" ต้นทุนจะเพิ่ม · ถ้าหมุนแค่ให้ตรงรูปอ้างอิง แนะนำเลือก "พื้นที่จริง" หรือหมุนทีละ 90°`, `Rotated ${d.deg}° — the bounding box grew; with "Bounding box" costing the fabric cost rises · if you only rotated to match the reference, pick "Actual area" or rotate in 90° steps`) });
     }
+    if (d.k === "medge" && d.moved && mDraft?.kind === "edge") { finishEdge(mDraft); return; }   // กดลากปล่อย = จบ · คลิกเฉย ๆ = รอคลิกจุดปลาย
     if (d.k === "mline" && mDraft?.kind === "line") {
       const { a, b } = mDraft; const len = Math.hypot(b.x - a.x, b.y - a.y);
       setMDraft(null);
@@ -883,18 +886,27 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       drag.current = { k: "mHandle", idx: nodes.length, origin: q }; capture();
       return;
     }
-    if (mDraft?.kind === "edge") {   // จุดปลาย
-      const g = geo.get(mDraft.pieceId);
-      setMDraft(null);
-      if (!g) return;
-      const r = outlineDistance(g.sew, mDraft.a, [raw.x, raw.y]);
-      addMeasure({ kind: "edge", nodes: [], len: r.short, alt: r.long, path: r.path });
-      return;
-    }
+    if (mDraft?.kind === "edge") { finishEdge(edgeStep(mDraft, raw)); return; }   // คลิกจุดปลาย
     const hid = target.getAttribute?.("data-piece");
     const g = hid ? geo.get(hid) : null;
-    if (!hid || !g) { setMsg({ tone: "err", text: t("วัดตามขอบ: คลิกบนชิ้นตรงจุดเริ่ม แล้วคลิกจุดปลาย", "Along edge: click a piece at the start point, then the end point") }); return; }
-    setMDraft({ kind: "edge", pieceId: hid, a: projectOnOutline(g.sew, [raw.x, raw.y]).at, hover: null });
+    if (!hid || !g) { setMsg({ tone: "err", text: t("วัดตามขอบ: กดบนชิ้นตรงจุดเริ่ม แล้วลากไปตามขอบ", "Along edge: press on a piece at the start, then drag along the edge") }); return; }
+    const pr = projectOnOutline(g.sew, [raw.x, raw.y]);
+    setMDraft({ kind: "edge", pieceId: hid, a: pr.at, hover: null, pos: pr.pos, travel: 0, last: pr.pos });
+    drag.current = { k: "medge", sx: e.clientX, sy: e.clientY, moved: false }; capture();
+  };
+  /** เคอร์เซอร์ขยับ → ระยะตามขอบสะสมตามทิศที่ลาก (อ้อมทางไหนก็ได้ · ไม่เกิน 1 รอบ) */
+  const edgeStep = (m: Extract<MDraft, { kind: "edge" }>, raw: XY): Extract<MDraft, { kind: "edge" }> => {
+    const g = geo.get(m.pieceId);
+    if (!g) return { ...m, hover: raw };
+    const total = outlineLength(g.sew), st = outlineStep(g.sew, m.last, [raw.x, raw.y]);
+    return { ...m, hover: raw, last: st.pos, travel: Math.max(-total, Math.min(total, m.travel + st.delta)) };
+  };
+  const finishEdge = (m: Extract<MDraft, { kind: "edge" }>) => {
+    const g = geo.get(m.pieceId);
+    setMDraft(null);
+    if (!g || Math.abs(m.travel) < 0.05) return;
+    const total = outlineLength(g.sew), len = Math.abs(m.travel);
+    addMeasure({ kind: "edge", nodes: [], len, alt: Math.max(0, total - len), path: outlineWalk(g.sew, m.pos, m.travel) });
   };
 
   // ── วาดไม้บรรทัด / ตาราง ──
@@ -1004,7 +1016,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             {([["line", t("วัดตรง", "Straight")], ["curve", t("วัดโค้ง", "Curve")], ["edge", t("ตามขอบชิ้น", "Along edge")]] as [MeasureMode, string][]).map(([m, l]) => (
               <button key={m} type="button" onClick={() => { setMeasureMode(m); setMDraft(null); }} className={`h-7 rounded-md border px-2 ${measureMode === m ? "border-violet-400 bg-white font-medium text-violet-700" : "border-transparent text-violet-700 hover:bg-white/60"}`}>{l}</button>
             ))}
-            <span className="text-violet-600">{measureMode === "line" ? t("กดลากจากจุดหนึ่งไปอีกจุด (Shift = 45°)", "Drag from one point to another (Shift = 45°)") : measureMode === "curve" ? t("คลิกวางจุดตามแนว · กดลาก = โค้ง · ดับเบิลคลิก/Enter = จบ", "Click points along the line · drag = curve · double-click/Enter = finish") : t("คลิกบนชิ้นที่จุดเริ่ม แล้วคลิกจุดปลาย — วัดตามเส้นเย็บ", "Click a piece at the start, then the end — measured along the sewing line")}</span>
+            <span className="text-violet-600">{measureMode === "line" ? t("กดลากจากจุดหนึ่งไปอีกจุด (Shift = 45°)", "Drag from one point to another (Shift = 45°)") : measureMode === "curve" ? t("คลิกวางจุดตามแนว · กดลาก = โค้ง · ดับเบิลคลิก/Enter = จบ", "Click points along the line · drag = curve · double-click/Enter = finish") : t("กดบนชิ้นที่จุดเริ่ม แล้วลากไปตามขอบทางที่ต้องการ (อ้อมทางยาวก็ได้) ปล่อย = จบ · หรือคลิกจุดเริ่ม → เลื่อนตามขอบ → คลิกจุดปลาย — วัดตามเส้นเย็บ", "Press on a piece at the start and drag along the edge the way you want (long way works too) · release = done · or click start → move along → click end — measured along the sewing line")}</span>
             {measures.length > 0 && <button type="button" onClick={() => setMeasures([])} className="ml-auto h-7 rounded-md px-2 text-violet-700 hover:bg-white/60">{t(`ล้างการวัด (${measures.length})`, `Clear (${measures.length})`)}</button>}
           </div>
         )}
@@ -1167,11 +1179,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 })()}
                 {mDraft?.kind === "edge" && (() => {
                   const g = geo.get(mDraft.pieceId);
-                  const r = g && mDraft.hover ? outlineDistance(g.sew, mDraft.a, [mDraft.hover.x, mDraft.hover.y]) : null;
+                  const path = g && mDraft.hover && Math.abs(mDraft.travel) > 0 ? outlineWalk(g.sew, mDraft.pos, mDraft.travel) : null;
+                  const end = path?.[path.length - 1];
                   return <g style={{ pointerEvents: "none" }}>
-                    {r && <polyline points={r.path.map((q) => q.join(",")).join(" ")} fill="none" stroke={MEASURE_COLOR} strokeWidth={3} strokeOpacity={0.6} vectorEffect="non-scaling-stroke" />}
+                    {path && <polyline points={path.map((q) => q.join(",")).join(" ")} fill="none" stroke={MEASURE_COLOR} strokeWidth={3} strokeOpacity={0.6} vectorEffect="non-scaling-stroke" />}
                     <circle cx={mDraft.a[0]} cy={mDraft.a[1]} r={fs * 0.25} fill={MEASURE_COLOR} />
-                    {r && mDraft.hover && <text x={mDraft.hover.x + fs * 0.4} y={mDraft.hover.y - fs * 0.4} fontSize={fs * 0.85} fill={MEASURE_COLOR} stroke="#fff" strokeWidth={fs * 0.12} paintOrder="stroke">{fmtLen(r.short)}</text>}
+                    {end && <circle cx={end[0]} cy={end[1]} r={fs * 0.18} fill="#fff" stroke={MEASURE_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />}
+                    {path && mDraft.hover && <text x={mDraft.hover.x + fs * 0.4} y={mDraft.hover.y - fs * 0.4} fontSize={fs * 0.85} fill={MEASURE_COLOR} stroke="#fff" strokeWidth={fs * 0.12} paintOrder="stroke">{fmtLen(Math.abs(mDraft.travel))}</text>}
                   </g>;
                 })()}
                 {cal?.a && (() => {

@@ -51,3 +51,26 @@ describe("หมุนชิ้น", async () => {
     close(shapeBox(q.shape).w, (20 + 10) * Math.SQRT1_2, 0.01);
   });
 });
+
+describe("วัดตามขอบแบบตามที่ลาก", () => {
+  it("ลากอ้อมทางยาว → ได้ระยะทางยาว · ลากทางสั้น → ทางสั้น · ทางเดินตามขอบจริง", async () => {
+    const { outlineStep, outlineWalk, outlineLength } = await import("@/lib/pattern-shape");
+    const sq: [number, number][] = [[0, 0], [10, 0], [10, 10], [0, 10]];   // รอบ 40
+    expect(outlineLength(sq)).toBe(40);
+    // เริ่มมุมซ้ายบน (pos 0) ลากลงตามขอบซ้าย → ล่าง → ขวา → จบมุมขวาบน (ทางยาว 30)
+    let last = 0, travel = 0;
+    for (const p of [[0, 3], [0, 7], [0, 10], [4, 10], [10, 10], [10, 6], [10, 1], [10, 0]] as [number, number][]) {
+      const st = outlineStep(sq, last, p); travel += st.delta; last = st.pos;
+    }
+    expect(Math.abs(travel)).toBeCloseTo(30, 5);
+    const path = outlineWalk(sq, 0, travel);
+    expect(path[0]).toEqual([0, 0]);
+    expect(path[path.length - 1]).toEqual([10, 0]);
+    expect(path).toContainEqual([0, 10]);
+    expect(path).toContainEqual([10, 10]);
+    // ลากตรงไปทางขวาตามขอบบน = ทางสั้น 10
+    const st = outlineStep(sq, 0, [10, 0]);
+    expect(Math.abs(st.delta)).toBeCloseTo(10, 5);
+    expect(outlineWalk(sq, 0, 10)).toEqual([[0, 0], [10, 0]]);
+  });
+});

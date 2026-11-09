@@ -847,6 +847,40 @@ export function outlineDistance(P: Pt[], a: Pt, b: Pt): { short: number; long: n
   return { short, long: total - short, total, path };
 }
 
+/** ความยาวรอบรูป (เส้นปิด) */
+export const outlineLength = (P: Pt[]) => polyLen(P);
+
+/**
+ * วัดตามขอบแบบ "ตามที่ลาก": ขยับเคอร์เซอร์จาก last (ตำแหน่งบนขอบ) ไปจุด p → ระยะที่เดินเพิ่ม (มีทิศ + / −)
+ * ก้าวเล็ก ๆ ทีละครั้ง เลือกทางสั้นของก้าวนั้น → ลากอ้อมทางไหน ระยะสะสมก็ไปทางนั้น (อ้อมทางยาวได้)
+ */
+export function outlineStep(P: Pt[], last: number, p: Pt): { pos: number; delta: number; at: Pt; d: number } {
+  const total = polyLen(P) || 1;
+  const pr = projectOnOutline(P, p);
+  let delta = (((pr.pos - last) % total) + total) % total;
+  if (delta > total / 2) delta -= total;
+  return { pos: pr.pos, delta, at: pr.at, d: pr.d };
+}
+
+/** จุดตามขอบ: เริ่มที่ตำแหน่ง from (ระยะตามขอบ) เดิน len ซม. (บวก = ทิศเดียวกับลำดับจุด · ลบ = ย้อน · ไม่เกิน 1 รอบ) */
+export function outlineWalk(P: Pt[], from: number, len: number): Pt[] {
+  const n = P.length, total = polyLen(P);
+  if (n < 2 || !(total > 0)) return [];
+  const cum: number[] = [0];
+  for (let i = 0; i < n; i++) { const a = P[i], b = P[(i + 1) % n]; cum.push(cum[i] + Math.hypot(b[0] - a[0], b[1] - a[1])); }
+  const L = Math.max(-total, Math.min(total, len)), end = from + L;
+  const at = (pos: number): Pt => {
+    const q = ((pos % total) + total) % total;
+    let i = 0; while (i < n - 1 && cum[i + 1] < q) i++;
+    const seg = cum[i + 1] - cum[i], t = seg > 0 ? (q - cum[i]) / seg : 0, a = P[i], b = P[(i + 1) % n];
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  };
+  const lo = Math.min(from, end), hi = Math.max(from, end), mid: { pos: number; p: Pt }[] = [];
+  for (let m = -1; m <= 2; m++) for (let i = 0; i < n; i++) { const pos = cum[i] + m * total; if (pos > lo && pos < hi) mid.push({ pos, p: P[i] }); }
+  mid.sort((x, y) => (L >= 0 ? x.pos - y.pos : y.pos - x.pos));
+  return [at(from), ...mid.map((x) => x.p), at(end)];
+}
+
 // ───────────────────────── หมุนชิ้น (2026-11-09) ─────────────────────────
 
 const rotXY = (x: number, y: number, deg: number, cx: number, cy: number): Pt => {
