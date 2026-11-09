@@ -104,13 +104,15 @@ export const QUOTE_STATUS_OPTS = lazyOpts(QUOTE_STATUS);
 export type CostCalcInput = {
   calc_method: string | null; width_cm: number | null; length_cm: number | null; pieces: number | null;
   face_width_cm: number | null; waste_percent: number | null; divisor: number | null;
+  /** พื้นที่จริงต่อชิ้น (ตร.ซม.) จากรูปทรงที่วาด (lib/pattern-shape) — ส่งมา = ใช้แทน กว้าง×ยาว · ไม่ส่ง = สูตรเดิม */
+  area_cm2?: number | null;
 };
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
 export function calcCostQty(l: CostCalcInput): number | null {
   const m = l.calc_method ?? "manual";
   const d = l.divisor || 90;
   const k = 1 + (l.waste_percent || 0) / 100;
-  const area = (l.width_cm || 0) * (l.length_cm || 0) * (l.pieces || 1);
+  const area = (l.area_cm2 != null && l.area_cm2 > 0 ? l.area_cm2 : (l.width_cm || 0) * (l.length_cm || 0)) * (l.pieces || 1);
   if (m === "count")     return l.pieces || 0;
   if (m === "length")    return l.length_cm ? r4(l.length_cm * k / d) : null;
   if (m === "area_100")  return (l.width_cm && l.length_cm) ? r4(area * k / d) : null;

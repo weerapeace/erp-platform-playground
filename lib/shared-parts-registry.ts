@@ -533,11 +533,11 @@ export const SHARED_PARTS: SharedPart[] = [
     what: "กดพิมพ์แล้วเปิดหน้าปรับก่อน ปรับแล้วเห็นผลทันที",
   },
   {
-    key: "pattern-sheet", label: "แพทเทิร์นจากขนาดชิ้น (พิมพ์ 1:1 / DXF)", code: "PatternPiecesSvg · lib/pattern-sheet", category: "print",
+    key: "pattern-sheet", label: "แพทเทิร์นจากขนาดชิ้น (พิมพ์ 1:1 / DXF) + วาดชิ้นวัสดุ", code: "PatternPiecesSvg · ShapeEditor · lib/pattern-sheet · lib/pattern-shape", category: "print",
     source: { path: "components/pattern-sheet" },
-    what: "เอากว้าง×ยาว×จำนวนชิ้นจากตาราง มาวาดเป็นชิ้นแพทเทิร์นขนาดจริง พิมพ์แบ่งหน้า A4 แล้วต่อกัน (มีกรอบทดสอบ 5 ซม.) หรือดาวน์โหลด DXF/SVG ส่งเครื่องตัด",
+    what: "เอากว้าง×ยาว×จำนวนชิ้นจากตาราง มาวาดเป็นชิ้นแพทเทิร์นขนาดจริง พิมพ์แบ่งหน้า A4 แล้วต่อกัน (มีกรอบทดสอบ 5 ซม.) หรือดาวน์โหลด DXF/SVG ส่งเครื่องตัด · ShapeEditor = หน้าต่างวาดชิ้นขนาดจริง (สี่เหลี่ยม วงกลม ปากกา วางจาก Illustrator ไม้บรรทัด ดูดเข้า พิมพ์ขนาด) → บรรทัดตีราคา + ชิ้นแพทเทิร์นรูปทรงจริง",
     when: "งานที่มีขนาดชิ้นตัด เช่น ตีราคาใบงานออกแบบ (เปิดที่ /print/design-sheet/<id>/pattern)",
-    notWhen: "คำนวณผ้าที่ต้องใช้ ให้ใช้เครื่องคิดเลขผ้า (lib/fabric-calc + FabricLayoutPreview) · ชิ้นรูปทรงโค้งจริงยังไม่รองรับ (รอขั้นนำเข้าไฟล์ DXF/SVG)",
+    notWhen: "คำนวณผ้าที่ต้องใช้ ให้ใช้เครื่องคิดเลขผ้า (lib/fabric-calc + FabricLayoutPreview) · วาดอิสระ/แปะรูป/วางการ์ด (ไม่มีขนาดจริง) ให้ใช้กระดานวาด (CanvasSketch) · วาดบนรูปสินค้า ให้ใช้ ImageMarkup",
     doc: "pattern-sheet.md",
   },
   {

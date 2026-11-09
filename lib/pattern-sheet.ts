@@ -7,12 +7,16 @@
  *   • tilePages      — แบ่งแผ่นใหญ่เป็นหน้า A4 (พิมพ์ขนาดจริง 1:1 แล้วต่อกัน)
  *   • buildPatternDxf / buildPatternSvg — ไฟล์ส่งเครื่องตัด (DXF หน่วยมม. ข้อความ ASCII) / ไฟล์ภาพเวกเตอร์
  *
- *   ชิ้นเป็นสี่เหลี่ยมตาม กว้าง×ยาว ในตาราง (ยังไม่มีรูปทรงโค้ง — รอขั้นนำเข้าไฟล์ DXF/SVG)
+ *   ชิ้นเป็นสี่เหลี่ยมตาม กว้าง×ยาว ในตาราง · บรรทัดที่ "วาดรูปทรง" ไว้ (shape — lib/pattern-shape) = ใช้รูปทรงจริง (2026-11-09)
  * คู่มือ: docs/pattern-sheet.md · หน้าจอ: components/pattern-sheet · หน้าพิมพ์: app/print/design-sheet/[id]/pattern
  */
 
+import { cleanLineShape, flattenShape, shapeBox, shapePathD, type Pt } from "@/lib/pattern-shape";
+
 export type PatternLineInput = {
   key?: string | null;
+  /** รูปทรงที่วาด/วางจาก Illustrator (design_sheet_cost_lines.shape) — มี = ชิ้นแพทเทิร์นเป็นรูปทรงจริง */
+  shape?: unknown;
   /** วิธีคิดของบรรทัด (ตีราคา) — ส่งมา = เอาเฉพาะแบบคิดพื้นที่ (area_face / area_100) · ไม่ส่ง = เอาทุกบรรทัดที่มีกว้าง×ยาว */
   calc_method?: string | null;
   item_name?: string | null;
@@ -33,6 +37,9 @@ export type PatternPiece = {
   count: number;       // ตัดกี่ชิ้นต่อ 1 ใบ
   faceWidth: number | null;   // หน้าผ้า (ซม.) ถ้ามี
   note: string | null;
+  /** รูปทรงจริง (เริ่มที่ 0,0 ภายในกรอบ w×h) — ไม่มี = สี่เหลี่ยม */
+  d?: string | null;          // SVG path data (วาดจอ/ไฟล์ SVG)
+  outline?: Pt[] | null;      // จุดรอบรูป (ไฟล์ DXF)
 };
 
 export type PlacedPiece = PatternPiece & { x: number; y: number };
@@ -51,13 +58,17 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
   const out: PatternPiece[] = [];
   for (const l of lines) {
     if (l.calc_method !== undefined && !PATTERN_AREA_METHODS.has(l.calc_method ?? "")) continue;
-    const w = num(l.width_cm), h = num(l.length_cm);
+    const ls = cleanLineShape(l.shape);
+    const sb = ls ? shapeBox(ls.shape) : null;
+    const w = sb ? sb.w : num(l.width_cm), h = sb ? sb.h : num(l.length_cm);
     if (!(w > 0) || !(h > 0)) continue;
     out.push({
       id: `P${out.length + 1}`,
       name: (l.item_name ?? "").trim() || "ไม่ระบุวัสดุ",
       group: (l.group_name ?? "").trim() || "ไม่ระบุชนิด",
       w: r1(w), h: r1(h),
+      d: ls ? shapePathD(ls.shape) : null,
+      outline: ls ? flattenShape(ls.shape, 12) : null,
       count: Math.max(1, Math.round(num(l.pieces)) || 1),
       faceWidth: num(l.face_width_cm) > 0 ? num(l.face_width_cm) : null,
       note: (l.note ?? "").trim() || null,
@@ -125,7 +136,10 @@ export function buildPatternDxf(layout: PatternLayout): string {
   for (const p of layout.placed) {
     const x0 = mm(p.x), x1 = mm(p.x + p.w);
     const yTop = H - mm(p.y), yBot = H - mm(p.y + p.h);
-    line(x0, yBot, x1, yBot); line(x1, yBot, x1, yTop); line(x1, yTop, x0, yTop); line(x0, yTop, x0, yBot);
+    if (p.outline && p.outline.length >= 3) {   // รูปทรงจริง → เส้นต่อกันรอบรูป
+      const P = p.outline.map(([x, y]) => [mm(p.x + x), H - mm(p.y + y)] as const);
+      for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; line(a[0], a[1], b[0], b[1]); }
+    } else { line(x0, yBot, x1, yBot); line(x1, yBot, x1, yTop); line(x1, yTop, x0, yTop); line(x0, yTop, x0, yBot); }
     const textH = Math.max(3, Math.min(8, mm(Math.min(p.w, p.h)) / 8));
     out.push("0", "TEXT", "8", "LABEL", "10", String(Math.round((x0 + 2) * 10) / 10), "20", String(Math.round((yTop - textH - 2) * 10) / 10), "30", "0",
       "40", String(Math.round(textH * 10) / 10), "1", dxfLabel(p));
@@ -141,7 +155,8 @@ export function buildPatternSvg(layout: PatternLayout): string {
   const W = Math.max(1, layout.width), H = Math.max(1, layout.height);
   const body = layout.placed.map((p) => {
     const fs = Math.max(0.8, Math.min(2.4, Math.min(p.w, p.h) / 6));
-    return `<g><rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="none" stroke="#000" stroke-width="0.05"/>`
+    const outlineSvg = p.d ? `<path transform="translate(${p.x} ${p.y})" d="${p.d}" fill="none" stroke="#000" stroke-width="0.05"/>` : `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="none" stroke="#000" stroke-width="0.05"/>`;
+    return `<g>${outlineSvg}`
       + `<text x="${r1(p.x + p.w / 2)}" y="${r1(p.y + p.h / 2)}" font-size="${r1(fs)}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif">${esc(`${p.id} ${p.name}`)}</text>`
       + `<text x="${r1(p.x + p.w / 2)}" y="${r1(p.y + p.h / 2 + fs * 1.3)}" font-size="${r1(fs * 0.8)}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif">${esc(`${p.w}×${p.h} ซม. · ตัด ×${p.count}`)}</text></g>`;
   }).join("");

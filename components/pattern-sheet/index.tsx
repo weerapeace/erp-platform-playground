@@ -1,7 +1,8 @@
 "use client";
 
 /**
- * ✂ PatternSheet — วาดชิ้นแพทเทิร์น (สี่เหลี่ยมตามกว้าง×ยาว) ขนาดจริง · ของกลาง · เจ้าของขอ 2026-11-07
+ * ✂ PatternSheet — วาดชิ้นแพทเทิร์น (สี่เหลี่ยมตามกว้าง×ยาว หรือรูปทรงจริงที่วาดไว้) ขนาดจริง · ของกลาง · เจ้าของขอ 2026-11-07
+ *   หน้าต่างวาดชิ้น (สี่เหลี่ยม วงกลม ปากกา วางจาก Illustrator) = ./shape-editor.tsx (ShapeEditor)
  *   <PatternPiecesSvg layout={shelfLayout(patternPieces(lines), 56)} />                 ภาพรวม (ย่อให้พอดีกล่อง)
  *   <PatternPiecesSvg layout={L} view={{ x, y, w: 19, h: 27.7 }} printMm />            1 หน้า A4 ขนาดจริง 1:1 (หน่วยมม. ตอนพิมพ์)
  *   สีตามชนิดวัสดุ · เส้นประ = แนวตัด · ป้าย = รหัสชิ้น + ชื่อ + ขนาด + ตัดกี่ชิ้น
@@ -52,8 +53,13 @@ export function PatternPiecesSvg({ layout, view, printMm = false, mono = false, 
         const showSub = p.h >= fs * 3.2;
         return (
           <g key={p.id}>
-            <rect x={p.x} y={p.y} width={p.w} height={p.h} fill={mono ? "#fff" : c.fill} stroke={mono ? "#111" : c.stroke}
-              strokeWidth={printMm ? 0.04 : Math.max(0.08, v.w / 600)} strokeDasharray={printMm ? "0.4 0.25" : undefined} />
+            {p.d ? (   // รูปทรงจริงที่วาด/วางจาก Illustrator
+              <path transform={`translate(${p.x} ${p.y})`} d={p.d} fill={mono ? "#fff" : c.fill} stroke={mono ? "#111" : c.stroke}
+                strokeWidth={printMm ? 0.04 : Math.max(0.08, v.w / 600)} strokeDasharray={printMm ? "0.4 0.25" : undefined} />
+            ) : (
+              <rect x={p.x} y={p.y} width={p.w} height={p.h} fill={mono ? "#fff" : c.fill} stroke={mono ? "#111" : c.stroke}
+                strokeWidth={printMm ? 0.04 : Math.max(0.08, v.w / 600)} strokeDasharray={printMm ? "0.4 0.25" : undefined} />
+            )}
             <text x={cx} y={showSub ? cy - fs * 0.55 : cy} fontSize={fs} textAnchor="middle" dominantBaseline="middle" fill={mono ? "#111" : c.text} fontWeight={600}>
               {p.id} {p.name}
             </text>
