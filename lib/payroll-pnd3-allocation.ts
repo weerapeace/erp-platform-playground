@@ -89,8 +89,12 @@ export function parsePnd3RandomAllocationNote(note?: string | null) {
   return round2(Math.max(money(raw), 0));
 }
 
+/** สูตร ภ.ง.ด.3 กลาง (บริษัทออกภาษีให้) — หน้าจอ · ไฟล์ Excel · ตัวกระจายยอด ใช้ตัวนี้ตัวเดียว
+ *  ยอดสุทธิ = ยอดที่จ่ายจริง/ยอดที่กระจาย ตามจริง (โอนจริงเป็นเต็มบาท · ยอดกระจายอาจมีสตางค์ ห้ามปัด ไม่งั้นรวมไม่เท่ายอดตั้งต้น)
+ *  จำนวนเงิน = ยอดสุทธิ ÷ (1 − อัตรา) ทศนิยม 2 ตำแหน่ง · ภาษี = จำนวนเงิน − ยอดสุทธิ
+ *  เช่น 18,549 → จำนวนเงิน 19,122.68 · ภาษี 573.68 (ยอดสุทธิเต็มบาท → ภาษีได้ 3% ของจำนวนเงินพอดีทุกกรณี) */
 export function pnd3GrossUpFromNet(netAmount: unknown, taxRate: unknown) {
-  const net = money(netAmount);
+  const net = round2(money(netAmount));
   const rate = Math.max(money(taxRate), 0);
   if (net <= 0) return { gross_pay: 0, withholding_tax: 0, net_pay: 0 };
   if (rate <= 0) return { gross_pay: net, withholding_tax: 0, net_pay: net };

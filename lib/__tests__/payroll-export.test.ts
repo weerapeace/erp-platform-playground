@@ -257,23 +257,29 @@ describe("payroll export rules", () => {
     });
   });
 
-  // ภ.ง.ด.3 ยื่นเป็นจำนวนเต็มบาท (b636cdbb): ปัดยอดสุทธิ + จำนวนเงินเป็นเต็มบาท แล้ว ภาษี = จำนวนเงิน − ยอดสุทธิ
-  //   → สมการในแบบยื่นลงตัวเสมอ ไม่มีเศษสตางค์ให้สรรพากรตีกลับ
-  it("grosses up recurring PND3 net amount with tax rate", () => {
-    expect(pnd3GrossUpFromNet(5000, 3)).toEqual({ gross_pay: 5155, withholding_tax: 155, net_pay: 5000 });
-    expect(pnd3GrossUpFromNet(17000, 3)).toEqual({ gross_pay: 17526, withholding_tax: 526, net_pay: 17000 });
-    for (const net of [5000, 17000, 8755.57, 500, 1234.5]) {
+  // ภ.ง.ด.3 (เจ้าของสั่ง 2026-11-09): ยอดสุทธิตามที่จ่ายจริง · จำนวนเงิน = ยอดสุทธิ ÷ 0.97 ทศนิยม 2 ตำแหน่ง · ภาษี = จำนวนเงิน − ยอดสุทธิ
+  it("grosses up recurring PND3 net amount with tax rate (2 decimals)", () => {
+    expect(pnd3GrossUpFromNet(18549, 3)).toEqual({ gross_pay: 19122.68, withholding_tax: 573.68, net_pay: 18549 });
+    expect(pnd3GrossUpFromNet(5000, 3)).toEqual({ gross_pay: 5154.64, withholding_tax: 154.64, net_pay: 5000 });
+    expect(pnd3GrossUpFromNet(17000, 3)).toEqual({ gross_pay: 17525.77, withholding_tax: 525.77, net_pay: 17000 });
+    expect(pnd3GrossUpFromNet(1700, 3)).toEqual({ gross_pay: 1752.58, withholding_tax: 52.58, net_pay: 1700 });
+    for (const net of [5000, 17000, 8755.57, 500, 1234.5, 4220, 28000]) {
       const r = pnd3GrossUpFromNet(net, 3);
-      expect(Number.isInteger(r.gross_pay) && Number.isInteger(r.withholding_tax) && Number.isInteger(r.net_pay)).toBe(true);
-      expect(r.gross_pay - r.withholding_tax).toBe(r.net_pay);
+      expect(r.net_pay).toBe(net);
+      expect(Math.round((r.gross_pay - r.withholding_tax) * 100) / 100).toBe(r.net_pay);
+    }
+    // ยอดสุทธิเต็มบาท (ยอดโอนจริง) → ภาษีเท่ากับ 3% ของจำนวนเงินพอดีทุกกรณี
+    for (let net = 1; net <= 50000; net += 7) {
+      const r = pnd3GrossUpFromNet(net, 3);
+      expect(r.withholding_tax).toBe(Math.round(r.gross_pay * 3) / 100);
     }
   });
 
   it("uses actual payment amount as the PND3 net basis before gross-up", () => {
     const netBasis = pnd3NetPayBasis(17000, 8755.57);
     expect(netBasis).toBe(8755.57);
-    // ยอดจ่ายจริง 8,755.57 → ยื่นเป็นเต็มบาท 8,756 · จำนวนเงิน 9,027 · ภาษี 271
-    expect(pnd3GrossUpFromNet(netBasis, 3)).toEqual({ gross_pay: 9027, withholding_tax: 271, net_pay: 8756 });
+    // ยอดจ่ายจริง 8,755.57 → จำนวนเงิน 9,026.36 · ภาษี 270.79
+    expect(pnd3GrossUpFromNet(netBasis, 3)).toEqual({ gross_pay: 9026.36, withholding_tax: 270.79, net_pay: 8755.57 });
     expect(pnd3NetPayBasis(17000, 0)).toBe(17000);
   });
 
@@ -560,9 +566,9 @@ describe("payroll export rules", () => {
       pnd3_is_extra: true,
       pnd3_payment_date: "2026-05-15",
       net_pay: 500,
-      // แถวที่แยกออกมาคิด gross-up ใหม่แบบเต็มบาท (500 → 515 · ภาษี 15)
-      gross_pay: 515,
-      withholding_tax: 15,
+      // แถวที่แยกออกมาคิด gross-up ใหม่ (500 → 515.46 · ภาษี 15.46)
+      gross_pay: 515.46,
+      withholding_tax: 15.46,
     });
   });
 
@@ -577,11 +583,11 @@ describe("payroll export rules", () => {
 
     expect(sheetRows[2][1]).toBe("31/5/2569");
     expect(sheetRows[3][1]).toBe("15/5/2569");
-    // ไฟล์ ภ.ง.ด.3 เป็นจำนวนเต็มบาท: จำนวนเงิน − ภาษี = ยอดสุทธิ ทุกแถว
-    expect(sheetRows[3][6]).toBe(515);
-    expect(sheetRows[3][7]).toBe(15);
+    // ไฟล์ ภ.ง.ด.3 เก็บทศนิยม 2 ตำแหน่ง: จำนวนเงิน − ภาษี = ยอดสุทธิ ทุกแถว
+    expect(sheetRows[3][6]).toBe(515.46);
+    expect(sheetRows[3][7]).toBe(15.46);
     expect(sheetRows[3][8]).toBe(500);
-    expect(sheetRows[2].slice(6, 9)).toEqual([1031, 31, 1000]);
+    expect(sheetRows[2].slice(6, 9)).toEqual([1030.93, 30.93, 1000]);
   });
 
   it("exports row-level PND3 tax id and address overrides without changing the base employee row", () => {

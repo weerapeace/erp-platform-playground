@@ -132,6 +132,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 // ทะเบียนเงินเดือน + ภ.ง.ด.3 ใช้จำนวนเต็มบาททั้งหน้า (เหมือนหน้าอื่นในระบบ ไม่มีทศนิยม)
 // ตัวเลขที่คำนวณมาเป็นจำนวนเต็มแล้ว — ปัดตรงนี้อีกชั้นกันเศษหลุดมาโชว์
 const baht = (value: unknown) => `฿${Math.round(Number(value) || 0).toLocaleString("th-TH")}`;
+// ภ.ง.ด.3: จำนวนเงิน/ภาษีมีสตางค์ (ทะเบียนเงินเดือนยังใช้ baht เต็มบาท)
+const bahtSatang = (value: unknown) => `฿${(Number(value) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dashBaht = (value: unknown) => Math.abs(Number(value) || 0) > 0.004 ? baht(value) : "-";
 const identityText = (row: Pick<ExportRow, "identity_no" | "national_id" | "passport_no">) => row.identity_no || row.national_id || row.passport_no || "-";
 const thaiDate = (value: string) => {
@@ -907,8 +909,8 @@ export default function PayrollExportsPage() {
             <SummaryBox label="เลือกแล้ว" value={`${selectedTotals.count.toLocaleString("th-TH")} รายการ`} />
             <SummaryBox label="จากพนักงาน" value={`${employeeCount.toLocaleString("th-TH")} รายการ`} />
             <SummaryBox label="รายการประจำ" value={`${recurringCount.toLocaleString("th-TH")} รายการ`} />
-            <SummaryBox label="ภาษี" value={baht(selectedTotals.tax)} />
-            <SummaryBox label="ยอดสุทธิ" value={baht(selectedTotals.net)} strong />
+            <SummaryBox label="ภาษี" value={bahtSatang(selectedTotals.tax)} />
+            <SummaryBox label="ยอดสุทธิ" value={bahtSatang(selectedTotals.net)} strong />
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
@@ -1278,7 +1280,7 @@ function Pnd3AllocationPanel({ allocation, busy, randomSpreadPercent, selectedSo
                     const amounts = pnd3GrossUpFromNet(row.net_pay, 3);
                     return (
                       <span className="mt-0.5 block text-[11px] font-medium text-slate-500">
-                        จำนวนเงิน {baht(amounts.gross_pay)} · ภาษี {baht(amounts.withholding_tax)}
+                        จำนวนเงิน {bahtSatang(amounts.gross_pay)} · ภาษี {bahtSatang(amounts.withholding_tax)}
                       </span>
                     );
                   })()}
@@ -1393,7 +1395,7 @@ function Pnd3PreviewTable({ rows, selectedIds, allShownSelected, paymentDate, lo
         </div>
       </div>
       <div className="border-b border-sky-100 bg-sky-50 px-4 py-2 text-xs font-medium text-sky-800">
-        สูตร ภ.ง.ด.3: ยอดสุทธิ = ยอดจ่ายจริง, จำนวนเงิน = ยอดสุทธิ / 0.97, ภาษี = จำนวนเงิน - ยอดสุทธิ · ตารางนี้เป็น preview อ่านก่อนโหลดไฟล์
+        สูตร ภ.ง.ด.3: ยอดสุทธิ = ยอดจ่ายจริง (เต็มบาท), จำนวนเงิน = ยอดสุทธิ / 0.97 (ทศนิยม 2 ตำแหน่ง), ภาษี = จำนวนเงิน - ยอดสุทธิ · ตารางนี้เป็น preview อ่านก่อนโหลดไฟล์
       </div>
       <div className="max-h-[66vh] overflow-auto">
         <table className="min-w-[1500px] border-collapse text-left text-sm">
@@ -1437,10 +1439,10 @@ function Pnd3PreviewTable({ rows, selectedIds, allShownSelected, paymentDate, lo
                   {row.address || <span className="font-semibold text-red-600">ต้องกรอก</span>}
                 </td>
                 <td className="border border-slate-200 px-3 py-2">{row.income_type || "ค่าจ้าง"}</td>
-                <td className="border border-slate-200 px-3 py-2 text-right">{baht(row.gross_pay)}</td>
-                <td className="border border-slate-200 px-3 py-2 text-right">{baht(row.withholding_tax)}</td>
+                <td className="border border-slate-200 px-3 py-2 text-right">{bahtSatang(row.gross_pay)}</td>
+                <td className="border border-slate-200 px-3 py-2 text-right">{bahtSatang(row.withholding_tax)}</td>
                 <td className="border border-slate-200 px-3 py-2 text-right font-semibold text-slate-900">
-                  {baht(row.net_pay)}
+                  {bahtSatang(row.net_pay)}
                   {(row.pnd3_allocation_net ?? 0) > 0 && (
                     <div className="text-[11px] font-medium text-amber-600">+ กระจาย {baht(row.pnd3_allocation_net)}</div>
                   )}
@@ -1595,15 +1597,15 @@ function Pnd3RowEditModal({ row, draft, setDraft, saving, onClose, onSave }: {
           <div className="grid gap-2 sm:grid-cols-3">
             <div className="rounded-lg bg-white p-3">
               <div className="text-xs text-slate-500">จำนวนเงิน</div>
-              <div className="text-lg font-bold text-slate-900">{baht(amounts.gross_pay)}</div>
+              <div className="text-lg font-bold text-slate-900">{bahtSatang(amounts.gross_pay)}</div>
             </div>
             <div className="rounded-lg bg-white p-3">
               <div className="text-xs text-slate-500">ภาษี 3%</div>
-              <div className="text-lg font-bold text-slate-900">{baht(amounts.withholding_tax)}</div>
+              <div className="text-lg font-bold text-slate-900">{bahtSatang(amounts.withholding_tax)}</div>
             </div>
             <div className="rounded-lg bg-white p-3">
               <div className="text-xs text-slate-500">ยอดสุทธิ</div>
-              <div className="text-lg font-bold text-emerald-700">{baht(amounts.net_pay)}</div>
+              <div className="text-lg font-bold text-emerald-700">{bahtSatang(amounts.net_pay)}</div>
             </div>
           </div>
         </section>

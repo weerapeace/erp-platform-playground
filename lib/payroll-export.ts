@@ -717,6 +717,11 @@ function payrollRegisterMoney(value: unknown) {
   return Math.round(money(value));
 }
 
+function pnd3Money(value: unknown) {
+  // ภ.ง.ด.3 ในไฟล์ Excel เก็บทศนิยม 2 ตำแหน่ง (จำนวนเงิน/ภาษีมีสตางค์ · ยอดสุทธิเต็มบาท)
+  return round2(money(value));
+}
+
 function pnd3IdentityNo(row: PayrollExportRow) {
   return formatThaiNationalId(text(row.national_id)) || formatThaiNationalId(text(row.identity_no)) || text(row.national_id) || text(row.identity_no) || text(row.passport_no) || "-";
 }
@@ -793,9 +798,9 @@ export function pnd3SheetRows(rows: PayrollExportRow[], paymentDate: string) {
       pnd3IdentityNo(row),
       row.address,
       cleanPnd3IncomeType(row.income_type),
-      payrollRegisterMoney(row.gross_pay),
-      payrollRegisterMoney(row.withholding_tax),
-      payrollRegisterMoney(row.net_pay),
+      pnd3Money(row.gross_pay),
+      pnd3Money(row.withholding_tax),
+      pnd3Money(row.net_pay),
     ]),
     ["", "", "รวม", "", "", "", 0, 0, 0],
   ];
@@ -816,11 +821,11 @@ function pnd3StringCell(ref: string, value: unknown, styleId: number) {
 }
 
 function pnd3NumberCell(ref: string, value: unknown, styleId: number) {
-  return `<c r="${ref}" s="${styleId}"><v>${payrollRegisterMoney(value)}</v></c>`;
+  return `<c r="${ref}" s="${styleId}"><v>${pnd3Money(value)}</v></c>`;
 }
 
 function pnd3FormulaCell(ref: string, formula: string, value: unknown, styleId: number) {
-  return `<c r="${ref}" s="${styleId}"><f>${xmlEscape(formula)}</f><v>${payrollRegisterMoney(value)}</v></c>`;
+  return `<c r="${ref}" s="${styleId}"><f>${xmlEscape(formula)}</f><v>${pnd3Money(value)}</v></c>`;
 }
 
 function buildPnd3WorksheetXml(rows: PayrollExportRow[], paymentDate: string) {
