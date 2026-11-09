@@ -1763,8 +1763,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       ) },
     { key: "width_cm", header: t("กว้าง (ซม.)", "Width (cm)"), width: cw(112, 70), align: "right", sortable: true, getValue: (r) => r.width_cm,
       render: (r, u) => {
-        const showNum = usesWidth(r.calc_method);
-        const canDraw = fullEdit && (showNum || rowIsPiece(r) || !r.calc_method);   // สาย/เทป (ยาว) / อะไหล่ (นับชิ้น) ไม่ต้องวาด
+        // ชิ้นที่วาดไว้ / ชนิดชิ้น = โชว์ช่องกว้างแยกเสมอ (เดิมรวม "กว้าง×ยาว" ไว้ช่องเดียว — เจ้าของขอให้แยก 2026-11-09)
+        const showNum = usesWidth(r.calc_method) || rowIsPiece(r) || !!r.shape;
+        const canDraw = fullEdit && (showNum || !r.calc_method);   // สาย/เทป (ยาว) / อะไหล่ (นับชิ้น) ไม่ต้องวาด
         // ✏️ ปุ่มวาดรูปทรงชิ้น — วาดแล้ว = รูปย่อสีฟ้า (กดแก้รูปได้)
         const btn = r.shape || canDraw ? (
           <button type="button" disabled={!canEdit}
@@ -1780,15 +1781,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         return (
           <div className="flex items-center gap-1">
             {btn}
-            {showNum
-              ? <div className="min-w-0 flex-1">{numCell(r.width_cm, (v) => u({ width_cm: v, ...(r.shape ? { shape: refitLineShape(r.shape, v, r.length_cm) } : {}) }))}</div>
-              : r.shape ? <span className="truncate text-[11px] tabular-nums text-slate-500">{fmtQty(r.width_cm)}×{fmtQty(r.length_cm)}</span> : null}
+            {showNum && <div className="min-w-0 flex-1">{numCell(r.width_cm, (v) => u({ width_cm: v, ...(r.shape ? { shape: refitLineShape(r.shape, v, r.length_cm) } : {}) }))}</div>}
           </div>
         );
       } },
     { key: "length_cm", header: t("ยาว (ซม.)", "Length (cm)"), width: cw(84, 60), align: "right", sortable: true, getValue: (r) => r.length_cm,
-      render: (r, u) => usesLength(r.calc_method)
-        ? numCell(r.length_cm, (v) => u({ length_cm: v, ...(r.shape && usesWidth(r.calc_method) ? { shape: refitLineShape(r.shape, r.width_cm, v) } : {}) }))
+      render: (r, u) => usesLength(r.calc_method) || rowIsPiece(r) || !!r.shape
+        ? numCell(r.length_cm, (v) => u({ length_cm: v, ...(r.shape ? { shape: refitLineShape(r.shape, r.width_cm, v) } : {}) }))
         : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้ความยาว", "This type doesn't use length")}></span> },
     { key: "pieces", header: t("จำนวนชิ้น", "Pcs"), width: cw(80, 56), align: "right", sortable: true, getValue: (r) => r.pieces,
       render: (r, u) => usesPieces(r.calc_method)
