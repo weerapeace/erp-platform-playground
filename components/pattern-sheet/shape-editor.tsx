@@ -1363,7 +1363,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           )}
           {panelOpen && multi.size < 2 && !(selPiece && selGeo) && (
             <aside className="rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-500" aria-label={t("รายละเอียดชิ้น", "Piece details")}>
-              <div className="mb-2 text-sm font-semibold text-slate-600">{t("รายละเอียดชิ้น", "Piece details")}</div>
+              <div className="mb-2 flex items-center gap-2"><span className="text-sm font-semibold text-slate-600">{t("รายละเอียดชิ้น", "Piece details")}</span><button type="button" onClick={() => setPanelOpen(false)} title={t("ปิดแผง (พื้นที่วาดกว้างขึ้น · คลิกชิ้นแล้วแผงกลับมาเอง)", "Close the panel (wider board · it reopens when you click a piece)")} aria-label={t("ปิดแผง", "Close panel")} className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-600">✕</button></div>
               <p>{t("กดชิ้นที่วาดแล้ว เพื่อตั้งชื่อ ใส่วัสดุ (หนัง ซับใน …) เผื่อพับ ขนาด จำนวน เจาะรู พับครึ่ง กลับด้าน แก้จุด", "Click a piece to set its name, materials (leather, lining…), allowance, size, count, holes, fold, flip and points")}</p>
               <ul className="mt-2 list-disc space-y-0.5 pl-4 text-slate-400">
                 <li>{t("Ctrl+Z ย้อนกลับ · Ctrl+Shift+Z / Ctrl+Y ทำซ้ำ", "Ctrl+Z undo · Ctrl+Shift+Z / Ctrl+Y redo")}</li>
