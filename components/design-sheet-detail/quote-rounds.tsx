@@ -8,9 +8,10 @@
  * ✏️ แก้ไขครั้งที่เสนอแล้ว = ฟอร์มเดียวกัน ใส่ค่าของการ์ดนั้นมาให้ → บันทึกเฉพาะที่เปลี่ยน (แก้/ลบ/เพิ่มช่อง · เปลี่ยนตัวเลขขั้นจำนวน)
  *
  * ข้อมูล: design_sheet_quotes (1 แถว = 1 ช่อง; batch = ครั้งที่) · API /quotes (ช่อง) + /quotes/batch (ทั้งครั้ง)
- * ของกลาง: ConfirmDialog · useToast · apiFetch
+ * 💰 ตัวช่วยตั้งราคา (เจ้าของขอ 2026-11-09) = ปุ่มบนแถบ → quote-pricing-helper.tsx → เลือกวิธีแล้ว "ใส่ราคา" = ตีราคาของทุกช่อง × ตัวคูณ (เปิดฟอร์มครั้งใหม่ให้ถ้ายังไม่เปิด)
+ * ของกลาง: ConfirmDialog · useToast · apiFetch · lib/quote-pricing
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ConfirmDialog } from "@/components/modal";
 import { useToast } from "@/components/toast";
 import { apiFetch } from "@/lib/api";
@@ -18,6 +19,9 @@ import { tr } from "@/lib/lang";
 import { useT } from "@/components/i18n";
 import { QUOTE_STATUS, QUOTE_STATUS_OPTS } from "@/lib/design-sheets-meta";
 import type { DesignSheetQuote } from "@/app/api/design-sheets/[id]/quotes/route";
+import { Icon } from "@/components/icon";
+import { priceFromCost } from "@/lib/quote-pricing";
+import { QuotePricingHelper, type PriceFill } from "./quote-pricing-helper";
 
 const fmtBaht = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const fmtInt = (n: number | null | undefined) => (n == null ? "—" : Number(n).toLocaleString("th-TH"));
@@ -32,7 +36,7 @@ const byQty = (a: number | null, b: number | null) => (a == null ? 1 : b == null
 type Size = { key: string; label: string };
 type Batch = { batch: number; part: number; quotes: DesignSheetQuote[]; date: string | null; note: string | null; sizes: string[]; qtys: (number | null)[]; status: string | "mixed" };
 
-export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, canEdit, costDirty, saveCost, onReload, onOpenVersions, onSendToQuotation, compact = false }: {
+export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, canEdit, costDirty, saveCost, onReload, onOpenVersions, onSendToQuotation, compact = false, pricingHelper = false }: {
   sheetId: string;
   quotes: DesignSheetQuote[];
   sizes: Size[];                                  // ไซส์/แท็บทั้งหมดของใบ (เรียงตามแท็บตีราคา)
@@ -44,6 +48,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
   onOpenVersions?: (a: string | null, b: string, parent: string) => void;   // ไม่ส่ง (มือถือ) = บอกให้ไปดูในหน้าเต็ม
   onSendToQuotation?: () => void;
   compact?: boolean;                              // มือถือ: ซ่อนคำอธิบายยาว ๆ
+  pricingHelper?: boolean;                        // โชว์ปุ่ม 💰 ตัวช่วยตั้งราคา (คนเห็นต้นทุนเท่านั้น — API กันอีกชั้น)
 }) {
   const t = useT();
   const toast = useToast();
@@ -57,6 +62,13 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
   const [editKey, setEditKey] = useState<string | null>(null);  // ✏️ การ์ดที่กำลังแก้ (`batch-part`) — เปิดได้ทีละใบ
   const cardKey = (b: Batch) => `${b.batch}-${b.part}`;
   const formOpen = addOpen || editKey !== null;
+  const [helperOpen, setHelperOpen] = useState(false);
+  const [fill, setFill] = useState<PriceFill | null>(null);   // ส่งให้ฟอร์มที่เปิดอยู่ (ครั้งใหม่ หรือที่กำลังแก้)
+  const applyPrice = (f: Omit<PriceFill, "id">) => {
+    setFill({ ...f, id: Date.now() });
+    if (!formOpen) { setAddFrom(null); setAddOpen(true); }   // ยังไม่เปิดฟอร์ม → เปิด "เสนอราคาครั้งใหม่" แล้วใส่ราคาให้
+  };
+  useEffect(() => { if (!formOpen) setFill(null); }, [formOpen]);   // ฟอร์มปิดแล้ว ล้างทิ้ง — ไม่ให้ฟอร์มที่เปิดทีหลังโดนใส่ราคาซ้ำ
   const openV = onOpenVersions ?? (() => toast.warning(tr("ดูรายละเอียดเทียบเวอร์ชันตีราคาได้ในหน้าเต็ม (คอมพิวเตอร์)", "Open the full page (on a computer) to compare costing versions")));
 
   // จัดกลุ่มเป็น "ครั้ง" (batch) — แถวเก่าที่ยังไม่มี batch ใช้วันที่แทน
@@ -120,14 +132,20 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="text-xs text-slate-400">{compact ? "" : t("1 ครั้ง = 1 การ์ด (หลายไซส์ × หลายขั้นจำนวน) · กดตัวเลขราคาเพื่อแก้ · สถานะตั้งได้ทั้งครั้งหรือรายช่อง", "1 round = 1 card (sizes × quantity tiers) · click a price to edit · set status for the whole round or per cell")}</div>
           <div className="flex gap-1.5">
+            {pricingHelper && <button type="button" onClick={() => setHelperOpen(true)} className="h-8 px-3 text-sm border border-emerald-300 text-emerald-700 rounded-lg hover:bg-emerald-50 whitespace-nowrap inline-flex items-center gap-1.5" title={t("บวกกำไรจากต้นทุน · เทียบงานอื่นในแบรนด์ · ปัดราคา · VAT · ย้อนจากงบลูกค้า", "Markup on cost · compare jobs in this brand · rounding · VAT · from budget")}><Icon value="i:calculator" className="text-[15px]" />{t("ตัวช่วยตั้งราคา", "Pricing helper")}</button>}
             {onSendToQuotation && <button type="button" onClick={onSendToQuotation} className="h-8 px-3 text-sm border border-indigo-300 text-indigo-700 rounded-lg hover:bg-indigo-50 whitespace-nowrap">{t("🧾 ส่งไปใบเสนอราคา", "🧾 Send to quotation")}</button>}
             <button type="button" onClick={() => { setAddFrom(null); setAddOpen(true); }} disabled={formOpen} title={editKey ? t("บันทึกหรือยกเลิกการแก้ไขก่อน", "Save or cancel the edit first") : undefined} className="h-8 px-3 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 whitespace-nowrap">{t("＋ เสนอราคาครั้งที่", "＋ Quote round")} {Math.max(0, ...batches.map((x) => x.batch)) + 1}</button>
           </div>
         </div>
       )}
 
+      {pricingHelper && helperOpen && (
+        <QuotePricingHelper open onClose={() => setHelperOpen(false)} sheetId={sheetId} sizes={sizes} currentCost={currentCost}
+          qtys={batches.at(-1)?.qtys ?? [100, 200, 500, 1000]} onApply={applyPrice} />
+      )}
+
       {addOpen && (
-        <RoundEditor sheetId={sheetId} nextBatch={Math.max(0, ...batches.map((x) => x.batch)) + 1} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={addFrom ?? batches.at(-1) ?? null} copiedFrom={addFrom?.batch ?? null}
+        <RoundEditor sheetId={sheetId} nextBatch={Math.max(0, ...batches.map((x) => x.batch)) + 1} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={addFrom ?? batches.at(-1) ?? null} copiedFrom={addFrom?.batch ?? null} fill={fill}
           costDirty={costDirty} saveCost={saveCost} onClose={() => { setAddOpen(false); setAddFrom(null); }}
           onSaved={async (n) => { setAddOpen(false); setAddFrom(null); await onReload(); toast.success(tr(`เสนอราคาครั้งที่ ${n} แล้ว`, `Quote round ${n} saved`)); }} />
       )}
@@ -141,7 +159,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
         // "ที่เปลี่ยนจากครั้งก่อน" ต่อไซส์ (API คำนวณจากเวอร์ชันตีราคา) — เอาช่องแรกของแต่ละไซส์
         const changes = b.sizes.map((s) => ({ size: s, q: b.quotes.find((q) => (q.parent_code ?? "") === s) })).filter((x) => x.q?.changes || x.q?.cost_snapshot_id);
         if (editKey === cardKey(b)) return (
-          <RoundEditor key={`edit-${cardKey(b)}`} sheetId={sheetId} nextBatch={b.batch} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={null} editing={b}
+          <RoundEditor key={`edit-${cardKey(b)}`} sheetId={sheetId} nextBatch={b.batch} sizes={sizes} sizeLabel={sizeLabel} currentCost={currentCost} last={null} editing={b} fill={fill}
             costDirty={costDirty} saveCost={saveCost} onClose={() => setEditKey(null)} onReload={onReload}
             onSaved={async (n) => { setEditKey(null); await onReload(); toast.success(tr(`บันทึกการแก้ไขครั้งที่ ${n} แล้ว`, `Round ${n} changes saved`)); }} />
         );
@@ -275,8 +293,9 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
  *  ครั้งใหม่: เตรียมค่าจากครั้งล่าสุด/ครั้งที่คัดลอก
  *  แก้ไข (editing): ใส่ค่าของการ์ดนั้น → บันทึกเฉพาะที่เปลี่ยน ทีละช่อง (ช่องเดิมแก้ราคา/จำนวน · ล้างราคา/ปิดไซส์/เอาขั้นออก = ลบช่อง · ช่องใหม่ = เพิ่ม)
  *  วันที่/สถานะ/หมายเหตุ แก้เฉพาะช่องของการ์ดนี้ (ข้อมูลเก่าที่ครั้งเดียวกันแยกเป็นหลาย "รายการ" จะไม่กระทบกัน) */
-function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, copiedFrom = null, editing = null, costDirty, saveCost, onClose, onSaved, onReload }: {
+function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, copiedFrom = null, editing = null, fill = null, costDirty, saveCost, onClose, onSaved, onReload }: {
   copiedFrom?: number | null;   // คัดลอกมาจากครั้งที่ (โชว์ที่หัวฟอร์ม)
+  fill?: PriceFill | null;      // 💰 จากตัวช่วยตั้งราคา: ใส่ราคา = ตีราคาของช่อง × ตัวคูณ (ทุกไซส์ที่ติ๊ก × ทุกขั้นจำนวน)
   editing?: Batch | null;       // ✏️ แก้ไขการ์ดนี้ (null = เสนอครั้งใหม่)
   onReload?: () => Promise<void>;   // แก้ไขแล้วพลาดกลางทาง → โหลดของจริงมาโชว์
   sheetId: string; nextBatch: number; sizes: Size[]; sizeLabel: (code: string | null) => string; currentCost: (key: string, qty?: number | null) => number;
@@ -325,6 +344,24 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
     setCells((m) => { const n = { ...m }; for (const s of rowSizes) { const a = key(s.key, from); if (a in n) { n[key(s.key, to)] = n[a]; delete n[a]; } } return n; });
     setOrigQty((o) => { const n = { ...o }; if (qtyKey(from) in n) { n[qtyKey(to)] = n[qtyKey(from)]; delete n[qtyKey(from)]; } return n; });
   };
+  // 💰 ตัวช่วยตั้งราคาส่งวิธีคิดมา → ใส่ทุกช่อง (ไซส์ที่ติ๊ก × ขั้นจำนวน) จากตีราคาของช่องนั้น · ช่องที่ยังไม่ได้ตีราคา ไม่แตะ
+  const [fillNote, setFillNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!fill) return;
+    const next = { ...cells }; let n = 0; let skipped = 0;
+    for (const s of rowSizes) {
+      if (!onSizes.includes(s.key)) continue;
+      for (const qty of qtys) {
+        const p = priceFromCost(currentCost(s.key, qty), fill.mult, fill.round);
+        if (p == null) { skipped++; continue; }
+        next[key(s.key, qty)] = String(p); n++;
+      }
+    }
+    setCells(next);
+    setFillNote(n ? tr(`ใส่ราคา ${n} ช่อง (${fill.label})${skipped ? ` · ${skipped} ช่องยังไม่ได้ตีราคา ไม่ได้ใส่` : ""} — ตรวจแล้วกดบันทึก`, `Filled ${n} cells (${fill.label})${skipped ? ` · ${skipped} uncosted cells skipped` : ""} — check, then save`)
+      : tr("ยังไม่มีช่องที่ตีราคาไว้ — ตีราคาก่อน หรือติ๊กไซส์ที่ตีราคาแล้ว", "No costed cells yet — cost first, or tick a costed size"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fill?.id]);
   const fillFromCost = () => setCells((m) => { const n = { ...m }; for (const s of rowSizes) for (const qty of qtys) { const c = currentCost(s.key, qty); if (c > 0 && !n[key(s.key, qty)]) n[key(s.key, qty)] = String(Math.round(c * 100) / 100); } return n; });
   // ± บาท ทุกช่อง (เจ้าของขอ 2026-10-21: "+10 → 400 เป็น 410, 380 เป็น 390") — เฉพาะช่องที่ใส่ราคาแล้ว + ไซส์ที่ติ๊ก · ช่องว่างไม่แตะ
   const [shift, setShift] = useState("");
@@ -438,6 +475,7 @@ function RoundEditor({ sheetId, nextBatch, sizes, sizeLabel, currentCost, last, 
         <span className="h-7 px-2 rounded-lg bg-blue-600 text-white text-xs font-semibold flex items-center">
           {editing ? t(`✏️ แก้ไขครั้งที่ ${editing.batch}`, `✏️ Edit round ${editing.batch}`) + (editing.part > 0 ? t(` · รายการที่ ${editing.part + 1}`, ` · entry ${editing.part + 1}`) : "") : t(`＋ ครั้งที่ ${nextBatch}`, `＋ Round ${nextBatch}`)}
         </span>
+        {fillNote && <span className="text-[11px] text-emerald-700">{fillNote}</span>}
         {copiedFrom != null && <span className="text-[11px] text-blue-700">{t(`คัดลอกจากครั้งที่ ${copiedFrom} — แก้ราคาแล้วบันทึก`, `Copied from round ${copiedFrom} — edit prices, then save`)}</span>}
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white" />
         <select value={status} onChange={(e) => setStatus(e.target.value)} className="h-7 px-1.5 text-xs border border-slate-200 rounded-md bg-white">

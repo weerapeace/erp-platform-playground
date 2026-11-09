@@ -2836,7 +2836,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 onSend={canEdit ? () => setToQuote(true) : undefined} />
               {/* รอบเสนอราคาแบบ 1 ครั้ง = 1 การ์ด (ไซส์ × ขั้นจำนวน) — components/design-sheet-detail/quote-rounds.tsx */}
               <QuoteRounds sheetId={form.id} quotes={quotes} sizes={costParentTabs.map((tb) => ({ key: tb.key, label: tb.label }))} sizeLabel={quoteSizeLabel}
-                currentCost={totalForParent} canEdit={canEdit} costDirty={costDirty} saveCost={saveCost}
+                currentCost={totalForParent} canEdit={canEdit} costDirty={costDirty} saveCost={saveCost} pricingHelper={canSeeCost}
                 onReload={() => loadCq(form.id!)}
                 onOpenVersions={(a, b, parent) => { setVersionsInit({ a, b, parent }); setVersionsOpen(true); }}
                 onSendToQuotation={canEdit ? () => setToQuote(true) : undefined} />
