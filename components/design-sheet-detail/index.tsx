@@ -36,7 +36,8 @@ import { tr } from "@/lib/lang";
 const QUOTE_CART_KEY = "erp-design-quote-cart";   // ตัวชี้ใบเสนอราคาร่างที่เป็น "ตะกร้า" ปัจจุบัน (ต่อ browser)
 import type { Attachment } from "@/app/api/attachments/route";
 import { lineShapeArea, normalizePiece, pieceGeometry, refitLineShape, shapeBox, shapePathD, type LineShape, type Shape } from "@/lib/pattern-shape";
-import type { PieceMat, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
+import type { EditorPiece, PieceMat, RefImage, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
+import { SheetImagePicker } from "./sheet-image-picker";
 import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
@@ -543,7 +544,13 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const priceItemById = useMemo(() => new Map(priceItems.map((it) => [it.id, it])), [priceItems]);
   const [priceGroups, setPriceGroups] = useState<PriceGroup[]>([]);
   const [copyFromOpen, setCopyFromOpen] = useState(false);   // โมดอลคัดลอกตีราคาจากใบงานอื่น
-  const [shapeEdit, setShapeEdit] = useState<{ key: string | null } | null>(null);   // ✏️ หน้าต่างวาด: key = แก้รูปของบรรทัดนี้ · null = เพิ่มบรรทัดใหม่
+  // ✏️ ตีราคาดูได้ 2 แบบ: ตาราง ↔ แบบวาด (กระดานชิ้นวัสดุ · แก้แล้วตารางเปลี่ยนตามทันที) — จำแบบที่เลือกไว้ในเครื่อง
+  const [costView, setCostViewState] = useState<"table" | "draw">(() => { try { return localStorage.getItem("ds-cost-view") === "draw" ? "draw" : "table"; } catch { return "table"; } });
+  const setCostView = (v: "table" | "draw") => { setCostViewState(v); try { localStorage.setItem("ds-cost-view", v); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
+  const [board, setBoard] = useState<{ initial: EditorPiece[]; refs: RefImage[]; sel: string | null; nonce: number; basis: "box" | "area"; skipped: number } | null>(null);
+  const boardOpened = useRef<Set<string>>(new Set());   // บรรทัดที่ขึ้นกระดานตอนเปิด
+  const boardPids = useRef<Set<string>>(new Set());     // รหัสชิ้นที่เคยอยู่บนกระดานรอบนี้ (ลบชิ้น = ลบบรรทัดของชิ้นนั้น)
+  const [costLoadTick, setCostLoadTick] = useState(0);   // โหลดบรรทัดจากฐานข้อมูลเสร็จ → กระดานแบบวาดอ่านใหม่
   // ผูก SKU เข้าวัสดุตีราคา — ทำในตารางจัดการวัสดุตีราคา (ต่อแถว)
   const [pmLinks, setPmLinks] = useState<Record<string, string[]>>({});   // item_id → sku_ids
   const [pmLinkSkus, setPmLinkSkus] = useState<Record<string, SkuLite>>({}); // sku_id → {code,name}
@@ -586,50 +593,76 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     unit_price: null, amount: null, note: null, sort_order: costLines.length + 1,
   }), [costLines.length, costParent]);
   const addCostRow = useCallback(() => { setCostLines((prev) => [...prev, newCostRow()]); setCostDirty(true); }, [newCostRow]);
-  // ✏️ ผลจากหน้าต่างวาด → บรรทัดตีราคา: 1 ชิ้น × 1 วัสดุ = 1 บรรทัด (ชิ้นไม่มีวัสดุ = 1 บรรทัดว่าง เลือกวัสดุทีหลัง)
-  //   บรรทัดของชิ้นเดียวกันผูกด้วย shape.pid (เช่น หนัง + ซับใน) → เปิดแก้จากบรรทัดไหนก็ได้ ได้ทั้งชิ้น
-  //   กว้าง×ยาว = ขนาดตัด (รวมเผื่อพับ) · จำนวนชิ้น = จำนวนในหน้าต่างวาด · บรรทัดเดิมที่วัสดุตรงกัน = ใช้ต่อ (ราคา/ประวัติไม่หาย)
-  //   วัสดุที่เอาออกจากชิ้น = บรรทัดนั้นหายไป
-  const applyShapes = useCallback((key: string | null, res: ShapeEditorResult) => {
-    const stamp = Date.now();
+  // ✏️ เปิด "แบบวาด" ของแท็บที่ดูอยู่: บรรทัดที่วาดไว้ = รูปทรงจริง (รวมบรรทัดชิ้นเดียวกันด้วย pid) · บรรทัดแบบเดิมที่มีกว้าง×ยาว = สี่เหลี่ยม
+  //   บรรทัดที่ไม่มีกว้าง×ยาว (อะไหล่ นับชิ้น · สาย/เทป คิดตามยาว) ไม่ขึ้นกระดาน (บอกจำนวนไว้)
+  const openBoard = useCallback((selKey?: string | null) => {
+    const rows = costLines.filter((r) => pkey(r.parent_code) === costParent);
+    const drawable = rows.filter((r) => !!r.shape || ((usesWidth(r.calc_method) || rowIsPiece(r) || !r.calc_method) && Number(r.width_cm) > 0 && Number(r.length_cm) > 0));
+    const groups = new Map<string, CostRow[]>();
+    for (const r of drawable) { const g = r.shape?.pid ? `pid:${r.shape.pid}` : `row:${r.key}`; (groups.get(g) ?? groups.set(g, []).get(g)!).push(r); }
+    const matOf = (r: CostRow): PieceMat | null => r.item_id ? { id: r.item_id, name: r.item_name ?? tr("วัสดุ", "Material") }
+      : r.item_sku_code || r.item_name ? { id: `row:${r.key}`, name: [r.item_sku_code, r.item_name].filter(Boolean).join(" ") } : null;
+    const initial: EditorPiece[] = [...groups.values()].map((g) => {
+      const r = g[0];
+      const mats: PieceMat[] = [];
+      for (const x of g) { const m = matOf(x); if (m && !mats.some((y) => y.id === m.id)) mats.push(m); }
+      if (r.shape) return { shape: r.shape.shape, holes: r.shape.holes, count: r.pieces ?? 1, allow: r.shape.allow, name: r.shape.name, mats, pid: r.shape.pid ?? `pc${r.key.replace(/[^\w-]/g, "").slice(-38)}`, at: r.shape.at, src: g.map((x) => x.key) };
+      return { shape: { k: "rect", x: 0, y: 0, w: Number(r.width_cm), h: Number(r.length_cm) }, count: r.pieces ?? 1, mats, pid: `pc${r.key.replace(/[^\w-]/g, "").slice(-38)}`, src: [r.key] };
+    });
+    const refMap = new Map<string, RefImage>();
+    for (const r of drawable) for (const ref of r.shape?.refs ?? []) refMap.set(`${ref.url}|${ref.x}|${ref.y}|${ref.w}`, ref);
+    const sel = selKey ? initial.find((p) => p.src?.includes(selKey))?.pid ?? null : null;
+    boardOpened.current = new Set(drawable.map((r) => r.key));
+    boardPids.current = new Set(initial.map((p) => p.pid!));
+    setBoard({ initial, refs: [...refMap.values()].slice(0, 4), sel, nonce: Date.now(), basis: drawable.find((r) => r.shape)?.shape?.basis ?? "box", skipped: rows.length - drawable.length });
+    setCostView("draw");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [costLines, costParent]);
+  const openBoardRef = useRef(openBoard); openBoardRef.current = openBoard;
+  // ✏️ กระดานส่งค่ากลับ (ทุกครั้งที่แก้) → บรรทัดตีราคา: 1 ชิ้น × 1 วัสดุ = 1 บรรทัด
+  //   บรรทัดเดิมของชิ้น (pid / บรรทัดที่มาจาก) ที่วัสดุตรงกัน = ใช้ต่อ (ราคา/ประวัติอยู่) · วัสดุ/ชิ้นที่เอาออก = บรรทัดนั้นหาย
+  //   กว้าง×ยาว = ขนาดตัด (รวมเผื่อพับ) · at = ตำแหน่งบนกระดาน · refs = รูปอ้างอิง (เก็บซ้ำทุกบรรทัดของแท็บ)
+  const applyBoard = useCallback((res: ShapeEditorResult) => {
+    for (const p of res.pieces) boardPids.current.add(p.pid);
     setCostLines((prev) => {
-      const anchor = key ? prev.find((r) => r.key === key) : undefined;
-      const pid0 = anchor?.shape?.pid;
-      const group = anchor ? prev.filter((r) => r.key === anchor.key || (!!pid0 && r.shape?.pid === pid0 && pkey(r.parent_code) === pkey(anchor.parent_code))) : [];
-      const pool = [...group];
-      const take = (mid: string): CostRow | undefined => {
-        const i = pool.findIndex((r) => (mid.startsWith("row:") ? r.key === mid.slice(4) : r.item_id === mid));
-        return i >= 0 ? pool.splice(i, 1)[0] : undefined;
-      };
+      const isBoardRow = (r: CostRow) => pkey(r.parent_code) === costParent && (boardOpened.current.has(r.key) || (!!r.shape?.pid && boardPids.current.has(r.shape.pid)));
+      const pool = prev.filter(isBoardRow);
       const made: CostRow[] = [];
       res.pieces.forEach((p, i) => {
+        const mine = (r: CostRow) => r.shape?.pid === p.pid || p.src.includes(r.key);
+        const take = (mid: string | null) => {
+          const k = pool.findIndex((r) => mine(r) && (mid == null ? !r.item_id && !r.item_sku_code && !r.item_name : mid.startsWith("row:") ? r.key === mid.slice(4) : r.item_id === mid));
+          return k >= 0 ? pool.splice(k, 1)[0] : undefined;
+        };
         const norm = normalizePiece(p.shape, p.holes);
         const ls: LineShape = {
-          v: 1, shape: norm.shape, basis: res.basis, pid: i === 0 && pid0 ? pid0 : `pc${stamp.toString(36)}${i}`,
-          ...(norm.holes.length ? { holes: norm.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.name ? { name: p.name } : {}),
+          v: 1, shape: norm.shape, basis: res.basis, pid: p.pid, at: p.at,
+          ...(norm.holes.length ? { holes: norm.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.name ? { name: p.name } : {}), ...(res.refs.length ? { refs: res.refs } : {}),
         };
         const size = { width_cm: Math.round(p.geo.cutBox.w * 100) / 100, length_cm: Math.round(p.geo.cutBox.h * 100) / 100, pieces: p.count };
         const mats: (string | null)[] = p.mats.length ? p.mats.map((m) => m.id) : [null];
-        mats.forEach((mid, j) => {
-          let row = mid ? take(mid) : i === 0 && j === 0 && anchor && !anchor.item_id && !anchor.item_sku_code && !anchor.item_name ? take(`row:${anchor.key}`) : undefined;
+        mats.forEach((mid) => {
+          let row = take(mid);
           let fresh = false;
           if (!row) {
             fresh = true;
             const it = mid && !mid.startsWith("row:") ? priceItemById.get(mid) : undefined;
-            row = { ...(it ? rowFromItem(it, made.length) : newCostRow()), parent_code: anchor ? anchor.parent_code ?? null : costParent || null };
+            row = { ...(it ? rowFromItem(it, i) : newCostRow()), parent_code: costParent || null };
           }
-          made.push(recomputeRow({ ...row, ...(fresh ? { key: `sh${stamp}_${i}_${j}` } : {}), shape: ls, ...size }));
+          made.push(recomputeRow({ ...row, ...(fresh ? { key: `pc_${p.pid}_${mid ?? "x"}`.slice(0, 90) } : {}), shape: ls, ...size }));
         });
       });
-      if (!anchor) return [...prev, ...made];
-      const groupKeys = new Set(group.map((r) => r.key));
-      const insertAt = prev.slice(0, prev.findIndex((r) => groupKeys.has(r.key))).filter((r) => !groupKeys.has(r.key)).length;
-      const rest = prev.filter((r) => !groupKeys.has(r.key));
-      rest.splice(insertAt, 0, ...made);
+      const first = prev.findIndex(isBoardRow);
+      const rest = prev.filter((r) => !isBoardRow(r));
+      rest.splice(first < 0 ? rest.length : prev.slice(0, first).filter((r) => !isBoardRow(r)).length, 0, ...made);
       return rest;
     });
     setCostDirty(true);
-  }, [newCostRow, priceItemById, costParent]);
+    setEditing(true);   // แก้บนกระดาน = เข้าโหมดแก้ไข (กดบันทึกตีราคาเพื่อเก็บ) · ห้ามอ้าง fullEdit ตรงนี้ (ประกาศทีหลัง → จอพัง)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [costParent, priceItemById, newCostRow]);
+  // เปลี่ยนแท็บ Parent ระหว่างดูแบบวาด → เปิดกระดานของแท็บนั้น · เปิดป๊อปมาด้วยแบบวาด (จำไว้) → สร้างกระดาน
+  useEffect(() => { if (costView === "draw" && form?.id) openBoardRef.current(null); }, [costParent, form?.id, costLoadTick]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const costTotal  = curLines.reduce((s, r) => s + (r.amount || 0), 0);   // ต้นทุนวัสดุของ Parent นี้
   const extraTotal = costExtra.reduce((s, c) => s + (Number(c.amount) || 0), 0);
@@ -977,7 +1010,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       ]);
       if (!cr.error) setComments((cr.data ?? []) as DesignSheetComment[]);
       if (!qr.error) setQuotes((qr.data ?? []) as DesignSheetQuote[]);
-      if (!lr.error) { setCostLines(((lr.data ?? []) as CostLine[]).map((l, i) => ({ ...l, key: `db${i}_${l.id ?? ""}` }))); setCostDirty(false); }
+      if (!lr.error) { setCostLines(((lr.data ?? []) as CostLine[]).map((l, i) => ({ ...l, key: `db${i}_${l.id ?? ""}` }))); setCostDirty(false); setCostLoadTick((n) => n + 1); }
     } catch { /* ignore */ }
     finally { setCqLoading(false); }
   }, []);
@@ -1735,7 +1768,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         // ✏️ ปุ่มวาดรูปทรงชิ้น — วาดแล้ว = รูปย่อสีฟ้า (กดแก้รูปได้)
         const btn = r.shape || canDraw ? (
           <button type="button" disabled={!canEdit}
-            onClick={() => { if (!fullEdit) setEditing(true); setShapeEdit({ key: r.key }); }}
+            onClick={() => openBoardRef.current(r.key)}
             title={r.shape
               ? t(`รูปทรงวาด${r.shape.name ? ` "${r.shape.name}"` : ""}${r.shape.allow ? ` · เผื่อพับ ${r.shape.allow} ซม.` : ""}${r.shape.holes?.length ? ` · เจาะ ${r.shape.holes.length} รู` : ""} · พื้นที่ตัด ${Math.round(pieceGeometry(r.shape).cutArea)} cm² · คิดผ้าจาก${r.shape.basis === "area" ? "พื้นที่จริง" : "กรอบสี่เหลี่ยม"} — กดเพื่อแก้รูป`, `Drawn shape${r.shape.name ? ` "${r.shape.name}"` : ""}${r.shape.allow ? ` · allowance ${r.shape.allow} cm` : ""}${r.shape.holes?.length ? ` · ${r.shape.holes.length} holes` : ""} · cut area ${Math.round(pieceGeometry(r.shape).cutArea)} cm² · fabric from ${r.shape.basis === "area" ? "actual area" : "bounding box"} — click to edit`)
               : t("วาดรูปทรงชิ้นนี้ (สี่เหลี่ยม วงกลม ปากกา หรือวางจาก Illustrator)", "Draw this piece (rectangle, circle, pen, or paste from Illustrator)")}
@@ -2459,6 +2492,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     );
                   })()}
                 </div>
+                <div className="flex flex-wrap items-center gap-2">
+                {/* ✏️ ดูได้ 2 แบบ: ตาราง ↔ แบบวาด (เจ้าของขอ 2026-11-09 "เชื่อมกันระหว่างรายการตีราคากับแบบวาด") */}
+                <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5" role="group" aria-label={t("มุมมองตีราคา", "Costing view")}>
+                  <button type="button" onClick={() => { setCostView("table"); setBoard(null); }} className={`inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs ${costView === "table" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}><Icon value="i:table" className="text-[13px]" />{t("ตาราง", "Table")}</button>
+                  <button type="button" onClick={() => openBoardRef.current(null)} className={`inline-flex h-7 items-center gap-1 rounded-md px-2.5 text-xs ${costView === "draw" ? "bg-slate-800 text-white" : "text-slate-600 hover:bg-slate-50"}`}><Icon value="i:vector-bezier" className="text-[13px]" />{t("แบบวาด", "Drawing")}</button>
+                </div>
                 {/* เครื่องมือตีราคา = เมนูรวมตามประเภท (ของกลาง components/menu-bar · เจ้าของขอ 2026-11-07) —
                     คำสั่งที่แก้ข้อมูลกดตอนดูอย่างเดียวได้ = เข้าโหมดแก้ให้เอง */}
                 <MenuBar menus={(() => {
@@ -2520,6 +2559,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   ];
                   return menus.filter((m) => m.items.length > 0);
                 })()} />
+                </div>
               </div>
               {priceItems.length === 0 && (
                 <div className="px-3 py-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg">
@@ -2642,6 +2682,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 );
               })()}
 
+              {costView === "draw" && board ? (
+                <ShapeEditor key={`board-${costParent}-${board.nonce}`} open embedded readonly={!canEdit}
+                  initial={board.initial} initialRefs={board.refs} initialBasis={board.basis} initialSel={board.sel}
+                  materials={priceItems.map((p) => ({ id: p.id, name: p.name, sub: p.group_name }))}
+                  refPicker={form.id ? (pick) => <SheetImagePicker sheetId={form.id!} usedKeys={new Set<string>()} onPick={(im) => pick({ url: im.url, label: im.source_label })} /> : undefined}
+                  onChange={applyBoard}
+                  footerNote={<span className="text-slate-400">{t("แก้บนกระดาน = ตารางเปลี่ยนตามทันที · กด บันทึกตีราคา เพื่อเก็บ", "Edits here update the table instantly · press Save costing to keep")}{board.skipped > 0 ? t(` · ${board.skipped} บรรทัดไม่มีกว้าง×ยาว (อะไหล่/สาย) ดูในตาราง`, ` · ${board.skipped} lines without width×length (parts/tapes) are in the table`) : ""}</span>} />
+              ) : (
               <LineItemsGrid<CostRow>
                 variant="lines"
                 rows={curLines}
@@ -2684,7 +2732,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 }}
                 onAdd={newCostRow}
                 addLabel={t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}
-                addExtra={<button type="button" onClick={() => setShapeEdit({ key: null })} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
+                addExtra={<button type="button" onClick={() => openBoardRef.current(null)} className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-800"
                   title={t("วาดชิ้นวัสดุ (สี่เหลี่ยม วงกลม ปากกา) หรือก๊อปจาก Illustrator มาวาง → ได้บรรทัดใหม่พร้อมกว้าง×ยาว", "Draw pieces (rectangle, circle, pen) or paste from Illustrator → new lines with width×length")}>
                   <Icon value="i:vector-bezier" className="text-[14px]" />{t("วาดชิ้นวัสดุ", "Draw pieces")}</button>}
                 emptyText={t("ยังไม่มีวัตถุดิบในรายการตีราคา", "No materials in the costing list yet")}
@@ -2695,7 +2743,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       className="h-9 px-4 text-sm font-medium bg-amber-500 text-white rounded-lg hover:bg-amber-600">{t("＋ เพิ่มวัตถุดิบ", "＋ Add material")}</button>}
                     <button type="button" onClick={() => setCopyFromOpen(true)}
                       className="h-9 px-4 text-sm font-medium border border-blue-300 text-blue-700 bg-white rounded-lg hover:bg-blue-50">{t("📄 ดึงจากใบงานอื่น", "📄 Pull from another sheet")}</button>
-                    <button type="button" onClick={() => { if (!fullEdit) setEditing(true); setShapeEdit({ key: null }); }}
+                    <button type="button" onClick={() => openBoardRef.current(null)}
                       className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><Icon value="i:vector-bezier" className="text-[15px]" />{t("วาดชิ้นวัสดุ", "Draw pieces")}</button>
                   </div>
                 ) : null}
@@ -2729,6 +2777,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   );
                 }}
               />
+              )}
 
 
               {/* ค่าใช้จ่ายเพิ่ม (ค่าแรง/โสหุ้ย/อื่นๆ) — เพิ่ม/ลบ/ตั้งชื่อเองได้ */}
@@ -3176,28 +3225,6 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         excludeIds={pmLinkFor ? (pmLinks[pmLinkFor.id] ?? []) : []} onConfirm={onPmLinkPicked} />
 
       {/* ป๊อปจัดการวัสดุตีราคา — CRUD ผ่าน API กลาง master-v2 (เหมือนหน้า /master/design-price-items) */}
-      {/* ✏️ วาดชิ้นวัสดุ — แก้รูปของบรรทัด (key) หรือเพิ่มบรรทัดใหม่ (null) · components/pattern-sheet/shape-editor.tsx */}
-      {shapeEdit && (() => {
-        const row = shapeEdit.key ? costLines.find((r) => r.key === shapeEdit.key) : undefined;
-        // บรรทัดทั้งหมดของชิ้นเดียวกัน (pid เดียวกัน เช่น หนัง + ซับใน) → 1 ชิ้นหลายวัสดุ
-        const pid = row?.shape?.pid;
-        const group = row ? costLines.filter((r) => r.key === row.key || (!!pid && r.shape?.pid === pid && pkey(r.parent_code) === pkey(row.parent_code))) : [];
-        const mats: PieceMat[] = [];
-        for (const r of group) {
-          const m: PieceMat | null = r.item_id ? { id: r.item_id, name: r.item_name ?? t("วัสดุ", "Material") }
-            : r.item_sku_code || r.item_name ? { id: `row:${r.key}`, name: [r.item_sku_code, r.item_name].filter(Boolean).join(" ") } : null;
-          if (m && !mats.some((x) => x.id === m.id)) mats.push(m);
-        }
-        const initial = row?.shape ? [{ shape: row.shape.shape, holes: row.shape.holes, count: row.pieces ?? 1, allow: row.shape.allow, name: row.shape.name, mats }]
-          : row && Number(row.width_cm) > 0 && Number(row.length_cm) > 0 ? [{ shape: { k: "rect" as const, x: 0, y: 0, w: Number(row.width_cm), h: Number(row.length_cm) }, count: row.pieces ?? 1, mats }] : [];
-        return (
-          <ShapeEditor open onClose={() => setShapeEdit(null)} initial={initial} initialBasis={row?.shape?.basis ?? "box"}
-            materials={priceItems.map((p) => ({ id: p.id, name: p.name, sub: p.group_name }))} defaultMats={mats}
-            title={row ? t(`วาดชิ้น: ${row.shape?.name || row.item_name || "ยังไม่เลือกวัสดุ"}`, `Draw piece: ${row.shape?.name || row.item_name || "no material yet"}`) : t("วาดชิ้นวัสดุ (เพิ่มบรรทัดใหม่)", "Draw pieces (new lines)")}
-            multiNote={row ? t("ชิ้นใหม่ใช้วัสดุเดียวกับบรรทัดนี้ (แก้ในแผงได้)", "New pieces use this line's materials (editable in the panel)") : t("1 ชิ้น × 1 วัสดุ = 1 บรรทัด", "1 piece × 1 material = 1 line")}
-            onSave={(res) => { applyShapes(shapeEdit.key, res); setShapeEdit(null); }} />
-        );
-      })()}
       {/* คัดลอกตีราคาจากใบงานอื่น (ข้ามใบ) → มาใส่แท็บที่กำลังดู */}
       {form?.id && (
         <PullCostFromSheetModal open={copyFromOpen} excludeId={form.id} targetLabel={costTabLabel(costParent, generalLabel)} targetCount={curLines.length}

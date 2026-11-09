@@ -7,30 +7,38 @@
  *   แผงรายละเอียดชิ้น (ขั้นที่ 2): ชื่อชิ้น · วัสดุหลายตัว (1 วัสดุ = 1 บรรทัดตีราคา) · เผื่อพับ/เผื่อเย็บ · ขนาดสำเร็จ/ขนาดตัด · จำนวน
  *     เครื่องมือ: แก้จุด · พับครึ่ง → ↓ · กลับด้าน ↔ ↕ · เจาะเป็นรูในชิ้นที่ครอบอยู่ · แยกรู/ลบรู · ลบชิ้น
  *   ย้อนกลับ/ทำซ้ำ: Ctrl+Z · Ctrl+Shift+Z / Ctrl+Y (ทุกการเปลี่ยนแปลง)
+ *   ขั้นที่ 3: ฝังในแท็บได้ (embedded + onChange = ส่งค่ากลับทุกครั้งที่แก้ → ตารางเปลี่ยนตาม) · ตำแหน่งชิ้นบนกระดาน (at)
+ *     รูปอ้างอิง (รูปสินค้า วางใต้กระดาน · จาง · ล็อก · ตั้งขนาดจริงด้วย 2 จุด) · ไม้บรรทัดวัด ตรง / โค้ง / ตามขอบชิ้น (M)
  *   คีย์ลัด: R สี่เหลี่ยม · O วงกลม · P ปากกา · V ย้าย · H มือ · Space ค้าง = เลื่อน · ลูกศร = ขยับ (Shift ×10)
  *            Shift ระหว่างวาด = จัตุรัส/วงกลม/เส้น 45° · Enter = ปิดรูปปากกา · Esc = ยกเลิก · Delete = ลบชิ้น/จุด
  *
  *   <ShapeEditor open onClose initial={[{ shape, holes, count, allow, name, mats }]} materials={[{ id, name }]} onSave={(r) => …} />
  * สูตร: lib/pattern-shape · ใช้ที่: แท็บตีราคา ใบงานออกแบบ (components/design-sheet-detail) · คู่มือ docs/pattern-sheet.md
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ERPModal } from "@/components/modal";
 import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
-  SNAP_STEPS, cleanAllow, fitPiece, flipPiece, foldPiece, movePiece, nearestSegment, parseSvgShapes, pieceGeometry, polyD,
+  SNAP_STEPS, cleanAllow, fitPiece, flattenOpen, flipPiece, foldPiece, movePiece, nearestSegment, openPathLength, outlineDistance, parseSvgShapes, pieceGeometry, polyD, projectOnOutline,
   shapeBox, shapeInside, shapePathD, snapTo, splitSegment, toPathShape, toggleSmooth,
-  type PNode, type PieceGeometry, type Shape, type ShapeBasis,
+  type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
+export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
-export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; name?: string; mats?: PieceMat[] };
-export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[]; geo: PieceGeometry };
-export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis };
+/** pid = รหัสชิ้น (ผูกบรรทัดตีราคา) · at = ตำแหน่งบนกระดาน (มุมซ้ายบนเส้นเย็บ) · src = บรรทัดเดิมที่ชิ้นนี้มาจาก */
+export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; name?: string; mats?: PieceMat[]; pid?: string; at?: [number, number]; src?: string[] };
+export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[]; geo: PieceGeometry; pid: string; at: [number, number]; src: string[] };
+export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs: RefImage[] };
 
-type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[] };
-type Tool = "rect" | "ellipse" | "pen" | "move" | "hand";
+type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[]; pid: string; src: string[] };
+type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure";
+type MeasureMode = "line" | "curve" | "edge";
+type Measure = { id: string; kind: MeasureMode; nodes: PNode[]; len: number; alt?: number; path?: Pt[] };
+type MDraft = { kind: "line"; a: XY; b: XY } | { kind: "curve"; nodes: PNode[]; hover: XY | null } | { kind: "edge"; pieceId: string; a: Pt; hover: XY | null };
+type Ref = RefImage & { id: string; lock: boolean; show: boolean };
 type DrawTool = "rect" | "ellipse" | "pen";
 type View = { x: number; y: number; w: number };
 type XY = { x: number; y: number };
@@ -42,7 +50,11 @@ type Drag =
   | { k: "box" }
   | { k: "penHandle"; idx: number; origin: XY }
   | { k: "node"; idx: number; before: Piece[]; moved: boolean }
-  | { k: "handle"; idx: number; which: "i" | "o"; before: Piece[]; moved: boolean; alt: boolean };
+  | { k: "handle"; idx: number; which: "i" | "o"; before: Piece[]; moved: boolean; alt: boolean }
+  | { k: "ref"; id: string; start: XY; ox: number; oy: number }
+  | { k: "refSize"; id: string; start: XY; w: number }
+  | { k: "mline" }
+  | { k: "mHandle"; idx: number; origin: XY };
 
 const SNAP_KEY = "pattern-shape-snap";
 const ALLOW_KEY = "pattern-shape-allow";
@@ -53,6 +65,8 @@ const r1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString("th-TH", { ma
 const r2s = (n: number) => String(Math.round(n * 100) / 100);
 let seq = 0;
 const newId = () => `p${Date.now().toString(36)}${(seq++).toString(36)}`;
+const newPid = () => `pc${Date.now().toString(36)}${(seq++).toString(36)}`;
+const MEASURE_COLOR = "#7c3aed";
 
 function readNum(key: string, allowed: readonly number[] | null, dflt: number): number {
   try { const raw = localStorage.getItem(key); if (raw == null || raw === "") return dflt; const v = Number(raw); return Number.isFinite(v) && (!allowed || allowed.includes(v)) ? v : dflt; } catch { return dflt; }
@@ -88,10 +102,22 @@ function NumField({ value, onCommit, min, max, label, step = 0.1, className = "w
   );
 }
 
-export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [] }: {
+export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis = "box", title, multiNote, materials = [], defaultMats = [],
+  embedded = false, readonly = false, onChange, initialRefs = [], refPicker, initialSel = null, footerNote }: {
   open: boolean;
-  onClose: () => void;
-  onSave: (r: ShapeEditorResult) => void;
+  onClose?: () => void;
+  onSave?: (r: ShapeEditorResult) => void;
+  /** ฝังในหน้า (ไม่ใช่ป๊อป) — ใช้คู่ onChange: แก้แล้วส่งค่ากลับเอง ไม่มีปุ่มบันทึก */
+  embedded?: boolean;
+  readonly?: boolean;
+  /** เรียกทุกครั้งที่แก้ (หน่วง 0.25 วิ) — ส่งค่าทั้งกระดานกลับ */
+  onChange?: (r: ShapeEditorResult) => void;
+  initialRefs?: RefImage[];
+  /** ตัวเลือกรูปอ้างอิง (เช่น รูปในใบงาน) — เรียก pick(รูป) เมื่อผู้ใช้เลือก */
+  refPicker?: (pick: (img: { url: string; label?: string }) => void) => ReactNode;
+  /** pid ของชิ้นที่ให้เลือกไว้ตอนเปิด */
+  initialSel?: string | null;
+  footerNote?: ReactNode;
   initial?: EditorPiece[];
   initialBasis?: ShapeBasis;
   title?: string;
@@ -108,13 +134,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [size, setSize] = useState({ cw: 0, ch: 0 });   // วัดจริงหลังเปิด (ResizeObserver)
   const sizeRef = useRef({ cw: 0, ch: 0 });
   const [pieces, setPieces] = useState<Piece[]>(() => {
-    // ชิ้นจากตารางเริ่มที่ 0,0 ทุกชิ้น → วางเรียงไปทางขวา ห่างกัน 2 ซม.
-    let x = 0;
+    // ชิ้นที่เคยวางบนกระดาน (at) = วางที่เดิม · ชิ้นที่ยังไม่มีตำแหน่ง (เช่น บรรทัดแบบเดิมที่พิมพ์กว้าง×ยาว) = เรียงต่อไปทางขวา ห่างกัน 2 ซม.
+    let x = initial.reduce((m, p) => (p.at ? Math.max(m, p.at[0] + shapeBox(p.shape).w + (p.allow ?? 0) + 2) : m), 0);
     return initial.map((p) => {
-      const b = shapeBox(p.shape);
-      const m = movePiece({ shape: p.shape, holes: p.holes ?? [] }, x - b.x, -b.y);
-      x += b.w + 2 + (p.allow ?? 0) * 2;
-      return { id: newId(), shape: m.shape, holes: m.holes, count: Math.max(1, Math.round(p.count) || 1), allow: cleanAllow(p.allow), name: p.name ?? "", mats: p.mats ?? [] };
+      const b = shapeBox(p.shape), a = cleanAllow(p.allow);
+      let dx: number, dy: number;
+      if (p.at) { dx = p.at[0] - b.x; dy = p.at[1] - b.y; }
+      else { dx = x + a - b.x; dy = a - b.y; x += b.w + 2 * a + 2; }
+      const m = movePiece({ shape: p.shape, holes: p.holes ?? [] }, dx, dy);
+      return { id: newId(), shape: m.shape, holes: m.holes, count: Math.max(1, Math.round(p.count) || 1), allow: a, name: p.name ?? "", mats: p.mats ?? [], pid: p.pid || newPid(), src: p.src ?? [] };
     });
   });
   const piecesRef = useRef(pieces); piecesRef.current = pieces;
@@ -139,6 +167,17 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const drag = useRef<Drag | null>(null);
   const spaceDown = useRef(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const engaged = useRef(!embedded);   // ฝังในหน้า: คีย์ลัดทำงานเฉพาะหลังคลิกในกระดาน (ไม่แย่งคีย์ส่วนอื่นของหน้า)
+  // รูปอ้างอิง
+  const [refs, setRefs] = useState<Ref[]>(() => initialRefs.slice(0, 4).map((r) => ({ ...r, id: newId(), lock: true, show: true })));
+  const [activeRef, setActiveRef] = useState<string | null>(null);
+  const [refPickOpen, setRefPickOpen] = useState(false);
+  const [cal, setCal] = useState<{ a?: XY; b?: XY; m?: XY; cm: string } | null>(null);
+  // ไม้บรรทัด
+  const [measureMode, setMeasureMode] = useState<MeasureMode>("line");
+  const [measures, setMeasures] = useState<Measure[]>([]);
+  const [mDraft, setMDraft] = useState<MDraft | null>(null);
 
   // ── ย้อนกลับ / ทำซ้ำ ──
   const hist = useRef<Piece[][]>([]);
@@ -209,8 +248,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const a = Math.round(Math.atan2(dy, dx) / (Math.PI / 4)) * (Math.PI / 4);
     return { x: snapTo(from.x + Math.cos(a) * len, snap), y: snapTo(from.y + Math.sin(a) * len, snap) };
   };
-  const changeTool = (tl: Tool) => { setTool(tl); if (tl === "rect" || tl === "ellipse" || tl === "pen") setLastDraw(tl); setPen(null); setBox(null); if (tl !== "move") setEditId(null); };
-  const newPiece = (shape: Shape, holes: Shape[] = []): Piece => ({ id: newId(), shape, holes, count: 1, allow: lastAllow, name: "", mats: [...defaultMats] });
+  const changeTool = (tl: Tool) => {
+    if (readonly && (tl === "rect" || tl === "ellipse" || tl === "pen")) return;
+    setTool(tl); if (tl === "rect" || tl === "ellipse" || tl === "pen") setLastDraw(tl); setPen(null); setBox(null); setMDraft(null); if (tl !== "move") setEditId(null);
+  };
+  const newPiece = (shape: Shape, holes: Shape[] = []): Piece => ({ id: newId(), shape, holes, count: 1, allow: lastAllow, name: "", mats: [...defaultMats], pid: newPid(), src: [] });
   const addPieces = (list: Piece[], selectFirst = true): Piece[] | null => {
     const cur = piecesRef.current;
     if (cur.length + list.length > MAX_PIECES) { setMsg({ tone: "err", text: t(`วาดได้ไม่เกิน ${MAX_PIECES} ชิ้นต่อครั้ง`, `Up to ${MAX_PIECES} pieces at a time`) }); return null; }
@@ -246,6 +288,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (e.button !== 0) return;
     const raw = toCm(e), p = snapPt(raw);
     const target = e.target as Element;
+    // ตั้งขนาดจริงของรูปอ้างอิง: คลิก 2 จุดบนรูป
+    if (cal) { if (!cal.a) setCal({ ...cal, a: raw }); else if (!cal.b) setCal({ ...cal, b: raw, m: undefined }); return; }
+    // รูปอ้างอิงที่ยังไม่ล็อก: ลากย้าย / ลากมุมย่อขยาย
+    const rs = target.getAttribute?.("data-refsize"), rf = target.getAttribute?.("data-ref");
+    if (rs) { const r = refs.find((x) => x.id === rs); if (r) { drag.current = { k: "refSize", id: rs, start: raw, w: r.w }; capture(); } return; }
+    if (rf) { const r = refs.find((x) => x.id === rf); if (r) { setActiveRef(rf); drag.current = { k: "ref", id: rf, start: raw, ox: r.x, oy: r.y }; capture(); } return; }
+    if (tool === "measure") { measureDown(e, raw, p, target, capture); return; }
+    // ดูอย่างเดียว: กด = เลือกชิ้น · ลากที่ว่าง = เลื่อนดู
+    if (readonly) { const hid = target.getAttribute?.("data-piece"); if (hid) setSel(hid); else { setSel(null); drag.current = { k: "pan", sx: e.clientX, sy: e.clientY, v: view }; capture(); } return; }
     // แก้จุด: ลากจุด / หูจับ
     if (editId) {
       const nd = target.getAttribute?.("data-node"), hd = target.getAttribute?.("data-handle");
@@ -285,7 +336,22 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const raw = toCm(e), p = snapPt(raw);
     setHover(p);
     const d = drag.current;
-    if (!d) { if (pen) { const last = pen.nodes[pen.nodes.length - 1]; setPen({ ...pen, hover: e.shiftKey && last ? constrain45(last, p) : p }); } return; }
+    if (cal?.a && !cal.b) setCal({ ...cal, m: raw });
+    if (!d) {
+      if (pen) { const last = pen.nodes[pen.nodes.length - 1]; setPen({ ...pen, hover: e.shiftKey && last ? constrain45(last, p) : p }); }
+      else if (mDraft?.kind === "curve") { const last = mDraft.nodes[mDraft.nodes.length - 1]; setMDraft({ ...mDraft, hover: e.shiftKey && last ? constrain45(last, p) : p }); }
+      else if (mDraft?.kind === "edge") setMDraft({ ...mDraft, hover: raw });
+      return;
+    }
+    if (d.k === "ref") { setRefs((rs) => rs.map((r) => (r.id === d.id ? { ...r, x: d.ox + raw.x - d.start.x, y: d.oy + raw.y - d.start.y } : r))); return; }
+    if (d.k === "refSize") { setRefs((rs) => rs.map((r) => (r.id === d.id ? { ...r, w: Math.max(1, d.w + raw.x - d.start.x) } : r))); return; }
+    if (d.k === "mline" && mDraft?.kind === "line") { setMDraft({ ...mDraft, b: e.shiftKey ? constrain45(mDraft.a, p) : p }); return; }
+    if (d.k === "mHandle" && mDraft?.kind === "curve") {
+      const vx = p.x - d.origin.x, vy = p.y - d.origin.y;
+      if (Math.hypot(vx, vy) * ppc < 3) return;
+      setMDraft({ ...mDraft, hover: null, nodes: mDraft.nodes.map((n, i) => (i === d.idx ? { x: n.x, y: n.y, ox: vx, oy: vy, ix: -vx, iy: -vy } : n)) });
+      return;
+    }
     if (d.k === "pan") { setView({ x: d.v.x - (e.clientX - d.sx) / ppc, y: d.v.y - (e.clientY - d.sy) / ppc, w: d.v.w }); return; }
     if (d.k === "move") {
       const ob = shapeBox(d.orig.shape);
@@ -324,6 +390,11 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const d = drag.current; drag.current = null;
     if (!d) return;
     if ((d.k === "move" || d.k === "node" || d.k === "handle") && d.moved) { record(d.before); setDirty(true); }
+    if (d.k === "mline" && mDraft?.kind === "line") {
+      const { a, b } = mDraft; const len = Math.hypot(b.x - a.x, b.y - a.y);
+      setMDraft(null);
+      if (len > 0) addMeasure({ kind: "line", nodes: [{ x: a.x, y: a.y }, { x: b.x, y: b.y }], len });
+    }
     if (d.k === "box" && box) {
       const x = Math.min(box.a.x, box.b.x), y = Math.min(box.a.y, box.b.y), w = Math.abs(box.a.x - box.b.x), h = Math.abs(box.a.y - box.b.y);
       setBox(null);
@@ -331,6 +402,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     }
   };
   const onDoubleClick = (e: React.MouseEvent<SVGSVGElement>) => {
+    if (mDraft?.kind === "curve") { commitCurve(); return; }
     if (pen) { commitPen(); return; }
     if (!editId) return;
     const target = e.target as Element;
@@ -392,7 +464,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const inField = (el: EventTarget | null) => el instanceof HTMLElement && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
     const onKey = (e: KeyboardEvent) => {
       if (inField(e.target)) return;   // ในช่องพิมพ์ ใช้ย้อนกลับของช่องเอง
+      if (embedded && !engaged.current) return;   // ฝังในหน้า: ต้องคลิกในกระดานก่อน
       const k = e.key.toLowerCase();
+      if (e.key === "Escape" && (mDraft || cal)) { e.stopPropagation(); e.preventDefault(); setMDraft(null); setCal(null); return; }
+      if (e.key === "Enter" && mDraft?.kind === "curve") { e.preventDefault(); commitCurve(); return; }
+      if (readonly) {
+        if (e.key === " ") { spaceDown.current = true; e.preventDefault(); }
+        else if (!e.ctrlKey && !e.metaKey && (k === "m" || k === "h" || k === "v")) { e.preventDefault(); changeTool(k === "m" ? "measure" : k === "h" ? "hand" : "move"); }
+        return;
+      }
       if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); redo(); return; }
       if (e.key === "Escape" && (pen || box || sel || editId)) {
@@ -419,12 +499,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       }
       if (e.key === " ") { spaceDown.current = true; e.preventDefault(); return; }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const map: Record<string, Tool> = { r: "rect", o: "ellipse", e: "ellipse", p: "pen", v: "move", h: "hand" };
+      const map: Record<string, Tool> = { r: "rect", o: "ellipse", e: "ellipse", p: "pen", v: "move", h: "hand", m: "measure" };
       if (map[k]) { e.preventDefault(); changeTool(map[k]); }
     };
     const onKeyUp = (e: KeyboardEvent) => { if (e.key === " ") spaceDown.current = false; };
     const onPaste = (e: ClipboardEvent) => {
       if (inField(e.target)) return;
+      if ((embedded && !engaged.current) || readonly) return;
       const cd = e.clipboardData; if (!cd) return;
       const file = Array.from(cd.files ?? []).find((f) => f.type === "image/svg+xml" || f.name.toLowerCase().endsWith(".svg"));
       if (file) { e.preventDefault(); void file.text().then((x) => importRef.current(x)); return; }
@@ -437,7 +518,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     window.addEventListener("paste", onPaste);
     return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("keyup", onKeyUp); window.removeEventListener("paste", onPaste); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, pen, box, sel, editId, selNode, step]);
+  }, [open, pen, box, sel, editId, selNode, step, mDraft, cal, readonly]);
+
+  // ฝังในหน้า: คลิกในกระดาน = เปิดคีย์ลัด · คลิกนอกกระดาน = ปิด
+  useEffect(() => {
+    if (!embedded) return;
+    const onDown = (e: PointerEvent) => { engaged.current = !!rootRef.current?.contains(e.target as Node); };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [embedded]);
 
   const onFile = async (f: File | null | undefined) => {
     if (!f) return;
@@ -493,9 +582,98 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const lineCount = rows.reduce((s, r) => s + Math.max(1, r.p.mats.length), 0);
   const noMat = rows.filter((r) => !r.p.mats.length).length;
 
+  // ── ผลลัพธ์ (บันทึกแบบป๊อป / ส่งกลับอัตโนมัติแบบฝัง) ──
+  const basisRef = useRef(basis); basisRef.current = basis;
+  const refsRef = useRef(refs); refsRef.current = refs;
+  const buildResult = (): ShapeEditorResult => ({
+    pieces: piecesRef.current.map((p) => {
+      const g = pieceGeometry(p);
+      return { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, name: p.name.trim(), mats: p.mats, geo: g, pid: p.pid, src: p.src, at: [Math.round(g.finished.x * 1000) / 1000, Math.round(g.finished.y * 1000) / 1000] };
+    }),
+    basis: basisRef.current,
+    refs: refsRef.current.map((r) => ({ url: r.url, ...(r.label ? { label: r.label } : {}), x: r.x, y: r.y, w: r.w, ar: r.ar, op: r.op })),
+  });
   const save = () => {
     if (!pieces.length) { setMsg({ tone: "err", text: t("ยังไม่มีชิ้น — วาดหรือวางจาก Illustrator ก่อน", "No pieces yet — draw or paste from Illustrator first") }); return; }
-    onSave({ pieces: rows.map(({ p, g }) => ({ shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, name: p.name.trim(), mats: p.mats, geo: g })), basis });
+    onSave?.(buildResult());
+  };
+  const onChangeRef = useRef(onChange); onChangeRef.current = onChange;
+  const sigOf = () => JSON.stringify([piecesRef.current.map((p) => [p.shape, p.holes, p.count, p.allow, p.name, p.mats, p.pid]), basisRef.current, refsRef.current.map((r) => [r.url, r.x, r.y, r.w, r.ar, r.op])]);
+  const lastSig = useRef<string | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flush = useCallback(() => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null; }
+    const s = sigOf();
+    if (s !== lastSig.current) { lastSig.current = s; onChangeRef.current?.(buildResult()); }
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (lastSig.current == null) { lastSig.current = sigOf(); return; }   // ตอนเปิด ไม่ส่ง (ยังไม่ได้แก้)
+    if (!onChangeRef.current) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(flush, 250);
+  }, [pieces, basis, refs]);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => { if (timer.current) flush(); }, [flush]);   // ปิด/สลับมุมมองระหว่างรอ = ส่งทันที ไม่หาย
+  useEffect(() => { if (initialSel) { const pc = piecesRef.current.find((x) => x.pid === initialSel); if (pc) { setSel(pc.id); setTool("move"); } } }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── รูปอ้างอิง ──
+  const addRef = (img: { url: string; label?: string }) => {
+    setRefPickOpen(false);
+    const id = newId();
+    const w = Math.max(10, Math.round(view.w * 0.45));
+    setRefs((rs) => [...rs.slice(-3), { id, url: img.url, label: img.label, x: view.x + view.w * 0.08, y: view.y + vh * 0.08, w, ar: 1, op: 0.5, lock: false, show: true }]);
+    setActiveRef(id);
+    const im = new Image();
+    im.onload = () => { if (im.naturalWidth > 0) setRefs((rs) => rs.map((r) => (r.id === id ? { ...r, ar: im.naturalHeight / im.naturalWidth } : r))); };
+    im.src = img.url;
+    setMsg({ tone: "ok", text: t("วางรูปอ้างอิงแล้ว — ลากย้าย / ลากมุมขวาล่างย่อขยาย แล้วกด \"ตั้งขนาดจริง\"", "Reference added — drag to move, drag the corner to resize, then \"Set real size\"") });
+  };
+  const patchRef = (id: string, patch: Partial<Ref>) => setRefs((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const applyCal = () => {
+    const cm = Number(cal?.cm);
+    if (!cal?.a || !cal.b || !(cm > 0) || !activeRef) return;
+    const a = cal.a, d = Math.hypot(cal.b.x - a.x, cal.b.y - a.y);
+    if (!(d > 0)) return;
+    const k = cm / d;
+    setRefs((rs) => rs.map((r) => (r.id === activeRef ? { ...r, x: a.x - (a.x - r.x) * k, y: a.y - (a.y - r.y) * k, w: r.w * k, lock: true } : r)));
+    setCal(null);
+    setMsg({ tone: "ok", text: t(`ตั้งขนาดจริงแล้ว (${cm} ซม.) — รูปล็อกไว้ วาดลอกตามได้เลย`, `Real size set (${cm} cm) — locked; trace over it`) });
+  };
+
+  // ── ไม้บรรทัด ──
+  const fmtLen = (n: number) => `${(Math.round(n * 10) / 10).toLocaleString("th-TH", { maximumFractionDigits: 1 })} ${t("ซม.", "cm")}`;
+  const addMeasure = (m: Omit<Measure, "id">) => {
+    setMeasures((ms) => [...ms.slice(-29), { ...m, id: newId() }]);
+    setMsg({ tone: "ok", text: m.kind === "edge" ? t(`ตามขอบ ${fmtLen(m.len)} (อ้อมอีกทาง ${fmtLen(m.alt ?? 0)})`, `Along edge ${fmtLen(m.len)} (other way ${fmtLen(m.alt ?? 0)})`) : t(`วัดได้ ${fmtLen(m.len)}`, `Measured ${fmtLen(m.len)}`) });
+  };
+  const commitCurve = () => {
+    if (mDraft?.kind !== "curve") return;
+    const nodes: PNode[] = [];
+    for (const n of mDraft.nodes) { const last = nodes[nodes.length - 1]; if (last && Math.hypot(n.x - last.x, n.y - last.y) < 0.02) continue; nodes.push({ ...n }); }
+    setMDraft(null);
+    if (nodes.length >= 2) addMeasure({ kind: "curve", nodes, len: openPathLength(nodes) });
+  };
+  const measureDown = (e: React.PointerEvent<SVGSVGElement>, raw: XY, p: XY, target: Element, capture: () => void) => {
+    if (measureMode === "line") { setMDraft({ kind: "line", a: p, b: p }); drag.current = { k: "mline" }; capture(); return; }
+    if (measureMode === "curve") {
+      const nodes = mDraft?.kind === "curve" ? mDraft.nodes : [];
+      const last = nodes[nodes.length - 1];
+      const q = e.shiftKey && last ? constrain45(last, p) : p;
+      setMDraft({ kind: "curve", nodes: [...nodes, { x: q.x, y: q.y }], hover: null });
+      drag.current = { k: "mHandle", idx: nodes.length, origin: q }; capture();
+      return;
+    }
+    if (mDraft?.kind === "edge") {   // จุดปลาย
+      const g = geo.get(mDraft.pieceId);
+      setMDraft(null);
+      if (!g) return;
+      const r = outlineDistance(g.sew, mDraft.a, [raw.x, raw.y]);
+      addMeasure({ kind: "edge", nodes: [], len: r.short, alt: r.long, path: r.path });
+      return;
+    }
+    const hid = target.getAttribute?.("data-piece");
+    const g = hid ? geo.get(hid) : null;
+    if (!hid || !g) { setMsg({ tone: "err", text: t("วัดตามขอบ: คลิกบนชิ้นตรงจุดเริ่ม แล้วคลิกจุดปลาย", "Along edge: click a piece at the start point, then the end point") }); return; }
+    setMDraft({ kind: "edge", pieceId: hid, a: projectOnOutline(g.sew, [raw.x, raw.y]).at, hover: null });
   };
 
   // ── วาดไม้บรรทัด / ตาราง ──
@@ -534,33 +712,37 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const selHost = selPiece ? hostOf(selPiece) : null;
   const matOptions = materials.filter((m) => !selPiece?.mats.some((x) => x.id === m.id)).map((m) => ({ value: m.id, label: m.name, sub: m.sub ?? undefined }));
 
-  return (
-    <ERPModal open={open} onClose={onClose} size="xl" hasUnsavedChanges={dirty}
-      title={title ?? t("วาดชิ้นวัสดุ", "Draw material pieces")}
-      description={t("ขนาดจริงหน่วย ซม. · กดชิ้นเพื่อใส่วัสดุ เผื่อพับ เจาะรู พับครึ่ง แก้จุด · Ctrl+Z ย้อนกลับ", "Real size in cm · click a piece for materials, allowance, holes, fold, points · Ctrl+Z to undo")}
-      footer={<>
+  const activeRefObj = refs.find((r) => r.id === activeRef) ?? refs[refs.length - 1] ?? null;
+  const footerEl = (<>
         <div className="mr-auto flex flex-wrap items-center gap-2 text-xs text-slate-500">
           <span>{t("คิดผ้าจาก", "Fabric from")}</span>
           {(["box", "area"] as ShapeBasis[]).map((b) => (
-            <button key={b} type="button" onClick={() => { setBasis(b); setDirty(true); }} className={`h-7 rounded-md border px-2 text-xs ${basis === b ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+            <button key={b} type="button" disabled={readonly} onClick={() => { setBasis(b); setDirty(true); }} className={`h-7 rounded-md border px-2 text-xs ${basis === b ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
               {b === "box" ? t("กรอบสี่เหลี่ยม", "Bounding box") : t("พื้นที่จริง", "Actual area")}
             </button>
           ))}
           <span className="text-slate-400">{t(`รวม ${Math.round(total).toLocaleString("th-TH")} ตร.ซม. · จะได้ ${lineCount} บรรทัด`, `Total ${Math.round(total).toLocaleString("th-TH")} cm² · ${lineCount} lines`)}</span>
           {noMat > 0 && materials.length > 0 && <span className="text-amber-600">{t(`${noMat} ชิ้นยังไม่เลือกวัสดุ`, `${noMat} pieces have no material`)}</span>}
           {multiNote && <span className="text-slate-400">{multiNote}</span>}
+          {footerNote}
         </div>
-        <button type="button" onClick={onClose} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
-        <button type="button" onClick={save} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">{t(`ใช้ขนาดนี้ (${pieces.length} ชิ้น)`, `Use these (${pieces.length} pcs)`)}</button>
-      </>}>
+        {!embedded && <>
+          <button type="button" onClick={() => onClose?.()} className="h-9 rounded-lg border border-slate-200 px-4 text-sm hover:bg-slate-50">{t("ยกเลิก", "Cancel")}</button>
+          <button type="button" onClick={save} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">{t(`ใช้ขนาดนี้ (${pieces.length} ชิ้น)`, `Use these (${pieces.length} pcs)`)}</button>
+        </>}
+      </>);
+  const bodyEl = (
       <div className="space-y-3">
         {/* แถบเครื่องมือ */}
         <div className="flex flex-wrap items-center gap-1.5">
-          {toolBtn("rect", "square", t("สี่เหลี่ยม", "Rectangle"), "R")}
-          {toolBtn("ellipse", "circle", t("วงกลม", "Circle"), "O")}
-          {toolBtn("pen", "vector-bezier", t("ปากกา", "Pen"), "P")}
-          {toolBtn("move", "pointer", t("ย้าย", "Move"), "V")}
+          {!readonly && toolBtn("rect", "square", t("สี่เหลี่ยม", "Rectangle"), "R")}
+          {!readonly && toolBtn("ellipse", "circle", t("วงกลม", "Circle"), "O")}
+          {!readonly && toolBtn("pen", "vector-bezier", t("ปากกา", "Pen"), "P")}
+          {toolBtn("move", "pointer", readonly ? t("เลือก", "Select") : t("ย้าย", "Move"), "V")}
           {toolBtn("hand", "hand-stop", t("เลื่อนดู", "Pan"), "H")}
+          {toolBtn("measure", "ruler-measure", t("ไม้บรรทัด", "Measure"), "M")}
+          {refPicker && <button type="button" onClick={() => setRefPickOpen((v) => !v)} className={btnCls(refPickOpen)} title={t("ใส่รูปสินค้าเป็นภาพอ้างอิงใต้กระดาน (วาดลอกตาม)", "Put a product photo under the board as a tracing reference")}><Icon value="i:photo" className="text-[14px]" />{t("รูปอ้างอิง", "Reference")}</button>}
+          {!readonly && <>
           <span className="mx-1 h-5 w-px bg-slate-200" />
           <button type="button" onClick={undo} disabled={!hist.current.length} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} className={`${btnCls(false)} disabled:opacity-40`}><Icon value="i:arrow-back-up" className="text-[14px]" />{t("ย้อน", "Undo")}</button>
           <button type="button" onClick={redo} disabled={!fut.current.length} title={t("ทำซ้ำ (Ctrl+Shift+Z / Ctrl+Y)", "Redo (Ctrl+Shift+Z / Ctrl+Y)")} className={`${btnCls(false)} disabled:opacity-40`}><Icon value="i:arrow-forward-up" className="text-[14px]" />{t("ทำซ้ำ", "Redo")}</button>
@@ -569,6 +751,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
             <Icon value="i:file-import" className="text-[14px]" />{t("ไฟล์ SVG", "SVG file")}
           </button>
           <input ref={fileRef} type="file" accept=".svg,image/svg+xml" className="hidden" onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
+          </>}
           <span className="ml-auto flex items-center gap-1">
             <button type="button" onClick={() => zoomAt(0.5)} aria-label={t("ซูมออก", "Zoom out")} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><Icon value="i:zoom-out" className="text-[15px]" /></button>
             <span className="w-12 text-center text-xs tabular-nums text-slate-500">{Math.round((62 / view.w) * 100)}%</span>
@@ -585,6 +768,46 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           ))}
           <span className="ml-auto font-mono tabular-nums text-slate-500">{hover ? `x ${r2s(hover.x)} · y ${r2s(hover.y)} ${t("ซม.", "cm")}` : "x — · y —"}</span>
         </div>
+        {tool === "measure" && (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-violet-50 px-2 py-1.5 text-xs text-violet-800">
+            <Icon value="i:ruler-measure" className="text-[14px]" />{t("ไม้บรรทัด", "Measure")}
+            {([["line", t("วัดตรง", "Straight")], ["curve", t("วัดโค้ง", "Curve")], ["edge", t("ตามขอบชิ้น", "Along edge")]] as [MeasureMode, string][]).map(([m, l]) => (
+              <button key={m} type="button" onClick={() => { setMeasureMode(m); setMDraft(null); }} className={`h-7 rounded-md border px-2 ${measureMode === m ? "border-violet-400 bg-white font-medium text-violet-700" : "border-transparent text-violet-700 hover:bg-white/60"}`}>{l}</button>
+            ))}
+            <span className="text-violet-600">{measureMode === "line" ? t("กดลากจากจุดหนึ่งไปอีกจุด (Shift = 45°)", "Drag from one point to another (Shift = 45°)") : measureMode === "curve" ? t("คลิกวางจุดตามแนว · กดลาก = โค้ง · ดับเบิลคลิก/Enter = จบ", "Click points along the line · drag = curve · double-click/Enter = finish") : t("คลิกบนชิ้นที่จุดเริ่ม แล้วคลิกจุดปลาย — วัดตามเส้นเย็บ", "Click a piece at the start, then the end — measured along the sewing line")}</span>
+            {measures.length > 0 && <button type="button" onClick={() => setMeasures([])} className="ml-auto h-7 rounded-md px-2 text-violet-700 hover:bg-white/60">{t(`ล้างการวัด (${measures.length})`, `Clear (${measures.length})`)}</button>}
+          </div>
+        )}
+        {refPickOpen && refPicker && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-2 flex items-center gap-2 text-xs text-slate-600"><b className="font-medium">{t("เลือกรูปสินค้าเป็นภาพอ้างอิง", "Pick a product photo as a reference")}</b><button type="button" onClick={() => setRefPickOpen(false)} className="ml-auto text-slate-400 hover:text-slate-600">✕</button></div>
+            {refPicker(addRef)}
+          </div>
+        )}
+        {refs.length > 0 && activeRefObj && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-600">
+            <Icon value="i:photo" className="text-[14px]" />
+            {refs.map((r, i) => <button key={r.id} type="button" onClick={() => setActiveRef(r.id)} className={`h-7 max-w-[10rem] truncate rounded-md border px-2 ${r.id === activeRefObj.id ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 bg-white"}`}>{r.label || t(`รูป ${i + 1}`, `Image ${i + 1}`)}</button>)}
+            <span className="text-slate-400">{t("จาง", "Fade")}</span>
+            <input type="range" min={10} max={100} step={5} value={Math.round(activeRefObj.op * 100)} onChange={(e) => patchRef(activeRefObj.id, { op: Number(e.target.value) / 100 })} className="w-24" aria-label={t("ความจางของรูป", "Image opacity")} />
+            <label className="flex items-center gap-1"><input type="checkbox" checked={activeRefObj.lock} onChange={(e) => patchRef(activeRefObj.id, { lock: e.target.checked })} className="h-3.5 w-3.5" />{t("ล็อก", "Lock")}</label>
+            <label className="flex items-center gap-1"><input type="checkbox" checked={activeRefObj.show} onChange={(e) => patchRef(activeRefObj.id, { show: e.target.checked })} className="h-3.5 w-3.5" />{t("แสดง", "Show")}</label>
+            {!readonly && <button type="button" onClick={() => { setActiveRef(activeRefObj.id); patchRef(activeRefObj.id, { lock: true, show: true }); setCal({ cm: "30" }); }} className={btnCls(!!cal)}><Icon value="i:ruler-measure" className="text-[14px]" />{t("ตั้งขนาดจริง", "Set real size")}</button>}
+            {!readonly && <button type="button" onClick={() => { setRefs((rs) => rs.filter((r) => r.id !== activeRefObj.id)); setActiveRef(null); }} className="h-7 rounded-md px-2 text-rose-600 hover:bg-rose-50">{t("เอารูปออก", "Remove")}</button>}
+            <span className="text-slate-400">{t("กว้าง", "W")} {r1(activeRefObj.w)} {t("ซม.", "cm")}</span>
+          </div>
+        )}
+        {cal && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <span>{!cal.a ? t("ตั้งขนาดจริง: คลิกจุดที่ 1 บนรูป (เช่น มุมซ้ายของตัวกระเป๋า)", "Set real size: click point 1 on the image (e.g. the bag's left corner)") : !cal.b ? t("คลิกจุดที่ 2 (เช่น มุมขวาของตัวกระเป๋า)", "Click point 2 (e.g. the bag's right corner)") : t(`ตอนนี้ห่าง ${r1(Math.hypot(cal.b.x - cal.a.x, cal.b.y - cal.a.y))} ซม. — ของจริงยาว`, `Now ${r1(Math.hypot(cal.b.x - cal.a.x, cal.b.y - cal.a.y))} cm apart — real length`)}</span>
+            {cal.a && cal.b && <>
+              <input type="number" step="0.1" min={0.1} value={cal.cm} onChange={(e) => setCal({ ...cal, cm: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") applyCal(); }} autoFocus aria-label={t("ระยะจริง ซม.", "Real length cm")} className="h-7 w-20 rounded border border-amber-300 bg-white px-1.5 text-right" />
+              <span>{t("ซม.", "cm")}</span>
+              <button type="button" onClick={applyCal} className="h-7 rounded-md bg-amber-600 px-2.5 text-white hover:bg-amber-700">{t("ตั้ง", "Set")}</button>
+            </>}
+            <button type="button" onClick={() => setCal(null)} className="ml-auto h-7 rounded-md px-2 hover:bg-amber-100">{t("ยกเลิก", "Cancel")}</button>
+          </div>
+        )}
 
         <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_290px]">   {/* แผงขวาอยู่ตลอด — เลือก/เลิกเลือกชิ้นแล้วพื้นที่วาดไม่ขยับ */}
           <div className="min-w-0 space-y-2">
@@ -604,6 +827,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 viewBox={`${view.x} ${view.y} ${view.w} ${Math.max(0.001, vh)}`} preserveAspectRatio="none"
                 onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
                 onPointerLeave={() => setHover(null)} onDoubleClick={onDoubleClick}>
+                {refs.filter((r) => r.show).map((r) => (
+                  <image key={r.id} href={r.url} x={r.x} y={r.y} width={r.w} height={r.w * r.ar} opacity={r.op} preserveAspectRatio="none"
+                    data-ref={r.lock || readonly ? undefined : r.id} style={{ pointerEvents: r.lock || readonly || cal ? "none" : "auto", cursor: "move" }} />
+                ))}
                 {ticks(view.x, view.w, gridStep).map((x) => <line key={`gx${x}`} x1={x} x2={x} y1={view.y} y2={view.y + vh} stroke={isMajor(x, rs.major) ? COLORS.gridMajor : COLORS.grid} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
                 {ticks(view.y, vh, gridStep).map((y) => <line key={`gy${y}`} y1={y} y2={y} x1={view.x} x2={view.x + view.w} stroke={isMajor(y, rs.major) ? COLORS.gridMajor : COLORS.grid} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
                 {rows.map(({ p, i, g }) => {
@@ -652,6 +879,52 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   </> : null}
                   {pen.nodes.map((n, i) => <circle key={i} cx={n.x} cy={n.y} r={fs * (i === 0 ? 0.4 : 0.25)} fill={i === 0 ? "#fff" : COLORS.sel} stroke={COLORS.sel} strokeWidth={1.5} vectorEffect="non-scaling-stroke" />)}
                 </g>}
+                {refs.filter((r) => r.show && !r.lock && !readonly && !cal).map((r) => (
+                  <g key={`rf${r.id}`}>
+                    <rect x={r.x} y={r.y} width={r.w} height={r.w * r.ar} fill="none" stroke={COLORS.sel} strokeDasharray="5 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+                    <rect x={r.x + r.w - fs * 0.35} y={r.y + r.w * r.ar - fs * 0.35} width={fs * 0.7} height={fs * 0.7} fill={COLORS.sel} data-refsize={r.id} style={{ cursor: "nwse-resize" }} />
+                  </g>
+                ))}
+                {/* การวัด */}
+                {[...measures, ...(mDraft?.kind === "line" ? [{ id: "draft", kind: "line" as const, nodes: [{ x: mDraft.a.x, y: mDraft.a.y }, { x: mDraft.b.x, y: mDraft.b.y }], len: Math.hypot(mDraft.b.x - mDraft.a.x, mDraft.b.y - mDraft.a.y) }] : [])].map((m) => {
+                  const P: Pt[] = m.kind === "edge" ? m.path ?? [] : flattenOpen(m.nodes);
+                  if (P.length < 2) return null;
+                  const mid = P[Math.floor(P.length / 2)];
+                  const label = m.kind === "edge" ? t(`ตามขอบ ${fmtLen(m.len)}`, `along edge ${fmtLen(m.len)}`) : fmtLen(m.len);
+                  return (
+                    <g key={m.id} style={{ pointerEvents: "none" }}>
+                      <polyline points={P.map((q) => q.join(",")).join(" ")} fill="none" stroke={MEASURE_COLOR} strokeWidth={m.kind === "edge" ? 3 : 1.5} strokeOpacity={m.kind === "edge" ? 0.7 : 1} vectorEffect="non-scaling-stroke" />
+                      {[P[0], P[P.length - 1]].map((q, i) => <circle key={i} cx={q[0]} cy={q[1]} r={fs * 0.18} fill={MEASURE_COLOR} />)}
+                      <text x={mid[0]} y={mid[1] - fs * 0.45} fontSize={fs * 0.85} textAnchor="middle" fill={MEASURE_COLOR} stroke="#fff" strokeWidth={fs * 0.12} paintOrder="stroke">{label}</text>
+                    </g>
+                  );
+                })}
+                {mDraft?.kind === "curve" && (() => {
+                  const nodes = mDraft.hover ? [...mDraft.nodes, { x: mDraft.hover.x, y: mDraft.hover.y }] : mDraft.nodes;
+                  const P = flattenOpen(nodes);
+                  const last = P[P.length - 1];
+                  return <g style={{ pointerEvents: "none" }}>
+                    <polyline points={P.map((q) => q.join(",")).join(" ")} fill="none" stroke={MEASURE_COLOR} strokeWidth={1.5} strokeDasharray="4 3" vectorEffect="non-scaling-stroke" />
+                    {mDraft.nodes.map((n, i) => <circle key={i} cx={n.x} cy={n.y} r={fs * 0.2} fill={MEASURE_COLOR} />)}
+                    {last && <text x={last[0] + fs * 0.4} y={last[1] - fs * 0.4} fontSize={fs * 0.85} fill={MEASURE_COLOR} stroke="#fff" strokeWidth={fs * 0.12} paintOrder="stroke">{fmtLen(openPathLength(nodes))}</text>}
+                  </g>;
+                })()}
+                {mDraft?.kind === "edge" && (() => {
+                  const g = geo.get(mDraft.pieceId);
+                  const r = g && mDraft.hover ? outlineDistance(g.sew, mDraft.a, [mDraft.hover.x, mDraft.hover.y]) : null;
+                  return <g style={{ pointerEvents: "none" }}>
+                    {r && <polyline points={r.path.map((q) => q.join(",")).join(" ")} fill="none" stroke={MEASURE_COLOR} strokeWidth={3} strokeOpacity={0.6} vectorEffect="non-scaling-stroke" />}
+                    <circle cx={mDraft.a[0]} cy={mDraft.a[1]} r={fs * 0.25} fill={MEASURE_COLOR} />
+                    {r && mDraft.hover && <text x={mDraft.hover.x + fs * 0.4} y={mDraft.hover.y - fs * 0.4} fontSize={fs * 0.85} fill={MEASURE_COLOR} stroke="#fff" strokeWidth={fs * 0.12} paintOrder="stroke">{fmtLen(r.short)}</text>}
+                  </g>;
+                })()}
+                {cal?.a && (() => {
+                  const b = cal.b ?? cal.m;
+                  return <g style={{ pointerEvents: "none" }}>
+                    <circle cx={cal.a.x} cy={cal.a.y} r={fs * 0.25} fill="#dc2626" />
+                    {b && <><line x1={cal.a.x} y1={cal.a.y} x2={b.x} y2={b.y} stroke="#dc2626" strokeWidth={1.5} vectorEffect="non-scaling-stroke" /><circle cx={b.x} cy={b.y} r={fs * 0.25} fill="#dc2626" /></>}
+                  </g>;
+                })()}
               </svg>
             </div>
             <div className="text-xs text-slate-500">{hint}</div>
@@ -667,7 +940,24 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 <li>{t("Ctrl+Z ย้อนกลับ · Ctrl+Shift+Z / Ctrl+Y ทำซ้ำ", "Ctrl+Z undo · Ctrl+Shift+Z / Ctrl+Y redo")}</li>
                 <li>{t("R สี่เหลี่ยม · O วงกลม · P ปากกา · V ย้าย · H เลื่อนดู", "R rect · O circle · P pen · V move · H pan")}</li>
                 <li>{t("ลูกศร = ขยับชิ้น (Shift ×10) · Delete = ลบ", "Arrows = nudge (Shift ×10) · Delete = remove")}</li>
+                <li>{t("M ไม้บรรทัด: วัดตรง · วัดโค้ง · ตามขอบชิ้น", "M measure: straight · curve · along edge")}</li>
               </ul>
+              {measures.length > 0 && (
+                <div className="mt-3 border-t border-slate-100 pt-2">
+                  <div className="mb-1 flex items-center font-medium text-slate-600">{t("การวัด", "Measurements")}<button type="button" onClick={() => setMeasures([])} className="ml-auto text-[11px] text-slate-400 hover:text-rose-600">{t("ล้าง", "Clear")}</button></div>
+                  <ul className="space-y-0.5">
+                    {measures.map((m, i) => (
+                      <li key={m.id} className="flex items-center gap-1.5">
+                        <span className="text-violet-700">{i + 1}. {m.kind === "line" ? t("ตรง", "Straight") : m.kind === "curve" ? t("โค้ง", "Curve") : t("ตามขอบ", "Edge")}</span>
+                        <b className="tabular-nums text-slate-700">{fmtLen(m.len)}</b>
+                        {m.kind === "edge" && <span className="text-slate-400">{t(`(อีกทาง ${fmtLen(m.alt ?? 0)})`, `(other ${fmtLen(m.alt ?? 0)})`)}</span>}
+                        <button type="button" onClick={() => setMeasures((ms) => ms.filter((x) => x.id !== m.id))} className="ml-auto text-slate-300 hover:text-rose-600" aria-label={t("ลบการวัดนี้", "Remove measurement")}>✕</button>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="mt-1 text-[11px] text-slate-400">{t("การวัดไว้ดูชั่วคราว ไม่ได้บันทึก", "Measurements are temporary (not saved)")}</div>
+                </div>
+              )}
             </aside>
           )}
           {selPiece && selGeo && (
@@ -796,6 +1086,19 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           </div>
         </div>
       </div>
+  );
+  if (embedded) return (
+    <div ref={rootRef} className="space-y-3">
+      {bodyEl}
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-2">{footerEl}</div>
+    </div>
+  );
+  return (
+    <ERPModal open={open} onClose={() => onClose?.()} size="xl" hasUnsavedChanges={dirty}
+      title={title ?? t("วาดชิ้นวัสดุ", "Draw material pieces")}
+      description={t("ขนาดจริงหน่วย ซม. · กดชิ้นเพื่อใส่วัสดุ เผื่อพับ เจาะรู พับครึ่ง แก้จุด · Ctrl+Z ย้อนกลับ", "Real size in cm · click a piece for materials, allowance, holes, fold, points · Ctrl+Z to undo")}
+      footer={footerEl}>
+      <div ref={rootRef}>{bodyEl}</div>
     </ERPModal>
   );
 }

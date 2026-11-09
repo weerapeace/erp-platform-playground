@@ -31,8 +31,11 @@ export type ShapeBasis = "box" | "area";
  * รูปทรงของบรรทัดตีราคา (design_sheet_cost_lines.shape) — shape/holes = เส้นเย็บ (ขนาดสำเร็จ) เริ่มที่ 0,0
  *   allow = เผื่อพับ/เผื่อเย็บ (ซม.) → เส้นตัด = ขยายออก allow · รูเจาะหดเข้า allow · กว้าง×ยาวในบรรทัด = กรอบของเส้นตัด
  *   pid = รหัสชิ้น (บรรทัดหลายวัสดุของชิ้นเดียวกัน เช่น หนัง + ซับใน ใช้ pid เดียวกัน) · name = ชื่อชิ้น เช่น "ตัวหน้า"
+ *   at = ตำแหน่งชิ้นบนกระดาน "แบบวาด" (มุมซ้ายบนของเส้นเย็บ · ซม.) · refs = รูปอ้างอิงบนกระดาน (พิกัดกระดาน · เก็บซ้ำทุกบรรทัดของแท็บ)
  */
-export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; pid?: string; name?: string };
+export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[] };
+/** รูปอ้างอิง (รูปสินค้า) วางใต้กระดานวาด — url จากรูปในระบบ · x,y,w = ซม. บนกระดาน · ar = สูง/กว้าง · op = ความจาง 0–1 */
+export type RefImage = { url: string; label?: string; x: number; y: number; w: number; ar: number; op: number };
 /** ชิ้นงาน 1 ชิ้น = เส้นรอบนอก + รูเจาะ + เผื่อพับ */
 export type PieceGeom = { shape: Shape; holes?: Shape[]; allow?: number };
 export type Box = { x: number; y: number; w: number; h: number };
@@ -212,6 +215,21 @@ export function cleanLineShape(raw: unknown): LineShape | null {
   if (allow) out.allow = allow;
   if (typeof o.pid === "string" && /^[\w-]{1,40}$/.test(o.pid)) out.pid = o.pid;
   if (typeof o.name === "string" && o.name.trim()) out.name = o.name.trim().slice(0, 60);
+  if (Array.isArray(o.at) && o.at.length === 2) { const x = fin(o.at[0]), y = fin(o.at[1]); if (x != null && y != null && Math.abs(x) < 1e5 && Math.abs(y) < 1e5) out.at = [r3(x), r3(y)]; }
+  if (Array.isArray(o.refs)) { const refs = o.refs.slice(0, 4).map(cleanRefImage).filter((r): r is RefImage => !!r); if (refs.length) out.refs = refs; }
+  return out;
+}
+
+/** ตรวจรูปอ้างอิง — รับเฉพาะรูปในระบบ (/api/r2-image?key=…) หรือ https · ห้าม data:/javascript: (กันไฟล์ยักษ์/สคริปต์แฝง) */
+export function cleanRefImage(raw: unknown): RefImage | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const url = typeof o.url === "string" ? o.url.trim() : "";
+  if (!url || url.length > 600 || !(/^\/api\/r2-image\?key=/.test(url) || /^https:\/\//.test(url))) return null;
+  const x = fin(o.x), y = fin(o.y), w = fin(o.w), ar = fin(o.ar), op = fin(o.op);
+  if (x == null || y == null || w == null || !(w >= 0.5 && w <= 2000) || ar == null || !(ar >= 0.02 && ar <= 50)) return null;
+  const out: RefImage = { url, x: r3(x), y: r3(y), w: r3(w), ar: Math.round(ar * 10000) / 10000, op: op != null && op >= 0.05 && op <= 1 ? Math.round(op * 100) / 100 : 0.5 };
+  if (typeof o.label === "string" && o.label.trim()) out.label = o.label.trim().slice(0, 60);
   return out;
 }
 
@@ -730,4 +748,73 @@ export function toggleSmooth(nodes: PNode[], i: number): PNode[] {
   const vx = (q.x - p.x) / 6, vy = (q.y - p.y) / 6;
   c.ox = vx; c.oy = vy; c.ix = -vx; c.iy = -vy;
   return out;
+}
+
+// ───────────────────────── ไม้บรรทัด: วัดตรง · วัดโค้ง · วัดตามขอบชิ้น (2026-11-09) ─────────────────────────
+
+/** เส้นเปิด (ไม่ปิดกลับจุดแรก) จากจุด+หูจับ → จุดถี่ ๆ */
+export function flattenOpen(nodes: PNode[], steps = CURVE_STEPS): Pt[] {
+  if (!nodes.length) return [];
+  const out: Pt[] = [[nodes[0].x, nodes[0].y]];
+  for (let i = 1; i < nodes.length; i++) {
+    const a = nodes[i - 1], b = nodes[i];
+    if (hasOut(a) || hasIn(b)) {
+      const x1 = a.x + (a.ox ?? 0), y1 = a.y + (a.oy ?? 0), x2 = b.x + (b.ix ?? 0), y2 = b.y + (b.iy ?? 0);
+      for (let t = 1; t <= steps; t++) {
+        const u = t / steps, v = 1 - u;
+        out.push([v * v * v * a.x + 3 * v * v * u * x1 + 3 * v * u * u * x2 + u * u * u * b.x, v * v * v * a.y + 3 * v * v * u * y1 + 3 * v * u * u * y2 + u * u * u * b.y]);
+      }
+    } else out.push([b.x, b.y]);
+  }
+  return out;
+}
+
+/** ความยาวเส้นเปิด (วัดโค้ง) — ซม. */
+export function openPathLength(nodes: PNode[]): number {
+  const P = flattenOpen(nodes);
+  let L = 0;
+  for (let i = 1; i < P.length; i++) L += Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]);
+  return L;
+}
+
+/** จุดบนรูปปิด (จุดถี่ ๆ) ที่ใกล้ p ที่สุด → ระยะทางสะสมตามขอบจากจุดแรก (pos) + ระยะห่างจาก p (d) + จุดที่ตก (at) */
+export function projectOnOutline(P: Pt[], p: Pt): { pos: number; d: number; at: Pt } {
+  let best = { pos: 0, d: Infinity, at: P[0] ?? p };
+  let acc = 0;
+  for (let i = 0; i < P.length; i++) {
+    const a = P[i], b = P[(i + 1) % P.length];
+    const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy, L = Math.sqrt(L2);
+    const t = L2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2)) : 0;
+    const q: Pt = [a[0] + dx * t, a[1] + dy * t];
+    const d = Math.hypot(q[0] - p[0], q[1] - p[1]);
+    if (d < best.d) best = { pos: acc + L * t, d, at: q };
+    acc += L;
+  }
+  return best;
+}
+
+/**
+ * วัดตามขอบชิ้นระหว่าง 2 จุด (เช่น ความยาวซิป / ขอบที่ต้องกุ๊น) — คืนทั้งทางสั้นและทางยาวรอบรูป
+ * path = จุดตามขอบช่วงที่สั้นกว่า (ไว้วาดเส้นวัด)
+ */
+export function outlineDistance(P: Pt[], a: Pt, b: Pt): { short: number; long: number; total: number; path: Pt[] } {
+  const total = polyLen(P);
+  const pa = projectOnOutline(P, a), pb = projectOnOutline(P, b);
+  const fwd = ((pb.pos - pa.pos) % total + total) % total;
+  const short = Math.min(fwd, total - fwd);
+  // เดินตามขอบจาก a ไป b ทางที่สั้นกว่า เก็บจุดไว้วาด
+  const forward = fwd <= total - fwd;
+  const cum: number[] = [0];
+  for (let i = 0; i < P.length; i++) { const q = P[(i + 1) % P.length], c = P[i]; cum.push(cum[i] + Math.hypot(q[0] - c[0], q[1] - c[1])); }
+  const from = forward ? pa.pos : pb.pos, to = forward ? pb.pos : pa.pos;
+  const path: Pt[] = [forward ? pa.at : pb.at];
+  const span = ((to - from) % total + total) % total;
+  for (let k = 0; k < P.length * 2 && path.length < 2000; k++) {
+    const i = k % P.length, pos = cum[i] + (k >= P.length ? total : 0);
+    const rel = pos - from;
+    if (rel > 0 && rel < span) path.push(P[i]);
+    if (rel >= span) break;
+  }
+  path.push(forward ? pb.at : pa.at);
+  return { short, long: total - short, total, path };
 }
