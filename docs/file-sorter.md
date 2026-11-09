@@ -107,6 +107,15 @@
   - โฟลเดอร์งานอยู่ในเครื่อง = ก๊อปเข้า Collection แทน Work In Process (จัดชื่อตอนก๊อป · ต้นฉบับในเครื่องอยู่ที่เดิม)
   - ปุ่ม "ย้ายกลับที่เดิม" ทำย้อนทุกขั้นจากท้ายสุด (`res.ops`: Rawfiles → จัดชื่อ → Collection) · ประวัติ `moves[].what = collection`, `how = rename | merge | copy`
 
+## ประวัติไฟล์ใน Task Manager (ขั้น 8 · 2026-11-09 · เจ้าของขอ "อยากรู้ว่าย้ายอะไรไปแล้วบ้าง")
+- ข้อมูลอยู่ที่ประวัติกลาง `audit_logs` ที่เดียว (ไม่มีตารางใหม่): `file_sort.upload` (1 ครั้งที่ใช้) + `file_sort.undo` (กด "ย้ายกลับที่เดิม" ในโปรแกรม)
+  - `/api/file-sort/log` รับ `run_id` (ผูกครั้งที่ลงไฟล์ ↔ ย้ายกลับ) · `model` (รหัสรุ่น/ชื่องาน) · `parent_ids` (สินค้าที่ลงรูป) · `status` · `event:"undo"` + `undone[]`
+  - โปรแกรม v1.5.2 ขึ้นไปส่งครบ (รุ่นก่อนหน้าไม่มี run_id/parent_ids — ตอนเปิดใช้ยังไม่มีประวัติจริงเลย 0 ครั้ง)
+- `GET /api/file-sort/history` (สิทธิ์ `tasks.view` หรือ `assets.view`) · ตัวกรอง q / profile / actor / days / before (หน้าถัดไป) · โหมดกล่องในหน้างาน `parent_ids` + `codes` · `include=actors`
+  - `lib/file-sort-history` `mergeFileSortUndo` = ย้ายกลับที่เจอครั้งที่ลงไฟล์ของมัน → แนบ `undone_at/undone_by` เข้าแถวนั้น · `cleanHistoryTerm` (เก็บวรรณยุกต์ไทย `\p{M}`)
+  - คำแปลภาษาคน: `lib/audit-format` `describeFileSort` (ลงไฟล์ / ย้ายกลับ · รหัสรุ่น · ชนิดงาน · ย้ายอะไรจากไหนไปไหน · ลงกี่รูป · ผล · ย้ายกลับแล้ว) — หน้าประวัติการใช้งานรวมก็อ่านได้ด้วย
+- หน้าจอ: Task Manager › เมนูมุมมอง › **ประวัติไฟล์** (`app/tasks/file-history-view.tsx` `FileHistoryView` · `/tasks?view=files&q=PIX39`) + กล่อง "ประวัติไฟล์ของรุ่นนี้" ในหน้างานที่ผูก Parent SKU (`FileHistoryBox`) — แสดงด้วยไทม์ไลน์กลาง `ActivityFeed`
+
 ## ข้อจำกัดที่รู้
 - Drive ดูไฟล์เดิมในโฟลเดอร์ได้ 100 ไฟล์แรก (โฟลเดอร์งานเดียวไม่ควรเกินนี้)
 - `/api/drive` POST ไม่ได้มีไว้ให้เบราว์เซอร์ (Google บล็อก CORS) — เว็บใช้ `/api/drive/upload-chunk` แทน

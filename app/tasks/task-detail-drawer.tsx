@@ -29,6 +29,7 @@ import { useT } from "@/components/i18n";
 import { SubtaskManager } from "./subtask-manager";
 import { TaskDirectPanel } from "./direct-edit-panel";
 import { TaskParentBox } from "./task-parent-box";
+import { FileHistoryBox } from "./file-history-view";
 import { WorkJobLinkBox } from "./work-job-link-box";
 import { AssigneeAvatar, AssigneeChip } from "./assignee-avatar";
 import { taskTypeLabel, useCreativeOptions } from "./use-options";
@@ -609,6 +610,14 @@ export function TaskDetailDrawer({ taskId, brands = [], campaigns = [], onClose,
 
             </div>
           </div>
+
+          {/* ประวัติไฟล์ของรุ่นนี้ (ตัวแยกไฟล์ ERP ลงรูป/ย้ายอะไรไปไหน) — เฉพาะงานที่ผูก Parent SKU */}
+          {parentList.length > 0 && (
+            <div className="border-t border-slate-100 px-5 py-4" style={{ borderColor: dividerColorOf(dth) }}>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{t("ประวัติไฟล์ของรุ่นนี้", "File history for this model")}</p>
+              <FileHistoryBox parents={parentList} />
+            </div>
+          )}
 
           {/* ความคิดเห็น — section เต็มกว้างใต้ 2 คอลัมน์ */}
           <div className="border-t border-slate-100 px-5 py-4" style={{ borderColor: dividerColorOf(dth) }}>

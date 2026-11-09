@@ -286,6 +286,7 @@ const str = (v: unknown): string | null => (typeof v === "string" && v.trim() ? 
 export function describeAudit(row: AuditRowLike, ctx: AuditFormatCtx = {}): AuditView {
   const m: Record<string, unknown> = isObj(row.metadata) ? row.metadata : {};
   const info = auditEntityInfo(row.entity_type);
+  if (row.action.startsWith("file_sort.")) return describeFileSort(row, m, info);
   const hidden = ctx.hiddenFields ?? new Set<string>();
   const labelOf = (f: string) => ctx.fieldLabels?.[f] || COMMON_FIELD_LABELS[f] || f;
 
@@ -385,5 +386,56 @@ export function describeAudit(row: AuditRowLike, ctx: AuditFormatCtx = {}): Audi
     detailFields,
     extras,
     noise: isAuditNoise(row.action, row.entity_type),
+  };
+}
+
+// ── ตัวแยกไฟล์ ERP (file_sort.upload / file_sort.undo · โปรแกรมบนเครื่องจดผ่าน /api/file-sort/log) ──
+//   1 แถว = 1 ครั้งที่ใช้: รุ่น/งาน · ชนิดงาน · ลงกี่รูป · ย้ายอะไรจากไหนไปไหน (moves) · ย้ายกลับแล้ว (undone_at / undone_by — /api/file-sort/history แนบให้)
+const FS_KIND: Record<string, string> = { new: "สินค้าใหม่", color: "เพิ่มสี", edit: "แก้สี", content: "Content", artwork: "โลโก้ / Artwork" };
+const FS_WHAT: Record<string, string> = { raw: "Rawfiles", images: "Images", collection: "ทั้งโฟลเดอร์ → Collection" };
+const FS_HOW: Record<string, string> = { merge: " · รวมเข้าของเดิม ไม่ทับ", copy: " · ก๊อปจากเครื่อง", "copy+trash": " · ก๊อปแล้วต้นฉบับลงถังขยะ" };
+const FS_STATUS: Record<string, string> = { done: "ครบ", partial: "ได้บางส่วน", failed: "ไม่สำเร็จ" };
+
+/** ชนิดงานของตัวแยกไฟล์เป็นภาษาคน (สินค้าใหม่ / เพิ่มสี / แก้สี / Content / โลโก้) */
+export function fileSortKindLabel(m: Record<string, unknown>): string {
+  return m.profile === "product" ? FS_KIND[String(m.variant ?? "new")] ?? "งานสินค้า" : FS_KIND[String(m.profile ?? "artwork")] ?? "งาน";
+}
+
+function describeFileSort(row: AuditRowLike, m: Record<string, unknown>, info: ReturnType<typeof auditEntityInfo>): AuditView {
+  const undo = row.action === "file_sort.undo";
+  const raw = undo ? m.undone : m.moves;
+  const changes: AuditChange[] = [];
+  (Array.isArray(raw) ? raw : []).forEach((x, i) => {
+    if (!isObj(x)) return;
+    const from = str(x.from), to = str(x.to);
+    if (!from && !to) return;
+    const files = typeof x.files === "number" && x.files > 0 ? ` ${x.files} ไฟล์` : "";
+    const label = `${FS_WHAT[str(x.what) ?? ""] ?? "โฟลเดอร์"}${files}${FS_HOW[str(x.how) ?? ""] ?? ""}`;
+    // ลงไฟล์: ที่เดิม → ที่ใหม่ · ย้ายกลับ: ที่ที่เคยย้ายไป → กลับที่เดิม
+    const a = undo ? to : from, b = undo ? from : to;
+    changes.push({ field: `move${i}`, label, hasOld: !!a, old: a ?? undefined, new: b ?? "" });
+  });
+  const c = isObj(m.counts) ? m.counts : {};
+  const n = (k: string) => (typeof c[k] === "number" ? (c[k] as number) : 0);
+  const extras: AuditView["extras"] = [];
+  if (!undo) {
+    if (n("erp")) extras.push({ label: "ลงระบบ", value: `${n("erp")} รูป` });
+    if (n("album")) extras.push({ label: "ลงอัลบั้ม", value: `${n("album")} ไฟล์` });
+    if (n("drive")) extras.push({ label: "ขึ้น Drive", value: `${n("drive")} ไฟล์` });
+    if (n("nas")) extras.push({ label: "ก๊อปลง Z:", value: `${n("nas")} ไฟล์` });
+    if (n("failed")) extras.push({ label: "พลาด", value: String(n("failed")) });
+    const st = FS_STATUS[str(m.status) ?? ""];
+    if (st) extras.push({ label: "ผล", value: st });
+    const at = str(m.undone_at);
+    if (at) {
+      const when = new Date(at).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", timeZone: "Asia/Bangkok" });
+      extras.push({ label: "ย้ายกลับแล้ว", value: `${when}${str(m.undone_by) ? ` · ${str(m.undone_by)}` : ""}` });
+    }
+  } else if (Array.isArray(m.errors) && m.errors.length) extras.push({ label: "ย้ายกลับไม่ได้", value: `${m.errors.length} อย่าง` });
+  return {
+    group: undo ? "status" : "create", verb: undo ? "ย้ายกลับ" : "ลงไฟล์",
+    module: info.module, moduleLabel: "ตัวแยกไฟล์", page: fileSortKindLabel(m),
+    recordCode: str(m.model) ?? str(m.name), recordName: null, href: null,
+    changes, fieldsOnly: [], detailFields: [], extras, noise: false,
   };
 }

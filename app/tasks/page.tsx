@@ -7,7 +7,7 @@
 // ข้อมูลจาก /api/creative-tasks (ดู app/tasks/data.ts)
 // ============================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { supabaseBrowser } from "@/lib/supabase-browser";
@@ -58,11 +58,15 @@ import {
   type CreativeTask, type CreativeStatus, type CreativePriority,
   type Campaign, type BrandOption, type MySubtask,
 } from "./data";
+import { FileHistoryView } from "./file-history-view";
+import { Icon } from "@/components/icon";
 
 // ============================================================
 // Table columns + views
 // ============================================================
 type Tfn = (th: string, en: string) => string;
+/** มุมมองของหน้างาน · files = ประวัติไฟล์ (ตัวแยกไฟล์ ERP ลงรูป/ย้ายอะไรไปไหน) */
+type TaskView = "overview" | "queue" | "calendar" | "workload" | "report" | "kanban" | "canvas" | "files";
 function makeColumns(t: Tfn): ColumnDef<CreativeTask>[] { return [
   { accessorKey: "task_no", header: t("เลขที่งาน", "Task no."), size: 140, cell: ({ getValue }) => <span className="font-mono text-xs bg-slate-100 px-1.5 py-0.5 rounded text-slate-700 font-medium">{(getValue() as string) || "—"}</span> },
   {
@@ -107,7 +111,7 @@ export default function TasksPage() {
   const t = useT();
   const COLUMNS = useMemo(() => makeColumns(t), [t]);
   const { statuses } = useCreativeStatuses();
-  const [view, setView] = useState<"overview" | "queue" | "calendar" | "workload" | "report" | "kanban" | "canvas">("overview");
+  const [view, setView] = useState<TaskView>("overview");
   const [ovFilter, setOvFilter] = useState<"all" | "mine" | "review" | "overdue">("all"); // ตัวกรองตารางในภาพรวม (จากการ์ด)
   const [ovStatusFilter, setOvStatusFilter] = useState<string | null>(null);  // กรองสถานะเดียว — มาจากปุ่ม "ดูทั้งหมด" ในคอลัมน์ที่จบแล้ว
   const showAllStatus = useCallback((k: string) => { setOvStatusFilter(k); setOvFilter("all"); setView("overview"); }, []);
@@ -170,7 +174,7 @@ export default function TasksPage() {
     const sp = new URLSearchParams(window.location.search);
     const tid = sp.get("task"); if (tid) setDetailId(tid);
     const v = sp.get("view");
-    if (v === "queue" || v === "calendar" || v === "workload" || v === "report" || v === "kanban" || v === "canvas" || v === "overview") setView(v);
+    if (v === "queue" || v === "calendar" || v === "workload" || v === "report" || v === "kanban" || v === "canvas" || v === "overview" || v === "files") setView(v);
     else if (v === "table") setView("overview");   // แท็บตารางถูกรวมเข้าภาพรวมแล้ว → ลิงก์เดิมมาที่ภาพรวม
   }, []);
 
@@ -356,6 +360,8 @@ export default function TasksPage() {
                 <CanvasBoard tasks={tasks} statuses={statuses} startMaximized onAddTask={openCreate} onCardClick={(id) => setDetailId(id)} onMove={(taskId, to, force) => { const found = tasks.find((x) => x.id === taskId); if (found) applyMove(found, to, force); }} />
               </div>
             )}
+
+            {view === "files" && <FileHistoryView />}
           </>
         )}
       </div>
@@ -415,12 +421,12 @@ function StatChip({ label, value, tone = "slate", onClick, active }: { label: st
 // เมนูเลือกมุมมอง (☰ ดรอปดาวน์) — โชว์ในแถบบน (มุมมองอื่น) หรือฝังใน Hero (onHero) ของหน้าภาพรวม
 function ViewSwitcher({ view, setView, t, onHero }: {
   view: string;
-  setView: (v: "overview" | "queue" | "calendar" | "workload" | "report" | "kanban" | "canvas") => void;
+  setView: (v: TaskView) => void;
   t: Tfn;
   onHero?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const VIEWS = [
+  const VIEWS: { k: TaskView; icon: ReactNode; label: string }[] = [
     { k: "overview", icon: "🏠", label: t("ภาพรวม", "Overview") },
     { k: "queue", icon: "🙋", label: t("คิวงานของฉัน", "My queue") },
     { k: "calendar", icon: "📅", label: t("ปฏิทิน", "Calendar") },
@@ -428,7 +434,8 @@ function ViewSwitcher({ view, setView, t, onHero }: {
     { k: "report", icon: "📊", label: t("รายงาน", "Report") },
     { k: "kanban", icon: "🟦", label: "Kanban" },
     { k: "canvas", icon: "🟪", label: "Canvas" },
-  ] as const;
+    { k: "files", icon: <Icon name="folder" size={15} />, label: t("ประวัติไฟล์", "File history") },
+  ];
   const cur = VIEWS.find((v) => v.k === view) ?? VIEWS[0];
   const btnCls = onHero
     ? "inline-flex items-center gap-2 h-9 px-3.5 bg-white/20 hover:bg-white/30 text-white rounded-lg text-sm font-semibold backdrop-blur-sm"
