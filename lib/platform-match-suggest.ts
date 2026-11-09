@@ -130,16 +130,19 @@ export function suggestMatches(
 /** คะแนนตั้งแต่นี้ = นับเป็น "ระบบเดาให้" (ต่ำกว่านี้เดาจากชื่ออย่างเดียว → อยู่กลุ่ม "ยังไม่มีคู่" แต่ยังโชว์ให้เลือกตอนกาง) */
 export const GUESS_MIN = 60;
 
-export type ListingMatchStatus = "ok" | "ignored" | "guess" | "none";
+export type ListingMatchStatus = "ok" | "ignored" | "guess" | "none" | "gone";
 
 /**
- * สถานะของสินค้าบนร้าน 1 ตัว (ใช้ทั้งการ์ด/ป้าย/ตัวกรอง) — ลำดับ: จับคู่แล้ว > ไม่ต้องจับคู่ > ระบบเดาให้ > ยังไม่มีคู่
- * จับคู่แล้วชนะเสมอ (นำเข้าไฟล์รอบหลังอาจจับคู่ด้วยรหัสให้เอง แม้เคยกดข้ามไว้)
+ * สถานะของสินค้าบนร้าน 1 ตัว (ใช้ทั้งการ์ด/ป้าย/ตัวกรอง)
+ * ลำดับ: ไม่อยู่บนร้านแล้ว > จับคู่แล้ว > ไม่ต้องจับคู่ > ระบบเดาให้ > ยังไม่มีคู่
+ * ไม่อยู่บนร้านแล้ว (status "removed" — LISTING_GONE_STATUS ใน lib/platform-listing-health) ชนะทุกอย่าง: ไม่ใช่งานจับคู่ รอคนกดล้าง
+ * จับคู่แล้วชนะที่เหลือ (นำเข้าไฟล์รอบหลังอาจจับคู่ด้วยรหัสให้เอง แม้เคยกดข้ามไว้)
  */
 export function listingMatchStatus(
-  l: { matched_parent_sku_id?: string | null; match_ignored?: boolean | null },
+  l: { matched_parent_sku_id?: string | null; match_ignored?: boolean | null; status?: string | null },
   topScore: number | null | undefined,
 ): ListingMatchStatus {
+  if (l.status === "removed") return "gone";
   if (l.matched_parent_sku_id) return "ok";
   if (l.match_ignored) return "ignored";
   return (topScore ?? 0) >= GUESS_MIN ? "guess" : "none";

@@ -13,6 +13,7 @@ import { writeAudit } from "@/lib/audit";
 import { lineCreateProduct } from "@/lib/line-shopping";
 import { decryptSecret } from "@/lib/secret-box";
 import { linePrice } from "@/lib/platform-listing-builder";
+import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -44,8 +45,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   if (d.platform_product_id) return NextResponse.json({ error: "สินค้านี้มีบน LINE แล้ว — ใช้ปุ่มส่ง update แทน" }, { status: 400 });
   // 🛡️ กันซ้ำชั้น 2 (บทเรียน JEAN08 ถูกสร้างซ้ำ 6 รายการ ก.ค. 2026): มีรายการบน LINE ที่จับคู่สินค้านี้อยู่แล้ว
   //    (เช่น ดึงสินค้าจากร้านแล้วจับคู่ แต่ร่างยังไม่มีรหัส) → ไม่สร้างซ้ำ
+  //    ไม่นับตัวที่ร้านลบไปแล้ว (ป้าย "ไม่อยู่บนร้านแล้ว") → ลงใหม่ได้
   {
-    const { data: onShop } = await admin.from("platform_catalog_listings").select("external_product_id").eq("platform_id", platform_id).eq("matched_parent_sku_id", parent_sku_id).limit(1);
+    const { data: onShop } = await admin.from("platform_catalog_listings").select("external_product_id").eq("platform_id", platform_id).eq("matched_parent_sku_id", parent_sku_id).or(LIVE_LISTING_OR).limit(1);
     const ex = ((onShop ?? []) as { external_product_id: string | null }[])[0];
     if (ex) return NextResponse.json({ error: `สินค้านี้มีบน LINE แล้ว (#${ex.external_product_id ?? "?"}) — ไม่สร้างซ้ำ` }, { status: 409 });
   }

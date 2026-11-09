@@ -10,16 +10,18 @@
  * การนำเข้าจริง (อัปไฟล์ export / ต่อ API) มาเฟสถัดไป — โครงตาราง+หน้าพร้อมแล้ว
  * DELETE ?id=  (products.platforms.edit) → ลบรายการที่นำเข้าผิด (เป็นสำเนาข้อมูลจากร้าน — ของบนร้านจริงไม่ถูกแตะ)
  *   ถ้าสินค้านั้นยังอยู่ในไฟล์ export รอบหน้า จะกลับมาเอง (ต้องจับคู่ใหม่)
+ * DELETE body { gone_ids: string[] } (≤500) → ล้างรายการ "ไม่อยู่บนร้านแล้ว" หลายตัว
+ *   ลบเฉพาะตัวที่ status = "removed" จริง (ตัวที่ยังอยู่บนร้านส่งมาก็ไม่ลบ) · audit ทีละแถวพร้อมข้อมูลเดิม
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { guardApi } from "@/lib/api-auth";
-import { writeAudit } from "@/lib/audit";
+import { writeAudit, writeAuditMany } from "@/lib/audit";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { SELLING_PLATFORMS } from "@/lib/selling-platforms";
 import { loadBrandSummaries, loadListingSummaries, loadListingVariants, loadShopView } from "@/lib/platform-shop-view-server";
-import type { ListingSummariesResponse, ShopBrandsResponse, ShopViewResponse } from "@/lib/platform-listing-health";
+import { LISTING_GONE_STATUS, LIVE_LISTING_OR, type ListingSummariesResponse, type ShopBrandsResponse, type ShopViewResponse } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -100,12 +102,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   });
 }
 
-/** จำนวนสินค้าบนร้านต่อแพลตฟอร์ม (เฉพาะร้านขายของ) — นับแบบ head ไม่ดึงแถว */
+/** จำนวนสินค้าบนร้านต่อแพลตฟอร์ม (เฉพาะร้านขายของ · ไม่นับตัวที่ไม่อยู่บนร้านแล้ว) — นับแบบ head ไม่ดึงแถว */
 async function countPerPlatform(admin: ReturnType<typeof supabaseAdmin>, brandId: string): Promise<Record<string, number>> {
   const { data: pfs } = await admin.from("erp_platforms").select("id, code").in("code", [...SELLING_PLATFORMS]);
   const out: Record<string, number> = {};
   await Promise.all(((pfs ?? []) as { id: string }[]).map(async (p) => {
-    let q = admin.from("platform_catalog_listings").select("id", { count: "exact", head: true }).eq("platform_id", p.id);
+    let q = admin.from("platform_catalog_listings").select("id", { count: "exact", head: true }).eq("platform_id", p.id).or(LIVE_LISTING_OR);
     if (brandId) q = q.eq("brand_id", brandId);
     const { count } = await q;
     out[p.id] = count ?? 0;
@@ -117,7 +119,15 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   const denied = await guardApi(request, "products.platforms.edit"); if (denied) return denied;
   const { data: { user } } = await supabaseFromRequest(request).auth.getUser();
   const id = (new URL(request.url).searchParams.get("id") ?? "").trim();
-  if (!id) return NextResponse.json({ error: "ต้องระบุรายการ" }, { status: 400 });
+  if (!id) {
+    // ล้างหลายตัว: รายการ "ไม่อยู่บนร้านแล้ว" (body { gone_ids })
+    let body: { gone_ids?: unknown } = {};
+    try { body = await request.json(); } catch { /* ไม่มี body */ }
+    const goneIds = Array.isArray(body.gone_ids) ? [...new Set(body.gone_ids.map((x) => String(x ?? "").trim()).filter(Boolean))] : [];
+    if (goneIds.length === 0) return NextResponse.json({ error: "ต้องระบุรายการ" }, { status: 400 });
+    if (goneIds.length > 500) return NextResponse.json({ error: "ล้างได้ครั้งละไม่เกิน 500 รายการ" }, { status: 400 });
+    return deleteGoneListings(goneIds, user ? { id: user.id, email: user.email ?? null } : null);
+  }
 
   const admin = supabaseAdmin();
   const { data: cur } = await admin.from("platform_catalog_listings")
@@ -128,4 +138,28 @@ export async function DELETE(request: NextRequest): Promise<NextResponse> {
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   await writeAudit(admin, { action: "delete", entityType: "platform_catalog_listing", entityId: id, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { snapshot: cur } });
   return NextResponse.json({ ok: true, error: null });
+}
+
+/** ล้างรายการที่ไม่อยู่บนร้านแล้ว — ลบเฉพาะแถวที่ status "removed" จริง (ทีละชุด 200 กัน .in() ยาว) */
+async function deleteGoneListings(ids: string[], user: { id: string; email: string | null } | null): Promise<NextResponse> {
+  const admin = supabaseAdmin();
+  const COLS = "id, platform_id, brand_id, external_product_id, title, sku_code, matched_parent_sku_id, price, status, source, last_imported_at";
+  const targets: Record<string, unknown>[] = [];
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data, error } = await admin.from("platform_catalog_listings").select(COLS).in("id", ids.slice(i, i + 200)).eq("status", LISTING_GONE_STATUS);
+    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+    targets.push(...((data ?? []) as Record<string, unknown>[]));
+  }
+  let deleted = 0;
+  for (let i = 0; i < targets.length; i += 200) {
+    const chunk = targets.slice(i, i + 200);
+    const { error } = await admin.from("platform_catalog_listings").delete().in("id", chunk.map((t) => String(t.id))).eq("status", LISTING_GONE_STATUS);
+    if (error) return NextResponse.json({ error: `${error.message} (ล้างไปแล้ว ${deleted} จาก ${targets.length})` }, { status: 400 });
+    deleted += chunk.length;
+    await writeAuditMany(admin, chunk.map((t) => ({
+      action: "delete", entityType: "platform_catalog_listing", entityId: String(t.id), actorId: user?.id ?? null, actorName: user?.email ?? null,
+      metadata: { reason: "gone_from_shop", snapshot: t },
+    })));
+  }
+  return NextResponse.json({ ok: true, deleted, skipped: ids.length - deleted, error: null });
 }

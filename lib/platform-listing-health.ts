@@ -3,8 +3,8 @@
  * --------------------------------------------------------------------------
  * อ่าน "ข้อมูลดิบจากร้าน" (platform_catalog_listings.raw) แล้วสรุปเป็นภาษาเดียวกันทุกแพลตฟอร์ม:
  *   รูปแรก · สต๊อกรวม · เปิด/ปิดขาย · ราคา/ราคาลด · จำนวนตัวเลือก · หมวดบนร้าน · สถานะแบบ Seller Center
- * + กติกาแท็บ (ขายอยู่ / หมด / ปิดขาย / รอตรวจ / ยังไม่จับคู่ / ยังไม่ลง)
- * + กติกากองงาน (หมดแต่ยังเปิดขาย / ใกล้หมด / ปิดขาย / รอตรวจ / ไม่มีรูปบนร้าน / ชื่อ+รหัสซ้ำ / ยังไม่จับคู่)
+ * + กติกาแท็บ (ขายอยู่ / หมด / ปิดขาย / รอตรวจ / ยังไม่จับคู่ / ยังไม่ลง / ไม่อยู่บนร้านแล้ว)
+ * + กติกากองงาน (หมดแต่ยังเปิดขาย / ใกล้หมด / ปิดขาย / รอตรวจ / ไม่มีรูปบนร้าน / ชื่อ+รหัสซ้ำ / ยังไม่จับคู่ / ไม่อยู่บนร้านแล้ว)
  *
  * ใช้ที่: /api/platform-catalog?view=shop (สรุปฝั่ง server) · components/platform-catalog/shop-view (แท็บ + กองงาน)
  * ห้ามใช้: ตัดสินว่า "จับคู่แล้วหรือยัง / ระบบเดาให้" → ใช้ listingMatchStatus (lib/platform-match-suggest)
@@ -16,14 +16,28 @@
  * ห้าม import "@/..." ในไฟล์นี้ (ใช้ทั้ง server/client/เทสต์)
  */
 
-/** สถานะแบบหน้า Seller Center */
-export type ShopState = "selling" | "low" | "out" | "hidden" | "review" | "nodata";
+/** สถานะแบบหน้า Seller Center · gone = ร้านลบไปแล้ว (ดึงครบทั้งร้านแต่ไม่เจอตัวนี้) */
+export type ShopState = "selling" | "low" | "out" | "hidden" | "review" | "nodata" | "gone";
+
+/**
+ * ค่าในช่อง platform_catalog_listings.status ของรายการที่ "ไม่อยู่บนร้านแล้ว"
+ * ใครใส่: lib/platform-catalog-sync (ตอนดึงผ่าน API ได้ครบทั้งร้าน แล้วไม่เจอรายการนี้) · เจอกลับมาบนร้าน = ล้างป้ายเอง
+ * ไม่ลบแถวเอง — คนกด "ล้างรายการที่ไม่อยู่บนร้าน" ในหน้า สินค้าบนแพลตฟอร์ม
+ */
+export const LISTING_GONE_STATUS = "removed";
+export const isGoneStatus = (status: string | null | undefined): boolean => status === LISTING_GONE_STATUS;
+/**
+ * ตัวกรอง PostgREST "เฉพาะรายการที่ยังอยู่บนร้าน" → ใช้ `.or(LIVE_LISTING_OR)`
+ * (`.neq("status","removed")` อย่างเดียวตัดแถว status null ทิ้งด้วย = เกือบทั้งร้าน)
+ * ใช้กับงานที่ยิงไปร้าน/นับของบนร้าน: ส่งราคา/รายละเอียด · กันสร้างซ้ำ · นับจำนวน · ตัวเดาคู่
+ */
+export const LIVE_LISTING_OR = `status.is.null,status.neq.${LISTING_GONE_STATUS}`;
 
 /** เหลือรวมทุกตัวเลือกไม่เกินนี้ = ใกล้หมด */
 export const LOW_STOCK_MAX = 3;
 
 export const SHOP_STATE_LABEL: Record<ShopState, string> = {
-  selling: "ขายอยู่", low: "ใกล้หมด", out: "หมด", hidden: "ปิดขาย", review: "รอตรวจ", nodata: "ไม่รู้สถานะ",
+  selling: "ขายอยู่", low: "ใกล้หมด", out: "หมด", hidden: "ปิดขาย", review: "รอตรวจ", nodata: "ไม่รู้สถานะ", gone: "ไม่อยู่บนร้านแล้ว",
 };
 
 export type ListingShopSummary = {
@@ -152,9 +166,13 @@ function summarizeLazada(raw: Obj, fallbackPrice: number | null): ListingShopSum
  * @param platformCode code ใน erp_platforms (line_shopping / lazada / shopee / …)
  * @param raw          platform_catalog_listings.raw (หรือชิ้นส่วนที่ select มาเฉพาะช่องที่ใช้)
  * @param fallbackPrice platform_catalog_listings.price (ใช้เมื่อ raw ไม่มีราคา)
+ * @param status       platform_catalog_listings.status — "removed" = ไม่อยู่บนร้านแล้ว (ชนะทุกสถานะ · รูป/ราคาเดิมยังโชว์ไว้ดูอ้างอิง)
  */
-export function summarizeListing(platformCode: string, raw: unknown, fallbackPrice: number | null = null): ListingShopSummary {
-  const r = obj(raw) ?? {};
+export function summarizeListing(platformCode: string, raw: unknown, fallbackPrice: number | null = null, status: string | null = null): ListingShopSummary {
+  const s = summarizeRaw(platformCode, obj(raw) ?? {}, fallbackPrice);
+  return isGoneStatus(status) ? { ...s, state: "gone" } : s;
+}
+function summarizeRaw(platformCode: string, r: Obj, fallbackPrice: number | null): ListingShopSummary {
   if (platformCode === "line_shopping") return summarizeLine(r, fallbackPrice);
   if (platformCode === "lazada" && obj(r.lazada)) return summarizeLazada(r, fallbackPrice);
   return { image: null, imageKnown: false, stock: null, display: null, price: fallbackPrice, salePrice: null, variants: 0, category: null, state: "nodata" };
@@ -254,7 +272,7 @@ export type ShopViewResponse = {
 
 // ───────── แท็บ (แบบ A) ─────────
 
-export type ShopTab = "all" | "selling" | "out" | "hidden" | "review" | "unmatched" | "notlisted";
+export type ShopTab = "all" | "selling" | "out" | "hidden" | "review" | "unmatched" | "notlisted" | "gone";
 
 export const SHOP_TABS: { key: ShopTab; label: string }[] = [
   { key: "all", label: "ทั้งหมด" },
@@ -264,14 +282,17 @@ export const SHOP_TABS: { key: ShopTab; label: string }[] = [
   { key: "review", label: "รอตรวจ" },
   { key: "unmatched", label: "ยังไม่จับคู่" },
   { key: "notlisted", label: "ยังไม่ลง" },
+  { key: "gone", label: "ไม่อยู่บนร้านแล้ว" },
 ];
 
-/** ยังไม่จับคู่ = ไม่มีคู่ในระบบ และไม่ได้กด "ไม่ต้องจับคู่" */
-export const isUnmatched = (it: Pick<ShopItem, "matched_parent_sku_id" | "match_ignored">): boolean =>
-  !it.matched_parent_sku_id && !it.match_ignored;
+/** ยังไม่จับคู่ = ไม่มีคู่ในระบบ · ไม่ได้กด "ไม่ต้องจับคู่" · ยังอยู่บนร้าน (ตัวที่ร้านลบแล้วไม่ใช่งานจับคู่) */
+export const isUnmatched = (it: Pick<ShopItem, "matched_parent_sku_id" | "match_ignored"> & { state?: ShopState }): boolean =>
+  !it.matched_parent_sku_id && !it.match_ignored && it.state !== "gone";
 
-/** รายการนี้อยู่แท็บนี้ไหม (แท็บ notlisted เป็นสินค้าของเรา ไม่ใช่รายการบนร้าน → false เสมอ) */
+/** รายการนี้อยู่แท็บนี้ไหม (แท็บ notlisted เป็นสินค้าของเรา ไม่ใช่รายการบนร้าน → false เสมอ)
+ *  ตัวที่ไม่อยู่บนร้านแล้ว อยู่แท็บ gone แท็บเดียว (ไม่ปนในทั้งหมด/ขายอยู่/…) */
 export function inShopTab(it: ShopItem, tab: ShopTab): boolean {
+  if (it.state === "gone") return tab === "gone";
   switch (tab) {
     case "all": return true;
     case "selling": return it.state === "selling" || it.state === "low";
@@ -285,7 +306,7 @@ export function inShopTab(it: ShopItem, tab: ShopTab): boolean {
 
 // ───────── กองงาน (แบบ D) ─────────
 
-export type ShopQueue = "out" | "low" | "hidden" | "review" | "noimg_shop" | "dup" | "unmatched";
+export type ShopQueue = "out" | "low" | "hidden" | "review" | "noimg_shop" | "dup" | "unmatched" | "gone";
 
 export const SHOP_QUEUES: { key: ShopQueue; label: string; why: string; tone: "danger" | "warning" | "info" | "neutral" }[] = [
   { key: "out", label: "หมดแต่ยังเปิดขาย", why: "ลูกค้าเห็นสินค้าแต่กดซื้อไม่ได้ — เติมสต๊อกหรือปิดขาย", tone: "danger" },
@@ -295,10 +316,12 @@ export const SHOP_QUEUES: { key: ShopQueue; label: string; why: string; tone: "d
   { key: "noimg_shop", label: "ไม่มีรูปบนร้าน", why: "สินค้าบนร้านไม่มีรูป — ทำรูปแล้วอัปขึ้นร้าน", tone: "warning" },
   { key: "dup", label: "ชื่อ+รหัสซ้ำ", why: "รายการบนร้านที่ชื่อและรหัสเหมือนกันทุกตัว — ตรวจว่าซ้ำจริงไหม", tone: "danger" },
   { key: "unmatched", label: "ยังไม่จับคู่", why: "ยังไม่รู้ว่าตรงกับสินค้าไหนในระบบ — ไปหน้าจับคู่ (ระบบเดาให้แล้ว)", tone: "neutral" },
+  { key: "gone", label: "ไม่อยู่บนร้านแล้ว", why: "ดึงสินค้าครบทั้งร้านแล้วไม่เจอ (ร้านลบไปแล้ว) — ล้างออกได้ที่หน้าจับคู่", tone: "neutral" },
 ];
 
-/** รายการนี้อยู่กองงานนี้ไหม */
+/** รายการนี้อยู่กองงานนี้ไหม (ตัวที่ไม่อยู่บนร้านแล้ว อยู่กอง gone กองเดียว) */
 export function inShopQueue(it: ShopItem, q: ShopQueue): boolean {
+  if (it.state === "gone") return q === "gone";
   switch (q) {
     case "out": return it.state === "out";
     case "low": return it.state === "low";
@@ -314,9 +337,9 @@ export function inShopQueue(it: ShopItem, q: ShopQueue): boolean {
 /** สัดส่วนที่ยังไม่จับคู่เกินนี้ → "ยังไม่ลง" เชื่อไม่ได้ (สินค้าที่ลงแล้วแต่ยังไม่จับคู่จะถูกนับว่ายังไม่ลง) */
 export const NOT_LISTED_TRUST_MAX_UNMATCHED = 0.2;
 
-/** แท็บ "ยังไม่ลง" เชื่อได้ไหม (จับคู่ไปแล้วพอสมควร) */
-export function notListedTrustworthy(items: Pick<ShopItem, "matched_parent_sku_id" | "match_ignored">[]): boolean {
-  const need = items.filter((it) => !it.match_ignored).length;
+/** แท็บ "ยังไม่ลง" เชื่อได้ไหม (จับคู่ไปแล้วพอสมควร) · ไม่นับตัวที่ไม่อยู่บนร้านแล้ว */
+export function notListedTrustworthy(items: (Pick<ShopItem, "matched_parent_sku_id" | "match_ignored"> & { state?: ShopState })[]): boolean {
+  const need = items.filter((it) => !it.match_ignored && it.state !== "gone").length;
   if (!need) return true;
   const un = items.filter(isUnmatched).length;
   return un / need <= NOT_LISTED_TRUST_MAX_UNMATCHED;

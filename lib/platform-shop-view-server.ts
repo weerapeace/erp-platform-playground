@@ -8,7 +8,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
-import { duplicateCounts, summarizeListing, type ListingCardSummary, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
+import { duplicateCounts, isGoneStatus, LIVE_LISTING_OR, summarizeListing, type ListingCardSummary, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
 import { expectedLinePrice, linePriceDiff, matchShopVariants, shopVariantsOf, variantLookupCodes, type ListingVariantsResponse, type SkuLite } from "@/lib/platform-variant-match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -17,6 +17,8 @@ const CHUNK = 200;   // .in() ยาวเกินจะโดนตัด/ช�
 type ListingRow = {
   id: string; external_product_id: string | null; title: string | null; sku_code: string | null;
   matched_parent_sku_id: string | null; price: number | null; match_ignored: boolean | null; last_imported_at: string | null;
+  /** "removed" = ไม่อยู่บนร้านแล้ว (lib/platform-catalog-sync ติดป้ายตอนดึงครบทั้งร้าน) */
+  status: string | null;
   line_id: unknown; line_display: unknown; line_variants: unknown; line_images: unknown; line_cat: unknown; lazada: unknown;
 };
 
@@ -30,7 +32,7 @@ function chunks<T>(xs: T[]): T[][] {
 async function loadListings(admin: Admin, platformId: string, brandId: string): Promise<ListingRow[]> {
   return fetchAllPages<ListingRow>((from, to) => {
     let q = admin.from("platform_catalog_listings")
-      .select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, match_ignored, last_imported_at, line_id:raw->line->id, line_display:raw->line->isDisplay, line_variants:raw->line->variants, line_images:raw->line->imageUrls, line_cat:raw->line->category, lazada:raw->lazada")
+      .select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, match_ignored, last_imported_at, status, line_id:raw->line->id, line_display:raw->line->isDisplay, line_variants:raw->line->variants, line_images:raw->line->imageUrls, line_cat:raw->line->category, lazada:raw->lazada")
       .eq("platform_id", platformId);
     if (brandId) q = q.eq("brand_id", brandId);
     return q.order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: ListingRow[] | null; error: unknown }>;
@@ -137,11 +139,12 @@ export async function loadListingSummaries(admin: Admin, platformId: string, pla
   const rows = await loadListings(admin, platformId, brandId);
   const out: Record<string, ListingCardSummary> = {};
   for (const r of rows) {
-    const s = summarizeListing(platformCode, rawSlice(r), r.price != null ? Number(r.price) : null);
+    const s = summarizeListing(platformCode, rawSlice(r), r.price != null ? Number(r.price) : null, r.status);
     out[r.id] = { image: s.image, imageKnown: s.imageKnown, stock: s.stock, display: s.display, price: s.price, salePrice: s.salePrice, variants: s.variants, state: s.state, erpPriceDiff: null, erpFullDiff: null };
   }
   if (platformCode === "line_shopping") {
-    const matched = rows.filter((r) => r.matched_parent_sku_id && r.line_variants != null)
+    // ตัวที่ไม่อยู่บนร้านแล้วไม่ต้องเทียบราคา (ส่งราคาไปไม่ได้อยู่ดี)
+    const matched = rows.filter((r) => r.matched_parent_sku_id && r.line_variants != null && !isGoneStatus(r.status))
       .map((r) => ({ id: r.id, vs: shopVariantsOf("line_shopping", { line: { variants: r.line_variants } }) }));
     if (matched.length) {
       const { fakeOf, saleOf } = await loadSkuLookup(admin, variantLookupCodes(matched.flatMap((m) => m.vs.map((v) => v.sku))));
@@ -185,7 +188,9 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
     for (const p of (data ?? []) as ParentRow[]) pMap.set(p.id, p);
   }));
 
-  const listedIds = new Set(matchedIds);
+  // ยังไม่ลง: นับเฉพาะรายการที่ยังอยู่บนร้าน (คู่ของตัวที่ร้านลบไปแล้ว = สินค้านั้นไม่อยู่บนร้านนี้แล้ว)
+  const liveRows = rows.filter((r) => !isGoneStatus(r.status));
+  const listedIds = new Set(liveRows.map((r) => r.matched_parent_sku_id).filter((x): x is string => !!x));
   const notListedRows = brandParents ? brandParents.filter((p) => !listedIds.has(p.id)) : null;
   const noCoverRows = brandParents ? brandParents.filter((p) => !p.cover_image_r2_key) : null;
 
@@ -195,13 +200,13 @@ export async function loadShopView(admin: Admin, platformId: string, platformCod
     noCoverRows ? imageStates(admin, noCoverRows.map((p) => p.id)) : Promise.resolve(new Map<string, "sku_only" | "none">()),
   ]);
 
-  const dups = duplicateCounts(rows);
+  const dups = duplicateCounts(liveRows);   // ตัวที่ไม่อยู่บนร้านแล้วไม่นับเป็นตัวซ้ำ
   let last: string | null = null;
   const items: ShopItem[] = rows.map((r) => {
     if (r.last_imported_at && (!last || r.last_imported_at > last)) last = r.last_imported_at;
     const p = r.matched_parent_sku_id ? pMap.get(r.matched_parent_sku_id) : undefined;
     return {
-      ...summarizeListing(platformCode, rawSlice(r), r.price != null ? Number(r.price) : null),
+      ...summarizeListing(platformCode, rawSlice(r), r.price != null ? Number(r.price) : null, r.status),
       id: r.id, external_product_id: r.external_product_id, title: r.title, sku_code: r.sku_code,
       matched_parent_sku_id: r.matched_parent_sku_id, matched_code: p?.code ?? null, matched_name: p?.name_th ?? null,
       matched_cover_key: p?.cover_image_r2_key ?? null, category_id: p?.platform_category_id ?? null,
@@ -246,7 +251,7 @@ export async function loadBrandSummaries(admin: Admin, sellingCodes: readonly st
     fetchAllPages<{ id: string; brand_id: string | null; platform_category_id: string | null }>((from, to) =>
       admin.from("parent_skus_v2").select("id, brand_id, platform_category_id").eq("is_active", true).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { id: string; brand_id: string | null; platform_category_id: string | null }[] | null; error: unknown }>),
     fetchAllPages<{ id: string; brand_id: string | null; platform_id: string }>((from, to) =>
-      admin.from("platform_catalog_listings").select("id, brand_id, platform_id").order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { id: string; brand_id: string | null; platform_id: string }[] | null; error: unknown }>),
+      admin.from("platform_catalog_listings").select("id, brand_id, platform_id").or(LIVE_LISTING_OR).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: { id: string; brand_id: string | null; platform_id: string }[] | null; error: unknown }>),
     admin.from("platform_accounts").select("brand_id, platform_id").eq("is_active", true),
   ]);
   const pfRows = (pfs ?? []) as { id: string; code: string; name_th: string }[];

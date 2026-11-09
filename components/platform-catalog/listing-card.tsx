@@ -2,7 +2,7 @@
 /**
  * การ์ดสินค้าบนร้าน — ใบเดียวใช้ทั้งแท็บจับคู่และมุมมองหน้าร้าน (/master/platform-catalog)
  *
- * รูปเต็มใบ · ป้ายสถานะร้าน (ขายอยู่/ใกล้หมด/หมด/ปิดขาย + สต๊อก) · ป้าย "ซ้ำ ×N" · ป้ายส่วนลด %
+ * รูปเต็มใบ · ป้ายสถานะร้าน (ขายอยู่/ใกล้หมด/หมด/ปิดขาย/ไม่อยู่บนร้านแล้ว + สต๊อก) · ป้าย "ซ้ำ ×N" · ป้ายส่วนลด %
  * ชื่อ 2 บรรทัด · รหัส + เลขบนร้าน · ราคาที่จ่ายจริง (ราคาเต็มขีดฆ่า) · จำนวนตัวเลือก
  * ส่วนท้าย (footer) หน้าใส่เอง — แท็บจับคู่: สถานะจับคู่ + ยืนยัน · หน้าร้าน: สินค้าในระบบ + สร้างงาน
  *
@@ -21,6 +21,7 @@ export const SHOP_STATE_CLS: Record<ShopState, string> = {
   hidden: "bg-slate-100 text-slate-600 border-slate-200",
   review: "bg-sky-50 text-sky-700 border-sky-200",
   nodata: "bg-white text-slate-400 border-slate-200",
+  gone: "bg-slate-100 text-slate-500 border-dashed border-slate-300",
 };
 
 /** ป้ายสถานะร้าน (+ สต๊อกเมื่อยังขายได้) */
@@ -56,7 +57,8 @@ export function ListingCard({ data: d, footer, badges }: { data: ListingCardData
     <div className="flex h-full flex-col" style={{ contentVisibility: "auto", containIntrinsicSize: "auto 330px" }}>
       <div className="relative aspect-square bg-slate-50">
         {d.image
-          ? <img src={d.image} alt="" loading="lazy" decoding="async" className="h-full w-full object-cover" />
+          // ไม่อยู่บนร้านแล้ว = รูปจางขาวดำ (ยังโชว์ไว้ให้จำได้ว่าตัวไหน)
+          ? <img src={d.image} alt="" loading="lazy" decoding="async" className={`h-full w-full object-cover ${d.state === "gone" ? "opacity-50 grayscale" : ""}`} />
           : <div className="flex h-full flex-col items-center justify-center gap-1 text-xs text-slate-300"><Icon name="image" className="text-2xl" />ไม่มีรูป</div>}
         {d.state && d.state !== "nodata" && <ShopStateBadge state={d.state} stock={d.stock} className="absolute bottom-1.5 left-1.5" />}
         {!!d.dupCount && d.dupCount > 1 && (

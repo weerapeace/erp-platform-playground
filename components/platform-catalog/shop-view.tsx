@@ -316,6 +316,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
           {SHOP_TABS.map((t) => {
             const on = !queueOn && t.key === tab;
             const n = tabCount(t.key);
+            if (t.key === "gone" && !n && !on) return null;   // ไม่อยู่บนร้านแล้ว: โชว์เฉพาะตอนมี (ล้างที่หน้าจับคู่)
             return (
               <button key={t.key} type="button" data-tab-key={t.key} onClick={() => pickTab(t.key)} aria-pressed={on}
                 className={`px-3 py-2.5 text-sm whitespace-nowrap border-b-2 -mb-px ${on ? "border-violet-500 text-violet-700 font-medium" : "border-transparent text-slate-500 hover:text-slate-800"}`}>

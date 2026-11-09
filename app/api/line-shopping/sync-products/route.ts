@@ -72,10 +72,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // 3) บันทึก + จับคู่รหัสตรง (ของกลาง · ทีละชุด · ไม่ทับคู่เดิม · ไม่จับคู่ตัวที่กดข้าม)
+  //    ได้ครบตามยอดที่ LINE รายงาน (นับเลขสินค้าไม่ซ้ำ กันหน้าซ้อน) → ตัวเดิมที่ไม่เจอ = ติดป้าย "ไม่อยู่บนร้านแล้ว"
+  const complete = apiTotal > 0 && new Set(items.map((i) => i.external_product_id)).size >= apiTotal;
   let saved;
-  try { saved = await upsertCatalogListings(admin, { platformId: platform_id, brandId: brand_id, source: "api", items }); }
+  try { saved = await upsertCatalogListings(admin, { platformId: platform_id, brandId: brand_id, source: "api", items, markMissing: complete }); }
   catch (e) { return NextResponse.json({ error: `บันทึกไม่สำเร็จ: ${(e as Error).message}` }, { status: 400 }); }
 
-  await writeAudit(admin, { action: "import", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_api", brand_id, api_total: apiTotal, fetched: items.length, ...saved } });
-  return NextResponse.json({ ok: true, api_total: apiTotal, fetched: items.length, ...saved, error: null });
+  await writeAudit(admin, { action: "import", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_api", brand_id, api_total: apiTotal, fetched: items.length, complete, ...saved } });
+  return NextResponse.json({ ok: true, api_total: apiTotal, fetched: items.length, complete, ...saved, error: null });
 }

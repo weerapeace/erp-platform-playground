@@ -9,6 +9,7 @@ import {
   isHighConfidence, prepareCandidates, skuCodeForms, suggestMatches,
   type ExtraHit, type MatchCandidate, type MatchSuggestion,
 } from "@/lib/platform-match-suggest";
+import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 
@@ -36,7 +37,8 @@ export async function computeMatchSuggestions(
     if (args.listingId) q = q.eq("id", args.listingId);
     else {
       // ตัวที่กด "ไม่ต้องจับคู่" ไม่ต้องเดาให้ (หน้าจับคู่สินค้าเร็วก็ไม่โชว์)
-      q = q.eq("platform_id", args.platformId ?? "").is("matched_parent_sku_id", null).eq("match_ignored", false);
+      // ไม่เดาคู่ให้ตัวที่ไม่อยู่บนร้านแล้ว (status "removed") · .neq อย่างเดียวตัดแถว null ทิ้ง → ต้อง or กับ is.null
+      q = q.eq("platform_id", args.platformId ?? "").is("matched_parent_sku_id", null).eq("match_ignored", false).or(LIVE_LISTING_OR);
       if (args.brandId) q = q.eq("brand_id", args.brandId);
     }
     return q.order("id", { ascending: true }).range(from, to);

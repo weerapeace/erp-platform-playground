@@ -33,7 +33,7 @@ import PlatformImportProfileManager from "@/components/platform-import-profile-m
 import { PlatformShopView } from "@/components/platform-catalog/shop-view";
 import { BrandGate, BrandAvatar } from "@/components/platform-catalog/brand-gate";
 import {
-  duplicateCounts, duplicateKey, discountPct, effectivePrice, priceFlags, LOW_STOCK_MAX, PRICE_FLAG_LABEL,
+  duplicateCounts, duplicateKey, discountPct, effectivePrice, priceFlags, isGoneStatus, LOW_STOCK_MAX, PRICE_FLAG_LABEL,
   type ListingCardSummary, type ListingSummariesResponse, type ShopBrandSummary, type ShopState,
 } from "@/lib/platform-listing-health";
 
@@ -58,9 +58,16 @@ const SHOP_FILTERS: { key: Exclude<ShopFilter, "">; label: string; tip: string }
   { key: "review", label: "รอตรวจ", tip: "ยังไม่ได้ข้อมูลจากร้าน (เช่น ระบบสร้างขึ้นร้านเองแต่ยังไม่ได้ดึงกลับ)" },
   { key: "price", label: "ราคาผิดปกติ", tip: "ลูกค้าจ่ายต่ำกว่า 10฿ · ลดเกิน 80% · หรือราคาที่ลูกค้าจ่ายบนร้านไม่ตรงกับที่ระบบจะส่ง (LINE ที่จับคู่แล้ว · แค่ราคาเต็มไม่ตรงไม่นับ)" },
 ];
+// ผลป้าย "ไม่อยู่บนร้านแล้ว" หลังกดดึงสินค้า (lib/platform-catalog-sync) → ข้อความต่อท้าย
+const goneNote = (j: { removed?: number; restored?: number; removed_skipped?: number; complete?: boolean }) => [
+  j.removed ? ` · ไม่อยู่บนร้านแล้ว ${j.removed} รายการ (ดูการ์ด "ไม่อยู่บนร้านแล้ว")` : "",
+  j.restored ? ` · กลับมาบนร้าน ${j.restored} รายการ` : "",
+  j.removed_skipped ? ` · ⚠️ ไม่เจอ ${j.removed_skipped} รายการ (เกินครึ่งร้าน — สงสัยดึงมาไม่ครบ เลยยังไม่ติดป้าย ลองดึงใหม่)` : "",
+  j.complete === false ? " · ยังดึงไม่ครบทั้งร้าน เลยยังไม่เช็กว่าตัวไหนถูกลบ" : "",
+].join("");
 const priceFlagText = (s: ListingCardSummary | undefined) => priceFlags(s).map((f) => (f === "erp" && s?.erpPriceDiff ? `ราคาขายไม่ตรงระบบ ${s.erpPriceDiff} ตัวเลือก` : PRICE_FLAG_LABEL[f])).join(" · ");
 // เรียงตามสถานะบนร้าน: ปัญหาก่อน
-const STATE_RANK: Record<ShopState, number> = { out: 0, low: 1, review: 2, hidden: 3, selling: 4, nodata: 5 };
+const STATE_RANK: Record<ShopState, number> = { out: 0, low: 1, review: 2, hidden: 3, selling: 4, nodata: 5, gone: 6 };
 const SORT_LS = "platform-catalog:sort";
 type IgnorePatch = { match_ignored: boolean; match_ignore_reason: string | null; match_ignored_at: string | null };
 
@@ -254,20 +261,22 @@ export default function PlatformCatalogPage() {
 
   // ---------- จับคู่ ----------
   const statusOf = useCallback((l: Listing): ListingMatchStatus => listingMatchStatus(l, suggestions[l.id]?.[0]?.score), [suggestions]);
+  // ทั้งหมด = ที่ยังอยู่บนร้าน · ตัวที่ร้านลบไปแล้ว (ดึงครบทั้งร้านแต่ไม่เจอ) แยกการ์ด "ไม่อยู่บนร้านแล้ว" ไว้ให้ล้าง
   const counts = useMemo(() => {
-    const c = { all: listings.length, ok: 0, guess: 0, none: 0, ignored: 0 };
+    const c = { all: 0, ok: 0, guess: 0, none: 0, ignored: 0, gone: 0 };
     for (const l of listings) c[statusOf(l)]++;
+    c.all = listings.length - c.gone;
     return c;
   }, [listings, statusOf]);
   // ชื่อ+รหัสซ้ำบนร้าน = ร้านมีหลายหน้าขายของชิ้นเดียวกัน (เช่น JEAN08 ถูกสร้างบน LINE 6 ครั้งตอนทดสอบ)
-  //   กฎเดียวกับมุมมองหน้าร้าน (lib/platform-listing-health) · ไม่นับตัวที่ตั้งไม่ต้องจับคู่แล้ว → เก็บไว้ตัวเดียวแล้วป้ายหายเอง
-  const activeListings = useMemo(() => listings.filter((l) => !l.match_ignored), [listings]);
+  //   กฎเดียวกับมุมมองหน้าร้าน (lib/platform-listing-health) · ไม่นับตัวที่ตั้งไม่ต้องจับคู่แล้ว/ไม่อยู่บนร้านแล้ว → เก็บไว้ตัวเดียวแล้วป้ายหายเอง
+  const activeListings = useMemo(() => listings.filter((l) => !l.match_ignored && !isGoneStatus(l.status)), [listings]);
   const dupCounts = useMemo(() => duplicateCounts(activeListings), [activeListings]);
   // ยืนยันทั้งหมด: ไม่รวมตัวที่ซ้ำบนร้าน (ไม่งั้นทุกชิ้นซ้ำถูกจับกับรุ่นเดียวกันหมด) — ให้คนเลือกเก็บตัวเดียวเอง
   const highAll = useMemo(() => listings.filter((l) => statusOf(l) === "guess" && high.has(l.id) && suggestions[l.id]?.[0]), [listings, high, suggestions, statusOf]);
   const highRows = useMemo(() => highAll.filter((l) => !dupCounts.has(l.id)), [highAll, dupCounts]);
   const highDupSkipped = highAll.length - highRows.length;
-  const matchRows = useMemo(() => filter === "all" ? listings : filter === "dup" ? listings.filter((l) => dupCounts.has(l.id)) : listings.filter((l) => statusOf(l) === filter), [listings, filter, statusOf, dupCounts]);
+  const matchRows = useMemo(() => filter === "all" ? listings.filter((l) => !isGoneStatus(l.status)) : filter === "dup" ? listings.filter((l) => dupCounts.has(l.id)) : listings.filter((l) => statusOf(l) === filter), [listings, filter, statusOf, dupCounts]);
   const shownRows = useMemo(() => !shopFilter ? matchRows
     : shopFilter === "price" ? matchRows.filter((l) => priceFlags(summ[l.id]).length > 0)
     : matchRows.filter((l) => summ[l.id]?.state === shopFilter), [matchRows, shopFilter, summ]);
@@ -276,13 +285,13 @@ export default function PlatformCatalogPage() {
   const hasShopData = summList.some((s) => s.state !== "nodata");
   const showThumbs = summList.some((s) => s.imageKnown);
   const shopCounts = useMemo(() => {
-    const c: Record<ShopState | "price", number> = { selling: 0, low: 0, out: 0, hidden: 0, review: 0, nodata: 0, price: 0 };
+    const c: Record<ShopState | "price", number> = { selling: 0, low: 0, out: 0, hidden: 0, review: 0, nodata: 0, gone: 0, price: 0 };
     for (const l of matchRows) { const s = summ[l.id]; if (s) { c[s.state]++; if (priceFlags(s).length) c.price++; } }
     return c;
   }, [matchRows, summ]);
   // เรียงแบบพิเศษ (เมนูเรียงของตาราง — ใช้ได้ทั้งตารางและการ์ด) · สต๊อก/ราคา/สถานะร้าน = เรียงตามคอลัมน์ (สลับทิศได้)
   const extraSorts = useMemo(() => {
-    const rankOf = (l: Listing) => (dupCounts.has(l.id) ? 0 : ({ guess: 1, none: 2, ok: 3, ignored: 4 } as const)[statusOf(l)]);
+    const rankOf = (l: Listing) => (dupCounts.has(l.id) ? 0 : ({ guess: 1, none: 2, ok: 3, ignored: 4, gone: 5 } as const)[statusOf(l)]);
     const extId = (l: Listing) => Number(l.external_product_id) || 0;   // LINE เลขสินค้าเรียงตามวันที่ลงร้าน (ร้านไม่ส่งวันที่มา)
     const byTitle = (a: Listing, b: Listing) => (a.title ?? "").localeCompare(b.title ?? "", "th");
     return [
@@ -346,7 +355,36 @@ export default function PlatformCatalogPage() {
   };
   const ignoreTargetRows = useMemo(() => (ignoreTarget ?? []).map((id) => listings.find((l) => l.id === id)).filter(Boolean) as Listing[], [ignoreTarget, listings]);
   const selectedRows = useMemo(() => listings.filter((l) => selected.has(l.id)), [listings, selected]);
-  const selIgnorable = selectedRows.filter((l) => !l.matched_parent_sku_id && !l.match_ignored).map((l) => l.id);
+  const selIgnorable = selectedRows.filter((l) => !l.matched_parent_sku_id && !l.match_ignored && !isGoneStatus(l.status)).map((l) => l.id);
+  const selGone = selectedRows.filter((l) => isGoneStatus(l.status)).map((l) => l.id);
+  const goneIds = useMemo(() => listings.filter((l) => isGoneStatus(l.status)).map((l) => l.id), [listings]);
+  // ล้างรายการที่ไม่อยู่บนร้านแล้ว (สำเนาในระบบเรา — ร้านลบไปแล้ว) · ลบได้เฉพาะตัวที่ติดป้ายจริง (server เช็กซ้ำ)
+  const [goneBusy, setGoneBusy] = useState(false);
+  const clearGone = async (ids: string[]) => {
+    if (ids.length === 0) return;
+    const matchedN = listings.filter((l) => ids.includes(l.id) && l.matched_parent_sku_id).length;
+    const ok = await askConfirm({
+      title: `ล้างรายการที่ไม่อยู่บนร้านแล้ว ${ids.length.toLocaleString()} รายการ?`,
+      message: `ร้านลบสินค้าเหล่านี้ไปแล้ว (ดึงครบทั้งร้านแต่ไม่เจอ) — ลบสำเนาออกจากระบบเรา${matchedN ? ` · การจับคู่ ${matchedN.toLocaleString()} รายการจะหายไปด้วย` : ""} · ถ้าวันหลังร้านเปิดขายกลับ กดดึงสินค้าใหม่แล้วจะกลับมาเอง (ต้องจับคู่ใหม่)`,
+      confirmText: "ยืนยันล้าง", variant: "danger",
+    });
+    if (!ok) return;
+    setGoneBusy(true);
+    let deleted = 0;
+    try {
+      for (let i = 0; i < ids.length; i += 500) {
+        const r = await apiFetch("/api/platform-catalog", { method: "DELETE", body: JSON.stringify({ gone_ids: ids.slice(i, i + 500) }) });
+        const j = await r.json(); if (j.error) throw new Error(j.error);
+        deleted += Number(j.deleted ?? 0);
+      }
+      toast.success(`ล้างรายการที่ไม่อยู่บนร้านแล้ว ${deleted.toLocaleString()} รายการ`);
+      const gone = new Set(ids);
+      setListings((ls) => ls.filter((l) => !(gone.has(l.id) && isGoneStatus(l.status))));
+      setSelected((s) => new Set([...s].filter((id) => !gone.has(id))));
+      if (filter === "gone") setFilter("all");
+    } catch (e) { toast.error(`ล้างไม่สำเร็จ${deleted ? ` (ล้างไปแล้ว ${deleted} รายการ)` : ""}: ${(e as Error).message}`); await reloadCurrent(); }
+    finally { setGoneBusy(false); }
+  };
   const selIgnored = selectedRows.filter((l) => !l.matched_parent_sku_id && l.match_ignored).map((l) => l.id);
 
   // ติ๊กแล้วยืนยันคู่ที่ระบบเดา — ไม่รวมตัวซ้ำบนร้าน (ต้องเลือกเก็บทีละตัว)
@@ -516,7 +554,7 @@ export default function PlatformCatalogPage() {
       const r = await apiFetch("/api/lazada/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
       const part = j.partial ? " · ⚠️ ยังดึงไม่ครบ (หมดเวลา) กดดึงอีกครั้งเพื่อเติมส่วนที่เหลือ" : "";
-      setNote(`ดึงจาก Lazada แล้ว: ${j.fetched} สินค้า${j.api_total ? ` (Lazada รายงาน ${j.api_total})` : ""} · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่รหัสตรงอัตโนมัติ ${j.newly_matched} — ที่เหลือดูการ์ด "รอยืนยัน"${part}`);
+      setNote(`ดึงจาก Lazada แล้ว: ${j.fetched} สินค้า${j.api_total ? ` (Lazada รายงาน ${j.api_total})` : ""} · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่รหัสตรงอัตโนมัติ ${j.newly_matched} — ที่เหลือดูการ์ด "รอยืนยัน"${goneNote(j)}${part}`);
       await reloadCurrent();
     } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
     finally { setImporting(false); }
@@ -530,7 +568,7 @@ export default function PlatformCatalogPage() {
       const r = await apiFetch("/api/line-shopping/sync-products", { method: "POST", body: JSON.stringify({ brand_id: brandId }) });
       const j = await r.json(); if (j.error) throw new Error(j.error);
       const totalNote = j.api_total > 0 && j.api_total !== j.fetched ? ` (LINE รายงานทั้งหมด ${j.api_total})` : "";
-      setNote(`ดึงจาก LINE แล้ว: ${j.fetched} สินค้า${totalNote} · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่ ERP อัตโนมัติ ${j.matched}`);
+      setNote(`ดึงจาก LINE แล้ว: ${j.fetched} สินค้า${totalNote} · เพิ่มใหม่ ${j.created} · อัปเดต ${j.updated} · จับคู่ ERP อัตโนมัติ ${j.matched}${goneNote(j)}`);
       await reloadCurrent();
     } catch (e) { setNote("ผิดพลาด: " + (e as Error).message); }
     finally { setImporting(false); }
@@ -594,6 +632,15 @@ export default function PlatformCatalogPage() {
     const st = statusOf(l);
     const busy = busyIds.has(l.id);
     const stop = (e: React.MouseEvent) => e.stopPropagation();
+    if (st === "gone") return (
+      <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
+        <span className="text-xs text-slate-500 bg-slate-100 border border-dashed border-slate-300 rounded px-1.5 py-0.5 truncate"
+          title={`ดึงสินค้าครบทั้งร้านแล้วไม่เจอตัวนี้ (ร้านลบไปแล้ว)${l.matched_code ? ` · เคยจับคู่กับ ${l.matched_code}` : ""}`}>
+          ไม่อยู่บนร้านแล้ว{l.matched_code ? ` · เคยคู่ ${l.matched_code}` : ""}
+        </span>
+        {canEdit && <button type="button" disabled={goneBusy} onClick={() => void clearGone([l.id])} className="text-[11px] text-slate-400 hover:text-rose-600 hover:underline shrink-0 disabled:opacity-50">ล้างออก</button>}
+      </span>
+    );
     if (st === "ok") return (
       <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
         <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 truncate" title={l.matched_name ?? ""}>✓ {l.matched_code || "จับคู่แล้ว"}</span>
@@ -647,7 +694,7 @@ export default function PlatformCatalogPage() {
       cell: (l: Listing) => { const s = summ[l.id]; return s && s.state !== "nodata" ? <ShopStateBadge state={s.state} /> : <span className="text-slate-300">—</span>; },
     }, {
       key: "stock", header: "สต๊อก", width: "0.55fr", align: "right" as const, sortValue: (l: Listing) => summ[l.id]?.stock ?? -1,
-      cell: (l: Listing) => { const s = summ[l.id]; return s?.stock == null ? <span className="text-slate-300">—</span> : <span className={`tabular-nums ${s.state === "out" ? "text-rose-600 font-medium" : s.state === "low" ? "text-amber-600 font-medium" : ""}`}>{s.stock.toLocaleString()}</span>; },
+      cell: (l: Listing) => { const s = summ[l.id]; return s?.stock == null || s.state === "gone" ? <span className="text-slate-300">—</span> : <span className={`tabular-nums ${s.state === "out" ? "text-rose-600 font-medium" : s.state === "low" ? "text-amber-600 font-medium" : ""}`}>{s.stock.toLocaleString()}</span>; },
     }] : []),
     {
       key: "price", header: "ราคา", sortLabel: "ราคาที่ขายจริง", width: "0.75fr", align: "right", sortValue: (l) => effectivePrice(summ[l.id]) ?? l.price ?? -1,
@@ -659,7 +706,7 @@ export default function PlatformCatalogPage() {
         return full != null ? <span className="leading-tight"><span className="block">{full.toLocaleString()}฿</span>{warn}</span> : <span className="text-slate-300">—</span>;
       },
     },
-    { key: "match", header: "จับคู่ในระบบ", width: "1.6fr", align: "right", sortValue: (l) => ({ guess: 0, none: 1, ok: 2, ignored: 3 })[statusOf(l)], cell: (l) => matchCell(l) },
+    { key: "match", header: "จับคู่ในระบบ", width: "1.6fr", align: "right", sortValue: (l) => ({ guess: 0, none: 1, ok: 2, ignored: 3, gone: 4 })[statusOf(l)], cell: (l) => matchCell(l) },
   ];
   const fcols: MiniColumn<FieldRow>[] = [
     { key: "key", header: "Field", width: "1.3fr", sortValue: (f) => f.field_key, cell: (f) => <span className="font-mono text-xs">{f.field_key}</span> },
@@ -669,13 +716,13 @@ export default function PlatformCatalogPage() {
     { key: "sample", header: "ตัวอย่าง", width: "1.5fr", cell: (f) => <span className="text-xs text-slate-400 truncate">{f.sample || "—"}</span> },
   ];
 
-  // % จับคู่ คิดจากตัวที่ "ต้องจับคู่" (ไม่นับตัวที่กดไม่ต้องจับคู่) → ไปถึง 100% ได้จริง
+  // % จับคู่ คิดจากตัวที่ "ต้องจับคู่" (ไม่นับตัวที่กดไม่ต้องจับคู่ · counts.all ไม่รวมตัวที่ไม่อยู่บนร้านแล้วอยู่แล้ว) → ไปถึง 100% ได้จริง
   const needMatch = counts.all - counts.ignored;
   const pct = needMatch ? Math.round((counts.ok / needMatch) * 100) : (counts.all ? 100 : 0);
   const unmatchedRows = listings.filter((l) => { const s = statusOf(l); return s === "guess" || s === "none"; });
   // ยังไม่จับคู่ = รอยืนยัน + ต้องหาคู่เอง (รู้ได้ทันที ไม่ต้องรอตัวเดา) · หลายประกาศบนร้านชี้สินค้าในระบบตัวเดียวกันได้ → นับรุ่นแยก
   const unmatchedCount = needMatch - counts.ok;
-  const matchedParents = new Set(listings.map((l) => l.matched_parent_sku_id).filter(Boolean)).size;
+  const matchedParents = new Set(listings.filter((l) => !isGoneStatus(l.status)).map((l) => l.matched_parent_sku_id).filter(Boolean)).size;
   const where = `${activePf?.name_th ?? "ร้านนี้"}${activeBrand ? ` · ${activeBrand.name}` : ""}`;
   // มุมมองหน้าร้านต้องเลือกแบรนด์ก่อน (เจ้าของขอ 2026-11-08) — ยังไม่เลือก = หน้าเลือกแบรนด์
   const gate = viewReady && view === "shop" && !brandId;
@@ -874,7 +921,20 @@ export default function PlatformCatalogPage() {
                 { key: "none", label: "ต้องหาคู่เอง", value: suggestLoading ? null : counts.none, tone: "warning", hint: "ระบบเดาไม่ได้/ไม่มั่นใจ" },
                 { key: "ignored", label: "ไม่ต้องจับคู่", value: counts.ignored, tone: "neutral", hint: "งานบริการ/เลิกขาย ฯลฯ" },
                 ...(dupCounts.size > 0 || filter === "dup" ? [{ key: "dup", label: "ซ้ำบนร้าน", value: dupCounts.size, tone: "danger" as const, hint: "ชื่อ+รหัสเหมือนกัน · เก็บไว้ตัวเดียว" }] : []),
+                ...(counts.gone > 0 || filter === "gone" ? [{ key: "gone", label: "ไม่อยู่บนร้านแล้ว", value: counts.gone, tone: "neutral" as const, hint: "ร้านลบไปแล้ว · ล้างออกได้" }] : []),
               ]} />
+              {filter === "gone" && counts.gone > 0 && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  <Icon name="info" />
+                  <span className="flex-1 min-w-[14rem]">ตอนกดดึงสินค้าจากร้านแล้วได้ครบทั้งร้าน รายการเหล่านี้ไม่อยู่ในร้านแล้ว (ร้านลบไป) — ไม่นับเป็นงานจับคู่ · ถ้าร้านเปิดขายกลับ ดึงรอบหน้าป้ายจะหายเอง</span>
+                  {canEdit && (
+                    <button type="button" disabled={goneBusy} onClick={() => void clearGone(goneIds)}
+                      className="h-8 px-3 inline-flex items-center gap-1.5 text-sm whitespace-nowrap text-rose-700 border border-rose-200 bg-white rounded-lg hover:bg-rose-50 disabled:opacity-50">
+                      <Icon name="delete" />{goneBusy ? "กำลังล้าง…" : `ล้างรายการที่ไม่อยู่บนร้าน (${counts.gone.toLocaleString()})`}
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="flex items-center gap-3">
                 <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} /></div>
                 <span className="text-xs text-slate-500 shrink-0">จับคู่แล้ว {pct}%{counts.ignored ? ` (ไม่นับที่ไม่ต้องจับคู่ ${counts.ignored.toLocaleString()})` : ""}</span>
@@ -1001,6 +1061,9 @@ export default function PlatformCatalogPage() {
           )}
           {selIgnored.length > 0 && (
             <button type="button" disabled={ignoreBusy} onClick={() => void saveIgnore(selIgnored, false, null)} className="h-8 px-3 text-sm rounded-lg border border-white/30 text-white hover:bg-white/10 disabled:opacity-50">↩ เลิกข้าม ({selIgnored.length.toLocaleString()})</button>
+          )}
+          {selGone.length > 0 && (
+            <button type="button" disabled={goneBusy} onClick={() => void clearGone(selGone)} className="h-8 px-3 inline-flex items-center gap-1.5 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"><Icon name="delete" />ล้างที่ไม่อยู่บนร้าน ({selGone.length.toLocaleString()})</button>
           )}
         </BulkActionBar>
       )}

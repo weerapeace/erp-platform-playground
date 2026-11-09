@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
+import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -45,7 +46,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   // สินค้าบนแพลตฟอร์ม (catalog) ตามฟิลเตอร์ (แพลตฟอร์ม/แบรนด์)
   // 🐛 เดิม .limit(20000) แต่ PostgREST ตัดที่ 1,000 เงียบ ๆ (มี ~1,200 ตัว → ตัวเลขขาด) → ไล่ทีละหน้า
   const catalog = await fetchAllPages<{ platform_id: string; matched_parent_sku_id: string | null; match_ignored: boolean | null }>((from, to) => {
-    let cq = admin.from("platform_catalog_listings").select("id, platform_id, matched_parent_sku_id, match_ignored");
+    let cq = admin.from("platform_catalog_listings").select("id, platform_id, matched_parent_sku_id, match_ignored").or(LIVE_LISTING_OR);   // ไม่นับตัวที่ร้านลบไปแล้ว
     if (platformId) cq = cq.eq("platform_id", platformId);
     if (brandId) cq = cq.eq("brand_id", brandId);
     return cq.order("id", { ascending: true }).range(from, to);

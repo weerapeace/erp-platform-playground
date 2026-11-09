@@ -56,13 +56,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   // 2) บันทึก + จับคู่รหัสตรง (ของกลาง)
+  //    ได้ครบทั้งร้าน (ไม่หมดเวลา/ไม่ล้มกลางทาง + ครบตามยอดที่ Lazada รายงาน) → ตัวเดิมที่ไม่เจอ = ติดป้าย "ไม่อยู่บนร้านแล้ว"
+  //    filter=all ไม่รวมตัวที่ลบแล้ว → ตัวที่ไม่เจอ = ร้านลบไปแล้ว (ตัวที่ปิดขายยังมาครบ)
+  const complete = !partial && apiTotal > 0 && new Set(items.map((i) => i.external_product_id)).size >= apiTotal;
   let saved;
-  try { saved = await upsertCatalogListings(admin, { platformId: lazId, brandId, source: "api", items }); }
+  try { saved = await upsertCatalogListings(admin, { platformId: lazId, brandId, source: "api", items, markMissing: complete }); }
   catch (e) { return NextResponse.json({ error: `บันทึกไม่สำเร็จ: ${(e as Error).message}` }, { status: 400 }); }
 
   await writeAudit(admin, {
     action: "import", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null,
-    metadata: { source: "lazada_api", brand_id: brandId, api_total: apiTotal, fetched: items.length, partial, ...saved },
+    metadata: { source: "lazada_api", brand_id: brandId, api_total: apiTotal, fetched: items.length, partial, complete, ...saved },
   });
-  return NextResponse.json({ ok: true, api_total: apiTotal, fetched: items.length, partial, ...saved, error: null });
+  return NextResponse.json({ ok: true, api_total: apiTotal, fetched: items.length, partial, complete, ...saved, error: null });
 }

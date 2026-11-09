@@ -11,6 +11,7 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { lineUpdateProduct } from "@/lib/line-shopping";
 import { decryptSecret } from "@/lib/secret-box";
+import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -42,8 +43,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   let apiKey: string;
   try { apiKey = await decryptSecret(stored); } catch { return NextResponse.json({ error: "ถอดรหัสคีย์ไม่ได้ (กุญแจหลักไม่ตรง/หาย?)" }, { status: 400 }); }
 
-  // สินค้า LINE ที่จับคู่แล้ว
-  let lq = admin.from("platform_catalog_listings").select("external_product_id, title, matched_parent_sku_id").eq("platform_id", platform_id).eq("brand_id", brand_id).not("matched_parent_sku_id", "is", null);
+  // สินค้า LINE ที่จับคู่แล้ว (ไม่รวมตัวที่ร้านลบไปแล้ว — ส่งไปก็ error)
+  let lq = admin.from("platform_catalog_listings").select("external_product_id, title, matched_parent_sku_id").eq("platform_id", platform_id).eq("brand_id", brand_id).not("matched_parent_sku_id", "is", null).or(LIVE_LISTING_OR);
   if (onlyParent) lq = lq.eq("matched_parent_sku_id", onlyParent);
   const { data: listings } = await lq;
   const rows = (listings ?? []) as { external_product_id: string; title: string | null; matched_parent_sku_id: string }[];

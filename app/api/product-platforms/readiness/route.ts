@@ -10,6 +10,7 @@ import { guardApi } from "@/lib/api-auth";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { loadListingContexts } from "@/lib/product-listing-context";
 import { DEFAULT_PRICE_RULE } from "@/lib/platform-listing-builder";
+import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
 import { loadPlatformByCode, readinessOf, hasRealConnector } from "../shared";
 
 export const dynamic = "force-dynamic";
@@ -23,7 +24,8 @@ const PICK_MAX = 200;
 async function onShopSet(admin: ReturnType<typeof supabaseAdmin>, platformId: string, parentIds: string[]): Promise<Set<string>> {
   const out = new Set<string>();
   for (let i = 0; i < parentIds.length; i += 100) {
-    const { data } = await admin.from("platform_catalog_listings").select("matched_parent_sku_id").eq("platform_id", platformId).in("matched_parent_sku_id", parentIds.slice(i, i + 100));
+    // ไม่นับตัวที่ร้านลบไปแล้ว (ป้าย "ไม่อยู่บนร้านแล้ว") → ลงใหม่ได้
+    const { data } = await admin.from("platform_catalog_listings").select("matched_parent_sku_id").eq("platform_id", platformId).in("matched_parent_sku_id", parentIds.slice(i, i + 100)).or(LIVE_LISTING_OR);
     for (const r of (data ?? []) as { matched_parent_sku_id: string | null }[]) if (r.matched_parent_sku_id) out.add(r.matched_parent_sku_id);
   }
   return out;

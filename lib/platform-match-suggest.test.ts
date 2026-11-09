@@ -3,6 +3,7 @@ import { codeTokens, isHighConfidence, listingMatchStatus, normCode, prepareCand
 
 describe("listingMatchStatus", () => {
   it("จับคู่แล้วชนะเสมอ แม้เคยกดข้าม", () => expect(listingMatchStatus({ matched_parent_sku_id: "p", match_ignored: true }, 0)).toBe("ok"));
+  it("ไม่อยู่บนร้านแล้ว ชนะทุกอย่าง (แม้จับคู่ไว้)", () => expect(listingMatchStatus({ matched_parent_sku_id: "p", status: "removed" }, 95)).toBe("gone"));
   it("กดข้าม = ไม่ต้องจับคู่ (แม้ระบบเดาได้มั่นใจ)", () => expect(listingMatchStatus({ matched_parent_sku_id: null, match_ignored: true }, 95)).toBe("ignored"));
   it("คะแนน ≥60 = ระบบเดาให้ · ต่ำกว่า = ยังไม่มีคู่", () => {
     expect(listingMatchStatus({ matched_parent_sku_id: null }, 60)).toBe("guess");

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   effectivePrice, discountPct, priceFlags,
   summarizeListing, shopStateOf, duplicateCounts, duplicateKey, inShopTab, inShopQueue, notListedTrustworthy,
-  LOW_STOCK_MAX, type ShopItem,
+  LOW_STOCK_MAX, LISTING_GONE_STATUS, isUnmatched, type ShopItem,
 } from "@/lib/platform-listing-health";
 
 // รูปร่างจริงจาก LINE SHOPPING (ย่อ) — WK42 ของ Louis Montini
@@ -155,5 +155,28 @@ describe("ราคาผิดปกติ", () => {
     expect(priceFlags({ price: 1499, salePrice: 850, erpPriceDiff: 0, erpFullDiff: 6 })).toEqual([]);   // แค่ราคาเต็มไม่ตรง ไม่นับ
     expect(priceFlags({ price: 0, salePrice: null })).toEqual([]);
     expect(priceFlags(null)).toEqual([]);
+  });
+});
+
+describe("ไม่อยู่บนร้านแล้ว (status removed)", () => {
+  it("status removed ชนะทุกสถานะ · รูป/ราคาเดิมยังอยู่ให้ดูอ้างอิง", () => {
+    const s = summarizeListing("line_shopping", lineRaw(), null, LISTING_GONE_STATUS);
+    expect(s.state).toBe("gone");
+    expect(s.image).toBe("https://obs.line-scdn.net/a");
+    expect(summarizeListing("shopee", {}, 100, "removed").state).toBe("gone");
+    expect(summarizeListing("line_shopping", lineRaw(), null, null).state).toBe("selling");
+  });
+  it("อยู่แท็บ/กอง gone อย่างเดียว · ไม่นับเป็นงานจับคู่ · ไม่ทำให้ ยังไม่ลง เชื่อไม่ได้", () => {
+    const g = item({ state: "gone", matched_parent_sku_id: null, dup_count: 2, imageKnown: true, image: null });
+    expect(inShopTab(g, "gone")).toBe(true);
+    expect(inShopTab(g, "all")).toBe(false);
+    expect(inShopTab(g, "unmatched")).toBe(false);
+    expect(inShopQueue(g, "gone")).toBe(true);
+    expect(inShopQueue(g, "dup")).toBe(false);
+    expect(inShopQueue(g, "noimg_shop")).toBe(false);
+    expect(isUnmatched(g)).toBe(false);
+    expect(inShopTab(item({ state: "selling" }), "gone")).toBe(false);
+    const ok = item({ matched_parent_sku_id: "p1" });
+    expect(notListedTrustworthy([ok, g, g, g])).toBe(true);
   });
 });
