@@ -1790,11 +1790,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
         ? numCell(r.length_cm, (v) => u({ length_cm: v, ...(r.shape ? { shape: refitLineShape(r.shape, r.width_cm, v) } : {}) }))
         : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้ความยาว", "This type doesn't use length")}></span> },
     { key: "pieces", header: t("จำนวนชิ้น", "Pcs"), width: cw(80, 56), align: "right", sortable: true, getValue: (r) => r.pieces,
-      render: (r, u) => usesPieces(r.calc_method)
+      render: (r, u) => usesPieces(r.calc_method) || rowIsPiece(r) || !!r.shape   // ชิ้นที่วาด/ชนิดชิ้น = มีจำนวนชิ้นเหมือนบรรทัดปกติ
         ? numCell(r.pieces, (v) => u({ pieces: v }))
         : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้จำนวนชิ้น", "This type doesn't use pcs")}></span> },
     { key: "waste_percent", header: t("เผื่อเสีย %", "Waste %"), width: cw(84, 60), align: "right", sortable: true, getValue: (r) => r.waste_percent,
-      render: (r, u) => usesWaste(r.calc_method)
+      render: (r, u) => usesWaste(r.calc_method) || rowIsPiece(r) || !!r.shape   // ชิ้นที่วาด/ชนิดชิ้น = มีเผื่อเสียเหมือนบรรทัดปกติ
         ? numCell(r.waste_percent, (v) => u({ waste_percent: v }), "0")
         : <span className="block h-7" title={t("ชนิดนี้ไม่ใช้เผื่อเสีย", "This type doesn't use waste")}></span> },
     { key: "face_width_cm", header: t("หน้ากว้าง / พื้นที่", "Roll width / area"), width: cw(96, 72), align: "right", sortable: true, getValue: (r) => r.face_width_cm,
