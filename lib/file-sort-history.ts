@@ -5,6 +5,8 @@
  *   (ไม่เจอ = โชว์แถวย้ายกลับเดี่ยว ๆ) · หน้าจอแปลด้วย lib/audit-format (describeFileSort)
  */
 export const FILE_SORT_ACTIONS = ["file_sort.upload", "file_sort.undo"] as const;
+/** entity_type ที่ /api/file-sort/log จดเสมอ — ใช้กรองคู่กันเพื่อให้ฐานข้อมูลใช้ index (ตาราง audit_logs ไม่มี index ที่ action) */
+export const FILE_SORT_ENTITY_TYPES = ["assets", "content_album"] as const;
 
 type Row = { action: string; created_at: string; actor_name?: string | null; metadata: Record<string, unknown> | null };
 

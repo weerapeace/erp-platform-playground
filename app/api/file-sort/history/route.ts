@@ -12,7 +12,7 @@ import { apiCan } from "@/lib/api-auth";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { describeAudit } from "@/lib/audit-format";
 import { enrichAuditRows, loadAuditProfiles, type RawAuditRow } from "@/lib/audit-view-server";
-import { FILE_SORT_ACTIONS, cleanHistoryTerm, mergeFileSortUndo } from "@/lib/file-sort-history";
+import { FILE_SORT_ACTIONS, FILE_SORT_ENTITY_TYPES, cleanHistoryTerm, mergeFileSortUndo } from "@/lib/file-sort-history";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -29,7 +29,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
   const sp = new URL(request.url).searchParams;
   const admin = supabaseAdmin();
   const limit = Math.min(100, Math.max(1, Math.round(Number(sp.get("limit")) || 50)));
-  const base = () => admin.from("audit_logs").select(COLS).in("action", [...FILE_SORT_ACTIONS]);
+  // กรอง entity_type ด้วย (log route จดเป็น assets / content_album เสมอ) → ใช้ index entity_type+created_at · ไม่กรอง = ไล่ทั้งตาราง ~95k แถว ~1.9 วิ (วัด 2026-11-09)
+  const base = () => admin.from("audit_logs").select(COLS).in("entity_type", [...FILE_SORT_ENTITY_TYPES]).in("action", [...FILE_SORT_ACTIONS]);
   const fail = () => NextResponse.json({ error: "โหลดประวัติไฟล์ไม่สำเร็จ ลองใหม่อีกครั้ง" }, { status: 500, headers: NO_STORE });
 
   let rows: RawAuditRow[] = [];
@@ -73,7 +74,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   let actors: { id: string; name: string }[] | undefined;
   if (sp.get("include") === "actors") {
-    const { data } = await admin.from("audit_logs").select("actor_user_id").in("action", [...FILE_SORT_ACTIONS]).not("actor_user_id", "is", null).order("created_at", { ascending: false }).limit(2000);
+    const { data } = await admin.from("audit_logs").select("actor_user_id").in("entity_type", [...FILE_SORT_ENTITY_TYPES]).in("action", [...FILE_SORT_ACTIONS]).not("actor_user_id", "is", null).order("created_at", { ascending: false }).limit(2000);
     const ids = [...new Set(((data ?? []) as { actor_user_id: string | null }[]).map((r) => r.actor_user_id).filter((x): x is string => !!x))];
     if (ids.length) {
       const profiles = await loadAuditProfiles(admin);
