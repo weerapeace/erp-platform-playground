@@ -12,7 +12,7 @@
  */
 
 export type PriceMode = "markup" | "margin";
-export type PriceRound = "none" | "ceil5" | "ceil10" | "end9";
+export type PriceRound = "none" | "nice" | "ceil5" | "ceil10" | "end9";
 
 export const PRICE_STEPS = [25, 50, 75, 100, 150, 200] as const;
 export const VAT_RATE = 7;
@@ -22,7 +22,7 @@ export const MODE_HINT: Record<PriceMode, string> = {
   markup: "ราคาขาย = ต้นทุน × (1 + %)",
   margin: "ราคาขาย = ต้นทุน ÷ (1 − %) · ให้กำไรเป็น % ของราคาขายจริง (ตั้งได้ไม่ถึง 100%)",
 };
-export const ROUND_LABEL: Record<PriceRound, string> = { none: "ไม่ปัด", ceil5: "ขึ้นหลัก 5", ceil10: "ขึ้นหลักสิบ", end9: "ลงท้าย 9" };
+export const ROUND_LABEL: Record<PriceRound, string> = { none: "ไม่ปัด", nice: "เลขสวย 0/5/9", ceil5: "ขึ้นหลัก 5", ceil10: "ขึ้นหลักสิบ", end9: "ลงท้าย 9" };
 
 const r2 = (v: number) => Math.round(v * 100) / 100;
 
@@ -40,6 +40,7 @@ export function roundQuotePrice(v: number, round: PriceRound): number {
     case "ceil5": return Math.ceil(x / 5) * 5;
     case "ceil10": return Math.ceil(x / 10) * 10;
     case "end9": { const n = Math.ceil(x); return Math.floor(n / 10) * 10 + 9; }   // 141.3 → 149 · 149 → 149 · 150 → 159
+    case "nice": { let n = Math.ceil(x); while (![0, 5, 9].includes(n % 10)) n++; return n; }   // 56.34 → 59 · 61 → 65 · 70 → 70 (ตัวช่วยตั้งราคาแบบง่าย)
     default: return x;
   }
 }

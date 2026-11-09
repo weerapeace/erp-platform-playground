@@ -36,12 +36,13 @@ const byQty = (a: number | null, b: number | null) => (a == null ? 1 : b == null
 type Size = { key: string; label: string };
 type Batch = { batch: number; part: number; quotes: DesignSheetQuote[]; date: string | null; note: string | null; sizes: string[]; qtys: (number | null)[]; status: string | "mixed" };
 
-export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, canEdit, costDirty, saveCost, onReload, onOpenVersions, onSendToQuotation, compact = false, pricingHelper = false }: {
+export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, orderQtyFor, canEdit, costDirty, saveCost, onReload, onOpenVersions, onSendToQuotation, compact = false, pricingHelper = false }: {
   sheetId: string;
   quotes: DesignSheetQuote[];
   sizes: Size[];                                  // ไซส์/แท็บทั้งหมดของใบ (เรียงตามแท็บตีราคา)
   sizeLabel: (code: string | null) => string;
   currentCost: (key: string, qty?: number | null) => number;   // ตีราคาปัจจุบันของไซส์ (รวมที่ยังไม่บันทึก) · ส่ง qty = คิดค่าแบบ "หารจำนวนสั่ง" (ค่าบล็อก) ตามจำนวนนั้น
+  orderQtyFor?: (key: string) => number | null;                 // จำนวนที่สั่งของไซส์ (แถบจำนวนที่สั่ง) — ตัวช่วยตั้งราคาใช้ตั้งต้น
   canEdit: boolean;
   costDirty: boolean; saveCost: () => Promise<boolean>;   // เพิ่มครั้งใหม่ → บันทึกตีราคาที่ค้างก่อน
   onReload: () => Promise<void>;
@@ -140,7 +141,7 @@ export function QuoteRounds({ sheetId, quotes, sizes, sizeLabel, currentCost, ca
       )}
 
       {pricingHelper && helperOpen && (
-        <QuotePricingHelper open onClose={() => setHelperOpen(false)} sheetId={sheetId} sizes={sizes} currentCost={currentCost}
+        <QuotePricingHelper open onClose={() => setHelperOpen(false)} sheetId={sheetId} sizes={sizes} currentCost={currentCost} orderQtyFor={orderQtyFor}
           qtys={batches.at(-1)?.qtys ?? [100, 200, 500, 1000]} onApply={applyPrice} />
       )}
 

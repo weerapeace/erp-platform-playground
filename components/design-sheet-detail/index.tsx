@@ -43,7 +43,7 @@ import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
 import { CostSummaryCard } from "./cost-summary-card";
 import { CostPresetsManager, CutLaborBreakdown, LaborRefPicker, OrderQtyBar, OtherCostPicker, OverheadBreakdown, presetsOf, useCostPresets } from "./cost-extras-tools";
-import { cleanOrderQty, cutLaborRows, cutLaborSummary, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, packSuggestions, pickBag, type OverheadCfg, type PackRef, type PresetKind } from "@/lib/design-cost-presets";
+import { cleanOrderQty, cutLaborRows, cutLaborSummary, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, packSuggestions, pickBag, type CostPreset, type OverheadCfg, type PackRef, type PresetKind } from "@/lib/design-cost-presets";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { SkuLite } from "@/app/api/design-sheets/price-item-skus/route";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -671,9 +671,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const grandTotal = costTotal + extraTotal;                              // ต้นทุนสินค้าของ Parent นี้ (รวมทั้งหมด)
   // ต้นทุนสินค้ารวม (วัสดุ+ค่าใช้จ่าย) ของไซส์/แท็บใด ๆ — ใช้เด้งราคาตอนเสนอราคาตามไซส์
   // qty = คิดค่าแบบ "หารจำนวนสั่ง" ตามจำนวนนั้น (ขั้นราคาตอนเสนอราคา) · ไม่ส่ง = ใช้จำนวนที่ตั้งไว้ในตีราคา
+  const presetsRef = useRef<CostPreset[] | null>(null);   // ราคากลาง (ตั้งค่าหลังประกาศ presetsApi)
   const totalForParent = useCallback((key: string, qty?: number | null) => {
     const mat = costLines.filter((r) => pkey(r.parent_code) === key).reduce((s, r) => s + (r.amount || 0), 0);
-    const ex = (costExtraMap[key] ?? []).reduce((s, c) => s + extraAmountAt(c, qty), 0);
+    const pr = presetsRef.current;
+    const ex = (costExtraMap[key] ?? []).reduce((s, c) => s + (qty != null && qty > 0 && pr && extraKindOf(c) === "overhead" && c.oh
+      ? overheadTotal(overheadRows(c.oh, pr, qty)) : extraAmountAt(c, qty)), 0);
     return Math.round((mat + ex) * 100) / 100;
   }, [costLines, costExtraMap]);
   // จำนวนที่สั่ง — ใช้หารค่าแบบ "หารจำนวนสั่ง" (ค่าบล็อกสกรีน) ของแท็บที่ดูอยู่ (เจ้าของขอ 2026-11-03)
@@ -718,6 +721,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     setCostDirty(true);
   };
   /** แก้รายการค่าใช้จ่ายเพิ่มบางช่อง (ชนิด / ยอด / หมายเหตุ / ตั้งค่าโสหุ้ย) — ผ่าน cleanExtra ทุกครั้ง */
+  const orderQtyFor = useCallback((key: string): number | null =>
+    (costExtraMap[key] ?? []).find((c) => c.mode === "split" && c.split_qty)?.split_qty ?? orderQtyDraft[key] ?? quoteQtyFor(key),
+  [costExtraMap, orderQtyDraft, quoteQtyFor]);
   // ขนาดที่ระบบรู้ของแท็บนี้ → ตัวเลือก "ขนาดสินค้าตอนแพ็ก" (ขนาดสินค้า · กล่องส่ง · ชิ้นใหญ่สุด)
   const packSugg = useMemo(() => {
     const code = costParent || (form?.parent_sku_codes?.[0] ?? "");
@@ -1265,6 +1271,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const [planOpen, setPlanOpen] = useState(false);     // ป๊อปใส่แผนงาน (จากเมนู ส่งต่อ)
   // 💼 ราคากลางค่าใช้จ่ายเพิ่ม (ค่าแรงตัด / โสหุ้ย / ถุง / กล่อง / ลังส่ง / ต้นทุนอื่นๆ) — โหลดเฉพาะคนเห็นต้นทุน ตอนเปิดแท็บตีราคา
   const presetsApi = useCostPresets(canSeeCost && modalTab === "cost");
+  presetsRef.current = presetsApi.loaded ? presetsApi.presets : null;
   const [presetsOpen, setPresetsOpen] = useState<PresetKind | null | false>(false);
   const canEditPresets = canEdit && canSeeCost;
   // ✂ ค่าแรงตัด/ปลอก/วาด ตามจำนวนชิ้นวัตถุดิบของแท็บนี้ (ราคา: แก้ในใบ → ตามวัสดุ → ราคากลาง)
@@ -3070,7 +3077,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 onSend={canEdit ? () => setToQuote(true) : undefined} />
               {/* รอบเสนอราคาแบบ 1 ครั้ง = 1 การ์ด (ไซส์ × ขั้นจำนวน) — components/design-sheet-detail/quote-rounds.tsx */}
               <QuoteRounds sheetId={form.id} quotes={quotes} sizes={costParentTabs.map((tb) => ({ key: tb.key, label: tb.label }))} sizeLabel={quoteSizeLabel}
-                currentCost={totalForParent} canEdit={canEdit} costDirty={costDirty} saveCost={saveCost} pricingHelper={canSeeCost}
+                currentCost={totalForParent} orderQtyFor={orderQtyFor} canEdit={canEdit} costDirty={costDirty} saveCost={saveCost} pricingHelper={canSeeCost}
                 onReload={() => loadCq(form.id!)}
                 onOpenVersions={(a, b, parent) => { setVersionsInit({ a, b, parent }); setVersionsOpen(true); }}
                 onSendToQuotation={canEdit ? () => setToQuote(true) : undefined} />

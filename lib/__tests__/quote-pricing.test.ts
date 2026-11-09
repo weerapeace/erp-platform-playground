@@ -71,3 +71,15 @@ describe("brandMarkupSummary", () => {
     expect(median([3, 1, 2, 4])).toBe(2.5);
   });
 });
+
+describe("ปัดราคาเลขสวย (0/5/9)", () => {
+  it("ปัดขึ้นเป็นเลขลงท้าย 0 / 5 / 9 · ตรงอยู่แล้วไม่เปลี่ยน", async () => {
+    const { roundQuotePrice, priceFromCost } = await import("@/lib/quote-pricing");
+    expect(roundQuotePrice(56.34, "nice")).toBe(59);
+    expect(roundQuotePrice(61, "nice")).toBe(65);
+    expect(roundQuotePrice(70, "nice")).toBe(70);
+    expect(roundQuotePrice(65.01, "nice")).toBe(69);
+    expect(roundQuotePrice(99.2, "nice")).toBe(100);
+    expect(priceFromCost(37.56, 1.5, "nice")).toBe(59);
+  });
+});
