@@ -58,8 +58,9 @@ import {
   type CreativeTask, type CreativeStatus, type CreativePriority,
   type Campaign, type BrandOption, type MySubtask,
 } from "./data";
-import { FileHistoryView } from "./file-history-view";
 import { Icon } from "@/components/icon";
+// 📂 ประวัติไฟล์ — โหลดเมื่อเปิดมุมมองนี้เท่านั้น (ไม่ถ่วงหน้างานหลัก)
+const FileHistoryView = dynamic(() => import("./file-history-view").then((m) => m.FileHistoryView), { ssr: false });
 
 // ============================================================
 // Table columns + views
