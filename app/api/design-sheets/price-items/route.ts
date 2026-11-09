@@ -25,6 +25,8 @@ export type PriceItem = {
   last_used_price: number | null;                               // ราคาที่ "เคยใช้ตีราคา" ครั้งล่าสุดของวัสดุนี้
   price_updated_at: string | null;   // แก้ master วัสดุล่าสุดเมื่อไหร่ (ใช้บอก "ราคากรอกเองปรับตั้งแต่…")
   sku_latest_date: string | null;    // วันรับของของราคาซื้อจริงล่าสุด (ใช้บอก "ราคาซื้อจริงปรับตั้งแต่…")
+  used_lines?: number;               // ใช้ในบรรทัดตีราคากี่บรรทัด (หน้าค่าตัดตามวัตถุดิบ เรียงที่ใช้บ่อยก่อน)
+  used_pieces?: number;              // รวมกี่ชิ้นวัตถุดิบ
 };
 
 // กลุ่มวัสดุ (สำหรับตีราคาแบบ "กลุ่ม") — ราคาเฉลี่ยจากวัสดุในกลุ่ม + ราคาตั้ง + ราคาซื้อจริงล่าสุด (GR→PO)
@@ -120,18 +122,23 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
   // ราคาที่ "เคยใช้ตีราคา" ครั้งล่าสุด ต่อวัสดุ (จากบรรทัดตีราคาเดิม) → ฐาน "ใช้ล่าสุด"
   const lastUsedByItem = new Map<string, number>();
+  const usedByItem = new Map<string, { lines: number; pieces: number }>();
   if (itemIds.length) {
     const { data: prevLines } = await admin.from("design_sheet_cost_lines")
-      .select("item_id, unit_price, created_at").in("item_id", itemIds)
-      .not("unit_price", "is", null).order("created_at", { ascending: false }).limit(5000);
+      .select("item_id, unit_price, pieces, created_at").in("item_id", itemIds)
+      .order("created_at", { ascending: false }).limit(5000);
     for (const l of (prevLines ?? []) as Array<Record<string, unknown>>) {
       const it = String(l.item_id);
       if (!lastUsedByItem.has(it) && l.unit_price != null) lastUsedByItem.set(it, Number(l.unit_price));   // แถวแรก = ล่าสุด
+      const u = usedByItem.get(it) ?? { lines: 0, pieces: 0 };
+      u.lines += 1; u.pieces += Number(l.pieces) > 0 ? Number(l.pieces) : 1;
+      usedByItem.set(it, u);
     }
   }
   // เติมราคา "ล่าสุด/เฉลี่ย" ต่อวัสดุตีราคา จาก SKU ที่ผูก
   for (const it of items) {
     it.last_used_price = lastUsedByItem.get(it.id) ?? null;   // "ใช้ล่าสุด" ไม่ขึ้นกับ SKU ที่ผูก
+    const u = usedByItem.get(it.id); it.used_lines = u?.lines ?? 0; it.used_pieces = Math.round((u?.pieces ?? 0) * 100) / 100;
     const skuIds = skusByItem.get(it.id) ?? [];
     it.sku_count = skuIds.length;
     if (skuIds.length === 0) continue;

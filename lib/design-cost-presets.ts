@@ -28,7 +28,7 @@ export type CostPreset = {
 /** ชื่อหมวด + ช่องที่ต้องกรอก (หน้าตั้งค่าราคากลาง) */
 export const PRESET_KIND_META: Record<PresetKind, { label: string; hint: string; dims: 0 | 2 | 3; weight?: boolean; needLabel?: boolean; amountLabel: string }> = {
   labor_cut: { label: "ค่าแรง (ตัด/ปลอก/วาด)", hint: "ราคากลางต่อใบ — ปุ่ม “ราคากลาง” ใช้ตัวแรก", dims: 0, amountLabel: "฿ / ใบ" },
-  cut_rate: { label: "ค่าตัดต่อชิ้นวัตถุดิบ", hint: "ราคากลางค่าตัด/ปลอก/วาด ต่อ 1 ชิ้นวัตถุดิบ (ใช้ตัวแรก) — วัสดุที่ตั้งราคาเฉพาะไว้ที่ “จัดการวัสดุตีราคา” ใช้ราคานั้นแทน", dims: 0, amountLabel: "฿ / ชิ้น" },
+  cut_rate: { label: "ค่าตัดต่อชิ้นวัตถุดิบ", hint: "ค่าตัด/ปลอก/วาด ต่อ 1 ชิ้นวัตถุดิบ — ตั้งรายวัตถุดิบหรือทั้งกลุ่มได้ด้านล่าง · วัตถุดิบที่ยังไม่ตั้งใช้ค่ากลาง · ตีราคาคิดให้อัตโนมัติ", dims: 0, amountLabel: "฿ / ชิ้น" },
   oh_fixed: { label: "โสหุ้ยต่อชิ้น", hint: "เช่น ค่า QC · ค่าแรงแพ็ก — ใส่ให้ทุกงานอัตโนมัติ (ปิดรายแท็บได้)", dims: 0, needLabel: true, amountLabel: "฿ / ชิ้น" },
   bag: { label: "ถุง", hint: "ขนาดถุง (กว้าง × ยาว) — ระบบเลือกใบเล็กสุดที่ใส่สินค้าได้", dims: 2, amountLabel: "฿ / ใบ" },
   box: { label: "กล่อง", hint: "ขนาดกล่องด้านใน (กว้าง × ยาว × สูง) — ระบบเลือกใบเล็กสุดที่ใส่ได้", dims: 3, amountLabel: "฿ / ใบ" },
@@ -279,4 +279,42 @@ export function cutLaborSummary(rows: CutRow[]): { total: number; pieces: number
     byMaterial: [...by.entries()].map(([name, pieces]) => ({ name, pieces })),
     missingRate: on.filter((r) => r.source === "none").length,
   };
+}
+
+// ── ค่าตัดตามวัตถุดิบ (หน้าราคากลาง แท็บค่าตัดต่อชิ้น · เจ้าของขอ 2026-11-09) ──
+//   ลำดับราคาที่ใช้คิดในตีราคา (cutLaborRows): แก้ในใบ → ราคาของวัตถุดิบ → ค่ากลาง
+//   "ทั้งกลุ่ม" = ใส่ราคาเดียวกันให้ทุกวัตถุดิบในกลุ่ม (เก็บที่ design_price_items.cut_rate — ไม่มีตาราง/คอลัมน์ใหม่)
+
+/** ค่าตัดต่อชิ้น = ค่าแรงช่างต่อวัน ÷ ตัดได้กี่ชิ้นต่อวัน */
+export function cutRateFromWage(wagePerDay: number | null | undefined, piecesPerDay: number | null | undefined): number | null {
+  const w = Number(wagePerDay), p = Number(piecesPerDay);
+  return Number.isFinite(w) && Number.isFinite(p) && w > 0 && p > 0 ? r2(w / p) : null;
+}
+
+export type CutMaterial = { id: string; name: string; group_name: string | null; calc_method: string | null; cut_rate: number | null; used_lines?: number; used_pieces?: number };
+export type CutMaterialGroup = {
+  group: string;
+  items: CutMaterial[];
+  hardware: boolean;                   // อะไหล่ / ซิป / นับชิ้น — ปกติไม่นับค่าตัด
+  rate: number | null;                 // ราคาเดียวกันทั้งกลุ่ม (null = ยังไม่ตั้ง หรือหลายราคา)
+  state: "none" | "same" | "mixed";    // none = ทุกตัวใช้ค่ากลาง · same = ราคาเดียวทั้งกลุ่ม · mixed = หลายราคา/บางตัว
+  used: number;                        // ใช้ในตีราคากี่บรรทัดรวม
+};
+
+/** จัดวัตถุดิบเป็นกลุ่ม — กลุ่มที่ใช้บ่อยก่อน · ในกลุ่มเรียงตัวที่ใช้บ่อยก่อน · กลุ่มอะไหล่ไปท้าย */
+export function cutMaterialGroups(items: CutMaterial[]): CutMaterialGroup[] {
+  const map = new Map<string, CutMaterial[]>();
+  for (const it of items) { const g = (it.group_name ?? "").trim() || "ไม่ระบุกลุ่ม"; map.set(g, [...(map.get(g) ?? []), it]); }
+  const out = [...map.entries()].map(([group, list]): CutMaterialGroup => {
+    const sorted = [...list].sort((a, b) => (b.used_lines ?? 0) - (a.used_lines ?? 0) || a.name.localeCompare(b.name, "th"));
+    const rates = sorted.map((x) => (x.cut_rate != null && Number.isFinite(Number(x.cut_rate)) ? Number(x.cut_rate) : null));
+    const set = rates.filter((r): r is number => r != null);
+    const state: CutMaterialGroup["state"] = !set.length ? "none" : set.length === rates.length && set.every((r) => r === set[0]) ? "same" : "mixed";
+    return {
+      group, items: sorted, state, rate: state === "same" ? set[0] : null,
+      hardware: sorted.every((x) => isHardwareLine({ group_name: x.group_name, calc_method: x.calc_method })),
+      used: sorted.reduce((s, x) => s + (x.used_lines ?? 0), 0),
+    };
+  });
+  return out.sort((a, b) => Number(a.hardware) - Number(b.hardware) || b.used - a.used || a.group.localeCompare(b.group, "th"));
 }

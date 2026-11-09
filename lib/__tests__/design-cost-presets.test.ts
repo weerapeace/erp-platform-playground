@@ -144,3 +144,30 @@ describe("groupCutRows — วัสดุเดียวกันหลาย�
     expect(g[1]).toMatchObject({ lines: 1, pieces: 1, rate: 0.5, source: "central", on: "all", auto: true });
   });
 });
+
+describe("ค่าตัดตามวัตถุดิบ", () => {
+  it("ค่าตัดต่อชิ้น = ค่าแรงต่อวัน ÷ ชิ้นต่อวัน · ใส่ไม่ครบ = null", async () => {
+    const { cutRateFromWage } = await import("@/lib/design-cost-presets");
+    expect(cutRateFromWage(400, 600)).toBe(0.67);
+    expect(cutRateFromWage(400, 150)).toBe(2.67);
+    expect(cutRateFromWage(400, 0)).toBeNull();
+    expect(cutRateFromWage(null, 300)).toBeNull();
+  });
+  it("จัดกลุ่ม: ใช้บ่อยก่อน · อะไหล่ไปท้าย · สถานะราคาทั้งกลุ่ม", async () => {
+    const { cutMaterialGroups } = await import("@/lib/design-cost-presets");
+    const g = cutMaterialGroups([
+      { id: "1", name: "ผ้าซับใน", group_name: "ผ้า", calc_method: "area_face", cut_rate: 0.7, used_lines: 47 },
+      { id: "2", name: "ผ้าแคนวาส", group_name: "ผ้า", calc_method: "area_face", cut_rate: 0.7, used_lines: 25 },
+      { id: "3", name: "PU จอนนี่", group_name: "PU", calc_method: "area_face", cut_rate: null, used_lines: 22 },
+      { id: "4", name: "PU เสริม", group_name: "PU", calc_method: "area_face", cut_rate: 1.2, used_lines: 12 },
+      { id: "5", name: "หัวซิป", group_name: "อะไหล่", calc_method: "count", cut_rate: null, used_lines: 99 },
+      { id: "6", name: "เยื่อ", group_name: "ตัวเสริม", calc_method: "area_face", cut_rate: null, used_lines: 18 },
+    ]);
+    expect(g.map((x) => x.group)).toEqual(["ผ้า", "PU", "ตัวเสริม", "อะไหล่"]);
+    expect(g[0]).toMatchObject({ state: "same", rate: 0.7, used: 72 });
+    expect(g[1]).toMatchObject({ state: "mixed", rate: null });
+    expect(g[2]).toMatchObject({ state: "none", rate: null });
+    expect(g[3].hardware).toBe(true);
+    expect(g[0].items[0].name).toBe("ผ้าซับใน");
+  });
+});

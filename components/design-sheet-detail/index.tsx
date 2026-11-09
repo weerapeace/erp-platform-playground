@@ -1269,6 +1269,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       toast.success(t(`บันทึกราคาตัด ${fmtBaht(rate)} ให้วัสดุนี้แล้ว — ใบงานอื่นใช้ราคานี้อัตโนมัติ`, `Saved cut rate ${fmtBaht(rate)} for this material`));
     } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกราคาวัสดุไม่สำเร็จ", "Failed to save material rate")); }
   };
+  // ป๊อปราคากลาง แท็บค่าตัด: ตั้งค่าตัดรายวัตถุดิบ/ทั้งกลุ่ม (null = กลับไปใช้ค่ากลาง) → อัปเดตรายการในใบทันที
+  const setMaterialCutRate = async (itemId: string, rate: number | null): Promise<string | null> => {
+    try {
+      const res = await apiFetch(`/api/master-v2/design-price-items/${itemId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cut_rate: rate }) });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || j?.error) return String(j?.error ?? t("บันทึกไม่สำเร็จ", "Save failed"));
+      setPriceItems((list) => list.map((p) => (p.id === itemId ? { ...p, cut_rate: rate } : p)));
+      return null;
+    } catch (e) { return e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed"); }
+  };
   const [bomWizard, setBomWizard] = useState(false);   // Wizard ดึงตีราคา → สร้างสูตร BOM
   const [fabricCalc, setFabricCalc] = useState(false); // 🧵 คำนวณจำนวนผ้า (จากขนาดชิ้น × จำนวนผลิต)
   const [bomPull, setBomPull] = useState(false);       // Wizard ดึงโครงจาก BOM → ตีราคา (คู่กลับ)
@@ -3015,7 +3025,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {/* Wizard สร้าง Parent SKU + SKU ลูก จากใบงาน */}
         {presentOpen && form?.id && <DesignSheetPresentPanel sheetId={form.id} open={presentOpen} onClose={() => setPresentOpen(false)} />}
         {presetsOpen !== false && (
-          <CostPresetsManager open api={presetsApi} initialKind={presetsOpen || null} onClose={() => setPresetsOpen(false)} />
+          <CostPresetsManager open api={presetsApi} initialKind={presetsOpen || null} onClose={() => setPresetsOpen(false)} materials={priceItems} onMaterialRate={setMaterialCutRate} />
         )}
         {planOpen && form?.id && (
           <AddToPlanModal open defaultTitle={`${form.code ? `${form.code} ` : ""}${form.name}`.trim()}

@@ -7,6 +7,7 @@
  *   OverheadBreakdown   — ค่าโสหุ้ยแยกรายการ (QC / แพ็ก / ถุง / กล่อง / ค่าส่ง) จากขนาดสินค้าตอนแพ็ก
  *   OtherCostPicker     — ต้นทุนอื่นๆ: ติ๊กเลือกจากรายการกลาง
  *   CostPresetsManager  — ป๊อปตั้งค่าราคากลาง (เพิ่ม / แก้ / ลบ)
+ *   CutRateByMaterial   — แท็บค่าตัดต่อชิ้น: ค่ากลาง + ตั้งรายวัตถุดิบ / ทั้งกลุ่ม + ตัวช่วยคิดจากค่าแรงต่อวัน
  * คิดเลขอยู่ lib/design-cost-presets · ของกลาง: Popover · ERPModal · askConfirm · Icon
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -16,8 +17,8 @@ import { askConfirm } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
 import { apiFetch } from "@/lib/api";
 import {
-  cutLaborSummary, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
-  type CostPreset, type CutRateSource, type CutRow, type LaborRef, type OverheadCfg, type PackDims, type PresetKind,
+  cutLaborSummary, cutMaterialGroups, cutRateFromWage, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
+  type CostPreset, type CutMaterial, type CutMaterialGroup, type CutRateSource, type CutRow, type LaborRef, type OverheadCfg, type PackDims, type PresetKind,
 } from "@/lib/design-cost-presets";
 
 const baht = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -224,7 +225,13 @@ export function OtherCostPicker({ presets, onAdd, onManage }: { presets: CostPre
 type Draft = Partial<CostPreset> & { kind: PresetKind; _key: string };
 const toDraft = (p: CostPreset): Draft => ({ ...p, _key: p.id });
 
-export function CostPresetsManager({ open, api, initialKind, onClose }: { open: boolean; api: CostPresetsApi; initialKind?: PresetKind | null; onClose: () => void }) {
+export function CostPresetsManager({ open, api, initialKind, onClose, materials, onMaterialRate }: {
+  open: boolean; api: CostPresetsApi; initialKind?: PresetKind | null; onClose: () => void;
+  /** วัตถุดิบตีราคา (แท็บค่าตัดต่อชิ้น — ตั้งราคารายวัตถุดิบ/ทั้งกลุ่ม) */
+  materials?: CutMaterial[];
+  /** บันทึกค่าตัดของวัตถุดิบ (null = กลับไปใช้ค่ากลาง) → ข้อความผิดพลาด หรือ null */
+  onMaterialRate?: (itemId: string, rate: number | null) => Promise<string | null>;
+}) {
   const [kind, setKind] = useState<PresetKind>(initialKind ?? "labor_cut");
   const [drafts, setDrafts] = useState<Draft[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -274,6 +281,7 @@ export function CostPresetsManager({ open, api, initialKind, onClose }: { open: 
           ))}
         </div>
         <p className="text-xs text-slate-500">{meta.hint}</p>
+        {kind === "cut_rate" && <div className="text-sm font-semibold text-slate-700">ค่ากลาง <span className="text-xs font-normal text-slate-400">— ใช้กับวัตถุดิบที่ยังไม่ได้ตั้งค่าตัดเฉพาะ</span></div>}
         <div className="space-y-1.5">
           {drafts.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">ยังไม่มีรายการ — กด “เพิ่ม” ด้านล่าง</p>}
           {drafts.map((d) => (
@@ -298,13 +306,142 @@ export function CostPresetsManager({ open, api, initialKind, onClose }: { open: 
             </div>
           ))}
         </div>
-        <button type="button" onClick={() => setDrafts((l) => [...l, { kind, _key: `n${Date.now()}`, amount: 0, mode: kind === "other" ? "piece" : null }])}
-          className="inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-blue-300 px-3 text-xs font-medium text-blue-700 hover:bg-blue-50">
-          <Icon value="i:plus" className="text-[13px]" /> เพิ่ม{meta.label}
-        </button>
+        {!(kind === "cut_rate" && drafts.length >= 1) && (
+          <button type="button" onClick={() => setDrafts((l) => [...l, { kind, _key: `n${Date.now()}`, amount: 0, mode: kind === "other" ? "piece" : null }])}
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-dashed border-blue-300 px-3 text-xs font-medium text-blue-700 hover:bg-blue-50">
+            <Icon value="i:plus" className="text-[13px]" /> {kind === "cut_rate" ? "ตั้งค่ากลาง" : `เพิ่ม${meta.label}`}
+          </button>
+        )}
         {err && <p className="text-sm text-rose-600">{err}</p>}
+        {kind === "cut_rate" && materials && onMaterialRate && (
+          <CutRateByMaterial materials={materials} central={presetsOf(api.presets, "cut_rate")[0]?.amount ?? null} onSave={onMaterialRate} />
+        )}
       </div>
     </ERPModal>
+  );
+}
+
+// ── ค่าตัดต่อชิ้น แยกตามวัตถุดิบ (ในป๊อปราคากลาง) ──
+const WAGE_KEY = "cut-rate-wage";   // ค่าแรงช่างตัดต่อวัน (จำในเครื่อง — ใช้คิดราคาจาก "ชิ้น/วัน")
+const GROUP_STATE_CLS: Record<CutMaterialGroup["state"], string> = {
+  same: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  mixed: "border-violet-200 bg-violet-50 text-violet-700",
+  none: "border-slate-200 bg-white text-slate-500",
+};
+
+export function CutRateByMaterial({ materials, central, onSave }: {
+  materials: CutMaterial[];
+  central: number | null;
+  onSave: (itemId: string, rate: number | null) => Promise<string | null>;
+}) {
+  const [wage, setWage] = useState("400");
+  useEffect(() => { try { const v = localStorage.getItem(WAGE_KEY); if (v) setWage(v); } catch { /* ไม่มีก็ใช้ 400 */ } }, []);
+  const saveWage = (v: string) => { setWage(v); try { localStorage.setItem(WAGE_KEY, v); } catch { /* เก็บไม่ได้ก็ไม่เป็นไร */ } };
+  const [q, setQ] = useState("");
+  const [showHw, setShowHw] = useState(false);
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [grpIn, setGrpIn] = useState<Record<string, { pcs: string; rate: string }>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const groups = useMemo(() => cutMaterialGroups(materials), [materials]);
+  const ql = q.trim().toLowerCase();
+  const visible = groups.filter((g) => showHw || !g.hardware || (ql && g.items.some((i) => i.name.toLowerCase().includes(ql))))
+    .map((g) => ({ g, items: ql ? g.items.filter((i) => i.name.toLowerCase().includes(ql) || g.group.toLowerCase().includes(ql)) : g.items }))
+    .filter((x) => x.items.length);
+  const hwCount = groups.filter((g) => g.hardware).reduce((s, g) => s + g.items.length, 0);
+  const centralTxt = central != null ? `ค่ากลาง ${baht(central)}` : "ค่ากลาง (ยังไม่ตั้ง)";
+
+  const saveOne = async (id: string, rate: number | null) => {
+    setBusy(id); setErr(null);
+    const e = await onSave(id, rate);
+    setBusy(null);
+    if (e) setErr(e); else setEdits((m) => { const n = { ...m }; delete n[id]; return n; });
+  };
+  const applyGroup = async (g: CutMaterialGroup) => {
+    const raw = grpIn[g.group]?.rate ?? "";
+    const rate = raw === "" ? NaN : Number(raw);
+    if (!(rate >= 0)) { setErr(`ใส่ราคาต่อชิ้นของกลุ่ม "${g.group}" ก่อน (หรือใส่ ชิ้น/วัน ให้ระบบคิด)`); return; }
+    const ok = await askConfirm({
+      title: `ใส่ค่าตัด ${baht(rate)} ฿/ชิ้น ให้ทั้งกลุ่ม "${g.group}"?`,
+      message: `${g.items.length} วัตถุดิบ — ทับราคาที่ตั้งไว้เดิมของวัตถุดิบในกลุ่มนี้ · ใบงานที่แก้ราคาในใบไว้เองไม่เปลี่ยน`,
+      confirmText: "ใส่ทั้งกลุ่ม",
+    });
+    if (!ok) return;
+    setBusy(`g:${g.group}`); setErr(null);
+    let fail = 0;
+    for (const it of g.items) { if (await onSave(it.id, rate)) fail++; }
+    setBusy(null);
+    if (fail) setErr(`บันทึกไม่สำเร็จ ${fail} จาก ${g.items.length} วัตถุดิบ`);
+    else setGrpIn((m) => ({ ...m, [g.group]: { pcs: "", rate: "" } }));
+  };
+
+  return (
+    <div className="space-y-2 border-t border-slate-100 pt-3">
+      <div className="text-sm font-semibold text-slate-700">ตั้งตามวัตถุดิบ <span className="text-xs font-normal text-slate-400">— ตีราคาใช้ราคาของวัตถุดิบก่อน ไม่มีค่อยใช้ค่ากลาง · คิดให้อัตโนมัติ</span></div>
+      <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1.5 text-xs text-slate-600">
+        <Icon value="i:calculator" className="text-[14px]" />ค่าแรงช่างตัดต่อวัน
+        <input type="number" min={0} step="any" value={wage} onChange={(e) => saveWage(e.target.value)} aria-label="ค่าแรงช่างตัดต่อวัน" className={`${inCls} w-20 text-right tabular-nums`} />บาท
+        <span className="text-slate-400">· ค่าตัดต่อชิ้น = ค่าแรงต่อวัน ÷ ตัดได้กี่ชิ้นต่อวัน (ใส่ “ชิ้น/วัน” ที่หัวกลุ่ม ระบบคิดราคาให้)</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="ค้นวัตถุดิบ เช่น PU, ผ้าซับใน" className={`${inCls} min-w-0 flex-1`} />
+        {hwCount > 0 && <label className="flex items-center gap-1 text-xs text-slate-500"><input type="checkbox" checked={showHw} onChange={(e) => setShowHw(e.target.checked)} className="h-3.5 w-3.5" />แสดงอะไหล่/ซิป ({hwCount}) — ปกติไม่นับค่าตัด</label>}
+      </div>
+      {materials.length === 0 && <p className="rounded-lg border border-dashed border-slate-200 p-4 text-center text-xs text-slate-400">ยังไม่มีรายการวัตถุดิบตีราคา — เพิ่มที่ “จัดการวัสดุตีราคา”</p>}
+      {materials.length > 0 && visible.length === 0 && <p className="text-center text-xs text-slate-400">ไม่พบวัตถุดิบที่ค้น</p>}
+      {visible.map(({ g, items }) => {
+        const gi = grpIn[g.group] ?? { pcs: "", rate: "" };
+        const gBusy = busy === `g:${g.group}`;
+        return (
+          <div key={g.group} className="overflow-hidden rounded-lg border border-slate-200">
+            <div className="flex flex-wrap items-center gap-1.5 border-b border-slate-100 bg-slate-50/70 px-2 py-1.5">
+              <b className="text-sm font-semibold text-slate-700">{g.group}</b>
+              <span className="text-[11px] text-slate-400">{g.items.length} วัตถุดิบ{g.used ? ` · ใช้ในตีราคา ${g.used} บรรทัด` : ""}</span>
+              <span className={`rounded-full border px-2 py-0.5 text-[11px] ${GROUP_STATE_CLS[g.state]}`}>
+                {g.state === "same" ? `ทั้งกลุ่ม ${baht(g.rate ?? 0)}` : g.state === "mixed" ? "หลายราคา" : `ใช้${centralTxt}`}
+              </span>
+              <span className="ml-auto flex flex-wrap items-center gap-1 text-[11px] text-slate-500">
+                <input type="number" min={0} step="any" value={gi.pcs} placeholder="ชิ้น/วัน" aria-label={`ตัดได้กี่ชิ้นต่อวัน กลุ่ม ${g.group}`} title="ตัดได้กี่ชิ้นต่อวัน → ระบบคิดราคาต่อชิ้นให้"
+                  onChange={(e) => { const pcs = e.target.value; const r = cutRateFromWage(Number(wage), Number(pcs)); setGrpIn((m) => ({ ...m, [g.group]: { pcs, rate: r != null ? String(r) : gi.rate } })); }}
+                  className="h-7 w-20 rounded border border-slate-200 px-1.5 text-right tabular-nums" />
+                <span>→</span>
+                <input type="number" min={0} step="any" value={gi.rate} placeholder="฿/ชิ้น" aria-label={`ค่าตัดต่อชิ้น กลุ่ม ${g.group}`}
+                  onChange={(e) => setGrpIn((m) => ({ ...m, [g.group]: { pcs: "", rate: e.target.value } }))}
+                  className="h-7 w-20 rounded border border-slate-200 px-1.5 text-right tabular-nums" />
+                <button type="button" disabled={gBusy || gi.rate === ""} onClick={() => void applyGroup(g)}
+                  className="h-7 rounded-md bg-blue-600 px-2 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-40">{gBusy ? "กำลังใส่…" : "ใส่ทั้งกลุ่ม"}</button>
+              </span>
+            </div>
+            <div className="divide-y divide-slate-50">
+              {items.map((it) => {
+                const cur = it.cut_rate != null ? String(it.cut_rate) : "";
+                const typed = edits[it.id];
+                const dirty = typed != null && typed !== cur;
+                return (
+                  <div key={it.id} className="flex flex-wrap items-center gap-1.5 px-2 py-1 text-xs">
+                    <span className="min-w-0 flex-1 truncate text-slate-700" title={it.name}>{it.name}</span>
+                    <span className="text-[11px] text-slate-400">{it.used_lines ? `${it.used_lines} บรรทัด · ${it.used_pieces ?? 0} ชิ้น` : "ยังไม่มีใบงานใช้"}</span>
+                    <input type="number" min={0} step="any" value={typed ?? cur} placeholder={centralTxt} aria-label={`ค่าตัดต่อชิ้น ${it.name}`}
+                      onChange={(e) => setEdits((m) => ({ ...m, [it.id]: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter" && dirty) void saveOne(it.id, typed === "" ? null : Math.max(0, Number(typed) || 0)); }}
+                      className={`h-7 w-28 rounded border px-1.5 text-right tabular-nums ${it.cut_rate != null ? "border-amber-300 bg-amber-50/40" : "border-slate-200"}`} />
+                    <span className="w-10 text-[11px] text-slate-400">฿/ชิ้น</span>
+                    {dirty ? (
+                      <button type="button" disabled={busy === it.id} onClick={() => void saveOne(it.id, typed === "" ? null : Math.max(0, Number(typed) || 0))}
+                        className="h-7 rounded-md bg-blue-600 px-2 text-[11px] font-medium text-white hover:bg-blue-700 disabled:opacity-50">{busy === it.id ? "…" : "บันทึก"}</button>
+                    ) : it.cut_rate != null ? (
+                      <button type="button" disabled={busy === it.id} onClick={() => void saveOne(it.id, null)} title="ล้างราคานี้ → กลับไปใช้ค่ากลาง" aria-label={`ล้างค่าตัด ${it.name}`}
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600">✕</button>
+                    ) : <span className="w-7" />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+      {err && <p className="text-sm text-rose-600">{err}</p>}
+    </div>
   );
 }
 
