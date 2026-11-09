@@ -818,3 +818,41 @@ export function outlineDistance(P: Pt[], a: Pt, b: Pt): { short: number; long: n
   path.push(forward ? pb.at : pa.at);
   return { short, long: total - short, total, path };
 }
+
+// ───────────────────────── หมุนชิ้น (2026-11-09) ─────────────────────────
+
+const rotXY = (x: number, y: number, deg: number, cx: number, cy: number): Pt => {
+  const a = (deg * Math.PI) / 180, c = Math.cos(a), s = Math.sin(a);
+  return [cx + (x - cx) * c - (y - cy) * s, cy + (x - cx) * s + (y - cy) * c];   // แกน y ลง: องศาบวก = ตามเข็มนาฬิกา
+};
+
+/** หมุนรูปรอบจุด cx,cy (องศา · บวก = ตามเข็ม) — สี่เหลี่ยม/วงกลมหมุนทีละ 90° ยังเป็นรูปเดิม · มุมอื่น = แปลงเป็นจุด */
+export function rotateShape(s: Shape, deg: number, cx: number, cy: number): Shape {
+  const a = ((Math.round(deg * 1000) / 1000) % 360 + 360) % 360;
+  if (a === 0) return s;
+  if ((s.k === "rect" || s.k === "ellipse") && a % 90 === 0) {
+    const [nx, ny] = rotXY(s.x + s.w / 2, s.y + s.h / 2, a, cx, cy);
+    const [w, h] = a % 180 === 0 ? [s.w, s.h] : [s.h, s.w];
+    return { k: s.k, x: nx - w / 2, y: ny - h / 2, w, h };
+  }
+  const p = toPathShape(s);
+  if (p.k !== "path") return s;
+  const rv = (vx: number, vy: number): Pt => { const [x, y] = rotXY(vx, vy, a, 0, 0); return [x, y]; };
+  return {
+    k: "path",
+    nodes: p.nodes.map((n) => {
+      const [x, y] = rotXY(n.x, n.y, a, cx, cy);
+      const o: PNode = { x, y };
+      if (hasIn(n)) { const [ix, iy] = rv(n.ix ?? 0, n.iy ?? 0); o.ix = ix; o.iy = iy; }
+      if (hasOut(n)) { const [ox, oy] = rv(n.ox ?? 0, n.oy ?? 0); o.ox = ox; o.oy = oy; }
+      return o;
+    }),
+  };
+}
+
+/** หมุนทั้งชิ้น (เส้นนอก+รู) รอบจุดกึ่งกลางของเส้นนอก (หรือจุดที่ส่งมา) */
+export function rotatePiece<T extends { shape: Shape; holes?: Shape[] }>(p: T, deg: number, cx?: number, cy?: number): T & { holes: Shape[] } {
+  const b = shapeBox(p.shape);
+  const ox = cx ?? b.x + b.w / 2, oy = cy ?? b.y + b.h / 2;
+  return { ...p, shape: rotateShape(p.shape, deg, ox, oy), holes: (p.holes ?? []).map((h) => rotateShape(h, deg, ox, oy)) };
+}

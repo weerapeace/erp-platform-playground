@@ -38,3 +38,16 @@ describe("รูปอ้างอิง / ตำแหน่งบนกระ�
     expect(cleanLineShape({ shape: { k: "rect", x: 0, y: 0, w: 5, h: 5 }, at: ["a", 1] })!.at).toBeUndefined();
   });
 });
+
+describe("หมุนชิ้น", async () => {
+  const { rotatePiece, shapeArea, shapeBox } = await import("@/lib/pattern-shape");
+  it("สี่เหลี่ยมหมุน 90° = สลับกว้าง/สูง (ยังเป็นสี่เหลี่ยม) · หมุน 45° = จุด พื้นที่เท่าเดิม · รูหมุนตาม", () => {
+    const p = rotatePiece({ shape: { k: "rect" as const, x: 0, y: 0, w: 20, h: 10 }, holes: [{ k: "rect" as const, x: 2, y: 2, w: 4, h: 2 }] }, 90);
+    expect(p.shape).toEqual({ k: "rect", x: 5, y: -5, w: 10, h: 20 });
+    expect(shapeBox(p.holes[0])).toMatchObject({ w: 2, h: 4 });
+    const q = rotatePiece({ shape: { k: "rect" as const, x: 0, y: 0, w: 20, h: 10 } }, 45);
+    expect(q.shape.k).toBe("path");
+    close(shapeArea(q.shape), 200, 0.01);
+    close(shapeBox(q.shape).w, (20 + 10) * Math.SQRT1_2, 0.01);
+  });
+});
