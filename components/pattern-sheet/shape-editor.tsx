@@ -9,6 +9,8 @@
  *   ย้อนกลับ/ทำซ้ำ: Ctrl+Z · Ctrl+Shift+Z / Ctrl+Y (ทุกการเปลี่ยนแปลง)
  *   ขั้นที่ 3: ฝังในแท็บได้ (embedded + onChange = ส่งค่ากลับทุกครั้งที่แก้ → ตารางเปลี่ยนตาม) · ตำแหน่งชิ้นบนกระดาน (at)
  *     รูปอ้างอิง (รูปสินค้า วางใต้กระดาน · จาง · ล็อก · ตั้งขนาดจริงด้วย 2 จุด) · ไม้บรรทัดวัด ตรง / โค้ง / ตามขอบชิ้น (M)
+ *     เครื่องมือ vector: เลือกหลายชิ้น (Shift+คลิก · Shift+ลากกรอบ · Ctrl+A) · Ctrl+C / Ctrl+V / Ctrl+D (ก๊อปเป็น SVG ไปวางใน Illustrator ได้)
+ *       เส้นช่วยจัดแนว (ลากชิ้นแล้วดูดขอบ/กึ่งกลางชิ้นอื่น) · จัดแนว/เว้นระยะเท่ากัน · ลบมุมโค้ง · สำเนากลับด้าน · เส้นขนาน · เส้นทางผ้า · รอยบาก
  *     ชิ้นที่เลือก: จุดจับ 8 จุดลากย่อขยาย (Shift/ล็อกสัดส่วน = คงสัดส่วน) · จุดจับหมุน (Shift = ทีละ 15°) · หมุน 90° · ความทึบชิ้น (เห็นรูปอ้างอิงด้านล่าง)
  *   คีย์ลัด: R สี่เหลี่ยม · O วงกลม · P ปากกา · V ย้าย · H มือ · Space ค้าง = เลื่อน · ลูกศร = ขยับ (Shift ×10)
  *            Shift ระหว่างวาด = จัตุรัส/วงกลม/เส้น 45° · Enter = ปิดรูปปากกา · Esc = ยกเลิก · Delete = ลบชิ้น/จุด
@@ -22,7 +24,7 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
-  SNAP_STEPS, cleanAllow, fitPiece, flattenOpen, flipPiece, foldPiece, movePiece, nearestSegment, openPathLength, outlineDistance, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece,
+  SNAP_STEPS, cleanAllow, defaultGrain, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, outlineDistance, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
   shapeBox, shapeInside, shapePathD, snapTo, splitSegment, toPathShape, toggleSmooth,
   type Box, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
@@ -30,11 +32,11 @@ export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
 /** pid = รหัสชิ้น (ผูกบรรทัดตีราคา) · at = ตำแหน่งบนกระดาน (มุมซ้ายบนเส้นเย็บ) · src = บรรทัดเดิมที่ชิ้นนี้มาจาก */
-export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; name?: string; mats?: PieceMat[]; pid?: string; at?: [number, number]; src?: string[] };
-export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[]; geo: PieceGeometry; pid: string; at: [number, number]; src: string[] };
+export type EditorPiece = { shape: Shape; holes?: Shape[]; count: number; allow?: number; name?: string; mats?: PieceMat[]; pid?: string; at?: [number, number]; src?: string[]; grain?: Pt[] | null; notches?: Pt[] };
+export type ResultPiece = { shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[]; geo: PieceGeometry; pid: string; at: [number, number]; src: string[]; grain: Pt[] | null; notches: Pt[] };
 export type ShapeEditorResult = { pieces: ResultPiece[]; basis: ShapeBasis; refs: RefImage[] };
 
-type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[]; pid: string; src: string[] };
+type Piece = { id: string; shape: Shape; holes: Shape[]; count: number; allow: number; name: string; mats: PieceMat[]; pid: string; src: string[]; grain?: Pt[] | null; notches?: Pt[] };
 type Tool = "rect" | "ellipse" | "pen" | "move" | "hand" | "measure";
 type MeasureMode = "line" | "curve" | "edge";
 type Measure = { id: string; kind: MeasureMode; nodes: PNode[]; len: number; alt?: number; path?: Pt[] };
@@ -47,7 +49,8 @@ type PenDraft = { nodes: PNode[]; hover: XY | null };
 type BoxDraft = { k: "rect" | "ellipse"; a: XY; b: XY };
 type Drag =
   | { k: "pan"; sx: number; sy: number; v: View }
-  | { k: "move"; id: string; start: XY; orig: Piece; before: Piece[]; moved: boolean }
+  | { k: "move"; ids: string[]; start: XY; orig: Piece[]; before: Piece[]; moved: boolean }
+  | { k: "marquee"; a: XY; add: boolean }
   | { k: "box" }
   | { k: "penHandle"; idx: number; origin: XY }
   | { k: "node"; idx: number; before: Piece[]; moved: boolean }
@@ -73,6 +76,13 @@ let seq = 0;
 const newId = () => `p${Date.now().toString(36)}${(seq++).toString(36)}`;
 const newPid = () => `pc${Date.now().toString(36)}${(seq++).toString(36)}`;
 const MEASURE_COLOR = "#7c3aed";
+const MARK_COLOR = "#dc2626";   // เส้นทางผ้า / รอยบาก
+const GUIDE_COLOR = "#db2777";  // เส้นช่วยจัดแนว
+const unionBox = (bs: Box[]): Box => {
+  if (!bs.length) return { x: 0, y: 0, w: 0, h: 0 };
+  const x0 = Math.min(...bs.map((b) => b.x)), y0 = Math.min(...bs.map((b) => b.y));
+  return { x: x0, y: y0, w: Math.max(...bs.map((b) => b.x + b.w)) - x0, h: Math.max(...bs.map((b) => b.y + b.h)) - y0 };
+};
 
 function readNum(key: string, allowed: readonly number[] | null, dflt: number): number {
   try { const raw = localStorage.getItem(key); if (raw == null || raw === "") return dflt; const v = Number(raw); return Number.isFinite(v) && (!allowed || allowed.includes(v)) ? v : dflt; } catch { return dflt; }
@@ -147,12 +157,19 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       let dx: number, dy: number;
       if (p.at) { dx = p.at[0] - b.x; dy = p.at[1] - b.y; }
       else { dx = x + a - b.x; dy = a - b.y; x += b.w + 2 * a + 2; }
-      const m = movePiece({ shape: p.shape, holes: p.holes ?? [] }, dx, dy);
-      return { id: newId(), shape: m.shape, holes: m.holes, count: Math.max(1, Math.round(p.count) || 1), allow: a, name: p.name ?? "", mats: p.mats ?? [], pid: p.pid || newPid(), src: p.src ?? [] };
+      const m = movePiece({ shape: p.shape, holes: p.holes ?? [], grain: p.grain ?? null, notches: p.notches ?? [] }, dx, dy);
+      return { id: newId(), shape: m.shape, holes: m.holes, grain: m.grain ?? null, notches: m.notches ?? [], count: Math.max(1, Math.round(p.count) || 1), allow: a, name: p.name ?? "", mats: p.mats ?? [], pid: p.pid || newPid(), src: p.src ?? [] };
     });
   });
   const piecesRef = useRef(pieces); piecesRef.current = pieces;
   const [sel, setSel] = useState<string | null>(null);
+  const [multi, setMulti] = useState<Set<string>>(() => new Set());   // เลือกหลายชิ้น (≥2) — sel = ชิ้นหลักในกลุ่ม
+  const [marquee, setMarquee] = useState<{ a: XY; b: XY } | null>(null);
+  const [guides, setGuides] = useState<{ x?: number; y?: number }[]>([]);
+  const clipRef = useRef<{ id: string; pieces: Piece[]; n: number } | null>(null);
+  const [notchMode, setNotchMode] = useState(false);
+  const [roundR, setRoundR] = useState("1");
+  const [offD, setOffD] = useState("1");
   const [tool, setTool] = useState<Tool>("rect");
   const [lastDraw, setLastDraw] = useState<DrawTool>("rect");
   const [snap, setSnapState] = useState<number>(1);
@@ -264,12 +281,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     setTool(tl); if (tl === "rect" || tl === "ellipse" || tl === "pen") setLastDraw(tl); setPen(null); setBox(null); setMDraft(null); if (tl !== "move") setEditId(null);
   };
   const newPiece = (shape: Shape, holes: Shape[] = []): Piece => ({ id: newId(), shape, holes, count: 1, allow: lastAllow, name: "", mats: [...defaultMats], pid: newPid(), src: [] });
+  const selIds: string[] = multi.size ? [...multi] : sel ? [sel] : [];
+  const selIdsRef = useRef(selIds); selIdsRef.current = selIds;
+  const selectIds = (ids: string[]) => { setMulti(ids.length > 1 ? new Set(ids) : new Set()); setSel(ids[0] ?? null); };
   const addPieces = (list: Piece[], selectFirst = true): Piece[] | null => {
     const cur = piecesRef.current;
     if (cur.length + list.length > MAX_PIECES) { setMsg({ tone: "err", text: t(`วาดได้ไม่เกิน ${MAX_PIECES} ชิ้นต่อครั้ง`, `Up to ${MAX_PIECES} pieces at a time`) }); return null; }
     const next = [...cur, ...list];
     commit(next);
-    if (selectFirst && list[0]) setSel(list[0].id);
+    if (selectFirst && list[0]) { setSel(list[0].id); setMulti(new Set()); }
     return next;
   };
   const rightEdge = () => piecesRef.current.reduce((m, p) => { const b = pieceGeometry(p).cutBox; return Math.max(m, b.x + b.w); }, -2) + 2;
@@ -306,6 +326,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (rs) { const r = refs.find((x) => x.id === rs); if (r) { drag.current = { k: "refSize", id: rs, start: raw, w: r.w }; capture(); } return; }
     if (rf) { const r = refs.find((x) => x.id === rf); if (r) { setActiveRef(rf); drag.current = { k: "ref", id: rf, start: raw, ox: r.x, oy: r.y }; capture(); } return; }
     if (tool === "measure") { measureDown(e, raw, p, target, capture); return; }
+    if (notchMode && selPiece && !readonly) {   // โหมดรอยบาก: คลิกใกล้ขอบ = เพิ่ม · คลิกที่รอยเดิม = ลบ
+      const g = geo.get(selPiece.id); const q: Pt = [raw.x, raw.y];
+      if (g) {
+        const ex = (selPiece.notches ?? []).findIndex((n) => Math.hypot(n[0] - q[0], n[1] - q[1]) * ppc < 10);
+        if (ex >= 0) patchPiece(selPiece.id, (x) => ({ ...x, notches: (x.notches ?? []).filter((_, i) => i !== ex) }));
+        else { const pr = projectOnOutline(g.sew, q); if (pr.d * ppc < 16) patchPiece(selPiece.id, (x) => ({ ...x, notches: [...(x.notches ?? []), pr.at] })); else setMsg({ tone: "err", text: t("คลิกให้ใกล้เส้นขอบของชิ้น (เส้นเย็บ)", "Click closer to the piece's edge (sewing line)") }); }
+      }
+      return;
+    }
     // จุดจับของชิ้นที่เลือก: ย่อขยาย / หมุน
     const rsDir = target.getAttribute?.("data-rs"), rotId = target.getAttribute?.("data-rot");
     if (rsDir && selPiece && !readonly) { drag.current = { k: "resize", id: selPiece.id, dir: rsDir, start: pieceGeometry(selPiece).cutBox, orig: selPiece, before: piecesRef.current, moved: false }; capture(); return; }
@@ -334,13 +363,27 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       return;
     }
     const hitId = target.getAttribute?.("data-piece");
-    if (hitId) {   // กดชิ้นที่วาดแล้ว → ย้าย + เปิดแผงรายละเอียด
+    if (hitId) {   // กดชิ้นที่วาดแล้ว → ย้าย + เปิดแผงรายละเอียด · Shift = เลือกเพิ่ม/เอาออก · กดชิ้นในกลุ่ม = ลากทั้งกลุ่ม
       const pc = piecesRef.current.find((x) => x.id === hitId);
-      if (pc) { setSel(hitId); setTool("move"); drag.current = { k: "move", id: hitId, start: raw, orig: pc, before: piecesRef.current, moved: false }; capture(); }
+      if (!pc) return;
+      setTool("move");
+      if (e.shiftKey) {
+        const cur = new Set(selIdsRef.current);
+        if (cur.has(hitId)) cur.delete(hitId); else cur.add(hitId);
+        const ids = [...cur];
+        setMulti(ids.length > 1 ? cur : new Set()); setSel(cur.has(hitId) ? hitId : ids[0] ?? null);
+        return;
+      }
+      const group = multi.has(hitId) ? [...multi] : [hitId];
+      if (!multi.has(hitId)) setMulti(new Set());
+      setSel(hitId);
+      drag.current = { k: "move", ids: group, start: raw, orig: piecesRef.current.filter((x) => group.includes(x.id)), before: piecesRef.current, moved: false }; capture();
       return;
     }
+    // Shift + ลากที่ว่าง = กรอบเลือกหลายชิ้น
+    if (e.shiftKey) { drag.current = { k: "marquee", a: raw, add: true }; setMarquee({ a: raw, b: raw }); capture(); return; }
     // ที่ว่าง → วาดด้วยเครื่องมือล่าสุด
-    setSel(null);
+    setSel(null); setMulti(new Set());
     const dt: DrawTool = tool === "move" ? lastDraw : (tool as DrawTool);
     if (tool === "move") setTool(lastDraw);
     if (dt === "pen") { setPen({ nodes: [{ x: p.x, y: p.y }], hover: null }); drag.current = { k: "penHandle", idx: 0, origin: p }; capture(); return; }
@@ -396,12 +439,25 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       return;
     }
     if (d.k === "pan") { setView({ x: d.v.x - (e.clientX - d.sx) / ppc, y: d.v.y - (e.clientY - d.sy) / ppc, w: d.v.w }); return; }
+    if (d.k === "marquee") { setMarquee({ a: d.a, b: raw }); return; }
     if (d.k === "move") {
-      const ob = shapeBox(d.orig.shape);
-      const nx = snapTo(ob.x + raw.x - d.start.x, snap), ny = snapTo(ob.y + raw.y - d.start.y, snap);
-      if (nx === ob.x && ny === ob.y && !d.moved) return;
+      const ob = unionBox(d.orig.map((o) => pieceGeometry(o).cutBox));
+      let dx = snapTo(ob.x + raw.x - d.start.x, snap) - ob.x, dy = snapTo(ob.y + raw.y - d.start.y, snap) - ob.y;
+      // เส้นช่วยจัดแนว: ขอบ/กึ่งกลางของกลุ่มที่ลาก ใกล้ขอบ/กึ่งกลางชิ้นอื่น (6px) = ดูดเข้าให้ตรง
+      const tol = 6 / ppc;
+      const others = piecesRef.current.filter((x) => !d.ids.includes(x.id)).map((x) => pieceGeometry(x).cutBox);
+      let bx: { d: number; v: number } | null = null, by: { d: number; v: number } | null = null;
+      for (const o of others) {
+        for (const v of [o.x, o.x + o.w / 2, o.x + o.w]) for (const m of [ob.x + dx, ob.x + dx + ob.w / 2, ob.x + dx + ob.w]) { const dd = v - m; if (Math.abs(dd) < tol && (!bx || Math.abs(dd) < Math.abs(bx.d))) bx = { d: dd, v }; }
+        for (const v of [o.y, o.y + o.h / 2, o.y + o.h]) for (const m of [ob.y + dy, ob.y + dy + ob.h / 2, ob.y + dy + ob.h]) { const dd = v - m; if (Math.abs(dd) < tol && (!by || Math.abs(dd) < Math.abs(by.d))) by = { d: dd, v }; }
+      }
+      if (bx) dx += bx.d;
+      if (by) dy += by.d;
+      setGuides([...(bx ? [{ x: bx.v }] : []), ...(by ? [{ y: by.v }] : [])]);
+      if (!dx && !dy && !d.moved) return;
       d.moved = true;
-      setPieces((ps) => ps.map((x) => (x.id === d.id ? movePiece(d.orig, nx - ob.x, ny - ob.y) : x)));
+      const om = new Map(d.orig.map((o) => [o.id, o]));
+      setPieces((ps) => ps.map((x) => { const o = om.get(x.id); return o ? movePiece(o, dx, dy) : x; }));
       return;
     }
     if (d.k === "node") { d.moved = true; setEditNodes((ns) => ns.map((n, i) => (i === d.idx ? { ...n, x: p.x, y: p.y } : n))); return; }
@@ -431,7 +487,17 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   };
   const onPointerUp = () => {
     const d = drag.current; drag.current = null;
+    setGuides([]);
     if (!d) return;
+    if (d.k === "marquee" && marquee) {
+      const x0 = Math.min(marquee.a.x, marquee.b.x), x1 = Math.max(marquee.a.x, marquee.b.x), y0 = Math.min(marquee.a.y, marquee.b.y), y1 = Math.max(marquee.a.y, marquee.b.y);
+      const inside = piecesRef.current.filter((p) => { const b = pieceGeometry(p).cutBox; return b.x >= x0 && b.y >= y0 && b.x + b.w <= x1 && b.y + b.h <= y1; }).map((p) => p.id);
+      setMarquee(null);
+      const ids = [...new Set([...(d.add ? selIdsRef.current : []), ...inside])];
+      selectIds(ids);
+      if (inside.length) setMsg({ tone: "ok", text: t(`เลือก ${ids.length} ชิ้น`, `Selected ${ids.length} pieces`) });
+      return;
+    }
     if ((d.k === "move" || d.k === "node" || d.k === "handle" || d.k === "resize" || d.k === "rotate") && d.moved) { record(d.before); setDirty(true); }
     if (d.k === "rotate") {
       setRotDeg(null);
@@ -523,11 +589,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       }
       if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
       if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); redo(); return; }
-      if (e.key === "Escape" && (pen || box || sel || editId)) {
+      if (e.key === "Escape" && (pen || box || sel || editId || notchMode)) {
         e.stopPropagation(); e.preventDefault();
-        if (pen || box) { setPen(null); setBox(null); } else if (editId) { setEditId(null); setSelNode(-1); } else setSel(null);
+        if (pen || box) { setPen(null); setBox(null); } else if (notchMode) setNotchMode(false); else if (editId) { setEditId(null); setSelNode(-1); } else { setSel(null); setMulti(new Set()); }
         return;
       }
+      if ((e.ctrlKey || e.metaKey) && k === "a") { e.preventDefault(); selectIds(piecesRef.current.map((p) => p.id)); return; }
+      if ((e.ctrlKey || e.metaKey) && k === "d") { e.preventDefault(); duplicateSel(); return; }
       if (e.key === "Enter" && pen) { e.preventDefault(); commitPen(); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && pen) { e.preventDefault(); setPen(pen.nodes.length > 1 ? { ...pen, nodes: pen.nodes.slice(0, -1) } : null); return; }
       if ((e.key === "Backspace" || e.key === "Delete") && editId && selNode >= 0) {
@@ -537,12 +605,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
         else setMsg({ tone: "err", text: t("รูปต้องมีอย่างน้อย 3 จุด", "A shape needs at least 3 points") });
         return;
       }
-      if ((e.key === "Backspace" || e.key === "Delete") && sel) { e.preventDefault(); commit(piecesRef.current.filter((p) => p.id !== sel)); setSel(null); setEditId(null); return; }
-      if (e.key.startsWith("Arrow") && sel) {
+      if ((e.key === "Backspace" || e.key === "Delete") && selIdsRef.current.length) { e.preventDefault(); deleteSel(); return; }
+      if (e.key.startsWith("Arrow") && selIdsRef.current.length) {
         e.preventDefault();
         const d = step * (e.shiftKey ? 10 : 1);
         const [dx, dy] = e.key === "ArrowLeft" ? [-d, 0] : e.key === "ArrowRight" ? [d, 0] : e.key === "ArrowUp" ? [0, -d] : [0, d];
-        patchPiece(sel, (p) => movePiece(p, dx, dy), `nudge-${sel}`);
+        const ids = new Set(selIdsRef.current);
+        commit(piecesRef.current.map((p) => (ids.has(p.id) ? movePiece(p, dx, dy) : p)), `nudge-${[...ids].join(",")}`);
         return;
       }
       if (e.key === " ") { spaceDown.current = true; e.preventDefault(); return; }
@@ -558,15 +627,28 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       const file = Array.from(cd.files ?? []).find((f) => f.type === "image/svg+xml" || f.name.toLowerCase().endsWith(".svg"));
       if (file) { e.preventDefault(); void file.text().then((x) => importRef.current(x)); return; }
       const txt = cd.getData("image/svg+xml") || cd.getData("text/plain");
+      if (txt && clipRef.current && txt.includes(`pshape:${clipRef.current.id}`)) { e.preventDefault(); pasteInternal(); return; }
       if (txt && /<svg[\s>]/i.test(txt)) { e.preventDefault(); importRef.current(txt); return; }
       if (txt || cd.files?.length) setMsg({ tone: "err", text: t("สิ่งที่วางไม่ใช่รูปทรงจาก Illustrator — ใน Illustrator ไปที่ Preferences → Clipboard Handling → ติ๊ก Include SVG Code แล้วก๊อปใหม่", "That isn't a shape from Illustrator — enable Preferences → Clipboard Handling → Include SVG Code, then copy again") });
     };
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("keyup", onKeyUp);
+    // Ctrl+C: ก๊อปชิ้นที่เลือก (ในกระดาน) + ใส่ SVG ขนาดจริงลงคลิปบอร์ด (เอาไปวางใน Illustrator ได้)
+    const onCopy = (e: ClipboardEvent) => {
+      if (inField(e.target) || (embedded && !engaged.current)) return;
+      const ids = selIdsRef.current;
+      if (!ids.length || !e.clipboardData) return;
+      e.preventDefault();
+      const svg = copySel(ids);
+      e.clipboardData.setData("text/plain", svg);
+      e.clipboardData.setData("image/svg+xml", svg);
+    };
     window.addEventListener("paste", onPaste);
-    return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("keyup", onKeyUp); window.removeEventListener("paste", onPaste); };
+    window.addEventListener("copy", onCopy);
+    return () => { window.removeEventListener("keydown", onKey, true); window.removeEventListener("keyup", onKeyUp); window.removeEventListener("paste", onPaste); window.removeEventListener("copy", onCopy); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, pen, box, sel, editId, selNode, step, mDraft, cal, readonly]);
+  }, [open, pen, box, sel, multi, editId, selNode, step, mDraft, cal, readonly, notchMode]);
+  useEffect(() => { setNotchMode(false); }, [sel]);   // เปลี่ยนชิ้น = ออกจากโหมดรอยบาก
 
   // ฝังในหน้า: คลิกในกระดาน = เปิดคีย์ลัด · คลิกนอกกระดาน = ปิด
   useEffect(() => {
@@ -604,6 +686,84 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     if (!selPiece || !(s > 0) || s === 1) { setMsg({ tone: "err", text: t("ใส่ % เช่น 110 = ขยาย 10% · 90 = ย่อ 10%", "Enter a %, e.g. 110 = +10% · 90 = −10%") }); return; }
     const b = shapeBox(selPiece.shape), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
     patchPiece(selPiece.id, (p) => fitPiece(p, cx - (b.w * s) / 2, cy - (b.h * s) / 2, b.w * s, b.h * s));
+  };
+  // ── เครื่องมือ vector ──
+  const deleteSel = () => { const ids = new Set(selIdsRef.current); if (!ids.size) return; commit(piecesRef.current.filter((p) => !ids.has(p.id))); setSel(null); setMulti(new Set()); setEditId(null); };
+  /** ก๊อปชิ้นที่เลือกไว้ในกระดาน + คืน SVG ขนาดจริง (ซม.) ไว้ใส่คลิปบอร์ด */
+  const copySel = (ids: string[] = selIdsRef.current): string => {
+    const ps = piecesRef.current.filter((p) => ids.includes(p.id));
+    const id = newId();
+    clipRef.current = { id, pieces: JSON.parse(JSON.stringify(ps)) as Piece[], n: 0 };
+    const B = unionBox(ps.map((p) => shapeBox(p.shape)));
+    const f = (v: number) => String(Math.round(v * 1000) / 1000);
+    const body = ps.map((p) => `<path fill="none" stroke="#000" stroke-width="0.05" fill-rule="evenodd" d="${shapePathD(p.shape, -B.x, -B.y)}${p.holes.map((h) => shapePathD(h, -B.x, -B.y)).join("")}"/>`).join("");
+    setMsg({ tone: "ok", text: t(`คัดลอก ${ps.length} ชิ้นแล้ว — Ctrl+V วางในกระดาน หรือวางใน Illustrator ได้ (ขนาดจริง)`, `Copied ${ps.length} pieces — Ctrl+V here, or paste into Illustrator (real size)`) });
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${f(B.w)}cm" height="${f(B.h)}cm" viewBox="0 0 ${f(B.w)} ${f(B.h)}"><!--pshape:${id}-->${body}</svg>`;
+  };
+  const copyButton = () => { const svg = copySel(); try { void navigator.clipboard?.writeText(svg).catch(() => {}); } catch { /* ไม่ได้ก็ยังวางในกระดานได้ */ } };
+  /** วางชิ้นที่ก๊อปไว้ (วัสดุ/เผื่อพับ/รู/เครื่องหมายครบ) เยื้อง 2 ซม. ทุกครั้งที่วาง */
+  const pasteInternal = () => {
+    const c = clipRef.current;
+    if (!c || !c.pieces.length) { setMsg({ tone: "err", text: t("ยังไม่ได้คัดลอกชิ้น — เลือกชิ้นแล้วกด Ctrl+C", "Nothing copied yet — select pieces and press Ctrl+C") }); return; }
+    c.n += 1;
+    const off = 2 * c.n;
+    const add = c.pieces.map((p) => ({ ...movePiece(p, off, off), id: newId(), pid: newPid(), src: [] as string[] }));
+    const next = addPieces(add, false);
+    if (next) { selectIds(add.map((p) => p.id)); setTool("move"); }
+  };
+  const duplicateSel = () => { if (!selIdsRef.current.length) return; copySel(); pasteInternal(); };
+  /** จัดแนวชิ้นที่เลือก (ตามกรอบตัด) */
+  const alignSel = (m: "l" | "cx" | "r" | "t" | "cy" | "b") => {
+    const ids = new Set(selIdsRef.current); if (ids.size < 2) return;
+    const boxes = new Map(piecesRef.current.filter((p) => ids.has(p.id)).map((p) => [p.id, pieceGeometry(p).cutBox]));
+    const U = unionBox([...boxes.values()]);
+    commit(piecesRef.current.map((p) => {
+      const b = boxes.get(p.id); if (!b) return p;
+      const dx = m === "l" ? U.x - b.x : m === "r" ? U.x + U.w - b.x - b.w : m === "cx" ? U.x + U.w / 2 - b.x - b.w / 2 : 0;
+      const dy = m === "t" ? U.y - b.y : m === "b" ? U.y + U.h - b.y - b.h : m === "cy" ? U.y + U.h / 2 - b.y - b.h / 2 : 0;
+      return dx || dy ? movePiece(p, dx, dy) : p;
+    }));
+  };
+  /** เว้นระยะห่างเท่ากัน (≥3 ชิ้น) — ชิ้นหัว/ท้ายอยู่ที่เดิม */
+  const distributeSel = (axis: "x" | "y") => {
+    const ids = new Set(selIdsRef.current); if (ids.size < 3) return;
+    const items = piecesRef.current.filter((p) => ids.has(p.id)).map((p) => ({ p, b: pieceGeometry(p).cutBox })).sort((a, b) => (axis === "x" ? a.b.x - b.b.x : a.b.y - b.b.y));
+    const first = items[0].b, last = items[items.length - 1].b;
+    const span = axis === "x" ? last.x + last.w - first.x : last.y + last.h - first.y;
+    const sum = items.reduce((m, it) => m + (axis === "x" ? it.b.w : it.b.h), 0);
+    const gap = (span - sum) / (items.length - 1);
+    let pos = axis === "x" ? first.x : first.y;
+    const moved = new Map<string, Piece>();
+    for (const it of items) { const d = pos - (axis === "x" ? it.b.x : it.b.y); moved.set(it.p.id, axis === "x" ? movePiece(it.p, d, 0) : movePiece(it.p, 0, d)); pos += (axis === "x" ? it.b.w : it.b.h) + gap; }
+    commit(piecesRef.current.map((p) => moved.get(p.id) ?? p));
+  };
+  const applyRound = () => {
+    const r = Number(roundR);
+    if (!selPiece || !(r > 0)) { setMsg({ tone: "err", text: t("ใส่รัศมีมุมโค้ง เช่น 1 ซม.", "Enter a corner radius, e.g. 1 cm") }); return; }
+    if (selPiece.shape.k === "ellipse") { setMsg({ tone: "err", text: t("วงกลมไม่มีมุมให้ลบ", "Circles have no corners") }); return; }
+    patchPiece(selPiece.id, (p) => ({ ...p, shape: roundCorners(p.shape, r) }));
+  };
+  const mirrorCopy = () => {
+    if (!selPiece) return;
+    const cb = pieceGeometry(selPiece).cutBox;
+    const f = movePiece(flipPiece(selPiece, "x"), cb.w + 2, 0);
+    const np: Piece = { ...f, id: newId(), pid: newPid(), src: [], name: selPiece.name ? `${selPiece.name} (กลับ)` : "" };
+    if (addPieces([np])) setTool("move");
+  };
+  const offsetCopy = (sign: 1 | -1) => {
+    const d = Number(offD);
+    if (!selPiece || !(d > 0)) { setMsg({ tone: "err", text: t("ใส่ระยะ เช่น 1 ซม.", "Enter a distance, e.g. 1 cm") }); return; }
+    const sh = offsetShape(selPiece.shape, sign * d);
+    if (!sh) { setMsg({ tone: "err", text: t("ชิ้นเล็กเกินจะหดเข้าเท่านี้", "The piece is too small to shrink that much") }); return; }
+    const label = sign < 0 ? t(`ด้านใน ${d} ซม.`, `inner ${d} cm`) : t(`ด้านนอก ${d} ซม.`, `outer ${d} cm`);
+    const np: Piece = { id: newId(), shape: sh, holes: [], count: selPiece.count, allow: 0, name: `${selPiece.name || `P${pieces.indexOf(selPiece) + 1}`} (${label})`, mats: [], pid: newPid(), src: [] };
+    if (addPieces([np])) { setTool("move"); setMsg({ tone: "ok", text: t("สร้างชิ้นเส้นขนานแล้ว (ซ้อนอยู่ตำแหน่งเดิม · ยังไม่เลือกวัสดุ เช่น ผ้ากาว/ซับใน)", "Offset piece created (on top of the original · pick a material, e.g. interfacing)") }); }
+  };
+  const toggleGrain = () => { if (selPiece) patchPiece(selPiece.id, (p) => ({ ...p, grain: p.grain ? null : defaultGrain(p.shape) })); };
+  const turnGrain = () => {
+    if (!selPiece?.grain || selPiece.grain.length !== 2) return;
+    const [[x1, y1], [x2, y2]] = selPiece.grain, mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    patchPiece(selPiece.id, (p) => ({ ...p, grain: [[mx - (y1 - my), my + (x1 - mx)], [mx - (y2 - my), my + (x2 - mx)]] }));
   };
   const setAllow = (v: number) => { if (!selPiece) return; const a = cleanAllow(v); patchPiece(selPiece.id, (p) => ({ ...p, allow: a }), `allow-${selPiece.id}`); setLastAllow(a); saveNum(ALLOW_KEY, a); };
   const hostOf = (p: Piece) => pieces.find((o) => o.id !== p.id && shapeInside(p.shape, o.shape)) ?? null;
@@ -648,7 +808,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const buildResult = (): ShapeEditorResult => ({
     pieces: piecesRef.current.map((p) => {
       const g = pieceGeometry(p);
-      return { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, name: p.name.trim(), mats: p.mats, geo: g, pid: p.pid, src: p.src, at: [Math.round(g.finished.x * 1000) / 1000, Math.round(g.finished.y * 1000) / 1000] };
+      return { shape: p.shape, holes: p.holes, count: p.count, allow: p.allow, name: p.name.trim(), mats: p.mats, geo: g, pid: p.pid, src: p.src, at: [Math.round(g.finished.x * 1000) / 1000, Math.round(g.finished.y * 1000) / 1000], grain: p.grain ?? null, notches: p.notches ?? [] };
     }),
     basis: basisRef.current,
     refs: refsRef.current.map((r) => ({ url: r.url, ...(r.label ? { label: r.label } : {}), x: r.x, y: r.y, w: r.w, ar: r.ar, op: r.op })),
@@ -658,7 +818,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     onSave?.(buildResult());
   };
   const onChangeRef = useRef(onChange); onChangeRef.current = onChange;
-  const sigOf = () => JSON.stringify([piecesRef.current.map((p) => [p.shape, p.holes, p.count, p.allow, p.name, p.mats, p.pid]), basisRef.current, refsRef.current.map((r) => [r.url, r.x, r.y, r.w, r.ar, r.op])]);
+  const sigOf = () => JSON.stringify([piecesRef.current.map((p) => [p.shape, p.holes, p.count, p.allow, p.name, p.mats, p.pid, p.grain, p.notches]), basisRef.current, refsRef.current.map((r) => [r.url, r.x, r.y, r.w, r.ar, r.op])]);
   const lastSig = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const flush = useCallback(() => {
@@ -808,6 +968,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           <button type="button" onClick={undo} disabled={!hist.current.length} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} className={`${btnCls(false)} disabled:opacity-40`}><Icon value="i:arrow-back-up" className="text-[14px]" />{t("ย้อน", "Undo")}</button>
           <button type="button" onClick={redo} disabled={!fut.current.length} title={t("ทำซ้ำ (Ctrl+Shift+Z / Ctrl+Y)", "Redo (Ctrl+Shift+Z / Ctrl+Y)")} className={`${btnCls(false)} disabled:opacity-40`}><Icon value="i:arrow-forward-up" className="text-[14px]" />{t("ทำซ้ำ", "Redo")}</button>
           <span className="mx-1 h-5 w-px bg-slate-200" />
+          <button type="button" onClick={copyButton} disabled={!selIds.length} title={t("คัดลอกชิ้นที่เลือก (Ctrl+C) — วางใน Illustrator ได้", "Copy selected (Ctrl+C) — pastes into Illustrator too")} className={`${btnCls(false)} disabled:opacity-40`}><Icon value="i:copy" className="text-[14px]" />{t("คัดลอก", "Copy")}</button>
+          <button type="button" onClick={pasteInternal} title={t("วาง (Ctrl+V)", "Paste (Ctrl+V)")} className={btnCls(false)}><Icon value="i:clipboard" className="text-[14px]" />{t("วาง", "Paste")}</button>
+          <button type="button" onClick={duplicateSel} disabled={!selIds.length} title={t("ทำสำเนาชิ้นที่เลือก (Ctrl+D)", "Duplicate (Ctrl+D)")} className={`${btnCls(false)} disabled:opacity-40`}>{t("ทำสำเนา", "Duplicate")}</button>
+          <span className="mx-1 h-5 w-px bg-slate-200" />
           <button type="button" onClick={() => fileRef.current?.click()} className={btnCls(false)} title={t("นำเข้าไฟล์ .svg (หรือก๊อปจาก Illustrator แล้วกด Ctrl+V)", "Import an .svg file (or copy in Illustrator and press Ctrl+V)")}>
             <Icon value="i:file-import" className="text-[14px]" />{t("ไฟล์ SVG", "SVG file")}
           </button>
@@ -900,14 +1064,23 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 {ticks(view.x, view.w, gridStep).map((x) => <line key={`gx${x}`} x1={x} x2={x} y1={view.y} y2={view.y + vh} stroke={isMajor(x, rs.major) ? COLORS.gridMajor : COLORS.grid} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
                 {ticks(view.y, vh, gridStep).map((y) => <line key={`gy${y}`} y1={y} y2={y} x1={view.x} x2={view.x + view.w} stroke={isMajor(y, rs.major) ? COLORS.gridMajor : COLORS.grid} strokeWidth={1} vectorEffect="non-scaling-stroke" />)}
                 {rows.map(({ p, i, g }) => {
-                  const on = p.id === sel, b = g.finished, cb = g.cutBox;
+                  const on = p.id === sel || multi.has(p.id), single = p.id === sel && multi.size < 2, b = g.finished, cb = g.cutBox;
                   const cutD = p.allow > 0 ? polyD(g.cut) + g.holesCut.map((h) => polyD(h)).join("") : shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("");
                   return (
                     <g key={p.id}>
                       <path d={cutD} fillRule="evenodd" data-piece={p.id} fill={COLORS.fill} fillOpacity={on ? Math.min(1, pieceFade + 0.15) : pieceFade} stroke={on ? COLORS.sel : COLORS.stroke} strokeWidth={on ? 2.5 : 1.5} vectorEffect="non-scaling-stroke" style={{ cursor: editId === p.id ? "copy" : "move" }} />
                       {p.allow > 0 && <path d={shapePathD(p.shape) + p.holes.map((h) => shapePathD(h)).join("")} fill="none" stroke={COLORS.stroke} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
+                      {p.grain && p.grain.length === 2 && (() => {   // เส้นทางผ้า: ลูกศร 2 หัว
+                        const [[x1, y1], [x2, y2]] = p.grain; const L = Math.hypot(x2 - x1, y2 - y1) || 1, ux = (x2 - x1) / L, uy = (y2 - y1) / L, hs = fs * 0.45;
+                        const head = (x: number, y: number, s: number) => `M${x + s * ux * hs - uy * hs * 0.6} ${y + s * uy * hs + ux * hs * 0.6}L${x} ${y}L${x + s * ux * hs + uy * hs * 0.6} ${y + s * uy * hs - ux * hs * 0.6}`;
+                        return <path d={`M${x1} ${y1}L${x2} ${y2}${head(x1, y1, 1)}${head(x2, y2, -1)}`} fill="none" stroke={MARK_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />;
+                      })()}
+                      {(p.notches ?? []).length > 0 && notchSegments(g.sew, p.notches ?? [], p.allow, Math.max(0.5, fs * 0.45)).map(([a, c], ni) => (
+                        <line key={ni} x1={a[0]} y1={a[1]} x2={c[0]} y2={c[1]} stroke={MARK_COLOR} strokeWidth={2} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+                      ))}
+                      {notchMode && p.id === sel && (p.notches ?? []).map((n, ni) => <circle key={`n${ni}`} cx={n[0]} cy={n[1]} r={fs * 0.22} fill="#fff" stroke={MARK_COLOR} strokeWidth={1.5} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />)}
                       <text x={b.x + b.w / 2} y={b.y + b.h / 2} fontSize={fs} textAnchor="middle" dominantBaseline="middle" fill={COLORS.text} style={{ pointerEvents: "none" }}>P{i + 1}{p.name ? ` ${p.name}` : ""}{p.count > 1 ? ` ×${p.count}` : ""}</text>
-                      {on && editId !== p.id && <>
+                      {single && editId !== p.id && <>
                         <rect x={cb.x} y={cb.y} width={cb.w} height={cb.h} fill="none" stroke={COLORS.sel} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
                         <text x={cb.x + cb.w / 2} y={cb.y + cb.h + fs * 1.1} fontSize={fs * 0.9} textAnchor="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{p.allow > 0 ? t("ตัด ", "cut ") : ""}{r1(cb.w)} {t("ซม.", "cm")}</text>
                         <text x={cb.x + cb.w + fs * 0.6} y={cb.y + cb.h / 2} fontSize={fs * 0.9} dominantBaseline="middle" fill={COLORS.sel} style={{ pointerEvents: "none" }}>{r1(cb.h)} {t("ซม.", "cm")}</text>
@@ -928,6 +1101,10 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                     </g>
                   );
                 })}
+                {marquee && <rect x={Math.min(marquee.a.x, marquee.b.x)} y={Math.min(marquee.a.y, marquee.b.y)} width={Math.abs(marquee.a.x - marquee.b.x)} height={Math.abs(marquee.a.y - marquee.b.y)} fill={COLORS.stroke} fillOpacity={0.08} stroke={COLORS.stroke} strokeDasharray="4 3" strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />}
+                {guides.map((gd, gi) => gd.x != null
+                  ? <line key={`gd${gi}`} x1={gd.x} x2={gd.x} y1={view.y} y2={view.y + vh} stroke={GUIDE_COLOR} strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />
+                  : <line key={`gd${gi}`} y1={gd.y} y2={gd.y} x1={view.x} x2={view.x + view.w} stroke={GUIDE_COLOR} strokeWidth={1} vectorEffect="non-scaling-stroke" style={{ pointerEvents: "none" }} />)}
                 {/* แก้จุด: จุด + หูจับของจุดที่เลือก */}
                 {editPiece && editPiece.shape.k === "path" && (() => {
                   const N = editPiece.shape.nodes, sn = N[selNode];
@@ -1011,7 +1188,38 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           </div>
 
           {/* แผงรายละเอียดชิ้น */}
-          {!(selPiece && selGeo) && (
+          {multi.size >= 2 && (
+            <aside className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-xs" aria-label={t("เลือกหลายชิ้น", "Multiple pieces")}>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-slate-700">{t(`เลือก ${multi.size} ชิ้น`, `${multi.size} pieces selected`)}</span>
+                <button type="button" onClick={() => { setMulti(new Set()); setSel(null); }} aria-label={t("เลิกเลือก", "Deselect")} className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100">✕</button>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {pieces.filter((p) => multi.has(p.id)).map((p) => <span key={p.id} className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-700">P{pieces.indexOf(p) + 1}{p.name ? ` ${p.name}` : ""}</span>)}
+              </div>
+              {!readonly && <>
+                <div>
+                  <div className="mb-1 font-medium text-slate-600">{t("จัดแนว (ตามกรอบตัด)", "Align (by cut box)")}</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    {([["l", t("ชิดซ้าย", "Left")], ["cx", t("กึ่งกลาง ↕", "Center")], ["r", t("ชิดขวา", "Right")], ["t", t("ชิดบน", "Top")], ["cy", t("กึ่งกลาง ↔", "Middle")], ["b", t("ชิดล่าง", "Bottom")]] as const).map(([m, l]) => (
+                      <button key={m} type="button" onClick={() => alignSel(m)} className={btnCls(false)}>{l}</button>
+                    ))}
+                  </div>
+                  <div className="mt-1 grid grid-cols-2 gap-1">
+                    <button type="button" disabled={multi.size < 3} onClick={() => distributeSel("x")} className={`${btnCls(false)} disabled:opacity-40`} title={t("ระยะห่างแนวนอนเท่ากัน (≥3 ชิ้น)", "Equal horizontal gaps (3+ pieces)")}>{t("เว้นเท่ากัน ↔", "Distribute ↔")}</button>
+                    <button type="button" disabled={multi.size < 3} onClick={() => distributeSel("y")} className={`${btnCls(false)} disabled:opacity-40`} title={t("ระยะห่างแนวตั้งเท่ากัน (≥3 ชิ้น)", "Equal vertical gaps (3+ pieces)")}>{t("เว้นเท่ากัน ↕", "Distribute ↕")}</button>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <button type="button" onClick={copyButton} className={btnCls(false)}><Icon value="i:copy" className="text-[13px]" />{t("คัดลอก", "Copy")}</button>
+                  <button type="button" onClick={duplicateSel} className={btnCls(false)}>{t("ทำสำเนา", "Duplicate")}</button>
+                  <button type="button" onClick={deleteSel} className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-200 bg-white px-2.5 text-xs text-rose-600 hover:bg-rose-50"><Icon value="i:trash" className="text-[13px]" />{t("ลบทั้งหมด", "Delete all")}</button>
+                </div>
+              </>}
+              <div className="text-[11px] text-slate-400">{t("ลากชิ้นใดก็ได้ในกลุ่ม = ย้ายพร้อมกัน · ลูกศร = ขยับทั้งกลุ่ม · Shift+คลิก = เอาออกจากกลุ่ม", "Drag any piece to move the group · arrows nudge all · Shift+click removes from the group")}</div>
+            </aside>
+          )}
+          {multi.size < 2 && !(selPiece && selGeo) && (
             <aside className="rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-500" aria-label={t("รายละเอียดชิ้น", "Piece details")}>
               <div className="mb-2 text-sm font-semibold text-slate-600">{t("รายละเอียดชิ้น", "Piece details")}</div>
               <p>{t("กดชิ้นที่วาดแล้ว เพื่อตั้งชื่อ ใส่วัสดุ (หนัง ซับใน …) เผื่อพับ ขนาด จำนวน เจาะรู พับครึ่ง กลับด้าน แก้จุด", "Click a piece to set its name, materials (leather, lining…), allowance, size, count, holes, fold, flip and points")}</p>
@@ -1020,6 +1228,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 <li>{t("R สี่เหลี่ยม · O วงกลม · P ปากกา · V ย้าย · H เลื่อนดู", "R rect · O circle · P pen · V move · H pan")}</li>
                 <li>{t("ลูกศร = ขยับชิ้น (Shift ×10) · Delete = ลบ", "Arrows = nudge (Shift ×10) · Delete = remove")}</li>
                 <li>{t("M ไม้บรรทัด: วัดตรง · วัดโค้ง · ตามขอบชิ้น", "M measure: straight · curve · along edge")}</li>
+                <li>{t("Shift+คลิก / Shift+ลากกรอบ / Ctrl+A = เลือกหลายชิ้น · Ctrl+C / Ctrl+V / Ctrl+D", "Shift+click / Shift+drag / Ctrl+A = multi-select · Ctrl+C / Ctrl+V / Ctrl+D")}</li>
               </ul>
               {measures.length > 0 && (
                 <div className="mt-3 border-t border-slate-100 pt-2">
@@ -1039,7 +1248,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               )}
             </aside>
           )}
-          {selPiece && selGeo && (
+          {multi.size < 2 && selPiece && selGeo && (
             <aside className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-xs" aria-label={t("รายละเอียดชิ้น", "Piece details")}>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-slate-700">P{selIdx + 1}</span>
@@ -1118,8 +1327,35 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   <button type="button" onClick={() => patchPiece(selPiece.id, (p) => flipPiece(p, "y"))} className={btnCls(false)}>{t("กลับด้าน ↕", "Flip ↕")}</button>
                   <button type="button" onClick={() => patchPiece(selPiece.id, (p) => rotatePiece(p, -90))} className={btnCls(false)} title={t("หมุนทวนเข็ม 90°", "Rotate 90° counter-clockwise")}>{t("หมุน ⟲ 90°", "Rotate ⟲ 90°")}</button>
                   <button type="button" onClick={() => patchPiece(selPiece.id, (p) => rotatePiece(p, 90))} className={btnCls(false)} title={t("หมุนตามเข็ม 90°", "Rotate 90° clockwise")}>{t("หมุน ⟳ 90°", "Rotate ⟳ 90°")}</button>
+                  <button type="button" onClick={mirrorCopy} className={btnCls(false)} title={t("สร้างชิ้นกลับด้านวางข้าง ๆ (ได้คู่ซ้าย/ขวา)", "Create a mirrored copy beside it (left/right pair)")}>{t("สำเนากลับด้าน", "Mirror copy")}</button>
                   {selHost && <button type="button" onClick={() => makeHole(selPiece)} className="inline-flex h-8 items-center rounded-md border border-amber-300 bg-amber-50 px-2.5 text-xs font-medium text-amber-700 hover:bg-amber-100">{t(`เจาะเป็นรูใน P${pieces.indexOf(selHost) + 1}`, `Make a hole in P${pieces.indexOf(selHost) + 1}`)}</button>}
                   <button type="button" onClick={() => { commit(piecesRef.current.filter((p) => p.id !== selPiece.id)); setSel(null); setEditId(null); }} className="inline-flex h-8 items-center gap-1 rounded-md border border-rose-200 bg-white px-2.5 text-xs text-rose-600 hover:bg-rose-50"><Icon value="i:trash" className="text-[13px]" />{t("ลบชิ้น", "Delete")}</button>
+                </div>
+                {/* เครื่องมือ vector ของชิ้นนี้ */}
+                <div className="mt-2 space-y-1.5 rounded-md border border-slate-200 bg-white p-2 text-slate-500">
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="w-16">{t("มุมโค้ง", "Round")}</span>
+                    <input type="number" step={0.1} min={0.1} value={roundR} onChange={(e) => setRoundR(e.target.value)} aria-label={t("รัศมีมุมโค้ง ซม.", "Corner radius cm")} className="h-7 w-14 rounded border border-slate-200 px-1 text-right" />{t("ซม.", "cm")}
+                    <button type="button" onClick={applyRound} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("ลบมุมทุกมุมให้มน", "Round every corner")}>{t("ลบมุม", "Apply")}</button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="w-16">{t("เส้นขนาน", "Offset")}</span>
+                    <input type="number" step={0.1} min={0.1} value={offD} onChange={(e) => setOffD(e.target.value)} aria-label={t("ระยะเส้นขนาน ซม.", "Offset distance cm")} className="h-7 w-14 rounded border border-slate-200 px-1 text-right" />{t("ซม.", "cm")}
+                    <button type="button" onClick={() => offsetCopy(-1)} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("ชิ้นใหม่เล็กลงรอบด้าน เช่น ผ้ากาว/ซับใน", "New smaller piece, e.g. interfacing")}>{t("ด้านใน", "Inner")}</button>
+                    <button type="button" onClick={() => offsetCopy(1)} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("ชิ้นใหม่ใหญ่ขึ้นรอบด้าน", "New larger piece")}>{t("ด้านนอก", "Outer")}</button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="w-16">{t("เส้นทางผ้า", "Grain")}</span>
+                    <button type="button" onClick={toggleGrain} className={`h-7 rounded-md border px-2 ${selPiece.grain ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 hover:bg-slate-50"}`}>{selPiece.grain ? t("ซ่อน", "Hide") : t("แสดง", "Show")}</button>
+                    {selPiece.grain && <button type="button" onClick={turnGrain} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50">{t("หมุน 90°", "Turn 90°")}</button>}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    <span className="w-16">{t("รอยบาก", "Notches")}</span>
+                    <button type="button" onClick={() => setNotchMode((v) => !v)} className={`h-7 rounded-md border px-2 ${notchMode ? "border-rose-300 bg-rose-50 text-rose-700" : "border-slate-200 hover:bg-slate-50"}`} title={t("คลิกบนขอบชิ้น = เพิ่ม · คลิกที่รอยเดิม = ลบ", "Click the edge to add · click a notch to remove")}>{notchMode ? t("เสร็จ", "Done") : t("คลิกเพิ่ม/ลบ", "Click to add")}</button>
+                    <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, notches: [...(p.notches ?? []), ...midEdgeNotches(p.shape)] }))} className="h-7 rounded-md border border-slate-200 px-2 hover:bg-slate-50" title={t("ใส่รอยบากกลางทุกขอบตรง (ยาว ≥ 3 ซม.)", "Notch the middle of every straight edge (≥ 3 cm)")}>{t("กลางทุกขอบ", "Mid edges")}</button>
+                    {(selPiece.notches ?? []).length > 0 && <button type="button" onClick={() => patchPiece(selPiece.id, (p) => ({ ...p, notches: [] }))} className="h-7 rounded-md px-2 text-rose-600 hover:bg-rose-50">{t(`ล้าง (${(selPiece.notches ?? []).length})`, `Clear (${(selPiece.notches ?? []).length})`)}</button>}
+                  </div>
+                  {notchMode && <div className="text-[11px] text-rose-600">{t("โหมดรอยบาก: คลิกบนขอบชิ้นเพื่อเพิ่ม · คลิกที่รอยเดิมเพื่อลบ · Esc = เสร็จ", "Notch mode: click the edge to add · click a notch to remove · Esc = done")}</div>}
                 </div>
                 {selPiece.holes.length > 0 && (
                   <div className="mt-2 space-y-1">

@@ -33,7 +33,9 @@ export type ShapeBasis = "box" | "area";
  *   pid = รหัสชิ้น (บรรทัดหลายวัสดุของชิ้นเดียวกัน เช่น หนัง + ซับใน ใช้ pid เดียวกัน) · name = ชื่อชิ้น เช่น "ตัวหน้า"
  *   at = ตำแหน่งชิ้นบนกระดาน "แบบวาด" (มุมซ้ายบนของเส้นเย็บ · ซม.) · refs = รูปอ้างอิงบนกระดาน (พิกัดกระดาน · เก็บซ้ำทุกบรรทัดของแท็บ)
  */
-export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[] };
+export type LineShape = { v: 1; shape: Shape; basis: ShapeBasis; holes?: Shape[]; allow?: number; pid?: string; name?: string; at?: [number, number]; refs?: RefImage[]; grain?: [Pt, Pt]; notches?: Pt[] };
+/** เครื่องหมายบนชิ้น: เส้นทางผ้า (2 จุด) · รอยบาก (จุดบนเส้นเย็บ) — พิกัดเดียวกับรูปทรง ย้าย/ยืด/หมุน/กลับด้านไปพร้อมชิ้น */
+export type PieceMarks = { grain?: Pt[] | null; notches?: Pt[] | null };
 /** รูปอ้างอิง (รูปสินค้า) วางใต้กระดานวาด — url จากรูปในระบบ · x,y,w = ซม. บนกระดาน · ar = สูง/กว้าง · op = ความจาง 0–1 */
 export type RefImage = { url: string; label?: string; x: number; y: number; w: number; ar: number; op: number };
 /** ชิ้นงาน 1 ชิ้น = เส้นรอบนอก + รูเจาะ + เผื่อพับ */
@@ -208,9 +210,14 @@ export function cleanLineShape(raw: unknown): LineShape | null {
   const shape = cleanShape(o.shape);
   if (!shape) return null;
   const holes = Array.isArray(o.holes) ? o.holes.slice(0, 50).map(cleanShape).filter((h): h is Shape => !!h) : [];
-  const norm = normalizePiece(shape, holes);
+  const pt = (v: unknown): Pt | null => (Array.isArray(v) && v.length === 2 && fin(v[0]) != null && fin(v[1]) != null && Math.abs(Number(v[0])) < 1e5 && Math.abs(Number(v[1])) < 1e5 ? [Number(v[0]), Number(v[1])] : null);
+  const grain = Array.isArray(o.grain) && o.grain.length === 2 ? o.grain.map(pt) : null;
+  const notches = Array.isArray(o.notches) ? o.notches.slice(0, 100).map(pt).filter((q): q is Pt => !!q) : [];
+  const norm = normalizePiece(shape, holes, { grain: grain && grain[0] && grain[1] ? (grain as Pt[]) : null, notches });
   const out: LineShape = { v: 1, shape: norm.shape, basis: o.basis === "area" ? "area" : "box" };
   if (norm.holes.length) out.holes = norm.holes;
+  if (norm.grain && norm.grain.length === 2) out.grain = [norm.grain[0], norm.grain[1]];
+  if (norm.notches?.length) out.notches = norm.notches;
   const allow = cleanAllow(o.allow);
   if (allow) out.allow = allow;
   if (typeof o.pid === "string" && /^[\w-]{1,40}$/.test(o.pid)) out.pid = o.pid;
@@ -252,9 +259,14 @@ export function refitLineShape(ls: LineShape | null | undefined, w: number | nul
   const a = ls.allow ?? 0;
   const b = shapeBox(ls.shape);
   const nw = w != null && w > 2 * a ? w - 2 * a : b.w, nh = h != null && h > 2 * a ? h - 2 * a : b.h;
-  const f = fitPiece({ shape: ls.shape, holes: ls.holes ?? [] }, 0, 0, nw, nh);
-  const norm = normalizePiece(f.shape, f.holes);
-  return { ...ls, shape: norm.shape, ...(norm.holes.length ? { holes: norm.holes } : {}) };
+  const f = fitPiece({ shape: ls.shape, holes: ls.holes ?? [], grain: ls.grain ?? null, notches: ls.notches ?? [] }, 0, 0, nw, nh);
+  const norm = normalizePiece(f.shape, f.holes, { grain: f.grain, notches: f.notches });
+  const { grain: _g, notches: _n, ...rest } = ls;   // eslint-disable-line @typescript-eslint/no-unused-vars
+  return {
+    ...rest, shape: norm.shape, ...(norm.holes.length ? { holes: norm.holes } : {}),
+    ...(norm.grain && norm.grain.length === 2 ? { grain: [norm.grain[0], norm.grain[1]] as [Pt, Pt] } : {}),
+    ...(norm.notches?.length ? { notches: norm.notches } : {}),
+  };
 }
 
 // ───────────────────────── นำเข้า SVG (Illustrator) ─────────────────────────
@@ -598,24 +610,38 @@ export function pieceGeometry(g: PieceGeom): PieceGeometry {
   };
 }
 
+/** แปลงจุดของเส้นทางผ้า/รอยบาก ด้วยสูตรเดียวกับชิ้น (ถ้ามี) */
+function mapMarks<T>(p: T, f: (q: Pt) => Pt): T {
+  const m = p as T & PieceMarks;
+  const o: PieceMarks = {};
+  if (m.grain && m.grain.length === 2) o.grain = [f(m.grain[0]), f(m.grain[1])];
+  if (m.notches?.length) o.notches = m.notches.map(f);
+  return Object.keys(o).length ? { ...p, ...o } : p;
+}
+
 export function movePiece<T extends { shape: Shape; holes?: Shape[] }>(p: T, dx: number, dy: number): T & { holes: Shape[] } {
-  return { ...p, shape: moveShape(p.shape, dx, dy), holes: (p.holes ?? []).map((h) => moveShape(h, dx, dy)) };
+  return mapMarks({ ...p, shape: moveShape(p.shape, dx, dy), holes: (p.holes ?? []).map((h) => moveShape(h, dx, dy)) }, ([x, y]) => [x + dx, y + dy]);
 }
 
 /** ยืด/ย้ายชิ้น (เส้นนอก = กรอบ x,y,w,h) — รูยืดและเลื่อนตามสัดส่วนเดียวกัน */
 export function fitPiece<T extends { shape: Shape; holes?: Shape[] }>(p: T, x: number, y: number, w: number, h: number): T & { holes: Shape[] } {
   const b = shapeBox(p.shape);
   const sx = b.w > 0 ? w / b.w : 1, sy = b.h > 0 ? h / b.h : 1;
-  return {
+  return mapMarks({
     ...p, shape: fitShape(p.shape, x, y, w, h),
     holes: (p.holes ?? []).map((hs) => { const hb = shapeBox(hs); return fitShape(hs, x + (hb.x - b.x) * sx, y + (hb.y - b.y) * sy, hb.w * sx, hb.h * sy); }),
-  };
+  }, ([qx, qy]) => [x + (qx - b.x) * sx, y + (qy - b.y) * sy]);
 }
 
 /** เลื่อนชิ้น (เส้นนอก+รู) ให้กรอบเส้นนอกเริ่มที่ 0,0 + ปัดทศนิยม (ก่อนเก็บ) */
-export function normalizePiece(shape: Shape, holes: Shape[] = []): { shape: Shape; holes: Shape[] } {
+export function normalizePiece(shape: Shape, holes: Shape[] = [], marks: PieceMarks = {}): { shape: Shape; holes: Shape[]; grain?: Pt[]; notches?: Pt[] } {
   const b = shapeBox(shape);
-  return { shape: normalizeShape(shape), holes: holes.map((h) => roundShape(moveShape(h, -b.x, -b.y))) };
+  const sh = ([x, y]: Pt): Pt => [r3(x - b.x), r3(y - b.y)];
+  return {
+    shape: normalizeShape(shape), holes: holes.map((h) => roundShape(moveShape(h, -b.x, -b.y))),
+    ...(marks.grain && marks.grain.length === 2 ? { grain: marks.grain.map(sh) } : {}),
+    ...(marks.notches?.length ? { notches: marks.notches.map(sh) } : {}),
+  };
 }
 function roundShape(s: Shape): Shape {
   if (s.k !== "path") return { k: s.k, x: r3(s.x), y: r3(s.y), w: r3(s.w), h: r3(s.h) };
@@ -668,7 +694,7 @@ export function mirrorShape(s: Shape, axis: "x" | "y", c: number): Shape {
 export function flipPiece<T extends { shape: Shape; holes?: Shape[] }>(p: T, axis: "x" | "y" = "x"): T & { holes: Shape[] } {
   const b = shapeBox(p.shape);
   const c = axis === "x" ? b.x + b.w / 2 : b.y + b.h / 2;
-  return { ...p, shape: mirrorShape(p.shape, axis, c), holes: (p.holes ?? []).map((h) => mirrorShape(h, axis, c)) };
+  return mapMarks({ ...p, shape: mirrorShape(p.shape, axis, c), holes: (p.holes ?? []).map((h) => mirrorShape(h, axis, c)) }, ([x, y]) => (axis === "x" ? [2 * c - x, y] : [x, 2 * c - y]));
 }
 
 /**
@@ -681,7 +707,9 @@ export function foldPiece<T extends { shape: Shape; holes?: Shape[] }>(p: T, axi
   const b = shapeBox(s);
   const F = axis === "x" ? b.x + b.w : b.y + b.h;
   const holes = p.holes ?? [];
-  const withHoles = (shape: Shape) => ({ ...p, shape, holes: [...holes, ...holes.map((h) => mirrorShape(h, axis, F))] });
+  const notches = (p as T & PieceMarks).notches ?? [];
+  const mirPt = ([x, y]: Pt): Pt => (axis === "x" ? [2 * F - x, y] : [x, 2 * F - y]);
+  const withHoles = (shape: Shape) => ({ ...p, shape, holes: [...holes, ...holes.map((h) => mirrorShape(h, axis, F))], ...(notches.length ? { notches: [...notches, ...notches.map(mirPt)] } : {}) });
   if (s.k === "rect") return withHoles(axis === "x" ? { ...s, w: s.w * 2 } : { ...s, h: s.h * 2 });
   if (s.k !== "path") return null;
   const N = s.nodes, n = N.length;
@@ -854,5 +882,121 @@ export function rotateShape(s: Shape, deg: number, cx: number, cy: number): Shap
 export function rotatePiece<T extends { shape: Shape; holes?: Shape[] }>(p: T, deg: number, cx?: number, cy?: number): T & { holes: Shape[] } {
   const b = shapeBox(p.shape);
   const ox = cx ?? b.x + b.w / 2, oy = cy ?? b.y + b.h / 2;
-  return { ...p, shape: rotateShape(p.shape, deg, ox, oy), holes: (p.holes ?? []).map((h) => rotateShape(h, deg, ox, oy)) };
+  return mapMarks({ ...p, shape: rotateShape(p.shape, deg, ox, oy), holes: (p.holes ?? []).map((h) => rotateShape(h, deg, ox, oy)) }, ([x, y]) => rotXY(x, y, deg, ox, oy));
+}
+
+// ───────────────────────── เครื่องมือ vector: ลบมุมโค้ง · เส้นขนาน · เส้นทางผ้า · รอยบาก (2026-11-09) ─────────────────────────
+
+/**
+ * ลบมุมโค้งรัศมี r ทุกมุมที่เป็นมุมแหลม/มุมตรง (จุดที่ไม่มีหูจับ) — สี่เหลี่ยม = มุมมนทั้ง 4 · วงกลม = เหมือนเดิม
+ * มุมที่ขอบสั้นกว่า 2 เท่าของระยะตัด = ลดรัศมีลงให้พอดี (ไม่ทับกัน)
+ */
+export function roundCorners(s: Shape, r: number): Shape {
+  if (!(r > 0) || s.k === "ellipse") return s;
+  if (s.k === "rect") return { k: "path", nodes: roundRectNodes(s.x, s.y, s.w, s.h, r, r) };
+  const N = s.nodes, n = N.length, out: PNode[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = N[i];
+    if (hasIn(v) || hasOut(v)) { out.push({ ...v }); continue; }
+    const a = N[(i - 1 + n) % n], b = N[(i + 1) % n];
+    const ax = a.x - v.x, ay = a.y - v.y, bx = b.x - v.x, by = b.y - v.y;
+    const la = Math.hypot(ax, ay), lb = Math.hypot(bx, by);
+    if (la < 1e-6 || lb < 1e-6) { out.push({ ...v }); continue; }
+    const theta = Math.acos(Math.max(-1, Math.min(1, (ax * bx + ay * by) / (la * lb))));   // มุมภายใน
+    if (theta > Math.PI - 0.01) { out.push({ ...v }); continue; }   // เส้นตรง ไม่ใช่มุม
+    const d = Math.min(r / Math.tan(theta / 2), la / 2, lb / 2);
+    const rr = d * Math.tan(theta / 2);
+    const hl = (4 / 3) * Math.tan((Math.PI - theta) / 4) * rr;   // หูจับที่ทำส่วนโค้งวงกลม
+    const ua: Pt = [ax / la, ay / la], ub: Pt = [bx / lb, by / lb];
+    out.push({ x: v.x + ua[0] * d, y: v.y + ua[1] * d, ox: -ua[0] * hl, oy: -ua[1] * hl });
+    out.push({ x: v.x + ub[0] * d, y: v.y + ub[1] * d, ix: -ub[0] * hl, iy: -ub[1] * hl });
+  }
+  return { k: "path", nodes: out };
+}
+
+/** เส้นขนาน: รูปใหม่ห่างจากเดิม d ซม. (บวก = ใหญ่ขึ้น · ลบ = เล็กลง เช่น ผ้ากาว/ซับ) · เล็กจนหาย = null */
+export function offsetShape(s: Shape, d: number): Shape | null {
+  if (s.k === "rect" || s.k === "ellipse") { const w = s.w + 2 * d, h = s.h + 2 * d; return w > 0.1 && h > 0.1 ? { k: s.k, x: s.x - d, y: s.y - d, w, h } : null; }
+  const P = untangle(offsetPolygon(flattenShape(s, 16), d));
+  if (P.length < 3) return null;
+  const out: Shape = { k: "path", nodes: P.map(([x, y]) => ({ x, y })) };
+  const before = shapeArea(s), after = shapeArea(out);
+  return after > 0.01 && (d >= 0 ? after >= before : after <= before) ? out : null;
+}
+
+/** จุดตัดของเส้น ab กับ cd (เฉพาะตัดกันกลางเส้นจริง ๆ) */
+function segCross(a: Pt, b: Pt, c: Pt, d: Pt): Pt | null {
+  const rx = b[0] - a[0], ry = b[1] - a[1], sx = d[0] - c[0], sy = d[1] - c[1];
+  const den = rx * sy - ry * sx;
+  if (Math.abs(den) < 1e-12) return null;
+  const t = ((c[0] - a[0]) * sy - (c[1] - a[1]) * sx) / den, u = ((c[0] - a[0]) * ry - (c[1] - a[1]) * rx) / den;
+  return t > 1e-6 && t < 1 - 1e-6 && u > 1e-6 && u < 1 - 1e-6 ? [a[0] + rx * t, a[1] + ry * t] : null;
+}
+
+/**
+ * แก้เส้นที่ไขว้ตัวเอง (หลังทำเส้นขนานเข้าด้านในของมุมโค้ง จะเกิดห่วงเล็ก ๆ ตรงมุม) → ตัดห่วงทิ้ง เหลือรูปหลัก
+ * + ตัดจุดที่ซ้อนกัน (ห่างกัน < 0.3 มม.)
+ */
+export function untangle(P: Pt[]): Pt[] {
+  let Q = P.filter((p, i) => { const q = P[(i + 1) % P.length]; return Math.hypot(q[0] - p[0], q[1] - p[1]) > 0.03; });
+  for (let guard = 0; guard < 500 && Q.length >= 4; guard++) {
+    const n = Q.length;
+    let hit: { i: number; k: number; x: Pt } | null = null;
+    for (let i = 0; i < n && !hit; i++) {
+      for (let k = 2; k < n - 1; k++) {   // เส้นที่ i+k (ข้ามเส้นติดกัน)
+        const j = (i + k) % n;
+        const x = segCross(Q[i], Q[(i + 1) % n], Q[j], Q[(j + 1) % n]);
+        if (x) { hit = { i, k, x }; break; }
+      }
+    }
+    if (!hit) break;
+    const { i, k, x } = hit;
+    const loop: Pt[] = [x], rest: Pt[] = [];
+    for (let m = 1; m <= k; m++) loop.push(Q[(i + m) % n]);
+    for (let m = k + 1; m <= n; m++) rest.push(Q[(i + m) % n]);
+    rest.push(x);
+    Q = Math.abs(signedArea(rest)) >= Math.abs(signedArea(loop)) ? rest : loop;   // เก็บส่วนที่ใหญ่กว่า
+  }
+  return Q;
+}
+
+/** เส้นทางผ้าตั้งต้น: แนวตั้งกลางชิ้น 15%–85% ของความสูง */
+export function defaultGrain(s: Shape): [Pt, Pt] {
+  const b = shapeBox(s), cx = b.x + b.w / 2;
+  return [[cx, b.y + b.h * 0.15], [cx, b.y + b.h * 0.85]];
+}
+
+/** รอยบากกลางทุกขอบ (ขอบตรงยาวกว่า minLen ซม.) — จุดอยู่บนเส้นเย็บ */
+export function midEdgeNotches(s: Shape, minLen = 3): Pt[] {
+  const p = toPathShape(s);
+  if (p.k !== "path") return [];
+  const N = p.nodes, out: Pt[] = [];
+  for (let i = 0; i < N.length; i++) {
+    const a = N[i], b = N[(i + 1) % N.length];
+    if (hasOut(a) || hasIn(b)) continue;   // ขอบโค้ง ข้าม
+    if (Math.hypot(b.x - a.x, b.y - a.y) >= minLen) out.push([(a.x + b.x) / 2, (a.y + b.y) / 2]);
+  }
+  return out;
+}
+
+/**
+ * เส้นรอยบากสำหรับพิมพ์/DXF: จากเส้นตัด (ห่างเส้นเย็บ = เผื่อพับ) เข้าไปในชิ้น len ซม.
+ * sew = จุดรอบเส้นเย็บ · notches = จุดรอยบาก (บน/ใกล้เส้นเย็บ)
+ */
+export function notchSegments(sew: Pt[], notches: Pt[], allow = 0, len = 0.5): [Pt, Pt][] {
+  if (sew.length < 3) return [];
+  const s = signedArea(sew) > 0 ? 1 : -1;
+  return notches.map((q): [Pt, Pt] => {
+    let best = { d: Infinity, nx: 0, ny: 0, px: q[0], py: q[1] };
+    for (let i = 0; i < sew.length; i++) {
+      const a = sew[i], b = sew[(i + 1) % sew.length];
+      const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+      if (L2 <= 0) continue;
+      const t = Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / L2));
+      const px = a[0] + dx * t, py = a[1] + dy * t, d = Math.hypot(px - q[0], py - q[1]);
+      if (d < best.d) { const L = Math.sqrt(L2); best = { d, nx: (s * dy) / L, ny: (-s * dx) / L, px, py }; }
+    }
+    const sx = best.px + best.nx * allow, sy = best.py + best.ny * allow;
+    return [[sx, sy], [sx - best.nx * len, sy - best.ny * len]];
+  });
 }

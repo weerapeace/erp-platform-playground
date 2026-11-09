@@ -606,7 +606,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       const r = g[0];
       const mats: PieceMat[] = [];
       for (const x of g) { const m = matOf(x); if (m && !mats.some((y) => y.id === m.id)) mats.push(m); }
-      if (r.shape) return { shape: r.shape.shape, holes: r.shape.holes, count: r.pieces ?? 1, allow: r.shape.allow, name: r.shape.name, mats, pid: r.shape.pid ?? `pc${r.key.replace(/[^\w-]/g, "").slice(-38)}`, at: r.shape.at, src: g.map((x) => x.key) };
+      if (r.shape) return { shape: r.shape.shape, holes: r.shape.holes, count: r.pieces ?? 1, allow: r.shape.allow, name: r.shape.name, mats, pid: r.shape.pid ?? `pc${r.key.replace(/[^\w-]/g, "").slice(-38)}`, at: r.shape.at, src: g.map((x) => x.key), grain: r.shape.grain ?? null, notches: r.shape.notches ?? [] };
       return { shape: { k: "rect", x: 0, y: 0, w: Number(r.width_cm), h: Number(r.length_cm) }, count: r.pieces ?? 1, mats, pid: `pc${r.key.replace(/[^\w-]/g, "").slice(-38)}`, src: [r.key] };
     });
     const refMap = new Map<string, RefImage>();
@@ -634,10 +634,12 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           const k = pool.findIndex((r) => mine(r) && (mid == null ? !r.item_id && !r.item_sku_code && !r.item_name : mid.startsWith("row:") ? r.key === mid.slice(4) : r.item_id === mid));
           return k >= 0 ? pool.splice(k, 1)[0] : undefined;
         };
-        const norm = normalizePiece(p.shape, p.holes);
+        const norm = normalizePiece(p.shape, p.holes, { grain: p.grain, notches: p.notches });   // เส้นทางผ้า/รอยบาก เลื่อนไปพร้อมชิ้น
         const ls: LineShape = {
           v: 1, shape: norm.shape, basis: res.basis, pid: p.pid, at: p.at,
           ...(norm.holes.length ? { holes: norm.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.name ? { name: p.name } : {}), ...(res.refs.length ? { refs: res.refs } : {}),
+          ...(norm.grain && norm.grain.length === 2 ? { grain: [norm.grain[0], norm.grain[1]] as NonNullable<LineShape["grain"]> } : {}),
+          ...(norm.notches?.length ? { notches: norm.notches } : {}),
         };
         const size = { width_cm: Math.round(p.geo.cutBox.w * 100) / 100, length_cm: Math.round(p.geo.cutBox.h * 100) / 100, pieces: p.count };
         const mats: (string | null)[] = p.mats.length ? p.mats.map((m) => m.id) : [null];

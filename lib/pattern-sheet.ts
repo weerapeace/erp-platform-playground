@@ -11,7 +11,7 @@
  * คู่มือ: docs/pattern-sheet.md · หน้าจอ: components/pattern-sheet · หน้าพิมพ์: app/print/design-sheet/[id]/pattern
  */
 
-import { cleanLineShape, pieceGeometry, polyD, shapePathD, type Pt } from "@/lib/pattern-shape";
+import { cleanLineShape, notchSegments, pieceGeometry, polyD, shapePathD, type Pt } from "@/lib/pattern-shape";
 
 export type PatternLineInput = {
   key?: string | null;
@@ -43,7 +43,24 @@ export type PatternPiece = {
   outline?: Pt[] | null;      // จุดรอบเส้นตัด (ไฟล์ DXF)
   holes?: Pt[][] | null;      // รูเจาะที่ตัดจริง (ไฟล์ DXF)
   sewOutline?: Pt[] | null;   // จุดรอบเส้นเย็บ (ไฟล์ DXF layer SEW)
+  grainSegs?: [Pt, Pt][] | null;   // เส้นทางผ้า: ก้าน + หัวลูกศร 2 ข้าง (DXF layer GRAIN)
+  notchSegs?: [Pt, Pt][] | null;   // รอยบาก: ขีดจากเส้นตัดเข้าในชิ้น (DXF layer NOTCH)
+  marksD?: string | null;          // เส้นทางผ้า + รอยบาก รวมเป็น SVG path (วาดเส้นทึบบาง)
 };
+
+/** ลูกศรเส้นทางผ้า 2 หัว → ชุดเส้นตรง (ก้าน + หัว 4 เส้น) */
+export function grainArrowSegs(a: Pt, b: Pt): [Pt, Pt][] {
+  const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  if (!(L > 0)) return [];
+  const ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, hs = Math.min(1, L * 0.15), hw = hs * 0.55;
+  const head = (p: Pt, s: number): [Pt, Pt][] => [
+    [p, [p[0] + s * ux * hs - uy * hw, p[1] + s * uy * hs + ux * hw]],
+    [p, [p[0] + s * ux * hs + uy * hw, p[1] + s * uy * hs - ux * hw]],
+  ];
+  return [[a, b], ...head(a, 1), ...head(b, -1)];
+}
+const r2 = (v: number) => Math.round(v * 100) / 100;
+const segsD = (S: [Pt, Pt][]) => S.map(([a, b]) => `M${r2(a[0])} ${r2(a[1])}L${r2(b[0])} ${r2(b[1])}`).join("");
 
 export type PlacedPiece = PatternPiece & { x: number; y: number };
 export type PatternLayout = { placed: PlacedPiece[]; width: number; height: number };
@@ -68,6 +85,8 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
     const sh = (P: Pt[]): Pt[] => P.map(([x, y]) => [x - (cb?.x ?? 0), y - (cb?.y ?? 0)]);   // ให้มุมซ้ายบนของเส้นตัด = 0,0
     const allow = ls?.allow ?? 0;
     if (!(w > 0) || !(h > 0)) continue;
+    const grainSegs = ls?.grain ? grainArrowSegs(...(sh(ls.grain) as [Pt, Pt])) : [];
+    const notchSegs = g && ls?.notches?.length ? notchSegments(g.sew, ls.notches, allow, 0.5).map((s) => sh(s) as [Pt, Pt]) : [];
     out.push({
       id: `P${out.length + 1}`,
       name: [(l.item_name ?? "").trim() || "ไม่ระบุวัสดุ", ls?.name].filter(Boolean).join(" · "),
@@ -78,6 +97,9 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
       outline: g ? sh(g.cut) : null,
       holes: g ? g.holesCut.map(sh) : null,
       sewOutline: g && allow ? sh(g.sew) : null,
+      ...(grainSegs.length ? { grainSegs } : {}),
+      ...(notchSegs.length ? { notchSegs } : {}),
+      ...(grainSegs.length || notchSegs.length ? { marksD: segsD([...grainSegs, ...notchSegs]) } : {}),
       count: Math.max(1, Math.round(num(l.pieces)) || 1),
       faceWidth: num(l.face_width_cm) > 0 ? num(l.face_width_cm) : null,
       note: (l.note ?? "").trim() || null,
@@ -135,7 +157,7 @@ export function patternSheetWidth(pieces: PatternPiece[], pageW = A4_PRINTABLE.w
 /** ข้อความในไฟล์ DXF ใช้ตัวอักษรอังกฤษเท่านั้น (โปรแกรมเครื่องตัดหลายตัวอ่านภาษาไทยเพี้ยน) */
 export const dxfLabel = (p: PatternPiece) => `${p.id} ${p.w}x${p.h}cm x${p.count}`;
 
-/** DXF (R12) หน่วยมิลลิเมตร — เส้นตัด layer CUT · ป้าย layer LABEL · แกน Y กลับด้าน (DXF นับจากล่างขึ้นบน) */
+/** DXF (R12) หน่วยมิลลิเมตร — เส้นตัด layer CUT · เส้นเย็บ SEW · เส้นทางผ้า GRAIN · รอยบาก NOTCH · ป้าย LABEL · แกน Y กลับด้าน (DXF นับจากล่างขึ้นบน) */
 export function buildPatternDxf(layout: PatternLayout): string {
   const mm = (cm: number) => Math.round(cm * 100) / 10;   // ซม. → มม. (ทศนิยม 1)
   const H = mm(layout.height);
@@ -153,6 +175,9 @@ export function buildPatternDxf(layout: PatternLayout): string {
       ring(p.outline, "CUT");
       for (const h of p.holes ?? []) ring(h, "CUT");
       if (p.sewOutline) ring(p.sewOutline, "SEW");
+      const segs = (S: [Pt, Pt][] | null | undefined, layer: string) => { for (const [a, b] of S ?? []) line(mm(p.x + a[0]), H - mm(p.y + a[1]), mm(p.x + b[0]), H - mm(p.y + b[1]), layer); };
+      segs(p.grainSegs, "GRAIN");
+      segs(p.notchSegs, "NOTCH");
     } else { line(x0, yBot, x1, yBot); line(x1, yBot, x1, yTop); line(x1, yTop, x0, yTop); line(x0, yTop, x0, yBot); }
     const textH = Math.max(3, Math.min(8, mm(Math.min(p.w, p.h)) / 8));
     out.push("0", "TEXT", "8", "LABEL", "10", String(Math.round((x0 + 2) * 10) / 10), "20", String(Math.round((yTop - textH - 2) * 10) / 10), "30", "0",
@@ -169,7 +194,7 @@ export function buildPatternSvg(layout: PatternLayout): string {
   const W = Math.max(1, layout.width), H = Math.max(1, layout.height);
   const body = layout.placed.map((p) => {
     const fs = Math.max(0.8, Math.min(2.4, Math.min(p.w, p.h) / 6));
-    const outlineSvg = p.d ? `<path transform="translate(${p.x} ${p.y})" d="${p.d}" fill="none" stroke="#000" stroke-width="0.05"/>` + (p.sewD ? `<path transform="translate(${p.x} ${p.y})" d="${p.sewD}" fill="none" stroke="#000" stroke-width="0.03" stroke-dasharray="0.3 0.2"/>` : "") : `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="none" stroke="#000" stroke-width="0.05"/>`;
+    const outlineSvg = p.d ? `<path transform="translate(${p.x} ${p.y})" d="${p.d}" fill="none" stroke="#000" stroke-width="0.05"/>` + (p.sewD ? `<path transform="translate(${p.x} ${p.y})" d="${p.sewD}" fill="none" stroke="#000" stroke-width="0.03" stroke-dasharray="0.3 0.2"/>` : "") + (p.marksD ? `<path transform="translate(${p.x} ${p.y})" d="${p.marksD}" fill="none" stroke="#000" stroke-width="0.04"/>` : "") : `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="none" stroke="#000" stroke-width="0.05"/>`;
     return `<g>${outlineSvg}`
       + `<text x="${r1(p.x + p.w / 2)}" y="${r1(p.y + p.h / 2)}" font-size="${r1(fs)}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif">${esc(`${p.id} ${p.name}`)}</text>`
       + `<text x="${r1(p.x + p.w / 2)}" y="${r1(p.y + p.h / 2 + fs * 1.3)}" font-size="${r1(fs * 0.8)}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif">${esc(`${p.w}×${p.h} ซม. · ตัด ×${p.count}`)}</text></g>`;
