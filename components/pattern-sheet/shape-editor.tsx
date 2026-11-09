@@ -69,6 +69,9 @@ const FADE_KEY = "pattern-shape-fade";
 const RS_DIRS = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
 const RS_CURSOR: Record<string, string> = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
 const ALLOW_KEY = "pattern-shape-allow";
+const CANVAS_H_KEY = "pattern-shape-h";      // ความสูงพื้นที่วาด (px) — ลากขีดใต้แคนวาส
+const PANEL_KEY = "pattern-shape-panel";     // 1 = แผงรายละเอียดชิ้นเปิด · 0 = พับ
+const CANVAS_H_DEFAULT = 480, CANVAS_H_MIN = 260, CANVAS_H_MAX = 1600;
 const ALLOW_STEPS = [0, 0.3, 0.5, 1] as const;
 const MAX_PIECES = 60;
 const COLORS = { fill: "#dbeafe", stroke: "#2563eb", sel: "#f59e0b", text: "#1e3a8a", grid: "#e2e8f0", gridMajor: "#cbd5e1", node: "#7c3aed" };
@@ -205,6 +208,20 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const [mDraft, setMDraft] = useState<MDraft | null>(null);
   const [pieceFade, setPieceFadeState] = useState(0.6);   // ความทึบของพื้นชิ้น (เส้นยังชัด) — จางลง = เห็นรูปอ้างอิงด้านล่าง
   const setPieceFade = (v: number) => { const x = Math.min(1, Math.max(0.05, v)); setPieceFadeState(x); saveNum(FADE_KEY, x); };
+  // หน้าตาพื้นที่วาด: ความสูง (ลากขีดใต้แคนวาส · จำในเครื่อง) · พับแผงชิ้น · ขยายเต็มป๊อป · เมนูลอยที่เปิดอยู่
+  const [canvasH, setCanvasHState] = useState(CANVAS_H_DEFAULT);
+  const setCanvasH = (v: number, save = false) => { const x = Math.round(Math.min(CANVAS_H_MAX, Math.max(CANVAS_H_MIN, v))); setCanvasHState(x); if (save) saveNum(CANVAS_H_KEY, x); };
+  const [panelOpen, setPanelOpenState] = useState(true);
+  const setPanelOpen = (v: boolean) => { setPanelOpenState(v); saveNum(PANEL_KEY, v ? 1 : 0); };
+  const [focus, setFocus] = useState(false);
+  const [menu, setMenu] = useState<null | "snap" | "more" | "ref">(null);
+  const gripRef = useRef<{ y: number; h: number } | null>(null);
+  useEffect(() => {   // คลิกนอกเมนูลอย = ปิด
+    if (!menu) return;
+    const onDown = (e: PointerEvent) => { if (!(e.target as Element | null)?.closest?.("[data-menu]")) setMenu(null); };
+    window.addEventListener("pointerdown", onDown, true);
+    return () => window.removeEventListener("pointerdown", onDown, true);
+  }, [menu]);
   const [rotDeg, setRotDeg] = useState<number | null>(null);
   const [rotIn, setRotIn] = useState("15");     // Transform: หมุนกี่องศา
   const [scaleIn, setScaleIn] = useState("110"); // Transform: ย่อ/ขยายกี่ %
@@ -229,7 +246,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const undo = useCallback(() => { const h = hist.current.pop(); if (!h) return; fut.current.push(piecesRef.current); restore(h); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const redo = useCallback(() => { const f = fut.current.pop(); if (!f) return; hist.current.push(piecesRef.current); restore(f); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { setSnapState(readNum(SNAP_KEY, SNAP_STEPS, 1)); setLastAllow(readNum(ALLOW_KEY, null, 0)); setPieceFadeState(readNum(FADE_KEY, null, initialRefs.length ? 0.3 : 0.6)); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setSnapState(readNum(SNAP_KEY, SNAP_STEPS, 1)); setLastAllow(readNum(ALLOW_KEY, null, 0)); setPieceFadeState(readNum(FADE_KEY, null, initialRefs.length ? 0.3 : 0.6)); setCanvasH(readNum(CANVAS_H_KEY, null, CANVAS_H_DEFAULT)); setPanelOpenState(readNum(PANEL_KEY, [0, 1], 1) === 1); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const setSnap = (v: number) => { setSnapState(v); saveNum(SNAP_KEY, v); };
 
   const vh = view.w * (size.ch / Math.max(1, size.cw));
@@ -502,6 +519,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
       return;
     }
     if ((d.k === "move" || d.k === "node" || d.k === "handle" || d.k === "resize" || d.k === "rotate") && d.moved) { record(d.before); setDirty(true); }
+    if (d.k === "move" && !d.moved && !panelOpen) setPanelOpen(true);
     if (d.k === "rotate") {
       setRotDeg(null);
       // หมุนเอียง (ไม่ใช่ทีละ 90°) → กรอบสี่เหลี่ยมใหญ่ขึ้น · คิดผ้าแบบกรอบ ต้นทุนจะเพิ่ม — บอกให้รู้
@@ -940,17 +958,13 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
   const fs = view.w / 60;
   const cursor = tool === "hand" ? "grab" : tool === "move" ? "default" : "crosshair";
   const btnCls = (on: boolean) => `inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs ${on ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`;
-  const toolBtn = (tl: Tool, icon: string, label: string, key: string) => (
-    <button key={tl} type="button" onClick={() => changeTool(tl)} title={`${label} (${key})`} className={btnCls(tool === tl)}>
-      <Icon value={`i:${icon}`} className="text-[14px]" />{label}
-    </button>
-  );
   const editPiece = editId ? pieces.find((p) => p.id === editId) ?? null : null;
   const hint = pen
     ? t(`ปากกา: ${pen.nodes.length} จุด · กดลาก = เส้นโค้ง · กดจุดแรก/ดับเบิลคลิก/Enter = ปิดรูป · Backspace = ลบจุดล่าสุด · Esc = ยกเลิก`, `Pen: ${pen.nodes.length} points · drag = curve · click first point / double-click / Enter = close · Backspace = undo point · Esc = cancel`)
     : editPiece ? t("แก้จุด: ลากจุด = ย้าย · ลากหูจับ = ดัดโค้ง (Alt = แยกหูจับ) · ดับเบิลคลิกจุด = มุม↔โค้ง · ดับเบิลคลิกเส้น = เพิ่มจุด · Delete = ลบจุด · Esc = เสร็จ", "Edit points: drag a point to move · drag a handle to bend (Alt = break) · double-click a point = corner↔smooth · double-click the outline = add point · Delete = remove point · Esc = done")
     : tool === "pen" ? t("ปากกา: คลิกวางจุด (มุม) · กดค้างแล้วลาก = เส้นโค้ง · Shift = เส้น 45°", "Pen: click to place corners · press and drag for curves · Shift = 45°")
     : tool === "hand" ? t("ลากเพื่อเลื่อนดู", "Drag to pan")
+    : tool === "measure" ? (measureMode === "line" ? t("ไม้บรรทัด วัดตรง: กดลากจากจุดหนึ่งไปอีกจุด (Shift = 45°)", "Measure straight: drag from one point to another (Shift = 45°)") : measureMode === "curve" ? t("ไม้บรรทัด วัดโค้ง: คลิกวางจุดตามแนว · กดลาก = โค้ง · ดับเบิลคลิก/Enter = จบ", "Measure curve: click points along the line · drag = curve · double-click/Enter = finish") : t("ไม้บรรทัด ตามขอบ: กดบนชิ้นที่จุดเริ่ม แล้วลากไปตามขอบทางที่ต้องการ (อ้อมทางยาวก็ได้) ปล่อย = จบ · หรือคลิกจุดเริ่ม → เลื่อนตามขอบ → คลิกจุดปลาย — วัดตามเส้นเย็บ", "Measure along edge: press on a piece at the start and drag along the edge the way you want (long way works too) · release = done · or click start → move along → click end — measured along the sewing line"))
     : t("กดลากที่ว่างเพื่อวาด (Shift = จัตุรัส/วงกลม) · กดชิ้น = ย้าย + แผงรายละเอียด · ลากจุดจับรอบชิ้น = ย่อขยาย · จุดกลมด้านบน = หมุน · Ctrl+Z ย้อนกลับ", "Drag on empty space to draw (Shift = square/circle) · click a piece = move + details · drag the handles = resize · top circle = rotate · Ctrl+Z undo");
 
   const penPath = () => {
@@ -989,94 +1003,164 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
           <button type="button" onClick={save} className="h-9 rounded-lg bg-blue-600 px-4 text-sm text-white hover:bg-blue-700">{t(`ใช้ขนาดนี้ (${pieces.length} ชิ้น)`, `Use these (${pieces.length} pcs)`)}</button>
         </>}
       </>);
-  const bodyEl = (
-      <div className="space-y-3">
-        {/* แถบเครื่องมือ */}
-        <div className="flex flex-wrap items-center gap-1.5">
-          {!readonly && toolBtn("rect", "square", t("สี่เหลี่ยม", "Rectangle"), "R")}
-          {!readonly && toolBtn("ellipse", "circle", t("วงกลม", "Circle"), "O")}
-          {!readonly && toolBtn("pen", "vector-bezier", t("ปากกา", "Pen"), "P")}
-          {toolBtn("move", "pointer", readonly ? t("เลือก", "Select") : t("ย้าย", "Move"), "V")}
-          {toolBtn("hand", "hand-stop", t("เลื่อนดู", "Pan"), "H")}
-          {toolBtn("measure", "ruler-measure", t("ไม้บรรทัด", "Measure"), "M")}
-          {refPicker && <button type="button" onClick={() => setRefPickOpen((v) => !v)} className={btnCls(refPickOpen)} title={t("ใส่รูปสินค้าเป็นภาพอ้างอิงใต้กระดาน (วาดลอกตาม)", "Put a product photo under the board as a tracing reference")}><Icon value="i:photo" className="text-[14px]" />{t("รูปอ้างอิง", "Reference")}</button>}
+  // ── เครื่องมือลอยบนแคนวาส (แทนแถบ 3 แถวด้านบน — พื้นที่วาดได้เต็ม) ──
+  const fbar = "pointer-events-auto flex items-center gap-0.5 rounded-xl border border-slate-200 bg-white/95 p-1 shadow-sm";
+  const ibCls = (on: boolean) => `relative inline-flex h-8 min-w-8 items-center justify-center gap-1 rounded-lg px-1.5 text-xs disabled:opacity-35 ${on ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-100"}`;
+  const toolIcon = (tl: Tool, icon: string, label: string, key: string) => (
+    <button key={tl} type="button" onClick={() => changeTool(tl)} title={`${label} (${key})`} aria-label={label} aria-pressed={tool === tl} className={ibCls(tool === tl)}>
+      <Icon value={`i:${icon}`} className="text-[16px]" />
+    </button>
+  );
+  const sep = <span className="mx-0.5 h-5 w-px bg-slate-200" />;
+  const overlayEl = (
+    <div className="pointer-events-none absolute inset-0" data-float-ui>
+      <input ref={fileRef} type="file" accept=".svg,image/svg+xml" className="hidden" onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
+      {/* ซ้าย: เครื่องมือวาด */}
+      <div className={`${fbar} absolute left-2 top-14 flex-col`} aria-label={t("เครื่องมือวาด", "Drawing tools")}>
+        {toolIcon("move", "pointer", readonly ? t("เลือก", "Select") : t("ย้าย", "Move"), "V")}
+        {!readonly && toolIcon("rect", "square", t("สี่เหลี่ยม", "Rectangle"), "R")}
+        {!readonly && toolIcon("ellipse", "circle", t("วงกลม", "Circle"), "O")}
+        {!readonly && toolIcon("pen", "vector-bezier", t("ปากกา", "Pen"), "P")}
+        {toolIcon("hand", "hand-stop", t("เลื่อนดู", "Pan"), "H")}
+        {toolIcon("measure", "ruler-measure", t("ไม้บรรทัด", "Measure"), "M")}
+        {refPicker && <button type="button" onClick={() => setRefPickOpen((v) => !v)} title={t("ใส่รูปสินค้าเป็นภาพอ้างอิงใต้กระดาน (วาดลอกตาม)", "Put a product photo under the board as a tracing reference")} aria-label={t("รูปอ้างอิง", "Reference")} className={ibCls(refPickOpen)}><Icon value="i:photo" className="text-[16px]" /></button>}
+      </div>
+      {/* บนซ้าย: คำสั่ง */}
+      <div className="absolute left-14 right-24 top-2 flex flex-col items-start gap-1.5">
+        <div className={`${fbar} flex-wrap`} aria-label={t("คำสั่ง", "Commands")}>
           {!readonly && <>
-          <span className="mx-1 h-5 w-px bg-slate-200" />
-          <button type="button" onClick={undo} disabled={!hist.current.length} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} className={`${btnCls(false)} disabled:opacity-40`}><Icon value="i:arrow-back-up" className="text-[14px]" />{t("ย้อน", "Undo")}</button>
-          <button type="button" onClick={redo} disabled={!fut.current.length} title={t("ทำซ้ำ (Ctrl+Shift+Z / Ctrl+Y)", "Redo (Ctrl+Shift+Z / Ctrl+Y)")} className={`${btnCls(false)} disabled:opacity-40`}><Icon value="i:arrow-forward-up" className="text-[14px]" />{t("ทำซ้ำ", "Redo")}</button>
-          <span className="mx-1 h-5 w-px bg-slate-200" />
-          <button type="button" onClick={copyButton} disabled={!selIds.length} title={t("คัดลอกชิ้นที่เลือก (Ctrl+C) — วางใน Illustrator ได้", "Copy selected (Ctrl+C) — pastes into Illustrator too")} className={`${btnCls(false)} disabled:opacity-40`}><Icon value="i:copy" className="text-[14px]" />{t("คัดลอก", "Copy")}</button>
-          <button type="button" onClick={pasteInternal} title={t("วาง (Ctrl+V)", "Paste (Ctrl+V)")} className={btnCls(false)}><Icon value="i:clipboard" className="text-[14px]" />{t("วาง", "Paste")}</button>
-          <button type="button" onClick={duplicateSel} disabled={!selIds.length} title={t("ทำสำเนาชิ้นที่เลือก (Ctrl+D)", "Duplicate (Ctrl+D)")} className={`${btnCls(false)} disabled:opacity-40`}>{t("ทำสำเนา", "Duplicate")}</button>
-          <span className="mx-1 h-5 w-px bg-slate-200" />
-          <button type="button" onClick={() => fileRef.current?.click()} className={btnCls(false)} title={t("นำเข้าไฟล์ .svg (หรือก๊อปจาก Illustrator แล้วกด Ctrl+V)", "Import an .svg file (or copy in Illustrator and press Ctrl+V)")}>
-            <Icon value="i:file-import" className="text-[14px]" />{t("ไฟล์ SVG", "SVG file")}
-          </button>
-          <input ref={fileRef} type="file" accept=".svg,image/svg+xml" className="hidden" onChange={(e) => { void onFile(e.target.files?.[0]); e.target.value = ""; }} />
+            <button type="button" onClick={undo} disabled={!hist.current.length} title={t("ย้อนกลับ (Ctrl+Z)", "Undo (Ctrl+Z)")} aria-label={t("ย้อน", "Undo")} className={ibCls(false)}><Icon value="i:arrow-back-up" className="text-[16px]" /></button>
+            <button type="button" onClick={redo} disabled={!fut.current.length} title={t("ทำซ้ำ (Ctrl+Shift+Z / Ctrl+Y)", "Redo (Ctrl+Shift+Z / Ctrl+Y)")} aria-label={t("ทำซ้ำ", "Redo")} className={ibCls(false)}><Icon value="i:arrow-forward-up" className="text-[16px]" /></button>
+            {sep}
+            <button type="button" onClick={copyButton} disabled={!selIds.length} title={t("คัดลอกชิ้นที่เลือก (Ctrl+C) — วางใน Illustrator ได้", "Copy selected (Ctrl+C) — pastes into Illustrator too")} aria-label={t("คัดลอก", "Copy")} className={ibCls(false)}><Icon value="i:copy" className="text-[16px]" /></button>
+            <button type="button" onClick={pasteInternal} title={t("วาง (Ctrl+V)", "Paste (Ctrl+V)")} aria-label={t("วาง", "Paste")} className={ibCls(false)}><Icon value="i:clipboard" className="text-[16px]" /></button>
+            <button type="button" onClick={duplicateSel} disabled={!selIds.length} title={t("ทำสำเนาชิ้นที่เลือก (Ctrl+D)", "Duplicate (Ctrl+D)")} className={ibCls(false)}>{t("สำเนา", "Dup")}</button>
+            {sep}
           </>}
-          <span className="ml-auto flex items-center gap-1">
-            <button type="button" onClick={() => zoomAt(0.5)} aria-label={t("ซูมออก", "Zoom out")} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><Icon value="i:zoom-out" className="text-[15px]" /></button>
-            <span className="w-12 text-center text-xs tabular-nums text-slate-500">{Math.round((62 / view.w) * 100)}%</span>
-            <button type="button" onClick={() => zoomAt(2)} aria-label={t("ซูมเข้า", "Zoom in")} className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"><Icon value="i:zoom-in" className="text-[15px]" /></button>
-            <button type="button" onClick={() => fitView()} className="h-8 rounded-md border border-slate-200 bg-white px-2 text-xs text-slate-600 hover:bg-slate-50">{t("พอดี", "Fit")}</button>
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
-          <Icon value="i:magnet" className="text-[14px]" />{t("ดูดเข้าทุก", "Snap every")}
-          {SNAP_STEPS.map((s) => (
-            <button key={s} type="button" onClick={() => setSnap(s)} className={`h-7 rounded-md border px-2 text-xs ${snap === s ? "border-blue-400 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
-              {s === 0 ? t("ไม่ดูด", "Off") : `${s} ${t("ซม.", "cm")}`}
+          <span className="relative" data-menu>
+            <button type="button" onClick={() => setMenu(menu === "snap" ? null : "snap")} title={t("ดูดเข้าจุดทุกกี่ ซม.", "Snap step")} className={ibCls(menu === "snap")}>
+              <Icon value="i:magnet" className="text-[15px]" />{snap === 0 ? t("ไม่ดูด", "Off") : `${snap}`}<Icon value="i:chevron-down" className="text-[12px] text-slate-400" />
             </button>
-          ))}
-          <span className="ml-3 inline-flex items-center gap-1.5" title={t("ความทึบของพื้นชิ้น — จางลงเพื่อเห็นรูปอ้างอิงด้านล่าง (เส้นขอบยังชัด)", "Piece fill opacity — fade to see the reference below (outlines stay sharp)")}>
-            {t("ชิ้นทึบ", "Piece fill")}
-            <input type="range" min={5} max={100} step={5} value={Math.round(pieceFade * 100)} onChange={(e) => setPieceFade(Number(e.target.value) / 100)} className="w-20" aria-label={t("ความทึบของชิ้น", "Piece opacity")} />
-            <span className="w-8 tabular-nums">{Math.round(pieceFade * 100)}%</span>
+            {menu === "snap" && (
+              <div className="absolute left-0 top-9 z-30 w-40 rounded-xl border border-slate-200 bg-white p-1 text-xs shadow-lg">
+                <div className="px-2 py-1 text-[11px] text-slate-400">{t("ดูดเข้าทุก", "Snap every")}</div>
+                {SNAP_STEPS.map((s) => (
+                  <button key={s} type="button" onClick={() => { setSnap(s); setMenu(null); }} className={`flex w-full items-center rounded-lg px-2 py-1.5 text-left ${snap === s ? "bg-blue-50 font-medium text-blue-700" : "text-slate-600 hover:bg-slate-50"}`}>
+                    {s === 0 ? t("ไม่ดูด", "Off") : `${s} ${t("ซม.", "cm")}`}
+                  </button>
+                ))}
+              </div>
+            )}
           </span>
-          <span className="ml-auto font-mono tabular-nums text-slate-500">{hover ? `x ${r2s(hover.x)} · y ${r2s(hover.y)} ${t("ซม.", "cm")}` : "x — · y —"}</span>
+          <span className="relative" data-menu>
+            <button type="button" onClick={() => setMenu(menu === "more" ? null : "more")} title={t("ตั้งค่าเพิ่ม: ความทึบชิ้น · นำเข้าไฟล์ SVG", "More: piece fill · import SVG")} aria-label={t("ตั้งค่าเพิ่ม", "More")} className={ibCls(menu === "more")}><Icon value="i:adjustments-horizontal" className="text-[16px]" /></button>
+            {menu === "more" && (
+              <div className="absolute left-0 top-9 z-30 w-64 space-y-2 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-lg">
+                <label className="flex items-center gap-2" title={t("ความทึบของพื้นชิ้น — จางลงเพื่อเห็นรูปอ้างอิงด้านล่าง (เส้นขอบยังชัด)", "Piece fill opacity — fade to see the reference below (outlines stay sharp)")}>
+                  <span className="w-14">{t("ชิ้นทึบ", "Piece fill")}</span>
+                  <input type="range" min={5} max={100} step={5} value={Math.round(pieceFade * 100)} onChange={(e) => setPieceFade(Number(e.target.value) / 100)} className="min-w-0 flex-1" aria-label={t("ความทึบของชิ้น", "Piece opacity")} />
+                  <span className="w-9 text-right tabular-nums">{Math.round(pieceFade * 100)}%</span>
+                </label>
+                {!readonly && <button type="button" onClick={() => { setMenu(null); fileRef.current?.click(); }} className="flex w-full items-center gap-1.5 rounded-lg border border-slate-200 px-2 py-1.5 hover:bg-slate-50" title={t("นำเข้าไฟล์ .svg (หรือก๊อปจาก Illustrator แล้วกด Ctrl+V)", "Import an .svg file (or copy in Illustrator and press Ctrl+V)")}>
+                  <Icon value="i:file-import" className="text-[14px]" />{t("นำเข้าไฟล์ SVG", "Import SVG file")}
+                </button>}
+                <div className="text-[11px] text-slate-400">{t("ลากขีดใต้พื้นที่วาด = ปรับความสูง · ดับเบิลคลิกขีด = ความสูงเดิม", "Drag the bar under the board to resize · double-click it to reset")}</div>
+              </div>
+            )}
+          </span>
         </div>
         {tool === "measure" && (
-          <div className="flex flex-wrap items-center gap-1.5 rounded-lg bg-violet-50 px-2 py-1.5 text-xs text-violet-800">
-            <Icon value="i:ruler-measure" className="text-[14px]" />{t("ไม้บรรทัด", "Measure")}
+          <div className={`${fbar} bg-violet-50/95 text-xs text-violet-800`}>
+            <Icon value="i:ruler-measure" className="mx-1 text-[14px]" />
             {([["line", t("วัดตรง", "Straight")], ["curve", t("วัดโค้ง", "Curve")], ["edge", t("ตามขอบชิ้น", "Along edge")]] as [MeasureMode, string][]).map(([m, l]) => (
               <button key={m} type="button" onClick={() => { setMeasureMode(m); setMDraft(null); }} className={`h-7 rounded-md border px-2 ${measureMode === m ? "border-violet-400 bg-white font-medium text-violet-700" : "border-transparent text-violet-700 hover:bg-white/60"}`}>{l}</button>
             ))}
-            <span className="text-violet-600">{measureMode === "line" ? t("กดลากจากจุดหนึ่งไปอีกจุด (Shift = 45°)", "Drag from one point to another (Shift = 45°)") : measureMode === "curve" ? t("คลิกวางจุดตามแนว · กดลาก = โค้ง · ดับเบิลคลิก/Enter = จบ", "Click points along the line · drag = curve · double-click/Enter = finish") : t("กดบนชิ้นที่จุดเริ่ม แล้วลากไปตามขอบทางที่ต้องการ (อ้อมทางยาวก็ได้) ปล่อย = จบ · หรือคลิกจุดเริ่ม → เลื่อนตามขอบ → คลิกจุดปลาย — วัดตามเส้นเย็บ", "Press on a piece at the start and drag along the edge the way you want (long way works too) · release = done · or click start → move along → click end — measured along the sewing line")}</span>
-            {measures.length > 0 && <button type="button" onClick={() => setMeasures([])} className="ml-auto h-7 rounded-md px-2 text-violet-700 hover:bg-white/60">{t(`ล้างการวัด (${measures.length})`, `Clear (${measures.length})`)}</button>}
-          </div>
-        )}
-        {refPickOpen && refPicker && (
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-            <div className="mb-2 flex items-center gap-2 text-xs text-slate-600"><b className="font-medium">{t("เลือกรูปสินค้าเป็นภาพอ้างอิง", "Pick a product photo as a reference")}</b><button type="button" onClick={() => setRefPickOpen(false)} className="ml-auto text-slate-400 hover:text-slate-600">✕</button></div>
-            {refPicker(addRef)}
-          </div>
-        )}
-        {refs.length > 0 && activeRefObj && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 px-2 py-1.5 text-xs text-slate-600">
-            <Icon value="i:photo" className="text-[14px]" />
-            {refs.map((r, i) => <button key={r.id} type="button" onClick={() => setActiveRef(r.id)} className={`h-7 max-w-[10rem] truncate rounded-md border px-2 ${r.id === activeRefObj.id ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 bg-white"}`}>{r.label || t(`รูป ${i + 1}`, `Image ${i + 1}`)}</button>)}
-            <span className="text-slate-400">{t("จาง", "Fade")}</span>
-            <input type="range" min={10} max={100} step={5} value={Math.round(activeRefObj.op * 100)} onChange={(e) => patchRef(activeRefObj.id, { op: Number(e.target.value) / 100 })} className="w-24" aria-label={t("ความจางของรูป", "Image opacity")} />
-            <label className="flex items-center gap-1"><input type="checkbox" checked={activeRefObj.lock} onChange={(e) => patchRef(activeRefObj.id, { lock: e.target.checked })} className="h-3.5 w-3.5" />{t("ล็อก", "Lock")}</label>
-            <label className="flex items-center gap-1"><input type="checkbox" checked={activeRefObj.show} onChange={(e) => patchRef(activeRefObj.id, { show: e.target.checked })} className="h-3.5 w-3.5" />{t("แสดง", "Show")}</label>
-            {!readonly && <button type="button" onClick={() => { setActiveRef(activeRefObj.id); patchRef(activeRefObj.id, { lock: true, show: true }); setCal({ cm: "30" }); }} className={btnCls(!!cal)}><Icon value="i:ruler-measure" className="text-[14px]" />{t("ตั้งขนาดจริง", "Set real size")}</button>}
-            {!readonly && <button type="button" onClick={() => { setRefs((rs) => rs.filter((r) => r.id !== activeRefObj.id)); setActiveRef(null); }} className="h-7 rounded-md px-2 text-rose-600 hover:bg-rose-50">{t("เอารูปออก", "Remove")}</button>}
-            <span className="text-slate-400">{t("กว้าง", "W")} {r1(activeRefObj.w)} {t("ซม.", "cm")}</span>
+            {measures.length > 0 && <button type="button" onClick={() => setMeasures([])} className="h-7 rounded-md px-2 text-violet-700 hover:bg-white/60">{t(`ล้าง (${measures.length})`, `Clear (${measures.length})`)}</button>}
           </div>
         )}
         {cal && (
-          <div className="flex flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <div className={`${fbar} flex-wrap gap-2 bg-amber-50/95 px-3 py-1.5 text-xs text-amber-800`}>
             <span>{!cal.a ? t("ตั้งขนาดจริง: คลิกจุดที่ 1 บนรูป (เช่น มุมซ้ายของตัวกระเป๋า)", "Set real size: click point 1 on the image (e.g. the bag's left corner)") : !cal.b ? t("คลิกจุดที่ 2 (เช่น มุมขวาของตัวกระเป๋า)", "Click point 2 (e.g. the bag's right corner)") : t(`ตอนนี้ห่าง ${r1(Math.hypot(cal.b.x - cal.a.x, cal.b.y - cal.a.y))} ซม. — ของจริงยาว`, `Now ${r1(Math.hypot(cal.b.x - cal.a.x, cal.b.y - cal.a.y))} cm apart — real length`)}</span>
             {cal.a && cal.b && <>
               <input type="number" step="0.1" min={0.1} value={cal.cm} onChange={(e) => setCal({ ...cal, cm: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") applyCal(); }} autoFocus aria-label={t("ระยะจริง ซม.", "Real length cm")} className="h-7 w-20 rounded border border-amber-300 bg-white px-1.5 text-right" />
               <span>{t("ซม.", "cm")}</span>
               <button type="button" onClick={applyCal} className="h-7 rounded-md bg-amber-600 px-2.5 text-white hover:bg-amber-700">{t("ตั้ง", "Set")}</button>
             </>}
-            <button type="button" onClick={() => setCal(null)} className="ml-auto h-7 rounded-md px-2 hover:bg-amber-100">{t("ยกเลิก", "Cancel")}</button>
+            <button type="button" onClick={() => setCal(null)} className="h-7 rounded-md px-2 hover:bg-amber-100">{t("ยกเลิก", "Cancel")}</button>
           </div>
         )}
-
-        <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_290px]">   {/* แผงขวาอยู่ตลอด — เลือก/เลิกเลือกชิ้นแล้วพื้นที่วาดไม่ขยับ */}
+        {refPickOpen && refPicker && (
+          <div className="pointer-events-auto max-h-[min(60vh,420px)] w-[min(440px,100%)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+            <div className="mb-2 flex items-center gap-2 text-xs text-slate-600"><b className="font-medium">{t("เลือกรูปสินค้าเป็นภาพอ้างอิง", "Pick a product photo as a reference")}</b><button type="button" onClick={() => setRefPickOpen(false)} aria-label={t("ปิด", "Close")} className="ml-auto text-slate-400 hover:text-slate-600">✕</button></div>
+            {refPicker(addRef)}
+          </div>
+        )}
+      </div>
+      {/* บนขวา: ขยายเต็มป๊อป · พับแผง */}
+      <div className={`${fbar} absolute right-2 top-2`}>
+        <button type="button" onClick={() => setFocus((v) => !v)} title={focus ? t("ย่อกลับ", "Exit full view") : t("ขยายพื้นที่วาดเต็มหน้าจอ", "Expand the board to full screen")} className={ibCls(focus)}>
+          <Icon value={focus ? "i:x" : "i:maximize"} className="text-[16px]" />{focus ? t("ย่อกลับ", "Exit") : null}
+        </button>
+        <button type="button" onClick={() => setPanelOpen(!panelOpen)} title={panelOpen ? t("พับแผงรายละเอียดชิ้น (พื้นที่วาดกว้างขึ้น)", "Collapse the piece panel (wider board)") : t("เปิดแผงรายละเอียดชิ้น", "Open the piece panel")} aria-label={t("แผงรายละเอียดชิ้น", "Piece panel")} className={ibCls(panelOpen)}>
+          <Icon value="i:layout-sidebar-right" className="text-[16px]" />
+        </button>
+      </div>
+      {/* ล่างซ้าย: รูปอ้างอิง */}
+      {refs.length > 0 && activeRefObj && (
+        <div className="absolute bottom-3 left-14 flex flex-col items-start gap-1.5" data-menu>
+          {menu === "ref" && (
+            <div className="pointer-events-auto w-72 space-y-2 rounded-xl border border-slate-200 bg-white p-3 text-xs text-slate-600 shadow-lg">
+              <div className="flex flex-wrap gap-1">
+                {refs.map((r, i) => <button key={r.id} type="button" onClick={() => setActiveRef(r.id)} className={`h-7 max-w-[10rem] truncate rounded-md border px-2 ${r.id === activeRefObj.id ? "border-blue-400 bg-blue-50 text-blue-700" : "border-slate-200 bg-white"}`}>{r.label || t(`รูป ${i + 1}`, `Image ${i + 1}`)}</button>)}
+              </div>
+              <label className="flex items-center gap-2"><span className="w-10 text-slate-400">{t("จาง", "Fade")}</span>
+                <input type="range" min={10} max={100} step={5} value={Math.round(activeRefObj.op * 100)} onChange={(e) => patchRef(activeRefObj.id, { op: Number(e.target.value) / 100 })} className="min-w-0 flex-1" aria-label={t("ความจางของรูป", "Image opacity")} />
+                <span className="w-9 text-right tabular-nums">{Math.round(activeRefObj.op * 100)}%</span>
+              </label>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-1"><input type="checkbox" checked={activeRefObj.lock} onChange={(e) => patchRef(activeRefObj.id, { lock: e.target.checked })} className="h-3.5 w-3.5" />{t("ล็อก", "Lock")}</label>
+                <label className="flex items-center gap-1"><input type="checkbox" checked={activeRefObj.show} onChange={(e) => patchRef(activeRefObj.id, { show: e.target.checked })} className="h-3.5 w-3.5" />{t("แสดง", "Show")}</label>
+                <span className="text-slate-400">{t("กว้าง", "W")} {r1(activeRefObj.w)} {t("ซม.", "cm")}</span>
+              </div>
+              {!readonly && <div className="flex flex-wrap gap-1">
+                <button type="button" onClick={() => { setMenu(null); setActiveRef(activeRefObj.id); patchRef(activeRefObj.id, { lock: true, show: true }); setCal({ cm: "30" }); }} className={btnCls(!!cal)}><Icon value="i:ruler-measure" className="text-[14px]" />{t("ตั้งขนาดจริง", "Set real size")}</button>
+                <button type="button" onClick={() => { setRefs((rs) => rs.filter((r) => r.id !== activeRefObj.id)); setActiveRef(null); }} className="h-8 rounded-md px-2 text-rose-600 hover:bg-rose-50">{t("เอารูปออก", "Remove")}</button>
+              </div>}
+            </div>
+          )}
+          <button type="button" onClick={() => setMenu(menu === "ref" ? null : "ref")} className={`${fbar} gap-1.5 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50`} title={t("ตั้งค่ารูปอ้างอิง", "Reference image settings")}>
+            <Icon value="i:photo" className="text-[14px]" />
+            <span className="max-w-[9rem] truncate">{activeRefObj.label || t("รูปอ้างอิง", "Reference")}</span>
+            <span className="text-slate-400">{t(`จาง ${Math.round(activeRefObj.op * 100)}%`, `${Math.round(activeRefObj.op * 100)}%`)}</span>
+            {!activeRefObj.show && <span className="text-amber-600">{t("ซ่อนอยู่", "hidden")}</span>}
+            <Icon value={menu === "ref" ? "i:chevron-down" : "i:chevron-up"} className="text-[12px] text-slate-400" />
+          </button>
+        </div>
+      )}
+      {/* ล่างขวา: พิกัด + ซูม */}
+      <div className={`${fbar} absolute bottom-3 right-2`}>
+        <span className="hidden px-1.5 font-mono text-[11px] tabular-nums text-slate-400 sm:inline">{hover ? `x ${r2s(hover.x)} · y ${r2s(hover.y)}` : "x — · y —"}</span>
+        <button type="button" onClick={() => zoomAt(0.5)} aria-label={t("ซูมออก", "Zoom out")} className={ibCls(false)}><Icon value="i:minus" className="text-[15px]" /></button>
+        <span className="w-11 text-center text-xs tabular-nums text-slate-500">{Math.round((62 / view.w) * 100)}%</span>
+        <button type="button" onClick={() => zoomAt(2)} aria-label={t("ซูมเข้า", "Zoom in")} className={ibCls(false)}><Icon value="i:plus" className="text-[15px]" /></button>
+        <button type="button" onClick={() => fitView()} title={t("พอดีจอ", "Fit")} className={ibCls(false)}>{t("พอดี", "Fit")}</button>
+      </div>
+      {/* ขีดใต้แคนวาส: ลากปรับความสูง */}
+      {!focus && (
+        <div role="separator" aria-orientation="horizontal" aria-label={t("ลากเพื่อปรับความสูงพื้นที่วาด", "Drag to resize the board")} title={t("ลากเพื่อปรับความสูง · ดับเบิลคลิก = ความสูงเดิม", "Drag to resize · double-click to reset")}
+          className="pointer-events-auto absolute bottom-0 left-1/2 flex h-3 w-20 -translate-x-1/2 cursor-ns-resize items-center justify-center"
+          onPointerDown={(e) => { gripRef.current = { y: e.clientY, h: canvasH }; try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* บางเบราว์เซอร์ */ } e.preventDefault(); }}
+          onPointerMove={(e) => { const g = gripRef.current; if (g) setCanvasH(g.h + e.clientY - g.y); }}
+          onPointerUp={() => { if (gripRef.current) { gripRef.current = null; saveNum(CANVAS_H_KEY, canvasH); } }}
+          onDoubleClick={() => setCanvasH(CANVAS_H_DEFAULT, true)}>
+          <span className="h-1 w-10 rounded-full bg-slate-300" />
+        </div>
+      )}
+    </div>
+  );
+  const bodyEl = (
+      <div className={focus ? "fixed inset-0 z-[80] space-y-3 overflow-y-auto bg-white p-3" : "space-y-3"}>
+        <div className={`grid gap-3 ${panelOpen ? "lg:grid-cols-[minmax(0,1fr)_290px]" : "lg:grid-cols-[minmax(0,1fr)_36px]"} ${focus ? "lg:[&>aside]:max-h-[calc(100vh-110px)] lg:[&>aside]:overflow-y-auto" : ""}`}>   {/* แผงขวาอยู่ตลอด — เลือก/เลิกเลือกชิ้นแล้วพื้นที่วาดไม่ขยับ */}
           <div className="min-w-0 space-y-2">
             {/* ไม้บรรทัด + พื้นที่วาด */}
             <div className="grid select-none overflow-hidden rounded-lg border border-slate-200" style={{ gridTemplateColumns: "26px minmax(0,1fr)", gridTemplateRows: "22px auto" }}
@@ -1090,7 +1174,8 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                 {ticks(view.y, vh, rs.minor).map((v) => { const py = (v - view.y) * ppc, M = isMajor(v, rs.major); return <g key={v}><line y1={py} y2={py} x1={M ? 10 : 17} x2={26} stroke="#94a3b8" strokeWidth={1} />{M && <text x={2} y={py + 10} fontSize={10} fill="#64748b">{r2s(v)}</text>}</g>; })}
                 {hover && <line y1={(hover.y - view.y) * ppc} y2={(hover.y - view.y) * ppc} x1={0} x2={26} stroke="#ef4444" strokeWidth={1.5} />}
               </svg>
-              <svg ref={bindSvg} className="block h-[min(52vh,480px)] min-h-[300px] w-full bg-white" style={{ cursor, touchAction: "none" }}
+              <div className="relative min-w-0">
+              <svg ref={bindSvg} className="block w-full bg-white" style={{ height: focus ? "calc(100vh - 150px)" : canvasH, cursor, touchAction: "none" }}
                 viewBox={`${view.x} ${view.y} ${view.w} ${Math.max(0.001, vh)}`} preserveAspectRatio="none"
                 onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}
                 onPointerLeave={() => setHover(null)} onDoubleClick={onDoubleClick}>
@@ -1221,13 +1306,22 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                   </g>;
                 })()}
               </svg>
+              {overlayEl}
+              </div>
             </div>
             <div className="text-xs text-slate-500">{hint}</div>
             {msg && <div className={`rounded-lg px-3 py-2 text-xs ${msg.tone === "ok" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>{msg.text}</div>}
           </div>
 
-          {/* แผงรายละเอียดชิ้น */}
-          {multi.size >= 2 && (
+          {/* แผงรายละเอียดชิ้น (พับได้ — เหลือแถบบาง ๆ · คลิกชิ้นแล้วกางเอง) */}
+          {!panelOpen && (
+            <button type="button" onClick={() => setPanelOpen(true)} title={t("เปิดแผงรายละเอียดชิ้น", "Open the piece panel")}
+              className="flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-50 py-2 text-xs text-slate-500 hover:bg-slate-100 lg:flex-col lg:justify-start">
+              <Icon value="i:layout-sidebar-right" className="text-[16px]" />
+              <span className="lg:[writing-mode:vertical-rl]">{selPiece ? `P${selIdx + 1}${selPiece.name ? ` ${selPiece.name}` : ""}` : multi.size >= 2 ? t(`เลือก ${multi.size} ชิ้น`, `${multi.size} selected`) : t("รายละเอียดชิ้น", "Piece details")}</span>
+            </button>
+          )}
+          {panelOpen && multi.size >= 2 && (
             <aside className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-xs" aria-label={t("เลือกหลายชิ้น", "Multiple pieces")}>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-slate-700">{t(`เลือก ${multi.size} ชิ้น`, `${multi.size} pieces selected`)}</span>
@@ -1267,7 +1361,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               <div className="text-[11px] text-slate-400">{t("ลากชิ้นใดก็ได้ในกลุ่ม = ย้ายพร้อมกัน · ลูกศร = ขยับทั้งกลุ่ม · Shift+คลิก = เอาออกจากกลุ่ม", "Drag any piece to move the group · arrows nudge all · Shift+click removes from the group")}</div>
             </aside>
           )}
-          {multi.size < 2 && !(selPiece && selGeo) && (
+          {panelOpen && multi.size < 2 && !(selPiece && selGeo) && (
             <aside className="rounded-lg border border-dashed border-slate-200 p-3 text-xs text-slate-500" aria-label={t("รายละเอียดชิ้น", "Piece details")}>
               <div className="mb-2 text-sm font-semibold text-slate-600">{t("รายละเอียดชิ้น", "Piece details")}</div>
               <p>{t("กดชิ้นที่วาดแล้ว เพื่อตั้งชื่อ ใส่วัสดุ (หนัง ซับใน …) เผื่อพับ ขนาด จำนวน เจาะรู พับครึ่ง กลับด้าน แก้จุด", "Click a piece to set its name, materials (leather, lining…), allowance, size, count, holes, fold, flip and points")}</p>
@@ -1296,7 +1390,7 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
               )}
             </aside>
           )}
-          {multi.size < 2 && selPiece && selGeo && (
+          {panelOpen && multi.size < 2 && selPiece && selGeo && (
             <aside className="space-y-3 rounded-lg border border-slate-200 bg-slate-50/60 p-3 text-xs" aria-label={t("รายละเอียดชิ้น", "Piece details")}>
               <div className="flex items-center gap-2">
                 <span className="text-sm font-semibold text-slate-700">P{selIdx + 1}</span>
