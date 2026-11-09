@@ -11,6 +11,7 @@
  *   Images / Rawfiles / ไฟล์ที่ไม่ใช่รูป (PSD, RAW …) / จับคู่รหัสไม่ได้ / เกินเพดาน → ไม่ลงระบบ (อยู่บน Z:)
  *   ทุกไฟล์ (ยกเว้นไฟล์ระบบ) อยู่บน Z: เสมอ: โฟลเดอร์อยู่บน Z: แล้ว = ไม่ทำอะไร · ไม่อยู่ = โปรแกรมก๊อปไปที่ nasRoot\<รุ่น>
  *   สูตรนี้ไม่ลบต้นฉบับ · ย้ายเฉพาะโฟลเดอร์ Rawfiles / Images ตามค่าตั้ง cfg.moves หลังลงรูปเสร็จ (planProductMoves · โปรแกรมเลือกปิดได้ทีละงาน)
+ *   แล้วเก็บทั้งโฟลเดอร์เข้า Collection ตามแบรนด์ (cfg.collection · planProductCollection · แบบปุ่ม Arrange) — ปิดได้ทีละงานเช่นกัน
  */
 import {
   DEFAULT_TEMPLATE,
@@ -28,7 +29,7 @@ import {
   type SlotKind,
 } from "@/lib/product-image-routing";
 import type { CatalogParent } from "@/lib/product-image-catalog-server";
-import { MOVE_ROLES, fillNasPattern, isJunkFile, nasDateValues, relPathOf, safeFolderName, type MoveRole, type ProductSortConfig, type ProductVariant } from "@/lib/file-sort";
+import { MOVE_ROLES, collectionPatternFor, fillNasPattern, isJunkFile, nasDateValues, relPathOf, safeFolderName, type MoveRole, type ProductSortConfig, type ProductVariant } from "@/lib/file-sort";
 import { folderLabelKey } from "@/lib/role-folders";
 
 export const ERP_IMAGE_EXTS = ["jpg", "jpeg", "png", "webp"] as const;
@@ -238,8 +239,8 @@ export function matchesFolderWord(name: string, words: string[]): boolean {
   return words.some((w) => !!w && (k === w || (k.startsWith(w) && /^[\s_\-.\d]*$/.test(k.slice(w.length)))));
 }
 
-export function planProductMoves(files: ProductFileIn[], cfg: ProductSortConfig, opts: { jobFolder: string; brandFolder: string | null; now?: Date }): { moves: ProductMove[]; warnings: string[] } {
-  const job = safeFolderName((opts.jobFolder ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "");
+/** โฟลเดอร์ชั้นบนของงาน → จำนวนไฟล์/ขนาด (ไม่นับไฟล์ระบบ) */
+function topFolders(files: ProductFileIn[]): Map<string, { files: number; bytes: number }> {
   const tops = new Map<string, { files: number; bytes: number }>();
   for (const f of files) {
     const rel = relPathOf(f.path);
@@ -251,6 +252,13 @@ export function planProductMoves(files: ProductFileIn[], cfg: ProductSortConfig,
     t.files++; t.bytes += Math.max(0, Number(f.size) || 0);
     tops.set(top, t);
   }
+  return tops;
+}
+const jobNameOf = (jobFolder: string): string => safeFolderName((jobFolder ?? "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? "");
+
+export function planProductMoves(files: ProductFileIn[], cfg: ProductSortConfig, opts: { jobFolder: string; brandFolder: string | null; now?: Date }): { moves: ProductMove[]; warnings: string[] } {
+  const job = jobNameOf(opts.jobFolder);
+  const tops = topFolders(files);
   const moves: ProductMove[] = [];
   const warnings: string[] = [];
   for (const [folder, t] of tops) {
@@ -265,6 +273,46 @@ export function planProductMoves(files: ProductFileIn[], cfg: ProductSortConfig,
   }
   moves.sort((a, b) => MOVE_ROLES.indexOf(a.role) - MOVE_ROLES.indexOf(b.role) || a.folder.localeCompare(b.folder));
   return { moves, warnings };
+}
+
+/**
+ * เก็บทั้งโฟลเดอร์งานเข้า Collection (cfg.collection) — แค่คิดปลายทาง + ชื่อที่จะจัด ตัวย้ายจริงคือโปรแกรมบนเครื่อง
+ *   target = แม่แบบของแบรนด์สินค้า (collectionPatternFor) · คง {กลุ่ม} ไว้ให้โปรแกรมหาโฟลเดอร์กลุ่มจริงบน Z: · null = ยังเก็บไม่ได้ (ดู reason)
+ *   ไม่มีแบรนด์ = ไม่เดา (ที่เก็บต่างกันตามแบรนด์)
+ *   renames = จัดชื่อโฟลเดอร์ชั้นบนก่อนเก็บ (คิดไว้เสมอ · tidy = ค่าตั้งต้นว่าติ๊กไหม)
+ */
+export const TIDY_DESC_FOLDER = "[01] Description";
+export const TIDY_IMAGES_FOLDER = "[02] Images";
+export type TidyRename = { from: string; to: string };
+export type ProductCollection = { mode: "stay" | "move"; target: string | null; reason: string | null; tidy: boolean; renames: TidyRename[] };
+
+/** จัดชื่อแบบปุ่ม Arrange: ชื่อมีคำว่า description → [01] Description (มีอยู่แล้ว = ไม่แตะ) · lifestyle / model → [02] Images/<ชื่อเดิม> · ข้ามโฟลเดอร์ Rawfiles / Images */
+export function planTidyRenames(tops: string[], cfg: ProductSortConfig): TidyRename[] {
+  const out: TidyRename[] = [];
+  const skip = (n: string) => /raw\s*file/i.test(n) || MOVE_ROLES.some((r) => matchesFolderWord(n, cfg.moveFolders[r]));
+  let descTaken = tops.some((n) => n.toLowerCase() === TIDY_DESC_FOLDER.toLowerCase());
+  for (const n of [...tops].sort((a, b) => a.localeCompare(b))) {
+    const low = n.toLowerCase();
+    if (low === TIDY_DESC_FOLDER.toLowerCase() || low === TIDY_IMAGES_FOLDER.toLowerCase() || skip(n)) continue;
+    if (/description/i.test(n)) { if (!descTaken) { out.push({ from: n, to: TIDY_DESC_FOLDER }); descTaken = true; } continue; }
+    if (/lifestyle|model/i.test(n)) out.push({ from: n, to: `${TIDY_IMAGES_FOLDER}/${n}` });
+  }
+  return out;
+}
+
+export function planProductCollection(files: ProductFileIn[], cfg: ProductSortConfig, opts: { jobFolder: string; brand: { id: string; name: string; folder: string | null } | null; now?: Date }): { collection: ProductCollection; warnings: string[] } {
+  const c = cfg.collection;
+  const job = jobNameOf(opts.jobFolder);
+  const renames = planTidyRenames([...topFolders(files).keys()], cfg);
+  const pattern = opts.brand ? collectionPatternFor(c, opts.brand) : "";
+  const target = pattern && job
+    ? fillNasPattern(pattern, { แบรนด์: opts.brand?.folder ?? "", รุ่น: job, โฟลเดอร์: job, กลุ่ม: "{กลุ่ม}", ...nasDateValues(opts.now) }, pattern.includes("{แบรนด์}") ? ["แบรนด์"] : [])
+    : null;
+  const reason = target ? null : !opts.brand ? "สินค้านี้ยังไม่ได้ตั้งแบรนด์ในระบบ" : !pattern ? "ยังไม่ได้ตั้งที่เก็บ Collection ของแบรนด์นี้" : "แม่แบบที่เก็บ Collection ใช้ไม่ได้";
+  const warnings = c.mode === "move" && !target
+    ? [`เก็บเข้า Collection ไม่ได้: ${reason} — ${reason === "สินค้านี้ยังไม่ได้ตั้งแบรนด์ในระบบ" ? "ตั้งแบรนด์ที่หน้า Parent SKU หรือ" : ""}กด "เปลี่ยนที่…" ในโปรแกรมเพื่อเลือกที่เอง`]
+    : [];
+  return { collection: { mode: c.mode, target, reason, tidy: c.tidy, renames }, warnings };
 }
 
 export function productNasFolder(cfg: ProductSortConfig, jobFolder: string, variant: ProductVariant = "new", now?: Date): string | null {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { matchesFolderWord, planProductMoves, planProductSort, productNasFolder, type ProductFileIn } from "./file-sort-product";
-import { DEFAULT_PRODUCT_CONFIG, cleanProductConfig } from "./file-sort";
+import { matchesFolderWord, planProductCollection, planProductMoves, planProductSort, planTidyRenames, productNasFolder, type ProductFileIn } from "./file-sort-product";
+import { DEFAULT_PRODUCT_CONFIG, cleanProductConfig, collectionPatternFor, fillNasPattern } from "./file-sort";
 import type { CatalogParent } from "./product-image-catalog-server";
 
 const P = "11111111-0000-0000-0000-000000000001";
@@ -198,5 +198,58 @@ describe("ย้ายโฟลเดอร์ Rawfiles / Images หลังล
     expect(matchesFolderWord("00_rawfiles_1", w)).toBe(true);
     expect(matchesFolderWord("Rawhide", w)).toBe(false);
     expect(cleanProductConfig({}).moves).toEqual(DEFAULT_PRODUCT_CONFIG.moves);
+  });
+});
+
+describe("planProductCollection — เก็บทั้งโฟลเดอร์เข้า Collection (แบบปุ่ม Arrange)", () => {
+  const files: ProductFileIn[] = [
+    { path: "Description/1.jpeg", size: 10 }, { path: "Lifestyle/a.jpg", size: 10 }, { path: "BSD15 Model/b.jpg", size: 10 },
+    { path: "[03] Rawfiles/IMG_1.CR2", size: 10 }, { path: "BSD15-01/1.jpeg", size: 10 }, { path: "Thumbs.db", size: 1 },
+  ];
+  const LOUIS = { id: "b-louis", name: "Louis Montini", folder: "[01] Louis Montini" };
+  it("ค่าตั้งต้น: เก็บเข้า Z:\\Collection\\{กลุ่ม}\\<รุ่น> · คง {กลุ่ม} ไว้ให้โปรแกรมหาบน Z: · จัดชื่อแบบ Arrange", () => {
+    const { collection, warnings } = planProductCollection(files, DEFAULT_PRODUCT_CONFIG, { jobFolder: "BSD15", brand: LOUIS });
+    expect(collection).toMatchObject({ mode: "move", target: "Z:\\Collection\\{กลุ่ม}\\BSD15", reason: null, tidy: true });
+    expect(collection.renames).toEqual([
+      { from: "BSD15 Model", to: "[02] Images/BSD15 Model" },
+      { from: "Description", to: "[01] Description" },
+      { from: "Lifestyle", to: "[02] Images/Lifestyle" },
+    ]);
+    expect(warnings).toEqual([]);
+  });
+  it("ค่าตั้งต้นตามชื่อแบรนด์: IG / Nekomeow / Risara (ตรงกับโครงจริงใน Z:\\Collection) · ตั้งทับรายแบรนด์ได้", () => {
+    const c = DEFAULT_PRODUCT_CONFIG.collection;
+    expect(planProductCollection(files, DEFAULT_PRODUCT_CONFIG, { jobFolder: "TTN01", brand: { id: "b-ig", name: "IG International", folder: "[02] IG International" } }).collection.target)
+      .toBe("Z:\\Collection\\[01] สินค้าร้าน IG (IG Products)\\{กลุ่ม}\\TTN01");
+    expect(planProductCollection(files, DEFAULT_PRODUCT_CONFIG, { jobFolder: "NEKO-BOX002", brand: { id: "b-neko", name: " nekomeow ", folder: null } }).collection.target)
+      .toBe("Z:\\Collection\\[05] Nekomeow\\NEKO-BOX002");
+    expect(collectionPatternFor(c, { id: "x", name: "Risara Ja Kissa" })).toContain("[06] Risara Ja Kissa");
+    // แบรนด์ที่ยังไม่มีที่ใน Collection → ไม่มีค่าตั้งต้น = ไม่เก็บ (ไม่เดา) จนกว่าจะตั้ง
+    const gg = planProductCollection(files, DEFAULT_PRODUCT_CONFIG, { jobFolder: "CTL002L", brand: { id: "b-gg", name: "Good Goods", folder: "[06] Goodgoods" } });
+    expect(gg.collection).toMatchObject({ target: null, reason: "ยังไม่ได้ตั้งที่เก็บ Collection ของแบรนด์นี้" });
+    expect(gg.warnings[0]).toContain("เปลี่ยนที่");
+    const cfg = cleanProductConfig({ collection: { mode: "move", pattern: "Z:\\Collection\\{กลุ่ม}\\{รุ่น}", byBrand: { "b-louis": "Z:\\Archive\\{แบรนด์}\\{รุ่น}", "": "Z:\\x", bad: 5 }, tidy: false } });
+    expect(cfg.collection.byBrand).toEqual({ "b-louis": "Z:\\Archive\\{แบรนด์}\\{รุ่น}" });
+    const r = planProductCollection(files, cfg, { jobFolder: "BSD15", brand: LOUIS }).collection;
+    expect(r.target).toBe("Z:\\Archive\\[01] Louis Montini\\BSD15");
+    expect(r.tidy).toBe(false);
+    expect(r.renames.length).toBe(3);   // คิดไว้เสมอ · โปรแกรมติ๊กเปิดเองได้
+  });
+  it("สินค้ายังไม่ได้ตั้งแบรนด์ → ไม่เดา · เตือน · ตั้งเป็น 'อยู่ที่ Work In Process' = ไม่เตือน", () => {
+    const a = planProductCollection(files, DEFAULT_PRODUCT_CONFIG, { jobFolder: "JEAN10", brand: null });
+    expect(a.collection.target).toBeNull();
+    expect(a.collection.reason).toBe("สินค้านี้ยังไม่ได้ตั้งแบรนด์ในระบบ");
+    expect(a.warnings[0]).toContain("ตั้งแบรนด์");
+    const stay = cleanProductConfig({ collection: { mode: "stay" } });
+    expect(planProductCollection(files, stay, { jobFolder: "JEAN10", brand: null }).warnings).toEqual([]);
+    expect(cleanProductConfig({}).collection).toEqual(DEFAULT_PRODUCT_CONFIG.collection);
+  });
+  it("จัดชื่อ: มี [01] Description อยู่แล้ว = ไม่แตะ · ข้าม Rawfiles/Images · Description หลายอันเปลี่ยนแค่อันแรก", () => {
+    expect(planTidyRenames(["[01] Description", "Description2", "[02] Images", "Raw files model", "Models"], DEFAULT_PRODUCT_CONFIG))
+      .toEqual([{ from: "Models", to: "[02] Images/Models" }]);
+    expect(planTidyRenames(["Description A", "Description B"], DEFAULT_PRODUCT_CONFIG)).toEqual([{ from: "Description A", to: "[01] Description" }]);
+  });
+  it("{กลุ่ม} ในแม่แบบอื่นที่ไม่ได้ส่งค่า = ตัดชั้นนั้นทิ้ง (ไม่ค้างเป็นข้อความ)", () => {
+    expect(fillNasPattern("Z:\\Work\\{กลุ่ม}\\{รุ่น}", { รุ่น: "BSD15" })).toBe("Z:\\Work\\BSD15");
   });
 });

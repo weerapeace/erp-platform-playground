@@ -17,10 +17,10 @@ import { Icon } from "@/components/icon";
 import { useDragReorder, DragHandle, moveItem } from "@/components/sortable-list";
 import {
   DEFAULT_ARTWORK_PROFILE, DEFAULT_CONTENT_CONFIG, DEFAULT_PRODUCT_CONFIG, MOVE_ROLES, MOVE_ROLE_LABEL, NAS_TOKENS, NAS_TOKEN_HINT, PREVIEWABLE_EXTS, PRODUCT_VARIANTS, PRODUCT_VARIANT_LABEL, type MoveRole,
-  cleanContentConfig, cleanFileSortConfig, findProfile, nasFolderFor, nasPrefixOf, normalizeExt, planFileSort,
+  cleanContentConfig, cleanFileSortConfig, collectionDefaultFor, fillNasPattern, findProfile, nasDateValues, nasFolderFor, nasPrefixOf, normalizeExt, planFileSort,
   type ContentSortConfig, type FileSortConfig, type FileSortProfile, type FileSortRule, type NasToken, type ProductSortConfig, type ProductVariant,
 } from "@/lib/file-sort";
-import { planProductMoves, planProductSort, productNasFolder } from "@/lib/file-sort-product";
+import { planProductMoves, planProductSort, planTidyRenames, productNasFolder } from "@/lib/file-sort-product";
 import { contentNasFolder, planContentSort } from "@/lib/file-sort-content";
 import { DEST_LABEL } from "@/lib/product-image-routing";
 import { cleanRoleFolders } from "@/lib/role-folders";
@@ -109,6 +109,10 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
     moveFolders: { raw: [...new Set(parseList(moveText.raw).map((s) => s.toLowerCase()))], images: [...new Set(parseList(moveText.images).map((s) => s.toLowerCase()))] },
   }), [product, descText, archText, moveText]);
   const sampleMoves = useMemo(() => planProductMoves(SAMPLE_PRODUCT_FILES, productNow, { jobFolder: "BSD15", brandFolder: "[01] Louis Montini" }).moves, [productNow]);
+  const sampleTidy = useMemo(() => planTidyRenames(["Description", "Lifestyle", "Model"], productNow), [productNow]);
+  // ตัวอย่างที่เก็บ Collection ของรุ่น BSD15 ({กลุ่ม} โชว์เป็น BSD — ของจริงโปรแกรมหาจากโฟลเดอร์บน Z:)
+  const collExample = (pattern: string, brandFolder: string | null): string | null =>
+    fillNasPattern(pattern, { แบรนด์: brandFolder ?? "", รุ่น: "BSD15", โฟลเดอร์: "BSD15", กลุ่ม: "BSD", ...nasDateValues() }, pattern.includes("{แบรนด์}") ? ["แบรนด์"] : []);
   const savedProfile = saved ? findProfile(saved, "artwork") : null;
   const contentNow: ContentSortConfig = useMemo(() => cleanContentConfig({ ...content, rawFolders: rawText, albumExts: extText }), [content, rawText, extText]);
   const dirty = !!saved && (JSON.stringify(savedProfile) !== JSON.stringify(draft) || JSON.stringify(saved.product) !== JSON.stringify(productNow) || JSON.stringify(saved.content) !== JSON.stringify(contentNow));
@@ -119,10 +123,16 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
   const sampleType = types.find((x) => x.name === SAMPLE_ART_TYPE.name) ?? types[0] ?? SAMPLE_ART_TYPE;
 
   // แม่แบบที่เก็บบน Z:: art = ค่าตั้งต้นของ Artwork · type:<ชื่อชนิด> = แยกตามชนิด · prod:<variant> = สูตรสินค้า · content = สูตร Content
+  //   coll:default = ที่เก็บ Collection ตั้งต้น · coll:<id แบรนด์> = แยกตามแบรนด์ (ว่าง = ค่าตั้งต้นของแบรนด์นั้น)
   const patternOf = (key: string): string =>
-    key === "art" ? draft.nasPattern : key === "content" ? content.nasPattern : key.startsWith("move:") ? (product.moves[key.slice(5) as MoveRole]?.pattern ?? "") : key.startsWith("type:") ? (draft.nasByType[key.slice(5)] ?? "") : product.nasPatterns[key.slice(5) as ProductVariant] ?? "";
+    key === "art" ? draft.nasPattern : key === "content" ? content.nasPattern : key === "coll:default" ? product.collection.pattern : key.startsWith("coll:") ? (product.collection.byBrand[key.slice(5)] ?? "")
+      : key.startsWith("move:") ? (product.moves[key.slice(5) as MoveRole]?.pattern ?? "") : key.startsWith("type:") ? (draft.nasByType[key.slice(5)] ?? "") : product.nasPatterns[key.slice(5) as ProductVariant] ?? "";
   const setPattern = (key: string, v: string) => {
-    if (key === "art") setDraft((d) => ({ ...d, nasPattern: v, nasRoot: nasPrefixOf(v) }));
+    if (key === "coll:default") setProduct((p) => ({ ...p, collection: { ...p.collection, pattern: v } }));
+    else if (key.startsWith("coll:")) {
+      const id = key.slice(5);
+      setProduct((p) => { const by = { ...p.collection.byBrand }; if (v.trim()) by[id] = v; else delete by[id]; return { ...p, collection: { ...p.collection, byBrand: by } }; });
+    } else if (key === "art") setDraft((d) => ({ ...d, nasPattern: v, nasRoot: nasPrefixOf(v) }));
     else if (key === "content") setContent((c) => ({ ...c, nasPattern: v, nasRoot: nasPrefixOf(v) }));
     else if (key.startsWith("move:")) { const r = key.slice(5) as MoveRole; setProduct((p) => ({ ...p, moves: { ...p.moves, [r]: { ...p.moves[r], pattern: v } } })); }
     else if (key.startsWith("type:")) {
@@ -407,6 +417,41 @@ export function FileSortSettingsModal({ onClose, canEdit }: { onClose: () => voi
                   <p className="text-[12px] text-slate-500 mt-1">{t("ตัวอย่างใช้แบรนด์ [01] Louis Montini · ช่องล่าง = ชื่อโฟลเดอร์ (คั่นด้วย , · ไม่สนเลขนำหน้า) · ย้ายบน Z: ด้วยกัน = เสร็จทันที · ปลายทางมีแล้ว = ตั้งชื่อ _v.2 ไม่ทับ · โปรแกรมหาโฟลเดอร์แบรนด์ที่สะกดต่างกันให้ · ปิดได้ทีละงานในโปรแกรม",
                     "Sample uses brand [01] Louis Montini · lower box = folder names · moves on Z: are instant · existing destination gets _v.2 · the app finds brand folders spelled differently · can be turned off per job")}</p>
                   {tokenChips}
+                </div>
+                <div className="sm:col-span-2">
+                  <p className="text-[13px] font-medium text-slate-700 mb-1">{t("หลังลงรูปเสร็จ: เก็บทั้งโฟลเดอร์เข้า Collection (แบบปุ่ม Arrange)", "After uploading: file the whole folder into Collection (like Arrange)")}</p>
+                  <div className="flex flex-wrap gap-4 text-[13px] mb-2" role="radiogroup" aria-label="Collection">
+                    <label className="inline-flex items-center gap-2"><input type="radio" name="fs-coll" className={chk} checked={product.collection.mode === "stay"} disabled={!canEdit} onChange={() => setProduct((p) => ({ ...p, collection: { ...p.collection, mode: "stay" } }))} />{t("อยู่ที่ Work In Process", "Stay in Work In Process")}</label>
+                    <label className="inline-flex items-center gap-2"><input type="radio" name="fs-coll" className={chk} checked={product.collection.mode === "move"} disabled={!canEdit} onChange={() => setProduct((p) => ({ ...p, collection: { ...p.collection, mode: "move" } }))} />{t("เก็บเข้า Collection", "File into Collection")}</label>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[150px_minmax(0,1fr)] gap-2 items-start">
+                      <span className="text-[13px] text-slate-700 pt-2">{t("แบรนด์ที่ไม่ได้ตั้ง", "Other brands")}</span>
+                      <div className="min-w-0">
+                        {patternInput("coll:default", t("ว่าง = ไม่เก็บ (ตั้งรายแบรนด์ด้านล่าง)", "Empty = don't file (set per brand below)"))}
+                        <p className="text-[11px] text-slate-500 font-mono break-all mt-0.5">{collExample(product.collection.pattern, "[01] Louis Montini") ?? t("— ไม่เก็บเข้า Collection", "— not filed")}</p>
+                      </div>
+                    </div>
+                    {brands.map((b) => {
+                      const def = collectionDefaultFor(product.collection, b.name);
+                      const eff = (product.collection.byBrand[b.id] ?? "").trim() || def;
+                      return (
+                        <div key={b.id} className="grid grid-cols-[150px_minmax(0,1fr)] gap-2 items-start">
+                          <span className="text-[13px] text-slate-700 pt-2 truncate" title={b.name}>{b.name}</span>
+                          <div className="min-w-0">
+                            {patternInput(`coll:${b.id}`, def || t("ยังไม่ได้ตั้ง — ไม่เก็บ", "Not set — not filed"))}
+                            <p className={`text-[11px] font-mono break-all mt-0.5 ${eff ? "text-slate-500" : "text-amber-700"}`}>{collExample(eff, b.folder) ?? (eff ? t("— แม่แบบใช้ไม่ได้", "— invalid template") : t("— ยังไม่มีที่ใน Collection: ไม่เก็บจนกว่าจะตั้ง", "— no Collection location yet: not filed until set"))}{product.collection.byBrand[b.id] || !eff ? "" : t(" · ค่าตั้งต้น", " · default")}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <label className="mt-2 inline-flex items-start gap-2 text-[13px]">
+                    <input type="checkbox" className={`${chk} mt-0.5`} checked={product.collection.tidy} disabled={!canEdit} onChange={(e) => setProduct((p) => ({ ...p, collection: { ...p.collection, tidy: e.target.checked } }))} />
+                    <span>{t("จัดชื่อโฟลเดอร์ก่อนเก็บ", "Tidy folder names first")}<span className="block text-[12px] text-slate-500 font-mono">{sampleTidy.map((r) => `${r.from} → ${r.to.replace(/\//g, "\\")}`).join(" · ")}</span></span>
+                  </label>
+                  <p className="text-[12px] text-slate-500 mt-1">{t("ตัวอย่างใช้รุ่น BSD15 · {กลุ่ม} = โฟลเดอร์กลุ่มที่โปรแกรมหาเองบน Z: (ชื่อตรงตัวอักษรหน้ารหัส เช่น BSD · ขึ้นต้นด้วยตัวนั้น เช่น BD (สร้อยข้อมือ) · มีรุ่นพี่น้องอยู่ เช่น JEAN10 → JEANS · ไม่เจอ = สร้างใหม่) · มีรุ่นนี้ใน Collection แล้ว = รวมเข้าไป ไม่ทับ (ชื่อชน → _v.2) · สินค้าที่ยังไม่ตั้งแบรนด์ = ไม่เก็บ · ทำหลังลงรูปครบเท่านั้น · ปิดได้ทีละงาน + ย้ายกลับได้ในโปรแกรม",
+                    "Sample model BSD15 · {กลุ่ม} = group folder the app finds on Z: (same letters as the code, starts with them, or holds sibling models like JEAN10 → JEANS; none = created) · model already in Collection = merged, never overwritten (_v.2) · products without a brand stay · only after all images upload · can be turned off per job and undone in the app")}</p>
                 </div>
               </section>
 

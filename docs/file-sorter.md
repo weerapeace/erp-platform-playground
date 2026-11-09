@@ -94,6 +94,19 @@
   - ต้นทางและปลายทางอยู่บน Z: ทั้งคู่ = ย้ายแบบเปลี่ยนที่อยู่ (ทันที) · ต้นทางอยู่ในเครื่อง = ก๊อป + ตรวจขนาด แล้วต้นฉบับในเครื่องลงถังขยะ · ปลายทางมีแล้ว = `_v.2` · มีปุ่ม "ย้ายกลับ" (เฉพาะที่ย้ายบน Z:)
   - โฟลเดอร์ที่ย้ายไม่ถูกก๊อปลงที่เก็บงานบน Z: ซ้ำ · ประวัติ `file_sort.upload` จด `moves` (from/to/how)
 
+## เก็บทั้งโฟลเดอร์เข้า Collection (ขั้น 7 · 2026-11-09 · แบบปุ่ม Arrange ของ Create Folder Tool)
+- ค่าตั้ง `product.collection` = `{ mode: "stay" | "move", pattern, byBrand: { <id แบรนด์>: แม่แบบ }, tidy }` (ค่าตั้งต้น mode = move · tidy = true)
+  - ที่เก็บต่อแบรนด์: `byBrand[id]` → ค่าตั้งต้นตามชื่อแบรนด์ `COLLECTION_BRAND_DEFAULTS` → `pattern` (ว่าง = ไม่เก็บ) · สินค้าไม่มีแบรนด์ = ไม่เก็บ + เตือน (ไม่เดา)
+  - ค่าตั้งต้นตามชื่อ (โครงจริงใน Z:\Collection): Louis Montini / Pixie Dustie = `Z:\Collection\{กลุ่ม}\{รุ่น}` · IG International = `…\[01] สินค้าร้าน IG (IG Products)\{กลุ่ม}\{รุ่น}` · Nekomeow = `…\[05] Nekomeow\{รุ่น}` · Risara Ja Kissa = `…\[06] Risara Ja Kissa\[01] Risara Ja Kissa Products\{กลุ่ม}\{รุ่น}`
+  - Good Goods / Cansooba / Findig / อื่นๆ ยังไม่มีที่ใน Z:\Collection (เช็ก 2026-11-09) → ไม่มีค่าตั้งต้น ต้องตั้งในหน้าตั้งค่าก่อน
+- `{กลุ่ม}` = โฟลเดอร์กลุ่ม — เว็บคงไว้ในแผน โปรแกรมหาจากโฟลเดอร์จริงบน Z: (`Find-CollectionGroup`): ชื่อตรงตัวอักษรหน้ารหัส (BSD) → ขึ้นต้นด้วยตัวนั้น + วรรค/วงเล็บ (`BD (สร้อยข้อมือ)` · `[01] TTN (สีทาขอบ)`) → กลุ่มที่มีรุ่นนี้/รุ่นพี่น้อง (JEAN10 → JEANS · กลุ่มไม่เกิน 30 ตัวดูลึก 2 ชั้น เช่น IG `[06] อะไหล่\คอสุนัข1`) → ไม่เจอ = สร้างชื่อตัวอักษรหน้ารหัส
+  - เช็กกับรหัสจริง 2026-11-09: Louis 98% · Pixie 37/38 · Risara 11/12 · IG 65% เจอกลุ่มเดิม (ที่เหลือสร้างกลุ่มใหม่ใต้ IG Products) · จำรายชื่อโฟลเดอร์ 5 นาที (ครั้งแรกของ IG ~1 วิ)
+- `lib/file-sort-product` `planProductCollection` → plan `collection { mode, target, reason, tidy, renames[{from,to}] }` · `planTidyRenames` = ชื่อมีคำว่า description → `[01] Description` (มีอยู่แล้ว = ไม่แตะ) · lifestyle/model → `[02] Images/<ชื่อเดิม>` · ข้าม Rawfiles/Images
+- โปรแกรม (v1.5.0): ทำหลังลงรูปเข้า ERP ไม่มีพลาด + หลังย้าย Rawfiles · ติ๊กปิด/เปลี่ยนที่/ปิดจัดชื่อได้ทีละงาน · เลือกที่เก็บ Z: เอง = ไม่เก็บเข้า Collection
+  - โฟลเดอร์งานอยู่บน Z: = จัดชื่อแล้วย้ายทั้งโฟลเดอร์ (ทันที) · มีรุ่นนี้ใน Collection แล้ว = รวมเข้าไป (`Merge-IntoFolder` แบบ Merge-Folder ของ Arrange: ชื่อชน `_v.2` · Description ` v.2` · `[02] Images` ชน → ซ้อน `Images v.2` · Thumbs.db ชน = ทิ้ง) แล้วลบโฟลเดอร์งานที่ว่าง
+  - โฟลเดอร์งานอยู่ในเครื่อง = ก๊อปเข้า Collection แทน Work In Process (จัดชื่อตอนก๊อป · ต้นฉบับในเครื่องอยู่ที่เดิม)
+  - ปุ่ม "ย้ายกลับที่เดิม" ทำย้อนทุกขั้นจากท้ายสุด (`res.ops`: Rawfiles → จัดชื่อ → Collection) · ประวัติ `moves[].what = collection`, `how = rename | merge | copy`
+
 ## ข้อจำกัดที่รู้
 - Drive ดูไฟล์เดิมในโฟลเดอร์ได้ 100 ไฟล์แรก (โฟลเดอร์งานเดียวไม่ควรเกินนี้)
 - `/api/drive` POST ไม่ได้มีไว้ให้เบราว์เซอร์ (Google บล็อก CORS) — เว็บใช้ `/api/drive/upload-chunk` แทน

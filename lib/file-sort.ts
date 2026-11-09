@@ -57,11 +57,37 @@ export type ProductSortConfig = {
   moves: Record<MoveRole, FolderMove>;
   /** ชื่อโฟลเดอร์ชั้นบนของแต่ละชนิด (ไม่สนเลขนำหน้า · มีเลขต่อท้ายก็นับ เช่น 00_rawfiles_1) */
   moveFolders: Record<MoveRole, string[]>;
+  /** หลังลงรูปเสร็จ: เก็บทั้งโฟลเดอร์งานเข้า Collection (แบบปุ่ม Arrange ของ Create Folder Tool) · ตัวคิด planProductCollection */
+  collection: CollectionMove;
 };
 export const MOVE_ROLES = ["raw", "images"] as const;
 export type MoveRole = (typeof MOVE_ROLES)[number];
 export const MOVE_ROLE_LABEL: Record<MoveRole, string> = { raw: "Rawfiles", images: "Images" };
 export type FolderMove = { mode: "stay" | "move"; pattern: string };
+/**
+ * เก็บทั้งโฟลเดอร์งานเข้า Collection — ทำหลังลงรูปเข้า ERP ครบ + หลังย้าย Rawfiles แล้ว
+ *   ที่เก็บคิดตามแบรนด์ของสินค้า: byBrand[id แบรนด์] → ค่าตั้งต้นตามชื่อแบรนด์ (COLLECTION_BRAND_DEFAULTS) → pattern (ว่าง = ไม่เก็บ)
+ *   {กลุ่ม} = โฟลเดอร์กลุ่มใน Collection — โปรแกรมหาเองบน Z: (ชื่อตรงตัวอักษรหน้ารหัส / ขึ้นต้นด้วยตัวนั้น / มีรุ่นพี่น้องอยู่ เช่น JEAN10 → JEANS)
+ *   มีรุ่นนี้ใน Collection แล้ว (งานเพิ่มสี/แก้สี) = รวมเข้าไป ไม่ทับ: ชื่อชน → _v.2 · [02] Images ชน → ซ้อนเป็น Images v.2 (เหมือน Arrange)
+ *   tidy = จัดชื่อก่อนเก็บ: โฟลเดอร์ที่มีคำว่า description → [01] Description · lifestyle / model → ย้ายเข้า [02] Images\
+ *   แบรนด์ที่ยังไม่มีที่ใน Z:\Collection (Good Goods / Cansooba / Findig / อื่นๆ — เช็ก 2026-11-09) = ไม่มีค่าตั้งต้น → ไม่เก็บจนกว่าจะตั้ง (ไม่เดา)
+ */
+export type CollectionMove = { mode: "stay" | "move"; pattern: string; byBrand: Record<string, string>; tidy: boolean };
+export const COLLECTION_PATTERN_DEFAULT = "Z:\\Collection\\{กลุ่ม}\\{รุ่น}";
+/** ค่าตั้งต้นตามชื่อแบรนด์ (ตรงกับปุ่ม Arrange + โครงจริงใน Z:\Collection) — ตั้งทับรายแบรนด์ได้ในหน้าตั้งค่า */
+export const COLLECTION_BRAND_DEFAULTS: Record<string, string> = {
+  "louis montini": COLLECTION_PATTERN_DEFAULT,
+  "pixie dustie": COLLECTION_PATTERN_DEFAULT,
+  "ig international": "Z:\\Collection\\[01] สินค้าร้าน IG (IG Products)\\{กลุ่ม}\\{รุ่น}",
+  nekomeow: "Z:\\Collection\\[05] Nekomeow\\{รุ่น}",
+  "risara ja kissa": "Z:\\Collection\\[06] Risara Ja Kissa\\[01] Risara Ja Kissa Products\\{กลุ่ม}\\{รุ่น}",
+};
+const brandNameKey = (s: string): string => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+/** แม่แบบ Collection ที่ไม่ได้ตั้งแยก: ค่าตั้งต้นตามชื่อแบรนด์ หรือแม่แบบตั้งต้น */
+export const collectionDefaultFor = (c: CollectionMove, brandName: string): string => COLLECTION_BRAND_DEFAULTS[brandNameKey(brandName)] ?? c.pattern;
+/** แม่แบบ Collection ของแบรนด์นี้ (ตั้งแยก → ค่าตั้งต้นตามชื่อ → แม่แบบตั้งต้น) */
+export const collectionPatternFor = (c: CollectionMove, brand: { id: string; name: string }): string =>
+  (c.byBrand[brand.id] ?? "").trim() || collectionDefaultFor(c, brand.name);
 const PRODUCT_NAS_DEFAULT = "Z:\\Work In Process\\[01] New Product\\{รุ่น}";
 export const DEFAULT_PRODUCT_CONFIG: ProductSortConfig = {
   label: "งานสินค้า", nasPatterns: { new: PRODUCT_NAS_DEFAULT, color: PRODUCT_NAS_DEFAULT, edit: PRODUCT_NAS_DEFAULT },
@@ -69,6 +95,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductSortConfig = {
   // ที่เดียวกับปุ่ม Arrange ของ Create Folder Tool: Z:\Raw Files\<แบรนด์>\<รุ่น>_rawfiles · Images อยู่กับรุ่น
   moves: { raw: { mode: "move", pattern: "Z:\\Raw Files\\{แบรนด์}\\{รุ่น}_rawfiles" }, images: { mode: "stay", pattern: "" } },
   moveFolders: { raw: ["rawfile", "rawfiles", "raw files", "raw file", "raw"], images: ["images", "image"] },
+  collection: { mode: "move", pattern: "", byBrand: {}, tidy: true },
 };
 
 const cleanPattern = (v: unknown): string => String(v ?? "").trim().replace(/[\\/]+$/, "").slice(0, 300);
@@ -104,6 +131,25 @@ export function cleanProductConfig(raw: unknown): ProductSortConfig {
     roleFolders: cleanRoleFolders(o.roleFolders),
     mode: o.mode === "append" ? "append" : "replace",
     ...cleanMoves(o),
+    collection: cleanCollection(o.collection),
+  };
+}
+
+function cleanCollection(raw: unknown): CollectionMove {
+  const d = DEFAULT_PRODUCT_CONFIG.collection;
+  const o = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const by = (o.byBrand && typeof o.byBrand === "object" ? o.byBrand : {}) as Record<string, unknown>;
+  const byBrand: Record<string, string> = {};
+  for (const [k, v] of Object.entries(by).slice(0, 100)) {
+    const id = String(k).trim().slice(0, 64);
+    const p = typeof v === "string" ? cleanPattern(v) : "";
+    if (id && p) byBrand[id] = p;
+  }
+  return {
+    mode: o.mode === "stay" || o.mode === "move" ? o.mode : d.mode,
+    pattern: typeof o.pattern === "string" ? cleanPattern(o.pattern) : d.pattern,
+    byBrand,
+    tidy: typeof o.tidy === "boolean" ? o.tidy : d.tidy,
   };
 }
 
@@ -249,12 +295,13 @@ export function winJoin(base: string, ...rest: string[]): string {
 // ── แม่แบบที่เก็บบน Z: (ตั้งตามชนิดงานในหน้าตั้งค่า · โปรแกรมเลือกที่เก็บเองรายงานได้อีกชั้น) ──
 
 /** ช่องเติมคำในแม่แบบ */
-export const NAS_TOKENS = ["แบรนด์", "ชนิด", "ชื่องาน", "รุ่น", "ปี", "เดือน", "โฟลเดอร์"] as const;
+export const NAS_TOKENS = ["แบรนด์", "ชนิด", "ชื่องาน", "รุ่น", "ปี", "เดือน", "โฟลเดอร์", "กลุ่ม"] as const;
 export type NasToken = (typeof NAS_TOKENS)[number];
 export type NasValues = Partial<Record<NasToken, string | null | undefined>>;
 export const NAS_TOKEN_HINT: Record<NasToken, string> = {
   แบรนด์: "โฟลเดอร์แบรนด์ เช่น [01] Louis Montini", ชนิด: "ซับตามชนิด เช่น 01_Logo", ชื่องาน: "ชื่องานที่กรอก", รุ่น: "ชื่อโฟลเดอร์รุ่น เช่น BSD15",
   ปี: "ปี ค.ศ. เช่น 2026", เดือน: "เดือน 2 หลัก เช่น 11", โฟลเดอร์: "ชื่อโฟลเดอร์ที่ลากเข้ามา",
+  กลุ่ม: "เฉพาะที่เก็บ Collection: โฟลเดอร์กลุ่มที่โปรแกรมหาเองบน Z: เช่น BSD15 → BSD · JEAN10 → JEANS",
 };
 
 const ROOT_RE = /^([A-Za-z]:|\\\\[^\\/]+[\\/][^\\/]+)/;
