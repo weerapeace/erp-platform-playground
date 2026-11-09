@@ -1295,6 +1295,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       const j = await res.json().catch(() => ({}));
       if (!res.ok || j?.error) return String(j?.error ?? t("บันทึกไม่สำเร็จ", "Save failed"));
       setPriceItems((list) => list.map((p) => (p.id === itemId ? { ...p, cut_rate: rate } : p)));
+      if (canEdit && cutExtraIdx >= 0 && cutRows.some((r) => r.itemId === itemId)) setEditing(true);   // ใบนี้ใช้วัสดุนี้ → ยอดค่าตัดในใบคิดใหม่ (กดบันทึกตีราคา)
       return null;
     } catch (e) { return e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed"); }
   };
@@ -2857,6 +2858,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       const toggleOpen = () => setExtraOpen((s) => { const n = new Set(s); if (n.has(okey)) n.delete(okey); else n.add(okey); return n; });
                       let sub: string | null = null;
                       let det: ReactNode = null;
+                      // ยอดที่คิดได้ตอนนี้ (ราคาตัด/ราคากลาง/จำนวนสั่งอาจเปลี่ยนหลังบันทึก) — ไม่ตรงกับยอดในใบ = ให้กดอัปเดต
+                      const liveAmt: number | null = k === "labor_cut" && c.cut_by === "pieces" && presetsApi.loaded && priceItems.length > 0 ? cutTotal
+                        : k === "overhead" && c.oh && presetsApi.loaded ? overheadTotal(overheadRows(c.oh, presetsApi.presets, orderQty)) : null;
+                      const stale = liveAmt != null && Math.abs(liveAmt - (c.amount || 0)) > 0.005;
                       if (k === "labor_cut" && c.cut_by === "pieces") {
                         const s = cutLaborSummary(cutRows);
                         sub = t(`${s.pieces} ชิ้น/ใบ`, `${s.pieces} pcs/unit`) + (s.byMaterial.length ? ` · ${s.byMaterial.map((m) => `${m.name} ${m.pieces}`).join(" · ")}` : "");
@@ -2908,7 +2913,14 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                             <Icon value={opened ? "i:chevron-down" : "i:chevron-right"} className={`shrink-0 text-[12px] ${det ? "text-slate-400" : "invisible"}`} />
                             <span className="shrink-0 text-slate-600">{c.label || "—"}</span>
                             {sub && <span className="min-w-0 flex-1 truncate text-[11px] text-slate-400" title={sub}>{sub}</span>}
-                            <span className={`ml-auto shrink-0 tabular-nums ${c.amount ? "text-slate-800" : "text-slate-300"}`}>{fmtBaht(c.amount || 0)}</span>
+                            {stale && liveAmt != null && (canEdit ? (
+                              <button type="button" onClick={(e) => { e.stopPropagation(); updExtra(i, { amount: liveAmt }); setEditing(true); }}
+                                title={t(`ยอดในใบ ${fmtBaht(c.amount || 0)} ยังเป็นของเดิม — คิดใหม่ได้ ${fmtBaht(liveAmt)} (กดแล้วกดบันทึกตีราคา)`, `Saved ${fmtBaht(c.amount || 0)} is outdated — recalculated ${fmtBaht(liveAmt)}`)}
+                                className="ml-auto shrink-0 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800 hover:bg-amber-100">
+                                {t(`คิดใหม่ได้ ${fmtBaht(liveAmt)} · อัปเดต`, `Recalc ${fmtBaht(liveAmt)} · update`)}
+                              </button>
+                            ) : <span className="ml-auto shrink-0 text-[11px] text-amber-700">{t(`คิดใหม่ได้ ${fmtBaht(liveAmt)}`, `Recalc ${fmtBaht(liveAmt)}`)}</span>)}
+                            <span className={`${stale ? "line-through decoration-amber-500" : "ml-auto"} shrink-0 tabular-nums ${c.amount ? "text-slate-800" : "text-slate-300"}`}>{fmtBaht(c.amount || 0)}</span>
                           </div>
                           {opened && det && <div className="border-t border-slate-100 bg-slate-50/60 px-2 py-1.5 pl-6 text-[12px] text-slate-600" onDoubleClick={(e) => e.stopPropagation()}>{det}</div>}
                         </div>
