@@ -32,8 +32,8 @@ describe("พื้นที่ / รอบรูป / กรอบ", () => {
   it("วงกลมจากเส้นโค้ง 4 ช่วง (หูจับ) ได้พื้นที่ใกล้ πr²", () => {
     const svg = `<svg xmlns="http://www.w3.org/2000/svg"><circle cx="0" cy="0" r="72" transform="rotate(30)"/></svg>`;
     const imp = parseSvgShapes(svg)!;
-    expect(imp.shapes[0].k).toBe("path");   // หมุน = แปลงเป็นเส้นโค้ง
-    close(shapeArea(imp.shapes[0]), Math.PI * 2.54 * 2.54, 0.02);   // r = 72pt = 2.54 ซม.
+    expect(imp.pieces[0].shape.k).toBe("path");   // หมุน = แปลงเป็นเส้นโค้ง
+    close(shapeArea(imp.pieces[0].shape), Math.PI * 2.54 * 2.54, 0.02);   // r = 72pt = 2.54 ซม.
   });
 });
 
@@ -68,17 +68,17 @@ describe("นำเข้า SVG (Illustrator)", () => {
   });
   it("หน่วย Illustrator 72 ต่อนิ้ว: สี่เหลี่ยม 850×992 pt = 30×35 ซม. · เลื่อนกลุ่มให้เริ่ม 0,0", () => {
     const imp = parseSvgShapes(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1100"><rect x="100" y="50" width="850.394" height="992.126"/><circle cx="1050" cy="150" r="85.04"/></svg>`)!;
-    expect(imp.shapes).toHaveLength(2);
-    const b = shapeBox(imp.shapes[0]);
+    expect(imp.pieces).toHaveLength(2);
+    const b = shapeBox(imp.pieces[0].shape);
     close(b.w, 30); close(b.h, 35); close(b.x, 0); close(b.y, 0);
-    expect(imp.shapes[1].k).toBe("ellipse");
-    close(shapeBox(imp.shapes[1]).w, 6);
+    expect(imp.pieces[1].shape.k).toBe("ellipse");
+    close(shapeBox(imp.pieces[1].shape).w, 6);
   });
   it("ไฟล์ที่ระบุ width เป็น mm ใช้ขนาดตามไฟล์ · transform ของกลุ่ม · ข้าม defs/clipPath", () => {
     const imp = parseSvgShapes(`<svg width="200mm" height="100mm" viewBox="0 0 2000 1000"><defs><rect width="999" height="999"/></defs><g transform="translate(100 100)"><rect width="1000" height="500"/></g><clipPath><rect width="5" height="5"/></clipPath></svg>`)!;
-    expect(imp.shapes).toHaveLength(1);
+    expect(imp.pieces).toHaveLength(1);
     expect(imp.unitNote).toContain("200mm");
-    close(shapeBox(imp.shapes[0]).w, 10); close(shapeBox(imp.shapes[0]).h, 5);
+    close(shapeBox(imp.pieces[0].shape).w, 10); close(shapeBox(imp.pieces[0].shape).h, 5);
   });
   it("path: เส้นตรง + โค้ง C + ปิดทับจุดแรก · หลายเส้น = หลายชิ้น · มุมมน rx", () => {
     const subs = parsePathData("M0 0 H100 V100 C100 150 0 150 0 100 Z M200 0 l50 0 l0 50 z");
@@ -86,7 +86,7 @@ describe("นำเข้า SVG (Illustrator)", () => {
     expect(subs[0].length).toBe(4);   // 0,0 · 100,0 · 100,100 · 0,100 (เส้นปิดกลับจุดแรก = Z)
     expect(subs[1].length).toBe(3);
     const rr = parseSvgShapes(`<svg><rect width="72" height="72" rx="18"/></svg>`)!;
-    const a = shapeArea(rr.shapes[0]);
+    const a = shapeArea(rr.pieces[0].shape);
     const side = 2.54, r = 0.635;
     close(a, side * side - (4 - Math.PI) * r * r, 0.02);
   });
@@ -97,7 +97,7 @@ describe("นำเข้า SVG (Illustrator)", () => {
   });
   it("arc (A) ครึ่งวงกลม → พื้นที่ใกล้ครึ่ง πr²", () => {
     const imp = parseSvgShapes(`<svg width="10cm" height="10cm" viewBox="0 0 10 10"><path d="M0 5 A5 5 0 0 1 10 5 Z"/></svg>`)!;
-    close(shapeArea(imp.shapes[0]), (Math.PI * 25) / 2, 0.05);
+    close(shapeArea(imp.pieces[0].shape), (Math.PI * 25) / 2, 0.05);
   });
 });
 

@@ -35,8 +35,8 @@ import { tr } from "@/lib/lang";
 
 const QUOTE_CART_KEY = "erp-design-quote-cart";   // ตัวชี้ใบเสนอราคาร่างที่เป็น "ตะกร้า" ปัจจุบัน (ต่อ browser)
 import type { Attachment } from "@/app/api/attachments/route";
-import { lineShapeArea, normalizeShape, refitLineShape, shapeArea, shapeBox, shapePathD, type Shape } from "@/lib/pattern-shape";
-import type { ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
+import { lineShapeArea, normalizePiece, pieceGeometry, refitLineShape, shapeBox, shapePathD, type LineShape, type Shape } from "@/lib/pattern-shape";
+import type { PieceMat, ShapeEditorResult } from "@/components/pattern-sheet/shape-editor";
 import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STATUS_CLS, type StatusMeta, type WfStatusRow } from "@/lib/design-sheets-meta";
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
@@ -326,11 +326,11 @@ function rowFieldsFromGroup(g: PriceGroup, basis: string): Partial<CostRow> {
 }
 
 /** รูปย่อของรูปทรงที่วาด (ปุ่มในตารางตีราคา) */
-function ShapeMini({ shape }: { shape: Shape }) {
+function ShapeMini({ shape, holes = [] }: { shape: Shape; holes?: Shape[] }) {
   const b = shapeBox(shape); const pad = Math.max(b.w, b.h) * 0.1 || 1;
   return (
     <svg viewBox={`${b.x - pad} ${b.y - pad} ${b.w + pad * 2} ${b.h + pad * 2}`} className="h-4 w-4" aria-hidden>
-      <path d={shapePathD(shape)} fill="currentColor" fillOpacity={0.25} stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+      <path d={shapePathD(shape) + holes.map((h) => shapePathD(h)).join("")} fillRule="evenodd" fill="currentColor" fillOpacity={0.25} stroke="currentColor" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
     </svg>
   );
 }
@@ -586,27 +586,50 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     unit_price: null, amount: null, note: null, sort_order: costLines.length + 1,
   }), [costLines.length, costParent]);
   const addCostRow = useCallback(() => { setCostLines((prev) => [...prev, newCostRow()]); setCostDirty(true); }, [newCostRow]);
-  // ✏️ ผลจากหน้าต่างวาด → บรรทัดตีราคา: ชิ้นแรก = บรรทัดที่กดวาด (หรือบรรทัดใหม่) · ชิ้นถัดไป = บรรทัดใหม่ วัสดุเดียวกัน (ต่อท้ายบรรทัดนั้น)
-  //   กว้าง×ยาว = กรอบของรูปทรง · จำนวนชิ้น = จำนวนในหน้าต่างวาด · รูปทรงเก็บในช่อง shape (เริ่มที่ 0,0)
+  // ✏️ ผลจากหน้าต่างวาด → บรรทัดตีราคา: 1 ชิ้น × 1 วัสดุ = 1 บรรทัด (ชิ้นไม่มีวัสดุ = 1 บรรทัดว่าง เลือกวัสดุทีหลัง)
+  //   บรรทัดของชิ้นเดียวกันผูกด้วย shape.pid (เช่น หนัง + ซับใน) → เปิดแก้จากบรรทัดไหนก็ได้ ได้ทั้งชิ้น
+  //   กว้าง×ยาว = ขนาดตัด (รวมเผื่อพับ) · จำนวนชิ้น = จำนวนในหน้าต่างวาด · บรรทัดเดิมที่วัสดุตรงกัน = ใช้ต่อ (ราคา/ประวัติไม่หาย)
+  //   วัสดุที่เอาออกจากชิ้น = บรรทัดนั้นหายไป
   const applyShapes = useCallback((key: string | null, res: ShapeEditorResult) => {
     const stamp = Date.now();
     setCostLines((prev) => {
-      const idx = key ? prev.findIndex((r) => r.key === key) : -1;
-      const base: CostRow = idx >= 0 ? prev[idx] : newCostRow();
-      const made = res.pieces.map((p, i) => {
-        const b = shapeBox(p.shape);
-        const fresh = !(i === 0 && idx >= 0);
-        return recomputeRow({
-          ...base, ...(fresh ? { id: undefined, key: `sh${stamp}_${i}`, prev_item: null, price_ack: null } : {}),
-          shape: { v: 1, shape: normalizeShape(p.shape), basis: res.basis },
-          width_cm: Math.round(b.w * 100) / 100, length_cm: Math.round(b.h * 100) / 100, pieces: p.count,
+      const anchor = key ? prev.find((r) => r.key === key) : undefined;
+      const pid0 = anchor?.shape?.pid;
+      const group = anchor ? prev.filter((r) => r.key === anchor.key || (!!pid0 && r.shape?.pid === pid0 && pkey(r.parent_code) === pkey(anchor.parent_code))) : [];
+      const pool = [...group];
+      const take = (mid: string): CostRow | undefined => {
+        const i = pool.findIndex((r) => (mid.startsWith("row:") ? r.key === mid.slice(4) : r.item_id === mid));
+        return i >= 0 ? pool.splice(i, 1)[0] : undefined;
+      };
+      const made: CostRow[] = [];
+      res.pieces.forEach((p, i) => {
+        const norm = normalizePiece(p.shape, p.holes);
+        const ls: LineShape = {
+          v: 1, shape: norm.shape, basis: res.basis, pid: i === 0 && pid0 ? pid0 : `pc${stamp.toString(36)}${i}`,
+          ...(norm.holes.length ? { holes: norm.holes } : {}), ...(p.allow ? { allow: p.allow } : {}), ...(p.name ? { name: p.name } : {}),
+        };
+        const size = { width_cm: Math.round(p.geo.cutBox.w * 100) / 100, length_cm: Math.round(p.geo.cutBox.h * 100) / 100, pieces: p.count };
+        const mats: (string | null)[] = p.mats.length ? p.mats.map((m) => m.id) : [null];
+        mats.forEach((mid, j) => {
+          let row = mid ? take(mid) : i === 0 && j === 0 && anchor && !anchor.item_id && !anchor.item_sku_code && !anchor.item_name ? take(`row:${anchor.key}`) : undefined;
+          let fresh = false;
+          if (!row) {
+            fresh = true;
+            const it = mid && !mid.startsWith("row:") ? priceItemById.get(mid) : undefined;
+            row = { ...(it ? rowFromItem(it, made.length) : newCostRow()), parent_code: anchor ? anchor.parent_code ?? null : costParent || null };
+          }
+          made.push(recomputeRow({ ...row, ...(fresh ? { key: `sh${stamp}_${i}_${j}` } : {}), shape: ls, ...size }));
         });
       });
-      if (idx >= 0) { const next = [...prev]; next.splice(idx, 1, ...made); return next; }
-      return [...prev, ...made];
+      if (!anchor) return [...prev, ...made];
+      const groupKeys = new Set(group.map((r) => r.key));
+      const insertAt = prev.slice(0, prev.findIndex((r) => groupKeys.has(r.key))).filter((r) => !groupKeys.has(r.key)).length;
+      const rest = prev.filter((r) => !groupKeys.has(r.key));
+      rest.splice(insertAt, 0, ...made);
+      return rest;
     });
     setCostDirty(true);
-  }, [newCostRow]);
+  }, [newCostRow, priceItemById, costParent]);
 
   const costTotal  = curLines.reduce((s, r) => s + (r.amount || 0), 0);   // ต้นทุนวัสดุของ Parent นี้
   const extraTotal = costExtra.reduce((s, c) => s + (Number(c.amount) || 0), 0);
@@ -1714,10 +1737,10 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           <button type="button" disabled={!canEdit}
             onClick={() => { if (!fullEdit) setEditing(true); setShapeEdit({ key: r.key }); }}
             title={r.shape
-              ? t(`รูปทรงวาด · พื้นที่จริง ${Math.round(shapeArea(r.shape.shape))} cm² · คิดผ้าจาก${r.shape.basis === "area" ? "พื้นที่จริง" : "กรอบสี่เหลี่ยม"} — กดเพื่อแก้รูป`, `Drawn shape · actual area ${Math.round(shapeArea(r.shape.shape))} cm² · fabric from ${r.shape.basis === "area" ? "actual area" : "bounding box"} — click to edit`)
+              ? t(`รูปทรงวาด${r.shape.name ? ` "${r.shape.name}"` : ""}${r.shape.allow ? ` · เผื่อพับ ${r.shape.allow} ซม.` : ""}${r.shape.holes?.length ? ` · เจาะ ${r.shape.holes.length} รู` : ""} · พื้นที่ตัด ${Math.round(pieceGeometry(r.shape).cutArea)} cm² · คิดผ้าจาก${r.shape.basis === "area" ? "พื้นที่จริง" : "กรอบสี่เหลี่ยม"} — กดเพื่อแก้รูป`, `Drawn shape${r.shape.name ? ` "${r.shape.name}"` : ""}${r.shape.allow ? ` · allowance ${r.shape.allow} cm` : ""}${r.shape.holes?.length ? ` · ${r.shape.holes.length} holes` : ""} · cut area ${Math.round(pieceGeometry(r.shape).cutArea)} cm² · fabric from ${r.shape.basis === "area" ? "actual area" : "bounding box"} — click to edit`)
               : t("วาดรูปทรงชิ้นนี้ (สี่เหลี่ยม วงกลม ปากกา หรือวางจาก Illustrator)", "Draw this piece (rectangle, circle, pen, or paste from Illustrator)")}
             className={`inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border ${r.shape ? "border-blue-300 bg-blue-50 text-blue-700" : "border-transparent text-slate-400 hover:border-blue-300 hover:text-blue-600"} disabled:cursor-default`}>
-            {r.shape ? <ShapeMini shape={r.shape.shape} /> : <Icon value="i:vector-bezier" className="text-[14px]" />}
+            {r.shape ? <ShapeMini shape={r.shape.shape} holes={r.shape.holes} /> : <Icon value="i:vector-bezier" className="text-[14px]" />}
           </button>
         ) : null;
         if (!showNum && !btn) return <span className="block h-7" title={t("ชนิดนี้ไม่ใช้ความกว้าง", "This type doesn't use width")}></span>;
@@ -2676,7 +2699,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"><Icon value="i:vector-bezier" className="text-[15px]" />{t("วาดชิ้นวัสดุ", "Draw pieces")}</button>
                   </div>
                 ) : null}
-                onDuplicate={(r) => recomputeRow({ ...r, key: `d${Date.now()}_${Math.round(Math.random() * 1e6)}` })}
+                onDuplicate={(r) => recomputeRow({ ...r, key: `d${Date.now()}_${Math.round(Math.random() * 1e6)}`, shape: r.shape ? { ...r.shape, pid: undefined } : r.shape })}
                 selectable={fullEdit}
                 bulkBar={(sel, clear) => {
                   const keys = new Set(sel.map((r) => r.key));
@@ -3156,12 +3179,22 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       {/* ✏️ วาดชิ้นวัสดุ — แก้รูปของบรรทัด (key) หรือเพิ่มบรรทัดใหม่ (null) · components/pattern-sheet/shape-editor.tsx */}
       {shapeEdit && (() => {
         const row = shapeEdit.key ? costLines.find((r) => r.key === shapeEdit.key) : undefined;
-        const initial = row?.shape ? [{ shape: row.shape.shape, count: row.pieces ?? 1 }]
-          : row && Number(row.width_cm) > 0 && Number(row.length_cm) > 0 ? [{ shape: { k: "rect" as const, x: 0, y: 0, w: Number(row.width_cm), h: Number(row.length_cm) }, count: row.pieces ?? 1 }] : [];
+        // บรรทัดทั้งหมดของชิ้นเดียวกัน (pid เดียวกัน เช่น หนัง + ซับใน) → 1 ชิ้นหลายวัสดุ
+        const pid = row?.shape?.pid;
+        const group = row ? costLines.filter((r) => r.key === row.key || (!!pid && r.shape?.pid === pid && pkey(r.parent_code) === pkey(row.parent_code))) : [];
+        const mats: PieceMat[] = [];
+        for (const r of group) {
+          const m: PieceMat | null = r.item_id ? { id: r.item_id, name: r.item_name ?? t("วัสดุ", "Material") }
+            : r.item_sku_code || r.item_name ? { id: `row:${r.key}`, name: [r.item_sku_code, r.item_name].filter(Boolean).join(" ") } : null;
+          if (m && !mats.some((x) => x.id === m.id)) mats.push(m);
+        }
+        const initial = row?.shape ? [{ shape: row.shape.shape, holes: row.shape.holes, count: row.pieces ?? 1, allow: row.shape.allow, name: row.shape.name, mats }]
+          : row && Number(row.width_cm) > 0 && Number(row.length_cm) > 0 ? [{ shape: { k: "rect" as const, x: 0, y: 0, w: Number(row.width_cm), h: Number(row.length_cm) }, count: row.pieces ?? 1, mats }] : [];
         return (
           <ShapeEditor open onClose={() => setShapeEdit(null)} initial={initial} initialBasis={row?.shape?.basis ?? "box"}
-            title={row ? t(`วาดชิ้น: ${row.item_name || "ยังไม่เลือกวัสดุ"}`, `Draw piece: ${row.item_name || "no material yet"}`) : t("วาดชิ้นวัสดุ (เพิ่มบรรทัดใหม่)", "Draw pieces (new lines)")}
-            multiNote={row ? t("ชิ้นที่ 2 ขึ้นไป = เพิ่มเป็นบรรทัดใหม่ วัสดุเดียวกัน", "Pieces 2+ become new lines with the same material") : t("1 ชิ้น = 1 บรรทัด (เลือกวัสดุทีหลัง)", "1 piece = 1 line (pick material later)")}
+            materials={priceItems.map((p) => ({ id: p.id, name: p.name, sub: p.group_name }))} defaultMats={mats}
+            title={row ? t(`วาดชิ้น: ${row.shape?.name || row.item_name || "ยังไม่เลือกวัสดุ"}`, `Draw piece: ${row.shape?.name || row.item_name || "no material yet"}`) : t("วาดชิ้นวัสดุ (เพิ่มบรรทัดใหม่)", "Draw pieces (new lines)")}
+            multiNote={row ? t("ชิ้นใหม่ใช้วัสดุเดียวกับบรรทัดนี้ (แก้ในแผงได้)", "New pieces use this line's materials (editable in the panel)") : t("1 ชิ้น × 1 วัสดุ = 1 บรรทัด", "1 piece × 1 material = 1 line")}
             onSave={(res) => { applyShapes(shapeEdit.key, res); setShapeEdit(null); }} />
         );
       })()}

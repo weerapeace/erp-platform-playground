@@ -54,8 +54,11 @@ export function PatternPiecesSvg({ layout, view, printMm = false, mono = false, 
         return (
           <g key={p.id}>
             {p.d ? (   // รูปทรงจริงที่วาด/วางจาก Illustrator
-              <path transform={`translate(${p.x} ${p.y})`} d={p.d} fill={mono ? "#fff" : c.fill} stroke={mono ? "#111" : c.stroke}
-                strokeWidth={printMm ? 0.04 : Math.max(0.08, v.w / 600)} strokeDasharray={printMm ? "0.4 0.25" : undefined} />
+              <g transform={`translate(${p.x} ${p.y})`}>
+                <path d={p.d} fillRule="evenodd" fill={mono ? "#fff" : c.fill} stroke={mono ? "#111" : c.stroke}
+                  strokeWidth={printMm ? 0.04 : Math.max(0.08, v.w / 600)} strokeDasharray={printMm ? "0.4 0.25" : undefined} />
+                {p.sewD && <path d={p.sewD} fill="none" stroke={mono ? "#555" : c.stroke} strokeWidth={printMm ? 0.025 : Math.max(0.05, v.w / 900)} strokeDasharray={printMm ? "0.2 0.15" : "0.6 0.4"} />}
+              </g>
             ) : (
               <rect x={p.x} y={p.y} width={p.w} height={p.h} fill={mono ? "#fff" : c.fill} stroke={mono ? "#111" : c.stroke}
                 strokeWidth={printMm ? 0.04 : Math.max(0.08, v.w / 600)} strokeDasharray={printMm ? "0.4 0.25" : undefined} />

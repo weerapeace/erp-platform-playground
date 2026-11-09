@@ -11,7 +11,7 @@
  * คู่มือ: docs/pattern-sheet.md · หน้าจอ: components/pattern-sheet · หน้าพิมพ์: app/print/design-sheet/[id]/pattern
  */
 
-import { cleanLineShape, flattenShape, shapeBox, shapePathD, type Pt } from "@/lib/pattern-shape";
+import { cleanLineShape, pieceGeometry, polyD, shapePathD, type Pt } from "@/lib/pattern-shape";
 
 export type PatternLineInput = {
   key?: string | null;
@@ -38,8 +38,11 @@ export type PatternPiece = {
   faceWidth: number | null;   // หน้าผ้า (ซม.) ถ้ามี
   note: string | null;
   /** รูปทรงจริง (เริ่มที่ 0,0 ภายในกรอบ w×h) — ไม่มี = สี่เหลี่ยม */
-  d?: string | null;          // SVG path data (วาดจอ/ไฟล์ SVG)
-  outline?: Pt[] | null;      // จุดรอบรูป (ไฟล์ DXF)
+  d?: string | null;          // SVG path data ของเส้นตัด (+รูเจาะ · fill-rule evenodd)
+  sewD?: string | null;       // เส้นเย็บ (มีเผื่อพับ) — วาดเส้นประ
+  outline?: Pt[] | null;      // จุดรอบเส้นตัด (ไฟล์ DXF)
+  holes?: Pt[][] | null;      // รูเจาะที่ตัดจริง (ไฟล์ DXF)
+  sewOutline?: Pt[] | null;   // จุดรอบเส้นเย็บ (ไฟล์ DXF layer SEW)
 };
 
 export type PlacedPiece = PatternPiece & { x: number; y: number };
@@ -59,16 +62,22 @@ export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
   for (const l of lines) {
     if (l.calc_method !== undefined && !PATTERN_AREA_METHODS.has(l.calc_method ?? "")) continue;
     const ls = cleanLineShape(l.shape);
-    const sb = ls ? shapeBox(ls.shape) : null;
-    const w = sb ? sb.w : num(l.width_cm), h = sb ? sb.h : num(l.length_cm);
+    const g = ls ? pieceGeometry(ls) : null;   // เส้นตัด (รวมเผื่อพับ) · รู · เส้นเย็บ
+    const cb = g?.cutBox;
+    const w = cb ? cb.w : num(l.width_cm), h = cb ? cb.h : num(l.length_cm);
+    const sh = (P: Pt[]): Pt[] => P.map(([x, y]) => [x - (cb?.x ?? 0), y - (cb?.y ?? 0)]);   // ให้มุมซ้ายบนของเส้นตัด = 0,0
+    const allow = ls?.allow ?? 0;
     if (!(w > 0) || !(h > 0)) continue;
     out.push({
       id: `P${out.length + 1}`,
-      name: (l.item_name ?? "").trim() || "ไม่ระบุวัสดุ",
+      name: [(l.item_name ?? "").trim() || "ไม่ระบุวัสดุ", ls?.name].filter(Boolean).join(" · "),
       group: (l.group_name ?? "").trim() || "ไม่ระบุชนิด",
       w: r1(w), h: r1(h),
-      d: ls ? shapePathD(ls.shape) : null,
-      outline: ls ? flattenShape(ls.shape, 12) : null,
+      d: ls && g ? (allow ? polyD(sh(g.cut)) + g.holesCut.map((x) => polyD(sh(x))).join("") : shapePathD(ls.shape, -(cb?.x ?? 0), -(cb?.y ?? 0)) + (ls.holes ?? []).map((x) => shapePathD(x, -(cb?.x ?? 0), -(cb?.y ?? 0))).join("")) : null,
+      sewD: ls && g && allow ? shapePathD(ls.shape, -(cb?.x ?? 0), -(cb?.y ?? 0)) + (ls.holes ?? []).map((x) => shapePathD(x, -(cb?.x ?? 0), -(cb?.y ?? 0))).join("") : null,
+      outline: g ? sh(g.cut) : null,
+      holes: g ? g.holesCut.map(sh) : null,
+      sewOutline: g && allow ? sh(g.sew) : null,
       count: Math.max(1, Math.round(num(l.pieces)) || 1),
       faceWidth: num(l.face_width_cm) > 0 ? num(l.face_width_cm) : null,
       note: (l.note ?? "").trim() || null,
@@ -131,14 +140,19 @@ export function buildPatternDxf(layout: PatternLayout): string {
   const mm = (cm: number) => Math.round(cm * 100) / 10;   // ซม. → มม. (ทศนิยม 1)
   const H = mm(layout.height);
   const out: string[] = ["0", "SECTION", "2", "HEADER", "9", "$INSUNITS", "70", "4", "0", "ENDSEC", "0", "SECTION", "2", "ENTITIES"];
-  const line = (x1: number, y1: number, x2: number, y2: number) =>
-    out.push("0", "LINE", "8", "CUT", "10", String(x1), "20", String(y1), "30", "0", "11", String(x2), "21", String(y2), "31", "0");
+  const line = (x1: number, y1: number, x2: number, y2: number, layer = "CUT") =>
+    out.push("0", "LINE", "8", layer, "10", String(x1), "20", String(y1), "30", "0", "11", String(x2), "21", String(y2), "31", "0");
   for (const p of layout.placed) {
     const x0 = mm(p.x), x1 = mm(p.x + p.w);
     const yTop = H - mm(p.y), yBot = H - mm(p.y + p.h);
-    if (p.outline && p.outline.length >= 3) {   // รูปทรงจริง → เส้นต่อกันรอบรูป
-      const P = p.outline.map(([x, y]) => [mm(p.x + x), H - mm(p.y + y)] as const);
-      for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; line(a[0], a[1], b[0], b[1]); }
+    if (p.outline && p.outline.length >= 3) {   // รูปทรงจริง → เส้นตัดรอบรูป + รูเจาะ (CUT) · เส้นเย็บ (SEW)
+      const ring = (Q: Pt[], layer: string) => {
+        const P = Q.map(([x, y]) => [mm(p.x + x), H - mm(p.y + y)] as const);
+        for (let i = 0; i < P.length; i++) { const a = P[i], b = P[(i + 1) % P.length]; line(a[0], a[1], b[0], b[1], layer); }
+      };
+      ring(p.outline, "CUT");
+      for (const h of p.holes ?? []) ring(h, "CUT");
+      if (p.sewOutline) ring(p.sewOutline, "SEW");
     } else { line(x0, yBot, x1, yBot); line(x1, yBot, x1, yTop); line(x1, yTop, x0, yTop); line(x0, yTop, x0, yBot); }
     const textH = Math.max(3, Math.min(8, mm(Math.min(p.w, p.h)) / 8));
     out.push("0", "TEXT", "8", "LABEL", "10", String(Math.round((x0 + 2) * 10) / 10), "20", String(Math.round((yTop - textH - 2) * 10) / 10), "30", "0",
@@ -155,7 +169,7 @@ export function buildPatternSvg(layout: PatternLayout): string {
   const W = Math.max(1, layout.width), H = Math.max(1, layout.height);
   const body = layout.placed.map((p) => {
     const fs = Math.max(0.8, Math.min(2.4, Math.min(p.w, p.h) / 6));
-    const outlineSvg = p.d ? `<path transform="translate(${p.x} ${p.y})" d="${p.d}" fill="none" stroke="#000" stroke-width="0.05"/>` : `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="none" stroke="#000" stroke-width="0.05"/>`;
+    const outlineSvg = p.d ? `<path transform="translate(${p.x} ${p.y})" d="${p.d}" fill="none" stroke="#000" stroke-width="0.05"/>` + (p.sewD ? `<path transform="translate(${p.x} ${p.y})" d="${p.sewD}" fill="none" stroke="#000" stroke-width="0.03" stroke-dasharray="0.3 0.2"/>` : "") : `<rect x="${p.x}" y="${p.y}" width="${p.w}" height="${p.h}" fill="none" stroke="#000" stroke-width="0.05"/>`;
     return `<g>${outlineSvg}`
       + `<text x="${r1(p.x + p.w / 2)}" y="${r1(p.y + p.h / 2)}" font-size="${r1(fs)}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif">${esc(`${p.id} ${p.name}`)}</text>`
       + `<text x="${r1(p.x + p.w / 2)}" y="${r1(p.y + p.h / 2 + fs * 1.3)}" font-size="${r1(fs * 0.8)}" text-anchor="middle" dominant-baseline="middle" font-family="sans-serif">${esc(`${p.w}×${p.h} ซม. · ตัด ×${p.count}`)}</text></g>`;
