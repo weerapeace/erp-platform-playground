@@ -203,7 +203,7 @@ export function overheadRows(cfg: OverheadCfg, presets: CostPreset[]): OverheadR
 export const overheadTotal = (rows: OverheadRow[]) => r2(rows.reduce((s, r) => s + (r.on ? r.amount : 0), 0));
 
 // ── ค่าแรงที่เคยผลิต (ตัวเลือกอ้างอิง ค่าแรงผลิต) ──
-export type LaborRef = { source: "bom" | "wo" | "ds"; code: string; name: string; amount: number; note?: string | null; at?: string | null };
+export type LaborRef = { source: "bom" | "wo" | "ds"; code: string; name: string; amount: number; note?: string | null; at?: string | null; image?: string | null };
 
 /** รหัสรุ่น (Parent) จากรหัส SKU/BOM — BOM-CTL044-01 → CTL044 · CTL044-01 → CTL044 */
 export const parentOfCode = (code: string): string => code.replace(/^BOM-/i, "").replace(/-\d+$/, "");
@@ -220,9 +220,21 @@ export type CutLineInput = {
   pieces?: number | null;
   cut_rate?: number | null;     // แก้เฉพาะบรรทัดนี้
   cut_skip?: boolean | null;    // null = อัตโนมัติ
+  // ไว้บอกว่าบรรทัดนี้คือชิ้นไหน (โชว์รายบรรทัดในตารางค่าตัด)
+  note?: string | null;
+  width_cm?: number | null;
+  length_cm?: number | null;
+  shape?: { name?: string | null } | null;
 };
 export type CutRateSource = "line" | "material" | "central" | "none";
-export type CutRow = { key: string; itemId: string | null; name: string; group: string; pieces: number; rate: number; source: CutRateSource; on: boolean; auto: boolean; amount: number };
+export type CutRow = { key: string; itemId: string | null; name: string; group: string; pieces: number; rate: number; source: CutRateSource; on: boolean; auto: boolean; amount: number; detail: string };
+
+/** บรรทัดนี้คือชิ้นไหน: ชื่อชิ้นที่วาด · หมายเหตุ · ขนาด กว้าง×ยาว */
+export function cutLineDetail(l: Pick<CutLineInput, "note" | "width_cm" | "length_cm" | "shape">): string {
+  const w = num(l.width_cm), h = num(l.length_cm);
+  const f = (v: number) => String(Math.round(v * 10) / 10);
+  return [(l.shape?.name ?? "").trim(), (l.note ?? "").trim(), w != null && h != null && w > 0 && h > 0 ? `${f(w)}×${f(h)} ซม.` : ""].filter(Boolean).join(" · ");
+}
 
 /** อะไหล่ (นับเป็นชิ้นสำเร็จ / หัวซิป / กระดุม) — ไม่ต้องตัด → ไม่นับอัตโนมัติ */
 export const isHardwareLine = (l: Pick<CutLineInput, "group_name" | "calc_method">): boolean =>
@@ -238,7 +250,7 @@ export function cutLaborRows(lines: CutLineInput[], central: number | null, mate
     const mat = l.item_id ? num(materialRate(l.item_id)) : null;
     const line = num(l.cut_rate);
     const [rate, source]: [number, CutRateSource] = line != null ? [line, "line"] : mat != null ? [mat, "material"] : central != null ? [central, "central"] : [0, "none"];
-    return { key: l.key, itemId: l.item_id ?? null, name: (l.item_name ?? "").trim() || "—", group: (l.group_name ?? "").trim() || "—", pieces, rate, source, on, auto: l.cut_skip == null, amount: on ? r2(pieces * rate) : 0 };
+    return { key: l.key, itemId: l.item_id ?? null, name: (l.item_name ?? "").trim() || "—", group: (l.group_name ?? "").trim() || "—", pieces, rate, source, on, auto: l.cut_skip == null, amount: on ? r2(pieces * rate) : 0, detail: cutLineDetail(l) };
   });
 }
 
@@ -249,6 +261,7 @@ export type CutGroup = {
   rate: number | null;            // null = หลายราคาในวัสดุเดียวกัน
   source: CutRateSource | "mixed";
   auto: boolean;                  // ทุกบรรทัดยังเป็นอัตโนมัติ
+  rows: CutRow[];                 // รายบรรทัด (กดดูว่ามีชิ้นไหนบ้าง เท่าไหร่)
 };
 export function groupCutRows(rows: CutRow[]): CutGroup[] {
   const map = new Map<string, CutRow[]>();
@@ -265,6 +278,7 @@ export function groupCutRows(rows: CutRow[]): CutGroup[] {
       rate: rates.length === 1 ? rates[0] : null,
       source: sources.length === 1 ? sources[0] : "mixed",
       auto: rs.every((r) => r.auto),
+      rows: rs,
     };
   });
 }

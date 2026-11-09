@@ -171,3 +171,19 @@ describe("ค่าตัดตามวัตถุดิบ", () => {
     expect(g[0].items[0].name).toBe("ผ้าซับใน");
   });
 });
+
+describe("ตารางค่าตัด: รายบรรทัด", () => {
+  it("บอกชิ้นไหน (ชื่อชิ้นวาด · หมายเหตุ · ขนาด) + จัดกลุ่มเก็บรายบรรทัด", async () => {
+    const { cutLaborRows, groupCutRows, cutLineDetail } = await import("@/lib/design-cost-presets");
+    expect(cutLineDetail({ shape: { name: "ตัว" }, note: "หน้า", width_cm: 30, length_cm: 40.25 })).toBe("ตัว · หน้า · 30×40.3 ซม.");
+    expect(cutLineDetail({})).toBe("");
+    const rows = cutLaborRows([
+      { key: "a", item_id: "kw", item_name: "ผ้าขาวม้า", group_name: "ผ้า", pieces: 2, width_cm: 30, length_cm: 40 },
+      { key: "b", item_id: "kw", item_name: "ผ้าขาวม้า", group_name: "ผ้า", pieces: 4, shape: { name: "หู" } },
+    ], null, () => 1.33);
+    const g = groupCutRows(rows);
+    expect(g).toHaveLength(1);
+    expect(g[0].rows.map((r) => [r.detail, r.pieces, r.amount])).toEqual([["30×40 ซม.", 2, 2.66], ["หู", 4, 5.32]]);
+    expect(g[0].amount).toBe(7.98);
+  });
+});

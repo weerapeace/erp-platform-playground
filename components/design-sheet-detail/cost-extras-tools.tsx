@@ -10,11 +10,12 @@
  *   CutRateByMaterial   — แท็บค่าตัดต่อชิ้น: ค่ากลาง + ตั้งรายวัตถุดิบ / ทั้งกลุ่ม + ตัวช่วยคิดจากค่าแรงต่อวัน
  * คิดเลขอยู่ lib/design-cost-presets · ของกลาง: Popover · ERPModal · askConfirm · Icon
  */
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Popover } from "@/components/popover";
 import { ERPModal } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { Icon } from "@/components/icon";
+import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import {
   cutLaborSummary, cutMaterialGroups, cutRateFromWage, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
@@ -110,6 +111,7 @@ export function LaborRefPicker({ sheetId, onPick }: { sheetId?: string | null; o
               : list.map((r, i) => (
                 <button key={`${r.code}-${i}`} type="button" onClick={() => { onPick(r); close(); }}
                   className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-slate-50">
+                  <HoverImage url={r.image ?? null} size={40} previewSize={260} alt={r.name} rounded="rounded-md" fallback="—" className="shrink-0" />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate text-[13px] text-slate-800"><b className="font-semibold">{r.code}</b> <span className="text-slate-500">{r.name !== r.code ? r.name : ""}</span></span>
                     <span className="block truncate text-[11px] text-slate-400">{[r.note, r.at].filter(Boolean).join(" · ")}</span>
@@ -469,6 +471,8 @@ export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverri
 }) {
   const s = cutLaborSummary(rows);
   const groups = groupCutRows(rows);
+  const [openKeys, setOpenKeys] = useState<Set<string>>(new Set());   // วัสดุที่กางดูรายบรรทัด
+  const toggleOpen = (k: string) => setOpenKeys((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; });
   const [qty, setQty] = useState<number>(orderQty && orderQty > 0 ? orderQty : 1000);
   useEffect(() => { if (orderQty && orderQty > 0) setQty(orderQty); }, [orderQty]);
   return (
@@ -485,8 +489,10 @@ export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverri
                 const label = g.source === "mixed" ? "หลายราคา" : SRC_LABEL[g.source];
                 const cls = g.source === "mixed" ? "border-violet-200 bg-violet-50 text-violet-700" : SRC_CLS[g.source];
                 const isLine = g.source === "line";
+                const opened = openKeys.has(g.key);
                 return (
-                  <tr key={g.key} className={`border-b border-slate-50 ${g.on === "none" ? "text-slate-400" : ""}`}>
+                  <Fragment key={g.key}>
+                  <tr className={`border-b border-slate-50 ${g.on === "none" ? "text-slate-400" : ""}`}>
                     <td className="px-2 py-1">
                       <input type="checkbox" checked={g.on !== "none"} disabled={readOnly}
                         ref={(el) => { if (el) el.indeterminate = g.on === "some"; }}
@@ -495,7 +501,12 @@ export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverri
                     </td>
                     <td className="max-w-[200px] px-1 py-1">
                       <span className="block truncate" title={g.name}>{g.name}</span>
-                      {g.lines > 1 && <span className="text-[10px] text-slate-400">{g.lines} บรรทัดในตาราง</span>}
+                      {g.lines > 1 ? (
+                        <button type="button" onClick={() => toggleOpen(g.key)} aria-expanded={opened}
+                          className="inline-flex items-center gap-0.5 text-[10px] text-blue-600 hover:underline" title="ดูว่ามีชิ้นไหนบ้าง ชิ้นละเท่าไหร่">
+                          <Icon value={opened ? "i:chevron-up" : "i:chevron-down"} className="text-[11px]" />{g.lines} บรรทัด — {opened ? "ซ่อน" : "ดูทีละชิ้น"}
+                        </button>
+                      ) : g.rows[0]?.detail ? <span className="block truncate text-[10px] text-slate-400" title={g.rows[0].detail}>{g.rows[0].detail}</span> : null}
                     </td>
                     <td className="px-1 py-1 text-slate-500">{g.group}{!g.auto && <button type="button" disabled={readOnly} onClick={() => onToggle(g.lineKeys, null)} className="ml-1 text-[10px] text-slate-400 underline" title="กลับเป็นอัตโนมัติ">อัตโนมัติ</button>}</td>
                     <td className="px-1 py-1 text-right tabular-nums">{g.pieces}</td>
@@ -521,6 +532,17 @@ export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverri
                     </td>
                     <td className="px-2 py-1 text-right tabular-nums">{g.on !== "none" ? baht(g.amount) : "—"}</td>
                   </tr>
+                  {opened && g.rows.map((r, i) => (
+                    <tr key={r.key} className={`border-b border-slate-50 bg-slate-50/60 text-[11px] ${r.on ? "text-slate-600" : "text-slate-400 line-through"}`}>
+                      <td />
+                      <td className="max-w-[200px] px-1 py-0.5 pl-3"><span className="block truncate" title={r.detail || undefined}>└ {r.detail || `บรรทัดที่ ${i + 1}`}</span></td>
+                      <td className="px-1 py-0.5 text-slate-400">{r.on ? "" : "ไม่นับ"}</td>
+                      <td className="px-1 py-0.5 text-right tabular-nums">{r.pieces}</td>
+                      <td className="px-1 py-0.5 tabular-nums text-slate-500">× {baht(r.rate)}</td>
+                      <td className="px-2 py-0.5 text-right tabular-nums">{r.on ? baht(r.amount) : "—"}</td>
+                    </tr>
+                  ))}
+                  </Fragment>
                 );
               })}
             </tbody>
