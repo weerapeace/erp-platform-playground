@@ -47,7 +47,12 @@ export type ListingShopSummary = {
 };
 
 /** สรุปต่อรายการ สำหรับหน้าจับคู่ (การ์ด/ตาราง/กล่องตัวซ้ำ) — GET /api/platform-catalog?view=summary */
-export type ListingCardSummary = Omit<ListingShopSummary, "category">;
+export type ListingCardSummary = Omit<ListingShopSummary, "category"> & {
+  /** LINE ที่จับคู่แล้ว: จำนวนตัวเลือกที่ "ราคาที่ลูกค้าจ่าย" ไม่ตรงกับที่ระบบจะส่ง (null = ไม่ได้เทียบ) */
+  erpPriceDiff?: number | null;
+  /** จำนวนตัวเลือกที่จ่ายตรง แต่ราคาเต็ม (ตัวขีดฆ่า) ไม่ตรง — ไม่นับเป็นราคาผิดปกติ */
+  erpFullDiff?: number | null;
+};
 export type ListingSummariesResponse = { summaries: Record<string, ListingCardSummary>; error: string | null };
 
 /** ราคาที่ลูกค้าจ่ายจริง = ราคาลด (ถ้ามี) ไม่งั้นราคาปกติ */
@@ -57,6 +62,26 @@ export const effectivePrice = (s: Pick<ListingShopSummary, "price" | "salePrice"
 export function discountPct(s: Pick<ListingShopSummary, "price" | "salePrice"> | null | undefined): number {
   if (!s || s.price == null || s.price <= 0 || s.salePrice == null || s.salePrice >= s.price) return 0;
   return Math.round((1 - s.salePrice / s.price) * 100);
+}
+
+// ───────── ราคาผิดปกติ ─────────
+/** ราคาที่ลูกค้าจ่ายต่ำกว่านี้ = น่าสงสัย (เช่น GIFT03 ลดเหลือ 1฿) */
+export const PRICE_TINY_UNDER = 10;
+/** ลดเกินกี่ % = น่าสงสัย */
+export const PRICE_DEEP_PCT = 80;
+export type PriceFlag = "tiny" | "deep" | "erp";
+export const PRICE_FLAG_LABEL: Record<PriceFlag, string> = {
+  tiny: `ราคาต่ำกว่า ${PRICE_TINY_UNDER}฿`, deep: `ลดเกิน ${PRICE_DEEP_PCT}%`, erp: "ราคาขายไม่ตรงระบบ",
+};
+/** ธงราคาผิดปกติของรายการ 1 ตัว (ว่าง = ปกติ) */
+export function priceFlags(s: Pick<ListingCardSummary, "price" | "salePrice" | "erpPriceDiff" | "erpFullDiff"> | null | undefined): PriceFlag[] {
+  if (!s) return [];
+  const out: PriceFlag[] = [];
+  const pay = effectivePrice(s);
+  if (pay != null && pay > 0 && pay < PRICE_TINY_UNDER) out.push("tiny");
+  if (discountPct(s) > PRICE_DEEP_PCT) out.push("deep");
+  if ((s.erpPriceDiff ?? 0) > 0) out.push("erp");
+  return out;
 }
 
 type Obj = Record<string, unknown>;

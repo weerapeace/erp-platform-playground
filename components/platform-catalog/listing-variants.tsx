@@ -4,6 +4,7 @@
  *
  * บอกเจ้าของว่าแต่ละตัวเลือก (สี/ไซซ์) บนร้าน ตรงกับ SKU ไหนในระบบ ตามกฎเดียวกับตอนส่งราคา/สต๊อก:
  *   ✓ รหัสตรง · ≈ ใช้รหัสสี (LINE แยกไซซ์ ระบบมีแค่สี) · ✗ ไม่เจอ (ส่งราคา/สต๊อกให้ไม่ได้) · ⚠ อยู่คนละรุ่น
+ *   LINE: ราคาที่ระบบจะส่ง (กฎเดียวกับปุ่มส่งราคา) — ราคาจ่ายไม่ตรง = ตัวแดง · แค่ราคาเต็มไม่ตรง = ส้ม
  * อ่านอย่างเดียว (เฟสนี้ยังไม่ให้แก้คู่) · ข้อมูล: GET /api/platform-catalog?view=variants · กฎ: lib/platform-variant-match
  * ของกลางที่ใช้: MiniTable · HoverImage · state-views
  */
@@ -49,6 +50,7 @@ export function ListingVariantMap({ listingId, reloadKey = 0 }: { listingId: str
   }
 
   const c = data.counts;
+  const hasErpPrice = data.rows.some((r) => r.erp_pay != null);
   const cols: MiniColumn<VariantMatchRow>[] = [
     {
       key: "opt", header: "ตัวเลือกบนร้าน", width: "2fr", sortValue: (r) => r.label,
@@ -69,6 +71,16 @@ export function ListingVariantMap({ listingId, reloadKey = 0 }: { listingId: str
         ? <span className="leading-tight"><span className="block">{money(r.sale_price)}</span><span className="block text-[11px] text-slate-400 line-through">{money(r.price)}</span></span>
         : <span>{money(r.price)}</span>,
     },
+    ...(hasErpPrice ? [{
+      key: "erp_price", header: "ราคาที่ระบบจะส่ง", width: "7rem", align: "right" as const, sortValue: (r: VariantMatchRow) => (r.price_diff === "pay" ? 0 : r.price_diff === "full" ? 1 : 2),
+      cell: (r: VariantMatchRow) => r.erp_pay == null ? <span className="text-slate-300">—</span> : (
+        <span className={`leading-tight ${r.price_diff === "pay" ? "font-medium text-rose-600" : r.price_diff === "full" ? "text-amber-700" : "text-slate-600"}`}
+          title={r.price_diff === "pay" ? "ราคาที่ลูกค้าจ่ายบนร้าน ไม่ตรงกับที่ระบบจะส่ง" : r.price_diff === "full" ? "ราคาจ่ายตรง แต่ราคาเต็ม (ตัวขีดฆ่า) ไม่ตรง — ในระบบอาจยังไม่มีราคาเต็ม" : "ตรงกับบนร้าน"}>
+          <span className="block">{money(r.erp_pay)}</span>
+          {r.erp_price != null && r.erp_price !== r.erp_pay && <span className="block text-[11px] text-slate-400 line-through">{money(r.erp_price)}</span>}
+        </span>
+      ),
+    }] : []),
     {
       key: "erp", header: "SKU ในระบบ", width: "1.6fr", sortValue: (r) => ({ none: 0, nosku: 1, base: 2, exact: 3 })[r.kind] - (r.other_parent ? 0.5 : 0),
       cell: (r) => {
@@ -100,6 +112,8 @@ export function ListingVariantMap({ listingId, reloadKey = 0 }: { listingId: str
         {chip(c.none, "ไม่เจอ", KIND.none.cls)}
         {chip(c.nosku, "ไม่มีรหัส", KIND.nosku.cls)}
         {chip(c.other_parent, "อยู่คนละรุ่น", "text-amber-700 bg-amber-50 border-amber-200")}
+        {chip(c.price_diff, "ราคาขายไม่ตรงระบบ", "text-rose-700 bg-rose-50 border-rose-200")}
+        {chip(c.full_diff, "แค่ราคาเต็มไม่ตรง", "text-amber-700 bg-amber-50 border-amber-200")}
       </div>
       <MiniTable rows={data.rows} columns={cols} rowKey={(r) => r.key} dense hideToolbar={data.rows.length <= 10}
         searchText={(r) => `${r.label} ${r.sku ?? ""} ${r.erp_code ?? ""}`} searchPlaceholder="ค้นหาตัวเลือก / รหัส" emptyText="ไม่มีตัวเลือก"
@@ -107,6 +121,7 @@ export function ListingVariantMap({ listingId, reloadKey = 0 }: { listingId: str
       <p className="text-[11px] text-slate-400">
         ระบบจับตัวเลือกกับ SKU เองด้วยรหัส ทุกครั้งที่ส่งราคา/สต๊อก (ไม่ต้องกดจับคู่ทีละตัว)
         {c.none + c.nosku > 0 ? " · ตัวที่ “ไม่เจอ/ไม่มีรหัส” จะส่งราคา/สต๊อกให้ไม่ได้ — แก้รหัสบนร้านให้ตรง หรือเพิ่ม SKU ในระบบ" : ""}
+        {c.price_diff + c.full_diff > 0 ? ` · ราคาไม่ตรง ${(c.price_diff + c.full_diff).toLocaleString()} ตัวเลือก — กด “ส่งราคา” จะเปลี่ยนราคาบนร้านเป็นตามคอลัมน์ “ราคาที่ระบบจะส่ง” (ตรวจราคาในระบบก่อน · ไม่มีราคาเต็มในระบบ = ตัวขีดฆ่าบนร้านจะหาย)` : ""}
       </p>
     </div>
   );

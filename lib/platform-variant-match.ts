@@ -9,6 +9,7 @@
  * ต้องตรงกับที่ /api/line-shopping/push-prices ทำจริง (เทียบแบบตัวพิมพ์ตรงกัน) — ฐานรหัสใช้ baseOfCode ตัวเดียวกัน
  */
 import { baseOfCode } from "@/lib/product-listing-context";
+import { linePrice } from "@/lib/platform-listing-builder";
 
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Obj : null);
@@ -63,6 +64,36 @@ export function variantLookupCodes(skus: (string | null)[]): string[] {
   return [...out];
 }
 
+/**
+ * ราคาที่ระบบจะส่งขึ้น LINE ให้ตัวเลือก 1 ตัว (กฎเดียวกับปุ่ม "ส่งราคา" — push-prices ใช้ตัวนี้)
+ * ราคาเต็ม/ราคาขาย ของรหัสตัวเอง ไม่มี → ของรหัสสี (ฐาน) · แล้วคิดด้วย linePrice (ไม่มีราคาเต็ม = ใช้ราคาขาย)
+ * null = ไม่รู้ราคา (ไม่มีรหัส / ไม่เจอ SKU / ไม่มีราคาทั้งคู่)
+ */
+export function expectedLinePrice(sku: string | null, fakeOf: Map<string, number>, saleOf: Map<string, number>): { price: number; discount: number } | null {
+  if (!sku) return null;
+  const pick = (m: Map<string, number>): number | null => {
+    const own = m.get(sku); if (own != null) return own;
+    const b = baseOfCode(sku); const mv = b ? m.get(b) : undefined;
+    return mv ?? null;
+  };
+  return linePrice(pick(fakeOf), pick(saleOf));
+}
+
+/**
+ * ราคาบนร้านเทียบกับที่ระบบจะส่ง (ต่างกัน ≥ 1 บาท)
+ *   "pay"  = ราคาที่ลูกค้าจ่ายไม่ตรง (เงินจริงต่างกัน — สำคัญ)
+ *   "full" = จ่ายตรง แต่ราคาเต็ม (ตัวขีดฆ่า) ไม่ตรง — ส่วนใหญ่เพราะในระบบยังไม่มีราคาเต็ม
+ *   null   = ตรง / ไม่รู้ราคาในระบบ
+ */
+export type LinePriceDiff = "pay" | "full" | null;
+export function linePriceDiff(shop: Pick<ShopVariant, "price" | "sale_price">, exp: { price: number; discount: number } | null): LinePriceDiff {
+  if (!exp || shop.price == null) return null;
+  const shopPay = shop.sale_price ?? shop.price;
+  if (Math.abs(shopPay - (exp.price - exp.discount)) >= 1) return "pay";
+  if (Math.abs(shop.price - exp.price) >= 1) return "full";
+  return null;
+}
+
 export type VariantMatchKind = "exact" | "base" | "none" | "nosku";
 export type SkuLite = { code: string; parent_sku_id: string | null; name?: string | null };
 
@@ -84,23 +115,34 @@ export type VariantMatchRow = ShopVariant & {
   erp_parent_code: string | null;
   /** SKU ที่เจออยู่คนละรุ่นกับ Parent SKU ที่จับคู่ไว้ (ราคา/สต๊อกจะมาจากรุ่นอื่น — ควรตรวจ) */
   other_parent: boolean;
+  /** ราคาที่ระบบจะส่ง (LINE เท่านั้น · null = ไม่รู้) — ราคาเต็ม + ราคาที่ลูกค้าจ่าย */
+  erp_price: number | null;
+  erp_pay: number | null;
+  /** ราคาบนร้านเทียบที่ระบบจะส่ง: "pay" ราคาจ่ายไม่ตรง · "full" แค่ราคาเต็มไม่ตรง · null ตรง/ไม่รู้ */
+  price_diff: LinePriceDiff;
 };
-export type VariantMatchCounts = { total: number; exact: number; base: number; none: number; nosku: number; other_parent: number };
+export type VariantMatchCounts = { total: number; exact: number; base: number; none: number; nosku: number; other_parent: number; price_diff: number; full_diff: number };
 
 /** จับทุกตัวเลือก + นับสรุป · matchedParentId = Parent SKU ที่จับคู่ไว้ (null = ยังไม่จับคู่ → ไม่เช็กคนละรุ่น) */
 export function matchShopVariants(
   variants: ShopVariant[], byCode: Map<string, SkuLite>, matchedParentId: string | null, parentCodeOf: (id: string) => string | null,
+  /** ราคาที่ระบบจะส่ง (LINE: expectedLinePrice) — ไม่ส่ง = ไม่เทียบราคา */
+  priceOf?: (sku: string | null) => { price: number; discount: number } | null,
 ): { rows: VariantMatchRow[]; counts: VariantMatchCounts } {
-  const counts: VariantMatchCounts = { total: variants.length, exact: 0, base: 0, none: 0, nosku: 0, other_parent: 0 };
+  const counts: VariantMatchCounts = { total: variants.length, exact: 0, base: 0, none: 0, nosku: 0, other_parent: 0, price_diff: 0, full_diff: 0 };
   const rows = variants.map((v): VariantMatchRow => {
     const m = matchVariantSku(v.sku, byCode);
     counts[m.kind]++;
     const pid = m.erp?.parent_sku_id ?? null;
     const other = !!(matchedParentId && pid && pid !== matchedParentId);
     if (other) counts.other_parent++;
+    const exp = priceOf ? priceOf(v.sku) : null;
+    const diff = linePriceDiff(v, exp);
+    if (diff === "pay") counts.price_diff++; else if (diff === "full") counts.full_diff++;
     return {
       ...v, kind: m.kind, erp_code: m.erp?.code ?? null, erp_name: m.erp?.name ?? null,
       erp_parent_code: pid ? parentCodeOf(pid) : null, other_parent: other,
+      erp_price: exp?.price ?? null, erp_pay: exp ? exp.price - exp.discount : null, price_diff: diff,
     };
   });
   return { rows, counts };

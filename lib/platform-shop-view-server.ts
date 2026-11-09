@@ -9,7 +9,7 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { duplicateCounts, summarizeListing, type ListingCardSummary, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
-import { matchShopVariants, shopVariantsOf, variantLookupCodes, type ListingVariantsResponse, type SkuLite } from "@/lib/platform-variant-match";
+import { expectedLinePrice, linePriceDiff, matchShopVariants, shopVariantsOf, variantLookupCodes, type ListingVariantsResponse, type SkuLite } from "@/lib/platform-variant-match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 const CHUNK = 200;   // .in() ยาวเกินจะโดนตัด/ช้า → ถามเป็นชุด
@@ -106,15 +106,51 @@ async function imageStates(admin: Admin, noCover: string[]): Promise<Map<string,
 }
 
 /**
+ * SKU ในระบบตามรหัส (รหัสตัวเลือก + รหัสสี) — รุ่น/ชื่อ/ราคาเต็ม/ราคาขาย
+ * รหัสเดียวกันมีทั้งตัวใช้งาน + ตัวที่ปิดแล้ว (เช่น JEAN08-01 ใต้ Parent ซ้ำที่ปิดไป) → ใช้ตัวที่ใช้งานอยู่
+ */
+async function loadSkuLookup(admin: Admin, codes: string[]): Promise<{ byCode: Map<string, SkuLite>; fakeOf: Map<string, number>; saleOf: Map<string, number> }> {
+  type Row = { code: string; parent_sku_id: string | null; name_th: string | null; color: string | null; color_th: string | null; is_active: boolean | null; fake_price: number | null; list_price: number | null };
+  const byCode = new Map<string, SkuLite>(); const fakeOf = new Map<string, number>(); const saleOf = new Map<string, number>();
+  const activeCodes = new Set<string>();
+  const parts = await Promise.all(chunks(codes).map(async (ids) => {
+    const { data } = await admin.from("skus_v2").select("code, parent_sku_id, name_th, color, color_th, is_active, fake_price, list_price").in("code", ids);
+    return (data ?? []) as Row[];
+  }));
+  for (const s of parts.flat()) {
+    const active = s.is_active !== false;
+    if (byCode.has(s.code) && (activeCodes.has(s.code) || !active)) continue;
+    byCode.set(s.code, { code: s.code, parent_sku_id: s.parent_sku_id, name: s.color_th || s.color || s.name_th || null });
+    const f = Number(s.fake_price); if (Number.isFinite(f) && f > 0) fakeOf.set(s.code, f); else fakeOf.delete(s.code);
+    const l = Number(s.list_price); if (Number.isFinite(l) && l > 0) saleOf.set(s.code, l); else saleOf.delete(s.code);
+    if (active) activeCodes.add(s.code);
+  }
+  return { byCode, fakeOf, saleOf };
+}
+
+/**
  * สรุปรูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ (หน้าจับคู่ — การ์ด/ตาราง/กล่องตัวซ้ำ)
  * กฎสรุปตัวเดียวกับมุมมองหน้าร้าน (summarizeListing) · ส่งกลับแค่ตัวเลขสั้น ๆ ไม่ส่งข้อมูลดิบทั้งก้อน
+ * LINE ที่จับคู่แล้ว: นับตัวเลือกที่ราคาจ่ายไม่ตรง (erpPriceDiff) / แค่ราคาเต็มไม่ตรง (erpFullDiff) กับที่ระบบจะส่ง — กฎเดียวกับปุ่มส่งราคา
  */
 export async function loadListingSummaries(admin: Admin, platformId: string, platformCode: string, brandId: string): Promise<Record<string, ListingCardSummary>> {
   const rows = await loadListings(admin, platformId, brandId);
   const out: Record<string, ListingCardSummary> = {};
   for (const r of rows) {
     const s = summarizeListing(platformCode, rawSlice(r), r.price != null ? Number(r.price) : null);
-    out[r.id] = { image: s.image, imageKnown: s.imageKnown, stock: s.stock, display: s.display, price: s.price, salePrice: s.salePrice, variants: s.variants, state: s.state };
+    out[r.id] = { image: s.image, imageKnown: s.imageKnown, stock: s.stock, display: s.display, price: s.price, salePrice: s.salePrice, variants: s.variants, state: s.state, erpPriceDiff: null, erpFullDiff: null };
+  }
+  if (platformCode === "line_shopping") {
+    const matched = rows.filter((r) => r.matched_parent_sku_id && r.line_variants != null)
+      .map((r) => ({ id: r.id, vs: shopVariantsOf("line_shopping", { line: { variants: r.line_variants } }) }));
+    if (matched.length) {
+      const { fakeOf, saleOf } = await loadSkuLookup(admin, variantLookupCodes(matched.flatMap((m) => m.vs.map((v) => v.sku))));
+      for (const m of matched) {
+        const diffs = m.vs.map((v) => linePriceDiff(v, expectedLinePrice(v.sku, fakeOf, saleOf)));
+        out[m.id].erpPriceDiff = diffs.filter((d) => d === "pay").length;
+        out[m.id].erpFullDiff = diffs.filter((d) => d === "full").length;
+      }
+    }
   }
   return out;
 }
@@ -249,7 +285,7 @@ export async function loadBrandSummaries(admin: Admin, sellingCodes: readonly st
  * อ่านอย่างเดียว — ไม่บันทึกคู่ (ระบบจับด้วยรหัสทุกครั้งที่ส่งราคา/สต๊อก) · กฎจับ = lib/platform-variant-match
  */
 export async function loadListingVariants(admin: Admin, listingId: string): Promise<ListingVariantsResponse> {
-  const counts = { total: 0, exact: 0, base: 0, none: 0, nosku: 0, other_parent: 0 };
+  const counts = { total: 0, exact: 0, base: 0, none: 0, nosku: 0, other_parent: 0, price_diff: 0, full_diff: 0 };
   const fail = (error: string): ListingVariantsResponse => ({ platform_code: "", matched_parent_code: null, supported: false, fetched: false, rows: [], counts, error });
   const { data: l, error } = await admin.from("platform_catalog_listings")
     .select("id, platform_id, matched_parent_sku_id, line_variants:raw->line->variants, lazada_skus:raw->lazada->skus")
@@ -264,27 +300,16 @@ export async function loadListingVariants(admin: Admin, listingId: string): Prom
   const raw = { line: row.line_variants != null ? { variants: row.line_variants } : undefined, lazada: row.lazada_skus != null ? { skus: row.lazada_skus } : undefined };
   const variants = shopVariantsOf(platformCode, raw);
 
-  // SKU ในระบบ (รหัสเอง + รหัสสี) → รุ่นของแต่ละ SKU
-  const codes = variantLookupCodes(variants.map((v) => v.sku));
-  const byCode = new Map<string, SkuLite>();
-  const activeCodes = new Set<string>();
-  for (let i = 0; i < codes.length; i += CHUNK) {
-    const { data: ss } = await admin.from("skus_v2").select("code, parent_sku_id, name_th, color, color_th, is_active").in("code", codes.slice(i, i + CHUNK));
-    // รหัสเดียวกันมีทั้งตัวใช้งาน + ตัวที่ปิดแล้ว (เช่น JEAN08-01 ใต้ Parent ซ้ำที่ปิดไป) → ใช้ตัวที่ใช้งานอยู่ ไม่งั้นเตือน "อยู่คนละรุ่น" ผิด
-    for (const s of ((ss ?? []) as { code: string; parent_sku_id: string | null; name_th: string | null; color: string | null; color_th: string | null; is_active: boolean | null }[])) {
-      const active = s.is_active !== false;
-      if (byCode.has(s.code) && (activeCodes.has(s.code) || !active)) continue;
-      byCode.set(s.code, { code: s.code, parent_sku_id: s.parent_sku_id, name: s.color_th || s.color || s.name_th || null });
-      if (active) activeCodes.add(s.code);
-    }
-  }
+  // SKU ในระบบ (รหัสเอง + รหัสสี) → รุ่น + ราคาที่ระบบจะส่ง (ใช้ตัวที่เปิดใช้งาน ไม่งั้นเตือน "อยู่คนละรุ่น" ผิด)
+  const { byCode, fakeOf, saleOf } = await loadSkuLookup(admin, variantLookupCodes(variants.map((v) => v.sku)));
   const parentIds = [...new Set([...[...byCode.values()].map((s) => s.parent_sku_id), row.matched_parent_sku_id].filter(Boolean) as string[])];
   const parentCode = new Map<string, string>();
   for (let i = 0; i < parentIds.length; i += CHUNK) {
     const { data: ps } = await admin.from("parent_skus_v2").select("id, code").in("id", parentIds.slice(i, i + CHUNK));
     for (const p of ((ps ?? []) as { id: string; code: string | null }[])) if (p.code) parentCode.set(p.id, p.code);
   }
-  const { rows, counts: c } = matchShopVariants(variants, byCode, row.matched_parent_sku_id, (id) => parentCode.get(id) ?? null);
+  const { rows, counts: c } = matchShopVariants(variants, byCode, row.matched_parent_sku_id, (id) => parentCode.get(id) ?? null,
+    platformCode === "line_shopping" ? (sku) => expectedLinePrice(sku, fakeOf, saleOf) : undefined);
   return {
     platform_code: platformCode,
     matched_parent_code: row.matched_parent_sku_id ? parentCode.get(row.matched_parent_sku_id) ?? null : null,

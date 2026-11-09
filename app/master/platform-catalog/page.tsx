@@ -33,7 +33,7 @@ import PlatformImportProfileManager from "@/components/platform-import-profile-m
 import { PlatformShopView } from "@/components/platform-catalog/shop-view";
 import { BrandGate, BrandAvatar } from "@/components/platform-catalog/brand-gate";
 import {
-  duplicateCounts, duplicateKey, discountPct, effectivePrice, LOW_STOCK_MAX,
+  duplicateCounts, duplicateKey, discountPct, effectivePrice, priceFlags, LOW_STOCK_MAX, PRICE_FLAG_LABEL,
   type ListingCardSummary, type ListingSummariesResponse, type ShopBrandSummary, type ShopState,
 } from "@/lib/platform-listing-health";
 
@@ -50,13 +50,15 @@ type Listing = {
 };
 type Filter = "all" | ListingMatchStatus | "dup";
 // กรองตามสถานะบนร้าน (ใช้ร่วมกับการ์ดกรองสถานะจับคู่) — "หมดแต่ยังเปิดขาย" = ลูกค้าเห็นแต่ซื้อไม่ได้
-type ShopFilter = "" | "out" | "low" | "hidden" | "review";
+type ShopFilter = "" | "out" | "low" | "hidden" | "review" | "price";
 const SHOP_FILTERS: { key: Exclude<ShopFilter, "">; label: string; tip: string }[] = [
   { key: "out", label: "หมดแต่ยังเปิดขาย", tip: "ลูกค้าเห็นแต่ซื้อไม่ได้ — เติมสต๊อก หรือปิดขายไว้ก่อน" },
   { key: "low", label: `ใกล้หมด (≤${LOW_STOCK_MAX})`, tip: "เปิดขายอยู่ แต่เหลือรวมทุกตัวเลือกไม่เกิน 3 ชิ้น" },
   { key: "hidden", label: "ปิดขาย", tip: "ปิดขายบนร้านอยู่ — ตรวจว่าตั้งใจปิดไหม" },
   { key: "review", label: "รอตรวจ", tip: "ยังไม่ได้ข้อมูลจากร้าน (เช่น ระบบสร้างขึ้นร้านเองแต่ยังไม่ได้ดึงกลับ)" },
+  { key: "price", label: "ราคาผิดปกติ", tip: "ลูกค้าจ่ายต่ำกว่า 10฿ · ลดเกิน 80% · หรือราคาที่ลูกค้าจ่ายบนร้านไม่ตรงกับที่ระบบจะส่ง (LINE ที่จับคู่แล้ว · แค่ราคาเต็มไม่ตรงไม่นับ)" },
 ];
+const priceFlagText = (s: ListingCardSummary | undefined) => priceFlags(s).map((f) => (f === "erp" && s?.erpPriceDiff ? `ราคาขายไม่ตรงระบบ ${s.erpPriceDiff} ตัวเลือก` : PRICE_FLAG_LABEL[f])).join(" · ");
 // เรียงตามสถานะบนร้าน: ปัญหาก่อน
 const STATE_RANK: Record<ShopState, number> = { out: 0, low: 1, review: 2, hidden: 3, selling: 4, nodata: 5 };
 const SORT_LS = "platform-catalog:sort";
@@ -120,7 +122,7 @@ export default function PlatformCatalogPage() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [busyIds, setBusyIds] = useState<Set<string>>(new Set());
   const [workbench, setWorkbench] = useState(false);
-  const [bulkAsk, setBulkAsk] = useState(false);
+  const [bulkAsk, setBulkAsk] = useState<null | "high" | "selected">(null);   // ยืนยันหลายตัว: ทุกตัวที่รหัสตรง / เฉพาะที่ติ๊ก
   const [bulkBusy, setBulkBusy] = useState(false);
   // ไม่ต้องจับคู่ (ข้าม) — ติ๊กหลายตัว + ป๊อปเลือกเหตุผล
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -266,14 +268,16 @@ export default function PlatformCatalogPage() {
   const highRows = useMemo(() => highAll.filter((l) => !dupCounts.has(l.id)), [highAll, dupCounts]);
   const highDupSkipped = highAll.length - highRows.length;
   const matchRows = useMemo(() => filter === "all" ? listings : filter === "dup" ? listings.filter((l) => dupCounts.has(l.id)) : listings.filter((l) => statusOf(l) === filter), [listings, filter, statusOf, dupCounts]);
-  const shownRows = useMemo(() => shopFilter ? matchRows.filter((l) => summ[l.id]?.state === shopFilter) : matchRows, [matchRows, shopFilter, summ]);
+  const shownRows = useMemo(() => !shopFilter ? matchRows
+    : shopFilter === "price" ? matchRows.filter((l) => priceFlags(summ[l.id]).length > 0)
+    : matchRows.filter((l) => summ[l.id]?.state === shopFilter), [matchRows, shopFilter, summ]);
   // ร้านนี้ส่งสถานะ/สต๊อก/รูปมาไหม (ไฟล์ export ของ Shopee = ไม่ส่ง → ซ่อนคอลัมน์/ชิปที่ใช้ไม่ได้)
   const summList = useMemo(() => Object.values(summ), [summ]);
   const hasShopData = summList.some((s) => s.state !== "nodata");
   const showThumbs = summList.some((s) => s.imageKnown);
   const shopCounts = useMemo(() => {
-    const c: Record<ShopState, number> = { selling: 0, low: 0, out: 0, hidden: 0, review: 0, nodata: 0 };
-    for (const l of matchRows) { const s = summ[l.id]; if (s) c[s.state]++; }
+    const c: Record<ShopState | "price", number> = { selling: 0, low: 0, out: 0, hidden: 0, review: 0, nodata: 0, price: 0 };
+    for (const l of matchRows) { const s = summ[l.id]; if (s) { c[s.state]++; if (priceFlags(s).length) c.price++; } }
     return c;
   }, [matchRows, summ]);
   // เรียงแบบพิเศษ (เมนูเรียงของตาราง — ใช้ได้ทั้งตารางและการ์ด) · สต๊อก/ราคา/สถานะร้าน = เรียงตามคอลัมน์ (สลับทิศได้)
@@ -345,9 +349,15 @@ export default function PlatformCatalogPage() {
   const selIgnorable = selectedRows.filter((l) => !l.matched_parent_sku_id && !l.match_ignored).map((l) => l.id);
   const selIgnored = selectedRows.filter((l) => !l.matched_parent_sku_id && l.match_ignored).map((l) => l.id);
 
-  // ยืนยันทุกตัวที่ "รหัสตรงกันและไม่กำกวม" ทีเดียว (ส่งเป็นชุดละ 500)
-  const confirmHighAll = async () => {
-    const rows = highRows;
+  // ติ๊กแล้วยืนยันคู่ที่ระบบเดา — ไม่รวมตัวซ้ำบนร้าน (ต้องเลือกเก็บทีละตัว)
+  const selGuessAll = selectedRows.filter((l) => statusOf(l) === "guess" && suggestions[l.id]?.[0]);
+  const selGuess = selGuessAll.filter((l) => !dupCounts.has(l.id));
+  const selGuessDup = selGuessAll.length - selGuess.length;
+  const bulkRows = bulkAsk === "selected" ? selGuess : bulkAsk === "high" ? highRows : [];
+  const bulkSure = bulkRows.filter((l) => high.has(l.id)).length;   // รหัสตรงกันและไม่กำกวม (มั่นใจ)
+  // ยืนยันหลายตัวทีเดียว (ส่งเป็นชุดละ 500) — ทุกตัวที่รหัสตรงกัน หรือเฉพาะที่ติ๊ก
+  const confirmMany = async () => {
+    const rows = bulkRows;
     if (rows.length === 0) return;
     setBulkBusy(true);
     let updated = 0;
@@ -360,7 +370,8 @@ export default function PlatformCatalogPage() {
         updated += j.updated ?? 0;
       }
       toast.success(`จับคู่แล้ว ${updated.toLocaleString()} รายการ — แก้ทีหลังได้ทีละตัว (มีประวัติเก็บไว้)`);
-      setBulkAsk(false);
+      if (bulkAsk === "selected") setSelected(new Set());
+      setBulkAsk(null);
     } catch (e) { toast.error(`จับคู่ได้ ${updated} รายการ แล้วสะดุด: ${(e as Error).message}`); }
     finally { setBulkBusy(false); }
   };
@@ -642,8 +653,10 @@ export default function PlatformCatalogPage() {
       key: "price", header: "ราคา", sortLabel: "ราคาที่ขายจริง", width: "0.75fr", align: "right", sortValue: (l) => effectivePrice(summ[l.id]) ?? l.price ?? -1,
       cell: (l) => {
         const s = summ[l.id]; const full = s?.price ?? l.price; const sale = s?.salePrice ?? null;
-        if (sale != null) return <span className="leading-tight"><span className="block text-rose-600">{sale.toLocaleString()}฿</span>{full != null && <span className="block text-[11px] text-slate-400 line-through">{full.toLocaleString()}฿</span>}</span>;
-        return full != null ? <span>{full.toLocaleString()}฿</span> : <span className="text-slate-300">—</span>;
+        const flag = priceFlagText(s);
+        const warn = flag ? <span className="mt-0.5 flex items-center justify-end gap-0.5 text-[10px] text-amber-700" title={flag}><Icon name="warning" />ราคาผิดปกติ</span> : null;
+        if (sale != null) return <span className="leading-tight"><span className="block text-rose-600">{sale.toLocaleString()}฿</span>{full != null && <span className="block text-[11px] text-slate-400 line-through">{full.toLocaleString()}฿</span>}{warn}</span>;
+        return full != null ? <span className="leading-tight"><span className="block">{full.toLocaleString()}฿</span>{warn}</span> : <span className="text-slate-300">—</span>;
       },
     },
     { key: "match", header: "จับคู่ในระบบ", width: "1.6fr", align: "right", sortValue: (l) => ({ guess: 0, none: 1, ok: 2, ignored: 3 })[statusOf(l)], cell: (l) => matchCell(l) },
@@ -875,7 +888,7 @@ export default function PlatformCatalogPage() {
                         className={`h-7 rounded-full border px-2.5 text-xs whitespace-nowrap ${!shopFilter ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>ทั้งหมด</button>
                       {SHOP_FILTERS.map((f) => (
                         <button key={f.key} type="button" onClick={() => setShopFilter(shopFilter === f.key ? "" : f.key)} aria-pressed={shopFilter === f.key} title={f.tip}
-                          className={`h-7 rounded-full border px-2.5 text-xs whitespace-nowrap ${shopFilter === f.key ? "border-violet-300 bg-violet-50 text-violet-800" : f.key === "out" && shopCounts.out > 0 ? "border-rose-200 bg-rose-50/60 text-rose-700 hover:bg-rose-50" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                          className={`h-7 rounded-full border px-2.5 text-xs whitespace-nowrap ${shopFilter === f.key ? "border-violet-300 bg-violet-50 text-violet-800" : (f.key === "out" || f.key === "price") && shopCounts[f.key] > 0 ? "border-rose-200 bg-rose-50/60 text-rose-700 hover:bg-rose-50" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
                           {f.label} <span className="tabular-nums opacity-70">{shopCounts[f.key].toLocaleString()}</span>
                         </button>
                       ))}
@@ -889,7 +902,9 @@ export default function PlatformCatalogPage() {
                 renderCard={(l) => {
                   const s = summ[l.id];
                   return (
-                    <ListingCard footer={matchCell(l, true)} data={{
+                    <ListingCard footer={matchCell(l, true)} badges={priceFlagText(s) ? (
+                      <span className="inline-flex w-fit items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-800" title={priceFlagText(s)}><Icon name="warning" />{priceFlagText(s)}</span>
+                    ) : undefined} data={{
                       image: s?.image ?? null, title: l.title, sku: l.sku_code, externalId: l.external_product_id,
                       state: s?.state ?? null, stock: s?.stock ?? null, price: s?.price ?? l.price, salePrice: s?.salePrice ?? null,
                       variants: s?.variants ?? null, dupCount: dupCounts.get(l.id),
@@ -915,7 +930,7 @@ export default function PlatformCatalogPage() {
                       <button type="button" onClick={() => setWorkbench(true)} className="h-8 px-3 text-sm whitespace-nowrap text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">⚡ จับคู่ทีละตัว ({unmatchedRows.length.toLocaleString()})</button>
                     )}
                     {canEdit && highRows.length > 0 && (
-                      <button type="button" onClick={() => setBulkAsk(true)} disabled={bulkBusy} className="h-8 px-3 text-sm whitespace-nowrap text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">✓ ยืนยันทั้งหมดที่รหัสตรงกัน ({highRows.length.toLocaleString()})</button>
+                      <button type="button" onClick={() => setBulkAsk("high")} disabled={bulkBusy} className="h-8 px-3 text-sm whitespace-nowrap text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">✓ ยืนยันทั้งหมดที่รหัสตรงกัน ({highRows.length.toLocaleString()})</button>
                     )}
                   </div>
                 )}
@@ -977,7 +992,10 @@ export default function PlatformCatalogPage() {
 
       {canEdit && view === "match" && tab === "catalog" && (
         <BulkActionBar count={selected.size} unit="รายการ" onClear={() => setSelected(new Set())}
-          extra={selected.size !== selIgnorable.length + selIgnored.length ? "ตัวที่จับคู่อยู่แล้วจะไม่ถูกข้าม" : undefined}>
+          extra={[selGuessDup > 0 ? `ตัวซ้ำบนร้าน ${selGuessDup} ไม่รวมในการยืนยัน` : "", selected.size !== selIgnorable.length + selIgnored.length ? "ตัวที่จับคู่อยู่แล้วจะไม่ถูกข้าม" : ""].filter(Boolean).join(" · ") || undefined}>
+          {selGuess.length > 0 && (
+            <button type="button" disabled={bulkBusy} onClick={() => setBulkAsk("selected")} className="h-8 px-3 text-sm rounded-lg bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50">✓ ยืนยันคู่ที่ระบบเดา ({selGuess.length.toLocaleString()})</button>
+          )}
           {selIgnorable.length > 0 && (
             <button type="button" disabled={ignoreBusy} onClick={() => setIgnoreTarget(selIgnorable)} className="h-8 px-3 text-sm rounded-lg bg-white text-slate-800 hover:bg-slate-100 disabled:opacity-50">🚫 ไม่ต้องจับคู่ ({selIgnorable.length.toLocaleString()})</button>
           )}
@@ -988,18 +1006,22 @@ export default function PlatformCatalogPage() {
       )}
 
       <ConfirmDialog
-        open={bulkAsk} onClose={() => { if (!bulkBusy) setBulkAsk(false); }} onConfirm={() => void confirmHighAll()} loading={bulkBusy}
-        title={`ยืนยันจับคู่ ${highRows.length.toLocaleString()} รายการที่รหัสตรงกัน?`}
-        confirmText={`ยืนยัน ${highRows.length.toLocaleString()} รายการ`}
-        requireTyped={highRows.length > TYPED_CONFIRM_OVER ? "ยืนยัน" : undefined}
+        open={!!bulkAsk && bulkRows.length > 0} onClose={() => { if (!bulkBusy) setBulkAsk(null); }} onConfirm={() => void confirmMany()} loading={bulkBusy}
+        title={bulkAsk === "selected" ? `ยืนยันจับคู่ ${bulkRows.length.toLocaleString()} รายการที่เลือก?` : `ยืนยันจับคู่ ${bulkRows.length.toLocaleString()} รายการที่รหัสตรงกัน?`}
+        confirmText={`ยืนยัน ${bulkRows.length.toLocaleString()} รายการ`}
+        requireTyped={bulkRows.length > TYPED_CONFIRM_OVER ? "ยืนยัน" : undefined}
         message={(
           <div className="space-y-2 text-sm">
-            <p>ทุกรายการนี้ รหัสบนร้าน (ช่อง SKU หรือรหัสท้ายชื่อสินค้า) ตรงกับรหัสในระบบ ต่างแค่ขีด/ตัวเล็กใหญ่ และไม่มีตัวอื่นที่ตรงพอกัน — ตัวอย่าง:</p>
+            {bulkAsk === "selected"
+              ? <p>จับคู่ตามที่ระบบเดา — รหัสตรงกัน (มั่นใจ) {bulkSure.toLocaleString()} · เดาจากชื่อ/รหัสใกล้เคียง {(bulkRows.length - bulkSure).toLocaleString()}{bulkRows.length - bulkSure > 0 ? " (ควรดูตัวอย่างก่อน)" : ""}:</p>
+              : <p>ทุกรายการนี้ รหัสบนร้าน (ช่อง SKU หรือรหัสท้ายชื่อสินค้า) ตรงกับรหัสในระบบ ต่างแค่ขีด/ตัวเล็กใหญ่ และไม่มีตัวอื่นที่ตรงพอกัน — ตัวอย่าง:</p>}
             <ul className="text-xs font-mono bg-slate-50 border border-slate-200 rounded-lg p-2 space-y-0.5">
-              {highRows.slice(0, 6).map((l) => <li key={l.id} className="truncate">{l.sku_code || (l.title ?? "").slice(0, 32)} → {suggestions[l.id]?.[0]?.code}</li>)}
-              {highRows.length > 6 && <li className="text-slate-400">… และอีก {(highRows.length - 6).toLocaleString()} รายการ</li>}
+              {[...bulkRows].sort((a, b) => (high.has(a.id) ? 1 : 0) - (high.has(b.id) ? 1 : 0)).slice(0, 8).map((l) => (
+                <li key={l.id} className="truncate">{l.sku_code || (l.title ?? "").slice(0, 32)} → {suggestions[l.id]?.[0]?.code}{!high.has(l.id) && <span className="text-amber-700"> · {suggestions[l.id]?.[0]?.score}%</span>}</li>
+              ))}
+              {bulkRows.length > 8 && <li className="text-slate-400">… และอีก {(bulkRows.length - 8).toLocaleString()} รายการ</li>}
             </ul>
-            {highDupSkipped > 0 && <p className="text-xs text-amber-700">ไม่รวม {highDupSkipped.toLocaleString()} รายการที่ซ้ำบนร้าน (ชื่อ+รหัสเหมือนกันหลายชิ้น) — กดการ์ด “ซ้ำบนร้าน” แล้วเปิดดูทีละตัวเพื่อเก็บไว้ตัวเดียว</p>}
+            {bulkAsk === "high" && highDupSkipped > 0 && <p className="text-xs text-amber-700">ไม่รวม {highDupSkipped.toLocaleString()} รายการที่ซ้ำบนร้าน (ชื่อ+รหัสเหมือนกันหลายชิ้น) — กดการ์ด “ซ้ำบนร้าน” แล้วเปิดดูทีละตัวเพื่อเก็บไว้ตัวเดียว</p>}
             <p className="text-xs text-slate-500">จับคู่ผิดตัวไหนแก้ทีหลังได้ทีละตัว · มีประวัติเก็บว่าใครจับคู่อะไร</p>
           </div>
         )}

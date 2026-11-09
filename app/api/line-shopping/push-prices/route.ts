@@ -10,8 +10,8 @@ import { supabaseFromRequest } from "@/lib/supabase-auth-server";
 import { supabaseAdmin } from "@/lib/supabase-admin";
 import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
-import { linePrice } from "@/lib/platform-listing-builder";
 import { baseOfCode } from "@/lib/product-listing-context";
+import { expectedLinePrice } from "@/lib/platform-variant-match";
 import { lineUpdatePrices } from "@/lib/line-shopping";
 import { decryptSecret } from "@/lib/secret-box";
 
@@ -69,7 +69,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       const l = Number(s.list_price); if (Number.isFinite(l) && l > 0) saleOf.set(String(s.code), l);
     }
   }
-  const resolve = (m: Map<string, number>, sku: string): number | null => { const own = m.get(sku); if (own != null) return own; const b = baseOf(sku); const mv = b ? m.get(b) : undefined; return mv ?? null; };
 
   // ยิงราคาไป LINE ทีละสินค้า
   const results: { product: string; ok: boolean; variants: number; error?: string }[] = [];
@@ -80,7 +79,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       .map((v) => ({ variantId: asStr(v.id ?? v.variantId), sku: asStr(v.sku) }))
       .filter((v): v is { variantId: string; sku: string } => !!(v.variantId && v.sku))
       // กฎกลาง linePrice: ราคาเต็มเป็นราคาหลัก + ส่วนลด · ไม่มีราคาเต็ม → ใช้ราคาขาย (เจ้าของตัดสิน 2026-11-08) · ไม่มีทั้งคู่ = ไม่ส่ง (กันส่งราคา 0)
-      .map((v) => ({ variantId: v.variantId, lp: linePrice(resolve(fakeOf, v.sku), resolve(saleOf, v.sku)) }))
+      .map((v) => ({ variantId: v.variantId, lp: expectedLinePrice(v.sku, fakeOf, saleOf) }))   // กฎเดียวกับป้าย "ราคาไม่ตรงในระบบ"
       .filter((v): v is { variantId: string; lp: { price: number; discount: number } } => v.lp != null)
       .map((v) => ({ variantId: v.variantId, price: v.lp.price, instantDiscount: v.lp.discount }));
     if (items.length === 0) { results.push({ product: r.title ?? r.external_product_id, ok: false, variants: 0, error: "ไม่พบ variant id หรือราคา (ราคาเต็ม/ราคาขาย) ของ SKU ใน ERP" }); continue; }

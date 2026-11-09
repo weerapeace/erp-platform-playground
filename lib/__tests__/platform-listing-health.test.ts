@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  effectivePrice, discountPct,
+  effectivePrice, discountPct, priceFlags,
   summarizeListing, shopStateOf, duplicateCounts, duplicateKey, inShopTab, inShopQueue, notListedTrustworthy,
   LOW_STOCK_MAX, type ShopItem,
 } from "@/lib/platform-listing-health";
@@ -143,5 +143,17 @@ describe("ราคาที่จ่ายจริง + ส่วนลด %",
     expect(discountPct({ price: 500, salePrice: 500 })).toBe(0);
     expect(discountPct({ price: null, salePrice: 100 })).toBe(0);
     expect(discountPct({ price: 0, salePrice: 0 })).toBe(0);
+  });
+});
+
+describe("ราคาผิดปกติ", () => {
+  it("ต่ำกว่า 10฿ · ลดเกิน 80% · ราคาไม่ตรงระบบ", () => {
+    expect(priceFlags({ price: 30, salePrice: 1 })).toEqual(["tiny", "deep"]);   // GIFT03
+    expect(priceFlags({ price: 2690, salePrice: 1640 })).toEqual([]);
+    expect(priceFlags({ price: 500, salePrice: 90 })).toEqual(["deep"]);
+    expect(priceFlags({ price: 690, salePrice: null, erpPriceDiff: 2 })).toEqual(["erp"]);
+    expect(priceFlags({ price: 1499, salePrice: 850, erpPriceDiff: 0, erpFullDiff: 6 })).toEqual([]);   // แค่ราคาเต็มไม่ตรง ไม่นับ
+    expect(priceFlags({ price: 0, salePrice: null })).toEqual([]);
+    expect(priceFlags(null)).toEqual([]);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { shopVariantsOf, variantLookupCodes, matchVariantSku, matchShopVariants, type SkuLite } from "@/lib/platform-variant-match";
+import { shopVariantsOf, variantLookupCodes, matchVariantSku, matchShopVariants, expectedLinePrice, linePriceDiff, type SkuLite } from "@/lib/platform-variant-match";
 
 // ข้อมูลจริงย่อจาก LINE (Louis Montini FFB16) + Lazada (lib/lazada → raw.skus)
 const lineRaw = { line: { variants: [
@@ -48,11 +48,37 @@ describe("จับกับ SKU ในระบบ (ลำดับเดีย
   });
   it("นับสรุป + เตือน SKU ที่อยู่คนละรุ่นกับที่จับคู่ไว้", () => {
     const { rows, counts } = matchShopVariants(shopVariantsOf("line_shopping", lineRaw), byCode, "P-FFB16", (id) => id.replace("P-", ""));
-    expect(counts).toEqual({ total: 4, exact: 1, base: 1, none: 1, nosku: 1, other_parent: 1 });
+    expect(counts).toEqual({ total: 4, exact: 1, base: 1, none: 1, nosku: 1, other_parent: 1, price_diff: 0, full_diff: 0 });
     expect(rows[0]).toMatchObject({ kind: "exact", erp_code: "FFB16-01", erp_name: "ดำ", other_parent: false });
     expect(rows[1]).toMatchObject({ kind: "base", erp_code: "MGN402-03", erp_parent_code: "MGN402", other_parent: true });
   });
   it("ยังไม่จับคู่รุ่น → ไม่เช็กคนละรุ่น", () => {
     expect(matchShopVariants(shopVariantsOf("line_shopping", lineRaw), byCode, null, () => null).counts.other_parent).toBe(0);
+  });
+});
+
+describe("ราคาที่ระบบจะส่งขึ้น LINE (กฎเดียวกับปุ่มส่งราคา)", () => {
+  const fake = new Map([["FFB16-01", 289], ["MGN402-03", 690]]);
+  const sale = new Map([["FFB16-01", 159], ["MGN402-03", 490], ["GIFT03-01", 30]]);
+  it("รหัสตัวเอง → รหัสสี → ไม่มีราคาเต็มใช้ราคาขาย · ไม่รู้ = null", () => {
+    expect(expectedLinePrice("FFB16-01", fake, sale)).toEqual({ price: 289, discount: 130 });
+    expect(expectedLinePrice("MGN402-03M", fake, sale)).toEqual({ price: 690, discount: 200 });
+    expect(expectedLinePrice("GIFT03-01", fake, sale)).toEqual({ price: 30, discount: 0 });
+    expect(expectedLinePrice("ZZZ-99", fake, sale)).toBeNull();
+    expect(expectedLinePrice(null, fake, sale)).toBeNull();
+  });
+  it("ราคาจ่ายไม่ตรง = pay · จ่ายตรงแต่ราคาเต็มไม่ตรง = full (ข้อมูลจริง LM)", () => {
+    expect(linePriceDiff({ price: 289, sale_price: 159 }, { price: 289, discount: 130 })).toBeNull();
+    expect(linePriceDiff({ price: 2100, sale_price: 1390 }, { price: 1190, discount: 0 })).toBe("pay");   // TML10
+    expect(linePriceDiff({ price: 1499, sale_price: 850 }, { price: 850, discount: 0 })).toBe("full");    // MGN386 ในระบบไม่มีราคาเต็ม
+    expect(linePriceDiff({ price: 30, sale_price: 1 }, { price: 30, discount: 0 })).toBe("pay");
+    expect(linePriceDiff({ price: 289, sale_price: 159 }, null)).toBeNull();
+  });
+  it("นับตัวเลือกที่ราคาไม่ตรงในตารางตัวเลือก", () => {
+    const { rows, counts } = matchShopVariants(shopVariantsOf("line_shopping", lineRaw), byCode, "P-FFB16", () => null, (s) => expectedLinePrice(s, fake, sale));
+    expect(rows[0]).toMatchObject({ erp_price: 289, erp_pay: 159, price_diff: null });
+    expect(rows[1]).toMatchObject({ erp_price: 690, erp_pay: 490, price_diff: "pay" });   // บนร้าน 690 ไม่ลด แต่ระบบลดเหลือ 490
+    expect(rows[0].price_diff).toBeNull();
+    expect(counts.price_diff).toBe(1);
   });
 });
