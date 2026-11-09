@@ -2,7 +2,9 @@
  * ดึงสินค้าจาก LINE SHOPPING → เก็บลง platform_catalog_listings + จับคู่ ERP — /api/line-shopping/sync-products
  *  POST { brand_id }  (products.platforms.edit)
  *   → โหลด api_key (ถอดรหัส) ของ (แบรนด์ × line_shopping) → วนดึงสินค้าทุกหน้า (GET /products)
- *   → แปลงเป็นรายการสินค้า + จับคู่ด้วยรหัส SKU (skus_v2 / parent_skus_v2) → upsert ตาม external_product_id (source=api, เติมไม่ลบ)
+ *   → แปลงเป็นรายการสินค้า → บันทึก + จับคู่รหัสตรงด้วยของกลาง lib/platform-catalog-sync (เหมือน Lazada)
+ * 🐛 เดิมบันทึกเองทีเดียวทั้งร้าน (Louis Montini 921 ตัว) → เกิน 8 วิ ฐานข้อมูลตัดทิ้ง ("statement timeout")
+ *    + เดิมเอาคู่ที่เดาจากรหัสทับคู่ที่คนจับไว้ (รวมตัวที่กด "ไม่ต้องจับคู่") → ใช้ของกลางที่ส่งทีละชุดและไม่ทับคู่เดิม
  */
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseFromRequest } from "@/lib/supabase-auth-server";
@@ -11,9 +13,11 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { lineListProducts } from "@/lib/line-shopping";
 import { decryptSecret } from "@/lib/secret-box";
+import { upsertCatalogListings, type CatalogSyncItem } from "@/lib/platform-catalog-sync";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 60;
 
 const MAX_PAGES = 200;   // กันวนไม่จบ
 const PER_PAGE = 100;
@@ -56,9 +60,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
   if (products.length === 0) return NextResponse.json({ ok: true, fetched: 0, matched: 0, created: 0, updated: 0, error: null });
 
-  // 2) แปลงเป็นรายการมาตรฐาน (ระดับสินค้า + เก็บ variants ใน raw)
-  type Item = { external_product_id: string; title: string | null; skus: string[]; price: number | null; raw: Record<string, unknown> };
-  const items: Item[] = [];
+  // 2) แปลงเป็นรายการมาตรฐาน (ระดับสินค้า + เก็บ variants ใน raw.line)
+  const items: CatalogSyncItem[] = [];
   for (const p of products) {
     const variants = Array.isArray(p.variants) ? p.variants as Record<string, unknown>[] : [];
     const skus = variants.map((v) => asStr(v.sku)).filter(Boolean) as string[];
@@ -68,58 +71,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     items.push({ external_product_id: eid, title: asStr(p.name), skus, price: prices.length ? Math.min(...prices) : null, raw: { line: p } });
   }
 
-  // 3) จับคู่ ERP ด้วยรหัส SKU (variant sku → skus_v2 / parent_skus_v2)
-  const allSkus = [...new Set(items.flatMap((i) => i.skus))];
-  const skuToParent = new Map<string, string>();   // sku code → parent_sku_id
-  const codeToParent = new Map<string, string>();  // parent code → id
-  // ถามเป็นชุดย่อย (กัน .in() ยาวเกินขีดจำกัด URL เมื่อสินค้าเยอะ → เดิมทำให้จับคู่ไม่ได้เลย)
-  for (let i = 0; i < allSkus.length; i += 200) {
-    const chunk = allSkus.slice(i, i + 200);
-    const [{ data: skus }, { data: parents }] = await Promise.all([
-      admin.from("skus_v2").select("code, parent_sku_id").in("code", chunk),
-      admin.from("parent_skus_v2").select("id, code").in("code", chunk),
-    ]);
-    for (const s of ((skus ?? []) as Record<string, unknown>[])) if (s.parent_sku_id) skuToParent.set(String(s.code), String(s.parent_sku_id));
-    for (const p of ((parents ?? []) as Record<string, unknown>[])) codeToParent.set(String(p.code), String(p.id));
-  }
-  const matchOf = (i: Item): string | null => {
-    for (const sk of i.skus) { if (skuToParent.has(sk)) return skuToParent.get(sk)!; if (codeToParent.has(sk)) return codeToParent.get(sk)!; }
-    return null;
-  };
+  // 3) บันทึก + จับคู่รหัสตรง (ของกลาง · ทีละชุด · ไม่ทับคู่เดิม · ไม่จับคู่ตัวที่กดข้าม)
+  let saved;
+  try { saved = await upsertCatalogListings(admin, { platformId: platform_id, brandId: brand_id, source: "api", items }); }
+  catch (e) { return NextResponse.json({ error: `บันทึกไม่สำเร็จ: ${(e as Error).message}` }, { status: 400 }); }
 
-  // 4) upsert ตาม external_product_id (เติม/อัปเดต ไม่ลบของเดิม)
-  const extIds = items.map((i) => i.external_product_id);
-  const existing: Record<string, unknown>[] = [];
-  for (let i = 0; i < extIds.length; i += 300) {
-    const { data } = await admin.from("platform_catalog_listings").select("id, external_product_id, brand_id, title, price, matched_parent_sku_id, raw").eq("platform_id", platform_id).eq("brand_id", brand_id).in("external_product_id", extIds.slice(i, i + 300));
-    existing.push(...((data ?? []) as Record<string, unknown>[]));
-  }
-  const byExt = new Map<string, Record<string, unknown>>();
-  for (const r of existing) byExt.set(String(r.external_product_id), r);
-
-  const now = new Date().toISOString();
-  const insertRows: Record<string, unknown>[] = [];
-  const updateRows: Record<string, unknown>[] = [];
-  let matched = 0;
-  for (const it of items) {
-    const m = matchOf(it); if (m) matched++;
-    const displaySku = it.skus[0] ?? null;
-    const found = byExt.get(it.external_product_id);
-    if (found) {
-      const prevRaw = (found.raw && typeof found.raw === "object") ? found.raw as Record<string, unknown> : {};
-      updateRows.push({ id: found.id, platform_id, brand_id, source: "api", last_imported_at: now,
-        external_product_id: it.external_product_id, title: it.title ?? (found.title ?? null), sku_code: displaySku,
-        matched_parent_sku_id: m ?? (found.matched_parent_sku_id ?? null), price: it.price ?? (found.price ?? null),
-        raw: { ...prevRaw, ...it.raw } });
-    } else {
-      insertRows.push({ platform_id, brand_id, source: "api", last_imported_at: now,
-        external_product_id: it.external_product_id, title: it.title, sku_code: displaySku,
-        matched_parent_sku_id: m, price: it.price, raw: it.raw });
-    }
-  }
-  if (insertRows.length) { const { error } = await admin.from("platform_catalog_listings").insert(insertRows); if (error) return NextResponse.json({ error: error.message }, { status: 400 }); }
-  if (updateRows.length) { const { error } = await admin.from("platform_catalog_listings").upsert(updateRows, { onConflict: "id" }); if (error) return NextResponse.json({ error: error.message }, { status: 400 }); }
-
-  await writeAudit(admin, { action: "import", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_api", brand_id, api_total: apiTotal, fetched: items.length, matched, created: insertRows.length, updated: updateRows.length } });
-  return NextResponse.json({ ok: true, api_total: apiTotal, fetched: items.length, matched, created: insertRows.length, updated: updateRows.length, error: null });
+  await writeAudit(admin, { action: "import", entityType: "platform_catalog", entityId: null, actorId: user?.id ?? null, actorName: user?.email ?? null, metadata: { source: "line_api", brand_id, api_total: apiTotal, fetched: items.length, ...saved } });
+  return NextResponse.json({ ok: true, api_total: apiTotal, fetched: items.length, ...saved, error: null });
 }
