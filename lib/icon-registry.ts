@@ -64,6 +64,8 @@ export const ICON_MEANINGS: IconMeaning[] = [
   M("print", "พิมพ์", "action", "🖨️", "printer"),
   M("search", "ค้นหา", "action", "🔍", "search", undefined, ["🔎"]),
   M("list", "รายการ / คัดลอก", "action", "📋", "clipboard-list"),
+  M("table-view", "ดูแบบตาราง", "action", "▤", "table"),
+  M("grid-view", "ดูแบบการ์ด", "action", "▦", "layout-grid"),
   M("link", "ลิงก์", "action", "🔗", "link"),
   M("open", "เปิดหน้าใหม่", "action", "↗️", "external-link"),
   M("back", "ย้อนกลับ / ส่งคืน", "action", "↩️", "arrow-back-up", undefined, ["🔙"]),

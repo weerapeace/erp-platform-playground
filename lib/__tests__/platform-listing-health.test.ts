@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  effectivePrice, discountPct,
   summarizeListing, shopStateOf, duplicateCounts, duplicateKey, inShopTab, inShopQueue, notListedTrustworthy,
   LOW_STOCK_MAX, type ShopItem,
 } from "@/lib/platform-listing-health";
@@ -127,5 +128,20 @@ describe("notListedTrustworthy", () => {
     const rows = [...Array.from({ length: 9 }, () => ({ matched_parent_sku_id: "p", match_ignored: false })), { matched_parent_sku_id: null, match_ignored: true }];
     expect(notListedTrustworthy(rows)).toBe(true);
     expect(notListedTrustworthy([])).toBe(true);
+  });
+});
+
+describe("ราคาที่จ่ายจริง + ส่วนลด %", () => {
+  it("มีราคาลด = ใช้ราคาลด · ไม่มี = ราคาปกติ", () => {
+    expect(effectivePrice({ price: 1080, salePrice: 490 })).toBe(490);
+    expect(effectivePrice({ price: 150, salePrice: null })).toBe(150);
+    expect(effectivePrice(null)).toBeNull();
+  });
+  it("ส่วนลด % ปัดเป็นจำนวนเต็ม · ไม่ลด/ข้อมูลไม่ครบ = 0", () => {
+    expect(discountPct({ price: 30, salePrice: 1 })).toBe(97);
+    expect(discountPct({ price: 2690, salePrice: 1640 })).toBe(39);
+    expect(discountPct({ price: 500, salePrice: 500 })).toBe(0);
+    expect(discountPct({ price: null, salePrice: 100 })).toBe(0);
+    expect(discountPct({ price: 0, salePrice: 0 })).toBe(0);
   });
 });

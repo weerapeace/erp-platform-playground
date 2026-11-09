@@ -8,7 +8,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { fetchAllPages } from "@/lib/fetch-all";
-import { duplicateCounts, summarizeListing, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
+import { duplicateCounts, summarizeListing, type ListingCardSummary, type ShopBrandSummary, type ShopCategory, type ShopItem, type ShopParent } from "@/lib/platform-listing-health";
 import { matchShopVariants, shopVariantsOf, variantLookupCodes, type ListingVariantsResponse, type SkuLite } from "@/lib/platform-variant-match";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -102,6 +102,20 @@ async function imageStates(admin: Admin, noCover: string[]): Promise<Map<string,
   const out = new Map<string, "sku_only" | "none">();
   // มีรูปในแกลเลอรีแต่ไม่ตั้งปก = ยังมีรูปให้ใช้ → นับรวมกับ "มีรูปที่ SKU" (ตั้งปกได้เลย ไม่ต้องถ่ายใหม่)
   for (const id of noCover) out.set(id, hasGallery.has(id) || hasSku.has(id) ? "sku_only" : "none");
+  return out;
+}
+
+/**
+ * สรุปรูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ (หน้าจับคู่ — การ์ด/ตาราง/กล่องตัวซ้ำ)
+ * กฎสรุปตัวเดียวกับมุมมองหน้าร้าน (summarizeListing) · ส่งกลับแค่ตัวเลขสั้น ๆ ไม่ส่งข้อมูลดิบทั้งก้อน
+ */
+export async function loadListingSummaries(admin: Admin, platformId: string, platformCode: string, brandId: string): Promise<Record<string, ListingCardSummary>> {
+  const rows = await loadListings(admin, platformId, brandId);
+  const out: Record<string, ListingCardSummary> = {};
+  for (const r of rows) {
+    const s = summarizeListing(platformCode, rawSlice(r), r.price != null ? Number(r.price) : null);
+    out[r.id] = { image: s.image, imageKnown: s.imageKnown, stock: s.stock, display: s.display, price: s.price, salePrice: s.salePrice, variants: s.variants, state: s.state };
+  }
   return out;
 }
 

@@ -11,7 +11,9 @@ import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
-import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { MiniTable, LayoutSwitch, useMiniTableLayout, type MiniColumn } from "@/components/mini-table";
+import { HoverImage } from "@/components/hover-image";
+import { ListingCard, ShopStateBadge } from "@/components/platform-catalog/listing-card";
 import { ERPModal, ConfirmDialog } from "@/components/modal";
 import { askConfirm } from "@/components/modal/ask-dialog";
 import { EmptyState, ErrorState, LoadingState } from "@/components/state-views";
@@ -30,7 +32,10 @@ import { detectProfile, profilesForPlatform, getProfile, dbRowToProfile, type Im
 import PlatformImportProfileManager from "@/components/platform-import-profile-manager";
 import { PlatformShopView } from "@/components/platform-catalog/shop-view";
 import { BrandGate, BrandAvatar } from "@/components/platform-catalog/brand-gate";
-import { duplicateCounts, duplicateKey, type ShopBrandSummary } from "@/lib/platform-listing-health";
+import {
+  duplicateCounts, duplicateKey, discountPct, effectivePrice, LOW_STOCK_MAX,
+  type ListingCardSummary, type ListingSummariesResponse, type ShopBrandSummary, type ShopState,
+} from "@/lib/platform-listing-health";
 
 // Drawer รายละเอียดต่อแพลตฟอร์ม (ของกลาง เปิดจาก Parent SKUs ด้วย) — dynamic กัน bundle หนัก
 const ProductPlatformManager = dynamic(() => import("@/components/product-platform-manager").then((m) => m.ProductPlatformManager), { ssr: false });
@@ -44,6 +49,17 @@ type Listing = {
   match_ignored?: boolean | null; match_ignore_reason?: string | null; match_ignored_at?: string | null;
 };
 type Filter = "all" | ListingMatchStatus | "dup";
+// กรองตามสถานะบนร้าน (ใช้ร่วมกับการ์ดกรองสถานะจับคู่) — "หมดแต่ยังเปิดขาย" = ลูกค้าเห็นแต่ซื้อไม่ได้
+type ShopFilter = "" | "out" | "low" | "hidden" | "review";
+const SHOP_FILTERS: { key: Exclude<ShopFilter, "">; label: string; tip: string }[] = [
+  { key: "out", label: "หมดแต่ยังเปิดขาย", tip: "ลูกค้าเห็นแต่ซื้อไม่ได้ — เติมสต๊อก หรือปิดขายไว้ก่อน" },
+  { key: "low", label: `ใกล้หมด (≤${LOW_STOCK_MAX})`, tip: "เปิดขายอยู่ แต่เหลือรวมทุกตัวเลือกไม่เกิน 3 ชิ้น" },
+  { key: "hidden", label: "ปิดขาย", tip: "ปิดขายบนร้านอยู่ — ตรวจว่าตั้งใจปิดไหม" },
+  { key: "review", label: "รอตรวจ", tip: "ยังไม่ได้ข้อมูลจากร้าน (เช่น ระบบสร้างขึ้นร้านเองแต่ยังไม่ได้ดึงกลับ)" },
+];
+// เรียงตามสถานะบนร้าน: ปัญหาก่อน
+const STATE_RANK: Record<ShopState, number> = { out: 0, low: 1, review: 2, hidden: 3, selling: 4, nodata: 5 };
+const SORT_LS = "platform-catalog:sort";
 type IgnorePatch = { match_ignored: boolean; match_ignore_reason: string | null; match_ignored_at: string | null };
 
 // มุมมอง: จับคู่ (เดิม · ค่าเริ่มต้นในแอปช่องทางขาย) / หน้าร้าน (แบบ Seller Center · เมนูในแอปจัดการงานเปิดด้วย ?view=shop)
@@ -111,6 +127,20 @@ export default function PlatformCatalogPage() {
   const [ignoreTarget, setIgnoreTarget] = useState<string[] | null>(null);
   const [ignoreBusy, setIgnoreBusy] = useState(false);
   const [dupKeepAsk, setDupKeepAsk] = useState(false);   // ป๊อปยืนยัน "เก็บตัวนี้ · ที่เหลือไม่ต้องจับคู่ (ซ้ำบนร้าน)"
+  // รูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ (โหลดตามหลังตาราง) + การ์ด/ตาราง + เรียง (จำในเครื่อง)
+  const [summ, setSumm] = useState<Record<string, ListingCardSummary>>({});
+  const [summLoading, setSummLoading] = useState(false);
+  const [shopFilter, setShopFilter] = useState<ShopFilter>("");
+  const [layout, setLayout] = useMiniTableLayout("platform-catalog-listings");
+  const [sortKey, setSortKey] = useState("todo");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  useEffect(() => {
+    try { const s = JSON.parse(localStorage.getItem(SORT_LS) ?? "null") as { k?: string; d?: string } | null; if (s && typeof s.k === "string") { setSortKey(s.k); setSortDir(s.d === "desc" ? "desc" : "asc"); } } catch { /* ไม่จำก็ได้ */ }
+  }, []);
+  const onSortChange = useCallback((k: string, d: "asc" | "desc") => {
+    setSortKey(k); setSortDir(d);
+    try { localStorage.setItem(SORT_LS, JSON.stringify({ k, d })); } catch { /* ไม่จำก็ได้ */ }
+  }, []);
   // มุมมองหน้าร้าน — อ่านจาก URL ตอนเปิด · สลับแล้วเขียนกลับ URL (รีเฟรชแล้วอยู่มุมมองเดิม)
   const [view, setViewState] = useState<PageView>("match");
   const [viewReady, setViewReady] = useState(false);
@@ -169,6 +199,7 @@ export default function PlatformCatalogPage() {
     setLoading(true); setLoadError(null);
     setListings([]); setFields([]); setMappings({});
     setSuggestions({}); setHigh(new Set()); setSuggestError(false); setExpanded(new Set()); setSelected(new Set());
+    setSumm({}); setShopFilter("");
     let unmatched = 0;
     try {
       const q = new URLSearchParams({ platform_id: platformId, with_counts: "1" }); if (brandId) q.set("brand_id", brandId);
@@ -189,6 +220,17 @@ export default function PlatformCatalogPage() {
       return;
     } finally { if (my === reqSeq.current) setLoading(false); }
 
+    // รูป/สต๊อก/สถานะบนร้าน — โหลดคู่กับตัวเดา ไม่บังตาราง · เฉพาะร้านที่ส่งข้อมูลพวกนี้มา (LINE/Lazada — ไฟล์ export ของ Shopee ไม่มี)
+    const pfCode = platforms.find((p) => p.id === platformId)?.code ?? "";
+    if (pfCode === "line_shopping" || pfCode === "lazada") {
+    setSummLoading(true);
+    const smq = new URLSearchParams({ platform_id: platformId, view: "summary" }); if (brandId) smq.set("brand_id", brandId);
+    void apiFetch(`/api/platform-catalog?${smq}`).then((r) => r.json())
+      .then((j: ListingSummariesResponse) => { if (my === reqSeq.current && !j.error) setSumm(j.summaries ?? {}); })
+      .catch(() => { /* ไม่มีรูป/สต๊อกก็ยังจับคู่ได้ */ })
+      .finally(() => { if (my === reqSeq.current) setSummLoading(false); });
+    }
+
     if (unmatched === 0) return;
     setSuggestLoading(true);
     try {
@@ -200,7 +242,7 @@ export default function PlatformCatalogPage() {
       setHigh(new Set((sj.high ?? []) as string[]));
     } catch { if (my === reqSeq.current) setSuggestError(true); }
     finally { if (my === reqSeq.current) setSuggestLoading(false); }
-  }, [platformId, brandId]);
+  }, [platformId, brandId, platforms]);
   // มุมมองหน้าร้านโหลดข้อมูลของตัวเอง (สรุปสต๊อก/สถานะ) → ไม่ต้องโหลดตารางจับคู่ + เดาคู่ (หนัก) ซ้ำ
   useEffect(() => { if (viewReady && view === "match") load(); }, [load, view, viewReady]);
   /** หลังดึงสินค้าจากร้าน → โหลดมุมมองที่เปิดอยู่ใหม่ */
@@ -223,7 +265,30 @@ export default function PlatformCatalogPage() {
   const highAll = useMemo(() => listings.filter((l) => statusOf(l) === "guess" && high.has(l.id) && suggestions[l.id]?.[0]), [listings, high, suggestions, statusOf]);
   const highRows = useMemo(() => highAll.filter((l) => !dupCounts.has(l.id)), [highAll, dupCounts]);
   const highDupSkipped = highAll.length - highRows.length;
-  const shownRows = useMemo(() => filter === "all" ? listings : filter === "dup" ? listings.filter((l) => dupCounts.has(l.id)) : listings.filter((l) => statusOf(l) === filter), [listings, filter, statusOf, dupCounts]);
+  const matchRows = useMemo(() => filter === "all" ? listings : filter === "dup" ? listings.filter((l) => dupCounts.has(l.id)) : listings.filter((l) => statusOf(l) === filter), [listings, filter, statusOf, dupCounts]);
+  const shownRows = useMemo(() => shopFilter ? matchRows.filter((l) => summ[l.id]?.state === shopFilter) : matchRows, [matchRows, shopFilter, summ]);
+  // ร้านนี้ส่งสถานะ/สต๊อก/รูปมาไหม (ไฟล์ export ของ Shopee = ไม่ส่ง → ซ่อนคอลัมน์/ชิปที่ใช้ไม่ได้)
+  const summList = useMemo(() => Object.values(summ), [summ]);
+  const hasShopData = summList.some((s) => s.state !== "nodata");
+  const showThumbs = summList.some((s) => s.imageKnown);
+  const shopCounts = useMemo(() => {
+    const c: Record<ShopState, number> = { selling: 0, low: 0, out: 0, hidden: 0, review: 0, nodata: 0 };
+    for (const l of matchRows) { const s = summ[l.id]; if (s) c[s.state]++; }
+    return c;
+  }, [matchRows, summ]);
+  // เรียงแบบพิเศษ (เมนูเรียงของตาราง — ใช้ได้ทั้งตารางและการ์ด) · สต๊อก/ราคา/สถานะร้าน = เรียงตามคอลัมน์ (สลับทิศได้)
+  const extraSorts = useMemo(() => {
+    const rankOf = (l: Listing) => (dupCounts.has(l.id) ? 0 : ({ guess: 1, none: 2, ok: 3, ignored: 4 } as const)[statusOf(l)]);
+    const extId = (l: Listing) => Number(l.external_product_id) || 0;   // LINE เลขสินค้าเรียงตามวันที่ลงร้าน (ร้านไม่ส่งวันที่มา)
+    const byTitle = (a: Listing, b: Listing) => (a.title ?? "").localeCompare(b.title ?? "", "th");
+    return [
+      { key: "todo", label: "เรียง: งานที่ต้องทำก่อน", compare: (a: Listing, b: Listing) => rankOf(a) - rankOf(b) || byTitle(a, b) },
+      { key: "dupnear", label: "เรียง: ชื่อ ก–ฮ (ตัวซ้ำอยู่ติดกัน)", compare: (a: Listing, b: Listing) => byTitle(a, b) || (a.sku_code ?? "").localeCompare(b.sku_code ?? "") || extId(a) - extId(b) },
+      { key: "disc", label: "เรียง: ลดราคามากสุด (%)", compare: (a: Listing, b: Listing) => discountPct(summ[b.id]) - discountPct(summ[a.id]) },
+      { key: "newest", label: "เรียง: ลงร้านล่าสุดก่อน", compare: (a: Listing, b: Listing) => extId(b) - extId(a) },
+      { key: "variants", label: "เรียง: ตัวเลือกเยอะสุด", compare: (a: Listing, b: Listing) => (summ[b.id]?.variants ?? 0) - (summ[a.id]?.variants ?? 0) },
+    ];
+  }, [dupCounts, statusOf, summ]);
 
   const applyMatch = (listingId: string, r: { matched_parent_sku_id: string | null; matched_code: string | null; matched_name: string | null }) => {
     setListings((ls) => ls.map((x) => x.id === listingId ? { ...x, ...r } : x));
@@ -513,14 +578,15 @@ export default function PlatformCatalogPage() {
   const mappedCount = fields.filter((f) => mappings[f.field_key]).length;
 
   // ช่อง "จับคู่ในระบบ" ของแต่ละแถว — ปุ่มในช่องนี้ไม่เปิดป๊อป (กดแถวส่วนอื่น = เปิดรายละเอียด)
-  const matchCell = (l: Listing) => {
+  // inCard = ส่วนท้ายการ์ด (การ์ดกางแถวไม่ได้ → ปุ่ม "จับคู่/เปลี่ยน" เปิดป๊อปรายละเอียดแทน)
+  const matchCell = (l: Listing, inCard = false) => {
     const st = statusOf(l);
     const busy = busyIds.has(l.id);
     const stop = (e: React.MouseEvent) => e.stopPropagation();
     if (st === "ok") return (
       <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
         <span className="text-xs font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5 truncate" title={l.matched_name ?? ""}>✓ {l.matched_code || "จับคู่แล้ว"}</span>
-        {canEdit && <button type="button" onClick={() => toggleExpand(l.id)} className="text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0">เปลี่ยน</button>}
+        {canEdit && <button type="button" onClick={() => (inCard ? openRow(l) : toggleExpand(l.id))} className="text-[11px] text-slate-400 hover:text-slate-700 hover:underline shrink-0">เปลี่ยน</button>}
       </span>
     );
     if (st === "ignored") return (
@@ -532,14 +598,14 @@ export default function PlatformCatalogPage() {
     const top = suggestions[l.id]?.[0];
     if (st === "guess" && top) return (
       <span className="inline-flex items-center gap-1.5 max-w-full" onClick={stop}>
-        <button type="button" onClick={() => toggleExpand(l.id)} title={`${top.name ?? ""} · ${top.score}% ${top.reason}`}
+        <button type="button" onClick={() => (inCard ? openRow(l) : toggleExpand(l.id))} title={`${top.name ?? ""} · ${top.score}% ${top.reason}`}
           className="text-xs font-mono text-sky-700 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5 truncate hover:bg-sky-100">{top.code} ?</button>
         {canEdit && <button type="button" disabled={busy} onClick={() => confirmTop(l)} className="h-7 px-2.5 text-xs text-white bg-emerald-600 rounded-md hover:bg-emerald-700 disabled:opacity-50 shrink-0">{busy ? "…" : "ยืนยัน"}</button>}
       </span>
     );
     return (
       <span onClick={stop}>
-        <button type="button" onClick={() => toggleExpand(l.id)} className="h-7 px-2.5 text-xs text-amber-700 border border-amber-200 bg-amber-50/60 rounded-md hover:bg-amber-50">
+        <button type="button" onClick={() => (inCard ? openRow(l) : toggleExpand(l.id))} className="h-7 px-2.5 text-xs text-amber-700 border border-amber-200 bg-amber-50/60 rounded-md hover:bg-amber-50">
           {suggestLoading ? "กำลังเดา…" : "🔍 จับคู่"}
         </button>
       </span>
@@ -547,8 +613,10 @@ export default function PlatformCatalogPage() {
   };
   const cols: MiniColumn<Listing>[] = [
     {
-      key: "title", header: "สินค้าบนร้าน", width: "2.4fr", locked: true, sortValue: (l) => l.title ?? "",
+      key: "title", header: "สินค้าบนร้าน", sortLabel: "ชื่อ", width: "2.4fr", locked: true, sortValue: (l) => l.title ?? "",
       cell: (l) => (
+        <div className="flex min-w-0 items-center gap-2">
+        {showThumbs && <HoverImage url={summ[l.id]?.image ?? null} size={36} previewSize={280} rounded="rounded-md" fallback="—" />}
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-1.5">
             <span className="truncate" title={l.title ?? ""}>{l.title || "—"}</span>
@@ -559,10 +627,26 @@ export default function PlatformCatalogPage() {
           </div>
           <div className="text-[11px] text-slate-400 font-mono truncate">{l.sku_code || "ไม่มี SKU"} · #{l.external_product_id || "—"}</div>
         </div>
+        </div>
       ),
     },
-    { key: "price", header: "ราคา", width: "0.7fr", align: "right", sortValue: (l) => l.price ?? -1, cell: (l) => l.price != null ? <span>{l.price.toLocaleString()}฿</span> : <span className="text-slate-300">—</span> },
-    { key: "match", header: "จับคู่ในระบบ", width: "1.6fr", align: "right", sortValue: (l) => ({ guess: 0, none: 1, ok: 2, ignored: 3 })[statusOf(l)], cell: matchCell },
+    ...(hasShopData ? [{
+      key: "shop", header: "สถานะร้าน", sortLabel: "สถานะบนร้าน (ปัญหาก่อน)", width: "0.8fr", align: "center" as const,
+      sortValue: (l: Listing) => STATE_RANK[summ[l.id]?.state ?? "nodata"],
+      cell: (l: Listing) => { const s = summ[l.id]; return s && s.state !== "nodata" ? <ShopStateBadge state={s.state} /> : <span className="text-slate-300">—</span>; },
+    }, {
+      key: "stock", header: "สต๊อก", width: "0.55fr", align: "right" as const, sortValue: (l: Listing) => summ[l.id]?.stock ?? -1,
+      cell: (l: Listing) => { const s = summ[l.id]; return s?.stock == null ? <span className="text-slate-300">—</span> : <span className={`tabular-nums ${s.state === "out" ? "text-rose-600 font-medium" : s.state === "low" ? "text-amber-600 font-medium" : ""}`}>{s.stock.toLocaleString()}</span>; },
+    }] : []),
+    {
+      key: "price", header: "ราคา", sortLabel: "ราคาที่ขายจริง", width: "0.75fr", align: "right", sortValue: (l) => effectivePrice(summ[l.id]) ?? l.price ?? -1,
+      cell: (l) => {
+        const s = summ[l.id]; const full = s?.price ?? l.price; const sale = s?.salePrice ?? null;
+        if (sale != null) return <span className="leading-tight"><span className="block text-rose-600">{sale.toLocaleString()}฿</span>{full != null && <span className="block text-[11px] text-slate-400 line-through">{full.toLocaleString()}฿</span>}</span>;
+        return full != null ? <span>{full.toLocaleString()}฿</span> : <span className="text-slate-300">—</span>;
+      },
+    },
+    { key: "match", header: "จับคู่ในระบบ", width: "1.6fr", align: "right", sortValue: (l) => ({ guess: 0, none: 1, ok: 2, ignored: 3 })[statusOf(l)], cell: (l) => matchCell(l) },
   ];
   const fcols: MiniColumn<FieldRow>[] = [
     { key: "key", header: "Field", width: "1.3fr", sortValue: (f) => f.field_key, cell: (f) => <span className="font-mono text-xs">{f.field_key}</span> },
@@ -589,6 +673,9 @@ export default function PlatformCatalogPage() {
   const dupMatchedOther = openListing ? openSiblings.find((l) => l.id !== openListing.id && l.matched_parent_sku_id) ?? null : null;
   // ตัวอื่นจับคู่อยู่ แต่ตัวที่เปิดยังไม่จับคู่ → ให้ไปเก็บตัวที่จับคู่แทน (ไม่ทิ้งคู่ที่ทำไว้แล้ว)
   const dupCanKeep = dupOthers.length > 0 && (!dupMatchedOther || !!openListing?.matched_parent_sku_id);
+  // แนะนำเก็บ = ชิ้นที่ยังขายได้ (เปิดขาย + มีของ) และสต๊อกมากสุด · เท่ากัน = ตัวที่จับคู่อยู่
+  const keepScore = (l: Listing) => { const s = summ[l.id]; const live = s && (s.state === "selling" || s.state === "low") ? 1 : 0; return live * 1e9 + (s?.stock ?? 0) * 10 + (l.matched_parent_sku_id ? 1 : 0); };
+  const dupBest = openSiblings.length > 1 && openSiblings.some((l) => summ[l.id]) ? openSiblings.reduce((a, b) => (keepScore(b) > keepScore(a) ? b : a)) : null;
   const pickBrand = (b: ShopBrandSummary) => {
     setPickedBrand(b);
     setBrandId(b.id);
@@ -779,8 +866,37 @@ export default function PlatformCatalogPage() {
                 <div className="flex-1 h-1.5 rounded-full bg-slate-100 overflow-hidden"><div className="h-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} /></div>
                 <span className="text-xs text-slate-500 shrink-0">จับคู่แล้ว {pct}%{counts.ignored ? ` (ไม่นับที่ไม่ต้องจับคู่ ${counts.ignored.toLocaleString()})` : ""}</span>
               </div>
+              {(hasShopData || summLoading) && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="mr-0.5 text-xs text-slate-500">สถานะบนร้าน</span>
+                  {summLoading && !hasShopData ? <span className="text-xs text-slate-400">กำลังโหลดสต๊อก/สถานะจากร้าน…</span> : (
+                    <>
+                      <button type="button" onClick={() => setShopFilter("")} aria-pressed={!shopFilter}
+                        className={`h-7 rounded-full border px-2.5 text-xs whitespace-nowrap ${!shopFilter ? "border-violet-300 bg-violet-50 text-violet-800" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>ทั้งหมด</button>
+                      {SHOP_FILTERS.map((f) => (
+                        <button key={f.key} type="button" onClick={() => setShopFilter(shopFilter === f.key ? "" : f.key)} aria-pressed={shopFilter === f.key} title={f.tip}
+                          className={`h-7 rounded-full border px-2.5 text-xs whitespace-nowrap ${shopFilter === f.key ? "border-violet-300 bg-violet-50 text-violet-800" : f.key === "out" && shopCounts.out > 0 ? "border-rose-200 bg-rose-50/60 text-rose-700 hover:bg-rose-50" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"}`}>
+                          {f.label} <span className="tabular-nums opacity-70">{shopCounts[f.key].toLocaleString()}</span>
+                        </button>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
               <MiniTable
                 rows={shownRows} columns={cols} rowKey={(l) => l.id} onRowClick={openRow}
+                layout={layout} cardPick cardGrid="repeat(auto-fill,minmax(170px,1fr))"
+                renderCard={(l) => {
+                  const s = summ[l.id];
+                  return (
+                    <ListingCard footer={matchCell(l, true)} data={{
+                      image: s?.image ?? null, title: l.title, sku: l.sku_code, externalId: l.external_product_id,
+                      state: s?.state ?? null, stock: s?.stock ?? null, price: s?.price ?? l.price, salePrice: s?.salePrice ?? null,
+                      variants: s?.variants ?? null, dupCount: dupCounts.get(l.id),
+                    }} />
+                  );
+                }}
+                extraSorts={extraSorts} sortKey={sortKey} sortDir={sortDir} onSortChange={onSortChange}
                 selectable={canEdit} selected={selected} onSelectedChange={setSelected}
                 expandedKeys={expanded}
                 renderExpanded={(l) => (
@@ -792,12 +908,13 @@ export default function PlatformCatalogPage() {
                 searchText={(l) => `${l.title ?? ""} ${l.sku_code ?? ""} ${l.external_product_id ?? ""} ${l.matched_code ?? ""}`}
                 searchPlaceholder="ค้นหาชื่อ / SKU / รหัสบนร้าน / รหัสในระบบ"
                 emptyText="ไม่มีสินค้าในกลุ่มนี้"
-                actions={canEdit && (
+                actions={(
                   <div className="flex flex-wrap items-center justify-end gap-2">
-                    {unmatchedRows.length > 0 && (
+                    <LayoutSwitch value={layout} onChange={setLayout} />
+                    {canEdit && unmatchedRows.length > 0 && (
                       <button type="button" onClick={() => setWorkbench(true)} className="h-8 px-3 text-sm whitespace-nowrap text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50">⚡ จับคู่ทีละตัว ({unmatchedRows.length.toLocaleString()})</button>
                     )}
-                    {highRows.length > 0 && (
+                    {canEdit && highRows.length > 0 && (
                       <button type="button" onClick={() => setBulkAsk(true)} disabled={bulkBusy} className="h-8 px-3 text-sm whitespace-nowrap text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 disabled:opacity-50">✓ ยืนยันทั้งหมดที่รหัสตรงกัน ({highRows.length.toLocaleString()})</button>
                     )}
                   </div>
@@ -932,12 +1049,17 @@ export default function PlatformCatalogPage() {
                     <li key={s.id} className="flex items-center gap-2 px-2 py-1.5">
                       <span className="font-mono text-slate-700">#{s.external_product_id || "—"}</span>
                       {s.id === openListing.id && <span className="rounded bg-slate-100 px-1 text-[10px] text-slate-500">ตัวนี้</span>}
+                      {dupBest?.id === s.id && <span className="rounded border border-emerald-200 bg-emerald-50 px-1 text-[10px] text-emerald-700">แนะนำเก็บ</span>}
                       <span className="flex-1" />
+                      {summ[s.id] && summ[s.id].state !== "nodata" && <ShopStateBadge state={summ[s.id].state} stock={summ[s.id].stock} />}
+                      {summ[s.id] && summ[s.id].state === "out" && <span className="text-rose-600">สต๊อก 0</span>}
+                      {effectivePrice(summ[s.id]) != null && <span className="tabular-nums text-slate-600">{effectivePrice(summ[s.id])!.toLocaleString()}฿</span>}
                       {s.matched_parent_sku_id ? <span className="text-emerald-700">✓ จับคู่ {s.matched_code}</span> : <span className="text-slate-400">ยังไม่จับคู่</span>}
                       {s.id !== openListing.id && <button type="button" onClick={() => openRow(s)} className="text-violet-700 hover:underline">เปิด</button>}
                     </li>
                   ))}
                 </ul>
+                {dupBest && <p className="text-[11px] text-slate-500">“แนะนำเก็บ” = ชิ้นที่ยังเปิดขายและสต๊อกมากสุด (ลูกค้าซื้อได้จริง){dupBest.id !== openListing.id ? " — กด “เปิด” ที่ตัวนั้น แล้วกด “เก็บตัวนี้”" : ""}</p>}
                 {canEdit && (dupCanKeep ? (
                   <button type="button" disabled={ignoreBusy} onClick={() => setDupKeepAsk(true)} className="w-full h-9 px-3 text-sm text-amber-800 border border-amber-300 bg-white rounded-lg hover:bg-amber-50 disabled:opacity-50">
                     เก็บตัวนี้ · อีก {dupOthers.length} ตัวตั้ง “ไม่ต้องจับคู่ (ซ้ำบนร้าน)”

@@ -692,3 +692,4 @@ const HEAD_BG = "#f1f5f9";   // = bg-slate-100 ของหัวตาราง
 const GROUP_BG = "#f8fafc";  // = bg-slate-50 ของแถวสรุปกลุ่ม
 
 export { useColumnPrefs, ColumnChooser, type ColumnPrefsState } from "./column-chooser";
+export { LayoutSwitch, useMiniTableLayout, type MiniLayout } from "./layout-switch";

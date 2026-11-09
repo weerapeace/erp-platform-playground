@@ -6,6 +6,7 @@
  *   view=brands → การ์ดหน้าเลือกแบรนด์ ShopBrandsResponse (ไม่ต้องมี platform_id)
  *   view=shop → มุมมองหน้าร้าน ShopViewResponse (lib/platform-listing-health) — สต๊อก/สถานะ/รูปจากร้าน · ยังไม่ลง · ไม่มีรูป · งานค้าง
  *   view=variants&listing_id= → ตัวเลือกบนร้าน ↔ SKU ในระบบ ListingVariantsResponse (lib/platform-variant-match) · อ่านอย่างเดียว
+ *   view=summary → รูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ ListingSummariesResponse (หน้าจับคู่ โหลดตามหลังตาราง)
  * การนำเข้าจริง (อัปไฟล์ export / ต่อ API) มาเฟสถัดไป — โครงตาราง+หน้าพร้อมแล้ว
  * DELETE ?id=  (products.platforms.edit) → ลบรายการที่นำเข้าผิด (เป็นสำเนาข้อมูลจากร้าน — ของบนร้านจริงไม่ถูกแตะ)
  *   ถ้าสินค้านั้นยังอยู่ในไฟล์ export รอบหน้า จะกลับมาเอง (ต้องจับคู่ใหม่)
@@ -17,8 +18,8 @@ import { guardApi } from "@/lib/api-auth";
 import { writeAudit } from "@/lib/audit";
 import { fetchAllPages } from "@/lib/fetch-all";
 import { SELLING_PLATFORMS } from "@/lib/selling-platforms";
-import { loadBrandSummaries, loadListingVariants, loadShopView } from "@/lib/platform-shop-view-server";
-import type { ShopBrandsResponse, ShopViewResponse } from "@/lib/platform-listing-health";
+import { loadBrandSummaries, loadListingSummaries, loadListingVariants, loadShopView } from "@/lib/platform-shop-view-server";
+import type { ListingSummariesResponse, ShopBrandsResponse, ShopViewResponse } from "@/lib/platform-listing-health";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -54,6 +55,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       sp.get("with_counts") === "1" ? countPerPlatform(admin, brandId) : Promise.resolve(undefined),
     ]);
     const body: ShopViewResponse = { platform_code: platformCode, ...shop, ...(platformCounts ? { platform_counts: platformCounts } : {}), error: null };
+    return NextResponse.json(body);
+  }
+
+  // หน้าจับคู่: รูป/สต๊อก/สถานะ/ราคาบนร้าน ต่อรายการ (โหลดตามหลังตาราง ตารางขึ้นก่อน)
+  if (sp.get("view") === "summary") {
+    const { data: pf } = await admin.from("erp_platforms").select("code").eq("id", platformId).maybeSingle();
+    const platformCode = String((pf as { code?: string } | null)?.code ?? "");
+    const body: ListingSummariesResponse = { summaries: await loadListingSummaries(admin, platformId, platformCode, brandId), error: null };
     return NextResponse.json(body);
   }
 

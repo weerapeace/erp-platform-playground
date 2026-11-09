@@ -46,6 +46,19 @@ export type ListingShopSummary = {
   state: ShopState;
 };
 
+/** สรุปต่อรายการ สำหรับหน้าจับคู่ (การ์ด/ตาราง/กล่องตัวซ้ำ) — GET /api/platform-catalog?view=summary */
+export type ListingCardSummary = Omit<ListingShopSummary, "category">;
+export type ListingSummariesResponse = { summaries: Record<string, ListingCardSummary>; error: string | null };
+
+/** ราคาที่ลูกค้าจ่ายจริง = ราคาลด (ถ้ามี) ไม่งั้นราคาปกติ */
+export const effectivePrice = (s: Pick<ListingShopSummary, "price" | "salePrice"> | null | undefined): number | null =>
+  s ? (s.salePrice ?? s.price) : null;
+/** ลดกี่ % (0 = ไม่ลด/ไม่รู้) — ปัดเป็นจำนวนเต็ม */
+export function discountPct(s: Pick<ListingShopSummary, "price" | "salePrice"> | null | undefined): number {
+  if (!s || s.price == null || s.price <= 0 || s.salePrice == null || s.salePrice >= s.price) return 0;
+  return Math.round((1 - s.salePrice / s.price) * 100);
+}
+
 type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v && typeof v === "object" && !Array.isArray(v) ? v as Obj : null);
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);

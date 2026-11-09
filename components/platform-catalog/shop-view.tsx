@@ -14,7 +14,7 @@ import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
-import { MiniTable, type MiniColumn } from "@/components/mini-table";
+import { MiniTable, LayoutSwitch, useMiniTableLayout, type MiniColumn } from "@/components/mini-table";
 import { Pager } from "@/components/pager";
 import { ScrollTabs } from "@/components/scroll-tabs";
 import { BulkActionBar } from "@/components/bulk-action-bar";
@@ -25,22 +25,15 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import type { ParentSkuPickerValue } from "@/components/pickers";
 import {
   SHOP_STATE_LABEL, SHOP_TABS, inShopQueue, inShopTab, notListedTrustworthy,
-  type ShopItem, type ShopParent, type ShopState, type ShopTab, type ShopViewResponse,
+  type ShopItem, type ShopParent, type ShopTab, type ShopViewResponse,
 } from "@/lib/platform-listing-health";
 import { ShopQueues, queueLabel, queueWhy, type QueueKey } from "./shop-queues";
+import { ListingCard, SHOP_STATE_CLS } from "./listing-card";
 import { AddToPlatformWizard, type AddWizardParent } from "@/components/platform-listing/add-to-platform-wizard";
 
 // ป๊อปสร้างงาน (หนัก) — โหลดตอนกดเท่านั้น
 const CreateTaskModal = dynamic(() => import("@/app/tasks/create-task-modal").then((m) => m.CreateTaskModal), { ssr: false });
 
-const STATE_CLS: Record<ShopState, string> = {
-  selling: "bg-emerald-50 text-emerald-700 border-emerald-200",
-  low: "bg-amber-50 text-amber-700 border-amber-200",
-  out: "bg-rose-50 text-rose-700 border-rose-200",
-  hidden: "bg-slate-100 text-slate-600 border-slate-200",
-  review: "bg-sky-50 text-sky-700 border-sky-200",
-  nodata: "bg-white text-slate-400 border-slate-200",
-};
 const IMG_STATE_LABEL: Record<ShopParent["image_state"], string> = { ok: "มีรูปปก", sku_only: "มีรูป SKU · ยังไม่ตั้งปก", none: "ไม่มีรูปเลย" };
 
 type SortKey = "default" | "stock_desc" | "stock_asc" | "price_desc" | "price_asc" | "name";
@@ -91,6 +84,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const [addFor, setAddFor] = useState<AddWizardParent[] | null>(null);   // ตัวช่วยลงสินค้า (ของกลาง)
   const [cat, setCat] = useState("");   // หมวดกลาง ("" = ทุกหมวด · "__none" = ไม่รู้หมวด เช่น ยังไม่จับคู่)
   const canAdd = can("products.platforms.edit");
+  const [layout, setLayout] = useMiniTableLayout("platform-shop-items");   // ตาราง / การ์ด (การ์ดใบเดียวกับแท็บจับคู่)
 
   // เลขรอบ: สลับร้าน/แบรนด์ระหว่างโหลด → ทิ้งคำตอบของรอบเก่า (บั๊กเดิมของหน้านี้)
   const seq = useRef(0);
@@ -221,7 +215,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
     },
     {
       key: "state", header: "สถานะ", width: "0.8fr", align: "center",
-      cell: (it) => <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${STATE_CLS[it.state]}`}>{SHOP_STATE_LABEL[it.state]}</span>,
+      cell: (it) => <span className={`text-[11px] px-2 py-0.5 rounded-full border whitespace-nowrap ${SHOP_STATE_CLS[it.state]}`}>{SHOP_STATE_LABEL[it.state]}</span>,
     },
     {
       key: "match", header: "สินค้าในระบบ", width: "1fr",
@@ -345,6 +339,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
               {SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
             </select>
           )}
+          {!parentMode && <LayoutSwitch value={layout} onChange={setLayout} />}
           {queueOn && queue === "unmatched" && (
             <button type="button" onClick={onGoMatch} className="h-9 px-3 text-sm text-violet-700 border border-violet-200 rounded-lg hover:bg-violet-50 inline-flex items-center gap-1.5"><Icon name="link" />ไปหน้าจับคู่</button>
           )}
@@ -367,6 +362,24 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
         ) : (
           <MiniTable rows={pageItems} columns={itemCols} rowKey={(it) => it.id}
             selectable={canCreateTask} selected={selected} onSelectedChange={setSelected}
+            layout={layout} cardPick cardGrid="repeat(auto-fill,minmax(170px,1fr))"
+            renderCard={(it) => (
+              <ListingCard badges={it.open_tasks > 0 ? <div className="flex flex-wrap gap-1">{taskBadge(it.open_tasks)}</div> : undefined} data={{
+                image: it.image ?? r2ImageUrl(it.matched_cover_key, 400), title: it.title, sku: it.sku_code, externalId: it.external_product_id,
+                state: it.state, stock: it.stock, price: it.price, salePrice: it.salePrice, variants: it.variants, dupCount: it.dup_count,
+              }} footer={(
+                <div className="flex min-w-0 items-center gap-1.5 text-xs">
+                  {it.matched_parent_sku_id
+                    ? <span className="truncate font-mono text-emerald-700" title={it.matched_name ?? ""}>✓ {it.matched_code || "จับคู่แล้ว"}</span>
+                    : it.match_ignored ? <span className="text-slate-400">ไม่ต้องจับคู่</span>
+                    : <button type="button" onClick={onGoMatch} className="truncate text-amber-700 hover:underline">ยังไม่จับคู่ — ไปจับคู่</button>}
+                  {canCreateTask && it.matched_parent_sku_id && (
+                    <button type="button" onClick={() => setTaskFor([pickerOf(it.matched_parent_sku_id as string, it.matched_code, it.matched_name, it.matched_cover_key)])}
+                      className="ml-auto inline-flex h-7 shrink-0 items-center gap-1 rounded-md border border-slate-200 px-2 hover:bg-slate-50"><Icon name="add" />สร้างงาน</button>
+                  )}
+                </div>
+              )} />
+            )}
             emptyText={needle ? "ไม่พบสินค้าที่ค้นหา" : "ไม่มีสินค้าในกลุ่มนี้"} dense
             resizable storageKey="platform-shop-items" />
         )}
