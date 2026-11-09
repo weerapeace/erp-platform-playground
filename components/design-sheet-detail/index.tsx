@@ -42,8 +42,8 @@ import { calcCostQty, buildStatusMeta, isOwnBrandJob, statusOptsFor, UNKNOWN_STA
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
 import { CostSummaryCard } from "./cost-summary-card";
-import { CostPresetsManager, CutLaborBreakdown, LaborRefPicker, OtherCostPicker, OverheadBreakdown, presetsOf, useCostPresets } from "./cost-extras-tools";
-import { cutLaborRows, cutLaborSummary, DEFAULT_OH, overheadRows, overheadTotal, type PresetKind } from "@/lib/design-cost-presets";
+import { CostPresetsManager, CutLaborBreakdown, LaborRefPicker, OrderQtyBar, OtherCostPicker, OverheadBreakdown, presetsOf, useCostPresets } from "./cost-extras-tools";
+import { cleanOrderQty, cutLaborRows, cutLaborSummary, DEFAULT_OH, overheadRows, overheadTotal, type PresetKind } from "@/lib/design-cost-presets";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { SkuLite } from "@/app/api/design-sheets/price-item-skus/route";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -694,8 +694,19 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
   const orderQtyFromQuote = !(costParent in orderQtyDraft) && orderQty != null && orderQty === quoteQtyFor(costParent);   // ยังไม่ได้พิมพ์เอง + ตรงกับรอบเสนอราคา
   const setOrderQty = (q: number | null) => {
     setOrderQtyDraft((m) => ({ ...m, [costParent]: q }));
-    if (hasSplitExtra) { setCurExtra((l) => l.map((c) => (c.mode === "split" ? cleanExtra({ ...c, split_qty: q }) : c))); setCostDirty(true); }
+    if (hasSplitExtra) setCurExtra((l) => l.map((c) => (c.mode === "split" ? cleanExtra({ ...c, split_qty: q }) : c)));
+    setCostDirty(true); setEditing(true);   // จำนวนที่สั่งบันทึกพร้อมตีราคา (design_sheets.order_qty) · ห้ามอ้าง fullEdit ตรงนี้ (ประกาศทีหลัง)
   };
+  // จำนวนในรอบเสนอราคาของแท็บนี้ (ปุ่มกดใช้บนแถบจำนวนที่สั่ง)
+  const quoteQtyChips = useMemo(() => {
+    const withQty = quotes.filter((q) => (q.qty ?? 0) > 0);
+    const mine = withQty.filter((q) => pkey(q.parent_code) === costParent);
+    const pool = mine.length ? mine : withQty;
+    const byQty = new Map<number, number>();
+    for (const q of pool) { const b = q.batch ?? q.round; const cur = byQty.get(q.qty as number); if (cur == null || b > cur) byQty.set(q.qty as number, b); }
+    return [...byQty.entries()].sort((a, b) => a[0] - b[0]).map(([qty, b]) => ({ qty, label: t(`รอบ ${b}`, `Round ${b}`) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quotes, costParent]);
   // สลับ "ต่อชิ้น" ↔ "หารจำนวนสั่ง" — ตัวเลขในช่องคงเดิม เปลี่ยนแค่ความหมาย (ต่อชิ้น ↔ ยอดรวมจ่ายครั้งเดียว)
   const setExtraMode = (i: number, split: boolean) => {
     setCurExtra((l) => l.map((c, xi) => (xi !== i ? c : split
@@ -1076,7 +1087,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
           body: JSON.stringify({ lines: src.map((row, i) => { const { key: _key, ...l } = row; void _key; return { ...l, sort_order: i + 1 }; }), cost_extra: costExtraMap }) }),
         apiFetch(`/api/design-sheets/${form.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" },
           // ส่ง cost_extra ทั้ง map (แยกตาม Parent) + ชื่อเวอร์ชัน/ร่าง Parent (แท็บที่เพิ่มจากหน้านี้จะได้ไม่หายตอนรีโหลด)
-          body: JSON.stringify({ cost_extra: costExtraMap, parent_sku_drafts: form.parent_sku_drafts }) }),
+          body: JSON.stringify({ cost_extra: costExtraMap, parent_sku_drafts: form.parent_sku_drafts, order_qty: cleanOrderQty(orderQtyDraft) }) }),
       ]);
       const lj = await lr.json(); if (lj.error) throw new Error(lj.error);
       const ej = await er.json(); if (ej.error) throw new Error(ej.error);
@@ -1085,7 +1096,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       return true;
     } catch (e) { toast.error(e instanceof Error ? e.message : t("บันทึกตีราคาไม่สำเร็จ", "Failed to save costing")); return false; }
     finally { setCostSaving(false); }
-  }, [form?.id, form?.parent_sku_drafts, costLines, costExtraMap, toast, t]);
+  }, [form?.id, form?.parent_sku_drafts, costLines, costExtraMap, orderQtyDraft, toast, t]);
 
   // เปลี่ยนชื่อ / ลบ "เวอร์ชันตีราคา" (แท็บ) — เซิร์ฟเวอร์แก้ให้ครบทุกตาราง (วัสดุ/สั่งจากร้าน/เสนอราคา/ค่าใช้จ่ายเพิ่ม/แบ่งกำไร/ชื่อ) แล้วหน้าจอรีโหลด
   const versionOp = async (action: "rename" | "delete", from: string, to?: string): Promise<boolean> => {
@@ -1471,6 +1482,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       }
       if (!(ceMap[""]?.length)) ceMap[""] = defaultCostExtra();   // แท็บทั่วไปโชว์ค่าแรงตั้งต้นเสมอถ้ายังว่าง
       setCostParent(""); setCostExtraMap(ceMap);
+      setOrderQtyDraft(cleanOrderQty(d.order_qty));   // จำนวนที่สั่งที่บันทึกไว้ต่อแท็บ
     } catch (e) { setFormErr(e instanceof Error ? e.message : t("โหลดไม่ได้", "Could not load")); }
     finally { setLoadingForm(false); }
   };
@@ -2693,6 +2705,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 );
               })()}
 
+              {/* จำนวนที่สั่ง — ใส่ครั้งเดียว ใช้ทุกที่ของแท็บนี้ (หารจำนวนสั่ง · ค่าตัดทั้งล็อต · ต้นทุนทั้งล็อต) */}
+              <OrderQtyBar qty={orderQty} fromQuote={orderQtyFromQuote} quoteQtys={quoteQtyChips} readOnly={!canEdit}
+                perUnit={grandTotal} splitPerUnit={costExtra.reduce((s, c) => s + (c.mode === "split" ? Number(c.amount) || 0 : 0), 0)}
+                cutPiecesPerUnit={cutLaborSummary(cutRows).pieces} onChange={setOrderQty} />
+
               {costView === "draw" && board ? (
                 <ShapeEditor key={`board-${costParent}-${board.nonce}`} open embedded readonly={!canEdit}
                   initial={board.initial} initialRefs={board.refs} initialBasis={board.basis} initialSel={board.sel}
@@ -2797,15 +2814,9 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                   <span className="text-sm font-medium text-slate-600">{t("💼 ค่าใช้จ่ายเพิ่ม (นอกจากวัสดุ)", "💼 Additional costs (besides materials)")}</span>
                   {/* จำนวนที่สั่ง — โผล่เมื่อมีรายการแบบ "หารจำนวนสั่ง" (ค่าบล็อก/แม่พิมพ์) */}
                   {hasSplitExtra && (
-                    <label className="ml-auto flex items-center gap-1.5 text-xs text-slate-500"
-                      title={t("ใช้หารรายการแบบ “หารจำนวนสั่ง” (เช่น ค่าบล็อกสกรีน) · ตั้งต้นจากรอบเสนอราคาล่าสุด", "Divides “÷ order qty” items (e.g. screen block) · defaults to the latest quote round")}>
-                      {t("จำนวนที่สั่ง", "Order qty")}
-                      <input type="number" min={1} step={1} value={orderQty ?? ""} disabled={!canEdit} placeholder="0"
-                        onChange={(e) => { const v = Math.round(Number(e.target.value)); setOrderQty(e.target.value === "" || !(v > 0) ? null : v); }}
-                        className="w-20 h-7 px-2 text-sm text-right tabular-nums font-medium text-slate-700 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
-                      {t("ชิ้น", "pcs")}
-                      {orderQtyFromQuote && <span className="text-[10px] text-slate-400">{t("(จากรอบเสนอราคาล่าสุด)", "(from latest quote)")}</span>}
-                    </label>
+                    <span className="ml-auto text-xs text-slate-500" title={t("ใช้หารรายการแบบ “หารจำนวนสั่ง” (เช่น ค่าบล็อกสกรีน) — แก้ที่แถบ “จำนวนที่สั่ง” ด้านบน", "Divides “÷ order qty” items — change it in the Order qty bar above")}>
+                      {t("หารด้วยจำนวนที่สั่ง", "Divided by order qty")} <b className="tabular-nums text-slate-700">{orderQty != null ? orderQty.toLocaleString("th-TH") : "—"}</b> {t("ใบ (แก้ที่แถบด้านบน)", "(edit in the bar above)")}
+                    </span>
                   )}
                   {/* ต้นทุนอื่นๆ: ติ๊กเลือกจากรายการกลาง · ราคากลาง: ตั้งค่า/แก้ (เจ้าของขอ 2026-11-07) */}
                   {canEdit && canSeeCost && (
@@ -2914,7 +2925,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                     : <p className="pl-1 text-[11px] text-amber-600">{t("ใส่ “จำนวนที่สั่ง” ด้านบนก่อน — ตอนนี้ยังไม่ได้รวมในต้นทุน", "Enter the “Order qty” above first — not included in the cost yet")}</p>)}
                   {c.note && <p className="pl-1 text-[11px] text-slate-500">{c.note}</p>}
                   {extraKindOf(c) === "labor_cut" && c.cut_by === "pieces" && (
-                    <CutLaborBreakdown rows={cutRows} orderQty={orderQty} readOnly={!canEdit}
+                    <CutLaborBreakdown rows={cutRows} orderQty={orderQty} onOrderQty={canEdit ? setOrderQty : undefined} readOnly={!canEdit}
                       onToggle={(keys, count) => setLineCut(keys, { cut_skip: count == null ? null : !count })}
                       onOverride={(keys, rate) => setLineCut(keys, { cut_rate: rate })}
                       onSaveMaterial={canEdit ? (itemId, rate, keys) => void saveMaterialCutRate(itemId, rate, keys) : undefined}

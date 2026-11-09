@@ -187,3 +187,18 @@ describe("ตารางค่าตัด: รายบรรทัด", () =>
     expect(g[0].amount).toBe(7.98);
   });
 });
+
+describe("จำนวนที่สั่ง", () => {
+  it("cleanOrderQty เก็บเฉพาะจำนวนเต็มบวก · stepOrderQty ทีละ 100 / ทีละ 1", async () => {
+    const { cleanOrderQty, stepOrderQty } = await import("@/lib/design-cost-presets");
+    expect(cleanOrderQty({ "": 1000, CTL115: "500", x: 0, y: -3, z: "abc", w: 12.6 })).toEqual({ "": 1000, CTL115: 500, w: 13 });
+    expect(cleanOrderQty(null)).toEqual({});
+    expect(cleanOrderQty([1, 2])).toEqual({});
+    expect(stepOrderQty(1000, 1)).toBe(1100);
+    expect(stepOrderQty(1000, -1)).toBe(900);
+    expect(stepOrderQty(100, -1)).toBe(99);
+    expect(stepOrderQty(50, 1)).toBe(51);
+    expect(stepOrderQty(1, -1)).toBe(1);
+    expect(stepOrderQty(null, 1)).toBe(1);
+  });
+});

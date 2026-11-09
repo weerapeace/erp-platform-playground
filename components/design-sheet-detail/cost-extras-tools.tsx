@@ -8,6 +8,7 @@
  *   OtherCostPicker     — ต้นทุนอื่นๆ: ติ๊กเลือกจากรายการกลาง
  *   CostPresetsManager  — ป๊อปตั้งค่าราคากลาง (เพิ่ม / แก้ / ลบ)
  *   CutRateByMaterial   — แท็บค่าตัดต่อชิ้น: ค่ากลาง + ตั้งรายวัตถุดิบ / ทั้งกลุ่ม + ตัวช่วยคิดจากค่าแรงต่อวัน
+ *   OrderQtyBar         — แถบ "จำนวนที่สั่ง" บนแท็บตีราคา (ใส่ครั้งเดียว ใช้ทุกที่: หารจำนวนสั่ง · ค่าตัดทั้งล็อต · ต้นทุนทั้งล็อต)
  * คิดเลขอยู่ lib/design-cost-presets · ของกลาง: Popover · ERPModal · askConfirm · Icon
  */
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
@@ -18,7 +19,7 @@ import { Icon } from "@/components/icon";
 import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import {
-  cutLaborSummary, cutMaterialGroups, cutRateFromWage, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
+  cutLaborSummary, cutMaterialGroups, cutRateFromWage, DEFAULT_OH, ORDER_QTY_QUICK, stepOrderQty, groupCutRows, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
   type CostPreset, type CutMaterial, type CutMaterialGroup, type CutRateSource, type CutRow, type LaborRef, type OverheadCfg, type PackDims, type PresetKind,
 } from "@/lib/design-cost-presets";
 
@@ -323,6 +324,59 @@ export function CostPresetsManager({ open, api, initialKind, onClose, materials,
   );
 }
 
+// ── แถบจำนวนที่สั่ง (บนแท็บตีราคา) ──
+export function OrderQtyBar({ qty, fromQuote, quoteQtys, readOnly, perUnit, splitPerUnit, cutPiecesPerUnit, onChange }: {
+  qty: number | null;
+  /** ตัวเลขตอนนี้มาจากรอบเสนอราคา (ยังไม่ได้พิมพ์เอง) */
+  fromQuote: boolean;
+  /** จำนวนในรอบเสนอราคาของแท็บนี้ (กดใช้ได้) */
+  quoteQtys: { qty: number; label: string }[];
+  readOnly: boolean;
+  perUnit: number;            // ต้นทุนต่อใบตอนนี้ (รวมรายการหารจำนวนสั่งที่คิดจากจำนวนนี้แล้ว)
+  splitPerUnit: number;       // ส่วนของ "หารจำนวนสั่ง" ต่อใบ
+  cutPiecesPerUnit: number;   // ชิ้นงานตัดต่อใบ
+  onChange: (q: number | null) => void;
+}) {
+  const [text, setText] = useState(qty != null ? String(qty) : "");
+  useEffect(() => { setText(qty != null ? String(qty) : ""); }, [qty]);
+  const commit = (raw: string) => { const v = Math.round(Number(raw)); onChange(raw.trim() === "" || !(v > 0) ? null : v); };
+  const q = qty ?? 0;
+  const chip = (on: boolean, tone: "blue" | "green") => `h-7 rounded-md border px-2.5 text-xs tabular-nums disabled:opacity-50 ${on
+    ? tone === "blue" ? "border-blue-500 bg-blue-600 text-white" : "border-emerald-500 bg-emerald-600 text-white"
+    : tone === "blue" ? "border-slate-200 bg-white text-slate-600 hover:bg-slate-50" : "border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-50"}`;
+  const quick = ORDER_QTY_QUICK.filter((v) => !quoteQtys.some((x) => x.qty === v));
+  return (
+    <div className="rounded-xl border-2 border-blue-200 bg-blue-50/40 p-2.5" aria-label="จำนวนที่สั่ง">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="text-sm font-semibold text-slate-700">จำนวนที่สั่ง</span>
+        <div className="flex items-center gap-1">
+          <button type="button" disabled={readOnly} onClick={() => onChange(stepOrderQty(qty, -1))} aria-label="ลดจำนวน" className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40"><Icon value="i:minus" className="text-[15px]" /></button>
+          <input type="number" min={1} step={1} value={text} disabled={readOnly} placeholder="0" aria-label="จำนวนที่สั่ง (ใบ)"
+            onChange={(e) => setText(e.target.value)} onBlur={(e) => commit(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit((e.target as HTMLInputElement).value); } }}
+            className="h-9 w-28 rounded-lg border border-slate-300 bg-white px-2 text-right text-lg font-semibold tabular-nums text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50" />
+          <button type="button" disabled={readOnly} onClick={() => onChange(stepOrderQty(qty, 1))} aria-label="เพิ่มจำนวน" className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40"><Icon value="i:plus" className="text-[15px]" /></button>
+          <span className="text-sm text-slate-500">ใบ</span>
+        </div>
+        <span className="text-[11px] text-slate-400">{qty == null ? "ยังไม่ได้ใส่ — ใส่แล้วต้นทุนทั้งล็อตขึ้นให้" : fromQuote ? "ตั้งต้นจากรอบเสนอราคาล่าสุด" : "บันทึกพร้อมตีราคา"}</span>
+        <span className="ml-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
+          <span>ต่อใบ <b className="text-sm tabular-nums text-slate-800">{baht(perUnit)}</b></span>
+          {q > 0 && <span>ทั้งล็อต <b className="text-sm tabular-nums text-emerald-700">{Math.round(perUnit * q).toLocaleString("th-TH")} ฿</b></span>}
+          {q > 0 && splitPerUnit > 0 && <span title="รายการแบบ “หารจำนวนสั่ง” เช่น ค่าบล็อกสกรีน">หารจำนวนสั่ง <b className="tabular-nums text-slate-700">{baht(splitPerUnit)}</b>/ใบ</span>}
+          {q > 0 && cutPiecesPerUnit > 0 && <span>ชิ้นงานตัด <b className="tabular-nums text-slate-700">{Math.round(cutPiecesPerUnit * q).toLocaleString("th-TH")}</b> ชิ้น</span>}
+        </span>
+      </div>
+      {!readOnly && (
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          {quoteQtys.map((x) => <button key={`q${x.qty}`} type="button" onClick={() => onChange(x.qty)} className={chip(x.qty === q, "green")} title="จำนวนในรอบเสนอราคา">{x.label} · {x.qty.toLocaleString("th-TH")}</button>)}
+          {quoteQtys.length > 0 && quick.length > 0 && <span className="mx-1 h-4 w-px bg-slate-200" />}
+          {quick.map((v) => <button key={v} type="button" onClick={() => onChange(v)} className={chip(v === q, "blue")}>{v.toLocaleString("th-TH")}</button>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ค่าตัดต่อชิ้น แยกตามวัตถุดิบ (ในป๊อปราคากลาง) ──
 const WAGE_KEY = "cut-rate-wage";   // ค่าแรงช่างตัดต่อวัน (จำในเครื่อง — ใช้คิดราคาจาก "ชิ้น/วัน")
 const GROUP_STATE_CLS: Record<CutMaterialGroup["state"], string> = {
@@ -456,9 +510,11 @@ const SRC_CLS: Record<CutRateSource, string> = {
   none: "border-rose-200 bg-rose-50 text-rose-600",
 };
 
-export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverride, onSaveMaterial, onManageMaterials, onManageCentral }: {
+export function CutLaborBreakdown({ rows, orderQty, onOrderQty, readOnly, onToggle, onOverride, onSaveMaterial, onManageMaterials, onManageCentral }: {
   rows: CutRow[];
   orderQty: number | null;
+  /** เปลี่ยนจำนวนที่สั่ง (กลางของแท็บ) — ไม่ส่ง = ช่องในกล่องนี้ใช้ชั่วคราว */
+  onOrderQty?: (q: number) => void;
   readOnly: boolean;
   /** นับ/ไม่นับ ทุกบรรทัดของวัสดุนั้น — null = กลับเป็นอัตโนมัติ (อะไหล่ไม่นับ) */
   onToggle: (lineKeys: string[], count: boolean | null) => void;
@@ -553,7 +609,7 @@ export function CutLaborBreakdown({ rows, orderQty, readOnly, onToggle, onOverri
       <div className="grid gap-2 sm:grid-cols-3">
         <div className="rounded-lg bg-white px-2 py-1.5"><div className="text-[11px] text-slate-400">ชิ้นงานตัดต่อใบ</div><div className="text-base font-semibold tabular-nums text-slate-800">{s.pieces.toLocaleString("th-TH")}</div></div>
         <div className="rounded-lg bg-white px-2 py-1.5">
-          <div className="text-[11px] text-slate-400">ถ้าสั่ง <input type="number" min={1} value={qty} onChange={(e) => setQty(Math.max(1, Math.round(Number(e.target.value)) || 1))} className="h-5 w-16 rounded border border-slate-200 px-1 text-right text-[11px]" /> ใบ = ชิ้นงานรวม</div>
+          <div className="text-[11px] text-slate-400">ถ้าสั่ง <input type="number" min={1} value={qty} onChange={(e) => { const v = Math.max(1, Math.round(Number(e.target.value)) || 1); setQty(v); onOrderQty?.(v); }} className="h-5 w-16 rounded border border-slate-200 px-1 text-right text-[11px]" /> ใบ = ชิ้นงานรวม</div>
           <div className="text-base font-semibold tabular-nums text-slate-800">{Math.round(s.pieces * qty).toLocaleString("th-TH")}</div>
         </div>
         <div className="rounded-lg bg-white px-2 py-1.5"><div className="text-[11px] text-slate-400">ค่าแรงตัดทั้งล็อต</div><div className="text-base font-semibold tabular-nums text-emerald-700">{Math.round(s.total * qty).toLocaleString("th-TH")} ฿</div></div>

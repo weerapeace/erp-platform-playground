@@ -332,3 +332,25 @@ export function cutMaterialGroups(items: CutMaterial[]): CutMaterialGroup[] {
   });
   return out.sort((a, b) => Number(a.hardware) - Number(b.hardware) || b.used - a.used || a.group.localeCompare(b.group, "th"));
 }
+
+// ── จำนวนที่สั่ง ต่อแท็บตีราคา (design_sheets.order_qty · แถบ "จำนวนที่สั่ง" · เจ้าของขอ 2026-11-09) ──
+export const ORDER_QTY_QUICK = [100, 300, 500, 1000, 3000, 5000] as const;
+const ORDER_QTY_MAX = 10_000_000;
+
+/** {parentKey: qty} ที่ปลอดภัย — ตัดค่าที่ไม่ใช่จำนวนเต็มบวก · key ยาวไม่เกิน 120 */
+export function cleanOrderQty(raw: unknown): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return out;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    const n = Math.round(Number(v));
+    if (k.length <= 120 && Number.isFinite(n) && n > 0 && n <= ORDER_QTY_MAX) out[k] = n;
+  }
+  return out;
+}
+
+/** ปุ่ม + / − : ตั้งแต่ 100 ขึ้นไปทีละ 100 · ต่ำกว่านั้นทีละ 1 · ไม่ต่ำกว่า 1 */
+export function stepOrderQty(q: number | null | undefined, dir: 1 | -1): number {
+  const cur = Math.max(0, Math.round(Number(q) || 0));
+  if (dir > 0) return cur >= 100 ? cur + 100 : cur + 1;
+  return Math.max(1, cur > 100 ? cur - 100 : cur - 1);
+}

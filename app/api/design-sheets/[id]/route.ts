@@ -14,6 +14,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { COST_PERM } from "@/lib/cost-access";
 import { writeAudit, auditSnapshot, auditChangeMeta } from "@/lib/audit";
+import { cleanOrderQty } from "@/lib/design-cost-presets";
 import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { isValidDsStatus } from "../shared";
@@ -93,6 +94,7 @@ type PatchBody = {
   parent_sku_drafts?: string[];   // ข้อ 6: ร่าง Parent (ชื่อ ยังไม่มีรหัสจริง)
   cost_general_label?: string | null;   // ชื่อแท็บตีราคา "ทั่วไป" ที่ตั้งเอง (ว่าง = ทั่วไป)
   profit_splits?: Record<string, { name?: string; type?: string; value?: number; on?: boolean }[]>;   // แบ่งกำไรทั้งใบ (ต่อแท็บ Parent)
+  order_qty?: Record<string, number> | null;   // จำนวนที่สั่งต่อแท็บตีราคา (แถบ "จำนวนที่สั่ง")
 };
 
 // sanitize ค่าใช้จ่ายเพิ่ม 1 ชุด — คงแบบ "หารจำนวนสั่ง" (ค่าบล็อก) + คิด amount ต่อชิ้นใหม่ฝั่งเซิร์ฟเวอร์ (lib กลาง)
@@ -140,6 +142,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       patch.cost_extra = out;
     }
   }
+  if (body.order_qty !== undefined) { const oq = cleanOrderQty(body.order_qty); patch.order_qty = Object.keys(oq).length ? oq : null; }
   if (body.status !== undefined) patch.status = body.status;   // ตรวจกับ workflow ด้านล่าง (หลังมี admin)
   const admin = supabaseAdmin();
 
