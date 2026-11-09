@@ -24,10 +24,11 @@ import { Icon } from "@/components/icon";
 import { useT } from "@/components/i18n";
 import { SearchableSelect } from "@/components/searchable-select";
 import {
-  SNAP_STEPS, cleanAllow, defaultGrain, outlineLength, outlineStep, outlineWalk, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
+  SNAP_STEPS, cleanAllow, defaultGrain, flattenShape, outlineLength, outlineStep, outlineWalk, fitPiece, flattenOpen, flipPiece, foldPiece, midEdgeNotches, movePiece, nearestSegment, notchSegments, offsetShape, openPathLength, parseSvgShapes, pieceGeometry, polyD, projectOnOutline, rotatePiece, roundCorners,
   shapeBox, shapeInside, shapePathD, snapTo, splitSegment, toPathShape, toggleSmooth,
   type Box, type PNode, type PieceGeometry, type Pt, type RefImage, type Shape, type ShapeBasis,
 } from "@/lib/pattern-shape";
+import { booleanPieces, type BoolOp } from "@/lib/pattern-boolean";
 export type { RefImage };
 
 export type PieceMat = { id: string; name: string };
@@ -762,6 +763,30 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
     const np: Piece = { id: newId(), shape: sh, holes: [], count: selPiece.count, allow: 0, name: `${selPiece.name || `P${pieces.indexOf(selPiece) + 1}`} (${label})`, mats: [], pid: newPid(), src: [] };
     if (addPieces([np])) { setTool("move"); setMsg({ tone: "ok", text: t("สร้างชิ้นเส้นขนานแล้ว (ซ้อนอยู่ตำแหน่งเดิม · ยังไม่เลือกวัสดุ เช่น ผ้ากาว/ซับใน)", "Offset piece created (on top of the original · pick a material, e.g. interfacing)") }); }
   };
+  /** รวม / ตัดออก / ส่วนทับ ชิ้นที่เลือก — ชิ้นหลัก = ชิ้นที่อยู่ก่อนบนกระดาน (P เลขน้อยสุด) เก็บวัสดุ/เผื่อพับ/บรรทัดตีราคาเดิม · ชิ้นอื่นที่เลือกหายไป */
+  const booleanSel = (op: BoolOp) => {
+    const ids = new Set(selIdsRef.current);
+    const list = piecesRef.current.filter((p) => ids.has(p.id));
+    if (list.length < 2) return;
+    const base = list[0], no = piecesRef.current.indexOf(base) + 1;
+    const res = booleanPieces(op, list.map((p) => ({ shape: p.shape, holes: p.holes })));
+    if (!res.length) {
+      setMsg({ tone: "err", text: op === "intersect" ? t("ชิ้นที่เลือกไม่มีส่วนที่ซ้อนกัน", "The selected pieces don't overlap") : t(`ตัดแล้วไม่เหลืออะไรจาก P${no} (ชิ้นที่ตัดคลุมทั้งชิ้น)`, `Nothing left of P${no} (the cutter covers it)`) });
+      return;
+    }
+    const onEdge = (shape: Shape, notches?: Pt[]) => { const P = flattenShape(shape); return (notches ?? []).filter((n) => projectOnOutline(P, n).d < 0.05); };
+    const first: Piece = { ...base, shape: res[0].shape, holes: res[0].holes, notches: onEdge(res[0].shape, base.notches) };
+    const extra: Piece[] = res.slice(1).map((r, i) => ({ ...base, id: newId(), pid: newPid(), src: [], shape: r.shape, holes: r.holes, notches: [], name: base.name ? `${base.name} (${i + 2})` : "" }));
+    const drop = new Set(list.slice(1).map((p) => p.id));
+    const next: Piece[] = [];
+    for (const p of piecesRef.current) { if (drop.has(p.id)) continue; if (p.id === base.id) next.push(first, ...extra); else next.push(p); }
+    commit(next);
+    setMulti(new Set()); setSel(base.id); setEditId(null); setTool("move");
+    const what = op === "union" ? (res.length === 1 ? t("รวมเป็นชิ้นเดียวแล้ว", "Merged into one piece") : t(`รวมแล้วได้ ${res.length} ชิ้น (บางชิ้นไม่ได้ซ้อนกัน)`, `Merged into ${res.length} pieces (some didn't overlap)`))
+      : op === "subtract" ? t(`ตัดออกจาก P${no} แล้ว${res.length > 1 ? ` · แยกเป็น ${res.length} ชิ้น` : ""}${res[0].holes.length ? ` · มีรู ${res[0].holes.length}` : ""}`, `Cut out of P${no}${res.length > 1 ? ` · split into ${res.length}` : ""}`)
+      : t("เหลือเฉพาะส่วนที่ซ้อนกันแล้ว", "Kept only the overlapping part");
+    setMsg({ tone: "ok", text: `${what} — ${t(`ใช้วัสดุ/เผื่อพับของ P${no} · ชิ้นอื่นที่เลือกถูกเอาออก · Ctrl+Z ย้อนได้`, `uses P${no}'s materials/allowance · other selected pieces removed · Ctrl+Z to undo`)}` });
+  };
   const toggleGrain = () => { if (selPiece) patchPiece(selPiece.id, (p) => ({ ...p, grain: p.grain ? null : defaultGrain(p.shape) })); };
   const turnGrain = () => {
     if (!selPiece?.grain || selPiece.grain.length !== 2) return;
@@ -1223,6 +1248,15 @@ export function ShapeEditor({ open, onClose, onSave, initial = [], initialBasis 
                     <button type="button" disabled={multi.size < 3} onClick={() => distributeSel("x")} className={`${btnCls(false)} disabled:opacity-40`} title={t("ระยะห่างแนวนอนเท่ากัน (≥3 ชิ้น)", "Equal horizontal gaps (3+ pieces)")}>{t("เว้นเท่ากัน ↔", "Distribute ↔")}</button>
                     <button type="button" disabled={multi.size < 3} onClick={() => distributeSel("y")} className={`${btnCls(false)} disabled:opacity-40`} title={t("ระยะห่างแนวตั้งเท่ากัน (≥3 ชิ้น)", "Equal vertical gaps (3+ pieces)")}>{t("เว้นเท่ากัน ↕", "Distribute ↕")}</button>
                   </div>
+                </div>
+                <div>
+                  <div className="mb-1 font-medium text-slate-600">{t("รวมรูป", "Combine shapes")}</div>
+                  <div className="grid grid-cols-3 gap-1">
+                    <button type="button" onClick={() => booleanSel("union")} className={btnCls(false)} title={t("รวมทุกชิ้นที่เลือกเป็นรูปเดียว", "Merge all selected into one shape")}>{t("รวม", "Union")}</button>
+                    <button type="button" onClick={() => booleanSel("subtract")} className={btnCls(false)} title={t("ชิ้นหลัก (P เลขน้อยสุด) ถูกเจาะด้วยชิ้นอื่น", "The main piece (lowest P) is cut by the others")}>{t("ตัดออก", "Subtract")}</button>
+                    <button type="button" onClick={() => booleanSel("intersect")} className={btnCls(false)} title={t("เหลือเฉพาะส่วนที่ทุกชิ้นซ้อนกัน", "Keep only where all pieces overlap")}>{t("ส่วนทับ", "Intersect")}</button>
+                  </div>
+                  <div className="mt-1 text-[11px] text-slate-400">{t(`ชิ้นหลัก = P${pieces.findIndex((p) => multi.has(p.id)) + 1} (เก็บวัสดุ/เผื่อพับ/บรรทัดตีราคา) · ขอบโค้งกลายเป็นจุด แก้จุดต่อได้`, `Main piece = P${pieces.findIndex((p) => multi.has(p.id)) + 1} (keeps materials/allowance/cost row) · curves become points`)}</div>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   <button type="button" onClick={copyButton} className={btnCls(false)}><Icon value="i:copy" className="text-[13px]" />{t("คัดลอก", "Copy")}</button>
