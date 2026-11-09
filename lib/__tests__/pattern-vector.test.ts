@@ -87,3 +87,15 @@ describe("เส้นขนานด้านในของมุมโค้�
     expect(untangle(sq)).toEqual(sq);
   });
 });
+
+describe("ชิ้นที่วาดขึ้นใบแพทเทิร์นเสมอ", () => {
+  it("วิธีคิด area_sheet / count ที่มีรูปวาด = ขึ้น · ไม่มีรูปวาดแบบ count = ไม่ขึ้น · area_sheet กว้าง×ยาว = ขึ้น", async () => {
+    const { patternPieces } = await import("@/lib/pattern-sheet");
+    const shape = { v: 1, shape: { k: "ellipse", x: 0, y: 0, w: 8, h: 7 }, basis: "box", allow: 1 };
+    expect(patternPieces([{ calc_method: "area_sheet", shape, width_cm: 10, length_cm: 9 }])).toHaveLength(1);
+    expect(patternPieces([{ calc_method: "count", shape }])).toHaveLength(1);
+    expect(patternPieces([{ calc_method: "count", width_cm: 5, length_cm: 5 }])).toHaveLength(0);
+    expect(patternPieces([{ calc_method: "length", width_cm: 167, length_cm: 100 }])).toHaveLength(0);
+    expect(patternPieces([{ calc_method: "area_sheet", width_cm: 10, length_cm: 9 }])).toHaveLength(1);
+  });
+});

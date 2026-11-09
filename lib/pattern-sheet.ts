@@ -71,14 +71,14 @@ const r1 = (v: number) => Math.round(v * 10) / 10;
 
 /** วิธีคิดที่ใช้ทั้งกว้างและยาว (ชิ้นตัดจริง) — สาย/เทปคิดตามยาว ("length") อาจมีค่ากว้างค้างจากเดิม ห้ามนับเป็นชิ้น
  *  (เจอจริง 2026-11-07: กุ้น 7 หุน 167 × 100 ใน DS-2026-0064 → เคยจะกลายเป็นชิ้นยักษ์ พิมพ์ A4 หลายสิบหน้า) */
-export const PATTERN_AREA_METHODS = new Set(["area_face", "area_100"]);
+export const PATTERN_AREA_METHODS = new Set(["area_face", "area_100", "area_sheet"]);
 
 /** บรรทัดตีราคา → ชิ้นแพทเทิร์น (เฉพาะบรรทัดที่มีทั้งกว้างและยาว + คิดแบบพื้นที่) · ชิ้น = 0/ว่าง ถือเป็น 1 */
 export function patternPieces(lines: PatternLineInput[]): PatternPiece[] {
   const out: PatternPiece[] = [];
   for (const l of lines) {
-    if (l.calc_method !== undefined && !PATTERN_AREA_METHODS.has(l.calc_method ?? "")) continue;
-    const ls = cleanLineShape(l.shape);
+    const ls = cleanLineShape(l.shape);   // ชิ้นที่วาดไว้ = ชิ้นแพทเทิร์นเสมอ ไม่ว่าวิธีคิดไหน (เจอจริง 2026-11-09: วาดแบบ "ตัดจากผืน" area_sheet แล้วหน้าพิมพ์ไม่ขึ้น)
+    if (!ls && l.calc_method !== undefined && !PATTERN_AREA_METHODS.has(l.calc_method ?? "")) continue;
     const g = ls ? pieceGeometry(ls) : null;   // เส้นตัด (รวมเผื่อพับ) · รู · เส้นเย็บ
     const cb = g?.cutBox;
     const w = cb ? cb.w : num(l.width_cm), h = cb ? cb.h : num(l.length_cm);
