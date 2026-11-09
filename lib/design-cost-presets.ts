@@ -79,8 +79,8 @@ export function presetProblem(p: Omit<CostPreset, "id">): string | null {
 
 /** ขนาดสินค้าตอนแพ็กแล้ว (ซม. / กรัม) */
 export type PackDims = { w: number | null; l: number | null; t: number | null; g: number | null };
-/** การตั้งค่าโสหุ้ยของ 1 แท็บ — off = คีย์รายการที่ปิด (fx:<id> / bag / box / ship) · ship = วิธีคิดค่าส่ง */
-export type OverheadCfg = { dims: PackDims; off: string[]; ship: "carton" | "parcel" | "none" };
+/** การตั้งค่าโสหุ้ยของ 1 แท็บ — off = คีย์รายการที่ปิด (fx:<id> / bag / box / ship) · ship = วิธีคิดค่าส่ง · carton = ลังที่เลือกเอง (ไม่มี = ระบบเลือกลังที่คุ้มสุด) */
+export type OverheadCfg = { dims: PackDims; off: string[]; ship: "carton" | "parcel" | "none"; carton?: string | null };
 
 export const EMPTY_DIMS: PackDims = { w: null, l: null, t: null, g: null };
 export const DEFAULT_OH: OverheadCfg = { dims: EMPTY_DIMS, off: ["box"], ship: "carton" };   // กล่อง: ปิดไว้ก่อน (งานส่วนใหญ่ไม่มีกล่อง)
@@ -94,6 +94,7 @@ export function cleanOverheadCfg(raw: unknown): OverheadCfg | null {
     dims: { w: pos(d.w), l: pos(d.l), t: pos(d.t), g: pos(d.g) },
     off: Array.isArray(r.off) ? [...new Set(r.off.map(String).filter((s) => s && s.length <= 60))].slice(0, 40) : [],
     ship,
+    ...(typeof r.carton === "string" && r.carton && r.carton.length <= 64 ? { carton: r.carton } : {}),
   };
 }
 
@@ -155,12 +156,32 @@ export function parcelPrice(d: PackDims, tiers: CostPreset[]): { chargeKg: numbe
   return { chargeKg: Math.round(chargeKg * 1000) / 1000, volKg: Math.round(volKg * 1000) / 1000, actKg, tier };
 }
 
-export type OverheadRow = { key: string; label: string; detail: string; amount: number; on: boolean; warn?: boolean };
+/** ลังแต่ละขนาด: ใส่ได้กี่ชิ้น · จำนวนสั่งนี้ต้องใช้กี่ลัง · ค่าส่งรวม · ต่อชิ้น (คิดจากจำนวนลังจริง ลังสุดท้ายไม่เต็มก็จ่ายเต็ม) */
+export type CartonOption = { preset: CostPreset; perCarton: number; cartons: number; total: number; perUnit: number; lastFill: number };
+export function cartonOptions(d: PackDims, cartons: CostPreset[], qty?: number | null): CartonOption[] {
+  const q = qty != null && qty > 0 ? Math.round(qty) : 0;
+  return cartons.map((c) => {
+    const n = piecesPerCarton(d, c);
+    if (!(n > 0)) return { preset: c, perCarton: 0, cartons: 0, total: 0, perUnit: 0, lastFill: 0 };
+    if (!q) return { preset: c, perCarton: n, cartons: 1, total: c.amount, perUnit: r2(c.amount / n), lastFill: n };
+    const k = Math.ceil(q / n);
+    return { preset: c, perCarton: n, cartons: k, total: r2(k * c.amount), perUnit: r2((k * c.amount) / q), lastFill: q - (k - 1) * n };
+  });
+}
+/** ลังที่ใช้: ที่เลือกไว้ (ถ้ายังใส่ได้) ไม่งั้นลังที่ค่าส่งต่อชิ้นถูกสุด (เท่ากัน = ลังที่อยู่ก่อน) */
+export function pickCarton(opts: CartonOption[], chosen?: string | null): { use: CartonOption | null; best: CartonOption | null } {
+  const ok = opts.filter((o) => o.perCarton > 0);
+  const best = ok.reduce<CartonOption | null>((m, o) => (!m || o.perUnit < m.perUnit ? o : m), null);
+  const sel = chosen ? ok.find((o) => o.preset.id === chosen) ?? null : null;
+  return { use: sel ?? best, best };
+}
+
+export type OverheadRow = { key: string; label: string; detail: string; amount: number; on: boolean; warn?: boolean; cartons?: CartonOption[]; carton?: string | null; bestCarton?: string | null };
 
 const fmt = (n: number) => r2(n).toLocaleString("th-TH", { maximumFractionDigits: 2 });
 
 /** รายการโสหุ้ยของแท็บ (ตามราคากลางปัจจุบัน) — ยอดโสหุ้ย = รวมเฉพาะรายการที่เปิด */
-export function overheadRows(cfg: OverheadCfg, presets: CostPreset[]): OverheadRow[] {
+export function overheadRows(cfg: OverheadCfg, presets: CostPreset[], qty?: number | null): OverheadRow[] {
   const by = (k: PresetKind) => presets.filter((p) => p.kind === k).sort((a, b) => a.sort_order - b.sort_order);
   const off = new Set(cfg.off);
   const d = cfg.dims;
@@ -181,12 +202,20 @@ export function overheadRows(cfg: OverheadCfg, presets: CostPreset[]): OverheadR
       : { key: "box", label: "กล่อง", detail: "ไม่มีกล่องที่ใส่ได้ — เพิ่มขนาดกล่องในราคากลาง", amount: 0, on: !off.has("box"), warn: true });
   }
   if (cfg.ship === "carton") {
-    const c = by("carton")[0];
-    if (c) {
-      const n = piecesPerCarton(d, c);
+    const cartons = by("carton");
+    if (cartons.length) {
+      const opts = hasWL(d) ? cartonOptions(d, cartons, qty) : [];
+      const { use, best } = pickCarton(opts, cfg.carton);
+      const q = qty != null && qty > 0 ? Math.round(qty) : 0;
+      const size = (c: CostPreset) => `${fmt(c.w_cm ?? 0)}×${fmt(c.l_cm ?? 0)}×${fmt(c.h_cm ?? 0)}`;
       rows.push(!hasWL(d) ? { key: "ship", label: "ค่าส่ง (ลัง)", detail: "ใส่ขนาดสินค้าก่อน", amount: 0, on: !off.has("ship"), warn: true }
-        : n > 0 ? { key: "ship", label: "ค่าส่ง (ลัง)", detail: `ลัง ${fmt(c.w_cm ?? 0)}×${fmt(c.l_cm ?? 0)}×${fmt(c.h_cm ?? 0)} ใส่ได้ ${n} ชิ้น · ${fmt(c.amount)} ÷ ${n}`, amount: r2(c.amount / n), on: !off.has("ship") }
-        : { key: "ship", label: "ค่าส่ง (ลัง)", detail: "สินค้าใหญ่กว่าลัง — แก้ขนาดลังในราคากลาง", amount: 0, on: !off.has("ship"), warn: true });
+        : use ? {
+          key: "ship", label: "ค่าส่ง (ลัง)", amount: use.perUnit, on: !off.has("ship"), cartons: opts, carton: use.preset.id, bestCarton: best?.preset.id ?? null,
+          detail: q
+            ? `ลัง ${size(use.preset)} ใส่ได้ ${use.perCarton} · สั่ง ${q.toLocaleString("th-TH")} = ${use.cartons.toLocaleString("th-TH")} ลัง${use.lastFill < use.perCarton ? ` (ลังสุดท้าย ${use.lastFill})` : ""} · ${fmt(use.total)} ฿`
+            : `ลัง ${size(use.preset)} ใส่ได้ ${use.perCarton} ชิ้น · ${fmt(use.preset.amount)} ÷ ${use.perCarton}`,
+        }
+        : { key: "ship", label: "ค่าส่ง (ลัง)", detail: "สินค้าใหญ่กว่าทุกลัง — เพิ่มขนาดลังในราคากลาง", amount: 0, on: !off.has("ship"), warn: true, cartons: opts });
     }
   } else if (cfg.ship === "parcel") {
     const tiers = by("parcel");
@@ -353,4 +382,26 @@ export function stepOrderQty(q: number | null | undefined, dir: 1 | -1): number 
   const cur = Math.max(0, Math.round(Number(q) || 0));
   if (dir > 0) return cur >= 100 ? cur + 100 : cur + 1;
   return Math.max(1, cur > 100 ? cur - 100 : cur - 1);
+}
+
+// ── ขนาดสินค้าตอนแพ็ก: ตัวเลือกจากข้อมูลที่ระบบรู้ (เจ้าของขอ 2026-11-09 "เลือกจากที่คำนวณได้") ──
+export type PackSuggestion = { key: string; label: string; dims: PackDims };
+export type PackRef = { product?: { w: number | null; l: number | null; t: number | null; g: number | null } | null; parcel?: { name: string; w: number; l: number; h: number } | null };
+type PackLine = { item_name?: string | null; group_name?: string | null; calc_method?: string | null; width_cm?: number | null; length_cm?: number | null };
+
+/** ตัวเลือกขนาด: ขนาดสินค้าในข้อมูลรุ่น · กล่องส่งที่รุ่นนี้ใช้ · ชิ้นใหญ่สุดในตีราคา (กว้าง×ยาว) */
+export function packSuggestions(ref: PackRef | null | undefined, lines: PackLine[], code?: string | null): PackSuggestion[] {
+  const out: PackSuggestion[] = [];
+  const p = ref?.product;
+  if (p && pos(p.w) && pos(p.l)) out.push({ key: "product", label: `ขนาดสินค้า${code ? ` ${code}` : ""}`, dims: { w: pos(p.w), l: pos(p.l), t: pos(p.t), g: pos(p.g) } });
+  const c = ref?.parcel;
+  if (c && pos(c.w) && pos(c.l)) out.push({ key: "parcel", label: `กล่องส่งที่รุ่นนี้ใช้ ${c.name}`, dims: { w: pos(c.w), l: pos(c.l), t: pos(c.h), g: p ? pos(p.g) : null } });
+  let big: { name: string; w: number; l: number } | null = null;
+  for (const l of lines) {
+    if (isHardwareLine(l)) continue;
+    const w = pos(l.width_cm), h = pos(l.length_cm);
+    if (w && h && (!big || w * h > big.w * big.l)) big = { name: (l.item_name ?? "").trim(), w, l: h };
+  }
+  if (big) out.push({ key: "piece", label: `ชิ้นใหญ่สุดในตีราคา${big.name ? ` (${big.name})` : ""}`, dims: { w: big.w, l: big.l, t: null, g: null } });
+  return out;
 }

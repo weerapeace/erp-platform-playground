@@ -202,3 +202,41 @@ describe("จำนวนที่สั่ง", () => {
     expect(stepOrderQty(null, 1)).toBe(1);
   });
 });
+
+describe("ลังส่ง: เลือกลังคุ้มสุด + นับลังตามจำนวนสั่ง", () => {
+  const P = (id: string, w: number, l: number, h: number, amount: number) => ({ id, kind: "carton" as const, label: null, amount, w_cm: w, l_cm: l, h_cm: h, max_kg: null, mode: null, sort_order: 0 });
+  const d = { w: 30, l: 38, t: 10, g: 450 };
+  it("cartonOptions: จำนวนลัง = ปัดขึ้น · ต่อชิ้นคิดจากลังจริง · pickCarton เลือกถูกสุด/ที่เลือกเอง", async () => {
+    const { cartonOptions, pickCarton, piecesPerCarton } = await import("@/lib/design-cost-presets");
+    const cs = [P("mid", 40, 50, 30, 215), P("small", 30, 45, 20, 135), P("big", 45, 45, 45, 305)];
+    const n = piecesPerCarton(d, cs[0]);
+    const o = cartonOptions(d, cs, 1000);
+    expect(o[0].perCarton).toBe(n);
+    expect(o[0].cartons).toBe(Math.ceil(1000 / n));
+    expect(o[0].perUnit).toBeCloseTo((Math.ceil(1000 / n) * 215) / 1000, 2);
+    const { use, best } = pickCarton(o, null);
+    expect(use?.preset.id).toBe(best?.preset.id);
+    expect(best!.perUnit).toBe(Math.min(...o.filter((x) => x.perCarton > 0).map((x) => x.perUnit)));
+    expect(pickCarton(o, "big").use?.preset.id).toBe("big");
+    expect(pickCarton(o, "nope").use?.preset.id).toBe(best?.preset.id);
+  });
+  it("overheadRows: ค่าส่งตามจำนวนสั่ง + เก็บลังที่เลือก · cleanOverheadCfg เก็บ carton", async () => {
+    const { overheadRows, cleanOverheadCfg } = await import("@/lib/design-cost-presets");
+    const cs = [P("mid", 40, 50, 30, 215), P("small", 30, 45, 20, 135)];
+    const ship = overheadRows({ dims: d, off: [], ship: "carton", carton: "mid" }, cs, 1000).find((r) => r.key === "ship")!;
+    expect(ship.carton).toBe("mid");
+    expect(ship.detail).toContain("สั่ง 1,000");
+    expect(ship.cartons).toHaveLength(2);
+    expect(cleanOverheadCfg({ dims: d, off: [], ship: "carton", carton: "mid" })?.carton).toBe("mid");
+    expect(cleanOverheadCfg({ dims: d, off: [], ship: "carton" })).not.toHaveProperty("carton");
+  });
+  it("packSuggestions: สินค้า · กล่องส่ง · ชิ้นใหญ่สุด (ข้ามอะไหล่)", async () => {
+    const { packSuggestions } = await import("@/lib/design-cost-presets");
+    const s = packSuggestions({ product: { w: 30, l: 38, t: 10, g: 450 }, parcel: { name: "C", w: 20, l: 30, h: 11 } },
+      [{ item_name: "ผ้าตัว", group_name: "ผ้า", width_cm: 32, length_cm: 40 }, { item_name: "หัวซิป", group_name: "อะไหล่", calc_method: "count", width_cm: 100, length_cm: 100 }], "CTL115");
+    expect(s.map((x) => x.key)).toEqual(["product", "parcel", "piece"]);
+    expect(s[1].dims).toEqual({ w: 20, l: 30, t: 11, g: 450 });
+    expect(s[2]).toMatchObject({ label: "ชิ้นใหญ่สุดในตีราคา (ผ้าตัว)", dims: { w: 32, l: 40 } });
+    expect(packSuggestions(null, [])).toEqual([]);
+  });
+});

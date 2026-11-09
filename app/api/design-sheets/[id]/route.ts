@@ -14,7 +14,7 @@ import { supabaseAdmin } from "@/lib/supabase-admin";
 import { apiCan, guardApi } from "@/lib/api-auth";
 import { COST_PERM } from "@/lib/cost-access";
 import { writeAudit, auditSnapshot, auditChangeMeta } from "@/lib/audit";
-import { cleanOrderQty } from "@/lib/design-cost-presets";
+import { cleanOrderQty, type PackRef } from "@/lib/design-cost-presets";
 import { r2MoveToTrash, isR2Configured } from "@/lib/r2";
 import { friendlyDbError } from "../../master-v2/[entity]/route";
 import { isValidDsStatus } from "../shared";
@@ -52,6 +52,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   if (Array.isArray(row.parent_sku_codes)) for (const c of row.parent_sku_codes as unknown[]) if (c) codesSet.add(String(c));
   if (row.parent_sku_code) codesSet.add(String(row.parent_sku_code));
   const parent_sku_refs: { code: string; id: string }[] = [];
+  // ขนาดสินค้า/กล่องส่งของแต่ละรุ่น → ตัวเลือก "ขนาดสินค้าตอนแพ็ก" ในค่าโสหุ้ย (lib/design-cost-presets packSuggestions)
+  const pack_refs: Record<string, PackRef> = {};
+  const parcelByParent = new Map<string, string>();
   const parentIdToCode = new Map<string, string>();
 
   // "SKU ที่เชื่อมกับใบงานนี้" = SKU ที่สร้างจากใบนี้ (design_sheet_id) + พี่น้องที่อยู่ใต้ Parent เดียวกัน
@@ -60,11 +63,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   for (const s of (ownRes.data ?? []) as Record<string, unknown>[]) byId.set(String(s.id), s);
   if (codesSet.size) {
     // Parent + SKU ลูกทั้งหมด ในคำขอเดียว (FK skus_v2.parent_sku_id → parent_skus_v2 มีตัวเดียว)
-    const { data: prs } = await admin.from("parent_skus_v2").select(`id, code, skus:skus_v2(${SKU_COLS})`).in("code", Array.from(codesSet));
-    for (const p of (prs ?? []) as { id: string; code: string; skus?: Record<string, unknown>[] | null }[]) {
+    const { data: prs } = await admin.from("parent_skus_v2").select(`id, code, size_length_cm, size_height_cm, size_thickness_cm, weight_g, parcel_size_id, skus:skus_v2(${SKU_COLS})`).in("code", Array.from(codesSet));
+    for (const p of (prs ?? []) as { id: string; code: string; size_length_cm?: number | null; size_height_cm?: number | null; size_thickness_cm?: number | null; weight_g?: number | null; parcel_size_id?: string | null; skus?: Record<string, unknown>[] | null }[]) {
       parent_sku_refs.push({ code: String(p.code), id: String(p.id) });
+      const num = (v: unknown) => (Number(v) > 0 ? Number(v) : null);
+      if (num(p.size_length_cm) && num(p.size_height_cm)) pack_refs[String(p.code)] = { product: { w: num(p.size_length_cm), l: num(p.size_height_cm), t: num(p.size_thickness_cm), g: num(p.weight_g) } };
+      if (p.parcel_size_id) parcelByParent.set(String(p.code), String(p.parcel_size_id));
       parentIdToCode.set(String(p.id), String(p.code));
       for (const s of (p.skus ?? []).slice(0, 500)) if (!byId.has(String(s.id))) byId.set(String(s.id), s);
+    }
+  }
+  if (parcelByParent.size) {
+    const { data: ps } = await admin.from("parcel_sizes").select("id, name, width_cm, length_cm, height_cm").in("id", [...new Set(parcelByParent.values())]);
+    const byPid = new Map(((ps ?? []) as { id: string; name: string | null; width_cm: number | null; length_cm: number | null; height_cm: number | null }[]).map((x) => [String(x.id), x]));
+    for (const [code, pid] of parcelByParent) {
+      const x = byPid.get(pid);
+      if (x && Number(x.width_cm) > 0 && Number(x.length_cm) > 0) pack_refs[code] = { ...(pack_refs[code] ?? {}), parcel: { name: String(x.name ?? ""), w: Number(x.width_cm), l: Number(x.length_cm), h: Number(x.height_cm) || 0 } };
     }
   }
   const linked_skus = Array.from(byId.values()).map((s) => ({
@@ -80,7 +94,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   // ค่าใช้จ่ายเพิ่ม/แบ่งกำไร = ข้อมูลต้นทุน → ไม่มีสิทธิ์ดูต้นทุน ตัดออก (เดิมซ่อนแค่หน้าจอ)
   const costHidden = !canCost;
   const safe = costHidden ? { ...data, cost_extra: null, profit_splits: null } : data;
-  return NextResponse.json({ data: { ...safe, parent_sku_refs, linked_skus, ...(costHidden ? { cost_restricted: true } : {}) }, error: null });
+  return NextResponse.json({ data: { ...safe, parent_sku_refs, pack_refs, linked_skus, ...(costHidden ? { cost_restricted: true } : {}) }, error: null });
 }
 
 // field ที่แก้ได้ (whitelist)

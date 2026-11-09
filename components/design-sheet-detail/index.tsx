@@ -5,7 +5,7 @@
  * ของกลาง: DataTable(server) / CanvasBoard / ERPModal / ConfirmDialog / ImageManager(แนบไฟล์กลาง→R2) / useToast / useAuth
  * เฟสถัดไป: comment ลูกค้า · รอบเสนอราคา · แท็บตีราคา · ตั้ง Parent SKU
  */
-import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, useLayoutEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable, type ServerFetchParams } from "@/components/data-table";
@@ -43,7 +43,7 @@ import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { costUsagePerUnit } from "@/lib/cost-usage";
 import { CostSummaryCard } from "./cost-summary-card";
 import { CostPresetsManager, CutLaborBreakdown, LaborRefPicker, OrderQtyBar, OtherCostPicker, OverheadBreakdown, presetsOf, useCostPresets } from "./cost-extras-tools";
-import { cleanOrderQty, cutLaborRows, cutLaborSummary, DEFAULT_OH, overheadRows, overheadTotal, type PresetKind } from "@/lib/design-cost-presets";
+import { cleanOrderQty, cutLaborRows, cutLaborSummary, DEFAULT_OH, groupCutRows, overheadRows, overheadTotal, packSuggestions, pickBag, type OverheadCfg, type PackRef, type PresetKind } from "@/lib/design-cost-presets";
 import type { SkuPickerValue } from "@/components/pickers";
 import type { SkuLite } from "@/app/api/design-sheets/price-item-skus/route";
 import { SearchableSelect } from "@/components/searchable-select";
@@ -688,13 +688,16 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     return Math.min(...pool.filter((q) => batchOf(q) === last).map((q) => q.qty as number));
   }, [quotes]);
   const [orderQtyDraft, setOrderQtyDraft] = useState<Record<string, number | null>>({});
+  const [packRefs, setPackRefs] = useState<Record<string, PackRef>>({});   // ขนาดสินค้า/กล่องส่งของแต่ละรุ่น (GET ใบงาน pack_refs)
+  const [extraOpen, setExtraOpen] = useState<Set<string>>(new Set());      // แถวค่าใช้จ่ายเพิ่มที่กางดูรายละเอียด (โหมดดู)
   const hasSplitExtra = costExtra.some((c) => c.mode === "split");
   const savedSplitQty = costExtra.find((c) => c.mode === "split" && c.split_qty)?.split_qty ?? null;
   const orderQty: number | null = savedSplitQty ?? (costParent in orderQtyDraft ? orderQtyDraft[costParent] : quoteQtyFor(costParent));
   const orderQtyFromQuote = !(costParent in orderQtyDraft) && orderQty != null && orderQty === quoteQtyFor(costParent);   // ยังไม่ได้พิมพ์เอง + ตรงกับรอบเสนอราคา
   const setOrderQty = (q: number | null) => {
     setOrderQtyDraft((m) => ({ ...m, [costParent]: q }));
-    if (hasSplitExtra) setCurExtra((l) => l.map((c) => (c.mode === "split" ? cleanExtra({ ...c, split_qty: q }) : c)));
+    setCurExtra((l) => l.map((c) => (c.mode === "split" ? cleanExtra({ ...c, split_qty: q })
+      : extraKindOf(c) === "overhead" && c.oh && presetsApi.loaded ? { ...c, amount: overheadTotal(overheadRows(c.oh, presetsApi.presets, q)) } : c)));
     setCostDirty(true); setEditing(true);   // จำนวนที่สั่งบันทึกพร้อมตีราคา (design_sheets.order_qty) · ห้ามอ้าง fullEdit ตรงนี้ (ประกาศทีหลัง)
   };
   // จำนวนในรอบเสนอราคาของแท็บนี้ (ปุ่มกดใช้บนแถบจำนวนที่สั่ง)
@@ -715,6 +718,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
     setCostDirty(true);
   };
   /** แก้รายการค่าใช้จ่ายเพิ่มบางช่อง (ชนิด / ยอด / หมายเหตุ / ตั้งค่าโสหุ้ย) — ผ่าน cleanExtra ทุกครั้ง */
+  // ขนาดที่ระบบรู้ของแท็บนี้ → ตัวเลือก "ขนาดสินค้าตอนแพ็ก" (ขนาดสินค้า · กล่องส่ง · ชิ้นใหญ่สุด)
+  const packSugg = useMemo(() => {
+    const code = costParent || (form?.parent_sku_codes?.[0] ?? "");
+    return packSuggestions(code ? packRefs[code] : null, curLines, code || null);
+  }, [packRefs, costParent, curLines, form?.parent_sku_codes]);
   const updExtra = (i: number, patch: Partial<SnapExtra>) => {
     setCurExtra((l) => l.map((c, xi) => (xi === i ? cleanExtra({ ...c, ...patch }) : c)));
     setCostDirty(true);
@@ -1483,6 +1491,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
       if (!(ceMap[""]?.length)) ceMap[""] = defaultCostExtra();   // แท็บทั่วไปโชว์ค่าแรงตั้งต้นเสมอถ้ายังว่าง
       setCostParent(""); setCostExtraMap(ceMap);
       setOrderQtyDraft(cleanOrderQty(d.order_qty));   // จำนวนที่สั่งที่บันทึกไว้ต่อแท็บ
+      setPackRefs(d.pack_refs && typeof d.pack_refs === "object" ? (d.pack_refs as Record<string, PackRef>) : {});
     } catch (e) { setFormErr(e instanceof Error ? e.message : t("โหลดไม่ได้", "Could not load")); }
     finally { setLoadingForm(false); }
   };
@@ -2841,19 +2850,70 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                 {!fullEdit && costExtra.length > 0 && (
                   <div className="divide-y divide-slate-100 rounded-lg border border-slate-100" onDoubleClick={canEdit ? () => setEditing(true) : undefined}
                     title={canEdit ? t("ดับเบิลคลิกเพื่อแก้", "Double-click to edit") : undefined}>
-                    {costExtra.map((c, i) => (
-                      <div key={i} className="flex items-center justify-between gap-2 px-2 py-1 text-[13px]">
-                        <span className="min-w-0 truncate text-slate-600">{c.label || "—"}{c.mode === "split" ? <span className="text-[11px] text-slate-400">{t(" · หารจำนวนสั่ง", " · ÷ order qty")}{c.split_qty ? ` (${fmtBaht(c.total ?? 0)} ÷ ${c.split_qty.toLocaleString("th-TH")})` : ""}</span> : null}
-                          {c.note ? <span className="text-[11px] text-slate-400"> · {c.note}</span> : null}
-                          {extraKindOf(c) === "labor_cut" && c.cut_by === "pieces" ? (() => { const s = cutLaborSummary(cutRows); return (
-                            <span className="block truncate text-[11px] text-slate-400">{t(`ตามจำนวนชิ้น: ${s.pieces} ชิ้น/ใบ`, `By pieces: ${s.pieces} pcs/unit`)}{s.byMaterial.length ? ` · ${s.byMaterial.map((m) => `${m.name} ${m.pieces}`).join(" · ")}` : ""}{orderQty ? t(` · สั่ง ${orderQty.toLocaleString("th-TH")} ใบ = ${Math.round(s.pieces * orderQty).toLocaleString("th-TH")} ชิ้นงาน`, ` · ${orderQty} units = ${Math.round(s.pieces * orderQty)} pcs`) : ""}</span>
-                          ); })() : null}
-                          {extraKindOf(c) === "overhead" && c.oh && presetsApi.presets.length > 0 ? (
-                            <span className="block truncate text-[11px] text-slate-400">{overheadRows(c.oh, presetsApi.presets).filter((r) => r.on && r.amount > 0).map((r) => `${r.label} ${fmtBaht(r.amount)}`).join(" · ")}</span>
-                          ) : null}</span>
-                        <span className={`shrink-0 tabular-nums ${c.amount ? "text-slate-800" : "text-slate-300"}`}>{fmtBaht(c.amount || 0)}</span>
-                      </div>
-                    ))}
+                    {costExtra.map((c, i) => {
+                      // แบบ A (เจ้าของเลือก 2026-11-09): แถวเดียว + สรุปสั้น · กดเพื่อกางรายละเอียด
+                      const k = extraKindOf(c);
+                      const okey = `${costParent}|${i}`, opened = extraOpen.has(okey);
+                      const toggleOpen = () => setExtraOpen((s) => { const n = new Set(s); if (n.has(okey)) n.delete(okey); else n.add(okey); return n; });
+                      let sub: string | null = null;
+                      let det: ReactNode = null;
+                      if (k === "labor_cut" && c.cut_by === "pieces") {
+                        const s = cutLaborSummary(cutRows);
+                        sub = t(`${s.pieces} ชิ้น/ใบ`, `${s.pieces} pcs/unit`) + (s.byMaterial.length ? ` · ${s.byMaterial.map((m) => `${m.name} ${m.pieces}`).join(" · ")}` : "");
+                        det = (
+                          <div className="space-y-0.5">
+                            {groupCutRows(cutRows).filter((g) => g.on !== "none").map((g) => (
+                              <div key={g.key} className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate">{g.name}</span><span className="text-slate-400 tabular-nums">{g.pieces} × {g.rate != null ? fmtBaht(g.rate) : t("หลายราคา", "mixed")}</span><span className="w-16 text-right tabular-nums text-slate-700">{fmtBaht(g.amount)}</span></div>
+                            ))}
+                            {orderQty ? <div className="text-slate-400">{t(`สั่ง ${orderQty.toLocaleString("th-TH")} ใบ = ${Math.round(s.pieces * orderQty).toLocaleString("th-TH")} ชิ้นงานตัด · ค่าตัดทั้งล็อต ${Math.round(s.total * orderQty).toLocaleString("th-TH")} ฿`, `${orderQty} units = ${Math.round(s.pieces * orderQty)} pcs to cut`)}</div> : null}
+                          </div>
+                        );
+                      } else if (k === "overhead" && presetsApi.presets.length > 0) {
+                        const cfg: OverheadCfg = c.oh ?? DEFAULT_OH;
+                        const d = cfg.dims;
+                        if (c.oh && d.w && d.l) {
+                          const bag = pickBag(d, presetsOf(presetsApi.presets, "bag"))?.bag;
+                          const ship = overheadRows(cfg, presetsApi.presets, orderQty).find((r) => r.key === "ship");
+                          const opt = ship?.cartons?.find((o) => o.preset.id === ship.carton);
+                          sub = [`${d.w}×${d.l}×${d.t ?? "?"}`, bag ? t(`ถุง ${bag.w_cm}×${bag.l_cm}`, `bag ${bag.w_cm}×${bag.l_cm}`) : null, opt && orderQty ? t(`${opt.cartons.toLocaleString("th-TH")} ลัง`, `${opt.cartons} cartons`) : null].filter(Boolean).join(" · ");
+                        } else sub = c.oh ? t("ยังไม่ใส่ขนาดสินค้า", "No product size yet") : t("ใส่ยอดเอง — กดเพื่อแยกตามขนาดสินค้า", "Manual — click to break down by size");
+                        det = (
+                          <OverheadBreakdown cfg={cfg} presets={presetsApi.presets} tabLabel={costTabLabel(costParent, generalLabel)} readOnly={!canEdit}
+                            qty={orderQty} suggestions={packSugg}
+                            onChange={(next, total) => { updExtra(i, { kind: "overhead", oh: next, amount: total }); setEditing(true); }}
+                            onManage={canEditPresets ? () => setPresetsOpen("oh_fixed") : undefined} />
+                        );
+                      } else if (c.mode === "split") {
+                        sub = c.split_qty ? `${fmtBaht(c.total ?? 0)} ÷ ${c.split_qty.toLocaleString("th-TH")}` : t("หารจำนวนสั่ง — ยังไม่ใส่จำนวน", "÷ order qty — no qty yet");
+                        det = c.split_qty ? <div>{t(`จ่ายครั้งเดียว ${fmtBaht(c.total ?? 0)} บาท ÷ สั่ง ${c.split_qty.toLocaleString("th-TH")} ใบ = ${fmtBaht(c.amount)} บาท/ใบ`, `One-off ${fmtBaht(c.total ?? 0)} ÷ ${c.split_qty} = ${fmtBaht(c.amount)}/unit`)}{c.note ? <div className="text-slate-400">{c.note}</div> : null}</div> : null;
+                      } else if (c.note) {
+                        sub = c.note;
+                        det = <div className="whitespace-pre-wrap">{c.note}</div>;
+                      }
+                      // ไม่มีรายละเอียด → บอกว่าใส่ได้ที่ไหน (ทุกแถวกดขยายได้เหมือนกัน)
+                      if (!det) det = (
+                        <div className="text-slate-400">
+                          {k === "labor" ? t("ใส่ยอดเอง — ตอนแก้กด “ดูเคยผลิต” เพื่อเลือกจากสินค้าที่เคยผลิต (จดอ้างอิงให้)", "Manual — when editing, use “past production” to pick a reference")
+                            : k === "labor_cut" ? t("ใส่ยอดเอง — ตอนแก้กด “ตามจำนวนชิ้น” ให้คิดจากชิ้นวัตถุดิบ × ค่าตัด", "Manual — when editing, switch to “by pieces”")
+                            : k === "other" ? t("ยังไม่มีรายการ — ตอนแก้กด “เลือกต้นทุนอื่นๆ” หรือเพิ่มรายการ", "No items — when editing, pick from other costs")
+                            : t("ยังไม่มีรายละเอียด", "No details")}
+                          {canEdit && <> · <button type="button" onClick={() => setEditing(true)} className="text-blue-600 underline">{t("แก้", "Edit")}</button></>}
+                        </div>
+                      );
+                      return (
+                        <div key={i}>
+                          <div className={`flex items-center gap-1.5 px-2 py-1 text-[13px] ${det ? "cursor-pointer hover:bg-slate-50" : ""}`} onClick={det ? toggleOpen : undefined}
+                            role={det ? "button" : undefined} aria-expanded={det ? opened : undefined} tabIndex={det ? 0 : undefined}
+                            onKeyDown={det ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(); } } : undefined}>
+                            <Icon value={opened ? "i:chevron-down" : "i:chevron-right"} className={`shrink-0 text-[12px] ${det ? "text-slate-400" : "invisible"}`} />
+                            <span className="shrink-0 text-slate-600">{c.label || "—"}</span>
+                            {sub && <span className="min-w-0 flex-1 truncate text-[11px] text-slate-400" title={sub}>{sub}</span>}
+                            <span className={`ml-auto shrink-0 tabular-nums ${c.amount ? "text-slate-800" : "text-slate-300"}`}>{fmtBaht(c.amount || 0)}</span>
+                          </div>
+                          {opened && det && <div className="border-t border-slate-100 bg-slate-50/60 px-2 py-1.5 pl-6 text-[12px] text-slate-600" onDoubleClick={(e) => e.stopPropagation()}>{det}</div>}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
                 {fullEdit && costExtra.map((c, i) => {
@@ -2893,7 +2953,7 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       if (k === "overhead") return (
                         <button type="button" onClick={() => (c.oh
                           ? updExtra(i, { oh: null })
-                          : updExtra(i, { kind: "overhead", oh: DEFAULT_OH, amount: overheadTotal(overheadRows(DEFAULT_OH, presetsApi.presets)) }))}
+                          : updExtra(i, { kind: "overhead", oh: DEFAULT_OH, amount: overheadTotal(overheadRows(DEFAULT_OH, presetsApi.presets, orderQty)) }))}
                           title={c.oh ? t("กลับไปใส่ยอดเอง", "Back to manual amount") : t("แยกรายการ QC / แพ็ก / ถุง / กล่อง / ค่าส่ง จากขนาดสินค้า", "Break down QC / packing / bag / box / shipping from product size")}
                           className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-lg border px-2 text-xs ${c.oh ? "border-slate-200 bg-white text-slate-500 hover:bg-slate-50" : "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100"}`}>
                           <Icon value={c.oh ? "i:pencil" : "i:list"} className="text-[13px]" /> {c.oh ? t("ใส่ยอดเอง", "Manual") : t("แยกรายการ", "Break down")}
@@ -2933,10 +2993,11 @@ export function DesignSheetsDetail({ detailOnly = false, openId = null, createMo
                       onManageCentral={canEditPresets ? () => setPresetsOpen("cut_rate") : undefined} />
                   )}
                   {extraKindOf(c) === "overhead" && c.oh && (() => {
-                    const live = presetsApi.loaded ? overheadTotal(overheadRows(c.oh, presetsApi.presets)) : c.amount;
+                    const live = presetsApi.loaded ? overheadTotal(overheadRows(c.oh, presetsApi.presets, orderQty)) : c.amount;
                     return (
                       <>
                         <OverheadBreakdown cfg={c.oh} presets={presetsApi.presets} tabLabel={costTabLabel(costParent, generalLabel)} readOnly={!canEdit}
+                          qty={orderQty} suggestions={packSugg}
                           onChange={(cfg, total) => updExtra(i, { kind: "overhead", oh: cfg, amount: total })}
                           onManage={canEditPresets ? () => setPresetsOpen("oh_fixed") : undefined} />
                         {/* ราคากลางเปลี่ยนหลังใส่ไปแล้ว — ยอดในใบยังเป็นของเดิม (ไม่เปลี่ยนเอง) จนกว่าจะกดอัปเดต */}

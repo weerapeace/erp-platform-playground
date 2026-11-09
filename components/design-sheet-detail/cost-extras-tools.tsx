@@ -20,7 +20,7 @@ import { HoverImage } from "@/components/hover-image";
 import { apiFetch } from "@/lib/api";
 import {
   cutLaborSummary, cutMaterialGroups, cutRateFromWage, DEFAULT_OH, ORDER_QTY_QUICK, stepOrderQty, groupCutRows, overheadRows, overheadTotal, PRESET_KIND_META, PRESET_KINDS,
-  type CostPreset, type CutMaterial, type CutMaterialGroup, type CutRateSource, type CutRow, type LaborRef, type OverheadCfg, type PackDims, type PresetKind,
+  type CartonOption, type PackSuggestion, type CostPreset, type CutMaterial, type CutMaterialGroup, type CutRateSource, type CutRow, type LaborRef, type OverheadCfg, type PackDims, type PresetKind,
 } from "@/lib/design-cost-presets";
 
 const baht = (n: number) => (Math.round(n * 100) / 100).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -129,61 +129,88 @@ export function LaborRefPicker({ sheetId, onPick }: { sheetId?: string | null; o
 }
 
 // ── ค่าโสหุ้ยแยกรายการ ──
-export function OverheadBreakdown({ cfg, presets, tabLabel, readOnly, onChange, onManage }: {
+export function OverheadBreakdown({ cfg, presets, tabLabel, readOnly, qty, suggestions = [], onChange, onManage }: {
   cfg: OverheadCfg;
   presets: CostPreset[];
   tabLabel: string;
   readOnly: boolean;
+  /** จำนวนที่สั่ง (แถบด้านบน) — ใช้นับว่าต้องใช้กี่ลัง และคิดค่าส่งต่อชิ้นจากจำนวนลังจริง */
+  qty?: number | null;
+  /** ขนาดที่ระบบรู้ (ขนาดสินค้า / กล่องส่ง / ชิ้นใหญ่สุด) — เลือกแล้วเติมช่องขนาดให้ */
+  suggestions?: PackSuggestion[];
   onChange: (cfg: OverheadCfg, total: number) => void;
   onManage?: () => void;
 }) {
-  const rows = overheadRows(cfg, presets);
+  const rows = overheadRows(cfg, presets, qty);
   const total = overheadTotal(rows);
-  const set = (next: OverheadCfg) => onChange(next, overheadTotal(overheadRows(next, presets)));
+  const set = (next: OverheadCfg) => onChange(next, overheadTotal(overheadRows(next, presets, qty)));
   const setDim = (k: keyof PackDims, v: string) => {
     const n = v === "" ? null : Number(v);
     set({ ...cfg, dims: { ...cfg.dims, [k]: n != null && Number.isFinite(n) && n > 0 ? n : null } });
   };
   const toggle = (key: string, on: boolean) => set({ ...cfg, off: on ? cfg.off.filter((k) => k !== key) : [...cfg.off, key] });
-  const dimIn = (k: keyof PackDims, ph: string, w = "w-16") => (
-    <input type="number" min={0} step="any" value={cfg.dims[k] ?? ""} placeholder={ph} disabled={readOnly}
-      onChange={(e) => setDim(k, e.target.value)} className={`${inCls} ${w} text-right tabular-nums disabled:bg-slate-50`} />
+  const dimIn = (k: keyof PackDims, ph: string, w = "w-12") => (
+    <input type="number" min={0} step="any" value={cfg.dims[k] ?? ""} placeholder={ph} disabled={readOnly} aria-label={ph}
+      onChange={(e) => setDim(k, e.target.value)} className={`h-6 ${w} rounded border border-slate-200 px-1 text-right text-xs tabular-nums disabled:bg-slate-50`} />
   );
   const noPresets = !presets.some((p) => p.kind === "oh_fixed" || p.kind === "bag" || p.kind === "box" || p.kind === "carton" || p.kind === "parcel");
+  const q = qty != null && qty > 0 ? Math.round(qty) : 0;
+  const sz = (o: CartonOption) => `${o.preset.w_cm}×${o.preset.l_cm}×${o.preset.h_cm}`;
   return (
-    <div className="space-y-2 rounded-lg border border-slate-100 bg-slate-50/60 p-2">
-      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-600">
-        <span className="font-medium text-slate-700">ขนาดสินค้าตอนแพ็ก</span><span className="text-[11px] text-slate-400">({tabLabel})</span>
-        {dimIn("w", "กว้าง")}×{dimIn("l", "ยาว")}×{dimIn("t", "หนา", "w-14")} ซม. · {dimIn("g", "กรัม", "w-16")} ก.
+    <div className="space-y-1 text-xs">
+      <div className="flex flex-wrap items-center gap-1 text-slate-600">
+        <span className="w-12 text-[11px] text-slate-400" title={`ขนาดสินค้าตอนแพ็ก (${tabLabel})`}>ขนาด</span>
+        {dimIn("w", "กว้าง")}×{dimIn("l", "ยาว")}×{dimIn("t", "หนา")}<span className="text-slate-400">ซม. ·</span>{dimIn("g", "กรัม", "w-14")}<span className="text-slate-400">ก.</span>
+        {!readOnly && suggestions.length > 0 && (
+          <select value="" aria-label="เลือกขนาดที่คำนวณได้" onChange={(e) => { const sgg = suggestions.find((x) => x.key === e.target.value); if (sgg) set({ ...cfg, dims: { w: sgg.dims.w, l: sgg.dims.l, t: sgg.dims.t ?? cfg.dims.t, g: sgg.dims.g ?? cfg.dims.g } }); }}
+            className="h-6 max-w-[16rem] rounded border border-blue-200 bg-blue-50 px-1 text-xs text-blue-700">
+            <option value="">เลือกขนาดที่คำนวณได้ ▾</option>
+            {suggestions.map((x) => <option key={x.key} value={x.key}>{x.label} · {[x.dims.w, x.dims.l, x.dims.t].map((v) => v ?? "?").join("×")}{x.dims.g ? ` · ${x.dims.g} ก.` : ""}</option>)}
+          </select>
+        )}
       </div>
       {noPresets ? (
         <p className="text-[11px] text-amber-700">ยังไม่ได้ตั้งราคากลางของโสหุ้ย (QC / ถุง / กล่อง / ลังส่ง){onManage ? <> — <button type="button" onClick={onManage} className="underline">ตั้งค่าราคากลาง</button></> : null}</p>
       ) : (
-        <div className="divide-y divide-slate-100 rounded-lg bg-white">
+        <div className="divide-y divide-slate-100 rounded-md border border-slate-100 bg-white">
           {rows.map((r) => (
-            <label key={r.key} className={`flex items-center gap-2 px-2 py-1.5 text-[13px] ${r.on ? "" : "opacity-50"}`}>
-              <input type="checkbox" checked={r.on} disabled={readOnly} onChange={(e) => toggle(r.key, e.target.checked)} className="h-3.5 w-3.5" />
-              <span className="min-w-0 flex-1">
-                <span className="text-slate-700">{r.label}</span>
-                <span className={`block truncate text-[11px] ${r.warn ? "text-rose-600" : "text-slate-400"}`} title={r.detail}>{r.detail}</span>
-              </span>
+            <div key={r.key} className={`flex items-center gap-1.5 px-1.5 py-1 ${r.on ? "" : "opacity-50"}`}>
+              {!readOnly && <input type="checkbox" checked={r.on} onChange={(e) => toggle(r.key, e.target.checked)} aria-label={`นับ ${r.label}`} className="h-3.5 w-3.5 shrink-0" />}
+              <span className="shrink-0 text-slate-700">{r.label}</span>
+              {r.key === "ship" && r.cartons && r.cartons.some((o) => o.perCarton > 0) ? (
+                <select value={cfg.carton && r.cartons.some((o) => o.preset.id === cfg.carton && o.perCarton > 0) ? cfg.carton : ""} disabled={readOnly} aria-label="เลือกลังส่ง"
+                  onChange={(e) => set({ ...cfg, carton: e.target.value || null })}
+                  className="h-6 min-w-0 max-w-[15rem] rounded border border-slate-200 px-1 text-xs disabled:bg-slate-50">
+                  <option value="">อัตโนมัติ (คุ้มสุด)</option>
+                  {r.cartons.map((o) => (
+                    <option key={o.preset.id} value={o.preset.id} disabled={!(o.perCarton > 0)}>
+                      {sz(o)} · {o.perCarton > 0 ? `${o.perCarton}/ลัง${q ? ` · ${o.cartons} ลัง` : ""} · ${baht(o.perUnit)}/ชิ้น` : "ใส่ไม่ได้"}{o.preset.id === r.bestCarton ? " · คุ้มสุด" : ""}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
+              <span className={`min-w-0 flex-1 truncate text-[11px] ${r.warn ? "text-rose-600" : "text-slate-400"}`} title={r.detail}>{r.detail}</span>
               <span className="shrink-0 tabular-nums text-slate-800">{baht(r.amount)}</span>
-            </label>
+            </div>
           ))}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        <span className="text-slate-500">ค่าส่งคิดแบบ</span>
-        {([["carton", "ลังส่ง"], ["parcel", "ขนส่งรายชิ้น"], ["none", "ไม่คิด"]] as const).map(([k, l]) => (
-          <button key={k} type="button" disabled={readOnly} onClick={() => set({ ...cfg, ship: k })}
-            className={`h-7 rounded-md border px-2 ${cfg.ship === k ? "border-blue-300 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"} disabled:cursor-default`}>{l}</button>
-        ))}
-        <span className="ml-auto font-medium text-slate-700">รวมโสหุ้ย <b className="tabular-nums text-emerald-700">{baht(total)}</b> ฿</span>
-        {onManage && <button type="button" onClick={onManage} className="text-[11px] text-slate-500 underline hover:text-blue-700">ราคากลาง</button>}
+      <div className="flex flex-wrap items-center gap-1">
+        {!readOnly && <>
+          <span className="text-[11px] text-slate-400">ค่าส่ง</span>
+          {([["carton", "ลังส่ง"], ["parcel", "รายชิ้น"], ["none", "ไม่คิด"]] as const).map(([k, l]) => (
+            <button key={k} type="button" onClick={() => set({ ...cfg, ship: k })}
+              className={`h-6 rounded border px-1.5 text-[11px] ${cfg.ship === k ? "border-blue-300 bg-blue-50 font-medium text-blue-700" : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"}`}>{l}</button>
+          ))}
+        </>}
+        {q > 0 && (() => { const bag = rows.find((r) => r.key === "bag" && r.on && r.amount > 0); return bag ? <span className="text-[11px] text-slate-400">· ถุง {q.toLocaleString("th-TH")} ใบ = {Math.round(bag.amount * q).toLocaleString("th-TH")} ฿</span> : null; })()}
+        <span className="ml-auto text-slate-500">รวมโสหุ้ย <b className="tabular-nums text-emerald-700">{baht(total)}</b> ฿/ชิ้น</span>
+        {onManage && <button type="button" onClick={onManage} className="text-[11px] text-slate-400 underline hover:text-blue-700">ราคากลาง</button>}
       </div>
     </div>
   );
 }
+
 export const ohCfgOf = (raw: OverheadCfg | null | undefined): OverheadCfg => raw ?? DEFAULT_OH;
 
 // ── ต้นทุนอื่นๆ: เลือกจากรายการกลาง ──
