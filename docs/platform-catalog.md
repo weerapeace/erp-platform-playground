@@ -146,6 +146,13 @@
 - **ปุ่ม "เพิ่มสินค้าขึ้นร้าน"** (หัวหน้า · ต้องเลือกแบรนด์) → `NotListedPicker` (`?view=notlisted` = `loadNotListed` กฎเดียวกับแท็บยังไม่ลง · LM 158) → AddToPlatformWizard เดิม (ตรวจความพร้อม/ลงจริง/จับคู่ให้)
 - `lib/line-shopping-server` `lineApiKey(admin, brandId, platformId)` — ถอดกุญแจ API ที่เดียว (route เก่า 6 ตัวยังถอดเอง ย้ายได้เมื่อแตะ)
 - **ยังไม่ทำ (เฟส 2 — ต้องทดสอบกับร้านจริง 1 สินค้าก่อน ขออนุญาตเจ้าของ):** แก้รูป (เพิ่ม/ลบ/เรียง/ปก) · น้ำหนัก/บาร์โค้ดต่อตัวเลือก · เพิ่ม/ลบตัวเลือก · **สต๊อก** = ดูอย่างเดียว (ไประบบซิงค์สต๊อกกลาง)
+- **ปุ่ม "ดูหน้าร้าน" + "Seller Center" ทุกแพลตฟอร์ม (2026-11-10):** หัวลิ้นชัก `components/platform-catalog/listing-links` ← ของกลาง `lib/platform-links` (pure + เทสต์) `listingLinks(code, externalProductId, shopRef)` · shopRef = `platform_accounts.external_shop_id` (ส่งมาใน `ListingDetail.shop_ref`)
+  - Lazada: หน้าร้าน `/products/i{item}.html` · หลังร้าน `sellercenter.lazada.co.th/apps/product/publish?productId={item}` (หน้าแก้สินค้าตรง) · ลิงก์ต่อตัวเลือก = `Url` จาก Lazada ในแท็บตัวเลือก
+  - LINE: หน้าร้าน `{ลิงก์ร้าน}/product/{id}` (ตั้งไว้แล้วทั้ง IG + LM) · หลังร้าน `oaplus.line.biz` ไม่มีลิงก์เข้าสินค้าตรง → หน้าแรก + ปุ่มคัดลอกรหัส
+  - Shopee: หน้าร้านต้องมี Shop ID ตัวเลข (ยังไม่มีใครตั้ง → ป้ายบอกให้ตั้งที่ 🏪 บัญชีร้าน) · หลังร้าน `seller.shopee.co.th/portal/product/{item}` ใช้ได้เลย
+  - TikTok: หน้าร้าน `shop.tiktok.com/view/product/{id}?region=TH` · หลังร้านหน้าแรก (ยังไม่มีสินค้า TikTok ในระบบ)
+  - `platformShopUrl` ย้ายมาจาก /admin/platform-accounts (ผลเหมือนเดิม) · ProductPlatformManager ใช้ `listingLinks` แทนสร้างลิงก์ LINE เอง
+  - ที่มา: สำรวจ 2026-11-10 — Lazada/Shopee หลังร้านยืนยันจากภาพหน้าจอ (โดเมนไทยอนุมาน) · LINE หน้าร้านยืนยันจากโค้ด shop.line.me · TikTok หลังร้านยังไม่ยืนยัน
 - **Lazada ในลิ้นชักเดียวกัน (เฟส 1 ดูอย่างเดียว · 2026-11-10):** แท็บข้อมูล/รูป/ตัวเลือก ดึงสดจาก Lazada ตอนเปิด (`components/platform-catalog/lazada-listing-panels` → `GET /api/lazada/listing-detail`) · หัวลิ้นชักมีป้ายสถานะ Lazada + ปุ่ม "ดึงตัวนี้จาก Lazada" (POST = อัปเดตสำเนาย่อในระบบ) · แท็บจับคู่/ประวัติใช้ร่วมกับ LINE · แผนเฟสแก้ขึ้นร้าน + กติกา Lazada → `docs/lazada-connector.md`
 
 ## ลิ้นชักสินค้าบนร้าน เฟส 2 — รูปสินค้า + รายละเอียดตัวเลือก (2026-11-10)
