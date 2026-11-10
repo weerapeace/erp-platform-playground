@@ -7,6 +7,9 @@
  *   แบบแจ้ง (ผ้าที่มาทำได้กี่ใบ / ใช้ผ้ากี่หลาต่อใบ / แจ้งทั่วไป) · หัวข้อ · รูปหลายรูป + คำอธิบายใต้รูปทีละรูป
  *   · ตารางผ้าต่อไซส์ (ใช้ต่อใบดึงจากแท็บตีราคาได้) · ข้อความถึงลูกค้า
  * พรีวิวทางขวา = ใบเดียวกับที่ออก PDF/JPEG (lib/design-sheet-notice buildNoticeHtml)
+ * โหมดดู ↔ แก้ (เจ้าของขอ 2026-11-10 "ตรงนี้เป็น readonly สิ กดแก้แล้วค่อยแก้ได้"):
+ *   เปิดใบที่บันทึกแล้ว = อ่านอย่างเดียว · กด "แก้ไข" หรือดับเบิลคลิกช่อง (ของกลาง DblClickToEdit — แบบเดียวกับแท็บข้อมูลงาน)
+ *   ใบใหม่ / คัดลอก = เข้าโหมดแก้เลย · บันทึกแล้วกลับเป็นอ่านอย่างเดียว · "ยกเลิก" = คืนค่าที่บันทึกไว้
  * กด PDF / JPEG → หน้าพิมพ์ /print/design-sheet/[id]/notice/[noticeId] (มีแผงเลือกโชว์/ซ่อนแบบละเอียด)
  *
  * ของกลาง: SheetImagePicker (รูปใบงาน + ImageManager) · LineItemsGrid · SearchableSelect · ERPModal · ConfirmDialog · PrintFrame · useUserPref · Icon
@@ -17,6 +20,7 @@ import { SearchableSelect, type SelectOption } from "@/components/searchable-sel
 import { LineItemsGrid, type LineColumn } from "@/components/line-items-grid";
 import { PrintFrame } from "@/components/report";
 import { Icon } from "@/components/icon";
+import { DblClickToEdit } from "@/components/dbl-click-edit";
 import { useToast } from "@/components/toast";
 import { useT } from "@/components/i18n";
 import { useAuth } from "@/components/auth";
@@ -92,6 +96,8 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
   const [pickImg, setPickImg] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<(() => void) | null>(null);
+  /** โหมดแก้ไข — ใบที่บันทึกแล้วเปิดมาเป็นอ่านอย่างเดียว */
+  const [editing, setEditing] = useState(false);
   const [companies, setCompanies] = useState<Record<string, unknown>[]>([]);
   const [allOrder, setAllOrder] = useState<number | null>(null);
   // ค่าตั้งต้น "สิ่งที่จะโชว์" ของคนนี้ (หน้าพิมพ์ติ๊ก "จำไว้ใช้ครั้งหน้า") → ใบแจ้งใหม่ใช้ค่านี้
@@ -136,12 +142,18 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
   const startNew = (kind: NoticeKind) => guard(() => {
     const d: Draft = { ...newNoticeDoc(kind, defDisplay), id: null, created_by_name: user?.name ?? null, created_at: null };
     if (noticeHasCalc(kind)) d.calc = { ...d.calc, ...seedRows() };
-    setCur(d); setBase(snap(d));
+    setCur(d); setBase(snap(d)); setEditing(true);
   });
-  const openNotice = (r: NoticeRecord) => guard(() => { const d = toDraft(r); setCur(d); setBase(snap(d)); });
+  const openNotice = (r: NoticeRecord) => guard(() => { const d = toDraft(r); setCur(d); setBase(snap(d)); setEditing(false); });
+  /** ยกเลิกแก้: คืนใบที่บันทึกไว้ (ใบใหม่ที่ยังไม่บันทึก = กลับไปใบล่าสุด) · มีแก้ค้าง = ถามก่อน */
+  const cancelEdit = () => guard(() => {
+    const saved = cur?.id ? (list ?? []).find((x) => x.id === cur.id) : (list ?? [])[0];
+    const d = saved ? toDraft(saved) : null;
+    setCur(d); setBase(snap(d)); setEditing(false);
+  });
   const duplicate = () => {
     if (!cur) return;
-    guard(() => { const d: Draft = { ...cleanNotice(cur), id: null, created_by_name: user?.name ?? null, created_at: null, title: `${cur.title} (ใหม่)` }; setCur(d); setBase(""); });
+    guard(() => { const d: Draft = { ...cleanNotice(cur), id: null, created_by_name: user?.name ?? null, created_at: null, title: `${cur.title} (ใหม่)` }; setCur(d); setBase(""); setEditing(true); });
   };
 
   const patch = (p: Partial<NoticeDoc>) => setCur((c) => (c ? { ...c, ...p } : c));
@@ -218,8 +230,8 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
       if (!res.ok || j.error) throw new Error(j.error || t("บันทึกไม่สำเร็จ", "Save failed"));
       const rec = j.data as NoticeRecord;
       setList((prev) => [rec, ...(prev ?? []).filter((x) => x.id !== rec.id)].sort((a, b) => b.created_at.localeCompare(a.created_at)));
-      const d = toDraft(rec); setCur(d); setBase(snap(d));
-      toast.success(t("บันทึกใบแจ้งแล้ว", "Notice saved"));
+      const d = toDraft(rec); setCur(d); setBase(snap(d)); setEditing(false);
+      toast.success(t("บันทึกใบแจ้งแล้ว — กดแก้ไขเพื่อแก้ต่อ", "Notice saved — press Edit to change it"));
       return rec.id;
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("บันทึกไม่สำเร็จ", "Save failed"));
@@ -240,7 +252,7 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
     const rest = (list ?? []).filter((x) => x.id !== cur.id);
     setList(rest);
     const next = rest[0] ? toDraft(rest[0]) : null;
-    setCur(next); setBase(snap(next)); setConfirmDel(false);
+    setCur(next); setBase(snap(next)); setConfirmDel(false); setEditing(false);
     toast.success(t("ลบใบแจ้งแล้ว", "Notice deleted"));
   };
 
@@ -272,7 +284,8 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
   }, [cur, company, sheet.code, sheet.name, sheet.brandName, user?.name]);
 
   const res = useMemo(() => (cur && noticeHasCalc(cur.kind) ? computeNotice(cur.calc) : null), [cur]);
-  const ro = !canEdit;
+  const ro = !canEdit || !editing;   // ไม่มีสิทธิ์ หรือยังไม่ได้กดแก้ไข = อ่านอย่างเดียว
+  const startEdit = canEdit ? () => setEditing(true) : undefined;
 
   // ---- ตารางไซส์ (ตารางบรรทัดกลาง) ----
   const gridRows: GridRow[] = useMemo(() => (cur?.calc.rows ?? []).map((r, i) => ({ ...r, _k: `${r.key}#${i}` })), [cur?.calc.rows]);
@@ -326,8 +339,8 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
         </div>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-          {/* ซ้าย: แก้ไขใบแจ้ง */}
-          <div className="space-y-3 min-w-0">
+          {/* ซ้าย: ใบแจ้ง — อ่านอย่างเดียวจนกดแก้ไข / ดับเบิลคลิกช่อง (ของกลาง DblClickToEdit) */}
+          <DblClickToEdit className="space-y-3 min-w-0" locked={ro} onEdit={startEdit}>
             <div>
               <div className="text-xs text-slate-500 mb-1">{t("แบบแจ้ง", "Notice type")}</div>
               <div className="flex gap-1.5 flex-wrap">
@@ -352,14 +365,14 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                 <span className="flex-1" />
                 <span className="text-xs text-slate-400">{t("รูปต่อแถว", "Per row")}</span>
                 <Seg value={cur.img_cols} disabled={ro} options={[1, 2, 3, 4].map((n) => ({ v: n, label: String(n) }))} onChange={(v) => patch({ img_cols: v })} />
-                {canEdit && <button type="button" onClick={() => setPickImg(true)} className="h-8 px-2.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center gap-1"><Icon name="add" /> {t("เลือกรูป", "Pick images")}</button>}
+                {!ro && <button type="button" onClick={() => setPickImg(true)} className="h-8 px-2.5 text-xs bg-blue-600 text-white rounded-lg hover:bg-blue-700 inline-flex items-center gap-1"><Icon name="add" /> {t("เลือกรูป", "Pick images")}</button>}
               </div>
               {cur.images.length === 0 ? (
                 <p className="text-xs text-slate-400 py-2">{t("ยังไม่มีรูป — กด \"เลือกรูป\" เลือกจากรูปในใบงานหรืออัปโหลดเพิ่ม (เลือกได้หลายรูป หลายสินค้า)", "No images yet — pick from this sheet or upload (several images / products)")}</p>
               ) : (
                 <div className="space-y-2">
                   {cur.images.map((im, i) => (
-                    <div key={`${im.url}#${i}`} className="flex gap-2 items-start">
+                    <div key={`${im.url}#${i}`} className="flex gap-2 items-start" data-dbl-field>
                       <div className="relative w-16 h-16 shrink-0 rounded-lg overflow-hidden border border-slate-200 bg-slate-100">
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img src={im.url} alt="" className="w-full h-full object-cover" />
@@ -368,7 +381,7 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                       <textarea value={im.caption} disabled={ro} onChange={(e) => setImage(i, { caption: e.target.value })} rows={2} maxLength={1000}
                         placeholder={t("คำอธิบายใต้รูป (เว้นว่างได้) เช่น ไซส์ / สี / จุดที่อยากให้ลูกค้าดู", "Caption under the image (optional)")}
                         className="flex-1 min-w-0 px-2 py-1.5 text-sm border border-slate-200 rounded-lg resize-y disabled:bg-slate-50" />
-                      {canEdit && (
+                      {!ro && (
                         <div className="flex flex-col gap-0.5 shrink-0">
                           <button type="button" onClick={() => moveImage(i, -1)} disabled={i === 0} title={t("เลื่อนขึ้น", "Move up")} className="h-6 w-7 text-xs border border-slate-200 rounded-md text-slate-500 hover:bg-slate-50 disabled:opacity-30">▲</button>
                           <button type="button" onClick={() => moveImage(i, 1)} disabled={i === cur.images.length - 1} title={t("เลื่อนลง", "Move down")} className="h-6 w-7 text-xs border border-slate-200 rounded-md text-slate-500 hover:bg-slate-50 disabled:opacity-30">▼</button>
@@ -397,7 +410,7 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                     <Seg value={cur.calc.unit} disabled={ro} onChange={switchUnit}
                       options={curMatBase.units.map((u) => ({ v: u.unit, label: u.note ? `${u.unit} (${u.note})` : u.unit }))} />
                   )}
-                  {canEdit && matOptions.length > 0 && (
+                  {!ro && matOptions.length > 0 && (
                     <div className="w-full sm:w-64">
                       <SearchableSelect value="" options={matOptions} onChange={pullMaterial} placeholder={t("ดึงใช้ต่อใบจากแท็บตีราคา…", "Pull usage from costing…")} />
                     </div>
@@ -406,7 +419,7 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                 <input value={cur.calc.unit_note} disabled={ro} onChange={(e) => patchCalc({ unit_note: e.target.value })} maxLength={120}
                   placeholder={t("หมายเหตุหน่วย (ขึ้นในใบ) เช่น คิดจากหน้ากว้าง 80 ซม.", "Unit note (printed)")}
                   className="w-full h-8 px-2 text-xs border border-slate-200 rounded-lg disabled:bg-slate-50" />
-                {curMat && canEdit && curMatTabs.length > 1 && (
+                {curMat && !ro && curMatTabs.length > 1 && (
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-[11px] text-slate-400">{t("ไซส์จากแท็บตีราคา (กดเพิ่ม/เอาออก):", "Sizes from costing (click to add/remove):")}</span>
                     {curMatTabs.map((tb) => {
@@ -421,7 +434,7 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                     })}
                   </div>
                 )}
-                {matOptions.length === 0 && canEdit && (
+                {matOptions.length === 0 && !ro && (
                   <p className="text-[11px] text-slate-400">{t("แท็บตีราคายังไม่มีวัตถุดิบที่คิดปริมาณได้ (หรือคุณไม่มีสิทธิ์ดูต้นทุน) — พิมพ์ใช้ต่อใบเองในตารางด้านล่าง", "No usable costing lines (or no cost permission) — type per-bag usage below")}</p>
                 )}
                 <div className="flex gap-x-4 gap-y-2 flex-wrap items-center text-sm text-slate-600">
@@ -439,11 +452,12 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
                   columns={columns}
                   rowId={(r) => r._k}
                   readonly={ro}
+                  onRequestEdit={startEdit}
                   onChange={(rows) => patchCalc({ rows: rows.map(({ _k, ...r }) => { void _k; return r; }) })}
                   onAdd={() => ({ key: newKey(), label: "", use: null, order: null, _k: newKey() })}
                   addLabel={t("＋ เพิ่มไซส์", "＋ Add size")}
                   emptyText={t("ยังไม่มีไซส์ — เพิ่มเอง หรือดึงจากแท็บตีราคา", "No sizes yet — add one or pull from costing")}
-                  addExtra={canEdit && gridRows.length > 1 ? (
+                  addExtra={!ro && gridRows.length > 1 ? (
                     <span className="inline-flex items-center gap-1 text-xs text-slate-500">
                       {t("จำนวนสั่งเท่ากันทุกไซส์", "Same order for all")}
                       <NumIn value={allOrder} step="1" onChange={setAllOrder} className="w-20" />
@@ -472,17 +486,27 @@ export function DesignSheetNoticeTab({ sheetId, canEdit, sheet, costTabs, costLi
 
             {canEdit && (
               <div className="flex items-center gap-2 flex-wrap">
-                <button type="button" onClick={() => void saveDraft()} disabled={saving || (!dirty && !!cur.id)}
-                  className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-1.5">
-                  <Icon name="save" /> {saving ? t("กำลังบันทึก…", "Saving…") : cur.id ? t("บันทึกใบแจ้ง", "Save notice") : t("บันทึกใบแจ้งใหม่", "Save new notice")}
-                </button>
-                {dirty && <span className="text-xs text-amber-600">{t("มีแก้ไขที่ยังไม่บันทึก", "Unsaved changes")}</span>}
+                {editing ? (<>
+                  <button type="button" onClick={() => void saveDraft()} disabled={saving || (!dirty && !!cur.id)}
+                    className="h-9 px-4 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 inline-flex items-center gap-1.5">
+                    <Icon name="save" /> {saving ? t("กำลังบันทึก…", "Saving…") : cur.id ? t("บันทึกใบแจ้ง", "Save notice") : t("บันทึกใบแจ้งใหม่", "Save new notice")}
+                  </button>
+                  <button type="button" onClick={cancelEdit} disabled={saving}
+                    className="h-9 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50 disabled:opacity-50">{t("ยกเลิก", "Cancel")}</button>
+                  {dirty && <span className="text-xs text-amber-600">{t("มีแก้ไขที่ยังไม่บันทึก", "Unsaved changes")}</span>}
+                </>) : (<>
+                  <button type="button" onClick={() => setEditing(true)}
+                    className="h-9 px-4 text-sm font-medium border border-blue-200 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 inline-flex items-center gap-1.5">
+                    <Icon name="edit" /> {t("แก้ไข", "Edit")}
+                  </button>
+                  <span className="text-xs text-slate-400">{t("หรือดับเบิลคลิกที่ช่องเพื่อแก้", "or double-click a field")}</span>
+                </>)}
                 <span className="flex-1" />
                 {cur.id && <button type="button" onClick={duplicate} className="h-9 px-3 text-sm border border-slate-200 text-slate-600 rounded-lg hover:bg-slate-50">{t("คัดลอกเป็นใบใหม่", "Copy as new")}</button>}
                 {cur.id && <button type="button" onClick={() => setConfirmDel(true)} className="h-9 px-3 text-sm border border-rose-200 text-rose-600 rounded-lg hover:bg-rose-50 inline-flex items-center gap-1"><Icon name="delete" /> {t("ลบ", "Delete")}</button>}
               </div>
             )}
-          </div>
+          </DblClickToEdit>
 
           {/* ขวา: พรีวิว + ส่งออก */}
           <div className="min-w-0 space-y-2">
