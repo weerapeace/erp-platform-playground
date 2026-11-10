@@ -17,6 +17,15 @@ describe("rich-note", () => {
     expect(noteToHtml("<p><strong>x</strong></p>")).toBe("<p><strong>x</strong></p>");
   });
 
+  it("noteToHtml แบบรายละเอียด LINE: เก็บบรรทัดว่าง + ย่อหน้าเยื้อง + ขีดเป็นข้อความ", () => {
+    const opts = { keepBlankLines: true, keepIndent: true, bullets: false };
+    expect(noteToHtml("  ย่อหน้าแรก\n\nรายละเอียดสินค้า\n- หนังแท้\n- ซิปคู่\n\n", opts))
+      .toBe("<p>&nbsp;&nbsp;ย่อหน้าแรก</p><p><br></p><p>รายละเอียดสินค้า</p><p>- หนังแท้</p><p>- ซิปคู่</p>");
+    expect(noteToHtml("\n\na\n\n\nb\n", opts)).toBe("<p>a</p><p><br></p><p><br></p><p>b</p>");
+    expect(noteToHtml("\tเยื้องแท็บ", opts)).toBe("<p>&nbsp;&nbsp;&nbsp;&nbsp;เยื้องแท็บ</p>");
+    expect(noteToHtml("<p>มี HTML แล้ว</p>", opts)).toBe("<p>มี HTML แล้ว</p>");
+  });
+
   it("noteToText: HTML → ข้อความล้วน (bullet เป็น - )", () => {
     expect(noteToText("<p><strong>วิดีโอ</strong> 3 สี</p><ul><li><p>ซูมหัว</p></li><li><p>ราคา &amp; โปร</p></li></ul>"))
       .toBe("วิดีโอ 3 สี\n- ซูมหัว\n- ราคา & โปร");

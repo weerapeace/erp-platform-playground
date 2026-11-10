@@ -19,6 +19,11 @@
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import { linePrice } from "@/lib/platform-listing-builder";
 import { LIVE_LISTING_OR } from "@/lib/platform-listing-health";
+import { noteToHtml, type NoteHtmlOptions } from "@/lib/rich-note";
+
+/** รายละเอียดในระบบเป็นข้อความธรรมดา แต่ LINE เก็บเป็น HTML ย่อหน้า (920/934 รายการบนร้าน) → แปลงก่อนส่ง
+ *  เก็บบรรทัดว่าง + ย่อหน้าเยื้อง · ขีด "- " คงเป็นข้อความ (ไม่แปลงเป็น <ul> — ยังไม่รู้ว่า LINE รับไหม) · เป็น HTML อยู่แล้ว = ใช้ตามนั้น */
+export const LINE_DESC_HTML: NoteHtmlOptions = { keepBlankLines: true, keepIndent: true, bullets: false };
 
 type Admin = ReturnType<typeof supabaseAdmin>;
 type SkuRow = { id: string; code: string; color_th: string | null; color: string | null; list_price: number | null; fake_price: number | null; cover_image_r2_key: string | null; attribute_values: Record<string, unknown> | null };
@@ -114,8 +119,9 @@ export async function buildLineCreate(admin: Admin, parentSkuId: string): Promis
     : catPath === mappedPath ? "หมวดกลางของสินค้า → หมวด LINE" : "เลือกไว้สำหรับ LINE";
 
   const descPf = String(p.platform_description ?? ""), descMain = String(p.description ?? ""), dDesc = String(d.description ?? "");
-  const descText = dDesc || descPf || descMain;
-  const descSrc = !descText.trim() ? "ยังไม่มีรายละเอียด" : dDesc && dDesc !== descPf && dDesc !== descMain ? "แก้ไว้สำหรับ LINE" : (dDesc || descText) === descPf ? "รายละเอียดสำหรับแพลตฟอร์ม" : "รายละเอียดสินค้า";
+  const descRaw = dDesc || descPf || descMain;
+  const descText = noteToHtml(descRaw, LINE_DESC_HTML);
+  const descSrc = !descRaw.trim() ? "ยังไม่มีรายละเอียด" : dDesc && dDesc !== descPf && dDesc !== descMain ? "แก้ไว้สำหรับ LINE" : descRaw === descPf ? "รายละเอียดสำหรับแพลตฟอร์ม" : "รายละเอียดสินค้า";
 
   const brandVal = str(extra.brand) || brandName;
   const brandSrc = !brandVal ? "ยังไม่มีแบรนด์" : str(extra.brand) && str(extra.brand) !== brandName ? "แก้ไว้สำหรับ LINE" : "แบรนด์ของสินค้า";

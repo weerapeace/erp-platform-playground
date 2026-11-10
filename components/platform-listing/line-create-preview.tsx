@@ -30,7 +30,6 @@ const RichTextEditor = dynamic(() => import("@/components/rich-text").then((m) =
 
 type EditKey = "name" | "brand" | "weight" | "desc" | "cat" | null;
 const baht = (n: number) => `฿${n.toLocaleString("th-TH", { maximumFractionDigits: 2 })}`;
-const plain = (html: string) => html.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
 const numOrNull = (raw: string): number | null => { const s = raw.replace(/,/g, "").trim(); if (!s) return null; const n = Number(s); return Number.isFinite(n) && n >= 0 ? n : null; };
 
 export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoaded }: {
@@ -48,7 +47,8 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
   const [edit, setEdit] = useState<EditKey>(null);
   const [val, setVal] = useState("");
   const [saving, setSaving] = useState(false);
-  const [imgs, setImgs] = useState<string[] | null>(null);          // กำลังแก้รูป (null = ไม่ได้แก้)
+  const [sel, setSel] = useState<string[] | null>(null);            // รูปที่ติ๊กเลือก (null = ตามที่จะส่งตอนนี้)
+  const [descOpen, setDescOpen] = useState(false);
   const [pool, setPool] = useState<{ key: string; source: string }[] | null>(null);
   const [prices, setPrices] = useState<Record<string, string>>({});  // `${sku_id}:fake|sale` → ค่าที่พิมพ์
 
@@ -60,7 +60,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
       setPv(j.preview); onLoaded?.(j.preview);
     } catch (e) { setErr((e as Error).message); }
   }, [parentId, onLoaded]);
-  useEffect(() => { setPv(null); setEdit(null); setImgs(null); setPool(null); setPrices({}); void load(); }, [load]);
+  useEffect(() => { setPv(null); setEdit(null); setSel(null); setPool(null); setPrices({}); setDescOpen(false); void load(); }, [load]);
 
   const patchDraft = async (body: Record<string, unknown>, okMsg: string) => {
     if (!pv) return;
@@ -69,7 +69,7 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
       const r = await apiFetch("/api/product-platforms", { method: "PATCH", body: JSON.stringify({ parent_sku_id: parentId, platform_id: pv.platform_id, ...body }) });
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "บันทึกไม่สำเร็จ");
-      toast.success(okMsg); setEdit(null); setImgs(null);
+      toast.success(okMsg); setEdit(null); setSel(null);
       await load();
     } catch (e) { toast.error((e as Error).message); }
     finally { setSaving(false); }
@@ -89,20 +89,28 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
     }
   };
 
-  // ---------- รูป ----------
-  const drag = useDragReorder((from, to) => setImgs((xs) => (xs ? moveItem(xs, from, to) : xs)), { group: "line-create-images" });
-  const openImages = async () => {
-    if (!pv) return;
-    setImgs(pv.images.keys.slice());
-    if (!pool) {
-      try {
-        const j = await apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(parentId)}`).then((r) => r.json()) as { images?: { key: string; source: string }[]; descImages?: { key: string; source: string }[] };
+  // ---------- รูป: รูปทั้งหมดของสินค้า → ติ๊กเลือก (≤7) + ลากเรียง · บันทึก = ร่าง extra.line_images ----------
+  const curImgs = sel ?? pv?.images.keys ?? [];
+  const imgDirty = !!sel && !!pv && sel.join("|") !== pv.images.keys.join("|");
+  const drag = useDragReorder((from, to) => setSel((xs) => moveItem(xs ?? curImgs, from, to)), { group: "line-create-images" });
+  const toggleImg = (key: string) => setSel(() => {
+    const cur = curImgs;
+    if (cur.includes(key)) return cur.filter((k) => k !== key);
+    return cur.length < LINE_CREATE_MAX_IMAGES ? [...cur, key] : cur;
+  });
+  useEffect(() => {
+    if (!pv || pool) return;
+    let alive = true;
+    apiFetch(`/api/product-platforms?parent_sku_id=${encodeURIComponent(parentId)}`).then((r) => r.json())
+      .then((j: { images?: { key: string; source: string }[]; descImages?: { key: string; source: string }[] }) => {
+        if (!alive) return;
         const seen = new Set<string>(); const all: { key: string; source: string }[] = [];
-        for (const im of [...(j.images ?? []), ...(j.descImages ?? [])]) if (im.key && !seen.has(im.key)) { seen.add(im.key); all.push(im); }
+        for (const im of [...(j.images ?? []), ...(j.descImages ?? [])]) if (im.key && !seen.has(im.key)) { seen.add(im.key); all.push({ key: im.key, source: im.source.replace(/^Description (\d+)$/, "รูปในรายละเอียด $1") }); }
         setPool(all);
-      } catch { setPool([]); }
-    }
-  };
+      })
+      .catch(() => { if (alive) setPool([]); });
+    return () => { alive = false; };
+  }, [pv, pool, parentId]);
 
   // ---------- ราคา (เปลี่ยนในระบบ) ----------
   const priceKey = (id: string, f: "fake" | "sale") => `${id}:${f}`;
@@ -196,12 +204,12 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
           {k !== "cat" && <button type="button" disabled={saving} onClick={saveField} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึก</button>}
           <button type="button" onClick={() => setEdit(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
         </div>
-      ) : <button type="button" disabled={saving || !!imgs} onClick={() => startEdit(k, startVal)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50 disabled:opacity-40">{k === "cat" ? (pv.category.id ? "เปลี่ยน" : "เลือก") : "แก้"}</button>)}
+      ) : <button type="button" disabled={saving} onClick={() => startEdit(k, startVal)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50 disabled:opacity-40">{k === "cat" ? (pv.category.id ? "เปลี่ยน" : "เลือก") : "แก้"}</button>)}
     </div>
   );
 
-  const shownImgs = imgs ?? pv.images.keys;
-  const poolLeft = (pool ?? []).filter((im) => !shownImgs.includes(im.key));
+  // รูปทั้งหมดให้เลือก = รูปของสินค้าในระบบ + รูปที่ใช้อยู่แต่ไม่อยู่ในคลัง (เช่น ร่างเก่า)
+  const poolAll = [...curImgs.filter((k) => !(pool ?? []).some((im) => im.key === k)).map((k) => ({ key: k, source: "ใช้อยู่" })), ...(pool ?? [])];
   return (
     <div className="space-y-3">
       {(pv.missing.length > 0 || pv.blockers.length > 0) && (
@@ -211,45 +219,54 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
         </div>
       )}
 
-      {/* รูป */}
+      {/* รูป: ที่จะส่ง (ลากเรียง) + รูปทั้งหมดของสินค้า (ติ๊กเลือก) */}
       <div>
         <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs text-slate-500">รูปสินค้า {shownImgs.length}/{LINE_CREATE_MAX_IMAGES} · รูปแรก = ปก</span>
-          {canEdit && (imgs ? (
+          <span className="text-xs text-slate-500">รูปที่จะส่ง {curImgs.length}/{LINE_CREATE_MAX_IMAGES} · รูปแรก = ปก{canEdit ? " · ลากที่หูจับเพื่อเรียง" : ""}</span>
+          {canEdit && (imgDirty || pv.images.custom) && (
             <div className="flex gap-1">
-              <button type="button" disabled={saving || imgs.length === 0} onClick={() => void patchExtra({ line_images: imgs }, "บันทึกรูปแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกรูป</button>
-              {pv.images.custom && <button type="button" disabled={saving} onClick={() => void patchExtra({ line_images: null }, "กลับไปใช้รูปอัตโนมัติ")} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ใช้รูปอัตโนมัติ</button>}
-              <button type="button" onClick={() => setImgs(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>
+              {imgDirty && <button type="button" disabled={saving || curImgs.length === 0} onClick={() => void patchExtra({ line_images: curImgs }, "บันทึกรูปแล้ว")} className="h-7 rounded-md bg-violet-600 px-2 text-xs text-white hover:bg-violet-700 disabled:opacity-50">บันทึกรูปที่เลือก</button>}
+              {imgDirty && <button type="button" onClick={() => setSel(null)} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">ยกเลิก</button>}
+              {!imgDirty && pv.images.custom && <button type="button" disabled={saving} onClick={() => void patchExtra({ line_images: null }, "กลับไปใช้รูปอัตโนมัติ")} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50">กลับไปใช้รูปอัตโนมัติ</button>}
             </div>
-          ) : <button type="button" disabled={saving || !!edit} onClick={() => void openImages()} className="h-7 rounded-md border border-slate-200 px-2 text-xs hover:bg-slate-50 disabled:opacity-40">แก้รูป</button>)}
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
-          {shownImgs.map((k, i) => (
-            <div key={`${k}-${i}`} {...(imgs ? drag.rowProps(i) : {})} className={`relative h-20 w-20 overflow-hidden rounded-lg border bg-slate-50 ${i === 0 ? "border-violet-400" : "border-slate-200"} ${imgs ? drag.rowCls(i) : ""}`}>
+          {curImgs.map((k, i) => (
+            <div key={`${k}-${i}`} {...(canEdit ? drag.rowProps(i) : {})} className={`relative h-20 w-20 overflow-hidden rounded-lg border bg-slate-50 ${i === 0 ? "border-violet-400" : "border-slate-200"} ${canEdit ? drag.rowCls(i) : ""}`}>
               <img src={r2ImageUrl(k, 200) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
-              {i === 0 && <span className="absolute left-1 top-1 rounded-full bg-white/90 px-1.5 text-[10px] text-violet-700">ปก</span>}
-              {imgs && (
+              <span className={`absolute left-1 top-1 rounded-full px-1.5 text-[10px] ${i === 0 ? "bg-violet-600 text-white" : "bg-white/90 text-slate-600"}`}>{i === 0 ? "ปก" : i + 1}</span>
+              {canEdit && (
                 <div className="absolute inset-x-0 bottom-0 flex items-center gap-1 bg-white/90 px-1 text-[10px]">
                   <DragHandle {...drag.handleProps(i)} title="ลากเพื่อเรียง" />
-                  <button type="button" onClick={() => setImgs((xs) => (xs ? xs.filter((_, j) => j !== i) : xs))} className="ml-auto text-rose-600 hover:underline">ลบ</button>
+                  <button type="button" onClick={() => toggleImg(k)} className="ml-auto text-rose-600 hover:underline">เอาออก</button>
                 </div>
               )}
             </div>
           ))}
-          {shownImgs.length === 0 && <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-dashed border-rose-300 text-[11px] text-rose-600">ไม่มีรูป</div>}
+          {curImgs.length === 0 && <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-dashed border-rose-300 text-[11px] text-rose-600">ไม่มีรูป</div>}
         </div>
-        <div className="mt-1 text-[11px] text-slate-400">มาจาก: {pv.images.src}</div>
-        {imgs && (
+        <div className="mt-1 text-[11px] text-slate-400">มาจาก: {imgDirty ? "ที่เลือกตอนนี้ (ยังไม่บันทึก)" : pv.images.src}</div>
+        {canEdit && (
           <div className="mt-2 rounded-lg border border-slate-200 p-2">
-            <div className="mb-1 text-xs text-slate-500">กดรูปเพื่อเพิ่ม (รูปของสินค้านี้ในระบบ)</div>
-            {!pool ? <div className="text-xs text-slate-400">กำลังโหลดรูป...</div> : poolLeft.length === 0 ? <div className="text-xs text-slate-400">ใช้ครบทุกรูปแล้ว</div> : (
-              <div className="flex max-h-48 flex-wrap gap-1.5 overflow-y-auto">
-                {poolLeft.map((im) => (
-                  <button key={im.key} type="button" disabled={imgs.length >= LINE_CREATE_MAX_IMAGES} onClick={() => setImgs((xs) => (xs && xs.length < LINE_CREATE_MAX_IMAGES ? [...xs, im.key] : xs))}
-                    title={imgs.length >= LINE_CREATE_MAX_IMAGES ? `ครบ ${LINE_CREATE_MAX_IMAGES} รูปแล้ว` : im.source} className="h-14 w-14 overflow-hidden rounded border border-slate-200 hover:ring-2 hover:ring-violet-300 disabled:opacity-40">
-                    <img src={r2ImageUrl(im.key, 120) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
-                  </button>
-                ))}
+            <div className="mb-1.5 text-xs text-slate-500">รูปทั้งหมดของสินค้านี้ {pool ? `(${poolAll.length.toLocaleString()} รูป)` : ""} — กดเพื่อเลือก / เอาออก · เลือกได้ {LINE_CREATE_MAX_IMAGES} รูป</div>
+            {!pool ? <div className="text-xs text-slate-400">กำลังโหลดรูป...</div> : poolAll.length === 0 ? <div className="text-xs text-slate-400">สินค้านี้ยังไม่มีรูปในระบบ</div> : (
+              <div className="grid max-h-72 grid-cols-[repeat(auto-fill,minmax(5.5rem,1fr))] gap-2 overflow-y-auto">
+                {poolAll.map((im) => {
+                  const idx = curImgs.indexOf(im.key);
+                  const full = idx < 0 && curImgs.length >= LINE_CREATE_MAX_IMAGES;
+                  return (
+                    <button key={im.key} type="button" onClick={() => toggleImg(im.key)} disabled={full}
+                      title={full ? `เลือกครบ ${LINE_CREATE_MAX_IMAGES} รูปแล้ว — เอารูปอื่นออกก่อน` : idx >= 0 ? "กดเพื่อเอาออก" : "กดเพื่อเลือก"}
+                      className={`min-w-0 rounded-lg border p-1 text-left ${idx >= 0 ? "border-violet-400 bg-violet-50 ring-1 ring-violet-300" : "border-slate-200 hover:bg-slate-50"} disabled:opacity-40`}>
+                      <div className="relative aspect-square overflow-hidden rounded bg-slate-50">
+                        <img src={r2ImageUrl(im.key, 200) ?? ""} alt="" loading="lazy" className="h-full w-full object-cover" />
+                        <span className={`absolute right-1 top-1 flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px] ${idx >= 0 ? "bg-violet-600 text-white" : "border border-slate-300 bg-white/90 text-transparent"}`}>{idx >= 0 ? (idx === 0 ? "ปก" : idx + 1) : "·"}</span>
+                      </div>
+                      <div className="mt-0.5 truncate text-[10px] text-slate-500" title={im.source}>{im.source}</div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -261,7 +278,14 @@ export function LineCreatePreviewEditor({ parentId, canEdit, canEditPrice, onLoa
         {fieldRow("name", "ชื่อ", pv.name.value || "(ยังไม่มีชื่อ)", pv.name.src, pv.name.value, !pv.name.value)}
         {fieldRow("cat", "หมวด LINE", pv.category.label || "ยังไม่ได้เลือก — ต้องเลือกก่อนส่ง", pv.category.src, "", !pv.category.id)}
         {fieldRow("brand", "แบรนด์", pv.brand.value || "(ไม่มี)", pv.brand.src, pv.brand.value)}
-        {fieldRow("desc", "รายละเอียด", <span className="line-clamp-3 text-slate-600">{plain(pv.description.value) || "(ไม่มีรายละเอียด)"}</span>, `${pv.description.src} · รูปในรายละเอียด LINE ไม่รับ → ย้ายไปไว้ในรูปสินค้า`, pv.description.value)}
+        {fieldRow("desc", "รายละเอียด", pv.description.value ? (
+          <div>
+            {/* แสดงแบบที่ LINE จะเห็น: ย่อหน้า + บรรทัดว่าง + ย่อหน้าเยื้อง (แปลงจากข้อความธรรมดาด้วย noteToHtml · LINE_DESC_HTML) */}
+            <div className={`tiptap-content overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-sm leading-relaxed text-slate-700 [&_img]:max-w-full [&_p]:my-0 ${descOpen ? "max-h-[60vh]" : "max-h-44"}`}
+              dangerouslySetInnerHTML={{ __html: pv.description.value }} />
+            <button type="button" onClick={() => setDescOpen((o) => !o)} className="mt-1 text-xs text-violet-700 hover:underline">{descOpen ? "ย่อ" : "ดูทั้งหมด"}</button>
+          </div>
+        ) : "(ไม่มีรายละเอียด)", `${pv.description.src} · จัดย่อหน้าให้แบบเดียวกับบน LINE · รูปในรายละเอียด LINE ไม่รับ → ใช้เป็นรูปสินค้าแทน`, pv.description.value, !pv.description.value)}
         {fieldRow("weight", "น้ำหนัก", pv.weight.kg > 0 ? `${pv.weight.kg} กก. (ทุกตัวเลือก)` : "ไม่ส่ง", pv.weight.src, pv.weight.kg > 0 ? String(pv.weight.kg) : "")}
       </div>
 
