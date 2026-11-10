@@ -21,8 +21,11 @@ import { platformShopUrl } from "@/lib/platform-links";
 
 type Platform ={ id: string; code: string; name_th: string; icon_key: string | null };
 type Brand = { id: string; name: string; color: string | null };
-type Account = { label: string | null; external_shop_id: string | null; is_active: boolean };
+type Account = { label: string | null; external_shop_id: string | null; is_active: boolean; tax_invoice_company_id?: string | null };
+type Company = { id: string; name: string; company_code: string | null };
 type Msg = { text: string; bad?: boolean } | null;
+// ร้านขายของที่ออกใบกำกับภาษีจากศูนย์ออเดอร์ได้ (เว็บร้านตั้งบริษัทที่ ข้อมูลร้าน › 🧾 แยกอยู่แล้ว)
+const INVOICE_CODES = ["shopee", "lazada", "line_shopping", "tiktok"];
 type PostStat = { posted30: number; queued: number; failed: number; next_run_at: string | null; last_posted_at: string | null };
 
 // แพลตฟอร์มที่ระบบเชื่อมบัญชีได้จริง (OAuth / API Key) — ขึ้นกลุ่มบนสุด
@@ -288,6 +291,13 @@ export default function PlatformAccountsPage() {
     } catch (e) { say((e as Error).message, true); } finally { setLoading(false); }
   }, []);
   useEffect(() => { load(""); }, [load]);
+  // บริษัท (เลือกบริษัทที่ออกใบกำกับภาษีของร้าน) — โหลดไม่ได้ = ซ่อนส่วนนี้ ไม่ให้ทั้งหน้าพัง
+  const [companies, setCompanies] = useState<Company[]>([]);
+  useEffect(() => {
+    apiFetch("/api/admin/companies").then((r) => (r.ok ? r.json() : { data: [] })).catch(() => ({ data: [] }))
+      .then((j: { data?: { id: string; name?: string; name_th?: string; company_code?: string | null; status?: string }[] }) =>
+        setCompanies((j.data ?? []).filter((c) => c.status !== "inactive").map((c) => ({ id: c.id, name: c.name_th || c.name || c.company_code || "", company_code: c.company_code ?? null }))));
+  }, []);
   useEffect(() => { if (brandId) load(brandId); }, [brandId, load]);
   // โลโก้แบรนด์ (โชว์บนปุ่มเลือกแบรนด์) — แหล่งเดียวกับ Design Dashboard
   useEffect(() => {
@@ -751,6 +761,20 @@ export default function PlatformAccountsPage() {
                       </div>
                     )}
                   </Section>
+
+                  {INVOICE_CODES.includes(cur.code) && companies.length > 0 && (
+                    <Section title="ใบกำกับภาษี" desc="บริษัทที่ออกใบกำกับภาษีให้ลูกค้าของร้านนี้ (ศูนย์ออเดอร์ออนไลน์ › ออกใบกำกับ) — ออกผ่านใบขาย ใช้เลขชุดของบริษัทนี้ และเข้ารายงานภาษีขายเอง">
+                      <div className="max-w-sm">
+                        <select value={acc.tax_invoice_company_id ?? ""} disabled={!canManage}
+                          onChange={(e) => void save(cur.id, { tax_invoice_company_id: e.target.value || null })}
+                          className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2.5 text-sm text-slate-800 disabled:bg-slate-50">
+                          <option value="">— ยังไม่เลือก (ออกใบกำกับไม่ได้) —</option>
+                          {companies.map((c) => <option key={c.id} value={c.id}>{c.company_code ? `${c.company_code} · ` : ""}{c.name}</option>)}
+                        </select>
+                        {!acc.tax_invoice_company_id && <p className="mt-1.5 text-xs text-slate-500">ระบบไม่เดาบริษัทให้ — ใบกำกับผิดบริษัทเป็นปัญหาภาษี</p>}
+                      </div>
+                    </Section>
+                  )}
 
                   {conn && (
                     <Section title={cur.code === "line_shopping" ? "API Key" : "การเชื่อมต่อ"}

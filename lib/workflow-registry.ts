@@ -161,6 +161,21 @@ export const WORKFLOWS: WorkflowDef[] = [
     logicIds: ["LOG-MKT-0002", "LOG-MKT-0004"],
   },
   {
+    key: "platform-order",
+    label: "ออเดอร์จากแพลตฟอร์ม (ศูนย์ออเดอร์ออนไลน์ Shopee/Lazada/…)",
+    flow: "ต้องจัดส่ง → ยืนยัน (ตัดสต๊อก) → แพ็กแล้ว → ส่งแล้ว / ยกเลิก (คืนสต๊อก) · ออเดอร์จากเมล = ยอดขายส่งแล้ว ดูอย่างเดียว · ใบกำกับภาษีออกผ่านใบขาย (ไม่ตัดสต๊อกซ้ำ)",
+    ruleFiles: ["lib/platform-order-status.ts"],
+    gates: ["app/api/platform-orders/route.ts", "app/api/platform-orders/invoice/route.ts", "app/api/lazada/sync-orders/route.ts", "app/api/platform-orders/import/route.ts"],
+    tables: ["platform_orders", "platform_order_items"],
+    signals: ["stock_deducted", "platform_status", "ship_by_at"],
+    feeds: ["sales-order"],
+    gaps: [
+      "Lazada ดึงออเดอร์ (app/api/lazada/sync-orders) ยังแปลงสถานะเองแบบหยาบ — ควรย้ายมาใช้ตัวแปลงใน lib/platform-order-status แบบ shopeeToInternal",
+      "ระบบอ่านออเดอร์จากเมล (lib/platform-email/server.ts) ตั้งสถานะ new/cancelled เอง",
+      "แผนที่การไหลของงาน (/master/flow-map) ยังไม่มีกล่องออเดอร์ออนไลน์",
+    ],
+  },
+  {
     key: "creative-task",
     label: "งานครีเอทีฟ / งานย่อย + อนุมัติผลงาน",
     flow: "ตั้งค่าได้ในระบบ (ตาราง erp_creative_statuses + เส้นทาง) · อนุมัติ / ตีกลับ / แก้ ต้องมีสิทธิ์ tasks.approve",
