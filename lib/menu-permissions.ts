@@ -26,6 +26,7 @@ export const MENU_PERMISSION_RULES: MenuPermRule[] = [
   { href: "/master/storage-rules", sameAs: "/master/assets" },
   { href: "/master/storage-plan", sameAs: "/master/assets" },   // แผนผังการเก็บไฟล์ (กระดานวาดเอง)
   { href: "/admin/paid-services", keys: ["admin.paid_services"] },   // ศูนย์ AI / API ที่เสียเงิน
+  { href: "/admin/deploy", keys: ["admin.users"] },   // ขึ้นเว็บ (คิวรอขึ้นเว็บ + ปุ่มขึ้นทันที)
   { href: "/website", prefixes: ["website."] },
   { href: "/marketing/skus", prefixes: ["marketing.sku."] },
   // ผลิต → จ่ายงานเหมา: ดู/จ่าย/รับคืน ใช้สิทธิ์สินค้า (เหมือน /api/mo/piecework) · ตั้งรายชื่องานเหมากลาง = production.piecework
