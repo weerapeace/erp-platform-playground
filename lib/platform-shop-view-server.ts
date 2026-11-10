@@ -3,7 +3,8 @@
  * ใช้: GET /api/platform-catalog?view=shop (หน้าสินค้าบนแพลตฟอร์ม → มุมมองหน้าร้าน · เมนูในแอปจัดการงาน)
  * อ่านอย่างเดียว ไม่แก้อะไรในระบบหรือบนร้าน
  *
- * ความเร็ว: ข้อมูลดิบจากร้านมีคำอธิบายยาว ๆ → select เฉพาะช่องที่ใช้ (ตัวเลือก/รูป/สถานะ) ไม่ดึง raw ทั้งก้อน
+ * ความเร็ว: ข้อมูลดิบจากร้านมีคำอธิบายยาว ๆ → อ่านผ่านฟังก์ชัน DB platform_listings_slim (แกะ raw ครั้งเดียว/แถว ส่งเฉพาะช่องที่ใช้)
+ *   เดิม select raw->line->x หลายช่องผ่าน PostgREST = แกะ raw ซ้ำทุกช่อง + ทุกหน้า → LINE LM 931 รายการ ~3 วิ · ใหม่ ~0.1 วิ (2026-11-10)
  *   (LINE ทั้งร้าน ~920 รายการ ≈ ตัวเลือก 2.5MB ฝั่ง server · ส่งให้หน้าเว็บเฉพาะสรุป)
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
@@ -22,8 +23,11 @@ type ListingRow = {
   matched_parent_sku_id: string | null; price: number | null; match_ignored: boolean | null; last_imported_at: string | null;
   /** "removed" = ไม่อยู่บนร้านแล้ว (lib/platform-catalog-sync ติดป้ายตอนดึงครบทั้งร้าน) */
   status: string | null;
-  line_id: unknown; line_display: unknown; line_variants: unknown; line_images: unknown; line_cat: unknown; lazada: unknown;
+  /** ข้อมูลดิบ LINE เฉพาะช่องที่ใช้ { id, isDisplay, variants, imageUrls, category } · ไม่มี = null */
+  line: { id?: unknown; isDisplay?: unknown; variants?: unknown; imageUrls?: unknown; category?: unknown } | null;
+  lazada: unknown;
 };
+type LegacyListingRow = Omit<ListingRow, "line"> & { line_id: unknown; line_display: unknown; line_variants: unknown; line_images: unknown; line_cat: unknown };
 
 function chunks<T>(xs: T[]): T[][] {
   const out: T[][] = [];
@@ -31,23 +35,46 @@ function chunks<T>(xs: T[]): T[][] {
   return out;
 }
 
-/** รายการบนร้าน (ร้าน + แบรนด์) + ช่องจากข้อมูลดิบเฉพาะที่ใช้สรุป */
+const PAGE = 1000;   // เพดาน PostgREST — หน้าละเต็มเพดาน = รอบน้อยสุด
+
+/**
+ * รายการบนร้าน (ร้าน + แบรนด์) + ช่องจากข้อมูลดิบเฉพาะที่ใช้สรุป · เรียงใหม่สุดก่อน
+ * อ่านผ่านฟังก์ชัน DB platform_listings_slim (migration 202611280100) · ฟังก์ชันใช้ไม่ได้ (เช่น ยังไม่ได้ลง) → ถอยไปวิธีเดิม (ช้าแต่ได้ข้อมูลครบ)
+ */
 async function loadListings(admin: Admin, platformId: string, brandId: string): Promise<ListingRow[]> {
-  return fetchAllPages<ListingRow>((from, to) => {
+  const out: ListingRow[] = [];
+  for (let from = 0; from < 100_000; from += PAGE) {
+    const { data, error } = await admin.rpc("platform_listings_slim", { p_platform_id: platformId, p_brand_id: brandId || null, p_limit: PAGE, p_offset: from });
+    if (error) {
+      if (from === 0) { console.warn("[platform-shop-view] platform_listings_slim ใช้ไม่ได้ → ใช้วิธีเดิม:", error.message); return loadListingsLegacy(admin, platformId, brandId); }
+      break;   // พังกลางทาง → คืนเท่าที่ได้ (เหมือน fetchAllPages)
+    }
+    const rows = (data ?? []) as ListingRow[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
+/** วิธีเดิม (select raw->line->x ผ่าน PostgREST) — สำรองไว้กรณีฟังก์ชัน DB ใช้ไม่ได้ */
+async function loadListingsLegacy(admin: Admin, platformId: string, brandId: string): Promise<ListingRow[]> {
+  const rows = await fetchAllPages<LegacyListingRow>((from, to) => {
     let q = admin.from("platform_catalog_listings")
       .select("id, external_product_id, title, sku_code, matched_parent_sku_id, price, match_ignored, last_imported_at, status, line_id:raw->line->id, line_display:raw->line->isDisplay, line_variants:raw->line->variants, line_images:raw->line->imageUrls, line_cat:raw->line->category, lazada:raw->lazada")
       .eq("platform_id", platformId);
     if (brandId) q = q.eq("brand_id", brandId);
-    return q.order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: ListingRow[] | null; error: unknown }>;
-  }, { page: 500 });
+    return q.order("created_at", { ascending: false }).order("id", { ascending: true }).range(from, to) as unknown as PromiseLike<{ data: LegacyListingRow[] | null; error: unknown }>;
+  }, { page: PAGE });
+  return rows.map(({ line_id, line_display, line_variants, line_images, line_cat, ...r }) => ({
+    ...r,
+    line: line_id != null || line_variants != null ? { id: line_id, isDisplay: line_display, variants: line_variants, imageUrls: line_images, category: line_cat } : null,
+  }));
 }
 
 /** ประกอบ raw กลับเป็นรูปเดิม (เฉพาะช่องที่เลือกมา) ให้กฎกลางอ่านได้เหมือนข้อมูลเต็ม */
 function rawSlice(r: ListingRow): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  if (r.line_id != null || r.line_variants != null) {
-    out.line = { id: r.line_id, isDisplay: r.line_display, variants: r.line_variants, imageUrls: r.line_images, category: r.line_cat };
-  }
+  if (r.line && (r.line.id != null || r.line.variants != null)) out.line = r.line;
   if (r.lazada != null) out.lazada = r.lazada;
   return out;
 }
@@ -148,8 +175,8 @@ export async function loadListingSummaries(admin: Admin, platformId: string, pla
   }
   if (platformCode === "line_shopping") {
     // ตัวที่ไม่อยู่บนร้านแล้วไม่ต้องเทียบราคา (ส่งราคาไปไม่ได้อยู่ดี)
-    const matched = rows.filter((r) => r.matched_parent_sku_id && r.line_variants != null && !isGoneStatus(r.status))
-      .map((r) => ({ id: r.id, vs: shopVariantsOf("line_shopping", { line: { variants: r.line_variants } }) }));
+    const matched = rows.filter((r) => r.matched_parent_sku_id && r.line?.variants != null && !isGoneStatus(r.status))
+      .map((r) => ({ id: r.id, vs: shopVariantsOf("line_shopping", { line: { variants: r.line?.variants } }) }));
     if (matched.length) {
       const { fakeOf, saleOf } = await loadSkuLookup(admin, variantLookupCodes(matched.flatMap((m) => m.vs.map((v) => v.sku))));
       for (const m of matched) {

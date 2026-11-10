@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { apiFetch } from "@/lib/api";
+import { mutateSWR, peekSWR, useSWRLite } from "@/lib/swr-lite";
 import { useAuth } from "@/components/auth";
 import { useToast } from "@/components/toast";
 import { MiniTable, LayoutSwitch, useMiniTableLayout, type MiniColumn } from "@/components/mini-table";
@@ -73,9 +74,24 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const { can } = useAuth();
   const toast = useToast();
   const canCreateTask = can("tasks.create" as Parameters<typeof can>[0]);
-  const [data, setData] = useState<ShopViewResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // ข้อมูลหน้าร้าน — แคชกลาง useSWRLite ต่อร้าน+แบรนด์: เปิดซ้ำ/สลับแบรนด์กลับมา = เห็นของเดิมทันที แล้วโหลดใหม่เงียบ ๆ
+  //   (แคชอยู่ในหน้าเว็บที่เปิดอยู่ · รีเฟรชหน้า = โหลดสด) · เปลี่ยนแบรนด์ระหว่างโหลด = ไม่ทับกันเพราะแยกกุญแจ
+  const swrKey = platformId ? `platform-shop:${platformId}:${brandId}` : null;
+  const [refreshing, setRefreshing] = useState(false);
+  const swr = useSWRLite<ShopViewResponse>(swrKey, async () => {
+    setRefreshing(true);
+    try {
+      const qs = new URLSearchParams({ platform_id: platformId, view: "shop", with_counts: "1" });
+      if (brandId) qs.set("brand_id", brandId);
+      const j = await apiFetch(`/api/platform-catalog?${qs}`).then((r) => r.json()) as ShopViewResponse;
+      if (j.error) throw new Error(j.error);
+      return j;
+    } finally { setRefreshing(false); }
+  }, { focusStaleMs: 5 * 60_000 });
+  const data = swr.data ?? null;
+  const error = swr.error ? (swr.error.message || "โหลดข้อมูลไม่สำเร็จ") : null;
+  const reload = swr.revalidate;
+  const load = useCallback(() => { void reload(true); }, [reload]);
   const [tab, setTab] = useState<ShopTab>("all");
   const [queue, setQueue] = useState<QueueKey>("none");
   const [q, setQ] = useState("");
@@ -93,35 +109,27 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   const isLine = platformCode === "line_shopping";
   const [openId, setOpenId] = useState<string | null>(null);
   const patchItem = useCallback((id: string, p: { title?: string; display?: boolean }) => {
-    setData((d) => (d ? { ...d, items: d.items.map((it) => {
+    const d = peekSWR<ShopViewResponse>(swrKey);
+    if (!swrKey || !d) return;
+    mutateSWR<ShopViewResponse>(swrKey, { ...d, items: d.items.map((it) => {
       if (it.id !== id) return it;
       const display = p.display ?? it.display;
       return { ...it, ...(p.title ? { title: p.title } : {}), display, state: p.display != null ? shopStateOf(display, it.stock, true) : it.state };
-    }) } : d));
-  }, []);
+    }) });
+  }, [swrKey]);
   const disp = useLineDisplay((results) => { for (const r of results) if (r.ok) patchItem(r.listing_id, { display: !!r.display }); });
 
-  // เลขรอบ: สลับร้าน/แบรนด์ระหว่างโหลด → ทิ้งคำตอบของรอบเก่า (บั๊กเดิมของหน้านี้)
-  const seq = useRef(0);
-  const load = useCallback(async () => {
-    if (!platformId) return;
-    const my = ++seq.current;
-    setLoading(true); setError(null); setSelected(new Set());
-    try {
-      const qs = new URLSearchParams({ platform_id: platformId, view: "shop", with_counts: "1" });
-      if (brandId) qs.set("brand_id", brandId);
-      const j = await apiFetch(`/api/platform-catalog?${qs}`).then((r) => r.json()) as ShopViewResponse;
-      if (my !== seq.current) return;
-      if (j.error) throw new Error(j.error);
-      setData(j);
-      if (j.platform_counts) onCounts?.(j.platform_counts);
-    } catch (e) {
-      if (my === seq.current) setError((e as Error).message || "โหลดข้อมูลไม่สำเร็จ");
-    } finally { if (my === seq.current) setLoading(false); }
-  }, [platformId, brandId, onCounts]);
-  useEffect(() => { void load(); }, [load, reloadKey]);
+  // หน้าแม่สั่งโหลดใหม่ (หลังกดดึงสินค้าจากร้าน) → โหลดสด แต่ยังโชว์ของเดิมระหว่างรอ
+  const lastReload = useRef(reloadKey);
+  useEffect(() => {
+    if (lastReload.current === reloadKey) return;
+    lastReload.current = reloadKey;
+    void reload(true);
+  }, [reloadKey, reload]);
+  // จำนวนสินค้าต่อร้าน → ปุ่มเลือกร้านของหน้าแม่
+  useEffect(() => { if (data?.platform_counts) onCounts?.(data.platform_counts); }, [data, onCounts]);
   // เปลี่ยนร้าน/แบรนด์ → เริ่มที่แท็บแรก
-  useEffect(() => { setTab("all"); setQueue("none"); setPage(1); setQ(""); setCat(""); }, [platformId, brandId]);
+  useEffect(() => { setTab("all"); setQueue("none"); setPage(1); setQ(""); setCat(""); setSelected(new Set()); }, [platformId, brandId]);
 
   const allItems = useMemo(() => data?.items ?? [], [data]);
   const noData = allItems.length > 0 && allItems.every((it) => it.state === "nodata");
@@ -298,8 +306,9 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
   ];
 
   // ---------- แสดงผล ----------
-  if (loading && !data) return <LoadingState label={`กำลังโหลดสินค้าของ ${where}...`} />;
-  if (error && !data) return <ErrorState hint={error} onRetry={() => void load()} />;
+  // กำลังโหลด (รวมกรณีเคยพังกับแบรนด์ก่อน แล้วสลับมาแบรนด์ใหม่) → จอรอ · พังและไม่ได้โหลดอยู่ → จอลองใหม่
+  if (!data && swrKey && (refreshing || !error)) return <LoadingState label={`กำลังโหลดสินค้าของ ${where}...`} />;
+  if (error && !data) return <ErrorState hint={error} onRetry={load} />;
   if (!data) return null;
   if (items.length === 0 && !data.not_listed?.length) {
     return <EmptyState title={`ยังไม่มีสินค้าจาก ${where}`} hint="กดดึงสินค้าจากร้าน หรือนำเข้าไฟล์ export ด้านบนก่อน" />;
@@ -310,7 +319,7 @@ export function PlatformShopView({ platformId, platformCode, brandId, brandName,
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
         <span className="inline-flex items-center gap-1"><Icon name="history" />ข้อมูลจากร้านล่าสุด {thDate(data.last_imported_at)}</span>
-        {loading && <span className="text-slate-400">กำลังโหลดใหม่…</span>}
+        {refreshing && <span className="text-slate-400">กำลังโหลดใหม่…</span>}
         {!brandId && <span className="text-amber-700">เลือกแบรนด์ด้านบน เพื่อดู "ยังไม่ลง" และ "ไม่มีรูปในระบบ"</span>}
       </div>
       {noData && (
