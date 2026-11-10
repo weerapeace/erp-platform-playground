@@ -1,6 +1,6 @@
 /**
  * ฐานข้อมูลจำลองในหน่วยความจำ สำหรับ test ตัวเชื่อม DB (ไม่แตะฐานข้อมูลจริง — ห้ามสร้างออเดอร์/คูปองทดสอบใน DB จริง)
- * รองรับเท่าที่โค้ดเราใช้: select (ไม่สนคอลัมน์ · แถวต้องมีตารางลูกที่ embed ใส่มาเอง) · eq/neq/in/gte/lte/is/or/like · order/limit · maybeSingle · count
+ * รองรับเท่าที่โค้ดเราใช้: select (ไม่สนคอลัมน์ · แถวต้องมีตารางลูกที่ embed ใส่มาเอง) · eq/neq/in/gte/lte/is/or/like · order/limit · range (แบ่งหน้า — fetchAllPages) · maybeSingle · count
  * เขียน: insert (แถวเดียว/หลายแถว · ใส่ id/created_at ให้ถ้าไม่มี · ต่อ .select().maybeSingle() ได้) · upsert(v, { onConflict }) · delete().eq() · update(patch).eq()(.select()) — แก้ตาราง tables ที่ส่งมาเลย (test อ่านผลได้)
  * rpc = ฟังก์ชันที่ test ส่งมาเอง (เลียนแบบฟังก์ชัน DB จริง)
  */
@@ -30,6 +30,7 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: Record<string, (args:
     let del = false;
     let upd: Row | null = null;
     let updated: Row[] | null = null;
+    let rng: [number, number] | null = null;   // .range(from, to) — ตัดเฉพาะผลที่คืน (count = ทั้งหมด เหมือน PostgREST)
     const rows = () => updated ?? inserted ?? (tables[table] ?? []).filter((r) => filters.every((f) => f(r)));
     const run = () => {
       if (del) tables[table] = (tables[table] ?? []).filter((r) => !filters.every((f) => f(r)));
@@ -83,10 +84,14 @@ export function fakeDb(tables: Record<string, Row[]>, rpc: Record<string, (args:
       or: (expr: string) => (filters.push(orFilter(expr)), q),
       order: () => q,
       limit: () => q,
+      // แบ่งหน้า (fetchAllPages ใช้ .order().range()) — รวมปลายทั้งสองด้านแบบ PostgREST
+      range: (fromIdx: number, toIdx: number) => ((rng = [fromIdx, toIdx]), q),
       maybeSingle: async () => ({ data: rows()[0] ?? null, error: null }),
       then: (res: (v: { data: Row[] | null; count: number; error: null }) => unknown) => {
         run();
-        return res({ data: head || del ? null : rows(), count: rows().length, error: null });
+        const all = rows();
+        const data = rng ? all.slice(rng[0], rng[1] + 1) : all;
+        return res({ data: head || del ? null : data, count: all.length, error: null });
       },
     };
     return q;
