@@ -23,6 +23,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 
 /** LINE รับรูปสินค้าได้ 1–7 รูป (รูปแรก = ปก) */
 export const MAX_LINE_IMAGES = 7;
+/** รูปในรายละเอียด ใส่ได้ครั้งละไม่เกิน (ร้านเราใช้สูงสุด 17 รูป/สินค้า) — lib/line-desc-images */
+export const MAX_LINE_DESC_IMAGES = 15;
 /** รูปจากคลังรูปในระบบ (R2) ในฟอร์ม = "r2:<key>" — API แปลงเป็นลิงก์สาธารณะก่อนส่ง LINE */
 export const systemImageRef = (key: string) => `r2:${key}`;
 export const systemImageKey = (ref: string | null | undefined): string | null => (ref && ref.startsWith("r2:") ? ref.slice(3) : null);

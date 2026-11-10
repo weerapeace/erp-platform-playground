@@ -30,6 +30,7 @@ import { r2ImageUrl } from "@/lib/r2-image";
 import { ListingVariantMap } from "./listing-variants";
 import { useLineDisplay } from "./use-line-display";
 import { VariantStructureEditor } from "./variant-structure-editor";
+import { DescImagesTest } from "./desc-images-test";
 import { applyBulkPrice, planLineEdit, systemImageKey, systemImageRef, MAX_LINE_IMAGES, type LineEditState, type LineEditVariant, type ListingDetail, type ListingDetailResponse } from "@/lib/line-listing-edit";
 import type { ListingVariantsResponse } from "@/lib/platform-variant-match";
 
@@ -275,6 +276,12 @@ export function ListingDrawer({ listingId, onClose, onChanged, canPublish, match
           : <div className="tiptap-content max-h-80 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/50 px-3 py-2 text-sm [&_img]:max-w-full [&_img]:rounded"
               dangerouslySetInnerHTML={{ __html: form.description || "<p class=\"text-slate-400\">(ไม่มีรายละเอียด)</p>" }} />}
       </div>
+      {/* ทดสอบใส่รูปจากระบบลงในรายละเอียด (ช่วงทดสอบ · เฉพาะสินค้าปิดขาย) */}
+      {canEdit && listingId && (
+        <DescImagesTest listingId={listingId} matchedParent={matchedParent} display={line.display}
+          blocked={dirty ? "มีการแก้ที่ยังไม่ได้ส่งขึ้น LINE — ส่งหรือยกเลิกก่อน" : null}
+          onDone={() => setReload((n) => n + 1)} />
+      )}
     </div>
   );
   const imagesTab = !form || !line ? noLine : (
