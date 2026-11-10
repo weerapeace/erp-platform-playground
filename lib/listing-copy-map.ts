@@ -280,10 +280,11 @@ export function applyCopyChoices(input: {
   const out: { title?: string | null; description?: string | null } = {};
   const hash: CopiedFrom["hash"] = {};
 
+  // "ข้อมูลในระบบ" = ใส่ค่าในระบบลงร่างเลย (ไม่เว้นว่าง — ตัวตรวจความครบอ่านจากร่าง · ว่าง = ถูกข้ามว่าไม่มีชื่อ)
   if (used.title === "source") { out.title = v.title.src; hash.title = copyHash(v.title.src); }
-  else if (used.title === "system") out.title = null;
+  else if (used.title === "system") out.title = norm(sys.name) || null;
   if (used.description === "source") { out.description = v.description.src; hash.description = copyHash(v.description.src); }
-  else if (used.description === "system") out.description = null;
+  else if (used.description === "system") out.description = s(sys.description) || null;
   if (used.images === "source") { extra.line_images = v.images.src; hash.images = copyHash(v.images.src); }
   else if (used.images === "system") delete extra.line_images;
   if (used.brand === "source") { extra.brand = v.brand.src; hash.brand = copyHash(v.brand.src); }

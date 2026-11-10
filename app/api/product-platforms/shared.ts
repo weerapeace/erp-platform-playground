@@ -3,7 +3,7 @@
  */
 import type { supabaseAdmin } from "@/lib/supabase-admin";
 import type { BulkListingItem } from "@/lib/product-listing-context";
-import { prepareDraft, listingCtx, normalizePriceRule, platformPrice, sellableVariants, type PriceRule } from "@/lib/platform-listing-builder";
+import { prepareDraft, listingCtx, normalizePriceRule, platformPrice, sellableVariants, draftImageCount, type PriceRule } from "@/lib/platform-listing-builder";
 import { requiredChecks } from "@/lib/platform-required-fields";
 
 type Admin = ReturnType<typeof supabaseAdmin>;
@@ -55,7 +55,7 @@ export function readinessOf(platformCode: string, item: BulkListingItem, default
   if (d) {
     checks = requiredChecks(platformCode, listingCtx({
       platformCode, title: String(d.title ?? ""), description: String(d.description ?? ""), category: String(d.category_path ?? ""),
-      imageCount: Array.isArray(d.image_keys) ? d.image_keys.length : 0, variants: item.variants, parent: item.parent,
+      imageCount: draftImageCount(platformCode, d), variants: item.variants, parent: item.parent,
       brand: (extra.brand as string) ?? item.parent.brand_name,
     }));
   } else {
@@ -74,7 +74,7 @@ export function readinessOf(platformCode: string, item: BulkListingItem, default
     name: String(item.parent.name_platform || item.parent.name_th || ""),
     central_category: item.parent.central_category_name ?? "",
     platform_category: String(d?.category_path || item.platformCategory || ""),
-    variant_count: vs.length, image_count: d && Array.isArray(d.image_keys) ? d.image_keys.length : item.images.length,
+    variant_count: vs.length, image_count: d ? draftImageCount(platformCode, d) : item.images.length,
     price_erp: range(erpPrices), price_platform: range(erpPrices.map((n) => platformPrice(n, rule))),
     status, status_label: STATUS_LABEL[status],
     ready_now: ready, ready_label: ready ? "พร้อม" : `ขาด ${blockers.length} ข้อ`,

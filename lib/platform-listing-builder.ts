@@ -78,6 +78,18 @@ export function linePrice(fake: number | null | undefined, sale: number | null |
 const hasPriceFor = (platformCode: string, v: ListingVariantLite) =>
   platformCode === "line_shopping" ? linePrice(v.fake_price, v.sale_price) != null : ((v.sale_price ?? 0) > 0 || (v.fake_price ?? 0) > 0);
 
+/**
+ * จำนวนรูปที่จะส่งขึ้นร้านจริงจากร่าง — ตัวตรวจความครบต้องนับแบบเดียวกับตัวสร้างสินค้า
+ * LINE: รูปที่เลือกไว้ใน extra.line_images มาก่อน (lib/line-create-payload · รวมลิงก์รูปที่คัดลอกจากร้านต้นทาง) · ไม่มี = image_keys
+ */
+export function draftImageCount(platformCode: string, d: { image_keys?: unknown; extra?: unknown } | null | undefined): number {
+  const keys = Array.isArray(d?.image_keys) ? (d!.image_keys as unknown[]).filter(Boolean).length : 0;
+  if (platformCode !== "line_shopping") return keys;
+  const ex = d?.extra && typeof d.extra === "object" ? d.extra as Record<string, unknown> : {};
+  const line = Array.isArray(ex.line_images) ? new Set((ex.line_images as unknown[]).map((x) => str(x)).filter(Boolean)).size : 0;
+  return line > 0 ? Math.min(line, 7) : keys;
+}
+
 /** ค่าที่ตัวตรวจต้องใช้ — ตัวจัดการรายสินค้ากับหน้ารวมเรียกตัวเดียวกัน */
 export function listingCtx(input: {
   platformCode: string;
@@ -149,7 +161,7 @@ export function prepareDraft(input: {
   const checks = requiredChecks(input.platformCode, listingCtx({
     platformCode: input.platformCode,
     title: title ?? "", description: description ?? "", category: category_path ?? "",
-    imageCount: (image_keys ?? []).length, variants: input.variants, parent: input.parent, brand,
+    imageCount: draftImageCount(input.platformCode, { image_keys, extra }), variants: input.variants, parent: input.parent, brand,
   }));
   const blockers = checks.filter((c) => c.required && !c.ok).map((c) => c.label);
 

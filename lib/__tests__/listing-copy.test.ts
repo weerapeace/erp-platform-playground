@@ -130,11 +130,14 @@ describe("applyCopyChoices + ป้าย 'มาจาก'", () => {
     expect(copiedLabel(r.extra, "brand", r.extra.brand)).toBeNull();
     expect(copiedLabel(r.extra, "images", r.extra.line_images)).toContain("Lazada");
   });
-  it("เลือก 'ข้อมูลในระบบ' = ล้างค่าในร่าง (ตัวสร้างสินค้าใช้ของในระบบ)", () => {
+  it("เลือก 'ข้อมูลในระบบ' = ชื่อ/รายละเอียดในระบบลงร่าง (ไม่เว้นว่าง — ตัวตรวจอ่านจากร่าง) · รูป/น้ำหนัก = ล้าง ให้ตัวสร้างใช้ของในระบบ", () => {
     const d: CopyDraft = { title: "x", description: "y", categoryPath: null, extra: { line_images: ["a"], weight: 1 } };
     const r = applyCopyChoices({ target: "line_shopping", source: src, system: sys(), draft: d, choices: { title: "system", description: "system", images: "system", weight: "system" } });
-    expect(r.title).toBeNull(); expect(r.description).toBeNull();
+    expect(r.title).toBe(sys().name); expect(r.description).toBe("รายละเอียดในระบบ");
     expect("line_images" in r.extra).toBe(false); expect("weight" in r.extra).toBe(false);
+    const p = planCopy({ target: "line_shopping", source: src, system: sys(), draft: { ...d, title: r.title ?? null, description: r.description ?? null, extra: r.extra } });
+    expect(p.fields.find((f) => f.key === "title")!.choice).toBe("system");
+    expect(p.fields.find((f) => f.key === "description")!.choice).toBe("system");
   });
   it("เลือกแหล่งที่ไม่มีค่า = ใช้ค่าเริ่มแทน", () => {
     const r = applyCopyChoices({ target: "line_shopping", source: src, system: sys(), draft: emptyDraft, choices: { brand: "source" } });

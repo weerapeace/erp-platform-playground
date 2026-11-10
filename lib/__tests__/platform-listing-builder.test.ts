@@ -113,3 +113,17 @@ describe("linePrice — ราคาที่ส่งขึ้น LINE", () => 
     expect(linePrice(-5, undefined)).toBeNull();
   });
 });
+
+describe("draftImageCount — นับรูปแบบเดียวกับตัวสร้างสินค้า", () => {
+  it("LINE: รูปที่เลือกไว้ (line_images · รวมลิงก์จากร้านต้นทาง) มาก่อน image_keys · ไม่เกิน 7", async () => {
+    const { draftImageCount } = await import("@/lib/platform-listing-builder");
+    expect(draftImageCount("line_shopping", { image_keys: [], extra: { line_images: ["https://x.slatic.net/1.jpg", "https://x.slatic.net/1.jpg", "k2"] } })).toBe(2);
+    expect(draftImageCount("line_shopping", { image_keys: ["a", "b", "c"], extra: {} })).toBe(3);
+    expect(draftImageCount("line_shopping", { image_keys: [], extra: { line_images: Array.from({ length: 9 }, (_, i) => `k${i}`) } })).toBe(7);
+  });
+  it("ร้านอื่นนับ image_keys เท่านั้น", async () => {
+    const { draftImageCount } = await import("@/lib/platform-listing-builder");
+    expect(draftImageCount("lazada", { image_keys: ["a"], extra: { line_images: ["x", "y"] } })).toBe(1);
+    expect(draftImageCount("lazada", null)).toBe(0);
+  });
+});
